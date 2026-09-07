@@ -1,0 +1,10 @@
+{
+  "id": "pkm-assistant",
+  "name": "PKM Assistant",
+  "author": "JDHole",
+  "description": "Build and chat with AI agents that live in your vault: hierarchical memory, skills, sub-agents, and MCP tools. Works with local models (Ollama, LM Studio) or cloud providers (OpenAI, Anthropic, Google, xAI, and more).",
+  "minAppVersion": "1.11.0",
+  "authorUrl": "https://github.com/JDHole",
+  "isDesktopOnly": true,
+  "version": "2.2.1"
+}

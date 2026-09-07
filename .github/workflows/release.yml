@@ -1,0 +1,117 @@
+name: Release
+
+# Wydanie buduje GitHub Actions z DOKŁADNIE tego commita, na który wskazuje tag — nie laptop.
+# Powody (raport walidatora katalogu Obsidiana, 2026-09-07):
+#   * artifact attestations: użytkownik może kryptograficznie sprawdzić, że main.js/styles.css
+#     powstały z tego repo i tego commita (actions/attest-build-provenance);
+#   * powtarzalność: bundle budowany na Windows różnił się od zbudowanego na Linuksie
+#     końcami linii w osadzonej notce wydania (esbuild.js normalizuje to od tej pory, ale
+#     jedno stałe środowisko builda zamyka temat na dobre);
+#   * release ma zawierać WYŁĄCZNIE main.js, manifest.json i styles.css — nic więcej katalog
+#     nie pobiera, a każdy dodatkowy plik walidator wytyka.
+#
+# Tag == manifest.version, znak w znak, BEZ litery `v` (wymóg katalogu — patrz RELEASE_PROCESS.md).
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write      # utworzenie wydania i wgranie assetów
+  id-token: write      # podpis provenance (OIDC)
+  attestations: write  # zapis atestacji przy repo
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # esbuild.js czyta DESTINATION_VAULTS przez process.loadEnvFile; w CI nie ma .env — ustawiamy jawnie.
+      DESTINATION_VAULTS: ''
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: tag == package.json == manifest.json, wpis w versions.json
+        run: |
+          node -e "
+            const fs = require('fs');
+            const tag = process.env.TAG;
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+            const versions = JSON.parse(fs.readFileSync('versions.json', 'utf8'));
+            const problems = [];
+            if (pkg.version !== tag) problems.push('package.json=' + pkg.version + ' != tag=' + tag);
+            if (manifest.version !== tag) problems.push('manifest.json=' + manifest.version + ' != tag=' + tag);
+            if (!Object.prototype.hasOwnProperty.call(versions, tag)) problems.push('versions.json nie ma wpisu dla ' + tag);
+            else if (versions[tag] !== manifest.minAppVersion) problems.push('versions.json[' + tag + ']=' + versions[tag] + ' != minAppVersion=' + manifest.minAppVersion);
+            if (!fs.existsSync('releases/' + tag + '.md')) problems.push('brak releases/' + tag + '.md (notatki wydania)');
+            if (problems.length) { console.error(problems.join('\n')); process.exit(1); }
+            console.log('Wersja ' + tag + ' spójna (minAppVersion ' + manifest.minAppVersion + ')');
+          "
+
+      # Te same bramki co w ci.yml — wydanie nie ma prawa być mniej sprawdzone niż zwykły push.
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run lint:obsidian
+      - run: npm run build
+      - name: manifest i versions nietkniete przez build
+        run: git diff --exit-code manifest.json versions.json
+      # Harness „Szklane Pudło" — prawdziwy plugin bootowany w Node bez Obsidiana. Od 2026-09-07
+      # mieszka w OSOBNYM repo (https://github.com/JDHole/pkm-assistant-harness): walidator
+      # katalogu Obsidiana lintuje CAŁE repo pluginu, a narzędzie testowe nie jest częścią
+      # pluginu i generowało tysiące ostrzeżeń. Bramka zostaje ta sama — klonujemy harness obok
+      # i puszczamy jego skrypty na TYM checkoutcie pluginu (PKM_ASSISTANT_ROOT).
+      - name: harness — checkout osobnego repo
+        uses: actions/checkout@v4
+        with:
+          repository: JDHole/pkm-assistant-harness
+          ref: main
+          path: .harness-ci
+
+      - name: harness — zależności
+        run: npm ci --no-audit --no-fund
+        working-directory: .harness-ci
+
+      - name: harness — selftest
+        run: npm run selftest
+        working-directory: .harness-ci
+        env:
+          PKM_ASSISTANT_ROOT: ${{ github.workspace }}
+
+      - name: harness — scenariusze
+        run: npm run scenarios
+        working-directory: .harness-ci
+        env:
+          PKM_ASSISTANT_ROOT: ${{ github.workspace }}
+
+      - name: atestacja provenance assetów
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/main.js
+            dist/manifest.json
+            dist/styles.css
+
+      - name: wydanie na GitHubie (tylko 3 pliki katalogu)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Wydanie $TAG istnieje — podmieniam assety."
+            gh release upload "$TAG" dist/main.js dist/manifest.json dist/styles.css --clobber
+          else
+            gh release create "$TAG" dist/main.js dist/manifest.json dist/styles.css \
+              --title "$TAG" \
+              --notes-file "releases/$TAG.md" \
+              --verify-tag
+          fi

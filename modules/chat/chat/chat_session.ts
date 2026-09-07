@@ -1,0 +1,597 @@
+/**
+ * Session management — save, load, consolidate, rolling window creation.
+ * Methods mixed into ChatView.prototype.
+ */
+import { Notice } from 'obsidian';
+import { RollingWindow } from './RollingWindow.js';
+import { IdleScheduler } from '../../memory/index.js';
+import { runSaveSessionFlow } from '../slash-commands/save_session.js';
+import { SessionCloseModal } from '../SessionCloseModal.js';
+import { OpenSessionModal } from '../OpenSessionModal.js';
+import { log } from '../../../core/utils/Logger.js';
+import { t } from '../../../core/i18n/index.js';
+import { TokenTracker } from '../../../core/index.js';
+import {
+    buildOwnerWindowOptions,
+    isOwnerTabActive,
+    resolveOwnerAgentName,
+    resolveOwnerMemory,
+} from './turnOwner.js';
+// F04 (domknięcie AUD-code-review-016 / K19 gotcha o „druga kopia formuły"): `_agentStates`
+// MUSI być kluczowana dokładnie tym, co liczy `_switchTab` — inaczej wynik suba / cleanup tury
+// trafia do złej zakładki. `_tabKey` jest eksportowany DOKŁADNIE po to, żeby nie było czwartego
+// miejsca przepisującego `sessionId || sessionPath || sessionName || agentName` ręcznie.
+import { _tabKey } from './chat_tabs.js';
+
+// TS-any: receiver legacy mixinów składany runtime przez Object.assign.
+type ChatViewMixinContext = any;
+
+/**
+ * Initialize session manager — auto-save timer + restore last active session.
+ * Memory v3 drops the v2 draft recovery flow: sessions live in active/ and archive/ only.
+ */
+export async function initSessionManager(this: ChatViewMixinContext) {
+    // registerInterval ties the timer to the view lifecycle (Component clears it on unload),
+    // same as the idle tick below — no manual field, no clearInterval in onClose.
+    const autoSaveInterval = this.env?.settings?.pkmAssistant?.autoSaveInterval;
+    if (autoSaveInterval && autoSaveInterval > 0) {
+        this.registerInterval(window.setInterval(() => {
+            if (this.rollingWindow?.messages?.length > 0) {
+                this.handleSaveSession();
+            }
+        }, autoSaveInterval * 60 * 1000));
+    }
+
+    // E2.7 W3 (K4): idle consolidation. Every 60s, if the session has been idle past the
+    // threshold AND has new entries since the last idle save, run W3-lite = handleSaveSession
+    // (mechanical transcript save, no background LLM). registerInterval ties it to the view
+    // lifecycle so it clears on unload.
+    this._idleScheduler = new IdleScheduler({ minNewEntries: 2 });
+    this._lastIdleSaveMsgCount = 0;
+    this.registerInterval(window.setInterval(() => { this._idleTick(); }, 60 * 1000));
+
+    await this._restoreActiveSession();
+}
+
+/**
+ * E2.7 W3 (K4): one idle check. Live-reads idleConsolidationMinutes (default 20, 0=off) so a
+ * Settings change takes effect without reloading the view. Best-effort — never throws upward.
+ */
+export async function _idleTick(this: ChatViewMixinContext) {
+    try {
+        if (!this._idleScheduler) return;
+        const idleMinutes = this.env?.settings?.pkmAssistant?.idleConsolidationMinutes ?? 20;
+        this._idleScheduler.idleMinutes = Number(idleMinutes) || 0;
+        const msgCount = this.rollingWindow?.messages?.length || 0;
+        const newEntries = msgCount - (this._lastIdleSaveMsgCount || 0);
+        const fire = this._idleScheduler.shouldFire({
+            nowMs: Date.now(),
+            lastActivityMs: this.lastMessageTimestamp || null,
+            newEntries
+        });
+        if (!fire) return;
+        this._lastIdleSaveMsgCount = msgCount;
+        await this.handleSaveSession();
+        log.info('Chat', `Idle consolidation: saved session after ${this._idleScheduler.idleMinutes} min idle (${newEntries} new entries)`);
+    } catch (e: ChatViewMixinContext) {
+        log.warn('Chat', `Idle tick failed (non-fatal): ${e?.message || e}`);
+    }
+}
+
+/**
+ * Memory v3: if .state.json lists an active session that loadActiveSession could not parse into
+ * messages (empty/corrupted/stale), drop the pointer from state so it stops surfacing in restore
+ * and /save session. The session FILE is never deleted — Kuba can recover it manually from
+ * sessions/active/ if needed.
+ *
+ * Earlier implementation deleted the file too. That destroyed a real session in Smoke 01 retake
+ * because the parser is one corner case away from returning 0 even on a populated file. Never
+ * again. State-only pruning is the safe contract.
+ * @private
+ */
+async function _pruneEmptyActiveSessionFromState(agentMemory: ChatViewMixinContext, session: ChatViewMixinContext) {
+    try {
+        const path = session?.path;
+        const name = session?.name || (path ? path.split('/').pop() : null);
+        if (!name) return;
+
+        if (agentMemory.stateManager?.removeActiveSession) {
+            try { await agentMemory.stateManager.removeActiveSession(name); } catch { /* best-effort */ }
+        }
+        if (agentMemory.activeSessionPath === path) {
+            agentMemory.activeSessionPath = null;
+            await agentMemory._persistActiveSession?.();
+        }
+    } catch (e: ChatViewMixinContext) {
+        log.warn('Chat', `Prune empty active session pointer failed (non-fatal): ${e.message}`);
+    }
+}
+
+/**
+ * Odłóż starą sesję przy starcie nowej rozmowy (gałęzie „draft" i „odrzuć").
+ *
+ * Do 2026-07-29 obie gałęzie zostawiały plik w `sessions/active/` i wpis w `.state.json` —
+ * porzucona rozmowa wracała przy restarcie jako żywa zakładka albo wisiała jako zombie-wpis.
+ * `AgentMemory.discardActiveSession` przenosi plik do `sessions/active/.discarded/` (bez twardej
+ * kasacji — user authority) i wypisuje go z ewidencji. Best-effort: pad nie może zablokować
+ * otwarcia nowej rozmowy.
+ * @private
+ */
+async function _retireActiveSession(agentMemory: ChatViewMixinContext, reason: string) {
+    try {
+        if (!agentMemory?.discardActiveSession) return;
+        const moved = await agentMemory.discardActiveSession();
+        if (moved) log.info('Chat', `Old session retired to .discarded/ (${reason}): ${moved}`);
+    } catch (e: ChatViewMixinContext) {
+        log.warn('Chat', `Retiring old session failed (non-fatal): ${e?.message || e}`);
+    }
+}
+
+/**
+ * Restore the last active session from disk.
+ */
+export async function _restoreActiveSession(this: ChatViewMixinContext) {
+    try {
+        const agentManager = this.plugin?.agentManager;
+        if (!agentManager) return;
+
+        const agents = agentManager.getAllAgents?.() || [];
+        const activeAgentName = agentManager.getActiveAgent?.()?.name || 'Jaskier';
+        const restored = [];
+
+        for (const agent of agents) {
+            const agentName = agent?.name;
+            if (!agentName) continue;
+            const agentMemory = agentManager.getAgentMemory?.(agentName);
+            if (!agentMemory?.listActiveSessions) continue;
+
+            const sessions = await agentMemory.listActiveSessions();
+            for (const session of sessions) {
+                let parsed = null;
+                try {
+                    parsed = await agentMemory.loadActiveSession(session);
+                } catch (e: ChatViewMixinContext) {
+                    log.warn('Chat', `Could not load active session ${session?.name}: ${e.message}`);
+                }
+                if (!parsed?.messages?.length) {
+                    // Memory v3: do NOT delete the underlying file. We previously called
+                    // _discardEmptyActiveSession here, which destroyed a real session for Kuba when
+                    // the parser returned 0 messages. Only prune the .state.json pointer; the file
+                    // stays on disk as a recovery anchor.
+                    await _pruneEmptyActiveSessionFromState(agentMemory, session);
+                    continue;
+                }
+
+                const rollingWindow = this._createRollingWindow(agentName);
+                for (const msg of parsed.messages) {
+                    await rollingWindow.addMessage(msg.role, msg.content);
+                }
+
+                restored.push({
+                    agentName,
+                    session,
+                    rollingWindow,
+                    tokenTracker: new TokenTracker()
+                });
+            }
+        }
+
+        if (restored.length === 0) {
+            const agentMemory = agentManager.getActiveMemory?.();
+            const restoredPath = await agentMemory?.restoreActiveSession?.();
+            if (!restoredPath) return;
+            // S36 Faza 2: `restoreActiveSession` zwraca ścieżkę pliku z `sessions/active/`, a ten
+            // jest event-logiem. `loadSession` (parser transkryptu `## User`) wyciągnąłby z niego
+            // ZERO wiadomości i restore po cichu by się nie odbył — dlatego czytamy tym samym
+            // czytnikiem co gałąź główna wyżej (`loadActiveSession` → `parseActiveSession`,
+            // rozumie format A, B i pliki MIESZANE).
+            const parsed = await agentMemory.loadActiveSession(restoredPath);
+            if (!parsed?.messages?.length) return;
+
+            const rollingWindow = this._createRollingWindow(activeAgentName);
+            for (const msg of parsed.messages) {
+                await rollingWindow.addMessage(msg.role, msg.content);
+            }
+            restored.push({
+                agentName: activeAgentName,
+                session: {
+                    path: restoredPath,
+                    name: restoredPath.split('/').pop(),
+                    label: activeAgentName
+                },
+                rollingWindow,
+                tokenTracker: new TokenTracker()
+            });
+        }
+
+        restored.sort((a, b) => {
+            const aActive = a.agentName === activeAgentName ? 1 : 0;
+            const bActive = b.agentName === activeAgentName ? 1 : 0;
+            if (aActive !== bActive) return bActive - aActive;
+            return (b.session?.mtime || 0) - (a.session?.mtime || 0);
+        });
+
+        this.chatTabs = restored.map((item, index) => ({
+            agentName: item.agentName,
+            sessionId: item.session.path,
+            sessionPath: item.session.path,
+            sessionName: item.session.name,
+            sessionLabel: item.session.label,
+            isActive: index === 0
+        }));
+        this._agentStates.clear();
+        restored.forEach((item, index) => {
+            // F04: `_tabKey(this.chatTabs[index])` — kanoniczny klucz, nie ręczna kopia
+            // `item.session.path` (dziś równa się `sessionId`/`sessionPath` zbudowanym wyżej
+            // TYLKO dlatego, że oba pola dostały tę samą wartość przy tworzeniu `chatTabs`;
+            // jedna przyszła zmiana kształtu taba rozjeżdża klucz cicho, bez żadnego testu,
+            // który by to złapał).
+            this._agentStates.set(_tabKey(this.chatTabs[index]), {
+                rollingWindow: item.rollingWindow,
+                tokenTracker: item.tokenTracker,
+                autonomy: this.currentAutonomy,
+                scrollTop: 0,
+                isGenerating: false
+            });
+            const memory = agentManager.getAgentMemory?.(item.agentName);
+            if (memory && item.session.path) memory.activeSessionPath = item.session.path;
+        });
+
+        const active = restored[0];
+        agentManager.switchAgent?.(active.agentName);
+        const activeMemory = agentManager.getAgentMemory?.(active.agentName);
+        if (activeMemory && active.session.path) {
+            activeMemory.activeSessionPath = active.session.path;
+            await activeMemory._persistActiveSession?.();
+        }
+        this.rollingWindow = active.rollingWindow;
+        this.tokenTracker = active.tokenTracker;
+        this.render_messages();
+        this.updateTokenCounter();
+        this._updateTokenPanel();
+        if (this._tabBarContainer) this._renderTabBar(this._tabBarContainer);
+        log.info('Chat', `Restored ${restored.length} active session(s)`);
+    } catch (e: ChatViewMixinContext) {
+        log.warn('Chat', `Session restore failed: ${e.message}`);
+    }
+}
+
+// E2.9 FAZA D: _refreshSystemPrompt usunięty (0 call sites, martwy od dawna — czytał stary świat
+// artifacts:{todos,plans} z _chatTodoStore/_planStore, które już nie istnieją).
+
+export async function startActiveSession(this: ChatViewMixinContext, agentName: string) {
+    const agentManager = this.plugin?.agentManager;
+    const owner = resolveOwnerAgentName(agentManager, agentName);
+    const agentMemory = resolveOwnerMemory(agentManager, owner);
+    if (!agentMemory?.startActiveSession) return null;
+    return agentMemory.startActiveSession(owner);
+}
+
+/**
+ * Dopisz zdarzenie tury do event-logu sesji.
+ *
+ * K4 (AUD-security-064): destynacja bierze się z `event.agentName` — czyli z TURY, która to
+ * zdarzenie wyprodukowała (`chat_streaming` podaje je przy każdym wywołaniu). Do K4 szło to
+ * przez `getActiveMemory()`, więc przełączenie zakładki w trakcie tury wsypywało wiadomości,
+ * wywołania narzędzi i ich WYNIKI do `sessions/active/` zupełnie innego agenta.
+ */
+export async function appendToActiveSession(this: ChatViewMixinContext, event: ChatViewMixinContext) {
+    const agentManager = this.plugin?.agentManager;
+    const owner = resolveOwnerAgentName(agentManager, event?.agentName);
+    const agentMemory = resolveOwnerMemory(agentManager, owner);
+    if (!agentMemory?.appendToActiveSession) return null;
+    return agentMemory.appendToActiveSession(event);
+}
+
+/**
+ * Handle new session — save, optionally compress, reset.
+ */
+export async function handleNewSession(this: ChatViewMixinContext) {
+    // Friendly fire 2026-08-15: nowa sesja NIE może zostawić trwającej tury jako zombie.
+    // Porzucona tura wisiała w tle z uzbrojonym watchdogiem, który strzela „po agencie"
+    // i ubijał requesty KOLEJNEJ tury tego samego agenta. Ubijamy jawnie, zanim wymienimy sesję.
+    if (this.is_generating) this.stop_generation();
+
+    const msgCount = this.rollingWindow.messages.length;
+    log.info('Chat', `handleNewSession: ${msgCount} wiadomości`);
+
+    if (msgCount > 0) {
+        await this.handleSaveSession();
+
+        const agent = this.plugin?.agentManager?.getActiveAgent();
+        const modal = new SessionCloseModal(this.app, {
+            agentName: agent?.name || 'Agent',
+            agentColor: agent?.color || '',
+            messageCount: msgCount
+        });
+        // Sprint 03 Z5: prompt() returns { choice }. AUD-dead-code-051/093/130 (2026-09-02):
+        // kanał `options` skasowany z SessionCloseModal — był strukturalnie pusty i nieczytany.
+        const { choice } = await modal.prompt() as ChatViewMixinContext || { choice: 'cancel' };
+
+        if (choice === 'cancel') return;
+
+        const agentMemoryForOpts = this.plugin?.agentManager?.getActiveMemory();
+
+        // Decyzja Kuby 2026-08-15: biegi subów należą do SESJI — zamknięcie (archive/discard)
+        // wymiata jej zakończone biegi z rejestru, żeby chipy nie przeżywały do nowej rozmowy
+        // (incydent: klucz zakładki nie odróżniał starej sesji od nowej). `running` zostają.
+        const closingSessionPath = agentMemoryForOpts?.activeSessionPath || '';
+        if (closingSessionPath) {
+            this.plugin?.subTaskRegistry?.pruneSession?.(closingSessionPath);
+            this._renderSubTaskStrip?.();
+        }
+
+        if (choice === 'archive') {
+            new Notice(t('chat.session.compressing'));
+            await this.consolidateSession();
+        } else if (choice === 'discard') {
+            // Modal już potwierdził z window.confirm. Plik NIE jest kasowany — ląduje
+            // w sessions/active/.discarded/ i znika z .state.json, żeby nie wisiał jako
+            // zombie-wpis do najbliższego restore.
+            log.info('Chat', `Session discarded by user (${msgCount} msgs)`);
+            await _retireActiveSession(agentMemoryForOpts, 'discard');
+        }
+
+        // E2.9 FAZA D (A18): artefakt „Kontekst sesji" (ContextSessionGenerator) SKASOWANY — ruch
+        // przejęły propozycje „Na teraz" w brain.md (E2.8 D3, żywe w /save session). „Nie zostawiamy
+        // nic z tyłu": checkbox createContextArtifact też zniknął z SessionCloseModal.
+        //
+        // S36b (2026-07-30): gałąź „draft" SKASOWANA razem z rodziną draftów w AgentMemory.
+        // `saveDraft` pisał plik do `.draft/`, którego NIC nigdy nie czytało (obiecane odzyskiwanie
+        // przy starcie pluginu nie istnieje od Memory v3) — user dostawał notice „zapisano jako
+        // draft" o sesji, do której nie miał jak wrócić. Zostają „archiwizuj" i „odrzuć".
+    }
+
+    const agentMemory = this.plugin?.agentManager?.getActiveMemory();
+    if (agentMemory) {
+        await agentMemory.startNewSession();
+    }
+
+    this.rollingWindow = this._createRollingWindow();
+    this.tokenTracker.clear();
+    this.render_messages();
+    this.add_welcome_message();
+    this.updateTokenCounter();
+    this._updateTokenPanel();
+}
+
+/**
+ * Save current session.
+ *
+ * K4: wołacz z TŁA (kompresja końca tury na zakładce, której user już nie ogląda) podaje
+ * agenta i okno SWOJEJ tury. Bez argumentów zachowanie jest jak dotąd — bieżąca zakładka.
+ * Do K4 zapis z tury w tle brał `getActiveMemory()` + `this.rollingWindow`, więc transkrypt
+ * agenta X lądował w pliku sesji agenta Y (ten sam wzorzec co AUD-security-064).
+ *
+ * @param agentName - właściciel tury (opcjonalny)
+ * @param rollingWindow - okno tury (opcjonalne; brak = okno bieżącej zakładki)
+ */
+export async function handleSaveSession(this: ChatViewMixinContext, agentName?: string | null, rollingWindow?: ChatViewMixinContext) {
+    log.debug('Chat', 'handleSaveSession');
+    const rw = rollingWindow || this.rollingWindow;
+    if (!rw?.messages?.length) return;
+    try {
+        const agentManager = this.plugin?.agentManager;
+        const ownerName = resolveOwnerAgentName(agentManager, agentName) || 'default';
+        const memory = resolveOwnerMemory(agentManager, ownerName);
+
+        const metadata = {
+            created: new Date().toISOString(),
+            agent: ownerName,
+            tokens_used: rw.getCurrentTokenCount()
+        };
+
+        if (memory?.saveSession) {
+            const savedPath = await memory.saveSession(rw.messages, metadata);
+            if (savedPath) {
+                if (this.autosaveStatus) {
+                    this.autosaveStatus.textContent = t('chat.session.autosave_saved', { agent: ownerName });
+                    window.setTimeout(() => { if (this.autosaveStatus) this.autosaveStatus.textContent = ''; }, 2000);
+                }
+            }
+        }
+    } catch (e) {
+        log.error('Chat', 'Error saving session:', e);
+        if (this.autosaveStatus) this.autosaveStatus.textContent = t('chat.session.autosave_failed');
+    }
+}
+
+/**
+ * Load a session from disk. Sprint 03 Z16: modal z 3 opcjami przed loadem.
+ */
+export async function handleLoadSession(this: ChatViewMixinContext, path: string) {
+    log.info('Chat', `handleLoadSession: ${path}`);
+    try {
+        const agentMemory = this.plugin?.agentManager?.getActiveMemory();
+        if (!agentMemory) return;
+        const filename = path.split('/').pop() as string;
+        const parsed = await agentMemory.loadSession(filename);
+        if (!parsed?.messages) return;
+
+        // Sprint 03 Z16: modal otwórz starą sesję — 3 opcje + cancel.
+        // Default focus 'compress' (decyzja Kuby). Cancel → return.
+        const agent = this.plugin?.agentManager?.getActiveAgent();
+        const modal = new OpenSessionModal(this.app, {
+            agentName: agent?.name || 'Agent',
+            agentColor: agent?.color || '',
+            sessionTitle: filename.replace(/\.md$/, ''),
+            sessionDate: parsed.metadata?.created || filename
+        });
+        const choice = await modal.prompt();
+        if (choice === 'cancel') return;
+
+        this.rollingWindow = this._createRollingWindow();
+
+        if (choice === 'continue') {
+            // Pełen load — jak pre-Z16
+            for (const msg of parsed.messages) {
+                await this.rollingWindow.addMessage(msg.role, msg.content);
+            }
+            new Notice(t('chat.session.loaded_full') || `Sesja załadowana: ${parsed.messages.length} wiad.`, 4000);
+        } else if (choice === 'compress') {
+            // Załaduj L1 summary który includes tę sesję — przez frontmatter `included_in: [[l1_xxx]]`
+            const summaryText = await _findCoveringL1Summary.call(this, agentMemory, filename);
+            if (summaryText) {
+                await this.rollingWindow.addMessage('system', `Kontekst poprzedniej sesji (L1 summary):\n\n${summaryText}`);
+                new Notice(t('chat.session.loaded_compressed') || 'Załadowano L1 summary (skompresowany kontekst)', 4000);
+            } else {
+                // Fallback: brak L1 jeszcze (sesja niezaczęta przez consolidateLevel1) — załaduj summary z pliku jeśli jest
+                const fallback = parsed.summary || `${parsed.messages.length} wiadomości — pełen kontekst niedostępny w skompresowanej formie.`;
+                await this.rollingWindow.addMessage('system', `Kontekst poprzedniej sesji:\n\n${fallback}`);
+                new Notice(t('chat.session.compressed_fallback') || 'Brak L1 — załadowano summary z sesji', 4000);
+            }
+        } else if (choice === 'fresh') {
+            // Brain + ostatnie 3 L1 jako kontekst, fresh start
+            const fresh = await _buildFreshAgentContext.call(this, agentMemory);
+            if (fresh) {
+                await this.rollingWindow.addMessage('system', fresh);
+            }
+            new Notice(t('chat.session.loaded_fresh') || 'Nowy chat z perspektywy agenta (brain + 3 L1)', 4000);
+        }
+
+        this.render_messages();
+        this.updateTokenCounter();
+        this._updateTokenPanel?.();
+    } catch (e) {
+        log.error('Chat', 'Error loading session:', e);
+    }
+}
+
+/**
+ * Sprint 03 Z16: znajdź L1 summary który includes sesję.
+ * Wykorzystuje Z9 frontmatter `sessions:` w L1 (cascade contract).
+ */
+async function _findCoveringL1Summary(agentMemory: ChatViewMixinContext, sessionFilename: string) {
+    try {
+        const listed = await agentMemory.vault.adapter.list(agentMemory.paths.l1);
+        for (const filePath of listed?.files || []) {
+            if (!filePath.endsWith('.md')) continue;
+            try {
+                const content = await agentMemory.vault.adapter.read(filePath);
+                const fm = agentMemory._parseFrontmatter(content);
+                const sessions = Array.isArray(fm.sessions) ? fm.sessions : [];
+                if (sessions.includes(sessionFilename)) {
+                    // Strip frontmatter, return body
+                    return content.replace(/^---[\s\S]*?---\n*/, '').trim();
+                }
+            } catch { /* skip */ }
+        }
+    } catch { /* L1 folder doesn't exist yet */ }
+    return null;
+}
+
+/**
+ * Sprint 03 Z16: zbuduj fresh agent context — brain + ostatnie 3 L1 summaries.
+ */
+async function _buildFreshAgentContext(agentMemory: ChatViewMixinContext) {
+    const parts = [];
+    try {
+        const brain = await agentMemory.getBrain();
+        if (brain && brain.trim()) {
+            parts.push(`PAMIĘĆ DŁUGOTERMINOWA AGENTA:\n${brain.trim()}`);
+        }
+    } catch { /* no brain */ }
+    try {
+        const l1s = await agentMemory.vault.adapter.list(agentMemory.paths.l1);
+        const l1Files = (l1s?.files || []).filter((f: string) => f.endsWith('.md')).sort().reverse().slice(0, 3);
+        if (l1Files.length > 0) {
+            const summaries = [];
+            for (const path of l1Files) {
+                try {
+                    const content = await agentMemory.vault.adapter.read(path);
+                    const body = content.replace(/^---[\s\S]*?---\n*/, '').trim();
+                    summaries.push(`### ${path.split('/').pop()}\n${body}`);
+                } catch { /* skip */ }
+            }
+            if (summaries.length > 0) {
+                parts.push(`OSTATNIE PODSUMOWANIA (L1):\n${summaries.join('\n\n---\n\n')}`);
+            }
+        }
+    } catch { /* no L1 yet */ }
+    return parts.length > 0 ? parts.join('\n\n=====\n\n') : null;
+}
+
+/**
+ * Consolidate session (E2.7 K4): reroute to the SINGLE canonical /save session flow.
+ *
+ * Pre-E2.7 this saved the transcript and ran the silent AgentMemory.consolidateAll (L1/L2/L3
+ * without user review). That whole path was deleted. Now the 🧠 button, /memory command and the
+ * SessionCloseModal "archive" choice all land here → SaveSessionWorkflow proposes durable brain
+ * notes → user reviews in SaveSessionModal → the active session is archived → ArchiveWorkflow
+ * fires at the threshold. Kept as a ChatView method so the three callers stay unchanged.
+ *
+ * ⚠️ USER-VISIBLE CHANGE: these entry points now open the save-session review modal instead of
+ * silently consolidating. See modules/memory/CLAUDE.md + E2.7 report.
+ */
+export async function consolidateSession(this: ChatViewMixinContext) {
+    await runSaveSessionFlow({ view: this, plugin: this.plugin });
+}
+
+/**
+ * Creates a RollingWindow with optional Summarizer.
+ */
+export function _createRollingWindow(this: ChatViewMixinContext, agentName?: string | null) {
+    const maxTokens = this.env?.settings?.pkmAssistant?.maxContextTokens || 100000;
+    const threshold = this.env?.settings?.pkmAssistant?.summarizationThreshold || 0.9;
+    const toolTrimThreshold = this.env?.settings?.pkmAssistant?.toolTrimThreshold || 0.7;
+    log.debug('RollingWindow', `Init: maxTokens=${maxTokens}, threshold=${threshold}, toolTrim=${toolTrimThreshold}, trigger=${Math.round(maxTokens * threshold)}`);
+    // K4 (AUD-security-065/066): okno należy do KONKRETNEJ zakładki i jej agenta. Nazwę zamrażamy
+    // TU, przy zakładaniu okna, a providery (prompt kompresji, model, indeks pamięci, ratunek
+    // pamięci) rozwiązują się po niej — nie po globalnym `activeAgent` w chwili kompresji.
+    // Kompresja końca tury leci także dla zakładek W TLE (chat_streaming: „Background tab finished").
+    const ownerAgentName = resolveOwnerAgentName(this.plugin?.agentManager, agentName);
+    return new RollingWindow({
+        maxTokens,
+        triggerThreshold: threshold,
+        toolTrimThreshold,
+        // AUD-code-review-013: K4 mówi że kompresja LECI bezwarunkowo także dla zakładki w tle —
+        // ale to zasada o DANYCH (transkrypt, sesja), nie o DOM-ie. `messages_container` jest
+        // JEDEN na cały widok, więc bez tej bramki blok „skompresowano" agenta A malował się
+        // fizycznie w rozmowie agenta B, którą user akurat czyta (z licznikami z okna A).
+        onSummarized: (summary, count, messagesKept, isEmergency) => {
+            if (!isOwnerTabActive(this, ownerAgentName)) return;
+            this._renderCompressionBlock(summary, count, messagesKept, isEmergency);
+            this._updateTokenPanel();
+        },
+        onToolsTrimmed: (info) => {
+            log.info('Chat', `Faza 1: skrócono ${info.trimmed} wyników narzędzi (łącznie: ${info.totalTrimmed})`);
+            if (!isOwnerTabActive(this, ownerAgentName)) return;
+            this._renderTrimBlock(info);
+            this._updateTokenPanel();
+        },
+        // E2.7 W2 (K3): dedup context + durable-memory rescue. chat_session owns AgentMemory access;
+        // RollingWindow only calls these providers (kierunek zależności jak dziś).
+        // E2.8 B3: szkielet kompresji (agent>global>factory) też jest w tej paczce.
+        ...buildOwnerWindowOptions(this, ownerAgentName),
+    });
+}
+
+/**
+ * Build emergency task context for summarization.
+ */
+export function _buildEmergencyTaskContext(this: ChatViewMixinContext, agentName?: string | null) {
+    const parts = [];
+
+    // K4: ścieżka sesji do promptu awaryjnego = sesja WŁAŚCICIELA okna (inaczej kompresja
+    // agenta X obiecywała modelowi plik sesji agenta Y).
+    const sessionPath = resolveOwnerMemory(this.plugin?.agentManager, agentName ?? null)?.activeSessionPath;
+    if (sessionPath) {
+        parts.push(t('chat.session.full_saved', { path: sessionPath }));
+    }
+
+    // E2.9 FAZA D: emergency-kontekst listuje AKTYWNĄ listę `todo` (live-widok). Stary świat
+    // (_chatTodoStore/_planStore) usunięty; plany są teraz artefaktami w vaulcie (aktywny idzie do
+    // promptu osobno przez activeArtifactId).
+    const todo = this._activeTodoState;
+    if (todo?.items?.length) {
+        const done = todo.items.filter((i: ChatViewMixinContext) => i.checked || i.done).length;
+        const total = todo.items.length;
+        const lines = [`📋 TODO "${todo.title || t('chat.todo.panel_title')}" (${done}/${total} ${t('prompt.dt.done')}):`];
+        for (const item of todo.items) {
+            lines.push(`  ${(item.checked || item.done) ? '✅' : '⬜'} ${item.text}`);
+        }
+        parts.push(lines.join('\n'));
+    }
+
+    return parts.join('\n\n');
+}

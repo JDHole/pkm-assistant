@@ -1,0 +1,67 @@
+{
+  "smart_chat_model": {
+    "platform": "google",
+    "adapter": "google",
+    "google_model": "gemini-2.0-flash",
+    "anthropic": {
+      "model_key": "claude-sonnet-4-5"
+    },
+    "anthropic_api_key": "sk-ant-PLACEHOLDER",
+    "xai_api_key": "xai-PLACEHOLDER",
+    "ollama_host": "http://127.0.0.1:11434",
+    "temperature": 0.7,
+    "max_tokens": 4096
+  },
+  "smart_sources": {
+    "embed_model": {
+      "adapter": "gemini",
+      "gemini": {
+        "model_key": "gemini-embedding-001",
+        "api_key": "AIzaPLACEHOLDER"
+      }
+    },
+    "folder_exclusions": "Sekrety"
+  },
+  "smart_notices": {
+    "muted": {
+      "release_notes": true
+    }
+  },
+  "pkmAssistant": {
+    "komunikatorEnabled": true,
+    "fileLogEnabled": true,
+    "traceEnabled": true,
+    "language": "en",
+    "defaultAutonomy": "edge",
+    "no_go_folders": [
+      "Sekrety"
+    ],
+    "webSearch": {
+      "provider": "brave"
+    },
+    "secureStorage": {
+      "enabled": true,
+      "backend": "master-password",
+      "masterSalt": "c2FsdC1QTEFDRUhPTERFUg==",
+      "refs": {
+        "pkmAssistant.webSearch.apiKey": "obsek-obsek-websearch-apikey",
+        "smart_chat_model.anthropic_api_key": "pkm-assistant-smart-chat-model-anthropic-api-key",
+        "smart_chat_model.xai_api_key": "obsek-smart-chat-model-xai-api-key"
+      },
+      "encrypted": {
+        "obsek-obsek-websearch-apikey": {
+          "iv": "aXYtd2Vic2VhcmNo",
+          "data": "ZW5jLXdlYnNlYXJjaA=="
+        },
+        "pkm-assistant-smart-chat-model-anthropic-api-key": {
+          "iv": "aXYtYW50aHJvcGlj",
+          "data": "ZW5jLWFudGhyb3BpYw=="
+        },
+        "obsek-smart-chat-model-xai-api-key": {
+          "iv": "aXYteGFp",
+          "data": "ZW5jLXhhaQ=="
+        }
+      }
+    }
+  }
+}

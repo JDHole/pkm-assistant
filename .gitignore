@@ -1,0 +1,47 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.obsidian
+.vscode
+dist
+node_modules
+stylesheets
+ref
+
+*.sublime-*
+
+.git-dev
+
+# Separate tool repositories (managed independently)
+jdhole-skills/
+jdhole-mcp-servers/
+
+# ── Harness „Szklane Pudło" (od 2026-09-07 osobne repo) ──
+# Kod harnessu wyjechał do https://github.com/JDHole/pkm-assistant-harness (wymóg katalogu:
+# walidator lintuje CAŁE repo, a narzędzie testowe nie jest częścią pluginu). CI klonuje je
+# obok, do katalogu niżej — lokalny katalog roboczy, nie wersjonujemy go.
+.harness-ci/
+
+# Development/personal files (not for distribution)
+Prompt Startowy 25/
+.agent/
+BUGI_SESJA_*.md
+TESTY_SESJA_*.md
+SESJA_*.md
+CHEATSHEET.md
+*_GUIDELINES.md
+PLAYBOOK_DRAFT.md
+PROMPT_VISUAL_AUDIT.md
+_BRAINSTORM_*.md
+
+# Worktree'y agentów (lokalny artefakt; wcześniej tylko w .git/info/exclude — nieprzenośne)
+.claude/worktrees/
+
+# Osobiste ustawienia Claude Code (reguły uprawnień per maszyna — nie commitować)
+.claude/settings.local.json
+
+audyt/biegi/*/surowe/
+
+# Skille agentów Claude Code to prywatne narzędzia właściciela (ścieżki lokalne, nazwy agentów) — nie są częścią pluginu.
+.claude/skills/

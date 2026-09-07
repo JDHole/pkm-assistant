@@ -1,0 +1,1364 @@
+/* ═══════════════════════════════════════════════════════════════
+   CRYSTAL SOUL DESIGN SYSTEM v2 — Foundation
+   All variables use --cs- prefix (Crystal Soul)
+   Agent color: set --cs-agent-color via inline style
+   Inherits Obsidian theme → works with ANY theme
+   Override via .pkm-assistant/theme.css
+   ═══════════════════════════════════════════════════════════════ */
+
+.theme-dark, .theme-light {
+
+  /* ── Agent color (primary accent — set per element) ── */
+  --cs-agent-color: var(--interactive-accent);
+
+  /* ── Derived agent color variants (auto-calculated from --cs-agent-color) ── */
+  --cs-agent-glow: color-mix(in srgb, var(--cs-agent-color) 35%, transparent);
+  --cs-agent-subtle: color-mix(in srgb, var(--cs-agent-color) 12%, transparent);
+  --cs-agent-faded: color-mix(in srgb, var(--cs-agent-color) 50%, transparent);
+  --cs-agent-strong: color-mix(in srgb, var(--cs-agent-color) 85%, white);
+
+  /* ── User color (personal accent — set globally via settings) ── */
+  --cs-user-color: var(--interactive-accent);
+  --cs-user-glow: color-mix(in srgb, var(--cs-user-color) 35%, transparent);
+  --cs-user-subtle: color-mix(in srgb, var(--cs-user-color) 12%, transparent);
+  --cs-user-faded: color-mix(in srgb, var(--cs-user-color) 50%, transparent);
+  --cs-user-strong: color-mix(in srgb, var(--cs-user-color) 85%, white);
+
+  /* ── Shard decorations (use agent color) ── */
+  --cs-shard-color: var(--cs-agent-color);
+  --cs-shard-glow: var(--cs-agent-glow);
+  --cs-shard-subtle: var(--cs-agent-subtle);
+
+  /* ── Border accent (left border on cards/messages) ── */
+  --cs-border-accent-width: 3px;
+  --cs-border-accent-color: var(--cs-agent-color);
+  --cs-border-accent-faded: var(--cs-agent-faded);
+
+  /* ── Crystal marker (replaces diamond marker) ── */
+  --cs-crystal-size: 5px;
+  --cs-crystal-color: var(--cs-agent-color);
+  --cs-crystal-empty-color: var(--text-faint);
+
+  /* ── Surface layers (inherit from Obsidian) ── */
+  --cs-surface-primary: var(--background-primary);
+  --cs-surface-secondary: var(--background-secondary);
+  --cs-surface-elevated: var(--background-primary-alt);
+  --cs-surface-border: var(--background-modifier-border);
+
+  /* ── Text layers ── */
+  --cs-text-primary: var(--text-normal);
+  --cs-text-secondary: var(--text-muted);
+  --cs-text-tertiary: var(--text-faint);
+
+  /* ── Animation ── */
+  --cs-transition-fast: 0.12s ease;
+  --cs-transition-normal: 0.25s ease;
+  --cs-transition-slow: 0.4s ease;
+  --cs-breathing-duration: 3s;
+
+  /* ── Glow intensity ── */
+  --cs-glow-spread: 12px;
+  --cs-glow-blur: 24px;
+}
+
+/* ── Agent color: set via inline style ──
+   style="--cs-agent-color: #7B5EA7"
+   ────────────────────────────────────────────────────────── */
+
+/* ── Animations ── */
+@keyframes cs-breathing {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+@keyframes cs-crystal-build {
+  0% { transform: scale(0.3); opacity: 0; filter: blur(4px); }
+  50% { transform: scale(1.1); opacity: 0.8; filter: blur(1px); }
+  100% { transform: scale(1); opacity: 1; filter: blur(0); }
+}
+@keyframes cs-glow-pulse {
+  0%, 100% { box-shadow: 0 0 var(--cs-glow-spread) var(--cs-agent-glow); }
+  50% { box-shadow: 0 0 var(--cs-glow-blur) var(--cs-agent-faded); }
+}
+/* Crystal grow-in for new messages */
+@keyframes cs-message-enter {
+  0% { opacity: 0; transform: translateY(8px) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* ── Utility classes ── */
+.cs-breathing { animation: cs-breathing var(--cs-breathing-duration) ease-in-out infinite; }
+
+/* ── Light theme overrides ── */
+.theme-light {
+  --cs-glow-spread: 8px;
+  --cs-glow-blur: 16px;
+}
+
+/* ── CS Root — contextual foreground-based vars ── */
+.cs-root {
+  --cs-fg-rgb: 180, 170, 155;
+  --cs-border: rgba(var(--cs-fg-rgb), 0.08);
+  --cs-border-vis: rgba(var(--cs-fg-rgb), 0.14);
+  --cs-soul: rgba(var(--cs-fg-rgb), 0.04);
+  --cs-soul-vis: rgba(var(--cs-fg-rgb), 0.08);
+}
+.theme-light .cs-root {
+  --cs-fg-rgb: 40, 40, 40;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   END CRYSTAL SOUL FOUNDATION v2
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── PKM Assistant Status Bar ── */
+.pkm-status-bar-item {
+  display: flex;
+  align-items: center;
+}
+/* S29 Z5: podczas konsolidacji pamięci pasek jest klikalny (otwiera modal przebiegu). */
+.pkm-status-bar-item--clickable,
+.pkm-status-bar-item--clickable .pkm-status-container {
+  cursor: pointer;
+}
+.pkm-status-container {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: var(--font-smallest);
+  cursor: default;
+}
+.pkm-status-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--text-faint);
+  border-top-color: var(--interactive-accent);
+  border-radius: 50%;
+  animation: pkm-spin 0.8s linear infinite;
+}
+@keyframes pkm-spin {
+  to { transform: rotate(360deg); }
+}
+
+
+.notice .pkm-notice-actions {
+  display: flex;
+  justify-content: space-between;
+  flex-direction: row-reverse;
+}
+
+
+
+
+
+
+/* ── Crystal Soul Notices ── */
+.notice.cs-notice {
+    background: var(--background-secondary, #1e1e2e);
+    border: 1px solid color-mix(in srgb, var(--pkm-skin-accent, var(--interactive-accent)) 30%, transparent);
+    border-left: 3px solid var(--pkm-skin-accent, var(--interactive-accent));
+    border-radius: 8px;
+    padding: 10px 14px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), 0 0 12px color-mix(in srgb, var(--pkm-skin-accent, var(--interactive-accent)) 10%, transparent);
+}
+.cs-notice__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+.cs-notice__diamond {
+    font-size: 14px;
+    color: var(--pkm-skin-accent, var(--interactive-accent));
+    animation: cs-glow-pulse 2s ease-in-out infinite;
+}
+.cs-notice__title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.cs-notice__body {
+    font-size: 13px;
+    color: var(--text-normal);
+    line-height: 1.4;
+}
+.cs-notice__body--success { color: var(--text-success, #a6e3a1); }
+.cs-notice__body--warning { color: var(--text-warning, #f9e2af); }
+.cs-notice__body--error { color: var(--text-error, #f38ba8); }
+.cs-notice__body--agent {
+    color: var(--cs-notice-agent-color, var(--pkm-skin-accent, var(--interactive-accent)));
+}
+
+/* Light theme overrides */
+.theme-light .notice.cs-notice {
+    background: var(--background-primary, #fff);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1), 0 0 8px color-mix(in srgb, var(--cs-accent, #7c6dd8) 8%, transparent);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   E3.4 D2 — statyczne inline styles wyniesione z JS (kampania katalogowa)
+   Wymóg-ostrzeżenie review katalogu Obsidian: żadnego stylowania z JS.
+   Wartości przeniesione 1:1 z `el.style.cssText` / `el.style.X`.
+   Reguły scope'owane pod klasą-rodzicem tam, gdzie element to input/
+   textarea/select/button — inaczej selektory Obsidiana typu
+   `input[type="text"]` (0,1,1) wygrałyby z gołą klasą (0,1,0).
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── chat: wspólny szkielet modali przeglądu (SaveSessionModal + ArchiveModal) ──
+   Klasy `pkm-review__*` są dzielone TYLKO tam, gdzie oba modale miały
+   co do wartości identyczne bloki inline. */
+.modal.cs-archive-modal-wide {
+  width: 760px;
+  max-width: 94vw;
+}
+.modal.cs-save-session-modal-wide {
+  width: 720px;
+  max-width: 94vw;
+}
+.pkm-review__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.pkm-review__banner {
+  padding: 6px 10px;
+  margin-bottom: 10px;
+  border-radius: 6px;
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.pkm-review__group {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 8px 0;
+}
+.pkm-review__group-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-normal);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pkm-review__counter {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+.pkm-review__item {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 5px;
+  padding: 8px;
+  margin: 6px 0;
+}
+.pkm-review__item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 12px;
+}
+.pkm-review__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.pkm-review__empty {
+  font-size: 11px;
+  color: var(--text-faint);
+  padding: 4px 0;
+}
+.pkm-review__badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+}
+.pkm-review__chip {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+}
+
+/* ── shell/ArchiveModal.js ── */
+.cs-archive-modal__dedup-empty {
+  padding: 12px;
+  color: var(--text-faint);
+  text-align: center;
+  font-size: 12px;
+}
+.pkm-review .cs-archive-modal__name-input {
+  flex: 1;
+  font-weight: 500;
+}
+.cs-archive-modal__sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.cs-archive-modal__sources--summary {
+  margin: 6px 0;
+}
+.cs-archive-modal__sources-label {
+  font-size: 10px;
+  color: var(--text-faint);
+  align-self: center;
+}
+.cs-archive-modal__sources-label--summary {
+  font-size: 11px;
+}
+.pkm-review .cs-archive-modal__merge-content {
+  width: 100%;
+  margin-top: 6px;
+  font-size: 12px;
+}
+.cs-archive-modal__why {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--text-faint);
+  font-style: italic;
+}
+.cs-archive-modal__del-name {
+  font-family: var(--font-monospace);
+  font-weight: 500;
+  text-decoration: line-through;
+}
+.pkm-review .cs-archive-modal__summary-body {
+  width: 100%;
+  margin-top: 8px;
+  font-size: 12px;
+  font-family: var(--font-monospace);
+}
+/* ── chat/SaveSessionModal.js ── */
+.cs-save-session__error {
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  background: var(--background-modifier-error);
+  color: var(--text-on-accent);
+  font-size: 12px;
+}
+.cs-save-session__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 24px 0;
+}
+.cs-save-session__spinner {
+  font-size: 32px;
+  color: var(--interactive-accent);
+}
+.cs-save-session__loading-text {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+.cs-save-session__loading-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-align: center;
+  transition: color 0.2s ease, opacity 0.2s ease;
+}
+/* S29 Z6: puls na chunku modelu — widoczna różnica „myśli" vs „zdechł". */
+.cs-save-session__loading-hint.is-pulsing {
+  color: var(--interactive-accent);
+  opacity: 1;
+}
+.cs-save-session__loading-timer {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.cs-save-session__loading-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+/* ── S29 Z4: chat/ConsolidationProgressModal.js (Puls pamięci) ── */
+.cs-consolidation__checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+.cs-consolidation__step {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border-left: 3px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+.cs-consolidation__step.is-open {
+  border-left-color: var(--interactive-accent);
+}
+.cs-consolidation__step--running,
+.cs-consolidation__step--applying {
+  border-left-color: var(--interactive-accent);
+}
+.cs-consolidation__step--awaiting_review {
+  border-left-color: var(--text-warning, var(--interactive-accent));
+}
+.cs-consolidation__step--failed {
+  border-left-color: var(--text-error);
+}
+.cs-consolidation__step--done {
+  opacity: 0.85;
+}
+.cs-consolidation__step--skipped,
+.cs-consolidation__step--gated {
+  opacity: 0.6;
+}
+.cs-consolidation__step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cs-consolidation__step-label {
+  font-size: 13px;
+  flex: 1 1 auto;
+}
+.cs-consolidation__step-icon {
+  font-size: 13px;
+}
+.cs-consolidation__step-time {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.cs-consolidation__step-actions {
+  display: flex;
+  gap: 6px;
+}
+.cs-consolidation__checklist .cs-consolidation__step-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  height: auto;
+}
+.cs-consolidation__step-detail {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-left: 24px;
+}
+.cs-consolidation__step-warning {
+  font-size: 11px;
+  color: var(--text-warning, var(--text-error));
+  margin-left: 24px;
+}
+.cs-consolidation__cost {
+  margin-top: 10px;
+  padding-top: 6px;
+  border-top: 1px solid var(--background-modifier-border);
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+}
+.cs-consolidation__panel:not(:empty) {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.cs-consolidation__summary {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  font-size: 12px;
+}
+.pkm-review .cs-save-session__note-field {
+  width: 100%;
+  margin-top: 8px;
+}
+.cs-save-session__na-teraz-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+}
+.cs-save-session__section-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+}
+.cs-save-session__diff {
+  margin-top: 6px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cs-save-session__diff-del {
+  color: var(--text-error);
+  text-decoration: line-through;
+}
+.cs-save-session__diff-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cs-save-session__diff-plus {
+  color: var(--text-success);
+  font-weight: 700;
+}
+.pkm-review .cs-save-session__diff-input {
+  flex: 1;
+}
+
+/* -- shell: wspolne prymitywy modali-edytorow (Skill / SubAgent / MCPServer) --
+   Selektory kwalifikowane elementem tam, gdzie Obsidian ma wlasna regule na
+   input/textarea w .setting-item-control (0,1,1) - sama klasa by przegrala. */
+.setting-item-description.pkm-editor-note {
+  margin-top: -4px;
+  margin-bottom: 8px;
+}
+.setting-item-control .pkm-editor-input-full {
+  width: 100%;
+}
+.setting-item-control .pkm-editor-input-icon {
+  width: 60px;
+  text-align: center;
+  font-size: 18px;
+}
+.setting-item-control .pkm-editor-input-narrow {
+  width: 60px;
+}
+.setting-item-control .pkm-editor-input-wide {
+  width: 320px;
+}
+.pkm-editor-warn {
+  margin-top: 10px;
+  color: var(--text-error);
+}
+.pkm-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.pkm-editor-section-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+textarea.pkm-editor-prompt-textarea {
+  width: 100%;
+  min-height: 200px;
+  font-family: var(--font-monospace);
+  font-size: 0.82em;
+  resize: vertical;
+  padding: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+button.pkm-editor-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+button.pkm-editor-btn-danger {
+  color: var(--text-error);
+  border-color: var(--text-error);
+}
+
+/* -- shell: podglad zaznaczenia (SendToAgentModal + InlineCommentModal) -- */
+.pkm-selection-preview {
+  background: var(--background-secondary);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  font-size: 0.85em;
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  color: var(--text-muted);
+}
+.pkm-selection-path-hint {
+  font-size: 0.75em;
+  color: var(--text-muted);
+  margin: 0 0 12px 0;
+}
+
+/* -- shell/SendToAgentModal.js -- */
+.send-to-agent-modal {
+  max-width: 450px;
+}
+.send-to-agent-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.send-to-agent-row--comment {
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+.send-to-agent-label {
+  font-weight: 500;
+  min-width: 70px;
+  font-size: 0.9em;
+}
+.send-to-agent-label--comment {
+  padding-top: 5px;
+}
+select.send-to-agent-select {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 0.9em;
+}
+textarea.send-to-agent-comment {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 0.85em;
+  font-family: inherit;
+  min-height: 50px;
+  resize: vertical;
+}
+.send-to-agent-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* -- shell/InlineCommentModal.js -- */
+.inline-comment-modal {
+  max-width: 480px;
+}
+.inline-comment-label {
+  font-weight: 500;
+  font-size: 0.9em;
+  display: block;
+  margin-bottom: 4px;
+}
+textarea.inline-comment-area {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 0.9em;
+  font-family: inherit;
+  min-height: 80px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.inline-comment-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+  margin-top: 12px;
+}
+
+/* -- shell/CostTrackingModal.js -- */
+.modal.cs-cost-tracking-modal-wide {
+  width: 640px;
+  max-width: 95vw;
+}
+.cs-cost-desc {
+  opacity: 0.75;
+  margin-bottom: 14px;
+}
+.cs-cost-section--total {
+  background: var(--background-secondary);
+  padding: 12px;
+  border-radius: 6px;
+  margin-bottom: 14px;
+}
+.cs-cost-section--spaced {
+  margin-top: 14px;
+}
+.cs-cost-table {
+  width: 100%;
+  margin-top: 6px;
+  border-collapse: collapse;
+}
+.cs-cost-table th {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.cs-cost-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--background-modifier-border-subtle);
+}
+.cs-cost-list {
+  font-family: monospace;
+  font-size: 12px;
+  margin-top: 6px;
+}
+canvas.cs-cost-chart {
+  width: 100%;
+  max-width: 600px;
+  height: 180px;
+  margin-top: 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+}
+.cs-cost-footer {
+  margin-top: 16px;
+  text-align: right;
+}
+
+/* S36b (2026-07-30): blok `.cs-drafts-list*` (shell/DraftsListModal.js) skasowany razem
+   z całą rodziną draftów — modalu, który go renderował, już nie ma. */
+
+/* -- chat: modale sesji (SessionCloseModal + OpenSessionModal) -- */
+.modal.cs-session-modal-narrow {
+  width: 460px;
+  max-width: 90vw;
+}
+.cs-session-close__cancel-row,
+.cs-open-session__cancel-row {
+  margin-top: 8px;
+  text-align: right;
+}
+
+/* -- shell/MigrationModal.js -- */
+.modal.cs-migration-modal-wide {
+  width: 680px;
+  max-width: 94vw;
+}
+.cs-migration-modal__preview {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  background: var(--background-secondary);
+  padding: 10px;
+  border-radius: 6px;
+}
+.cs-migration-modal__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+/* -- shell/AgentSidebar.js: ekran ladowania przed _ready -- */
+.pkm-sidebar-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 12px;
+  opacity: 0.6;
+}
+.pkm-sidebar-loading__diamond {
+  font-size: 24px;
+}
+.pkm-sidebar-loading__label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* -- shell/AgentPresentationModal.js --
+   Kwalifikacja elementem bije .cs-profile-hero__color-dot { cursor: pointer }
+   z SidebarViews.css (arkusz adoptowany wygrywa remis z document stylesheet). */
+div.cs-profile-hero__color-dot--readonly {
+  cursor: default;
+}
+
+/* -- shell/SettingsRegistry.js: rama zakladek ustawien -- */
+.pkm-settings-layout {
+  display: grid;
+  grid-template-columns: minmax(170px, 220px) 1fr;
+  gap: 18px;
+  align-items: start;
+}
+.pkm-settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: sticky;
+  top: 0;
+}
+.pkm-settings-content {
+  min-width: 0;
+}
+button.pkm-settings-nav__btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  justify-content: flex-start;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+/* -- shell/pkm_settings_tab.js: baner onboardingu -- */
+.pkm-onboarding-banner {
+  background: var(--background-modifier-border);
+  border-left: 3px solid var(--color-orange);
+  padding: 12px 16px;
+  margin: 0 0 16px;
+  border-radius: 4px;
+}
+.pkm-onboarding-banner__text {
+  margin: 0 0 8px;
+  font-size: 0.9em;
+}
+
+/* -- shell/vault_settings.js: Ustawienia > Vault -- */
+input.pkm-vault-folder-input {
+  flex: 1;
+  min-width: 160px;
+}
+.pkm-vault-group-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 8px 0;
+}
+.pkm-vault-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+input.pkm-vault-group-name {
+  flex: 1;
+  font-weight: 600;
+}
+.pkm-vault-folder-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+.pkm-vault-folder-add-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.pkm-vault-map-controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* -- shell/prompt_settings.js: Ustawienia > Prompt --
+   .cs-prompt-textarea / .cs-prompt-override / .cs-prompt-badge maja reguly
+   w SidebarViews.css (arkusz adoptowany dopiero przy otwarciu sidebara i wygrywa
+   remis z document stylesheet) - dlatego kwalifikacja elementem, zeby nadpisania
+   dzialaly niezaleznie od tego, czy sidebar byl kiedykolwiek otwarty. */
+textarea.cs-prompt-textarea--vault-map {
+  width: 100%;
+  min-height: 220px;
+  font-family: var(--font-monospace);
+}
+textarea.cs-prompt-textarea--settings {
+  width: 100%;
+  min-height: 140px;
+  font-family: var(--font-monospace);
+}
+div.cs-prompt-override--settings {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 10px 0;
+}
+.cs-prompt-settings-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+span.cs-prompt-badge--push {
+  margin-left: auto;
+}
+.cs-prompt-settings-warn {
+  color: var(--text-warning, var(--color-orange));
+  font-size: 0.82em;
+  margin: 2px 0 6px;
+}
+.cs-prompt-settings-controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* -- agents/profile: prymitywy panelu agenta --
+   Selektory kwalifikowane elementem tam, gdzie nadpisujemy regule z
+   SidebarViews.css (arkusz adoptowany wygrywa remis z document stylesheet). */
+.cs-shard--clickable {
+  cursor: pointer;
+}
+.cs-shard__corner-toggle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.cs-shard-badge {
+  margin-left: 6px;
+  font-size: 10px;
+}
+.cs-shard-inline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cs-section-head--spaced {
+  margin-top: 16px;
+}
+
+/* -- agents/profile/profile_artifacts.js -- */
+.cs-artifact-manage-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+}
+.cs-artifact-manage-row__icon {
+  flex: 0 0 auto;
+  font-size: 14px;
+}
+.cs-artifact-manage-row__info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.cs-artifact-manage-row__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.cs-artifact-manage-row__btn {
+  flex: 0 0 auto;
+}
+input.cs-artifact-name-input {
+  width: 100%;
+  margin: 8px 0;
+  padding: 6px 8px;
+  box-sizing: border-box;
+}
+.cs-artifact-btn-row {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+/* ConfirmModal (ui-components) — zamiennik confirm(), release 2.2.0 */
+.pkm-confirm-btn-row {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+/* -- agents/profile/profile_memory.js -- */
+input.cs-mem-input {
+  flex: 1;
+  font-size: 12px;
+}
+.cs-mem-add-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+button.cs-mem-pagination__btn--prev {
+  transform: rotate(90deg);
+}
+button.cs-mem-pagination__btn--next {
+  transform: rotate(-90deg);
+}
+p.cs-focus-hint--padded {
+  padding: 8px 14px;
+}
+
+/* -- agents/profile/profile_prompt.js -- */
+div.cs-profile-tabs--2col {
+  grid-template-columns: repeat(2, 1fr);
+}
+pre.cs-prompt-preview--capped {
+  max-height: 120px;
+}
+input.cs-prompt-override__checkbox {
+  margin: 0 2px 0 0;
+  flex-shrink: 0;
+}
+textarea.cs-prompt-textarea--instr {
+  min-height: 48px;
+}
+
+/* -- wspolne szerokosci pol w Setting (Obsidian ma `input[type=...]` 0,1,1,
+   wiec sama klasa by przegrala -> scope pod .setting-item-control) -- */
+.setting-item-control .pkm-setting-input--w80 { width: 80px; }
+.setting-item-control .pkm-setting-input--w100 { width: 100px; }
+.setting-item-control .pkm-setting-input--w120 { width: 120px; }
+.setting-item-control .pkm-setting-input--w250 { width: 250px; }
+.setting-item-control .pkm-setting-input--w280 { width: 280px; }
+.setting-item-control .pkm-setting-input--w300 { width: 300px; }
+
+/* -- modules/tools/SettingsContent.js -- */
+.mcp-servers-listing {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.mcp-server-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+}
+.mcp-server-badge {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+}
+.pkm-tools-info {
+  flex: 1;
+}
+.mcp-external-listing {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.mcp-external-server {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.pkm-mcp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pkm-mcp-error {
+  color: var(--text-error);
+}
+.pkm-mcp-details {
+  margin-top: 6px;
+}
+.pkm-mcp-tool-list {
+  margin: 4px 0 0 0;
+  padding-left: 18px;
+}
+/* S32 Z2.2/Z2.3: preset hint + wiersz guzików (Dodaj / Importuj z Claude) + lista importu */
+.mcp-server-editor-preset-hint {
+  margin: -6px 0 10px 0;
+}
+.mcp-external-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.claude-import-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0;
+}
+.claude-import-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* -- modules/models/SettingsContent.js -- */
+.pkm-model-empty-hint {
+  font-style: italic;
+}
+.pkm-model-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 4px 0 16px 0;
+}
+select.pkm-model-select {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+input.pkm-model-name-input {
+  padding: 4px 8px;
+  width: 220px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+button.pkm-model-add-btn {
+  padding: 4px 12px;
+  white-space: nowrap;
+}
+
+/* -- modules/web/SettingsContent.js -- */
+.pkm-link-btn {
+  cursor: pointer;
+}
+
+/* -- modules/crystal-soul/SettingsContent.js -- */
+.pkm-color-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+/* -- modules/onboarding/OnboardingModal.js -- */
+input.pkm-onboarding-key-input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  font-family: monospace;
+  font-size: 13px;
+}
+
+/* -- core/SettingsContent.js -- */
+.pkm-nogo-warning {
+  background: var(--background-modifier-error-hover, rgba(255, 0, 0, 0.05));
+  border-left: 4px solid var(--text-error);
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border-radius: 4px;
+  font-size: 0.88em;
+}
+.pkm-info-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 0;
+}
+.pkm-info-link {
+  color: var(--link-color);
+}
+
+/* -- core/security/MasterPasswordModal.js -- */
+.pkm-master-password__error {
+  color: var(--text-error);
+  min-height: 1.4em;
+}
+.pkm-master-password__buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* -- modules/ui-components/ToolCallDisplay.js: kompaktowy chip narzedzia -- */
+.cs-tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 4px 3px 0;
+  padding: 4px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 100%;
+}
+.cs-tool-chip__icon {
+  display: inline-flex;
+  align-items: center;
+}
+.cs-tool-chip__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cs-tool-chip-wrap {
+  display: block;
+}
+
+/* -- modules/ui-components/MentionAutocomplete.js: kotwica dla dropdownu -- */
+.pkm-mention-anchor {
+  position: relative;
+}
+
+/* -- profil agenta: modal generatora promptu startowego (S32 Z1a) --
+   Akcent kolorystyczny agenta wchodzi zmienną --cs-startprompt-accent (ustawianą w JS
+   przez setProperty), żeby sam kolor był dynamiczny, a reszta stylu została w CSS. */
+.cs-startprompt__wrap {
+  border-left: 3px solid var(--cs-startprompt-accent, var(--interactive-accent));
+  padding-left: 12px;
+}
+.cs-startprompt__label {
+  display: block;
+  margin-top: 10px;
+  margin-bottom: 4px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+.cs-startprompt input[type="text"],
+.cs-startprompt textarea,
+.cs-startprompt select {
+  width: 100%;
+}
+.cs-startprompt pre {
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+/* === lint-zero A: profile/shell/tools (2026-08-27) === */
+/* -- agents/profile/profile_prompt.js: etykieta wyłączonej instrukcji drzewa decyzji --
+   Static jak reszta pliku byla dawniej `instrLabel.style.opacity = '0.4'`; przełącznik
+   czyta/pisze `instrCb.checked`, więc stan wchodzi jako klasa, nie inline style. */
+.cs-prompt-override__instr-label.is-dimmed {
+  opacity: 0.4;
+}
+
+/* -- shell/ApprovalModal.js + modules/tools/SettingsContent.js: pola/elementy ukrywane
+   od startu (deny/redirect reason, hidden file <input>). Świadomie NIE `cs-collapsed`
+   (SidebarViews.css) — te dwa surface'y (modal approvala, zakładka Ustawień) mogą
+   renderować się zanim user w ogóle otworzy sidebar agentów, czyli zanim ten arkusz
+   zostanie zaadoptowany do dokumentu; `.pkm-hidden` żyje w document stylesheet (styles.css),
+   więc działa od pierwszej klatki pluginu. */
+.pkm-hidden {
+  display: none;
+}
+
+/* -- shell/sidebar/TriggersView.js: podświetlenie wiersza na hover --
+   Dawniej `mouseenter`/`mouseleave` ręcznie ustawiały/kasowały inline `style.background` -
+   dokładnie to, do czego CSS ma `:hover`. `.cs-trigger-row` (bez tła w spoczynku) mieszka
+   w SidebarViews.css; specificity `:hover` (0,2,0) bije zwykłą klasę (0,1,0) niezależnie od
+   kolejności/adopcji arkuszy, więc nadpisanie działa bez `!important`. */
+.cs-trigger-row:hover {
+  background: var(--background-modifier-hover);
+}
+/* === lint-zero B: chat/core/ui-components (2026-08-27) === */
+/* obsidianmd/no-static-styles-assignment — statyczne `element.style.x = '...'` zamienione na
+   klasy CSS + addClass/removeClass/classList.toggle. Wartości dosłownie 1:1 z usuniętego inline
+   stylu. Miejsca z wartością DYNAMICZNĄ (np. `--cs-agent-color-rgb` przez `style.setProperty`
+   w chat_ui.ts) reguła i tak nie łapie — zostały bez zmian. */
+
+/* -- chat/chat_ui.ts: guzik-przełącznik listy todo + mikrofon (chowane, gdy nieaktywne) -- */
+.cs-input-ctrl.is-hidden {
+  display: none;
+}
+
+/* -- chat/chat_ui.ts: przyciski Konsoliduj / Sumaryzuj — przygaszone na czas operacji async -- */
+.cs-skillbar__icon--busy {
+  opacity: 0.3;
+}
+
+/* -- chat/chat_ui.ts: chip aktywnego artefaktu nad inputem (_renderArtifactChip) -- */
+.cs-artifact-chip-bar.is-hidden {
+  display: none;
+}
+
+/* -- chat/chat_ui.ts: wiersze liczników tokenów w slim barze (_updateSlimBarTokens) -- */
+.cs-skillbar__token-row.is-hidden {
+  display: none;
+}
+
+/* -- chat/TokenViewerWidget.ts: guzik odświeżenia (widoczny tylko gdy auto-update wyłączony) -- */
+.cs-token-viewer__refresh.is-visible {
+  display: inline-flex;
+}
+
+/* -- chat/TriggerPopup.ts: podświetlenie wybranego wiersza (klawiatura / hover) -- */
+.pkm-trigger-popup__item.is-selected {
+  background: var(--background-modifier-hover);
+}
+
+/* -- core/PKMEnv.ts: spinner paska statusu (register_status_bar / _renderStatusBar) -- */
+.pkm-status-spinner.is-hidden {
+  display: none;
+}
+
+/* -- ui-components/AttachmentManager.ts: pasek chipów załączników (pusty = schowany) -- */
+.pkm-attachment-chips.is-hidden {
+  display: none;
+}
+
+/* -- ui-components/MentionAutocomplete.ts: dropdown @-wzmianek nad polem czatu -- */
+.pkm-mention-dropdown.is-open {
+  display: block;
+}
+
+/* -- ui-components/ToolCallDisplay.ts: rozwijalny szczegół pod kompaktowym chipem narzędzia -- */
+.cs-action-row.is-hidden {
+  display: none;
+}
+
+/* ── release 2.2.0 / W2 chat-ui ── */
+/* -- chat/chat_ui.ts (_applyBottomBarMode, N4): dwustanowy przełącznik slotu paska dolnego --
+   (textarea vs lista todo) — obsidianmd/no-static-styles-assignment zamiast bezpośredniego
+   `.style.display`. Bazowe style (.cs-input-row/.cs-todo-panel-bar) żyją w chat_view.css;
+   te dwie reguły tylko dokładają `display: none` po drugiej stronie przełącznika. */
+.cs-input-row.is-hidden,
+.cs-todo-panel-bar.is-hidden {
+  display: none;
+}
+
+/* ── release 2.2.0 / W3 agents-etc ── */
+/* Utility współdzielony przez wiele dotów/swatchy koloru (agent/kategoria/paleta) w:
+   agents/profile_overview.ts, crystal-soul/SettingsContent.ts, skills/SkillsBackstageTab.ts,
+   sub-agents/SubAgentsBackstageTab.ts, komunikator/CommunicatorView.ts. Wartość koloru jest
+   PER-INSTANCJA dynamiczna (kolor agenta/kategorii/palety) — wchodzi zmienną `--cs-dyn-bg`
+   ustawianą w JS przez `style.setProperty`, żeby sam kolor był dynamiczny, a `background`
+   został w CSS (obsidianmd: bez stylowania z JS poza zmiennymi). Brak wartości = `initial`
+   (transparent), czyli identycznie jak przed ustawieniem inline stylu. */
+.cs-dyn-bg {
+  background: var(--cs-dyn-bg);
+}
+
+/* ── release 2.2.0 / W4 tools-models ── */
+/* modules/models/SettingsContent.ts: plakietka lokalny/chmurowy przy modelu w Sub-agenci/Model
+   główny (dawniej setAttr('style', ...) inline — wytyczna katalogu Obsidiana zabrania inline style). */
+.pkm-model-badge {
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  margin-left: 6px;
+  color: #fff;
+}
+.pkm-model-badge--local {
+  background: #4caf50;
+}
+.pkm-model-badge--cloud {
+  background: #2196f3;
+}

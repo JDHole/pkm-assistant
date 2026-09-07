@@ -1,0 +1,51 @@
+/* Agent Sidebar Styles */
+
+.agent-sidebar {
+    padding: 10px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+
+
+/* Error state */
+.agent-error {
+    color: var(--text-error);
+    font-size: 0.9em;
+    padding: 10px;
+}
+
+/* Delete Modal */
+.agent-delete-modal {
+    padding: 20px;
+    max-width: 450px;
+}
+
+.agent-delete-modal h2 {
+    margin-top: 0;
+}
+
+.agent-delete-info p {
+    margin: 8px 0;
+}
+
+.agent-delete-warning {
+    color: var(--text-error);
+    font-size: 0.9em;
+    font-style: italic;
+}
+
+.agent-delete-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+    padding-top: 12px;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.agent-delete-buttons button {
+    padding: 8px 16px;
+    border-radius: 6px;
+}

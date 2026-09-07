@@ -1,0 +1,87 @@
+{
+  "name": "pkm-assistant",
+  "version": "2.2.1",
+  "type": "module",
+  "description": "AI Agent system for Obsidian - chat with your vault, edit files with AI assistance.",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "build": "node esbuild.js",
+    "dev": "node esbuild.js --watch",
+    "release": "node release.js",
+    "test": "npx ava --verbose",
+    "typecheck": "tsc --noEmit",
+    "lint": "npx eslint \"modules/**/*.ts\" \"src/**/*.ts\" \"config/**/*.ts\" \"utils/**/*.ts\" \"test-support/**/*.ts\"",
+    "lint:obsidian": "npx eslint --config eslint.obsidian.config.js core modules src config utils test-support"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JDHole/pkm-assistant.git"
+  },
+  "keywords": [
+    "Obsidian",
+    "AI",
+    "Agents",
+    "PKM",
+    "Chat",
+    "Memory"
+  ],
+  "author": "JDHole",
+  "license": "GPL-3.0-or-later",
+  "bugs": {
+    "url": "https://github.com/JDHole/pkm-assistant/issues"
+  },
+  "homepage": "https://github.com/JDHole/pkm-assistant",
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "ava": "^6.0.1",
+    "esbuild": "^0.25.9",
+    "eslint": "^10.7.0",
+    "eslint-plugin-obsidianmd": "^0.4.1",
+    "obsidian": "latest",
+    "tsx": "^4.23.1",
+    "typescript": "5.4.5",
+    "typescript-eslint": "^8.65.0",
+    "yaml": "^2.9.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@orama/orama": "^3.1.18",
+    "ajv": "8.20.0"
+  },
+  "overrides": {
+    "ajv": "8.20.0",
+    "eslint": {
+      "ajv": "6.15.0"
+    },
+    "@eslint/eslintrc": {
+      "ajv": "6.15.0"
+    }
+  },
+  "ava": {
+    "files": [
+      "*.test.ts",
+      "src/*.test.ts",
+      "config/*.test.ts",
+      "utils/*.test.ts",
+      "core/*.test.ts",
+      "core/security/*.test.ts",
+      "core/utils/*.test.ts",
+      "core/i18n/*.test.ts",
+      "core/runtime/*.test.ts",
+      "core/http/*.test.ts",
+      "core/ui/*.test.ts",
+      "modules/**/*.test.ts"
+    ],
+    "extensions": {
+      "js": true,
+      "ts": "module"
+    },
+    "nodeArguments": [
+      "--import=tsx",
+      "--import=./test-support/register-obsidian-for-ava.mjs"
+    ],
+    "workerThreads": false
+  }
+}

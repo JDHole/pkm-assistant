@@ -1,0 +1,28 @@
+# PKM Assistant Configuration
+# Dokumentacja: https://github.com/twoj-repo/pkm-assistant
+version: 1
+# Vault Zones - strefy wymagające dodatkowych potwierdzeń
+zones:
+  # Przykład: folder finansów wymaga explicit approve
+  - name: Finanse
+    path: "03 - Finanse/**"
+    requires_explicit_approve: true
+    
+  # Przykład: folder prywatny
+  - name: Prywatne
+    path: "Personal/**"
+    requires_explicit_approve: true
+    
+  # Przykład: projekty z custom permissions
+  - name: Projekty
+    path: "Projects/**"
+    default_permissions:
+      read: true
+      write: false
+# Auto-save settings (chat_session.initSessionManager mixin — auto-save timer per agent)
+auto_save:
+  enabled: true
+  trigger_tokens: 200000
+  trigger_timeout_minutes: 30
+# Default model (fallback gdy agent nie ma ustawionego)
+default_model: claude-3-5-sonnet-20241022

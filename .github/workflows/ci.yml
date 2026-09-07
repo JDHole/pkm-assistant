@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # esbuild.js czyta DESTINATION_VAULTS z .env przez process.loadEnvFile; w CI nie ma .env, więc deploy
+      # i tak byłby zero, ale ustawiamy jawnie żeby nie polegać na braku pliku.
+      DESTINATION_VAULTS: ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - run: npm test
+
+      - run: npm run typecheck
+
+      - run: npm run lint
+
+      - run: npm run lint:obsidian
+
+      - run: npm run build
+
+      # F2.20: build NIE MA PRAWA zostawić brudnego drzewa. `esbuild.js` wpisuje wersję
+      # z package.json do ŹRÓDŁOWEGO manifest.json (linie 81-82) i dopiero potem kopiuje go
+      # do dist/ — dlatego dawne porównanie package.json z dist/manifest.json było tautologią:
+      # dist powstawał właśnie z package.json, więc równość była gwarantowana z konstrukcji.
+      #
+      # Prawdziwy sygnał to brudne drzewo PO buildzie: gdy zacommitowany manifest.json rozjedzie
+      # się z package.json, build go po cichu przepisze i ten krok padnie (sprawdzone lokalnie:
+      # manifest 2.1.9 + package 2.2.0 → `git diff --exit-code` kończy się kodem 1).
+      - name: manifest i versions nietkniete przez build (F2.20)
+        run: git diff --exit-code manifest.json versions.json
+
+      - name: weryfikacja artefaktów builda
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            if (!fs.existsSync(path.join('dist', 'main.js'))) throw new Error('Brak dist/main.js');
+            if (!fs.existsSync(path.join('dist', 'styles.css'))) throw new Error('Brak dist/styles.css');
+            if (!fs.existsSync(path.join('dist', 'manifest.json'))) throw new Error('Brak dist/manifest.json');
+            // Wersje czytamy ze ŹRÓDEŁ, nie z dist — dist jest pochodną package.json, więc
+            // nie może zaświadczyć o niczym. Rozjazd package↔manifest łapie krok wyżej
+            // (build przepisuje manifest → brudne drzewo); tutaj zostaje jako tani niezmiennik.
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+            const versions = JSON.parse(fs.readFileSync('versions.json', 'utf8'));
+            if (pkg.version !== manifest.version) {
+              throw new Error('Rozjazd wersji: package.json=' + pkg.version + ' manifest.json=' + manifest.version);
+            }
+            // versions.json czyta katalog społeczności, żeby podać userowi na starszym
+            // Obsidianie ostatnie wydanie, które jeszcze u niego wstanie. Build tego pliku
+            // NIE dotyka, więc oba sprawdzenia niżej są tu jedyną bramką.
+            if (!Object.prototype.hasOwnProperty.call(versions, manifest.version)) {
+              throw new Error('versions.json nie ma wpisu dla wersji ' + manifest.version);
+            }
+            if (versions[manifest.version] !== manifest.minAppVersion) {
+              throw new Error('versions.json[' + manifest.version + ']=' + versions[manifest.version] +
+                ' != manifest.minAppVersion=' + manifest.minAppVersion);
+            }
+            console.log('Artefakty builda OK (wersja ' + manifest.version + ', minAppVersion ' + manifest.minAppVersion + ')');
+          "
+
+      # Harness „Szklane Pudło" — prawdziwy plugin bootowany w Node bez Obsidiana. Od 2026-09-07
+      # mieszka w OSOBNYM repo (https://github.com/JDHole/pkm-assistant-harness): walidator
+      # katalogu Obsidiana lintuje CAŁE repo pluginu, a narzędzie testowe nie jest częścią
+      # pluginu i generowało tysiące ostrzeżeń. Bramka zostaje ta sama — klonujemy harness obok
+      # i puszczamy jego skrypty na TYM checkoutcie pluginu (PKM_ASSISTANT_ROOT).
+      - name: harness — checkout osobnego repo
+        uses: actions/checkout@v4
+        with:
+          repository: JDHole/pkm-assistant-harness
+          ref: main
+          path: .harness-ci
+
+      - name: harness — zależności
+        run: npm ci --no-audit --no-fund
+        working-directory: .harness-ci
+
+      - name: harness — selftest
+        run: npm run selftest
+        working-directory: .harness-ci
+        env:
+          PKM_ASSISTANT_ROOT: ${{ github.workspace }}
+
+      - name: harness — scenariusze
+        run: npm run scenarios
+        working-directory: .harness-ci
+        env:
+          PKM_ASSISTANT_ROOT: ${{ github.workspace }}

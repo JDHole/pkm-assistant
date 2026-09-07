@@ -1,0 +1,69 @@
+{
+  "smart_chat_model": {
+    "platform": "deepseek",
+    "adapter": "deepseek",
+    "deepseek_model": "deepseek-chat",
+    "deepseek": {
+      "model_key": "deepseek-chat"
+    },
+    "openai": {
+      "model_key": "gpt-4o-mini"
+    },
+    "deepseek_api_key": "sk-deepseek-PLACEHOLDER",
+    "openai_api_key": "sk-openai-PLACEHOLDER",
+    "ollama_host": "http://127.0.0.1:11434",
+    "lm_studio_host": "http://127.0.0.1:1234",
+    "temperature": 0.4,
+    "max_tokens": 3000
+  },
+  "smart_chat_threads": {
+    "chat_model": {
+      "adapter": "deepseek"
+    }
+  },
+  "smart_sources": {
+    "embed_model": {
+      "adapter": "openai",
+      "openai": {
+        "model_key": "text-embedding-3-small",
+        "api_key": "sk-openai-embed-PLACEHOLDER",
+        "batch_size": 12
+      },
+      "embed_timeout_ms": 45000
+    },
+    "folder_exclusions": "Sekrety",
+    "file_exclusions": "prywatne.md",
+    "excluded_headings": "Prywatne"
+  },
+  "smart_notices": {
+    "muted": {
+      "embedding_provider_missing": true
+    }
+  },
+  "smart_blocks": {
+    "embed_blocks": true
+  },
+  "smart_view_filter": {
+    "render_markdown": true
+  },
+  "embedding_models": {
+    "default_model_key": "openai#1771891985201"
+  },
+  "is_obsidian_vault": true,
+  "re_import_wait_time": 300,
+  "language": "pl",
+  "obsek": {
+    "komunikatorEnabled": true,
+    "fileLogEnabled": true,
+    "traceEnabled": true,
+    "language": "pl",
+    "defaultAutonomy": "edge",
+    "no_go_folders": [
+      "Sekrety"
+    ],
+    "maxTokens": {
+      "deepseek": 2048,
+      "openai": 2048
+    }
+  }
+}

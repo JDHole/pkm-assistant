@@ -1,0 +1,37 @@
+{
+  // Kontrakt kampanii TS (TS-0, 2026-07-30). tsc = TYLKO typecheck (noEmit);
+  // transpilacją zajmuje się esbuild (build) i tsx (testy AVA).
+  "compilerOptions": {
+    "strict": true,
+    // WYJĄTEK od strict (TS-0): `strict` implikuje `alwaysStrict`, a esbuild CZYTA to
+    // pole i wstrzykiwał "use strict" do ~200 domknięć modułów bundla CJS — jedyna
+    // zmiana runtime shipowanego artefaktu w całej fali. `false` = bundle bajt-w-bajt
+    // identyczny z baseline sprzed TS. Dla typechecku bez straty: źródła są ESM,
+    // a moduły są strict z definicji. Włączenie strict-bundla to świadoma decyzja
+    // bazy POZA kampanią TS (raport TS-0, sekcja „Do decyzji bazy").
+    "alwaysStrict": false,
+    "noEmit": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    // esbuild strippuje typy plik-po-pliku — isolatedModules pilnuje wzorców,
+    // których pojedynczy plik nie umie strzelić.
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    // Typecheck-only: odzwierciedla REALNY interop ESM/CJS Node'a i esbuilda
+    // (repo robi `import fs from 'fs'` itp.). Nie przepisujemy stylu importów.
+    "esModuleInterop": true,
+    // esbuild CZYTA to pole. true = natywna semantyka pól klas (identyczna z
+    // dzisiejszym JS). Nie zmieniać — false zmieniłoby zachowanie runtime.
+    "useDefineForClassFields": true,
+    // KL-04 (2026-09-02, audyt dead-code): bramka na nieużywane lokalne/parametry.
+    // Zero @ts-ignore / per-file wyjątków — pozycje domknięte prefiksem `_` (sygnatury
+    // wymuszone interfejsem/nadpisaniem) albo kasacją (martwe importy/zmienne/typy).
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
+  "include": ["config", "utils", "modules", "core", "src", "test-support"],
+  "exclude": ["node_modules"]
+}

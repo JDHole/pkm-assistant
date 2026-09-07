@@ -1,0 +1,27 @@
+# PKM Assistant 2.2.1
+
+**„Gotowe do katalogu"** — PKM Assistant 2.2.1
+
+Wydanie porządkowe po raporcie automatycznego walidatora katalogu społeczności Obsidiana.
+Bez nowych funkcji: plugin robi to samo, co 2.2.0, ale spełnia polityki katalogu, jest
+budowany i podpisywany przez GitHub Actions i ma mniej zależności.
+
+Najważniejsze:
+
+- **Zgodność z politykami katalogu.** Z kodu zniknęła nieużywana metoda, która potrafiła
+  wyłączyć i włączyć plugin z jego wnętrza (Obsidian zakazuje tego wprost). Pilnuje tego
+  od teraz stały test w repozytorium, razem z zakazem `eval`/`new Function` i `globalThis`.
+- **Wydanie z GitHub Actions.** Pliki wydania (`main.js`, `manifest.json`, `styles.css`) buduje
+  serwer GitHuba z dokładnie tego commita, który ma tag, i podpisuje je atestacją provenance —
+  każdy może sprawdzić, że pobiera to, co jest w źródłach. W wydaniu są tylko te trzy pliki.
+- **Mniej zależności.** Plugin czyta i zapisuje YAML wbudowanymi funkcjami Obsidiana zamiast
+  własnej biblioteki; z narzędzi deweloperskich wypadły pakiety, które walidator wskazał
+  jako do zamiany; trzy ostrzeżenia `npm audit` w zależnościach serwerowych MCP SDK zamknięte.
+- **Porządek w kodzie pod recenzję.** Timery i dostęp do okna idą przez jedno miejsce (`window`
+  w Obsidianie), obietnice nie giną bez obsługi, nieużywane zmienne skasowane — kilkaset
+  ostrzeżeń mniej w raporcie walidatora, bez zmiany zachowania pluginu.
+- **Harness testowy w osobnym repozytorium.** Narzędzie, które uruchamia prawdziwy bundle
+  pluginu w Node bez Obsidiana, mieszka teraz w `pkm-assistant-harness`; w repo pluginu
+  zostały tylko atrapy potrzebne testom jednostkowym.
+
+Aktualizacja z 2.2.0: bez migracji, bez zmian w ustawieniach i plikach agentów.

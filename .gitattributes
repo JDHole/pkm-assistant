@@ -1,0 +1,3 @@
+# Normalizacja końców linii — repo trzyma LF, checkout wg platformy.
+# Bez tego pliku wszystko wisiało na core.autocrlf jednej maszyny (health check 2026-07-29).
+* text=auto
