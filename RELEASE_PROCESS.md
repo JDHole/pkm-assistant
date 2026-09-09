@@ -1,6 +1,6 @@
 # Release process (v2.2+)
 
-> Zastępuje runbook epoki v2.0 — przeniesiony do archiwum: [`releases/RELEASE_PROCESS_v2.0_ARCHIWUM.md`](releases/RELEASE_PROCESS_v2.0_ARCHIWUM.md) (publikował RC przez martwy branch `refactor/v2.0`, pomijał 5 z 7 bramek). Ten plik opisuje, co skrypty i workflow repo REALNIE robią dziś — sprawdzone czytaniem `release.js`, `utils/releaseNotes.ts`, `esbuild.js` i [`.github/workflows/release.yml`](.github/workflows/release.yml) na HEAD, nie z pamięci.
+> Zastępuje runbook epoki v2.0 (publikował RC przez martwy branch `refactor/v2.0`, pomijał 5 z 7 bramek) — od 2026-09-09 poza repo, w archiwum planów w vaulcie (`Plany i archiwum repo/releases-v2.0/`). Ten plik opisuje, co skrypty i workflow repo REALNIE robią dziś — sprawdzone czytaniem `release.js`, `utils/releaseNotes.ts`, `esbuild.js` i [`.github/workflows/release.yml`](.github/workflows/release.yml) na HEAD, nie z pamięci.
 >
 > **Od 2026-09-07 wydanie publikuje GitHub Actions, nie lokalna maszyna.** `release.js` (`npm run release`) zostaje skryptem PRZYGOTOWANIA: sprawdza spójność wersji, gotuje notatki, robi lokalny rebuild kontrolny. Publikację (build na czystym Linuksie, atestacja provenance, `gh release create` z DOKŁADNIE trzema plikami) robi workflow „Release" po pushu taga. Powód zmiany: raport walidatora katalogu Obsidiana (2026-09-06) chciał weryfikowalnej proweniencji assetów i release'u bez zbędnych plików (dawny zip i `THIRD-PARTY-LICENSES.md` katalog ignorował i wytykał).
 

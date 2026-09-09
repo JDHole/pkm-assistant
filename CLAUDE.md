@@ -271,7 +271,7 @@ Oprócz `core/` + `modules/`, w roocie są:
 - **`config/`** (5 plików `.ts`) — `runtimeConfig.ts` (`buildRuntimeConfig` — jawna rejestracja dostawców czatu i embeddingu, HTTP, transportu), `defaultSettings.ts` (domyślne ustawienia), `default_prompts.ts` (fabryczne szkielety promptów, S31), `limits.ts` + `limits.test.ts` (twarde limity pętli agenta, E1.5/R3)
 - **`utils/`** (root-level, 4 pliki `.ts` + testy) — `releaseNotes.ts` (notatki wydania: `compareSemver`, `latestReleaseFile`, `priorNotes`, `resolveNotesTarget`), `releasePrep.ts` (walidacja wersji + nazwa taga dla `release.js` — **od 2026-09-07 tylko przygotowanie**, publikację robi `.github/workflows/release.yml` po pushu taga; dawniej `releaseGithub.ts`, wystawiał release przez API GitHuba), `buildManifest.ts` (wersja z `package.json` do manifestu), `banner.ts` (copyright banner do bundla, użyty w `esbuild.js`). Workflow release: `RELEASE_PROCESS.md`
 - **`assets/`** — screenshoty do README
-- **`releases/`** — release notes archiwum + `RELEASE_PROCESS_v2.0_ARCHIWUM.md` (stary runbook epoki v2.0)
+- **`releases/`** — notatki wydania: `{wersja}.md` dla każdej wersji z `versions.json` (kontrakt `build_kontrakt.test.ts`; `release.yml` czyta je jako treść release'u), `latest_release.md` czyta widok „Co nowego" w pluginie. Stary runbook epoki v2.0 od 2026-09-09 poza repo, w vaulcie Kuby: `Projekty/PKM Assistant/Plany i archiwum repo/releases-v2.0/`
 
 > **Note:** `jdhole-mcp-servers/` + `jdhole-skills/` (kuratorskie kolekcje JDHole) zostały wyniesione z repo pluginu jako osobne zasoby. NIE są częścią pluginu.
 
