@@ -135,6 +135,14 @@ Depending on your configuration, the plugin can connect to:
 
 **External MCP servers (advanced, opt-in):** you can connect external MCP tool servers — local processes (stdio) or remote endpoints (HTTP). These run outside the plugin's control; install only servers you trust.
 
+**What the plugin does outside your vault** (this is the complete list, and every item happens only when you click the corresponding button):
+
+- **Starts local processes** only for stdio MCP servers you added yourself (the `command` you configured). Nothing is spawned otherwise.
+- **Reads one file outside the vault:** Claude Desktop's `claude_desktop_config.json` (from its default location, `%APPDATA%\Claude` on Windows; otherwise a file picker opens), only when you click *Import from Claude* in the external MCP servers settings, to copy your existing server definitions. The file is read, never written.
+- **Uses the system clipboard** only for explicit copy actions: copying a chat message, an agent's prompt, or an exported agent profile.
+
+Everything else — notes, memory, settings, indexes — stays inside your vault folder.
+
 ---
 
 ## Security
