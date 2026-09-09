@@ -1,5 +1,5 @@
 /**
- * SttAdapter — transkrypcja audio (speech-to-text) przez rozne platformy.
+ * SttAdapter - transkrypcja audio (speech-to-text) przez rozne platformy.
  * Kazda platforma: przyjmuje Blob audio, zwraca { text }.
  * Wszystkie requesty ida przez Obsidian requestUrl (CORS-free).
  */
@@ -12,7 +12,7 @@ import { t } from '../../core/i18n/index.js';
 // GLOWNA FUNKCJA
 // ═══════════════════════════════════════════
 
-/** Klucze API per platforma STT — kazda funkcja bierze swoj jeden. */
+/** Klucze API per platforma STT - kazda funkcja bierze swoj jeden. */
 export interface SttKeys {
     openai?: string;
     groq?: string;
@@ -53,7 +53,7 @@ export async function transcribeAudio(
 }
 
 // ═══════════════════════════════════════════
-// HELPER — Language locale mapping
+// HELPER - Language locale mapping
 // ═══════════════════════════════════════════
 
 const LANG_LOCALE_MAP: Record<string, string> = {
@@ -68,11 +68,11 @@ function _langToLocale(lang: string): string {
 }
 
 // ═══════════════════════════════════════════
-// HELPER — Blob → base64 / ArrayBuffer
+// HELPER - Blob → base64 / ArrayBuffer
 // ═══════════════════════════════════════════
 
 // blobToBase64 imported from utils/binaryUtils.js
-// _blobToArrayBuffer removed — use blob.arrayBuffer() directly
+// _blobToArrayBuffer removed - use blob.arrayBuffer() directly
 
 /**
  * Build multipart/form-data with a file field.
@@ -122,7 +122,7 @@ async function _buildMultipartFormData(
 // ═══════════════════════════════════════════
 
 /**
- * Ksztalty, w jakich CZYTAMY odpowiedzi platform — tylko pola, po ktore siega kod.
+ * Ksztalty, w jakich CZYTAMY odpowiedzi platform - tylko pola, po ktore siega kod.
  * `error.message` jest tu wymagane, bo kod wchodzi tam dopiero po `if (data.error)`.
  */
 interface WhisperResponse {
@@ -131,7 +131,7 @@ interface WhisperResponse {
 }
 
 /**
- * Groq Whisper — najszybszy STT, darmowy tier.
+ * Groq Whisper - najszybszy STT, darmowy tier.
  */
 async function _groqWhisper(apiKey: string | undefined, audioBlob: Blob, language: string): Promise<Transcription> {
     if (!apiKey) throw new Error(t('stt.no_api_key', { key: 'Groq' }));
@@ -209,7 +209,7 @@ async function _googleStt(apiKey: string | undefined, audioBlob: Blob, language:
 }
 
 /**
- * Deepgram — streaming-capable, very accurate.
+ * Deepgram - streaming-capable, very accurate.
  */
 async function _deepgram(apiKey: string | undefined, audioBlob: Blob, language: string): Promise<Transcription> {
     if (!apiKey) throw new Error(t('stt.no_api_key', { key: 'Deepgram (deepgram_api_key)' }));
@@ -235,7 +235,7 @@ async function _deepgram(apiKey: string | undefined, audioBlob: Blob, language: 
 }
 
 /**
- * AssemblyAI — upload → poll.
+ * AssemblyAI - upload → poll.
  */
 async function _assemblyAI(apiKey: string | undefined, audioBlob: Blob, language: string): Promise<Transcription> {
     if (!apiKey) throw new Error(t('stt.no_api_key', { key: 'AssemblyAI (assemblyai_api_key)' }));
@@ -289,8 +289,8 @@ async function _assemblyAI(apiKey: string | undefined, audioBlob: Blob, language
 }
 
 /**
- * Ollama — lokalny Whisper (jeśli zainstalowany).
- * Uwaga: Ollama nie ma natywnego STT — to jest placeholder na wypadek
+ * Ollama - lokalny Whisper (jeśli zainstalowany).
+ * Uwaga: Ollama nie ma natywnego STT - to jest placeholder na wypadek
  * gdyby pojawił się model whisper w Ollama ecosystem.
  */
 async function _ollamaWhisper(_audioBlob: Blob, _language: string): Promise<Transcription> {

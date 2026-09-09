@@ -3,21 +3,21 @@ import { createDeleteTool } from './DeleteTool.js';
 import type { DeleteToolArgs } from './DeleteTool.js';
 
 /**
- * AUD-testy-047 [HIGH] — strażnik „nie kasuj folderów" (`isFolderLike`, zdefiniowany w
- * `vault_binary_io.ts` jako `!!abstractFile && Array.isArray(abstractFile.children)`) na
- * ZWYKŁEJ ścieżce Vault API — `DeleteTool.ts:88-94`, PO gałęzi adapterowej admina (linie 72-86,
- * wchodzi tylko gdy `adminAccess && (isHiddenVaultPath(path) || !file)`).
+ * Strażnik „nie kasuj folderów" (`isFolderLike`, zdefiniowany w `vault_binary_io.ts` jako
+ * `!!abstractFile && Array.isArray(abstractFile.children)`) chroni ZWYKŁĄ ścieżkę Vault API —
+ * `DeleteTool.ts:88-94`, PO gałęzi adapterowej admina (linie 72-86, wchodzi tylko gdy
+ * `adminAccess && (isHiddenVaultPath(path) || !file)`).
  *
- * Do tego pliku strażnik był ćwiczony WYŁĄCZNIE przez `AdminVaultTools.test.ts`, gdzie atrapa
- * ma `getAbstractFileByPath: () => null` BEZWARUNKOWO — `file` jest tam ZAWSZE `null`, więc
- * `isFolderLike(file)` nigdy nie dostaje realnego obiektu i kod za nim jest martwy w tamtym
- * teście. Mutacja odtworzona w audycie (wycięcie CAŁEGO bloku `if (isFolderLike(file)) { throw
- * ... }`) przechodziła cały pakiet `modules/tools/*.test.ts` bez czerwieni (427/427 passed).
+ * `AdminVaultTools.test.ts` ćwiczy tę samą funkcję atrapą, w której `getAbstractFileByPath: () =>
+ * null` BEZWARUNKOWO — `file` jest tam ZAWSZE `null`, więc `isFolderLike(file)` nigdy nie
+ * dostaje realnego obiektu i kod za nim jest martwy w tamtym teście. Usunięcie CAŁEGO bloku
+ * `if (isFolderLike(file)) { throw ... }` przechodziłoby więc cały pakiet
+ * `modules/tools/*.test.ts` bez czerwieni, gdyby nie testy niżej.
  *
  * Testy niżej karmią `getAbstractFileByPath` obiektami, które REALNIE różnią się kształtem —
  * plik: brak `children`; folder: `children` to tablica, dokładnie kontrakt `isFolderLike` —
  * i pilnują strony ODMOWY przez SPY na `vault.trash`/`vault.delete`, nie tylko `success:false`:
- * mutacja usuwająca guard wywołałaby te metody NA FOLDERZE, a to właśnie ma złapać test.
+ * usunięcie guard-a wywołałoby te metody NA FOLDERZE, a to właśnie ma złapać test.
  */
 
 type DeleteApp = Parameters<ReturnType<typeof createDeleteTool>['execute']>[1];

@@ -7,10 +7,9 @@
 /**
  * Paths that must NEVER be accessible through MCP vault tools.
  *
- * K8 (AUD-security-029): doszły dwa wpisy niosące sekrety i treść rozmów — katalog logów
- * (linie logu wożą nagłówki żądań i pełne ścieżki notatek) oraz katalog sesji pamięci
- * agenta. Wpis może zawierać `*` jako JEDEN segment ścieżki (slug agenta) — patrz
- * `_PROTECTED_MATCHERS`.
+ * Katalog logów (linie logu wożą nagłówki żądań i pełne ścieżki notatek) oraz katalog sesji
+ * pamięci agenta niosą sekrety i treść rozmów, więc są tu chronione. Wpis może zawierać `*`
+ * jako JEDEN segment ścieżki (slug agenta) - patrz `_PROTECTED_MATCHERS`.
  */
 const PROTECTED_PATHS = [
     '.pkm-assistant/settings.json',
@@ -23,22 +22,21 @@ const PROTECTED_PATHS = [
 ];
 
 /**
- * K8 (AUD-security-029): wpisy, które plugin dopisuje do `.gitignore` vaulta przy starcie.
- * Jedna lista zamiast rozsypanych wywołań w `src/main.ts` — dzięki temu da się ją objąć
+ * Wpisy, które plugin dopisuje do `.gitignore` vaulta przy starcie.
+ * Jedna lista zamiast rozsypanych wywołań w `src/main.ts` - dzięki temu da się ją objąć
  * testem bez wstawania Obsidiana. Kolejność = kolejność dopisywania.
  *
- * ⚠️ K12 (decyzja Kuby, 2026-08-23): wpis na katalog sesji pamięci agenta
- * (`.pkm-assistant/agents/<slug>/memory/sessions/`) ZDJĘTY z listy. K8 dopisał go, bo pliki sesji mogą nieść sekret wpleciony w treść błędu
- * przy padniętym strumieniu — ale skutek uboczny był większy niż ryzyko: pliki sesji to
- * PAMIĘĆ AGENTÓW między urządzeniami (laptop ↔ chmura ↔ telefon, przez repo vaulta)
- * i przestały podróżować. Sekrety załatwiamy U ŹRÓDŁA: `AgentMemory` przepuszcza każdy
- * zapis pliku sesji przez `maskSensitiveData` (patrz `modules/memory/AgentMemory.ts`,
- * `_writeSessionFile`). Sesje mają wracać do gita — zamaskowane.
+ * ⚠️ Katalog sesji pamięci agenta (`.pkm-assistant/agents/<slug>/memory/sessions/`) NIE jest
+ * na tej liście, mimo że pliki sesji mogą nieść sekret wpleciony w treść błędu przy padniętym
+ * strumieniu - bo pliki sesji to PAMIĘĆ AGENTÓW między urządzeniami (laptop ↔ chmura ↔
+ * telefon, przez repo vaulta) i mają podróżować z gitem. Sekrety załatwiamy U ŹRÓDŁA:
+ * `AgentMemory` przepuszcza każdy zapis pliku sesji przez `maskSensitiveData` (patrz
+ * `modules/memory/AgentMemory.ts`, `_writeSessionFile`). Sesje wracają do gita - zamaskowane.
  *
  * ⚠️ To NIE dotyka `PROTECTED_PATHS`: sesje dalej są poza zasięgiem narzędzi agenta.
- * Osobne osie — „czy narzędzie może to otworzyć" ≠ „czy to wolno wersjonować".
+ * Osobne osie - „czy narzędzie może to otworzyć" ≠ „czy to wolno wersjonować".
  *
- * ⚠️ Plugin NIGDY nie usuwa wpisu, który już dopisał. Kto ma go w `.gitignore` po K8,
+ * ⚠️ Plugin NIGDY nie usuwa wpisu, który już dopisał - kto ma tu wpis w `.gitignore`,
  * musi skasować linię ręcznie.
  */
 export const VAULT_GITIGNORE_ENTRIES = [
@@ -151,22 +149,22 @@ function sanitizeOnce(path: string): string | null {
 
     if (!normalized) return null;
 
-    // K1: `.` i puste segmenty NIC nie znaczą — wycinamy je, żeby `./Sekrety/./x.md`
+    // `.` i puste segmenty NIC nie znaczą - wycinamy je, żeby `./Sekrety/./x.md`
     // i `Sekrety/x.md` były jednym i tym samym ciągiem dla każdej bramki niżej.
-    // `..` nadal ODRZUCAMY (nie rozwiązujemy go — wyjście w górę ma być błędem, nie skrótem).
+    // `..` nadal ODRZUCAMY (nie rozwiązujemy go - wyjście w górę ma być błędem, nie skrótem).
     const components = normalized.split('/').filter(c => c !== '' && c !== '.');
     if (components.length === 0) return null;
     if (components.some(c => c === '..')) return null;
     if (components.some(c => c.length > MAX_SEGMENT_LENGTH)) return null;
     if (components.some(hasHomoglyphMix)) return null;
     if (components.some(c => WINDOWS_RESERVED_NAMES.test(c))) return null;
-    // K22 (AUD-security-104): gwiazdka NIE jest nazwą pliku — jest w tym kodzie znakiem
-    // STERUJĄCYM. `AccessGuard._matchesEntry` czyta ją jako globa whitelisty, a klucz reguły
+    // Gwiazdka NIE jest nazwą pliku - jest w tym kodzie znakiem STERUJĄCYM.
+    // `AccessGuard._matchesEntry` czyta ją jako globa whitelisty, a klucz reguły
     // „Zawsze zezwalaj" jako „dowolny cel". Cel przychodzący od modelu ma znaczyć JEDEN plik,
     // więc `delete {path:"*"}` odpada tu, zanim ktokolwiek zobaczy okno zgody z bezsensownym
     // celem. Windows i tak zabrania `*` w nazwach, a Obsidian nie pozwala jej wpisać.
     // ⚠️ Świadomie WYŁĄCZNIE `*`: `?`, `[`, `]` czy `%` żadnego znaczenia sterującego tu nie
-    // mają, a w tytułach notatek („Czy to działa?.md") są pospolite na macOS i Linuksie —
+    // mają, a w tytułach notatek („Czy to działa?.md") są pospolite na macOS i Linuksie -
     // odrzucanie ich byłoby regresją, nie obroną. Prawdziwa naprawa siedzi w `ApprovalManager`;
     // to jest druga warstwa, bo cele nie-vaultowe (`web.*`, `agent.message`) tędy nie idą.
     if (components.some(c => c.includes('*'))) return null;
@@ -175,36 +173,35 @@ function sanitizeOnce(path: string): string | null {
 }
 
 /**
- * Sanitize and normalize a vault-relative path — do PUNKTU STAŁEGO.
+ * Sanitize and normalize a vault-relative path - do PUNKTU STAŁEGO.
  *
- * K1 (AUD-security-014): wynik jest FORMĄ KANONICZNĄ ścieżki — bez segmentów `./`,
- * bez `..`, bez wiodącego i końcowego `/`, bez `\` i bez `%XX`. Ta sama ścieżka
- * zapisana na kilkanaście sposobów daje ten sam ciąg, więc bramka (No-Go, pliki
- * chronione, whitelista) i narzędzie oglądają DOKŁADNIE to samo.
+ * Wynik jest FORMĄ KANONICZNĄ ścieżki - bez segmentów `./`, bez `..`, bez wiodącego
+ * i końcowego `/`, bez `\` i bez `%XX`. Ta sama ścieżka zapisana na kilkanaście sposobów
+ * daje ten sam ciąg, więc bramka (No-Go, pliki chronione, whitelista) i narzędzie oglądają
+ * DOKŁADNIE to samo.
  *
- * K13 (2026-08-23) — DLACZEGO PĘTLA. K12 wykrył, że pojedynczy przebieg nie jest
- * idempotentny: `trim()` działa raz na całym ciągu, a `decodeURIComponent` schodzi o jedną
- * warstwę kodowania. Kontrprzykłady (zmierzone):
+ * DLACZEGO PĘTLA: pojedynczy przebieg (`sanitizeOnce`) nie jest idempotentny - `trim()`
+ * działa raz na całym ciągu, a `decodeURIComponent` schodzi o jedną warstwę kodowania.
+ * Kontrprzykłady:
  *   `'./ A/B.md'` → `' A/B.md'` → `'A/B.md'`,   `'x.md%20'` → `'x.md '` → `'x.md'`,
  *   `'a%252e%252e/x'` → `'a%2e%2e/x'` → `'a../x'`,   `'%252e%252e/x'` → `'%2e%2e/x'` → null.
- * To łamało kontrakt K1 „bramka i zlew oglądają JEDEN ciąg": wołacz
- * (`MCPClient._canonicalizeToolContext`) kanonizował RAZ i tę wartość podmieniał w argumentach
- * narzędzia, a bramka (`PermissionSystem.checkPermission`) kanonizowała DRUGI raz i wydawała
- * werdykt o innym tekście. Dla `'./ A/B.md'` user widział w oknie zgody ścieżkę w folderze
- * „ A" (ze spacją — SĄSIAD folderu `A`), a bramka przepuszczała `'A/B.md'` na whiteliście `A/`.
+ * Bez pętli bramka i zlew mogłyby oglądać DWA różne ciągi dla tej samej ścieżki: wołacz
+ * (`MCPClient._canonicalizeToolContext`) kanonizuje RAZ i tę wartość podmienia w argumentach
+ * narzędzia, a bramka (`PermissionSystem.checkPermission`) kanonizuje NIEZALEŻNIE - gdyby
+ * przebiegi dawały różne wyniki, user widziałby w oknie zgody ścieżkę w folderze „ A"
+ * (ze spacją - SĄSIAD folderu `A`), a bramka przepuszczałaby `'A/B.md'` na whiteliście `A/`.
  *
  * Dlatego pętla: wynik jest liczony aż się nie ustabilizuje, więc
  * `sanitizePath(sanitizePath(x)) === sanitizePath(x)` Z KONSTRUKCJI i każda warstwa może
  * kanonizować bez ryzyka, że odda inny ciąg niż poprzednia.
  *
- * ⚠️ CO SIĘ ZMIENIŁO SEMANTYCZNIE: podwójnie zakodowane wejście dekoduje się DO KOŃCA albo
- * odpada. `'%252e%252e/x'` → `null` (wcześniej przechodziło jako niewinnie wyglądający plik
- * `%2e%2e`), a `'a%252e%252e/x'` → `'a../x'` — segment `a..` to legalna nazwa pliku, nie
- * wyjście w górę. Białe znaki z brzegów całego ciągu giną na dobre: `' A/B.md'` i `'./ A/B.md'`
- * to dziś `'A/B.md'`, nie folder ze spacją z przodu (spacja WEWNĄTRZ segmentu, `'A/ B.md'`,
- * zostaje — to legalna nazwa).
+ * ⚠️ Podwójnie zakodowane wejście dekoduje się DO KOŃCA albo odpada: `'%252e%252e/x'` → `null`,
+ * a `'a%252e%252e/x'` → `'a../x'` - segment `a..` to legalna nazwa pliku, nie wyjście w górę.
+ * Białe znaki z brzegów całego ciągu giną na dobre: `' A/B.md'` i `'./ A/B.md'` to `'A/B.md'`,
+ * nie folder ze spacją z przodu (spacja WEWNĄTRZ segmentu, `'A/ B.md'`, zostaje - to legalna
+ * nazwa).
  *
- * @param path - Raw path from tool args (`unknown` — patrz uwaga przy `isProtectedPath`)
+ * @param path - Raw path from tool args (`unknown` - patrz uwaga przy `isProtectedPath`)
  * @returns Normalized safe path (punkt stały), or null if invalid
  */
 export function sanitizePath(path: unknown): string | null {

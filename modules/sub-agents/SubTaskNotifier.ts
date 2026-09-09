@@ -1,7 +1,7 @@
 /**
- * SubTaskNotifier — skrzynka wyników sub-agentów odpalonych W TLE (F2 „delegacja w tle").
+ * SubTaskNotifier — skrzynka wyników sub-agentów odpalonych W TLE („delegacja w tle").
  *
- * PO CO: od F2 `delegate` domyślnie nie blokuje tury — model dostaje `started:true` +
+ * PO CO: `delegate` domyślnie nie blokuje tury — model dostaje `started:true` +
  * `task_id`, a bieg suba toczy się dalej po tym, jak tura się skończyła. Ktoś musi
  * przechować gotowy wynik do chwili, w której będzie komu go oddać. Tym „kimś" jest ten
  * plik: siedzi na zdarzeniu `task:finished` rejestru i trzyma zakończone biegi w kolejce,
@@ -44,7 +44,7 @@ export interface SubTaskNotifierOptions {
 const MAX_PENDING = 200;
 
 export class SubTaskNotifier {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare private _pending: SubTask[];
     declare private _deliverer: SubTaskDeliverer | null;
     declare private _maxPending: number;

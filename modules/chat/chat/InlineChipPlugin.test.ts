@@ -6,7 +6,7 @@ import {
     makeInlineTriggerMarker,
 } from './InlineChipPlugin.js';
 
-test('parseInlineTriggers supports Sprint 05 default marker format', t => {
+test('parseInlineTriggers supports default marker format', t => {
     const markers = parseInlineTriggers('@@skill:redaktor @sub-agent:prep-x-post @@tool:vault_grep znajdz notki');
 
     t.deepEqual(markers.map(m => `${m.type}:${m.name}`), [
@@ -27,7 +27,7 @@ test('buildInlineTriggerInstruction forces exact sub-agent delegate', t => {
     t.true(instruction.includes('aspect_explicit=true'));
 });
 
-test('D17: marker @@skill: wstrzykuje PEŁNY przepis (nie woła skill_execute)', t => {
+test('marker @@skill: wstrzykuje PEŁNY przepis (nie woła skill_execute)', t => {
     const markers = parseInlineTriggers('@@skill:daily-review zrób przegląd');
     const instruction = buildInlineTriggerInstruction(markers, {
         'daily-review': { name: 'daily-review', prompt: 'Krok 1: przejrzyj notatki dnia\nKrok 2: podsumuj' },
@@ -38,7 +38,7 @@ test('D17: marker @@skill: wstrzykuje PEŁNY przepis (nie woła skill_execute)',
     t.true(instruction.includes('Krok 2: podsumuj'));
 });
 
-test('D17: marker @@skill: nieznanego skilla → krótka nota, bez wybuchu', t => {
+test('marker @@skill: nieznanego skilla → krótka nota, bez wybuchu', t => {
     const markers = parseInlineTriggers('@@skill:nieistnieje hej');
     const instruction = buildInlineTriggerInstruction(markers, {});
     t.false(instruction.includes('skill_execute'));

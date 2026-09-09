@@ -1,7 +1,7 @@
 import test from 'ava';
 import { computeSemanticStatusText } from './semanticStatusText.js';
 
-/** Stub `t()` — zwraca `key + JSON(params)`, żeby asercje widziały DOKŁADNIE co poszło do i18n. */
+/** Stub `t()` - zwraca `key + JSON(params)`, żeby asercje widziały DOKŁADNIE co poszło do i18n. */
 function stubT(key: string, params?: Record<string, unknown>): string {
     return params ? `${key}::${JSON.stringify(params)}` : key;
 }
@@ -17,14 +17,14 @@ test('brak danych (idle) — plugin bez vaultIndexer albo getStatus() zwraca nul
 
 test('ready z niezerowym countDocs — liczy DOKUMENTY, nie progress.total', t => {
     // Regresja główna: progress.total=4420 (plików przeskanowanych), ale docs=4420 realnych
-    // wektorów też — happy path, tekst niesie liczbę dokumentów.
+    // wektorów też - happy path, tekst niesie liczbę dokumentów.
     const r = computeSemanticStatusText({ status: 'ready', total: 4420, docs: 4420 }, stubT);
     t.is(r.variant, 'ready');
     t.is(r.text, 'settings.semantic_status_ready::{"count":4420}');
 });
 
-test('ready + countDocs=0 + total>0 → indeks pusty, NIE "Aktywne" (regresja W5)', t => {
-    // To jest DOKŁADNIE bug z zadania: skan przeszedł 4420 plików, ale indeks pusty
+test('ready + countDocs=0 + total>0 → indeks pusty, NIE "Aktywne"', t => {
+    // Skan przeszedł 4420 plików, ale indeks jest pusty
     // (pad pierwszego skanu, _publish() z zerowym db).
     const r = computeSemanticStatusText({ status: 'ready', total: 4420, docs: 0 }, stubT);
     t.is(r.variant, 'ready_empty');

@@ -11,7 +11,7 @@
  * samą stałą `DEFAULT_AUTONOMY`, więc efektywne zachowanie jest identyczne — ale suwak
  * autonomii w Ustawieniach ma wtedy co pokazać, a worek fabryczny mówi wprost, na jak ciasnym
  * trybie plugin startuje po utracie ustawień. Klucz istniał w starej fabryce i wraca tu
- * świadomie (clean-room, integracja F7).
+ * świadomie.
  *
  * ⚠️ KAŻDE wywołanie oddaje ŚWIEŻY obiekt (mapy też). Worek defaultów wchodzi do
  * `RuntimeConfig.defaults`, a stamtąd do pancerza ustawień, który go merguje z tym,
@@ -22,9 +22,9 @@ import type { SettingsBag } from '../core/index.js';
 import { DEFAULT_AUTONOMY } from '../core/index.js';
 import { DEFAULT_EMBEDDING_SETTINGS } from '../modules/embedding/index.js';
 
-/** Suwak 0–1 w Ustawieniach → Modele (B.14 SE-12). */
+/** Suwak 0–1 w Ustawieniach → Modele. */
 export const DEFAULT_CHAT_TEMPERATURE = 0.7;
-/** Globalny limit odpowiedzi — legacy, per platforma nadpisuje `pkmAssistant.maxTokens` (B.14 SE-13). */
+/** Globalny limit odpowiedzi — legacy, per platforma nadpisuje `pkmAssistant.maxTokens`. */
 export const DEFAULT_CHAT_MAX_TOKENS = 4096;
 
 export function defaultSettings(): SettingsBag {

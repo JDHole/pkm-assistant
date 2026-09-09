@@ -1,23 +1,23 @@
 /**
- * K11 (AUD-security-090, twardnienie) — kolor z profilu agenta nie może wpisać markupu,
+ * Kolor z profilu agenta nie może wpisać markupu,
  * a `_scrub` musi wycinać elementy ściągające cudze zasoby, nie tylko `script`.
  *
- * Znalezisko było OBALONE jako luka (źródło `color` jest dziś zamknięte: `.pkm-assistant/**`
- * fail-closed dla narzędzi bez `admin_access`, a UI zapisuje hex z palety), ale mechanika
- * była prawdziwa. Ten test pilnuje, żeby obie połowy zostały domknięte.
+ * Źródło `color` jest dziś zamknięte (`.pkm-assistant/**` fail-closed dla narzędzi bez
+ * `admin_access`, a UI zapisuje hex z palety), więc to twardnienie, nie łata realnej dziury -
+ * ale mechanika ataku jest prawdziwa. Ten test pilnuje, żeby obie połowy zostały domknięte.
  */
 import test from 'ava';
 import { sanitizeSvgColor } from './SvgHelper.js';
 import { CrystalGenerator } from './CrystalGenerator.js';
 
-test('K11 090: przepuszczamy realne kształty koloru', t => {
+test('przepuszczamy realne kształty koloru', t => {
     for (const ok of ['#abc', '#7B5EA7', '#7B5EA7FF', 'rgb(10, 20, 30)', 'rgba(1,2,3,0.5)',
         'hsl(120 50% 50%)', 'var(--text-accent)', 'currentColor', 'none', 'transparent', 'tomato']) {
         t.is(sanitizeSvgColor(ok), ok, `odrzucony poprawny kolor: ${ok}`);
     }
 });
 
-test('K11 090: wartość z markupem wraca jako currentColor', t => {
+test('wartość z markupem wraca jako currentColor', t => {
     const atak = '#fff" /><image href="https://evil.example/ping.png" x="0" y="0" width="1" height="1"/><polygon points="0,0';
     t.is(sanitizeSvgColor(atak), 'currentColor');
     t.is(sanitizeSvgColor('red;background:url(https://evil.example)'), 'currentColor');
@@ -26,14 +26,14 @@ test('K11 090: wartość z markupem wraca jako currentColor', t => {
     t.is(sanitizeSvgColor('#'.repeat(80)), 'currentColor');
 });
 
-test('K11 090: kryształ agenta nie wpuszcza cudzego elementu do markupu', t => {
+test('kryształ agenta nie wpuszcza cudzego elementu do markupu', t => {
     const atak = '#fff" /><image href="https://evil.example/ping.png"/><polygon points="0,0';
     const svg = CrystalGenerator.generate('jaskier', { color: atak });
     t.false(svg.includes('<image'), svg.slice(0, 400));
     t.false(svg.includes('evil.example'), svg.slice(0, 400));
     t.true(svg.includes('currentColor'));
 
-    // Ta sama bramka na drugim wejściu — `generateInner` bywa wołane wprost.
+    // Ta sama bramka na drugim wejściu - `generateInner` bywa wołane wprost.
     t.false(CrystalGenerator.generateInner('jaskier', atak).includes('<image'));
 });
 
@@ -65,7 +65,7 @@ function el(tagName: string, attrs: Record<string, string> = {}, children: FakeE
     return node;
 }
 
-test('K11 090: _scrub wycina elementy ściągające cudze zasoby, nie tylko script', async t => {
+test('_scrub wycina elementy ściągające cudze zasoby, nie tylko script', async t => {
     const { SvgHelper } = await import('./SvgHelper.js');
     const root = el('svg', {}, [
         el('polygon', { points: '0,0', fill: '#fff' }),
@@ -85,7 +85,7 @@ test('K11 090: _scrub wycina elementy ściągające cudze zasoby, nie tylko scri
     t.deepEqual(g.children[0].attributes.map(a => a.name), ['r'], 'onload zdjęty');
 });
 
-test('K11 090: _scrub zostawia lokalne odwołanie #id (filtry glow działają dalej)', async t => {
+test('_scrub zostawia lokalne odwołanie #id (filtry glow działają dalej)', async t => {
     const { SvgHelper } = await import('./SvgHelper.js');
     const root = el('svg', {}, [el('rect', { href: '#cg-123', fill: 'red' })]);
 

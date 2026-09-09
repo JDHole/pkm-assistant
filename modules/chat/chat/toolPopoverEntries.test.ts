@@ -2,10 +2,10 @@ import test from 'ava';
 import { buildToolPopoverEntries, type ToolPopoverIconLabel } from './toolPopoverEntries.js';
 
 /**
- * Fixture mirroring the real bug shape (AUD-dead-code-205): `TOOL_INFO` carries a dead
- * name (`minion_task` — killed narrative role, kept only so old transcripts render a label)
- * that the registry no longer knows, while the registry carries a live tool (`todo`) that
- * never got a TOOL_INFO entry.
+ * Fixture mirroring a real bug shape: `TOOL_INFO` carries a dead name (`minion_task` -
+ * killed narrative role, kept only so old transcripts render a label) that the registry
+ * no longer knows, while the registry carries a live tool (`todo`) that never got a
+ * TOOL_INFO entry.
  */
 const TOOL_INFO_FIXTURE: Record<string, ToolPopoverIconLabel> = {
     read: { label: 'Czytaj', icon: () => '<svg-read/>' },

@@ -1,9 +1,9 @@
 /**
- * Tor BEZ strumienia — `complete()` (luka L-03, B.3 SM-17).
+ * Tor BEZ strumienia - `complete()`.
  *
  * Idzie przez `deps.http` (w Obsidianie `requestUrl`, poza CORS; w Node `fetch`), czyta ciało
  * jako JSON i oddaje kształt kanoniczny. Błąd dostawcy MUSI zostać znormalizowany, nie rzucony
- * surowym ciałem — inaczej `modules/agent-loop` dostaje coś, czego nie umie odczytać.
+ * surowym ciałem - inaczej `modules/agent-loop` dostaje coś, czego nie umie odczytać.
  */
 import test from 'ava';
 import { createChatModel } from './ChatModel.js';
@@ -26,7 +26,7 @@ function deps(overrides: Partial<ChatModelDeps> = {}): ChatModelDeps {
     };
 }
 
-test('L-03: complete() normalizuje błąd dostawcy zamiast rzucać surowym ciałem', async t => {
+test('complete() normalizuje błąd dostawcy zamiast rzucać surowym ciałem', async t => {
     const http = new CapturingHttpClient({
         status: 401,
         body: { error: { message: 'Incorrect API key provided', type: 'invalid_request_error' } },
@@ -41,7 +41,7 @@ test('L-03: complete() normalizuje błąd dostawcy zamiast rzucać surowym ciał
     t.is(err!.http_status, 401, 'status zostaje — diagnostyka ma działać');
 });
 
-test('L-03: complete() bez odpowiedzi z choices oddaje pustą wiadomość asystenta', async t => {
+test('complete() bez odpowiedzi z choices oddaje pustą wiadomość asystenta', async t => {
     const model = createChatModel(deps({ http: new CapturingHttpClient({ body: {} }) }));
 
     const out = await model.complete({ messages: MESSAGES });
@@ -51,7 +51,7 @@ test('L-03: complete() bez odpowiedzi z choices oddaje pustą wiadomość asyste
     t.deepEqual(out.usage, {}, 'usage bez danych zostaje PUSTYM obiektem — sygnał „estymuj" dla pętli');
 });
 
-test('L-03: brak HttpClient w zależnościach jest błędem konstrukcji, nie cichym null', t => {
+test('brak HttpClient w zależnościach jest błędem konstrukcji, nie cichym null', t => {
     const broken = deps();
     delete (broken as { http?: unknown }).http;
 
@@ -63,11 +63,10 @@ test('L-03: brak HttpClient w zależnościach jest błędem konstrukcji, nie cic
 });
 
 /**
- * F10 (mutacje): tor bez strumienia MUSI poprosić dostawcę o odpowiedź jednorazową.
- * Przestawienie flagi na `true` przechodziło cały pakiet — a serwer odesłałby wtedy SSE,
- * którego `complete()` nie umie czytać (`response.json()` na strumieniu ramek).
+ * Tor bez strumienia MUSI poprosić dostawcę o odpowiedź jednorazową - serwer inaczej odesłałby
+ * SSE, którego `complete()` nie umie czytać (`response.json()` na strumieniu ramek).
  */
-test('L-03: complete() buduje żądanie BEZ streamu (żadnego stream:true, żadnego stream_options)', async t => {
+test('complete() buduje żądanie BEZ streamu (żadnego stream:true, żadnego stream_options)', async t => {
     const http = new CapturingHttpClient({
         body: { choices: [{ index: 0, message: { role: 'assistant', content: 'ok' } }] },
     });

@@ -1,12 +1,12 @@
 import { isValidNoteType } from '../../memory/index.js';
 
 /**
- * E2.7 W2 (K3): parse the MEMORY_CANDIDATES block that the Summarizer appends to its summary.
+ * Parses the MEMORY_CANDIDATES block that the Summarizer appends to its summary.
  *
  * The Summarizer produces ONE LLM call: the structured summary, then (optionally) a sentinel line
  * followed by a fenced ```json block listing 0-3 durable memory candidates. This helper splits the
  * two so the summary stored as conversationSummary stays clean, and the candidates are validated
- * before chat_session writes them to brain/ (create-only + K1 queue).
+ * before chat_session writes them to brain/ (create-only, serialized through a write queue).
  *
  * Tolerant by contract: missing sentinel / garbage JSON / wrong shape → zero candidates and the
  * summary is returned unchanged (never blocks compaction).
@@ -63,8 +63,8 @@ function extractCandidates(tail: unknown): MemoryCandidate[] {
 
     const clean: MemoryCandidate[] = [];
     for (const candidate of list) {
-        // Invalid type is rejected outright (not silently coerced) — a mislabeled note pollutes the
-        // wrong brain.md section. Spec K3: "zły typ → odrzucony".
+        // Invalid type is rejected outright (not silently coerced) - a mislabeled note pollutes the
+        // wrong brain.md section.
         if (!isValidNoteType(candidate?.type)) continue;
         const name = String(candidate?.name || '').trim();
         const content = String(candidate?.content || '').trim();

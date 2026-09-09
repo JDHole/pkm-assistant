@@ -1,19 +1,19 @@
 /**
- * activeSessionFormat.js — JEDNO ŹRÓDŁO kontraktu pliku `sessions/active/<agent>_*.md`.
+ * activeSessionFormat.js - JEDNO ŹRÓDŁO kontraktu pliku `sessions/active/<agent>_*.md`.
  *
  * Plik aktywnej sesji ma DWÓCH pisarzy o nieprzystających formatach:
  *
- *  - **format A (event-log)** — `AgentMemory.appendToActiveSession` → `formatSessionEvent()`:
- *    DOPISUJE blok `## <ISO> — <typ zdarzenia>` + pola `**content:**` / `**tool:**` / `**args:**` /
+ *  - **format A (event-log)** - `AgentMemory.appendToActiveSession` → `formatSessionEvent()`:
+ *    DOPISUJE blok `## <ISO> - <typ zdarzenia>` + pola `**content:**` / `**tool:**` / `**args:**` /
  *    `**result:**` / `**model:**` / `**tokens:**` / `**duration_ms:**` / `**role:**` /
  *    `**prompt:**` / `**seq:**` (pełna lista i kolejność: `EVENT_FIELDS`).
  *    Niesie telemetrię narzędzi, której transkrypt nie ma.
- *  - **format B (transkrypt)** — `sessionParser.formatToMarkdown`: nagłówki `## User` /
- *    `## Assistant` / `## System` / `## Tool`. Od S36 Fazy 2 to format `sessions/archive/`
+ *  - **format B (transkrypt)** - `sessionParser.formatToMarkdown`: nagłówki `## User` /
+ *    `## Assistant` / `## System` / `## Tool`. To format `sessions/archive/`
  *    i draftów, a NIE pliku active.
  *
- * ⚠️ **S36 Faza 2: pisarzem pliku active jest już TYLKO event-log (A).** `saveSession` nie
- * nadpisuje pliku transkryptem — DOPISUJE brakujący ogon jako eventy, a transkrypt powstaje
+ * ⚠️ **Pisarzem pliku active jest TYLKO event-log (A).** `saveSession` nie
+ * nadpisuje pliku transkryptem - DOPISUJE brakujący ogon jako eventy, a transkrypt powstaje
  * dopiero przy archiwizacji (`archiveActiveSession` konwertuje event-log → format B).
  *
  * Czytnik `parseActiveSession()` mimo to zostaje NA ZAWSZE trójformatowy (A + B + MIESZANY):
@@ -24,8 +24,7 @@
  * **Dlaczego ten plik istnieje:** kontrakt był rozsmarowany po trzech miejscach
  * (`AgentMemory._formatSessionEvent`, `sessionParser.formatToMarkdown`,
  * `AgentMemory._parseActiveSessionFile`) i nikt go nie pilnował testem. Brak takiego testu
- * pozwolił przeżyć wtopie z hotfiksa `71a4ffe` — trwałej utracie rozmowy usera.
- * Krok 1 z `Refaktor/Decyzje_Sesji/2026-07-30_d6_raport.md` §6 (S36 Faza 1).
+ * pozwolił przeżyć utratę rozmowy usera przy hotfiksie bez pokrycia testowego.
  *
  * Test kontraktowy: `activeSessionFormat.test.js` (round-trip `formatSessionEvent` →
  * `parseActiveSession`, plik mieszany, wsteczna zgodność z legacy event-logiem bez escapów).
@@ -36,20 +35,20 @@
  * (nagłówek, nazwy pól, sposób escapowania) w sposób, którego `parseActiveSession`
  * nie czyta identycznie jak dotąd.
  *
- * v1 = stan z S36 Faza 1: nagłówek `## <ISO> — <typ>`, pola `**<label>:**` + pusta linia
+ * v1: nagłówek `## <ISO> - <typ>`, pola `**<label>:**` + pusta linia
  * + treść, treść pól escapowana przez `escapeActiveText`.
- * v2 = S36 Faza 2: doszło pole `**seq:**` (numer zdarzenia w pliku) + escapowanie linii
+ * v2: doszło pole `**seq:**` (numer zdarzenia w pliku) + escapowanie linii
  * treści, które są etykietą znanego pola (`\**result:**`).
  *
- * ⚠️ Nie jest zapisywana do pliku — pliki usera sprzed S36 nie mają żadnego znacznika
- * wersji, a czytnik musi rozumieć je NA ZAWSZE (§6 krok 4): **v2 czyta v1 i legacy
- * identycznie jak dotąd.** Stała jest jawną kotwicą kontraktu w kodzie i w raportach.
+ * ⚠️ Nie jest zapisywana do pliku - pliki usera sprzed v2 nie mają żadnego znacznika
+ * wersji, a czytnik musi rozumieć je NA ZAWSZE: **v2 czyta v1 i legacy
+ * identycznie jak dotąd.** Stała jest jawną kotwicą kontraktu w kodzie.
  */
 export const ACTIVE_SESSION_FORMAT_VERSION = 2;
 
 /**
  * Rola wiadomości uznawana przez format sesji za granicę bloku (`## Rola`).
- * Zbiór jest zamknięty CELOWO — E1.8: parser bez whitelisty brał każdy nagłówek
+ * Zbiór jest zamknięty CELOWO: parser bez whitelisty brał każdy nagłówek
  * `## X` z treści za nową wiadomość, a API odrzuca nieznane role.
  */
 export type SessionRole = 'system' | 'user' | 'assistant' | 'tool';
@@ -74,7 +73,7 @@ export type EventFieldName =
  *
  * Wartości są WIELOKSZTAŁTNE z premedytacją: wołacze wrzucają stringi (`content`,
  * `result`), obiekty (`args` narzędzia) i liczby (`duration_ms`, `tokens`). Pisarz
- * robi `JSON.stringify` wszystkiemu, co nie jest stringiem — poza `seq`, które MUSI
+ * robi `JSON.stringify` wszystkiemu, co nie jest stringiem - poza `seq`, które MUSI
  * być skończoną liczbą (inaczej pole nie powstaje). Pola spoza `EVENT_FIELDS` są
  * po cichu ignorowane; index signature odwzorowuje to, że wołacze podają całe
  * obiekty zdarzeń (`{ ...event, seq }` w testach kontraktowych).
@@ -103,7 +102,7 @@ export interface ActiveSessionMessage {
  */
 export type SessionFrontmatter = Record<string, string | number | boolean | null | string[]>;
 
-/** Wynik czytania pliku aktywnej sesji (kanon formatu — S36 Faza 1). */
+/** Wynik czytania pliku aktywnej sesji (kanon formatu). */
 export interface ParsedActiveSession {
     messages: ActiveSessionMessage[];
     metadata: SessionFrontmatter;
@@ -115,9 +114,9 @@ export interface ParsedActiveSession {
  * Wspólne dla OBU czytników (`parseActiveSession` tu, `parseSessionFile` w `sessionParser.js`),
  * żeby nie rozjechały się w czasie.
  *
- * E1.8 fix: parser BEZ whitelisty brał KAŻDY nagłówek `## X` z TREŚCI wiadomości
+ * Parser BEZ whitelisty brał KAŻDY nagłówek `## X` z TREŚCI wiadomości
  * (np. sekcję "## Wyniki" w odpowiedzi agenta) za nową wiadomość z rolą "wyniki"
- * — a API odrzuca nieznane role (DeepSeek: "unknown variant 'wyniki'").
+ * - a API odrzuca nieznane role (DeepSeek: "unknown variant 'wyniki'").
  */
 export const KNOWN_ROLES = new Set<string>(['system', 'user', 'assistant', 'tool']);
 
@@ -142,13 +141,13 @@ export const EVENT_FIELDS: EventFieldName[] = [
     'seq',
 ];
 
-/** Alternatywa regexowa ze znanych etykiet — składana RAZ. */
+/** Alternatywa regexowa ze znanych etykiet - składana RAZ. */
 const FIELD_LABELS_ALT = EVENT_FIELDS.join('|');
 
 /**
  * Linia będąca DOKŁADNIE etykietą znanego pola (`**result:**`, z opcjonalnymi spacjami
  * na końcu). Tylko taka linia jest granicą pola w bloku eventu, więc tylko taką
- * escapujemy — `**result:** coś jeszcze` w treści nic nie psuje.
+ * escapujemy - `**result:** coś jeszcze` w treści nic nie psuje.
  */
 const FIELD_LABEL_LINE_RE = new RegExp(
     `(^|\\n)(\\*\\*(?:${FIELD_LABELS_ALT}):\\*\\*[ \\t]*)(?=\\n|$)`,
@@ -163,7 +162,7 @@ const ESCAPED_FIELD_LABEL_LINE_RE = new RegExp(
 
 /**
  * Lookahead kończący pole: NASTĘPNA etykieta ZNANEGO pola stojąca sama w linii.
- * Zawężenie do znanych etykiet (S36 Faza 2) ma skutek uboczny na plikach legacy:
+ * Zawężenie do znanych etykiet ma skutek uboczny na plikach legacy:
  * nieznana bold-etykieta w treści (np. `**Uwaga:**`) PRZESTAJE ucinać pole. To poprawa.
  */
 const FIELD_END_LOOKAHEAD = `(?=\\n\\*\\*(?:${FIELD_LABELS_ALT}):\\*\\*[ \\t]*(?:\\n|$)|\\s*$)`;
@@ -172,10 +171,9 @@ const FIELD_END_LOOKAHEAD = `(?=\\n\\*\\*(?:${FIELD_LABELS_ALT}):\\*\\*[ \\t]*(?
  * Escapuje linie, które w pliku sesji wyglądałyby jak granica wiadomości.
  * `\## ` renderuje się w Markdown jako zwykłe "## ", a `unescapeActiveText` to odkręca.
  *
- * ⚠️ ZNANA, ŚWIADOMA NIEDOSKONAŁOŚĆ (odziedziczona po `formatToMarkdown`, nietknięta w S36):
- * schemat nie escapuje samego backslasha, więc treść z LITERALNYM `\## ` na początku linii
- * wróci z odczytu jako `## `. Naprawa wymagałaby zmiany formatu po stronie pisarza B
- * (i tym samym odczytu starych plików) — poza zakresem Fazy 1.
+ * ⚠️ ZNANA, ŚWIADOMA NIEDOSKONAŁOŚĆ: schemat nie escapuje samego backslasha, więc treść
+ * z LITERALNYM `\## ` na początku linii wróci z odczytu jako `## `. Naprawa wymagałaby zmiany
+ * formatu po stronie pisarza B (i tym samym odczytu starych plików).
  *
  */
 export function escapeActiveText(text: unknown): string {
@@ -194,7 +192,7 @@ export function unescapeActiveText(text: unknown): string {
  * Escape treści JEDNEGO pola eventu: najpierw granice bloku (`## `), potem linie, które
  * są dokładnie etykietą znanego pola (`**result:**` → `\**result:**`).
  *
- * Ta druga rzecz to domknięcie dziury bliźniaczej do `## ` (S36 Faza 2, znalezisko Fazy 1):
+ * Ta druga rzecz to domknięcie dziury bliźniaczej do `## `:
  * wynik narzędzia zawierający linię `**result:**` UCINAŁ pole przy odczycie, bo lookahead
  * `extractEventField` brał ją za początek następnego pola.
  */
@@ -218,9 +216,9 @@ export function unescapeEventFieldLabels(text: unknown): string {
  * Treść KAŻDEGO pola (po ewentualnym `JSON.stringify`) przechodzi przez
  * `escapeEventFieldText`, więc żadna treść nie może udawać ani granicy bloku (`## `),
  * ani granicy pola (`**result:**`). Bez tego `## User` w cytowanym tekście rozbijał
- * wiadomość na dwie, a linia `**result:**` ucinała pole (§6 kroki 5 i 4).
+ * wiadomość na dwie, a linia `**result:**` ucinała pole.
  *
- * Nagłówek (`## <ISO> — <typ>`) NIE jest escapowany — to nasza własna, kontrolowana linia,
+ * Nagłówek (`## <ISO> - <typ>`) NIE jest escapowany - to nasza własna, kontrolowana linia,
  * a `type` pochodzi z kodu (nie od usera ani modelu). `seq` też NIE przechodzi przez escape:
  * to nasza liczba, nie treść.
  *
@@ -238,7 +236,7 @@ export function formatSessionEvent(
     const lines: string[] = [`## ${timestamp} — ${title}`, ''];
     const add = (label: EventFieldName, value: unknown) => {
         if (value === undefined || value === null || value === '') return;
-        // `seq` jest liczbą pisarza, nie treścią — bez escape, bez JSON.stringify.
+        // `seq` jest liczbą pisarza, nie treścią - bez escape, bez JSON.stringify.
         if (label === 'seq') {
             if (typeof value !== 'number' || !Number.isFinite(value)) return;
             lines.push('**seq:**', '', String(value), '');
@@ -260,7 +258,7 @@ export function formatSessionEvent(
 /**
  * Największy `**seq:**` w pliku (0 = brak numeracji, np. plik legacy albo świeży).
  *
- * Służy do inicjalizacji licznika numeracji po restarcie Obsidiana — dalej numer
+ * Służy do inicjalizacji licznika numeracji po restarcie Obsidiana - dalej numer
  * idzie z cache w pamięci (`AgentMemory._nextSeq`), bez ponownego skanu.
  *
  * Wymaga BLOKOWEGO kształtu pola (etykieta sama w linii, wartość niżej), więc linia
@@ -286,30 +284,30 @@ export function maxSeq(text: unknown): number {
  *
  * Dlaczego jeden przebieg, a nie „dwa parsery i sklej": produkcyjna sekwencja to
  * append × N → autozapis NADPISUJE plik transkryptem → dalsze appendy doklejają eventy,
- * czyli plik jest MIESZANY (B + ogon A). Wersja sprzed kubełka 2 parsowała format A, a na
- * format B spadała dopiero przy ZERZE wiadomości — z pliku mieszanego zwracała sam ogon
- * eventów, po czym pierwszy autozapis po restore nadpisywał plik tą okrojoną wersją =
- * TRWAŁA UTRATA rozmowy. Sklejanie dwóch parserów też nie działa: parser B wciąga bloki
- * eventowe do treści ostatniej wiadomości, więc te same zdania wracałyby podwójnie.
+ * czyli plik jest MIESZANY (B + ogon A). Parser samego formatu A na takim pliku zwróciłby
+ * sam ogon eventów (na format B spada dopiero przy ZERZE wiadomości), a pierwszy autozapis
+ * po restore nadpisałby plik tą okrojoną wersją = TRWAŁA UTRATA rozmowy. Sklejanie dwóch
+ * parserów też nie działa: parser B wciąga bloki eventowe do treści ostatniej wiadomości,
+ * więc te same zdania wracałyby podwójnie.
  *
  * Kolejność klasyfikacji bloku:
  *  a) SUROWY nagłówek jest znaną rolą (`user`/`assistant`/`system`/`tool`) → wiadomość
  *     transkryptowa (z unescape `\## ` → `## `). Sprawdzane PRZED `_eventTypeFromHeader`,
  *     bo jego regex ucina w nagłówku wszystko do myślnika włącznie.
  *  b) blok niesie pole eventowe (`**content:**` / `**result:**` / `**prompt:**`) → wiadomość
- *     eventowa (rola z typu eventu albo z pola `**role:**`), treść przez unescape —
+ *     eventowa (rola z typu eventu albo z pola `**role:**`), treść przez unescape -
  *     lustro escapowania z `formatSessionEvent`. Na legacy blokach (nigdy nie escapowanych)
  *     unescape jest no-opem.
  *  c) ani rola, ani pole eventowe → to NIE jest granica wiadomości, tylko nagłówek w treści
- *     poprzedniej (np. `## Wyniki` w odpowiedzi agenta). Doklejamy go tam z powrotem —
+ *     poprzedniej (np. `## Wyniki` w odpowiedzi agenta). Doklejamy go tam z powrotem -
  *     zasada „nic nie ginie".
  *
- * Plik pusty / sam frontmatter daje 0 wiadomości — na tym stoi pruning naprawdę pustych
+ * Plik pusty / sam frontmatter daje 0 wiadomości - na tym stoi pruning naprawdę pustych
  * wpisów (`_pruneEmptyActiveSessionFromState` w modules/chat). Kontrakt nietykalny.
  *
- * Każda wiadomość niesie DODATKOWO `seq` (S36 Faza 2): numer zdarzenia z pola `**seq:**`
+ * Każda wiadomość niesie DODATKOWO `seq`: numer zdarzenia z pola `**seq:**`
  * albo `null` (wiadomość transkryptowa, blok legacy bez numeracji). Rozszerzenie jest
- * ADDYTYWNE — konsument `{role, content}` (`_restoreActiveSession` → `addMessage`) nie
+ * ADDYTYWNE - konsument `{role, content}` (`_restoreActiveSession` → `addMessage`) nie
  * wymagał zmian.
  *
  * @param text - zawartość pliku
@@ -322,7 +320,7 @@ export function parseActiveSession(text: unknown): ParsedActiveSession {
     };
     if (!text) return result;
 
-    // Normalizacja końców linii RAZ — dalej cały parser pracuje wyłącznie na `\n`.
+    // Normalizacja końców linii RAZ - dalej cały parser pracuje wyłącznie na `\n`.
     let body = String(text).replace(/\r\n/g, '\n');
     result.metadata = parseFrontmatter(body);
     body = body.replace(/^---\n[\s\S]*?\n---\n*/, '');
@@ -331,7 +329,7 @@ export function parseActiveSession(text: unknown): ParsedActiveSession {
     // Ostatnia wiadomość była transkryptowa? (decyduje, czy doklejka idzie przez unescape)
     let lastWasTranscript = false;
 
-    // parts[0] to treść PRZED pierwszym `## ` (nagłówek H1 pliku sesji) — nigdy nie jest blokiem.
+    // parts[0] to treść PRZED pierwszym `## ` (nagłówek H1 pliku sesji) - nigdy nie jest blokiem.
     for (let i = 1; i < parts.length; i++) {
         const part = parts[i];
         if (!part.trim()) continue;
@@ -342,7 +340,7 @@ export function parseActiveSession(text: unknown): ParsedActiveSession {
         // (a) transkrypt
         const role = rawHeader.trim().toLowerCase();
         // `KNOWN_ROLES` to Set<string> (zbiór dzielony z sessionParser), więc `has`
-        // nie zawęża typu — asercja przywraca wiedzę, którą właśnie sprawdziliśmy.
+        // nie zawęża typu - asercja przywraca wiedzę, którą właśnie sprawdziliśmy.
         if (KNOWN_ROLES.has(role)) {
             result.messages.push({ role: role as SessionRole, content: unescapeActiveText(rawBody.trim()), seq: null });
             lastWasTranscript = true;
@@ -356,7 +354,7 @@ export function parseActiveSession(text: unknown): ParsedActiveSession {
         if (contentValue) {
             const eventRole = roleFromEvent(eventTypeFromHeader(rawHeader), rawBody);
             // Event o nierozpoznanej roli pomijamy jak dotąd, ale NIE doklejamy go do
-            // poprzedniej wiadomości — blok z polem eventowym nigdy nie jest treścią.
+            // poprzedniej wiadomości - blok z polem eventowym nigdy nie jest treścią.
             if (eventRole) {
                 result.messages.push({
                     role: eventRole,
@@ -368,13 +366,13 @@ export function parseActiveSession(text: unknown): ParsedActiveSession {
             continue;
         }
 
-        // (c) nagłówek z treści wiadomości — wraca tam, skąd przyszedł
+        // (c) nagłówek z treści wiadomości - wraca tam, skąd przyszedł
         // Wyjątek: nagłówek z ISO-timestampem to EVENT bez pola treści (np. `mcp call`,
-        // którego narzędzie zwróciło pustkę — `formatSessionEvent` pomija puste pola).
-        // Taki blok pomijamy jak dotąd — doklejka zaśmieciłaby poprzednią wiadomość.
+        // którego narzędzie zwróciło pustkę - `formatSessionEvent` pomija puste pola).
+        // Taki blok pomijamy jak dotąd - doklejka zaśmieciłaby poprzednią wiadomość.
         if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(rawHeader.trim())) continue;
         const prev = result.messages[result.messages.length - 1];
-        if (!prev) continue; // śmieć przed pierwszą wiadomością — pomijamy jak dotąd
+        if (!prev) continue; // śmieć przed pierwszą wiadomością - pomijamy jak dotąd
         const head = rawHeader.trim();
         const tail = rawBody.trim();
         const restored = `## ${head}${tail ? `\n${tail}` : ''}`;
@@ -386,7 +384,7 @@ export function parseActiveSession(text: unknown): ParsedActiveSession {
 }
 
 /**
- * Typ zdarzenia z nagłówka bloku: `## 2026-07-30T10:32:41.240Z — user message` → `user_message`.
+ * Typ zdarzenia z nagłówka bloku: `## 2026-07-30T10:32:41.240Z - user message` → `user_message`.
  */
 function eventTypeFromHeader(header: unknown): string {
     const normalized = String(header)
@@ -401,15 +399,15 @@ function eventTypeFromHeader(header: unknown): string {
  * Wyciąga jedno pole `**<field>:**` z ciała bloku event-logu.
  *
  * Zwraca treść po odkręceniu escapów ETYKIET (`\**result:**` → `**result:**`), ale BEZ
- * odkręcania `## ` — to robi `parseActiveSession` na końcu (kolejność odwrotna do pisarza).
+ * odkręcania `## ` - to robi `parseActiveSession` na końcu (kolejność odwrotna do pisarza).
  * Koniec pola wyznacza wyłącznie ZNANA etykieta stojąca sama w linii (`FIELD_END_LOOKAHEAD`).
  *
- * Początek pola jest zakotwiczony na początku linii (`(?:^|\n)`, bez flagi `i`) — DOKŁADNIE
+ * Początek pola jest zakotwiczony na początku linii (`(?:^|\n)`, bez flagi `i`) - DOKŁADNIE
  * tak samo jak `FIELD_LABEL_LINE_RE`, którego używa pisarz (`escapeEventFieldText`) do
  * escapowania linii-etykiet w treści. Bez tej kotwicy i tej samej wielkości liter etykieta
  * pola WCZEŚNIEJSZEGO w `EVENT_FIELDS` osadzona w środku treści pola PÓŹNIEJSZEGO (np. wynik
- * narzędzia niosący linię `**Content:**`) była brana za prawdziwy początek pola — i to nawet
- * gdy pisarz linię zescapował, bo escape sam nie blokował dopasowania bez kotwicy (AUD-007).
+ * narzędzia niosący linię `**Content:**`) była brana za prawdziwy początek pola - i to nawet
+ * gdy pisarz linię zescapował, bo escape sam nie blokował dopasowania bez kotwicy.
  *
  * @returns treść pola albo ''
  */
@@ -422,7 +420,7 @@ function extractEventField(body: unknown, field: string): string {
 
 /**
  * Numer zdarzenia z pola `**seq:**` bloku event-logu. `null` = brak numeracji
- * (blok legacy sprzed S36 Fazy 2 albo pole w nieznanym kształcie).
+ * (blok legacy sprzed v2 albo pole w nieznanym kształcie).
  */
 function seqFromEvent(body: unknown): number | null {
     const raw = extractEventField(body, 'seq');
@@ -435,7 +433,7 @@ function seqFromEvent(body: unknown): number | null {
  * Rola wiadomości dla bloku event-logu: z typu zdarzenia, a w ostatniej instancji
  * z jawnego pola `**role:**`. `null` = rola nierozpoznana (blok pomijany).
  *
- * ⚠️ **`subagent_error` MUSI mieć mapowanie z typu** (AUD-bledy-011). Oba zdarzenia biegu suba
+ * ⚠️ **`subagent_error` MUSI mieć mapowanie z typu.** Oba zdarzenia biegu suba
  * niosą w polu `**role:**` ETYKIETĘ suba (`researcher`, `strategist`, czasem `system` z YAML-a),
  * a nie rolę wiadomości. Dla `subagent_call` typ rozstrzygał wcześniej niż pole, więc kolizja
  * była niewidoczna - `subagent_error` mapowania NIE MIAŁ, spadał do gałęzi `**role:**` i przy
@@ -460,7 +458,7 @@ function roleFromEvent(type: string, body: unknown): SessionRole | null {
  *
  * Mieszka tu, bo blok frontmattera jest częścią kontraktu pliku sesji (`created`/`updated`/
  * `messageCount`/`covered_by_l1`), a `parseActiveSession` musi go czytać bez `this`.
- * `AgentMemory._parseFrontmatter` DELEGUJE tutaj — jedno źródło, zero kopii
+ * `AgentMemory._parseFrontmatter` DELEGUJE tutaj - jedno źródło, zero kopii
  * (metoda zostaje, bo wołają ją też `ArchiveWorkflow`, `chat_session` i `ReadTool`).
  *
  * @param content - File content
@@ -468,7 +466,7 @@ function roleFromEvent(type: string, body: unknown): SessionRole | null {
 export function parseFrontmatter(content: unknown): SessionFrontmatter {
     const match = String(content ?? '').match(/^---\n([\s\S]*?)\n---/);
     if (!match) return {};
-    // `_lastKey` to pole ROBOCZE parsera (kotwica dla list `- item`), kasowane na końcu —
+    // `_lastKey` to pole ROBOCZE parsera (kotwica dla list `- item`), kasowane na końcu -
     // stąd osobny wariant typu, a nie zanieczyszczanie kontraktu `SessionFrontmatter`.
     const result: SessionFrontmatter & { _lastKey?: string } = {};
     for (const line of match[1].split('\n')) {
@@ -507,7 +505,7 @@ function parseFrontmatterScalar(value: unknown): string | boolean | null {
         raw === 'null'
     ) {
         try {
-            // `JSON.parse` oddaje `any` — zawężamy do kształtów, które ta gałąź
+            // `JSON.parse` oddaje `any` - zawężamy do kształtów, które ta gałąź
             // realnie produkuje (cudzysłowy → string, `true`/`false` → boolean, `null`).
             return JSON.parse(raw) as string | boolean | null;
         } catch {

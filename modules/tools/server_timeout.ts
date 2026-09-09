@@ -1,12 +1,12 @@
 /**
- * server_timeout.js — Sprint 04 Z6 (MCP_PORZADEK_v1).
+ * server_timeout.js
  *
  * Pure helper (no obsidian import) — testowalny w izolacji.
  * Resolve effective timeout for a server: 60s default, override via manifest `timeout_ms`,
  * clamped to MAX 180s (defense-in-depth: malicious user MCP server cannot DoS).
  */
 
-// AUD-dead-code-019/108: `export` zdjęty — zero konsumentów poza tym plikiem (nawet w testach),
+// `export` zdjęty — zero konsumentów poza tym plikiem (nawet w testach),
 // czytane wyłącznie przez resolveTimeoutMs() u siebie.
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_TIMEOUT_MS = 180_000;

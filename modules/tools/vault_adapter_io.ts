@@ -12,9 +12,8 @@ export function isHiddenVaultPath(path: unknown): boolean {
         .some(segment => segment.startsWith('.') && segment.length > 1);
 }
 
-// S30 Z3: `ensureAdapterFolder` (mkdir -p po segmentach) przeniesiony do
-// `core/utils/vaultFs.js` — było 3 warianty tej samej logiki (tu + MigrationV3 +
-// domknięcie w crystal-soul/SettingsContent). Re-eksport pod tą samą nazwą, bo
+// `ensureAdapterFolder` (mkdir -p po segmentach) żyje w `core/utils/vaultFs.js` — jedna
+// kopia logiki zamiast osobnych wariantów rozsianych po module. Re-eksport pod tą samą nazwą, bo
 // `WriteTool.js` i `CreateFolderTool.js` importują ją stąd. Deep-import świadomy:
 // barrel `core/index.js` wciąga obsidian, a ten plik musi być node-safe (testy AVA).
 export { ensureAdapterFolder } from '../../core/index.js';
@@ -38,9 +37,9 @@ interface ListAdapterOptions {
     maxDepth?: number;
     maxScanned?: number;
     /**
-     * AUD-wydajnosc-074: sufit liczby ZEBRANYCH wpisów — walk kończy się, gdy `files` go
-     * osiągnie, zamiast dobijać do `maxScanned`. Domyślnie `Infinity` (zachowanie sprzed
-     * naprawy: pełny przebieg do `maxScanned`, przycięcie dopiero u wołacza).
+     * Sufit liczby ZEBRANYCH wpisów — walk kończy się, gdy `files` go osiągnie, zamiast
+     * dobijać do `maxScanned`. Domyślnie `Infinity` (pełny przebieg do `maxScanned`,
+     * przycięcie dopiero u wołacza).
      */
     maxFiles?: number;
 }
@@ -56,7 +55,7 @@ interface AdapterListing {
  * List an adapter folder in the same result shape as ListTool.
  * Recursive mode returns files only, matching Vault API's existing recursive behavior.
  *
- * AUD-wydajnosc-074: `maxScanned` (5000) jest tylko a sufitem awaryjnym — z domyślnym
+ * `maxScanned` (5000) jest tylko sufitem awaryjnym — z domyślnym
  * `maxFiles: Infinity` walk go dobija w każdym wywołaniu z dużym drzewem, nawet gdy wołający
  * i tak przytnie wynik do garstki pozycji PO fakcie. Gdy `maxFiles` jest podane, `walk`
  * zatrzymuje się, jak tylko `files` je osiągnie — bez rekursji w kolejne podfoldery i bez

@@ -1,9 +1,9 @@
 /**
- * turnAbort — przerwanie jako STAN TURY (K5, AUD-security-037/068).
+ * turnAbort — przerwanie jako STAN TURY.
  *
  * Testy pinują trzy obietnice:
- *   1. Stop zatrzaskuje przerwanie na TEJ turze i nowa tura go NIE odkręca (037),
- *   2. zamknięcie widoku zbiera wszystkie tury w locie — także z zakładek w tle (068),
+ *   1. Stop zatrzaskuje przerwanie na TEJ turze i nowa tura go NIE odkręca,
+ *   2. zamknięcie widoku zbiera wszystkie tury w locie — także z zakładek w tle,
  *   3. suby zlecone z zamykanej zakładki są rozpoznawane po adresie zwrotnym, a cudze nie.
  */
 import test from 'ava';
@@ -27,12 +27,12 @@ test('abort() jest idempotentny — powód pierwszego przerwania zostaje', (t) =
     t.is(a.reason(), 'stop');
 });
 
-test('AUD-security-037: nowa tura NIE gasi przerwania tury poprzedniej', (t) => {
-    // Serce klastra K5. Do naprawy `send_message` czyściło JEDNO pole widoku
-    // (`_abortedStream = null`, „nowa wiadomość = świeży start"), więc pętla zatrzymanej
-    // tury, zaparkowana w długim narzędziu, po powrocie nie widziała już przerwania i
-    // wznawiała iteracje. Uchwyt per tura nie daje się wyzerować z zewnątrz — nie ma
-    // takiego API — a nowa tura dostaje własny, niezależny obiekt.
+test('nowa tura NIE gasi przerwania tury poprzedniej', (t) => {
+    // Jedno pole widoku (`_abortedStream = null`, „nowa wiadomość = świeży start") nie
+    // wystarczyłoby: `send_message` czyściłby je na wejściu, więc pętla zatrzymanej tury,
+    // zaparkowana w długim narzędziu, po powrocie nie widziałaby już przerwania i wznawiałaby
+    // iteracje. Uchwyt per tura nie daje się wyzerować z zewnątrz — nie ma takiego API —
+    // a nowa tura dostaje własny, niezależny obiekt.
     const stara = createTurnAbort();
     stara.abort('stop');
 
@@ -43,7 +43,7 @@ test('AUD-security-037: nowa tura NIE gasi przerwania tury poprzedniej', (t) => 
 
 // ─── 2. Zamknięcie widoku: wszystkie tury ────────────────────────────────────
 
-test('AUD-security-068: zbieramy WSZYSTKIE tury w locie, nie tylko aktywną zakładkę', (t) => {
+test('zbieramy WSZYSTKIE tury w locie, nie tylko aktywną zakładkę', (t) => {
     const mapa = new Map([
         ['Borys', { agentName: 'Borys', abort: createTurnAbort() }],
         ['Jaskier', { agentName: 'Jaskier', abort: createTurnAbort() }],
@@ -72,7 +72,7 @@ test('collectTurnsToStop: brak wpisów = pusta lista (zamknięcie bezczynnego cz
 const bieg = (id: string, origin: unknown, extra: Record<string, unknown> = {}) =>
     ({ id, status: 'running', origin, ...extra } as never);
 
-test('AUD-security-068: suby po adresie zwrotnym zakładki, cudze nietknięte', (t) => {
+test('suby po adresie zwrotnym zakładki, cudze nietknięte', (t) => {
     const zadania = [
         bieg('sub/a#1', { agentName: 'Borys', tabKey: 'Borys::1' }),   // nasza zakładka
         bieg('sub/b#2', { agentName: 'Wera', tabKey: 'Wera::9' }),        // inny widok czatu

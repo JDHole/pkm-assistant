@@ -7,9 +7,8 @@
  * źródle), jest sprawdzany naprawdę. `PluginRuntime.whenLoaded_layout_ready()` jest cienką
  * otoczką na tę funkcję.
  *
- * DLACZEGO W OGÓLE (naprawa 2026-08-23): start pluginu czekał wcześniej na DWA
- * dwa ślepe zegary odziedziczone po starym starcie (5000 ms + 3000 ms). Oba zastąpiło jedno
- * zdarzenie: `workspace.onLayoutReady`. Obsidian woła podany callback natychmiast,
+ * DLACZEGO W OGÓLE: start pluginu czekał wcześniej na DWA ślepe zegary (5000 ms + 3000 ms).
+ * Oba zastąpiło jedno zdarzenie: `workspace.onLayoutReady`. Obsidian woła podany callback natychmiast,
  * jeśli layout już stoi, a w przeciwnym razie dokładnie wtedy, gdy stanie —
  * więc plugin czeka tyle, ile trzeba, i ani milisekundy dłużej.
  *

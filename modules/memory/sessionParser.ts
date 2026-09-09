@@ -3,14 +3,13 @@ import { KNOWN_ROLES, escapeActiveText, unescapeActiveText } from './activeSessi
 import type { SessionRole } from './activeSessionFormat.js';
 
 // Role granicznych nagłówków + para escape/unescape mieszkają w `activeSessionFormat.js`
-// (jedno źródło kontraktu pliku sesji, S36 Faza 1). `KNOWN_ROLES` jest tu tylko UŻYWANE
-// (niżej) — re-eksport bez konsumenta skasowany w dead-code sweepie 2026-09-02
-// (AUD-dead-code-226): jedyni realni konsumenci, `AgentMemory.ts` i ten plik, biorą stałą
-// wprost z `activeSessionFormat.js`.
+// (jedno źródło kontraktu pliku sesji). `KNOWN_ROLES` jest tu tylko UŻYWANE
+// (niżej) - nie jest re-eksportowane: jedyni realni konsumenci, `AgentMemory.ts` i ten plik,
+// biorą stałą wprost z `activeSessionFormat.js`.
 
 /**
  * Wiadomość podawana pisarzowi B. `role`/`content` są WIELOKSZTAŁTNE z premedytacją:
- * pisarz broni się przed rolą-nie-stringiem (E1.8: `## [object Object]`) i przyjmuje
+ * pisarz broni się przed rolą-nie-stringiem (inaczej: `## [object Object]`) i przyjmuje
  * treść multimodalną (tablica bloków `{text}`/`{content}`), z której wycina sam tekst.
  */
 export interface TranscriptMessageInput {
@@ -18,14 +17,14 @@ export interface TranscriptMessageInput {
     content?: string | Array<{ text?: string; content?: string }> | null;
 }
 
-/** Wiadomość odzyskana z transkryptu (`format B`) — rola zawsze ze znanego zbioru. */
+/** Wiadomość odzyskana z transkryptu (`format B`) - rola zawsze ze znanego zbioru. */
 export interface TranscriptMessage {
     role: SessionRole;
     content: string;
 }
 
 /**
- * Frontmatter transkryptu. `tokens_used` wraca z parsera jako liczba, reszta jako string —
+ * Frontmatter transkryptu. `tokens_used` wraca z parsera jako liczba, reszta jako string -
  * pisarz serializuje wartości zwykłą interpolacją, więc wejście jest wielokształtne.
  */
 export type TranscriptMetadata = Record<string, string | number | boolean | null>;
@@ -64,18 +63,18 @@ export function formatToMarkdown(
     // 2. Messages
     messages.forEach(msg => {
         if (!msg || typeof msg !== 'object') return;
-        // Rola MUSI być prostym stringiem ze znanego zbioru — obiekt dawał nagłówek
-        // "## [object Object]", nieznana rola rozjeżdżała restore (E1.8 fix).
+        // Rola MUSI być prostym stringiem ze znanego zbioru - obiekt dawał nagłówek
+        // "## [object Object]", nieznana rola rozjeżdżała restore.
         const rawRole = typeof msg.role === 'string' && KNOWN_ROLES.has(msg.role.toLowerCase())
             ? msg.role.toLowerCase()
             : 'system';
         const role = rawRole.charAt(0).toUpperCase() + rawRole.slice(1);
         lines.push(`## ${role}`);
-        // content can be string or array (multimodal) — extract text
+        // content can be string or array (multimodal) - extract text
         const content = Array.isArray(msg.content)
             ? msg.content.map(c => c.text || c.content || '').filter(Boolean).join('\n')
             : (msg.content || '');
-        // Escape linii, które wyglądałyby jak granica wiadomości — `\## ` renderuje
+        // Escape linii, które wyglądałyby jak granica wiadomości - `\## ` renderuje
         // się w Markdown jako zwykłe "## ", a parseSessionFile robi unescape.
         lines.push(escapeActiveText(content));
     });
@@ -146,9 +145,9 @@ export function parseSessionFile(content: string | null | undefined): ParsedSess
     }
 
     // 3. Parse Messages
-    // Split by "## Role" (line start). Header spoza KNOWN_ROLES to NIE granica —
+    // Split by "## Role" (line start). Header spoza KNOWN_ROLES to NIE granica -
     // to treść poprzedniej wiadomości (np. sekcja "## Wyniki" w odpowiedzi agenta,
-    // stare pliki sprzed escapowania) i wraca tam, skąd przyszła (E1.8 fix).
+    // stare pliki sprzed escapowania) i wraca tam, skąd przyszła.
     const unescape = unescapeActiveText;
     const parts = text.split(/(?:^|\n)## /);
 
@@ -160,7 +159,7 @@ export function parseSessionFile(content: string | null | undefined): ParsedSess
         const body = splitIndex === -1 ? '' : part.slice(splitIndex + 1).trim();
         const role = head.toLowerCase();
 
-        // `KNOWN_ROLES` to Set<string>, więc `has` nie zawęża typu — asercja
+        // `KNOWN_ROLES` to Set<string>, więc `has` nie zawęża typu - asercja
         // przywraca wiedzę, którą właśnie sprawdziliśmy.
         if (KNOWN_ROLES.has(role)) {
             result.messages.push({ role: role as SessionRole, content: unescape(body) });
@@ -173,7 +172,7 @@ export function parseSessionFile(content: string | null | undefined): ParsedSess
             const restored = `## ${head}${body ? '\n' + body : ''}`;
             prev.content = prev.content ? `${prev.content}\n${unescape(restored)}` : unescape(restored);
         }
-        // Brak poprzedniej wiadomości = śmieć przed pierwszą rolą — pomijamy.
+        // Brak poprzedniej wiadomości = śmieć przed pierwszą rolą - pomijamy.
     });
 
     return result;

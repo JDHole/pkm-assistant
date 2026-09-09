@@ -1,11 +1,5 @@
 /**
- * providers/openai.test.ts — kształt żądania/odpowiedzi OpenAI (`contracts.ts` §5).
- *
- * Reshape z `embed_adapter_base.test.ts` (EB-08, EB-10 — kształt jest sprawą DOSTAWCY,
- * nie modelu, patrz `EmbeddingModel.test.ts`) + nowe testy C-10/C-11.
- *
- * Napisany przed implementacją (czerwony na stubie — każda metoda `OpenAiEmbeddingProvider`
- * rzucała `not implemented`), dziś zielony.
+ * providers/openai.test.ts - kształt żądania/odpowiedzi OpenAI (`contracts.ts` §5).
  */
 import test from 'ava';
 import { OpenAiEmbeddingProvider } from './openai.js';
@@ -28,7 +22,7 @@ function jsonResponse(status: number, body: unknown): HttpResponse {
     return { status, headers: {}, text, json: <T>() => JSON.parse(text) as T };
 }
 
-test('C-10: żądanie: POST {base}/embeddings, Bearer, {model, input[]}', t => {
+test('żądanie: POST {base}/embeddings, Bearer, {model, input[]}', t => {
     const provider = new OpenAiEmbeddingProvider();
     const spec = provider.buildEmbedRequest(['hello', 'world'], makeCtx());
 
@@ -40,12 +34,12 @@ test('C-10: żądanie: POST {base}/embeddings, Bearer, {model, input[]}', t => {
     t.deepEqual(body.input, ['hello', 'world']);
 });
 
-test('EB-10: katalog: text-embedding-3-small → 8191', t => {
+test('modelSpec: katalog: text-embedding-3-small → 8191', t => {
     const provider = new OpenAiEmbeddingProvider();
     t.is(provider.modelSpec('text-embedding-3-small')?.maxInputTokens, 8191);
 });
 
-test('EB-08: ciało bez `data` → EmbedBatchError{kind:\'shape\'} z parseEmbedResponse', t => {
+test('parseEmbedResponse: ciało bez `data` → EmbedBatchError{kind:\'shape\'}', t => {
     const provider = new OpenAiEmbeddingProvider();
     const ctx = makeCtx();
     const err = t.throws(() => provider.parseEmbedResponse({ nie_ma_data: true }, ['a'], ctx));
@@ -53,7 +47,7 @@ test('EB-08: ciało bez `data` → EmbedBatchError{kind:\'shape\'} z parseEmbedR
     if (isEmbedBatchError(err)) t.is(err.kind, 'shape');
 });
 
-test('C-11: odpowiedź: data[].embedding w kolejności, usage.total_tokens w tokens', t => {
+test('odpowiedź: data[].embedding w kolejności, usage.total_tokens w tokens', t => {
     const provider = new OpenAiEmbeddingProvider();
     const ctx = makeCtx();
     const body = {
@@ -80,12 +74,12 @@ test('countTokens: estymata znaki/TOKEN_CHARS_PER_TOKEN zaokrąglona w górę, n
     t.is(provider.countTokens(''), 0);
 });
 
-test('EB-02: limit zgłoszony w CIELE (status 200, {error:{code:429}}) podbija httpStatus na 429 mimo statusu HTTP', t => {
+test('parseEmbedError: limit zgłoszony w CIELE (status 200, {error:{code:429}}) podbija httpStatus na 429 mimo statusu HTTP', t => {
     const provider = new OpenAiEmbeddingProvider();
     const ctx = makeCtx();
     const res = jsonResponse(200, { error: { code: 429, message: 'Rate limit reached' } });
     const { error } = provider.parseEmbedError(res, ctx);
-    t.is(error.httpStatus, 429, 'kod z ciała ma pierwszeństwo nad statusem HTTP — AUD-wydajnosc-010');
+    t.is(error.httpStatus, 429, 'kod z ciała ma pierwszeństwo nad statusem HTTP');
     t.is(error.code, 'rate_limited');
     t.regex(error.message, /Rate limit reached/);
 });

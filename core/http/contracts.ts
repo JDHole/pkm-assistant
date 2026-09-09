@@ -6,7 +6,7 @@
  * a moduły nie mają prawa importować się nawzajem po bebechach. `core/` jest ich wspólnym
  * fundamentem; gotowe instancje wstrzykuje composition root przez `RuntimeConfig`.
  *
- * NODE-SAFETY (K-01/K-03): żaden plik tego podklastra NIE importuje `obsidian`.
+ * NODE-SAFETY: żaden plik tego podklastra NIE importuje `obsidian`.
  * `ObsidianHttpClient` dostaje funkcję `requestUrl` w konstruktorze.
  *
  * GRANICA ODPOWIEDZIALNOŚCI:
@@ -65,8 +65,8 @@ export interface StreamOpenResult {
      */
     headers: Record<string, string>;
     /**
-     * Ciało błędu, gdy `status !== 200`. Puste, gdy serwer nic nie odpisał — wtedy K20
-     * wymaga od wołacza własnego krótkiego komunikatu.
+     * Ciało błędu, gdy `status !== 200`. Puste, gdy serwer nic nie odpisał — wtedy reguła
+     * "sekret nigdy w komunikacie błędu" wymaga od wołacza własnego krótkiego komunikatu.
      */
     body: string;
 }
@@ -88,7 +88,7 @@ export interface StreamSink {
  * - status inny niż 200 rozstrzyga promisę `{ status, headers, body }` BEZ rzucania;
  * - `signal.abort()` przerywa czytanie natychmiast; promisa odrzuca się błędem abortu,
  *   a porcja niedokończona NIE trafia do `sink`;
- * - K20: żaden komunikat błędu wychodzący z transportu nie zawiera nagłówków żądania.
+ * - żaden komunikat błędu wychodzący z transportu nie zawiera nagłówków żądania.
  */
 export interface StreamTransport {
     open(spec: HttpRequestSpec, sink: StreamSink, signal: AbortSignal): Promise<StreamOpenResult>;

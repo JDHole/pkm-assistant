@@ -1,8 +1,7 @@
 /**
- * HiddenFileEditorModal — edytor/podgląd pojedynczego pliku (playbook/vault_map/prompt/...).
+ * HiddenFileEditorModal - edytor/podgląd pojedynczego pliku (playbook/vault_map/prompt/...).
  *
- * E2.8 A4: wyodrębniony z (skasowanego) zombie `AgentProfileModal.js`. Żywi konsumenci:
- * profile_helpers (openHiddenFile), profile_permissions (podgląd vault_map),
+ * Żywi konsumenci: profile_helpers (openHiddenFile), profile_permissions (podgląd vault_map),
  * profile_prompt (podgląd system promptu). Modal na cały ekran z krysztalowym nagłówkiem agenta.
  */
 import { Modal, MarkdownRenderer, Notice, Component } from 'obsidian';
@@ -47,13 +46,13 @@ export class HiddenFileEditorModal extends Modal {
         const { contentEl, modalEl } = this;
         contentEl.empty();
 
-        // Adopt CSS if not already adopted (AUD-bledy-037: przez `adoptSheet` — demontaż
-        // pluginu zdejmuje arkusz, zamiast zostawiać go w dokumencie do restartu).
+        // Adopt CSS if not already adopted: adoptSheet zapewnia, że demontaż pluginu zdejmuje
+        // arkusz, zamiast zostawiać go w dokumencie do restartu.
         adoptSheet(agent_profile_styles);
 
         contentEl.addClass('cs-file-editor-modal');
 
-        // Force large modal — rozmiary w HiddenFileEditorModal.css (E3.4 D2)
+        // Force large modal - rozmiary w HiddenFileEditorModal.css
         if (modalEl) {
             modalEl.addClass('cs-file-editor-modal-container');
         }

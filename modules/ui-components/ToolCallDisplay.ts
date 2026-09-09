@@ -5,7 +5,7 @@ import { t } from '../../core/i18n/index.js';
 // TS-any: payloady narzędzi pochodzą z rozszerzalnych serwerów MCP i zapisów sesji.
 type ToolDynamic = any;
 
-// Node-safe DOM shim (release 2.2.0 / W2): `ToolCallDisplay.ts` nie importuje `obsidian` i jego
+// Node-safe DOM shim: `ToolCallDisplay.ts` nie importuje `obsidian` i jego
 // testy (`ToolCallDisplay.truncate.test.ts`, `ToolCallDisplay.searchCase.test.ts`) go wołają
 // w gołym Node, podstawiając WŁASNĄ atrapę `globalThis.document.createElement` — nie globalny
 // helper Obsidiana (`createDiv`/`createEl`/`createSpan`), którego w Node nie ma.
@@ -30,7 +30,7 @@ function _toolEntry(iconFn: ToolDynamic, toolName: string) {
 }
 
 export const TOOL_INFO = {
-    // E2.6 prymitywy (read/list ze scope vault|memory):
+    // Prymitywy (read/list ze scope vault|memory):
     read:            _toolEntry(() => UiIcons.file(14), 'read'),
     list:            _toolEntry(() => UiIcons.folder(14), 'list'),
     write:           _toolEntry(() => UiIcons.edit(14), 'write'),
@@ -59,7 +59,7 @@ export const TOOL_INFO = {
     master_task:     _toolEntry(() => UiIcons.crown(14), 'master_task'),
     agent_message:   _toolEntry(() => UiIcons.send(14), 'agent_message'),
     agent_delegate:  _toolEntry(() => UiIcons.send(14), 'agent_delegate'),
-    // S28: poczta agenta (kom_send/kom_list/kom_read).
+    // Poczta agenta (kom_send/kom_list/kom_read).
     kom_send:        _toolEntry(() => UiIcons.send(14), 'kom_send'),
     kom_list:        _toolEntry(() => UiIcons.chat(14), 'kom_list'),
     kom_read:        _toolEntry(() => UiIcons.chat(14), 'kom_read'),
@@ -76,8 +76,8 @@ export const TOOL_INFO = {
  * Etykieta chipa/bloku WYWOŁANIA narzędzia (i18n `tool.<name>`), czytana dynamicznie,
  * żeby respektować aktualny język. Fallback = surowa nazwa narzędzia.
  *
- * ⚠️ S30 Z3 rename z `getToolLabel`: istniała druga funkcja o tej samej nazwie i INNEJ
- * semantyce — `getPermissionToolLabel` w `modules/agents/toolAxis.js` (etykieta osi uprawnień,
+ * ⚠️ Nazwa `getToolCallLabel`, nie `getToolLabel` — istnieje druga funkcja o INNEJ semantyce,
+ * `getPermissionToolLabel` w `modules/agents/toolAxis.js` (etykieta osi uprawnień,
  * przestrzeń i18n `tools.label.*`). Nie mieszać przestrzeni kluczy.
  *
  * Fallback jest tu KONIECZNY: narzędzie z zewnętrznego serwera MCP (`serwer__tool`) nie ma
@@ -449,12 +449,12 @@ function formatToolOutput(toolName: string, output: ToolDynamic) {
             }
         }
     } catch {
-        // AUD-wydajnosc-029: this was the ONLY branch in formatToolOutput without a ceiling on
-        // `detail` — every other branch caps its detail (read/vault_read 2000, skill_execute
-        // 1000, web_read 500, generic strings 1500). A non-JSON tool result (the normal shape
-        // for every external MCP server tool, via normalizeMcpResult) landed here and put the
-        // WHOLE response into the DOM node, even in the default compact-chip mode where the
-        // node is built eagerly and then immediately hidden. Same cap as the read branch.
+        // This branch needs a ceiling on `detail` too — every other branch caps its detail
+        // (read/vault_read 2000, skill_execute 1000, web_read 500, generic strings 1500).
+        // A non-JSON tool result (the normal shape for every external MCP server tool, via
+        // normalizeMcpResult) lands here; without a cap it would put the WHOLE response into
+        // the DOM node, even in the default compact-chip mode where the node is built eagerly
+        // and then immediately hidden. Same cap as the read branch.
         const s = String(output || '');
         return { summary: _truncate(s, 120), detail: s.length > 120 ? _truncate(s, 2000) : null };
     }
@@ -549,11 +549,11 @@ function _truncate(s: string, max: number) {
     return s.length > max ? s.slice(0, max - 3) + '...' : s;
 }
 
-// S30 Z4: `TOOL_DESCRIPTIONS` (Proxy nad kluczami i18n `tool.desc.*`) i `getToolDescription()`
-// SKASOWANE. Zero wołaczy w całym repo (zweryfikowane dwoma niezależnymi zwiadami), a klucze
-// `tool.desc.*` poszły do kosza w S30 Z2 — proxy zwracało już tylko surową nazwę klucza.
-// Opisy narzędzi, które REALNIE widzi user i model, żyją w i18n `mcp.<tool>.desc`
-// (idą do API razem z definicją narzędzia) — patrz modules/prompts/CLAUDE.md, D14.
+// `TOOL_DESCRIPTIONS` (Proxy nad kluczami i18n `tool.desc.*`) i `getToolDescription()` nie
+// istnieją — zero wołaczy w całym repo, a klucze `tool.desc.*` też nie istnieją, więc taki
+// proxy zwracałby tylko surową nazwę klucza. Opisy narzędzi, które REALNIE widzi user i model,
+// żyją w i18n `mcp.<tool>.desc` (idą do API razem z definicją narzędzia) — patrz
+// modules/prompts/CLAUDE.md.
 
 /**
  * Creates a Crystal Soul .cs-action-row for a tool call.

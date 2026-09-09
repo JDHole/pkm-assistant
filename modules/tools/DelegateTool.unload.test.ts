@@ -1,17 +1,18 @@
 /**
- * Z7 (AUD-bledy-054/056) — DEMONTAŻ PLUGINU MUSI ZATRZYMAĆ BIEG W TLE.
+ * DEMONTAŻ PLUGINU MUSI ZATRZYMAĆ BIEG W TLE.
  *
- * Nocka 2026-08-16: po `onunload` sub odpalony w tle wykonał jeszcze SZEŚĆ żądań do modelu
- * i kolejne narzędzia na żywym vaultcie — bo `dispose()` czyścił mapę uchwytów abortu BEZ
- * ich wywołania, a `mcpClient`/`toolRegistry` żyją do końca procesu. Jedynym mechanizmem,
- * który bieg w końcu kończył, był własny budzik delegacji (do 900 s).
+ * Bez tego po `onunload` sub odpalony w tle potrafi wykonać kolejne żądania do modelu
+ * i kolejne narzędzia na żywym vaultcie - `dispose()` czyści mapę uchwytów abortu BEZ
+ * ich wywołania, a `mcpClient`/`toolRegistry` żyją do końca procesu. Bez aktywnego
+ * abortu jedynym mechanizmem, który taki bieg w końcu kończy, jest własny budzik
+ * delegacji (do 900 s) - stanowczo za późno.
  *
- * Ten plik jedzie na PRAWDZIWEJ pętli (`runAgentLoop`) i prawdziwym `SubTaskRegistry` —
+ * Ten plik jedzie na PRAWDZIWEJ pętli (`runAgentLoop`) i prawdziwym `SubTaskRegistry`:
  * atrapa runnera z pętlą „kręć się, aż ktoś podniesie flagę" nie dotknęłaby mechanizmu,
- * bo zepsuty był styk: uchwyt w rejestrze ↔ abort streamu ↔ `shouldAbort` pętli.
+ * bo styk, który trzeba pokryć, to uchwyt w rejestrze ↔ abort streamu ↔ `shouldAbort` pętli.
  *
- * Osobny plik (nie `DelegateTool.test.ts`) świadomie: klaster Z7 dokłada tu cały własny
- * osprzęt (model liczący żądania), a tamten plik jest jednocześnie edytowany gdzie indziej.
+ * Osobny plik (nie `DelegateTool.test.ts`) świadomie: ten zestaw dokłada tu cały własny
+ * osprzęt (model liczący żądania), a tamten plik bywa jednocześnie edytowany gdzie indziej.
  */
 import test from 'ava';
 import { createDelegateTool, stopAllDelegations, __test__ } from './DelegateTool.js';
@@ -29,11 +30,11 @@ type TloRunnerOptions = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// clean-room: model NIE powstaje już z mapy DI (`config.modules.chatModel.class`) — powstaje przez
-// `createChatModel(deps)` w `modelResolver`. Testy delegacji badają, KTÓRY model dostaje sub
+// Model powstaje przez `createChatModel(deps)` w `modelResolver`, nie z mapy DI
+// (`config.modules.chatModel.class`). Testy delegacji badają, KTÓRY model dostaje sub
 // i co się z nim dzieje, więc podstawiają własną klasę przez seam fabryki resolvera.
 //
-// ⚠️ Klasa jedzie NA DOSTAWCY z configu tego konkretnego pluginu, nie w globalnej zmiennej —
+// ⚠️ Klasa jedzie NA DOSTAWCY z configu tego konkretnego pluginu, nie w globalnej zmiennej:
 // pliku nie da się w całości zserializować (`test` obok `test.serial`), a globalny stan
 // mieszałby atrapy między równoległymi testami.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -82,7 +83,7 @@ async function czekaj(warunek: () => boolean, ms = 2000): Promise<void> {
  * Model-atrapa w kontrakcie `ChatModel`:
  *   - żądanie 1 → prosi o narzędzie (sub realnie coś robi),
  *   - żądanie 2+ → WISI (jak most lokalny, który przyjął request i milczy),
- *   - `stopStream` → odrzuca promisę znacznikiem `_aborted` (kontrakt po FAIL 3).
+ *   - `stopStream` → odrzuca promisę znacznikiem `_aborted` (kontrakt oczekiwany przez pętlę abortu).
  */
 function makeCountingModel(licznik: Licznik) {
     class CountingModel {
@@ -166,7 +167,7 @@ function makeLoopRunner(registry: SubTaskRegistry, licznik: Licznik, zejscia: st
     });
 }
 
-test.serial('Z7: demontaż (stopAll + dispose) ubija bieg W TLE — model NIE dostaje kolejnego żądania', async t => {
+test.serial('demontaż (stopAll + dispose) ubija bieg W TLE - model NIE dostaje kolejnego żądania', async t => {
     __test__._resetBackground();
     const licznik: Licznik = { zadania: 0, narzedzia: 0, stopy: 0 };
     const registry = new SubTaskRegistry();
@@ -192,8 +193,8 @@ test.serial('Z7: demontaż (stopAll + dispose) ubija bieg W TLE — model NIE do
     t.deepEqual(zejscia, ['abort'], 'bieg zszedł jako przerwany, nie mielił dalej');
     t.is(licznik.stopy, 1, 'abort dosięgnął streamu modelu (stopStream)');
 
-    // Sedno Z7: po wyładowaniu pluginu model NIE dostaje kolejnego żądania, a vault —
-    // kolejnego narzędzia. Przed naprawą sub dowoził jeszcze sześć żądań, bez śladu w trace.
+    // Sedno: po wyładowaniu pluginu model NIE dostaje kolejnego żądania, a vault
+    // kolejnego narzędzia.
     const zadaniaPoStopie = licznik.zadania;
     const narzedziaPoStopie = licznik.narzedzia;
     await new Promise(r => setTimeout(r, 150));
@@ -202,14 +203,14 @@ test.serial('Z7: demontaż (stopAll + dispose) ubija bieg W TLE — model NIE do
     t.is(__test__._liveAbortCount(), 0, 'zamknięty bieg schodzi z listy właścicieli (zero wycieku)');
 });
 
-test.serial('Z7: stopAllDelegations dosięga biegu, który nie zdążył założyć bytu w rejestrze', async t => {
+test.serial('stopAllDelegations dosięga biegu, który nie zdążył założyć bytu w rejestrze', async t => {
     __test__._resetBackground();
     const licznik: Licznik = { zadania: 0, narzedzia: 0, stopy: 0 };
     const registry = new SubTaskRegistry();
     const plugin = pluginZRejestrem(registry, makeCountingModel(licznik));
 
-    // Okno z incydentu: `runTask` buduje prompt (dysk!) ZANIM zawoła `onTaskCreated`.
-    // W tym czasie rejestr nie ma uchwytu do niczego — `stopAll()` nie ma czego wołać.
+    // `runTask` buduje prompt (dysk!) ZANIM zawoła `onTaskCreated`.
+    // W tym czasie rejestr nie ma uchwytu do niczego, więc `stopAll()` nie ma czego wołać.
     let wpuscDalej!: () => void;
     const promptGotowy = new Promise<void>((res) => { wpuscDalej = res; });
     let wStarcie = false;
@@ -246,18 +247,18 @@ test.serial('Z7: stopAllDelegations dosięga biegu, który nie zdążył założ
 });
 
 /**
- * AUD-code-review-001 — `stopAllDelegations` musi dosięgnąć też zadania ZAKOLEJKOWANE
- * w puli multi-task, nie tylko biegi już wystartowane.
+ * `stopAllDelegations` musi dosięgnąć też zadania ZAKOLEJKOWANE w puli multi-task,
+ * nie tylko biegi już wystartowane.
  *
- * `_trackAbort` (i tym samym `_liveAborts`, siatka Z7 wyżej) rejestruje kontrolkę abortu
- * DOPIERO wewnątrz thunka — czyli dopiero gdy robotnik puli (`_runWithConcurrency`) po niego
+ * `_trackAbort` (i tym samym `_liveAborts`, siatka wyżej) rejestruje kontrolkę abortu
+ * DOPIERO wewnątrz thunka, czyli dopiero gdy robotnik puli (`_runWithConcurrency`) po niego
  * sięgnie. Bramka lokalnej platformy (`_streamGateLimit() === 1`) tnie szerokość puli do
- * JEDNEGO robotnika, więc paczka 3 zadań zostawia 2 z nich w kolejce (`queued: 2`) — dla
- * `_liveAborts` niewidzialne. Przed naprawą `stopAllDelegations('unload')` widziała tylko
- * pierwsze zadanie; gdy ono się kończyło, robotnik sięgał po KOLEJNY thunk i odpalał pełny
+ * JEDNEGO robotnika, więc paczka 3 zadań zostawia 2 z nich w kolejce (`queued: 2`), dla
+ * `_liveAborts` niewidzialne. Bez tego pokrycia `stopAllDelegations('unload')` widzi tylko
+ * pierwsze zadanie; gdy ono się kończy, robotnik sięga po KOLEJNY thunk i odpala pełny
  * bieg suba (budowa modelu, prompt z dysku, `runTask`) na już zdemontowanym pluginie.
  */
-test.serial('AUD-code-review-001: stopAllDelegations ubija KOLEJKĘ multi-task w tle — zero startów po demontażu', async t => {
+test.serial('stopAllDelegations ubija KOLEJKĘ multi-task w tle - zero startów po demontażu', async t => {
     __test__._resetBackground();
     __test__._resetModuleUnloaded();
 
@@ -329,20 +330,18 @@ test.serial('AUD-code-review-001: stopAllDelegations ubija KOLEJKĘ multi-task w
 });
 
 /**
- * BLOKER werdyktu adwersarialnego review (opus, 2026-08-30) na AUD-code-review-001: test
- * wyżej łapał tylko wariant, w którym PIERWSZA bramka fali już jest otwarta (zadanie 1
- * wystartowało PRZED `stopAllDelegations`). Prawdziwa dziura była inna — `_moduleUnloaded`
- * żyła w `_runWithConcurrency`, robotnik robił `continue` BEZ wywołania thunka, a `gate.open()`
- * woła WYŁĄCZNIE sam thunk (na starcie / w `onTaskCreated` / w `.finally()`). Gdy flaga jest
- * PODNIESIONA JUŻ PRZED `execute()` (unload zaszedł, zanim model w ogóle zawołał `delegate`),
- * ŻADNA bramka fali nigdy się nie otwierała — `await Promise.all(acceptedGates...opened)`
- * wisiał w nieskończoność i `execute()` nigdy nie wracał (reprodukcja opusa: >3 s na tym
- * branchu, na main wraca od razu). To ten sam deadlock, który wieszał
- * scenariusze harnessu na `32_deep_research` — runner woła `onunload()` po KAŻDYM
- * scenariuszu w JEDNYM procesie, więc flaga została lepka od scenariusza 01 i zwis czekał
- * na scenariusz z `delegate({tasks:[...]})` w tle.
+ * Wariant osobny od testu wyżej, bo ten łapie tylko przypadek, gdzie PIERWSZA bramka fali
+ * już jest otwarta (zadanie 1 wystartowało PRZED `stopAllDelegations`). Trzeba osobno pokryć
+ * przypadek, gdzie `_moduleUnloaded` jest PODNIESIONA JUŻ PRZED wywołaniem `execute()`
+ * (unload zaszedł, zanim model w ogóle zawołał `delegate`): `gate.open()` woła WYŁĄCZNIE sam
+ * thunk (na starcie / w `onTaskCreated` / w `.finally()`), więc w `_runWithConcurrency`
+ * robotnik, który robi `continue` bez wywołania thunka, nie otwiera ŻADNEJ bramki fali -
+ * `await Promise.all(acceptedGates...opened)` wisi w nieskończoność i `execute()` nigdy nie
+ * wraca. Ten sam deadlock potrafi zawiesić scenariusze uruchamiane w jednym długo żyjącym
+ * procesie, gdzie `onunload()` woła się po KAŻDYM scenariuszu: flaga zostaje lepka z
+ * poprzedniego scenariusza i kolejny zwisa na `delegate({tasks:[...]})` w tle.
  */
-test.serial('AUD-code-review-001 (bloker): execute() WRACA, nie wisi, gdy _moduleUnloaded jest PODNIESIONA już PRZED wywołaniem (tło, multi-task)', async t => {
+test.serial('execute() WRACA, nie wisi, gdy _moduleUnloaded jest PODNIESIONA już PRZED wywołaniem (tło, multi-task)', async t => {
     __test__._resetBackground();
     __test__._resetModuleUnloaded();
 
@@ -386,7 +385,7 @@ test.serial('AUD-code-review-001 (bloker): execute() WRACA, nie wisi, gdy _modul
         }),
     });
 
-    // ── unload zaszedł PIERWSZY — dokładnie reprodukcja z werdyktu review ──
+    // ── unload zaszedł PIERWSZY, zanim `execute()` w ogóle wystartował ──
     t.is(stopAllDelegations('unload'), 0, 'brak żywych biegów w tej chwili — flaga i tak idzie w górę');
 
     const wynik = tool.execute({ tasks: [{ task: 'a' }, { task: 'b' }] }, {}, plugin) as Promise<TloRes & {
@@ -398,7 +397,7 @@ test.serial('AUD-code-review-001 (bloker): execute() WRACA, nie wisi, gdy _modul
         new Promise((resolve) => setTimeout(() => resolve(strażnik), 3000)),
     ]);
 
-    t.not(res, strażnik, 'SEDNO BLOKERA: execute() musi WRÓCIĆ w rozsądnym czasie, nie wisieć w nieskończoność');
+    t.not(res, strażnik, 'SEDNO: execute() musi WRÓCIĆ w rozsądnym czasie, nie wisieć w nieskończoność');
     const wynikRes = res as TloRes & { results?: Array<{ success?: boolean; error?: string }> };
     t.is(starts, 0, 'żaden bieg suba nie wystartował — zero modelu, zero promptu z dysku');
     t.is(wynikRes.results?.length, 2, 'oba zadania dostały odpowiedź (żadne nie zawisło w kolejce)');

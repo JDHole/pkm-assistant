@@ -7,18 +7,16 @@ import { TOOL_CALL_MAX_INDEX } from '../contracts.js';
 import type { ChatRequest, OpenAiCompletion, OpenAiRequestMessage, ProviderContext, StreamEvent } from '../contracts.js';
 
 /**
- * Testy regresji fabryki napraw F03 (klaster models-adaptery-streamu, 2026-08-30).
+ * Testy regresji dostawcy Anthropic - dekoder strumienia i budowa żądania.
  *
- * Do tego audytu `modules/models/` nie miał ani jednego testu dostawcy Anthropic — kierunek
- * AUD-code-review-018 to wprost odnotował. Ten plik pilnuje trzech napraw naraz, bo wszystkie
- * dotyczą tej samej pary (dekoder strumienia / budowa żądania):
+ * Trzy naprawy dotyczące tej samej pary (dekoder strumienia / budowa żądania):
  *
- * - AUD-code-review-018 (HIGH): domknięcie bloku dopasowywało `tool_use` heurystyką
- *   "pierwszy z pustym input", więc dwa równoległe wywołania w jednej turze mieszały argumenty.
- * - AUD-code-review-078 (MEDIUM): delta tekstu pisała zawsze do PIERWSZEGO bloku text zamiast
- *   do OSTATNIEGO (symetria z deltą myślenia tuż obok).
- * - AUD-code-review-079 (HIGH): budowa żądania NADPISYWAŁA tekst assistant blokami `tool_use`,
- *   zamiast złożyć je w jedną wspólną tablicę `content`, jak wymaga Anthropic.
+ * - Domknięcie bloku dopasowywało `tool_use` heurystyką "pierwszy z pustym input", więc dwa
+ *   równoległe wywołania w jednej turze mieszały argumenty.
+ * - Delta tekstu pisała zawsze do PIERWSZEGO bloku text zamiast do OSTATNIEGO (symetria z deltą
+ *   myślenia tuż obok).
+ * - Budowa żądania NADPISYWAŁA tekst assistant blokami `tool_use`, zamiast złożyć je w jedną
+ *   wspólną tablicę `content`, jak wymaga Anthropic.
  */
 const REQ: ChatRequest = { messages: [{ role: 'user', content: 'hej' }] };
 const CTX: ProviderContext = makeCtx({ modelId: 'claude-sonnet-4-20250514', apiKey: 'sk-ant-test' });
@@ -35,12 +33,12 @@ function transformMessages(messages: OpenAiRequestMessage[]) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AUD-code-review-018 — dopasowanie tool_use po indeksie, nie po "pierwszy pusty"
+// Dopasowanie tool_use po indeksie, nie po "pierwszy pusty"
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('018: dwa tool_use w jednej turze — ten z PUSTYMI argumentami nie kradnie argumentów drugiego', t => {
+test('dwa tool_use w jednej turze — ten z PUSTYMI argumentami nie kradnie argumentów drugiego', t => {
   const snapshot = decode([
-    // Blok 0: narzędzie bezargumentowe — start i stop bez ŻADNEGO input_json_delta pomiędzy.
+    // Blok 0: narzędzie bezargumentowe - start i stop bez ŻADNEGO input_json_delta pomiędzy.
     'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_A","name":"kom_list","input":{}}}',
     'data: {"type":"content_block_stop","index":0}',
     // Blok 1: narzędzie z argumentami.
@@ -64,11 +62,11 @@ test('018: dwa tool_use w jednej turze — ten z PUSTYMI argumentami nie kradnie
   t.deepEqual(JSON.parse(vault.function.arguments) as unknown, { path: 'tajne.md' }, 'drugie narzędzie zachowuje SWOJE argumenty');
 });
 
-test('018: dwa tool_use z PRZEPLECIONYMI deltami (in-flight naraz) — JSON każdego trafia do własnego bloku', t => {
+test('dwa tool_use z PRZEPLECIONYMI deltami (in-flight naraz) — JSON każdego trafia do własnego bloku', t => {
   const snapshot = decode([
     'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_A","name":"a","input":{}}}',
     'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_B","name":"b","input":{}}}',
-    // Deltas przeplecione: 1, 0, 1, 0 — jakby model streamował oba naraz.
+    // Deltas przeplecione: 1, 0, 1, 0 - jakby model streamował oba naraz.
     'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"q\\":"}}',
     'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"n\\":"}}',
     'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"1}"}}',
@@ -89,10 +87,10 @@ test('018: dwa tool_use z PRZEPLECIONYMI deltami (in-flight naraz) — JSON każ
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AUD-code-review-078 — text_delta pisze do OSTATNIEGO bloku text
+// text_delta pisze do OSTATNIEGO bloku text
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('078: tekst -> tool_use -> tekst — drugi kawałek dopisuje się do DRUGIEGO bloku, nie do pierwszego', t => {
+test('tekst -> tool_use -> tekst — drugi kawałek dopisuje się do DRUGIEGO bloku, nie do pierwszego', t => {
   const snapshot = decode([
     'data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}',
     'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Sprawdzę to w vaultcie... "}}',
@@ -110,10 +108,10 @@ test('078: tekst -> tool_use -> tekst — drugi kawałek dopisuje się do DRUGIE
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AUD-code-review-079 — request adapter: tekst + tool_calls w JEDNEJ wspólnej tablicy content
+// request adapter: tekst + tool_calls w JEDNEJ wspólnej tablicy content
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('079: assistant z tekstem I tool_calls jednocześnie — tekst NIE znika, oba lądują w jednej tablicy content', t => {
+test('assistant z tekstem I tool_calls jednocześnie — tekst NIE znika, oba lądują w jednej tablicy content', t => {
   const [msg] = transformMessages([
     {
       role: 'assistant',
@@ -132,7 +130,7 @@ test('079: assistant z tekstem I tool_calls jednocześnie — tekst NIE znika, o
   t.deepEqual(blocks[1].input as unknown, { path: 'a.md' });
 });
 
-test('079: assistant z SAMYMI tool_calls (bez tekstu) nie dostaje pustego bloku text — zachowanie bez zmian', t => {
+test('assistant z SAMYMI tool_calls (bez tekstu) nie dostaje pustego bloku text — zachowanie bez zmian', t => {
   const [msg] = transformMessages([
     { role: 'assistant', content: '', tool_calls: [{ id: 't1', type: 'function', function: { name: 'x', arguments: '{}' } }] },
   ]);
@@ -142,31 +140,31 @@ test('079: assistant z SAMYMI tool_calls (bez tekstu) nie dostaje pustego bloku 
   t.is(blocks[0].type, 'tool_use');
 });
 
-test('079: assistant z SAMYM tekstem (bez tool_calls) zostaje zwykłym stringiem — zachowanie bez zmian', t => {
+test('assistant z SAMYM tekstem (bez tool_calls) zostaje zwykłym stringiem — zachowanie bez zmian', t => {
   const [msg] = transformMessages([{ role: 'assistant', content: 'zwykła odpowiedź' }]);
   t.is(msg.content, 'zwykła odpowiedź');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AUD-dead-code-213 — `message.usage` z `message_start` musi się MERGE'OWAĆ do snapshotu
+// `message.usage` z `message_start` musi się MERGE'OWAĆ do snapshotu
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // Anthropic wysyła input_tokens + oba liczniki cache WYŁĄCZNIE w `message.usage` zdarzenia
 // `message_start`; `message_delta` niesie później tylko `usage.output_tokens` na POZIOMIE
 // GŁÓWNYM. Dekoder czytał z `chunk.message` tylko id/model/role, więc tłumaczenie na kształt
 // kanoniczny zawsze oddawało prompt_tokens:0 i cztery zera cache na żywym streamingu (tor
-// non-streaming mapował te same pola poprawnie od zawsze — rozjazd widać tylko na czacie).
+// non-streaming mapował te same pola poprawnie od zawsze - rozjazd widać tylko na czacie).
 //
-// Drugi commit (review opus) dokłada dwie poprawki do PIERWSZEGO fixu:
-// 1. `prompt_tokens`/`total_tokens` muszą SUMOWAĆ input_tokens + oba liczniki cache — u Anthropica
+// Drugi commit dokłada dwie poprawki do PIERWSZEGO fixu:
+// 1. `prompt_tokens`/`total_tokens` muszą SUMOWAĆ input_tokens + oba liczniki cache - u Anthropica
 //    te trzy pola są ROZŁĄCZNE (input_tokens = TYLKO tokeny nie-cache'owane), a konwencja OpenAI
 //    zakłada, że `cached_tokens` jest PODZBIOREM `prompt_tokens`. Bez sumowania prompt_tokens był
 //    zaniżony o cały cache.
-// 2. `output_tokens` z `message.usage` (message_start) jest tylko WSTĘPNYM placeholderem — merge
+// 2. `output_tokens` z `message.usage` (message_start) jest tylko WSTĘPNYM placeholderem - merge
 //    go POMIJA, żeby urwany stream (bez `message_delta`) nie zostawił fałszywego `output_tokens:1`
 //    zamiast prawdziwego zera.
 
-test('213: pełna sekwencja SSE — prompt_tokens sumuje input_tokens + oba liczniki cache, completion_tokens z message_delta', t => {
+test('pełna sekwencja SSE — prompt_tokens sumuje input_tokens + oba liczniki cache, completion_tokens z message_delta', t => {
   const snapshot = decode([
     'data: {"type":"message_start","message":{"id":"msg_01","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[],"usage":{"input_tokens":1200,"cache_creation_input_tokens":300,"cache_read_input_tokens":800,"output_tokens":1}}}',
     'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
@@ -195,19 +193,19 @@ test('213: pełna sekwencja SSE — prompt_tokens sumuje input_tokens + oba licz
   t.is(usage.total_tokens, 2357, 'total spójny: prompt_tokens (2300) + completion_tokens (57)');
   t.deepEqual(usage.prompt_tokens_details, { cached_tokens: 800, cache_creation_tokens: 300 });
 
-  // cache_utils.ts jest node-czyste (zero importów) — buildCacheMetadata wołalne wprost w teście.
+  // cache_utils.ts jest node-czyste (zero importów) - buildCacheMetadata wołalne wprost w teście.
   const cacheMeta = buildCacheMetadata(usage);
   t.is(cacheMeta.cached_tokens, 800);
   t.true(cacheMeta.cached_tokens <= usage.prompt_tokens, 'cached_tokens musi być PODZBIOREM prompt_tokens (kontrakt OpenAI) — z zaniżonym prompt_tokens sprzed drugiego commitu savings_pct przekraczałby 100%');
   t.true(cacheMeta.savings_pct <= 100, 'savings_pct = cached/prompt_tokens*100 — nie może przekroczyć 100%');
 });
 
-test('213: message_start Z usage, ale BEZ message_delta (Stop usera / urwany transport) — completion_tokens zostaje 0, nie dziedziczy placeholdera', t => {
+test('message_start Z usage, ale BEZ message_delta (Stop usera / urwany transport) — completion_tokens zostaje 0, nie dziedziczy placeholdera', t => {
   const snapshot = decode([
     'data: {"type":"message_start","message":{"id":"msg_02","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[],"usage":{"input_tokens":1200,"cache_creation_input_tokens":300,"cache_read_input_tokens":800,"output_tokens":1}}}',
     'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
     'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Cze"}}',
-    // Stream urwany TUTAJ — brak content_block_stop, brak message_delta, brak message_stop.
+    // Stream urwany TUTAJ - brak content_block_stop, brak message_delta, brak message_stop.
   ]);
 
 
@@ -221,7 +219,7 @@ test('213: message_start Z usage, ale BEZ message_delta (Stop usera / urwany tra
   t.is(usage.cache_read_input_tokens, 800);
 });
 
-test('213: message_delta z PEŁNYM skumulowanym usage na poziomie głównym (kształt server-tools) NADPISUJE message_start, nie sumuje się z nim', t => {
+test('message_delta z PEŁNYM skumulowanym usage na poziomie głównym (kształt server-tools) NADPISUJE message_start, nie sumuje się z nim', t => {
   const snapshot = decode([
     'data: {"type":"message_start","message":{"id":"msg_03","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[],"usage":{"input_tokens":1200,"cache_creation_input_tokens":300,"cache_read_input_tokens":800,"output_tokens":1}}}',
     'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
@@ -245,9 +243,8 @@ test('213: message_delta z PEŁNYM skumulowanym usage na poziomie głównym (ksz
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// no-deprecated (AUD F02/W4, release 2.2.0): fallback listy modeli przestał czytać
-// deprecated getter z zaszytą listą — dziś ponawia wzbogacanie metadanych, które samo
-// nie rzuca (błąd sieci katalogu modeli łapany u siebie).
+// Fallback listy modeli nie czyta deprecated gettera z zaszytą listą - ponawia wzbogacanie
+// metadanych, które samo nie rzuca (błąd sieci katalogu modeli łapany u siebie).
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('no-deprecated: listModels() w gałęzi catch nie rzuca i oddaje PUSTĄ listę, nie zaszytą w kodzie', async t => {
@@ -255,15 +252,15 @@ test('no-deprecated: listModels() w gałęzi catch nie rzuca i oddaje PUSTĄ lis
 
   const models = await anthropicProvider.listModels(CTX, deadHttp);
 
-  t.deepEqual(models, [], 'bez sieci i bez modeli w keszu katalogu wynik to PUSTA tablica (B.5 ST-21) — nie lista zaszyta w kodzie (B.7 AN-18)');
+  t.deepEqual(models, [], 'bez sieci i bez modeli w keszu katalogu wynik to PUSTA tablica - nie lista zaszyta w kodzie');
   t.true(Array.isArray(models), 'nowy kontrakt to ModelInfo[], nie mapa');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Prompt Caching v1 (S06) + budżety (N21/N22)
+// Prompt Caching + budżety
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Body żądania po `JSON.parse` — tylko pola, które ten plik sprawdza. */
+/** Body żądania po `JSON.parse` - tylko pola, które ten plik sprawdza. */
 type CacheBlock = { cache_control?: { type?: string } };
 type ParsedBody = {
   system?: CacheBlock[];
@@ -304,7 +301,7 @@ test('Anthropic request marks up to four cache_control blocks', t => {
   t.is(body.tools![0].cache_control!.type, 'ephemeral');
 });
 
-test('AUD-testy-035: Anthropic request forwards max_tokens (default when not explicit)', t => {
+test('Anthropic request forwards max_tokens (default when not explicit)', t => {
   const body = JSON.parse(
     anthropicProvider.buildRequest(
       { messages: [{ role: 'user', content: 'hello' }] },
@@ -340,10 +337,10 @@ test('Anthropic usage exposes cache read/create tokens in OpenAI-like usage', t 
 });
 
 /**
- * N21 (luka L-22, B.7 AN-03): przy MNIEJSZEJ liczbie kandydatów ma być MNIEJ znaczników,
- * a nie wyjątek — cztery to SUFIT, nie wymóg.
+ * Przy MNIEJSZEJ liczbie kandydatów ma być MNIEJ znaczników, a nie wyjątek - cztery to
+ * SUFIT, nie wymóg.
  */
-test('L-22: cache_control przy MNIEJ niż czterech kandydatach i przy braku tools', t => {
+test('cache_control przy MNIEJ niż czterech kandydatach i przy braku tools', t => {
   const withoutTools = bodyOf({
     messages: [
       { role: 'system', content: 'stable system' },
@@ -358,8 +355,8 @@ test('L-22: cache_control przy MNIEJ niż czterech kandydatach i przy braku tool
 });
 
 /**
- * N22 (B.7 AN-19, spec §1.1): `thinking: true` daje blok myślenia z budżetem MNIEJSZYM
- * niż `max_tokens` — inaczej Anthropic odbija żądanie.
+ * `thinking: true` daje blok myślenia z budżetem MNIEJSZYM niż `max_tokens` - inaczej
+ * Anthropic odbija żądanie.
  */
 test('thinking: true daje blok thinking z budżetem MNIEJSZYM niż max_tokens', t => {
   const body = JSON.parse(
@@ -383,14 +380,14 @@ test('thinking: true daje blok thinking z budżetem MNIEJSZYM niż max_tokens', 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// F10 (bramka mutacyjna): zachowania, które przeżywały mutacje operatorów
+// Zachowania, które przeżywały mutacje operatorów
 //
 // Każdy test poniżej pinuje obserwowalny efekt (URL żądania, pole ciała, zdarzenie
 // dekodera, kształt kanoniczny) w miejscu, w którym drobna zmiana operatora nie
 // wywracała ani jednego istniejącego testu.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Ciało żądania po `JSON.parse` — szerszy widok niż `ParsedBody` wyżej. */
+/** Ciało żądania po `JSON.parse` - szerszy widok niż `ParsedBody` wyżej. */
 type F10Body = {
   model?: string;
   max_tokens?: number;
@@ -410,7 +407,7 @@ const HEJ = REQ.messages;
 
 // ── katalog modeli ───────────────────────────────────────────────────────────
 
-test('F10: listModels() bierze katalog JEDNYM żądaniem — ścieżka /v1/models i limit 1000', async t => {
+test('listModels() bierze katalog JEDNYM żądaniem — ścieżka /v1/models i limit 1000', async t => {
   const http = new CapturingHttpClient({ status: 200, body: { data: [] } });
 
   t.deepEqual(await anthropicProvider.listModels(CTX, http), []);
@@ -421,7 +418,7 @@ test('F10: listModels() bierze katalog JEDNYM żądaniem — ścieżka /v1/model
   t.is(http.lastSpec?.headers['x-api-key'], 'sk-ant-test');
 });
 
-test('F10: adres z kontekstu — znana ścieżka odcięta, sklejenie oddaje STRING', async t => {
+test('adres z kontekstu — znana ścieżka odcięta, sklejenie oddaje STRING', async t => {
   const ctx = makeCtx({ modelId: 'claude-sonnet-4-20250514', apiKey: 'k', endpoint: 'https://proxy.local/v1/messages/' });
 
   t.is(anthropicProvider.buildRequest(REQ, ctx, false).url, 'https://proxy.local/v1/messages');
@@ -434,7 +431,7 @@ test('F10: adres z kontekstu — znana ścieżka odcięta, sklejenie oddaje STRI
   t.is(anthropicProvider.buildRequest(REQ, pusty, false).url, 'https://api.anthropic.com/v1/messages', 'pusty adres = adres produkcyjny');
 });
 
-test('F10: listModels() przy 200 mapuje katalog; niedodatnie limity NIE trafiają do ModelInfo', async t => {
+test('listModels() przy 200 mapuje katalog; niedodatnie limity NIE trafiają do ModelInfo', async t => {
   const http = new CapturingHttpClient({
     status: 200,
     body: {
@@ -455,15 +452,15 @@ test('F10: listModels() przy 200 mapuje katalog; niedodatnie limity NIE trafiaj�
   ], 'zero i wartości ujemne to BRAK metadanej, nie limit zerowy; wpis bez id wypada');
 });
 
-test('F10: listModels() przy statusie innym niż 200 oddaje PUSTĄ listę i nie czyta ciała', async t => {
+test('listModels() przy statusie innym niż 200 oddaje PUSTĄ listę i nie czyta ciała', async t => {
   const http = new CapturingHttpClient({ status: 401, body: { data: [{ id: 'nie-czytamy-tego' }] } });
 
-  t.deepEqual(await anthropicProvider.listModels(CTX, http), [], 'odrzucone żądanie katalogu = pusta lista (ST-21)');
+  t.deepEqual(await anthropicProvider.listModels(CTX, http), [], 'odrzucone żądanie katalogu = pusta lista');
 });
 
 // ── budowa żądania ───────────────────────────────────────────────────────────
 
-test('F10: max_tokens — jawne 0 i wartość ujemna NIE są budżetem, kontekstowa jedynka już tak', t => {
+test('max_tokens — jawne 0 i wartość ujemna NIE są budżetem, kontekstowa jedynka już tak', t => {
   const zKontekstem = makeCtx({ modelId: 'claude-sonnet-4-20250514', maxOutputTokens: 5000 });
 
   t.is(bodyWith({ messages: HEJ, max_tokens: 0 }, zKontekstem).max_tokens, 5000, 'zero z żądania spada na kontekst, nie jedzie jako limit');
@@ -477,7 +474,7 @@ test('F10: max_tokens — jawne 0 i wartość ujemna NIE są budżetem, kontekst
   );
 });
 
-test('F10: myślenie na granicy 1024 — DOKŁADNIE na minimum jeszcze się nie włącza', t => {
+test('myślenie na granicy 1024 — DOKŁADNIE na minimum jeszcze się nie włącza', t => {
   t.is(bodyWith({ messages: HEJ, thinking: true, max_tokens: 1024 }, CTX).thinking, undefined, 'budżet musi być MNIEJSZY niż max_tokens, więc przy równym minimum myślenia nie ma');
 
   const owlos = bodyWith({ messages: HEJ, thinking: true, max_tokens: 1025 }, CTX);
@@ -487,7 +484,7 @@ test('F10: myślenie na granicy 1024 — DOKŁADNIE na minimum jeszcze się nie 
   t.is(bodyWith({ messages: HEJ, thinking: 999999, max_tokens: 8192 }, CTX).thinking?.budget_tokens, 8191, 'żądany budżet przycięty do max_tokens - 1');
 });
 
-test('F10: temperature 0 z żądania NIE spada na wartość z kontekstu', t => {
+test('temperature 0 z żądania NIE spada na wartość z kontekstu', t => {
   const ctx = makeCtx({ modelId: 'claude-sonnet-4-20250514', apiKey: 'k', temperature: 0.7 });
 
   t.is(bodyWith({ messages: HEJ, temperature: 0 }, ctx).temperature, 0, 'zero to WYBRANA temperatura, nie brak wyboru');
@@ -495,13 +492,13 @@ test('F10: temperature 0 z żądania NIE spada na wartość z kontekstu', t => {
   t.is(bodyWith({ messages: HEJ, thinking: true }, ctx).temperature, undefined, 'przy myśleniu temperatury nie wysyłamy w ogóle');
 });
 
-test('F10: model z żądania jedzie DOSŁOWNIE; dopiero brak pola spada na kontekst', t => {
+test('model z żądania jedzie DOSŁOWNIE; dopiero brak pola spada na kontekst', t => {
   t.is(bodyWith({ messages: HEJ, model: 'claude-opus-4-1' }, CTX).model, 'claude-opus-4-1');
   t.is(bodyWith({ messages: HEJ }, CTX).model, 'claude-sonnet-4-20250514');
   t.is(bodyWith({ messages: HEJ, model: '' }, CTX).model, '', 'pusty string to PODANA wartość, nie brak pola — fallback jest nullish, nie falsy');
 });
 
-test('F10: tool_choice — cztery kształty kanoniczne na słownik Anthropica', t => {
+test('tool_choice — cztery kształty kanoniczne na słownik Anthropica', t => {
   t.deepEqual(bodyWith({ messages: HEJ, tool_choice: 'auto' }, CTX).tool_choice, { type: 'auto' });
   t.deepEqual(bodyWith({ messages: HEJ, tool_choice: 'required' }, CTX).tool_choice, { type: 'any' }, 'required to `any` u Anthropica, nie `auto`');
   t.deepEqual(bodyWith({ messages: HEJ, tool_choice: 'none' }, CTX).tool_choice, { type: 'none' });
@@ -512,7 +509,7 @@ test('F10: tool_choice — cztery kształty kanoniczne na słownik Anthropica', 
   t.is(bodyWith({ messages: HEJ }, CTX).tool_choice, undefined, 'brak wyboru = brak pola');
 });
 
-test('F10: obraz — data: URI jako base64, https jako url, reszta wypada', t => {
+test('obraz — data: URI jako base64, https jako url, reszta wypada', t => {
   const dane = bodyWith({ messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,QUJD' } }] }] }, CTX);
   t.deepEqual(dane.messages?.[0].content, [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'QUJD' } }]);
 
@@ -523,7 +520,7 @@ test('F10: obraz — data: URI jako base64, https jako url, reszta wypada', t =>
   t.deepEqual(smiec.messages, [], 'obrazu, którego nie da się przenieść, nie zastępujemy pustą wiadomością');
 });
 
-test('F10: mieszana treść usera — blok tekstu i blok obrazu trafiają KAŻDY do swojej gałęzi', t => {
+test('mieszana treść usera — blok tekstu i blok obrazu trafiają KAŻDY do swojej gałęzi', t => {
   const body = bodyWith({
     messages: [{
       role: 'user',
@@ -542,7 +539,7 @@ test('F10: mieszana treść usera — blok tekstu i blok obrazu trafiają KAŻDY
 
 // ── odpowiedź bez strumienia ─────────────────────────────────────────────────
 
-test('F10: parseCompletion — treść, myślenie, indeks wyboru i słownik stop_reason', t => {
+test('parseCompletion — treść, myślenie, indeks wyboru i słownik stop_reason', t => {
   const gotowe = anthropicProvider.parseCompletion(
     { id: 'msg_9', model: 'claude-x', stop_reason: 'end_turn', content: [{ type: 'text', text: 'ok' }, { type: 'thinking', thinking: 'hmm' }] },
     REQ,
@@ -568,7 +565,7 @@ test('F10: parseCompletion — treść, myślenie, indeks wyboru i słownik stop
 
 // ── dekoder strumienia ───────────────────────────────────────────────────────
 
-test('F10: ramka rozcięta między porcjami CZEKA na dalszy ciąg, nie idzie do kosza', t => {
+test('ramka rozcięta między porcjami CZEKA na dalszy ciąg, nie idzie do kosza', t => {
   const decoder = anthropicProvider.createStreamDecoder(REQ, CTX);
   const snapshot = collect(decoder, [
     'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_de',
@@ -579,7 +576,7 @@ test('F10: ramka rozcięta między porcjami CZEKA na dalszy ciąg, nie idzie do 
   t.is(decoder.droppedFrames, 0, 'rozcięcie transportu to NIE jest nieczytelna ramka');
 });
 
-test('F10: dwie ramki w JEDNEJ porcji — drugi wiersz nie traci pierwszego znaku', t => {
+test('dwie ramki w JEDNEJ porcji — drugi wiersz nie traci pierwszego znaku', t => {
   const snapshot = decode([
     'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"A"}}\n'
     + 'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"B"}}\n',
@@ -588,7 +585,7 @@ test('F10: dwie ramki w JEDNEJ porcji — drugi wiersz nie traci pierwszego znak
   t.is(snapshot.choices[0].message.content, 'AB');
 });
 
-test('F10: ogon dokładnie 1 MiB bez końca wiersza jeszcze przeżywa — sufit bufora jest OSTRY', t => {
+test('ogon dokładnie 1 MiB bez końca wiersza jeszcze przeżywa — sufit bufora jest OSTRY', t => {
   const sufit = 1024 * 1024;
   const prefiks = 'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"';
   const wypelniacz = 'x'.repeat(sufit - prefiks.length);
@@ -598,7 +595,7 @@ test('F10: ogon dokładnie 1 MiB bez końca wiersza jeszcze przeżywa — sufit 
   t.is(String(snapshot.choices[0].message.content).length, wypelniacz.length, 'bufor DOKŁADNIE na sufcie nie leci do kosza — dopiero powyżej');
 });
 
-test('F10: content_block_start typu thinking oddaje myślenie; nieznany typ bloku jest CICHY', t => {
+test('content_block_start typu thinking oddaje myślenie; nieznany typ bloku jest CICHY', t => {
   const snapshot = decode([
     'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"licze"}}',
     'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" dalej"}}',
@@ -611,7 +608,7 @@ test('F10: content_block_start typu thinking oddaje myślenie; nieznany typ blok
   t.is(message.content, 'gotowe');
 });
 
-test('F10: numeracja slotów narzędzi jest własna i gęsta, a indeks spoza zakresu nie otwiera nowego slotu', t => {
+test('numeracja slotów narzędzi jest własna i gęsta, a indeks spoza zakresu nie otwiera nowego slotu', t => {
   const malejaco: string[] = [];
   for (let i = TOOL_CALL_MAX_INDEX - 1; i >= 0; i -= 1) {
     malejaco.push(`data: {"type":"content_block_start","index":${i},"content_block":{"type":"tool_use","id":"toolu_${i}","name":"n${i}","input":{}}}`);

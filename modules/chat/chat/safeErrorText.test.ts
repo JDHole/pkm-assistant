@@ -1,9 +1,9 @@
 /**
- * K20b (AUD-security-132, część czatowa) — okno rozmowy pokazuje ZAMASKOWANY tekst błędu.
+ * Okno rozmowy pokazuje ZAMASKOWANY tekst błędu, nigdy surowy `error.message`.
  *
- * `handle_error` wstawiał `error.message` wprost do DOM-u. Na sieciowym padzie strumienia ta
- * wiadomość bywa zrzutem całego zdarzenia streamera razem z `source.headers.Authorization`,
- * czyli surowym kluczem API. Źródło domyka osobna naprawa — tu pilnujemy ZLEWU.
+ * Na sieciowym padzie strumienia ta wiadomość bywa zrzutem całego zdarzenia streamera razem
+ * z `source.headers.Authorization`, czyli surowym kluczem API - stąd maska jest obowiązkowym
+ * przystankiem, nie kosmetyką.
  */
 import test from 'ava';
 import { readFileSync } from 'fs';
@@ -86,7 +86,7 @@ function handleErrorBody(): string {
 test('handle_error nie wstawia surowego error.message do DOM-u', t => {
     const body = handleErrorBody();
     t.true(body.length > 0, 'nie znalazłem handle_error w źródle');
-    t.false(/error\.message/.test(body), 'surowy error.message w oknie rozmowy = powrót AUD-security-132');
+    t.false(/error\.message/.test(body), 'surowy error.message w oknie rozmowy mógłby ujawnić klucz API');
     t.regex(body, /safeErrorText\(error\)/);
 });
 

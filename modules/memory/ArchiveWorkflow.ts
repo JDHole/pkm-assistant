@@ -14,17 +14,17 @@ import type {
     ConsolidationStepApplied,
     ConsolidationStepResult,
 } from './ConsolidationRun.js';
-// AUD-bledy-047: wynik stemplowania sesji po zapisie L1 jedzie do zwrotki kroku.
+// Wynik stemplowania sesji po zapisie L1 jedzie do zwrotki kroku.
 import type { L1StampOutcome, L1StampSkip } from './AgentMemory.js';
 
 const VALID_NOTE_TYPES = new Set(['user', 'agent_rule', 'skill_hint', 'project_context', 'reference']);
 
-/** Błąd w catch — czytamy z niego tylko te pola (kontrakt kampanii TS §4). */
+/** Błąd w catch — czytamy z niego tylko te pola. */
 type ErrLike = { message?: string; code?: string; silentMs?: number };
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
 //  Kontrakty otoczenia, typowane STRUKTURALNIE
-//  (`AgentMemory.js` jest jeszcze w JavaScripcie — kontrakt kampanii TS: nie czekamy na
+//  (`AgentMemory.js` jest jeszcze w JavaScripcie — nie czekamy na
 //  konwersję właściciela; odwzorowujemy TO, co ten plik realnie woła, i nic ponadto.)
 // ═══════════════════════════════════════════════════════════════════════════════════════
 
@@ -205,22 +205,18 @@ export interface ApplyStepResult {
 /**
  * ArchiveWorkflow — konsolidacja pamięci: dedup `brain/` + podsumowania L1/L2/L3.
  *
- * **Jeden tor, nieblokujący** (S29 Z3, 2026-07-29): `runWithRun(consolidationRun)` generuje
+ * **Jeden tor, nieblokujący**: `runWithRun(consolidationRun)` generuje
  * propozycje WSZYSTKICH paczek po kolei i wkłada je do `ConsolidationRun` jako kroki
  * `awaiting_review`. NIC nie zapisuje. Zapis dzieje się osobno, po decyzji usera:
  * `applyStepDecision(run, stepId, decision)`. Hierarchia (L2/L3) jest zabramkowana —
  * `generateGatedSteps(run)` rusza dopiero, gdy wszystkie L1 są rozstrzygnięte, bo L2 syntetyzuje
  * TREŚĆ L1 (nie może powstać z wersji, którą user właśnie edytuje).
  *
- * **Stary, blokujący tor SKASOWANY (D6, 2026-07-30).** `run()` (jedna paczka L1 na przebieg,
- * modal per faza przez `modalFactory`, snapshot+rollback) razem z `createLevel1/2/3`,
- * `_prompt`, `_emptyCostReport` i `ConsolidationSnapshot.create/restore` stracił ostatniego
- * produkcyjnego wołacza w kubełku 2 (guziki profilu agenta przeszły na `startConsolidationRun`,
- * próg z `/save session` — już w S29). Trzymały go wyłącznie testy. Z podsystemu snapshotów
- * został tylko `prune()` — sprząta stare kopie na starcie `runWithRun`.
+ * Z podsystemu snapshotów (`ConsolidationSnapshot`) w użyciu jest wyłącznie `prune()` —
+ * sprząta stare kopie na starcie `runWithRun`.
  */
 export class ArchiveWorkflow {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare agentMemory: ArchiveAgentMemoryLike;
     declare settings: ArchiveSettingsLike;
     declare snapshot: ConsolidationSnapshot;
@@ -260,7 +256,7 @@ export class ArchiveWorkflow {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════
-    //  Generacja ≠ aplikacja (S29 Z3)
+    //  Generacja ≠ aplikacja
     // ═══════════════════════════════════════════════════════════════════════════════════════
 
     /**
@@ -273,13 +269,12 @@ export class ArchiveWorkflow {
      *     (60 sesji = 12 paczek w JEDNYM przebiegu; skasowany stary tor robił jedną na przebieg),
      *  4. L2/L3 zostają z kłódką — odblokowuje je `generateGatedSteps()` po rozstrzygnięciu L1.
      *
-     * **Dlaczego przebieg NIE robi snapshotu (2026-07-29).** Snapshot powstawał na starcie
-     * generacji, a zapisy dzieją się dopiero po decyzjach usera — czasem godziny później. Odtworzenie
-     * z takiego snapshotu cofnęłoby bieżącą rozmowę (pliki sesji też są w środku), a same operacje
-     * konsolidacji są create-before-delete, więc pad w połowie i tak nie gubi danych. Do tego kopia
-     * CAŁEGO folderu pamięci w JSON-ie to własny punkt awarii (RAM + Dysk Google). Snapshot +
-     * rollback trzymał tylko stary, blokujący `run()` (tam zapis leciał od razu po propozycji) —
-     * skasowany w D6 razem z `ConsolidationSnapshot.create/restore`. Został sam `prune()`.
+     * **Dlaczego przebieg NIE robi snapshotu.** Zapisy dzieją się dopiero po decyzjach usera —
+     * czasem godziny po starcie generacji. Snapshot zrobiony na starcie i tak nie dawałby
+     * bezpiecznego rollbacku: odtworzenie z niego cofnęłoby bieżącą rozmowę (pliki sesji też są
+     * w środku), a same operacje konsolidacji są create-before-delete, więc pad w połowie i tak
+     * nie gubi danych. Do tego kopia CAŁEGO folderu pamięci w JSON-ie to własny punkt awarii
+     * (RAM + Dysk Google).
      *
      * Padnięty krok NIE zatrzymuje przebiegu: leci dalej do następnej paczki (fail jednej paczki
      * L1 nie może zablokować pozostałych jedenastu). Zwis streamu jest ponawiany raz, potem krok
@@ -313,11 +308,11 @@ export class ArchiveWorkflow {
      * Zdejmuje kłódkę z L2 (a potem z L3) i generuje ich propozycje — ale dopiero, gdy niższy
      * poziom jest rozstrzygnięty. Woła to UI po każdej decyzji usera; jest idempotentne.
      *
-     * Gating (spec F3): L2 syntetyzuje TREŚĆ L1, więc nie może powstać z wersji, którą user
+     * Gating: L2 syntetyzuje TREŚĆ L1, więc nie może powstać z wersji, którą user
      * właśnie edytuje albo którą za chwilę odrzuci. Jeśli po odrzuceniach na dysku jest mniej
      * niż `batchSize` NIEPOKRYTYCH plików L1 — L2 (i zależny od niego L3) lecą jako `skipped`.
      *
-     * ⚠️ „Niepokrytych", nie „wszystkich" (2026-09-04): L1 nie ubywają po wchłonięciu do L2
+     * ⚠️ „Niepokrytych", nie „wszystkich": L1 nie ubywają po wchłonięciu do L2
      * (kasuje je dopiero kaskada L3), a L2 nie ubywają nigdy — liczenie po gołym listingu
      * folderu produkowało w kółko podsumowania tego samego materiału. Patrz `_listUncoveredL1`.
      *
@@ -335,8 +330,8 @@ export class ArchiveWorkflow {
             }
             // Ungate PRZED pierwszym await: w oknie między „wszystkie L1 terminalne" a startem
             // generacji L2 wszystkie kroki wyglądały na rozstrzygnięte/gated — zamknięcie modalu
-            // w tym momencie uznawało przebieg za utknięty i zwalniało centrum przy ŻYWEJ robocie
-            // (review kubełka 2, P3-1). `pending` sygnalizuje: robota przed nami.
+            // w tym momencie uznawało przebieg za utknięty i zwalniało centrum przy ŻYWEJ robocie.
+            // `pending` sygnalizuje: robota przed nami.
             run.ungate(l2.id);
             const l1s = await this._listUncoveredL1();
             if (l1s.length < this.batchSize) {
@@ -364,7 +359,7 @@ export class ArchiveWorkflow {
                 out.waiting = true;
                 return out;
             }
-            // Ungate przed await — ten sam pancerz co przy L2 (P3-1).
+            // Ungate przed await — ten sam pancerz co przy L2.
             run.ungate(l3.id);
             const l2s = await this._listUncoveredL2();
             if (l2s.length < this.batchSize) {
@@ -525,8 +520,7 @@ export class ArchiveWorkflow {
         // Okno paczki jest ZAMRAŻANE przy pierwszej generacji (`step.meta.sessions`).
         // Lista niepokrytych sesji KURCZY SIĘ po każdej zaakceptowanej paczce (stemple
         // covered_by_l1), więc `slice(offset)` liczony od nowa przy „Ponów" brałby okno
-        // INNEJ paczki — duplikat L1 na cudzych sesjach wracałby tylnymi drzwiami
-        // (review kubełka 2, P2-1: reprodukcja z 3 paczkami i padem środkowej).
+        // INNEJ paczki — duplikat L1 na cudzych sesjach wracałby tylnymi drzwiami.
         const frozenNames = Array.isArray(step.meta?.sessions) && step.meta.sessions.length > 0
             ? step.meta.sessions
             : null;
@@ -661,9 +655,9 @@ export class ArchiveWorkflow {
     /**
      * Odpala strzał LLM z polityką zwisu: pierwszy stall = ponowienie TEGO SAMEGO strzału,
      * drugi = krok `failed` (już ustawiony przez `markStalled`). Błędy inne niż zwis kończą
-     * krok od razu (bez auto-retry — decyzja J w specu). Abort (user „Anuluj") to NIE zwis:
+     * krok od razu (bez auto-retry). Abort (user „Anuluj") to NIE zwis:
      * pada od razu z własnym kodem — inaczej wchodził w politykę ponowień i modal raportował
-     * „stream zwisł dwa razy" po własnoręcznym anulowaniu (znalezisko Poligonu, 2026-07-31).
+     * „stream zwisł dwa razy" po własnoręcznym anulowaniu.
      */
     private async _attemptWithStallRetry<T>(
         run: ConsolidationRun,
@@ -711,7 +705,7 @@ export class ArchiveWorkflow {
     }
 
     /**
-     * Timeout zwisu WSPÓLNY z czatem (decyzja Kuby 5): `chat_stream_stall_timeout_ms`
+     * Timeout zwisu WSPÓLNY z czatem: `chat_stream_stall_timeout_ms`
      * z `config/limits.js`, nadpisywalny w Settings → Limity.
      *
      * Uwaga na kształt: `getLimits()` czeka na PEŁNY obiekt settings (czyta `settings.pkmAssistant.limits`),
@@ -729,7 +723,7 @@ export class ArchiveWorkflow {
      * to semantically group notes and propose CLEAN merged content. Falls back to the v1 prefix
      * heuristic when LLM is unavailable or throws.
      *
-     * @param opts - S29 Z3, używane tylko przez nowy tor (stare wywołania bez zmian):
+     * @param opts - używane tylko przez nowy tor (stare wywołania bez zmian):
      *   `stream` (opcje `streamToComplete`: onChunk/watchdog/signal), `onUsage(usage)` (koszt kroku),
      *   `rethrowStreamErrors` (zwis/abort ma polecieć w górę zamiast cicho spaść na fallback).
      */
@@ -747,7 +741,7 @@ export class ArchiveWorkflow {
     }
 
     private async _tryProposeDedupViaAgent(notes: BrainNoteLike[], opts: LlmCallOptions = {}): Promise<{ merges: DedupMerge[]; deletions: DedupDeletion[] } | null> {
-        // E2.8 B3: resolver (agent>global>factory) — LLM path as soon as a model is present.
+        // Resolver (agent>global>factory) — LLM path as soon as a model is present.
         if (!this.model) return null;
         const archivePrompt = resolveWorkPrompt(this.agent, 'archive_prompt', this.settings, DEFAULT_ARCHIVE_PROMPT);
         if (!archivePrompt) return null;
@@ -770,7 +764,7 @@ export class ArchiveWorkflow {
             }));
 
             const payload = {
-                // Fix znaleziska TS-2 #4: `this.agent` bywa null (legalne wg konstruktora), a bramka
+                // `this.agent` bywa null (legalne wg konstruktora), a bramka
                 // wyżej sprawdza tylko `this.model` — asercja `!` dawała TypeError połykany przez
                 // catch niżej (LLM-dedup po cichu przepadał). Fallback `||` istniał dokładnie na to.
                 agent: this.agent?.name || this.agentMemory.agentName,
@@ -785,8 +779,8 @@ export class ArchiveWorkflow {
             opts.onUsage?.(usage);
             return this._parseDedupResponse(text);
         } catch (e) {
-            // S29 Z3: zwis streamu / abort NIE MOŻE po cichu spaść na heurystykę prefiksów —
-            // to jest dokładnie ta cicha wtopa, którą sprint likwiduje. Nowy tor prosi o rzut.
+            // Zwis streamu / abort NIE MOŻE po cichu spaść na heurystykę prefiksów —
+            // nowy tor prosi o rzut zamiast cichego fallbacku.
             if (opts.rethrowStreamErrors && this._isStreamControlError(e)) throw e;
             log.warn('ArchiveWorkflow', `LLM dedup proposal failed, falling back: ${(e as ErrLike).message as string}`);
             return null;
@@ -925,32 +919,30 @@ export class ArchiveWorkflow {
                 content = chunks.join('\n\n---\n\n');
             }
 
-            // E2.7 K1 + AUD-code-review (runda 2, F01): probe+sufiks I zapis żyją teraz W JEDNYM
-            // wpisie kolejki, kluczowanym BAZOWĄ (nie-sufiksowaną) ścieżką — wzorzec
-            // `AgentMemory.writeBrainNote`. Do tej naprawy pętla `probeFile`+sufiks biegła PRZED
-            // `enqueue()`, na gołym `targetPath` spoza kolejki — okno między „nazwa wolna" a
-            // realnym zapisem (wewnątrz `enqueue`) było otwarte na równoległy `memory_save`
-            // piszący POD TĄ SAMĄ nazwą: dwa zapisy tej samej bazowej nazwy scalają się w
-            // wyścig, bo tylko JEDEN z nich trzymał się klucza kolejki. Kluczowanie na
-            // `baseTargetPath` (zamiast na finalnym, już-z-sufiksem `targetPath`) zamyka to
-            // okno — `writeBrainNote` woła TĘ SAMĄ kolejkę pod TYM SAMYM bazowym kluczem, więc
+            // Probe+sufiks I zapis żyją W JEDNYM wpisie kolejki, kluczowanym BAZOWĄ
+            // (nie-sufiksowaną) ścieżką — wzorzec `AgentMemory.writeBrainNote`. Kluczowanie na
+            // `baseTargetPath` (zamiast na finalnym, już-z-sufiksem `targetPath`) jest celowe:
+            // gdyby pętla `probeFile`+sufiks biegła PRZED `enqueue()`, na gołym `targetPath` spoza
+            // kolejki, otwierałoby się okno między „nazwa wolna" a realnym zapisem (wewnątrz
+            // `enqueue`) na równoległy `memory_save` piszący POD TĄ SAMĄ nazwą — dwa zapisy tej
+            // samej bazowej nazwy scalałyby się w wyścig, bo tylko JEDEN trzymałby się klucza
+            // kolejki. `writeBrainNote` woła TĘ SAMĄ kolejkę pod TYM SAMYM bazowym kluczem, więc
             // oba zapisy tej samej nazwy serializują się względem siebie, nie tylko względem
             // samych siebie.
             //
-            // AUD-code-review-008 (kontekst kolizji): `target_name` jest wejściem NIEZAUFANYM
-            // (LLM albo user edytujący pole w modalu przeglądu), nie gotową ścieżką zapisu. Bez
-            // pętli sufiksów kolizja z notatką SPOZA `sources` (identyczna nazwa albo ucięty do
-            // 80 znaków wspólny slug — `MemoryAccessGuard.makeMemoryNoteFilename`) kończyła się
-            // cichym nadpisaniem: notatka usera znikała bez `.bak` i bez wpisu `delete` w
-            // `brain.log` (log dostawał tylko `merge`). Plik NIE jest kolizją, gdy jest jednym
-            // ze scalanych `sources` (wtedy scalenie legalnie zajmuje jego miejsce — kod niżej
-            // pomija `remove()` dla `path === targetPath`).
+            // `target_name` jest wejściem NIEZAUFANYM (LLM albo user edytujący pole w modalu
+            // przeglądu), nie gotową ścieżką zapisu. Bez pętli sufiksów kolizja z notatką SPOZA
+            // `sources` (identyczna nazwa albo ucięty do 80 znaków wspólny slug —
+            // `MemoryAccessGuard.makeMemoryNoteFilename`) kończyłaby się cichym nadpisaniem:
+            // notatka usera znikałaby bez `.bak` i bez wpisu `delete` w `brain.log` (log dostawałby
+            // tylko `merge`). Plik NIE jest kolizją, gdy jest jednym ze scalanych `sources` (wtedy
+            // scalenie legalnie zajmuje jego miejsce — kod niżej pomija `remove()` dla
+            // `path === targetPath`).
             //
-            // Wyczerpanie prób (suffix > 50) POMIJA scalenie z `log.warn`, zamiast (jak dawniej)
-            // `break`-iem zostawiać `targetFilename` na `_50` — nazwie, o której ta sama pętla
-            // WŁAŚNIE orzekła, że ISTNIEJE (`probeFile(...) !== 'missing'` było warunkiem wejścia
-            // w tę iterację) — i pisać tam mimo to. Ta sama klasa błędu co CRITICAL naprawiony
-            // wyżej w tym pliku (AUD-code-review-008): cichy zapis nad cudzą notatką.
+            // Wyczerpanie prób (suffix > 50) POMIJA scalenie z `log.warn`, zamiast `break`-iem
+            // zostawiać `targetFilename` na `_50` — nazwie, o której ta sama pętla WŁAŚNIE orzekła,
+            // że ISTNIEJE (`probeFile(...) !== 'missing'` było warunkiem wejścia w tę iterację) — i
+            // pisać tam mimo to. Ta sama klasa błędu: cichy zapis nad cudzą notatką.
             const enqueue = this.agentMemory._enqueuePathWrite
                 ? this.agentMemory._enqueuePathWrite.bind(this.agentMemory)
                 : (_p: string, fn: () => Promise<{ filename: string; path: string } | null>) => fn();
@@ -987,7 +979,7 @@ export class ArchiveWorkflow {
 
             if (!applied) continue;
 
-            // S32 Z1b: kronika `brain.log`. Dedup pisze TU, bezpośrednio adapterem (nie przez
+            // Kronika `brain.log`. Dedup pisze TU, bezpośrednio adapterem (nie przez
             // metodę AgentMemory), więc wpis musi powstać tutaj — inaczej scalenie kilku notatek
             // w jedną byłoby dla usera niewidzialne.
             await this.agentMemory.appendBrainLog?.('merge', applied.filename, proposal.sources.join(' + '));
@@ -1011,14 +1003,14 @@ export class ArchiveWorkflow {
                 continue;
             }
             if (this.agentMemory.vault.adapter.remove) {
-                // E2.7 K1: serialize the delete against the note path.
+                // Serialize the delete against the note path.
                 const enqueueDel = this.agentMemory._enqueuePathWrite
                     ? this.agentMemory._enqueuePathWrite.bind(this.agentMemory)
                     : (_p: string, fn: () => Promise<void>) => fn();
                 await enqueueDel(path, async () => {
                     await this.agentMemory.vault.adapter.remove!(path);
                 });
-                // S32 Z1b: gałąź `project_context` loguje się sama w `archiveBrainNote` (op `archive`).
+                // Gałąź `project_context` loguje się sama w `archiveBrainNote` (op `archive`).
                 await this.agentMemory.appendBrainLog?.('delete', d.filename, d.why || '');
                 deleted++;
             }
@@ -1055,15 +1047,14 @@ ${String(body || '').trim()}
 
     // ── zapisywacze podsumowań ────────────────────────────────────────────────────────────
     //
-    // Wyniesione z dawnych `createLevelN` (S29 Z3), żeby oba ówczesne tory pisały DOKŁADNIE to
-    // samo; po kasacji starego toru (D6) są jedyną drogą zapisu. Każdy zapis idzie przez kolejkę
-    // per-ścieżka (E2.7 K1), a nazwa pliku jest odkolizjonowana — 12 paczek L1 zaakceptowanych
+    // Jedyna droga zapisu podsumowań L1/L2/L3. Każdy zapis idzie przez kolejkę
+    // per-ścieżka, a nazwa pliku jest odkolizjonowana — 12 paczek L1 zaakceptowanych
     // w tej samej sekundzie miałoby inaczej tę samą nazwę `RRRR-MM-DD_GG-mm-ss_l1.md`
     // i zjadłoby się nawzajem.
 
     /**
      * @returns faktyczna nazwa pliku (po odkolizjonowaniu) + `unstamped`, gdy któraś sesja
-     *   NIE dostała stempla `covered_by_l1` (AUD-bledy-047). Paczka L1 jest wtedy zapisana,
+     *   NIE dostała stempla `covered_by_l1`. Paczka L1 jest wtedy zapisana,
      *   ale te sesje wrócą do następnej paczki — krok nie ma prawa meldować czystego sukcesu.
      */
     async _writeLevel1({ name, sessions = [], body = '' }: {
@@ -1138,7 +1129,7 @@ ${String(body || '').trim()}
         return { created: 1, name: finalName };
     }
 
-    /** Kolejka zapisu per-ścieżka (E2.7 K1); bez niej (stare atrapy) po prostu odpala funkcję. */
+    /** Kolejka zapisu per-ścieżka; bez niej (stare atrapy) po prostu odpala funkcję. */
     private _enqueueWrite(path: string, fn: () => Promise<void>): Promise<void> {
         return this.agentMemory._enqueuePathWrite
             ? this.agentMemory._enqueuePathWrite(path, fn)
@@ -1149,12 +1140,12 @@ ${String(body || '').trim()}
     private async _uniqueSummaryName(folder: string, name: string): Promise<string> {
         const adapter = this.agentMemory.vault.adapter;
         const stem = String(name).replace(/\.md$/, '');
-        // Adapter bez exists() w ogóle → nie blokujemy zapisu (zachowanie sprzed naprawy K4;
-        // probeFile na takim adapterze i tak zwróci wyłącznie 'unknown', więc pętla niżej
-        // przemieliłaby bez sensu wszystkie 100 sufiksów).
+        // Adapter bez exists() w ogóle → nie blokujemy zapisu (probeFile na takim adapterze i tak
+        // zwróci wyłącznie 'unknown', więc pętla niżej przemieliłaby bez sensu wszystkie 100
+        // sufiksów).
         if (typeof adapter?.exists !== 'function') return `${stem}.md`;
         let candidate = `${stem}.md`;
-        // K4 (AUD-bledy-061): ta sama pętla co w AgentMemory — „nie wiem" (probeFile) liczy się
+        // Ta sama pętla co w AgentMemory — „nie wiem" (probeFile) liczy się
         // jako ZAJĘTA, żeby kłamiący exists() nie dał dwóm paczkom zaakceptowanym w tej samej
         // sekundzie tej samej nazwy (dokładnie ryzyko opisane w komentarzu nad wołaczami niżej).
         for (let n = 2; n <= 100; n++) {
@@ -1166,11 +1157,6 @@ ${String(body || '').trim()}
 
     /**
      * Sesje kandydujące do paczki L1 — WYŁĄCZNIE te bez stempla `covered_by_l1`.
-     *
-     * Do 2026-07-29 wybór paczek szedł po gołym `_listMarkdown(sessions/archive)`, więc każdy
-     * kolejny przebieg brał te same najstarsze sesje i robił z nich kolejne L1 (u Kuby: 12
-     * duplikatów). Stempel istniał w kodzie, ale nikt go nie czytał — a `_cleanupAfterL1` i tak
-     * go nie zapisywał (zła ścieżka). Dopiero jedno z drugim domyka pętlę.
      *
      * Kształt wyniku ({path, name}) zostaje ten sam co `_listMarkdown` — okna paczek liczą się
      * dalej przez `slice(offset, offset + batchSize)`.
@@ -1192,12 +1178,6 @@ ${String(body || '').trim()}
 
     /**
      * Materiał na paczkę L2 — WYŁĄCZNIE pliki L1, których nie wchłonęło jeszcze żadne L2.
-     *
-     * Do 2026-09-04 stało tu gołe `_listMarkdown(paths.l1)`, a `_writeLevel2` nie kasowało L1
-     * ani nie zostawiało na nich śladu — więc KAŻDY kolejny przebieg brał `slice(0, batchSize)`
-     * z tej samej, nigdy niekurczącej się listy i robił kolejne L2 z tych samych pięciu L1
-     * (u Borysa trzy L2 z identycznym `l1_files`, a nowsze L1 nigdy nie awansowały).
-     * Ta sama klasa wtopy co „12 duplikatów L1" na szczeblu niżej, tylko o piętro wyżej.
      *
      * Znacznikiem pokrycia jest sam plik L2 (jego frontmatter `l1_files:`) — patrz
      * `AgentMemory.listUncoveredL1s()` po uzasadnienie, dlaczego backlink, a nie stempel.
@@ -1224,19 +1204,19 @@ ${String(body || '').trim()}
     }
 
     /**
-     * Memory v3 LLM-driven synthesis for L1/L2/L3. When a model is present (E2.8 B3: summary prompt
+     * Memory v3 LLM-driven synthesis for L1/L2/L3. When a model is present (summary prompt
      * resolved agent>global>factory), the agent receives N documents (stripped frontmatter, truncated to 5kB each) and writes a
      * single synthetic summary scaled to the target level. Without LLM we fall back to the v1
      * raw concatenation so deterministic tests still pass.
      */
     async _summaryFromFiles(paths: string[], level: string, opts: LlmCallOptions = {}): Promise<string> {
-        // E2.8 B3: resolver provides the summary prompt (agent>global>factory) — LLM synthesis runs
+        // Resolver provides the summary prompt (agent>global>factory) — LLM synthesis runs
         // whenever a model is present; without a model we keep the deterministic raw-concat fallback.
         if (this.model) {
             try {
                 return await this._summaryFromFilesViaAgent(paths, level, opts);
             } catch (e) {
-                // S29 Z3: zwis/abort leci w górę (nowy tor robi z tego retry albo krok failed);
+                // Zwis/abort leci w górę (nowy tor robi z tego retry albo krok failed);
                 // zwykła awaria LLM-a nadal spada na deterministyczny fallback jak dotąd.
                 if (opts.rethrowStreamErrors && this._isStreamControlError(e)) throw e;
                 log.warn('ArchiveWorkflow', `LLM summary failed (${level}), falling back: ${(e as ErrLike).message as string}`);
@@ -1320,9 +1300,8 @@ ${String(body || '').trim()}
 
     async _autoBumpBrainNoteLimit(): Promise<boolean> {
         // Bump current limit by +10 (cap at 100) so users who reject merges don't get badgered
-        // every save. Pre-2026-05-15 the bump was hard-coded 10→15; with the new 25 default that
-        // never fires. Now it scales relative to whatever the user already has.
-        // Read-modify-write przez kolejkę `.state.json` (E2.7 K1) — patrz `_resetArchiveCounter`.
+        // every save. Scales relative to whatever the user already has.
+        // Read-modify-write przez kolejkę `.state.json` — patrz `_resetArchiveCounter`.
         let bumped = false;
         await this.agentMemory.stateManager.update((state) => {
             const current = Number(state.brain_notes_limit || 20);

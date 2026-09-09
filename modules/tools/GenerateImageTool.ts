@@ -14,8 +14,8 @@ import type { BinaryIoApp } from './vault_binary_io.js';
 const DEFAULT_SAVE_FOLDER = 'Attachments/generated';
 
 /**
- * K2 (AUD-security-048): folder, do którego narzędzie NAPRAWDĘ pisze — liczony z ustawień,
- * nie z tekstu modelu. Jedno miejsce, bo czyta go i bramka (`contextExtractor`), i `execute`.
+ * Folder, do którego narzędzie NAPRAWDĘ pisze — liczony z ustawień, nie z tekstu modelu.
+ * Jedno miejsce, bo czyta go i bramka (`contextExtractor`), i `execute`.
  */
 function resolveSaveFolder(plugin: GenerateImagePlugin | null | undefined): string {
     const raw = plugin?.env?.settings?.pkmAssistant?.imageGen?.saveFolder || DEFAULT_SAVE_FOLDER;
@@ -107,12 +107,11 @@ UWAGI:
             required: ['prompt'],
         },
 
-        // K2 (AUD-security-048): bramka dostaje FOLDER ZAPISU, nie prompt. Dawniej
-        // `_extractToolContext` oddawał tu `args.prompt`, więc AccessGuard i koniunkcyjna bariera
-        // `scope.folders` suba oceniały tekst, który model sam pisze (dopisanie „Projekty/” na
-        // początku promptu wystarczało, żeby strażnik powiedział „whitelist: Projekty”), a dwa
-        // realne zapisy szły gdzie indziej — bez żadnej kontroli. Prompt jedzie do okna zgody
-        // jako osobne pole, tak jak `memoryContent` przy pamięci.
+        // Bramka dostaje FOLDER ZAPISU, nie prompt: jeśli AccessGuard i koniunkcyjna bariera
+        // `scope.folders` suba oceniałyby tekst, który model sam pisze, dopisanie „Projekty/” na
+        // początku promptu wystarczyłoby, żeby strażnik powiedział „whitelist: Projekty”, podczas
+        // gdy realny zapis szedłby gdzie indziej — bez żadnej kontroli. Prompt jedzie do okna
+        // zgody jako osobne pole, tak jak `memoryContent` przy pamięci.
         contextExtractor: (args: { prompt?: unknown; size?: unknown }, ctx: { plugin?: unknown }) => ({
             targetPath: resolveSaveFolder(ctx?.plugin as GenerateImagePlugin | null | undefined),
             approvalContext: {
@@ -132,9 +131,9 @@ UWAGI:
                 const imageGenSettings = plugin?.env?.settings?.pkmAssistant?.imageGen || {};
                 const platform = imageGenSettings.platform;
 
-                // K2 (AUD-security-048): folder zapisu przez centralną walidację ZANIM cokolwiek
-                // policzymy — źle ustawiony `saveFolder` (`../`, `.pkm-assistant/`, plik chroniony)
-                // nie może być furtką do zapisu poza vaultem ani do pamięci innego agenta.
+                // Folder zapisu przez centralną walidację ZANIM cokolwiek policzymy — źle
+                // ustawiony `saveFolder` (`../`, `.pkm-assistant/`, plik chroniony) nie może być
+                // furtką do zapisu poza vaultem ani do pamięci innego agenta.
                 const saveFolder = resolveSaveFolder(plugin);
                 const folderCheck = validateVaultPath(saveFolder);
                 if (!folderCheck.ok) {
@@ -186,7 +185,7 @@ UWAGI:
                 const filename = `generated_${timestamp}.${ext}`;
                 const savePath = `${folderCheck.safePath}/${filename}`;
 
-                // Write binary (E2.6 API-first: vault.createBinary; adapter fallback dla ukrytych ścieżek).
+                // Write binary (API-first: vault.createBinary; adapter fallback dla ukrytych ścieżek).
                 // writeBinary sam zapewnia folder docelowy (vault.createFolder / adapter.mkdir).
                 const binaryData = Uint8Array.from(atob(result.base64), c => c.charCodeAt(0));
                 await writeBinary(appRef, savePath, binaryData.buffer);

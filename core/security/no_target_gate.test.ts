@@ -1,5 +1,5 @@
 /**
- * K2 (AUD-security-075 / 076 / 016 / 048 / 021) — BRAK CELU ≠ PRZEPUŚĆ.
+ * BRAK CELU ≠ PRZEPUŚĆ.
  *
  * Cała reszta `checkPermission` (No-Go, pliki chronione, whitelista `focusFolders`, `scope.folders`
  * suba) stoi za `if (targetPath)`. Dopóki akcja dotykająca pliku mogła przyjść z pustym celem,
@@ -33,7 +33,7 @@ const AKCJE_Z_CELEM = [
     'image.generate',
 ];
 
-test.serial('K2: akcja dotykająca pliku BEZ celu = odmowa fail-closed', t2 => {
+test.serial('akcja dotykająca pliku BEZ celu = odmowa fail-closed', t2 => {
     AccessGuard.setNoGoFolders([]);
     const ps = new PermissionSystem(null, {});
     const agent = makeAgent();
@@ -47,11 +47,11 @@ test.serial('K2: akcja dotykająca pliku BEZ celu = odmowa fail-closed', t2 => {
     }
 });
 
-test.serial('K2: lista akcji wymagających celu pokrywa się z tym, czego pilnują testy', t2 => {
+test.serial('lista akcji wymagających celu pokrywa się z tym, czego pilnują testy', t2 => {
     t2.deepEqual([...TARGET_REQUIRED_ACTIONS].sort(), [...AKCJE_Z_CELEM].sort());
 });
 
-test.serial('K2: pusty cel jest odmawiany także agentowi z whitelistą i subowi ze scope', t2 => {
+test.serial('pusty cel jest odmawiany także agentowi z whitelistą i subowi ze scope', t2 => {
     AccessGuard.setNoGoFolders([]);
     const ps = new PermissionSystem(null, {});
 
@@ -66,7 +66,7 @@ test.serial('K2: pusty cel jest odmawiany także agentowi z whitelistą i subowi
     );
 });
 
-test.serial('K2: akcje, które CELOWO nie mają celu, nadal przechodzą', t2 => {
+test.serial('akcje, które CELOWO nie mają celu, nadal przechodzą', t2 => {
     AccessGuard.setNoGoFolders([]);
     const ps = new PermissionSystem(null, {});
     const agent = makeAgent();
@@ -81,7 +81,7 @@ test.serial('K2: akcje, które CELOWO nie mają celu, nadal przechodzą', t2 => 
     t2.true(ps.checkPermission(agent, 'memory.write', '.pkm-assistant/agents/tester/memory/brain.md').allowed);
 });
 
-test.serial('K2: cel podany = bramka działa jak dotąd (brak fałszywych alarmów)', t2 => {
+test.serial('cel podany = bramka działa jak dotąd (brak fałszywych alarmów)', t2 => {
     AccessGuard.setNoGoFolders(['Prywatne']);
     const ps = new PermissionSystem(null, {});
 
@@ -94,9 +94,9 @@ test.serial('K2: cel podany = bramka działa jak dotąd (brak fałszywych alarm�
     t2.true(ps.checkPermission(makeWhitelistedAgent(), 'artifact.create', 'Projekty/x.md').allowed);
 });
 
-// ── AUD-security-021: „brak celu" to nie „dowolny cel" ────────────────────────
+// ── „brak celu" to nie „dowolny cel" ────────────────────────
 
-test('K2: pusty cel NIE zapada w wieloznacznik akcja::*', t2 => {
+test('pusty cel NIE zapada w wieloznacznik akcja::*', t2 => {
     const am = new ApprovalManager(null, { storage: {} });
 
     const pusty = am.createPatternKey('vault.write', '');
@@ -105,7 +105,7 @@ test('K2: pusty cel NIE zapada w wieloznacznik akcja::*', t2 => {
     t2.is(pusty, am.createPatternKey('vault.write', undefined), 'brak i pusty to ten sam przypadek');
 });
 
-test('K2: reguła „zawsze" z pustego celu nie auto-zatwierdza zapisów po ścieżkach', async t2 => {
+test('reguła „zawsze" z pustego celu nie auto-zatwierdza zapisów po ścieżkach', async t2 => {
     const storage: Record<string, unknown> = {};
     const am = new ApprovalManager(null, { storage });
     am.setApprovalHandler(() => ({ result: 'always' }));
@@ -119,7 +119,7 @@ test('K2: reguła „zawsze" z pustego celu nie auto-zatwierdza zapisów po ści
     t2.true(am.isAlwaysApproved('Igor', 'vault.write', ''), 'reguła obejmuje dokładnie to, na co user kliknął');
 });
 
-test('K2: stara reguła `akcja::*` przestaje pokrywać wywołania BEZ celu', t2 => {
+test('stara reguła `akcja::*` przestaje pokrywać wywołania BEZ celu', t2 => {
     const am = new ApprovalManager(null, {
         storage: { alwaysApprovedRules: { Igor: ['vault.write::*'] } },
     });

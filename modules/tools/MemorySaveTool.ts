@@ -116,12 +116,12 @@ function getInvocationMemory(
     agentManager: MemorySaveAgentManager | null | undefined,
 ): AgentMemoryLike | null | undefined {
     const agentName = (args?._invocationAgentName as string) || agentManager?.getActiveAgent?.()?.name || null;
-    // K4 (AUD-security-036): FAIL-CLOSED. Nazwana tożsamość bez wpisu w `agentMemories`
-    // (pad inicjalizacji pamięci, agent skasowany w trakcie biegu w tle) kończy się ODMOWĄ.
-    // Do K4 stał tu `|| getActiveMemory()`, więc narzędzie po cichu pisało i czytało katalog
-    // `brain/` agenta AKURAT wybranego w UI — a `_invocationAgentName` rozjeżdża się
-    // z aktywnym przy każdym biegu suba w tle i w drugiej zakładce czatu.
-    // Brak JAKIEJKOLWIEK tożsamości (ani znacznika, ani aktywnego agenta) = ścieżka jak dotąd.
+    // FAIL-CLOSED: nazwana tożsamość bez wpisu w `agentMemories` (pad inicjalizacji pamięci,
+    // agent skasowany w trakcie biegu w tle) kończy się ODMOWĄ, a nie fallbackiem na
+    // `getActiveMemory()` — taki fallback po cichu pisałby i czytał katalog `brain/` agenta
+    // AKURAT wybranego w UI, bo `_invocationAgentName` rozjeżdża się z aktywnym przy każdym
+    // biegu suba w tle i w drugiej zakładce czatu.
+    // Brak JAKIEJKOLWIEK tożsamości (ani znacznika, ani aktywnego agenta) = pamięć aktywnego agenta.
     return agentName ? agentManager?.getAgentMemory?.(agentName) : agentManager?.getActiveMemory?.();
 }
 
@@ -185,7 +185,7 @@ export function createMemorySaveTool() {
                     return { success: false, error: t('mcp.memory_save.no_agent') };
                 }
 
-                // E2.8 D2 (S22): ephemeral „Na teraz" state lives IN brain.md, not in a brain/ note.
+                // Ephemeral „Na teraz" state lives IN brain.md, not in a brain/ note.
                 // This is the ONE conscious exception to memory_save's create-only rule — the section
                 // is updated and pruned in place (add current state / remove outdated). Persistent
                 // facts still go to create-only brain/ notes below. Exception scoped to these sections.
@@ -226,7 +226,7 @@ export function createMemorySaveTool() {
                 const filename = makeMemoryNoteFilename(note.type, note.name);
                 const path = `${agentMemory.paths.brainNotes}/${filename}`;
 
-                // E2.7 K1: serialize the create-only check + write against the note path so two
+                // Serialize the create-only check + write against the note path so two
                 // parallel memory_save calls for the same name can't both pass the exists() gate
                 // and clobber each other. The second one now correctly sees NOTE_ALREADY_EXISTS.
                 const enqueue: <T>(path: string, fn: () => Promise<T>) => Promise<T> = agentMemory._enqueuePathWrite
@@ -244,15 +244,15 @@ export function createMemorySaveTool() {
                         error: t('mcp.memory_save.note_exists', { filename })
                     };
                 }
-                // S32 Z1b: kronika `brain.log` (karta „Log wpisów" w profilu → Pamięć). Ta ścieżka
+                // Kronika `brain.log` (karta „Log wpisów" w profilu → Pamięć). Ta ścieżka
                 // pisze notatkę adapterem wprost, nie przez `AgentMemory.writeBrainNote`, więc wpis
                 // musi powstać tutaj. Best-effort — `appendBrainLog` nigdy nie rzuca.
                 await agentMemory.appendBrainLog?.('create', filename, 'memory_save');
-                // AUD-bledy-029: NOTATKA JEST JUŻ NA DYSKU. Przebudowa indeksu to osobny krok
-                // i osobny `try` — od K4 (gotcha 9 w `modules/memory/CLAUDE.md`) `rebuildBrainIndex`
-                // jest fail-closed i RZUCA przy niepewnym odczycie brain.md, więc jej pad
-                // zamieniał udany zapis w `{success:false}`. Model ponawiał wtedy `memory_save`
-                // i odbijał się o create-only (`note_already_exists`), a user słyszał „nie zapisałem"
+                // NOTATKA JEST JUŻ NA DYSKU. Przebudowa indeksu to osobny krok i osobny `try` —
+                // `rebuildBrainIndex` (gotcha 9 w `modules/memory/CLAUDE.md`) jest fail-closed
+                // i RZUCA przy niepewnym odczycie brain.md, więc jej pad zamieniałby udany zapis
+                // w `{success:false}`: model ponawiałby wtedy `memory_save` i odbijał się
+                // o create-only (`note_already_exists`), a user słyszałby „nie zapisałem"
                 // o pliku, który powstał. Meldunek ma opisywać STAN: fakt zapisany, indeks stary.
                 let indexStale = false;
                 try {

@@ -1,7 +1,7 @@
 /**
- * modules/embedding/tokens.ts — estymacja tokenów + przycinanie do budżetu (B.5 EB-13, B.6 GM-04).
+ * modules/embedding/tokens.ts — estymacja tokenów + przycinanie do budżetu.
  *
- * DLACZEGO NA PIECHOTĘ: prawdziwy tokenizator (tiktoken) wyleciał z bundla w E1.7 — ważył
+ * DLACZEGO NA PIECHOTĘ: prawdziwy tokenizator (tiktoken) wyleciał z bundla - ważył
  * więcej niż cała reszta pluginu. Zostaje kalibracja „znaki / {@link TOKEN_CHARS_PER_TOKEN}",
  * czyli przybliżenie liczone dla angielszczyzny. Polski tekst ma tokeny KRÓTSZE, więc ta
  * estymata potrafi zaniżyć realną liczbę tokenów — dlatego wołacz nie tnie do samego limitu

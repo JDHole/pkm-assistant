@@ -1,10 +1,9 @@
 /**
- * K19 (AUD-security-117 / 131) — kolejka wiadomości czatu wozi PROWENIENCJĘ razem z tekstem.
- *
- * Do K19 `_queuedMessage` był gołym stringiem, a oba dreny (kontynuacja pętli w
- * `_chatBeforeContinue` i `set_generating(false)`) nadawały mu twardo `HUMAN_MESSAGE_META`.
- * Tekst maszynowy zakolejkowany w trakcie tury — np. treść artefaktu wstawiona w pole
- * wpisywania przez `artifactSummon` — wracał więc z przywilejami człowieka.
+ * Kolejka wiadomości czatu wozi PROWENIENCJĘ razem z tekstem: `_queuedMessage` nie jest gołym
+ * stringiem, tylko niesie meta z origin. Gdyby oba dreny (kontynuacja pętli w
+ * `_chatBeforeContinue` i `set_generating(false)`) nadawały mu twardo `HUMAN_MESSAGE_META`,
+ * tekst maszynowy zakolejkowany w trakcie tury - np. treść artefaktu wstawiona w pole
+ * wpisywania przez `artifactSummon` - wracałby z przywilejami człowieka.
  */
 import test from 'ava';
 import { readFileSync } from 'fs';
@@ -73,7 +72,7 @@ test('dren kolejki maszynowej NIE zasila rejestru adresów (web_read dalej odmaw
     t.is(registered, 0, 'registerUrlsFromText nie może zostać nawet zawołane');
 });
 
-test('dren kolejki ludzkiej zasila rejestr (regresja K7 nie wraca)', t => {
+test('dren kolejki ludzkiej zasila rejestr adresów', t => {
     const queued = readQueuedMessage(queueChatMessage('zobacz https://ok.example', HUMAN_MESSAGE_META))!;
     let registered = 0;
     t.is(registerUrlsIfHuman(queued.text, queued.meta, () => { registered += 1; return 1; }), 1);
@@ -93,7 +92,7 @@ const streamingCode = streamingSource
 test('żadna gałąź opróżniania kolejki nie nadaje HUMAN_MESSAGE_META', t => {
     t.false(
         streamingCode.includes('HUMAN_MESSAGE_META'),
-        'twarda pieczątka człowieka w chat_streaming.ts = powrót AUD-security-117/131',
+        'twarda pieczątka człowieka w chat_streaming.ts nadawałaby przywileje człowieka tekstowi maszynowemu',
     );
 });
 
@@ -111,7 +110,7 @@ test('do kolejki wchodzi się wyłącznie przez queueChatMessage', t => {
     t.is(assignments.length, 1, `nieoczekiwane przypisania do kolejki: ${assignments.join(' | ')}`);
 });
 
-// ── AUD-bledy-015: slot kolejki należy do ZAKŁADKI, nie do widoku ──
+// ── slot kolejki należy do ZAKŁADKI, nie do widoku ──
 // `set_generating(false)` leci także z `_switchTab` (krok 5), więc dren budził się u agenta,
 // który akurat jest na wierzchu: wiadomość napisana do Jaskra jechała modelem Borysa, jego
 // promptem, pamięcią i zestawem narzędzi. Slot wozi więc też właściciela.
@@ -151,10 +150,10 @@ test('pusty slot i pusty widok nie wywracają porównania', t => {
     t.false(queuedOwnerMatches(slot, null));
 });
 
-// ── AUD-testy-024: DECYZJA DRENU jako zachowanie, nie napis w źródle ──
-// Do tej naprawy „czy właściciel kolejki się zgadza" pilnował wyłącznie regex
-// `/queuedOwnerMatches\(/` na tekście `chat_streaming.ts` — mutacja
-// `if (false && !queuedOwnerMatches(...))` zostawiała napis i cały pakiet zielony.
+// ── DECYZJA DRENU jako zachowanie, nie napis w źródle ──
+// Sam regex `/queuedOwnerMatches\(/` na tekście `chat_streaming.ts` nie wystarcza jako
+// strażnik: mutacja `if (false && !queuedOwnerMatches(...))` zostawiałaby napis w źródle,
+// mimo że „czy właściciel kolejki się zgadza" przestałoby być realnie sprawdzane.
 
 const jaskier = { agentName: 'Jaskier', tabKey: 'tab-jaskier' };
 
@@ -163,10 +162,10 @@ test('dren: zgodny właściciel + brak trwającej tury → send', t => {
     const d = evaluateQueuedDrain(slot, jaskier, { isGenerating: false });
     t.is(d.action, 'send');
     t.is(d.queued?.text, 'zapisz to');
-    t.is(d.queued?.meta.origin, 'human', 'dren oddaje pieczątkę, z którą wiadomość weszła (K19)');
+    t.is(d.queued?.meta.origin, 'human', 'dren oddaje pieczątkę, z którą wiadomość weszła');
 });
 
-test('dren: rozjazd zakładki → wait_owner, wiadomość ZOSTAJE (AUD-bledy-015)', t => {
+test('dren: rozjazd zakładki → wait_owner, wiadomość ZOSTAJE', t => {
     const slot = queueChatMessage('zapisz to', HUMAN_MESSAGE_META, jaskier);
     const d = evaluateQueuedDrain(slot, { agentName: 'Borys', tabKey: 'tab-borys' }, { isGenerating: false });
     t.is(d.action, 'wait_owner');
@@ -193,17 +192,17 @@ test('dren: slot bez właściciela (stary kształt) jedzie jak dotąd', t => {
     t.is(evaluateQueuedDrain('goły string', jaskier, { isGenerating: false }).action, 'send');
 });
 
-// ── AUD-testy-024: STOP kasuje slot kolejki (AUD-bledy-055) ──
+// ── STOP kasuje slot kolejki ──
 
 test('Stop: pełny slot → kasujemy i oddajemy tekst do PUSTEGO pola wpisywania', t => {
     const slot = queueChatMessage('zapisz to', HUMAN_MESSAGE_META, jaskier);
     const d = evaluateStopQueueCancel(slot, '');
     t.true(d.clearSlot, 'bez kasowania slot leci do modelu 100 ms po kliknięciu Stop');
-    t.is(d.restoreText, 'zapisz to', 'tekst nie ginie — user widzi, co przerwał');
+    t.is(d.restoreText, 'zapisz to', 'tekst nie ginie - user widzi, co przerwał');
     t.is(d.cancelled?.text, 'zapisz to');
 });
 
-test('Stop: szkic w polu jest ważniejszy niż odzyskana kopia (duch Z3)', t => {
+test('Stop: szkic w polu jest ważniejszy niż odzyskana kopia', t => {
     const slot = queueChatMessage('zakolejkowane', HUMAN_MESSAGE_META, jaskier);
     const d = evaluateStopQueueCancel(slot, 'szkic, którego user nie wysłał');
     t.true(d.clearSlot, 'slot i tak kasujemy — Stop znaczy Stop');

@@ -1,12 +1,12 @@
 /**
- * Licznik wyszukiwań webowych (E3.3, DEC L13-4).
+ * Licznik wyszukiwań webowych.
  *
  * **INFORMACYJNY, NIGDY BLOKUJĄCY.** User ma WIDZIEĆ ile zapytań zjadł u płatnego
  * dostawcy względem darmowych progów — plugin nie odcina mu wyszukiwania, gdy próg
  * minie. Zero twardych limitów w tym pliku i w jego callerach.
  *
  * Liczymy TYLKO dostawców „lepszych niż Jina" (`COUNTED_PROVIDERS`). Jina jest
- * darmową podłogą (DEC L13-3) i nie ma sensownego progu do pokazania; SearXNG to
+ * darmową podłogą i nie ma sensownego progu do pokazania; SearXNG to
  * self-host usera — jego limitem jest jego własna maszyna.
  *
  * Kształt stanu w `settings.pkmAssistant.webSearch.usage`:

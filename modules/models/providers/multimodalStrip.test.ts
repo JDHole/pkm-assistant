@@ -5,12 +5,10 @@ import { makeCtx } from '../testing/harness.js';
 import type { OpenAiRequestMessage } from '../contracts.js';
 
 /**
- * AUD-code-review-021 (LOW): budowa żądania podmieniała treść wiadomości złożonej z samego
- * obrazu na zaszyty polski string `'[Obraz pominiety — model nie obsluguje vision]'` (bez
- * ogonków), mimo że rodzina komunikatów o braku vision (`chat.streaming.model_no_vision` /
- * `oczko_no_vision`) ma klucze w `core/i18n`. Ten tekst wchodzi do transkryptu WIDZIANEGO
- * przez model (i do zapisu sesji) — dziś idzie przez `t('model.image_stripped')`, więc
- * respektuje `settings.language` tak jak reszta komunikatów. (B.6 BA-15/BA-16)
+ * Budowa żądania podmienia treść wiadomości złożonej z samego obrazu na komunikat
+ * o braku wsparcia dla vision. Ten tekst wchodzi do transkryptu WIDZIANEGO przez model
+ * (i do zapisu sesji) - idzie przez `t('model.image_stripped')`, więc respektuje
+ * `settings.language` tak jak reszta komunikatów, zamiast być zaszytym stringiem.
  */
 function transform(messages: OpenAiRequestMessage[], modelKey = 'llama3'): OpenAiRequestMessage[] {
   const spec = openaiProvider.buildRequest({ model: modelKey, messages }, makeCtx({ modelId: modelKey }), false);
@@ -24,14 +22,14 @@ const imageOnlyMessage: OpenAiRequestMessage[] = [{
 
 test.afterEach(() => { setLocale('en'); });
 
-test('021: obraz pominięty na non-vision modelu idzie przez t(\'model.image_stripped\'), nie przez zaszyty string', t2 => {
+test('obraz pominięty na non-vision modelu idzie przez t(\'model.image_stripped\'), nie przez zaszyty string', t2 => {
   setLocale('en');
   const [msg] = transform(imageOnlyMessage);
   t2.is(msg.content, t('model.image_stripped'));
   t2.not(msg.content, '[Obraz pominiety — model nie obsluguje vision]', 'dawny zaszyty polski string (bez ogonków) ma zniknąć');
 });
 
-test('021: komunikat respektuje locale usera (pl vs en to różny tekst)', t2 => {
+test('komunikat respektuje locale usera (pl vs en to różny tekst)', t2 => {
   setLocale('en');
   const [en] = transform(imageOnlyMessage);
   setLocale('pl');
@@ -42,10 +40,10 @@ test('021: komunikat respektuje locale usera (pl vs en to różny tekst)', t2 =>
 });
 
 /**
- * N23 (luka L-10, B.6 BA-15): wiadomość MIESZANA (tekst + obraz) na modelu bez vision
- * traci TYLKO blok obrazu — tekst zostaje, wysyłka nie jest blokowana.
+ * Wiadomość MIESZANA (tekst + obraz) na modelu bez vision traci TYLKO blok obrazu -
+ * tekst zostaje, wysyłka nie jest blokowana.
  */
-test('L-10: wiadomość MIESZANA (tekst + obraz) na modelu bez vision traci tylko obraz', t2 => {
+test('wiadomość MIESZANA (tekst + obraz) na modelu bez vision traci tylko obraz', t2 => {
   setLocale('en');
   const mixed: OpenAiRequestMessage[] = [{
     role: 'user',
@@ -64,9 +62,9 @@ test('L-10: wiadomość MIESZANA (tekst + obraz) na modelu bez vision traci tylk
 });
 
 /**
- * N24 (luka L-10, B.13 VC-01): na modelu Z vision obraz przechodzi nietknięty.
+ * Na modelu Z vision obraz przechodzi nietknięty.
  */
-test('L-10: na modelu z vision obraz przechodzi nietknięty', t2 => {
+test('na modelu z vision obraz przechodzi nietknięty', t2 => {
   setLocale('en');
   const [msg] = transform(imageOnlyMessage, 'gpt-4o');
   const asText = JSON.stringify(msg.content);

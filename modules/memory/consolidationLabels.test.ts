@@ -1,5 +1,5 @@
 /**
- * consolidationLabels.test.js — S29 Z4/Z5: warstwa opisowa przebiegu konsolidacji.
+ * consolidationLabels.test.js - warstwa opisowa przebiegu konsolidacji.
  *
  * To jest jedyna część UI „Pulsu pamięci", którą da się przetestować node'em (modale importują
  * `obsidian`). Sprawdzamy dokładnie te rzeczy, na których stoi widok: etykieta paczki składana
@@ -30,10 +30,10 @@ import type { ConsolidationStepSpec } from './ConsolidationRun.js';
 setLocale('pl');
 
 /**
- * Kontrakt przebiegu w zakresie, którego ten test używa. Rzutowanie zostaje po TS-2
- * (konwersja `ConsolidationRun` na TypeScript) już tylko z jednego powodu: prawdziwy
+ * Kontrakt przebiegu w zakresie, którego ten test używa. Rzutowanie zostaje po konwersji
+ * `ConsolidationRun` na TypeScript już tylko z jednego powodu: prawdziwy
  * `getStep` zwraca `ConsolidationStep | null`, a ten test operuje wyłącznie na krokach,
- * które sam przed chwilą zbudował — więc czyta je bez każdorazowego `!`.
+ * które sam przed chwilą zbudował - więc czyta je bez każdorazowego `!`.
  */
 interface RunUnderTest extends ConsolidationRunLike {
     getStep(id: string): ConsolidationStepLike;

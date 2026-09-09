@@ -5,11 +5,10 @@
  * Po co osobny plik: `release.js` czyta stdin, więc pod AVA nie da się go uruchomić.
  * Wszystko, co da się sprawdzić bez stdinu, mieszka tutaj.
  *
- * Nazwa i zawartość PO cięciu z 2026-09-07: do tej daty plik nazywał się
- * `releaseGithub.ts` i trzymał też budowę żądania do REST API GitHuba, listę assetów
- * i maskowanie tokena — wszystko wycięte razem z publikacją przez `release.js` (tag
- * `push` uruchamia teraz `.github/workflows/release.yml`, patrz `RELEASE_PROCESS.md`).
- * Zostało tylko to, co dotyczy PRZYGOTOWANIA wydania, stąd nowa nazwa.
+ * Plik NIE trzyma budowy żądania do REST API GitHuba, listy assetów ani maskowania
+ * tokena — publikację robi `.github/workflows/release.yml` (tag `push` ją uruchamia,
+ * patrz `RELEASE_PROCESS.md`), nie `release.js`. Tutaj mieszka tylko to, co dotyczy
+ * PRZYGOTOWANIA wydania.
  *
  * Plik jest świadomą sierotą grafu produkcyjnego — woła go wydanie, nie kod wtyczki.
  */

@@ -2,23 +2,23 @@
  * SubAgentRunner
  * Unified runner for sub-agent tasks (replaces MinionRunner + MasterRunner).
  * Role determines behavior: researcher (search/prep) vs strategist (analyze/plan).
- * E2.1: pętla tool-callingu wyciągnięta do modules/agent-loop (runAgentLoop) — wspólna
- * z czatem (D11). SubAgentRunner buduje store/tools/limity/egzekutor i mapuje wynik.
+ * Pętla tool-callingu jest wyciągnięta do modules/agent-loop (runAgentLoop) - wspólna
+ * z czatem. SubAgentRunner buduje store/tools/limity/egzekutor i mapuje wynik.
  */
 import { runAgentLoop, ArrayMessageStore } from '../agent-loop/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
 import { getLimits } from '../../config/limits.js';
-// AUD-bledy-013: „co jest porażką narzędzia" liczy ta sama funkcja, co status chipa w czacie.
+// „Co jest porażką narzędzia" liczy ta sama funkcja, co status chipa w czacie.
 import { resolveWorkPrompt, maskSensitiveData, toolResultStatus } from '../../core/index.js';
 import { DEFAULT_SUBAGENT_FRAME_PROMPT } from './framePrompt.js';
-// E2.5: rozpoznaj stare nazwy retrieval przy budowie whitelisty (fail-safe, gdyby
-// config nie przeszedł migracji przez loader) — np. vault_grep → search.
-// D18: jednolity domyślny zestaw narzędzi workera (brak podziału research/strateg).
+// Rozpoznaje stare nazwy retrieval przy budowie whitelisty (fail-safe, gdyby
+// config nie przeszedł migracji przez loader) - np. vault_grep → search.
+// Jednolity domyślny zestaw narzędzi workera (brak podziału research/strateg).
 import { DEPRECATED_TOOL_RENAMES, DEFAULT_SUB_AGENT_TOOLS } from './SubAgentLoader.js';
 import type { SubAgentData } from './types.js';
-// F1 (przebudowa subów 2026): bieg suba jest BYTEM w rejestrze (`plugin.subTaskRegistry`).
-// Sam rejestr przychodzi z pluginu (DI), stąd tylko typ — runner go nie tworzy.
+// Bieg suba jest BYTEM w rejestrze (`plugin.subTaskRegistry`).
+// Sam rejestr przychodzi z pluginu (DI), stąd tylko typ - runner go nie tworzy.
 import type { SubTask, SubTaskOrigin } from './SubTaskRegistry.js';
 // TS-any: these services are plugin-managed dynamic runtime adapters.
 type RunnerBoundary = any;
@@ -27,15 +27,15 @@ type RunOptions = {
     delegationDepth?: number;
     scopeFolders?: string[];
     /**
-     * K11 (AUD-security-072): whitelista narzędzi WOŁAJĄCEGO (suba, który zlecił ten bieg).
-     * Trzeci składnik przecięcia w `_getTools` obok configu dziecka i widoczności agenta —
+     * Whitelista narzędzi WOŁAJĄCEGO (suba, który zlecił ten bieg).
+     * Trzeci składnik przecięcia w `_getTools` obok configu dziecka i widoczności agenta -
      * bez niego wnuk odpalony przez read-only suba dostawał pełną whitelistę agenta głównego.
      * Brak = piętro 1 (zlecenie z czatu), czyli przecięcie jak dotąd.
      */
     callerToolNames?: string[];
     /**
-     * K4 (AUD-security-050): tryb autonomii TURY, która zleciła ten bieg — zamrożony w chwili
-     * zlecenia, dokładnie jak `scopeFolders` w S33. Delegacja z czatu jest od rundy 3 zawsze
+     * Tryb autonomii TURY, która zleciła ten bieg - zamrożony w chwili
+     * zlecenia, dokładnie jak `scopeFolders`. Delegacja z czatu jest zawsze
      * w tle, więc lustro `plugin.currentAutonomy` zmienia się pod biegiem przy każdym
      * przełączeniu zakładki. Brak wartości = stare zachowanie (lustro jako fallback).
      */
@@ -43,34 +43,35 @@ type RunOptions = {
     modelTimeout?: number;
     shouldAbort?: () => boolean;
     /**
-     * Z2 (FAIL 4): sygnał „sub dostał slot bramki" — runner przekazuje go pętli 1:1
+     * Sygnał „sub dostał slot bramki" - runner przekazuje go pętli 1:1
      * (`RunAgentLoopOptions.onGateAdmitted`) i sam go nie interpretuje. Czyta go
      * `DelegateTool`, żeby budżet zadania liczył czas ROBOTY, a nie stania w kolejce.
      */
     onGateAdmitted?: () => void;
-    /** F2: adres zwrotny zlecenia — leci 1:1 do `registry.create`. */
+    /** Adres zwrotny zlecenia - leci 1:1 do `registry.create`. */
     origin?: SubTaskOrigin;
-    /** F2: bieg w tle (wołający nie czeka na wynik) — leci 1:1 do `registry.create`. */
+    /** Bieg w tle (wołający nie czeka na wynik) - leci 1:1 do `registry.create`. */
     background?: boolean;
     /**
-     * F2: hak „byt już istnieje". Wołany ZARAZ po `registry.create`, zanim runner zrobi
-     * cokolwiek awaitowalnego — dzięki temu `DelegateTool` może oddać modelowi `task_id`
+     * Hak „byt już istnieje". Wołany ZARAZ po `registry.create`, zanim runner zrobi
+     * cokolwiek awaitowalnego - dzięki temu `DelegateTool` może oddać modelowi `task_id`
      * biegu, który dopiero się zaczyna. Bez rejestru NIE jest wołany.
      */
     onTaskCreated?: (task: SubTask) => void;
 };
 /**
- * F5: jak sub ZSZEDŁ z biegu. Trzy pierwsze wartości przychodzą wprost z `runAgentLoop`
- * (`RunAgentLoopResult.stoppedBy`), czwarta — `'error'` — powstaje TUTAJ, w gałęzi `catch`
+ * Jak sub ZSZEDŁ z biegu. Trzy pierwsze wartości przychodzą wprost z `runAgentLoop`
+ * (`RunAgentLoopResult.stoppedBy`), czwarta - `'error'` - powstaje TUTAJ, w gałęzi `catch`
  * runnera: pętla nigdy nie oddaje `'error'`, bo przy wyjątku po prostu rzuca dalej.
  */
 export type SubRunStoppedBy = 'natural' | 'backstop' | 'abort' | 'error';
 
 /**
- * F5: zwrotka `runTask`. Do F5 gałąź `catch` oddawała NORMALNY wynik z tekstem błędu w polu
- * `result` i bez żadnej flagi — `DelegateTool` owijał to w `{success:true}`, więc dla agenta
- * zlecającego padnięty sub wyglądał identycznie jak sub, który zadanie domknął. Stąd dwa
- * nowe pola: `stoppedBy` (sposób zejścia) i `failed` (obecne WYŁĄCZNIE w gałęzi catch).
+ * Zwrotka `runTask`. Bez pól `stoppedBy`/`failed` gałąź `catch` oddawałaby NORMALNY wynik
+ * z tekstem błędu w polu `result` i bez żadnej flagi - `DelegateTool` owijałby to
+ * w `{success:true}`, więc dla agenta zlecającego padnięty sub wyglądałby identycznie
+ * jak sub, który zadanie domknął. Stąd dwa pola: `stoppedBy` (sposób zejścia) i `failed`
+ * (obecne WYŁĄCZNIE w gałęzi catch).
  */
 export type SubRunResult = {
     result: string;
@@ -88,8 +89,8 @@ type ToolDefinition = { name: string; description: string; inputSchema: unknown;
 type ErrLike = { message?: unknown; error?: unknown; details?: { message?: unknown }; cause?: { message?: unknown } };
 
 /**
- * Licznik WYWOŁAŃ suba w tym procesie — daje krótki, unikalny sufiks etykiety trace
- * (`sub/pkm-sub#3`). Poligon F2: bez niego `delegate` z listą `tasks` odpalał N równoległych
+ * Licznik WYWOŁAŃ suba w tym procesie - daje krótki, unikalny sufiks etykiety trace
+ * (`sub/pkm-sub#3`). Bez niego `delegate` z listą `tasks` odpalał N równoległych
  * workerów piszących w trace pod TĄ SAMĄ etykietą i przebiegów nie dało się rozdzielić.
  *
  * Dlaczego licznik, a nie czas jak w pętli głównej (`harness/Tester#15-41-51`): równoległe suby
@@ -98,8 +99,8 @@ type ErrLike = { message?: unknown; error?: unknown; details?: { message?: unkno
 let _subCallSeq = 0;
 
 /**
- * Bezpiecznik księgowości (F1): wołanie rejestru SubTask NIE MOŻE zmienić wyniku `runTask`
- * ani wywrócić biegu suba. Sam rejestr jest fail-soft w środku — to drugi pas, na wypadek
+ * Bezpiecznik księgowości: wołanie rejestru SubTask NIE MOŻE zmienić wyniku `runTask`
+ * ani wywrócić biegu suba. Sam rejestr jest fail-soft w środku - to drugi pas, na wypadek
  * gdyby `plugin.subTaskRegistry` okazał się czymś innym niż rejestrem.
  */
 function _safeRegistry<T>(fn: () => T): T | undefined {
@@ -112,26 +113,26 @@ function _safeRegistry<T>(fn: () => T): T | undefined {
 }
 
 /**
- * F1 (weryfikacja opus, werdykt 19.08): sufit deliverable dla `delegate`/`agent_delegate` NIE
- * MOŻE wyjść niższy niż ogólny sufit TEGO suba (`config.max_tool_result_length` — per-sub
- * override edytowalny w SubAgentEditorModal, patrz `runTask` linia z `maxResultLen`). Bez tej
- * funkcji sub skonfigurowany np. na 100k dostawałby wynik zagnieżdżonej delegacji ścięty do
- * 60k — naprawa z 19.08 OBNIŻAŁABY mu sufit zamiast go podnosić. Czat (`chat_streaming.ts`)
- * tego problemu nie ma, bo tam nie istnieje per-agent override (jeden wspólny sufit dla
- * wszystkich agentów) — tu bierzemy WIĘKSZY z dwóch. `deliverableDefault === 0` (świadome
+ * Sufit deliverable dla `delegate`/`agent_delegate` NIE MOŻE wyjść niższy niż ogólny sufit
+ * TEGO suba (`config.max_tool_result_length` - per-sub override edytowalny
+ * w SubAgentEditorModal, patrz `runTask` linia z `maxResultLen`). Bez tej funkcji sub
+ * skonfigurowany np. na 100k dostawałby wynik zagnieżdżonej delegacji ścięty do 60k -
+ * taki sufit OBNIŻAŁBY mu limit zamiast go podnosić. Czat (`chat_streaming.ts`) tego
+ * problemu nie ma, bo tam nie istnieje per-agent override (jeden wspólny sufit dla
+ * wszystkich agentów) - tu bierzemy WIĘKSZY z dwóch. `deliverableDefault === 0` (świadome
  * „bez limitu" na poziomie globalnego `subagent_result_max_chars`) zostaje zerem: zwykły
  * `Math.max` by je zepsuł (0 przegrywa z każdą dodatnią liczbą), a `AgentLoop._truncateResult`
- * przy cap<=0 w ogóle nie tnie — więc zero musi zostać zerem, nie zamienić się w 60000.
+ * przy cap<=0 w ogóle nie tnie - więc zero musi zostać zerem, nie zamienić się w 60000.
  *
  * JEDNA funkcja dla obu miejsc, które o tym mówią (`loopLimits` w `runTask` i blok BUDŻET
- * w `_buildTaskPrompt`, F2) — te dwa miejsca już raz się rozjechały (prompt obiecywał inny
- * sufit niż runtime realnie egzekwował), więc licząc to niezależnie w dwóch miejscach
+ * w `_buildTaskPrompt`) - te dwa miejsca łatwo się rozjeżdżają (prompt obiecuje inny
+ * sufit niż runtime realnie egzekwuje), więc licząc to niezależnie w dwóch miejscach
  * ryzykujemy powtórkę tego samego błędu.
  *
- * Review lidera (ten sam dzień): `subCommonCap` TEŻ może wyjść zerem — `config.max_tool_result_length`
- * to pole edytowalne per sub w SubAgentEditorModal, puste pole zapisuje się jako 0. Zero po
- * KTÓREJKOLWIEK stronie znaczy „bez limitu" i musi wygrać: semantycznie 0 to NAJWIĘKSZY możliwy
- * sufit (nieskończoność), ale liczbowo jest najmniejszy, więc goły `Math.max` by go przegrał.
+ * `subCommonCap` TEŻ może wyjść zerem - `config.max_tool_result_length` to pole edytowalne
+ * per sub w SubAgentEditorModal, puste pole zapisuje się jako 0. Zero po KTÓREJKOLWIEK
+ * stronie znaczy „bez limitu" i musi wygrać: semantycznie 0 to NAJWIĘKSZY możliwy sufit
+ * (nieskończoność), ale liczbowo jest najmniejszy, więc goły `Math.max` by go przegrał.
  */
 function _deliverableResultCap(subCommonCap: number, deliverableDefault: number): number {
     return (subCommonCap === 0 || deliverableDefault === 0) ? 0 : Math.max(subCommonCap, deliverableDefault);
@@ -162,47 +163,47 @@ export class SubAgentRunner {
      * @param {Object} config - Sub-agent config from SubAgentLoader
      * @param {Object} model - ChatModel instance
      * @param {Object} [options]
-     * @param {number} [options.delegationDepth=0] - S33 Z1: piętro delegacji, na którym stoi ten
+     * @param {number} [options.delegationDepth=0] - piętro delegacji, na którym stoi ten
      *   sub (1 = odpalony z głównego czatu). Wędruje do `MCPClient.executeToolCall`, żeby
      *   `delegate` wołany z wnętrza suba wiedział, jak głęboko już jesteśmy.
-     * @param {string[]} [options.scopeFolders] - S33 Z1: foldery ze `scope.folders` custom suba.
-     *   Dodatkowe (koniunkcyjne) zawężenie ścieżek vaultowych — patrz AccessGuard.
-     * @returns {Promise<SubRunResult>} — od F5 zwrotka niesie też `stoppedBy` (sposób zejścia)
+     * @param {string[]} [options.scopeFolders] - foldery ze `scope.folders` custom suba.
+     *   Dodatkowe (koniunkcyjne) zawężenie ścieżek vaultowych - patrz AccessGuard.
+     * @returns {Promise<SubRunResult>} - zwrotka niesie też `stoppedBy` (sposób zejścia)
      *   i `failed: true` w gałęzi błędu. Patrz `SubRunResult`.
      */
     async runTask(taskPrompt: string, agent: AgentLike, config: SubAgentData, model: RunnerBoundary, options: RunOptions = {}): Promise<SubRunResult> {
         const startTime = Date.now();
-        // S33 Z1: kaganiec delegacji + bariera scope — przenoszone przez cały bieg suba.
+        // Kaganiec delegacji + bariera scope - przenoszone przez cały bieg suba.
         const delegationDepth = Number(options.delegationDepth) || 0;
         const scopeFolders = Array.isArray(options.scopeFolders) && options.scopeFolders.length > 0
             ? options.scopeFolders
             : null;
-        // K4 (AUD-security-050): tryb pytań zamrożony na CAŁY bieg — jedna wartość dla wszystkich
+        // Tryb pytań zamrożony na CAŁY bieg - jedna wartość dla wszystkich
         // wywołań narzędzi, nawet gdy user w międzyczasie przeskoczy na zakładkę z `yolo`.
         const autonomy = typeof options.autonomy === 'string' && options.autonomy
             ? options.autonomy
             : null;
-        // D18: jeden generyczny worker — brak rozgałęzień po roli. Rola w config to etykieta.
+        // Jeden generyczny worker - brak rozgałęzień po roli. Rola w config to etykieta.
         const logTag = 'SubAgent';
 
         log.group(logTag, `Task: ${config.name} dla ${agent.name}`);
         log.debug(logTag, `Zadanie: "${taskPrompt.slice(0, 200)}..."`);
 
-        // F1: deklaracja PRZED `try`, bo domknięcie biegu robi też gałąź `catch` (fail).
+        // Deklaracja PRZED `try`, bo domknięcie biegu robi też gałąź `catch` (fail).
         const registry: RunnerBoundary = this.plugin?.subTaskRegistry || null;
         let subTask: SubTask | undefined;
 
         try {
-            // E1.5: limity z config/limits.js — JEDNO źródło prawdy. Per sub-agent config
+            // Limity z config/limits.js - JEDNO źródło prawdy. Per sub-agent config
             // nadal wygrywa; getLimits() daje aktualne kanoniczne defaulty (patrz limits.ts).
             const limits = getLimits(this.plugin?.env?.settings);
             const maxResultLen = config.max_tool_result_length ?? limits.max_tool_result_length;
-            // F1 (weryfikacja opus): sufit delegate/agent_delegate nie może być NIŻSZY niż
+            // Sufit delegate/agent_delegate nie może być NIŻSZY niż
             // sufit tego suba (patrz komentarz przy `_deliverableResultCap`).
             const deliverableResultCap = _deliverableResultCap(maxResultLen, limits.subagent_result_max_chars);
-            // E2.2: trace pętli sub-agenta → .pkm-assistant/logs/trace.log.
+            // Trace pętli sub-agenta → .pkm-assistant/logs/trace.log.
             // traceLog przychodzi z plugin (DI z DelegateTool); suby dostają trace za darmo, bez hooków.
-            // Poligon F2: etykieta `sub/<nazwa|rola>#<nr wywołania>` — konwencja pętli głównej
+            // Etykieta `sub/<nazwa|rola>#<nr wywołania>` - konwencja pętli głównej
             // (`chat/<agent>#<id sesji>`, `harness/<agent>#<runId>`). Bez numeru N równoległych
             // workerów z jednego `delegate` pisało pod wspólną etykietą i nie dało się ich rozdzielić.
             // Czytelnicy trace dopasowują etykietę PREFIKSOWO (patrz `scenarios/_asserts.ts` w repo harnessu).
@@ -212,15 +213,15 @@ export class SubAgentRunner {
                 minIterations: config.min_iterations || 1,
                 perCallTimeoutMs: options.modelTimeout || config.model_timeout || limits.delegation_timeout_ms,
                 maxToolResultLength: maxResultLen,
-                // Front A: watchdog ciszy (chunk przezbraja budzik) + skrót dorobku przy padzie
+                // Watchdog ciszy (chunk przezbraja budzik) + skrót dorobku przy padzie
                 // finalnej syntezy. Zegar ścienny wyżej zostaje awaryjnym sufitem.
                 stallTimeoutMs: limits.subagent_stall_timeout_ms,
                 salvageMaxChars: limits.subagent_salvage_max_chars,
-                // Werdykt 19.08 (ten sam sufit też W PĘTLI SUBA): wynik zagnieżdżonej delegacji
+                // Ten sam sufit obowiązuje też W PĘTLI SUBA: wynik zagnieżdżonej delegacji
                 // (sub deleguje głębiej, max_delegation_depth > 1) to DELIVERABLE, nie zrzut
-                // narzędzia — dokładnie ten sam wyjątek co w turze czatu (chat_streaming.ts),
-                // z tego samego źródła configu. Bez tego wracał przycięty wspólnym 15k.
-                // F1 (weryfikacja opus): NIE przelot wprost jak w czacie — czat nie ma per-agent
+                // narzędzia - dokładnie ten sam wyjątek co w turze czatu (chat_streaming.ts),
+                // z tego samego źródła configu. Bez tego wracałby przycięty wspólnym 15k.
+                // NIE przelot wprost jak w czacie - czat nie ma per-agent
                 // override, sub ma (`config.max_tool_result_length`), więc mapa nie może nikomu
                 // obniżyć sufitu; `_deliverableResultCap` bierze większy z dwóch (zero = bez limitu).
                 maxToolResultLengthPerTool: {
@@ -228,13 +229,13 @@ export class SubAgentRunner {
                     agent_delegate: deliverableResultCap,
                 },
             };
-            // F1: bieg suba zakładany w rejestrze POD TĄ SAMĄ etykietą co dotąd w trace —
+            // Bieg suba zakładany w rejestrze POD TĄ SAMĄ etykietą co w trace -
             // id taska = etykieta trace. Rejestr rozsyła kroki do konsumentów, a pierwszym
             // konsumentem jest trace.log (subskrypcja w SubTaskRegistry), więc format linii
             // nie zmienia się o bajt. Bez rejestru (stary plugin / test bez DI) lecimy
             // ścieżką dotychczasową: trace prosto z `traceLog.scope`.
             //
-            // F2: byt zakładamy NA SAMYM POCZĄTKU — przed budową promptu i przed pierwszym
+            // Byt zakładamy NA SAMYM POCZĄTKU - przed budową promptu i przed pierwszym
             // `await`. Delegacja w tle oddaje modelowi `task_id`, więc identyfikator musi
             // istnieć, zanim cokolwiek długiego się zacznie (budowa promptu sięga do dysku).
             subTask = registry
@@ -249,12 +250,12 @@ export class SubAgentRunner {
                     },
                     ...(options.background !== undefined ? { background: options.background } : {}),
                     ...(options.origin ? { origin: options.origin } : {}),
-                    // Front B (szyba): panel pokazuje, PO CO bieg wystartował. Skrót zadania,
+                    // Panel pokazuje, PO CO bieg wystartował. Skrót zadania,
                     // nie pełny prompt — sufit i maska siedzą w rejestrze.
                     taskPreview: taskPrompt,
                 }))
                 : undefined;
-            // F2: „byt istnieje" — hak dla wołacza (DelegateTool), pod tym samym bezpiecznikiem
+            // „Byt istnieje" - hak dla wołacza (DelegateTool), pod tym samym bezpiecznikiem
             // co reszta księgowości. Bez rejestru nie ma czego zgłaszać, więc hak milczy.
             if (subTask && typeof options.onTaskCreated === 'function') {
                 _safeRegistry(() => options.onTaskCreated!(subTask as SubTask));
@@ -266,10 +267,11 @@ export class SubAgentRunner {
                 : undefined;
             const trace = traceTee || this.plugin?.traceLog?.scope?.(label);
 
-            // AUD-bledy-013: pętla stawia `status:'error'` na kroku `tool.post` WYŁĄCZNIE po
-            // wyjątku egzekutora, a egzekutor suba z kontraktu nie rzuca — więc bieg, w którym
-            // padło każde narzędzie, wyglądał w trace.log i w pasku biegów jak bieg udany
-            // (`detailFromPost` w subTaskPanelModel miało martwą gałąź błędu). Znacznik liczy
+            // Pętla stawia `status:'error'` na kroku `tool.post` WYŁĄCZNIE po
+            // wyjątku egzekutora, a egzekutor suba z kontraktu nie rzuca - bez osobnego
+            // znacznika bieg, w którym padło każde narzędzie, wyglądałby w trace.log
+            // i w pasku biegów jak bieg udany (`detailFromPost` w subTaskPanelModel potrzebuje
+            // realnej gałęzi błędu, nie martwej). Znacznik liczy
             // `_executeTool` (ta sama funkcja, co status chipa w czacie), a doklejamy go do
             // KROKU PĘTLI, żeby nie mnożyć wpisów `tool.post` i nie zawyżać licznika wywołań.
             // Parowanie po KOLEJNOŚCI: pętla startuje wywołania w kolejności tablicy i emituje
@@ -290,7 +292,7 @@ export class SubAgentRunner {
             // Resolve tools: config.tools → role defaults
             const toolNames = this._resolveToolNames(config);
             const tools = this._getTools(toolNames, agent, options.callerToolNames);
-            // Fail-closed whitelist (E1.3 P8): the sub-agent may ONLY execute tools that
+            // Fail-closed whitelist: the sub-agent may ONLY execute tools that
             // survived the parent∩sub intersection in _getTools. _executeTool enforces this
             // so the direct-execution fallback cannot run a tool outside the whitelist.
             const allowedToolNames = new Set<string>(tools.map((td) => td.function.name));
@@ -300,14 +302,14 @@ export class SubAgentRunner {
                 { role: 'user', content: taskPrompt }
             ];
 
-            // E2.1: wspólna pętla (runAgentLoop). Store = ArrayMessageStore (system+user).
+            // Wspólna pętla (runAgentLoop). Store = ArrayMessageStore (system+user).
             // resolveTools = zamrożona lista jak dotąd. Obcinanie wyniku narzędzia przejmuje
-            // pętla (limits.maxToolResultLength) — _executeTool już nie truncuje.
+            // pętla (limits.maxToolResultLength) - _executeTool już nie truncuje.
             const store = new ArrayMessageStore(messages);
-            // F5: JEDYNY hak, jaki suby podpinają do pętli. `beforeContinue` leci przed KAŻDYM
+            // JEDYNY hak, jaki suby podpinają do pętli. `beforeContinue` leci przed KAŻDYM
             // kolejnym wywołaniem modelu, więc wiadomość wrzucona przez usera do rejestru
             // (panel biegów → `postMessage`) wchodzi do transkryptu suba dokładnie tam, gdzie
-            // model ją przeczyta — jak nudge, a nie jak przerwanie w połowie zdania.
+            // model ją przeczyta - jak nudge, a nie jak przerwanie w połowie zdania.
             // Bez rejestru (testy jednostkowe, stary bootstrap) hak NIE JEST podpinany.
             const steerHooks = (registry && subTask)
                 ? {
@@ -322,8 +324,8 @@ export class SubAgentRunner {
                 model,
                 store,
                 resolveTools: () => tools,
-                // AUD-bledy-013: numer wywołania łapiemy PRZY STARCIE (kolejność tablicy pętli),
-                // a nie przy zakończeniu — wywołania jednego batcha rozstrzygają się równolegle.
+                // Numer wywołania łapiemy PRZY STARCIE (kolejność tablicy pętli),
+                // a nie przy zakończeniu - wywołania jednego batcha rozstrzygają się równolegle.
                 executeToolCall: (toolCall) => {
                     const seq = toolCallSeq++;
                     return this._executeTool(toolCall as ToolCall, agent.name, allowedToolNames,
@@ -331,11 +333,11 @@ export class SubAgentRunner {
                         () => { failedToolCalls.add(seq); });
                 },
                 ...(steerHooks ? { hooks: steerHooks } : {}),
-                // Zwis subagentow, lokalny most, 2026: delegate po SWOIM timeoucie ubija bieg suba
+                // Delegate po SWOIM timeoucie ubija bieg suba, żeby sub nie wisiał w tle bez końca
                 // (abort streamu robi stopStream z kontrolki; flaga zatrzymuje pętlę między
                 // iteracjami, żeby porzucony sub nie mielił dalej na narzędziach).
                 ...(options.shouldAbort ? { shouldAbort: options.shouldAbort } : {}),
-                // Z2: przelot sygnału bramki do wołacza (DelegateTool uzbraja nim budzik zadania).
+                // Przelot sygnału bramki do wołacza (DelegateTool uzbraja nim budzik zadania).
                 ...(options.onGateAdmitted ? { onGateAdmitted: options.onGateAdmitted } : {}),
                 trace: loopTrace,
                 limits: loopLimits,
@@ -352,7 +354,7 @@ export class SubAgentRunner {
                 result: response.finalText || '',
                 duration_ms: Date.now() - startTime
             });
-            // F1: domknięcie bytu wynikiem (status z `stoppedBy`: abort → aborted, reszta → done).
+            // Domknięcie bytu wynikiem (status z `stoppedBy`: abort → aborted, reszta → done).
             if (subTask) {
                 _safeRegistry(() => registry?.finish?.(subTask, {
                     text: response.finalText || '',
@@ -368,8 +370,8 @@ export class SubAgentRunner {
                 toolCallDetails: response.toolCallDetails || [],
                 duration: Date.now() - startTime,
                 usage: response.usage || null,
-                // F5: sposób zejścia przestaje ginąć na granicy runnera. Do F5 wołacz
-                // (`DelegateTool` → agent zlecający) nie miał JAK odróżnić suba, który
+                // Sposób zejścia nie ginie na granicy runnera: bez tego pola wołacz
+                // (`DelegateTool` → agent zlecający) nie miałby JAK odróżnić suba, który
                 // zadanie domknął, od suba, któremu skończyły się iteracje i oddał
                 // zaślepkę backstopu.
                 stoppedBy: response.stoppedBy,
@@ -378,12 +380,11 @@ export class SubAgentRunner {
             const safeErrorMsg = _extractSafeErrorMessage(error);
             log.error(logTag, 'Task FAIL:', error, '| extracted:', safeErrorMsg);
             log.groupEnd();
-            // AUD-bledy-011: TEN SAM kształt bloku co przy udanym biegu (`subagent_call`) —
-            // te same pola nagłówka, status niesie treść `result`. Do naprawy pole `result`
-            // woziło goły komunikat wyjątku, a `roleFromEvent` w ogóle nie znało typu
-            // `subagent_error`, więc parser pliku sesji POMIJAŁ cały blok: padnięty bieg
-            // znikał z odtworzonej rozmowy i z pamięci długoterminowej. Zdanie jest to samo,
-            // które dostaje agent zlecający — plik sesji i wołacz mówią jedno.
+            // TEN SAM kształt bloku co przy udanym biegu (`subagent_call`) - te same pola
+            // nagłówka, status niesie treść `result`. Bez typu `subagent_error` znanego
+            // `roleFromEvent` parser pliku sesji pomijałby cały blok: padnięty bieg
+            // znikałby z odtworzonej rozmowy i z pamięci długoterminowej. Zdanie jest to samo,
+            // które dostaje agent zlecający - plik sesji i wołacz mówią jedno.
             await this._appendMemoryEvent(agent.name, {
                 type: 'subagent_error',
                 role: config.role || 'researcher',
@@ -391,7 +392,7 @@ export class SubAgentRunner {
                 result: t('subagent.error', { name: config.name, error: safeErrorMsg }),
                 duration_ms: Date.now() - startTime
             });
-            // F1: bieg mógł się nie założyć (błąd przed `create`) — wtedy nie ma czego domykać.
+            // Bieg mógł się nie założyć (błąd przed `create`) - wtedy nie ma czego domykać.
             if (subTask) _safeRegistry(() => registry?.fail?.(subTask, safeErrorMsg));
             return {
                 result: t('subagent.error', { name: config.name, error: safeErrorMsg }),
@@ -399,9 +400,9 @@ export class SubAgentRunner {
                 toolCallDetails: [],
                 duration: Date.now() - startTime,
                 usage: null,
-                // F5: JEDYNE miejsce, w którym `failed` się pojawia. `DelegateTool` czyta tę
+                // JEDYNE miejsce, w którym `failed` się pojawia. `DelegateTool` czyta tę
                 // flagę i oddaje modelowi uczciwe `success:false` zamiast sukcesu z tekstem
-                // błędu w środku (bieg live 2026-08-15: agent referował błąd jako wynik).
+                // błędu w środku - bez flagi agent zlecający referowałby błąd jako wynik.
                 stoppedBy: 'error',
                 failed: true,
             };
@@ -411,14 +412,14 @@ export class SubAgentRunner {
     /**
      * Dziennik biegu → plik aktywnej sesji WŁAŚCICIELA biegu.
      *
-     * K4 (AUD-security-091): `agentName` to agent, dla którego bieg wystartował — zamrożony
+     * `agentName` to agent, dla którego bieg wystartował - zamrożony
      * w chwili zlecenia (argument `runTask(…, agent, …)`, ten sam, który ląduje w `SubTask.agentName`).
-     * Do K4 adresatem był `getActiveMemory()`, czyli agent AKURAT wybrany w UI: delegacja z czatu
-     * leci od rundy 3 zawsze w tle, więc jedno przełączenie zakładki wsypywało treść zlecenia
+     * Gdyby adresatem był `getActiveMemory()` (agent AKURAT wybrany w UI), delegacja z czatu
+     * leci zawsze w tle, więc jedno przełączenie zakładki wsypywałoby treść zlecenia
      * i cały wynik suba do `sessions/active/` obcego agenta.
      *
      * Fail-closed: agent bez wpisu w `agentMemories` (pad inicjalizacji, skasowany w trakcie biegu)
-     * NIE dostaje podstawionej cudzej pamięci — po prostu nie zapisujemy dziennika.
+     * NIE dostaje podstawionej cudzej pamięci - po prostu nie zapisujemy dziennika.
      */
     async _appendMemoryEvent(agentName: string, event: Record<string, unknown>): Promise<void> {
         try {
@@ -439,13 +440,13 @@ export class SubAgentRunner {
      * Uses config.tools or role defaults.
      */
     _resolveToolNames(config: Pick<SubAgentData, 'tools'>): string[] {
-        // D18: jeden generyczny worker — jednolity domyślny zestaw narzędzi dla wszystkich subów.
+        // Jeden generyczny worker - jednolity domyślny zestaw narzędzi dla wszystkich subów.
         // config.tools (z YAML custom suba) nadal wygrywa. Przecięcie z uprawnieniami rodzica
-        // (parent∩sub) robi _getTools. E2.6: read/list mają scope vault|memory.
-        // S33: martwy kanał extraTools/allowExtraTools WYCIĘTY (flaga nigdy nie była podawana).
+        // (parent∩sub) robi _getTools. read/list mają scope vault|memory.
+        // Martwy kanał extraTools/allowExtraTools WYCIĘTY (flaga nigdy nie była podawana).
         const toolNames = [...(config.tools || DEFAULT_SUB_AGENT_TOOLS)];
 
-        // E2.5: przemapuj deprecated nazwy na kanoniczne (vault_grep → search itd.) + dedup,
+        // Przemapowuje deprecated nazwy na kanoniczne (vault_grep → search itd.) + dedup,
         // żeby whitelist nie wypadła pusta gdy config trzyma starą nazwę.
         const seen = new Set<string>();
         return toolNames
@@ -454,24 +455,24 @@ export class SubAgentRunner {
     }
 
     /**
-     * Build the sub-agent system prompt — D18 THIN template (jeden szablon dla wszystkich).
-     * „Piecz metodę, pulluj dane": sub NIE dostaje pamięci rodzica pushem (brain injection
-     * 12k USUNIĘTY). Jeśli potrzebuje pamięci — czyta ją sam (search/read/list scope=memory,
+     * Build the sub-agent system prompt - THIN template (jeden szablon dla wszystkich).
+     * „Piecz metodę, pulluj dane": sub NIE dostaje pamięci rodzica pushem (brak brain
+     * injection). Jeśli potrzebuje pamięci - czyta ją sam (search/read/list scope=memory,
      * pamięć własnego agenta) albo dostaje istotny fragment od rodzica w `context`.
      * `config.prompt` (metoda custom suba z KNOWLEDGE.md) ma miękki cap z `config/limits.js`
-     * (`subagent_prompt_max_chars`, default 24000) — obrona przed encyklopediami, ale
-     * konfigurowalna: instrukcja jest karmą dla modelu, nie wynikiem narzędzia (F4).
-     * Rola (F6) nie steruje treścią promptu.
+     * (`subagent_prompt_max_chars`, default 24000) - obrona przed encyklopediami, ale
+     * konfigurowalna: instrukcja jest karmą dla modelu, nie wynikiem narzędzia.
+     * Rola nie steruje treścią promptu.
      */
     async _buildTaskPrompt(agent: AgentLike, config: SubAgentData): Promise<string> {
-        // F4: limity czytamy RAZ — ten sam obiekt karmi cap instrukcji i blok BUDŻET niżej,
+        // Limity czytamy RAZ - ten sam obiekt karmi cap instrukcji i blok BUDŻET niżej,
         // więc prompt nie może obiecać modelowi czegoś innego, niż realnie dostał.
         const limits = getLimits(this.plugin?.env?.settings);
-        // F4: cap instrukcji custom suba przestał być hardcodem 6000 — to budżet
+        // Cap instrukcji custom suba to budżet
         // `subagent_prompt_max_chars` (default 24000), zmienialny w Ustawieniach → Limity.
         const configPromptCap = limits.subagent_prompt_max_chars;
 
-        // E2.8 B3: the fixed frame (header/pull/ZASADY) lives in framePrompt.js and is overridable
+        // The fixed frame (header/pull/ZASADY) lives in framePrompt.js and is overridable
         // (agent>global>factory). The mechanical sections below are still composed here and injected.
         const frame = resolveWorkPrompt(agent, 'subagent_frame_prompt', this.plugin?.env?.settings, DEFAULT_SUBAGENT_FRAME_PROMPT);
 
@@ -493,7 +494,7 @@ export class SubAgentRunner {
             const frontmatter = config.scope.frontmatter && Object.keys(config.scope.frontmatter).length
                 ? JSON.stringify(config.scope.frontmatter)
                 : 'brak frontmatter';
-            // S33 Z1: foldery są egzekwowane technicznie (bariera w łańcuchu uprawnień), reszta
+            // Foldery są egzekwowane technicznie (bariera w łańcuchu uprawnień), reszta
             // pól scope to nadal wskazówki. Model ma to wiedzieć, żeby nie próbował ich obchodzić.
             const foldersNote = config.scope.folders?.length
                 ? ' (EGZEKWOWANE technicznie — proba dostepu poza nie zostanie odrzucona)'
@@ -501,10 +502,10 @@ export class SubAgentRunner {
             scopeBlock = `SCOPE:\n- Foldery: ${folders}${foldersNote}\n- Frontmatter: ${frontmatter}\n- Sekcje: ${sections}\n- Przypiete notatki: ${pinned}\n\n`;
         }
 
-        // BUDŻET — spójny z runtime (runTask limits): iteracje + obcięcie wyniku narzędzia +
-        // wyjątek delegate/agent_delegate. F2 (weryfikacja opus): to zdanie i `loopLimits` w
-        // `runTask` MUSZĄ liczyć tą samą funkcją (`_deliverableResultCap`) — inaczej prompt
-        // znowu zacznie obiecywać subowi inny sufit niż ten, który realnie egzekwuje pętla.
+        // BUDŻET - spójny z runtime (runTask limits): iteracje + obcięcie wyniku narzędzia +
+        // wyjątek delegate/agent_delegate. To zdanie i `loopLimits` w
+        // `runTask` MUSZĄ liczyć tą samą funkcją (`_deliverableResultCap`) - inaczej prompt
+        // zacznie obiecywać subowi inny sufit niż ten, który realnie egzekwuje pętla.
         const maxIter = config.max_iterations || limits.subagent_max_iterations_worker;
         const maxLen = config.max_tool_result_length ?? limits.max_tool_result_length;
         const delegateCap = _deliverableResultCap(maxLen, limits.subagent_result_max_chars);
@@ -524,14 +525,15 @@ export class SubAgentRunner {
 
     /**
      * Get tool definitions from registry (filtered by allowed names).
-     * Sprint 04 MCP_PORZADEK_v1: sub-agent inherits parent agent's `mcp_servers[]` whitelist
-     * (intersection — sub-agent never sees a server the parent agent cannot see).
-     * K11 (AUD-security-072): na piętrze >1 dochodzi TRZECI składnik przecięcia — whitelista
+     * sub-agent inherits parent agent's `mcp_servers[]` whitelist
+     * (intersection - sub-agent never sees a server the parent agent cannot see).
+     * Na piętrze >1 dochodzi TRZECI składnik przecięcia - whitelista
      * suba, który ten bieg zlecił. `parentAgent` jest wtedy nadal agentem GŁÓWNYM, więc samo
-     * `filterByAgent` nie chroni: wnuk dostawał narzędzia, których jego rodzic w ogóle nie ma.
+     * `filterByAgent` nie chroni: bez tego trzeciego składnika wnuk dostawałby narzędzia,
+     * których jego rodzic w ogóle nie ma.
      * @param {string[]} toolNames - Tool names declared by sub-agent config
      * @param {Object} [parentAgent] - Parent agent (for mcp_servers whitelist intersection)
-     * @param {string[]} [callerToolNames] - K11: whitelista wołającego suba (koniunkcja).
+     * @param {string[]} [callerToolNames] - whitelista wołającego suba (koniunkcja).
      * @returns {Array} Tool definitions in OpenAI format
      */
     _getTools(
@@ -570,17 +572,17 @@ export class SubAgentRunner {
      * @param {string} [agentName] - Agent name for permission context
      * @param {Set<string>} [allowedToolNames] - Fail-closed whitelist (parent∩sub intersection).
      *   When provided, a tool call outside this set is refused BEFORE execution — this closes
-     *   the direct-execution fallback that previously ran any registered tool when MCPClient
-     *   was unavailable (E1.3 P8).
-     * @param {Object} [execOptions] - S33 Z1: kaganiec delegacji przenoszony do MCPClient.
+     *   the direct-execution fallback that would otherwise run any registered tool when MCPClient
+     *   is unavailable.
+     * @param {Object} [execOptions] - kaganiec delegacji przenoszony do MCPClient.
      * @param {number} [execOptions.delegationDepth] - piętro delegacji tego suba.
      * @param {string[]|null} [execOptions.scopeFolders] - foldery scope suba (koniunkcja z rodzicem).
-     * @param {string|null} [execOptions.autonomy] - K4: tryb pytań ZAMROŻONY przy zleceniu biegu.
-     * @param {Function} [onFailure] - AUD-bledy-013: sygnał „to wywołanie padło" dla telemetrii
+     * @param {string|null} [execOptions.autonomy] - tryb pytań ZAMROŻONY przy zleceniu biegu.
+     * @param {Function} [onFailure] - sygnał „to wywołanie padło" dla telemetrii
      *   biegu (`runTask` znaczy nim krok `tool.post`). Kontrakt „egzekutor NIE rzuca" zostaje
-     *   bez zmian — porażka wraca tekstem do transkryptu suba, a osobno znacznikiem do rejestru.
+     *   bez zmian - porażka wraca tekstem do transkryptu suba, a osobno znacznikiem do rejestru.
      * @returns {Promise<string>} Tool result as string.
-     *   E2.1: obcinanie do max_tool_result_length przejęła pętla (runAgentLoop limits.maxToolResultLength);
+     *   Obcinanie do max_tool_result_length przejęła pętla (runAgentLoop limits.maxToolResultLength);
      *   ten egzekutor już NIE truncuje — zwraca surowy string.
      */
     async _executeTool(toolCall: ToolCall, agentName: string, allowedToolNames: Set<string> | null = null, execOptions: Pick<RunOptions, 'delegationDepth' | 'scopeFolders' | 'autonomy'> = {}, onFailure?: () => void) {
@@ -594,41 +596,41 @@ export class SubAgentRunner {
             return t('subagent.tool_not_allowed', { name: toolCall.name });
         }
 
-        // AUD-bledy-013: obie ścieżki wykonania mierzą wynik JEDNĄ regułą (`toolResultStatus`).
-        // Porażka wraca do transkryptu suba tą samą linią co wyjątek (`subagent.tool_error` —
+        // Obie ścieżki wykonania mierzą wynik JEDNĄ regułą (`toolResultStatus`).
+        // Porażka wraca do transkryptu suba tą samą linią co wyjątek (`subagent.tool_error` -
         // po polsku dosłownie „Błąd narzędzia …"), więc model nie czyta awarii jako zwykłego
         // wyniku; pełny payload zostaje w komunikacie, nic nie ginie. Równolegle zapala się
         // znacznik dla telemetrii biegu (krok `tool.post` w `runTask`).
         const asTranscript = (result: unknown): string => {
-            // AUD-wydajnosc-098: `generate_image` niesie w SUKCESIE pełny base64 (obraz jest
-            // już zapisany w vaulcie i wskazany przez `path`/`note_path`) — czat go wycina przed
-            // wstawieniem do transkryptu (`chat_streaming.ts` — `delete copy.base64`), tu nikt
-            // tego nie robił. Sama normalizacja co w czacie, tylko bez gałęzi vision (sub nie
-            // renderuje obrazów inline — base64 nie ma tu żadnego konsumenta).
+            // `generate_image` niesie w SUKCESIE pełny base64 (obraz jest
+            // już zapisany w vaulcie i wskazany przez `path`/`note_path`) - czat go wycina przed
+            // wstawieniem do transkryptu (`chat_streaming.ts` - `delete copy.base64`), tu ta sama
+            // normalizacja jest potrzebna osobno. Sama normalizacja co w czacie, tylko bez gałęzi
+            // vision (sub nie renderuje obrazów inline - base64 nie ma tu żadnego konsumenta).
             const sanitized = stripImageBase64ForTranscript(toolCall.name, result);
             const text = typeof sanitized === 'string' ? sanitized : JSON.stringify(sanitized);
             if (toolResultStatus(sanitized) !== 'error') return text;
             onFailure?.();
-            // K8: komunikat błędu jadący do transkryptu suba idzie przez maskę — tak samo,
+            // Komunikat błędu jadący do transkryptu suba idzie przez maskę - tak samo,
             // jak ten z `catch` niżej.
             return t('subagent.tool_error', { name: toolCall.name, error: maskSensitiveData(text) });
         };
 
         try {
             // Route through MCPClient for permission + whitelist enforcement.
-            // E2.3 (D21): sub-agent dziedziczy tryb PYTAŃ po turze, która go zleciła.
-            // K4 (AUD-security-050): wartość jest ZAMROŻONA w `execOptions.autonomy` (podaje ją
+            // sub-agent dziedziczy tryb PYTAŃ po turze, która go zleciła.
+            // Wartość jest ZAMROŻONA w `execOptions.autonomy` (podaje ją
             // `runTask` z opcji zlecenia). Globalne lustro `plugin.currentAutonomy` zostaje
-            // wyłącznie jako fallback dla starych wołaczy, którzy autonomii nie przekazują —
-            // czytane w trakcie biegu dawało subowi tryb zakładki, na którą user właśnie przeskoczył.
+            // wyłącznie jako fallback dla starych wołaczy, którzy autonomii nie przekazują -
+            // czytane w trakcie biegu dawałoby subowi tryb zakładki, na którą user właśnie przeskoczył.
             if (this.mcpClient && agentName) {
                 const result = await this.mcpClient.executeToolCall(toolCall, agentName, {
                     autonomy: execOptions.autonomy ?? this.plugin?.currentAutonomy,
-                    // S33 Z1: głębokość delegacji + bariera scope suba jadą z biegu suba do
+                    // Głębokość delegacji + bariera scope suba jadą z biegu suba do
                     // klienta narzędzi (MCPClient wstrzykuje je dalej: do args / checkPermission).
                     delegationDepth: execOptions.delegationDepth,
                     scopeFolders: execOptions.scopeFolders,
-                    // K11 (AUD-security-072): whitelista TEGO suba jedzie dalej jako znacznik,
+                    // Whitelista TEGO suba jedzie dalej jako znacznik,
                     // żeby `delegate` policzył narzędzia wnuka względem niego, nie względem
                     // agenta głównego. Lista jest już przecięciem rodzic∩sub (patrz `runTask`).
                     ...(allowedToolNames ? { callerToolNames: [...allowedToolNames] } : {}),
@@ -636,12 +638,12 @@ export class SubAgentRunner {
                 return asTranscript(result);
             }
 
-            // Fallback: direct execution (when MCPClient unavailable). F2.13 (release 2.2.0/W3):
-            // ta ścieżka wywołuje `tool.execute()` wprost — omija `PermissionSystem.checkPermission`
+            // Fallback: direct execution (when MCPClient unavailable). Ta ścieżka wywołuje
+            // `tool.execute()` wprost - omija `PermissionSystem.checkPermission`
             // w całości (foldery, No-Go, admin_access, oś akcji), nie tylko `scopeFolders`. Jedyną
             // ochroną tutaj jest whitelista NAZW narzędzi wyżej. Gdy wołacz podał `scopeFolders`
             // (zamierzał ograniczyć suba do konkretnych folderów), fail-open by cicho podmieniło
-            // "zakres suba" na "cały vault" — fail-closed jest bezpieczniejsze niż milczące
+            // "zakres suba" na "cały vault" - fail-closed jest bezpieczniejsze niż milczące
             // rozszerzenie dostępu. Brak `scopeFolders` w execOptions (dawne zachowanie, testy
             // whitelisty) przechodzi bez zmian.
             if (Array.isArray(execOptions.scopeFolders) && execOptions.scopeFolders.length > 0) {
@@ -661,7 +663,7 @@ export class SubAgentRunner {
             if (typeof args === 'string') {
                 args = JSON.parse(args);
             }
-            // S33 Z1: ta ścieżka omija MCPClient, więc sama musi dołożyć znacznik głębokości —
+            // Ta ścieżka omija MCPClient, więc sama musi dołożyć znacznik głębokości -
             // inaczej `delegate` wołany tędy startowałby zawsze od zera (rekurencja bez kagańca).
             if ((execOptions.delegationDepth as number) > 0 && args && typeof args === 'object' && !Array.isArray(args)) {
                 args = { ...args, _invocationDelegationDepth: execOptions.delegationDepth };
@@ -670,7 +672,7 @@ export class SubAgentRunner {
             return asTranscript(result);
         } catch (error) {
             onFailure?.();
-            // K8: błąd narzędzia wraca do transkryptu suba — też przez maskę.
+            // Błąd narzędzia wraca do transkryptu suba - też przez maskę.
             return t('subagent.tool_error', {
                 name: toolCall.name,
                 error: maskSensitiveData(String((error as { message?: string }).message ?? error)),
@@ -680,20 +682,20 @@ export class SubAgentRunner {
 }
 
 /**
- * AUD-wydajnosc-098: `GenerateImageTool` zwraca w sukcesie pełny base64 zapisanego obrazu
- * (obok `path`/`note_path` — obraz JEST już w vaulcie, base64 jest tu wyłącznie dla ścieżki
+ * `GenerateImageTool` zwraca w sukcesie pełny base64 zapisanego obrazu
+ * (obok `path`/`note_path` - obraz JEST już w vaulcie, base64 jest tu wyłącznie dla ścieżki
  * czatu z vision). Bez tej normalizacji medianowy obraz (~594 000 znaków base64, dane realne
- * z `Attachments/generated`) zjadał 99% sufitu `max_tool_result_length` transkryptu suba
- * (domyślnie 15000 — `config/limits.ts`), wypychając poza limit `format`/`revised_prompt`/
- * `message`, i był budowany od nowa przy KAŻDEJ kolejnej iteracji pętli suba. Tylko
- * `generate_image` — inne narzędzia nie niosą base64 w wyniku. Wejście bez `base64`
+ * z `Attachments/generated`) zjadałby 99% sufitu `max_tool_result_length` transkryptu suba
+ * (domyślnie 15000 - `config/limits.ts`), wypychając poza limit `format`/`revised_prompt`/
+ * `message`, i byłby budowany od nowa przy KAŻDEJ kolejnej iteracji pętli suba. Tylko
+ * `generate_image` - inne narzędzia nie niosą base64 w wyniku. Wejście bez `base64`
  * (błąd, inne narzędzie) wraca bez zmian.
  */
 function stripImageBase64ForTranscript(toolName: string, result: unknown): unknown {
     if (toolName !== 'generate_image' || !result || typeof result !== 'object') return result;
     const raw = result as { base64?: unknown };
     if (typeof raw.base64 !== 'string' || raw.base64.length === 0) return result;
-    // Rozmiar liczony z długości base64 (4 znaki = 3 bajty) — bez dekodowania. Wzór:
+    // Rozmiar liczony z długości base64 (4 znaki = 3 bajty) - bez dekodowania. Wzór:
     // `normalizeMcpResult` w `modules/tools/ExternalMcpManager.ts` (adnotacja obrazka z serwerów
     // zewnętrznych MCP).
     const kb = Math.round((raw.base64.length * 3) / 4 / 1024);
@@ -704,11 +706,11 @@ function stripImageBase64ForTranscript(toolName: string, result: unknown): unkno
 }
 
 /**
- * K8 (AUD-security-055): JEDNA granica maskowania dla wszystkich trzech odbiorców błędu
+ * JEDNA granica maskowania dla wszystkich trzech odbiorców błędu
  * (rejestr biegów, plik aktywnej sesji w vaultcie, wynik oddany narzędziu `delegate`).
- * Do K8 maskowała tylko `SubTaskRegistry` — dwie pozostałe drogi woziły surowy komunikat,
- * a ten przy zdarzeniu strumienia bez `data` bywa całym `JSON.stringify(event)` razem
- * z nagłówkiem `Authorization`.
+ * Bez tej wspólnej granicy maskowałby tylko `SubTaskRegistry` - dwie pozostałe drogi
+ * woziłyby surowy komunikat, a ten przy zdarzeniu strumienia bez `data` bywa całym
+ * `JSON.stringify(event)` razem z nagłówkiem `Authorization`.
  */
 function _extractSafeErrorMessage(error: unknown): string {
     return maskSensitiveData(_rawErrorMessage(error));

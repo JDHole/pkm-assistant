@@ -5,35 +5,35 @@
 import { log } from '../utils/Logger.js';
 
 /**
- * K2 (AUD-security-021): jawny token „to wywołanie nie miało celu". Nie jest wieloznacznikiem —
+ * Jawny token „to wywołanie nie miało celu". Nie jest wieloznacznikiem —
  * pasuje wyłącznie do innego wywołania bez celu tej samej akcji. Nawiasy trójkątne gwarantują,
  * że żadna prawdziwa ścieżka vaultowa go nie udaje (`sanitizePath` ich nie produkuje).
  */
 const NO_TARGET_TOKEN = '<bez-celu>';
 
 /**
- * K22 (AUD-security-104): jawny token „cel był DOSŁOWNĄ gwiazdką". Też nie jest
+ * Jawny token „cel był DOSŁOWNĄ gwiazdką". Też nie jest
  * wieloznacznikiem — pasuje wyłącznie do innego wywołania z tym samym dosłownym celem.
  */
 const STAR_TOKEN = '<gwiazdka>';
 
 /**
- * AUD-code-review-058: jawny token „reguła bez aktywnego agenta" (klucz Mapy `null`) w
+ * Jawny token „reguła bez aktywnego agenta" (klucz Mapy `null`) w
  * serializacji `alwaysApproved`. JS koerciuje klucz obiektu `null` do stringa `"null"` przy
  * indeksowaniu (`obj[null] === obj['null']`), a `Object.entries()` przy WCZYTYWANIU oddaje
- * klucz z definicji jako STRING — Map<string|null,...> dostawała więc po restarcie klucz
+ * klucz z definicji jako STRING — Map<string|null,...> dostawałaby więc po restarcie klucz
  * string `"null"`, a `isAlwaysApproved(null,...)` (wołane z prawdziwym `null`) robi
- * `Map.get(null)` i nie trafiał: reguła zapisana bez aktywnego agenta znikała po restarcie
- * Obsidiana. Ten sam wzorzec co `NO_TARGET_TOKEN`/`STAR_TOKEN` wyżej — jawny token zamiast
- * polegania na koercji property-key.
+ * `Map.get(null)` i by nie trafiał: reguła zapisana bez aktywnego agenta znikałaby po
+ * restarcie Obsidiana. Ten sam wzorzec co `NO_TARGET_TOKEN`/`STAR_TOKEN` wyżej — jawny token
+ * zamiast polegania na koercji property-key.
  */
 const NO_AGENT_TOKEN = '<brak-agenta>';
 
 /**
- * K22 (AUD-security-104): cel od wołacza to DOSŁOWNY TEKST — nigdy sterowanie.
+ * Cel od wołacza to DOSŁOWNY TEKST — nigdy sterowanie.
  *
  * Dwa ciągi mają w kluczu reguły znaczenie sterujące: `*` (czyta go `isAlwaysApproved` jako
- * „dowolny cel") i `<bez-celu>` (K2). Argumenty narzędzi pisze MODEL, więc oba dałoby się
+ * „dowolny cel") i `<bez-celu>`. Argumenty narzędzi pisze MODEL, więc oba dałoby się
  * podstawić z zewnątrz — `delete {path:"*"}` produkowało klucz `vault.delete::*`, czyli trwałą
  * zgodę na każde przyszłe kasowanie. Dlatego zanim cel wejdzie do klucza:
  *
@@ -59,13 +59,13 @@ export interface ApprovalAction {
     description?: string;
     targetPath?: string;
     /**
-     * Fix znaleziska TS-3 #9: wołacze (`MCPClient.invocationAgentName`, DiffModal) legalnie
+     * Wołacze (`MCPClient.invocationAgentName`, DiffModal) legalnie
      * podają `null` przy braku aktywnego agenta — runtime to toleruje (Map.get(null) = brak
      * reguł, fail-closed), więc typ przestaje kłamać, że agent zawsze jest.
      */
     agentName: string | null;
     preview?: string;
-    /** R4 (E3.1): osobny cel reguły „zawsze" — dla narzędzi external prefiksowana nazwa narzędzia. */
+    /** Osobny cel reguły „zawsze" — dla narzędzi external prefiksowana nazwa narzędzia. */
     approvalTarget?: string;
     /** Wołacze dokładają własne pola informacyjne dla modala (np. `toolName`, `args`). */
     [key: string]: unknown;
@@ -124,12 +124,12 @@ export interface ApprovalManagerOptions {
 }
 
 export class ApprovalManager {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3). Bez `private`,
+    // `declare` = sama deklaracja typu, zero emitu. Bez `private`,
     // bo to zwykłe pola instancji, po których chodzą wołacze w .js.
     declare app: unknown;
     declare storage: ApprovalStorage;
     declare onChange: ApprovalStorageChangeHandler | null;
-    /** Agent -> Set of always-approved action patterns (klucz `null` = akcje bez agenta, patrz #9). */
+    /** Agent -> Set of always-approved action patterns (klucz `null` = akcje bez agenta). */
     declare alwaysApproved: Map<string | null, Set<string>>;
     /** Approval history */
     declare history: ApprovalHistoryEntry[];
@@ -162,7 +162,7 @@ export class ApprovalManager {
      * @param action - Action details
      */
     async requestApproval(action: ApprovalAction): Promise<ApprovalResult> {
-        // R4 (E3.1): narzędzia zewnętrznych serwerów MCP niosą osobne `approvalTarget` (prefiksowana
+        // Narzędzia zewnętrznych serwerów MCP niosą osobne `approvalTarget` (prefiksowana
         // nazwa narzędzia), żeby trwała reguła „zawsze" była per KONKRETNE narzędzie
         // (external.call::srv__tool), a nie za szeroka external.call::*. Dla pozostałych akcji
         // approvalTarget nie istnieje → fallback na targetPath (bez zmiany zachowania).
@@ -192,12 +192,12 @@ export class ApprovalManager {
                 return { result: 'approve', reason: '' };
 
             case 'always':
-                // R4: zapisujemy regułę per approvalTarget (external = prefiksowana nazwa narzędzia).
+                // Zapisujemy regułę per approvalTarget (external = prefiksowana nazwa narzędzia).
                 this.addToAlwaysApproved(action.agentName, action.type, approvalTarget);
                 this.logApproval(action, 'always-approved');
                 return { result: 'approve', reason: '' };
 
-            // E2.3 (D21): trzecia ścieżka — użytkownik zatrzymuje akcję i przekierowuje
+            // Trzecia ścieżka — użytkownik zatrzymuje akcję i przekierowuje
             // agenta instrukcją. Przepuszczamy kształt {result:'redirect', instruction}.
             case 'redirect':
                 this.logApproval(action, 'redirect');
@@ -226,7 +226,7 @@ export class ApprovalManager {
         // Check exact match
         if (agentRules.has(patternKey)) return true;
 
-        // K2 (AUD-security-021): wieloznacznik `akcja::*` znaczy „dowolny CEL", więc wolno mu
+        // Wieloznacznik `akcja::*` znaczy „dowolny CEL", więc wolno mu
         // pokryć wyłącznie wywołanie, które cel ma. Wywołanie BEZ celu ma własny, jawny klucz
         // (`akcja::<bez-celu>`) i musi trafić dokładnie w niego. Skutek uboczny: stara reguła
         // `akcja::*` zapisana jeszcze z pustego celu (np. `delegate`) przestaje pasować — user
@@ -235,7 +235,7 @@ export class ApprovalManager {
 
         // Check wildcard pattern (action type only)
         //
-        // K22 (AUD-security-104): ta gałąź obsługuje już WYŁĄCZNIE reguły zastane w ustawieniach
+        // Ta gałąź obsługuje już WYŁĄCZNIE reguły zastane w ustawieniach
         // — `createPatternKey` nie potrafi wyprodukować `akcja::*` z celu podanego przez wołacza,
         // a innej drogi zapisu reguły nie ma (ekran reguł tylko listuje i kasuje). Zostaje, żeby
         // nie zmienić po cichu znaczenia tego, co user ma już na dysku; `loadApprovals` o takich
@@ -276,8 +276,8 @@ export class ApprovalManager {
         const agentRules = this.alwaysApproved.get(agentName);
         if (agentRules) {
             agentRules.delete(this.createPatternKey(actionType, targetPath));
-            // K22: kasowanie musi sięgnąć też do reguł ZASTANYCH, zapisanych w formie dosłownej
-            // sprzed tej naprawy (`akcja::*`). Ekran reguł rozbija wiersz po `::` i oddaje tu
+            // Kasowanie musi sięgnąć też do reguł ZASTANYCH, zapisanych w formie dosłownej
+            // (`akcja::*`). Ekran reguł rozbija wiersz po `::` i oddaje tu
             // surowy cel, więc bez tej linii user nie mógłby usunąć dokładnie tych reguł, które
             // ostrzeżenie każe mu przejrzeć. Kasowanie tylko zabiera uprawnienia — jest bezpieczne.
             agentRules.delete(`${actionType}::${String(targetPath ?? '').trim()}`);
@@ -293,7 +293,7 @@ export class ApprovalManager {
     loadApprovals(storage: ApprovalStorage = {}): void {
         this.alwaysApproved.clear();
         const rulesByAgent = storage.alwaysApprovedRules || storage.alwaysApproved || {};
-        /** K22: reguły wieloznaczne zastane w ustawieniach — do JEDNEGO ostrzeżenia niżej. */
+        /** Reguły wieloznaczne zastane w ustawieniach — do JEDNEGO ostrzeżenia niżej. */
         const legacyWildcards: string[] = [];
         for (const [agentName, rules] of Object.entries(rulesByAgent)) {
             if (!Array.isArray(rules)) continue;
@@ -301,17 +301,17 @@ export class ApprovalManager {
             for (const rule of clean) {
                 if (rule.endsWith('::*')) legacyWildcards.push(`${agentName}: ${rule}`);
             }
-            // AUD-code-review-058: odkręcamy sentinel z saveApprovals — inaczej reguła bez
+            // Odkręcamy sentinel z saveApprovals — inaczej reguła bez
             // agenta wraca pod kluczem Mapy STRING `NO_AGENT_TOKEN`, a `isAlwaysApproved(null,…)`
             // pyta o prawdziwy `null` i nigdy jej nie znajdzie.
             const key = agentName === NO_AGENT_TOKEN ? null : agentName;
             this.alwaysApproved.set(key, new Set(clean));
         }
 
-        // K22 (AUD-security-104): od tej wersji `akcja::*` nie powstaje z celu podanego przez
-        // wołacza — więc każda taka reguła W USTAWIENIACH jest zaszłością. Część mogła powstać
-        // z jednego kliknięcia „Zawsze zezwalaj" na bezsensownym celu `*` albo (przed K2) na
-        // wywołaniu bez celu, a odróżnić ich od świadomych nie da się. NIE kasujemy ich po cichu
+        // `akcja::*` nie powstaje z celu podanego przez wołacza — więc każda taka reguła
+        // W USTAWIENIACH jest zaszłością. Część mogła powstać z jednego kliknięcia
+        // „Zawsze zezwalaj" na bezsensownym celu `*` albo na wywołaniu bez celu, a odróżnić
+        // ich od świadomych nie da się. NIE kasujemy ich po cichu
         // — semantyka zastanych reguł zostaje bez zmian — ale user ma się o nich dowiedzieć
         // i przejrzeć je w Ustawienia → Bezpieczeństwo → „Approved actions".
         if (legacyWildcards.length) {
@@ -328,7 +328,7 @@ export class ApprovalManager {
     saveApprovals(): void {
         const serialized: Record<string, string[]> = {};
         for (const [agentName, rules] of this.alwaysApproved.entries()) {
-            // AUD-code-review-058: klucz null idzie pod jawnym sentinelem (NO_AGENT_TOKEN),
+            // Klucz null idzie pod jawnym sentinelem (NO_AGENT_TOKEN),
             // nie pod koercją property-key `"null"` — inaczej loadApprovals nie ma jak go
             // odróżnić od agenta, który miałby taką samą literalną nazwę.
             const key = agentName === null ? NO_AGENT_TOKEN : agentName;
@@ -349,19 +349,19 @@ export class ApprovalManager {
     /**
      * Create pattern key for storage
      *
-     * K2 (AUD-security-021): „brak celu" i „dowolny cel" to DWIE różne rzeczy. Dawniej pusty
-     * `targetPath` zapadał w `akcja::*`, czyli w wieloznacznik — jedno kliknięcie „Zawsze zezwalaj"
-     * na wywołaniu bez ścieżki (a takie wywołanie i tak odbija się o walidację w narzędziu, więc
-     * user klika je spokojnie) zapisywało regułę auto-zatwierdzającą KAŻDY przyszły zapis tego
-     * agenta. Brak celu ma teraz własny, jawny token, który nie pasuje do niczego innego.
+     * „Brak celu" i „dowolny cel" to DWIE różne rzeczy. Gdyby pusty `targetPath` zapadał
+     * w `akcja::*` (wieloznacznik), jedno kliknięcie „Zawsze zezwalaj" na wywołaniu bez ścieżki
+     * (a takie wywołanie i tak odbija się o walidację w narzędziu, więc user klika je spokojnie)
+     * zapisywałoby regułę auto-zatwierdzającą KAŻDY przyszły zapis tego agenta. Brak celu ma
+     * więc własny, jawny token, który nie pasuje do niczego innego.
      *
-     * K22 (AUD-security-104): druga połowa tej samej reguły. K2 zamknął drogę „pusty cel →
-     * wieloznacznik", ale DOSŁOWNA gwiazdka z argumentu narzędzia (`delete {path:"*"}`) dalej
-     * produkowała klucz `akcja::*` — modal pokazywał bezsensowny cel, wywołanie i tak padało
-     * w walidacji narzędzia, więc user klikał spokojnie „Zawsze zezwalaj" i zapisywał trwałą
-     * zgodę na KAŻDY przyszły cel tej akcji. Dziś cel przechodzi przez `literalTarget`, więc
-     * **żaden wieloznacznik nie powstaje z celu podanego przez wołacza** — `akcja::*` może
-     * przyjechać wyłącznie z reguł ZASTANYCH w ustawieniach (patrz `loadApprovals`).
+     * Druga połowa tej samej reguły: DOSŁOWNA gwiazdka z argumentu narzędzia
+     * (`delete {path:"*"}`) mogłaby produkować klucz `akcja::*` — modal pokazywałby bezsensowny
+     * cel, wywołanie i tak padałoby w walidacji narzędzia, więc user klikałby spokojnie
+     * „Zawsze zezwalaj" i zapisywał trwałą zgodę na KAŻDY przyszły cel tej akcji. Cel przechodzi
+     * przez `literalTarget`, więc **żaden wieloznacznik nie powstaje z celu podanego przez
+     * wołacza** — `akcja::*` może przyjechać wyłącznie z reguł ZASTANYCH w ustawieniach (patrz
+     * `loadApprovals`).
      * @private
      */
     createPatternKey(actionType: string, targetPath: string | undefined): string {

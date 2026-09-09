@@ -111,10 +111,10 @@ test('buildImportRows: odporne na brak/śmieci w argumentach', t => {
     t.true(rows.every(r => r.selected && !r.exists));
 });
 
-// ─── AUD-code-review-050: import ma TĘ SAMĄ walidację unikalności/rezerwacji id co
+// ─── import ma TĘ SAMĄ walidację unikalności/rezerwacji id co
 // ręczne dodawanie serwera (`MCPServerEditorModal._handleSave` → `validateServerId`) ───
 
-test('050: serwer nazwany jak WBUDOWANY (np. "memory") jest zablokowany — ta sama reguła co connect()/edytor', t => {
+test('serwer nazwany jak WBUDOWANY (np. "memory") jest zablokowany — ta sama reguła co connect()/edytor', t => {
     const parsed = parseClaudeDesktopConfig(JSON.stringify({
         mcpServers: { memory: { command: 'npx', args: ['-y', 'server-memory'] } },
     }));
@@ -127,18 +127,18 @@ test('050: serwer nazwany jak WBUDOWANY (np. "memory") jest zablokowany — ta s
     t.is(rows[0].blockedReason, 'reserved');
 });
 
-test('050: bez podania builtinNames zachowanie sprzed naprawy (fail-soft, nic nie krzyczy)', t => {
+test('bez podania builtinNames działanie jest fail-soft, nic nie krzyczy', t => {
     const parsed = parseClaudeDesktopConfig(JSON.stringify({
         mcpServers: { memory: { command: 'npx' } },
     }));
-    // Trzeci argument pominięty (domyślne []) — kontrakt wołaczy sprzed AUD-code-review-050
-    // (SettingsContent bez toolRegistry) dalej działa, tylko bez kontroli built-inów.
+    // Trzeci argument pominięty (domyślne []) — kontrakt wołaczy bez toolRegistry
+    // (np. SettingsContent) dalej działa, tylko bez kontroli built-inów.
     const rows = buildImportRows(parsed, []);
 
     t.false(rows[0].exists, 'brak listy built-inów = kontrola rezerwacji wyłączona, nie fail-closed');
 });
 
-test('050: dwie RÓŻNE nazwy Claude Desktop dające TEN SAM slug — duplikat WEWNĄTRZ paczki zablokowany', t => {
+test('dwie RÓŻNE nazwy Claude Desktop dające TEN SAM slug — duplikat WEWNĄTRZ paczki zablokowany', t => {
     // "Filesystem" i "filesystem" różnią się tylko wielkością liter — slugifyServerId
     // (lowercase) sprowadza obie do id "filesystem".
     const parsed = parseClaudeDesktopConfig(JSON.stringify({
@@ -159,7 +159,7 @@ test('050: dwie RÓŻNE nazwy Claude Desktop dające TEN SAM slug — duplikat W
     t.is(rows[1].blockedReason, 'duplicate');
 });
 
-test('050: duplikat wewnątrz paczki NIE miesza się z "już w ustawieniach" — inny powód, ten sam skutek', t => {
+test('duplikat wewnątrz paczki NIE miesza się z "już w ustawieniach" — inny powód, ten sam skutek', t => {
     const parsed = parseClaudeDesktopConfig(JSON.stringify({
         mcpServers: { Foo: { command: 'npx' }, foo: { command: 'npx' } },
     }));

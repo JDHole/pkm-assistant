@@ -1,5 +1,5 @@
 /**
- * artifact_update — nałóż strukturalny patch na instancję artefaktu (E2.9 A4).
+ * artifact_update — nałóż strukturalny patch na instancję artefaktu.
  *
  * Ops przez ten sam walidator co silnik: set_field (frontmatter, klucze bazowe niezmienialne),
  * set_section / add_item (reject bloków kodu), check_item / uncheck_item / remove_item (po block-id).
@@ -47,7 +47,7 @@ export function createArtifactUpdateTool() {
             },
             required: ['id', 'ops'],
         },
-        // K2 (AUD-security-075/076): bramka dostaje ścieżkę NADPISYWANEJ notatki, nie pusty string.
+        // Bramka dostaje ścieżkę NADPISYWANEJ notatki, nie pusty string.
         contextExtractor: (args: ArtifactUpdateArgs, ctx: { plugin?: unknown }) => ({
             targetPath: artifactTargetPath(artifactStoreFromCtx(ctx?.plugin), args?.id),
         }),

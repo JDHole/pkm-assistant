@@ -34,12 +34,11 @@ export function createCreateFolderTool(app: CreateFolderToolApp) {
             },
             required: ['path']
         },
-        // Sprint 04 Z10 (DRY-2): contextExtractor
         contextExtractor: (args: CreateFolderToolArgs) => ({ targetPath: args.path || '' }),
         execute: async (args: CreateFolderToolArgs, runtimeApp: CreateFolderToolApp, plugin: PathValidatorPlugin) => {
             try {
                 const appRef = runtimeApp || app;
-                // Sprint 04 Z8 (DRY-1): centralized vault path validation
+                // Centralized vault path validation
                 const adminAccess = invocationHasAdminAccess(args, plugin);
                 const validation = validateVaultPath(args.path, { adminAccess });
                 if (!validation.ok) {
@@ -76,7 +75,7 @@ export function createCreateFolderTool(app: CreateFolderToolApp) {
                     };
                 }
 
-                // Create folder (E2.6 API-first — vault.createFolder tworzy też foldery nadrzędne)
+                // Create folder (API-first — vault.createFolder tworzy też foldery nadrzędne)
                 await appRef.vault.createFolder(cleanPath);
 
                 return {

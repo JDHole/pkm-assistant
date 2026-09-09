@@ -1,12 +1,12 @@
 /**
- * Zaplecze → zakładka „Szablony skilli" (S27 Z2).
+ * Zaplecze → zakładka „Szablony skilli".
  *
- * Zaplecze to KATALOG ZASOBÓW usera, nie zarządzanie żywymi bytami (D4). Ta zakładka
+ * Zaplecze to KATALOG ZASOBÓW usera, nie zarządzanie żywymi bytami. Ta zakładka
  * pokazuje wyłącznie SZABLONY z `.pkm-assistant/templates/skills/` — formy odlewnicze.
  * Żywe skille (przypisane agentom) żyją w profilu agenta → Umiejętności.
  *
  * Karta: nazwa · kategoria · opis · `vN`. BEZ „Used by" — szablon nie jest używany, jest
- * kopiowany (D3). Akcje: „+ nowy szablon" · edycja (bump vN) · „Użyj u agenta…" · usuń.
+ * kopiowany. Akcje: „+ nowy szablon" · edycja (bump vN) · „Użyj u agenta…" · usuń.
  */
 import {
     IconGenerator,
@@ -153,7 +153,7 @@ function renderTemplateCard(list: UiBoundary, tpl: UiBoundary, { plugin, nav, st
 }
 
 /**
- * „Użyj u agenta…" — odlej kopię szablonu (D3) i dopisz ją do `skills[]` agenta.
+ * „Użyj u agenta…" — odlej kopię szablonu i dopisz ją do `skills[]` agenta.
  * Zapis profilu agenta idzie przez AgentManager (jedyny owner), żeby YAML nie rozjechał się z cache.
  */
 async function useTemplateAtAgent(tpl: UiBoundary, agentName: string, { plugin, store, nav }: { plugin: UiBoundary; store: UiBoundary; nav: UiBoundary }) {

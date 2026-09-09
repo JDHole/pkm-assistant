@@ -1,5 +1,5 @@
 /**
- * Known-URL provenance registry (E1.3 P6 / L13-11).
+ * Known-URL provenance registry.
  *
  * `web_read` fetches whatever URL the model hands it. A prompt-injection can abuse
  * that to exfiltrate private notes: it makes the model call
@@ -17,9 +17,9 @@
  * small; the security property (a URL must have a legitimate origin) still holds,
  * because the registry only ever contains provider search results and user-typed URLs.
  *
- * Ceiling (risk register 2026-09-02 / S34 z8): a long-lived runtime that keeps
- * searching/reading URLs would otherwise grow this Set unbounded (a slow memory
- * leak). Capped at MAX_KNOWN_URLS; once full, the OLDEST entry is evicted to make
+ * Ceiling: a long-lived runtime that keeps searching/reading URLs would otherwise
+ * grow this Set unbounded (a slow memory leak). Capped at MAX_KNOWN_URLS; once
+ * full, the OLDEST entry is evicted to make
  * room for the newest — `Set` preserves insertion order, so destructuring the Set
  * (`const [oldest] = _knownUrls`) reads its first item, the oldest one (NOT
  * `.values().next().value`, which types as `any` and trips eslint:obsidian's typed
@@ -33,8 +33,8 @@
  * not a security hole), never fail-open.
  */
 
-// F2.22 (release 2.2.0/W3): exported (not just module-internal) so `urlRegistry.test.ts` can
-// import the real value instead of keeping its own duplicate literal that could silently drift.
+// Exported (not just module-internal) so `urlRegistry.test.ts` can import the real value
+// instead of keeping its own duplicate literal that could silently drift.
 export const MAX_KNOWN_URLS = 2000;
 
 const _knownUrls = new Set<string>();
@@ -111,7 +111,7 @@ export function _clearKnownUrls(): void {
 }
 
 /**
- * Test-only accessor (B1, klaster C4b nit): the "registry stays capped" test had no way to
+ * Test-only accessor: the "registry stays capped" test had no way to
  * prove the ceiling actually held the registry AT MAX_KNOWN_URLS — it could only prove the
  * newest URL survived, which passes just as well with a ceiling that is a no-op. Exposes the
  * size directly, same pattern as `_clearKnownUrls`.

@@ -1,27 +1,25 @@
 /**
- * VaultIndexer — żywy indeks semantyczny vaulta (E1.4 · R1, 2026-07-21).
+ * VaultIndexer - żywy indeks semantyczny vaulta.
  *
- * PRZED tym plikiem wyszukiwanie semantyczne było MARTWE: nikt nie przypisywał
- * `plugin.oramaDb`, więc `RetrievalEngine._canUseLayer3()` zawsze zwracał false
- * i L3 po cichu spadał do keyword/L2. VaultIndexer buduje indeks Oramy z plików
- * `.md` vaulta i publikuje go jako `plugin.oramaDb` — TEN kontrakt zasila istniejących
- * konsumentów (VaultRetrievalTools, MemoryRetrievalTools, RetrievalEngine) bez
- * zmiany ich API.
+ * VaultIndexer buduje indeks Oramy z plików `.md` vaulta i publikuje go jako `plugin.oramaDb` -
+ * ten kontrakt zasila istniejących konsumentów (VaultRetrievalTools, MemoryRetrievalTools,
+ * RetrievalEngine) bez zmiany ich API. Bez tego przypisania `RetrievalEngine._canUseLayer3()`
+ * zawsze zwracałby false i L3 po cichu spadałby do keyword/L2.
  *
  * Stany (getStatus().status):
- *   - 'disabled_mobile' — Platform.isMobile (desktop-first, decyzja D6)
- *   - 'no_provider'     — brak działającego adaptera embeddingów (user nie wybrał providera)
- *   - 'building'        — trwa skan/embedding (progress {indexed, total})
- *   - 'ready'           — indeks zbudowany i opublikowany jako plugin.oramaDb
- *   - 'error'           — embed API padło; częściowy indeks NIE jest publikowany
+ *   - 'disabled_mobile' - Platform.isMobile (desktop-first)
+ *   - 'no_provider'     - brak działającego adaptera embeddingów (user nie wybrał providera)
+ *   - 'building'        - trwa skan/embedding (progress {indexed, total})
+ *   - 'ready'           - indeks zbudowany i opublikowany jako plugin.oramaDb
+ *   - 'error'           - embed API padło; częściowy indeks NIE jest publikowany
  *                         (a jeśli był już 'ready', stary oramaDb zostaje żywy)
  *
- * Trade-off E1.4 (świadomy): embedujemy PER PLIK pierwsze ~6000 znaków, BEZ chunkingu.
- * Chunking per sekcja (dokładniejszy, ale droższy) to osobne zadanie E2.5.
+ * Świadomy trade-off: embedujemy PER PLIK pierwsze ~6000 znaków, BEZ chunkingu.
+ * Chunking per sekcja (dokładniejszy, ale droższy) to celowo osobny zakres.
  *
  * BEZPIECZEŃSTWO (twarda granica): indeks NIGDY nie zawiera `.pkm-assistant/**`
- * — to pamięć agentów (izolacja). Traktowane jak NoGo. Dlatego semantyka pamięci
- * (scope:'memory') pozostaje niedostępna i degraduje do L2 — patrz RetrievalEngine.
+ * - to pamięć agentów (izolacja). Traktowane jak NoGo. Dlatego semantyka pamięci
+ * (scope:'memory') pozostaje niedostępna i degraduje do L2 - patrz RetrievalEngine.
  *
  * Testowalność: wszystkie zależności wstrzykiwane (fake vault, fake embedder,
  * flaga isMobile, in-memory adapter). Handlery hooków wołalne bezpośrednio.
@@ -57,15 +55,15 @@ function _nodeSafeClearTimeout(...args: Parameters<typeof clearTimeout>): void {
 
 const INDEX_VERSION = 1;
 const DEFAULT_INDEX_DIR = '.pkm-assistant/index';
-const MAX_EMBED_CHARS = 6000;     // per-plik treść do embeddingu (E1.4 trade-off)
+const MAX_EMBED_CHARS = 6000;     // per-plik treść do embeddingu (świadomy trade-off, patrz docstring modułu)
 const DEFAULT_BATCH_SIZE = 16;    // porcja plików na jeden embedBatch
 const DEFAULT_DEBOUNCE_MS = 2000; // debounce kolejki zmian z hooków
 const DEFAULT_PERSIST_MS = 30000; // debounce zapisu na dysk po zmianach
-/** Sufit odczekania po nieudanym flushu (AUD-wydajnosc-090: porcja wraca do kolejki). */
+/** Sufit odczekania po nieudanym flushu (porcja wraca do kolejki). */
 const MAX_FLUSH_RETRY_MS = 5 * 60 * 1000;
-/** Ile razy ponawiamy PORCJĘ po awarii przejściowej, zanim uznamy skan za padnięty (P2b). */
+/** Ile razy ponawiamy PORCJĘ po awarii przejściowej, zanim uznamy skan za padnięty. */
 const BATCH_TRANSIENT_RETRIES = 2;
-/** Ile razy próbujemy POJEDYNCZY plik przy trwałej awarii, zanim go pominiemy (P2c). */
+/** Ile razy próbujemy POJEDYNCZY plik przy trwałej awarii, zanim go pominiemy. */
 const MAX_FILE_ATTEMPTS = 3;
 /** Baza backoffu ponowień porcji (ms). */
 const DEFAULT_EMBED_RETRY_MS = 2000;
@@ -75,8 +73,8 @@ const DEFAULT_SCAN_RETRY_MS = 30000;
 const MAX_SCAN_RETRY_MS = 5 * 60 * 1000;
 
 /**
- * Plik trwale pominięty w tej rundzie — NIE dostaje stempla mtime, więc wróci przy
- * następnym skanie/restarcie, ale nie blokuje reszty porcji (P2c).
+ * Plik trwale pominięty w tej rundzie - NIE dostaje stempla mtime, więc wróci przy
+ * następnym skanie/restarcie, ale nie blokuje reszty porcji.
  */
 export const EMBED_SKIPPED = 'skipped';
 /** Wynik embeddingu jednego pliku: wektor | `null` (pusta treść) | `EMBED_SKIPPED`. */
@@ -86,15 +84,15 @@ export type EmbedSlot = number[] | null | typeof EMBED_SKIPPED;
 type EmbedFailure = 'transient' | 'permanent' | 'fatal';
 
 /**
- * Klasyfikacja awarii embeddingu — kaczo-typowana, bo fasada embeddera jest WSTRZYKIWANA
+ * Klasyfikacja awarii embeddingu - kaczo-typowana, bo fasada embeddera jest WSTRZYKIWANA
  * i nie musi rzucać `EmbedBatchError` z tego modułu (harness i testy mają własne atrapy).
  *
- * - `transient` — sieć/timeout/429: ponawiamy CAŁĄ porcję (P2b).
- * - `permanent` — błąd API inny niż 429 (np. 400 za przekroczony kontekst): jeden zatruty
- *   plik nie może blokować pozostałych, więc porcja idzie na pojedynczo (P2c).
- * - `fatal` — adapter oddał inną liczbę wyników niż wejść. NIE rozbijamy takiej porcji:
+ * - `transient` - sieć/timeout/429: ponawiamy CAŁĄ porcję.
+ * - `permanent` - błąd API inny niż 429 (np. 400 za przekroczony kontekst): jeden zatruty
+ *   plik nie może blokować pozostałych, więc porcja idzie na pojedynczo.
+ * - `fatal` - adapter oddał inną liczbę wyników niż wejść. NIE rozbijamy takiej porcji:
  *   dla jednego wejścia zwrotka błędu ma długość 1, więc wyglądałaby jak „plik pusty"
- *   i wskrzesiłaby dokładnie ten stempel mtime, który naprawia AUD-wydajnosc-090.
+ *   i wskrzesiłaby dokładnie ten stempel mtime, przed którym chroni kontrakt błędu (patrz testy).
  */
 function embedFailureKind(e: unknown): EmbedFailure {
     let cur: unknown = e;
@@ -255,13 +253,13 @@ export class VaultIndexer {
     declare private _hooksRegistered: boolean;
     declare private _debounceTimer: ReturnType<typeof setTimeout> | null;
     declare private _persistTimer: ReturnType<typeof setTimeout> | null;
-    /** Liczba KOLEJNYCH nieudanych flushów — steruje backoffem ponowienia (AUD-wydajnosc-090). */
+    /** Liczba KOLEJNYCH nieudanych flushów - steruje backoffem ponowienia. */
     declare private _flushFailures: number;
-    /** Kiedy (wg `now()`) ma wystrzelić uzbrojone ponowienie po padzie — `null` = brak (P2a). */
+    /** Kiedy (wg `now()`) ma wystrzelić uzbrojone ponowienie po padzie - `null` = brak. */
     declare private _flushRetryAt: number | null;
-    /** Ostatnio uzbrojone opóźnienie flushu (ms) — diagnostyka + asercja w testach (P2a). */
+    /** Ostatnio uzbrojone opóźnienie flushu (ms) - diagnostyka + asercja w testach. */
     declare _flushDelayMs: number;
-    /** Licznik prób na plik przy trwałej awarii (P2c). */
+    /** Licznik prób na plik przy trwałej awarii. */
     declare private _fileAttempts: Map<string, number>;
     /** Pliki pominięte po wyczerpaniu prób — bez stempla mtime, wrócą przy następnym skanie. */
     declare skipped: Set<string>;
@@ -277,7 +275,7 @@ export class VaultIndexer {
         this.isMobile = !!deps.isMobile;
         this.logger = deps.logger || { info() {}, warn() {}, error() {}, debug() {} };
         this._noGoSource = deps.noGoFolders || [];
-        // E2.9: folder artefaktów żywych wykluczany z indeksu, dopóki user nie włączy
+        // Folder artefaktów żywych wykluczany z indeksu, dopóki user nie włączy
         // „Indeksuj artefakty" (jednorazówki = szum semantyczny). Funkcja zwraca ścieżkę folderu
         // do wykluczenia albo null (indeksuj). Przewód wzorem noGoFolders.
         this._artifactsExclude = deps.artifactsExclude || null;
@@ -343,11 +341,11 @@ export class VaultIndexer {
             }
 
             if (restored) {
-                // P1 (review W5): odzyskany indeks jest KOMPLETNY sam w sobie — publikujemy go
-                // ZANIM ruszy resync. Wcześniej pad resyncu (np. Ollama zgaszona przy starcie,
-                // 3 notatki zmienione od wczoraj) leciał do `catch` niżej, `_publish()` nigdy nie
-                // szło, a `_ready` zostawało `false`: semantyka martwa na całą sesję i zero
-                // ponowień, mimo że NIEŚWIEŻY indeks był w garści. Nieświeży > brak.
+                // Odzyskany indeks jest KOMPLETNY sam w sobie - publikujemy go
+                // ZANIM ruszy resync. Gdyby pad resyncu (np. Ollama zgaszona przy starcie,
+                // notatki zmienione od ostatniego bootu) leciał do `catch` niżej przed tą publikacją,
+                // `_publish()` nigdy by nie poszło, a `_ready` zostawałoby `false`: semantyka martwa
+                // na całą sesję i zero ponowień, mimo że NIEŚWIEŻY indeks był w garści. Nieświeży > brak.
                 this._publish();
                 await this._resync(); // własny catch: nieudane pliki lądują w kolejce
             } else {
@@ -364,13 +362,13 @@ export class VaultIndexer {
             this.status = 'error';
             this.lastError = (e as ErrLike)?.message || String(e);
             this.logger.error('VaultIndexer', 'initialize failed:', e);
-            // P2b: skan bez indeksu w garści (albo pad poza resyncem) — ponów sam, z backoffem.
+            // Skan bez indeksu w garści (albo pad poza resyncem) - ponów sam, z backoffem.
             // Bez tego zimny start Ollamy dłuższy niż sufit czasu kończył się `error` NA STAŁE.
             this._scheduleScanRetry();
         }
     }
 
-    /** Automatyczne ponowienie całego skanu po padzie (P2b). Odwoływane przez `dispose()`. */
+    /** Automatyczne ponowienie całego skanu po padzie. Odwoływane przez `dispose()`. */
     _scheduleScanRetry(): void {
         if (this._scanRetryTimer) _nodeSafeClearTimeout(this._scanRetryTimer);
         this._scanFailures++;
@@ -389,16 +387,16 @@ export class VaultIndexer {
      */
     async rebuild(): Promise<IndexerStatusSnapshot> {
         this.lastError = null;
-        // K8/AUD-code-review-101: bramki PRZED mutacją stanu — wcześniej `_ready=false` +
-        // `db=null` + kolejka/mtimes wyczyszczone szły PRZED tymi sprawdzeniami, więc wczesny
-        // return (isMobile/no_provider) zostawiał indekser połamany na zawsze (żywy `plugin.oramaDb`,
+        // Bramki PRZED mutacją stanu: gdyby `_ready=false` + `db=null` + kolejka/mtimes
+        // wyczyszczone szły PRZED tymi sprawdzeniami, wczesny return (isMobile/no_provider)
+        // zostawiałby indekser połamany na zawsze (żywy `plugin.oramaDb`,
         // ale `_ready=false` blokujące `_flushQueue` do końca sesji). Nic tu nie mutujemy, dopóki
-        // nie wiemy, że rebuild faktycznie ruszy — wtedy early return nie ma czego przywracać.
+        // nie wiemy, że rebuild faktycznie ruszy - wtedy early return nie ma czego przywracać.
         if (this.isMobile) { this.status = 'disabled_mobile'; return this.getStatus(); }
         if (!this._embedderReady()) { this.status = 'no_provider'; return this.getStatus(); }
 
-        // Review W5: do naprawy `catch` przywracał SAM `db` — `_mtimes` zostawały puste,
-        // `dims` z nieudanego skanu, a `_ready` na `false`, czyli przywrócony indeks był żywy
+        // Gdyby `catch` przywracał SAM `db`, `_mtimes` zostawałyby puste,
+        // `dims` z nieudanego skanu, a `_ready` na `false`, czyli przywrócony indeks byłby żywy
         // dla czytelników, ale martwy dla kolejki zmian. Zdejmujemy pełny snapshot.
         const previousDb = this.db;
         const previousMtimes = this._mtimes;
@@ -470,10 +468,10 @@ export class VaultIndexer {
             const path = typeof file === 'string' ? file : file?.path;
             if (!path) return;
 
-            // AUD-wydajnosc-008: `_scheduleFlush()` stało dawniej POZA tymi gałęziami, więc
-            // zdarzenie na pliku SPOZA indeksu (załącznik, notatka w NoGo, folder artefaktów)
-            // kasowało zaplanowany flush realnych zmian i nastawiało zegar od nowa. Strumień
-            // takich zdarzeń odsuwał indeksowanie edytowanej notatki na czas swojego trwania.
+            // Gdyby `_scheduleFlush()` stało POZA tymi gałęziami, zdarzenie na pliku SPOZA
+            // indeksu (załącznik, notatka w NoGo, folder artefaktów) kasowałoby zaplanowany
+            // flush realnych zmian i nastawiało zegar od nowa. Strumień takich zdarzeń
+            // odsuwałby indeksowanie edytowanej notatki na czas swojego trwania.
             let queued = false;
             if (type === 'rename') {
                 const old = typeof oldPath === 'string' ? oldPath : (oldPath?.path || oldPath);
@@ -495,10 +493,10 @@ export class VaultIndexer {
      * @param delayMs jawne opóźnienie = UZBROJENIE ponowienia po padzie; bez argumentu
      *   to zwykły debounce z hooka vaulta.
      *
-     * P2a (review W5): zwykły debounce NIE MOŻE skrócić uzbrojonego ponowienia. Oba wiszą na
+     * Zwykły debounce NIE MOŻE skrócić uzbrojonego ponowienia. Oba wiszą na
      * tym samym timerze, więc przy trwale zgaszonym demonie i pracującym userze każde zdarzenie
-     * z vaulta zbijało 5-minutowy backoff do 2 s — czyli młóciliśmy API co dwie sekundy,
-     * dokładnie to, przed czym backoff miał chronić.
+     * z vaulta zbijałoby 5-minutowy backoff do 2 s - czyli młócilibyśmy API co dwie sekundy,
+     * dokładnie to, przed czym backoff ma chronić.
      */
     _scheduleFlush(delayMs?: number): void {
         let delay = delayMs ?? this.debounceMs;
@@ -526,7 +524,7 @@ export class VaultIndexer {
     async _flushQueue(): Promise<void> {
         if (!this._ready || this._processing || this._queue.size === 0) return;
         this._processing = true;
-        this._flushRetryAt = null; // uzbrojone ponowienie właśnie konsumujemy (P2a)
+        this._flushRetryAt = null; // uzbrojone ponowienie właśnie konsumujemy
         const entries = [...this._queue.entries()];
         this._queue.clear();
         let failed = false;
@@ -545,9 +543,9 @@ export class VaultIndexer {
             this.lastError = null;
             this._schedulePersist();
         } catch (e) {
-            // AUD-wydajnosc-090/045: embed API padło w trakcie kolejki. Porcja NIE dostała
+            // Embed API padło w trakcie kolejki. Porcja NIE dostała
             // stempla mtime (patrz `_embedMetas`), więc wraca do kolejki i pójdzie ponownie.
-            // Bez tego `_queue.clear()` wyżej gubił te ścieżki bezpowrotnie: pliki znikały
+            // Bez tego `_queue.clear()` wyżej gubiłby te ścieżki bezpowrotnie: pliki znikałyby
             // z indeksu (remove-then-insert) i nie wracały aż do pełnego reindeksu.
             failed = true;
             this._flushFailures++;
@@ -594,7 +592,7 @@ export class VaultIndexer {
                 for (let j = 0; j < batch.length; j++) await this._insertOne(batch[j], vectors[j]);
             } else {
                 // dims wciąż nieznane (cała porcja pusta) — zapamiętaj mtimes, pomiń insert.
-                // Pominięte pliki (P2c) NIE dostają stempla: mają wrócić.
+                // Pominięte pliki NIE dostają stempla: mają wrócić.
                 for (let j = 0; j < batch.length; j++) {
                     if (vectors[j] !== EMBED_SKIPPED) this._mtimes.set(batch[j].path, batch[j].mtime);
                 }
@@ -632,7 +630,7 @@ export class VaultIndexer {
             try {
                 await this._indexMetas(toUpsert);
             } catch (e) {
-                // P1: pad odświeżania NIE MOŻE zabrać odzyskanego indeksu. Zmienione pliki
+                // Pad odświeżania NIE MOŻE zabrać odzyskanego indeksu. Zmienione pliki
                 // wracają do kolejki i idą tym samym mechanizmem ponowień co flush; ich mtime
                 // nie został zestemplowany, więc przy następnym starcie i tak wrócą.
                 upserted = 0;
@@ -666,20 +664,20 @@ export class VaultIndexer {
     async _insertOne(meta: FileMeta, vec: EmbedSlot): Promise<void> {
         if (!this.db) return;
         if (vec === EMBED_SKIPPED) {
-            // P2c: plik trwale odrzucany przez API. BEZ stempla mtime — wróci przy następnym
+            // Plik trwale odrzucany przez API. BEZ stempla mtime - wróci przy następnym
             // skanie/restarcie, ale nie blokuje reszty porcji ani całego indeksowania.
             return;
         }
         if (Array.isArray(vec) && vec.length) {
-            // insertVectorLean: wektor zostaje TYLKO w `index.vectorIndexes` (AUD-wydajnosc-088/041).
+            // insertVectorLean: wektor zostaje TYLKO w `index.vectorIndexes`.
             await insertVectorLean(this.db, this._makeDoc(meta, vec));
             this._mtimes.set(meta.path, meta.mtime);
             this.progress.indexed = this._mtimes.size;
         } else {
             // PUSTY PLIK (i tylko pusty): brak wektora dla treści, której nie ma. Awaria
-            // providera nigdy tu nie dociera — od naprawy kontraktu błędu
-            // (AUD-wydajnosc-090/010/045/068) `_embedMetas` RZUCA zamiast oddawać nulle,
-            // więc mtime nie jest stemplowany i porcja wraca do kolejki / kończy skan błędem.
+            // providera nigdy tu nie dociera - kontrakt błędu wymaga, żeby `_embedMetas` RZUCAŁO
+            // zamiast oddawać nulle, więc mtime nie jest stemplowany i porcja wraca do kolejki
+            // / kończy skan błędem.
             this._mtimes.set(meta.path, meta.mtime);
         }
     }
@@ -708,15 +706,15 @@ export class VaultIndexer {
     }
 
     /**
-     * Surowe wołanie embeddera z twardym kontraktem (AUD-wydajnosc-090/010/045/068):
+     * Surowe wołanie embeddera z twardym kontraktem:
      * N wejść → N wyników albo RZUT. Rzucony błąd niesie `kind`, żeby wołacz wiedział,
      * czy ponawiać (patrz `embedFailureKind`).
      */
     async _embedTexts(texts: string[], expected: number): Promise<Array<number[] | null>> {
         try {
             const vectors = await this.embedder.embedBatch(texts);
-            // Dawniej `Array.isArray(vectors) ? vectors : metas.map(() => null)` przepuszczało
-            // wszystko, co jest tablicą — a padnięty provider oddawał właśnie tablicę nulli.
+            // Padnięty provider bywa zwraca tablicę (np. samych nulli) - samo `Array.isArray`
+            // nie wystarcza, więc długość musi się zgadzać z liczbą wejść (sprawdzenie niżej).
             if (!Array.isArray(vectors)) {
                 throw Object.assign(new Error('embedder nie zwrócił tablicy wyników'), { kind: 'shape' });
             }
@@ -734,7 +732,7 @@ export class VaultIndexer {
     }
 
     /**
-     * Jeden plik z rozliczaniem TRWAŁYCH awarii (P2c). Awarię przejściową propaguje wyżej
+     * Jeden plik z rozliczaniem TRWAŁYCH awarii. Awarię przejściową propaguje wyżej
      * (tam jest backoff), trwałą liczy: po `MAX_FILE_ATTEMPTS` plik jest pomijany.
      */
     async _embedOne(meta: FileMeta, text: string): Promise<EmbedSlot> {
@@ -759,7 +757,7 @@ export class VaultIndexer {
 
     /**
      * Porcja: najpierw jednym żądaniem, a przy TRWAŁEJ awarii (np. 400 za jedną zatrutą
-     * notatkę) plik po pliku — jeden zatruty plik nie może zabrać pozostałych piętnastu (P2c).
+     * notatkę) plik po pliku - jeden zatruty plik nie może zabrać pozostałych piętnastu.
      */
     async _embedBatchSlots(metas: FileMeta[], texts: string[]): Promise<EmbedSlot[]> {
         try {
@@ -782,7 +780,7 @@ export class VaultIndexer {
             try {
                 return await this._embedBatchSlots(metas, texts);
             } catch (e) {
-                // P2b: zimny start providera (Ollama ładująca model) potrafi przekroczyć sufit
+                // Zimny start providera (Ollama ładująca model) potrafi przekroczyć sufit
                 // czasu POJEDYNCZEGO żądania. Dwa ponowienia porcji, zanim uznamy skan za padnięty.
                 if (attempt >= BATCH_TRANSIENT_RETRIES || embedFailureKind(e) !== 'transient') throw e;
                 const wait = this.embedRetryMs * Math.pow(2, attempt);
@@ -847,7 +845,7 @@ export class VaultIndexer {
             return false;
         }
         this.dims = dims;
-        // AUD-wydajnosc-088/041: plik zapisany starszą wersją pluginu niesie kopie wektorów
+        // Plik zapisany starszą wersją pluginu niesie kopie wektorów
         // w dokumentach. Zerujemy je od razu, żeby pierwszy zapis po restarcie nie utrwalił
         // dubla; stary (gruby) plik wczytuje się bez zmian i chudnie przy najbliższym zapisie.
         const stripped = stripStoredVectors(this.db);
@@ -930,18 +928,18 @@ export class VaultIndexer {
     }
 
     /**
-     * K15 (AUD-security-101): to jest bramka ZAKAZU, więc porównuje BEZ rozróżniania
-     * wielkości liter — tak samo jak `AccessGuard._isNoGo` i `isProtectedPath`.
+     * To jest bramka ZAKAZU, więc porównuje BEZ rozróżniania
+     * wielkości liter - tak samo jak `AccessGuard._isNoGo` i `isProtectedPath`.
      *
-     * Wcześniej szło bajt w bajt, a wpisy No-Go i folder artefaktów user wpisuje RĘCZNIE
-     * w ustawieniach. Na Windows i macOS wystarczyło, żeby wpisał `Prywatne`, a folder na
-     * dysku nazywał się `prywatne` — treść z zakazanego folderu wchodziła do indeksu
-     * semantycznego i wracała userowi w wynikach `search mode=semantic`. Zakaz ma łapać
-     * za dużo, nie za mało (pełne uzasadnienie: `core/security/AccessGuard.ts`,
+     * Porównanie bajt w bajt nie wystarcza: wpisy No-Go i folder artefaktów user wpisuje
+     * RĘCZNIE w ustawieniach. Na Windows i macOS wystarczyłoby, żeby wpisał `Prywatne`, a
+     * folder na dysku nazywał się `prywatne` - treść z zakazanego folderu wchodziłaby do
+     * indeksu semantycznego i wracała userowi w wynikach `search mode=semantic`. Zakaz ma
+     * łapać za dużo, nie za mało (pełne uzasadnienie: `core/security/AccessGuard.ts`,
      * `_normalizeForDenyCompare`).
      *
      * Świadomie BEZ importu `AccessGuard`: indekser trzyma zero zależności od `core/`,
-     * wszystko dostaje wstrzyknięte (patrz nagłówek pliku) — dlatego ta sama reguła jest
+     * wszystko dostaje wstrzyknięte (patrz nagłówek pliku) - dlatego ta sama reguła jest
      * tu wyliczona lokalnie, a nie zawołana.
      */
     _isExcluded(norm: string): boolean {
@@ -958,7 +956,7 @@ export class VaultIndexer {
             if (!n) continue;
             if (cel === n || cel.startsWith(n + '/')) return true;
         }
-        // E2.9: folder artefaktów (gdy indeksowanie wyłączone).
+        // Folder artefaktów (gdy indeksowanie wyłączone).
         const art = wpis(this._getArtifactsExclude() || '');
         if (art && (cel === art || cel.startsWith(art + '/'))) return true;
         return false;

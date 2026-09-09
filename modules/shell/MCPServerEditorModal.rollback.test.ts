@@ -1,15 +1,15 @@
 /**
- * Strażnik po źródle dla `_handleSave` (AUD-code-review-040).
+ * Strażnik po źródle dla `_handleSave`.
  *
  * `MCPServerEditorModal.ts` importuje `obsidian` (`Modal`, `Setting`, `Notice`) na samej
- * górze, więc AVA go nie zaimportuje — ten sam powód i wzór, co
+ * górze, więc AVA go nie zaimportuje - ten sam powód i wzór, co
  * `modules/chat/chat/stopSemantics.test.ts` i `src/main.test.ts`: czytamy ŹRÓDŁO regexami.
  *
- * Wtopa: `_handleSave` wpisywał `servers[idx] = config` (albo `servers.push(config)`) PRZED
- * zapisem, a przy padzie `await this._save()` tylko pokazywał Notice i robił `return` — bez
- * cofnięcia mutacji. Modal zostawał otwarty, ale konfiguracja w RAM była już podmieniona,
- * choć na dysku dalej leżała poprzednia wersja (repo ma na tę klasę błędu dedykowany wzorzec:
- * `persistOrRollback` w `modules/tools/settingsPersist.ts`, K3-E).
+ * Pilnowany trap: gdyby `_handleSave` wpisywał `servers[idx] = config` (albo `servers.push(config)`)
+ * PRZED zapisem, a przy padzie `await this._save()` tylko pokazywał Notice i robił `return` - bez
+ * cofnięcia mutacji - modal zostawałby otwarty, ale konfiguracja w RAM byłaby już podmieniona,
+ * choć na dysku dalej leżałaby poprzednia wersja (repo ma na tę klasę błędu dedykowany wzorzec:
+ * `persistOrRollback` w `modules/tools/settingsPersist.ts`).
  */
 import test from 'ava';
 import { readFileSync } from 'fs';
@@ -32,7 +32,7 @@ function methodBody(src: string, name: string): string {
 
 const source = readSource('./MCPServerEditorModal.ts');
 
-test('_handleSave: mutacja jest cofana, gdy zapis padnie (AUD-code-review-040)', t => {
+test('_handleSave: mutacja jest cofana, gdy zapis padnie', t => {
     const body = methodBody(source, '_handleSave');
     t.true(body.length > 0, 'nie znalazłem _handleSave w MCPServerEditorModal.ts');
 

@@ -1,13 +1,13 @@
 /**
- * collisionSuffix.test.ts — AUD-testy-042.
+ * collisionSuffix.test.ts.
  *
  * `findFreeCollisionPath` jest teraz JEDYNE miejsce w `modules/memory` gdzie żyje pętla „znajdź
- * wolną nazwę pliku przy kolizji" — wcześniej powielona 6× w `AgentMemory.ts`. Zamiast doklejać
- * pięć bliźniaczych testów wyczerpania do pięciu bywszych kopii (co synteza audytu wprost
- * odradza), testujemy KONTRAKT raz, obiema stronami: (1) znajduje wolną nazwę — bazową i przez
+ * wolną nazwę pliku przy kolizji" - wcześniej powielona 6× w `AgentMemory.ts`. Zamiast doklejać
+ * pięć bliźniaczych testów wyczerpania do pięciu bywszych kopii,
+ * testujemy KONTRAKT raz, obiema stronami: (1) znajduje wolną nazwę - bazową i przez
  * kolejne sufiksy, aż do granicy 50 prób; (2) po wyczerpaniu 50 kandydatów RZUCA z oczekiwanym
  * komunikatem zamiast oddać zajętą nazwę. Każdy z sześciu wołających (`AgentMemory.ts`) dziedziczy
- * to zachowanie przez delegację — dowód wiązania (throw faktycznie PROPAGUJE się i plik źródłowy
+ * to zachowanie przez delegację - dowód wiązania (throw faktycznie PROPAGUJE się i plik źródłowy
  * zostaje nietknięty) leży w `AgentMemory_kolizja_nazw.test.ts`.
  */
 import test from 'ava';
@@ -94,8 +94,8 @@ test('findFreeCollisionPath: adapter twierdzący, że KAŻDA ścieżka istnieje 
 });
 
 test('findFreeCollisionPath: kłamiący exists() (mówi "nie ma", ale read() dowodzi, że JEST) liczy się jako ZAJĘTA — probeFile fail-closed', async t => {
-    // Sedno K4/AUD-bledy-061: `exists()` kłamie na dyskach sieciowych. `probeFile` potwierdza
-    // odczytem — więc nawet gdy `exists()` mówi "false", plik, który realnie idzie odczytać,
+    // Sedno: `exists()` kłamie na dyskach sieciowych. `probeFile` potwierdza
+    // odczytem - więc nawet gdy `exists()` mówi "false", plik, który realnie idzie odczytać,
     // MUSI się liczyć jako zajęty (nie wolno w niego wejść).
     const realFiles = new Set([`${DIR}/note.md`]);
     const adapter = {

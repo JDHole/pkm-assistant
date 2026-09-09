@@ -3,7 +3,7 @@ import { ollamaProvider } from './ollama.js';
 import { OLLAMA_DEFAULT_KEEP_ALIVE } from '../contracts.js';
 
 /**
- * Wiadomość, w której treść jest ZAWSZE stringiem — dostawcy kształtu OpenAI nie oddają
+ * Wiadomość, w której treść jest ZAWSZE stringiem - dostawcy kształtu OpenAI nie oddają
  * bloków multimodalnych w odpowiedzi, a testy porównują treść znak w znak.
  */
 type TextMessage = OpenAiResponseTransformedMessage & { content: string };
@@ -19,18 +19,19 @@ import type {
 } from '../contracts.js';
 
 /**
- * Regression guards for the Ollama <think>-tag parser (v2.2).
+ * Regression guards for the Ollama <think>-tag parser.
  *
  * Ollama gada INACZEJ niż LM Studio: porcje to gołe obiekty JSON, jeden na linię (NDJSON,
- * bez prefiksu `data: `), a koniec strumienia sygnalizuje STRUKTURALNIE — `done_reason`
+ * bez prefiksu `data: `), a koniec strumienia sygnalizuje STRUKTURALNIE - `done_reason`
  * albo `done: true`, nie sentinel tekstowy. Mechanika rozdzielania myślenia od treści jest
- * jednak WSPÓLNA (`ReasoningTagFilter`) — bliźniaczy zestaw dla LM Studio: `lm_studio.test.ts`.
+ * jednak WSPÓLNA (`ReasoningTagFilter`) - bliźniaczy zestaw dla LM Studio: `lm_studio.test.ts`.
  *
- * Bugi, które ten plik zabija (oba były w Ollamie i LM Studio jednocześnie — bo kopia kodu):
- *  1. `<think>` bez `</think>` (model ucięty na `num_predict`, proxy zgubiło tag) wrzucał CAŁĄ
- *     wypowiedź do myślenia → user widzi zwinięte myślenie i pustą odpowiedź.
- *  2. Literalny `<think>` w prozie / bloku kodu (model PISZE o znaczniku) otwierał myślenie
- *     w środku zdania → widoczna treść urywała się w połowie.
+ * Niezmienniki parsera:
+ *  1. `<think>` bez `</think>` (model ucięty na `num_predict`, proxy zgubiło tag) nie może
+ *     wciągnąć całej wypowiedzi w myślenie - inaczej user widzi zwinięte myślenie i pustą
+ *     odpowiedź.
+ *  2. Literalny `<think>` w prozie / bloku kodu (model PISZE o znaczniku) nie może otworzyć
+ *     myślenia w środku zdania - inaczej widoczna treść urywa się w połowie.
  */
 const REQ: ChatRequest = { messages: [{ role: 'user', content: 'hej' }] };
 const CTX: ProviderContext = makeCtx({ modelId: 'qwen3' });
@@ -43,7 +44,7 @@ const say = (content: string) => JSON.stringify({
   done: false,
 }) + '\n';
 
-/** Ostatnia linia — Ollama zamiast sentinela tekstowego wysyła `done_reason`. */
+/** Ostatnia linia - Ollama zamiast sentinela tekstowego wysyła `done_reason`. */
 const DONE = JSON.stringify({
   model: 'qwen3',
   message: { role: 'assistant', content: '' },
@@ -67,7 +68,7 @@ const emitted = (events: StreamEvent[]) =>
   events.filter((e): e is Extract<StreamEvent, { type: 'text' }> => e.type === 'text')
     .map(e => e.delta).join('');
 
-/** Seam obserwacyjny parsera tagów myślenia (TT-16). */
+/** Seam obserwacyjny parsera tagów myślenia. */
 const seam = (decoder: StreamDecoder) => decoder.reasoning!;
 
 /** Czy porcja niesie koniec strumienia (zdarzenie `done` dekodera). */
@@ -99,7 +100,7 @@ function completed(content: string, thinking?: string): TextMessage {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 1. Happy path — myślenie osobno, odpowiedź osobno, ogon nie ginie
+// 1. Happy path - myślenie osobno, odpowiedź osobno, ogon nie ginie
 // ─────────────────────────────────────────────────────────────────────────────
 test('ollama think parser: rozdziela myślenie od odpowiedzi co do znaku', t => {
   const THINK = 'Sprawdzam czego dokładnie chce użytkownik, potem odpowiadam po polsku.';
@@ -150,9 +151,9 @@ test('ollama think parser: tagi rozcięte między chunki zostają sklejone', t =
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. BUG 1 — <think> który nigdy się nie domknął
+// 2. <think> który nigdy się nie domknął
 // ─────────────────────────────────────────────────────────────────────────────
-test('ollama think parser: niedomknięty <think> wraca w całości do treści (BUG 1)', t => {
+test('ollama think parser: niedomknięty <think> wraca w całości do treści', t => {
   const CUT = 'Zaczynam od backlogu. Pierwszy punkt to naprawa parsera, drugi to testy, trzeci';
 
   const { message, events } = stream([
@@ -187,9 +188,9 @@ test('ollama think parser: domknięte myślenie zostaje, urwany ogon wraca do tr
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. BUG 2 — model PISZE o znaczniku (proza / blok kodu)
+// 3. model PISZE o znaczniku (proza / blok kodu)
 // ─────────────────────────────────────────────────────────────────────────────
-test('ollama think parser: literalny <think> w prozie nie zjada zdania (BUG 2)', t => {
+test('ollama think parser: literalny <think> w prozie nie zjada zdania', t => {
   const PROSE = 'Usuń znacznik <think> z promptu, bo psuje parser.';
 
   const { message, events } = stream([say(PROSE), DONE]);
@@ -199,7 +200,7 @@ test('ollama think parser: literalny <think> w prozie nie zjada zdania (BUG 2)',
   t.is(emitted(events), message.content);
 });
 
-test('ollama think parser: <think> w bloku kodu zostaje w treści (BUG 2)', t => {
+test('ollama think parser: <think> w bloku kodu zostaje w treści', t => {
   const CHUNKS = [
     'Parser wycina bloki myślenia. Przykład wejścia:\n\n```\n',
     '<think>tu model myśli</think>\n',
@@ -224,7 +225,7 @@ test('ollama think parser: przerwany stream nie gubi rezerwy, finish() dokłada 
     say(ANSWER),
   ];
 
-  // Bez porcji z `done_reason` — dokładnie tak wygląda strumień ubity Stopem. Karmimy dekoder
+  // Bez porcji z `done_reason` - dokładnie tak wygląda strumień ubity Stopem. Karmimy dekoder
   // BEZ `finish()`, żeby zobaczyć stan rezerwy w połowie drogi.
   const midDecoder = ollamaProvider.createStreamDecoder(REQ, CTX);
   const midEvents = CHUNKS.flatMap(c => midDecoder.feed(c));
@@ -241,11 +242,11 @@ test('ollama think parser: przerwany stream nie gubi rezerwy, finish() dokłada 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. Non-streaming (complete() → to_openai()) — te same reguły co w streamie
+// 5. Non-streaming (complete() → to_openai()) - te same reguły co w streamie
 // ─────────────────────────────────────────────────────────────────────────────
 test('ollama think parser: non-streaming rozdziela myślenie od odpowiedzi', t => {
-  // Przed fixem `complete()` w ogóle nie parsował <think> — surowy tag jechał dalej
-  // (m.in. do wyników sub-agentów na modelach lokalnych).
+  // `complete()` musi parsować `<think>` tak samo jak stream - inaczej surowy tag jedzie
+  // dalej (m.in. do wyników sub-agentów na modelach lokalnych).
   const msg = completed('<think>rozumowanie modelu</think>Właściwa odpowiedź.');
 
   t.is(msg.reasoning_content, 'rozumowanie modelu');
@@ -268,11 +269,11 @@ test('ollama think parser: non-streaming — tag w środku treści nic nie zmien
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 6. Natywne myślenie Ollamy (`message.thinking`) — osobne pole, nie tagi w treści
+// 6. Natywne myślenie Ollamy (`message.thinking`) - osobne pole, nie tagi w treści
 // ─────────────────────────────────────────────────────────────────────────────
 test('ollama native thinking: message.thinking ląduje w reasoning_content, treść czysta', t => {
-  // Przed fixem pole `thinking` było IGNOROWANE — myślenie modeli z `think: true`
-  // (qwen3, deepseek-r1) przepadało w całości, user nie widział bloku myślenia.
+  // Pole `thinking` niesie myślenie modeli z `think: true` (qwen3, deepseek-r1) i musi
+  // trafić do reasoning_content - inaczej user nie widzi bloku myślenia.
   const { message, events, decoder } = stream([
     ponder('Sprawdzam, o co pyta user. '),
     ponder('Odpowiem po polsku.'),
@@ -334,10 +335,10 @@ test('ollama think parser: tool_calls przechodzą przy urwanym <think>', t => {
   ]);
 
   t.is(message.tool_calls![0].function.name, 'read');
-  // OL-05: Ollama niesie `arguments` OBIEKTEM i dostawca ma go przepuścić bez gubienia pól.
+  // Ollama niesie `arguments` OBIEKTEM i dostawca ma go przepuścić bez gubienia pól.
   // W torze STRUMIENIOWYM językiem dostawcy są zdarzenia, a te niosą argumenty wyłącznie
   // tekstem (`StreamEvent.tool_call.argumentsDelta?: string`; akumulacja w `ChatModel` skleja
-  // delty stringiem) — obiekt jedzie więc dosłownym zapisem JSON i wraca obiektem po
+  // delty stringiem) - obiekt jedzie więc dosłownym zapisem JSON i wraca obiektem po
   // sparsowaniu. Ta sama idiomatyka co u Gemini (`gemini.test.ts` „arg sklejony ze WSZYSTKICH
   // kawałków”). Przepuszczenie 1:1 pinuje test non-streaming zaraz pod spodem.
   t.deepEqual(JSON.parse(String(message.tool_calls![0].function.arguments)) as unknown, { path: 'a.md' });
@@ -345,7 +346,7 @@ test('ollama think parser: tool_calls przechodzą przy urwanym <think>', t => {
   t.is(message.reasoning_content, undefined);
 });
 
-test('OL-05: non-streaming — `arguments` przychodzące OBIEKTEM przechodzą bez przepakowania', t => {
+test('non-streaming — `arguments` przychodzące OBIEKTEM przechodzą bez przepakowania', t => {
   const msg = ollamaProvider.parseCompletion(
     {
       model: 'qwen3',
@@ -370,11 +371,11 @@ test('OL-05: non-streaming — `arguments` przychodzące OBIEKTEM przechodzą be
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// F2.14: rozpoznanie konca streamu sprawdza pola STRUKTURALNE (done_reason/done), nie substring
-// na surowym tekście porcji — patrz to samo znalezisko po stronie google.ts.
+// Rozpoznanie konca streamu sprawdza pola STRUKTURALNE (done_reason/done), nie substring
+// na surowym tekście porcji - ten sam mechanizm obowiązuje po stronie google.ts.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('F2.14: ollama/koniec streamu: model wypowiadający frazę "done_reason" w treści NIE kończy strumienia przedwcześnie', t => {
+test('ollama/koniec streamu: model wypowiadający frazę "done_reason" w treści NIE kończy strumienia przedwcześnie', t => {
   const talksAboutIt = JSON.stringify({
       model: 'qwen3',
       message: { role: 'assistant', content: 'Pole "done_reason" mówi, dlaczego Ollama zakończyła generację.' },
@@ -391,37 +392,36 @@ test('F2.14: ollama/koniec streamu: model wypowiadający frazę "done_reason" w 
   t.true(endsStream(genuinelyFinal));
 });
 
-test('F2.14: ollama/koniec streamu: rozpoznaje koniec przez samo "done":true, nawet bez done_reason', t => {
+test('ollama/koniec streamu: rozpoznaje koniec przez samo "done":true, nawet bez done_reason', t => {
   const doneNoReason = JSON.stringify({ model: 'qwen3', message: { role: 'assistant', content: '' }, done: true });
   t.true(endsStream(doneNoReason), 'handle_chunk traktuje done_reason ORAZ done===true jako sygnał końca — rozpoznanie końca ma być spójne');
 });
 
-test('F2.14: ollama/koniec streamu: porcja niesparsowalna (rozcięty JSON) nie rzuca i nie jest końcem', t => {
+test('ollama/koniec streamu: porcja niesparsowalna (rozcięty JSON) nie rzuca i nie jest końcem', t => {
   const partial = '{"model":"qwen3","message":{"role":"assistant","content":"urwa';
   t.notThrows(() => endsStream(partial));
   t.false(endsStream(partial));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// W4-02 (review fali 2, 2026-09-04): rozpoznanie końca parsowało CAŁĄ porcję jako JEDEN
-// obiekt JSON — dwie linie NDJSON zlepione w jedno zdarzenie (proxy buforujący, sklejony `\n`)
-// gubiły sentinel, nawet gdy druga linia niosła `done_reason`. Dziś dzieli porcję po liniach
-// i bierze OSTATNIĄ PARSOWALNĄ — ta sama ścieżka co `handle_chunk`.
+// Dwie linie NDJSON mogą zlepić się w jedno zdarzenie (proxy buforujący, sklejony `\n`);
+// rozpoznanie końca dzieli porcję po liniach i bierze OSTATNIĄ PARSOWALNĄ - ta sama
+// ścieżka co `handle_chunk` - inaczej sentinel z drugiej linii ginie.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('W4-02: ollama/koniec streamu: dwie linie NDJSON zlepione w jednym zdarzeniu — bierze OSTATNIĄ, rozpoznaje done_reason', t => {
+test('ollama/koniec streamu: dwie linie NDJSON zlepione w jednym zdarzeniu — bierze OSTATNIĄ, rozpoznaje done_reason', t => {
   const line1 = JSON.stringify({ model: 'qwen3', message: { role: 'assistant', content: 'kawałek 1' }, done: false });
   const line2 = JSON.stringify({ model: 'qwen3', message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop' });
   const glued = `${line1}\n${line2}`;
   t.true(endsStream(glued), 'ostatnia linia zlepionej porcji niesie done_reason — koniec ma zostać wykryty');
 
-  // Odwrotna kolejność: PIERWSZA linia niesie sentinel, OSTATNIA nie — porcja nie jest końcem,
+  // Odwrotna kolejność: PIERWSZA linia niesie sentinel, OSTATNIA nie - porcja nie jest końcem,
   // bo liczy się stan z KOŃCA porcji, nie obecność sentinela GDZIEKOLWIEK w niej.
   const gluedNoEnd = `${line2}\n${line1}`;
   t.false(endsStream(gluedNoEnd));
 });
 
-test('W4-02: ollama/koniec streamu: ostatnia linia urwana (niesparsowalna), przedostatnia parsowalna z done_reason — przeskakuje do niej', t => {
+test('ollama/koniec streamu: ostatnia linia urwana (niesparsowalna), przedostatnia parsowalna z done_reason — przeskakuje do niej', t => {
   const line1 = JSON.stringify({ model: 'qwen3', message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop' });
   const glued = `${line1}\n{"model":"qwen3","message":{"role":"assistant","content":"urwa`;
   t.true(endsStream(glued), 'ostatnia linia jest śmieciem transportowym — poprzednia parsowalna linia ma rozstrzygać');
@@ -429,7 +429,7 @@ test('W4-02: ollama/koniec streamu: ostatnia linia urwana (niesparsowalna), prze
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// N35 (luka L-24, B.10 OL-03): keep_alive i limit wyjścia w żądaniu
+// keep_alive i limit wyjścia w żądaniu
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('Ollama request uses keep_alive setting and max_tokens default', t => {
@@ -445,7 +445,7 @@ test('Ollama request uses keep_alive setting and max_tokens default', t => {
   t.is(body.options?.num_predict, MODEL_MAX_TOKENS_DEFAULTS.ollama);
 });
 
-test('L-24: pusta/nieprawidłowa wartość keep_alive spada na OLLAMA_DEFAULT_KEEP_ALIVE', t => {
+test('pusta/nieprawidłowa wartość keep_alive spada na OLLAMA_DEFAULT_KEEP_ALIVE', t => {
   type ParsedBody = { keep_alive?: string };
   for (const bad of ['', undefined]) {
     const spec = ollamaProvider.buildRequest(
@@ -460,12 +460,12 @@ test('L-24: pusta/nieprawidłowa wartość keep_alive spada na OLLAMA_DEFAULT_KE
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// B.10 OL-08: katalog modeli ściągniętych na dysk — `GET <host>/api/tags`, wołany wyłącznie
-// przez Ustawienia. Wiersz jest must-keep w katalogu zachowań, a nie miał w klastrze żadnego
-// testu (jedyny test `/api/tags` w repo należy do `modules/embedding`, czyli innego modułu).
+// Katalog modeli ściągniętych na dysk - `GET <host>/api/tags`, wołany wyłącznie
+// przez Ustawienia. Wiersz jest must-keep w katalogu zachowań (jedyny test `/api/tags`
+// w repo należy do `modules/embedding`, czyli innego modułu).
 // ────────────────────────────────────────────────────────────────────────────
 
-test('OL-08: katalog modeli to GET <host>/api/tags i wraca TABLICĄ ModelInfo[]', async t => {
+test('katalog modeli to GET <host>/api/tags i wraca TABLICĄ ModelInfo[]', async t => {
   const http = new CapturingHttpClient({
     body: {
       models: [
@@ -481,11 +481,11 @@ test('OL-08: katalog modeli to GET <host>/api/tags i wraca TABLICĄ ModelInfo[]'
   t.is(http.lastSpec!.method, 'GET', 'katalog czyta się, nie wysyła');
   t.is(http.lastSpec!.url, 'http://localhost:11434/api/tags', 'ścieżkę dokleja dostawca, host przychodzi z ustawień');
   t.deepEqual(models.map(m => m.id), ['qwen3:8b', 'llava:13b'], 'wpis bez identyfikatora wypada z listy');
-  t.true(models[1].multimodal, 'rodzina "clip" rozstrzyga vision lepiej niż zgadywanie po nazwie (VC-02)');
+  t.true(models[1].multimodal, 'rodzina "clip" rozstrzyga vision lepiej niż zgadywanie po nazwie');
   t.falsy(models[0].multimodal);
 });
 
-test('OL-08: zgaszony demon albo błąd statusu — katalog to PUSTA lista, nie wyjątek', async t => {
+test('zgaszony demon albo błąd statusu — katalog to PUSTA lista, nie wyjątek', async t => {
   const padniety = new CapturingHttpClient().throwOn(new Error('ECONNREFUSED'));
   t.deepEqual(await ollamaProvider.listModels(makeCtx(), padniety), [], 'rozwijane pole Ustawień ma się narysować także bez demona');
 
@@ -494,14 +494,13 @@ test('OL-08: zgaszony demon albo błąd statusu — katalog to PUSTA lista, nie 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// F10 (bramka mutacyjna): zachowania kontraktowe dostawcy, których nie pinował żaden
-// test — sklejanie adresu, tłumaczenie transkryptu (role, bloki treści, obrazy,
-// `tool_calls`, myślenie), liczniki tokenów, powód końca i limit odpowiedzi.
-// Każdy przypadek stoi na obserwowalnym wyniku: ciele żądania, kształcie odpowiedzi,
-// zdarzeniach dekodera albo wywołaniach na wstrzykniętym logu.
+// Zachowania kontraktowe dostawcy: sklejanie adresu, tłumaczenie transkryptu (role,
+// bloki treści, obrazy, `tool_calls`, myślenie), liczniki tokenów, powód końca
+// i limit odpowiedzi. Każdy przypadek stoi na obserwowalnym wyniku: ciele żądania,
+// kształcie odpowiedzi, zdarzeniach dekodera albo wywołaniach na wstrzykniętym logu.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Ciało `POST /api/chat` po stronie testu (dostawca oddaje je STRINGIEM — BA-01). */
+/** Ciało `POST /api/chat` po stronie testu (dostawca oddaje je STRINGIEM). */
 type BodyOllamy = {
   model?: string;
   think?: boolean;
@@ -515,11 +514,11 @@ type BodyOllamy = {
 const bodyOf = (req: ChatRequest, ctx: ProviderContext = CTX): BodyOllamy =>
   JSON.parse(ollamaProvider.buildRequest(req, ctx, false).body ?? '{}') as BodyOllamy;
 
-/** Kontekst modelu, który UMIE czytać obrazy (metadana katalogu rozstrzyga — VC-02). */
+/** Kontekst modelu, który UMIE czytać obrazy (metadana katalogu rozstrzyga). */
 const ctxVision = (): ProviderContext =>
   makeCtx({ modelId: 'llava:13b', models: [{ id: 'llava:13b', multimodal: true }] });
 
-test('F10: host sprowadzony do samego ukośnika spada na demona domyślnego', t => {
+test('host sprowadzony do samego ukośnika spada na demona domyślnego', t => {
   t.is(
     ollamaProvider.buildRequest(REQ, makeCtx({ modelId: 'qwen3', endpoint: '/' }), false).url,
     'http://localhost:11434/api/chat',
@@ -528,16 +527,16 @@ test('F10: host sprowadzony do samego ukośnika spada na demona domyślnego', t 
   t.is(
     ollamaProvider.buildRequest(REQ, makeCtx({ modelId: 'qwen3', endpoint: 'http://dom:11434/api/chat' }), false).url,
     'http://dom:11434/api/chat',
-    'wklejona ścieżka API znika z hosta, zanim dostawca doklei własną (BA-21)',
+    'wklejona ścieżka API znika z hosta, zanim dostawca doklei własną',
   );
 });
 
-test('F10: model bierze się z żądania, a pusty spada na model domyślny', t => {
+test('model bierze się z żądania, a pusty spada na model domyślny', t => {
   t.is(bodyOf({ ...REQ, model: 'qwen3:8b' }, makeCtx({ modelId: 'inny' })).model, 'qwen3:8b');
   t.is(bodyOf(REQ, makeCtx({ modelId: '' })).model, 'llama3', 'brak wskazania = model domyślny');
 });
 
-test('F10: role spoza słownika demona schodzą do `user`, znane przechodzą bez zmian', t => {
+test('role spoza słownika demona schodzą do `user`, znane przechodzą bez zmian', t => {
   const msgs = bodyOf({
     messages: [
       { role: 'system', content: 'a' },
@@ -553,7 +552,7 @@ test('F10: role spoza słownika demona schodzą do `user`, znane przechodzą bez
   t.false('tool_name' in msgs[4], 'zwykły głos rozmówcy nie dostaje pola narzędzia');
 });
 
-test('F10: bloki treści — tekst sklejony nową linią, obrazy osobno jako goły base64', t => {
+test('bloki treści — tekst sklejony nową linią, obrazy osobno jako goły base64', t => {
   const msgs = bodyOf({
     messages: [{
       role: 'user',
@@ -571,7 +570,7 @@ test('F10: bloki treści — tekst sklejony nową linią, obrazy osobno jako go�
   t.false('tool_calls' in msgs[0], 'wiadomość bez wywołań narzędzi nie dostaje pustej tablicy');
 });
 
-test('F10: obraz-odsyłacz http(s) nie jedzie do demona — zostaje po nim komunikat w treści', t => {
+test('obraz-odsyłacz http(s) nie jedzie do demona — zostaje po nim komunikat w treści', t => {
   const msgs = bodyOf({
     messages: [{
       role: 'user',
@@ -587,7 +586,7 @@ test('F10: obraz-odsyłacz http(s) nie jedzie do demona — zostaje po nim komun
   t.false(String(msgs[0].content).includes('przyklad.test'), 'adres obrazu nie wchodzi do transkryptu');
 });
 
-test('F10: ostrzeżenie o pominiętym obrazie leci RAZ na turę, nie raz na obraz', t => {
+test('ostrzeżenie o pominiętym obrazie leci RAZ na turę, nie raz na obraz', t => {
   const log = makeLog();
   const obrazek = (ladunek: string) => ({
     role: 'user',
@@ -603,7 +602,7 @@ test('F10: ostrzeżenie o pominiętym obrazie leci RAZ na turę, nie raz na obra
   t.is(ostrzezenia.length, 1, 'album zdjęć nie może zalać logu');
 });
 
-test('F10: reasoning_content z transkryptu jedzie jako `thinking`, brak nie tworzy pola', t => {
+test('reasoning_content z transkryptu jedzie jako `thinking`, brak nie tworzy pola', t => {
   const msgs = bodyOf({
     messages: [
       { role: 'assistant', content: 'a', reasoning_content: 'bo tak' },
@@ -615,7 +614,7 @@ test('F10: reasoning_content z transkryptu jedzie jako `thinking`, brak nie twor
   t.false('thinking' in msgs[1], 'puste myślenie nie dokłada pola do żądania');
 });
 
-test('F10: tool_calls w transkrypcie — argumenty OBIEKTEM, wpis bez nazwy wypada', t => {
+test('tool_calls w transkrypcie — argumenty OBIEKTEM, wpis bez nazwy wypada', t => {
   const msgs = bodyOf({
     messages: [{
       role: 'assistant',
@@ -641,20 +640,20 @@ test('F10: tool_calls w transkrypcie — argumenty OBIEKTEM, wpis bez nazwy wypa
     'tekst czytelny jako JSON, ale nie jako OBIEKT, też zostaje tekstem');
 });
 
-test('F10: tryb myślenia to FLAGA, a bez niego pole `think` w ogóle nie wchodzi', t => {
+test('tryb myślenia to FLAGA, a bez niego pole `think` w ogóle nie wchodzi', t => {
   t.is(bodyOf({ ...REQ, thinking: true }).think, true);
   t.is(bodyOf({ ...REQ, thinking: 2048 }).think, true, 'budżet w tokenach znaczy dla demona tyle co true');
   t.false('think' in bodyOf(REQ));
 });
 
-test('F10: limit odpowiedzi — żądanie, potem kontekst, na końcu wyliczenie z platformy', t => {
+test('limit odpowiedzi — żądanie, potem kontekst, na końcu wyliczenie z platformy', t => {
   t.is(bodyOf({ ...REQ, max_tokens: 1 }, makeCtx({ modelId: 'qwen3' })).options?.num_predict, 1,
     'jedynka z żądania też jest wartością dodatnią');
   t.is(bodyOf(REQ, makeCtx({ modelId: 'qwen3', maxOutputTokens: 777 })).options?.num_predict, 777);
   t.is(bodyOf(REQ, makeCtx({ modelId: 'qwen3' })).options?.num_predict, MODEL_MAX_TOKENS_DEFAULTS.ollama);
 });
 
-test('F10: liczniki tokenów — liczby, liczby w stringu, brak jednego z nich', t => {
+test('liczniki tokenów — liczby, liczby w stringu, brak jednego z nich', t => {
   const usage = (liczniki: Record<string, unknown>) => ollamaProvider.parseCompletion(
     { model: 'qwen3', message: { role: 'assistant', content: 'ok' }, done: true, done_reason: 'stop', ...liczniki },
     REQ,
@@ -666,12 +665,12 @@ test('F10: liczniki tokenów — liczby, liczby w stringu, brak jednego z nich',
     'demon bywa kapryśny i podaje licznik stringiem — to nadal liczba');
   t.deepEqual(usage({ prompt_eval_count: 7 }), { prompt_tokens: 7 }, 'jeden licznik wystarczy, sumy wtedy nie ma');
   t.deepEqual(usage({ eval_count: 9 }), { completion_tokens: 9 });
-  t.deepEqual(usage({}), {}, 'brak obu liczników to sygnał estymacji (BA-08)');
+  t.deepEqual(usage({}), {}, 'brak obu liczników to sygnał estymacji');
   t.deepEqual(usage({ prompt_eval_count: '', eval_count: 'nie-liczba' }), {},
     'pusty string i śmieć to BRAK licznika, nie zero');
 });
 
-test('F10: powód końca — własny wygrywa, samo done spada na stop, brak końca to null', t => {
+test('powód końca — własny wygrywa, samo done spada na stop, brak końca to null', t => {
   const powod = (koniec: Record<string, unknown>) => ollamaProvider.parseCompletion(
     { model: 'qwen3', message: { role: 'assistant', content: 'x' }, ...koniec },
     REQ,
@@ -683,7 +682,7 @@ test('F10: powód końca — własny wygrywa, samo done spada na stop, brak koń
   t.is(powod({ done: false }), null);
 });
 
-test('F10: ładunek z polem error oddaje błąd zamiast rzucać (BA-22)', t => {
+test('ładunek z polem error oddaje błąd zamiast rzucać', t => {
   const odpowiedz = ollamaProvider.parseCompletion({ error: 'model "qwen9" not found' }, REQ, CTX);
 
   t.truthy(odpowiedz.error, 'pętla ma dostać kształt, na którym umie stanąć');
@@ -691,7 +690,7 @@ test('F10: ładunek z polem error oddaje błąd zamiast rzucać (BA-22)', t => {
   t.is(odpowiedz.choices[0].finish_reason, null);
 });
 
-test('F10: tool_calls w odpowiedzi bez strumienia — string i obiekt przechodzą, śmieć spada na {}', t => {
+test('tool_calls w odpowiedzi bez strumienia — string i obiekt przechodzą, śmieć spada na {}', t => {
   const msg = ollamaProvider.parseCompletion({
     model: 'qwen3',
     message: {
@@ -706,7 +705,7 @@ test('F10: tool_calls w odpowiedzi bez strumienia — string i obiekt przechodz�
     done_reason: 'stop',
   }, REQ, CTX).choices[0].message;
 
-  t.is(msg.tool_calls![0].function.arguments, '{"path":"a.md"}', 'string idzie stringiem (OL-05)');
+  t.is(msg.tool_calls![0].function.arguments, '{"path":"a.md"}', 'string idzie stringiem');
   t.is(msg.tool_calls![1].function.arguments, '{}', 'ani string, ani obiekt = pusty obiekt argumentów');
 
   const zwykla = ollamaProvider.parseCompletion(
@@ -717,7 +716,7 @@ test('F10: tool_calls w odpowiedzi bez strumienia — string i obiekt przechodz�
   t.is(zwykla.tool_calls, undefined, 'odpowiedź bez narzędzi nie dostaje pustej tablicy');
 });
 
-test('F10: strumień oddaje zużycie i identyfikator wywołania narzędzia', t => {
+test('strumień oddaje zużycie i identyfikator wywołania narzędzia', t => {
   const linia = JSON.stringify({
     model: 'qwen3',
     message: {
@@ -738,7 +737,7 @@ test('F10: strumień oddaje zużycie i identyfikator wywołania narzędzia', t =
   t.deepEqual(zuzycie?.usage, { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 });
 });
 
-test('F10: urwany ogon porcji czeka na resztę bajtów, nie ląduje w koszu', t => {
+test('urwany ogon porcji czeka na resztę bajtów, nie ląduje w koszu', t => {
   const decoder = ollamaProvider.createStreamDecoder(REQ, CTX);
 
   t.deepEqual(decoder.feed('{"model":"qwen3","message":{"role":"assistant","content":"urwa'), [],
@@ -747,10 +746,10 @@ test('F10: urwany ogon porcji czeka na resztę bajtów, nie ląduje w koszu', t 
   const reszta = decoder.feed('ne"},"done":true,"done_reason":"stop"}');
   t.is(emitted(reszta), 'urwane', 'sklejona linia wychodzi w całości');
   t.true(reszta.some(e => e.type === 'done'), 'ostatnia linia bez znaku nowej linii też kończy turę');
-  t.is(decoder.droppedFrames, 0, 'nic nie poszło do kosza jako nieczytelne (ST-11)');
+  t.is(decoder.droppedFrames, 0, 'nic nie poszło do kosza jako nieczytelne');
 });
 
-test('F10: katalog przy błędnym statusie jest PUSTY, nawet gdy ciało jest poprawnym JSON-em', async t => {
+test('katalog przy błędnym statusie jest PUSTY, nawet gdy ciało jest poprawnym JSON-em', async t => {
   const zly = new CapturingHttpClient({ status: 404, body: { models: [{ model: 'qwen3:8b' }] } });
   t.deepEqual(await ollamaProvider.listModels(makeCtx(), zly), [], 'status spoza 2xx nie ma treści do czytania');
 

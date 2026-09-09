@@ -1,9 +1,9 @@
 /**
- * AUD-wydajnosc-096: blok myśli dopisuje DELTĘ zamiast podmieniać całość.
+ * Blok myśli dopisuje DELTĘ zamiast podmieniać całość.
  *
  * `updateThinkingBlock` dostaje ślad rozumowania ZAKUMULOWANY od początku tury (adapter
  * dokłada deltę do `message.reasoning_content`), więc `content.textContent = text` przy każdym
- * wywołaniu przepisywało O(K × długość) znaków i przy rozwiniętym bloku wymuszało przeliczenie
+ * wywołaniu przepisywałoby O(K × długość) znaków i przy rozwiniętym bloku wymuszało przeliczenie
  * układu (`scrollHeight`) — także wtedy, gdy nic się nie zmieniło.
  *
  * `createThinkingBlock` wymaga rozszerzeń DOM Obsidiana (`createDiv`), więc testujemy samą

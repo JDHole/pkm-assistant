@@ -1,11 +1,10 @@
 /**
- * Migracja ada-002 → 3-small — strażnik AUD-bledy-040.
+ * Migracja ada-002 → 3-small.
  *
- * Do naprawy `_syncEmbeddingModelSettings` (src/main.ts) pokazywał 15-sekundowy Notice
- * „Przełączam na text-embedding-3-small. Wymagany reindex", a DOPIERO POTEM próbował zapisać
- * ustawienia — w `try { save() } catch (_) {}`. Gdy zapis padł (zajęty plik, dysk sieciowy),
- * nie było ani logu, ani drugiego komunikatu: user robił reindex w przekonaniu, że ustawienie
- * jest utrwalone, a przy następnym starcie migracja startowała od zera.
+ * Trap: zapis ustawień musi się powieść, zanim user usłyszy obietnicę przełączenia modelu.
+ * Gdy zapis pada (zajęty plik, dysk sieciowy) bez tego warunku, user robi reindex w
+ * przekonaniu, że ustawienie jest utrwalone, a przy następnym starcie migracja startuje od
+ * zera - bez śladu w logu.
  */
 import test from 'ava';
 import { announceAdaMigration, ADA_FROM, ADA_TO } from './adaMigration.js';
@@ -33,7 +32,7 @@ test('zapis przeszedł — user dostaje obietnicę przełączenia i wie o reinde
     t.is(spy.errors.length, 0);
 });
 
-test('AUD-bledy-040: zapis padł — komunikat mówi, że przełączenie NIE zostało utrwalone', async t => {
+test('zapis padł - komunikat mówi, że przełączenie NIE zostało utrwalone', async t => {
     const spy = collect();
     const boom = new Error('EBUSY: settings.json zajęty');
 
@@ -50,7 +49,7 @@ test('AUD-bledy-040: zapis padł — komunikat mówi, że przełączenie NIE zos
     t.is(spy.errors[0], boom, 'pad idzie do logu z kontekstem, nie do pustego catch');
 });
 
-test('AUD-bledy-040: zapis rzucił synchronicznie — ta sama ścieżka co odrzucona obietnica', async t => {
+test('zapis rzucił synchronicznie - ta sama ścieżka co odrzucona obietnica', async t => {
     const spy = collect();
 
     const saved = await announceAdaMigration({

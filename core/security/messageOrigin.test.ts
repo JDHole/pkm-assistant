@@ -7,7 +7,7 @@ import {
     MACHINE_MESSAGE_META,
 } from './messageOrigin.js';
 
-// ── K7: fail-closed — człowiekiem jest tylko jawne `origin: 'human'` ──
+// ── fail-closed — człowiekiem jest tylko jawne `origin: 'human'` ──
 
 test('resolveMessageOrigin: jawne human => human', t => {
     t.is(resolveMessageOrigin({ origin: 'human' }), 'human');

@@ -1,14 +1,14 @@
 /**
- * `ChatModel.stopStream()` — twardy Stop ROZSTRZYGA promisę bieżącego streamu.
+ * `ChatModel.stopStream()` - twardy Stop ROZSTRZYGA promisę bieżącego streamu.
  *
- * DLACZEGO (FAIL 3 żywego smoke'a 2026-08-15, 17:58): przerwanie transportu nie emituje
- * ŻADNEGO zdarzenia — ani końca, ani błędu. Promisa `stream()` wisiała więc w nieskończoność:
- * pętla suba stała na `await` aż po 124,7 s strzelił per-call budzik i bieg kończył się jako
- * „błąd / Model timeout" zamiast „Przerwany", mimo że user kliknął Stop dwie minuty wcześniej.
+ * DLACZEGO: przerwanie transportu nie emituje ŻADNEGO zdarzenia - ani końca, ani błędu. Bez
+ * jawnego rozstrzygnięcia promisa `stream()` wisiałaby w nieskończoność: pętla suba stałaby na
+ * `await` aż per-call budzik strzeliłby po 124,7 s, a bieg kończyłby się jako „błąd / Model
+ * timeout" zamiast „Przerwany", mimo że user kliknął Stop dwie minuty wcześniej.
  *
- * ⚠️ ŚWIADOMIE OSOBNY PLIK — `ChatModel.concurrent.test.ts` ma znanego flake'a (mierzy realne
+ * ⚠️ ŚWIADOMIE OSOBNY PLIK - `ChatModel.concurrent.test.ts` ma znanego flake'a (mierzy realne
  * odstępy czasowe) i bywa naprawiany równolegle. Tu pinujemy tylko mechanikę rozstrzygnięcia;
- * testy współdzielą globalną bramkę `lm_studio`, więc jak u sąsiada — CAŁY plik `test.serial`.
+ * testy współdzielą globalną bramkę `lm_studio`, więc jak u sąsiada - CAŁY plik `test.serial`.
  */
 import test from 'ava';
 import { ChatModel, createChatModel } from './ChatModel.js';
@@ -27,7 +27,7 @@ function makeProvider(id: string, local: boolean): ChatProvider {
     } as ChatProvider;
 }
 
-/** Skrócony cooldown — pinujemy mechanikę, nie czekamy 150 ms na każdy slot. */
+/** Skrócony cooldown - pinujemy mechanikę, nie czekamy 150 ms na każdy slot. */
 class FastModel extends ChatModel {
     static override GATE_RELEASE_COOLDOWN_MS = 20;
 }
@@ -92,7 +92,7 @@ test.serial('rozstrzygnięcie jest idempotentne: drugi stopStream niczego nie ro
 
 test.serial('po abercie finally w stream() zwalnia slot normalną drogą (następny wjeżdża)', async (t) => {
     let nextStarted = false;
-    /** Transport, który od razu odpowiada 200 i domyka ciało — „następny w kolejce" jedzie. */
+    /** Transport, który od razu odpowiada 200 i domyka ciało - „następny w kolejce" jedzie. */
     const nextTransport: StreamTransport = {
         open: async () => {
             nextStarted = true;
@@ -112,7 +112,7 @@ test.serial('po abercie finally w stream() zwalnia slot normalną drogą (nastę
 
 test.serial('stopStream biletu CZEKAJĄCEGO w kolejce nie dubluje odrzucenia', async (t) => {
     // Ścieżka `admitted === false` rozstrzyga się sama (`GateCancelledError` w `stream`), a uchwyt
-    // odrzucenia jest wtedy jeszcze pusty — nie ma czego zużyć i nie ma jak rzucić dwa razy.
+    // odrzucenia jest wtedy jeszcze pusty - nie ma czego zużyć i nie ma jak rzucić dwa razy.
     const first = makeModel('lm_studio');
     const second = makeModel('lm_studio');
     const p1 = first.stream(REQ);
@@ -128,14 +128,14 @@ test.serial('stopStream biletu CZEKAJĄCEGO w kolejce nie dubluje odrzucenia', a
 });
 
 /**
- * N34 (luka L-20, CC §1.1 M-4): model wzięty ze slotu runtime'u (`env.chatModel`) jako
- * fallback delegacji NIE może dziedziczyć zbitego priorytetu bramki po subie.
+ * Model wzięty ze slotu runtime'u (`env.chatModel`) jako fallback delegacji NIE może
+ * dziedziczyć zbitego priorytetu bramki po subie.
  */
-test.serial('L-20: env.chatModel użyty jako fallback NIE dostaje zbitego _gatePriority', t => {
+test.serial('env.chatModel użyty jako fallback NIE dostaje zbitego _gatePriority', t => {
     const shared = makeModel('lm_studio');
-    t.is(shared._gatePriority, 1, 'brak pola = 1 („to główny czat", B.3 SM-05)');
+    t.is(shared._gatePriority, 1, 'brak pola = 1 („to główny czat")');
 
-    // Delegacja zbija priorytet ŚWIEŻEJ instancji suba — nigdy tej ze slotu runtime'u.
+    // Delegacja zbija priorytet ŚWIEŻEJ instancji suba - nigdy tej ze slotu runtime'u.
     const sub = makeModel('lm_studio');
     sub._gatePriority = 0;
 
@@ -143,7 +143,7 @@ test.serial('L-20: env.chatModel użyty jako fallback NIE dostaje zbitego _gateP
     t.is(shared._gatePriority, 1, 'instancja ze slotu runtime NIE może zejść na 0 — user czekałby za własnym subem');
 });
 
-/** `createChatModel` to jedyna droga powstania modelu — fabryka i klasa muszą się zgadzać. */
+/** `createChatModel` to jedyna droga powstania modelu - fabryka i klasa muszą się zgadzać. */
 test.serial('createChatModel oddaje instancję ChatModel', t => {
     const model = createChatModel({
         provider: makeProvider('openai', false),

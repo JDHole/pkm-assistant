@@ -1,17 +1,10 @@
 /**
  * @module archiveReviewRenders
- * S29 Z4 (2026-07-29) — RENDERY REVIEW konsolidacji, wspólne dla dwóch modali.
- *
- * Skąd się wzięły: te funkcje mieszkały w `ArchiveModal.js` i były do niego przyklejone
- * (`this.merges`, `this.summaryBody`, `this.payload`). Nowy `ConsolidationProgressModal`
- * (checklista całego przebiegu z review W ŚRODKU) potrzebuje DOKŁADNIE tych samych ekranów,
- * a kopiuj-wklej gwarantowałby rozjazd przy pierwszej poprawce. Więc: wyciągnięte tu, oba
- * modale wołają to samo.
+ * Rendery review konsolidacji, wydzielone tak, żeby każdy modal, który pokazuje ten ekran,
+ * wołał to samo zamiast kopiować kod (kopiuj-wklej gwarantowałby rozjazd przy pierwszej poprawce).
  *
  * Kontrakt: funkcje przyjmują element-rodzica i MUTOWALNE obiekty propozycji (te same, które
- * caller potem odda do `applyStepDecision`). Checkboxy/inputy zapisują wprost do tych obiektów —
- * dokładnie tak, jak robił to `ArchiveModal` od Sprintu M3. Klasy CSS i klucze i18n nietknięte,
- * żeby stary tor wyglądał identycznie jak wczoraj.
+ * caller potem odda do `applyStepDecision`). Checkboxy/inputy zapisują wprost do tych obiektów.
  */
 import { t } from '../../core/i18n/index.js';
 
@@ -40,9 +33,7 @@ export function normalizeDeletions<T extends { accepted?: boolean }>(deletions: 
     return (deletions || []).map(d => ({ ...d, accepted: d.accepted !== false }));
 }
 
-// AUD-dead-code-055/231 (2026-09-02): `export` zdjęty — drugi konsument (`ArchiveModal`) zniknął
-// w kasacji starego toru konsolidacji (D6); dziś te trzy prymitywy służą tylko
-// `renderMergesColumn`/`renderDeletionsColumn` w TYM pliku.
+// Te trzy prymitywy służą tylko `renderMergesColumn`/`renderDeletionsColumn` w TYM pliku.
 
 /** Nagłówek kolumny: ikona + etykieta + licznik. */
 function renderReviewColumn(parent: HTMLElement, icon: string, label: string, count: number): HTMLDivElement {

@@ -1,5 +1,5 @@
 /**
- * cleanupQueue.js — kolejka modali sprzątania (S28 D5, mikro-decyzja Kuby).
+ * cleanupQueue.js - kolejka modali sprzątania.
  *
  * Gdy kilka wiadomości naraz dostaje DRUGI ptaszek (np. „oznacz wszystkie jako
  * przeczytane" albo agent czyta hurtem), user nie może dostać pięciu modali na raz.

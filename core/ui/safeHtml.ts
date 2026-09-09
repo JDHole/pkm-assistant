@@ -1,5 +1,5 @@
 /**
- * Dwie pomocnicze funkcje DOM wyciągnięte z dawnej warstwy renderu (V-09).
+ * Dwie pomocnicze funkcje DOM wyciągnięte z dawnej warstwy renderu.
  *
  * `fragmentFromHtml` SANITYZUJE: usuwa `javascript:` z atrybutów `href`/`src`
  * oraz wszystkie atrybuty `on*`.
@@ -9,7 +9,7 @@
  *      trzeba najpierw wkleić markup do dokumentu, a `<img src=x onerror=…>` odpala
  *      się już przy wklejeniu. Tutaj markup jest czyszczony JAKO TEKST i dopiero
  *      czysty trafia do DOM.
- *   2. Plik siedzi w `core/`, które MUSI wstawać w gołym Node (kontrakt K-01/K-03) —
+ *   2. Plik siedzi w `core/`, które MUSI wstawać w gołym Node (kontrakt node-safe) —
  *      AVA nie ma `document`, `DocumentFragment` ani `DOMParser`. Parser własny działa
  *      w obu światach, więc test naprawdę bada tę samą ścieżkę, którą pójdzie Obsidian.
  *

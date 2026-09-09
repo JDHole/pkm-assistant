@@ -1,5 +1,5 @@
 /**
- * artifact_read — odczytaj instancję artefaktu żywego jako chudy JSON (E2.9 A4).
+ * artifact_read — odczytaj instancję artefaktu żywego jako chudy JSON.
  * Teksty sekcji przycięte do ARTIFACT_CONTEXT_MAX_CHARS (przycinanie w store).
  */
 import { t } from '../../../../core/i18n/index.js';
@@ -9,24 +9,24 @@ import { t } from '../../../../core/i18n/index.js';
  * Moduł jest jeszcze w JS, więc kontrakt spisany tu, u konsumenta, i tylko w używanym zakresie.
  */
 interface ArtifactStoreLike {
-    // K10 (AUD-security-061): `created:false` = store odmówił PRZED zapisem (wartość pola nie
-    // przeszła bramki treści) — wtedy `id`/`path` są puste, a `errors` niesie kod odmowy.
+    // `created:false` = store odmówił PRZED zapisem (wartość pola nie przeszła bramki treści) —
+    // wtedy `id`/`path` są puste, a `errors` niesie kod odmowy.
     create(typ: string, input: { tytul: string; pola: Record<string, unknown>; sekcje: unknown[]; agent: string }):
         Promise<{ created: boolean; id: string; path: string; applied: number; errors: Array<{ op?: unknown; code: string; message: string }>; artifact: Record<string, unknown> | null }>;
     read(id: string): Promise<Record<string, unknown> | null | undefined>;
     update(id: string, ops: unknown[]):
         Promise<{ applied: unknown; errors: unknown; artifact: unknown }>;
     list(filter: { agent: string | null; typ?: string; status?: string }): unknown[];
-    /** K2: SYNCHRONICZNA ścieżka artefaktu po id (tylko folder artefaktów) — dla bramki uprawnień. */
+    /** SYNCHRONICZNA ścieżka artefaktu po id (tylko folder artefaktów) — dla bramki uprawnień. */
     pathById?(id: string): string | null;
-    /** K2: ścieżka, pod którą powstanie nowa instancja — dla bramki uprawnień przy `create`. */
+    /** Ścieżka, pod którą powstanie nowa instancja — dla bramki uprawnień przy `create`. */
     instancePathFor?(agent: string, tytul: string): string | null;
-    /** K2: folder artefaktów — cel akcji, która nie dotyczy jednego pliku (`artifact_list`). */
+    /** Folder artefaktów — cel akcji, która nie dotyczy jednego pliku (`artifact_list`). */
     artifactsRoot?(): string;
 }
 
 /**
- * K2 (AUD-security-075): wspólny wyciąg celu dla rodziny `artifact_*`.
+ * Wspólny wyciąg celu dla rodziny `artifact_*`.
  *
  * Narzędzia artefaktów nie przyjmują ścieżek od modelu (buduje je silnik), więc do bramki
  * uprawnień szedł PUSTY `targetPath` — a pusty cel przeskakiwał No-Go, pliki chronione,
@@ -50,7 +50,7 @@ export function artifactStoreFromCtx(plugin: unknown): ArtifactStoreLike | null 
     return (plugin as ArtifactToolPlugin | null | undefined)?.artifactStore || null;
 }
 
-/** Agent w zakresie, jaki czyta rodzina `artifact_*` (S32 Z5: biblioteka dozwolonych typów). */
+/** Agent w zakresie, jaki czyta rodzina `artifact_*` (biblioteka dozwolonych typów). */
 export interface ArtifactToolAgent {
     name?: string;
     artifact_types?: unknown;
@@ -83,7 +83,7 @@ export function createArtifactReadTool() {
             },
             required: ['id'],
         },
-        // K2 (AUD-security-075/076): bramka dostaje ścieżkę CZYTANEJ notatki, nie pusty string.
+        // Bramka dostaje ścieżkę CZYTANEJ notatki, nie pusty string.
         contextExtractor: (args: ArtifactReadArgs, ctx: { plugin?: unknown }) => ({
             targetPath: artifactTargetPath(artifactStoreFromCtx(ctx?.plugin), args?.id),
         }),

@@ -1,10 +1,9 @@
 /**
- * Rejestracja zakładki „Konektory" w Zapleczu (S27 Z5).
+ * Rejestracja zakładki „Konektory" w Zapleczu.
  *
- * To NIE jest powrót skasowanego w E2.8 A4 taba „Narzędzia MCP" (który pokazywał martwe
- * nazwy i udawał sterowanie). Ta zakładka jest INFORMACYJNA (D5): opisuje podłączone serwery
- * MCP i ich narzędzia oraz realną listę narzędzi wbudowanych. Zero akcji zarządzających —
- * podłączanie żyje w Ustawieniach, włączanie per agent w profilu → Umiejętności → Konektory.
+ * Ta zakładka jest INFORMACYJNA: opisuje podłączone serwery MCP i ich narzędzia oraz realną
+ * listę narzędzi wbudowanych. Zero akcji zarządzających — podłączanie żyje w Ustawieniach,
+ * włączanie per agent w profilu → Umiejętności → Konektory.
  *
  * Render leży w `ConnectorsBackstageTab.js` i jest lazy-loadowany (barrel modułu zostaje
  * bez zbędnych zależności UI w ścieżce importu).

@@ -1,14 +1,14 @@
 /**
- * `ReleaseNotesView` — widok „co nowego" (clean-room / F1, build-release).
+ * `ReleaseNotesView` - widok „co nowego".
  *
  * ŹRÓDŁO TREŚCI: statyczny `releases/latest_release.md`, WBUDOWANY do bundla przy
  * buildzie przez import z atrybutem `with { type: 'markdown' }`. Deklaracja typu tego
  * importu żyje w `modules/shell/markdown.d.ts` i ZOSTAJE. Skutek: brak pliku
- * `releases/latest_release.md` to BŁĄD BUILDA, nie błąd runtime — nie dokładać
+ * `releases/latest_release.md` to BŁĄD BUILDA, nie błąd runtime - nie dokładać
  * runtime'owego fallbacku „gdy pusto".
  *
- * `open` NIE JEST tu nadpisywane — sygnatura bazy (`PluginItemView`) zostaje jedna
- * w całym repo (decyzja A4, cross-check §1.4). Podklasa dokłada tylko wygodny skrót
+ * `open` NIE JEST tu nadpisywane - sygnatura bazy (`PluginItemView`) zostaje jedna
+ * w całym repo. Podklasa dokłada tylko wygodny skrót
  * {@link ReleaseNotesView.openForVersion}, który woła bazę ze stanem `{ version }`.
  */
 import { MarkdownRenderer } from 'obsidian';
@@ -21,18 +21,18 @@ import { PluginItemView } from '../ui-components/index.js';
 /** Etykieta w logu. */
 const SCOPE = 'ReleaseNotesView';
 
-/** Klasa CSS kontenera notatek — hak dla arkusza stylów. */
+/** Klasa CSS kontenera notatek - hak dla arkusza stylów. */
 const NOTES_CSS_CLASS = 'pkm-release-notes';
 
 /**
  * Ścieżka źródłowa podawana rendererowi markdownu. Notatki wydania nie są notatką
- * z vaulta, więc nie ma czego rozwijać dla linków względnych — stąd pusto.
+ * z vaulta, więc nie ma czego rozwijać dla linków względnych - stąd pusto.
  */
 const NO_SOURCE_PATH = '';
 
 export class ReleaseNotesView extends PluginItemView {
     /**
-     * B37: identyfikator zapisywany w układzie workspace'u usera (`workspace.json`).
+     * Identyfikator zapisywany w układzie workspace'u usera (`workspace.json`).
      * ⚠️ Zmiana tego napisu = user traci otwartą kartę po aktualizacji.
      */
     static readonly viewType = 'pkm-release-notes-view';
@@ -41,11 +41,11 @@ export class ReleaseNotesView extends PluginItemView {
 
     static readonly iconName = 'scroll-text';
 
-    /** Treść wbudowana przy buildzie — patrz nagłówek pliku. */
+    /** Treść wbudowana przy buildzie - patrz nagłówek pliku. */
     protected readonly notes: string = releaseNotesMarkdown;
 
     /**
-     * Skrót wygodny — JEDYNY kształt wywołania u konsumenta (`src/main.ts`). Sprowadza
+     * Skrót wygodny - JEDYNY kształt wywołania u konsumenta (`src/main.ts`). Sprowadza
      * się do wywołania bazowego `open` ze stanem `{ version }`, żeby wersja dalej
      * jechała w `state` widoku bez rozszerzania kontraktu bazy o pojęcie „wersja".
      */

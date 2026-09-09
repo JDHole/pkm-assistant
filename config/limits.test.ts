@@ -15,16 +15,16 @@ test('getLimits({}) with no pkmAssistant.limits returns defaults', t => {
     t.deepEqual(getLimits({ pkmAssistant: { limits: {} } }), DEFAULT_LIMITS);
 });
 
-test('DEFAULT_LIMITS carries the harmonized values (E1.5 P3/P4, F4)', t => {
+test('DEFAULT_LIMITS carries the harmonized values', t => {
     t.is(DEFAULT_LIMITS.chat_max_iterations, 8);
-    // F4: 8 → 12; runda 2 Frontu A (2026-08-17): 12 → 25 (sub ma pracować aż skończy,
-    // strażnikami są watchdog ciszy + zegar zadania, nie licznik iteracji).
+    // Sub ma pracować aż skończy — strażnikami są watchdog ciszy i zegar zadania, nie
+    // licznik iteracji.
     t.is(DEFAULT_LIMITS.subagent_max_iterations_worker, 25);
-    // Straż regresji: klucz ma NIE istnieć (D18 skasował osobny limit strategist). W TS
+    // Straż regresji: klucz ma NIE istnieć — nie ma osobnego limitu dla strategist. W TS
     // odpytanie o nieistniejący klucz jest błędem typu, więc patrzymy przez luźny widok.
     t.is((DEFAULT_LIMITS as Record<string, number | undefined>).subagent_max_iterations_strategist, undefined);
-    // Front A (2026-08-17): 120000 → 480000, runda 2: → 900000 — zegar ścienny to awaryjny
-    // sufit, głównym strażnikiem jest watchdog ciszy (subagent_stall_timeout_ms).
+    // Zegar ścienny to awaryjny sufit — głównym strażnikiem jest watchdog ciszy
+    // (subagent_stall_timeout_ms).
     t.is(DEFAULT_LIMITS.delegation_timeout_ms, 900000);
     t.is(DEFAULT_LIMITS.max_tool_result_length, 15000);
 });
@@ -100,7 +100,7 @@ test('max_tool_result_length rejects negative and clamps huge values', t => {
     t.is(getLimits({ pkmAssistant: { limits: { max_tool_result_length: 10_000_000 } } }).max_tool_result_length, LIMIT_SPECS.max_tool_result_length.ceiling);
 });
 
-// ── chat_stream_stall_timeout_ms (watchdog streamu czatu, 2026-07-29) ───
+// ── chat_stream_stall_timeout_ms (watchdog streamu czatu) ───
 
 test('chat_stream_stall_timeout_ms: default 120s, 0 = off valid, negative → default, ceiling clamps', t => {
     t.is(DEFAULT_LIMITS.chat_stream_stall_timeout_ms, 120000);
@@ -110,9 +110,9 @@ test('chat_stream_stall_timeout_ms: default 120s, 0 = off valid, negative → de
     t.is(getLimits({ pkmAssistant: { limits: { chat_stream_stall_timeout_ms: 90000 } } }).chat_stream_stall_timeout_ms, 90000);
 });
 
-// ── S33 Z1: kagańce delegacji (głębokość + szerokość) ──────────────────
+// ── Kagańce delegacji (głębokość + szerokość) ──────────────────
 
-test('S33 Z1: max_delegation_depth default 1, clamped to ceiling 3, min 1', t => {
+test('max_delegation_depth default 1, clamped to ceiling 3, min 1', t => {
     t.is(DEFAULT_LIMITS.max_delegation_depth, 1);
     t.is(LIMIT_SPECS.max_delegation_depth.ceiling, 3);
     t.is(LIMIT_SPECS.max_delegation_depth.min, 1);
@@ -128,16 +128,16 @@ test('S33 Z1: max_delegation_depth default 1, clamped to ceiling 3, min 1', t =>
     t.is(getLimits({ pkmAssistant: { limits: { max_delegation_depth: 'gleboko' } } }).max_delegation_depth, 1);
 });
 
-test('S33 Z1: max_parallel_delegations default 5, ceiling 20, min 1', t => {
+test('max_parallel_delegations default 5, ceiling 20, min 1', t => {
     t.is(DEFAULT_LIMITS.max_parallel_delegations, 5);
     t.is(getLimits({ pkmAssistant: { limits: { max_parallel_delegations: 999 } } }).max_parallel_delegations, 20);
     t.is(getLimits({ pkmAssistant: { limits: { max_parallel_delegations: 0 } } }).max_parallel_delegations, 5);
     t.is(getLimits({ pkmAssistant: { limits: { max_parallel_delegations: 8 } } }).max_parallel_delegations, 8);
 });
 
-// ── S33 Z2: bezpiecznik poczty agentów ─────────────────────────────────
+// ── Bezpiecznik poczty agentów ─────────────────────────────────
 
-test('S33 Z2: kom_send_rate_max default 20, ceiling 500, min 1', t => {
+test('kom_send_rate_max default 20, ceiling 500, min 1', t => {
     t.is(DEFAULT_LIMITS.kom_send_rate_max, 20);
     t.is(LIMIT_SPECS.kom_send_rate_max.ceiling, 500);
     t.is(LIMIT_SPECS.kom_send_rate_max.min, 1);
@@ -149,9 +149,9 @@ test('S33 Z2: kom_send_rate_max default 20, ceiling 500, min 1', t => {
     t.is(getLimits({ pkmAssistant: { limits: { kom_send_rate_max: 'duzo' } } }).kom_send_rate_max, 20);
 });
 
-// ── Werdykt Kuby 16.08: sufit ŁAŃCUCHA auto-tur po subach z rzędu ───────
+// ── Sufit ŁAŃCUCHA auto-tur po subach z rzędu ───────
 
-test('Werdykt 16.08: max_consecutive_auto_turns default 10, ceiling 20, min 1', t => {
+test('max_consecutive_auto_turns default 10, ceiling 20, min 1', t => {
     t.is(DEFAULT_LIMITS.max_consecutive_auto_turns, 10);
     t.is(LIMIT_SPECS.max_consecutive_auto_turns.ceiling, 20);
     t.is(LIMIT_SPECS.max_consecutive_auto_turns.min, 1);
@@ -166,7 +166,7 @@ test('Werdykt 16.08: max_consecutive_auto_turns default 10, ceiling 20, min 1', 
     t.is(getLimits({ pkmAssistant: { limits: { max_consecutive_auto_turns: 'duzo' } } }).max_consecutive_auto_turns, 10);
 });
 
-test('K12: kom_send_rate_max_sender default 40, ceiling 2000, min 1', t => {
+test('kom_send_rate_max_sender default 40, ceiling 2000, min 1', t => {
     t.is(DEFAULT_LIMITS.kom_send_rate_max_sender, 40);
     t.is(LIMIT_SPECS.kom_send_rate_max_sender.ceiling, 2000);
     t.is(LIMIT_SPECS.kom_send_rate_max_sender.min, 1);
@@ -178,9 +178,9 @@ test('K12: kom_send_rate_max_sender default 40, ceiling 2000, min 1', t => {
     t.is(getLimits({ pkmAssistant: { limits: { kom_send_rate_max_sender: 'duzo' } } }).kom_send_rate_max_sender, 40);
 });
 
-// ── F4: capy jakościowe subów jako konfigurowalne budżety ──────────────
+// ── Capy jakościowe subów jako konfigurowalne budżety ──────────────
 
-test('F4: subagent_prompt_max_chars default 24000, min 1000, ceiling 100000', t => {
+test('subagent_prompt_max_chars default 24000, min 1000, ceiling 100000', t => {
     t.is(DEFAULT_LIMITS.subagent_prompt_max_chars, 24000);
     t.is(LIMIT_SPECS.subagent_prompt_max_chars.min, 1000);
     t.is(LIMIT_SPECS.subagent_prompt_max_chars.ceiling, 100000);
@@ -192,7 +192,7 @@ test('F4: subagent_prompt_max_chars default 24000, min 1000, ceiling 100000', t 
     t.is(getLimits({ pkmAssistant: { limits: { subagent_prompt_max_chars: 'duzo' } } }).subagent_prompt_max_chars, 24000);
 });
 
-test('F4: delegation_context_max_chars default 48000, min 1000, ceiling 200000', t => {
+test('delegation_context_max_chars default 48000, min 1000, ceiling 200000', t => {
     t.is(DEFAULT_LIMITS.delegation_context_max_chars, 48000);
     t.is(LIMIT_SPECS.delegation_context_max_chars.min, 1000);
     t.is(LIMIT_SPECS.delegation_context_max_chars.ceiling, 200000);
@@ -202,7 +202,7 @@ test('F4: delegation_context_max_chars default 48000, min 1000, ceiling 200000',
     t.is(getLimits({ pkmAssistant: { limits: { delegation_context_max_chars: 0 } } }).delegation_context_max_chars, 48000);
 });
 
-test('F5/Front A: subagent_final_grace_ms default 120000, min 5000, ceiling 240000', t => {
+test('subagent_final_grace_ms default 120000, min 5000, ceiling 240000', t => {
     t.is(DEFAULT_LIMITS.subagent_final_grace_ms, 120000);
     t.is(LIMIT_SPECS.subagent_final_grace_ms.min, 5000);
     t.is(LIMIT_SPECS.subagent_final_grace_ms.ceiling, 240000);
@@ -214,9 +214,9 @@ test('F5/Front A: subagent_final_grace_ms default 120000, min 5000, ceiling 2400
     t.is(getLimits({ pkmAssistant: { limits: { subagent_final_grace_ms: 0 } } }).subagent_final_grace_ms, 120000);
 });
 
-// ── Front A (2026-08-17): watchdog ciszy + ratowanie dorobku subów ──────
+// ── Watchdog ciszy + ratowanie dorobku subów ──────
 
-test('Front A: subagent_stall_timeout_ms default 180000, 0 = off valid, ceiling clamps', t => {
+test('subagent_stall_timeout_ms default 180000, 0 = off valid, ceiling clamps', t => {
     t.is(DEFAULT_LIMITS.subagent_stall_timeout_ms, 180000);
     t.is(LIMIT_SPECS.subagent_stall_timeout_ms.min, 0);
     t.is(LIMIT_SPECS.subagent_stall_timeout_ms.ceiling, 600000);
@@ -227,7 +227,7 @@ test('Front A: subagent_stall_timeout_ms default 180000, 0 = off valid, ceiling 
     t.is(getLimits({ pkmAssistant: { limits: { subagent_stall_timeout_ms: 240000 } } }).subagent_stall_timeout_ms, 240000);
 });
 
-test('Runda 2: subagent_result_max_chars default 60000, 0 = bez limitu, ceiling clamps', t => {
+test('subagent_result_max_chars default 60000, 0 = bez limitu, ceiling clamps', t => {
     t.is(DEFAULT_LIMITS.subagent_result_max_chars, 60000);
     t.is(LIMIT_SPECS.subagent_result_max_chars.min, 0);
     t.is(LIMIT_SPECS.subagent_result_max_chars.ceiling, 200000);
@@ -237,21 +237,20 @@ test('Runda 2: subagent_result_max_chars default 60000, 0 = bez limitu, ceiling 
     t.is(getLimits({ pkmAssistant: { limits: { subagent_result_max_chars: 9_000_000 } } }).subagent_result_max_chars, 200000);
 });
 
-test('Runda 2: sufity podniesione — iteracje workera 100, zegar zadania 30 min', t => {
+test('sufity podniesione — iteracje workera 100, zegar zadania 30 min', t => {
     t.is(LIMIT_SPECS.subagent_max_iterations_worker.ceiling, 100);
     t.is(LIMIT_SPECS.delegation_timeout_ms.ceiling, 1800000);
     t.is(DEFAULT_LIMITS.chat_model_call_timeout_ms, 600000);
 });
 
-// ── AUD-testy-031/004: chat_model_call_timeout_ms (friendly fire 2026-08-15) ────
+// ── chat_model_call_timeout_ms: test widełek (min/ceiling), nie tylko pin defaultu ────
 //
-// Do dziś jedyna asercja na ten klucz był pin defaultu wyżej — zero testu widełek:
-// mutacja sufitu 900000 → 1 (albo podłogi 0 → 100000) zostawiała 28/28 zielonych,
-// mimo że sanitizeLimit ma dla tego klucza dokładnie te same gałęzie co sąsiedzi.
-// Wzorem `chat_stream_stall_timeout_ms` (identyczny kształt: min 0 / 0 = watchdog
-// wyłączony / ceiling twardy sufit XHR adaptera).
+// Bez tego testu mutacja sufitu 900000 → 1 (albo podłogi 0 → 100000) zostawiałaby
+// 28/28 zielonych, mimo że sanitizeLimit ma dla tego klucza dokładnie te same gałęzie
+// co sąsiedzi. Wzorem `chat_stream_stall_timeout_ms` (identyczny kształt: min 0 / 0 =
+// watchdog wyłączony / ceiling twardy sufit XHR adaptera).
 
-test('AUD-testy-031: chat_model_call_timeout_ms default 600000, 0 = off valid, negative → default, ceiling clamps', t => {
+test('chat_model_call_timeout_ms default 600000, 0 = off valid, negative → default, ceiling clamps', t => {
     t.is(DEFAULT_LIMITS.chat_model_call_timeout_ms, 600000);
     t.is(LIMIT_SPECS.chat_model_call_timeout_ms.min, 0);
     t.is(LIMIT_SPECS.chat_model_call_timeout_ms.ceiling, 900000);
@@ -263,7 +262,7 @@ test('AUD-testy-031: chat_model_call_timeout_ms default 600000, 0 = off valid, n
     t.is(getLimits({ pkmAssistant: { limits: { chat_model_call_timeout_ms: 'duzo' } } }).chat_model_call_timeout_ms, DEFAULT_LIMITS.chat_model_call_timeout_ms);
 });
 
-test('Front A: subagent_salvage_max_chars default 12000, 0 = off valid, ceiling clamps', t => {
+test('subagent_salvage_max_chars default 12000, 0 = off valid, ceiling clamps', t => {
     t.is(DEFAULT_LIMITS.subagent_salvage_max_chars, 12000);
     t.is(LIMIT_SPECS.subagent_salvage_max_chars.min, 0);
     t.is(LIMIT_SPECS.subagent_salvage_max_chars.ceiling, 200000);
@@ -274,14 +273,14 @@ test('Front A: subagent_salvage_max_chars default 12000, 0 = off valid, ceiling 
     t.is(getLimits({ pkmAssistant: { limits: { subagent_salvage_max_chars: 20000 } } }).subagent_salvage_max_chars, 20000);
 });
 
-// ── AUD-testy-001/048: local_platform_max_concurrent (bramka mostu lokalnego) ───
+// ── local_platform_max_concurrent: test widełek (bramka mostu lokalnego) ───
 //
-// Jedyny z 18 limitów bez ANI JEDNEGO testu — klucz nie występował w tym pliku ani razu.
-// Mutacja widełek (ceiling 10 → 999999) nie zapalała nic w config/limits.test.ts (obalacz
-// potwierdził: efekt DOMYŚLNEJ wartości 1 jest osobno pilnowany zachowaniem w
-// modules/models/ChatModel.concurrent.test.ts, ale ŚCIEŻKA OVERRIDE/WIDEŁEK była naga).
+// Bez tego testu mutacja widełek (ceiling 10 → 999999) nie zapala nic w config/limits.test.ts —
+// efekt DOMYŚLNEJ wartości 1 jest osobno pilnowany zachowaniem w
+// modules/models/ChatModel.concurrent.test.ts, ale ŚCIEŻKA OVERRIDE/WIDEŁEK bez tego testu
+// zostaje naga.
 
-test('AUD-testy-001: local_platform_max_concurrent default 1, ceiling 10, min 1', t => {
+test('local_platform_max_concurrent default 1, ceiling 10, min 1', t => {
     t.is(DEFAULT_LIMITS.local_platform_max_concurrent, 1);
     t.is(LIMIT_SPECS.local_platform_max_concurrent.ceiling, 10);
     t.is(LIMIT_SPECS.local_platform_max_concurrent.min, 1);
@@ -297,7 +296,7 @@ test('AUD-testy-001: local_platform_max_concurrent default 1, ceiling 10, min 1'
     t.is(getLimits({ pkmAssistant: { limits: { local_platform_max_concurrent: 'duzo' } } }).local_platform_max_concurrent, 1);
 });
 
-// ── AUD-testy-001: inwariant widełek — domyka też PRZYSZŁE klucze ───────────────
+// ── Inwariant widełek — domyka też PRZYSZŁE klucze ───────────────
 //
 // Defaulty w DEFAULT_LIMITS NIE przechodzą przez sanitizeLimit (getLimits() bez override
 // zwraca defaulty 1:1) — więc żaden pojedynczy blok testowy wyżej nie gwarantuje, że

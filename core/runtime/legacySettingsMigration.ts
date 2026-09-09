@@ -1,6 +1,6 @@
 /**
  * **PLIK KWARANTANNY** — JEDYNE miejsce w repo, w którym wolno wystąpić starym nazwom
- * kluczy ustawień. Pełna mapa stare→nowe: plan wykonawczy klastra `core`, sekcja A.4.
+ * kluczy ustawień. Pełna mapa stare→nowe jest zdefiniowana niżej w tym pliku.
  *
  * Kontrakt:
  *  • CZYSTA, ZERO I/O — jeden argument, mutacja w miejscu, `fn.length === 1`;
@@ -19,19 +19,19 @@
  * zostawiłby całą gałąź `obsek` usera osieroconą. Kto pisze pancerz `load_settings`,
  * woła w kolejności: `migrateNamespace(data)` → `migrateLegacySettings(data)`.
  *
- * ⚠️ **Świadome odstępstwo od zamrożenia id sekretów** (katalog zachowań D.4 / G.6):
- * tamto zamrożenie opisuje migrację NAMESPACE'U (M1) i tam obowiązuje bez wyjątku —
- * `migrateNamespace` id nie tyka. Ten migrator id RUSZA, bo każe mu tak decyzja Kuby
- * z 05.09 („zero śladu także w danych", spec §7) — ale wyłącznie w dwóch przypadkach
- * wypisanych przy `przepnijSejf`. Wpisy sejfu spoza tych dwóch przypadków przechodzą
- * przez migrator nietknięte.
+ * ⚠️ **Świadome odstępstwo od zamrożenia id sekretów**: tamto zamrożenie opisuje
+ * migrację NAMESPACE'U i tam obowiązuje bez wyjątku — `migrateNamespace` id nie
+ * tyka. Ten migrator id RUSZA, bo zasada „zero śladu także w danych" tak każe — ale
+ * wyłącznie w dwóch przypadkach wypisanych przy `przepnijSejf`. Wpisy sejfu spoza tych
+ * dwóch przypadków przechodzą przez migrator nietknięte.
  */
 import type { LegacySettingsMigrationResult } from './contracts.js';
 
 export type { LegacySettingsMigrationResult } from './contracts.js';
 
 // =============================================================================
-// SŁOWNIK KWARANTANNY — nazwy sprzed clean-room. Nigdzie indziej w repo nie mają prawa być.
+// SŁOWNIK KWARANTANNY — stare nazwy z frameworka, na którym plugin kiedyś stał.
+// Nigdzie indziej w repo nie mają prawa być.
 // =============================================================================
 
 /** Gałąź czatu w starym worku. */
@@ -373,11 +373,11 @@ function nowaSciezkaSekretu(stara: string): string | undefined {
 }
 
 /**
- * Wykrywa id sekretu niosące słownictwo sprzed clean-room. Lista ścieżek sekretnych jest
+ * Wykrywa id sekretu niosące słownictwo starego frameworka. Lista ścieżek sekretnych jest
  * zamknięta i systemowa (żaden segment nie pochodzi od usera), więc te dwa słowa nie
- * mają prawa trafić do id inaczej niż z poprzedniej epoki.
+ * mają prawa trafić do id inaczej niż ze starego nazewnictwa.
  */
-const SLOWNICTWO_SPRZED_CLEAN_ROOM = /obsek|smart/i;
+const SLOWNICTWO_DAWNYCH_ID = /obsek|smart/i;
 
 /**
  * Przepina sejf sekretów. Rusza wpis TYLKO wtedy, gdy ma po temu powód:
@@ -385,13 +385,13 @@ const SLOWNICTWO_SPRZED_CLEAN_ROOM = /obsek|smart/i;
  *  1. **ścieżka się przeprowadza** — pole sekretne ma nowy adres (`nowaSciezkaSekretu`),
  *     więc klucz w `refs` musi pójść za nim; inaczej wstrzykiwanie kluczy API celuje
  *     w martwy adres i user zostaje bez kluczy;
- *  2. **id niesie stare słownictwo** — `obsek-…` / `…-smart-chat-model-…`; decyzja Kuby
- *     z 05.09 („zero śladu także w danych", spec §7) każe je przemianować.
+ *  2. **id niesie stare słownictwo** — `obsek-…` / `…-smart-chat-model-…`; zasada
+ *     „zero śladu także w danych" każe je przemianować.
  *
  * Wpisy, które nie spełniają żadnego z tych dwóch warunków — np. czysty już
  * `pkmAssistant.imageGen.stability_api_key` — zostają NIETKNIĘTE. To celowe zawężenie
  * względem wersji, która kanonizowała cały sejf hurtem: migrator nie ma prawa
- * przemianowywać id, które nikogo nie obchodzą (zamrożenie id z katalogu D.4/G.6 jest
+ * przemianowywać id, które nikogo nie obchodzą (zamrożenie id sekretów jest
  * tu uchylone dokładnie na szerokość powodów 1 i 2, ani o krok dalej).
  *
  * ⚠️ To JEDYNE miejsce w repo, które wolno mianować id sekretów — i robi to bez
@@ -412,7 +412,7 @@ function przepnijSejf(pkm: Slownik, licznik: Licznik): void {
         const stareId = typeof wpis === 'string' ? wpis : null;
         const nowaSciezka = nowaSciezkaSekretu(staraSciezka);
         const przeprowadzka = nowaSciezka !== undefined && nowaSciezka !== staraSciezka;
-        const stareSlownictwo = stareId !== null && SLOWNICTWO_SPRZED_CLEAN_ROOM.test(stareId);
+        const stareSlownictwo = stareId !== null && SLOWNICTWO_DAWNYCH_ID.test(stareId);
         if (!przeprowadzka && !stareSlownictwo) continue;
 
         const docelowaSciezka = nowaSciezka ?? staraSciezka;

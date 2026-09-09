@@ -2,7 +2,7 @@ import test from 'ava';
 import { createWriteTool } from './WriteTool.js';
 
 /**
- * obsidianmd (release 2.2.0 / W4): `Vault.modify` → `Vault.process` (zapis atomowy,
+ * obsidianmd: `Vault.modify` → `Vault.process` (zapis atomowy,
  * wytyczna katalogu Obsidiana). `WriteTool.execute` woła prywatny helper `writeFileContent`,
  * który feature-detectuje `vault.process` i spada na `vault.modify`, gdy host go nie ma
  * (harness mock ma `process`; ten test pilnuje OBU gałęzi bezpośrednio na atrapie).

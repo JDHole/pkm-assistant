@@ -30,7 +30,6 @@ async function withServer(handler: Handler, fn: (url: string) => Promise<void>):
 
 const spec = (url: string): HttpRequestSpec => ({ url, method: 'GET', headers: {} });
 
-// ── C13.10 ───────────────────────────────────────────────────────────────────
 test('FetchHttpClient nie rzuca na 4xx/5xx — status wraca w odpowiedzi', async t => {
     await withServer((_req, res) => {
         res.writeHead(401, { 'content-type': 'application/json' });
@@ -43,7 +42,6 @@ test('FetchHttpClient nie rzuca na 4xx/5xx — status wraca w odpowiedzi', async
     });
 });
 
-// ── C13.11 ───────────────────────────────────────────────────────────────────
 test('json() rzuca na nie-JSON, text zostaje surowy', async t => {
     await withServer((_req, res) => {
         res.writeHead(502, { 'content-type': 'text/html' });
@@ -92,7 +90,6 @@ test('FetchHttpClient: `timeoutMs` przerywa powolne żądanie kodem `timeout`, n
     });
 });
 
-// ── C13.12 ───────────────────────────────────────────────────────────────────
 test('ObsidianHttpClient dostaje requestUrl konstruktorem i NIE importuje obsidiana', async t => {
     const wywolania: Array<Record<string, unknown>> = [];
     const atrapa = async (params: Record<string, unknown>) => {

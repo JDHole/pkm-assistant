@@ -1,5 +1,5 @@
 /**
- * SubAgentBlock — pierwszy test w module (K7/AUD-code-review-044).
+ * SubAgentBlock — testy renderowania bloku suba.
  *
  * `SubAgentBlock.ts` NIE importuje `obsidian`, ale woła `document.createElement(...).createDiv()`
  * — metody, które Obsidian dokleja do `HTMLElement.prototype` w runtime. Node/AVA nie ma ani

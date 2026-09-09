@@ -3,8 +3,8 @@ import { createDelegateTool, __test__ } from './DelegateTool.js';
 import type { DelegatePlugin, SubAgentConfigLike } from './DelegateTool.js';
 import { SubTaskRegistry } from '../../modules/sub-agents/index.js';
 import type { SubTask, SubTaskOrigin } from '../../modules/sub-agents/index.js';
-// FAIL 3/FAIL 4: dwa testy niżej jadą na PRAWDZIWEJ pętli — inaczej nie dotknęłyby
-// mechanizmu, który się zepsuł (zejście przez abort w środku wywołania modelu).
+// Dwa testy niżej jadą na PRAWDZIWEJ pętli — atrapa nie dotknęłaby mechanizmu,
+// który trzeba pokryć (zejście przez abort w środku wywołania modelu).
 import { runAgentLoop, ArrayMessageStore } from '../../modules/agent-loop/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { __test__ as modelsTest } from '../models/index.js';
@@ -18,11 +18,11 @@ type DelegateRes = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// clean-room: model NIE powstaje już z mapy DI (`config.modules.chatModel.class`) — powstaje przez
-// `createChatModel(deps)` w `modelResolver`. Testy delegacji badają, KTÓRY model dostaje sub
+// Model powstaje przez `createChatModel(deps)` w `modelResolver`, nie z mapy DI
+// (`config.modules.chatModel.class`). Testy delegacji badają, KTÓRY model dostaje sub
 // i co się z nim dzieje, więc podstawiają własną klasę przez seam fabryki resolvera.
 //
-// ⚠️ Klasa jedzie NA DOSTAWCY z configu tego konkretnego pluginu, nie w globalnej zmiennej —
+// ⚠️ Klasa jedzie NA DOSTAWCY z configu tego konkretnego pluginu, nie w globalnej zmiennej:
 // pliku nie da się w całości zserializować (`test` obok `test.serial`), a globalny stan
 // mieszałby atrapy między równoległymi testami.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -71,7 +71,7 @@ const delegates = [
 ];
 
 /**
- * ⚠️ F2: `delegate` domyślnie startuje suba W TLE. Testy poniżej badają MECHANIKĘ BIEGU
+ * ⚠️ `delegate` domyślnie startuje suba W TLE. Testy poniżej badają MECHANIKĘ BIEGU
  * (timeout, config workera, kagańce, szerokość puli, kolejność wyników), więc jawnie proszą
  * o ścieżkę blokującą przez `background: false` — inaczej sprawdzałyby zwrotkę `started:true`
  * zamiast tego, co deklarują. Ścieżka tła ma własną sekcję na końcu pliku.
@@ -97,7 +97,7 @@ test('withTimeout returns timeout object', async t => {
     t.true(result.error.includes('timeout'));
 });
 
-// Zwis subagentow, lokalny most, 2026: timeout delegacji UBIJA bieg suba (onTimeout), nie porzuca.
+// Timeout delegacji UBIJA bieg suba (onTimeout), nie porzuca go samopas.
 test('withTimeout woła onTimeout przy strzale budzika (ubicie suba), a NIE woła przy sukcesie', async t => {
     let killed = 0;
     const timedOut = await __test__._withTimeout(new Promise(() => {}), 1, 1, () => { killed++; }) as { success?: boolean };
@@ -156,7 +156,7 @@ test('resolveDelegate without aspect returns generic worker marker', t => {
     t.deepEqual(__test__._resolveDelegate('', [], false), { generic: true });
 });
 
-test('delegate WITHOUT aspect runs the generic worker even with zero custom subs (D18)', async t => {
+test('delegate WITHOUT aspect runs the generic worker even with zero custom subs', async t => {
     const captured: { modelKey?: string; resolveCalled?: boolean; config?: SubAgentConfigLike } = {};
     class FakeModel {
         constructor(opts: { modelKey?: string }) { captured.modelKey = opts.modelKey; }
@@ -193,7 +193,7 @@ test('delegate WITHOUT aspect runs the generic worker even with zero custom subs
     const res = await tool.execute({ task: 'zbierz X', timeout_ms: 200, background: false }, {}, plugin as unknown as DelegatePlugin) as DelegateRes;
 
     t.true(res.success);
-    t.is(res.aspect, 'pkm-sub', 'aspect = nazwa fabrycznego workera (S27 D2)');
+    t.is(res.aspect, 'pkm-sub', 'aspect = nazwa fabrycznego workera');
     t.is(captured.config!.name, 'pkm-sub');
     t.deepEqual(captured.config!.tools, ['search', 'list', 'read', 'web_search', 'web_read'],
         'worker dostaje domyślny zestaw (przecięcie z rodzicem robi runner)');
@@ -202,7 +202,7 @@ test('delegate WITHOUT aspect runs the generic worker even with zero custom subs
     t.is(captured.modelKey, 'worker-model', 'slot modelu researcher→minion');
 });
 
-// ─── S27 Z4: globalny sub (delegate BEZ aspect) ───────────────────────────────
+// ─── Globalny sub (delegate BEZ aspect) ───────────────────────────────
 
 function pluginWithTemplates(
     globalSubTemplate: string | null,
@@ -216,7 +216,7 @@ function pluginWithTemplates(
     } as unknown as DelegatePlugin;
 }
 
-test('S27 Z4: bez ustawienia globalnego szablonu delegacja używa fabrycznego pkm-sub', t => {
+test('bez ustawienia globalnego szablonu delegacja używa fabrycznego pkm-sub', t => {
     const config = __test__.resolveGenericWorkerConfig(pluginWithTemplates(null));
 
     t.is(config.name, 'pkm-sub');
@@ -224,7 +224,7 @@ test('S27 Z4: bez ustawienia globalnego szablonu delegacja używa fabrycznego pk
     t.falsy(config.prompt, 'fabryczny worker nie niesie instrukcji');
 });
 
-test('S27 Z4: ustawiony globalny szablon daje config z szablonu', t => {
+test('ustawiony globalny szablon daje config z szablonu', t => {
     const plugin = pluginWithTemplates('zwiadowca', {
         zwiadowca: {
             name: 'Zwiadowca', description: 'zbiera materiał', tools: ['search', 'read'],
@@ -243,7 +243,7 @@ test('S27 Z4: ustawiony globalny szablon daje config z szablonu', t => {
     t.falsy((config as unknown as Record<string, unknown>).version, 'wersja szablonu nie wchodzi do configu biegu');
 });
 
-test('S27 Z4 fail-soft: ustawienie na nieistniejący szablon wraca do pkm-sub + warn', t => {
+test('fail-soft: ustawienie na nieistniejący szablon wraca do pkm-sub + warn', t => {
     const warns: string[] = [];
     const originalWarn = log.warn;
     log.warn = (module: string, message: string) => warns.push(`${module} ${message}`);
@@ -256,7 +256,7 @@ test('S27 Z4 fail-soft: ustawienie na nieistniejący szablon wraca do pkm-sub + 
     t.true(warns.some(w => w.includes('duch') && w.includes('pkm-sub')));
 });
 
-test('S27 Z4 fail-soft: zepsuty szablon (bez opisu / rzucający store) nie wywala delegacji', t => {
+test('fail-soft: zepsuty szablon (bez opisu / rzucający store) nie wywala delegacji', t => {
     const originalWarn = log.warn;
     log.warn = () => {};
     try {
@@ -275,7 +275,7 @@ test('S27 Z4 fail-soft: zepsuty szablon (bez opisu / rzucający store) nie wywal
     }
 });
 
-test('S27 Z4: delegate BEZ aspect realnie odpala config globalnego szablonu', async t => {
+test('delegate BEZ aspect realnie odpala config globalnego szablonu', async t => {
     const captured: { modelKey?: string; config?: SubAgentConfigLike } = {};
     class FakeModel { constructor(opts: { modelKey?: string }) { captured.modelKey = opts.modelKey; } stream() {} }
     const activeAgent = { name: 'Jaskier', activeSubAgents: [] };
@@ -319,9 +319,9 @@ test('S27 Z4: delegate BEZ aspect realnie odpala config globalnego szablonu', as
     t.is(captured.config!.prompt, 'Metoda.');
 });
 
-// ─── F4 (model policy v2): wbudowana para aspektów explorer / worker ─────────
+// ─── Wbudowana para aspektów explorer / worker ─────────
 
-test('F4: explorer i worker rozpoznawane po dokładnej nazwie, bez wielkości liter', t => {
+test('explorer i worker rozpoznawane po dokładnej nazwie, bez wielkości liter', t => {
     for (const nazwa of ['explorer', 'EXPLORER', ' Explorer ']) {
         t.is(__test__._resolveDelegate(nazwa, [], false).builtin, 'explorer', nazwa);
     }
@@ -335,7 +335,7 @@ test('F4: explorer i worker rozpoznawane po dokładnej nazwie, bez wielkości li
         'odmowa mówi modelowi, co w ogóle istnieje');
 });
 
-test('F4: custom sub usera o nazwie "explorer" WYGRYWA z wbudowanym', t => {
+test('custom sub usera o nazwie "explorer" WYGRYWA z wbudowanym', t => {
     const wlasny = [{ name: 'explorer' }];
 
     const exact = __test__._resolveDelegate('explorer', wlasny, false);
@@ -346,7 +346,7 @@ test('F4: custom sub usera o nazwie "explorer" WYGRYWA z wbudowanym', t => {
     t.is(__test__._resolveDelegate('explorer', wlasny, true).delegate?.name, 'explorer');
 });
 
-test('F4: fuzzy po nazwie ma pierwszeństwo przed wbudowanym; w trybie ścisłym wbudowany wchodzi', t => {
+test('fuzzy po nazwie ma pierwszeństwo przed wbudowanym; w trybie ścisłym wbudowany wchodzi', t => {
     const wlasny = [{ name: 'klara-explorer-x' }];
 
     t.is(__test__._resolveDelegate('explorer', wlasny, false).delegate?.name, 'klara-explorer-x',
@@ -355,7 +355,7 @@ test('F4: fuzzy po nazwie ma pierwszeństwo przed wbudowanym; w trybie ścisłym
         'tryb ścisły nie robi fuzzy → schodzimy na wbudowanego');
 });
 
-test('F4: config explorera jest read-only i jedzie slotem sub-agentów', t => {
+test('config explorera jest read-only i jedzie slotem sub-agentów', t => {
     const config = __test__.buildBuiltinExplorerConfig();
 
     t.is(config.name, __test__.PKM_EXPLORER_NAME);
@@ -367,7 +367,7 @@ test('F4: config explorera jest read-only i jedzie slotem sub-agentów', t => {
     t.not(config.description, 'mcp.delegate.explorer_desc', 'i18n rozwiązane, nie goły klucz');
 });
 
-test('F4: config workera bierze PEŁNĄ listę narzędzi rodzica i rolę modelu sub_worker', t => {
+test('config workera bierze PEŁNĄ listę narzędzi rodzica i rolę modelu sub_worker', t => {
     const rodzic = { name: 'Jaskier' };
     const plugin = {
         toolRegistry: {
@@ -384,7 +384,7 @@ test('F4: config workera bierze PEŁNĄ listę narzędzi rodzica i rolę modelu 
     t.is(__test__._resolveModelRole(config), 'sub_worker', 'model klasy rodzica');
 });
 
-test('F4 fail-soft: brak/zepsute filterByAgent daje workerowi zestaw domyślny, nie wywala delegacji', t => {
+test('fail-soft: brak/zepsute filterByAgent daje workerowi zestaw domyślny, nie wywala delegacji', t => {
     const originalWarn = log.warn;
     log.warn = () => {};
     try {
@@ -402,14 +402,14 @@ test('F4 fail-soft: brak/zepsute filterByAgent daje workerowi zestaw domyślny, 
     }
 });
 
-test('F4: custom sub z YAML role:"worker" też dostaje model rodzica', t => {
+test('custom sub z YAML role:"worker" też dostaje model rodzica', t => {
     t.is(__test__._resolveModelRole({ name: 'klara-pisarz', description: '', tools: [], role: 'worker' }), 'sub_worker');
     t.is(__test__._resolveModelRole({ name: 'klara-prep', description: '', tools: [], role: 'researcher' }), 'researcher');
     t.is(__test__._resolveModelRole({ name: 'pkm-sub', description: '', tools: [] }), 'researcher',
         'brak roli = dotychczasowy slot sub-agentów (zero zmian dla pkm-sub i szablonów)');
 });
 
-test('F4 end-to-end: aspect:"worker" odpala model GŁÓWNY agenta, explorer — slot sub-agentów', async t => {
+test('end-to-end: aspect:"worker" odpala model GŁÓWNY agenta, explorer — slot sub-agentów', async t => {
     const modelKeys: string[] = [];
     class FakeModel {
         constructor(opts: { modelKey?: string }) { modelKeys.push(opts.modelKey || '?'); }
@@ -457,7 +457,7 @@ test('F4 end-to-end: aspect:"worker" odpala model GŁÓWNY agenta, explorer — 
     t.deepEqual(modelKeys, ['model-taniutki', 'model-glowny']);
 });
 
-test('F4: cap kontekstu delegacji jedzie z limits, nie z hardcodu 16000', async t => {
+test('cap kontekstu delegacji jedzie z limits, nie z hardcodu 16000', async t => {
     const prompts: string[] = [];
     class FakeModel { stream() {} }
     const activeAgent = { name: 'Jaskier', activeSubAgents: [] };
@@ -496,7 +496,7 @@ test('F4: cap kontekstu delegacji jedzie z limits, nie z hardcodu 16000', async 
     t.false(prompts[1].includes('k'.repeat(5001)), 'niższy budżet tnie kontekst');
 });
 
-// ─── S33 Z1: strażnicy delegacji (głębokość + szerokość + scope) ─────────────
+// ─── Strażnicy delegacji (głębokość + szerokość + scope) ─────────────
 
 /**
  * Plugin-atrapa dla testów kagańców. `runs` zbiera wywołania runnera (co realnie odpalono).
@@ -511,7 +511,7 @@ function pluginForGuards(
     return {
         plugin: {
             currentAutonomy: 'edge',
-            // K11: `filterByAgent` potrzebne dopiero testom aspektu `worker` (klasa rodzica).
+            // `filterByAgent` potrzebne dopiero testom aspektu `worker` (klasa rodzica).
             toolRegistry: opts.agentTools
                 ? { filterByAgent: () => opts.agentTools!.map(name => ({ name })) }
                 : {},
@@ -540,7 +540,7 @@ function pluginForGuards(
     };
 }
 
-test('S33 Z1 depth: sub-agent (depth 1) NIE deleguje dalej przy limicie 1', async t => {
+test('depth: sub-agent (depth 1) NIE deleguje dalej przy limicie 1', async t => {
     const runs: RunRow[] = [];
     const { plugin, makeRunner } = pluginForGuards(runs);
     const tool = createDelegateTool({}, { makeRunner });
@@ -554,7 +554,7 @@ test('S33 Z1 depth: sub-agent (depth 1) NIE deleguje dalej przy limicie 1', asyn
     t.is(runs.length, 0, 'ZERO odpalonych subów');
 });
 
-test('S33 Z1 depth: z głębokości 0 sub startuje, a runner dostaje delegationDepth 1', async t => {
+test('depth: z głębokości 0 sub startuje, a runner dostaje delegationDepth 1', async t => {
     const runs: RunRow[] = [];
     const { plugin, makeRunner } = pluginForGuards(runs);
     const tool = createDelegateTool({}, { makeRunner });
@@ -566,7 +566,7 @@ test('S33 Z1 depth: z głębokości 0 sub startuje, a runner dostaje delegationD
     t.is(runs[0].options.delegationDepth, 1, 'sub stoi o piętro niżej niż wołający');
 });
 
-test('S33 Z1 depth: podniesiony limit (2) przepuszcza jedno piętro głębiej', async t => {
+test('depth: podniesiony limit (2) przepuszcza jedno piętro głębiej', async t => {
     const runs: RunRow[] = [];
     const { plugin, makeRunner } = pluginForGuards(runs, { limits: { max_delegation_depth: 2 } });
     const tool = createDelegateTool({}, { makeRunner });
@@ -579,7 +579,7 @@ test('S33 Z1 depth: podniesiony limit (2) przepuszcza jedno piętro głębiej', 
     t.false(stop.success, 'na drugim piętrze kaganiec znów zamyka');
 });
 
-test('S33 Z1 depth: ujemna głębokość z palca modelu clampowana do 0 — dziecko i tak dostaje depth 1', async t => {
+test('depth: ujemna głębokość z palca modelu clampowana do 0 — dziecko i tak dostaje depth 1', async t => {
     const runs: RunRow[] = [];
     const { plugin, makeRunner } = pluginForGuards(runs);
     const tool = createDelegateTool({}, { makeRunner });
@@ -592,7 +592,7 @@ test('S33 Z1 depth: ujemna głębokość z palca modelu clampowana do 0 — dzie
     t.is(runs[0].options.delegationDepth, 1, 'clamp: -5 traktowane jak 0, sub startuje z piętra 1');
 });
 
-test('S33 Z1 width: 6 zadań przy limicie 5 odrzuca CAŁE wywołanie, zero odpalonych subów', async t => {
+test('width: 6 zadań przy limicie 5 odrzuca CAŁE wywołanie, zero odpalonych subów', async t => {
     const runs: RunRow[] = [];
     const { plugin, makeRunner } = pluginForGuards(runs);
     const tool = createDelegateTool({}, { makeRunner });
@@ -606,7 +606,7 @@ test('S33 Z1 width: 6 zadań przy limicie 5 odrzuca CAŁE wywołanie, zero odpal
     t.is(runs.length, 0, 'ani jedno zadanie nie ruszyło');
 });
 
-test('S33 Z1 width: 5 zadań przy limicie 5 przechodzi (granica włącznie)', async t => {
+test('width: 5 zadań przy limicie 5 przechodzi (granica włącznie)', async t => {
     const runs: RunRow[] = [];
     const { plugin, makeRunner } = pluginForGuards(runs);
     const tool = createDelegateTool({}, { makeRunner });
@@ -619,7 +619,7 @@ test('S33 Z1 width: 5 zadań przy limicie 5 przechodzi (granica włącznie)', as
     t.true(runs.every(r => r.options.delegationDepth === 1));
 });
 
-test('S33 Z1 scope: scope.folders custom suba jedzie do runnera jako realna bariera', async t => {
+test('scope: scope.folders custom suba jedzie do runnera jako realna bariera', async t => {
     const runs: RunRow[] = [];
     const { plugin, makeRunner } = pluginForGuards(runs, {
         scope: { folders: ['Projekty'], sections: ['## Drafty'] },
@@ -631,7 +631,7 @@ test('S33 Z1 scope: scope.folders custom suba jedzie do runnera jako realna bari
     t.deepEqual(runs[0].options.scopeFolders, ['Projekty']);
 });
 
-test('S33 Z1 scope: brak scope.folders = brak nowych ograniczeń (null)', async t => {
+test('scope: brak scope.folders = brak nowych ograniczeń (null)', async t => {
     const runs: RunRow[] = [];
     const { plugin, makeRunner } = pluginForGuards(runs, { scope: { folders: [], sections: ['## A'] } });
     const tool = createDelegateTool({}, { makeRunner });
@@ -641,9 +641,9 @@ test('S33 Z1 scope: brak scope.folders = brak nowych ograniczeń (null)', async 
     t.is(runs[0].options.scopeFolders, null);
 });
 
-// ─── S33 fala 2: A2 (wiszący budzik) + A3 (górny timeout w trybie multi-task) ──
+// ─── Wiszący budzik + górny timeout w trybie multi-task ──
 
-test.serial('S33 A2: _withTimeout rozbraja budzik po rozstrzygnięciu wyścigu', async t => {
+test.serial('_withTimeout rozbraja budzik po rozstrzygnięciu wyścigu', async t => {
     const cleared = [];
     const realClear = globalThis.clearTimeout;
     globalThis.clearTimeout = (id) => { cleared.push(id); return realClear(id); };
@@ -664,7 +664,7 @@ function pluginWithHangingRunner(opts: { limits?: Record<string, number>; scope?
     return { plugin: base.plugin, makeRunner: () => ({ runTask: () => new Promise<never>(() => {}) }) };
 }
 
-test('S33 A3: górny timeout_ms jest defaultem dla zadań bez własnego', async t => {
+test('górny timeout_ms jest defaultem dla zadań bez własnego', async t => {
     const { plugin, makeRunner } = pluginWithHangingRunner();
     const tool = createDelegateTool({}, { makeRunner });
 
@@ -678,7 +678,7 @@ test('S33 A3: górny timeout_ms jest defaultem dla zadań bez własnego', async 
     t.true(Date.now() - started < 5000, 'czekaliśmy sekundy, nie minuty');
 });
 
-test('S33 A3: własny timeout_ms zadania wygrywa z górnym', async t => {
+test('własny timeout_ms zadania wygrywa z górnym', async t => {
     const { plugin, makeRunner } = pluginWithHangingRunner();
     const tool = createDelegateTool({}, { makeRunner });
 
@@ -689,7 +689,7 @@ test('S33 A3: własny timeout_ms zadania wygrywa z górnym', async t => {
     t.true(res.results[1].error.includes('60ms'), 'reszta bierze górny default');
 });
 
-// ─── Zwis delegacji 2026-08-14: szerokość multi-task dopasowana do bramki platformy ───
+// ─── Szerokość multi-task dopasowana do bramki platformy ───
 
 /** Licznik równoległości biegów runnera: max(active) mówi, ile subów realnie biegło naraz. */
 type RunConcurrencyLog = { active: number; maxActive: number; started: string[] };
@@ -732,7 +732,7 @@ function pluginWithGate(gateLimit: number, runLog: RunConcurrencyLog) {
     };
 }
 
-test('Zwis delegacji 2026-08-14: bramka lokalna limit 1 → taski multi-task jadą SEKWENCYJNIE', async t => {
+test('bramka lokalna limit 1 → taski multi-task jadą SEKWENCYJNIE', async t => {
     const runLog: RunConcurrencyLog = { active: 0, maxActive: 0, started: [] };
     const { plugin, makeRunner } = pluginWithGate(1, runLog);
     const tool = createDelegateTool({}, { makeRunner });
@@ -747,7 +747,7 @@ test('Zwis delegacji 2026-08-14: bramka lokalna limit 1 → taski multi-task jad
     t.deepEqual(runLog.started, ['a', 'b', 'c'], 'kolejność startu = kolejność paczki');
 });
 
-test('Zwis delegacji 2026-08-14: bramka limit 2 → najwyżej 2 suby naraz', async t => {
+test('bramka limit 2 → najwyżej 2 suby naraz', async t => {
     const runLog: RunConcurrencyLog = { active: 0, maxActive: 0, started: [] };
     const { plugin, makeRunner } = pluginWithGate(2, runLog);
     const tool = createDelegateTool({}, { makeRunner });
@@ -759,7 +759,7 @@ test('Zwis delegacji 2026-08-14: bramka limit 2 → najwyżej 2 suby naraz', asy
     t.is(runLog.maxActive, 2, 'szerokość = pojemność bramki, nie zawsze 1');
 });
 
-test('Zwis delegacji 2026-08-14: chmura (bramka 0) zachowuje pełną równoległość', async t => {
+test('chmura (bramka 0) zachowuje pełną równoległość', async t => {
     const runLog: RunConcurrencyLog = { active: 0, maxActive: 0, started: [] };
     const { plugin, makeRunner } = pluginWithGate(0, runLog);
     const tool = createDelegateTool({}, { makeRunner });
@@ -771,7 +771,7 @@ test('Zwis delegacji 2026-08-14: chmura (bramka 0) zachowuje pełną równoległ
     t.is(runLog.maxActive, 3, 'bez bramki nic się nie zmienia — paczka jedzie równolegle');
 });
 
-test('Zwis delegacji 2026-08-14: model bez sondy (_streamGateLimit) = dotychczasowa równoległość', async t => {
+test('model bez sondy (_streamGateLimit) = dotychczasowa równoległość', async t => {
     const runLog: RunConcurrencyLog = { active: 0, maxActive: 0, started: [] };
     const base = pluginForGuards([]);
     const tool = createDelegateTool({}, {
@@ -802,7 +802,7 @@ test('_runWithConcurrency: wyniki wracają w kolejności wejścia niezależnie o
     t.deepEqual(results, ['wolny', 'szybki']);
 });
 
-test('delegate routes EVERY sub-agent through the researcher/minion model slot (D18 unification)', async t => {
+test('delegate routes EVERY sub-agent through the researcher/minion model slot', async t => {
     const warns: string[] = [];
     const originalWarn = log.warn;
     log.warn = (module: string, message: string, ...data: unknown[]) => warns.push([module, message, ...data].join(' '));
@@ -829,7 +829,7 @@ test('delegate routes EVERY sub-agent through the researcher/minion model slot (
             getActiveAgent: () => activeAgent,
             resolveSubAgentConfig: (name: string) => ({
                 name,
-                // Etykieta role:'strategist' NIE steruje już modelem (F6/D18).
+                // Etykieta role:'strategist' NIE steruje modelem.
                 role: name === 'jaskier-strateg' ? 'strategist' : 'researcher',
                 tools: [],
             }),
@@ -860,13 +860,13 @@ test('delegate routes EVERY sub-agent through the researcher/minion model slot (
         log.warn = originalWarn;
     }
 
-    // D18: nawet sub z etykietą strategist idzie przez slot researcher→minion (worker-model),
+    // Nawet sub z etykietą strategist idzie przez slot researcher→minion (worker-model),
     // a NIE przez master (strategy-model nieużyty). Jeden worker dla wszystkich.
     t.deepEqual(modelKeys, ['worker-model', 'worker-model']);
     t.false(warns.some(w => w.includes('modelRole "minion"') || w.includes('modelRole "master"')));
 });
 
-// ─── F2 „delegacja w tle": default = TŁO, zwrotka to started + task_id ───────
+// ─── „Delegacja w tle": default = TŁO, zwrotka to started + task_id ───────
 //
 // Warunek tła po stronie narzędzia jest JEDEN: `plugin.subTaskRegistry` istnieje (i wołamy
 // z głównego czatu). Sam byt zakłada RUNNER i melduje go hakiem `onTaskCreated` — dlatego
@@ -888,7 +888,7 @@ type TloRes = {
     results?: Array<{ success?: boolean; error?: string }>;
 };
 
-/** Opcje runnera w testach tła (F2 dokłada origin/background/onTaskCreated). */
+/** Opcje runnera w testach tła (origin/background/onTaskCreated). */
 type TloRunnerOptions = {
     delegationDepth?: number;
     scopeFolders?: unknown;
@@ -896,7 +896,7 @@ type TloRunnerOptions = {
     origin?: SubTaskOrigin;
     background?: boolean;
     shouldAbort?: () => boolean;
-    /** Z2: sygnał „sub wjechał na slot bramki" — runner podaje go pętli. */
+    /** Sygnał „sub wjechał na slot bramki" — runner podaje go pętli. */
     onGateAdmitted?: () => void;
     onTaskCreated?: (task: SubTask) => void;
 };
@@ -959,7 +959,7 @@ function nowyLog(): TloLog {
     return { prompts: [], options: [], ukonczone: [] };
 }
 
-test.serial('F2 default: delegate startuje suba w TLE — tura dostaje started + task_id, nie wynik', async t => {
+test.serial('default: delegate startuje suba w TLE — tura dostaje started + task_id, nie wynik', async t => {
     __test__._resetBackground();
     const log = nowyLog();
     const { plugin, makeRunner } = pluginZTlem(log, { opoznienieMs: 40 });
@@ -981,11 +981,11 @@ test.serial('F2 default: delegate startuje suba w TLE — tura dostaje started +
     t.is(log.ukonczone.length, 1, 'bieg domyka się PO turze');
 });
 
-// Runda 3 (2026-08-17, decyzja Kuby): model wybierał `background:false` z przyzwyczajenia
-// i mroził userowi czat na cały bieg suba. Z głównego czatu tło jest teraz PRZYMUSOWE —
-// jawnie podany parametr jest ignorowany. Blokada żyje dalej TYLKO bez rejestru (fail-soft,
-// test niżej) i przy delegacji z wnętrza suba (depth >= 1, testy budżetów niżej).
-test.serial('runda 3: background:false z czatu IGNOROWANE — sub i tak startuje w tle', async t => {
+// Model wybierał `background:false` z przyzwyczajenia i mroził userowi czat na cały bieg
+// suba. Z głównego czatu tło jest PRZYMUSOWE — jawnie podany parametr jest ignorowany.
+// Blokada żyje dalej TYLKO bez rejestru (fail-soft, test niżej) i przy delegacji z wnętrza
+// suba (depth >= 1, testy budżetów niżej).
+test.serial('background:false z czatu IGNOROWANE — sub i tak startuje w tle', async t => {
     __test__._resetBackground();
     const log = nowyLog();
     const { plugin, makeRunner } = pluginZTlem(log, { opoznienieMs: 40 });
@@ -1002,7 +1002,7 @@ test.serial('runda 3: background:false z czatu IGNOROWANE — sub i tak startuje
     t.is(log.ukonczone.length, 1, 'bieg domyka się PO turze');
 });
 
-test.serial('F2 fail-soft: bez plugin.subTaskRegistry delegacja leci ścieżką BLOKUJĄCĄ', async t => {
+test.serial('fail-soft: bez plugin.subTaskRegistry delegacja leci ścieżką BLOKUJĄCĄ', async t => {
     __test__._resetBackground();
     const log = nowyLog();
     const { plugin, makeRunner } = pluginZTlem(log, { registry: null });
@@ -1016,7 +1016,7 @@ test.serial('F2 fail-soft: bez plugin.subTaskRegistry delegacja leci ścieżką 
     t.is(log.ukonczone.length, 1);
 });
 
-test.serial('F2 multi-task: cała paczka jedzie w tle, zwrotka niesie listę task_id', async t => {
+test.serial('multi-task: cała paczka jedzie w tle, zwrotka niesie listę task_id', async t => {
     __test__._resetBackground();
     const log = nowyLog();
     const { plugin, makeRunner } = pluginZTlem(log, { opoznienieMs: 40 });
@@ -1036,7 +1036,7 @@ test.serial('F2 multi-task: cała paczka jedzie w tle, zwrotka niesie listę tas
     t.is(log.ukonczone.length, 3);
 });
 
-test.serial('F2 szerokość: zadania biegnące W TLE liczą się do limitu następnego wywołania', async t => {
+test.serial('szerokość: zadania biegnące W TLE liczą się do limitu następnego wywołania', async t => {
     __test__._resetBackground();
     const log = nowyLog();
     const { plugin, makeRunner } = pluginZTlem(log, { opoznienieMs: 150 });
@@ -1061,7 +1061,7 @@ test.serial('F2 szerokość: zadania biegnące W TLE liczą się do limitu nast�
     t.is(__test__._backgroundCount(), 0, 'licznik zwalnia się po zakończeniu biegów');
 });
 
-test.serial('F2 timeout w tle: tura ma started, a sub i tak zostaje UBITY (abort + stopStream)', async t => {
+test.serial('timeout w tle: tura ma started, a sub i tak zostaje UBITY (abort + stopStream)', async t => {
     __test__._resetBackground();
     let streamStopped = 0;
     class HangingModel {
@@ -1099,11 +1099,11 @@ test.serial('F2 timeout w tle: tura ma started, a sub i tak zostaje UBITY (abort
     t.true(res.started, 'tura nie czeka na budzik');
 
     await new Promise(r => setTimeout(r, 120));
-    t.is(streamStopped, 1, 'porzucony sub NIE mieli dalej — timeout go ubija tak samo jak przed F2');
+    t.is(streamStopped, 1, 'porzucony sub NIE mieli dalej — timeout go ubija tak samo jak w trybie blokującym');
     t.true(captured.options!.shouldAbort!(), 'flaga abortu pętli suba podniesiona');
 });
 
-test.serial('F2: origin jedzie do rejestru, ale NIE trafia do promptu suba', async t => {
+test.serial('origin jedzie do rejestru, ale NIE trafia do promptu suba', async t => {
     __test__._resetBackground();
     const log = nowyLog();
     const { plugin, makeRunner } = pluginZTlem(log);
@@ -1120,7 +1120,7 @@ test.serial('F2: origin jedzie do rejestru, ale NIE trafia do promptu suba', asy
     t.true(log.prompts[0].includes('kontekst od rodzica'), 'zwykły kontekst przechodzi jak dotąd');
 });
 
-test.serial('F2: podrobiony origin bez agentName jest odrzucany (do rejestru nie idzie nic)', async t => {
+test.serial('podrobiony origin bez agentName jest odrzucany (do rejestru nie idzie nic)', async t => {
     __test__._resetBackground();
     const log = nowyLog();
     const { plugin, makeRunner } = pluginZTlem(log);
@@ -1131,7 +1131,7 @@ test.serial('F2: podrobiony origin bez agentName jest odrzucany (do rejestru nie
     t.is(log.options[0].origin, undefined);
 });
 
-test.serial('F2: sub-agent (depth 1) przy podniesionym limicie deleguje BLOKUJĄCO, nie w tle', async t => {
+test.serial('sub-agent (depth 1) przy podniesionym limicie deleguje BLOKUJĄCO, nie w tle', async t => {
     __test__._resetBackground();
     const log = nowyLog();
     const { plugin, makeRunner } = pluginZTlem(log, { limits: { max_delegation_depth: 2 } });
@@ -1145,7 +1145,7 @@ test.serial('F2: sub-agent (depth 1) przy podniesionym limicie deleguje BLOKUJĄ
     t.is(res.result, 'wynik suba');
 });
 
-// ─── F3 „panel biegów": Stop z panelu ubija bieg ─────────────────────────────
+// ─── „Panel biegów": Stop z panelu ubija bieg ─────────────────────────────
 //
 // Test jedzie na PRAWDZIWYM `SubTaskRegistry` (nie atrapie), bo cała wartość tej
 // ścieżki to spotkanie trzech rzeczy: id nadanego przez runnera, uchwytu podpiętego
@@ -1207,7 +1207,7 @@ function makeStopRunner(registry: SubTaskRegistry, seq = { n: 0 }) {
     });
 }
 
-test.serial('F3: requestStop po id z rejestru zatrzymuje bieg odpalony W TLE', async t => {
+test.serial('requestStop po id z rejestru zatrzymuje bieg odpalony W TLE', async t => {
     __test__._resetBackground();
     const registry = new SubTaskRegistry();
     const { plugin, stopy } = pluginZeStopem(registry);
@@ -1229,7 +1229,7 @@ test.serial('F3: requestStop po id z rejestru zatrzymuje bieg odpalony W TLE', a
     registry.dispose();
 });
 
-test.serial('F3: Stop działa też dla biegu BLOKUJĄCEGO (background:false)', async t => {
+test.serial('Stop działa też dla biegu BLOKUJĄCEGO (background:false)', async t => {
     __test__._resetBackground();
     const registry = new SubTaskRegistry();
     const { plugin, stopy } = pluginZeStopem(registry);
@@ -1253,11 +1253,12 @@ test.serial('F3: Stop działa też dla biegu BLOKUJĄCEGO (background:false)', a
     registry.dispose();
 });
 
-// ─── FAIL 3 + FAIL 4 (żywy smoke 2026-08-15) ────────────────────────────────────────
-// FAIL 3: Stop wisiał na „zatrzymywanie…", bo pętla suba stała na `await model.stream()`
-//         — abort adaptera nie rozstrzygał promisy. Bieg kończył się po 124,7 s jako błąd.
-// FAIL 4: worker (priorytet 0) stał 76 s w kolejce bramki `lm_studio`, po czym budżet
-//         zadania (120 s) minął mu w trakcie roboty — „anulowany w kolejce bramki".
+// ─── Gotchas pokryte tu na PRAWDZIWEJ pętli, nie atrapie ────────────────────────────
+// Stop może wisieć na „zatrzymywanie…" w nieskończoność, jeśli pętla suba stoi na
+// `await model.stream()`, a abort adaptera nie rozstrzyga tej promisy — bieg kończyłby się
+// dopiero po pełnym budżecie, jako błąd. Osobno: worker (priorytet 0) może długo stać
+// w kolejce bramki lokalnej platformy, a budżet zadania minąć mu w trakcie tego czekania
+// zamiast dać pełny czas na samą robotę — „anulowany w kolejce bramki".
 
 /** Model-atrapa w kontrakcie ChatModel PO fixie: wisi, a `stopStream` ODRZUCA promisę. */
 function makeAbortableModel(opts: { admitAfterMs?: number } = {}) {
@@ -1304,7 +1305,7 @@ function pluginZAbortem(registry: SubTaskRegistry, ModelClass: unknown) {
     } as unknown as DelegatePlugin;
 }
 
-/** Runner-atrapa na PRAWDZIWEJ pętli — bez tego test nie dotknąłby mechanizmu z FAIL 3. */
+/** Runner-atrapa na PRAWDZIWEJ pętli — atrapa prostszej pętli nie dotknęłaby mechanizmu. */
 function makeLoopRunner(registry: SubTaskRegistry, seq = { n: 0 }) {
     return () => ({
         runTask: async (
@@ -1338,7 +1339,7 @@ function makeLoopRunner(registry: SubTaskRegistry, seq = { n: 0 }) {
     });
 }
 
-test.serial('FAIL 3: Stop na biegu stojącym W ŚRODKU wywołania modelu kończy go NATYCHMIAST jako Przerwany', async t => {
+test.serial('Stop na biegu stojącym W ŚRODKU wywołania modelu kończy go NATYCHMIAST jako Przerwany', async t => {
     __test__._resetBackground();
     const registry = new SubTaskRegistry();
     const { state, AbortableModel } = makeAbortableModel();
@@ -1356,21 +1357,22 @@ test.serial('FAIL 3: Stop na biegu stojącym W ŚRODKU wywołania modelu kończy
     while (registry.getTask(res.task_id!)?.status === 'running' && Date.now() < deadline) {
         await new Promise(r => setTimeout(r, 5));
     }
-    // Przed fixem bieg wisiałby tu aż do per-call budzika (120 s) i skończył jako `error`.
+    // Bez tego mechanizmu bieg wisiałby tu aż do per-call budzika (120 s) i kończyłby się
+    // jako `error`, zamiast dawać Przerwany od razu.
     t.is(registry.getTask(res.task_id!)?.status, 'aborted', 'karta biegu: Przerwany, nie błąd');
     t.true(Date.now() - startedAt < 1000, 'domknięcie idzie od ręki, nie po budziku');
     registry.dispose();
 });
 
-test.serial('FAIL 4: budżet zadania liczy się od WJAZDU na slot bramki, nie od zlecenia', async t => {
+test.serial('budżet zadania liczy się od WJAZDU na slot bramki, nie od zlecenia', async t => {
     __test__._resetBackground();
     const registry = new SubTaskRegistry();
-    // Wzór z incydentu: worker stał w kolejce 76 s przy budżecie 120 s i zginął w 120,0 s
-    // z 3 zrobionymi narzędziami. Tu ta sama proporcja w miniaturze: kolejka 60 ms, budżet 80 ms.
-    // PRZED Z2 budzik strzelał w 80 ms (20 ms realnej roboty), PO — dopiero w ~140 ms.
+    // Miniaturowa reprodukcja: kolejka 60 ms, budżet zadania 80 ms. Budzik uzbrojony na
+    // starcie zlecenia strzeliłby w 80 ms (ledwie 20 ms realnej roboty po wjeździe na slot);
+    // dopiero przezbrojenie budzika na pierwszej admisji do bramki daje pełny budżet PO wjeździe.
     const { state, AbortableModel } = makeAbortableModel({ admitAfterMs: 60 });
     const plugin = pluginZAbortem(registry, AbortableModel);
-    // Runda 3: z czatu (depth 0) tło jest przymusowe — kontrakt ścieżki BLOKUJĄCEJ testujemy
+    // Z czatu (depth 0) tło jest przymusowe — kontrakt ścieżki BLOKUJĄCEJ testujemy
     // tam, gdzie ona nadal legalnie żyje: delegacja z WNĘTRZA suba (depth 1, limit podniesiony).
     (plugin.env!.settings!.pkmAssistant!.limits as Record<string, number>).max_delegation_depth = 2;
     const tool = createDelegateTool({}, { makeRunner: makeLoopRunner(registry) });
@@ -1388,14 +1390,14 @@ test.serial('FAIL 4: budżet zadania liczy się od WJAZDU na slot bramki, nie od
     registry.dispose();
 });
 
-test.serial('Z2: bez sygnału bramki budzik zadania działa jak dotąd (siatka bezpieczeństwa)', async t => {
+test.serial('bez sygnału bramki budzik zadania działa jak dotąd (siatka bezpieczeństwa)', async t => {
     // Model, który NIGDY nie melduje admisji (atrapy, obce implementacje) nie może zostać
     // bez sufitu — budzik uzbrojony przy zleceniu strzela normalnie.
     __test__._resetBackground();
     const registry = new SubTaskRegistry();
     const { AbortableModel } = makeAbortableModel({ admitAfterMs: 300 });
     const plugin = pluginZAbortem(registry, AbortableModel);
-    // Runda 3: ścieżka blokująca przez depth 1 (z czatu tło jest przymusowe).
+    // Ścieżka blokująca przez depth 1 (z czatu tło jest przymusowe).
     (plugin.env!.settings!.pkmAssistant!.limits as Record<string, number>).max_delegation_depth = 2;
     const tool = createDelegateTool({}, { makeRunner: makeLoopRunner(registry) });
 
@@ -1410,7 +1412,7 @@ test.serial('Z2: bez sygnału bramki budzik zadania działa jak dotąd (siatka b
     registry.dispose();
 });
 
-test.serial('F3: brak attachAbort w rejestrze nie psuje delegacji (fail-soft)', async t => {
+test.serial('brak attachAbort w rejestrze nie psuje delegacji (fail-soft)', async t => {
     __test__._resetBackground();
     const log = nowyLog();
     // Rejestr-atrapa BEZ `attachAbort` — jak starszy bootstrap albo wysypana implementacja.
@@ -1422,13 +1424,13 @@ test.serial('F3: brak attachAbort w rejestrze nie psuje delegacji (fail-soft)', 
     t.true(res.started, 'delegacja przeszła mimo wysypanego attachAbort');
 });
 
-// ─── Audyt nocny 2026-08-15, moduł 19 (iteracje subagentów) — ZAMKNIĘTY w F5 ───
-// Bieg live 2026-08-15 (harness, DeepSeek): sub wyczerpał 8 iteracji i zszedł backstopem,
-// a agent zlecający dostał `status=ok` bez ani jednego pola mówiącego, że to zejście
-// awaryjne — i zreferował wynik jako „zadanie wykonane". Gdy finalny strzał backstopu
-// padnie (obserwowane na moście 2026-08-14: „Backstop final call błąd: Model timeout"),
-// tą samą ścieżką wracała 36-znakowa zaślepka, nadal jako `success: true`.
-// F5: zwrotka delegacji niesie `stopped_by`.
+// ─── Sposób zejścia suba (stopped_by) ───
+// Sub potrafi wyczerpać iteracje i zejść backstopem, a bez `stopped_by` agent zlecający
+// dostaje `status=ok` bez żadnego pola mówiącego, że to zejście awaryjne — referuje wynik
+// jako „zadanie wykonane", mimo że to zaślepka. To samo dotyczy sytuacji, gdy finalny strzał
+// backstopu sam pada błędem („Backstop final call błąd: Model timeout"): bez oznaczenia tą
+// samą ścieżką wracałaby goła zaślepka, nadal jako `success: true`.
+// Zwrotka delegacji niesie `stopped_by`.
 function pluginDlaZejscia() {
     return {
         agentManager: {
@@ -1440,7 +1442,7 @@ function pluginDlaZejscia() {
     } as unknown as DelegatePlugin;
 }
 
-test('audyt 19: wynik delegacji niesie sposób zejścia suba (stopped_by)', async t => {
+test('wynik delegacji niesie sposób zejścia suba (stopped_by)', async t => {
     const tool = createDelegateTool({}, {
         makeRunner: () => ({
             runTask: async () => ({
@@ -1462,7 +1464,7 @@ test('audyt 19: wynik delegacji niesie sposób zejścia suba (stopped_by)', asyn
     t.is(out.stopped_by, 'backstop', 'wynik delegacji nie mówi, że sub zszedł backstopem');
 });
 
-test('F5: bieg z failed:true wraca do modelu jako success:false + stopped_by "error"', async t => {
+test('bieg z failed:true wraca do modelu jako success:false + stopped_by "error"', async t => {
     const tool = createDelegateTool({}, {
         makeRunner: () => ({
             runTask: async () => ({
@@ -1487,7 +1489,7 @@ test('F5: bieg z failed:true wraca do modelu jako success:false + stopped_by "er
     t.is(out.result, undefined, 'gałąź błędu nie udaje, że jest wynik');
 });
 
-test('F5: multi-task — element z błędem jest success:false, sąsiad z sukcesem nietknięty', async t => {
+test('multi-task — element z błędem jest success:false, sąsiad z sukcesem nietknięty', async t => {
     __test__._resetBackground();
     let n = 0;
     const tool = createDelegateTool({}, {
@@ -1511,7 +1513,7 @@ test('F5: multi-task — element z błędem jest success:false, sąsiad z sukces
     t.is(out.results[1].stopped_by, 'error');
 });
 
-test('F5: runner sprzed F5 (bez stoppedBy) nie wstawia pustego stopped_by — kształt jak dotąd', async t => {
+test('runner bez stoppedBy (starszy kształt wyniku) nie wstawia pustego stopped_by — kształt jak dotąd', async t => {
     const tool = createDelegateTool({}, {
         makeRunner: () => ({
             runTask: async () => ({ result: 'ok', toolsUsed: [], toolCallDetails: [], duration: 1, usage: null }),
@@ -1525,30 +1527,30 @@ test('F5: runner sprzed F5 (bez stoppedBy) nie wstawia pustego stopped_by — ks
     t.false('stopped_by' in out);
 });
 
-// ─── F5 Z2: grace-okno na finalne podsumowanie suba ───────────────────────────
-// `delegation_timeout_ms` obejmuje CAŁY bieg, więc budzik potrafił strzelić dokładnie
-// wtedy, gdy sub pisał już podsumowanie backstopu — zadanie zjadało pełny budżet na
-// narzędzia i oddawało zaślepkę zamiast dorobku (znalezisko nocy 2026-08-14/15).
+// ─── Grace-okno na finalne podsumowanie suba ───────────────────────────
+// `delegation_timeout_ms` obejmuje CAŁY bieg, więc budzik potrafi strzelić dokładnie
+// wtedy, gdy sub pisze już podsumowanie backstopu — bez grace-okna zadanie zjadałoby pełny
+// budżet na narzędzia i oddawało zaślepkę zamiast dorobku.
 
 /** Karta biegu w zakresie, jakiego dotyka `_isInFinalSummary`. */
 function karta(typy: string[]) {
     return { id: 'sub/x#1', steps: typy.map((type, i) => ({ at: i, type, fields: {} })) } as unknown as SubTask;
 }
 
-test('F5: _isInFinalSummary widzi backstop bez późniejszego loop.end', t => {
+test('_isInFinalSummary widzi backstop bez późniejszego loop.end', t => {
     t.true(__test__._isInFinalSummary(karta(['loop.start', 'tool.pre', 'tool.post', 'backstop'])));
     // Między backstopem a końcem pętla zapisuje jeszcze model.done — to nadal finalna iteracja.
     t.true(__test__._isInFinalSummary(karta(['backstop', 'model.done'])));
 });
 
-test('F5: _isInFinalSummary NIE odracza w zwykłej iteracji ani po domknięciu pętli', t => {
+test('_isInFinalSummary NIE odracza w zwykłej iteracji ani po domknięciu pętli', t => {
     t.false(__test__._isInFinalSummary(karta(['loop.start', 'model.done', 'tool.pre'])));
     t.false(__test__._isInFinalSummary(karta(['backstop', 'model.done', 'loop.end'])), 'pętla już zeszła');
     t.false(__test__._isInFinalSummary(karta([])), 'bieg bez kroków');
     t.false(__test__._isInFinalSummary(undefined), 'brak karty = brak dowodu = brak odroczenia');
 });
 
-test('F5: timeout w trakcie backstopu ODRACZA abort, timeout w zwykłej iteracji ubija natychmiast', async t => {
+test('timeout w trakcie backstopu ODRACZA abort, timeout w zwykłej iteracji ubija natychmiast', async t => {
     const zrobGrace = (typy: string[], odroczenia: string[]) => __test__._makeFinalGrace(
         {
             subTaskRegistry: {
@@ -1561,13 +1563,12 @@ test('F5: timeout w trakcie backstopu ODRACZA abort, timeout w zwykłej iteracji
     );
 
     // (a) zwykła iteracja — budzik ubija od razu, bez śladu odroczenia.
-    // F2.8: dawniej pilnowane też przez `Date.now() - startA < 45` — realny zegar ścienny
-    // przy tak wąskim marginesie (20ms budżet + tylko 25ms luzu) flake'ował pod pełnym
-    // `npm test` (Refaktor/Decyzje_Sesji/2026-08-22_naprawy_po_audycie_security.md, sekcja
-    // „Ogony"). Komunikat błędu JUŻ dowodzi braku odroczenia deterministycznie: `kill()`
-    // wpisuje w niego dokładnie `effectiveTimeout` (tu 20), a okno grace dopisałoby +30 —
-    // "20ms" zamiast "50ms" jest tym samym dowodem co pomiar zegara, bez wrażliwości na
-    // obciążenie procesu testowego.
+    // Sprawdzanie realnym zegarem ściennym (`Date.now() - startA < 45`) przy tak wąskim
+    // marginesie (20ms budżet + tylko 25ms luzu) flake'uje pod obciążonym `npm test`.
+    // Komunikat błędu dowodzi braku odroczenia deterministycznie: `kill()` wpisuje w niego
+    // dokładnie `effectiveTimeout` (tu 20), a okno grace dopisałoby +30 — "20ms" zamiast
+    // "50ms" jest tym samym dowodem co pomiar zegara, bez wrażliwości na obciążenie procesu
+    // testowego.
     const sladyA: string[] = [];
     const a = await __test__._withTimeout(new Promise(() => {}), 20, 20, null, zrobGrace(['tool.post'], sladyA)) as { error: string };
     t.true(/timeout after 20ms/.test(a.error), 'brak grace w komunikacie = abort natychmiastowy, bez doliczonych 30ms');
@@ -1580,7 +1581,7 @@ test('F5: timeout w trakcie backstopu ODRACZA abort, timeout w zwykłej iteracji
     t.true(/timeout after 50ms/.test(b.error), `komunikat ma pokazywać CAŁY przeczekany czas: ${b.error}`);
 });
 
-test('F5: wynik, który zdążył w grace-oknie, wygrywa wyścig (abort nie leci)', async t => {
+test('wynik, który zdążył w grace-oknie, wygrywa wyścig (abort nie leci)', async t => {
     let ubity = 0;
     const grace = __test__._makeFinalGrace(
         { subTaskRegistry: { getTask: () => karta(['backstop']), step: () => {} } } as unknown as DelegatePlugin,
@@ -1596,14 +1597,13 @@ test('F5: wynik, który zdążył w grace-oknie, wygrywa wyścig (abort nie leci
     t.is(ubity, 0, 'abortu nie było — bieg zdążył');
 });
 
-// F2.8: dawniej pilnowane realnym zegarem (`Date.now() - t1 < 40` / `< 40`) — margines
-// 15ms budżetu + 25ms luzu flake'ował pod pełnym `npm test`
-// (Refaktor/Decyzje_Sesji/2026-08-22_naprawy_po_audycie_security.md, sekcja „Ogony").
-// Ten sam dowód idzie dziś przez TREŚĆ komunikatu: `kill()` wpisuje weń `effectiveTimeout`
-// (15), a doliczone okno grace zmieniłoby go na `15+30=45` — "15ms" w obu gałęziach jest
-// deterministycznym dowodem "zero odroczenia", niezależnym od tego, jak długo faktycznie
-// trwał bieg testu na obciążonej maszynie.
-test('F5: brak rejestru / wysypany getTask = zero odroczenia (fail-soft jak przed F5)', async t => {
+// Sprawdzanie realnym zegarem (`Date.now() - t1 < 40` / `< 40`) przy marginesie 15ms budżetu
+// + tylko 25ms luzu flake'uje pod obciążonym `npm test`. Dowód idzie zamiast tego przez
+// TREŚĆ komunikatu: `kill()` wpisuje weń `effectiveTimeout` (15), a doliczone okno grace
+// zmieniłoby go na `15+30=45` — "15ms" w obu gałęziach jest deterministycznym dowodem
+// "zero odroczenia", niezależnym od tego, jak długo faktycznie trwał bieg testu na
+// obciążonej maszynie.
+test('brak rejestru / wysypany getTask = zero odroczenia (fail-soft)', async t => {
     const bezRejestru = __test__._makeFinalGrace({} as DelegatePlugin, 30, () => 'sub/x#1');
     const res1 = await __test__._withTimeout(new Promise(() => {}), 15, 15, null, bezRejestru) as { error: string };
     t.true(/timeout after 15ms/.test(res1.error), 'brak rejestru nie może odraczać (komunikat bez doliczonych 30ms)');
@@ -1617,7 +1617,7 @@ test('F5: brak rejestru / wysypany getTask = zero odroczenia (fail-soft jak prze
     t.true(/timeout after 15ms/.test(res2.error), 'wyjątek sondy nie może przykryć timeoutu ani dopisać grace');
 });
 
-test.serial('F5 end-to-end: delegacja z realnym rejestrem odracza abort, gdy sub jest w backstopie', async t => {
+test.serial('end-to-end: delegacja z realnym rejestrem odracza abort, gdy sub jest w backstopie', async t => {
     __test__._resetBackground();
     const registry = new SubTaskRegistry();
     const kroki: string[] = [];
@@ -1638,7 +1638,7 @@ test.serial('F5 end-to-end: delegacja z realnym rejestrem odracza abort, gdy sub
             settings: {
                 // Grace poniżej `min` z LIMIT_SPECS spada na default — dlatego bierzemy 5000
                 // (dokładnie podłoga) i ucinamy czekanie realnym wynikiem po 40 ms.
-                // Runda 3: depth 2, bo ścieżkę BLOKUJĄCĄ (na której czekamy na grace) wołamy
+                // Depth 2, bo ścieżkę BLOKUJĄCĄ (na której czekamy na grace) wołamy
                 // z wnętrza suba (depth 1) — z czatu tło jest przymusowe.
                 pkmAssistant: {
                     chat: { platform: 'ollama', hosts: { ollama: 'http://localhost:11434' } },
@@ -1674,9 +1674,9 @@ test.serial('F5 end-to-end: delegacja z realnym rejestrem odracza abort, gdy sub
     registry.dispose();
 });
 
-// ─── Front A (2026-08-17): ratowanie dorobku po strzale budzika zadania ───
+// ─── Ratowanie dorobku po strzale budzika zadania ───
 
-test('Front A: _withTimeout z mapperem — ubity bieg oddaje dorobek jako partial_result', async t => {
+test('_withTimeout z mapperem — ubity bieg oddaje dorobek jako partial_result', async t => {
     const mapper = __test__._makeSalvageMapper(12000);
     // Bieg „domyka się" 40 ms po strzale budzika (abort → pętla finalize → runner) z częściowym
     // wynikiem — dokładnie tak wraca _executeSubAgent po abort (success:true, stopped_by:'abort').
@@ -1699,7 +1699,7 @@ test('Front A: _withTimeout z mapperem — ubity bieg oddaje dorobek jako partia
     t.is(res.aspect, 'pkm-explorer');
 });
 
-test('Front A: mapper NIE przykrywa realnego błędu biegu (success:false zostaje bez zmian)', async t => {
+test('mapper NIE przykrywa realnego błędu biegu (success:false zostaje bez zmian)', async t => {
     const mapper = __test__._makeSalvageMapper(12000);
     const run = new Promise((resolve) => setTimeout(() => resolve({
         success: false, error: 'runner init failed', stopped_by: 'error',
@@ -1709,7 +1709,7 @@ test('Front A: mapper NIE przykrywa realnego błędu biegu (success:false zostaj
     t.is(res.error, 'runner init failed');
 });
 
-test('Front A: bieg bez tekstu — partial_result budowany z tool_call_details', async t => {
+test('bieg bez tekstu — partial_result budowany z tool_call_details', async t => {
     const mapper = __test__._makeSalvageMapper(12000);
     const run = new Promise((resolve) => setTimeout(() => resolve({
         success: true,
@@ -1727,7 +1727,7 @@ test('Front A: bieg bez tekstu — partial_result budowany z tool_call_details',
     t.true(String(res.partial_result).includes('PODGLĄD NOTATKI'));
 });
 
-test('Front A: odrzucenie ubitego biegu PO strzale budzika nie wywraca delegacji', async t => {
+test('odrzucenie ubitego biegu PO strzale budzika nie wywraca delegacji', async t => {
     const mapper = __test__._makeSalvageMapper(12000);
     const run = new Promise((_, reject) => setTimeout(() => reject(new Error('abort zszedł wyjątkiem')), 30));
     const res = await __test__._withTimeout(run, 10, 10, null, null, null, mapper) as Record<string, unknown>;
@@ -1735,7 +1735,7 @@ test('Front A: odrzucenie ubitego biegu PO strzale budzika nie wywraca delegacji
     t.true(String(res.error).includes('timeout after 10ms'));
 });
 
-test('Front A: bez mappera zachowanie sprzed zmiany — goła zwrotka od ręki, bez czekania', async t => {
+test('bez mappera: goła zwrotka od ręki, bez czekania', async t => {
     const start = Date.now();
     const run = new Promise((resolve) => setTimeout(() => resolve({ success: true, result: 'za późno' }), 200));
     const res = await __test__._withTimeout(run, 10, 10) as Record<string, unknown>;
@@ -1743,7 +1743,7 @@ test('Front A: bez mappera zachowanie sprzed zmiany — goła zwrotka od ręki, 
     t.true(Date.now() - start < 150, 'goła zwrotka bez okna salvage');
 });
 
-test('Front A: _digestFromToolDetails — sufit znaków, pomijanie wpisów bez podglądu', t => {
+test('_digestFromToolDetails — sufit znaków, pomijanie wpisów bez podglądu', t => {
     const digest = __test__._digestFromToolDetails([
         { name: 'search', args: '{"q":"x"}', resultPreview: 'A'.repeat(300) },
         { name: 'bez_podgladu' },
@@ -1754,15 +1754,15 @@ test('Front A: _digestFromToolDetails — sufit znaków, pomijanie wpisów bez p
     t.false(digest.includes('bez_podgladu'));
 });
 
-// ─── K11 (AUD-security-008/072): dziecko NIGDY szerzej niż sub, który je zleca ───────────
+// ─── Dziecko NIGDY szerzej niż sub, który je zleca ───────────
 //
-// Do K11 `delegate` liczył zakres folderów WYŁĄCZNIE z configu odpalanego suba, a whitelistę
-// narzędzi — względem agenta GŁÓWNEGO. Wąski sub (`scope.folders: ['Publiczne']`, `tools:
-// [read, delegate]`) na piętrze 1 mógł więc wystawić wnukowi pełny vault i pełny zestaw
+// Liczenie zakresu folderów WYŁĄCZNIE z configu odpalanego suba, a whitelisty narzędzi
+// względem agenta GŁÓWNEGO, jest dziurą: wąski sub (`scope.folders: ['Publiczne']`, `tools:
+// [read, delegate]`) na piętrze 1 mógłby wystawić wnukowi pełny vault i pełny zestaw
 // narzędzi agenta. Znaczniki `_invocationScopeFolders` / `_invocationToolNames` wstrzykuje
 // `MCPClient` (jak `_invocationDelegationDepth`), a te testy pilnują, że są PRZECINANE.
 
-test('K11 008: wnuk dziedziczy zakres wołającego suba, gdy własnego configu scope nie ma', async t => {
+test('wnuk dziedziczy zakres wołającego suba, gdy własnego configu scope nie ma', async t => {
     const runs: RunRow[] = [];
     const { plugin, makeRunner } = pluginForGuards(runs, { limits: { max_delegation_depth: 2 } });
     const tool = createDelegateTool({}, { makeRunner });
@@ -1779,7 +1779,7 @@ test('K11 008: wnuk dziedziczy zakres wołającego suba, gdy własnego configu s
     t.deepEqual(runs[0].options.scopeFolders, ['Publiczne'], 'pusty scope dziecka NIE poszerza zakresu');
 });
 
-test('K11 008: przecięcie zostawia węższy wpis dziecka', async t => {
+test('przecięcie zostawia węższy wpis dziecka', async t => {
     const runs: RunRow[] = [];
     const { plugin, makeRunner } = pluginForGuards(runs, {
         limits: { max_delegation_depth: 2 },
@@ -1801,7 +1801,7 @@ test('K11 008: przecięcie zostawia węższy wpis dziecka', async t => {
     t.deepEqual(runs[0].options.scopeFolders, ['Publiczne/Drafty']);
 });
 
-test('K11 008: zakresy rozłączne = odmowa fail-closed, zero odpalonych subów', async t => {
+test('zakresy rozłączne = odmowa fail-closed, zero odpalonych subów', async t => {
     const runs: RunRow[] = [];
     const { plugin, makeRunner } = pluginForGuards(runs, {
         limits: { max_delegation_depth: 2 },
@@ -1824,7 +1824,7 @@ test('K11 008: zakresy rozłączne = odmowa fail-closed, zero odpalonych subów'
     t.is(runs.length, 0);
 });
 
-test('K11 072: aspect "worker" zlecony przez suba bierze JEGO whitelistę, nie agenta głównego', async t => {
+test('aspect "worker" zlecony przez suba bierze JEGO whitelistę, nie agenta głównego', async t => {
     const runs: RunRow[] = [];
     const { plugin, makeRunner } = pluginForGuards(runs, {
         limits: { max_delegation_depth: 2 },
@@ -1848,7 +1848,7 @@ test('K11 072: aspect "worker" zlecony przez suba bierze JEGO whitelistę, nie a
     t.deepEqual(runs[0].options.callerToolNames, ['read', 'delegate'], 'runner dostaje trzeci składnik przecięcia');
 });
 
-test('K11 072: bez znaczników (zlecenie z czatu) worker nadal bierze klasę agenta', async t => {
+test('bez znaczników (zlecenie z czatu) worker nadal bierze klasę agenta', async t => {
     const runs: RunRow[] = [];
     const { plugin, makeRunner } = pluginForGuards(runs, {
         agentTools: ['read', 'write', 'delegate'],
@@ -1865,13 +1865,14 @@ test('K11 072: bez znaczników (zlecenie z czatu) worker nadal bierze klasę age
     t.is(runs[0].options.scopeFolders, null, 'brak znaczników = zero nowych ograniczeń');
 });
 
-// ─── AUD-bledy-020: multi-task w tle - odrzucone NIE są „w kolejce" ──────────
+// ─── Multi-task w tle: odrzucone NIE są „w kolejce" ──────────
 //
 // Zadanie odbite od ręki (puste `task`, literówka w `aspect`) nigdy nie wchodzi do
-// rejestru, więc powiadomienie o nim NIE przyjdzie. Do naprawy zwrotka liczyła je jako
-// `queued`, a komunikat odmowy (z listą dostępnych aspektów!) ginął w porzuconej puli.
+// rejestru, więc powiadomienie o nim NIE przyjdzie. Licząc je jako `queued` zgubiłbyś
+// komunikat odmowy (z listą dostępnych aspektów!) w porzuconej puli — dlatego wraca
+// osobnym polem `rejected`.
 
-test.serial('AUD-bledy-020: odrzucone zadania wracają jako `rejected`, nie jako `queued`', async t => {
+test.serial('odrzucone zadania wracają jako `rejected`, nie jako `queued`', async t => {
     __test__._resetBackground();
     const log = nowyLog();
     const { plugin, makeRunner } = pluginZTlem(log, { opoznienieMs: 40 });
@@ -1896,7 +1897,7 @@ test.serial('AUD-bledy-020: odrzucone zadania wracają jako `rejected`, nie jako
     t.true((res.note || '').includes('1'), 'nota mówi o 1 zleconym zadaniu, nie o trzech');
 });
 
-test.serial('AUD-bledy-020: same odmowy = success:false (nic nie ruszyło)', async t => {
+test.serial('same odmowy = success:false (nic nie ruszyło)', async t => {
     __test__._resetBackground();
     const log = nowyLog();
     const { plugin, makeRunner } = pluginZTlem(log);
@@ -1912,7 +1913,7 @@ test.serial('AUD-bledy-020: same odmowy = success:false (nic nie ruszyło)', asy
     t.deepEqual(log.prompts, [], 'żaden sub nie ruszył');
 });
 
-test.serial('AUD-bledy-020: paczka bez odmów zachowuje się jak dotąd (brak pola `rejected`)', async t => {
+test.serial('paczka bez odmów zachowuje się jak dotąd (brak pola `rejected`)', async t => {
     __test__._resetBackground();
     const log = nowyLog();
     const { plugin, makeRunner } = pluginZTlem(log, { opoznienieMs: 40 });
@@ -1928,14 +1929,14 @@ test.serial('AUD-bledy-020: paczka bez odmów zachowuje się jak dotąd (brak po
     await new Promise(r => setTimeout(r, 120));
 });
 
-// ─── AUD-security-128: zewnętrzny catch `delegate` maskuje sekret ───
+// ─── Zewnętrzny catch `delegate` maskuje sekret ───
 //
-// K8 (AUD-security-055) postawił maskę dokładnie na tę klasę wycieku, ale TYLKO wewnątrz
-// `SubAgentRunner.runTask`. Własny, zewnętrzny catch `DelegateTool` oddawał `(e as Error).message`
+// `SubAgentRunner.runTask` maskuje tę samą klasę wycieku, ale TYLKO u siebie. Bez osobnej
+// maski tutaj własny, zewnętrzny catch `DelegateTool` oddawałby `(e as Error).message`
 // wprost modelowi i do transkryptu — a komunikat wyjątku bywa całym zrzutem zdarzenia
 // strumienia razem z nagłówkiem `Authorization`.
 
-test('128: catch w delegate nie oddaje modelowi surowego komunikatu z sekretem', async t => {
+test('catch w delegate nie oddaje modelowi surowego komunikatu z sekretem', async t => {
     const SECRET = 'sk-ant-TAJNYKLUCZ0123456789abcdef';
     const plugin = {
         agentManager: {

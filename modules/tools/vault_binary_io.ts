@@ -1,5 +1,5 @@
 /**
- * vault_binary_io.js — API-first zapis/odczyt plików vaulta (E2.6).
+ * vault_binary_io.js — API-first zapis/odczyt plików vaulta.
  *
  * Obrazy (generate_image / add_text_to_image) idą do vaulta usera (np. Attachments/),
  * więc pisz je przez Vault API (createBinary/modifyBinary/create/modify + createFolder).
@@ -58,8 +58,8 @@ function isHiddenPath(path: string): boolean {
 
 /**
  * TFolder ma `children` (tablica), TFile nie — duck-typing zamiast importu `obsidian`
- * (testowalność AVA). S30 Z3: JEDNA kopia dla całego modułu (było 5 identycznych —
- * tu + Read/List/Write/DeleteTool), reszta plików importuje ją stąd.
+ * (testowalność AVA). JEDNA kopia dla całego modułu (Read/List/Write/DeleteTool
+ * importują ją stąd) zamiast osobnej implementacji w każdym pliku.
  */
 export function isFolderLike(abstractFile: VaultFileLike | null | undefined): boolean {
     return !!abstractFile && Array.isArray(abstractFile.children);
@@ -72,8 +72,8 @@ export function isFolderLike(abstractFile: VaultFileLike | null | undefined): bo
  * app-aware i dla zwykłych ścieżek MUSI iść przez Vault API (`createFolder`), żeby Obsidian
  * zaindeksował nowy folder. Adapter jest tu tylko awaryjną ścieżką dla dot-folderów.
  *
- * AUD-dead-code-021/166: `export` zdjęty — zero konsumentów poza tym plikiem (kolizja nazwy
- * z metodą `KomunikatorManager.ensureFolder()`, martwa gałąź homonimu). Wołają go u siebie
+ * `export` zdjęty — zero konsumentów poza tym plikiem (kolizja nazwy z metodą
+ * `KomunikatorManager.ensureFolder()`, martwa gałąź homonimu). Wołają go u siebie
  * wyłącznie `writeBinary`/`writeText` niżej.
  */
 async function ensureFolder(app: BinaryIoApp, folder: string): Promise<void> {

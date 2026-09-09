@@ -1,15 +1,12 @@
 /**
- * toolTranscriptSanitizer — testy strony „odsiewa" (AUD-testy-015/038).
+ * toolTranscriptSanitizer — testy strony „odsiewa".
  *
  * Sanitizer jest jedyną bramką między transkryptem a dostawcą — pętla go puszcza przed
- * KAŻDYM wywołaniem modelu (AgentLoop.ts:407 i :647). Do tego pliku dwie z trzech gałęzi
- * nie miały ŻADNEGO dedykowanego testu: filtr poprawności wpisów `tool_calls` (id +
- * function.name, linia 55) i odsiew pustych wiadomości (linia 73). Jedyny istniejący test
- * dotykający tego kodu pośrednio (`modules/chat/chat/RollingWindow.test.ts:88`) karmi
- * sanitizer PUSTĄ tablicą `tool_calls: []`, więc trafia w skrót `validToolCalls.length === 0`
- * i nigdy nie dotyka samego predykatu filtra — podmiana `filter(tc => tc?.id &&
- * tc?.function?.name)` na `filter(tc => true)` nie ruszała ani jednego testu w repo
- * (mutacja potwierdzona dwa razy niezależnie w audycie 2026-09-01).
+ * KAŻDYM wywołaniem modelu (AgentLoop.ts:407 i :647). Test z PUSTĄ tablicą `tool_calls: []`
+ * trafia w skrót `validToolCalls.length === 0` i nigdy nie dotyka samego predykatu filtra
+ * (`filter(tc => tc?.id && tc?.function?.name)`) — trzeba niepustej tablicy z mieszanką
+ * poprawnych i niepoprawnych wpisów, żeby faktycznie przetestować filtr poprawności wpisów
+ * `tool_calls` i odsiew pustych wiadomości.
  */
 import test from 'ava';
 import { sanitizeToolTranscript } from './toolTranscriptSanitizer.js';

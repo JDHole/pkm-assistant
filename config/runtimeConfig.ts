@@ -4,7 +4,7 @@
  *
  * ⚠️ To TU powstaje klient HTTP oparty na `requestUrl` Obsidiana — NIE w `src/main.ts`
  * (pilnuje tego strażnik `src/main.test.ts`). Composition root buduje ten obiekt
- * w KONSTRUKTORZE pluginu i podaje TĘ SAMĄ referencję konstruktorowi runtime'u (C-02/C-03).
+ * w KONSTRUKTORZE pluginu i podaje TĘ SAMĄ referencję konstruktorowi runtime'u.
  *
  * PODZIAŁ TRANSPORTU (spec §0.4):
  *   • tor BEZ strumienia (`complete()`, katalogi modeli, embedding) → `ObsidianHttpClient`,

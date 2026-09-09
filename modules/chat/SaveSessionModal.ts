@@ -11,17 +11,17 @@ interface SessionNote {
     content?: string;
     accepted?: boolean;
     /**
-     * D8 (2026-08-27, werdykt 27.08) + weryfikacja opusa (nit 2): obecne WYŁĄCZNIE dla
+     * Pole obecne WYŁĄCZNIE dla
      * propozycji dołożonych z poczekalni `brain/pending_rescue/` (`SaveSessionWorkflow.
      * _proposePendingRescue`). `SaveSessionWorkflow.applyDecision` rozpoznaje po tym polu,
      * czy accept/reject ma iść przez `acceptPendingRescue`/`rejectPendingRescue`, czy zwykłą
-     * ścieżkę tworzenia notatki. Dziś przeżywa round-trip przez ten modal tylko dlatego, że
-     * `setProposals`/`_resolveWith` operują na SPREADACH (`{...note, accepted: ...}`) — gdyby
+     * ścieżkę tworzenia notatki. Przeżywa round-trip przez ten modal tylko dlatego, że
+     * `setProposals`/`_resolveWith` operują na SPREADACH (`{...note, accepted: ...}`) - gdyby
      * ktoś kiedyś dopisał tu jawną rekonstrukcję pól (jak `_normalizeUpdate` niżej dla
      * `BrainUpdate`), a zapomniał o tych trzech polach, kandydat zgubiłby `pendingFilename`
      * po cichu: `applyDecision` potraktowałby go jak zwykłą notatkę (utworzyłby DRUGĄ kopię
      * przez `_createBrainNote`), a oryginał zostałby w poczekalni NA ZAWSZE (nic już go stamtąd
-     * nie skasuje — dublowałby się przy KAŻDEJ kolejnej rundzie `/save session`). Trzymaj te
+     * nie skasuje - dublowałby się przy KAŻDEJ kolejnej rundzie `/save session`). Trzymaj te
      * pola przy każdej zmianie sposobu, w jaki `SessionNote` jest budowany/kopiowany.
      */
     pendingFilename?: string;
@@ -78,8 +78,8 @@ export class SaveSessionModal extends Modal {
     declare brainUpdates: BrainUpdate[];
     declare _resolve: ((payload: SaveSessionPayload) => void) | null;
     declare _loadingStartedAt: number | null;
-    // release 2.2.0/W2: `window.setInterval`/`window.setTimeout` (obsidianmd/prefer-window-timers)
-    // zwracają `number` (typ DOM), nie `NodeJS.Timeout` — `ReturnType<typeof window.setInterval>`
+    // `window.setInterval`/`window.setTimeout` (obsidianmd/prefer-window-timers)
+    // zwracają `number` (typ DOM), nie `NodeJS.Timeout` - `ReturnType<typeof window.setInterval>`
     // sam się myli (typ `window` to `Window & typeof globalThis`, więc przecina się z globalnym
     // `setInterval` z @types/node), więc typy pól wpisane wprost jako `number`.
     declare _loadingTimer: number | null;
@@ -101,8 +101,8 @@ export class SaveSessionModal extends Modal {
 
         this._resolve = null;
 
-        // S29 Z6 — faza loading przestaje być ekranem „coś się dzieje, nie wiadomo co":
-        // sekundnik na żywo (koniec obietnicy „zwykle 4-10s"), puls na chunkach modelu
+        // Faza loading nie jest ekranem „coś się dzieje, nie wiadomo co":
+        // sekundnik na żywo, puls na chunkach modelu
         // i możliwość ponowienia, gdy strzał padnie albo zwiśnie.
         this._loadingStartedAt = null;
         this._loadingTimer = null;
@@ -128,12 +128,11 @@ export class SaveSessionModal extends Modal {
         if (this.contentEl) this._renderCurrentState();
     }
 
-    // S29 Z6: `setError(message)` USUNIĘTY — jego jedyny wołacz (`save_session.js`) po padzie LLM
-    // dorysowywał banner i JECHAŁ DALEJ z pustymi propozycjami, udając, że wszystko gra.
-    // Teraz pad zatrzymuje flow w fazie loading: `awaitRetry()` pokazuje przyczynę i guzik „Ponów".
+    // Pad LLM zatrzymuje flow w fazie loading zamiast jechać dalej z pustymi propozycjami:
+    // `awaitRetry()` pokazuje przyczynę i guzik „Ponów".
 
     /**
-     * S29 Z6: znak życia z modelu (chunk streamu). Zamienia podpowiedź na „Model pisze…" i mruga —
+     * Znak życia z modelu (chunk streamu). Zamienia podpowiedź na „Model pisze…" i mruga -
      * user widzi różnicę między „myśli" a „zdechł".
      */
     noteChunk(): void {
@@ -147,7 +146,7 @@ export class SaveSessionModal extends Modal {
     }
 
     /**
-     * S29 Z6: strzał padł (zwis / błąd modelu). Zostajemy w fazie loading, ale zamiast kręcącego
+     * Strzał padł (zwis / błąd modelu). Zostajemy w fazie loading, ale zamiast kręcącego
      * się w nieskończoność diamentu user dostaje przyczynę i guzik „Ponów analizę".
      *
      * @returns {Promise<void>} rozstrzyga się, gdy user kliknie „Ponów" (anulowanie idzie normalną
@@ -223,7 +222,7 @@ export class SaveSessionModal extends Modal {
                 text: t('modal.save_session.analyzing_failed', { reason: this._loadingError }),
             });
         } else {
-            // Sekundnik zamiast obietnicy — kaskada potrafi trwać minuty (S29 Z6).
+            // Sekundnik zamiast obietnicy - kaskada potrafi trwać minuty.
             this._loadingTimerEl = wrap.createDiv({ cls: 'cs-save-session__loading-timer' });
             this._startLoadingTimer();
         }
@@ -307,7 +306,7 @@ export class SaveSessionModal extends Modal {
     }
 
     /**
-     * E2.8 D3: render the proposed „Na teraz" short-term updates as an accept-able diff
+     * Render the proposed „Na teraz" short-term updates as an accept-able diff
      * (− removed / + added, editable), one item per section. Empty = a friendly no-op state.
      */
     _renderNaTerazColumn(parent: HTMLElement, updates: BrainUpdate[]): void {

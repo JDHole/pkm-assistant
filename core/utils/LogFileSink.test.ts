@@ -190,11 +190,11 @@ test('write is a no-op without an adapter (node-safe)', (t) => {
     sink.dispose();
 });
 
-// ─────────────────────────── dispose: zamknięcie sinka (piny nocy 2026-08-14) ───────────────────────────
+// ─────────────────────────── dispose: zamknięcie sinka ───────────────────────────
 //
-// Kontrast, od którego zaczęło się znalezisko: `TraceLog.dispose()` robi
+// Kontrast, który był punktem wyjścia: `TraceLog.dispose()` robi
 // `await sink.flush()` PRZED `sink.dispose()` i jest wołany z `PKMPlugin.onunload`.
-// Naprawa (2026-09-04): `LogFileSink.dispose()` sam zrzuca resztę bufora (fire-and-forget —
+// `LogFileSink.dispose()` sam zrzuca resztę bufora (fire-and-forget —
 // `dispose()` musi zostać synchroniczne, bo `onunload` jest synchroniczne) i ustawia
 // `_disposed`, więc kolejny `write()` po dispose jest no-opem — stara ścieżka nie ożywa.
 // `Logger.disposeFileSink()` (wołane z `src/main.ts` `onunload`, patrz gotcha 6a w

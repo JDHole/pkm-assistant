@@ -43,7 +43,7 @@ function sink(): StreamSink & { porcje: string[] } {
     return { porcje, onChunk(text: string) { porcje.push(text); } };
 }
 
-/** Cały ślad, jaki błąd zostawia u wołacza i w logu — na tym stoi K20. */
+/** Cały ślad, jaki błąd zostawia u wołacza i w logu — na tym stoi reguła: sekret nigdy nie trafia do komunikatu błędu. */
 function slad(err: unknown): string {
     const e = err as { message?: string };
     return `${String(e?.message ?? '')} ${String(err)} ${JSON.stringify(err)}`.toLowerCase();
@@ -259,7 +259,7 @@ test('kod błędu odróżnia limit czasu od Stopu', async t => {
     });
 });
 
-test('K20: klucz z ZAPYTANIA adresu nie wychodzi w komunikacie błędu', async t => {
+test('klucz z ZAPYTANIA adresu nie wychodzi w komunikacie błędu', async t => {
     // Część dostawców przyjmuje klucz w query stringu — pełny adres w komunikacie byłby
     // wyciekiem równie dotkliwym jak nagłówek.
     const KLUCZ = 'AIzaSyTAJNYKLUCZDOSTAWCY1234567890';
@@ -477,7 +477,7 @@ test('FetchHttpClient: awaria transportu rzuca błąd z kodem i bez sekretów', 
     t.false(slad(err).includes(KLUCZ.toLowerCase()), 'adres w komunikacie idzie bez zapytania');
 });
 
-// ── K-01 / Electron: `fetch` nie może dostać odbiornika ───────────────────────
+// ── Electron: `fetch` nie może dostać odbiornika ───────────────────────
 // W gołym Node `this.cokolwiek(...)` na funkcji `fetch` przechodzi, w Electronie (czyli
 // w Obsidianie) rzuca „Illegal invocation". Pin trzyma wywołanie bez odbiornika, bo tej
 // różnicy nie widać w żadnym teście jadącym w Node.
@@ -618,8 +618,9 @@ test('sygnał zgłaszający SAM `aborted` zatrzymuje porcje w pół strumienia',
 });
 
 test('ciała błędu nie da się doczytać: `body` to PUSTY łańcuch, a połączenie zostaje zamknięte', async t => {
-    // Zerwane połączenie w połowie ciała błędu. Wołacz ma dostać pustkę (K20 każe mu dopisać
-    // własny krótki komunikat), a gniazdo nie ma prawa wisieć do końca życia procesu.
+    // Zerwane połączenie w połowie ciała błędu. Wołacz ma dostać pustkę (reguła "sekret nigdy
+    // w komunikacie błędu" każe mu dopisać własny krótki komunikat), a gniazdo nie ma prawa
+    // wisieć do końca życia procesu.
     let widziany: RequestInit | undefined;
     const atrapa = ((_url: string, init: RequestInit) => {
         widziany = init;

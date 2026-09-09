@@ -2,11 +2,9 @@
  * @module chat_artifacts
  * Delegation proposal button extracted from ChatView.
  *
- * E2.9 FAZA D: stary świat artefaktów (panel `_toggleArtifactPanel` + `ArtifactProgressModal` +
- * `IdeaReviewModal` + auto-save do `_planStore`/`_chatTodoStore`) SKASOWANY. Artefakty żywe mają
- * własne UI (zakładka panelu agenta + segment slim bara + chip B4), a `todo` — live-widok nad inputem
- * (`_renderTodoPanel`). Został tu tylko przycisk propozycji delegacji (nie-artefaktowy, wołany z
- * `chat_streaming._pendingDelegation`).
+ * Artefakty mają własne UI (zakładka panelu agenta + segment slim bara + chip aktywnego
+ * artefaktu), a `todo` - live-widok nad inputem (`_renderTodoPanel`). Ten moduł trzyma tylko
+ * przycisk propozycji delegacji (nie-artefaktowy, wołany z `chat_streaming._pendingDelegation`).
  */
 import { t } from '../../../core/i18n/index.js';
 import { MACHINE_MESSAGE_META } from '../../../core/index.js';
@@ -47,14 +45,10 @@ export function _renderDelegationButton(
 
             const delegationMsg = data.context_summary || data.reason || t('chat.artifact.delegation_from');
             this.input_area.value = t('chat.artifact.delegation_msg', { message: delegationMsg, artifacts: '' });
-            // K7 (AUD-security-088): `context_summary` pisze MODEL — ta wysyłka jest maszynowa, choć
-            // klika ją user. Bez tego znacznika marker `@@skill:` z tekstu modelu wjeżdżałby do promptu
-            // systemowego nowego agenta z ramką „użytkownik uruchomił skill".
+            // `context_summary` pisze MODEL - ta wysyłka jest maszynowa, choć klika ją user. Bez
+            // tego znacznika marker `@@skill:` z tekstu modelu wjeżdżałby do promptu systemowego
+            // nowego agenta z ramką „użytkownik uruchomił skill".
             window.setTimeout(() => this.send_message({ meta: MACHINE_MESSAGE_META }), 200);
         })();
     });
 }
-
-// E2.3 (D21): _renderModeChangeButton usunięty wraz z trybami pracy.
-// E2.9 FAZA D: _toggleArtifactPanel/_refreshArtifactPanel/openProgressModal/_autoSaveArtifact usunięte
-// (stary świat artefaktów) — patrz nagłówek modułu.

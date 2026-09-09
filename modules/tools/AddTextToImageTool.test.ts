@@ -1,18 +1,17 @@
 /**
  * `add_text_to_image` dotyka DWÓCH plików — i każdy ma mieć własną, pełną bramkę.
  *
- * K2 (AUD-security-016) — CEL ZAPISU. Narzędzie renderuje napis na obrazku i zapisuje wynik
- * pod `output_path`. Dotąd bramka uprawnień oglądała ścieżkę ŹRÓDŁOWĄ (legalny obrazek),
- * a cel zapisu nie przechodził przez `validateVaultPath` — czyli ani przez blokadę
- * `.pkm-assistant/`, ani przez No-Go, ani przez whitelistę.
+ * CEL ZAPISU. Narzędzie renderuje napis na obrazku i zapisuje wynik pod `output_path`.
+ * Bramka uprawnień ocenia właśnie tę ścieżkę zapisu przez `validateVaultPath` — czyli
+ * przez blokadę `.pkm-assistant/`, No-Go i whitelistę — a nie ścieżkę ŹRÓDŁOWĄ.
  *
- * K16 (AUD-security-102/126) — OBRAZ ŹRÓDŁOWY. Po K2 bramka `MCPClienta` widzi WYŁĄCZNIE cel
- * (`image.generate` + `output_path`), a źródło szło już tylko przez `validateVaultPath`, które
- * nie zna whitelisty `focusFolders`, strefy No-Go ani `scope.folders` suba. Agent z whitelistą
- * `Publiczne` i No-Go `Prywatne` wołał
+ * OBRAZ ŹRÓDŁOWY. Bramka `MCPClienta` widzi WYŁĄCZNIE cel (`image.generate` + `output_path`);
+ * gdyby źródło szło tylko przez `validateVaultPath`, które nie zna whitelisty `focusFolders`,
+ * strefy No-Go ani `scope.folders` suba, agent z whitelistą `Publiczne` i No-Go `Prywatne`
+ * mógłby wywołać
  * `add_text_to_image {path:'Prywatne/skan.png', output_path:'Publiczne/kopia.png'}` — bramka
- * widziała sam legalny cel, a plik z `Prywatne/` lądował przepisany tam, gdzie agent sięga.
- * Od K16 źródło przechodzi przez PEŁNĄ bramkę (`PermissionSystem.checkPermission(agent,
+ * widziałaby sam legalny cel, a plik z `Prywatne/` lądowałby przepisany tam, gdzie agent sięga.
+ * Dlatego źródło przechodzi przez PEŁNĄ bramkę (`PermissionSystem.checkPermission(agent,
  * 'vault.read', ...)`) PRZED odczytem, a brak tożsamości/bramki = odmowa fail-closed.
  *
  * Render (`renderTextOverlay`) potrzebuje canvasu, więc „przeszło" poznajemy po LICZNIKU
@@ -77,7 +76,7 @@ const BAZA = { path: 'Attachments/ok.png', text: 'napis' };
 /** Zaufany znacznik tożsamości — w runtime wstrzykuje go `MCPClient`, model go nie podrobi. */
 const WOLAJACY = { _invocationAgentName: 'Tester' };
 
-test.serial('K2: contextExtractor oddaje CEL ZAPISU, nie ścieżkę źródłową', t => {
+test.serial('contextExtractor oddaje CEL ZAPISU, nie ścieżkę źródłową', t => {
     const tool = createAddTextToImageTool();
 
     t.is(
@@ -102,7 +101,7 @@ test.serial('K2: contextExtractor oddaje CEL ZAPISU, nie ścieżkę źródłową
     );
 });
 
-test.serial('K2: output_path z traversalem = odmowa przed jakimkolwiek zapisem', async t => {
+test.serial('output_path z traversalem = odmowa przed jakimkolwiek zapisem', async t => {
     const { app, written } = makeApp();
     const tool = createAddTextToImageTool();
 
@@ -112,7 +111,7 @@ test.serial('K2: output_path z traversalem = odmowa przed jakimkolwiek zapisem',
     t.deepEqual(written, [], 'nic nie poleciało do vaulta');
 });
 
-test.serial('K2: output_path w .pkm-assistant (pamięć innego agenta / kod pluginu) = odmowa', async t => {
+test.serial('output_path w .pkm-assistant (pamięć innego agenta / kod pluginu) = odmowa', async t => {
     const { app, written } = makeApp();
     const tool = createAddTextToImageTool();
 
@@ -128,7 +127,7 @@ test.serial('K2: output_path w .pkm-assistant (pamięć innego agenta / kod plug
     t.deepEqual(written, []);
 });
 
-test.serial('K2: legalny cel przechodzi walidację (odbija się dopiero o brak canvasu/obrazka)', async t => {
+test.serial('legalny cel przechodzi walidację (odbija się dopiero o brak canvasu/obrazka)', async t => {
     AccessGuard.setNoGoFolders([]);
     const { app } = makeApp();
     const tool = createAddTextToImageTool();
@@ -143,7 +142,7 @@ test.serial('K2: legalny cel przechodzi walidację (odbija się dopiero o brak c
     t.notRegex(res.error!, /output path/i, 'walidacja celu nie może być tym, co blokuje legalny zapis');
 });
 
-test.serial('K16: źródło spoza whitelisty / w No-Go = odmowa PRZED odczytem obrazu', async t => {
+test.serial('źródło spoza whitelisty / w No-Go = odmowa PRZED odczytem obrazu', async t => {
     AccessGuard.setNoGoFolders(['Prywatne']);
     const { app, written, reads } = makeApp(['Prywatne/sekret.png', 'Publiczne/a.png']);
     const tool = createAddTextToImageTool();
@@ -161,7 +160,7 @@ test.serial('K16: źródło spoza whitelisty / w No-Go = odmowa PRZED odczytem o
     t.deepEqual(written, [], 'nic nie poleciało do vaulta');
 });
 
-test.serial('K16: źródło wewnątrz whitelisty przechodzi bramkę jak dotąd', async t => {
+test.serial('źródło wewnątrz whitelisty przechodzi bramkę jak dotąd', async t => {
     AccessGuard.setNoGoFolders(['Prywatne']);
     const { app, reads } = makeApp(['Publiczne/a.png']);
     const tool = createAddTextToImageTool();
@@ -177,7 +176,7 @@ test.serial('K16: źródło wewnątrz whitelisty przechodzi bramkę jak dotąd',
     t.false(res.success, 'render bez canvasu i tak padnie — liczy się, GDZIE bieg się zatrzymał');
 });
 
-test.serial('K16: zakres sub-agenta (scope.folders) obowiązuje także źródło', async t => {
+test.serial('zakres sub-agenta (scope.folders) obowiązuje także źródło', async t => {
     AccessGuard.setNoGoFolders([]);
     // Agent widzi CAŁY zwykły vault — jedyną barierą zostaje zakres suba.
     const agent = makeAgent({ permissions: { guidance_mode: true } });
@@ -214,7 +213,7 @@ test.serial('K16: zakres sub-agenta (scope.folders) obowiązuje także źródło
     t.deepEqual(wewnatrz.reads, ['Publiczne/Sub/a.png'], 'źródło w zakresie suba przechodzi');
 });
 
-test.serial('K16: brak tożsamości albo bramki w kontekście = odmowa fail-closed', async t => {
+test.serial('brak tożsamości albo bramki w kontekście = odmowa fail-closed', async t => {
     AccessGuard.setNoGoFolders([]);
     const pelnoprawny = makeAgent({ permissions: { guidance_mode: true } });
 
@@ -245,7 +244,7 @@ test.serial('K16: brak tożsamości albo bramki w kontekście = odmowa fail-clos
     }
 });
 
-test.serial('K16: `.pkm-assistant` jako źródło nadal odbija się o validateVaultPath', async t => {
+test.serial('`.pkm-assistant` jako źródło nadal odbija się o validateVaultPath', async t => {
     AccessGuard.setNoGoFolders([]);
     const { app, reads } = makeApp(['.pkm-assistant/agents/inny/memory/x.png']);
     const tool = createAddTextToImageTool();

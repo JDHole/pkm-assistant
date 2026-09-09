@@ -11,20 +11,20 @@ test('DECISION_TREE_DEFAULTS = rdzeń (tier core) + rozszerzone (tier extended)'
     t.is(DECISION_TREE_DEFAULTS.length, CORE_RULES.length + EXTENDED_RULES.length);
     t.true(DECISION_TREE_DEFAULTS.filter(r => r.tier === 'core').length === CORE_RULES.length);
     t.true(DECISION_TREE_DEFAULTS.filter(r => r.tier === 'extended').length === EXTENDED_RULES.length);
-    // Stare id nie występują już w drzewie (D14).
+    // Stare id nie występują już w drzewie.
     const ids = new Set(DECISION_TREE_DEFAULTS.map(r => r.id));
     for (const dead of ['deleg_mandatory', 'deleg_strateg', 'skill_use', 'skill_known', 'file_write', 'file_delete']) {
         t.false(ids.has(dead), `${dead} nie powinno istnieć`);
     }
 });
 
-test('mem_proactive w rdzeniu — rdzeń E2.7 + rozszerzenie ulotne E2.8 D2', t => {
+test('mem_proactive w rdzeniu — rdzeń + rozszerzenie ulotne', t => {
     const rule = CORE_RULES.find(r => r.id === 'mem_proactive')!;
     t.truthy(rule);
     t.true(rule.text.startsWith('POD KONIEC TURY sam oceń'));
-    // E2.7 durable-first framing zachowane…
+    // Durable-first framing zachowane…
     t.true(rule.text.includes('Lepiej nie zapisać niż zaśmiecić pamięć.'));
-    // …a E2.8 D2 dokłada ścieżkę ulotną „na teraz" (ephemeral + section) na końcu.
+    // …a dokłada ścieżkę ulotną „na teraz" (ephemeral + section) na końcu.
     t.true(rule.text.includes('ephemeral:true'));
     t.true(rule.text.includes('„Na teraz"'));
     t.is(rule.tool, 'memory_save');
@@ -55,15 +55,15 @@ test('splitDecisionTreeRules: available=null → nie filtruje po narzędziu (pod
 
 test('splitDecisionTreeRules: instrukcja narzędzia NIEdostępnego NIE renderuje się', t => {
     const resolved = resolveDecisionTreeInstructions({}, {});
-    // E2.9 FAZA B: agent ma tylko artifact_create — NIE ma delegate/memory_save/todo.
+    // Agent ma tylko artifact_create - NIE ma delegate/memory_save/todo.
     const available = new Set(['artifact_create']);
     const { core } = splitDecisionTreeRules(resolved, { available, hasSkills: false, extended: false });
     const ids = core.map(r => r.id);
     t.true(ids.includes('art_hierarchy'));         // artifact_create dostępny
-    t.false(ids.includes('art_todo_default'));     // todo niedostępny (dochodzi w fazie D — świadome)
+    t.false(ids.includes('art_todo_default'));     // todo niedostępny (dochodzi w fazie D - świadome)
     t.false(ids.includes('deleg_core'));           // delegate niedostępny
     t.false(ids.includes('mem_proactive'));        // memory_save niedostępny
-    t.true(ids.includes('deleg_escalation'));      // reguła bez narzędzia — zawsze
+    t.true(ids.includes('deleg_escalation'));      // reguła bez narzędzia - zawsze
 });
 
 test('splitDecisionTreeRules: reguła requiresSkills tylko gdy agent ma skille', t => {
@@ -86,16 +86,16 @@ test('splitDecisionTreeRules: furtka OFF → brak rozszerzonych; ON → są (fil
     // Filtrowanie po narzędziu obowiązuje też w furtce.
     const onNarrow = splitDecisionTreeRules(resolved, { available: new Set(['read']), hasSkills: true, extended: true });
     t.true(onNarrow.extended.some(r => r.id === 'mem_read')); // tool read dostępny
-    t.false(onNarrow.extended.some(r => r.id === 'kom_send')); // kom_* niedostępny (S28)
+    t.false(onNarrow.extended.some(r => r.id === 'kom_send')); // kom_* niedostępny
 });
 
-test('S28: reguły poczty renderują się TYLKO gdy agent ma narzędzia komunikatora', t => {
+test('reguły poczty renderują się TYLKO gdy agent ma narzędzia komunikatora', t => {
     const resolved = resolveDecisionTreeInstructions({}, {});
 
     // Reakcja na ping = rdzeń (always-on), gatowana dostępnością kom_read.
     const withMail = splitDecisionTreeRules(resolved, { available: new Set(['kom_send', 'kom_read']), hasSkills: false, extended: true });
     t.true(withMail.core.some(r => r.id === 'kom_inbox'));
-    // „Kiedy wysłać" siedzi w opisie narzędzia (D14) — w drzewie tylko za furtką.
+    // „Kiedy wysłać" siedzi w opisie narzędzia - w drzewie tylko za furtką.
     t.true(withMail.extended.some(r => r.id === 'kom_send'));
 
     const withoutMail = splitDecisionTreeRules(resolved, { available: new Set(['read']), hasSkills: false, extended: true });

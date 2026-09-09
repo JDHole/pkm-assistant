@@ -1,7 +1,7 @@
 /**
- * `NoticeCenter` — zamyka lukę F-04 (powiadomienia nie miały ani jednego testu).
+ * `NoticeCenter` — zamyka lukę pokrycia (powiadomienia nie miały ani jednego testu).
  *
- * Kluczowe rozróżnienie S-17: PROWIZJONOWANIE gałęzi ustawień idzie SUROWYM workiem
+ * Kluczowe rozróżnienie: PROWIZJONOWANIE gałęzi ustawień idzie SUROWYM workiem
  * (`settingsStore.raw`, boot nie pisze), ale WYCISZENIE przez usera to prawdziwa decyzja
  * i MA planować zapis.
  */
@@ -33,7 +33,6 @@ async function makeStore(bag: SettingsBag): Promise<SettingsStore> {
     );
 }
 
-// ── C5.1 ─────────────────────────────────────────────────────────────────────
 test('show() woła fabrykę powiadomienia i zwraca uchwyt', async t => {
     const wywolania: Wywolanie[] = [];
     const store = await makeStore({ pkmAssistant: {} });
@@ -47,7 +46,6 @@ test('show() woła fabrykę powiadomienia i zwraca uchwyt', async t => {
     t.true(wywolania[0].handle.hidden);
 });
 
-// ── C5.2 ─────────────────────────────────────────────────────────────────────
 test('wyciszony id → show() zwraca null i NIC nie pokazuje', async t => {
     const wywolania: Wywolanie[] = [];
     const store = await makeStore({ pkmAssistant: { notices: { muted: { reindex: true } } } });
@@ -60,7 +58,7 @@ test('wyciszony id → show() zwraca null i NIC nie pokazuje', async t => {
     t.true(notices.isMuted('reindex'));
 });
 
-// ── C5.3 (S-17, pierwsza połowa) ─────────────────────────────────────────────
+// ── pierwsza połowa ─────────────────────────────────────────────
 test('mute() planuje zapis (mutacja PRZEZ PROXY)', async t => {
     const store = await makeStore({ pkmAssistant: {} });
     const notices = new NoticeCenter({ createNotice: makeFactory([]), settingsStore: store });
@@ -71,7 +69,7 @@ test('mute() planuje zapis (mutacja PRZEZ PROXY)', async t => {
     t.true(notices.isMuted('reindex'));
 });
 
-// ── C5.4 (S-17, druga połowa) ────────────────────────────────────────────────
+// ── druga połowa ────────────────────────────────────────────────
 test('prowizjonowanie pustej gałęzi notices NIE planuje zapisu', async t => {
     const store = await makeStore({ pkmAssistant: {} });
     const notices = new NoticeCenter({ createNotice: makeFactory([]), settingsStore: store });
@@ -82,7 +80,6 @@ test('prowizjonowanie pustej gałęzi notices NIE planuje zapisu', async t => {
         'samo pokazanie powiadomienia zaplanowało zapis CAŁEGO pliku z kluczami API');
 });
 
-// ── C5.4b (decyzja 10) ───────────────────────────────────────────────────────
 test('hydratacja sekretów nie planuje zapisu', async t => {
     // `config/defaultSettings.ts` prowizjonuje `chat.apiKeys` i `embedding.apiKeys`, więc
     // czterosegmentowa ścieżka sekretu (`pkmAssistant.chat.apiKeys.openai`) NIE dotwarza
@@ -105,11 +102,10 @@ test('hydratacja sekretów nie planuje zapisu', async t => {
 
     await new Promise(r => setTimeout(r, 30));
 
-    t.is(store.pendingSaveTimer, null, 'hydratacja sekretów zaplanowała zapis — S-07 i scenariusz 39 padają cicho');
+    t.is(store.pendingSaveTimer, null, 'hydratacja sekretów zaplanowała zapis — zależne od tego zachowania scenariusze padają cicho');
     t.is(zapisy.length, 0);
 });
 
-// ── C5.5 (N-03) ──────────────────────────────────────────────────────────────
 test('guziki akcji dostają klasę pkm-notice-actions', async t => {
     const wywolania: Wywolanie[] = [];
     const store = await makeStore({ pkmAssistant: {} });
@@ -127,7 +123,6 @@ test('guziki akcji dostają klasę pkm-notice-actions', async t => {
         'kontener guzików nie dostał jedynej żywej klasy powiadomień');
 });
 
-// ── C5.6 (N-01) ──────────────────────────────────────────────────────────────
 test('unload() zamyka wszystkie żywe powiadomienia', async t => {
     const wywolania: Wywolanie[] = [];
     const store = await makeStore({ pkmAssistant: {} });
@@ -141,7 +136,6 @@ test('unload() zamyka wszystkie żywe powiadomienia', async t => {
     t.true(wywolania.every(w => w.handle.hidden), 'powiadomienie przeżyło demontaż pluginu');
 });
 
-// ── C5.7 ─────────────────────────────────────────────────────────────────────
 test('timeout domyślny = NOTICE_DEFAULT_TIMEOUT_MS', async t => {
     const wywolania: Wywolanie[] = [];
     const store = await makeStore({ pkmAssistant: {} });
@@ -154,7 +148,7 @@ test('timeout domyślny = NOTICE_DEFAULT_TIMEOUT_MS', async t => {
     t.is(wywolania[1].timeout, 0, '`0` znaczy „nie znika samo" i nie może zostać podmienione na default');
 });
 
-// ── C5.8 (N-02, druga strona bramki) ─────────────────────────────────────────
+// ── druga strona bramki ─────────────────────────────────────────
 test('NIEwyciszony id przechodzi — show() pokazuje i zwraca uchwyt', async t => {
     const wywolania: Wywolanie[] = [];
     const store = await makeStore({ pkmAssistant: { notices: { muted: { inny: true } } } });
@@ -168,7 +162,7 @@ test('NIEwyciszony id przechodzi — show() pokazuje i zwraca uchwyt', async t =
         'powiadomienie bez `mutable` dostało guzik — treść przestała być gołym tekstem');
 });
 
-// ── C5.9 (N-02 + N-03: guzik „wycisz" wymaga OBU warunków) ───────────────────
+// ── guzik „wycisz" wymaga OBU warunków ───────────────────
 test('guzik „wycisz" pojawia się TYLKO przy mutable + id', async t => {
     const wywolania: Wywolanie[] = [];
     const store = await makeStore({ pkmAssistant: {} });
@@ -186,7 +180,7 @@ test('guzik „wycisz" pojawia się TYLKO przy mutable + id', async t => {
     t.true(String(wywolania[2].content).includes(NOTICE_ACTIONS_CSS_CLASS));
 });
 
-// ── C5.10 (fabryka pada) ─────────────────────────────────────────────────────
+// ── fabryka pada ─────────────────────────────────────────────────────
 test('padnięta fabryka → show() zwraca null i melduje wstrzykniętym logiem', async t => {
     const store = await makeStore({ pkmAssistant: {} });
     const bledy: unknown[][] = [];

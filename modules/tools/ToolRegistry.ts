@@ -1,26 +1,26 @@
 /**
  * Central registry for all available MCP tools.
  *
- * Tool visibility (E2.8 C1 — JEDNA OŚ NARZĘDZIOWA, po Sprint 04 MCP_PORZADEK_v1):
+ * Tool visibility (JEDNA OŚ NARZĘDZIOWA):
  * - Built-in servers map (BUILTIN_TOOL_MAP) defines which tools belong to which "logical server"
  *   (grupy w UI Uprawnień). Źródło prawdy nazw = manifesty `built-in-servers/*.manifest.js`.
  * - `core` is always-available (ask_user). Agent cannot remove it.
  * - `filterByAgent(agent)` = all built-in − `agent.disabled_tools[]` (negatywna lista). User MCP
- *   server tools (`tool.serverName`) dodatkowo gated pozytywną listą `mcp_servers` (opt-in, E3.1).
- * - K3: regułę liczy JEDNA metoda — `checkToolAxis(agent, toolName)`. `filterByAgent` to jej
+ *   server tools (`tool.serverName`) dodatkowo gated pozytywną listą `mcp_servers` (opt-in).
+ * - Regułę liczy JEDNA metoda — `checkToolAxis(agent, toolName)`. `filterByAgent` to jej
  *   przelot po rejestrze, a `MCPClient.executeToolCall` woła ją jako BRAMKĘ przed wykonaniem.
  *   Widoczność i egzekucja nie mogą się rozjechać, bo liczy je ten sam kod.
  */
 import { log } from '../../core/utils/Logger.js';
 
 /**
- * Kanoniczny kształt narzędzia w rejestrze (TS-3). Właścicielem typu jest ToolRegistry —
+ * Kanoniczny kształt narzędzia w rejestrze. Właścicielem typu jest ToolRegistry —
  * fabryki `create*Tool()` i wrappery external MCP rejestrują obiekty tego kształtu.
  *
  * `execute` celowo jako METODA (nie pole funkcyjne): parametry metod są biwariantne nawet pod
  * `strictFunctionTypes`, więc narzędzie z konkretnym typem argumentów przypisuje się do rejestru
  * bez rzutowań, a wołacze (MCPClient) mogą podać `Record<string, unknown>`.
- * Index signature: narzędzia niosą pola dodatkowe (np. `contextExtractor` z S04 Z10).
+ * Index signature: narzędzia niosą pola dodatkowe (np. `contextExtractor`).
  */
 export interface ToolDefinition {
     /** Unique name of the tool. */
@@ -45,7 +45,7 @@ export interface ToolDefinition {
 
 /**
  * Minimalny widok agenta, jakiego potrzebuje filtr widoczności. Pola są `unknown`, bo pochodzą
- * z YAML-a usera — istniejące `Array.isArray` w kodzie zawężają je same (kontrakt TS-0 §4).
+ * z YAML-a usera — istniejące `Array.isArray` w kodzie zawężają je same.
  */
 export interface ToolVisibilityAgent {
     disabled_tools?: unknown;
@@ -53,7 +53,7 @@ export interface ToolVisibilityAgent {
     effective_mcp_servers?: unknown;
 }
 
-/** Powód odmowy na osi narzędziowej agenta (K3). */
+/** Powód odmowy na osi narzędziowej agenta. */
 export type ToolAxisDenialReason = 'disabled_tool' | 'server_not_opted_in';
 
 /**
@@ -70,9 +70,9 @@ interface ToolAxisDecision {
 
 const BUILTIN_TOOL_MAP: Record<string, string[]> = {
     core: ['ask_user'],
-    // E2.9: artifact_* (żywe artefakty, gatunek 1) + todo (gatunek 2). Stare chat_todo/idea_review/plan_review skasowane (aliasy w toolAliases.js).
+    // artifact_* (żywe artefakty, gatunek 1) + todo (gatunek 2). Stare chat_todo/idea_review/plan_review skasowane (aliasy w toolAliases.js).
     artifacts: ['artifact_create', 'artifact_read', 'artifact_update', 'artifact_list', 'todo'],
-    // E2.5: 12 narzędzi retrieval skonsolidowane w JEDNO `search` (scope vault/memory).
+    // Narzędzia retrieval skonsolidowane w JEDNO `search` (scope vault/memory).
     // `search` żyje w serwerze `vault` — scope=memory bramkowane osobno uprawnieniem memory
     // (SearchTool), więc agent bez serwera `vault` nie dostaje dostępu do vaultu przez tylną furtkę.
     vault: [
@@ -84,13 +84,13 @@ const BUILTIN_TOOL_MAP: Record<string, string[]> = {
     ],
     web: ['web_search', 'web_read'],
     multimodal: ['generate_image', 'add_text_to_image'],
-    // S28 (D3): `agent_message` OUT — poczta ma własny serwer `komunikator`.
+    // `agent_message` OUT — poczta ma własny serwer `komunikator`.
     delegation: [
         'delegate', 'agent_delegate'
     ],
-    // Serwer `skills` skasowany w E2.4 (D17): skill_list/skill_execute nie istnieją.
+    // Serwer `skills` nie istnieje: skill_list/skill_execute skasowane.
     // Odkrywalność skilli = indeks w prompcie, przepis czytany przez `read`.
-    // S28 (D3): Komunikator v3 = trzy prymitywy poczty (Project Hub skasowany).
+    // Komunikator v3 = trzy prymitywy poczty (Project Hub skasowany).
     komunikator: [
         'kom_send', 'kom_list', 'kom_read'
     ]
@@ -123,8 +123,8 @@ export class ToolRegistry {
     }
 
     /**
-     * Unregisters a tool by name (E3.1 R1 — public API so external managers stop reaching into
-     * the private `this.tools` Map from Mapa-era code). Idempotent.
+     * Unregisters a tool by name — public API so external managers don't reach into
+     * the private `this.tools` Map directly. Idempotent.
      * @returns true if a tool was present and removed, false otherwise.
      */
     unregisterTool(name: string): boolean {
@@ -167,20 +167,19 @@ export class ToolRegistry {
     }
 
     /**
-     * Filters tools to those visible for the given agent (E2.8 C1 — JEDNA OŚ NARZĘDZIOWA).
+     * Filters tools to those visible for the given agent (JEDNA OŚ NARZĘDZIOWA).
      *
      * Model:
      * - Narzędzia BUILT-IN: włączone, chyba że nazwa w `agent.disabled_tools[]` (negatywna lista;
      *   nowe narzędzie po update pluginu = domyślnie ON). `core` (ask_user) ZAWSZE ON, nieusuwalny.
      * - Narzędzia USEROWYCH serwerów MCP (tool.serverName spoza built-in): gated `disabled_tools`
      *   ORAZ pozytywną listą `mcp_servers` (opt-in per agent — connector przypięty do agenta).
-     *   To oś TRANSITIONAL do E3.1 („prawdziwy klient MCP"); built-in jej NIE używa.
+     *   To oś TRANSITIONAL do prawdziwego klienta MCP; built-in jej NIE używa.
      * - Brak agenta / brak `disabled_tools` → nic nie wyłączone (semantyka negatywnej listy).
      *
-     * To filtr WIDOCZNOŚCI (co model dostaje w definicjach narzędzi), ale od K3 liczy go ta sama
-     * metoda `checkToolAxis`, którą `MCPClient.executeToolCall` woła jako BRAMKĘ przed wykonaniem.
-     * Dawny komentarz mówił tu „to nie granica bezpieczeństwa, granicą jest checkPermission",
-     * a `checkPermission` odsyłał z powrotem do `disabled_tools` — i nikt nie bramkował.
+     * To filtr WIDOCZNOŚCI (co model dostaje w definicjach narzędzi), a liczy go ta sama
+     * metoda `checkToolAxis`, którą `MCPClient.executeToolCall` woła jako BRAMKĘ przed wykonaniem —
+     * widoczność i egzekucja nie mogą się rozjechać, bo liczy je ten sam kod.
      *
      * @param agent - Agent profile (`disabled_tools[]`, `mcp_servers[]`).
      */
@@ -189,15 +188,15 @@ export class ToolRegistry {
     }
 
     /**
-     * K3 (AUD-security-052 / 004) — JEDNA REGUŁA OSI NARZĘDZIOWEJ.
+     * JEDNA REGUŁA OSI NARZĘDZIOWEJ.
      *
      * Ta metoda jest jedynym miejscem, w którym zapada decyzja „to narzędzie należy do agenta".
      * Woła ją `filterByAgent` (co model WIDZI w definicjach narzędzi) i woła ją
-     * `MCPClient.executeToolCall` (co agentowi wolno WYKONAĆ). Do K3 istniała tylko pierwsza
-     * droga, więc model, który znał nazwę wyłączonego narzędzia (ze starej sesji, z notatki,
-     * z transkryptu innego agenta), wołał je po nazwie i nikt go nie zatrzymywał.
+     * `MCPClient.executeToolCall` (co agentowi wolno WYKONAĆ) — gdyby reguła liczyła się tylko
+     * w `filterByAgent`, model, który zna nazwę wyłączonego narzędzia (ze starej sesji,
+     * z notatki, z transkryptu innego agenta), mógłby wołać je po nazwie bez żadnej bramki.
      *
-     * Reguła (bez zmian merytorycznych względem dawnego `filterByAgent`, poza opt-inem niżej):
+     * Reguła:
      * - `core` (ask_user) — zawsze wolno, nieusuwalny;
      * - built-in — wolno, dopóki nazwy nie ma w `agent.disabled_tools[]` (negatywna lista);
      * - narzędzie serwera USEROWEGO / zewnętrznego (`tool.serverName`) — dodatkowo musi mieć
@@ -244,7 +243,7 @@ export class ToolRegistry {
     }
 
     /**
-     * User-connector positive whitelist (E3.1-transitional). Built-in servers ignored here.
+     * User-connector positive whitelist (transitional). Built-in servers ignored here.
      * @private
      * @returns '*' = all user servers visible (no whitelist / wildcard).
      */
@@ -253,9 +252,9 @@ export class ToolRegistry {
         const servers = Array.isArray(agent.effective_mcp_servers)
             ? agent.effective_mcp_servers
             : (Array.isArray(agent.mcp_servers) ? agent.mcp_servers : null);
-        // K3 (AUD-security-004): opt-in znaczy opt-in. Agent BEZ listy serwerów nie przypiął
-        // żadnego konektora, więc nie dostaje żadnego — dawne `'*'` w tym miejscu robiło
-        // z braku listy przepustkę na wszystkie serwery zewnętrzne.
+        // Opt-in znaczy opt-in: agent BEZ listy serwerów nie przypiął żadnego konektora, więc
+        // nie dostaje żadnego — traktowanie braku listy jako `'*'` dawałoby przepustkę na
+        // wszystkie serwery zewnętrzne.
         if (!Array.isArray(servers)) return new Set();
         if (servers.includes('*')) return '*';
         return new Set(servers);

@@ -1,10 +1,9 @@
 /**
- * Streszczanie treści stron tanim modelem (E3.3, DEC L13-5a).
+ * Streszczanie treści stron tanim modelem.
  *
- * PROBLEM: `web_read` ucinał stronę na twardo (`slice(0, 8000)`) — model dostawał
- * przypadkowy początek i nie wiedział, co mu obcięto. Sedno artykułu bywa na końcu.
- *
- * ROZWIĄZANIE: gdy strona jest dłuższa niż limit, oddajemy ją modelowi Badacza
+ * DLACZEGO: twarde cięcie strony (`slice(0, 8000)`, fallback `web_read` opisany niżej)
+ * dawałoby modelowi przypadkowy początek, bez wiedzy co obcięto — a sedno artykułu bywa
+ * na końcu. Zamiast tego, gdy strona jest dłuższa niż limit, oddajemy ją modelowi Badacza
  * (tani slot `researcher`), który zwraca streszczenie + 3-5 DOSŁOWNYCH cytatów.
  * Cytaty są ważne osobno: to gotowy format {tytuł, url, fragment} dla Pamięci v3
  * — agent może zacytować źródło, a nie tylko parafrazę parafrazy.

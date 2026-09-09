@@ -1,5 +1,5 @@
 /**
- * Skills tab registration for the Backstage sidebar (Sprint 10 Z6).
+ * Skills tab registration for the Backstage sidebar.
  *
  * Render lives in `SkillsBackstageTab.js`, lazy-loaded so importing this
  * file (via `modules/skills/index.js`) doesn't pull `obsidian` into the

@@ -27,11 +27,10 @@ import { log } from '../../../core/utils/Logger.js';
 type ChatViewMixinContext = any;
 
 /**
- * AUD-code-review-053: rdzeń ręcznej kompresji kontekstu, dzielony przez guzik 🗜️ „Sumaryzuj chat"
- * (`_renderSlimBar` niżej) i komendę `/compress` (`SlashCommandsRegistry.ts`). Oba wołacze miały
- * DOTĄD wklejoną osobno tę samą gałąź decyzyjną — i gałąź „nic się nie zmieniło" zdążyła się
- * rozjechać na dwa różne teksty i18n dla tego samego stanu (`chat.nothing_to_summarize` vs
- * `chat.streaming.below_threshold`). Kanon: `chat.nothing_to_summarize` (drugi klucz skasowany).
+ * Rdzeń ręcznej kompresji kontekstu, dzielony przez guzik 🗜️ „Sumaryzuj chat" (`_renderSlimBar`
+ * niżej) i komendę `/compress` (`SlashCommandsRegistry.ts`). Oba wołacze MUSZĄ wołać JEDNĄ
+ * wspólną gałąź decyzyjną — dwie osobne kopie tej gałęzi mogłyby się rozjechać na dwa różne
+ * teksty i18n dla gałęzi „nic się nie zmieniło" tego samego stanu. Kanon: `chat.nothing_to_summarize`.
  *
  * Wołacze zachowują WŁASNE opakowanie: guzik dokłada busy-state + własny catch/Notice błędu
  * (to jest UI dymka, nie logika kompresji), komenda slash dokłada `resetInputArea()`. Wzór
@@ -61,8 +60,8 @@ export async function runManualCompression(view: ChatViewMixinContext): Promise<
 // ── Main view render ────────────────────────────────────────────────
 
 export async function renderView(this: ChatViewMixinContext, container = this.container) {
-    // Adopt chat styles (CSSStyleSheet from import). AUD-bledy-037: przez `adoptSheet`,
-    // żeby demontaż pluginu zdjął arkusz zamiast zostawiać go w dokumencie do restartu.
+    // Adopt chat styles (CSSStyleSheet from import) przez `adoptSheet`, żeby demontaż pluginu
+    // zdjął arkusz zamiast zostawiać go w dokumencie do restartu.
     adoptSheet(chat_view_styles);
 
     container.empty();
@@ -75,7 +74,7 @@ export async function renderView(this: ChatViewMixinContext, container = this.co
     this._tabBarContainer = container.createDiv();
     this._renderTabBar(this._tabBarContainer);
 
-    // ── PASEK BIEGÓW SUBÓW ── pod zakładkami, nad wiadomościami (decyzja Kuby 2026-08-15).
+    // ── PASEK BIEGÓW SUBÓW ── pod zakładkami, nad wiadomościami.
     // Pusty = klasa `pkm-substrip--empty`, czyli zero wysokości; czat wygląda jak wcześniej.
     this._subStripContainer = container.createDiv({ cls: 'pkm-substrip pkm-substrip--empty' });
     this._renderSubTaskStrip();
@@ -98,11 +97,11 @@ export async function renderView(this: ChatViewMixinContext, container = this.co
     const bottomPanel = chatMain.createDiv({ cls: 'cs-input-panel cs-root' });
     bottomPanel.style.setProperty('--cs-agent-color-rgb', this._getAgentRgb());
 
-    // E2.9 FAZA B (B4): chip aktywnego artefaktu nad inputem (tytuł + odśwież + odepnij).
+    // Chip aktywnego artefaktu nad inputem (tytuł + odśwież + odepnij).
     this._artifactChipBar = bottomPanel.createDiv({ cls: 'cs-artifact-chip-bar' });
     this._renderArtifactChip();
 
-    // Textarea row — pierwszy z DWÓCH widoków slotu (N4).
+    // Textarea row — pierwszy z DWÓCH widoków slotu.
     const inputRow = bottomPanel.createDiv({ cls: 'cs-input-row' });
     this._inputRow = inputRow;
     this.input_area = inputRow.createEl('textarea', {
@@ -110,11 +109,11 @@ export async function renderView(this: ChatViewMixinContext, container = this.co
         attr: { rows: '1' }
     });
 
-    // E2.9 FAZA D (D2) + N4: live-widok listy `todo` agenta — drugi widok TEGO SAMEGO slotu
-    // (w miejscu textarea, nie nad nią). Przełącza chip `📋 done/total` w dolnym rzędzie guzików.
+    // Live-widok listy `todo` agenta — drugi widok TEGO SAMEGO slotu (w miejscu textarea, nie
+    // nad nią). Przełącza chip `📋 done/total` w dolnym rzędzie guzików.
     this._todoPanelBar = bottomPanel.createDiv({ cls: 'cs-todo-panel-bar' });
 
-    // Z8 (Sprint 05.5): inline trigger popup on `/` and `@`
+    // Inline trigger popup on `/` and `@`
     this._triggerPopup = null;
     this._triggerPos = -1;
     this.input_area.addEventListener('keydown', (e: KeyboardEvent) => this._handleTriggerKeyDown(e));
@@ -136,7 +135,7 @@ export async function renderView(this: ChatViewMixinContext, container = this.co
     const barRight = bar.createDiv({ cls: 'cs-input-bar__right' });
 
     // ── LEFT: Todo, Autonomy, Oczko, Skills, Artifacts, Permissions, Tokens ──
-    // N4: chip-przełącznik widoku slotu (textarea ↔ lista todo). Pierwszy w rzędzie, bo dotyczy
+    // Chip-przełącznik widoku slotu (textarea ↔ lista todo). Pierwszy w rzędzie, bo dotyczy
     // całego paska; pokazuje się TYLKO gdy lista `todo` żyje (widoczność ustawia _renderTodoPanel).
     this._todoToggleBtn = barLeft.createEl('button', {
         cls: 'cs-input-ctrl cs-todo-toggle is-hidden',
@@ -144,7 +143,7 @@ export async function renderView(this: ChatViewMixinContext, container = this.co
     });
     this._todoToggleBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); this._toggleBottomBarMode(); });
 
-    // Autonomy selector (E2.3 D21 / F12) — replaces the old Gadaj/Rób mode button.
+    // Autonomy selector.
     // Autonomy = whether the agent ASKS before acting (per-chat policy), independent
     // of permissions (what the agent MAY do).
     const autoLabel = t(`autonomy.${this.currentAutonomy}`);
@@ -231,13 +230,13 @@ export async function renderView(this: ChatViewMixinContext, container = this.co
     // Event listeners
     this.input_area.addEventListener('input', this.handleInputResize.bind(this));
     this.input_area.addEventListener('keydown', this.handle_input_keydown.bind(this));
-    // K7: guzik Wyślij to jedna z dwóch ścieżek z pola wpisywania — jawny znacznik człowieka.
-    // (Dawne `.bind(this)` podawało jako `opts` MouseEvent, więc proweniencja szła z UI, nie stąd.)
+    // Guzik Wyślij to jedna z dwóch ścieżek z pola wpisywania — jawny znacznik człowieka.
+    // (`.bind(this)` podawałoby jako `opts` MouseEvent, więc proweniencja szłaby z UI, nie stąd.)
     this.send_button.addEventListener('click', () => this.send_message({ meta: HUMAN_MESSAGE_META }));
-    // K5: TO SAMO co wyżej z guzikiem Wyślij — `.bind(this)` podawało jako `agentName`
-    // MouseEvent, więc Stop nie trafiał w kontekst ŻADNEJ tury (mapa jest kluczowana nazwą
-    // agenta). Zostawał tylko ubity XHR wspólnej instancji modelu; tura stojąca w narzędziu
-    // nie widziała przerwania w ogóle. Wołamy bez argumentu = tura aktywnego agenta.
+    // TO SAMO co wyżej z guzikiem Wyślij — `.bind(this)` podawałoby jako `agentName` MouseEvent,
+    // więc Stop nie trafiałby w kontekst ŻADNEJ tury (mapa jest kluczowana nazwą agenta).
+    // Zostawałby tylko ubity XHR wspólnej instancji modelu; tura stojąca w narzędziu nie
+    // widziałaby przerwania w ogóle. Wołamy bez argumentu = tura aktywnego agenta.
     this.stop_button.addEventListener('click', () => this.stop_generation());
 
     // Global listeners
@@ -248,12 +247,12 @@ export async function renderView(this: ChatViewMixinContext, container = this.co
     this.handleBeforeUnloadBound = () => { this.handleSaveSession(); };
     window.addEventListener('beforeunload', this.handleBeforeUnloadBound);
 
-    // N4: widok slotu liczy się dopiero teraz — chip-przełącznik musi już istnieć w DOM.
+    // Widok slotu liczy się dopiero teraz — chip-przełącznik musi już istnieć w DOM.
     this._renderTodoPanel();
 
-    // N3: pasek jest `position:absolute` NAD wiadomościami, więc każdy jego przyrost (chip
-    // artefaktu, dłuższy tekst) zasłaniał treść — sztywne `padding-bottom: 120px` z CSS to była
-    // zgadywanka. Obserwator rezerwuje dokładnie tyle, ile pasek zajmuje; CSS zostaje fallbackiem
+    // Pasek jest `position:absolute` NAD wiadomościami, więc każdy jego przyrost (chip artefaktu,
+    // dłuższy tekst) zasłaniałby treść, gdyby polegać na sztywnym `padding-bottom: 120px` z CSS.
+    // Obserwator rezerwuje dokładnie tyle, ile pasek zajmuje; CSS zostaje fallbackiem
     // (środowiska bez ResizeObserver — m.in. testy node'owe).
     this._bottomPanelObserver?.disconnect();
     this._bottomPanelObserver = null;
@@ -343,8 +342,8 @@ export function _renderSlimBar(this: ChatViewMixinContext) {
         }
     });
 
-    // Row 3: Sumaryzuj chat (E2.9 FAZA D: stary przycisk „Artefakty" + panel usunięty — artefakty
-    // żywe mają własny segment slim bara w renderArtifactButtons/C2, a todo — live-widok nad inputem).
+    // Row 3: Sumaryzuj chat. Artefakty mają własny segment slim bara w renderArtifactButtons,
+    // a todo — live-widok nad inputem.
     const summarizeBtn = actionsGrid.createDiv({ cls: 'cs-skillbar__icon', attr: { 'data-tip': t('chat.summarize') } });
     setSvg(summarizeBtn, UiIcons.layers(16));
     summarizeBtn.addEventListener('click', async () => {
@@ -375,7 +374,7 @@ export function _renderSlimBar(this: ChatViewMixinContext) {
     this.mcpServerButtonsBar = this._slimBar.createDiv({ cls: 'cs-skillbar__section' });
     this.renderMcpServerButtons();
 
-    // E2.9 FAZA C (C2): segment ARTEFAKTY — picker artefaktów agenta + aktywny.
+    // Segment ARTEFAKTY — picker artefaktów agenta + aktywny.
     this.artifactButtonsBar = this._slimBar.createDiv({ cls: 'cs-skillbar__section' });
     this.renderArtifactButtons();
 }
@@ -479,9 +478,8 @@ export function renderMcpServerButtons(this: ChatViewMixinContext) {
 }
 
 /**
- * E2.9 FAZA B (B4): chip aktywnego artefaktu nad inputem. Tytuł + „odśwież stan" (ponowne
- * wstrzyknięcie sparsowanego JSON przez przywołanie) + „odepnij" (czyści aktywny artefakt).
- * Minimum — pełny segment slim bara to faza C.
+ * Chip aktywnego artefaktu nad inputem. Tytuł + „odśwież stan" (ponowne wstrzyknięcie
+ * sparsowanego JSON przez przywołanie) + „odepnij" (czyści aktywny artefakt).
  */
 export function _renderArtifactChip(this: ChatViewMixinContext) {
     const bar = this._artifactChipBar;
@@ -534,14 +532,14 @@ export function _renderArtifactChip(this: ChatViewMixinContext) {
 }
 
 /**
- * N4: pokaż właściwy widok slotu paska dolnego — textarea ('input') albo listę `todo` ('todo').
+ * Pokaż właściwy widok slotu paska dolnego — textarea ('input') albo listę `todo` ('todo').
  * Dolny rząd guzików (wyślij/stop, spinacz, mikrofon, autonomia…) zostaje widoczny w OBU.
  */
 export function _applyBottomBarMode(this: ChatViewMixinContext) {
     const todoMode = this._bottomBarMode === 'todo';
-    // release 2.2.0/W2 (obsidianmd/no-static-styles-assignment — wytyczne katalogu: klasa CSS
-    // zamiast inline `.style.display`): przełącznik widoku slotu jest dwustanowy (nie ciągła
-    // wartość), więc `.is-hidden` w src/styles.css zastępuje bezpośredni zapis stylu.
+    // Wytyczne katalogu wtyczek Obsidiana (obsidianmd/no-static-styles-assignment) wymagają
+    // klasy CSS zamiast inline `.style.display`. Przełącznik widoku slotu jest dwustanowy
+    // (nie ciągła wartość), więc `.is-hidden` w src/styles.css zastępuje bezpośredni zapis stylu.
     if (this._inputRow) this._inputRow.classList.toggle('is-hidden', todoMode);
     if (this._todoPanelBar) this._todoPanelBar.classList.toggle('is-hidden', !todoMode);
     this._todoToggleBtn?.classList.toggle('active', todoMode);
@@ -555,9 +553,9 @@ export function _toggleBottomBarMode(this: ChatViewMixinContext) {
 }
 
 /**
- * E2.9 FAZA D (D2) + N4: live-widok listy `todo` W SLOCIE inputu. Odhaczana lista (read-only dla
- * usera — agent nią steruje przez narzędzie `todo`), aktualizowana po każdym tool-callu przez
- * reactor. Zastąpił `ArtifactProgressModal` (polling 1s). Stan trzymany w `this._activeTodoState`.
+ * Live-widok listy `todo` W SLOCIE inputu. Odhaczana lista (read-only dla usera — agent nią
+ * steruje przez narzędzie `todo`), aktualizowana po każdym tool-callu przez reactor, nie przez
+ * polling. Stan trzymany w `this._activeTodoState`.
  *
  * O tym, KTÓRY widok jest na wierzchu, decyduje pure `resolveBottomBarMode`: pojawienie się listy
  * przeskakuje na 'todo', jej zniknięcie wraca na 'input', a ręczny wybór usera w trakcie życia
@@ -569,8 +567,8 @@ export function _renderTodoPanel(this: ChatViewMixinContext) {
     bar.empty();
 
     const model = buildTodoPanelModel(this._activeTodoState);
-    // Z3: niewysłany szkic blokuje AUTO-przeskok na listę (chowanie wiersza inputu wyglądało
-    // dla usera jak skasowanie tego, co pisał). Ręczne przełączenie chipem działa bez zmian.
+    // Niewysłany szkic blokuje AUTO-przeskok na listę (chowanie wiersza inputu wyglądałoby dla
+    // usera jak skasowanie tego, co pisał). Ręczne przełączenie chipem działa bez zmian.
     const hasDraft = !!(this.input_area?.value || '').trim();
     this._bottomBarMode = resolveBottomBarMode(
         this._prevTodoModel,
@@ -625,8 +623,9 @@ export function _renderSubTaskStrip(this: ChatViewMixinContext) {
         plugin: this.plugin,
         tabKey: _tabKey(tab),
         agentName: tab?.agentName || this.plugin?.agentManager?.getActiveAgent?.()?.name || '',
-        // Ta sama krynica, z której F2 bierze origin.sessionPath przy zleceniu — dzięki temu
-        // porównanie „ta sama sesja?" jest symetryczne (incydent: chipy przeżywały archiwizację).
+        // Ta sama krynica, z której adres zwrotny delegacji bierze origin.sessionPath przy
+        // zleceniu — dzięki temu porównanie „ta sama sesja?" jest symetryczne (inaczej chipy
+        // przeżywałyby archiwizację).
         sessionPath: this.plugin?.agentManager?.getActiveMemory?.()?.activeSessionPath || '',
         expandedId: this._subStripExpandedId || null,
         onToggle: (id: string | null) => {
@@ -713,7 +712,7 @@ export function _showMcpToolPicker(this: ChatViewMixinContext, server: string, t
     }
 }
 
-// ── Artifacts segment (E2.9 FAZA C / C2) ────────────────────────────
+// ── Artifacts segment ────────────────────────────
 
 /**
  * Render the ARTEFAKTY slim-bar segment (mirror of `renderMcpServerButtons`). One icon opening a
@@ -1018,10 +1017,10 @@ export function hideTypingIndicator(this: ChatViewMixinContext) {
 
 /**
  * @param smooth - płynne przewinięcie (jak dotąd)
- * @param opts - AUD-wydajnosc-072/014: `drawConnectors: false` = TRYB „TYLKO PRZEWIŃ".
- *   Malowanie strumienia (`_paintStreamFrame`) korzysta z niego, bo rosnący tekst ostatniej
- *   wiadomości nie przesuwa ani kryształu, ani wierszy akcji — a `_drawConnectorLines` skanuje
- *   CAŁĄ listę wiadomości i przeplata odczyty `getBoundingClientRect` z wstawianiem węzłów.
+ * @param opts - `drawConnectors: false` = TRYB „TYLKO PRZEWIŃ". Malowanie strumienia
+ *   (`_paintStreamFrame`) korzysta z niego, bo rosnący tekst ostatniej wiadomości nie przesuwa
+ *   ani kryształu, ani wierszy akcji — a `_drawConnectorLines` skanuje CAŁĄ listę wiadomości
+ *   i przeplata odczyty `getBoundingClientRect` z wstawianiem węzłów.
  */
 export function scrollToBottom(this: ChatViewMixinContext, smooth = true, opts: { drawConnectors?: boolean } = {}) {
     const container = this.messages_container;
@@ -1045,7 +1044,7 @@ export function scrollToBottom(this: ChatViewMixinContext, smooth = true, opts: 
 }
 
 /**
- * AUD-wydajnosc-072/014: JEDNO przerysowanie łączników na klatkę, nie na wywołanie.
+ * JEDNO przerysowanie łączników na klatkę, nie na wywołanie.
  *
  * `_drawConnectorLines` usuwa i wstawia węzły przeplatając to z odczytami geometrii (layout
  * thrashing), a jego koszt rośnie z liczbą wiadomości w oknie. Wołaczy jest kilku i potrafią
@@ -1139,7 +1138,7 @@ export function handle_input_keydown(this: ChatViewMixinContext, e: KeyboardEven
     // Send on Enter (without Shift)
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        // K7: druga (i ostatnia) ścieżka z pola wpisywania — jawny znacznik człowieka.
+        // Druga (i ostatnia) ścieżka z pola wpisywania — jawny znacznik człowieka.
         this.send_message({ meta: HUMAN_MESSAGE_META });
         return;
     }
@@ -1192,7 +1191,7 @@ export function updateTokenCounter(this: ChatViewMixinContext) {
     const threshold = this.env?.settings?.pkmAssistant?.summarizationThreshold || 0.9;
     const thresholdPercent = Math.round(threshold * 100);
 
-    // Okno kontekstu to zawsze estymata (RollingWindow) — tylda + tooltip (E1.7 P3).
+    // Okno kontekstu to zawsze estymata (RollingWindow) — tylda + tooltip mówią to wprost.
     el.textContent = `~${percent}%`;
     el.title = t('chat.token_viewer.approx_tooltip');
 
@@ -1217,7 +1216,7 @@ export function _updateTokenPanel(this: ChatViewMixinContext) {
     this._tokenViewer?.update();
 }
 
-// L07-6: _updateContextCircle usunięty (martwy stary donut). `.token-wrapper` nigdy nie
+// _updateContextCircle usunięty (martwy stary donut). `.token-wrapper` nigdy nie
 // powstawał w DOM, więc funkcja zawsze wchodziła w early-return. Aktywny wskaźnik kontekstu
 // to TokenViewerWidget (donut w slim barze). CSS .token-wrapper/.pkm-context-circle/.pkm-donut* też out.
 
@@ -1239,9 +1238,9 @@ export function _buildTokenRow(this: ChatViewMixinContext, parent: ChatViewMixin
         // Diamond crystal for main
         setSvg(icon, '<svg viewBox="0 0 10 10" width="8" height="8"><polygon points="5,0 10,5 5,10 0,5" fill="currentColor"/></svg>');
     } else {
-        // 'minion' — jedyna pozostała rola sub-agentów w slim barze. Gałąź 'master' (ikona
-        // korony) skasowana w fabryce kasacji S1 (2026-09-02, AUD-dead-code-119) — od czystki
-        // E3.6 nic już nie woła `_buildTokenRow` z rolą inną niż 'main'/'minion'.
+        // 'minion' — jedyna pozostała rola sub-agentów w slim barze. Nic w kodzie nie woła
+        // `_buildTokenRow` z rolą inną niż 'main'/'minion', więc gałęzi 'master' (ikona korony)
+        // tu nie ma.
         setSvg(icon, UiIcons.robot(8));
     }
     const valEl = row.createSpan({ cls: 'cs-skillbar__token-val' });
@@ -1270,12 +1269,11 @@ export function _updateSlimBarTokens(this: ChatViewMixinContext) {
     };
 
     const main = s.byRole?.main || { input: 0, output: 0 };
-    // D6c (2026-07-30, wtopa #4 z S30): runtime od E2.3 raportuje role 'researcher' —
-    // wiersz subów czytał martwe byRole.minion i wiecznie pokazywał 0 (fallback dla starych stanów).
+    // Runtime raportuje role 'researcher' — bez fallbacku na `byRole.minion` wiersz subów
+    // czytałby martwy klucz i wiecznie pokazywałby 0.
     const minion = s.byRole?.researcher || s.byRole?.minion || { input: 0, output: 0 };
-    // Wiersz 'master' skasowany w fabryce kasacji S1 (2026-09-02, AUD-dead-code-119) — żadna
-    // konfiguracja produkowana przez plugin nie zasilała `byRole.master`, więc wiersz był
-    // trwale ukryty (`is-hidden` przy totalu 0).
+    // Nie ma wiersza 'master': żadna konfiguracja produkowana przez plugin nie zasila
+    // `byRole.master`, więc taki wiersz byłby trwale ukryty (`is-hidden` przy totalu 0).
 
     update(this._slimBarTokenMain, main);
     update(this._slimBarTokenMinion, minion);
@@ -1292,10 +1290,10 @@ export function updatePermissionsBadge(this: ChatViewMixinContext) {
     const agent = this.plugin.agentManager?.getActiveAgent();
     if (!agent) return;
 
-    // E2.3 (D21): the rocket/yolo branch is gone — YOLO is now a per-chat autonomy mode
-    // (its own button/popover), not a permission.
-    // E2.8 C1: pola-widma (edit_notes/mcp) skasowane — badge liczy z jednej osi (disabled_tools):
-    // tarcza gdy agent może modyfikować vault (narzędzie `write` włączone), kłódka gdy tylko czyta.
+    // Nie ma gałęzi rocket/yolo tutaj — YOLO to per-chat tryb autonomii (własny
+    // button/popover), nie uprawnienie. Badge liczy z jednej osi (disabled_tools), nie z pól
+    // edit_notes/mcp: tarcza gdy agent może modyfikować vault (narzędzie `write` włączone),
+    // kłódka gdy tylko czyta.
     const canModify = !(Array.isArray(agent.disabled_tools) && agent.disabled_tools.includes('write'));
     let iconFn;
     if (canModify) {
@@ -1308,7 +1306,7 @@ export function updatePermissionsBadge(this: ChatViewMixinContext) {
     if (this._permBtn) setSvg(this._permBtn, iconFn(12));
 }
 
-// ── Z8 inline trigger popup (Sprint 05.5) ───────────────────────────
+// ── Inline trigger popup ───────────────────────────
 
 export function _handleTriggerKeyDown(this: ChatViewMixinContext, e: KeyboardEvent) {
     // If popup open, give it first chance to consume key

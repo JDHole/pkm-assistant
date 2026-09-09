@@ -1,20 +1,18 @@
 /**
- * Pure list-building logic for the chat "tools" popover (AUD-dead-code-205).
+ * Pure list-building logic for the chat "tools" popover.
  *
- * `_toggleToolsPopover` (chat_popovers.ts) used to build the popover list from
- * `Object.keys(TOOL_INFO)` — a map of icons/labels kept for rendering OLD chat history
- * (it deliberately carries dead names like `minion_task`, `connect_to_server`: E2.4/S28/E3.1
- * killed the tools, but old transcripts still reference them by name and need a label).
- * Using that map as the SOURCE of "what can I call right now" meant the popover offered
- * six tool names the registry doesn't know, and hid six real ones (`todo`, `artifact_*`,
+ * `TOOL_INFO` (chat_popovers.ts, consulted by `_toggleToolsPopover`) is a map of icons/labels
+ * kept for rendering OLD chat history (it deliberately carries dead names like `minion_task`,
+ * `connect_to_server` — those tools are gone, but old transcripts still reference them by name
+ * and need a label). Building the popover list from `Object.keys(TOOL_INFO)` would offer tool
+ * names the registry doesn't know, and hide real ones (`todo`, `artifact_*`,
  * `add_text_to_image`) that simply never got a TOOL_INFO entry.
  *
  * `buildToolPopoverEntries` takes the list of names straight from `ToolRegistry` (the LIVE
- * registry — `getAllToolNames()`, in registration order), filters `disabled_tools` the same
- * way `_toggleToolsPopover` always has (a plain Set), and only consults `toolInfo` for
- * icon/label. A registry name with no `toolInfo` entry (new built-in without a TOOL_INFO
- * entry yet, or an external MCP tool) still gets a popover row — with a fallback label
- * (its own name) and no icon (caller paints a default one).
+ * registry — `getAllToolNames()`, in registration order), filters `disabled_tools` (a plain
+ * Set), and only consults `toolInfo` for icon/label. A registry name with no `toolInfo` entry
+ * (new built-in without a TOOL_INFO entry yet, or an external MCP tool) still gets a popover row
+ * — with a fallback label (its own name) and no icon (caller paints a default one).
  */
 
 /** Shape `buildToolPopoverEntries` needs from a TOOL_INFO-style catalog entry. */

@@ -17,10 +17,10 @@ type Runtime = any;
 /**
  * Atrapa AgentManagera z dwoma agentami: A (właściciel tury) i B (przełączony pod spodem).
  *
- * @param opts.pendingRescue - D8 (2026-08-27): opcjonalna atrapa `writePendingRescue` na pamięci.
+ * @param opts.pendingRescue - opcjonalna atrapa `writePendingRescue` na pamięci.
  *   `'ok'` = poczekalnia działa (kandydat ląduje w `pending`, NIE w `written`). `'throw'` = symuluje
  *   padniętą poczekalnię (fail-soft ma wtedy spaść na `writeBrainNote`). Bez opcji (stare testy)
- *   `writePendingRescue` W OGÓLE nie istnieje na atrapie — dokładnie jak przed D8.
+ *   `writePendingRescue` W OGÓLE nie istnieje na atrapie.
  */
 function makeManager(opts: { pendingRescue?: 'ok' | 'throw' } = {}) {
     const brains: Record<string, string> = { A: 'BRAIN-A', B: 'BRAIN-B' };
@@ -66,8 +66,8 @@ function makeManager(opts: { pendingRescue?: 'ok' | 'throw' } = {}) {
 
 /**
  * Atrapa ChatView — tylko to, czego dotykają providery okna.
- * @param opts.chatTabs - AUD-code-review-013: opcjonalny model zakładek dla `isOwnerTabActive`.
- *   Domyślnie brak (jak przed 013) — `isOwnerTabActive` wtedy fail-open (maluje, jak dawniej).
+ * @param opts.chatTabs - opcjonalny model zakładek dla `isOwnerTabActive`.
+ *   Domyślnie brak — `isOwnerTabActive` wtedy fail-open (maluje, jak dawniej).
  */
 function makeView(manager: Runtime, opts: { chatTabs?: Runtime[] } = {}) {
     const seen: Runtime = { minionAgents: [], emergencyOwners: [], savedNotes: [], tokenPanelUpdates: 0 };
@@ -95,9 +95,9 @@ test('resolveOwnerAgentName: jawna nazwa wygrywa z globalnym aktywnym', t => {
     t.is(resolveOwnerAgentName(manager, null), 'B');
 });
 
-// ── K4 rdzeń: brak zjazdu na globalne lustro ──
+// ── Rdzeń: brak zjazdu na globalne lustro ──
 
-test('resolveOwnerMemory: znana nazwa NIE spada na getActiveMemory (AUD-security-064/065)', t => {
+test('resolveOwnerMemory: znana nazwa NIE spada na getActiveMemory', t => {
     const { manager, state } = makeManager();
     state.active = 'B';
     t.is(resolveOwnerMemory(manager, 'A')?.agentName, 'A');
@@ -106,7 +106,7 @@ test('resolveOwnerMemory: znana nazwa NIE spada na getActiveMemory (AUD-security
     t.is(resolveOwnerMemory(manager, null)?.agentName, 'B', 'brak nazwy = stare zachowanie');
 });
 
-test('resolveOwnerAgent: znana nazwa NIE spada na getActiveAgent (AUD-security-066)', t => {
+test('resolveOwnerAgent: znana nazwa NIE spada na getActiveAgent', t => {
     const { manager, state } = makeManager();
     state.active = 'B';
     t.is(resolveOwnerAgent(manager, 'A')?.name, 'A');
@@ -164,11 +164,11 @@ test('wyłącznik memory_rescue czytany z agenta-WŁAŚCICIELA, nie z aktywnego'
     t.deepEqual(written, []);
 });
 
-// ── AUD-code-review-013: callbacki okna malują TYLKO do zakładki WŁAŚCICIELA ────────────────
+// ── Callbacki okna malują TYLKO do zakładki WŁAŚCICIELA ────────────────
 //
-// `messages_container` jest JEDEN na cały widok. K4 mówi że kompresja end-of-turn LECI
+// `messages_container` jest JEDEN na cały widok. Kompresja end-of-turn LECI
 // bezwarunkowo także dla zakładki w tle — to zasada o DANYCH (transkrypt, sesja), nie o DOM-ie.
-// Bez tej bramki blok „skompresowano"/nota ratunku pamięci agenta A malowały się fizycznie
+// Bez tej bramki blok „skompresowano"/nota ratunku pamięci agenta A malowałyby się fizycznie
 // w rozmowie agenta B, którą user akurat czyta.
 
 test('isOwnerTabActive: true gdy zakładka właściciela jest na wierzchu, false gdy inna', t => {
@@ -182,7 +182,7 @@ test('isOwnerTabActive: fail-open (true) gdy widok nie zna modelu zakładek', t 
     t.true(isOwnerTabActive({ chatTabs: [] }, 'A'));
 });
 
-test('onMemoryCandidates NIE maluje noty do cudzej zakładki (AUD-code-review-013)', async t => {
+test('onMemoryCandidates NIE maluje noty do cudzej zakładki', async t => {
     const { manager } = makeManager();
     const { view, seen } = makeView(manager, {
         chatTabs: [
@@ -211,7 +211,7 @@ test('onMemoryCandidates maluje notę, gdy zakładka właściciela jest aktywna'
 
 // `_createRollingWindow` (chat_session.ts) importuje `obsidian` — strażnik PO ŹRÓDLE, wzór
 // `stopSemantics.test.ts`.
-test('chat_session._createRollingWindow gate’uje onSummarized/onToolsTrimmed przez isOwnerTabActive (AUD-code-review-013)', t => {
+test('chat_session._createRollingWindow gate’uje onSummarized/onToolsTrimmed przez isOwnerTabActive', t => {
     const src = readFileSync(fileURLToPath(new URL('./chat_session.ts', import.meta.url)), 'utf8');
     const head = /onSummarized:[\s\S]*?\.\.\.buildOwnerWindowOptions/.exec(src);
     t.true(!!head, 'nie znalazłem bloku onSummarized/onToolsTrimmed w _createRollingWindow');
@@ -228,9 +228,9 @@ test('brak pamięci dla nazwanego właściciela = zero zapisów (fail-closed)', 
     t.deepEqual(written, [], 'kandydat NIE MOŻE wylądować w katalogu aktywnego agenta');
 });
 
-// ── D8 (2026-08-27, werdykt 27.08): poczekalnia zamiast zapisu wprost do brain/ ──
+// ── Poczekalnia zamiast zapisu wprost do brain/ ──
 
-test('D8: kandydat idzie do poczekalni (writePendingRescue), NIE wprost do writeBrainNote', async t => {
+test('kandydat idzie do poczekalni (writePendingRescue), NIE wprost do writeBrainNote', async t => {
     const { manager, written, pending, rebuilt } = makeManager({ pendingRescue: 'ok' });
 
     const saved = await saveMemoryCandidatesFor(manager, 'A', [
@@ -243,16 +243,16 @@ test('D8: kandydat idzie do poczekalni (writePendingRescue), NIE wprost do write
     t.deepEqual(rebuilt, ['A'], 'indeks nadal odświeżany (rebuild jest tani no-opem, gdy brain/ się nie zmieniło)');
 });
 
-test('D8: fail-soft — padnięta poczekalnia wraca do dawnego zapisu wprost do brain/', async t => {
+test('fail-soft — padnięta poczekalnia wraca do dawnego zapisu wprost do brain/', async t => {
     const { manager, written } = makeManager({ pendingRescue: 'throw' });
 
     const saved = await saveMemoryCandidatesFor(manager, 'A', [{ name: 'x', type: 'user', content: 'y' }]);
 
-    t.is(saved, 1, 'lepszy niezreview\'owany zapis niż utrata kandydata (werdykt 27.08)');
+    t.is(saved, 1, 'lepszy niezreview\'owany zapis niż utrata kandydata');
     t.deepEqual(written.map(w => w.agent), ['A'], 'writeBrainNote wołane jako fallback po padzie poczekalni');
 });
 
-test('D8: wiele kandydatów — jeden pada w poczekalni, reszta idzie normalnie (błąd izolowany per kandydat)', async t => {
+test('wiele kandydatów — jeden pada w poczekalni, reszta idzie normalnie (błąd izolowany per kandydat)', async t => {
     const { manager, written, pending } = makeManager({ pendingRescue: 'ok' });
     // Nadpisujemy poczekalnię A: DRUGI kandydat pada, pierwszy i trzeci przechodzą normalnie.
     manager.getAgentMemory('A')!.writePendingRescue = async (candidate: Runtime) => {
@@ -272,10 +272,10 @@ test('D8: wiele kandydatów — jeden pada w poczekalni, reszta idzie normalnie 
     t.deepEqual(written.map(w => w.candidate.name), ['padnie'], 'tylko padnięty kandydat idzie fail-softem wprost do brain/');
 });
 
-test('D8 nit C1(a) (weryfikacja opusa): atrapa BEZ poczekalni — padnięty writeBrainNote NIE jest ponawiany drugi raz', async t => {
-    // Przed naprawą: gałąź "atrapa bez poczekalni" wołała writeBrainNote WEWNĄTRZ try, a catch
-    // wołał je ZNOWU jako "fallback" — czyli dwa identyczne wywołania z tymi samymi argumentami
-    // po jednym padzie. To marnowanie roboty (podwójny I/O) bez żadnej korzyści.
+test('atrapa BEZ poczekalni — padnięty writeBrainNote NIE jest ponawiany drugi raz', async t => {
+    // Guard: gałąź "atrapa bez poczekalni" nie może wołać writeBrainNote WEWNĄTRZ try, a potem
+    // ZNOWU w catchu jako "fallback" — dwa identyczne wywołania z tymi samymi argumentami po
+    // jednym padzie to marnowanie roboty (podwójny I/O) bez żadnej korzyści.
     const { manager } = makeManager(); // bez { pendingRescue }, więc mem.writePendingRescue === undefined
     let calls = 0;
     manager.getAgentMemory('A')!.writeBrainNote = async () => {
@@ -289,7 +289,7 @@ test('D8 nit C1(a) (weryfikacja opusa): atrapa BEZ poczekalni — padnięty writ
     t.is(calls, 1, 'writeBrainNote wołane DOKŁADNIE raz — bez sensownego retry tego samego wywołania');
 });
 
-// ── K18 (AUD-security-112): właściciel TURY zamrożony przed awaitami przygotowania ──
+// ── Właściciel TURY zamrożony przed awaitami przygotowania ──
 
 /** Atrapa ChatView z dwiema zakładkami — odgrywa `_switchTab` w trakcie budowy promptu. */
 function makeTabbedView(manager: Runtime, bundle: Runtime) {
@@ -408,7 +408,7 @@ test('po zamrożeniu send_message nie czyta już globalnych luster widoku', t =>
     const from = src.indexOf('freezeTurnOwner(this)');
     t.true(from > 0, 'brak zamrożenia właściciela w send_message');
     const body = stripComments(src.slice(from, src.indexOf('export function handle_chunk')));
-    t.false(/getActiveAgent\(/.test(body), 'getActiveAgent() po zamrożeniu = powrót AUD-security-112');
+    t.false(/getActiveAgent\(/.test(body), 'getActiveAgent() po zamrożeniu = odczyt globalnego lustra zamiast zamrożonego właściciela');
     t.false(/this\.rollingWindow/.test(body), 'this.rollingWindow po zamrożeniu = okno cudzej zakładki');
     t.false(/getActiveMemory/.test(body), 'getActiveMemory() po zamrożeniu = sesja cudzego agenta');
 });

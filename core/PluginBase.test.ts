@@ -1,11 +1,10 @@
 /**
- * `PluginBase` — zamyka luki F-14/F-15 (wersjonowanie usera i `plugin.settings` nie miały
- * ani jednego testu, a od nich zależy, czy user dostanie powitanie „nowy użytkownik"
- * i modal „co nowego").
+ * `PluginBase` - testy pokrywają wersjonowanie usera i `plugin.settings` (od nich zależy,
+ * czy user dostanie powitanie „nowy użytkownik" i modal „co nowego").
  *
- * ⚠️ OGRANICZENIE ŚRODOWISKA (do rozstrzygnięcia w F7): `core/PluginBase.ts` dziedziczy po
- * `Plugin` Obsidiana, a pakiet `obsidian` w `node_modules` to SAME TYPY — nie ma runtime'u.
- * AVA nie ma dziś atrapy `obsidian`, więc import klasy jest zrobiony DYNAMICZNIE, w środku
+ * ⚠️ OGRANICZENIE ŚRODOWISKA: `core/PluginBase.ts` dziedziczy po
+ * `Plugin` Obsidiana, a pakiet `obsidian` w `node_modules` to SAME TYPY - nie ma runtime'u.
+ * AVA nie ma atrapy `obsidian`, więc import klasy jest zrobiony DYNAMICZNIE, w środku
  * każdego testu: dzięki temu brak atrapy jest czerwienią JEDNEGO testu z czytelnym powodem,
  * a nie wywrotką całego pliku. Gdy atrapa się pojawi (jest w `test-support/obsidian.ts`, wpinana
  * preloadem AVA), testy zaczną trafiać w rzuty stubów bez żadnej zmiany w treści asercji.
@@ -58,19 +57,16 @@ async function makePlugin(spy: HostSpy, manifestVersion = '2.2.0', gitignore?: {
     return plugin;
 }
 
-// ── C6.1 ─────────────────────────────────────────────────────────────────────
 test('isNewUser: brak data.json → true', async t => {
     const plugin = await makePlugin({ data: null, zapisy: [] });
     t.is(await plugin.isNewUser(), true);
 });
 
-// ── C6.2 ─────────────────────────────────────────────────────────────────────
 test('isNewUser: data.json z installed_at → false', async t => {
     const plugin = await makePlugin({ data: { installed_at: 1_700_000_000_000 }, zapisy: [] });
     t.is(await plugin.isNewUser(), false);
 });
 
-// ── C6.3 ─────────────────────────────────────────────────────────────────────
 test('isNewPluginVersion: last_version starsze → true, równe → false', async t => {
     const starsze = await makePlugin({ data: { last_version: '2.1.0' }, zapisy: [] });
     t.is(await starsze.isNewPluginVersion('2.2.0'), true);
@@ -82,7 +78,6 @@ test('isNewPluginVersion: last_version starsze → true, równe → false', asyn
     t.is(await nowsze.isNewPluginVersion('2.2.0'), false, 'cofnięcie wersji nie jest „nową wersją"');
 });
 
-// ── C6.4 (BR-1) ──────────────────────────────────────────────────────────────
 test('setLastKnownVersion pisze last_version, NIE rusza installed_at', async t => {
     const spy: HostSpy = { data: { installed_at: 1_700_000_000_000, last_version: '2.1.0' }, zapisy: [] };
     const plugin = await makePlugin(spy);
@@ -95,7 +90,7 @@ test('setLastKnownVersion pisze last_version, NIE rusza installed_at', async t =
         'installed_at został nadpisany — user dostałby powitanie „nowy użytkownik" po każdej aktualizacji');
 });
 
-// ── C6.5 (BR-1/Y-4 — dziś zero pokrycia) ─────────────────────────────────────
+// ── dziś zero pokrycia ─────────────────────────────────────────────────
 test('fixture harnessu (installed_at + last_version 2.1.0) → NIE nowy user I NIE nowa wersja dla 2.1.0', async t => {
     // Dosłownie ten obiekt z fixture harnessu (`vault-fixture/.obsidian/plugins/pkm-assistant/data.json`
     // w https://github.com/JDHole/pkm-assistant-harness).
@@ -106,7 +101,6 @@ test('fixture harnessu (installed_at + last_version 2.1.0) → NIE nowy user I N
     t.is(await plugin.isNewPluginVersion('2.1.0'), false, 'harness otwierałby modal „co nowego" w każdym scenariuszu');
 });
 
-// ── C6.6 (PL-08, luka F-15) ──────────────────────────────────────────────────
 test('plugin.settings NIGDY nie zwraca undefined', async t => {
     const plugin = await makePlugin({ data: null, zapisy: [] });
 
@@ -117,7 +111,6 @@ test('plugin.settings NIGDY nie zwraca undefined', async t => {
     t.is(plugin.settings, worek);
 });
 
-// ── C6.7 ─────────────────────────────────────────────────────────────────────
 test('onReady odpala natychmiast, gdy już gotowe', async t => {
     const plugin = await makePlugin({ data: null, zapisy: [] });
     plugin._ready = true;
@@ -128,7 +121,6 @@ test('onReady odpala natychmiast, gdy już gotowe', async t => {
     t.true(odpalone, 'callback po `_ready` został zakolejkowany zamiast odpalić od razu');
 });
 
-// ── C6.8 ─────────────────────────────────────────────────────────────────────
 test('błąd w jednym callbacku onReady nie przerywa pętli', async t => {
     const plugin = await makePlugin({ data: null, zapisy: [] });
     plugin._ready = true;
@@ -142,7 +134,6 @@ test('błąd w jednym callbacku onReady nie przerywa pętli', async t => {
     t.deepEqual(kolejnosc, ['pierwszy', 'drugi'], 'wywrotka jednego konsumenta zabrała pozostałych');
 });
 
-// ── C6.9 ─────────────────────────────────────────────────────────────────────
 test('waitForReady rozwiązuje się dokładnie raz', async t => {
     const plugin = await makePlugin({ data: null, zapisy: [] });
     plugin._ready = true;
@@ -155,7 +146,6 @@ test('waitForReady rozwiązuje się dokładnie raz', async t => {
     t.is(ile, 1);
 });
 
-// ── C6.10 (PL-09) ────────────────────────────────────────────────────────────
 test('addToGitignore: no-op bez pliku, dopisuje TYLKO brakujące, idempotentne', async t => {
     const brak = { content: null as string | null, appended: [] as string[] };
     const bezPliku = await makePlugin({ data: null, zapisy: [] }, '2.2.0', brak);
@@ -173,7 +163,7 @@ test('addToGitignore: no-op bez pliku, dopisuje TYLKO brakujące, idempotentne',
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// F10 — bramka mutacyjna. Poniższe testy przypinają zachowania, które przeżywały
+// Bramka mutacyjna. Poniższe testy przypinają zachowania, które przeżywały
 // podmianę operatorów w `core/PluginBase.ts`: kształt bazowych getterów, bramkę
 // „nowy user / nowa wersja", flagę gotowości, ubieranie powiadomień w skórę,
 // bramkę kolorów, dopisywanie do `.gitignore`, otwieranie czatu i restart.
@@ -274,14 +264,12 @@ function makeGitignoreAdapter(content: string | null, options: { withAppend?: bo
     return { adapter, appended, written };
 }
 
-// ── F10.1 (PL-03) ────────────────────────────────────────────────────────────
 test('commands: baza oddaje PUSTY OBIEKT, nie undefined (podklasa rozlewa `...super.commands`)', async t => {
     const plugin = await makeBarePlugin();
     t.deepEqual(plugin.commands, {},
         'baza musi oddać worek — podklasa robi `{ ...super.commands, ... }` i na undefined straciłaby czytelny kontrakt');
 });
 
-// ── F10.2 (PL-05) ────────────────────────────────────────────────────────────
 test('isNewUser: installed_at === 0 NIE jest znacznikiem instalacji', async t => {
     const spy: HostSpy = { data: { installed_at: 0 }, zapisy: [] };
     const plugin = await makePlugin(spy);
@@ -291,7 +279,6 @@ test('isNewUser: installed_at === 0 NIE jest znacznikiem instalacji', async t =>
     t.true((spy.zapisy[0].installed_at ?? 0) > 0);
 });
 
-// ── F10.3 (PL-06) ────────────────────────────────────────────────────────────
 test('isNewPluginVersion: brak last_version → true (pierwsza instalacja widzi notatki wydania)', async t => {
     const plugin = await makePlugin({ data: { installed_at: 1_700_000_000_000 }, zapisy: [] });
     t.is(await plugin.isNewPluginVersion('2.2.0'), true);
@@ -300,7 +287,6 @@ test('isNewPluginVersion: brak last_version → true (pierwsza instalacja widzi 
     t.is(await pusty.isNewPluginVersion('2.2.0'), true, 'biały znak to brak wersji, nie wersja');
 });
 
-// ── F10.4 (E-25) ─────────────────────────────────────────────────────────────
 test('notifyReady podnosi flagę: konsument zapisany PO nim odpala natychmiast', async t => {
     const plugin = await makeBarePlugin();
     const kolejnosc: string[] = [];
@@ -319,7 +305,6 @@ test('notifyReady podnosi flagę: konsument zapisany PO nim odpala natychmiast',
     t.pass('waitForReady po gotowości musi się rozwiązać od razu');
 });
 
-// ── F10.5 (N-05/C-1) ─────────────────────────────────────────────────────────
 test('showCrystalNotice: oddaje uchwyt centrum i ubiera kontener w skórę pluginu', async t => {
     const { host, hostClasses } = makeNoticeHost();
     const handle = { hide() {}, containerEl: host } as unknown as NoticeHandle;
@@ -335,7 +320,6 @@ test('showCrystalNotice: oddaje uchwyt centrum i ubiera kontener w skórę plugi
     t.deepEqual(hostClasses, ['cs-notice'], 'kontener nie dostał klasy skina — powiadomienie zostało w wyglądzie natywnym');
 });
 
-// ── F10.6 (N-05) ─────────────────────────────────────────────────────────────
 test('showCrystalNotice: wariant inny niż „info" maluje ciało, „info" zostaje gołe', async t => {
     const zly = makeNoticeHost();
     const handleZly = { hide() {}, containerEl: zly.host } as unknown as NoticeHandle;
@@ -351,7 +335,6 @@ test('showCrystalNotice: wariant inny niż „info" maluje ciało, „info" zost
     t.deepEqual(info.bodyClasses, [], 'domyślny wariant „info" nie dokłada klasy wariantu');
 });
 
-// ── F10.7 (D.5 — bramka kolorów) ─────────────────────────────────────────────
 test('showCrystalNotice: kolor agenta o kształcie koloru wchodzi, śmieć NIE wchodzi', async t => {
     const dobry = makeNoticeHost();
     const handleDobry = { hide() {}, containerEl: dobry.host } as unknown as NoticeHandle;
@@ -367,7 +350,6 @@ test('showCrystalNotice: kolor agenta o kształcie koloru wchodzi, śmieć NIE w
         'wartość spoza kształtu koloru trafiła do arkusza stylów — bramka `accent && COLOR_SHAPE` przestała bramkować');
 });
 
-// ── F10.8 (C-2) ──────────────────────────────────────────────────────────────
 test.serial('applyUserColor: kolor z argumentu trafia do zmiennej CSS (hex z zerem też jest kolorem)', async t => {
     const spy = makeStyleSpy();
     const plugin = await makeBarePlugin();
@@ -378,7 +360,6 @@ test.serial('applyUserColor: kolor z argumentu trafia do zmiennej CSS (hex z zer
     t.deepEqual(spy.removed, []);
 });
 
-// ── F10.9 (C-2) ──────────────────────────────────────────────────────────────
 test.serial('applyUserColor: bez argumentu bierze kolor z ustawień', async t => {
     const spy = makeStyleSpy();
     const plugin = await makeBarePlugin({ env: { settings: { pkmAssistant: { userColor: '#102030' } } } });
@@ -388,7 +369,6 @@ test.serial('applyUserColor: bez argumentu bierze kolor z ustawień', async t =>
     t.deepEqual(spy.set, [['--cs-user-color', '#102030']]);
 });
 
-// ── F10.10 (C-2) ─────────────────────────────────────────────────────────────
 test.serial('applyUserColor: pusty kolor ZDEJMUJE zmienną, śmieć nie rusza arkusza', async t => {
     const pusty = makeStyleSpy();
     const bezKoloru = await makeBarePlugin();
@@ -403,7 +383,6 @@ test.serial('applyUserColor: pusty kolor ZDEJMUJE zmienną, śmieć nie rusza ar
     t.deepEqual(smiec.removed, [], 'odrzucony kolor nie ma prawa zdjąć obowiązującego');
 });
 
-// ── F10.11 (PL-09) ───────────────────────────────────────────────────────────
 test('addToGitignore: treść kończąca się nową linią nie dostaje pustej linii wiodącej', async t => {
     const zNowaLinia = makeGitignoreAdapter('node_modules\n');
     const a = await makeBarePlugin({ app: { vault: { adapter: zNowaLinia.adapter } } });
@@ -417,7 +396,6 @@ test('addToGitignore: treść kończąca się nową linią nie dostaje pustej li
     t.deepEqual(pusty.appended, ['.pkm-assistant/\n'], 'pusty plik nie potrzebuje linii wiodącej');
 });
 
-// ── F10.12 (PL-09) ───────────────────────────────────────────────────────────
 test('addToGitignore: adapter bez `append` dostaje SKLEJONĄ treść przez `write`', async t => {
     const bezAppend = makeGitignoreAdapter('node_modules', { withAppend: false });
     const plugin = await makeBarePlugin({ app: { vault: { adapter: bezAppend.adapter } } });
@@ -428,7 +406,6 @@ test('addToGitignore: adapter bez `append` dostaje SKLEJONĄ treść przez `writ
         'ścieżka bez `append` musi dopisać do ISTNIEJĄCEJ treści, nie zgubić jej');
 });
 
-// ── F10.13 (C-3) ─────────────────────────────────────────────────────────────
 test('openChatView: bez otwartego czatu bierze PRAWY liść i ustawia go aktywnym', async t => {
     const pytaniaOTyp: string[] = [];
     const splity: boolean[] = [];
@@ -455,7 +432,6 @@ test('openChatView: bez otwartego czatu bierze PRAWY liść i ustawia go aktywny
     t.deepEqual(przelaczenia, ['toggle'], 'zwinięty prawy panel nie został rozwinięty');
 });
 
-// ── F10.14 (C-3) ─────────────────────────────────────────────────────────────
 test('openChatView: istniejący czat jest UJAWNIANY, a nie otwierany drugi raz', async t => {
     const lisc = { id: 'czat' };
     const ujawnione: unknown[] = [];

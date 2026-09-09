@@ -1,8 +1,8 @@
 /**
- * K1 (AUD-security-014 / 015 / 018) — RÓWNOWAŻNOŚĆ ZAPISU ŚCIEŻKI.
+ * RÓWNOWAŻNOŚĆ ZAPISU ŚCIEŻKI.
  *
  * Model potrafi zapisać tę samą ścieżkę na kilkanaście sposobów (`./`, `//`, `\`, `%XX`,
- * wiodący `/`). Bramka MUSI podjąć dla wszystkich tę samą decyzję — inaczej No-Go
+ * wiodący `/`). Bramka MUSI podjąć dla wszystkich tę samą decyzję - inaczej No-Go
  * i lista plików chronionych są tylko dekoracją.
  */
 import test from 'ava';
@@ -40,7 +40,7 @@ function makeAgent() {
     return { name: 'Tester', permissions: { guidance_mode: true }, focusFolders: [] };
 }
 
-test.serial('K1: No-Go blokuje KAŻDY wariant zapisu tej samej ścieżki', t2 => {
+test.serial('No-Go blokuje KAŻDY wariant zapisu tej samej ścieżki', t2 => {
     AccessGuard.setNoGoFolders(['Prywatne']);
     const ps = new PermissionSystem(null, {});
     const agent = makeAgent();
@@ -55,7 +55,7 @@ test.serial('K1: No-Go blokuje KAŻDY wariant zapisu tej samej ścieżki', t2 =>
     }
 });
 
-test.serial('K1: No-Go blokuje warianty także przy zapisie (vault.write)', t2 => {
+test.serial('No-Go blokuje warianty także przy zapisie (vault.write)', t2 => {
     AccessGuard.setNoGoFolders(['Prywatne']);
     const ps = new PermissionSystem(null, {});
     const agent = makeAgent();
@@ -65,7 +65,7 @@ test.serial('K1: No-Go blokuje warianty także przy zapisie (vault.write)', t2 =
     }
 });
 
-test.serial('K1: plik chroniony jest chroniony w KAŻDYM wariancie zapisu', t2 => {
+test.serial('plik chroniony jest chroniony w KAŻDYM wariancie zapisu', t2 => {
     AccessGuard.setNoGoFolders([]);
     const ps = new PermissionSystem(null, {});
     const agent = makeAgent();
@@ -77,7 +77,7 @@ test.serial('K1: plik chroniony jest chroniony w KAŻDYM wariancie zapisu', t2 =
     }
 });
 
-test.serial('K1: ścieżka nie do uratowania (traversal) = twarda odmowa, nie „nieznana akcja"', t2 => {
+test.serial('ścieżka nie do uratowania (traversal) = twarda odmowa, nie „nieznana akcja"', t2 => {
     AccessGuard.setNoGoFolders([]);
     const ps = new PermissionSystem(null, {});
     const agent = makeAgent();
@@ -89,7 +89,7 @@ test.serial('K1: ścieżka nie do uratowania (traversal) = twarda odmowa, nie �
     }
 });
 
-test.serial('K1: zwykła ścieżka w wariantach nadal PRZECHODZI (brak fałszywych alarmów)', t2 => {
+test.serial('zwykła ścieżka w wariantach nadal PRZECHODZI (brak fałszywych alarmów)', t2 => {
     AccessGuard.setNoGoFolders(['Prywatne']);
     const ps = new PermissionSystem(null, {});
     const agent = makeAgent();
@@ -99,14 +99,14 @@ test.serial('K1: zwykła ścieżka w wariantach nadal PRZECHODZI (brak fałszywy
     }
 });
 
-test.serial('K1: listing roota (`/`) zachowuje dotychczasowe zachowanie', t2 => {
+test.serial('listing roota (`/`) zachowuje dotychczasowe zachowanie', t2 => {
     AccessGuard.setNoGoFolders([]);
     const ps = new PermissionSystem(null, {});
     // guidance_mode = cały zwykły vault → root przechodzi tak samo jak przed zmianą.
     t2.true(ps.checkPermission(makeAgent(), 'vault.read', '/').allowed);
 });
 
-test.serial('K1: AccessGuard._isNoGo — wpis i cel w tej samej normalizacji', t2 => {
+test.serial('AccessGuard._isNoGo — wpis i cel w tej samej normalizacji', t2 => {
     // Wpis No-Go podany „brudno" (backslash, `./`, końcowy slash) ma działać tak samo.
     AccessGuard.setNoGoFolders(['./Prywatne/']);
     t2.true(AccessGuard._isNoGo('Prywatne/d.md'));
@@ -115,16 +115,16 @@ test.serial('K1: AccessGuard._isNoGo — wpis i cel w tej samej normalizacji', t
     t2.false(AccessGuard._isNoGo('Prywatnosc/d.md'));
 });
 
-// ── K13 (2026-08-23): bramka i zlew widzą JEDEN ciąg ───────────────────────
+// ── bramka i zlew widzą JEDEN ciąg ───────────────────────
 
 /**
- * Kontrakt K1 mówi: bramka i zlew oglądają DOKŁADNIE ten sam tekst. Łamała go
- * nie-idempotencja `sanitizePath` (K12): wołacz (`MCPClient._canonicalizeToolContext`)
- * liczył kanonizację RAZ i tę wartość podmieniał w argumentach narzędzia, a bramka
- * (`PermissionSystem.checkPermission`) liczyła ją DRUGI raz i oceniała już inny ciąg.
- * Dla `'./ A/B.md'`: w argumentach lądowało `' A/B.md'` (folder ze spacją z przodu —
- * SĄSIAD folderu `A`), a bramka wydawała werdykt o `'A/B.md'`, gdzie whitelista `A/` mówi ZGÓD.
- * Od K13 `sanitizePath` liczy wynik do punktu stałego, więc obie warstwy trafiają w to samo.
+ * Kontrakt: bramka i zlew oglądają DOKŁADNIE ten sam tekst. Gdyby `sanitizePath` nie była
+ * idempotentna, wołacz (`MCPClient._canonicalizeToolContext`) mógłby policzyć kanonizację RAZ
+ * i tę wartość podmienić w argumentach narzędzia, a bramka (`PermissionSystem.checkPermission`)
+ * policzyłaby ją DRUGI raz i oceniałaby już inny ciąg. Dla `'./ A/B.md'`: w argumentach
+ * lądowałoby `' A/B.md'` (folder ze spacją z przodu — SĄSIAD folderu `A`), a bramka wydawałaby
+ * werdykt o `'A/B.md'`, gdzie whitelista `A/` mówi ZGODA. `sanitizePath` liczy wynik do punktu
+ * stałego, więc obie warstwy trafiają w to samo.
  */
 
 /** Vault-atrapa liczy każdy zapis — chcemy wiedzieć, GDZIE naprawdę ląduje plik. */
@@ -161,7 +161,7 @@ function makeWaskiAgent() {
     };
 }
 
-test.serial('K13: wołacz podmienia w argumentach DOKŁADNIE ten ciąg, który ocenia bramka', t2 => {
+test.serial('wołacz podmienia w argumentach DOKŁADNIE ten ciąg, który ocenia bramka', t2 => {
     AccessGuard.setNoGoFolders([]);
     const { app } = makeWriteApp();
     const registry = new ToolRegistry();
@@ -186,7 +186,7 @@ test.serial('K13: wołacz podmienia w argumentach DOKŁADNIE ten ciąg, który o
     t2.is(ctx.targetPath, 'A/B.md', 'wołacz podmienił ścieżkę na formę SPRZED punktu stałego');
     t2.is(ctx.canonicalPathField, 'path');
 
-    // (b) inwariant K13: to, co wołacz oddał, jest już punktem stałym — bramka nie ma czego poprawić
+    // (b) inwariant: to, co wołacz oddał, jest już punktem stałym — bramka nie ma czego poprawić
     t2.is(sanitizePath(ctx.targetPath), ctx.targetPath, 'ciąg od wołacza NIE jest punktem stałym kanonizacji');
 
     // (c) decyzja bramki dotyczy tego samego tekstu, niezależnie od zapisu wejściowego
@@ -203,7 +203,7 @@ test.serial('K13: wołacz podmienia w argumentach DOKŁADNIE ten ciąg, który o
     t2.false(ps.checkPermission(agent, 'vault.write', 'Inne/B.md').allowed);
 });
 
-test.serial('K13: pełny łańcuch write — okno zgody i plik pokazują ten sam ciąg', async t2 => {
+test.serial('pełny łańcuch write — okno zgody i plik pokazują ten sam ciąg', async t2 => {
     AccessGuard.setNoGoFolders([]);
     const { app, written } = makeWriteApp();
     const registry = new ToolRegistry();
@@ -234,12 +234,12 @@ test.serial('K13: pełny łańcuch write — okno zgody i plik pokazują ten sam
 
     t2.is(out.path, 'A/B.md');
     t2.deepEqual(written, ['A/B.md'], 'plik wylądował gdzie indziej niż zdecydowała bramka');
-    // Przed K13 user widział w oknie zgody `' A/B.md'` — ścieżkę w INNYM folderze niż ta,
-    // którą bramka przepuściła i pod którą zapisało narzędzie.
+    // Okno zgody i zapis mają pokazywać TĘ SAMĄ ścieżkę — inaczej user widziałby zgodę na
+    // jeden folder, a plik lądowałby w innym.
     t2.deepEqual(pokazaneCele, ['A/B.md'], 'okno zgody pokazało inną ścieżkę niż zapisana');
 });
 
-test.serial('K13: wiodąca spacja ginie przez `trim()` — świadomy skutek, nie sąsiedni folder', t2 => {
+test.serial('wiodąca spacja ginie przez `trim()` — świadomy skutek, nie sąsiedni folder', t2 => {
     // `' A/B.md'` NIE jest dziś plikiem w folderze o nazwie „ A” (ze spacją) — kanonizacja
     // zdejmuje białe znaki z BRZEGÓW całego ciągu, więc to ten sam `A/B.md`. Spacja WEWNĄTRZ
     // ścieżki (`'A/ B.md'`) zostaje — to legalna nazwa pliku.

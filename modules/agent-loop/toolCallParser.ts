@@ -2,13 +2,8 @@
  * toolCallParser — kanoniczny parser tool_calls dla pętli agenta.
  *
  * JEDNO miejsce na parsowanie wywołań narzędzi z odpowiedzi modelu, niezależnie od
- * dostawcy. Wcześniej ta logika żyła w DWÓCH kopiach:
- *   - modules/mcp/MCPClient.js (parseToolCalls + _trySplitConcatenatedToolCall)
- *   - modules/memory/streamHelper.js (_splitConcatenatedToolCalls, pętla sub-agentów)
- * E2.1 wyciąga ją tutaj jako czyste funkcje. Kanonem odsklejania jest wersja z
- * MCPClient (operuje na płaskim kształcie `{id, name, arguments}` — tym samym, który
- * zwraca parser), rozszerzona o wstrzykiwaną listę znanych nazw narzędzi zamiast
- * twardej zależności od `ToolRegistry`.
+ * dostawcy. Operuje na płaskim kształcie `{id, name, arguments}`, z wstrzykiwaną listą
+ * znanych nazw narzędzi zamiast twardej zależności od `ToolRegistry`.
  *
  * ZERO zależności od modules/mcp, modules/chat, modules/sub-agents — czyste funkcje.
  */
@@ -139,7 +134,7 @@ export function parseToolCalls(
         for (let i = 0; i < rawCalls.length; i++) {
             const call = rawCalls[i];
             toolCalls.push({
-                // AUD-testy-053: goły `Date.now()` nie wystarcza — dostawca OpenAI-shape z
+                // Goły `Date.now()` nie wystarcza — dostawca OpenAI-shape z
                 // indeksami, ale bez id (typowy artefakt mostu LM Studio/Ollama), potrafi
                 // oddać 2+ tool_calls bez id w JEDNEJ odpowiedzi; pętla synchroniczna liczy
                 // je w tej samej milisekundzie, więc wszystkie dostawały IDENTYCZNY fallback

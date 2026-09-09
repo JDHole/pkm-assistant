@@ -1,5 +1,5 @@
 /**
- * artifactButtons.js — logika „status instancji → przyciski w notatce" (E2.9 FAZA B / B1).
+ * artifactButtons.js — logika „status instancji → przyciski w notatce".
  *
  * Pure module (ZERO importów Obsidiana / i18n) → node-testowalne. Renderer (`artifactBlocks.js`)
  * bierze z tego listę akcji, a etykiety tłumaczy przez `t()` po `labelKey`. Rozdział celowy:
@@ -9,10 +9,10 @@
  *  - `action`   — identyfikator kliknięcia ('approve' | 'revise' | 'summon').
  *  - `statusTo` — docelowy status (set_field) LUB null (samo przywołanie bez zmiany statusu).
  *  - `labelKey` — klucz i18n etykiety przycisku.
- *  - `summonKey`— klucz i18n frazy „user zrobił X" wstrzykiwanej do wiadomości przywołania (B2).
+ *  - `summonKey`— klucz i18n frazy „user zrobił X" wstrzykiwanej do wiadomości przywołania.
  *  - `icon`     — emoji przycisku.
  *
- * Mapa (makieta A10/A11 dla typu `plan`, uogólniona na dowolny typ przez `statusy`):
+ * Mapa (dla typu `plan`, uogólniona na dowolny typ przez `statusy`):
  *  - status = ostatni w `statusy` (lub 'zamkniety') → BRAK przycisków (artefakt domknięty).
  *  - status = 'do-akceptacji' → [✅ Zatwierdź] (→ 'zaakceptowany') [💬 Odeślij z uwagami] (→ 'uwagi')
  *    (każdy przycisk tylko jeśli jego status docelowy istnieje w `statusy` typu).

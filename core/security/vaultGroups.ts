@@ -1,5 +1,5 @@
 /**
- * Vault folder groups (E2.8 B1 / S19b) — pure, node-safe helper.
+ * Vault folder groups — pure, node-safe helper.
  *
  * A "group" is a named, reusable bundle of folders defined in Settings→Vault
  * (`settings.pkmAssistant.vaultGroups = [{ name, folders: [{path, access}] }]`).

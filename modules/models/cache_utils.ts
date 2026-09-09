@@ -34,7 +34,7 @@ export type UsageLike = {
     cache_creation_tokens?: number;
 } | null;
 
-/** Metadane cache promptu (S06) — składane przez konsumentów promptu. */
+/** Metadane cache promptu — składane przez konsumentów promptu. */
 export type CacheMetadata = {
     cached_tokens: number;
     cache_creation_tokens: number;
@@ -68,9 +68,8 @@ export function resolveMaxOutputTokens({ settings = {}, platform = '', modelId =
     return Number(modelData?.max_output_tokens) || 4096;
 }
 
-// AUD-dead-code-214: `export` zdjęty z obu — jedyny wołacz każdej jest w tym pliku
-// (`buildCacheMetadata` niżej). Barrel `index.ts` ich i tak nie eksportował (S30 Z4),
-// a komentarz tam mylił czytelnika sugerując, że czytają je adaptery u siebie.
+// `export` zdjęty z obu — jedyny wołacz każdej jest w tym pliku (`buildCacheMetadata`
+// niżej). Barrel `index.ts` ich nie eksportuje.
 function getCachedTokensFromUsage(usage: UsageLike = {}): number {
     return Number(
         usage?.prompt_tokens_details?.cached_tokens

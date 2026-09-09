@@ -1,7 +1,7 @@
 /**
- * Testy czystej składanki promptu startowego (S32 Z1a).
+ * Testy czystej składanki promptu startowego.
  *
- * Modal (DOM) świadomie bez testu — cała logika siedzi tutaj. `translate` wstrzykujemy jako
+ * Modal (DOM) świadomie bez testu - cała logika siedzi tutaj. `translate` wstrzykujemy jako
  * atrapę, żeby asercje nie zależały od treści słowników (te pilnuje `parity.test.js`).
  */
 import test from 'ava';
@@ -34,7 +34,7 @@ test('buildStartPrompt: puste pola są pomijane, nie zostawiają pustych zdań',
         '<profile.start_prompt.tpl_who:role=kucharzem>');
     t.is(buildStartPrompt({ tone: 'concise' }, fakeT),
         '<profile.start_prompt.tpl_tone:tone=<profile.start_prompt.tone_concise_phrase>>');
-    // Same zasady, bez roli i tonu — nadal sensowny tekst.
+    // Same zasady, bez roli i tonu - nadal sensowny tekst.
     t.is(buildStartPrompt({ rules: 'bądź krótki' }, fakeT),
         '<profile.start_prompt.tpl_rules>\n- bądź krótki');
 });
@@ -51,7 +51,7 @@ test('buildStartPrompt: zasady — puste linie out, wiodące myślniki i numery 
 });
 
 test('buildStartPrompt: kropka na końcu roli nie dubluje się z szablonem', t => {
-    // Szablon sam kończy zdanie kropką — user, który ją napisał, nie dostaje „..".
+    // Szablon sam kończy zdanie kropką - user, który ją napisał, nie dostaje „..".
     t.is(buildStartPrompt({ role: 'archiwistą.' }, realT).endsWith('..'), false);
     t.true(buildStartPrompt({ role: 'archiwistą.' }, realT).includes('archiwistą'));
 });

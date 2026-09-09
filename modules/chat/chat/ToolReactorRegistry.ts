@@ -24,7 +24,7 @@ export class ToolReactorRegistry {
 
 export function createDefaultToolReactorRegistry(): ToolReactorRegistry {
     const registry = new ToolReactorRegistry();
-    // E2.9 FAZA D (D2): live-widok listy `todo` NAD inputem (zastąpił ArtifactProgressModal/polling).
+    // Live-widok listy `todo` NAD inputem, aktualizowany przez reactor zamiast pollingiem.
     registry.register('todo', async (result, { view, isActiveTab }) => {
         if (result?.type !== 'todo') return;
         view._activeTodoState = result;

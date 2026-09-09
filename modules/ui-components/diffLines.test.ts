@@ -1,17 +1,17 @@
 /**
- * diffLines — AUD-wydajnosc-102 + AUD-wydajnosc-103.
+ * diffLines — windowing wokół zmian + jedna wspólna tabela diffa na modal.
  *
- * 102: `DiffModal._renderDiff` built one DOM row for EVERY line of a diff, including every
- * unchanged ('equal') line — a one-line edit in a multi-thousand-line note built thousands of
- * rows, almost all of them noise. `selectVisibleDiffLines` now keeps only changed lines plus a
- * small context window, collapsing long unchanged runs into a single placeholder segment.
+ * Building one DOM row for EVERY line of a diff, including every unchanged ('equal') line,
+ * would turn a one-line edit in a multi-thousand-line note into thousands of rows, almost all
+ * of them noise. `selectVisibleDiffLines` keeps only changed lines plus a small context window,
+ * collapsing long unchanged runs into a single placeholder segment.
  *
- * 103: `onOpen` called `_computeLineDiff()` twice (once for stats, once for render) — same full
- * LCS DP table computed twice for one modal open. `DiffModal.onOpen` now computes `ops` once
- * and passes it to both `computeDiffStats` and `_renderDiff`/`selectVisibleDiffLines` — this
- * file's `computeDiffStats`/`computeLineDiff` are exactly the functions it calls, so testing
- * them here proves the shared computation is correct, and `DiffModal.ts`'s single call site
- * (grepped below) proves it isn't computed twice.
+ * `DiffModal.onOpen` computes `ops` (`_computeLineDiff()` — the full LCS DP table) ONCE and
+ * passes it to both `computeDiffStats` and `_renderDiff`/`selectVisibleDiffLines`, instead of
+ * computing the same table twice for one modal open. This file's `computeDiffStats`/
+ * `computeLineDiff` are exactly the functions it calls, so testing them here proves the shared
+ * computation is correct, and `DiffModal.ts`'s single call site (grepped below) proves it isn't
+ * computed twice.
  */
 import test from 'ava';
 import { readFileSync } from 'fs';
@@ -50,7 +50,7 @@ test('computeDiffStats: counts add/remove, ignores equal', t => {
     t.true(stats.added >= 1);
 });
 
-test('selectVisibleDiffLines (AUD-wydajnosc-102): a single change in a long file keeps only context, collapses the rest', t => {
+test('selectVisibleDiffLines: a single change in a long file keeps only context, collapses the rest', t => {
     const oldContent = Array.from({ length: 1000 }, (_, i) => `line${i}`).join('\n');
     const newContent = oldContent.replace('line500', 'line500-CHANGED');
     const ops = computeLineDiff(oldContent, newContent);
@@ -102,7 +102,7 @@ test('selectVisibleDiffLines: two separate changes far apart keep TWO separate c
     t.is(collapsed.length, 3);
 });
 
-// AUD-wydajnosc-103: the diff must be computed exactly ONCE per modal open. DiffModal.ts is a
+// The diff must be computed exactly ONCE per modal open. DiffModal.ts is a
 // Modal subclass (imports 'obsidian', which ships type-only — no runtime JS — so AVA cannot
 // load it directly, same reason chat_streaming.ts etc. have no direct tests). Read the source
 // instead and pin the wiring: onOpen calls computeLineDiff() exactly once, and its result is
@@ -121,10 +121,10 @@ test('DiffModal.onOpen wiring: computeLineDiff() is called exactly once and its 
     t.regex(onOpenBody, /_renderDiff\(diffBody, ops\)/, '_renderDiff musi dostać już policzone ops');
 });
 
-// Review fix (2026-09-02): oldContent !== newContent as STRINGS doesn't guarantee any single
-// line actually differs after split('\n') — without a dedicated notice, the modal showed nothing
-// but a single "⋯ N unchanged lines ⋯" placeholder: an approval screen with no visible change to
-// approve. `stats.added === 0 && stats.removed === 0` is the trigger; `computeDiffStats` already
+// oldContent !== newContent as STRINGS doesn't guarantee any single line actually differs
+// after split('\n') — without a dedicated notice, the modal would show nothing but a single
+// "⋯ N unchanged lines ⋯" placeholder: an approval screen with no visible change to approve.
+// `stats.added === 0 && stats.removed === 0` is the trigger; `computeDiffStats` already
 // proves that case returns all-zero for identical content.
 test('computeDiffStats: identical content is {added:0, removed:0} — the trigger for the "no changes" notice', t => {
     const ops = computeLineDiff('a\nb\nc', 'a\nb\nc');

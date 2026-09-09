@@ -1,5 +1,5 @@
 /**
- * Sub-Agents tab registration for the Backstage sidebar (Sprint 10 Z6).
+ * Sub-Agents tab registration for the Backstage sidebar.
  *
  * Render lives in `SubAgentsBackstageTab.js`, lazy-loaded so importing this
  * file (via `modules/sub-agents/index.js`) doesn't pull `obsidian` into the

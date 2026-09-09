@@ -14,9 +14,8 @@ export type VaultEventFile = { path?: string } | string;
 
 export type VaultLike = {
     adapter: VaultAdapterLike;
-    // W8 (AUD-wydajnosc-028/058/101, follow-up po review koordynatora): opcjonalne —
-    // realny Obsidian `Vault` je ma, atrapy testowe bez `.on` po prostu nie dostają nasłuchu
-    // (kesz wtedy chroni WYŁĄCZNIE TTL, patrz KomunikatorManager.attachVaultEvents).
+    // Opcjonalne: realny Obsidian `Vault` je ma, atrapy testowe bez `.on` po prostu nie
+    // dostają nasłuchu (kesz wtedy chroni WYŁĄCZNIE TTL, patrz KomunikatorManager.attachVaultEvents).
     on?: (event: 'create' | 'modify' | 'delete' | 'rename', cb: (file: VaultEventFile, oldPath?: VaultEventFile) => void) => VaultEventRef;
     offref?: (ref: VaultEventRef) => void;
 };

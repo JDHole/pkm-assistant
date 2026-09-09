@@ -1,5 +1,5 @@
 /**
- * mcpServerPresets — S32 Z2.2: katalog gotowych serwerów MCP („pierwszy raz" bez czytania docsów).
+ * mcpServerPresets — katalog gotowych serwerów MCP („pierwszy raz" bez czytania docsów).
  *
  * Dane siedzą TU, w kodzie — zero sieci, zero pobierania katalogu z internetu (nie chcemy, żeby
  * lista serwerów do uruchomienia na komputerze usera przychodziła ze zdalnego źródła).

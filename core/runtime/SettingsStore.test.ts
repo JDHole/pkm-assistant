@@ -1,9 +1,9 @@
 /**
  * `SettingsStore` — magazyn ustawień.
  *
- * Trzy pierwsze testy przyjechały 1:1 z `core/utils/SettingsManager.test.ts` (strażnik
- * AUD-bledy-028: `scheduleSave()` wołał zapis w callbacku timera BEZ `await` i BEZ `catch`,
- * więc pad zapisu wychodził jako unhandled rejection). Reszta zamyka lukę F-16: rozróżnienie
+ * Trzy pierwsze testy przyjechały 1:1 z `core/utils/SettingsManager.test.ts` (strażnik:
+ * `scheduleSave()` wołał zapis w callbacku timera BEZ `await` i BEZ `catch`,
+ * więc pad zapisu wychodził jako unhandled rejection). Reszta pilnuje rozróżnienia
  * `settings` (proxy → planuje zapis) od `raw` (surowy worek → NIE planuje).
  */
 import test from 'ava';
@@ -38,7 +38,7 @@ async function zlapUnhandled(fn: () => Promise<void>): Promise<unknown[]> {
     return zlapane;
 }
 
-// ── C2.6 (przeniesione) ──────────────────────────────────────────────────────
+// ── przeniesione ──────────────────────────────────────────────────────
 test.serial('scheduleSave: pad zapisu NIE ucieka z timera jako unhandled rejection', async t => {
     const bledy: string[] = [];
     const originalError = log.error;
@@ -62,7 +62,7 @@ test.serial('scheduleSave: pad zapisu NIE ucieka z timera jako unhandled rejecti
     }
 });
 
-// ── C2.5 (przeniesione) ──────────────────────────────────────────────────────
+// ── przeniesione ──────────────────────────────────────────────────────
 test.serial('udany zapis dostaje CAŁY worek i zeruje pendingSaveTimer', async t => {
     const bledy: string[] = [];
     const originalError = log.error;
@@ -87,7 +87,7 @@ test.serial('udany zapis dostaje CAŁY worek i zeruje pendingSaveTimer', async t
     }
 });
 
-// ── C2.4 (przeniesione) ──────────────────────────────────────────────────────
+// ── przeniesione ──────────────────────────────────────────────────────
 test.serial('trzy scheduleSave pod rząd = jeden zapis', async t => {
     const zapisane: SettingsBag[] = [];
     const store = new SettingsStore(owner(), {
@@ -104,7 +104,6 @@ test.serial('trzy scheduleSave pod rząd = jeden zapis', async t => {
     t.is(zapisane.length, 1);
 });
 
-// ── C2.1 ─────────────────────────────────────────────────────────────────────
 test.serial('mutacja przez settings planuje zapis (także zagnieżdżona i delete)', async t => {
     const worek: SettingsBag = { pkmAssistant: { chat: { platform: 'deepseek' }, doKasacji: 1 } };
     const store = await SettingsStore.create(
@@ -132,7 +131,6 @@ test.serial('mutacja przez settings planuje zapis (także zagnieżdżona i delet
     t.not(store3.pendingSaveTimer, null, '`delete` też planuje zapis');
 });
 
-// ── C2.2 ─────────────────────────────────────────────────────────────────────
 test.serial('mutacja przez raw NIE planuje zapisu', async t => {
     const zapisy: SettingsBag[] = [];
     const store = await SettingsStore.create(
@@ -148,7 +146,6 @@ test.serial('mutacja przez raw NIE planuje zapisu', async t => {
     t.is(zapisy.length, 0, 'boot nie zapisał pliku z kluczami API');
 });
 
-// ── C2.3 ─────────────────────────────────────────────────────────────────────
 test.serial('przypisanie TEJ SAMEJ wartości nie planuje zapisu', async t => {
     const store = await SettingsStore.create(
         { loadSettings: () => ({ pkmAssistant: { chat: { apiKeys: { deepseek: 'sk-abc' } } } }), saveSettings: () => {} },
@@ -161,7 +158,6 @@ test.serial('przypisanie TEJ SAMEJ wartości nie planuje zapisu', async t => {
     t.is(store.pendingSaveTimer, null, 'no-op nie ma prawa planować zapisu całego pliku');
 });
 
-// ── C2.7 (S-18, wtopa 2026-07-28) ────────────────────────────────────────────
 test.serial('save() bez argumentu nie istnieje — owner dostaje worek zawsze', async t => {
     const podane: unknown[] = [];
     const store = await SettingsStore.create(
@@ -176,7 +172,6 @@ test.serial('save() bez argumentu nie istnieje — owner dostaje worek zawsze', 
     t.deepEqual(podane[0], { pkmAssistant: { a: 1 } });
 });
 
-// ── C2.9 ─────────────────────────────────────────────────────────────────────
 test.serial('raw i settings pokazują TE SAME dane', async t => {
     const store = await SettingsStore.create(
         { loadSettings: () => ({ pkmAssistant: {} }), saveSettings: () => {} },
@@ -190,7 +185,6 @@ test.serial('raw i settings pokazują TE SAME dane', async t => {
     t.is((store.raw.pkmAssistant as Record<string, unknown>).zProxy, 2, 'zapis przez settings widać w raw');
 });
 
-// ── C2.10 (F10/mutacje: L43) ─────────────────────────────────────────────────
 test.serial('saveDelayMs: 0 znaczy „bez zwłoki", a nie „brak wartości"', async t => {
     const zapisy: SettingsBag[] = [];
     const store = new SettingsStore(owner(), {
@@ -207,7 +201,6 @@ test.serial('saveDelayMs: 0 znaczy „bez zwłoki", a nie „brak wartości"', a
     t.is(store.pendingSaveTimer, null);
 });
 
-// ── C2.11 (F10/mutacje: L118) ────────────────────────────────────────────────
 test.serial('onChange: funkcja dostaje worek po zapisie, uchwyt ją odpina, nie-funkcja jest ignorowana', async t => {
     const widziane: SettingsBag[] = [];
     const bledy: string[] = [];
@@ -237,7 +230,6 @@ test.serial('onChange: funkcja dostaje worek po zapisie, uchwyt ją odpina, nie-
     t.deepEqual(bledy, [], 'nie-funkcja nigdy nie trafiła na listę słuchaczy, więc nic nie padło przy zapisie');
 });
 
-// ── C2.12 (F10/mutacje: L167) ────────────────────────────────────────────────
 test.serial('delete nieistniejącego klucza jest bezszkodowy i nic nie planuje', async t => {
     const store = await SettingsStore.create(
         { loadSettings: () => ({ pkmAssistant: {} }), saveSettings: () => {} },
@@ -252,7 +244,6 @@ test.serial('delete nieistniejącego klucza jest bezszkodowy i nic nie planuje',
     t.is(store.pendingSaveTimer, null, 'kasacja nieistniejącego klucza nie planuje zapisu całego pliku');
 });
 
-// ── C2.13 (F10/mutacje: L181, L182) ──────────────────────────────────────────
 test.serial('obserwacja: null i prymitywy przechodzą bez szwanku, tablice są obserwowane, instancje klas NIE', async t => {
     class Klient { odpal(): void {} }
     const klient = new Klient();
@@ -275,7 +266,6 @@ test.serial('obserwacja: null i prymitywy przechodzą bez szwanku, tablice są o
     t.deepEqual(raw.lista, [1, 2, 3], 'mutacja tablicy dosięga worka');
 });
 
-// ── C2.14 (F10/mutacje: L189, L190) ──────────────────────────────────────────
 test.serial('do worka wchodzi goły obiekt, nigdy owijka ani undefined', async t => {
     const store = await SettingsStore.create(
         { loadSettings: () => ({ zrodlo: { a: 1 } }) as unknown as SettingsBag, saveSettings: () => {} },

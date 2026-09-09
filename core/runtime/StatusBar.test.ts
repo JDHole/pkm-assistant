@@ -1,6 +1,6 @@
 /**
- * `StatusBar` (SB-01..SB-04) — pasek statusu nie miał ANI JEDNEGO testu, choć jest jedynym
- * miejscem, w którym user widzi, czy plugin żyje. Weryfikacja clean-room / F1 wskazała tę lukę.
+ * `StatusBar` — pasek statusu nie miał ANI JEDNEGO testu, choć jest jedynym
+ * miejscem, w którym user widzi, czy plugin żyje.
  *
  * Wszystko stoi na atrapie elementu: `createStatusBar` sięga po pomocnicze metody Obsidiana
  * (`empty`, `createSpan`, `addClass`, `setText`) przez opcjonalny widok, więc test nie musi
@@ -13,7 +13,7 @@ import { STATUS_BAR_CSS_CLASSES } from './contracts.js';
 import type { LoggerLike, StatusBarRenderer } from './contracts.js';
 
 /**
- * Mutacje F10 (`??` → `||`) na trzech liniach są RÓWNOWAŻNE — żaden test nie może
+ * Mutacje (`??` → `||`) na trzech liniach są RÓWNOWAŻNE — żaden test nie może
  * ich legalnie odróżnić, bo typ po lewej stronie nigdy nie niesie wartości fałszywej-
  * -a-nie-nullowej przez publiczny (typowany) interfejs:
  *
@@ -121,12 +121,10 @@ function makeLog(): { log: LoggerLike; ostrzezenia: unknown[][] } {
     return { log, ostrzezenia };
 }
 
-// ── SB-01 ────────────────────────────────────────────────────────────────────
 test('brak kontenera (goły Node) → null, zero wybuchu', t => {
     t.is(createStatusBar({ container: null }), null);
 });
 
-// ── SB-01 ────────────────────────────────────────────────────────────────────
 test('postawienie paska: klasa bazowa, opróżnienie kontenera, własny span na treść', t => {
     const { el, stan } = makeKontener();
 
@@ -138,7 +136,6 @@ test('postawienie paska: klasa bazowa, opróżnienie kontenera, własny span na 
     t.truthy(stan.span, 'treść nie dostała własnego span-a');
 });
 
-// ── SB-04 ────────────────────────────────────────────────────────────────────
 test('setText: „ładowanie" → „gotowe" ląduje w treści paska', t => {
     const { el, stan } = makeKontener();
     const pasek = createStatusBar({ container: el })!;
@@ -150,7 +147,6 @@ test('setText: „ładowanie" → „gotowe" ląduje w treści paska', t => {
     t.is(stan.span?.textContent, 'Gotowe', 'druga zmiana tekstu nie doszła — pasek zamarł na pierwszym stanie');
 });
 
-// ── SB-04 ────────────────────────────────────────────────────────────────────
 test('setText woli obsidianowe setText() od podmiany textContent', t => {
     const { el, stan } = makeKontener({ spanZeSetText: true });
     const pasek = createStatusBar({ container: el })!;
@@ -160,7 +156,6 @@ test('setText woli obsidianowe setText() od podmiany textContent', t => {
     t.is(stan.span?.textContent, 'Gotowe');
 });
 
-// ── SB-04 ────────────────────────────────────────────────────────────────────
 test('bez createSpan tekst idzie wprost na kontener', t => {
     const { el, stan } = makeKontener({ bezCreateSpan: true });
     const pasek = createStatusBar({ container: el })!;
@@ -170,7 +165,6 @@ test('bez createSpan tekst idzie wprost na kontener', t => {
     t.is(stan.textContent, 'Gotowe', 'element bez pomocników Obsidiana został bez tekstu');
 });
 
-// ── SB-04 ────────────────────────────────────────────────────────────────────
 test('tekst ustawiony PRZED przerysowaniem przeżywa refresh()', t => {
     const { el, stan } = makeKontener();
     const pasek = createStatusBar({ container: el })!;
@@ -182,7 +176,6 @@ test('tekst ustawiony PRZED przerysowaniem przeżywa refresh()', t => {
     t.is(stan.span?.textContent, 'Gotowe', 'przerysowanie zgubiło tekst — pasek pustoszeje po pulsie pamięci');
 });
 
-// ── SB-02 ────────────────────────────────────────────────────────────────────
 test('własny komponent (renderer) wchodzi do kontenera i przejmuje treść', t => {
     const wlasny: Span = { textContent: null };
     const renderer: StatusBarRenderer = { render: () => wlasny as unknown as HTMLElement };
@@ -191,11 +184,10 @@ test('własny komponent (renderer) wchodzi do kontenera i przejmuje treść', t 
     const pasek = createStatusBar({ container: el, renderer })!;
     pasek.setText('Gotowe');
 
-    t.deepEqual(stan.dzieci, [wlasny], 'komponent z configu nie trafił do paska (SB-02)');
+    t.deepEqual(stan.dzieci, [wlasny], 'komponent z configu nie trafił do paska');
     t.is(wlasny.textContent, 'Gotowe', 'tekst poszedł obok komponentu z configu');
 });
 
-// ── SB-03 ────────────────────────────────────────────────────────────────────
 test('setClickable: wariant klikalny + działający handler', t => {
     const { el, stan, klik } = makeKontener();
     const pasek = createStatusBar({ container: el })!;
@@ -210,7 +202,6 @@ test('setClickable: wariant klikalny + działający handler', t => {
     t.is(kliki, 1, 'kliknięcie nie doszło do handlera');
 });
 
-// ── SB-03 ────────────────────────────────────────────────────────────────────
 test('setClickable(null) zdejmuje klasę i słuchacza', t => {
     const { el, stan, klik } = makeKontener();
     const pasek = createStatusBar({ container: el })!;
@@ -225,7 +216,6 @@ test('setClickable(null) zdejmuje klasę i słuchacza', t => {
     t.is(kliki, 0, 'martwy handler dalej odpalał');
 });
 
-// ── SB-03 ────────────────────────────────────────────────────────────────────
 test('podmiana handlera nie mnoży kliknięć', t => {
     const { el, klik } = makeKontener();
     const pasek = createStatusBar({ container: el })!;
@@ -238,7 +228,6 @@ test('podmiana handlera nie mnoży kliknięć', t => {
     t.deepEqual(wolane, ['drugi'], 'stary handler przeżył podmianę albo kliknięcie poszło dwa razy');
 });
 
-// ── SB-03 ────────────────────────────────────────────────────────────────────
 test('klikalność przeżywa przerysowanie', t => {
     const { el, stan, klik } = makeKontener();
     const pasek = createStatusBar({ container: el })!;
@@ -252,7 +241,6 @@ test('klikalność przeżywa przerysowanie', t => {
     t.is(kliki, 1, 'po przerysowaniu pasek przestał być klikalny');
 });
 
-// ── SB-01 ────────────────────────────────────────────────────────────────────
 test('dispose: słuchacz zdjęty, kontener pusty, dalsze wołania to no-op', t => {
     const { el, stan, klik } = makeKontener();
     const pasek = createStatusBar({ container: el })!;
@@ -279,7 +267,7 @@ test('dispose: słuchacz zdjęty, kontener pusty, dalsze wołania to no-op', t =
     // do Obsidiana (`addStatusBarItem()`), który usuwa go w całości przy wyłączeniu pluginu.
 });
 
-// ── SB-01 (pasek jest ozdobą, nie funkcją krytyczną) ─────────────────────────
+// ── pasek jest ozdobą, nie funkcją krytyczną ─────────────────────────────────
 test('pad elementu przy rysowaniu tylko loguje — nikt nie wybucha', t => {
     const { el } = makeKontener({ pekaNaEmpty: true });
     const { log, ostrzezenia } = makeLog();

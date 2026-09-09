@@ -1,9 +1,9 @@
 /**
- * Strażnik polityk katalogu społeczności Obsidiana (2026-09-07).
+ * Strażnik polityk katalogu społeczności Obsidiana.
  *
- * DLACZEGO: walidator katalogu odrzucił zgłoszenie 2.2.0 za martwą metodę, która wyłączała
- * i włączała plugin przez `app.plugins` — Developer policies zakazują tego wprost (tak wygląda
- * podmiana kodu bez wiedzy usera). Kampania dead-code z 2026-09-02 tego nie złapała, bo liczyła
+ * DLACZEGO: walidator katalogu odrzuca zgłoszenie za martwą metodę, która wyłącza
+ * i włącza plugin przez `app.plugins` — Developer policies zakazują tego wprost (tak wygląda
+ * podmiana kodu bez wiedzy usera). Zwykłe wykrywanie martwego kodu tego nie złapie, bo liczy
  * odwołania do eksportów, a metoda klasy z własnym testem i samowywołaniem przez `window`
  * wyglądała na „używaną". Ten test pilnuje ZASADY, nie użycia: zakazane wzorce nie mają prawa
  * pojawić się w źródłach pluginu niezależnie od tego, czy ktoś je woła.

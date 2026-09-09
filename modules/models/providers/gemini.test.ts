@@ -4,22 +4,14 @@ import { CapturingHttpClient, collect, makeCtx } from '../testing/harness.js';
 import type { ChatRequest, OpenAiCompletion, ProviderContext } from '../contracts.js';
 
 /**
- * Testy charakteryzujące dostawcę Gemini — nocna zmiana audytowa 2026-08-27, moduł 9.
+ * Testy charakteryzujące dostawcę Gemini.
  *
  * Kontekst: to JEDYNY dostawca w repo, który tłumaczy na kształt SPOZA rodziny OpenAI (role,
- * części treści, `functionCall`, `usageMetadata`, własny akumulator myślenia). Do audytu
- * 2026-08-27 nie importował go ANI JEDEN test — pozostali dostawcy mają ich od jednego do
- * trzech, a wspólna baza kształtu OpenAI dziesięć.
+ * części treści, `functionCall`, `usageMetadata`, własny akumulator myślenia).
  *
  * Ten plik NICZEGO nie naprawia. Spisuje zachowanie tłumaczy w obie strony (żądanie → Gemini,
- * odpowiedź → kształt kanoniczny), żeby przyszła zmiana musiała się przyznać, co psuje.
- *
- * ⚠️ Dwa piny na końcu były do clean-room `test.failing` (zachowanie dziś wadliwe). W nowym
- * kodzie mają być spełnione OD PIERWSZEGO DNIA (B.9 GG-25/GG-26), więc są zwykłymi testami.
- *
- * Fabryka napraw F1 (AUD-testy-011/036, 2026-09-02): sekcje „Żądanie: forwardowanie
- * max_tokens" (AUD-testy-036), „Strumień" (AUD-testy-011 — do tego audytu NIC nie ćwiczyło
- * ścieżki streamingu tego dostawcy) i test strony `error`.
+ * odpowiedź → kształt kanoniczny), żeby przyszła zmiana musiała się przyznać, co psuje. Piny
+ * pod koniec pliku mają być spełnione OD PIERWSZEGO DNIA, więc są zwykłymi testami.
  */
 const REQ: ChatRequest = { messages: [{ role: 'user', content: 'hej' }] };
 const CTX: ProviderContext = makeCtx({ modelId: 'gemini-2.5-pro', apiKey: 'test-key', maxOutputTokens: 4096 });
@@ -45,7 +37,7 @@ const endsStream = (chunk: string) =>
   geminiProvider.createStreamDecoder(REQ, CTX).feed(chunk).some(e => e.type === 'done');
 
 /**
- * Karmi dekoder porcjami i akumuluje zdarzenia w snapshot — zamiennik dawnej pary
+ * Karmi dekoder porcjami i akumuluje zdarzenia w snapshot - zamiennik dawnej pary
  * „przetwórz porcję" + „zamień stan adaptera na kształt kanoniczny".
  */
 function streamSnapshot(chunks: string[]): OpenAiCompletion {
@@ -137,14 +129,14 @@ test('gemini/request: thinking=true daje budżet 8192, liczba jedzie wprost, bra
   );
 });
 
-test('AUD-testy-036: gemini/request: max_tokens jawnie podane trafia do generationConfig.maxOutputTokens', t => {
+test('gemini/request: max_tokens jawnie podane trafia do generationConfig.maxOutputTokens', t => {
   const body = geminiBody({ messages: [{ role: 'user', content: 'x' }], max_tokens: 2048 });
   t.is(body.generationConfig.maxOutputTokens, 2048, 'buildRequest() ma forwardować max_tokens — mutacja usuwająca tę linię ma paść');
 });
 
-test('AUD-testy-036: gemini/request: max_tokens BEZ jawnej wartości spada na maxOutputTokens kontekstu', t => {
+test('gemini/request: max_tokens BEZ jawnej wartości spada na maxOutputTokens kontekstu', t => {
   const body = geminiBody({ messages: [{ role: 'user', content: 'x' }] });
-  // `CTX.maxOutputTokens = 4096` (nagłówek tego pliku) — fallback `req.max_tokens
+  // `CTX.maxOutputTokens = 4096` (nagłówek tego pliku) - fallback `req.max_tokens
   // || ctx.maxOutputTokens`, druga strona TEJ SAMEJ decyzji.
   t.is(body.generationConfig.maxOutputTokens, 4096, 'brak jawnego max_tokens ma spaść na fallback kontekstu, nie zniknąć z body');
 });
@@ -204,7 +196,7 @@ test('gemini/response: słownik powodów zakończenia', t => {
   t.is(reason('MAX_TOKENS'), 'length');
   t.is(reason('SAFETY'), 'content_filter');
   t.is(reason('RECITATION'), 'content_filter');
-  // Powód spoza słownika przechodzi zmałymi literami — kontrakt „nie gub informacji".
+  // Powód spoza słownika przechodzi zmałymi literami - kontrakt „nie gub informacji".
   t.is(reason('MALFORMED_FUNCTION_CALL'), 'malformed_function_call');
 });
 
@@ -221,15 +213,15 @@ test('gemini/response: usageMetadata mapuje się na liczniki OpenAI, brak metada
   t.deepEqual(noUsage.usage as unknown, { prompt_tokens: null, completion_tokens: null, total_tokens: null });
 });
 
-test('gemini/response: kandydat BEZ content oddaje pustą wiadomość asystenta (fix TS-3 #6)', t => {
-  // Kandydat istnieje, ale nie ma treści — strażnik ma oddać obiekt wiadomości, nie pusty string.
+test('gemini/response: kandydat BEZ content oddaje pustą wiadomość asystenta', t => {
+  // Kandydat istnieje, ale nie ma treści - strażnik ma oddać obiekt wiadomości, nie pusty string.
   const out = respondTo({ candidates: [{ finishReason: 'SAFETY' }] });
 
   t.deepEqual(out.choices![0].message as unknown, { role: 'assistant', content: '' });
   t.is(out.choices![0].finish_reason, 'content_filter');
 });
 
-test('AUD-testy-011: gemini/response: payload z polem `error` oddaje znormalizowany błąd zamiast rzucać', t => {
+test('gemini/response: payload z polem `error` oddaje znormalizowany błąd zamiast rzucać', t => {
   const out = respondTo({ error: { message: 'API key not valid.' } }) as unknown as {
     error?: { message: string; code: string; http_status: number | null };
   };
@@ -240,11 +232,10 @@ test('AUD-testy-011: gemini/response: payload z polem `error` oddaje znormalizow
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Strumień (AUD-testy-011) — do tego audytu ŻADEN test nie ćwiczył ścieżki streamingu tego
-// dostawcy (jedyny w repo, który parsuje TABLICĘ JSON zamiast liniowych ramek SSE).
+// Strumień - jedyny dostawca w repo, który parsuje TABLICĘ JSON zamiast liniowych ramek SSE.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('AUD-testy-011: gemini/stream: myślenie (thought:true) i tekst w OSOBNYCH porcjach akumulują się do reasoning_content i content', t => {
+test('gemini/stream: myślenie (thought:true) i tekst w OSOBNYCH porcjach akumulują się do reasoning_content i content', t => {
   const out = streamSnapshot([
     '[' + JSON.stringify({
     candidates: [{ content: { role: 'model', parts: [{ text: 'liczę ', thought: true }] } }],
@@ -261,7 +252,7 @@ test('AUD-testy-011: gemini/stream: myślenie (thought:true) i tekst w OSOBNYCH 
   t.is(message.reasoning_content, 'liczę w głowie', 'dwie porcje myślenia sklejają się w jedną');
 });
 
-test('AUD-testy-011: gemini/stream: functionCall w dwóch kawałkach składa się w jedno wywołanie z pełnymi argumentami', t => {
+test('gemini/stream: functionCall w dwóch kawałkach składa się w jedno wywołanie z pełnymi argumentami', t => {
   const out = streamSnapshot([
     '[' + JSON.stringify({
     candidates: [{ content: { role: 'model', parts: [{ functionCall: { name: 'vault_read', args: { path: 'a' } } }] } }],
@@ -276,12 +267,12 @@ test('AUD-testy-011: gemini/stream: functionCall w dwóch kawałkach składa si�
   t.is(calls.length, 1);
   t.is(calls[0].function.name, 'vault_read', 'imię narzędzia z pierwszego kawałka nie ginie, drugi kawałek ma pusty name');
   t.deepEqual(JSON.parse(calls[0].function.arguments) as unknown, { path: 'a.md' }, 'argument sklejony ze WSZYSTKICH kawałków, nie tylko z ostatniego');
-  // Dekoder streamu nie niesie `functionCall.id` (Gemini go w strumieniu nie podaje) — dostaje
+  // Dekoder streamu nie niesie `functionCall.id` (Gemini go w strumieniu nie podaje) - dostaje
   // więc to samo lokalnie wygenerowane id co kształt non-streaming bez id (test wyżej).
   t.regex(calls[0].id, /^call_\d+_[a-z0-9]+$/);
 });
 
-test('AUD-testy-011: gemini/stream: usageMetadata z porcji trafia do usage w kształcie kanonicznym', t => {
+test('gemini/stream: usageMetadata z porcji trafia do usage w kształcie kanonicznym', t => {
   const out = streamSnapshot([
     '[' + JSON.stringify({
     candidates: [{ content: { role: 'model', parts: [{ text: 'ok' }] } }],
@@ -294,7 +285,7 @@ test('AUD-testy-011: gemini/stream: usageMetadata z porcji trafia do usage w ksz
   t.deepEqual(out.usage as unknown, { prompt_tokens: 10, completion_tokens: 3, total_tokens: 13 });
 });
 
-test('AUD-testy-011: gemini/koniec streamu: rozpoznaje porcję z "finishReason", ignoruje porcję bez', t => {
+test('gemini/koniec streamu: rozpoznaje porcję z "finishReason", ignoruje porcję bez', t => {
   const withReason = '{"candidates":[{"content":{"parts":[{"text":""}]},"finishReason":"STOP"}]}';
   const withoutReason = '{"candidates":[{"content":{"parts":[{"text":"czesc"}]}}]}';
 
@@ -302,10 +293,10 @@ test('AUD-testy-011: gemini/koniec streamu: rozpoznaje porcję z "finishReason",
   t.false(endsStream(withoutReason));
 });
 
-test('F2.14: gemini/koniec streamu: model wypowiadający frazę "finishReason" w treści NIE kończy strumienia przedwcześnie', t => {
+test('gemini/koniec streamu: model wypowiadający frazę "finishReason" w treści NIE kończy strumienia przedwcześnie', t => {
   // Porcja NIEFINALNA: model tłumaczy działanie API, tekst zawiera literalnie 'finishReason'.
   // Stary substring-check (`event.data.includes('"finishReason"')`) łapał to jako koniec
-  // strumienia po samej treści — dziś sprawdzenie idzie po WYPARSOWANYM polu na kandydacie,
+  // strumienia po samej treści - dziś sprawdzenie idzie po WYPARSOWANYM polu na kandydacie,
   // które tu nie istnieje, więc porcja poprawnie NIE jest końcem.
   const talksAboutIt = JSON.stringify({
       candidates: [{ content: { role: 'model', parts: [
@@ -314,7 +305,7 @@ test('F2.14: gemini/koniec streamu: model wypowiadający frazę "finishReason" w
     });
   t.false(endsStream(talksAboutIt), 'sama treść wspominająca finishReason nie jest sygnałem końca');
 
-  // Ta sama sytuacja, ale porcja JEST finalna (realny kandydat niesie finishReason) — nadal wykryte.
+  // Ta sama sytuacja, ale porcja JEST finalna (realny kandydat niesie finishReason) - nadal wykryte.
   const genuinelyFinal = JSON.stringify({
       candidates: [{
         content: { role: 'model', parts: [{ text: 'Pole "finishReason" mówi API...' }] },
@@ -324,7 +315,7 @@ test('F2.14: gemini/koniec streamu: model wypowiadający frazę "finishReason" w
   t.true(endsStream(genuinelyFinal));
 });
 
-test('F2.14: gemini/koniec streamu: porcja niesparsowalna (rozcięty JSON streamu tablicowego) nie rzuca i nie jest końcem', t => {
+test('gemini/koniec streamu: porcja niesparsowalna (rozcięty JSON streamu tablicowego) nie rzuca i nie jest końcem', t => {
   // Realny kształt środkowej porcji strumienia Gemini: prefiks `,` + niedomknięty obiekt.
   const partial = ',{"candidates":[{"content":{"parts":[{"text":"urwa';
   t.notThrows(() => endsStream(partial));
@@ -332,14 +323,13 @@ test('F2.14: gemini/koniec streamu: porcja niesparsowalna (rozcięty JSON stream
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// W4-02 (review fali 2, 2026-09-04): rozpoznanie końca wymagało, żeby POJEDYNCZA porcja
-// parsowała się jako JSON — porcja niosąca sentinel, ale sama zlepiona z drugim obiektem albo
-// owinięta w prefiks `data:` (proxy udające SSE), traciła koniec strumienia. Dekoder i
-// rozpoznanie końca jadą dziś TĄ SAMĄ ścieżką parsowania porcji, więc obie dostają ten sam
-// werdykt.
+// Rozpoznanie końca wymaga, żeby POJEDYNCZA porcja parsowała się jako JSON - porcja niosąca
+// sentinel, ale sama zlepiona z drugim obiektem albo owinięta w prefiks `data:` (proxy udające
+// SSE), traciłaby koniec strumienia, gdyby dekoder i rozpoznanie końca nie jechały TĄ SAMĄ
+// ścieżką parsowania porcji.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('W4-02: gemini/koniec streamu: dwa obiekty zlepione w jednej porcji (dwie "linie" strumienia w jednym zdarzeniu) — bierze OSTATNI, niesie finishReason', t => {
+test('gemini/koniec streamu: dwa obiekty zlepione w jednej porcji (dwie "linie" strumienia w jednym zdarzeniu) — bierze OSTATNI, niesie finishReason', t => {
   const glued = ',' + JSON.stringify({ candidates: [{ content: { parts: [{ text: 'kawałek 1' }] } }] })
       + ',' + JSON.stringify({ candidates: [{ content: { parts: [{ text: 'kawałek 2' }] }, finishReason: 'STOP' }] });
   t.true(endsStream(glued), 'ostatni obiekt zlepionej porcji niesie finishReason — koniec ma zostać wykryty');
@@ -349,7 +339,7 @@ test('W4-02: gemini/koniec streamu: dwa obiekty zlepione w jednej porcji (dwie "
   t.false(endsStream(gluedNoEnd), 'finishReason siedzi w PIERWSZYM obiekcie, ostatni go nie niesie — porcja nie jest końcem');
 });
 
-test('W4-02: gemini/koniec streamu: prefiks `data:` (proxy udające SSE) nie przeszkadza w rozpoznaniu finishReason', t => {
+test('gemini/koniec streamu: prefiks `data:` (proxy udające SSE) nie przeszkadza w rozpoznaniu finishReason', t => {
   const withPrefix = 'data: ' + JSON.stringify({ candidates: [{ content: { parts: [{ text: 'x' }] }, finishReason: 'STOP' }] });
   t.true(endsStream(withPrefix));
 
@@ -358,14 +348,13 @@ test('W4-02: gemini/koniec streamu: prefiks `data:` (proxy udające SSE) nie prz
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PINY — nowy kod ma je spełniać OD PIERWSZEGO DNIA (B.9 GG-25/GG-26). Przed clean-room były
-// to `test.failing`: zachowanie wywalało się wyjątkiem.
+// PINY - kod ma je spełniać OD PIERWSZEGO DNIA.
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('PIN gemini/response: pusta lista kandydatów (prompt zablokowany) ma dać odpowiedź, nie wyjątek', t => {
   // Realny kształt od Gemini, gdy blokada leci na PROMPCIE, nie na odpowiedzi:
   // `candidates` przychodzi puste, a powód siedzi w `promptFeedback.blockReason`.
-  // B.9 GG-25: pusta lista kandydatów MUSI dać pustą wiadomość asystenta, nie wyjątek.
+  // Pusta lista kandydatów MUSI dać pustą wiadomość asystenta, nie wyjątek.
   const out = respondTo({ candidates: [], promptFeedback: { blockReason: 'SAFETY' } });
 
   t.truthy(out, 'parseCompletion() nie może rzucić na odpowiedzi, którą serwer realnie zwraca');
@@ -373,7 +362,7 @@ test('PIN gemini/response: pusta lista kandydatów (prompt zablokowany) ma dać 
 });
 
 test('PIN gemini/response: kandydat bez finishReason ma się przetłumaczyć, nie wywalić', t => {
-  // B.9 GG-26: Gemini pomija `finishReason` w częściowych odpowiedziach — brak pola nie może
+  // Gemini pomija `finishReason` w częściowych odpowiedziach - brak pola nie może
   // wywrócić tłumaczenia na kształt kanoniczny.
   const out = respondTo({
     candidates: [{ content: { role: 'model', parts: [{ text: 'urwane w pół' }] } }],
@@ -383,11 +372,10 @@ test('PIN gemini/response: kandydat bez finishReason ma się przetłumaczyć, ni
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// F10 (bramka mutacyjna, 2026-09-06): mutanty, które przeżyły pakiet powyżej. Każdy test
-// niżej pinuje JEDNO obserwowalne zachowanie, którego mutacja nie umie udawać.
+// Każdy test niżej pinuje JEDNO obserwowalne zachowanie, którego mutacja nie umie udawać.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('F10 gemini/request: argumenty wywołania z transkryptu — obiekt jedzie wprost, string JSON jest parsowany, śmieć i brak dają pusty obiekt', t => {
+test('gemini/request: argumenty wywołania z transkryptu — obiekt jedzie wprost, string JSON jest parsowany, śmieć i brak dają pusty obiekt', t => {
   const argsOf = (call: Record<string, unknown>) => {
     const body = geminiBody({
       messages: [
@@ -398,7 +386,7 @@ test('F10 gemini/request: argumenty wywołania z transkryptu — obiekt jedzie w
     return (body.contents[1].parts[0] as { functionCall: { name: string; args: unknown } }).functionCall;
   };
 
-  // Gotowy OBIEKT z transkryptu przechodzi bez zmian — nie wolno go zgubić po drodze.
+  // Gotowy OBIEKT z transkryptu przechodzi bez zmian - nie wolno go zgubić po drodze.
   t.deepEqual(argsOf({ name: 'read', arguments: { path: 'a.md', deep: true } }).args, { path: 'a.md', deep: true });
   // String JSON: parsowany do obiektu, bo Gemini wymaga `args` jako obiektu, nie stringa.
   t.deepEqual(argsOf({ name: 'read', arguments: '{"path":"b.md"}' }).args, { path: 'b.md' });
@@ -412,25 +400,25 @@ test('F10 gemini/request: argumenty wywołania z transkryptu — obiekt jedzie w
   t.deepEqual(argsOf({ name: 'read', arguments: '42' }).args, {});
 });
 
-test('F10 gemini/request: wynik narzędzia staje się functionResponse TYLKO dla ról tool/function z nazwą', t => {
+test('gemini/request: wynik narzędzia staje się functionResponse TYLKO dla ról tool/function z nazwą', t => {
   const parts = (message: Record<string, unknown>) =>
     geminiBody({ messages: [{ role: 'user', content: 'x' }, message] }).contents[1].parts;
 
-  // Rola `tool` z nazwą — wynik narzędzia w kształcie Gemini.
+  // Rola `tool` z nazwą - wynik narzędzia w kształcie Gemini.
   t.deepEqual(parts({ role: 'tool', name: 'read', content: 'treść pliku' }), [
     { functionResponse: { name: 'read', response: { result: 'treść pliku' } } },
   ]);
-  // Rola `function` z nazwą — ta sama ścieżka.
+  // Rola `function` z nazwą - ta sama ścieżka.
   t.deepEqual(parts({ role: 'function', name: 'list', content: 'a\nb' }), [
     { functionResponse: { name: 'list', response: { result: 'a\nb' } } },
   ]);
-  // Rola `tool` BEZ nazwy — nie ma czym zaadresować wyniku, więc zwykły tekst.
+  // Rola `tool` BEZ nazwy - nie ma czym zaadresować wyniku, więc zwykły tekst.
   t.deepEqual(parts({ role: 'tool', content: 'bez nazwy' }), [{ text: 'bez nazwy' }]);
-  // Rola `user` z nazwą (imię rozmówcy) — to NIE jest wynik narzędzia.
-  t.deepEqual(parts({ role: 'user', name: 'kuba', content: 'cześć' }), [{ text: 'cześć' }]);
+  // Rola `user` z nazwą (imię rozmówcy) - to NIE jest wynik narzędzia.
+  t.deepEqual(parts({ role: 'user', name: 'jan', content: 'cześć' }), [{ text: 'cześć' }]);
 });
 
-test('F10 gemini/request: blok treści bez tekstu i blok z pustym tekstem nie dokładają części', t => {
+test('gemini/request: blok treści bez tekstu i blok z pustym tekstem nie dokładają części', t => {
   const body = geminiBody({
     messages: [{
       role: 'user',
@@ -443,11 +431,11 @@ test('F10 gemini/request: blok treści bez tekstu i blok z pustym tekstem nie do
     }],
   });
 
-  // Do żądania idzie WYŁĄCZNIE część z realnym tekstem — ani `{text: undefined}`, ani `{text: ''}`.
+  // Do żądania idzie WYŁĄCZNIE część z realnym tekstem - ani `{text: undefined}`, ani `{text: ''}`.
   t.deepEqual(body.contents[0].parts, [{ text: 'widoczny' }]);
 });
 
-test('F10 gemini/request: adres bazowy z kontekstu wygrywa z publicznym API, endpoint z samych spacji spada na domyślny', t => {
+test('gemini/request: adres bazowy z kontekstu wygrywa z publicznym API, endpoint z samych spacji spada na domyślny', t => {
   const custom = geminiProvider.buildRequest(
     REQ,
     makeCtx({ modelId: 'gemini-2.5-pro', endpoint: 'https://proxy.local/v1beta/' }),
@@ -461,7 +449,7 @@ test('F10 gemini/request: adres bazowy z kontekstu wygrywa z publicznym API, end
   t.is(blank.url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent');
 });
 
-test('F10 gemini/listModels: odpowiedź 200 mapuje katalog na ModelInfo (prefiks models/ ścięty, limity przepisane)', async t => {
+test('gemini/listModels: odpowiedź 200 mapuje katalog na ModelInfo (prefiks models/ ścięty, limity przepisane)', async t => {
   const http = new CapturingHttpClient({
     status: 200,
     body: {
@@ -488,16 +476,16 @@ test('F10 gemini/listModels: odpowiedź 200 mapuje katalog na ModelInfo (prefiks
   t.is(http.lastSpec?.headers['x-goog-api-key'], 'test-key', 'klucz jedzie nagłówkiem, nigdy w URL-u');
 });
 
-test('F10 gemini/listModels: filtr metod — brak listy metod zostawia model, lista bez generateContent go wycina', async t => {
+test('gemini/listModels: filtr metod — brak listy metod zostawia model, lista bez generateContent go wycina', async t => {
   const http = new CapturingHttpClient({
     status: 200,
     body: {
       models: [
         { name: 'models/gemini-flash', supportedGenerationMethods: ['generateContent'] },
         { name: 'models/text-embedding-004', supportedGenerationMethods: ['embedContent'] },
-        // Wpis BEZ pola `supportedGenerationMethods` — nie wiemy, czego nie umie, więc zostaje.
+        // Wpis BEZ pola `supportedGenerationMethods` - nie wiemy, czego nie umie, więc zostaje.
         { name: 'models/gemini-nieznany' },
-        // Wpis bez nazwy jest nie do użycia — wypada niezależnie od metod.
+        // Wpis bez nazwy jest nie do użycia - wypada niezależnie od metod.
         { supportedGenerationMethods: ['generateContent'] },
       ],
     },
@@ -506,11 +494,11 @@ test('F10 gemini/listModels: filtr metod — brak listy metod zostawia model, li
   const models = await geminiProvider.listModels(makeCtx(), http);
 
   t.deepEqual(models.map(m => m.id), ['gemini-flash', 'gemini-nieznany']);
-  // Wpis bez limitów NIE dostaje pól limitów (ani `null`, ani zera) — konsument odróżnia „nie wiem".
+  // Wpis bez limitów NIE dostaje pól limitów (ani `null`, ani zera) - konsument odróżnia „nie wiem".
   t.deepEqual(models[1] as unknown, { id: 'gemini-nieznany', multimodal: true });
 });
 
-test('F10 gemini/listModels: status spoza 2xx oddaje pustą listę, awaria transportu też — nigdy wyjątek ani undefined', async t => {
+test('gemini/listModels: status spoza 2xx oddaje pustą listę, awaria transportu też — nigdy wyjątek ani undefined', async t => {
   const odbite = new CapturingHttpClient({ status: 403, body: { error: { message: 'API key not valid.' } } });
   t.deepEqual(await geminiProvider.listModels(makeCtx(), odbite), [], 'odrzucone żądanie katalogu = pusta lista');
 

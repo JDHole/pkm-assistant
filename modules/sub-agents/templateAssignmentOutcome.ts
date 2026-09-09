@@ -1,18 +1,17 @@
 /**
  * templateAssignmentOutcome — decyzje stanu wokół „Użyj u agenta" i globalnego suba
- * w Zapleczu (AUD-testy-021).
+ * w Zapleczu.
  *
  * `useTemplateAtAgent` i handler kasowania w `SubAgentsBackstageTab.ts` mieszają I/O
  * (`Notice`, `store.instantiate`, `agentManager.updateAgent`) z regułami STANU:
  * idempotencja przypisania (nie dopisuj tego samego suba drugi raz), „pierwszy sub
  * agenta zostaje domyślny" i „kasujesz szablon będący globalnym → wskaźnik wraca na
- * pkm-sub". Żaden test w repo nie importował `SubAgentsBackstageTab.ts` (prywatne
- * funkcje, zero eksportu), więc te reguły nie miały ani strony „robi dobrze", ani
- * strony „odmawia" — zepsucie któregokolwiek warunku dawało cichy półstan.
+ * pkm-sub". `SubAgentsBackstageTab.ts` nie eksportuje tych funkcji jako prywatne, więc
+ * te reguły nie dają się przetestować bezpośrednio - zepsucie któregokolwiek warunku
+ * dawałoby cichy półstan.
  *
- * Ten sam ruch, który zamknął AUD-bledy-012 (`deleteOutcome.ts`) i AUD-bledy-014
- * (`templateUseOutcome.ts`): decyzja wychodzi do czystego pliku (zero DOM, zero
- * obsidian, zero i18n) — widok zostaje wywołaniem i `Notice`.
+ * Decyzja wychodzi do czystego pliku (zero DOM, zero obsidian, zero i18n) — tak samo
+ * jak w `deleteOutcome.ts` i `templateUseOutcome.ts` - widok zostaje wywołaniem i `Notice`.
  */
 
 /**
@@ -40,7 +39,7 @@ export interface SubAgentsAfterTemplateUse {
 }
 
 /**
- * Nowy zestaw `sub_agents` po „Użyj u agenta" (D3).
+ * Nowy zestaw `sub_agents` po „Użyj u agenta".
  *
  * Idempotencja: sub o nazwie `newName` NIE jest dopisywany drugi raz. Pierwszy sub
  * agenta dostaje `default: true` — agent bez ŻADNEGO przypisanego suba potrzebuje
@@ -63,7 +62,7 @@ export function computeSubAgentsAfterTemplateUse(
     return { changed: true, subAgents };
 }
 
-/** Decyzja: na co ma wskazywać globalny sub po skasowaniu szablonu (S27 D2). */
+/** Decyzja: na co ma wskazywać globalny sub po skasowaniu szablonu. */
 export interface GlobalSubAfterTemplateDelete {
     /** `false` = kasowany szablon NIE był globalny — wskaźnik zostaje bez zmian. */
     changed: boolean;

@@ -1,13 +1,13 @@
 /**
  * subTaskStrip — pasek biegów sub-agentów POD paskiem zakładek czatu.
  *
- * PO CO: od F2 delegacja domyślnie leci w tle — tura kończy się pokwitowaniem, a sub mieli
- * dalej. Do 2026-08-15 podgląd tych biegów wisiał w globalnym sidebarze; decyzja Kuby:
- * **biegi należą do agenta i sesji**, więc mają być tam, gdzie user je zlecił — w oknie czatu,
- * pod zakładkami. Ten pasek pokazuje wyłącznie biegi AKTYWNEJ zakładki.
+ * PO CO: delegacja domyślnie leci w tle - tura kończy się pokwitowaniem, a sub mieli dalej.
+ * **Biegi należą do agenta i sesji**, więc mają być tam, gdzie user je zlecił - w oknie czatu,
+ * pod zakładkami, nie w globalnym sidebarze. Ten pasek pokazuje wyłącznie biegi AKTYWNEJ
+ * zakładki.
  *
  * CZEGO TU NIE MA (świadomie): pola „Wiadomość do suba". Komunikacja z subem należy do
- * agenta, nie do usera — kanał (`registry.postMessage`) żyje dalej i czeka na narzędzie
+ * agenta, nie do usera - kanał (`registry.postMessage`) żyje dalej i czeka na narzędzie
  * agentowe, ale UI go nie wystawia. User może bieg wyłącznie PRZERWAĆ (Stop).
  *
  * PODZIAŁ ROBOTY: cała arytmetyka (filtr zakładki, kolejność, liczniki, skróty) siedzi
@@ -58,15 +58,16 @@ interface PluginLike {
     subTaskNotifier?: NotifierLike | null;
 }
 
-// AUD-dead-code-231 (2026-09-02): `export` zdjęty — zero referencji spoza tego pliku
-// (`renderSubTaskStrip` jest jedynym publicznym wejściem).
+// Nie eksportowany - brak referencji spoza tego pliku (`renderSubTaskStrip` jest jedynym
+// publicznym wejściem).
 interface SubTaskStripContext {
     plugin: PluginLike | null | undefined;
-    /** Tożsamość aktywnej zakładki (`chat_tabs._tabKey`) — po niej filtrujemy biegi. */
+    /** Tożsamość aktywnej zakładki (`chat_tabs._tabKey`) - po niej filtrujemy biegi. */
     tabKey: string;
-    /** Agent aktywnej zakładki — dopasowanie awaryjne dla biegów bez adresu zakładki. */
+    /** Agent aktywnej zakładki - dopasowanie awaryjne dla biegów bez adresu zakładki. */
     agentName: string;
-    /** Ścieżka aktywnej sesji agenta — twardy wyróżnik „per sesja" (incydent 2026-08-15). */
+    /** Ścieżka aktywnej sesji agenta - twardy wyróżnik „per sesja": dwie zakładki tego samego
+     *  agenta na różnych sesjach nie mają dzielić widoku biegów. */
     sessionPath?: string;
     /** Id rozwiniętego biegu (jeden naraz) albo `null`. Stan trzyma ChatView, nie DOM. */
     expandedId?: string | null;
@@ -149,7 +150,7 @@ function renderChip(chips: El, row: StripRow, ctx: SubTaskStripContext, isExpand
     const cls = 'pkm-substrip__chip'
         + (isExpanded ? ' pkm-substrip__chip--open' : '')
         + (row.waiting ? ' pkm-substrip__chip--waiting' : '');
-    // Front B: podpowiedź chipa niesie też skrót zadania — user widzi PO CO bieg, bez rozwijania.
+    // Podpowiedź chipa niesie też skrót zadania — user widzi PO CO bieg, bez rozwijania.
     const hint = row.taskPreview
         ? `${statusLabel(row)} — ${row.taskPreview.slice(0, 120)}${row.taskPreview.length > 120 ? '…' : ''}`
         : statusLabel(row);
@@ -192,7 +193,7 @@ function renderDetail(details: El, row: StripRow, registry: RegistryLike | null 
     // Stop TYLKO dla biegu w toku — do zakończonego nie ma czego wysyłać.
     if (row.status === 'running') renderStopButton(head, registry, row);
 
-    // Front B: zadanie od maina NAD krokami — najpierw „po co ten bieg", potem „co klika".
+    // Zadanie od maina NAD krokami — najpierw „po co ten bieg", potem „co klika".
     if (row.taskPreview) {
         const taskTitle = details.createDiv({ cls: 'pkm-substrip__section-title' });
         taskTitle.textContent = t('chat.substrip.details_task');
@@ -252,7 +253,7 @@ function renderStep(list: El, step: StripStep): void {
     line.createSpan({ cls: 'pkm-substrip__step-time', text: formatClock(step.at) });
     line.createSpan({ cls: 'pkm-substrip__step-type', text: step.type });
     if (step.tool) line.createSpan({ cls: 'pkm-substrip__step-tool', text: step.tool });
-    // Front B: konkret kroku (ścieżka / zapytanie / rozmiar wyniku) — koniec zgadywania,
+    // Konkret kroku (ścieżka / zapytanie / rozmiar wyniku) — koniec zgadywania,
     // co sub właściwie czyta. Model przycina do 80 znaków, CSS dokłada elipsę.
     if (step.detail) line.createSpan({ cls: 'pkm-substrip__step-detail', text: step.detail });
 }

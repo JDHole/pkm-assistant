@@ -1,10 +1,8 @@
 /**
  * subTaskPanelModel — co pasek biegów subów ma NARYSOWAĆ.
  *
- * HISTORIA: powstał w F3 dla panelu w sidebarze (`buildPanelModel`, trzy sekcje).
- * 2026-08-15 Kuba zdecydował, że biegi należą do AGENTA i SESJI, więc podgląd przeniósł
- * się do okna czatu — panel sidebara i jego model poszły do kosza, został `buildStripModel`
- * (płaska lista dla JEDNEJ zakładki).
+ * Biegi należą do AGENTA i SESJI, nie do globalnego sidebara — podgląd żyje w oknie czatu,
+ * jako `buildStripModel` (płaska lista dla JEDNEJ zakładki).
  *
  * PO CO OSOBNY PLIK: rejestr (`SubTaskRegistry`) trzyma byty w kolejności powstania i nic
  * nie wie o kolejności prezentacji ani licznikach; widok (`modules/chat/chat/subTaskStrip.ts`)
@@ -69,9 +67,9 @@ export interface StripStep {
     /** Nazwa narzędzia, jeśli krok jej dotyczy (`tool.pre` / `tool.post`). */
     tool?: string;
     /**
-     * Front B (szyba, 2026-08-17): konkret kroku — dla `tool.pre` najistotniejszy argument
+     * Konkret kroku — dla `tool.pre` najistotniejszy argument
      * (ścieżka / zapytanie / folder / URL), dla `tool.post` rozmiar wyniku albo błąd.
-     * Zgłoszenie Kuby: „widać, że wykonuje toole, ale co dokładnie czyta? Nie wiadomo".
+     * Bez tego widać tylko, że sub wykonuje narzędzia, ale nie co dokładnie czyta.
      */
     detail?: string;
 }
@@ -144,7 +142,7 @@ export interface StripRow {
     outcome: string;
     /** Ostatnie ≤20 kroków, od najstarszego — do rozwinięcia wiersza. */
     recentSteps: StripStep[];
-    /** Front B: skrót zadania zleconego przez maina (≤300 znaków; '' gdy bieg go nie niesie). */
+    /** Skrót zadania zleconego przez maina (≤300 znaków; '' gdy bieg go nie niesie). */
     taskPreview: string;
 }
 
@@ -166,16 +164,16 @@ export interface BuildStripModelInput {
 /**
  * Czy ten bieg należy do TEJ zakładki czatu.
  *
- * Pierwszeństwo ma `origin.tabKey` — adres zwrotny wystawiony przez czat przy zleceniu
- * (F2). Bieg, który go nie ma (zlecenie spoza czatu, stara karta w pamięci, delegacja
+ * Pierwszeństwo ma `origin.tabKey` — adres zwrotny wystawiony przez czat przy zleceniu.
+ * Bieg, który go nie ma (zlecenie spoza czatu, stara karta w pamięci, delegacja
  * bez originu), przypisujemy po AGENCIE: lepiej pokazać go na jednej zakładce tego agenta
  * niż zgubić zupełnie. Gdy nie znamy ani klucza zakładki, ani agenta — nie zgadujemy.
  */
 function belongsToTab(task: SubTask, tabKey: string, agentName: string, sessionPath: string): boolean {
-    // Twardy wyróżnik SESJI (incydent 2026-08-15 wieczór): klucz zakładki potrafi sprowadzić
-    // się do samej nazwy agenta (świeża zakładka przed pierwszą wiadomością nie ma jeszcze
-    // sesji), więc stara i nowa sesja tego samego agenta były nierozróżnialne — chipy
-    // zakończonych biegów zostawały po archiwizacji. Adres sesji ze zlecenia rozstrzyga:
+    // Twardy wyróżnik SESJI: klucz zakładki potrafi sprowadzić się do samej nazwy agenta
+    // (świeża zakładka przed pierwszą wiadomością nie ma jeszcze sesji), więc bez tego
+    // wyróżnika stara i nowa sesja tego samego agenta byłyby nierozróżnialne — chipy
+    // zakończonych biegów zostawałyby po archiwizacji. Adres sesji ze zlecenia rozstrzyga:
     // bieg z CUDZEJ/starej sesji pokazujemy wyłącznie, gdy wciąż BIEGNIE (sierota — user
     // musi mieć jak go zobaczyć i ubić Stopem).
     const originSession = task.origin?.sessionPath || '';
@@ -196,7 +194,7 @@ function toStripStep(step: SubTaskStep): StripStep {
     const tool = fields.tool;
     const out: StripStep = { at: step.at, type: step.type };
     if (typeof tool === 'string' && tool) out.tool = tool;
-    // Front B: konkret kroku — args dla zapowiedzi narzędzia, rozmiar/błąd dla wyniku.
+    // Konkret kroku — args dla zapowiedzi narzędzia, rozmiar/błąd dla wyniku.
     const detail = step.type === 'tool.pre'
         ? detailFromArgs(fields.args)
         : (step.type === 'tool.post' ? detailFromPost(fields) : '');
@@ -225,7 +223,7 @@ function toStripRow(task: SubTask, now: number, waiting: boolean): StripRow {
 }
 
 /**
- * Model paska biegów dla JEDNEJ zakładki czatu (decyzja Kuby 2026-08-15: biegi subów
+ * Model paska biegów dla JEDNEJ zakładki czatu (biegi subów
  * należą do agenta i sesji, nie do globalnego sidebara).
  *
  * PŁASKA lista, bo pasek nie ma sekcji — ma kolejność, która odpowiada uwadze usera:

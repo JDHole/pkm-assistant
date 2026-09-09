@@ -1,27 +1,27 @@
 /**
  * @module consolidationLabels
- * S29 Z4-Z5 (2026-07-29) — WARSTWA OPISOWA przebiegu konsolidacji: etykiety, ikony statusu,
+ * WARSTWA OPISOWA przebiegu konsolidacji: etykiety, ikony statusu,
  * czasy, koszt, podsumowanie. Czyste funkcje, zero DOM, zero Obsidiana.
  *
- * Dlaczego tu, a nie w UI: ten sam przebieg opisują DWA różne miejsca —
+ * Dlaczego tu, a nie w UI: ten sam przebieg opisują DWA różne miejsca -
  *  1. pasek statusu Obsidiana (`core/PKMEnv.js`),
- *  2. modal przebiegu (`modules/chat/ConsolidationProgressModal.js` — do S31 w `modules/shell/`).
+ *  2. modal przebiegu (`modules/chat/ConsolidationProgressModal.js`).
  * Gdyby każde składało etykiety samo, po pierwszej zmianie nazewnictwa rozjechałyby się
  * („L1 paczka 2/4" na pasku vs „Paczka 2 z 4" w modalu). Pasek statusu siedzi w `core/`,
- * które nie może importować z modułu z widokami (cykl przez barrele) — więc wspólnym
+ * które nie może importować z modułu z widokami (cykl przez barrele) - więc wspólnym
  * mianownikiem jest `modules/memory` (oba i tak stąd biorą `memoryOpsCenter`).
  *
  * SILNIK ZOSTAJE i18n-FREE: `ConsolidationRun` / `ArchiveWorkflow` nadal nie znają ani jednego
- * stringa usera. To jest osobny, opcjonalny plik prezentacyjny — kroki opisuje z ich `kind` /
- * `index` / `total` / `meta`, dokładnie tak, jak przewiduje spec S29.
+ * stringa usera. To jest osobny, opcjonalny plik prezentacyjny - kroki opisuje z ich `kind` /
+ * `index` / `total` / `meta`.
  */
 import { t, getDateLocale } from '../../core/i18n/index.js';
 import { STEP_KIND, STEP_STATUS } from './ConsolidationRun.js';
 import { estimateCostUsd } from './CostLog.js';
 
 /**
- * Kontrakty przebiegu typowane STRUKTURALNIE — `ConsolidationRun.js` jest jeszcze
- * w JavaScripcie (kontrakt kampanii TS: nie czekamy na konwersję właściciela).
+ * Kontrakty przebiegu typowane STRUKTURALNIE - `ConsolidationRun.js` jest jeszcze
+ * w JavaScripcie (nie czekamy na konwersję właściciela).
  * Kształty odwzorowują to, co ten plik REALNIE czyta, i nic ponadto.
  */
 
@@ -33,7 +33,7 @@ export interface ConsolidationUsage {
     calls?: number;
 }
 
-/** Propozycja kroku (kształt zależny od `kind`) — czytamy z niej tylko te pola. */
+/** Propozycja kroku (kształt zależny od `kind`) - czytamy z niej tylko te pola. */
 export interface ConsolidationStepResult {
     sessions?: unknown[];
     merges?: unknown[];
@@ -43,7 +43,7 @@ export interface ConsolidationStepResult {
     [key: string]: unknown;
 }
 
-/** Jeden krok przebiegu — widok tylko do opisu (zero mutacji). */
+/** Jeden krok przebiegu - widok tylko do opisu (zero mutacji). */
 export interface ConsolidationStepLike {
     kind?: string;
     status?: string;
@@ -70,7 +70,7 @@ export interface ConsolidationRunLike {
     totalUsage?: () => ConsolidationUsage;
 }
 
-/** Co z przebiegu wynikło — liczone z `step.applied`, nie z propozycji. */
+/** Co z przebiegu wynikło - liczone z `step.applied`, nie z propozycji. */
 export interface RunSummary {
     merged: number;
     deleted: number;
@@ -84,7 +84,7 @@ export interface RunSummary {
     durationMs: number;
 }
 
-/** Ikona statusu kroku na checkliście (spec S29: ✅/🔄/⬜/🔒/⏸️/❌). */
+/** Ikona statusu kroku na checkliście (✅/🔄/⬜/🔒/⏸️/❌). */
 const STATUS_ICONS: Record<string, string> = {
     [STEP_STATUS.PENDING]: '⬜',
     [STEP_STATUS.RUNNING]: '🔄',
@@ -107,7 +107,7 @@ export function stepStatusLabel(status: string | undefined): string {
 
 /**
  * Etykieta kroku składana z `kind` + `index` + `total`.
- * `l1_batch_3` z total 12 → „L1 — paczka 3/12".
+ * `l1_batch_3` z total 12 → „L1 - paczka 3/12".
  */
 export function stepLabel(step: ConsolidationStepLike | null | undefined): string {
     if (!step) return '';
@@ -147,7 +147,7 @@ export function stepDetail(step: ConsolidationStepLike | null | undefined): stri
     return '';
 }
 
-/** „sesje 6-10" — okno paczki L1 w posortowanym archiwum (1-indeksowane dla człowieka). */
+/** „sesje 6-10" - okno paczki L1 w posortowanym archiwum (1-indeksowane dla człowieka). */
 function l1SessionRange(step: ConsolidationStepLike | null | undefined): string {
     const size = Number(step?.meta?.batchSize) || (Array.isArray(step?.result?.sessions) ? step.result.sessions.length : 0);
     const offset = Number(step?.meta?.offset);
@@ -155,7 +155,7 @@ function l1SessionRange(step: ConsolidationStepLike | null | undefined): string 
     return t('memory.consolidation.detail.session_range', { from: offset + 1, to: offset + size });
 }
 
-/** Czytelna przyczyna padu kroku — zwis streamu ma własny, ludzki tekst. */
+/** Czytelna przyczyna padu kroku - zwis streamu ma własny, ludzki tekst. */
 export function stepErrorText(step: ConsolidationStepLike | null | undefined): string {
     const code = step?.error?.code;
     if (code === 'stream_stalled') return t('memory.consolidation.error.stalled');
@@ -168,7 +168,7 @@ export function isFallbackStep(step: ConsolidationStepLike | null | undefined): 
     return Boolean(step?.result) && step!.result!.llmDriven === false;
 }
 
-/** „38s" / „2 min 05 s" — czas jednego kroku albo całego przebiegu. */
+/** „38s" / „2 min 05 s" - czas jednego kroku albo całego przebiegu. */
 export function formatDuration(ms: number | null | undefined): string {
     const totalSeconds = Math.max(0, Math.round(Number(ms) || 0) / 1000);
     if (totalSeconds < 60) return t('memory.consolidation.duration_s', { seconds: Math.round(totalSeconds) });
@@ -197,14 +197,14 @@ function formatNumber(value: number, maximumFractionDigits = 1): string {
     }
 }
 
-/** „12,4k tok." — suma tokenów wejścia i wyjścia. */
+/** „12,4k tok." - suma tokenów wejścia i wyjścia. */
 export function formatTokens(usage: ConsolidationUsage | null | undefined): string {
     const total = (Number(usage?.inputTokens) || 0) + (Number(usage?.outputTokens) || 0);
     if (total < 1000) return t('memory.consolidation.tokens', { value: String(total) });
     return t('memory.consolidation.tokens_k', { value: formatNumber(total / 1000, 1) });
 }
 
-/** „$0.0182" — szacunek albo pusty string, gdy cennik nie zna modelu (wtedy pokazujemy same tokeny). */
+/** „$0.0182" - szacunek albo pusty string, gdy cennik nie zna modelu (wtedy pokazujemy same tokeny). */
 function formatCostUsd(usage: ConsolidationUsage | null | undefined, modelName: string | null | undefined): string {
     if (!modelName) return '';
     const usd = estimateCostUsd({
@@ -224,7 +224,7 @@ export function formatUsageLine(usage: ConsolidationUsage | null | undefined, mo
 }
 
 /**
- * Jedna linijka do paska statusu Obsidiana: „🧠 L1 — paczka 2/4 (3/7) · 38s".
+ * Jedna linijka do paska statusu Obsidiana: „🧠 L1 - paczka 2/4 (3/7) · 38s".
  * Zwraca null, gdy przebieg nie istnieje albo nic nie mieli (pasek ma wtedy milczeć).
  */
 export function statusBarLine(run: ConsolidationRunLike | null | undefined, now: number = Date.now()): string | null {
@@ -250,8 +250,8 @@ export function statusBarLine(run: ConsolidationRunLike | null | undefined, now:
 }
 
 /**
- * Co z przebiegu wynikło — do sekcji podsumowania w modalu i do notice'a na koniec.
- * Liczy z `step.applied` (wynik zapisu), nie z propozycji — czyli z tego, co NAPRAWDĘ powstało.
+ * Co z przebiegu wynikło - do sekcji podsumowania w modalu i do notice'a na koniec.
+ * Liczy z `step.applied` (wynik zapisu), nie z propozycji - czyli z tego, co NAPRAWDĘ powstało.
  */
 export function buildRunSummary(run: ConsolidationRunLike | null | undefined, now: number = Date.now()): RunSummary {
     const steps = run?.getSteps?.() || [];
@@ -284,7 +284,7 @@ export function buildRunSummary(run: ConsolidationRunLike | null | undefined, no
     return summary;
 }
 
-/** Zdanie „scalono 2 notatki, 12× L1, 1× L2" — puste, gdy nic nie powstało. */
+/** Zdanie „scalono 2 notatki, 12× L1, 1× L2" - puste, gdy nic nie powstało. */
 export function summaryToText(summary: RunSummary): string {
     const parts: string[] = [];
     if (summary.merged > 0) parts.push(t('memory.consolidation.summary.merged', { count: summary.merged }));
@@ -296,7 +296,7 @@ export function summaryToText(summary: RunSummary): string {
     return parts.join(', ');
 }
 
-/** Plan przebiegu jednym zdaniem — do notice'a startowego („12 paczek L1 + sprzątanie brain/"). */
+/** Plan przebiegu jednym zdaniem - do notice'a startowego („12 paczek L1 + sprzątanie brain/"). */
 export function planToText(run: ConsolidationRunLike | null | undefined): string {
     const steps = run?.getSteps?.() || [];
     const parts: string[] = [];

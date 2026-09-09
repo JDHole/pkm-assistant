@@ -1,11 +1,11 @@
 /**
- * deleteOutcome - co zameldować po próbie skasowania suba/szablonu (AUD-bledy-012).
+ * deleteOutcome - co zameldować po próbie skasowania suba/szablonu.
  *
  * `SubAgentLoader.deleteSubAgent` i `SubAgentTemplateStore.delete` łapią wyjątek adaptera
  * i zwracają `false` (np. `rmdir` jest NIEREKURENCYJNE, więc wystarczy jeden dodatkowy plik
- * w folderze suba: plik konfliktu synchronizacji, `desktop.ini`, notatka usera). Do naprawy
- * wołacze tej wartości nie czytali: user dostawał „Usunięto: X", modal się zamykał, a sub
- * zostawał w cache i na liście.
+ * w folderze suba: plik konfliktu synchronizacji, `desktop.ini`, notatka usera). Wołacze
+ * MUSZĄ czytać tę wartość - inaczej user dostaje „Usunięto: X", modal się zamyka, a sub
+ * zostaje w cache i na liście.
  *
  * Moduł jest CZYSTY (zero DOM, zero i18n) - oddaje KLUCZ komunikatu, tłumaczy wołacz.
  */

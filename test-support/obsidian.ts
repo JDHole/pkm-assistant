@@ -25,8 +25,8 @@
  * Wszystko, czego tu NIE MA, a jest importowane z 'obsidian' w kodzie, wywali build
  * (esbuild rozwiązuje named-importy statycznie) → to jest nasz „test pokrycia symboli".
  *
- * TYPY: atrapa udaje otwarte API hosta, ale NIE jedzie na `any` (do 2026-09-07 jechała) —
- * ten plik idzie razem z pluginem do walidatora katalogu, a `any` zapala mu ~115 błędów
+ * TYPY: atrapa udaje otwarte API hosta, ale NIE jedzie na `any` — ten plik idzie razem
+ * z pluginem do walidatora katalogu, a `any` zapala mu ~115 błędów
  * `no-unsafe-*`. Kształty niżej są nazwane i minimalne; to SAME adnotacje, zero zmian
  * zachowania. Typy klas UI nie muszą pasować do prawdziwego Obsidiana: kod pluginu
  * typuje się przeciw pakietowi `obsidian` z npm, a ten plik podmieniany jest dopiero
@@ -121,7 +121,7 @@ export function addIcon() {}
 // to element ZEWNĘTRZNY (klasa `notice`), `messageEl` jego dziecko (klasa `notice-message`);
 // deprecated `noticeEl` wskazuje na TO SAMO co `messageEl` — nie osobny, trzeci element
 // (`this.messageEl = this.noticeEl = …` w realnym kodzie). `src/main.ts` (`showCrystalNotice`)
-// stylizuje `containerEl` (ogony-ogA, fala 3, 2026-09-04).
+// stylizuje `containerEl`.
 export class Notice {
     message: unknown;
     timeout: number | undefined;
@@ -141,14 +141,13 @@ export class Notice {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Router `requestUrl` (Poligon F1)
+// Router `requestUrl`
 //
 // PO CO: `requestUrl` to drugi (obok streamingu) kanał wyjścia pluginu na świat —
 // jedzie nim wyszukiwarka webowa (`modules/web/WebSearchProvider`), generowanie obrazów
 // i STT (`modules/multimodal`) oraz onboarding. Domyślnie harness blokuje wszystko, na co
-// scenariusz nie zarejestrował trasy (599) — do 2026-09-04 był tu jeszcze wyjątek: stub
-// GitHuba dla updatera (`check_for_update`), zdjęty tego dnia razem z updaterem przed
-// katalogiem (D1). Bez zarejestrowanej trasy scenariusz nie ma jak sprawdzić TYCH ścieżek.
+// scenariusz nie zarejestrował trasy (599) — bez zarejestrowanej trasy scenariusz nie ma
+// jak sprawdzić TYCH ścieżek.
 //
 // Trasy rejestruje scenariusz PRZED biegiem; handler zwraca GOTOWY obiekt odpowiedzi —
 // ŻADEN realny HTTP się nie dzieje (inaczej niż przy fake-serwerach modeli, które muszą
@@ -251,9 +250,9 @@ function _normalizeRouteResponse(out: HarnessRequestUrlResponse | null | undefin
 }
 
 // ── requestUrl: ŻADNEGO realnego requestu — trasy scenariusza → 599 ──
-// Updater (check_for_update, api.github.com co 3h) wycięty 2026-09-04 przed katalogiem (D1) —
-// nic w bootstrapie już nie strzela do sieci samo z siebie. Streaming/model idzie osobnym
-// torem (transport strumienia + fake-serwery na loopbacku).
+// Plugin nie ma updatera (check_for_update, api.github.com co 3h) — nic w bootstrapie
+// już nie strzela do sieci samo z siebie. Streaming/model idzie osobnym torem (transport
+// strumienia + fake-serwery na loopbacku).
 export async function requestUrl(request: RequestUrlArg): Promise<RequestUrlResult> {
     const isStr = typeof request === 'string';
     const url = isStr ? request : (request?.url || '');
@@ -480,7 +479,7 @@ export class Plugin {
     app: AppLike | undefined;
     manifest: { id?: string };
     _children: unknown[];
-    /** Review W5-01: dry-boot ma POKAZAĆ, że komendy i ikony wstążki naprawdę się zarejestrowały. */
+    /** Dry-boot ma POKAZAĆ, że komendy i ikony wstążki naprawdę się zarejestrowały. */
     _registeredCommands: unknown[];
     _registeredRibbonIcons: { icon: unknown; title: unknown }[];
 

@@ -189,7 +189,7 @@ async function main() {
         // Runtime hosta, nie paczka z npm — musi zostac poza bundlem, inaczej wciagnelibysmy
         // caly Obsidian. Lista jest LITERALEM czytanym regexem przez trzech niezaleznych
         // straznikow (core/deps_kontrakt, core/dead_code_zasieg, build_kontrakt) — nie sklejaj
-        // jej ze zmiennych. `electron` NIE WRACA (zszedl 2026-09-04 ze swoim jedynym konsumentem).
+        // jej ze zmiennych. `electron` NIE WRACA (zszedl ze swoim jedynym konsumentem).
         external: ['obsidian'],
         plugins: [cssImportPlugin, markdownImportPlugin, finishBuildPlugin(manifest.id)],
     });

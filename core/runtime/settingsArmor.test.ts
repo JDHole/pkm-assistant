@@ -1,6 +1,5 @@
 /**
- * Pancerz ustawień — zamyka luki F-11/F-12 (do clean-room jedynym dowodem na tę warstwę był
- * harness end-to-end).
+ * Pancerz ustawień. Wcześniej jedynym dowodem na tę warstwę był harness end-to-end.
  *
  * Reguła nadrzędna: pancerz NIGDY nie pisze do `SETTINGS_PATH`. Wolno mu dotknąć wyłącznie
  * odkładki `settings.corrupt-<ts>.json`, kopii `last-good` i katalogu backupów.
@@ -67,7 +66,6 @@ function makeIo(files: Record<string, string> = {}, now = 1_700_000_000_000): Fa
     return { io, files, reads, writes, mkdirs, removed };
 }
 
-// ── C3.1 ─────────────────────────────────────────────────────────────────────
 test('zdrowy plik → source "primary", plik nietknięty, last-good = kopia 1:1', async t => {
     const zdrowy = JSON.stringify({ pkmAssistant: { language: 'pl' } });
     const fake = makeIo({ [SETTINGS_PATH]: zdrowy });
@@ -82,7 +80,6 @@ test('zdrowy plik → source "primary", plik nietknięty, last-good = kopia 1:1'
     t.is(wynik.lastGoodRefreshed, true);
 });
 
-// ── C3.2 ─────────────────────────────────────────────────────────────────────
 test('zdrowy plik → odkładka corrupt NIE powstaje', async t => {
     const fake = makeIo({ [SETTINGS_PATH]: JSON.stringify({ pkmAssistant: {} }) });
     const wynik = await loadSettingsWithArmor({ io: fake.io, defaults: DEFAULTS });
@@ -91,7 +88,6 @@ test('zdrowy plik → odkładka corrupt NIE powstaje', async t => {
     t.false(fake.writes.some(w => SETTINGS_CORRUPT_PATH_PATTERN.test(w.path)));
 });
 
-// ── C3.3 ─────────────────────────────────────────────────────────────────────
 test('urwany JSON bez kopii → defaulty, oryginał nietknięty, DOKŁADNIE jedna odkładka 1:1', async t => {
     const urwany = '{"pkmAssistant": {"language": "pl", "chat": {"apiKeys": {"openai": "sk-';
     const fake = makeIo({ [SETTINGS_PATH]: urwany });
@@ -107,7 +103,6 @@ test('urwany JSON bez kopii → defaulty, oryginał nietknięty, DOKŁADNIE jedn
     t.false(fake.writes.some(w => w.path.startsWith(SETTINGS_BACKUPS_DIR)), 'backup dzienny powstał z uszkodzonego pliku');
 });
 
-// ── C3.4 ─────────────────────────────────────────────────────────────────────
 test('urwany JSON → parser odrzuca CAŁOŚĆ, nie skleja strzępów', async t => {
     const urwany = '{"pkmAssistant": {"language": "pl"}, "sekret": "sk-abc';
     const fake = makeIo({ [SETTINGS_PATH]: urwany });
@@ -119,7 +114,7 @@ test('urwany JSON → parser odrzuca CAŁOŚĆ, nie skleja strzępów', async t 
         'język z uszkodzonego pliku przeciekł — parser wydłubał klucz zamiast odrzucić całość');
 });
 
-// ── C3.5 (regresja `parsedFromRaw`) ──────────────────────────────────────────
+// ── regresja `parsedFromRaw` ──────────────────────────────────────────
 test('urwany JSON + zdrowy last-good → source "last-good", kopia NIETKNIĘTA', async t => {
     const kopia = JSON.stringify({ pkmAssistant: { language: 'pl', userColor: '#abc' } });
     const fake = makeIo({ [SETTINGS_PATH]: '{"urwane', [SETTINGS_LAST_GOOD_PATH]: kopia });
@@ -132,7 +127,6 @@ test('urwany JSON + zdrowy last-good → source "last-good", kopia NIETKNIĘTA',
     t.false(fake.writes.some(w => w.path === SETTINGS_LAST_GOOD_PATH), 'kopia awansowała z uszkodzonej treści');
 });
 
-// ── C3.6 ─────────────────────────────────────────────────────────────────────
 test('pusty obiekt {} nie awansuje na last-good', async t => {
     const fake = makeIo({ [SETTINGS_PATH]: '{}' });
     await loadSettingsWithArmor({ io: fake.io, defaults: DEFAULTS });
@@ -141,7 +135,6 @@ test('pusty obiekt {} nie awansuje na last-good', async t => {
         'pusty worek awansował na kopię — user straciłby ostatnie dobre ustawienia');
 });
 
-// ── C3.7 (luka F-12) ─────────────────────────────────────────────────────────
 test('backup dzienny POWSTAJE przy zdrowym pliku', async t => {
     const zdrowy = JSON.stringify({ pkmAssistant: { language: 'pl' } });
     const fake = makeIo({ [SETTINGS_PATH]: zdrowy });
@@ -154,7 +147,6 @@ test('backup dzienny POWSTAJE przy zdrowym pliku', async t => {
     t.is(wynik.backupWritten, true);
 });
 
-// ── C3.8 (luka F-12) ─────────────────────────────────────────────────────────
 test('rotacja backupów tnie do 7', async t => {
     const files: Record<string, string> = { [SETTINGS_PATH]: JSON.stringify({ pkmAssistant: {} }) };
     for (let i = 1; i <= 9; i++) {
@@ -170,7 +162,6 @@ test('rotacja backupów tnie do 7', async t => {
     t.false(fake.removed.some(p => p.includes('2026-08-09')), 'rotacja skasowała najświeższy backup');
 });
 
-// ── C3.10 (S-15 po kasacji importu) ──────────────────────────────────────────
 test('brak settings.json i brak kopii → DEFAULTY, zero prób czytania czegokolwiek innego', async t => {
     const fake = makeIo({});
 
@@ -183,7 +174,6 @@ test('brak settings.json i brak kopii → DEFAULTY, zero prób czytania czegokol
     t.deepEqual(fake.writes, [], 'pancerz założył marker albo cokolwiek innego zapisał');
 });
 
-// ── C3.11 (S-16, incydent 2026-07-28) ────────────────────────────────────────
 test('pancerz NIGDY nie woła exists()', async t => {
     const fake = makeIo({ [SETTINGS_PATH]: JSON.stringify({ pkmAssistant: {} }) });
     // `SettingsIo` w ogóle nie ma metody `exists` — gdyby pancerz jej szukał, poleci TypeError.
@@ -194,17 +184,15 @@ test('pancerz NIGDY nie woła exists()', async t => {
     await t.notThrowsAsync(loadSettingsWithArmor({ io: fake.io, defaults: DEFAULTS }));
 });
 
-// ── C3.12 ────────────────────────────────────────────────────────────────────
 test('nazwa odkładki pasuje do SETTINGS_CORRUPT_PATH_PATTERN', async t => {
     const fake = makeIo({ [SETTINGS_PATH]: 'to nie jest json' });
     const wynik = await loadSettingsWithArmor({ io: fake.io, defaults: DEFAULTS });
 
     t.truthy(wynik.quarantinedPath);
     t.regex(wynik.quarantinedPath!, SETTINGS_CORRUPT_PATH_PATTERN,
-        'scenariusze 26/27 pinują DOKŁADNIE ten wzorzec nazwy');
+        'ten test pinuje DOKŁADNIE ten wzorzec nazwy');
 });
 
-// ── C3.13 (spec §6 zasada 6) ─────────────────────────────────────────────────
 test('migracje biegną w PAMIĘCI — wynik ma nowe klucze, dysk stary', async t => {
     const stary = STARY_WOREK;
     const fake = makeIo({ [SETTINGS_PATH]: stary });
@@ -218,8 +206,7 @@ test('migracje biegną w PAMIĘCI — wynik ma nowe klucze, dysk stary', async t
     t.false(fake.writes.some(w => w.path === SETTINGS_PATH));
 });
 
-// ── C3.14 ────────────────────────────────────────────────────────────────────
-test('pierwszy zapis po migracji poprzedza kopia settings.pre-clean-room.json', async t => {
+test('pierwszy zapis po migracji poprzedza kopia settings.pre-migration.json', async t => {
     const fake = makeIo({ [SETTINGS_PATH]: STARY_WOREK });
 
     await loadSettingsWithArmor({ io: fake.io, defaults: DEFAULTS });
@@ -232,7 +219,7 @@ test('pierwszy zapis po migracji poprzedza kopia settings.pre-clean-room.json', 
     t.is(kopie.length, 0, 'kopia sprzed migracji jest JEDNORAZOWA');
 });
 
-// ── C7.9 / E-22 — `readUiLanguage` (funkcja żyje w tym pliku) ────────────────
+// ── `readUiLanguage` (funkcja żyje w tym pliku) ──────────────────────────────
 test('readUiLanguage: kolejność kandydatów + brak exists() + fallback "en"', async t => {
     const odczyty: string[] = [];
     const adapter = {
@@ -253,7 +240,6 @@ test('readUiLanguage: kolejność kandydatów + brak exists() + fallback "en"', 
         'nieczytelny plik musi dawać fallback — rejestracja komend nie ma prawa wywalić onload()');
 });
 
-// ── C3.16 ────────────────────────────────────────────────────────────────────
 test('brak czytelnych ustawień → RAPORT migracji jest wyzerowany', async t => {
     const fake = makeIo({});
 
@@ -265,7 +251,6 @@ test('brak czytelnych ustawień → RAPORT migracji jest wyzerowany', async t =>
     t.is(wynik.backupWritten, false);
 });
 
-// ── C3.17 ────────────────────────────────────────────────────────────────────
 test('mkdir dostaje KATALOG kopii, nie ścieżkę pliku', async t => {
     const fake = makeIo({ [SETTINGS_PATH]: JSON.stringify({ pkmAssistant: { language: 'pl' } }) });
 
@@ -275,7 +260,6 @@ test('mkdir dostaje KATALOG kopii, nie ścieżkę pliku', async t => {
         'pancerz zakłada katalog wyliczony ze ścieżki — inaczej zapis kopii pada na dysku bez katalogu');
 });
 
-// ── C3.18 ────────────────────────────────────────────────────────────────────
 test('dysk tylko-do-odczytu → degradacja, a raport MÓWI, że kopii nie ma', async t => {
     const zdrowy = JSON.stringify({ pkmAssistant: { language: 'pl' } });
     const fake = makeIo({ [SETTINGS_PATH]: zdrowy });
@@ -289,7 +273,6 @@ test('dysk tylko-do-odczytu → degradacja, a raport MÓWI, że kopii nie ma', a
     t.is(wynik.backupWritten, false, 'raport kłamie: backup dzienny nie powstał');
 });
 
-// ── C3.19 ────────────────────────────────────────────────────────────────────
 test('dysk tylko-do-odczytu + nieczytelny plik → BRAK ścieżki odkładki w raporcie', async t => {
     const fake = makeIo({ [SETTINGS_PATH]: '{"urwane' });
     fake.io.write = async () => { throw new Error('EROFS'); };
@@ -301,7 +284,6 @@ test('dysk tylko-do-odczytu + nieczytelny plik → BRAK ścieżki odkładki w ra
         'raport wskazuje odkładkę, której na dysku nie ma — user szukałby nieistniejącego pliku');
 });
 
-// ── C3.20 ────────────────────────────────────────────────────────────────────
 test('backup na dziś już jest → drugi boot go NIE nadpisuje i nie rotuje', async t => {
     // `makeIo` wstrzykuje zegar 1_700_000_000_000 ms = 2023-11-14 UTC.
     const dzisiejszy = `${SETTINGS_BACKUPS_DIR}/settings.2023-11-14.json`;
@@ -319,7 +301,6 @@ test('backup na dziś już jest → drugi boot go NIE nadpisuje i nie rotuje', a
     t.deepEqual(fake.removed, [], 'rotacja ruszyła mimo braku nowego backupu');
 });
 
-// ── C3.21 ────────────────────────────────────────────────────────────────────
 test('poprawny JSON, ale nie obiekt (liczba / tekst / tablica) → to NIE są ustawienia', async t => {
     for (const tresc of ['42', '"pl"', 'true', '[]']) {
         const fake = makeIo({ [SETTINGS_PATH]: tresc });
@@ -333,7 +314,6 @@ test('poprawny JSON, ale nie obiekt (liczba / tekst / tablica) → to NIE są us
     }
 });
 
-// ── C3.22 ────────────────────────────────────────────────────────────────────
 test('createVaultSettingsIo: każda metoda idzie do adaptera vaulta', async t => {
     const wolania: unknown[][] = [];
     const adapter = {
@@ -366,7 +346,6 @@ test('createVaultSettingsIo: każda metoda idzie do adaptera vaulta', async t =>
     ], 'któraś metoda nie doszła do adaptera albo doszła w złej kolejności');
 });
 
-// ── C3.23 ────────────────────────────────────────────────────────────────────
 test('createVaultSettingsIo: kaleki adapter degraduje, nie wywala bootu', async t => {
     const io = createVaultSettingsIo({} as unknown as Parameters<typeof createVaultSettingsIo>[0]);
 
@@ -378,7 +357,6 @@ test('createVaultSettingsIo: kaleki adapter degraduje, nie wywala bootu', async 
         'zapis bez adaptera musi być głośny — cichy no-op udawałby udaną kopię');
 });
 
-// ── C3.24 ────────────────────────────────────────────────────────────────────
 test('createVaultSettingsIo: pad adaptera w read/mkdir/list wygląda jak brak pliku', async t => {
     const buch = async (): Promise<never> => { throw new Error('pad dysku'); };
     const io = createVaultSettingsIo({
@@ -395,7 +373,6 @@ test('createVaultSettingsIo: pad adaptera w read/mkdir/list wygląda jak brak pl
         'kasowanie idzie do adaptera bez tłumika — rotacja sama łapie swoje błędy');
 });
 
-// ── C3.25 ────────────────────────────────────────────────────────────────────
 test('createVaultSettingsIo: adapter zwracający śmieci z list nie wywraca rotacji', async t => {
     const io = createVaultSettingsIo({
         list: async () => undefined,

@@ -1,22 +1,22 @@
 /**
- * artifactSummon.js — przywołanie agenta po interakcji z artefaktem w notatce (E2.9 FAZA B / B2).
+ * artifactSummon.js - przywołanie agenta po interakcji z artefaktem w notatce.
  *
  * Dwie warstwy w jednym pliku (BEZ importu `obsidian`, żeby `buildSummonMessage` był node-testowalny):
- *  - `buildSummonMessage(thin, actionLabel)` — PURE. Buduje wiadomość user-side: nagłówek
- *    „📄 Artefakt „<tytul>" (<id>) — user: <akcja>" + sparsowany chudy JSON (ten sam kształt co
+ *  - `buildSummonMessage(thin, actionLabel)` - PURE. Buduje wiadomość user-side: nagłówek
+ *    „📄 Artefakt „<tytul>" (<id>) - user: <akcja>" + sparsowany chudy JSON (ten sam kształt co
  *    `artifact_read`). Testowalny.
- *  - `summonAgentForArtifact(plugin, {...})` — RUNTIME. Czyta świeży stan (`artifactStore.read`),
+ *  - `summonAgentForArtifact(plugin, {...})` - RUNTIME. Czyta świeży stan (`artifactStore.read`),
  *    otwiera/aktywuje ChatView z agentem instancji, ustawia artefakt jako AKTYWNY w tej rozmowie
- *    (B3) i wysyła wiadomość ISTNIEJĄCĄ ścieżką `send_message` (wzór `main.sendInlineComment`).
- *    NIE buduje równoległego mechanizmu wysyłki.
- *  - `activateArtifactInChat(plugin, {id})` — RUNTIME, wariant CICHY. To samo ustawienie aktywnego
+ *    i wysyła wiadomość ISTNIEJĄCĄ ścieżką `send_message` (wzór `main.sendInlineComment`). NIE
+ *    buduje równoległego mechanizmu wysyłki.
+ *  - `activateArtifactInChat(plugin, {id})` - RUNTIME, wariant CICHY. To samo ustawienie aktywnego
  *    artefaktu, ale BEZ budowania i wysyłania wiadomości. Dla klików, które mają tylko przypiąć
  *    artefakt (picker w slim barze); wysyłkę robią guziki w notatce i 🔄 na chipie.
  */
 import { t } from '../../core/i18n/index.js';
-// AUD-dead-code-182: CHAT_VIEW_TYPE — kanoniczna stała żyje w core/ (node-safe barrel),
-// nie w `modules/chat/index.js` (ten ciągnie `obsidian` przez ChatView/chat_streaming.js
-// i złamałby "BEZ importu obsidian" tego pliku — patrz `core/utils/viewTypes.ts`).
+// CHAT_VIEW_TYPE - kanoniczna stała żyje w core/ (node-safe barrel), nie w
+// `modules/chat/index.js` (ten ciągnie `obsidian` przez ChatView/chat_streaming.js i złamałby
+// "BEZ importu obsidian" tego pliku - patrz `core/utils/viewTypes.ts`).
 import { MACHINE_MESSAGE_META, CHAT_VIEW_TYPE } from '../../core/index.js';
 import type { ThinArtifact } from './types.js';
 
@@ -117,10 +117,10 @@ export async function summonAgentForArtifact(plugin: any, { id, actionLabel = ''
             setActiveArtifact(view, id);
             if (view.input_area) {
                 view.input_area.value = message;
-                // K7 (AUD-security-062): treść artefaktu pisze AGENT (a jej materiał bywa z sieci),
-                // więc wysyłka jest maszynowa mimo kliknięcia usera — inaczej adres wpisany przez
-                // model do sekcji „Źródła" odblokowywałby `web_read`, a marker `@@skill:` udawałby
-                // polecenie człowieka.
+                // Treść artefaktu pisze AGENT (a jej materiał bywa z sieci), więc wysyłka jest
+                // maszynowa mimo kliknięcia usera - inaczej adres wpisany przez model do sekcji
+                // „Źródła" odblokowywałby `web_read`, a marker `@@skill:` udawałby polecenie
+                // człowieka.
                 try { view.send_message?.({ meta: MACHINE_MESSAGE_META }); } catch { /* model niekonfigurowany itp. */ }
             }
         };

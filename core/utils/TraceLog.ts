@@ -1,5 +1,5 @@
 /**
- * TraceLog — cienki trace przebiegu pętli agenta (E2.2, F10, 2026-07-22).
+ * TraceLog — cienki trace przebiegu pętli agenta.
  *
  * PO CO: `runAgentLoop` (modules/agent-loop) to jedna pętla narzędziowa czatu i
  * sub-agentów. Kiedy coś idzie nie tak (narzędzie się wywala, model kręci się w
@@ -41,7 +41,7 @@ export interface TraceSink {
 export type ScopedTrace = (type: string, fields?: Record<string, unknown>) => void;
 
 export class TraceLog {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare sink: TraceSink | null;
     declare enabled: boolean;
     declare mask: ((line: string) => string) | null;

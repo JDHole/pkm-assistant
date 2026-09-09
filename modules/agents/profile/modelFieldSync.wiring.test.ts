@@ -1,5 +1,5 @@
 /**
- * modelFieldSync — strażnik OKABLOWANIA na REALNYM miejscu buga (review Opusa, blocker B6-2 p.4).
+ * modelFieldSync — strażnik OKABLOWANIA na REALNYM miejscu buga (blocker B6-2 p.4).
  *
  * Dlaczego test po ŹRÓDLE, a nie po zachowaniu: `AgentProfileView.ts` i `profile_advanced.ts`
  * importują `obsidian` (Setting/Notice), więc AVA nie zaimportuje żadnego z nich — to samo

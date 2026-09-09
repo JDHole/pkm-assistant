@@ -13,7 +13,7 @@ import type {
 } from '../contracts.js';
 
 /**
- * Wiadomość, w której treść jest ZAWSZE stringiem — dostawcy kształtu OpenAI nie oddają
+ * Wiadomość, w której treść jest ZAWSZE stringiem - dostawcy kształtu OpenAI nie oddają
  * bloków multimodalnych w odpowiedzi, a testy porównują treść znak w znak.
  */
 type TextMessage = OpenAiResponseTransformedMessage & { content: string };
@@ -23,15 +23,14 @@ type TextMessage = OpenAiResponseTransformedMessage & { content: string };
  * Regression guards dla parsera `<think>` na POZOSTAŁYCH platformach o kształcie OpenAI
  * (Groq, OpenRouter).
  *
- * Kontekst: mechanika mieszka we wspólnym `ReasoningTagFilter`, tym samym co w LM Studio.
- * Wcześniej TYLKO LM Studio i Ollama parsowały tagi myślenia — na Groqu (hostuje
- * Qwen/DeepSeek-R1 distill) i na modelach lokalnych przepuszczanych przez OpenRoutera surowe
- * `<think>…</think>` jechało do widocznej treści odpowiedzi. (Trzeci dostawca tej rodziny,
- * Custom API w trybie „openai", skreślony 2026-09-03 razem z całym adapterem —
- * AUD-dead-code-026/110/168, decyzja Kuby.)
+ * Mechanika mieszka we wspólnym `ReasoningTagFilter`, tym samym co w LM Studio. Ten plik
+ * pilnuje, że mechanika obejmuje też Groq (hostuje Qwen/DeepSeek-R1 distill) i modele
+ * lokalne przepuszczane przez OpenRoutera - bez tego podłączenia surowy `<think>…</think>`
+ * jedzie do widocznej treści odpowiedzi. (Trzeci dostawca tej rodziny, Custom API w trybie
+ * „openai", został usunięty razem z całym adapterem.)
  *
  * Pełne pokrycie reguł parsera (rozcięte tagi, rollback, proza o znaczniku, przerwany stream)
- * siedzi w `lm_studio.test.ts` — ten plik pilnuje, że KAŻDY z pozostałych dwóch dostawców jest
+ * siedzi w `lm_studio.test.ts` - ten plik pilnuje, że KAŻDY z pozostałych dwóch dostawców jest
  * do tej mechaniki podłączony i że natywne myślenie nadal ją wyłącza.
  */
 const REQ: ChatRequest = { messages: [{ role: 'user', content: 'hej' }] };
@@ -44,7 +43,7 @@ const emitted = (events: StreamEvent[]) =>
   events.filter((e): e is Extract<StreamEvent, { type: 'text' }> => e.type === 'text')
     .map(e => e.delta).join('');
 
-/** Seam obserwacyjny parsera tagów myślenia (TT-16). */
+/** Seam obserwacyjny parsera tagów myślenia. */
 const seam = (decoder: StreamDecoder) => decoder.reasoning!;
 
 function ctxFor(provider: ChatProvider): ProviderContext {
@@ -78,8 +77,8 @@ function completed(provider: ChatProvider, content: string): TextMessage {
 }
 
 /**
- * Tablica dostawców zamiast tablicy klas adapterów — dziś jedna klasa per platforma,
- * a różnicę robi metryczka (`info`), nie hierarchia dziedziczenia.
+ * Tablica dostawców: jedna klasa per platforma, różnicę robi metryczka (`info`),
+ * nie hierarchia dziedziczenia.
  */
 const PROVIDERS: Array<[string, ChatProvider]> = [
   ['groq', groqProvider],
@@ -138,7 +137,7 @@ for (const [name, provider] of PROVIDERS) {
   });
 
   test(`${name} think parser: non-streaming rozdziela myślenie od odpowiedzi`, t => {
-    // Bez tego surowy `<think>` jechał gołym tekstem m.in. do wyników sub-agentów.
+    // Bez tego surowy `<think>` jedzie gołym tekstem m.in. do wyników sub-agentów.
     const msg = completed(provider, '<think>rozumowanie modelu</think>Właściwa odpowiedź.');
 
     t.is(msg.reasoning_content, 'rozumowanie modelu');

@@ -26,7 +26,7 @@ export class Summarizer {
      * @param {Object} options
      * @param {number} options.triggerThreshold - % limitu (0.9 = 90%)
      * @param {Object} options.chatModel - ChatModel instance
-     * @param {string} [options.compressionPrompt] - E2.8 B3: resolved compression skeleton
+     * @param {string} [options.compressionPrompt] - Resolved compression skeleton
      *   (agent>global>factory). Defaults to the factory skeleton. chat_session resolves it
      *   (Summarizer doesn't know the active agent).
      */
@@ -174,7 +174,7 @@ export class Summarizer {
             ? `\nPOPRZEDNIE PODSUMOWANIE (buduj na nim — rozszerzaj, nie zastępuj):\n---\n${previousSummary}\n---\n`
             : '';
 
-        // E2.7 W2 (K3): dedup context for MEMORY_CANDIDATES — pass only the brain.md index
+        // Dedup context for MEMORY_CANDIDATES - pass only the brain.md index
         // (pointers), never full note bodies, to keep the token budget tight.
         const memoryIndexSection = memoryIndex
             ? `\nAKTUALNA PAMIĘĆ DŁUGOTERMINOWA (indeks brain.md — NIE proponuj kandydatów, które już tu są):\n---\n${memoryIndex}\n---\n`
@@ -200,7 +200,7 @@ Agent MUSI wiedzieć od czego zacząć po wznowieniu — opisz to tak szczegół
             ? `\n\n📂 Pełna rozmowa zapisana w: ${sessionPath} — agent może ją przeczytać żeby zweryfikować szczegóły.`
             : '';
 
-        // E2.8 B3: the fixed skeleton (intro + sekcje 1-8 + ZASADY + blok MEMORY_CANDIDATES) lives in
+        // The fixed skeleton (intro + sekcje 1-8 + ZASADY + blok MEMORY_CANDIDATES) lives in
         // compressionPrompt.js and is overridable (agent>global>factory, resolved by chat_session).
         // The dynamic pieces below are still composed here and injected into the placeholders.
         // Function replacers avoid `$`-sequence interpretation from user-provided content.

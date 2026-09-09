@@ -50,12 +50,12 @@ interface VaultSectionContext {
 }
 
 /**
- * Settings → Vault (E2.8 B1 / S19b).
+ * Settings → Vault.
  *
  * Two things live here, both consumed by agents' focus folders / the environment prompt:
- *  1. GRUPY folderów — named, reusable bundles of folders (`settings.pkmAssistant.vaultGroups`).
- *     An agent references a group via `{group: 'Nazwa'}` in its focus folders (assignment UI = phase C).
- *  2. Opisy stref vaulta — the global vault map (`.pkm-assistant/agents/vault_map.md`): folder
+ *  1. GRUPY folderów - named, reusable bundles of folders (`settings.pkmAssistant.vaultGroups`).
+ *     An agent references a group via `{group: 'Nazwa'}` in its focus folders.
+ *  2. Opisy stref vaulta - the global vault map (`.pkm-assistant/agents/vault_map.md`): folder
  *     descriptions appended to the environment section of every agent's system prompt.
  */
 export function renderVaultSection(container: HTMLElement, ctx: VaultSectionContext): void {
@@ -92,7 +92,7 @@ export function renderVaultSection(container: HTMLElement, ctx: VaultSectionCont
     };
 
     const makeFolderInput = (value: string): HTMLInputElement => {
-        // Element odklejony (dopięty ręcznie przez appendChild niżej) — global `createEl` Obsidiana
+        // Element odklejony (dopięty ręcznie przez appendChild niżej) - global `createEl` Obsidiana
         // zamiast document.createElement (obsidianmd/prefer-create-el), ten sam kształt atrybutów.
         const input = createEl('input', {
             type: 'text',
@@ -235,7 +235,7 @@ export function renderVaultSection(container: HTMLElement, ctx: VaultSectionCont
         })();
     });
 
-    // ── Section C: artefakty żywe (E2.9) ──
+    // ── Section C: artefakty żywe ──
     container.createEl('h4', { text: t('settings.artifacts_title') });
     container.createEl('p', { text: t('settings.artifacts_desc'), cls: 'setting-item-description' });
 

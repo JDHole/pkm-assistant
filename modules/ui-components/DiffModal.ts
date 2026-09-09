@@ -52,8 +52,8 @@ export class DiffModal extends Modal {
         pathEl.appendText(' ');
         pathEl.createEl('code', { text: this.opts.path });
 
-        // AUD-wydajnosc-103: diff computed ONCE, shared by stats + render (was computed twice —
-        // once per method, full LCS DP table included).
+        // Diff computed ONCE, shared by stats + render — computing the same full LCS DP table
+        // twice (once per method) would waste one pass for nothing.
         const ops = computeLineDiff(this.opts.oldContent, this.opts.newContent);
 
         // Stats
@@ -76,10 +76,10 @@ export class DiffModal extends Modal {
 
         // Diff body
         const diffBody = contentEl.createDiv('diff-body');
-        // Review fix (2026-09-02): oldContent !== newContent as STRINGS doesn't guarantee any
-        // line actually differs after split('\n') (e.g. content that differs only outside what
-        // split captures) — without this, the modal showed nothing but a single "⋯ N unchanged
-        // lines ⋯" placeholder, an approval screen with no visible change to approve.
+        // oldContent !== newContent as STRINGS doesn't guarantee any line actually differs after
+        // split('\n') (e.g. content that differs only outside what split captures) — without
+        // this check, the modal would show nothing but a single "⋯ N unchanged lines ⋯"
+        // placeholder, an approval screen with no visible change to approve.
         if (stats.added === 0 && stats.removed === 0) {
             this._renderNoChanges(diffBody);
         } else {
@@ -99,9 +99,9 @@ export class DiffModal extends Modal {
     }
 
     /**
-     * AUD-wydajnosc-102: this used to render a DOM row for EVERY line of the diff, including
-     * every unchanged ('equal') one — so opening the modal on a barely-touched 4000-line note
-     * built ~4000 rows (~12000 DOM nodes) when only a handful of lines actually changed.
+     * Rendering a DOM row for EVERY line of the diff, including every unchanged ('equal') one,
+     * would turn opening the modal on a barely-touched 4000-line note into ~4000 rows
+     * (~12000 DOM nodes) even when only a handful of lines actually changed.
      * `selectVisibleDiffLines` (pure, `diffLines.ts`) picks changed lines plus a small context
      * window; long runs of unchanged lines collapse into a single "N unchanged lines"
      * placeholder row. Nothing about a change itself is ever hidden — only the surrounding noise.

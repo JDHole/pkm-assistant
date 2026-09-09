@@ -80,7 +80,7 @@ export function renderWebSearchSection(container: HTMLElement, ctx: WebSettingsS
     const providerId = ws.provider || 'jina';
     const provider = WEB_SEARCH_PROVIDERS[providerId];
 
-    // ── Licznik zużycia (E3.3, DEC L13-4) — INFORMACJA, nie limit ──
+    // ── Licznik zużycia — INFORMACJA, nie limit ──
     // Jina (darmowa podłoga) i SearXNG (self-host) nie mają progu, który dałoby się pokazać.
     if (COUNTED_PROVIDERS.includes(providerId)) {
         const usage = readUsage(ws);
@@ -91,7 +91,7 @@ export function renderWebSearchSection(container: HTMLElement, ctx: WebSettingsS
             .setDesc(t('settings.web_search_usage_hint'));
     }
 
-    // ── Klucz API per dostawca (E3.3, mikro-decyzja 2) ──
+    // ── Klucz API per dostawca ──
     // Pole widoczne, gdy klucz jest wymagany, opcjonalny albo już wpisany.
     // Legacy `ws.apiKey` pokazujemy jako wartość startową dla WYBRANEGO dostawcy
     // (resolveProviderKey), ale zapisujemy już wyłącznie do `ws.apiKeys[id]` —
@@ -149,7 +149,7 @@ export function renderWebSearchSection(container: HTMLElement, ctx: WebSettingsS
         linkBtn.addClass('pkm-link-btn');
     }
 
-    // ── Streszczanie długich stron (E3.3, DEC L13-5a) ──
+    // ── Streszczanie długich stron ──
     new Setting(container)
         .setName(t('settings.web_search_summarize'))
         .setDesc(t('settings.web_search_summarize_desc'))
@@ -160,7 +160,7 @@ export function renderWebSearchSection(container: HTMLElement, ctx: WebSettingsS
                 await save();
             }));
 
-    // ── Filtr domen (E3.3, DEC L13-5c) ──
+    // ── Filtr domen ──
     _renderDomainList(container, ctx, ws, 'blockedDomains', 'blocked');
     _renderDomainList(container, ctx, ws, 'allowedDomains', 'allowed');
 }

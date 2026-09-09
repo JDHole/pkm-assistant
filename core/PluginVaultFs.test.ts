@@ -1,5 +1,5 @@
 /**
- * `PluginVaultFs` — zamyka lukę F-02 (cienka warstwa nad adapterem vaulta nie miała
+ * `PluginVaultFs` — zamyka lukę pokrycia (cienka warstwa nad adapterem vaulta nie miała
  * ani jednego testu, mimo że przez nią przechodzi każdy odczyt i zapis runtime'u).
  *
  * Plik dotyka `obsidian` wyłącznie przez `import type`, więc wstaje w gołym Node.
@@ -26,7 +26,6 @@ function makeAdapter(overrides: Record<string, unknown> = {}, log: Wywolanie[] =
 
 const host = (adapter: unknown) => ({ app: { vault: { adapter } } });
 
-// ── C8.1 ─────────────────────────────────────────────────────────────────────
 test('basePath jest doklejany do każdej ścieżki', async t => {
     const log: Wywolanie[] = [];
     const fs = new PluginVaultFs(host(makeAdapter({}, log)) as never, { basePath: '.pkm-assistant' });
@@ -44,7 +43,6 @@ test('basePath jest doklejany do każdej ścieżki', async t => {
     t.is(fs.basePath, '.pkm-assistant');
 });
 
-// ── C8.2 ─────────────────────────────────────────────────────────────────────
 test('scan() zwraca pustą listę, gdy katalogu nie ma (fail-soft)', async t => {
     const adapter = makeAdapter({
         exists: async () => false,
@@ -58,7 +56,6 @@ test('scan() zwraca pustą listę, gdy katalogu nie ma (fail-soft)', async t => 
     t.deepEqual(fs.files, [], 'lista plików nie została zresetowana po nieudanym skanie');
 });
 
-// ── C8.3 ─────────────────────────────────────────────────────────────────────
 test('mkdir na istniejącym katalogu to no-op', async t => {
     const log: Wywolanie[] = [];
     const adapter = makeAdapter({ exists: async () => true }, log);
@@ -70,7 +67,6 @@ test('mkdir na istniejącym katalogu to no-op', async t => {
         'mkdir na istniejącym katalogu poszedł do adaptera — na niektórych systemach to błąd');
 });
 
-// ── C8.4 ─────────────────────────────────────────────────────────────────────
 test('list() na padzie → {files:[],folders:[]}', async t => {
     const adapter = makeAdapter({ list: async () => { throw new Error('dysk padł'); } });
     const fs = new PluginVaultFs(host(adapter) as never, {});
@@ -78,7 +74,6 @@ test('list() na padzie → {files:[],folders:[]}', async t => {
     t.deepEqual(await fs.list('cokolwiek'), { files: [], folders: [] });
 });
 
-// ── C8.5 ─────────────────────────────────────────────────────────────────────
 test('stat() na padzie → null', async t => {
     const adapter = makeAdapter({ stat: async () => { throw new Error('dysk padł'); } });
     const fs = new PluginVaultFs(host(adapter) as never, {});
@@ -86,7 +81,6 @@ test('stat() na padzie → null', async t => {
     t.is(await fs.stat('a.md'), null);
 });
 
-// ── C8.6 ─────────────────────────────────────────────────────────────────────
 test('brak adaptera → wszystkie metody fail-soft, żadna nie rzuca poza read/write', async t => {
     const fs = new PluginVaultFs(host(undefined) as never, {});
 

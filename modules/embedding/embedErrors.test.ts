@@ -1,10 +1,10 @@
 /**
- * embedErrors.test.ts — pinowanie kontraktu błędu embeddingu (F10 mutacje, `embedErrors.ts`).
+ * embedErrors.test.ts - pinowanie kontraktu błędu embeddingu (`embedErrors.ts`).
  *
  * Zakres: konstruktor `EmbedBatchError` (domyślna wartość `attempts`) + strażnik
- * `isEmbedBatchError` (ścieżka `instanceof` ORAZ ścieżka po kształcie — to druga
+ * `isEmbedBatchError` (ścieżka `instanceof` ORAZ ścieżka po kształcie - to druga
  * jest tu kluczowa, bo VaultIndexer opiera się na niej, gdy `instanceof` zawodzi
- * przez granicę modułu — patrz komentarz w `embedErrors.ts`).
+ * przez granicę modułu - patrz komentarz w `embedErrors.ts`).
  */
 import test from 'ava';
 import { EmbedBatchError, isEmbedBatchError } from './embedErrors.js';

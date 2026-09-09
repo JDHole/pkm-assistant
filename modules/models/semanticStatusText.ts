@@ -1,33 +1,33 @@
 /**
- * Renderer statusu indeksu semantycznego (W13, follow-up po review W5) — wyciągnięty do
- * czystej funkcji, żeby dało się go testować bez `obsidian` (AVA, node-owy proces).
+ * Renderer statusu indeksu semantycznego - czysta funkcja, żeby dało się go testować bez
+ * `obsidian` (AVA, node-owy proces).
  *
- * PRZED tą naprawą `case 'ready'` w `SettingsContent.ts` czytał `progress.total` —
- * czyli liczbę plików PRZESKANOWANYCH przez ostatni skan, nie liczbę wektorów faktycznie
- * leżących w indeksie. Po W5 (`VaultIndexer.getStatus()` ma `lastError` i indekser potrafi
- * opublikować odzyskany indeks mimo pada resyncu, patrz `modules/embedding/CLAUDE.md` gotcha 8)
- * to rozjechało się z rzeczywistością: pusty indeks (0 wektorów) po padniętym pierwszym skanie
- * dalej pokazywał „Aktywne — zaindeksowano 4420 plików", bo `total` liczy WEJŚCIE skanu, nie
- * jego WYNIK.
+ * `progress.total` liczy WEJŚCIE skanu - liczbę plików PRZESKANOWANYCH przez ostatni skan -
+ * NIE liczbę wektorów faktycznie leżących w indeksie. Indekser (`VaultIndexer.getStatus()`,
+ * `lastError`) potrafi opublikować odzyskany indeks mimo pada resyncu (patrz
+ * `modules/embedding/CLAUDE.md` gotcha 8), więc pusty indeks (0 wektorów) po padniętym
+ * pierwszym skanie może mieć `total > 0`. Polegając na `total`, `case 'ready'` pokazałby
+ * „Aktywne - zaindeksowano 4420 plików" mimo pustego indeksu, bo `total` liczy WEJŚCIE skanu,
+ * nie jego WYNIK.
  *
- * Prawda o zawartości indeksu to `countDocs(plugin.oramaDb)` (`modules/embedding`) — realna
+ * Prawda o zawartości indeksu to `countDocs(plugin.oramaDb)` (`modules/embedding`) - realna
  * liczba dokumentów w silniku Orama. Ta funkcja dostaje ją już policzoną (wołacz w
  * `SettingsContent.ts` robi `await import('../embedding/index.js')`, tak jak dla
- * `migrateSCToOrama` w tym samym pliku — moduł `models` nie ma statycznej zależności od
+ * `migrateSCToOrama` w tym samym pliku - moduł `models` nie ma statycznej zależności od
  * `embedding`).
  */
 
-/** Dane wejściowe — już wyciągnięte z `IndexerStatusSnapshot` + policzone `countDocs`. */
+/** Dane wejściowe - już wyciągnięte z `IndexerStatusSnapshot` + policzone `countDocs`. */
 export interface SemanticStatusData {
     status?: string;
-    /** `progress.total` — liczba plików PRZESKANOWANYCH przez ostatni skan (NIE liczba wektorów). */
+    /** `progress.total` - liczba plików PRZESKANOWANYCH przez ostatni skan (NIE liczba wektorów). */
     total?: number;
-    /** `progress.indexed` — postęp trwającego skanu (`status === 'building'`). */
+    /** `progress.indexed` - postęp trwającego skanu (`status === 'building'`). */
     indexed?: number;
-    /** `countDocs(plugin.oramaDb)` — realna liczba dokumentów w indeksie. */
+    /** `countDocs(plugin.oramaDb)` - realna liczba dokumentów w indeksie. */
     docs?: number;
     lastError?: string | null;
-    /** `vaultIndexer.skipped.size` — pliki pominięte po wyczerpaniu prób (patrz embedding gotcha 12). */
+    /** `vaultIndexer.skipped.size` - pliki pominięte po wyczerpaniu prób (patrz embedding gotcha 12). */
     skipped?: number;
 }
 
@@ -49,7 +49,7 @@ type Translate = (key: string, params?: Record<string, unknown>) => string;
 
 /**
  * Czysta funkcja: dane statusu → wariant + tekst gotowy do `.setDesc()`.
- * Zero zależności od `obsidian` — `t` przychodzi wstrzyknięty (w produkcji `core/i18n`,
+ * Zero zależności od `obsidian` - `t` przychodzi wstrzyknięty (w produkcji `core/i18n`,
  * w testach dowolny stub).
  */
 export function computeSemanticStatusText(data: SemanticStatusData | null | undefined, t: Translate): SemanticStatusResult {
@@ -66,7 +66,7 @@ export function computeSemanticStatusText(data: SemanticStatusData | null | unde
     switch (data.status) {
         case 'ready': {
             // Skan przeszedł N plików, ale indeks jest pusty (pad pierwszego skanu przed
-            // publikacją, albo `_publish()` z zerowym `db`) — powiedz to wprost, nie „Aktywne".
+            // publikacją, albo `_publish()` z zerowym `db`) - powiedz to wprost, nie „Aktywne".
             const isEmpty = docs === 0 && total > 0;
             let text = isEmpty
                 ? t('settings.semantic_status_ready_empty')

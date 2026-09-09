@@ -1,32 +1,32 @@
 /**
- * requestGate — bramka równoległości requestów do modelu, per platforma.
+ * requestGate - bramka równoległości requestów do modelu, per platforma.
  *
- * Powód (Zwis subagentow, lokalny most, 2026, incydent 2026-08-11): lokalny most
- * (proxy zgodne z API LM Studio) przy KILKU połączeniach otwartych naraz potrafi
- * przyjąć request i nie oddać ani bajta — bez błędu, w nieskończoność. Delegate
- * z listą tasków strzela wszystkie suby w tej samej milisekundzie, więc każda
- * delegacja wielozadaniowa była ruletką. Most i tak przerabia requesty po kolei
- * (zmierzone: 2 równoległe = 2x czas pojedynczego), więc kolejka po naszej
- * stronie nic nie kosztuje, a eliminuje jedyny scenariusz, który go kładzie.
+ * Powód: lokalny most (proxy zgodne z API LM Studio) przy KILKU połączeniach
+ * otwartych naraz potrafi przyjąć request i nie oddać ani bajta - bez błędu,
+ * w nieskończoność. Delegate z listą tasków strzela wszystkie suby w tej samej
+ * milisekundzie, więc każda delegacja wielozadaniowa była ruletką. Most i tak
+ * przerabia requesty po kolei (zmierzone: 2 równoległe = 2x czas pojedynczego),
+ * więc kolejka po naszej stronie nic nie kosztuje, a eliminuje jedyny scenariusz,
+ * który go kładzie.
  *
- * Chmurowe API bramki NIE dostają (limit 0 = bez bramki) — tam równoległość
+ * Chmurowe API bramki NIE dostają (limit 0 = bez bramki) - tam równoległość
  * jest stanem normalnym, a przeciążenie kończy się głośnym 429, nie cichym
- * zwisem. Decyzja Kuby 2026-08-11: mechanizm generyczny, domyślki różne.
+ * zwisem. Mechanizm zostaje generyczny, ale domyślne limity różnią się per platforma.
  *
- * ZERO importów z `obsidian` i innych modułów — czysty stan w pamięci procesu,
+ * ZERO importów z `obsidian` i innych modułów - czysty stan w pamięci procesu,
  * w pełni testowalny node'em. Konsument: `ChatModel.stream` (bramka wokół wywołania
  * dostawcy) + `ChatModel.stopStream` (anulowanie biletu czekającego w kolejce).
  */
 
 /** Bilet z bramki. Kontrakt użycia:
- *  1. `await admitted` — true = jedziesz (slot zajęty), false = anulowano w kolejce.
- *  2. Po skończonej robocie (sukces LUB błąd) — `release()`, zawsze, np. w `finally`.
- *  3. `cancel()` działa tylko na bilet CZEKAJĄCY w kolejce (biegnącego nie dotyka —
+ *  1. `await admitted` - true = jedziesz (slot zajęty), false = anulowano w kolejce.
+ *  2. Po skończonej robocie (sukces LUB błąd) - `release()`, zawsze, np. w `finally`.
+ *  3. `cancel()` działa tylko na bilet CZEKAJĄCY w kolejce (biegnącego nie dotyka -
  *     biegnący request ubija się przez abort strumienia, a `release()` zwalnia slot).
  */
 export interface GateTicket {
     admitted: Promise<boolean>;
-    /** true = bilet trafił do kolejki (ktoś już trzyma slot) — przydatne do logów. */
+    /** true = bilet trafił do kolejki (ktoś już trzyma slot) - przydatne do logów. */
     queued: boolean;
     cancel(): void;
     release(): void;
@@ -39,7 +39,7 @@ export interface GateOptions {
 
 type Waiter = {
     cancelled: boolean;
-    /** Klasa pierwszeństwa w kolejce (F2: główny czat 1, sub-agent 0). */
+    /** Klasa pierwszeństwa w kolejce (główny czat 1, sub-agent 0). */
     priority: number;
     admit: () => void;
     reject: () => void;
@@ -53,10 +53,10 @@ const _gates = new Map<string, GateState>();
  * Zajmij slot w bramce `key` (np. nazwa platformy) o pojemności `limit`.
  * `limit <= 0` = bramka wyłączona: bilet od ręki, release jest no-opem.
  *
- * `opts.priority` (F2 „delegacja w tle"): przy zwalnianiu slotu pierwszeństwo ma bilet
- * o NAJWYŻSZYM priorytecie, a w ramach jednej klasy — kolejność zgłoszeń (FIFO).
+ * `opts.priority` („delegacja w tle"): przy zwalnianiu slotu pierwszeństwo ma bilet
+ * o NAJWYŻSZYM priorytecie, a w ramach jednej klasy - kolejność zgłoszeń (FIFO).
  * Po co: sub-agent odpalony w tle nie może kazać użytkownikowi czekać na własną
- * odpowiedź w czacie. Główny czat wchodzi z priorytetem 1, sub z 0 — patrz
+ * odpowiedź w czacie. Główny czat wchodzi z priorytetem 1, sub z 0 - patrz
  * `ChatModel._gatePriority` i `DelegateTool._executeSubAgent`.
  */
 export function acquireSlot(key: string, limit: number, opts: GateOptions = {}): GateTicket {
@@ -72,7 +72,7 @@ export function acquireSlot(key: string, limit: number, opts: GateOptions = {}):
     const s = state;
 
     let holdsSlot = false;  // bilet aktualnie trzyma slot
-    let finished = false;   // released albo cancelled — stan terminalny
+    let finished = false;   // released albo cancelled - stan terminalny
 
     const releaseSlot = () => {
         if (finished) return;
@@ -83,14 +83,14 @@ export function acquireSlot(key: string, limit: number, opts: GateOptions = {}):
         _admitNext(s);
     };
 
-    // Wolny slot — wjazd od ręki.
+    // Wolny slot - wjazd od ręki.
     if (s.active < limit) {
         s.active++;
         holdsSlot = true;
         return {
             admitted: Promise.resolve(true),
             queued: false,
-            // Biegnącego requestu cancel nie dotyka — patrz kontrakt w nagłówku.
+            // Biegnącego requestu cancel nie dotyka - patrz kontrakt w nagłówku.
             cancel() {},
             release: releaseSlot,
         };
@@ -122,7 +122,7 @@ export function acquireSlot(key: string, limit: number, opts: GateOptions = {}):
 }
 
 /**
- * Wstaw bilet do kolejki wg priorytetu — ZA wszystkimi o priorytecie >= jego własnego.
+ * Wstaw bilet do kolejki wg priorytetu - ZA wszystkimi o priorytecie >= jego własnego.
  *
  * Porządkujemy PRZY WSTAWIANIU, a nie przy zdejmowaniu: `_admitNext` zostaje najprostszym
  * możliwym `shift()`, a stabilność (FIFO w ramach jednej klasy) wynika z konstrukcji,

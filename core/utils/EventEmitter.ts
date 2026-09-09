@@ -24,7 +24,7 @@ export type EventHandler = (...args: unknown[]) => void;
 export type Unsubscribe = () => void;
 
 export class EventEmitter {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare private _handlers: Map<string, Set<EventHandler>>;
 
     constructor() {

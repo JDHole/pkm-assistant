@@ -41,7 +41,7 @@ export interface WebPageRead {
 /** Slice `settings.pkmAssistant.webSearch` w zakresie, który czyta ten plik. */
 export interface WebSearchProviderSettings {
     provider?: string;
-    /** legacy, sprzed E3.3 — należy do AKTUALNIE wybranego dostawcy */
+    /** legacy — należy do AKTUALNIE wybranego dostawcy */
     apiKey?: string;
     apiKeys?: Record<string, string>;
     instanceUrl?: string;
@@ -259,9 +259,9 @@ async function serperSearch(query: string, limit: number, apiKey: string): Promi
  * `keyOptional` = działa bez klucza, ale z kluczem jest lepiej (wyższy limit) —
  * Ustawienia pokazują wtedy pole klucza z opisem „opcjonalny".
  *
- * E3.3 (L13-12): Jina miała `requiresKey: true`, przez co bramka rzucała zanim
- * cokolwiek poleciało — obiecany w UI tryb bezkluczowy (3 zapytania/min) był
- * NIEOSIĄGALNY. Teraz `requiresKey: false` + `keyOptional: true`.
+ * DLACZEGO Jina ma `requiresKey: false` + `keyOptional: true`: z `requiresKey: true`
+ * bramka rzucałaby zanim cokolwiek poleciało, a obiecany w UI tryb bezkluczowy
+ * (3 zapytania/min) byłby NIEOSIĄGALNY.
  */
 export const WEB_SEARCH_PROVIDERS: Record<string, WebSearchProviderInfo> = {
     jina:    { get label() { return t('websearch.provider.jina'); }, requiresKey: false, keyOptional: true, requiresUrl: false, fn: jinaSearch },
@@ -272,12 +272,13 @@ export const WEB_SEARCH_PROVIDERS: Record<string, WebSearchProviderInfo> = {
 };
 
 /**
- * Klucz API dla konkretnego dostawcy (E3.3, mikro-decyzja 2).
+ * Klucz API dla konkretnego dostawcy.
  *
- * Do E3.2 wszyscy dostawcy dzielili JEDNO pole `ws.apiKey` — zmiana dostawcy
- * wymagała przeklejenia klucza, a klucz Tavily leciał do Jiny (401). Teraz każdy
- * ma własną szufladkę `ws.apiKeys.<id>`; stare pole czytamy jako fallback dla
- * AKTUALNIE wybranego dostawcy i NIE kasujemy go (zero migracji danych na dysku).
+ * DLACZEGO osobna szufladka per dostawca: JEDNO wspólne pole `ws.apiKey` znaczyłoby,
+ * że zmiana dostawcy wymaga przeklejenia klucza, a klucz Tavily poleciałby do Jiny
+ * (401). Każdy dostawca ma więc własną szufladkę `ws.apiKeys.<id>`; stare pole
+ * czytamy jako fallback dla AKTUALNIE wybranego dostawcy i NIE kasujemy go (zero
+ * migracji danych na dysku).
  *
  * @param settings - pkmAssistant.webSearch
  * @returns klucz albo pusty string
@@ -307,8 +308,8 @@ export const PROVIDER_SIGNUP_URLS: Record<string, string> = {
 /**
  * Execute web search via configured provider.
  *
- * WARSTWY (E3.3, mikro-decyzja 1 / DEC L13-3): wybrany dostawca siedzi NA darmowej
- * podłodze. Gdy płatny padnie (401, wyczerpany limit, brak sieci), automatycznie
+ * WARSTWY: wybrany dostawca siedzi NA darmowej podłodze. Gdy płatny padnie
+ * (401, wyczerpany limit, brak sieci), automatycznie
  * lecimy drugi raz przez Jinę — user dostaje wyniki zamiast błędu, a wynik niesie
  * `fallback_from`, żeby narzędzie mogło to uczciwie napisać modelowi. Gdy padnie
  * też podłoga — rzucamy ORYGINALNY błąd wybranego dostawcy (czytelniejszy: mówi
@@ -345,7 +346,7 @@ export async function executeWebSearch(
     const cached = _getCached(cacheKey);
     if (cached) {
         log.debug('WebSearch', `Cache hit: "${query}"`);
-        // `cached` mówi callerowi, że u dostawcy NIC się nie zużyło (licznik E3.3 tego nie liczy).
+        // `cached` mówi callerowi, że u dostawcy NIC się nie zużyło (licznik tego nie liczy).
         return { ...cached, cached: true };
     }
 
@@ -396,12 +397,12 @@ export async function executeWebSearch(
 /**
  * Read full content of a single URL via Jina Reader.
  *
- * Reader (r.jina.ai) jest ZAWSZE Jiny, niezależnie od wybranego dostawcy wyszukiwania
- * (DEC L13-3) — więc klucz też bierzemy Jiny (`apiKeys.jina`, legacy `apiKey` tylko
- * gdy Jina jest wybranym dostawcą). Wcześniej leciał tu klucz DOWOLNEGO dostawcy,
- * co przy wybranym Tavily/Brave dawało 401 od readera.
+ * Reader (r.jina.ai) jest ZAWSZE Jiny, niezależnie od wybranego dostawcy wyszukiwania —
+ * więc klucz też bierzemy Jiny (`apiKeys.jina`, legacy `apiKey` tylko gdy Jina jest
+ * wybranym dostawcą). Klucz DOWOLNEGO INNEGO dostawcy dawałby przy wybranym
+ * Tavily/Brave 401 od readera.
  *
- * PDF (E3.3, DEC L13-5d): reader sam ekstrahuje tekst z PDF-ów — przekazujemy takie
+ * PDF: reader sam ekstrahuje tekst z PDF-ów — przekazujemy takie
  * URL-e normalnie, bez żadnej biblioteki po naszej stronie. Binaria, których reader
  * nie umie przeczytać (obrazy, archiwa), dają uczciwy komunikat zamiast pustki albo
  * surowego wyjątku parsera.
@@ -423,7 +424,7 @@ export async function readWebPage(
     }
 
     const readerUrl = `https://r.jina.ai/${url}`;
-    // K1 / znalezisko 001 — STRAŻNIK KANONICZNOŚCI. Reader przyjmuje adres doklejony do
+    // STRAŻNIK KANONICZNOŚCI. Reader przyjmuje adres doklejony do
     // własnej ścieżki, więc segmenty `..` w adresie zwijają się PO sklejce: filtr domen widzi
     // `good.com`, a request leci na `evil.com`. Jeśli kanoniczny `href` sklejki różni się od
     // tego, co skleiliśmy — adres nie był kanoniczny i nie ruszamy nigdzie.

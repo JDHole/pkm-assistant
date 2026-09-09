@@ -109,17 +109,16 @@ export class SkinManagerClass {
     }
 
     /**
-     * Dosztukowanie domyślnego skina to NIE jest decyzja usera — idzie do SUROWEGO worka
+     * Dosztukowanie domyślnego skina to NIE jest decyzja usera - idzie do SUROWEGO worka
      * (`settingsStore.raw`), z pominięciem obserwowanego proxy.
      *
      * Mutacja proxy planuje zapis CAŁEGO `.pkm-assistant/settings.json` (a tam mieszkają klucze
-     * API) sekundę po starcie — a boot nie ma prawa pisać (reguła „boot nie pisze", incydent
-     * 2026-07-28; strażnik: scenariusz harnessa `39_boot_nie_pisze`). Do clean-room objaw był
-     * niewidoczny, bo fabryczne ustawienia niosły `activeSkin` i warunek nigdy nie wchodził;
-     * nowe `config/defaultSettings.ts` prowizjonuje wyłącznie kontenery czatu i embeddingu
-     * (spec §4), więc gałąź stała się osiągalna przy każdym starcie nowego usera.
+     * API) sekundę po starcie, a boot nie ma prawa pisać (reguła „boot nie pisze", strażnik:
+     * scenariusz harnessa `39_boot_nie_pisze`). `config/defaultSettings.ts` prowizjonuje
+     * wyłącznie kontenery czatu i embeddingu, więc ta gałąź (brak `activeSkin`) jest osiągalna
+     * przy każdym starcie nowego usera.
      *
-     * ⚠️ `setActiveSkin` pisze DALEJ przez proxy — tam zapis jest w porządku, bo to wybór usera.
+     * ⚠️ `setActiveSkin` pisze DALEJ przez proxy - tam zapis jest w porządku, bo to wybór usera.
      */
     ensureSettings(): SkinSettings | null {
         const settings = this.getSettings();
@@ -170,8 +169,8 @@ export class SkinManagerClass {
     }
 
     /**
-     * K7/AUD-code-review-092: `_visited` łapie cykl dziedziczenia (`parent` wpisany ręcznie
-     * w YAML usera — self-referencja albo dwa skiny wskazujące na siebie nawzajem). Bez tego
+     * `_visited` łapie cykl dziedziczenia (`parent` wpisany ręcznie
+     * w YAML usera - self-referencja albo dwa skiny wskazujące na siebie nawzajem). Bez tego
      * rekurencja wybucha `RangeError: Maximum call stack size exceeded` przy KAŻDYM renderze
      * (getColor/getCrystal/applyCss), czyli zamraża całą warstwę wizualną agentów.
      */
@@ -193,10 +192,10 @@ export class SkinManagerClass {
     }
 
     /**
-     * Klucze spoza `SkinSpec` w YAML usera (np. `icons:` z archiwalnego schematu S12 — pole
-     * skasowane 2026-09-02 razem z martwą ścieżką `getIcon`, AUD-dead-code-198) przechodzą
-     * przez `...custom` bez walidacji i nikt ich nie czyta. Świadomie: loader nie ma schematu,
-     * a nieznany klucz nie może psuć ładowania skina. Strażnik w `SkinManager.test.ts`.
+     * Klucze spoza `SkinSpec` w YAML usera (np. dawne `icons:`, którego już nie czyta żaden
+     * kod) przechodzą przez `...custom` bez walidacji i nikt ich nie czyta. Świadomie: loader
+     * nie ma schematu, a nieznany klucz nie może psuć ładowania skina. Strażnik w
+     * `SkinManager.test.ts`.
      */
     mergeSkin(parent: SkinSpec, custom: SkinDefinition): SkinSpec {
         const merged = {
@@ -274,11 +273,11 @@ export class SkinManagerClass {
     }
 
     /**
-     * Demontaż skina (AUD-bledy-037) — wołane z `onunload` pluginu.
+     * Demontaż skina - wołane z `onunload` pluginu.
      *
      * Bez tego arkusz skina i znaczniki na `document.body` zostawały po wyłączeniu pluginu
      * (Obsidian stylizowany przez martwy plugin aż do restartu), a każdy cykl wyłącz/włącz
-     * dokładał kolejny arkusz. Idempotentne — drugi demontaż nic nie psuje.
+     * dokładał kolejny arkusz. Idempotentne - drugi demontaż nic nie psuje.
      */
     dispose(): void {
         removeSheet(this._sheet);

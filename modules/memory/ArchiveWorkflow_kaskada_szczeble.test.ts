@@ -1,9 +1,8 @@
 /**
- * ArchiveWorkflow_kaskada_szczeble.test.ts — noc audytowa 2026-08-29, modul 9.
+ * ArchiveWorkflow_kaskada_szczeble.test.ts — testy kaskady szczebli archiwizacji L1/L2/L3.
  *
- * Pytanie tej nocy (brief Niki 2026-08-27, Bug 3): dlaczego rura L1/L2 "mieli w kolko" -
- * u Borysa trzy pliki L2 z IDENTYCZNA lista `l1_files` (piec najstarszych), a nowsze L1
- * nigdy nie awansowaly.
+ * Pytanie: dlaczego rura L1/L2 potrafi "mielić w kolko" - trzy pliki L2 z IDENTYCZNA lista
+ * `l1_files` (piec najstarszych), a nowsze L1 nigdy nie awansowaly.
  *
  * Odpowiedz jest w ksztalcie samej rury, nie w danych. Kaskada ma trzy szczeble i kazdy
  * dobiera material tak samo - `slice(0, batchSize)` po posortowanym listingu katalogu.
@@ -17,13 +16,7 @@
  *                 `_cleanupAfterL3` kasuje L1, a L2 zostawia
  *                 ("najwyzszy poziom historii, manualny cleanup")   -> petla OTWARTA
  *
- * Naprawa z 2026-07-29 (komentarz przy `_listSessionsForL1`, wtopa "12 duplikatow L1")
- * zamknela petle na PIERWSZYM szczeblu. Dwa pozostale mialy ksztalt sprzed tamtej naprawy
- * az do 2026-09-04.
- *
- * ── NAPRAWA 2026-09-04 (P1 health checku 29.07: "duplikaty L1") ────────────────────────
- *
- * Petle domkniete jednym gestem, BEZ dokladania czegokolwiek do plikow usera:
+ * Domkniecie petli na dwoch gornych szczeblach, BEZ dokladania czegokolwiek do plikow usera:
  *
  *   L1 -> L2 : `_listUncoveredL1()` = pliki L1, ktorych nie wymienia zadne L2 we
  *              frontmatterze `l1_files:`  (`AgentMemory.listUncoveredL1s`)
@@ -31,22 +24,20 @@
  *              frontmatterze `l2_files:`  (`AgentMemory.listUncoveredL2s`)
  *
  * Znacznikiem pokrycia jest SAM PLIK NADRZEDNY - `l1_files`/`l2_files` pisze `_writeLevel2`
- * i `_writeLevel3` od zawsze, tylko nikt tego nie czytal przy doborze materialu (dokladnie
- * ta sama choroba co stempel `covered_by_l1` przed 29.07: stempel byl, czytacza nie bylo).
- * Dlatego "zapis L2" i "oznaczenie L1" to JEDNA operacja atomowa - stad crash-safety za
+ * i `_writeLevel3` od zawsze, tylko nikt tego nie czytal przy doborze materialu. Dlatego
+ * "zapis L2" i "oznaczenie L1" to JEDNA operacja atomowa - stad crash-safety za
  * darmo i zerowa migracja starych dyskow. Uzasadnienie odrzucenia stempla `covered_by_l2`
  * (drugi zapis = okno na duplikat po padzie) siedzi przy `AgentMemory.listUncoveredL1s`.
  *
- * Testy nizej opisuja stan PO naprawie. Cztery charakteryzujace zostaly przepisane
- * (opisywaly wtope), pin zszedl z `test.failing` na `test`, doszly dwa nowe:
- * "crash w polowie" i "stare dane".
+ * Testy nizej opisuja stan po naprawie, w tym dwa scenariusze brzegowe: crash w polowie
+ * zapisu i stare dane sprzed migracji.
  *
  * Strazniki bliźniacze na szczeblu L1:
  *   `ArchiveWorkflowRun.test.ts` - "sesje ze stemplem covered_by_l1 nie wchodza do paczek L1"
  *                                - "drugi przebieg po zaakceptowanym L1 nie proponuje tych samych sesji"
  *
  * Atrapy (vault, model, workflow) sa swiadomie skopiowane z `ArchiveWorkflowRun.test.ts` -
- * tamten plik ich nie eksportuje, a nocka nie przepisuje cudzego pliku testowego.
+ * tamten plik ich nie eksportuje, a ten plik nie przepisuje cudzego pliku testowego.
  */
 import test from 'ava';
 import { AgentMemory } from './AgentMemory.js';
@@ -191,7 +182,7 @@ test('_writeLevel2 nie dopisuje NIC do plikow L1 - znacznikiem jest jego wlasny 
 
     // Piec plikow L1 nadal na dysku - to jest kontrakt kaskady ("L1 zostaja") i jest dotrzymany.
     t.is(namesIn(files, 'L1').length, 5, 'pliki L1 zostaja, zgodnie z kontraktem kaskady');
-    // Ich TRESC tez sie nie zmienila - naprawa 2026-09-04 celowo NIE stempluje plikow usera
+    // Ich TRESC tez sie nie zmienila - mechanizm celowo NIE stempluje plikow usera
     // (`covered_by_l2` bylby DRUGIM zapisem po zapisie L2 = okno na duplikat przy padzie miedzy nimi).
     for (const name of namesIn(files, 'L1')) {
         const path = `${BASE}/summaries/L1/${name}`;
@@ -278,7 +269,7 @@ test('drugi przebieg L3 bierze KOLEJNE piec plikow L2, nie te same', async t => 
     t.is(namesIn(files, 'L2').length, 10, 'L2 nie ubywaja nigdy - tym bardziej musi je odsiewac filtr');
 });
 
-// ── kontrast: szczebel z domknieta petla od 2026-07-29 ────────────────────────────
+// ── kontrast: szczebel z domknieta petla ────────────────────────────
 
 test('kontrast - szczebel sesje -> L1 domyka petle stemplem, dwa wyzsze backlinkiem', async t => {
     // Ten sam ksztalt danych co wyzej, ale o pietro nizej: sesje w archiwum, z ktorych
@@ -305,10 +296,8 @@ test('kontrast - szczebel sesje -> L1 domyka petle stemplem, dwa wyzsze backlink
     );
 });
 
-// ── pin z 2026-08-29, dzis zielony ────────────────────────────────────────────────
-//
 // Odpowiednik testu "drugi przebieg po zaakceptowanym L1 nie proponuje tych samych sesji"
-// (ArchiveWorkflowRun.test.ts), tyle ze o szczebel wyzej. Do 2026-09-04 czerwony (`test.failing`).
+// (ArchiveWorkflowRun.test.ts), tyle ze o szczebel wyzej.
 
 test('drugi przebieg L2 nie proponuje tych samych plikow L1 (koniec duplikatow L2)', async t => {
     const { vault } = makeVault(l1Files(10));

@@ -90,7 +90,7 @@ test('calibrate is per-platform and does not leak across NAMED platforms', t => 
 
 test('platform-less estimate uses global calibration (RollingWindow path)', t => {
     // RollingWindow/ToolTokenCache wołają countTokens/getTokenCount BEZ platformy —
-    // kalibracja z API musi tam dotrzeć globalnym kanałem, inaczej P2 jest martwe.
+    // kalibracja z API musi tam dotrzeć globalnym kanałem, inaczej ta ścieżka jest martwa.
     const before = countTokens(SAMPLE); // brak platformy → global cpt (default 4.0)
     calibrate('anthropic', 100, 200);   // gęstszy tekst → niższy cpt → więcej tokenów
     const after = countTokens(SAMPLE);  // brak platformy → global cpt już niższy
@@ -121,7 +121,7 @@ test('getTokenCount never throws and matches countTokens for strings', t => {
     t.is(getTokenCount(''), 0);
 });
 
-// ── AUD-wydajnosc-017/048: estymata ze STATYSTYK tekstu ────────────────────
+// ── Estymata ze STATYSTYK tekstu ────────────────────
 // Kontrakt: `countTokensFromStats(len, nonAscii)` daje DOKŁADNIE to samo co
 // `countTokens(tekst)` o tych statystykach — na tym stoi przyrostowy licznik okna
 // kontekstu czatu (`modules/chat/chat/RollingWindow.ts`).

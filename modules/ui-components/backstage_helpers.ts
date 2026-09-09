@@ -3,9 +3,9 @@
  * Tab implementations live in their owning module (skills, sub-agents) and reuse these
  * common UI primitives (filter chips, agent links, card actions).
  *
- * S31: przeniesione z `modules/shell/sidebar/`. Wołają je WYŁĄCZNIE zakładki z modułów
- * niższych (skills, sub-agents), więc trzymanie ich w shellu zmuszało te moduły do
- * importu z barrela shella. Klocek współdzielony przez ≥2 moduły = `modules/ui-components`.
+ * Wołają je WYŁĄCZNIE zakładki z modułów niższych (skills, sub-agents) — trzymanie ich
+ * w shellu zmuszałoby te moduły do importu z barrela shella. Klocek współdzielony
+ * przez ≥2 moduły = `modules/ui-components`.
  */
 import { getToolIcon } from './ToolCallDisplay.js';
 import { t } from '../../core/i18n/index.js';
@@ -40,7 +40,7 @@ export function getCategoryLabel(category: string) {
 }
 
 /**
- * S27 Z2/Z3: guzik „Użyj u agenta…" — rozwijana lista agentów, klik = odlanie kopii.
+ * Guzik „Użyj u agenta…" — rozwijana lista agentów, klik = odlanie kopii.
  * Szablon nie ma „Used by" (nie jest używany, jest kopiowany), więc to JEDYNA akcja
  * łącząca kartę Zaplecza z konkretnym agentem.
  *
@@ -77,7 +77,7 @@ export function renderUseAtAgentButton(container: BackstageDynamic, agents: Back
 }
 
 /**
- * S27 Z2/Z3: badge wersji szablonu („v3"). Szablon jest formą odlewniczą — wersja mówi
+ * Badge wersji szablonu („v3"). Szablon jest formą odlewniczą — wersja mówi
  * userowi, że forma poszła do przodu względem odlanych wcześniej kopii.
  * @param {HTMLElement} container
  * @param {number} version
@@ -90,7 +90,7 @@ export function renderTemplateVersionBadge(container: BackstageDynamic, version:
 }
 
 /**
- * S27 Z2/Z3: mały guzik akcji na karcie szablonu (edycja / kasowanie).
+ * Mały guzik akcji na karcie szablonu (edycja / kasowanie).
  * @param {HTMLElement} container
  * @param {Object} opts - { iconFn, label, danger?, onClick }
  */

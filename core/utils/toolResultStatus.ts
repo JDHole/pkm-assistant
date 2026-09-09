@@ -1,5 +1,5 @@
 /**
- * JEDEN kształt porażki narzędzia (AUD-bledy-027/058/025/013).
+ * JEDEN kształt porażki narzędzia.
  *
  * W repo współżyją dwie konwencje: narzędzia wbudowane (`write`, `delete`, `read`, `list`,
  * `search`, `memory_*`, `kom_*`, `web_*`, `ask_user`, `delegate`) sygnalizują porażkę przez

@@ -1,5 +1,5 @@
 /**
- * Zaplecze → zakładka „Konektory" (S27 Z5) — INFORMACYJNIE, zero akcji zarządzających (D5).
+ * Zaplecze → zakładka „Konektory" — INFORMACYJNIE, zero akcji zarządzających.
  *
  * Dwie sekcje:
  *  1. „Twoje konektory" — zewnętrzne serwery MCP usera: nazwa, transport, status
@@ -158,8 +158,8 @@ function renderBuiltinSection(content: HTMLElement, plugin: ConnectorsPluginLike
  * Pogrupuj REALNIE zarejestrowane narzędzia built-in po serwerze wbudowanym.
  * Narzędzia zewnętrznych serwerów (`source: 'user'`) idą do sekcji konektorów, nie tutaj.
  *
- * AUD-dead-code-021/166: `export` zdjęty — zero konsumentów poza tym plikiem, wołana
- * wyłącznie przez `renderConnectorsTab` niżej, u siebie.
+ * `export` zdjęty — zero konsumentów poza tym plikiem, wołana wyłącznie przez
+ * `renderConnectorsTab` niżej, u siebie.
  */
 function groupBuiltinTools(plugin: ConnectorsPluginLike): Map<string, ToolRow[]> {
     const registry = plugin?.toolRegistry;

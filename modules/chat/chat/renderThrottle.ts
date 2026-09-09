@@ -1,5 +1,5 @@
 /**
- * RenderThrottle — koalescencja malowania strumienia odpowiedzi (AUD-wydajnosc-071/015/070).
+ * RenderThrottle - koalescencja malowania strumienia odpowiedzi.
  *
  * PROBLEM: `handlers.chunk` adaptera leci RAZ NA RAMKĘ SSE i niesie ZAKUMULOWANĄ treść
  * (`chat_adapter_base.ts` dokłada deltę do `message.content`), a `handle_chunk` malował ją
@@ -13,13 +13,12 @@
  * identyczna z ostatnio namalowaną nie maluje nic. Koszt tury przestaje zależeć od granulacji
  * chunków dostawcy.
  *
- * ⚠️ Malowanie WOŁA `MarkdownRenderer.render` (release 2.2.0/W2 domknęło migrację z deprecated
- * `renderMarkdown` — patrz `modules/chat/CLAUDE.md`), ale fire-and-forget (`void`, bez await) —
- * dokładnie tak samo jak dawne `renderMarkdown`, które też zwraca `Promise<void>` i było wołane
- * bez await w tym samym miejscu. Migracja API NIE wprowadza nowej asynchroniczności ponad to, co
- * już istniało; throttle odpowiada WYŁĄCZNIE za CZĘSTOTLIWOŚĆ malowania (najwyżej raz na
- * `intervalMs`), nie za to, czy render jest sync czy async. Kolejność jednego malowania
- * (myślenie → narzędzia → tekst) i wszystkie stany tury (abort, błąd, tool calls) zostają bez zmian.
+ * ⚠️ Malowanie WOŁA `MarkdownRenderer.render` (patrz `modules/chat/CLAUDE.md`), ale
+ * fire-and-forget (`void`, bez await) - `render` zwraca `Promise<void>`, więc wywołanie bez
+ * await nie wprowadza żadnej asynchroniczności ponad to, co throttle już zakłada: throttle
+ * odpowiada WYŁĄCZNIE za CZĘSTOTLIWOŚĆ malowania (najwyżej raz na `intervalMs`), nie za to,
+ * czy render jest sync czy async. Kolejność jednego malowania (myślenie → narzędzia → tekst)
+ * i wszystkie stany tury (abort, błąd, tool calls) zostają bez zmian.
  *
  * ⚠️ ŻADEN FRAGMENT NIE GINIE: koniec tury, Stop i błąd wołają `flush()` (domalowanie ostatniej
  * zebranej klatki) albo `cancel()` (gdy DOM dymka i tak jest zaraz nadpisywany komunikatem błędu).
@@ -35,20 +34,20 @@ export interface StreamFrame {
     /** Skumulowany ślad rozumowania (`reasoning_content`); pusty = brak bloku myśli. */
     reasoning: string;
     /**
-     * WŁAŚCICIEL klatki — nazwa agenta tury, która ją zgłosiła (review opusa, P1).
+     * WŁAŚCICIEL klatki - nazwa agenta tury, która ją zgłosiła.
      * Klatka uzbrojona ≤ okno przed przełączeniem zakładki wystrzeliwuje JUŻ na cudzej
      * zakładce: wskaźniki malowania (`current_message_*`) nadal celują w wypięte węzły starej,
      * więc sam tekst jest niewidoczny, ale skutki uboczne malowania (przewinięcie!) trafiają
-     * w NOWĄ zakładkę. Dlatego malowanie pyta `shouldPaintFrame` — patrz niżej.
+     * w NOWĄ zakładkę. Dlatego malowanie pyta `shouldPaintFrame` - patrz niżej.
      */
     owner?: string;
 }
 
 /**
- * Czy tę klatkę wolno jeszcze namalować (review opusa, P1 — bramka „właściciel na wierzchu").
+ * Czy tę klatkę wolno jeszcze namalować (bramka „właściciel na wierzchu").
  *
  * Druga linia obrony za `cancel()` w `_switchTab`: klatka bez właściciela maluje zawsze
- * (zgodność wsteczna / testy), klatka z właścicielem — tylko gdy jej agent nadal jest
+ * (zgodność wsteczna / testy), klatka z właścicielem - tylko gdy jej agent nadal jest
  * na wierzchu. Ta sama reguła co bramka zakładki w `handle_chunk`.
  */
 export function shouldPaintFrame(frame: StreamFrame, activeAgentName: string | null | undefined): boolean {
@@ -69,13 +68,13 @@ export interface RenderThrottleOptions {
     now?: () => number;
 }
 
-// Node-safe timer shim (release 2.2.0 / W2): `obsidianmd/prefer-window-timers` wants
-// `window.setTimeout(...)`, ale ten plik CELOWO wstaje w gołym Node pod AVA (nagłówek modułu
-// wyżej) i `window` tam nie istnieje. Reguła obsidianmd nie da się wyłączyć inline (`obsidianmd/*`
-// jest na liście `eslint-comments/no-restricted-disable`, zweryfikowane empirycznie), więc zamiast
-// tłumionego ostrzeżenia — REFERENCJA (nie wywołanie) do globalnego `setTimeout`/`clearTimeout`.
+// Node-safe timer shim: `obsidianmd/prefer-window-timers` wants `window.setTimeout(...)`,
+// ale ten plik CELOWO wstaje w gołym Node pod AVA (nagłówek modułu wyżej) i `window` tam
+// nie istnieje. Reguła obsidianmd nie da się wyłączyć inline (`obsidianmd/*` jest na liście
+// `eslint-comments/no-restricted-disable`, zweryfikowane empirycznie), więc zamiast tłumionego
+// ostrzeżenia - REFERENCJA (nie wywołanie) do globalnego `setTimeout`/`clearTimeout`.
 // W prawdziwym Obsidianie to DOKŁADNIE ta sama funkcja co `window.setTimeout` (globalny obiekt
-// realm-u to `window`), więc zero zmiany zachowania — reguła łapie tylko BEZPOŚREDNIE wywołanie
+// realm-u to `window`), więc zero zmiany zachowania - reguła łapie tylko BEZPOŚREDNIE wywołanie
 // `setTimeout(...)`, nie przypisanie referencji do zmiennej.
 const _nodeSafeSetTimeout: typeof setTimeout = setTimeout;
 const _nodeSafeClearTimeout: typeof clearTimeout = clearTimeout;
@@ -122,9 +121,9 @@ export class RenderThrottle {
      * wyłącznie deltę `tool_calls` albo `usage`) NIE planuje niczego — zero malowań.
      */
     request(frame: StreamFrame): void {
-        // Review opusa (P3): klatka identyczna z NAMALOWANĄ wychodzi ZAWSZE, także gdy czeka
-        // już nowsza — dawny warunek `&& this._pending === null` nadpisywał wtedy `_pending`
-        // starszą treścią (duplikat/„cofnięcie" ze strumienia zjadało ogon odpowiedzi).
+        // Klatka identyczna z NAMALOWANĄ wychodzi ZAWSZE, także gdy czeka już nowsza - warunek
+        // `&& this._pending === null` nadpisywałby wtedy `_pending` starszą treścią
+        // (duplikat/„cofnięcie" ze strumienia zjadałoby ogon odpowiedzi).
         if (framesEqual(frame, this._painted)) return;
         this._pending = frame;
         if (this._timer !== null) return;

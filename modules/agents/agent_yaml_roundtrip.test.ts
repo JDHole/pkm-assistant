@@ -1,23 +1,15 @@
 /**
- * B6 (werdykt Kuby 2026-08-30, zgłoszenie Niki) — YAML agenta: `model` tylko gdy świadomie
- * ustawiony, `language` i inne pola usera PRZEŻYWAJĄ zapis.
+ * YAML agenta: `model` jest zapisywane TYLKO gdy świadomie ustawione (Default OFF), a
+ * `language` i inne pola usera PRZEŻYWAJĄ zapis - włącznie z automatycznym rewrite'em pliku,
+ * jaki `AgentLoader.loadAgentFromFile` odpala przy migracji osi narzędziowej (jedyny
+ * automatyczny REWRITE całego pliku, który dzieje się bez kliknięcia "Zapisz profil"). Testy
+ * działają na atrapie vaulta w pamięci (żadnego dotknięcia realnego dysku ani vaulta usera)
+ * i pilnują dokładnie tego kształtu regresji: żadna ścieżka w `modules/agents`/`modules/chat`/
+ * `modules/models`/`modules/tools`/`modules/sub-agents`/`modules/shell` nie może mutować
+ * `agent.model` na twardą wartość bez udziału usera.
  *
- * Objaw zgłoszony: po użyciu agenta runtime dopisuje do `.pkm-assistant/agents/{slug}.yaml`
- * twardą wartość `model` (tę samą u wielu agentów), a przy okazji GUBI `language`, które user
- * miał w yamlu. Ten plik reprodukuje ścieżkę „automatyczny zapis bez udziału usera" —
- * migrację osi narzędziowej w `AgentLoader.loadAgentFromFile` (jedyny automatyczny REWRITE
- * całego pliku, jaki commit odpala bez kliknięcia „Zapisz profil") — na atrapie vaulta
- * w pamięci (żadnego dotknięcia realnego dysku ani vaulta usera).
- *
- * WYNIK REPRODUKCJI (2026-09-02): wszystkie ścieżki poniżej dla `model`/`language` są ZIELONE
- * na dzisiejszym kodzie — `Agent.serialize()` już miał wzór Default OFF dla `model` (linia
- * `if (this.model) data.model = ...`) i jawną obsługę `language` (E2.8 A6, 2026-07-23, a więc
- * SPRZED zgłoszenia). Nie znaleziono w `modules/agents`/`modules/chat`/`modules/models`/
- * `modules/tools`/`modules/sub-agents`/`modules/shell` żadnej ścieżki, która mutowałaby
- * `agent.model` na twardą wartość bez udziału usera — pełen grep + dynamiczna reprodukcja
- * w raporcie sesji. Testy zostają jako STRAŻNIK (zamykają dokładnie ten kształt regresji na
- * przyszłość) i jako dowód diagnozy. Jedyne REALNE, wciąż-czerwone (przed naprawą w tym samym
- * commicie) pole tej samej klasy błędu znalezione w kodzie: `emoji` — patrz testy niżej.
+ * `emoji` miało tę samą klasę błędu (pole schematu bez wiązania z instancją) - patrz testy
+ * niżej.
  */
 import test from 'ava';
 import { parseYaml } from '../../core/utils/yamlParser.js';
@@ -44,7 +36,7 @@ function makeMemoryVault() {
 
 // ── Reprodukcja: yaml stary (bez disabled_tools) z language, BEZ model ────────────────
 
-test('B6 repro: agent bez model + z language przeżywa migrację osi narzędziowej (auto-rewrite przy load)', async t => {
+test('agent bez model + z language przeżywa migrację osi narzędziowej (auto-rewrite przy load)', async t => {
     const vault = makeMemoryVault();
     // Stary format: brak `disabled_tools` (tablicy) → konstruktor Agenta wylicza go z legacy
     // (`mcp_servers`/`enabled_tools`/`permissions`) i AgentLoader od razu PRZEPISUJE plik w formie
@@ -73,7 +65,7 @@ test('B6 repro: agent bez model + z language przeżywa migrację osi narzędziow
 
 // ── Ta sama ścieżka, ale przez update() + saveAgent — symulacja zapisu profilu ────────
 
-test('B6: update() pola niezwiązanego z modelem + saveAgent nie wstrzykuje model ani nie gubi language', async t => {
+test('update() pola niezwiązanego z modelem + saveAgent nie wstrzykuje model ani nie gubi language', async t => {
     const vault = makeMemoryVault();
     vault.files['.pkm-assistant/agents/klara.yaml'] = [
         'name: Klara',
@@ -98,7 +90,7 @@ test('B6: update() pola niezwiązanego z modelem + saveAgent nie wstrzykuje mode
 
 // ── Model JAWNIE ustawiony w yamlu przeżywa round-trip (Default OFF działa w OBIE strony) ──
 
-test('B6: agent z JAWNIE ustawionym model w yamlu zachowuje go po round-tripie', async t => {
+test('agent z JAWNIE ustawionym model w yamlu zachowuje go po round-tripie', async t => {
     const vault = makeMemoryVault();
     vault.files['.pkm-assistant/agents/borys.yaml'] = [
         'name: Borys',
@@ -117,7 +109,7 @@ test('B6: agent z JAWNIE ustawionym model w yamlu zachowuje go po round-tripie',
 
 // ── Czyszczenie pola w profilu (pusty string) nie zostawia model:'' ani nie wstrzykuje domyślnego ──
 
-test('B6: czyszczenie modelu w profilu (pusty string → null) nie zostawia model:"" ani domyślnej wartości', t => {
+test('czyszczenie modelu w profilu (pusty string → null) nie zostawia model:"" ani domyślnej wartości', t => {
     const agent = new Agent({ name: 'Igor', model: 'anthropic/claude-3-5-sonnet-20241022' });
     t.is(agent.model, 'anthropic/claude-3-5-sonnet-20241022');
 
@@ -131,7 +123,7 @@ test('B6: czyszczenie modelu w profilu (pusty string → null) nie zostawia mode
 
 // ── Round-trip innych pól usera (komunikator_visible, default_autonomy, models, prompt_overrides, mcp_servers) ──
 
-test('B6: round-trip kompletu pól usera przez auto-rewrite migracji — nic nie ginie poza samym model', async t => {
+test('round-trip kompletu pól usera przez auto-rewrite migracji — nic nie ginie poza samym model', async t => {
     const vault = makeMemoryVault();
     vault.files['.pkm-assistant/agents/wera.yaml'] = [
         'name: Wera',
@@ -162,18 +154,18 @@ test('B6: round-trip kompletu pól usera przez auto-rewrite migracji — nic nie
     t.false('model' in rewritten, 'nadal brak model — nic go nie ustawiło w tej ścieżce');
 });
 
-// ── B6 niespodzianka: `emoji` jest w AgentConfig/allowedFields od zawsze, ale konstruktor go
-// nie czytał — dokładnie ta sama klasa błędu co zgłoszony `language` (pole schematu, zerowe
-// wiązanie z instancją), tylko że TU realnie łamie widoczną funkcję: `chat_popovers.ts` i
-// `chat_streaming.ts` czytają `agent.emoji` na komunikaty „czeka…"/„skończył" (fallback `◆`),
-// a NAWET Jaskier (`HUMAN_VIBE_CONFIG.emoji: '🎭'`) dostawał ten sam placeholder co reszta.
+// ── `emoji` jest w AgentConfig/allowedFields od zawsze, ale konstruktor go nie czytał -
+// dokładnie ta sama klasa błędu co `language` (pole schematu, zerowe wiązanie z instancją),
+// tylko że TU realnie łamie widoczną funkcję: `chat_popovers.ts` i `chat_streaming.ts` czytają
+// `agent.emoji` na komunikaty "czeka…"/"skończył" (fallback `◆`), a NAWET Jaskier
+// (`HUMAN_VIBE_CONFIG.emoji: '🎭'`) dostawał ten sam placeholder co reszta.
 
-test('B6: emoji z yamla trafia do instancji Agenta (do naprawy w tym commicie: ginęło)', t => {
+test('emoji z yamla trafia do instancji Agenta', t => {
     const agent = new Agent({ name: 'Jaskier', emoji: '🎭' });
     t.is(agent.emoji, '🎭', 'agent.emoji musi nieść wartość z configu, nie undefined');
 });
 
-test('B6: emoji przeżywa round-trip load → serialize (auto-rewrite migracji)', async t => {
+test('emoji przeżywa round-trip load → serialize (auto-rewrite migracji)', async t => {
     const vault = makeMemoryVault();
     vault.files['.pkm-assistant/agents/zoja.yaml'] = [
         'name: Zoja',
@@ -188,7 +180,7 @@ test('B6: emoji przeżywa round-trip load → serialize (auto-rewrite migracji)'
     t.is(rewritten.emoji, '🌙', 'emoji przeżywa automatyczny rewrite migracji osi narzędziowej');
 });
 
-test('B6: emoji nieustawiony nie zaśmieca yamla (Default OFF, wzór color)', t => {
+test('emoji nieustawiony nie zaśmieca yamla (Default OFF, wzór color)', t => {
     const data = new Agent({ name: 'Bezimienny' }).serialize();
     t.false('emoji' in data);
 });

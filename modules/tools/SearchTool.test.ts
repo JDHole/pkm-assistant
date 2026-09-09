@@ -157,17 +157,16 @@ test('limit respektowany przez narzędzie', async t => {
     t.is(res.results.length, 3);
 });
 
-// ─── AUD-wydajnosc-024 follow-up: przekazanie `scan` (kontrakt W3, RetrievalEngine) ────────
+// ─── przekazanie opcjonalnego `scan` z `RetrievalEngine.runSearch` do wyniku narzędzia ────────
 //
-// `RetrievalEngine.runSearch` (branch `refactor/v2.2-perf-W3`, NIE zmergowany do tego
-// worktree) dokłada opcjonalne `scan: {candidates, scanned, truncated}` wyłącznie gdy skan
-// keyword był obcięty sufitem 300 kandydatów. Silnik w TYM worktree jeszcze go nie zna —
-// testy podmieniają `RetrievalEngine.prototype.runSearch` na atrapę, żeby sprawdzić WYŁĄCZNIE
-// przewód `SearchTool.execute` → wynik narzędzia, niezależnie od tego, czy W3 jest zmergowany.
+// `RetrievalEngine.runSearch` dokłada opcjonalne `scan: {candidates, scanned, truncated}`
+// wyłącznie gdy skan keyword był obcięty sufitem 300 kandydatów. Testy podmieniają
+// `RetrievalEngine.prototype.runSearch` na atrapę, żeby sprawdzić WYŁĄCZNIE przewód
+// `SearchTool.execute` → wynik narzędzia, niezależnie od kształtu, jaki akurat zwraca silnik.
 
 // Podmiana idzie przez luźny kontrakt (`unknown` prototyp), żeby nie zderzać się z typem
-// `SearchOutcome` deklarowanym w TYM worktree (bez pola `scan` — dojdzie dopiero z W3) —
-// dokładnie ten sam powód, dla którego `buildEngine` w `SearchTool.ts` rzutuje na `never`.
+// `SearchOutcome` (nie deklaruje pola `scan` jako zawsze obecnego) — dokładnie ten sam powód,
+// dla którego `buildEngine` w `SearchTool.ts` rzutuje na `never`.
 type LooseRunSearchProto = { runSearch: (...args: unknown[]) => Promise<unknown> };
 
 test('scan: obecne w silniku i truncated=true → pole `scan` w wyniku narzędzia', async t => {
@@ -201,7 +200,7 @@ test('scan: NIEOBECNE w silniku (skan nieobcięty) → brak pola `scan` w wyniku
         results: [],
         total: 0,
         semantic: { requested: false, used: false },
-        // brak pola `scan` — dokładnie kształt silnika sprzed W3
+        // brak pola `scan` — dokładnie kształt silnika bez obciętego skanu
     });
     try {
         const plugin = makePlugin({ 'a.md': 'target' });

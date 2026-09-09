@@ -33,9 +33,10 @@ test('isEdgePermissionType: read/think = NIE krawędź', t => {
     t.false(isEdgePermissionType(PERMISSION_TYPES.THINKING));
 });
 
-// Fix znaleziska TS-1 #1: 5 asercji na kategoriach skasowanych w E2.8 A5 (EXECUTE_COMMANDS,
-// BUILDING_AGENTS, ACCESS_OUTSIDE_VAULT, SYSTEM_SETTINGS, SKILLS_CRUD) realnie sprawdzało
-// `isEdgePermissionType(undefined)` — gałąź fail-closed ma własny test niżej, więc wyleciały.
+// Kategorie uprawnień, które nie istnieją w katalogu (EXECUTE_COMMANDS, BUILDING_AGENTS,
+// ACCESS_OUTSIDE_VAULT, SYSTEM_SETTINGS, SKILLS_CRUD) nie dostają tu osobnych asercji —
+// realnie sprawdzałyby tylko `isEdgePermissionType(undefined)`, a ta gałąź fail-closed
+// ma już własny test niżej.
 test('isEdgePermissionType: zapis/kasowanie/web/mcp = krawędź', t => {
     t.true(isEdgePermissionType(PERMISSION_TYPES.EDIT_NOTES));
     t.true(isEdgePermissionType(PERMISSION_TYPES.CREATE_FILES));
@@ -106,7 +107,7 @@ test('A3 traffic lights: todo read=green, todo mutation=yellow', t => {
     t.is(classifyToolRisk({ toolName: 'todo', operationMode: 'add' }), TOOL_RISK_LEVELS.YELLOW);
 });
 
-test('A3 traffic lights (S28): kom_send=yellow mimo akcji agent.message, odczyt skrzynki=green', t => {
+test('A3 traffic lights: kom_send=yellow mimo akcji agent.message, odczyt skrzynki=green', t => {
     // Jawny wyjątek narzędziowy MUSI wyprzedzić szeroką regułę `action === 'agent.message'`.
     t.is(classifyToolRisk({
         action: 'agent.message',

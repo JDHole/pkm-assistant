@@ -11,7 +11,7 @@ import { hostWindow } from '../utils/hostWindow.js';
 
 // Prefiks id NOWYCH sekretów. Stare id `obsek-*` żyją dalej w mapie
 // `settings.pkmAssistant.secureStorage.refs` u userów i są w pełni poprawne —
-// odszyfrowanie idzie po refs, nie po tym prefiksie (S35).
+// odszyfrowanie idzie po refs, nie po tym prefiksie.
 const DEFAULT_NAMESPACE = 'pkm-assistant';
 
 /** Zaszyfrowany sekret zapisany w ustawieniach (wszystko base64). */
@@ -66,8 +66,7 @@ type ErrLike = { message?: string };
 /** Skrót na „dowolny obiekt" — potrzebny przy chodzeniu po ścieżkach kropkowanych. */
 type AnyRecord = Record<string, unknown>;
 
-// AUD-dead-code-116/177 (2026-09-02): zdjęty `export` — zero konsumentów poza tym plikiem
-// (był reeksportowany z core/index.ts, ale nikt spoza core/ po niego nie sięgał).
+// Bez `export` — zero konsumentów poza tym plikiem.
 const SECRET_FIELD_PATHS: string[] = [
     'pkmAssistant.chat.apiKeys.anthropic',
     'pkmAssistant.chat.apiKeys.openai',
@@ -80,7 +79,7 @@ const SECRET_FIELD_PATHS: string[] = [
     'pkmAssistant.embedding.apiKeys.ollama',
     'pkmAssistant.embedding.apiKeys.lm_studio',
     'pkmAssistant.embedding.apiKeys.gemini',
-    // Web Search: klucz per dostawca (E3.3). Stare wspólne `apiKey` ZOSTAJE na liście —
+    // Web Search: klucz per dostawca. Stare wspólne `apiKey` ZOSTAJE na liście —
     // user, który go nie przeklikał, dalej ma go schowanego w sejfie.
     'pkmAssistant.webSearch.apiKey',
     'pkmAssistant.webSearch.apiKeys.jina',
@@ -94,7 +93,7 @@ const SECRET_FIELD_PATHS: string[] = [
 ];
 
 export class SecretsStorage {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare app: unknown;
     declare namespace: string;
     declare passwordKey: PasswordKey | null;
@@ -176,7 +175,7 @@ export class SecretsStorage {
         this.passwordKey = null;
     }
 
-    // Fix znaleziska TS-1 #5: bramka zamkniętego sejfu żyła TYLKO u wołaczy (`setSecret`,
+    // Bramka zamkniętego sejfu żyła TYLKO u wołaczy (`setSecret`,
     // `getSecret`) — wywołanie wprost dawało gołe TypeError na `null.key`. Teraz obie metody
     // bronią się same (ten sam komunikat co u wołacza), a zawężenie zastępuje rzutowania.
     async encryptWithPassword(value: string): Promise<EncryptedSecret> {

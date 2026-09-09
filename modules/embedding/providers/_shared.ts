@@ -88,7 +88,7 @@ export function parseOpenAiShapedEmbedResponse(
     return data.map(item => item.embedding as number[]);
 }
 
-/** Błąd ≥400 (albo 200 z `{error:{code:429}}` w ciele — OpenAI potrafi tak oddać limit, B.5 EB-02). */
+/** Błąd ≥400 (albo 200 z `{error:{code:429}}` w ciele — OpenAI potrafi tak oddać limit). */
 export function parseOpenAiShapedEmbedError(
     res: HttpResponse,
     providerId: EmbeddingProviderId,

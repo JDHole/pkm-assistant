@@ -1,7 +1,7 @@
 /**
- * Logger — K20 (AUD-security-120/133): maska działa na KAŻDYM poziomie i w KAŻDEJ metodzie.
+ * Logger - maska działa na KAŻDYM poziomie i w KAŻDEJ metodzie.
  *
- * Znalezisko 133 mówiło: `log.error(...)` wozi do pliku logu obiekty błędów, w których klucz
+ * Chodziło o to, że `log.error(...)` wozi do pliku logu obiekty błędów, w których klucz
  * siedzi głębiej niż jedna stringifikacja. Maska widzi finalny string — ale gdy pole `message`
  * niosło już zestringifikowany JSON, nazwa nagłówka była zaescapowana (`\"api-key\":\"…\"`)
  * i żaden filtr nie trafiał. Tu pilnujemy CAŁEJ drogi: co dostaje sink plikowy po
@@ -66,7 +66,7 @@ function captureConsole(method: 'log' | 'warn' | 'error', fn: () => void): unkno
 
 const SECRET = 'SEKRET12345ABCDEF';
 
-test.serial('K20: obiekt z ZAESCAPOWANYM JSON-em w polu message nie wynosi klucza do pliku logu', t => {
+test.serial('Obiekt z ZAESCAPOWANYM JSON-em w polu message nie wynosi klucza do pliku logu', t => {
     const lines = installFakeSink();
     try {
         // Dokładnie kształt, jaki produkował `normalize_error` po padzie strumienia:
@@ -81,7 +81,7 @@ test.serial('K20: obiekt z ZAESCAPOWANYM JSON-em w polu message nie wynosi klucz
     } finally { removeFakeSink(); }
 });
 
-test.serial('K20: Error z zaescapowanym JSON-em w message — plik logu czysty', t => {
+test.serial('Error z zaescapowanym JSON-em w message - plik logu czysty', t => {
     const lines = installFakeSink();
     try {
         captureConsole('error', () => log.error('X', 'boom', new Error(JSON.stringify({ message: JSON.stringify({ headers: { 'api-key': SECRET } }) }))));
@@ -89,7 +89,7 @@ test.serial('K20: Error z zaescapowanym JSON-em w message — plik logu czysty',
     } finally { removeFakeSink(); }
 });
 
-test.serial('K20: Error z gołym JSON-em w message — plik logu czysty (regresja K8)', t => {
+test.serial('Error z gołym JSON-em w message - plik logu czysty', t => {
     const lines = installFakeSink();
     try {
         captureConsole('error', () => log.error('X', 'boom', new Error(JSON.stringify({ headers: { 'api-key': SECRET } }))));
@@ -97,7 +97,7 @@ test.serial('K20: Error z gołym JSON-em w message — plik logu czysty (regresj
     } finally { removeFakeSink(); }
 });
 
-test.serial('K20: debug i info też maskują (sink bierze je niezależnie od trybu debug)', t => {
+test.serial('Debug i info też maskują (sink bierze je niezależnie od trybu debug)', t => {
     const lines = installFakeSink();
     try {
         const payload = { message: JSON.stringify({ headers: { Authorization: `Bearer ${SECRET}` } }) };
@@ -109,7 +109,7 @@ test.serial('K20: debug i info też maskują (sink bierze je niezależnie od try
     } finally { removeFakeSink(); }
 });
 
-test.serial('K20: sekret w `cause` błędu nie wychodzi na konsolę', t => {
+test.serial('Sekret w `cause` błędu nie wychodzi na konsolę', t => {
     const internals = log as unknown as LoggerInternals;
     const wasDebug = internals._debug;
     internals._debug = true;
@@ -123,7 +123,7 @@ test.serial('K20: sekret w `cause` błędu nie wychodzi na konsolę', t => {
     } finally { internals._debug = wasDebug; }
 });
 
-test.serial('K20: sekret w polu dopiętym do błędu (`response`) nie wychodzi na konsolę', t => {
+test.serial('Sekret w polu dopiętym do błędu (`response`) nie wychodzi na konsolę', t => {
     const internals = log as unknown as LoggerInternals;
     const wasDebug = internals._debug;
     internals._debug = true;
@@ -137,7 +137,7 @@ test.serial('K20: sekret w polu dopiętym do błędu (`response`) nie wychodzi n
     } finally { internals._debug = wasDebug; }
 });
 
-test.serial('K20: zwykły log nie jest kaleczony przez maskę', t => {
+test.serial('Zwykły log nie jest kaleczony przez maskę', t => {
     const lines = installFakeSink();
     try {
         log.info('X', 'gotowe', { model: 'deepseek-chat', max_tokens: 16384 });
@@ -148,14 +148,13 @@ test.serial('K20: zwykły log nie jest kaleczony przez maskę', t => {
 });
 
 /**
- * AUD-bledy-059 / AUD-bledy-038 — plikowy sink Loggera ma drzwi demontażu.
+ * Plikowy sink Loggera ma drzwi demontażu.
  *
  * `initFileSink()` (main.ts, start pluginu) tworzy prywatny `LogFileSink` na
- * `.pkm-assistant/logs/pkm-assistant.log`. Do naprawy jego `dispose()` wołał WYŁĄCZNIE sam
- * `initFileSink` przy ponownej inicjalizacji, a `onunload()` zamykał tylko sink trace'u.
- * Skutek: cały ślad demontażu siedział w buforze czekając na debounce (1000 ms) — przy
- * zamknięciu Obsidiana tuż po wyłączeniu pluginu ogon logu ginął bez ostrzeżenia, a budzik
- * flusha zostawał uzbrojony na martwym pluginie.
+ * `.pkm-assistant/logs/pkm-assistant.log`. Bez wywołania `dispose()` przy demontażu pluginu
+ * ślad demontażu siedziałby w buforze czekając na debounce (1000 ms) — przy zamknięciu
+ * Obsidiana tuż po wyłączeniu pluginu ogon logu ginąłby bez ostrzeżenia, a budzik flusha
+ * zostawałby uzbrojony na martwym pluginie.
  */
 type SinkFiles = Record<string, string | undefined>;
 
@@ -182,7 +181,7 @@ function sinkAdapter(): SinkAdapter {
 
 const SINK_PATH = '.pkm-assistant/logs/pkm-assistant.log';
 
-test.serial('AUD-bledy-059: disposeFileSink() wypycha ogon logu na dysk PRZED końcem demontażu', async t => {
+test.serial('disposeFileSink() wypycha ogon logu na dysk PRZED końcem demontażu', async t => {
     const adapter = sinkAdapter();
     try {
         log.initFileSink({ adapter, enabled: true, level: 'info' });
@@ -199,7 +198,7 @@ test.serial('AUD-bledy-059: disposeFileSink() wypycha ogon logu na dysk PRZED ko
     }
 });
 
-test.serial('AUD-bledy-038: disposeFileSink() gasi sink — po demontażu nic już nie buforuje', async t => {
+test.serial('disposeFileSink() gasi sink - po demontażu nic już nie buforuje', async t => {
     const adapter = sinkAdapter();
     try {
         log.initFileSink({ adapter, enabled: true, level: 'info' });
@@ -217,7 +216,7 @@ test.serial('AUD-bledy-038: disposeFileSink() gasi sink — po demontażu nic ju
     }
 });
 
-test.serial('AUD-bledy-059: disposeFileSink() bez sinka jest bezpieczne (fail-soft w onunload)', async t => {
+test.serial('disposeFileSink() bez sinka jest bezpieczne (fail-soft w onunload)', async t => {
     log.initFileSink({ enabled: false });
     await t.notThrowsAsync(() => log.disposeFileSink());
 });

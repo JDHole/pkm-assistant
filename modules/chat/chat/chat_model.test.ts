@@ -1,12 +1,11 @@
 /**
- * N43 (luka L-21, decyzja R13): `get_chat_model` NIE MA własnej drabinki — deleguje do
- * `createModelForRole`.
+ * `get_chat_model` NIE MA własnej drabinki - deleguje do `createModelForRole`.
  *
- * Do clean-room ten mixin trzymał DRUGĄ KOPIĘ pięciostopniowej drabinki: własne defaulty modeli
- * (`ollama: 'llama3.2'`), brak `lm_studio` i `xai`, ręczna budowa instancji z mapy DI. Kopia
- * rozjeżdżała się z `modelResolver` przy każdej zmianie tam i była martwa bez starego DI.
+ * Ten mixin nie może trzymać DRUGĄ KOPIĘ pięciostopniowej drabinki: własne defaulty modeli
+ * (`ollama: 'llama3.2'`), brak `lm_studio` i `xai`, ręczna budowa instancji z mapy DI. Taka kopia
+ * rozjeżdżałaby się z `modelResolver` przy każdej zmianie tam.
  *
- * Strażnik chodzi PO ŹRÓDLE, bo `chat_model.ts` importuje `obsidian` — AVA go nie zaimportuje
+ * Strażnik chodzi PO ŹRÓDLE, bo `chat_model.ts` importuje `obsidian` - AVA go nie zaimportuje
  * (ten sam wzór co `chatModelSkipCache.test.ts` i `oczkoAccessGate.test.ts`).
  */
 import test from 'ava';
@@ -16,7 +15,7 @@ import { fileURLToPath } from 'url';
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), 'chat_model.ts');
 
-test('L-21: get_chat_model deleguje do createModelForRole i nie ma własnej drabinki', async t => {
+test('get_chat_model deleguje do createModelForRole i nie ma własnej drabinki', async t => {
     const src = await readFile(SRC, 'utf8');
 
     t.true(
@@ -38,11 +37,11 @@ test('L-21: get_chat_model deleguje do createModelForRole i nie ma własnej drab
 });
 
 /**
- * Bug 2026-09-06: mikrofon (STT) czytał klucze z płaskich pól `chat.groq_api_key` /
- * `openai_api_key` / `gemini_api_key` — kształtu sprzed migracji ustawień. Migrator przenosi
- * je do puli `chat.apiKeys.<platforma>`, więc płaskie pole było zawsze puste i Groq Whisper
- * meldował „brak klucza API" mimo wpisanego klucza. STT ma czytać z TEJ SAMEJ puli co
- * modelResolver i GenerateImageTool.
+ * Mikrofon (STT) nie może czytać klucze z płaskich pól `chat.groq_api_key` /
+ * `openai_api_key` / `gemini_api_key` - te pola nie są zasilane, bo migrator ustawień
+ * przenosi klucze do puli `chat.apiKeys.<platforma>`. Czytanie z płaskiego pola więc zawsze
+ * trafia na puste i Groq Whisper melduje „brak klucza API" mimo wpisanego klucza. STT ma
+ * czytać z TEJ SAMEJ puli co modelResolver i GenerateImageTool.
  */
 test('STT: klucze czatu z puli chat.apiKeys, nie z płaskich pól sprzed migracji', async t => {
     const src = await readFile(SRC, 'utf8');

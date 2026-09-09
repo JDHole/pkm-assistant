@@ -69,13 +69,13 @@ test('scope=vault: traversal → odmowa (validateVaultPath)', async t => {
     t.false(res.success);
 });
 
-test('scope=vault: .pkm-assistant zablokowane (E1.8) nawet gdy istnieje na dysku', async t => {
+test('scope=vault: .pkm-assistant zablokowane nawet gdy istnieje na dysku', async t => {
     const app = makeVaultApp({ '.pkm-assistant/agents/tola/memory/brain.md': 'secret' });
     const res = await runVault(app, { path: '.pkm-assistant/agents/tola/memory/brain.md' });
     t.false(res.success);
 });
 
-test('scope=vault: przepis skilla .pkm-assistant/skills/**/SKILL.md CZYTELNY (D17, przez adapter)', async t => {
+test('scope=vault: przepis skilla .pkm-assistant/skills/**/SKILL.md CZYTELNY (przez adapter)', async t => {
     const app = makeVaultApp({ '.pkm-assistant/skills/daily-review/SKILL.md': '# Daily review\nkroki...' });
     // Ukryty folder — Obsidian go nie indeksuje → getAbstractFileByPath null, czyta adapter.
     app.vault.getAbstractFileByPath = () => null;
@@ -157,15 +157,15 @@ test('scope=memory: brak pamięci agenta → no_agent', async t => {
 });
 
 test('scope=memory: czyta notatkę brain/ aktualnego agenta', async t => {
-    const notePath = '.pkm-assistant/agents/jaskier/memory/brain/user_kuba.md';
+    const notePath = '.pkm-assistant/agents/jaskier/memory/brain/user_jan.md';
     const { vault } = makeVault({
         '.pkm-assistant/agents/jaskier/memory/brain.md': '# Brain',
-        [notePath]: '---\nname: Kuba\ntype: user\n---\nKuba lubi konkret.'
+        [notePath]: '---\nname: Jan\ntype: user\n---\nUser lubi konkret.'
     });
     const memory = new AgentMemory(vault, 'Jaskier');
-    const res = await runMem(memPlugin(memory), { path: 'user_kuba.md' });
+    const res = await runMem(memPlugin(memory), { path: 'user_jan.md' });
     t.true(res.success);
-    t.true(res.content!.includes('Kuba lubi konkret.'));
+    t.true(res.content!.includes('User lubi konkret.'));
     t.is(res.path, notePath);
 });
 
@@ -220,15 +220,15 @@ test('scope=memory: brak podsumowania → note_not_found', async t => {
     t.is(res.code, 'note_not_found');
 });
 
-test('K4/036: scope=memory z nieznaną tożsamością NIE czyta pamięci aktywnego agenta', async t => {
-    const notePath = '.pkm-assistant/agents/jaskier/memory/brain/user_kuba.md';
+test('scope=memory z nieznaną tożsamością NIE czyta pamięci aktywnego agenta', async t => {
+    const notePath = '.pkm-assistant/agents/jaskier/memory/brain/user_jan.md';
     const { vault } = makeVault({
         '.pkm-assistant/agents/jaskier/memory/brain.md': '# Brain',
-        [notePath]: '---\nname: Kuba\ntype: user\n---\nTAJNE-JASKRA',
+        [notePath]: '---\nname: Jan\ntype: user\n---\nTAJNE-JASKRA',
     });
     const memory = new AgentMemory(vault, 'Jaskier');
 
-    const res = await runMem(memPlugin(memory), { path: 'user_kuba.md', _invocationAgentName: 'Skasowany' });
+    const res = await runMem(memPlugin(memory), { path: 'user_jan.md', _invocationAgentName: 'Skasowany' });
 
     t.false(res.success, 'brak pamięci dla nazwanej tożsamości = odmowa, nie cudzy katalog');
     t.false(JSON.stringify(res).includes('TAJNE-JASKRA'));

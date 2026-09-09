@@ -1,10 +1,9 @@
 /**
- * AUD-testy-007 — `AccessGuard._matchesEntry`, gałąź wpisu whitelisty wskazującego
+ * `AccessGuard._matchesEntry`, gałąź wpisu whitelisty wskazującego
  * POJEDYNCZY PLIK (ostatni segment wzorca zawiera kropkę → dopasowanie DOSŁOWNE,
  * core/security/AccessGuard.ts:648-655, `return normalizedPath === normalizedPattern;`).
  *
- * Nie miała testu z ŻADNEJ strony (`_matchesEntry` występowało w testach tylko w
- * komentarzach). Ryzyko: gałąź FOLDEROWA tuż nad nią dopasowuje PREFIKSEM — klasyczna
+ * Ryzyko: gałąź FOLDEROWA tuż nad nią dopasowuje PREFIKSEM — klasyczna
  * regresja to skopiowanie tego wzorca (albo zmiana `===` na `startsWith`) do gałęzi
  * plikowej, co wpuściłoby sąsiadów o tej samej podstawie nazwy (`lista.md.backup`,
  * `lista.md/cokolwiek`) agentowi, który miał dostęp do JEDNEGO konkretnego pliku.

@@ -5,7 +5,7 @@ import { ServerLoader } from './ServerLoader.js';
 const emptyVault = () => ({ adapter: { exists: async () => false, list: async () => ({ folders: [] }) } });
 const toolNames = (server: { tools?: Array<string | { name: string }> }) => (server.tools || []).map(x => (typeof x === 'string' ? x : x.name));
 
-test('BUILTIN_MANIFESTS: 8 servers registered (skills server dropped in E2.4/D17)', t => {
+test('BUILTIN_MANIFESTS: 8 servers registered (no skills server)', t => {
     t.is(BUILTIN_MANIFESTS.length, 8);
     const names = BUILTIN_MANIFESTS.map(m => m.name).sort();
     t.deepEqual(names, ['artifacts', 'core', 'delegation', 'komunikator', 'memory', 'multimodal', 'vault', 'web']);
@@ -29,7 +29,7 @@ test('core manifest is always-available (timeout 60s, simplest tools)', t => {
     t.is(core.timeout_ms, 60_000);
 });
 
-test('artifacts manifest owns living-artifact tools + todo (E2.9 D — bez starych review/chat_todo)', t => {
+test('artifacts manifest owns living-artifact tools + todo (bez starych review/chat_todo)', t => {
     const artifacts = getBuiltinManifest('artifacts')!;
     t.deepEqual(
         artifacts.tools.sort(),
@@ -47,14 +47,14 @@ test('multimodal manifest has 180s timeout (long-running image gen)', t => {
     t.is(mm.timeout_ms, 180_000);
 });
 
-test('vault manifest has 6 prymitywów (read/list/write/delete/create_folder + search) after E2.6', t => {
+test('vault manifest has 6 prymitywów (read/list/write/delete/create_folder + search)', t => {
     const vault = getBuiltinManifest('vault')!;
     t.is(vault.tools.length, 6);
     t.true(vault.tools.includes('read'));
     t.true(vault.tools.includes('list'));
     t.true(vault.tools.includes('write'));
-    t.true(vault.tools.includes('search')); // E2.5 unified retrieval
-    // E2.6: prefixowane vault_* zastąpione prymitywami; E2.5 retrieval → `search`.
+    t.true(vault.tools.includes('search')); // unified retrieval
+    // Prefixowane vault_* zastąpione prymitywami; retrieval → `search`.
     t.false(vault.tools.includes('vault_read'));
     t.false(vault.tools.includes('vault_search'));
 });
@@ -65,26 +65,26 @@ test('A2 manifests nie udają whitelisty default_roles', t => {
     }
 });
 
-test('memory manifest has 2 write tools after E2.6 (read/list moved to vault server, scope=memory)', t => {
+test('memory manifest has 2 write tools (read/list moved to vault server, scope=memory)', t => {
     const memory = getBuiltinManifest('memory')!;
     t.is(memory.tools.length, 2);
     t.true(memory.tools.includes('memory_save'));
     t.true(memory.tools.includes('memory_delete'));
-    // E2.6: memory_read/read_summary/list_summaries wchłonięte przez read/list (scope=memory).
+    // memory_read/read_summary/list_summaries wchłonięte przez read/list (scope=memory).
     t.false(memory.tools.includes('memory_read'));
     t.false(memory.tools.includes('memory_list_summaries'));
-    // E1.1: legacy brain_update guard is no longer registered (direct brain.md writes disabled).
+    // legacy brain_update guard is no longer registered (direct brain.md writes disabled).
     t.false(memory.tools.includes('brain_update'));
 });
 
-test('komunikator manifest has the three S28 mail primitives (Project Hub gone)', t => {
+test('komunikator manifest has the three mail primitives (no Project Hub)', t => {
     const komunikator = getBuiltinManifest('komunikator')!;
     t.deepEqual(komunikator.tools, ['kom_send', 'kom_list', 'kom_read']);
-    // D1: Project Hub skasowany — żaden kom_*_project/thread/brief nie może wrócić.
+    // Project Hub nie istnieje — żaden kom_*_project/thread/brief nie może wrócić.
     t.false(komunikator.tools.some(name => /project|thread|brief/.test(name)));
 });
 
-test('delegation manifest no longer carries agent_message (S28 D3)', t => {
+test('delegation manifest no longer carries agent_message', t => {
     const delegation = getBuiltinManifest('delegation')!;
     t.deepEqual(delegation.tools, ['delegate', 'agent_delegate']);
 });

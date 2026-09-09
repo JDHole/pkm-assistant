@@ -1,10 +1,9 @@
 /**
- * S27 D7 — test routingu Zaplecza.
+ * Test routingu Zaplecza.
  *
- * Kontekst: 2026-07-28 na ekranie domowym wisiał wiersz „Narzędzia MCP" celujący w tab
- * `tools`, który nie istniał — Zaplecze po cichu spadało na Skille. Ten plik ma sprawić,
- * że powtórka jest niemożliwa bez czerwonego testu: KAŻDY wiersz Home musi celować
- * w realnie zarejestrowaną zakładkę `BackstageRegistry` albo w realny widok sidebara.
+ * Ten plik ma sprawić, że wiersz celujący w nieistniejącą zakładkę jest niemożliwy bez
+ * czerwonego testu: KAŻDY wiersz Home musi celować w realnie zarejestrowaną zakładkę
+ * `BackstageRegistry` albo w realny widok sidebara.
  */
 import test from 'ava';
 import { BackstageRegistryClass } from '../BackstageRegistry.js';
@@ -22,7 +21,7 @@ function realRegistry() {
     return registry;
 }
 
-test('D7: każdy wiersz Home celuje w ISTNIEJĄCĄ zakładkę Zaplecza albo widok sidebara', t => {
+test('każdy wiersz Home celuje w ISTNIEJĄCĄ zakładkę Zaplecza albo widok sidebara', t => {
     const registry = realRegistry();
     const rows = buildZapleczeRows({ skillTemplates: 1, subTemplates: 2, connectedServers: 3 });
 
@@ -37,7 +36,7 @@ test('D7: każdy wiersz Home celuje w ISTNIEJĄCĄ zakładkę Zaplecza albo wido
     }
 });
 
-test('D7: każda zarejestrowana zakładka Zaplecza ma swój wiersz na Home (nic się nie chowa)', t => {
+test('każda zarejestrowana zakładka Zaplecza ma swój wiersz na Home (nic się nie chowa)', t => {
     const registry = realRegistry();
     const targeted = new Set(buildZapleczeRows().filter(r => r.tab).map(r => r.tab));
 

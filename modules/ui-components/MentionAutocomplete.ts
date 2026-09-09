@@ -4,7 +4,7 @@ import { t } from '../../core/i18n/index.js';
 // TS-any: lista i plugin są dynamicznym kontraktem chat/Obsidian.
 type MentionDynamic = any;
 
-// Node-safe DOM/timer shims (release 2.2.0 / W2): ten plik CELOWO nie importuje `obsidian`
+// Node-safe DOM/timer shims: ten plik CELOWO nie importuje `obsidian`
 // (dokumentacja modułu: „Prawie ZERO testów… jedyny plik z pokryciem" — MentionAutocomplete.test.ts
 // stawia własną atrapę `document.createElement` w globalThis, patrz test) — testy AVA go wołają
 // w gołym Node, gdzie `window`/globalny `createDiv` (helper Obsidiana) NIE istnieją.
@@ -57,16 +57,16 @@ export class MentionAutocomplete {
         /** @type {Array<{type: string, name: string, path: string, icon: string}>} */
         this.mentions = [];
 
-        // AUD-wydajnosc-027/047/077: notes/folders were re-fetched from the vault
+        // Without this cache, notes/folders would be re-fetched from the vault
         // (getMarkdownFiles/getAllLoadedFiles) AND re-lowercased on every single keystroke
         // inside an '@' mention — O(rozmiar vaulta) work on the keystroke path. Both lists
-        // are now built ONCE, lazily, on first use (`_ensureCaches`), with basename/path
+        // are built ONCE, lazily, on first use (`_ensureCaches`), with basename/path
         // lowercased up front, and invalidated only when the vault actually changes.
         this._notesCache = null;
         this._foldersCache = null;
         this._vaultCacheRefs = [];
         this._invalidateVaultCache = () => {
-            // Review fix (2026-09-02): `renderView()` in chat_ui.ts builds a NEW
+            // `renderView()` in chat_ui.ts builds a NEW
             // MentionAutocomplete on every skin change without calling `destroy()` on the old
             // one (that lifecycle belongs to modules/chat, out of scope here) — the old
             // instance's textarea gets detached from the live DOM, but its vault listeners
@@ -168,7 +168,7 @@ export class MentionAutocomplete {
         }
     }
 
-    /** AUD-wydajnosc-027/047/077: debounce the vault scan itself, not just its rendering. */
+    /** Debounce the vault scan itself, not just its rendering. */
     _scheduleSuggestionsUpdate() {
         if (this._suggestTimer !== null) {
             _nodeSafeClearTimeout(this._suggestTimer);
@@ -181,12 +181,11 @@ export class MentionAutocomplete {
     }
 
     /**
-     * Review fix (2026-09-02, BLOKER): the debounce added for AUD-wydajnosc-027/047/077
-     * suppresses the SCAN, but selection/navigation used to read `this.items` regardless of
-     * whether a scan for the LATEST query was still pending. Repro: type "@da" (debounced scan
-     * for "da" schedules), keep typing "ilyp" within the same 50ms window (query is now
-     * "dailyp", scan still pending for it), hit Enter before the timer fires — Enter picked
-     * `this.items[selectedIndex]` from the STALE "da" results and inserted "daniel" instead of
+     * The debounce suppresses the SCAN, but selection/navigation must NOT read `this.items`
+     * while a scan for the LATEST query is still pending — otherwise: type "@da" (debounced
+     * scan for "da" schedules), keep typing "ilyp" within the same 50ms window (query is now
+     * "dailyp", scan still pending for it), hit Enter before the timer fires — Enter would pick
+     * `this.items[selectedIndex]` from the STALE "da" results and insert "daniel" instead of
      * matching "dailyp". Flushing here forces the scan to run synchronously for the query the
      * user is actually looking at before anything reads `items`/`selectedIndex`.
      */
@@ -222,7 +221,7 @@ export class MentionAutocomplete {
             // Flush BEFORE reading `items.length` — including right after a bare '@' (items
             // still empty pre-debounce): without the flush, `items.length > 0` was false, the
             // key fell through unhandled, and the chat's own keydown handler sent the message
-            // instead of picking the (about to exist) top suggestion (P2).
+            // instead of picking the (about to exist) top suggestion.
             this._flushPendingSuggestions();
             if (this.items.length > 0) {
                 e.preventDefault();
@@ -346,7 +345,7 @@ export class MentionAutocomplete {
         // debounced left to show yet: a brand-new dropdown, or reopening after `close()` reset
         // `items` to `[]` — otherwise the OLD rendered rows from the PREVIOUS mention (dropdown
         // DOM persists across close()/reopen; only `destroy()` removes it) would stay visible,
-        // stale, until the debounce fires ~50ms later (review fix, 2026-09-02). Mid-mention
+        // stale, until the debounce fires ~50ms later. Mid-mention
         // keystrokes, where `items` is already populated from the last render, skip this and
         // wait for the debounce — that's the actual perf fix.
         if (isNewDropdown || this.items.length === 0) {
@@ -355,7 +354,7 @@ export class MentionAutocomplete {
     }
 
     close() {
-        // Review fix (2026-09-02): a pending debounced scan must not fire AFTER close() — it
+        // A pending debounced scan must not fire AFTER close() — it
         // would repopulate `items` and re-render a dropdown the user just dismissed/selected
         // from (Escape, or a legit selection via `_selectItem`, which also calls `close()`).
         if (this._suggestTimer !== null) {
@@ -410,10 +409,10 @@ export class MentionAutocomplete {
             });
 
             row.addEventListener('mouseover', () => {
-                // AUD-wydajnosc-078: `mouseover` bubbles from the icon/name/path spans inside
-                // the row, so moving the mouse across ONE row fired this multiple times — each
-                // one rebuilding the whole dropdown DOM. Skip the rebuild when the row is
-                // already selected.
+                // `mouseover` bubbles from the icon/name/path spans inside the row, so moving
+                // the mouse across ONE row fires this multiple times — without the guard below,
+                // each one would rebuild the whole dropdown DOM. Skip the rebuild when the row
+                // is already selected.
                 if (this.selectedIndex === i) return;
                 this.selectedIndex = i;
                 this._renderItems();

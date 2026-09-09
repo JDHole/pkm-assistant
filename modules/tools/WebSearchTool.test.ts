@@ -1,5 +1,5 @@
 /**
- * WebSearchTool.test.js — E3.3: nowy kształt wyniku, filtr domen, licznik, warstwy.
+ * WebSearchTool.test.js — kształt wyniku, filtr domen, licznik, warstwy.
  *
  * ⚠️ Wzorzec z `GenerateImageTool.test.js`: `obsidian` z npm to same typy (bez runtime'u),
  * więc przez `module.registerHooks` podstawiamy moduł delegujący `requestUrl` do atrapy.

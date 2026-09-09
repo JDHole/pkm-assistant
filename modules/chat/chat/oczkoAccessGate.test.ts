@@ -1,14 +1,14 @@
 /**
  * Strażnik PO ŹRÓDLE: wołacz Oczka (i @-wzmianki) przepuszczają ścieżki przez PEŁNĄ bramkę
- * uprawnień agenta tury — K23 / AUD-security-119.
+ * uprawnień agenta tury.
  *
  * DLACZEGO PO ŹRÓDLE, A NIE BEHAWIORALNIE: `chat_model.ts` importuje `obsidian` (`Notice`)
  * i całą warstwę UI, więc w AVA nie da się go zaimportować. Ten sam wzór i ten sam powód,
- * co `core/PKMEnv.boot_timing.test.ts` — plik czyta własne źródło zamiast wołać moduł.
+ * co `core/PKMEnv.boot_timing.test.ts` - plik czyta własne źródło zamiast wołać moduł.
  * Zachowanie samej bramki obrazów jest przetestowane naprawdę, po stronie producenta:
- * `modules/multimodal/active_note.test.ts` (testy K23).
+ * `modules/multimodal/active_note.test.ts`.
  *
- * CO PILNUJE: żeby nikt po cichu nie wyciął przekazania predykatu — bez niego Oczko wraca
+ * CO PILNUJE: żeby nikt po cichu nie wyciął przekazania predykatu - bez niego Oczko wraca
  * do stanu ze znaleziska, czyli wczytuje osadzone `![[…]]` obrazy z dowolnego miejsca
  * w vaultcie (także ze strefy No-Go) i wysyła ich bajty do dostawcy modelu.
  */
@@ -32,7 +32,7 @@ function plainFnBody(name: string): string {
     return code.match(re)?.[1] || '';
 }
 
-test('K23: wolacz Oczka przekazuje predykat dostepu do obrazow', t => {
+test('wolacz Oczka przekazuje predykat dostepu do obrazow', t => {
     const body = fnBody('_buildActiveNoteContext');
     t.not(body, '', 'nie znalazłem ciała _buildActiveNoteContext — zmieniła się sygnatura');
 
@@ -44,15 +44,15 @@ test('K23: wolacz Oczka przekazuje predykat dostepu do obrazow', t => {
     );
 });
 
-// AUD-testy-025: SAMA DECYZJA bramki (pełne `checkPermission('vault.read', …)`, fail-closed bez
-// systemu uprawnień, fail-closed przy rzucie) mieszka od tej naprawy w `vaultReadGate.ts` i ma tam
-// testy ZACHOWANIA — `vaultReadGate.test.ts`. Dawny strażnik mierzył tu obecność napisu
-// `checkPermission(agent, 'vault.read'`, więc podmiana `return …allowed === true;` na
-// `checkPermission(…); return true;` (bramka otwarta na oścież) przechodziła na zielono.
+// SAMA DECYZJA bramki (pełne `checkPermission('vault.read', …)`, fail-closed bez systemu
+// uprawnień, fail-closed przy rzucie) mieszka w `vaultReadGate.ts` i ma tam testy ZACHOWANIA -
+// `vaultReadGate.test.ts`. Mierzenie tu samej obecności napisu `checkPermission(agent, 'vault.read'`
+// nie wystarcza - podmiana `return …allowed === true;` na `checkPermission(…); return true;`
+// (bramka otwarta na oścież) przechodziłaby wtedy na zielono.
 // Tutaj pilnujemy już tylko OKABLOWANIA: że `chat_model.ts` podaje bramce trzy właściwe rzeczy
 // z pluginu i niczego nie liczy sam.
 
-test('K23: predykat woła wspólną bramkę i podaje jej system uprawnień + agenta tury', t => {
+test('predykat woła wspólną bramkę i podaje jej system uprawnień + agenta tury', t => {
     t.regex(
         source,
         /import \{ createVaultReadPredicate \} from '\.\/vaultReadGate\.js';/,
@@ -71,11 +71,11 @@ test('K23: predykat woła wspólną bramkę i podaje jej system uprawnień + age
     t.regex(
         source,
         /onError:\s*\([\s\S]{0,40}?\)\s*=>\s*log\.warn\('Chat',\s*'vault\.read gate threw/,
-        'rzut bramki musi trafiać do logu — cicha odmowa czyni śledztwo ślepym'
+        'rzut bramki musi trafiać do logu - cicha odmowa czyni diagnozę ślepą'
     );
 });
 
-test('K23: predykat NIE MA innej drogi wyjścia niż wspólna bramka (AUD-testy-025)', t => {
+test('predykat NIE MA innej drogi wyjścia niż wspólna bramka', t => {
     // Bez tej asercji wystarczyło dopisać `if (view) return () => true;` PRZED wywołaniem
     // bramki: napis `createVaultReadPredicate(` zostawał w źródle, a Oczko i @-wzmianki
     // przepuszczały każdą ścieżkę. Ciało predykatu ma być JEDNYM returnem.
@@ -87,7 +87,7 @@ test('K23: predykat NIE MA innej drogi wyjścia niż wspólna bramka (AUD-testy-
         'pierwszą (i jedyną) instrukcją predykatu musi być oddanie wspólnej bramki');
 });
 
-test('K23: chat_model.ts nie liczy dostępu sam (żadnej drugiej kopii bramki)', t => {
+test('chat_model.ts nie liczy dostępu sam (żadnej drugiej kopii bramki)', t => {
     t.false(
         /checkPermission\(/.test(code),
         'wróciło własne wołanie checkPermission w chat_model.ts — decyzja ma być JEDNA, w vaultReadGate.ts'
@@ -98,7 +98,7 @@ test('K23: chat_model.ts nie liczy dostępu sam (żadnej drugiej kopii bramki)',
     );
 });
 
-test('K23: @-wzmianki nie stoja juz na golym AccessGuard._isNoGo', t => {
+test('@-wzmianki nie stoja juz na golym AccessGuard._isNoGo', t => {
     // Szukamy WYWOŁANIA, nie wzmianki — nazwa pada też w komentarzu tłumaczącym, po czym
     // ta gałąź została przepięta (inaczej strażnik zapalałby się od własnej dokumentacji).
     t.false(
@@ -113,7 +113,7 @@ test('K23: @-wzmianki nie stoja juz na golym AccessGuard._isNoGo', t => {
     t.not(mentions, '', 'nie znalazłem ciała _resolveMentions — zmieniła się sygnatura');
     t.regex(mentions, /const canRead = _vaultReadPredicate\(this\);/,
         '@-wzmianki przestały pytać wspólnego predykatu o dostęp');
-    // AUD-testy-025: obecność napisu `canRead(` NIE wystarcza — `if (false && !canRead(m.path))`
+    // Obecność napisu `canRead(` NIE wystarcza - `if (false && !canRead(m.path))`
     // zostawia napis i przepuszcza każdą wzmiankę. Pilnujemy KSZTAŁTU gałęzi: warunek
     // z negacją i pominięcie wzmianki (`continue`) w środku.
     t.regex(mentions, /if\s*\(!canRead\(m\.path\)\)\s*\{[\s\S]{0,200}?continue;/,

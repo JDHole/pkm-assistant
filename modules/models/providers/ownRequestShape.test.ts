@@ -6,7 +6,7 @@ import { makeCtx } from '../testing/harness.js';
 /**
  * `stream_options` to pole kształtu OpenAI. Platformy o WŁASNYM kształcie żądania
  * (Anthropic — Messages API, Ollama — `/api/chat` NDJSON) nie mogą go dostać w ogóle:
- * serwer walidujący nieznane pola odbija 400. (B.6 BA-04/BA-05/BA-06)
+ * serwer walidujący nieznane pola odbija 400.
  */
 const MESSAGES = [{ role: 'user', content: 'cześć' }];
 

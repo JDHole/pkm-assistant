@@ -1,5 +1,5 @@
 /**
- * text_overlay_helper.js — Sprint 04 Z7 (MCP_PORZADEK_v1).
+ * text_overlay_helper.js
  *
  * `renderTextOverlay()` — czysta funkcja Canvas2D (bez modala, bez UI), używana przez
  * `add_text_to_image`. Wydzielona z narzędzia, żeby dało się ją testować i wołać

@@ -8,16 +8,16 @@
  *
  * Trzy rzeczy, które w tym dostawcy zaskakują najczęściej:
  *  1. **Nie ma roli `system`.** Wszystkie wiadomości systemowe są zlepiane i wchodzą jako
- *     PIERWSZA tura `user` (GG-05/GG-06).
+ *     PIERWSZA tura `user`.
  *  2. **Strumień to strumień OBIEKTÓW JSON, nie linie SSE.** Porcje przychodzą jako
  *     `[{…}`, `,{…}`, `,{…}]` (a przez proxy bywa i prefiks `data: `). Rozcinaniem zajmuje
- *     się {@link JsonObjectScanner}, który pamięta ogon między porcjami (GG-18/GG-23/GG-24).
+ *     się {@link JsonObjectScanner}, który pamięta ogon między porcjami.
  *  3. **Koniec strumienia rozpoznaje się STRUKTURALNIE.** Liczy się WYPARSOWANE pole
- *     `finishReason` na kandydacie z OSTATNIEGO obiektu porcji — nigdy podciąg w tekście,
- *     bo model potrafi o tym polu po prostu opowiadać (GG-22/GG-24).
+ *     `finishReason` na kandydacie z OSTATNIEGO obiektu porcji - nigdy podciąg w tekście,
+ *     bo model potrafi o tym polu po prostu opowiadać.
  *
- * Nagłówek klucza: `x-goog-api-key` (GG-02). Budżet myślenia:
- * `generationConfig.thinkingConfig.thinkingBudget` (GG-09).
+ * Nagłówek klucza: `x-goog-api-key`. Budżet myślenia:
+ * `generationConfig.thinkingConfig.thinkingBudget`.
  */
 import { normalizeError } from '../../../core/index.js';
 import { GEMINI_DEFAULT_THINKING_BUDGET } from '../contracts.js';
@@ -48,14 +48,14 @@ import type {
 /** Adres bazowy publicznego API (bez ukośnika na końcu). */
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
-/** Nazwa nagłówka klucza API — Gemini nie używa `Authorization: Bearer` (GG-02). */
+/** Nazwa nagłówka klucza API - Gemini nie używa `Authorization: Bearer`. */
 const API_KEY_HEADER = 'x-goog-api-key';
 
 /** Model brany, gdy nikt nie wskazał innego (parytet z `DEFAULT_MODELS`). */
 const DEFAULT_MODEL = 'gemini-1.5-pro';
 
 /**
- * Słownik powodów zakończenia (GG-14). Powód spoza słownika NIE jest gubiony —
+ * Słownik powodów zakończenia. Powód spoza słownika NIE jest gubiony -
  * przechodzi zmałymi literami.
  */
 const FINISH_REASON_MAP: Readonly<Record<string, string>> = {
@@ -65,7 +65,7 @@ const FINISH_REASON_MAP: Readonly<Record<string, string>> = {
     RECITATION: 'content_filter',
 };
 
-/** Skrócona forma MIME, której serwer Gemini nie przyjmuje (GG-07). */
+/** Skrócona forma MIME, której serwer Gemini nie przyjmuje. */
 const MIME_ALIASES: Readonly<Record<string, string>> = {
     'image/jpg': 'image/jpeg',
 };
@@ -99,7 +99,7 @@ function asCount(value: unknown): number | null {
 // Żądanie: kształt kanoniczny → Gemini
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/** Jedna część treści w żądaniu — Gemini przyjmuje formy `snake_case` (GG-03/GG-07). */
+/** Jedna część treści w żądaniu - Gemini przyjmuje formy `snake_case`. */
 type RequestPart =
     | { text: string }
     | { inline_data: { mime_type: string; data: string } }
@@ -113,7 +113,7 @@ interface RequestTurn {
 }
 
 /**
- * Mapowanie ról (GG-04): `assistant` i `function` stają się `model`, `user` zostaje,
+ * Mapowanie ról: `assistant` i `function` stają się `model`, `user` zostaje,
  * a rola nieznana Gemini (np. `tool`) przechodzi BEZ ZMIAN — świadomie, żeby nie zgubić
  * informacji o pochodzeniu tury.
  */
@@ -131,7 +131,7 @@ function flattenText(content: OpenAiContent | undefined): string {
         .join('\n');
 }
 
-/** `image/jpg` → `image/jpeg`; reszta bez zmian (GG-07). */
+/** `image/jpg` → `image/jpeg`; reszta bez zmian. */
 function canonicalMime(mime: string): string {
     return MIME_ALIASES[mime] ?? mime;
 }
@@ -194,9 +194,9 @@ function partsOfMessage(message: OpenAiRequestMessage): RequestPart[] {
 }
 
 /**
- * Wiadomości `system` → jedna, pierwsza tura `user` (GG-05). Kolejność źródłowa zachowana,
+ * Wiadomości `system` → jedna, pierwsza tura `user`. Kolejność źródłowa zachowana,
  * sklejenie po `\n`, ogonowe znaki nowej linii przycięte. Brak systemów nie dokłada pustej
- * tury (GG-06).
+ * tury.
  */
 function buildTurns(messages: OpenAiRequestMessage[]): RequestTurn[] {
     const systemChunks: string[] = [];
@@ -219,7 +219,7 @@ function buildTurns(messages: OpenAiRequestMessage[]): RequestTurn[] {
     return turns;
 }
 
-/** `ChatTool` → `function_declarations[]` (GG-03). Pola puste nie są dokładane. */
+/** `ChatTool` → `function_declarations[]`. Pola puste nie są dokładane. */
 function toDeclaration(tool: ChatTool): Json {
     const declaration: Json = { name: tool.function.name };
     if (typeof tool.function.description === 'string') declaration.description = tool.function.description;
@@ -228,7 +228,7 @@ function toDeclaration(tool: ChatTool): Json {
 }
 
 /**
- * Budżet myślenia (GG-09): `true` → domyślny, liczba jedzie wprost, brak pola → BRAK
+ * Budżet myślenia: `true` → domyślny, liczba jedzie wprost, brak pola → BRAK
  * `thinkingConfig` w ogóle.
  */
 function thinkingBudgetOf(thinking: ChatRequest['thinking']): number | undefined {
@@ -241,8 +241,8 @@ function thinkingBudgetOf(thinking: ChatRequest['thinking']): number | undefined
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Identyfikator wywołania narzędzia wytworzony lokalnie, gdy Gemini go nie podał (GG-13).
- * Pętla narzędzi paruje po nim wynik, więc MUSI być niepusty — stąd własny alfabet zamiast
+ * Identyfikator wywołania narzędzia wytworzony lokalnie, gdy Gemini go nie podał.
+ * Pętla narzędzi paruje po nim wynik, więc MUSI być niepusty - stąd własny alfabet zamiast
  * `Math.random().toString(36)`, który przy losie równym zeru oddaje pusty ogon.
  */
 function freshCallId(): string {
@@ -253,7 +253,7 @@ function freshCallId(): string {
     return `call_${Date.now()}_${tail}`;
 }
 
-/** `finishReason` → `finish_reason` kształtu kanonicznego (GG-14); brak pola → `null`. */
+/** `finishReason` → `finish_reason` kształtu kanonicznego; brak pola → `null`. */
 function toFinishReason(raw: unknown): string | null {
     const reason = asText(raw);
     if (!reason) return null;
@@ -270,8 +270,8 @@ function finishReasonOfPayload(payload: Json): string | null {
 }
 
 /**
- * `usageMetadata` → liczniki kształtu kanonicznego (GG-15). BRAK metadanych daje trzy
- * `null` (nie zera i nie `undefined`) — pętla odróżnia „nie wiem" od „zero".
+ * `usageMetadata` → liczniki kształtu kanonicznego. BRAK metadanych daje trzy
+ * `null` (nie zera i nie `undefined`) - pętla odróżnia „nie wiem" od „zero".
  */
 function toUsage(raw: unknown): UsageLike {
     const meta = asObject(raw);
@@ -282,7 +282,7 @@ function toUsage(raw: unknown): UsageLike {
     };
 }
 
-/** `functionCall` → wywołanie kanoniczne; `arguments` ZAWSZE stringiem (GG-12). */
+/** `functionCall` → wywołanie kanoniczne; `arguments` ZAWSZE stringiem. */
 function toToolCall(call: Json): OpenAiToolCall {
     return {
         id: asText(call.id) || freshCallId(),
@@ -294,14 +294,14 @@ function toToolCall(call: Json): OpenAiToolCall {
     };
 }
 
-/** Pusta wiadomość asystenta — jedyna sensowna odpowiedź, gdy kandydata nie ma (GG-16/GG-25). */
+/** Pusta wiadomość asystenta - jedyna sensowna odpowiedź, gdy kandydata nie ma. */
 function emptyChoice(finishReason: string | null): OpenAiCompletionChoice {
     return { index: 0, message: { role: 'assistant', content: '' }, finish_reason: finishReason };
 }
 
 /**
- * Rozdział części kandydata: `thought: true` idzie do myślenia, reszta do widocznej treści
- * (GG-11), a `functionCall` do wywołań narzędzi.
+ * Rozdział części kandydata: `thought: true` idzie do myślenia, reszta do widocznej treści,
+ * a `functionCall` do wywołań narzędzi.
  */
 function splitParts(parts: unknown[]): { text: string; reasoning: string; calls: OpenAiToolCall[] } {
     let text = '';
@@ -337,11 +337,11 @@ function splitParts(parts: unknown[]): { text: string; reasoning: string; calls:
  * więc porcje wyglądają jak `[{…}`, `,{…}`, `,{…}]`. Wszystko poza klamrami (`[`, `]`, `,`,
  * białe znaki, a przez proxy także prefiks `data: `) jest szumem strukturalnym i jest
  * pomijane. Obiekt rozcięty w pół zostaje w buforze do następnej porcji, a fragment, którego
- * nie da się sparsować, jest po prostu przeskakiwany — porcja NIGDY nie rzuca (GG-23).
+ * nie da się sparsować, jest po prostu przeskakiwany - porcja NIGDY nie rzuca.
  */
 class JsonObjectScanner {
     private buffer = '';
-    /** ST-11/GG-23: ile obiektów w kształcie klamry okazało się nie do przeczytania. */
+    /** Ile obiektów w kształcie klamry okazało się nie do przeczytania. */
     dropped = 0;
 
     /** Dokłada porcję i oddaje wszystkie obiekty, które właśnie się domknęły. */
@@ -411,7 +411,7 @@ interface AssembledCall {
 
 /**
  * Doklejenie argumentów z kolejnej porcji: wartości tekstowe SKLEJAJĄ SIĘ, reszta nadpisuje.
- * Tak `{path:'a'}` + `{path:'.md'}` daje `{path:'a.md'}` (GG-20).
+ * Tak `{path:'a'}` + `{path:'.md'}` daje `{path:'a.md'}`.
  */
 function mergeArgs(target: Json, incoming: Json | undefined): void {
     if (!incoming) return;
@@ -470,8 +470,8 @@ class GeminiStreamDecoder implements StreamDecoder {
             if (asObject(payload.usageMetadata)) events.push({ type: 'usage', usage: toUsage(payload.usageMetadata) });
         }
 
-        // Koniec czyta OSTATNI obiekt porcji — sentinel w obiekcie wcześniejszym nie kończy
-        // tury, bo po nim przyszła jeszcze treść (GG-22/GG-24).
+        // Koniec czyta OSTATNI obiekt porcji - sentinel w obiekcie wcześniejszym nie kończy
+        // tury, bo po nim przyszła jeszcze treść.
         const last = payloads[payloads.length - 1];
         const finishReason = last ? finishReasonOfPayload(last) : null;
         if (finishReason !== null) {
@@ -605,9 +605,9 @@ export class GeminiProvider implements ChatProvider {
 
         if (req.tools && req.tools.length > 0) {
             body.tools = [{ function_declarations: req.tools.map(toDeclaration) }];
-            // Świadoma decyzja: nawet `required` schodzi do AUTO — tryb ANY u Gemini psuje
+            // Świadoma decyzja: nawet `required` schodzi do AUTO - tryb ANY u Gemini psuje
             // zwykłe odpowiedzi tekstowe. `none` nie dokłada `tool_config`, ale deklaracje
-            // narzędzi i tak jadą (GG-08).
+            // narzędzi i tak jadą.
             if (req.tool_choice !== 'none') {
                 body.tool_config = { function_calling_config: { mode: 'AUTO' } };
             }
@@ -630,19 +630,19 @@ export class GeminiProvider implements ChatProvider {
         const usage = toUsage(payload.usageMetadata);
 
         // Payload z polem `error` (zły klucz, wyczerpany limit) oddaje błąd, zamiast wywracać
-        // się na nieistniejącym kandydacie (GG-17).
+        // się na nieistniejącym kandydacie.
         if (payload.error !== undefined && payload.error !== null) {
             return { choices: [emptyChoice(null)], usage, error: normalizeError(payload.error) };
         }
 
         const candidate = asObject(asArray(payload.candidates)[0]);
-        // Pusta lista kandydatów = blokada na PROMPCIE (`promptFeedback.blockReason`) —
-        // to odpowiedź, nie awaria (GG-25).
+        // Pusta lista kandydatów = blokada na PROMPCIE (`promptFeedback.blockReason`) -
+        // to odpowiedź, nie awaria.
         if (!candidate) return { choices: [emptyChoice(null)], usage };
 
         const finishReason = toFinishReason(candidate.finishReason);
         const content = asObject(candidate.content);
-        // Kandydat bez treści (odcięty filtrem) — oddajemy OBIEKT pustej wiadomości (GG-16).
+        // Kandydat bez treści (odcięty filtrem) - oddajemy OBIEKT pustej wiadomości.
         if (!content) return { choices: [emptyChoice(finishReason)], usage };
 
         const { text, reasoning, calls } = splitParts(asArray(content.parts));
@@ -663,7 +663,7 @@ export class GeminiProvider implements ChatProvider {
         return base.replace(/\/+$/, '');
     }
 
-    /** Nagłówki żądania — klucz idzie w `x-goog-api-key`, nigdy w URL-u (GG-02). */
+    /** Nagłówki żądania - klucz idzie w `x-goog-api-key`, nigdy w URL-u. */
     private headers(ctx: ProviderContext): Record<string, string> {
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         if (ctx.apiKey) headers[API_KEY_HEADER] = ctx.apiKey;

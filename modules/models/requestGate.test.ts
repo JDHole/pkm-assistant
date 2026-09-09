@@ -26,7 +26,7 @@ test.serial('limit 1 serializuje: drugi czeka aż pierwszy odda slot', async t =
     let bAdmitted = false;
     void b.admitted.then(ok => { bAdmitted = ok; });
     await new Promise(res => setTimeout(res, 10));
-    t.false(bAdmitted); // b nadal wisi — a nie oddał slotu
+    t.false(bAdmitted); // b nadal wisi - a nie oddał slotu
 
     a.release();
     t.true(await b.admitted);
@@ -76,7 +76,7 @@ test.serial('osobne klucze = osobne bramki', async t => {
     b.release();
 });
 
-// ─── F2 „delegacja w tle": priorytet main > sub w kolejce bramki ─────────────
+// ─── „delegacja w tle": priorytet main > sub w kolejce bramki ────────────────
 
 test.serial('priorytet: main (1) wjeżdża PRZED czekającymi subami (0) przy limicie 1', async t => {
     const bieg = acquireSlot('lm_studio', 1, { priority: 0 });

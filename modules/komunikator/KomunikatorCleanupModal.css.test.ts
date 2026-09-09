@@ -1,16 +1,10 @@
 /**
- * Strażnik KL-09 (AUD-dead-code-072) — "żywy DOM bez reguły CSS".
- *
- * Historia: `KomunikatorModal.css` importował wyłącznie osierocony `KomunikatorModal.ts`
- * (skasowany, AUD-dead-code-073), więc arkusz nigdy nie trafiał do `dist/main.js` —
- * a klasy `.komunikator-cleanup-*`, malowane przez ŻYWY `KomunikatorCleanupModal`,
- * nie miały w zbudowanym pluginie ani jednej reguły (user widział zlepiony tekst listu
- * w oknie, w którym decyduje o TWARDYM skasowaniu wiadomości).
- *
- * Naprawa: arkusz przeniesiony do `KomunikatorCleanupModal.css`, importowany i adoptowany
- * (`adoptSheet`) w pliku, który realnie rysuje ten DOM. Ten test pinuje po ŹRÓDLE
- * (nie po `dist/`), żeby nikt przypadkiem nie odpiął CSS-a od żywego pliku ani nie
- * dodał nowej klasy `komunikator-cleanup-*` bez odpowiadającej reguły.
+ * Strażnik przed "żywym DOM bez reguły CSS": arkusz `KomunikatorCleanupModal.css` musi być
+ * importowany i adoptowany (`adoptSheet`) w pliku, który realnie rysuje ten DOM, a każda
+ * klasa `.komunikator-cleanup-*` malowana w `KomunikatorCleanupModal.ts` musi mieć
+ * odpowiadającą regułę w tym arkuszu - inaczej w zbudowanym pluginie te klasy nie dostają
+ * ani jednej reguły CSS. Ten test pinuje po ŹRÓDLE (nie po `dist/`), żeby nikt przypadkiem
+ * nie odpiął CSS-a od żywego pliku ani nie dodał nowej klasy bez odpowiadającej reguły.
  */
 import test from 'ava';
 import fs from 'node:fs';

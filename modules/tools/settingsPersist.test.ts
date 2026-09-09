@@ -1,6 +1,6 @@
 /**
  * settingsPersist - reguła "meldunek ze stanu, nie z zamiaru" dla zakładki Ustawienia
- * → Narzędzia (AUD-bledy-028). DOM-u i `Notice` tu nie ma; testujemy samą decyzję.
+ * → Narzędzia. DOM-u i `Notice` tu nie ma; testujemy samą decyzję.
  */
 import test from 'ava';
 import { persistOrRollback, applyServerKillSwitch } from './settingsPersist.js';

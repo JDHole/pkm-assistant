@@ -1,17 +1,16 @@
 /**
  * Wrapper na model embeddingu (klaster `embedding`) dla łatwego użycia w RAG.
- * Cienka warstwa nad `EmbeddingModelLike` — wyrównanie wyniku z wejściem oraz porcjowanie
+ * Cienka warstwa nad `EmbeddingModelLike` - wyrównanie wyniku z wejściem oraz porcjowanie
  * pustych tekstów są kontraktem MODELU (`EmbeddingModel.embed`: N wejść → N wyników, `vector:
  * null` dla wejścia pustego/białego), nie tego helpera. Ręczne remapowanie przez
- * `originalIndex`, które ten plik kiedyś robił sam, zniknęło razem z clean-room — kontrakt modelu
- * już trzyma wyrównanie.
+ * `originalIndex` nie istnieje - kontrakt modelu już trzyma wyrównanie.
  */
 import type { EmbedResult, EmbeddingModelLike } from '../embedding/index.js';
 
 export type { EmbedResult, EmbeddingModelLike } from '../embedding/index.js';
 
 /**
- * Środowisko pluginu widziane przez helper — jedyna żywa droga dojścia do modelu embeddingu.
+ * Środowisko pluginu widziane przez helper - jedyna żywa droga dojścia do modelu embeddingu.
  * Wszystko opcjonalne: helper JEST napisany na to, że env jeszcze nie wstało.
  */
 export interface EmbeddingRuntimeLike {
@@ -19,7 +18,7 @@ export interface EmbeddingRuntimeLike {
 }
 
 export class EmbeddingHelper {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare env: EmbeddingRuntimeLike | null | undefined;
     declare private _model: EmbeddingModelLike | null;
 
@@ -29,7 +28,7 @@ export class EmbeddingHelper {
     }
 
     /**
-     * Znajduje model embeddingu przez `env.embeddings.default` — jedyna droga po clean-room
+     * Znajduje model embeddingu przez `env.embeddings.default` - jedyna droga
      * (rejestr `EmbeddingRegistry`, kontrakt w `modules/embedding`).
      */
     private _findModel(): EmbeddingModelLike | null {
@@ -55,7 +54,7 @@ export class EmbeddingHelper {
     async embed(text: string): Promise<number[]> {
         if (!this.isReady()) throw new Error('Embed model not ready');
 
-        // `isReady()` dopiero co ustawiło `_model` na niepusty — TS tego nie widzi przez
+        // `isReady()` dopiero co ustawiło `_model` na niepusty - TS tego nie widzi przez
         // granicę wywołania metody, więc asercja przywraca tę wiedzę.
         const results = await this._model!.embed([text]);
 
@@ -67,7 +66,7 @@ export class EmbeddingHelper {
 
     /**
      * Embeduje wiele tekstów (batch). Model oddaje DOKŁADNIE tyle wyników, ile dostał wejść
-     * (indeks w indeks) — `null` dla wejścia pustego/białego. Helper już niczego nie remapuje.
+     * (indeks w indeks) - `null` dla wejścia pustego/białego. Helper już niczego nie remapuje.
      * @param texts - Lista tekstów do zembedowania
      * @returns Lista wektorów (null dla pustych)
      */

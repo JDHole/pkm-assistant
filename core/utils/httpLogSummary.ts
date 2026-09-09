@@ -1,8 +1,8 @@
 /**
- * K8 (AUD-security-057): jednolinijkowe podsumowanie żądania HTTP do logu.
+ * Jednolinijkowe podsumowanie żądania HTTP do logu.
  *
- * Do K8 adapter w gałęzi błędu wypisywał `JSON.stringify(request_params, null, 2)`, czyli
- * KOMPLET parametrów razem z nagłówkiem `Authorization` / `x-api-key` — jedyną osłoną był
+ * Bez tego adapter w gałęzi błędu wypisywałby `JSON.stringify(request_params, null, 2)`, czyli
+ * KOMPLET parametrów razem z nagłówkiem `Authorization` / `x-api-key` — jedyną osłoną byłby
  * kształt wartości w `SensitiveDataGuard`. Diagnostyka potrzebuje adresu, metody, statusu
  * i czasu; treść nagłówków nie jest do niczego potrzebna, więc tu jej po prostu NIE MA
  * (lecą same NAZWY nagłówków). Plik jest node-safe (zero importu `obsidian`) właśnie po to,

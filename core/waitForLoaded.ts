@@ -8,24 +8,22 @@
  * dokładnie jak `whenLoaded_layout_ready()` jest otoczką na `waitForLayoutReady`
  * z `core/layoutReady.ts` (ten sam wzór, ta sama przyczyna).
  *
- * DLACZEGO W OGÓLE (AUD-wydajnosc-001/062, 2026-09-02): `whenLoaded` czekał WYŁĄCZNIE
- * siatką `setInterval` 100 ms, bez sprawdzenia warunku na wejściu — `setInterval` z
- * definicji nie odpala się przed pierwszym tickiem, więc nawet gotowy env czekał do
- * pełnych 100 ms. Zmierzone: 63-64% (~90-100 ms) bootu i PEŁNE 100 ms przy KAŻDYM
- * otwarciu zakładki Ustawień (`modules/shell/pkm_settings_tab.ts`), gdzie env prawie
- * zawsze jest już gotowy. Naprawa idzie za werdyktem 2026-08-23 „zegar → zdarzenie"
+ * DLACZEGO W OGÓLE: `whenLoaded` czekał WYŁĄCZNIE siatką `setInterval` 100 ms, bez
+ * sprawdzenia warunku na wejściu — `setInterval` z definicji nie odpala się przed
+ * pierwszym tickiem, więc nawet gotowy env czekał do pełnych 100 ms, PEŁNE 100 ms przy
+ * KAŻDYM otwarciu zakładki Ustawień (`modules/shell/pkm_settings_tab.ts`), gdzie env
+ * prawie zawsze jest już gotowy. Naprawa idzie za zasadą „zegar → zdarzenie"
  * (core/CLAUDE.md, gotcha 6c): sprawdzenie na wejściu + rozwiązanie na zdarzenie
  * `'loaded'` + siatka odpytywania WYŁĄCZNIE jako asekuracja (rzadsza, kasowana po
  * rozwiązaniu, nie przeżywa `'unloading'`).
  *
- * DOMKNIĘCIE PO REVIEW (2026-09-02): pierwsza wersja podpinała się pod `events` TYLKO
- * w chwili wywołania — jeśli `getEnv()` wtedy zwracał `undefined` (env jeszcze nie
- * istnieje) albo `create()` PODMIENIŁ instancję pod nami (`reload`,
- * `core/PluginRuntime.ts:541-551` — nowy obiekt, nowa szyna zdarzeń), funkcja cichła na
- * samej siatce `pollMs` aż do resolve — czyli w tych dwóch przypadkach 100→250 ms
- * była LATENTNĄ REGRESJĄ, nie poprawą. `check()` (tick siatki) dziś sam wykrywa
- * pojawienie się / zmianę instancji i dopina subskrypcję do AKTUALNEJ — siatka
- * wraca do roli czystej asekuracji również na tej ścieżce, nie tylko przy starcie.
+ * `check()` (tick siatki) sam wykrywa pojawienie się / zmianę instancji i dopina
+ * subskrypcję do AKTUALNEJ — bo `getEnv()` w chwili wywołania może jeszcze nie zwracać
+ * env (jeszcze nie istnieje), albo `create()` może PODMIENIĆ instancję pod nami
+ * (`reload`, `core/PluginRuntime.ts:541-551` — nowy obiekt, nowa szyna zdarzeń);
+ * subskrypcja tylko przy starcie złapałaby oba przypadki dopiero na najbliższym ticku
+ * siatki, nie na zdarzeniu — siatka wraca do roli czystej asekuracji również na tej
+ * ścieżce, nie tylko przy starcie.
  *
  * NIE eksportowane przez `core/index.ts` — konsument jest jeden i siedzi wewnątrz
  * `core/`, więc importuje wprost (złota zasada dotyczy wejścia Z ZEWNĄTRZ modułu).
@@ -69,11 +67,11 @@ export interface RuntimeLoadedSource {
  * nie ma już czekać na CO — kontynuowanie oczekiwania na kolejną, późniejszą instancję
  * env byłoby zombie-`initialize()` działającym na cudzym (kolejnym) środowisku. Wołacz,
  * który naprawdę potrzebuje gotowego env po restarcie, ma wywołać `whenLoaded()` PONOWNIE,
- * nie polegać na tym, że stara obietnica się doczeka. (Zamyka też obalone znalezisko 002
- * z tej samej rundy audytu: „siatka mieli 10 Hz bez końca po padzie load()" — bez
- * wymyślania nowego stanu błędu, `state` nie zna dziś wartości `'error'`.)
+ * nie polegać na tym, że stara obietnica się doczeka. (Dzięki temu siatka nie mieli bez
+ * końca po nieudanym `load()` — `state` nie zna dziś wartości `'error'`, więc nie trzeba
+ * osobnego stanu błędu, żeby to domknąć.)
  */
-/** Domyślne ziarno siatki bezpieczeństwa (W-09). */
+/** Domyślne ziarno siatki bezpieczeństwa. */
 export const WAIT_FOR_LOADED_POLL_MS = 250;
 
 export function waitForLoaded<T extends RuntimeLoadedSource>(

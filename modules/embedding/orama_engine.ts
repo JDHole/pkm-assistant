@@ -68,7 +68,7 @@ export async function insertVector(db: AnyOrama, doc: EmbeddingDoc): Promise<str
 const DEFAULT_VECTOR_PROPERTY = 'embedding';
 
 /**
- * Insert, po którym wektor zostaje TYLKO w `index.vectorIndexes` (AUD-wydajnosc-088/041).
+ * Insert, po którym wektor zostaje TYLKO w `index.vectorIndexes`.
  *
  * Orama trzyma każdy wektor DWA RAZY: raz w indeksie wektorowym (tam się szuka) i raz jako
  * zwykłą tablicę liczb w kopii dokumentu w docs-store. Tej drugiej kopii NIKT nie czyta —
@@ -103,7 +103,7 @@ export async function insertVectorLean(
 }
 
 /**
- * Zeruje kopie wektorów w docs-store CAŁEGO indeksu (AUD-wydajnosc-088/041).
+ * Zeruje kopie wektorów w docs-store CAŁEGO indeksu.
  *
  * Wołane po `restore()`: plik indeksu zapisany starszą wersją pluginu niesie kopie wektorów
  * w dokumentach, więc bez tego pierwszy zapis po restarcie znowu utrwaliłby dubel. Stary
@@ -154,9 +154,9 @@ export async function searchVectorTopK(
     vector: number[],
     options: SearchVectorTopKOptions = {},
 ): Promise<Results<AnyDocument>> {
-    // similarity 0.2 (E1.8, kalibracja na żywym vaultcie): snowflake-arctic-embed2 daje
-    // NISKIE absolutne cosine — zmierzony trafny wynik ≈0.38, szum ≈0.03-0.04. Stary próg
-    // 0.5 odcinał nawet idealne trafienia (L3 zwracał pustkę = smoke E1.8 to wykrył).
+    // Próg podobieństwa 0.2 (kalibracja na żywym vaultcie): snowflake-arctic-embed2 daje
+    // NISKIE absolutne cosine - zmierzony trafny wynik ≈0.38, szum ≈0.03-0.04. Wyższy próg,
+    // np. 0.5, odcinałby nawet idealne trafienia.
     const { k = 10, property = 'embedding', similarity = 0.2, where } = options;
     // `mode: 'vector'` jest w typie Oramy WYMAGANE, ale `searchVector()` go nie czyta
     // (tryb wynika z samej funkcji) — dopisanie pola byłoby zmianą runtime'u, więc asercja.

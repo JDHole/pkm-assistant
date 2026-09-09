@@ -1,5 +1,5 @@
 /**
- * promptFence.test.ts — strażnik ogrodzenia niezaufanej treści (audyt K9: AUD-security-030).
+ * promptFence.test.ts — strażnik ogrodzenia niezaufanej treści.
  *
  * Poprzeczka: cokolwiek wejdzie do `fenceUntrusted`, w wyniku stoi DOKŁADNIE jedno otwarcie
  * i jedno zamknięcie znacznika, a ładunek zostaje w środku.

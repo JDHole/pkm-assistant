@@ -65,10 +65,10 @@ test('sanitizePath: zero-width unicode BLOCKED', t => {
 });
 
 test('sanitizePath: ZWNJ i ZWJ (pozostale dwa znaki z DANGEROUS_INVISIBLE_CHARS) BLOCKED', t => {
-    // Naprawa no-misleading-character-class (2026-08-27): DANGEROUS_INVISIBLE_CHARS przepisany
-    // z klasy znakow na alternacje o identycznej semantyce (fuzz-test 50k ciagow, zero
-    // rozbieznosci). Te dwa znaki byly na liscie od poczatku, ale nie mialy wlasnego testu —
-    // dopisane, zeby przybic zachowanie 1:1 przed i po zmianie zapisu regexu.
+    // DANGEROUS_INVISIBLE_CHARS to alternacja o identycznej semantyce jak klasa znakow
+    // (fuzz-test 50k ciagow, zero rozbieznosci) - unika ostrzezenia
+    // no-misleading-character-class. Te dwa znaki byly na liscie od poczatku, ale nie mialy
+    // wlasnego testu - dopisane, zeby przybic zachowanie 1:1.
     t.is(sanitizePath('foo\u200Cbar'), null);  // zero-width non-joiner
     t.is(sanitizePath('foo\u200Dbar'), null);  // zero-width joiner
 });
@@ -136,7 +136,7 @@ test('isProtectedPath: .env protected', t => {
     t.true(isProtectedPath('data.json'));
 });
 
-test('isProtectedPath: settings E3.7 (.pkm-assistant) protected', t => {
+test('isProtectedPath: settings (.pkm-assistant) protected', t => {
     t.true(isProtectedPath('.pkm-assistant/settings.json'));
     t.true(isProtectedPath('.pkm-assistant/settings.last-good.json'));
     t.true(isProtectedPath('.pkm-assistant/backups'));
@@ -158,32 +158,32 @@ test('isProtectedPath: null/empty → false', t => {
     t.false(isProtectedPath(''));
 });
 
-// ── K1 (AUD-security-014): forma kanoniczna — segmenty `.` znikają ──
+// ── forma kanoniczna — segmenty `.` znikają ──
 
-test('K1 sanitizePath: segmenty `.` są wycinane (kanonizacja)', t => {
+test('sanitizePath: segmenty `.` są wycinane (kanonizacja)', t => {
     t.is(sanitizePath('./.pkm-assistant/./settings.json'), '.pkm-assistant/settings.json');
     t.is(sanitizePath('a/./b'), 'a/b');
     t.is(sanitizePath('./Notes/./a.md'), 'Notes/a.md');
     t.is(sanitizePath('Prywatne/./d.md'), 'Prywatne/d.md');
 });
 
-test('K1 sanitizePath: sama kropka / sam separator → null', t => {
+test('sanitizePath: sama kropka / sam separator → null', t => {
     t.is(sanitizePath('.'), null);
     t.is(sanitizePath('./'), null);
     t.is(sanitizePath('/'), null);
     t.is(sanitizePath('././.'), null);
 });
 
-test('K1 sanitizePath: pozostałe formy kanoniczne', t => {
+test('sanitizePath: pozostałe formy kanoniczne', t => {
     t.is(sanitizePath('%2e%2e/x'), null);
     t.is(sanitizePath('/x'), 'x');
     t.is(sanitizePath('x\\y'), 'x/y');
 });
 
-test('K1 sanitizePath: idempotencja dla typowych wariantów zapisu ścieżki', t => {
-    // K13 (2026-08-23): idempotencja jest dziś własnością OGÓLNĄ funkcji (wynik liczony do
-    // punktu stałego), a nie tylko tej rodziny zapisów. Ten test zostaje jako czytelny
-    // spis wariantów, które model realnie produkuje; ogólnej własności pilnuje test niżej.
+test('sanitizePath: idempotencja dla typowych wariantów zapisu ścieżki', t => {
+    // Idempotencja jest własnością OGÓLNĄ funkcji (wynik liczony do punktu stałego), a nie
+    // tylko tej rodziny zapisów. Ten test zostaje jako czytelny spis wariantów, które model
+    // realnie produkuje; ogólnej własności pilnuje test niżej.
     const warianty = [
         'Prywatne/d.md',
         '/Prywatne/d.md',
@@ -203,11 +203,11 @@ test('K1 sanitizePath: idempotencja dla typowych wariantów zapisu ścieżki', t
     }
 });
 
-test('K13: sanitizePath jest idempotentna — sanitizePath(sanitizePath(x)) === sanitizePath(x)', t => {
-    // Te osiem ciągów to KONTRPRZYKŁADY z K12 (2026-08-23). Wtedy każdy z nich zmieniał się
-    // dopiero w DRUGIM przebiegu (`trim()` działał raz na całym ciągu, `decodeURIComponent`
-    // robił jeden przebieg), więc bramka — licząca kanonizację drugi raz — oceniała INNY tekst
-    // niż ten, który wołacz podmienił w argumentach narzędzia. Od K13 wynik jest liczony do
+test('sanitizePath jest idempotentna — sanitizePath(sanitizePath(x)) === sanitizePath(x)', t => {
+    // Te osiem ciągów to KONTRPRZYKŁADY: pojedynczy przebieg (`trim()` działa raz na całym
+    // ciągu, `decodeURIComponent` robi jeden przebieg) zmieniałby każdy z nich dopiero
+    // w DRUGIM przebiegu, więc bramka — licząca kanonizację drugi raz — oceniałaby INNY
+    // tekst niż ten, który wołacz podmienił w argumentach narzędzia. Wynik jest liczony do
     // PUNKTU STAŁEGO, więc drugi przebieg nie ma już czego poprawić.
     const dawne_kontrprzyklady = [
         './ A/B.md',
@@ -226,7 +226,7 @@ test('K13: sanitizePath jest idempotentna — sanitizePath(sanitizePath(x)) === 
     }
 });
 
-test('K13: wartości po ustabilizowaniu — podwójne kodowanie dekoduje się do końca albo odpada', t => {
+test('sanitizePath: wartości po ustabilizowaniu — podwójne kodowanie dekoduje się do końca albo odpada', t => {
     // Wiodące `./` znika w pierwszym przebiegu, a odsłonięta spacja — w drugim. Skutek
     // ŚWIADOMY: `'./ A/B.md'` i `' A/B.md'` to dziś ten sam plik `A/B.md`, nie sąsiedni
     // folder o nazwie ze spacją z przodu.
@@ -240,7 +240,7 @@ test('K13: wartości po ustabilizowaniu — podwójne kodowanie dekoduje się do
     t.is(sanitizePath('x.md%20'), 'x.md');
 });
 
-test('K13: własność — idempotencja na 3000 wygenerowanych ciągach', t => {
+test('sanitizePath: własność — idempotencja na 3000 wygenerowanych ciągach', t => {
     // Generator DETERMINISTYCZNY (LCG, Numerical Recipes) — żadnego `Math.random`, żeby
     // czerwony test dawało się powtórzyć co do ciągu. Alfabet celowo mieszany: znaki
     // sterujące ścieżką (`.`, `/`, `\`), materiał na `%XX` i `%25XX` (`%`, `2`, `e`, `5`, `0`),
@@ -266,9 +266,9 @@ test('K13: własność — idempotencja na 3000 wygenerowanych ciągach', t => {
     t.true(poprawnych > 100, `za mało poprawnych ścieżek w próbce (${poprawnych}) — test nic nie sprawdza`);
 });
 
-// ── K8 (AUD-security-029): logi pluginu i pliki sesji pamięci są chronione ──
+// ── logi pluginu i pliki sesji pamięci są chronione ──
 
-test('K8: .pkm-assistant/logs/ jest ścieżką chronioną', t => {
+test('isProtectedPath: .pkm-assistant/logs/ jest ścieżką chronioną', t => {
     t.true(isProtectedPath('.pkm-assistant/logs'));
     t.true(isProtectedPath('.pkm-assistant/logs/pkm-assistant.log'));
     t.true(isProtectedPath('.pkm-assistant/logs/pkm-assistant.log.old'));
@@ -277,38 +277,38 @@ test('K8: .pkm-assistant/logs/ jest ścieżką chronioną', t => {
     t.true(isProtectedPath('.pkm-assistant\\logs\\pkm-assistant.log'));
 });
 
-test('K8: katalog sesji pamięci agenta jest chroniony (dowolny slug)', t => {
+test('isProtectedPath: katalog sesji pamięci agenta jest chroniony (dowolny slug)', t => {
     t.true(isProtectedPath('.pkm-assistant/agents/klara/memory/sessions'));
     t.true(isProtectedPath('.pkm-assistant/agents/klara/memory/sessions/active/2026-08-22.md'));
     t.true(isProtectedPath('.pkm-assistant/agents/Tola/memory/sessions/archive/x.md'));
 });
 
-test('K8: reszta .pkm-assistant/agents nadal NIE jest „protected" (bez zmiany zakresu)', t => {
+test('isProtectedPath: reszta .pkm-assistant/agents nadal NIE jest „protected" (bez zmiany zakresu)', t => {
     t.false(isProtectedPath('.pkm-assistant/agents/test.md'));
     t.false(isProtectedPath('.pkm-assistant/agents/klara/memory/brain.md'));
     t.false(isProtectedPath('Projekty/logs/notatka.md'));
 });
 
-test('K8: lista wpisów .gitignore obejmuje logi (i settings sprzed K8)', t => {
+test('VAULT_GITIGNORE_ENTRIES: lista wpisów .gitignore obejmuje logi i settings', t => {
     t.true(VAULT_GITIGNORE_ENTRIES.includes('.pkm-assistant/logs/'));
-    // Regresja: wpisy sprzed K8 zostają.
+    // Regresja: starsze wpisy zostają.
     for (const legacy of ['.pkm-assistant/settings.json', '.pkm-assistant/settings.last-good.json', '.pkm-assistant/backups/']) {
         t.true(VAULT_GITIGNORE_ENTRIES.includes(legacy), `zgubiony wpis ${legacy}`);
     }
 });
 
-test('K12: pliki sesji NIE są w .gitignore — pamięć agentów podróżuje z repo vaulta', t => {
-    // Decyzja Kuby 2026-08-23: sesje wracają do gita (synchronizacja między urządzeniami),
-    // a ryzyko sekretu w treści błędu zdejmuje maska PRZY ZAPISIE (`AgentMemory`).
+test('VAULT_GITIGNORE_ENTRIES: pliki sesji NIE są w .gitignore — pamięć agentów podróżuje z repo vaulta', t => {
+    // Sesje wracają do gita (synchronizacja między urządzeniami), a ryzyko sekretu w treści
+    // błędu zdejmuje maska PRZY ZAPISIE (`AgentMemory`).
     t.false(VAULT_GITIGNORE_ENTRIES.some(e => e.includes('memory/sessions')),
         'wpis sessions/ ma NIE wracać na listę');
     // ...ale narzędzia agenta dalej ich nie widzą — to osobna oś i zostaje bez zmian.
     t.true(isProtectedPath('.pkm-assistant/agents/klara/memory/sessions/active/2026-08-22.md'));
 });
 
-// ── K22 (AUD-security-104): gwiazdka nie jest nazwą pliku ──────────────────
+// ── gwiazdka nie jest nazwą pliku ──────────────────
 
-test('K22: sanitizePath odrzuca gwiazdkę — cel „wiele plików" nie udaje jednego', t => {
+test('sanitizePath: odrzuca gwiazdkę — cel „wiele plików" nie udaje jednego', t => {
     t.is(sanitizePath('*'), null);
     t.is(sanitizePath('Notes/*.md'), null);
     t.is(sanitizePath('Notes/*'), null);
@@ -318,7 +318,7 @@ test('K22: sanitizePath odrzuca gwiazdkę — cel „wiele plików" nie udaje je
     t.is(sanitizePath('./Notes/*.md'), null);
 });
 
-test('K22: pozostałe znaki „windowsowo zakazane" ZOSTAJĄ legalne (żadnej regresji dla macOS/Linux)', t => {
+test('sanitizePath: pozostałe znaki „windowsowo zakazane" ZOSTAJĄ legalne (żadnej regresji dla macOS/Linux)', t => {
     // Świadoma granica: blokujemy WYŁĄCZNIE `*`, bo to jedyny znak o znaczeniu STERUJĄCYM
     // w tym kodzie (glob whitelisty w `AccessGuard._matchesEntry`, wieloznacznik reguł zgody).
     // `?` i `[` `]` żadnego znaczenia nie mają, a w tytułach notatek są pospolite.

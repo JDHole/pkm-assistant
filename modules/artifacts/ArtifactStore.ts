@@ -1,16 +1,15 @@
 /**
- * ArtifactStore — CRUD instancji artefaktów żywych (E2.9 FAZA A / A3).
+ * ArtifactStore — CRUD instancji artefaktów żywych.
  *
- * Store instancji artefaktów żywych (stary `ArtifactManager.js` z JSON-ami skasowany w fazie D).
- * Instancja gatunku 1 = widoczna notatka vaulta: frontmatter (klucze bazowe + pola typu) + treść (sekcje,
- * checkboxy z block-idami). Notatka JEST źródłem prawdy (A2); śledzenie po frontmatterze
- * `pkm-artefakt`, NIE po ścieżce (A16 — przenosiny notatki nic nie psują).
+ * Instancja artefaktu = widoczna notatka vaulta: frontmatter (klucze bazowe + pola typu) + treść
+ * (sekcje, checkboxy z block-idami). Notatka JEST źródłem prawdy; śledzenie po frontmatterze
+ * `pkm-artefakt`, NIE po ścieżce - przenosiny notatki nic nie psują.
  *
  * Zależności wstrzykiwane (app, typeLoader, folder, zegar) → node-testowalne z mockiem vaulta.
- * Importy PURE (parser + sanitizePath + stringifyYaml) — bez `obsidian` w module (Vault API dostaje
+ * Importy PURE (parser + sanitizePath + stringifyYaml) - bez `obsidian` w module (Vault API dostaje
  * przez `app` w runtime).
  *
- * Bezpieczeństwo ścieżek: `artifact_*` NIE przyjmuje ścieżek od modelu — buduje je silnik z
+ * Bezpieczeństwo ścieżek: `artifact_*` NIE przyjmuje ścieżek od modelu - buduje je silnik z
  * `id/typ/tytul` przez `sanitizePath` + twarde ograniczenie do folderu artefaktów. To zamyka temat
  * traversal (nie ruszamy centralnego vault_path_validator).
  */
@@ -26,11 +25,11 @@ interface ArtifactStoreDependencies {
     getArtifactsFolder?: () => string;
     now?: () => Date;
     /**
-     * AUD-wydajnosc-059/030/021/051: hak sprzątający dla nasłuchów `vault.on`/`metadataCache.on`
-     * rejestrowanych przez rejestr artefaktów (patrz `_registerVaultEvents`) — wzór
-     * `IndexerPluginLike.registerEvent` z `modules/embedding/VaultIndexer.ts`. Opcjonalny: bez
-     * niego nasłuchy i tak działają (testy / hosty bez cyklu życia pluginu), tylko nie mają
-     * automatycznego sprzątania przy `onunload`.
+     * Hak sprzątający dla nasłuchów `vault.on`/`metadataCache.on` rejestrowanych przez rejestr
+     * artefaktów (patrz `_registerVaultEvents`) - wzór `IndexerPluginLike.registerEvent`
+     * z `modules/embedding/VaultIndexer.ts`. Opcjonalny: bez niego nasłuchy i tak działają
+     * (testy / hosty bez cyklu życia pluginu), tylko nie mają automatycznego sprzątania
+     * przy `onunload`.
      */
     registerEvent?: (ref: unknown) => void;
 }
@@ -60,18 +59,18 @@ export class ArtifactStore {
     declare _getFolder: () => string;
     declare _now: () => Date;
     /**
-     * K2: id → ścieżka dla instancji utworzonych/przeniesionych W TEJ SESJI. `metadataCache`
+     * Indeks id → ścieżka dla instancji utworzonych/przeniesionych W TEJ SESJI. `metadataCache`
      * Obsidiana bywa zimny przez chwilę po `create`, a bramka uprawnień pyta o ścieżkę
-     * SYNCHRONICZNIE (`pathById`) — bez tego indeksu `artifact_update` tuż po `artifact_create`
-     * dostawałby odmowę „brak celu". To pamięć podręczna, nie źródło prawdy: każdy wpis i tak
+     * SYNCHRONICZNIE (`pathById`) - bez tego indeksu `artifact_update` tuż po `artifact_create`
+     * dostawałby odmowę "brak celu". To pamięć podręczna, nie źródło prawdy: każdy wpis i tak
      * przechodzi przez `_isUnderRoot`.
      */
     declare _pathIndex: Map<string, string>;
     /**
-     * AUD-wydajnosc-059/030/021/051: rejestr id → wpis `list()`, budowany LENIWIE (jeden pełny
-     * przelot po `getMarkdownFiles()` przy pierwszym `list()`/`pathById()`) i odtąd utrzymywany
-     * zdarzeniami vaulta/metadataCache — patrz `_ensureRegistry`/`_registerVaultEvents` i gotcha
-     * „Rejestr artefaktów" w CLAUDE.md. `null` = jeszcze nie zbudowany.
+     * Rejestr id → wpis `list()`, budowany LENIWIE (jeden pełny przelot po `getMarkdownFiles()`
+     * przy pierwszym `list()`/`pathById()`) i odtąd utrzymywany zdarzeniami vaulta/metadataCache -
+     * patrz `_ensureRegistry`/`_registerVaultEvents` i gotcha "Rejestr artefaktów" w CLAUDE.md.
+     * `null` = jeszcze nie zbudowany.
      */
     declare _registry: Map<string, ArtifactListEntry> | null;
     /** Root, dla którego `_registry` jest aktualny — zmiana ustawienia folderu unieważnia rejestr. */
@@ -115,9 +114,9 @@ export class ArtifactStore {
         const type = this.typeLoader?.getType?.(typ);
         if (!type) throw new Error(`Nieznany typ artefaktu: "${typ}"`);
 
-        // K10 (AUD-security-061): wartości pól przez TĘ SAMĄ bramkę co patch — PRZED zapisem.
-        // Odmowa jest fail-closed: żaden plik nie powstaje (inaczej w vaultcie zostawałby artefakt
-        // z pustym polem, a model i tak musiałby powtórzyć wywołanie).
+        // Wartości pól przez TĘ SAMĄ bramkę co patch - PRZED zapisem. Odmowa jest fail-closed:
+        // żaden plik nie powstaje (inaczej w vaultcie zostawałby artefakt z pustym polem,
+        // a model i tak musiałby powtórzyć wywołanie).
         const fieldErrors = this.applyFieldsValidated(pola);
         if (fieldErrors.length > 0) return { created: false, id: '', path: '', applied: 0, errors: fieldErrors, artifact: null };
 
@@ -160,24 +159,25 @@ export class ArtifactStore {
         await this._ensureFolder(path.slice(0, path.lastIndexOf('/')));
         const file = await this.app.vault.create(path, content);
         this._pathIndex.set(id, path);
-        // AUD-wydajnosc-059: rejestr zna WSZYSTKIE pola od razu — nie czeka na metadataCache
-        // (bywa zimny tuż po `create`), bo je właśnie sami napisaliśmy do frontmattera.
+        // Rejestr zna WSZYSTKIE pola od razu - nie czeka na metadataCache (bywa zimny tuż
+        // po `create`), bo je właśnie sami napisaliśmy do frontmattera.
         this._registry?.set(id, { id, path, tytul: this._basename(file), typ: type.name, agent, status, utworzono: today, zaktualizowano: today });
 
         return { created: true, id, path, applied, errors, artifact: this._toThin(file, content) };
     }
 
     /**
-     * K10 (AUD-security-061): JEDYNE wejście wartości `pola` (od MODELU) do instancji artefaktu.
+     * JEDYNE wejście wartości `pola` (od MODELU) do instancji artefaktu.
      *
-     * Wartości pól nie zostają w frontmatterze — szablon typu podstawia je do CIAŁA notatki przez
-     * `{{pole}}`, więc są dokładnie taką samą treścią jak tekst z `set_section`. Przed K10 leciały
-     * do `substitutePlaceholders` surowym `String(v)`, z pominięciem bramki: `artifact_create`
-     * z `pola:{cel:"```dataviewjs …```"}` zapisywał wykonywalny blok do widocznego folderu vaulta
-     * i zwracał `errors: []`. Tu stoi jeden predykat wspólny z patchem (`validateArtifactBodyText`).
+     * Wartości pól nie zostają w frontmatterze - szablon typu podstawia je do CIAŁA notatki przez
+     * `{{pole}}`, więc są dokładnie taką samą treścią jak tekst z `set_section`. Gdyby leciały do
+     * `substitutePlaceholders` surowym `String(v)`, z pominięciem bramki, `artifact_create`
+     * z `pola:{cel:"```dataviewjs …```"}` zapisywałby wykonywalny blok do widocznego folderu
+     * vaulta i zwracał `errors: []`. Tu stoi jeden predykat wspólny z patchem
+     * (`validateArtifactBodyText`).
      *
-     * Nie sprawdzamy szablonu typu ani wartości domyślnych pól — to treść USERA, w której kod jest
-     * legalny i świadomy (A3). Sprawdzamy wyłącznie to, co przyszło od agenta.
+     * Nie sprawdzamy szablonu typu ani wartości domyślnych pól - to treść USERA, w której kod
+     * jest legalny i świadomy. Sprawdzamy wyłącznie to, co przyszło od agenta.
      *
      * @param {Object} pola - mapa pole → wartość (od modelu)
      * @returns {Array} lista odmów w kształcie błędów patcha (pusta = wolno pisać)
@@ -187,9 +187,9 @@ export class ArtifactStore {
         if (!pola || typeof pola !== 'object') return errors;
         for (const [key, value] of Object.entries(pola)) {
             if (value == null) continue;
-            // M (AUD-security-125): NAJPIERW ten sam kontrakt co `set_field` — tylko skalary.
-            // `String(value)` na obiekcie daje „[object Object]", więc bramka treści oglądała
-            // co innego, niż `create` wpisywał do frontmattera (surową mapę z blokiem kodu).
+            // NAJPIERW ten sam kontrakt co `set_field` - tylko skalary. `String(value)` na
+            // obiekcie dałoby "[object Object]", więc bramka treści oglądałaby co innego, niż
+            // `create` wpisuje do frontmattera (surową mapę z blokiem kodu).
             if (!isArtifactScalar(value)) {
                 errors.push({ op: { op: 'set_field', key, value }, code: 'invalid_value', message: INVALID_VALUE_MSG });
                 continue;
@@ -201,9 +201,9 @@ export class ArtifactStore {
     }
 
     /**
-     * Import instancji z GOTOWEGO ciała (migracja starych JSONów — D4). Body wstawiany VERBATIM
-     * (bez walidatora patchy / guardu code-fence) — to zachowanie ISTNIEJĄCEJ treści usera, nie
-     * pisanie przez agenta (A3 dotyczy agenta). Zwraca {id, path}.
+     * Import instancji z GOTOWEGO ciała (migracja starych JSONów artefaktów). Body wstawiany
+     * VERBATIM (bez walidatora patchy / guardu code-fence) - to zachowanie ISTNIEJĄCEJ treści
+     * usera, nie pisanie przez agenta. Zwraca {id, path}.
      * @param {string} typ
      * @param {Object} opts - {tytul, agent, status?, pola?, body, utworzono?, zaktualizowano?}
      */
@@ -278,13 +278,13 @@ export class ArtifactStore {
             errors.push(...result.errors);
         }
 
-        // 2) FRONTMATTER set_field (API-first) — waliduj klucze bazowe + skalary.
-        // AUD-code-review-047/102: TEN SAM kontrakt co `applyOne` w artifactParser.ts (string
-        // key → klucz chroniony → skalar), po kanoniczny predykat/komunikat (`isArtifactScalar`
-        // + `INVALID_VALUE_MSG`) — nie własna, rozjeżdżająca się kopia reguły. `ops` przychodzi
-        // od modelu jako `unknown[]` (patrz `ArtifactUpdateTool`), więc typowanie `key: string`
-        // na `ArtifactPatchOp` jest tylko deklaracją kompilacyjną — bez tej bramki `{op:'set_field',
-        // value:'x'}` bez `key` pisał `front['undefined']='x'` do frontmattera i meldował sukces.
+        // 2) FRONTMATTER set_field (API-first) - waliduj klucze bazowe + skalary.
+        // TEN SAM kontrakt co `applyOne` w artifactParser.ts (string key → klucz chroniony →
+        // skalar), przez kanoniczny predykat/komunikat (`isArtifactScalar` + `INVALID_VALUE_MSG`) -
+        // nie własna, rozjeżdżająca się kopia reguły. `ops` przychodzi od modelu jako `unknown[]`
+        // (patrz `ArtifactUpdateTool`), więc typowanie `key: string` na `ArtifactPatchOp` jest
+        // tylko deklaracją kompilacyjną - bez tej bramki `{op:'set_field', value:'x'}` bez `key`
+        // pisałby `front['undefined']='x'` do frontmattera i meldował sukces.
         const validFieldOps: Array<Extract<ArtifactPatchOp, { op: 'set_field' }>> = [];
         for (const op of fieldOps as Array<Extract<ArtifactPatchOp, { op: 'set_field' }>>) {
             const key = op.key;
@@ -315,9 +315,9 @@ export class ArtifactStore {
 
         const content = await this._readFile(file);
         const artifact = this._toThin(file, content, { truncate: true });
-        // AUD-wydajnosc-059/104: `list()` czyta z rejestru, więc pola widoczne tam (status,
-        // zaktualizowano) muszą się odświeżyć TU — nie czekamy na `metadataCache`'owy `changed`
-        // (patrz też `_onMetadataChanged`, który robi to samo dla mutacji SPOZA store'a).
+        // `list()` czyta z rejestru, więc pola widoczne tam (status, zaktualizowano) muszą się
+        // odświeżyć TU - nie czekamy na `metadataCache`'owy `changed` (patrz też
+        // `_onMetadataChanged`, który robi to samo dla mutacji SPOZA store'a).
         if (applied > 0 && artifact?.id) {
             this._registry?.set(artifact.id, {
                 id: artifact.id,
@@ -336,11 +336,11 @@ export class ArtifactStore {
     // ─── list ────────────────────────────────────────────────────────────────
 
     /**
-     * Lista instancji z filtrem (śledzenie po frontmatterze, NIE po ścieżce — A16).
+     * Lista instancji z filtrem (śledzenie po frontmatterze, NIE po ścieżce).
      *
-     * AUD-wydajnosc-059/030/021/051: filtruje REJESTR (`_ensureRegistry`), nie
-     * `vault.getMarkdownFiles()` — koszt przestaje rosnąć z rozmiarem vaulta. Rejestr jest
-     * budowany leniwie (raz) i odtąd utrzymywany zdarzeniami — patrz CLAUDE.md.
+     * Filtruje REJESTR (`_ensureRegistry`), nie `vault.getMarkdownFiles()` - koszt nie rośnie
+     * z rozmiarem vaulta. Rejestr jest budowany leniwie (raz) i odtąd utrzymywany zdarzeniami -
+     * patrz CLAUDE.md.
      * @param {Object} [filter] - {agent, typ, status}
      * @returns {Object[]}
      */
@@ -351,8 +351,8 @@ export class ArtifactStore {
             if (agent && entry.agent !== agent) continue;
             if (typ && entry.typ !== typ) continue;
             if (status && entry.status !== status) continue;
-            // Review opusa: KOPIA, nie żywy obiekt rejestru — wołacz nie ma dostać uchwytu,
-            // przez który mógłby (przypadkiem) zmutować stan store'a.
+            // KOPIA, nie żywy obiekt rejestru - wołacz nie ma dostać uchwytu, przez który
+            // mógłby (przypadkiem) zmutować stan store'a.
             out.push({ ...entry });
         }
         return out;
@@ -368,17 +368,17 @@ export class ArtifactStore {
         if (!folder) return false;
         const target = sanitizePath(`${folder}/${file.name}`);
         if (!target) return false;
-        // K2 (AUD-security-076): przenosiny WYŁĄCZNIE wewnątrz folderu artefaktów. Po zawężeniu
-        // wyszukiwania do tego folderu artefakt wyniesiony na zewnątrz przestałby być widoczny dla
-        // silnika (osierocona notatka) — więc lepiej odmówić od razu, niż zgubić go po cichu.
-        // A16 („przenosiny nic nie psują") obowiązuje dalej WEWNĄTRZ folderu: śledzimy po
-        // frontmatterze, nie po dokładnej ścieżce.
+        // Przenosiny WYŁĄCZNIE wewnątrz folderu artefaktów. Wyszukiwanie jest ograniczone do
+        // tego folderu, więc artefakt wyniesiony na zewnątrz przestałby być widoczny dla silnika
+        // (osierocona notatka) - lepiej odmówić od razu, niż zgubić go po cichu. "Przenosiny nic
+        // nie psują" obowiązuje dalej WEWNĄTRZ folderu: śledzimy po frontmatterze, nie po
+        // dokładnej ścieżce.
         if (!this._isUnderRoot(target)) return false;
         await this._ensureFolder(folder);
         await this.app.fileManager.renameFile(file, target);
-        // K2: indeks idzie za plikiem — inaczej bramka oceniałaby starą ścieżkę. `target` jest
-        // TU już zagwarantowany pod rootem (early return kilka linii wyżej) — review opusa: usunięty
-        // martwy `else` „przenosiny poza root", bo do tego miejsca nie dojdziemy inaczej.
+        // Indeks idzie za plikiem - inaczej bramka oceniałaby starą ścieżkę. `target` jest TU już
+        // zagwarantowany pod rootem (early return kilka linii wyżej), więc "przenosiny poza root"
+        // do tego miejsca nie dojdą.
         this._pathIndex.set(id, target);
         const entry = this._registry?.get(id);
         if (entry) this._registry!.set(id, { ...entry, path: target, tytul: this._basename({ path: target }) });
@@ -423,24 +423,24 @@ export class ArtifactStore {
         return sanitizePath(this._getFolder() || DEFAULT_ARTIFACTS_FOLDER) || DEFAULT_ARTIFACTS_FOLDER;
     }
 
-    /** K2: folder artefaktów jako CEL akcji bez pojedynczego pliku (`artifact_list`) — dla bramki. */
+    /** Folder artefaktów jako CEL akcji bez pojedynczego pliku (`artifact_list`) - dla bramki. */
     artifactsRoot(): string {
         return this._artifactsRoot();
     }
 
     /**
-     * K2 (AUD-security-075): czy ścieżka leży w folderze artefaktów. Jedno miejsce, bo tę samą
-     * granicę sprawdza wyszukiwanie po id, listowanie i budowanie ścieżki nowej instancji.
+     * Czy ścieżka leży w folderze artefaktów. Jedno miejsce, bo tę samą granicę sprawdza
+     * wyszukiwanie po id, listowanie i budowanie ścieżki nowej instancji.
      */
     _isUnderRoot(path: unknown): boolean {
         return this._underRoot(path, this._artifactsRoot());
     }
 
     /**
-     * AUD-wydajnosc-106: TA SAMA reguła co `_isUnderRoot`, ale z rootem PRZEKAZANYM — dla pętli
-     * po wielu plikach (rejestr, self-heal skan), żeby `sanitizePath` nie liczył się od nowa na
-     * każdy plik (było: 6,6× narzutu na jeden przelot przy 5000 plikach, bo `_artifactsRoot()`
-     * siedziało w ciele starego `_isUnderRoot` wołanego per iteracja).
+     * TA SAMA reguła co `_isUnderRoot`, ale z rootem PRZEKAZANYM - dla pętli po wielu plikach
+     * (rejestr, self-heal skan). Liczenie `_artifactsRoot()` (czyli `sanitizePath`) OD NOWA na
+     * każdy plik zamiast raz na przelot mnoży narzut wielokrotnie przy dużym vaultcie (zmierzone:
+     * 6,6× przy 5000 plikach).
      */
     _underRoot(path: unknown, root: string): boolean {
         if (!root) return false;
@@ -449,11 +449,11 @@ export class ArtifactStore {
     }
 
     /**
-     * M (AUD-security-123): czy wpis `_pathIndex` jest jeszcze PRAWDĄ.
+     * Czy wpis `_pathIndex` jest jeszcze PRAWDĄ.
      *
-     * Indeks to pamięć podręczna z TEJ sesji, a notatkę user może przenieść w Obsidianie —
-     * plugin się o tym nie dowiaduje. Nieświeży wpis rozjeżdżał bramkę ze zlewem: `pathById`
-     * oddawał starą ścieżkę (bramka mierzyła whitelistę na niej), a `_findFileById` pisał pod
+     * Indeks to pamięć podręczna z TEJ sesji, a notatkę user może przenieść w Obsidianie -
+     * plugin się o tym nie dowiaduje. Nieświeży wpis rozjeżdżałby bramkę ze zlewem: `pathById`
+     * oddawałby starą ścieżkę (bramka mierzyła whitelistę na niej), a `_findFileById` pisałby pod
      * nową. Weryfikacja jest zachowawcza: brak pliku pod ścieżką albo CUDZE `id` we
      * frontmatterze = wpis do wyrzucenia; zimny `metadataCache` (chwilę po `create`, po to ten
      * indeks w ogóle jest) NIE unieważnia wpisu.
@@ -468,32 +468,31 @@ export class ArtifactStore {
     }
 
     /**
-     * K2 (AUD-security-075): ścieżka artefaktu po id, SYNCHRONICZNIE — tego potrzebuje
-     * `contextExtractor` narzędzi `artifact_*`, żeby bramka uprawnień dostała prawdziwy cel,
-     * a nie pusty string. Szuka tam, gdzie sięgają szybkie źródła (własny indeks z tej sesji +
-     * rejestr artefaktów) i WYŁĄCZNIE w folderze artefaktów. Nie znalazł = `null` → wołacz odmawia
-     * fail-closed (i tak `update`/`read` skończyłyby się `not_found`).
+     * Ścieżka artefaktu po id, SYNCHRONICZNIE - tego potrzebuje `contextExtractor` narzędzi
+     * `artifact_*`, żeby bramka uprawnień dostała prawdziwy cel, a nie pusty string. Szuka tam,
+     * gdzie sięgają szybkie źródła (własny indeks z tej sesji + rejestr artefaktów) i WYŁĄCZNIE
+     * w folderze artefaktów. Nie znalazł = `null` → wołacz odmawia fail-closed (i tak
+     * `update`/`read` skończyłyby się `not_found`).
      *
-     * M (AUD-security-123): to JEDYNE rozstrzygnięcie „id → ścieżka" w module — woła je i bramka,
-     * i zlew (`_findFileById` startuje właśnie stąd), więc oba oglądają jeden ciąg. Wpis indeksu
-     * idzie przez weryfikację, a skan odświeża indeks, żeby następne pytanie było już tanie.
+     * JEDYNE rozstrzygnięcie "id → ścieżka" w module - woła je i bramka, i zlew (`_findFileById`
+     * startuje właśnie stąd), więc oba oglądają jeden ciąg. Wpis indeksu idzie przez weryfikację,
+     * a skan odświeża indeks, żeby następne pytanie było już tanie.
      *
-     * AUD-wydajnosc-060/031/104: KLUCZOWA różnica od sprzed naprawy — dla id, którego rejestr
-     * (leniwie zbudowany, event-maintained — patrz `_ensureRegistry`) NIGDY nie znał, wracamy
-     * `null` OD RAZU, bez skanu. Rejestr jest kompletny (obejmuje CAŁY folder artefaktów), więc
-     * jego brak = artefakt naprawdę nie istnieje — nie trzeba tego sprawdzać drugi raz. Pełny
-     * (ale WCIĄŻ ograniczony do folderu artefaktów, root liczony RAZ — AUD-wydajnosc-106) skan
-     * leci WYŁĄCZNIE jako samoleczenie: wpis BYŁ znany (indeks sesji albo rejestr), ale przestał
-     * być prawdą (`_pathIndexEntryValid` odmówiła) — np. user przeniósł notatkę w Obsidianie
-     * mimo trwającej sesji, zanim zdążył dojść event `rename` (patrz `_rescanForId`).
+     * Dla id, którego rejestr (leniwie zbudowany, event-maintained - patrz `_ensureRegistry`)
+     * NIGDY nie znał, wracamy `null` OD RAZU, bez skanu: rejestr jest kompletny (obejmuje CAŁY
+     * folder artefaktów), więc jego brak = artefakt naprawdę nie istnieje - nie trzeba tego
+     * sprawdzać drugi raz. Pełny (ale WCIĄŻ ograniczony do folderu artefaktów, root liczony RAZ)
+     * skan leci WYŁĄCZNIE jako samoleczenie: wpis BYŁ znany (indeks sesji albo rejestr), ale
+     * przestał być prawdą (`_pathIndexEntryValid` odmówiła) - np. user przeniósł notatkę
+     * w Obsidianie mimo trwającej sesji, zanim zdążył dojść event `rename` (patrz `_rescanForId`).
      *
-     * P1b (review opusa, 2026-09-02): stary/nieaktualny wpis NIE jest kasowany na wejściu do
-     * samoleczenia — tylko gdy rescan (synchroniczny, TYLKO metadataCache) faktycznie ZNAJDZIE
-     * nową lokalizację, nadpisujemy go świeżym. Jeśli rescan zawiedzie (np. nowa lokalizacja ma
-     * jeszcze zimny `metadataCache`), stary wpis ZOSTAJE — to jest sygnał „to id kiedyś było
-     * prawdziwe", który asynchroniczny `_findFileById` czyta przez `_wasEverKnown` i dopuszcza
-     * sobie fallback z dysku. Kasując wpis od razu, samoleczenie z M123 (przenosiny bez eventu)
-     * regresowałoby dokładnie wtedy, gdy metadataCache pod nową ścieżką jest zimny.
+     * Stary/nieaktualny wpis NIE jest kasowany na wejściu do samoleczenia - tylko gdy rescan
+     * (synchroniczny, TYLKO metadataCache) faktycznie ZNAJDZIE nową lokalizację, nadpisujemy go
+     * świeżym. Jeśli rescan zawiedzie (np. nowa lokalizacja ma jeszcze zimny `metadataCache`),
+     * stary wpis ZOSTAJE - to jest sygnał "to id kiedyś było prawdziwe", który asynchroniczny
+     * `_findFileById` czyta przez `_wasEverKnown` i dopuszcza sobie fallback z dysku. Kasowanie
+     * wpisu od razu regresowałoby samoleczenie po przenosinach bez eventu dokładnie wtedy, gdy
+     * metadataCache pod nową ścieżką jest zimny.
      */
     pathById(id: string): string | null {
         if (!id) return null;
@@ -522,28 +521,28 @@ export class ArtifactStore {
         return null;
     }
 
-    /** P1b: czy id MIAŁ KIEDYŚ wpis (sesji albo rejestru) — nawet jeśli od tamtej pory zdezaktualizowany. */
+    /** Czy id MIAŁ KIEDYŚ wpis (sesji albo rejestru) - nawet jeśli od tamtej pory zdezaktualizowany. */
     _wasEverKnown(id: string): boolean {
         return this._pathIndex.has(id) || !!this._registry?.has(id);
     }
 
     /**
-     * AUD-wydajnosc-059/106: leniwie budowany (raz) rejestr artefaktów — `id → wpis list()`,
-     * ograniczony do folderu artefaktów (K2), root liczony RAZ na przelot. Po zbudowaniu jest
-     * utrzymywany zdarzeniami vaulta/metadataCache (`_registerVaultEvents`) i bezpośrednio przez
-     * `create`/`move`/`remove`/`update` — patrz CLAUDE.md „Rejestr artefaktów".
+     * Leniwie budowany (raz) rejestr artefaktów - `id → wpis list()`, ograniczony do folderu
+     * artefaktów, root liczony RAZ na przelot. Po zbudowaniu jest utrzymywany zdarzeniami
+     * vaulta/metadataCache (`_registerVaultEvents`) i bezpośrednio przez
+     * `create`/`move`/`remove`/`update` - patrz CLAUDE.md "Rejestr artefaktów".
      *
-     * P1a (review opusa, 2026-09-02): pierwsze wywołanie może wypaść ZANIM Obsidian rozgrzał
-     * `metadataCache` dla całego vaulta (np. `archive()` z `initialize()` na `onLayoutReady`).
-     * Plik pod rootem z ZUPEŁNIE zimnym cache'em (`getFileCache` = `null`/`undefined` — nie:
-     * cache istnieje, ale bez `pkm-artefakt`) NIE wchodzi do rejestru w tym przelocie — ale w
-     * takim przypadku `_registryRoot` NIE jest stemplowany (`allWarm=false`), więc kolejne
-     * pytanie przebuduje rejestr od zera, aż cache się rozgrzeje. Bez tego artefakt zimny w
-     * MOMENCIE budowy zostawałby niewidoczny do końca sesji (rejestr jest inaczej wyrocznią —
-     * patrz `pathById`). Drugie zabezpieczenie: `metadataCache.on('resolved')`
-     * (`_registerVaultEvents`) wymusza przebudowę bezwarunkowo, gdy Obsidian skończy PIERWSZE
-     * pełne rozwiązanie metadanych. Koszt jest jednorazowy (okno startowe) — po rozgrzaniu
-     * `allWarm` jest zawsze `true` i rejestr wraca do O(1) na wywołanie.
+     * Pierwsze wywołanie może wypaść ZANIM Obsidian rozgrzał `metadataCache` dla całego vaulta
+     * (np. `archive()` z `initialize()` na `onLayoutReady`). Plik pod rootem z ZUPEŁNIE zimnym
+     * cache'em (`getFileCache` = `null`/`undefined` - nie: cache istnieje, ale bez
+     * `pkm-artefakt`) NIE wchodzi do rejestru w tym przelocie - ale w takim przypadku
+     * `_registryRoot` NIE jest stemplowany (`allWarm=false`), więc kolejne pytanie przebuduje
+     * rejestr od zera, aż cache się rozgrzeje. Bez tego artefakt zimny w MOMENCIE budowy
+     * zostawałby niewidoczny do końca sesji (rejestr jest inaczej wyrocznią - patrz `pathById`).
+     * Drugie zabezpieczenie: `metadataCache.on('resolved')` (`_registerVaultEvents`) wymusza
+     * przebudowę bezwarunkowo, gdy Obsidian skończy PIERWSZE pełne rozwiązanie metadanych. Koszt
+     * jest jednorazowy (okno startowe) - po rozgrzaniu `allWarm` jest zawsze `true` i rejestr
+     * wraca do O(1) na wywołanie.
      */
     _ensureRegistry(): void {
         const root = this._artifactsRoot();
@@ -581,12 +580,12 @@ export class ArtifactStore {
     }
 
     /**
-     * Samoleczenie ograniczone do folderu artefaktów (root liczony RAZ) — jedyna droga, którą
+     * Samoleczenie ograniczone do folderu artefaktów (root liczony RAZ) - jedyna droga, którą
      * `pathById` wciąż może kosztować więcej niż O(1): wpis BYŁ znany i przestał być prawdą
-     * (M — AUD-security-123, np. user przeniósł notatkę w Obsidianie zanim doszedł event
-     * `rename`). SYNCHRONICZNA jak `pathById` sama — `contextExtractor` woła ją bez `await`,
-     * więc bez dysku (jak oryginał): metadataCache albo nic. Odczyt z dysku dla zimnego cache'u
-     * mieszka osobno, w `_indexSingleFile` (asynchroniczne hooki `create`/`changed`).
+     * (np. user przeniósł notatkę w Obsidianie zanim doszedł event `rename`). SYNCHRONICZNA jak
+     * `pathById` sama - `contextExtractor` woła ją bez `await`, więc bez dysku: metadataCache
+     * albo nic. Odczyt z dysku dla zimnego cache'u mieszka osobno, w `_indexSingleFile`
+     * (asynchroniczne hooki `create`/`changed`).
      */
     _rescanForId(id: string): string | null {
         const root = this._artifactsRoot();
@@ -604,10 +603,10 @@ export class ArtifactStore {
     }
 
     /**
-     * K2 (AUD-security-075): ścieżka, pod którą POWSTANIE nowa instancja — synchronicznie, dla
-     * `contextExtractor` narzędzia `artifact_create`. Sufiks kolizyjny (" 2", " 3") może się do
-     * czasu wykonania przesunąć o jeden, ale folder — czyli to, co ocenia AccessGuard — jest ten sam.
-     * Ścieżka nie do zbudowania = `null` (wołacz odmawia), NIE wyjątek: bramka nie ma prawa rzucać.
+     * Ścieżka, pod którą POWSTANIE nowa instancja - synchronicznie, dla `contextExtractor`
+     * narzędzia `artifact_create`. Sufiks kolizyjny (" 2", " 3") może się do czasu wykonania
+     * przesunąć o jeden, ale folder - czyli to, co ocenia AccessGuard - jest ten sam. Ścieżka nie
+     * do zbudowania = `null` (wołacz odmawia), NIE wyjątek: bramka nie ma prawa rzucać.
      */
     instancePathFor(agent: string, tytul: string): string | null {
         try {
@@ -654,28 +653,22 @@ export class ArtifactStore {
     }
 
     /**
-     * K2 (AUD-security-076): trzyma się folderu artefaktów — `pathById` (którą tu wołamy)
-     * nie wychodzi poza root. Artefakt wyniesiony poza folder przestaje być artefaktem —
-     * to świadoma cena za granicę.
+     * Trzyma się folderu artefaktów - `pathById` (którą tu wołamy) nie wychodzi poza root.
+     * Artefakt wyniesiony poza folder przestaje być artefaktem - to świadoma cena za granicę.
      *
-     * M (AUD-security-123): bramka i zlew mają iść do JEDNEGO rozstrzygnięcia — `pathById` —
-     * żeby rozjazd (stara ścieżka dla bramki, nowa dla zapisu) nie był możliwy.
+     * Bramka i zlew mają iść do JEDNEGO rozstrzygnięcia - `pathById` - żeby rozjazd (stara
+     * ścieżka dla bramki, nowa dla zapisu) nie był możliwy. Deleguje więc do `pathById` (rejestr
+     * + samoleczenie po metadataCache, patrz `_rescanForId`) i NIE robi własnego skanu dla id,
+     * którego rejestr NIGDY nie znał - to zostaje O(1).
      *
-     * AUD-wydajnosc-060/031/104: do naprawy ta metoda miała WŁASNE, niezależne od `pathById`,
-     * dwa pełne przejścia po vaultcie (metadataCache, potem odczyt z dysku KAŻDEGO pliku
-     * w folderze) — nawet dla id, które `pathById` już rozstrzygnęło jako nieistniejące. Dziś
-     * deleguje do `pathById` (rejestr + samoleczenie po metadataCache, patrz `_rescanForId`) i
-     * NIE robi własnego skanu dla id, którego rejestr NIGDY nie znał — to zostaje O(1).
-     *
-     * P1b (review opusa, 2026-09-02): `pathById`'s samoleczenie jest SYNCHRONICZNE i patrzy
-     * TYLKO w `metadataCache` (bramka nie ma prawa czekać na dysk). Jeśli artefakt przeniesiono
-     * poza zasięgiem store'a (bez eventu `rename`) DO lokalizacji, której cache jeszcze nie
-     * rozgrzał, samo `pathById` nie znajdzie go — regresja samoleczenia z M123. Tu, ASYNCHRONICZNIE
-     * (`_findFileById` nie jest ścieżką bramki — koszt jednorazowego odczytu z dysku po plikach
-     * folderu artefaktów jest OK), dopuszczamy jednorazowy fallback z dysku — ale WYŁĄCZNIE gdy
-     * `_wasEverKnown(id)` (id BYŁO kiedyś w indeksie sesji albo rejestrze). Dla id nigdy
-     * niewidzianego fallback się NIE odpala — inaczej wróciłaby dokładnie ta regresja, którą
-     * naprawiają 060/031/104 (skan + odczyt z dysku na każde nieznane id).
+     * `pathById`'s samoleczenie jest SYNCHRONICZNE i patrzy TYLKO w `metadataCache` (bramka nie
+     * ma prawa czekać na dysk). Jeśli artefakt przeniesiono poza zasięgiem store'a (bez eventu
+     * `rename`) DO lokalizacji, której cache jeszcze nie rozgrzał, samo `pathById` nie znajdzie
+     * go. Tu, ASYNCHRONICZNIE (`_findFileById` nie jest ścieżką bramki - koszt jednorazowego
+     * odczytu z dysku po plikach folderu artefaktów jest OK), dopuszczamy jednorazowy fallback
+     * z dysku - ale WYŁĄCZNIE gdy `_wasEverKnown(id)` (id BYŁO kiedyś w indeksie sesji albo
+     * rejestrze). Dla id nigdy niewidzianego fallback się NIE odpala - inaczej każde nieznane id
+     * kosztowałoby pełny skan + odczyt z dysku, zamiast O(1).
      */
     // TS-any: Obsidian file objects come from the dynamically injected vault facade.
     async _findFileById(id: string): Promise<any> {
@@ -690,9 +683,8 @@ export class ArtifactStore {
     }
 
     /**
-     * P1b: jednorazowy odczyt z dysku po plikach folderu artefaktów — TYLKO wołane z
-     * `_findFileById` dla id, które `_wasEverKnown` (nigdy dla nowego/nieznanego id). Root
-     * liczony RAZ (AUD-wydajnosc-106).
+     * Jednorazowy odczyt z dysku po plikach folderu artefaktów - TYLKO wołane z `_findFileById`
+     * dla id, które `_wasEverKnown` (nigdy dla nowego/nieznanego id). Root liczony RAZ.
      */
     async _diskFallbackForId(id: string): Promise<any> {
         const root = this._artifactsRoot();
@@ -712,7 +704,7 @@ export class ArtifactStore {
         return null;
     }
 
-    // ─── rejestr: utrzymanie zdarzeniami (AUD-wydajnosc-059/030/021/051) ────────────────────
+    // ─── rejestr: utrzymanie zdarzeniami ──────────────────────────────────────────────────
 
     /**
      * Nasłuchy `vault.on('create'|'delete'|'rename')` + `metadataCache.on('changed')`,
@@ -735,13 +727,13 @@ export class ArtifactStore {
         const mc = this.app?.metadataCache;
         if (typeof mc?.on === 'function') {
             reg(mc.on('changed', (file: any) => { void this._onMetadataChanged(file); }));
-            // P1a (review opusa): `resolved` = Obsidian skończył PIERWSZE pełne rozwiązanie
-            // metadanych całego vaulta — zdarzenie JEDNORAZOWE. Jeśli rejestr zbudował się
-            // wcześniej (np. `archive()` w `initialize()` na `onLayoutReady`) z częścią plików
-            // pod rootem jeszcze zimnych, `_ensureRegistry` już samo się nie zastemplowało jako
-            // kompletne (`allWarm`) — ale `resolved` daje dodatkową, bezwarunkową gwarancję:
-            // unieważnia rejestr, żeby leniwa przebudowa złapała WSZYSTKO od razu, bez czekania
-            // na kolejne przypadkowe `list()`/`pathById()`.
+            // `resolved` = Obsidian skończył PIERWSZE pełne rozwiązanie metadanych całego
+            // vaulta - zdarzenie JEDNORAZOWE. Jeśli rejestr zbudował się wcześniej (np.
+            // `archive()` w `initialize()` na `onLayoutReady`) z częścią plików pod rootem
+            // jeszcze zimnych, `_ensureRegistry` już samo się nie zastemplowało jako kompletne
+            // (`allWarm`) - ale `resolved` daje dodatkową, bezwarunkową gwarancję: unieważnia
+            // rejestr, żeby leniwa przebudowa złapała WSZYSTKO od razu, bez czekania na kolejne
+            // przypadkowe `list()`/`pathById()`.
             reg(mc.on('resolved', () => { this._registry = null; this._registryRoot = null; }));
         }
     }
@@ -776,8 +768,8 @@ export class ArtifactStore {
 
     /**
      * Usuń wszystkie wpisy rejestru/indeksu sesji wskazujące na TĘ ścieżkę.
-     * Drobna poprawka review opusa: normalnie ścieżka→id jest 1:1, ale nie zakładamy tego na
-     * siłę (duch po nadpisaniu/race) — zbieramy WSZYSTKIE trafienia, nie przerywamy po pierwszym.
+     * Normalnie ścieżka→id jest 1:1, ale nie zakładamy tego na siłę (duch po nadpisaniu/race) -
+     * zbieramy WSZYSTKIE trafienia, nie przerywamy po pierwszym.
      */
     _forgetPath(path: string): void {
         if (!path || !this._registry) return;
@@ -792,9 +784,9 @@ export class ArtifactStore {
     }
 
     /**
-     * Indeksuj JEDEN plik (pod rootem) do rejestru. `metadataCache` bywa zimne tuż po `create` —
-     * AUD-wydajnosc-060/031/104 wymaga fallbacku „do dotychczasowej ścieżki dla pojedynczego
-     * pliku", nie skanu całego vaulta: czytamy TEN plik z dysku, nic więcej.
+     * Indeksuj JEDEN plik (pod rootem) do rejestru. `metadataCache` bywa zimne tuż po `create` -
+     * dlatego fallback jest "do dotychczasowej ścieżki dla pojedynczego pliku", nie skanu całego
+     * vaulta: czytamy TEN plik z dysku, nic więcej.
      */
     async _indexSingleFile(file: any): Promise<void> {
         if (!this._registry) return;
@@ -853,7 +845,7 @@ export class ArtifactStore {
     }
 
     _genId() {
-        // AUD-code-review-105: JEDEN helper daty (`formatYmd`) — sam stempel bez myślników.
+        // JEDEN helper daty (`formatYmd`) - sam stempel bez myślników.
         const stamp = formatYmd(this._now()).replace(/-/g, '');
         const hex = Math.floor(Math.random() * 0x10000).toString(16).padStart(4, '0');
         return `art-${stamp}-${hex}`;

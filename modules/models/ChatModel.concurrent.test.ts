@@ -1,11 +1,11 @@
 import test from 'ava';
 import { ChatModel } from './ChatModel.js';
 import { acquireSlot } from './requestGate.js';
-// CALY PLIK test.serial (audyt nocny 2026-08-13, modul 9): testy dziela globalna
-// bramke platformy lm_studio i statyczne liczniki szpiega rownoleglosci, a czesc
-// mierzy realne odstepy czasowe. Rownolegle bily sie o ten sam stan - determinizm
-// wisial przypadkiem na produkcyjnym cooldownie 150 ms (przy 0 pakiet padal,
-// izolacja przechodzila). Serial = kazdy test ma bramke i liczniki dla siebie.
+// CALY PLIK test.serial: testy dziela globalna bramke platformy lm_studio i statyczne
+// liczniki szpiega rownoleglosci, a czesc mierzy realne odstepy czasowe. Rownolegle bily
+// sie o ten sam stan - determinizm wisial przypadkiem na produkcyjnym cooldownie 150 ms
+// (przy 0 pakiet padal, izolacja przechodzila). Serial = kazdy test ma bramke i liczniki
+// dla siebie.
 import { CapturingHttpClient, makeCtx, makeSettings } from './testing/harness.js';
 import type {
     ChatModelDeps,
@@ -21,7 +21,7 @@ import type {
     StreamTransport,
 } from './contracts.js';
 
-/** Żądanie w tym teście niesie gołą treść — atrapa dostawcy nie potrzebuje nic więcej. */
+/** Żądanie w tym teście niesie gołą treść - atrapa dostawcy nie potrzebuje nic więcej. */
 const reqWith = (prompt: string): ChatRequest => ({ messages: [{ role: 'user', content: prompt }] });
 const EMPTY_REQ: ChatRequest = { messages: [] };
 
@@ -31,7 +31,7 @@ const infoOf = (id: string, local: boolean): ChatProviderInfo => ({
 
 /**
  * Dekoder-atrapa kształtu OpenAI. Model rozumie WYŁĄCZNIE zdarzenia dekodera, więc pusty
- * dekoder nie umiałby oddać ani treści (`answer:…`), ani sentinela `data: [DONE]` —
+ * dekoder nie umiałby oddać ani treści (`answer:…`), ani sentinela `data: [DONE]` -
  * a bez sentinela każda tura tego pliku kończyłaby się trzecim wyjściem streamu.
  */
 function sseDecoderStub(): StreamDecoder {
@@ -76,7 +76,7 @@ function makeProvider(id: string): ChatProvider {
 }
 
 /**
- * Transport sterowany funkcją `onOpen` — zastępuje dawne atrapy adapterów
+ * Transport sterowany funkcją `onOpen` - zastępuje dawne atrapy adapterów
  * (`MockAdapter`/`ConcurrencySpyAdapter`/`HangingAdapter`/`StampAdapter`/`NextAdapter`).
  */
 function makeTransport(onOpen: (spec: unknown, sink: StreamSink) => Promise<StreamOpenResult>): StreamTransport {
@@ -127,7 +127,7 @@ test.serial('ChatModel.stream parallel calls return distinct provider responses'
     );
 });
 
-// ── Bramka platform lokalnych (Zwis subagentow, lokalny most, 2026) ────────────────────────
+// ── Bramka platform lokalnych (lokalny most) ────────────────────────
 
 /** Transport-szpieg: mierzy, ile streamów biegnie RÓWNOCZEŚNIE. */
 function makeSpyTransport(): { transport: StreamTransport; state: { active: number; maxActive: number } } {
@@ -145,7 +145,7 @@ function makeSpyTransport(): { transport: StreamTransport; state: { active: numb
 
 test.serial('bramka lokalna: 3 streamy do lm_studio ida gesiego (max 1 naraz), chmura bez bramki', async t => {
     const local = makeSpyTransport();
-    // Osobna instancja per request — jak w produkcie (suby: skipCache w modelResolver).
+    // Osobna instancja per request - jak w produkcie (suby: skipCache w modelResolver).
     await Promise.all([1, 2, 3].map(() => makeModel('lm_studio', local.transport).stream(EMPTY_REQ)));
     t.is(local.state.maxActive, 1); // lokalna platforma: gesiego
 
@@ -154,9 +154,9 @@ test.serial('bramka lokalna: 3 streamy do lm_studio ida gesiego (max 1 naraz), c
     t.is(cloud.state.maxActive, 3); // chmura: prawdziwa rownoleglosc
 });
 
-// Test 3 (2026-08-11 17:40): po przerwaniu transportu nie leci ani koniec, ani blad, wiec
-// finally w stream() nie rusza - stopStream MUSI sam zwolnic slot biegnacego biletu, inaczej
-// nastepny request (glowny czat) stoi w kolejce za trupem na zawsze.
+// Po przerwaniu transportu nie leci ani koniec, ani blad, wiec finally w stream() nie rusza -
+// stopStream MUSI sam zwolnic slot biegnacego biletu, inaczej nastepny request (glowny czat)
+// stoi w kolejce za trupem na zawsze.
 test.serial('bramka lokalna: stopStream BIEGNACEGO streamu zwalnia slot (nastepny wjezdza)', async t => {
     const hangingTransport = makeTransport(() => new Promise<StreamOpenResult>(() => {})); // wisi jak most
 
@@ -176,20 +176,19 @@ test.serial('bramka lokalna: stopStream BIEGNACEGO streamu zwalnia slot (nastepn
     t.true(nextStarted, 'po stopStream trupa nastepny request dostaje slot');
 });
 
-// ── Cooldown zwolnienia slotu (audyt nocny 2026-08-13, modul 9) ──────────────────────
-// Commit fb58207 dolozyl GATE_RELEASE_COOLDOWN_MS = 150 jako lekarstwo na incydent
-// 2026-08-11: transport konczyl KAZDY stream przerwaniem, a request wystrzelony
-// milisekundy pozniej dostawal od Chromium gniazdo z puli w trakcie rozbiorki i wisial
-// 120 s. Fix wjechal BEZ ani jednego testu - mutacja stalej na 0 przechodzila caly plik
-// w izolacji. Ponizsze testy pinuja mechanizm, zeby cisza po tej zmianie byla slyszalna.
+// ── Cooldown zwolnienia slotu ──────────────────────────────────────────────────────
+// GATE_RELEASE_COOLDOWN_MS = 150 jest lekarstwem na to, że transport konczy KAZDY stream
+// przerwaniem, a request wystrzelony milisekundy pozniej dostawal od Chromium gniazdo z puli
+// w trakcie rozbiorki i wisial 120 s. Mutacja stalej na 0 przechodzi caly plik w izolacji, bez
+// testu ponizej ta regresja nie zapala zadnej lampki.
 //
-// 2026-08-15: pierwotna wersja mierzyla odstep zegarem sciennym (Date.now przed/po)
-// z marginesem -10 ms i FLAKE'owala pod pelnym `npm test` — timer libuv liczy termin od
+// Pierwotna wersja mierzyla odstep zegarem sciennym (Date.now przed/po) z marginesem -10 ms
+// i FLAKE'owala pod pelnym `npm test` - timer libuv liczy termin od
 // czasu petli zcache'owanego na starcie iteracji, wiec pod obciazonym CPU odpala
 // „wczesniej" wzgledem stempli Date.now() (zmierzone: gap 69 ms przy cooldownie 80 ms).
 // Teraz testy przechwytuja seam `ChatModel.scheduleGateRelease` i pinuja WIECEJ,
 // bez jednego pomiaru czasu: (a) zwolnienie slotu idzie wylacznie przez zaplanowany
-// callback — dopoki nie odpalony, nastepny stream NIE dostaje slotu, (b) zaplanowany
+// callback - dopoki nie odpalony, nastepny stream NIE dostaje slotu, (b) zaplanowany
 // odstep to dokladnie GATE_RELEASE_COOLDOWN_MS (hardcode 0 w wywolaniu tez by wpadl),
 // (c) po odpaleniu callbacka kolejka rusza. Wartosc produkcyjna pinuje osobny test nizej.
 
@@ -197,7 +196,7 @@ test.serial('bramka lokalna: stopStream BIEGNACEGO streamu zwalnia slot (nastepn
 const TEST_COOLDOWN_MS = 80;
 
 /** Podklasa z przechwyconym seamem czasu: zaplanowane zwolnienia laduja w `scheduled`
- *  zamiast w setTimeout — test odpala je recznie i W PELNI kontroluje uplyw cooldownu. */
+ *  zamiast w setTimeout - test odpala je recznie i W PELNI kontroluje uplyw cooldownu. */
 const makeSeamModel = () => {
     const scheduled: Array<{ fn: () => void; ms: number }> = [];
     class SeamModel extends ChatModel {
@@ -206,7 +205,7 @@ const makeSeamModel = () => {
     }
     // Drenaz na koniec testu: bramka `lm_studio` jest globalna (mapa w requestGate),
     // wiec nieodpalone zwolnienia przeciekalyby slotem do nastepnego testu w pliku.
-    // release() jest idempotentne — podwojne odpalenie nie szkodzi.
+    // release() jest idempotentne - podwojne odpalenie nie szkodzi.
     const drain = () => { scheduled.forEach(s => s.fn()); };
     return { SeamModel, scheduled, drain };
 };
@@ -247,7 +246,7 @@ test.serial('bramka lokalna: slot zwalnia sie z cooldownem - nastepny stream nie
     }
 });
 
-// Sciezka z incydentu: stream NIE konczy sie sam, tylko przerwaniem. Tu gniazdo jest
+// Sciezka, gdzie stream NIE konczy sie sam, tylko przerwaniem. Tu gniazdo jest
 // najswiezsze w rozbiorce, wiec to wlasnie tu cooldown musi zadzialac.
 test.serial('bramka lokalna: stopStream biegnacego streamu tez zwalnia slot przez cooldown', async t => {
     const { SeamModel, scheduled, drain } = makeSeamModel();
@@ -263,7 +262,7 @@ test.serial('bramka lokalna: stopStream biegnacego streamu tez zwalnia slot prze
         const stuck = makeModel('lm_studio', hangingTransport, SeamModel);
         void stuck.stream(EMPTY_REQ).catch(() => {});
         // Czekamy na BILET, nie na sztywne 5 ms: pod obciazeniem (pelny `npm test`)
-        // stopStream trafial w pusty bilet i nic nie planowal (flake 2026-08-22).
+        // stopStream potrafi trafic w pusty bilet i nic nie zaplanowac.
         for (let i = 0; i < 400 && !(stuck as unknown as { _gateTicket: unknown })._gateTicket; i++) {
             await new Promise(res => setTimeout(res, 5));
         }
@@ -286,8 +285,8 @@ test.serial('bramka lokalna: stopStream biegnacego streamu tez zwalnia slot prze
 });
 
 // Pin na wartosc produkcyjna. 150 ms nie jest okragla liczba z sufitu - to odstep,
-// przy ktorym most przestal gubic body (incydent 2026-08-11 18:52). Zejscie do zera
-// bez tego pinu nie zapala zadnej lampki.
+// przy ktorym most przestal gubic body. Zejscie do zera bez tego pinu nie zapala
+// zadnej lampki.
 test.serial('bramka lokalna: domyslny cooldown zwolnienia slotu to 150ms', t => {
     t.is(ChatModel.GATE_RELEASE_COOLDOWN_MS, 150);
 });
@@ -308,18 +307,17 @@ test.serial('bramka lokalna: stopStream anuluje request czekajacy w kolejce (han
     await t.notThrowsAsync(() => p1); // pierwszy dojezdza normalnie
 });
 
-/** Nieużywany dziś helper zostawiony celowo poza testami byłby martwym kodem — patrz `echoTransport`. */
+/** Nieużywany dziś helper zostawiony celowo poza testami byłby martwym kodem - patrz `echoTransport`. */
 test.serial('echoTransport oddaje treść żądania jako odpowiedź (helper pliku)', async t => {
     const model = makeModel('openai', echoTransport(() => 0));
     const out = await model.stream(reqWith('ping'));
     t.true(String(out.choices[0].message.content).startsWith('answer:'));
 });
 
-// Poprawka po weryfikacji clean-room (2026-09-06): `complete()` zerowało `_gateTicket`
-// BIEGNĄCEJ tury strumienia (instancja nie jest concurrent-safe, ale wołaczom nikt tego
-// nie zabrania). Tura zwalnia slot właśnie przez to pole, więc na platformie lokalnej
-// (pojemność 1) slot zostawał zajęty na zawsze i kolejka stawała — objaw identyczny
-// z incydentem „zwis subagentów", tylko z zupełnie innego powodu.
+// `complete()` nie może zerować `_gateTicket` BIEGNĄCEJ tury strumienia (instancja nie jest
+// concurrent-safe, ale wołaczom nikt tego nie zabrania). Tura zwalnia slot właśnie przez to
+// pole, więc na platformie lokalnej (pojemność 1) slot zostawałby zajęty na zawsze i kolejka
+// by stawała - objaw identyczny ze zwisem subagentów, tylko z zupełnie innego powodu.
 test.serial('bramka lokalna: complete() nie zabiera biletu biegnącej turze strumienia', async t => {
     const hangingTransport = makeTransport(() => new Promise<StreamOpenResult>(() => {}));
     const stuck = makeModel('lm_studio', hangingTransport);
@@ -333,7 +331,7 @@ test.serial('bramka lokalna: complete() nie zabiera biletu biegnącej turze stru
     t.truthy(biletStreamu, 'wiszący stream zajął slot');
 
     // Tor bez strumienia na TEJ SAMEJ instancji. Bramka lokalna ma pojemność 1, więc jego
-    // bilet ląduje w kolejce — i nie ma prawa dotknąć niczego, co należy do tury streamu.
+    // bilet ląduje w kolejce - i nie ma prawa dotknąć niczego, co należy do tury streamu.
     let rozstrzygniete = false;
     const completeP = stuck.complete(EMPTY_REQ).then(
         () => { rozstrzygniete = true; },

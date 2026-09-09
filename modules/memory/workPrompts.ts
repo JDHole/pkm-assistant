@@ -1,5 +1,5 @@
 /**
- * Factory work-prompts owned by the memory module (E2.8 B3).
+ * Factory work-prompts owned by the memory module.
  *
  * These are the built-in defaults for the memory workflows. They are resolved through the
  * agent > global (Settings→Prompt) > factory chain via `resolveWorkPrompt` (core), so a fresh
@@ -9,8 +9,8 @@
  * - DEFAULT_ARCHIVE_PROMPT      — ArchiveWorkflow Phase 1 dedup (notes list → merges + deletions)
  * - DEFAULT_SUMMARY_PROMPT      — ArchiveWorkflow Phase 2/3/4 (L1/L2/L3 docs → 1 synthetic summary; {{LEVEL}} token)
  *
- * AUD-dead-code-124 (2026-09-02): DEFAULT_BRIEF_PROMPT WYCIĘTY (zero czytelników od skasowania
- * ContextSessionGenerator w E2.9 D) — patrz komentarz przy dawnym miejscu stałej na końcu pliku.
+ * DEFAULT_BRIEF_PROMPT WYCIĘTY (zero czytelników od skasowania ContextSessionGenerator) - patrz
+ * komentarz przy dawnym miejscu stałej na końcu pliku.
  *
  * CONTRACT: workflows parse the shape these produce. Overrides (global/agent) MUST keep the same
  * output structure — DEFAULT_ARCHIVE_PROMPT's JSON keys, DEFAULT_SUMMARY_PROMPT's {{LEVEL}} token,
@@ -53,7 +53,7 @@ WYMAGANY OUTPUT (czysty JSON, bez markdown code-fence):
     }
   ],
   "na_teraz": {
-    "user": { "add": ["Kuba testuje dziś zakładkę Pamięć w panelu agenta"], "remove": [] },
+    "user": { "add": ["User testuje dziś zakładkę Pamięć w panelu agenta"], "remove": [] },
     "environment": { "add": [], "remove": ["Stary stan projektu, który już nieaktualny"] }
   }
 }
@@ -77,14 +77,14 @@ ZASADY DECYZYJNE:
 export const DEFAULT_ARCHIVE_PROMPT = `Analizujesz listę WSZYSTKICH notatek w brain/ aktualnego agenta. Twoje zadanie: zaproponować scalenia (merges) podobnych notatek + ewentualne usunięcia stale notatek.
 
 CO TO JEST brain/:
-- brain/*.md to TRWAŁA pamięć agenta — wiedza wielokrotnego użytku (np. "jak pisać posty na LinkedIn", "Kuba ma 33 lata").
+- brain/*.md to TRWAŁA pamięć agenta — wiedza wielokrotnego użytku (np. "jak pisać posty na LinkedIn", "user ma 33 lata").
 - Każda notatka ma frontmatter: name, description, type, created.
 - Typy: user, agent_rule, skill_hint, project_context, reference.
 - project_context zakończony nie jest kasowany w próżnię: po akceptacji workflow przenosi go do brain/archive/. Zanim zaproponujesz taki cleanup, upewnij się, że trwałe lekcje z projektu są już zachowane w user / agent_rule / skill_hint / reference albo w scalonej notatce.
 
 KIEDY SCALAĆ:
 - 2+ notatki mówią o TYM SAMYM temacie semantycznie (NIE wystarczy że mają podobny prefix filename).
-- Notatki MUSZĄ być tego samego type (nie scalaj user + agent_rule, nawet jeśli o "Kubie").
+- Notatki MUSZĄ być tego samego type (nie scalaj user + agent_rule, nawet jeśli o tej samej osobie).
 - Jeśli treści są komplementarne (różne aspekty tej samej rzeczy) → scal.
 - Jeśli treści to duplikat lub stara wersja → scal, biorąc świeższą/pełniejszą treść.
 
@@ -105,10 +105,10 @@ WYMAGANY OUTPUT (czysty JSON, bez markdown code-fence):
       "sources": ["user_kuba_wiek.md", "user_kuba_miejsce.md"],
       "target_name": "kuba_profil_podstawowy",
       "target_type": "user",
-      "target_description": "Podstawowe fakty o Kubie (wiek, lokalizacja)",
+      "target_description": "Podstawowe fakty o userze (wiek, lokalizacja)",
       "target_why": "Dlaczego to scalenie ma sens",
       "target_how_to_apply": "Kiedy używać tej notatki",
-      "merged_content": "Kuba ma 33 lata. Mieszka w Polsce.",
+      "merged_content": "User ma 33 lata. Mieszka w Polsce.",
       "why": "Dwie notatki o tej samej osobie, fakty komplementarne."
     }
   ],
@@ -161,10 +161,9 @@ ZASADY DECYZYJNE:
 - NIE używaj fraz "User powiedział..." / "W sesji X..." — pisz syntetycznie ("Ustalono X", "Pojawia się wzorzec Y").
 - Jeśli dokumenty są pustym placeholderem → zwróć krótkie "Pusty okres — brak treści do syntezy".`;
 
-// AUD-dead-code-124 (2026-09-02): DEFAULT_BRIEF_PROMPT WYCIĘTY stąd razem ze slotem w
-// Settings→Prompt (modules/shell/prompt_settings.ts) i z WORK_PROMPT_KEYS (core/utils/
-// workPromptResolver.ts). Konsument (ContextSessionGenerator) skasowany w E2.9 fazie D — od tego
-// momentu wartość slotu nie miała ani jednego czytelnika, mimo że kontrolka w Ustawieniach dalej
-// obiecywała działanie w czasie teraźniejszym. Wzór kasacji: keepRecentSessions/l3Threshold
-// (S32 Z6/Z1b). Osierocona wartość promptDefaults.brief_prompt w settings.json usera jest
-// nieszkodliwa — nikt jej już nie czyta.
+// DEFAULT_BRIEF_PROMPT WYCIĘTY stąd razem ze slotem w Settings→Prompt (modules/shell/
+// prompt_settings.ts) i z WORK_PROMPT_KEYS (core/utils/workPromptResolver.ts). Konsument
+// (ContextSessionGenerator) skasowany - od tego momentu wartość slotu nie miała ani jednego
+// czytelnika, mimo że kontrolka w Ustawieniach dalej obiecywała działanie w czasie
+// teraźniejszym. Osierocona wartość promptDefaults.brief_prompt w settings.json usera jest
+// nieszkodliwa - nikt jej już nie czyta.

@@ -1,6 +1,6 @@
 /**
  * HumanVibe Archetype - Jaskier
- * Domyślny agent PKM Assistant — mentor, przewodnik i budowniczy systemu.
+ * Domyślny agent PKM Assistant - mentor, przewodnik i budowniczy systemu.
  * Na fresh install jest jedynym agentem i prowadzi usera przez onboarding.
  *
  * Użytkownik może nadpisać tę konfigurację przez jaskier_overrides.yaml w swoim vaultcie.
@@ -10,15 +10,13 @@ import { Agent } from '../Agent.js';
 /**
  * HumanVibe archetype configuration
  *
- * AUD-dead-code-069/191/239 (2026-09-02): nie eksportowana poza ten plik — jedyny konsument
- * jest 74 linie niżej (`createJaskier`). Barrel `archetypes/index.ts` re-eksportował ją bez
- * odbiorcy; przycięte razem.
+ * Nie eksportowana poza ten plik - jedyny konsument jest w tym samym pliku (`createJaskier`).
  */
 const HUMAN_VIBE_CONFIG = {
     name: 'Jaskier',
     emoji: '🎭',
-    color: '#C58048', // Szlachetna Miedź — warm copper from Crystal Soul palette
-    // E2.8 A1/A3: archetyp i rola skasowane jako byty. Charakter mentora-onboardera
+    color: '#C58048', // Szlachetna Miedź - warm copper from Crystal Soul palette
+    // Archetyp i rola skasowane jako byty. Charakter mentora-onboardera
     // (dawna rola `jaskier-mentor`) wtopiony w `personality` niżej.
     temperature: 0.7,
     personality: `Jestem Jaskier — Twój główny asystent w PKM Assistant.
@@ -60,7 +58,7 @@ Memory v3 — jak działa:
 - sessions/active/ — bieżące rozmowy (auto-zapis). sessions/archive/ — zarchiwizowane po /save session.
 
 Jeśli user mówi "zapamiętaj X", zapisuję to jako notatkę w brain/ właściwego typu. /save session tworzy zaakceptowane notatki i przebudowuje indeks brain.md.`,
-    // E2.8 B3: prompty robocze NIE są tu zaszyte — resolver (agent>global>factory) daje Jaskrowi
+    // Prompty robocze NIE są tu zaszyte - resolver (agent>global>factory) daje Jaskrowi
     // fabryczne wersje z modules/memory/workPrompts.js. Zostaw puste = fabryka.
     skills: [
         'welcome-tour',
@@ -72,7 +70,7 @@ Jeśli user mówi "zapamiętaj X", zapisuję to jako notatkę w brain/ właściw
         'create-skill',
         'system-health-check',
     ],
-    // D18: brak ról systemowych — Jaskier, jak każdy asystent, korzysta z generycznego
+    // Brak ról systemowych - Jaskier, jak każdy asystent, korzysta z generycznego
     // workera (delegate bez aspect) lub własnych subów budowanych przez usera.
     preferred_servers: ['agent-builder', 'komunikator'],
     access_policy_version: 2,
@@ -90,6 +88,3 @@ Jeśli user mówi "zapamiętaj X", zapisuję to jako notatkę w brain/ właściw
 export function createJaskier() {
     return new Agent(HUMAN_VIBE_CONFIG);
 }
-
-// E2.8 C1: `getHumanVibeDefaults()` skasowane — martwa fabryka (0 wywołań poza re-eksportem)
-// z zombie polami (archetype/role/default_permissions sprzed A1/A3/C1).

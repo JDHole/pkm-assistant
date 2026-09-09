@@ -57,17 +57,17 @@ interface ReviewPanel {
 type NoticeOptions = { type?: string; timeout?: number };
 
 /**
- * ConsolidationProgressModal — S29 Z4 „Puls pamięci": okno, w którym widać CAŁY przebieg
+ * ConsolidationProgressModal - „Puls pamięci": okno, w którym widać CAŁY przebieg
  * konsolidacji pamięci, a nie tylko gotowy wynik ostatniej fazy.
  *
  * Czym różni się od `ArchiveModal` (stary tor):
- *  - NIE BLOKUJE. Zamknięcie okna nie przerywa roboty — przebieg leci dalej w tle, a wraca się
+ *  - NIE BLOKUJE. Zamknięcie okna nie przerywa roboty - przebieg leci dalej w tle, a wraca się
  *    do niego klikiem w 🧠 na pasku statusu (`MemoryOpsCenter.requestOpenModal`).
  *  - Pokazuje CHECKLISTĘ wszystkich kroków (dedup + N paczek L1 + L2 + L3) z ikoną statusu,
- *    czasem i tym, co z kroku wynikło — user od pierwszej sekundy wie, ile jeszcze zostało.
+ *    czasem i tym, co z kroku wynikło - user od pierwszej sekundy wie, ile jeszcze zostało.
  *  - Review dzieje się W ŚRODKU tego okna (panel pod checklistą), a nie w osobnym modalu.
  *    Można przejrzeć pierwszą paczkę L1, gdy piąta dopiero się liczy.
- *  - Krok, który padł, ma „Ponów" i „Pomiń" — bez tego jedna zdechła paczka blokowała L2.
+ *  - Krok, który padł, ma „Ponów" i „Pomiń" - bez tego jedna zdechła paczka blokowała L2.
  *
  * Modal jest GŁUPI: całą robotę (aplikacja decyzji, retry, bramkowanie L2/L3, notice, koszt)
  * robi kontroler przebiegu z `modules/chat/chat/consolidationRunner.js`. Tutaj jest tylko widok.
@@ -78,8 +78,8 @@ export class ConsolidationProgressModal extends Modal {
     declare agentName: string;
     declare _onClosed: (() => void) | null;
     declare _unsubRun: (() => void) | null;
-    // release 2.2.0/W2: `window.setInterval` (obsidianmd/prefer-window-timers) zwraca `number`
-    // (typ DOM), nie `NodeJS.Timeout` — `ReturnType<typeof window.setInterval>` sam się myli
+    // `window.setInterval` (obsidianmd/prefer-window-timers) zwraca `number`
+    // (typ DOM), nie `NodeJS.Timeout` - `ReturnType<typeof window.setInterval>` sam się myli
     // (typ `window` to `Window & typeof globalThis`, więc przecina się z globalnym `setInterval`
     // z @types/node), więc typ pola wpisany wprost jako `number`.
     declare _tickTimer: number | null;
@@ -89,7 +89,7 @@ export class ConsolidationProgressModal extends Modal {
     declare _costEl: HTMLDivElement | null;
     declare _panelEl: HTMLDivElement | null;
     declare _footerEl: HTMLDivElement | null;
-    /** AUD-wydajnosc-019: stepId → element „· 38s" (sekundnik zamiast pełnej przebudowy listy). */
+    /** stepId → element „· 38s" (sekundnik zamiast pełnej przebudowy listy). */
     declare _stepTimeEls: Map<string, HTMLElement>;
     /**
      * @param {Object} app - Obsidian App
@@ -116,7 +116,7 @@ export class ConsolidationProgressModal extends Modal {
         this._costEl = null;
         this._panelEl = null;
         this._footerEl = null;
-        // AUD-wydajnosc-019: stepId → element z czasem kroku (sekundnik podmienia sam tekst).
+        // stepId → element z czasem kroku (sekundnik podmienia sam tekst).
         this._stepTimeEls = new Map();
     }
 
@@ -146,12 +146,12 @@ export class ConsolidationProgressModal extends Modal {
         // (user może ponowić padnięty krok z sekcji podsumowania, gdy centrum już nie nadaje).
         this._unsubRun = this.run.addChangeListener?.(() => this._refresh()) || null;
         // Sekundnik dla kroku w biegu („· 38s"). Chodzi tylko wtedy, gdy naprawdę coś mieli.
-        // AUD-wydajnosc-019: tyknięcie podmienia TEKST CZASU aktywnego kroku, nie przebudowuje
+        // Tyknięcie podmienia TEKST CZASU aktywnego kroku, nie przebudowuje
         // całej checklisty. Pełny `_renderChecklist` zostaje dla zdarzeń zmiany przebiegu
-        // (`addChangeListener` → `_refresh`, linia wyżej) — tylko one zmieniają cokolwiek poza
-        // sekundnikiem. Wcześniej co sekundę leciało `parent.empty()` + budowa WSZYSTKICH
+        // (`addChangeListener` → `_refresh`, linia wyżej) - tylko one zmieniają cokolwiek poza
+        // sekundnikiem. Pełny render co sekundę oznaczałby `parent.empty()` + budowę WSZYSTKICH
         // wierszy (a każdy wiersz to kilka `createDiv`/`createSpan`, `t()` i nowe guziki
-        // z nowymi listenerami) — przez cały czas mielenia przebiegu, czyli minuty.
+        // z nowymi listenerami) - przez cały czas mielenia przebiegu, czyli minuty.
         this._tickTimer = window.setInterval(() => this._tickActiveStep(), 1000);
 
         this._refresh();
@@ -160,10 +160,10 @@ export class ConsolidationProgressModal extends Modal {
     onClose() {
         if (this._tickTimer) window.clearInterval(this._tickTimer);
         this._tickTimer = null;
-        this._stepTimeEls.clear(); // uchwyty do węzłów zamkniętego okna (AUD-wydajnosc-019)
+        this._stepTimeEls.clear(); // uchwyty do węzłów zamkniętego okna
         try { this._unsubRun?.(); } catch { /* best-effort */ }
         this._unsubRun = null;
-        // Rozstrzygnięty przebieg zwalnia centrum (pasek statusu gaśnie) — zamknięcie okna to
+        // Rozstrzygnięty przebieg zwalnia centrum (pasek statusu gaśnie) - zamknięcie okna to
         // naturalny moment. Gdy przebieg jeszcze leci, NIC nie przerywamy.
         try { this.controller?.finishIfSettled?.(); } catch { /* best-effort */ }
         try { this._releaseIfStuck(); } catch { /* best-effort */ }
@@ -174,9 +174,9 @@ export class ConsolidationProgressModal extends Modal {
      * Awaryjne zwolnienie centrum operacji, gdy przebieg UTKNĄŁ (patrz `isRunStuck`).
      *
      * Scenariusz: paczka L1 padła, L2/L3 wiszą pod kłódką, user zamyka okno. Nikt już nie kliknie
-     * „Ponów"/„Pomiń", więc `isSettled()` nigdy nie będzie prawdą — a bez tego `MemoryOpsCenter`
-     * zostawał zajęty aż do restartu Obsidiana (🧠 świeciło wiecznie, kolejny zapis sesji nie mógł
-     * ruszyć konsolidacji). Zamknięcie okna przy kroku `awaiting_review` NIC nie zwalnia — to
+     * „Ponów"/„Pomiń", więc `isSettled()` nigdy nie będzie prawdą - a bez tego `MemoryOpsCenter`
+     * zostaje zajęty aż do restartu Obsidiana (🧠 świeci wiecznie, kolejny zapis sesji nie może
+     * ruszyć konsolidacji). Zamknięcie okna przy kroku `awaiting_review` NIC nie zwalnia - to
      * normalna przerwa, pasek ma świecić i pozwalać wrócić.
      *
      * Nic nie ginie: niedokończone paczki wrócą przy następnym zapisie sesji, a sesje pokryte
@@ -216,7 +216,7 @@ export class ConsolidationProgressModal extends Modal {
     }
 
     /**
-     * AUD-wydajnosc-019: jedno tyknięcie sekundnika = jedna podmiana `textContent`.
+     * Jedno tyknięcie sekundnika = jedna podmiana `textContent`.
      *
      * Uchwyt do elementu czasu bierzemy z mapy zbudowanej przy renderze checklisty. Gdy kroku
      * nie ma w mapie (wiersz powstał ZANIM czas przekroczył zero, więc `_renderStepRow` nie
@@ -265,7 +265,7 @@ export class ConsolidationProgressModal extends Modal {
 
         const duration = stepDurationMs(step as unknown as ConsolidationStepLike);
         if (duration > 0) {
-            // AUD-wydajnosc-019: uchwyt zapamiętany — sekundnik podmienia w nim sam tekst.
+            // Uchwyt zapamiętany — sekundnik podmienia w nim sam tekst.
             this._stepTimeEls.set(step.id, head.createSpan({ text: `· ${formatDuration(duration)}`, cls: 'cs-consolidation__step-time' }));
         }
 

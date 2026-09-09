@@ -1,7 +1,7 @@
 /**
- * templateUseOutcome - AUD-bledy-014. „Użyj u agenta" wołało `useTemplateAtAgent` bez
- * `try/catch`, a kafel odpalał ten async handler bez `.catch`: awaria zapisu kończyła się
- * ciszą i półstanem (kopia suba na dysku, agent bez przypisania).
+ * templateUseOutcome - guardrail przeciw handlerowi „Użyj u agenta", który woła
+ * `useTemplateAtAgent` bez `try/catch`, gdzie kafel odpala ten async handler bez `.catch`:
+ * awaria zapisu kończy się ciszą i półstanem (kopia suba na dysku, agent bez przypisania).
  *
  * Test czystej decyzji - zero DOM, zero obsidian.
  */

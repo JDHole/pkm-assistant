@@ -1,9 +1,8 @@
 import test from 'ava';
 import { globPatternToRegex } from './globPattern.js';
 
-// AUD-code-review-033: test równoważności — helper musi produkować DOKŁADNIE ten sam regex
-// (co do wyniku `.test()`) jak stary, bajt-w-bajt zduplikowany łańcuch `.replace()`, który żył
-// osobno w `AccessGuard._matchesEntry` i (do wywałki 2026-09-03) `VaultZones.matchesPattern`.
+// Test równoważności: helper musi produkować DOKŁADNIE ten sam regex (co do wyniku `.test()`)
+// jak ten inline łańcuch `.replace()` — referencyjna implementacja, z którą porównujemy wynik.
 function legacyGlobToRegex(pattern: string): RegExp {
     const regexStr = pattern
         .replace(/\*\*/g, '<<<DOUBLESTAR>>>')

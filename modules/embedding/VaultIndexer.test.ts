@@ -31,7 +31,7 @@ function makeVault(files: FakeFiles, store: FakeStore = new Map()): { vault: Vau
         getMarkdownFiles() {
             return [...files.entries()].map(([path, f]) => ({ path, stat: { mtime: f.mtime } }));
         },
-        // Treść zwykłych notatek idzie przez Vault API (nie adapter) — E3.4.
+        // Treść zwykłych notatek idzie przez Vault API (nie adapter).
         getAbstractFileByPath(path: string) {
             const f = files.get(path);
             return f ? { path, stat: { mtime: f.mtime } } : null;
@@ -145,10 +145,10 @@ test('full scan indexes markdown, excludes .pkm-assistant / .obsidian / NoGo', a
     t.false(indexed.some(p => p.startsWith('.pkm-assistant')));
 });
 
-// 1a. K15 (AUD-security-101): wykluczenia to bramka ZAKAZU — bez rozróżniania wielkości liter.
+// 1a. Wykluczenia to bramka ZAKAZU - bez rozróżniania wielkości liter.
 // Wpisy No-Go user pisze ręcznie w ustawieniach, a Windows i macOS wielkości liter nie
-// rozróżniają: `Prywatne` w ustawieniach a `prywatne/` na dysku to TEN SAM folder. Przed
-// naprawą treść z zakazanego folderu wchodziła do indeksu i wracała w `search mode=semantic`.
+// rozróżniają: `Prywatne` w ustawieniach a `prywatne/` na dysku to TEN SAM folder. Case-sensitive
+// porównanie wpuściłoby treść z zakazanego folderu do indeksu i do `search mode=semantic`.
 test('NoGo i twarde wykluczenia łapią mimo innej wielkości liter', async t => {
     const files = new Map<string, FakeFile>([
         ['car.md', { content: 'samochód', mtime: 1 }],
@@ -164,7 +164,7 @@ test('NoGo i twarde wykluczenia łapią mimo innej wielkości liter', async t =>
     t.deepEqual([...indexer._mtimes.keys()].sort(), ['car.md']);
 });
 
-// 1b. E2.9: folder artefaktów wykluczony gdy indexArtifacts OFF, indeksowany gdy ON.
+// 1b. Folder artefaktów wykluczony gdy indexArtifacts OFF, indeksowany gdy ON.
 test('excludes the artifacts folder unless indexArtifacts is on', async t => {
     const mk = () => new Map<string, FakeFile>([
         ['notes/cat.md', { content: 'kot', mtime: 1 }],
@@ -273,8 +273,8 @@ test('mobile disables the indexer and no provider is reported', async t => {
     t.is(noProv.plugin.oramaDb, null);
 });
 
-// 6b. AUD-code-review-101: rebuild() na wczesnym wyjściu (no_provider) nie łamie
-// istniejącego, żywego indeksu — db/_ready/oramaDb/mtimes zostają NIETKNIĘTE, żeby
+// 6b. rebuild() na wczesnym wyjściu (no_provider) nie łamie
+// istniejącego, żywego indeksu - db/_ready/oramaDb/mtimes zostają NIETKNIĘTE, żeby
 // _flushQueue (bramkowane przez _ready) dalej przyjmowało zmiany z hooków po tym,
 // jak provider embeddingów wróci.
 test('rebuild() bailing out on no_provider leaves the already-ready index intact', async t => {
@@ -365,13 +365,13 @@ test('empty vault yields a ready empty index', async t => {
     t.is(indexer._mtimes.size, 0);
 });
 
-// ─────────────── KONTRAKT BŁĘDU (AUD-wydajnosc-090/010/045/068) ───────────────
+// ─────────────── KONTRAKT BŁĘDU ───────────────
 //
 // Padnięty provider (zgaszony demon, 429, brak sieci) NIE MOŻE wyglądać jak „pliki puste".
-// Do naprawy `embed_batch` oddawało pustą albo jednoelementową tablicę, `EmbeddingHelper`
-// robił z tego N nulli, a `_insertOne` stemplował mtime CAŁEJ porcji jako obrobionej.
-// Skan kończył się statusem `ready` z ZEREM wektorów, a `_resync` po restarcie porównywał
-// mtime i nie robił ani jednego wywołania API — indeks zostawał pusty NA STAŁE.
+// Gdyby `embed_batch` oddawał pustą albo jednoelementową tablicę, `EmbeddingHelper` zrobiłby
+// z tego N nulli, a `_insertOne` stemplowałby mtime CAŁEJ porcji jako obrobionej. Skan
+// kończyłby się statusem `ready` z ZEREM wektorów, a `_resync` po restarcie porównywałby
+// mtime i nie robił ani jednego wywołania API - indeks zostawałby pusty NA STAŁE.
 
 /** Embedder, który zachowuje się jak padnięty provider ZA naprawionym kontraktem. */
 function makeBrokenEmbedder(mode: 'throw' | 'short' | 'notArray'): FakeEmbedder {
@@ -407,13 +407,13 @@ for (const mode of ['throw', 'short', 'notArray'] as const) {
     });
 }
 
-// ─────────── P1 (review W5): pad resyncu NIE zabiera odzyskanego indeksu ───────────
+// ─────────── Pad resyncu NIE zabiera odzyskanego indeksu ───────────
 //
-// `_tryRestore()` OK → `_resync()` pada (Ollama zgaszona przy starcie, 3 notatki zmienione
-// od wczoraj) → wyjątek szedł do `catch` w `initialize`, `_publish()` nigdy nie leciało,
-// `_ready` zostawało `false`. Skutek: `RetrievalEngine` nie widział `oramaDb` (semantyka
-// martwa na CAŁĄ sesję), a `_ready=false` blokowało `_flushQueue`, czyli zero ponowień —
-// mimo że NIEŚWIEŻY, ale kompletny indeks był w garści.
+// `_tryRestore()` OK → `_resync()` pada (np. Ollama zgaszona przy starcie, notatki zmienione
+// od ostatniego bootu) → wyjątek szedłby do `catch` w `initialize`, `_publish()` nigdy by nie
+// poleciało, `_ready` zostawałoby `false`. Skutek: `RetrievalEngine` nie widziałby `oramaDb`
+// (semantyka martwa na CAŁĄ sesję), a `_ready=false` blokowałoby `_flushQueue`, czyli zero
+// ponowień - mimo że NIEŚWIEŻY, ale kompletny indeks byłby w garści.
 test('pad resyncu publikuje odzyskany indeks, a zmienione pliki idą do kolejki', async t => {
     const store = new Map();
     const a = newIndexer({ files: baseFiles(), store });
@@ -565,7 +565,7 @@ test('po awarii skanu następny start NIE uznaje vaulta za zaindeksowany', async
     const store = new Map();
     const files = baseFiles();
 
-    // Bieg 1: provider padnięty (u Kuby: Obsidian wstał przed demonem Ollamy).
+    // Bieg 1: provider padnięty (przypadek: Obsidian wstał przed demonem Ollamy).
     const a = newIndexer({ files, store, embedder: makeBrokenEmbedder('short') });
     await a.indexer.initialize();
     t.is(a.indexer.getStatus().status, 'error');
@@ -622,7 +622,7 @@ test('ponowienia po padzie mają rosnący odstęp (nie młócą API co debounce)
     t.true(indexer._flushRetryDelayMs(99) <= 5 * 60 * 1000, 'odstęp ma sufit');
 });
 
-// ─────────── AUD-wydajnosc-008: debounce kolejki nie resetuje się na cudzych plikach ───────────
+// ─────────── Debounce kolejki nie resetuje się na cudzych plikach ───────────
 
 test('zdarzenie na pliku SPOZA indeksu nie przesuwa timera realnych zmian', async t => {
     const { indexer, files } = newIndexer();
@@ -634,7 +634,7 @@ test('zdarzenie na pliku SPOZA indeksu nie przesuwa timera realnych zmian', asyn
     t.truthy(timerPoZmianie, 'realna zmiana planuje flush');
 
     // Strumień zdarzeń, które do indeksu NIE wchodzą: załącznik, plik pamięci agentów,
-    // notatka w NoGo. Każde z nich robiło dawniej clearTimeout + setTimeout od nowa.
+    // notatka w NoGo. Bez filtra każde z nich zresetowałoby clearTimeout + setTimeout od nowa.
     indexer._onVaultEvent('modify', { path: 'zalaczniki/obrazek.png' });
     indexer._onVaultEvent('create', { path: '.pkm-assistant/agents/x/memory/brain.md' });
     indexer._onVaultEvent('delete', { path: 'notatka.canvas' });
@@ -648,7 +648,7 @@ test('zdarzenie na pliku SPOZA indeksu nie przesuwa timera realnych zmian', asyn
     t.is(indexer._queue.size, 2);
 });
 
-// ─────────── AUD-wydajnosc-088/041: wektor tylko w vectorIndexes ───────────
+// ─────────── Wektor tylko w vectorIndexes ───────────
 
 test('zapisany indeks nie niesie DRUGIEJ kopii wektorów, a wyszukiwanie działa', async t => {
     const store = new Map();

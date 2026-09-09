@@ -6,9 +6,9 @@ import type { ChatRequest, ProviderContext, StreamEvent } from '../contracts.js'
 /**
  * Przechwycenie `usage` ze streamu (opcja `stream_options: { include_usage: true }`).
  * Bez niej API OpenAI-kształtne NIE zwraca zużycia tokenów w streamingu, więc pętla agenta
- * zawsze spadała na estymatę i zaniżała koszt wielokrotnie.
+ * spada na estymatę i zaniża koszt wielokrotnie.
  *
- * ⚠️ `usage` bez danych zostaje PUSTYM OBIEKTEM (B.6 BA-08) — nie `undefined`, nie zera.
+ * ⚠️ `usage` bez danych zostaje PUSTYM OBIEKTEM - nie `undefined`, nie zera.
  * Pusty obiekt jest sygnałem dla pętli „estymuj".
  */
 const REQ: ChatRequest = { messages: [{ role: 'user', content: 'hej' }] };
@@ -35,11 +35,11 @@ test('bez chunka z usage zwrotka zostaje pusta — czyli pętla wie, że ma esty
     const out = decode(['data: {"id":"c1","choices":[{"delta":{"content":"hej"}}]}']);
     t.is(out.usage.prompt_tokens, undefined);
     t.is(out.usage.completion_tokens, undefined);
-    t.deepEqual(out.usage, {}, 'pusty obiekt, nie undefined i nie zera (B.6 BA-08)');
+    t.deepEqual(out.usage, {}, 'pusty obiekt, nie undefined i nie zera');
 });
 
 /**
- * Granice ramek i sentinel końca tury (mutacje F10 na `isCompleteFrame` / `consumeLine`).
+ * Granice ramek i sentinel końca tury (mutacje na `isCompleteFrame` / `consumeLine`).
  *
  * Sieć nie tnie porcji na granicach ramek, więc dekoder musi umieć trzy rzeczy naraz:
  * domknąć turę ramką, która przyszła BEZ kończącego znaku nowej linii, poczekać na resztę
@@ -88,7 +88,7 @@ test('ramka trwale niesparsowalna ląduje w koszu, ale nie kończy strumienia', 
     const decoder = openaiProvider.createStreamDecoder(REQ, CTX);
     const events = decoder.feed('data: {nie-json}\ndata: {"choices":[{"delta":{"content":"dalej"}}]}\n');
 
-    t.is(decoder.droppedFrames, 1, 'ST-11: kosz zostawia ślad, z którego ChatModel robi ostrzeżenie');
+    t.is(decoder.droppedFrames, 1, 'kosz zostawia ślad, z którego ChatModel robi ostrzeżenie');
     t.deepEqual(
         texts(events),
         ['dalej'],

@@ -13,22 +13,22 @@ import type { ScopeData, SubAgentData, SubAgentInput, SubAgentYaml, VaultLike } 
 type YamlData = Record<string, any>;
 
 const SUB_AGENTS_PATH = '.pkm-assistant/sub-agents';
-// AUD-code-review-091: JEDNO źródło prawdy jest `config/limits.ts` (DEFAULT_LIMITS) — ta stała
-// go tylko odzwierciedla pod historyczną nazwą. `export` zdjęty w D7 (AUD-dead-code-010/164):
+// JEDNO źródło prawdy jest `config/limits.ts` (DEFAULT_LIMITS) — ta stała
+// go tylko odzwierciedla pod historyczną nazwą. `export` nie jest potrzebny:
 // zero importerów spoza pliku, jedyne użycie jest lokalne (patrz niżej).
 const DEFAULT_RESEARCHER_MAX_TOOL_RESULT_LENGTH = DEFAULT_LIMITS.max_tool_result_length;
-// D18/F6: JEDEN generyczny worker — brak podziału research/strateg. Wszystkie suby dostają
+// JEDEN generyczny worker — brak podziału research/strateg. Wszystkie suby dostają
 // ten sam domyślny zestaw narzędzi (rola w YAML to już tylko etykieta opisowa, nie steruje).
 // Przecięcie z uprawnieniami rodzica robi SubAgentRunner._getTools (parent∩sub).
 export const DEFAULT_SUB_AGENT_TOOLS = ['search', 'list', 'read', 'web_search', 'web_read'];
 /**
- * S27 D2: nazwa FABRYCZNEGO generycznego workera (`delegate` bez `aspect`).
+ * Nazwa FABRYCZNEGO generycznego workera (`delegate` bez `aspect`).
  * Byt syntetyczny — nie istnieje na dysku, więc jest niezniszczalny bez żadnego mechanizmu
  * ochrony. Zaplecze → Suby pokazuje go jako pierwszą, read-only kartę („wbudowany").
  */
 export const PKM_SUB_NAME = 'pkm-sub';
 export const DEPRECATED_TOOL_RENAMES = {
-    // E2.5: 10 narzędzi retrieval → jedno `search` (whitelist sub-agenta rozpoznaje
+    // 10 narzędzi retrieval → jedno `search` (whitelist sub-agenta rozpoznaje
     // starą nazwę już przy budowie — bez tego sub z vault_grep dostałby pustą whitelistę).
     'vault_search': 'search',
     'vault_grep': 'search',
@@ -40,7 +40,7 @@ export const DEPRECATED_TOOL_RENAMES = {
     'memory_semantic': 'search',
     'memory_filter_yaml': 'search',
     'memory_links': 'search',
-    // E2.6: prymitywy plikowe bez prefixów. Mapujemy PROSTO na finalną nazwę (single-pass,
+    // Prymitywy plikowe bez prefixów. Mapujemy PROSTO na finalną nazwę (single-pass,
     // bez łańcuchów) — dlatego dawne memory_sessions/summaries celują od razu w list/read.
     'vault_read': 'read',
     'vault_list': 'list',
@@ -107,7 +107,7 @@ function normalizeScope(scope: unknown): ScopeData | null {
     };
 }
 
-// D18/F6: jednolite defaulty dla WSZYSTKICH subów (rola = etykieta, nie steruje).
+// Jednolite defaulty dla WSZYSTKICH subów (rola = etykieta, nie steruje).
 function defaultSubAgentTools() {
     return [...DEFAULT_SUB_AGENT_TOOLS];
 }
@@ -130,7 +130,7 @@ function normalizeAgentPrefix(agent: string | { name?: string } | null | undefin
 }
 
 /**
- * Visible sub-agents for one active agent (D18: brak ról systemowych).
+ * Visible sub-agents for one active agent (brak ról systemowych).
  * Zwraca WYŁĄCZNIE custom suby usera zaczynające się od slugu agenta, np. jaskier-prep.
  * Legacy standalone (bez prefiksu, np. "prep") jest celowo ukryty.
  *
@@ -168,7 +168,7 @@ export class SubAgentLoader {
 
     /**
      * Load all sub-agents from .pkm-assistant/sub-agents/ (custom suby usera).
-     * D18: brak ról systemowych — plugin nie wnosi żadnych wbudowanych subów.
+     * Brak ról systemowych — plugin nie wnosi żadnych wbudowanych subów.
      * @returns {Promise<void>}
      */
     async loadAllSubAgents() {
@@ -240,7 +240,7 @@ export class SubAgentLoader {
 
         return {
             name: config.name,
-            // F6: rola to opisowa etykieta z YAML (może być pusta) — nie steruje zachowaniem.
+            // Rola to opisowa etykieta z YAML (może być pusta) — nie steruje zachowaniem.
             description: config.description,
             role: config.role || null,
             model: config.model || null,
@@ -252,7 +252,7 @@ export class SubAgentLoader {
             max_tool_result_length: config.max_tool_result_length ?? defaultMaxToolResultLength(),
             enabled: config.enabled !== false,
             prompt: (knowledge || '').trim(),
-            // S27 D3: ślad pochodzenia kopii („z szablonu: X vN"); brak = sub zrobiony od zera.
+            // Ślad pochodzenia kopii („z szablonu: X vN"); brak = sub zrobiony od zera.
             from_template: typeof config.from_template === 'string' ? config.from_template : null,
             path: yamlPath,
             format: 'sub_agent',
@@ -334,10 +334,10 @@ export class SubAgentLoader {
         const yamlStr = stringifyYaml(yamlConfig);
         await this.vault.adapter.write(yamlPath, yamlStr);
 
-        // AUD-bledy-010: instrukcja idzie na dysk W OBIE STRONY. Do naprawy zapis stał
-        // pod samym `if (data.prompt)`, więc wyczyszczenie instrukcji zostawiało starą
-        // treść w KNOWLEDGE.md: cache mówił „pusto", user dostawał „zapisany", a przy
-        // najbliższym `loadAllSubAgents()` skasowana metoda wracała do biegów suba.
+        // Instrukcja idzie na dysk W OBIE STRONY. Gdyby zapis stał pod samym
+        // `if (data.prompt)`, wyczyszczenie instrukcji zostawiałoby starą
+        // treść w KNOWLEDGE.md: cache mówiłby „pusto", user dostawałby „zapisany", a przy
+        // najbliższym `loadAllSubAgents()` skasowana metoda wracałaby do biegów suba.
         // Pusto = tak samo jak przy odczycie (`prompt: (knowledge || '').trim()`).
         if (data.prompt?.trim()) {
             await this.vault.adapter.write(knowledgePath, data.prompt);
@@ -399,7 +399,7 @@ export class SubAgentLoader {
     }
 
     /**
-     * Ensure the sub-agents folder exists. D18: brak ról systemowych do zasiania —
+     * Ensure the sub-agents folder exists. Brak ról systemowych do zasiania —
      * plugin nie tworzy żadnych domyślnych subów (user buduje własne / używa generycznego workera).
      * @returns {Promise<void>}
      */

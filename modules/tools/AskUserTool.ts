@@ -13,8 +13,7 @@
  *
  * Safeguards:
  *   - 5 min timeout (user forgot, navigated away) — honest failure, NEVER a fabricated
- *     "first option" answer (AUD-code-review-002; same class of bug as the no-UI branch
- *     fixed in AUD-bledy-026, K3-E update below)
+ *     "first option" answer (same class of bug as the no-UI branch fixed below)
  *   - null answer = cancelled (handle_error, onClose, timeout)
  *   - chat_view is the ONLY creator of the promise
  */
@@ -41,8 +40,8 @@ function _nodeSafeClearTimeout(...args: Parameters<typeof clearTimeout>): void {
     fn(...args);
 }
 
-/** Opcje `createAskUserTool` — WYŁĄCZNIE do testów (AUD-code-review-002: budzik 5 min
- *  nie jest inaczej osiągalny bez czekania naprawdę 5 minut). */
+/** Opcje `createAskUserTool` — WYŁĄCZNIE do testów (budzik 5 min nie jest inaczej
+ *  osiągalny bez czekania naprawdę 5 minut). */
 interface AskUserToolOptions {
     /** Nadpisanie budzika. Produkcja zawsze dostaje `ASK_USER_TIMEOUT_MS`. */
     timeoutMs?: number;
@@ -65,7 +64,7 @@ export interface AskUserPlugin {
     _askUserPromise?: Promise<string | null> | null;
     _askUserResolve?: ((answer: string | null) => void) | null;
     /**
-     * Obsidian `Plugin.registerInterval` — czyści uchwyt przy unload (AUD-bledy-030).
+     * Obsidian `Plugin.registerInterval` — czyści uchwyt przy unload.
      * Opcjonalne: host bez tej metody (testy, starszy adapter) po prostu jej nie dostaje.
      */
     registerInterval?: (handle: unknown) => number;
@@ -108,7 +107,7 @@ export function createAskUserTool(options: AskUserToolOptions = {}) {
 
             // ask_user ZAWSZE czeka na usera — nawet w autonomii yolo (zero pytań o
             // approval). Cały sens tego toola to "MUSZĘ zapytać usera"; tryb autonomii
-            // znosi bramki approval, ale nie samo pytanie tego narzędzia (D21, E2.3).
+            // znosi bramki approval, ale nie samo pytanie tego narzędzia.
 
             // Signal to chat_view what question to render (used if _renderAskUserBlock
             // hasn't fired yet, e.g. background tab auto-answer path)
@@ -120,14 +119,14 @@ export function createAskUserTool(options: AskUserToolOptions = {}) {
             // chat_view._renderAskUserBlock() creates plugin._askUserPromise in Phase 1 (sync),
             // which runs BEFORE Phase 2 (this execute). So the promise should already exist.
             if (!plugin?._askUserPromise) {
-                // AUD-bledy-026: brak kanału pytania (tura leci w zakładce W TLE, blok pytania
-                // nigdy nie powstał) = NIE MA KOGO ZAPYTAĆ. Do naprawy szła tu pierwsza opcja
-                // z listy jako "odpowiedź użytkownika" (success:true, auto:true) i model dostawał
-                // sfabrykowaną ZGODĘ na operację, której user nie widział. Dziś to rozpoznawalna
-                // porażka: pętla i model mają pójść ścieżką błędu, a nie zgadywać za człowieka.
+                // Brak kanału pytania (tura leci w zakładce W TLE, blok pytania nigdy nie
+                // powstał) = NIE MA KOGO ZAPYTAĆ. Pierwsza opcja z listy jako "odpowiedź
+                // użytkownika" (success:true, auto:true) byłaby sfabrykowaną ZGODĄ na operację,
+                // której user nie widział — dlatego to rozpoznawalna porażka: pętla i model
+                // mają pójść ścieżką błędu, a nie zgadywać za człowieka.
                 log.warn('AskUserTool', 'Brak kanału pytania (zakładka w tle?) - zwracam ask_user.no_ui');
-                // Fix znaleziska TS-3 #8: bramka jak u sąsiadów (linia wyżej i finally) — do tej
-                // gałęzi wchodzi się TAKŻE gdy plugin jest null, więc asercja była uśpionym NPE.
+                // Bramka jak u sąsiadów (linia wyżej i finally) — do tej gałęzi wchodzi się
+                // TAKŻE gdy plugin jest null, więc jej brak byłby uśpionym NPE.
                 if (plugin) plugin._askUserPending = null;
                 return {
                     success: false,
@@ -137,19 +136,19 @@ export function createAskUserTool(options: AskUserToolOptions = {}) {
                 };
             }
 
-            // Wyciek przy okazji (AUD-bledy-026, testy): budzik trzymał proces przy życiu
-            // jeszcze 5 minut po odpowiedzi usera - uchwyt jest po to, żeby `finally` go zdjął.
+            // Bez tego uchwytu budzik trzymałby proces przy życiu jeszcze 5 minut po odpowiedzi
+            // usera — uchwyt jest po to, żeby `finally` go zdjął.
             let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
             try {
                 // Race between user response and timeout
                 const timeoutPromise = new Promise<never>((_, reject) => {
                     timeoutHandle = _nodeSafeSetTimeout(() => reject(new Error('ask_user_timeout')), timeoutMs);
                 });
-                // AUD-bledy-030 (resztka): `finally` zdejmuje budzik po ROZSTRZYGNIĘCIU wyścigu.
-                // W oknie oczekiwania (user jeszcze nie odpowiedział) obietnica nie rozstrzyga
-                // się nigdy, więc przy `onunload` budzik tykał dalej na martwym pluginie. Uchwyt
-                // idzie do cyklu życia hosta — kanon z src/main.ts (`clearInterval` w JS kasuje
-                // uchwyty obu rodzajów, więc `registerInterval` obsługuje też `setTimeout`).
+                // `finally` zdejmuje budzik po ROZSTRZYGNIĘCIU wyścigu. W oknie oczekiwania
+                // (user jeszcze nie odpowiedział) obietnica nie rozstrzyga się nigdy, więc bez
+                // rejestracji budzik tykałby dalej na martwym pluginie po `onunload`. Uchwyt
+                // idzie więc dodatkowo do cyklu życia hosta — kanon z src/main.ts (`clearInterval`
+                // w JS kasuje uchwyty obu rodzajów, więc `registerInterval` obsługuje też `setTimeout`).
                 try { plugin.registerInterval?.(timeoutHandle); } catch { /* host bez rejestru */ }
 
                 const answer = await Promise.race([
@@ -174,12 +173,11 @@ export function createAskUserTool(options: AskUserToolOptions = {}) {
                 };
             } catch (err) {
                 if ((err as Error).message === 'ask_user_timeout') {
-                    // AUD-code-review-002: budzik NIE zmyśla zgody. Ta gałąź niosła kiedyś
-                    // dokładnie ten sam błąd, który AUD-bledy-026 naprawił w gałęzi „brak UI"
-                    // (patrz K3-E niżej w pliku) — pierwsza opcja jako "odpowiedź usera"
-                    // (success:true, auto:true), czyli sfabrykowana zgoda na operację, której
-                    // user nigdy nie widział. Timeout ma iść tą samą drogą co reszta braku
-                    // odpowiedzi: porażka, rozpoznawalny kod, zdanie dla modelu. NIE przywracaj
+                    // Budzik NIE zmyśla zgody: pierwsza opcja jako "odpowiedź usera"
+                    // (success:true, auto:true) byłaby sfabrykowaną zgodą na operację, której
+                    // user nigdy nie widział — ten sam błąd, który naprawia gałąź „brak UI"
+                    // wyżej w pliku. Timeout ma iść tą samą drogą co reszta braku odpowiedzi:
+                    // porażka, rozpoznawalny kod, zdanie dla modelu. NIE przywracaj
                     // auto-odpowiedzi tutaj.
                     log.warn('AskUserTool', 'Timeout (5 min) - brak odpowiedzi usera, zwracam ask_user.timeout');
                     return {

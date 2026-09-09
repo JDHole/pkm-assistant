@@ -59,7 +59,7 @@ test('backslashe i puste segmenty normalizowane', async t => {
     t.deepEqual(adapter.calls.mkdir, ['.pkm-assistant', '.pkm-assistant/skins', '.pkm-assistant/skins/custom']);
 });
 
-// ───────────────── probeFile: trzy stany zamiast dwóch (K4, AUD-bledy-061) ─────────────────
+// ───────────────── probeFile: trzy stany zamiast dwóch ─────────────────
 
 /** Adapter, któremu można rozkazać, jak ma się zachować `exists` i `read`. */
 function probeAdapter(opts: { exists?: boolean | 'throw'; read?: string | 'throw' } = {}) {
@@ -96,7 +96,7 @@ test('probeFile: adapter bez read zostaje przy słowie exists()', async t => {
     t.is(await probeFile({}, 'a.md'), 'unknown');
 });
 
-// ─────────────── readIfExists: self-append, odczyt-najpierw (K4, siostra probeFile) ───────────────
+// ─────────────── readIfExists: self-append, odczyt-najpierw (siostra probeFile) ───────────────
 
 test('readIfExists: plik ma treść → content, NIEZALEŻNIE od tego co mówi exists()', async t => {
     // Sedno naprawy: `exists()` kłamie (false), ale nasz WŁASNY read() i tak się udaje —

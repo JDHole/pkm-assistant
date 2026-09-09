@@ -140,9 +140,9 @@ export function createSaveSessionCommand(): SaveSessionCommand {
  * The canonical Memory v3 save/consolidation flow: LLM proposes brain notes → user reviews in
  * SaveSessionModal → archive the active session → maybe trigger ArchiveWorkflow at threshold.
  *
- * E2.7 K4 made this the SINGLE consolidation path. It is the `/save session` slash handler AND the
+ * This is the SINGLE consolidation path. It is the `/save session` slash handler AND the
  * target that chat_session.consolidateSession() (🧠 button, /memory, SessionCloseModal "archive")
- * reroutes to. The deleted AgentMemory.consolidateAll (silent L1/L2/L3) is gone.
+ * reroutes to.
  * @param {{view: Object, plugin: Object}} ctx
  */
 export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandContext): Promise<void> {
@@ -167,10 +167,9 @@ export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandCon
     // save_session_prompt against transcript+brain.md. Both may be null on cold startup —
     // workflow falls back to regex proposeNotes() in that case (graceful degradation).
     let mainModel = null;
-    // AUD-wydajnosc-079/RR-08-11: /save session (i jego dwaj wolacze - guzik konsolidacji
-    // 🧠 oraz SessionCloseModal "archive", patrz E2.7 W3 update wyzej) to operacja W TLE
-    // wzgledem aktywnej tury czatu tego samego agenta - nie jest zarejestrowana w
-    // StreamingManager jako stream, wiec shouldUseFreshModel(localTurns, globalActiveStreams)
+    // /save session (i jego dwaj wolacze - guzik konsolidacji 🧠 oraz SessionCloseModal
+    // "archive") to operacja W TLE wzgledem aktywnej tury czatu tego samego agenta - nie jest
+    // zarejestrowana w StreamingManager jako stream, wiec shouldUseFreshModel(localTurns, globalActiveStreams)
     // nie ma tu czego policzyc bez dorabiania nowego licznika. Ta sama semantyka co
     // profile_memory._runArchiveWorkflow: zawsze callerSkipCache=true. Koszt to jedna
     // konstrukcja adaptera na wywolanie flow (nie per request do API), za to zero ryzyka
@@ -182,11 +181,9 @@ export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandCon
         mainModel = null;
     }
 
-    // S29 Z5: BEZ `archiveWorkflow` — `applyDecision` zwraca `shouldTriggerArchive`, a przebieg
+    // BEZ `archiveWorkflow` — `applyDecision` zwraca `shouldTriggerArchive`, a przebieg
     // odpalamy przez `startConsolidationRun`: nieblokujący, z modalem przebiegu i paskiem statusu.
-    // Stary, blokujący `ArchiveWorkflow.run()` (jedna paczka L1 na przebieg, modal per faza,
-    // cztery strzały LLM bez żadnego UI) stracił tu wołacza w S29, w profilu agenta w kubełku 2,
-    // a w D6 (2026-07-30) został SKASOWANY. Dziś istnieje jedna droga konsolidacji.
+    // Istnieje jedna droga konsolidacji.
     const workflow = new SaveSessionWorkflow(agentMemory, {
         app: view.app,
         settings: plugin?.settings?.pkmAssistant || {},
@@ -209,7 +206,7 @@ export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandCon
     });
     const decisionPromise = modal.prompt();
 
-    // S29 Z6: „Anuluj" wreszcie anuluje — wyścig decyzji usera ze strzałem do modelu + AbortSignal.
+    // „Anuluj" anuluje — wyścig decyzji usera ze strzałem do modelu + AbortSignal.
     const prepared = await prepareWithCancel({ workflow, activeSession, modal, decisionPromise, plugin });
     if (prepared.cancelled) {
         view.resetInputArea?.();
@@ -217,7 +214,7 @@ export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandCon
     }
 
     const prep = prepared.prep;
-    // Z4.3: koszt strzału propozycji księgujemy TU, zaraz po udanej analizie — tokeny spaliły się
+    // Koszt strzału propozycji księgujemy TU, zaraz po udanej analizie — tokeny spaliły się
     // niezależnie od tego, czy user zatwierdzi notatki, czy kliknie „Anuluj" w oknie przeglądu.
     // Jedno wywołanie LLM = jeden wpis, więc (inaczej niż w konsolidacji) nie ma delty do liczenia.
     logSaveSessionCost({ agentMemory, agentName: activeSession.agentName, model: mainModel, usage: prep.usage });
@@ -238,7 +235,7 @@ export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandCon
     }
 
     await applyPostArchiveAction(view, agentMemory, result);
-    // AUD-code-review-051: `applyDecision` (modules/memory) już nie przerywa się na padzie
+    // `applyDecision` (modules/memory) nie przerywa się na padzie
     // jednej notatki — reszta pętli (rebuildBrainIndex, archiveActiveSession) dochodzi do końca,
     // a padnięte pozycje wracają w `result.noteFailures`. Bezwarunkowy Notice „gotowe" zamieniałby
     // tę widoczną awarię w CICHĄ utratę notatki, którą user właśnie zatwierdził w modalu — więc
@@ -250,7 +247,7 @@ export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandCon
         new Notice(t('modal.save_session.done'), 4000);
     }
     if (result.shouldTriggerArchive) {
-        // S29 Z5: zamiast notice'a „Czas na konsolidację pamięci" PO cichej kaskadzie — realny
+        // Zamiast notice'a „Czas na konsolidację pamięci" PO cichej kaskadzie — realny
         // przebieg z modalem, paskiem statusu i notice'em startowym PRZED pierwszym strzałem.
         startConsolidationRun({
             plugin,
@@ -259,7 +256,7 @@ export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandCon
             agent: activeAgent,
             model: mainModel,
             settings: plugin?.settings?.pkmAssistant || {},
-            // Z4.4: trigger automatyczny (próg / idle-scheduler). Pusty plan = cisza, nie notice
+            // Trigger automatyczny (próg / idle-scheduler). Pusty plan = cisza, nie notice
             // po każdym zapisie sesji.
             source: 'auto',
         }).catch((e) => {
@@ -271,12 +268,12 @@ export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandCon
 }
 
 /**
- * Faza propozycji z DZIAŁAJĄCYM anulowaniem (S29 Z6).
+ * Faza propozycji z DZIAŁAJĄCYM anulowaniem.
  *
- * Do S29 było tu zwykłe `await workflow.prepareProposals(...)`: klik „Anuluj" zamykał okno,
- * a strzał do modelu leciał dalej w tle i po minucie kończył się w próżni. Teraz decyzja usera
- * ściga się ze strzałem, a przegrany strzał dostaje `abort()` tą samą drogą, co Stop w czacie.
- * Pad/zwis nie spada po cichu na regexy — modal pokazuje przyczynę i guzik „Ponów analizę".
+ * Bez tego klik „Anuluj" zamykałby tylko okno, a strzał do modelu leciałby dalej w tle i po
+ * minucie kończyłby się w próżni. Decyzja usera ściga się ze strzałem, a przegrany strzał
+ * dostaje `abort()` tą samą drogą, co Stop w czacie. Pad/zwis nie spada po cichu na regexy —
+ * modal pokazuje przyczynę i guzik „Ponów analizę".
  *
  * @returns {Promise<{cancelled: boolean, prep?: Object}>}
  */
@@ -312,12 +309,13 @@ async function prepareWithCancel({ workflow, activeSession, modal, decisionPromi
 }
 
 /**
- * Wpis kosztu za JEDEN strzał propozycji `/save session` (Z4.3, 2026-07-30).
+ * Wpis kosztu za JEDEN strzał propozycji `/save session`.
  *
- * Do teraz `CostLog` znał tylko konsolidację pamięci (`memory-consolidation`), więc modal kosztów
- * milczał o strzale, który leci przy KAŻDYM zapisie sesji. Ścieżka regexowa (brak modelu / awaria)
- * nie ma `usage` → nie ma czego księgować, wychodzimy cicho. Zapis jest best-effort: `CostLog.append`
- * sam nie rzuca, a my dodatkowo nie czekamy na dysk (dziennik kosztów nie może opóźniać okna).
+ * `CostLog` obejmuje też ten strzał (nie tylko konsolidację pamięci, `memory-consolidation`) —
+ * bez tego modal kosztów milczałby o wywołaniu LLM, które leci przy KAŻDYM zapisie sesji. Ścieżka
+ * regexowa (brak modelu / awaria) nie ma `usage` → nie ma czego księgować, wychodzimy cicho.
+ * Zapis jest best-effort: `CostLog.append` sam nie rzuca, a my dodatkowo nie czekamy na dysk
+ * (dziennik kosztów nie może opóźniać okna).
  */
 function logSaveSessionCost({ agentMemory, agentName, model, usage }: LogSaveSessionCostOptions): void {
     const totals = normalizeUsage(usage);
@@ -333,8 +331,7 @@ function logSaveSessionCost({ agentMemory, agentName, model, usage }: LogSaveSes
 }
 
 function collectSessionArtifacts(_plugin: SaveSessionPlugin, _messages: SessionMessageLike[]): SessionArtifactLike[] {
-    // E2.9 FAZA D: stary świat artefaktów (_chatTodoStore/_planStore + ArtifactManager) SKASOWANY, więc
-    // nie ma czego zbierać. Artefakty żywe są własnymi notatkami w vaulcie (nie „kontekstem sesji"), a
+    // Nie ma czego zbierać. Artefakty żywe są własnymi notatkami w vaulcie (nie „kontekstem sesji"), a
     // todo to jednorazówka. Propozycje pamięci z transkryptu ("pamiętaj że X") idą przez
     // SaveSessionWorkflow.proposeNotes — to jedyne źródło, któremu ufamy.
     return [];
@@ -363,16 +360,16 @@ async function applyPostArchiveAction(view: SaveSessionView, agentMemory: AgentM
         return;
     }
 
-    // W13 (follow-up review W4): akcja plain `archive` (bez `_new`/`_close`, czyli TAKŻE
-    // `result.action` domyślny). `SaveSessionWorkflow.applyDecision` woła
+    // Akcja plain `archive` (bez `_new`/`_close`, czyli TAKŻE `result.action` domyślny).
+    // `SaveSessionWorkflow.applyDecision` woła
     // `agentMemory.archiveActiveSession(sessionPath)` bezwarunkowo, DLA KAŻDEJ akcji — a
     // `AgentMemory.archiveActiveSession` zeruje `agentMemory.activeSessionPath` sam, gdy
     // archiwizowana ścieżka zgadza się z aktywną (AgentMemory.ts, `archiveActiveSession`).
-    // Ten branch był jednak PUSTY: nic nie czyściło `activeTab.sessionPath` na zakładce.
-    // `_switchTab` (chat_tabs.ts) czyta `targetTab.sessionPath` i przy KAŻDYM powrocie na tę
-    // zakładkę WPISYWAŁ tę wiszącą ścieżkę z powrotem do `memory.activeSessionPath` — sesja
-    // "zmartwychwstawała" jako wskaźnik na plik, którego już nie ma (przenosiny do
-    // sessions/archive/, przy odczycie 'missing'). Czyścimy te same cztery pola co
+    // Bez czyszczenia `activeTab.sessionPath` na zakładce, `_switchTab` (chat_tabs.ts), który
+    // czyta `targetTab.sessionPath`, przy KAŻDYM powrocie na tę zakładkę WPISYWAŁBY tę wiszącą
+    // ścieżkę z powrotem do `memory.activeSessionPath` — sesja "zmartwychwstawałaby" jako
+    // wskaźnik na plik, którego już nie ma (przenosiny do sessions/archive/, przy odczycie
+    // 'missing'). Czyścimy te same cztery pola co
     // `archive_new` wyżej, ale BEZ wpisywania nowej wartości — nowa sesja ma powstać
     // leniwie, przy pierwszym kolejnym zdarzeniu (dokładnie jak dla świeżej zakładki
     // w `chat_tabs._initTabs`, która też startuje bez `sessionPath`). Tożsamość zakładki

@@ -1,12 +1,12 @@
 /**
- * skillIndex.js — cienki indeks skilli do system promptu (D17, E2.4).
+ * skillIndex.js - cienki indeks skilli do system promptu.
  *
  * Model NIE ma już narzędzi skill_list/skill_execute. Odkrywalność skilli = ten indeks
  * (nazwa + opis + ścieżka SKILL.md) wstrzykiwany do system promptu od startu; pełny przepis
  * model wciąga narzędziem `read(ścieżka)`. Skille manual-only (`disable-model-invocation`)
  * lądują na osobnej, krótkiej liście „tylko na wyraźne życzenie usera".
  *
- * BUDŻET: cała sekcja capowana (domyślnie ~8000 znaków — wzór Codex 2%/8k, bierzemy flat 8k).
+ * BUDŻET: cała sekcja capowana (domyślnie ~8000 znaków - wzór Codex 2%/8k, bierzemy flat 8k).
  * Nadmiarowe skille wypadają, a zamykająca linia kieruje do list(".pkm-assistant/skills").
  *
  * Pure module (zależność tylko od i18n) → testowalny node'em (PromptBuilder przez łańcuch
@@ -46,7 +46,7 @@ export function buildSkillIndex(skills: unknown = [], maxChars: number = SKILL_I
         const desc = s.description || t('prompt.dt.no_description');
         const recipe = s.path ? ` → ${t('prompt.dt.skill_recipe', { path: s.path })}` : '';
         const line = `  ${icon} ${s.name}: ${desc}${recipe}`;
-        // Zostaw miejsce na linię „…i N kolejnych" — dlatego cap sprawdzamy PRZED dopisaniem
+        // Zostaw miejsce na linię „…i N kolejnych" - dlatego cap sprawdzamy PRZED dopisaniem
         // (i zawsze pokazujemy co najmniej jeden skill, żeby indeks nie był pusty).
         if (shown > 0 && used + line.length + 1 > maxChars) break;
         lines.push(line);

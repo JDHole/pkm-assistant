@@ -1,16 +1,15 @@
 /**
  * `waitForLoaded` — czekanie na `state === 'loaded'`.
  *
- * Testy przyjechały 1:1 ze strażnika startu (AUD-wydajnosc-001/062). Pole źródła nazywa się
- * dziś `events` (bez podkreślnika) — B-03 opisywał je jako „de facto publiczny kontrakt".
+ * Pole źródła nazywa się `events` (bez podkreślnika) - to de facto publiczny kontrakt.
  * Test „podmiana instancji pod czekającym" ZOSTAJE: `waitForLoaded` dalej ma ten kontrakt,
- * mimo że runtime po clean-room woła ją na SOBIE i instancji nie podmienia.
+ * mimo że runtime dziś woła ją na SOBIE i instancji nie podmienia.
  */
 import test from 'ava';
 import { waitForLoaded } from './waitForLoaded.js';
 
-// ── T8-T11 (behawioralne, AUD-wydajnosc-001/062) — waitForLoaded z core/waitForLoaded.ts ──
-// Zastępuje strażnika ze znaleziska: „whenLoaded rozwiązuje się w ≤~10 ms po ustawieniu loaded,
+// ── behawioralne — waitForLoaded z core/waitForLoaded.ts ──
+// Zastępuje starego strażnika: „whenLoaded rozwiązuje się w ≤~10 ms po ustawieniu loaded,
 // a nie po pełnym ticku siatki". Minimalny fake-event-bus (bez `obsidian`, bez PKMEnv) — testuje
 // PRAWDZIWE zachowanie funkcji, nie regex po źródle.
 
@@ -71,7 +70,7 @@ test('waitForLoaded: env bez szyny zdarzen (samo state) -> jedyna droga to siatk
     t.is(resolved.state, 'loaded');
 });
 
-// ── T10 (regression guard — review 2026-09-02) ──────────────────────────────
+// ── T10 (regression guard) ───────────────────────────────────────────────────
 // Pierwsza wersja podpinała się pod `events` TYLKO w chwili wywołania — env powstały PO
 // starcie (albo instancja podmieniona pod whenLoaded, patrz test niżej) zostawał złapany
 // WYŁĄCZNIE tickiem siatki, czyli 100→250 ms było tu latentną REGRESJĄ, nie poprawą.

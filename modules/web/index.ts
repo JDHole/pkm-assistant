@@ -4,7 +4,7 @@
  * Silnik dostępu do sieci. Kontrakty narzędzi (`web_search`/`web_read`) żyją
  * w `modules/tools/`. Patrz CLAUDE.md.
  *
- * S30 Z4 (przycinka powierzchni): 9 symboli bez konsumenta spoza modułu OUT —
+ * Świadomie poza publicznym API: 9 symboli bez konsumenta spoza modułu —
  * `resolveProviderKey`, `WEB_SEARCH_PROVIDERS`, `PROVIDER_SIGNUP_URLS` (czyta je
  * `SettingsContent.js` TEGO modułu), `readUsage`/`sumUsage`/`COUNTED_PROVIDERS` (licznik
  * renderuje własna sekcja Settings),
@@ -12,18 +12,18 @@
  * i tak deep-importuje `readCache.js`). Definicje żyją w bebechach.
  */
 export { executeWebSearch, readWebPage } from './WebSearchProvider.js';
-// E1.3 P6 — rejestr znanych URL-i (bramka provenance dla web_read).
-// K1 / znalezisko 001: `normalizeUrl` wraca na powierzchnie modulu — `web_read` kanonizuje
+// Rejestr znanych URL-i (bramka provenance dla web_read).
+// `normalizeUrl` wraca na powierzchnię modułu — `web_read` kanonizuje
 // adres RAZ, zanim ocenia go provenance, filtr domen, cache i reader.
 export { registerKnownUrl, registerUrlsFromText, isUrlKnown, normalizeUrl } from './urlRegistry.js';
-// E3.3 — licznik zużycia (informacyjny), filtr domen, cache odczytów, streszczanie.
+// Licznik zużycia (informacyjny), filtr domen, cache odczytów, streszczanie.
 export { bumpUsage } from './usageCounter.js';
 export { checkDomain } from './domainFilter.js';
 export { makeReadCacheKey, getCachedRead, setCachedRead } from './readCache.js';
 export { summarizeWebContent } from './summarize.js';
 export { registerSettings } from './SettingsSection.js';
 
-// TS-3 — typy publiczne modułu. `export type` ZNIKA przy transpilacji, więc powierzchnia
+// Typy publiczne modułu. `export type` ZNIKA przy transpilacji, więc powierzchnia
 // runtime'u zostaje dokładnie taka, jak wyżej.
 export type {
     WebSearchResult,

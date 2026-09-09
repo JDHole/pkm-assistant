@@ -1,16 +1,17 @@
 /**
- * SubTaskRegistry — księga zadań sub-agentów (F1 „Przebudowa subagentów 2026").
+ * SubTaskRegistry — księga zadań sub-agentów.
  *
- * PO CO: do F1 jedynym śladem po biegu suba była linia w `.pkm-assistant/logs/trace.log`
- * (funkcja `trace` wstrzykiwana do pętli). Nie istniał BYT, którego można zapytać „co ten
- * sub robi teraz", „ile mu zostało budżetu", „czym skończył". Ten plik robi z biegu suba
- * obiekt (`SubTask`: id, status, kroki, wynik, budżet) i wystawia szynę zdarzeń.
+ * PO CO: bez tego rejestru jedynym śladem po biegu suba byłaby linia w
+ * `.pkm-assistant/logs/trace.log` (funkcja `trace` wstrzykiwana do pętli) — nie istniałby BYT,
+ * którego można zapytać „co ten sub robi teraz", „ile mu zostało budżetu", „czym skończył".
+ * Ten plik robi z biegu suba obiekt (`SubTask`: id, status, kroki, wynik, budżet) i wystawia
+ * szynę zdarzeń.
  *
  * ODWRÓCENIE ZALEŻNOŚCI: trace.log przestaje być JEDYNYM odbiorcą — staje się PIERWSZYM
  * KONSUMENTEM zdarzeń (`task:step` → `traceLog.scope(task.id)(type, fields)`). Format linii
  * jest BIT W BIT ten sam co dotąd (etykieta = dzisiejsza etykieta trace `sub/<nazwa>#<seq>`,
  * formatowanie robi `TraceLog.scope`), bo scenariusze harnessa parsują ten plik prefiksowo.
- * Panel podglądu subów (F3) podepnie się jako DRUGI konsument, bez dotykania runnera.
+ * Panel podglądu subów może podpiąć się jako DRUGI konsument, bez dotykania runnera.
  *
  * ZASADY:
  *   - Plik czysty: zero `obsidian`, zero UI, zero I/O. Zależności (traceLog, mask)
@@ -22,12 +23,12 @@
  *   - Sufity pamięci: `maxStepsPerTask` (kroki w RAM per task) i `maxDone` (ile zakończonych
  *     tasków trzymamy). Taski `running` nie są usuwane NIGDY.
  *
- * F3 („panel biegów"): rejestr jest też SKRZYNKĄ KONTAKTOWĄ do biegu — `attachAbort`
+ * Panel biegów: rejestr jest też SKRZYNKĄ KONTAKTOWĄ do biegu — `attachAbort`
  * przyjmuje uchwyt „ubij mnie" od tego, kto suba odpalił, a `requestStop` pozwala nim
  * pociągnąć komuś, kto zna wyłącznie `id` (panel w sidebarze). Rejestr dalej nic nie wie
  * o tym, JAK się ubija suba — trzyma cudzą funkcję i tyle.
  *
- * F5 („sterowanie w trakcie"): ta sama skrzynka przyjmuje też WIADOMOŚCI — `postMessage`
+ * Sterowanie w trakcie: ta sama skrzynka przyjmuje też WIADOMOŚCI — `postMessage`
  * wrzuca tekst do kolejki biegu, `takeMessages` opróżnia ją po stronie runnera (hak
  * `beforeContinue` pętli, czyli między wywołaniami modelu). Rejestr nie interpretuje
  * treści i nie doręcza jej sam; jest skrzynką, nie listonoszem.
@@ -63,10 +64,10 @@ export interface SubTaskResult {
 }
 
 /**
- * Skąd przyszło zlecenie (F2 „delegacja w tle") — adres zwrotny dla wyniku.
+ * Skąd przyszło zlecenie (delegacja w tle) — adres zwrotny dla wyniku.
  *
  * Rejestr TEGO NIE INTERPRETUJE: przechowuje 1:1 i oddaje konsumentom (`SubTaskNotifier`,
- * a w fazie B czat, który po tych polach trafi z powiadomieniem do właściwej zakładki/sesji).
+ * a docelowo czat, który po tych polach trafi z powiadomieniem do właściwej zakładki/sesji).
  */
 export interface SubTaskOrigin {
     agentName: string;
@@ -86,18 +87,18 @@ export interface SubTask {
     budget: SubTaskBudget;
     result?: SubTaskResult;
     error?: string;
-    /** F2: bieg odpalony W TLE (tura wołającego NIE czeka na wynik). */
+    /** Bieg odpalony W TLE (tura wołającego NIE czeka na wynik). */
     background?: boolean;
-    /** F2: adres zwrotny zlecenia — patrz `SubTaskOrigin`. */
+    /** Adres zwrotny zlecenia — patrz `SubTaskOrigin`. */
     origin?: SubTaskOrigin;
     /**
-     * Front B (szyba, 2026-08-17): skrót ZADANIA zleconego przez maina (≤300 znaków,
+     * Skrót ZADANIA zleconego przez maina (≤300 znaków,
      * zmaskowany na wejściu). Panel pokazuje go w rozwinięciu chipa — user ma widzieć,
      * PO CO ten bieg w ogóle wystartował, nie tylko co klika.
      */
     taskPreview?: string;
     /**
-     * F3: ktoś (panel) poprosił o zatrzymanie tego biegu. To ZNACZNIK PROŚBY, nie status —
+     * Ktoś (panel) poprosił o zatrzymanie tego biegu. To ZNACZNIK PROŚBY, nie status —
      * bieg gaśnie dopiero, gdy pętla suba dojedzie do najbliższego punktu przerwania i
      * domknie się przez `finish`/`fail`. Panel dzięki temu może pokazać „zatrzymywanie…".
      */
@@ -122,7 +123,7 @@ export interface SubTaskRegistryOptions {
     mask?: ((value: string) => string) | null;
     maxDone?: number;
     maxStepsPerTask?: number;
-    /** F5: sufit kolejki wiadomości do jednego biegu (patrz `postMessage`). */
+    /** Sufit kolejki wiadomości do jednego biegu (patrz `postMessage`). */
     maxMessagesPerTask?: number;
 }
 
@@ -131,7 +132,7 @@ const DEFAULT_MAX_DONE = 50;
 /** Ile kroków per bieg ląduje w RAM (nadmiar idzie tylko do konsumentów, np. do pliku). */
 const DEFAULT_MAX_STEPS_PER_TASK = 500;
 /**
- * F5: ile NIEODEBRANYCH wiadomości do biegu trzymamy w kolejce. Sufit jest niski celowo —
+ * Ile NIEODEBRANYCH wiadomości do biegu trzymamy w kolejce. Sufit jest niski celowo —
  * kolejka opróżnia się przy najbliższej iteracji pętli, więc dziesięć czekających znaczy,
  * że user sypie poleceniami szybciej, niż sub jest w stanie je przeczytać. Nadmiarowe
  * odrzucamy (`postMessage` → `false`), a nie wypychamy najstarsze: przy sterowaniu biegiem
@@ -140,7 +141,7 @@ const DEFAULT_MAX_STEPS_PER_TASK = 500;
 const DEFAULT_MAX_MESSAGES_PER_TASK = 10;
 
 export class SubTaskRegistry {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     /** Szyna zdarzeń: `task:created` (task), `task:step` ({task, step}), `task:finished` (task). */
     declare events: EventEmitter;
     declare private _tasks: Map<string, SubTask>;
@@ -148,13 +149,13 @@ export class SubTaskRegistry {
     /** Cache funkcji `scope` per id taska — jedna na bieg, kasowana przy `task:finished`. */
     declare private _traceScopes: Map<string, SubTaskTrace>;
     /**
-     * F3: uchwyty „ubij ten bieg" per id taska (side-channel abortów). Rejestr NIE WIE,
+     * Uchwyty „ubij ten bieg" per id taska (side-channel abortów). Rejestr NIE WIE,
      * jak się ubija suba — zna tylko funkcję, którą wstrzyknął ten, kto bieg odpalił
      * (`DelegateTool`). Wpis żyje dokładnie tyle co bieg (kasowany przy `task:finished`).
      */
     declare private _aborts: Map<string, () => void>;
     /**
-     * F5: kolejka wiadomości od usera do KONKRETNEGO biegu (side-channel sterowania).
+     * Kolejka wiadomości od usera do KONKRETNEGO biegu (side-channel sterowania).
      * Rejestr nie wie, co się z nimi stanie — zdejmuje je runner w haku `beforeContinue`
      * i dopisuje do transkryptu suba. Wpis żyje dokładnie tyle co bieg.
      */
@@ -195,13 +196,13 @@ export class SubTaskRegistry {
             const task = payload as SubTask | undefined;
             if (!task?.id) return;
             this._aborts.delete(task.id);
-            // F5: niedoręczone wiadomości do zakończonego biegu nie mają już adresata.
+            // Niedoręczone wiadomości do zakończonego biegu nie mają już adresata.
             this._messages.delete(task.id);
         });
     }
 
     /**
-     * Domyślny konsument zdarzeń: zapis do trace.log. Sedno F1 — plik jest ODBIORCĄ,
+     * Domyślny konsument zdarzeń: zapis do trace.log. Plik jest ODBIORCĄ,
      * nie właścicielem śladu. Formatowanie linii (`label | type | k=v`) i maskowanie
      * całej linii robi `TraceLog.scope`, więc format nie zmienia się ani o bajt.
      */
@@ -241,8 +242,8 @@ export class SubTaskRegistry {
     /**
      * Zakłada byt dla nowego biegu suba i ogłasza `task:created`.
      * @param id - etykieta trace tego wywołania (`sub/<nazwa>#<seq>`) — jednocześnie klucz rejestru.
-     * @param background - F2: bieg w tle (wołający nie czeka). Rejestr tylko przechowuje flagę.
-     * @param origin - F2: adres zwrotny zlecenia. Rejestr go NIE interpretuje (patrz `SubTaskOrigin`).
+     * @param background - bieg w tle (wołający nie czeka). Rejestr tylko przechowuje flagę.
+     * @param origin - adres zwrotny zlecenia. Rejestr go NIE interpretuje (patrz `SubTaskOrigin`).
      */
     create({ id, name, agentName, budget, background, origin, taskPreview }: {
         id: string;
@@ -263,10 +264,10 @@ export class SubTaskRegistry {
             budget: budget ? { ...budget } : {},
         };
         // Pola opcjonalne dokładamy tylko gdy podane — kształt bytu bez delegacji w tle
-        // zostaje bit w bit taki jak po F1 (konsumenci sprawdzają obecność pola).
+        // zostaje bit w bit ten sam (konsumenci sprawdzają obecność pola).
         if (background !== undefined) task.background = background;
         if (origin) task.origin = { ...origin };
-        // Front B: skrót zadania przechodzi przez tę samą maskę co kroki (zadanie potrafi
+        // Skrót zadania przechodzi przez tę samą maskę co kroki (zadanie potrafi
         // nieść sekret z kontekstu rodzica) i ma twardy sufit — to podgląd, nie transkrypt.
         if (typeof taskPreview === 'string' && taskPreview.trim()) {
             const trimmed = taskPreview.trim().slice(0, 300);
@@ -335,7 +336,7 @@ export class SubTaskRegistry {
     }
 
     /**
-     * F3: podepnij uchwyt „zatrzymaj ten bieg". Woła to ten, kto suba odpalił
+     * Podepnij uchwyt „zatrzymaj ten bieg". Woła to ten, kto suba odpalił
      * (`DelegateTool`) — tylko on ma jednocześnie `task.id` i domkniętą kontrolkę abortu.
      * Rejestr uchwytu nie interpretuje; jest tylko skrzynką kontaktową dla panelu.
      */
@@ -349,7 +350,7 @@ export class SubTaskRegistry {
     }
 
     /**
-     * F3: poproś o zatrzymanie biegu. Zwraca `true` TYLKO gdy prośba miała dokąd pójść —
+     * Poproś o zatrzymanie biegu. Zwraca `true` TYLKO gdy prośba miała dokąd pójść —
      * czyli bieg istnieje, jeszcze biegnie i ma podpięty uchwyt.
      *
      * ⚠️ To jest PROŚBA, nie egzekucja: znacznik `stopRequested` i ślad `stop.requested`
@@ -378,13 +379,13 @@ export class SubTaskRegistry {
     }
 
     /**
-     * Z7 (AUD-bledy-054/056): zatrzymaj WSZYSTKIE żywe biegi — demontaż pluginu.
+     * Zatrzymaj WSZYSTKIE żywe biegi — demontaż pluginu.
      *
-     * PO CO: `dispose()` czyścił mapę uchwytów BEZ ich wywołania, więc wyłączenie pluginu
-     * zrywało kanały raportowania, ale nie zatrzymywało egzekucji: sub odpalony w tle mielił
-     * dalej na wciąż żywym `mcpClient` (realny zapis do vaulta) i znikał z trace.log, bo szyna
-     * zdarzeń była już odpięta. Demontaż ma NAJPIERW zatrzymać, POTEM odpiąć — stąd osobna
-     * metoda, wołana z `onunload` PRZED `dispose()`.
+     * PO CO: gdyby `dispose()` czyścił mapę uchwytów BEZ ich wywołania, wyłączenie pluginu
+     * zrywałoby kanały raportowania, ale nie zatrzymywałoby egzekucji: sub odpalony w tle
+     * mieliłby dalej na wciąż żywym `mcpClient` (realny zapis do vaulta) i znikałby z trace.log,
+     * bo szyna zdarzeń byłaby już odpięta. Demontaż ma NAJPIERW zatrzymać, POTEM odpiąć — stąd
+     * osobna metoda, wołana z `onunload` PRZED `dispose()`.
      *
      * ⚠️ To zbiorcza PROŚBA, nie egzekucja (jak `requestStop`): uchwyt podnosi flagę abortu
      * i przerywa stream modelu, a bieg gaśnie przy najbliższym punkcie przerwania swojej
@@ -421,7 +422,7 @@ export class SubTaskRegistry {
     }
 
     /**
-     * F5: wrzuć wiadomość od usera do biegu, który TRWA (side-channel sterowania).
+     * Wrzuć wiadomość od usera do biegu, który TRWA (side-channel sterowania).
      *
      * Zwraca `true` tylko wtedy, gdy wiadomość ma dokąd pójść: bieg istnieje, ma status
      * `running` i kolejka nie jest pełna. Sam rejestr jej NIE DORĘCZA — leży w kolejce,
@@ -459,7 +460,7 @@ export class SubTaskRegistry {
     }
 
     /**
-     * F5: zdejmij wszystkie czekające wiadomości do biegu (woła runner między iteracjami).
+     * Zdejmij wszystkie czekające wiadomości do biegu (woła runner między iteracjami).
      * Zabiera je z kolejki — druga próba na tym samym biegu odda pustą tablicę.
      */
     takeMessages(id: string): string[] {
@@ -479,8 +480,8 @@ export class SubTaskRegistry {
     }
 
     /**
-     * Zamknięcie/archiwizacja sesji czatu (decyzja Kuby 2026-08-15: biegi subów należą do
-     * SESJI): wymiata z rejestru ZAKOŃCZONE biegi tej sesji — nie mają już czego pokazywać
+     * Zamknięcie/archiwizacja sesji czatu (biegi subów należą do SESJI): wymiata
+     * z rejestru ZAKOŃCZONE biegi tej sesji — nie mają już czego pokazywać
      * w nowej rozmowie. Biegi `running` zostają (sieroty widać na pasku i da się je ubić).
      * Zwraca liczbę usuniętych. Fail-soft jak reszta metod.
      */

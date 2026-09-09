@@ -47,7 +47,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 /**
  * Deep, order-independent-for-objects / order-sensitive-for-arrays equality over the
  * JSON-safe shapes that `Agent.serialize()` produces (strings, numbers, booleans,
- * arrays, plain objects — no cycles, no Dates/Maps/Sets).
+ * arrays, plain objects - no cycles, no Dates/Maps/Sets).
  */
 function deepEqualAgentValue(a: unknown, b: unknown): boolean {
     if (a === b) return true;
@@ -64,13 +64,12 @@ function deepEqualAgentValue(a: unknown, b: unknown): boolean {
 }
 
 /**
- * C1 (risk register 2026-09-02 / S34 z8): keep only the fields of `current` whose value
- * differs (deeply) from the same key in `baseline`. Used so a built-in agent's overrides
- * file carries a DIFF against the factory config, not a full re-serialization — otherwise
- * every save leaks the entire built-in config (emoji, color, personality, disabled_tools…)
- * into the overrides file, even fields the user never touched. A field present in `current`
- * but absent from `baseline` is always kept (its baseline value is `undefined`, which never
- * deep-equals a real value).
+ * Keep only the fields of `current` whose value differs (deeply) from the same key in
+ * `baseline`. Used so a built-in agent's overrides file carries a DIFF against the factory
+ * config, not a full re-serialization - otherwise every save leaks the entire built-in
+ * config (emoji, color, personality, disabled_tools…) into the overrides file, even fields
+ * the user never touched. A field present in `current` but absent from `baseline` is always
+ * kept (its baseline value is `undefined`, which never deep-equals a real value).
  */
 function diffAgentConfig(current: Record<string, unknown>, baseline: Record<string, unknown>): Record<string, unknown> {
     const diff: Record<string, unknown> = {};
@@ -83,28 +82,28 @@ function diffAgentConfig(current: Record<string, unknown>, baseline: Record<stri
 }
 
 /**
- * A1 (klaster C4b nit na C1): meta-pola, które MUSZĄ zawsze trafić do diff-only pliku nadpisań,
- * nawet gdy ich wartość jest identyczna z baseline. `access_policy_version` to jedyne pole, które
+ * Meta-pola, które MUSZĄ zawsze trafić do diff-only pliku nadpisań, nawet gdy ich wartość
+ * jest identyczna z baseline. `access_policy_version` to jedyne pole, które
  * `_mergeBuiltInOverrides` sprawdza PRZED zastosowaniem reszty diffu (`migrateAccessPolicy`
- * short-circuituje na `accessVersion >= ACCESS_POLICY_VERSION`) — `diffAgentConfig` naturalnie
+ * short-circuituje na `accessVersion >= ACCESS_POLICY_VERSION`) - `diffAgentConfig` naturalnie
  * je wycina, bo baseline (`createJaskier().serialize()`) ma DOKŁADNIE tę samą, BIEŻĄCĄ wartość
  * (`ACCESS_POLICY_VERSION`, pisaną bezwarunkowo przez `Agent.serialize()`). Bez tego wyjątku
  * KAŻDY zapis produkuje plik bez `access_policy_version` → następny load widzi `accessVersion
  * 0 < 2` → migracja odpala się na nowo (dopisuje `default_permissions` które migracja syntetyzuje,
- * gdy `focus_folders` jest puste) → zapisuje plik → loguje „Migrated built-in override" → PO
+ * gdy `focus_folders` jest puste) → zapisuje plik → loguje "Migrated built-in override" → PO
  * KAŻDYM zapisie profilu, w nieskończoność. Samo `access_policy_version` wystarcza: dopóki jest
  * obecne i aktualne, `migrateAccessPolicy` wraca natychmiast i nic więcej (w tym
- * `default_permissions`) nie jest dotykane — dopisywanie `default_permissions` do tej listy
+ * `default_permissions`) nie jest dotykane - dopisywanie `default_permissions` do tej listy
  * byłoby rozwiązywaniem objawu, nie przyczyny.
  */
 const ALWAYS_WRITTEN_META_FIELDS = ['access_policy_version'] as const;
 
 /**
- * A2 (klaster C4b nit na C1): rejestr fabryk baseline per built-in, kluczowany `agent.name`.
+ * Rejestr fabryk baseline per built-in, kluczowany `agent.name`.
  * `saveBuiltInOverrides` hardcodowało `createJaskier()` jako baseline dla KAŻDEGO
  * `agent.isBuiltIn`, co jest bezpieczne tylko dopóki Jaskier jest jedynym built-inem
  * (`loadBuiltInAgents` dziś zwraca wyłącznie `[jaskier]`). Gdyby ktoś dodał drugi built-in
- * bez dopisania go tutaj, diff liczyłby się względem CUDZEGO baseline'u — pole wyciekałoby
+ * bez dopisania go tutaj, diff liczyłby się względem CUDZEGO baseline'u - pole wyciekałoby
  * (baseline go nie ma) albo znikało (baseline ma inną wartość, przypadkiem równą). Dopisz
  * nowego built-ina razem z jego fabryką configu.
  */
@@ -112,19 +111,19 @@ const BUILT_IN_BASELINES: Record<string, () => Agent> = {
     Jaskier: createJaskier,
 };
 
-// F2.22 (release 2.2.0/W3): `saveBuiltInOverrides` woła `log.warn` w gałęzi A2 (built-in bez
-// zarejestrowanego baseline) — do tej naprawy krzyczało przy KAŻDYM zapisie profilu tego
-// agenta, w nieskończoność. Ostrzeżenie ma realną wartość raz („dopisz go do
-// BUILT_IN_BASELINES") — powtarzanie go co zapis to szum, nie sygnał. Zbiór nazw modułowy
-// (nie per-instancja `AgentLoader`), bo cel to zero powtórki w LOGU, niezależnie od tego, ile
-// razy loader jest tworzony na nowo w trakcie życia pluginu.
+// `saveBuiltInOverrides` woła `log.warn` w gałęzi built-in bez zarejestrowanego baseline -
+// bez tego ostrzeżenie krzyczałoby przy KAŻDYM zapisie profilu tego agenta, w nieskończoność.
+// Ostrzeżenie ma realną wartość raz ("dopisz go do BUILT_IN_BASELINES") - powtarzanie go co
+// zapis to szum, nie sygnał. Zbiór nazw modułowy (nie per-instancja `AgentLoader`), bo cel to
+// zero powtórki w LOGU, niezależnie od tego, ile razy loader jest tworzony na nowo w trakcie
+// życia pluginu.
 const _warnedMissingBaseline = new Set<string>();
 
 // `watchAgents` niżej wstaje w gołym Node bez mocka obsidiana (importowany wprost przez testy
 // AVA), gdzie `window` nie istnieje. Te dwie stałe trzymają REFERENCJĘ do funkcji (nie wywołanie)
-// — `window.setTimeout` w prawdziwym Obsidianie (Electron — popout window compatibility), goły
+// - `window.setTimeout` w prawdziwym Obsidianie (Electron - popout window compatibility), goły
 // global jako fallback w Node. `obsidianmd/prefer-window-timers` łapie tylko WYWOŁANIE gołego
-// identyfikatora (`setTimeout(...)`), nie referencję do niego jako wartości — więc call site
+// identyfikatora (`setTimeout(...)`), nie referencję do niego jako wartości - więc call site
 // niżej (`timerSet(...)`) nie jest już bare-globalem w oczach reguły.
 const timerSet: typeof setTimeout = typeof window !== 'undefined' ? window.setTimeout.bind(window) : setTimeout;
 const timerClear: typeof clearTimeout = typeof window !== 'undefined' ? window.clearTimeout.bind(window) : clearTimeout;
@@ -179,7 +178,7 @@ export class AgentLoader {
                 return agents;
             }
 
-            // Load each YAML file (skip _overrides files — those are for built-in agents)
+            // Load each YAML file (skip _overrides files - those are for built-in agents)
             for (const filePath of listed.files) {
                 const fileName = filePath.split('/').pop() || '';
                 if (fileName.includes('_overrides')) continue;
@@ -225,8 +224,8 @@ export class AgentLoader {
                 return null;
             }
 
-            // E2.8 A1: migracja archetypów usunięta (byt skasowany). Stare pola `archetype`/`role`
-            // w YAML są po prostu ignorowane przez konstruktor Agenta — bez breakage.
+            // Migracja archetypów usunięta (byt skasowany). Stare pola `archetype`/`role`
+            // w YAML są po prostu ignorowane przez konstruktor Agenta - bez breakage.
 
             // Add file path reference
             data.filePath = filePath;
@@ -239,7 +238,7 @@ export class AgentLoader {
 
             const agent = new Agent(data);
 
-            // E2.8 C1: migracja osi narzędziowej. Gdy YAML nie miał `disabled_tools` (miał stare
+            // Migracja osi narzędziowej. Gdy YAML nie miał `disabled_tools` (miał stare
             // mcp_servers/enabled_tools/permissions), konstruktor wyliczył disabled_tools. Zapisz
             // agenta RAZ w formie kanonicznej (disabled_tools + porzucone martwe osie). Kolejny load
             // widzi już `disabled_tools` (tablicę) → `_toolAxisMigrated=false` → brak ponownego zapisu.
@@ -278,10 +277,10 @@ export class AgentLoader {
     /**
      * Save agent definition to YAML file
      *
-     * K3 (AUD-security-024): agent WBUDOWANY (Jaskier) nie ma pliku `<nazwa>.yaml` — `loadAllAgents`
+     * Agent WBUDOWANY (Jaskier) nie ma pliku `<nazwa>.yaml` - `loadAllAgents`
      * odfiltrowuje custom agenta o nazwie built-ina, więc taki zapis znikał po restarcie i user
      * tracił ograniczenie, które właśnie ustawił, bez jednego słowa ostrzeżenia. Built-in ma
-     * własny plik nadpisań (`<nazwa>_overrides.yaml`) i tam ląduje — niezależnie od tego, kto woła.
+     * własny plik nadpisań (`<nazwa>_overrides.yaml`) i tam ląduje - niezależnie od tego, kto woła.
      *
      * @param {Agent} agent - Agent to save
      * @param {string} [filename] - Optional filename (defaults to agent name)
@@ -348,7 +347,7 @@ export class AgentLoader {
             agent.update(data);
         // TS-any: vault adapter errors are legacy untyped values and this path only reports their message.
         } catch (e: any) {
-            // File not found is expected (no overrides) — only log unexpected errors
+            // File not found is expected (no overrides) - only log unexpected errors
             if (e?.message && !e.message.includes('ENOENT') && !e.message.includes('not found')) {
                 log.warn('AgentLoader', `Override read error for ${agent.name}:`, e.message);
             }
@@ -372,26 +371,25 @@ export class AgentLoader {
 
         let diff: Record<string, unknown>;
         if (baselineFactory) {
-            // C1 (risk register 2026-09-02 / S34 z8): write only the DIFF against the built-in
-            // factory config, not the full serialize(). `_mergeBuiltInOverrides` merges this
-            // file over a FRESH built-in instance (`agent.update(data)`), so a diff-only file
-            // is compatible with the read side without any change there — omitted fields
-            // simply keep their factory value.
+            // Write only the DIFF against the built-in factory config, not the full serialize().
+            // `_mergeBuiltInOverrides` merges this file over a FRESH built-in instance
+            // (`agent.update(data)`), so a diff-only file is compatible with the read side
+            // without any change there - omitted fields simply keep their factory value.
             const baseline = baselineFactory().serialize();
             delete baseline.name;
             diff = diffAgentConfig(data, baseline);
 
-            // A1 (klaster C4b nit na C1): meta-pola, które `_mergeBuiltInOverrides` czyta PRZED
-            // zastosowaniem reszty diffu, muszą przetrwać nawet gdy diff je wycina jako
-            // „identyczne z baseline" — patrz komentarz przy `ALWAYS_WRITTEN_META_FIELDS`.
+            // Meta-pola, które `_mergeBuiltInOverrides` czyta PRZED zastosowaniem reszty diffu,
+            // muszą przetrwać nawet gdy diff je wycina jako "identyczne z baseline" - patrz
+            // komentarz przy `ALWAYS_WRITTEN_META_FIELDS`.
             for (const field of ALWAYS_WRITTEN_META_FIELDS) {
                 if (field in data) diff[field] = data[field];
             }
         } else {
-            // A2 (klaster C4b nit na C1): agent.isBuiltIn, ale bez zarejestrowanego baseline —
-            // diffowanie względem configu Jaskra byłoby diffem względem CUDZEGO built-ina
-            // (wyciek albo zniknięcie pól po przypadkowej zbieżności wartości). Fallback na
-            // zachowanie sprzed C1 (pełny serialize) zamiast zgadywać.
+            // agent.isBuiltIn, ale bez zarejestrowanego baseline - diffowanie względem
+            // configu Jaskra byłoby diffem względem CUDZEGO built-ina (wyciek albo zniknięcie
+            // pól po przypadkowej zbieżności wartości). Fallback na pełny serialize zamiast
+            // zgadywać.
             if (!_warnedMissingBaseline.has(agent.name)) {
                 _warnedMissingBaseline.add(agent.name);
                 log.warn('AgentLoader', `saveBuiltInOverrides: brak zarejestrowanego baseline dla built-ina "${agent.name}" — zapisuję pełny serialize() zamiast diffu (dopisz go do BUILT_IN_BASELINES).`);
@@ -408,17 +406,17 @@ export class AgentLoader {
     _migrateLegacyAgentFormat(data: LegacyAgentConfig): AgentMigration {
         const migration: AgentMigration = { changed: false, messages: [] };
 
-        // A2 (2026-07-24): wcześniej brak/puste focus_folders oznaczały pełny vault.
+        // Wcześniej brak/puste focus_folders oznaczały pełny vault.
         // Nowy kontrakt oznacza zero dostępu w trybie "Tylko przypisane". Jednorazowo
         // zachowujemy realne zachowanie starych profili przez guidance_mode=true i
-        // znacznik wersji. Nowy YAML (także tworzony skillem Niki) niesie wersję 2.
+        // znacznik wersji. Nowy YAML niesie wersję 2.
         const accessMigration = migrateAccessPolicy(data);
         if (accessMigration.changed) {
             migration.changed = true;
             migration.messages.push(...accessMigration.messages);
         }
 
-        // E2.8 A1: legacy `type: minion/master` — pole martwe po kasacji archetypu. Zostaje tylko
+        // legacy `type: minion/master` - pole martwe po kasacji archetypu. Zostaje tylko
         // sprzątnięcie pola; migracja starych minion/master → sub_agents leci niżej.
         if (data.type === 'minion' || data.type === 'master') {
             migration.messages.push(`type:${data.type}(legacy, removed)`);

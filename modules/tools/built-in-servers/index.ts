@@ -3,9 +3,10 @@
  * Logical servers: core, artifacts, vault, memory, web, multimodal, delegation, komunikator.
  *
  * User-added MCP servers live in `.pkm-assistant/mcp-servers/` (vault) — handled by ServerLoader.
- * Built-in vs user separation per Wizja MCP_PORZADEK_v1 (Sprint 04).
+ * Built-in vs user separation is deliberate: built-ins ship read-only with the plugin, user
+ * servers are editable.
  *
- * D17 (E2.4): serwer `skills` (skill_list/skill_execute) skasowany — skille odkrywane
+ * Serwer `skills` (skill_list/skill_execute) nie istnieje — skille odkrywane
  * indeksem w system promptcie, przepis czytany przez `read`.
  *
  * `version: 'plugin'` is a sentinel — resolved to the actual plugin version at runtime
@@ -32,12 +33,10 @@ export interface BuiltinServerManifest {
     tools: string[];
     requires_permission: string[];
     /**
-     * Deklaratywny sufit czasu. Realnie odczytuje go DZIŚ tylko `resolveTimeoutMs`
+     * Deklaratywny sufit czasu. Realnie odczytuje go tylko `resolveTimeoutMs`
      * (server_timeout.ts), a jedynym wołaczem jest `ExternalMcpManager` (serwery
-     * zewnętrzne) — dla WBUDOWANYCH narzędzi to pole nie ma żadnego egzekutora
-     * (AUD-code-review-003; niezrealizowany punkt Sprint 04 Z6 po kasacji
-     * `ServerExecutor` w E3.1 faza C). Zostaje jako dokumentacja zamierzonego
-     * budżetu, nie jako aktywny limit.
+     * zewnętrzne) — dla WBUDOWANYCH narzędzi to pole nie ma żadnego egzekutora.
+     * Zostaje jako dokumentacja zamierzonego budżetu, nie jako aktywny limit.
      */
     timeout_ms: number;
     source: string;
@@ -61,8 +60,8 @@ export const BUILTIN_MANIFESTS: BuiltinServerManifest[] = [core, artifacts, vaul
  */
 export function resolveBuiltinManifests({ pluginVersion, komunikatorEnabled = true }: ResolveManifestsOptions = {}): BuiltinServerManifest[] {
     let manifests = BUILTIN_MANIFESTS;
-    // Kill-switch komunikatora (przewód E1.2, semantyka S28 D7 — flaga default ON): gdy user
-    // wyłączy pocztę, cały serwer `komunikator` (kom_send/kom_list/kom_read) znika z katalogu.
+    // Kill-switch komunikatora (flaga default ON): gdy user wyłączy pocztę, cały serwer
+    // `komunikator` (kom_send/kom_list/kom_read) znika z katalogu.
     // `delegation` (delegate / agent_delegate) zostaje — działa bez KomunikatorManagera.
     // Domyślne `true` sprawia, że każdy caller bez flagi widzi pełny katalog (czysty bypass).
     if (komunikatorEnabled === false) {
@@ -82,5 +81,5 @@ export function getBuiltinManifest(name: string): BuiltinServerManifest | null {
     return BUILTIN_MANIFESTS.find(m => m.name === name) || null;
 }
 
-// AUD-dead-code-017/210: 8 aliasów re-eksportu (coreManifest…komunikatorManifest) skasowane —
-// zero konsumentów w całym repo. Realni wołacze chodzą przez BUILTIN_MANIFESTS / getBuiltinManifest.
+// Nie dodawaj aliasów re-eksportu (coreManifest…komunikatorManifest) — realni wołacze chodzą
+// przez BUILTIN_MANIFESTS / getBuiltinManifest, alias bez konsumenta jest martwym kodem.

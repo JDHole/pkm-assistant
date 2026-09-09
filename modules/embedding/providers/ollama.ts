@@ -63,7 +63,7 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
 
     /**
      * `GET {endpoint}/api/tags` → filtr nazw embeddingowych → `POST {endpoint}/api/show`
-     * per model, dla `context_length` (`model_info['general.context_length']`, C-12).
+     * per model, dla `context_length` (`model_info['general.context_length']`).
      * Model, dla którego `/api/show` nie odpowie 200, dostaje wpis bez `maxInputTokens`
      * (fail-safe — jeden zawieszony model nie ma prawa wywalić całej listy).
      */
@@ -94,7 +94,7 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
         );
     }
 
-    /** `POST {endpoint}/api/embed` — host bierze się z ustawień (`ctx.endpoint`), nie z defaultu (C-13). */
+    /** `POST {endpoint}/api/embed` — host bierze się z ustawień (`ctx.endpoint`), nie z defaultu. */
     buildEmbedRequest(texts: string[], ctx: EmbeddingProviderContext): HttpRequestSpec {
         return {
             url: `${ctx.endpoint}/api/embed`,

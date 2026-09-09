@@ -1,5 +1,5 @@
 // `release.js` — PRZYGOTOWANIE wydania (`npm run release`). Publikację NIE robi ten
-// skrypt — od 2026-09-07 robi ją GitHub Actions (`.github/workflows/release.yml`):
+// skrypt — robi ją GitHub Actions (`.github/workflows/release.yml`):
 // push taga `X.Y.Z` (bez litery `v`) uruchamia bramki, build na czystym Linuksie,
 // atestację provenance (`actions/attest-build-provenance`) i `gh release create`
 // z DOKŁADNIE trzema plikami — `main.js`, `manifest.json`, `styles.css`.
@@ -74,7 +74,7 @@ async function confirmVersion(rl, packageVersion) {
  * Krok 5.3 — notatki wydania.
  * Gotowy `releases/<wersja>.md` bierzemy 1:1. Gdy go nie ma, sklejamy świeży opis
  * z konsoli z notatkami poprzedniego wydania i zapisujemy pod ścieżką z
- * `resolveNotesTarget` (zawsze-nie-null, nie dotyka dysku — AUD-docs-009).
+ * `resolveNotesTarget` (zawsze-nie-null, nie dotyka dysku).
  *
  * Workflow releasowy sprawdza istnienie tego pliku PRZED buildem (patrz
  * `release.yml`) — bez niego push taga obleje bramkę już na pierwszym kroku.

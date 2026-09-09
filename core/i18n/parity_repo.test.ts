@@ -1,7 +1,7 @@
 /**
- * Noc 24/25.08 - strażnik zasięgu skanu źródeł i18n.
+ * Strażnik zasięgu skanu źródeł i18n.
  *
- * `parity.test.ts` (AUD-bledy-041) zeskanował literały `t('...')`, ale w JEDNYM katalogu:
+ * `parity.test.ts` skanuje literały `t('...')`, ale ograniczone do jednego katalogu:
  * `SCANNED_DIRS = ['modules/komunikator']` z dopiskiem „Dokładaj kolejne, gdy przyjdzie ich
  * kolej". Parytet pl↔en tej klasy nie łapie z definicji - klucz nieobecny w OBU słownikach
  * jest dla niego „zgodny".
@@ -90,19 +90,15 @@ test('i18n: skan repo w ogóle działa - widzi pliki i wywołania t()', t => {
 });
 
 test('i18n: dotychczasowy zasięg strażnika (modules/komunikator) jest czysty', t => {
-    // Kontrola, że pin niżej nie jest regresem w obszarze, który AUD-bledy-041 już domknął.
+    // Kontrola, że pin niżej nie jest regresem w obszarze już pokrytym wcześniej.
     t.deepEqual(scanDirs(['modules/komunikator']).missing, []);
 });
 
-// ─── pin: zasięg strażnika domknięty (zielone, werdykt 25.08) ──────────────────
+// ─── pin: zasięg strażnika domknięty (zielone) ──────────────────
 
 test('i18n: KAŻDY literalny klucz t() w repo istnieje w pl i en', t => {
-    // Było czerwone: 10 kluczy w `modules/shell/CostTrackingModal.ts` (7) i `core/SettingsContent.ts` (3).
-    // Ścieżka usera: Ustawienia -> wiersz „Koszty LLM" -> przycisk -> modal. Zamiast tekstów
-    // było widać `settings.cost_tracking`, `modal.cost_tracking.title` itd. Wina NIE była fabryki
-    // napraw 23/24.08 - pliki wjechały 2026-07-31 (`988ff55`) i fabryka ich nie dotykała.
-    // Naprawa (werdykt 25.08): 10 kluczy dopisane do pl.ts i en.ts + `parity.test.ts`
-    // `SCANNED_DIRS` rozszerzone na `REPO_DIRS` (ten sam skan, więc pin i strażnik zgadzają
-    // się z definicji). Pin zdjęty z `test.failing` na `test` — pilnuje, żeby nie wróciło.
+    // Brakujący klucz pokazuje się userowi jako goły napis (np. `settings.cost_tracking`)
+    // zamiast przetłumaczonego tekstu. `SCANNED_DIRS` w `parity.test.ts` obejmuje tu całe
+    // repo (`REPO_DIRS`), nie jeden katalog, więc klucz dodany gdziekolwiek zostaje złapany.
     t.deepEqual(scanDirs(REPO_DIRS).missing, []);
 });

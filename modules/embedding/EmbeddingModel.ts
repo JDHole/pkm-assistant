@@ -67,7 +67,7 @@ function positiveNumber(value: unknown): number | undefined {
     return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
-/** Wejście „puste" = brak treści po obcięciu białych znaków (B.5 EB-09). */
+/** Wejście „puste" = brak treści po obcięciu białych znaków. */
 function isBlank(text: unknown): boolean {
     return typeof text !== 'string' || text.trim().length === 0;
 }
@@ -413,7 +413,7 @@ export class EmbeddingModel {
                 ...init,
                 httpStatus,
                 attempts,
-                // K20: ciało odpowiedzi bywa echem żądania razem z nagłówkiem autoryzacji,
+                // Ciało odpowiedzi bywa echem żądania razem z nagłówkiem autoryzacji,
                 // więc do błędu NIE trafia. Zostaje status, rodzaj i komunikat po maskowaniu.
                 cause: undefined,
             }),
@@ -431,8 +431,8 @@ export class EmbeddingModel {
         return new EmbedBatchError({
             ...init,
             message: this._mask(init.message),
-            // Przyczyna przechodzi przez tę samą maskę co komunikat — K20 wymienia `cause`
-            // wprost, a błąd transportu potrafi wciągnąć do treści cały URL z żądania.
+            // Przyczyna przechodzi przez tę samą maskę co komunikat - błąd transportu potrafi
+            // wciągnąć do treści cały URL z żądania, więc `cause` trzeba maskować tak samo.
             cause: this._maskCause(init.cause),
             providerId: this.providerId,
             modelId: this.modelId,
@@ -440,7 +440,7 @@ export class EmbeddingModel {
     }
 
     /**
-     * Wycina klucz API z komunikatu (K20). Krótkich wartości nie maskujemy — trafiłyby
+     * Wycina klucz API z komunikatu. Krótkich wartości nie maskujemy - trafiłyby
      * w przypadkowe fragmenty tekstu i zrobiły z komunikatu bełkot.
      */
     private _mask(message: string): string {

@@ -1,9 +1,9 @@
 /**
- * consolidationRunner.test.js — KONTROLER przebiegu konsolidacji (S29 „Puls pamięci").
+ * consolidationRunner.test.js — KONTROLER przebiegu konsolidacji („Puls pamięci").
  *
- * Do 2026-07-29 ten plik nie miał ANI JEDNEGO testu, bo `consolidationRunner.js` statycznie
- * importował modal z barrela shella → `obsidian` → AVA wywalała się już na imporcie. Modal jest
- * teraz ładowany leniwie, a testy wstrzykują atrapę klasy (`_setModalClassForTests`).
+ * `consolidationRunner.js` importuje modal z barrela shella → `obsidian`, więc statyczny import
+ * wywalałby AVA już na imporcie modułu. Modal jest ładowany leniwie, a testy wstrzykują atrapę
+ * klasy (`_setModalClassForTests`).
  *
  * Zasada repo: integracyjne > jednostkowe. `AgentMemory`, `ArchiveWorkflow`, `ConsolidationRun`
  * i `memoryOpsCenter` są PRAWDZIWE — atrapy dostają tylko model (skrypt strzałów), modal
@@ -324,7 +324,7 @@ test.serial('pusty plan → null, notice „nie ma czego", centrum wolne, zero m
     t.is(env.model.calls.length, 0, 'zero strzałów do modelu');
 });
 
-test.serial('Z4.4: pusty plan z triggera AUTOMATYCZNEGO milczy (koniec notice-spamu po każdym zapisie)', async t => {
+test.serial('pusty plan z triggera AUTOMATYCZNEGO milczy (koniec notice-spamu po każdym zapisie)', async t => {
     // Licznik `archived_since_last_consolidation` zeruje dopiero realny zapis L1, więc gdy
     // materiału jest mniej niż batchSize, próg jest przebity przy KAŻDYM kolejnym `/save session`.
     const env = makeEnv();
@@ -338,7 +338,7 @@ test.serial('Z4.4: pusty plan z triggera AUTOMATYCZNEGO milczy (koniec notice-sp
     t.is(modals.length, 0);
 });
 
-test.serial('Z4.4: pusty plan z triggera RĘCZNEGO nadal odpowiada („nie ma czego konsolidować")', async t => {
+test.serial('pusty plan z triggera RĘCZNEGO nadal odpowiada („nie ma czego konsolidować")', async t => {
     const env = makeEnv();
 
     const run = await env.start({ source: 'manual' });
@@ -468,7 +468,7 @@ test.serial('happy path: propozycja → decyzja → domknięcie z notice, koszte
 
     const run = await env.start();
     await waitStatus(run, 'l1_batch_1', STEP_STATUS.AWAITING_REVIEW);
-    await controllerOf(run).applyDecision('l1_batch_1', { accepted: true, body: 'wersja Kuby' });
+    await controllerOf(run).applyDecision('l1_batch_1', { accepted: true, body: 'wersja usera' });
 
     t.is(run.getStep('l1_batch_1').status, STEP_STATUS.DONE);
     t.true(run.isSettled());
@@ -477,7 +477,7 @@ test.serial('happy path: propozycja → decyzja → domknięcie z notice, koszte
 
     const l1 = Object.keys(env.files).filter(p => p.includes('/summaries/L1/'));
     t.is(l1.length, 1);
-    t.true(env.files[l1[0]].includes('wersja Kuby'));
+    t.true(env.files[l1[0]].includes('wersja usera'));
 
     await waitUntil(() => Boolean(env.files[COST_LOG]), 'wpis w cost_log.jsonl');
     const entries = env.files[COST_LOG].trim().split('\n').map(line => JSON.parse(line));
@@ -519,9 +519,8 @@ test.serial('każdy krok odpadł → przebieg domyka się sam, bez decyzji usera
     // Nikt nie kliknie decyzji, więc domknięcie musi zrobić `generate()` → `advance()`.
     // Dwie notatki bez wspólnego mianownika → dedup nie ma co proponować → krok `skipped`.
     //
-    // ⚠️ Ten test do 2026-07-30 symulował inny wyścig: plan widział 4 sesje, a generator (drugie
-    // listowanie archiwum) już tylko jedną. Po przejściu na JEDNĄ listę (runner podaje ją
-    // workflow) tego okna nie ma — plan i generacja patrzą na ten sam materiał z definicji.
+    // Plan i generacja patrzą na ten sam materiał z definicji (runner podaje JEDNĄ listę
+    // workflow) — nie ma okna, w którym plan i generator widziałyby różną liczbę sesji.
     const env = makeEnv({
         files: {
             [`${BASE}/brain/user_a.md`]: brainNoteFile('A', 'user'),
@@ -593,7 +592,7 @@ test.serial('„Ponów" po padzie ZAPISU powtarza zapis z decyzją usera, bez no
     const run = await env.start();
     await waitStatus(run, 'l1_batch_1', STEP_STATUS.AWAITING_REVIEW);
     const controller = controllerOf(run);
-    await controller.applyDecision('l1_batch_1', { accepted: true, body: 'wersja Kuby' });
+    await controller.applyDecision('l1_batch_1', { accepted: true, body: 'wersja usera' });
     t.is(run.getStep('l1_batch_1').status, STEP_STATUS.FAILED);
 
     breakSummaryWrite = false;
@@ -603,7 +602,7 @@ test.serial('„Ponów" po padzie ZAPISU powtarza zapis z decyzją usera, bez no
     t.is(env.model.calls.length, 1, 'zapis ponowiony bez palenia kolejnego strzału LLM');
     const l1 = Object.keys(env.files).filter(p => p.includes('/summaries/L1/'));
     t.is(l1.length, 1);
-    t.true(env.files[l1[0]].includes('wersja Kuby'), 'edycja usera przeżyła ponowienie');
+    t.true(env.files[l1[0]].includes('wersja usera'), 'edycja usera przeżyła ponowienie');
 });
 
 test.serial('drugie domknięcie przebiegu księguje tylko DELTĘ kosztu', async t => {

@@ -1,12 +1,11 @@
 /**
- * K23 / AUD-security-119 + AUD-testy-025 — bramka `vault.read` dla Oczka i @-wzmianek
- * ma test ZACHOWANIA, nie napisu w źródle.
+ * Bramka `vault.read` dla Oczka i @-wzmianek ma test ZACHOWANIA, nie napisu w źródle.
  *
  * Granica, o którą chodzi: to jedyna bariera między plikiem, którego agent nie ma prawa
  * czytać, a bajtami wychodzącymi z maszyny do zewnętrznego dostawcy modelu (osadzone
- * `![[…]]` obrazy z aktywnej notatki + pliki wskazane wzmianką `@`). Do tej naprawy pilnował
- * jej regex po tekście `chat_model.ts`, który przechodził na zielono także wtedy, gdy predykat
- * przepuszczał KAŻDĄ ścieżkę (`checkPermission(…); return true;`).
+ * `![[…]]` obrazy z aktywnej notatki + pliki wskazane wzmianką `@`). Test regexem po tekście
+ * `chat_model.ts` przechodziłby na zielono także wtedy, gdy predykat przepuszcza KAŻDĄ ścieżkę
+ * (`checkPermission(…); return true;`) — stąd test na ZACHOWANIE.
  *
  * Atrapa systemu uprawnień odtwarza trzy zachowania prawdziwego: strefę No-Go, whitelistę
  * folderów agenta (`focusFolders`) i zgodę.
@@ -81,7 +80,7 @@ test('rzut bramki = odmowa + zgłoszenie do logu (fail-closed, nie fail-open)', 
     const ps = { checkPermission: () => { throw new Error('permissions boom'); } };
     const d = evaluateVaultRead({ permissionSystem: ps, agent: borys, onError: (e) => bledy.push(e) }, 'Projekty/plan.md');
     t.deepEqual(d, { allowed: false, reason: 'gate_threw' });
-    t.is(bledy.length, 1, 'cicha odmowa bez śladu w logu = ślepe śledztwo „czemu Oczko nic nie widzi"');
+    t.is(bledy.length, 1, 'cicha odmowa bez śladu w logu = ślepa diagnoza „czemu Oczko nic nie widzi"');
 });
 
 test('zepsuty werdykt (null) wpada w gałąź rzutu, nie udaje zwykłej odmowy', t => {

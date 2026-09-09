@@ -22,11 +22,11 @@ export function getCategoryColor(category: string): string {
 export function deriveDelegateCategory(toolsList: string[] | null | undefined): string {
     if (!toolsList || toolsList.length === 0) return 'mixed';
     const groupScores = {
-        // E2.6 prymitywy (read/list/write/delete/create_folder) + legacy vault_* dla starych YAML.
+        // Prymitywy (read/list/write/delete/create_folder) + legacy vault_* dla starych YAML.
         vault: ['read', 'list', 'write', 'delete', 'create_folder', 'vault_read', 'vault_list', 'vault_write', 'vault_delete', 'vault_search'],
         memory: ['memory_save', 'memory_delete'],
         search: ['search', 'vault_search', 'memory_sessions', 'web_search'],
-        // S28: `agent_message` skasowany, ale zostaje w liście — stare YAML-e subów mogą go
+        // `agent_message` skasowany, ale zostaje w liście - stare YAML-e subów mogą go
         // jeszcze nieść i kategoria ma się wtedy policzyć tak jak dotąd.
         communication: ['kom_send', 'kom_list', 'kom_read', 'agent_message', 'agent_delegate', 'ask_user'],
         planning: ['todo', 'artifact_create', 'artifact_read', 'artifact_update', 'artifact_list'],

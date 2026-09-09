@@ -1,7 +1,7 @@
 /**
- * Factory sub-agent task frame (E2.8 B3) — sub-agents domain.
+ * Factory sub-agent task frame — sub-agents domain.
  *
- * The FIXED scaffolding of a sub-agent's system prompt (D18 thin template): header, the
+ * The FIXED scaffolding of a sub-agent's system prompt (thin template): header, the
  * "pull memory" hint, and the shared rules. The mechanical, per-task sections (the custom method
  * from KNOWLEDGE.md, SCOPE from config, BUDŻET from limits) are still composed in code and injected
  * into the placeholders. Resolved via the agent>global>factory chain (`resolveWorkPrompt`), so a

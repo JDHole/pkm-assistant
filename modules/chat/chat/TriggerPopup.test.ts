@@ -55,18 +55,18 @@ test('buildItems collects skills, visible custom sub-agents and mcp servers', t 
 
     const subAgentNames = items.filter(i => i.section === 'sub-agents').map(i => i.name).sort();
     t.deepEqual(subAgentNames, ['klara-prep', 'klara-strateg'], 'only Klara-prefixed custom subs surface');
-    t.false(subAgentNames.includes('prep-memory'), 'D18: former system role no longer global');
+    t.false(subAgentNames.includes('prep-memory'), 'former system role no longer global');
     t.false(subAgentNames.includes('kustosz-prep'), 'custom sub-agent for another agent is hidden');
     t.false(subAgentNames.includes('prep'), 'legacy standalone prep is hidden');
 
-    // D18: brak dekoracji isSystem/badge na itemach sub-agentów.
+    // brak dekoracji isSystem/badge na itemach sub-agentów.
     t.true(items.filter(i => i.section === 'sub-agents').every((i: TestDynamic) => i.isSystem === undefined && i.badge === undefined));
 
     const mcpServers = items.filter(i => i.section === 'mcp').map(i => i.name);
     t.deepEqual(mcpServers.sort(), ['core', 'demo-server'], 'unique server names from filterByAgent');
 });
 
-test('buildItems surfaces no sub-agents when none match the agent prefix (D18)', t => {
+test('buildItems surfaces no sub-agents when none match the agent prefix', t => {
     const { plugin, agent } = makePlugin({
         agentName: 'Klara',
         assignments: [],

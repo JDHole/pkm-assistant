@@ -1,9 +1,6 @@
 /**
  * `utils/banner.ts` nie miał ani jednego testu, choć jego treść ląduje dosłownie
  * w KAŻDYM zbudowanym bundlu. Luka katalogu: „zero testów, zero opisu treści banera".
- *
- * clean-room / F1 (build-release) — napisany przed implementacją (czerwony na stubie),
- * dziś zielony.
  */
 import test from 'ava';
 import { BANNER_REQUIRED_SUBSTRINGS, buildBanner } from './banner.js';

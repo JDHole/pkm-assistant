@@ -5,29 +5,27 @@ import { formatSessionEvent, maxSeq } from './activeSessionFormat.js';
 import { maskSensitiveData } from '../../core/index.js';
 
 /**
- * AUD-wydajnosc-094 + AUD-wydajnosc-095 (fabryka W4, 2026-09-02).
+ * `appendToActiveSession` NIE czyta CAŁEGO pliku sesji ani nie przepisuje go w całości na
+ * KAŻDE zdarzenie tury (co dla 200 zdarzeń dawałoby 110 MB zapisu na plik 1,1 MB — kwadratowy
+ * koszt względem długości sesji). Zamiast tego: `adapter.append` (dopisanie ogona), pełny
+ * odczyt tylko RAZ na ścieżkę (inicjalizacja cache numeracji `_nextSeq` + stanu „kończy się \n").
  *
- * 094: `appendToActiveSession` czytała CAŁY plik sesji i przepisywała go w całości na KAŻDE
- * zdarzenie tury (200 zdarzeń = 110 MB zapisu na plik 1,1 MB — kwadratowy koszt względem
- * długości sesji). Naprawa: `adapter.append` (dopisanie ogona), pełny odczyt tylko RAZ na
- * ścieżkę (inicjalizacja cache numeracji `_nextSeq` + stanu „kończy się \n").
+ * `ensureMemoryStructure()` (11× exists + list + 2× read) NIE leci bezwarunkowo na KAŻDE
+ * zdarzenie przez `startActiveSession`. Zamiast tego: flaga „struktura sprawdzona" (memoizacja
+ * per instancja) + `startActiveSession` ufa żywemu `activeSessionPath` bez ponownego sprawdzania.
  *
- * 095: `ensureMemoryStructure()` (11× exists + list + 2× read) leciała bezwarunkowo na KAŻDE
- * zdarzenie przez `startActiveSession`. Naprawa: flaga „struktura sprawdzona" (memoizacja per
- * instancja) + `startActiveSession` ufa żywemu `activeSessionPath` bez ponownego sprawdzania.
- *
- * Review opusa (2026-09-02, ten sam dzień) — P1 BLOKER + P2 + P4:
- *  - P1: „ufam ścieżce" poprawione na „ufam ŻYWEMU CACHE dla tej ścieżki" — `activeSessionPath`
+ * Dodatkowe niezmienniki:
+ *  - „ufam ścieżce" znaczy „ufam ŻYWEMU CACHE dla tej ścieżki" — `activeSessionPath`
  *    bywa wskrzeszony z zewnątrz (chat_tabs.ts/chat_session.ts) po archiwizacji; zimny cache =
  *    jeden tani `probeFile`, potwierdzone „nie ma" = nowa sesja zamiast wywrócenia tury.
- *  - P2: ciepły cache dostaje periodyczny `exists()` co `APPEND_VERIFY_EVERY_N` zdarzeń (metadane,
+ *  - ciepły cache dostaje periodyczny `exists()` co `APPEND_VERIFY_EVERY_N` zdarzeń (metadane,
  *    nie pełny odczyt) — łapie zewnętrzne skasowanie pliku między zdarzeniami, żeby `append`
  *    nie odtworzył pliku BEZ frontmattera.
- *  - P4: `writeBrainNote` resetuje `_structureEnsured` i próbuje raz jeszcze po pierwszym padzie
+ *  - `writeBrainNote` resetuje `_structureEnsured` i próbuje raz jeszcze po pierwszym padzie
  *    zapisu (samonaprawa struktury skasowanej w trakcie sesji) — patrz `AgentMemory.test.ts`.
- * Te testy zostały zaktualizowane, żeby odzwierciedlić NOWE, zamierzone koszty (periodyczny
- * `exists`), i doszły dwa nowe scenariusze P1/P2 (wisząca ścieżka po archiwizacji, skasowanie
- * między zdarzeniami) + dwa golden na brzegach (plik bez `\n`, plik pusty).
+ *
+ * Testy tu obejmują wiszącą ścieżkę po archiwizacji, skasowanie pliku między zdarzeniami
+ * i dwa golden na brzegach (plik bez `\n`, plik pusty).
  *
  * Testy tu NIE dublują `AgentMemory.test.ts` (kształt plików, migracje, itp.) — mierzą
  * WYŁĄCZNIE liczbę operacji adaptera i bajtową równoważność ze starym algorytmem.
@@ -54,7 +52,7 @@ function parentFoldersFor(path: string): string[] {
  * główna — jak prawdziwy Obsidian DataAdapter); `false` wymusza fallback read+write w
  * `_appendSessionFile` (adapter bez metody `append`).
  *
- * `appendThrowsOnMissing` (review opusa P2): część implementacji `append` WYMAGA istniejącego
+ * `appendThrowsOnMissing`: część implementacji `append` WYMAGA istniejącego
  * pliku i rzuca zamiast cicho zakładać go od nowa (w przeciwieństwie do domyślnego zachowania
  * tej atrapy, które naśladuje `fs` z flagą `a`). Obie ścieżki są w produkcji obsłużone inaczej —
  * ta flaga pozwala przetestować obie.
@@ -131,10 +129,10 @@ function makeEvents(n: number, baseTimestamp: string): Array<Record<string, unkn
 }
 
 /**
- * Referencyjna implementacja STAREGO algorytmu (sprzed AUD-wydajnosc-094): pełny odczyt + pełny
- * zapis na każde zdarzenie. Używa TYCH SAMYCH funkcji formatujących co produkcja
- * (`formatSessionEvent`/`maxSeq`), więc test mierzy RÓŻNICĘ w mechanizmie zapisu (append vs
- * read+write), nie różnicę w formacie zdarzenia.
+ * Referencyjna implementacja algorytmu opartego na read+write (nieużywanego w produkcji):
+ * pełny odczyt + pełny zapis na każde zdarzenie. Używa TYCH SAMYCH funkcji formatujących co
+ * produkcja (`formatSessionEvent`/`maxSeq`), więc test mierzy RÓŻNICĘ w mechanizmie zapisu
+ * (append vs read+write), nie różnicę w formacie zdarzenia.
  */
 function oldAppendAll(initialContent: string, events: Array<Record<string, unknown>>): string {
     let content = initialContent;
@@ -152,15 +150,15 @@ function oldAppendAll(initialContent: string, events: Array<Record<string, unkno
     return content;
 }
 
-test('AUD-wydajnosc-094: 50 zdarzeń → append zamiast pełnego read+write; koszt odczytu/zapisu jest jednorazowy, nie per-zdarzenie', async t => {
+test('50 zdarzeń → append zamiast pełnego read+write; koszt odczytu/zapisu jest jednorazowy, nie per-zdarzenie', async t => {
     const { vault, counts } = makeCountingVault({ withAppend: true });
     const memory = new AgentMemory(vault, 'Jaskier');
 
     // Pierwsze zdarzenie płaci JEDNORAZOWY koszt bootstrapu: zapis `brain.md`, `.state.json`
     // (×2 — utworzenie + `addActiveSession`), `.active_session.json` I samego pliku sesji
     // (frontmatter + nagłówek, w `startActiveSession`, PRZED pierwszym appendem) — żaden z nich
-    // nie jest „pełnym przepisaniem rosnącego pliku sesji na każde zdarzenie", czyli tym, co
-    // naprawia AUD-wydajnosc-094. Test mierzy DELTĘ po tym punkcie, nie zero bezwzględne.
+    // nie jest „pełnym przepisaniem rosnącego pliku sesji na każde zdarzenie". Test mierzy
+    // DELTĘ po tym punkcie, nie zero bezwzględne.
     await memory.appendToActiveSession(makeEvents(1, '2026-09-02T10:00:00.000Z')[0]);
     const afterFirst = { ...counts };
 
@@ -170,16 +168,16 @@ test('AUD-wydajnosc-094: 50 zdarzeń → append zamiast pełnego read+write; kos
 
     t.is(counts.append, 50, `append wołany raz na zdarzenie, było ${counts.append}`);
     // Zero DODATKOWYCH pełnych zapisów po pierwszym zdarzeniu — 49 kolejnych appendów nie
-    // przepisuje niczego w całości (przed naprawą: +49 pełnych write, po 200 zdarzeniach 110 MB).
+    // przepisuje niczego w całości (alternatywa: +49 pełnych write, po 200 zdarzeniach 110 MB).
     t.is(counts.write, afterFirst.write, `zero dodatkowych pełnych write po pierwszym zdarzeniu, było +${counts.write - afterFirst.write}`);
     // Odczyty (bootstrap: `probeFile` na `brain.md`/`.state.json`/kolizji nazwy pliku sesji +
     // JEDEN prawdziwy odczyt treści sesji do zainicjowania cache numeracji) są kosztem
-    // JEDNORAZOWYM pierwszego zdarzenia — zero DODATKOWYCH odczytów po nim (przed naprawą:
+    // JEDNORAZOWYM pierwszego zdarzenia — zero DODATKOWYCH odczytów po nim (alternatywa:
     // +1 pełny odczyt całego pliku sesji NA KAŻDE z pozostałych 49 zdarzeń).
     t.is(counts.read, afterFirst.read, `zero dodatkowych odczytów po pierwszym zdarzeniu, było +${counts.read - afterFirst.read}`);
 });
 
-test('AUD-wydajnosc-095: bootstrap (exists/list/mkdir) płaci się raz, nie rośnie z 50 zdarzeniami', async t => {
+test('bootstrap (exists/list/mkdir) płaci się raz, nie rośnie z 50 zdarzeniami', async t => {
     const { vault, counts } = makeCountingVault({ withAppend: true });
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -195,22 +193,22 @@ test('AUD-wydajnosc-095: bootstrap (exists/list/mkdir) płaci się raz, nie roś
         await memory.appendToActiveSession(event);
     }
 
-    // Kolejne 49 zdarzeń (razem 50) NIE dokłada ani jednego list/mkdir/read — cała różnica
-    // między naprawą a stanem sprzed niej jest właśnie tu (przed naprawą: 19 operacji × 50 = 950).
-    // `exists` ROŚNIE, ale periodycznie, nie per-zdarzeniowo (review opusa P2): co
+    // Kolejne 49 zdarzeń (razem 50) NIE dokłada ani jednego list/mkdir/read - bez tego każde
+    // zdarzenie płaciłoby pełny bootstrap (19 operacji × 50 = 950).
+    // `exists` ROŚNIE, ale periodycznie, nie per-zdarzeniowo: co
     // `APPEND_VERIFY_EVERY_N` appendów na ciepłym cache jeden tani `exists()` sprawdza, czy plik
-    // wciąż istnieje (zewnętrzne skasowanie między zdarzeniami — patrz gotcha 13/14 w CLAUDE.md).
+    // wciąż istnieje (zewnętrzne skasowanie między zdarzeniami - patrz gotcha 13/14 w CLAUDE.md).
     const expectedVerifyExistsCalls = Math.floor(remaining / APPEND_VERIFY_EVERY_N);
     t.is(
         counts.exists, afterFirst.exists + expectedVerifyExistsCalls,
-        `exists powinien rosnąć TYLKO co ${APPEND_VERIFY_EVERY_N} zdarzeń (P2), nie co zdarzenie — było +${counts.exists - afterFirst.exists}, oczekiwano +${expectedVerifyExistsCalls}`
+        `exists powinien rosnąć TYLKO co ${APPEND_VERIFY_EVERY_N} zdarzeń, nie co zdarzenie — było +${counts.exists - afterFirst.exists}, oczekiwano +${expectedVerifyExistsCalls}`
     );
     t.is(counts.list, afterFirst.list, 'zero dodatkowych list po pierwszym zdarzeniu');
     t.is(counts.mkdir, afterFirst.mkdir, 'zero dodatkowych mkdir po pierwszym zdarzeniu');
-    t.is(counts.read, afterFirst.read, 'zero dodatkowych pełnych read po pierwszym zdarzeniu (periodyczna weryfikacja P2 czyta tylko metadane, nie treść)');
+    t.is(counts.read, afterFirst.read, 'zero dodatkowych pełnych read po pierwszym zdarzeniu (periodyczna weryfikacja czyta tylko metadane, nie treść)');
 });
 
-test('AUD-wydajnosc-095: ensureMemoryStructure() jest memoizowana — druga wołka NIE dotyka adaptera wcale', async t => {
+test('ensureMemoryStructure() jest memoizowana — druga wołka NIE dotyka adaptera wcale', async t => {
     // Niezależnie od `startActiveSession`: `listArchiveSessions`/`listActiveSessions`/MCP tools
     // (`ListTool`/`MemorySaveTool`/`MemoryDeleteTool`/`ReadTool`) wołają `ensureMemoryStructure()`
     // wprost na WŁASNYM wejściu, nie przez `appendToActiveSession`. Ta memoizacja jest dla nich.
@@ -231,7 +229,7 @@ test('AUD-wydajnosc-095: ensureMemoryStructure() jest memoizowana — druga woł
     t.is(counts.mkdir, afterFirst.mkdir, 'ani mkdir');
 });
 
-test('AUD-wydajnosc-095: startActiveSession na ZIMNYM cache płaci jeden tani probeFile, na CIEPŁYM — zero (review opusa P1)', async t => {
+test('startActiveSession na ZIMNYM cache płaci jeden tani probeFile, na CIEPŁYM — zero', async t => {
     const { vault, counts } = makeCountingVault({ withAppend: true });
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -239,7 +237,7 @@ test('AUD-wydajnosc-095: startActiveSession na ZIMNYM cache płaci jeden tani pr
     const afterCreate = { ...counts };
 
     // Cache ZIMNY (żadnego appendu jeszcze nie było na tej ścieżce — `_sessionSeqCache` pusty):
-    // `startActiveSession` NIE MA PRAWA ufać samemu faktowi „pole niepuste" (P1, BLOKER) — płaci
+    // `startActiveSession` NIE MA PRAWA ufać samemu faktowi „pole niepuste" — płaci
     // JEDEN tani `probeFile` (exists, bez odczytu treści na trafieniu).
     const second = await memory.startActiveSession('Jaskier');
     t.is(second, first, 'ta sama ścieżka, żadnej nowej kolizji do rozstrzygania');
@@ -252,7 +250,7 @@ test('AUD-wydajnosc-095: startActiveSession na ZIMNYM cache płaci jeden tani pr
     const afterWarm = { ...counts };
 
     // Cache CIEPŁY: kolejne wołania `startActiveSession` (np. z appendToActiveSession na
-    // następne zdarzenie) są TERAZ zerokosztowe — dokładnie zysk AUD-wydajnosc-095.
+    // następne zdarzenie) są zerokosztowe.
     const third = await memory.startActiveSession('Jaskier');
     t.is(third, first, 'wciąż ta sama ścieżka');
     t.is(counts.exists, afterWarm.exists, 'ciepły cache: zero dodatkowych exists na powtórne wołanie');
@@ -260,7 +258,7 @@ test('AUD-wydajnosc-095: startActiveSession na ZIMNYM cache płaci jeden tani pr
     t.true(afterSecondCall.exists > afterCreate.exists, 'sanity: zimna ścieżka rzeczywiście zapłaciła (kontrast z ciepłą)');
 });
 
-test('AUD-wydajnosc-094: append daje BAJTOWO tę samą treść co stary read+pełny-write dla tej samej sekwencji zdarzeń', async t => {
+test('append daje BAJTOWO tę samą treść co read+pełny-write dla tej samej sekwencji zdarzeń', async t => {
     const { vault, files } = makeCountingVault({ withAppend: true });
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -281,7 +279,7 @@ test('AUD-wydajnosc-094: append daje BAJTOWO tę samą treść co stary read+pe�
     t.is(files[path], expected, 'treść pliku po 50 appendach identyczna z referencyjnym read+write');
 });
 
-test('AUD-wydajnosc-094: fallback read+write (adapter bez natywnego append) daje tę samą treść', async t => {
+test('fallback read+write (adapter bez natywnego append) daje tę samą treść', async t => {
     const { vault, files } = makeCountingVault({ withAppend: false });
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -298,7 +296,7 @@ test('AUD-wydajnosc-094: fallback read+write (adapter bez natywnego append) daje
     t.is(files[path], expected, 'fallback (bez adapter.append) daje tę samą treść co referencja');
 });
 
-test('AUD-wydajnosc-094: fallback bez adapter.append NIE nadpisuje pliku, gdy odczyt jest niepewny (K4)', async t => {
+test('fallback bez adapter.append NIE nadpisuje pliku, gdy odczyt jest niepewny', async t => {
     const { vault, files } = makeCountingVault({ withAppend: false });
     const memory = new AgentMemory(vault, 'Jaskier');
     await memory.startActiveSession('Jaskier');
@@ -311,8 +309,8 @@ test('AUD-wydajnosc-094: fallback bez adapter.append NIE nadpisuje pliku, gdy od
     const before = files[path];
 
     // Symuluj sprzeczne sygnały: `exists()` mówi „jest", ale `read()` rzuca — dokładnie klasa
-    // błędu K4/gotcha 12, przed którą fallback MUSI się bronić (nie ma prawa cichcem zacząć
-    // pliku od zera i skasować dotychczasową rozmowę).
+    // błędu, przed którą fallback MUSI się bronić (nie ma prawa cichcem zacząć pliku od zera
+    // i skasować dotychczasową rozmowę).
     const adapter = vault.adapter;
     const realRead = adapter.read.bind(adapter);
     adapter.read = async (p: string) => {
@@ -328,9 +326,7 @@ test('AUD-wydajnosc-094: fallback bez adapter.append NIE nadpisuje pliku, gdy od
     t.is(files[path], before, 'plik sesji NIE został nadpisany mimo padniętego odczytu');
 });
 
-// ═══════════════════════ Review opusa (2026-09-02) — P1 BLOKER + P2 ═══════════════════════
-
-test('Review opusa P1 (BLOKER): sesja zarchiwizowana + wskrzeszona z zewnątrz activeSessionPath → append zakłada NOWĄ sesję z frontmatterem, nie ENOENT', async t => {
+test('sesja zarchiwizowana + wskrzeszona z zewnątrz activeSessionPath → append zakłada NOWĄ sesję z frontmatterem, nie ENOENT', async t => {
     const { vault, files } = makeCountingVault({ withAppend: true });
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -345,15 +341,15 @@ test('Review opusa P1 (BLOKER): sesja zarchiwizowana + wskrzeszona z zewnątrz a
     t.falsy(files[firstPath], 'oryginalny plik active USUNIĘTY po archiwizacji');
     t.is(memory.activeSessionPath, null, 'archiveActiveSession zerowuje wskaźnik u siebie');
 
-    // 3) BUG odtworzony (opisany w reviewie): przełączenie zakładki tam i z powrotem
-    //    (`chat_tabs.ts:126` / `chat_session.ts:237`/`244` — patrz gotcha P3 przy polu
+    // 3) Scenariusz: przełączenie zakładki tam i z powrotem
+    //    (`chat_tabs.ts:126` / `chat_session.ts:237`/`244` — patrz komentarz przy polu
     //    `activeSessionPath` w AgentMemory.ts) PODSTAWIA WPROST starą, teraz martwą ścieżkę —
     //    z pominięciem `startActiveSession`/`saveSession`, bez sprawdzenia czy plik wciąż istnieje.
     memory.activeSessionPath = firstPath;
 
-    // 4) Kolejna wiadomość usera. Na main (i na W4 PRZED tą poprawką) `startActiveSession` ufał
-    //    samemu faktowi „pole niepuste" i `appendToActiveSession` leciał `read()`/`append()` na
-    //    plik, którego nie ma — tura padała, wiadomość usera ginęła. Tu MA przejść: wykryć
+    // 4) Kolejna wiadomość usera. Bez ochrony `startActiveSession` ufałby
+    //    samemu faktowi „pole niepuste" i `appendToActiveSession` leciałby `read()`/`append()` na
+    //    plik, którego nie ma — tura padałaby, wiadomość usera by ginęła. Tu MA przejść: wykryć
     //    martwą ścieżkę i założyć NOWĄ sesję z frontmatterem, tak jak main robi od zera.
     const newPath = await memory.appendToActiveSession({ type: 'user_message', content: 'wiadomość po wiszącej ścieżce', timestamp: '2026-09-02T09:05:00.000Z' });
 
@@ -368,7 +364,7 @@ test('Review opusa P1 (BLOKER): sesja zarchiwizowana + wskrzeszona z zewnątrz a
     t.is(memory.activeSessionPath, newPath, 'wskaźnik wskazuje na nową, żywą sesję');
 });
 
-test('Review opusa P2: plik skasowany MIĘDZY zdarzeniami na ciepłym cache — periodyczna weryfikacja odtwarza frontmatter (adapter, który cicho zakłada plik od nowa)', async t => {
+test('plik skasowany MIĘDZY zdarzeniami na ciepłym cache — periodyczna weryfikacja odtwarza frontmatter (adapter, który cicho zakłada plik od nowa)', async t => {
     const { vault, files } = makeCountingVault({ withAppend: true });
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -377,7 +373,7 @@ test('Review opusa P2: plik skasowany MIĘDZY zdarzeniami na ciepłym cache — 
 
     // Symuluj: ktoś (user w Obsidianie, sync na Dysku Google) skasował plik z dysku MIĘDZY
     // zdarzeniami, mimo że cache tej instancji jest wciąż ciepły. Wymuszamy też, że periodyczna
-    // weryfikacja (P2) trafi na TĘ KONKRETNĄ próbę appendu — inaczej ten konkretny adapter
+    // weryfikacja trafi na TĘ KONKRETNĄ próbę appendu — inaczej ten konkretny adapter
     // (cicho zakłada plik od nowa jak `fs` z flagą `a`) odtworzyłby plik BEZ nagłówka i test nie
     // miałby czego złapać. To jest realne, udokumentowane ograniczenie periodycznej weryfikacji
     // (patrz komentarz przy `APPEND_VERIFY_EVERY_N` w AgentMemory.ts) — okno trafienia jest 1/N,
@@ -391,13 +387,13 @@ test('Review opusa P2: plik skasowany MIĘDZY zdarzeniami na ciepłym cache — 
     // Uwaga: `newPath` może wyjść identyczna jak `path` (nazwa ma rozdzielczość minutową i
     // zwolniła się dokładnie w tym momencie) — to legalne i NIE jest przedmiotem testu.
     // Przedmiotem jest: plik pod `newPath` to PRAWDZIWA, świeża sesja z nagłówkiem, nie goły
-    // fragment zdarzenia bez `type: active_session` (dokładnie to, co P2 miało zapobiec).
+    // fragment zdarzenia bez `type: active_session` (dokładnie to, co ta weryfikacja ma zapobiec).
     t.truthy(files[newPath]);
     t.true(files[newPath].startsWith('---\ntype: active_session'), 'odtworzony plik MA frontmatter, nie goły blok zdarzenia');
     t.true(files[newPath].includes('drugie, po skasowaniu'));
 });
 
-test('Review opusa P2: adapter.append RZUCA na brakujący plik — natychmiastowe odtworzenie, niezależnie od periodycznej weryfikacji', async t => {
+test('adapter.append RZUCA na brakujący plik — natychmiastowe odtworzenie, niezależnie od periodycznej weryfikacji', async t => {
     const { vault, files } = makeCountingVault({ withAppend: true, appendThrowsOnMissing: true });
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -414,7 +410,7 @@ test('Review opusa P2: adapter.append RZUCA na brakujący plik — natychmiastow
     t.true(files[newPath].includes('drugie'));
 });
 
-test('AUD-wydajnosc-094: golden — plik istniejący BEZ końcowego \\n (ręcznie edytowany) daje tę samą treść co stary algorytm', async t => {
+test('golden — plik istniejący BEZ końcowego \\n (ręcznie edytowany) daje tę samą treść co referencyjny algorytm', async t => {
     const { vault, files } = makeCountingVault({ withAppend: true });
     const memory = new AgentMemory(vault, 'Jaskier');
     const path = '.pkm-assistant/agents/jaskier/memory/sessions/active/jaskier_2026-09-02_16-00.md';
@@ -433,7 +429,7 @@ test('AUD-wydajnosc-094: golden — plik istniejący BEZ końcowego \\n (ręczni
     t.is(files[path], expected, 'brak końcowego \\n w istniejącym pliku obsłużony identycznie jak stary algorytm');
 });
 
-test('AUD-wydajnosc-094: golden — plik PUSTY (istnieje, zero bajtów) daje tę samą treść co stary algorytm', async t => {
+test('golden — plik PUSTY (istnieje, zero bajtów) daje tę samą treść co referencyjny algorytm', async t => {
     const { vault, files } = makeCountingVault({ withAppend: true });
     const memory = new AgentMemory(vault, 'Jaskier');
     const path = '.pkm-assistant/agents/jaskier/memory/sessions/active/jaskier_2026-09-02_17-00.md';

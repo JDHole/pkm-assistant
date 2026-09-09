@@ -1,4 +1,4 @@
-/** Kontroler paska statusu (SB-01..SB-04) + drugi kanał zdarzeń pamięci. */
+/** Kontroler paska statusu + drugi kanał zdarzeń pamięci. */
 import { log as globalLog } from '../utils/Logger.js';
 import { STATUS_BAR_CSS_CLASSES } from './contracts.js';
 import type { LoggerLike, StatusBarController, StatusBarRenderer } from './contracts.js';
@@ -7,13 +7,13 @@ export type { StatusBarController } from './contracts.js';
 
 const SCOPE = 'StatusBar';
 
-/** Klasa bazowa elementu paska i wariant klikalny (SB-03). */
+/** Klasa bazowa elementu paska i wariant klikalny. */
 const [CSS_ITEM, CSS_CLICKABLE] = STATUS_BAR_CSS_CLASSES;
 
 export interface StatusBarDeps {
     /** Kontener z `host.addStatusBarItem()`; `null` poza Obsidianem. */
     container: HTMLElement | null;
-    /** SB-02: override komponentu paska statusu. */
+    /** Override komponentu paska statusu. */
     renderer?: StatusBarRenderer;
     log?: LoggerLike;
 }
@@ -104,7 +104,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarController | null
             if (zdemontowany) return;
             bezpiecznie('ustawienie tekstu paska', () => { ustawTekst(tekst); });
         },
-        /** SB-03: przełącza wariant klikalny. */
+        /** Przełącza wariant klikalny. */
         setClickable(handler: (() => void) | null): void {
             klik = typeof handler === 'function' ? handler : null;
             if (zdemontowany) return;

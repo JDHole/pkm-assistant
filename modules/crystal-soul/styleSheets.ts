@@ -1,19 +1,19 @@
 /**
- * styleSheets — montaż i DEMONTAŻ konstruowanych arkuszy CSS (AUD-bledy-037).
+ * styleSheets - montaż i DEMONTAŻ konstruowanych arkuszy CSS.
  *
  * WHY: plugin wstrzykuje style przez `document.adoptedStyleSheets` (katalogowa alternatywa
- * dla `<style>`, patrz obsidianmd/no-forbidden-elements). Siedem miejsc dokładało arkusze
- * wzorcem „sprawdź `.includes` → rozwiń tablicę", a ZERO miejsc je zdejmowało: wyłączony
- * plugin dalej nadpisywał zmienne motywu aż do restartu Obsidiana, a każdy cykl wyłącz/włącz
- * dokładał kolejne arkusze (świeży bundle = świeże obiekty `CSSStyleSheet`, więc `.includes`
+ * dla `<style>`, patrz obsidianmd/no-forbidden-elements). Wiele miejsc dokłada arkusze
+ * wzorcem „sprawdź `.includes` → rozwiń tablicę". Bez zdejmowania: wyłączony
+ * plugin dalej nadpisywałby zmienne motywu aż do restartu Obsidiana, a każdy cykl wyłącz/włącz
+ * dokładałby kolejne arkusze (świeży bundle = świeże obiekty `CSSStyleSheet`, więc `.includes`
  * starych nie widzi i tablica rośnie).
  *
- * RULE: arkusz wchodzi WYŁĄCZNIE przez `adoptSheet()` — wtedy trafia do rejestru modułu
+ * RULE: arkusz wchodzi WYŁĄCZNIE przez `adoptSheet()` - wtedy trafia do rejestru modułu
  * i `removeAdoptedSheets()` w `onunload` zdejmuje go bez pytania właściciela o uchwyt.
  * Właściciele z jawnym uchwytem (SkinManager, motyw usera w main) wołają dodatkowo
  * `removeSheet()` w swoim `dispose()`.
  *
- * NOTE: celowo bez importu `obsidian` i bez `document` na sztywno — `host` jest parametrem,
+ * NOTE: celowo bez importu `obsidian` i bez `document` na sztywno - `host` jest parametrem,
  * więc helper testuje się atrapą, a plik zostaje w node-safe barrelu crystal-soul.
  */
 

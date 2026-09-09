@@ -1,5 +1,5 @@
 /**
- * Sprzątanie skrzynki pół-automatem (S28 D5) — BEZ kosza, usuwanie twarde.
+ * Sprzątanie skrzynki pół-automatem - BEZ kosza, usuwanie twarde.
  *
  * Reguła: wiadomość, która dostała OBA ptaszki (user ją widział ORAZ agent ją przeczytał),
  * jest już do niczego nikomu potrzebna. Zamiast kasować ją po cichu, plugin pokazuje
@@ -10,8 +10,7 @@
  */
 import { Modal, Notice } from 'obsidian';
 import { t } from '../../core/i18n/index.js';
-// AUD-dead-code-072: arkusz przeniesiony tu z osieroconego KomunikatorModal.ts —
-// to jest jedyny ŻYWY plik, który maluje klasy `.komunikator-cleanup-*`.
+// To jedyny plik, który maluje klasy `.komunikator-cleanup-*`.
 import komunikator_cleanup_styles from './KomunikatorCleanupModal.css' with { type: 'css' };
 import { UiIcons, setSvgLabel, adoptSheet } from '../crystal-soul/index.js';
 import { CleanupQueue } from './cleanupQueue.js';
@@ -41,8 +40,8 @@ export class KomunikatorCleanupModal extends Modal {
         contentEl.empty();
         contentEl.addClass('komunikator-cleanup-modal');
 
-        // Adopt CSS (AUD-dead-code-072 + wzór AUD-bledy-037: `adoptSheet` rejestruje
-        // arkusz do demontażu w onunload; idempotentne, bezpieczne przy wielokrotnym open).
+        // Adopt CSS: `adoptSheet` rejestruje arkusz do demontażu w onunload;
+        // idempotentne, bezpieczne przy wielokrotnym open.
         adoptSheet(komunikator_cleanup_styles);
 
         const h2 = contentEl.createEl('h2');
@@ -113,7 +112,7 @@ export class KomunikatorBulkDeleteModal extends Modal {
         contentEl.empty();
         contentEl.addClass('komunikator-cleanup-modal');
 
-        // Adopt CSS (AUD-dead-code-072) — idempotentne, więc bez znaczenia że
+        // Adopt CSS - idempotentne, więc bez znaczenia że
         // KomunikatorCleanupModal mógł już wywołać to samo w tej sesji.
         adoptSheet(komunikator_cleanup_styles);
 

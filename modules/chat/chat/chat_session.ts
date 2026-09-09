@@ -17,10 +17,10 @@ import {
     resolveOwnerAgentName,
     resolveOwnerMemory,
 } from './turnOwner.js';
-// F04 (domknięcie AUD-code-review-016 / K19 gotcha o „druga kopia formuły"): `_agentStates`
-// MUSI być kluczowana dokładnie tym, co liczy `_switchTab` — inaczej wynik suba / cleanup tury
-// trafia do złej zakładki. `_tabKey` jest eksportowany DOKŁADNIE po to, żeby nie było czwartego
-// miejsca przepisującego `sessionId || sessionPath || sessionName || agentName` ręcznie.
+// `_agentStates` MUSI być kluczowana dokładnie tym, co liczy `_switchTab` - inaczej wynik
+// suba / cleanup tury trafia do złej zakładki. `_tabKey` jest eksportowany DOKŁADNIE po to,
+// żeby nie było czwartego miejsca przepisującego
+// `sessionId || sessionPath || sessionName || agentName` ręcznie.
 import { _tabKey } from './chat_tabs.js';
 
 // TS-any: receiver legacy mixinów składany runtime przez Object.assign.
@@ -42,10 +42,10 @@ export async function initSessionManager(this: ChatViewMixinContext) {
         }, autoSaveInterval * 60 * 1000));
     }
 
-    // E2.7 W3 (K4): idle consolidation. Every 60s, if the session has been idle past the
-    // threshold AND has new entries since the last idle save, run W3-lite = handleSaveSession
-    // (mechanical transcript save, no background LLM). registerInterval ties it to the view
-    // lifecycle so it clears on unload.
+    // Idle consolidation. Every 60s, if the session has been idle past the threshold AND has
+    // new entries since the last idle save, run a lightweight handleSaveSession (mechanical
+    // transcript save, no background LLM). registerInterval ties it to the view lifecycle so
+    // it clears on unload.
     this._idleScheduler = new IdleScheduler({ minNewEntries: 2 });
     this._lastIdleSaveMsgCount = 0;
     this.registerInterval(window.setInterval(() => { this._idleTick(); }, 60 * 1000));
@@ -54,8 +54,8 @@ export async function initSessionManager(this: ChatViewMixinContext) {
 }
 
 /**
- * E2.7 W3 (K4): one idle check. Live-reads idleConsolidationMinutes (default 20, 0=off) so a
- * Settings change takes effect without reloading the view. Best-effort — never throws upward.
+ * One idle check. Live-reads idleConsolidationMinutes (default 20, 0=off) so a Settings
+ * change takes effect without reloading the view. Best-effort — never throws upward.
  */
 export async function _idleTick(this: ChatViewMixinContext) {
     try {
@@ -81,7 +81,7 @@ export async function _idleTick(this: ChatViewMixinContext) {
 /**
  * Memory v3: if .state.json lists an active session that loadActiveSession could not parse into
  * messages (empty/corrupted/stale), drop the pointer from state so it stops surfacing in restore
- * and /save session. The session FILE is never deleted — Kuba can recover it manually from
+ * and /save session. The session FILE is never deleted — user can recover it manually from
  * sessions/active/ if needed.
  *
  * Earlier implementation deleted the file too. That destroyed a real session in Smoke 01 retake
@@ -110,11 +110,11 @@ async function _pruneEmptyActiveSessionFromState(agentMemory: ChatViewMixinConte
 /**
  * Odłóż starą sesję przy starcie nowej rozmowy (gałęzie „draft" i „odrzuć").
  *
- * Do 2026-07-29 obie gałęzie zostawiały plik w `sessions/active/` i wpis w `.state.json` —
- * porzucona rozmowa wracała przy restarcie jako żywa zakładka albo wisiała jako zombie-wpis.
- * `AgentMemory.discardActiveSession` przenosi plik do `sessions/active/.discarded/` (bez twardej
- * kasacji — user authority) i wypisuje go z ewidencji. Best-effort: pad nie może zablokować
- * otwarcia nowej rozmowy.
+ * Obie gałęzie NIE MOGĄ zostawić pliku w `sessions/active/` z wpisem w `.state.json` -
+ * porzucona rozmowa wracałaby przy restarcie jako żywa zakładka albo wisiałaby jako
+ * zombie-wpis. `AgentMemory.discardActiveSession` przenosi plik do
+ * `sessions/active/.discarded/` (bez twardej kasacji - user authority) i wypisuje go
+ * z ewidencji. Best-effort: pad nie może zablokować otwarcia nowej rozmowy.
  * @private
  */
 async function _retireActiveSession(agentMemory: ChatViewMixinContext, reason: string) {
@@ -155,7 +155,7 @@ export async function _restoreActiveSession(this: ChatViewMixinContext) {
                 }
                 if (!parsed?.messages?.length) {
                     // Memory v3: do NOT delete the underlying file. We previously called
-                    // _discardEmptyActiveSession here, which destroyed a real session for Kuba when
+                    // _discardEmptyActiveSession here, which destroyed a real session for the user when
                     // the parser returned 0 messages. Only prune the .state.json pointer; the file
                     // stays on disk as a recovery anchor.
                     await _pruneEmptyActiveSessionFromState(agentMemory, session);
@@ -180,9 +180,9 @@ export async function _restoreActiveSession(this: ChatViewMixinContext) {
             const agentMemory = agentManager.getActiveMemory?.();
             const restoredPath = await agentMemory?.restoreActiveSession?.();
             if (!restoredPath) return;
-            // S36 Faza 2: `restoreActiveSession` zwraca ścieżkę pliku z `sessions/active/`, a ten
-            // jest event-logiem. `loadSession` (parser transkryptu `## User`) wyciągnąłby z niego
-            // ZERO wiadomości i restore po cichu by się nie odbył — dlatego czytamy tym samym
+            // `restoreActiveSession` zwraca ścieżkę pliku z `sessions/active/`, a ten jest
+            // event-logiem. `loadSession` (parser transkryptu `## User`) wyciągnąłby z niego
+            // ZERO wiadomości i restore po cichu by się nie odbył - dlatego czytamy tym samym
             // czytnikiem co gałąź główna wyżej (`loadActiveSession` → `parseActiveSession`,
             // rozumie format A, B i pliki MIESZANE).
             const parsed = await agentMemory.loadActiveSession(restoredPath);
@@ -221,7 +221,7 @@ export async function _restoreActiveSession(this: ChatViewMixinContext) {
         }));
         this._agentStates.clear();
         restored.forEach((item, index) => {
-            // F04: `_tabKey(this.chatTabs[index])` — kanoniczny klucz, nie ręczna kopia
+            // `_tabKey(this.chatTabs[index])` - kanoniczny klucz, nie ręczna kopia
             // `item.session.path` (dziś równa się `sessionId`/`sessionPath` zbudowanym wyżej
             // TYLKO dlatego, że oba pola dostały tę samą wartość przy tworzeniu `chatTabs`;
             // jedna przyszła zmiana kształtu taba rozjeżdża klucz cicho, bez żadnego testu,
@@ -256,9 +256,6 @@ export async function _restoreActiveSession(this: ChatViewMixinContext) {
     }
 }
 
-// E2.9 FAZA D: _refreshSystemPrompt usunięty (0 call sites, martwy od dawna — czytał stary świat
-// artifacts:{todos,plans} z _chatTodoStore/_planStore, które już nie istnieją).
-
 export async function startActiveSession(this: ChatViewMixinContext, agentName: string) {
     const agentManager = this.plugin?.agentManager;
     const owner = resolveOwnerAgentName(agentManager, agentName);
@@ -270,10 +267,10 @@ export async function startActiveSession(this: ChatViewMixinContext, agentName: 
 /**
  * Dopisz zdarzenie tury do event-logu sesji.
  *
- * K4 (AUD-security-064): destynacja bierze się z `event.agentName` — czyli z TURY, która to
- * zdarzenie wyprodukowała (`chat_streaming` podaje je przy każdym wywołaniu). Do K4 szło to
- * przez `getActiveMemory()`, więc przełączenie zakładki w trakcie tury wsypywało wiadomości,
- * wywołania narzędzi i ich WYNIKI do `sessions/active/` zupełnie innego agenta.
+ * Destynacja bierze się z `event.agentName` - czyli z TURY, która to zdarzenie wyprodukowała
+ * (`chat_streaming` podaje je przy każdym wywołaniu), a NIE z `getActiveMemory()`: czytanie
+ * aktywnej pamięci wsypywałoby wiadomości, wywołania narzędzi i ich WYNIKI do
+ * `sessions/active/` zupełnie innego agenta, gdyby user przełączył zakładkę w trakcie tury.
  */
 export async function appendToActiveSession(this: ChatViewMixinContext, event: ChatViewMixinContext) {
     const agentManager = this.plugin?.agentManager;
@@ -287,9 +284,9 @@ export async function appendToActiveSession(this: ChatViewMixinContext, event: C
  * Handle new session — save, optionally compress, reset.
  */
 export async function handleNewSession(this: ChatViewMixinContext) {
-    // Friendly fire 2026-08-15: nowa sesja NIE może zostawić trwającej tury jako zombie.
-    // Porzucona tura wisiała w tle z uzbrojonym watchdogiem, który strzela „po agencie"
-    // i ubijał requesty KOLEJNEJ tury tego samego agenta. Ubijamy jawnie, zanim wymienimy sesję.
+    // Nowa sesja NIE może zostawić trwającej tury jako zombie. Porzucona tura wisiałaby w tle
+    // z uzbrojonym watchdogiem, który strzela „po agencie" i ubijałby requesty KOLEJNEJ tury
+    // tego samego agenta. Ubijamy jawnie, zanim wymienimy sesję.
     if (this.is_generating) this.stop_generation();
 
     const msgCount = this.rollingWindow.messages.length;
@@ -304,17 +301,17 @@ export async function handleNewSession(this: ChatViewMixinContext) {
             agentColor: agent?.color || '',
             messageCount: msgCount
         });
-        // Sprint 03 Z5: prompt() returns { choice }. AUD-dead-code-051/093/130 (2026-09-02):
-        // kanał `options` skasowany z SessionCloseModal — był strukturalnie pusty i nieczytany.
+        // prompt() returns { choice }. SessionCloseModal nie ma kanału `options` - byłby
+        // strukturalnie pusty i nieczytany.
         const { choice } = await modal.prompt() as ChatViewMixinContext || { choice: 'cancel' };
 
         if (choice === 'cancel') return;
 
         const agentMemoryForOpts = this.plugin?.agentManager?.getActiveMemory();
 
-        // Decyzja Kuby 2026-08-15: biegi subów należą do SESJI — zamknięcie (archive/discard)
-        // wymiata jej zakończone biegi z rejestru, żeby chipy nie przeżywały do nowej rozmowy
-        // (incydent: klucz zakładki nie odróżniał starej sesji od nowej). `running` zostają.
+        // Biegi subów należą do SESJI - zamknięcie (archive/discard) wymiata jej zakończone
+        // biegi z rejestru, żeby chipy nie przeżywały do nowej rozmowy (inaczej klucz zakładki
+        // nie odróżnia starej sesji od nowej). `running` zostają.
         const closingSessionPath = agentMemoryForOpts?.activeSessionPath || '';
         if (closingSessionPath) {
             this.plugin?.subTaskRegistry?.pruneSession?.(closingSessionPath);
@@ -332,14 +329,10 @@ export async function handleNewSession(this: ChatViewMixinContext) {
             await _retireActiveSession(agentMemoryForOpts, 'discard');
         }
 
-        // E2.9 FAZA D (A18): artefakt „Kontekst sesji" (ContextSessionGenerator) SKASOWANY — ruch
-        // przejęły propozycje „Na teraz" w brain.md (E2.8 D3, żywe w /save session). „Nie zostawiamy
-        // nic z tyłu": checkbox createContextArtifact też zniknął z SessionCloseModal.
-        //
-        // S36b (2026-07-30): gałąź „draft" SKASOWANA razem z rodziną draftów w AgentMemory.
-        // `saveDraft` pisał plik do `.draft/`, którego NIC nigdy nie czytało (obiecane odzyskiwanie
-        // przy starcie pluginu nie istnieje od Memory v3) — user dostawał notice „zapisano jako
-        // draft" o sesji, do której nie miał jak wrócić. Zostają „archiwizuj" i „odrzuć".
+        // SessionCloseModal ma tylko dwie gałęzie: „archiwizuj" i „odrzuć". Nie ma checkboxa
+        // createContextArtifact ani gałęzi „draft" - propozycje „Na teraz" w brain.md (żywe
+        // w /save session) przejęły rolę „nie zostawiamy nic z tyłu" bez osobnego artefaktu
+        // kontekstu sesji czy pliku szkicu.
     }
 
     const agentMemory = this.plugin?.agentManager?.getActiveMemory();
@@ -358,10 +351,10 @@ export async function handleNewSession(this: ChatViewMixinContext) {
 /**
  * Save current session.
  *
- * K4: wołacz z TŁA (kompresja końca tury na zakładce, której user już nie ogląda) podaje
- * agenta i okno SWOJEJ tury. Bez argumentów zachowanie jest jak dotąd — bieżąca zakładka.
- * Do K4 zapis z tury w tle brał `getActiveMemory()` + `this.rollingWindow`, więc transkrypt
- * agenta X lądował w pliku sesji agenta Y (ten sam wzorzec co AUD-security-064).
+ * Wołacz z TŁA (kompresja końca tury na zakładce, której user już nie ogląda) podaje agenta
+ * i okno SWOJEJ tury. Bez argumentów zachowanie jest jak dotąd - bieżąca zakładka. Zapis
+ * z tury w tle NIE MOŻE brać `getActiveMemory()` + `this.rollingWindow`: transkrypt agenta X
+ * lądowałby w pliku sesji agenta Y.
  *
  * @param agentName - właściciel tury (opcjonalny)
  * @param rollingWindow - okno tury (opcjonalne; brak = okno bieżącej zakładki)
@@ -397,7 +390,7 @@ export async function handleSaveSession(this: ChatViewMixinContext, agentName?: 
 }
 
 /**
- * Load a session from disk. Sprint 03 Z16: modal z 3 opcjami przed loadem.
+ * Load a session from disk. Modal z 3 opcjami przed loadem.
  */
 export async function handleLoadSession(this: ChatViewMixinContext, path: string) {
     log.info('Chat', `handleLoadSession: ${path}`);
@@ -408,8 +401,8 @@ export async function handleLoadSession(this: ChatViewMixinContext, path: string
         const parsed = await agentMemory.loadSession(filename);
         if (!parsed?.messages) return;
 
-        // Sprint 03 Z16: modal otwórz starą sesję — 3 opcje + cancel.
-        // Default focus 'compress' (decyzja Kuby). Cancel → return.
+        // Modal otwórz starą sesję - 3 opcje + cancel. Default focus 'compress'.
+        // Cancel → return.
         const agent = this.plugin?.agentManager?.getActiveAgent();
         const modal = new OpenSessionModal(this.app, {
             agentName: agent?.name || 'Agent',
@@ -423,7 +416,7 @@ export async function handleLoadSession(this: ChatViewMixinContext, path: string
         this.rollingWindow = this._createRollingWindow();
 
         if (choice === 'continue') {
-            // Pełen load — jak pre-Z16
+            // Pełen load
             for (const msg of parsed.messages) {
                 await this.rollingWindow.addMessage(msg.role, msg.content);
             }
@@ -458,8 +451,8 @@ export async function handleLoadSession(this: ChatViewMixinContext, path: string
 }
 
 /**
- * Sprint 03 Z16: znajdź L1 summary który includes sesję.
- * Wykorzystuje Z9 frontmatter `sessions:` w L1 (cascade contract).
+ * Znajdź L1 summary który includes sesję.
+ * Wykorzystuje frontmatter `sessions:` w L1 (cascade contract).
  */
 async function _findCoveringL1Summary(agentMemory: ChatViewMixinContext, sessionFilename: string) {
     try {
@@ -481,7 +474,7 @@ async function _findCoveringL1Summary(agentMemory: ChatViewMixinContext, session
 }
 
 /**
- * Sprint 03 Z16: zbuduj fresh agent context — brain + ostatnie 3 L1 summaries.
+ * Zbuduj fresh agent context — brain + ostatnie 3 L1 summaries.
  */
 async function _buildFreshAgentContext(agentMemory: ChatViewMixinContext) {
     const parts = [];
@@ -512,16 +505,15 @@ async function _buildFreshAgentContext(agentMemory: ChatViewMixinContext) {
 }
 
 /**
- * Consolidate session (E2.7 K4): reroute to the SINGLE canonical /save session flow.
+ * Consolidate session: reroute to the SINGLE canonical /save session flow.
  *
- * Pre-E2.7 this saved the transcript and ran the silent AgentMemory.consolidateAll (L1/L2/L3
- * without user review). That whole path was deleted. Now the 🧠 button, /memory command and the
- * SessionCloseModal "archive" choice all land here → SaveSessionWorkflow proposes durable brain
- * notes → user reviews in SaveSessionModal → the active session is archived → ArchiveWorkflow
- * fires at the threshold. Kept as a ChatView method so the three callers stay unchanged.
+ * The 🧠 button, /memory command and the SessionCloseModal "archive" choice all land here →
+ * SaveSessionWorkflow proposes durable brain notes → user reviews in SaveSessionModal → the
+ * active session is archived → ArchiveWorkflow fires at the threshold. Kept as a ChatView
+ * method so the three callers stay unchanged.
  *
- * ⚠️ USER-VISIBLE CHANGE: these entry points now open the save-session review modal instead of
- * silently consolidating. See modules/memory/CLAUDE.md + E2.7 report.
+ * These entry points open the save-session review modal - they do not silently consolidate.
+ * See modules/memory/CLAUDE.md.
  */
 export async function consolidateSession(this: ChatViewMixinContext) {
     await runSaveSessionFlow({ view: this, plugin: this.plugin });
@@ -535,19 +527,19 @@ export function _createRollingWindow(this: ChatViewMixinContext, agentName?: str
     const threshold = this.env?.settings?.pkmAssistant?.summarizationThreshold || 0.9;
     const toolTrimThreshold = this.env?.settings?.pkmAssistant?.toolTrimThreshold || 0.7;
     log.debug('RollingWindow', `Init: maxTokens=${maxTokens}, threshold=${threshold}, toolTrim=${toolTrimThreshold}, trigger=${Math.round(maxTokens * threshold)}`);
-    // K4 (AUD-security-065/066): okno należy do KONKRETNEJ zakładki i jej agenta. Nazwę zamrażamy
-    // TU, przy zakładaniu okna, a providery (prompt kompresji, model, indeks pamięci, ratunek
-    // pamięci) rozwiązują się po niej — nie po globalnym `activeAgent` w chwili kompresji.
-    // Kompresja końca tury leci także dla zakładek W TLE (chat_streaming: „Background tab finished").
+    // Okno należy do KONKRETNEJ zakładki i jej agenta. Nazwę zamrażamy TU, przy zakładaniu
+    // okna, a providery (prompt kompresji, model, indeks pamięci, ratunek pamięci) rozwiązują
+    // się po niej - nie po globalnym `activeAgent` w chwili kompresji. Kompresja końca tury
+    // leci także dla zakładek W TLE (chat_streaming: „Background tab finished").
     const ownerAgentName = resolveOwnerAgentName(this.plugin?.agentManager, agentName);
     return new RollingWindow({
         maxTokens,
         triggerThreshold: threshold,
         toolTrimThreshold,
-        // AUD-code-review-013: K4 mówi że kompresja LECI bezwarunkowo także dla zakładki w tle —
-        // ale to zasada o DANYCH (transkrypt, sesja), nie o DOM-ie. `messages_container` jest
-        // JEDEN na cały widok, więc bez tej bramki blok „skompresowano" agenta A malował się
-        // fizycznie w rozmowie agenta B, którą user akurat czyta (z licznikami z okna A).
+        // Kompresja LECI bezwarunkowo także dla zakładki w tle - ale to zasada o DANYCH
+        // (transkrypt, sesja), nie o DOM-ie. `messages_container` jest JEDEN na cały widok,
+        // więc bez tej bramki blok „skompresowano" agenta A malowałby się fizycznie w
+        // rozmowie agenta B, którą user akurat czyta (z licznikami z okna A).
         onSummarized: (summary, count, messagesKept, isEmergency) => {
             if (!isOwnerTabActive(this, ownerAgentName)) return;
             this._renderCompressionBlock(summary, count, messagesKept, isEmergency);
@@ -559,9 +551,9 @@ export function _createRollingWindow(this: ChatViewMixinContext, agentName?: str
             this._renderTrimBlock(info);
             this._updateTokenPanel();
         },
-        // E2.7 W2 (K3): dedup context + durable-memory rescue. chat_session owns AgentMemory access;
+        // Dedup context + durable-memory rescue. chat_session owns AgentMemory access;
         // RollingWindow only calls these providers (kierunek zależności jak dziś).
-        // E2.8 B3: szkielet kompresji (agent>global>factory) też jest w tej paczce.
+        // Szkielet kompresji (agent>global>factory) też jest w tej paczce.
         ...buildOwnerWindowOptions(this, ownerAgentName),
     });
 }
@@ -572,16 +564,15 @@ export function _createRollingWindow(this: ChatViewMixinContext, agentName?: str
 export function _buildEmergencyTaskContext(this: ChatViewMixinContext, agentName?: string | null) {
     const parts = [];
 
-    // K4: ścieżka sesji do promptu awaryjnego = sesja WŁAŚCICIELA okna (inaczej kompresja
-    // agenta X obiecywała modelowi plik sesji agenta Y).
+    // Ścieżka sesji do promptu awaryjnego = sesja WŁAŚCICIELA okna (inaczej kompresja
+    // agenta X obiecywałaby modelowi plik sesji agenta Y).
     const sessionPath = resolveOwnerMemory(this.plugin?.agentManager, agentName ?? null)?.activeSessionPath;
     if (sessionPath) {
         parts.push(t('chat.session.full_saved', { path: sessionPath }));
     }
 
-    // E2.9 FAZA D: emergency-kontekst listuje AKTYWNĄ listę `todo` (live-widok). Stary świat
-    // (_chatTodoStore/_planStore) usunięty; plany są teraz artefaktami w vaulcie (aktywny idzie do
-    // promptu osobno przez activeArtifactId).
+    // Emergency-kontekst listuje AKTYWNĄ listę `todo` (live-widok). Plany są artefaktami
+    // w vaulcie (aktywny idzie do promptu osobno przez activeArtifactId).
     const todo = this._activeTodoState;
     if (todo?.items?.length) {
         const done = todo.items.filter((i: ChatViewMixinContext) => i.checked || i.done).length;

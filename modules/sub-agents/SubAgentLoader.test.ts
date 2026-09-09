@@ -53,12 +53,12 @@ function makeVault(files: Record<string, string> = {}) {
     };
 }
 
-// D18: brak ról systemowych — plugin nie ma żadnych wbudowanych subów.
+// Brak ról systemowych — plugin nie ma żadnych wbudowanych subów.
 test('DEFAULT_SUB_AGENT_TOOLS is the uniform generic worker toolset', t => {
     t.deepEqual(DEFAULT_SUB_AGENT_TOOLS, ['search', 'list', 'read', 'web_search', 'web_read']);
 });
 
-test('SubAgentLoader has no loadSystemRoles (system roles removed in D18)', t => {
+test('SubAgentLoader has no loadSystemRoles (no system roles)', t => {
     const loader = new SubAgentLoader(makeVault());
     t.is(typeof loader.loadSystemRoles, 'undefined');
 });
@@ -69,7 +69,7 @@ test('getVisibleSubAgentsForAgent returns ONLY custom subs matching the agent pr
         { name: 'jaskier-strateg' },
         { name: 'kustosz-prep' },
         { name: 'prep' },
-        // D18: flaga system:true nie daje już globalnej widoczności — bez prefiksu = ukryty.
+        // Flaga system:true nie daje globalnej widoczności — bez prefiksu = ukryty.
         { name: 'prep-memory', system: true },
     ]);
 
@@ -107,10 +107,10 @@ test('loadAllSubAgents parses custom YAML scope', async t => {
     t.is(config.max_tool_result_length, 15000);
 });
 
-// AUD-code-review-054/091: createPrepSubAgent NIE wolno hardcodować dawnych literałów
+// createPrepSubAgent NIE wolno hardcodować literałów
 // (max_iterations: 8, max_tool_result_length: 15000) — musi czytać z config/limits.ts przez
-// defaultMaxIterations()/defaultMaxToolResultLength(), żeby podbicie kanonu (F4, runda 2)
-// dotarło też do nowo odlewanych prep-subów, nie tylko do runtime fallbacku w runnerze.
+// defaultMaxIterations()/defaultMaxToolResultLength(), żeby zmiana kanonicznych defaultów
+// dotarła też do nowo odlewanych prep-subów, nie tylko do runtime fallbacku w runnerze.
 test('createPrepSubAgent zapisuje KANONICZNE defaulty z config/limits.ts, nie zwietrzałe literały', async t => {
     const loader = new SubAgentLoader(makeVault());
 
@@ -118,11 +118,11 @@ test('createPrepSubAgent zapisuje KANONICZNE defaulty z config/limits.ts, nie zw
     const config = loader.getSubAgent('jaskier-prep');
 
     t.is(config.max_iterations, DEFAULT_LIMITS.subagent_max_iterations_worker);
-    t.not(config.max_iterations, 8, 'stary default sprzed F4/rundy 2 nie może wrócić');
+    t.not(config.max_iterations, 8, 'stary hardcodowany default nie może wrócić');
     t.is(config.max_tool_result_length, DEFAULT_LIMITS.max_tool_result_length);
 });
 
-// E2.6: dawne czytniki pamięci mapują wprost na prymitywy list/read (single-pass, bez łańcuchów).
+// Dawne czytniki pamięci mapują wprost na prymitywy list/read (single-pass, bez łańcuchów).
 for (const [oldTool, newTool] of [
     ['memory_sessions', 'list'],
     ['memory_summaries', 'read'],
@@ -145,7 +145,7 @@ for (const [oldTool, newTool] of [
     });
 }
 
-test('migrateDeprecatedTools rewrites E2.5 retrieval names to search', t => {
+test('migrateDeprecatedTools rewrites deprecated retrieval names to search', t => {
     const yamlData = { tools: ['vault_grep', 'web_search'] };
     const result = migrateDeprecatedTools(yamlData);
     t.true(result.changed);
@@ -162,7 +162,7 @@ test('migrateDeprecatedTools collapses multiple retrieval aliases into one searc
     t.deepEqual(yamlData.tools, ['search', 'web_search']);
 });
 
-test('migrateDeprecatedTools rewrites E2.6 file primitives (vault_read → read, vault_write → write)', t => {
+test('migrateDeprecatedTools rewrites deprecated file primitives (vault_read → read, vault_write → write)', t => {
     const yamlData = { tools: ['vault_read', 'vault_write', 'vault_list', 'vault_delete', 'vault_create_folder'] };
     const result = migrateDeprecatedTools(yamlData);
     t.true(result.changed);
@@ -189,7 +189,7 @@ test('loadAllSubAgents persists deprecated tool migration to YAML', async t => {
     await loader.loadAllSubAgents();
     const config = loader.getSubAgent('klara-prep');
 
-    // E2.6: vault_search → search; memory_sessions + memory_list_summaries → list (dedup); vault_read → read.
+    // vault_search → search; memory_sessions + memory_list_summaries → list (dedup); vault_read → read.
     t.deepEqual(config.tools, ['search', 'list', 'read']);
     const yaml = files['.pkm-assistant/sub-agents/klara-prep/SUB_AGENT.yaml'];
     t.false(yaml.includes('memory_sessions'));
@@ -199,16 +199,16 @@ test('loadAllSubAgents persists deprecated tool migration to YAML', async t => {
 });
 
 
-// ─── AUD-bledy-010: wyczyszczona instrukcja MUSI zniknąć Z DYSKU ─────────────
+// ─── wyczyszczona instrukcja MUSI zniknąć Z DYSKU ─────────────
 //
-// `saveSubAgent` pisał KNOWLEDGE.md tylko pod `if (data.prompt)`, więc skasowanie
-// instrukcji w edytorze zostawiało starą treść na dysku: cache mówił „pusto", user dostawał
-// Notice „zapisany", a po reloadzie skasowana metoda wracała do promptu suba.
+// Gdyby `saveSubAgent` pisał KNOWLEDGE.md tylko pod `if (data.prompt)`, skasowanie
+// instrukcji w edytorze zostawiałoby starą treść na dysku: cache mówiłby „pusto", user
+// dostawałby Notice „zapisany", a po reloadzie skasowana metoda wracałaby do promptu suba.
 
 type SaveableLoader = TestLoader & { saveSubAgent(data: Record<string, unknown>): Promise<string> };
 const KNOWLEDGE = '.pkm-assistant/sub-agents/klara-prep/KNOWLEDGE.md';
 
-test('AUD-bledy-010: pusta instrukcja NIE zostawia starego KNOWLEDGE.md na dysku', async t => {
+test('pusta instrukcja NIE zostawia starego KNOWLEDGE.md na dysku', async t => {
     const files: Record<string, string> = {};
     const loader = new SubAgentLoader(makeVault(files)) as unknown as SaveableLoader;
     await loader.saveSubAgent({ name: 'klara-prep', description: 'zwiad', prompt: 'STARA METODA' });
@@ -219,7 +219,7 @@ test('AUD-bledy-010: pusta instrukcja NIE zostawia starego KNOWLEDGE.md na dysku
     t.falsy(files[KNOWLEDGE], 'skasowana instrukcja znika z dysku, a nie tylko z cache');
 });
 
-test('AUD-bledy-010: po „reloadzie" skasowana instrukcja NIE wraca do suba', async t => {
+test('po „reloadzie" skasowana instrukcja NIE wraca do suba', async t => {
     const files: Record<string, string> = {};
     const vault = makeVault(files);
     const pisarz = new SubAgentLoader(vault) as unknown as SaveableLoader;
@@ -232,7 +232,7 @@ test('AUD-bledy-010: po „reloadzie" skasowana instrukcja NIE wraca do suba', a
     t.is(poRestarcie.getSubAgent('klara-prep').prompt as string, '');
 });
 
-test('AUD-bledy-010: niepusta instrukcja zapisuje się jak dotąd', async t => {
+test('niepusta instrukcja zapisuje się jak dotąd', async t => {
     const files: Record<string, string> = {};
     const loader = new SubAgentLoader(makeVault(files)) as unknown as SaveableLoader;
 
@@ -241,7 +241,7 @@ test('AUD-bledy-010: niepusta instrukcja zapisuje się jak dotąd', async t => {
     t.is(files[KNOWLEDGE], 'NOWA METODA');
 });
 
-test('AUD-bledy-010: pad zapisu leci wyjątkiem do wołającego (nie melduje „zapisany")', async t => {
+test('pad zapisu leci wyjątkiem do wołającego (nie melduje „zapisany")', async t => {
     const vault = makeVault({});
     vault.adapter.write = async () => { throw new Error('dysk odmówił'); };
     const loader = new SubAgentLoader(vault) as unknown as SaveableLoader;
@@ -250,10 +250,10 @@ test('AUD-bledy-010: pad zapisu leci wyjątkiem do wołającego (nie melduje „
         { message: 'dysk odmówił' });
 });
 
-// ─── AUD-testy-056 (kanon; duplikat AUD-testy-039): deleteSubAgent — sukces I porażka ─────
+// ─── deleteSubAgent — sukces I porażka ─────
 //
-// Cała logika kasowania z dysku (linie 381-391) nie miała ŻADNEGO testu w tym module —
-// jedyny test dotykający tematu (`deleteOutcome.test.ts`) testuje WYŁĄCZNIE czystą funkcję
+// Cała logika kasowania z dysku (linie 381-391) nie ma ŻADNEGO innego testu w tym module —
+// jedyny inny test dotykający tematu (`deleteOutcome.test.ts`) testuje WYŁĄCZNIE czystą funkcję
 // `resolveDeleteOutcome(boolean, string)`, która nigdy nie dotyka `vault.adapter`. Gdyby ktoś
 // zostawił samo `this.cache.delete(name); return true;` (wycięcie exists/remove/rmdir), user
 // dostałby „Usunięto", sub zniknąłby z listy, a pliki wróciłyby po restarcie Obsidiana.
@@ -262,7 +262,7 @@ const KLARA_PREP_YAML = '.pkm-assistant/sub-agents/klara-prep/SUB_AGENT.yaml';
 const KLARA_PREP_KNOWLEDGE = '.pkm-assistant/sub-agents/klara-prep/KNOWLEDGE.md';
 const KLARA_PREP_FOLDER = '.pkm-assistant/sub-agents/klara-prep';
 
-test('AUD-testy-056: deleteSubAgent kasuje YAML/KNOWLEDGE/folder z dysku i z cache (sukces)', async t => {
+test('deleteSubAgent kasuje YAML/KNOWLEDGE/folder z dysku i z cache (sukces)', async t => {
     const files: Record<string, string> = {};
     const vault = makeVault(files);
     const loader = new SubAgentLoader(vault) as unknown as SaveableLoader;
@@ -280,7 +280,7 @@ test('AUD-testy-056: deleteSubAgent kasuje YAML/KNOWLEDGE/folder z dysku i z cac
     t.falsy(loader.getSubAgent('klara-prep'), 'cache też czyszczony');
 });
 
-test('AUD-testy-056: deleteSubAgent — porażka I/O (remove rzuca) zwraca false, cache i plik NIETKNIĘTE', async t => {
+test('deleteSubAgent — porażka I/O (remove rzuca) zwraca false, cache i plik NIETKNIĘTE', async t => {
     const files: Record<string, string> = {};
     const vault = makeVault(files);
     const loader = new SubAgentLoader(vault) as unknown as SaveableLoader;

@@ -1,5 +1,5 @@
 /**
- * WebSearchProvider.test.js — E3.3: keyless Jina, klucze per-provider, warstwy (fallback), reader.
+ * WebSearchProvider.test.js — keyless Jina, klucze per-provider, warstwy (fallback), reader.
  *
  * ⚠️ Jak w `modules/tools/GenerateImageTool.test.js`: pakiet `obsidian` z npm to SAME
  * TYPY (bez runtime'u), więc Node nie potrafi go zaimportować. Podstawiamy przez
@@ -86,7 +86,7 @@ const tavilyOk: MockResponse = {
     text: JSON.stringify({ results: [{ title: 'Tavily', url: 'https://tavily-result.pl/1', content: 'treść' }] }),
 };
 
-test.serial('rejestr: Jina nie wymaga klucza, ma go za to jako opcjonalny (fix L13-12)', t => {
+test.serial('rejestr: Jina nie wymaga klucza, ma go za to jako opcjonalny', t => {
     t.false(WEB_SEARCH_PROVIDERS.jina.requiresKey);
     t.true(WEB_SEARCH_PROVIDERS.jina.keyOptional);
     t.true(WEB_SEARCH_PROVIDERS.tavily.requiresKey);
@@ -228,8 +228,9 @@ test.serial('nieczytelna binarka daje uczciwy komunikat zamiast pustki albo wyj�
     t.is(err.message, tr('websearch.unreadable_binary', { url: 'https://example.com/obraz.png' }));
 });
 
-// S32 Z4.1: poprawny JSON + pusta treść to NIE binarka. Dawniej oba przypadki dawały
-// `unreadable_binary` — model dostawał info „to obrazek", choć reader po prostu nic nie znalazł.
+// DLACZEGO osobny komunikat: poprawny JSON + pusta treść to NIE binarka. Traktowanie
+// obu przypadków jako `unreadable_binary` dawałoby modelowi info „to obrazek", choć
+// reader po prostu nic nie znalazł.
 test.serial('poprawny JSON bez treści daje komunikat o braku treści, nie o binarce', async t => {
     mockNetwork(() => ({ status: 200, text: JSON.stringify({ data: { title: 'x', content: '   ' } }) }));
     const err = await t.throwsAsync(readWebPage('https://example.com/pusto', {}), { message: /pusto/ }) as Error;
@@ -237,7 +238,7 @@ test.serial('poprawny JSON bez treści daje komunikat o braku treści, nie o bin
     t.not(err.message, tr('websearch.unreadable_binary', { url: 'https://example.com/pusto' }));
 });
 
-// ─── K1 / znalezisko 001: strażnik kanoniczności adresu przed sklejką z readerem ───
+// ─── strażnik kanoniczności adresu przed sklejką z readerem ───
 
 test.serial('readWebPage ODMAWIA, gdy sklejka z readerem zmieniłaby adres (segmenty `..`)', async t => {
     // `https://r.jina.ai/https://good.com/a/../../../../evil.com/collect` po normalizacji URL

@@ -1,5 +1,5 @@
 /**
- * kom_send / kom_list / kom_read (S28 Z3) — kontrakt trzech prymitywów poczty.
+ * kom_send / kom_list / kom_read — kontrakt trzech prymitywów poczty.
  *
  * Narzędzia dostają PRAWDZIWY `KomunikatorManager` na atrapie vaulta, więc test dotyka
  * pełnej ścieżki: schema → walidacja adresata (widoczność) → zapis pliku → odczyt.
@@ -7,7 +7,7 @@
 import test from 'ava';
 import { createKomunikatorTools } from './KomunikatorTools.js';
 import type { KomPlugin, KomunikatorArgs } from './KomunikatorTools.js';
-// K17: bramka poczty pyta o oś narzędziową WOŁAJĄCEGO — atrapa niesie PRAWDZIWY rejestr,
+// Bramka poczty pyta o oś narzędziową WOŁAJĄCEGO — atrapa niesie PRAWDZIWY rejestr,
 // żeby liczyła ją ta sama metoda co w produkcji (`ToolRegistry.checkToolAxis`).
 import { ToolRegistry } from './ToolRegistry.js';
 import { KomunikatorManager, KOM_RATE_WINDOW_MS, KOM_HOP_LIMIT } from '../komunikator/KomunikatorManager.js';
@@ -62,7 +62,7 @@ function fakeVault() {
 
 /**
  * Agent w atrapie: nazwa + (opcjonalnie) flaga ducha czytana przez PRAWDZIWY filtr
- * + (K17) negatywna lista narzędzi, czyli oś, którą liczy `ToolRegistry.checkToolAxis`.
+ * + negatywna lista narzędzi, czyli oś, którą liczy `ToolRegistry.checkToolAxis`.
  */
 type FakeAgent = { name: string; komunikator_visible?: boolean; disabled_tools?: string[] };
 
@@ -71,8 +71,8 @@ type EmittedEvent = { event: string; data: unknown };
 
 /**
  * @param opts.withKomunikator - domyślnie true
- * @param opts.limits - nadpisania `settings.pkmAssistant.limits` (S33 Z2 rate-limit)
- * @param opts.now - zegar na sznurku (S33 Z2)
+ * @param opts.limits - nadpisania `settings.pkmAssistant.limits` (rate-limit)
+ * @param opts.now - zegar na sznurku
  */
 function makePlugin(
     agents: FakeAgent[],
@@ -96,8 +96,8 @@ function makePlugin(
     agentManager.komunikatorManager = withKomunikator
         ? new KomunikatorManager(vault, agentManager, now ? { now } : {})
         : null;
-    // K17: rejestr jest w KAŻDEJ atrapie, także w testach sprzed tej naprawy — dzięki temu
-    // cały dotychczasowy zestaw biegnie z żywą bramką osi i pilnuje zera regresji.
+    // Rejestr jest w KAŻDEJ atrapie — dzięki temu cały zestaw testów biegnie z żywą bramką
+    // osi i pilnuje zera regresji.
     const plugin = {
         agentManager,
         toolRegistry: new ToolRegistry(),
@@ -117,7 +117,7 @@ test('trzy narzędzia, wszystkie na serwerze `komunikator`', t => {
     const list = createKomunikatorTools();
     t.deepEqual(list.map(tl => tl.name), ['kom_send', 'kom_list', 'kom_read']);
     t.true(list.every(tl => tl.serverName === 'komunikator'));
-    // Agent NIE MA narzędzia kasowania poczty (D3 create-only).
+    // Agent NIE MA narzędzia kasowania poczty (create-only).
     t.false(list.some(tl => /delete|remove|clear/.test(tl.name)));
 });
 
@@ -249,7 +249,7 @@ test('wyłączony komunikator: wszystkie trzy odmawiają zamiast wybuchać', asy
     }
 });
 
-// ═════════════ S33 Z2 — strażnicy poczty (rate-limit B1 + licznik odbić B2) ═════════════
+// ═════════════ strażnicy poczty (rate-limit + licznik odbić) ═════════════
 
 test('B1: po wyczerpaniu limitu kom_send odmawia i NIC nie zapisuje', async t => {
     const { plugin, vault } = makePlugin(AGENTS(), { limits: { kom_send_rate_max: 2 } });
@@ -305,7 +305,7 @@ test('B1: po wyjściu z okna 10 min agent znów może pisać', async t => {
     t.true((await send.execute(args(), {}, plugin)).success);
 });
 
-test('K12: sufit NADAWCY blokuje mimo wolnych par — i mówi to innym komunikatem', async t => {
+test('sufit NADAWCY blokuje mimo wolnych par — i mówi to innym komunikatem', async t => {
     const { plugin, vault } = makePlugin(
         [...AGENTS(), { name: 'Jaskier' }],
         { limits: { kom_send_rate_max: 5, kom_send_rate_max_sender: 2 } },
@@ -384,9 +384,9 @@ test('B2: próg odmowy w narzędziu zgadza się ze stałą managera', t => {
     t.is(KOM_HOP_LIMIT, 3, 'gdy zmienisz próg, zmień go w OBU miejscach (świadoma duplikacja)');
 });
 
-// ══════════ K6 (AUD-security-011/044/046/013) — bramki poczty pod równoległością ══════════
+// ══════════ bramki poczty pod równoległością ══════════
 
-test('011: 10× kom_send przez Promise.all przy limicie 5 → dokładnie 5 zapisów i 5 odmów', async t => {
+test('10× kom_send przez Promise.all przy limicie 5 → dokładnie 5 zapisów i 5 odmów', async t => {
     const { plugin, vault } = makePlugin(AGENTS(), { limits: { kom_send_rate_max: 5 } });
     const send = tools(plugin).kom_send;
 
@@ -400,7 +400,7 @@ test('011: 10× kom_send przez Promise.all przy limicie 5 → dokładnie 5 zapis
     t.is(vault._files.size, 5, 'na dysku dokładnie tyle plików, ile przepustek');
 });
 
-test('044: równoległy wsad nie nadpisuje plików — każdy list ma własną nazwę', async t => {
+test('równoległy wsad nie nadpisuje plików — każdy list ma własną nazwę', async t => {
     // Zegar stoi w miejscu: wszystkie wysyłki celują w TEN SAM `msg-<stamp>`.
     const { plugin, vault } = makePlugin(AGENTS(), { limits: { kom_send_rate_max: 50 }, now: () => 1_700_000_000_000 });
     const send = tools(plugin).kom_send;
@@ -417,7 +417,7 @@ test('044: równoległy wsad nie nadpisuje plików — każdy list ma własną n
     t.is(tresci.size, 6, 'treść każdego listu ocalała');
 });
 
-test('044: dwaj RÓŻNI nadawcy piszą równolegle do jednej skrzynki — nic nie ginie', async t => {
+test('dwaj RÓŻNI nadawcy piszą równolegle do jednej skrzynki — nic nie ginie', async t => {
     const { plugin, vault } = makePlugin([{ name: 'A' }, { name: 'B' }, { name: 'C' }], { now: () => 1_700_000_000_000 });
     const send = tools(plugin).kom_send;
 
@@ -429,7 +429,7 @@ test('044: dwaj RÓŻNI nadawcy piszą równolegle do jednej skrzynki — nic ni
     t.is(vault._files.size, 10, 'dziesięć wysyłek = dziesięć plików');
 });
 
-test('046: kom_read i kom_send w JEDNEJ turze — wysłany list niesie hop przeczytanego + 1', async t => {
+test('kom_read i kom_send w JEDNEJ turze — wysłany list niesie hop przeczytanego + 1', async t => {
     const { plugin, vault } = makePlugin([{ name: 'Tester' }, { name: 'Odbiorca' }]);
     const tl = tools(plugin);
     // Podłożona wiadomość z hop 1 (id świeże — łańcuch w oknie TTL).
@@ -450,7 +450,7 @@ test('046: kom_read i kom_send w JEDNEJ turze — wysłany list niesie hop przec
     t.true(wyslana![1].includes('hop: 2'), 'hop przeczytanego (1) + 1');
 });
 
-test('046: kom_read w tej samej turze dobija do HOP_LIMIT — kom_send odmawia', async t => {
+test('kom_read w tej samej turze dobija do HOP_LIMIT — kom_send odmawia', async t => {
     const { plugin, vault } = makePlugin([{ name: 'Tester' }, { name: 'Odbiorca' }]);
     const tl = tools(plugin);
     const stamp = Date.now();
@@ -468,7 +468,7 @@ test('046: kom_read w tej samej turze dobija do HOP_LIMIT — kom_send odmawia',
     t.is([...vault._files.keys()].filter(p => p.includes('/odbiorca/')).length, 0);
 });
 
-test('013: duch jako nadawca kom_send — odmowa i zero plików', async t => {
+test('duch jako nadawca kom_send — odmowa i zero plików', async t => {
     const { plugin, vault } = makePlugin(AGENTS());
     const res = await tools(plugin).kom_send.execute(
         { to: 'Sonny', subject: 's', content: 'c', _invocationAgentName: 'Duch' }, {}, plugin,
@@ -477,7 +477,7 @@ test('013: duch jako nadawca kom_send — odmowa i zero plików', async t => {
     t.is(vault._files.size, 0);
 });
 
-test('044: żadne narzędzie kom_* nie kasuje ani nie przepisuje cudzej wiadomości', async t => {
+test('żadne narzędzie kom_* nie kasuje ani nie przepisuje cudzej wiadomości', async t => {
     const { plugin, vault } = makePlugin(AGENTS());
     const tl = tools(plugin);
     await tl.kom_send.execute({ to: 'Sonny', subject: 'Temat', content: 'Treść oryginalna', _invocationAgentName: 'Tola' }, {}, plugin);
@@ -491,12 +491,12 @@ test('044: żadne narzędzie kom_* nie kasuje ani nie przepisuje cudzej wiadomo�
     t.is(vault._files.size, 1, 'plik nadal jest — kom_read nic nie skasował');
     t.true(po.includes('Treść oryginalna'), 'treść nietknięta');
     t.true(po.includes('od: "Tola"'), 'nagłówek nadawcy nietknięty');
-    // Jedyna dozwolona różnica to ptaszek `ai_read` (D3 auto-ptaszek AI).
+    // Jedyna dozwolona różnica to ptaszek `ai_read` (auto-ptaszek AI).
     t.is(przed.replace('ai_read: false', 'ai_read: true'), po);
 });
 
-// ═════ K17 (AUD-security-110): bramką jest OŚ POCZTY WOŁAJĄCEGO, nie nazwa narzędzia ═════
-// `sendAgentMail` to jedyna droga do cudzej skrzynki (K6), więc to ona pyta rejestr o
+// ═════ bramką jest OŚ POCZTY WOŁAJĄCEGO, nie nazwa narzędzia ═════
+// `sendAgentMail` to jedyna droga do cudzej skrzynki, więc to ona pyta rejestr o
 // `kom_send` agenta, który ją zawołał. Dzięki temu reguła obowiązuje każdą drogę — także
 // `agent_delegate`, którego oś narzędziową MCPClient ocenia pod grupą `delegation`.
 
@@ -506,7 +506,7 @@ const BEZ_POCZTY = (): FakeAgent[] => [
     { name: 'Sonny' },
 ];
 
-test('110: agent z wyłączoną grupą `komunikator` nie wyśle listu — plik NIE powstaje', async t => {
+test('agent z wyłączoną grupą `komunikator` nie wyśle listu — plik NIE powstaje', async t => {
     const { plugin, vault } = makePlugin(BEZ_POCZTY());
 
     const res = await tools(plugin).kom_send.execute(
@@ -517,7 +517,7 @@ test('110: agent z wyłączoną grupą `komunikator` nie wyśle listu — plik N
     t.is(vault._files.size, 0, 'żaden plik nie wylądował w cudzej skrzynce');
 });
 
-test('110: wyłączone samo `kom_send` (reszta poczty ON) też odbija wysyłkę', async t => {
+test('wyłączone samo `kom_send` (reszta poczty ON) też odbija wysyłkę', async t => {
     const { plugin, vault } = makePlugin([{ name: 'Tola', disabled_tools: ['kom_send'] }, { name: 'Sonny' }]);
 
     const res = await tools(plugin).kom_send.execute(
@@ -528,7 +528,7 @@ test('110: wyłączone samo `kom_send` (reszta poczty ON) też odbija wysyłkę'
     t.is(vault._files.size, 0);
 });
 
-test('110: odmowa nie zdradza, kto istnieje — ten sam komunikat dla znanego i nieznanego adresata', async t => {
+test('odmowa nie zdradza, kto istnieje — ten sam komunikat dla znanego i nieznanego adresata', async t => {
     const { plugin } = makePlugin(BEZ_POCZTY());
     const tl = tools(plugin);
 
@@ -538,7 +538,7 @@ test('110: odmowa nie zdradza, kto istnieje — ten sam komunikat dla znanego i 
     t.is(znany.error, nieznany.error, 'bramka osi stoi PRZED rozwiązaniem adresata');
 });
 
-test('110: agent z włączoną pocztą wysyła jak dotąd (zero regresji)', async t => {
+test('agent z włączoną pocztą wysyła jak dotąd (zero regresji)', async t => {
     const { plugin, vault } = makePlugin([{ name: 'Tola', disabled_tools: ['write'] }, { name: 'Sonny' }]);
 
     const res = await tools(plugin).kom_send.execute(
@@ -549,8 +549,8 @@ test('110: agent z włączoną pocztą wysyła jak dotąd (zero regresji)', asyn
     t.is(vault._files.size, 1);
 });
 
-test('110: bramka dotyczy WYSYŁKI — czytanie własnej skrzynki idzie swoją drogą', async t => {
-    // `kom_list`/`kom_read` mają własną bramkę osi w `MCPClient` (K3, po nazwie narzędzia).
+test('bramka dotyczy WYSYŁKI — czytanie własnej skrzynki idzie swoją drogą', async t => {
+    // `kom_list`/`kom_read` mają własną bramkę osi w `MCPClient` (po nazwie narzędzia).
     // Chokepoint poczty ich nie dotyka, bo nie prowadzi do CUDZEJ skrzynki.
     const { plugin, vault } = makePlugin([{ name: 'Tola' }, { name: 'Sonny', disabled_tools: ['kom_send'] }]);
     const tl = tools(plugin);
@@ -562,7 +562,7 @@ test('110: bramka dotyczy WYSYŁKI — czytanie własnej skrzynki idzie swoją d
     t.is(lista.count, 1, 'adresat bez prawa wysyłki nadal czyta swoją skrzynkę');
 });
 
-// ── M (AUD-security-111): adresat liczony RAZ, przed bramką ─────────────────────
+// ── adresat liczony RAZ, przed bramką ─────────────────────
 // `execute` czytał cztery synonimy (`to`/`to_agent`/`agent`/`target`), a switch w
 // `MCPClient` tylko dwa i wpadał na literał `'agent'`. Modal mówił „do agenta »agent«",
 // a klik „Zawsze zezwalaj" zapisywał regułę `agent.message::agent` — auto-zgodę na pocztę
@@ -582,7 +582,7 @@ function komSendExtractor(plugin: KomPlugin): KomExtractor {
     return (args, ctx) => fn(args, { ...ctx, plugin });
 }
 
-test('M111: cztery synonimy adresata dają JEDEN kanon dla okna zgody', t => {
+test('cztery synonimy adresata dają JEDEN kanon dla okna zgody', t => {
     const { plugin } = makePlugin(AGENTS());
     const extract = komSendExtractor(plugin);
     const base = { subject: 'Temat', content: 'Treść', _invocationAgentName: 'Tola' };
@@ -596,7 +596,7 @@ test('M111: cztery synonimy adresata dają JEDEN kanon dla okna zgody', t => {
     t.false(cele.includes('agent'), 'literał „agent" nie może być celem reguły zgody');
 });
 
-test('M111: kanon = nazwa z rejestru, więc modal i reguła nie rozjeżdżają się na wielkości liter', t => {
+test('kanon = nazwa z rejestru, więc modal i reguła nie rozjeżdżają się na wielkości liter', t => {
     const { plugin } = makePlugin(AGENTS());
     const extract = komSendExtractor(plugin);
     const ctx = { agentName: 'Tola', plugin };
@@ -605,7 +605,7 @@ test('M111: kanon = nazwa z rejestru, więc modal i reguła nie rozjeżdżają s
     t.is(extract({ to: 'SONNY', _invocationAgentName: 'Tola' }, ctx).targetPath, 'Sonny');
 });
 
-test('M111: cel bramki = adresat, który REALNIE dostał list (jeden ciąg)', async t => {
+test('cel bramki = adresat, który REALNIE dostał list (jeden ciąg)', async t => {
     const { plugin, vault } = makePlugin(AGENTS());
     const args = { target: 'sonny', subject: 'Temat', content: 'Treść', _invocationAgentName: 'Tola' };
 
@@ -620,7 +620,7 @@ test('M111: cel bramki = adresat, który REALNIE dostał list (jeden ciąg)', as
     t.is(skrzynka.count, 1);
 });
 
-test('M111: okno zgody dostaje temat i treść (podgląd, nie sam adresat)', t => {
+test('okno zgody dostaje temat i treść (podgląd, nie sam adresat)', t => {
     const { plugin } = makePlugin(AGENTS());
     const ctx = { agentName: 'Tola', plugin };
     const out = komSendExtractor(plugin)(
@@ -630,7 +630,7 @@ test('M111: okno zgody dostaje temat i treść (podgląd, nie sam adresat)', t =
     t.is(out.approvalContext?.messageContent, 'Treść');
 });
 
-test('M111: nieznany adresat NIE zapada w wieloznacznik — cel zostaje dosłowny', t => {
+test('nieznany adresat NIE zapada w wieloznacznik — cel zostaje dosłowny', t => {
     const { plugin } = makePlugin(AGENTS());
     const ctx = { agentName: 'Tola', plugin };
     t.is(komSendExtractor(plugin)({ target: 'NieMaTakiego', _invocationAgentName: 'Tola' }, ctx).targetPath, 'NieMaTakiego');

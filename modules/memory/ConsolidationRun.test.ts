@@ -1,6 +1,6 @@
 /**
- * ConsolidationRun.test.js — S29 Z2: plan przebiegu, maszyna stanów, retry-polityka, koszt.
- * Czysty node — zero Obsidiana, zero I/O.
+ * ConsolidationRun.test.js - plan przebiegu, maszyna stanów, retry-polityka, koszt.
+ * Czysty node - zero Obsidiana, zero I/O.
  */
 import test from 'ava';
 import {

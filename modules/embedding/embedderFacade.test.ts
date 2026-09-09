@@ -1,6 +1,6 @@
 /**
  * embedderFacade.test.ts — most rejestr → `EmbedderFacade` dla `VaultIndexer` (`contracts.ts` §9).
- * Nowe testy C-23/C-24. Napisany przed implementacją (czerwony na stubie — `createEmbedderFacade`
+ * Napisany przed implementacją (czerwony na stubie — `createEmbedderFacade`
  * rzucał `not implemented`), dziś zielony.
  */
 import test from 'ava';
@@ -19,7 +19,7 @@ function fakeRegistry(model: EmbeddingModel | null): EmbeddingRegistry {
     } as unknown as EmbeddingRegistry;
 }
 
-test('C-23: isReady()/getModelKey()/getDims() na pustym rejestrze -> false / \'\' / null, bez rzutu', t => {
+test('isReady()/getModelKey()/getDims() na pustym rejestrze -> false / \'\' / null, bez rzutu', t => {
     const facade = createEmbedderFacade(fakeRegistry(null));
 
     t.notThrows(() => facade.isReady?.());
@@ -28,7 +28,7 @@ test('C-23: isReady()/getModelKey()/getDims() na pustym rejestrze -> false / \'\
     t.is(facade.getDims?.(), null);
 });
 
-test('C-24: embedBatch przepisuje vector 1:1 i propaguje RZUT nietknięty', async t => {
+test('embedBatch przepisuje vector 1:1 i propaguje RZUT nietknięty', async t => {
     const rzut = new EmbedBatchError({ kind: 'api', code: 'http_error', message: 'boom' });
     const model = {
         modelKey: 'openai:text-embedding-3-small',
@@ -48,14 +48,14 @@ test('C-24: embedBatch przepisuje vector 1:1 i propaguje RZUT nietknięty', asyn
     t.is(err, rzut, 'rzut modelu leci dalej NIETKNIĘTY — indekser klasyfikuje po `kind`');
 });
 
-test('C-25: getDims() zwraca 0 z modelu bez podmiany na fallback (falsy liczba != brak wartości)', t => {
+test('getDims() zwraca 0 z modelu bez podmiany na fallback (falsy liczba != brak wartości)', t => {
     const model = { modelKey: 'openai:text-embedding-3-small', dims: 0 } as unknown as EmbeddingModel;
     const facade = createEmbedderFacade(fakeRegistry(model));
 
     t.is(facade.getDims?.(), 0, 'dims=0 to realna wartość modelu, nie „brak" — `??` musi ją przepuścić');
 });
 
-test('C-26: embed() oddaje realny wektor modelu (nie fallback, nie undefined)', async t => {
+test('embed() oddaje realny wektor modelu (nie fallback, nie undefined)', async t => {
     const model = {
         modelKey: 'openai:text-embedding-3-small',
         dims: 1024,
@@ -67,7 +67,7 @@ test('C-26: embed() oddaje realny wektor modelu (nie fallback, nie undefined)', 
     t.deepEqual(wynik, [7, 8, 9]);
 });
 
-test('C-27: embed() oddaje null, gdy model nie zwrócił wektora (pusta treść)', async t => {
+test('embed() oddaje null, gdy model nie zwrócił wektora (pusta treść)', async t => {
     const model = {
         modelKey: 'openai:text-embedding-3-small',
         dims: 1024,

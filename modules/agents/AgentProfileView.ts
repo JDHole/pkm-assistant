@@ -1,5 +1,5 @@
 /**
- * AgentProfileView — coordinator.
+ * AgentProfileView - coordinator.
  * Imports tab modules from profile/ and wires them together.
  */
 import { Setting, Notice } from 'obsidian';
@@ -28,7 +28,7 @@ type UiBoundary = any;
 interface ProfileParams { agentName?: string | null; }
 
 // Tab definitions (Crystal Soul 8-tab layout).
-// E2.8 C2: `editOnly` skasowane — nie ma już create-mode (agent tworzony od razu przy „+",
+// `editOnly` skasowane - nie ma już create-mode (agent tworzony od razu przy "+",
 // profil zawsze otwiera się w normalnym trybie edycji z pełnym zestawem 8 zakładek).
 const TABS = [
     { id: 'overview',    labelKey: 'profile.tab.overview',     icon: () => UiIcons.eye(14) },
@@ -56,7 +56,7 @@ export function renderAgentProfileView(container: HTMLElement, plugin: UiBoundar
         return;
     }
 
-    // E2.8 C2: agent tworzony jest OD RAZU przy „+" (HomeView) — profil zawsze ma istniejącego
+    // Agent tworzony jest OD RAZU przy "+" (HomeView) - profil zawsze ma istniejącego
     // agenta. Brak agenta = ktoś wszedł na skasowany/niepoprawny wpis → komunikat, bez create-mode.
     const agent = params.agentName ? agentManager.getAgent(params.agentName) : null;
     if (!agent) {
@@ -72,18 +72,18 @@ export function renderAgentProfileView(container: HTMLElement, plugin: UiBoundar
         description: agent.description || '',
         createdAt: agent.createdAt || null,
         temperature: agent.temperature,
-        // E2.8 A6/C7/C9: język + domyślna autonomia per agent ('' = globalna/auto).
+        // Język + domyślna autonomia per agent ('' = globalna/auto).
         language: agent.language || 'auto',
         default_autonomy: agent.default_autonomy || '',
         admin_access: agent.admin_access === true,
-        // S28 D6: „Uczestniczy w komunikatorze" (default ON).
+        // "Uczestniczy w komunikatorze" (default ON).
         komunikator_visible: agent.komunikator_visible !== false,
         focus_folders: [...(agent.focusFolders || [])],
         model: agent.model || null,
         skills: JSON.parse(JSON.stringify(agent._skills || [])),
-        // E2.9 C1: typy artefaktów podpięte per agent (jak skille). Puste = tylko wbudowany `plan`.
+        // Typy artefaktów podpięte per agent (jak skille). Puste = tylko wbudowany `plan`.
         artifact_types: [...(agent.artifact_types || [])],
-        // E2.8 C1: jedna oś narzędziowa (disabled_tools). enabled_tools skasowane.
+        // Jedna oś narzędziowa (disabled_tools). enabled_tools skasowane.
         disabled_tools: [...(agent.disabled_tools || [])],
         preferred_servers: [...(agent.preferredServers || [])],
         preferred_tools: [...(agent.preferredTools || [])],
@@ -95,20 +95,20 @@ export function renderAgentProfileView(container: HTMLElement, plugin: UiBoundar
         prompt_overrides: JSON.parse(JSON.stringify(agent.promptOverrides || {})),
         agent_rules: agent.agentRules || '',
         crystal_seed: agent.crystalSeed || null,
-        // E2.8 C9 (A2/B3): prompty robocze per agent (puste = global/factory przez resolver).
+        // Prompty robocze per agent (puste = global/factory przez resolver).
         compression_prompt: agent.compression_prompt || '',
         save_session_prompt: agent.save_session_prompt || '',
         archive_prompt: agent.archive_prompt || '',
         summary_prompt: agent.summary_prompt || '',
         subagent_frame_prompt: agent.subagent_frame_prompt || '',
-        // E2.8 C9: ratunek pamięci przed kompresją (per-agent, default ON)
+        // Ratunek pamięci przed kompresją (per-agent, default ON)
         memory_rescue: agent.memory_rescue !== false
     };
 
-    // B6 druga runda (2026-09-02): KANON to `models.main` — `model` (legacy) NIGDY nie jest
-    // kopiowany z powrotem z `models.main` (był to żywy bug, patrz modelFieldSync.ts). Jedyny
-    // przypadek, gdy `model` się zmienia tutaj, to jednorazowa migracja starego configu, który
-    // ma TYLKO legacy pole (bez models.main) — wtedy awansuje na models.main i gaśnie.
+    // KANON to `models.main` - `model` (legacy) NIGDY nie jest kopiowany z powrotem z
+    // `models.main` (był to żywy bug, patrz modelFieldSync.ts). Jedyny przypadek, gdy `model`
+    // się zmienia tutaj, to jednorazowa migracja starego configu, który ma TYLKO legacy pole
+    // (bez models.main) - wtedy awansuje na models.main i gaśnie.
     const modelSync = resolveMainModelForForm({ model: formData.model, models: formData.models });
     formData.model = modelSync.model;
     formData.models = modelSync.models;
@@ -143,9 +143,9 @@ export function renderAgentProfileView(container: HTMLElement, plugin: UiBoundar
     // ── HEADER ──
     const header = container.createDiv({ cls: 'cs-profile__header' });
     header.createEl('h2', { text: formData.name, cls: 'cs-profile__name' });
-    // E2.8 A3: badge roli w headerze usunięty — rola rozpuszczona (D7).
+    // Badge roli w headerze usunięty - rola rozpuszczona.
 
-    // ── TAB BAR ── (E2.8 C2: zawsze pełne 8 zakładek, start na Przeglądzie)
+    // ── TAB BAR ── (zawsze pełne 8 zakładek, start na Przeglądzie)
     let activeTab = 'overview';
     const tabBar = container.createDiv({ cls: 'cs-profile-tabs' });
     for (const tab of TABS) {
@@ -191,7 +191,7 @@ export function renderAgentProfileView(container: HTMLElement, plugin: UiBoundar
         try {
             switch (activeTab) {
                 case 'overview': await renderOverviewTab(ctx, tabContent); break;
-                // S32 Z1c: Persona jest async (panel aktywnych sesji czyta pamięć z dysku).
+                // Persona jest async (panel aktywnych sesji czyta pamięć z dysku).
                 case 'profile': await renderProfileTab(ctx, tabContent); break;
                 case 'permissions': renderPermissionsTab(ctx, tabContent); break;
                 case 'skills': renderSkillsTab(ctx as unknown as Parameters<typeof renderSkillsTab>[0], tabContent); break;

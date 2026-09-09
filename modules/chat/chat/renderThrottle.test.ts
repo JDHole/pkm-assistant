@@ -174,7 +174,7 @@ function bodyOf(src: string, name: string): string {
 const streaming = readSource('./chat_streaming.ts');
 const ui = readSource('./chat_ui.ts');
 
-test('handle_chunk NIE maluje sam — zgłasza klatkę do throttle\'a (AUD-wydajnosc-071)', t => {
+test('handle_chunk NIE maluje sam - zgłasza klatkę do throttle\'a', t => {
     const body = bodyOf(streaming, 'handle_chunk');
     t.true(body.length > 0, 'nie znalazłem handle_chunk w chat_streaming.ts');
     t.regex(body, /this\._streamRenderThrottle\(\)\.request\(/,
@@ -185,7 +185,7 @@ test('handle_chunk NIE maluje sam — zgłasza klatkę do throttle\'a (AUD-wydaj
         'przewijanie per chunk ciągnęło _drawConnectorLines po całej liście wiadomości');
 });
 
-test('malowanie klatki przewija BEZ przerysowania łączników (AUD-wydajnosc-072/014)', t => {
+test('malowanie klatki przewija BEZ przerysowania łączników', t => {
     const body = bodyOf(streaming, '_paintStreamFrame');
     t.regex(body, /scrollToBottom\(\s*true\s*,\s*\{\s*drawConnectors:\s*false\s*\}\s*\)/,
         'malowanie strumienia musi wołać tryb „tylko przewiń"');
@@ -208,7 +208,7 @@ test('_resetPaintTargets zeruje też throttle (klatka starej tury nie wpada w no
     t.regex(body, /this\._renderThrottle\?\.reset\(\)/);
 });
 
-test('scrollToBottom koalescuje łączniki i umie „tylko przewinąć" (AUD-wydajnosc-072/014)', t => {
+test('scrollToBottom koalescuje łączniki i umie „tylko przewinąć"', t => {
     const body = bodyOf(ui, 'scrollToBottom');
     t.regex(body, /if\s*\(opts\.drawConnectors\s*===\s*false\)\s*return;/,
         'tryb „tylko przewiń" musi wychodzić PRZED rysowaniem łączników');
@@ -218,10 +218,10 @@ test('scrollToBottom koalescuje łączniki i umie „tylko przewinąć" (AUD-wyd
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Review opusa (P1 + P3) — klatka nie ma prawa uderzyć w CUDZĄ zakładkę
+// Klatka nie ma prawa uderzyć w CUDZĄ zakładkę
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('P3: klatka identyczna z NAMALOWANĄ nie nadpisuje czekającej nowszej', t => {
+test('klatka identyczna z NAMALOWANĄ nie nadpisuje czekającej nowszej', t => {
     const { throttle, painted, advance } = harness(80);
 
     throttle.request(frame('pierwsza wersja'));
@@ -236,10 +236,10 @@ test('P3: klatka identyczna z NAMALOWANĄ nie nadpisuje czekającej nowszej', t 
     t.is(painted[1].text, 'pierwsza wersja i ogon', 'duplikat zjadł ogon odpowiedzi');
 });
 
-test('P1: przełączenie zakładki (cancel) = ZERO malowań i zero przewinięć', t => {
+test('przełączenie zakładki (cancel) = ZERO malowań i zero przewinięć', t => {
     const { throttle, painted, advance, pendingTimers } = harness(80);
 
-    // Chunk wpada ≤80 ms przed przełączeniem — timer jest uzbrojony.
+    // Chunk wpada ≤80 ms przed przełączeniem - timer jest uzbrojony.
     throttle.request({ text: 'odpowiedź Jaskra', reasoning: '', owner: 'Jaskier' });
     t.is(pendingTimers(), 1);
 
@@ -250,7 +250,7 @@ test('P1: przełączenie zakładki (cancel) = ZERO malowań i zero przewinięć'
     t.is(pendingTimers(), 0);
 });
 
-test('P1: bramka właściciela — klatka cudzej tury NIE maluje po zmianie zakładki', t => {
+test('bramka właściciela - klatka cudzej tury NIE maluje po zmianie zakładki', t => {
     // Druga linia obrony: gdyby ktoś dołożył `await` przed `cancel()` w `_switchTab`, malowanie
     // i tak musi odmówić. Symulujemy `_paintStreamFrame`: paint pyta `shouldPaintFrame`.
     let activeTab = 'Jaskier';
@@ -279,7 +279,7 @@ test('P1: bramka właściciela — klatka cudzej tury NIE maluje po zmianie zak�
     t.deepEqual(scrolled, []);
 });
 
-test('P1: klatka bez właściciela maluje zawsze (zgodność wsteczna)', t => {
+test('klatka bez właściciela maluje zawsze (zgodność wsteczna)', t => {
     t.true(shouldPaintFrame(frame('x'), 'Jaskier'));
     t.true(shouldPaintFrame(frame('x'), null));
     t.true(shouldPaintFrame({ text: 'x', reasoning: '', owner: 'Jaskier' }, 'Jaskier'));
@@ -287,7 +287,7 @@ test('P1: klatka bez właściciela maluje zawsze (zgodność wsteczna)', t => {
     t.false(shouldPaintFrame({ text: 'x', reasoning: '', owner: 'Jaskier' }, undefined));
 });
 
-test('P1: ta sama treść od INNEJ tury nie jest połykana jako „identyczna"', t => {
+test('ta sama treść od INNEJ tury nie jest połykana jako „identyczna"', t => {
     const { throttle, painted, advance } = harness(80);
     throttle.request({ text: 'gotowe', reasoning: '', owner: 'Jaskier' });
     advance(80);
@@ -297,7 +297,7 @@ test('P1: ta sama treść od INNEJ tury nie jest połykana jako „identyczna"',
     t.is(painted[1].owner, 'Borys');
 });
 
-test('P1: _switchTab rozbraja throttle, a malowanie pyta o właściciela (strażnik po źródle)', t => {
+test('_switchTab rozbraja throttle, a malowanie pyta o właściciela (strażnik po źródle)', t => {
     const tabs = stripComments(readSource('./chat_tabs.ts'));
     t.regex(tabs, /this\._renderThrottle\?\.cancel\(\)/,
         '_switchTab bez cancel() = klatka starej zakładki przewija nową po przywróceniu scrollTop');

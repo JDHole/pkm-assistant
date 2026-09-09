@@ -61,7 +61,7 @@ test('SkinManager custom skin inherits parent and overrides per key', t => {
 });
 
 /**
- * AUD-code-review-092 — `parent` w YAML usera potrafi wskazywać samego siebie albo cyklicznie
+ * `parent` w YAML usera potrafi wskazywać samego siebie albo cyklicznie
  * dwa custom skiny nawzajem. Bez wykrywania cyklu `resolveSkin` rekurowałby w nieskończoność
  * (`RangeError: Maximum call stack size exceeded`) i wywalał każdy render UI dotykający skina.
  */
@@ -102,11 +102,9 @@ test('SkinManager emits skin_changed when active skin changes', async t => {
 });
 
 /**
- * AUD-bledy-037 — arkusz skina wraca z `document.adoptedStyleSheets` przy demontażu.
- *
- * Przed naprawą `applyCss()` dokładał skonstruowany arkusz i NIC go nie zdejmowało:
- * wyłączony plugin dalej stylizował Obsidiana aż do restartu, a każdy cykl
- * wyłącz/włącz dokładał kolejny arkusz (nowy obiekt nie przechodzi testu `.includes`).
+ * Arkusz skina musi wracać z `document.adoptedStyleSheets` przy demontażu: inaczej
+ * wyłączony plugin dalej stylizowałby Obsidiana aż do restartu, a każdy cykl
+ * wyłącz/włącz dokładałby kolejny arkusz (nowy obiekt nie przechodzi testu `.includes`).
  */
 type FakeSheet = { replaceSync(css: string): void; css: string };
 type FakeDoc = { adoptedStyleSheets: FakeSheet[]; body: FakeBody };
@@ -154,7 +152,7 @@ function installFakeDom(): { doc: FakeDoc; restore: () => void } {
     };
 }
 
-test.serial('AUD-bledy-037: dispose() zdejmuje arkusz skina z adoptedStyleSheets', t => {
+test.serial('dispose() zdejmuje arkusz skina z adoptedStyleSheets', t => {
     const { doc, restore } = installFakeDom();
     try {
         const manager = new SkinManagerClass();
@@ -174,7 +172,7 @@ test.serial('AUD-bledy-037: dispose() zdejmuje arkusz skina z adoptedStyleSheets
     }
 });
 
-test.serial('AUD-bledy-037: dispose() jest idempotentny, a po nim applyCss dokłada arkusz raz', t => {
+test.serial('dispose() jest idempotentny, a po nim applyCss dokłada arkusz raz', t => {
     const { doc, restore } = installFakeDom();
     try {
         const manager = new SkinManagerClass();
@@ -194,10 +192,9 @@ test.serial('AUD-bledy-037: dispose() jest idempotentny, a po nim applyCss dokł
 });
 
 /**
- * Follow-up AUD-dead-code-198 (2026-09-02) — pole `icons` wycięte z `SkinSpec` (jedynym
- * czytelnikiem był skasowany `getIcon()`). Archiwalny schemat S12 pokazywał `icons:` w YAML
- * usera, więc taki klucz może siedzieć w czyimś pliku. Loader nie ma schematu: nieznany klucz
- * przechodzi przez `...custom` w `mergeSkin()` i nikt go nie czyta — ładowanie i dziedziczenie
+ * Pole `icons` nie istnieje w `SkinSpec`, ale starsze YAML-e usera mogą wciąż nieść
+ * klucz `icons:` z czasów, gdy było wspierane. Loader nie ma schematu: nieznany klucz
+ * przechodzi przez `...custom` w `mergeSkin()` i nikt go nie czyta - ładowanie i dziedziczenie
  * mają działać dokładnie tak samo jak bez niego.
  */
 test('SkinLoader + mergeSkin tolerują obcy klucz `icons:` w YAML usera (pole wycięte ze SkinSpec)', async t => {
@@ -236,8 +233,7 @@ test('SkinLoader + mergeSkin tolerują obcy klucz `icons:` w YAML usera (pole wy
 //
 // `ensureSettings()` dosztukowuje domyślny skin przy starcie. Mutacja OBSERWOWANEGO proxy
 // planuje wtedy zapis całego `.pkm-assistant/settings.json` (a tam mieszkają klucze API)
-// sekundę po boocie — to ta sama klasa co incydent 2026-07-28. Strażnik end-to-end:
-// scenariusz harnessa `39_boot_nie_pisze`.
+// sekundę po boocie. Strażnik end-to-end: scenariusz harnessa `39_boot_nie_pisze`.
 
 /** Atrapa magazynu: worek `raw` + licznik zaplanowanych zapisów, jak w `SettingsStore`. */
 function magazynZProxy() {

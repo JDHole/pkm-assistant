@@ -1,5 +1,5 @@
 /**
- * F10 (mutacje) — `seededStringHash` jest jedynym publicznym punktem wejścia (`asText`/`scatter`
+ * `seededStringHash` jest jedynym publicznym punktem wejścia (`asText`/`scatter`
  * są prywatne), więc te testy pinują dokładne wartości liczbowe wynikające z algorytmu: każda
  * stała bitowa (przesunięcia, `| 0`/`>>> 0`, znak dodawania) i każda gałąź koercji wejścia
  * (string / number / boolean / bigint / „wszystko inne") ma tu przynajmniej jeden test, który

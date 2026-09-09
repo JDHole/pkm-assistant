@@ -1,5 +1,5 @@
 /**
- * templateUseOutcome - co zameldować po „Użyj u agenta" w Zapleczu (AUD-bledy-014).
+ * templateUseOutcome - co zameldować po „Użyj u agenta" w Zapleczu.
  *
  * `useTemplateAtAgent` robi DWA zapisy pod rząd (`store.instantiate` → kopia suba na dysku,
  * `agentManager.updateAgent` → przypisanie do agenta) i nie miał `try/catch`, a kafel odpalał

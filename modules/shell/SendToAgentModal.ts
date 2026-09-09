@@ -81,7 +81,7 @@ export class SendToAgentModal extends Modal {
 
         const agentManager = this.plugin.agentManager;
         if (agentManager) {
-            // S28 D6: tylko agenci uczestniczący w komunikatorze (duchy nie są adresatami).
+            // Tylko agenci uczestniczący w komunikatorze (duchy nie są adresatami).
             const agents = agentManager.listKomunikatorAgents();
             for (const agent of agents) {
                 const opt = agentSelect.createEl('option', {
@@ -135,7 +135,7 @@ export class SendToAgentModal extends Modal {
                     const subject = comment
                         ? comment.slice(0, 60)
                         : t('modal.send_to_agent.fragment_from', { path: this.filePath || 'notatki' });
-                    // S28 (D2): wiadomość nie ma osobnego pola `kontekst` — doklejamy je do treści.
+                    // Wiadomość nie ma osobnego pola `kontekst` - doklejamy je do treści.
                     const context = this.filePath
                         ? `${this.filePath}${comment ? ' | ' + comment : ''}`
                         : comment || '';

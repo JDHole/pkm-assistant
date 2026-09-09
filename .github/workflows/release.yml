@@ -1,11 +1,11 @@
 name: Release
 
 # Wydanie buduje GitHub Actions z DOKŁADNIE tego commita, na który wskazuje tag — nie laptop.
-# Powody (raport walidatora katalogu Obsidiana, 2026-09-07):
+# Powody (wymogi katalogu Obsidiana):
 #   * artifact attestations: użytkownik może kryptograficznie sprawdzić, że main.js/styles.css
 #     powstały z tego repo i tego commita (actions/attest-build-provenance);
 #   * powtarzalność: bundle budowany na Windows różnił się od zbudowanego na Linuksie
-#     końcami linii w osadzonej notce wydania (esbuild.js normalizuje to od tej pory, ale
+#     końcami linii w osadzonej notce wydania (esbuild.js to normalizuje, ale
 #     jedno stałe środowisko builda zamyka temat na dobre);
 #   * release ma zawierać WYŁĄCZNIE main.js, manifest.json i styles.css — nic więcej katalog
 #     nie pobiera, a każdy dodatkowy plik walidator wytyka.
@@ -66,8 +66,8 @@ jobs:
       - run: npm run build
       - name: manifest i versions nietkniete przez build
         run: git diff --exit-code manifest.json versions.json
-      # Harness „Szklane Pudło" — prawdziwy plugin bootowany w Node bez Obsidiana. Od 2026-09-07
-      # mieszka w OSOBNYM repo (https://github.com/JDHole/pkm-assistant-harness): walidator
+      # Harness „Szklane Pudło" — prawdziwy plugin bootowany w Node bez Obsidiana. Mieszka
+      # w OSOBNYM repo (https://github.com/JDHole/pkm-assistant-harness): walidator
       # katalogu Obsidiana lintuje CAŁE repo pluginu, a narzędzie testowe nie jest częścią
       # pluginu i generowało tysiące ostrzeżeń. Bramka zostaje ta sama — klonujemy harness obok
       # i puszczamy jego skrypty na TYM checkoutcie pluginu (PKM_ASSISTANT_ROOT).

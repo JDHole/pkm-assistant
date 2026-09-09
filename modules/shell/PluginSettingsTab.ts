@@ -1,20 +1,20 @@
 /**
- * `PluginSettingsTab` — baza zakładki ustawień (V-05..V-07).
+ * `PluginSettingsTab` - baza zakładki ustawień.
  *
  * Szkielet DWÓCH kontenerów: klasy CSS `pkm-settings-header` i `pkm-settings-main`.
  *
- * V-06 DWA STANY EKRANU — decyduje o nich BAZA, w {@link PluginSettingsTab.showScreen}:
+ * DWA STANY EKRANU - decyduje o nich BAZA, w {@link PluginSettingsTab.showScreen}:
  *  • `state !== 'loaded'` → akapit `settings.loading` i czekanie na `runtime.whenLoaded()`;
  *  • `state === 'loaded'` → treść od ręki.
  *
- * ⚠️ NIE MA guzika „uruchom" ani trzeciego stanu — istniały wyłącznie dla stanu `'idle'`
- * (gałąź mobile-defer, skasowana).
+ * ⚠️ NIE MA guzika „uruchom" ani trzeciego stanu - istnieje wyłącznie stan `'loaded'`
+ * i „nie-loaded".
  *
  * WEJŚCIE: Obsidian woła WYŁĄCZNIE `display()`; sekcje ustawień odświeżają ekran tą samą
  * metodą (`owner.display()` z kontraktu `SettingsSectionCtx`). Podklasa dostarcza `render()`
- * i sama go z siebie nie odpala — inaczej pominęłaby bramę stanu.
+ * i sama go z siebie nie odpala - inaczej pominęłaby bramę stanu.
  *
- * V-07: `saveSettings()` zakładki = `runtime.settingsStore.save()`.
+ * `saveSettings()` zakładki = `runtime.settingsStore.save()`.
  */
 import { PluginSettingTab } from 'obsidian';
 import type { App } from 'obsidian';
@@ -29,9 +29,9 @@ const SCOPE = 'PluginSettingsTab';
 
 /** Nagłówek zakładki (tytuł + jednozdaniowy opis). */
 const HEADER_CSS_CLASS = 'pkm-settings-header';
-/** Główna część zakładki — tu wchodzą sekcje z rejestru. */
+/** Główna część zakładki - tu wchodzą sekcje z rejestru. */
 const MAIN_CSS_CLASS = 'pkm-settings-main';
-/** Akapit „ładuję" — jedyna treść ekranu, dopóki runtime nie wstanie. */
+/** Akapit „ładuję" - jedyna treść ekranu, dopóki runtime nie wstanie. */
 const LOADING_CSS_CLASS = 'pkm-settings-loading';
 /** Stan runtime'u, przy którym zakładka rysuje treść bez czekania. */
 const READY_STATE = 'loaded';
@@ -47,7 +47,7 @@ export abstract class PluginSettingsTab extends PluginSettingTab {
      */
     declare readonly headerContainer: HTMLElement;
 
-    /** Główna część zakładki — tu wchodzą sekcje z rejestru. */
+    /** Główna część zakładki - tu wchodzą sekcje z rejestru. */
     declare readonly mainContainer: HTMLElement;
 
     constructor(app: App, plugin: PluginApi) {
@@ -62,7 +62,7 @@ export abstract class PluginSettingsTab extends PluginSettingTab {
     /**
      * Stawia szkielet DWÓCH kontenerów.
      *
-     * Kontener czyścimy TYLKO wtedy, gdy jest czym go zapełnić — czyli gdy runtime stoi.
+     * Kontener czyścimy TYLKO wtedy, gdy jest czym go zapełnić - czyli gdy runtime stoi.
      * Bez runtime'u jedyną treścią ekranu jest komunikat „ładuję" postawiony przez `render()`;
      * wytarcie go zamieniłoby czekanie w niemą, pustą zakładkę. Szkielet powstaje mimo to,
      * żeby wołacz zawsze dostał element do rysowania, a nie `undefined`.
@@ -77,7 +77,7 @@ export abstract class PluginSettingsTab extends PluginSettingTab {
     }
 
     /**
-     * Wejście Obsidiana w zakładkę — i zarazem odświeżenie, bo sekcje wołają
+     * Wejście Obsidiana w zakładkę - i zarazem odświeżenie, bo sekcje wołają
      * `owner.display()`. Obsidian tej metody nie awaituje, więc pełny przebieg jedzie
      * obok, a jego pad ląduje w logu, nie w nieobsłużonym odrzuceniu obietnicy.
      */
@@ -86,7 +86,7 @@ export abstract class PluginSettingsTab extends PluginSettingTab {
     }
 
     /**
-     * V-06: brama DWÓCH stanów ekranu. Runtime niegotowy → user widzi akapit „ładuję",
+     * Brama DWÓCH stanów ekranu. Runtime niegotowy → user widzi akapit „ładuję",
      * a treść czeka na `whenLoaded()`. Runtime gotowy → od razu treść (przy gotowym
      * runtimie `whenLoaded()` kosztuje 0 ms, więc gałąź jest skrótem, nie wymogiem).
      *
@@ -109,12 +109,12 @@ export abstract class PluginSettingsTab extends PluginSettingTab {
     }
 
     /**
-     * Treść zakładki. Woła ją {@link PluginSettingsTab.showScreen} — już PO bramie stanu,
+     * Treść zakładki. Woła ją {@link PluginSettingsTab.showScreen} - już PO bramie stanu,
      * więc implementacja może zakładać, że runtime miał swoją szansę wstać.
      */
     abstract render(): Promise<void>;
 
-    /** V-07: zapis idzie JEDNĄ drogą — przez magazyn ustawień runtime'u. */
+    /** Zapis idzie JEDNĄ drogą - przez magazyn ustawień runtime'u. */
     async saveSettings(): Promise<void> {
         const store = this.env?.settingsStore;
         if (!store) {

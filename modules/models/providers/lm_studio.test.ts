@@ -11,38 +11,38 @@ import type {
 } from '../contracts.js';
 
 /**
- * Wiadomość, w której treść jest ZAWSZE stringiem — dostawcy kształtu OpenAI nie oddają
+ * Wiadomość, w której treść jest ZAWSZE stringiem - dostawcy kształtu OpenAI nie oddają
  * bloków multimodalnych w odpowiedzi, a testy porównują treść znak w znak.
  */
 type TextMessage = OpenAiResponseTransformedMessage & { content: string };
 
 
 /**
- * Regression guards for the LM Studio <think>-tag parser (hotfix v2.2).
+ * Regression guards for the LM Studio <think>-tag parser.
  *
  * Kontekst produkcyjny: lokalne proxy ChatGPT udające LM Studio (na :1234) w trybie
- * think-tags wysyła reasoning inline w `delta.content` — atomowy chunk `<think>`, potem
+ * think-tags wysyła reasoning inline w `delta.content` - atomowy chunk `<think>`, potem
  * tekst myślenia, potem atomowy `</think>`, potem właściwa odpowiedź.
  *
- * Od v2.2 mechanika siedzi we wspólnym `ReasoningTagFilter` (jeden kod dla LM Studio,
- * Groqa, OpenRoutera i Ollamy — wcześniej dwie rozjeżdżające się kopie). Bliźniaczy zestaw
- * dla Ollamy: `ollama.test.ts`.
+ * Mechanika siedzi we wspólnym `ReasoningTagFilter` (jeden kod dla LM Studio, Groqa,
+ * OpenRoutera i Ollamy). Bliźniaczy zestaw dla Ollamy: `ollama.test.ts`.
  *
- * Naprawione bugi:
- *  1. Guard sprawdzał pole, które NASZ parser sam wypełnia → po pierwszym flushu myślenia
- *     parser gasł na stałe, a reszta myślenia + literalny `</think>` + odpowiedź lądowały
- *     w widocznej treści.
+ * Niezmienniki parsera:
+ *  1. Guard rozpoznający tryb myślenia nie może opierać się na polu, które sam parser
+ *     wypełnia - inaczej gaśnie na stałe po pierwszym flushu myślenia, a reszta myślenia
+ *     wraz z literalnym `</think>` i odpowiedzią lądują w widocznej treści.
  *  2. Parser zawsze zostawia w rezerwie ostatnie ≤8 znaków (na wypadek tagu rozciętego
- *     między chunki), a sentinel tej rezerwy nie opróżniał → ginął ogon odpowiedzi.
- *     Dziś dopycha ją `decoder.finish()`.
- *  3. (BUG 1) `<think>` bez `</think>` — model ucięty na max_tokens albo proxy zgubiło tag —
- *     wrzucał CAŁĄ wypowiedź do myślenia: user widział zwinięte myślenie i pustą odpowiedź.
- *     Teraz niedomknięty tag jest wycofywany do treści.
- *  4. (BUG 2) literalny `<think>` w prozie/bloku kodu (model PISZE o znaczniku) otwierał
- *     myślenie w środku zdania. Teraz tag uzbraja parser tylko na początku wiadomości.
+ *     między chunki); `decoder.finish()` musi tę rezerwę opróżnić, inaczej ginie ogon
+ *     odpowiedzi.
+ *  3. `<think>` bez `</think>` (model ucięty na max_tokens albo proxy zgubiło tag
+ *     zamykający) nie może wciągnąć całej wypowiedzi w myślenie - niedomknięty tag jest
+ *     wycofywany do treści, żeby user widział odpowiedź zamiast pustki.
+ *  4. Literalny `<think>` w prozie/bloku kodu (model PISZE o znaczniku, nie generuje go)
+ *     nie może otworzyć myślenia w środku zdania - tag uzbraja parser tylko na początku
+ *     wiadomości.
  */
 const REQ: ChatRequest = { messages: [{ role: 'user', content: 'hej' }] };
-// Endpoint z metryczki liczony LENIWIE — inaczej pusty rejestr na stubach wywala CAŁY plik
+// Endpoint z metryczki liczony LENIWIE - inaczej pusty rejestr na stubach wywala CAŁY plik
 // przy imporcie, zamiast dać każdemu testowi własne, czytelne „not implemented".
 const CTX: ProviderContext = makeCtx({ modelId: 'qwen3' });
 
@@ -66,7 +66,7 @@ const emitted = (events: StreamEvent[]) =>
   events.filter((e): e is Extract<StreamEvent, { type: 'text' }> => e.type === 'text')
     .map(e => e.delta).join('');
 
-/** Seam obserwacyjny parsera tagów myślenia (TT-16). */
+/** Seam obserwacyjny parsera tagów myślenia. */
 const seam = (decoder: StreamDecoder) => decoder.reasoning!;
 
 /** Odpowiedź non-streaming w kształcie OpenAI (tor `complete()`). */
@@ -86,7 +86,7 @@ function completed(content: string): TextMessage {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 1. Lokalne proxy happy path — pełna sekwencja think-tagów
+// 1. Lokalne proxy happy path - pełna sekwencja think-tagów
 // ─────────────────────────────────────────────────────────────────────────────
 test('lm_studio think parser: lokalne proxy happy path rozdziela myślenie od odpowiedzi co do znaku', t => {
   const THINK_1 = '**Confirming backlog execution to Nika**';
@@ -109,12 +109,12 @@ test('lm_studio think parser: lokalne proxy happy path rozdziela myślenie od od
   t.is(message.reasoning_content, THINK_1 + THINK_2 + THINK_3, 'całe myślenie w reasoning_content');
   t.is(message.content, ANSWER_1 + ANSWER_2, 'widoczna treść = sama odpowiedź');
 
-  // Objawy z produkcji, które ten hotfix zabija:
+  // Objawy z produkcji, przed którymi ten parser musi chronić:
   t.false(message.content.includes('</think>'), 'żaden tag nie może zostać w treści');
   t.false(message.content.includes('<think>'), 'żaden tag nie może zostać w treści');
   t.false(message.content.includes('Confirming backlog'), 'nagłówki reasoning nie mogą wyciec');
 
-  // Ogon odpowiedzi (ostatnie ≤7 znaków trzymanych w rezerwie bufora) — ginął bez flushu na [DONE].
+  // Ogon odpowiedzi (ostatnie ≤7 znaków trzymanych w rezerwie bufora) musi dojechać po flushu na [DONE].
   t.true(message.content.endsWith('po kolei.'), 'ogon odpowiedzi musi dojechać');
 
   // Zwrotki handle_chunk skladaja sie w dokladnie te sama widoczna tresc (kontrakt streamingu).
@@ -122,12 +122,12 @@ test('lm_studio think parser: lokalne proxy happy path rozdziela myślenie od od
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. Regresja guardu — parser nie gaśnie po pierwszym flushu reasoning
+// 2. Guard nie gaśnie po pierwszym flushu reasoning
 // ─────────────────────────────────────────────────────────────────────────────
 test('lm_studio think parser: parsuje dalej po pierwszym flushu reasoning (regresja guardu)', t => {
   // Pierwszy chunk myślenia jest dłuższy niż rezerwa 8 znaków, więc WYMUSZA flush do
-  // reasoning_content już na starcie. Stary guard po tym flushu widział niepuste
-  // reasoning_content i wracał wcześniej dla KAŻDEGO kolejnego chunka.
+  // reasoning_content już na starcie. Guard nie może przez to przestać parsować kolejne
+  // chunki tylko dlatego, że reasoning_content jest już niepuste.
   const THINK = [
     '**Planning the answer for the user**',
     '\n\nFirst I check the backlog file.',
@@ -148,7 +148,6 @@ test('lm_studio think parser: parsuje dalej po pierwszym flushu reasoning (regre
   t.is(message.reasoning_content, THINK.join(''), 'myślenie kompletne, nie urwane na pierwszym flushu');
   t.is(message.content, ANSWER, 'odpowiedź czysta');
 
-  // Bug pre-fix: content == '<ogon myślenia></think>' + odpowiedź.
   for (const chunk of THINK.slice(1)) {
     t.false(message.content.includes(chunk.trim()), `fragment myślenia wyciekł do treści: ${chunk.trim()}`);
   }
@@ -156,7 +155,7 @@ test('lm_studio think parser: parsuje dalej po pierwszym flushu reasoning (regre
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. Natywny reasoning (DeepSeek-style) — parser think ma się NIE włączać
+// 3. Natywny reasoning (DeepSeek-style) - parser think ma się NIE włączać
 // ─────────────────────────────────────────────────────────────────────────────
 test('lm_studio think parser: natywne delta.reasoning_content zostaje nietknięte', t => {
   const { message, events, decoder } = stream([
@@ -175,7 +174,7 @@ test('lm_studio think parser: natywne delta.reasoning_content zostaje nietknięt
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. Stream bez myślenia — czysty content, ogon nie ginie
+// 4. Stream bez myślenia - czysty content, ogon nie ginie
 // ─────────────────────────────────────────────────────────────────────────────
 test('lm_studio think parser: zwykły stream przechodzi nietknięty razem z ogonem', t => {
   const { message, events, decoder } = stream([
@@ -193,7 +192,7 @@ test('lm_studio think parser: zwykły stream przechodzi nietknięty razem z ogon
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. Tagi rozcięte między chunki — rezerwa bufora skleja je z powrotem
+// 5. Tagi rozcięte między chunki - rezerwa bufora skleja je z powrotem
 // ─────────────────────────────────────────────────────────────────────────────
 test('lm_studio think parser: rozcięty <think> na starcie streamu zostaje sklejony', t => {
   const { message } = stream([
@@ -205,15 +204,14 @@ test('lm_studio think parser: rozcięty <think> na starcie streamu zostaje sklej
   ]);
 
   t.is(message.reasoning_content, 'tekst myślenia dłuższy niż rezerwa bufora');
-  // Pre-fix: '<th' zostawał w treści, a całe myślenie przeciekało (bufor startował za tagiem).
   t.is(message.content, 'Odpowiedź po myśleniu.');
   t.false(message.content.includes('<th'), 'kawałek tagu nie może zostać w treści');
 });
 
-// KONTRAKT ZMIENIONY w v2.2 (dawniej: „rozcięty <think> po zwykłej treści nie zjada tekstu sprzed
-// tagu" — tag po treści otwierał myślenie, a widoczne zdanie urywało się w połowie).
-// Teraz `<think>` uzbraja parser TYLKO gdy przed nim nie padł ani jeden widoczny znak.
-test('lm_studio think parser: <think> po zwykłej treści zostaje zwykłym tekstem (BUG 2)', t => {
+// `<think>` uzbraja parser TYLKO gdy przed nim nie padł ani jeden widoczny znak - inaczej
+// rozcięty `<think>` po zwykłej treści zjadałby tekst sprzed tagu (tag po treści otwierałby
+// myślenie, a widoczne zdanie urywałoby się w połowie).
+test('lm_studio think parser: <think> po zwykłej treści zostaje zwykłym tekstem', t => {
   const CHUNKS = [
     'Wstęp widoczny. <th',
     'ink>myślenie dłuższe niż rezerwa',
@@ -222,8 +220,9 @@ test('lm_studio think parser: <think> po zwykłej treści zostaje zwykłym tekst
 
   const { message, events } = stream([...CHUNKS.map(c => sse({ content: c })), 'data: [DONE]']);
 
-  // Objaw produkcyjny: model PISZE o znaczniku (agenci w tym projekcie rozmawiają o własnym
-  // parserze), a treść od tagu w dół znikała z odpowiedzi do bloku myślenia.
+  // Objaw produkcyjny, przed którym testy chronią: model PISZE o znaczniku (agenci w tym
+  // projekcie rozmawiają o własnym parserze) - treść od tagu w dół nie może zniknąć
+  // z odpowiedzi do bloku myślenia.
   t.is(message.content, CHUNKS.join(''), 'nic nie może zniknąć z widocznej treści');
   t.is(message.reasoning_content, undefined, 'to nie było myślenie — pole nie może powstać');
   t.is(emitted(events), message.content);
@@ -243,12 +242,13 @@ test('lm_studio think parser: rozcięty </think> w środku streamu zostaje sklej
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 8. BUG 1 — <think> który nigdy się nie domknął (model ucięty na max_tokens,
+// 8. <think> który nigdy się nie domknął (model ucięty na max_tokens,
 //    proxy zgubiło tag zamykający)
 // ─────────────────────────────────────────────────────────────────────────────
-test('lm_studio think parser: niedomknięty <think> wraca w całości do treści (BUG 1)', t => {
-  // Objaw z produkcji: user widzi zwinięty blok myślenia i ZERO odpowiedzi — cała wypowiedź
-  // wylądowała w reasoning_content, a `content` został pustym stringiem.
+test('lm_studio think parser: niedomknięty <think> wraca w całości do treści', t => {
+  // Objaw z produkcji, przed którym testy chronią: user widzi zwinięty blok myślenia
+  // i ZERO odpowiedzi - cała wypowiedź ląduje w reasoning_content, a `content` zostaje
+  // pustym stringiem.
   const CUT = 'Zaczynam od backlogu. Pierwszy punkt to naprawa parsera, drugi to testy, trzeci';
 
   const { message, events } = stream([
@@ -284,9 +284,9 @@ test('lm_studio think parser: domknięte myślenie zostaje, urwany ogon wraca do
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 9. BUG 2 — model PISZE o znaczniku (proza / blok kodu)
+// 9. model PISZE o znaczniku (proza / blok kodu)
 // ─────────────────────────────────────────────────────────────────────────────
-test('lm_studio think parser: literalny <think> w prozie nie zjada zdania (BUG 2)', t => {
+test('lm_studio think parser: literalny <think> w prozie nie zjada zdania', t => {
   const PROSE = 'Usuń znacznik <think> z promptu, bo psuje parser.';
 
   const { message, events } = stream([
@@ -299,7 +299,7 @@ test('lm_studio think parser: literalny <think> w prozie nie zjada zdania (BUG 2
   t.is(emitted(events), message.content);
 });
 
-test('lm_studio think parser: <think> w bloku kodu zostaje w treści (BUG 2)', t => {
+test('lm_studio think parser: <think> w bloku kodu zostaje w treści', t => {
   const CHUNKS = [
     'Parser wycina bloki myślenia. Przykład wejścia:\n\n```\n',
     '<think>tu model myśli</think>\n',
@@ -313,7 +313,7 @@ test('lm_studio think parser: <think> w bloku kodu zostaje w treści (BUG 2)', t
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 10. Tool calls przy urwanym <think> — narzędzia przechodzą, treść nie ginie
+// 10. Tool calls przy urwanym <think> - narzędzia przechodzą, treść nie ginie
 // ─────────────────────────────────────────────────────────────────────────────
 test('lm_studio think parser: urwany <think> nie psuje tool_calls', t => {
   const CUT = 'Sprawdzę plik zanim odpowiem — muszę go najpierw przeczytać.';
@@ -334,7 +334,7 @@ test('lm_studio think parser: urwany <think> nie psuje tool_calls', t => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 11. Przerwany stream (Stop usera / błąd sieci → brak [DONE]) — rezerwa w to_openai()
+// 11. Przerwany stream (Stop usera / błąd sieci → brak [DONE]) - rezerwa w to_openai()
 // ─────────────────────────────────────────────────────────────────────────────
 test('lm_studio think parser: przerwany stream nie gubi rezerwy, finish() dokłada ogon', t => {
   const ANSWER = 'Odpowiedź urwana Stopem.';
@@ -345,7 +345,7 @@ test('lm_studio think parser: przerwany stream nie gubi rezerwy, finish() dokła
     sse({ content: ANSWER }),
   ];
 
-  // Bez sentinela — dokładnie tak wygląda strumień ubity przyciskiem Stop. Karmimy dekoder
+  // Bez sentinela - dokładnie tak wygląda strumień ubity przyciskiem Stop. Karmimy dekoder
   // BEZ `finish()`, żeby zobaczyć stan rezerwy w połowie drogi.
   const midDecoder = lmStudioProvider.createStreamDecoder(REQ, CTX);
   const midEvents = CHUNKS.flatMap(c => midDecoder.feed(c));
@@ -356,7 +356,7 @@ test('lm_studio think parser: przerwany stream nie gubi rezerwy, finish() dokła
   t.true(seam(midDecoder).buffered.length > 0, 'ostatnie ≤8 znaków siedzą w rezerwie na rozcięty tag');
   t.not(midText, ANSWER, 'akumulator sam z siebie nie ma jeszcze ogona');
 
-  // `finish()` domyka rezerwę — ogon nie ginie.
+  // `finish()` domyka rezerwę - ogon nie ginie.
   const { message } = stream(CHUNKS);
   t.is(message.content, ANSWER, 'finish() dokłada rezerwę — ogon nie ginie');
   t.is(message.reasoning_content, 'krótkie myślenie');
@@ -364,11 +364,11 @@ test('lm_studio think parser: przerwany stream nie gubi rezerwy, finish() dokła
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 12. Non-streaming (complete() → to_openai()) — te same reguły co w streamie
+// 12. Non-streaming (complete() → to_openai()) - te same reguły co w streamie
 // ─────────────────────────────────────────────────────────────────────────────
 test('lm_studio think parser: non-streaming rozdziela myślenie od odpowiedzi', t => {
-  // Przed fixem `complete()` w ogóle nie parsował <think> — surowy tag jechał dalej
-  // (m.in. do wyników sub-agentów na modelach lokalnych).
+  // `complete()` musi parsować `<think>` tak samo jak stream - inaczej surowy tag jedzie
+  // dalej (m.in. do wyników sub-agentów na modelach lokalnych).
   const msg = completed('<think>rozumowanie modelu</think>Właściwa odpowiedź.');
 
   t.is(msg.reasoning_content, 'rozumowanie modelu');
@@ -391,10 +391,10 @@ test('lm_studio think parser: non-streaming — tag w środku treści nic nie zm
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// N20 (luka L-07, B.10 LS-01/LS-02): endpoint z hosta ustawień, bez wymogu klucza
+// Endpoint z hosta ustawień, bez wymogu klucza
 // ─────────────────────────────────────────────────────────────────────────────
 
-test('L-07: lm_studio — endpoint z hosta ustawień, brak wymogu klucza API', t => {
+test('lm_studio — endpoint z hosta ustawień, brak wymogu klucza API', t => {
   const fromSettings = 'http://192.168.0.7:4321';
   const spec = lmStudioProvider.buildRequest(REQ, makeCtx({ modelId: 'qwen3', endpoint: fromSettings }), false);
   t.true(spec.url.startsWith(fromSettings), 'host z `pkmAssistant.chat.hosts.lm_studio` wygrywa nad domyślnym');
@@ -413,11 +413,11 @@ test('L-07: lm_studio — endpoint z hosta ustawień, brak wymogu klucza API', t
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// F10: `modelsPath` liczy adres listy modeli z HOSTA ustawień, nie z metryczki
-// (L45) — bez tego custom host z Ustawień jest ignorowany na liście modeli,
+// `modelsPath` liczy adres listy modeli z HOSTA ustawień, nie z metryczki -
+// bez tego custom host z Ustawień jest ignorowany na liście modeli,
 // mimo że czat go respektuje.
 // ─────────────────────────────────────────────────────────────────────────────
-test('F10 lm_studio: listModels liczy adres z hosta ustawień (modelsPath), nie z domyślnego endpointu', async t => {
+test('lm_studio: listModels liczy adres z hosta ustawień (modelsPath), nie z domyślnego endpointu', async t => {
   const fromSettings = 'http://192.168.0.7:4321';
   const http = new CapturingHttpClient({ body: { data: [{ id: 'qwen3' }] } });
 
@@ -428,10 +428,10 @@ test('F10 lm_studio: listModels liczy adres z hosta ustawień (modelsPath), nie 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// F10: `acceptsModel` (L54) — ten sam serwer wystawia modele embeddingowe obok
+// `acceptsModel` - ten sam serwer wystawia modele embeddingowe obok
 // modeli czatu; lista w Ustawieniach ma pokazać TYLKO modele czatu.
 // ─────────────────────────────────────────────────────────────────────────────
-test('F10 lm_studio: listModels filtruje modele embeddingowe, zostawia modele czatu', async t => {
+test('lm_studio: listModels filtruje modele embeddingowe, zostawia modele czatu', async t => {
   const http = new CapturingHttpClient({
     body: {
       data: [

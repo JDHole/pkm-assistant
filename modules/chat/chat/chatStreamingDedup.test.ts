@@ -1,6 +1,6 @@
 /**
- * AUD-code-review-017: `chat_streaming.ts` importuje `obsidian` (MarkdownRenderer, Notice) więc
- * AVA nie może zaimportować go wprost — strażnik czyta ŹRÓDŁO (wzór `turnOwner.test.ts`,
+ * `chat_streaming.ts` importuje `obsidian` (MarkdownRenderer, Notice) więc
+ * AVA nie może zaimportować go wprost - strażnik czyta ŹRÓDŁO (wzór `turnOwner.test.ts`,
  * `stopSemantics.test.ts`).
  *
  * Dwie deduplikacje w tym pliku:
@@ -15,7 +15,7 @@ import { fileURLToPath } from 'url';
 const readSource = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 const source = readSource('./chat_streaming.ts');
 
-test('parseToolCallArgs: dokładnie JEDNA definicja wzorca string→JSON.parse w try/catch (AUD-code-review-017)', t => {
+test('parseToolCallArgs: dokładnie JEDNA definicja wzorca string→JSON.parse w try/catch', t => {
     const pattern = /typeof toolCall\.arguments === 'string'/g;
     const matches = source.match(pattern) || [];
     t.is(matches.length, 1, `wzorzec parsowania toolCall.arguments powinien żyć w JEDNYM miejscu (parseToolCallArgs), znaleziono ${matches.length} kopii`);
@@ -50,7 +50,7 @@ test('parseToolCallArgs: zachowanie identyczne ze starym inline wzorcem (string 
     t.deepEqual(parseToolCallArgs({ arguments: null }), {});
 });
 
-test('handle_chunk deleguje budowę kontenera agenta do _ensureAgentMessageContainer, nie powiela ciała (AUD-code-review-017)', t => {
+test('handle_chunk deleguje budowę kontenera agenta do _ensureAgentMessageContainer, nie powiela ciała', t => {
     const handleChunkStart = source.indexOf('export function handle_chunk');
     t.true(handleChunkStart > 0, 'nie znalazłem handle_chunk');
     const nextExport = source.indexOf('\nexport function', handleChunkStart + 1);

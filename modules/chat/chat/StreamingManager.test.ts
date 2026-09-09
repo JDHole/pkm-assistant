@@ -1,14 +1,10 @@
 /**
- * AUD-testy-027 — `StreamingManager` wreszcie ma testy.
+ * `getActiveStreams()` zasila decyzję, czy tura dostanie ŚWIEŻĄ instancję modelu
+ * (`chat_streaming.ts`): jeśli ta metoda kiedykolwiek zwróci pustą listę mimo aktywnych
+ * streamów, dwie zakładki zaczną dzielić jedną instancję `ChatModel` - czyli Stop kliknięty
+ * w jednej trafi w turę drugiej (`stopStream`/bilet bramki/`_abortSettle` są per instancja).
  *
- * Plik jest wolny od `obsidian`, DOM-u i I/O (ZERO importów), a mimo to nie był importowany
- * przez żaden test w repo. Tymczasem `getActiveStreams()` zasila decyzję, czy tura dostanie
- * ŚWIEŻĄ instancję modelu (`chat_streaming.ts`): wstrzyknięcie `return [];` na początek tej
- * metody zostawiało 259/259 na zielono, a dwie zakładki wracały do dzielenia jednej instancji
- * `ChatModel` — czyli Stop kliknięty w jednej trafiałby w turę drugiej
- * (`stopStream`/bilet bramki/`_abortSettle` są per instancja).
- *
- * Testy są `serial`, bo `streamingManager` (default export) to singleton modułowy — biegi
+ * Testy są `serial`, bo `streamingManager` (default export) to singleton modułowy - biegi
  * równoległe grzebałyby sobie nawzajem w `activeStreams`.
  */
 import test from 'ava';
@@ -28,15 +24,15 @@ test('świeża instancja: druga tura W TYM widoku wymusza świeży model', t => 
     t.true(shouldUseFreshModel(5, 0));
 });
 
-test('świeża instancja: stream z INNEGO widoku też wymusza świeży model (Sprint 03 Z7)', t => {
-    // Sedno naprawy Z7: lokalne `size > 1` nie widziało czterech zakładek z osobnych widoków.
+test('świeża instancja: stream z INNEGO widoku też wymusza świeży model', t => {
+    // Lokalne `size > 1` nie widzi zakładek z osobnych widoków, więc trzeba liczyć osobno.
     t.true(shouldUseFreshModel(1, 1));
     t.true(shouldUseFreshModel(0, 3));
 });
 
 test('świeża instancja: martwy licznik streamów (zawsze 0) NIE otwiera cache dla drugiej tury', t => {
-    // Mutacja z AUD-testy-027 (`getActiveStreams()` → `[]`) psuje tylko drugi człon —
-    // pierwszy musi ją częściowo złapać, ale przypadek 1 tura + cudzy stream już nie.
+    // Mutacja `getActiveStreams()` → `[]` psuje tylko drugi człon - pierwszy musi ją częściowo
+    // złapać, ale przypadek 1 tura + cudzy stream już nie.
     t.true(shouldUseFreshModel(2, 0));
     t.true(shouldUseFreshModel(1, 1));
 });

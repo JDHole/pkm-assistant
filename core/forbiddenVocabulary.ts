@@ -1,24 +1,24 @@
 /**
- * JEDNO źródło wzorca bramki „grep zero" (clean-room).
+ * JEDNO źródło wzorca bramki „grep zero" - sprawdza kod pod kątem zakazanego
+ * słownictwa/nazewnictwa.
  *
- * DLACZEGO OSOBNY PLIK: ten sam wzorzec był dotąd przepisany w dwóch miejscach —
- * `core/clean_room_guard.test.ts` i `build_kontrakt.test.ts`. Dwie kopie tej samej listy
+ * DLACZEGO OSOBNY PLIK: ten sam wzorzec był dotąd przepisany w dwóch miejscach -
+ * `core/vocabulary_guard.test.ts` i `build_kontrakt.test.ts`. Dwie kopie tej samej listy
  * rozjeżdżają się po pierwszej zmianie, a rozjazd w BRAMCE jest cichy: węższa kopia
  * przepuszcza to, co szersza łapie.
  *
- * DLACZEGO TAK DZIWNIE ZAPISANY: plik z listą zakazanych słów sam by się o nią odbijał —
+ * DLACZEGO TAK DZIWNIE ZAPISANY: plik z listą zakazanych słów sam by się o nią odbijał -
  * bramka szuka ich WSZĘDZIE, także w sobie. Każda pozycja ma więc jedną literę ujętą
  * w klasę znaków (`[s]mart` ≡ `smart` dla silnika wyrażeń regularnych), przez co
  * w TEKŚCIE pliku zakazany ciąg nie występuje ani razu, a ZNACZENIE wzorca jest
- * identyczne. Dzięki temu ten plik NIE potrzebuje wyjątku w bramce — a każdy wyjątek
+ * identyczne. Dzięki temu ten plik NIE potrzebuje wyjątku w bramce - a każdy wyjątek
  * to dziura, o której trzeba pamiętać.
  *
- * ŹRÓDŁO PRAWDY: `clean_room_grep.sh` (ERE, case-insensitive). Zmieniasz wzorzec tam —
- * zmieniasz go TU, i nigdzie indziej.
+ * ŹRÓDŁO PRAWDY: ten plik (ERE, case-insensitive). Zmieniasz wzorzec TU, i nigdzie indziej.
  */
 
 /**
- * Alternatywy wzorca, w kolejności z gatunkowego skryptu. Każda jest zapisem
+ * Alternatywy wzorca, w ustalonej kolejności. Każda jest zapisem
  * równoważnym, nie luźniejszym — nie „upraszczaj" klas znaków z powrotem do gołych liter.
  */
 const ALTERNATYWY = [
@@ -39,9 +39,9 @@ const ALTERNATYWY = [
 ] as const;
 
 /** Źródło wyrażenia — dokładny odpowiednik `PATTERN` ze skryptu bramki. */
-export const CLEAN_ROOM_PATTERN_SOURCE = ALTERNATYWY.join('|');
+export const FORBIDDEN_VOCABULARY_SOURCE = ALTERNATYWY.join('|');
 
 /** Gotowe wyrażenie, bez flagi `g` (żeby `lastIndex` nie niósł stanu między wywołaniami). */
-export function cleanRoomPattern(): RegExp {
-    return new RegExp(CLEAN_ROOM_PATTERN_SOURCE, 'i');
+export function forbiddenVocabulary(): RegExp {
+    return new RegExp(FORBIDDEN_VOCABULARY_SOURCE, 'i');
 }

@@ -149,10 +149,10 @@ test('defaultMemorySchema has memory-specific fields', t => {
     t.is(defaultMemorySchema.embedding, `vector[${DEFAULT_VECTOR_DIM}]`);
 });
 
-// ── AUD-wydajnosc-088/041: wektor tylko w `index.vectorIndexes` ──────────────
+// ── Wektor tylko w `index.vectorIndexes` ──────────────
 //
 // Orama trzyma każdy wektor DWA RAZY (indeks wektorowy + kopia w dokumencie w docs-store),
-// a tej drugiej kopii nie czyta ani plugin, ani sama Orama — przy każdym `searchVector`
+// a tej drugiej kopii nie czyta ani plugin, ani sama Orama - przy każdym `searchVector`
 // nadpisuje ją `null`. Testy jadą na PRAWDZIWEJ Oramie z `node_modules`.
 
 const bigSchema: AnySchema = { id: 'string', path: 'string', embedding: 'vector[64]' };

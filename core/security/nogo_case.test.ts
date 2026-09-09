@@ -1,21 +1,17 @@
 /**
- * K15 (2026-08-23) — STREFA No-Go PORÓWNYWANA BEZ ROZRÓŻNIANIA WIELKOŚCI LITER.
+ * STREFA No-Go PORÓWNYWANA BEZ ROZRÓŻNIANIA WIELKOŚCI LITER.
  *
- * Znalezisko AUD-security-101 [HIGH] z drugiego biegu audytu security. Stan przed naprawą:
+ * Gdyby `AccessGuard._isNoGo` porównywał ścieżkę ze strefą No-Go BAJT W BAJT, na Windows
+ * i macOS (system plików wielkości liter NIE rozróżnia) `Projekty/prywatne/tajne.md`
+ * przechodziłby bramkę na zielono (bez okna zgody), choć `Projekty/Prywatne/tajne.md` byłby
+ * odrzucany — a to JEDEN I TEN SAM PLIK. To samo dotyczyłoby `SYSTEM_NO_GO`:
+ * `.Obsidian/workspace.json` i `.TRASH/x.md` przechodziłyby, mimo że `.obsidian/` i `.trash/`
+ * są zablokowane z definicji.
  *
- *   • `AccessGuard._isNoGo` porównywał ścieżkę ze strefą No-Go BAJT W BAJT — świadomie,
- *     z komentarzem „vault bywa case-sensitive";
- *   • na Windows i macOS system plików wielkości liter NIE rozróżnia, więc
- *     `Projekty/prywatne/tajne.md` przechodził bramkę na zielono (bez okna zgody),
- *     choć `Projekty/Prywatne/tajne.md` był odrzucany — a to JEDEN I TEN SAM PLIK;
- *   • to samo dotyczyło `SYSTEM_NO_GO`: `.Obsidian/workspace.json` i `.TRASH/x.md`
- *     przechodziły, mimo że `.obsidian/` i `.trash/` są zablokowane z definicji.
+ * Kontrast: `isProtectedPath` (`keySanitizer.ts`) od zawsze robi `.toLowerCase()`, więc
+ * `.PKM-Assistant/settings.json` jest łapany poprawnie.
  *
- * No-Go było JEDYNĄ bramką ścieżkową fail-OPEN na wielkość liter. Kontrast:
- * `isProtectedPath` (`keySanitizer.ts`) od zawsze robi `.toLowerCase()`, więc
- * `.PKM-Assistant/settings.json` był łapany poprawnie.
- *
- * ZASADA PO NAPRAWIE (i to jest sedno tego pliku):
+ * ZASADA (i to jest sedno tego pliku):
  *
  *   bramka ZAKAZU  (No-Go, SYSTEM_NO_GO)     → porównuje BEZ rozróżniania wielkości liter
  *   bramka ZEZWOLENIA (whitelista, scope suba) → porównuje Z rozróżnianiem
@@ -48,7 +44,7 @@ const WARIANTY = [
 
 // ─── 1. No-Go usera: wszystkie warianty zapisu odbijają się z powodem No-Go ───
 
-test.serial('K15: No-Go łapie plik niezależnie od wielkości liter (whitelista)', t2 => {
+test.serial('No-Go łapie plik niezależnie od wielkości liter (whitelista)', t2 => {
     AccessGuard.setNoGoFolders(['Projekty/Prywatne']);
     const ps = new PermissionSystem(null as never, {} as never);
     const agent = agentZWhitelista();
@@ -70,7 +66,7 @@ test.serial('K15: No-Go łapie plik niezależnie od wielkości liter (whitelista
     );
 });
 
-test.serial('K15: No-Go łapie plik niezależnie od wielkości liter (guidance_mode)', t2 => {
+test.serial('No-Go łapie plik niezależnie od wielkości liter (guidance_mode)', t2 => {
     AccessGuard.setNoGoFolders(['Projekty/Prywatne']);
     const ps = new PermissionSystem(null as never, {} as never);
     const agent = agentZCalymVaultem();
@@ -86,7 +82,7 @@ test.serial('K15: No-Go łapie plik niezależnie od wielkości liter (guidance_m
 
 // ─── 2. SYSTEM_NO_GO: `.obsidian` i `.trash` w przebraniu wielkich liter ───
 
-test.serial('K15: SYSTEM_NO_GO trzyma mimo wielkich liter — odczyt i zapis', t2 => {
+test.serial('SYSTEM_NO_GO trzyma mimo wielkich liter — odczyt i zapis', t2 => {
     AccessGuard.setNoGoFolders([]);
     const agent = agentZCalymVaultem();
 
@@ -104,7 +100,7 @@ test.serial('K15: SYSTEM_NO_GO trzyma mimo wielkich liter — odczyt i zapis', t
 
 // ─── 3. Wpis w ustawieniach też jest normalizowany ───
 
-test.serial('K15: wpis No-Go pisany małymi literami blokuje folder pisany wielkimi', t2 => {
+test.serial('wpis No-Go pisany małymi literami blokuje folder pisany wielkimi', t2 => {
     AccessGuard.setNoGoFolders(['prywatne/']);
     const ps = new PermissionSystem(null as never, {} as never);
     const agent = agentZCalymVaultem();
@@ -117,7 +113,7 @@ test.serial('K15: wpis No-Go pisany małymi literami blokuje folder pisany wielk
     t2.false(AccessGuard._isNoGo('Prywatnosc/x.md'));
 });
 
-test.serial('K15: `Prywatne/` i `prywatne` to JEDEN wpis po normalizacji', t2 => {
+test.serial('`Prywatne/` i `prywatne` to JEDEN wpis po normalizacji', t2 => {
     AccessGuard.setNoGoFolders(['Prywatne/', 'prywatne', './PRYWATNE/']);
     const uzytkownika = AccessGuard._noGoFolders.filter(f => f.includes('prywatne'));
     t2.deepEqual(uzytkownika, ['prywatne'], `wpisy No-Go nie zwinęły się do jednego: ${uzytkownika.join(', ')}`);
@@ -125,7 +121,7 @@ test.serial('K15: `Prywatne/` i `prywatne` to JEDEN wpis po normalizacji', t2 =>
 
 // ─── 4. Bramka ZEZWOLENIA zostaje case-sensitive (świadomie) ───
 
-test.serial('K15: whitelista NADAL rozróżnia wielkość liter — fail-closed', t2 => {
+test.serial('whitelista NADAL rozróżnia wielkość liter — fail-closed', t2 => {
     AccessGuard.setNoGoFolders([]);
     const ps = new PermissionSystem(null as never, {} as never);
     const agent = { name: 'Tester', permissions: { guidance_mode: false }, focusFolders: ['Publiczne'] };
@@ -141,7 +137,7 @@ test.serial('K15: whitelista NADAL rozróżnia wielkość liter — fail-closed'
     t2.true(ps.checkPermission(agent, 'vault.read', 'Publiczne/x.md').allowed);
 });
 
-test.serial('K15: zakres sub-agenta NADAL rozróżnia wielkość liter', t2 => {
+test.serial('zakres sub-agenta NADAL rozróżnia wielkość liter', t2 => {
     AccessGuard.setNoGoFolders([]);
     const agent = agentZCalymVaultem();
     const scopeFolders = ['Projekty/Alfa'];
@@ -155,7 +151,7 @@ test.serial('K15: zakres sub-agenta NADAL rozróżnia wielkość liter', t2 => {
 
 // ─── 5. Wyniki `search`/`list` — ten sam filtr, ta sama normalizacja ───
 
-test.serial('K15: filterResults wycina No-Go w każdym zapisie wielkości liter', t2 => {
+test.serial('filterResults wycina No-Go w każdym zapisie wielkości liter', t2 => {
     AccessGuard.setNoGoFolders(['Projekty/Prywatne']);
     const agent = agentZCalymVaultem();
 

@@ -1,11 +1,11 @@
 /**
- * Domknięcie K4 na wzorcu SELF-APPEND — siostrzana wada, inna niż `AgentMemory_kolizja_nazw.test.ts`.
+ * Wzorzec SELF-APPEND — siostrzana wada, inna niż `AgentMemory_kolizja_nazw.test.ts`.
  *
  * Tamten plik naprawiał pętle „dobierz WOLNĄ NAZWĘ z kandydatów" (`probeFile`). Tu chodzi
  * o pięć miejsc, gdzie kod czytał stary log/sesję/archiwum PRZED dopisaniem NOWEGO wpisu do
  * WŁASNEGO, znanego pliku — wzorzec `if (await adapter.exists(path)) { existing =
  * await adapter.read(path); }`. Na Dysku Google `exists()` potrafi zwrócić `false` DLA PLIKU,
- * KTÓRY JEST (incydent 2026-07-28): kod nigdy nie próbuje `read()`, traktuje plik jako świeży,
+ * KTÓRY JEST: kod nigdy nie próbuje `read()`, traktuje plik jako świeży,
  * i zapis NADPISUJE całą dotychczasową treść jednym nowym wpisem. Naprawa: `readIfExists`
  * (`core/utils/vaultFs.ts`) czyta NAJPIERW — `exists()` nie ma szans skłamać.
  *

@@ -15,7 +15,7 @@
  * Kiedy DEBUG=false: tylko warn/error.
  * Kiedy DEBUG=true: WSZYSTKO (debug, info, tool, model, timing).
  *
- * L1 (2026-08-27): `debug`/`info`/`model`/`timing` oraz etykiety w `tool()`/`table()` wołają
+ * `debug`/`info`/`model`/`timing` oraz etykiety w `tool()`/`table()` wołają
  * `console.debug` (nie `console.log`) — zgodność z wytyczną Obsidiana „Avoid unnecessary
  * logging to console" (dozwolone metody: warn/error/debug; patrz eslint.obsidian.config.js).
  * W Chromium DevTools poziom Verbose jest DOMYŚLNIE UKRYTY, więc po włączeniu debugMode trzeba
@@ -56,11 +56,10 @@ function maskLogText(value: string): string {
 const MASK_MAX_DEPTH = 6;
 
 /**
- * K20 (AUD-security-133): przez maskę idzie KAŻDY poziom argumentu, także kontekst dopięty
- * do błędu. Dawniej klon `Error` niósł wyłącznie `name`/`message`/`stack`, więc `cause`
- * (ES2022) i pola doklejane przez adaptery (`response`, `data`, `details`) po prostu ZNIKAŁY
- * — sekret nie wyciekał, ale diagnostyka gubiła całą treść. Dziś te pola zostają, przepuszczone
- * przez tę samą maskę.
+ * Przez maskę idzie KAŻDY poziom argumentu, także kontekst dopięty do błędu. Bez tego klon
+ * `Error` niósłby wyłącznie `name`/`message`/`stack`, więc `cause` (ES2022) i pola doklejane
+ * przez adaptery (`response`, `data`, `details`) po prostu ZNIKAŁYBY — sekret nie wyciekałby,
+ * ale diagnostyka traciłaby całą treść. Te pola zostają, przepuszczone przez tę samą maskę.
  *
  * `depth` pilnuje, żeby cykliczna struktura nie zapętliła rekurencji — dlatego wszystkie
  * wywołania `.map()` opakowane są w lambdę (goły `.map(maskLogValue)` podawał INDEKS jako
@@ -97,7 +96,7 @@ function maskLogValue(value: unknown, depth = 0): unknown {
 }
 
 class Logger {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     // `_debug` NIE jest `private` świadomie: testy security (`core/security/*.test.js`)
     // przestawiają je wprost, żeby sprawdzić maskowanie w trybie debug.
     declare _debug: boolean;
@@ -105,7 +104,7 @@ class Logger {
 
     constructor() {
         this._debug = false;
-        // Optional file sink (E1.8) — off until initFileSink() is called from main.js.
+        // Optional file sink — off until initFileSink() is called from main.js.
         // Node tests never call it, so behaviour stays console-only there.
         this._fileSink = null;
     }
@@ -120,7 +119,7 @@ class Logger {
         // File sink mirrors debug state: info+ normally, everything when debug is on.
         if (this._fileSink) this._fileSink.setLevel(enabled ? 'debug' : 'info');
         if (enabled) {
-            // L1 (2026-08-27): console.debug (nie .log) — patrz komentarz klasy na górze pliku.
+            // console.debug (nie .log) — patrz komentarz klasy na górze pliku.
             console.debug(
                 `%c[PKM] 🐛 ${t('logger.debug_enabled')}`,
                 'color: #4caf50; font-weight: bold; font-size: 14px'
@@ -168,11 +167,10 @@ class Logger {
      * Wzór `TraceLog.dispose()` — wołane z `onunload` pluginu, MOŻLIWIE PÓŹNO, bo wcześniejsze
      * kroki demontażu jeszcze logują.
      *
-     * AUD-bledy-059/038: przedtem jedynym wołaczem `dispose()` był sam `initFileSink` przy
-     * PONOWNEJ inicjalizacji. Ogon logu z demontażu czekał na debounce (1000 ms) i przy
-     * zamknięciu Obsidiana tuż po wyłączeniu pluginu ginął bez ostrzeżenia — akurat ten plik
-     * jest po to, żeby agent czytał z niego, co się działo (LogFileSink: „CZYTA PLIKI z dysku").
-     * Fail-soft: demontaż nie ma prawa się wywrócić na logowaniu.
+     * Bez jawnego wywołania `dispose()` tutaj, ogon logu z demontażu czekałby na debounce
+     * (1000 ms) i przy zamknięciu Obsidiana tuż po wyłączeniu pluginu ginąłby bez ostrzeżenia —
+     * akurat ten plik jest po to, żeby agent czytał z niego, co się działo (LogFileSink: „CZYTA
+     * PLIKI z dysku"). Fail-soft: demontaż nie ma prawa się wywrócić na logowaniu.
      */
     async disposeFileSink(): Promise<void> {
         const sink = this._fileSink;

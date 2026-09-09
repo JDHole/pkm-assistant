@@ -1,5 +1,5 @@
 /**
- * Cache odczytów stron dla `web_read` (E3.3, mikro-decyzja 9).
+ * Cache odczytów stron dla `web_read`.
  *
  * DLACZEGO TUTAJ, A NIE W PROVIDERZE: cache'ujemy WYNIK KOŃCOWY narzędzia — czyli
  * już PO ewentualnym streszczeniu tanim modelem. Gdyby cache siedział w

@@ -1,5 +1,5 @@
 /**
- * SearchTool — jedno narzędzie `search` (E2.5, decyzje D5/D6).
+ * SearchTool — jedno narzędzie `search`.
  *
  * Konsoliduje 12 dawnych narzędzi retrieval (vault_search/grep/semantic/glob/
  * filter_yaml/links + memory_* analogi + memory_sessions/summaries) w JEDNO.
@@ -19,7 +19,7 @@ import type { AgentIdentityLike } from './vault_path_validator.js';
 import { log } from '../../core/utils/Logger.js';
 
 /** Filtry kandydatów (`where`) wg `inputSchema`.
- * AUD-dead-code-166: `export` zdjęty — homonim z `modules/memory/RetrievalEngine.ts:120`
+ * `export` zdjęty — homonim z `modules/memory/RetrievalEngine.ts:120`
  * (ten sam identyfikator, inny kształt); zero konsumentów tej lokalnej definicji poza plikiem. */
 interface SearchWhere {
     folder?: string;
@@ -54,7 +54,7 @@ interface SearchToolAgentManager {
 }
 
 /**
- * Minimalny widok pluginu. `oramaDb` publikuje `VaultIndexer` (E1.4) — `null` = tylko keyword.
+ * Minimalny widok pluginu. `oramaDb` publikuje `VaultIndexer` — `null` = tylko keyword.
  * Rozszerza `SemanticNotePlugin`, bo ten sam obiekt idzie do `buildSemanticNote`.
  */
 export interface SearchToolPlugin extends SemanticNotePlugin {
@@ -67,7 +67,7 @@ export interface SearchToolPlugin extends SemanticNotePlugin {
 function resolveAgentMemory(plugin: SearchToolPlugin | null | undefined, agentName: string | null): unknown {
     const am = plugin?.agentManager;
     if (!am) return null;
-    // K4 (AUD-security-036): FAIL-CLOSED — patrz komentarz w ReadTool.getInvocationMemory.
+    // FAIL-CLOSED — patrz komentarz w ReadTool.getInvocationMemory.
     return (agentName ? am.getAgentMemory?.(agentName) : am.getActiveMemory?.()) || null;
 }
 
@@ -77,12 +77,12 @@ function buildEngine(plugin: SearchToolPlugin, scope: SemanticScope, agentName: 
     const vault = app?.vault;
     if (!vault) throw new Error('Vault unavailable');
     const embeddingHelper = plugin?.env ? new EmbeddingHelper(plugin.env) : null;
-    const oramaDb = plugin?.oramaDb || null; // publikowany przez VaultIndexer (E1.4); null → keyword only
+    const oramaDb = plugin?.oramaDb || null; // publikowany przez VaultIndexer; null → keyword only
     const agentMemory = scope === 'memory' ? resolveAgentMemory(plugin, agentName) : null;
-    // E2.6: app przekazujemy zawsze — scope=vault jest API-first (getMarkdownFiles/metadataCache),
+    // app przekazujemy zawsze — scope=vault jest API-first (getMarkdownFiles/metadataCache),
     // scope=memory i tak spada na adapter (pamięć poza indeksem Obsidiana).
-    // `RetrievalEngine` mieszka jeszcze w JS (fala TS-2) — argumenty przechodzą przez
-    // asercję do jego luźnego kontraktu; kształt jest sprawdzony po stronie silnika.
+    // `RetrievalEngine` mieszka jeszcze w JS — argumenty przechodzą przez asercję do jego
+    // luźnego kontraktu; kształt jest sprawdzony po stronie silnika.
     return new RetrievalEngine({ app, vault, embeddingHelper, oramaDb, agentMemory, includeHiddenVault } as never);
 }
 
@@ -155,14 +155,12 @@ export function createSearchTool() {
                     ? buildSemanticNote({ plugin, scope })
                     : undefined;
 
-                // AUD-wydajnosc-024 follow-up (kontrakt W3, `modules/memory/RetrievalEngine.ts`,
-                // branch `refactor/v2.2-perf-W3`): `runSearch` niesie opcjonalne `scan:
-                // {candidates, scanned, truncated}` WYŁĄCZNIE gdy skan keyword był obcięty sufitem
-                // 300 kandydatów — bez przekazania tego dalej agent nie wie, że nie widział całego
-                // vaulta. Odczyt przez bezpieczny rzut: `SearchOutcome` w TYM worktree (W3 jeszcze
-                // niezmergowany tu) go nie zna; po merge'u typ w `modules/memory` dołoży pole i ten
-                // rzut stanie się zwykłym odczytem. Pole dopisywane TYLKO gdy obecne — brak `scan`
-                // (silnik sprzed W3, albo skan nieobcięty) daje wynik bajtowo identyczny jak dziś.
+                // `runSearch` niesie opcjonalne `scan: {candidates, scanned, truncated}`
+                // WYŁĄCZNIE gdy skan keyword był obcięty sufitem 300 kandydatów — bez
+                // przekazania tego dalej agent nie wie, że nie widział całego vaulta. Odczyt
+                // przez bezpieczny rzut, bo `SearchOutcome` nie deklaruje tego pola jako zawsze
+                // obecnego. Pole dopisywane TYLKO gdy obecne — brak `scan` (skan nieobcięty)
+                // daje wynik bajtowo identyczny jak bez tego pola.
                 const scan = (r as { scan?: { candidates: number; scanned: number; truncated: boolean } }).scan;
 
                 return {

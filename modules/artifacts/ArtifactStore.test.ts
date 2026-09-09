@@ -15,11 +15,10 @@ const PLAN_TYPE = {
 const typeLoader = { getType: (n: string) => (n === PLAN_TYPE.name ? PLAN_TYPE : null) };
 
 // ── Mini event bus (imituje `vault.on`/`metadataCache.on` z Obsidiana) ──
-// AUD-wydajnosc-059/030/021/051/060/031/104/106: rejestr artefaktów (ArtifactStore) trzyma się
-// aktualny NIE dzięki skanowaniu vaulta przy każdym `list()`/`pathById()`, tylko dzięki tym
-// nasłuchom — więc atrapa musi je REALNIE odpalać (nie tylko udawać `on()`), inaczej testy
-// mutacji-zewnętrznej (np. `fileManager.processFrontMatter` z pominięciem `store.update()`)
-// nie ujawniłyby regresji.
+// Rejestr artefaktów (ArtifactStore) trzyma się aktualny NIE dzięki skanowaniu vaulta przy
+// każdym `list()`/`pathById()`, tylko dzięki tym nasłuchom - więc atrapa musi je REALNIE
+// odpalać (nie tylko udawać `on()`), inaczej testy mutacji-zewnętrznej (np.
+// `fileManager.processFrontMatter` z pominięciem `store.update()`) nie ujawniłyby regresji.
 function makeEmitter() {
     const handlers = new Map<string, Set<(...args: never[]) => void>>();
     return {
@@ -46,7 +45,7 @@ function makeApp() {
     const mcEvents = makeEmitter();
     let getMarkdownFilesCalls = 0;
     let cachedReadCalls = 0;
-    // P1a (review opusa): pliki pod rootem, dla których `metadataCache` udaje NIEROZWIĄZANY
+    // Pliki pod rootem, dla których `metadataCache` udaje NIEROZWIĄZANY
     // stan (getFileCache -> null), tak jak zaraz po starcie pluginu, zanim Obsidian rozgrzeje
     // cache całego vaulta — bez emisji żadnego eventu.
     const coldPaths = new Set<string>();
@@ -242,7 +241,7 @@ test('update rejects protected-key set_field but still applies valid ops', async
     t.is(r.artifact!.status, 'uwagi');
 });
 
-test('AUD-code-review-102: update rejects set_field without a string key (no "undefined" frontmatter key)', async t => {
+test('update rejects set_field without a string key (no "undefined" frontmatter key)', async t => {
     const nowRef = { value: new Date('2026-07-23') };
     const { store, files } = makeStore(nowRef);
     const { id, path } = await store.create('plan', { tytul: 'Bez klucza', agent: 'Jaskier' });
@@ -256,7 +255,7 @@ test('AUD-code-review-102: update rejects set_field without a string key (no "un
     t.false(files.get(path)!.includes('undefined:'));
 });
 
-test('AUD-code-review-047: update rejects a non-scalar set_field value with the CANONICAL message', async t => {
+test('update rejects a non-scalar set_field value with the canonical message', async t => {
     const nowRef = { value: new Date('2026-07-23') };
     const { store } = makeStore(nowRef);
     const { id } = await store.create('plan', { tytul: 'Nie-skalar', agent: 'Jaskier' });
@@ -266,7 +265,7 @@ test('AUD-code-review-047: update rejects a non-scalar set_field value with the 
     t.is(r.applied, 0);
     t.is(r.errors.length, 1);
     t.is(r.errors[0]!.code, 'invalid_value');
-    // Kanoniczny komunikat z artifactParser.ts (INVALID_VALUE_MSG) — TEN SAM co przy `create`/`pola`,
+    // Kanoniczny komunikat z artifactParser.ts (INVALID_VALUE_MSG) - TEN SAM co przy `create`/`pola`,
     // nie osobna, rozjechana kopia ("set_field accepts only scalar values" bez sufiksu).
     t.is(r.errors[0]!.message, 'set_field accepts only scalar values (string/number/bool)');
 });
@@ -298,7 +297,7 @@ test('move relocates the note but keeps it findable by frontmatter id', async t 
     const { store, files } = makeStore(nowRef);
     const { id, path } = await store.create('plan', { tytul: 'Przenoszony', agent: 'Jaskier' });
 
-    // K2: przenosiny WEWNĄTRZ folderu artefaktów — tu tropimy po frontmatterze, nie po ścieżce (A16).
+    // Przenosiny WEWNĄTRZ folderu artefaktów - tu tropimy po frontmatterze, nie po ścieżce.
     const ok = await store.move(id, `${DEFAULT_ARTIFACTS_FOLDER}/Inny`);
     t.true(ok);
     t.false(files.has(path));
@@ -307,7 +306,7 @@ test('move relocates the note but keeps it findable by frontmatter id', async t 
     t.true(thin.path!.startsWith(`${DEFAULT_ARTIFACTS_FOLDER}/Inny/`));
 });
 
-test('K2: move POZA folder artefaktów jest odmawiane — artefakt nie może osierocieć', async t => {
+test('move POZA folder artefaktów jest odmawiane - artefakt nie może osierocieć', async t => {
     const nowRef = { value: new Date('2026-07-23') };
     const { store, files } = makeStore(nowRef);
     const { id, path } = await store.create('plan', { tytul: 'Nie wyjedzie', agent: 'Jaskier' });
@@ -349,19 +348,20 @@ test('archive moves closed artifacts older than the type retention window', asyn
     t.true(thin.path!.includes('_archiwum/'));
 });
 
-// ── M (AUD-security-123): bramka i zlew rozstrzygają id na TĘ SAMĄ ścieżkę ──────
-// `pathById` (cel dla `contextExtractor`) czytał `_pathIndex` bez weryfikacji, a
-// `_findFileById` (zapis) skanował dysk. User przenosił notatkę w Obsidianie → bramka
-// oceniała STARĄ ścieżkę, zapis szedł pod NOWĄ, a `isBlockBoundToNote` wiązał cudzą
-// notatkę stojącą pod starym adresem z żywymi guzikami artefaktu (nawrót S-063).
+// ── bramka i zlew rozstrzygają id na TĘ SAMĄ ścieżkę ──────
+// `pathById` (cel dla `contextExtractor`) i `_findFileById` (zapis) muszą się zgadzać: gdyby
+// jeden czytał nieświeży `_pathIndex` bez weryfikacji, a drugi skanował dysk, user przenoszący
+// notatkę w Obsidianie rozjeżdżałby bramkę (ocena STAREJ ścieżki) z zapisem (NOWA ścieżka), a
+// `isBlockBoundToNote` wiązałby cudzą notatkę stojącą pod starym adresem z żywymi guzikami
+// artefaktu.
 
-test('M123: po przenosinach usera bramka i zlew widzą tę samą ścieżkę', async t => {
+test('po przenosinach usera bramka i zlew widzą tę samą ścieżkę', async t => {
     const nowRef = { value: new Date('2026-07-23') };
     const { store, files } = makeStore(nowRef);
     const { id, path } = await store.create('plan', { tytul: 'Plan', agent: 'Klara' });
     t.is(store.pathById(id), path);
 
-    // User przenosi notatkę w Obsidianie (poza zasięgiem store'a — plugin nic nie wie).
+    // User przenosi notatkę w Obsidianie (poza zasięgiem store'a - plugin nic nie wie).
     const moved = `${DEFAULT_ARTIFACTS_FOLDER}/Prywatne/2026-07-23 Plan.md`;
     files.set(moved, files.get(path)!);
     files.delete(path);
@@ -371,7 +371,7 @@ test('M123: po przenosinach usera bramka i zlew widzą tę samą ścieżkę', as
     t.is(store.pathById(id), moved, 'bramka MUSI wskazać to samo co zlew');
 });
 
-test('M123: obca notatka pod starą ścieżką nie dziedziczy id artefaktu', async t => {
+test('obca notatka pod starą ścieżką nie dziedziczy id artefaktu', async t => {
     const nowRef = { value: new Date('2026-07-23') };
     const { store, files } = makeStore(nowRef);
     const { id, path } = await store.create('plan', { tytul: 'Plan', agent: 'Klara' });
@@ -385,12 +385,12 @@ test('M123: obca notatka pod starą ścieżką nie dziedziczy id artefaktu', asy
     t.not(store.pathById(id), path, 'stary wpis indeksu nie może wskazywać cudzej notatki');
 });
 
-// ── M (AUD-security-125): walidator ogląda DOKŁADNIE to, co pójdzie do zapisu ────
-// `applyFieldsValidated` sprawdzało `String(value)`, więc zagnieżdżony obiekt dawał
-// „[object Object]" i przechodził, a `create` wpisywał do frontmattera SUROWĄ mapę —
-// razem z blokiem kodu, którego `set_field` w ogóle nie dopuszcza (tylko skalary).
+// ── walidator ogląda DOKŁADNIE to, co pójdzie do zapisu ──────
+// `applyFieldsValidated` musi sprawdzać samą wartość, nie `String(value)` - inaczej zagnieżdżony
+// obiekt dawałby "[object Object]" i przechodził, a `create` wpisywałby do frontmattera SUROWĄ
+// mapę - razem z blokiem kodu, którego `set_field` w ogóle nie dopuszcza (tylko skalary).
 
-test('M125: nie-skalar w `pola` jest odrzucony (invalid_value), plik NIE powstaje', async t => {
+test('nie-skalar w `pola` jest odrzucony (invalid_value), plik NIE powstaje', async t => {
     const nowRef = { value: new Date('2026-07-23') };
     const { store, files } = makeStore(nowRef);
 
@@ -406,7 +406,7 @@ test('M125: nie-skalar w `pola` jest odrzucony (invalid_value), plik NIE powstaj
     t.is(files.size, 0, 'żaden plik nie powstał');
 });
 
-test('M125: walidator i zapis oglądają ten sam ładunek — tablica też odpada', async t => {
+test('walidator i zapis oglądają ten sam ładunek - tablica też odpada', async t => {
     const nowRef = { value: new Date('2026-07-23') };
     const { store } = makeStore(nowRef);
     const res = await store.create('plan', {
@@ -418,7 +418,7 @@ test('M125: walidator i zapis oglądają ten sam ładunek — tablica też odpad
     t.is(res.errors[0]!.code, 'invalid_value');
 });
 
-test('M125: skalary (string/liczba/bool) nadal przechodzą', async t => {
+test('skalary (string/liczba/bool) nadal przechodzą', async t => {
     const nowRef = { value: new Date('2026-07-23') };
     const { store } = makeStore(nowRef);
     const res = await store.create('plan', {
@@ -430,12 +430,11 @@ test('M125: skalary (string/liczba/bool) nadal przechodzą', async t => {
     t.is(res.errors.length, 0);
 });
 
-// ── AUD-wydajnosc-059/030/021/051 (+060/031/104/106): rejestr artefaktów zamiast skanu
-// vaulta na każde `list()`/`pathById()`. Testy MUSZĄ czerwienić się po cofnięciu naprawy
-// (powrót `list()`/`pathById()`/`_findFileById` do pętli po `getMarkdownFiles()` per
-// wywołanie) — liczą realne wywołania `vault.getMarkdownFiles()`, nie tylko wynik.
+// ── rejestr artefaktów zamiast skanu vaulta na każde `list()`/`pathById()` ──
+// Testy liczą realne wywołania `vault.getMarkdownFiles()`, nie tylko wynik - żeby złapać
+// regresję do pętli po `getMarkdownFiles()` per wywołanie w `list()`/`pathById()`/`_findFileById`.
 
-test('AUD-wydajnosc-059/030/021/051: list() skanuje vault RAZ (rejestr), kolejne wywołania nie skanują ponownie', async t => {
+test('list() skanuje vault RAZ (rejestr), kolejne wywołania nie skanują ponownie', async t => {
     const nowRef = { value: new Date('2026-07-23') };
     const { store, getMarkdownFilesCalls } = makeStore(nowRef);
     await store.create('plan', { tytul: 'A', agent: 'Jaskier' });
@@ -449,7 +448,7 @@ test('AUD-wydajnosc-059/030/021/051: list() skanuje vault RAZ (rejestr), kolejne
     t.is(getMarkdownFilesCalls(), 1, 'cztery `list()` z rzędu mają skanować vault RAZ, nie cztery');
 });
 
-test('AUD-wydajnosc-060/031/104: pathById dla NIEISTNIEJĄCEGO id nie skanuje vaulta powtórnie', async t => {
+test('pathById dla NIEISTNIEJĄCEGO id nie skanuje vaulta powtórnie', async t => {
     const nowRef = { value: new Date('2026-07-23') };
     const { store, getMarkdownFilesCalls } = makeStore(nowRef);
     await store.create('plan', { tytul: 'A', agent: 'Jaskier' });
@@ -465,7 +464,7 @@ test('AUD-wydajnosc-060/031/104: pathById dla NIEISTNIEJĄCEGO id nie skanuje va
         'kolejne pytania o (to samo albo inne) nieznane id NIE mają wracać do pełnego skanu — rejestr jest kompletną wyrocznią');
 });
 
-test('AUD-wydajnosc-060/031: `create` pod rootem (zdarzenie vault.on) odsłania nowy artefakt bez pełnego skanu', async t => {
+test('`create` pod rootem (zdarzenie vault.on) odsłania nowy artefakt bez pełnego skanu', async t => {
     const nowRef = { value: new Date('2026-07-23') };
     const { store, files, vaultEvents, getMarkdownFilesCalls } = makeStore(nowRef);
 
@@ -487,7 +486,7 @@ test('AUD-wydajnosc-060/031: `create` pod rootem (zdarzenie vault.on) odsłania 
     t.is(store.list({ agent: 'Jaskier' }).length, 1, 'list() też widzi świeżo doindeksowany wpis, bez własnego skanu');
 });
 
-test('AUD-wydajnosc-059/060: `delete` pod rootem (zdarzenie vault.on) wypisuje artefakt z rejestru', async t => {
+test('`delete` pod rootem (zdarzenie vault.on) wypisuje artefakt z rejestru', async t => {
     const nowRef = { value: new Date('2026-07-23') };
     const { store, vaultEvents } = makeStore(nowRef);
     const { id, path } = await store.create('plan', { tytul: 'Do skasowania z zewnątrz', agent: 'Jaskier' });
@@ -499,7 +498,7 @@ test('AUD-wydajnosc-059/060: `delete` pod rootem (zdarzenie vault.on) wypisuje a
     t.is(store.pathById(id), null);
 });
 
-test('AUD-wydajnosc-104: `metadataCache.changed` (edycja frontmattera z zewnątrz store\'a) odświeża rejestr', async t => {
+test('`metadataCache.changed` (edycja frontmattera z zewnątrz store\'a) odświeża rejestr', async t => {
     // To jest DOKŁADNIE scenariusz z testu „archive moves closed artifacts…" niżej w tym pliku,
     // wyizolowany: `list()` musi zobaczyć zmianę zrobioną PRZEZ `app.fileManager` wprost, z
     // pominięciem `store.update()` — inaczej `archive()` (który filtruje po `list({status})`)
@@ -515,7 +514,7 @@ test('AUD-wydajnosc-104: `metadataCache.changed` (edycja frontmattera z zewnątr
     t.is(store.list({ status: 'zamkniety' }).length, 1, 'zmiana zrobiona mimo store powinna dotrzeć do rejestru przez event `changed`');
 });
 
-test('AUD-wydajnosc-106: root ustawień liczy się O(1) na przelot rejestru, nie O(liczby plików vaulta)', async t => {
+test('root ustawień liczy się O(1) na przelot rejestru, nie O(liczby plików vaulta)', async t => {
     const nowRef = { value: new Date('2026-07-23') };
     const { app, files } = makeApp();
     let getFolderCalls = 0;
@@ -527,8 +526,8 @@ test('AUD-wydajnosc-106: root ustawień liczy się O(1) na przelot rejestru, nie
     });
 
     await store.create('plan', { tytul: 'A', agent: 'Jaskier' });
-    // 30 obcych notatek w vaultcie, poza folderem artefaktów — dawny kod liczył `_artifactsRoot()`
-    // (czyli `sanitizePath`) per KAŻDY z nich wewnątrz pętli `list()`.
+    // 30 obcych notatek w vaultcie, poza folderem artefaktów - test pilnuje żeby `_artifactsRoot()`
+    // (czyli `sanitizePath`) nie liczył się per KAŻDY z nich wewnątrz pętli `list()`.
     for (let i = 0; i < 30; i++) files.set(`Notatki/nota-${i}.md`, '# nic');
 
     getFolderCalls = 0; // liczymy WYŁĄCZNIE koszt tego jednego list()
@@ -537,12 +536,11 @@ test('AUD-wydajnosc-106: root ustawień liczy się O(1) na przelot rejestru, nie
         `_artifactsRoot() policzony ${getFolderCalls} razy na 31 plików vaulta — powinien być stały, nie proporcjonalny do rozmiaru vaulta`);
 });
 
-// ── Review opusa (2026-09-02): P1a (zimny metadataCache przy budowie rejestru) + P1b (self-heal
-// regresuje pod zimnym cache w NOWEJ lokalizacji). Testy MUSZĄ czerwienić się po cofnięciu
-// naprawy — reprodukują dokładnie to, co reviewer opisał (3 artefakty / zimny cache -> list()=0,
-// pathById=null; potem rozgrzanie / `resolved` / dysk-fallback odzyskują dane).
+// ── zimny metadataCache przy budowie rejestru + samoleczenie pod zimnym cache w NOWEJ
+// lokalizacji. Testy reprodukują: 3 artefakty / zimny cache -> list()=0, pathById=null; potem
+// rozgrzanie / `resolved` / dysk-fallback odzyskują dane.
 
-test('AUD-wydajnosc-059 P1a: zimny metadataCache przy (pierwszej) budowie rejestru nie gubi artefaktów na zawsze', async t => {
+test('zimny metadataCache przy (pierwszej) budowie rejestru nie gubi artefaktów na zawsze', async t => {
     const nowRef = { value: new Date('2026-07-23') };
     const { store, files, coldPaths } = makeStore(nowRef);
     // Artefakty ISTNIEJĄCE już na dysku (np. z poprzedniej sesji) — fresh store, `_pathIndex`
@@ -565,7 +563,7 @@ test('AUD-wydajnosc-059 P1a: zimny metadataCache przy (pierwszej) budowie rejest
     t.is(store.pathById('art-stara-0001'), paths[1]);
 });
 
-test('AUD-wydajnosc-059 P1a: metadataCache "resolved" wymusza przebudowę rejestru (łapie zmiany bez żadnego innego eventu)', async t => {
+test('metadataCache "resolved" wymusza przebudowę rejestru (łapie zmiany bez żadnego innego eventu)', async t => {
     const nowRef = { value: new Date('2026-07-23') };
     const { store, files, mcEvents } = makeStore(nowRef);
     await store.create('plan', { tytul: 'A', agent: 'Jaskier' });
@@ -581,7 +579,7 @@ test('AUD-wydajnosc-059 P1a: metadataCache "resolved" wymusza przebudowę rejest
     t.is(store.list().length, 2, 'po "resolved" rejestr się przebudował i widzi oba');
 });
 
-test('AUD-wydajnosc-060/104 P1b: artefakt przeniesiony BEZ eventu do lokalizacji z zimnym cache — _findFileById wraca do dysku', async t => {
+test('artefakt przeniesiony BEZ eventu do lokalizacji z zimnym cache - _findFileById wraca do dysku', async t => {
     const nowRef = { value: new Date('2026-07-23') };
     const { store, files, coldPaths } = makeStore(nowRef);
     const { id, path } = await store.create('plan', { tytul: 'Przenoszony po cichu', agent: 'Jaskier' });
@@ -606,7 +604,7 @@ test('AUD-wydajnosc-060/104 P1b: artefakt przeniesiony BEZ eventu do lokalizacji
     t.is(store.pathById(id), moved);
 });
 
-test('AUD-wydajnosc-060/104 P1b: id NIGDY niewidziane nie dostaje fallbacku z dysku (zostaje O(1), nie regresuje 060/031/104)', async t => {
+test('id NIGDY niewidziane nie dostaje fallbacku z dysku (zostaje O(1))', async t => {
     const nowRef = { value: new Date('2026-07-23') };
     const { store, cachedReadCalls } = makeStore(nowRef);
     await store.create('plan', { tytul: 'A', agent: 'Jaskier' });
@@ -614,8 +612,8 @@ test('AUD-wydajnosc-060/104 P1b: id NIGDY niewidziane nie dostaje fallbacku z dy
     t.is(await store._findFileById('art-nigdy-niewidziane-0000'), null,
         '_wasEverKnown musi być false dla id, którego rejestr nigdy nie znał — bez tego wracałby skan+odczyt z dysku na każde halucynowane id');
     t.is(await store._findFileById('inne-halucynowane-id'), null);
-    // To jest SEDNO 060/031/104: fallback z dysku dla id, którego rejestr nigdy nie znał, w
-    // ogóle się NIE odpala — inaczej `_diskFallbackForId` czytałby z dysku KAŻDY plik folderu
-    // artefaktów na KAŻDE halucynowane id od modelu (dokładnie regresja, którą naprawiono).
+    // Fallback z dysku dla id, którego rejestr nigdy nie znał, w ogóle się NIE odpala - inaczej
+    // `_diskFallbackForId` czytałby z dysku KAŻDY plik folderu artefaktów na KAŻDE halucynowane
+    // id od modelu.
     t.is(cachedReadCalls(), 0, 'zero odczytów z dysku dla id, którego rejestr nigdy nie znał');
 });

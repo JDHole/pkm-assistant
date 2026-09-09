@@ -1,8 +1,8 @@
 /**
  * `modules/models/capabilities.ts` — katalog możliwości modelu.
  *
- * Dziś jedno pytanie: czy model umie czytać obrazy. Odpowiedź jest TRÓJWARSTWOWA
- * (B.6 BA-17): metadana z katalogu dostawcy → dokładna nazwa → rodzina/kształt nazwy.
+ * Dziś jedno pytanie: czy model umie czytać obrazy. Odpowiedź jest TRÓJWARSTWOWA:
+ * metadana z katalogu dostawcy → dokładna nazwa → rodzina/kształt nazwy.
  * Kolejność nie jest kosmetyczna: katalog `listModels()` wie o modelu więcej niż my,
  * więc gdy powiedział wprost `multimodal`, nie zgadujemy po literkach.
  */
@@ -76,9 +76,9 @@ function metadataFor(models: ModelInfo[] | undefined, name: string): ModelInfo |
 /**
  * Czy model obsługuje obraz na wejściu.
  *
- * B.13 VC-01..VC-03 / B.6 BA-17. Bierze CAŁY opis modelu (konsument podaje instancję
- * `ChatModel`, dostawca — goły `{ modelId, models }`), bo o multimodalności decyduje
- * albo nazwa, albo katalog modeli pobrany z API.
+ * Bierze CAŁY opis modelu (konsument podaje instancję `ChatModel`, dostawca - goły
+ * `{ modelId, models }`), bo o multimodalności decyduje albo nazwa, albo katalog
+ * modeli pobrany z API.
  *
  * @param model Opis modelu (`modelKey`/`modelId` + opcjonalne metadane z `listModels()`).
  * @returns `true`, gdy model przyjmuje obrazy; `false` przy braku modelu i przy modelach tekstowych.

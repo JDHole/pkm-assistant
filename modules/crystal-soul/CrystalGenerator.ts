@@ -13,7 +13,7 @@
  */
 
 import { seededStringHash } from './utils/stableHash.js';
-// K11 (AUD-security-090): kolor z profilu agenta wchodzi do MARKUPU — przez bramkę ksztaltu.
+// Kolor z profilu agenta wchodzi do MARKUPU - przez bramkę ksztaltu.
 import { sanitizeSvgColor } from './SvgHelper.js';
 
 export type CrystalOptions = { size?: number; color?: string; glow?: boolean };
@@ -222,7 +222,7 @@ export class CrystalGenerator {
     }
     const rng = new SeededRNG(seed);
     const template = rng.pick(CRYSTAL_TEMPLATES);
-    // K11: bramka stoi TAKŻE tutaj — `generateInner` bywa wołane wprost, z pominięciem `generate`.
+    // Bramka stoi TAKŻE tutaj - `generateInner` bywa wołane wprost, z pominięciem `generate`.
     return template(rng, sanitizeSvgColor(color));
   }
 

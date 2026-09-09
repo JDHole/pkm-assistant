@@ -1,5 +1,5 @@
 /**
- * settingsPersist - decyzja "co zrobić, gdy zapis ustawień padnie" (AUD-bledy-028).
+ * settingsPersist - decyzja "co zrobić, gdy zapis ustawień padnie".
  *
  * Handlery zakładki Ustawienia → Narzędzia mutują worek ustawień W PAMIĘCI, a dopiero potem
  * wołają zapis. Do naprawy nikt tego zapisu nie łapał: odrzucenie wracało do `async`

@@ -52,7 +52,7 @@ export class ConfirmModal extends Modal {
         });
         okBtn.addEventListener('click', () => { this.settle(true); this.close(); });
         // Akcja niszcząca (kasowanie) startuje z fokusem na „Anuluj" — Enter/Spacja zaraz po
-        // otwarciu nie może skasować sesji/skilla/serwera (review fali 2, W2-02/AR-MK-02).
+        // otwarciu nie może skasować sesji/skilla/serwera.
         (this.opts.destructive ? cancelBtn : okBtn).focus();
     }
 

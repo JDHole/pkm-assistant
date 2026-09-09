@@ -25,9 +25,9 @@ test('PermissionSystem: unknown actions fail closed', t => {
     t.is(result.reason, 'Unknown action');
 });
 
-test('E2.8 C1: akcje NIE są już bramkowane polami-widmami uprawnień (mcp/edit_notes...)', t => {
+test('checkPermission: akcje NIE są już bramkowane polami-widmami uprawnień (mcp/edit_notes...)', t => {
     const ps = new PermissionSystem(null, {});
-    // Po C1 checkPermission NIE sprawdza już permissions.mcp/edit_notes/... — o „wolno" decyduje
+    // checkPermission NIE sprawdza permissions.mcp/edit_notes/... — o „wolno" decyduje
     // DOSTĘPNOŚĆ narzędzia (disabled_tools/filterByAgent: model nie dostaje wyłączonego narzędzia).
     // Bramką pozostają: No-Go / pliki chronione / whitelista (AccessGuard) + approval (autonomia).
     const agent = {
@@ -41,9 +41,9 @@ test('E2.8 C1: akcje NIE są już bramkowane polami-widmami uprawnień (mcp/edit
     t.true(ps.checkPermission(agent, 'web.search', 'query').allowed);
 });
 
-// ─── E2.3 (D21) — tryb autonomii w polityce uprawnień ───────────────
+// ─── tryb autonomii w polityce uprawnień ───────────────
 
-test('E2.3 autonomy yolo: znosi pytania ale NIE omija whitelisty (AccessGuard)', t => {
+test('autonomy yolo: znosi pytania ale NIE omija whitelisty (AccessGuard)', t => {
     const ps = new PermissionSystem(null, {});
     const agent = {
         name: 'Zoe',
@@ -60,7 +60,7 @@ test('E2.3 autonomy yolo: znosi pytania ale NIE omija whitelisty (AccessGuard)',
     t.false(outside.allowed);
 });
 
-test('E2.3/C1 autonomy yolo: NIE omija plików chronionych (twarde granice)', t => {
+test('autonomy yolo: NIE omija plików chronionych (twarde granice)', t => {
     const ps = new PermissionSystem(null, {});
     const agent = { name: 'Ro', hasPermission: () => true };
     // Pliki chronione (data.json / .env) — yolo znosi pytania, ale nie granice: blok twardy.
@@ -68,28 +68,28 @@ test('E2.3/C1 autonomy yolo: NIE omija plików chronionych (twarde granice)', t 
     t.false(ps.checkPermission(agent, 'vault.write', '.env', { autonomy: 'yolo' }).allowed);
 });
 
-test('E2.3 requiresApproval: yolo nigdy nie pyta', t => {
+test('requiresApproval: yolo nigdy nie pyta', t => {
     const ps = new PermissionSystem(null, {});
     t.false(ps.requiresApproval('vault.write', 'a.md', 'write', {}, 'yolo'));
     t.false(ps.requiresApproval('vault.delete', 'a.md', 'delete', {}, 'yolo'));
     t.false(ps.requiresApproval('web.search', 'q', 'web_search', {}, 'yolo'));
 });
 
-test('E2.3 requiresApproval: all pyta o wszystko poza ask_user', t => {
+test('requiresApproval: all pyta o wszystko poza ask_user', t => {
     const ps = new PermissionSystem(null, {});
     t.true(ps.requiresApproval('vault.read', 'a.md', 'read', {}, 'all'));   // czysty odczyt, ale all pyta
     t.true(ps.requiresApproval('web.search', 'q', 'web_search', {}, 'all'));
     t.false(ps.requiresApproval('vault.read', '', 'ask_user', {}, 'all'));  // ask_user = wyjątek
 });
 
-test('E2.3 requiresApproval: edge pyta na krawędzi, nie o czyste read/think', t => {
+test('requiresApproval: edge pyta na krawędzi, nie o czyste read/think', t => {
     const ps = new PermissionSystem(null, {});
     t.false(ps.requiresApproval('vault.read', 'a.md', 'read', {}, 'edge'));    // read = bezpieczne
     t.true(ps.requiresApproval('vault.delete', 'a.md', 'delete', {}, 'edge')); // delete = krawędź
     t.true(ps.requiresApproval('web.search', 'q', 'web_search', {}, 'edge'));  // web = krawędź
 });
 
-test('E2.3 requiresApproval: edge z toggle-off wyłącza pytanie dla danego narzędzia', t => {
+test('requiresApproval: edge z toggle-off wyłącza pytanie dla danego narzędzia', t => {
     const ps = new PermissionSystem(null, {});
     const agent = { approvalToggles: { web_search: false } };
     t.false(ps.requiresApproval('web.search', 'q', 'web_search', agent, 'edge'));
@@ -162,13 +162,13 @@ test('A1: admin_access podnosi No-Go/protected/workspace, ale nie jest autonomi�
     t.true(ps.checkPermission(admin, 'vault.write', '.pkm-assistant/agents/x.yaml', { autonomy: 'edge' }).requiresApproval);
 });
 
-test('E2.3 requiresApproval: nieznana kategoria akcji = krawędź (fail-closed) w edge', t => {
+test('requiresApproval: nieznana kategoria akcji = krawędź (fail-closed) w edge', t => {
     const ps = new PermissionSystem(null, {});
     // akcja bez wpisu w ACTION_PERMISSIONS → isEdgePermissionType(undefined) = true
     t.true(ps.requiresApproval('nieznana.akcja', 'x', null, {}, 'edge'));
 });
 
-test('E2.3 requiresApproval: brak autonomy → domyślnie edge', t => {
+test('requiresApproval: brak autonomy → domyślnie edge', t => {
     const ps = new PermissionSystem(null, {});
     // Bez 5. argumentu — zachowanie ≈ dzisiejsze defaulty (edge).
     t.true(ps.requiresApproval('vault.delete', 'a.md', 'delete', {}));
@@ -199,8 +199,7 @@ test('ApprovalManager lists and removes always-approved rules', t => {
     const storage: ApprovalStorage = {};
     const manager = new ApprovalManager({}, { storage });
     manager.addToAlwaysApproved('Jaskier', 'vault.write', 'notes/a.md');
-    // K22 (AUD-security-104): cel `*` jest DOSŁOWNY — zapisuje się jako token, nie jako
-    // wieloznacznik `web.search::*`. Wcześniej ten wiersz udokumentowywał właśnie tę dziurę.
+    // Cel `*` jest DOSŁOWNY — zapisuje się jako token, nie jako wieloznacznik `web.search::*`.
     manager.addToAlwaysApproved('Tola', 'web.search', '*');
 
     t.deepEqual(manager.getAllAlwaysApprovedRules(), [
@@ -218,7 +217,7 @@ test('ApprovalManager lists and removes always-approved rules', t => {
     });
 });
 
-test('E2.3 ApprovalManager: redirect passthrough (result + instruction, logged)', async t => {
+test('ApprovalManager: redirect passthrough (result + instruction, logged)', async t => {
     const manager = new ApprovalManager({}, {});
     manager.setApprovalHandler(async () => ({ result: 'redirect', instruction: 'zapisz w Szkice' }));
 
@@ -255,9 +254,8 @@ test('Logger masks sensitive data in warn and error', t => {
 });
 
 test('Logger masks sensitive data in info and debug when debug mode is enabled', t => {
-    // L1 (2026-08-27): info()/debug() call console.debug (not .log) — zgodnosc z wytyczna
-    // Obsidiana "Avoid unnecessary logging to console" (core/utils/Logger.ts). Spy podmieniony
-    // razem ze zmiana wywolania, semantyka testu (maskowanie sekretow) bez zmian.
+    // info()/debug() call console.debug (not .log) — zgodnosc z wytyczna Obsidiana
+    // "Avoid unnecessary logging to console" (core/utils/Logger.ts).
     const oldDebugConsole = console.debug;
     const oldDebug = log.isDebug;
     const calls: unknown[] = [];
@@ -279,7 +277,7 @@ test('Logger masks sensitive data in info and debug when debug mode is enabled',
 });
 
 test('Logger masks sensitive data in model selection logs', t => {
-    // L1 (2026-08-27): model() calls console.debug (not .log) — patrz komentarz w tescie wyzej.
+    // model() calls console.debug (not .log) — patrz komentarz w tescie wyzej.
     const oldDebugConsole = console.debug;
     const oldDebug = log.isDebug;
     const calls: unknown[] = [];
@@ -312,7 +310,7 @@ test('SecretsStorage migrates plaintext settings to master-password encrypted re
     t.false(Object.prototype.propertyIsEnumerable.call(settings.pkmAssistant.chat!.apiKeys, 'openai'));
     t.is(settings.pkmAssistant.chat!.apiKeys!.openai, 'sk-test12345678901234567890');
     t.is(JSON.stringify(settings).includes('sk-test12345678901234567890'), false);
-    // S35: NOWE sekrety dostają prefiks `pkm-assistant-`. Stare id `obsek-*` u userów
+    // NOWE sekrety dostają prefiks `pkm-assistant-`. Stare id `obsek-*` u userów
     // dalej działają, bo odszyfrowanie idzie po mapie refs, nie po prefiksie.
     t.truthy(settings.pkmAssistant.secureStorage!.encrypted!['pkm-assistant-pkmassistant-chat-apikeys-openai']);
 
@@ -355,10 +353,10 @@ test('SecretsStorage startup hydrate without unlock keeps keys unavailable witho
     t.is(freshSettings.pkmAssistant.chat!.apiKeys!.anthropic, undefined);
 });
 
-// ─── AUD-testy-008 (kanon; duplikat 050) — próg min. 12 znaków w SecretsStorage.unlock ───
-// core/security/SecretsStorage.ts:158-160. Nie miał testu strony "blokuje": `unlock` w tym
-// pliku był wołany zawsze z tym samym, długim hasłem (28 znaków) — zamiana warunku na
-// `if (false)` zostawiała pełny pakiet 2465 testów zielony.
+// ─── próg min. 12 znaków w SecretsStorage.unlock ───
+// core/security/SecretsStorage.ts:158-160. Bez testu strony "blokuje" `unlock` w tym pliku
+// byłby wołany zawsze z tym samym, długim hasłem (28 znaków) — zamiana warunku na
+// `if (false)` zostawiałaby pełny pakiet testów zielony.
 
 test('SecretsStorage.unlock: hasło krótsze niż 12 znaków = odmowa BEZ próby odszyfrowania czegokolwiek', async t => {
     const storage = new SecretsStorage({});
@@ -383,7 +381,7 @@ test('SecretsStorage.unlock: dokładnie 12 znaków (granica progu) i dłuższe h
     t.not(storage.passwordKey, null);
 });
 
-// ─── AUD-testy-034 — SecretsStorage.hydrateSettings, gałąź status.errors ───────────────
+// ─── SecretsStorage.hydrateSettings, gałąź status.errors ───────────────
 // core/security/SecretsStorage.ts:220-227. Złe hasło główne przy ODSZYFROWANIU (nie: "nigdy
 // nie odblokowano" — to inna gałąź, pokryta testem wyżej) musi zostać ZARAPORTOWANE w
 // status.errors, nie połknięte cichym `catch`, i nie może wywrócić hydrate nieobsłużonym

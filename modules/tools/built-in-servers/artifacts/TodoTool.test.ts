@@ -148,9 +148,9 @@ test('polish characters survive roundtrip', async t => {
     t.is(parsed.sections[0].items[0].text, 'Zażółć gęślą jaźń');
 });
 
-// ── AUD-bledy-057: kolejka per ścieżka (pętla agenta puszcza tool_calls tury przez Promise.all) ──
+// ── Kolejka per ścieżka (pętla agenta puszcza tool_calls tury przez Promise.all) ──
 
-test('AUD-bledy-057: dwa równoległe add na tej samej liście NIE gubią pozycji', async t => {
+test('dwa równoległe add na tej samej liście NIE gubią pozycji', async t => {
     const hooks: AdapterHooks = { slowRead: true };
     const { store, files } = makeStore(hooks);
     await store.create('Ag', 's', ['baza']);
@@ -169,7 +169,7 @@ test('AUD-bledy-057: dwa równoległe add na tej samej liście NIE gubią pozycj
     t.is(new Set(ids).size, ids.length, 'block-idy unikalne');
 });
 
-test('AUD-bledy-057: równoległy add + check nie kasują się nawzajem', async t => {
+test('równoległy add + check nie kasują się nawzajem', async t => {
     const hooks: AdapterHooks = { slowRead: true };
     const { store, files } = makeStore(hooks);
     await store.create('Ag', 's', ['pierwszy']);
@@ -185,7 +185,7 @@ test('AUD-bledy-057: równoległy add + check nie kasują się nawzajem', async 
     t.true(items[0].checked, 'odhaczenie też zostało');
 });
 
-test('AUD-bledy-057: zwrotka patch to stan ODCZYTANY z dysku po zapisie', async t => {
+test('zwrotka patch to stan ODCZYTANY z dysku po zapisie', async t => {
     const hooks: AdapterHooks = {};
     const { store, files } = makeStore(hooks);
     await store.create('Ag', 's', ['a']);
@@ -206,9 +206,9 @@ test('AUD-bledy-057: zwrotka patch to stan ODCZYTANY z dysku po zapisie', async 
     );
 });
 
-// ── AUD-bledy-031: finish nie może meldować zamknięcia, gdy kasowanie padło ──
+// ── finish nie może meldować zamknięcia, gdy kasowanie padło ──
 
-test('AUD-bledy-031: finish z nieudanym remove wraca jako błąd, nie „zakończono"', async t => {
+test('finish z nieudanym remove wraca jako błąd, nie „zakończono"', async t => {
     const hooks: AdapterHooks = {};
     const { store, files, adapter } = makeStore(hooks);
     await store.create('Ag', 'current', ['niedokończone']);
@@ -232,7 +232,7 @@ test('AUD-bledy-031: finish z nieudanym remove wraca jako błąd, nie „zakońc
     );
 });
 
-test('AUD-bledy-031: finish bez pliku dalej jest sukcesem (idempotencja)', async t => {
+test('finish bez pliku dalej jest sukcesem (idempotencja)', async t => {
     const { store, adapter } = makeStore();
     const tool = createTodoTool();
     const res = await tool.execute(
@@ -245,12 +245,12 @@ test('AUD-bledy-031: finish bez pliku dalej jest sukcesem (idempotencja)', async
     t.true(res.finished);
 });
 
-// ── K4 self-append (za weryfikacją opus): readIfExists broni `patch` przed kłamiącym exists() ──
-// Ten sam wzorzec bugu co `modules/memory` (AgentMemory_self_append.test.ts): stary
-// `(await exists(p)) ? read(p) : emptyMarkdown()` na Dysku Google traktował ISTNIEJĄCĄ listę
-// jako świeżą i patch nadpisywał ją pustym szkieletem + nowym wpisem — reszta zadań znikała.
+// ── self-append: readIfExists broni `patch` przed kłamiącym exists() ──
+// Ten sam wzorzec bugu co `modules/memory` (AgentMemory_self_append.test.ts): wzorzec
+// `(await exists(p)) ? read(p) : emptyMarkdown()` na Dysku Google traktuje ISTNIEJĄCĄ listę
+// jako świeżą i patch nadpisuje ją pustym szkieletem + nowym wpisem — reszta zadań znika.
 
-test('K4: kłamiący exists() na WŁASNYM pliku listy NIE kasuje wcześniejszych zadań (patch)', async t => {
+test('kłamiący exists() na WŁASNYM pliku listy NIE kasuje wcześniejszych zadań (patch)', async t => {
     const { store, files, adapter } = makeStore();
     await store.create('Ag', 's', ['stare zadanie']);
     const path = store.path('Ag', 's');
@@ -268,7 +268,7 @@ test('K4: kłamiący exists() na WŁASNYM pliku listy NIE kasuje wcześniejszych
     t.deepEqual(onDisk, ['stare zadanie', 'nowe zadanie'], 'obie pozycje realnie leżą na dysku');
 });
 
-test('K4: sprzeczne sygnały (exists=true, read rzuca) na WŁASNYM pliku listy → tool-error, plik NIETKNIĘTY', async t => {
+test('sprzeczne sygnały (exists=true, read rzuca) na WŁASNYM pliku listy → tool-error, plik NIETKNIĘTY', async t => {
     const { store, files, adapter } = makeStore();
     await store.create('Ag', 'current', ['stare zadanie']);
     const path = store.path('Ag', 'current');

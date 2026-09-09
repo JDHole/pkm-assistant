@@ -110,7 +110,7 @@ test('A4 migrates only factory create-agent v2, keeps backup and installs primit
     t.false(files[path].includes('vault_write'));
 });
 
-test('S27 D6: stary skill z allowed-tools wczytuje się, pole jest ignorowane (zero migracji)', async t => {
+test('stary skill z allowed-tools wczytuje się, pole jest ignorowane (zero migracji)', async t => {
     const loader = new SkillLoader(makeVault({
         '.pkm-assistant/skills/stary/SKILL.md': [
             '---',
@@ -130,7 +130,7 @@ test('S27 D6: stary skill z allowed-tools wczytuje się, pole jest ignorowane (z
     t.false('allowedTools' in skill, 'pole-fasada nie wchodzi już do modelu skilla');
 });
 
-test('S27 D6: saveSkill nie zapisuje allowed-tools nawet gdy wołający je poda', async t => {
+test('saveSkill nie zapisuje allowed-tools nawet gdy wołający je poda', async t => {
     const files: Record<string, string> = {};
     const folders = new Set<string>();
     const loader = new SkillLoader({
@@ -153,7 +153,7 @@ test('S27 D6: saveSkill nie zapisuje allowed-tools nawet gdy wołający je poda'
     t.falsy(loader.getSkill('nowy')?.allowedTools);
 });
 
-test('S27 D6: startery nie niosą już pola allowed-tools', async t => {
+test('startery nie niosą już pola allowed-tools', async t => {
     const files: Record<string, string> = {};
     const folders = new Set<string>();
     const loader = new SkillLoader({
@@ -193,9 +193,9 @@ test('A4 does not overwrite a user-customized create-agent skill', async t => {
 });
 
 
-// ── E3.5 regression guard: S27 Z1 zgubił preQuestions z returna parseSkillMarkdown ──
-// (każdy load z dysku tracił pre-questions → modal pytań przed skillem był martwy).
-test('load z dysku zachowuje pre-questions (regresja S27→E3.5)', async t => {
+// ── regression guard: `preQuestions` musi przetrwać return z `parseSkillMarkdown` ──
+// (inaczej każdy load z dysku traciłby pre-questions → modal pytań przed skillem byłby martwy).
+test('load z dysku zachowuje pre-questions', async t => {
     const raw = `---
 name: pytajacy
 description: "skill z pytaniami"
@@ -230,11 +230,11 @@ Body {{dzien}} / {{glebokosc}}`;
 });
 
 
-// ── smoke-04 finding 01 (przepisany fix z zaginionego commita 3804947) ──
+// ── deleteSkill: nazwa wyświetlana ≠ slug ──
 // Cache jest kluczowany slugiem, ale UI kasuje po nazwie wyświetlanej;
 // folder musi znikać rekurencyjnie (references/, examples/).
 
-test('smoke-04: deleteSkill kasuje skill po nazwie wyświetlanej ≠ slug', async t => {
+test('deleteSkill kasuje skill po nazwie wyświetlanej ≠ slug', async t => {
     const vault = makeVault({
         '.pkm-assistant/skills/moj-skill/SKILL.md': [
             '---', 'name: Mój Skill', 'description: opis', '---', '', 'Body',
@@ -252,7 +252,7 @@ test('smoke-04: deleteSkill kasuje skill po nazwie wyświetlanej ≠ slug', asyn
     t.false(await vault.adapter.exists('.pkm-assistant/skills/moj-skill'));
 });
 
-test('smoke-04: deleteSkill kasuje rekurencyjnie folder z references/ i examples/', async t => {
+test('deleteSkill kasuje rekurencyjnie folder z references/ i examples/', async t => {
     const vault = makeVault({
         '.pkm-assistant/skills/z-dodatkami/SKILL.md': [
             '---', 'name: z-dodatkami', 'description: opis', '---', '', 'Body',
@@ -300,7 +300,7 @@ test('deleteSkill działa zaraz po saveSkill (wpis cache z zapisu, nie z dysku)'
     t.false(await vault.adapter.exists('.pkm-assistant/skills/swiezy-skill'));
 });
 
-test('AUD-code-review-049: saveSkill w edycji pisze do folderu z cache (slug), nie do slugify(nowej nazwy)', async t => {
+test('saveSkill w edycji pisze do folderu z cache (slug), nie do slugify(nowej nazwy)', async t => {
     // Skill, którego `name:` we frontmatterze user zmienił ręcznie w vaulcie BEZ zmiany
     // nazwy folderu — dokładnie sytuacja, którą deleteSkill nazywa "legacy/renamed skills".
     // _loadSkillFromFolder bierze slug ZAWSZE z folderu, więc po wczytaniu:
@@ -316,7 +316,7 @@ test('AUD-code-review-049: saveSkill w edycji pisze do folderu z cache (slug), n
     const loaded = loader.getSkill('stara-nazwa');
     t.is(loaded?.name, 'Nowa Nazwa', 'sanity: frontmatter i folder się rozjechały');
 
-    // SkillEditorModal (po naprawie) przekazuje `slug` z `existing.slug` — identyczny
+    // SkillEditorModal przekazuje `slug` z `existing.slug` — identyczny
     // przewód jak deleteSkill.
     await loader.saveSkill({
         slug: 'stara-nazwa',
@@ -339,7 +339,7 @@ test('AUD-code-review-049: saveSkill w edycji pisze do folderu z cache (slug), n
     t.false(await vault.adapter.exists('.pkm-assistant/skills/stara-nazwa'));
 });
 
-test('AUD-code-review-049: saveSkill bez slug (nowy skill) zakłada folder ze slugify(name), jak dotąd', async t => {
+test('saveSkill bez slug (nowy skill) zakłada folder ze slugify(name), jak dotąd', async t => {
     const vault = makeVault({}, ['.pkm-assistant/skills']);
     const loader = new SkillLoader(vault);
 

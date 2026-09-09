@@ -6,11 +6,11 @@ import type { ChatRequest, ProviderContext } from '../contracts.js';
 
 /**
  * Odpowiedź BEZ strumienia i katalog modeli wspólnej bazy kształtu OpenAI
- * (mutacje F10 na `parseCompletion` / `parseChoice` / `listModels` / `parseModelList`).
+ * (mutacje na `parseCompletion` / `parseChoice` / `listModels` / `parseModelList`).
  *
  * DeepSeek jest tu świadkiem GOŁEJ bazy: nie nadpisuje ani jednego haka, więc jego
  * zachowanie JEST zachowaniem klasy bazowej. LM Studio dokłada dwa haki, które trzeba
- * badać osobno — własną ścieżkę listy modeli (`modelsPath`) i filtr wpisów
+ * badać osobno - własną ścieżkę listy modeli (`modelsPath`) i filtr wpisów
  * (`acceptsModel`).
  */
 const REQ: ChatRequest = { messages: [{ role: 'user', content: 'hej' }] };

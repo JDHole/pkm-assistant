@@ -10,10 +10,10 @@
  * `modelSpec()` ŚWIADOMIE zawsze oddaje `undefined` — katalog LM Studio nie jest statyczny
  * (użytkownik ładuje dowolne modele), a `listModels()` dziś nie ma konsumenta produkcyjnego,
  * więc nie ma skąd wziąć cache'u kontekstu. Model spada wtedy na `DEFAULT_MAX_INPUT_TOKENS`
- * (512) — to świadomy, udokumentowany wyjątek (C-15).
+ * (512) — to świadomy, udokumentowany wyjątek.
  *
  * Źródła kształtu: https://lmstudio.ai/docs/app/api/endpoints/openai (embedding),
- * natywny `/api/v0/models` z polem `type` (kontrakt pinowany testem C-14).
+ * natywny `/api/v0/models` z polem `type` (kontrakt pinowany testem).
  */
 import { DEFAULT_EMBED_MODELS, LM_STUDIO_EMBED_BASE_URL } from '../contracts.js';
 import { buildOpenAiShapedEmbedRequest, parseOpenAiShapedEmbedError, parseOpenAiShapedEmbedResponse, defaultCountTokens } from './_shared.js';
@@ -59,7 +59,7 @@ export class LmStudioEmbeddingProvider implements EmbeddingProvider {
         return undefined;
     }
 
-    /** `GET {nativeBase}/api/v0/models`, tylko wpisy `type === 'embeddings'` (C-14). */
+    /** `GET {nativeBase}/api/v0/models`, tylko wpisy `type === 'embeddings'`. */
     async listModels(ctx: EmbeddingProviderContext, http: HttpClient): Promise<EmbeddingModelInfo[]> {
         const res = await http.send({
             url: `${nativeBase(ctx.endpoint)}/api/v0/models`,

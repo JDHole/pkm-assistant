@@ -1,5 +1,5 @@
 /**
- * migrate_json_to_notes.js — jednorazowy migrator starego świata artefaktów (E2.9 FAZA D / D4, A18).
+ * migrate_json_to_notes.js — jednorazowy migrator starego świata artefaktów.
  *
  * Stary świat: `ArtifactManager` trzymał artefakty jako JSON w `.pkm-assistant/artifacts/*.json`
  * (+ zakopany podfolder `plan_review/*.json` z bugowatej migracji plan_action). Nowy świat: artefakty
@@ -7,7 +7,7 @@
  * `plan` / `notatka`, a `context-session` i nierozpoznane → do `.pkm-assistant/artifacts-backup-<data>/`.
  *
  * IDEMPOTENTNY: marker `.pkm-assistant/artifacts/.migrated-v2` albo brak plików źródłowych = no-op.
- * „Nie zostawiamy nic z tyłu" (A18): po sukcesie źródłowe JSONy skasowane.
+ * "Nie zostawiamy nic z tyłu": po sukcesie źródłowe JSONy skasowane.
  *
  * DI (adapter + store) → node-testowalny na fixture. Body notatki wstawiany VERBATIM przez
  * `store.importInstance` (zachowanie treści usera, nie pisanie przez agenta).
@@ -23,7 +23,7 @@ interface LegacyArtifactRecord { [key: string]: any; data?: Record<string, any>;
 // TS-any: migration adapter mirrors Obsidian's untyped dot-folder adapter.
 interface MigrationDependencies { adapter: any; store: { importInstance(typ: string, opts: Record<string, unknown>): Promise<unknown> }; now?: () => Date; }
 
-/** Data w formacie YYYY-MM-DD (do nazwy folderu backupu). AUD-code-review-105: JEDEN helper. */
+/** Data w formacie YYYY-MM-DD (do nazwy folderu backupu) - JEDEN helper. */
 function today(now?: () => Date): string {
     return formatYmd(now ? now() : new Date());
 }

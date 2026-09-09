@@ -1,11 +1,11 @@
 /**
- * TriggersView — Z9 z Sprintu 05 Hotfix.
+ * TriggersView.
  *
- * Sidebar tab "Triggery" — 3 sekcje (Skille / Sub-Agenty / MCP servery).
+ * Sidebar tab "Triggery" - 3 sekcje (Skille / Sub-Agenty / MCP servery).
  * Klik na element wstawia chip-marker (`@@skill:foo`, `@sub-agent:foo`,
  * `@@tool:foo`) do textarea aktywnego czatu.
  *
- * Działa równolegle do slim baru (chat_ui.js) i popupu /@ (Z8) —
+ * Działa równolegle do slim baru (chat_ui.js) i popupu /@ -
  * zapewnia trzecią drogę odkrycia: stationary panel zamiast pop-up'a.
  */
 
@@ -110,8 +110,8 @@ function renderTriggerSection(container: Runtime, { sectionLabel, emptyText, ite
         top.createSpan({ text: item.label });
         if (item.kind === 'sub-agent') {
             const badge = top.createSpan({ text: '[CUSTOM]', cls: 'cs-trigger-row__badge' });
-            // `activeAgent` is not in scope here (it lives in the caller) — a
-            // templated title threw ReferenceError whenever this badge rendered.
+            // `activeAgent` is not in scope here (it lives in the caller), so this title
+            // must stay a plain string - referencing it in a template would throw ReferenceError.
             badge.title = 'Custom sub-agent of the active agent';
         }
 

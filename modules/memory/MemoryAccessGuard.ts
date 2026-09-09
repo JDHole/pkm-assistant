@@ -20,11 +20,11 @@ export type NoteFilenameDecision =
     | { ok: true; filename: string; path: string }
     | { ok: false; code: MemoryV3ErrorCode; error: string };
 
-// AUD-code-review-029: kanoniczne źródło to `core/utils/agentSlug.ts` (musi stać w `core/`, bo
-// jeden z konsumentów duplikatu — `core/security/AccessGuard` — nie może importować z modułów).
-// Ta funkcja zostaje jako cienki wrapper: jest już 1 (jedyny) wewnątrzmodułowy wołacz
-// (`MemoryAccessGuard` konstruktor) i wycięta z barrela w S30 Z4 — dotykanie tego kontraktu
-// jest poza zakresem tej naprawy (czysty dedup, zero zmian API).
+// Kanoniczne źródło to `core/utils/agentSlug.ts` (musi stać w `core/`, bo
+// jeden z konsumentów duplikatu - `core/security/AccessGuard` - nie może importować z modułów).
+// Ta funkcja zostaje jako cienki wrapper: jest jedynym wewnątrzmodułowym wołaczem
+// (`MemoryAccessGuard` konstruktor) i nie jest eksportowana z barrela - dotykanie tego kontraktu
+// jest świadomie pominięte (czysty dedup, zero zmian API).
 export function getSafeAgentName(agentName: unknown): string {
     return getAgentSafeName(agentName);
 }
@@ -55,7 +55,7 @@ export function makeMemoryNoteFilename(type: unknown, name: unknown): string {
 }
 
 export class MemoryAccessGuard {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare agentName: string;
     declare safeName: string;
 

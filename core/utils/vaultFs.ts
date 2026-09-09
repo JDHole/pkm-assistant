@@ -1,5 +1,5 @@
 /**
- * vaultFs — pomocniki systemu plików na DataAdapterze (S30 Z3, konsolidacja duplikatów).
+ * vaultFs — pomocniki systemu plików na DataAdapterze (konsolidacja duplikatów).
  *
  * Wariant „adapterowy mkdir -p" żył w trzech kopiach: `modules/tools/vault_adapter_io.js`
  * (pętlowa, wzór tej implementacji), `modules/memory/MigrationV3.js` (rekurencyjna) oraz
@@ -57,11 +57,10 @@ export interface ProbeCapableAdapter {
 }
 
 /**
- * Czy plik istnieje — w TRZECH stanach, nie dwóch (K4, AUD-bledy-061/063).
+ * Czy plik istnieje — w TRZECH stanach, nie dwóch.
  *
- * DLACZEGO: `adapter.exists()` KŁAMIE na dyskach sieciowych i na Dysku Google — ten projekt
- * ma to udokumentowane jako incydent 2026-07-28 (core/CLAUDE.md gotcha 6b, „PANCERZ"
- * w `load_settings`). Gołe `boolean` zmusza wołacza do wybrania jednej z dwóch odpowiedzi,
+ * DLACZEGO: `adapter.exists()` KŁAMIE na dyskach sieciowych i na Dysku Google (core/CLAUDE.md
+ * gotcha 6b, „PANCERZ" w `load_settings`). Gołe `boolean` zmusza wołacza do wybrania jednej z dwóch odpowiedzi,
  * a jedna fałszywa `false` wystarczyła, żeby nadpisać brain.md / plik sesji / `.state.json`
  * domyślną treścią. „Nie wiem" musi dać się odróżnić od „nie ma".
  *
@@ -118,13 +117,13 @@ export type ReadIfExistsResult =
     | { state: 'unreadable'; content: null; cause?: unknown };
 
 /**
- * Odczyt WŁASNEGO, znanego pliku przed dopisaniem do niego — bramka „self-append" (K4,
- * siostrzana wada `probeFile`).
+ * Odczyt WŁASNEGO, znanego pliku przed dopisaniem do niego — bramka „self-append"
+ * (siostrzana wada `probeFile`).
  *
  * WZORZEC, KTÓRY TO ZASTĘPUJE: `if (await adapter.exists(path)) { existing =
  * await adapter.read(path); }` tuż przed dopisaniem nowego wpisu do własnego loga/pliku
  * (sesja, kronika, archiwum). Na Dysku Google `exists()` potrafi zwrócić `false` DLA PLIKU,
- * KTÓRY JEST (incydent 2026-07-28) — kod nigdy nie próbuje `read()`, traktuje plik jako
+ * KTÓRY JEST — kod nigdy nie próbuje `read()`, traktuje plik jako
  * świeży, i zapis NADPISUJE całą dotychczasową treść jednym nowym wpisem.
  *
  * CZYM RÓŻNI SIĘ OD `probeFile`: tamten odpowiada na pytanie „czy TA ścieżka jest zajęta" dla
@@ -179,7 +178,7 @@ export async function readIfExists(
             // bo tu nie ma cudzego wyjątku do przekazania dalej.
             cause = new Error(`readIfExists: adapter.read(${path}) zwrócił ${typeof content} zamiast string`);
         } catch (e) {
-            // Read padł — może kłamie exists() (K4), może pliku naprawdę nie ma. Pytamy dalej.
+            // Read padł — może kłamie exists(), może pliku naprawdę nie ma. Pytamy dalej.
             cause = e;
         }
     }

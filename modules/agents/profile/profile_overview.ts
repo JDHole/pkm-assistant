@@ -1,10 +1,10 @@
 /**
- * Overview tab (Przegląd) — witryna agenta: hero (nazwa/opis/kryształ/kolor/daty inline),
- * podstawowe info (model / autonomia / miejsce pracy) + statystyki. E2.8 C3.
+ * Overview tab (Przegląd) - witryna agenta: hero (nazwa/opis/kryształ/kolor/daty inline),
+ * podstawowe info (model / autonomia / miejsce pracy) + statystyki.
  *
- * Zasada: to WITRYNA — zero szybkich akcji (S3/S4). Fun facty (tokeny/wywołania narzędzi)
- * odłożone (S4c) — nie ma taniego per-agent źródła bez nowej maszynerii. Szlif wizualny na
- * koniec refaktoru (S4c) — tu funkcjonalna kompletność, bez pikselowania.
+ * Zasada: to WITRYNA - zero szybkich akcji. Fun facty (tokeny/wywołania narzędzi) odłożone -
+ * nie ma taniego per-agent źródła bez nowej maszynerii. Szlif wizualny później - tu funkcjonalna
+ * kompletność, bez pikselowania.
  */
 import { SkinManager, setSvg } from '../../crystal-soul/index.js';
 import { COLOR_GROUPS, getColorByHex } from '../../crystal-soul/index.js';
@@ -86,7 +86,7 @@ export async function renderOverviewTab(ctx: UiBoundary, el: HTMLElement) {
         input.addEventListener('keydown', (e: KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save(); } });
     });
 
-    // Meta — daty (E2.8 A1: badge archetypu usunięty — byt skasowany)
+    // Meta - daty
     const heroMeta = heroInfo.createDiv({ cls: 'cs-profile-hero__meta' });
     if (formData.createdAt) {
         heroMeta.createSpan({ text: new Date(formData.createdAt).toLocaleDateString(getDateLocale()), cls: 'cs-profile-hero__date' });
@@ -137,7 +137,7 @@ export async function renderOverviewTab(ctx: UiBoundary, el: HTMLElement) {
     colorDot.addEventListener('click', togglePalette);
     colorLabel.addEventListener('click', togglePalette);
 
-    // Reshape crystal (reroll seed) — kryształ+kolor żyją w Przeglądzie (C4).
+    // Reshape crystal (reroll seed) - kryształ+kolor żyją w Przeglądzie.
     let reshapeCounter = 0;
     const reshapeBtn = colorRow.createEl('button', {
         cls: 'cs-preset-btn cs-profile-hero__reshape',
@@ -160,7 +160,7 @@ export async function renderOverviewTab(ctx: UiBoundary, el: HTMLElement) {
     const infoGrid = el.createDiv({ cls: 'cs-shards' });
 
     const autonomyMode = agent?.default_autonomy || plugin?.env?.settings?.pkmAssistant?.defaultAutonomy || 'edge';
-    // B6-2: kanon to models.main — legacy formData.model gaśnie po sync w AgentProfileView.ts
+    // Kanon to models.main - legacy formData.model gaśnie po sync w AgentProfileView.ts
     // (modelFieldSync.ts), więc czytanie samego formData.model tu pokazywałoby „globalny" dla
     // KAŻDEGO agenta ze zmigrowanym modelem, mimo że ma jawnie ustawiony.
     const mainModel = formData.models?.main || '';

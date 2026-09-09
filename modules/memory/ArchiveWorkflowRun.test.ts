@@ -1,5 +1,5 @@
 /**
- * ArchiveWorkflowRun.test.js — S29 Z3: NOWY tor ArchiveWorkflow (generacja ≠ aplikacja).
+ * ArchiveWorkflowRun.test.js — NOWY tor ArchiveWorkflow (generacja ≠ aplikacja).
  *
  * Stary, blokujący `run()` ma własne testy w `ArchiveWorkflow.test.js` — celowo nietknięte.
  * Tu sprawdzamy tylko to, co dokłada Puls pamięci: pętlę paczek L1 w jednym przebiegu,
@@ -213,10 +213,10 @@ test('user może podmienić treść przy akceptacji (decision.body wygrywa z pro
     const run = new ConsolidationRun({ counts: { archiveCount: 5, batchSize: 5 } });
 
     await workflow.runWithRun(run);
-    await workflow.applyStepDecision(run, 'l1_batch_1', { accepted: true, body: 'wersja Kuby' });
+    await workflow.applyStepDecision(run, 'l1_batch_1', { accepted: true, body: 'wersja Jana' });
 
     const content = files[l1FilesIn(files)[0]];
-    t.true(content.includes('wersja Kuby'));
+    t.true(content.includes('wersja Jana'));
     t.false(content.includes('wersja modelu'));
 });
 
@@ -415,9 +415,9 @@ test('zwis → auto-ponów 1× → failed; kolejne paczki mielą się dalej', as
 });
 
 test('„Ponów" padniętej paczki L1 trzyma ZAMROŻONE okno — nie kradnie sesji innej paczki', async t => {
-    // Review kubełka 2, P2-1: lista niepokrytych sesji KURCZY SIĘ po zaakceptowaniu paczki
-    // (stemple covered_by_l1), więc retry liczący okno od nowa slice'em brał sesje paczki 3:
-    // duplikat L1 na tych samych źródłach + 5 sesji wypadało z przebiegu.
+    // Lista niepokrytych sesji KURCZY SIĘ po zaakceptowaniu paczki (stemple covered_by_l1) -
+    // retry liczący okno od nowa slice'em brałby wtedy sesje paczki 3: duplikat L1 na tych
+    // samych źródłach + 5 sesji wypadałoby z przebiegu.
     const { vault } = makeVault(archiveWith(15));
     // call1 = paczka 1 OK; call2+3 = paczka 2 zwis + auto-retry zwis → failed; call4 = paczka 3 OK
     const model = scriptedModel(['P1', 'SILENT', 'SILENT', 'P3']);
@@ -592,9 +592,8 @@ test('ConsolidationSnapshot.prune zostawia N najnowszych kopii', async t => {
 });
 
 test('ConsolidationSnapshot.prune NIE dotyka plików usera i nie oddaje im slotów retencji', async t => {
-    // Second-pass audytu kubełka 2: prune bez filtra nazwy kasował ręcznie wrzucony
-    // backup usera, a nie-snapshot (litery > cyfry leksykalnie) zajmował slot retencji
-    // i wypychał prawdziwy snapshot.
+    // Bez filtra nazwy prune kasowałby ręcznie wrzucony backup usera, a nie-snapshot (litery >
+    // cyfry leksykalnie) zajmowałby slot retencji i wypychał prawdziwy snapshot.
     const root = `${BASE}/.consolidation_snapshots`;
     const stamps = ['2026-07-25', '2026-07-26', '2026-07-27', '2026-07-28', '2026-07-29'];
     const initial: Record<string, string> = {
@@ -761,8 +760,7 @@ test('drugi przebieg po zaakceptowanym L1 nie proponuje tych samych sesji (konie
     t.is(l1FilesIn(files).length, 1, 'żadnego duplikatu L1');
 });
 
-// D6 (2026-07-30): test „stary tor createLevel1 też pomija sesje ostemplowane" skasowany razem
-// z `createLevel1`. Filtr stempla `covered_by_l1` żyje w `_listSessionsForL1` (jedno źródło dla
+// Filtr stempla `covered_by_l1` żyje w `_listSessionsForL1` (jedno źródło dla
 // całego przebiegu) i jest sprawdzany dwoma testami wyżej.
 
 // ── przedpobrana lista archiwum od runnera (jedno listowanie na start) ────────────

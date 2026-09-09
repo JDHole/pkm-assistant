@@ -15,9 +15,9 @@
  * łańcuchowalne no-opy; nieznane właściwości zwracają łańcuchowalny no-op (zamiast
  * `undefined`), żeby uciąć rundy debugowania na „X is not a function".
  *
- * TYPY: atrapa udaje otwarte API przeglądarki, więc kusi, żeby wpisać wszędzie `any` — i tak
- * było do 2026-09-07. Dziś ten plik jedzie razem z pluginem do walidatora katalogu Obsidiana,
- * a `any` zapala mu ~150 błędów `no-unsafe-*`. Zamiast tego: nazwane kształty (`MockEl`,
+ * TYPY: atrapa udaje otwarte API przeglądarki, więc kusi, żeby wpisać wszędzie `any` —
+ * ale ten plik jedzie razem z pluginem do walidatora katalogu Obsidiana, a `any` zapala
+ * mu ~150 błędów `no-unsafe-*`. Zamiast tego: nazwane kształty (`MockEl`,
  * `ElOptions`) plus JEDNA furtka — indeks `[key: string]: unknown` w `MockEl`, który opisuje
  * dokładnie to, co robi Proxy niżej (nieznana nazwa = łańcuchowalny no-op). Zero zmian
  * zachowania: to są SAME adnotacje i rzutowania.
@@ -402,10 +402,10 @@ function createMockDocument(): MockDocument {
 // = `document.createElement(tag)` + nałożenie opcji (`cls`/`text`/`attr`/...) + wywołanie
 // callbacku; `window.createDiv`/`createSpan` = cienkie owijki `createEl('div'|'span', o, cb)`;
 // `window.createFragment(cb)` = `document.createDocumentFragment()` + wywołanie callbacku).
-// Harness (goły Node) ich nie miał — stąd `document.createElement`/`createDocumentFragment`
-// w `src/main.ts` przed naprawą (ogony-ogA, fala 3, 2026-09-04). Implementacja niżej
-// deleguje do `createMockEl`, które już umie nałożyć te same opcje (`applyOpts` w jego
-// metodzie `createEl`) — jeden throwaway rodzic, zwracamy sam utworzony element/fragment.
+// Harness (goły Node) ich nie miał, mimo że `prefer-create-el` wymaga, żeby kod pluginu
+// wołał właśnie te globalne pomocnicze. Implementacja niżej deleguje do `createMockEl`,
+// które już umie nałożyć te same opcje (`applyOpts` w jego metodzie `createEl`) — jeden
+// throwaway rodzic, zwracamy sam utworzony element/fragment.
 function globalCreateEl(tag: string, opts?: ElOptionsArg, cb?: ElCallback): MockEl {
   const scratch = createMockEl('div');
   return scratch.createEl(tag, opts, cb);

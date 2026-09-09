@@ -33,7 +33,7 @@ export function stripInlineTriggers(text = ''): string {
 /**
  * Zbuduj instrukcję tury z markerów inline.
  *
- * D17 (E2.4): skille nie mają już narzędzia skill_execute. Marker `@@skill:` wstrzykuje
+ * Skille nie mają narzędzia skill_execute. Marker `@@skill:` wstrzykuje
  * PEŁNY przepis zresolwowanego skilla (z overridami per-agent — „doczepki nie giną").
  * Resolucja jest async/plugin-zależna, więc robi ją chat_streaming i podaje tu gotową mapę
  * `resolvedSkills` (nazwa/slug markera → { name?, prompt }). Marker bez wpisu (nieznany skill)

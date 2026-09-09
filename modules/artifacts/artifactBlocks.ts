@@ -1,5 +1,5 @@
 /**
- * artifactBlocks.js — render bloku ```pkm-artefakt``` w notatce instancji (E2.9 FAZA B / B1).
+ * artifactBlocks.js — render bloku ```pkm-artefakt``` w notatce instancji.
  *
  * Precedens: `modules/komunikator/KomunikatorEmbed.js` (registerMarkdownCodeBlockProcessor).
  * Silnik store dokleja blok ` ```pkm-artefakt\nid: <art-id>\n``` ` do body instancji przy `create`
@@ -31,13 +31,13 @@ function canonicalVaultPath(path: unknown): string {
 }
 
 /**
- * K10 (AUD-security-063): czy blok `pkm-artefakt` stoi w SWOJEJ notatce?
+ * Czy blok `pkm-artefakt` stoi w SWOJEJ notatce?
  *
- * Procesor jest zarejestrowany globalnie dla całego vaultu, a `id` bierze z TREŚCI bloku — czyli
+ * Procesor jest zarejestrowany globalnie dla całego vaultu, a `id` bierze z TREŚCI bloku - czyli
  * z tekstu, który do notatki może wpisać model albo zatwierdzony `write`. Bez tego warunku blok
- * podłożony w dowolnej notatce rysował działające guziki CUDZEGO artefaktu: user widział
- * „✅ Zatwierdź" w kontekście swojej notatki, a klik przestawiał status cudzego planu i przywoływał
- * jego agenta (ASI09 — nadużycie zaufania człowieka).
+ * podłożony w dowolnej notatce rysowałby działające guziki CUDZEGO artefaktu: user widziałby
+ * „✅ Zatwierdź" w kontekście swojej notatki, a klik przestawiałby status cudzego planu i przywoływał
+ * jego agenta (nadużycie zaufania człowieka).
  *
  * Prawowitym pisarzem bloku jest wyłącznie `ArtifactStore.create`, który wkleja go do notatki tego
  * samego artefaktu — więc niezmiennik brzmi: ścieżka renderowanego pliku == ścieżka artefaktu.
@@ -79,8 +79,8 @@ export function registerArtifactBlocks(plugin: any): void {
             return;
         }
 
-        // K10 (AUD-security-063): blok bez związku z tą notatką renderuje się MARTWY — i to PRZED
-        // odczytem artefaktu, żeby cudza notatka nie wyciekła nawet statusem.
+        // Blok bez związku z tą notatką renderuje się MARTWY - i to PRZED odczytem artefaktu,
+        // żeby cudza notatka nie wyciekła nawet statusem.
         if (!isBlockBoundToNote(id, ctx?.sourcePath, store)) {
             root.createSpan({ cls: 'pkm-artefakt-block__note', text: t('artifact.block.foreign') });
             return;

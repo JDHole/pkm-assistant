@@ -1,6 +1,6 @@
 import { t } from '../../core/i18n/index.js';
 import { setSvgLabel } from '../../modules/crystal-soul/index.js';
-// `import type` = ZERO emitu — sekcja dostaje `Setting` przez ctx (DI), nie importem wartości.
+// `import type` = ZERO emitu - sekcja dostaje `Setting` przez ctx (DI), nie importem wartości.
 import type { Setting as ObsidianSetting } from 'obsidian';
 
 /**
@@ -21,7 +21,7 @@ export interface MemoryPkmSlice {
 }
 
 /**
- * Fragment worka DI z `pkm_settings_tab.buildSectionContext()` — TYLKO to, co czyta ta sekcja.
+ * Fragment worka DI z `pkm_settings_tab.buildSectionContext()` - TYLKO to, co czyta ta sekcja.
  * Strukturalnie, bez importu z core: pełny `SettingsSectionCtx` niesie pola, których memory
  * nie dotyka, a moduł nie ma powodu ich znać.
  */
@@ -110,8 +110,8 @@ export function renderMemorySection(container: HTMLElement, ctx: MemorySettingsC
             text.inputEl.addClass('pkm-setting-input--w80');
         });
 
-    // Z6 (2026-07-30): pole „Zachowaj ostatnich sesji po L1" (`keepRecentSessions`) WYCIĘTE —
-    // było duchem: zero konsumentów w kodzie po kasacji starego toru konsolidacji (D6), więc
+    // Pole „Zachowaj ostatnich sesji po L1" (`keepRecentSessions`) nie istnieje -
+    // było duchem: zero konsumentów w kodzie po kasacji starego toru konsolidacji, więc
     // obiecywało zachowanie, którego nie było. NIE zostało przepięte na retencję poniżej:
     // jego domyślne „3" znaczyłoby „skasuj wszystko poza trzema", a domyślną wartością retencji
     // musi być „nic nie kasuj".
@@ -147,11 +147,11 @@ export function renderMemorySection(container: HTMLElement, ctx: MemorySettingsC
             text.inputEl.addClass('pkm-setting-input--w80');
         });
 
-    // S32 (2026-07-30): pole „Próg L3" (`l3Threshold`) WYCIĘTE — drugi duch obok keepRecentSessions:
+    // Pole „Próg L3" (`l3Threshold`) nie istnieje - drugi duch obok keepRecentSessions:
     // zero konsumentów w kodzie (o kadencji L2→L3 decyduje wyłącznie batchSize w buildConsolidationPlan),
     // więc pole obiecywało kontrolę, której nie było. Osierocona wartość w settings usera jest nieszkodliwa.
 
-    // E2.7 K4: session timeout (was read from the wrong settings level with no UI — now wired here).
+    // Session timeout (was read from the wrong settings level with no UI - now wired here).
     new Setting(container)
         .setName(t('settings.session_timeout'))
         .setDesc(t('settings.session_timeout_desc'))
@@ -168,7 +168,7 @@ export function renderMemorySection(container: HTMLElement, ctx: MemorySettingsC
             text.inputEl.addClass('pkm-setting-input--w80');
         });
 
-    // E2.7 W3 (K4): idle consolidation — save the transcript after N minutes of inactivity. 0 = off.
+    // Idle consolidation - save the transcript after N minutes of inactivity. 0 = off.
     new Setting(container)
         .setName(t('settings.idle_consolidation'))
         .setDesc(t('settings.idle_consolidation_desc'))

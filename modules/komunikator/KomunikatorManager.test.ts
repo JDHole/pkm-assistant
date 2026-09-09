@@ -1,5 +1,5 @@
 /**
- * KomunikatorManager v3 (S28 Z2) — skrzynka plik-per-wiadomość.
+ * KomunikatorManager - skrzynka plik-per-wiadomość.
  *
  * Vault jest atrapą in-memory (mapa ścieżka → treść), więc testy dotykają PRAWDZIWEJ
  * logiki managera: składania frontmattera, liczenia statusów, kolizji timestampów
@@ -84,11 +84,11 @@ function fakeVault(initial: Record<string, string> = {}) {
 type VaultEventCb = (file: unknown, oldPath?: unknown) => void;
 
 /**
- * W8 follow-up (review koordynatora): `fakeVault` PLAIN nie ma `.on`/`.offref` — dokładnie
- * jak w większości testów tego pliku, gdzie kesz opiera się WYŁĄCZNIE na jawnej inwalidacji
- * + TTL. Ten wariant DODAJE event API realnego Obsidian `Vault`, żeby dowieść drugi kanał
- * ochrony (`attachVaultEvents`) — `_emitVaultEvent` symuluje to, co Obsidian odpaliłby po
- * zapisie z zewnątrz (sync Google Drive, obsidian-git, agent CC piszący wprost na dysk).
+ * `fakeVault` PLAIN nie ma `.on`/`.offref` - dokładnie jak w większości testów tego pliku,
+ * gdzie kesz opiera się WYŁĄCZNIE na jawnej inwalidacji + TTL. Ten wariant DODAJE event API
+ * realnego Obsidian `Vault`, żeby dowieść drugi kanał ochrony (`attachVaultEvents`) -
+ * `_emitVaultEvent` symuluje to, co Obsidian odpaliłby po zapisie z zewnątrz (sync Google
+ * Drive, obsidian-git, agent CC piszący wprost na dysk).
  */
 function fakeVaultWithEvents(initial: Record<string, string> = {}) {
     const base = fakeVault(initial);
@@ -290,7 +290,7 @@ test('sygnał ALL_READ leci DOKŁADNIE raz — przy drugim ptaszku, niezależnie
     }
 });
 
-test('deleteMessage: twarde usunięcie pliku (D5 — bez kosza)', async t => {
+test('deleteMessage: twarde usunięcie pliku (bez kosza)', async t => {
     const { manager, vault } = makeManager();
     const sent = await manager.sendMessage('A', 'B', 't', 'c');
 
@@ -374,9 +374,9 @@ test('listMessages: ignoruje pliki spoza wzorca msg-* w folderze skrzynki', asyn
     t.is(list[0].subject, 't');
 });
 
-// ═══════════════ S33 Z2 — strażnicy poczty (rate-limit + licznik odbić) ═══════════════
+// ═══════════════ strażnicy poczty (rate-limit + licznik odbić) ═══════════════
 
-test('B1 rate-limit: limit liczy się PER PARA nadawca→adresat', t => {
+test('rate-limit: limit liczy się PER PARA nadawca→adresat', t => {
     const clock = fakeClock();
     const { manager } = makeManager(undefined, { now: clock.now });
 
@@ -387,7 +387,7 @@ test('B1 rate-limit: limit liczy się PER PARA nadawca→adresat', t => {
     t.true(manager.checkSendAllowed('Klara', 'Sonny', 3).allowed, 'inny nadawca ma własną pulę');
 });
 
-test('B1 rate-limit: wielkość liter nie obchodzi limitu', t => {
+test('rate-limit: wielkość liter nie obchodzi limitu', t => {
     const clock = fakeClock();
     const { manager } = makeManager(undefined, { now: clock.now });
 
@@ -397,7 +397,7 @@ test('B1 rate-limit: wielkość liter nie obchodzi limitu', t => {
     t.false(manager.checkSendAllowed('tola', 'SONNY', 2).allowed);
 });
 
-test('B1 rate-limit: po wyjściu z okna 10 min pula wraca', t => {
+test('rate-limit: po wyjściu z okna 10 min pula wraca', t => {
     const clock = fakeClock();
     const { manager } = makeManager(undefined, { now: clock.now });
 
@@ -411,16 +411,16 @@ test('B1 rate-limit: po wyjściu z okna 10 min pula wraca', t => {
     t.is(after.count, 0, 'stare znaczniki wypadły z okna');
 });
 
-test('B1 rate-limit: śmieciowy limit spada na default z config/limits.js', t => {
+test('rate-limit: śmieciowy limit spada na default z config/limits.js', t => {
     const { manager } = makeManager();
     t.is(manager.checkSendAllowed('A', 'B').limit, DEFAULT_LIMITS.kom_send_rate_max);
     t.is(manager.checkSendAllowed('A', 'B', 0).limit, DEFAULT_LIMITS.kom_send_rate_max);
     t.is(manager.checkSendAllowed('A', 'B', 'duzo').limit, DEFAULT_LIMITS.kom_send_rate_max);
 });
 
-// ═══════════════ K12 (ogon K6) — DRUGI sufit: pula wysyłkowa NADAWCY ═══════════════
+// ═══════════════ DRUGI sufit: pula wysyłkowa NADAWCY ═══════════════
 
-test('K12: 12 różnych adresatów poniżej limitu pary — sufit nadawcy i tak przerywa', t => {
+test('12 różnych adresatów poniżej limitu pary — sufit nadawcy i tak przerywa', t => {
     const clock = fakeClock();
     const { manager } = makeManager(undefined, { now: clock.now });
     const PARA = 5;      // każdy adresat dostaje najwyżej 5 → 12 × 5 = 60 > 40
@@ -443,7 +443,7 @@ test('K12: 12 różnych adresatów poniżej limitu pary — sufit nadawcy i tak 
     t.true(manager.reserveSend('Klara', 'Agent0', PARA, NADAWCA).allowed);
 });
 
-test('K12: klucz nadawcy jest niewrażliwy na wielkość liter', t => {
+test('klucz nadawcy jest niewrażliwy na wielkość liter', t => {
     const clock = fakeClock();
     const { manager } = makeManager(undefined, { now: clock.now });
 
@@ -457,7 +457,7 @@ test('K12: klucz nadawcy jest niewrażliwy na wielkość liter', t => {
     t.is(res.senderCount, 3);
 });
 
-test('K12: po wyjściu z okna 10 min pula NADAWCY też wraca', t => {
+test('po wyjściu z okna 10 min pula NADAWCY też wraca', t => {
     const clock = fakeClock();
     const { manager } = makeManager(undefined, { now: clock.now });
 
@@ -471,7 +471,7 @@ test('K12: po wyjściu z okna 10 min pula NADAWCY też wraca', t => {
     t.is(after.senderCount, 0, 'stare znaczniki nadawcy wypadły z okna');
 });
 
-test('K12: limit PARY działa niezależnie — odmowa mówi `pair`', t => {
+test('limit PARY działa niezależnie — odmowa mówi `pair`', t => {
     const clock = fakeClock();
     const { manager } = makeManager(undefined, { now: clock.now });
 
@@ -484,7 +484,7 @@ test('K12: limit PARY działa niezależnie — odmowa mówi `pair`', t => {
     t.true(manager.reserveSend('Tola', 'Klara', 2, 40).allowed, 'inny adresat wciąż przechodzi');
 });
 
-test('K12: nieudany zapis oddaje slot w OBU licznikach', t => {
+test('nieudany zapis oddaje slot w OBU licznikach', t => {
     const clock = fakeClock();
     const { manager } = makeManager(undefined, { now: clock.now });
 
@@ -496,19 +496,19 @@ test('K12: nieudany zapis oddaje slot w OBU licznikach', t => {
     t.is(res.senderCount, 0, 'slot nadawcy też wrócił — błąd dysku nie zjada sufitu');
 });
 
-test('K12: śmieciowy sufit nadawcy spada na default z config/limits.js', t => {
+test('śmieciowy sufit nadawcy spada na default z config/limits.js', t => {
     const { manager } = makeManager();
     t.is(manager.checkSendAllowed('A', 'B').senderLimit, DEFAULT_LIMITS.kom_send_rate_max_sender);
     t.is(manager.checkSendAllowed('A', 'B', 5, 0).senderLimit, DEFAULT_LIMITS.kom_send_rate_max_sender);
     t.is(manager.checkSendAllowed('A', 'B', 5, 'duzo').senderLimit, DEFAULT_LIMITS.kom_send_rate_max_sender);
 });
 
-test('B2 hop: bez przeczytanej poczty wiadomość startuje od 0', t => {
+test('hop: bez przeczytanej poczty wiadomość startuje od 0', t => {
     const { manager } = makeManager();
     t.is(manager.nextHopFor('Tola'), 0);
 });
 
-test('B2 hop: po przeczytaniu hop-2 kolejna wysyłka byłaby trzecim odbiciem', t => {
+test('hop: po przeczytaniu hop-2 kolejna wysyłka byłaby trzecim odbiciem', t => {
     const clock = fakeClock();
     const { manager } = makeManager(undefined, { now: clock.now });
 
@@ -519,7 +519,7 @@ test('B2 hop: po przeczytaniu hop-2 kolejna wysyłka byłaby trzecim odbiciem', 
     t.is(manager.nextHopFor('Sonny'), 0, 'łańcuch jest per agent');
 });
 
-test('B2 hop: liczy się NAJWYŻSZY świeżo przeczytany hop', t => {
+test('hop: liczy się NAJWYŻSZY świeżo przeczytany hop', t => {
     const clock = fakeClock();
     const { manager } = makeManager(undefined, { now: clock.now });
 
@@ -529,7 +529,7 @@ test('B2 hop: liczy się NAJWYŻSZY świeżo przeczytany hop', t => {
     t.is(manager.nextHopFor('Tola'), 3, 'świeży list od usera nie zeruje łańcucha');
 });
 
-test('B2 hop: odczyt starszy niż TTL przestaje budować łańcuch', t => {
+test('hop: odczyt starszy niż TTL przestaje budować łańcuch', t => {
     const clock = fakeClock();
     const { manager } = makeManager(undefined, { now: clock.now });
 
@@ -542,7 +542,7 @@ test('B2 hop: odczyt starszy niż TTL przestaje budować łańcuch', t => {
     t.is(manager.nextHopFor('Tola'), 1, 'po TTL licznik rusza od nowa, nie od starego maksimum');
 });
 
-test('B2 hop: sendMessage zapisuje hop we frontmatterze, kom_read go odczytuje', async t => {
+test('hop: sendMessage zapisuje hop we frontmatterze, kom_read go odczytuje', async t => {
     const { manager, vault } = makeManager();
     await manager.sendMessage('Tola', 'Sonny', 't', 'c', { hop: 2 });
 
@@ -552,14 +552,14 @@ test('B2 hop: sendMessage zapisuje hop we frontmatterze, kom_read go odczytuje',
     t.is(list[0].hop, 2);
 });
 
-test('B2 hop: domyślnie 0 — ścieżka UI (user pisze z panelu) nie buduje łańcucha', async t => {
+test('hop: domyślnie 0 — ścieżka UI (user pisze z panelu) nie buduje łańcucha', async t => {
     const { manager, vault } = makeManager();
     await manager.sendMessage('User', 'Sonny', 't', 'c');
 
     t.true([...vault._files.values()][0].includes('hop: 0'));
 });
 
-test('B2 hop: stara wiadomość BEZ pola hop czyta się jako 0 (kompatybilność)', t => {
+test('hop: stara wiadomość BEZ pola hop czyta się jako 0 (kompatybilność)', t => {
     const legacy = [
         '---', 'type: kom-message', 'od: "Tola"', 'do: "Sonny"',
         'temat: "Stary list"', 'data: "2026-07-01 10:00"',
@@ -569,7 +569,7 @@ test('B2 hop: stara wiadomość BEZ pola hop czyta się jako 0 (kompatybilność
     t.is(parseMessage(legacy, 'msg-1')!.header.hop, 0);
 });
 
-test('B2 hop: readMessage odnotowuje odczyt, getMessage (podgląd UI) NIE', async t => {
+test('hop: readMessage odnotowuje odczyt, getMessage (podgląd UI) NIE', async t => {
     const { manager } = makeManager();
     await manager.sendMessage('Tola', 'Sonny', 't', 'c', { hop: 1 });
     const [msg] = await manager.listMessages('Sonny');
@@ -581,10 +581,10 @@ test('B2 hop: readMessage odnotowuje odczyt, getMessage (podgląd UI) NIE', asyn
     t.is(manager.nextHopFor('Sonny'), 2, 'dopiero kom_read buduje łańcuch');
 });
 
-// ───────────────── K4 / AUD-bledy-063: „nie wiem, czy plik istnieje" ≠ „nazwa wolna" ─────────────────
+// ───────────────── „nie wiem, czy plik istnieje" ≠ „nazwa wolna" ─────────────────
 
 // `test.serial` bo test podmienia globalny Date.now — równoległe testy nie mogą tego zobaczyć.
-test.serial('AUD-bledy-063: exists() rzuca → sendMessage ODMAWIA, nie nadpisuje cudzej wiadomości', async t => {
+test.serial('exists() rzuca → sendMessage ODMAWIA, nie nadpisuje cudzej wiadomości', async t => {
     const fixed = Date.now();
     const realNow = Date.now;
     Date.now = () => fixed;
@@ -612,9 +612,9 @@ test.serial('AUD-bledy-063: exists() rzuca → sendMessage ODMAWIA, nie nadpisuj
     }
 });
 
-// ───────────── AUD-bledy-042 / 046: poczta melduje ZE STANU, nie z zamiaru ─────────────
+// ───────────── poczta melduje ZE STANU, nie z zamiaru ─────────────
 
-test('AUD-bledy-042: pad zapisu ptaszka ai_read → readMessage NIE melduje przeczytania', async t => {
+test('pad zapisu ptaszka ai_read → readMessage NIE melduje przeczytania', async t => {
     const path = '.pkm-assistant/komunikator/inbox/sonny/msg-1000.md';
     const original = buildMessageMarkdown(
         { od: 'Tola', do: 'Sonny', temat: 'brief', data: '2026-08-23 10:00', user_read: false, ai_read: false },
@@ -635,7 +635,7 @@ test('AUD-bledy-042: pad zapisu ptaszka ai_read → readMessage NIE melduje prze
         'zero eventów „zaktualizowano" po nieudanym zapisie');
 });
 
-test('AUD-bledy-046: pad zakładania skrzynki → komunikat o SKRZYNCE, nie o adresacie', async t => {
+test('pad zakładania skrzynki → komunikat o SKRZYNCE, nie o adresacie', async t => {
     const { manager, vault } = makeManager();
     // `mkdir` pada wyłącznie na folderze skrzynki (brak miejsca / prawa / blokada synchronizatora).
     vault.adapter.mkdir = async (p: string) => {
@@ -650,7 +650,7 @@ test('AUD-bledy-046: pad zakładania skrzynki → komunikat o SKRZYNCE, nie o ad
     t.not(res.error, tr('komunikator.invalid_recipient'), 'adresat został rozpoznany — to nie jest błąd adresata');
 });
 
-test('AUD-bledy-046: pusta nazwa adresata dalej melduje „nieznany adresat"', async t => {
+test('pusta nazwa adresata dalej melduje „nieznany adresat"', async t => {
     const { manager } = makeManager();
 
     const res = await manager.sendMessage('Tola', '', 'temat', 'treść');
@@ -659,14 +659,14 @@ test('AUD-bledy-046: pusta nazwa adresata dalej melduje „nieznany adresat"', a
     t.is(res.error, tr('komunikator.invalid_recipient'), 'walidacja nazwy zostaje bez zmian');
 });
 
-// ───────────── K8/AUD-code-review-045 + AUD-code-review-046: padnięty odczyt skrzynki ≠ pusta skrzynka ─────────────
+// ───────────── padnięty odczyt skrzynki ≠ pusta skrzynka ─────────────
 //
-// `listMessages` (publiczne) łykało KAŻDY błąd I/O na folderze skrzynki i oddawało `[]` —
-// dokładnie tę samą wartość co legalnie pusta skrzynka. `resolveHopFor` deklarował fail-closed
-// (KOM_HOP_LIMIT), a `CommunicatorView`/`HomeView` miały gotowe catch-e na badge „?" — ale żadne
-// z nich nigdy się nie odpalało, bo `listMessages` nie oddawał wyjątku, którego mogłyby złapać.
+// `listMessages` (publiczne) łyka KAŻDY błąd I/O na folderze skrzynki i oddaje `[]` —
+// dokładnie tę samą wartość co legalnie pusta skrzynka. `resolveHopFor` musi być fail-closed
+// (KOM_HOP_LIMIT), a `CommunicatorView`/`HomeView` mają catch-e na badge „?" — dlatego
+// `_listMessagesStrict` PROPAGUJE awarię zamiast ją połykać, żeby te catch-e miały co złapać.
 
-test('AUD-code-review-045: resolveHopFor wraca KOM_HOP_LIMIT, gdy listing skrzynki rzuca (nie hop 0)', async t => {
+test('resolveHopFor wraca KOM_HOP_LIMIT, gdy listing skrzynki rzuca (nie hop 0)', async t => {
     const { manager, vault } = makeManager();
     // Skrzynka istnieje (agent już dostawał pocztę), ale odczyt katalogu akurat pada —
     // to NIE jest to samo co „skrzynka pusta".
@@ -676,7 +676,7 @@ test('AUD-code-review-045: resolveHopFor wraca KOM_HOP_LIMIT, gdy listing skrzyn
     t.is(await manager.resolveHopFor('Tola'), KOM_HOP_LIMIT, 'padnięty odczyt = odmowa, nie zresetowany łańcuch');
 });
 
-test('AUD-code-review-045: resolveHopFor wraca KOM_HOP_LIMIT, gdy exists() na skrzynce rzuca', async t => {
+test('resolveHopFor wraca KOM_HOP_LIMIT, gdy exists() na skrzynce rzuca', async t => {
     const { manager, vault } = makeManager();
     vault.adapter.exists = async (p: string) => {
         if (p.includes('/inbox/tola')) throw new Error('EIO');
@@ -686,7 +686,7 @@ test('AUD-code-review-045: resolveHopFor wraca KOM_HOP_LIMIT, gdy exists() na sk
     t.is(await manager.resolveHopFor('Tola'), KOM_HOP_LIMIT);
 });
 
-test('AUD-code-review-045: legalnie pusta skrzynka (folder nigdy nie powstał) NIE jest fail-closed', async t => {
+test('legalnie pusta skrzynka (folder nigdy nie powstał) NIE jest fail-closed', async t => {
     const clock = fakeClock();
     const { manager } = makeManager(undefined, { now: clock.now });
     manager.noteRead('Tola', 1);
@@ -695,17 +695,16 @@ test('AUD-code-review-045: legalnie pusta skrzynka (folder nigdy nie powstał) N
     t.is(await manager.resolveHopFor('Tola'), 2, 'brak folderu ≠ padnięty odczyt — stan z pamięci zostaje');
 });
 
-// ───────────── AUD-testy-022: kanał DYSKOWY resolveHopFor (KomunikatorManager.ts:349-355) ─────────────
+// ───────────── kanał DYSKOWY resolveHopFor ─────────────
 //
 // `resolveHopFor` bierze MAKSIMUM z dwóch źródeł: rejestru w pamięci (`nextHopFor`) i ŚWIEŻEGO
-// odczytu własnej skrzynki z dysku (docstring linie 322-334). Kanał dyskowy istnieje DOKŁADNIE
-// po to, żeby łańcuch A→B→C→A przeżył restart pluginu — `_readHops` to zwykła `Map`, ginie z
-// pamięcią procesu. Wszystkie testy WYŻEJ karmią albo padnięty I/O, albo skrzynkę bez folderu —
-// żaden nie podkłada na dysku PRAWDZIWEJ wiadomości z `ai_read: true`, więc pętla licząca
-// `fromDisk` (linie 352-354) nie miała ani jednej asercji. Testy hopa w KomunikatorTools.test.ts
-// przechodzą wyłącznie po kanale PAMIĘCIOWYM (kom_read w tej samej turze ustawia noteRead).
+// odczytu własnej skrzynki z dysku. Kanał dyskowy istnieje DOKŁADNIE po to, żeby łańcuch
+// A→B→C→A przeżył restart pluginu — `_readHops` to zwykła `Map`, ginie z pamięcią procesu.
+// Testy niżej karmią na dysku PRAWDZIWĄ wiadomość z `ai_read: true`, żeby pokryć gałąź
+// `fromDisk` osobno od testów hopa w KomunikatorTools.test.ts, które przechodzą wyłącznie
+// po kanale PAMIĘCIOWYM (kom_read w tej samej turze ustawia noteRead).
 
-test('AUD-testy-022: resolveHopFor liczy hop ze ŚWIEŻEJ wiadomości na dysku, mimo PUSTEGO rejestru w pamięci (restart pluginu)', async t => {
+test('resolveHopFor liczy hop ze ŚWIEŻEJ wiadomości na dysku, mimo PUSTEGO rejestru w pamięci (restart pluginu)', async t => {
     const clock = fakeClock();
     const dir = '.pkm-assistant/komunikator/inbox/tola';
     const path = `${dir}/msg-${clock.now()}.md`;
@@ -727,7 +726,7 @@ test('AUD-testy-022: resolveHopFor liczy hop ze ŚWIEŻEJ wiadomości na dysku, 
     );
 });
 
-test('AUD-testy-022: resolveHopFor IGNORUJE wiadomość na dysku starszą niż KOM_HOP_TTL_MS (granica świeżości)', async t => {
+test('resolveHopFor IGNORUJE wiadomość na dysku starszą niż KOM_HOP_TTL_MS (granica świeżości)', async t => {
     const clock = fakeClock();
     const dir = '.pkm-assistant/komunikator/inbox/tola';
     const path = `${dir}/msg-${clock.now()}.md`;
@@ -749,7 +748,7 @@ test('AUD-testy-022: resolveHopFor IGNORUJE wiadomość na dysku starszą niż K
     );
 });
 
-test('AUD-code-review-046: getUnreadCount ODRZUCA przy padniętym listingu skrzynki, nie melduje zero', async t => {
+test('getUnreadCount ODRZUCA przy padniętym listingu skrzynki, nie melduje zero', async t => {
     const { manager, vault } = makeManager();
     vault._dirs.add('.pkm-assistant/komunikator/inbox/tola');
     vault.adapter.list = async () => { throw new Error('EIO'); };
@@ -769,15 +768,16 @@ test('listMessages (publiczne) dalej łyka błąd I/O i oddaje [] — kontrakt r
     t.deepEqual(await manager.listMessages('Tola'), [], 'ping/UI/narzędzia agenta dalej dostają bezpieczne „pusto"');
 });
 
-// ═════════ AUD-wydajnosc-028/058/101/020/053 — kesz nagłówków skrzynki (dowód mutacyjny) ═════════
+// ═════════ kesz nagłówków skrzynki (dowód mutacyjny) ═════════
 //
-// Znalezisko: KAŻDE odświeżenie sidebara (i KAŻDE `kom_send`/`kom_list`) czytało z dysku
-// CAŁĄ skrzynkę KAŻDEGO agenta, plik po pliku, sekwencyjnie, TYLKO żeby policzyć jedną liczbę
-// (nieprzeczytane) albo zbudować listę nagłówków. Naprawa: kesz nagłówków per skrzynka
-// (`_headerCache`), budowany raz przez `Promise.all` (nie sekwencyjny `for`+`await`) i
-// jawnie inwalidowany po KAŻDEJ mutacji tej konkretnej skrzynki (`sendMessage`/`readMessage`/
-// `markUserRead`/`markAiRead`/`deleteMessage`). Atrapa vaulta liczy realne wywołania
-// `read`/`exists`/`list`, żeby dowód był na LICZBACH operacji I/O, nie na czasie zegarowym.
+// DLACZEGO kesz: bez niego KAŻDE odświeżenie sidebara (i KAŻDE `kom_send`/`kom_list`)
+// czytałoby z dysku CAŁĄ skrzynkę KAŻDEGO agenta, plik po pliku, sekwencyjnie, TYLKO żeby
+// policzyć jedną liczbę (nieprzeczytane) albo zbudować listę nagłówków. Kesz nagłówków per
+// skrzynka (`_headerCache`) buduje się raz przez `Promise.all` (nie sekwencyjny `for`+`await`)
+// i jest jawnie inwalidowany po KAŻDEJ mutacji tej konkretnej skrzynki (`sendMessage`/
+// `readMessage`/`markUserRead`/`markAiRead`/`deleteMessage`). Atrapa vaulta liczy realne
+// wywołania `read`/`exists`/`list`, żeby dowód był na LICZBACH operacji I/O, nie na czasie
+// zegarowym.
 
 /** Owija `fakeVault` licznikiem wywołań adaptera per metoda — do dowodu mutacyjnego. */
 function countingVault(vault: ReturnType<typeof fakeVault>) {
@@ -791,7 +791,7 @@ function countingVault(vault: ReturnType<typeof fakeVault>) {
     return calls;
 }
 
-/** 5 skrzynek × 40 wiadomości (mieszanka read/unread) — rozmiar zbliżony do znaleziska (569/14). */
+/** 5 skrzynek × 40 wiadomości (mieszanka read/unread) — realistyczny rozmiar skrzynki. */
 async function seedInboxes(manager: TestManager, agents: string[], perAgent = 40) {
     for (const agent of agents) {
         for (let i = 0; i < perAgent; i++) {
@@ -801,7 +801,7 @@ async function seedInboxes(manager: TestManager, agents: string[], perAgent = 40
     }
 }
 
-test('AUD-wydajnosc: kesz zimny buduje się przez Promise.all (nie exists+read na plik) — 1 odczyt/plik, 0 podwójnego exists', async t => {
+test('kesz zimny buduje się przez Promise.all (nie exists+read na plik) — 1 odczyt/plik, 0 podwójnego exists', async t => {
     const { manager, vault } = makeManager();
     const calls = countingVault(vault);
     for (let i = 0; i < 10; i++) await manager.sendMessage('A', 'B', `t${i}`, `c${i}`);
@@ -815,7 +815,7 @@ test('AUD-wydajnosc: kesz zimny buduje się przez Promise.all (nie exists+read n
     t.is(calls.list, 1);
 });
 
-test('AUD-wydajnosc-028/058/101: getUnreadCount po zimnym renderze liczy poprawnie I drugi render jest darmowy', async t => {
+test('getUnreadCount po zimnym renderze liczy poprawnie I drugi render jest darmowy', async t => {
     const { manager, vault } = makeManager();
     const AGENTS = ['Tola', 'Sonny', 'Klara', 'Borys', 'Wera'];
     await seedInboxes(manager, AGENTS, 40);
@@ -833,12 +833,12 @@ test('AUD-wydajnosc-028/058/101: getUnreadCount po zimnym renderze liczy poprawn
     for (const agent of AGENTS) second.push(await manager.getUnreadCount(agent));
 
     t.deepEqual(second, first, 'te same liczniki po trafieniu w kesz');
-    t.is(calls.read, 0, 'DRUGIE odświeżenie NIECHANIONEJ skrzynki = zero odczytów treści (dowód na AUD-028/058/101)');
+    t.is(calls.read, 0, 'DRUGIE odświeżenie NIECHANIONEJ skrzynki = zero odczytów treści');
     t.is(calls.exists, 0);
     t.is(calls.list, 0, 'nawet listing katalogu jest z kesza — nie tylko odczyt plików');
 });
 
-test('AUD-wydajnosc-028/058/101: mutacja JEDNEJ skrzynki inwaliduje TYLKO jej kesz, sąsiednie 4 zostają darmowe', async t => {
+test('mutacja JEDNEJ skrzynki inwaliduje TYLKO jej kesz, sąsiednie 4 zostają darmowe', async t => {
     const { manager, vault } = makeManager();
     const AGENTS = ['Tola', 'Sonny', 'Klara', 'Borys', 'Wera'];
     await seedInboxes(manager, AGENTS, 40);
@@ -854,13 +854,13 @@ test('AUD-wydajnosc-028/058/101: mutacja JEDNEJ skrzynki inwaliduje TYLKO jej ke
     t.is(counts.Tola, 40 - 14 + 1, 'Tola widzi nową wiadomość — kesz faktycznie zainwalidowany');
     t.is(counts.Sonny, 40 - 14, 'Sonny nietknięty');
     // Koszt: TYLKO Tola (41 plików) czyta dysk na nowo; pozostałe 4 skrzynki (160 plików
-    // łącznie) zostają w keszu i płacą zero — to jest dokładnie „targeted invalidation"
-    // ze znaleziska (odświeżenie NIE skanuje WSZYSTKICH agentów na ślepo).
+    // łącznie) zostają w keszu i płacą zero — „targeted invalidation": odświeżenie NIE
+    // skanuje WSZYSTKICH agentów na ślepo.
     t.is(calls.read, 41, 'przeczytany dysk tylko dla skrzynki, która faktycznie się zmieniła');
     t.is(calls.list, 1, 'jeden listing — tylko Tola');
 });
 
-test('AUD-wydajnosc-020/053: kom_list ma twardy sufit — nie rośnie bez ograniczenia razem ze skrzynką', async t => {
+test('kom_list ma twardy sufit — nie rośnie bez ograniczenia razem ze skrzynką', async t => {
     const { manager } = makeManager();
     for (let i = 0; i < 120; i++) await manager.sendMessage('Nadawca', 'B', `t${i}`, `c${i}`);
 
@@ -868,19 +868,19 @@ test('AUD-wydajnosc-020/053: kom_list ma twardy sufit — nie rośnie bez ograni
     t.is(all.length, 120, 'manager sam nie tnie — sufit żyje w narzędziu (KomunikatorTools), test tu dowodzi materiału wejściowego');
 });
 
-// ═════════ W8 follow-up (review koordynatora, 2026-09-02) — zapisy Z ZEWNĄTRZ ═════════
+// ═════════ zapisy Z ZEWNĄTRZ ═════════
 //
-// Znalezisko: „wszystkie zapisy idą przez KomunikatorManager" jest fałszywe. Sesje Claude
+// DLACZEGO: „wszystkie zapisy idą przez KomunikatorManager" nie jest prawdą. Sesje Claude
 // Code piszą do skrzynek WPROST na dysk (nowy plik `msg-{epoch}.md`, edycja `ai_read` —
 // kontrakt `/agent`), vault bywa synchronizowany Google Drive między laptopem a telefonem
 // (pliki pojawiają się/zmieniają bez udziału pluginu), `obsidian-git pull` też potrafi
 // podmienić pliki. Kesz z jawną inwalidacją (sekcja wyżej) widzi TYLKO mutacje przez metody
 // managera — bez dodatkowej ochrony zamroziłby liczniki do najbliższej takiej mutacji, czyli
-// realną regresję funkcjonalną. Naprawa: `attachVaultEvents` (nasłuch `create`/`modify`/
+// realną regresję funkcjonalną. Stąd `attachVaultEvents` (nasłuch `create`/`modify`/
 // `delete`/`rename` na `this.vault`, gdy dostępny) + `HEADER_CACHE_TTL_MS=5000` jako siatka
 // bezpieczeństwa niezależna od zdarzeń.
 
-test('W8: TTL kesza — zapis Z ZEWNĄTRZ (atrapa bez .on, brak zdarzeń) staje się widoczny po upływie TTL', async t => {
+test('TTL kesza — zapis Z ZEWNĄTRZ (atrapa bez .on, brak zdarzeń) staje się widoczny po upływie TTL', async t => {
     const clock = fakeClock();
     const { manager, vault } = makeManager(undefined, { now: clock.now });
 
@@ -905,7 +905,7 @@ test('W8: TTL kesza — zapis Z ZEWNĄTRZ (atrapa bez .on, brak zdarzeń) staje 
         'PO TTL manager przeczytał dysk na nowo i widzi wiadomość dopisaną z zewnątrz — przed naprawą (kesz bez TTL) NIGDY by jej nie zobaczył');
 });
 
-test('W8: attachVaultEvents — zdarzenie vaulta inwaliduje kesz NATYCHMIAST, bez czekania na TTL', async t => {
+test('attachVaultEvents — zdarzenie vaulta inwaliduje kesz NATYCHMIAST, bez czekania na TTL', async t => {
     const clock = fakeClock();
     const vault = fakeVaultWithEvents();
     const manager = new KomunikatorManager(vault, { _emit: () => {} }, { now: clock.now });
@@ -929,7 +929,7 @@ test('W8: attachVaultEvents — zdarzenie vaulta inwaliduje kesz NATYCHMIAST, be
         'zdarzenie create zainwalidowało kesz NATYCHMIAST — dowód, że to event, nie TTL, zdjął wpis');
 });
 
-test('W8: attachVaultEvents łapie też rename (stara I nowa ścieżka tracą kesz) i delete', async t => {
+test('attachVaultEvents łapie też rename (stara I nowa ścieżka tracą kesz) i delete', async t => {
     const vault = fakeVaultWithEvents();
     const manager = new KomunikatorManager(vault, null, {});
     manager.attachVaultEvents();
@@ -952,12 +952,12 @@ test('W8: attachVaultEvents łapie też rename (stara I nowa ścieżka tracą ke
     t.is(await manager.getUnreadCount('Tola'), 1, 'rename zainwalidował kesz — nowa wiadomość widoczna bez TTL');
 });
 
-test('W8: attachVaultEvents — atrapa BEZ .on nie wybucha, zwraca false, kesz chroni tylko TTL', t => {
+test('attachVaultEvents — atrapa BEZ .on nie wybucha, zwraca false, kesz chroni tylko TTL', t => {
     const { manager } = makeManager();
     t.false(manager.attachVaultEvents(), 'fakeVault (bez .on) nie ma jak dać nasłuchu — no-op, nie wyjątek');
 });
 
-test('W8: attachVaultEvents jest idempotentne — drugie wołanie nie dubluje nasłuchu', t => {
+test('attachVaultEvents jest idempotentne — drugie wołanie nie dubluje nasłuchu', t => {
     const vault = fakeVaultWithEvents();
     const manager = new KomunikatorManager(vault, null, {});
 
@@ -966,7 +966,7 @@ test('W8: attachVaultEvents jest idempotentne — drugie wołanie nie dubluje na
     t.is(vault._listenerCount('create'), 1, 'jeden listener na `create`, nie dwa');
 });
 
-test('W8: attachVaultEvents z registerEvent — refy idą do przekazanej funkcji (wzór plugin.registerEvent), nie do wewnętrznej listy', t => {
+test('attachVaultEvents z registerEvent — refy idą do przekazanej funkcji (wzór plugin.registerEvent), nie do wewnętrznej listy', t => {
     const vault = fakeVaultWithEvents();
     const manager = new KomunikatorManager(vault, null, {});
     const registered: unknown[] = [];
@@ -977,7 +977,7 @@ test('W8: attachVaultEvents z registerEvent — refy idą do przekazanej funkcji
     t.deepEqual(manager._vaultEventRefs, [], 'gdy registerEvent podany, manager NIE trzyma refów sam (Obsidian Component sprząta)');
 });
 
-test('W8: detachVaultEvents odpina nasłuch zarejestrowany BEZ registerEvent (harness/testy poza cyklem pluginu)', async t => {
+test('detachVaultEvents odpina nasłuch zarejestrowany BEZ registerEvent (harness/testy poza cyklem pluginu)', async t => {
     const vault = fakeVaultWithEvents();
     const manager = new KomunikatorManager(vault, null, {});
     manager.attachVaultEvents();

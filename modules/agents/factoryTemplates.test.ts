@@ -103,7 +103,7 @@ test('odlany researcher trafia w fuzzy match delegate(aspect:"researcher")', asy
     const stores = makeStores(vault);
     await ensureFactoryTemplates({ vault, ...stores });
 
-    // Odlew dla agenta Klara → kopia `klara-researcher` (D3).
+    // Odlew dla agenta Klara → kopia `klara-researcher`.
     const saved: SubAgentInput[] = [];
     const subAgentLoader = {
         saveSubAgent: async (cfg: SubAgentInput) => { saved.push(cfg); },
@@ -145,9 +145,9 @@ test('odlany skill web ma pre-questions z selectem głębokości (round-trip prz
     t.true(loadedSkill.prompt.includes('{{glebokosc}}'));
 });
 
-// AUD-code-review-091: max_tool_result_length fabrycznego szablonu NIE wolno hardcodować —
-// musi zgadzać się z JEDNYM źródłem prawdy (config/limits.ts), inaczej podbicie kanonu tam
-// nie dotrze do nowo seedowanego szablonu researcher-a.
+// max_tool_result_length fabrycznego szablonu NIE wolno hardcodować - musi zgadzać się
+// z JEDNYM źródłem prawdy (config/limits.ts), inaczej podbicie kanonu tam nie dotrze do
+// nowo seedowanego szablonu researcher-a.
 test('definicje fabryczne: max_tool_result_length zgadza się z DEFAULT_LIMITS, nie z lokalnym literałem', t => {
     const subs = getFactorySubAgentTemplates();
     t.is(subs[0].max_tool_result_length, DEFAULT_LIMITS.max_tool_result_length);

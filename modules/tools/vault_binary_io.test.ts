@@ -3,7 +3,7 @@ import { writeText } from './vault_binary_io.js';
 import type { BinaryIoApp, VaultFileLike } from './vault_binary_io.js';
 
 /**
- * obsidianmd (release 2.2.0 / W4): `writeText` na plik ISTNIEJĄCY w vaulcie robi
+ * obsidianmd: `writeText` na plik ISTNIEJĄCY w vaulcie robi
  * `Vault.modify` → `Vault.process` (zapis atomowy, wytyczna katalogu Obsidiana), z fallbackiem
  * na `modify` dla hostów bez `process` (feature-detect — ten sam wzorzec, który plik już
  * stosuje dla `getAbstractFileByPath`/inne opcjonalne metody Vault API).

@@ -1,6 +1,6 @@
 /**
  * @module StreamWatchdog
- * Watchdog martwego streamu czatu (2026-07-29). Obserwowany przypadek: lokalne proxy
+ * Watchdog martwego streamu czatu. Obserwowany przypadek: lokalne proxy
  * (zgodne z API LM Studio) przyjmuje request i trzyma połączenie, ale nie oddaje
  * ANI JEDNEGO chunka (log `[ChatAdapter] no chunk`) — twardy timeout XHR w adapterze
  * to dopiero 600 s, więc tura wisiała w nieskończoność aż do ręcznego Stopa.
@@ -14,9 +14,9 @@
  * i zegar wstrzykiwalne (testy podają fake'i); w produkcie timer jest zawsze czyszczony
  * deterministycznie (disarm w finally pętli + ręczny Stop + onClose widoku).
  *
- * S29 Z1 (2026-07-29): przeprowadzka `modules/chat/chat/` → `core/utils/`. Powód: watchdoga
- * potrzebuje też `modules/memory/streamHelper.js` (konsolidacja pamięci), a memory NIE MOŻE
- * importować z modules/chat — złota zasada (tylko barrel) plus realny cykl (chat już importuje
+ * Watchdog żyje w `core/utils/`, nie w `modules/chat/chat/`, bo potrzebuje go też
+ * `modules/memory/streamHelper.js` (konsolidacja pamięci), a memory NIE MOŻE importować
+ * z modules/chat — złota zasada (tylko barrel) plus realny cykl (chat już importuje
  * z memory). Klasa nie ma zależności, więc jej miejsce jest w rdzeniu.
  */
 /**
@@ -45,7 +45,7 @@ export interface StreamWatchdogOptions {
 }
 
 export class StreamWatchdog {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare timeoutMs: number;
     declare onStall: (silentMs: number) => void;
     declare private _setTimeout: (fn: () => void, ms: number) => TimerId;

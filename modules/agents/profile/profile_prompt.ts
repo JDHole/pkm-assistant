@@ -1,5 +1,5 @@
 /**
- * Prompt tab — inspector and editor for system prompt composition.
+ * Prompt tab - inspector and editor for system prompt composition.
  */
 import { Notice } from 'obsidian';
 import { FACTORY_DEFAULTS, DECISION_TREE_GROUPS, DECISION_TREE_DEFAULTS } from '../../prompts/index.js';
@@ -102,9 +102,7 @@ async function _renderPromptInspector(ctx: UiBoundary, el: HTMLElement) {
     };
 
     const bodyEl = el.createDiv();
-    // E2.3 (D21): tryby pracy usunięte — Prompt Inspector nie przekazuje już workMode.
-    // E2.9 FAZA D: stary świat artifacts:{todos,plans} (_chatTodoStore/_planStore) usunięty — prompt
-    // czyta teraz indeks TYPÓW + aktywny artefakt (B3), niezależnie od inspektora.
+    // Prompt czyta indeks TYPÓW + aktywny artefakt, niezależnie od inspektora.
     const extraContext = { disabledPromptSections: mergedDisabled };
 
     try {
@@ -124,7 +122,7 @@ async function _renderPromptInspector(ctx: UiBoundary, el: HTMLElement) {
             const groupEl = bodyEl.createDiv({ cls: 'cs-prompt-category' });
             const catHeader = groupEl.createDiv({ cls: 'cs-prompt-category__header' });
             setSvgLabel(catHeader.createSpan(), catDef.dot, catDef.label);
-            // Bez tekstu startowego — `updateTokenDisplays()` (linia niżej, ta sama tura wykonania,
+            // Bez tekstu startowego - `updateTokenDisplays()` (linia niżej, ta sama tura wykonania,
             // przed jakimkolwiek repaintem) i tak zaraz wpisze `${n.toLocaleString()} tok` (ten sam
             // wzorzec co reszta pliku); placeholder "0 tok" nigdy nie był widoczny na ekranie.
             const catTokenEl = catHeader.createSpan({ cls: 'setting-item-description' });
@@ -174,10 +172,10 @@ async function _renderPromptInspector(ctx: UiBoundary, el: HTMLElement) {
 }
 
 /**
- * S32 Z1a: baner „Generator promptu startowego" na górze Inspektora.
+ * Baner „Generator promptu startowego" na górze Inspektora.
  *
  * Dlaczego TU, a nie w Personie: Inspektor to miejsce, gdzie user pierwszy raz widzi, z czego
- * składa się prompt — i od razu, że sekcja „KIM JESTEM" jest pusta. Generator wypełnia
+ * składa się prompt - i od razu, że sekcja „KIM JESTEM" jest pusta. Generator wypełnia
  * `formData.personality` (bufor panelu), więc zmiana ląduje w YAML-u dopiero po „Zapisz profil".
  */
 function _renderStartPromptBanner(ctx: UiBoundary, el: HTMLElement) {
@@ -306,11 +304,11 @@ function _renderPromptEditor(ctx: UiBoundary, el: HTMLElement) {
     overHead.createSpan({ text: t('profile.prompt.section_overrides') });
     el.createEl('p', { text: t('profile.prompt.section_overrides_desc'), cls: 'setting-item-description' });
 
-    // S32 Z4.2: `minion_guide` + `master_guide` WYCIĘTE. Były martwymi slotami — od unifikacji
-    // trybów PromptBuilder renderuje wyłącznie `delegate_guide` (komentarze `PromptBuilder.js:176,577`),
+    // `minion_guide` + `master_guide` WYCIĘTE. Były martwymi slotami - od unifikacji trybów
+    // PromptBuilder renderuje wyłącznie `delegate_guide` (komentarze `PromptBuilder.js:176,577`),
     // więc cokolwiek user wpisał w te dwa okienka, NIE trafiało do promptu. Okienko obiecujące
     // wpływ, którego nie ma, jest gorsze od jego braku. Stare wartości zostają nieszkodliwie
-    // w YAML-ach userów (bez migratora — nikt ich nie czyta).
+    // w YAML-ach userów (bez migratora - nikt ich nie czyta).
     const overrideDefs = [
         { key: 'environment', label: t('profile.prompt.environment'), icon: UiIcons.globe(12) },
         { key: 'rules', label: t('profile.prompt.rules_section'), icon: UiIcons.clipboard(12) },
@@ -451,7 +449,7 @@ function _renderPromptEditor(ctx: UiBoundary, el: HTMLElement) {
             const instrLabel = instrHeader.createSpan({ text: truncated, cls: 'cs-prompt-override__instr-label' });
             if (isDisabled) instrLabel.addClass('is-dimmed');
 
-            // E2.8 C9: rozróżnij rdzeń (CORE_RULES, always-on) od reguł rozszerzonych (furtka).
+            // Rozróżnij rdzeń (CORE_RULES, always-on) od reguł rozszerzonych (furtka).
             if (instr.tier === 'core') instrHeader.createSpan({ text: t('profile.prompt.core_rule'), cls: 'cs-dt-badge' });
             if (instr.tool) instrHeader.createSpan({ text: instr.tool, cls: 'cs-dt-badge' });
             if (hasAgentOverride) instrHeader.createSpan({ text: t('profile.prompt.overridden'), cls: 'cs-prompt-badge cs-prompt-badge--agent' });
@@ -547,7 +545,7 @@ function _renderPromptEditor(ctx: UiBoundary, el: HTMLElement) {
         });
     }
 
-    // ── Prompty robocze per agent (E2.8 C9 — A2/B3) ──
+    // ── Prompty robocze per agent ──
     _renderWorkPrompts(ctx, el);
 }
 
@@ -555,7 +553,7 @@ function _renderPromptEditor(ctx: UiBoundary, el: HTMLElement) {
  * Prompty robocze agenta: kompresja / zapis / dedup / streszczenia / rama suba.
  * Puste = resolver bierze global (Settings→Prompt) lub factory. Reset = wyczyść override.
  * Ostrzeżenie o kontrakcie przy compression/save/archive (parsery: MEMORY_CANDIDATES fence,
- * JSON new_notes, {{LEVEL}}). Sloty promptów artefaktów = E2.9 (nie budujemy).
+ * JSON new_notes, {{LEVEL}}). Sloty promptów artefaktów jeszcze nie budujemy.
  */
 function _renderWorkPrompts(ctx: UiBoundary, el: HTMLElement) {
     const { formData } = ctx;

@@ -1,11 +1,10 @@
 /**
- * `PluginSettingsTab` — zamyka lukę F-05.
+ * `PluginSettingsTab`.
  *
- * V-06: DWA stany ekranu („ładuję" vs „gotowe"). Trzeci stan i guzik „uruchom" zeszły razem
- * z gałęzią mobile-defer, więc nie ma tu ani funkcji `resolveSettingsGate`, ani jej testu —
- * cała decyzja mieści się w `render()`.
+ * DWA stany ekranu („ładuję" vs „gotowe"). Nie ma trzeciego stanu ani guzika „uruchom" - nie ma
+ * tu ani funkcji `resolveSettingsGate`, ani jej testu - cała decyzja mieści się w `render()`.
  *
- * ⚠️ OGRANICZENIE ŚRODOWISKA (do rozstrzygnięcia w F7): baza dziedziczy po `PluginSettingTab`
+ * ⚠️ OGRANICZENIE ŚRODOWISKA: baza dziedziczy po `PluginSettingTab`
  * Obsidiana, a pakiet `obsidian` w `node_modules` to SAME TYPY. AVA nie ma dziś atrapy
  * `obsidian`, więc klasa jest importowana DYNAMICZNIE w środku każdego testu.
  */
@@ -87,7 +86,6 @@ async function makeTab(runtime: FakeRuntime | null) {
     return { tab, sekcje };
 }
 
-// ── C9.1 ─────────────────────────────────────────────────────────────────────
 test('runtime w "loading" → akapit settings.loading, render czeka', async t => {
     const release: { fn?: () => void } = {};
     const { tab, sekcje } = await makeTab(makeRuntime('loading', release));
@@ -104,7 +102,6 @@ test('runtime w "loading" → akapit settings.loading, render czeka', async t =>
     t.deepEqual(sekcje, ['sekcja']);
 });
 
-// ── C9.2 ─────────────────────────────────────────────────────────────────────
 test('po whenLoaded() zakładka renderuje sekcje', async t => {
     const release: { fn?: () => void } = {};
     const { tab, sekcje } = await makeTab(makeRuntime('loading', release));
@@ -119,7 +116,6 @@ test('po whenLoaded() zakładka renderuje sekcje', async t => {
     t.deepEqual(sekcje, ['sekcja']);
 });
 
-// ── C9.3 ─────────────────────────────────────────────────────────────────────
 test('runtime w "loaded" → render bez czekania', async t => {
     const { tab, sekcje } = await makeTab(makeRuntime('loaded'));
 
@@ -130,7 +126,6 @@ test('runtime w "loaded" → render bez czekania', async t => {
     t.deepEqual(sekcje, ['sekcja']);
 });
 
-// ── C9.4 ─────────────────────────────────────────────────────────────────────
 test('brak runtime\'u (null) nie wywala zakładki', async t => {
     const { tab } = await makeTab(null);
 
@@ -140,7 +135,6 @@ test('brak runtime\'u (null) nie wywala zakładki', async t => {
     t.true(wszystkieTeksty(el).includes('settings.loading'));
 });
 
-// ── C9.5 (V-07) ──────────────────────────────────────────────────────────────
 test('saveSettings() zakładki idzie przez settingsStore.save()', async t => {
     const zapisy: string[] = [];
     const runtime = makeRuntime('loaded');
@@ -152,10 +146,9 @@ test('saveSettings() zakładki idzie przez settingsStore.save()', async t => {
     t.deepEqual(zapisy, ['save'], 'zakładka zapisuje inną drogą niż magazyn ustawień');
 });
 
-// ── C9.6-C9.8 (dopisane przez autora bazy) ───────────────────────────────────
-// C9.1-C9.4 sprawdzają bramę stanu napisaną w PODKLASIE testowej, więc same w sobie nie
-// pilnują, czy ma ją BAZA (A13: „dwa kontenery + DWA stany ekranu"). Te trzy testy biorą
-// podklasę, która NIE zna pojęcia „ładuję" — cała brama musi przyjść z klasy bazowej.
+// Testy powyżej sprawdzają bramę stanu napisaną w PODKLASIE testowej, więc same w sobie nie
+// pilnują, czy ma ją BAZA („dwa kontenery + DWA stany ekranu"). Te trzy testy biorą
+// podklasę, która NIE zna pojęcia „ładuję" - cała brama musi przyjść z klasy bazowej.
 
 async function makePlainTab(runtime: FakeRuntime | null) {
     const Base = await loadBase();
@@ -223,11 +216,11 @@ test('BAZA: display() nie rzuca, gdy render podklasy pada', async t => {
     t.pass();
 });
 
-// ── F10 (mutacje) ────────────────────────────────────────────────────────────
-// Getter `env`, szkielet dwóch kontenerów i pusty magazyn ustawień — trzy zachowania,
+// ── Mutacje ────────────────────────────────────────────────────────────
+// Getter `env`, szkielet dwóch kontenerów i pusty magazyn ustawień - trzy zachowania,
 // których poprzednie testy dotykały tylko mimochodem, przez podklasę.
 
-/** Zakładka bez podklasowej bramy stanu — do sprawdzania samego gettera i szkieletu. */
+/** Zakładka bez podklasowej bramy stanu - do sprawdzania samego gettera i szkieletu. */
 async function makeBareTab(plugin: unknown) {
     const Base = await loadBase();
     class BareTab extends Base {

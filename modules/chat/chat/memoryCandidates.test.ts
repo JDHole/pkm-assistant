@@ -8,7 +8,7 @@ function withCandidates(summary: string, jsonBody: string): string {
 test('parseMemoryCandidates: valid JSON block yields candidates and a clean summary', t => {
     const body = JSON.stringify({
         memory_candidates: [
-            { name: 'Kuba prefers direct feedback', description: 'no cheerleading', type: 'user', content: 'Be concrete.', why: 'stated in session', how_to_apply: 'always' },
+            { name: 'User prefers direct feedback', description: 'no cheerleading', type: 'user', content: 'Be concrete.', why: 'stated in session', how_to_apply: 'always' },
         ],
     });
     const raw = withCandidates('## 1. Cel\nRozmowa o pamięci.', body);
@@ -20,7 +20,7 @@ test('parseMemoryCandidates: valid JSON block yields candidates and a clean summ
     t.is(summary, '## 1. Cel\nRozmowa o pamięci.');
     t.is(candidates.length, 1);
     t.is(candidates[0].type, 'user');
-    t.is(candidates[0].name, 'Kuba prefers direct feedback');
+    t.is(candidates[0].name, 'User prefers direct feedback');
 });
 
 test('parseMemoryCandidates: no sentinel → zero candidates, summary unchanged', t => {

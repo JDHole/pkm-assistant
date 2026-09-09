@@ -2,7 +2,7 @@
  * `waitForLayoutReady` — zdarzeniowy zamiennik dawnych ślepych zegarów na starcie.
  *
  * Testy przyjechały 1:1 ze strażnika startu, który czytał źródło skasowanego pliku
- * środowiska (clean-room / F2). Tutaj są tym, czym były od początku: BEHAWIORALNYM
+ * środowiska. Tutaj są tym, czym były od początku: BEHAWIORALNYM
  * sprawdzeniem czystej funkcji, która wstaje w gołym Node.
  */
 import test from 'ava';

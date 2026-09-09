@@ -1,8 +1,8 @@
 # PKM Assistant
 
-**Build your own AI agents inside Obsidian — with full transparency and control over every part of the prompt.**
+**Build your own AI agents inside Obsidian - with full transparency and control over every part of the prompt.**
 
-[![Version](https://img.shields.io/badge/version-2.2.0-blue)]() [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-green)](LICENSE) [![Tests](https://img.shields.io/badge/tests-3013%20PASS-brightgreen)]() [![CI](https://github.com/JDHole/pkm-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/JDHole/pkm-assistant/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-2.2.2-blue)]() [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-green)](LICENSE) [![Tests](https://img.shields.io/badge/tests-3617%20PASS-brightgreen)]() [![CI](https://github.com/JDHole/pkm-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/JDHole/pkm-assistant/actions/workflows/ci.yml)
 
 ![Chat with Jaskier](assets/pkm-chat.png)
 
@@ -10,11 +10,11 @@
 
 ## What is this?
 
-PKM Assistant is an Obsidian plugin that lets you create, customize, and run AI agents directly inside your vault. Each agent has its own personality, memory, skills, and tools — and you can see and edit **every piece of text** that gets sent to the AI model.
+PKM Assistant is an Obsidian plugin that lets you create, customize, and run AI agents directly inside your vault. Each agent has its own personality, memory, skills, and tools - and you can see and edit **every piece of text** that gets sent to the AI model.
 
 Most AI tools hide what happens under the hood. PKM Assistant says: *"There is no magic here. Your agent is a prompt. Here is what it is made of. Change whatever you want."*
 
-Everything the agent sends to the model — system prompt, memory, tools, skills — is assembled from parts you can read and edit. No hidden middle layer.
+Everything the agent sends to the model - system prompt, memory, tools, skills - is assembled from parts you can read and edit. No hidden middle layer.
 
 ---
 
@@ -32,31 +32,31 @@ Everything the agent sends to the model — system prompt, memory, tools, skills
 
 ## Key Features
 
-**Multi-Agent System** — Create multiple agents, each with a unique personality, role, and capabilities. Switch between them with tabs. Jaskier (built-in mentor) guides you from day one — then build your own.
+**Multi-Agent System** - Create multiple agents, each with a unique personality, role, and capabilities. Switch between them with tabs. Jaskier (built-in mentor) guides you from day one - then build your own.
 
-**9 AI Platforms** — Anthropic, OpenAI, Google Gemini, DeepSeek, Groq, OpenRouter, xAI, Ollama, LM Studio. Use cloud models or run fully offline.
+**9 AI Platforms** - Anthropic, OpenAI, Google Gemini, DeepSeek, Groq, OpenRouter, xAI, Ollama, LM Studio. Use cloud models or run fully offline.
 
-**Full Prompt Transparency** — The Prompt Inspector shows every section of the system prompt with token counts. Edit any part. No black boxes.
+**Full Prompt Transparency** - The Prompt Inspector shows every section of the system prompt with token counts. Edit any part. No black boxes.
 
-**Built-in MCP Tools** — Read/write notes, memory, skills, delegation, live artifacts, web search (5 providers), image generation, audio STT, agent-to-agent mail. Plus external MCP servers (stdio/HTTP) you connect yourself.
+**Built-in MCP Tools** - Read/write notes, memory, skills, delegation, live artifacts, web search (5 providers), image generation, audio STT, agent-to-agent mail. Plus external MCP servers (stdio/HTTP) you connect yourself.
 
-**Sub-Agent Delegation** — Agents delegate research and strategy tasks to cheaper/smaller models, saving tokens while maintaining quality.
+**Sub-Agent Delegation** - Agents delegate research and strategy tasks to cheaper/smaller models, saving tokens while maintaining quality.
 
-**Skills & Playbooks** — Teach your agents reusable procedures. Skills are markdown files — easy to create, share, and version.
+**Skills & Playbooks** - Teach your agents reusable procedures. Skills are markdown files - easy to create, share, and version.
 
-**Deep Research** — Two factory skill templates (web + vault) orchestrate parallel research workers and deliver a living report note with verbatim quotes: URLs for web research, wikilinks (plus knowledge blind spots) for vault research. Reports are artifacts — reopen one and summon the agent to dig deeper.
+**Deep Research** - Two factory skill templates (web + vault) orchestrate parallel research workers and deliver a living report note with verbatim quotes: URLs for web research, wikilinks (plus knowledge blind spots) for vault research. Reports are artifacts - reopen one and summon the agent to dig deeper.
 
-**Persistent Memory v3** — Each agent has its own brain index, durable memory notes, session archive, and cascading summaries (L1/L2/L3). Context carries across sessions.
+**Persistent Memory v3** - Each agent has its own brain index, durable memory notes, session archive, and cascading summaries (L1/L2/L3). Context carries across sessions.
 
-**Multi-Modal** — Vision input, image generation (6 platforms), audio speech-to-text (6 platforms).
+**Multi-Modal** - Vision input, image generation (6 platforms), audio speech-to-text (6 platforms).
 
-**Orama Retrieval** — Semantic and text search across your vault using the v2 embedding module and Orama.
+**Orama Retrieval** - Semantic and text search across your vault using the v2 embedding module and Orama.
 
-**Security** — AccessGuard, path traversal protection, sensitive data masking, per-agent approval system.
+**Security** - AccessGuard, path traversal protection, sensitive data masking, per-agent approval system.
 
-**Extended Thinking** — Thinking/reasoning blocks across all supported platforms.
+**Extended Thinking** - Thinking/reasoning blocks across all supported platforms.
 
-**Bilingual UI** — Full Polish and English interface with ~1000 translation keys.
+**Bilingual UI** - Full Polish and English interface with ~1000 translation keys.
 
 ---
 
@@ -81,33 +81,33 @@ Everything the agent sends to the model — system prompt, memory, tools, skills
 
 ### Option C: Community plugins (after approval)
 
-The plugin is not in Obsidian's community catalogue yet — submission is planned.
+The plugin is not in Obsidian's community catalogue yet - submission is planned.
 If it is accepted, you will be able to install it straight from
 Settings → Community plugins → Browse. Until then, use Option A (BRAT) or Option B (ZIP).
 
 ### Requirements
 
 - Obsidian 1.11.0+
-- An API key for at least one AI platform — **or** [Ollama](https://ollama.com/) for fully local, free operation
+- An API key for at least one AI platform - **or** [Ollama](https://ollama.com/) for fully local, free operation
 - For local embeddings: Ollama with `snowflake-arctic-embed2` model
 
 ---
 
 ## Quick Start
 
-1. **Set up a model** — There's no first-launch wizard: on first start you'll see a short notice pointing you to Settings. Open Settings → PKM Assistant → Klucze API (API Keys) and add a key for a cloud platform (OpenRouter, DeepSeek, Anthropic, or any supported platform) — or set a local Ollama/LM Studio server address for fully local, free operation.
+1. **Set up a model** - There's no first-launch wizard: on first start you'll see a short notice pointing you to Settings. Open Settings → PKM Assistant → Klucze API (API Keys) and add a key for a cloud platform (OpenRouter, DeepSeek, Anthropic, or any supported platform) - or set a local Ollama/LM Studio server address for fully local, free operation.
 
-2. **Meet Jaskier** — Your default mentor agent. He knows the entire system and will walk you through the features, help you configure models, and create your first custom agent.
+2. **Meet Jaskier** - Your default mentor agent. He knows the entire system and will walk you through the features, help you configure models, and create your first custom agent.
 
-3. **Explore the sidebar** — Agents, Communicator (agent-to-agent mail, stored as plain Markdown in your vault — local only, nothing leaves your machine), Backstage (skill and sub-agent templates, connectors).
+3. **Explore the sidebar** - Agents, Communicator (agent-to-agent mail, stored as plain Markdown in your vault - local only, nothing leaves your machine), Backstage (skill and sub-agent templates, connectors).
 
-4. **Start chatting** — Type anything. Use `@` to mention a note from your vault. Use the autonomy control (YOLO / Ask at the edge / Ask about everything) to decide when the agent checks with you before acting.
+4. **Start chatting** - Type anything. Use `@` to mention a note from your vault. Use the autonomy control (YOLO / Ask at the edge / Ask about everything) to decide when the agent checks with you before acting.
 
 ---
 
 ## Built-in Agent
 
-**Jaskier** (Mentor) — your default orchestrator. He knows the entire system, guides you through features, helps configure models, and walks you through creating your first custom agent.
+**Jaskier** (Mentor) - your default orchestrator. He knows the entire system, guides you through features, helps configure models, and walks you through creating your first custom agent.
 
 From there, create unlimited custom agents with their own personalities, roles, skills, memory, and tool access.
 
@@ -115,25 +115,25 @@ From there, create unlimited custom agents with their own personalities, roles, 
 
 ## Network Use, Accounts & Privacy
 
-**No telemetry.** This plugin collects no analytics and sends nothing to the author. It never checks for or installs its own updates — that is handled by Obsidian's community plugin catalogue (or by BRAT, if you installed it that way). Background connections happen only for features you have configured yourself: vault indexing when you select a cloud embedding provider, and external MCP servers you marked as autostart. Everything else is the direct result of an action you take.
+**No telemetry.** This plugin collects no analytics and sends nothing to the author. It never checks for or installs its own updates - that is handled by Obsidian's community plugin catalogue (or by BRAT, if you installed it that way). Background connections happen only for features you have configured yourself: vault indexing when you select a cloud embedding provider, and external MCP servers you marked as autostart. Everything else is the direct result of an action you take.
 
 **Your content goes only to providers you configure.** When you use chat, semantic search indexing, web search, speech-to-text, or image generation, the relevant content (chat messages, note excerpts, attachments, search queries, audio) is sent to the provider you explicitly selected in settings. Until you configure a provider and use a feature, nothing leaves your vault.
 
 Depending on your configuration, the plugin can connect to:
 
-- **Chat models:** Anthropic, OpenAI, Google Gemini, DeepSeek, Groq, OpenRouter, xAI — or local Ollama / LM Studio (`localhost`).
-- **Embeddings (semantic search):** OpenAI, Google Gemini — or local Ollama / LM Studio.
+- **Chat models:** Anthropic, OpenAI, Google Gemini, DeepSeek, Groq, OpenRouter, xAI - or local Ollama / LM Studio (`localhost`).
+- **Embeddings (semantic search):** OpenAI, Google Gemini - or local Ollama / LM Studio.
 - **Web search:** Jina AI (works without an API key), Tavily, Brave Search, Serper.dev, or a self-hosted SearXNG instance. Page reading via Jina Reader.
-- **Speech-to-text:** OpenAI Whisper, Groq, Google Speech, Deepgram, AssemblyAI — or local Ollama.
+- **Speech-to-text:** OpenAI Whisper, Groq, Google Speech, Deepgram, AssemblyAI - or local Ollama.
 - **Image generation:** OpenAI, Stability AI, Replicate, Google Gemini, xAI, OpenRouter.
 
-**Fully local operation is possible:** chat and embeddings via Ollama or LM Studio, web search via self-hosted SearXNG — no cloud account required.
+**Fully local operation is possible:** chat and embeddings via Ollama or LM Studio, web search via self-hosted SearXNG - no cloud account required.
 
 **API keys** are stored locally in the plugin's settings file inside your vault (`.pkm-assistant/settings.json`, with a `settings.last-good.json` fallback and daily backups in `.pkm-assistant/backups/`) and are sent only to the corresponding provider. Treat your vault folder as sensitive if you sync or share it.
 
 **Accounts & payment:** cloud providers require your own account and API key; most are paid (some offer free tiers). The plugin itself is free and open source (GPL-3.0).
 
-**External MCP servers (advanced, opt-in):** you can connect external MCP tool servers — local processes (stdio) or remote endpoints (HTTP). These run outside the plugin's control; install only servers you trust.
+**External MCP servers (advanced, opt-in):** you can connect external MCP tool servers - local processes (stdio) or remote endpoints (HTTP). These run outside the plugin's control; install only servers you trust.
 
 **What the plugin does outside your vault** (this is the complete list, and every item happens only when you click the corresponding button):
 
@@ -141,7 +141,7 @@ Depending on your configuration, the plugin can connect to:
 - **Reads one file outside the vault:** Claude Desktop's `claude_desktop_config.json` (from its default location, `%APPDATA%\Claude` on Windows; otherwise a file picker opens), only when you click *Import from Claude* in the external MCP servers settings, to copy your existing server definitions. The file is read, never written.
 - **Uses the system clipboard** only for explicit copy actions: copying a chat message, an agent's prompt, or an exported agent profile.
 
-Everything else — notes, memory, settings, indexes — stays inside your vault folder.
+Everything else - notes, memory, settings, indexes - stays inside your vault folder.
 
 ---
 
@@ -149,17 +149,17 @@ Everything else — notes, memory, settings, indexes — stays inside your vault
 
 - **API keys** stored in the vault's `.pkm-assistant/settings.json` (not in plugin code)
 - **AccessGuard** protects system folders (`.obsidian`, `.trash`)
-- **No arbitrary code execution** — executable custom JS tools were removed in v2.2. Custom tools run as external MCP servers (separate processes or HTTP endpoints) that you explicitly configure — install only servers you trust.
-- **Path traversal protection** — blocks `../`, URL-encoded sequences, null bytes, zero-width unicode
-- **Sensitive data masking** — API keys detected and masked in logs
+- **No arbitrary code execution** - executable custom JS tools were removed in v2.2. Custom tools run as external MCP servers (separate processes or HTTP endpoints) that you explicitly configure - install only servers you trust.
+- **Path traversal protection** - blocks `../`, URL-encoded sequences, null bytes, zero-width unicode
+- **Sensitive data masking** - API keys detected and masked in logs
 - **Agents cannot access** the OS filesystem or spawn processes; network access is limited to your configured providers. External MCP servers you explicitly add run as separate OS processes.
-- **Approval system** — per-tool notifications with context, per-agent toggles
+- **Approval system** - per-tool notifications with context, per-agent toggles
 
 ### Why the Adapter API
 
 All agent data (profiles, skills, memory, sessions, artifacts, settings) lives in a hidden
 folder inside your vault: `.pkm-assistant/`. Obsidian's `Vault` API does not index dotted
-folders, so `getAbstractFileByPath()` returns `null` for every file there — the plugin has to
+folders, so `getAbstractFileByPath()` returns `null` for every file there - the plugin has to
 read and write them through `app.vault.adapter`, which is the supported API for exactly this
 case. Regular user notes are still handled through the normal `Vault` API.
 
@@ -229,7 +229,7 @@ npm test             # Run 3023 unit tests (AVA)
 npm run typecheck    # tsc --noEmit (TypeScript strict)
 ```
 
-The integration harness (the real plugin booted in Node without Obsidian — offline agent loop,
+The integration harness (the real plugin booted in Node without Obsidian - offline agent loop,
 34 scenario tests) lives in its own repository:
 [pkm-assistant-harness](https://github.com/JDHole/pkm-assistant-harness). Clone it next to this
 one and follow its README.
@@ -270,7 +270,7 @@ The production bundle is a single `main.js` of roughly 2.1 MB; the plugin boots 
 
 ## How it was built
 
-This project is 100% **vibe-coded**. The author (JDHole) is not a programmer. All code — 367 TypeScript source files (tests excluded), 23 built-in tools, 19 modules — was written across ~114 sessions working with AI, primarily **Claude** via the **Claude Code** extension for VS Code.
+This project is 100% **vibe-coded**. The author (JDHole) is not a programmer. All code - 367 TypeScript source files (tests excluded), 23 built-in tools, 19 modules - was written across ~114 sessions working with AI, primarily **Claude** via the **Claude Code** extension for VS Code.
 
 ---
 

@@ -4,8 +4,8 @@
  * `DiffModal.ts` extends Obsidian's `Modal`, which the `obsidian` package only ships as
  * type declarations (no runtime JS) — files importing `obsidian` cannot be loaded by AVA
  * (same reason `chat_streaming.ts` etc. have no direct tests, see their CLAUDE.md gotchas).
- * This file has zero `obsidian` import, so the diff algorithm itself — the part that had the
- * actual bugs (AUD-wydajnosc-102/103) — gets real tests instead of a copy-pasted repro script.
+ * This file has zero `obsidian` import, so the diff algorithm itself — the part most likely to
+ * have subtle bugs — gets real tests instead of a copy-pasted repro script.
  */
 
 export type DiffOp = { type: 'equal' | 'add' | 'remove'; text: string };
@@ -70,7 +70,7 @@ function _simpleDiff(oldLines: string[], newLines: string[]): DiffOp[] {
     return ops;
 }
 
-/** AUD-wydajnosc-103: read once, used by both stats and rendering. */
+/** Read once, used by both stats and rendering. */
 export function computeDiffStats(ops: DiffOp[]): { added: number; removed: number } {
     let added = 0, removed = 0;
     for (const op of ops) {
@@ -85,12 +85,12 @@ export type DiffSegment =
     | { kind: 'collapsed'; count: number };
 
 /**
- * AUD-wydajnosc-102: DiffModal used to build one DOM row per line of the diff, INCLUDING every
- * unchanged ('equal') line — opening the modal on a barely-touched multi-thousand-line note
- * built thousands of rows for a one-line edit. This picks which ops actually need a row:
- * every changed line plus `context` lines of unchanged text around it. Long unchanged runs
- * collapse into a single `{kind:'collapsed', count}` placeholder — nothing about a CHANGE is
- * ever hidden, only the surrounding noise.
+ * Building one DOM row per line of the diff, INCLUDING every unchanged ('equal') line, would
+ * turn opening the modal on a barely-touched multi-thousand-line note into thousands of rows
+ * for a one-line edit. This picks which ops actually need a row: every changed line plus
+ * `context` lines of unchanged text around it. Long unchanged runs collapse into a single
+ * `{kind:'collapsed', count}` placeholder — nothing about a CHANGE is ever hidden, only the
+ * surrounding noise.
  */
 export function selectVisibleDiffLines(ops: DiffOp[], context = 3): DiffSegment[] {
     const keep = new Array(ops.length).fill(false);

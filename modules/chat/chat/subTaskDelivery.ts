@@ -1,17 +1,17 @@
 /**
  * @module subTaskDelivery
- * KOMPLET BRAMEK DOSTARCZENIA wyniku suba z tła — jako czysta decyzja (AUD-testy-024).
+ * KOMPLET BRAMEK DOSTARCZENIA wyniku suba z tła - jako czysta decyzja.
  *
- * Co było zepsute: pięć pytań, od których zależy, czy czat sam wystartuje AUTO-TURĘ
- * z raportem sub-agenta, siedziało wyłącznie w `_deliverSubTaskResult` (`chat_streaming.ts`),
- * a `chat_streaming.ts` wisi na `obsidian` — AVA go nie zaimportuje. Jedynym strażnikiem był
- * więc regex po TEKŚCIE źródła (`stopSemantics.test.ts`), a taki strażnik nie odróżnia
- * `if (this._drainSuppressed) return false;` od `if (this._drainSuppressed) { }`: mutacja
- * kasująca SKUTEK przy zachowaniu NAPISU zostawiała pakiet zielony (dowód w znalezisku:
- * 259/259 pass po zneutralizowaniu trzech bramek).
+ * DLACZEGO PURE, POZA `_deliverSubTaskResult`: pięć pytań, od których zależy, czy czat sam
+ * wystartuje AUTO-TURĘ z raportem sub-agenta, musi dać się przetestować niezależnie od DOM-u.
+ * `chat_streaming.ts` wisi na `obsidian` - AVA go nie zaimportuje - więc jedynym strażnikiem
+ * kodu wewnątrz `_deliverSubTaskResult` byłby regex po TEKŚCIE źródła (`stopSemantics.test.ts`),
+ * a taki strażnik nie odróżnia `if (this._drainSuppressed) return false;` od
+ * `if (this._drainSuppressed) { }`: mutacja kasująca SKUTEK przy zachowaniu NAPISU
+ * zostawiałaby cały pakiet zielony.
  *
- * Dziś decyzja jest tutaj — pure, bez `obsidian`, bez DOM-u, bez I/O (wzór `autoTurnChain.ts`,
- * `queuedMessage.ts`, `turnAbort.ts`) — a `chat_streaming.ts` jest cienkim wołaczem, którego
+ * Decyzja jest więc tutaj - pure, bez `obsidian`, bez DOM-u, bez I/O (wzór `autoTurnChain.ts`,
+ * `queuedMessage.ts`, `turnAbort.ts`) - a `chat_streaming.ts` jest cienkim wołaczem, którego
  * OKABLOWANIE (kształt `if (!delivery.allowed)`) pilnuje osobny strażnik po źródle.
  *
  * ⚠️ Bramka „zadanie bez `id`" ZOSTAJE w monolicie, przed wyliczeniem adresu zwrotnego:
@@ -19,23 +19,23 @@
  * więc nie da się jej przesunąć tutaj bez zmiany kolejności efektów (log w `catch`).
  *
  * Kontrakt zwrotki dostawcy (`SubTaskNotifier`): `true` = skonsumowane (wypada z kolejki),
- * `false` = zostaw na później. KAŻDA odmowa z tego pliku znaczy `false` — wynik NIE ginie,
+ * `false` = zostaw na później. KAŻDA odmowa z tego pliku znaczy `false` - wynik NIE ginie,
  * czeka na najbliższy `drain()`.
  */
 
 /** Dlaczego wynik nie jedzie teraz. `ok` = wolno startować auto-turę. */
-// AUD-dead-code-231 (2026-09-02): `export` zdjęty na czterech typach niżej — zero referencji
-// spoza tego pliku (funkcja `evaluateSubTaskDelivery` jest jedynym publicznym wejściem).
+// Nie eksportowany - brak referencji spoza tego pliku (tu i na czterech typach niżej);
+// funkcja `evaluateSubTaskDelivery` jest jedynym publicznym wejściem.
 type SubTaskDeliveryReason =
     /** brak zakładki adresata (agent nieotwarty) */
     | 'no_tab'
-    /** zakładka jest w tle — auto-tura byłaby robotą za plecami usera */
+    /** zakładka jest w tle - auto-tura byłaby robotą za plecami usera */
     | 'tab_inactive'
     /** trwa tura (własna albo już wstrzyknięta) */
     | 'turn_in_flight'
-    /** po Stopie / watchdogu czat nie startuje tury sam (AUD-security-115) */
+    /** po Stopie / watchdogu czat nie startuje tury sam */
     | 'stopped'
-    /** sufit łańcucha auto-tur po subach (werdykt Kuby 16.08) */
+    /** sufit łańcucha auto-tur po subach */
     | 'chain_limit'
     | 'ok';
 

@@ -1,21 +1,21 @@
 /**
- * Generator promptu startowego (S32 Z1a — wisienka faza E z E2.8).
+ * Generator promptu startowego.
  *
  * Świeży agent ma PUSTE pole Osobowość i nie wiadomo od czego zacząć. Ten plik składa
  * z trzech prostych odpowiedzi (kim jest / jak mówi / czego unika) gotowy akapitowy tekst
- * do wklejenia w Personę. Zero magii, zero LLM-a — czysta składanka szablonów z i18n.
+ * do wklejenia w Personę. Zero magii, zero LLM-a - czysta składanka szablonów z i18n.
  *
  * Plik jest CZYSTY (bez `obsidian`, bez DOM) i dlatego testowalny w AVA. Modal, który go
  * używa, żyje obok w `StartPromptGeneratorModal.js`.
  *
- * ⚠️ Wynik to markdown-light: same akapity + lista zasad. ŻADNYCH nagłówków `#` — tekst
+ * ⚠️ Wynik to markdown-light: same akapity + lista zasad. ŻADNYCH nagłówków `#` - tekst
  * ląduje w `personality`, a PromptBuilder wkłada go w sekcję „KIM JESTEM" i własne nagłówki
  * by się z nim pobiły.
  */
 
 /**
  * Pięć tonów wypowiedzi. `labelKey` = etykieta w dropdownie, `phraseKey` = FRAZA OPISOWA
- * wstawiana do składanego tekstu (nie nazwa tonu — model ma dostać opis zachowania,
+ * wstawiana do składanego tekstu (nie nazwa tonu - model ma dostać opis zachowania,
  * nie kategorię z UI).
  */
 export const TONE_OPTIONS = [
@@ -44,7 +44,7 @@ export function getToneOption(id: string | undefined) {
  * typu „Jesteś .").
  *
  * @param {{role?: string, tone?: string, rules?: string}} answers
- *   `role` — kim jest agent (jedno zdanie), `tone` — id z `TONE_OPTIONS`,
+ *   `role` - kim jest agent (jedno zdanie), `tone` - id z `TONE_OPTIONS`,
  *   `rules` — zasady, jedna na linię (myślniki na początku są tolerowane i zdejmowane).
  * @param {(key: string, params?: Object) => string} [translate] - funkcja `t` (wstrzykiwana,
  *   żeby plik nie zależał od i18n i dał się testować bez ładowania słowników).
@@ -76,7 +76,7 @@ function parseRuleLines(rules: string | undefined) {
         .filter(Boolean);
 }
 
-/** „Jesteś archiwistą." — nie „Jesteś archiwistą.." gdy user sam postawił kropkę. */
+/** „Jesteś archiwistą." - nie „Jesteś archiwistą.." gdy user sam postawił kropkę. */
 function stripTrailingDot(text: string) {
     return text.replace(/[.。]+$/, '');
 }

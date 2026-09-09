@@ -1,9 +1,9 @@
 /**
- * OnboardingModal — 3-step wizard for first-run setup.
- * Step 1: Welcome — choose API (cloud) or Local path
- * Step 2a: Cloud — pick provider, enter API key, test connection
- * Step 2b: Local — auto-detect Ollama/LM Studio
- * Step 3: Done — open chat with Jaskier
+ * OnboardingModal - 3-step wizard for first-run setup.
+ * Step 1: Welcome - choose API (cloud) or Local path
+ * Step 2a: Cloud - pick provider, enter API key, test connection
+ * Step 2b: Local - auto-detect Ollama/LM Studio
+ * Step 3: Done - open chat with Jaskier
  *
  * Saves API key + sets default model in modelLibrary.
  * Triggered from main.js on first run (replaces auto-open chat).
@@ -416,7 +416,7 @@ export class OnboardingModal extends Modal {
     }
 
     /**
-     * Simple connectivity test per provider — tries to list models or make a tiny request.
+     * Simple connectivity test per provider - tries to list models or make a tiny request.
      */
     async _pingCloudProvider(platformId: string, apiKey: string): Promise<ConnectionResult> {
         const endpoints: Record<string, CloudEndpoint> = {
@@ -447,7 +447,7 @@ export class OnboardingModal extends Modal {
             if (resp.status === 401 || resp.status === 403) {
                 return { ok: false, message: t('onboarding.invalid_key') };
             }
-            // 400 from Anthropic means auth passed but request was bad — that's OK for a ping
+            // 400 from Anthropic means auth passed but request was bad - that's OK for a ping
             if (resp.status === 400 && platformId === 'anthropic') {
                 return { ok: true, message: t('onboarding.connected') };
             }

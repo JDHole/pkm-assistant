@@ -142,10 +142,10 @@ test('multiline add_item is rejected (multiline_forbidden)', t => {
     t.is(r.errors[0]!.code, 'multiline_forbidden');
 });
 
-// ── nagłówki sekcji (#/##) w treści — Poligon F2 ───────────────────────────────
-// Bieg live: model wpisał `## Źródła` do TREŚCI innej sekcji → w pliku powstał DRUGI
-// nagłówek o tej nazwie, a `findSection` zwraca PIERWSZE trafienie, więc oryginalna
-// sekcja została osierocona i kolejne patche trafiały w podrobioną.
+// ── nagłówki sekcji (#/##) w treści ─────────────────────────────────────────────
+// Jeśli model wpisze `## Źródła` do TREŚCI innej sekcji, w pliku powstaje DRUGI
+// nagłówek o tej nazwie, a `findSection` zwraca PIERWSZE trafienie — więc oryginalna
+// sekcja zostaje osierocona i kolejne patche trafiają w podrobioną.
 
 test('set_section z nagłówkiem ## jest odrzucony (heading_forbidden), plik NIETKNIĘTY', t => {
     const r = applyPatch(SAMPLE, [{
@@ -276,24 +276,24 @@ test('unknown op is reported, not thrown', t => {
     t.is(r.errors[0]!.code, 'invalid_op');
 });
 
-// ── K10 (AUD-security-089): bramka kodu liczy WSZYSTKIE nośniki kodu, nie sam grawis ──
-// Wcześniej `CODE_FENCE_RE = /```/` widziała wyłącznie potrójny grawis, więc ten sam ładunek
-// napisany tyldami albo w HTML-u przechodził przez bramkę i lądował w notatce vaulta.
+// ── bramka kodu liczy WSZYSTKIE nośniki kodu, nie sam grawis ───────────────────
+// `CODE_FENCE_RE` musi widzieć więcej niż potrójny grawis, inaczej ten sam ładunek
+// napisany tyldami albo w HTML-u przechodzi przez bramkę i ląduje w notatce vaulta.
 
-test('K10: fence tyldowy (~~~) w set_section jest odrzucony tak jak grawisy', t => {
+test('fence tyldowy (~~~) w set_section jest odrzucony tak jak grawisy', t => {
     const r = applyPatch(SAMPLE, [{ op: 'set_section', heading: 'Ryzyka i założenia', text: '~~~dataviewjs\nevil()\n~~~' }]);
     t.is(r.applied, 0);
     t.is(r.errors[0]!.code, 'code_forbidden');
     t.is(r.markdown, SAMPLE);
 });
 
-test('K10: fence tyldowy w add_item też jest odrzucony', t => {
+test('fence tyldowy w add_item też jest odrzucony', t => {
     const r = applyPatch(SAMPLE, [{ op: 'add_item', heading: 'Kroki', text: 'zrób ~~~js evil() ~~~' }]);
     t.is(r.applied, 0);
     t.is(r.errors[0]!.code, 'code_forbidden');
 });
 
-test('K10: HTML <pre> / <code> / <script> w treści jest odrzucony (code_forbidden)', t => {
+test('HTML <pre> / <code> / <script> w treści jest odrzucony (code_forbidden)', t => {
     for (const payload of ['<pre>evil()</pre>', '<code>evil()</code>', '<script>evil()</script>', '<iframe src="x">']) {
         const r = applyPatch(SAMPLE, [{ op: 'set_section', heading: 'Cel', text: payload }]);
         t.is(r.applied, 0, payload);
@@ -302,29 +302,30 @@ test('K10: HTML <pre> / <code> / <script> w treści jest odrzucony (code_forbidd
     }
 });
 
-test('K10: zwykły tekst z tyldą pojedynczą/podwójną PRZECHODZI (bez fałszywek)', t => {
+test('zwykły tekst z tyldą pojedynczą/podwójną PRZECHODZI (bez fałszywek)', t => {
     const r = applyPatch(SAMPLE, [{ op: 'set_section', heading: 'Cel', text: 'około ~5 dni, zakres ~~stary~~ nowy' }]);
     t.is(r.applied, 1);
     t.is(r.errors.length, 0);
 });
 
-test('K10: wcięcie 4 spacjami PRZECHODZI — zagnieżdżona lista to nie blok kodu', t => {
+test('wcięcie 4 spacjami PRZECHODZI — zagnieżdżona lista to nie blok kodu', t => {
     const r = applyPatch(SAMPLE, [{ op: 'set_section', heading: 'Cel', text: '- punkt\n    - podpunkt' }]);
     t.is(r.applied, 1);
     t.is(r.errors.length, 0);
 });
 
-test('K10: parseArtifact.buttons widzi blok pkm-artefakt także w wariancie tyldowym', t => {
+test('parseArtifact.buttons widzi blok pkm-artefakt także w wariancie tyldowym', t => {
     t.true(parseArtifact('---\npkm-artefakt: art-1\n---\n\n~~~pkm-artefakt\nid: art-1\n~~~\n').buttons);
     t.true(parseArtifact('---\npkm-artefakt: art-1\n---\n\n```pkm-artefakt\nid: art-1\n```\n').buttons);
 });
 
-// ── M (AUD-security-122/124): bramka i zlew widzą TEN SAM zbiór nagłówków ───────
-// Do fali M `heading_forbidden` mierzył `<=2`, a `findSection` szukał po `1-6` i łamał
-// linie tylko po `\r?\n`. Trzy dziury: podrobiony `###` przejmował patch adresowany do
-// prawdziwej sekcji, setext (`Tytul` + `===`/`---`) i samotny `\r` przechodziły bramkę.
+// ── bramka i zlew muszą widzieć TEN SAM zbiór nagłówków ─────────────────────────
+// Jeśli `heading_forbidden` mierzy poziom nagłówka inaczej niż `findSection` szuka sekcji,
+// albo linie łamane są tylko po `\r?\n`, powstają trzy dziury: podrobiony `###` przejmuje
+// patch adresowany do prawdziwej sekcji, a setext (`Tytul` + `===`/`---`) i samotny `\r`
+// przechodzą bramkę.
 
-test('M122: patch celujący w „## Uwagi usera" NIE trafia w podrobiony „### Uwagi usera"', t => {
+test('patch celujący w „## Uwagi usera" NIE trafia w podrobiony „### Uwagi usera"', t => {
     // Notatka, w której ktoś (user albo model przed naprawą) zostawił `###` o nazwie sekcji.
     const withFake = SAMPLE.replace(
         '## Ryzyka i założenia\n- Nie kasuję niczego — tylko przenoszę do Archiwum.',
@@ -343,7 +344,7 @@ test('M122: patch celujący w „## Uwagi usera" NIE trafia w podrobiony „### 
     t.is(sections.find(s => s.heading === 'Uwagi usera')!.text, 'zatwierdzam');
 });
 
-test('M124: setext (`Tytul` + `===` / `---`) jest łapany przez heading_forbidden', t => {
+test('setext (`Tytul` + `===` / `---`) jest łapany przez heading_forbidden', t => {
     for (const payload of ['Podrobiony H1\n===', 'Podrobiony H2\n---', 'Podrobiony H2\r\n----']) {
         const r = applyPatch(SAMPLE, [{ op: 'set_section', heading: 'Cel', text: payload }]);
         t.is(r.applied, 0, payload);
@@ -352,33 +353,33 @@ test('M124: setext (`Tytul` + `===` / `---`) jest łapany przez heading_forbidde
     }
 });
 
-test('M124: samotny `\r` łamie linię tak jak renderer — nagłówek za nim jest łapany', t => {
+test('samotny `\r` łamie linię tak jak renderer — nagłówek za nim jest łapany', t => {
     const r = applyPatch(SAMPLE, [{ op: 'set_section', heading: 'Cel', text: 'zwykly tekst\r## Podrobiona sekcja' }]);
     t.is(r.applied, 0);
     t.is(r.errors[0]!.code, 'heading_forbidden');
     t.is(r.markdown, SAMPLE);
 });
 
-test('M124: add_item z samotnym `\r` to wielolinijkowiec (multiline_forbidden)', t => {
+test('add_item z samotnym `\r` to wielolinijkowiec (multiline_forbidden)', t => {
     const r = applyPatch(SAMPLE, [{ op: 'add_item', heading: 'Kroki', text: 'punkt\rdrugie zdanie' }]);
     t.is(r.applied, 0);
     t.is(r.errors[0]!.code, 'multiline_forbidden');
     t.is(r.markdown, SAMPLE);
 });
 
-test('M124: separator `---` po pustej linii PRZECHODZI (to hr, nie setext)', t => {
+test('separator `---` po pustej linii PRZECHODZI (to hr, nie setext)', t => {
     const r = applyPatch(SAMPLE, [{ op: 'set_section', heading: 'Cel', text: 'akapit\n\n---\n\ndrugi akapit' }]);
     t.is(r.applied, 1);
     t.is(r.errors.length, 0);
 });
 
-test('M124: kreska pod punktem listy PRZECHODZI (setext nie przerywa listy)', t => {
+test('kreska pod punktem listy PRZECHODZI (setext nie przerywa listy)', t => {
     const r = applyPatch(SAMPLE, [{ op: 'set_section', heading: 'Cel', text: '- punkt\n---' }]);
     t.is(r.applied, 1);
     t.is(r.errors.length, 0);
 });
 
-test('AUD-code-review-104: kreska pod NUMEROWANYM punktem listy PRZECHODZI (setext nie przerywa listy)', t => {
+test('kreska pod NUMEROWANYM punktem listy PRZECHODZI (setext nie przerywa listy)', t => {
     for (const payload of ['1. krok\n---', '1) krok\n---', '12. krok\n---']) {
         const r = applyPatch(SAMPLE, [{ op: 'set_section', heading: 'Cel', text: payload }]);
         t.is(r.applied, 1, payload);

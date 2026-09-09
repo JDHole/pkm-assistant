@@ -1,18 +1,18 @@
 /**
  * save_session.archiveTabCleanup — strażnik PO ŹRÓDLE dla `applyPostArchiveAction`, gałąź
- * plain `archive` (fabryka napraw W13, follow-up po review W4).
+ * plain `archive`.
  *
  * DLACZEGO PO ŹRÓDLE, A NIE BEHAWIORALNIE: `save_session.ts` importuje `obsidian` (`Notice`,
  * `App`) na górze modułu, więc AVA nie zaimportuje pliku produkcyjnego — ten sam wzór, co
  * `save_session.skipCache.test.ts` i `save_session.noteFailures.test.ts` obok.
  *
- * BUG (review W4): `/save_session` z akcją `archive` (bez `_new`/`_close` — czyli TAKŻE
+ * PUŁAPKA: `/save_session` z akcją `archive` (bez `_new`/`_close` — czyli TAKŻE
  * `result.action` domyślny) archiwizuje plik aktywnej sesji i zeruje
- * `AgentMemory.activeSessionPath` (`SaveSessionWorkflow.applyDecision` → `archiveActiveSession`),
- * ale zostawiał `activeTab.sessionPath` wskazujące na TEN SAM, teraz zarchiwizowany plik.
- * `chat_tabs._switchTab` czyta `targetTab.sessionPath` i przy KAŻDYM powrocie na tę zakładkę
- * wpisywał tę wiszącą ścieżkę z powrotem do `memory.activeSessionPath` — sesja "zmartwychwstawała"
- * jako wskaźnik na nieistniejący plik.
+ * `AgentMemory.activeSessionPath` (`SaveSessionWorkflow.applyDecision` → `archiveActiveSession`).
+ * Bez czyszczenia `activeTab.sessionPath`, wskazywałoby ono na TEN SAM, teraz zarchiwizowany
+ * plik — `chat_tabs._switchTab`, który czyta `targetTab.sessionPath`, przy KAŻDYM powrocie na tę
+ * zakładkę wpisywałby tę wiszącą ścieżkę z powrotem do `memory.activeSessionPath` — sesja
+ * "zmartwychwstawałaby" jako wskaźnik na nieistniejący plik.
  *
  * CO PILNUJE: gałąź plain `archive` czyści WSZYSTKIE cztery pola tożsamości sesji na zakładce
  * (sessionPath/sessionId/sessionName/sessionLabel) — dokładnie jak `archive_new` robi dla NOWEJ
@@ -68,7 +68,7 @@ test('gałąź archive_close kończy się return — nie wpada w sprzątanie pla
     );
 });
 
-test('REGRESJA W4: po archive_close zostaje kod czyszczący 4 pola sesji zakładki (gałąź plain archive)', t => {
+test('po archive_close zostaje kod czyszczący 4 pola sesji zakładki (gałąź plain archive)', t => {
     const closeIdx = fnBody.indexOf("action === 'archive_close'");
     const tail = fnBody.slice(closeIdx);
 

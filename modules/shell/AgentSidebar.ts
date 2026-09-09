@@ -25,7 +25,7 @@ export const AGENT_SIDEBAR_VIEW_TYPE = 'pkm-agent-sidebar';
 export class AgentSidebar extends ItemView {
     declare private plugin: Runtime;
     declare private unsubscribe: (() => void) | null;
-    // `number`, nie `ReturnType<typeof window.setTimeout>` — z `@types/node` w tym samym projekcie
+    // `number`, nie `ReturnType<typeof window.setTimeout>` - z `@types/node` w tym samym projekcie
     // (harness/testy), `globalThis`/`window` mieszają przeciążenia Node+DOM i ReturnType<> łapie
     // wtedy `NodeJS.Timeout` zamiast liczby, którą naprawdę zwraca `window.setTimeout` w Obsidianie.
     declare private _renderTimer: number | null;
@@ -46,7 +46,7 @@ export class AgentSidebar extends ItemView {
 
     getDisplayText() {
         // obsidianmd/ui/sentence-case: 'PKM' zostaje (skrót nazwy pluginu, jak 'PKM Assistant'
-        // gdzie indziej), 'agents' schodzi na małą — sam ESLint proponowałby 'Pkm agents',
+        // gdzie indziej), 'agents' schodzi na małą - sam ESLint proponowałby 'Pkm agents',
         // co psułoby markę.
         return 'PKM agents';
     }
@@ -56,8 +56,8 @@ export class AgentSidebar extends ItemView {
     }
 
     async onOpen() {
-        // Adopt CSS (fix: was imported but never applied). AUD-bledy-037: przez `adoptSheet`,
-        // żeby `onunload` miał co zdjąć — arkusze zostawały w dokumencie po wyłączeniu pluginu.
+        // Adopt CSS (fix: was imported but never applied) przez `adoptSheet`,
+        // żeby `onunload` miał co zdjąć - arkusze zostawałyby w dokumencie po wyłączeniu pluginu.
         adoptSheet(agent_sidebar_styles);
         adoptSheet(sidebar_view_styles);
 
@@ -92,8 +92,8 @@ export class AgentSidebar extends ItemView {
         this.nav.register('zaplecze', renderZapleczeView);
         this.nav.register('skill-detail', renderSkillDetailView);
         this.nav.register('sub-agent-detail', renderSubAgentDetailView);
-        this.nav.register('triggers', renderTriggersView); // Sprint 05.5 H2
-        // Widoku `sub-agent-runs` już tu nie ma — biegi subów pokazuje pasek w OKNIE CZATU
+        this.nav.register('triggers', renderTriggersView);
+        // Widoku `sub-agent-runs` już tu nie ma - biegi subów pokazuje pasek w OKNIE CZATU
         // (per agent i per sesja), patrz `modules/chat/chat/subTaskStrip.ts`.
 
         this.nav.push('home', {}, 'Agenci');
@@ -121,9 +121,10 @@ export class AgentSidebar extends ItemView {
     onClose(): Runtime {
         this._unsubscribeSkinEvents?.();
         this._unsubscribeSkinEvents = null;
-        // AUD-bledy-045: sprzątanie BIEŻĄCEGO widoku wołał dotąd wyłącznie `SidebarNav._render`
-        // przy przełączeniu widoku — zamknięcie panelu zostawiało nasłuch Komunikatora i jego
-        // budzik renderu na całą sesję Obsidiana (ponowne otwarcie tworzy NOWY SidebarNav).
+        // Sprzątanie BIEŻĄCEGO widoku woła wyłącznie `SidebarNav._render` przy przełączeniu
+        // widoku - bez wywołania dispose() tutaj zamknięcie panelu zostawiłoby nasłuch
+        // Komunikatora i jego budzik renderu na całą sesję Obsidiana (ponowne otwarcie
+        // tworzy NOWY SidebarNav).
         this.nav?.dispose?.();
         if (this.unsubscribe) {
             this.unsubscribe();

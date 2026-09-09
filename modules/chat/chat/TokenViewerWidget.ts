@@ -128,14 +128,13 @@ export class TokenViewerWidget {
         if (fg) fg.setAttribute('stroke-dasharray', `${percent} ${100 - percent}`);
         if (pct) pct.textContent = `${percent}%`;
         // main = okno kontekstu (estymata); researcher/strategist = realne usage z API,
-        // ale L07-6: gdy dane suba przyszły z fallbacku (brak usage) → też oznacz jako przybliżone.
+        // ale gdy dane suba przyszły z fallbacku (brak usage) → też oznacz jako przybliżone.
         const isEstimate = this.selectedRole === 'main' || !!this.view.tokenTracker?.hasEstimates?.(this.selectedRole);
         if (amount) amount.textContent = `${isEstimate ? '~' : ''}${formatTokenCount(data.used)}/${formatTokenCount(data.max)}`;
         this.button.title = isEstimate ? t('chat.token_viewer.approx_tooltip') : '';
-        // AUD-wydajnosc-018: popover dostaje JUŻ POLICZONE `data`. Do naprawy liczył rozbicie
-        // okna kontekstu drugi raz w tym samym przebiegu `update()` — a `update()` leci po każdym
-        // zdarzeniu usage w turze, czyli kilkanaście razy, dokładnie wtedy, gdy user patrzy na
-        // licznik (bo po to go otworzył).
+        // Popover dostaje JUŻ POLICZONE `data`, nie liczy rozbicia okna kontekstu drugi raz -
+        // `update()` leci po każdym zdarzeniu usage w turze, czyli kilkanaście razy, dokładnie
+        // wtedy, gdy user patrzy na licznik (bo po to go otworzył).
         if (this.popover?.isConnected) this.renderPopover(data);
         if (!this.autoUpdate) this.showRefreshButton();
     }
@@ -166,12 +165,12 @@ export class TokenViewerWidget {
     resolveRoleMax(role: string): number {
         const agent = this.view.plugin?.agentManager?.getActiveAgent?.();
         const pkm = this.view.env?.settings?.pkmAssistant || {};
-        // Settings' model library may still hold roles under legacy keys (minion/master) —
-        // modelResolver accepts both for one more release. AUD-dead-code-134: the agent-side
-        // fallback below was removed — `Agent._normalizeModelOverrides` migrates
-        // `models.minion`/`models.master` into `researcher`/`strategist` and DELETES the legacy
-        // keys on every construction/update, so `agent.models[legacyKey]` can never be set; the
-        // library-side fallback (`pkm.modelLibrary`) is a genuinely different, still-live slot.
+        // Settings' model library may still hold roles under legacy keys (minion/master) -
+        // modelResolver accepts both for one more release. `Agent._normalizeModelOverrides`
+        // migrates `models.minion`/`models.master` into `researcher`/`strategist` and DELETES
+        // the legacy keys on every construction/update, so `agent.models[legacyKey]` can never
+        // be set; only the library-side fallback (`pkm.modelLibrary`) still needs the legacy
+        // lookup below.
         const legacyKey = ({ researcher: 'minion', strategist: 'master' } as Record<string, string>)[role];
         const lib = pkm?.modelLibrary?.[role] || (legacyKey ? pkm?.modelLibrary?.[legacyKey] : null);
         const configured: Runtime = agent?.models?.[role]
@@ -199,7 +198,7 @@ export class TokenViewerWidget {
     }
 
     /**
-     * @param roleData - AUD-wydajnosc-018: gotowe rozbicie od wołacza (`update()` już je policzył).
+     * @param roleData - gotowe rozbicie od wołacza (`update()` już je policzył).
      *   Wołacze spoza `update()` (otwarcie popovera, przełączniki ustawień) go nie mają i wtedy
      *   liczymy jak dotąd — ale to zdarzenia pojedyncze, nie kilkanaście na turę.
      */
@@ -235,7 +234,7 @@ export class TokenViewerWidget {
         });
 
         // main = szacunek okna kontekstu → oznacz jako przybliżony; role = realne usage
-        // (albo fallback → hasEstimates, L07-6).
+        // (albo fallback → hasEstimates).
         const meterIsEstimate = this.selectedRole === 'main' || !!this.view.tokenTracker?.hasEstimates?.(this.selectedRole);
         const meter = this.popover.createDiv({
             cls: `cs-token-popover__meter cs-token-popover__meter--${getContextLevel(percent)}`,
@@ -276,7 +275,7 @@ export class TokenViewerWidget {
 
     renderMainBreakdown(breakdown: TokenBreakdown | null): void {
         if (!breakdown) return;
-        // L07-6: sekcja „Odroczone" (layer3) usunięta — mcp_tools_deferred/system_tools_deferred
+        // Sekcja „Odroczone" (layer3) usunięta — mcp_tools_deferred/system_tools_deferred
         // były zawsze 0. Zostają tylko realnie zasilane warstwy + bufor.
         this.renderGroup('layer1', t('chat.token_viewer.layer1'), breakdown.layer1, breakdown.items?.messages || []);
         this.renderGroup('layer2', t('chat.token_viewer.layer2'), breakdown.layer2);

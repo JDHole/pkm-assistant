@@ -1,23 +1,24 @@
-// eslint.config.js — E1.6 C2 (R4)
+// eslint.config.js
 //
 // MINIMAL flat config with a SINGLE architectural rule: forbid deep imports into
 // another module's internals. Golden rule of this repo: outside a module you may
-// import ONLY from `modules/<name>/index.js` (the barrel). Until now this was
-// enforced by convention + review; here it becomes a lint error.
+// import ONLY from `modules/<name>/index.js` (the barrel). This is enforced as a
+// lint error, not just by convention + review.
 //
-// HOW THE PATTERNS WORK (documented — see E1.6 report):
+// HOW THE PATTERNS WORK:
 //   * `no-restricted-imports` matches the import SPECIFIER string, not the resolved
 //     path. A cross-module import always LEAVES the current module, so its specifier
 //     starts with `../` (possibly several). Every pattern is anchored on an explicit
 //     `../` prefix — specifiers starting with `./` (same-module imports, including
 //     subfolders that happen to share a module's name, e.g. models' `./adapters/chat/*`)
-//     are never matched. E1.6 also rewrote the few `../agents/…` self-imports to `./…`.
+//     are never matched (repo convention: self-imports like `../agents/…` are always
+//     written as `./…`).
 //   * Repo uses two cross-module specifier shapes: `../<module>/…` and
 //     `../../modules/<module>/…` — both are covered, at depths 1-4.
 //   * `reportUnusedDisableDirectives: 'off'` — old `eslint-disable no-alert` comments
 //     in shell predate this config (no such rule here); they stay as documentation.
 //
-// S31 (2026-07-30) — the rule now also guards `core/`:
+// The rule also guards `core/`:
 //   * Linted trees: `modules/**`, `src/**`, `config/**`, `utils/**` (tests still ignored).
 //     `core/**` is deliberately NOT linted: intra-core deep imports are a module's own
 //     internals talking to each other, which is legal.
@@ -31,7 +32,7 @@
 //     documented `modules/crystal-soul/icons.js` (same reason — obsidian). Any other
 //     deep import from main.js is still an error.
 //
-// 2026-09-07 (harness poza repo) — `test-support/**` takes the harness slot among the linted
+// (harness poza repo) — `test-support/**` takes the harness slot among the linted
 // trees. The harness (which boots the real plugin in Node) moved to its own repository,
 // https://github.com/JDHole/pkm-assistant-harness, because the Obsidian catalog validator lints
 // the WHOLE plugin repo and a test tool is not part of the plugin. What stayed here is the one
@@ -61,7 +62,7 @@ for (const m of MODULE_NAMES) {
   }
 }
 
-// S31: `core/` plays by the same rule — door is `core/index.js`. Only `core/i18n/index.js`
+// `core/` plays by the same rule — door is `core/index.js`. Only `core/i18n/index.js`
 // and `core/utils/Logger.js` stay deep-importable (global tooling, ~230 importers together).
 // Note: `./core/…` (i.e. `src/core/VaultZones.js`) is never matched — patterns need `../`.
 // NOTE — why `core/*.js` + `core/<dir>/*` instead of a single `core/**`: these patterns follow
@@ -83,7 +84,7 @@ for (const up of UP) {
   );
 }
 
-// TS-0 (2026-07-30) — negacje CELOWO zostają przypięte do `index.js`, mimo że barrele
+// Negacje CELOWO zostają przypięte do `index.js`, mimo że barrele
 // zaczynają migrować na `index.ts`: konwencja kampanii mówi, że specifiery w repo ZAWSZE
 // piszemy z `.js` (esbuild i tsx podstawiają rozszerzenie same), więc import barrela
 // napisany jako `index.ts` ma być błędem lintu — reguła sama egzekwuje konwencję.
@@ -91,8 +92,8 @@ const deepImportPatterns = [...positive, ...negative];
 
 // Composition root: `src/main.js` additionally may reach the obsidian-touching files that
 // deliberately do NOT live in the node-safe `core/index.js` barrel (contract documented at
-// the top of that file), plus two exceptions with DIFFERENT reasons (AUD-code-review-037 —
-// don't fold these into "exactly four", the four are only the obsidian-touching core/ files):
+// the top of that file), plus two exceptions with DIFFERENT reasons — don't fold these
+// into "exactly four", the four are only the obsidian-touching core/ files:
 //   - `core/selftest.js` does NOT import obsidian — it's node-safe and could live in the
 //     barrel — but stays out because main.ts loads it lazily (`await import(...)`) only when
 //     the self-test command runs, not on every boot.
@@ -113,7 +114,7 @@ const compositionRootPatterns = [
 
 export default [
   {
-    // D6b (2026-07-30): generated bundles are NOT source. Without this, inline
+    // Generated bundles are NOT source. Without this, inline
     // `eslint-disable` comments baked into bundled deps (e.g. `@typescript-eslint/…`
     // in a bundled dependency) raise "Definition for rule ... not found" ERRORS on any
     // `npx eslint .` over a tree that contains one. `dist/**` is the generated plugin bundle.
@@ -123,7 +124,7 @@ export default [
     ignores: ['dist/**', '.claude/**'],
   },
   {
-    // TS-0 (2026-07-30) — TYLKO parser dla plików .ts. Bez pluginu i bez ani jednej reguły
+    // TYLKO parser dla plików .ts. Bez pluginu i bez ani jednej reguły
     // typescript-eslint: ten config pilnuje ARCHITEKTURY (deep importy), nie stylu TS.
     // Bez parsera ESLint wywala się na składni typów jeszcze przed sprawdzeniem importów.
     files: ['**/*.ts'],

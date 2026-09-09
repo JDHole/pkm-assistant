@@ -3,14 +3,14 @@ import { listAdapterFolder, isHiddenVaultPath } from './vault_adapter_io.js';
 import type { ListCapableAdapter } from './vault_adapter_io.js';
 
 /**
- * AUD-wydajnosc-074: `listAdapterFolder` chodziła po CAŁYM drzewie (do `maxScanned`, domyślnie
- * 5000) niezależnie od tego, ile wpisów wołający realnie potrzebował — `ListTool` i tak tnie
- * wynik do `MAX_RESULTS` (100) PO fakcie. Nowa opcja `maxFiles` zatrzymuje `walk` W TRAKCIE,
+ * `listAdapterFolder` bez `maxFiles` przechodzi po CAŁYM drzewie (do `maxScanned`, domyślnie
+ * 5000) niezależnie od tego, ile wpisów wołający realnie potrzebuje — `ListTool` i tak tnie
+ * wynik do `MAX_RESULTS` (100) PO fakcie. Opcja `maxFiles` zatrzymuje `walk` W TRAKCIE,
  * jak tylko `files` ją osiągnie — bez dalszej rekursji i bez kolejnych `adapter.list()`.
  *
- * Testy niżej liczą wywołania `adapter.list()` (nie tylko wynik) — dowód mutacyjny na to, że
- * naprawa realnie ogranicza I/O, a nie tylko przycina tablicę na końcu (to już robił kod sprzed
- * naprawy, patrz `AdapterListing.truncated` przy `maxScanned`).
+ * Testy niżej liczą wywołania `adapter.list()` (nie tylko wynik) — dowód na to, że `maxFiles`
+ * realnie ogranicza I/O, a nie tylko przycina tablicę na końcu (samo przycinanie robi już
+ * `AdapterListing.truncated` przy `maxScanned`).
  */
 
 function makeTreeAdapter(folders: number, filesPerFolder: number) {
@@ -31,8 +31,8 @@ function makeTreeAdapter(folders: number, filesPerFolder: number) {
     return { adapter, listCalls };
 }
 
-test('074: maxFiles zatrzymuje walk PO zebraniu limitu — bez rekursji w kolejne podfoldery', async t => {
-    const { adapter, listCalls } = makeTreeAdapter(50, 100); // 5000 wpisów razem (dowód audytu)
+test('maxFiles zatrzymuje walk PO zebraniu limitu — bez rekursji w kolejne podfoldery', async t => {
+    const { adapter, listCalls } = makeTreeAdapter(50, 100); // 5000 wpisów razem
     const res = await listAdapterFolder(adapter, '/', { recursive: true, maxFiles: 100 });
 
     t.is(res.files.length, 100);
@@ -40,7 +40,7 @@ test('074: maxFiles zatrzymuje walk PO zebraniu limitu — bez rekursji w kolejn
     t.true(listCalls.length <= 3, `${listCalls.length} wywołań adapter.list() — miały być ~2 (root + f0), nie 51`);
 });
 
-test('074: BEZ maxFiles (domyślnie Infinity) — zachowanie IDENTYCZNE jak przed naprawą (pełny przebieg do maxScanned)', async t => {
+test('BEZ maxFiles (domyślnie Infinity) — zachowanie IDENTYCZNE jak przed naprawą (pełny przebieg do maxScanned)', async t => {
     const { adapter, listCalls } = makeTreeAdapter(50, 100);
     const res = await listAdapterFolder(adapter, '/', { recursive: true });
 
@@ -50,7 +50,7 @@ test('074: BEZ maxFiles (domyślnie Infinity) — zachowanie IDENTYCZNE jak prze
     t.true(res.truncated, 'maxScanned=5000 i tak zostaje trafiony przy 5050 wpisach');
 });
 
-test('074: maxFiles większe niż realna liczba wpisów — walk kończy się naturalnie, truncated=false', async t => {
+test('maxFiles większe niż realna liczba wpisów — walk kończy się naturalnie, truncated=false', async t => {
     const { adapter, listCalls } = makeTreeAdapter(3, 10); // 30 plików razem
     const res = await listAdapterFolder(adapter, '/', { recursive: true, maxFiles: 1000 });
 
@@ -59,7 +59,7 @@ test('074: maxFiles większe niż realna liczba wpisów — walk kończy się na
     t.is(listCalls.length, 4, 'root + 3 podfoldery — pełny przebieg, bo maxFiles nie był wąskim gardłem');
 });
 
-test('074: kolejność PIERWSZYCH N wpisów jest identyczna niezależnie od maxFiles (cięcie nie zmienia WYNIKU)', async t => {
+test('kolejność PIERWSZYCH N wpisów jest identyczna niezależnie od maxFiles (cięcie nie zmienia WYNIKU)', async t => {
     const { adapter: fullAdapter } = makeTreeAdapter(5, 20);
     const { adapter: cappedAdapter } = makeTreeAdapter(5, 20);
 
@@ -69,7 +69,7 @@ test('074: kolejność PIERWSZYCH N wpisów jest identyczna niezależnie od maxF
     t.deepEqual(capped.files, full.files.slice(0, 15));
 });
 
-test('074: non-recursive listing respektuje maxFiles tak samo (foldery liczą się jako wpisy)', async t => {
+test('non-recursive listing respektuje maxFiles tak samo (foldery liczą się jako wpisy)', async t => {
     const { adapter } = makeTreeAdapter(200, 0); // 200 pustych podfolderów, zero plików
     const res = await listAdapterFolder(adapter, '/', { recursive: false, maxFiles: 50 });
 
@@ -79,7 +79,7 @@ test('074: non-recursive listing respektuje maxFiles tak samo (foldery liczą si
 });
 
 // sanity: `isHiddenVaultPath` bez zmian w tej naprawie — regresja jednym testem wystarczy.
-test('isHiddenVaultPath: bez zmian po AUD-wydajnosc-074', t => {
+test('isHiddenVaultPath: zachowanie niezmienione', t => {
     t.true(isHiddenVaultPath('.pkm-assistant/agents'));
     t.false(isHiddenVaultPath('Notatki/a.md'));
 });

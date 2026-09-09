@@ -1,36 +1,27 @@
 /**
- * K12 (2026-08-23) — KANONIZACJA ŚCIEŻKI DLA AKCJI `image.*`.
+ * KANONIZACJA ŚCIEŻKI DLA AKCJI `image.*`.
  *
- * Znalezisko z nocy audytowej 2026-08-23 (moduł 20, code review CTO), naprawione tego
- * samego dnia. Stan przed naprawą:
+ * `generate_image` oddaje bramce FOLDER ZAPISU, a `add_text_to_image` - CEL ZAPISU. Oba są
+ * więc prawdziwymi celami vaultowymi (nie „promptem"), i bramka (`PermissionSystem.checkPermission`)
+ * musi je kanonizować dokładnie tak jak `vault.*` - inaczej ta sama ścieżka mogłaby dostać dwie
+ * różne decyzje w zależności od akcji (`vault.write` + `./.pkm-assistant/x.png` → DENY,
+ * `image.generate` + ten sam ciąg → ALLOW), a to WERDYKT bramki, nie sam zapis, ląduje
+ * w oknie zgody.
  *
- *   • bramka (`PermissionSystem.checkPermission`) kanonizowała TYLKO
- *     `action.startsWith('vault.')`, a komentarz przy tym warunku wymieniał `image.*`
- *     jako akcję „niosącą prompt, nie ścieżkę". To było prawdą PRZED K2;
- *   • K2 (AUD-security-048/016) zmienił to w tym samym biegu napraw: `generate_image`
- *     oddaje dziś bramce FOLDER ZAPISU, a `add_text_to_image` — CEL ZAPISU;
- *   • wołacz (`MCPClient._canonicalizeToolContext`) kanonizuje tylko wtedy, gdy
- *     `targetPath` jest DOSŁOWNIE wartością pola argumentów. Cel `add_text_to_image`
- *     bez `output_path` jest WYLICZANY (`<źródło>_text.<ext>`), więc nie jest równy
- *     żadnemu polu → kanonizacja u wołacza pomijana.
+ * Cel `add_text_to_image` bez `output_path` jest WYLICZANY (`<źródło>_text.<ext>`), więc nie
+ * jest DOSŁOWNIE wartością żadnego pola argumentów - wołacz (`MCPClient._canonicalizeToolContext`)
+ * kanonizuje tylko wtedy, gdy `targetPath` jest dosłowną wartością pola, więc dla celu
+ * wyliczanego kanonizację u wołacza pomija.
  *
- * Skutek: ta sama ścieżka dostawała dwie różne decyzje w zależności od akcji
- * (`vault.write` + `./.pkm-assistant/x.png` → DENY, `image.generate` + ten sam ciąg
- * → ALLOW). Zapisu nie było (`validateVaultPath` w samym narzędziu), zły był WERDYKT
- * bramki — i to on lądował w oknie zgody.
- *
- * GDZIE MIESZKA KANONIZACJA (stan po K12):
- *   1. `MCPClient._canonicalizeToolContext` — u wołacza, żeby narzędzie dostało ten sam
+ * GDZIE MIESZKA KANONIZACJA:
+ *   1. `MCPClient._canonicalizeToolContext` - u wołacza, żeby narzędzie dostało ten sam
  *      ciąg, który oceniła bramka (podmiana wartości w argumentach);
- *   2. `PermissionSystem.checkPermission` — obrona w głąb dla `vault.*` ORAZ `image.*`;
+ *   2. `PermissionSystem.checkPermission` - obrona w głąb dla `vault.*` ORAZ `image.*`;
  *      dla celu WYLICZANEGO to jedyna warstwa, która go prostuje.
- *   3. `AccessGuard.checkAccess` — od K13 (2026-08-23) TAKŻE kanonizuje, na wejściu.
- *      W K12 było to niemożliwe: `sanitizePath` nie była w pełni idempotentna
- *      (`'x.md%20'` → `'x.md '` → `'x.md'`; `'a%252e%252e/x'` → `'a%2e%2e/x'` → `'a../x'`),
- *      więc trzecia warstwa „poprawek" oddawała INNY ciąg niż wołacz i znowu rozjeżdżała
- *      bramkę ze zlewem. K13 liczy kanonizację do PUNKTU STAŁEGO, więc dodatkowa warstwa
- *      nie ma prawa niczego zmienić — a strażnik przestał wierzyć wołaczowi na słowo.
- *      Cel nie do uratowania = odmowa fail-closed, nie ciche przepuszczenie surowego ciągu.
+ *   3. `AccessGuard.checkAccess` - TAKŻE kanonizuje, na wejściu, do PUNKTU STAŁEGO (patrz
+ *      `sanitizePath`), więc żadna dodatkowa warstwa „poprawek" nie może oddać INNEGO ciągu
+ *      niż wołacz i rozjechać bramkę ze zlewem. Cel nie do uratowania = odmowa fail-closed,
+ *      nie ciche przepuszczenie surowego ciągu.
  */
 import test from 'ava';
 import { AccessGuard } from './AccessGuard.js';
@@ -48,7 +39,7 @@ function makeAgent() {
 const KANONICZNA = '.pkm-assistant/x_text.png';
 const Z_KROPKA = './.pkm-assistant/x_text.png';
 
-test.serial('K1: granica `.pkm-assistant/` trzyma dla akcji vault.* w OBU zapisach', t2 => {
+test.serial('granica `.pkm-assistant/` trzyma dla akcji vault.* w OBU zapisach', t2 => {
     AccessGuard.setNoGoFolders([]);
     const ps = new PermissionSystem(null as never, {} as never);
     const agent = makeAgent();
@@ -60,7 +51,7 @@ test.serial('K1: granica `.pkm-assistant/` trzyma dla akcji vault.* w OBU zapisa
     );
 });
 
-test.serial('K2: cel akcji image.* jest ŚCIEŻKĄ VAULTOWĄ, więc bramka go ocenia', t2 => {
+test.serial('cel akcji image.* jest ŚCIEŻKĄ VAULTOWĄ, więc bramka go ocenia', t2 => {
     AccessGuard.setNoGoFolders([]);
     const ps = new PermissionSystem(null as never, {} as never);
 
@@ -69,13 +60,13 @@ test.serial('K2: cel akcji image.* jest ŚCIEŻKĄ VAULTOWĄ, więc bramka go oc
     t2.false(ps.checkPermission(makeAgent(), 'image.generate', KANONICZNA).allowed);
 });
 
-test.serial('K12: image.* dostaje TĘ SAMĄ decyzję co vault.* dla tej samej ścieżki', t2 => {
+test.serial('image.* dostaje TĘ SAMĄ decyzję co vault.* dla tej samej ścieżki', t2 => {
     AccessGuard.setNoGoFolders([]);
     const ps = new PermissionSystem(null as never, {} as never);
     const agent = makeAgent();
 
-    // Przed K12: vault.write → DENY dla obu zapisów, image.generate → DENY tylko dla
-    // kanonicznego, a dla `./` ALLOW („Permission granted"). Reprodukcja z nocy 2026-08-23.
+    // Bez kanonizacji `image.generate` mógłby dać INNY werdykt niż `vault.write` dla tej
+    // samej ścieżki zapisanej z wiodącym `./`.
     t2.false(
         ps.checkPermission(agent, 'image.generate', Z_KROPKA).allowed,
         'wiodące `./` przewraca decyzję bramki dla akcji image.*',
@@ -92,14 +83,15 @@ test.serial('K12: image.* dostaje TĘ SAMĄ decyzję co vault.* dla tej samej ś
     t2.false(traversal.requiresApproval, 'odmowa fail-closed nie może pytać usera');
 });
 
-test.serial('K13: AccessGuard kanonizuje sam — `./.pkm-assistant/x_text.png` odbity bez pomocy wołacza', t2 => {
+test.serial('AccessGuard kanonizuje sam — `./.pkm-assistant/x_text.png` odbity bez pomocy wołacza', t2 => {
     AccessGuard.setNoGoFolders([]);
     const agent = makeAgent();
 
-    // Granica `.pkm-assistant/` w `checkAccess` stoi na `startsWith`, więc do K12 wystarczyło
-    // wiodące `./`, żeby ją ominąć — o ile ktokolwiek zawołał strażnika BEZ kanonizacji
-    // (produkcyjnie robi to `PermissionSystem`, ale kontrakt opierał się na dyscyplinie wołaczy).
-    // Od K13 strażnik prostuje cel sam: oba zapisy tego samego pliku odbijają się identycznie.
+    // Granica `.pkm-assistant/` w `checkAccess` stoi na `startsWith`, więc bez kanonizacji tu
+    // wiodące `./` mogłoby ją ominąć, gdyby ktokolwiek zawołał strażnika BEZ kanonizacji
+    // u wołacza (produkcyjnie robi to `PermissionSystem`, ale kontrakt nie ma polegać na
+    // dyscyplinie wołaczy). Strażnik prostuje cel sam: oba zapisy tego samego pliku odbijają
+    // się identycznie.
     t2.false(AccessGuard.checkAccess(agent, KANONICZNA, 'write').allowed);
     t2.false(
         AccessGuard.checkAccess(agent, Z_KROPKA, 'write').allowed,
@@ -143,7 +135,7 @@ function makeApp() {
     };
 }
 
-test.serial('K12: `add_text_to_image` bez output_path — WYLICZONY cel z `./` odbija się o bramkę', async t2 => {
+test.serial('`add_text_to_image` bez output_path — WYLICZONY cel z `./` odbija się o bramkę', async t2 => {
     AccessGuard.setNoGoFolders([]);
     const { app, written } = makeApp();
 

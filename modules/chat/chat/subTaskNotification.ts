@@ -1,16 +1,16 @@
 /**
- * subTaskNotification — treść powiadomienia o wyniku suba z TŁA + dopasowanie zakładki (F2 faza B).
+ * subTaskNotification — treść powiadomienia o wyniku suba z TŁA + dopasowanie zakładki.
  *
- * PO CO: od F2 `delegate` domyślnie nie blokuje tury — model dostaje pokwitowanie `started`,
+ * PO CO: `delegate` domyślnie nie blokuje tury - model dostaje pokwitowanie `started`,
  * a bieg suba kończy się długo po tym, jak tura się zamknęła. Wynik musi więc wrócić WŁASNĄ
  * turą: czat wstrzykuje go jako wiadomość i od razu odpala agenta ponownie. Ten plik składa
  * tekst tej wiadomości i wskazuje zakładkę, do której należy.
  *
  * ZASADY:
- *   - CZYSTY: zero `obsidian`, zero `this`, zero I/O — cała reszta czatu wisi na `obsidian`
+ *   - CZYSTY: zero `obsidian`, zero `this`, zero I/O - cała reszta czatu wisi na `obsidian`
  *     i nie da się jej testować w AVA. Ta logika daje się, więc mieszka osobno.
  *   - Tekst idzie do MODELU (ląduje w kontekście jako wiadomość usera), ale jest też widoczny
- *     dla usera w oknie rozmowy — dlatego cały przez `t()`, pl+en.
+ *     dla usera w oknie rozmowy - dlatego cały przez `t()`, pl+en.
  *   - Nie zgadujemy limitów: sufit długości wyniku podaje wołacz (czat zna `getLimits`).
  */
 import { t } from '../../../core/i18n/index.js';
@@ -18,15 +18,14 @@ import { DEFAULT_LIMITS } from '../../../config/limits.js';
 import type { SubTask, SubTaskOrigin } from '../../sub-agents/index.js';
 
 /** Minimalny kształt zakładki, jakiego potrzebuje dopasowanie (czat ma na niej więcej pól). */
-// AUD-dead-code-231 (2026-09-02): `export` zdjęty na obu typach niżej — zero referencji spoza
-// tego pliku.
+// Nie eksportowany - brak referencji spoza tego pliku (tu i na obu typach niżej).
 interface TabLike {
     agentName?: string;
     [extra: string]: unknown;
 }
 
 interface SubTaskNotificationOptions {
-    /** Sufit długości treści wyniku. `0` = bez limitu (runda 2). Default:
+    /** Sufit długości treści wyniku. `0` = bez limitu. Default:
      *  `subagent_result_max_chars` z config/limits (wynik suba to deliverable, nie zrzut). */
     maxResultChars?: number;
 }
@@ -63,8 +62,8 @@ function durationSeconds(task: SubTask): string | null {
  * powiadomienie jak zwykłą wypowiedź usera i tylko ją skwitować.
  */
 export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNotificationOptions = {}): string {
-    // Runda 2 (2026-08-17): 0 jest ŚWIADOMĄ wartością („bez limitu"), więc nie może spadać
-    // na default — przyjmujemy każdą skończoną liczbę >= 0, śmieć dopiero idzie na default.
+    // 0 jest ŚWIADOMĄ wartością („bez limitu"), więc nie może spadać na default -
+    // przyjmujemy każdą skończoną liczbę >= 0, śmieć dopiero idzie na default.
     const rawCap = Number(options.maxResultChars);
     const maxResultChars = Number.isFinite(rawCap) && rawCap >= 0
         ? rawCap

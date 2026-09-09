@@ -338,7 +338,7 @@ export abstract class OpenAiCompatibleProvider implements ChatProvider {
 class OpenAiShapeDecoder implements StreamDecoder {
     private buffer = '';
     private finishReason: string | undefined;
-    /** ST-11: ile ramek poszło do kosza jako nieczytelne — `ChatModel` z tego robi ostrzeżenie. */
+    /** Ile ramek poszło do kosza jako nieczytelne - `ChatModel` z tego robi ostrzeżenie. */
     private dropped = 0;
     private readonly filter: ReasoningTagFilter | null;
 
@@ -416,8 +416,8 @@ class OpenAiShapeDecoder implements StreamDecoder {
         try {
             parsed = JSON.parse(payload);
         } catch {
-            // Porcja nie do sparsowania nie rzuca i nie jest końcem — strumień jedzie dalej,
-            // ale ramka ląduje w koszu i musi zostawić ślad w logu (ST-11).
+            // Porcja nie do sparsowania nie rzuca i nie jest końcem - strumień jedzie dalej,
+            // ale ramka ląduje w koszu i musi zostawić ślad w logu.
             this.dropped += 1;
             return;
         }

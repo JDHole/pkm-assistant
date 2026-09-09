@@ -2,8 +2,8 @@
  * modules/embedding/providers/gemini.ts — dostawca Gemini (`:batchEmbedContents`,
  * `x-goog-api-key`, `retryDelay` z ciała 429, katalog 2048/50).
  *
- * K20: klucz NIGDY w query-stringu (`?key=`) — wyciekałby przez log adresu. Idzie
- * WYŁĄCZNIE w nagłówku `x-goog-api-key` (C-16).
+ * Klucz NIGDY w query-stringu (`?key=`) - wyciekałby przez log adresu. Idzie
+ * WYŁĄCZNIE w nagłówku `x-goog-api-key`.
  *
  * Źródła kształtu: https://ai.google.dev/api/embeddings (`:batchEmbedContents`),
  * https://cloud.google.com/apis/design/errors (`RetryInfo.retryDelay` w `error.details[]`).
@@ -23,7 +23,7 @@ import type {
     EmbedBatchErrorInit,
 } from '../contracts.js';
 
-/** Katalog TWARDYCH limitów — `batchSize:50` PRZEGRYWA z wyborem usera (B.6 GM-05, odwrotnie niż `maxInputTokens`). */
+/** Katalog TWARDYCH limitów - `batchSize:50` PRZEGRYWA z wyborem usera (odwrotnie niż `maxInputTokens`). */
 const MODEL_CATALOG: Readonly<Record<string, EmbeddingModelSpec>> = {
     'gemini-embedding-001': { maxInputTokens: 2048, batchSize: 50, dims: 3072 },
 };
@@ -73,7 +73,7 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
         }));
     }
 
-    /** `POST {base}/models/{model}:batchEmbedContents`, `x-goog-api-key`, `{requests:[{model,content}]}` (C-16). */
+    /** `POST {base}/models/{model}:batchEmbedContents`, `x-goog-api-key`, `{requests:[{model,content}]}`. */
     buildEmbedRequest(texts: string[], ctx: EmbeddingProviderContext): HttpRequestSpec {
         const modelPath = `models/${ctx.modelId}`;
         return {
@@ -89,7 +89,7 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
         };
     }
 
-    /** `{embeddings:[{values}]}` w kolejności wejść (C-17) — nierozpoznany kształt → rzut `shape`. */
+    /** `{embeddings:[{values}]}` w kolejności wejść - nierozpoznany kształt → rzut `shape`. */
     parseEmbedResponse(body: unknown, _texts: string[], ctx: EmbeddingProviderContext): number[][] {
         const parsed = body as GeminiEmbedBody | null | undefined;
         const embeddings = parsed?.embeddings;
@@ -106,9 +106,9 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
     }
 
     /**
-     * Błąd inny niż 429 leci od razu, bez `retryAfterMs` (GM-03). Dla 429 czyta
-     * `error.details[].retryDelay` (`RetryInfo`) — brak pola → `retryAfterMs` `undefined`,
-     * MUSI działać bez niego (ta gałąź podbijała mnożnik backoffu, C-18).
+     * Błąd inny niż 429 leci od razu, bez `retryAfterMs`. Dla 429 czyta
+     * `error.details[].retryDelay` (`RetryInfo`) - brak pola → `retryAfterMs` `undefined`,
+     * MUSI działać bez niego (ta gałąź podbija mnożnik backoffu).
      */
     parseEmbedError(
         res: HttpResponse,

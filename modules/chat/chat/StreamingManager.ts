@@ -1,44 +1,35 @@
 /**
- * StreamingManager — singleton zarządzający aktywnymi streamami chat (multi-tab).
+ * StreamingManager - singleton zarządzający aktywnymi streamami chat (multi-tab).
  *
- * Sprint 03 Z7 (Wizja MEMORY_v2_RETRIEVAL_v2 → Models hygiene v2):
- *
- * **Multi-tab tracking** — każdy ChatView (per-tab) rejestruje swój stream
+ * **Multi-tab tracking** - każdy ChatView (per-tab) rejestruje swój stream
  * przez `startStream(streamId, info)` na początku i `stopStream(streamId)`
  * po zakończeniu. `getActiveStreams()` zwraca live snapshot dla
- * Backstage/Token Viewer (Sprint 11) oraz karmi `shouldUseFreshModel`
- * (AUD-testy-027: decyzja „świeża instancja modelu czy z cache").
+ * Backstage/Token Viewer oraz karmi `shouldUseFreshModel`
+ * (decyzja „świeża instancja modelu czy z cache").
  *
- * Pre-Z7 chat_streaming.js miał lokalny guard `needsFreshModel = _streamCtxMap.size > 1`,
- * ale to per ChatView — multi-tab z różnych ChatView'ów wciąż mogło się ścierać.
- * StreamingManager jest plugin-global.
+ * StreamingManager jest plugin-global, nie per-ChatView: lokalny licznik streamów w jednym
+ * widoku nie widzi streamów z innych zakładek, więc tury z RÓŻNYCH ChatView'ów mogłyby się
+ * ścierać, gdyby decyzja opierała się tylko na stanie jednej zakładki.
  *
- * Pełen split chat_streaming.js → StreamingManager (~1226 LOC streaming logic
- * przeniesione) jest defer do późniejszego sprintu — dziś StreamingManager
- * to thin orchestration/coordination layer.
- *
- * AUD-dead-code-049 (2026-09-02): `acquireModelLock()` + mapa `modelLocks` (per-model
- * concurrent-safety lock, obiecany dla SubAgentRunner w hotfixie S03 z 2026-04-27)
- * skasowane — od hotfixu S03 `chat_streaming.ts` woła singleton wyłącznie po
- * tracking (`startStream`/`stopStream`/`getActiveStreams`), a `modules/sub-agents`
- * nigdy nie zaimportował StreamingManagera. Mapa była trwale pusta w runtime.
+ * Dziś StreamingManager to thin orchestration/coordination layer - właściwa logika streamu
+ * (~1226 LOC) zostaje w `chat_streaming.ts`, pełny split nie jest zrobiony.
  */
 
 /**
- * Czy tura ma dostać ŚWIEŻĄ instancję modelu zamiast tej z cache (AUD-testy-027).
+ * Czy tura ma dostać ŚWIEŻĄ instancję modelu zamiast tej z cache.
  *
  * `ChatModel` trzyma stan per instancja (bilet bramki, `stopStream`, `_abortSettle`),
  * więc dwie tury na jednej instancji ścierają się o niego: Stop kliknięty w jednej zakładce
- * trafiał wtedy w turę drugiej. Decyzja stała w `chat_streaming.ts` (plik wisi na `obsidian`,
- * AVA go nie zaimportuje) i nie miała ŻADNEGO testu — `getActiveStreams()` zwracające zawsze
- * `[]` zostawiało 259/259 na zielono. Dziś jest tutaj, obok stanu, na którym się opiera.
+ * trafia wtedy w turę drugiej. Funkcja mieszka tutaj, obok stanu (`getActiveStreams`), na
+ * którym się opiera.
  *
  * @param localTurns - ile tur trzyma TEN widok (`_streamCtxMap.size`)
  * @param globalActiveStreams - ile streamów żyje w całym pluginie (`getActiveStreams().length`)
  */
 export function shouldUseFreshModel(localTurns: number, globalActiveStreams: number): boolean {
-    // Pre-Z7 guard był tylko lokalny (`size > 1`) — przy czterech zakładkach każdy widok
-    // widział `size === 1` i brał instancję z cache, więc tury z RÓŻNYCH widoków się ścierały.
+    // Lokalny licznik (`size > 1`) sam nie wystarcza: przy czterech zakładkach każdy widok
+    // widziałby `size === 1` i brałby instancję z cache, więc tury z RÓŻNYCH widoków ścierałyby
+    // się - stąd też `globalActiveStreams`.
     return localTurns > 1 || globalActiveStreams > 0;
 }
 

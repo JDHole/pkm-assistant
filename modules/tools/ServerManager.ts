@@ -7,7 +7,7 @@
  * - disconnectAll() → przy zmianie agenta
  * - getActiveToolDefinitions() → dla chat_view (OpenAI format)
  *
- * E3.1 faza C: sandbox custom-JS + user/standalone serwery wycięte.
+ * Obsługuje wyłącznie built-in serwery — brak sandboxa custom-JS i user/standalone serwerów.
  * Zewnętrzne serwery MCP obsługuje ExternalMcpManager (prawdziwy klient stdio/HTTP).
  */
 import { ServerLoader } from './ServerLoader.js';
@@ -42,7 +42,7 @@ export interface ServerManagerPluginLike {
 
 /** Opcje konstruktora managera. */
 export interface ServerManagerOptions {
-    /** E1.2 kill-switch, forwarded to ServerLoader. */
+    /** Kill-switch, forwarded to ServerLoader. */
     komunikatorEnabled?: boolean;
 }
 
@@ -91,7 +91,7 @@ export class ServerManager {
 
     _getAgentMcpServers(agent: ServerVisibilityAgent | null | undefined): unknown[] | null | undefined {
         if (!agent) return null;
-        // E2.8 A3: rola rozpuszczona — oś to sam mcp_servers (effective_mcp_servers = jego lustro).
+        // Rola nie ogranicza widoczności serwerów — oś to sam mcp_servers (effective_mcp_servers = jego lustro).
         if (Array.isArray(agent.effective_mcp_servers)) return agent.effective_mcp_servers as unknown[];
         return agent.mcp_servers as unknown[] | null | undefined;
     }

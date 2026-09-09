@@ -8,16 +8,16 @@
  *     JSON — bez prefiksu `data: ` i bez tekstowego znacznika końca. Rozcinaniem linii
  *     zajmuje się wspólny {@link NdjsonFrames} z `core/http`.
  *  2. **Koniec tury rozpoznaje się STRUKTURALNIE.** Liczy się pole `done` albo `done_reason`
- *     w OSTATNIM parsowalnym obiekcie porcji — nigdy podciąg w tekście, bo model potrafi
- *     o tych polach zwyczajnie opowiadać (OL-06, OL-07).
- *  3. **Treść jest zawsze stringiem, a obrazy jadą osobno** — jako tablica `images`
+ *     w OSTATNIM parsowalnym obiekcie porcji - nigdy podciąg w tekście, bo model potrafi
+ *     o tych polach zwyczajnie opowiadać.
+ *  3. **Treść jest zawsze stringiem, a obrazy jadą osobno** - jako tablica `images`
  *     z gołym base64 przy wiadomości (bez nagłówka `data:`).
  *  4. **Myślenie ma własne pole.** `message.thinking` (tryb `think`) wyłącza parser
  *     znaczników `<think>`, bo skoro dostawca oddziela rozumowanie sam, to znacznik
- *     w treści jest już zwykłym tekstem (TT-13, TT-15).
+ *     w treści jest już zwykłym tekstem.
  *
  * Limit odpowiedzi wchodzi jako `options.num_predict`, a czas trzymania modelu w pamięci
- * jako `keep_alive` (OL-03). Katalog modeli to `GET /api/tags` (OL-08).
+ * jako `keep_alive`. Katalog modeli to `GET /api/tags`.
  */
 import { NdjsonFrames, normalizeError } from '../../../core/index.js';
 import { t } from '../../../core/i18n/index.js';
@@ -149,8 +149,8 @@ const SCIEZKI_API: readonly string[] = [
 ];
 
 /**
- * Sklejenie hosta ze ścieżką. KAŻDY adres dostawcy ma wychodzić od tego samego pnia
- * (BA-21), więc z hosta najpierw znika doklejona wcześniej ścieżka API — inaczej katalog
+ * Sklejenie hosta ze ścieżką. KAŻDY adres dostawcy ma wychodzić od tego samego pnia,
+ * więc z hosta najpierw znika doklejona wcześniej ścieżka API - inaczej katalog
  * modeli wołany po hoście `…/api/chat` lądowałby pod `…/api/chat/api/tags`.
  */
 function adres(host: string, sciezka: string): string {
@@ -238,7 +238,7 @@ interface RozbitaTresc {
  *
  * Obraz, który nie dojedzie, zostawia w SWOIM MIEJSCU `zastepnik`: wiadomość złożona
  * z samego obrazu zamienia się w ten komunikat w całości, a mieszana traci wyłącznie
- * blok obrazu i zachowuje kolejność wypowiedzi (BA-15/BA-16).
+ * blok obrazu i zachowuje kolejność wypowiedzi.
  */
 function rozbijTresc(tresc: unknown, obrazyDozwolone: boolean, zastepnik: string): RozbitaTresc {
     if (typeof tresc === 'string') return { tekst: tresc, obrazy: [], pominietoObraz: false };
@@ -300,7 +300,7 @@ function wywolanieDlaOllamy(wywolanie: unknown): Json | null {
  * Cały transkrypt na kształt Ollamy. Jedyna zmiana treści, jaką tu robimy, to wycięcie
  * obrazów kierowanych do modelu, który ich nie przeczyta: w miejsce obrazu wchodzi
  * komunikat z tłumaczeń, żeby model wiedział, czego nie dostał, a wysyłka nie została
- * zablokowana (BA-15/BA-16).
+ * zablokowana.
  */
 function transkryptDlaOllamy(
     wiadomosci: OpenAiRequestMessage[],
@@ -348,7 +348,7 @@ function transkryptDlaOllamy(
 
 /**
  * Zużycie tokenów z liczników demona. Brak obu liczników oddaje `null`, żeby wołacz
- * zostawił `usage` PUSTYM obiektem — to jego sygnał „estymuj" (BA-08).
+ * zostawił `usage` PUSTYM obiektem - to jego sygnał „estymuj".
  */
 function zuzycieZOdpowiedzi(surowe: Json): UsageLike | null {
     const wejscie = jakoLiczba(surowe.prompt_eval_count);
@@ -362,7 +362,7 @@ function zuzycieZOdpowiedzi(surowe: Json): UsageLike | null {
     return zuzycie;
 }
 
-/** Wywołanie narzędzia z odpowiedzi w kształcie kanonicznym. Argumenty idą jak przyszły (OL-05). */
+/** Wywołanie narzędzia z odpowiedzi w kształcie kanonicznym. Argumenty idą jak przyszły. */
 function wywolanieKanoniczne(wywolanie: unknown): OpenAiToolCall | null {
     const rekord = jakoObiekt(wywolanie);
     if (!rekord) return null;
@@ -375,7 +375,7 @@ function wywolanieKanoniczne(wywolanie: unknown): OpenAiToolCall | null {
         type: 'function',
         function: {
             name: nazwa,
-            // Demon oddaje argumenty gotowym OBIEKTEM i tak je przepuszczamy — pętla
+            // Demon oddaje argumenty gotowym OBIEKTEM i tak je przepuszczamy - pętla
             // agenta znosi oba kształty, a przepakowanie tylko gubiłoby typy liczb.
             arguments: typeof argumenty === 'string' || jestObiektem(argumenty)
                 ? argumenty
@@ -387,7 +387,7 @@ function wywolanieKanoniczne(wywolanie: unknown): OpenAiToolCall | null {
     return out;
 }
 
-/** Czy obiekt linii oznacza koniec tury. Wyłącznie pola STRUKTURALNE (OL-06). */
+/** Czy obiekt linii oznacza koniec tury. Wyłącznie pola STRUKTURALNE. */
 function koniecTury(obiekt: Json): boolean {
     if (obiekt.done === true) return true;
     return jakoTekst(obiekt.done_reason).trim() !== '';
@@ -418,14 +418,14 @@ class DekoderOllamy implements StreamDecoder {
     private ogon = '';
     /** Czy rezerwa filtra znaczników została już dopchnięta (raz na turę). */
     private domkniety = false;
-    /** ST-11: ile linii poszło do kosza jako nieczytelne — `ChatModel` z tego robi ostrzeżenie. */
+    /** Ile linii poszło do kosza jako nieczytelne - `ChatModel` z tego robi ostrzeżenie. */
     private wyrzucone = 0;
 
     get droppedFrames(): number {
         return this.wyrzucone;
     }
 
-    /** Seam obserwacyjny parsera znaczników myślenia (TT-16). */
+    /** Seam obserwacyjny parsera znaczników myślenia. */
     get reasoning(): { readonly active: boolean; readonly buffered: string } {
         return this.filtr;
     }
@@ -467,7 +467,7 @@ class DekoderOllamy implements StreamDecoder {
      * Ramki jednej porcji na zdarzenia kanoniczne.
      *
      * O końcu tury decyduje OSTATNI parsowalny obiekt porcji, nie obecność sentinela
-     * gdziekolwiek w niej (OL-07): dwie linie zlepione przez buforujące proxy nie mogą
+     * gdziekolwiek w niej: dwie linie zlepione przez buforujące proxy nie mogą
      * zakończyć strumienia tylko dlatego, że pierwsza z nich niosła `done`.
      */
     private przetworz(ramki: StreamFrame[]): StreamEvent[] {
@@ -477,7 +477,7 @@ class DekoderOllamy implements StreamDecoder {
         for (const ramka of ramki) {
             const obiekt = sparsujLinie(ramka.data);
             // Śmieć transportowy nie rzuca, nie kończy strumienia i nie unieważnia
-            // poprzedniej, poprawnej linii tej samej porcji — ale zostawia ślad (ST-11).
+            // poprzedniej, poprawnej linii tej samej porcji - ale zostawia ślad.
             if (!obiekt) {
                 this.wyrzucone += 1;
                 continue;
@@ -504,8 +504,8 @@ class DekoderOllamy implements StreamDecoder {
         if (wiadomosc) {
             const myslenie = jakoTekst(wiadomosc.thinking);
             if (myslenie) {
-                // Rozumowanie przyszło własnym polem — znaczniki w treści są od teraz
-                // zwykłym tekstem (TT-13).
+                // Rozumowanie przyszło własnym polem - znaczniki w treści są od teraz
+                // zwykłym tekstem.
                 this.filtr.disable();
                 zdarzenia.push({ type: 'reasoning', delta: myslenie });
             }
@@ -529,7 +529,7 @@ class DekoderOllamy implements StreamDecoder {
     }
 
     /**
-     * Wywołanie narzędzia. Demon przysyła je w JEDNEJ linii, w komplecie — nie ma tu
+     * Wywołanie narzędzia. Demon przysyła je w JEDNEJ linii, w komplecie - nie ma tu
      * sklejania fragmentów jak w rodzinie OpenAI, więc slot wskazuje pozycja w tablicy.
      */
     private wypuscWywolanie(wywolanie: unknown, pozycja: number, zdarzenia: StreamEvent[]): void {
@@ -550,7 +550,7 @@ class DekoderOllamy implements StreamDecoder {
         if (typeof argumenty === 'string') {
             zdarzenie.argumentsDelta = argumenty;
         } else if (argumenty !== undefined && argumenty !== null) {
-            // Argumenty przychodzą OBIEKTEM (OL-05), a zdarzenie strumienia niesie tekst —
+            // Argumenty przychodzą OBIEKTEM, a zdarzenie strumienia niesie tekst -
             // idzie więc ich dosłowny zapis JSON, który wołacz i tak parsuje.
             zdarzenie.argumentsDelta = JSON.stringify(argumenty);
         }
@@ -580,7 +580,7 @@ export class OllamaProvider implements ChatProvider {
     /**
      * Katalog modeli ściągniętych na dysk użytkownika. Zgaszony demon, błędny status albo
      * śmieć w odpowiedzi oddają PUSTĄ listę — rozwijane pole w Ustawieniach ma się narysować
-     * także wtedy, gdy nie ma z czym gadać (ST-21).
+     * także wtedy, gdy nie ma z czym gadać.
      */
     async listModels(ctx: ProviderContext, http: HttpClient): Promise<ModelInfo[]> {
         if (!http) return [];
@@ -597,7 +597,7 @@ export class OllamaProvider implements ChatProvider {
         }
     }
 
-    /** Żądanie → opis HTTP. `body` jest STRINGIEM JSON, nigdy obiektem (BA-01). */
+    /** Żądanie → opis HTTP. `body` jest STRINGIEM JSON, nigdy obiektem. */
     buildRequest(req: ChatRequest, ctx: ProviderContext, stream: boolean): HttpRequestSpec {
         const modelId = (req.model ?? ctx.modelId ?? '').trim() || DOMYSLNY_MODEL;
         const obrazyDozwolone = isVisionModel({ modelId, modelKey: modelId, models: ctx.models });
@@ -610,7 +610,7 @@ export class OllamaProvider implements ChatProvider {
             model: modelId,
             messages: transkryptDlaOllamy(req.messages ?? [], obrazyDozwolone, ctx, modelId),
             stream,
-            // Jak długo demon ma trzymać model w pamięci po odpowiedzi (OL-03). Pusta albo
+            // Jak długo demon ma trzymać model w pamięci po odpowiedzi. Pusta albo
             // brakująca wartość spada na domyślną — inaczej demon wyładowywałby model
             // natychmiast i każda tura płaciłaby za ponowne wczytanie wag.
             keep_alive: jakoTekst(ctx.keepAlive).trim() || OLLAMA_DEFAULT_KEEP_ALIVE,
@@ -634,7 +634,7 @@ export class OllamaProvider implements ChatProvider {
     /**
      * Odpowiedź bez strumienia → kształt kanoniczny. Te same reguły co w strumieniu:
      * natywne `thinking` wygrywa z parserem znaczników, a niedomknięty `<think>` wraca
-     * do widocznej treści (TT-14, TT-15).
+     * do widocznej treści.
      */
     parseCompletion(body: unknown, _req: ChatRequest, ctx: ProviderContext): OpenAiCompletion {
         const surowe = jakoObiekt(body) ?? {};
@@ -645,8 +645,8 @@ export class OllamaProvider implements ChatProvider {
             usage: zuzycieZOdpowiedzi(surowe) ?? {},
         };
 
-        // Ładunek z polem `error` oddaje błąd zamiast rzucać — pętla ma dostać kształt,
-        // na którym umie stanąć (BA-22).
+        // Ładunek z polem `error` oddaje błąd zamiast rzucać - pętla ma dostać kształt,
+        // na którym umie stanąć.
         if (surowe.error !== undefined && surowe.error !== null) {
             odpowiedz.error = normalizeError(surowe.error);
             return odpowiedz;
@@ -712,8 +712,8 @@ export class OllamaProvider implements ChatProvider {
             const nazwa = jakoTekst(wpis.name).trim();
             if (nazwa) model.name = nazwa;
 
-            // Demon sam mówi, czy model ma wieżę obrazową — ta metadana rozstrzyga
-            // pytanie o vision lepiej niż zgadywanie po nazwie (VC-02).
+            // Demon sam mówi, czy model ma wieżę obrazową - ta metadana rozstrzyga
+            // pytanie o vision lepiej niż zgadywanie po nazwie.
             const rodziny = jakoTablica(jakoObiekt(wpis.details)?.families)
                 .map(rodzina => jakoTekst(rodzina).toLowerCase());
             if (rodziny.some(rodzina => RODZINY_OBRAZOWE.has(rodzina))) model.multimodal = true;

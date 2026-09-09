@@ -1,10 +1,10 @@
 /**
- * AUD-testy-024: bramki dostarczenia wyniku suba mają test ZACHOWANIA, nie napisu.
+ * Bramki dostarczenia wyniku suba mają test ZACHOWANIA, nie napisu.
  *
- * Do tej naprawy trzy decyzje z `_deliverSubTaskResult` pilnował wyłącznie regex po tekście
- * `chat_streaming.ts` (`stopSemantics.test.ts`), więc mutacja typu
- * `if (this._drainSuppressed) { }` — czyli bramka bez skutku, ale z zachowanym napisem —
- * zostawiała cały pakiet zielony. Tutaj każda gałąź ma OBIE strony: raz przepuszcza,
+ * Regex po tekście `chat_streaming.ts` (`stopSemantics.test.ts`) sam nie wystarcza jako
+ * strażnik trzech decyzji z `_deliverSubTaskResult`: mutacja typu
+ * `if (this._drainSuppressed) { }` - czyli bramka bez skutku, ale z zachowanym napisem -
+ * zostawiałaby cały pakiet zielony. Tutaj każda gałąź ma OBIE strony: raz przepuszcza,
  * raz odmawia, z jawnym powodem.
  */
 import test from 'ava';
@@ -50,22 +50,22 @@ test('auto-tura już wstrzyknięta (_subTaskTurnPending) → odmowa, bo inaczej 
     t.deepEqual(evaluateSubTaskDelivery({ ...zielone, subTaskTurnPending: true }), { allowed: false, reason: 'turn_in_flight' });
 });
 
-// ── Bramka 4: Stop (AUD-security-115) ──────────────────────────────────────
+// ── Bramka 4: Stop ───────────────────────────────────────────────────────────
 
-test('po Stopie czat NIE startuje tury sam (AUD-security-115)', t => {
+test('po Stopie czat NIE startuje tury sam', t => {
     t.deepEqual(evaluateSubTaskDelivery({ ...zielone, drainSuppressed: true }), { allowed: false, reason: 'stopped' });
 });
 
-test('Stop wygrywa nawet gdy wszystko inne zielone — to nie jest ostatnia bramka po drodze', t => {
-    // Regresja, którą łapie ten test: przesunięcie bramki Stopu ZA sufit łańcucha (albo jej
-    // wycięcie „bo przecież jest w set_generating") — dostawcę woła też `SubTaskNotifier`
-    // wprost na `task:finished` i `_switchTab`, z pominięciem `set_generating`.
+test('Stop wygrywa nawet gdy wszystko inne zielone - to nie jest ostatnia bramka po drodze', t => {
+    // Bramka Stopu musi stać PRZED sufitem łańcucha, nie za nim: dostawcę woła też
+    // `SubTaskNotifier` wprost na `task:finished` i `_switchTab`, z pominięciem `set_generating`,
+    // więc „jest już pokryte w set_generating" nie jest wystarczającym powodem, by ją wyciąć.
     const d = evaluateSubTaskDelivery({ ...zielone, drainSuppressed: true, chainAllowed: true });
     t.false(d.allowed);
     t.is(d.reason, 'stopped');
 });
 
-// ── Bramka 5: sufit łańcucha auto-tur (werdykt Kuby 16.08) ─────────────────
+// ── Bramka 5: sufit łańcucha auto-tur ───────────────────────────────────────
 
 test('sufit łańcucha auto-tur osiągnięty → odmowa z powodem chain_limit (Notice dla usera)', t => {
     t.deepEqual(evaluateSubTaskDelivery({ ...zielone, chainAllowed: false }), { allowed: false, reason: 'chain_limit' });

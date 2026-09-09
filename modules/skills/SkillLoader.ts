@@ -4,17 +4,17 @@
  * Skills stored in .pkm-assistant/skills/{skill_name}/SKILL.md (standard agentskills.io)
  * with backward compat for skill.md (lowercase, v1 format).
  *
- * v2 (sesja 48): new format fields, saveSkill/deleteSkill, SKILL.md standard,
+ * v2: new format fields, saveSkill/deleteSkill, SKILL.md standard,
  *   pre-questions, icon, tags, model override, auto-invoke control.
  *
- * S27 D6: pole `allowed-tools` WYCIĘTE z całego łańcucha (parser + zapis + cache + startery).
+ * Pole `allowed-tools` jest WYCIĘTE z całego łańcucha (parser + zapis + cache + startery).
  *   Nigdy nie było egzekwowane — o narzędziach decyduje oś `disabled_tools` agenta
  *   (`ToolRegistry.filterByAgent`). Stare pliki usera z tym polem: parser je ignoruje, zero migracji.
  */
 import { slugify } from '../../core/index.js';
 import { t } from '../../core/i18n/index.js';
 import { log } from '../../core/utils/Logger.js';
-// S27 Z1: format pliku SKILL.md jest wspólny z magazynem szablonów (SkillTemplateStore),
+// Format pliku SKILL.md jest wspólny z magazynem szablonów (SkillTemplateStore),
 // żeby forma odlewnicza i odlew nie mogły się rozjechać.
 import { parseSkillMarkdown, serializeSkillFile } from './skillFrontmatter.js';
 import type { SkillData, SkillInput, VaultLike } from './types.js';
@@ -239,7 +239,7 @@ export class SkillLoader {
         const raw = await this.vault.adapter.read(skillFilePath);
         if (!raw?.trim()) return null;
 
-        // S27 Z1: parsowanie wspólne z magazynem szablonów. Slug bierzemy z nazwy folderu
+        // Parsowanie wspólne z magazynem szablonów. Slug bierzemy z nazwy folderu
         // (np. ".pkm-assistant/skills/wera-sesja" → "wera-sesja").
         const parsed = parseSkillMarkdown(raw, {
             slug: folderPath.split('/').pop(),
@@ -324,14 +324,14 @@ export class SkillLoader {
      * Save skill to disk (create or update).
      * Writes as SKILL.md (standard format).
      *
-     * AUD-code-review-049: w trybie edycji `skillData.slug` (identyfikator wpisu w cache,
+     * W trybie edycji `skillData.slug` (identyfikator wpisu w cache,
      * ustawiany przez wołacza z `existing.slug`) wygrywa nad `slugify(skillData.name)` —
      * dokładnie ten sam wzorzec co `deleteSkill` niżej. `_loadSkillFromFolder` bierze slug
      * ZAWSZE z nazwy folderu na dysku, więc dla skilla, którego `name:` we frontmatterze user
-     * poprawił ręcznie w vaulcie (bez zmiany folderu), `slugify(name)` daje INNY folder niż
-     * ten, z którego skill naprawdę został wczytany. Bez tej naprawy edycja takiego skilla
-     * zakładała DRUGI folder pod nowym slugiem i zostawiała oryginał osieroconym — user nie
-     * widział swojej zmiany, a w bibliotece stały dwie kopie.
+     * poprawił ręcznie w vaulcie (bez zmiany folderu), `slugify(name)` dawałby INNY folder niż
+     * ten, z którego skill naprawdę został wczytany. Bez tego priorytetu edycja takiego skilla
+     * zakładałaby DRUGI folder pod nowym slugiem i zostawiała oryginał osieroconym — user nie
+     * widziałby swojej zmiany, a w bibliotece stałyby dwie kopie.
      * @param {Object} skillData - skill object from SkillEditorModal
      * @returns {Promise<string>} File path
      */
@@ -342,7 +342,7 @@ export class SkillLoader {
         const folderPath = existing?.folderPath || `${SKILLS_PATH}/${slug}`;
         const filePath = `${folderPath}/SKILL.md`;
 
-        // S27 Z1: serializacja wspólna z magazynem szablonów (skillFrontmatter.js).
+        // Serializacja wspólna z magazynem szablonów (skillFrontmatter.js).
         const content = serializeSkillFile(skillData);
 
         // Ensure folders exist
@@ -378,7 +378,7 @@ export class SkillLoader {
             disableModelInvocation: skillData.disableModelInvocation === true,
             userInvocable: skillData.userInvocable !== false,
             preQuestions: skillData.preQuestions || null,
-            // S27 D3: ślad „z szablonu: X vN" przeżywa zapis (kopia go niesie, edycja nie gubi).
+            // Ślad „z szablonu: X vN" przeżywa zapis (kopia go niesie, edycja nie gubi).
             fromTemplate: skillData.fromTemplate || null,
             hasTemplate: false,
             hasReferences: false,
@@ -392,8 +392,8 @@ export class SkillLoader {
     /**
      * Delete skill from disk and cache.
      * Accepts display name OR slug — cache is keyed by slug, but UI passes
-     * the display name (smoke-04 finding 01: lookup by name alone silently
-     * returned false and the folder survived).
+     * the display name (lookup by name alone used to silently
+     * return false and leave the folder behind).
      * @param {string} skillName - display name or slug
      * @returns {Promise<boolean>} true only when the skill is actually gone
      */

@@ -1,5 +1,5 @@
 /**
- * `modules/models/ChatModel.ts` — model czatu: JEDYNY obiekt, jaki reszta pluginu trzyma
+ * `modules/models/ChatModel.ts` - model czatu: JEDYNY obiekt, jaki reszta pluginu trzyma
  * w ręku po stronie modeli.
  *
  * Dostawca tłumaczy kształty (żądanie → HTTP, ramki → zdarzenia). Model robi resztę:
@@ -8,19 +8,19 @@
  * po drugiej stronie nie został z wiszącą promisą.
  *
  * ODPOWIEDZIALNOŚCI (kontrakt, nie implementacja):
- *  • bramka równoległości platform lokalnych (B.3 SM-04..SM-06) + priorytet biletu (SM-05),
- *  • odroczone zwolnienie slotu przez statyczny seam `scheduleGateRelease` (SM-12/SM-13),
- *  • trzy wyjścia streamu (B.5 ST-04..ST-07): sentinel / domknięcie bez sentinela / błąd,
+ *  • bramka równoległości platform lokalnych + priorytet biletu,
+ *  • odroczone zwolnienie slotu przez statyczny seam `scheduleGateRelease`,
+ *  • trzy wyjścia streamu: sentinel / domknięcie bez sentinela / błąd,
  *  • polityka 429: backoff wykładniczy, `Retry-After`, sufit `STREAM_MAX_RETRIES`, budzik
- *    po Stopie (ST-12..ST-15) — transport tylko ujawnia `status` i `headers`,
- *  • tor `complete()` (SM-17) i emulacja streamu dla `streamMode === 'complete'` (XA-03),
- *  • semantyka Stopu (SM-07..SM-15): jednorazowy uchwyt odrzucenia, bezwarunkowe przerwanie
- *    transportu, `StreamAbortError` / `GateCancelledError`,
- *  • `listModels()` (ST-21/ST-22): brak sieci → PUSTA tablica, nigdy wyjątek.
+ *    po Stopie - transport tylko ujawnia `status` i `headers`,
+ *  • tor `complete()` i emulacja streamu dla `streamMode === 'complete'`,
+ *  • semantyka Stopu: jednorazowy uchwyt odrzucenia, bezwarunkowe przerwanie transportu,
+ *    `StreamAbortError` / `GateCancelledError`,
+ *  • `listModels()`: brak sieci → PUSTA tablica, nigdy wyjątek.
  *
  * CZEGO TU NIE MA: powiadomień. `deps.notices` jest przyjmowane dla zgodności zależności,
- * ale klaster świadomie nie pokazuje ani jednej notki (decyzja R8) — techniczny komunikat
- * przy każdej zmianie modelu to szum na ekranie usera.
+ * ale klaster świadomie nie pokazuje ani jednej notki - techniczny komunikat przy każdej
+ * zmianie modelu to szum na ekranie usera.
  */
 import { log } from '../../core/utils/Logger.js';
 import { hostWindow, maskSensitiveData, normalizeError, STREAM_TRANSPORT_TIMEOUT_MS } from '../../core/index.js';
@@ -49,14 +49,14 @@ import type {
     StreamTransport,
 } from './contracts.js';
 
-/** Etykieta modułu w logu — jedna, żeby dało się filtrować po niej cały klaster. */
+/** Etykieta modułu w logu - jedna, żeby dało się filtrować po niej wszystkie zdarzenia modelu. */
 const LOG_SCOPE = 'ChatModel';
 
-/** Widełki pojemności bramki platform lokalnych (B.3 SM-04). */
+/** Widełki pojemności bramki platform lokalnych. */
 const GATE_LIMIT_MIN = 1;
 const GATE_LIMIT_MAX = 10;
 
-/** Ile znaków porcji trafia do logu przy nieparsowalnej ramce — po masce sekretów. */
+/** Ile znaków porcji trafia do logu przy nieparsowalnej ramce - po masce sekretów. */
 const CHUNK_LOG_HEAD_CHARS = 200;
 
 /** Jak skończyła się JEDNA próba otwarcia strumienia. */
@@ -69,7 +69,7 @@ type TurnEnd =
     | { kind: 'done' }
     | { kind: 'error'; error: NormalizedError };
 
-/** Pusty, ale poprawny snapshot. `usage` jest PUSTYM obiektem — sygnał „estymuj" dla pętli. */
+/** Pusty, ale poprawny snapshot. `usage` jest PUSTYM obiektem - sygnał „estymuj" dla pętli. */
 function emptyCompletion(): OpenAiCompletion {
     return {
         choices: [{ index: 0, message: { role: 'assistant', content: '' } }],
@@ -80,7 +80,7 @@ function emptyCompletion(): OpenAiCompletion {
 /**
  * Płytka kopia snapshotu z rozdzielonymi zagnieżdżeniami, których dotyka akumulacja.
  * Potrzebna, bo `decoder.finish()` domyka rezerwę parsera myślenia i nie ma prawa zmutować
- * obiektu, który poszedł już do `handlers.chunk` (B.11 TT-11).
+ * obiektu, który poszedł już do `handlers.chunk`.
  */
 function cloneCompletion(src: OpenAiCompletion): OpenAiCompletion {
     const choice = src.choices[0];
@@ -114,10 +114,10 @@ function toolCallSlot(message: OpenAiCompletion['choices'][number]['message'], i
 /**
  * Nazwa narzędzia w slocie po dołożeniu kolejnego fragmentu.
  *
- * Nazwa AKUMULUJE SIĘ tak samo jak argumenty — nie nadpisuje. Powód jest jeden i konkretny:
+ * Nazwa AKUMULUJE SIĘ tak samo jak argumenty - nie nadpisuje. Powód jest jeden i konkretny:
  * DeepSeek Reasoner potrafi wypchnąć DWA wywołania na TYM SAMYM indeksie (`read` z własnymi
  * argumentami, zaraz po nim `list` z własnymi). Przy nadpisaniu zostaje jedno wywołanie
- * o nazwie DRUGIEGO i sklejonych argumentach obu — pierwsze narzędzie znika po cichu, a to,
+ * o nazwie DRUGIEGO i sklejonych argumentach obu - pierwsze narzędzie znika po cichu, a to,
  * które zostało, dostaje ciało `{…}{…}`. Przy sklejaniu powstaje `readlist` + `{…}{…}`,
  * czyli DOKŁADNIE kształt, który rozkleja kanon pętli
  * (`splitConcatenatedToolCalls` + `_decomposeToolName` w `modules/agent-loop`), i oba
@@ -125,7 +125,7 @@ function toolCallSlot(message: OpenAiCompletion['choices'][number]['message'], i
  * `10_sklejone_tool_calls`.
  *
  * ⚠️ Powtórzenie TEJ SAMEJ nazwy w kolejnej delcie (są serwery kształtu OpenAI, które wysyłają
- * ją przy każdej porcji) NIE dokleja się drugi raz — inaczej `read` + `read` dałoby `readread`.
+ * ją przy każdej porcji) NIE dokleja się drugi raz - inaczej `read` + `read` dałoby `readread`.
  */
 function mergeToolName(previous: unknown, incoming: string): string {
     const before = typeof previous === 'string' ? previous : '';
@@ -150,14 +150,14 @@ function applyEvents(snapshot: OpenAiCompletion, events: readonly StreamEvent[])
                 visible = true;
                 break;
             case 'reasoning':
-                // Pole POWSTAJE dopiero przy pierwszej delcie — brak myślenia to brak pola.
+                // Pole POWSTAJE dopiero przy pierwszej delcie - brak myślenia to brak pola.
                 message.reasoning_content = `${message.reasoning_content ?? ''}${event.delta}`;
                 visible = true;
                 break;
             case 'tool_call': {
                 const slot = toolCallSlot(message, event.index);
                 if (event.id !== undefined) slot.id = event.id;
-                // Nazwa AKUMULUJE SIĘ (patrz `mergeToolName`) — nadpisanie gubiło wywołanie,
+                // Nazwa AKUMULUJE SIĘ (patrz `mergeToolName`) - nadpisanie gubiło wywołanie,
                 // gdy dostawca wypchnął dwa narzędzia na tym samym indeksie.
                 if (event.name !== undefined) slot.function.name = mergeToolName(slot.function.name, event.name);
                 if (event.argumentsDelta !== undefined) {
@@ -199,8 +199,8 @@ function retryAfterMs(headers: Record<string, string> | undefined): number | nul
 /**
  * Błąd padu strumienia zbudowany PRZEZ NAS, nie z obiektu transportu.
  *
- * K20: gdy serwer nie odpisał ani bajta, do normalizacji nie wolno podać żądania ani
- * zdarzenia transportu — poszłyby tam nagłówki, a w nich klucz API. Stąd własne, krótkie
+ * Gdy serwer nie odpisał ani bajta, do normalizacji nie wolno podać żądania ani
+ * zdarzenia transportu - poszłyby tam nagłówki, a w nich klucz API. Stąd własne, krótkie
  * zdanie i zachowany `http_status`.
  */
 function bodilessStreamError(status: number): NormalizedError {
@@ -215,7 +215,7 @@ function errorFromBody(body: string, status: number): NormalizedError {
     try {
         return normalizeError(JSON.parse(raw), status > 0 ? status : null);
     } catch {
-        // Ciało, którego nie da się wyparsować, bywa stroną błędu proxy — a te potrafią
+        // Ciało, którego nie da się wyparsować, bywa stroną błędu proxy - a te potrafią
         // odbić NASZE nagłówki. Zdanie dostawcy przechodzi bez zmian, kształt sekretu nie.
         return normalizeError(maskSensitiveData(raw.slice(0, 500)), status > 0 ? status : null);
     }
@@ -224,7 +224,7 @@ function errorFromBody(body: string, status: number): NormalizedError {
 /**
  * Czy to jest już rozliczony błąd, którego NIE WOLNO przerabiać.
  *
- * Dwie rodziny: gotowy {@link NormalizedError} (goły obiekt — taki właśnie kształt widzi
+ * Dwie rodziny: gotowy {@link NormalizedError} (goły obiekt - taki właśnie kształt widzi
  * pętla) oraz znaczniki Stopu (`_aborted`) i anulowania w kolejce (`_queueCancelled`),
  * które niosą sens ponad treścią i po normalizacji przestałyby działać.
  */
@@ -248,7 +248,7 @@ function toConsumerError(e: unknown, fallback = 'Stream error (no response)'): N
 }
 
 export class ChatModel {
-    /** B.3 SM-18: tania nazwa modelu do logów/trace. */
+    /** Tania nazwa modelu do logów/trace. */
     readonly modelKey: string;
     /** Identyfikator modelu u dostawcy. */
     readonly modelId: string;
@@ -257,18 +257,18 @@ export class ChatModel {
     state: 'idle' | 'streaming' = 'idle';
 
     /**
-     * B.3 SM-05: priorytet biletu bramki. BRAK POLA = 1 („to główny czat").
+     * Priorytet biletu bramki. BRAK POLA = 1 („to główny czat").
      * `modules/tools/DelegateTool.ts` zbija ŚWIEŻEJ instancji suba `_gatePriority = 0`.
      */
     _gatePriority = 1;
 
     /**
-     * Seam testowy budzika okna backoffu 429 (ST-14). Istnieje tylko wtedy, gdy tura
+     * Seam testowy budzika okna backoffu 429. Istnieje tylko wtedy, gdy tura
      * faktycznie czeka na ponowienie.
      */
     _retryWake?: () => void;
 
-    /** B.3 SM-12: produkcyjny cooldown zwolnienia slotu — DOKŁADNIE 150 ms. */
+    /** Produkcyjny cooldown zwolnienia slotu - DOKŁADNIE 150 ms. */
     static GATE_RELEASE_COOLDOWN_MS = 150;
 
     private readonly _provider: ChatProvider;
@@ -279,8 +279,8 @@ export class ChatModel {
     private readonly _settings: ModelSettingsBag;
 
     /**
-     * B.3 SM-16: bilet bieżącej tury, ustawiany DOPIERO PO wejściu na slot. Pole jest
-     * obserwowane przez testy jako dowód, że stream faktycznie zajął slot — stąd nazwa
+     * Bilet bieżącej tury, ustawiany DOPIERO PO wejściu na slot. Pole jest
+     * obserwowane przez testy jako dowód, że stream faktycznie zajął slot - stąd nazwa
      * z podkreśleniem, mimo że w produkcji nikt go nie czyta.
      */
     private _gateTicket: GateTicket | null = null;
@@ -296,7 +296,7 @@ export class ChatModel {
      * Bilet toru BEZ strumienia. Osobne pole od {@link _gateTicket} i {@link _pendingTicket},
      * bo `complete()` bywa wołane na instancji, na której AKURAT BIEGNIE tura strumienia
      * (`ChatModel` nie jest concurrent-safe, ale nikt tego wołaczom nie zabrania).
-     * Wcześniej `complete()` zerowało `_gateTicket` biegnącej tury — a ta zwalnia slot
+     * Wcześniej `complete()` zerowało `_gateTicket` biegnącej tury - a ta zwalnia slot
      * właśnie przez to pole, więc na platformie lokalnej (pojemność 1) slot zostawał
      * zajęty na zawsze i kolejka stawała. Tor bez strumienia rozlicza dziś WYŁĄCZNIE
      * własny bilet i nie dotyka ani jednego pola cudzej tury.
@@ -304,7 +304,7 @@ export class ChatModel {
     private _completeTicket: GateTicket | null = null;
 
     private _abortController: AbortController | null = null;
-    /** JEDNORAZOWY uchwyt odrzucenia bieżącej tury — instalowany DOPIERO po wejściu na slot. */
+    /** JEDNORAZOWY uchwyt odrzucenia bieżącej tury - instalowany DOPIERO po wejściu na slot. */
     private _rejectTurn: ((err: unknown) => void) | null = null;
     private _turnSettled = true;
     private _admitted = false;
@@ -337,11 +337,11 @@ export class ChatModel {
     // ───────────────────────────────────────────────────────────────────────────
 
     /**
-     * Strumień. Rozstrzyga się na trzy sposoby (B.5 ST-04..ST-07):
-     * 1. sentinel platformy (zdarzenie `done` dekodera) — pełna treść, zero ostrzeżeń;
-     * 2. domknięcie transportu przy HTTP 200 BEZ sentinela — `stream.closed_without_sentinel`
+     * Strumień. Rozstrzyga się na trzy sposoby:
+     * 1. sentinel platformy (zdarzenie `done` dekodera) - pełna treść, zero ostrzeżeń;
+     * 2. domknięcie transportu przy HTTP 200 BEZ sentinela - `stream.closed_without_sentinel`
      *    + `handlers.done` + resolve tym, co przyszło; przy ZEROWEJ treści REJECT zdaniem;
-     * 3. błąd — `handlers.error` ORAZ odrzucenie promisy TYM SAMYM obiektem.
+     * 3. błąd - `handlers.error` ORAZ odrzucenie promisy TYM SAMYM obiektem.
      *
      * Sentinel przybyły RAZEM z domknięciem połączenia WYGRYWA: decyzja o „zamknięciu bez
      * sentinela" jest odroczona o jedno makrozadanie.
@@ -358,11 +358,11 @@ export class ChatModel {
         });
 
         // Instancja nie obsługuje dwóch tur naraz (stan tury żyje na polach). Gdy mimo to
-        // ktoś odpali drugą, poprzednia MUSI dostać rozstrzygnięcie — inaczej jej `await`
+        // ktoś odpali drugą, poprzednia MUSI dostać rozstrzygnięcie - inaczej jej `await`
         // nie wróciłby już nigdy. Lepszy jasny błąd niż wieczne wiszenie.
         this._supersedeRunningTurn();
 
-        // Stan tury zeruje się TU, a nie w `finally` poprzedniej — instancja bywa użyta
+        // Stan tury zeruje się TU, a nie w `finally` poprzedniej - instancja bywa użyta
         // ponownie, a `stopStream()` po zakończonej turze nadal ma prawo przerwać transport.
         this._turnSettled = false;
         this._admitted = false;
@@ -393,7 +393,7 @@ export class ChatModel {
 
         // Bilet bierzemy SYNCHRONICZNIE: `stopStream()` wywołany w tej samej turze pętli
         // zdarzeń musi mieć co anulować (bilet stojący w kolejce). Wybuch bramki (albo
-        // dostawcy przy liczeniu jej pojemności) NIE MOŻE wylecieć synchronicznie — pętla
+        // dostawcy przy liczeniu jej pojemności) NIE MOŻE wylecieć synchronicznie - pętla
         // łapie ten błąd wyłącznie na odrzuceniu promisy i na `handlers.error`.
         let ticket: GateTicket;
         try {
@@ -412,10 +412,10 @@ export class ChatModel {
     }
 
     /**
-     * Tor BEZ strumienia (B.3 SM-17). Idzie przez `deps.http`, czyta ciało jako JSON
+     * Tor BEZ strumienia. Idzie przez `deps.http`, czyta ciało jako JSON
      * i oddaje kształt kanoniczny. Błąd dostawcy jest NORMALIZOWANY, nie rzucany surowo.
      *
-     * Bramka obowiązuje tak samo jak w torze strumieniowym — inaczej most lokalny
+     * Bramka obowiązuje tak samo jak w torze strumieniowym - inaczej most lokalny
      * dostawałby żądania poza kolejką.
      */
     async complete(req: ChatRequest): Promise<OpenAiCompletion> {
@@ -430,7 +430,7 @@ export class ChatModel {
             return await this._completeOnce(req);
         } finally {
             if (this._completeTicket === ticket) this._completeTicket = null;
-            // Bilet, który nigdy nie wjechał na slot, nie ma czego zwalniać — jego drogą
+            // Bilet, który nigdy nie wjechał na slot, nie ma czego zwalniać - jego drogą
             // jest `cancel()`. Zwolnienie idzie z tym samym cooldownem co w torze strumienia.
             if (admitted) {
                 const cls = this._class();
@@ -442,17 +442,17 @@ export class ChatModel {
     }
 
     /**
-     * TWARDY Stop z zewnątrz (B.3 SM-07..SM-15).
+     * TWARDY Stop z zewnątrz.
      *
      * Kolejność jest kontraktem: najpierw budzimy okno backoffu 429 (po Stopie NIE wolno
      * polecieć kolejnemu, PŁATNEMU żądaniu), potem zwalniamy/anulujemy bilet bramki, potem
      * przerywamy transport, a na końcu zużywamy JEDNORAZOWY uchwyt odrzucenia. Odrzucenie
-     * idzie łańcuchem mikrozadań — synchroniczny budzik pętli ma dalej wygrywać swój wyścig.
+     * idzie łańcuchem mikrozadań - synchroniczny budzik pętli ma dalej wygrywać swój wyścig.
      */
     stopStream(): void {
         this._cancelled = true;
 
-        // 1. Okno backoffu — obudź, żeby pętla ponowień zobaczyła anulowanie.
+        // 1. Okno backoffu - obudź, żeby pętla ponowień zobaczyła anulowanie.
         const wake = this._retryWake;
         this._retryWake = undefined;
         if (wake) {
@@ -468,15 +468,15 @@ export class ChatModel {
 
         // 2b. Tor bez strumienia ma własny bilet. `cancel()` rusza WYŁĄCZNIE bilet czekający
         //     w kolejce (kontrakt bramki), więc żądanie już biegnące dokończy i zwolni slot
-        //     samo — Stop nie zabiera slotu spod wywołania, które wciąż leci po sieci.
+        //     samo - Stop nie zabiera slotu spod wywołania, które wciąż leci po sieci.
         if (this._completeTicket) {
             try { this._completeTicket.cancel(); } catch { /* bilet mógł już zejść */ }
         }
 
-        // 3. Przerwanie transportu jest BEZWARUNKOWE — także przy powtórnym Stopie.
+        // 3. Przerwanie transportu jest BEZWARUNKOWE - także przy powtórnym Stopie.
         this._signalAbort();
 
-        // 4. Uchwyt odrzucenia — jednorazowy. Pusty przy bilecie z kolejki: tamtą ścieżkę
+        // 4. Uchwyt odrzucenia - jednorazowy. Pusty przy bilecie z kolejki: tamtą ścieżkę
         //    rozstrzyga sam `stream()` błędem „anulowany w kolejce".
         const reject = this._rejectTurn;
         this._rejectTurn = null;
@@ -488,8 +488,8 @@ export class ChatModel {
     /**
      * Lista modeli dostawcy (dropdown Ustawień).
      *
-     * B.5 ST-21: brak sieci → PUSTA tablica, nigdy wyjątek. B.5 ST-22: wołanie bez `await`
-     * z UI nie może zostawić nieobsłużonego odrzucenia — dlatego cała treść siedzi w `try`.
+     * Brak sieci → PUSTA tablica, nigdy wyjątek. Wołanie bez `await` z UI nie może zostawić
+     * nieobsłużonego odrzucenia - dlatego cała treść siedzi w `try`.
      *
      * @param _refresh Zachowane dla wołaczy z UI; katalog i tak jest pobierany za każdym razem.
      */
@@ -504,7 +504,7 @@ export class ChatModel {
     }
 
     /**
-     * B.3 SM-06: pojemność bramki platformy tego modelu (0 = brak bramki/chmura).
+     * Pojemność bramki platformy tego modelu (0 = brak bramki/chmura).
      * Konsument: `DelegateTool._resolveTaskConcurrency`.
      */
     _streamGateLimit(): number {
@@ -516,7 +516,7 @@ export class ChatModel {
     }
 
     /**
-     * B.3 SM-13: seam odroczenia zwolnienia slotu. `ms` MUSI pochodzić ze stałej klasy
+     * Seam odroczenia zwolnienia slotu. `ms` MUSI pochodzić ze stałej klasy
      * (podklasa nadpisująca `GATE_RELEASE_COOLDOWN_MS` zmienia planowany odstęp), a dopóki
      * callback nie odpali, następny stream NIE dostaje slotu.
      */
@@ -526,7 +526,7 @@ export class ChatModel {
 
     /**
      * Seam odroczenia PONOWIENIA po 429. Dostaje kolejno `STREAM_RETRY_BASE_DELAY_MS`,
-     * ×2, ×4 — chyba że odpowiedź niosła `Retry-After`, który wygrywa nad backoffem.
+     * ×2, ×4 - chyba że odpowiedź niosła `Retry-After`, który wygrywa nad backoffem.
      */
     static scheduleRetry(fn: () => void, ms: number): void {
         hostWindow.setTimeout(fn, ms);
@@ -536,7 +536,7 @@ export class ChatModel {
     // Tura
     // ───────────────────────────────────────────────────────────────────────────
 
-    /** Klasa TEJ instancji — statyczne seamy i stałe czyta się przez nią, nie przez `ChatModel`. */
+    /** Klasa TEJ instancji - statyczne seamy i stałe czyta się przez nią, nie przez `ChatModel`. */
     private _class(): typeof ChatModel {
         return this.constructor as typeof ChatModel;
     }
@@ -551,14 +551,14 @@ export class ChatModel {
         return t(key, undefined, typeof language === 'string' ? language : undefined);
     }
 
-    /** Odrzucenie po Stopie użytkownika — instancja `Error` ze znacznikiem `_aborted`. */
+    /** Odrzucenie po Stopie użytkownika - instancja `Error` ze znacznikiem `_aborted`. */
     private _abortError(): StreamAbortError {
         const err = new Error(this._text('model.stream_aborted')) as StreamAbortError;
         err._aborted = true;
         return err;
     }
 
-    /** Odrzucenie biletu anulowanego W KOLEJCE — inna ścieżka niż Stop biegnącego streamu. */
+    /** Odrzucenie biletu anulowanego W KOLEJCE - inna ścieżka niż Stop biegnącego streamu. */
     private _gateCancelledError(): GateCancelledError {
         const err = new Error(`Request do platformy ${this._gateKey()} anulowany w kolejce.`) as GateCancelledError;
         err._queueCancelled = true;
@@ -570,7 +570,7 @@ export class ChatModel {
         if (!controller) return;
         if (controller.signal.aborted) {
             // Powtórny Stop: sygnał jest już zgaszony, ale przerwanie transportu ma być
-            // BEZWARUNKOWE — konsument sygnału musi zobaczyć każde wywołanie.
+            // BEZWARUNKOWE - konsument sygnału musi zobaczyć każde wywołanie.
             try { controller.signal.dispatchEvent(new Event('abort')); } catch { /* środowisko bez dispatchEvent */ }
             return;
         }
@@ -578,8 +578,8 @@ export class ChatModel {
     }
 
     /**
-     * Zwolnienie slotu jest ODROCZONE i wykonywane RAZ na turę (SM-12/SM-13).
-     * Bilet, który nigdy nie wjechał na slot, nie ma czego zwalniać — jego drogą jest
+     * Zwolnienie slotu jest ODROCZONE i wykonywane RAZ na turę.
+     * Bilet, który nigdy nie wjechał na slot, nie ma czego zwalniać - jego drogą jest
      * `cancel()`, nie `release()`.
      */
     private _releaseGateSlot(): void {
@@ -596,7 +596,7 @@ export class ChatModel {
      * Domyka turę, która jeszcze biegnie, gdy na TEJ SAMEJ instancji rusza następna.
      *
      * Stan tury (bilet, uchwyt odrzucenia, kontroler przerwania) żyje na polach, więc druga
-     * tura i tak by go nadpisała — bez tego pierwsza promisa nie miałaby już kto rozstrzygnąć
+     * tura i tak by go nadpisała - bez tego pierwsza promisa nie miałaby już kto rozstrzygnąć
      * i konsument wisiałby na `await` do końca świata. Rozliczamy więc starą turę uczciwie:
      * przerwanie transportu, zwolnienie/anulowanie biletu i odrzucenie ZDANIEM.
      *
@@ -605,7 +605,7 @@ export class ChatModel {
      *
      * Ścieżka jest bliźniacza do Stopu: ubijamy turę Z ZEWNĄTRZ, więc rozstrzygamy PROMISĘ,
      * a `handlers.error` starej tury zostawiamy w spokoju (tak samo jak `stopStream()`).
-     * Odrzucenie leci SYNCHRONICZNIE — mikrozadanie rozstrzygnęłoby starą turę już po tym,
+     * Odrzucenie leci SYNCHRONICZNIE - mikrozadanie rozstrzygnęłoby starą turę już po tym,
      * jak `stream()` zainstaluje stan nowej, i zabrałoby jej slot bramki.
      */
     private _supersedeRunningTurn(): void {
@@ -625,17 +625,17 @@ export class ChatModel {
 
         if (!reject) {
             // Tura stała jeszcze w kolejce bramki: uchwytu odrzucenia nie było, więc
-            // rozstrzygnie się sama — anulowanym biletem.
+            // rozstrzygnie się sama - anulowanym biletem.
             return;
         }
 
         const err = normalizeError('Poprzednia tura tego modelu została przerwana przez nowe żądanie na tej samej instancji.');
         log.debug(LOG_SCOPE, 'poprzednia tura przykryta nowym żądaniem', { provider: this.providerId });
-        // `reject` to `settleErr` STAREJ tury — sam ustawia `_turnSettled` i zdejmuje stan.
+        // `reject` to `settleErr` STAREJ tury - sam ustawia `_turnSettled` i zdejmuje stan.
         reject(err);
     }
 
-    /** Handler konsumenta nie ma prawa wywrócić tury — jego wyjątek to jego sprawa. */
+    /** Handler konsumenta nie ma prawa wywrócić tury - jego wyjątek to jego sprawa. */
     private _callHandler(fn: (() => void) | undefined): void {
         if (!fn) return;
         try { fn(); } catch (e) {
@@ -732,12 +732,12 @@ export class ChatModel {
     }
 
     /**
-     * Jedno wywołanie toru bez strumienia — bez bramki, bo bramkę trzyma wołacz.
+     * Jedno wywołanie toru bez strumienia - bez bramki, bo bramkę trzyma wołacz.
      *
-     * Z tej metody wychodzi WYŁĄCZNIE {@link NormalizedError} (B.3 SM-17): pad sieci,
+     * Z tej metody wychodzi WYŁĄCZNIE {@link NormalizedError}: pad sieci,
      * wybuch dostawcy przy składaniu żądania i nieczytelne ciało wyglądają dla konsumenta
      * tak samo jak błąd zwrócony przez API. Surowy `Error` z `fetch` bywa niesie adres,
-     * a w nim klucz — stąd maska na granicy.
+     * a w nim klucz - stąd maska na granicy.
      */
     private async _completeOnce(req: ChatRequest): Promise<OpenAiCompletion> {
         let spec: HttpRequestSpec;
@@ -798,7 +798,7 @@ export class ChatModel {
         }
     }
 
-    /** Okno backoffu z hakiem budzenia — po Stopie NIE leci kolejne, płatne żądanie. */
+    /** Okno backoffu z hakiem budzenia - po Stopie NIE leci kolejne, płatne żądanie. */
     private _waitBeforeRetry(ms: number): Promise<void> {
         return new Promise<void>(resolve => {
             let fired = false;
@@ -821,7 +821,7 @@ export class ChatModel {
     /**
      * JEDNA próba otwarcia strumienia.
      *
-     * Tura kończy się albo z sinka (sentinel / błąd w paśmie — transport może wtedy nadal
+     * Tura kończy się albo z sinka (sentinel / błąd w paśmie - transport może wtedy nadal
      * wisieć), albo ze zwrotki `open()`. Dlatego obie drogi są tu ścigane, a nie czekane
      * po kolei.
      */
@@ -857,7 +857,7 @@ export class ChatModel {
 
                 // Ostrzegamy WYŁĄCZNIE o porcji, której dekoder nie umiał przeczytać:
                 // rzucił albo zgłosił wyrzuconą ramkę. Sama pustka po `feed()` znaczy tyle,
-                // że ramka jeszcze nie dojechała ALBO nie niosła nic widocznego — u OpenAI
+                // że ramka jeszcze nie dojechała ALBO nie niosła nic widocznego - u OpenAI
                 // to pierwsza (`delta:{role}`) i przedostatnia (`finish_reason`) ramka tury,
                 // więc dawna heurystyka robiła 2 fałszywe alarmy na turę w logu usera.
                 if (threw || (decoder.droppedFrames ?? 0) > droppedBefore) {
@@ -886,7 +886,7 @@ export class ChatModel {
         const opened = this._transport.open(spec, sink, controller.signal).then(
             result => ({ kind: 'open' as const, result }),
             // `unknown`, nie domyślne `any`: transport może odrzucić czymkolwiek, a `toConsumerError`
-            // i tak przyjmuje wszystko — bez tej adnotacji `any` przeciekałby dalej po cichu.
+            // i tak przyjmuje wszystko - bez tej adnotacji `any` przeciekałby dalej po cichu.
             (error: unknown) => ({ kind: 'openError' as const, error }),
         );
 
@@ -919,7 +919,7 @@ export class ChatModel {
             return { kind: 'settled' };
         }
 
-        // Sentinel przybyły RAZEM z domknięciem ciała WYGRYWA — decyzję o trzecim wyjściu
+        // Sentinel przybyły RAZEM z domknięciem ciała WYGRYWA - decyzję o trzecim wyjściu
         // odraczamy o jedno makrozadanie, żeby ostatnia porcja zdążyła przejść przez dekoder.
         await new Promise<void>(resolve => { hostWindow.setTimeout(resolve, 0); });
 
@@ -934,7 +934,7 @@ export class ChatModel {
         return { kind: 'settled' };
     }
 
-    /** Zdarzenia domykające dekodera — rezerwa parsera myślenia nie ma prawa rzucić. */
+    /** Zdarzenia domykające dekodera - rezerwa parsera myślenia nie ma prawa rzucić. */
     private _finishDecoder(decoder: { finish(): StreamEvent[] }): StreamEvent[] {
         try {
             return decoder.finish() ?? [];
@@ -946,7 +946,7 @@ export class ChatModel {
 
     /**
      * Buduje FINALNĄ odpowiedź: kopia snapshotu + zdarzenia z `finish()`.
-     * Kopia jest obowiązkowa — `finish()` nie może zmutować obiektu, który poszedł już
+     * Kopia jest obowiązkowa - `finish()` nie może zmutować obiektu, który poszedł już
      * do `handlers.chunk`.
      */
     private _sealSnapshot(decoder: { finish(): StreamEvent[] }, snapshot: OpenAiCompletion): OpenAiCompletion {
@@ -1012,7 +1012,7 @@ export class ChatModel {
 }
 
 /**
- * Fabryka modelu z zależności — jedyna droga powstania {@link ChatModel}.
+ * Fabryka modelu z zależności - jedyna droga powstania {@link ChatModel}.
  *
  * @param deps Komplet zależności: dostawca, kontekst modelu, transport, bramka, ustawienia.
  */

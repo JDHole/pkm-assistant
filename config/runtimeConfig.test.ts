@@ -1,5 +1,5 @@
 /**
- * Strażnik składania `RuntimeConfig` (C-02/C-03 + spec §1.3).
+ * Strażnik składania `RuntimeConfig` (spec §1.3).
  *
  * Ten plik jest jedynym miejscem, w którym plugin decyduje, KTO gada z siecią i CZYM.
  * Trzy rzeczy muszą tu zostać na zawsze:
@@ -60,7 +60,7 @@ test('defaults: świeży worek na każde wywołanie, kontenery sekretów prowizj
     t.not(a, b);
     t.not(a.pkmAssistant?.chat?.apiKeys, b.pkmAssistant?.chat?.apiKeys);
 
-    // C5.4b: czterosegmentowa ścieżka sekretu nie dotwarza kontenerów przy hydratacji.
+    // czterosegmentowa ścieżka sekretu nie dotwarza kontenerów przy hydratacji.
     t.deepEqual(a.pkmAssistant?.chat?.apiKeys, {});
     t.deepEqual(a.pkmAssistant?.embedding?.apiKeys, {});
     t.is(a.pkmAssistant?.chat?.platform, '');

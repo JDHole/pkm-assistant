@@ -1,9 +1,9 @@
 /**
- * K5 (AUD-bledy-004/005/006/007/008/051/052) — strumień zna TRZY wyjścia.
+ * Strumień zna TRZY wyjścia.
  *
  * Model znał dotąd dwa: sentinel platformy (`data: [DONE]`, `message_stop`, `done_reason`)
  * i błąd transportu. Zamknięcie połączenia przy HTTP 200 BEZ sentinela nie miało jak
- * rozstrzygnąć promisy — a konsumenci, którzy rozstrzygają się WYŁĄCZNIE na `handlers.done`
+ * rozstrzygnąć promisy - a konsumenci, którzy rozstrzygają się WYŁĄCZNIE na `handlers.done`
  * (Summarizer, web/summarize), nie wracali nigdy, a slot bramki platform lokalnych zostawał
  * zajęty. Do tego trzy dziury obok: błąd zgłoszony W PAŚMIE ginął, zepsuta porcja SSE znikała
  * bez logu, a pętla retry 429 nie znała Stopu.
@@ -31,7 +31,7 @@ const REQ: ChatRequest = { messages: [{ role: 'user', content: 'czesc' }], max_t
 const delay = (ms: number) => new Promise<void>(res => setTimeout(res, ms));
 const WISI = Symbol('promisa nie rozstrzygnięta');
 
-/** Czeka na rozstrzygnięcie albo oddaje `WISI` — zamiast wieszać cały bieg testów. */
+/** Czeka na rozstrzygnięcie albo oddaje `WISI` - zamiast wieszać cały bieg testów. */
 async function settleOrHang(p: Promise<unknown>, ms = 2000): Promise<unknown> {
     return Promise.race([
         p.then(v => ({ ok: v }), e => ({ err: e })),
@@ -81,9 +81,9 @@ test.after.always(() => {
 });
 test.beforeEach(() => { gateTest.reset(); });
 
-// ── AUD-bledy-004: zamknięcie transportu bez sentinela ───────────────────────
+// ── Zamknięcie transportu bez sentinela ───────────────────────
 
-test.serial('004: transport domknięty bez sentinela oddaje to, co przyszło (resolve + handlers.done)', async t => {
+test.serial('transport domknięty bez sentinela oddaje to, co przyszło (resolve + handlers.done)', async t => {
     const { model, transport } = make();
     let doneResp: unknown = null;
     const p = model.stream(REQ, { done: (r) => { doneResp = r; } });
@@ -100,7 +100,7 @@ test.serial('004: transport domknięty bez sentinela oddaje to, co przyszło (re
     t.is(contentOf(doneResp), 'Ala ma kota.');
 });
 
-test.serial('004: zamknięcie bez sentinela i bez treści — odrzucenie z jasnym powodem', async t => {
+test.serial('zamknięcie bez sentinela i bez treści — odrzucenie z jasnym powodem', async t => {
     const { model, transport } = make();
     let handlerError: unknown = null;
     const p = model.stream(REQ, { error: (e) => { handlerError = e; } });
@@ -116,7 +116,7 @@ test.serial('004: zamknięcie bez sentinela i bez treści — odrzucenie z jasny
     t.truthy(handlerError, 'handlers.error też ma dostać powód');
 });
 
-test.serial('004: zamknięcie bez sentinela zwalnia slot bramki (następny stream wjeżdża)', async t => {
+test.serial('zamknięcie bez sentinela zwalnia slot bramki (następny stream wjeżdża)', async t => {
     class FastModel extends ChatModel { static override GATE_RELEASE_COOLDOWN_MS = 20; }
 
     const first = make(lmStudioProvider, 'lm_studio', FastModel);
@@ -135,7 +135,7 @@ test.serial('004: zamknięcie bez sentinela zwalnia slot bramki (następny strea
     await p2.catch(() => { /* sprzątanie */ });
 });
 
-test.serial('004: sentinel w OSTATNIEJ porcji wygrywa z zamknięciem transportu (zero skracania)', async t => {
+test.serial('sentinel w OSTATNIEJ porcji wygrywa z zamknięciem transportu (zero skracania)', async t => {
     const warns: string[] = [];
     const realWarn = log.warn;
     (log as unknown as { warn: unknown }).warn = (_mod: string, message: string) => { warns.push(message); };
@@ -144,7 +144,7 @@ test.serial('004: sentinel w OSTATNIEJ porcji wygrywa z zamknięciem transportu 
         const p = model.stream(REQ, {});
         await waitFor(() => transport.opens === 1);
         transport.push('data: {"choices":[{"delta":{"content":"pelna odpowiedz"}}]}\n\n');
-        // Sentinel dochodzi RAZEM z domknięciem połączenia — tak wygląda poprawny koniec streamu.
+        // Sentinel dochodzi RAZEM z domknięciem połączenia - tak wygląda poprawny koniec streamu.
         transport.push('data: [DONE]\n\n');
         transport.closeOk();
 
@@ -156,7 +156,7 @@ test.serial('004: sentinel w OSTATNIEJ porcji wygrywa z zamknięciem transportu 
     }
 });
 
-test.serial('004: własny sentinel platformy (Ollama `done_reason`) też wygrywa z zamknięciem', async t => {
+test.serial('własny sentinel platformy (Ollama `done_reason`) też wygrywa z zamknięciem', async t => {
     const warns: string[] = [];
     const realWarn = log.warn;
     (log as unknown as { warn: unknown }).warn = (_mod: string, message: string) => { warns.push(message); };
@@ -176,9 +176,9 @@ test.serial('004: własny sentinel platformy (Ollama `done_reason`) też wygrywa
     }
 });
 
-// ── AUD-bledy-006: błąd zgłoszony w paśmie ──────────────────────────────────
+// ── Błąd zgłoszony w paśmie ──────────────────────────────────
 
-test.serial('006: pole `error` w chunku przy HTTP 200 — handlers.error dostaje ZDANIE', async t => {
+test.serial('pole `error` w chunku przy HTTP 200 — handlers.error dostaje ZDANIE', async t => {
     const { model, transport } = make();
     let handlerError: unknown = null;
     const p = model.stream(REQ, { error: (e) => { handlerError = e; } });
@@ -195,9 +195,9 @@ test.serial('006: pole `error` w chunku przy HTTP 200 — handlers.error dostaje
     t.false(msg.startsWith('{"0"'), 'komunikat nie może być stringiem rozsypanym na znaki');
 });
 
-// ── AUD-bledy-008/052: niesparsowalna porcja SSE ────────────────────────────
+// ── Niesparsowalna porcja SSE ────────────────────────────
 
-test.serial('008/052: zepsuta porcja `data:` zostawia ślad w logu, a strumień jedzie dalej', async t => {
+test.serial('zepsuta porcja `data:` zostawia ślad w logu, a strumień jedzie dalej', async t => {
     const warns: Array<{ message: string; data: unknown[] }> = [];
     const realWarn = log.warn;
     (log as unknown as { warn: unknown }).warn = (_mod: string, message: string, ...data: unknown[]) => {
@@ -210,7 +210,7 @@ test.serial('008/052: zepsuta porcja `data:` zostawia ślad w logu, a strumień 
         await waitFor(() => transport.opens === 1);
         transport.push('data: {"choices":[{"delta":{"content":"Pierwsza czesc. "}}]}\n\n');
         // Urwana transmisja w środku linii: `data:` jest, JSON-a nie ma. W ciele siedzi coś,
-        // co wygląda jak klucz — log nie ma prawa go wypisać.
+        // co wygląda jak klucz - log nie ma prawa go wypisać.
         transport.push(`data: {"choices":[{"delta":{"content":"${SECRET}\n\n`);
         transport.push('data: {"choices":[{"delta":{"content":"Trzecia czesc."}}]}\n\n');
         transport.push('data: [DONE]\n\n');
@@ -229,7 +229,7 @@ test.serial('008/052: zepsuta porcja `data:` zostawia ślad w logu, a strumień 
     }
 });
 
-test.serial('008/052: POPRAWNA ramka bez zdarzeń NIE zostawia ostrzeżenia (koniec 2 fałszywych alarmów na turę)', async t => {
+test.serial('POPRAWNA ramka bez zdarzeń NIE zostawia ostrzeżenia (zero fałszywych alarmów na turę)', async t => {
     const warns: string[] = [];
     const realWarn = log.warn;
     (log as unknown as { warn: unknown }).warn = (_mod: string, message: string, ...data: unknown[]) => {
@@ -242,7 +242,7 @@ test.serial('008/052: POPRAWNA ramka bez zdarzeń NIE zostawia ostrzeżenia (kon
         const p = model.stream(REQ, {});
         await waitFor(() => transport.opens === 1);
         // Dokładnie tak wygląda normalna tura OpenAI: pierwsza ramka niesie samą rolę i pustą
-        // treść, przedostatnia — sam `finish_reason`. Obie są poprawnym JSON-em i obie
+        // treść, przedostatnia - sam `finish_reason`. Obie są poprawnym JSON-em i obie
         // wychodzą z dekodera bez ani jednego zdarzenia.
         transport.push('data: {"choices":[{"delta":{"role":"assistant","content":""}}]}\n\n');
         transport.push('data: {"choices":[{"delta":{"content":"Odpowiedz."}}]}\n\n');
@@ -262,9 +262,9 @@ test.serial('008/052: POPRAWNA ramka bez zdarzeń NIE zostawia ostrzeżenia (kon
     }
 });
 
-// ── AUD-bledy-005/051: Stop w oknie backoffu 429 ────────────────────────────
+// ── Stop w oknie backoffu 429 ────────────────────────────
 
-test.serial('005/051: Stop w oknie backoffu 429 — drugie żądanie NIE leci', async t => {
+test.serial('Stop w oknie backoffu 429 — drugie żądanie NIE leci', async t => {
     const { model, transport } = make();
     const p = model.stream(REQ, {});
 
@@ -281,20 +281,20 @@ test.serial('005/051: Stop w oknie backoffu 429 — drugie żądanie NIE leci', 
     t.true(Boolean((out as { err?: { _aborted?: boolean } })?.err?._aborted), 'znacznik przerwania (pętla mapuje go na stoppedBy:abort)');
 });
 
-// ── AUD-testy-012: polityka odporności strumienia (sufit ponowień, timeout transportu) ──────
+// ── Polityka odporności strumienia (sufit ponowień, timeout transportu) ──────
 //
 // `STREAM_MAX_RETRIES = 3` i `STREAM_RETRY_BASE_DELAY_MS = 1500` (kontrakt klastra) oraz twardy
-// `STREAM_TRANSPORT_TIMEOUT_MS` (H1 fix, „prevent indefinite hang", kontrakt `core/http`) nie
-// miały dotąd ANI pinu wartości, ANI testu zachowania — jedyny istniejący test pętli retry
-// (005/051 wyżej) sprawdza Stop w oknie backoffu, nie samą politykę. Test sufitu fast-forwarduje
-// okno backoffu przez `_retryWake` — TEN SAM hak, którego używa produkcyjny `stopStream()` do
-// budzenia backoffu — więc nie czeka realnie na sumę 1500+3000+6000 ms timerów.
+// `STREAM_TRANSPORT_TIMEOUT_MS` („prevent indefinite hang", kontrakt `core/http`) mają tu pin
+// wartości i test zachowania - test Stopu w oknie backoffu wyżej sprawdza tylko Stop, nie samą
+// politykę. Test sufitu fast-forwarduje okno backoffu przez `_retryWake` - TEN SAM hak, którego
+// używa produkcyjny `stopStream()` do budzenia backoffu - więc nie czeka realnie na sumę
+// 1500+3000+6000 ms timerów.
 //
 // ⚠️ Kształt wykładniczy backoffu (×2 na próbę) pinuje osobny plik: `ChatModel.retry.test.ts`
 // (seam `ChatModel.scheduleRetry`, zero realnego czekania). Sufit liczby prób jest przypięty
 // BEHAWIORALNIE tutaj (dokładnie 4 żądania).
 
-test.serial('012: sufit ponowień 429 — dokładnie MAX_RETRIES+1 prób, potem odrzucenie błędem 429 (nie kolejne żądanie)', async t => {
+test.serial('sufit ponowień 429 — dokładnie MAX_RETRIES+1 prób, potem odrzucenie błędem 429 (nie kolejne żądanie)', async t => {
     const { model, transport } = make();
     const wakeable = model as ChatModel & { _retryWake?: (() => void) | null };
     const p = model.stream(REQ, {});
@@ -304,7 +304,7 @@ test.serial('012: sufit ponowień 429 — dokładnie MAX_RETRIES+1 prób, potem 
         await waitFor(() => transport.opens === round + 1);
         transport.fail(429, JSON.stringify({ error: { message: 'Rate limit reached', type: 'rate_limit_exceeded' } }));
         if (round < 3) {
-            // Ostatnia (4.) runda NIE otwiera nowego okna backoffu — sufit ma się tu zatrzymać.
+            // Ostatnia (4.) runda NIE otwiera nowego okna backoffu - sufit ma się tu zatrzymać.
             await waitFor(() => Boolean(wakeable._retryWake));
             wakeable._retryWake!();
         }
@@ -318,7 +318,7 @@ test.serial('012: sufit ponowień 429 — dokładnie MAX_RETRIES+1 prób, potem 
     t.is(err!.http_status, 429);
 });
 
-test.serial('012: PIN — transport dostaje twardy timeout DOKŁADNIE 600000ms (H1 fix: "prevent indefinite hang")', async t => {
+test.serial('PIN — transport dostaje twardy timeout DOKŁADNIE 600000ms ("prevent indefinite hang")', async t => {
     const { model, transport } = make();
     const p = model.stream(REQ, {});
     await waitFor(() => transport.lastSpec !== null);
@@ -332,9 +332,9 @@ test.serial('012: PIN — transport dostaje twardy timeout DOKŁADNIE 600000ms (
     await settleOrHang(p);
 });
 
-// ── AUD-bledy-007: katalog modeli bez sieci ─────────────────────────────────
+// ── Katalog modeli bez sieci ─────────────────────────────────
 
-test.serial('007: brak sieci przy katalogu modeli — listModels oddaje pustą listę zamiast TypeError', async t => {
+test.serial('brak sieci przy katalogu modeli — listModels oddaje pustą listę zamiast TypeError', async t => {
     const { model, http } = make();
     http.throwOn(new Error('net down'));
 
@@ -344,7 +344,7 @@ test.serial('007: brak sieci przy katalogu modeli — listModels oddaje pustą l
     t.deepEqual((models as { ok?: unknown })?.ok, [], 'pusta LISTA, nie wyjątek i nie mapa');
 });
 
-test.serial('007: fire-and-forget listModels() ma właściciela odrzucenia (zero unhandled rejection)', async t => {
+test.serial('fire-and-forget listModels() ma właściciela odrzucenia (zero unhandled rejection)', async t => {
     const { model, http } = make();
     http.throwOn(new Error('net down'));
 
@@ -361,9 +361,9 @@ test.serial('007: fire-and-forget listModels() ma właściciela odrzucenia (zero
 });
 
 /**
- * N06 (spec §5 „abort w środku ramki", B.3 SM-07): Stop w POŁOWIE ramki nie może wypuścić
- * połowicznej treści do konsumenta. ⚠️ To inny test niż transportowy odpowiednik w
- * `core/http/streamTransport.test.ts`: tam sprawdzamy, że transport przestaje czytać —
+ * Stop w POŁOWIE ramki nie może wypuścić połowicznej treści do konsumenta.
+ * ⚠️ To inny test niż transportowy odpowiednik w
+ * `core/http/streamTransport.test.ts`: tam sprawdzamy, że transport przestaje czytać -
  * tu, że MODEL rozstrzyga promisę i nie oddaje śmiecia.
  */
 test.serial('abort w ŚRODKU ramki nie oddaje połowicznej treści', async t => {
@@ -388,8 +388,8 @@ test.serial('abort w ŚRODKU ramki nie oddaje połowicznej treści', async t => 
 });
 
 /**
- * N42 (B.5, harness `errorTurn`): 429 jest retryowalne, 500 nie — twardy błąd HTTP przed
- * ciałem kończy turę od razu, bez ani jednego ponowienia.
+ * 429 jest retryowalne, 500 nie - twardy błąd HTTP przed ciałem kończy turę od razu,
+ * bez ani jednego ponowienia.
  */
 test.serial('HTTP 500 przed ciałem: handlers.error + reject, zero prób ponowienia', async t => {
     const { model, transport } = make();
@@ -406,10 +406,10 @@ test.serial('HTTP 500 przed ciałem: handlers.error + reject, zero prób ponowie
     t.is((out as { err?: { http_status?: number } })?.err?.http_status, 500);
 });
 
-// ── F10 (mutacje): zachowania, które dotąd nie miały strażnika ───────────────
+// ── Zachowania, które dotąd nie miały strażnika ───────────────
 //
-// Poniższe testy powstały z biegu mutacyjnego na `ChatModel.ts`: każdy pinuje zachowanie,
-// którego zmiana przechodziła cały pakiet bez ani jednej czerwonej lampki.
+// Każdy z poniższych testów pinuje zachowanie, którego zmiana przechodziłaby cały pakiet
+// bez ani jednej czerwonej lampki.
 
 test.serial('ramka z SAMYM rozliczeniem tokenów nie odmalowuje bańki (chunk leci tylko za widoczną treścią)', async t => {
     const { model, transport } = make();
@@ -462,7 +462,7 @@ test.serial('sentinel przeczytany PO domknięciu ciała kończy turę sukcesem �
 
 test.serial('Stop w handlerze gate_admitted nie wypuszcza ANI JEDNEGO żądania', async t => {
     // User klika Stop w tej samej milisekundzie, w której bramka wpuszcza turę na slot.
-    // Żądanie jest PŁATNE, więc po Stopie nie ma prawa polecieć — nawet to pierwsze.
+    // Żądanie jest PŁATNE, więc po Stopie nie ma prawa polecieć - nawet to pierwsze.
     const { model, transport } = make();
     const p = model.stream(REQ, { gate_admitted: () => { model.stopStream(); } });
 

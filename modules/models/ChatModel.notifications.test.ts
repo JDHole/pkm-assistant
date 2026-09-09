@@ -1,6 +1,6 @@
 /**
- * CC §5 X-2 / §6 Y-6 (decyzja R8): `notices` jest OPCJONALNĄ zależnością `ChatModel`,
- * ale klaster NIE POKAZUJE żadnej notki — ani przy budowie modelu, ani przy starcie streamu.
+ * `notices` jest OPCJONALNĄ zależnością `ChatModel`, ale klaster NIE POKAZUJE żadnej notki -
+ * ani przy budowie modelu, ani przy starcie streamu.
  *
  * Powód decyzji: dawna notka „Loaded model: …" miała ZERO testów, a techniczny komunikat przy
  * każdej zmianie modelu to szum na ekranie usera. Odnotowane jako świadome odstępstwo.
@@ -23,7 +23,7 @@ function spyNotices(): NoticeLike & { shown: string[] } {
     };
 }
 
-test('CC X-2: ChatModel NIE pokazuje powiadomienia przy budowie ani przy starcie streamu', async t => {
+test('ChatModel NIE pokazuje powiadomienia przy budowie ani przy starcie streamu', async t => {
     const notices = spyNotices();
     const transport = new ScriptedTransport();
     const model = createChatModel({
@@ -47,5 +47,5 @@ test('CC X-2: ChatModel NIE pokazuje powiadomienia przy budowie ani przy starcie
     transport.closeOk();
     await p;
 
-    t.deepEqual(notices.shown, [], 'koniec tury również milczy — notka o modelu to szum (R8)');
+    t.deepEqual(notices.shown, [], 'koniec tury również milczy — notka o modelu to szum');
 });

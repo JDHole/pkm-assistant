@@ -1,17 +1,17 @@
 /**
- * KomunikatorTools — trzy prymitywy poczty agenta (S28 D3).
+ * KomunikatorTools — trzy prymitywy poczty agenta.
  *
  *   kom_send(to, subject, content)  YELLOW  — wyślij JEDNĄ wiadomość do JEDNEGO adresata
  *   kom_list()                      GREEN   — nagłówki własnej skrzynki
  *   kom_read(id)                    GREEN   — treść jednej wiadomości + auto-ptaszek `ai_read`
  *
  * CREATE-ONLY: agent NIE MA narzędzia kasowania poczty. Sprzątanie robi user (modal
- * z podglądem po drugim ptaszku + guzik hurtowy w sidebarze) — decyzja D5.
+ * z podglądem po drugim ptaszku + guzik hurtowy w sidebarze).
  *
  * Tożsamość nadawcy/właściciela skrzynki bierzemy z `args._invocationAgentName`, które
- * wstrzykuje `MCPClient` — model NIE może jej podrobić parametrem (wzór A1-A4).
+ * wstrzykuje `MCPClient` — model NIE może jej podrobić parametrem.
  *
- * Widoczność (D6) czytamy przez `agentManager` (`listKomunikatorAgents` /
+ * Widoczność czytamy przez `agentManager` (`listKomunikatorAgents` /
  * `findKomunikatorAgent` / `isKomunikatorVisible`), a nie importem — tak jak dawny
  * `AgentMessageTool`. Dzięki temu narzędzia nie wciągają obsidian-owego barrela
  * komunikatora i zostają node-testowalne, a filtr ducha ma JEDNO źródło prawdy
@@ -23,7 +23,7 @@ import { getLimits } from '../../config/limits.js';
 const SERVER_NAME = 'komunikator';
 
 /**
- * S33 B2 — na którym odbiciu przerywamy łańcuch agent→agent. Trzymamy stałą lokalnie
+ * Na którym odbiciu przerywamy łańcuch agent→agent. Trzymamy stałą lokalnie
  * (a nie importem z `modules/komunikator/`), żeby `modules/tools/` nie wciągało
  * obsidian-owego barrela komunikatora — dokładnie z tego samego powodu, dla którego
  * widoczność czytamy przez `agentManager`. Manager eksportuje tę samą wartość jako
@@ -32,8 +32,8 @@ const SERVER_NAME = 'komunikator';
 const HOP_LIMIT = 3;
 
 /**
- * AUD-wydajnosc-020/053 — twardy sufit wyników `kom_list` (skrzynka nie ma ewikcji, rośnie
- * bez ograniczenia — D5/D9 w `modules/komunikator/CLAUDE.md`). Wzór: `MAX_RESULTS` w
+ * Twardy sufit wyników `kom_list` (skrzynka nie ma ewikcji, rośnie
+ * bez ograniczenia — patrz `modules/komunikator/CLAUDE.md`). Wzór: `MAX_RESULTS` w
  * `ListTool.ts`. Newest-first z `listMessages` sprawia, że obcięcie zawsze zostawia
  * najświeższe wiadomości.
  */
@@ -71,18 +71,18 @@ interface KomMessage {
 
 /** Manager poczty (`modules/komunikator`) w zakresie, jakiego używają te narzędzia. */
 interface KomunikatorManagerLike {
-    /** K6: hop liczony ze stanu ODCZYTANEGO w chwili wysyłki (fail-closed przy braku danych). */
+    /** Hop liczony ze stanu ODCZYTANEGO w chwili wysyłki (fail-closed przy braku danych). */
     resolveHopFor(agentName: string): Promise<number>;
-    /** K6: łańcuch poczty jednego agenta — `kom_send` i `kom_read` tej samej tury po kolei. */
+    /** Łańcuch poczty jednego agenta — `kom_send` i `kom_read` tej samej tury po kolei. */
     withAgentLock<T>(agentName: string, fn: () => Promise<T>): Promise<T>;
     /**
-     * K6: ATOMOWA rezerwacja slotu rate-limitu (sprawdzenie + inkrement bez `await` w środku).
-     * K12: DWA sufity na to samo okno — `max` per para nadawca→adresat, `senderMax` per nadawca
+     * ATOMOWA rezerwacja slotu rate-limitu (sprawdzenie + inkrement bez `await` w środku).
+     * DWA sufity na to samo okno — `max` per para nadawca→adresat, `senderMax` per nadawca
      * niezależnie od adresata. `reason` mówi, który odmówił.
      */
     reserveSend(from: string, to: string, max: number, senderMax: number):
         { allowed: boolean; limit: number; senderLimit: number; reason?: 'pair' | 'sender' };
-    /** K6: zwrot slotu, gdy zapis pliku padł. */
+    /** Zwrot slotu, gdy zapis pliku padł. */
     releaseSend(from: string, to: string): void;
     sendMessage(from: string, to: string, subject: string, content: string, opts?: { hop?: number }):
         Promise<{ success?: boolean; error?: string; id?: string } | undefined>;
@@ -91,7 +91,7 @@ interface KomunikatorManagerLike {
         Promise<{ success?: boolean; error?: string; message: KomMessage } | undefined>;
 }
 
-/** Minimalny widok AgentManagera — widoczność czytamy przez niego, nie importem (D6). */
+/** Minimalny widok AgentManagera — widoczność czytamy przez niego, nie importem. */
 interface KomAgentManager {
     komunikatorManager?: KomunikatorManagerLike | null;
     getActiveAgent?(): { name?: string } | null | undefined;
@@ -103,7 +103,7 @@ interface KomAgentManager {
 }
 
 /**
- * Rejestr narzędzi w zakresie, którego potrzebuje bramka poczty (K17). Duck-typowany, nie
+ * Rejestr narzędzi w zakresie, którego potrzebuje bramka poczty. Duck-typowany, nie
  * importowany: `modules/tools/KomunikatorTools` ma zostać node-testowalny i nie wciągać
  * rejestru tylko po to, żeby zapytać go o jedną regułę.
  */
@@ -114,7 +114,7 @@ interface KomToolRegistryLike {
 /** Minimalny widok pluginu: `agentManager` + rejestr (oś poczty) + ustawienia (limit wysyłek). */
 export interface KomPlugin {
     agentManager?: KomAgentManager | null;
-    /** K17: `ToolRegistry` — bramka poczty pyta go o oś `kom_send` WOŁAJĄCEGO. */
+    /** `ToolRegistry` — bramka poczty pyta go o oś `kom_send` WOŁAJĄCEGO. */
     toolRegistry?: KomToolRegistryLike | null;
     env?: { settings?: { pkmAssistant?: { limits?: Record<string, unknown> } } } | null;
 }
@@ -146,7 +146,7 @@ function resolveCaller(args: KomunikatorArgs | undefined, plugin: KomPlugin | nu
     if (!meName) return { error: t('mcp.kom.no_identity') } as CallerContext;
 
     const me = agentManager.getAgent?.(meName) || null;
-    // Duch w OBIE strony (D6): niewidzialny agent nie wysyła i nie odbiera. Ten komunikat
+    // Duch w OBIE strony: niewidzialny agent nie wysyła i nie odbiera. Ten komunikat
     // widzi wyłącznie ON SAM — o cudzej niewidzialności nikt się stąd nie dowie.
     if (me && agentManager.isKomunikatorVisible?.(me) === false) return { error: t('mcp.kom.self_disabled') } as CallerContext;
 
@@ -154,7 +154,7 @@ function resolveCaller(args: KomunikatorArgs | undefined, plugin: KomPlugin | nu
 }
 
 /**
- * M (AUD-security-111): JEDNO miejsce, które sprowadza adresata do KANONU.
+ * JEDNO miejsce, które sprowadza adresata do KANONU.
  *
  * `kom_send` toleruje cztery nazwy tego samego pola (`to`/`to_agent`/`agent`/`target`), bo model
  * bywa kreatywny. Bramka w `MCPClient` czytała tylko dwie i wpadała na literał `'agent'`, więc
@@ -166,12 +166,12 @@ function resolveCaller(args: KomunikatorArgs | undefined, plugin: KomPlugin | nu
  * Kanonem jest NAZWA Z REJESTRU, gdy adresat jest rozpoznawalny (`sonny` → `Sonny`) — inaczej
  * modal i reguła rozjeżdżałyby się z rzeczywistością na samej wielkości liter. Nierozpoznany
  * adresat zostaje DOSŁOWNY (wysyłka i tak odbije się o `unknown_recipient`), bo cel od wołacza
- * nigdy nie ma prawa zamienić się w wieloznacznik (K22).
+ * nigdy nie ma prawa zamienić się w wieloznacznik.
  *
- * Wzór to K1: bramka i zlew oglądają jeden ciąg. Powtórne rozwiązanie w `sendAgentMail` jest
+ * Wzór: bramka i zlew oglądają jeden ciąg. Powtórne rozwiązanie w `sendAgentMail` jest
  * idempotentne — nazwa z rejestru rozwiązuje się do samej siebie.
  *
- * AUD-dead-code-021/166: `export` zdjęty — zero konsumentów poza tym plikiem (wołają go
+ * `export` zdjęty — zero konsumentów poza tym plikiem (wołają go
  * WYŁĄCZNIE `contextExtractor` i `execute` narzędzia `kom_send` niżej, u siebie).
  */
 function resolveKomSendTarget(
@@ -205,13 +205,13 @@ interface AgentMailResult {
 }
 
 /**
- * JEDYNA droga, którą poczta agenta trafia do cudzej skrzynki (K6, AUD-security-006/013).
+ * JEDYNA droga, którą poczta agenta trafia do cudzej skrzynki.
  *
  * `agent_delegate` pisał do skrzynki WPROST przez `KomunikatorManager.sendMessage`, omijając
  * komplet bramek, które mieszkały w `kom_send`: filtr ducha po stronie nadawcy, rate-limit i
  * licznik odbić. Teraz obie drogi wchodzą tutaj, więc bramka jest jedna.
  *
- * Kolejność kontroli (celowa, S28 D6 + S33 Z2 + K17):
+ * Kolejność kontroli (celowa):
  *   tożsamość → widoczność NADAWCY → OŚ POCZTY NADAWCY → widoczność ADRESATA → self →
  *   hop → rate-limit → zapis.
  * Widoczność adresata idzie PRZED limitami, żeby odmowa nigdy nie zdradziła, że jakiś duch
@@ -228,19 +228,19 @@ export async function sendAgentMail(
     const ctx = resolveCaller({ _invocationAgentName: req.from }, plugin);
     if (ctx.error) return { success: false, error: ctx.error };
 
-    // ── K17 (AUD-security-110): OŚ POCZTY WOŁAJĄCEGO, nie nazwa narzędzia ──
-    // Oś narzędziowa (K3) zapada w `MCPClient` na nazwie WYWOŁANEGO narzędzia. `agent_delegate`
+    // ── OŚ POCZTY WOŁAJĄCEGO, nie nazwa narzędzia ──
+    // Oś narzędziowa zapada w `MCPClient` na nazwie WYWOŁANEGO narzędzia. `agent_delegate`
     // nazywa się `agent_delegate` (grupa `delegation`), a robi to samo, co `kom_send` (grupa
     // `komunikator`): zostawia tekst modelu w cudzej skrzynce. Agent z włączoną delegacją i
     // wyłączoną pocztą — czyli domyślny stan świeżego profilu po włączeniu jednej grupy —
     // pisał więc do skrzynki mimo że user mu poczty nie dał.
     //
-    // Pytamy TUTAJ, w chokepoincie, bo to jedyna droga do skrzynki (K6): reguła obowiązuje
+    // Pytamy TUTAJ, w chokepoincie, bo to jedyna droga do skrzynki: reguła obowiązuje
     // każdego wołacza, także tego dopisanego jutro. Tożsamość bierzemy z runtime'u
     // (`ctx.meName`/`ctx.me`, czyli `_invocationAgentName`), nigdy z pola podanego przez model.
     //
     // Brak rejestru albo nieznany managerowi agent = nie ma czego liczyć, więc przechodzimy —
-    // dokładnie ten sam kontrakt, co bramka K3 w `MCPClient` (tam też `if (agent && ...)`).
+    // dokładnie ten sam kontrakt, co bramka w `MCPClient` (tam też `if (agent && ...)`).
     // W produkcji rejestr jest zawsze (`main.ts` stawia go przed rejestracją narzędzi).
     const axis = plugin?.toolRegistry?.checkToolAxis?.(ctx.me, 'kom_send');
     if (axis && !axis.allowed) {
@@ -251,7 +251,7 @@ export async function sendAgentMail(
     const wanted = String(req.to || '');
     const recipient = ctx.agentManager.findKomunikatorAgent(wanted);
     if (!recipient) {
-        // Nieznana nazwa i agent-duch dają DOKŁADNIE ten sam błąd (D6).
+        // Nieznana nazwa i agent-duch dają DOKŁADNIE ten sam błąd.
         const available = ctx.agentManager.listKomunikatorAgents().map(a => a.name).join(', ');
         return { success: false, error: t('mcp.kom_send.unknown_recipient', { name: wanted, available }) };
     }
@@ -260,7 +260,7 @@ export async function sendAgentMail(
     }
 
     return ctx.komunikator.withAgentLock(ctx.meName, async (): Promise<AgentMailResult> => {
-        // ── S33 B2 + K6: licznik odbić ──
+        // ── Licznik odbić ──
         // Wiadomość wychodząca dziedziczy „piętro" po najświeższej przeczytanej
         // (`maxHopPrzeczytanych + 1`); rozmowa z userem startuje od 0. Przy trzecim
         // odbiciu przerywamy — dwa boty odpisujące sobie w kółko to nie współpraca.
@@ -269,10 +269,10 @@ export async function sendAgentMail(
             return { success: false, error: t('mcp.kom_send.hop_limit', { limit: HOP_LIMIT }) };
         }
 
-        // ── S33 B1 + K6: rate-limit ──
+        // ── Rate-limit ──
         // Rezerwacja jest ATOMOWA (sprawdzenie + inkrement bez `await`), więc dziesięć
         // równoległych wywołań przy limicie 5 dostaje 5 przepustek, nie dziesięć.
-        // K12: drugi sufit — per NADAWCA, bez względu na adresata. Sam limit pary nie domykał
+        // Drugi sufit — per NADAWCA, bez względu na adresata. Sam limit pary nie domykał
         // sprawy: zepsuty agent rozsyłał `kom_send_rate_max` × liczba adresatów, mieszcząc się
         // w każdej parze z osobna. Komunikat odmowy mówi PRAWDĘ o tym, który sufit puścił —
         // „napisz do kogoś innego" byłoby złą radą, gdy wyczerpany jest sufit nadawcy.
@@ -325,11 +325,11 @@ export function createKomunikatorTools() {
                 required: ['to', 'subject', 'content'],
             },
             /**
-             * M (AUD-security-111): cel dla bramki liczymy U SIEBIE, tą samą funkcją co wykonanie.
+             * Cel dla bramki liczymy U SIEBIE, tą samą funkcją co wykonanie.
              * `MCPClient` woli `contextExtractor` od swojego switcha, więc adresat, którego user
              * widzi w oknie zgody (i który wchodzi do reguły „Zawsze zezwalaj"), jest dokładnie
              * tym, do kogo pójdzie list. Tożsamość NADAWCY zostaje po stronie `execute` —
-             * `contextExtractor` jej nie dotyka (K21: nazwy z worka się nie czyta).
+             * `contextExtractor` jej nie dotyka (nazwy z worka się nie czyta).
              */
             contextExtractor: (args: KomunikatorArgs, ctx: { plugin?: KomPlugin | null }) => ({
                 targetPath: resolveKomSendTarget(args, ctx?.plugin?.agentManager),
@@ -340,7 +340,7 @@ export function createKomunikatorTools() {
             }),
             execute: async (args: KomunikatorArgs, _app: unknown, plugin: KomPlugin | null | undefined) => {
                 // Cała treść bramek siedzi w `sendAgentMail` — TA SAMA droga, którą chodzi
-                // teraz `agent_delegate` (K6, AUD-security-006).
+                // teraz `agent_delegate`.
                 const res = await sendAgentMail(plugin, {
                     from: (args?._invocationAgentName as string) || '',
                     to: resolveKomSendTarget(args, plugin?.agentManager),
@@ -366,9 +366,9 @@ export function createKomunikatorTools() {
                 if (ctx.error) return { success: false, error: ctx.error };
 
                 const messages = await ctx.komunikator.listMessages(ctx.meName);
-                // AUD-wydajnosc-020/053: bez sufitu `kom_list` zwracał KOMPLET nagłówków
-                // skrzynki modelowi — koszt tokenów tury rósł liniowo ze skrzynką, która
-                // nie ma automatycznej ewikcji (sprzątanie jest pół-automatem, D5). Newest-first
+                // Bez sufitu `kom_list` zwracałby KOMPLET nagłówków skrzynki modelowi — koszt
+                // tokenów tury rósłby liniowo ze skrzynką, która nie ma automatycznej ewikcji
+                // (sprzątanie jest pół-automatem). Newest-first
                 // już zapewnia `listMessages` (sortowanie po id), więc `slice` bierze zawsze
                 // najświeższe. `unread` liczy się z CAŁEJ skrzynki (info niezależna od obcięcia
                 // widoku), `count`/`messages` tylko z widoku — tak jak przed cięciem dla skrzynek
@@ -406,7 +406,7 @@ export function createKomunikatorTools() {
                 const ctx = resolveCaller(args, plugin);
                 if (ctx.error) return { success: false, error: ctx.error };
 
-                // K6 (AUD-security-046): odczyt idzie po TYM SAMYM łańcuchu co wysyłka, więc
+                // Odczyt idzie po TYM SAMYM łańcuchu co wysyłka, więc
                 // `kom_send` z tej samej tury widzi już odnotowany licznik odbić.
                 const res = await ctx.komunikator.withAgentLock(
                     ctx.meName, () => ctx.komunikator.readMessage(ctx.meName, args.id),

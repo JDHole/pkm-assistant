@@ -1,8 +1,7 @@
 import { fenceUntrusted, countTokensFromStats, countNonAsciiChars } from '../../../core/index.js';
 import { Summarizer } from './Summarizer.js';
 import { t } from '../../../core/i18n/index.js';
-// S30 Z4: prosto z DOMU sanitizera (modules/agent-loop). Dawniej szło przez re-eksport
-// w barrelu memory — pass-through bez wartości, skasowany razem z tą zmianą.
+// Prosto z DOMU sanitizera (modules/agent-loop) - żaden pass-through pośrednik go nie osłania.
 import { sanitizeToolTranscript } from '../../agent-loop/index.js';
 import { parseMemoryCandidates } from './memoryCandidates.js';
 import { log } from '../../../core/utils/Logger.js';
@@ -12,20 +11,19 @@ import type { MemoryCandidate } from './memoryCandidates.js';
 // TS-any: bloki multimodalne, tool_calls, cache i model są payloadami różnych providerów API.
 type Runtime = any;
 
-// AUD-code-review-071 (F04, poprawka po blokadzie mergem): SUFIT na wycenę obrazu w oknie
-// kontekstu — realny koszt wizji u providerów to ~85-1600 tokenów/obraz, nie proporcja do
-// długości base64. Pełna długość (v1 tej naprawy) wysadzała `maxTokens` produkcyjny (100k)
-// w JEDNYM `addMessage` dla obrazu 1,5 MB → hard limit → `_trimToolResultsAggressive` →
-// `performSummarization(true)` (sztuczny strzał LLM) → `_trimOldestMessages` wycina obraz
-// i całą rozmowę, zanim model je zobaczy. `_contentSize` (character-based, do decyzji "czy
-// trimować stary wynik") ZOSTAJE bez zmian — to osobna oś od wyceny tokenów.
+// SUFIT na wycenę obrazu w oknie kontekstu - realny koszt wizji u providerów to ~85-1600
+// tokenów/obraz, nie proporcja do długości base64. Bez sufitu pełna długość base64 wysadzałaby
+// `maxTokens` produkcyjny (100k) w JEDNYM `addMessage` dla obrazu 1,5 MB → hard limit →
+// `_trimToolResultsAggressive` → `performSummarization(true)` (sztuczny strzał LLM) →
+// `_trimOldestMessages` wycina obraz i całą rozmowę, zanim model je zobaczy. `_contentSize`
+// (character-based, do decyzji "czy trimować stary wynik") to osobna oś od wyceny tokenów.
 const IMAGE_TOKEN_CEILING = 1600;
 function estimateImageTokens(url: string): number {
     return Math.min(Math.ceil(url.length / 4 / 1.2), IMAGE_TOKEN_CEILING);
 }
 
 /**
- * AUD-wydajnosc-017/048/049: STATYSTYKI TEKSTU zamiast samego tekstu.
+ * STATYSTYKI TEKSTU zamiast samego tekstu.
  *
  * Estymator (`core/utils/tokenCounter.ts`) potrzebuje z materiału dokładnie dwóch liczb:
  * długości i liczby znaków spoza ASCII. Obie są ADDYTYWNE po konkatenacji, więc okno kontekstu
@@ -136,9 +134,9 @@ export class RollingWindow {
     declare onMemoryCandidates: RollingWindowOptions['onMemoryCandidates'];
     declare memoryIndexProvider: RollingWindowOptions['memoryIndexProvider'];
     declare sessionPath: string;
-    /** AUD-wydajnosc-017: statystyki per wiadomość (klucz = obiekt wiadomości). */
+    /** Statystyki per wiadomość (klucz = obiekt wiadomości). */
     declare _msgStatsCache: WeakMap<object, MessageStats>;
-    /** AUD-wydajnosc-017: statystyki promptu systemowego + odciski, z których powstały. */
+    /** Statystyki promptu systemowego + odciski, z których powstały. */
     declare _promptStatsCache: (TextStats & { base: string; summary: string; emergency: boolean }) | null;
     /** Diagnostyka/testy: ile ZNAKÓW faktycznie przeskanowano od startu okna (dowód przyrostowości). */
     declare _statsScannedChars: number;
@@ -160,7 +158,7 @@ export class RollingWindow {
         this.conversationSummary = '';
         this.summarizer = options.summarizer || null;
         this._modelProvider = options.modelProvider || null;
-        // E2.8 B3: resolved compression skeleton (agent>global>factory) — passed to the lazily-created
+        // Resolved compression skeleton (agent>global>factory) - passed to the lazily-created
         // Summarizer. null → Summarizer uses its factory default.
         this._compressionPrompt = options.compressionPrompt || null;
         this._triggerThreshold = options.triggerThreshold || 0.9;
@@ -169,7 +167,7 @@ export class RollingWindow {
         this._summarizationCount = 0;
         this._toolTrimCount = 0;
         this._toolDefinitionsTokens = 0;
-        // L07-6: tylko realnie zasilane źródła. memory_files/skills siedzą w system_prompt
+        // Tylko realnie zasilane źródła. memory_files/skills siedzą w system_prompt
         // (nie osobno), a *_deferred nigdy nie były zasilane — usunięte (nie kłam wierszem 0).
         this._contextTokenSources = {
             system_tools: 0,
@@ -179,18 +177,18 @@ export class RollingWindow {
         this.onSummarized = options.onSummarized || null;
         this.onToolsTrimmed = options.onToolsTrimmed || null;
         this.emergencyContextProvider = options.emergencyContextProvider || null;
-        // E2.7 W2 (K3): rescue durable facts before compaction. Both injected from chat_session so
-        // RollingWindow never reaches into modules/memory to WRITE — the callback does the save.
+        // Rescue durable facts before compaction. Both injected from chat_session so
+        // RollingWindow never reaches into modules/memory to WRITE - the callback does the save.
         this.onMemoryCandidates = options.onMemoryCandidates || null;   // (candidates) => Promise
         this.memoryIndexProvider = options.memoryIndexProvider || null; // () => Promise<string> brain.md index
         this.sessionPath = ''; // Ustawiane przez chat_view — ścieżka do zapisanej sesji
-        // AUD-wydajnosc-017/048: pamięć statystyk (patrz `TextStats` na górze pliku).
+        // Pamięć statystyk (patrz `TextStats` na górze pliku).
         this._msgStatsCache = new WeakMap();
         this._promptStatsCache = null;
         this._statsScannedChars = 0;
     }
 
-    // ─── STATYSTYKI TEKSTU (baza licznika tokenów, AUD-wydajnosc-017/048/049) ───
+    // ─── STATYSTYKI TEKSTU (baza licznika tokenów) ───
 
     /** Dolicza tekst do akumulatora statystyk. JEDYNE miejsce, które skanuje znaki. */
     _addTextStats(acc: TextStats, text: string): void {
@@ -272,8 +270,8 @@ export class RollingWindow {
      * Pełny system prompt = base + summary.
      * Po awaryjnej sumaryzacji: specjalny nagłówek mówiący agentowi żeby kontynuował.
      *
-     * M (AUD-security-118): podsumowanie idzie przez `fenceUntrusted` — to CZWARTY kanał
-     * niezaufanej treści w prompcie systemowym, którego K9 nie objął. `Summarizer` streszcza
+     * Podsumowanie idzie przez `fenceUntrusted` - to CZWARTY kanał niezaufanej treści w prompcie
+     * systemowym. `Summarizer` streszcza
      * CAŁĄ rozmowę razem z wiadomościami `role:'tool'` (wyniki `read`/`web_read`), a wynik stoi
      * potem w `role:'system'` do końca sesji i wraca na wejście kolejnych sumaryzacji. Nagłówek
      * (`header`) zostaje NA ZEWNĄTRZ ogrodzenia jako etykieta sekcji — dokładnie jak
@@ -380,10 +378,10 @@ export class RollingWindow {
         for (let i = 0; i < safeZone; i++) {
             const msg = this.messages[i];
             if (msg.role !== 'tool' || !msg.content) continue;
-            // AUD-code-review-071: rozmiar TREŚCI, nie rozmiar tablicy bloków. `msg.content.length`
+            // Rozmiar TREŚCI, nie rozmiar tablicy bloków. `msg.content.length`
             // dla content-array (generate_image + vision: [{text},{image_url}]) to LICZBA BLOKÓW
-            // (zawsze 2) — wielomegabajtowy base64 nigdy nie przekraczał progu 200 i był
-            // strukturalnie nietrimowalny.
+            // (zawsze 2) - licząc po `.length` wielomegabajtowy base64 nigdy nie przekroczyłby
+            // progu 200 i byłby strukturalnie nietrimowalny.
             const originalSize = this._contentSize(msg.content);
             if (originalSize <= 200) continue;
 
@@ -436,8 +434,7 @@ export class RollingWindow {
 
         for (let i = 0; i < safeZone; i++) {
             const msg = this.messages[i];
-            // AUD-code-review-071: patrz `trimOldToolResults` — `.length` na content-array liczy
-            // BLOKI, nie znaki/bajty.
+            // Patrz `trimOldToolResults` - `.length` na content-array liczy BLOKI, nie znaki/bajty.
             if (msg.role === 'tool' && msg.content && this._contentSize(msg.content) > 50) {
                 msg.content = t('memory.trimmed_aggressive');
                 trimmed++;
@@ -552,7 +549,7 @@ export class RollingWindow {
                 }
             }
 
-            // E2.7 W2 (K3): brain.md index for dedup (pointers only — tight budget). Provider is
+            // brain.md index for dedup (pointers only - tight budget). Provider is
             // injected from chat_session; RollingWindow stays decoupled from modules/memory writes.
             let memoryIndex = '';
             if (this.memoryIndexProvider) {
@@ -591,8 +588,8 @@ export class RollingWindow {
                     }
                 }
 
-                // W2: fire-and-forget durable memory save. Compaction already happened above; the
-                // save runs through the K1 write queue in chat_session and never blocks the turn.
+                // Fire-and-forget durable memory save. Compaction already happened above; the
+                // save runs through the write queue in chat_session and never blocks the turn.
                 if (candidates.length > 0 && this.onMemoryCandidates) {
                     try {
                         Promise.resolve(this.onMemoryCandidates(candidates)).catch(err =>
@@ -703,24 +700,22 @@ export class RollingWindow {
      * @returns {number}
      */
     getCurrentTokenCount(): number {
-        // AUD-wydajnosc-017/048: sumujemy STATYSTYKI (długość + non-ASCII), nie sklejamy materiału.
-        // Wynik jest identyczny co do tokena z dawnym `getTokenCount(cały sklejony tekst)`, bo obie
-        // liczby są addytywne po konkatenacji (patrz `countTokensFromStats` w core), ale koszt
-        // wywołania spada z „przeskanuj całe okno" do „przeskanuj to, co się zmieniło".
+        // Sumujemy STATYSTYKI (długość + non-ASCII), nie sklejamy materiału. Wynik jest identyczny
+        // co do tokena z `getTokenCount(cały sklejony tekst)`, bo obie liczby są addytywne po
+        // konkatenacji (patrz `countTokensFromStats` w core), ale koszt wywołania to „przeskanuj
+        // to, co się zmieniło", nie „przeskanuj całe okno".
         const prompt = this._promptStats();
         let chars = prompt.chars;
         let nonAscii = prompt.nonAscii;
         let imageTokens = 0;
 
         for (const msg of this.messages) {
-            // AUD-code-review-071: JEDNA funkcja liczy treść wiadomości na tekst — dawniej ten
-            // sam placeholder '[image:85tokens]' był tu zduplikowany osobno od `_contentToTokenText`
-            // (getBreakdown), więc obraz miał WYCENIONY na sztywno koszt bez względu na realny
-            // rozmiar base64 — okno kontekstu nie widziało wielomegabajtowego payloadu i próg
-            // kompresji nigdy się od niego nie zapalał. F04: obraz NIE wchodzi do statystyk tekstu
-            // (patrz `estimateImageTokens` przy górze pliku) — liczony osobno, z sufitem.
+            // JEDNA funkcja liczy treść wiadomości na tekst, żeby to i `_contentToTokenText`
+            // (getBreakdown) nigdy nie rozjechały się w wycenie tego samego materiału. Obraz NIE
+            // wchodzi do statystyk tekstu (patrz `estimateImageTokens` przy górze pliku) - liczony
+            // osobno, z sufitem, żeby okno kontekstu widziało nawet wielomegabajtowy payload.
             // Statystyki wiadomości obejmują też `tool_calls` (nazwa + argumenty) i
-            // `reasoning_content` — jedno miejsce prawdy, patrz `_messageStats`.
+            // `reasoning_content` - jedno miejsce prawdy, patrz `_messageStats`.
             const stats = this._messageStats(msg);
             chars += stats.chars;
             nonAscii += stats.nonAscii;
@@ -741,14 +736,13 @@ export class RollingWindow {
      * @returns {Object}
      */
     getBreakdown() {
-        // AUD-wydajnosc-049: prompt liczony z tej samej pamięci statystyk co reszta okna —
-        // dawniej `getTokenCount(this.systemPrompt)` skanował go tu jeszcze raz, a `systemPrompt`
-        // jest getterem SKLEJAJĄCYM prompt bazowy ze streszczeniem przy każdym odczycie.
+        // Prompt liczony z tej samej pamięci statystyk co reszta okna, więc nie skanuje go
+        // drugi raz mimo że `systemPrompt` jest getterem SKLEJAJĄCYM prompt bazowy ze
+        // streszczeniem przy każdym odczycie.
         const promptStats = this._promptStats();
         const systemPromptTokens = countTokensFromStats(promptStats.chars, promptStats.nonAscii);
-        // AUD-wydajnosc-049: JEDEN przebieg po historii zamiast dwóch. Dawniej `getBreakdown`
-        // liczył wycenę per wiadomość, a potem wołał `getCurrentTokenCount()`, który przechodził
-        // po tych samych wiadomościach drugi raz (a `updateTokenCounter` dokładał trzeci).
+        // JEDEN przebieg po historii: wycena per wiadomość liczy się tu raz i karmi zarówno
+        // `messageItems` niżej, jak i (przez tę samą pamięć statystyk) `getCurrentTokenCount()`.
         let totalChars = promptStats.chars;
         let totalNonAscii = promptStats.nonAscii;
         let totalImageTokens = 0;
@@ -770,7 +764,7 @@ export class RollingWindow {
             messages: messagesTokens,
             system_prompt: systemPromptTokens,
         };
-        // L07-6: tylko realnie zasilane źródła (system_tools + mcp_tools_active). Dawne
+        // Tylko realnie zasilane źródła (system_tools + mcp_tools_active). Dawne
         // memory_files/skills/*_deferred były zawsze 0 → usunięte (kłamały wierszem w Viewerze).
         const layer2 = {
             mcp_tools_active: Number(sources.mcp_tools_active) || 0,
@@ -812,7 +806,7 @@ export class RollingWindow {
 
     /**
      * Ustawia rozbicie kosztu definicji narzędzi na dwa realnie zasilane źródła.
-     * L07-6: przyjmuje TYLKO system_tools + mcp_tools_active (jedyne, które produkcyjny
+     * Przyjmuje TYLKO system_tools + mcp_tools_active (jedyne, które produkcyjny
      * caller `getCachedToolTokenBreakdown` zwraca). Dawne memory_files/skills/*_deferred
      * były zawsze 0 i kłamały wierszem w Token Viewerze — usunięte z sygnatury.
      * @param {{system_tools?:number, systemTools?:number, mcp_tools_active?:number, mcpToolsActive?:number}} sources
@@ -843,7 +837,7 @@ export class RollingWindow {
         this._summarizationCount = 0;
         this._toolTrimCount = 0;
         this._toolDefinitionsTokens = 0;
-        // L07-6: tylko realnie zasilane źródła. memory_files/skills siedzą w system_prompt
+        // Tylko realnie zasilane źródła. memory_files/skills siedzą w system_prompt
         // (nie osobno), a *_deferred nigdy nie były zasilane — usunięte (nie kłam wierszem 0).
         this._contextTokenSources = {
             system_tools: 0,
@@ -867,8 +861,8 @@ export class RollingWindow {
     }
 
     _countMessageTokens(msg: Partial<RollingMessage> = {}): number {
-        // AUD-wydajnosc-049: te same statystyki co `getCurrentTokenCount` (jedna pamięć,
-        // jedno skanowanie) — Token Viewer przestaje przemiatać historię drugi i trzeci raz.
+        // Te same statystyki co `getCurrentTokenCount` (jedna pamięć,
+        // jedno skanowanie) - Token Viewer nie przemiata historii drugi ani trzeci raz.
         const stats = this._messageStats(msg as RollingMessage);
         return countTokensFromStats(stats.chars, stats.nonAscii) + stats.imageTokens;
     }
@@ -880,16 +874,16 @@ export class RollingWindow {
         let text = '';
         for (const block of content) {
             if (block.type === 'text') text += block.text || '';
-            // F04 (korekta AUD-code-review-071 v1): obraz NIE wchodzi tu jako surowy base64 —
-            // pełna długość url w tym samym stringu co reszta transkryptu wysadzała `maxTokens`
-            // produkcyjny w JEDNYM `addMessage` (patrz komentarz przy `estimateImageTokens`,
-            // góra pliku). Wyceniany osobno, z sufitem, w `_contentImageTokens`.
+            // Obraz NIE wchodzi tu jako surowy base64 - pełna długość url w tym samym stringu co
+            // reszta transkryptu wysadzałaby `maxTokens` produkcyjny w JEDNYM `addMessage` (patrz
+            // komentarz przy `estimateImageTokens`, góra pliku). Wyceniany osobno, z sufitem,
+            // w `_contentImageTokens`.
         }
         return text;
     }
 
     /**
-     * F04 (korekta AUD-code-review-071 v1): suma tokenów obrazów (`image_url`) w wiadomości,
+     * Suma tokenów obrazów (`image_url`) w wiadomości,
      * każdy z SUFITEM `estimateImageTokens`. Osobna od `_contentToTokenText`, bo base64 obrazu
      * nie może wpaść do wspólnego stringa liczonego przez `getTokenCount` — tam licz-po-znakach
      * skalowałby się z długością base64 bez ograniczenia.
@@ -906,11 +900,12 @@ export class RollingWindow {
     }
 
     /**
-     * AUD-code-review-071: rozmiar TREŚCI wiadomości (znaki), nie rozmiar tablicy bloków. Fazę 1
-     * kompresji (`trimOldToolResults`/`_trimToolResultsAggressive`) pytała dawniej `msg.content.length`
-     * wprost — dla content-array (generate_image + vision: `[{text},{image_url}]`) to zawsze LICZBA
-     * BLOKÓW (2), niezależnie od tego, ile waży base64 w środku, więc taka wiadomość nigdy nie
-     * przekraczała progu i nigdy nie była kwalifikowana do skrócenia.
+     * Rozmiar TREŚCI wiadomości (znaki), nie rozmiar tablicy bloków. Fazę 1
+     * kompresji (`trimOldToolResults`/`_trimToolResultsAggressive`) musi liczyć przez tę funkcję,
+     * nie `msg.content.length` wprost - dla content-array (generate_image + vision:
+     * `[{text},{image_url}]`) to zawsze LICZBA BLOKÓW (2), niezależnie od tego, ile waży base64
+     * w środku, więc taka wiadomość nigdy nie przekroczyłaby progu i nigdy nie byłaby
+     * kwalifikowana do skrócenia.
      */
     _contentSize(content: RollingMessage['content']): number {
         if (!content) return 0;
@@ -925,11 +920,10 @@ export class RollingWindow {
     }
 
     _previewMessage(msg: Partial<RollingMessage> = {}): string {
-        // AUD-wydajnosc-049: podgląd ma 96 znaków, więc normalizujemy TYLKO początek treści.
-        // Dawniej `replace(/\s+/g,' ')` przemiatał CAŁĄ wiadomość (przy 800 wiadomościach ×
-        // wielokilobajtowych wynikach narzędzi to drugi, ukryty przebieg po całej historii przy
-        // każdym otwarciu Token Viewera). Zapas 400 znaków pokrywa nawet treść zaczynającą się
-        // od długiego ciągu białych znaków.
+        // Podgląd ma 96 znaków, więc normalizujemy TYLKO początek treści - `replace(/\s+/g,' ')`
+        // na CAŁEJ wiadomości byłby przy 800 wiadomościach × wielokilobajtowych wynikach narzędzi
+        // drugi, ukryty przebieg po całej historii przy każdym otwarciu Token Viewera. Zapas 400
+        // znaków pokrywa nawet treść zaczynającą się od długiego ciągu białych znaków.
         const raw = this._contentToTokenText(msg.content);
         const text = (raw.length > 400 ? raw.slice(0, 400) : raw).replace(/\s+/g, ' ').trim();
         if (!text) return msg.tool_calls?.length ? '[tool calls]' : '';
@@ -944,10 +938,10 @@ export class RollingWindow {
      * @private
      */
     _trimOldestMessages(): void {
-        // AUD-wydajnosc-048: pętla przelicza okno po KAŻDEJ usuniętej grupie. Do naprawy każdy
-        // obrót sklejał całą historię i skanował ją znak po znaku (zmierzone 590 ms zamrożonego
-        // UI przy 800 wiadomościach, kwadratowo). Dziś `getCurrentTokenCount` sumuje zapamiętane
-        // statystyki per wiadomość — obrót kosztuje odczyt z pamięci, a nie ponowny skan tekstu.
+        // Pętla przelicza okno po KAŻDEJ usuniętej grupie, ale `getCurrentTokenCount` sumuje
+        // zapamiętane statystyki per wiadomość, więc obrót kosztuje odczyt z pamięci, a nie
+        // ponowny skan tekstu - bez tego każdy obrót sklejałby całą historię i skanował ją znak
+        // po znaku (kwadratowo).
         while (this.getCurrentTokenCount() > this.maxTokens && this.messages.length > 1) {
             if (this.messages.length <= 1) break;
 

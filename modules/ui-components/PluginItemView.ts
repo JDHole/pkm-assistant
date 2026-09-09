@@ -1,9 +1,9 @@
 /**
  * `PluginItemView` — baza widoków workspace'u.
- * Dziedziczą DOKŁADNIE DWIE klasy: widok czatu i widok notatek wydania (V-03).
+ * Dziedziczą DOKŁADNIE DWIE klasy: widok czatu i widok notatek wydania.
  *
- * • V-04: widok dostaje `manifest` WŁASNEJ instancji pluginu przez konstruktor.
- * • E-26: `onOpen()` NIE MOŻE blokować na gotowości pluginu (deadlock: Obsidian czeka
+ * • Widok dostaje `manifest` WŁASNEJ instancji pluginu przez konstruktor.
+ * • `onOpen()` NIE MOŻE blokować na gotowości pluginu (deadlock: Obsidian czeka
  *   na widoki, inicjalizacja na layout) — rysuje placeholder i wraca, resztę robi
  *   przez {@link PluginItemView.whenRuntimeLoaded}.
  * • `renderView` jest OPCJONALNA, NIE `abstract` — widok czatu dostaje ją miksinem.
@@ -18,10 +18,10 @@ export type { PluginItemViewClass } from '../../core/index.js';
 
 const SCOPE = 'PluginItemView';
 
-/** Klasa CSS placeholdera „czekam na gotowość pluginu" (E-26). */
+/** Klasa CSS placeholdera „czekam na gotowość pluginu". */
 const LOADING_CSS_CLASS = 'pkm-view-loading';
 
-/** Workspace w zakresie, jakiego dotyka otwieranie widoku (V-01/BR-4). */
+/** Workspace w zakresie, jakiego dotyka otwieranie widoku. */
 interface WorkspaceLike {
     getLeaf?(newLeaf?: boolean | 'tab' | 'split' | 'window'): LeafLike | null;
     revealLeaf?(leaf: LeafLike): void;
@@ -41,7 +41,7 @@ interface RegistrationHost {
     app?: { workspace?: unknown };
 }
 
-/** Statyki tożsamości widoku, których wymaga rejestracja (V-01). */
+/** Statyki tożsamości widoku, których wymaga rejestracja. */
 type ViewIdentity = 'viewType' | 'displayText' | 'iconName';
 
 /**
@@ -89,7 +89,7 @@ export abstract class PluginItemView extends ItemView {
         return requireIdentity(this, 'displayText');
     }
 
-    /** V-02: rejestruje widok + komendę „otwórz". */
+    /** Rejestruje widok + komendę „otwórz". */
     static register(plugin: PluginApi): void {
         const type = requireIdentity(this, 'viewType');
         const host = plugin as unknown as RegistrationHost;
@@ -103,7 +103,7 @@ export abstract class PluginItemView extends ItemView {
         });
     }
 
-    /** V-01/BR-4: otwiera widok; no-op, gdy workspace nie dał liścia. */
+    /** Otwiera widok; no-op, gdy workspace nie dał liścia. */
     static async open(
         workspace: unknown,
         state?: Record<string, unknown>,
@@ -121,7 +121,7 @@ export abstract class PluginItemView extends ItemView {
     constructor(leaf: unknown, plugin: PluginApi) {
         super(leaf as never);
         this.plugin = plugin;
-        // V-04: manifest WŁASNEJ instancji pluginu — koniec szukania siebie po id w rejestrze.
+        // Manifest WŁASNEJ instancji pluginu — koniec szukania siebie po id w rejestrze.
         this.manifest = plugin?.manifest;
         // `contentEl` to element treści widoku (`containerEl` niesie jeszcze nagłówek karty).
         this.container = this.contentEl ?? this.containerEl;
@@ -145,7 +145,7 @@ export abstract class PluginItemView extends ItemView {
     }
 
     /**
-     * E-26: Obsidian czeka na widoki, a inicjalizacja pluginu czeka na layout — więc ta
+     * Obsidian czeka na widoki, a inicjalizacja pluginu czeka na layout — więc ta
      * metoda ma prawo tylko postawić placeholder i wrócić. Dokończenie wisi na `onReady`.
      */
     async onOpen(): Promise<void> {
@@ -165,7 +165,7 @@ export abstract class PluginItemView extends ItemView {
         });
     }
 
-    /** E-26: cukier na `plugin.env?.whenLoaded()` z obsługą braku runtime'u. */
+    /** Cukier na `plugin.env?.whenLoaded()` z obsługą braku runtime'u. */
     async whenRuntimeLoaded(): Promise<void> {
         const runtime = this.env;
         if (!runtime) {

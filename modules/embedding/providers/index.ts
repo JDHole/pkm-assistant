@@ -1,7 +1,7 @@
 /**
  * modules/embedding/providers/index.ts — instancje dostawców + mapa rejestru (§5 kontraktu).
  * Zwykła rejestracja, bez stuba — `info` na każdej instancji jest już PRAWDZIWE (nie rzuca),
- * bo na nim stoją testy dropdownu (C-21) i placeholdera (D-16 w planie klastra).
+ * bo na nim stoją testy dropdownu i placeholdera (w planie klastra).
  */
 import { OpenAiEmbeddingProvider } from './openai.js';
 import { OllamaEmbeddingProvider } from './ollama.js';

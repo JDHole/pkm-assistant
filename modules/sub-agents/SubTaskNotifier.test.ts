@@ -115,12 +115,12 @@ test('sufit kolejki: najstarsze wyniki wypadają, nowe zostają', t => {
     t.deepEqual(notifier.pending().map(x => x.id), ['#3', '#4', '#5']);
 });
 
-// Pin audytu nocnego 2026-08-16 (moduł 19): `drain()` zdejmuje CAŁĄ kolejkę do zmiennej
-// lokalnej, a dostawca w czacie jest reentrantny (`send_message` → koniec tury → `drain`)
-// i w trakcie dostarczania może dojść NOWY wynik. Bez `left.concat(this._pending)` na końcu
-// świeży wynik wyprzedziłby ten, który czekał od kwadransa — a to kolejność, w jakiej user
-// widzi meldunki subów w rozmowie. Cicha do zepsucia: podmiana ostatniej linii `drain()`
-// na `this._pending = left` przechodzi wszystkie pozostałe asercje tego pliku.
+// `drain()` zdejmuje CAŁĄ kolejkę do zmiennej lokalnej, a dostawca w czacie jest
+// reentrantny (`send_message` → koniec tury → `drain`) i w trakcie dostarczania może
+// dojść NOWY wynik. Bez `left.concat(this._pending)` na końcu świeży wynik wyprzedziłby
+// ten, który czekał od kwadransa — a to kolejność, w jakiej user widzi meldunki subów
+// w rozmowie. Cicha do zepsucia: podmiana ostatniej linii `drain()` na
+// `this._pending = left` przechodzi wszystkie pozostałe asercje tego pliku.
 test('drain: wynik dorzucony W TRAKCIE dostarczania nie wyprzedza tego, co czekało', t => {
     const registry = makeRegistry();
     const notifier = new SubTaskNotifier({ registry });

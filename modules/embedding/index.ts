@@ -1,21 +1,20 @@
 /**
  * modules/embedding — public API (barrel).
  *
- * clean-room / F4: rejestr + model + dostawcy zastępują dawną kolekcję `embedding_models` i
- * cztery klasy adapterów. Migrator starego indeksu (v1.x → Orama) SKASOWANY w całości
- * (decyzja Kuby 05.09, R13) — nie ma go już w tym module.
+ * Ten moduł eksportuje rejestr + model + dostawcy embeddingów. Nie ma tu migratora starego
+ * indeksu (v1.x → Orama) - taki podsystem nie istnieje w tym module.
  *
- * **NIE wychodzi stąd:** typy HTTP (`HttpClient`, `HttpRequestSpec`, `HttpResponse`) — konsumenci
+ * **NIE wychodzi stąd:** typy HTTP (`HttpClient`, `HttpRequestSpec`, `HttpResponse`) - konsumenci
  * spoza modułu biorą je z `core/index.js`, żeby nie było dwóch dróg do jednego typu.
  */
 
-// Silnik Oramy — tylko to, co czytają konsumenci (licznik dokumentów + wyszukiwanie wektorowe).
+// Silnik Oramy - tylko to, co czytają konsumenci (licznik dokumentów + wyszukiwanie wektorowe).
 export { countDocs, searchVectorTopK } from './orama_engine.js';
 
-// E1.4 — żywy indeks semantyczny vaulta (publikuje `plugin.oramaDb`).
+// Żywy indeks semantyczny vaulta (publikuje `plugin.oramaDb`).
 export { VaultIndexer } from './VaultIndexer.js';
 
-// ── Rejestr + model + dostawcy (clean-room / F4) ──────────────────────────────────
+// ── Rejestr + model + dostawcy ──────────────────────────────────
 export { EmbeddingRegistry } from './EmbeddingRegistry.js';
 export { EmbeddingModel } from './EmbeddingModel.js';
 export { EmbedBatchError, isEmbedBatchError, UnknownEmbeddingProviderError } from './embedErrors.js';
@@ -34,15 +33,15 @@ export {
     DEFAULT_VECTOR_DIM,
 } from './contracts.js';
 
-// AUD-bledy-040 — meldunek z migracji ada-002 → 3-small (composition root woła to przy starcie).
+// Meldunek z migracji ada-002 → 3-small (composition root woła to przy starcie).
 export { announceAdaMigration } from './adaMigration.js';
 export type { AdaMigrationPorts } from './adaMigration.js';
 
 // ── Typy publiczne ──────────────────────────────────────────────────────────
 //
 // Wychodzą tymi samymi drzwiami co wartości, ale przez `export type`, które ZNIKA
-// przy transpilacji — zero wpływu na bundle. Typy żyją przy kodzie-właścicielu
-// (kontrakt kampanii TS §5), tu są tylko reeksportowane.
+// przy transpilacji - zero wpływu na bundle. Typy żyją przy kodzie-właścicielu,
+// tu są tylko reeksportowane.
 
 export type {
     SearchVectorTopKOptions,

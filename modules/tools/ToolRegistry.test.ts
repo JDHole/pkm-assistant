@@ -26,7 +26,7 @@ function seedRegistry(registry: ToolRegistry) {
     registry.registerTool(makeTool('my_user_tool', 'finance-tracker'));
 }
 
-test('filterByAgent: E2.8 C1 negatywna lista — brak disabled_tools = wszystkie built-in ON', t => {
+test('filterByAgent: negatywna lista — brak disabled_tools = wszystkie built-in ON', t => {
     const r = new ToolRegistry();
     seedRegistry(r);
     // Agent bez user-serwerów (mcp_servers domyślne) — built-in wszystkie widoczne.
@@ -64,7 +64,7 @@ test('filterByAgent: null agent → nic nie wyłączone (wszystkie tools)', t =>
     t.is(names.length, 9); // 8 built-in + 1 user tool (userServers '*' dla null)
 });
 
-test('filterByAgent: user MCP server tool gated pozytywną listą mcp_servers (opt-in, E3.1)', t => {
+test('filterByAgent: user MCP server tool gated pozytywną listą mcp_servers (opt-in)', t => {
     const r = new ToolRegistry();
     seedRegistry(r);
     const withServer = { name: 'Igor', disabled_tools: [], mcp_servers: ['finance-tracker'] };
@@ -111,9 +111,9 @@ test('getBuiltinServerMap: returns the full map with all expected servers', t =>
     const map = r.getBuiltinServerMap();
     t.deepEqual(Object.keys(map).sort(), ['artifacts', 'core', 'delegation', 'komunikator', 'memory', 'multimodal', 'vault', 'web']);
     t.true(map.vault.includes('read'));
-    t.true(map.vault.includes('search')); // E2.5 unified search lives in vault server
+    t.true(map.vault.includes('search')); // unified search lives in vault server
     t.true(map.memory.includes('memory_save'));
-    t.deepEqual(map.komunikator, ['kom_send', 'kom_list', 'kom_read']); // S28 D3
+    t.deepEqual(map.komunikator, ['kom_send', 'kom_list', 'kom_read']);
 });
 
 test('registerTool: validates required fields', t => {
@@ -138,7 +138,7 @@ test('getToolDefinitions: returns OpenAI-format definitions', t => {
     t.truthy(defs[0].function.parameters);
 });
 
-// E3.1 R1 — public unregisterTool (external MCP servers no longer touch the private tools Map)
+// public unregisterTool (external MCP servers no longer touch the private tools Map)
 test('unregisterTool: removes a tool, returns true, then false (idempotent)', t => {
     const r = new ToolRegistry();
     r.registerTool(makeTool('external__render', 'external'));

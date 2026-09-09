@@ -1,33 +1,25 @@
 /**
- * Noc 24/25.08 - strażnik reguły K4 (AUD-bledy-061) na pętlach dobierania wolnej nazwy.
+ * Strażnik reguły na pętlach dobierania wolnej nazwy: `probeFile` musi być wołane na ścieżkach
+ * ZAPISU (tam, gdzie od wyniku zależy nadpisanie) — kontrakt w `core/utils/vaultFs.ts:74`.
  *
- * `probeFile` ma w swoim własnym kontrakcie zdanie: „wołaj to na ścieżkach ZAPISU (tam, gdzie
- * od wyniku zależy nadpisanie)" (`core/utils/vaultFs.ts:74`). Werdykt 25.08 naprawił pierwsze
- * dwie pętle spoza `startActiveSession` (`writeBrainNote`, `discardActiveSession`); przegląd
- * opusa po tym commicie ocenił klasę bugu jako SZERSZĄ i zlecił domknięcie całego modułu.
+ * OSIEM miejsc w kodzie niesie ten sam mechanizm ryzyka (kłamiące `false` z `exists()` = licencja
+ * na nadpisanie). Sześć to pętle dobierania wolnej nazwy na `probeFile`:
+ *   1. `AgentMemory.startActiveSession` (~572)
+ *   2. `AgentMemory.writeBrainNote` (~1275)
+ *   3. `AgentMemory.discardActiveSession` (~810)
+ *   4. `AgentMemory.archiveBrainNote` (~1374)
+ *   5. `SaveSessionWorkflow._createBrainNote` (~579)
+ *   6. `ArchiveWorkflow._uniqueSummaryName` (~1096, zasila zapisy L1/L2/L3)
  *
- * **Stan po domknięciu (ten plik, 27.08): SZEŚĆ pętli tego samego kształtu na `probeFile`**
- * (nie trzy, jak mówił poprzedni docstring, i nie pięć, jak liczył werdykt zlecający tę rundę —
- * grep pkt 3 znalazł SZÓSTĄ, przegapioną wcześniej):
- *   1. `AgentMemory.startActiveSession` (~572) — oryginalny wzorzec, probeFile od zawsze.
- *   2. `AgentMemory.writeBrainNote` (~1275) — naprawione 25.08.
- *   3. `AgentMemory.discardActiveSession` (~810) — naprawione 25.08.
- *   4. `AgentMemory.archiveBrainNote` (~1374) — naprawione TU (27.08).
- *   5. `SaveSessionWorkflow._createBrainNote` (~579) — naprawione TU (27.08).
- *   6. `ArchiveWorkflow._uniqueSummaryName` (~1096, zasila zapisy L1/L2/L3) — naprawione TU,
- *      znalezione grepem pkt 3, NIE było na liście zlecenia.
- *
- * Do kompletu, TĄ SAMĄ rundą naprawione też DWA pojedyncze (nie pętlowe) warunki „czy ta nazwa
- * jest wolna, zanim tu napiszę" — ten sam mechanizm ryzyka (kłamiące `false` = licencja na
- * nadpisanie), inny kształt (skip zamiast retry z sufiksem), więc bez suffixu/throwa >50:
+ * Dwa to pojedyncze (nie pętlowe) warunki „czy ta nazwa jest wolna, zanim tu napiszę" — ten sam
+ * mechanizm ryzyka, inny kształt (skip zamiast retry z sufiksem), bez suffixu/throwa >50:
  *   7. `AgentMemory._migrateLegacyRootSessionsToArchive` (~531) — migracja płaskich sesji.
  *   8. `MigrationV3.applyPlan` (~218) — migracja v2→v3 brain.md.
  *
- * Ten plik nie zmienia zachowania pluginu poza tymi naprawami: charakteryzuje pętlę przy
- * uczciwym adapterze, a sekcje niżej dowodzą, że przy adapterze, który kłamie - dokładnie ten
- * scenariusz, dla którego `probeFile` powstało (dyski sieciowe / Dysk Google, incydent
- * 2026-07-28) - żadna z pętli już nie wchodzi w cudzy plik. Testy na `writeBrainNote` i
- * `discardActiveSession` (25.08) oraz `archiveBrainNote`/`_createBrainNote` (27.08) pokrywają
+ * Ten plik charakteryzuje pętlę przy uczciwym adapterze, a sekcje niżej dowodzą, że przy
+ * adapterze, który kłamie — dokładnie ten scenariusz, dla którego `probeFile` powstało (dyski
+ * sieciowe / Dysk Google) — żadna z pętli już nie wchodzi w cudzy plik. Testy na
+ * `writeBrainNote` i `discardActiveSession` oraz `archiveBrainNote`/`_createBrainNote` pokrywają
  * pozycje 2-5 z listy wyżej. `_uniqueSummaryName` (pozycja 6) ma własne pokrycie w
  * `ArchiveWorkflow.test.ts` („12 paczek zaakceptowanych pod rząd daje 12 RÓŻNYCH plików L1") —
  * nie duplikujemy go tutaj. Pozycje 7-8 (warunki pojedyncze) są bez dedykowanego testu w tym
@@ -115,7 +107,7 @@ test('writeBrainNote: nazwa zajęta → sufiks, stara notatka NIETKNIĘTA', asyn
     const second = await memory.writeBrainNote({ name: 'Wzorzec nocny', type: 'reference', content: 'treść B' });
 
     t.not(second.path, first.path, 'kolizja nazw ma dać NOWY plik, nie nadpisać');
-    // Wzmocnienie (werdykt opusa 27.08): nie tylko „inny plik", ale KONKRETNIE sufiks `_2` —
+    // Sprawdzamy nie tylko „inny plik", ale KONKRETNIE sufiks `_2` —
     // i treść B naprawdę pod nim leży, nie gdzieś indziej.
     t.is(second.path, first.path.replace(/\.md$/, '_2.md'), 'druga notatka ma dostać nazwę z sufiksem _2');
     t.true(files[first.path]!.includes('treść A'), 'pierwsza notatka musi przeżyć drugą');
@@ -123,7 +115,7 @@ test('writeBrainNote: nazwa zajęta → sufiks, stara notatka NIETKNIĘTA', asyn
 });
 
 test('startActiveSession: ta sama pętla pod probeFile - kłamiący exists() NIE wchodzi w cudzy plik', async t => {
-    // Kontrola dodatnia dla reguły K4: tu `probeFile` już jest i potwierdza „nie ma" odczytem,
+    // Kontrola dodatnia: tu `probeFile` już jest i potwierdza „nie ma" odczytem,
     // więc kłamstwo `exists()` zostaje wyłapane i nazwa liczy się jako ZAJĘTA.
     const { vault, files } = makeVault();
     const pierwsza = new AgentMemory(vault, 'Jaskier');
@@ -142,7 +134,7 @@ test('startActiveSession: ta sama pętla pod probeFile - kłamiący exists() NIE
     t.is(files[first], 'żywa rozmowa', 'cudza rozmowa nietknięta');
 });
 
-// ─── po naprawie 25.08: writeBrainNote + discardActiveSession pod probeFile (zielone) ──────
+// ─── writeBrainNote + discardActiveSession pod probeFile (zielone) ──────
 
 test('writeBrainNote: kłamiący exists() NIE MOŻE nadpisać istniejącej notatki', async t => {
     const { vault, files } = makeVault();
@@ -156,10 +148,9 @@ test('writeBrainNote: kłamiący exists() NIE MOŻE nadpisać istniejącej notat
 
     await memory.writeBrainNote({ name: 'Wzorzec nocny', type: 'reference', content: 'treść B' });
 
-    // NAPRAWIONE (werdykt 25.08): pętla w `writeBrainNote` pyta teraz `probeFile`, więc gołe
-    // kłamstwo `exists()` jest potwierdzane odczytem — nazwa liczy się jako ZAJĘTA, treść B
-    // ląduje pod sufiksem, a treść A przeżywa. Był to dawny pin (`test.failing`); ten sam plik
-    // dowodzi teraz, że `writeBrainNote` ma tę samą ochronę co `startActiveSession`.
+    // Pętla w `writeBrainNote` pyta `probeFile`, więc gołe kłamstwo `exists()` jest potwierdzane
+    // odczytem — nazwa liczy się jako ZAJĘTA, treść B ląduje pod sufiksem, a treść A przeżywa.
+    // `writeBrainNote` ma tę samą ochronę co `startActiveSession`.
     t.true(files[first.path]!.includes('treść A'), 'notatka A nietknięta mimo kłamiącego exists()');
 });
 
@@ -188,7 +179,7 @@ test('discardActiveSession: kłamiący exists() NIE MOŻE wejść w cudzy odło�
     t.true(files[secondTarget!]!.includes('Druga porzucona'));
 });
 
-// ─── po naprawie 27.08: archiveBrainNote + _createBrainNote pod probeFile (zielone) ────────
+// ─── archiveBrainNote + _createBrainNote pod probeFile (zielone) ────────
 
 test('archiveBrainNote: kłamiący exists() NIE MOŻE nadpisać cudzej zarchiwizowanej notatki', async t => {
     const { vault, files } = makeVault();
@@ -205,8 +196,8 @@ test('archiveBrainNote: kłamiący exists() NIE MOŻE nadpisać cudzej zarchiwiz
 
     const result = await memory.archiveBrainNote(source.filename);
 
-    // NAPRAWIONE (ten commit): pętla w `archiveBrainNote` pyta teraz `probeFile`, więc gołe
-    // kłamstwo na `firstTarget` jest potwierdzane odczytem — nazwa liczy się jako ZAJĘTA.
+    // Pętla w `archiveBrainNote` pyta `probeFile`, więc gołe kłamstwo na `firstTarget` jest
+    // potwierdzane odczytem - nazwa liczy się jako ZAJĘTA.
     t.not(result.targetPath, firstTarget, 'probeFile: „nie wiem" ma znaczyć ZAJĘTE, nie „wolne"');
     t.is(result.targetPath, firstTarget.replace(/\.md$/, '_2.md'), 'nowa archiwizacja dostaje sufiks _2');
     t.true(files[firstTarget]!.includes('treść cudza'), 'cudza zarchiwizowana notatka NIETKNIĘTA');
@@ -218,7 +209,7 @@ test('archiveBrainNote: kłamiący exists() NIE MOŻE nadpisać cudzej zarchiwiz
 });
 
 test('archiveBrainNote: bezpiecznik sufiksu rzuca PRZED write/remove — źródło zostaje nietknięte', async t => {
-    // UWAGA z werdyktu opusa: po pętli jest write(targetPath) i dopiero potem remove(sourcePath).
+    // UWAGA: po pętli jest write(targetPath) i dopiero potem remove(sourcePath).
     // Ten test dowodzi, że gdy pętla poddaje się (bezpiecznik `suffix > 50`), throw ląduje
     // PRZED obiema operacjami — nic nie jest nadpisane i źródło nie znika bez śladu.
     const { vault, files } = makeVault();
@@ -255,19 +246,19 @@ test('_createBrainNote (SaveSessionWorkflow): kłamiący exists() NIE MOŻE nadp
 
     const second = await workflow._createBrainNote({ name: 'Wzorzec nocny', type: 'reference', content: 'treść B' });
 
-    // NAPRAWIONE (30.08, AUD-code-review-067/068): `_createBrainNote` deleguje dziś WPROST do
-    // `AgentMemory.writeBrainNote` — kanoniczna ścieżka zamiast kopii z własną pętlą.
+    // `_createBrainNote` deleguje WPROST do `AgentMemory.writeBrainNote` — kanoniczna ścieżka
+    // zamiast kopii z własną pętlą.
     t.is(second.path, first.path.replace(/\.md$/, '_2.md'), 'druga notatka ma dostać nazwę z sufiksem _2');
     t.true(files[first.path]!.includes('treść A'), 'notatka A nietknięta mimo kłamiącego exists()');
     t.true(files[second.path]!.includes('treść B'));
 });
 
-// ─── po naprawie 30.08: writeBrainNote/writePendingRescue nie gubią się na slugu ≥80 znaków (AUD-code-review-010) ────
+// ─── writeBrainNote/writePendingRescue nie gubią się na slugu ≥80 znaków ────
 
 // Slug (po normalizacji i obcięciu diakrytyków) jest znacznie dłuższy niż limit 80 znaków
 // `makeMemoryNoteFilename` — dokładnie klasa nazwy, którą LLM potrafi zaproponować w
 // `memory_rescue` (kompresja okna czatu).
-const DLUGA_NAZWA = 'Ustalenia dotyczace sposobu pracy Kuby z agentem w projekcie PKM Assistant w sierpniu i pozniej w tym samym roku';
+const DLUGA_NAZWA = 'Ustalenia dotyczace sposobu pracy Jana z agentem w projekcie PKM Assistant w sierpniu i pozniej w tym samym roku';
 
 test('writeBrainNote: kolizja przy slugu ≥80 znaków dostaje KOLEJNY sufiks zamiast rzutu po 50 identycznych próbach', async t => {
     const { vault, files } = makeVault();
@@ -276,16 +267,16 @@ test('writeBrainNote: kolizja przy slugu ≥80 znaków dostaje KOLEJNY sufiks za
     const first = await memory.writeBrainNote({ name: DLUGA_NAZWA, type: 'user', content: 'treść A' });
     const second = await memory.writeBrainNote({ name: DLUGA_NAZWA, type: 'user', content: 'treść B' });
 
-    // Przed naprawą: sufiks doklejał się do TEKSTU wchodzącego w slugifikację, a ta i tak
-    // ucina do 80 znaków — więc `${DLUGA_NAZWA} 2}` dawał DOKŁADNIE tę samą nazwę pliku co
-    // `DLUGA_NAZWA` bez sufiksu, pętla mieliła 50 identycznych prób i rzucała.
+    // Pułapka: gdyby sufiks doklejał się do TEKSTU wchodzącego w slugifikację, ta i tak ucina
+    // do 80 znaków - więc `${DLUGA_NAZWA} 2}` dawałby DOKŁADNIE tę samą nazwę pliku co
+    // `DLUGA_NAZWA` bez sufiksu, a pętla mieliłaby 50 identycznych prób i rzucała.
     t.not(second.path, first.path, 'druga notatka o tej samej DŁUGIEJ nazwie dostaje INNY plik, nie throw');
     t.is(second.path, first.path.replace(/\.md$/, '_2.md'), 'sufiks dokleja się do GOTOWEJ NAZWY PLIKU, nie do tekstu przed slugifikacją');
     t.true(files[first.path]!.includes('treść A'), 'pierwsza notatka przeżywa drugą');
     t.true(files[second.path]!.includes('treść B'));
 });
 
-test('writePendingRescue: ta sama naprawa co writeBrainNote dla slugu ≥80 znaków', async t => {
+test('writePendingRescue: to samo zachowanie sufiksu co writeBrainNote dla slugu ≥80 znaków', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -298,12 +289,12 @@ test('writePendingRescue: ta sama naprawa co writeBrainNote dla slugu ≥80 znak
     t.true(files[second.path]!.includes('kandydat B'));
 });
 
-// ─── AUD-testy-042 (2026-09-01): wyczerpanie 50 prób — wiązanie z `findFreeCollisionPath` ──────
+// ─── Wyczerpanie 50 prób — wiązanie z `findFreeCollisionPath` ──────
 //
-// Wszystkie SZEŚĆ pętli wyżej dzielą dziś JEDNĄ implementację (`collisionSuffix.ts`), która ma
+// Wszystkie SZEŚĆ pętli wyżej dzielą JEDNĄ implementację (`collisionSuffix.ts`), która ma
 // własny plik testowy (`collisionSuffix.test.ts`) pokrywający kontrakt „znajduje wolną nazwę /
-// po wyczerpaniu rzuca" w izolacji. Zamiast doklejać tu pięć bliźniaczych testów wyczerpania do
-// pięciu bywszych kopii (audyt to wprost odradza), dwa testy niżej dowodzą tylko WIĄZANIA — że
+// po wyczerpaniu rzuca" w izolacji. Zamiast doklejać tu sześć bliźniaczych testów wyczerpania,
+// dwa testy niżej dowodzą tylko WIĄZANIA — że
 // throw ze wspólnej funkcji faktycznie PROPAGUJE się przez każdy z DWÓCH różnych kształtów
 // obsługi błędu, jakie mają te sześć wołających:
 //   - throw wprost do wołającego (`startActiveSession`, `saveSession`, `writeBrainNote`,

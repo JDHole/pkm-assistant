@@ -1,14 +1,12 @@
 /**
- * Noc 29/30.08 - strażnicy modułu 11 (dead code i zależności).
+ * Strażnicy dead code i zależności - zamrożone wyniki skanu jako regresja.
  *
- * Moduł 11 biegł ostatnio 21.08. Od tamtej pory na `origin/main` wjechało ~150 commitów
- * i +13k linii (fabryka napraw 23-27.08, fala lint-zero, fala docs), czyli CAŁY materiał,
- * z którego biorą się sieroty, powstał PO ostatnim skanie. Ten plik nie zmienia zachowania
- * pluginu - zamraża trzy wyniki nocy jako strażników i pinuje jedno znalezisko.
+ * Ten plik nie zmienia zachowania pluginu - zamraża wyniki skanu jako strażników
+ * i pinuje jeden dawniej złapany przypadek regresji.
  *
- * Lekcja z 21.08 wbudowana w pierwszy test: graf importów BEZ dynamicznych `await import(...)`
- * kłamie o rząd wielkości (wtedy 16 „martwych" plików i wszystkie fałszywe - repo ładuje
- * modale leniwie). Dlatego skaner niżej czyta cztery kształty specyfiera, nie jeden.
+ * Graf importów BEZ dynamicznych `await import(...)` kłamie o rząd wielkości: pomija
+ * pliki ładowane leniwie (np. modale). Dlatego skaner niżej czyta cztery kształty
+ * specyfiera, nie jeden.
  */
 import test from 'ava';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -18,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** Katalogi poza grafem produkcyjnym: narzędzia biegu, atrapy testowe, wynik builda. */
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'audyt', 'scripts', 'test-support', '.claude', 'Refaktor', 'Nauka']); // test-support: atrapa `obsidian` + shim DOM dla AVA, z definicji poza grafem produkcyjnym (harness, ktory tez ich uzywa, mieszka od 2026-09-07 w osobnym repo); .claude: worktree'y agentow (kopie repo) i skille - nie kod pluginu; Refaktor + Nauka: archiwum decyzji i materialy nauki, a zalaczone kontrakty `.ts` to specyfikacje, nie kod produkcyjny
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'audyt', 'scripts', 'test-support', '.claude', 'Refaktor', 'Nauka']); // test-support: atrapa `obsidian` + shim DOM dla AVA, z definicji poza grafem produkcyjnym (harness, ktory tez ich uzywa, mieszka w osobnym repo); .claude: worktree'y agentow (kopie repo) i skille - nie kod pluginu; Refaktor + Nauka: archiwum decyzji i materialy nauki, a zalaczone kontrakty `.ts` to specyfikacje, nie kod produkcyjny
 
 function walk(dir: string, out: string[] = []): string[] {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -57,7 +55,7 @@ function specifiersOf(relPath: string): string[] {
     return [...found];
 }
 
-/** Repo pisze specyfiery z rozszerzeniem `.js`, a na dysku leżą `.ts` (TS-0). */
+/** Repo pisze specyfiery z rozszerzeniem `.js`, a na dysku leżą `.ts`. */
 function resolveLocal(fromFile: string, specifier: string): string | null {
     if (!specifier.startsWith('.')) return null;
     const base = join(dirname(fromFile), specifier);
@@ -93,34 +91,27 @@ function reachableFromMain(): Set<string> {
 }
 
 /**
- * Cztery sieroty ZNANE i uzasadnione - stan zamrożony nocą 21.08 i potwierdzony 30.08.
+ * Sieroty ZNANE i uzasadnione - stan zamrożony jako regresja.
  * Nowa pozycja na tej liście = ktoś odpiął plik od grafu i nikt tego nie zauważył.
  */
 const ZNANE_SIEROTY: Record<string, string> = {
-    'modules/onboarding/OnboardingModal.ts': 'wyłączony świadomie w S01 Z7, szkielet pod v3',
+    'modules/onboarding/OnboardingModal.ts': 'wyłączony świadomie, szkielet pod v3',
     'utils/releaseNotes.ts': 'notatki wydania, wołane spoza bundla (release.js)',
     'utils/releasePrep.ts': 'przygotowanie release u, wolane spoza bundla (release.js)',
     'utils/buildManifest.ts': 'helpery builda, wolane spoza bundla (esbuild.js)',
     'utils/banner.ts': 'banner builda, wołany z esbuild.js spoza bundla',
-    // ── clean-room / F1: PLIKI CZEKAJĄCE NA WPIĘCIE W GRAF ─────────────────────────
-    // Gałąź `cleanroom-base` postawiła kontrakt i puste implementacje; autorzy clean-room
-    // wpinają je w graf plik po pliku. Ta lista ma od integracji fali 1 już tylko MALEĆ —
-    // wpięty plik znika stąd tego samego dnia. Wpisy zdjęte 2026-09-06 (wpięte przez
-    // autorów): `core/layoutReady.ts`, `core/runtime/{StatusBar,configMerge,
-    // legacySettingsMigration}.ts`, `core/utils/settingsNamespaceMigration.ts`,
-    // `modules/embedding/tokens.ts`, `modules/models/ReasoningTagFilter.ts`,
-    // `config/defaultSettings.ts` (F7: `buildRuntimeConfig` naprawdę je woła).
+    // ── PLIKI CZEKAJĄCE NA WPIĘCIE W GRAF ───────────────────────────────────────
+    // Nowo dodane pliki (kontrakt + implementacja), które nie mają jeszcze konsumenta.
+    // Wpięcie pliku w graf usuwa jego wpis z tej listy tego samego dnia.
     'core/ui/safeHtml.ts': 'czeka na wpięcie — konsumentem będzie NoticeCenter (guziki akcji)',
     'core/waitForLoaded.ts': 'czeka na PluginRuntime.whenLoaded()',
     'core/utils/httpLogSummary.ts': 'czeka na core/http — bezpieczna linia logu żądania',
     'modules/models/testing/harness.ts': 'atrapy testów klastra modeli — z definicji poza bundlem, jak `utils/release_helpers.ts`',
-    'core/cleanRoomPattern.ts': 'wzorzec bramki „grep zero" — wspólny dla dwóch testów, z definicji poza bundlem',
+    'core/forbiddenVocabulary.ts': 'wzorzec bramki „grep zero" — wspólny dla dwóch testów, z definicji poza bundlem',
 };
 /**
  * Klucze wyżej pisane są ze slashami (czytelność), a `walk()` oddaje ścieżki
- * z separatorem systemu — porównujemy więc po znormalizowanej formie.
- * `KomunikatorModal.ts` zniknął z listy 2026-09-04: plik nie istnieje od czasu
- * przepisania modułu na Komunikator v3.
+ * z separatorem systemu - porównujemy więc po znormalizowanej formie.
  */
 const ZNANE_SIEROTY_NORM = new Set(Object.keys(ZNANE_SIEROTY).map(normalize));
 
@@ -179,9 +170,8 @@ test('każdy pakiet importowany przez kod produkcyjny jest zadeklarowany albo ex
     }
 
     t.deepEqual(nieznane, [], `import bez pokrycia w package.json ani w external: ${nieznane.join('; ')}`);
-    // 2026-09-04: `electron` zszedł z listy external razem z `copy_to_clipboard`, jego jedynym
-    // konsumentem (AUD-dead-code-002/101/157). Zostaje `obsidian` — jedyny nie-builtin, który
-    // MUSI być external; gdyby wypadł, bundle wciągnąłby runtime hosta.
+    // `obsidian` jest jedynym nie-builtinem, który MUSI być external; gdyby wypadł,
+    // bundle wciągnąłby runtime hosta.
     t.true(externals.has('obsidian'));
 });
 
@@ -191,16 +181,16 @@ test('zero martwych zależności: każda zadeklarowana ma ślad poza package.jso
         .filter(f => f !== 'package.json' && f !== 'package-lock.json');
     const corpus = haystack.map(f => readFileSync(join(REPO_ROOT, f), 'utf8')).join('\n');
 
-    // Pin wersji w `overrides` (dedup drzewa, AUD-wydajnosc-004/039) to ŚWIADOMY ślad,
-    // choć żaden plik pakietu nie importuje — stąd `ajv` w `dependencies` bez ani jednego importu.
+    // Pin wersji w `overrides` (dedup drzewa) to ŚWIADOMY ślad,
+    // choć żaden plik pakietu nie importuje - stąd `ajv` w `dependencies` bez ani jednego importu.
     const PINY = new Set(Object.keys((PKG as { overrides?: Record<string, unknown> }).overrides ?? {}));
     const martwe = [...DECLARED].filter(dep => !PINY.has(dep) && !corpus.includes(dep)).sort();
-    // To jest strażnik klasy `swagger-jsdoc` (martwa devDep z 21.08, wycięta 28.08):
+    // To jest strażnik klasy `swagger-jsdoc` (martwa devDep, dawno wycięta):
     // pakiet w package.json, którego nikt nie importuje ani nie konfiguruje.
     t.deepEqual(martwe, [], `zadeklarowane, bez ani jednego śladu w repo: ${martwe.join(', ')}`);
 });
 
-/* ── kontrakt klas CSS po fali lint-zero (27.08) ────────────────────────────── */
+/* ── kontrakt klas CSS: zdefiniowane vs warunkowo przełączane ─────────────────── */
 
 const CSS_FILES = ALL_FILES.filter(f => /\.css$/.test(f));
 /** Własne prefiksy. Klasy Obsidiana (`mod-cta`, `setting-item`) mają regułę w JEGO arkuszu. */
@@ -244,10 +234,9 @@ function klasyPrzelaczaneWTs(): Map<string, string[]> {
 }
 
 /**
- * Fala lint-zero z 27.08 przepisała `style.display` na klasy w kilkunastu plikach UI.
- * Ta zamiana pęka po cichu wtedy, gdy klasa NIE MA reguły: gałąź „schowaj/pokaż" wykonuje
- * się, nic się nie dzieje, a żaden typecheck, lint ani test tego nie widzi.
- * Moduł 20 sprawdził 28.08 trzy takie miejsca ręcznie - ten test sprawdza WSZYSTKIE.
+ * `style.display` bywa przepisywany na klasy w plikach UI. Ta zamiana pęka po cichu, gdy
+ * klasa NIE MA reguły w CSS: gałąź „schowaj/pokaż" wykonuje się, nic się nie dzieje, a żaden
+ * typecheck, lint ani test tego nie widzi. Ten test sprawdza WSZYSTKIE takie klasy.
  */
 test('żadna warunkowo przełączana klasa własnego prefiksu nie jest przełącznikiem bez skutku', t => {
     const defined = klasyZdefiniowaneWCss();
@@ -264,12 +253,11 @@ test('żadna warunkowo przełączana klasa własnego prefiksu nie jest przełąc
 });
 
 /**
- * PIN (znalezisko nocy 29/30.08). Picker ma w CSS DWA słowniki: `__option*` - ten renderuje
- * kod (`modules/agents/profile/profile_team.ts`) i on jest ostylowany - oraz `__row*`, którego
+ * Picker ma w CSS DWA słowniki: `__option*` - ten renderuje kod
+ * (`modules/agents/profile/profile_team.ts`) i jest ostylowany - oraz `__row*`, którego
  * nie ustawia ani jeden plik w repo. To sierota po starszym kształcie komponentu; nic się
- * dziś przez nią nie psuje, ale arkusz opisuje UI, którego nie ma.
- * STAN 2026-09-04: reguły zdjęte (kampania dead-code) — pin zszedł z `.failing`
- * na zwykły test i pilnuje od teraz, żeby martwy słownik nie wrócił.
+ * dziś przez nią nie psuje, ale arkusz opisuje UI, którego nie ma. Ten test pilnuje,
+ * żeby martwy słownik nie wrócił.
  */
 test('rodzina .cs-picker__row* nie ma ani jednego ustawiającego (martwe reguły)', t => {
     const defined = klasyZdefiniowaneWCss();

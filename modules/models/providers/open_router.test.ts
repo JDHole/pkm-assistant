@@ -5,15 +5,15 @@ import { CapturingHttpClient, collect, makeCtx } from '../testing/harness.js';
 import type { ChatRequest, ProviderContext } from '../contracts.js';
 
 /**
- * N19 (luka L-07/L-08): metryczka OpenRoutera to fakt kontraktowy — endpoint i nagłówek
- * klucza; natywne `delta.reasoning` mapuje się na `reasoning_content` (B.10 OR-01).
+ * Metryczka OpenRoutera to fakt kontraktowy - endpoint i nagłówek klucza; natywne
+ * `delta.reasoning` mapuje się na `reasoning_content`.
  */
 const REQ: ChatRequest = { messages: [{ role: 'user', content: 'hej' }] };
 const CTX: ProviderContext = makeCtx({ modelId: 'anthropic/claude-sonnet-4-20250514', apiKey: 'or-test' });
 
 const sse = (delta: Record<string, unknown>) => 'data: ' + JSON.stringify({ choices: [{ delta }] });
 
-test('L-07/L-08: open_router — endpoint, nagłówki dostawcy, delta.reasoning → reasoning_content', t => {
+test('open_router — endpoint, nagłówki dostawcy, delta.reasoning → reasoning_content', t => {
   const spec = openRouterProvider.buildRequest(REQ, CTX, false);
 
   t.is(spec.url, PROVIDER_INFO.open_router.defaultEndpoint);
@@ -34,7 +34,7 @@ test('L-07/L-08: open_router — endpoint, nagłówki dostawcy, delta.reasoning 
   t.is(snapshot.choices[0].message.content, 'odpowiedź');
 });
 
-// ── F10: `decorateBody` / `reasoningOption` — prośba o rozumowanie ──────────────────────
+// ── `decorateBody` / `reasoningOption` - prośba o rozumowanie ──────────────────────
 
 test('decorateBody: brak `thinking` -> ciało BEZ pola `reasoning` (nie samo `null`)', t => {
   const spec = openRouterProvider.buildRequest(REQ, CTX, false);
@@ -80,7 +80,7 @@ test('decorateBody: `thinking === false` -> BRAK pola `reasoning` (nie `{enabled
   t.false(Object.prototype.hasOwnProperty.call(body, 'reasoning'));
 });
 
-// ── F10: `parseModelList` / `acceptsImages` — flaga multimodalności z katalogu ──────────
+// ── `parseModelList` / `acceptsImages` - flaga multimodalności z katalogu ──────────
 
 test('katalog modeli: `multimodal` już będące boolean zostaje NIETKNIĘTE, architektura go nie nadpisuje', async t => {
   const http = new CapturingHttpClient({
@@ -141,11 +141,11 @@ test('katalog modeli: `architecture === null` nie wywraca całej listy, wpis wyc
   t.false(Object.prototype.hasOwnProperty.call(models[0], 'multimodal'));
 });
 
-// F10: mutant L108 `(inputSide ?? '') -> (inputSide || '')` jest RÓWNOWAŻNY, nie do zabicia —
-// `inputSide` pochodzi z `modality.split('->')[0]`, `split` zawsze oddaje NAPIS (nigdy
-// `null`/`undefined`), więc `??` nigdy się nie uruchamia; jedyny falsy przypadek to `''`,
-// a fallback obu operatorów jest TĄ SAMĄ pustą wartością — żaden wejściowy napis nie odróżni
-// jednego od drugiego.
+// `(inputSide ?? '') -> (inputSide || '')` są równoważne, bo `inputSide` pochodzi
+// z `modality.split('->')[0]`: `split` zawsze oddaje NAPIS (nigdy `null`/`undefined`),
+// więc `??` nigdy się nie uruchamia; jedyny falsy przypadek to `''`, a fallback obu
+// operatorów jest TĄ SAMĄ pustą wartością - żaden wejściowy napis nie odróżni jednego
+// od drugiego.
 
 test('katalog modeli: `architecture.modality` (napis) czyta stronę WEJŚCIOWĄ przed strzałką', async t => {
   const http = new CapturingHttpClient({

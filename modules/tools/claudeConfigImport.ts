@@ -1,5 +1,5 @@
 /**
- * claudeConfigImport — S32 Z2.3: przeniesienie serwerów MCP z Claude Desktop do pluginu.
+ * claudeConfigImport — przeniesienie serwerów MCP z Claude Desktop do pluginu.
  *
  * Kto ma już poustawiane serwery w Claude Desktop, ten nie musi przeklikiwać ich drugi raz.
  * Format źródłowy (`claude_desktop_config.json`):
@@ -15,7 +15,7 @@
  * niezrozumiały wpis po prostu pomijamy.
  */
 
-// AUD-code-review-050: `validateServerId` to WARTOŚĆ (static method), nie sam typ — ten import
+// `validateServerId` to WARTOŚĆ (static method), nie sam typ — ten import
 // NIE znika przy transpilacji. `ExternalMcpManager.ts` jest bezpieczny do ciągnięcia (zero
 // obsidiana/SDK na poziomie modułu — SDK i `child_process` importowane leniwo DOPIERO wewnątrz
 // metod instancji `connect`/`_createClient`), więc plik zostaje testowalny w gołym Node.
@@ -38,11 +38,10 @@ interface ClaudeServerEntry {
 export interface ClaudeImportRow {
     config: ExternalMcpServerConfig;
     /**
-     * AUD-code-review-050: dziś znaczy „nie wolno zaznaczyć/zapisać" — nie tylko „już mamy
-     * ten id w ustawieniach" (dawne, jedyne znaczenie). Modal (`modules/shell/ClaudeImportModal`)
-     * jest celowo GŁUPI i czyta wyłącznie to pole (odznacza + blokuje checkbox), więc każdy
-     * powód blokady musi przez nie przejść, inaczej modal by go nie znał. Powód szczegółowy —
-     * `blockedReason` niżej.
+     * Znaczy „nie wolno zaznaczyć/zapisać" — nie tylko „już mamy ten id w ustawieniach". Modal
+     * (`modules/shell/ClaudeImportModal`) jest celowo GŁUPI i czyta wyłącznie to pole (odznacza +
+     * blokuje checkbox), więc każdy powód blokady musi przez nie przejść, inaczej modal by go
+     * nie znał. Powód szczegółowy — `blockedReason` niżej.
      */
     exists: boolean;
     selected: boolean;
@@ -135,11 +134,10 @@ export function parseClaudeDesktopConfig(jsonText: string | null | undefined): E
 /**
  * Wiersze do modala potwierdzenia: co zaznaczyć, a co zablokować.
  *
- * AUD-code-review-050: import przechodzi przez TĘ SAMĄ walidację unikalności/rezerwacji id,
- * którą wymusza ręczne dodawanie serwera (`MCPServerEditorModal._handleSave`) — dwie kontrole,
- * nie jedna:
- *   1. kolizja z id już zapisanym w ustawieniach (dawne, jedyne zachowanie — `exists:true`),
- *   2. `ExternalMcpManager.validateServerId` (R3): format sluga ORAZ brak kolizji z nazwą
+ * Import przechodzi przez TĘ SAMĄ walidację unikalności/rezerwacji id, którą wymusza ręczne
+ * dodawanie serwera (`MCPServerEditorModal._handleSave`) — dwie kontrole, nie jedna:
+ *   1. kolizja z id już zapisanym w ustawieniach (`exists:true`),
+ *   2. `ExternalMcpManager.validateServerId`: format sluga ORAZ brak kolizji z nazwą
  *      serwera WBUDOWANEGO (`vault`/`memory`/`core`/...) — bez tego import serwera nazwanego
  *      dosłownie `"memory"` zapisywał do `data.json` id, które `connect()` i tak by odrzucił,
  *      ale checkbox w modalu tego nie wiedział i user dostawał zaznaczalny wiersz, który

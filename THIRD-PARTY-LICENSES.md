@@ -2,7 +2,7 @@
 
 `dist/main.js` w tym repo (bundel produkowany przez `esbuild.js`) zawiera zminifikowany
 kod kilku bibliotek open-source obok kodu własnego pluginu. Ten plik zbiera noty
-copyrightowe i teksty licencji tych bibliotek — spełnienie warunku "dołącz notę
+copyrightowe i teksty licencji tych bibliotek - spełnienie warunku "dołącz notę
 licencyjną" przy redystrybucji w formie zbundlowanej (MIT/ISC/BSD wymagają zachowania
 noty copyright + tekstu licencji; Apache-2.0 dodatkowo wymaga dołączenia kopii licencji).
 
@@ -10,8 +10,8 @@ noty copyright + tekstu licencji; Apache-2.0 dodatkowo wymaga dołączenia kopii
 policzone `bytesInOutput > 0` per plik wejściowy po tree-shakingu), nie z samego
 `package.json` → `dependencies`. To ważne rozróżnienie: `@modelcontextprotocol/sdk` ma we
 własnym `package.json` dużo więcej zależności (np. `express`, `hono`, `cors`, `jose`) niż
-faktycznie trafia do tego bundla — części server-transportowej SDK ten plugin (klient MCP)
-nie importuje, więc tree-shaking ją usuwa. Zweryfikowano 2026-08-27 przy AUD-deps-009.
+faktycznie trafia do tego bundla - części server-transportowej SDK ten plugin (klient MCP)
+nie importuje, więc tree-shaking ją usuwa. Zweryfikowano 2026-08-27.
 
 ## Biblioteki w bundlu
 
@@ -43,23 +43,23 @@ Dotyczy: `@modelcontextprotocol/sdk`, `ajv`, `ajv-formats`, `cross-spawn`,
 `eventsource-parser`, `fast-deep-equal`, `json-schema-traverse`, `path-key`,
 `pkce-challenge`, `shebang-command`, `shebang-regex`, `zod`.
 
-Tekst licencji MIT jest identyczny dla wszystkich pakietów — jedyną zmienną częścią jest
+Tekst licencji MIT jest identyczny dla wszystkich pakietów - jedyną zmienną częścią jest
 nota copyrightowa, więc jest wypisana raz per pakiet, a tekst licencji raz na końcu.
 
 ### Noty copyrightowe
 
-- **@modelcontextprotocol/sdk** — Copyright (c) 2024 Anthropic, PBC
-- **ajv** — Copyright (c) 2015-2017 Evgeny Poberezkin
-- **ajv-formats** — Copyright (c) 2020 Evgeny Poberezkin
-- **cross-spawn** — Copyright (c) 2018 Made With MOXY Lda \<hello@moxy.studio\>
-- **eventsource-parser** — Copyright (c) 2026 Espen Hovlandsdal \<espen@hovlandsdal.com\>
-- **fast-deep-equal** — Copyright (c) 2017 Evgeny Poberezkin
-- **json-schema-traverse** — Copyright (c) 2017 Evgeny Poberezkin
-- **path-key** — Copyright (c) Sindre Sorhus \<sindresorhus@gmail.com\> (sindresorhus.com)
-- **pkce-challenge** — Copyright (c) 2019
-- **shebang-command** — Copyright (c) Kevin Mårtensson \<kevinmartensson@gmail.com\> (github.com/kevva)
-- **shebang-regex** — Copyright (c) Sindre Sorhus \<sindresorhus@gmail.com\> (sindresorhus.com)
-- **zod** — Copyright (c) 2025 Colin McDonnell
+- **@modelcontextprotocol/sdk** - Copyright (c) 2024 Anthropic, PBC
+- **ajv** - Copyright (c) 2015-2017 Evgeny Poberezkin
+- **ajv-formats** - Copyright (c) 2020 Evgeny Poberezkin
+- **cross-spawn** - Copyright (c) 2018 Made With MOXY Lda \<hello@moxy.studio\>
+- **eventsource-parser** - Copyright (c) 2026 Espen Hovlandsdal \<espen@hovlandsdal.com\>
+- **fast-deep-equal** - Copyright (c) 2017 Evgeny Poberezkin
+- **json-schema-traverse** - Copyright (c) 2017 Evgeny Poberezkin
+- **path-key** - Copyright (c) Sindre Sorhus \<sindresorhus@gmail.com\> (sindresorhus.com)
+- **pkce-challenge** - Copyright (c) 2019
+- **shebang-command** - Copyright (c) Kevin Mårtensson \<kevinmartensson@gmail.com\> (github.com/kevva)
+- **shebang-regex** - Copyright (c) Sindre Sorhus \<sindresorhus@gmail.com\> (sindresorhus.com)
+- **zod** - Copyright (c) 2025 Colin McDonnell
 
 ### Tekst licencji
 
@@ -91,9 +91,9 @@ Dotyczy: `isexe`, `which`, `zod-to-json-schema`.
 
 ### Noty copyrightowe
 
-- **isexe** — Copyright (c) Isaac Z. Schlueter and Contributors
-- **which** — Copyright (c) Isaac Z. Schlueter and Contributors
-- **zod-to-json-schema** — Copyright (c) 2020, Stefan Terdell
+- **isexe** - Copyright (c) Isaac Z. Schlueter and Contributors
+- **which** - Copyright (c) Isaac Z. Schlueter and Contributors
+- **zod-to-json-schema** - Copyright (c) 2020, Stefan Terdell
 
 ### Tekst licencji
 
@@ -351,23 +351,23 @@ Copyright 2023 OramaSearch Inc
 
 - Ta lista opisuje kod **zbundlowany do `dist/main.js`**, nie pełne drzewo `node_modules`
   (deweloperskie narzędzia jak `esbuild`, `typescript`, `eslint`, `ava` nie trafiają do
-  bundla i nie są tu wymienione — ich licencje dotyczą procesu budowania, nie
+  bundla i nie są tu wymienione - ich licencje dotyczą procesu budowania, nie
   dystrybuowanego pluginu).
 - `dist/main.js` niesie też kod własny (`core/`, `modules/`, `src/`) na licencji GPL-3.0
   tego repo (patrz `LICENSE` w root) oraz dane i18n. To NIE jest third-party i nie jest
   tu wymienione.
 - Release'owy banner w `dist/main.js` (`utils/banner.ts`) wskazuje na ten plik jedną
-  linią — pełne noty świadomie mieszkają tutaj, nie w samym bannerze, żeby nie rozdymać
+  linią - pełne noty świadomie mieszkają tutaj, nie w samym bannerze, żeby nie rozdymać
   bundla o kilkanaście kilobajtów tekstu prawnego przy każdym buildzie.
-- Lista została ustalona ręcznie 2026-08-27 (AUD-deps-009) na podstawie realnego builda.
+- Lista została ustalona ręcznie 2026-08-27 na podstawie realnego builda.
   Jeśli w przyszłości dojdzie/zmieni się zależność w `dependencies` w `package.json` albo
-  zmieni się to, co SDK importuje pod spodem, ten plik może się zdezaktualizować — nie ma
+  zmieni się to, co SDK importuje pod spodem, ten plik może się zdezaktualizować - nie ma
   dziś automatycznej bramki, która by to wykrywała (rozważyć `license-checker` albo
   podobne narzędzie SCA, jeśli temat wróci).
-- **2026-09-07 (TS-4):** `js-yaml` usunięty z listy — wyleciał z `package.json` w całości
+- **2026-09-07:** `js-yaml` usunięty z listy - wyleciał z `package.json` w całości
   (katalog Obsidiana go wytykał, module-replacements). `core/utils/yamlParser.ts` używa dziś
   wbudowanego `parseYaml`/`stringifyYaml` Obsidiana (silnik wstrzykiwany, `setYamlEngine()`).
-  Zamiennik `yaml` (eemeli/yaml) jest wyłącznie **devDependency** dla testów AVA i harnessu —
+  Zamiennik `yaml` (eemeli/yaml) jest wyłącznie **devDependency** dla testów AVA i harnessu -
   produkcyjny `src/main.ts` importuje `parseYaml`/`stringifyYaml` z `'obsidian'` (już na liście
   `external` esbuilda), więc do `dist/main.js` nie trafia ani `js-yaml`, ani `yaml`. Ręczna
   weryfikacja: `grep -c "js-yaml" dist/main.js` = 0.

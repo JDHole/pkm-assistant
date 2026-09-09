@@ -69,7 +69,7 @@ test('validateVaultFolder: still blocks protected paths', t => {
     t.is(result.code, 'protected');
 });
 
-test('validateVaultPath: .pkm-assistant jest chroniony (E1.8 — pamięci agentów + indeks)', t => {
+test('validateVaultPath: .pkm-assistant jest chroniony (pamięci agentów + indeks)', t => {
     const meta = validateVaultPath('.pkm-assistant/index/vault-index.meta.json');
     t.false(meta.ok);
     t.is(meta.code, 'protected');
@@ -88,7 +88,7 @@ test('validateVaultPath: podobna nazwa pliku NIE jest łapana przez blokadę .pk
     t.true(result.ok);
 });
 
-// ── D17 (E2.4): wyjątek TYLKO-ODCZYT dla przepisów skilli ──
+// ── Wyjątek TYLKO-ODCZYT dla przepisów skilli ──
 
 test('validateVaultPath: allowSkillsRead pozwala CZYTAĆ przepis skilla', t => {
     const skill = validateVaultPath('.pkm-assistant/skills/daily-review/SKILL.md', { allowSkillsRead: true });
@@ -122,15 +122,15 @@ test('validateVaultPath: allowSkillsRead NIE otwiera pamięci ani indeksu (izola
     t.is(notSkills.code, 'protected');
 });
 
-// ── K8 (AUD-security-029): log pluginu i sesje pamięci są „protected" także tutaj ──
+// ── Log pluginu i sesje pamięci są „protected" także tutaj ──
 
-test('K8: validateVaultPath odbija log pluginu kodem protected', t => {
+test('validateVaultPath odbija log pluginu kodem protected', t => {
     const res = validateVaultPath('.pkm-assistant/logs/pkm-assistant.log');
     t.false(res.ok);
     t.is(res.code, 'protected');
 });
 
-test('K8: validateVaultPath odbija plik sesji pamięci agenta kodem protected', t => {
+test('validateVaultPath odbija plik sesji pamięci agenta kodem protected', t => {
     const res = validateVaultPath('.pkm-assistant/agents/klara/memory/sessions/active/2026-08-22.md');
     t.false(res.ok);
     t.is(res.code, 'protected');

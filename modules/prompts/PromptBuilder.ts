@@ -1,12 +1,12 @@
 /**
- * PromptBuilder v2.1 — modularny system budowania system promptu agenta.
+ * PromptBuilder v2.1 - modularny system budowania system promptu agenta.
  *
  * Struktura dzisiejsza (patrz też modules/prompts/CLAUDE.md, sekcja „Skład promptu"):
- * A: KIM JESTEM (identity, personality — archetype/role skasowane w E2.8 A1/A3)
+ * A: KIM JESTEM (identity, personality - archetyp/rola skasowane jako byty)
  * B: GDZIE PRACUJĘ (environment, folders, permissions + agent_rules)
- * C: JAK PRACUJĘ (decision_tree, delegate_guide, rules — ★TRYB PRACY skasowany w E2.3 D21)
- * D: KONTEKST (artifacts, current_date, memory, oczko — dane, nie reguły; projects
- *    skasowany w E2.9 D1 razem z Project Hub)
+ * C: JAK PRACUJĘ (decision_tree, delegate_guide, rules - bez trybów Gadaj/Rób)
+ * D: KONTEKST (artifacts, current_date, memory, oczko - dane, nie reguły; bez
+ *    sekcji projektów/Project Hub)
  *
  * Filozofia:
  * - Opis → Instrukcja (nie mów czym jest, mów co robić)
@@ -39,10 +39,10 @@ interface PromptContext {
 }
 
 // ═══════════════════════════════════════════
-// FACTORY DEFAULTS — edytowalne przez usera
+// FACTORY DEFAULTS - edytowalne przez usera
 // ═══════════════════════════════════════════
 
-/** Factory defaults — getter-wrapped for i18n. Resolved at access time via t(). */
+/** Factory defaults - getter-wrapped for i18n. Resolved at access time via t(). */
 export const FACTORY_DEFAULTS = {
     get environment() {
         return `${t('prompt.env_header')}
@@ -52,8 +52,8 @@ ${t('prompt.env.pkm')}
 ${t('prompt.env.obsidian_folder')}`;
     },
 
-    // D6e (2026-07-30): forma rolowa aspect:"prep"/"strateg" OUT — `_resolveDelegate` rozwiązuje
-    // `aspect` wyłącznie po NAZWIE suba (fallback po roli skasowany w E2.4/D18), więc stara forma
+    // Forma rolowa aspect:"prep"/"strateg" OUT - `_resolveDelegate` rozwiązuje
+    // `aspect` wyłącznie po NAZWIE suba (fallback po roli skasowany), więc stara forma
     // z definicji zwracała `aspect_not_found`. Kanon: delegate(task) = domyślny worker (działa
     // zawsze), aspect = konkretny sub z Ekipy po nazwie (lista subów jest w danych dynamicznych).
     get delegate_guide() {
@@ -86,10 +86,10 @@ ${t('prompt.inline_comment')}
 };
 
 // ═══════════════════════════════════════════
-// DRZEWO DECYZYJNE — chudy rdzeń (D14). Dane + pure logika w decisionTree.js (testowalne node'em).
-// Re-eksport dla barrela/profile_prompt (kompatybilność importów). Fabryka dead-code D7
-// (AUD-dead-code-243): `CORE_RULES`/`EXTENDED_RULES` zdjęte z tej linii — jedyny ich konsument
-// (`decisionTree.test.ts`) importuje je wprost z `./decisionTree.js`, ten hop nie miał czytelnika.
+// DRZEWO DECYZYJNE - chudy rdzeń. Dane + pure logika w decisionTree.js (testowalne node'em).
+// Re-eksport dla barrela/profile_prompt (kompatybilność importów). `CORE_RULES`/`EXTENDED_RULES`
+// zdjęte z tej linii - jedyny ich konsument (`decisionTree.test.ts`) importuje je wprost
+// z `./decisionTree.js`, ten hop nie miał czytelnika.
 // ═══════════════════════════════════════════
 export { DECISION_TREE_GROUPS, DECISION_TREE_DEFAULTS } from './decisionTree.js';
 
@@ -115,14 +115,14 @@ export class PromptBuilder {
      * @param {boolean} [context.hasStrategist]
      * @param {Array<{name:string, description:string, category:string}>} [context.skills]
      * @param {string[]} [context.agentList] - other agent names
-     * @param {{count:number, senders:string[]}} [context.inboxPing] - S28 D4: ping skrzynki (bez treści)
+     * @param {{count:number, senders:string[]}} [context.inboxPing] - ping skrzynki (bez treści)
      * @param {Object} [context.promptDefaults] - global prompt overrides from settings
      * @returns {PromptBuilder} this (for chaining)
      */
     build(agent: PromptAgent, context: PromptContext): PromptBuilder {
         this.sections.clear();
 
-        // E2.8 C1: `permissions.mcp` skasowane — każdy agent ma narzędzia (min. core+vault+memory
+        // `permissions.mcp` skasowane - każdy agent ma narzędzia (min. core+vault+memory
         // wg disabled_tools). Drzewo decyzyjne renderuje się zawsze; instrukcje per-tool i tak gatuje
         // `ctx.availableToolNames` (agent, który wyłączył narzędzie, nie dostaje jego instrukcji).
         const hasResearcher = !!(context.hasResearcher);
@@ -136,7 +136,7 @@ export class PromptBuilder {
             category: 'core'
         });
 
-        // E2.8 A1/A3: archetyp i rola skasowane jako byty — nie wstrzykują żadnej sekcji do promptu.
+        // Archetyp i rola skasowane jako byty - nie wstrzykują żadnej sekcji do promptu.
 
         const personality = agent.personality;
         if (personality) {
@@ -164,10 +164,10 @@ export class PromptBuilder {
             });
 
         // ══ BLOK C: JAK PRACUJĘ ══
-        // E2.3 (D21): sekcja ★TRYB PRACY usunięta — tryby Gadaj/Rób już nie istnieją.
+        // Sekcja ★TRYB PRACY usunięta - tryby Gadaj/Rób już nie istnieją.
 
-        // D14: chudy rdzeń reguł + indeks skilli + dane dynamiczne (gatowane dostępnością narzędzi).
-        // E2.8 C1: zawsze renderowane (dawny guard hasMCP zniknął wraz z permissions.mcp).
+        // Chudy rdzeń reguł + indeks skilli + dane dynamiczne (gatowane dostępnością narzędzi).
+        // Zawsze renderowane (dawny guard hasMCP zniknął wraz z permissions.mcp).
         this._add('decision_tree', t('prompt.label.decision_tree'),
             this._buildDecisionTree(agent, context),
             { category: 'behavior' }
@@ -183,7 +183,7 @@ export class PromptBuilder {
             );
         }
 
-        // Delegate behavior_inject sections (sesja 46c)
+        // Delegate behavior_inject sections
         const delegates = context.delegateAssignments || [];
         for (const d of delegates) {
             if (d.overrides?.behavior_inject) {
@@ -203,8 +203,8 @@ export class PromptBuilder {
         );
 
         // ══ BLOK D: KONTEKST ══
-        // K9 (AUD-security-060): indeks artefaktów niesie surowy tekst z frontmattera notatek
-        // vaulta — sekcja danych w ogrodzeniu, NIE reguła w „JAK PRACUJĘ".
+        // Indeks artefaktów niesie surowy tekst z frontmattera notatek
+        // vaulta - sekcja danych w ogrodzeniu, NIE reguła w „JAK PRACUJĘ".
         this._addArtifactContext(context);
 
         this._add('current_date', t('prompt.label.current_date'),
@@ -220,7 +220,7 @@ export class PromptBuilder {
     // ═══════════════════════════════════════════
 
     /**
-     * Add a dynamic section (memory, RAG, oczko, inbox — injected per message by chat_view)
+     * Add a dynamic section (memory, RAG, oczko, inbox - injected per message by chat_view)
      */
     addDynamicSection(key: string, label: string, content: string, category: string = 'context'): void {
         if (!content || !content.trim()) return;
@@ -228,7 +228,7 @@ export class PromptBuilder {
         if (key === 'memory' && !sectionContent.includes('Notatki w brain/')) {
             sectionContent += '\n\n**Notatki w brain/ (możesz wczytać przez read(scope:"memory")):**\n- brak notatek';
         }
-        // SECURITY (K9 / AUD-security-030): ogrodzenie ESCAPUJE treść, więc nie da się go
+        // SECURITY: ogrodzenie ESCAPUJE treść, więc nie da się go
         // zamknąć od środka. Jedno źródło prawdy: `core/security/promptFence.js`.
         const wrapped = fenceUntrusted(sectionContent, key);
         if (!wrapped) return;
@@ -332,7 +332,7 @@ export class PromptBuilder {
         return factoryContent;
     }
 
-    // E2.8 C1: _getEnabledGroups usunięty — narzędzia gatuje disabled_tools (ToolRegistry),
+    // _getEnabledGroups usunięty - narzędzia gatuje disabled_tools (ToolRegistry),
     // a prompt filtruje per-tool przez ctx.availableToolNames. Grupy TOOL_GROUPS już nie sterują.
 
     // ─── A1: identity ───
@@ -349,17 +349,17 @@ export class PromptBuilder {
         return t('prompt.current_date', { date });
     }
 
-    // E2.8 A3: _buildRoleBehavior usunięty — rola rozpuszczona (D7).
+    // _buildRoleBehavior usunięty - rola rozpuszczona.
 
-    // ─── B1: environment (skrócone — bez README ekosystemu) ───
+    // ─── B1: environment (skrócone - bez README ekosystemu) ───
 
     _buildEnvironment(agent: PromptAgent, ctx: PromptContext): string {
         const lines: string[] = [];
         // Use factory default text (will be resolved by _resolveSection for overrides)
         lines.push(FACTORY_DEFAULTS.environment);
 
-        // Focus folders — WHITELIST or Guidance mode (always auto-generated).
-        // E2.8 B1: expand `{group}` references (Settings→Vault) to concrete folders at build time.
+        // Focus folders - WHITELIST or Guidance mode (always auto-generated).
+        // Expand `{group}` references (Settings→Vault) to concrete folders at build time.
         const focusEntries = expandFocusEntries(agent.focusFolders as never, ctx.vaultGroups as never || []);
         if (focusEntries.length > 0) {
             const isGuidance = agent.permissions?.guidance_mode === true;
@@ -394,9 +394,9 @@ export class PromptBuilder {
     // ─── B3: permissions + agent_rules ───
 
     _buildPermissions(agent: PromptAgent, _ctx: PromptContext): string {
-        // E2.8 C1: sekcja NIE wylicza już pól-widm (read_notes/edit_notes/create_files/
+        // Sekcja NIE wylicza już pól-widm (read_notes/edit_notes/create_files/
         // delete_files/mcp/web_search skasowane). O „co wolno" mówią same definicje narzędzi
-        // (model widzi TYLKO włączone — disabled_tools/filterByAgent), a o granicach przestrzeni —
+        // (model widzi TYLKO włączone - disabled_tools/filterByAgent), a o granicach przestrzeni -
         // sekcja środowiska (przypisane foldery). Zostaje ogólna reguła odmowy + reguły domenowe.
         const lines = [`## ${t('prompt.perm.header')}`];
         lines.push(t('prompt.perm.refusal'));
@@ -411,7 +411,7 @@ export class PromptBuilder {
         return lines.join('\n');
     }
 
-    // ─── C1: decision_tree — CHUDY RDZEŃ (D14) ───
+    // ─── C1: decision_tree - CHUDY RDZEŃ ───
 
     /**
      * Zbuduj sekcję „JAK PRACUJĘ": chudy rdzeń reguł cross-tool (CORE_RULES) + indeks skilli +
@@ -441,7 +441,7 @@ export class PromptBuilder {
         const hasSkills = (ctx.skills?.length || 0) > 0;
         const toolOn = (name: string) => !available || available.has(name);
 
-        // Podział na rdzeń + rozszerzone (furtka), z gatowaniem po dostępności — pure (decisionTree.js).
+        // Podział na rdzeń + rozszerzone (furtka), z gatowaniem po dostępności - pure (decisionTree.js).
         const { core, extended } = splitDecisionTreeRules(resolved, {
             available, hasSkills, extended: ctx.extendedPromptRules === true,
         });
@@ -451,21 +451,21 @@ export class PromptBuilder {
             lines.push(`- ${instr.text}`);
         }
 
-        // Furtka: ROZSZERZONE REGUŁY (dla słabszych modeli) — osobna sekcja.
+        // Furtka: ROZSZERZONE REGUŁY (dla słabszych modeli) - osobna sekcja.
         if (extended.length > 0) {
             lines.push('', `${t('prompt.dt.extended_header')}:`, ...extended.map(i => `- ${i.text}`));
         }
 
         lines.push('');
 
-        // Dane dynamiczne (NIE reguły) — gatowane realną dostępnością narzędzia.
+        // Dane dynamiczne (NIE reguły) - gatowane realną dostępnością narzędzia.
         if (toolOn('delegate')) this._injectGroupDynamics('delegacja', lines, ctx, agent);
-        // E2.9 FAZA B: świat artefaktów żywych zastąpił stare todo/plany w prompcie.
-        // K9 (AUD-security-060): indeks artefaktów NIE wchodzi już tutaj — niesie surowy
+        // Świat artefaktów żywych zastąpił stare todo/plany w prompcie.
+        // Indeks artefaktów NIE wchodzi już tutaj - niesie surowy
         // frontmatter notatek vaulta (`status`/`typ`/`id`), a to DANE, nie reguły. Renderuje
         // się jako osobna sekcja bloku D w ogrodzeniu (patrz `_addArtifactContext`).
 
-        // Indeks skilli (D17) — nazwa + opis + ścieżka read(), manual-only osobno, budżet 8000 zn.
+        // Indeks skilli - nazwa + opis + ścieżka read(), manual-only osobno, budżet 8000 zn.
         const skillIndex = this._buildSkillIndex(ctx);
         if (skillIndex) lines.push(skillIndex, '');
 
@@ -481,10 +481,10 @@ export class PromptBuilder {
     }
 
     /**
-     * Sekcja „Artefakty" (blok D) — indeks podpiętych TYPÓW + lista artefaktów agenta w toku
+     * Sekcja „Artefakty" (blok D) - indeks podpiętych TYPÓW + lista artefaktów agenta w toku
      * (pure `artifactIndex.js`, budżet 2000 zn) + AKTYWNY artefakt jako chudy JSON (4000 zn).
      *
-     * K9 (AUD-security-060): treść pochodzi z frontmattera zwykłych notatek vaulta (`status`,
+     * Treść pochodzi z frontmattera zwykłych notatek vaulta (`status`,
      * `typ`, `id`, `tytul`), czyli od kogokolwiek, kto potrafi zapisać plik. Dlatego idzie przez
      * `addDynamicSection` → `fenceUntrusted`, a nie do sekcji reguł. Gate bez zmian: narzędzie
      * `artifact_create` musi być dostępne (`availableToolNames === undefined` = brak filtrowania).
@@ -504,7 +504,7 @@ export class PromptBuilder {
     }
 
     /**
-     * Cienki indeks skilli (D17) — deleguje do pure helpera `buildSkillIndex` (testowalny node'em).
+     * Cienki indeks skilli - deleguje do pure helpera `buildSkillIndex` (testowalny node'em).
      * @param {Object} ctx
      * @returns {string} pusty string gdy agent nie ma skilli
      */
@@ -516,10 +516,10 @@ export class PromptBuilder {
      * Inject dynamic content per group (artifacts, skills, agents).
      */
     _injectGroupDynamics(groupId: string, lines: string[], ctx: PromptContext, agent: PromptAgent): void {
-        // K9 (AUD-security-060): gałąź 'artefakty' wyjechała stąd do `_addArtifactContext` —
+        // Gałąź 'artefakty' wyjechała stąd do `_addArtifactContext` -
         // indeks artefaktów jest DANYMI z vaulta i musi stać w ogrodzeniu, nie w sekcji reguł.
 
-        // D17: indeks skilli renderuje _buildSkillIndex (poza grupami drzewa) — patrz _buildDecisionTree.
+        // Indeks skilli renderuje _buildSkillIndex (poza grupami drzewa) - patrz _buildDecisionTree.
 
         if (groupId === 'delegacja') {
             // Tryby v2: unified delegate list from context
@@ -578,10 +578,10 @@ export class PromptBuilder {
     }
 
     /**
-     * Ping skrzynki — JEDNA linijka na dole drzewa decyzyjnego (S28 D4).
+     * Ping skrzynki - JEDNA linijka na dole drzewa decyzyjnego.
      *
      * Mówi TYLKO ile i od kogo. Zero treści, zero ścieżek do plików, zero instrukcji
-     * „przeczytaj to teraz" — agent sam decyduje, kiedy (i czy) zajrzeć. Brak
+     * „przeczytaj to teraz" - agent sam decyduje, kiedy (i czy) zajrzeć. Brak
      * nieprzeczytanych = brak linijki (nie zaśmiecamy promptu ani cache prefiksu).
      */
     _injectInboxNotification(lines: string[], ctx: PromptContext, _agent: PromptAgent): void {
@@ -593,7 +593,7 @@ export class PromptBuilder {
             : t('prompt.dt.inbox_ping_nosender', { count: ping.count }));
     }
 
-    // ─── C2: delegate_guide (unified sub-agenty — replaces minion_guide + master_guide) ───
+    // ─── C2: delegate_guide (unified sub-agenty - replaces minion_guide + master_guide) ───
 
     _buildDelegateGuide(agent: PromptAgent, _ctx: PromptContext): string {
         const safeName = getAgentSafeName(agent.name);
@@ -605,7 +605,7 @@ export class PromptBuilder {
 
     _buildRules(agent: PromptAgent, _ctx: PromptContext): string {
         const base = FACTORY_DEFAULTS.rules;
-        // E2.8 A6 (S9): język odpowiedzi per agent. 'pl'/'en' wymusza treść reguły językowej
+        // Język odpowiedzi per agent. 'pl'/'en' wymusza treść reguły językowej
         // (pierwsza w rules) niezależnie od globalnego locale; 'auto' → jak dziś (bez zmian).
         const lang = agent?.language;
         if (lang === 'pl' || lang === 'en') {

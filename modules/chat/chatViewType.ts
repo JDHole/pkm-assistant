@@ -1,7 +1,7 @@
 /**
  * modules/chat/chatViewType.ts — chat's own door onto the canonical view-type id.
  *
- * AUD-dead-code-182: obsidian-free by design (re-export only), so `ChatView.viewType`
+ * Obsidian-free by design (re-export only), so `ChatView.viewType`
  * and this module's barrel can both point at ONE physical constant without pulling
  * `chat_view.ts`'s obsidian-heavy import graph into consumers that need to stay
  * node-safe (e.g. `modules/shell/sidebar/findActiveChatView.ts`,

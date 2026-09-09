@@ -1,5 +1,5 @@
 /**
- * Strażnik fabrycznego worka ustawień (`defaultSettings()` + stałe B.14 SE-12/SE-13).
+ * Strażnik fabrycznego worka ustawień (`defaultSettings()` + stałych `DEFAULT_CHAT_TEMPERATURE`/`DEFAULT_CHAT_MAX_TOKENS`).
  *
  * Dwie stałe eksportowane z tego pliku mają realną, obserwowalną wartość liczbową —
  * to nie jest szczegół implementacji, tylko kontrakt: `maxTokens` i `temperature`
@@ -12,7 +12,7 @@ import test from 'ava';
 
 import { defaultSettings, DEFAULT_CHAT_MAX_TOKENS, DEFAULT_CHAT_TEMPERATURE } from './defaultSettings.js';
 
-test('DEFAULT_CHAT_MAX_TOKENS jest dokładnie 4096 (legacy limit odpowiedzi, B.14 SE-13)', t => {
+test('DEFAULT_CHAT_MAX_TOKENS jest dokładnie 4096 (legacy limit odpowiedzi)', t => {
     t.is(DEFAULT_CHAT_MAX_TOKENS, 4096);
 });
 
@@ -22,7 +22,7 @@ test('chat.maxTokens w worku fabrycznym jest dokładnie 4096, nie inną liczbą'
     t.is(pkm.chat?.maxTokens, 4096);
 });
 
-test('DEFAULT_CHAT_TEMPERATURE jest dokładnie 0.7 (suwak w Ustawieniach, B.14 SE-12)', t => {
+test('DEFAULT_CHAT_TEMPERATURE jest dokładnie 0.7 (suwak w Ustawieniach)', t => {
     t.is(DEFAULT_CHAT_TEMPERATURE, 0.7);
 });
 

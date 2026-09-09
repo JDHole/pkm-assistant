@@ -1,19 +1,19 @@
 /**
- * artifactIndex.js — sekcja „artefakty żywe" do system promptu (E2.9 FAZA B / B3).
+ * artifactIndex.js - sekcja „artefakty żywe" do system promptu.
  *
  * Pure module (i18n + node-safe silnik artefaktów) → node-testowalny. Wzór:
  * `modules/prompts/skillIndex.js` (PromptBuilder przez łańcuch importów wciąga `obsidian`, więc
  * logika sekcji żyje osobno, żeby dało się ją pokryć testem).
  *
  * Dwie funkcje:
- *  - `buildArtifactIndex(types, artifacts)` — indeks podpiętych TYPÓW (`📄 typ: opis` + nagłówki
+ *  - `buildArtifactIndex(types, artifacts)` - indeks podpiętych TYPÓW (`📄 typ: opis` + nagłówki
  *    sekcji szablonu) + lista artefaktów agenta w toku (status ≠ zamkniety; filtruje wołający).
  *    Budżet 2000 zn.
- *  - `buildActiveArtifactBlock(thin)` — AKTYWNY artefakt jako pełny chudy JSON (limit 4000 zn).
+ *  - `buildActiveArtifactBlock(thin)` - AKTYWNY artefakt jako pełny chudy JSON (limit 4000 zn).
  */
 import { t } from '../../core/i18n/index.js';
 // Nagłówki sekcji szablonu liczymy TYM SAMYM parserem, którym patcher szuka sekcji
-// (`findSection`) — własny regex tutaj rozjechałby się z silnikiem i indeks kłamałby modelowi.
+// (`findSection`) - własny regex tutaj rozjechałby się z silnikiem i indeks kłamałby modelowi.
 import { parseArtifact } from '../artifacts/index.js';
 
 /** Budżet znaków indeksu typów + listy artefaktów (nadmiar → „…i N kolejnych"). */
@@ -52,7 +52,7 @@ export function buildArtifactIndex(types: unknown = [], artifacts: unknown = [],
             const line = `  📄 ${ty.name}: ${opis}`;
             if (!fits(line)) break;
             push(line);
-            // Nagłówki szablonu — `heading` w `sekcje`/`artifact_update` musi trafić DOKŁADNIE
+            // Nagłówki szablonu - `heading` w `sekcje`/`artifact_update` musi trafić DOKŁADNIE
             // w jeden z nich, inaczej patch wraca `not_found`. Szablon bez nagłówków = brak linii.
             const headings = extractTemplateHeadings(ty.template);
             if (headings.length === 0) continue;
@@ -92,7 +92,7 @@ function extractTemplateHeadings(template: unknown): string[] {
     try {
         return parseArtifact(template).sections.map(s => s.heading).filter(Boolean);
     } catch {
-        return []; // szablon usera bywa dowolny — indeks nie ma prawa wybuchnąć
+        return []; // szablon usera bywa dowolny - indeks nie ma prawa wybuchnąć
     }
 }
 

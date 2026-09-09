@@ -1,10 +1,9 @@
 /**
- * CostLog — append-only JSONL log per LLM call (Sprint 03 Z10).
+ * CostLog - append-only JSONL log per LLM call.
  *
- * Path: `.pkm-assistant/cost_log.jsonl` (per-vault, NIE per-agent — global view).
+ * Path: `.pkm-assistant/cost_log.jsonl` (per-vault, NIE per-agent - global view).
  *
- * Z17 doda modal viewer z agregacją per agent / dzień / miesiąc / total.
- * Tu (Z10) zapisujemy minimalne entries dla archivist runs + przyszłych sub-agentów.
+ * Zapisuje minimalne entries dla archivist runs + przyszłych sub-agentów.
  *
  * Entry shape:
  *   {
@@ -27,9 +26,9 @@ import { readIfExists } from '../../core/index.js';
 const COST_LOG_PATH = '.pkm-assistant/cost_log.jsonl';
 
 /**
- * Krótki, czytelny opis `cause` z `readIfExists` (K4, self-append) — do wklejenia w komunikat
- * warn zamiast suchego „nie mogę odczytać X" bez powodu (za weryfikacją opus). Ta sama logika
- * co `causeText` w `AgentMemory.ts` — duplikat świadomy, plik jest celowo bez importów poza
+ * Krótki, czytelny opis `cause` z `readIfExists` - do wklejenia w komunikat
+ * warn zamiast suchego „nie mogę odczytać X" bez powodu. Ta sama logika
+ * co `causeText` w `AgentMemory.ts` - duplikat świadomy, plik jest celowo bez importów poza
  * `log`/`readIfExists` (patrz styl reszty modułu).
  */
 function causeText(cause: unknown): string {
@@ -41,7 +40,6 @@ function causeText(cause: unknown): string {
 /**
  * Approximate USD cost per 1M tokens (input/output).
  * Used as fallback when LLM API doesn't return cost. Updated 2026-04 prices.
- * Z17 modal może pokazać disclaimer "approximate" + pozwolić user override.
  */
 const PRICE_PER_M: Record<string, { input: number; output: number }> = {
     'claude-haiku-4-5': { input: 1.0, output: 5.0 },
@@ -55,7 +53,7 @@ const PRICE_PER_M: Record<string, { input: number; output: number }> = {
     'lm-studio':         { input: 0, output: 0 }
 };
 
-/** Wejście szacunku kosztu — `model` bywa nieznane/puste i wtedy szacunek to 0. */
+/** Wejście szacunku kosztu - `model` bywa nieznane/puste i wtedy szacunek to 0. */
 export interface CostEstimateInput {
     model?: string | null;
     inputTokens?: number;
@@ -71,7 +69,7 @@ export function estimateCostUsd({ model, inputTokens = 0, outputTokens = 0 }: Co
         const matched = Object.keys(PRICE_PER_M).find(k => key.startsWith(k));
         if (matched) prices = PRICE_PER_M[matched];
     }
-    if (!prices) return 0; // unknown model — Z17 może mieć user override
+    if (!prices) return 0; // unknown model
     return (inputTokens / 1_000_000) * prices.input + (outputTokens / 1_000_000) * prices.output;
 }
 
@@ -84,7 +82,7 @@ export interface CostLogVaultLike {
     };
 }
 
-/** Wpis podawany przez wołacza — wszystko opcjonalne, `append` normalizuje braki. */
+/** Wpis podawany przez wołacza - wszystko opcjonalne, `append` normalizuje braki. */
 export interface CostLogEntryInput {
     agent?: string;
     role?: string;
@@ -118,7 +116,7 @@ export interface CostLogRecord {
 }
 
 export class CostLog {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare vault: CostLogVaultLike;
     declare path: string;
 
@@ -129,7 +127,7 @@ export class CostLog {
 
     /**
      * Append one cost entry to JSONL.
-     * Best-effort — błąd zapisu loguje warn ale NIE rzuca (cost log to nie krytyczna ścieżka).
+     * Best-effort - błąd zapisu loguje warn ale NIE rzuca (cost log to nie krytyczna ścieżka).
      */
     async append(entry: CostLogEntryInput = {}): Promise<CostLogRecord> {
         const ts = new Date().toISOString();
@@ -155,7 +153,7 @@ export class CostLog {
         };
         const line = JSON.stringify(safe) + '\n';
         try {
-            // Self-append (klasa K4): jak `AgentMemory.appendBrainLog` — `readIfExists` czyta
+            // Self-append: jak `AgentMemory.appendBrainLog` - `readIfExists` czyta
             // najpierw, więc kłamiący `exists()` (Dysk Google) nie może przepchnąć kodu w
             // gałąź „pierwszy wpis" i nadpisać dotychczasowego dziennika kosztów jedną linią.
             const probe = await readIfExists(this.vault.adapter, this.path);
@@ -174,7 +172,7 @@ export class CostLog {
 
     /**
      * Read all entries (parsed). Z17 modal użyje do agregacji.
-     * Best-effort — corrupt lines skipowane.
+     * Best-effort - corrupt lines skipowane.
      */
     async readAll(): Promise<unknown[]> {
         try {

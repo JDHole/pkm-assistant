@@ -1,5 +1,5 @@
 /**
- * AUD-wydajnosc-017 / 048 / 049 — licznik tokenów okna liczony PRZYROSTOWO.
+ * Licznik tokenów okna liczony PRZYROSTOWO.
  *
  * `addMessage` sprawdza hard limit po KAŻDYM dopisku, a pętla agenta dopisuje wyniki narzędzi
  * po jednym (`store.appendToolResult`), więc pełne przeliczenie okna od zera dawało N przeliczeń
@@ -117,7 +117,7 @@ test('suma tokenów per wiadomość liczona z tej samej pamięci co całe okno',
     }
 });
 
-test('dopisanie wyniku narzędzia skanuje TYLKO nową treść, nie całą historię (AUD-wydajnosc-017)', async t => {
+test('dopisanie wyniku narzędzia skanuje TYLKO nową treść, nie całą historię', async t => {
     const rw: TestDynamic = new RollingWindow({ maxTokens: 10_000_000, systemPrompt: 'System prompt.' });
     for (let i = 0; i < 200; i++) await rw.addMessage('user', ('stara wiadomość numer ' + i + ' ').repeat(20));
     const historyChars = rw.messages.reduce((sum: number, m: TestDynamic) => sum + String(m.content).length, 0);
@@ -132,13 +132,12 @@ test('dopisanie wyniku narzędzia skanuje TYLKO nową treść, nie całą histor
     for (let n = 1; n <= 5; n++) await rw.addMessage('tool', payload, { tool_call_id: 't' + n });
     const scanned = rw._statsScannedChars - before;
 
-    // Przed naprawą: 6 dopisków × pełne okno (>600 000 znaków), bo każdy `addMessage` sprawdza
-    // hard limit. Dziś skanujemy wyłącznie NOWY materiał.
+    // Każdy `addMessage` sprawdza hard limit, ale skanuje wyłącznie NOWY materiał, nie całe okno.
     t.true(scanned < 5 * payload.length + 2000, 'przeskanowano ' + scanned + ' znaków — to nadal pełne przeliczenia');
     t.true(scanned < historyChars / 10, 'przeskanowano ' + scanned + ' znaków przy historii ' + historyChars);
 });
 
-test('Token Viewer: getBreakdown NIE skanuje historii po raz drugi (AUD-wydajnosc-049)', async t => {
+test('Token Viewer: getBreakdown NIE skanuje historii po raz drugi', async t => {
     const rw: TestDynamic = new RollingWindow({ maxTokens: 10_000_000, systemPrompt: 'System prompt.' });
     for (let i = 0; i < 100; i++) await rw.addMessage('user', ('wiadomość ' + i + ' ').repeat(30));
 
@@ -163,7 +162,7 @@ test('mutacja W MIEJSCU (Oczko dokłada obraz do ostatniej wiadomości) jest wid
     t.is(rw.getCurrentTokenCount(), legacyTokenCount(rw));
 });
 
-test('awaryjne przycinanie okna nie przelicza historii w kółko (AUD-wydajnosc-048)', t => {
+test('awaryjne przycinanie okna nie przelicza historii w kółko', t => {
     const rw: TestDynamic = new RollingWindow({ maxTokens: 60_000, systemPrompt: 'System prompt.' });
     for (let i = 0; i < 800; i++) {
         rw.messages.push({ role: i % 2 === 0 ? 'user' : 'assistant', content: ('wiadomość ' + i + ' ').repeat(120) });

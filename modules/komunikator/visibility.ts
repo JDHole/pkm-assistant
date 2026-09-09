@@ -1,8 +1,8 @@
 /**
- * visibility.js — JEDNO ŹRÓDŁO PRAWDY „kto uczestniczy w komunikatorze" (S28 D6).
+ * visibility.js — JEDNO ŹRÓDŁO PRAWDY „kto uczestniczy w komunikatorze".
  *
- * Model: zamiast szlabanu „kto może pisać do kogo" (dawne `can_message`, skasowane w E2.8 F7)
- * agent ma jeden przełącznik `komunikator_visible` (default `true`). Wyłączony agent jest
+ * Model: zamiast szlabanu „kto może pisać do kogo" agent ma jeden przełącznik
+ * `komunikator_visible` (default `true`). Wyłączony agent jest
  * DUCHEM: nie ma go na liście adresatów w UI ani w opisie narzędzia `kom_send`, jego skrzynka
  * znika z paneli, ping o nim milczy, a wysyłka do niego zwraca ten sam błąd co literówka
  * w nazwie („nieznany adresat") — zero przecieku, że w ogóle istnieje.

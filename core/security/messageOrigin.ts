@@ -1,15 +1,15 @@
 /**
  * Proweniencja wiadomości czatu — KTO naprawdę napisał tekst tury.
  *
- * K7 / AUD-security-062, 088, 003 (bieg 2026-08-22). Do tej pory o przywilejach człowieka
- * decydowało to, KTÓRA funkcja UI narysowała dymek: `append_message('user', …)` rejestrowało
- * adresy z tekstu w rejestrze proweniencji (`isUrlKnown` → bramka `web_read`), a `send_message`
- * parsowało z niego markery `@@skill:` i komendy `/`. Każda ścieżka, która wkłada tekst do pola
- * wpisywania i woła `send_message()` Z KODU — guzik artefaktu (`artifactSummon`), propozycja
- * delegacji (`chat_artifacts`), komentarz inline (`src/main.ts`), auto-tura po subie — dostawała
- * więc pieczątkę „to pisał człowiek", choć treść pochodzi od modelu albo z notatki/strony.
+ * Gdyby o przywilejach człowieka decydowało to, KTÓRA funkcja UI narysowała dymek —
+ * `append_message('user', …)` rejestrujące adresy z tekstu w rejestrze proweniencji
+ * (`isUrlKnown` → bramka `web_read`), a `send_message` parsujące z niego markery `@@skill:`
+ * i komendy `/` — to każda ścieżka, która wkłada tekst do pola wpisywania i woła
+ * `send_message()` Z KODU (guzik artefaktu `artifactSummon`, propozycja delegacji
+ * `chat_artifacts`, komentarz inline w `src/main.ts`, auto-tura po subie) dostawałaby
+ * pieczątkę „to pisał człowiek", choć treść pochodzi od modelu albo z notatki/strony.
  *
- * Od teraz proweniencja jest JAWNA i jest jedna: pole `origin` w `meta` wiadomości.
+ * Dlatego proweniencja jest JAWNA i jest jedna: pole `origin` w `meta` wiadomości.
  *   • `'human'` nadaje WYŁĄCZNIE ścieżka z pola wpisywania (guzik Wyślij, Enter, kolejka).
  *   • wszystko inne — w tym BRAK znacznika — jest maszyną (fail-closed).
  *

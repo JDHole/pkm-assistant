@@ -1,12 +1,11 @@
 /**
  * SubAgentRunner._executeTool — KONTRAKT ścieżki AWARYJNEJ (bieg bez `MCPClient`).
  *
- * Kontekst (audyt nocny 2026-09-01, moduł 19). `_executeTool` ma dwie drogi wykonania
- * narzędzia i one NIE są równoważne:
+ * `_executeTool` ma dwie drogi wykonania narzędzia i one NIE są równoważne:
  *
  *   (A) przez `MCPClient` — droga produkcyjna. Wiezie do klienta trzy rzeczy naraz:
- *       `autonomy`, `delegationDepth` i `scopeFolders` (bariera folderów suba, S33 Z1),
- *       plus whitelistę wołacza (K11). Klient wstrzykuje je dalej — do argumentów
+ *       `autonomy`, `delegationDepth` i `scopeFolders` (bariera folderów suba),
+ *       plus whitelistę wołacza. Klient wstrzykuje je dalej — do argumentów
  *       narzędzia i do `checkPermission`.
  *   (B) fallback `tool.execute(args, app, plugin)` — gdy `plugin?.mcpClient` jest puste
  *       (stary plugin, test bez DI, bieg z gołym obiektem plugin). Ta droga omija klienta,
@@ -16,20 +15,20 @@
  *
  *   1. GREEN — whitelista rodzic∩sub obowiązuje na OBU drogach. Odmowa zapada PRZED
  *      rozgałęzieniem, więc fallback nie jest dziurą w liście narzędzi.
- *   2. GREEN — `_invocationDelegationDepth` jedzie fallbackiem. To jest naprawa S33 Z1:
- *      bez niej `delegate` wołany tą drogą startowałby zawsze od zera, czyli rekurencja
+ *   2. GREEN — `_invocationDelegationDepth` jedzie fallbackiem: bez niego
+ *      `delegate` wołany tą drogą startowałby zawsze od zera, czyli rekurencja
  *      bez kagańca.
- *   3. ROZSTRZYGNIĘTE (F2.13, release 2.2.0/W3, 2026-09-04) — `scopeFolders` fallbackiem
- *      dalej NIE JEDZIE, ale to dziś ŚWIADOMY KONTRAKT, nie dziura do dopisania. Fallback
- *      nie ma jak wyegzekwować bariery folderów suba (żadna bramka `PermissionSystem` nie
- *      stoi na tej ścieżce — jedyna ochrona to whitelista NAZW z pkt 1), więc zamiast cicho
- *      rozszerzać suba z „konkretne foldery" na „cały vault" (fail-open), `_executeTool`
- *      ODMAWIA wykonania KAŻDEGO narzędzia, gdy wołacz podał niepusty `scopeFolders`
- *      (`t('subagent.tool_scope_unenforceable', …)`, fail-closed). Test charakteryzujący tę
- *      odmowę już istnieje w `SubAgentRunner.test.ts` („_executeTool (fallback bez MCPClient)
- *      ODMAWIA, gdy scopeFolders nie da się wyegzekwować" + siostrzany test na pustą listę)
- *      — nie dublowany tutaj. Ten plik zostaje jako kontrakt ścieżki (B) w całości; szczegóły
- *      decyzji: `modules/sub-agents/CLAUDE.md` gotcha K11.
+ *   3. ROZSTRZYGNIĘTE — `scopeFolders` fallbackiem dalej NIE JEDZIE, ale to dziś ŚWIADOMY
+ *      KONTRAKT, nie dziura do dopisania. Fallback nie ma jak wyegzekwować bariery folderów
+ *      suba (żadna bramka `PermissionSystem` nie stoi na tej ścieżce — jedyna ochrona to
+ *      whitelista NAZW z pkt 1), więc zamiast cicho rozszerzać suba z „konkretne foldery"
+ *      na „cały vault" (fail-open), `_executeTool` ODMAWIA wykonania KAŻDEGO narzędzia, gdy
+ *      wołacz podał niepusty `scopeFolders` (`t('subagent.tool_scope_unenforceable', …)`,
+ *      fail-closed). Test charakteryzujący tę odmowę już istnieje w `SubAgentRunner.test.ts`
+ *      („_executeTool (fallback bez MCPClient) ODMAWIA, gdy scopeFolders nie da się
+ *      wyegzekwować" + siostrzany test na pustą listę) — nie dublowany tutaj. Ten plik
+ *      zostaje jako kontrakt ścieżki (B) w całości; szczegóły decyzji:
+ *      `modules/sub-agents/CLAUDE.md`, gotcha o whitelistach wołacza w delegacji.
  */
 import test from 'ava';
 import { SubAgentRunner as RuntimeSubAgentRunner } from './SubAgentRunner.js';
@@ -86,7 +85,7 @@ test('fallback bez MCPClient: whitelista rodzic∩sub obowiązuje tak samo jak p
     );
 });
 
-test('fallback bez MCPClient: znacznik głębokości delegacji jedzie do argumentów narzędzia (S33 Z1)', async t => {
+test('fallback bez MCPClient: znacznik głębokości delegacji jedzie do argumentów narzędzia', async t => {
     const { widziane, registry } = makeSpyTool('delegate');
     const runner = makeRunnerBezKlienta(registry);
 

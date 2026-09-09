@@ -77,7 +77,7 @@ class SettingsRegistryClass {
     }
 
     getActiveId(defaultId: string | null = null): string | null {
-        // Okno przez `hostWindow` (Obsidian: window, Node: global z preloadu AVA) — `render()`
+        // Okno przez `hostWindow` (Obsidian: window, Node: global z preloadu AVA) - `render()`
         // jest wołane wprost w AVA (`SettingsRegistry.pkmSettingsV2.test.ts`), gdzie `location`
         // nie istnieje (stąd `?.`); w Obsidianie to zwykłe `window.location`.
         const hash = hostWindow.location?.hash || '';
@@ -87,10 +87,8 @@ class SettingsRegistryClass {
     }
 
     // TS-any: Obsidian augments HTMLElement with the UI helpers used by legacy settings renderers.
-    // AUD-dead-code-256 (2026-09-02): the `pkm-settings-v2*` namespace (6 names) was dropped —
-    // it never had a single CSS rule in any of the six stylesheets. Styling was carried entirely
-    // by the live `pkm-settings-*` names dubbed alongside them (`src/styles.css:831-847`); this
-    // render() now paints ONLY the live names.
+    // This render() paints ONLY the live `pkm-settings-*` names (`src/styles.css:831-847`) - the
+    // `pkm-settings-v2*` namespace has no CSS rule in any stylesheet and must not be painted.
     async render(containerEl: any, plugin: unknown, options: { defaultId?: string } = {}): Promise<void> {
         containerEl.empty();
         containerEl.classList.add('cs-root');
@@ -115,7 +113,7 @@ class SettingsRegistryClass {
             button.textContent = `${section.icon ? section.icon + ' ' : ''}${section.label}`;
             if (section.id === activeId) button.classList.add('mod-cta');
             button.addEventListener('click', async () => {
-                // `hostWindow` — patrz uzasadnienie przy getActiveId() wyżej.
+                // `hostWindow` - patrz uzasadnienie przy getActiveId() wyżej.
                 if (hostWindow.location) hostWindow.location.hash = `settings/${section.id}`;
                 await this.render(containerEl, plugin, options);
             });
@@ -126,8 +124,8 @@ class SettingsRegistryClass {
 
         const fields = this.getSubFields(active.id);
         if (fields.length > 0) {
-            // `pkm-settings-v2__subfields` had zero dubler and zero CSS rule anywhere (unlike its
-            // four siblings above) — dropped outright rather than renamed to another dead class.
+            // `pkm-settings-v2__subfields` has zero dubler and zero CSS rule anywhere (unlike its
+            // four siblings above) - dropped outright rather than renamed to another dead class.
             // Content is styled by the sub-field renderers' own `setting-item` markup.
             const subContainer = content.createDiv();
             for (const field of fields) {

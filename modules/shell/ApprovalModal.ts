@@ -10,7 +10,7 @@ import { t } from '../../core/i18n/index.js';
 // TS-any: approval payloads are open-ended tool action records assembled by heterogeneous runtime tools.
 type Runtime = any;
 
-/** S33 Z3: sufit długości JSON-a argumentów w modalu (dłuższe tniemy z dopiskiem). */
+/** Sufit długości JSON-a argumentów w modalu (dłuższe tniemy z dopiskiem). */
 const EXTERNAL_ARGS_LIMIT = 1500;
 
 export class ApprovalModal extends Modal {
@@ -71,9 +71,9 @@ export class ApprovalModal extends Modal {
             pathEl.createEl('code', { text: this.action.targetPath });
         }
 
-        // K16 (AUD-security-102/126): źródło operacji, gdy narzędzie dotyka DWÓCH plików.
-        // `add_text_to_image` czyta jeden obraz i zapisuje drugi — wyżej widać wyłącznie cel,
-        // więc user zatwierdzał połowę operacji, nie wiedząc, SKĄD plik zostanie wzięty.
+        // Źródło operacji, gdy narzędzie dotyka DWÓCH plików.
+        // `add_text_to_image` czyta jeden obraz i zapisuje drugi - wyżej widać wyłącznie cel,
+        // więc bez tego pola user zatwierdzałby połowę operacji, nie wiedząc, SKĄD plik zostanie wzięty.
         // Pole jest opcjonalne: narzędzia jednościeżkowe go nie podają i nic się nie zmienia.
         if (this.action.sourcePath) {
             const srcEl = details.createDiv('action-path action-source-path');
@@ -84,7 +84,7 @@ export class ApprovalModal extends Modal {
             srcEl.createEl('code', { text: String(this.action.sourcePath) });
         }
 
-        // Content preview — different per action type
+        // Content preview - different per action type
         this._renderContentPreview(contentEl);
 
         // Deny reason field (hidden by default)
@@ -101,7 +101,7 @@ export class ApprovalModal extends Modal {
             }
         });
 
-        // Redirect instruction field (hidden by default) — third path: stop + steer.
+        // Redirect instruction field (hidden by default) - third path: stop + steer.
         const redirectDiv = contentEl.createDiv({ cls: 'approval-redirect-reason pkm-hidden' });
         redirectDiv.createEl('label', { text: t('approval.redirect_label') });
         const redirectInput = redirectDiv.createEl('textarea', {
@@ -120,7 +120,7 @@ export class ApprovalModal extends Modal {
         // Buttons
         const buttonContainer = contentEl.createDiv('approval-buttons');
 
-        // Deny button — first click shows reason field, second confirms
+        // Deny button - first click shows reason field, second confirms
         let denyClicked = false;
         const denyBtn = buttonContainer.createEl('button', {
             cls: 'mod-warning'
@@ -147,7 +147,7 @@ export class ApprovalModal extends Modal {
         approveBtn.appendText(t('approval.approve'));
         approveBtn.onclick = () => this._resolve({ result: 'approve', reason: '' });
 
-        // Always approve button. E3.1 (B4/D-B): dla narzędzia zewnętrznego serwera „zawsze"
+        // Always approve button. Dla narzędzia zewnętrznego serwera „zawsze"
         // dotyczy TEGO KONKRETNEGO narzędzia (reguła external.call::serverId__tool, nie hurt),
         // więc etykieta + tooltip mówią to wprost.
         const isExternalCall = this.action.type === 'external.call';
@@ -159,7 +159,7 @@ export class ApprovalModal extends Modal {
         if (isExternalCall) alwaysBtn.title = t('approval.always_this_tool_desc');
         alwaysBtn.onclick = () => this._resolve({ result: 'always', reason: '' });
 
-        // Redirect button — third path: stop the action and tell the agent what to do
+        // Redirect button - third path: stop the action and tell the agent what to do
         // instead. First click reveals the instruction field, second click confirms.
         let redirectClicked = false;
         const redirectBtn = buttonContainer.createEl('button', {
@@ -234,14 +234,14 @@ export class ApprovalModal extends Modal {
             }
             case 'web.search':
                 return t('approval.desc.web_search', { name, query: a.targetPath || t('approval.fallback.query') });
-            // K11 (AUD-security-069): pobranie adresu to nie wyszukiwanie — opis ma mowic,
+            // Pobranie adresu to nie wyszukiwanie - opis ma mowic,
             // co naprawde sie stanie (zadanie HTTP pod adres wskazany przez model).
             case 'web.read':
                 return t('approval.desc.web_read', { name, url: a.targetPath || t('approval.fallback.query') });
             case 'image.generate': {
-                // K2 (AUD-security-048): `targetPath` to od teraz ŚCIEŻKA ZAPISU (bramka musi
+                // `targetPath` to ŚCIEŻKA ZAPISU (bramka musi
                 // oceniać cel, nie tekst modelu), więc prompt przyjeżdża osobnym polem.
-                // `add_text_to_image` promptu nie ma — wtedy user widzi ścieżkę, i słusznie.
+                // `add_text_to_image` promptu nie ma - wtedy user widzi ścieżkę, i słusznie.
                 const prompt = a.imagePrompt || a.targetPath || t('approval.fallback.image');
                 const short = prompt.length > 60 ? prompt.slice(0, 60) + '...' : prompt;
                 return t('approval.desc.generate_image', { name, prompt: short });
@@ -249,7 +249,7 @@ export class ApprovalModal extends Modal {
             case 'mcp.call':
                 return t('approval.desc.default', { name });
             case 'external.call': {
-                // E3.1: narzędzie zewnętrznego serwera MCP. Pokaż serwer + odprefiksowaną nazwę.
+                // Narzędzie zewnętrznego serwera MCP. Pokaż serwer + odprefiksowaną nazwę.
                 const server = a.externalServer || t('approval.fallback.server');
                 const prefix = a.externalServer ? `${a.externalServer}__` : '';
                 const rawTool = a.approvalTarget || a.toolName || '';
@@ -257,7 +257,7 @@ export class ApprovalModal extends Modal {
                 return t('approval.desc.external_call', { name, server, tool: toolLabel });
             }
             default:
-                // Group B tools (E2.9: idea_review/plan_review skasowane — aliasy remapują na artifact_create)
+                // Group B tools
                 if (a.toolName === 'delegate')
                     return t('approval.desc.delegate', { name, task: a.targetPath || t('approval.fallback.task') });
                 if (a.toolName === 'connect_to_server')
@@ -268,7 +268,7 @@ export class ApprovalModal extends Modal {
         }
     }
 
-    /** @returns {[string, string]} `[iconMarkup, labelText]` — label is ALWAYS inserted as text. */
+    /** @returns {[string, string]} `[iconMarkup, labelText]` - label is ALWAYS inserted as text. */
     _getActionLabel() {
         const labels: Record<string, [Runtime, string]> = {
             'vault.write': [UiIcons.edit(14), t('approval.type.vault_write')],
@@ -297,14 +297,14 @@ export class ApprovalModal extends Modal {
             'vault.create_folder': 'info',
             'todo.save': 'info',
             'mcp.call': 'info',
-            // E3.1: cudzy serwer/kod = RED w łańcuchu ryzyka → badge „danger".
+            // Cudzy serwer/kod = RED w łańcuchu ryzyka → badge „danger".
             'external.call': 'danger'
         };
         return severities[this.action.type] || 'info';
     }
 
     /**
-     * S33 Z3: pełne argumenty wywołania narzędzia zewnętrznego serwera. User zatwierdza
+     * Pełne argumenty wywołania narzędzia zewnętrznego serwera. User zatwierdza
      * KONKRETNE dane lecące do cudzego procesu/usługi, nie samą nazwę narzędzia.
      * Znaczniki `_invocation*` są odcięte wcześniej (MCPClient → stripInternalArgs).
      * @param {HTMLElement} contentEl
@@ -335,7 +335,7 @@ export class ApprovalModal extends Modal {
         const a = this.action;
 
         if (a.type === 'external.call') {
-            // Zewnętrzny serwer MCP — zamiast ogólnego preview pokazujemy pełne argumenty.
+            // Zewnętrzny serwer MCP - zamiast ogólnego preview pokazujemy pełne argumenty.
             this._renderExternalArgs(contentEl);
         } else if (a.type === 'agent.message' && a.messageContent) {
             // Message preview

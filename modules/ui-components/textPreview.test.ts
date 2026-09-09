@@ -1,9 +1,9 @@
 import test from 'ava';
 import { truncatePreview } from './textPreview.js';
 
-// AUD-code-review-099: test równoważności — helper musi dawać dokładnie ten sam wynik co stary,
-// dwukrotnie skopiowany inline wyraz `text.length > 500 ? text.slice(0, 500) + '...' : text`
-// (InlineCommentModal.ts + SendToAgentModal.ts).
+// Test równoważności — helper musi dawać dokładnie ten sam wynik co inline wyrażenie
+// `text.length > 500 ? text.slice(0, 500) + '...' : text`, które bez tego helpera trzeba by
+// duplikować (InlineCommentModal.ts + SendToAgentModal.ts).
 function legacyInline(text: string): string {
     return text.length > 500 ? text.slice(0, 500) + '...' : text;
 }

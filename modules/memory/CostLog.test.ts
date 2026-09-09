@@ -1,10 +1,10 @@
 /**
- * `CostLog` nie miała dotąd żadnego testu — pierwszy plik dla tej klasy.
+ * `CostLog` nie miała dotąd żadnego testu - pierwszy plik dla tej klasy.
  *
- * Fokus tej rundy: bramka self-append w `append()` (K4, ta sama klasa błędu co
+ * Bramka self-append w `append()` (ta sama klasa błędu co
  * `AgentMemory_self_append.test.ts`). Stary wzorzec `if (await exists()) { read() }` przed
  * dopisaniem nowej linii JSONL na Dysku Google potrafi dostać `exists()===false` dla PLIKU,
- * KTÓRY JEST — kod nigdy nie próbuje `read()`, traktuje log jako świeży, i zapis NADPISUJE
+ * KTÓRY JEST - kod nigdy nie próbuje `read()`, traktuje log jako świeży, i zapis NADPISUJE
  * całą dotychczasową historię kosztów jedną nową linią. `readIfExists` (core/utils/vaultFs.ts)
  * czyta najpierw, więc kłamstwo `exists()` nie ma jak przeciąć drogi do treści.
  */
@@ -52,7 +52,7 @@ test('append: drugi wpis DOPISUJE, nie nadpisuje (uczciwy adapter)', async t => 
     t.true(lines[1].includes('"agent":"Tola"'));
 });
 
-// ───────────────── self-append (K4): odczyt-najpierw zamiast exists()+read() ─────────────────
+// ───────────────── self-append: odczyt-najpierw zamiast exists()+read() ─────────────────
 
 test('append: kłamiący exists() na WŁASNYM cost_log.jsonl NIE gubi wcześniejszych wpisów', async t => {
     const { vault, files } = makeVault();

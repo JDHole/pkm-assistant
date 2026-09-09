@@ -1,7 +1,7 @@
 /**
  * Kanoniczny slug tożsamości agenta (nazwa → bezpieczny fragment ścieżki na dysku).
  *
- * AUD-code-review-029: to samo wyrażenie `toLowerCase().replace(/[^a-z0-9]/g,'_')` żyło
+ * To samo wyrażenie `toLowerCase().replace(/[^a-z0-9]/g,'_')` żyło
  * jako 20 niezależnych kopii w 8 modułach (+ `core/security/AccessGuard`). Format jest
  * ŚWIADOMIE zamrożony — to nie jest miejsce na ulepszenia (Unicode/polskie znaki/limit
  * długości): każda zmiana wyniku przesuwa istniejące foldery `.pkm-assistant/agents/<safeName>/`

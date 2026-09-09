@@ -2,8 +2,8 @@
  * `PluginRuntime` — pierwszy w historii tego kodu BEHAWIORALNY test bootu.
  *
  * Wszystko stoi na atrapie {@link PluginHost} + `SettingsIo` w pamięci: zero Obsidiana,
- * zero dysku. Do clean-room cała ścieżka startu miała wyłącznie testy REGEXOWE PO ŹRÓDLE
- * (luki F-03/F-04/F-10), bo środowisko importowało `obsidian` i nie wstawało w AVA.
+ * zero dysku. Wcześniej cała ścieżka startu miała wyłącznie testy REGEXOWE PO ŹRÓDLE,
+ * bo środowisko importowało `obsidian` i nie wstawało w AVA.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -97,7 +97,6 @@ function makeConfig(overrides: Partial<RuntimeConfig> = {}): RuntimeConfig {
     } as RuntimeConfig;
 }
 
-// ── C1.1 ─────────────────────────────────────────────────────────────────────
 test('konstruktor jest synchroniczny i tani — zero I/O, state "loading"', t => {
     const spy: IoSpy = { reads: [], writes: [] };
     let loadDataCalls = 0;
@@ -111,7 +110,6 @@ test('konstruktor jest synchroniczny i tani — zero I/O, state "loading"', t =>
     t.is(loadDataCalls, 0, 'konstruktor wołał loadData()');
 });
 
-// ── C1.2 ─────────────────────────────────────────────────────────────────────
 test('boot nie robi NIC, dopóki layout nie stoi', async t => {
     const spy: IoSpy = { reads: [], writes: [] };
     let release: (() => void) | null = null;
@@ -129,14 +127,12 @@ test('boot nie robi NIC, dopóki layout nie stoi', async t => {
     t.is(runtime.state, 'loaded');
 });
 
-// ── C1.3 ─────────────────────────────────────────────────────────────────────
 test('brak workspace (goły Node) → boot dochodzi do "loaded"', async t => {
     const runtime = new PluginRuntime(makeHost({ onLayoutReady: null }), makeConfig());
     await runtime.boot();
     t.is(runtime.state, 'loaded');
 });
 
-// ── C1.4 ─────────────────────────────────────────────────────────────────────
 test('state = "loaded" PRZED emisją zdarzenia "loaded"', async t => {
     const runtime = new PluginRuntime(makeHost(), makeConfig());
     let stateWidzianyPrzezSluchacza: string | null = null as string | null;
@@ -144,10 +140,9 @@ test('state = "loaded" PRZED emisją zdarzenia "loaded"', async t => {
 
     await runtime.boot();
 
-    t.is(stateWidzianyPrzezSluchacza, 'loaded', 'słuchacz zobaczył stan sprzed przypisania — klasyczny wyścig E-13');
+    t.is(stateWidzianyPrzezSluchacza, 'loaded', 'słuchacz zobaczył stan sprzed przypisania — klasyczny wyścig');
 });
 
-// ── C1.5 ─────────────────────────────────────────────────────────────────────
 test('dispose emituje "unloading" i przechodzi w "disposed"', async t => {
     const runtime = new PluginRuntime(makeHost(), makeConfig());
     await runtime.boot();
@@ -162,7 +157,6 @@ test('dispose emituje "unloading" i przechodzi w "disposed"', async t => {
     t.is(runtime.settingsStore.pendingSaveTimer, null, 'zaplanowany zapis przeżył demontaż');
 });
 
-// ── C1.7 ─────────────────────────────────────────────────────────────────────
 test('whenLoaded: gotowy runtime → resolve bez timera', async t => {
     const runtime = new PluginRuntime(makeHost(), makeConfig());
     await runtime.boot();
@@ -171,10 +165,9 @@ test('whenLoaded: gotowy runtime → resolve bez timera', async t => {
     const wynik = await runtime.whenLoaded();
 
     t.is(wynik, runtime);
-    t.true(Date.now() - start < 60, 'ścieżka „już gotowe" kosztowała tick siatki zamiast 0 ms (W-11)');
+    t.true(Date.now() - start < 60, 'ścieżka „już gotowe" kosztowała tick siatki zamiast 0 ms');
 });
 
-// ── C1.8 ─────────────────────────────────────────────────────────────────────
 test('whenLoaded: rozwiązuje się na zdarzenie, nie na tick', async t => {
     let release: (() => void) | null = null;
     const runtime = new PluginRuntime(makeHost({ onLayoutReady: (cb) => { release = cb; } }), makeConfig());
@@ -189,7 +182,7 @@ test('whenLoaded: rozwiązuje się na zdarzenie, nie na tick', async t => {
     t.true(Date.now() - emittedAt < 50, 'rozwiązanie przyszło z siatki, nie ze zdarzenia');
 });
 
-// ── C1.9 (reguła bezpieczeństwa W-08) ────────────────────────────────────────
+// ── reguła bezpieczeństwa ─────────────────────────────────────────────
 test('whenLoaded po dispose NIGDY się nie rozwiązuje', async t => {
     const runtime = new PluginRuntime(makeHost(), makeConfig());
     await runtime.boot();
@@ -208,7 +201,6 @@ test('whenLoaded po dispose NIGDY się nie rozwiązuje', async t => {
     t.false(poRozwiazane, 'obietnica wzięta PO dispose rozwiązała się — runtime jest „disposed" na stałe');
 });
 
-// ── C1.10 (luka F-08) ────────────────────────────────────────────────────────
 test('reload nie emituje "unloading" — czekający doczekują się', async t => {
     const runtime = new PluginRuntime(makeHost(), makeConfig());
     await runtime.boot();
@@ -223,7 +215,6 @@ test('reload nie emituje "unloading" — czekający doczekują się', async t =>
     t.is(await czekanie, runtime);
 });
 
-// ── C1.11 (luka F-08) ────────────────────────────────────────────────────────
 test('reload w trakcie "loading" nie startuje drugiego przebiegu', async t => {
     const spy: IoSpy = { reads: [], writes: [] };
     let release: (() => void) | null = null;
@@ -239,7 +230,7 @@ test('reload w trakcie "loading" nie startuje drugiego przebiegu', async t => {
     t.is(runtime.state, 'loaded');
 });
 
-// ── C1.12 (flagowa reguła S-07/S-08) ─────────────────────────────────────────
+// ── flagowa reguła ───────────────────────────────────────────────────
 test('boot NIE ZAPISUJE settings.json i nie planuje zapisu', async t => {
     const spy: IoSpy = { reads: [], writes: [] };
     const zdrowy = JSON.stringify({ pkmAssistant: { language: 'pl' } });
@@ -252,7 +243,6 @@ test('boot NIE ZAPISUJE settings.json i nie planuje zapisu', async t => {
     t.is(runtime.settingsStore.pendingSaveTimer, null, 'boot zaplanował zapis (debounce jest dłuższy niż test)');
 });
 
-// ── C1.13 ────────────────────────────────────────────────────────────────────
 test('boot nie rzuca, gdy adapter pada na wszystkim', async t => {
     const ostrzezenia: string[] = [];
     const host = makeHost();
@@ -279,7 +269,6 @@ test('boot nie rzuca, gdy adapter pada na wszystkim', async t => {
     t.true(ostrzezenia.length >= 1, 'degradacja przeszła po cichu — user nie ma jak się dowiedzieć');
 });
 
-// ── C1.14 (luka F-10) ────────────────────────────────────────────────────────
 test('dispose jest idempotentne, boot po dispose to no-op', async t => {
     const runtime = new PluginRuntime(makeHost(), makeConfig());
     await runtime.boot();
@@ -295,7 +284,6 @@ test('dispose jest idempotentne, boot po dispose to no-op', async t => {
     t.is(runtime.state, 'disposed', 'boot po dispose wskrzesił runtime');
 });
 
-// ── C1.16 ────────────────────────────────────────────────────────────────────
 test('config jest TĄ SAMĄ referencją co podany konstruktorowi', async t => {
     const config = makeConfig();
     const runtime = new PluginRuntime(makeHost(), config);
@@ -309,7 +297,6 @@ test('config jest TĄ SAMĄ referencją co podany konstruktorowi', async t => {
         'podmiana providera PRZED bootem nie doszła — harness nie ma jak podstawić atrapy');
 });
 
-// ── C1.17 (Y-1) ──────────────────────────────────────────────────────────────
 test('chatModel to mutowalny slot — zerowanie z zewnątrz działa', async t => {
     const runtime = new PluginRuntime(makeHost(), makeConfig());
     await runtime.boot();
@@ -322,7 +309,7 @@ test('chatModel to mutowalny slot — zerowanie z zewnątrz działa', async t =>
     t.is(runtime.chatModel, null, 'runtime odtworzył model po wyzerowaniu — Stop trafiałby w martwą instancję');
 });
 
-// ── C1.18 (strażnik po źródle, E-12) ─────────────────────────────────────────
+// ── strażnik po źródle ───────────────────────────────────────────────
 test('zero okien czasowych na ścieżce startu', t => {
     const zrodlo = fs.readFileSync(
         path.join(path.dirname(fileURLToPath(import.meta.url)), 'PluginRuntime.ts'),
@@ -334,7 +321,6 @@ test('zero okien czasowych na ścieżce startu', t => {
     t.deepEqual(zegary, [], `ślepy zegar na ścieżce startu wrócił (${zegary.join(', ')} ms) — dwa takie kosztowały 8,09 s bootu`);
 });
 
-// ── C1.19 (poprawka po weryfikacji, SB-01) ───────────────────────────────────
 test('pasek statusu staje PO layoucie, ale PRZED czytaniem ustawień', async t => {
     const slad: string[] = [];
     const files: Record<string, string> = { [SETTINGS_PATH]: JSON.stringify({ pkmAssistant: { language: 'pl' } }) };
@@ -356,7 +342,7 @@ test('pasek statusu staje PO layoucie, ale PRZED czytaniem ustawień', async t =
 
     const booting = runtime.boot();
     await new Promise(r => setTimeout(r, 20));
-    t.deepEqual(slad, [], 'pasek wyprzedził zdarzenie layoutu — SB-01 mówi „po layoucie"');
+    t.deepEqual(slad, [], 'pasek wyprzedził zdarzenie layoutu — kontrakt mówi „po layoucie"');
 
     release!();
     await booting;
@@ -366,7 +352,6 @@ test('pasek statusu staje PO layoucie, ale PRZED czytaniem ustawień', async t =
     t.truthy(runtime.statusBar, 'boot skończył bez paska');
 });
 
-// ── C1.20 (poprawka po weryfikacji) ──────────────────────────────────────────
 test('pasek statusu stoi nawet wtedy, gdy ustawienia się nie wczytały', async t => {
     const slad: string[] = [];
     const adapter = {
@@ -384,7 +369,6 @@ test('pasek statusu stoi nawet wtedy, gdy ustawienia się nie wczytały', async 
     t.truthy(runtime.statusBar, 'degradacja do defaultów zabrała userowi pasek statusu');
 });
 
-// ── C1.21 (poprawka po weryfikacji) ──────────────────────────────────────────
 test('kopia sprzed migracji: pad pierwszej próby NIE pali jednorazowej szansy', async t => {
     const stary = fs.readFileSync(
         path.join(path.dirname(fileURLToPath(import.meta.url)), '__fixtures__', 'settings_v2.1.json'),
@@ -430,7 +414,7 @@ test('kopia sprzed migracji: pad pierwszej próby NIE pali jednorazowej szansy',
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// F10 — dopisane pod bramkę mutacyjną. Każdy test pinuje zachowanie, którego
+// Dopisane pod bramkę mutacyjną. Każdy test pinuje zachowanie, którego
 // zmiana przechodziła dotąd przez zestaw bez jednej czerwonej asercji.
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -481,8 +465,7 @@ async function zPodmienionymZegarem(fn: () => Promise<unknown>): Promise<number[
     return opoznienia;
 }
 
-// ── F10.1 ────────────────────────────────────────────────────────────────────
-test('F10: pusty rejestr embeddingu — providers() to TABLICA, select() rzuca', t => {
+test('pusty rejestr embeddingu — providers() to TABLICA, select() rzuca', t => {
     const runtime = new PluginRuntime(makeHost(), makeConfig());
 
     const lista = runtime.embeddings.providers();
@@ -495,8 +478,7 @@ test('F10: pusty rejestr embeddingu — providers() to TABLICA, select() rzuca',
         'brak podłączonego rejestru ma być głośny, nie cichy');
 });
 
-// ── F10.2 ────────────────────────────────────────────────────────────────────
-test('F10: saveSettings bez bootu nie robi kopii sprzed migracji', async t => {
+test('saveSettings bez bootu nie robi kopii sprzed migracji', async t => {
     const spy: IoSpy = { reads: [], writes: [] };
     const files: Record<string, string> = { [SETTINGS_PATH]: JSON.stringify({ pkmAssistant: { language: 'pl' } }) };
     const runtime = new PluginRuntime(makeHost({ spy, files }), makeConfig());
@@ -508,8 +490,7 @@ test('F10: saveSettings bez bootu nie robi kopii sprzed migracji', async t => {
     t.true(spy.writes.some(w => w.path === SETTINGS_PATH), 'zapis ustawień w ogóle nie doszedł');
 });
 
-// ── F10.3 ────────────────────────────────────────────────────────────────────
-test('F10: reload po skończonym boocie czyta ustawienia OD NOWA', async t => {
+test('reload po skończonym boocie czyta ustawienia OD NOWA', async t => {
     const spy: IoSpy = { reads: [], writes: [] };
     const files: Record<string, string> = { [SETTINGS_PATH]: JSON.stringify({ pkmAssistant: { language: 'pl' } }) };
     const runtime = new PluginRuntime(makeHost({ spy, files }), makeConfig());
@@ -521,7 +502,7 @@ test('F10: reload po skończonym boocie czyta ustawienia OD NOWA', async t => {
     await runtime.reload();
 
     t.is(spy.reads.filter(p => p === SETTINGS_PATH).length, 2,
-        'reload oddał starą obietnicę zamiast puścić nowy przebieg — luka F-08 wraca');
+        'reload oddał starą obietnicę zamiast puścić nowy przebieg — stara luka wraca');
     t.is(runtime.settings.pkmAssistant?.language, 'en', 'reload przestawił stan, ale worek został stary');
     t.is(runtime.state, 'loaded');
 
@@ -533,8 +514,7 @@ test('F10: reload po skończonym boocie czyta ustawienia OD NOWA', async t => {
     t.is(runtime.state, 'disposed');
 });
 
-// ── F10.4 ────────────────────────────────────────────────────────────────────
-test('F10: dispose bez zaplanowanego zapisu nie dotyka settings.json', async t => {
+test('dispose bez zaplanowanego zapisu nie dotyka settings.json', async t => {
     const spy: IoSpy = { reads: [], writes: [] };
     const files: Record<string, string> = { [SETTINGS_PATH]: JSON.stringify({ pkmAssistant: { language: 'pl' } }) };
     const runtime = new PluginRuntime(makeHost({ spy, files }), makeConfig());
@@ -549,8 +529,7 @@ test('F10: dispose bez zaplanowanego zapisu nie dotyka settings.json', async t =
         'demontaż BEZ oczekującej zmiany przepisał plik z kluczami API');
 });
 
-// ── F10.5 ────────────────────────────────────────────────────────────────────
-test('F10: dispose z zaplanowanym zapisem dopisuje zmianę usera', async t => {
+test('dispose z zaplanowanym zapisem dopisuje zmianę usera', async t => {
     const spy: IoSpy = { reads: [], writes: [] };
     const files: Record<string, string> = { [SETTINGS_PATH]: JSON.stringify({ pkmAssistant: { language: 'pl' } }) };
     const runtime = new PluginRuntime(makeHost({ spy, files }), makeConfig());
@@ -569,8 +548,7 @@ test('F10: dispose z zaplanowanym zapisem dopisuje zmianę usera', async t => {
     t.is(runtime.settingsStore.pendingSaveTimer, null, 'zaplanowany zapis przeżył demontaż');
 });
 
-// ── F10.6 ────────────────────────────────────────────────────────────────────
-test('F10: kopia sprzed migracji leci, gdy zaszła CHOĆ JEDNA migracja', async t => {
+test('kopia sprzed migracji leci, gdy zaszła CHOĆ JEDNA migracja', async t => {
     // (a) same stare klucze — przestrzeń nazw jest już nowa
     const stareKlucze = fs.readFileSync(path.join(KATALOG_TESTU, '__fixtures__', 'settings_v2.2_s35.json'), 'utf8');
     const spyA: IoSpy = { reads: [], writes: [] };
@@ -594,8 +572,7 @@ test('F10: kopia sprzed migracji leci, gdy zaszła CHOĆ JEDNA migracja', async 
     t.is(kopieB[0].data, staraPrzestrzen);
 });
 
-// ── F10.7 ────────────────────────────────────────────────────────────────────
-test('F10: źródło inne niż plik główny idzie do ostrzeżenia', async t => {
+test('źródło inne niż plik główny idzie do ostrzeżenia', async t => {
     const zdrowe = JSON.stringify({ pkmAssistant: { language: 'pl' } });
 
     const zKopii = makeLog();
@@ -617,8 +594,7 @@ test('F10: źródło inne niż plik główny idzie do ostrzeżenia', async t => 
         'zdrowy start straszy ostrzeżeniem o źródle ustawień');
 });
 
-// ── F10.8 ────────────────────────────────────────────────────────────────────
-test('F10: saveSettings odrzuca wszystko, co nie jest workiem', async t => {
+test('saveSettings odrzuca wszystko, co nie jest workiem', async t => {
     const spy: IoSpy = { reads: [], writes: [] };
     const runtime = new PluginRuntime(makeHost({ spy }), makeConfig());
 
@@ -626,13 +602,12 @@ test('F10: saveSettings odrzuca wszystko, co nie jest workiem', async t => {
         'null przeszedł walidację — na dysk poszłoby „null" zamiast worka z kluczami API');
     await t.throwsAsync(() => runtime.saveSettings(undefined as unknown as SettingsBag), { instanceOf: TypeError });
     await t.throwsAsync(() => runtime.saveSettings('{}' as unknown as SettingsBag), { instanceOf: TypeError },
-        'tekst przeszedł walidację — S-18 pilnuje WORKA, nie samej obecności argumentu');
+        'tekst przeszedł walidację — walidacja pilnuje WORKA, nie samej obecności argumentu');
 
     t.deepEqual(spy.writes, [], 'odrzucony zapis i tak dotknął dysku');
 });
 
-// ── F10.9 ────────────────────────────────────────────────────────────────────
-test('F10: dispose w locie zatrzymuje boot — runtime nie wskrzesza się na "loaded"', async t => {
+test('dispose w locie zatrzymuje boot — runtime nie wskrzesza się na "loaded"', async t => {
     const spy: IoSpy = { reads: [], writes: [] };
     let release: (() => void) | null = null;
     const runtime = new PluginRuntime(
@@ -653,8 +628,7 @@ test('F10: dispose w locie zatrzymuje boot — runtime nie wskrzesza się na "lo
     t.deepEqual(spy.reads, [], 'boot po dispose i tak poszedł czytać ustawienia');
 });
 
-// ── F10.10 ───────────────────────────────────────────────────────────────────
-test.serial('F10: synchronizacja vaulta — pełny limit odpytań co 100 ms, potem start mimo sync-u', async t => {
+test.serial('synchronizacja vaulta — pełny limit odpytań co 100 ms, potem start mimo sync-u', async t => {
     let odczyty = 0;
     const sync = { get syncStatus(): string { odczyty++; return 'Syncing changes'; } };
     const spyLog = makeLog();
@@ -672,8 +646,7 @@ test.serial('F10: synchronizacja vaulta — pełny limit odpytań co 100 ms, pot
     t.true(spyLog.ostrzezenia.some(m => m.includes('Synchronizacja')), 'przekroczony limit sync-u przeszedł po cichu');
 });
 
-// ── F10.11 ───────────────────────────────────────────────────────────────────
-test.serial('F10: synchronizacja vaulta — pętla kończy się, gdy sync odpuści', async t => {
+test.serial('synchronizacja vaulta — pętla kończy się, gdy sync odpuści', async t => {
     const statusy = ['Syncing changes', 'syncing', 'Fully synced'];
     let i = 0;
     const sync = { get syncStatus(): string { return statusy[Math.min(i++, statusy.length - 1)]; } };
@@ -688,8 +661,7 @@ test.serial('F10: synchronizacja vaulta — pętla kończy się, gdy sync odpuś
     t.is(runtime.settings.pkmAssistant?.language, 'pl', 'po synchronizacji ustawienia nie doczytały się z pliku');
 });
 
-// ── F10.12 ───────────────────────────────────────────────────────────────────
-test.serial('F10: "Fully synced" to NIE jest trwająca synchronizacja — zero czekania', async t => {
+test.serial('"Fully synced" to NIE jest trwająca synchronizacja — zero czekania', async t => {
     const runtime = new PluginRuntime(
         makeHost({
             sync: { syncStatus: 'Fully synced' },
@@ -704,8 +676,7 @@ test.serial('F10: "Fully synced" to NIE jest trwająca synchronizacja — zero c
     t.is(runtime.state, 'loaded');
 });
 
-// ── F10.13 ───────────────────────────────────────────────────────────────────
-test.serial('F10: sync bez tekstowego statusu nie wywraca startu', async t => {
+test.serial('sync bez tekstowego statusu nie wywraca startu', async t => {
     const runtime = new PluginRuntime(
         makeHost({
             sync: { syncStatus: 42 },
@@ -721,8 +692,7 @@ test.serial('F10: sync bez tekstowego statusu nie wywraca startu', async t => {
         'nietekstowy status sync-u wywalił start i zdegradował ustawienia do fabrycznych');
 });
 
-// ── F10.14 ───────────────────────────────────────────────────────────────────
-test('F10: kopia sprzed migracji jest jednorazowa — skasowanie pliku jej nie wskrzesza', async t => {
+test('kopia sprzed migracji jest jednorazowa — skasowanie pliku jej nie wskrzesza', async t => {
     const stary = fs.readFileSync(path.join(KATALOG_TESTU, '__fixtures__', 'settings_v2.1.json'), 'utf8');
     const files: Record<string, string> = { [SETTINGS_PATH]: stary };
     const spy: IoSpy = { reads: [], writes: [] };
@@ -740,8 +710,7 @@ test('F10: kopia sprzed migracji jest jednorazowa — skasowanie pliku jej nie w
         'po udanej kopii flaga nie zgasła — drugi zapis utrwalił pod nazwą „sprzed migracji" worek PO migracji');
 });
 
-// ── F10.15 ───────────────────────────────────────────────────────────────────
-test('F10: powiadomienie poza Obsidianem zwraca żywy uchwyt, nie null', async t => {
+test('powiadomienie poza Obsidianem zwraca żywy uchwyt, nie null', async t => {
     const runtime = new PluginRuntime(makeHost(), makeConfig());
     await runtime.boot();
 

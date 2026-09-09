@@ -1,19 +1,19 @@
 /**
  * Sprzątaczka snapshotów konsolidacji.
  *
- * **Tworzenie i odtwarzanie snapshotów SKASOWANE (D6, 2026-07-30).** `create()` + `restore()`
+ * **Tworzenie i odtwarzanie snapshotów NIE ISTNIEJE.** `create()` + `restore()`
  * (+ prywatne `_collect`/`_ensureParent`) obsługiwały wyłącznie stary, blokujący
- * `ArchiveWorkflow.run()`, który tam zapisywał od razu po propozycji. Ten tor nie miał już
- * produkcyjnego wołacza — trzymały go testy. Dzisiejszy przebieg (`runWithRun`) snapshotu
- * ŚWIADOMIE nie robi: powstawałby na starcie generacji, a zapisy dzieją się po decyzjach usera
+ * `ArchiveWorkflow.run()`, który tam zapisywał od razu po propozycji. Ten tor nie ma
+ * produkcyjnego wołacza - trzymały go testy. Bieżący przebieg (`runWithRun`) snapshotu
+ * ŚWIADOMIE nie robi - powstawałby na starcie generacji, a zapisy dzieją się po decyzjach usera
  * (czasem godziny później), więc odtworzenie cofnęłoby bieżącą rozmowę; do tego operacje
  * konsolidacji są create-before-delete, a kopia CAŁEJ pamięci w jednym JSON-ie to własny punkt
  * awarii. Klasa została po to, żeby posprzątać kopie zostawione przez starą wersję pluginu.
  */
 
 /**
- * Adapter FS vaulta w zakresie, jakiego potrzebuje sprzątaczka. Typowany STRUKTURALNIE —
- * `AgentMemory` jest jeszcze w `.js` (kontrakt kampanii TS: nie czekamy na konwersję).
+ * Adapter FS vaulta w zakresie, jakiego potrzebuje sprzątaczka. Typowany STRUKTURALNIE -
+ * `AgentMemory` jest jeszcze w `.js` (nie czekamy na konwersję).
  */
 export interface SnapshotVaultAdapterLike {
     exists(path: string): Promise<boolean>;
@@ -28,7 +28,7 @@ export interface SnapshotAgentMemoryLike {
 }
 
 export class ConsolidationSnapshot {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare agentMemory: SnapshotAgentMemoryLike;
     declare snapshotRoot: string;
 
@@ -42,7 +42,7 @@ export class ConsolidationSnapshot {
      *
      * Nazwa pliku zaczyna się od znacznika czasu ISO (z `:`/`.` zamienionymi na `-`), więc
      * sortowanie leksykalne malejąco = od najnowszego. Bez tego folder `.consolidation_snapshots/`
-     * rósł bez końca — każda kopia to CAŁA pamięć agenta wrzucona do jednego JSON-a.
+     * rósł bez końca - każda kopia to CAŁA pamięć agenta wrzucona do jednego JSON-a.
      *
      * Nigdy nie rzuca: sprzątanie nie ma prawa ubić konsolidacji.
      */

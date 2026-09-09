@@ -4,7 +4,7 @@ import { t, getDateLocale } from '../../core/i18n/index.js';
 // TS-any: zapis sesji narzędzi jest elastycznym kontraktem historycznym chat.
 type SubAgentDynamic = any;
 
-// Node-safe DOM shim (release 2.2.0 / W2): `SubAgentBlock.ts` nie importuje `obsidian`, a jego
+// Node-safe DOM shim: `SubAgentBlock.ts` nie importuje `obsidian`, a jego
 // test (`SubAgentBlock.test.ts`) woła prawdziwe funkcje w gołym Node, podstawiając WŁASNĄ atrapę
 // `globalThis.document.createElement` — nie globalny helper Obsidiana (`createDiv`), którego
 // w Node nie ma. `obsidianmd/prefer-create-el` nie da się wyłączyć inline (`obsidianmd/*` jest
@@ -40,13 +40,13 @@ const TYPE_CONFIG = {
  * @param {number} [opts.duration] - ms
  * @param {{ prompt_tokens: number, completion_tokens: number }|null} [opts.usage]
  * @param {string} [opts.summary]
- * @param {boolean} [opts.pending] - F2: bieg TRWA (wystartował w tle). Kryształ statusu
+ * @param {boolean} [opts.pending] - bieg TRWA (wystartował w tle). Kryształ statusu
  *   pulsuje zamiast świecić na zielono — treść w `response` to pokwitowanie, nie wynik.
- * @param {'success'|'error'} [opts.status] - K7/AUD-code-review-044: JAWNY status z wołacza
+ * @param {'success'|'error'} [opts.status] - JAWNY status z wołacza
  *   (`result.success` / `toolResultStatus(...)` z `core/index.js`). `response` jest tekstem
  *   do wyświetlenia, NIE sygnałem — polski literał `'Błąd'` bywa sklejany przez JEDNEGO
  *   wołacza (`chat_streaming.ts`), ale nie przez odtwarzanie historii (`chat_messages.ts`),
- *   więc dopasowanie stringa dawało zielone „gotowe" na pustej, padniętej delegacji po
+ *   więc dopasowanie stringa dawałoby zielone „gotowe" na pustej, padniętej delegacji po
  *   przełączeniu zakładki / powrocie suba z tła. Brak `status` = domyślnie „success" (ten
  *   sam fail-safe co reszta tego modułu — tu nie ma logiki biznesowej, więc cichy błąd
  *   renderu nie ma prawa wywalić czatu).
@@ -80,9 +80,9 @@ export function createSubAgentBlock(opts: SubAgentDynamic) {
         head.createSpan({ cls: 'cs-action-row__time', text: `${(opts.duration / 1000).toFixed(1)}s` });
     }
 
-    // Status crystal — K7/AUD-code-review-044: JAWNA flaga z wołacza, nie dopasowanie stringa.
+    // Status crystal — JAWNA flaga z wołacza, nie dopasowanie stringa.
     const hasError = opts.status === 'error';
-    // F2: `pending` = sub wystartował W TLE i wciąż pracuje. Zielone „gotowe" kłamałoby —
+    // `pending` = sub wystartował W TLE i wciąż pracuje. Zielone „gotowe" kłamałoby —
     // w bloku nie ma wyniku, tylko pokwitowanie startu (wynik wraca osobnym powiadomieniem).
     const statusCls = opts.pending
         ? 'cs-action-row__status--pending'

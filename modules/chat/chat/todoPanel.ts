@@ -1,10 +1,9 @@
 /**
- * todoPanel.js — pure model dla live-widoku listy `todo` w czacie (E2.9 FAZA D / D2).
+ * todoPanel.js — pure model dla live-widoku listy `todo` w czacie.
  *
- * Zastępuje dawny `ArtifactProgressModal` (polling 1s): odhaczana lista W SLOCIE inputu (N4 — pasek
- * dolny ma dwa widoki w tym samym obrysie), wzorzec Claude Code, aktualizowana po każdym tool-callu
- * `todo`. DOM render w `chat_ui.js`; tu żyje pure logika (co pokazać i który widok) → node-testowalne
- * bez obsidiana.
+ * Odhaczana lista żyje W SLOCIE inputu (pasek dolny ma dwa widoki w tym samym obrysie,
+ * wzorem Claude Code), aktualizowana po każdym tool-callu `todo`. DOM render w `chat_ui.js`;
+ * tu żyje pure logika (co pokazać i który widok) → node-testowalne bez obsidiana.
  */
 
 /**
@@ -14,9 +13,9 @@
  */
 type TodoItemInput = { text?: unknown; checked?: unknown; done?: unknown };
 type TodoState = { items?: TodoItemInput[]; title?: string; finished?: boolean };
-// AUD-dead-code-231 (2026-09-02): `export` zdjęty (tu i na `BottomBarMode` niżej) — zero
-// referencji spoza tego pliku; funkcje/stałe, których sygnatury je noszą (`buildTodoPanelModel`,
-// `resolveBottomBarMode`, `DEFAULT_BOTTOM_BAR_MODE`), zostają publiczne.
+// Nie eksportowany (tu i na `BottomBarMode` niżej) - brak referencji spoza tego pliku;
+// funkcje/stałe, których sygnatury je noszą (`buildTodoPanelModel`, `resolveBottomBarMode`,
+// `DEFAULT_BOTTOM_BAR_MODE`), zostają publiczne.
 type TodoPanelModel = {
     visible: boolean;
     title: string | null;
@@ -50,7 +49,7 @@ type BottomBarMode = 'input' | 'todo';
 export const DEFAULT_BOTTOM_BAR_MODE: BottomBarMode = 'input';
 
 /**
- * Rozstrzygnij widok paska po odświeżeniu stanu `todo` (N4).
+ * Rozstrzygnij widok paska po odświeżeniu stanu `todo`.
  *
  * Reguły:
  *  - lista pojawia się (brak/finished → aktywna) → AUTO-PRZESKOK na 'todo',
@@ -71,10 +70,10 @@ export function resolveBottomBarMode(
     hasDraft = false,
 ): BottomBarMode {
     if (!next?.visible) return 'input';
-    // Śledztwo Z3 (FAIL 6 smoke'a 2026-08-15): auto-przeskok chował CAŁY wiersz inputu
-    // (`display:none`), więc szkic pisany w trakcie tury po prostu ZNIKAŁ userowi z oczu
-    // przy tool-callu `todo` — mimo że wartość textarea była nietknięta. Lista i tak jest
-    // o jedno kliknięcie chipa `📋`, a niewysłany tekst usera jest ważniejszy.
+    // Auto-przeskok nie może chować CAŁY wiersz inputu (`display:none`) gdy user ma szkic:
+    // wartość textarea zostaje nietknięta, ale bez tej gałęzi tekst pisany w trakcie tury
+    // ZNIKAŁBY userowi z oczu przy tool-callu `todo`. Lista i tak jest o jedno kliknięcie
+    // chipa `📋`, a niewysłany tekst usera jest ważniejszy.
     if (!prev?.visible) return hasDraft ? 'input' : 'todo';
     return current === 'todo' ? 'todo' : 'input';
 }

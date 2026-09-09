@@ -68,7 +68,7 @@ export class AgentDeleteModal extends Modal {
             text: t('modal.agent_delete.delete_btn'),
             cls: 'mod-warning'
         });
-        // E2.8 A6 (S25): agent wbudowany (Jaskier) jest nieusuwalny — przycisk zablokowany (defense in depth).
+        // Agent wbudowany (Jaskier) jest nieusuwalny - przycisk zablokowany (defense in depth).
         if (this.agent.isBuiltIn) {
             deleteBtn.disabled = true;
         } else {

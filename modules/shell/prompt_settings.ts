@@ -1,30 +1,28 @@
 import { Setting } from 'obsidian';
 import { t } from '../../core/i18n/index.js';
-// Factory work-prompts (E2.8 B3) surfaced here for "insert factory" / "restore default". Imported
-// through each module's barrel (golden rule — no deep imports). The barrels re-export only the pure
+// Factory work-prompts surfaced here for "insert factory" / "restore default". Imported
+// through each module's barrel (golden rule - no deep imports). The barrels re-export only the pure
 // string constants, so no heavy graph is pulled in beyond what the plugin already loads.
 import { DEFAULT_SAVE_SESSION_PROMPT, DEFAULT_ARCHIVE_PROMPT, DEFAULT_SUMMARY_PROMPT } from '../memory/index.js';
-// S31: szkielet kompresji mieszka w `config/` (nie w barrelu czatu) — przecięta krawędź shell→chat.
+// Szkielet kompresji mieszka w `config/` (nie w barrelu czatu) - przecięta krawędź shell→chat.
 import { DEFAULT_COMPRESSION_PROMPT } from '../../config/default_prompts.js';
 import { DEFAULT_SUBAGENT_FRAME_PROMPT } from '../sub-agents/index.js';
 import { FACTORY_DEFAULTS } from '../prompts/index.js';
 import { setSvgLabel } from '../../modules/crystal-soul/index.js';
 
 /**
- * Settings → Prompt (E2.8 B2 / S24a).
+ * Settings → Prompt.
  *
  * Global defaults for the "work prompts" (compression / save-session / archive / summary /
  * sub-agent frame) AND for the factory prompt sections (environment / rules / delegate).
- * Everything is stored under `settings.pkmAssistant.promptDefaults[<key>]` — the SAME map the resolver
+ * Everything is stored under `settings.pkmAssistant.promptDefaults[<key>]` - the SAME map the resolver
  * (resolveWorkPrompt) and PromptBuilder._resolveSection read. Empty = factory default at runtime.
- * Per-agent overrides of these live in the agent panel (phase C).
+ * Per-agent overrides of these live in the agent panel.
  *
- * AUD-dead-code-124 (2026-09-02): the `brief_prompt` slot was CUT here — its value had zero
- * production readers (`ContextSessionGenerator`, the only consumer, was deleted in E2.9 phase D).
- * The slot was rendering a live control with a present-tense description promising work that
- * never happened. Wzór kasacji: `keepRecentSessions`/`l3Threshold` (S32 Z6/Z1b,
- * `modules/memory/CLAUDE.md`). Old `settings.json` values under `promptDefaults.brief_prompt`
- * are silently ignored (no migrator) — the resolver never reads that key again.
+ * There is no `brief_prompt` slot here: it has zero production readers, so rendering a control
+ * for it would promise work that never happens. Old `settings.json` values under
+ * `promptDefaults.brief_prompt` are silently ignored (no migrator) - the resolver never reads
+ * that key.
  */
 
 // key → factory text + whether the prompt has a hard parser contract (warning shown).
@@ -36,7 +34,7 @@ const WORK_PROMPTS = [
     { key: 'subagent_frame_prompt', factory: () => DEFAULT_SUBAGENT_FRAME_PROMPT, warn: true },
 ];
 
-// Factory prompt sections — resolved from FACTORY_DEFAULTS (getters → current locale).
+// Factory prompt sections - resolved from FACTORY_DEFAULTS (getters → current locale).
 const SECTION_PROMPTS = [
     { key: 'environment', factory: () => FACTORY_DEFAULTS.environment, warn: false },
     { key: 'rules', factory: () => FACTORY_DEFAULTS.rules, warn: false },

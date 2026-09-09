@@ -1,6 +1,6 @@
 /**
  * Metadane notatki `brain/*.md` widziane przez budowniczego indeksu. Wszystko poza
- * `filename` bywa puste — pliki usera potrafią mieć niepełny frontmatter, a kod
+ * `filename` bywa puste - pliki usera potrafią mieć niepełny frontmatter, a kod
  * broni się `||`/`?.` (kontrakt: NIE dodajemy walidacji).
  */
 export interface BrainNoteMeta {
@@ -8,7 +8,7 @@ export interface BrainNoteMeta {
     name?: string;
     description?: string;
     /**
-     * typ notatki — w praktyce `MemoryNoteType`, ale kontrakt jest `string`:
+     * typ notatki - w praktyce `MemoryNoteType`, ale kontrakt jest `string`:
      * plik usera może nieść cokolwiek, a nieznana wartość ląduje w „Projekty i referencje".
      */
     type?: string;
@@ -20,12 +20,12 @@ export interface BrainNoteMeta {
 /** Klucz sekcji „Na teraz" (pamięć krótkoterminowa brain.md). */
 export type NaTerazKey = 'user' | 'environment';
 
-/** Zawartość obu sekcji „Na teraz" — zawsze oba klucze, zawsze tablice. */
+/** Zawartość obu sekcji „Na teraz" - zawsze oba klucze, zawsze tablice. */
 export type NaTerazSections = Record<NaTerazKey, string[]>;
 
 /**
  * Operacja na sekcji „Na teraz". `oldContent`/`content` to LEGACY aliasy pól
- * (`remove`/`add`) przyjmowane od LLM-a — zostają, bo parser propozycji je produkuje.
+ * (`remove`/`add`) przyjmowane od LLM-a - zostają, bo parser propozycji je produkuje.
  */
 export interface NaTerazOp {
     section?: string | null;
@@ -54,7 +54,7 @@ const NOTE_TYPE_TO_SECTION: Record<string, string> = {
 const CURRENT_PROJECT_LIMIT = 3;
 
 /**
- * E2.8 D2 (S22) — „Na teraz" short-term sections. Unlike the index sections (links to brain/*.md),
+ * „Na teraz" short-term sections. Unlike the index sections (links to brain/*.md),
  * these hold plain-text bullets describing the CURRENT state of the user / environment „for today".
  * They live at the TOP of brain.md so the LLM sees them first every request. Order is fixed.
  */
@@ -63,12 +63,11 @@ const NA_TERAZ_SECTIONS: ReadonlyArray<{ key: NaTerazKey; heading: string }> = [
     { key: 'environment', heading: '## Na teraz: Środowisko' },
 ];
 
-/** Hard cap on entries per „Na teraz" section — oldest are trimmed (D2). */
+/** Hard cap on entries per „Na teraz" section - oldest are trimmed. */
 const NA_TERAZ_MAX_ENTRIES = 10;
 
-// CURRENT_PROJECT_LIMIT i NA_TERAZ_SECTIONS byly tu eksportowane bez ani jednego importera
-// (dead-code sweep 2026-09-02, AUD-dead-code-045/226) — uzywane sa WYLACZNIE lokalnie w tym
-// pliku (linie 228 i 246 nizej).
+// CURRENT_PROJECT_LIMIT i NA_TERAZ_SECTIONS nie sa eksportowane - uzywane sa WYLACZNIE
+// lokalnie w tym pliku (linie 228 i 246 nizej).
 export {
     INDEX_SECTIONS,
     NOTE_TYPE_TO_SECTION,
@@ -102,11 +101,12 @@ export interface ForeignSection {
 }
 
 /**
- * Incydent 2026-08-15: ręcznie dopisana sekcja `## AKTYWNY TEST` znikała przy każdej przebudowie
- * indeksu (rebuild odtwarzał plik wyłącznie z „Na teraz" + metadanych brain/*.md, resztę odkładał
- * do `.bak`). Ten parser wyciąga KAŻDĄ sekcję H2, której nagłówek nie jest ani sekcją indeksu
- * (INDEX_SECTIONS), ani „Na teraz" — rebuild przenosi je verbatim na KONIEC nowego pliku,
- * z zachowaniem kolejności względnej. Body łapane jest surowymi liniami aż do następnego H2.
+ * DLACZEGO: bez tego ręcznie dopisana sekcja (np. `## AKTYWNY TEST`) znika przy każdej
+ * przebudowie indeksu (rebuild odtwarza plik wyłącznie z „Na teraz" + metadanych brain/*.md,
+ * resztę odkłada do `.bak`). Ten parser wyciąga KAŻDĄ sekcję H2, której nagłówek nie jest ani
+ * sekcją indeksu (INDEX_SECTIONS), ani „Na teraz" - rebuild przenosi je verbatim na KONIEC
+ * nowego pliku, z zachowaniem kolejności względnej. Body łapane jest surowymi liniami aż do
+ * następnego H2.
  */
 export function parseForeignSections(content: string | null | undefined): ForeignSection[] {
     const out: ForeignSection[] = [];
@@ -122,7 +122,7 @@ export function parseForeignSections(content: string | null | undefined): Foreig
         }
         if (current) current.lines.push(line);
     }
-    // Końcowe puste linie precz — emisja dokłada własny separator, a stabilny kształt
+    // Końcowe puste linie precz - emisja dokłada własny separator, a stabilny kształt
     // gwarantuje idempotencję (druga przebudowa = identyczny plik).
     for (const section of out) {
         while (section.lines.length && !(section.lines[section.lines.length - 1] || '').trim()) {
@@ -175,8 +175,8 @@ export function parseNaTerazSections(content: string | null | undefined): NaTera
 
 /**
  * Apply add/remove ops to the „Na teraz" sections (pure). Each op: `{ section, add?, remove? }`.
- * - `remove`: drops entries that equal or contain the (case-insensitive) needle — used to purge
- *   outdated state (this is the ONE place brain-memory is mutated in place, not create-only — S22).
+ * - `remove`: drops entries that equal or contain the (case-insensitive) needle - used to purge
+ *   outdated state (this is the ONE place brain-memory is mutated in place, not create-only).
  * - `add`: appends a new bullet (deduped, newest last).
  * Oldest entries beyond `max` are trimmed off the front. Returns `{ naTeraz, trimmed }`.
  */
@@ -216,7 +216,7 @@ export interface BuildBrainIndexInput {
     /** własny nagłówek H1; domyślnie „# <agent> brain" */
     header?: string | null;
     naTeraz?: Partial<NaTerazSections> | null;
-    /** sekcje spoza katalogu zarządzanych (`parseForeignSections`) — emitowane verbatim NA KOŃCU */
+    /** sekcje spoza katalogu zarządzanych (`parseForeignSections`) - emitowane verbatim NA KOŃCU */
     foreign?: ForeignSection[] | null;
 }
 
@@ -241,7 +241,7 @@ export function buildBrainIndex({ agentName, notes = [], header = null, naTeraz 
     }
 
     const parts: string[] = [safeHeader, ''];
-    // D2 (S22): „Na teraz" sections go first, above the index. Empty sections are omitted, so an
+    // „Na teraz" sections go first, above the index. Empty sections are omitted, so an
     // old brain.md without them migrates cleanly (the sections appear on the first ephemeral write).
     const nt = normalizeNaTeraz(naTeraz);
     for (const { key, heading } of NA_TERAZ_SECTIONS) {
@@ -258,7 +258,7 @@ export function buildBrainIndex({ agentName, notes = [], header = null, naTeraz 
         parts.push('');
     }
 
-    // Incydent 2026-08-15: sekcje spoza katalogu zarządzanych wracają do pliku — na końcu, verbatim.
+    // Sekcje spoza katalogu zarządzanych wracają do pliku - na końcu, verbatim.
     for (const section of foreign || []) {
         if (!section?.heading) continue;
         parts.push(section.heading);
@@ -301,8 +301,8 @@ function noteTimestamp(note: BrainNoteMeta | null | undefined): number {
 /**
  * Zwiń opis do JEDNEJ linii i przytnij do 220 znaków.
  *
- * K9 (AUD-security-035): `description` notatki `brain/` wraca z frontmattera przez `JSON.parse`
- * z PRAWDZIWYMI znakami nowej linii — wstawiony niesklejony do promptu potrafi otworzyć własny
+ * DLACZEGO: `description` notatki `brain/` wraca z frontmattera przez `JSON.parse`
+ * z PRAWDZIWYMI znakami nowej linii - wstawiony niesklejony do promptu potrafi otworzyć własny
  * nagłówek/sekcję. Każdy emiter opisu do promptu MUSI przejść tędy.
  */
 export function oneLineDescription(value: unknown): string {

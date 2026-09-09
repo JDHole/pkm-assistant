@@ -1,5 +1,5 @@
 /**
- * Kolejka modali sprzątania (S28 D5) — mikro-decyzja Kuby: JEDEN modal na raz.
+ * Kolejka modali sprzątania: JEDEN modal na raz.
  */
 import test from 'ava';
 import { CleanupQueue } from './cleanupQueue.js';

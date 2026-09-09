@@ -24,15 +24,15 @@ test('estimateContextWindow maps known model families', t => {
     t.is(estimateContextWindow({ platform: 'anthropic', model: 'claude-sonnet-4-5-20250929' }), 200000);
 });
 
-// ── AUD-wydajnosc-018: rozbicie okna liczone RAZ na odświeżenie ─────────────
-// `TokenViewerWidget.ts` importuje `obsidian` (Modal/Notice) i AVA go nie zaimportuje —
+// ── rozbicie okna liczone RAZ na odświeżenie ─────────────
+// `TokenViewerWidget.ts` importuje `obsidian` (Modal/Notice) i AVA go nie zaimportuje -
 // strażnik po ŹRÓDLE, wzorem `stopSemantics.test.ts` / `ownerScopedState.test.ts`.
 
 const widgetSrc = readFileSync(fileURLToPath(new URL('./TokenViewerWidget.ts', import.meta.url)), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 
-test('update() podaje popoverowi POLICZONE dane, nie każe liczyć drugi raz (AUD-wydajnosc-018)', t => {
+test('update() podaje popoverowi POLICZONE dane, nie każe liczyć drugi raz', t => {
     t.regex(widgetSrc, /if\s*\(this\.popover\?\.isConnected\)\s*this\.renderPopover\(data\);/,
         'przy otwartym popoverze `update()` musi PRZEKAZAĆ `data` — inaczej getBreakdown() leci dwa razy na każde zdarzenie usage');
     t.regex(widgetSrc, /renderPopover\(roleData\?: RoleData\): void/,
@@ -41,7 +41,7 @@ test('update() podaje popoverowi POLICZONE dane, nie każe liczyć drugi raz (AU
         'wołacze spoza update() (otwarcie popovera, przełączniki) nadal liczą same — ale to zdarzenia pojedyncze');
 });
 
-test('w jednym przebiegu update() jest DOKŁADNIE jedno getRoleData (AUD-wydajnosc-018)', t => {
+test('w jednym przebiegu update() jest DOKŁADNIE jedno getRoleData', t => {
     const update = /update\(force = false\): void \{([\s\S]*?)\n    \}/.exec(widgetSrc)?.[1] || '';
     t.true(update.length > 0, 'nie znalazłem ciała update()');
     t.is((update.match(/getRoleData\(/g) || []).length, 1);

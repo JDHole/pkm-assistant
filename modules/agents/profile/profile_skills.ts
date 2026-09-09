@@ -1,18 +1,16 @@
 /**
- * Skills tab (Umiejętności) — E2.8 C5 (S10/S11/S16/S30).
+ * Skills tab (Umiejętności).
  *
  * Rama: co agent UMIE = przepisy (skille) + podpięte programy (konektory).
  *  - Skille: grid per KATEGORIA (frontmatter `category`), badge „📎 dodatki" gdy skill ma
- *    template/references/examples (S30), klik → pełny widok skilla na sidebar (skill-detail).
- *  - Konektory: zewnętrzne serwery MCP usera (source='user') przypinane do agenta; pełna
- *    mechanika klienta MCP wchodzi w E3.1.
+ *    template/references/examples, klik → pełny widok skilla na sidebar (skill-detail).
+ *  - Konektory: zewnętrzne serwery MCP usera (source='user') przypinane do agenta.
  *
  * WYPROWADZKI (zgodnie z makietą): cały dawny pod-tab MCP (whitelist serwerów / karty / narzędzia
- * standalone / grid built-in) → Uprawnienia (C1/C7); can_message → skasowane (A4/F7); Playbook
- * Builder → skasowany (A4).
+ * standalone / grid built-in) → Uprawnienia; can_message → skasowane; Playbook Builder → skasowany.
  *
- * S27 Z6: TU jest miejsce narodzin żywego skilla („+ nowy skill" — po Z2 Zaplecze pokazuje
- * już tylko szablony) + „+ z szablonu" (odlanie kopii). Ślad „Z szablonu: X vN" na kafelku.
+ * TU jest miejsce narodzin żywego skilla („+ nowy skill" - Zaplecze pokazuje już tylko szablony)
+ * + „+ z szablonu" (odlanie kopii). Ślad „Z szablonu: X vN" na kafelku.
  */
 import { IconGenerator, UiIcons, setSvg } from '../../crystal-soul/index.js';
 import { showSkillOverrideForm } from './profile_skills_overrides.js';
@@ -36,7 +34,7 @@ export function renderSkillsTab(ctx: SkillsContext, el: UiBoundary) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// SKILLE — biblioteka umiejętności grupowana kategoriami
+// SKILLE - biblioteka umiejętności grupowana kategoriami
 // ─────────────────────────────────────────────────────────────
 
 function _renderSkillsSection(ctx: SkillsContext, el: UiBoundary) {
@@ -86,9 +84,9 @@ function _renderSkillsSection(ctx: SkillsContext, el: UiBoundary) {
         }
     }
 
-    // „+ dodaj skill" — przypisz istniejący.
+    // „+ dodaj skill" - przypisz istniejący.
     _renderAddSkill(ctx, el, allSkills);
-    // S27 Z6: miejsce NARODZIN żywego skilla (po Z2 Zaplecze pokazuje już tylko szablony)
+    // Miejsce NARODZIN żywego skilla (Zaplecze pokazuje już tylko szablony)
     // + odlanie kopii z formy odlewniczej.
     _renderNewSkill(ctx, el);
     _renderSkillFromTemplate(ctx, el);
@@ -110,7 +108,7 @@ function _renderSkillShard(ctx: SkillsContext, grid: UiBoundary, parentEl: UiBou
         const badge = labelEl.createSpan({ cls: 'cs-badge cs-badge--auto', text: `📎 ${t('profile.skills.attachments')}` });
         badge.addClass('cs-shard-badge');
     }
-    // S27 Z6: ślad pochodzenia kopii — widać z której formy odlewniczej wyszedł ten skill.
+    // Ślad pochodzenia kopii - widać z której formy odlewniczej wyszedł ten skill.
     if (skill.fromTemplate) {
         const originBadge = labelEl.createSpan({
             cls: 'cs-badge cs-badge--default',
@@ -125,7 +123,7 @@ function _renderSkillShard(ctx: SkillsContext, grid: UiBoundary, parentEl: UiBou
         nav.push('skill-detail', { skillName: skill.slug || skill.name }, formData.name);
     });
 
-    // Override per-agent (prompt_append itd.) — mały guzik, nie główna akcja.
+    // Override per-agent (prompt_append itd.) - mały guzik, nie główna akcja.
     const editBtn = shard.createEl('button', { cls: 'clickable-icon cs-shard__action' });
     setSvg(editBtn, UiIcons.edit(12));
     editBtn.title = t('profile.skills.edit_for_agent');
@@ -211,7 +209,7 @@ function _renderAddSkill(ctx: SkillsContext, el: UiBoundary, allSkills: Skill[])
 }
 
 /**
- * S27 Z6: „+ nowy skill" — jedyne miejsce narodzin ŻYWEGO skilla (Zaplecze trzyma szablony).
+ * „+ nowy skill" - jedyne miejsce narodzin ŻYWEGO skilla (Zaplecze trzyma szablony).
  * Modal umie od razu dołożyć formę odlewniczą („Zapisz też jako szablon w Zapleczu").
  */
 function _renderNewSkill(ctx: SkillsContext, el: UiBoundary) {
@@ -237,7 +235,7 @@ function _renderNewSkill(ctx: SkillsContext, el: UiBoundary) {
     el.createDiv({ text: t('profile.skills.new_skill_hint'), cls: 'setting-item-description' });
 }
 
-/** S27 Z6: „+ z szablonu" — odlej kopię z Zaplecza i przypisz ją temu agentowi (D3). */
+/** „+ z szablonu" - odlej kopię z Zaplecza i przypisz ją temu agentowi. */
 function _renderSkillFromTemplate(ctx: SkillsContext, el: UiBoundary) {
     const { formData, plugin } = ctx;
     const store = plugin.agentManager?.skillTemplateStore;
@@ -285,7 +283,7 @@ function _categoryLabel(cat: string) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// KONEKTORY — zewnętrzne serwery MCP usera przypięte do agenta
+// KONEKTORY - zewnętrzne serwery MCP usera przypięte do agenta
 // ─────────────────────────────────────────────────────────────
 
 function _renderKonektorySection(ctx: SkillsContext, el: UiBoundary) {
@@ -296,9 +294,9 @@ function _renderKonektorySection(ctx: SkillsContext, el: UiBoundary) {
     head.createSpan({ text: t('profile.skills.connectors_header') });
     el.createDiv({ text: t('profile.skills.connectors_desc'), cls: 'setting-item-description' });
 
-    // E3.1: external MCP servers (real client) — keyed by server ID (tool.serverName === id,
-    // co jest osią opt-in w ToolRegistry.filterByAgent). Status/toolCount z managera (R2).
-    // Legacy user-JS serwery (serverLoader source:'user') wycięte w fazie C (D-A).
+    // External MCP servers (real client) - keyed by server ID (tool.serverName === id,
+    // co jest osią opt-in w ToolRegistry.filterByAgent). Status/toolCount z managera.
+    // Legacy user-JS serwery (serverLoader source:'user') zostały wycięte.
     const connectors = _externalConnectors(plugin);
     if (connectors.length === 0) {
         el.createDiv({ cls: 'cs-picker__empty', text: t('profile.skills.no_connectors') });
@@ -327,7 +325,7 @@ function _renderKonektorySection(ctx: SkillsContext, el: UiBoundary) {
         toggle.createDiv({ cls: 'cs-toggle__thumb' });
         toggle.addEventListener('click', (e: Event) => {
             e.stopPropagation();
-            if (formData.mcp_servers.includes('*')) return; // wildcard — nic nie zmieniamy per-serwer
+            if (formData.mcp_servers.includes('*')) return; // wildcard - nic nie zmieniamy per-serwer
             const nowPinned = !formData.mcp_servers.includes(server.key);
             if (nowPinned) {
                 formData.mcp_servers.push(server.key);
@@ -342,8 +340,8 @@ function _renderKonektorySection(ctx: SkillsContext, el: UiBoundary) {
 }
 
 /**
- * External MCP servers dla listy konektorów profilu agenta (E3.1). Zaciąga id + nazwę + liczbę
- * narzędzi ze snapshotu managera (`listServersForUi`), a gdy manager niedostępny — z samego configu.
+ * External MCP servers dla listy konektorów profilu agenta. Zaciąga id + nazwę + liczbę
+ * narzędzi ze snapshotu managera (`listServersForUi`), a gdy manager niedostępny - z samego configu.
  * @returns {Array<{key:string,label:string,description:string,toolCount:number,icon:null}>}
  */
 function _externalConnectors(plugin: UiBoundary): Connector[] {

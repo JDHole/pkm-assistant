@@ -26,7 +26,7 @@ export function renderCommunicatorView(container: UiBoundary, plugin: UiBoundary
         return;
     }
 
-    // E1.2 kill-switch: guard against a missing KomunikatorManager (flag off / not instantiated).
+    // Kill-switch: guard against a missing KomunikatorManager (flag off / not instantiated).
     if (!agentManager.komunikatorManager) {
         container.createEl('p', { text: t('sidebar.communicator_unavailable'), cls: 'agent-error' });
         return;
@@ -49,7 +49,7 @@ export function renderCommunicatorView(container: UiBoundary, plugin: UiBoundary
     // Agent strip (horizontal, scrollable)
     const agentStrip = container.createDiv({ cls: 'cs-comm-strip' });
 
-    // Inbox container. S28 (D1): sekcja Projects skasowana razem z Project Hubem.
+    // Inbox container.
     const inboxEl = container.createDiv({ cls: 'cs-comm-inbox' });
 
     // Render
@@ -111,9 +111,9 @@ export function renderCommunicatorView(container: UiBoundary, plugin: UiBoundary
                         chip.createSpan({ cls: 'cs-comm-chip__badge', text: String(count) });
                     }
                 } catch (e) {
-                    // AUD-bledy-048: pusty `catch {}` robił z awarii licznika „brak nowych" —
+                    // DLACZEGO: pusty `catch {}` zrównałby awarię licznika z „brak nowych" -
                     // chip bez badge'a wygląda identycznie jak zero nieprzeczytanych, więc user
-                    // uznawał skrzynkę za pustą. Nieznany stan ma wyglądać jak nieznany.
+                    // uznałby skrzynkę za pustą. Nieznany stan ma wyglądać jak nieznany.
                     log.warn('CommunicatorView', `Nie policzyłem nieprzeczytanych dla ${agent.name}:`, e);
                     chip.createSpan({ cls: 'cs-comm-chip__badge', text: '?' });
                 }
@@ -170,7 +170,7 @@ export function renderCommunicatorView(container: UiBoundary, plugin: UiBoundary
             agentManager._emit('communicator:message_read');
         });
 
-        // S28 D5: guzik hurtowy — kasuje WSZYSTKIE obustronnie przeczytane, bez podglądu,
+        // Guzik hurtowy - kasuje WSZYSTKIE obustronnie przeczytane, bez podglądu,
         // z jednym zbiorczym potwierdzeniem. Usuwanie twarde (bez kosza).
         const purgeBtn = actions.createEl('button', {
             cls: 'cs-comm-action-btn cs-comm-action-btn--danger',
@@ -218,7 +218,7 @@ export function renderCommunicatorView(container: UiBoundary, plugin: UiBoundary
     }
 
     function renderMessageCard(messagesContainer: UiBoundary, msg: MessageHeader, komunikator: UiBoundary, agentColor: string) {
-        // S28 (D2): statusy przychodzą z frontmattera wiadomości, nie z regexa na całym pliku.
+        // Statusy przychodzą z frontmattera wiadomości, nie z regexa na całym pliku.
         const userRead = msg.userRead === true;
         const aiRead = msg.aiRead === true;
         const isUnread = !userRead;

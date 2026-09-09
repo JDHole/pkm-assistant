@@ -4,8 +4,7 @@
  * zerowe). Kazda inna rola przekazana do `record()` (np. `researcher` z sub-agentow) dostaje
  * wlasny kubelek leniwie.
  *
- * Kubelek `master` skasowany w fabryce kasacji martwego kodu S1 (2026-09-02,
- * AUD-dead-code-119) — po E3.6 zaden produkcyjny wolacz `record()` nie podaje roli 'master'
+ * Kubelek `master` skasowany: zaden produkcyjny wolacz `record()` nie podaje roli 'master'
  * (jedyne wolania to literal 'main' i `result.aspect_type || 'researcher'` z DelegateTool),
  * a wiersz w slim barze go pokazujacy byl trwale ukryty (`is-hidden` przy totalu 0).
  */
@@ -33,7 +32,7 @@ export interface SessionTotal {
 }
 
 export class TokenTracker {
-    // `declare` = deklaracja WYLACZNIE typu, zero emitu (patrz kontrakt kampanii TS, §3):
+    // `declare` = deklaracja WYLACZNIE typu, zero emitu:
     // przy `useDefineForClassFields: true` zwykla deklaracja wyemitowalaby realne puste pole.
     declare entries: TokenEntry[];
     /** Klucz = rola. Dwa kubelki startowe + kazda rola dolozona leniwie w `record()`. */
@@ -46,7 +45,7 @@ export class TokenTracker {
             main:   { input: 0, output: 0 },
             minion: { input: 0, output: 0 },
         };
-        // L07-6: czy DLA DANEJ ROLI jakikolwiek wpis byl estymata (fallback bez usage z API).
+        // Czy DLA DANEJ ROLI jakikolwiek wpis byl estymata (fallback bez usage z API).
         // Token Viewer oznacza wtedy liczby prefiksem `~` + etykieta „przyblizone".
         this.estimated = { main: false, minion: false };
     }
@@ -58,7 +57,7 @@ export class TokenTracker {
      * @param role — 'main' | 'minion' | dowolna rola runtime (np. 'researcher')
      * @param inputTokens  — prompt_tokens
      * @param outputTokens — completion_tokens
-     * @param meta — L07-6: estimated=true gdy liczby pochodza z fallbacku
+     * @param meta — estimated=true gdy liczby pochodza z fallbacku
      *   (brak usage z API). Backward-compat: stare wywolania bez meta dzialaja jak dotad.
      */
     record(role: string, inputTokens: number, outputTokens: number, meta: { estimated?: boolean } = {}): void {

@@ -3,8 +3,7 @@
  *
  * Pełne pokrycie reguł w kontekście streamu dostawcy siedzi w `providers/lm_studio.test.ts`
  * i `providers/ollama.test.ts`; tutaj pinujemy dwie mechaniki, które da się zbadać wyłącznie
- * w izolacji: rezerwę na tag rozcięty między porcje (B.11 TT-04/TT-05) i rollback tagu
- * niedomkniętego (TT-08/TT-09).
+ * w izolacji: rezerwę na tag rozcięty między porcje i rollback tagu niedomkniętego.
  */
 import test from 'ava';
 import { ReasoningTagFilter } from './ReasoningTagFilter.js';

@@ -4,11 +4,10 @@ import { isBlockBoundToNote, parseArtifactBlockId, registerArtifactBlocks } from
 
 setLocale('pl');
 
-// ── K10 (AUD-security-063) ────────────────────────────────────────────────────
-// Blok ```pkm-artefakt``` renderował guziki dla DOWOLNEGO id wpisanego w jego treść — także
-// artefaktu innego agenta, w dowolnej notatce vaulta. User widział „✅ Zatwierdź" w kontekście
-// SWOJEJ notatki i jednym klikiem przestawiał status cudzego planu (+ przywoływał tamtego agenta).
-// Bramką jest ścieżka: blok żyje wyłącznie w notatce swojego artefaktu.
+// Blok ```pkm-artefakt``` bez tej bramki renderowałby guziki dla DOWOLNEGO id wpisanego w jego
+// treść - także artefaktu innego agenta, w dowolnej notatce vaulta. User widziałby „✅ Zatwierdź" w
+// kontekście SWOJEJ notatki i jednym klikiem przestawiałby status cudzego planu (+ przywoływał
+// tamtego agenta). Bramką jest ścieżka: blok żyje wyłącznie w notatce swojego artefaktu.
 
 const OWN = 'PKM Assistant/Artefakty/Jaskier/2026-08-22 Plan.md';
 const FOREIGN = 'PKM Assistant/Artefakty/Igor/2026-08-22 Plan Igora.md';
@@ -80,14 +79,14 @@ async function render(source: string, sourcePath: string | undefined) {
     return { root, flat, calls };
 }
 
-test('K10: isBlockBoundToNote — własna notatka TAK, cudza NIE', t => {
+test('isBlockBoundToNote — własna notatka TAK, cudza NIE', t => {
     const { store } = makeStore();
     t.true(isBlockBoundToNote('art-wlasny', OWN, store));
     t.false(isBlockBoundToNote('art-obcy', OWN, store), 'cudze id w mojej notatce = nie związane');
     t.false(isBlockBoundToNote('art-wlasny', FOREIGN, store), 'moje id w cudzej notatce = nie związane');
 });
 
-test('K10: isBlockBoundToNote — nieznane id / brak ścieżki / brak store = fail-closed', t => {
+test('isBlockBoundToNote — nieznane id / brak ścieżki / brak store = fail-closed', t => {
     const { store } = makeStore();
     t.false(isBlockBoundToNote('art-nieznany', OWN, store));
     t.false(isBlockBoundToNote('art-wlasny', undefined, store));
@@ -95,27 +94,27 @@ test('K10: isBlockBoundToNote — nieznane id / brak ścieżki / brak store = fa
     t.false(isBlockBoundToNote('', OWN, store));
 });
 
-test('K10: isBlockBoundToNote — porównanie po ścieżce KANONICZNEJ (backslashe, ./ , wiodący /)', t => {
+test('isBlockBoundToNote — porównanie po ścieżce KANONICZNEJ (backslashe, ./ , wiodący /)', t => {
     const { store } = makeStore();
     t.true(isBlockBoundToNote('art-wlasny', OWN.replace(/\//g, '\\'), store));
     t.true(isBlockBoundToNote('art-wlasny', `./${OWN}`, store));
     t.true(isBlockBoundToNote('art-wlasny', `/${OWN}`, store));
 });
 
-test('K10: blok z CUDZYM id renderuje się nieaktywnie — zero guzików, zero wywołań store', async t => {
+test('blok z CUDZYM id renderuje się nieaktywnie — zero guzików, zero wywołań store', async t => {
     const { root, flat, calls } = await render('id: art-obcy', OWN);
     t.is(flat.filter(n => n.tag === 'button').length, 0, 'żadnej akcji do kliknięcia');
     t.deepEqual(calls, [], 'store nie jest nawet pytany o cudzy artefakt');
     t.true(root.children.some(n => n.cls.includes('pkm-artefakt-block__note') && n.text.length > 0), 'komunikat i18n dla usera');
 });
 
-test('K10: blok we WŁASNEJ notatce dalej rysuje guziki', async t => {
+test('blok we WŁASNEJ notatce dalej rysuje guziki', async t => {
     const { flat, calls } = await render('id: art-wlasny', OWN);
     t.true(flat.filter(n => n.tag === 'button').length >= 1);
     t.deepEqual(calls, ['read:art-wlasny']);
 });
 
-test('K10: brak ctx.sourcePath (stary host) = blok nieaktywny, nie otwarte guziki', async t => {
+test('brak ctx.sourcePath (stary host) = blok nieaktywny, nie otwarte guziki', async t => {
     const { flat } = await render('id: art-wlasny', undefined);
     t.is(flat.filter(n => n.tag === 'button').length, 0);
 });

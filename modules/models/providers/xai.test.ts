@@ -6,8 +6,8 @@ import type { NormalizedError, OpenAiCompletion, StreamHandlers } from '../contr
 
 /**
  * xAI nie ma użytecznego streamu w Obsidianie: `app://obsidian.md` nie dostaje nagłówków CORS
- * od api.x.ai, więc transport strumieniowy jest blokowany. Dawniej robiła to podklasa w
- * composition roocie; dziś to WŁAŚCIWOŚĆ dostawcy — `streamMode: 'complete'` (B.10 XA-03).
+ * od api.x.ai, więc transport strumieniowy jest blokowany. To WŁAŚCIWOŚĆ dostawcy -
+ * `streamMode: 'complete'`.
  */
 type ParsedBody = { max_tokens?: number };
 
@@ -24,7 +24,7 @@ test('xAI request sets x-grok-conv-id header', t => {
     t.is((JSON.parse(spec.body ?? '{}') as ParsedBody).max_tokens, MODEL_MAX_TOKENS_DEFAULTS.xai);
 });
 
-/** Wyciąga ostatni segment nagłówka rozmowy — losowy ogon identyfikatora. */
+/** Wyciąga ostatni segment nagłówka rozmowy - losowy ogon identyfikatora. */
 function tailOf(headerValue: string): string {
     const parts = headerValue.split('-');
     return parts[parts.length - 1];
@@ -77,8 +77,8 @@ test('decorateHeaders: pusty string w req.agentName NIE spada na ctx.agentName (
 test('conversationId: ten sam agent w tym samym dniu dostaje TEN SAM identyfikator (cache trafia)', t => {
     const ctx = makeCtx({ modelId: 'grok-3-mini-beta', apiKey: 'xai-test' });
 
-    const first = xaiProvider.buildRequest({ agentName: 'Kuba', messages: MESSAGES }, ctx, false);
-    const second = xaiProvider.buildRequest({ agentName: 'Kuba', messages: MESSAGES }, ctx, false);
+    const first = xaiProvider.buildRequest({ agentName: 'Agent', messages: MESSAGES }, ctx, false);
+    const second = xaiProvider.buildRequest({ agentName: 'Agent', messages: MESSAGES }, ctx, false);
 
     t.is(first.headers['x-grok-conv-id'], second.headers['x-grok-conv-id']);
 });
@@ -86,7 +86,7 @@ test('conversationId: ten sam agent w tym samym dniu dostaje TEN SAM identyfikat
 test('conversationId: sprzatanie starych wpisow NIE kasuje cache innego agenta z DZISIEJSZYM dniem', t => {
     const ctx = makeCtx({ modelId: 'grok-3-mini-beta', apiKey: 'xai-test' });
 
-    // Agent A dostaje identyfikator na dzis — trafia do wspolnej mapy modulu.
+    // Agent A dostaje identyfikator na dzis - trafia do wspolnej mapy modulu.
     const alphaFirst = xaiProvider.buildRequest({ agentName: 'Alpha', messages: MESSAGES }, ctx, false);
 
     // Zapytanie o agenta B odpala petle sprzatania starych wpisow w tej samej mapie.
@@ -100,10 +100,10 @@ test('conversationId: sprzatanie starych wpisow NIE kasuje cache innego agenta z
 });
 
 /**
- * N14 (luka L-02): `streamMode: 'complete'` — `stream()` emuluje strumień JEDNYM wywołaniem
- * `complete()`: `chunk` z CAŁĄ treścią, potem AWAITOWANE `done`, dopiero potem resolve.
+ * `streamMode: 'complete'` - `stream()` emuluje strumień JEDNYM wywołaniem `complete()`:
+ * `chunk` z CAŁĄ treścią, potem AWAITOWANE `done`, dopiero potem resolve.
  */
-test('L-02: xAI streamMode=complete — stream() woła complete() i emituje chunk → done', async t => {
+test('xAI streamMode=complete — stream() woła complete() i emituje chunk → done', async t => {
     const http = new CapturingHttpClient({
         body: { choices: [{ index: 0, message: { role: 'assistant', content: 'Cała odpowiedź naraz.' } }], usage: {} },
     });
@@ -124,10 +124,10 @@ test('L-02: xAI streamMode=complete — stream() woła complete() i emituje chun
 });
 
 /**
- * N15 (luka L-02, B.4 LP-03): błąd idzie DWIEMA drogami — do `handlers.error` i jako
- * odrzucenie promisy, TYM SAMYM obiektem.
+ * Błąd idzie DWIEMA drogami - do `handlers.error` i jako odrzucenie promisy, TYM SAMYM
+ * obiektem.
  */
-test('L-02: xAI — odpowiedź z polem error idzie do handlers.error I odrzuca promisę', async t => {
+test('xAI — odpowiedź z polem error idzie do handlers.error I odrzuca promisę', async t => {
     const http = new CapturingHttpClient({
         status: 400,
         body: { error: { message: 'Grok is grumpy', type: 'invalid_request_error' } },
@@ -149,10 +149,10 @@ test('L-02: xAI — odpowiedź z polem error idzie do handlers.error I odrzuca p
 });
 
 /**
- * N16 (luka L-02): `handlers.done` bywa asynchroniczne — harness owija je podsłuchem `async`.
- * Brak `await` gubi obserwację i przerywa scenariusze.
+ * `handlers.done` bywa asynchroniczne - harness owija je podsłuchem `async`. Brak `await`
+ * gubi obserwację i przerywa scenariusze.
  */
-test('L-02: xAI — handlers.done jest AWAITOWANE (asynchroniczny handler kończy się przed resolve)', async t => {
+test('xAI — handlers.done jest AWAITOWANE (asynchroniczny handler kończy się przed resolve)', async t => {
     const http = new CapturingHttpClient({
         body: { choices: [{ index: 0, message: { role: 'assistant', content: 'ok' } }], usage: {} },
     });

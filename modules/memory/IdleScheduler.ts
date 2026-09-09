@@ -1,12 +1,12 @@
 /**
- * E2.7 W3 (K4): idle-consolidation decision helper.
+ * Idle-consolidation decision helper.
  *
  * Pure logic, no Obsidian import → node-testable. The 60s interval and the actual
  * handleSaveSession() call live in chat_session (which owns ChatView + AgentMemory); this class
  * only answers "should we consolidate now?" given the current activity snapshot.
  *
- * W3-lite scope: on idle we only run the mechanical transcript save (handleSaveSession). No
- * background LLM work yet — that needs more trust and is a separate decision after W1+W2 settle.
+ * Limited scope: on idle we only run the mechanical transcript save (handleSaveSession). No
+ * background LLM work - that needs more trust and stays a separate decision.
  */
 export interface IdleSchedulerOptions {
     /** Idle threshold in minutes. <= 0 disables (off). */
@@ -26,7 +26,7 @@ export interface IdleSnapshot {
 }
 
 export class IdleScheduler {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare idleMinutes: number;
     declare minNewEntries: number;
 

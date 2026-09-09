@@ -16,11 +16,11 @@ type MemRes = {
     ephemeral?: boolean;
     section?: string;
     error?: string;
-    /** AUD-bledy-029: zmiana zatwierdzona, ale indeks brain.md nie odświeżony. */
+    /** Zmiana zatwierdzona, ale indeks brain.md nie odświeżony. */
     index_stale?: boolean;
     warning?: string;
 };
-// NOTE (E2.6): memory_read został wchłonięty przez narzędzie `read` (scope=memory).
+// NOTE: memory_read został wchłonięty przez narzędzie `read` (scope=memory).
 // Testy odczytu pamięci żyją teraz w ReadTool.test.js.
 
 function makeVault(initialFiles: Record<string, string> = {}, initialFolders: string[] = []) {
@@ -106,10 +106,10 @@ function makePlugin(
 
 function noteArgs(overrides: Record<string, unknown> = {}) {
     return {
-        name: 'Kuba direct feedback',
-        description: 'Kuba wants direct, concrete feedback',
+        name: 'Jan direct feedback',
+        description: 'Jan wants direct, concrete feedback',
         type: 'user',
-        content: 'Kuba prefers direct feedback without cheerleading.',
+        content: 'Jan prefers direct feedback without cheerleading.',
         why: 'Past sessions showed cheerleading mode is noisy.',
         how_to_apply: 'Be warm, but concrete and honest.',
         ...overrides,
@@ -123,17 +123,17 @@ test('memory_save creates a new brain note and refreshes brain.md index', async 
 
     const result = await createMemorySaveTool().execute(noteArgs(), null, makePlugin(memory)) as MemRes;
 
-    const notePath = '.pkm-assistant/agents/jaskier/memory/brain/user_kuba_direct_feedback.md';
+    const notePath = '.pkm-assistant/agents/jaskier/memory/brain/user_jan_direct_feedback.md';
     t.true(result.success);
     t.is(result.path, notePath);
     t.true(Object.prototype.hasOwnProperty.call(files, notePath));
     t.true(files[brainPath].includes('## User'));
-    t.true(files[brainPath].includes('[[brain/user_kuba_direct_feedback.md]]'));
-    t.true(files[brainPath].includes('Kuba wants direct, concrete feedback'));
+    t.true(files[brainPath].includes('[[brain/user_jan_direct_feedback.md]]'));
+    t.true(files[brainPath].includes('Jan wants direct, concrete feedback'));
 });
 
 test('memory_save refuses to overwrite an existing brain note', async t => {
-    const notePath = '.pkm-assistant/agents/jaskier/memory/brain/user_kuba_direct_feedback.md';
+    const notePath = '.pkm-assistant/agents/jaskier/memory/brain/user_jan_direct_feedback.md';
     const { vault, files } = makeVault({
         '.pkm-assistant/agents/jaskier/memory/brain.md': brain(),
         [notePath]: 'existing',
@@ -199,21 +199,21 @@ test('memory_save uses invocation agent memory when active agent changes', async
 
 test('memory_delete removes one matching brain note and refreshes brain.md index', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
-    const notePath = `${base}/brain/user_kuba_direct.md`;
+    const notePath = `${base}/brain/user_jan_direct.md`;
     const { vault, files } = makeVault({
         [`${base}/brain.md`]: brain(),
         [notePath]: `---
-name: Kuba direct
+name: Jan direct
 description: direct feedback preference
 type: user
 created: 2026-05-24
 ---
-Kuba prefers direct feedback.
+Jan prefers direct feedback.
 `,
     });
     const memory = new AgentMemory(vault, 'Jaskier');
     await memory.rebuildBrainIndex();
-    t.true(files[`${base}/brain.md`].includes('user_kuba_direct.md'));
+    t.true(files[`${base}/brain.md`].includes('user_jan_direct.md'));
 
     const result = await createMemoryDeleteTool().execute(
         { fact: 'direct feedback preference' },
@@ -222,23 +222,23 @@ Kuba prefers direct feedback.
     ) as MemRes;
 
     t.true(result.success, JSON.stringify(result));
-    t.is(result.filename, 'user_kuba_direct.md');
+    t.is(result.filename, 'user_jan_direct.md');
     t.false(Object.prototype.hasOwnProperty.call(files, notePath));
-    t.false(files[`${base}/brain.md`].includes('user_kuba_direct.md'));
+    t.false(files[`${base}/brain.md`].includes('user_jan_direct.md'));
 });
 
-test('memory_delete matches note identity only, not the full body (E1.1 ryzyko B)', async t => {
+test('memory_delete matches note identity only, not the full body', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
-    const notePath = `${base}/brain/user_kuba.md`;
+    const notePath = `${base}/brain/user_jan.md`;
     const { vault, files } = makeVault({
         [`${base}/brain.md`]: brain(),
         [notePath]: `---
-name: Kuba
+name: Jan
 description: podstawowe fakty o userze
 type: user
 created: 2026-05-24
 ---
-Kuba mieszka w Warszawie i pracuje nad pluginem.
+Jan mieszka w Warszawie i pracuje nad pluginem.
 `,
     });
     const memory = new AgentMemory(vault, 'Jaskier');
@@ -318,9 +318,9 @@ Projekt jest zakończony.
     t.true(Object.prototype.hasOwnProperty.call(files, notePath));
 });
 
-// ─── E2.7 K1: parallel memory_save through the per-path write queue ───
+// ─── parallel memory_save through the per-path write queue ───
 
-test('E2.7 K1: two parallel memory_save (different names) both land + index lists both', async t => {
+test('two parallel memory_save (different names) both land + index lists both', async t => {
     const brainPath = '.pkm-assistant/agents/jaskier/memory/brain.md';
     const { vault, files } = makeVault({ [brainPath]: brain() });
     // Widen the read→write window so a missing lock would drop one note from the index.
@@ -348,7 +348,7 @@ test('E2.7 K1: two parallel memory_save (different names) both land + index list
     t.true(files[brainPath].includes('[[brain/user_beta_fact.md]]'));
 });
 
-test('E2.7 K1: two parallel memory_save (same name) → exactly one file, other gets note_already_exists', async t => {
+test('two parallel memory_save (same name) → exactly one file, other gets note_already_exists', async t => {
     const brainPath = '.pkm-assistant/agents/jaskier/memory/brain.md';
     const { vault, files } = makeVault({ [brainPath]: brain() });
     const origWrite = vault.adapter.write;
@@ -372,15 +372,15 @@ test('E2.7 K1: two parallel memory_save (same name) → exactly one file, other 
     t.true(Object.prototype.hasOwnProperty.call(files, notePath));
 });
 
-// ─── E2.8 D2: memory_save {ephemeral} → „Na teraz" section (the create-only exception) ───
+// ─── memory_save {ephemeral} → „Na teraz" section (the create-only exception) ───
 
-test('E2.8 D2: memory_save ephemeral writes to „Na teraz" instead of a brain/ note', async t => {
+test('memory_save ephemeral writes to „Na teraz" instead of a brain/ note', async t => {
     const brainPath = '.pkm-assistant/agents/jaskier/memory/brain.md';
     const { vault, files } = makeVault({ [brainPath]: brain() });
     const memory = new AgentMemory(vault, 'Jaskier');
 
     const result = await createMemorySaveTool().execute(
-        { ephemeral: true, section: 'user', content: 'Kuba testuje dziś panel' },
+        { ephemeral: true, section: 'user', content: 'User testuje dziś panel' },
         null,
         makePlugin(memory)
     ) as MemRes;
@@ -389,13 +389,13 @@ test('E2.8 D2: memory_save ephemeral writes to „Na teraz" instead of a brain/ 
     t.true(result.ephemeral);
     t.is(result.section, 'user');
     t.true(files[brainPath].includes('## Na teraz: User'));
-    t.true(files[brainPath].includes('- Kuba testuje dziś panel'));
+    t.true(files[brainPath].includes('- User testuje dziś panel'));
     // No brain/ note was created — this is NOT the create-only path.
     const brainDir = '.pkm-assistant/agents/jaskier/memory/brain/';
     t.false(Object.keys(files).some(p => p.startsWith(brainDir)), 'no brain/ note created');
 });
 
-test('E2.8 D2: memory_save ephemeral remove purges an outdated „Na teraz" entry', async t => {
+test('memory_save ephemeral remove purges an outdated „Na teraz" entry', async t => {
     const brainPath = '.pkm-assistant/agents/jaskier/memory/brain.md';
     const { vault, files } = makeVault({ [brainPath]: brain() });
     const memory = new AgentMemory(vault, 'Jaskier');
@@ -414,7 +414,7 @@ test('E2.8 D2: memory_save ephemeral remove purges an outdated „Na teraz" entr
     t.true(files[brainPath].includes('- Nowy stan projektu'));
 });
 
-test('E2.8 D2: memory_save ephemeral rejects an empty op and a bad section', async t => {
+test('memory_save ephemeral rejects an empty op and a bad section', async t => {
     const brainPath = '.pkm-assistant/agents/jaskier/memory/brain.md';
     const { vault } = makeVault({ [brainPath]: brain() });
     const memory = new AgentMemory(vault, 'Jaskier');
@@ -429,7 +429,7 @@ test('E2.8 D2: memory_save ephemeral rejects an empty op and a bad section', asy
     t.is(badSection.code, 'validation_error');
 });
 
-// ── Poligon F2: stopka notatki (Dlaczego / Jak stosować) idzie z i18n ──────────
+// ── stopka notatki (Dlaczego / Jak stosować) idzie z i18n ──────────
 // Wcześniej `**Why:** Not specified yet.` / `**How to apply:** …` były wpisane na sztywno
 // w DWÓCH miejscach (MemorySaveTool + AgentMemory._buildBrainNoteContent) i lądowały
 // po angielsku w vaulcie usera niezależnie od języka UI.
@@ -488,12 +488,12 @@ test.serial('stopka notatki brain/ jest w języku UI (pl vs en) — obie ścież
     }
 });
 
-// ── K4 (AUD-security-036): rozwiązywanie pamięci jest FAIL-CLOSED ──
+// ── rozwiązywanie pamięci jest FAIL-CLOSED ──
 // Tożsamość z runtime (`_invocationAgentName`) bez wpisu w `agentMemories` — dzieje się przy
-// biegu suba w tle po przełączeniu agenta i po skasowaniu agenta w trakcie biegu. Do K4
-// narzędzia spadały wtedy na `getActiveMemory()`, czyli pisały do CUDZEGO katalogu `brain/`.
+// biegu suba w tle po przełączeniu agenta i po skasowaniu agenta w trakcie biegu. Fallback na
+// `getActiveMemory()` w tej sytuacji pisałby do CUDZEGO katalogu `brain/`.
 
-test('K4/036: memory_save z nieznaną tożsamością odmawia zamiast pisać do cudzej pamięci', async t => {
+test('memory_save z nieznaną tożsamością odmawia zamiast pisać do cudzej pamięci', async t => {
     const brainPath = '.pkm-assistant/agents/jaskier/memory/brain.md';
     const { vault, files } = makeVault({ [brainPath]: brain() });
     const memory = new AgentMemory(vault, 'Jaskier');
@@ -507,29 +507,29 @@ test('K4/036: memory_save z nieznaną tożsamością odmawia zamiast pisać do c
     t.is(Object.keys(files).length, before, 'żaden plik nie mógł powstać w pamięci Jaskra');
 });
 
-test('K4/036: memory_delete z nieznaną tożsamością odmawia zamiast kasować u kogoś innego', async t => {
-    const notePath = '.pkm-assistant/agents/jaskier/memory/brain/user_kuba.md';
+test('memory_delete z nieznaną tożsamością odmawia zamiast kasować u kogoś innego', async t => {
+    const notePath = '.pkm-assistant/agents/jaskier/memory/brain/user_jan.md';
     const { vault, files } = makeVault({
         '.pkm-assistant/agents/jaskier/memory/brain.md': brain(),
-        [notePath]: '---\nname: Kuba\ntype: user\n---\ntreść',
+        [notePath]: '---\nname: Jan\ntype: user\n---\ntreść',
     });
     const memory = new AgentMemory(vault, 'Jaskier');
 
     const result = await createMemoryDeleteTool().execute(
-        { fact: 'Kuba', _invocationAgentName: 'Skasowany' }, null, makePlugin(memory),
+        { fact: 'Jan', _invocationAgentName: 'Skasowany' }, null, makePlugin(memory),
     ) as MemRes;
 
     t.false(result.success);
     t.true(Object.prototype.hasOwnProperty.call(files, notePath), 'notatka Jaskra musi przeżyć');
 });
 
-// ── AUD-bledy-029: zmiana zatwierdzona ≠ indeks odświeżony ──
-// `rebuildBrainIndex` jest od K4 (gotcha 9 w `modules/memory/CLAUDE.md`) FAIL-CLOSED: odczyt
-// `'unknown'` rzuca zamiast nadpisać brain.md. Dopóki rebuild siedział w tym samym `try` co
-// zapis/kasacja, jego pad zamieniał UDANĄ operację w `{success:false}` — model ponawiał zapis
-// (i odbijał się o create-only) albo słyszał „nie skasowałem" o pliku, którego już nie ma.
+// ── zmiana zatwierdzona ≠ indeks odświeżony ──
+// `rebuildBrainIndex` (gotcha 9 w `modules/memory/CLAUDE.md`) jest FAIL-CLOSED: odczyt
+// `'unknown'` rzuca zamiast nadpisać brain.md. Gdyby rebuild siedział w tym samym `try` co
+// zapis/kasacja, jego pad zamieniałby UDANĄ operację w `{success:false}` — model ponawiałby
+// zapis (i odbijał się o create-only) albo słyszałby „nie skasowałem" o pliku, którego już nie ma.
 
-test('029: memory_save z padniętym rebuildem melduje sukces + index_stale (notatka JEST na dysku)', async t => {
+test('memory_save z padniętym rebuildem melduje sukces + index_stale (notatka JEST na dysku)', async t => {
     const brainPath = '.pkm-assistant/agents/jaskier/memory/brain.md';
     const { vault, files } = makeVault({ [brainPath]: brain() });
     const memory = new AgentMemory(vault, 'Jaskier');
@@ -538,7 +538,7 @@ test('029: memory_save z padniętym rebuildem melduje sukces + index_stale (nota
 
     const result = await createMemorySaveTool().execute(noteArgs(), null, makePlugin(memory)) as MemRes;
 
-    const notePath = '.pkm-assistant/agents/jaskier/memory/brain/user_kuba_direct_feedback.md';
+    const notePath = '.pkm-assistant/agents/jaskier/memory/brain/user_jan_direct_feedback.md';
     t.true(Object.prototype.hasOwnProperty.call(files, notePath), 'notatka realnie powstała');
     t.true(result.success, 'zapis się udał, więc meldunek to sukces');
     t.true(result.index_stale, 'ale indeks brain.md nie został odświeżony');
@@ -546,17 +546,17 @@ test('029: memory_save z padniętym rebuildem melduje sukces + index_stale (nota
     t.not(result.warning, '');
 });
 
-test('029: memory_delete z padniętym rebuildem melduje sukces + index_stale (plik JUŻ skasowany)', async t => {
-    const notePath = '.pkm-assistant/agents/jaskier/memory/brain/user_kuba.md';
+test('memory_delete z padniętym rebuildem melduje sukces + index_stale (plik JUŻ skasowany)', async t => {
+    const notePath = '.pkm-assistant/agents/jaskier/memory/brain/user_jan.md';
     const { vault, files } = makeVault({
         '.pkm-assistant/agents/jaskier/memory/brain.md': brain(),
-        [notePath]: '---\nname: Kuba\ntype: user\n---\ntreść',
+        [notePath]: '---\nname: Jan\ntype: user\n---\ntreść',
     });
     const memory = new AgentMemory(vault, 'Jaskier');
     memory.rebuildBrainIndex = async () => { throw new Error('brain.md: odczyt niepewny'); };
 
     const result = await createMemoryDeleteTool().execute(
-        { fact: 'Kuba' }, null, makePlugin(memory),
+        { fact: 'Jan' }, null, makePlugin(memory),
     ) as MemRes;
 
     t.false(Object.prototype.hasOwnProperty.call(files, notePath), 'plik realnie zniknął');

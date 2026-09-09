@@ -37,9 +37,9 @@ test('missing promptDefaults / missing settings → factory', t => {
     t.is(resolveWorkPrompt({}, 'subagent_frame_prompt', { pkmAssistant: {} }, FACTORY), FACTORY);
 });
 
-// AUD-dead-code-124 (2026-09-02): brief_prompt WYCIĘTY — zero czytelników od skasowania
-// ContextSessionGenerator w E2.9 D. Test-pin: lista kluczy resolvera NIE zawiera brief_prompt.
-test('WORK_PROMPT_KEYS lists the five live work prompts (brief_prompt cut, AUD-dead-code-124)', t => {
+// brief_prompt WYCIĘTY - zero czytelników od skasowania ContextSessionGenerator.
+// Test-pin: lista kluczy resolvera NIE zawiera brief_prompt.
+test('WORK_PROMPT_KEYS lists the five live work prompts (brief_prompt cut)', t => {
     t.deepEqual([...WORK_PROMPT_KEYS].sort(), [
         'archive_prompt', 'compression_prompt',
         'save_session_prompt', 'subagent_frame_prompt', 'summary_prompt',

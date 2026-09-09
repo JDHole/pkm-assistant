@@ -8,11 +8,11 @@ function makeManager(handlerResult: ApprovalHandlerResult) {
     return mgr;
 }
 
-// ─── E3.1 R4: "Zawsze zezwalaj" per KONKRETNE narzędzie external ────────────
+// ─── "Zawsze zezwalaj" per KONKRETNE narzędzie external ────────────
 // External MCP tools carry a distinct approvalTarget (prefixed tool name) so a single
 // "always" does NOT unlock every external tool of every server (external.call::* is too broad).
 
-test('R4: "always" for one external tool does NOT auto-approve sibling tools or another server', async t => {
+test('external tools: "always" for one tool does NOT auto-approve sibling tools or another server', async t => {
     const mgr = makeManager({ result: 'always' });
 
     // User approves-forever the specific external tool (approvalTarget = prefixed name; targetPath empty).
@@ -34,7 +34,7 @@ test('R4: "always" for one external tool does NOT auto-approve sibling tools or 
     t.is(asked, 2, 'exact tool auto-approved silently');
 });
 
-test('R4: external always-rule is stored per-tool (no external.call::* wildcard)', async t => {
+test('external tools: always-rule is stored per-tool (no external.call::* wildcard)', async t => {
     const mgr = makeManager({ result: 'always' });
     await mgr.requestApproval({ agentName: 'Jaskier', type: 'external.call', targetPath: '', approvalTarget: 'srv__toolA' });
     const rules = mgr.getAlwaysApprovedRules('Jaskier');
@@ -42,19 +42,19 @@ test('R4: external always-rule is stored per-tool (no external.call::* wildcard)
     t.false(rules.includes('external.call::*'), 'must NOT create the broad wildcard');
 });
 
-test('R4: non-external actions keep using targetPath (approvalTarget absent → fallback, unchanged behavior)', async t => {
+test('external tools: non-external actions keep using targetPath (approvalTarget absent → fallback, unchanged behavior)', async t => {
     const mgr = makeManager({ result: 'always' });
     await mgr.requestApproval({ agentName: 'Jaskier', type: 'vault.write', targetPath: 'Notes/a.md' });
     t.deepEqual(mgr.getAlwaysApprovedRules('Jaskier'), ['vault.write::Notes/a.md']);
 });
 
-// ─── K22 (AUD-security-104): cel od WOŁACZA jest dosłowny, nie wieloznaczny ──
-// K2 zamknął drogę „pusty cel → wildcard", ale DOSŁOWNA gwiazdka z argumentu narzędzia
-// (`delete {path:"*"}`) dalej produkowała klucz `akcja::*`. Modal pokazywał kasowanie „*",
-// wywołanie i tak odbijało się o walidację narzędzia, więc user klikał „Zawsze zezwalaj"
-// spokojnie — i zapisywał TRWAŁĄ regułę auto-zatwierdzającą każdy przyszły cel tej akcji.
+// ─── cel od WOŁACZA jest dosłowny, nie wieloznaczny ──
+// Gdyby DOSŁOWNA gwiazdka z argumentu narzędzia (`delete {path:"*"}`) produkowała klucz
+// `akcja::*`, modal pokazywałby kasowanie „*", wywołanie i tak odbijałoby się o walidację
+// narzędzia, więc user klikałby „Zawsze zezwalaj" spokojnie — i zapisywałby TRWAŁĄ regułę
+// auto-zatwierdzającą każdy przyszły cel tej akcji.
 
-test('K22: „zawsze" dla celu `*` nie zapisuje wieloznacznika i nie otwiera innych celów', async t => {
+test('literalTarget: „zawsze" dla celu `*` nie zapisuje wieloznacznika i nie otwiera innych celów', async t => {
     const mgr = makeManager({ result: 'always' });
 
     // Model woła `delete {path:"*"}` — wywołanie odbije się o walidację narzędzia,
@@ -70,7 +70,7 @@ test('K22: „zawsze" dla celu `*` nie zapisuje wieloznacznika i nie otwiera inn
     t.true(mgr.isAlwaysApproved('Igor', 'vault.delete', '*'), 'reguła obejmuje dokładnie to, na co user kliknął');
 });
 
-test('K22: to:"*" w agent.message też nie zapada w wieloznacznik', async t => {
+test('literalTarget: to:"*" w agent.message też nie zapada w wieloznacznik', async t => {
     const mgr = makeManager({ result: 'always' });
 
     await mgr.requestApproval({ agentName: 'Igor', type: 'agent.message', targetPath: '*' });
@@ -79,7 +79,7 @@ test('K22: to:"*" w agent.message też nie zapada w wieloznacznik', async t => {
     t.false(mgr.isAlwaysApproved('Igor', 'agent.message', 'Tola'), 'poczta do konkretnego agenta dalej pyta');
 });
 
-test('K22: gwiazdka WEWNĄTRZ celu też jest dosłowna (żadnego globa w kluczu)', t => {
+test('literalTarget: gwiazdka WEWNĄTRZ celu też jest dosłowna (żadnego globa w kluczu)', t => {
     const mgr = new ApprovalManager({}, { storage: {} });
 
     const klucz = mgr.createPatternKey('vault.write', 'Notes/*.md');
@@ -88,7 +88,7 @@ test('K22: gwiazdka WEWNĄTRZ celu też jest dosłowna (żadnego globa w kluczu)
     t.not(klucz, mgr.createPatternKey('vault.write', 'Notes/a.md'), 'i nie pasuje do prawdziwej notatki');
 });
 
-test('K22: zastana reguła `akcja::*` działa jak dotąd, ale wczytanie ostrzega', t => {
+test('loadApprovals: zastana reguła `akcja::*` działa jak dotąd, ale wczytanie ostrzega', t => {
     const warns: string[] = [];
     const oldWarn = console.warn;
     console.warn = (...args: unknown[]) => { warns.push(args.map(String).join(' ')); };
@@ -108,7 +108,7 @@ test('K22: zastana reguła `akcja::*` działa jak dotąd, ale wczytanie ostrzega
     t.false(warns.some(w => w.includes('vault.write::Notes/a.md')), 'zwykłe reguły nie hałasują');
 });
 
-test('K22: ekran reguł dalej usuwa zastany wieloznacznik', t => {
+test('removeFromAlwaysApproved: ekran reguł dalej usuwa zastany wieloznacznik', t => {
     const mgr = new ApprovalManager({}, {
         storage: { alwaysApprovedRules: { Igor: ['vault.delete::*'] } },
     });
@@ -122,7 +122,7 @@ test('K22: ekran reguł dalej usuwa zastany wieloznacznik', t => {
     t.false(mgr.isAlwaysApproved('Igor', 'vault.delete', 'Notes/wazne.md'));
 });
 
-test('K22: reguła dla konkretnego celu — zapis, dopasowanie i kasowanie bez zmian (regresja)', async t => {
+test('createPatternKey: reguła dla konkretnego celu — zapis, dopasowanie i kasowanie bez zmian (regresja)', async t => {
     const storage = {};
     const mgr = new ApprovalManager({}, { storage });
     mgr.setApprovalHandler(() => ({ result: 'always' }));
@@ -137,13 +137,13 @@ test('K22: reguła dla konkretnego celu — zapis, dopasowanie i kasowanie bez z
     t.deepEqual(mgr.getAlwaysApprovedRules('Jaskier'), []);
 });
 
-// ─── AUD-code-review-058: reguła BEZ agenta (agentName===null) przeżywa "restart" ──────────
+// ─── reguła BEZ agenta (agentName===null) przeżywa "restart" ──────────
 // invocationAgentName (MCPClient) bywa realnym `null`, gdy nie ma aktywnego agenta. Reguła
 // "Zawsze zezwalaj" zapisana wtedy musi wciąż obowiązywać po ponownym wczytaniu ustawień —
 // czyli po zbudowaniu NOWEJ instancji ApprovalManager nad tym samym `storage` (tak samo jak
 // `src/main.ts` robi przy każdym starcie pluginu).
 
-test('AUD-code-review-058: reguła "Zawsze zezwalaj" bez agenta (null) przeżywa restart', async t => {
+test('reguła "Zawsze zezwalaj" bez agenta (null) przeżywa restart', async t => {
     const storage = {};
     const mgr1 = new ApprovalManager({}, { storage });
     mgr1.setApprovalHandler(() => ({ result: 'always' }));

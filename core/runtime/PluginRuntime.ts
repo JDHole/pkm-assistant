@@ -1,5 +1,5 @@
 /**
- * `PluginRuntime` — podłoga runtime'u pluginu (dawne środowisko).
+ * `PluginRuntime` — podłoga runtime'u pluginu.
  *
  * UMOWA CYKLU ŻYCIA: `new PluginRuntime(host, config)` jest SYNCHRONICZNY i tani —
  * nie czyta dysku, nie czeka na layout, nie rzuca. Composition root tworzy runtime
@@ -74,16 +74,15 @@ class PustyRejestrEmbeddingu implements EmbeddingRegistryLike {
 }
 
 export class PluginRuntime implements SettingsOwner, RuntimeLoadedSource {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS).
-    /** B-02/B-03: szyna zdarzeń runtime'u. Dokładnie dwa klucze. */
+    // `declare` = sama deklaracja typu, zero emitu.
+    /** Szyna zdarzeń runtime'u. Dokładnie dwa klucze. */
     declare readonly events: EventEmitterLike<RuntimeEventKey>;
-    /** S-06: magazyn — `raw`, `save()`, `pendingSaveTimer`. */
+    /** Magazyn — `raw`, `save()`, `pendingSaveTimer`. */
     declare readonly settingsStore: SettingsStore;
-    /** N-01/S-17. */
     declare readonly notices: NoticeCenter;
     /** Dostęp do plików vaulta. */
     declare readonly fs: PluginVaultFs;
-    /** Y-1: WSPÓŁDZIELONY SLOT modelu czatu — zapisywalny z zewnątrz, zerowany przy zamykaniu czatu. */
+    /** WSPÓŁDZIELONY SLOT modelu czatu — zapisywalny z zewnątrz, zerowany przy zamykaniu czatu. */
     declare chatModel: ChatModelLike | null;
     /**
      * Rejestr modeli embeddingu. SLOT, nie wytwórnia: sam rejestr mieszka w klastrze
@@ -91,7 +90,7 @@ export class PluginRuntime implements SettingsOwner, RuntimeLoadedSource {
      * Do tego czasu stoi tu pusty rejestr, żeby `runtime.embeddings.default` nigdy nie wybuchło.
      */
     declare embeddings: EmbeddingRegistryLike;
-    /** C-02/C-03: TA SAMA referencja co obiekt podany konstruktorowi. */
+    /** TA SAMA referencja co obiekt podany konstruktorowi. */
     declare readonly config: RuntimeConfig;
     /** Host, którego runtime dostał — czytelny dla `PluginBase` i dla testów. */
     declare readonly host: PluginHost;
@@ -102,7 +101,7 @@ export class PluginRuntime implements SettingsOwner, RuntimeLoadedSource {
     /** Ostatni bieg startu (w toku albo zakończony) — `boot()` jest przez to idempotentne. */
     declare private _bieg: Promise<void> | null;
     declare private _wToku: boolean;
-    /** Czekający na `'loaded'`; `dispose()` czyści zbiór, więc porzuceni NIE dostaną resolve (W-08). */
+    /** Czekający na `'loaded'`; `dispose()` czyści zbiór, więc porzuceni NIE dostaną resolve. */
     declare private _czekajacy: Set<() => void>;
     declare private _noticeCtor: NoticeCtor | null;
     /** Skąd przyjechały ustawienia w tym boocie — do logu i selftestu. */
@@ -147,22 +146,22 @@ export class PluginRuntime implements SettingsOwner, RuntimeLoadedSource {
         this.fs = new PluginVaultFs({ app: (this.host?.app ?? {}) as never });
     }
 
-    /** E-06/E-13: `'loading' | 'loaded' | 'disposed'`. */
+    /** `'loading' | 'loaded' | 'disposed'`. */
     get state(): RuntimeState {
         return this._state;
     }
 
-    /** S-01: obserwowany worek (skrót na `settingsStore.settings`). */
+    /** Obserwowany worek (skrót na `settingsStore.settings`). */
     get settings(): SettingsBag {
         return this.settingsStore.settings;
     }
 
-    /** SB-01: `null` poza Obsidianem albo gdy pasek się nie postawił. */
+    /** `null` poza Obsidianem albo gdy pasek się nie postawił. */
     get statusBar(): StatusBarController | null {
         return this._statusBar;
     }
 
-    /** E-02: fire-and-forget z `onload()`. Nie rzuca. Wielokrotne wołanie = no-op. */
+    /** Fire-and-forget z `onload()`. Nie rzuca. Wielokrotne wołanie = no-op. */
     boot(): Promise<void> {
         if (this._state === 'disposed') return Promise.resolve();
         if (this._bieg) return this._bieg;
@@ -170,7 +169,7 @@ export class PluginRuntime implements SettingsOwner, RuntimeLoadedSource {
     }
 
     /**
-     * W-01..W-08: obietnica gotowości.
+     * Obietnica gotowości.
      *
      * Rozwiązuje się na ZDARZENIE (gotowy runtime — na najbliższym mikrozadaniu), nigdy
      * na tick siatki. Po `dispose()` NIE rozwiąże się nigdy: kontynuacja po demontażu
@@ -186,13 +185,13 @@ export class PluginRuntime implements SettingsOwner, RuntimeLoadedSource {
             };
             this._czekajacy.add(czekajacy);
             // Gotowy runtime też przechodzi przez kolejkę czekających — dzięki temu
-            // `dispose()` zdążone jeszcze w tej samej turze porzuca oczekiwanie (W-08).
+            // `dispose()` zdążone jeszcze w tej samej turze porzuca oczekiwanie.
             if (this._state === 'loaded') queueMicrotask(czekajacy);
         });
     }
 
     /**
-     * F-08: wymuszony (re)start ładowania. NIE emituje `'unloading'` — czekający na
+     * Wymuszony (re)start ładowania. NIE emituje `'unloading'` — czekający na
      * `whenLoaded()` mają się doczekać nowego bootu, nie zostać porzuceni.
      */
     reload(): Promise<void> {
@@ -201,7 +200,7 @@ export class PluginRuntime implements SettingsOwner, RuntimeLoadedSource {
         return this._start();
     }
 
-    /** E-14: demontaż. Emituje `'unloading'` i przechodzi w `'disposed'`. */
+    /** Demontaż. Emituje `'unloading'` i przechodzi w `'disposed'`. */
     async dispose(): Promise<void> {
         if (this._state === 'disposed') return;
         // Kolejność ma znaczenie i jest SYNCHRONICZNA: stan i porzucenie czekających muszą
@@ -250,7 +249,7 @@ export class PluginRuntime implements SettingsOwner, RuntimeLoadedSource {
     }
 
     /**
-     * S-18: argument OBOWIĄZKOWY. Wołanie bez niego robiło `JSON.stringify(undefined)`
+     * Argument OBOWIĄZKOWY. Wołanie bez niego robiło `JSON.stringify(undefined)`
      * i próbowało tym nadpisać plik z kluczami API.
      */
     async saveSettings(settings: SettingsBag): Promise<void> {
@@ -278,12 +277,12 @@ export class PluginRuntime implements SettingsOwner, RuntimeLoadedSource {
 
     private async _przebieg(): Promise<void> {
         try {
-            // E-06/E-07: najpierw ZDARZENIE layoutu. Poza Obsidianem workspace'u nie ma
+            // Najpierw ZDARZENIE layoutu. Poza Obsidianem workspace'u nie ma
             // wcale i funkcja wraca natychmiast — bez tej gałęzi boot w Node wisiałby wiecznie.
             await waitForLayoutReady(this.host?.app?.workspace);
             if (this._zdemontowany()) return;
 
-            // SB-01: pasek staje ZARAZ po layoucie, a PRZED jakimkolwiek I/O ustawień.
+            // Pasek staje ZARAZ po layoucie, a PRZED jakimkolwiek I/O ustawień.
             // Czekanie na synchronizację i czytanie worka potrafi potrwać — user ma w tym
             // czasie widzieć żywy pasek, a nie pustkę. `_postawPasek()` łyka własne błędy,
             // więc nie ma prawa zabrać sterowania ładowaniu ustawień.
@@ -294,7 +293,7 @@ export class PluginRuntime implements SettingsOwner, RuntimeLoadedSource {
 
             const worek = await this.loadSettings();
             if (this._zdemontowany()) return;
-            // Podmiana CAŁEGO worka, nie mutacja przez proxy — boot nie planuje zapisu (S-07).
+            // Podmiana CAŁEGO worka, nie mutacja przez proxy — boot nie planuje zapisu.
             this.settingsStore.settings = worek;
         } catch (e) {
             // Awaria startu degraduje do defaultów; user ma dostać żywy plugin, nie martwy.
@@ -303,7 +302,7 @@ export class PluginRuntime implements SettingsOwner, RuntimeLoadedSource {
         }
 
         if (this._zdemontowany()) return;
-        // E-13: stan PRZED emisją — słuchacz musi zobaczyć gotowy runtime.
+        // Stan PRZED emisją — słuchacz musi zobaczyć gotowy runtime.
         this._state = 'loaded';
         this._obudzCzekajacych();
         this.events.emit('loaded');
@@ -334,7 +333,7 @@ export class PluginRuntime implements SettingsOwner, RuntimeLoadedSource {
     }
 
     /**
-     * E-12: jedyne odpytywanie na ścieżce startu — flaga synchronizacji Obsidiana.
+     * Jedyne odpytywanie na ścieżce startu — flaga synchronizacji Obsidiana.
      * Poza Obsidianem (albo bez włączonego Sync-u) nie wykonuje żadnego obrotu.
      */
     private async _poczekajNaSynchronizacje(): Promise<void> {
@@ -365,12 +364,12 @@ export class PluginRuntime implements SettingsOwner, RuntimeLoadedSource {
     /**
      * Jednorazowa kopia worka SPRZED przeniesienia starych kluczy — zostaje w vaultcie
      * na zawsze, plugin jej nie kasuje. Robimy ją tuż PRZED pierwszym realnym zapisem,
-     * bo dopiero on utrwala nowy kształt; boot z definicji nie pisze niczego (S-07).
+     * bo dopiero on utrwala nowy kształt; boot z definicji nie pisze niczego.
      */
     private async _kopiaSprzedMigracji(io: SettingsIo): Promise<void> {
         if (!this._kopiaPrzedMigracja) return;
         try {
-            // S-16: „czy kopia już jest?" sprawdzamy PRÓBĄ ODCZYTU, nigdy przez `exists()`.
+            // „Czy kopia już jest?" sprawdzamy PRÓBĄ ODCZYTU, nigdy przez `exists()`.
             if (await io.read(SETTINGS_PRE_MIGRATION_PATH) !== null) {
                 this._kopiaZamknieta();
                 return;

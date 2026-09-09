@@ -1,18 +1,17 @@
 /**
- * ArtifactTypeLoader — biblioteka TYPÓW artefaktów żywych (E2.9 FAZA A / A2).
+ * ArtifactTypeLoader — biblioteka TYPÓW artefaktów żywych.
  *
  * Wzór: `modules/skills/SkillLoader.js` (adapter.list + `parseFrontmatter` + cache Map + seed
  * wbudowanych przy pierwszym starcie). Typ = plik `.pkm-assistant/artifacts/types/<nazwa>.md`:
  *   frontmatter meta (`nazwa`, `opis`, `pola{opis[,domyslne]}`, `statusy[]`, `sprzatanie` dni)
  *   + body = szablon ciała instancji (placeholdery `{{pole}}`).
  *
- * Body szablonu jest NIEPRZEZROCZYSTE (bez walidacji zawartości — tu WOLNO userowi mieć dataviewjs;
- * A3 decyzja z sesji). Agent nigdy nie pisze kodu do INSTANCJI (egzekwuje `artifactParser`), ale
+ * Body szablonu jest NIEPRZEZROCZYSTE (bez walidacji zawartości - tu WOLNO userowi mieć
+ * dataviewjs). Agent nigdy nie pisze kodu do INSTANCJI (egzekwuje `artifactParser`), ale
  * SZABLON TYPU pisze user i może w nim osadzić dowolny kod.
  *
- * Klucze frontmattera PO POLSKU (decyzja A6, „raz na zawsze"). Wartości statusów to semantyczne
- * identyfikatory (B1 renderuje przyciski wg statusu) — NIE tłumaczone. Seed typu `plan` = makieta
- * z `Nauka/2026-07-23_sesja_projektowa_E2.9.md`, treść PL jako część kontraktu formatu.
+ * Klucze frontmattera PO POLSKU, raz na zawsze. Wartości statusów to semantyczne identyfikatory
+ * (renderowanie przycisków zależy od statusu) - NIE tłumaczone.
  */
 import { parseFrontmatter } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
@@ -26,19 +25,19 @@ export const DEFAULT_STATUSY = ['szkic', 'zamkniety'];
 /** Nazwa wbudowanego typu seedowanego przy starcie (sensowny default per agent). */
 export const BUILTIN_PLAN_TYPE_NAME = 'plan';
 
-/** Drugi wbudowany typ (E2.9 FAZA D): goła notatka/treść do akceptacji — pokrywa dawny idea_review. */
+/** Drugi wbudowany typ: goła notatka/treść do akceptacji. */
 export const BUILTIN_NOTATKA_TYPE_NAME = 'notatka';
 
-/** Trzeci wbudowany typ (E3.5): raport z researchu — cel skilli deep-research (web + vault). */
+/** Trzeci wbudowany typ: raport z researchu - cel skilli deep-research (web + vault). */
 export const BUILTIN_RAPORT_TYPE_NAME = 'raport';
 
-/** Zbiór nazw typów wbudowanych (seedowanych przy starcie). Użycie wyłącznie w tym pliku
- *  (fabryka dead-code D7, AUD-dead-code-077: `export` zdjęty, zero importerów spoza pliku). */
+/** Zbiór nazw typów wbudowanych (seedowanych przy starcie). Użycie wyłącznie w tym pliku,
+ *  bez importerów spoza niego - `export` świadomie zdjęty. */
 const BUILTIN_TYPE_NAMES = [BUILTIN_PLAN_TYPE_NAME, BUILTIN_NOTATKA_TYPE_NAME, BUILTIN_RAPORT_TYPE_NAME];
 
 /**
- * Treść seedowanego typu `plan` (makieta zatwierdzona w sesji projektowej E2.9).
- * Body BEZ bloku przycisków — silnik store dokleja `pkm-artefakt` przy `create` (B1).
+ * Treść seedowanego typu `plan`.
+ * Body BEZ bloku przycisków - silnik store dokleja `pkm-artefakt` przy `create`.
  */
 export const PLAN_TYPE_CONTENT = `---
 nazwa: plan
@@ -65,9 +64,9 @@ sprzatanie: 30
 `;
 
 /**
- * Treść seedowanego typu `notatka` (E2.9 FAZA D) — goła treść do akceptacji (dawny idea_review:
- * post, brief, notatka). Sekcje Treść + Uwagi usera; statusy jak plan. Alias idea_review→
- * artifact_create{typ:'notatka'} wypełnia sekcję „Treść".
+ * Treść seedowanego typu `notatka` - goła treść do akceptacji (post, brief, notatka).
+ * Sekcje Treść + Uwagi usera; statusy jak plan. Alias idea_review→artifact_create{typ:'notatka'}
+ * wypełnia sekcję „Treść".
  */
 export const NOTATKA_TYPE_CONTENT = `---
 nazwa: notatka
@@ -84,16 +83,16 @@ sprzatanie: 30
 `;
 
 /**
- * Treść seedowanego typu `raport` (E3.5 Deep Research) — cel skilli deep-research-web/vault.
+ * Treść seedowanego typu `raport` - cel skilli deep-research-web/vault.
  * Statusy bez approval flow (raport się CZYTA, nie zatwierdza do wykonania): `w-trakcie` i `gotowy`
  * dostają generyczny guzik „Przywołaj agenta" (computeArtifactButtons), `zamkniety` domyka.
- * `sprzatanie: 0` — raporty się nie przedawniają (to wiedza, nie plan roboczy).
+ * `sprzatanie: 0` - raporty się nie przedawniają (to wiedza, nie plan roboczy).
  *
- * ⚠️ Sekcja `## Białe plamy` dołożona po biegu live Poligonu (F2): przepis deep-research kazał
- * `artifact_update` tej sekcji, a typ jej NIE MIAŁ → `set_section` zawsze wracał `not_found`
- * i raport wychodził bez najcenniejszej wg przepisu części. `ensureBuiltinTypes` seeduje plik
- * TYLKO gdy nie istnieje (user authority), więc ISTNIEJĄCE vaulty tej sekcji nie dostaną —
- * dlatego przepisy mają jawny fallback na podsekcję `### Białe plamy` w „Ustaleniach".
+ * Sekcja `## Białe plamy` musi tu być: przepis deep-research woła `artifact_update` na tej
+ * sekcji, a bez niej w typie `set_section` zawsze wraca `not_found` i raport wychodzi bez
+ * najcenniejszej wg przepisu części. `ensureBuiltinTypes` seeduje plik TYLKO gdy nie istnieje
+ * (user authority), więc ISTNIEJĄCE vaulty tej sekcji nie dostaną automatycznie - dlatego przepisy
+ * mają jawny fallback na podsekcję `### Białe plamy` w „Ustaleniach".
  */
 export const RAPORT_TYPE_CONTENT = `---
 nazwa: raport

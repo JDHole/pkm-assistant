@@ -1,5 +1,5 @@
 /**
- * summarize.test.js — streszczanie stron tanim modelem (E3.3, DEC L13-5a).
+ * summarize.test.js — streszczanie stron tanim modelem.
  *
  * Model jest atrapą wg kontraktu `streamToComplete` (`modules/memory/streamHelper.js`):
  * `.stream({messages}, {chunk, done, error})`, gdzie `done` dostaje kształt OpenAI.

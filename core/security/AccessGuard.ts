@@ -43,22 +43,19 @@ export interface GuardedAgent {
  */
 export type ScopeFolders = Array<string | FocusFolder>;
 
-/** Dodatkowe opcje sprawdzenia dostępu (S33 Z1 / A1 / K13). */
+/** Dodatkowe opcje sprawdzenia dostępu. */
 export interface AccessCheckOptions {
     scopeFolders?: ScopeFolders | null;
     /**
-     * K13/K14: czy `targetPath` jest ŚCIEŻKĄ VAULTOWĄ (a nie zapytaniem, adresem URL czy
-     * adresatem wiadomości). Domyślnie `true` — fail-closed, bo nowy wołacz najczęściej
+     * Czy `targetPath` jest ŚCIEŻKĄ VAULTOWĄ (a nie zapytaniem, adresem URL czy
+     * adresatem wiadomości). Domyślnie `true` - fail-closed, bo nowy wołacz najczęściej
      * przyjdzie ze ścieżką i ma dostać pełną ocenę bez proszenia się o nią.
      *
-     * `false` mówi strażnikowi: „to w ogóle nie jest ścieżka" — i od K14 (2026-08-23)
-     * oznacza NATYCHMIASTOWE `{ allowed: true, reason: 'non-vault-target' }`, przed
-     * kanonizacją i przed każdą bramką ścieżkową. Podaje je `PermissionSystem` dla akcji
-     * nie-vaultowych (`web.*`, `agent.message`, `delegate`, `external.call`).
-     *
-     * Do K14 flaga wyłączała samą kanonizację, a No-Go i whitelista `focusFolders` dalej
-     * mierzyły zapytanie jak ścieżkę — agent „Tylko przypisane" tracił przez to wyszukiwarkę,
-     * pocztę i delegację. Uzasadnienie i lista właściwych bramek: komentarz w `checkAccess`.
+     * `false` mówi strażnikowi: „to w ogóle nie jest ścieżka" - oznacza NATYCHMIASTOWE
+     * `{ allowed: true, reason: 'non-vault-target' }`, przed kanonizacją i przed każdą
+     * bramką ścieżkową. Podaje je `PermissionSystem` dla akcji nie-vaultowych (`web.*`,
+     * `agent.message`, `delegate`, `external.call`). Uzasadnienie i lista właściwych
+     * bramek: komentarz w `checkAccess`.
      */
     targetIsVaultPath?: boolean;
 }
@@ -73,7 +70,7 @@ export class AccessGuard {
     /** No-Go folders — set once at plugin init */
     static _noGoFolders: string[] = [];
 
-    /** Vault folder groups (E2.8 B1) — set at init + on settings change */
+    /** Vault folder groups - set at init + on settings change */
     static _vaultGroups: VaultGroup[] = [];
 
     /** Compiled regex cache for _matchesEntry patterns */
@@ -106,9 +103,9 @@ export class AccessGuard {
      * @param folders
      */
     static setNoGoFolders(folders: string[] | null | undefined): void {
-        // K1: wpis No-Go i porównywana ścieżka MUSZĄ przejść tę samą normalizację, inaczej
+        // Wpis No-Go i porównywana ścieżka MUSZĄ przejść tę samą normalizację, inaczej
         // „./Prywatne/" z ustawień nie łapie „Prywatne/x.md" z argumentów modelu.
-        // K15: tą normalizacją jest `_normalizeForDenyCompare` — wpisy lądują tu złożone
+        // Tą normalizacją jest `_normalizeForDenyCompare` - wpisy lądują tu złożone
         // z małych liter, więc „Prywatne/" i „prywatne" to JEDEN wpis, a nie dwa.
         const userFolders = (folders || []).map(f => AccessGuard._normalizeForDenyCompare(f));
         // Merge: hardcoded system No-Go + real config dir + user No-Go (deduplicate)
@@ -119,13 +116,13 @@ export class AccessGuard {
     }
 
     /**
-     * K1 — lekka normalizacja KSZTAŁTU ścieżki do porównania (nie mylić z `sanitizePath`).
+     * Lekka normalizacja KSZTAŁTU ścieżki do porównania (nie mylić z `sanitizePath`).
      *
      * Robi dokładnie tyle, ile trzeba, żeby dwa zapisy tej samej ścieżki dały ten sam ciąg:
      * `\` → `/`, kolaps `//`, ucięcie wiodących/końcowych `/`, wycięcie segmentów `.`.
-     * ŚWIADOMIE NIE dekoduje `%XX` — to robi `sanitizePath` warstwę wyżej.
+     * ŚWIADOMIE NIE dekoduje `%XX` - to robi `sanitizePath` warstwę wyżej.
      *
-     * WIELKOŚCI LITER NIE RUSZA — i to jest wybór, nie przeoczenie. Ta funkcja jest
+     * WIELKOŚCI LITER NIE RUSZA - i to jest wybór, nie przeoczenie. Ta funkcja jest
      * wspólną podstawą dla obu stron bramki, a strony te celowo różnią się wrażliwością:
      *
      *   • bramka ZAKAZU (No-Go) → `_normalizeForDenyCompare`, czyli TEN kształt
@@ -135,7 +132,7 @@ export class AccessGuard {
      *     wpuszczać za mało, nie za dużo: literówka w ustawieniach kończy się odmową,
      *     a nie cichym poszerzeniem obszaru agenta.
      *
-     * Oba kierunki są fail-closed — po prostu „bezpiecznie" znaczy dla nich co innego.
+     * Oba kierunki są fail-closed - po prostu „bezpiecznie" znaczy dla nich co innego.
      * @private
      */
     static _normalizeForCompare(p: string | null | undefined): string {
@@ -144,22 +141,21 @@ export class AccessGuard {
     }
 
     /**
-     * K15 (AUD-security-101) — normalizacja do porównania z bramką ZAKAZU (No-Go).
+     * Normalizacja do porównania z bramką ZAKAZU (No-Go).
      *
-     * `_normalizeForCompare` porównywał ścieżkę ze strefą No-Go bajt w bajt, z komentarzem
-     * „vault bywa case-sensitive". Problem: Windows i macOS wielkości liter NIE rozróżniają,
-     * więc `Projekty/prywatne/tajne.md` przechodził bramkę na zielono, choć
-     * `Projekty/Prywatne/tajne.md` był odrzucany — a to JEDEN I TEN SAM PLIK. To samo
-     * dotyczyło `SYSTEM_NO_GO` (`.Obsidian/workspace.json`, `.TRASH/x.md`). No-Go było
-     * jedyną bramką ścieżkową fail-OPEN na wielkość liter; `isProtectedPath`
-     * (`keySanitizer.ts`) składa litery od zawsze i dlatego luki nie miał.
+     * Porównanie ze strefą No-Go musi być NIEWRAŻLIWE na wielkość liter: Windows i macOS
+     * jej nie rozróżniają, więc `Projekty/prywatne/tajne.md` i `Projekty/Prywatne/tajne.md`
+     * to na tych systemach JEDEN I TEN SAM PLIK - a porównanie bajt w bajt (bez `toLowerCase`)
+     * przepuszczałoby jeden zapis i blokowało drugi. To samo dotyczy `SYSTEM_NO_GO`
+     * (`.Obsidian/workspace.json`, `.TRASH/x.md`). `isProtectedPath` (`keySanitizer.ts`)
+     * składa litery od zawsze i dlatego tej luki nie ma.
      *
      * Ta funkcja robi więc DOKŁADNIE to samo co `isProtectedPath`: `\` → `/`, `NFC`,
-     * `toLowerCase()` — a na to nakłada kształt z `_normalizeForCompare` (puste segmenty
+     * `toLowerCase()` - a na to nakłada kształt z `_normalizeForCompare` (puste segmenty
      * i `.` wypadają).
      *
      * Cena na vaultcie NAPRAWDĘ case-sensitive (Linux): zakaz obejmie też „sąsiada"
-     * różniącego się jedną literą — folder `prywatne/` obok `Prywatne/` stanie się
+     * różniącego się jedną literą - folder `prywatne/` obok `Prywatne/` stanie się
      * niedostępny, choć user zakazał tylko jednego. Świadomie zaakceptowane: lepiej
      * zakazać za dużo niż wypuścić plik, który miał być zakazany.
      * @private
@@ -170,7 +166,7 @@ export class AccessGuard {
     }
 
     /**
-     * Set the global vault folder groups (E2.8 B1). Called at plugin init and whenever the user
+     * Set the global vault folder groups. Called at plugin init and whenever the user
      * edits groups in Settings→Vault, so `{group}` references in agent focus folders resolve live.
      * @param groups
      */
@@ -181,14 +177,14 @@ export class AccessGuard {
     /**
      * Check if a path is in the No-Go zone.
      *
-     * K15: porównanie idzie BEZ rozróżniania wielkości liter (patrz
+     * Porównanie idzie BEZ rozróżniania wielkości liter (patrz
      * `_normalizeForDenyCompare`). To jedyne miejsce, w którym pytamy „czy to strefa
-     * zakazana" — wołacze poza `PermissionSystem` (m.in. bramka załączników w
+     * zakazana" - wołacze poza `PermissionSystem` (m.in. bramka załączników w
      * `modules/chat/chat/chat_model.ts`) dostają tę samą regułę przez tę funkcję.
      */
     static _isNoGo(targetPath: string | null | undefined): boolean {
         if (!targetPath || AccessGuard._noGoFolders.length === 0) return false;
-        // K1: cel w tej samej normalizacji co wpisy (patrz `_normalizeForDenyCompare`).
+        // Cel w tej samej normalizacji co wpisy (patrz `_normalizeForDenyCompare`).
         const norm = AccessGuard._normalizeForDenyCompare(targetPath);
         if (!norm) return false;
         return AccessGuard._noGoFolders.some(ng =>
@@ -197,17 +193,18 @@ export class AccessGuard {
     }
 
     /**
-     * S33 Z1 — bariera scope sub-agenta (`scope.folders` z SUB_AGENT.yaml).
+     * Bariera scope sub-agenta (`scope.folders` z SUB_AGENT.yaml).
      *
-     * Do tej pory `scope` był WYŁĄCZNIE tekstem w prompcie suba — model mógł go zignorować
-     * i sięgnąć wszędzie tam, gdzie sięgał rodzic. Teraz foldery są realną, KONIUNKCYJNĄ
-     * bramką: ścieżka w zwykłym vaulcie musi przejść zarówno reguły rodzica, jak i ten filtr.
+     * Bez tej bramki `scope` byłby WYŁĄCZNIE tekstem w prompcie suba - model mógłby go
+     * zignorować i sięgnąć wszędzie tam, gdzie sięga rodzic. Foldery są więc realną,
+     * KONIUNKCYJNĄ bramką: ścieżka w zwykłym vaulcie musi przejść zarówno reguły rodzica,
+     * jak i ten filtr.
      *
      * Świadome granice:
-     * - `.pkm-assistant/**` NIE jest objęte — tam rządzi wyłącznie `_checkPkmPath` rodzica
+     * - `.pkm-assistant/**` NIE jest objęte - tam rządzi wyłącznie `_checkPkmPath` rodzica
      *   (pamięć/skille/artefakty suba to nie „foldery robocze").
      * - No-Go i pliki chronione zostają nietknięte (są warstwą wyżej / obok).
-     * - `admin_access` rodzica NIE zwalnia z tej bariery — dlatego sprawdzenie idzie PRZED
+     * - `admin_access` rodzica NIE zwalnia z tej bariery - dlatego sprawdzenie idzie PRZED
      *   skrótem admina (fail-closed: sub admina nadal siedzi w swoim kącie).
      *
      * @private
@@ -231,10 +228,10 @@ export class AccessGuard {
     }
 
     /**
-     * S33 A1 — czysty predykat bariery scope suba (bez logu i bez i18n), żeby ta sama
+     * Czysty predykat bariery scope suba (bez logu i bez i18n), żeby ta sama
      * reguła mogła obsłużyć POJEDYNCZE sprawdzenie (`checkAccess`) i HURTOWE cięcie wyników
-     * (`filterResults`). Bez tego `search`/`list` oddawały subowi nagłówki i excerpty
-     * z całego obszaru rodzica, choć otwarcie tych plików było dla niego zablokowane.
+     * (`filterResults`). Bez tego `search`/`list` oddawałyby subowi nagłówki i excerpty
+     * z całego obszaru rodzica, choć otwarcie tych plików jest dla niego zablokowane.
      *
      * @private
      * @param targetPath
@@ -262,12 +259,12 @@ export class AccessGuard {
     }
 
     /**
-     * K11 (AUD-security-008) — PRZECIĘCIE dwóch zakresów folderów.
+     * PRZECIĘCIE dwóch zakresów folderów.
      *
-     * Delegacja piętro niżej liczyła zakres wyłącznie z configu dziecka, więc wnuk odpalony
-     * przez wąskiego suba (`scope.folders: ['Publiczne']`) startował z zakresem `null`,
-     * czyli z pełnymi uprawnieniami agenta-rodzica. Zakres dziecka NIGDY nie może być
-     * szerszy niż zakres tego, kto je zleca — stąd ta funkcja.
+     * Bez tej funkcji delegacja piętro niżej liczyłaby zakres wyłącznie z configu dziecka,
+     * więc wnuk odpalony przez wąskiego suba (`scope.folders: ['Publiczne']`) startowałby
+     * z zakresem `null`, czyli z pełnymi uprawnieniami agenta-rodzica. Zakres dziecka NIGDY
+     * nie może być szerszy niż zakres tego, kto je zleca - stąd ta funkcja.
      *
      * Reguła na parę wpisów: zostaje ten WĘŻSZY (ten, który mieści się w drugim, liczone
      * tą samą metodą co bramka ścieżek — `_matchesEntry`). Wpisy rozłączne wypadają.
@@ -310,9 +307,9 @@ export class AccessGuard {
      * @param targetPath - path being accessed
      * @param accessLevel - required access level
      * @param opts - Extra options
-     * @param opts.scopeFolders - S33 Z1: foldery scope sub-agenta (koniunkcja z
+     * @param opts.scopeFolders - foldery scope sub-agenta (koniunkcja z
      *   regułami rodzica). Brak/pusta lista = zero nowych ograniczeń.
-     * @param opts.targetIsVaultPath - K13/K14: `false` = cel NIE jest ścieżką (zapytanie, URL,
+     * @param opts.targetIsVaultPath - `false` = cel NIE jest ścieżką (zapytanie, URL,
      *   adresat) → strażnik wraca od razu z `non-vault-target`, bez kanonizacji i bez bramek
      *   ścieżkowych. Domyślnie `true`.
      */
@@ -322,44 +319,37 @@ export class AccessGuard {
         accessLevel: 'read' | 'write' = 'read',
         opts: AccessCheckOptions = {},
     ): AccessDecision {
-        // K14 (2026-08-23): cel, który NIE JEST ŚCIEŻKĄ, nie ma czego szukać w bramce ścieżek.
-        //
-        // K13 wprowadziło `targetIsVaultPath`, ale używało go WYŁĄCZNIE do pominięcia
-        // kanonizacji — No-Go, pliki chronione, whitelista `focusFolders` i bariera
-        // `scope.folders` suba dalej mierzyły zapytanie/adres/adresata jak ścieżkę. Skutkiem
-        // było to, że agent w trybie „Tylko przypisane" z whitelistą `['A/']` dostawał na
-        // `web_search "jak dziala X"` odmowę „poza obszarem roboczym" i tracił wyszukiwarkę,
-        // pobieranie stron, pocztę i delegację w całości. Whitelista folderów pilnuje ŚCIEŻEK
-        // i tylko ścieżek — porównywanie z nią frazy wyszukiwania jest kategorią błędu, nie
-        // ostrożnością.
+        // Cel, który NIE JEST ŚCIEŻKĄ, nie ma czego szukać w bramce ścieżek: No-Go, pliki
+        // chronione, whitelista `focusFolders` i bariera `scope.folders` suba mierzą ścieżki,
+        // a nie zapytania/adresy/adresatów. Gdyby ta gałąź nie wracała od razu, agent w trybie
+        // „Tylko przypisane" z whitelistą `['A/']` dostawałby na `web_search "jak dziala X"`
+        // odmowę „poza obszarem roboczym" i tracił wyszukiwarkę, pobieranie stron, pocztę
+        // i delegację w całości. Whitelista folderów pilnuje ŚCIEŻEK i tylko ścieżek -
+        // porównywanie z nią frazy wyszukiwania jest kategorią błędu, nie ostrożnością.
         //
         // Te akcje mają WŁASNE, właściwe im bramki i to one zostają jedynymi:
-        //   • `web.search` / `web.read` — rejestr znanych adresów (`modules/web/urlRegistry`)
-        //     + zgoda usera (`web_search` / `web_read` w APPROVAL_DEFAULTS, osobne od K11);
-        //   • `agent.message` — widoczność adresata + limity skrzynki (`modules/komunikator`);
-        //   • `delegate` — przecięcie zakresów rodzic∩dziecko (`intersectScopeFolders`)
+        //   • `web.search` / `web.read` - rejestr znanych adresów (`modules/web/urlRegistry`)
+        //     + zgoda usera (`web_search` / `web_read` w APPROVAL_DEFAULTS);
+        //   • `agent.message` - widoczność adresata + limity skrzynki (`modules/komunikator`);
+        //   • `delegate` - przecięcie zakresów rodzic∩dziecko (`intersectScopeFolders`)
         //     i głębokość delegacji liczona w runtime;
-        //   • `external.call` — ryzyko RED (obowiązkowa zgoda w `edge`) + whitelista serwerów.
+        //   • `external.call` - ryzyko RED (obowiązkowa zgoda w `edge`) + whitelista serwerów.
         //
         // `PermissionSystem` NIE zmienia przez to przepływu: klasyfikacja ryzyka, zgody
-        // i `disabled_tools` działają dokładnie jak dotąd — wypada wyłącznie pomiar ścieżkowy.
+        // i `disabled_tools` działają jak dla ścieżek - wypada wyłącznie pomiar ścieżkowy.
         // Domyślka `targetIsVaultPath === true` zostaje (fail-closed dla nowych wołaczy).
         if (opts?.targetIsVaultPath === false) {
             return { allowed: true, reason: 'non-vault-target' };
         }
 
-        // K13 (2026-08-23): strażnik kanonizuje cel SAM, na wejściu. Do K12 było to
-        // niemożliwe — `sanitizePath` nie była w pełni idempotentna, więc trzecia warstwa
-        // „poprawek" oddawała inny ciąg niż wołacz i bramka, czyli otwierała z powrotem
-        // dokładnie ten rozjazd, który zamknął K1. Od K13 kanonizacja jest liczona do PUNKTU
-        // STAŁEGO, więc dodatkowa warstwa nie ma prawa niczego zmienić — a strażnik przestaje
-        // wisieć na dyscyplinie wołaczy (granica `.pkm-assistant/` niżej stoi na `startsWith`,
-        // więc jedno wiodące `./` wystarczyło, żeby ją ominąć).
+        // Strażnik kanonizuje cel SAM, na wejściu, do PUNKTU STAŁEGO (patrz `sanitizePath`),
+        // więc żadna dodatkowa warstwa "poprawek" nie ma prawa oddać innego ciągu niż wołacz
+        // i bramka - a strażnik przestaje wisieć na dyscyplinie wołaczy (granica
+        // `.pkm-assistant/` niżej stoi na `startsWith`, więc jedno wiodące `./` wystarczyłoby,
+        // żeby ją ominąć, gdyby nie było kanonizowane tutaj).
         //
         // Kanonizacja idzie PRZED `_checkSubScope`, żeby także bariera suba oglądała formę
         // kanoniczną. Pusty cel i umowny root listingu (`/`) zostają bez zmian.
-        // (Warunek `targetIsVaultPath !== false` stał tu do K14 — dziś jest zbędny, bo cel
-        // nie-vaultowy wraca wyżej i nigdy tu nie dochodzi.)
         if (typeof targetPath === 'string' && targetPath !== '' && targetPath !== '/') {
             const canonical = sanitizePath(targetPath);
             // Ten sam komunikat co w `PermissionSystem.checkPermission` — jedna nazwa dla
@@ -368,7 +358,7 @@ export class AccessGuard {
             targetPath = canonical;
         }
 
-        // S33 Z1: bariera suba PRZED wszystkim innym — także przed admin_access rodzica.
+        // Bariera suba PRZED wszystkim innym - także przed admin_access rodzica.
         const subScopeDenial = AccessGuard._checkSubScope(targetPath, opts?.scopeFolders);
         if (subScopeDenial) return subScopeDenial;
 
@@ -441,7 +431,7 @@ export class AccessGuard {
      * @param results
      * @param pathExtractor - function to get path from result item
      * @param opts - Extra options
-     * @param opts.scopeFolders - S33 A1: foldery scope sub-agenta. Wyniki spoza
+     * @param opts.scopeFolders - foldery scope sub-agenta. Wyniki spoza
      *   scope wypadają tak samo jak wyniki spoza whitelisty rodzica (koniunkcja).
      * @returns filtered results
      */
@@ -455,7 +445,7 @@ export class AccessGuard {
     ): T[] {
         if (!results || !Array.isArray(results)) return results;
 
-        // S33 A1: bariera scope suba PRZED wszystkim innym — także przed skrótem admina,
+        // Bariera scope suba PRZED wszystkim innym - także przed skrótem admina,
         // dokładnie jak w `checkAccess`. Inaczej `search`/`list` byłyby furtką: sub nie
         // otworzy pliku spoza swojego kąta, ale dostałby jego tytuł i fragment treści.
         const scopeFolders = opts?.scopeFolders;
@@ -516,14 +506,13 @@ export class AccessGuard {
             return { allowed: true, reason: 'own-agent-folder' };
         }
 
-        // Shared areas: always allowed (match folder itself AND contents)
+        // Shared areas: always allowed (match folder itself AND contents).
+        // Celowo NIE ma tu `.pkm-assistant/roles` ani `agora`: to martwe furtki - nie dopisywać.
         const sharedAreas = [
             '.pkm-assistant/komunikator',
             '.pkm-assistant/skills',
             '.pkm-assistant/artifacts',
             '.pkm-assistant/sub-agents',
-            // E2.8: `.pkm-assistant/roles` usunięte — role rozpuszczone w A3 (D7), obszar martwy.
-            // Health check 2026-07-29: `.pkm-assistant/agora` usunięte — moduł skasowany w S08, furtka była martwa.
         ];
         for (const area of sharedAreas) {
             if (path === area || path.startsWith(area + '/')) {
@@ -550,7 +539,7 @@ export class AccessGuard {
 
     /**
      * Normalize focusFolders entries to {path, access} format.
-     * Handles old string[], new {path, access}[], AND {group} references (E2.8 B1) — a group
+     * Handles old string[], new {path, access}[], AND {group} references - a group
      * reference expands to the folders defined for it in Settings→Vault (missing group = skipped).
      */
     static _normalizeEntries(folders: FocusEntry[] | null | undefined) {
@@ -565,10 +554,8 @@ export class AccessGuard {
      * - Glob with *: "Projects/*" matches one level only
      * - Exact file: "Notes/todo.md" matches exactly
      *
-     * Glob→regex conversion via `globPatternToRegex` (AUD-code-review-033) — the
-     * plain-folder branch below and `_escapeRegex` stay local. (Formerly also shared
-     * with `VaultZones.matchesPattern()`; that dead subsystem was removed 2026-09-03,
-     * AUD-dead-code-031/115/172/216.)
+     * Glob→regex conversion via `globPatternToRegex` - the plain-folder branch below
+     * and `_escapeRegex` stay local.
      */
     static _matchesEntry(filePath: string | null | undefined, pattern: string | null | undefined): boolean {
         if (!pattern || !filePath) return false;

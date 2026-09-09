@@ -1,18 +1,18 @@
 /**
  * @module vaultReadGate
- * K23 (AUD-security-119) — bramka „czy agent TEJ TURY może CZYTAĆ ten plik", jako czysta decyzja.
+ * Bramka „czy agent TEJ TURY może CZYTAĆ ten plik", jako czysta decyzja.
  *
  * Jedna bramka dla dwóch kanałów, które wciągają pliki vaulta do promptu BEZ wołania narzędzia:
  * Oczko (osadzenia `![[…]]` z aktywnej notatki) i @-wzmianki. Stoi na TYM SAMYM
  * `checkPermission('vault.read', …)`, co narzędzie `read` — czyli No-Go, pliki chronione,
  * whitelista `focusFolders` i `admin_access`, a nie samo No-Go.
  *
- * DLACZEGO OSOBNY PLIK (AUD-testy-025): predykat mieszkał w `chat_model.ts`, który importuje
- * `obsidian` — AVA go nie zaimportuje, więc jedynym strażnikiem był regex po tekście źródła
+ * DLACZEGO OSOBNY PLIK: gdyby predykat mieszkał w `chat_model.ts`, ciągnąłby `obsidian` — AVA go
+ * nie zaimportuje, więc jedynym strażnikiem byłby regex po tekście źródła
  * (`oczkoAccessGate.test.ts`). Podmiana `return permissionSystem.checkPermission(…).allowed === true;`
- * na `permissionSystem.checkPermission(…); return true;` zostawiała dopasowywany napis na miejscu
- * i 486 testów na zielono — a bramka przepuszczała KAŻDĄ ścieżkę, więc bajty obrazu ze strefy
- * No-Go szły do dostawcy modelu. To jest granica „vault → prompt modelu", więc decyzja musi mieć
+ * na `permissionSystem.checkPermission(…); return true;` zostawia dopasowywany napis na miejscu
+ * i testy na zielono — a bramka przepuszczałaby KAŻDĄ ścieżkę, więc bajty obrazu ze strefy
+ * No-Go szłyby do dostawcy modelu. To jest granica „vault → prompt modelu", więc decyzja musi mieć
  * test zachowania, nie test napisu.
  *
  * Plik jest CELOWO wolny od `obsidian`, DOM-u i I/O (wzór `turnOwner.ts`, `queuedMessage.ts`):
@@ -21,7 +21,7 @@
  */
 
 /** Werdykt systemu uprawnień. Interesuje nas wyłącznie `allowed === true`. */
-// AUD-dead-code-231 (2026-09-02): `export` zdjęty na pięciu typach niżej — zero referencji spoza
+// `export` zdjęty na pięciu typach niżej — zero referencji spoza
 // tego pliku (`evaluateVaultRead`/`createVaultReadPredicate` są jedynym publicznym wejściem).
 interface PermissionVerdict {
     allowed?: boolean;

@@ -10,9 +10,8 @@ import type { ChatRequest, ProviderContext } from '../contracts.js';
  * Strażnik regresji na samej bramce `stream_options`: ta sama baza kształtu OpenAI, dwóch
  * dostawców różniących się WYŁĄCZNIE flagą `ChatProviderInfo.streamUsage`.
  *
- * ⚠️ Dawna wersja tego testu mutowała statykę adaptera (`defaults.stream_usage = false`),
- * żeby zbadać obie gałęzie jednym dostawcą. `ChatProviderInfo` jest `readonly`, więc
- * mutacja znika — jej rolę przejmuje para dostawców o przeciwnych flagach.
+ * `ChatProviderInfo` jest `readonly`, więc test bada obie gałęzie przez parę dostawców
+ * o przeciwnych flagach, zamiast mutować statykę adaptera.
  */
 const MESSAGES = [{ role: 'user', content: 'cześć' }];
 
@@ -34,10 +33,10 @@ test('bazowe żądanie kształtu OpenAI dokłada stream_options TYLKO przy strea
 });
 
 /**
- * Sklejanie hosta ze ścieżką (poprawka po weryfikacji clean-room, 2026-09-06).
+ * Sklejanie hosta ze ścieżką.
  *
- * User wpisuje w Ustawieniach host tak, jak go widzi w dokumentacji — a dokumentacja
- * LM Studio pokazuje `http://localhost:1234/v1`. Sklejenie na ślepo dawało
+ * User wpisuje w Ustawieniach host tak, jak go widzi w dokumentacji - a dokumentacja
+ * LM Studio pokazuje `http://localhost:1234/v1`. Sklejenie na ślepo dawałoby
  * `…/v1/v1/chat/completions`: 404 bez ani jednej wskazówki, że winny jest adres.
  */
 const chatUrlFor = (endpoint: string | undefined): string => lmStudioProvider.buildRequest(
@@ -71,7 +70,7 @@ test('adres czatu: pokrycie dłuższe niż jeden segment też się zdejmuje', t 
 });
 
 /**
- * Limit odpowiedzi i pola nieznane bazie (mutacje F10 na `resolveMaxTokens`
+ * Limit odpowiedzi i pola nieznane bazie (mutacje na `resolveMaxTokens`
  * i `passthroughFields`).
  *
  * DeepSeek jest tu świadkiem GOŁEJ bazy: nie nadpisuje ani jednego haka

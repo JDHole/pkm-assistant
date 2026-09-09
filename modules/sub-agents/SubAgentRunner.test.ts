@@ -4,7 +4,7 @@ import { SubTaskRegistry } from './SubTaskRegistry.js';
 // ⚠️ i18n importujemy jako `tr` — `t` to obiekt asercji AVA (konwencja repo).
 import { t as tr } from '../../core/i18n/index.js';
 import { DEFAULT_LIMITS } from '../../config/limits.js';
-// AUD-bledy-011: kontrakt pliku sesji — zdarzenie biegu musi przejść przez pisarza I czytnik.
+// Kontrakt pliku sesji: zdarzenie biegu musi przejść przez pisarza I czytnik.
 import { formatSessionEvent, parseActiveSession } from '../memory/activeSessionFormat.js';
 
 type TestRunner = {
@@ -46,7 +46,7 @@ test('SubAgentRunner returns readable error when stream throws object-like messa
     t.false(result.result.includes('[object Object]'));
 });
 
-// --- D18: THIN prompt template (brain injection 12k USUNIĘTY; pull zamiast push) ---
+// --- THIN prompt template (brak brain injection; pull zamiast push) ---
 
 test('_buildTaskPrompt is thin: no brain push, memory PULL hint + budget + rules', async t => {
     const runner = new SubAgentRunner({
@@ -72,7 +72,7 @@ test('_buildTaskPrompt is thin: no brain push, memory PULL hint + budget + rules
     t.true(prompt.includes('jednorazowy research'));
 });
 
-test('_buildTaskPrompt renders identically regardless of role label (F6)', async t => {
+test('_buildTaskPrompt renders identically regardless of role label', async t => {
     const runner = new SubAgentRunner({ toolRegistry: { getTool: () => null }, app: {}, plugin: {} });
 
     const asResearcher = await runner._buildTaskPrompt(
@@ -83,9 +83,9 @@ test('_buildTaskPrompt renders identically regardless of role label (F6)', async
     t.is(asResearcher, asStrategist, 'rola to etykieta — nie zmienia szablonu promptu');
 });
 
-// F4: cap ISTNIEJE i TNIE — to jest intencja tego testu. Wartość bierze się z
+// Cap ISTNIEJE i TNIE — to jest intencja tego testu. Wartość bierze się z
 // `config/limits.js` (`subagent_prompt_max_chars`), a nie z liczby wpisanej w test,
-// bo od F4 user może ją zmienić w Ustawieniach → Limity.
+// bo user może ją zmienić w Ustawieniach → Limity.
 test('_buildTaskPrompt soft-caps config.prompt at the configured budget', async t => {
     const cap = DEFAULT_LIMITS.subagent_prompt_max_chars;
     const runner = new SubAgentRunner({ toolRegistry: { getTool: () => null }, app: {}, plugin: {} });
@@ -101,7 +101,7 @@ test('_buildTaskPrompt soft-caps config.prompt at the configured budget', async 
     t.false(prompt.includes('y'.repeat(cap + 1)));
 });
 
-test('F4: budżet instrukcji suba jedzie z ustawień usera (override tnie mocniej)', async t => {
+test('budżet instrukcji suba jedzie z ustawień usera (override tnie mocniej)', async t => {
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: () => null },
         app: {},
@@ -117,7 +117,7 @@ test('F4: budżet instrukcji suba jedzie z ustawień usera (override tnie mocnie
     t.false(prompt.includes('y'.repeat(1501)));
 });
 
-test('F4: blok BUDŻET nie kłamie — pokazuje limity, którymi realnie karmimy pętlę', async t => {
+test('blok BUDŻET nie kłamie — pokazuje limity, którymi realnie karmimy pętlę', async t => {
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: () => null },
         app: {},
@@ -148,7 +148,7 @@ test('_buildTaskPrompt includes SCOPE block only when config.scope is set', asyn
     t.false(noScope.includes('SCOPE:'));
 });
 
-// --- E1.3 P8: fail-closed whitelist in the direct-execution fallback ---
+// --- fail-closed whitelist in the direct-execution fallback ---
 
 function makeToolSpyRegistry(calls: Record<string, boolean>) {
     const tools = {
@@ -183,7 +183,7 @@ test('_executeTool still runs a whitelisted tool (fallback path)', async t => {
     t.falsy(calls.del);
 });
 
-// F2.13 (release 2.2.0/W3): fallback bez MCPClient nie umie wyegzekwować scopeFolders (żadna
+// Fallback bez MCPClient nie umie wyegzekwować scopeFolders (żadna
 // bramka PermissionSystem nie stoi na tej ścieżce — jedyna ochrona to whitelista NAZW). Gdy
 // wołacz podał scopeFolders (zamierzał zawęzić suba do konkretnych folderów), fail-closed
 // (odmowa) jest bezpieczniejsze niż ciche rozszerzenie na cały vault.
@@ -206,11 +206,11 @@ test('_executeTool (fallback bez MCPClient) przechodzi bez zmian, gdy scopeFolde
 
     const okEmpty = await runner._executeTool({ name: 'vault_read', arguments: '{}' }, 'Klara', allowed,
         { scopeFolders: [] });
-    t.true(calls.read, 'pusta lista scopeFolders = brak zawężenia, zachowanie sprzed F2.13');
+    t.true(calls.read, 'pusta lista scopeFolders = brak zawężenia');
     t.is(okEmpty, 'READ_OK');
 });
 
-// --- S33 Z1: kagańce delegacji przenoszone do MCPClient ---
+// --- kagańce delegacji przenoszone do MCPClient ---
 
 test('_executeTool przekazuje delegationDepth i scopeFolders do MCPClient', async t => {
     const calls: Array<{ agentName?: string; opts: Record<string, unknown> }> = [];
@@ -271,7 +271,7 @@ test('runTask domyślnie nie nakłada scope ani głębokości (zachowanie bez zm
     t.is(calls[0].scopeFolders, undefined);
 });
 
-// --- D18/F6: jednolity domyślny zestaw narzędzi (rola nie steruje) ---
+// --- jednolity domyślny zestaw narzędzi (rola nie steruje) ---
 
 test('_resolveToolNames uses the uniform worker default set (prymitywy read/list/search)', t => {
     const runner = new SubAgentRunner({ toolRegistry: { getTool: () => null }, app: {}, plugin: {} });
@@ -282,7 +282,7 @@ test('_resolveToolNames uses the uniform worker default set (prymitywy read/list
     t.false(names.includes('vault_search'), 'no deprecated vault_search');
 });
 
-test('_resolveToolNames defaults are identical regardless of role label (F6)', t => {
+test('_resolveToolNames defaults are identical regardless of role label', t => {
     const runner = new SubAgentRunner({ toolRegistry: { getTool: () => null }, app: {}, plugin: {} });
     const asResearcher = runner._resolveToolNames({ role: 'researcher' }, {});
     const asStrategist = runner._resolveToolNames({ role: 'strategist' }, {});
@@ -292,7 +292,7 @@ test('_resolveToolNames defaults are identical regardless of role label (F6)', t
 
 test('_resolveToolNames honors explicit config.tools over defaults (rename applied)', t => {
     const runner = new SubAgentRunner({ toolRegistry: { getTool: () => null }, app: {}, plugin: {} });
-    // E2.6: vault_read → read przy budowie whitelisty (DEPRECATED_TOOL_RENAMES).
+    // vault_read → read przy budowie whitelisty (DEPRECATED_TOOL_RENAMES).
     const names = runner._resolveToolNames({ role: 'researcher', tools: ['vault_read'] }, {});
 
     t.deepEqual(names, ['read']);
@@ -300,17 +300,18 @@ test('_resolveToolNames honors explicit config.tools over defaults (rename appli
 
 test('_resolveToolNames maps deprecated config.tools to search/read + dedups', t => {
     const runner = new SubAgentRunner({ toolRegistry: { getTool: () => null }, app: {}, plugin: {} });
-    // vault_grep/vault_semantic → search (dedup), vault_read → read (E2.6).
+    // vault_grep/vault_semantic → search (dedup), vault_read → read.
     const names = runner._resolveToolNames({ role: 'researcher', tools: ['vault_grep', 'vault_semantic', 'vault_read'] }, {});
 
     t.deepEqual(names, ['search', 'read']);
 });
 
-// --- Poligon F2: etykieta trace musi rozróżniać WYWOŁANIA suba ---
+// --- etykieta trace musi rozróżniać WYWOŁANIA suba ---
 //
 // `delegate` z listą `tasks` odpala N workerów równolegle (Promise.all na tym samym configu).
-// Do F2 każdy pisał w trace pod tą samą etykietą `sub/<nazwa>`, więc `loop.start`/`tool.post`/
-// `loop.end` z kilku biegów mieszały się w jeden nierozróżnialny strumień.
+// Bez numeru wywołania w etykiecie każdy pisałby w trace pod tą samą etykietą `sub/<nazwa>`,
+// więc `loop.start`/`tool.post`/`loop.end` z kilku biegów mieszałyby się w jeden
+// nierozróżnialny strumień.
 
 /** Atrapa modelu: jedna odpowiedź tekstowa, zero tool-calli → pętla kończy się naturalnie. */
 function fakeDoneModel() {
@@ -380,7 +381,7 @@ test('filtr prefiksowy po nazwie suba nie łapie cudzych nazw (kontrakt harnessa
     t.is(labels.filter(l => l.startsWith('sub/pkm-sub-extra#')).length, 1);
 });
 
-// --- F1: bieg suba jako byt w rejestrze (`plugin.subTaskRegistry`) ---
+// --- bieg suba jako byt w rejestrze (`plugin.subTaskRegistry`) ---
 //
 // Rejestr rozsyła kroki pętli do konsumentów; trace.log jest PIERWSZYM z nich (subskrypcja
 // żyje w SubTaskRegistry, nie tutaj). Runner ma tylko: założyć byt pod etykietą trace,
@@ -422,8 +423,8 @@ test('runTask zakłada w rejestrze byt o id = etykieta trace i karmi go krokami 
     t.regex(created[0].id, /^sub\/pkm-sub#[a-z0-9]+$/, 'id taska = dzisiejsza etykieta trace');
     t.is(created[0].name, 'pkm-sub');
     t.is(created[0].agentName, 'Tester');
-    // F4: wartość bierze się z `config/limits.js`, nie z liczby wpisanej w test — intencja
-    // („budżet taska = limity, którymi realnie karmimy pętlę") zostaje, pin przestaje kłamać.
+    // Wartość bierze się z `config/limits.js`, nie z liczby wpisanej w test — intencja
+    // („budżet taska = limity, którymi realnie karmimy pętlę") zostaje, pin nie kłamie.
     t.is(created[0].budget.maxIterations, DEFAULT_LIMITS.subagent_max_iterations_worker,
         'budżet taska = limity podane pętli');
     t.true(steps.length > 0, 'kroki pętli lecą przez rejestr');
@@ -473,7 +474,7 @@ test('błąd modelu domyka byt przez fail, a wynik runTask zostaje bez zmian', a
     t.true(result.result.includes('model padł'), 'runTask nadal zwraca NORMALNY wynik z tekstem błędu');
 });
 
-test('bez rejestru runner pisze trace jak dotąd (fallback ścieżki sprzed F1)', async t => {
+test('bez rejestru runner pisze trace jak dotąd (fallback ścieżki bez rejestru)', async t => {
     const labels: string[] = [];
     const events: string[] = [];
     const runner = new SubAgentRunner({
@@ -526,7 +527,7 @@ test('sub bez nazwy spada na rolę, a bez roli na „sub" — nadal z numerem wy
     t.regex(labels[1], /^sub\/sub#[a-z0-9]+$/);
 });
 
-// --- F2: byt zakładany PRZED startem modelu + hak onTaskCreated ---
+// --- byt zakładany PRZED startem modelu + hak onTaskCreated ---
 
 test('onTaskCreated dostaje byt ZANIM ruszy model (delegacja w tle ma czym oddać task_id)', async t => {
     const { created, registry } = makeFakeRegistry();
@@ -571,7 +572,7 @@ test('origin i background jadą 1:1 do registry.create', async t => {
     t.deepEqual((created[0] as unknown as { origin?: unknown }).origin, origin);
 });
 
-test('bez rejestru onTaskCreated NIE jest wołany (ścieżka sprzed F1 bez zmian)', async t => {
+test('bez rejestru onTaskCreated NIE jest wołany (ścieżka bez rejestru, bez zmian)', async t => {
     const labels: string[] = [];
     const runner = makeTracingRunner(labels);
     let wolane = 0;
@@ -582,7 +583,7 @@ test('bez rejestru onTaskCreated NIE jest wołany (ścieżka sprzed F1 bez zmian
 
     t.is(wolane, 0);
     t.is(result.result, 'gotowe', 'brak rejestru nie psuje biegu');
-    t.is(labels.length, 1, 'trace leci wprost, jak przed F1');
+    t.is(labels.length, 1, 'trace leci wprost, bez rejestru');
 });
 
 test('rzucający onTaskCreated nie wywala biegu suba (bezpiecznik księgowości)', async t => {
@@ -601,14 +602,14 @@ test('rzucający onTaskCreated nie wywala biegu suba (bezpiecznik księgowości)
     t.is(finished.length, 1, 'bieg i tak domknięty normalnie');
 });
 
-// ─── Audyt nocny 2026-08-15, moduł 19 (iteracje subagentów) — ZAMKNIĘTY w F5 ───
-// `runAgentLoop` oddaje `stoppedBy` ('natural' | 'backstop' | 'abort'), runner wypisywał je
-// do logu ("stop: backstop"), ale NIE przekazywał dalej — zwracany obiekt miał
-// result/toolsUsed/toolCallDetails/duration/usage i tyle. Informacja o tym, JAK sub zszedł,
-// ginęła na granicy runnera i nie docierała ani do `DelegateTool`, ani do agenta zlecającego.
-// Skutek: sub, któremu skończyły się iteracje (i który oddał zaślepkę backstopu), wyglądał
+// ─── stoppedBy nie może zgubić się na granicy runnera ───
+// `runAgentLoop` oddaje `stoppedBy` ('natural' | 'backstop' | 'abort'), runner wypisuje je
+// do logu ("stop: backstop"), ale bez przekazania dalej zwracany obiekt miałby tylko
+// result/toolsUsed/toolCallDetails/duration/usage. Informacja o tym, JAK sub zszedł,
+// ginęłaby na granicy runnera i nie docierałaby ani do `DelegateTool`, ani do agenta zlecającego.
+// Skutek: sub, któremu skończyły się iteracje (i który oddał zaślepkę backstopu), wyglądałby
 // dla zlecającego identycznie jak sub, który zadanie realnie domknął.
-test('audyt 19: runTask oddaje stoppedBy z pętli (F5: już nie ginie na granicy runnera)', async t => {
+test('runTask oddaje stoppedBy z pętli (nie ginie na granicy runnera)', async t => {
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: () => null },
         app: {},
@@ -629,8 +630,8 @@ test('audyt 19: runTask oddaje stoppedBy z pętli (F5: już nie ginie na granicy
     t.is(result.failed, undefined, 'udany bieg NIE ma flagi failed');
 });
 
-// F5: druga połowa uczciwości — bieg, który padł, musi to POWIEDZIEĆ.
-test('F5: bieg zakończony wyjątkiem oddaje failed:true + stoppedBy "error"', async t => {
+// Druga połowa uczciwości — bieg, który padł, musi to POWIEDZIEĆ.
+test('bieg zakończony wyjątkiem oddaje failed:true + stoppedBy "error"', async t => {
     const model = {
         stream(_payload: unknown, callbacks: { error(error: unknown): void }) {
             callbacks.error(new Error('Model timeout'));
@@ -655,8 +656,8 @@ test('F5: bieg zakończony wyjątkiem oddaje failed:true + stoppedBy "error"', a
     t.true(result.failed);
 });
 
-// F5: rejestr dostaje `stoppedBy` z pętli tą samą drogą co dotąd (kontrakt `finish` bez zmian).
-test('F5: stoppedBy z pętli ląduje też w karcie biegu (registry.finish)', async t => {
+// Rejestr dostaje `stoppedBy` z pętli tą samą drogą co dotąd (kontrakt `finish` bez zmian).
+test('stoppedBy z pętli ląduje też w karcie biegu (registry.finish)', async t => {
     const { finished, registry } = makeFakeRegistry();
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: () => null },
@@ -670,8 +671,8 @@ test('F5: stoppedBy z pętli ląduje też w karcie biegu (registry.finish)', asy
     t.is(finished[0].result.stoppedBy, 'natural');
 });
 
-// ─── F5: wiadomość do suba w trakcie (hak `beforeContinue`) ───────────────────
-// Suby NIE podpinały dotąd ŻADNYCH hooków pętli. F5 dokłada dokładnie jeden —
+// ─── wiadomość do suba w trakcie (hak `beforeContinue`) ───────────────────
+// Suby podpinają dokładnie jeden hook pętli —
 // `beforeContinue` — bo tylko tam da się dopisać coś do transkryptu MIĘDZY wywołaniami
 // modelu, czyli tam, gdzie sub to przeczyta bez przerywania w połowie zdania.
 
@@ -713,7 +714,7 @@ function runnerZNarzedziem(registry: unknown) {
     });
 }
 
-test('F5: wiadomość wrzucona w trakcie biegu ląduje w transkrypcie suba przed kolejnym strzałem', async t => {
+test('wiadomość wrzucona w trakcie biegu ląduje w transkrypcie suba przed kolejnym strzałem', async t => {
     const registry = new SubTaskRegistry();
     const widziane: string[][] = [];
     const runner = runnerZNarzedziem(registry);
@@ -738,7 +739,7 @@ test('F5: wiadomość wrzucona w trakcie biegu ląduje w transkrypcie suba przed
     registry.dispose();
 });
 
-test('F5: wiadomość doręczana DOKŁADNIE RAZ — kolejne iteracje nie powtarzają dopisku', async t => {
+test('wiadomość doręczana DOKŁADNIE RAZ — kolejne iteracje nie powtarzają dopisku', async t => {
     const registry = new SubTaskRegistry();
     const widziane: string[][] = [];
     const runner = runnerZNarzedziem(registry);
@@ -757,7 +758,7 @@ test('F5: wiadomość doręczana DOKŁADNIE RAZ — kolejne iteracje nie powtarz
     registry.dispose();
 });
 
-test('F5: brak wiadomości = ZERO dopisków w transkrypcie', async t => {
+test('brak wiadomości = ZERO dopisków w transkrypcie', async t => {
     const registry = new SubTaskRegistry();
     const widziane: string[][] = [];
     const runner = runnerZNarzedziem(registry);
@@ -771,7 +772,7 @@ test('F5: brak wiadomości = ZERO dopisków w transkrypcie', async t => {
     registry.dispose();
 });
 
-test('F5: bez rejestru hak w ogóle nie jest podpinany (ścieżka sprzed F5)', async t => {
+test('bez rejestru hak w ogóle nie jest podpinany (ścieżka bez rejestru)', async t => {
     const widziane: string[][] = [];
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: () => null },
@@ -788,12 +789,12 @@ test('F5: bez rejestru hak w ogóle nie jest podpinany (ścieżka sprzed F5)', a
     t.false(widziane.flat().some(m => m.includes(tr('subagent.steer_prefix'))));
 });
 
-// ── K8 (AUD-security-055): błąd suba nie wozi sekretów do rodzica ani do pliku sesji ──
+// ── błąd suba nie wozi sekretów do rodzica ani do pliku sesji ──
 
-test('K8: klucz z błędu suba nie wraca do rodzica ani nie ląduje w pliku sesji', async t => {
+test('klucz z błędu suba nie wraca do rodzica ani nie ląduje w pliku sesji', async t => {
     const KEY = 'sk-or-v1-0123456789abcdef0123456789abcdef';
     // Kształt zdarzenia strumienia bez `data`: normalize_error serializuje CAŁY event
-    // razem z nagłówkiem autoryzacji (dokładnie ta wtopa z raportu).
+    // razem z nagłówkiem autoryzacji.
     const raw = new Error('placeholder');
     (raw as unknown as { message: unknown }).message =
         `{"status":null,"data":null,"source":{"headers":{"Authorization":"Bearer ${KEY}"}}}`;
@@ -809,7 +810,7 @@ test('K8: klucz z błędu suba nie wraca do rodzica ani nie ląduje w pliku sesj
         app: {},
         plugin: {
             agentManager: {
-                // K4: runner adresuje pamięć po WŁAŚCICIELU biegu, nie po globalnym aktywnym.
+                // Runner adresuje pamięć po WŁAŚCICIELU biegu, nie po globalnym aktywnym.
                 getAgentMemory: (name: string) => (name === 'Tester' ? {
                     appendToActiveSession: async (event: Record<string, unknown>) => { events.push(event); },
                 } : null),
@@ -834,8 +835,8 @@ test('K8: klucz z błędu suba nie wraca do rodzica ani nie ląduje w pliku sesj
     t.true(result.result.includes('Authorization'));
 });
 
-// ── K4 (AUD-security-091/050): stan biegu zamrożony w chwili ZLECENIA ──
-// Delegacja z głównego czatu jest od rundy 3 ZAWSZE w tle, więc bieg suba przeżywa dalszą
+// ── stan biegu zamrożony w chwili ZLECENIA ──
+// Delegacja z głównego czatu jest ZAWSZE w tle, więc bieg suba przeżywa dalszą
 // pracę usera w UI: przełączenie zakładki przestawia `agentManager.activeAgent` i
 // `plugin.currentAutonomy`. Runner nie ma prawa czytać tych luster w trakcie biegu.
 
@@ -860,7 +861,7 @@ function makeSwitchableManager() {
     };
 }
 
-test('K4: dziennik biegu suba agenta A ląduje u A, choć w trakcie przełączono na B', async t => {
+test('dziennik biegu suba agenta A ląduje u A, choć w trakcie przełączono na B', async t => {
     const { manager, state, events } = makeSwitchableManager();
     const model = {
         stream(_payload: unknown, callbacks: { error(error: unknown): void }) {
@@ -882,7 +883,7 @@ test('K4: dziennik biegu suba agenta A ląduje u A, choć w trakcie przełączon
     t.is(events.A[0].agentName, 'A');
 });
 
-test('K4: _appendMemoryEvent adresuje po nazwie właściciela, nie po getActiveMemory', async t => {
+test('_appendMemoryEvent adresuje po nazwie właściciela, nie po getActiveMemory', async t => {
     const { manager, state, events } = makeSwitchableManager();
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: () => null }, app: {}, plugin: { agentManager: manager },
@@ -896,7 +897,7 @@ test('K4: _appendMemoryEvent adresuje po nazwie właściciela, nie po getActiveM
     t.deepEqual(events.B, []);
 });
 
-test('K4: nieznany właściciel biegu = ZERO zapisu (fail-closed, nie cudza pamięć)', async t => {
+test('nieznany właściciel biegu = ZERO zapisu (fail-closed, nie cudza pamięć)', async t => {
     const { manager, state, events } = makeSwitchableManager();
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: () => null }, app: {}, plugin: { agentManager: manager },
@@ -910,7 +911,7 @@ test('K4: nieznany właściciel biegu = ZERO zapisu (fail-closed, nie cudza pami
     t.deepEqual(events.B, [], 'bieg agenta bez pamięci nie może dopisać się do aktywnego');
 });
 
-test('K4 (050): sub używa autonomii ZAMROŻONEJ przy zleceniu, nie lustra pluginu', async t => {
+test('sub używa autonomii ZAMROŻONEJ przy zleceniu, nie lustra pluginu', async t => {
     const calls: Array<Record<string, unknown>> = [];
     const plugin = {
         currentAutonomy: 'all',
@@ -932,7 +933,7 @@ test('K4 (050): sub używa autonomii ZAMROŻONEJ przy zleceniu, nie lustra plugi
     t.is(calls[1].autonomy, 'edge', 'drugie narzędzie tego samego biegu NIE MOŻE złapać nowego trybu');
 });
 
-test('K4 (050): runTask przenosi autonomię zlecenia do egzekutora narzędzi', async t => {
+test('runTask przenosi autonomię zlecenia do egzekutora narzędzi', async t => {
     const calls: Array<Record<string, unknown>> = [];
     const model = {
         stream(_payload: unknown, callbacks: Record<string, (arg: unknown) => void>) {
@@ -961,7 +962,7 @@ test('K4 (050): runTask przenosi autonomię zlecenia do egzekutora narzędzi', a
     t.is(calls[0].autonomy, 'edge', 'autonomia biegu ma iść ze zlecenia, nie z plugin.currentAutonomy');
 });
 
-test('K4 (050): brak autonomii w zleceniu = stare zachowanie (lustro jako fallback)', async t => {
+test('brak autonomii w zleceniu = stare zachowanie (lustro jako fallback)', async t => {
     const calls: Array<Record<string, unknown>> = [];
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: () => null },
@@ -979,9 +980,9 @@ test('K4 (050): brak autonomii w zleceniu = stare zachowanie (lustro jako fallba
     t.is(calls[0].autonomy, 'edge');
 });
 
-// ─── K11 (AUD-security-072): whitelista suba jedzie DALEJ, do delegacji piętro niżej ─────
+// ─── whitelista suba jedzie DALEJ, do delegacji piętro niżej ─────
 
-test('K11 (072): _getTools przecina też whitelistę WOŁAJĄCEGO suba', t => {
+test('_getTools przecina też whitelistę WOŁAJĄCEGO suba', t => {
     const runner = new SubAgentRunner({
         toolRegistry: {
             getTool: (name: string) => ({ name, description: '', inputSchema: {} }),
@@ -998,7 +999,7 @@ test('K11 (072): _getTools przecina też whitelistę WOŁAJĄCEGO suba', t => {
     t.deepEqual(zWolajacym.map(td => td.function.name), ['read'], 'wnuk nie dostaje nic ponad rodzica-suba');
 });
 
-test('K11 (072): _executeTool podaje klientowi whitelistę suba jako callerToolNames', async t => {
+test('_executeTool podaje klientowi whitelistę suba jako callerToolNames', async t => {
     const calls: Array<Record<string, unknown>> = [];
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: () => null },
@@ -1019,14 +1020,14 @@ test('K11 (072): _executeTool podaje klientowi whitelistę suba jako callerToolN
     t.deepEqual(calls[0].scopeFolders, ['Publiczne']);
 });
 
-// ─── AUD-wydajnosc-098: transkrypt suba nie niesie base64 obrazu ───────────────────────────
+// ─── transkrypt suba nie niesie base64 obrazu ───────────────────────────
 //
 // `generate_image` zwraca w sukcesie pełny base64 obrazu (obok `path`/`note_path` — obraz JEST
 // już zapisany w vaulcie). Czat wycina to pole przed wstawieniem wyniku do transkryptu
 // (`chat_streaming.ts`), ale sub nie miał tej samej normalizacji — medianowy obraz realny
 // (~594 000 znaków base64) zjadał niemal cały sufit `max_tool_result_length` transkryptu suba.
 
-test('098: generate_image (ścieżka MCPClient) — transkrypt suba NIE niesie base64, ale niesie path/note_path', async t => {
+test('generate_image (ścieżka MCPClient) — transkrypt suba NIE niesie base64, ale niesie path/note_path', async t => {
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: () => null },
         app: {},
@@ -1054,7 +1055,7 @@ test('098: generate_image (ścieżka MCPClient) — transkrypt suba NIE niesie b
     t.true(out.includes('kB'), 'adnotacja rozmiaru zostaje (wzór normalizeMcpResult)');
 });
 
-test('098: generate_image (ścieżka fallback bez MCPClient) — ta sama normalizacja', async t => {
+test('generate_image (ścieżka fallback bez MCPClient) — ta sama normalizacja', async t => {
     const runner = new SubAgentRunner({
         toolRegistry: {
             getTool: () => ({
@@ -1076,7 +1077,7 @@ test('098: generate_image (ścieżka fallback bez MCPClient) — ta sama normali
     t.true(out.includes('Attachments/generated/y.png'));
 });
 
-test('098: inne narzędzie z polem `base64` (nie generate_image) — NIE dotknięte (skalpel, nie młot)', async t => {
+test('inne narzędzie z polem `base64` (nie generate_image) — NIE dotknięte (skalpel, nie młot)', async t => {
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: () => null },
         app: {},
@@ -1092,7 +1093,7 @@ test('098: inne narzędzie z polem `base64` (nie generate_image) — NIE dotkni�
     t.true(out.includes('zostaje'), 'normalizacja jest wyłącznie dla generate_image — inne narzędzia bez zmian');
 });
 
-test('098: generate_image bez pola base64 (np. błąd) — wynik przechodzi bez zmian', async t => {
+test('generate_image bez pola base64 (np. błąd) — wynik przechodzi bez zmian', async t => {
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: () => null },
         app: {},
@@ -1108,14 +1109,14 @@ test('098: generate_image bez pola base64 (np. błąd) — wynik przechodzi bez 
     t.true(out.includes('Brak klucza API'));
 });
 
-// ─── AUD-bledy-013: padnięte narzędzie suba przestaje wyglądać jak wynik ──────────────────
+// ─── padnięte narzędzie suba przestaje wyglądać jak wynik ──────────────────
 //
 // Egzekutor suba z kontraktu NIE rzuca (każda ścieżka kończy się `return` stringa), a pętla
-// stawia `status: 'error'` na kroku `tool.post` wyłącznie po wyjątku. Efekt: bieg, w którym
-// padło każde narzędzie, wyglądał w trace.log i w pasku biegów identycznie jak bieg udany,
-// a sub dostawał komunikat błędu w kształcie zwykłego wyniku.
+// stawia `status: 'error'` na kroku `tool.post` wyłącznie po wyjątku. Bez osobnego znacznika
+// bieg, w którym padło każde narzędzie, wyglądałby w trace.log i w pasku biegów identycznie
+// jak bieg udany, a sub dostawałby komunikat błędu w kształcie zwykłego wyniku.
 
-test('AUD-bledy-013: wynik {success:false} wraca do suba jako BŁĄD, nie jako zwykły wynik', async t => {
+test('wynik {success:false} wraca do suba jako BŁĄD, nie jako zwykły wynik', async t => {
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: () => null },
         app: {},
@@ -1132,7 +1133,7 @@ test('AUD-bledy-013: wynik {success:false} wraca do suba jako BŁĄD, nie jako z
     t.true(tr('subagent.tool_error', { name: 'write', error: 'x' }, 'pl').startsWith('Błąd'));
 });
 
-test('AUD-bledy-013: krok tool.post padniętego narzędzia niesie status error', async t => {
+test('krok tool.post padniętego narzędzia niesie status error', async t => {
     const { steps, registry } = makeFakeRegistry();
     const widziane: string[][] = [];
     const runner = new SubAgentRunner({
@@ -1154,15 +1155,16 @@ test('AUD-bledy-013: krok tool.post padniętego narzędzia niesie status error',
     t.is(post[0].fields.status, 'error', 'bieg z padniętym narzędziem wyglądał w trace jak udany');
 });
 
-// ── AUD-bledy-011: padnięty bieg suba przeżywa drogę zdarzenie → plik sesji → parser ──
+// ── padnięty bieg suba przeżywa drogę zdarzenie → plik sesji → parser ──
 //
-// Runner dopisywał awarię jako `subagent_error` w kształcie, którego `parseActiveSession`
-// nie umiał odczytać (pole `**role:**` niosło etykietę suba, a typ nie miał mapowania roli).
-// Blok fizycznie leżał w pliku, ale KAŻDY odczyt go pomijał — więc po restarcie Obsidiana
-// nie było śladu po padzie, konsolidacja karmiła się wyłącznie udanymi biegami,
-// a `archiveActiveSession` (transkrypt z `parsed.messages` + kasacja oryginału) kasowała zapis.
+// Runner dopisuje awarię jako `subagent_error` w kształcie, który `parseActiveSession` musi
+// umieć odczytać (pole `**role:**` niesie etykietę suba, więc typ potrzebuje mapowania roli).
+// Bez tego mapowania blok fizycznie leżałby w pliku, ale KAŻDY odczyt by go pomijał — więc
+// po restarcie Obsidiana nie byłoby śladu po padzie, konsolidacja karmiłaby się wyłącznie
+// udanymi biegami, a `archiveActiveSession` (transkrypt z `parsed.messages` + kasacja
+// oryginału) kasowałaby zapis.
 
-test('AUD-bledy-011: zdarzenie padniętego biegu wraca z parsera pliku sesji', async t => {
+test('zdarzenie padniętego biegu wraca z parsera pliku sesji', async t => {
     const events: Array<Record<string, unknown>> = [];
     const model = {
         stream(_payload: unknown, callbacks: { error(error: unknown): void }) {
@@ -1205,19 +1207,18 @@ test('AUD-bledy-011: zdarzenie padniętego biegu wraca z parsera pliku sesji', a
     t.true(parsed.messages[0].content.includes('model timeout po 900000 ms'), 'powód padu zachowany');
 });
 
-// ─── Fabryka napraw F3 (2026-09-02), audyt testów 2026-09-01 ──────────────────────────────
+// ─── testy mierzące SKUTEK przelotu limitów pętli, nie tylko argument ──────────────────────
 //
-// Cztery znaleziska o WSPÓLNYM kształcie: `runTask` okablowuje `config/limits.ts` do
-// `loopLimits` przekazywanego `runAgentLoop` (linie 210-230), a żaden test nie sprawdzał, że
-// ten PRZELOT realnie działa — istniejące testy mierzyły albo TEKST promptu (osobna
-// kalkulacja w `_buildTaskPrompt`), albo tylko drogę DOMYŚLNĄ. Testy niżej mierzą SKUTEK:
-// co pętla faktycznie dostaje i jak się przez to zachowuje — nie sam fakt przekazania argumentu.
+// `runTask` okablowuje `config/limits.ts` do `loopLimits` przekazywanego `runAgentLoop`
+// (linie 210-230). Testy niżej mierzą SKUTEK: co pętla faktycznie dostaje i jak się przez
+// to zachowuje — nie sam fakt przekazania argumentu, bo TEKST promptu liczy to osobno
+// w `_buildTaskPrompt` (osobna kalkulacja), a droga DOMYŚLNA nie sprawdza custom overrides.
 
-// AUD-testy-018: `stoppedBy` z pętli MUSI dotrzeć do ZWROTKI `runTask` (linia 375) — osobnej
+// `stoppedBy` z pętli MUSI dotrzeć do ZWROTKI `runTask` (linia 375) — osobnej
 // linii od tej, która karmi `registry.finish` (linia 362). Mutacja „na sztywno 'natural'"
 // na linii 375 nie rusza żadnego z trzech testów pinujących wyłącznie drogę natural/error.
 
-test('AUD-testy-018: backstop — stoppedBy dociera do zwrotki runTask (mutacja "na sztywno natural" ma tu palić)', async t => {
+test('backstop — stoppedBy dociera do zwrotki runTask (mutacja "na sztywno natural" ma tu palić)', async t => {
     const model = fakeStubbornToolModel('read');
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: (name: string) => ({ name, description: 'atrapa', inputSchema: {}, execute: async () => 'wynik' }) },
@@ -1234,7 +1235,7 @@ test('AUD-testy-018: backstop — stoppedBy dociera do zwrotki runTask (mutacja 
     t.is(result.failed, undefined, 'backstop nie jest niepowodzeniem — nie może dostać flagi failed');
 });
 
-test('AUD-testy-018: abort — stoppedBy dociera do zwrotki runTask ORAZ do karty biegu jako aborted', async t => {
+test('abort — stoppedBy dociera do zwrotki runTask ORAZ do karty biegu jako aborted', async t => {
     const registry = new SubTaskRegistry();
     let task: { status?: string } | undefined;
     const runner = new SubAgentRunner({
@@ -1254,11 +1255,11 @@ test('AUD-testy-018: abort — stoppedBy dociera do zwrotki runTask ORAZ do kart
     registry.dispose();
 });
 
-// AUD-testy-019 (kanon; duplikat AUD-testy-002): `subagent_stall_timeout_ms` i
-// `subagent_salvage_max_chars` z ustawień muszą dotrzeć do `loopLimits` (linie 217-218) —
-// obalacz wyzerował oba na sztywno i 2465 testów + 34/34 scenariuszy harnessa zostały zielone.
+// `subagent_stall_timeout_ms` i `subagent_salvage_max_chars` z ustawień muszą dotrzeć do
+// `loopLimits` (linie 217-218) — bez tego przelotu mutacja zerująca oba na sztywno
+// przechodziłaby niezauważona przez resztę testów i scenariuszy harnessa.
 
-test('AUD-testy-019: subagent_stall_timeout_ms z ustawień budzi pętlę z ciszy (nie czeka do delegation_timeout_ms)', async t => {
+test('subagent_stall_timeout_ms z ustawień budzi pętlę z ciszy (nie czeka do delegation_timeout_ms)', async t => {
     const silentModel = {
         stream(_payload: unknown, _callbacks: Record<string, unknown>) {
             // Zero chunków, zero done/error — bez przelotu limitu z ustawień do pętli ten
@@ -1285,7 +1286,7 @@ test('AUD-testy-019: subagent_stall_timeout_ms z ustawień budzi pętlę z ciszy
         'komunikat musi pochodzić z watchdogu ciszy pętli, nie z innego źródła błędu');
 });
 
-test('AUD-testy-019: subagent_salvage_max_chars z ustawień trafia do zaślepki backstopu (dorobek, nie goła zaślepka)', async t => {
+test('subagent_salvage_max_chars z ustawień trafia do zaślepki backstopu (dorobek, nie goła zaślepka)', async t => {
     const dorobek = 'TAJNY_DOROBEK_XYZ_' + 'x'.repeat(200);
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: (name: string) => ({ name, description: 'atrapa', inputSchema: {}, execute: async () => dorobek }) },
@@ -1303,11 +1304,11 @@ test('AUD-testy-019: subagent_salvage_max_chars z ustawień trafia do zaślepki 
         'subagent_salvage_max_chars musi dotrzeć do pętli — bez przelotu zaślepka jest GOŁA (bez dorobku narzędzi)');
 });
 
-// AUD-testy-020: `options.modelTimeout` musi dotrzeć do `perCallTimeoutMs` (linia 213) — test
+// `options.modelTimeout` musi dotrzeć do `perCallTimeoutMs` (linia 213) — test
 // SKUTKU (bieg realnie kończy się szybko), nie samego przekazania argumentu tak jak robi to
 // `DelegateTool.test.ts` z atrapą runnera, która nigdy nie woła prawdziwego SubAgentRunnera.
 
-test('AUD-testy-020: options.modelTimeout dociera do perCallTimeoutMs pętli (skutek, nie tylko argument)', async t => {
+test('options.modelTimeout dociera do perCallTimeoutMs pętli (skutek, nie tylko argument)', async t => {
     const hangingModel = {
         stream(_payload: unknown, _callbacks: Record<string, unknown>) {
             // Model nigdy nie rozstrzyga promisy — jedyne, co może skończyć ten bieg, to
@@ -1330,10 +1331,10 @@ test('AUD-testy-020: options.modelTimeout dociera do perCallTimeoutMs pętli (sk
         'komunikat musi pochodzić z per-call timeoutu pętli, nie z innego źródła błędu');
 });
 
-// AUD-testy-055 (kanon; duplikat AUD-testy-041): config.max_iterations/min_iterations custom
-// suba muszą wygrać nad globalnym defaultem — WIDOCZNIE w budżecie taska ORAZ REALNIE w
-// liczbie kroków pętli (nie tylko w tekście promptu — test „F4: blok BUDŻET…" wyżej liczy TĘ
-// SAMĄ wartość osobną kalkulacją w `_buildTaskPrompt`, więc nie łapie rozjazdu w `runTask`).
+// config.max_iterations/min_iterations custom suba muszą wygrać nad globalnym defaultem —
+// WIDOCZNIE w budżecie taska ORAZ REALNIE w liczbie kroków pętli (nie tylko w tekście
+// promptu — test „blok BUDŻET…" wyżej liczy TĘ SAMĄ wartość osobną kalkulacją
+// w `_buildTaskPrompt`, więc nie łapie rozjazdu w `runTask`).
 
 /**
  * Model, który ZAWSZE prosi o narzędzie, dopóki dostaje `tools` w payloadzie (nigdy nie
@@ -1385,7 +1386,7 @@ function fakeToolThenFailingBackstopModel(nazwaNarzedzia: string) {
     };
 }
 
-test('AUD-testy-055: config.max_iterations custom suba widoczny w budżecie taska (nie tylko default)', async t => {
+test('config.max_iterations custom suba widoczny w budżecie taska (nie tylko default)', async t => {
     const { created, registry } = makeFakeRegistry();
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: () => null },
@@ -1401,7 +1402,7 @@ test('AUD-testy-055: config.max_iterations custom suba widoczny w budżecie task
         'fixture zły, jeśli override akurat równa się defaultowi');
 });
 
-test('AUD-testy-055: config.max_iterations REALNIE ogranicza pętlę, nie tylko widoczny w budżecie/prompcie', async t => {
+test('config.max_iterations REALNIE ogranicza pętlę, nie tylko widoczny w budżecie/prompcie', async t => {
     const model = fakeStubbornToolModel('read');
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: (name: string) => ({ name, description: 'atrapa', inputSchema: {}, execute: async () => 'wynik' }) },
@@ -1418,7 +1419,7 @@ test('AUD-testy-055: config.max_iterations REALNIE ogranicza pętlę, nie tylko 
     t.is(result.stoppedBy, 'backstop', 'pętla musi stanąć backstopem po dokładnie skonfigurowanej liczbie iteracji');
 });
 
-test('AUD-testy-055: config.min_iterations custom suba REALNIE wymusza kontynuację (nie tylko default=1)', async t => {
+test('config.min_iterations custom suba REALNIE wymusza kontynuację (nie tylko default=1)', async t => {
     let calls = 0;
     const model = {
         stream(_payload: unknown, callbacks: { done(resp: unknown): void }) {

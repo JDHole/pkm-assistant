@@ -1,10 +1,5 @@
 /**
- * `cache_utils.ts` — limity odpowiedzi i metadane cache promptu (luki L-11/L-12).
- *
- * Plik przechodzi clean-room nietknięty poza jednym renamem ścieżki ustawień
- * (`pkmAssistant.chat.maxTokens`), ale do tej pory nie miał WŁASNEGO pliku testów — jedyny
- * przypadek („cache metadata normalizes cached token usage") mieszkał w testach cache promptu
- * po stronie dostawców. Tu jest jego dom.
+ * `cache_utils.ts` — limity odpowiedzi i metadane cache promptu.
  */
 import test from 'ava';
 import { MODEL_MAX_TOKENS_DEFAULTS, buildCacheMetadata, resolveMaxOutputTokens } from './cache_utils.js';
@@ -23,11 +18,10 @@ test('cache metadata normalizes cached token usage', t => {
 });
 
 /**
- * N27 (luka L-11, B.12 CU-02): sześć gałęzi po kolei — override per platforma, globalny limit
- * z ustawień czatu, dopasowanie po platformie, dopasowanie po FRAGMENCIE nazwy modelu,
- * metadana modelu, twardy default 4096.
+ * Sześć gałęzi po kolei — override per platforma, globalny limit z ustawień czatu, dopasowanie
+ * po platformie, dopasowanie po FRAGMENCIE nazwy modelu, metadana modelu, twardy default 4096.
  */
-test('L-11: resolveMaxOutputTokens — sześć gałęzi po kolei', t => {
+test('resolveMaxOutputTokens — sześć gałęzi po kolei', t => {
     t.is(
         resolveMaxOutputTokens({
             settings: { pkmAssistant: { maxTokens: { anthropic: 1234 }, chat: { maxTokens: 999 } } },
@@ -70,8 +64,8 @@ test('L-11: resolveMaxOutputTokens — sześć gałęzi po kolei', t => {
     t.is(resolveMaxOutputTokens({ platform: 'nieznana', modelId: 'nieznany' }), 4096, '6. j.w. dla nieznanej pary');
 });
 
-/** N28 (luka L-12, B.12 CU-05): zero dzielenia przez zero i brak wywrotki na pustym usage. */
-test('L-12: buildCacheMetadata na usage null/undefined i przy prompt_tokens === 0', t => {
+/** Zero dzielenia przez zero i brak wywrotki na pustym usage. */
+test('buildCacheMetadata na usage null/undefined i przy prompt_tokens === 0', t => {
     const empty = { cached_tokens: 0, cache_creation_tokens: 0, total_input_tokens: 0, savings_pct: 0, savings_usd: 0 };
 
     t.deepEqual(buildCacheMetadata(null), empty, 'null nie może rzucić');
@@ -83,8 +77,8 @@ test('L-12: buildCacheMetadata na usage null/undefined i przy prompt_tokens === 
     t.is(zeroPrompt.cached_tokens, 5, 'licznik cache zostaje, mimo zerowego mianownika');
 });
 
-/** N29 (luka L-12, CU-03/CU-04): wariant Anthropica — `input_tokens` i `cache_creation_*`. */
-test('L-12: wariant input_tokens i cache_creation_tokens (Anthropic)', t => {
+/** Wariant Anthropica — `input_tokens` i `cache_creation_*`. */
+test('wariant input_tokens i cache_creation_tokens (Anthropic)', t => {
     const meta = buildCacheMetadata({
         input_tokens: 2000,
         cache_read_input_tokens: 400,

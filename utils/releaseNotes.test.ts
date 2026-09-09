@@ -1,18 +1,13 @@
 /**
- * AUD-docs-009: `releaseNotes.ts` gotuje ścieżkę zapisu dla `npm run release`.
+ * `releaseNotes.ts` gotuje ścieżkę zapisu dla `npm run release`.
  * `latestReleaseFile()` legalnie zwraca `null`, gdy `releases/` nie ma jeszcze żadnego
- * pliku `X.Y.Z.md` (dokładnie stan katalogu na HEAD tego repo) — `release.js` pisał
- * wtedy przez `fs.writeFileSync(prior_file, ...)` na tym `null`-u i cały proces padał
- * PRZED zbudowaniem notatek. Naprawa: `resolveNotesTarget()` daje jawną, zawsze-nie-null
- * ścieżkę zapisu; `latestReleaseFile()` służy odtąd wyłącznie do CZYTANIA poprzednich notatek.
+ * pliku `X.Y.Z.md` — pisanie wprost przez `fs.writeFileSync(prior_file, ...)` na tym
+ * `null`-u wywaliłoby cały proces PRZED zbudowaniem notatek. Dlatego `resolveNotesTarget()`
+ * daje jawną, zawsze-nie-null ścieżkę zapisu; `latestReleaseFile()` służy wyłącznie do
+ * CZYTANIA poprzednich notatek.
  *
  * `release.js` sam jest skryptem (czyta stdin, woła GitHuba) — nietestowalny w AVA —
- * dlatego bramka dla AUD-docs-009 stoi tutaj, na czystych funkcjach.
- *
- * clean-room / F1 (build-release): reshape mechaniczny dawnego `release_helpers.test.ts`
- * (plik był CZYSTY — żaden test nie jest portem upstreamu) + nowe testy dla `compareSemver` /
- * `priorNotes` / `writePluginReleaseNotes` (luki katalogu §F, napisane przed implementacją —
- * czerwone na stubie, dziś zielone) i AUTOR dla `formatReleaseNotesContent`.
+ * dlatego bramka na to zachowanie stoi tutaj, na czystych funkcjach.
  */
 import fs from 'fs';
 import os from 'os';
@@ -49,7 +44,7 @@ test('compareSemver: rozstrzyga po segmencie GLOWNYM, nie tylko po dalszych', t 
 
 // ── latestReleaseFile ───────────────────────────────────────────────────────────────────────
 
-test('latestReleaseFile: pusty katalog zwraca null, nie rzuca (AUD-docs-009 - stan releases/ na HEAD)', t => {
+test('latestReleaseFile: pusty katalog zwraca null, nie rzuca', t => {
     const dir = makeTempDir();
     t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -156,9 +151,9 @@ test('priorNotes: blad odczytu pliku (np. sciezka jest katalogiem) daje pusty st
 
 // ── resolveNotesTarget ──────────────────────────────────────────────────────────────────────
 //
-// To jest sedno naprawy AUD-docs-009: w przeciwienstwie do `latestReleaseFile`, ta funkcja
-// nie dotyka dysku, wiec fizycznie nie ma jak zwrocic `null` — `fs.writeFileSync(target, ...)`
-// w `release.js` nie moze sie juz wywalic tak, jak wywalal sie `writeFileSync(prior_file, ...)`.
+// W przeciwienstwie do `latestReleaseFile`, ta funkcja nie dotyka dysku, wiec fizycznie
+// nie ma jak zwrocic `null` — `fs.writeFileSync(target, ...)` w `release.js` nie moze sie
+// juz wywalic tak, jak wywalal sie `writeFileSync(prior_file, ...)`.
 
 test('resolveNotesTarget: zwraca releases/<wersja>.md w pustym katalogu (dokladnie stan HEAD)', t => {
     const dir = makeTempDir();
@@ -184,7 +179,7 @@ test('resolveNotesTarget: wynik jest niezalezny od tego, co lezy w katalogu obok
     t.is(resolveNotesTarget(dir, '2.1.0'), path.join(dir, '2.1.0.md'));
 });
 
-// ── formatReleaseNotesContent (AUTOR — kontrakt słaby, treść jest redakcyjna) ────────────────
+// ── formatReleaseNotesContent (kontrakt słaby, treść jest redakcyjna) ────────────────
 
 test('formatReleaseNotesContent: naglowek wersji + wynik niepusty dla niepustego wejscia', t => {
     const result = formatReleaseNotesContent('## Zmiany\n- coś', '2.2.0');

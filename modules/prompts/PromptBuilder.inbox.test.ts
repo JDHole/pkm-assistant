@@ -1,5 +1,5 @@
 /**
- * Ping skrzynki w system prompcie (S28 Z4/D4) — JEDNA linijka, bez treści i bez ścieżek.
+ * Ping skrzynki w system prompcie - JEDNA linijka, bez treści i bez ścieżek.
  */
 import test from 'ava';
 import { PromptBuilder } from './PromptBuilder.js';

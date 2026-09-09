@@ -1,14 +1,13 @@
 import Obsidian from "obsidian";
 import type { EventRef } from "obsidian";
-// TS-4 (2026-09-07): silnik YAML wbudowany w Obsidiana, zamiast paczki `js-yaml` — katalog
-// społeczności wytyka `js-yaml` (module-replacements) i tak czy inaczej dubluje bibliotekę,
-// którą Obsidian już wozi. `core/utils/yamlParser.ts` musi zostać node-safe (barrel core/
-// wstaje bez `obsidian`), więc silnik jest WSTRZYKIWANY — composition root robi to tutaj,
-// PRZED klasą pluginu, żeby żaden loader agentów/subów nie ruszył bez ustawionego silnika.
+// Silnik YAML wbudowany w Obsidiana, zamiast paczki `js-yaml` - katalog społeczności wytyka
+// `js-yaml` (module-replacements) i tak czy inaczej dubluje bibliotekę, którą Obsidian już
+// wozi. `core/utils/yamlParser.ts` musi zostać node-safe (barrel core/ wstaje bez `obsidian`),
+// więc silnik jest WSTRZYKIWANY - composition root robi to tutaj, PRZED klasą pluginu, żeby
+// żaden loader agentów/subów nie ruszył bez ustawionego silnika.
 import { parseYaml, stringifyYaml } from "obsidian";
-// D1 (2026-09-04): pomocnik żądań HTTP Obsidiana zniknął stąd razem z updaterem — plugin nie
-// ma już ani jednego ruchu sieciowego, którego nie zaczął user. Klient HTTP runtime'u powstaje
-// w `config/runtimeConfig.ts`, nie w composition roocie.
+// Plugin nie ma ani jednego ruchu sieciowego, którego nie zaczął user. Klient HTTP runtime'u
+// powstaje w `config/runtimeConfig.ts`, nie w composition roocie.
 const {
   Notice,
   Platform,
@@ -37,42 +36,42 @@ import { PluginBase } from '../core/PluginBase.js';
 import { ChatView } from "../modules/chat/index.js";
 import { AgentManager } from "../modules/agents/index.js";
 import { isKomunikatorEnabled, registerKomunikatorCleanup } from "../modules/komunikator/index.js";
-// S31: obsidianowe bebechy core/ (PluginBase, runtime/PluginRuntime, utils/obsidianNav,
-// security/MasterPasswordModal)
-// deep-importuje TYLKO ten plik — jako composition root. Reszta core przychodzi barrelem
-// (linia niżej), bo `core/index.js` musi zostać node-safe. Patrz nagłówek core/index.js.
+// Obsidianowe bebechy core/ (PluginBase, runtime/PluginRuntime, utils/obsidianNav,
+// security/MasterPasswordModal) deep-importuje TYLKO ten plik - jako composition root.
+// Reszta core przychodzi barrelem (linia niżej), bo `core/index.js` musi zostać node-safe.
+// Patrz nagłówek core/index.js.
 import { MasterPasswordModal } from "../core/security/MasterPasswordModal.js";
 import {
   // Runtime + registry
   ToolRegistry,
   MCPClient,
   ServerManager,
-  // E3.1: prawdziwy klient MCP — zewnętrzne serwery stdio/HTTP przez oficjalny SDK
+  // Prawdziwy klient MCP - zewnętrzne serwery stdio/HTTP przez oficjalny SDK
   ExternalMcpManager,
-  // Vault prymitywy (E2.6): read/list mają scope vault|memory; write/delete/create_folder vault-only
+  // Vault prymitywy: read/list mają scope vault|memory; write/delete/create_folder vault-only
   createReadTool,
   createListTool,
   createWriteTool,
   createDeleteTool,
   createCreateFolderTool,
-  // E2.5: JEDNO narzędzie search (12 narzędzi retrieval skonsolidowane)
+  // JEDNO narzędzie search (retrieval skonsolidowane)
   createSearchTool,
   // Memory tools (odczyt pamięci przez read/list scope=memory)
   createMemorySaveTool,
   createMemoryDeleteTool,
-  // Skille bez narzędzi (D17): odkrywalność = indeks w prompcie, przepis przez read()
+  // Skille bez narzędzi: odkrywalność = indeks w prompcie, przepis przez read()
   // Sub-agent + agent communication
   createDelegateTool,
-  // Z7: przerwanie biegów delegacji przy demontażu (patrz onunload)
+  // Przerwanie biegów delegacji przy demontażu (patrz onunload)
   stopAllDelegations,
   createAgentDelegateTool,
   createKomunikatorTools,
-  // E2.9: artefakty żywe (gatunek 1)
+  // Artefakty żywe (gatunek 1)
   createArtifactCreateTool,
   createArtifactReadTool,
   createArtifactUpdateTool,
   createArtifactListTool,
-  // E2.9 FAZA D: todo (gatunek 2)
+  // Todo agenta (gatunek 2)
   createTodoTool,
   // Web tools
   createWebSearchTool,
@@ -84,8 +83,8 @@ import {
   createAddTextToImageTool,
 } from "../modules/tools/index.js";
 import { ArtifactStore, registerArtifactBlocks, migrateJsonArtifactsToNotes, DEFAULT_ARTIFACTS_FOLDER, buildArtifactsBaseContent, buildArtifactsBasePath } from "../modules/artifacts/index.js";
-// F1 (przebudowa subów 2026): księga biegów sub-agentów. Stoi obok traceLog, bo trace.log
-// jest jej pierwszym konsumentem (patrz modules/sub-agents/CLAUDE.md).
+// Księga biegów sub-agentów. Stoi obok traceLog, bo trace.log jest jej pierwszym konsumentem
+// (patrz modules/sub-agents/CLAUDE.md).
 import { SubTaskRegistry, SubTaskNotifier } from "../modules/sub-agents/index.js";
 import { log } from "../core/utils/Logger.js";
 import {
@@ -97,22 +96,22 @@ import {
   ApprovalManager,
   SecretsStorage,
   VAULT_GITIGNORE_ENTRIES,
-  // K7: proweniencja wiadomości czatu — wysyłka składana przez kod jest maszynowa.
+  // Proweniencja wiadomości czatu - wysyłka składana przez kod jest maszynowa.
   MACHINE_MESSAGE_META,
-  // S35: przeprowadzka data.json ze starego folderu pluginu (.obsidian/plugins/obsek → nowe id).
+  // Przeprowadzka data.json ze starego folderu pluginu (.obsidian/plugins/obsek -> nowe id).
   migrateOldPluginFolder,
-  // AUD-dead-code-182: kanoniczny typ widoku czatu (zamiast trzech kopii literału).
+  // Kanoniczny typ widoku czatu (zamiast trzech kopii literału).
   CHAT_VIEW_TYPE,
   setYamlEngine,
 } from "../core/index.js";
 
-// Silnik YAML wstrzyknięty NATYCHMIAST po imporcie — zanim jakikolwiek loader (agentów,
+// Silnik YAML wstrzyknięty NATYCHMIAST po imporcie - zanim jakikolwiek loader (agentów,
 // sub-agentów, skilli, artefaktów) zdąży wywołać `parseYaml`/`stringifyYaml` z barrela `core/`.
 setYamlEngine({ parse: parseYaml, stringify: stringifyYaml });
 import { setLocale, t } from "../core/i18n/index.js";
 import { SkinManager, adoptSheet, removeAdoptedSheets } from "../modules/crystal-soul/index.js";
-// Embedding: indekser + providery. S31 Z4 — `src/embeddings/` wchłonięte do modułu,
-// więc 6 lokalnych importów providerów wchodzi teraz przez te same drzwi co VaultIndexer.
+// Embedding: indekser + providery. `src/embeddings/` wchłonięte do modułu, więc lokalne
+// importy providerów wchodzą teraz przez te same drzwi co VaultIndexer.
 import {
   VaultIndexer,
   EmbeddingRegistry,
@@ -126,11 +125,11 @@ type PluginDynamic = any;
 export default class PkmAssistantPlugin extends PluginBase {
   [key: string]: PluginDynamic;
   /**
-   * C-02/C-03: konfiguracja runtime'u powstaje w KONSTRUKTORZE (tanio, bez I/O), a `onload()`
-   * podaje TĘ SAMĄ referencję konstruktorowi runtime'u — dzięki temu harness podmienia
-   * dostawców RAZ, przed `onload()`, i podmiana jest widoczna po boocie.
+   * Konfiguracja runtime'u powstaje w KONSTRUKTORZE (tanio, bez I/O), a `onload()` podaje TĘ
+   * SAMĄ referencję konstruktorowi runtime'u - dzięki temu harness podmienia dostawców RAZ,
+   * przed `onload()`, i podmiana jest widoczna po boocie.
    *
-   * ⚠️ Klient HTTP (razem z pomocnikiem żądań Obsidiana) powstaje w `config/runtimeConfig.ts`, NIE tutaj.
+   * Klient HTTP (razem z pomocnikiem żądań Obsidiana) powstaje w `config/runtimeConfig.ts`, NIE tutaj.
    */
   constructor(app: PluginDynamic, manifest: PluginDynamic) {
     super(app, manifest);
@@ -142,7 +141,7 @@ export default class PkmAssistantPlugin extends PluginBase {
 
   get itemViews(): PluginDynamic {
     return {
-      // Z9 (Sprint 02): widoki starego panelu podobieństw wycofane razem ze starym frameworkiem.
+      // Widoki starego panelu podobieństw wycofane razem ze starym frameworkiem.
       ReleaseNotesView,
       ChatView,
     };
@@ -153,22 +152,22 @@ export default class PkmAssistantPlugin extends PluginBase {
   get api() { return this._api; }
   async onload() {
     log.info('Plugin', `=== PKM Assistant v${this.manifest.version} START ===`);
-    log.debug('Plugin', 'onload() — rejestracja komponentów');
+    log.debug('Plugin', 'onload() - rejestracja komponentów');
     this._ready = false;
     this._readyCallbacks = [];
     this.app.workspace.onLayoutReady(this.initialize.bind(this));
-    // E-02: runtime powstaje synchronicznie i tanio, PRZED pierwszym `await` — od tej linijki
+    // Runtime powstaje synchronicznie i tanio, PRZED pierwszym `await` - od tej linijki
     // `this.env` jest różne od `null` przez całe życie pluginu. `boot()` leci fire-and-forget.
     this.env = new PluginRuntime(this as PluginDynamic, this.runtimeConfig);
     // Rejestr embeddingu jest SLOTEM runtime'u, nie jego wytwórnią (`core/` nie importuje
-    // z modułów) — wstawia go composition root, ZANIM `boot()` obudzi konsumentów
+    // z modułów) - wstawia go composition root, ZANIM `boot()` obudzi konsumentów
     // (`VaultIndexer`, `EmbeddingHelper`, sekcja „Modele" w Ustawieniach). Bez tej linijki
     // runtime zostaje z pustym rejestrem fail-closed i semantyka jest martwa mimo
-    // skonfigurowanego dostawcy. Ustawienia czytane LENIWIE — zmiana dostawcy w Ustawieniach
+    // skonfigurowanego dostawcy. Ustawienia czytane LENIWIE - zmiana dostawcy w Ustawieniach
     // działa bez restartu, a rejestr niczego nie dopisuje do worka (boot nie pisze).
     this.env.embeddings = new EmbeddingRegistry({
       // `core/` opisuje dostawców STRUKTURALNIE (`{ info: { id } }`), bo nie wolno mu importować
-      // z modułów — zawężenie do konkretnego kontraktu należy do composition roota. Mapa jest
+      // z modułów - zawężenie do konkretnego kontraktu należy do composition roota. Mapa jest
       // ta sama, którą zarejestrował `buildRuntimeConfig`, więc harness podmienia ją JEDNYM
       // podstawieniem w `plugin.runtimeConfig`, przed `onload()`.
       providers: this.runtimeConfig.embedding.providers as PluginDynamic,
@@ -184,18 +183,18 @@ export default class PkmAssistantPlugin extends PluginBase {
     // layoutReady, więc typ widoku musi być znany zanim to nastąpi.
     this.registerItemViews();
     registerAgentSidebar(this);
-    // E2.9 FAZA B (B1): render bloku ```pkm-artefakt``` (guziki akceptacji/przywołania w notatce).
+    // Render bloku ```pkm-artefakt``` (guziki akceptacji/przywołania w notatce).
     registerArtifactBlocks(this);
 
-    // F2.16 + review W5-01/W5-04: komendy i wstążka MUSZĄ się rejestrować tutaj, w `onload()`.
-    // F2.16 przeniosło je do `initialize()` (za `setLocale()`), przez co zależały od UDANEGO
-    // bootu środowiska: wywrotka `PluginRuntime.boot()` = zero komend w palecie i zero ikon na wstążce,
-    // a ikony wędrowały na koniec paska (Obsidian układa je w kolejności rejestracji).
-    // Zostaje jednak prawdziwy powód F2.16: Obsidian zapamiętuje nazwę w chwili
-    // `addCommand`/`addRibbonIcon`, więc język musi być znany WCZEŚNIEJ — stąd samodzielny,
-    // tani odczyt `read_ui_language()` (jeden plik JSON), niezależny od całego env.
-    // `initialize()` woła `setLocale()` jeszcze raz na w pełni zmergowanych ustawieniach —
-    // to idempotentne i pilnuje przypadku, w którym tani odczyt nic nie znalazł.
+    // Komendy i wstążka MUSZĄ się rejestrować tutaj, w `onload()`, a nie w `initialize()` (za
+    // `setLocale()`) - inaczej zależałyby od UDANEGO bootu środowiska: wywrotka
+    // `PluginRuntime.boot()` = zero komend w palecie i zero ikon na wstążce, a ikony wędrowały
+    // na koniec paska (Obsidian układa je w kolejności rejestracji).
+    // Obsidian zapamiętuje nazwę w chwili `addCommand`/`addRibbonIcon`, więc język musi być
+    // znany WCZEŚNIEJ - stąd samodzielny, tani odczyt `read_ui_language()` (jeden plik JSON),
+    // niezależny od całego env. `initialize()` woła `setLocale()` jeszcze raz na w pełni
+    // zmergowanych ustawieniach - to idempotentne i pilnuje przypadku, w którym tani odczyt
+    // nic nie znalazł.
     setLocale(await readUiLanguage(this.app?.vault?.adapter as PluginDynamic));
     this.registerCommands();
     this.registerRibbonIcons();
@@ -242,14 +241,13 @@ export default class PkmAssistantPlugin extends PluginBase {
   }
 
   /**
-   * One-time migration: old model keys → modelLibrary format.
+   * One-time migration: old model keys -> modelLibrary format.
    * Only runs if modelLibrary doesn't exist yet.
    *
-   * Migracja slotu 'master' (rola stratega) ZAMKNIĘTA 2026-09-02 (fabryka kasacji martwego
-   * kodu S1, AUD-dead-code-173) — stary klucz `pkm.masterPlatform`/`masterModel` w
-   * settings.json usera jest od teraz ignorowany. Slot `modelLibrary.master` był tylko do
-   * zapisu: ta migracja go pisała, a `modelResolver.ts` po E3.6 nigdy go nie czytał (żaden
-   * produkcyjny wołacz `createModelForRole`/`getModelsForRole` nie pytał o rolę stratega).
+   * Stary klucz `pkm.masterPlatform`/`masterModel` w settings.json usera jest ignorowany -
+   * slot `modelLibrary.master` (rola stratega) był tylko do zapisu i żaden produkcyjny wołacz
+   * (`createModelForRole`/`getModelsForRole`) nie pytał o rolę stratega, więc migracja tego
+   * slotu nie ma sensu.
    */
   _migrateToModelLibrary() {
     const pkm = this.env?.settings?.pkmAssistant;
@@ -272,15 +270,16 @@ export default class PkmAssistantPlugin extends PluginBase {
 
     const hasAnything = lib.main.length + lib.minion.length > 0;
     if (hasAnything) {
-      // Realna migracja starych pól — zapis celowy i natychmiastowy.
+      // Realna migracja starych pól - zapis celowy i natychmiastowy.
       pkm.modelLibrary = lib;
       void this.env?.settingsStore?.save();
       log.info('Plugin', `Model Library: zmigrowano (main: ${lib.main.length}, minion: ${lib.minion.length})`);
     } else {
-      // Nic do zmigrowania (świeży user albo load zdegradowany do defaultów po incydencie
-      // dysku) — pusta biblioteka żyje w RAM przez SUROWY worek, z pominięciem proxy:
+      // Nic do zmigrowania (świeży user albo load zdegradowany do defaultów po awarii
+      // dysku) - pusta biblioteka żyje w RAM przez SUROWY worek, z pominięciem proxy:
       // mutacja przez proxy zaplanowałaby zapis ustawień, a boot nie może pisać na dysk
-      // (pancerz incydentu 2026-07-28). Na dysk trafi przy pierwszym realnym zapisie.
+      // (nie wolno pisać podczas bootu - pancerz na utratę ustawień). Na dysk
+      // trafi przy pierwszym realnym zapisie.
       const rawBag = (this.env?.settingsStore.raw as PluginDynamic)?.pkmAssistant;
       if (rawBag) rawBag.modelLibrary = lib;
     }
@@ -288,9 +287,9 @@ export default class PkmAssistantPlugin extends PluginBase {
 
   showCrystalNotice(message: string, opts: PluginDynamic = {}) {
     const { type = 'info', timeout = 4000, agentColor } = opts;
-    // `createFragment()` — globalna pomocnicza Obsidiana (obsidianmd/prefer-create-el).
-    // `test-support/dom-shim.ts` dokłada ją do `globalThis` (ogony-ogA, fala 3, 2026-09-04),
-    // więc kod wstaje identycznie i w Obsidianie, i w harnessie (goły Node).
+    // `createFragment()` - globalna pomocnicza Obsidiana (obsidianmd/prefer-create-el).
+    // `test-support/dom-shim.ts` dokłada ją do `globalThis`, więc kod wstaje identycznie
+    // i w Obsidianie, i w harnessie (goły Node).
     const frag = createFragment();
 
     const header = frag.createDiv({ cls: 'cs-notice__header' });
@@ -303,14 +302,13 @@ export default class PkmAssistantPlugin extends PluginBase {
 
     const notice = new Notice(frag, timeout);
     // `noticeEl` jest deprecated (@typescript-eslint/no-deprecated). Prawdziwy układ DOM
-    // powiadomienia (zweryfikowany bezpośrednio w zainstalowanym Obsidianie 1.12.7, kod
-    // `Notice`): `containerEl` to element ZEWNĘTRZNY z klasą `notice` (ten, w który celuje
-    // arkusz skina `.notice.cs-notice` i `borderLeftColor`), a `messageEl`/`noticeEl`
-    // (deprecated) wskazują na TEN SAM element WEWNĘTRZNY (`notice-message`) — dziś to
-    // dosłownie jeden i ten sam obiekt (`this.messageEl = this.noticeEl = …`), więc oba pola
-    // dawały ten sam (wewnętrzny) węzeł. `containerEl` (`@since 1.8.7`, bezpieczne przy
-    // minAppVersion 1.11.0) jest więc JEDYNYM oficjalnym polem dającym element zewnętrzny —
-    // dokładnie ten, który miał na myśli autor tego kodu (rama/tło/pasek koloru).
+    // powiadomienia (kod `Notice`): `containerEl` to element ZEWNĘTRZNY z klasą `notice`
+    // (ten, w który celuje arkusz skina `.notice.cs-notice` i `borderLeftColor`), a
+    // `messageEl`/`noticeEl` (deprecated) wskazują na TEN SAM element WEWNĘTRZNY
+    // (`notice-message`) - dosłownie jeden i ten sam obiekt (`this.messageEl = this.noticeEl
+    // = ...`), więc oba pola dają ten sam (wewnętrzny) węzeł. `containerEl` (bezpieczne przy
+    // minAppVersion 1.11.0) jest więc JEDYNYM oficjalnym polem dającym element zewnętrzny -
+    // ten, który potrzebny jest do stylowania ramy/tła/paska koloru.
     notice.containerEl.addClass('cs-notice');
 
     if (type === 'agent' && agentColor) {
@@ -322,37 +320,37 @@ export default class PkmAssistantPlugin extends PluginBase {
 
   onunload() {
     log.debug('Main', "Unloading PKM Assistant plugin");
-    // Z7 (AUD-bledy-054/056): NAJPIERW ZATRZYMAJ BIEGI, POTEM ODEPNIJ KANAŁY. Demontaż zrywał
-    // szynę zdarzeń i czyścił mapę uchwytów abortu BEZ ich wywołania, a `mcpClient`/`toolRegistry`
-    // żyją do końca procesu — sub odpalony w tle mielił po wyładowaniu dalej (realne narzędzia
-    // na vaultcie, do 900 s), i to bez śladu w trace.log, bo konsumenci byli już odpięci.
-    // `stopAll` tylko WOŁA uchwyty (abort streamu + flaga pętli) — nie czekamy na zejście
-    // biegów, bo Obsidian nie czeka na obietnice z `onunload`.
+    // NAJPIERW ZATRZYMAJ BIEGI, POTEM ODEPNIJ KANAŁY. Demontaż w złej kolejności zrywa szynę
+    // zdarzeń i czyści mapę uchwytów abortu BEZ ich wywołania, a `mcpClient`/`toolRegistry`
+    // żyją do końca procesu - sub odpalony w tle mieliłby po wyładowaniu dalej (realne
+    // narzędzia na vaultcie, do 900 s), i to bez śladu w trace.log, bo konsumenci byliby już
+    // odpięci. `stopAll` tylko WOŁA uchwyty (abort streamu + flaga pętli) - nie czekamy na
+    // zejście biegów, bo Obsidian nie czeka na obietnice z `onunload`.
     this.subTaskRegistry?.stopAll?.('unload');
-    // Z7, druga siatka: bieg, który nie zdążył założyć bytu w rejestrze (config/model/prompt
-    // budują się przed `onTaskCreated`), nie ma w nim uchwytu — jego kontrolka abortu żyje
+    // Druga siatka: bieg, który nie zdążył założyć bytu w rejestrze (config/model/prompt
+    // budują się przed `onTaskCreated`), nie ma w nim uchwytu - jego kontrolka abortu żyje
     // po stronie narzędzia delegacji. Tam też trzeba sięgnąć, zanim znikną kanały.
     try { stopAllDelegations('unload'); } catch (e) { log.warn('Main', 'stopAllDelegations padł (demontaż leci dalej):', e); }
-    // E3.1: zamknij zewnętrzne serwery MCP (SIGTERM procesów stdio) — nie zostawiać zombie.
+    // Zamknij zewnętrzne serwery MCP (SIGTERM procesów stdio) - nie zostawiać zombie.
     // Fire-and-forget: onunload jest synchroniczne, Obsidian nie czeka na obietnicę.
     this.externalMcpManager?.closeAll?.();
-    // S28 D5: odepnij nasłuch sprzątania skrzynki (i porzuć kolejkę czekających modali).
+    // Odepnij nasłuch sprzątania skrzynki (i porzuć kolejkę czekających modali).
     this._komunikatorCleanupUnsub?.();
     this._komunikatorCleanupUnsub = null;
-    // F1/F2: odepnij konsumentów rejestru subów PRZED zamknięciem trace'u (rejestr do niego
-    // pisze). Notifier jest konsumentem rejestru, więc znika PIERWSZY — inaczej odpinałby
+    // Odepnij konsumentów rejestru subów PRZED zamknięciem trace'u (rejestr do niego pisze).
+    // Notifier jest konsumentem rejestru, więc znika PIERWSZY - inaczej odpinałby
     // subskrypcję od szyny, której już nie ma.
     this.subTaskNotifier?.dispose?.();
     this.subTaskNotifier = null;
     this.subTaskRegistry?.dispose?.();
     this.subTaskRegistry = null;
-    // AUD-bledy-035: watcher plików agentów wiesza trzy nasłuchy na vaulcie POZA
-    // `registerEvent` — bez tego wyłączony plugin dalej przeładowywał agentów (i dopisywał
-    // pliki do vaulta) przy każdym zapisie yamla.
+    // Watcher plików agentów wiesza trzy nasłuchy na vaulcie POZA `registerEvent` - bez tego
+    // wyłączony plugin dalej przeładowywałby agentów (i dopisywał pliki do vaulta) przy
+    // każdym zapisie yamla.
     try { this.agentManager?.dispose?.(); } catch (e) { log.warn('Main', 'AgentManager.dispose padł:', e); }
-    // AUD-bledy-037: zdejmij WŁASNE arkusze (motyw usera, skin, CSS modułów) i znaczniki
-    // z `document.body` — wyłączony plugin nie ma prawa dalej stylizować Obsidiana, a każdy
-    // cykl wyłącz/włącz dokładał kolejne arkusze do `document.adoptedStyleSheets`.
+    // Zdejmij WŁASNE arkusze (motyw usera, skin, CSS modułów) i znaczniki z `document.body` -
+    // wyłączony plugin nie ma prawa dalej stylizować Obsidiana, a każdy cykl wyłącz/włącz
+    // dokładałby kolejne arkusze do `document.adoptedStyleSheets`.
     try {
       SkinManager.dispose?.();
       this._crystalSoulSheet = null;
@@ -364,10 +362,10 @@ export default class PkmAssistantPlugin extends PluginBase {
     this.traceLog?.dispose();   // flush + dispose trace sink (fail-soft, fire-and-forget)
     this.notices?.unload();
     void this.env?.dispose();
-    // AUD-bledy-059/038: sink `pkm-assistant.log` zamykamy NA KOŃCU — kroki wyżej jeszcze
-    // logują, a bufor czekał dotąd na debounce (1000 ms) i przy zamknięciu Obsidiana tuż po
-    // wyłączeniu pluginu ogon logu z demontażu ginął bez śladu. Fire-and-forget, bo
-    // `onunload` jest synchroniczne i Obsidian nie czeka na obietnicę.
+    // Sink `pkm-assistant.log` zamykamy NA KOŃCU - kroki wyżej jeszcze logują, a bufor czeka
+    // na debounce (1000 ms), więc przy zamknięciu Obsidiana tuż po wyłączeniu pluginu ogon
+    // logu z demontażu ginąłby bez śladu. Fire-and-forget, bo `onunload` jest synchroniczne
+    // i Obsidian nie czeka na obietnicę.
     void log.disposeFileSink();
   }
 
@@ -375,9 +373,8 @@ export default class PkmAssistantPlugin extends PluginBase {
     const initStart = Date.now();
     log.info('Plugin', 'initialize() START — czekam na runtime...');
 
-    // S35: MUSI pójść przed pierwszym loadData() (isNewUser() niżej) — inaczej po
-    // zmianie id pluginu user dostaje powitanie „nowy użytkownik" i modal Release Notes.
-    // Od S35 id = 'pkm-assistant', więc wywołanie jest ŻYWE (wcześniej inertne przez guard).
+    // MUSI pójść przed pierwszym loadData() (isNewUser() niżej) - inaczej po zmianie id
+    // pluginu user dostaje powitanie „nowy użytkownik" i modal Release Notes.
     await migrateOldPluginFolder({
       adapter: this.app?.vault?.adapter,
       // Folder konfiguracji NIE musi się nazywać `.obsidian` — user może go zmienić, więc
@@ -394,12 +391,11 @@ export default class PkmAssistantPlugin extends PluginBase {
       log.setDebug(true);
     }
 
-    // New-user onboarding: wizard wyłączony w v2.0 (planowany powrót w v3.0).
-    // Decyzja Mapa-8 (2026-04-26): wizard ma 31 znalezisk + 5×🔴 — defer do v3 z gruntownym rewrite.
-    // OnboardingModal kod zostaje w modules/onboarding/ jako szkielet do reactivation w v3.
+    // New-user onboarding: wizard wyłączony w v2.0 (planowany powrót w v3.0 z gruntownym
+    // rewrite). OnboardingModal kod zostaje w modules/onboarding/ jako szkielet do reactivation.
     void this.isNewUser().then(async (is_new: boolean) => {
       if (!is_new) return;
-      log.info('Plugin', 'Nowy użytkownik — wizard wyłączony w v2.0, pokazuję notice');
+      log.info('Plugin', 'Nowy użytkownik - wizard wyłączony w v2.0, pokazuję notice');
       await this.env?.whenLoaded();
       // sentence-case chciałby „settings → API keys → modele → agenci" — a to nazwy pozycji
       // w UI (zakładka Obsidiana + nasze sekcje ustawień), nie zdanie do zdekapitalizowania.
@@ -411,10 +407,10 @@ export default class PkmAssistantPlugin extends PluginBase {
 
     await this.env?.whenLoaded();
 
-    // Klucze API żyją w .pkm-assistant/settings.json — te wpisy NIGDY nie mogą trafić
+    // Klucze API żyją w .pkm-assistant/settings.json - te wpisy NIGDY nie mogą trafić
     // do repo vaulta usera (idempotentne; addToGitignore dopisuje tylko brakujące).
-    // K8 (AUD-security-029): lista wpisów żyje w core/security/keySanitizer.ts, żeby dało
-    // się ją objąć testem bez Obsidiana. Doszły logi pluginu i pliki sesji pamięci agentów.
+    // Lista wpisów żyje w core/security/keySanitizer.ts, żeby dało się ją objąć testem bez
+    // Obsidiana. Obejmuje logi pluginu i pliki sesji pamięci agentów.
     for (const entry of VAULT_GITIGNORE_ENTRIES) void this.addToGitignore(entry);
     log.timing('Plugin', 'runtime loaded', initStart);
 
@@ -427,11 +423,11 @@ export default class PkmAssistantPlugin extends PluginBase {
     // Set UI language from settings (default: 'en')
     // Drugie (i ostatnie) `setLocale` w bootcie: `onload()` ustawił język z taniego odczytu
     // `.pkm-assistant/settings.json`, tutaj mamy go już z w pełni zmergowanych ustawień.
-    // Wywołanie jest idempotentne — przy zgodnych wartościach nie zmienia nic, a ratuje
+    // Wywołanie jest idempotentne - przy zgodnych wartościach nie zmienia nic, a ratuje
     // przypadek, w którym tani odczyt trafił na nieczytelny plik.
     setLocale(pkmSettings?.language || 'en');
 
-    // E1.8: optional file-log sink — mirror logs to .pkm-assistant/logs/pkm-assistant.log so an
+    // Optional file-log sink - mirror logs to .pkm-assistant/logs/pkm-assistant.log so an
     // agent can smoke-test by reading files. No-op-safe; default on (settings flag).
     try {
       log.initFileSink({
@@ -444,7 +440,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       log.warn('Plugin', 'File-log sink init failed:', e);
     }
 
-    // E2.2: cienki trace przebiegu pętli agenta → .pkm-assistant/logs/trace.log.
+    // Cienki trace przebiegu pętli agenta -> .pkm-assistant/logs/trace.log.
     // Osobny sink od pkm-assistant.log (obserwowalność pętli, nie ogólny log). Fail-soft.
     try {
       const traceSink = new LogFileSink({
@@ -462,16 +458,16 @@ export default class PkmAssistantPlugin extends PluginBase {
       log.warn('Plugin', 'Trace log init failed:', e);
     }
 
-    // F1: rejestr biegów sub-agentów. Musi wstać PO traceLogu, bo dostaje go w konstruktorze
-    // jako pierwszego konsumenta zdarzeń (`task:step` → linia w trace.log, format bez zmian).
-    // Fail-soft: brak rejestru = SubAgentRunner wraca na ścieżkę sprzed F1 (trace wprost).
+    // Rejestr biegów sub-agentów. Musi wstać PO traceLogu, bo dostaje go w konstruktorze jako
+    // pierwszego konsumenta zdarzeń (`task:step` -> linia w trace.log, format bez zmian).
+    // Fail-soft: brak rejestru = SubAgentRunner wraca na ścieżkę bez rejestru (trace wprost).
     try {
       this.subTaskRegistry = new SubTaskRegistry({
         traceLog: this.traceLog,
         mask: maskSensitiveData,
       });
-      // F2 (delegacja w tle): skrzynka wyników subów odpalonych w tle. Bez rejestru nie ma
-      // czego słuchać, więc wstaje tylko razem z nim. Dostawcę (czat) podłącza FAZA B przez
+      // Delegacja w tle: skrzynka wyników subów odpalonych w tle. Bez rejestru nie ma czego
+      // słuchać, więc wstaje tylko razem z nim. Dostawcę (czat) podłącza inny moduł przez
       // `subTaskNotifier.setDeliverer(...)`; do tego czasu wyniki po prostu czekają w kolejce.
       if (this.subTaskRegistry) {
         this.subTaskNotifier = new SubTaskNotifier({ registry: this.subTaskRegistry });
@@ -498,7 +494,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     // Migrate old model settings to modelLibrary (one-time)
     this._migrateToModelLibrary();
 
-    // Z11 (Sprint 02): force pick embedding provider — bez defaultu. Notice jeśli pusty.
+    // Force pick embedding provider - bez defaultu. Notice jeśli pusty.
     this._checkEmbeddingProviderConfigured();
 
     // AgentManager
@@ -513,24 +509,24 @@ export default class PkmAssistantPlugin extends PluginBase {
       log.error('Plugin', 'AgentManager FAIL:', e);
     }
 
-    // E2.9 FAZA D: stary ArtifactManager (JSON w .pkm-assistant/artifacts/*.json) + store'y RAM
-    // _planStore/_chatTodoStore/_chatTodoVersion SKASOWANE. Migrator (D4) przenosi stare JSONy na
-    // notatki; artefakty żywe żyją jako notatki w vaulcie (ArtifactStore).
+    // Stary ArtifactManager (JSON w .pkm-assistant/artifacts/*.json) + towarzyszące store'y RAM
+    // są skasowane. Migrator przenosi stare JSONy na notatki; artefakty żywe żyją jako notatki
+    // w vaulcie (ArtifactStore).
 
-    // E2.9: silnik artefaktów żywych. Typy z AgentManager
-    // (owner ArtifactTypeLoader). Folder z ustawień (A5) lub domyślny w store.
+    // Silnik artefaktów żywych. Typy z AgentManager (owner ArtifactTypeLoader). Folder
+    // z ustawień lub domyślny w store.
     try {
       this.artifactStore = new ArtifactStore({
         app: this.app,
         typeLoader: this.agentManager?.artifactTypeLoader,
         getArtifactsFolder: () => this.env?.settings?.pkmAssistant?.artifactsFolder as string,
-        // AUD-wydajnosc-059/030/021/051: rejestr artefaktów utrzymuje się zdarzeniami
-        // vaulta/metadataCache (patrz modules/artifacts/CLAUDE.md) — sprzątanie nasłuchów
-        // przy onunload/reload pluginu, wzór `plugin` w `new VaultIndexer({...})` wyżej.
+        // Rejestr artefaktów utrzymuje się zdarzeniami vaulta/metadataCache (patrz
+        // modules/artifacts/CLAUDE.md) - sprzątanie nasłuchów przy onunload/reload pluginu,
+        // wzór `plugin` w `new VaultIndexer({...})` wyżej.
         registerEvent: (ref) => this.registerEvent(ref as EventRef),
       });
-      // E2.9 FAZA D (D4): jednorazowy migrator starych JSONów (ArtifactManager) → notatki (fire-and-forget,
-      // idempotentny przez marker). Musi biec PO seedowaniu typów (AgentManager.ensureBuiltinTypes) —
+      // Jednorazowy migrator starych JSONów (ArtifactManager) -> notatki (fire-and-forget,
+      // idempotentny przez marker). Musi biec PO seedowaniu typów (AgentManager.ensureBuiltinTypes) -
       // AgentManager jest już zainicjalizowany wyżej. Sprzątanie po migratorze.
       migrateJsonArtifactsToNotes({ adapter: this.app.vault.adapter, store: this.artifactStore })
         .then((res) => {
@@ -542,14 +538,14 @@ export default class PkmAssistantPlugin extends PluginBase {
       log.error('Plugin', 'ArtifactStore FAIL:', e);
     }
 
-    // No-Go folders (from settings → AccessGuard + embedding exclusions)
+    // No-Go folders (from settings -> AccessGuard + embedding exclusions)
     AccessGuard.setConfigDir(this.app?.vault?.configDir);
     AccessGuard.setNoGoFolders(this.env?.settings?.pkmAssistant?.no_go_folders);
-    // E2.8 B1: vault folder groups (Settings→Vault) → AccessGuard for `{group}` focus resolution.
+    // Vault folder groups (Settings->Vault) -> AccessGuard for `{group}` focus resolution.
     AccessGuard.setVaultGroups(this.env?.settings?.pkmAssistant?.vaultGroups as PluginDynamic);
 
-    // E1.4 R1: żywy indeks semantyczny (Orama) → publikuje plugin.oramaDb.
-    // Fire-and-forget — start pluginu NIE czeka na skan vaulta (własny catch w initialize()).
+    // Żywy indeks semantyczny (Orama) -> publikuje plugin.oramaDb.
+    // Fire-and-forget - start pluginu NIE czeka na skan vaulta (własny catch w initialize()).
     try {
       const embeddingHelper = new EmbeddingHelper(this.env);
       const embedder = {
@@ -574,7 +570,7 @@ export default class PkmAssistantPlugin extends PluginBase {
         isMobile: !!Platform?.isMobile,
         logger: log,
         noGoFolders: () => this.env?.settings?.pkmAssistant?.no_go_folders || [],
-        // E2.9: wyklucz folder artefaktów z indeksu, dopóki user nie włączy indexArtifacts.
+        // Wyklucz folder artefaktów z indeksu, dopóki user nie włączy indexArtifacts.
         artifactsExclude: () => (this.env?.settings?.pkmAssistant?.indexArtifacts
           ? null
           : (this.env?.settings?.pkmAssistant?.artifactsFolder || 'PKM Assistant/Artefakty')),
@@ -591,9 +587,9 @@ export default class PkmAssistantPlugin extends PluginBase {
 
       // SUROWY worek (bez proxy): dosztukowanie pustego kontenera `pkmAssistant.security`
       // to provisioning bootowy, nie zmiana usera. Przez obserwowane proxy każdy start
-      // pluginu planował zapis CAŁYCH ustawień — a boot nie pisze (pancerz 2026-07-28,
-      // ten sam wzór co `PluginRuntime.boot()`). Zapamiętane decyzje approvalu
-      // trafiają na dysk przy pierwszym realnym zapisie, przez jawny `onChange` niżej.
+      // pluginu planowałby zapis CAŁYCH ustawień - a boot nie może pisać (ten sam wzór co
+      // `PluginRuntime.boot()`). Zapamiętane decyzje approvalu trafiają na dysk przy
+      // pierwszym realnym zapisie, przez jawny `onChange` niżej.
       const pluginSettings = this.env?.settingsStore.raw || this.env?.settings || {};
       if (!pluginSettings.pkmAssistant) pluginSettings.pkmAssistant = {};
       if (!pluginSettings.pkmAssistant.security) pluginSettings.pkmAssistant.security = {};
@@ -602,46 +598,45 @@ export default class PkmAssistantPlugin extends PluginBase {
         onChange: () => this.env?.settingsStore?.save?.(),
       });
       this.approvalManager.setApprovalHandler(requestApproval);
-      // Kill-switch komunikatora (przewód z E1.2, semantyka od S28 D7): gate rejestracji
-      // narzędzi `kom_*` i katalogu serwerów built-in. OFF = agent w ogóle ich nie widzi.
+      // Kill-switch komunikatora: gate rejestracji narzędzi `kom_*` i katalogu serwerów
+      // built-in. OFF = agent w ogóle ich nie widzi.
       const komunikatorEnabled = isKomunikatorEnabled(this.settings);
 
       this.toolRegistry = new ToolRegistry();
       this.mcpClient = new MCPClient(this.app, this as PluginDynamic, this.toolRegistry);
 
-      // E2.6: read/list = prymitywy ze scope (vault|memory). memory_read/read_summary/
+      // read/list = prymitywy ze scope (vault|memory). memory_read/read_summary/
       // list_summaries wchłonięte przez read/list (scope=memory bramkowane uprawnieniem).
-      // AUD-dead-code-020/089: fabryki niżej nie czytają `app` (realny `app` dociera do
-      // narzędzia dopiero jako 2. argument `execute(args, app, plugin)`) — parametr zdjęty
-      // z 16 sygnatur, więc rejestracja już nie potrzebuje rzutowania `as PluginDynamic`.
+      // Fabryki niżej nie czytają `app` (realny `app` dociera do narzędzia dopiero jako
+      // 2. argument `execute(args, app, plugin)`).
       this.toolRegistry.registerTool(createReadTool());
       this.toolRegistry.registerTool(createListTool());
       this.toolRegistry.registerTool(createWriteTool());
       this.toolRegistry.registerTool(createDeleteTool());
       this.toolRegistry.registerTool(createCreateFolderTool(this.app));
-      // E2.5: JEDNO narzędzie `search` (scope vault/memory) zastąpiło 12 narzędzi retrieval.
+      // JEDNO narzędzie `search` (scope vault/memory) zastępuje osobne narzędzia retrieval.
       this.toolRegistry.registerTool(createSearchTool());
       this.toolRegistry.registerTool(createMemorySaveTool());
       this.toolRegistry.registerTool(createMemoryDeleteTool());
-      // brain_update usunięty w E1.6 — direct brain.md writes wyłączone; runtime pisze przez memory_save / /save session.
-      // skill_list/skill_execute skasowane w E2.4 (D17) — skille odkrywane indeksem w prompcie, przepis przez read().
+      // brain_update: direct brain.md writes wyłączone; runtime pisze przez memory_save / /save session.
+      // skill_list/skill_execute: skille odkrywane indeksem w prompcie, przepis przez read().
       this.toolRegistry.registerTool(createDelegateTool(this.app));
       // agent_delegate stays: it works without the communicator (context ping is optional/null-safe).
       this.toolRegistry.registerTool(createAgentDelegateTool());
-      // S28: poczta (kom_send/kom_list/kom_read) zależy od KomunikatorManagera — tylko przy fladze ON.
+      // Poczta (kom_send/kom_list/kom_read) zależy od KomunikatorManagera - tylko przy fladze ON.
       if (komunikatorEnabled) {
         for (const tool of createKomunikatorTools()) {
           this.toolRegistry.registerTool(tool);
         }
-        // S28 D5: modal sprzątania po drugim ptaszku (kolejka — jeden modal na raz).
+        // Modal sprzątania po drugim ptaszku (kolejka - jeden modal na raz).
         this._komunikatorCleanupUnsub = registerKomunikatorCleanup(this);
       }
-      // E2.9: artefakty żywe (gatunek 1). Stare chat_todo/idea_review/plan_review skasowane (aliasy).
+      // Artefakty żywe (gatunek 1). Stare chat_todo/idea_review/plan_review skasowane (aliasy).
       this.toolRegistry.registerTool(createArtifactCreateTool());
       this.toolRegistry.registerTool(createArtifactReadTool());
       this.toolRegistry.registerTool(createArtifactUpdateTool());
       this.toolRegistry.registerTool(createArtifactListTool());
-      // E2.9 FAZA D: prymitywne todo agenta (gatunek 2, default ON).
+      // Prymitywne todo agenta (gatunek 2, default ON).
       this.toolRegistry.registerTool(createTodoTool());
       this.toolRegistry.registerTool(createWebSearchTool());
       this.toolRegistry.registerTool(createWebReadTool());
@@ -649,13 +644,13 @@ export default class PkmAssistantPlugin extends PluginBase {
       this.toolRegistry.registerTool(createGenerateImageTool());
       this.toolRegistry.registerTool(createAddTextToImageTool());
 
-      // Fix znaleziska TS-3 #10: ToolLoader (definicje z `.pkm-assistant/tools/*.json`) SKASOWANY —
-      // od wyburzenia sandboxa (E3.1) rejestrował narzędzia-wabiki, których execute ZAWSZE zwracał
-      // błąd „requires external MCP server". Zewnętrzne narzędzia = ExternalMcpManager.
+      // ToolLoader (definicje z `.pkm-assistant/tools/*.json`) SKASOWANY - rejestrował
+      // narzędzia-wabiki, których execute ZAWSZE zwracał błąd „requires external MCP server".
+      // Zewnętrzne narzędzia = ExternalMcpManager.
       const toolCount = this.toolRegistry.tools?.size || 0;
       log.info('Plugin', `MCP system OK: ${toolCount} narzędzi zarejestrowanych`);
 
-      // ServerManager — dynamic MCP server packages (Faza 2)
+      // ServerManager - dynamic MCP server packages
       this.serverManager = new ServerManager(this.app, this, { komunikatorEnabled });
       await this.serverManager.initialize();
       this.serverManager.syncBuiltInServersForAgent(this.agentManager?.getActiveAgent?.());
@@ -671,13 +666,13 @@ export default class PkmAssistantPlugin extends PluginBase {
         });
       }
 
-      // E3.1 faza A: prawdziwy klient MCP — zewnętrzne serwery (stdio/HTTP przez SDK).
+      // Prawdziwy klient MCP — zewnętrzne serwery (stdio/HTTP przez SDK).
       // Autostart serwerów z enabled+autostart; cichy fail (D-D) — błąd zewnętrznego serwera
       // nie może wywalić wbudowanego systemu MCP. closeAll() woła onunload (patrz niżej).
       //
-      // K11 (AUD-security-005): autostart NIE bramkuje `_ready` (wzór `vaultIndexer.initialize()`
-      // wyżej). Do K11 czekaliśmy tu sekwencyjnie na każdy serwer, więc jeden, który przyjmuje
-      // transport i milczy, trzymał czat i sidebar na spinnerze przez cały swój budżet.
+      // Autostart NIE bramkuje `_ready` (wzór `vaultIndexer.initialize()` wyżej): sekwencyjne
+      // czekanie tu na każdy serwer sprawia, że jeden, który przyjmuje transport i milczy,
+      // trzyma czat i sidebar na spinnerze przez cały swój budżet.
       // Serwery dołączają, kiedy wstaną — do tego czasu ich narzędzi po prostu nie ma.
       try {
         this.externalMcpManager = new ExternalMcpManager(this as PluginDynamic, { isMobile: !!Platform?.isMobile });
@@ -802,7 +797,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       } else {
         this._crystalSoulSheet = new CSSStyleSheet();
         this._crystalSoulSheet.replaceSync(css);
-        // AUD-bledy-037: przez `adoptSheet` — `onunload` zdejmuje arkusz zamiast zostawiać
+        // Przez `adoptSheet` — `onunload` zdejmuje arkusz zamiast zostawiać
         // motyw usera nad wyłączonym pluginem aż do restartu Obsidiana.
         adoptSheet(this._crystalSoulSheet);
       }
@@ -854,7 +849,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     return {
       chat: {
         iconName: "pkm-icon",
-        // F2.19: był twardy angielski napis — teraz przez i18n, jak bliźniacze `agents` niżej.
+        // Przez i18n, jak bliźniacze `agents` niżej — nie twardy angielski napis.
         description: t('main.ribbon_chat'),
         callback: () => { this.openChatView(); }
       },
@@ -885,13 +880,11 @@ export default class PkmAssistantPlugin extends PluginBase {
    */
   sendInlineComment(filePath: string, selectedText: string, comment: string) {
     this.openChatView();
-    // AUD-code-review-036: ten jednorazowy budzik był GOŁYM setTimeout, dokładnie ta sama
-    // klasa błędu, którą naprawiono w budziku updatera (AUD-bledy-036/060; sam updater wycięty
-    // 2026-09-04 przed katalogiem — D1, patrz show_release_notes_if_new_version) —
-    // wyłączenie pluginu w oknie 300 ms strzelało na zdemontowanym egzemplarzu. registerInterval
-    // przyjmuje uchwyt obu rodzajów (clearInterval kasuje w JS też uchwyty setTimeout). Guard na
-    // `input_area`/`send_message` chroni drugą krawędź tego samego wyścigu: widok czatu jeszcze
-    // się buduje (plugin nie jest `_ready`), więc `ChatView.renderView()` nie zdążył postawić pola.
+    // Ten jednorazowy budzik nie może być GOŁYM setTimeout — wyłączenie pluginu w oknie 300 ms
+    // strzelałoby na zdemontowanym egzemplarzu. registerInterval przyjmuje uchwyt obu rodzajów
+    // (clearInterval kasuje w JS też uchwyty setTimeout). Guard na `input_area`/`send_message`
+    // chroni drugą krawędź tego samego wyścigu: widok czatu jeszcze się buduje (plugin nie jest
+    // `_ready`), więc `ChatView.renderView()` nie zdążył postawić pola.
     this.registerInterval(window.setTimeout(() => {
       const leaves = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
       if (leaves.length === 0) return;
@@ -910,7 +903,7 @@ export default class PkmAssistantPlugin extends PluginBase {
         t('main.what_to_change', { comment })
       ].join('\n');
       chatView.input_area.value = msg;
-      // K7: wiadomość składa KOD z fragmentu notatki — user dopisał tylko komentarz, więc
+      // Wiadomość składa KOD z fragmentu notatki — user dopisał tylko komentarz, więc
       // przywileje człowieka (rejestr adresów, markery `@@skill:`, komendy `/`) nie należą się
       // treści zaznaczenia. Patrz core/security/messageOrigin.ts.
       chatView.send_message({ meta: MACHINE_MESSAGE_META });
@@ -920,13 +913,10 @@ export default class PkmAssistantPlugin extends PluginBase {
   /**
    * Pokaż „co nowego" po podbiciu wersji pluginu — czysto lokalne, bez sieci.
    *
-   * D1 (2026-09-04): updater wycięty 2026-09-04 przed katalogiem. Ta metoda odpytywała
-   * `api.github.com` co 3 h (budzik 3 s + interwał 10800000 ms, oba przez `registerInterval`
-   * — AUD-bledy-036/060) i podnosiła Notice o nowej wersji. Katalog społeczności zabrania
-   * mechanizmów aktualizujących plugin, a samo sprawdzanie było i tak zbędne: katalog i BRAT
-   * aktualizują same. Był to jedyny ruch sieciowy pluginu niewynikający z akcji usera.
-   * Razem z nim poszły: `check_for_update()`, import `isNewerVersion` (+ `core/utils/versionCompare.ts`),
-   * pomocnik żądań HTTP Obsidiana i pole `update_available`.
+   * Plugin nie ma mechanizmu aktualizującego: katalog społeczności takich mechanizmów zabrania,
+   * a sprawdzanie wersji przez `api.github.com` i tak byłoby zbędne — katalog i BRAT aktualizują
+   * same. Ta metoda tylko czyta lokalnie zapisaną wersję i pokazuje notatki wydania, bez żadnego
+   * ruchu sieciowego.
    */
   async show_release_notes_if_new_version() {
     if (await this.isNewPluginVersion(this.manifest.version)) {
@@ -947,9 +937,7 @@ export default class PkmAssistantPlugin extends PluginBase {
    * If provider changed (e.g. transformers → ollama), creates a new model item.
    */
   /**
-   * Z11 (Sprint 02): force pick embedding provider.
-   *
-   * Decyzja Kuby z Mapa-16 Q3: brak default providera, user musi explicit wybrać.
+   * Wymuszony wybór dostawcy embeddingu: brak default providera, user musi wybrać explicit.
    * Plugin start: jeśli `embed_model.adapter` pusty → notice "Embedding niedostępny →
    * Settings → Embedding". NIE auto-detect z env vars (eksplicytna decyzja userowska).
    */
@@ -996,7 +984,6 @@ export default class PkmAssistantPlugin extends PluginBase {
           void openAgentSidebar(this);
         }
       },
-      // Z9 (Sprint 02): insert_connections_codeblock wycofane razem z Connections wywałką.
       pkm_selftest: {
         id: "pkm-selftest",
         name: t('command.selftest'),
@@ -1011,7 +998,7 @@ export default class PkmAssistantPlugin extends PluginBase {
   }
 
   /**
-   * S32 Z7: wygeneruj plik `.base` (Obsidian Bases) z dwoma widokami artefaktów
+   * Wygeneruj plik `.base` (Obsidian Bases) z dwoma widokami artefaktów
    * („Wszystkie" + „Otwarte") w folderze artefaktów. NIE nadpisuje istniejącego pliku —
    * user mógł go sobie dostosować w GUI Bases.
    *
@@ -1043,7 +1030,7 @@ export default class PkmAssistantPlugin extends PluginBase {
   }
 
   /**
-   * E1.8: run the "PKM Assistant: Self-test" diagnostic — READ-ONLY snapshot of plugin
+   * Run the "PKM Assistant: Self-test" diagnostic — READ-ONLY snapshot of plugin
    * health written to .pkm-assistant/logs/selftest-<stamp>.md (+ Notice summary).
    */
   async run_self_test() {
@@ -1078,7 +1065,7 @@ export default class PkmAssistantPlugin extends PluginBase {
   }
 
   async open_random_connection() {
-    // Z9 (Sprint 02): panel podobieństw wycofany razem ze starym frameworkiem bazowym.
+    // Panel podobieństw wycofany razem ze starym frameworkiem bazowym.
     // Restore w v3.0 z Orama scoring jeśli wymagane.
     new Notice('Connections feature wycofany w v2.0 — przywrócenie planowane na v3.0 z silnikiem Orama.');
   }
@@ -1088,10 +1075,10 @@ export default class PkmAssistantPlugin extends PluginBase {
   /**
    * TODO: wynieść do `core/utils/` jako wspólne narzędzie.
    *
-   * Dawniej stało tu `@deprecated extract into utility` — nadużycie tagu: `@deprecated`
-   * znaczy „nie używaj tego", a metoda jest ŻYWA i wołana z `initialize()` dla
-   * `VAULT_GITIGNORE_ENTRIES`. Efekt: lint zgłaszał użycie przestarzałego API na jedynym,
-   * całkowicie poprawnym wołaczu. Zamiar (wynieść do utili) zostaje jako zwykłe TODO.
+   * NIE oznaczaj tej metody `@deprecated` — tag znaczy „nie używaj tego", a metoda jest ŻYWA
+   * i wołana z `initialize()` dla `VAULT_GITIGNORE_ENTRIES`. `@deprecated` tu zgłaszałby lint
+   * jako użycie przestarzałego API na jedynym, całkowicie poprawnym wołaczu. Zamiar (wynieść
+   * do utili) zostaje jako zwykły TODO.
    */
   async addToGitignore(ignore: string, message: string | null = null) {
     if(!(await this.app.vault.adapter.exists(".gitignore"))) return;

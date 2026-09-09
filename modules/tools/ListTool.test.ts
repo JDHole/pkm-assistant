@@ -66,13 +66,13 @@ test('scope=vault: traversal → odmowa', async t => {
     t.false(res.success);
 });
 
-test('scope=vault: .pkm-assistant zablokowane (E1.8)', async t => {
+test('scope=vault: .pkm-assistant zablokowane', async t => {
     const app = makeVaultApp({ tree: {} });
     const res = await runVault(app, { folder: '.pkm-assistant/agents' });
     t.false(res.success);
 });
 
-test('scope=vault: katalog skilli .pkm-assistant/skills listowany przez adapter (D17)', async t => {
+test('scope=vault: katalog skilli .pkm-assistant/skills listowany przez adapter', async t => {
     const app = makeVaultApp({ tree: {} });
     app.vault.adapter = {
         list: async (p: string) => {
@@ -96,12 +96,11 @@ test('scope=vault: .pkm-assistant/agents NIE listowany mimo wyjątku skilli (izo
     t.false(res.success); // blokada w validateVaultFolder (agents nie jest pod skills/)
 });
 
-// ─── AUD-wydajnosc-074: `list folder:"/" recursive:true` u admina chodził po CAŁYM drzewie ────
+// ─── `list folder:"/" recursive:true` dla admina NIE MOŻE chodzić po CAŁYM drzewie ────
 //
 // adaptera (do 5000 wpisów na dysku) tylko po to, żeby oddać pierwsze 100. Atrapa niżej ma 50
-// podfolderów × 100 plików = 5000 wpisów (liczba z dowodu audytu) i liczy KAŻDE wywołanie
-// `adapter.list()` — dowód mutacyjny: naprawa musi ograniczyć liczbę odwiedzonych folderów,
-// nie tylko przyciąć wynik PO fakcie (to już robił kod sprzed naprawy).
+// podfolderów × 100 plików = 5000 wpisów i liczy KAŻDE wywołanie `adapter.list()`: test pilnuje,
+// żeby ograniczona była liczba ODWIEDZONYCH folderów, nie tylko przycięty wynik PO fakcie.
 
 function makeBigAdminAdapter(folders = 50, filesPerFolder = 100) {
     const listCalls: string[] = [];
@@ -147,7 +146,7 @@ function adminPlugin(): ListToolPlugin {
     } as unknown as ListToolPlugin;
 }
 
-test('074: admin + folder:"/" recursive:true — walk zatrzymuje się PO zebraniu MAX_RESULTS, nie po pełnym przebiegu 5000 wpisów', async t => {
+test('admin + folder:"/" recursive:true — walk zatrzymuje się PO zebraniu MAX_RESULTS, nie po pełnym przebiegu 5000 wpisów', async t => {
     const { adapter, listCalls } = makeBigAdminAdapter(50, 100); // 50 × 100 = 5000 wpisów
     const app = makeAdminApp(adapter);
     const res = await createListTool().execute(
@@ -165,7 +164,7 @@ test('074: admin + folder:"/" recursive:true — walk zatrzymuje się PO zebrani
     t.deepEqual(listCalls.slice(0, 2), ['', 'f0'], 'kolejność odwiedzin bez zmian (deterministyczna, jak przy pełnym przebiegu)');
 });
 
-test('074: admin + folder:"/" recursive:true — PIERWSZE 100 pozycji jest identyczne jak przy pełnym przebiegu (cięcie nie zmienia WYNIKU)', async t => {
+test('admin + folder:"/" recursive:true — PIERWSZE 100 pozycji jest identyczne jak przy pełnym przebiegu (cięcie nie zmienia WYNIKU)', async t => {
     const { adapter } = makeBigAdminAdapter(50, 100);
     const app = makeAdminApp(adapter);
     const res = await createListTool().execute(

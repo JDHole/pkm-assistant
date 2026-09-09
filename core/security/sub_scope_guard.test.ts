@@ -1,5 +1,5 @@
 /**
- * S33 Z1 — bariera `scope.folders` sub-agenta.
+ * Bariera `scope.folders` sub-agenta.
  *
  * Do tej pory `scope` z SUB_AGENT.yaml był wyłącznie tekstem w prompcie: sub mógł go
  * zignorować i sięgnąć wszędzie tam, gdzie sięgał rodzic. Ten test pilnuje, że foldery
@@ -12,7 +12,7 @@ import { MCPClient } from '../../modules/tools/MCPClient.js';
 import type { GuardedAgent } from './AccessGuard.js';
 
 /**
- * Trzy typy pomocnicze zamiast dotykania `modules/tools/MCPClient.js` (poza paczką TS-1):
+ * Trzy typy pomocnicze zamiast dotykania `modules/tools/MCPClient.js` (nie jest jeszcze przepisany na typy):
  * jego JSDoc deklaruje `app` jako `Object` (a te testy świadomie podają `null` — vault nie jest
  * tu w ogóle ruszany), wymaga `toolCall.id` (którego nie podaje ani ten test, ani realni wołacze)
  * i zwraca surowe `Object` (bez pól, których pilnują asercje).
@@ -93,7 +93,7 @@ test('scope suba respektuje węższą whitelistę rodzica (przecięcie, nie suma
     t.false(res.allowed);
 });
 
-// ─── AccessGuard.filterResults (S33 A1 — wyniki search/list) ───────────────
+// ─── AccessGuard.filterResults (wyniki search/list) ───────────────
 
 const VAULT_HITS = () => [
     { path: 'Projekty/plan.md', excerpt: 'plan projektu' },
@@ -156,7 +156,7 @@ function makeClient(agent: GuardedAgent, executed: Array<Record<string, unknown>
         permissionSystem: new PermissionSystem(null, {}),
         approvalManager: { requestApproval: async () => ({ result: 'approve' }) },
     }, {
-        // TS-3: rejestr-atrapa ma tylko `getTool` — reszty kontraktu ten test nie dotyka.
+        // Rejestr-atrapa ma tylko `getTool` — reszty kontraktu ten test nie dotyka.
         getTool: (name: string) => ({
             name,
             description: name,
@@ -183,7 +183,7 @@ test('MCPClient: sub ze scope czyta w swoim folderze, a poza nim dostaje odmowę
     t.is(executed.length, 1, 'narzędzie NIE zostało wykonane');
 });
 
-test('MCPClient: post-filtr wyników `search` zna scope suba (A1)', async t => {
+test('MCPClient: post-filtr wyników `search` zna scope suba', async t => {
     const hits = () => [
         { path: 'Projekty/plan.md', excerpt: 'plan' },
         { path: 'Inne/tajne.md', excerpt: 'NIE DLA SUBA' },
@@ -239,26 +239,26 @@ test('MCPClient: model NIE podrobi głębokości — runtime nadpisuje pole w ar
     t.is(executed[0]._invocationDelegationDepth, 1, 'wygrywa wartość od runtime, nie od modelu');
 });
 
-// ─── K11 (AUD-security-008): przecięcie zakresów przy delegacji piętro niżej ─────────────
+// ─── przecięcie zakresów przy delegacji piętro niżej ─────────────
 
-test('K11 intersect: brak zakresu po jednej stronie = zakres drugiej', t => {
+test('intersectScopeFolders: brak zakresu po jednej stronie = zakres drugiej', t => {
     t.deepEqual(AccessGuard.intersectScopeFolders(null, ['Projekty']), ['Projekty']);
     t.deepEqual(AccessGuard.intersectScopeFolders(['Projekty'], null), ['Projekty']);
     t.is(AccessGuard.intersectScopeFolders(null, null), null, 'nikt nie zawęża = zero ograniczeń');
     t.is(AccessGuard.intersectScopeFolders([], []), null);
 });
 
-test('K11 intersect: wygrywa WĘŻSZY wpis, niezależnie od strony', t => {
+test('intersectScopeFolders: wygrywa WĘŻSZY wpis, niezależnie od strony', t => {
     t.deepEqual(AccessGuard.intersectScopeFolders(['Projekty'], ['Projekty/Alfa']), ['Projekty/Alfa']);
     t.deepEqual(AccessGuard.intersectScopeFolders(['Projekty/Alfa'], ['Projekty']), ['Projekty/Alfa']);
     t.deepEqual(AccessGuard.intersectScopeFolders(['Projekty'], ['Projekty']), ['Projekty']);
 });
 
-test('K11 intersect: zakresy rozłączne = pusta lista (wołacz ma odmówić)', t => {
+test('intersectScopeFolders: zakresy rozłączne = pusta lista (wołacz ma odmówić)', t => {
     t.deepEqual(AccessGuard.intersectScopeFolders(['Projekty'], ['Sekrety']), []);
 });
 
-test('K11 intersect: wiele wpisów — zostają tylko części wspólne', t => {
+test('intersectScopeFolders: wiele wpisów — zostają tylko części wspólne', t => {
     const out = AccessGuard.intersectScopeFolders(
         ['Projekty', 'Notatki'],
         ['Projekty/Alfa', 'Sekrety'],
@@ -266,14 +266,14 @@ test('K11 intersect: wiele wpisów — zostają tylko części wspólne', t => {
     t.deepEqual(out, ['Projekty/Alfa']);
 });
 
-test('K11 intersect: wpisy obiektowe {path} i końcowy ukośnik znoszone', t => {
+test('intersectScopeFolders: wpisy obiektowe {path} i końcowy ukośnik znoszone', t => {
     t.deepEqual(
         AccessGuard.intersectScopeFolders([{ path: 'Projekty/' }], ['Projekty/Alfa']),
         ['Projekty/Alfa'],
     );
 });
 
-test('K11 intersect: wynik jest realną bramką dla _isInSubScope', t => {
+test('intersectScopeFolders: wynik jest realną bramką dla _isInSubScope', t => {
     const scope = AccessGuard.intersectScopeFolders(['Publiczne'], null)!;
     t.true(AccessGuard._isInSubScope('Publiczne/plik.md', scope));
     t.false(AccessGuard._isInSubScope('Prywatne/plik.md', scope), 'wnuk nie wychodzi poza kąt dziadka');

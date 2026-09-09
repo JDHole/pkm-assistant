@@ -1,7 +1,7 @@
 import test from 'ava';
 import { toolResultStatus, shouldLinkWrittenFile } from './toolResultStatus.js';
 
-// AUD-bledy-027/058/025: jedna reguła „co jest porażką narzędzia" dla całego repo. Trzy kształty,
+// Jedna reguła „co jest porażką narzędzia" dla całego repo. Trzy kształty,
 // które realnie krążą po kodzie: konwencja narzędzi wbudowanych, konwencja MCPClienta/artefaktów
 // i wynik udany. Rozjazd między nimi rysował nieudany zapis jako sukces z linkiem do pliku.
 

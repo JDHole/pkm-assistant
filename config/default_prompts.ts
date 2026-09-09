@@ -1,9 +1,9 @@
 /**
- * config/default_prompts.js — fabryczne szkielety promptów (S31, 2026-07-30)
+ * config/default_prompts.js — fabryczne szkielety promptów
  *
  * Czyste stałe tekstowe promptów, których potrzebuje więcej niż jeden moduł. Mieszkają tu,
  * bo `modules/shell` (Settings→Prompt) musi je pokazać, a nie ma powodu, żeby ciągnąć w tym
- * celu cały barrel modułu, który je konsumuje (krawędź shell→chat przecięta w S31).
+ * celu cały barrel modułu, który je konsumuje.
  *
  * ZERO importów z `obsidian` ani z modułów — czysty config, w pełni testowalny node'em.
  * Importowany BEZPOŚREDNIO (jak `config/default_settings.js` / `config/limits.js`).
@@ -17,7 +17,7 @@
 const MEMORY_CANDIDATES_SENTINEL = '===MEMORY_CANDIDATES===';
 
 /**
- * Factory compression prompt skeleton (E2.8 B3) — chat domain.
+ * Factory compression prompt skeleton — chat domain.
  *
  * This is the STATIC instruction skeleton for context-window compaction (Summarizer). The dynamic
  * pieces (previous summary, brain index, user messages, tool names, task context, the conversation

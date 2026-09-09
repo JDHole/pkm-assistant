@@ -1,5 +1,5 @@
 /**
- * artifactViewHelpers.js — czyste helpery widoku artefaktów (E2.9 FAZA C / C1+C2).
+ * artifactViewHelpers.js — czyste helpery widoku artefaktów.
  *
  * Logika listowania / sortowania / pozycji pickera i podpinania TYPÓW wyniesiona z UI, żeby była
  * node-testowalna (bez importu `obsidian`, bez DOM). UI (zakładka panelu agenta + segment slim bara)

@@ -22,7 +22,7 @@ type GlobalWithApp = Window & { app?: App };
 type ErrLike = { message?: string };
 
 export class PluginVaultFs {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare env: VaultFsHost | null | undefined;
     declare basePath: string;
     declare files: string[];

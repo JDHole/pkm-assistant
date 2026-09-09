@@ -1,5 +1,5 @@
 /**
- * consolidationRunState.test.js — kubełek 2 (2026-07-29).
+ * consolidationRunState.test.js
  *
  * Dwie decyzje `ConsolidationProgressModal`, których sam modal nie da się przetestować w node
  * (`obsidian` w imporcie): kiedy zamknięcie okna ma zwolnić centrum operacji i z czego startuje
@@ -71,7 +71,7 @@ test('częściowo zrobiony przebieg z padem i kłódką też jest utknięty', t 
 });
 
 test('krok świeżo odgatowany (pending) NIE jest utknięciem — generator zaraz po niego sięgnie', t => {
-    // Review kubełka 2, P3-1: okno wyścigu przy odgatowywaniu L2. Po zapisaniu ostatniej
+    // Okno wyścigu przy odgatowywaniu L2. Po zapisaniu ostatniej
     // paczki L1 `generateGatedSteps` robi ungate PRZED pierwszym await — w tym oknie kroki
     // to [done…, pending] i zamknięcie modalu NIE może zwolnić centrum (generacja L2 leci).
     const run = makeRun(1);
@@ -121,9 +121,9 @@ test('szkic L1: edycja usera przeżywa zwinięcie i ponowne otwarcie panelu', t 
     run.stepProposalReady('l1_batch_1', { body: 'wersja modelu' });
     const step = run.getStep('l1_batch_1')!;
 
-    resolveStepDraft(step).body = 'wersja Kuby'; // to robi callback `onChange` z renderera
+    resolveStepDraft(step).body = 'wersja usera'; // to robi callback `onChange` z renderera
 
-    t.is(resolveStepDraft(step).body, 'wersja Kuby');
+    t.is(resolveStepDraft(step).body, 'wersja usera');
     t.is(step.result!.body, 'wersja modelu', 'propozycja modelu zostaje nietknięta');
 });
 
@@ -157,9 +157,9 @@ test('szkic startuje z decyzji usera, gdy ta już zapadła (np. po padzie zapisu
     const run = makeRun(1, { withL2: false });
     run.startStep('l1_batch_1');
     run.stepProposalReady('l1_batch_1', { body: 'wersja modelu' });
-    run.beginApply('l1_batch_1', { accepted: true, body: 'wersja Kuby' });
+    run.beginApply('l1_batch_1', { accepted: true, body: 'wersja usera' });
 
-    t.is(resolveStepDraft(run.getStep('l1_batch_1')!).body, 'wersja Kuby');
+    t.is(resolveStepDraft(run.getStep('l1_batch_1')!).body, 'wersja usera');
 });
 
 test('szkic radzi sobie z krokiem bez propozycji', t => {
@@ -168,7 +168,7 @@ test('szkic radzi sobie z krokiem bez propozycji', t => {
     t.deepEqual(resolveStepDraft({}, { dedup: true }), { merges: [], deletions: [] });
 });
 
-// ── AUD-wydajnosc-019: sekundnik nie przebudowuje całej checklisty ──────────────────
+// ── Sekundnik nie przebudowuje całej checklisty ──────────────────
 // `ConsolidationProgressModal.ts` importuje `obsidian` (Modal) i AVA go nie zaimportuje —
 // strażnik po ŹRÓDLE (ten sam wzór co reszta strażników czatu).
 
@@ -176,16 +176,14 @@ const modalSrc = readFileSync(fileURLToPath(new URL('./ConsolidationProgressModa
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 
-test('tyknięcie sekundnika woła punktową aktualizację, nie _renderChecklist (AUD-wydajnosc-019)', t => {
-    // release 2.2.0/W2: obsidianmd/prefer-window-timers — `setInterval(...)` → `window.setInterval(...)`.
-    // Regex zaktualizowany na nowy tekst źródła; sens strażnika (sekundnik = punktowa aktualizacja) bez zmian.
+test('tyknięcie sekundnika woła punktową aktualizację, nie _renderChecklist', t => {
     t.regex(modalSrc, /this\._tickTimer = window\.setInterval\(\(\) => this\._tickActiveStep\(\), 1000\);/,
         'sekundnik z pełnym renderem przebudowuje WSZYSTKIE wiersze co sekundę przez cały przebieg');
     t.notRegex(modalSrc, /setInterval\([\s\S]{0,120}?_renderChecklist/,
         'w callbacku sekundnika nie ma prawa być pełnego renderu');
 });
 
-test('_tickActiveStep podmienia sam tekst czasu aktywnego kroku (AUD-wydajnosc-019)', t => {
+test('_tickActiveStep podmienia sam tekst czasu aktywnego kroku', t => {
     const body = /_tickActiveStep\(\): void \{([\s\S]*?)\n    \}/.exec(modalSrc)?.[1] || '';
     t.true(body.length > 0, 'nie znalazłem _tickActiveStep');
     t.regex(body, /const el = this\._stepTimeEls\.get\(step\.id\);/);

@@ -1,13 +1,13 @@
 /**
- * AUD-testy-052 (HIGH) — DeepSeek rozpoznaje koniec strumienia DOKŁADNYM dopasowaniem
- * sentinela platformy, nie podciągiem w treści. Dawna implementacja łapała substring
- * `'[DONE]'` / `'"done":true'` w CAŁEJ treści zdarzenia SSE (surowa linia `data: ...` razem
- * z treścią odpowiedzi modelu) zamiast dopasowywać sentinel dokładnie. Skutek: model pisze
- * zdanie, w którym dosłownie występuje „[DONE]" (albo `"done":true`) — strumień „kończy się"
- * w połowie, reszta odpowiedzi ginie CICHO, bez błędu i bez logu. (B.8 DS-03/DS-04)
+ * DeepSeek rozpoznaje koniec strumienia DOKŁADNYM dopasowaniem sentinela platformy, nie
+ * podciągiem w treści. Dopasowanie substring `'[DONE]'` / `'"done":true'` w CAŁEJ treści
+ * zdarzenia SSE (surowa linia `data: ...` razem z treścią odpowiedzi modelu) zamiast
+ * dokładnego sentinela ma taki skutek: model pisze zdanie, w którym dosłownie występuje
+ * „[DONE]" (albo `"done":true`) - strumień „kończyłby się" w połowie, a reszta odpowiedzi
+ * ginęłaby CICHO, bez błędu i bez logu.
  *
  * Bug ujawnia się tylko przy REALNYM TIMINGU sieci, dlatego testy świadomie robią `await`
- * (makrozadanie) MIĘDZY porcjami — tak jak prawdziwe bajty spływające w osobnych zdarzeniach.
+ * (makrozadanie) MIĘDZY porcjami - tak jak prawdziwe bajty spływające w osobnych zdarzeniach.
  *
  * Plik jest `test.serial`, bo scenariusze sterują jednym transportem po kolei.
  */
@@ -25,9 +25,9 @@ function chunkPayload(content: string): string {
 }
 
 /**
- * Porcja z dodatkowym, NIEFINALNYM polem `done: true` obok `choices` — np. dostawca/proxy,
+ * Porcja z dodatkowym, NIEFINALNYM polem `done: true` obok `choices` - np. dostawca/proxy,
  * który domiesza pole w stylu Ollamy do kształtu OpenAI. Taka porcja niesie PRAWDZIWY,
- * nieescapowany JSON (`"done":true`) w ramce — inaczej niż w (b), gdzie ten sam tekst
+ * nieescapowany JSON (`"done":true`) w ramce - inaczej niż w (b), gdzie ten sam tekst
  * WEWNĄTRZ `content` wychodzi z uciekanymi cudzysłowami i nigdy nie mógłby dopasować
  * starego `.includes('"done":true')`.
  */
@@ -36,11 +36,11 @@ function chunkPayloadWithDoneField(content: string): string {
 }
 
 const delay = (ms: number) => new Promise<void>(res => setTimeout(res, ms));
-/** Makrozadanie — porcja „przychodzi" jak z prawdziwej sieci, nie w tym samym ticku co poprzednia. */
+/** Makrozadanie - porcja „przychodzi" jak z prawdziwej sieci, nie w tym samym ticku co poprzednia. */
 const tick = () => new Promise<void>(res => setImmediate(res));
 const WISI = Symbol('promisa nie rozstrzygnięta');
 
-/** Czeka na rozstrzygnięcie albo oddaje `WISI` — zamiast wieszać cały bieg testów. */
+/** Czeka na rozstrzygnięcie albo oddaje `WISI` - zamiast wieszać cały bieg testów. */
 async function settleOrHang(p: Promise<unknown>, ms = 2000): Promise<unknown> {
     return Promise.race([
         p.then(v => ({ ok: v }), e => ({ err: e })),
@@ -60,11 +60,11 @@ function scripted(): { transport: ScriptedTransport; stream: () => Promise<OpenA
     return { transport, stream: () => model.stream(REQ, {}) };
 }
 
-test.serial('AUD-testy-052(a): prawdziwy sentinel `data: [DONE]` kończy strumień', async t => {
+test.serial('prawdziwy sentinel `data: [DONE]` kończy strumień', async t => {
     const { transport, stream } = scripted();
     const p = stream();
     // Otwarcie transportu jest ASYNCHRONICZNE (bilet bramki + łańcuch mikrozadań), więc
-    // pierwsza porcja też musi poczekać na swoje makrozadanie — jak każda następna.
+    // pierwsza porcja też musi poczekać na swoje makrozadanie - jak każda następna.
     await tick();
 
     transport.push(chunkPayload('Ala ma kota.'));
@@ -77,14 +77,14 @@ test.serial('AUD-testy-052(a): prawdziwy sentinel `data: [DONE]` kończy strumie
     t.is(contentOf((out as { ok?: unknown })?.ok), 'Ala ma kota.');
 });
 
-test.serial('AUD-testy-052(b): chunk z "[DONE]" w TREŚCI odpowiedzi NIE kończy strumienia — reszta dociera w całości', async t => {
+test.serial('chunk z "[DONE]" w TREŚCI odpowiedzi NIE kończy strumienia — reszta dociera w całości', async t => {
     const { transport, stream } = scripted();
     const p = stream();
     // Otwarcie transportu jest ASYNCHRONICZNE (bilet bramki + łańcuch mikrozadań), więc
-    // pierwsza porcja też musi poczekać na swoje makrozadanie — jak każda następna.
+    // pierwsza porcja też musi poczekać na swoje makrozadanie - jak każda następna.
     await tick();
 
-    // Model pisze zdanie zawierające dosłownie "[DONE]" — to NIE jest sentinel platformy.
+    // Model pisze zdanie zawierające dosłownie "[DONE]" - to NIE jest sentinel platformy.
     transport.push(chunkPayload('Zadanie ma status [DONE], ale nie jest ukonczone. '));
     await tick(); // realny timing sieci — druga porcja w OSOBNYM makrozadaniu
     transport.push(chunkPayload('Kontynuuje dalej.'));
@@ -101,11 +101,11 @@ test.serial('AUD-testy-052(b): chunk z "[DONE]" w TREŚCI odpowiedzi NIE kończy
     );
 });
 
-test.serial('AUD-testy-052(c): porcja z niefinalnym polem `"done":true` obok `choices` NIE kończy strumienia', async t => {
+test.serial('porcja z niefinalnym polem `"done":true` obok `choices` NIE kończy strumienia', async t => {
     const { transport, stream } = scripted();
     const p = stream();
     // Otwarcie transportu jest ASYNCHRONICZNE (bilet bramki + łańcuch mikrozadań), więc
-    // pierwsza porcja też musi poczekać na swoje makrozadanie — jak każda następna.
+    // pierwsza porcja też musi poczekać na swoje makrozadanie - jak każda następna.
     await tick();
 
     transport.push(chunkPayloadWithDoneField('Raportuje czesciowy wynik. '));

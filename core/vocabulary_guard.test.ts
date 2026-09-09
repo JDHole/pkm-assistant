@@ -1,20 +1,19 @@
 /**
- * Bramka „grep zero" — strażnik inicjatywy clean-room (F8, 2026-09-05).
+ * Bramka „grep zero" - sprawdza kod pod kątem zakazanego słownictwa/nazewnictwa.
  *
  * DLACZEGO: repo publiczne ma nie nieść ANI JEDNEGO śladu słownictwa frameworka, na którym
- * plugin kiedyś stał — ani w kodzie, ani w komentarzach, ani w dokumentacji, ani w nazwach
+ * plugin kiedyś stał - ani w kodzie, ani w komentarzach, ani w dokumentacji, ani w nazwach
  * plików czy symboli. Dotąd pilnował tego skrypt uruchamiany ręcznie; tu ta sama lista wzorców
  * stoi jako TEST, więc regres łapie się w `npm test`, a nie dopiero przy przeglądzie przed
  * wysyłką do katalogu.
  *
- * ŹRÓDŁO PRAWDY: wzorzec mieszka w `core/cleanRoomPattern.ts` (odpowiednik `PATTERN` z gatunkowego
- * skryptu `clean_room_grep.sh`, ERE, case-insensitive) i jest WSPÓLNY z `build_kontrakt.test.ts`.
- * Dwie kopie tej samej listy rozjeżdżają się po pierwszej zmianie, a rozjazd w bramce jest cichy.
- * Sam wzorzec zapisany jest tam tak, żeby zakazane słowa nie występowały w tekście pliku —
- * dzięki temu nie potrzebuje wyjątku.
+ * ŹRÓDŁO PRAWDY: wzorzec mieszka w `core/forbiddenVocabulary.ts` i jest WSPÓLNY z
+ * `build_kontrakt.test.ts`. Dwie kopie tej samej listy rozjeżdżają się po pierwszej zmianie,
+ * a rozjazd w bramce jest cichy. Sam wzorzec zapisany jest tam tak, żeby zakazane słowa nie
+ * występowały w tekście pliku - dzięki temu nie potrzebuje wyjątku.
  *
  * WYJĄTKI (`WYJATKI`): pliki, które MUSZĄ znać stare nazwy kluczy, żeby dane usera przeżyły
- * podniesienie wersji — migrator ustawień i jego dane testowe. Drugi test pilnuje, żeby wyjątek
+ * podniesienie wersji - migrator ustawień i jego dane testowe. Drugi test pilnuje, żeby wyjątek
  * nie przeżył pliku, którego dotyczy (martwy wyjątek = cicha dziura w bramce).
  */
 import test from 'ava';
@@ -22,18 +21,16 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { cleanRoomPattern } from './cleanRoomPattern.js';
+import { forbiddenVocabulary } from './forbiddenVocabulary.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-const WZORZEC = cleanRoomPattern();
+const WZORZEC = forbiddenVocabulary();
 
 /**
  * Drzewa skanowane w całości — WSZYSTKO, co trafia do publicznego repozytorium, łącznie
- * z notatkami wydania i CI (`.claude/` nie jest śledzone w gicie od 2026-09-07 — skille agentów
+ * z notatkami wydania i CI (`.claude/` nie jest śledzone w gicie — skille agentów
  * to prywatne narzędzia właściciela).
- * Poza bramką zostają wyłącznie archiwa, które nie wchodzą do publicznego drzewa
- * (patrz `POZA_PUBLICZNYM_DRZEWEM`).
  */
 const DRZEWA = ['core', 'modules', 'src', 'config', 'utils', 'test-support', 'releases', '.github'];
 
@@ -58,7 +55,6 @@ const PLIKI_ROOT = [
     'README.md',
     'QUICK_START.md',
     'SECURITY.md',
-    'MIGRATION_v2.md',
     'CLAUDE.md',
     'CHANGELOG.md',
     'RELEASE_PROCESS.md',
@@ -67,18 +63,6 @@ const PLIKI_ROOT = [
     // Zbudowany bundel — skanowany TYLKO jeśli leży w repo (po `npm run build`).
     'dist/main.js',
 ];
-
-/**
- * Archiwa ery forka, które NIE wchodzą do publicznego drzewa (kuracja przy budowie sierocego
- * commita publicznego repo: `Refaktor/`, `Nauka/`, `audyt/` i notatki wydania v2.0). Zostają
- * w prywatnym archiwum repozytorium jako zapis historyczny — nie poprawiamy historii, ale też
- * nie wysyłamy jej dalej. Wpis = prefiks folderu.
- */
-const POZA_PUBLICZNYM_DRZEWEM = ['Refaktor/', 'Nauka/', 'audyt/', 'releases/v2.0/'];
-
-function pozaPublicznymDrzewem(sciezka: string): boolean {
-    return POZA_PUBLICZNYM_DRZEWEM.some((prefiks) => sciezka.startsWith(prefiks));
-}
 
 /**
  * Jedyne pliki, którym wolno znać stare nazwy: migrator ustawień (mapa stary klucz → nowy)
@@ -158,7 +142,7 @@ function plikiPodBramka(): string[] {
         const sciezka = join(ROOT, plik);
         if (existsSync(sciezka) && statSync(sciezka).isFile()) pelne.push(sciezka);
     }
-    return pelne.map(sciezkaWzgledna).filter((p) => !czyWyjatek(p) && !pozaPublicznymDrzewem(p));
+    return pelne.map(sciezkaWzgledna).filter((p) => !czyWyjatek(p));
 }
 
 test('grep zero: zadne zrodlo ani dokument nie niesie slownictwa starego frameworka', (t) => {

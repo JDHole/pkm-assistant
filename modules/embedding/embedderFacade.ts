@@ -1,9 +1,9 @@
 /**
- * modules/embedding/embedderFacade.ts — most rejestr → `EmbedderFacade` (§9 kontraktu).
+ * modules/embedding/embedderFacade.ts - most rejestr → `EmbedderFacade` (§9 kontraktu w `contracts.ts`).
  *
- * `VaultIndexer` nie zna rejestru: dostaje w konstruktorze cztery funkcje i tyle. Do clean-room
- * te cztery funkcje były sklejane ręcznie w composition roocie i DRUGI RAZ w harnessie — dwie
- * kopie tej samej sklejki, które potrafiły się rozjechać. Teraz jest jedna, pod testem.
+ * `VaultIndexer` nie zna rejestru: dostaje w konstruktorze cztery funkcje i tyle. Jedna,
+ * testowalna sklejka zamiast ręcznego powielania tego samego kodu w wielu miejscach, które
+ * mogłyby się rozjechać.
  *
  * Fasada jest CIENKA z rozmysłu: nie łapie błędów modelu i nie normalizuje wyników. Rzut
  * przechodzi NIETKNIĘTY, bo indekser klasyfikuje awarię po `kind` i na tej podstawie decyduje,

@@ -106,13 +106,13 @@ export class SidebarNav {
     }
 
     /**
-     * Demontaż nawigacji (AUD-bledy-045) — wołane z `AgentSidebar.onClose()`.
+     * Demontaż nawigacji - wołane z `AgentSidebar.onClose()`.
      *
      * Widoki wieszają swoje sprzątanie na `_currentCleanup` (Komunikator: odsubskrybowanie
-     * `agentManager.on(...)` + `clearTimeout` budzika renderu). Do naprawy ten uchwyt wołał
-     * WYŁĄCZNIE `_render()` przy przejściu na inny widok, więc zamknięcie panelu zostawiało
-     * nasłuch na zawsze — a ponowne otwarcie tworzyło NOWY `SidebarNav`. Sprzątanie widoku
-     * nie może wywrócić zamykania panelu, stąd try/catch.
+     * `agentManager.on(...)` + `clearTimeout` budzika renderu). Ten uchwyt MUSI zostać wywołany
+     * tutaj explicite - samo wołanie `_render()` przy przejściu na inny widok nie wystarcza,
+     * inaczej zamknięcie panelu zostawiłoby nasłuch na zawsze (a ponowne otwarcie tworzy NOWY
+     * `SidebarNav`). Sprzątanie widoku nie może wywrócić zamykania panelu, stąd try/catch.
      */
     dispose(): void {
         const cleanup = this._currentCleanup;
@@ -128,12 +128,12 @@ export class SidebarNav {
     /**
      * @private
      *
-     * K7/AUD-code-review-042: `_rendering` MUSI wrócić do `false`, cokolwiek się stanie w środku —
-     * cały ciało leci w `try/finally`. Wcześniej flaga była zdejmowana tylko w ostatniej linii,
-     * więc wyjątek z cudzego `_currentCleanup()` albo `renderFn()` zostawiał ją na `true` NA STAŁE
-     * (wszystkie wejścia nawigacji zaczynają się od `if (this._rendering) return;`) i zamrażał
-     * cały panel do zamknięcia i ponownego otwarcia sidebara. Oba cudze wywołania mają teraz
-     * własny `try/catch` — wzór z `dispose()` (ten sam plik) i gałęzi `sidebar.unknown_view` niżej.
+     * `_rendering` MUSI wrócić do `false`, cokolwiek się stanie w środku - cały ciało leci w
+     * `try/finally`. Gdyby flaga była zdejmowana tylko w ostatniej linii, wyjątek z cudzego
+     * `_currentCleanup()` albo `renderFn()` zostawiłby ją na `true` NA STAŁE (wszystkie wejścia
+     * nawigacji zaczynają się od `if (this._rendering) return;`) i zamroziłby cały panel do
+     * zamknięcia i ponownego otwarcia sidebara. Oba cudze wywołania mają własny `try/catch` -
+     * wzór z `dispose()` (ten sam plik) i gałęzi `sidebar.unknown_view` niżej.
      */
     _render(): void {
         this._rendering = true;

@@ -1,10 +1,10 @@
 /**
- * AUD-wydajnosc-029 (LOW): `formatToolOutput`'s `catch` branch was the ONLY branch without a
- * ceiling on `detail` — every other branch caps it (read/vault_read 2000, skill_execute 1000,
- * web_read 500, generic strings 1500). A non-JSON tool result — the normal shape for EVERY
+ * `formatToolOutput`'s `catch` branch needs a ceiling on `detail` like every other branch does
+ * (read/vault_read 2000, skill_execute 1000, web_read 500, generic strings 1500) — without one
+ * it would be the only branch without a cap. A non-JSON tool result — the normal shape for EVERY
  * external MCP server tool, since `normalizeMcpResult` (`modules/tools/ExternalMcpManager.ts`)
  * joins the response into plain text — lands in this `catch` (JSON.parse throws), and the WHOLE
- * string used to go into `detail`, which `createToolCallDisplay` puts into a DOM node eagerly,
+ * string would go into `detail`, which `createToolCallDisplay` puts into a DOM node eagerly,
  * even in the default compact-chip mode where that node is built and immediately hidden.
  *
  * `formatToolOutput` is not exported, so the test drives it the way a real render does — through

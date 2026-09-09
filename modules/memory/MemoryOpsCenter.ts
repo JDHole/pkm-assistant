@@ -1,21 +1,21 @@
 /**
  * @module MemoryOpsCenter
- * S29 Z2 (2026-07-29) — rejestr JEDNEGO aktywnego przebiegu konsolidacji (wzorzec
+ * Rejestr JEDNEGO aktywnego przebiegu konsolidacji (wzorzec
  * `StreamingManager` z modules/chat: jedna instancja per plugin, wszyscy pytają ją o stan).
  *
  * Po co: pasek statusu Obsidiana, modal przebiegu i notice muszą patrzeć na TEN SAM przebieg.
  * Bez wspólnego rejestru każdy z nich musiałby dostać referencję z osobna, a drugi trigger
  * konsolidacji odpaliłby równoległy przebieg mielący te same pliki.
  *
- * Decyzja (spec B): **jedno aktywne run na raz**. `startRun()` przy zajętym centrum NIE rzuca —
+ * Decyzja: **jedno aktywne run na raz**. `startRun()` przy zajętym centrum NIE rzuca -
  * zwraca run, który już leci, i prosi UI o pokazanie modalu (focus zamiast drugiego przebiegu).
  * Caller rozpoznaje sytuację po tożsamości: `center.startRun(mine) === mine` znaczy „ruszył mój".
  *
- * Stan żyje w pamięci — restart Obsidiana ubija przebieg. To bezpieczne: progi konsolidacji są
+ * Stan żyje w pamięci - restart Obsidiana ubija przebieg. To bezpieczne: progi konsolidacji są
  * idempotentne (kolejny start zaproponuje resztę), a zaaplikowane kroki są trwałe od razu.
  *
- * ZERO UI, ZERO Obsidiana — czysty node (`MemoryOpsCenter.test.js`). Instancję per plugin
- * tworzy S29 Z5 (pasek statusu); tu jest tylko klasa.
+ * ZERO UI, ZERO Obsidiana - czysty node (`MemoryOpsCenter.test.js`). Instancję per plugin
+ * tworzy pasek statusu; tu jest tylko klasa.
  */
 import { log } from '../../core/utils/Logger.js';
 
@@ -33,7 +33,7 @@ export const OPS_EVENT = {
 export type OpsEventType = (typeof OPS_EVENT)[keyof typeof OPS_EVENT];
 
 /**
- * Przebieg widziany przez centrum — strukturalnie, nie przez import `ConsolidationRun`.
+ * Przebieg widziany przez centrum - strukturalnie, nie przez import `ConsolidationRun`.
  * Centrum trzyma go wyłącznie jako nieprzezroczystą referencję (tożsamość + `addChangeListener`),
  * a rozsyła dalej do UI, które zna go już po swojemu.
  */
@@ -93,7 +93,7 @@ export class MemoryOpsCenter {
 
     /**
      * Rejestruje przebieg jako aktywny i podpina się pod jego `onChange`.
-     * Gdy inny przebieg już leci — NIE startuje drugiego: zwraca ten aktywny i prosi o modal.
+     * Gdy inny przebieg już leci - NIE startuje drugiego: zwraca ten aktywny i prosi o modal.
      *
      * @param run - instancja ConsolidationRun
      * @returns run, który jest aktywny po tym wywołaniu (Twój albo ten, który już leciał)
@@ -129,7 +129,7 @@ export class MemoryOpsCenter {
 
     /**
      * Prośba o otwarcie modalu przebiegu (klik w 🧠 na pasku statusu, drugi trigger konsolidacji,
-     * akcja z notice'a o błędzie). Tu tylko zdarzenie — widok podpina się w S29 Z4.
+     * akcja z notice'a o błędzie). Tu tylko zdarzenie - widok podpina się osobno.
      */
     requestOpenModal(): void {
         this._emit(OPS_EVENT.OPEN_MODAL_REQUESTED);

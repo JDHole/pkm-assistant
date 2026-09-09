@@ -1,11 +1,11 @@
 /**
- * ListTool — jeden prymityw `list` (E2.6, decyzja D5).
+ * ListTool — jeden prymityw `list`.
  *
  * Konsoliduje `vault_list` (folder vaulta) + `memory_list_summaries` (podsumowania
  * L1/L2/L3) i dokłada listing pozostałej pamięci (brain/ + sesje). Scope w parametrze.
  *
  *   scope=vault (default): Vault API — TFolder.children (shallow) / getFiles (recursive).
- *     Walidacja przez validateVaultFolder (blokada .pkm-assistant z E1.8).
+ *     Walidacja przez validateVaultFolder (blokada .pkm-assistant).
  *   scope=memory: listing pamięci AKTUALNEGO agenta (adapter przez AgentMemory).
  *     `folder` = etykieta logiczna (brain | sessions | sessions/active | summaries |
  *     summaries/L1...), filtr na listingu — NIE budujemy ścieżek z inputu.
@@ -108,29 +108,29 @@ function getInvocationMemory(
     agentManager: ListToolAgentManager | null | undefined,
 ): AgentMemoryLike | null | undefined {
     const agentName = getInvocationAgentName(args, agentManager);
-    // K4 (AUD-security-036): FAIL-CLOSED. Nazwana tożsamość bez wpisu w `agentMemories`
-    // (pad inicjalizacji pamięci, agent skasowany w trakcie biegu w tle) kończy się ODMOWĄ.
-    // Do K4 stał tu `|| getActiveMemory()`, więc narzędzie po cichu pisało i czytało katalog
-    // `brain/` agenta AKURAT wybranego w UI — a `_invocationAgentName` rozjeżdża się
-    // z aktywnym przy każdym biegu suba w tle i w drugiej zakładce czatu.
-    // Brak JAKIEJKOLWIEK tożsamości (ani znacznika, ani aktywnego agenta) = ścieżka jak dotąd.
+    // FAIL-CLOSED: nazwana tożsamość bez wpisu w `agentMemories` (pad inicjalizacji pamięci,
+    // agent skasowany w trakcie biegu w tle) kończy się ODMOWĄ, a nie fallbackiem na
+    // `getActiveMemory()` — taki fallback po cichu pisałby i czytał katalog `brain/` agenta
+    // AKURAT wybranego w UI, bo `_invocationAgentName` rozjeżdża się z aktywnym przy każdym
+    // biegu suba w tle i w drugiej zakładce czatu.
+    // Brak JAKIEJKOLWIEK tożsamości (ani znacznika, ani aktywnego agenta) = pamięć aktywnego agenta.
     return agentName ? agentManager?.getAgentMemory?.(agentName) : agentManager?.getActiveMemory?.();
 }
 
 /**
- * D17: listing przepisów skilli (.pkm-assistant/skills/**) przez adapter — Vault API nie widzi
+ * Listing przepisów skilli (.pkm-assistant/skills/**) przez adapter — Vault API nie widzi
  * ukrytego `.pkm-assistant/`, więc getAbstractFileByPath zwraca null. Tanie: jedno adapter.list.
  * Zamykająca linia indeksu skilli podpowiada modelowi `list(".pkm-assistant/skills")`.
  */
 async function listViaAdapter(app: ListToolApp, folderPath: string, recursive = false): Promise<Record<string, unknown>> {
     try {
-        // AUD-wydajnosc-074: walk zatrzymuje się, jak tylko zbierze MAX_RESULTS wpisów — bez
-        // tego `folder:"/" recursive:true` u admina chodził po całym drzewie (do 5000 wpisów
+        // Walk zatrzymuje się, jak tylko zbierze MAX_RESULTS wpisów — bez tego
+        // `folder:"/" recursive:true` u admina chodziłby po całym drzewie (do 5000 wpisów
         // na dysku sieciowym) tylko po to, żeby i tak oddać pierwsze 100. Pierwsze `MAX_RESULTS`
         // pozycji jest identyczne jak przy pełnym przebiegu (kolejność walku bez zmian) — ale
         // `totalCount` NIŻEJ już nie jest realną liczbą wpisów w drzewie: cięcie wcześniej
         // ogranicza go do max `MAX_RESULTS`, tam gdzie pełny przebieg dawał prawdziwy total
-        // (`listed.truncated` sygnalizuje to wprost). Praktyczny wpływ ograniczony — krok 8
+        // (`listed.truncated` sygnalizuje to wprost). Praktyczny wpływ ograniczony — krok
         // klienta (`MCPClient.executeToolCall`) i tak PRZELICZA `totalCount` po odfiltrowaniu
         // whitelistą agenta dla scope=vault, więc ta wartość nie jest tu ostatnim słowem.
         const listed = await listAdapterFolder(app.vault.adapter, folderPath, { recursive, maxFiles: MAX_RESULTS });
@@ -161,7 +161,7 @@ async function listVault(args: ListToolArgs, app: ListToolApp, plugin: ListToolP
     if (folderPath === '/' || folderPath === '' || folderPath == null) {
         folderPath = '/';
     } else {
-        // D17: list wolno wylistować katalog skilli (.pkm-assistant/skills/**) — read wciąga przepis.
+        // `list` wolno wylistować katalog skilli (.pkm-assistant/skills/**) — read wciąga przepis.
         const validation = validateVaultFolder(folderPath, { allowSkillsRead: true, adminAccess });
         if (!validation.ok) {
             const errorKey = validation.code === 'protected'
@@ -173,7 +173,7 @@ async function listVault(args: ListToolArgs, app: ListToolApp, plugin: ListToolP
     }
 
     // Admin widzi także ukryty root i wszystkie bebechy; zwykły agent ma adapterowy
-    // wyjątek wyłącznie dla przepisów skilli (D17).
+    // wyjątek wyłącznie dla przepisów skilli.
     const lowerFolder = folderPath.toLowerCase();
     const isSkillsPath = lowerFolder === '.pkm-assistant/skills' || lowerFolder.startsWith('.pkm-assistant/skills/');
     if ((adminAccess && (folderPath === '/' || isHiddenVaultPath(folderPath))) || isSkillsPath) {

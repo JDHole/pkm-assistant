@@ -1,5 +1,5 @@
 /**
- * AUD-testy-006 — przemianowany folder konfiguracji Obsidiana (`Vault#configDir`) jako
+ * Przemianowany folder konfiguracji Obsidiana (`Vault#configDir`) jako
  * strefa No-Go. `AccessGuard.setConfigDir` (core/security/AccessGuard.ts:112-116) dokłada
  * NAZWĘ przemianowanego folderu do `_noGoFolders`, wpięte w `setNoGoFolders` (linia 130:
  * `const all = [...SYSTEM_NO_GO, AccessGuard._configDir, ...userFolders]`). Ta gałąź nie
@@ -76,7 +76,7 @@ test.serial('kolejność wywołań: setConfigDir PO setNoGoFolders NIE działa w
     AccessGuard.setNoGoFolders([]); // configDir w tym momencie to jeszcze '.obsidian' (z afterEach)
     AccessGuard.setConfigDir('.mojkonfig'); // za późno — `_noGoFolders` już policzone bez niego
 
-    // Uwaga review (opus, 02.09): asercja mierzy MECHANIZM (wpis nie wszedł do migawki), a NIE
+    // Uwaga: asercja mierzy MECHANIZM (wpis nie wszedł do migawki), a NIE
     // pinuje `allowed === true` — gdyby ktoś kiedyś utwardził `_noGoFolders` na żywy odczyt
     // `_configDir` (czyste ulepszenie), ten test ma pęknąć TYLKO jeśli poniższy inwariant
     // przestanie opisywać rzeczywistość, a nie naciskać na cofnięcie ulepszenia.

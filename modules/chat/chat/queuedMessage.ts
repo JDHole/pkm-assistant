@@ -1,33 +1,31 @@
 /**
  * @module queuedMessage
- * Kolejka wiadomości czatu — JEDEN slot na wiadomość odłożoną na czas trwającej tury,
- * razem z jej PROWENIENCJĄ (K19, AUD-security-117 / 131).
+ * Kolejka wiadomości czatu - JEDEN slot na wiadomość odłożoną na czas trwającej tury,
+ * razem z jej PROWENIENCJĄ.
  *
- * Co było zepsute: `send_message` odkładał do `_queuedMessage` GOŁY STRING, a oba miejsca
- * opróżniające kolejkę nadawały mu twardo `HUMAN_MESSAGE_META` — „bo kolejka bierze się
- * wyłącznie z pola wpisywania". To nieprawda: ścieżki, które WYPEŁNIAJĄ pole wpisywania
+ * DLACZEGO PROWENIENCJA JEDZIE RAZEM Z TEKSTEM: ścieżki, które WYPEŁNIAJĄ pole wpisywania
  * z kodu (guzik artefaktu → `artifactSummon`, propozycja delegacji → `chat_artifacts`,
- * komentarz inline → `src/main.ts`) też trafiają do tej kolejki, gdy akurat trwa tura.
- * Tekst maszynowy — treść artefaktu, w której materiał bywa z sieci — wracał więc
- * z przywilejami człowieka: rejestrował adresy w whiteliście `web_read`, jego `@@skill:`
- * udawał polecenie usera, a `/` uruchamiało komendę. Dokładnie to, co K7 zamknął.
+ * komentarz inline → `src/main.ts`) też trafiają do tej kolejki, gdy akurat trwa tura -
+ * kolejka nie bierze się wyłącznie z pola wpisywania. Gdyby dren opróżniający kolejkę nadawał
+ * jej twardo `HUMAN_MESSAGE_META`, tekst maszynowy - treść artefaktu, w której materiał bywa
+ * z sieci - wracałby z przywilejami człowieka: rejestrowałby adresy w whiteliście `web_read`,
+ * jego `@@skill:` udawałby polecenie usera, a `/` uruchamiałoby komendę.
  *
- * Zasada slotu: **jedna wiadomość na raz, nowsza zastępuje starszą W CAŁOŚCI** (tak było
- * i tak zostaje). Dzięki temu pieczątki nigdy się nie sklejają — nie ma sytuacji „tekst
- * maszynowy + ludzki w jednym wpisie", bo nie ma doklejania. Gdyby kiedyś kolejka miała
- * rosnąć do listy, regułą musi być fail-closed: paczka z choćby jednym tekstem maszynowym
- * jedzie jako `machine`.
+ * Zasada slotu: **jedna wiadomość na raz, nowsza zastępuje starszą W CAŁOŚCI**. Dzięki temu
+ * pieczątki nigdy się nie sklejają - nie ma sytuacji „tekst maszynowy + ludzki w jednym
+ * wpisie", bo nie ma doklejania. Gdyby kiedyś kolejka miała rosnąć do listy, regułą musi być
+ * fail-closed: paczka z choćby jednym tekstem maszynowym jedzie jako `machine`.
  *
- * Plik jest CELOWO wolny od `obsidian` i DOM-u — dzięki temu ma testy jednostkowe
+ * Plik jest CELOWO wolny od `obsidian` i DOM-u - dzięki temu ma testy jednostkowe
  * (`queuedMessage.test.ts`), a `chat_streaming.ts` tylko go wywołuje.
  */
 import { resolveMessageOrigin } from '../../../core/index.js';
 import type { MessageOriginMeta } from '../../../core/index.js';
 
 /**
- * Kto był na wierzchu, gdy wiadomość wpadła do slotu (AUD-bledy-015).
+ * Kto był na wierzchu, gdy wiadomość wpadła do slotu.
  *
- * `tabKey` liczy `chat_tabs._tabKey` — jedno źródło prawdy o tożsamości zakładki (to samo,
+ * `tabKey` liczy `chat_tabs._tabKey` - jedno źródło prawdy o tożsamości zakładki (to samo,
  * którym adresuje się wynik suba). `agentName` jest pasem zapasowym na wypadek, gdy zakładka
  * dostanie po drodze inny klucz (np. sesja zapisana pod nową ścieżką).
  */
@@ -37,8 +35,7 @@ export interface QueueOwner {
 }
 
 /** Wiadomość czekająca na koniec tury: treść + jej pieczątka pochodzenia + właściciel. */
-// AUD-dead-code-231 (2026-09-02): `export` zdjęty na czterech typach niżej — zero referencji
-// spoza tego pliku.
+// Nie eksportowany - brak referencji spoza tego pliku (tu i na czterech typach niżej).
 interface QueuedChatMessage {
     text: string;
     meta: MessageOriginMeta;
@@ -63,16 +60,16 @@ export function queueChatMessage(text: string, meta?: unknown, owner?: QueueOwne
 }
 
 /**
- * Czy slot wolno opróżnić DO TEGO widoku (AUD-bledy-015).
+ * Czy slot wolno opróżnić DO TEGO widoku.
  *
  * Dren kolejki jedzie na `setTimeout(…, 100)`, a `set_generating(false)` woła też
- * `_switchTab` (krok 5) przy każdym przejściu na niegenerującą zakładkę. Bez tego pytania
- * wybudzony timer wklejał tekst pisany do Jaskra w pole Borysa i startował turę JEGO
- * modelem, promptem, pamięcią i zestawem narzędzi — a `freezeTurnOwner` zamrażał już
- * cudzego właściciela.
+ * `_switchTab` przy każdym przejściu na niegenerującą zakładkę. Bez tego pytania wybudzony
+ * timer mógłby wkleić tekst pisany do Jaskra w pole Borysa i wystartować turę JEGO modelem,
+ * promptem, pamięcią i zestawem narzędzi - a `freezeTurnOwner` zamraża już cudzego
+ * właściciela.
  *
- * Slot bez właściciela (goły string sprzed tej zmiany) drenuje się jak dotąd — brak adresu
- * to nie jest dowód rozjazdu.
+ * Slot bez właściciela (goły string) drenuje się jak dotąd - brak adresu to nie jest
+ * dowód rozjazdu.
  */
 export function queuedOwnerMatches(entry: QueuedChatMessage | null | undefined, current: QueueOwner | null | undefined): boolean {
     const owner = entry?.owner;
@@ -98,20 +95,20 @@ export function readQueuedMessage(slot: unknown): QueuedChatMessage | null {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * DECYZJE DRENU I STOPU — wyprowadzone z `chat_streaming.ts` (AUD-testy-024).
+ * DECYZJE DRENU I STOPU - wyprowadzone z `chat_streaming.ts`.
  *
- * Obie siedziały w mixinie wiszącym na `obsidian`, więc jedynym strażnikiem był regex
+ * `chat_streaming.ts` wisi na `obsidian`, więc jedynym strażnikiem jego mixinu byłby regex
  * po tekście źródła: mutacja kasująca skutek (np. `if (false && !queuedOwnerMatches(…))`
- * albo `if (false && cancelled)`) zostawiała napis na miejscu i cały pakiet zielony.
+ * albo `if (false && cancelled)`) zostawiałaby napis na miejscu i cały pakiet zielony.
  * Tutaj są jako czyste funkcje z testami OBU stron każdej gałęzi; monolit tylko wykonuje
- * werdykt (efekty uboczne — wskaźnik ⏳, log, podmiana pola wpisywania — zostają u niego).
+ * werdykt (efekty uboczne - wskaźnik ⏳, log, podmiana pola wpisywania - zostają u niego).
  * ────────────────────────────────────────────────────────────────────────────── */
 
 /** Co timer drenu ma zrobić po przebudzeniu. */
 type QueuedDrainAction =
-    /** slot jest pusty — Stop albo zamknięcie widoku zdążyły anulować (AUD-bledy-055) */
+    /** slot jest pusty - Stop albo zamknięcie widoku zdążyły anulować */
     | 'empty'
-    /** wiadomość należy do innej zakładki — ZOSTAJE w slocie, wraca wskaźnik ⏳ (AUD-bledy-015) */
+    /** wiadomość należy do innej zakładki - ZOSTAJE w slocie, wraca wskaźnik ⏳ */
     | 'wait_owner'
     /** w oknie 100 ms ruszyła inna tura — kolejka czeka dalej */
     | 'wait_generating'
@@ -147,7 +144,7 @@ export function evaluateQueuedDrain(
 }
 
 interface StopQueueCancelDecision {
-    /** czy Stop ma opróżnić slot kolejki (AUD-bledy-055) */
+    /** czy Stop ma opróżnić slot kolejki */
     clearSlot: boolean;
     /** tekst do oddania userowi w polu wpisywania; `null` = nie dotykaj pola */
     restoreText: string | null;
@@ -156,12 +153,12 @@ interface StopQueueCancelDecision {
 }
 
 /**
- * Co Stop robi z kolejką (AUD-bledy-055).
+ * Co Stop robi z kolejką.
  *
- * Do naprawy `set_generating(false)` planował wysyłkę zakolejkowanej wiadomości na 100 ms
- * PO kliknięciu Stop — user przerywał wszystko, a chwilę później ruszała pełna tura.
- * Dziś Stop kasuje slot; tekst nie ginie: wraca do pola wpisywania, ale **tylko gdy pole
- * jest puste** — szkic usera jest ważniejszy niż odzyskana kopia (duch Z3).
+ * Stop kasuje slot; tekst nie ginie: wraca do pola wpisywania, ale **tylko gdy pole
+ * jest puste** - szkic usera jest ważniejszy niż odzyskana kopia. Bez tego kasowania
+ * `set_generating(false)` planowałby wysyłkę zakolejkowanej wiadomości na 100 ms PO
+ * kliknięciu Stop - user przerywałby wszystko, a chwilę później ruszałaby pełna tura.
  *
  * @param slot - surowa zawartość `_queuedMessage`
  * @param draft - bieżąca wartość pola wpisywania (`undefined` = pola nie ma)

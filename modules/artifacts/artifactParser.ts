@@ -1,45 +1,44 @@
 /**
- * artifactParser.js — parser + patcher artefaktów żywych (E2.9 FAZA A / A1).
+ * artifactParser.js — parser + patcher artefaktów żywych.
  *
- * Pure module (zależność tylko od `core/utils/yamlParser` — silnik YAML wstrzykiwany przez
- * composition root, TS-4 2026-09-07; ZERO importów Obsidiana) → testowalny node'em. Wzór:
+ * Pure module (zależność tylko od `core/utils/yamlParser` - silnik YAML wstrzykiwany przez
+ * composition root, ZERO importów Obsidiana) → testowalny node'em. Wzór:
  * `modules/prompts/decisionTree.js` / `modules/prompts/skillIndex.js`.
  *
  * Dwie funkcje:
  *  - `parseArtifact(markdown)` → chudy JSON dla agenta (frontmatter + sekcje + checkboxy).
- *    Frontmatter to FALLBACK — w runtime store woli `metadataCache` (świeższy). Parser jest
- *    „głupi" (A14): raportuje strukturę, znaczenie checkboxa decyduje typ + slot promptu.
- *  - `applyPatch(markdown, ops[])` → { markdown, applied, errors } — strukturalny patch nakładany
+ *    Frontmatter to FALLBACK - w runtime store woli `metadataCache` (świeższy). Parser jest
+ *    "głupi": raportuje strukturę, znaczenie checkboxa decyduje typ + slot promptu.
+ *  - `applyPatch(markdown, ops[])` → { markdown, applied, errors } - strukturalny patch nakładany
  *    na ŚWIEŻY stan tekstu. Patch NIE dotyka sekcji, których nie adresuje (edycje usera przeżywają).
  *
  * Bezpieczeństwo egzekwowane TU (nie tylko w prompcie): agent NIGDY nie pisze bloków kodu
- * (`code_forbidden`) ani nagłówków poziomu 1-2 (`heading_forbidden` — rozbijałyby strukturę
+ * (`code_forbidden`) ani nagłówków poziomu 1-2 (`heading_forbidden` - rozbijałyby strukturę
  * sekcji), a klucze bazowe frontmattera są NIEZMIENIALNE (`protected_key`).
  *
  * Uwagi: CRLF-safe (repo na Windows); `zaktualizowano` NIE jest odświeżane tutaj (parser jest
- * bezczasowy/deterministyczny) — robi to store po udanym patchu (ma dostęp do daty).
+ * bezczasowy/deterministyczny) - robi to store po udanym patchu (ma dostęp do daty).
  */
 import { parseYaml, stringifyYaml } from '../../core/index.js';
 import type { ArtifactFrontmatter, ArtifactPatchError, ArtifactScalar, ArtifactSection, ParsedArtifact } from './types.js';
 
-/** Klucze bazowe frontmattera instancji, których agent NIE może zmienić (A1/A6). */
+/** Klucze bazowe frontmattera instancji, których agent NIE może zmienić. */
 export const PROTECTED_FIELDS = ['pkm-artefakt', 'typ', 'agent', 'utworzono'];
 
-/** Limit tekstu sekcji wstrzykiwanego do kontekstu agenta (A4 — `artifact_read`). */
+/** Limit tekstu sekcji wstrzykiwanego do kontekstu agenta (`artifact_read`). */
 export const ARTIFACT_CONTEXT_MAX_CHARS = 4000;
 
 /**
- * Wykrycie bloku kodu — K10 (AUD-security-089).
+ * Wykrycie bloku kodu.
  *
- * Wcześniej stał tu sam `/```/`, więc bramka `code_forbidden` widziała WYŁĄCZNIE potrójny
- * grawis. CommonMark (a za nim Obsidian) zna też fence tyldowy, a renderer Obsidiana przepuszcza
- * surowy HTML — ten sam ładunek (`~~~dataviewjs`, `<pre>`, `<script>`) wchodził więc do notatki
- * bokiem. Liczymy wszystkie nośniki, żeby obietnica „agent NIGDY nie pisze bloku kodu" (A3)
- * miała jedno miejsce prawdy.
+ * CommonMark (a za nim Obsidian) zna fence z potrójnego grawisu ORAZ tyldy, a renderer
+ * Obsidiana przepuszcza surowy HTML - ten sam ładunek (`~~~dataviewjs`, `<pre>`, `<script>`)
+ * wchodzi więc do notatki bokiem, jeśli liczy się tylko grawis. Liczymy wszystkie nośniki, żeby
+ * obietnica "agent NIGDY nie pisze bloku kodu" miała jedno miejsce prawdy.
  *
  * ŚWIADOMIE NIE liczymy wciętego bloku kodu (4 spacje / tab): w treści artefaktu tak wygląda
  * zagnieżdżony punkt listy, więc bramka odrzucałaby normalną pracę modelu. Wcięcie bez fence'a
- * nie jest też nośnikiem dla `dataviewjs` — procesory bloków Obsidiana czepiają się fence'a.
+ * nie jest też nośnikiem dla `dataviewjs` - procesory bloków Obsidiana czepiają się fence'a.
  */
 const CODE_FENCE_RE = /```|~~~/;
 /** Nośniki kodu w surowym HTML (Obsidian renderuje HTML w treści notatki). */
@@ -56,20 +55,20 @@ const SECTION_HEADING_MAX_LEVEL = 2;
 const CHECKBOX_RE = /^(\s*)-\s+\[([ xX])\]\s+(.*?)(?:\s+\^([a-zA-Z0-9-]+))?\s*$/;
 /**
  * Dowolny element listy (dla znalezienia końca listy w sekcji ORAZ wykluczenia setext
- * pod punktem — AUD-code-review-104). Bullet (`-`) i numerowany (`1.`/`1)`) — CommonMark
- * uznaje oba za akapit-przerywacz, więc `---`/`===` zaraz pod nimi to `hr`, nie nagłówek.
+ * pod punktem). Bullet (`-`) i numerowany (`1.`/`1)`) - CommonMark uznaje oba za
+ * akapit-przerywacz, więc `---`/`===` zaraz pod nimi to `hr`, nie nagłówek.
  */
 const LIST_ITEM_RE = /^\s*(?:-\s+|\d+[.)]\s+)/;
 /** Blok frontmattera na początku pliku. */
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
 /**
- * Data lokalna w formacie `YYYY-MM-DD` (AUD-code-review-105) — JEDEN helper dla modułu.
+ * Data lokalna w formacie `YYYY-MM-DD` - JEDEN helper dla modułu.
  * `ArtifactStore._today()`/`_genId()` i `migrate_json_to_notes.ts` budowały to samo niezależnie
  * (getFullYear/getMonth/getDate + padStart); poprawka formatu/strefy = jedna kopia zamiast trzech.
- * Świadomie NIE `toISOString().slice(0,10)` — to UTC, a data instancji ma być LOKALNA (jak dotąd).
- * Sygnał z audytu: ten sam kształt YYYY-MM-DD żyje też w `modules/komunikator/KomunikatorManager.ts`
- * (`formatMessageDate`) — poza tym modułem, więc świadomie NIETKNIĘTY tutaj.
+ * Świadomie NIE `toISOString().slice(0,10)` - to UTC, a data instancji ma być LOKALNA.
+ * Ten sam kształt YYYY-MM-DD żyje też w `modules/komunikator/KomunikatorManager.ts`
+ * (`formatMessageDate`) - poza tym modułem, więc świadomie NIETKNIĘTY tutaj.
  */
 export function formatYmd(d: Date): string {
     const y = d.getFullYear();
@@ -86,9 +85,9 @@ function detectEol(text: unknown): string {
 /**
  * Podziel na linie DOKŁADNIE tak, jak łamie je renderer.
  *
- * M (AUD-security-124): CommonMark (a za nim Obsidian) kończy linię także na SAMOTNYM `\r`.
- * Dopóki bramka dzieliła tylko po `\r?\n`, ładunek `'tekst\r## Sekcja'` był dla niej jedną
- * linią bez nagłówka, a w notatce renderował się jako nagłówek poziomu 2.
+ * CommonMark (a za nim Obsidian) kończy linię także na SAMOTNYM `\r`. Dzielenie tylko po
+ * `\r?\n` zostawiłoby ładunek `'tekst\r## Sekcja'` jako jedną linię bez nagłówka, choć w notatce
+ * renderuje się on jako nagłówek poziomu 2 - więc trzeba łamać też po samotnym `\r`.
  */
 function splitLines(text: unknown): string[] {
     return String(text ?? '').split(/\r\n|\r|\n/);
@@ -98,19 +97,19 @@ function splitLines(text: unknown): string[] {
 interface SectionHeadingHit { level: number; title: string; start: number; end: number }
 
 /**
- * M (AUD-security-122/124): JEDNA reguła „co jest nagłówkiem SEKCJI".
+ * JEDNA reguła "co jest nagłówkiem SEKCJI".
  *
  * Czytają ją WSZYSCY trzej: `parseArtifact` (struktura), `findSection` (adresowanie patcha)
- * i `hasSectionHeading` (bramka `heading_forbidden`). Do fali M każdy mierzył co innego —
- * bramka `#`/`##`, zlew `#`…`######` — więc podrobiony `### Uwagi usera` przechwytywał patch
- * adresowany do prawdziwej sekcji, a wersja setext (`Tytul` + `===`/`---`) przechodziła bramkę
- * i renderowała się w notatce jako nagłówek.
+ * i `hasSectionHeading` (bramka `heading_forbidden`) - inaczej mogłyby mierzyć co innego
+ * (np. bramka `#`/`##`, zlew `#`…`######`), a wtedy podrobiony `### Uwagi usera` przechwytywałby
+ * patch adresowany do prawdziwej sekcji, a wersja setext (`Tytul` + `===`/`---`) przechodziłaby
+ * bramkę i renderowała się w notatce jako nagłówek.
  *
  * Rozpoznajemy więc oba warianty CommonMarka, ale tylko do poziomu, który TWORZY sekcję:
  *  - ATX `#`/`##` (poziom 3+ to legalny podtytuł WEWNĄTRZ sekcji),
  *  - setext: niepusty akapit + linia samych `=` (H1) / `-` (H2).
  *
- * Setext wymaga akapitu nad kreską — kreska po pustej linii, po nagłówku, po elemencie listy
+ * Setext wymaga akapitu nad kreską - kreska po pustej linii, po nagłówku, po elemencie listy
  * albo po drugiej kresce to zwykły separator (`hr`), nie nagłówek.
  */
 function scanSectionHeadings(lines: string[]): SectionHeadingHit[] {
@@ -170,7 +169,7 @@ export function parseArtifact(markdown: unknown): ParsedArtifact {
     const sections: Array<Omit<ArtifactSection, 'text'> & { _proseLines: string[] }> = [];
     let current: (Omit<ArtifactSection, 'text'> & { _proseLines: string[] }) | null = null;
 
-    // M: struktura liczona TYM SAMYM skanerem co bramka i `findSection` (patrz `scanSectionHeadings`).
+    // Struktura liczona TYM SAMYM skanerem co bramka i `findSection` (patrz `scanSectionHeadings`).
     const heads = scanSectionHeadings(lines);
     const headByLastLine = new Map(heads.map(h => [h.end, h]));
     const headTitleLines = new Set(heads.filter(h => h.start !== h.end).map(h => h.start));
@@ -208,8 +207,8 @@ export function parseArtifact(markdown: unknown): ParsedArtifact {
     return {
         frontmatter,
         sections: cleaned,
-        // K10 (AUD-security-089): detektor liczy te same fence'y co bramka — inaczej blok
-        // napisany tyldami jest w pliku, a chudy JSON (i UI) raportują `buttons: false`.
+        // Detektor liczy te same fence'y co bramka - inaczej blok napisany tyldami jest
+        // w pliku, a chudy JSON (i UI) raportują `buttons: false`.
         buttons: /^(?:```+|~~~+)\s*pkm-artefakt\b/m.test(body),
     };
 }
@@ -218,10 +217,10 @@ export function parseArtifact(markdown: unknown): ParsedArtifact {
  * Znajdź granice sekcji po nagłówku (case-insensitive, trim). Zwraca indeksy w tablicy linii ciała.
  * Sekcja = od nagłówka do następnego nagłówka tego samego/wyższego poziomu (lub końca).
  *
- * M (AUD-security-122): szukamy WYŁĄCZNIE wśród nagłówków, które `parseArtifact` uznaje za
- * sekcje (`scanSectionHeadings`). Wcześniej dopasowywał się tu KAŻDY poziom, więc podrobiony
- * `### Uwagi usera` — legalny podtytuł, którego bramka świadomie nie blokuje — przechwytywał
- * patch adresowany do prawdziwej sekcji `## Uwagi usera` i kasował cudzą treść aż do niej.
+ * Szukamy WYŁĄCZNIE wśród nagłówków, które `parseArtifact` uznaje za sekcje
+ * (`scanSectionHeadings`) - dopasowanie KAŻDEGO poziomu pozwoliłoby podrobionemu
+ * `### Uwagi usera` (legalny podtytuł, którego bramka świadomie nie blokuje) przechwycić
+ * patch adresowany do prawdziwej sekcji `## Uwagi usera` i skasować cudzą treść aż do niej.
  *
  * `start` to OSTATNIA linia nagłówka (przy setext: podkreślenie), żeby `slice(0, start+1)`
  * zachował go w całości; `end` to PIERWSZA linia następnego nagłówka (przy setext: jego tytuł).
@@ -271,12 +270,12 @@ function err(op: unknown, code: string, message: string): { error: ArtifactPatch
  *
  * Poziomy 1-2 tworzą sekcje, więc wpisanie takiej linii do TREŚCI sekcji rozbija strukturę
  * artefaktu: powstaje drugi nagłówek o tej samej nazwie, a `findSection` zwraca PIERWSZE
- * trafienie — oryginalna sekcja zostaje osierocona na zawsze. `###` i głębsze są DOZWOLONE
+ * trafienie - oryginalna sekcja zostaje osierocona na zawsze. `###` i głębsze są DOZWOLONE
  * (model legalnie używa ich jako podtytułów wewnątrz sekcji).
  *
- * M (AUD-security-124): bramka i zlew liczą nagłówki TĄ SAMĄ funkcją (`scanSectionHeadings`),
- * więc obejmuje też setext (`Tytul` + `===`/`---`) i łamanie linii samotnym `\r` — oba
- * renderują się w notatce jako nagłówek, a bramka ich wcześniej nie widziała.
+ * Bramka i zlew liczą nagłówki TĄ SAMĄ funkcją (`scanSectionHeadings`), więc obejmuje też
+ * setext (`Tytul` + `===`/`---`) i łamanie linii samotnym `\r` - oba renderują się w notatce
+ * jako nagłówek.
  */
 function hasSectionHeading(text: string): boolean {
     return scanSectionHeadings(splitLines(text)).length > 0;
@@ -286,15 +285,15 @@ function hasSectionHeading(text: string): boolean {
 const HEADING_FORBIDDEN_MSG = 'Headings level 1-2 (# / ## or setext ===/---) are not allowed in artifact content — they would create a new section. Use ### or deeper for subheadings.';
 
 /**
- * K10 (AUD-security-061): JEDYNA bramka treści, którą AGENT wpisuje do ciała artefaktu.
+ * JEDYNA bramka treści, którą AGENT wpisuje do ciała artefaktu.
  *
- * Każda droga zapisu ma przez nią przejść — opsy patcha (`set_section`/`add_item`) ORAZ wartości
+ * Każda droga zapisu ma przez nią przejść - opsy patcha (`set_section`/`add_item`) ORAZ wartości
  * `pola` podstawiane do szablonu typu przy `artifact_create` (`ArtifactStore.applyFieldsValidated`).
- * Wcześniej reguły stały tylko w `applyOne`, więc `pola` były drugą, niepilnowaną drogą: fence
- * kodu i nagłówek `##` lądowały w notatce vaultu, a narzędzie raportowało pełny sukces.
+ * Gdyby reguły stały tylko w `applyOne`, `pola` byłyby drugą, niepilnowaną drogą: fence kodu
+ * i nagłówek `##` mogłyby wylądować w notatce vaultu, a narzędzie raportowałoby pełny sukces.
  *
- * Nie dotyczy treści USERA (szablon typu, wartości domyślne pól, `importInstance` migratora) —
- * tam kod jest legalny i świadomy (A3).
+ * Nie dotyczy treści USERA (szablon typu, wartości domyślne pól, `importInstance` migratora) -
+ * tam kod jest legalny i świadomy.
  *
  * @param {string} text - kandydat na treść
  * @returns {{code:string, message:string}|null} - `null` = wolno
@@ -310,13 +309,13 @@ export function validateArtifactBodyText(text: unknown): { code: string; message
 export const INVALID_VALUE_MSG = 'set_field accepts only scalar values (string/number/bool)';
 
 /**
- * M (AUD-security-125): JEDEN kontrakt „co wolno wpisać jako WARTOŚĆ pola".
+ * JEDEN kontrakt "co wolno wpisać jako WARTOŚĆ pola".
  *
  * Czytają go OBA wejścia wartości od modelu: op `set_field` w `applyOne` oraz `pola` przy
- * `artifact_create` (`ArtifactStore.applyFieldsValidated`). Wcześniej reguła stała tylko
- * w `applyOne`, a druga droga walidowała `String(value)` — zagnieżdżony obiekt zamieniał się
- * w `"[object Object]"`, przechodził bramkę treści i lądował w frontmatterze notatki SUROWY
- * (razem z blokiem kodu). Walidator ma oglądać to samo, co ląduje w pliku.
+ * `artifact_create` (`ArtifactStore.applyFieldsValidated`). Gdyby druga droga walidowała
+ * tylko `String(value)`, zagnieżdżony obiekt zamieniłby się w `"[object Object]"`, przeszedłby
+ * bramkę treści i wylądował w frontmatterze notatki SUROWY (razem z blokiem kodu). Walidator
+ * ma oglądać to samo, co ląduje w pliku.
  */
 export function isArtifactScalar(value: unknown): value is ArtifactScalar {
     return value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
@@ -366,8 +365,8 @@ function applyOne(text: string, op: Record<string, unknown> | null, eol: string)
         if (typeof op.text !== 'string' || !op.text.trim()) return err(op, 'invalid_op', 'add_item requires non-empty text');
         const bad = validateArtifactBodyText(op.text);
         if (bad) return err(op, bad.code, bad.message);
-        // M (AUD-security-124): „jedna linia" liczona tak, jak łamie ją renderer — samotny `\r`
-        // też kończy linię, więc `'punkt\r## Sekcja'` nie jest jednolinijkowcem.
+        // "jedna linia" liczona tak, jak łamie ją renderer - samotny `\r` też kończy linię,
+        // więc `'punkt\r## Sekcja'` nie jest jednolinijkowcem.
         if (/[\r\n]/.test(op.text)) return err(op, 'multiline_forbidden', 'add_item text must be a single line');
         const sec = findSection(bodyLines, op.heading);
         if (!sec) return err(op, 'not_found', `Section "${op.heading as string}" not found`);

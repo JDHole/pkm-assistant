@@ -1,5 +1,5 @@
 /**
- * KomunikatorManager — Komunikator v3 „prosta poczta" (S28, D2).
+ * KomunikatorManager - Komunikator v3 „prosta poczta".
  *
  * MODEL DANYCH: folder per agent, PLIK PER WIADOMOŚĆ.
  *
@@ -16,17 +16,17 @@
  *   ---
  *   <treść wiadomości>
  *
- * DLACZEGO TAK (lekcja 11 + DEC L11-2): skrzynka-jeden-plik z blokami HTML-komentarzy
+ * DLACZEGO TAK: skrzynka-jeden-plik z blokami HTML-komentarzy
  * wymagała regexów na CAŁEJ zawartości przy każdej zmianie statusu, miała twardy limit
  * 500 KB z resetem-archiwizacją i psuła się, gdy ktoś zacytował `**Status:**` w treści.
  * Plik-per-wiadomość: „ile nowych?" = policz pliki z `ai_read: false`, zmiana statusu =
  * edycja JEDNEGO małego pliku, zero limitu, zero archiwizacji-resetu.
  *
  * DUAL-TRACK: `user_read` (czy user widział) × `ai_read` (czy agent przeczytał).
- * ALL_READ = `user_read && ai_read` — LICZONE, nigdy zapisywane (jedno źródło prawdy).
+ * ALL_READ = `user_read && ai_read` - LICZONE, nigdy zapisywane (jedno źródło prawdy).
  *
  * CREATE-ONLY DLA AGENTA: `deleteMessage` woła WYŁĄCZNIE UI (modal sprzątania / guzik
- * hurtowy, D5). Żadne narzędzie agenta nie kasuje poczty.
+ * hurtowy). Żadne narzędzie agenta nie kasuje poczty.
  */
 
 import { log } from '../../core/utils/Logger.js';
@@ -38,41 +38,41 @@ import type { AgentManagerLike, Message, MessageFrontmatter, MessageHeader, Vaul
 // TS-any: parseFrontmatter reads compatibility YAML from user-authored message files.
 type ParsedFrontmatter = Record<string, any>;
 
-/** Maksymalny rozmiar pojedynczej wiadomości (jak w dawnym AgentMessageTool). */
-// AUD-dead-code-077: `export` zdjęty — zero konsumentów spoza tego pliku (test importuje
-// tylko buildMessageMarkdown/parseMessage/setFrontmatterFlag, nie tę stałą).
+/** Maksymalny rozmiar pojedynczej wiadomości. */
+// Nieeksportowana: zero konsumentów spoza tego pliku (test importuje tylko
+// buildMessageMarkdown/parseMessage/setFrontmatterFlag, nie tę stałą).
 const MAX_MESSAGE_BYTES = 50 * 1024;
 
-/** S33 B1 — okno, w którym liczymy wysyłki na parę nadawca→adresat. */
+/** Okno, w którym liczymy wysyłki na parę nadawca→adresat. */
 export const KOM_RATE_WINDOW_MS = 10 * 60 * 1000;
 
 /**
- * S33 B2 — po ilu minutach ciszy odczyt przestaje liczyć się do łańcucha odbić.
+ * Po ilu minutach ciszy odczyt przestaje liczyć się do łańcucha odbić.
  * To jest zastępnik granicy „sesji": z poziomu narzędzia nie da się tanio i uczciwie
  * dowiedzieć, czy user zaczął nową rozmowę (patrz komentarz przy `noteRead`).
  */
 export const KOM_HOP_TTL_MS = 30 * 60 * 1000;
 
 /**
- * S33 B2 — na którym odbiciu przerywamy łańcuch. Wychodząca wiadomość dostaje
+ * Na którym odbiciu przerywamy łańcuch. Wychodząca wiadomość dostaje
  * `maxHopPrzeczytanych + 1`; przy 3 mówimy dość i odsyłamy sprawę do usera.
  * A→B(0) → B→C(1) → C→A(2) → A chce odpisać(3) = STOP.
  */
 export const KOM_HOP_LIMIT = 3;
 
-/** Dozwolony kształt identyfikatora wiadomości — id przychodzi od LLM (`kom_read`). */
+/** Dozwolony kształt identyfikatora wiadomości - id przychodzi od LLM (`kom_read`). */
 const MESSAGE_ID_RE = /^msg-[0-9]+(-[0-9]+)?$/;
 
 /**
- * W8 follow-up (review koordynatora, 2026-09-02): siatka bezpieczeństwa keszu nagłówków.
- * Jawna inwalidacja (mutacje przez ten manager) + nasłuch zdarzeń vaulta (patrz
- * `attachVaultEvents`) łapią WIĘKSZOŚĆ zmian, ale NIE WSZYSTKIE — sesje Claude Code piszą
- * do skrzynek WPROST na dysk (kontrakt `/agent`), vault bywa synchronizowany Google Drive
- * między urządzeniami, `obsidian-git pull` też potrafi podmienić pliki bez odpalenia
- * zdarzeń `Vault` (zależnie od tego, jak dany plugin/klient pisze). Bez tego TTL kesz mógłby
- * zamrozić licznik do najbliższej mutacji PRZEZ TEN MANAGER — realna regresja funkcjonalna,
- * nie tylko wydajnościowa. 5 s to górna granica opóźnienia — poniżej progu percepcji „to się
- * jeszcze nie odświeżyło" przy renderach co kilkaset ms (debounce sidebara).
+ * Siatka bezpieczeństwa keszu nagłówków. Jawna inwalidacja (mutacje przez ten manager) +
+ * nasłuch zdarzeń vaulta (patrz `attachVaultEvents`) łapią WIĘKSZOŚĆ zmian, ale NIE WSZYSTKIE -
+ * sesje Claude Code piszą do skrzynek WPROST na dysk (kontrakt `/agent`), vault bywa
+ * synchronizowany Google Drive między urządzeniami, `obsidian-git pull` też potrafi podmienić
+ * pliki bez odpalenia zdarzeń `Vault` (zależnie od tego, jak dany plugin/klient pisze). Bez
+ * tego TTL kesz mógłby zamrozić licznik do najbliższej mutacji PRZEZ TEN MANAGER - realna
+ * regresja funkcjonalna, nie tylko wydajnościowa. 5 s to górna granica opóźnienia - poniżej
+ * progu percepcji „to się jeszcze nie odświeżyło" przy renderach co kilkaset ms (debounce
+ * sidebara).
  */
 const HEADER_CACHE_TTL_MS = 5000;
 
@@ -104,24 +104,24 @@ export class KomunikatorManager {
         this.INBOX_PATH = `${this.BASE_PATH}/inbox`;
         // Zegar wstrzykiwalny — testy rate-limitu i TTL nie mogą czekać 10 realnych minut.
         this._now = typeof options.now === 'function' ? options.now : () => Date.now();
-        /** @type {Map<string, number[]>} znaczniki czasu wysyłek per para nadawca→adresat (S33 B1) */
+        /** @type {Map<string, number[]>} znaczniki czasu wysyłek per para nadawca→adresat */
         this._sendLog = new Map();
-        /** @type {Map<string, number[]>} znaczniki czasu wysyłek per NADAWCA, bez względu na adresata (K12) */
+        /** @type {Map<string, number[]>} znaczniki czasu wysyłek per NADAWCA, bez względu na adresata */
         this._senderLog = new Map();
-        /** @type {Map<string, {hop: number, at: number}>} najwyższy przeczytany hop per agent (S33 B2) */
+        /** @type {Map<string, {hop: number, at: number}>} najwyższy przeczytany hop per agent */
         this._readHops = new Map();
-        /** @type {Map<string, Promise<void>>} łańcuchy serializujące operacje poczty (K6) */
+        /** @type {Map<string, Promise<void>>} łańcuchy serializujące operacje poczty */
         this._locks = new Map();
         /**
-         * AUD-wydajnosc-028/058/101/020/053: nagłówki skrzynki (bez treści), keszowane per
-         * folder skrzynki, z pieczątką czasu budowy. Odświeżenie sidebara (i
-         * `getUnreadCount`/`kom_list`/`resolveHopFor` pod spodem) czytało z dysku KAŻDY plik
-         * wiadomości przy KAŻDYM wywołaniu, choć wynik to zwykle jedna liczba. Kesz buduje się
-         * raz (`Promise.all`, nie sekwencyjny `for`) i żyje, dopóki:
+         * Nagłówki skrzynki (bez treści), keszowane per folder skrzynki, z pieczątką czasu
+         * budowy. DLACZEGO: odświeżenie sidebara (i `getUnreadCount`/`kom_list`/`resolveHopFor`
+         * pod spodem) czytałoby z dysku KAŻDY plik wiadomości przy KAŻDYM wywołaniu, choć wynik
+         * to zwykle jedna liczba. Kesz buduje się raz (`Promise.all`, nie sekwencyjny `for`)
+         * i żyje, dopóki:
          *   1. żadna mutacja PRZEZ TEN MANAGER nie zajdzie (jawna inwalidacja: `sendMessage`/
          *      `_setFlag` przez `readMessage`/`markUserRead`/`markAiRead`/`deleteMessage`),
          *   2. żadne zdarzenie vaulta pod tym folderem nie przyjdzie (`attachVaultEvents`),
-         *   3. `HEADER_CACHE_TTL_MS` nie minie (siatka bezpieczeństwa dla zapisów Z ZEWNĄTRZ —
+         *   3. `HEADER_CACHE_TTL_MS` nie minie (siatka bezpieczeństwa dla zapisów Z ZEWNĄTRZ -
          *      patrz komentarz przy stałej: agent CC piszący wprost na dysk, sync Google Drive,
          *      `obsidian-git pull`).
          * @type {Map<string, {headers: MessageHeader[], at: number}>}
@@ -139,9 +139,9 @@ export class KomunikatorManager {
     }
 
     /**
-     * W8 follow-up: zdejmij kesz nagłówków dla folderu wskazanego ŚCIEŻKĄ PLIKU/FOLDERU
-     * (a nie nazwą agenta) — używane przez handler zdarzeń vaulta, który dostaje surową
-     * ścieżkę z Obsidiana, nie wie nic o `safeName`.
+     * Zdejmij kesz nagłówków dla folderu wskazanego ŚCIEŻKĄ PLIKU/FOLDERU (a nie nazwą
+     * agenta) - używane przez handler zdarzeń vaulta, który dostaje surową ścieżkę
+     * z Obsidiana, nie wie nic o `safeName`.
      * @private
      */
     _invalidateInboxCacheByPath(path: string | undefined): void {
@@ -155,12 +155,12 @@ export class KomunikatorManager {
     }
 
     /**
-     * W8 follow-up (review koordynatora, 2026-09-02): jawna inwalidacja przy mutacji PRZEZ
-     * TEN MANAGER nie łapie zapisów Z ZEWNĄTRZ — sesje Claude Code piszą do skrzynek WPROST
-     * na dysk (kontrakt `/agent`), vault bywa synchronizowany Google Drive między urządzeniami,
-     * `obsidian-git pull` też potrafi podmienić pliki. Bez nasłuchu kesz zamrażałby liczniki
-     * do najbliższej mutacji przez plugin (do `HEADER_CACHE_TTL_MS`, patrz stała) — realna
-     * regresja funkcjonalna, nie tylko wydajnościowa.
+     * DLACZEGO: jawna inwalidacja przy mutacji PRZEZ TEN MANAGER nie łapie zapisów
+     * Z ZEWNĄTRZ - sesje Claude Code piszą do skrzynek WPROST na dysk (kontrakt `/agent`),
+     * vault bywa synchronizowany Google Drive między urządzeniami, `obsidian-git pull` też
+     * potrafi podmienić pliki. Bez nasłuchu kesz zamrażałby liczniki do najbliższej mutacji
+     * przez plugin (do `HEADER_CACHE_TTL_MS`, patrz stała) - realna regresja funkcjonalna,
+     * nie tylko wydajnościowa.
      *
      * Nasłuchuje `create`/`modify`/`delete`/`rename` na `this.vault` (realny Obsidian `Vault`
      * ma `.on`/`.offref` — atrapy testowe bez nich po prostu nie dostają nasłuchu, TTL i tak
@@ -211,7 +211,7 @@ export class KomunikatorManager {
         this._vaultEventsAttached = false;
     }
 
-    // ────────────────── serializacja operacji (K6, AUD-security-011/044/046) ──────────────────
+    // ────────────────── serializacja operacji ──────────────────
 
     /**
      * Wykonaj `fn` jako OGNIWO łańcucha przypiętego do klucza — nic innego z tym samym
@@ -245,7 +245,7 @@ export class KomunikatorManager {
         return this.withLock(`agent:${this._getSafeName(agentName)}`, fn);
     }
 
-    // ────────────────── strażnicy poczty (S33 Z2) — stan w pamięci ──────────────────
+    // ────────────────── strażnicy poczty — stan w pamięci ──────────────────
 
     /**
      * Klucz pary nadawca→adresat. Ta sama normalizacja co nazwy folderu skrzynki, więc
@@ -257,7 +257,7 @@ export class KomunikatorManager {
     }
 
     /**
-     * K12 — klucz sufitu NADAWCY. Ta sama normalizacja co w {@link _pairKey}, więc
+     * Klucz sufitu NADAWCY. Ta sama normalizacja co w {@link _pairKey}, więc
      * „Tola" i „tola" to jeden nadawca także tutaj.
      * @private
      */
@@ -275,14 +275,14 @@ export class KomunikatorManager {
     }
 
     /**
-     * S33 B1 + K12 — czy wolno wysłać kolejną wiadomość.
-     * Stan żyje wyłącznie w pamięci: restart pluginu = czyste konto. Świadomie —
+     * Czy wolno wysłać kolejną wiadomość.
+     * Stan żyje wyłącznie w pamięci: restart pluginu = czyste konto. Świadomie -
      * to bezpiecznik przed rozpędzoną pętlą w jednej sesji, nie kwota dzienna.
      *
      * DWA sufity na to samo okno, koniunkcyjnie:
-     *  - `limit` — per PARA nadawca→adresat (S33 B1),
-     *  - `senderLimit` — per NADAWCA, bez względu na adresata (K12, ogon K6). Bez niego
-     *    zepsuty agent rozsyłał `limit` × liczba adresatów, mieszcząc się w każdej parze.
+     *  - `limit` — per PARA nadawca→adresat,
+     *  - `senderLimit` — per NADAWCA, bez względu na adresata. Bez niego
+     *    zepsuty agent rozsyłałby `limit` × liczba adresatów, mieszcząc się w każdej parze.
      * `reason` mówi, KTÓRY sufit odmówił — komunikat dla modelu ma być prawdziwy.
      *
      * @param {string} from
@@ -310,17 +310,17 @@ export class KomunikatorManager {
     }
 
     /**
-     * K6 (AUD-security-011) — ATOMOWA rezerwacja slotu: sprawdzenie i inkrement w JEDNYM
-     * kroku synchronicznym, bez ani jednego `await` w środku. To jest metoda, której ma
-     * używać narzędzie `kom_send`; `checkSendAllowed` + `noteSend` zostają jako podgląd
-     * i zapis dla UI/testów, ale rozjeżdżają się przy równoległości.
+     * ATOMOWA rezerwacja slotu: sprawdzenie i inkrement w JEDNYM kroku synchronicznym,
+     * bez ani jednego `await` w środku. To jest metoda, której ma używać narzędzie
+     * `kom_send`; `checkSendAllowed` + `noteSend` zostają jako podgląd i zapis dla
+     * UI/testów, ale rozjeżdżają się przy równoległości.
      *
-     * Licznik rośnie PRZED zapisem pliku (rezerwacja), a nie po nim — nieudany zapis
+     * Licznik rośnie PRZED zapisem pliku (rezerwacja), a nie po nim - nieudany zapis
      * oddaje slot przez {@link releaseSend}. Sufit wsadu w jednej turze to ten sam
      * `kom_send_rate_max` z `config/limits.js`: dziesięć równoległych wywołań przy limicie
      * 5 dostaje 5 przepustek i 5 odmów.
      *
-     * K12: rezerwacja dopisuje do OBU liczników (para + nadawca) — inaczej sufit nadawcy
+     * Rezerwacja dopisuje do OBU liczników (para + nadawca) - inaczej sufit nadawcy
      * byłby dekoracją, bo produkcyjna droga `kom_send` nie woła `noteSend`.
      */
     reserveSend(
@@ -353,8 +353,8 @@ export class KomunikatorManager {
     }
 
     /**
-     * K6 — oddaj slot zarezerwowany przez {@link reserveSend}, gdy zapis pliku padł.
-     * K12: oddajemy w OBU licznikach, inaczej błąd dysku zjadałby sufit nadawcy.
+     * Oddaj slot zarezerwowany przez {@link reserveSend}, gdy zapis pliku padł.
+     * Oddajemy w OBU licznikach, inaczej błąd dysku zjadałby sufit nadawcy.
      */
     releaseSend(from: string, to: string): void {
         const recent = this._sendLog.get(this._pairKey(from, to));
@@ -363,7 +363,7 @@ export class KomunikatorManager {
         if (sender?.length) sender.pop();
     }
 
-    /** S33 B1 + K12 — odnotuj wysyłkę w obu licznikach (wołane PO udanym zapisie pliku). */
+    /** Odnotuj wysyłkę w obu licznikach (wołane PO udanym zapisie pliku). */
     noteSend(from: string, to: string): void {
         const now = this._now();
         const pairKey = this._pairKey(from, to);
@@ -382,7 +382,7 @@ export class KomunikatorManager {
         return KomunikatorManager._prune(this._sendLog, key, this._now() - KOM_RATE_WINDOW_MS);
     }
 
-    /** @private K12 — to samo dla licznika nadawcy. To samo okno, inny klucz. */
+    /** @private To samo dla licznika nadawcy. To samo okno, inny klucz. */
     _pruneSenderLog(key: string): number[] {
         return KomunikatorManager._prune(this._senderLog, key, this._now() - KOM_RATE_WINDOW_MS);
     }
@@ -395,7 +395,7 @@ export class KomunikatorManager {
     }
 
     /**
-     * S33 B2 — odnotuj, że agent przeczytał wiadomość o danym `hop`.
+     * Odnotuj, że agent przeczytał wiadomość o danym `hop`.
      *
      * DLACZEGO TTL, A NIE „SESJA": z warstwy narzędzia nie ma czym uczciwie zmierzyć granicy
      * rozmowy — `kom_read` bywa wołane też przez sub-agenta i przez harness, a chat nie emituje
@@ -417,7 +417,7 @@ export class KomunikatorManager {
     }
 
     /**
-     * S33 B2 — jaki `hop` ma dostać wiadomość wychodząca od tego agenta.
+     * Jaki `hop` ma dostać wiadomość wychodząca od tego agenta.
      * Brak świeżych odczytów = zwykła rozmowa z userem → 0.
      * @param {string} agentName
      * @returns {number}
@@ -433,13 +433,13 @@ export class KomunikatorManager {
     }
 
     /**
-     * K6 (AUD-security-046) — jaki `hop` ma dostać wiadomość wychodząca, liczony ze stanu
-     * ODCZYTANEGO W CHWILI WYSYŁKI.
+     * Jaki `hop` ma dostać wiadomość wychodząca, liczony ze stanu ODCZYTANEGO W CHWILI
+     * WYSYŁKI.
      *
      * DLACZEGO NIE SAM `nextHopFor`: rejestr w pamięci zapisuje dopiero `noteRead`, czyli
      * dwa `await` w głąb `readMessage`. Gdy model w jednej turze woła `kom_read` i `kom_send`
-     * (naturalne „sprawdź pocztę i odpisz"), wysyłka wygrywała wyścig, szła z hopem 0 i
-     * KASOWAŁA cały dotychczasowy łańcuch. Tu bierzemy MAKSIMUM z dwóch źródeł:
+     * (naturalne „sprawdź pocztę i odpisz"), wysyłka mogłaby wygrać wyścig, pójść z hopem 0
+     * i SKASOWAĆ cały dotychczasowy łańcuch. Tu bierzemy MAKSIMUM z dwóch źródeł:
      *   1. rejestr w pamięci (`nextHopFor`) — świeży, bo `kom_send` i `kom_read` jednego
      *      agenta chodzą po tym samym łańcuchu {@link withAgentLock},
      *   2. ŚWIEŻY odczyt własnej skrzynki z dysku — listy już odhaczone `ai_read`, które
@@ -459,10 +459,11 @@ export class KomunikatorManager {
         let fromDisk = 0;
         try {
             const cutoff = this._now() - KOM_HOP_TTL_MS;
-            // K8/AUD-code-review-045: `listMessages()` (public) łyka błędy I/O i oddaje `[]` —
-            // ten sam kształt jak „skrzynka pusta", więc ten `catch` niżej był martwy. Wariant
-            // `_listMessagesStrict` PROPAGUJE awarię, żeby fail-closed z komentarza wyżej realnie
-            // odpalał się na padniętym odczycie, nie tylko na złej nazwie agenta.
+            // DLACZEGO `_listMessagesStrict`, NIE `listMessages()`: publiczny `listMessages()`
+            // łyka błędy I/O i oddaje `[]` — ten sam kształt jak „skrzynka pusta", więc catch
+            // niżej by nie zadziałał. `_listMessagesStrict` PROPAGUJE awarię, żeby fail-closed
+            // z komentarza wyżej realnie odpalał się na padniętym odczycie, nie tylko na
+            // złej nazwie agenta.
             for (const m of await this._listMessagesStrict(agentName)) {
                 if (!m.aiRead) continue;
                 // Świeżość mierzymy znacznikiem z id (`msg-<epoch>[-n]`) — to moment doręczenia.
@@ -480,7 +481,7 @@ export class KomunikatorManager {
     // ───────────────────────────── ścieżki ─────────────────────────────
 
     /**
-     * Nazwa agenta → bezpieczna nazwa folderu (jak w v2 — ten sam wzór co reszta pluginu).
+     * Nazwa agenta → bezpieczna nazwa folderu (ten sam wzór co reszta pluginu).
      * @param {string} name
      * @returns {string}
      */
@@ -518,14 +519,14 @@ export class KomunikatorManager {
         return clean;
     }
 
-    /** Emituj event odświeżenia UI po każdej mutacji (wzór Z10 z S08). */
+    /** Emituj event odświeżenia UI po każdej mutacji. */
     _notifyUpdated(agentName: string, extra: Record<string, unknown> = {}): void {
         this.agentManager?._emit?.('communicator:message_updated', { agent: agentName, ...extra });
     }
 
     /**
-     * Po zmianie ptaszka sprawdź, czy wiadomość ma OBA — wtedy dochodzi drugi event,
-     * na którym siedzi modal sprzątania (D5). Jedno miejsce dla wszystkich mutacji:
+     * Po zmianie ptaszka sprawdź, czy wiadomość ma OBA - wtedy dochodzi drugi event,
+     * na którym siedzi modal sprzątania. Jedno miejsce dla wszystkich mutacji:
      * i tych z UI, i tych z narzędzia agenta.
      * @param {string} agentName
      * @param {string} id
@@ -557,11 +558,10 @@ export class KomunikatorManager {
     /**
      * Folder skrzynki adresata, gotowy do zapisu.
      *
-     * ⚠️ **Dwie różne porażki, dwie różne diagnozy** (K4, AUD-bledy-046). Do naprawy oba
-     * przypadki oddawały `null`, a `sendMessage` mapowało je na jeden komunikat „nieznany
-     * adresat" — mimo że w drodze przez `sendAgentMail` adresat był już ROZWIĄZANY jako
-     * istniejący i widoczny. Model dostawał diagnozę, która jest nieprawdą (wnioskował, że
-     * agenta nie ma), a jedyna prawdziwa informacja — awaria dysku — zostawała w konsoli.
+     * ⚠️ **Dwie różne porażki, dwie różne diagnozy.** DLACZEGO: mapowanie obu przypadków na
+     * jeden komunikat „nieznany adresat" byłoby nieprawdą, gdy w drodze przez `sendAgentMail`
+     * adresat jest już ROZWIĄZANY jako istniejący i widoczny - model wnioskowałby, że agenta
+     * nie ma, a jedyna prawdziwa informacja (awaria dysku) zostawałaby tylko w konsoli.
      *
      * @returns `{dir}` przy sukcesie, `{dir: null, reason}` przy porażce:
      *   `'invalid_recipient'` = nazwa nie do użycia (walidacja), `'inbox_unavailable'` = I/O.
@@ -592,14 +592,14 @@ export class KomunikatorManager {
      * @param {string} subject
      * @param {string} content
      * @param {Object} [options]
-     * @param {number} [options.hop=0] - S33 B2: numer odbicia w łańcuchu. Ścieżka UI (user pisze
-     *   z panelu) zawsze zostawia 0 — łańcuch liczymy tylko dla poczty agent→agent.
+     * @param {number} [options.hop=0] - numer odbicia w łańcuchu. Ścieżka UI (user pisze
+     *   z panelu) zawsze zostawia 0 - łańcuch liczymy tylko dla poczty agent→agent.
      * @returns {Promise<{success: boolean, id?: string, path?: string, error?: string}>}
      */
     async sendMessage(from: string, to: string, subject: string, content: string, options: { hop?: number } = {}): Promise<{ success: boolean; id?: string; path?: string; error?: string }> {
         const inbox = await this._ensureInboxDir(to);
         if (inbox.dir === null) {
-            // AUD-bledy-046: „nie umiem założyć skrzynki" to awaria zapisu, nie błąd adresata.
+            // DLACZEGO: „nie umiem założyć skrzynki" to awaria zapisu, nie błąd adresata.
             return {
                 success: false,
                 error: inbox.reason === 'inbox_unavailable'
@@ -614,11 +614,10 @@ export class KomunikatorManager {
             return { success: false, error: t('komunikator.message_too_large', { max: MAX_MESSAGE_BYTES / 1024 }) };
         }
 
-        // K6 (AUD-security-044): dobór nazwy i zapis idą pod JEDNYM łańcuchem na skrzynkę.
-        // Wcześniej `_exists` było za `await`, więc dwie równoległe wysyłki w tej samej
-        // milisekundzie dostawały to samo id, a druga KASOWAŁA treść pierwszej — obie z
-        // `success: true`. Serializacja per skrzynka sprawia, że sufiks widzi już zapisany
-        // plik poprzednika, także gdy nadawcy są różni.
+        // DLACZEGO: dobór nazwy i zapis idą pod JEDNYM łańcuchem na skrzynkę - bez tego dwie
+        // równoległe wysyłki w tej samej milisekundzie dostałyby to samo id, a druga
+        // KASOWAŁABY treść pierwszej, obie z `success: true`. Serializacja per skrzynka
+        // sprawia, że sufiks widzi już zapisany plik poprzednika, także gdy nadawcy są różni.
         return this.withLock(`inbox:${dir}`, async () => {
             // Kolizja timestampu (dwie wiadomości w tej samej milisekundzie) → sufiks -1, -2, ...
             const stamp = this._now();
@@ -627,8 +626,8 @@ export class KomunikatorManager {
             for (let suffix = 1; ; suffix++) {
                 const probe = await this._probe(path);
                 if (probe === 'missing') break;
-                // K4 (AUD-bledy-063): nieudane SPRAWDZENIE nie jest wolną nazwą. Nie wiemy, czy
-                // pod spodem leży cudzy list, więc nadawca dostaje błąd (może ponowić — stempel
+                // DLACZEGO: nieudane SPRAWDZENIE nie jest wolną nazwą. Nie wiemy, czy pod
+                // spodem leży cudzy list, więc nadawca dostaje błąd (może ponowić - stempel
                 // się zmieni) zamiast cichego nadpisania z `success: true`.
                 if (probe === 'unknown') return { success: false, error: t('komunikator.send_failed') };
                 id = `msg-${stamp}-${suffix}`;
@@ -649,7 +648,7 @@ export class KomunikatorManager {
             // CREATE-ONLY na ostatnim metrze: adapter.write nadpisuje bez pytania, więc
             // tuż przed zapisem jeszcze raz upewniamy się, że pod tą nazwą nic nie leży.
             // Zapis przepuszcza WYŁĄCZNIE potwierdzone „nie ma" — `unknown` odmawia tak samo
-            // jak `exists` (K4, AUD-bledy-063).
+            // jak `exists`.
             if (await this._probe(path) !== 'missing') {
                 log.warn('KomunikatorManager', 'Refusing to overwrite existing message:', path);
                 return { success: false, error: t('komunikator.send_failed') };
@@ -662,7 +661,7 @@ export class KomunikatorManager {
                 return { success: false, error: t('komunikator.send_failed') };
             }
 
-            // Nowy plik w skrzynce adresata — kesz nagłówków (AUD-wydajnosc-*) jest nieaktualny.
+            // Nowy plik w skrzynce adresata - kesz nagłówków jest nieaktualny.
             this._invalidateInboxCache(to);
             this._notifyUpdated(to, { action: 'sent', id, from });
             return { success: true, id, path };
@@ -686,25 +685,25 @@ export class KomunikatorManager {
     }
 
     /**
-     * K8/AUD-code-review-045/046: jak {@link listMessages}, ale PROPAGUJE awarię I/O (`exists`/
-     * `list` na folderze skrzynki rzuca) zamiast cichego `[]`. Publiczny `listMessages()` zostaje
-     * swallow-to-`[]` dla wołaczy, dla których „pusto" i „nie wiem" to dziś bezpiecznie ten sam
+     * Jak {@link listMessages}, ale PROPAGUJE awarię I/O (`exists`/`list` na folderze
+     * skrzynki rzuca) zamiast cichego `[]`. Publiczny `listMessages()` zostaje
+     * swallow-to-`[]` dla wołaczy, dla których „pusto" i „nie wiem" to bezpiecznie ten sam
      * wynik (ping sesji, UI listujące skrzynkę, narzędzia agenta). Ale `resolveHopFor` i
-     * `getUnreadCount` MUSZĄ odróżnić te dwa stany — pierwszy ma fail-closed wracać do
+     * `getUnreadCount` MUSZĄ odróżnić te dwa stany - pierwszy ma fail-closed wracać do
      * `KOM_HOP_LIMIT`, drugi ma pozwolić wołaczowi (chip w `CommunicatorView`) pokazać „?"
-     * zamiast udawać potwierdzone zero. Bez tego oba `catch`e u wołaczy były martwym kodem:
-     * `listMessages` nigdy nie oddawał wyjątku, więc nie było czego złapać.
+     * zamiast udawać potwierdzone zero. `listMessages` nigdy nie oddaje wyjątku, więc catch
+     * u tych wołaczy nie miałby czego złapać.
      * @private
      */
     async _listMessagesStrict(agentName: string): Promise<MessageHeader[]> {
         const dir = this._getInboxDir(agentName);
         if (!dir) return [];
 
-        // AUD-wydajnosc-028/058/101/020/053: trafienie w kesz = ZERO operacji na dysku.
+        // Trafienie w kesz = ZERO operacji na dysku.
         // Kopia (`.slice()`), żeby wołacz mogący posortować/zmutować tablicę we własnym
-        // zakresie nie popsuł wpisu w keszu. W8 follow-up: TTL — trafienie starsze niż
-        // `HEADER_CACHE_TTL_MS` liczy się jako PUDŁO, nie hit (siatka bezpieczeństwa dla
-        // zapisów spoza tego managera, patrz komentarz przy stałej).
+        // zakresie nie popsuł wpisu w keszu. TTL: trafienie starsze niż `HEADER_CACHE_TTL_MS`
+        // liczy się jako PUDŁO, nie hit (siatka bezpieczeństwa dla zapisów spoza tego
+        // managera, patrz komentarz przy stałej).
         const cached = this._headerCache.get(dir);
         if (cached && (this._now() - cached.at) <= HEADER_CACHE_TTL_MS) return cached.headers.slice();
 
@@ -746,7 +745,7 @@ export class KomunikatorManager {
     }
 
     /**
-     * Przeczytaj JEDNĄ wiadomość + automatycznie odhacz `ai_read` (D3: auto-ptaszek AI).
+     * Przeczytaj JEDNĄ wiadomość + automatycznie odhacz `ai_read` (auto-ptaszek AI).
      * @param {string} agentName
      * @param {string} id
      * @returns {Promise<{success: boolean, message?: Object, error?: string}>}
@@ -757,15 +756,15 @@ export class KomunikatorManager {
         const parsed = await this._readMessageFile(path, String(id).replace(/\.md$/, ''));
         if (!parsed) return { success: false, error: t('komunikator.message_not_found') };
 
-        // S33 B2: TU (nie w `getMessage`) rośnie licznik odbić — to jest ścieżka AGENTA.
+        // TU (nie w `getMessage`) rośnie licznik odbić - to jest ścieżka AGENTA.
         // Podgląd w UI nie może dokładać agentowi łańcucha, którego sam nie przeczytał.
         this.noteRead(agentName, parsed.header.hop);
 
         if (!parsed.header.aiRead) {
-            // AUD-bledy-042: pad zapisu ptaszka NIE MOŻE zniknąć. Do naprawy zwrotka `_setFlag`
-            // była ignorowana: model dostawał `success: true` i treść listu, a na dysku zostawało
-            // `ai_read: false` — więc `getAiUnreadCount` dalej liczył 1, ping wracał w KAŻDEJ
-            // następnej turze i agent czytał ten sam list w kółko. Meldujemy ze STANU dysku:
+            // DLACZEGO: pad zapisu ptaszka NIE MOŻE zniknąć w zwrotce. Ignorowanie zwrotki
+            // `_setFlag` dałoby modelowi `success: true` i treść listu, a na dysku zostałoby
+            // `ai_read: false` - więc `getAiUnreadCount` dalej liczyłby 1, ping wracałby w KAŻDEJ
+            // następnej turze i agent czytałby ten sam list w kółko. Meldujemy ze STANU dysku:
             // nieoznaczona wiadomość to nie jest wiadomość odebrana.
             const marked = await this._setFlag(path, 'ai_read', true);
             if (!marked) {
@@ -815,7 +814,7 @@ export class KomunikatorManager {
     }
 
     /**
-     * TWARDE usunięcie wiadomości (D5 — bez kosza). Woła WYŁĄCZNIE UI.
+     * TWARDE usunięcie wiadomości (bez kosza). Woła WYŁĄCZNIE UI.
      * @returns {Promise<boolean>}
      */
     async deleteMessage(agentName: string, id: string): Promise<boolean> {
@@ -841,16 +840,16 @@ export class KomunikatorManager {
      * @returns {Promise<number>}
      */
     async getUnreadCount(agentName: string): Promise<number> {
-        // K8/AUD-code-review-046: strict wariant — `CommunicatorView.renderAgentStrip` i
+        // DLACZEGO strict wariant: `CommunicatorView.renderAgentStrip` i
         // `HomeView.updateCommunicatorChips` mają catch zbudowany DOKŁADNIE pod odrzucenie tej
-        // obietnicy (badge „?" / pominięty chip + log), a przez `listMessages()` ten catch nigdy
-        // się nie odpalał, bo błąd I/O wyglądał identycznie jak potwierdzone zero.
+        // obietnicy (badge „?" / pominięty chip + log) - przez `listMessages()` ten catch by się
+        // nie odpalił, bo błąd I/O wygląda identycznie jak potwierdzone zero.
         const messages = await this._listMessagesStrict(agentName);
         return messages.filter(m => !m.userRead).length;
     }
 
     /**
-     * Ile wiadomości agent (AI) jeszcze nie przeczytał — źródło pingu sesji (D4).
+     * Ile wiadomości agent (AI) jeszcze nie przeczytał - źródło pingu sesji.
      * @param {string} agentName
      * @returns {Promise<number>}
      */
@@ -873,7 +872,7 @@ export class KomunikatorManager {
     }
 
     /**
-     * Dane pingu sesji (D4): ile nieprzeczytanych przez AI + od kogo. BEZ treści.
+     * Dane pingu sesji: ile nieprzeczytanych przez AI + od kogo. BEZ treści.
      * @param {string} agentName
      * @returns {Promise<{count: number, senders: string[]}>}
      */
@@ -887,7 +886,7 @@ export class KomunikatorManager {
     }
 
     /**
-     * Wiadomości z OBOMA ptaszkami (kandydaci guzika „Usuń przeczytane", D5).
+     * Wiadomości z OBOMA ptaszkami (kandydaci guzika „Usuń przeczytane").
      * @param {string} agentName
      * @returns {Promise<Array<Object>>}
      */
@@ -898,13 +897,14 @@ export class KomunikatorManager {
     // ───────────────────────────── bebechy ─────────────────────────────
 
     /**
-     * Czy pod tą ścieżką coś leży — w TRZECH stanach (K4, AUD-bledy-063).
+     * Czy pod tą ścieżką coś leży - w TRZECH stanach.
      *
-     * Poprzednia wersja (`try { exists() } catch { return false }`) zamieniała KAŻDY wyjątek
-     * w ciche „nazwa wolna", bez jednej linii w logu — i tą samą wartością karmiła pętlę doboru
-     * nazwy ORAZ bramkę anty-nadpisaniową tuż przed zapisem. Jedno zacięcie I/O na jednym pliku
-     * wystarczało, żeby `adapter.write` skasował cudzą wiadomość, a obaj nadawcy dostali
-     * `success: true`. `unknown` odczytujemy jako „zajęte / nie ruszam" — fail-closed.
+     * DLACZEGO NIE `try { exists() } catch { return false }`: to zamieniałoby KAŻDY wyjątek
+     * w ciche „nazwa wolna", bez jednej linii w logu - i tą samą wartością karmiłoby pętlę
+     * doboru nazwy ORAZ bramkę anty-nadpisaniową tuż przed zapisem. Jedno zacięcie I/O na
+     * jednym pliku wystarczyłoby, żeby `adapter.write` skasował cudzą wiadomość, a obaj
+     * nadawcy dostali `success: true`. `unknown` odczytujemy jako „zajęte / nie ruszam" -
+     * fail-closed.
      */
     async _probe(path: string): Promise<FileProbe> {
         const probe = await probeFile(this.vault.adapter, path);
@@ -919,10 +919,10 @@ export class KomunikatorManager {
      * @returns {Promise<{header: Object, body: string}|null>}
      */
     async _readMessageFile(path: string, id: string): Promise<{ header: MessageHeader; body: string } | null> {
-        // AUD-wydajnosc-028/058/101: bez `exists()` przed `read()` — ten sam wzorzec co
-        // przy innych odczytach plików w tym repo (`exists()` kłamie na dyskach sieciowych, S30). Brakujący plik
-        // i padnięty odczyt dają identyczny skutek (`null`), więc jedno `try/catch` na `read`
-        // wystarcza i połowi liczbę operacji adaptera na plik.
+        // Bez `exists()` przed `read()` — ten sam wzorzec co przy innych odczytach plików
+        // w tym repo (`exists()` kłamie na dyskach sieciowych). Brakujący plik i padnięty
+        // odczyt dają identyczny skutek (`null`), więc jedno `try/catch` na `read` wystarcza
+        // i połowi liczbę operacji adaptera na plik.
         let raw: string | undefined;
         try {
             raw = await this.vault.adapter.read(path);
@@ -943,8 +943,8 @@ export class KomunikatorManager {
             if (!(await this.vault.adapter.exists(path))) return false;
             raw = await this.vault.adapter.read(path);
         } catch (e) {
-            // AUD-bledy-042: gołe `catch { return false; }` nie zostawiało ani linii w logu,
-            // a wołacz nie miał JAK odróżnić „nic do zmiany" od „odczyt padł".
+            // DLACZEGO log.warn: gołe `catch { return false; }` nie zostawiałoby ani linii
+            // w logu, a wołacz nie miałby JAK odróżnić „nic do zmiany" od „odczyt padł".
             log.warn('KomunikatorManager', 'Failed to read message before flag update:', path, e);
             return false;
         }
@@ -964,13 +964,13 @@ export class KomunikatorManager {
 // ═══════════════════════ pure helpery (testowalne bez vaulta) ═══════════════════════
 
 /**
- * Data wiadomości w formacie `YYYY-MM-DD HH:MM` (spójnie z E2.9).
+ * Data wiadomości w formacie `YYYY-MM-DD HH:MM`.
  * @param {Date} now
  * @returns {string}
  */
-// AUD-dead-code-077: `export` zdjęty — zero konsumentów spoza tego pliku (test nie
-// importuje formatMessageDate; wzmianka w modules/artifacts/artifactParser.ts:71 to
-// tylko komentarz prozą, nie import).
+// Nieeksportowana: zero konsumentów spoza tego pliku (test nie importuje
+// formatMessageDate; wzmianka w modules/artifacts/artifactParser.ts:71 to tylko
+// komentarz prozą, nie import).
 function formatMessageDate(now: Date): string {
     const pad = (n: number) => String(n).padStart(2, '0');
     const local = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
@@ -996,7 +996,7 @@ export function buildMessageMarkdown(fm: MessageFrontmatter, body: string): stri
         `data: ${quote(fm.data)}`,
         `user_read: ${fm.user_read === true}`,
         `ai_read: ${fm.ai_read === true}`,
-        // S33 B2: numer odbicia w łańcuchu agent→agent. 0 = początek rozmowy.
+        // Numer odbicia w łańcuchu agent→agent. 0 = początek rozmowy.
         `hop: ${Number(fm.hop) || 0}`,
         '---',
         '',
@@ -1028,7 +1028,7 @@ export function parseMessage(raw: string, id: string): { header: MessageHeader; 
             userRead,
             aiRead,
             allRead: userRead && aiRead,
-            // S33 B2: stare wiadomości (sprzed tej zmiany) nie mają pola — to hop 0.
+            // Brak pola (starsze wiadomości) = hop 0.
             hop: Number(frontmatter.hop) || 0,
         },
         body: String(content || '').trim(),

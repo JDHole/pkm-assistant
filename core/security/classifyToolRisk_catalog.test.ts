@@ -1,10 +1,10 @@
 /**
- * AUD-testy-049 — `classifyToolRisk` (core/security/autonomy.ts:103-180) decyduje, czy user
- * w ogóle zostaje ZAPYTANY przed akcją. Do tego testu tylko 2 z 23 built-in narzędzi
- * (`web_search`/`web_read`) miały pokrycie end-to-end — reszta (create_folder, memory_save,
- * delegate, generate_image, add_text_to_image, artifact_create/update...) dało się cicho
- * przeklasyfikować na GREEN bez ani jednego czerwonego testu (mutacja z findings.json:
- * `if (yellowTools.has(tool)) return YELLOW;` → `return GREEN;` zostawiała 2465/2465 zielono).
+ * `classifyToolRisk` (core/security/autonomy.ts:103-180) decyduje, czy user
+ * w ogóle zostaje ZAPYTANY przed akcją. Bez tego pliku tylko 2 z 23 built-in narzędzi
+ * (`web_search`/`web_read`) miałyby pokrycie end-to-end — reszta (create_folder, memory_save,
+ * delegate, generate_image, add_text_to_image, artifact_create/update...) dałaby się cicho
+ * przeklasyfikować na GREEN bez ani jednego czerwonego testu (np. mutacja
+ * `if (yellowTools.has(tool)) return YELLOW;` → `return GREEN;` zostawiałaby cały pakiet zielony).
  *
  * Dwie warstwy obrony:
  *  1. KOMPLETNOŚĆ — `EXPECTED` jest DIFFOWANE względem `ToolRegistry.getBuiltinServerMap()`
@@ -107,8 +107,8 @@ test('todo: get/list/read=GREEN (dowolna wielkość liter); każda inna akcja (i
     }
 });
 
-// ─── Aliasy wsteczne `vault_*` — poza dzisiejszym BUILTIN_TOOL_MAP (E2.6 zdjęło prefiks),
-// ale WCIĄŻ żywe w classifyToolRisk dla starych configów sub-agentów / przełączników
+// ─── Aliasy wsteczne `vault_*` — poza dzisiejszym BUILTIN_TOOL_MAP (narzędzia straciły
+// prefiks), ale WCIĄŻ żywe w classifyToolRisk dla starych configów sub-agentów / przełączników
 // approvalu zapisanych przed rename'em. Osobna sekcja, bo kompletność wyżej liczy się
 // względem KATALOGU, nie względem tych literałów. ───
 

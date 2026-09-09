@@ -1,10 +1,10 @@
 /**
- * decisionTree.js — dane i logika chudego rdzenia drzewa decyzyjnego (D14, E2.4).
+ * decisionTree.js - dane i logika chudego rdzenia drzewa decyzyjnego.
  *
  * Pure module (zależność tylko od i18n) → testowalny node'em. PromptBuilder przez łańcuch importów
  * wciąga `obsidian`, więc filtrowanie/rozstrzyganie instrukcji musi żyć osobno, żeby dało się je pokryć.
  *
- * Model D14: chudy rdzeń always-on (CORE_RULES) = reguły cross-tool i sądy modelu. Guidance
+ * Chudy rdzeń always-on (CORE_RULES) = reguły cross-tool i sądy modelu. Guidance
  * „kiedy użyć KONKRETNEGO narzędzia" wyprowadzone do opisów narzędzi (i18n mcp.*.desc → API);
  * twarde reguły (approval delete, nudge todo po skillu, anti-loop) żyją w kodzie/hookach.
  * Furtka `extendedPromptRules` dokłada EXTENDED_RULES (verbose, dla słabszych modeli).
@@ -23,10 +23,10 @@ export type DecisionTreeOverride = false | string | { text?: string; group?: str
 export type DecisionTreeOverrides = Record<string, DecisionTreeOverride>;
 
 /**
- * Grupy — służą TYLKO do grupowania w UI overridów (profile_prompt: `label` + `order`). Render
- * rdzenia jest płaski i gatuje po dostępności narzędzia (availableToolNames), nie po grupach —
- * pole `requiredGroups` istniało tu jako martwe metadane po D14 i zostało skasowane w fabryce
- * dead-code D7 (AUD-dead-code-076/139/242): zero czytelników w całym repo.
+ * Grupy - służą TYLKO do grupowania w UI overridów (profile_prompt: `label` + `order`). Render
+ * rdzenia jest płaski i gatuje po dostępności narzędzia (availableToolNames), nie po grupach -
+ * pole `requiredGroups` istniało tu jako martwe metadane i zostało skasowane: zero czytelników
+ * w całym repo.
  */
 export const DECISION_TREE_GROUPS = {
     delegacja:   { get label() { return t('dt.group.delegacja'); },   order: 0 },
@@ -39,7 +39,7 @@ export const DECISION_TREE_GROUPS = {
 };
 
 /**
- * CHUDY RDZEŃ (D14) — always-on reguły cross-tool i sądy modelu. Per-rule: id (klucz override),
+ * CHUDY RDZEŃ - always-on reguły cross-tool i sądy modelu. Per-rule: id (klucz override),
  * group (UI), tool (renderuj tylko gdy narzędzie dostępne wg availableToolNames), requiresSkills
  * (renderuj gdy agent ma skille), text. Teksty inline PL (drzewo to polski korpus promptu).
  */
@@ -48,31 +48,31 @@ export const CORE_RULES: DecisionTreeRule[] = [
       text: 'ESKALACJA: wiesz → odpowiadaj; brakuje danych → zbierz (narzędzia albo delegate); brak wyniku → ask_user; user odmówił → STOP.' },
     { id: 'deleg_core', group: 'delegacja', tool: 'delegate',
       text: 'Dużo danych z vaulta/weba do zebrania (przeszukanie wielu plików, analiza zbiorcza, synteza) → delegate. Drobiazgi (jeden read/search) rób sam.' },
-    // E2.9 FAZA B (B3): świat artefaktów żywych. `art_todo_default` gate'owany na `todo`, które
-    // dochodzi dopiero w fazie D — do tego czasu reguła się NIE renderuje (świadome, spec B).
+    // Świat artefaktów żywych. `art_todo_default` gate'owany na `todo`, które
+    // dochodzi dopiero w fazie D - do tego czasu reguła się NIE renderuje (świadome).
     { id: 'art_todo_default', group: 'artefakty', tool: 'todo',
       text: 'Zadanie na 3+ kroków → od razu todo (lista kroków) i odhaczaj po kolei — masz je na oczach, nie gubisz wątku.' },
     { id: 'art_hierarchy', group: 'artefakty', tool: 'artifact_create',
       text: 'Proponujesz plan/dokument do zatwierdzenia przez usera → artifact_create(typ:"plan", tytul, sekcje z krokami). Powstaje notatka w vaultcie z guzikami akceptacji — user ją przegląda, poprawia i zatwierdza. NIE pisz artefaktów przez write.' },
     { id: 'art_existing', group: 'artefakty', tool: 'artifact_update',
       text: 'Istniejący artefakt → artifact_update po jego ID (patch na świeżym stanie), nie twórz nowego. Sekcji „Uwagi usera" NIGDY nie nadpisuj — to strefa usera: czytaj ją, zmieniaj tylko własne sekcje.' },
-    // E2.7 W1 proaktywny zapis w tle (bramka istotności, decyzja D3) + E2.8 D2 rozszerzenie o ulotne „na teraz".
+    // Proaktywny zapis w tle (bramka istotności) + rozszerzenie o ulotne „na teraz".
     { id: 'mem_proactive', group: 'pamiec', tool: 'memory_save', text: 'POD KONIEC TURY sam oceń, czy pojawiło się coś TRWAŁEGO wartego zapamiętania na przyszłość — jeśli tak, wywołaj memory_save bez proszenia usera. ZAPISUJ tylko: trwałe fakty/preferencje usera, reguły współpracy, korekty od usera ("nie tak, rób X"), kontekst projektu wart >1 sesji. NIE zapisuj: jednorazowych detali zadania, rzeczy które już są w brain.md (sprawdź katalog ## sekcji powyżej — nie duplikuj), spekulacji. Lepiej nie zapisać niż zaśmiecić pamięć. Osobno: ULOTNY stan „na teraz" (nad czym user pracuje DZIŚ, bieżący stan projektu/środowiska) to NIE trwały fakt → memory_save({ephemeral:true, section:"user"|"environment", content:"..."}) dopisuje go do sekcji „Na teraz" w brain.md (nie tworzy notatki); gdy coś się zdezaktualizowało, w tym samym wywołaniu dodaj remove:"stary wpis", żeby je wyczyścić.' },
     { id: 'mem_dedup', group: 'pamiec', tool: 'memory_save',
       text: 'Brain.md to indeks pamięci — przed zapisem sprawdź istniejące notatki (katalog ## sekcji wyżej), nie duplikuj tematów.' },
     { id: 'skille', group: 'skille', tool: null, requiresSkills: true,
       text: 'Masz indeks skilli niżej — zadanie pasuje do opisu skilla → read(ścieżka przepisu) i wykonaj kroki, bez pytania. Skille manual-only tylko na wyraźne życzenie usera.' },
-    // S28 (D4): reakcja na ping skrzynki to reguła zachowania (rdzeń), a nie opis narzędzia.
-    // „Kiedy wysłać pocztę vs zdelegować" siedzi w `mcp.kom_send.desc` (D14) + furtce niżej.
+    // Reakcja na ping skrzynki to reguła zachowania (rdzeń), a nie opis narzędzia.
+    // „Kiedy wysłać pocztę vs zdelegować" siedzi w `mcp.kom_send.desc` + furtce niżej.
     { id: 'kom_inbox', group: 'komunikator', tool: 'kom_read',
       text: 'Ping o nieprzeczytanych wiadomościach → kom_list() po nagłówki i kom_read(id) tylko dla tych, które wyglądają na istotne. Nie czytaj wszystkiego hurtem i nie kasuj poczty — skrzynkę sprząta user.' },
 ];
 
 /**
- * FURTKA (D14) — ROZSZERZONE REGUŁY dla słabszych modeli (np. małe lokalne, słabo czytające opisy
+ * FURTKA - ROZSZERZONE REGUŁY dla słabszych modeli (np. małe lokalne, słabo czytające opisy
  * narzędzi). Domyślnie OFF (settings.pkmAssistant.extendedPromptRules). ON → dokładane po rdzeniu jako
  * osobna sekcja. Zachowane pełne treści starych instrukcji (guidance „kiedy użyć narzędzia"),
- * przefiltrowane po dostępności narzędzia jak rdzeń. BEZ skill_use/skill_known (D17), file_write/
+ * przefiltrowane po dostępności narzędzia jak rdzeń. BEZ skill_use/skill_known, file_write/
  * file_delete (approval/desc w kodzie), deleg_mandatory/strateg/multi/no_overkill (w delegate.desc),
  * comms_ask_user/art_skill_todo (dup/nudge).
  */
@@ -88,10 +88,10 @@ export const EXTENDED_RULES: DecisionTreeRule[] = [
 ];
 
 /**
- * Wszystkie instrukcje (rdzeń + rozszerzone) — źródło dla UI overridów (profile_prompt) i resolvera.
+ * Wszystkie instrukcje (rdzeń + rozszerzone) - źródło dla UI overridów (profile_prompt) i resolvera.
  * Każda niesie `tier` ('core'|'extended'). Override `promptOverrides.decisionTreeInstructions[id]`
- * działa dla obu. Stare id (deleg_mandatory, skill_use, file_write, ...) już tu nie występują —
- * overridy na nie przestają matchować (świadome, D14).
+ * działa dla obu. Stare id (deleg_mandatory, skill_use, file_write, ...) już tu nie występują -
+ * overridy na nie przestają matchować (świadome).
  */
 export const DECISION_TREE_DEFAULTS: DecisionTreeRule[] = [
     ...CORE_RULES.map(r => ({ ...r, tier: 'core' as const })),
@@ -118,7 +118,7 @@ export function resolveDecisionTreeInstructions(agentOverrides: DecisionTreeOver
         result.push({ id: def.id, group: def.group, tool: def.tool, text, tier: def.tier, requiresSkills: def.requiresSkills });
     }
 
-    // Custom (custom_*) — traktowane jak rdzeń (always-on).
+    // Custom (custom_*) - traktowane jak rdzeń (always-on).
     const allCustomKeys = new Set([
         ...Object.keys(globalOverrides).filter(k => k.startsWith('custom_')),
         ...Object.keys(agentOverrides).filter(k => k.startsWith('custom_')),
@@ -141,7 +141,7 @@ export function resolveDecisionTreeInstructions(agentOverrides: DecisionTreeOver
 
 /**
  * Podziel rozstrzygnięte instrukcje na rdzeń (always-on) i rozszerzone (furtka), gatując po
- * dostępności narzędzia/skilli. Pure — zwraca obiekty instrukcji (render tekstu robi PromptBuilder).
+ * dostępności narzędzia/skilli. Pure - zwraca obiekty instrukcji (render tekstu robi PromptBuilder).
  *
  * @param {Array} resolved - wynik resolveDecisionTreeInstructions
  * @param {Object} opts

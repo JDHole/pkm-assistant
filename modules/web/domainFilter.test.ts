@@ -1,5 +1,5 @@
 /**
- * domainFilter.test.js — filtr domen (E3.3, DEC L13-5c).
+ * domainFilter.test.js — filtr domen.
  * Pure, bez obsidiana.
  */
 import test from 'ava';
@@ -35,7 +35,7 @@ test('parseDomainList: tablica, puste wejścia, duplikaty', t => {
     t.deepEqual(parseDomainList(42 as unknown as DomainListArg), []);
 });
 
-test('puste listy = filtr wyłączony (zero zmiany zachowania sprzed E3.3)', t => {
+test('puste listy = filtr wyłączony (zero filtrowania)', t => {
     t.is(checkDomain('https://cokolwiek.pl/a', {}), 'allowed');
     t.is(checkDomain('to nie jest URL', {}), 'allowed', 'bez filtra nie parsujemy adresu');
     t.is(checkDomain('https://x.pl', { blockedDomains: [], allowedDomains: [] }), 'allowed');

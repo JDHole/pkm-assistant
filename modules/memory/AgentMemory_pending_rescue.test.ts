@@ -1,13 +1,13 @@
 /**
- * D8 (2026-08-27, werdykt 27.08) — poczekalnia `brain/pending_rescue/`.
+ * Poczekalnia `brain/pending_rescue/`.
  *
- * AUD-docs-065: `memory_rescue` (ratunek kandydatów przed kompresją okna) pisał kandydatów
- * WPROST do `brain/` przez `writeBrainNote` — bez review usera, wbrew gotchy 1 modułu ("agent
- * proponuje, user zatwierdza"). Śledztwo (sesja D8) sprawdziło poczekalnię `ArchiveWorkflow`/
- * `ConsolidationRun` i uznało ją za nieosiągalną bez przebudowy (globalny singleton
- * `MemoryOpsCenter`, propozycje wyłącznie w RAM). Werdykt lidera: HYBRYDA — trwała poczekalnia
- * PLIKOWA (ten plik testuje silnik) + review przez ISTNIEJĄCY modal `/save session`
- * (`SaveSessionWorkflow.test.ts` testuje wpięcie).
+ * `memory_rescue` (ratunek kandydatów przed kompresją okna) nie pisze kandydatów WPROST do
+ * `brain/` przez `writeBrainNote` — to omijałoby review usera, wbrew gotchy 1 modułu ("agent
+ * proponuje, user zatwierdza"). Poczekalnia `ArchiveWorkflow`/`ConsolidationRun` jest
+ * nieosiągalna bez przebudowy (globalny singleton `MemoryOpsCenter`, propozycje wyłącznie
+ * w RAM), więc rozwiązanie to HYBRYDA — trwała poczekalnia PLIKOWA (ten plik testuje silnik)
+ * + review przez ISTNIEJĄCY modal `/save session` (`SaveSessionWorkflow.test.ts` testuje
+ * wpięcie).
  *
  * Wzorzec atrapy: `AgentMemory_kolizja_nazw.test.ts` (`makeVault` z opcjonalnym kłamstwem
  * `exists()`) — realny `AgentMemory` na fałszywym, ale kompletnym adapterze, nie mock samej klasy.
@@ -70,12 +70,12 @@ test('writePendingRescue: kandydat ląduje w brain/pending_rescue/, nie w brain/
     const memory = new AgentMemory(vault, 'Jaskier');
 
     const created = await memory.writePendingRescue({
-        name: 'Kuba lubi ciemny motyw', type: 'user', content: 'Kuba lubi ciemny motyw w Obsidianie.',
+        name: 'Jan lubi ciemny motyw', type: 'user', content: 'Jan lubi ciemny motyw w Obsidianie.',
     }, { source: 'auto_compaction' });
 
     t.true(created.path.startsWith(`${PENDING}/`), 'plik ląduje w poczekalni, nie w brain/');
     t.true(Object.prototype.hasOwnProperty.call(files, created.path));
-    t.true(files[created.path]!.includes('Kuba lubi ciemny motyw w Obsidianie.'));
+    t.true(files[created.path]!.includes('Jan lubi ciemny motyw w Obsidianie.'));
 });
 
 test('writePendingRescue: kandydat NIE wchodzi do listBrainNotes()/indeksu', async t => {
@@ -113,14 +113,14 @@ test('acceptPendingRescue: tworzy notatkę w brain/ i kasuje kandydata z poczeka
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
     const pending = await memory.writePendingRescue({
-        name: 'Kuba lubi ciemny motyw', type: 'user', content: 'Kuba lubi ciemny motyw.',
+        name: 'Jan lubi ciemny motyw', type: 'user', content: 'Jan lubi ciemny motyw.',
         why: 'user wspomniał w rozmowie',
     });
 
     const created = await memory.acceptPendingRescue(pending.filename);
 
     t.true(created.path.startsWith(`${BRAIN}/`) && !created.path.includes('pending_rescue'));
-    t.true(files[created.path]!.includes('Kuba lubi ciemny motyw.'));
+    t.true(files[created.path]!.includes('Jan lubi ciemny motyw.'));
     t.true(files[created.path]!.includes('user wspomniał w rozmowie'), 'why przeżywa do finalnej notatki');
     t.false(Object.prototype.hasOwnProperty.call(files, pending.path), 'kandydat zniknął z poczekalni');
     t.deepEqual(await memory.listPendingRescue(), []);
@@ -203,7 +203,7 @@ test('acceptPendingRescue/rejectPendingRescue: odrzucają nazwy plików poza bez
     await t.throwsAsync(() => memory.rejectPendingRescue('../../../etc/passwd'), { message: /safe \.md filename/ });
 });
 
-// ─── K4 (AUD-bledy-061): probeFile/readIfExists w poczekalni, nie goły exists() ───────
+// ─── probeFile/readIfExists w poczekalni, nie goły exists() ───────
 
 test('writePendingRescue: kłamiący exists() NIE MOŻE nadpisać istniejącego kandydata', async t => {
     const { vault, files } = makeVault();
@@ -221,7 +221,7 @@ test('writePendingRescue: kłamiący exists() NIE MOŻE nadpisać istniejącego 
 });
 
 test('acceptPendingRescue: read() pada na źródle (exists() mówi TAK) — sprzeczne sygnały, fail-closed', async t => {
-    // K4/K12 (`readIfExists`): `exists()` uczciwie potwierdza, że plik JEST, ale `read()` na NIM
+    // `readIfExists`: `exists()` uczciwie potwierdza, że plik JEST, ale `read()` na NIM
     // pada — to jest DOKŁADNIE ta sprzeczność, na którą `readIfExists` odpowiada `'unreadable'`.
     // Wołacz nie ma prawa ani utworzyć notatki z tego, czego nie przeczytał, ani skasować pliku,
     // którego treści nie widział.
@@ -259,10 +259,10 @@ test('rejectPendingRescue: sygnały sprzeczne (exists() mówi NIE, ale read() si
     t.true(Object.prototype.hasOwnProperty.call(files, pending.path), 'kandydat NIETKNIĘTY');
 });
 
-// ─── Weryfikacja opusa — nit 1: torn write (write() rzuca, ale bajty realnie wylądowały) ──
+// ─── Torn write (write() rzuca, ale bajty realnie wylądowały) ──
 
 test('writePendingRescue: torn write — adapter.write() rzuca MIMO że plik realnie istnieje — traktowane jako sukces (bez duplikatu)', async t => {
-    // Klasa incydentu z lipca 2026 (utrata zapisu): dysk sieciowy/Dysk Google potrafi odrzucić Promise zapisu,
+    // Utrata zapisu: dysk sieciowy/Dysk Google potrafi odrzucić Promise zapisu,
     // mimo że bajty faktycznie wylądowały. Bez tej ochrony wołacz (turnOwner.saveMemoryCandidatesFor)
     // widziałby fałszywy fail i fail-softem dopisałby DUPLIKAT wprost do brain/, podczas gdy
     // kandydat i tak zostałby w poczekalni — user zobaczyłby ten sam fakt dwa razy.

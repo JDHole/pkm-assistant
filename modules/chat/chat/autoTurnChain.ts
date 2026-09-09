@@ -1,5 +1,5 @@
 /**
- * autoTurnChain — sufit ŁAŃCUCHA auto-tur po wyniku suba (werdykt Kuby, 2026-08-16).
+ * autoTurnChain - sufit ŁAŃCUCHA auto-tur po wyniku suba.
  *
  * PROBLEM: wynik suba odpalonego w tle wraca do czatu jako AUTO-TURA — `_deliverSubTaskResult`
  * (chat_streaming.ts) woła `send_message({injectedText})` SAM, bez udziału człowieka, gdy wynik
@@ -25,7 +25,7 @@
  */
 
 /** Decyzja o starcie KOLEJNEJ auto-tury w łańcuchu po subie. */
-// AUD-dead-code-231 (2026-09-02): `export` zdjęty — zero referencji spoza pliku.
+// Bez `export` - zero referencji spoza pliku.
 interface AutoTurnChainDecision {
     /** `false` = łańcuch osiągnął sufit; auto-tura NIE MA startować (fallback: zostaw w kolejce). */
     allowed: boolean;

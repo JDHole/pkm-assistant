@@ -1,5 +1,5 @@
 /**
- * basesView.js — generator pliku `.base` (Obsidian Bases) dla artefaktów żywych (S32 Z7).
+ * basesView.js — generator pliku `.base` (Obsidian Bases) dla artefaktów żywych.
  *
  * Pure module (ZERO importów Obsidiana / i18n) → node-testowalne. Buduje treść pliku `.base`
  * ręcznie jako template string, NIE przez `stringifyYaml` — kolejność kluczy i styl mają być

@@ -76,7 +76,7 @@ test('connect: lists tools and registers them prefixed with source:user + descri
     t.is(tool!.description, '[Blender] Render a scene');
     t.is(tool!.inputSchema, schema, 'JSON Schema passed through as-is (same reference)');
 
-    // R2: status runtime żyje w managerze, NIE na obiekcie configu (data.json = tylko konfiguracja).
+    // Status runtime żyje w managerze, NIE na obiekcie configu (data.json = tylko konfiguracja).
     t.is(mgr.getStatus('blender').status, 'connected');
     t.is(mgr.getStatus('blender').lastError, null);
     t.is(mgr.getStatus('blender').toolCount, 1);
@@ -103,7 +103,7 @@ test('execute routes to client.callTool with un-prefixed name, per-call timeout,
     t.is(call.params.name, 'render', 'tool name un-prefixed on the wire');
     t.deepEqual(call.params.arguments, { code: 'print(1)' }, '_invocationAgentName stripped, not leaked to external server');
     t.is(call.opts!.timeout, 60000, 'resolveTimeoutMs default (60s)');
-    // Z2.1: execute normalizuje wynik do czystego tekstu (model nie dostaje surowego content[]).
+    // execute normalizuje wynik do czystego tekstu (model nie dostaje surowego content[]).
     t.is(result, 'done');
 });
 
@@ -138,7 +138,7 @@ test('connect failure sets status:error + lastError and does NOT throw (silent f
     const registry = new ToolRegistry();
     const mgr = new ExternalMcpManager({}, {
         toolRegistry: registry,
-        // AUD-bledy-024: kształt `ENOENT` ma teraz własne zdanie — test pilnuje CICHEGO FAILA
+        // Kształt `ENOENT` ma własne zdanie — test pilnuje CICHEGO FAILA
         // (zero rzucania, status w mapie), a nie dosłownego brzmienia komunikatu.
         clientFactory: async () => { throw new Error('spawn ENOENT'); },
     });
@@ -245,9 +245,9 @@ test('connect twice is idempotent (alreadyConnected, no second handshake)', asyn
     t.is(calls.connect.length, 1, 'no duplicate handshake on re-connect');
 });
 
-// ─── R2: statusy runtime nie persystują do data.json ─────────────
+// ─── statusy runtime nie persystują do data.json ─────────────
 
-test('R2: getStatus reflects lifecycle and the config object never gains runtime fields', async t => {
+test('getStatus reflects lifecycle and the config object never gains runtime fields', async t => {
     const { mgr } = makeManager({ tools: [{ name: 'a', description: 'd', inputSchema: { type: 'object' } }] });
     const cfg = { id: 'srv', name: 'S', transport: 'http', url: 'https://x' };
 
@@ -265,7 +265,7 @@ test('R2: getStatus reflects lifecycle and the config object never gains runtime
     t.is(mgr.getStatus('srv').toolCount, 0);
 });
 
-test('R2: stripRuntimeFields removes status/lastError a previous version may have persisted', t => {
+test('stripRuntimeFields removes status/lastError a previous version may have persisted', t => {
     const cfg = { id: 'srv', name: 'S', transport: 'http', url: 'https://x', status: 'connected', lastError: 'boom' };
     const out = ExternalMcpManager.stripRuntimeFields(cfg);
     t.is(out, cfg, 'mutates in place and returns it');
@@ -276,7 +276,7 @@ test('R2: stripRuntimeFields removes status/lastError a previous version may hav
     t.notThrows(() => ExternalMcpManager.stripRuntimeFields(null));
 });
 
-test('R2: listServersForUi merges config + runtime status from the internal map', async t => {
+test('listServersForUi merges config + runtime status from the internal map', async t => {
     const { mgr } = makeManager({ tools: [{ name: 'a', description: 'd', inputSchema: { type: 'object' } }] });
     const servers = [
         { id: 'live', name: 'Live', transport: 'http', url: 'https://x', autostart: true },
@@ -295,9 +295,9 @@ test('R2: listServersForUi merges config + runtime status from the internal map'
     t.false(idle!.connected);
 });
 
-// ─── R3: walidacja id serwera (slug + brak kolizji z built-in) ────
+// ─── walidacja id serwera (slug + brak kolizji z built-in) ────
 
-test('R3 unit: validateServerId enforces slug + rejects built-in server-name collisions', t => {
+test('validateServerId enforces slug + rejects built-in server-name collisions', t => {
     const builtin = ['core', 'vault', 'memory', 'web', 'multimodal', 'delegation', 'artifacts', 'komunikator'];
     t.true(ExternalMcpManager.validateServerId('blender', builtin).ok);
     t.true(ExternalMcpManager.validateServerId('my-remote-2', builtin).ok);
@@ -314,7 +314,7 @@ test('R3 unit: validateServerId enforces slug + rejects built-in server-name col
     t.is(ExternalMcpManager.validateServerId(null as unknown as string, builtin).reason, 'format');
 });
 
-test('R3: connect refuses an id colliding with a built-in server (no auto-grant to every agent)', async t => {
+test('connect refuses an id colliding with a built-in server (no auto-grant to every agent)', async t => {
     const { mgr } = makeManager({ tools: [{ name: 'x', description: 'd', inputSchema: { type: 'object' } }] });
     const cfg = { id: 'vault', name: 'Evil', transport: 'http', url: 'https://x' };
 
@@ -325,7 +325,7 @@ test('R3: connect refuses an id colliding with a built-in server (no auto-grant 
     t.is(mgr.getStatus('vault').status, 'error');
 });
 
-test('R3: connect refuses a malformed id before touching the transport', async t => {
+test('connect refuses a malformed id before touching the transport', async t => {
     const connected = [];
     const registry = new ToolRegistry();
     const mgr = new ExternalMcpManager({}, {
@@ -338,14 +338,14 @@ test('R3: connect refuses a malformed id before touching the transport', async t
     t.is(connected.length, 0, 'clientFactory never called for an invalid id');
 });
 
-// ─── S32 Z2.1: normalizacja wyników MCP (model dostaje tekst, nie base64) ──
+// ─── normalizacja wyników MCP (model dostaje tekst, nie base64) ──
 
-test('Z2.1 normalizeMcpResult: text-only content sklejony w czysty string', t => {
+test('normalizeMcpResult: text-only content sklejony w czysty string', t => {
     t.is(normalizeMcpResult({ content: [{ type: 'text', text: 'pierwszy' }, { type: 'text', text: 'drugi' }] }),
         'pierwszy\n\ndrugi');
 });
 
-test('Z2.1 normalizeMcpResult: base64 obrazka NIE trafia do wyniku (tylko adnotacja)', t => {
+test('normalizeMcpResult: base64 obrazka NIE trafia do wyniku (tylko adnotacja)', t => {
     const base64 = 'A'.repeat(4096); // 4096 znaków base64 = ~3 kB
     const out = normalizeMcpResult({
         content: [
@@ -357,7 +357,7 @@ test('Z2.1 normalizeMcpResult: base64 obrazka NIE trafia do wyniku (tylko adnota
     t.is(out, 'Wyrenderowane:\n\n[image image/png, ~3 kB]');
 });
 
-test('Z2.1 normalizeMcpResult: resource z tekstem dokleja treść pod adnotacją', t => {
+test('normalizeMcpResult: resource z tekstem dokleja treść pod adnotacją', t => {
     t.is(
         normalizeMcpResult({ content: [{ type: 'resource', resource: { uri: 'file:///a.md', text: 'treść pliku' } }] }),
         '[resource: file:///a.md]\ntreść pliku'
@@ -371,14 +371,14 @@ test('Z2.1 normalizeMcpResult: resource z tekstem dokleja treść pod adnotacją
     t.is(normalizeMcpResult({ content: [{ type: 'audio', data: 'AAAA' }] }), '[audio]');
 });
 
-test('Z2.1 normalizeMcpResult: isError zwraca {isError, error} ze sklejonym tekstem', t => {
+test('normalizeMcpResult: isError zwraca {isError, error} ze sklejonym tekstem', t => {
     t.deepEqual(
         normalizeMcpResult({ isError: true, content: [{ type: 'text', text: 'server exploded' }] }),
         { isError: true, error: 'server exploded' }
     );
 });
 
-test('Z2.1 normalizeMcpResult: wejście bez tablicy content przechodzi bez zmian', t => {
+test('normalizeMcpResult: wejście bez tablicy content przechodzi bez zmian', t => {
     const own = { isError: true, error: 'nie podłączony' };
     t.is(normalizeMcpResult(own), own, 'nasz własny kształt błędu (bez content) — ta sama referencja');
     t.is(normalizeMcpResult(null), null);
@@ -387,7 +387,7 @@ test('Z2.1 normalizeMcpResult: wejście bez tablicy content przechodzi bez zmian
     t.is(normalizeMcpResult(noContent), noContent);
 });
 
-test('Z2.1: execute na obrazku zwraca adnotację, callTool nadal surowy wynik SDK', async t => {
+test('execute na obrazku zwraca adnotację, callTool nadal surowy wynik SDK', async t => {
     const raw = { content: [{ type: 'image', mimeType: 'image/jpeg', data: 'B'.repeat(1024) }] };
     const { mgr, registry } = makeManager({
         tools: [{ name: 'shot', description: 'd', inputSchema: { type: 'object' } }],
@@ -399,9 +399,9 @@ test('Z2.1: execute na obrazku zwraca adnotację, callTool nadal surowy wynik SD
     t.deepEqual(await mgr.callTool('srv', 'shot', {}), raw, 'callTool zostaje surowe (kontrakt niezmieniony)');
 });
 
-// ─── S32 Z2.4: czytelny 401 ────────────────────────────────────────
+// ─── czytelny 401 ────────────────────────────────────────
 
-test('Z2.4: 401/Unauthorized daje przetłumaczony komunikat w lastError', async t => {
+test('401/Unauthorized daje przetłumaczony komunikat w lastError', async t => {
     const mgr = new ExternalMcpManager({}, {
         toolRegistry: new ToolRegistry(),
         clientFactory: async () => { throw new Error('HTTP 401 Unauthorized'); },
@@ -413,7 +413,7 @@ test('Z2.4: 401/Unauthorized daje przetłumaczony komunikat w lastError', async 
     t.is(mgr.getStatus('remote').lastError, tr('settings.mcp_external_error_401'));
 });
 
-test('Z2.4: inny błąd niż 401 zostaje surowy (zamaskowany), bez podmiany na instrukcję', async t => {
+test('inny błąd niż 401 zostaje surowy (zamaskowany), bez podmiany na instrukcję', async t => {
     const mgr = new ExternalMcpManager({}, {
         toolRegistry: new ToolRegistry(),
         clientFactory: async () => { throw new Error('HTTP 500 Internal Server Error'); },
@@ -435,9 +435,9 @@ test('connect: stdio na mobile odmawia bez importu SDK (gate isMobile przez DI)'
     t.is(mgr.getStatus('blender').status, 'error');
 });
 
-// ─── S33 Z3: filtr znaczników wewnętrznych ────────────────────────
+// ─── filtr znaczników wewnętrznych ────────────────────────
 
-test('S33 Z3: _stripInternal wycina WSZYSTKIE znaczniki _invocation* i nie rusza reszty', t => {
+test('_stripInternal wycina WSZYSTKIE znaczniki _invocation* i nie rusza reszty', t => {
     const { mgr } = makeManager();
     const out = mgr._stripInternal({
         code: 'print(1)',
@@ -456,7 +456,7 @@ test('S33 Z3: _stripInternal wycina WSZYSTKIE znaczniki _invocation* i nie rusza
     t.deepEqual(ExternalMcpManager.stripInternalArgs({ a: 1, _invocationAgentName: 'x' }), { a: 1 });
 });
 
-test('S33 Z3: _stripInternal zwraca wejścia nie-obiektowe nietknięte', t => {
+test('_stripInternal zwraca wejścia nie-obiektowe nietknięte', t => {
     const { mgr } = makeManager();
     t.is(mgr._stripInternal(null), null);
     t.is(mgr._stripInternal(undefined), undefined);
@@ -466,9 +466,9 @@ test('S33 Z3: _stripInternal zwraca wejścia nie-obiektowe nietknięte', t => {
     t.is(mgr._stripInternal(arr), arr, 'tablica wraca TĄ SAMĄ referencją (nie filtrujemy list)');
 });
 
-// ─── S33 Z3: podgląd narzędzi PRZED zapisem ───────────────────────
+// ─── podgląd narzędzi PRZED zapisem ───────────────────────
 
-test('S33 Z3: previewTools listuje narzędzia, zamyka klienta i NICZEGO nie rejestruje', async t => {
+test('previewTools listuje narzędzia, zamyka klienta i NICZEGO nie rejestruje', async t => {
     const { mgr, registry, calls } = makeManager({
         tools: [
             { name: 'render', description: 'Render a scene', inputSchema: { type: 'object' } },
@@ -491,7 +491,7 @@ test('S33 Z3: previewTools listuje narzędzia, zamyka klienta i NICZEGO nie reje
     t.is(mgr.getStatus('blender').status, 'off', 'mapa statusów nietknięta przez podgląd');
 });
 
-test('S33 Z3: previewTools nie rzuca — błąd wraca jako {success:false, error}', async t => {
+test('previewTools nie rzuca — błąd wraca jako {success:false, error}', async t => {
     const { mgr } = makeManager({ connectThrows: 'ECONNREFUSED 127.0.0.1:9000' });
     const res = await mgr.previewTools({ id: 'srv', name: 'S', transport: 'http', url: 'https://x' });
     t.false(res.success);
@@ -499,7 +499,7 @@ test('S33 Z3: previewTools nie rzuca — błąd wraca jako {success:false, error
     t.is(mgr.getStatus('srv').status, 'off', 'nieudany podgląd nie ustawia statusu error');
 });
 
-test('S33 Z3: previewTools na mobile odmawia stdio (ten sam gate co connect)', async t => {
+test('previewTools na mobile odmawia stdio (ten sam gate co connect)', async t => {
     const mgr = new ExternalMcpManager({ manifest: { version: '2.1.0' } }, {
         toolRegistry: new ToolRegistry(),
         isMobile: true,
@@ -509,7 +509,7 @@ test('S33 Z3: previewTools na mobile odmawia stdio (ten sam gate co connect)', a
     t.regex(res.error!, /desktop/i);
 });
 
-test('S33 Z3: previewTools nie psuje ŻYWEGO połączenia tego samego serwera', async t => {
+test('previewTools nie psuje ŻYWEGO połączenia tego samego serwera', async t => {
     const { mgr, registry } = makeManager({
         tools: [{ name: 'a', description: 'd', inputSchema: { type: 'object' } }],
     });
@@ -534,13 +534,13 @@ test('connect: realna ścieżka SDK — nieistniejąca komenda stdio daje status
     t.truthy(mgr.getStatus('ghost').lastError);
 });
 
-// ─── K11 (AUD-security-005): autostart nie bramkuje startu pluginu ───────────────────────
+// ─── autostart nie bramkuje startu pluginu ───────────────────────
 //
-// Do K11 `autostart()` łączyła serwery po kolei (`await` w pętli), a `main.ts` czekał na nią
-// przed ustawieniem `plugin._ready`. Serwer, który przyjmuje transport i milczy, trzymał więc
-// czat i sidebar na spinnerze przez cały swój budżet — a trzy takie serwery sumowały budżety.
+// Sekwencyjne `autostart()` (`await` w pętli), na które `main.ts` czekałby przed ustawieniem
+// `plugin._ready`, oznaczałoby, że serwer, który przyjmuje transport i milczy, trzymałby
+// czat i sidebar na spinnerze przez cały swój budżet — a trzy takie serwery sumowałyby budżety.
 
-test('K11 005: autostart wraca NATYCHMIAST, choć serwer wisi (nie bramkuje _ready)', async t => {
+test('autostart wraca NATYCHMIAST, choć serwer wisi (nie bramkuje _ready)', async t => {
     const registry = new ToolRegistry();
     const mgr = new ExternalMcpManager({}, {
         toolRegistry: registry,
@@ -559,7 +559,7 @@ test('K11 005: autostart wraca NATYCHMIAST, choć serwer wisi (nie bramkuje _rea
     t.is(mgr.getServerTools('wisi-a').length, 0);
 });
 
-test('K11 005: autostart łączy RÓWNOLEGLE (budżety serwerów się nie sumują)', async t => {
+test('autostart łączy RÓWNOLEGLE (budżety serwerów się nie sumują)', async t => {
     const registry = new ToolRegistry();
     let inFlight = 0;
     let maxInFlight = 0;
@@ -586,7 +586,7 @@ test('K11 005: autostart łączy RÓWNOLEGLE (budżety serwerów się nie sumuj�
     t.is(mgr.getStatus('wolny-c').status, 'connected');
 });
 
-test('K11 005: connect ma JEDEN budżet na handshake + listTools, nie dwa', async t => {
+test('connect ma JEDEN budżet na handshake + listTools, nie dwa', async t => {
     const registry = new ToolRegistry();
     const timeouts: Array<[string, number | undefined]> = [];
     const mgr = new ExternalMcpManager({}, {
@@ -613,19 +613,19 @@ test('K11 005: connect ma JEDEN budżet na handshake + listTools, nie dwa', asyn
     t.true(timeouts[1][1]! < 1000, 'listTools dostaje RESZTĘ budżetu, nie drugie pełne okno');
 });
 
-// ─── AUD-bledy-022: śmierć procesu serwera musi zejść ze statusu i z rejestru ───
+// ─── śmierć procesu serwera musi zejść ze statusu i z rejestru ───
 //
-// Do tej naprawy manager nie podpinał `onclose`/`onerror` transportu, więc po padzie procesu
-// stdio (user zamknął Blendera) wpis zostawał w `_connections`, `getStatus()` dalej mówił
-// „connected", a martwe narzędzia leciały modelowi w definicjach — każde wywołanie wracało
-// „Connection closed", a Ustawienia i Konektory pokazywały zieloną kropkę.
+// Bez podpięcia `onclose`/`onerror` transportu, po padzie procesu stdio (user zamknął
+// Blendera) wpis zostawałby w `_connections`, `getStatus()` dalej mówiłby „connected",
+// a martwe narzędzia leciałyby modelowi w definicjach — każde wywołanie wracałoby
+// „Connection closed", a Ustawienia i Konektory pokazywałyby zieloną kropkę.
 
 /** Transport-atrapa: trzyma haki, które podpina do niego manager (i SDK). */
 function makeFakeTransport(): { onclose?: () => void; onerror?: (e: Error) => void } {
     return {};
 }
 
-test('022: pad procesu serwera (transport.onclose) rozłącza go i wyrejestrowuje narzędzia', async t => {
+test('pad procesu serwera (transport.onclose) rozłącza go i wyrejestrowuje narzędzia', async t => {
     const registry = new ToolRegistry();
     const transport = makeFakeTransport();
     const mgr = new ExternalMcpManager({}, {
@@ -646,7 +646,7 @@ test('022: pad procesu serwera (transport.onclose) rozłącza go i wyrejestrowuj
     t.is(mgr.getStatus('blender').toolCount, 0);
 });
 
-test('022: błąd transportu (onerror) też ląduje w statusie serwera', async t => {
+test('błąd transportu (onerror) też ląduje w statusie serwera', async t => {
     const registry = new ToolRegistry();
     const transport = makeFakeTransport();
     const mgr = new ExternalMcpManager({}, {
@@ -662,9 +662,9 @@ test('022: błąd transportu (onerror) też ląduje w statusie serwera', async t
     t.is(registry.getTool('blender__scene'), null);
 });
 
-// ─── AUD-bledy-023 + 034: closeAll równolegle z sufitem + guard po wyładowaniu ───
+// ─── closeAll równolegle z sufitem + guard po wyładowaniu ───
 
-test('023: closeAll nie czeka na wiszący serwer — pozostałe dostają close w limicie', async t => {
+test('closeAll nie czeka na wiszący serwer — pozostałe dostają close w limicie', async t => {
     const registry = new ToolRegistry();
     const closed: string[] = [];
     const mgr = new ExternalMcpManager({}, {
@@ -694,7 +694,7 @@ test('023: closeAll nie czeka na wiszący serwer — pozostałe dostają close w
     t.is(mgr.getConnectedServerIds().length, 0, 'rejestr połączeń pusty po demontażu');
 });
 
-test('034: po closeAll autostart i connect ODMAWIAJĄ (żadnego zombie po wyładowaniu)', async t => {
+test('po closeAll autostart i connect ODMAWIAJĄ (żadnego zombie po wyładowaniu)', async t => {
     const registry = new ToolRegistry();
     let created = 0;
     const mgr = new ExternalMcpManager({}, {
@@ -717,7 +717,7 @@ test('034: po closeAll autostart i connect ODMAWIAJĄ (żadnego zombie po wyład
     t.is(registry.getTool('srv-b__scene'), null);
 });
 
-test('034: handshake, który skończył się PO closeAll, nie ląduje w mapie połączeń', async t => {
+test('handshake, który skończył się PO closeAll, nie ląduje w mapie połączeń', async t => {
     const registry = new ToolRegistry();
     let release: (() => void) | null = null;
     const fake = makeFakeClient({ tools: [{ name: 'scene' }] });
@@ -742,15 +742,15 @@ test('034: handshake, który skończył się PO closeAll, nie ląduje w mapie po
     t.is(fake.calls.close, 1, 'świeżo zestawiony klient zostaje domknięty');
 });
 
-// ─── AUD-code-review-061: dwa równoczesne connect() dla TEGO SAMEGO serwera ───
+// ─── dwa równoczesne connect() dla TEGO SAMEGO serwera ───
 //
-// Scenariusz z audytu: autostart (bez await) łączy serwer stdio z wolnym handshakiem
-// (`npx` ściąga paczkę), a user w tym samym oknie klika „Połącz" w Ustawieniach. Przed
-// naprawą oba wywołania przechodziły check-then-act na `_connections` (pusta mapa dla
-// obu), oba stawiały OSOBNY klient/proces, a późniejszy zapis do `_connections.set()`
-// po cichu nadpisywał wcześniejszy — pierwszy proces potomny nigdy nie dostawał `close()`.
+// Scenariusz: autostart (bez await) łączy serwer stdio z wolnym handshakiem (`npx` ściąga
+// paczkę), a user w tym samym oknie klika „Połącz" w Ustawieniach. Bez blokady współbieżności
+// oba wywołania przechodziłyby check-then-act na `_connections` (pusta mapa dla obu), oba
+// stawiałyby OSOBNY klient/proces, a późniejszy zapis do `_connections.set()` po cichu
+// nadpisywałby wcześniejszy — pierwszy proces potomny nigdy nie dostawałby `close()`.
 
-test('061: dwa równoczesne connect() dla tego samego id — JEDEN handshake, JEDEN klient, zero zombie', async t => {
+test('dwa równoczesne connect() dla tego samego id — JEDEN handshake, JEDEN klient, zero zombie', async t => {
     const registry = new ToolRegistry();
     let created = 0;
     let release: (() => void) | null = null;
@@ -783,7 +783,7 @@ test('061: dwa równoczesne connect() dla tego samego id — JEDEN handshake, JE
     t.is(fake.calls.close, 0, 'zero zamkniętych klientów — nikt nie został osierocony');
 });
 
-test('061: blokada zwalnia się po rozstrzygnięciu — trzeci connect() widzi już podłączony serwer', async t => {
+test('blokada zwalnia się po rozstrzygnięciu — trzeci connect() widzi już podłączony serwer', async t => {
     const { mgr, calls } = makeManager({ tools: [{ name: 'a', description: 'd', inputSchema: { type: 'object' } }] });
     const cfg = { id: 'srv', name: 'S', transport: 'http', url: 'https://x' };
 
@@ -794,9 +794,9 @@ test('061: blokada zwalnia się po rozstrzygnięciu — trzeci connect() widzi j
     t.is(calls.connect.length, 1, 'wciąż tylko jeden handshake mimo trzech wywołań connect()');
 });
 
-// ─── AUD-bledy-024: nieudane połączenie mówi ZDANIEM, nie kodem systemowym ───
+// ─── nieudane połączenie mówi ZDANIEM, nie kodem systemowym ───
 
-test('024: spawn npx ENOENT daje zdanie z nazwą programu, nie ENOENT', async t => {
+test('spawn npx ENOENT daje zdanie z nazwą programu, nie ENOENT', async t => {
     const { mgr } = makeManager({ connectThrows: 'spawn npx ENOENT' });
 
     const res = await mgr.connect({ id: 'fs', name: 'Filesystem', transport: 'stdio', command: 'npx' });
@@ -807,7 +807,7 @@ test('024: spawn npx ENOENT daje zdanie z nazwą programu, nie ENOENT', async t 
     t.is(mgr.getStatus('fs').lastError, res.error ?? null, 'wiersz w Ustawieniach pokazuje to samo zdanie');
 });
 
-test('024: EACCES / ECONNREFUSED / timeout mają własne zdania', async t => {
+test('EACCES / ECONNREFUSED / timeout mają własne zdania', async t => {
     for (const [raw, must] of [
         ['spawn /usr/local/bin/mcp EACCES', 'EACCES'],
         ['connect ECONNREFUSED 127.0.0.1:3000', 'ECONNREFUSED'],
@@ -821,7 +821,7 @@ test('024: EACCES / ECONNREFUSED / timeout mają własne zdania', async t => {
     }
 });
 
-test('024: nieznany kształt błędu leci starą ścieżką (maskowany surowy tekst)', async t => {
+test('nieznany kształt błędu leci starą ścieżką (maskowany surowy tekst)', async t => {
     const { mgr } = makeManager({ connectThrows: 'cos zupelnie innego poszlo nie tak' });
 
     const res = await mgr.connect({ id: 'srv', name: 'S', transport: 'http', url: 'https://x' });
@@ -829,7 +829,7 @@ test('024: nieznany kształt błędu leci starą ścieżką (maskowany surowy te
     t.is(res.error, 'cos zupelnie innego poszlo nie tak');
 });
 
-test('024: klucze i18n użyte przez warstwę tłumaczenia istnieją w PL i EN', t => {
+test('klucze i18n użyte przez warstwę tłumaczenia istnieją w PL i EN', t => {
     for (const key of [
         'settings.mcp_external_error_enoent',
         'settings.mcp_external_error_eacces',

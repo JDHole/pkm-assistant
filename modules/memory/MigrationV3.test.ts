@@ -6,7 +6,7 @@ import type { MigrationAgentMemoryLike } from './MigrationV3.js';
 /**
  * `AgentMemory` jest jeszcze w JavaScripcie, a jego JSDoc deklaruje `@param {Object} vault`,
  * więc TS widzi `memory.vault` jako `Object` i nie uznaje instancji za `MigrationAgentMemoryLike`.
- * Rzutowanie znika, gdy paczka M2b skonwertuje właściciela.
+ * Rzutowanie znika, gdy `AgentMemory` zostanie skonwertowany do TS.
  */
 type MemoryUnderTest = AgentMemory & MigrationAgentMemoryLike;
 const asMemory = (m: AgentMemory): MemoryUnderTest => m as unknown as MemoryUnderTest;
@@ -77,7 +77,7 @@ test('MigrationV3 migrates clean brain.md into brain notes and keeps backup', as
     const brain = `# Jaskier brain
 
 ## User
-- Kuba lubi krotkie raporty.
+- Jan lubi krotkie raporty.
 
 ## Preferencje
 - Odpowiadaj po polsku prostymi slowami.
@@ -99,7 +99,7 @@ test('MigrationV3 migrates clean brain.md into brain notes and keeps backup', as
 
     t.true(result.migrated === true);
     t.true(Object.prototype.hasOwnProperty.call(files, `${base.replace('/memory', '/memory.v2.backup')}/brain.md`));
-    t.true(Object.keys(files).some(path => path.endsWith('/brain/user_kuba_lubi_krotkie_raporty.md')));
+    t.true(Object.keys(files).some(path => path.endsWith('/brain/user_jan_lubi_krotkie_raporty.md')));
     t.true(Object.keys(files).some(path => path.endsWith('/brain/agent_rule_odpowiadaj_po_polsku_prostymi_slowami.md')));
     t.true(Object.keys(files).some(path => path.endsWith('/brain/project_context_projekt_pkm_assistant_ma_release_blocker.md')));
     t.true(Object.keys(files).some(path => path.endsWith('/brain/project_context_dzisiaj_domykamy_sprint_m3.md')));
@@ -115,7 +115,7 @@ test('MigrationV3 proposes deletion for zombie sections instead of writing zombi
         [`${base}/brain.md`]: `# Jaskier brain
 
 ## User
-- Kuba uzywa Obsidiana.
+- Jan uzywa Obsidiana.
 
 ## System
 - agora project hub
@@ -131,7 +131,7 @@ test('MigrationV3 proposes deletion for zombie sections instead of writing zombi
 
     t.true((result.deletedSections || []).includes('System'));
     t.true(brainFiles.every(path => !path.includes('agora') && !path.includes('vault_builder') && !path.includes('default_rob')));
-    t.true(brainFiles.some(path => path.endsWith('/user_kuba_uzywa_obsidiana.md')));
+    t.true(brainFiles.some(path => path.endsWith('/user_jan_uzywa_obsidiana.md')));
 });
 
 test('MigrationV3 falls back to legacy brain dump for malformed unsectioned brain.md', async t => {
@@ -150,22 +150,20 @@ test('MigrationV3 falls back to legacy brain dump for malformed unsectioned brai
     t.true(Object.prototype.hasOwnProperty.call(files, `${base.replace('/memory', '/memory.v2.backup')}/brain.md`));
 });
 
-// ─── Werdykt 2026-08-27 (AUD-docs-051): Cancel na modalu review naprawdę anuluje ───
+// ─── Cancel na modalu review naprawdę anuluje ───
 //
-// Do tej naprawy `AgentManager._initializeMemoryForAgent` wołał `migration.run({interactive:
-// false})` DRUGI RAZ, gdy ten `cancelled:true` wracał stąd — czyli plan i tak był stosowany.
-// Testy niżej dowodzą, że SAM `MigrationV3` (silnik, niezależnie od tamtego bugu w orkiestracji)
+// Testy niżej dowodzą, że SAM `MigrationV3` (silnik, niezależnie od orkiestracji wyżej)
 // przy odrzuceniu w modalu nie stosuje planu i zostawia stan tak, że `needsMigration()` wraca
-// `true` — modal ma się pojawić ponownie przy następnym starcie. Regresję samej orkiestracji
+// `true` - modal ma się pojawić ponownie przy następnym starcie. Regresję samej orkiestracji
 // (AgentManager) pilnuje osobno `modules/agents/migrationReviewFlow.test.ts` (tamten plik nie
-// może importować `AgentMemory`/`MigrationV3` z prawdziwym vaultem — testuje tylko decyzję).
+// może importować `AgentMemory`/`MigrationV3` z prawdziwym vaultem - testuje tylko decyzję).
 
 test('MigrationV3 interactive review: Cancel nie stosuje planu - brain.md nietkniety, brain/ nie powstaje, needsMigration zostaje true', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const brain = `# Jaskier brain
 
 ## User
-- Kuba lubi krotkie raporty.
+- Jan lubi krotkie raporty.
 
 ## System
 - agora project hub
@@ -216,7 +214,7 @@ test('MigrationV3 interactive review: Confirm (Save) stosuje plan jak dotad - za
     const brain = `# Jaskier brain
 
 ## User
-- Kuba lubi krotkie raporty.
+- Jan lubi krotkie raporty.
 `;
     const { vault, files } = makeVault({ [`${base}/brain.md`]: brain });
     const memory = asMemory(new AgentMemory(vault, 'Jaskier'));
@@ -234,25 +232,21 @@ test('MigrationV3 interactive review: Confirm (Save) stosuje plan jak dotad - za
 
     t.true(result.migrated === true);
     t.truthy(seenPlan, 'modal ma dostac plan do przegladu');
-    t.true(Object.keys(files).some(path => path.endsWith('/brain/user_kuba_lubi_krotkie_raporty.md')));
+    t.true(Object.keys(files).some(path => path.endsWith('/brain/user_jan_lubi_krotkie_raporty.md')));
     t.false(await migration.needsMigration(), 'po Confirm migracja jest zastosowana - brain/ istnieje');
 });
 
-// ─── Weryfikacja opus (2026-08-27): guzik "Awaryjny dump" gubil realna tresc brain ───
+// ─── Guzik "Awaryjny dump" niesie pełną oryginalną treść brain.md ───
 //
-// `MigrationModal._resolveWith` nigdy nie oddawal pola `originalBrain` (guzik fallback
-// resolwowal SAM `{action:'fallback'}"), a `_reviewPlan` czytal `result.originalBrain || ''`
-// - notatka dumpu wychodzila PUSTA, po czym `applyPlan` i tak nadpisywal brain.md indeksem.
-// Stara tresc przezywala WYLACZNIE w `memory.v2.backup/`. Test niezej dowodzi, ze dump niesie
-// PELNA, bajt-w-bajt oryginalna tresc - migracja bierze ja teraz z lokalnej zmiennej `run()`
-// mial od zawsze, zamiast liczyc na to, ze modal ja odeśle.
+// Test niżej dowodzi, że dump niesie PELNA, bajt-w-bajt oryginalna tresc - migracja bierze ja
+// z lokalnej zmiennej, ktora `run()` mial od zawsze, zamiast liczyc na to, ze modal ja odesle.
 
 test('MigrationV3 interactive review: guzik "Awaryjny dump" niesie PELNA oryginalna tresc brain.md (nie pusty string)', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const brain = `# Jaskier brain
 
 ## User
-- Kuba lubi krotkie raporty.
+- Jan lubi krotkie raporty.
 
 ## Preferencje
 - Odpowiadaj po polsku prostymi slowami.
@@ -270,11 +264,11 @@ test('MigrationV3 interactive review: guzik "Awaryjny dump" niesie PELNA orygina
 
     t.true(result.migrated === true);
     t.truthy(dump, 'notatka dump ma powstac');
-    t.true(dump.includes('Kuba lubi krotkie raporty'), 'dump MUSI niesc PELNA oryginalna tresc - nie pusty string');
+    t.true(dump.includes('Jan lubi krotkie raporty'), 'dump MUSI niesc PELNA oryginalna tresc - nie pusty string');
     t.true(dump.includes('Odpowiadaj po polsku prostymi slowami'), 'dump MUSI niesc CALY brain.md, nie fragment');
     t.false(
-        Object.prototype.hasOwnProperty.call(files, `${base}/brain/user_kuba_lubi_krotkie_raporty.md`),
+        Object.prototype.hasOwnProperty.call(files, `${base}/brain/user_jan_lubi_krotkie_raporty.md`),
         'guzik fallback pomija automatyczny per-linie split - tylko jeden dump'
     );
-    t.false(files[`${base}/brain.md`].includes('Kuba lubi krotkie raporty'), 'brain.md jest nadpisany nowym indeksem, jak dotad (Accept/fallback obie migruja)');
+    t.false(files[`${base}/brain.md`].includes('Jan lubi krotkie raporty'), 'brain.md jest nadpisany nowym indeksem, jak dotad (Accept/fallback obie migruja)');
 });

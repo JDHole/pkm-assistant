@@ -1,5 +1,5 @@
 /**
- * usageCounter.test.js — licznik wyszukiwań (E3.3, DEC L13-4).
+ * usageCounter.test.js — licznik wyszukiwań.
  * Pure, bez obsidiana: `now` jest wstrzykiwany, więc rollover testujemy bez czekania na północ.
  */
 import test from 'ava';

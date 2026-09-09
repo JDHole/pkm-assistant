@@ -5,20 +5,20 @@
  * Problem: ChatModel has ONLY .stream() (callback-based).
  * Solution: Wrap it so callers can do: const text = await streamToComplete(model, msgs)
  *
- * E2.1: `streamToCompleteWithTools` (pętla tool-callingu sub-agentów) PRZENIESIONA do
- * modules/agent-loop (`runAgentLoop`) — jedyny konsument (SubAgentRunner) przepięty, więc
+ * `streamToCompleteWithTools` (pętla tool-callingu sub-agentów) PRZENIESIONA do
+ * modules/agent-loop (`runAgentLoop`) - jedyny konsument (SubAgentRunner) przepięty, więc
  * funkcja + jej prywatne helpery (odsklejanie DeepSeek, estymacja usage) zostały usunięte.
  * Tu zostaje tylko `streamToComplete` (bez narzędzi): Summarizer, ArchiveWorkflow,
  * SaveSessionWorkflow, web/summarize.
  *
- * S29 Z1 (2026-07-29): trzeci, opcjonalny argument `options`. Bez niego funkcja zachowuje się
+ * Trzeci, opcjonalny argument `options`. Bez niego funkcja zachowuje się
  * DOKŁADNIE jak wcześniej (wszystkie stare wywołania są nietknięte). Z nim strzał w tle
  * przestaje być czarną skrzynką:
- *   - `onChunk(delta, response)` — znak życia dla UI (dotąd chunki były jawnie ignorowane),
- *   - `watchdog: { timeoutMs, onStall }` — cisza dłuższa niż timeout przerywa stream i
+ *   - `onChunk(delta, response)` - znak życia dla UI (dotąd chunki były jawnie ignorowane),
+ *   - `watchdog: { timeoutMs, onStall }` - cisza dłuższa niż timeout przerywa stream i
  *     odrzuca Promise błędem `code === 'stream_stalled'` (bez tego zdechły serwer wisiał
  *     do twardego timeoutu XHR = 600 s, a workflow po cichu spadał na fallback regex),
- *   - `signal` (AbortSignal) — przerwanie z zewnątrz; Promise odrzuca się `code === 'aborted'`.
+ *   - `signal` (AbortSignal) - przerwanie z zewnątrz; Promise odrzuca się `code === 'aborted'`.
  * Przerwanie idzie TĄ SAMĄ ścieżką co Stop w czacie: `chatModel.stopStream()`
  * (ChatModel → adapter → `active_stream.end()`).
  */
@@ -33,7 +33,7 @@ export const STREAM_ERROR_CODES = {
 
 export type StreamErrorCode = (typeof STREAM_ERROR_CODES)[keyof typeof STREAM_ERROR_CODES];
 
-/** Błąd streamu z kodem — `err.code` jest jedynym kontraktem dla callerów. */
+/** Błąd streamu z kodem - `err.code` jest jedynym kontraktem dla callerów. */
 export interface StreamError extends Error {
     code?: StreamErrorCode;
     /** ile ms ciszy wykrył watchdog (tylko przy `stream_stalled`) */
@@ -60,7 +60,7 @@ export interface StreamHandlers {
 }
 
 /**
- * Model czatu widziany przez helper — typowany STRUKTURALNIE (adaptery żyją
+ * Model czatu widziany przez helper - typowany STRUKTURALNIE (adaptery żyją
  * w `modules/models`, jeszcze w `.js`). `stream` bywa synchroniczne albo oddaje
  * Promise, która potrafi odrzucić się BEZ wołania `handlers.error`.
  */
@@ -79,7 +79,7 @@ export interface StreamWatchdogOpts {
     now?: () => number;
 }
 
-/** Wszystkie pola opcjonalne; bez `options` zachowanie jak przed S29. */
+/** Wszystkie pola opcjonalne; bez `options` zachowanie bez zmian. */
 export interface StreamToCompleteOptions {
     /** nowy fragment tekstu (różnica treści skumulowanej) + surowy chunk */
     onChunk?: (delta: string, response: StreamResponse) => void;
@@ -96,7 +96,7 @@ export interface StreamToCompleteResult {
 
 type ErrLike = { message?: string };
 
-/** Buduje błąd z kodem — `err.code` jest jedynym kontraktem dla callerów. */
+/** Buduje błąd z kodem - `err.code` jest jedynym kontraktem dla callerów. */
 function makeStreamError(
     code: StreamErrorCode,
     message: string,
@@ -108,7 +108,7 @@ function makeStreamError(
     return err;
 }
 
-/** Przerywa stream tą samą drogą co przycisk Stop w czacie. Best-effort — nigdy nie rzuca. */
+/** Przerywa stream tą samą drogą co przycisk Stop w czacie. Best-effort - nigdy nie rzuca. */
 function stopModelStream(chatModel: StreamChatModelLike | null | undefined): void {
     try {
         if (typeof chatModel?.stopStream === 'function') chatModel.stopStream();
@@ -126,7 +126,7 @@ function contentOf(response: StreamResponse | null | undefined): string {
 /**
  * Call a ChatModel in non-streaming mode.
  *
- * `options.onChunk` — wyjątki z callbacku są łykane. `options.watchdog` — po ciszy:
+ * `options.onChunk` - wyjątki z callbacku są łykane. `options.watchdog` - po ciszy:
  * `onStall` (jeśli podany) → stop streamu → reject z `code: 'stream_stalled'`
  * i polem `silentMs`.
  *
@@ -161,7 +161,7 @@ export function streamToComplete(
         const settleOk = finish<StreamToCompleteResult>(resolve);
         const settleErr = finish<unknown>(reject);
 
-        // Przerwanie z zewnątrz — sprawdzone PRZED wystartowaniem streamu (abort sprzed wywołania
+        // Przerwanie z zewnątrz - sprawdzone PRZED wystartowaniem streamu (abort sprzed wywołania
         // nie może odpalić modelu i spalić tokenów).
         if (signal?.aborted) {
             settleErr(makeStreamError(STREAM_ERROR_CODES.ABORTED, 'Stream aborted before start'));
@@ -196,7 +196,7 @@ export function streamToComplete(
             });
         }
 
-        // Adapter oddaje albo nic, albo Promise — `stream()` jest typowany `unknown`,
+        // Adapter oddaje albo nic, albo Promise - `stream()` jest typowany `unknown`,
         // bo tylko tyle wolno o nim założyć. Asercja poniżej odwzorowuje tę dwoistość,
         // a `typeof .then === 'function'` i tak sprawdza ją w runtime.
         let streaming: PromiseLike<unknown> | undefined;
@@ -209,7 +209,7 @@ export function streamToComplete(
                         if (settled) return;
                         watchdog?.feed();
                         if (typeof onChunk !== 'function') return;
-                        // Chunk niesie CAŁOŚĆ skumulowaną — deltę liczymy sami. Gdy treść się
+                        // Chunk niesie CAŁOŚĆ skumulowaną - deltę liczymy sami. Gdy treść się
                         // skurczy (reset adaptera), oddajemy pusty string zamiast ujemnego wycinka.
                         const accumulated = contentOf(response);
                         const delta = accumulated.startsWith(lastContent)
@@ -226,7 +226,7 @@ export function streamToComplete(
                         settleOk({ text: content, usage });
                     },
                     error: (err) => {
-                        if (settled) return; // stall/abort już rozstrzygnął — nie nadpisujemy kodu
+                        if (settled) return; // stall/abort już rozstrzygnął - nie nadpisujemy kodu
                         log.error('StreamHelper', 'streamToComplete ERROR:', err);
                         settleErr(err);
                     }

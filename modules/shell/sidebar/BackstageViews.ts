@@ -1,17 +1,17 @@
 /**
- * BackstageViews — unified Zaplecze sidebar view (S27: 3 taby).
+ * BackstageViews - unified Zaplecze sidebar view (3 taby).
  *
- * Sprint 10 Z6 (2026-05-02 hotfix): tab implementations live with their owning
- * modules now. This file is a thin coordinator: tab bar + active-tab routing.
+ * Tab implementations live with their owning modules. This file is a thin
+ * coordinator: tab bar + active-tab routing.
  *
  *   modules/skills/SkillsBackstageTab.js          → Szablony skilli
  *   modules/sub-agents/SubAgentsBackstageTab.js   → Szablony subów (+ wbudowany pkm-sub)
- *   modules/tools/ConnectorsBackstageTab.js       → Konektory (S27 Z5, info-only)
+ *   modules/tools/ConnectorsBackstageTab.js       → Konektory (info-only)
  *
- * E2.8 A4: tab „Narzędzia MCP" skasowany — pokazywał martwe nazwy narzędzi po E2.5/E2.6
- * i udawał sterowanie. S27 Z5 wstawia w to miejsce INFORMACYJNĄ zakładkę „Konektory" (D5).
+ * Zakładka „Konektory" jest wyłącznie INFORMACYJNA - pokazuje podłączone serwery MCP,
+ * ale nie daje sterowania nimi.
  *
- * Crystal Soul styling — `--cs-user-color` for UI accents,
+ * Crystal Soul styling - `--cs-user-color` for UI accents,
  * `--cs-category-color-rgb` for per-card category coloring (set inside each tab).
  */
 import { BackstageRegistry } from '../BackstageRegistry.js';
@@ -25,7 +25,7 @@ import { setSvgLabel } from '../../../modules/crystal-soul/index.js';
 type Runtime = any;
 
 /**
- * S27: liczniki zakładek liczą SZABLONY (Zaplecze = katalog form odlewniczych),
+ * Liczniki zakładek liczą SZABLONY (Zaplecze = katalog form odlewniczych),
  * a nie żywe byty. Zakładka Konektory liczy PODŁĄCZONE serwery MCP.
  */
 function getTabCount(plugin: Runtime, tabId: string): number {
@@ -34,14 +34,14 @@ function getTabCount(plugin: Runtime, tabId: string): number {
         // pkm-sub (wbudowany) zawsze jest na liście, stąd +1 do szablonów.
         case 'sub-agents': return (plugin.agentManager?.subAgentTemplateStore?.count() || 0) + 1;
         case 'connectors': return countConnectedServers(plugin);
-        // Backward compat for old tab IDs — redirect to sub-agents
+        // Backward compat for old tab IDs - redirect to sub-agents
         case 'minions':
         case 'masters':    return (plugin.agentManager?.subAgentTemplateStore?.count() || 0) + 1;
         default: return 0;
     }
 }
 
-/** S27 Z5/Z7: ile zewnętrznych serwerów MCP jest realnie podłączonych. */
+/** Ile zewnętrznych serwerów MCP jest realnie podłączonych. */
 export function countConnectedServers(plugin: Runtime): number {
     try {
         const servers = plugin?.externalMcpManager?.listServersForUi?.() || [];
@@ -59,7 +59,7 @@ function registerDefaultBackstageTabs() {
 }
 
 /**
- * Main unified Backstage view — tabs registered by their owning modules.
+ * Main unified Backstage view - tabs registered by their owning modules.
  */
 export function renderZapleczeView(container: Runtime, plugin: Runtime, nav: Runtime, params: Runtime): void {
     container.classList.add('cs-root');

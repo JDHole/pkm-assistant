@@ -4,22 +4,13 @@
  * Crystal Soul modal pokazywany gdy user kończy sesję chat (X taba, "Nowy chat",
  * plugin shutdown z aktywną sesją).
  *
- * Opcje (Sprint 03 Z5, Wizja MEMORY_v2_RETRIEVAL_v2 Blok 1):
+ * Opcje:
  *     'archive'  → zapis sesji jako sessionType:'archived' + konsolidacja L0/L1
  *     'discard'  → "Stracisz X wiadomości" (confirm) → sesja ląduje w `.discarded/`
  *     'cancel'   → modal zamknięty (Esc / poza modalem)
  *
- * S36b (2026-07-30): opcja 'draft' USUNIĘTA. Obiecywała odzyskanie szkicu przy następnym
- * starcie pluginu, ale odzyskiwania nie było od Memory v3 — `saveDraft` pisał do `.draft/`
- * pliki, których NIC nigdy nie czytało. Guzik, który kłamie, jest gorszy od braku guzika.
- *
  * Result type:
  *   { choice: 'archive' | 'discard' | 'cancel' }
- *
- * AUD-dead-code-051/093/130 (2026-09-02): kanał `options` skasowany — od E2.9 FAZA D (A18)
- * (opcja „Kontekst sesji jako artefakt" usunięta) modal nie miał już nic do przewiezienia w tym
- * polu (typ był `Record<string, never>`), a jedyny konsument (`chat_session.handleNewSession`)
- * go destrukturyzował i nigdy nie czytał. `prompt()` zwraca dziś sam `choice`.
  */
 import { Modal, type App } from 'obsidian';
 import { SkinManager, UiIcons, setSvgLabel } from '../crystal-soul/index.js';
@@ -113,9 +104,7 @@ export class SessionCloseModal extends Modal {
         const info = contentEl.createDiv({ cls: 'cs-session-close__info' });
         info.textContent = t('modal.session_close.info', { agent: this.agentName, count: this.messageCount });
 
-        // E2.9 FAZA D (A18): checkbox „Kontekst sesji jako artefakt" usunięty — patrz konstruktor.
-
-        // Buttons (S36b: 2 opcje + cancel — gałąź „draft" skasowana razem z rodziną draftów)
+        // Buttons: 2 opcje + cancel
         const actions = contentEl.createDiv({ cls: 'cs-session-close__actions' });
 
         // 1) Archive (primary) — default action, podsumuj + zapisz
@@ -141,8 +130,8 @@ export class SessionCloseModal extends Modal {
                 const msg = t('modal.session_close.discard_confirm', { count: this.messageCount })
                     || `Stracisz ${this.messageCount} wiadomości. Na pewno?`;
                 // no-alert (wytyczne katalogu Obsidiana): natywny `window.confirm()` blokuje pętlę
-                // zdarzeń i wygląda obco — `confirmModal` z modules/ui-components jest jego
-                // promise'owym zamiennikiem (release 2.2.0 / W2).
+                // zdarzeń i wygląda obco - `confirmModal` z modules/ui-components jest jego
+                // promise'owym zamiennikiem.
                 const confirmed = this.messageCount === 0 || await confirmModal(this.app, {
                     title: t('modal.session_close.discard_confirm_title'),
                     message: msg,

@@ -31,7 +31,7 @@ type PowodPrzerwania = 'stop' | 'limit';
 
 /**
  * Znacznik wewnętrzny: czytanie stanęło, bo ktoś przerwał. Nigdy nie wychodzi na zewnątrz —
- * `open()` zamienia go na właściwy błąd transportu z opisem żądania (i filtrem K20).
+ * `open()` zamienia go na właściwy błąd transportu z opisem żądania (i filtrem sekretów).
  */
 class PrzerwaneCzytanie extends Error {}
 
@@ -119,7 +119,8 @@ export class FetchStreamTransport implements StreamTransport {
 
             if (odp.status !== 200) {
                 // Ciało błędu bywa puste (proxy, zerwane połączenie) — wtedy zostaje pustka,
-                // a krótki komunikat dopisuje wołacz. Zrzut żądania NIE wchodzi w grę (K20).
+                // a krótki komunikat dopisuje wołacz. Zrzut żądania NIE wchodzi w grę (sekret
+                // nigdy w komunikacie błędu).
                 const cialo = await odp.text().catch(() => {
                     // Ciała nie da się doczytać (zerwane połączenie w połowie błędu) — zamykamy
                     // je jawnie, żeby gniazdo nie wisiało do końca życia procesu.

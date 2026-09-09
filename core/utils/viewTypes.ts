@@ -1,15 +1,12 @@
 /**
  * Canonical Obsidian view-type identifiers shared across modules.
  *
- * AUD-dead-code-182: `modules/shell/sidebar/TriggersView.ts` carried its own stale
- * copy of the chat view-type string (`'pkm-chat'`), so `findActiveChatView` never
- * matched the real leaf — Obsidian registers `ChatView` under `'pkm-assistant-chat'`
- * (`modules/chat/chat_view.ts` `static get viewType()`), and view-type lookup is an
- * exact string match (`modules/ui-components/PluginItemView.ts` `registerView`/
- * `getViewType`). `modules/shell/sidebar/HomeView.ts` carried a second stale copy;
- * `modules/artifacts/artifactSummon.ts` and `src/main.ts` had independent (correct,
- * but still duplicated) copies of the right value. This file is the ONE physical
- * source of truth — the literal string appears here and nowhere else.
+ * Obsidian registers `ChatView` under `'pkm-assistant-chat'` (`modules/chat/chat_view.ts`
+ * `static get viewType()`), and view-type lookup is an exact string match
+ * (`modules/ui-components/PluginItemView.ts` `registerView`/`getViewType`) — a stale
+ * duplicate of this string elsewhere (e.g. in a view that scans for the chat leaf) silently
+ * breaks lookups like `findActiveChatView`. This file is the ONE physical source of truth —
+ * the literal string appears here and nowhere else.
  *
  * Lives in `core/`, not `modules/chat/`, because `modules/chat/index.ts` is NOT
  * node-safe: its barrel re-exports `ChatView` from `chat_view.ts`, which statically

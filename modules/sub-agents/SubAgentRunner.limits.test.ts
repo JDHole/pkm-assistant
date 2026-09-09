@@ -1,24 +1,22 @@
 /**
  * SubAgentRunner.limits — KONTRAKT sufitu wyniku narzędzia w pętli SUB-agenta.
  *
- * Kontekst (audyt nocny 2026-08-19, moduł 9): runda 2 z 2026-08-17 uznała wynik suba za
- * DELIVERABLE i dała mu własny sufit `subagent_result_max_chars` (60k) zamiast wspólnego
- * `max_tool_result_length` (15k). Do tego dnia naprawa działała TYLKO na drodze powrotu do
- * agenta GŁÓWNEGO (powiadomienie z tła + okablowanie per-tool w turze czatu, `chat_streaming`).
- * Ten plik pierwotnie SPISYWAŁ stan faktyczny piętro niżej: `SubAgentRunner` budował
- * `loopLimits` BEZ mapy per-tool, więc wynik zagnieżdżonej delegacji (sub deleguje głębiej,
- * `max_delegation_depth` > 1) wracał do suba przycięty wspólnym sufitem 15k.
+ * PO CO: wynik suba jest DELIVERABLE i dostaje własny sufit `subagent_result_max_chars`
+ * (60k) zamiast wspólnego `max_tool_result_length` (15k) — dokładnie jak powiadomienie
+ * z tła + okablowanie per-tool w turze czatu (`chat_streaming`) traktuje wynik agenta
+ * głównego. Ten plik pilnuje, że `SubAgentRunner` buduje `loopLimits` Z mapą per-tool
+ * (`maxToolResultLengthPerTool`) — bez niej wynik zagnieżdżonej delegacji (sub deleguje
+ * głębiej, `max_delegation_depth` > 1) wracałby do suba przycięty wspólnym sufitem 15k.
  *
- * Werdykt właściciela (2026-08-19): „podnosimy ten sam sufit też wewnątrz subagenta" — TAK.
- * Po naprawie ten plik pilnuje NOWEGO kontraktu zamiast starej granicy:
+ * Kontrakt:
  * (a) `loopLimits` ma mapę per-tool (`maxToolResultLengthPerTool`),
  * (b) `delegate` i `agent_delegate` dostają `subagent_result_max_chars` (60k) — chyba że sub
- *     ma WŁASNY `max_tool_result_length` większy niż to (F1, weryfikacja opus), wtedy wygrywa
+ *     ma WŁASNY `max_tool_result_length` większy niż to, wtedy wygrywa
  *     większy z dwóch — mapa nie ma prawa NIKOMU obniżyć sufitu,
  * (c) zero po KTÓREJKOLWIEK stronie (`subagent_result_max_chars` globalnie, ALBO
  *     `config.max_tool_result_length` tego suba — SubAgentEditorModal zapisuje 0 za puste
  *     pole) to świadome „bez limitu" i zostaje zerem — nie zamienia się w drugą wartość przez
- *     nieostrożny `Math.max` (F1 + review lidera tego samego dnia),
+ *     nieostrożny `Math.max`,
  * (d) każde inne narzędzie nadal idzie pod wspólny `max_tool_result_length` (15k).
  *
  * Wzorzec identyczny z `chat_streaming.ts` (per-tool override dla tych samych dwóch nazw,
@@ -77,8 +75,8 @@ function wynikNarzedziaZTranskryptu(model: { calls: Payload[] }): string {
  * Odpala suba z JEDNYM narzędziem `nazwa`, którego wynik jest `dorobek`; zwraca model (do
  * asercji na `calls`) i to, co dotarło do transkryptu.
  *
- * `opts.configExtra` — F1: dokłada pola do configu suba (np. WŁASNY `max_tool_result_length`,
- * per-sub override z SubAgentEditorModal). `opts.pluginExtra` — F1: nadpisuje `plugin`, żeby
+ * `opts.configExtra` — dokłada pola do configu suba (np. WŁASNY `max_tool_result_length`,
+ * per-sub override z SubAgentEditorModal). `opts.pluginExtra` — nadpisuje `plugin`, żeby
  * dowieźć `settings.pkmAssistant.limits.*` (np. `subagent_result_max_chars: 0`) przez ten sam
  * `getLimits(this.plugin?.env?.settings)`, którego używa runner.
  */
@@ -162,7 +160,7 @@ test('kontrakt: narzędzie SPOZA mapy per-tool (np. `search`) nadal idzie pod ws
     );
 });
 
-test('kontrakt (F1, weryfikacja opus): sub z WŁASNYM max_tool_result_length większym niż deliverable — delegate NIE cięty do 60k', async t => {
+test('kontrakt: sub z WŁASNYM max_tool_result_length większym niż deliverable — delegate NIE cięty do 60k', async t => {
     const deliverableDefault = DEFAULT_LIMITS.subagent_result_max_chars;
     const subCommonCap = deliverableDefault + 40000; // override w SUB_AGENT.yaml, > deliverable default
     t.true(subCommonCap > deliverableDefault, 'Fixture zły: cały sens testu to override suba WIĘKSZY niż deliverable default.');
@@ -179,11 +177,11 @@ test('kontrakt (F1, weryfikacja opus): sub z WŁASNYM max_tool_result_length wi�
     t.is(
         wTranskrypcie,
         dorobek,
-        `Wynik \`delegate\` został przycięty mimo że mieści się pod WŁASNYM sufitem suba (${subCommonCap}) — naprawa 19.08 obniżyła sufit configu suba zamiast go tylko podnosić do deliverable.`,
+        `Wynik \`delegate\` został przycięty mimo że mieści się pod WŁASNYM sufitem suba (${subCommonCap}) — mapa obniżyła sufit configu suba zamiast go tylko podnosić do deliverable.`,
     );
 });
 
-test('kontrakt (F1, weryfikacja opus): subagent_result_max_chars=0 („bez limitu") — delegate bez cięcia, nie 60k', async t => {
+test('kontrakt: subagent_result_max_chars=0 („bez limitu") — delegate bez cięcia, nie 60k', async t => {
     // Payload wyraźnie większy niż jakikolwiek default w tym pliku — ma przetrwać W CAŁOŚCI,
     // bo administrator globalnie wyłączył sufit deliverable (0 = bez limitu, config/limits.ts).
     const dorobek = 'D'.repeat(DEFAULT_LIMITS.subagent_result_max_chars * 3);
@@ -199,7 +197,7 @@ test('kontrakt (F1, weryfikacja opus): subagent_result_max_chars=0 („bez limit
     );
 });
 
-test('kontrakt (F1, review lidera): sub z WŁASNYM max_tool_result_length=0 („bez limitu") — delegate bez cięcia, nie 60k', async t => {
+test('kontrakt: sub z WŁASNYM max_tool_result_length=0 („bez limitu") — delegate bez cięcia, nie 60k', async t => {
     // SubAgentEditorModal zapisuje 0 za puste pole, a `config.max_tool_result_length ?? ...`
     // NIE łapie 0 (tylko null/undefined) — więc sufit ogólny TEGO suba realnie wynosi 0
     // („bez limitu" dla wszystkich jego narzędzi). Payload wyraźnie większy niż deliverable

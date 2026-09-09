@@ -22,7 +22,7 @@ import type {
 
 /**
  * Twarde limity modelu — NIE mylić z `model.data.max_tokens=512` (default fail-safe
- * z `EmbeddingModel`, EB-10/EB-12). Wymiary (`dims`) są informacyjne (UI, `listModels`);
+ * z `EmbeddingModel`). Wymiary (`dims`) są informacyjne (UI, `listModels`);
  * `EmbeddingModel.dims` ich nie czyta (patrz `DEFAULT_VECTOR_DIM`).
  */
 const MODEL_CATALOG: Readonly<Record<string, EmbeddingModelSpec>> = {

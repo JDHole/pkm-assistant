@@ -1,13 +1,13 @@
 /**
- * SkillTemplateStore — magazyn SZABLONÓW skilli (S27 Z1).
+ * SkillTemplateStore — magazyn SZABLONÓW skilli.
  *
  * Szablon to forma odlewnicza: `.pkm-assistant/templates/skills/<slug>/SKILL.md`
  * w formacie IDENTYCZNYM z żywym skillem + pole `version: N` (int, start 1).
  *
- * Decyzje kanoniczne (S27):
- *  - D3 „kopia, nie link": `instantiate()` tworzy NIEZALEŻNĄ kopię w `.pkm-assistant/skills/`.
+ * Zasady:
+ *  - „kopia, nie link": `instantiate()` tworzy NIEZALEŻNĄ kopię w `.pkm-assistant/skills/`.
  *    Edycja szablonu NIE zmienia istniejących kopii. Kopia niesie ślad `from_template: "<nazwa> vN"`.
- *  - D4 „same szablony": Zaplecze pokazuje wyłącznie ten magazyn; żywe skille żyją u agentów.
+ *  - „same szablony": Zaplecze pokazuje wyłącznie ten magazyn; żywe skille żyją u agentów.
  *  - Wersja szablonu rośnie przy KAŻDYM zapisie edycji (`save`). Kopia startuje od `version: 1` —
  *    wersja szablonu nie nadpisuje wersji żywego bytu.
  *
@@ -133,7 +133,7 @@ export class SkillTemplateStore {
     }
 
     /**
-     * Skasuj szablon (plik + folder). Kopie u agentów zostają nietknięte (D3).
+     * Skasuj szablon (plik + folder). Kopie u agentów zostają nietknięte (kopia, nie link).
      * @param {string} slug
      * @returns {Promise<boolean>}
      */
@@ -154,7 +154,7 @@ export class SkillTemplateStore {
     }
 
     /**
-     * Odlej KOPIĘ szablonu jako żywy skill w `.pkm-assistant/skills/` (D3).
+     * Odlej KOPIĘ szablonu jako żywy skill w `.pkm-assistant/skills/` (kopia, nie link).
      * Kolizja slugu → sufiks `-2`, `-3`… (wołający pokazuje Notice na `renamed: true`).
      *
      * @param {string} slug - slug szablonu

@@ -152,15 +152,15 @@ test('brak zakładek / brak originu → null, nigdy wyjątek', t => {
     t.is(matchTabForOrigin([{ agentName: 'Jaskier' }], undefined, tabKeyFn), null);
 });
 
-// ─── Runda 2 (2026-08-17): wynik suba to deliverable — własny sufit, 0 = bez limitu ───
+// ─── wynik suba to deliverable - własny sufit, 0 = bez limitu ───
 
-test('runda 2: maxResultChars 0 = bez limitu — długi wynik przechodzi w całości', t => {
+test('maxResultChars 0 = bez limitu - długi wynik przechodzi w całości', t => {
     const dlugi = 'W'.repeat(80_000);
     const text = buildSubTaskNotificationText(makeTask({ result: { text: dlugi, toolsUsed: [], durationMs: 1000, usage: null } }), { maxResultChars: 0 });
     t.true(text.includes(dlugi));
 });
 
-test('runda 2: śmieciowy maxResultChars spada na default subagent_result_max_chars (60k)', t => {
+test('śmieciowy maxResultChars spada na default subagent_result_max_chars (60k)', t => {
     const dlugi = 'W'.repeat(70_000);
     const text = buildSubTaskNotificationText(makeTask({ result: { text: dlugi, toolsUsed: [], durationMs: 1000, usage: null } }), { maxResultChars: Number.NaN });
     t.false(text.includes(dlugi));

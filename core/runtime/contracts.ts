@@ -1,9 +1,8 @@
 /**
  * `core/runtime/contracts.ts` — kontrakt podłogi runtime'u pluginu PKM Assistant.
  *
- * JEDYNE źródło prawdy o powierzchni publicznej runtime'u. Autorzy clean-room
- * implementują pod ten plik; konsumenci (moduły, harness, testy) programują wyłącznie
- * przeciw niemu.
+ * JEDYNE źródło prawdy o powierzchni publicznej runtime'u. Implementacje powstają
+ * pod ten plik; konsumenci (moduły, harness, testy) programują wyłącznie przeciw niemu.
  *
  * WŁAŚCICIELSTWO TYPÓW WSPÓŁDZIELONYCH: ten plik jest właścicielem `SettingsBag`,
  * `ChatSettingsSlice`, `EmbeddingSettingsSlice`, `SettingsRegistryLike`, `NoticeOptions`,
@@ -84,7 +83,7 @@ export interface AppLike {
         [key: string]: unknown;
     };
     /**
-     * E-10: `onLayoutReady` MUSI być wołane jako metoda workspace'u
+     * `onLayoutReady` MUSI być wołane jako metoda workspace'u
      * (`onLayoutReady.call(workspace, cb)`) — wywołanie przez samą referencję gubi `this`.
      */
     workspace: LayoutReadySource & Record<string, unknown>;
@@ -120,18 +119,18 @@ export type EventRefLike = object;
 // 1. ZDARZENIA I STAN
 // =============================================================================
 
-/** Uchwyt odsubskrybowania. Każde `on()` MUSI go zwracać (W-10). */
+/** Uchwyt odsubskrybowania. Każde `on()` MUSI go zwracać. */
 export type Unsubscribe = () => void;
 
 /** Handler zdarzenia szyny runtime'u. */
 export type EventHandler<T = unknown> = (payload: T) => void;
 
-/** Publiczne klucze zdarzeń środowiska. DOKŁADNIE DWA (B-02). */
+/** Publiczne klucze zdarzeń środowiska. DOKŁADNIE DWA. */
 export type RuntimeEventKey = 'loaded' | 'unloading';
 
 /** Szyna zdarzeń runtime'u (`core/utils/EventEmitter.js` — własna, NIE-pochodna). */
 export interface EventEmitterLike<K extends string = string> {
-    /** B-01/W-10: MUSI zwracać uchwyt odsubskrybowania. */
+    /** MUSI zwracać uchwyt odsubskrybowania. */
     on(key: K, handler: EventHandler): Unsubscribe;
     once(key: K, handler: EventHandler): Unsubscribe;
     off(key: K, handler: EventHandler): void;
@@ -150,7 +149,7 @@ export interface EventEmitterLike<K extends string = string> {
  */
 export type RuntimeState = 'loading' | 'loaded' | 'disposed';
 
-/** Minimalny kształt, którego wymaga `waitForLoaded` (W-10). Pole nazywa się `events`. */
+/** Minimalny kształt, którego wymaga `waitForLoaded`. Pole nazywa się `events`. */
 export interface RuntimeLoadedSource {
     state: string;
     events?: { on(key: string, callback: () => void): Unsubscribe };
@@ -183,7 +182,7 @@ export class PluginRuntimeError extends Error {
 
 /**
  * Rzucane WYŁĄCZNIE z warstwy pancerza do jej własnego wołacza — `boot()` łapie
- * je i degraduje do defaultów (S-10). Nigdy nie wychodzi do konsumenta.
+ * je i degraduje do defaultów. Nigdy nie wychodzi do konsumenta.
  */
 export class SettingsCorruptError extends PluginRuntimeError {
     declare readonly path: string;
@@ -198,10 +197,10 @@ export class SettingsCorruptError extends PluginRuntimeError {
 }
 
 // =============================================================================
-// 3. USTAWIENIA — KSZTAŁT (nowe klucze, spec §4)
+// 3. USTAWIENIA — KSZTAŁT (nowe klucze)
 // =============================================================================
 
-/** Worek ustawień. Na dysku: `.pkm-assistant/settings.json` (S-19 — NIE `data.json`). */
+/** Worek ustawień. Na dysku: `.pkm-assistant/settings.json` (NIE `data.json`). */
 export interface SettingsBag {
     pkmAssistant?: PkmAssistantSettings;
     /** Indeks otwarty: moduły dokładają własne gałęzie pod `pkmAssistant`. */
@@ -213,7 +212,7 @@ export interface PkmAssistantSettings {
     chat?: ChatSettingsSlice;
     embedding?: EmbeddingSettingsSlice;
     notices?: NoticesSettingsSlice;
-    /** Język UI. Czytany też PRZED bootem przez `readUiLanguage` (E-21/E-22). */
+    /** Język UI. Czytany też PRZED bootem przez `readUiLanguage`. */
     language?: string;
     /** Limity pętli agenta — nadpisują `DEFAULT_LIMITS` z `config/limits.ts`. */
     limits?: Record<string, number>;
@@ -272,14 +271,14 @@ export interface EmbeddingSettingsSlice {
     [key: string]: unknown;
 }
 
-/** Wyciszone powiadomienia per id (N-02, S-17). */
+/** Wyciszone powiadomienia per id. */
 export interface NoticesSettingsSlice {
     muted?: Record<string, boolean>;
 }
 
 /**
  * Sejf sekretów. `refs` mapuje ścieżkę ustawienia → id sekretu; `encrypted` jest
- * kluczowane po tych id. ID SĄ NIEPRZEZROCZYSTE DLA CAŁEGO KODU (M-02) — jedyny
+ * kluczowane po tych id. ID SĄ NIEPRZEZROCZYSTE DLA CAŁEGO KODU — jedyny
  * wyjątek to migrator kwarantannowy.
  */
 export interface SecureStorageSlice {
@@ -297,7 +296,7 @@ export interface SecureStorageSlice {
 /** Właściciel magazynu: dostarcza I/O. Runtime podaje siebie. */
 export interface SettingsOwner {
     loadSettings(): Promise<SettingsBag> | SettingsBag;
-    /** S-18: argument jest OBOWIĄZKOWY. */
+    /** Argument jest OBOWIĄZKOWY. */
     saveSettings(settings: SettingsBag): Promise<void> | void;
 }
 
@@ -311,7 +310,7 @@ export interface SettingsStoreOptions {
     log?: LoggerLike;
 }
 
-/** Debounce zapisu ustawień (S-01, S-04). */
+/** Debounce zapisu ustawień. */
 export const SETTINGS_SAVE_DEBOUNCE_MS = 1000;
 
 // =============================================================================
@@ -320,18 +319,18 @@ export const SETTINGS_SAVE_DEBOUNCE_MS = 1000;
 
 /** Katalog danych pluginu w vaultcie. */
 export const SETTINGS_DIR = '.pkm-assistant';
-/** JEDYNY plik ustawień; klucze API są w środku (S-19). */
+/** JEDYNY plik ustawień; klucze API są w środku. */
 export const SETTINGS_PATH = '.pkm-assistant/settings.json';
-/** Kopia zapasowa; awansuje WYŁĄCZNIE z treści, która się sparsowała (S-12). */
+/** Kopia zapasowa; awansuje WYŁĄCZNIE z treści, która się sparsowała. */
 export const SETTINGS_LAST_GOOD_PATH = '.pkm-assistant/settings.last-good.json';
-/** Katalog backupów dziennych (S-14). */
+/** Katalog backupów dziennych. */
 export const SETTINGS_BACKUPS_DIR = '.pkm-assistant/backups';
-/** Ile backupów dziennych zostaje po rotacji (S-14). */
+/** Ile backupów dziennych zostaje po rotacji. */
 export const SETTINGS_BACKUP_RETENTION = 7;
-/** Wzorzec nazwy odkładki nieczytelnego pliku (S-10). Scenariusze 26/27 pinują ten regex. */
+/** Wzorzec nazwy odkładki nieczytelnego pliku. Scenariusze 26/27 pinują ten regex. */
 export const SETTINGS_CORRUPT_PATH_PATTERN = /^\.pkm-assistant\/settings\.corrupt-\d+\.json$/;
 /** Jednorazowa kopia sprzed migracji starych kluczy — zostaje w vaultcie na zawsze. */
-export const SETTINGS_PRE_MIGRATION_PATH = '.pkm-assistant/settings.pre-clean-room.json';
+export const SETTINGS_PRE_MIGRATION_PATH = '.pkm-assistant/settings.pre-migration.json';
 
 /** Skąd przyjechały ustawienia w tym boocie — obserwowalne przez log i selftest. */
 export type SettingsSource = 'primary' | 'last-good' | 'defaults';
@@ -341,11 +340,11 @@ export interface SettingsLoadResult {
     /** Zmergowany worek: defaulty + to, co się wczytało + migracje w PAMIĘCI. */
     settings: SettingsBag;
     source: SettingsSource;
-    /** Ścieżka powstałej odkładki `settings.corrupt-<ts>.json`, gdy powstała (S-10). */
+    /** Ścieżka powstałej odkładki `settings.corrupt-<ts>.json`, gdy powstała. */
     quarantinedPath?: string;
-    /** Czy `settings.last-good.json` został ODŚWIEŻONY w tym boocie (S-12). */
+    /** Czy `settings.last-good.json` został ODŚWIEŻONY w tym boocie. */
     lastGoodRefreshed: boolean;
-    /** Czy powstał dzienny backup (S-14). */
+    /** Czy powstał dzienny backup. */
     backupWritten: boolean;
     /** Migracje w pamięci, które zaszły. */
     migrations: {
@@ -358,7 +357,7 @@ export interface SettingsLoadResult {
  * Minimalne I/O pancerza — wydzielone po to, żeby cały pancerz dał się przetestować
  * bez Obsidiana. Wszystkie metody mogą rzucać; pancerz sam się broni.
  *
- * S-16: NIGDY nie ufamy `exists()` — sprawdzamy PRÓBĄ ODCZYTU.
+ * NIGDY nie ufamy `exists()` — sprawdzamy PRÓBĄ ODCZYTU.
  */
 export interface SettingsIo {
     read(path: string): Promise<string | null>;
@@ -403,14 +402,14 @@ export interface LegacySettingsMigrationResult {
 // 7. POWIADOMIENIA
 // =============================================================================
 
-/** Przycisk akcji w powiadomieniu (N-03). */
+/** Przycisk akcji w powiadomieniu. */
 export interface NoticeAction {
     label: string;
     onClick: () => void;
 }
 
 export interface NoticeOptions {
-    /** Stabilny identyfikator powiadomienia; pozwala je wyciszyć (N-02). */
+    /** Stabilny identyfikator powiadomienia; pozwala je wyciszyć. */
     id?: string;
     /** ms; `0` = nie znika samo. Domyślnie {@link NOTICE_DEFAULT_TIMEOUT_MS}. */
     timeout?: number;
@@ -432,30 +431,30 @@ export interface NoticeLike {
 
 /** Domyślny czas życia powiadomienia. */
 export const NOTICE_DEFAULT_TIMEOUT_MS = 4000;
-/** N-03: klasa kontenera guzików akcji. */
+/** Klasa kontenera guzików akcji. */
 export const NOTICE_ACTIONS_CSS_CLASS = 'pkm-notice-actions';
 
 // =============================================================================
 // 8. PASEK STATUSU
 // =============================================================================
 
-/** SB-02: komponent paska statusu wstrzykiwany configiem. */
+/** Komponent paska statusu wstrzykiwany configiem. */
 export interface StatusBarRenderer {
     /** Zwraca element, który runtime wstawi do paska statusu Obsidiana. */
     render(): HTMLElement;
 }
 
-/** Uchwyt paska statusu (SB-01/SB-04). */
+/** Uchwyt paska statusu. */
 export interface StatusBarController {
     /** Przerysowanie treści paska (drugi kanał: zdarzenia „pulsu pamięci"). */
     refresh(): void;
     setText(text: string): void;
-    /** SB-03: przełącza wariant klikalny. */
+    /** Przełącza wariant klikalny. */
     setClickable(handler: (() => void) | null): void;
     dispose(): void;
 }
 
-/** SB-03: klasy CSS paska. */
+/** Klasy CSS paska. */
 export const STATUS_BAR_CSS_CLASSES = [
     'pkm-status-bar-item',
     'pkm-status-bar-item--clickable',
@@ -478,14 +477,14 @@ export interface PluginHost {
     readonly app: AppLike;
     readonly manifest: PluginManifestLike;
 
-    /** PL-06: `data.json` pluginu — TYLKO wersjonowanie, nie ustawienia (S-19). */
+    /** `data.json` pluginu — TYLKO wersjonowanie, nie ustawienia. */
     loadData(): Promise<PluginVersionData | null>;
     saveData(data: PluginVersionData): Promise<void>;
 
-    /** SB-01: kontener paska statusu. */
+    /** Kontener paska statusu. */
     addStatusBarItem(): HTMLElement;
 
-    /** PL-13: jednorazowe budziki MUSZĄ iść tędy, inaczej przeżywają unload. */
+    /** Jednorazowe budziki MUSZĄ iść tędy, inaczej przeżywają unload. */
     registerInterval(id: number): number;
     /** Rejestracja nasłuchu vaulta/workspace'u z auto-sprzątaniem. */
     registerEvent(ref: EventRefLike): void;
@@ -493,7 +492,7 @@ export interface PluginHost {
 
 /**
  * Zawartość `.obsidian/plugins/<manifest.id>/data.json`.
- * NAZWY PÓL SĄ ZAMROŻONE (BR-1/Y-4) — fixture harnessu na nich stoi.
+ * NAZWY PÓL SĄ ZAMROŻONE — fixture harnessu na nich stoi.
  */
 export interface PluginVersionData {
     installed_at?: number;
@@ -509,7 +508,7 @@ export interface PluginVersionData {
  * `RuntimeConfig` — zwykły obiekt budowany w composition roocie
  * (`config/runtimeConfig.ts`, `buildRuntimeConfig()`).
  *
- * KONTRAKT REFERENCJI (C-02/C-03): obiekt powstaje w KONSTRUKTORZE pluginu
+ * KONTRAKT REFERENCJI: obiekt powstaje w KONSTRUKTORZE pluginu
  * (`PluginBase.runtimeConfig`), `onload()` podaje TĘ SAMĄ referencję konstruktorowi
  * runtime'u, a `runtime.config === plugin.runtimeConfig`.
  */
@@ -525,7 +524,7 @@ export interface RuntimeConfig {
     };
     /** Fabryczne ustawienia (`config/defaultSettings.ts`). */
     defaults: SettingsBag;
-    /** SB-02: override komponentu paska statusu. */
+    /** Override komponentu paska statusu. */
     statusBar?: StatusBarRenderer;
     /** DI loggera — testy podstawiają szpiega. */
     log?: LoggerLike;
@@ -535,21 +534,21 @@ export interface RuntimeConfig {
 // 11. POWIERZCHNIA `plugin.*` (widok modułów)
 // =============================================================================
 
-/** PL-03: definicja komendy. Nazwa NIE zawiera nazwy pluginu — Obsidian ją dokleja. */
+/** Definicja komendy. Nazwa NIE zawiera nazwy pluginu — Obsidian ją dokleja. */
 export interface CommandDef {
     id: string;
     name: string;
     callback: () => void | Promise<void>;
 }
 
-/** PL-04: definicja ikony wstążki. Kolejność w mapie = kolejność ikon na pasku. */
+/** Definicja ikony wstążki. Kolejność w mapie = kolejność ikon na pasku. */
 export interface RibbonIconDef {
     iconName: string;
     description: string;
     callback: () => void | Promise<void>;
 }
 
-/** Opcje `showCrystalNotice` (N-05) — own-code, kształt zamrożony przez 4 konsumentów. */
+/** Opcje `showCrystalNotice` — own-code, kształt zamrożony przez 4 konsumentów. */
 export interface CrystalNoticeOptions {
     type?: 'info' | 'success' | 'warning' | 'error' | 'agent';
     /** domyślnie 4000; `0` = nie znika samo */
@@ -567,7 +566,7 @@ export interface PluginApi {
     readonly manifest: PluginManifestLike;
     /** Dla modułów pole jest TYLKO DO ODCZYTU (zapisuje je wyłącznie composition root). */
     readonly env: PluginRuntime | null;
-    /** C-02: ta sama referencja co `runtime.config`; moduły jej nie mutują. */
+    /** Ta sama referencja co `runtime.config`; moduły jej nie mutują. */
     readonly runtimeConfig: RuntimeConfig;
     readonly settings: SettingsBag;
     readonly notices: NoticeLike | null;
@@ -607,7 +606,7 @@ export interface PluginApi {
 // =============================================================================
 
 /**
- * Statyki, których wymaga `PluginItemView.register` (V-01).
+ * Statyki, których wymaga `PluginItemView.register`.
  *
  * JEDNA SYGNATURA `open` W CAŁYM REPO: `open(workspace, state?, active?)`. Podklasy
  * jej NIE zmieniają; gdy potrzebują skrótu, dokładają WŁASNĄ statykę
@@ -620,14 +619,14 @@ export interface PluginItemViewClass {
     readonly displayText: string;
     /** Ikona. */
     readonly iconName: string;
-    /** V-02: rejestruje widok + komendę „otwórz". */
+    /** Rejestruje widok + komendę „otwórz". */
     register(plugin: PluginApi): void;
-    /** V-01/BR-4: otwiera widok; no-op, gdy workspace nie dał liścia. */
+    /** Otwiera widok; no-op, gdy workspace nie dał liścia. */
     open(workspace: unknown, state?: Record<string, unknown>, active?: boolean): Promise<void>;
     new (leaf: unknown, plugin: PluginApi): object;
 }
 
-/** PL-02: mapa nazwa→klasa widoku (dziś: notatki wydania + czat). */
+/** Mapa nazwa→klasa widoku (dziś: notatki wydania + czat). */
 export type ItemViewMap = Record<string, PluginItemViewClass>;
 
 /** Kształt klasy zakładki ustawień, jakiego wymaga composition root. */
@@ -639,7 +638,7 @@ export interface PluginSettingsTabClass {
 // 13. REJESTR SEKCJI USTAWIEŃ
 // =============================================================================
 
-/** V-10: jedna sekcja w rejestrze ustawień shella. */
+/** Jedna sekcja w rejestrze ustawień shella. */
 export interface SettingsSectionDef {
     id: string;
     label?: string;
@@ -669,13 +668,13 @@ export interface SettingsSubFieldDef {
  */
 export interface SettingsRegistryLike {
     register(section: SettingsSectionDef): void;
-    /** V-10: dokłada pod-pole do sekcji o podanym `parentId`. */
+    /** Dokłada pod-pole do sekcji o podanym `parentId`. */
     registerSubFields(parentId: string, sub: SettingsSubFieldDef): void;
 }
 
 /**
- * V-11: worek DI budowany przez shell, bo `core/` nie importuje z modułów.
- * `Setting`/`Notice` wchodzą TĘDY, żeby barrel został node-safe (K-01/K-03).
+ * Worek DI budowany przez shell, bo `core/` nie importuje z modułów.
+ * `Setting`/`Notice` wchodzą TĘDY, żeby barrel został node-safe.
  */
 export interface SettingsSectionCtx {
     /** slice `pkmAssistant.chat` */

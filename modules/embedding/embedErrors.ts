@@ -1,13 +1,13 @@
 /**
- * modules/embedding/embedErrors.ts — kontrakt błędu embeddingu (§3 kontraktu).
+ * modules/embedding/embedErrors.ts - kontrakt błędu embeddingu (§3 kontraktu w `contracts.ts`).
  *
  * JEDEN typ błędu wychodzi z całego klastra na zewnątrz. `VaultIndexer` czyta z niego
  * `kind` i `httpStatus` KACZO (fasada embeddera jest wstrzykiwana, więc `instanceof`
- * przez granicę modułu bywa fałszywie ujemny) — stąd osobny strażnik {@link isEmbedBatchError},
+ * przez granicę modułu bywa fałszywie ujemny) - stąd osobny strażnik {@link isEmbedBatchError},
  * który patrzy na kształt, a nie na łańcuch prototypów.
  *
- * K20: żadne pole tego błędu nie ma prawa nieść klucza API ani nagłówków żądania.
- * Maskowanie robi wołacz (`EmbeddingModel`) PRZED zbudowaniem błędu — tutaj jest tylko
+ * Żadne pole tego błędu nie ma prawa nieść klucza API ani nagłówków żądania.
+ * Maskowanie robi wołacz (`EmbeddingModel`) PRZED zbudowaniem błędu - tutaj jest tylko
  * nośnik, więc trzymamy go głupim i przewidywalnym.
  */
 import type { EmbedBatchErrorInit, EmbedErrorKind, EmbedErrorCode, EmbeddingProviderId } from './contracts.js';
@@ -21,7 +21,7 @@ const ERROR_KINDS: ReadonlySet<string> = new Set<EmbedErrorKind>(['transport', '
  * `shape` = fatalna, porcji NIE wolno rozbijać na pojedyncze pliki).
  */
 export class EmbedBatchError extends Error {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare readonly kind: EmbedErrorKind;
     declare readonly code: EmbedErrorCode;
     declare readonly httpStatus?: number;

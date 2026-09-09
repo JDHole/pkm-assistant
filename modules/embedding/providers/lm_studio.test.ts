@@ -1,6 +1,6 @@
 /**
- * providers/lm_studio.test.ts — nowe testy C-14 (napisany przed implementacją, czerwony na
- * stubie, dziś zielony) i C-15 (AUTOR). Każda metoda `LmStudioEmbeddingProvider` rzucała
+ * providers/lm_studio.test.ts — nowe testy (napisany przed implementacją, czerwony na
+ * stubie, dziś zielony). Każda metoda `LmStudioEmbeddingProvider` rzucała
  * `not implemented` na stubie.
  */
 import test from 'ava';
@@ -28,7 +28,7 @@ function fakeHttp(router: (spec: HttpRequestSpec) => HttpResponse): HttpClient {
     return { async send(spec) { return router(spec); } };
 }
 
-test('C-14: listModels bierze WYŁĄCZNIE wpisy type === \'embeddings\' (natywny /api/v0/models)', async t => {
+test('listModels bierze WYŁĄCZNIE wpisy type === \'embeddings\' (natywny /api/v0/models)', async t => {
     const provider = new LmStudioEmbeddingProvider();
     const http = fakeHttp(() => jsonResponse(200, {
         data: [
@@ -109,7 +109,7 @@ test('countTokens: estymata znaki/TOKEN_CHARS_PER_TOKEN zaokrąglona w górę, n
     t.is(provider.countTokens(''), 0);
 });
 
-test('C-15: brak loaded_context_length -> modelSpec() undefined (model spada na 512)', t => {
+test('brak loaded_context_length -> modelSpec() undefined (model spada na 512)', t => {
     const provider = new LmStudioEmbeddingProvider();
     // Katalog LM Studio jest budowany dynamicznie z /api/v0/models — bez ANI JEDNEGO wywołania
     // listModels() dla nieznanego modelu, modelSpec() musi fail-safe oddać undefined (gotcha 11

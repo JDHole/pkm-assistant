@@ -1,5 +1,5 @@
 /**
- * Filtr domen dla dostępu do sieci (E3.3, DEC L13-5c / L13-13).
+ * Filtr domen dla dostępu do sieci.
  *
  * Dwie listy w `settings.pkmAssistant.webSearch`:
  * - `blockedDomains[]` — czarna lista, ma ZAWSZE pierwszeństwo,
@@ -79,7 +79,7 @@ function matchesList(host: string, list: string[]): boolean {
  * Werdykt dla pojedynczego adresu.
  *
  * Gdy OBIE listy są puste (domyślna konfiguracja) → `'allowed'` natychmiast, bez
- * parsowania URL-a: filtr wyłączony = zero zmiany zachowania względem stanu przed E3.3.
+ * parsowania URL-a: filtr wyłączony = zero filtrowania.
  * Gdy filtr JEST skonfigurowany, adres nieparsowalny → `'blocked'` (fail-closed).
  *
  * @param url - adres do sprawdzenia (nieparsowalny = `'blocked'`, patrz wyżej)

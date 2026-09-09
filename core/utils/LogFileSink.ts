@@ -1,5 +1,5 @@
 /**
- * LogFileSink — opcjonalny zapis logów do pliku dla Loggera (E1.8, 2026-07-21).
+ * LogFileSink — opcjonalny zapis logów do pliku dla Loggera.
  *
  * PO CO: `log.info/debug/warn/error` lecą tylko do konsoli devtools. Agent AI
  * testujący plugin z zewnątrz CZYTA PLIKI z dysku, nie konsolę. Ten sink dubluje
@@ -130,7 +130,7 @@ export interface LogFileSinkOptions {
 }
 
 export class LogFileSink {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare adapter: LogFileSinkAdapter | null;
     declare path: string;
     declare oldPath: string;

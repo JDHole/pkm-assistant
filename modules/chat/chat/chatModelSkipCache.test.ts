@@ -1,14 +1,13 @@
 /**
  * Strażnik PO ŹRÓDLE: `get_chat_model({ skipCache })` musi doprowadzić flagę do
- * `createModelForRole` w gałęzi agenta z WŁASNYM modelem (AUD-wydajnosc-079, potwierdza
- * otwarty risk register RR-08-11).
+ * `createModelForRole` w gałęzi agenta z WŁASNYM modelem.
  *
  * DLACZEGO PO ŹRÓDLE, A NIE BEHAWIORALNIE: `chat_model.ts` importuje `obsidian` (`Notice`)
  * i całą warstwę UI, więc w AVA nie da się go zaimportować bezpośrednio. Ten sam wzór, co
- * `oczkoAccessGate.test.ts` obok — plik czyta własne źródło zamiast wołać moduł.
+ * `oczkoAccessGate.test.ts` obok - plik czyta własne źródło zamiast wołać moduł.
  * Zachowanie samego resolvera (że `callerSkipCache` faktycznie tworzy świeżą instancję
  * i nie kasuje istniejącego wpisu cache) jest przetestowane naprawdę w
- * `modules/models/modelResolver.test.ts` ("AUD-wydajnosc-079").
+ * `modules/models/modelResolver.test.ts`.
  *
  * CO PILNUJE: żeby nikt po cichu nie wyciął przekazania `skipCache` jako 5. argumentu.
  * Bez tego dwa taby czatu tego samego agenta z modelem w YAML-u (`models.main`/`model`)
@@ -29,21 +28,21 @@ function fnBody(name: string): string {
     return source.match(re)?.[1] || '';
 }
 
-test('AUD-wydajnosc-079: get_chat_model przekazuje skipCache do createModelForRole (gałąź agenta z własnym modelem)', t => {
+test('get_chat_model przekazuje skipCache do createModelForRole (gałąź agenta z własnym modelem)', t => {
     const body = fnBody('get_chat_model');
-    t.not(body, '', 'nie znalazłem ciała get_chat_model — zmieniła się sygnatura');
+    t.not(body, '', 'nie znalazłem ciała get_chat_model - zmieniła się sygnatura');
 
     // Bez tej asercji `createModelForRole(this.plugin, 'main', activeAgent)` (3 argumenty,
-    // bez flagi) przechodziłby niezauważony — dokładnie ten regres, który znalazło AUD-079.
+    // bez flagi) przechodziłby niezauważony.
     t.regex(
         body,
         /createModelForRole\(\s*this\.plugin,\s*'main',\s*activeAgent,\s*null,\s*skipCache\s*\)/,
-        'gałąź hasAgentModel przestała przekazywać skipCache jako 5. argument createModelForRole — ' +
+        'gałąź hasAgentModel przestała przekazywać skipCache jako 5. argument createModelForRole - ' +
         'dwa taby tego samego agenta z modelem w YAML-u znów dzielą jedną instancję z cache resolvera'
     );
 });
 
-test('AUD-wydajnosc-079: skipCache destrukturyzowany z opcji, nie zaszyty na sztywno', t => {
+test('skipCache destrukturyzowany z opcji, nie zaszyty na sztywno', t => {
     // Kod bez komentarzy — pilnujemy że `skipCache` naprawdę jest parametrem funkcji,
     // nie literałem `false`/`true` podstawionym w wywołaniu.
     t.regex(

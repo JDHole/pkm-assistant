@@ -127,9 +127,9 @@ test('every tool declares serverName "artifacts" and an i18n description', t => 
     }
 });
 
-// ── K2 (AUD-security-075/076): bramka dostaje PRAWDZIWĄ ścieżkę ──────────────
+// ── Bramka dostaje PRAWDZIWĄ ścieżkę ──────────────
 
-test('K2: contextExtractor artefaktów oddaje ścieżkę, nie pusty string', async t => {
+test('contextExtractor artefaktów oddaje ścieżkę, nie pusty string', async t => {
     const { plugin, app } = makePlugin();
     const create = createArtifactCreateTool();
     const read = createArtifactReadTool();
@@ -150,14 +150,14 @@ test('K2: contextExtractor artefaktów oddaje ścieżkę, nie pusty string', asy
     t.is(listTool.contextExtractor({}, ctx).targetPath, 'PKM Assistant/Artefakty');
 });
 
-test('K2: nieznane id daje PUSTY cel — bramka odmawia fail-closed zamiast przepuścić', t => {
+test('nieznane id daje PUSTY cel — bramka odmawia fail-closed zamiast przepuścić', t => {
     const { plugin } = makePlugin();
     const ctx = { agentName: 'Jaskier', plugin };
     t.is(createArtifactReadTool().contextExtractor({ id: 'art-00000000-dead' }, ctx).targetPath, '');
     t.is(createArtifactUpdateTool().contextExtractor({ id: undefined }, ctx).targetPath, '');
 });
 
-test('K2: notatka z frontmatterem pkm-artefakt POZA folderem artefaktów jest niewidoczna', async t => {
+test('notatka z frontmatterem pkm-artefakt POZA folderem artefaktów jest niewidoczna', async t => {
     const { plugin, app, files } = makePlugin();
     const read = createArtifactReadTool();
     const update = createArtifactUpdateTool();
@@ -186,7 +186,7 @@ test('K2: notatka z frontmatterem pkm-artefakt POZA folderem artefaktów jest ni
     t.true(files.get('Prywatne/dziennik.md')!.includes('pkm-artefakt: art-20260723-beef'));
 });
 
-// ── K2: pełny łańcuch (MCPClient → PermissionSystem → AccessGuard) ────────────
+// ── Pełny łańcuch (MCPClient → PermissionSystem → AccessGuard) ────────────
 
 /** Klient MCP na PRAWDZIWEJ bramce uprawnień + prawdziwym silniku artefaktów. */
 function makeClient(plugin: ArtifactToolPlugin, app: unknown, agent: Record<string, unknown>) {
@@ -209,7 +209,7 @@ function makeClient(plugin: ArtifactToolPlugin, app: unknown, agent: Record<stri
     );
 }
 
-test.serial('K2: artifact_update na artefakcie w No-Go = odmowa przez pełny łańcuch', async t => {
+test.serial('artifact_update na artefakcie w No-Go = odmowa przez pełny łańcuch', async t => {
     AccessGuard.setNoGoFolders([]);
     const { plugin, app, files } = makePlugin();
     const agent = { name: 'Jaskier', permissions: { guidance_mode: true }, focusFolders: [] };
@@ -241,7 +241,7 @@ test.serial('K2: artifact_update na artefakcie w No-Go = odmowa przez pełny ła
     AccessGuard.setNoGoFolders([]);
 });
 
-test.serial('K2: agent bez dostępu do zwykłego vaultu nie tworzy artefaktów po cichu', async t => {
+test.serial('agent bez dostępu do zwykłego vaultu nie tworzy artefaktów po cichu', async t => {
     AccessGuard.setNoGoFolders([]);
     const { plugin, app, files } = makePlugin();
     // Profil „Tylko przypisane" bez przypisanych folderów = wg SECURITY.md zero dostępu do vaulta.
@@ -258,13 +258,14 @@ test.serial('K2: agent bez dostępu do zwykłego vaultu nie tworzy artefaktów p
     t.is([...files.keys()].filter(p => p.startsWith('PKM Assistant/Artefakty')).length, 0, 'nic nie powstało w vaulcie');
 });
 
-// ── K21 (AUD-security-121): CEL DLA BRAMKI Z TOŻSAMOŚCI RUNTIME, NIE Z ARGUMENTÓW ────────────
+// ── CEL DLA BRAMKI Z TOŻSAMOŚCI RUNTIME, NIE Z ARGUMENTÓW ────────────
 //
-// `contextExtractor` narzędzia `artifact_create` liczył folder z `args._invocationAgentName`.
-// Znacznik jest zaufany dopiero PO nadpisaniu przez `MCPClient` — a bramka dostawała worek
-// sprzed nadpisania, więc czytała nazwę wpisaną przez MODEL. Skutek: AccessGuard i modal zgody
-// oglądały `…/Artefakty/<nazwa od modelu>/…`, a `store.create` pisał do
-// `…/Artefakty/<prawdziwy agent>/…`. Dwa różne pliki = whitelista i zakres suba obchodzone.
+// `contextExtractor` narzędzia `artifact_create` liczy folder z `ctx.agentName` (runtime), nie
+// z `args._invocationAgentName` — ten znacznik jest zaufany dopiero PO nadpisaniu przez
+// `MCPClient`, a bramka dostaje worek PRZED tym nadpisaniem, więc czytałaby nazwę wpisaną przez
+// MODEL. Licząc z argumentów, AccessGuard i modal zgody oglądałyby `…/Artefakty/<nazwa od
+// modelu>/…`, a `store.create` pisałby do `…/Artefakty/<prawdziwy agent>/…` — dwa różne pliki,
+// czyli obejście whitelisty i zakresu suba.
 
 /** Klient jak `makeClient`, ale zapamiętuje CEL, który realnie oceniła bramka uprawnień. */
 function makeSpyClient(plugin: ArtifactToolPlugin, app: unknown, agent: Record<string, unknown>) {
@@ -296,7 +297,7 @@ function makeSpyClient(plugin: ArtifactToolPlugin, app: unknown, agent: Record<s
     return { client, ocenione };
 }
 
-test('K21: contextExtractor bierze tożsamość z runtime, a nie z worka argumentów', t => {
+test('contextExtractor bierze tożsamość z runtime, a nie z worka argumentów', t => {
     const { plugin } = makePlugin();
     const create = createArtifactCreateTool();
 
@@ -308,7 +309,7 @@ test('K21: contextExtractor bierze tożsamość z runtime, a nie z worka argumen
     t.true(cel.startsWith('PKM Assistant/Artefakty/Klara/'), `bramka dostała: ${cel}`);
 });
 
-test.serial('K21: whitelista mierzy folder PRAWDZIWEGO agenta — nazwa z argumentów nie otwiera zapisu', async t => {
+test.serial('whitelista mierzy folder PRAWDZIWEGO agenta — nazwa z argumentów nie otwiera zapisu', async t => {
     AccessGuard.setNoGoFolders([]);
     const { plugin, app, files } = makePlugin();
     // „Tylko przypisane" z whitelistą na CUDZY folder artefaktów. Model podaje w argumentach
@@ -327,7 +328,7 @@ test.serial('K21: whitelista mierzy folder PRAWDZIWEGO agenta — nazwa z argume
     t.is(files.size, 0, 'żaden plik nie powstał');
 });
 
-test.serial('K21: cel oceniony przez bramkę to DOKŁADNIE ścieżka zapisu', async t => {
+test.serial('cel oceniony przez bramkę to DOKŁADNIE ścieżka zapisu', async t => {
     AccessGuard.setNoGoFolders([]);
     const { plugin, app } = makePlugin();
     const agent = { name: 'Klara', permissions: { guidance_mode: false }, focusFolders: ['PKM Assistant/Artefakty/Klara'] };
@@ -342,7 +343,7 @@ test.serial('K21: cel oceniony przez bramkę to DOKŁADNIE ścieżka zapisu', as
     t.is(ocenione[0], res.path, 'bramka i zlew oglądają JEDEN ciąg');
 });
 
-test.serial('K21: zakres suba też mierzy folder prawdziwego agenta', async t => {
+test.serial('zakres suba też mierzy folder prawdziwego agenta', async t => {
     AccessGuard.setNoGoFolders([]);
     const { plugin, app, files } = makePlugin();
     // Rodzic widzi cały vault, ale sub dostał wąski zakres na cudzy folder artefaktów.
@@ -361,7 +362,7 @@ test.serial('K21: zakres suba też mierzy folder prawdziwego agenta', async t =>
     t.is(files.size, 0);
 });
 
-// ── K10 (AUD-security-061): `pola` przechodzą przez TEN SAM walidator co patch ────────────────
+// ── `pola` przechodzą przez TEN SAM walidator co patch ────────────────
 // Wartości pól są podstawiane do CIAŁA notatki przez `{{pole}}` w szablonie typu, więc bez tej
 // bramki `artifact_create` był drugą, niepilnowaną drogą zapisu treści: fence kodu i nagłówek
 // `##` lądowały w vaultcie, a narzędzie raportowało `ok:true`, `errors: []`.
@@ -375,7 +376,7 @@ const POISON = {
 
 for (const [expectedCode, payload] of Object.entries(POISON)) {
     const code = expectedCode.replace(/_(tilde|html)$/, '');
-    test(`K10: artifact_create odmawia, gdy pole niesie ${expectedCode} (kod ${code})`, async t => {
+    test(`artifact_create odmawia, gdy pole niesie ${expectedCode} (kod ${code})`, async t => {
         const { plugin, app, files } = makePlugin();
         const create = createArtifactCreateTool();
         const res = await create.execute(
@@ -390,7 +391,7 @@ for (const [expectedCode, payload] of Object.entries(POISON)) {
     });
 }
 
-test('K10: ten sam ładunek w `sekcje` i w `pola` daje ten sam kod odmowy', async t => {
+test('ten sam ładunek w `sekcje` i w `pola` daje ten sam kod odmowy', async t => {
     const { plugin, app } = makePlugin();
     const create = createArtifactCreateTool();
 
@@ -407,7 +408,7 @@ test('K10: ten sam ładunek w `sekcje` i w `pola` daje ten sam kod odmowy', asyn
     t.is(viaPola.errors[0]!.code, 'code_forbidden');
 });
 
-test('K10: czyste `pola` nadal tworzą artefakt (bramka nie blokuje normalnej pracy)', async t => {
+test('czyste `pola` nadal tworzą artefakt (bramka nie blokuje normalnej pracy)', async t => {
     const { plugin, app, files } = makePlugin();
     const create = createArtifactCreateTool();
     const res = await create.execute(

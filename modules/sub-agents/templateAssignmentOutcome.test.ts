@@ -1,8 +1,7 @@
 /**
- * templateAssignmentOutcome — AUD-testy-021. Logika „Użyj u agenta" (idempotencja +
- * „pierwszy sub = domyślny") i reset globalnego suba po kasacji szablonu siedziały w
- * `SubAgentsBackstageTab.ts` bez ŻADNEGO testu (prywatne funkcje, zero eksportu, zero
- * importu z plików testowych).
+ * templateAssignmentOutcome — logika „Użyj u agenta" (idempotencja + „pierwszy sub =
+ * domyślny") i reset globalnego suba po kasacji szablonu jest wydzielona z
+ * `SubAgentsBackstageTab.ts` właśnie po to, żeby dało się ją przetestować bez DOM.
  *
  * Test czystej decyzji — zero DOM, zero obsidian.
  */

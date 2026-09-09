@@ -1,11 +1,10 @@
 /**
- * Wiersze sekcji „Zaplecze" na ekranie domowym sidebara (S27 Z7).
+ * Wiersze sekcji „Zaplecze" na ekranie domowym sidebara.
  *
- * CZYSTA STRUKTURA DANYCH — bez DOM, bez obsidiana. Powód (D7): 2026-07-28 na Home wisiał
- * martwy wiersz „Narzędzia MCP" celujący w tab `tools`, którego nie było — Zaplecze po cichu
- * spadało na Skille i nikt tego nie łapał. Odkąd definicja wierszy jest danymi, test
- * sprawdza mapowanie wiersz→tab przeciw realnemu `BackstageRegistry` i taka wtopa
- * nie przejdzie bez czerwonego testu.
+ * CZYSTA STRUKTURA DANYCH - bez DOM, bez obsidiana. Powód: gdyby wiersz celował w tab, którego
+ * nie ma w `BackstageRegistry`, Zaplecze po cichu spadałoby na Skille i nikt by tego nie złapał.
+ * Odkąd definicja wierszy jest danymi, test sprawdza mapowanie wiersz→tab przeciw realnemu
+ * `BackstageRegistry`, więc taka pomyłka nie przejdzie bez czerwonego testu.
  *
  * Kontrakt wiersza:
  *   { id, labelKey, icon, count, tab }     → nawigacja do `zaplecze` z tą zakładką
@@ -46,9 +45,9 @@ export function buildZapleczeRows({
             id: 'connectors', labelKey: 'backstage.connectors', icon: 'externalLink',
             count: connectedServers, countTitleKey: 'backstage.connectors_count_title', tab: 'connectors',
         },
-        // Sprint 05.5 H2: Triggery to osobny widok sidebara, nie zakładka Zaplecza.
+        // Triggery to osobny widok sidebara, nie zakładka Zaplecza.
         { id: 'triggers', labelKey: 'sidebar.triggers', icon: 'sparkle', count: null, viewId: 'triggers' },
-        // Wiersza „Biegi subów" tu NIE MA (2026-08-15): biegi żyją per agent i per sesja,
+        // Wiersza „Biegi subów" tu NIE MA: biegi żyją per agent i per sesja,
         // więc pokazuje je pasek w oknie czatu, nie globalny sidebar.
     ];
 }
@@ -66,7 +65,7 @@ export function readZapleczeCounts(plugin: Runtime): Required<ZapleczeCounts> {
     } catch { connectedServers = 0; }
     return {
         skillTemplates: am?.skillTemplateStore?.count?.() || 0,
-        // pkm-sub (wbudowany) zawsze jest na liście zakładki — stąd +1.
+        // pkm-sub (wbudowany) zawsze jest na liście zakładki - stąd +1.
         subTemplates: (am?.subAgentTemplateStore?.count?.() || 0) + 1,
         connectedServers,
     };

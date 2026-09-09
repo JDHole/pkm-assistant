@@ -1,19 +1,18 @@
 /**
- * Testy arytmetyki łańcucha auto-tur po subach (werdykt Kuby, 2026-08-16; domknięcie po
- * weryfikacji opus, 2026-08-27).
+ * Testy arytmetyki łańcucha auto-tur po subach.
  *
  * Druga połowa (testy „po źródle") pilnuje, że `chat_streaming.ts` NAPRAWDĘ używa tego modułu
- * tam, gdzie licznik ma rosnąć/zerować się/pokazać Notice — plik importuje `obsidian` i AVA go
- * nie zaimportuje wprost (wzór `stopSemantics.test.ts`). Dwa z nich pilnują KONKRETNIE regresji
- * z pierwszego przebiegu: `resetAutoTurnChain()` był martwym eksportem (okablowanie robiło
- * goły `.delete()`), a `getLimits()` było wołane dwa razy na jedno doręczenie.
+ * tam, gdzie licznik ma rosnąć/zerować się/pokazać Notice - plik importuje `obsidian` i AVA go
+ * nie zaimportuje wprost (wzór `stopSemantics.test.ts`). Dwa z nich pilnują KONKRETNIE tego,
+ * żeby `resetAutoTurnChain()` nie stał się martwym eksportem (okablowanie wołające goły
+ * `.delete()` zamiast niego), a `getLimits()` nie był wołany dwa razy na jedno doręczenie.
  */
 import test from 'ava';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { evaluateAutoTurnChain, resetAutoTurnChain } from './autoTurnChain.js';
 
-// ── Minimum z werdyktu: rośnie / zeruje się / blokuje na limicie / znowu jedzie ──
+// ── Minimum: rośnie / zeruje się / blokuje na limicie / znowu jedzie ──
 
 test('licznik rośnie o 1 przy każdej dozwolonej auto-turze', t => {
     let d = evaluateAutoTurnChain(0, 5);
@@ -109,25 +108,25 @@ test('_deliverSubTaskResult sprawdza limit PRZED wysłaniem auto-tury i NIE woł
     t.regex(body, /chain\.allowed/, 'wynik decyzji musi być faktycznie odczytany');
 });
 
-// AUD-testy-046: sam FAKT odczytu `chain.allowed` nie wystarcza — dawny strażnik przechodził
-// na zielono także po dokładnym ODWRÓCENIU warunku (`if (chainDecision.allowed)` zamiast
-// `if (!chainDecision.allowed)`), bo mierzył obecność podciągu, nie kierunek bramki.
-// Po AUD-testy-024 polaryzacja mieszka w czystej `evaluateSubTaskDelivery` (test obu stron:
-// `chainAllowed: false` → `chain_limit`), a tutaj pilnujemy DWÓCH rzeczy w okablowaniu:
-// wynik łańcucha wchodzi do bramki NIEZANEGOWANY, a werdykt bramki jest odczytany Z NEGACJĄ.
+// Sam FAKT odczytu `chain.allowed` nie wystarcza jako asercja — trzeba pilnować KIERUNKU
+// warunku (`if (chainDecision.allowed)` vs `if (!chainDecision.allowed)`), bo mierzenie
+// obecności podciągu przepuszcza dokładne ODWRÓCENIE warunku. Polaryzacja mieszka w czystej
+// `evaluateSubTaskDelivery` (test obu stron: `chainAllowed: false` → `chain_limit`), a tutaj
+// pilnujemy DWÓCH rzeczy w okablowaniu: wynik łańcucha wchodzi do bramki NIEZANEGOWANY,
+// a werdykt bramki jest odczytany Z NEGACJĄ.
 
-test('AUD-testy-046: kierunek bramki łańcucha jest pilnowany, nie tylko jej obecność', t => {
+test('kierunek bramki łańcucha jest pilnowany, nie tylko jej obecność', t => {
     const body = bodyOf(streaming, '_deliverSubTaskResult');
 
-    // 1. Do bramki wchodzi `chain.allowed` — bez `!`, bez `false`, bez zamiany na `nextCount`.
+    // 1. Do bramki wchodzi `chain.allowed` - bez `!`, bez `false`, bez zamiany na `nextCount`.
     t.regex(body, /chainAllowed:\s*chain\.allowed\s*,/,
         'sufit łańcucha musi wchodzić do bramki dokładnie tak, jak go policzył evaluateAutoTurnChain');
     t.notRegex(body, /chainAllowed:\s*!/,
-        'zanegowane wejście = auto-tura startuje DOKŁADNIE po osiągnięciu sufitu (odwrócony werdykt Kuby 16.08)');
+        'zanegowane wejście = auto-tura startowałaby DOKŁADNIE po osiągnięciu sufitu, czyli odwrotnie niż powinna');
 
     // 2. Werdykt bramek czytany z negacją i kończący dostarczanie.
     const guard = /if\s*\(!delivery\.allowed\)\s*\{/;
-    t.regex(body, guard, 'brak `!` przy odczycie werdyktu = odwrócona bramka (mutacja z AUD-testy-046)');
+    t.regex(body, guard, 'brak `!` przy odczycie werdyktu = odwrócona bramka');
     const branchStart = body.search(guard);
     const branch = body.slice(branchStart);
     const returnIdx = branch.indexOf('return false;');
@@ -143,13 +142,13 @@ test('AUD-testy-046: kierunek bramki łańcucha jest pilnowany, nie tylko jej ob
 test('send_message zeruje łańcuch przez resetAutoTurnChain(), warunkowo na isHuman — nie goły .delete()', t => {
     const body = bodyOf(streaming, 'send_message');
     t.true(body.length > 0, 'nie znalazłem send_message');
-    // Weryfikacja opus (2. commit): `resetAutoTurnChain()` był martwym eksportem, okablowanie
-    // robiło goły `.delete()`. Test wymaga TEGO WYWOŁANIA wprost, żeby druga cicha regresja
-    // na `.delete()` nie przeszła bez czerwonego testu.
+    // Test wymaga TEGO WYWOŁANIA wprost, żeby cicha regresja na goły `.delete()` (który by
+    // omijał resetAutoTurnChain() i zostawiał go martwym eksportem) nie przeszła bez
+    // czerwonego testu.
     t.regex(body, /if\s*\(isHuman\)\s*this\._autoTurnChainCounts\?\.set\(owner\.agentName,\s*resetAutoTurnChain\(\)\)/,
-        'reset musi być warunkowany `isHuman` (resolveMessageOrigin) i wołać resetAutoTurnChain() — nie `.delete()`');
+        'reset musi być warunkowany `isHuman` (resolveMessageOrigin) i wołać resetAutoTurnChain() - nie `.delete()`');
     t.notRegex(body, /_autoTurnChainCounts\?\.delete\(/,
-        'goły `.delete()` zamiast resetAutoTurnChain() = powrót martwego eksportu (weryfikacja opus)');
+        'goły `.delete()` zamiast resetAutoTurnChain() = powrót martwego eksportu');
 });
 
 test('chat_streaming.ts importuje resetAutoTurnChain (nie tylko evaluateAutoTurnChain)', t => {
@@ -164,13 +163,13 @@ test('config/limits.ts ma nowy sufit i _deliverSubTaskResult czyta go przez getL
     const body = bodyOf(streaming, '_deliverSubTaskResult');
     t.regex(body, /getLimits\(/, '_deliverSubTaskResult musi czytać sufit przez getLimits, nie hardcode');
     t.regex(body, /\.max_consecutive_auto_turns\b/, 'wynik getLimits musi być odczytany pod tym kluczem');
-    // Kosmetyka z weryfikacji opus: JEDNO wywołanie getLimits() na doręczenie (chain limit +
-    // subagent_result_max_chars dzielą tę samą zmienną), nie dwa osobne odczyty ustawień.
+    // JEDNO wywołanie getLimits() na doręczenie (chain limit + subagent_result_max_chars dzielą
+    // tę samą zmienną), nie dwa osobne odczyty ustawień.
     const calls = body.match(/getLimits\(/g) || [];
-    t.is(calls.length, 1, `_deliverSubTaskResult woła getLimits() ${calls.length} razy — ma dzielić jedną zmienną`);
+    t.is(calls.length, 1, `_deliverSubTaskResult woła getLimits() ${calls.length} razy - ma dzielić jedną zmienną`);
 });
 
-test('_deliverSubTaskResult pokazuje Notice przy zaparkowaniu wyniku (cisza wobec usera = FAIL wg opus)', t => {
+test('_deliverSubTaskResult pokazuje Notice przy zaparkowaniu wyniku (cisza wobec usera to FAIL)', t => {
     const body = bodyOf(streaming, '_deliverSubTaskResult');
     const gateIdx = body.search(/chain\.allowed/);
     const noticeIdx = body.search(/new Notice\(t\('chat\.streaming\.auto_turn_chain_limit'\)/);

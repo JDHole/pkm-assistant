@@ -1,10 +1,10 @@
 /**
- * Wspólny kształt pliku SKILL.md (S27 Z1).
+ * Wspólny kształt pliku SKILL.md.
  *
  * Używany przez `SkillLoader` (żywe skille w `.pkm-assistant/skills/`) ORAZ przez
  * `SkillTemplateStore` (szablony w `.pkm-assistant/templates/skills/`). Jedno miejsce
  * parsowania i serializacji = format szablonu nie może się rozjechać z formatem żywego bytu
- * (decyzja D3: szablon → instancja to KOPIA, więc oba pliki muszą być tym samym formatem).
+ * (szablon → instancja to KOPIA, więc oba pliki muszą być tym samym formatem).
  *
  * Pure — zero importów z `obsidian`, testowalne w AVA.
  */
@@ -47,7 +47,7 @@ export function parseSkillMarkdown(raw: string, { slug = null, path = '' }: { sl
         if (preQuestions.length === 0) preQuestions = null;
     }
 
-    // S27 D6: pole `allowed-tools` WYCIĘTE (nic go nigdy nie egzekwowało — fasada).
+    // Pole `allowed-tools` jest WYCIĘTE (nic go nigdy nie egzekwowało — fasada).
     // Stare skille z tym polem we frontmatterze: parser ignoruje nieznane pola, zero migracji.
 
     // tags (array of strings or comma/space separated string)
@@ -65,8 +65,8 @@ export function parseSkillMarkdown(raw: string, { slug = null, path = '' }: { sl
         category: frontmatter.category || 'general',
         version: frontmatter.version || 1,
         enabled: frontmatter.enabled !== false,
-        // E3.5 regression fix: liczone wyżej, ale ZGUBIONE z returna przy unifikacji S27 Z1 —
-        // każdy load z dysku tracił pre-questions (modal pytań przed skillem martwy).
+        // Musi trafić do returna: liczone wyżej, ale bez tego pola w wyniku każdy load
+        // z dysku traciłby pre-questions (modal pytań przed skillem byłby martwy).
         preQuestions,
         prompt: content.trim(),
         path,
@@ -76,7 +76,7 @@ export function parseSkillMarkdown(raw: string, { slug = null, path = '' }: { sl
         argumentHint: frontmatter['argument-hint'] || null,
         disableModelInvocation: frontmatter['disable-model-invocation'] === true,
         userInvocable: frontmatter['user-invocable'] !== false, // default true
-        // S27 D3: ślad pochodzenia kopii („z szablonu: X vN"). Szablony go nie mają.
+        // Ślad pochodzenia kopii („z szablonu: X vN"). Szablony go nie mają.
         fromTemplate: typeof frontmatter.from_template === 'string' ? frontmatter.from_template : null,
     };
 }

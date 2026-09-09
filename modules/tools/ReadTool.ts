@@ -1,12 +1,12 @@
 /**
- * ReadTool — jeden prymityw `read` (E2.6, decyzja D5).
+ * ReadTool — jeden prymityw `read`.
  *
  * Konsoliduje 3 dawne narzędzia odczytu: `vault_read` (nota usera) +
  * `memory_read` (notatka brain/ aktualnego agenta) + `memory_read_summary`
  * (podsumowanie L1/L2/L3). Scope w parametrze, nie w nazwie (wzór `search`).
  *
  *   scope=vault (default): Vault API — getAbstractFileByPath → cachedRead.
- *     Walidacja przez validateVaultPath (blokada .pkm-assistant z E1.8).
+ *     Walidacja przez validateVaultPath (blokada .pkm-assistant).
  *   scope=memory: pamięć AKTUALNEGO agenta (adapter przez AgentMemory).
  *     Bramka uprawnienia memory fail-closed W execute (jak SearchTool),
  *     cross-agent niemożliwy (zawsze pamięć wołającego agenta).
@@ -42,7 +42,7 @@ export interface ReadToolApp {
 
 /** Pamięć agenta w zakresie, jaki czyta to narzędzie (pełny typ żyje w `modules/memory`). */
 interface AgentMemoryLike {
-    // SZEW spawany po merge TS-2: `AgentMemory.agentName` to `declare agentName: string`
+    // `AgentMemory.agentName` to `declare agentName: string`
     // (konstruktor go wymaga) — opcjonalność była zachowawczym strzałem fali równoległej.
     agentName: string;
     basePath: string;
@@ -85,12 +85,12 @@ function getInvocationMemory(
     agentManager: ReadToolAgentManager | null | undefined,
 ): AgentMemoryLike | null | undefined {
     const agentName = getInvocationAgentName(args, agentManager);
-    // K4 (AUD-security-036): FAIL-CLOSED. Nazwana tożsamość bez wpisu w `agentMemories`
-    // (pad inicjalizacji pamięci, agent skasowany w trakcie biegu w tle) kończy się ODMOWĄ.
-    // Do K4 stał tu `|| getActiveMemory()`, więc narzędzie po cichu pisało i czytało katalog
-    // `brain/` agenta AKURAT wybranego w UI — a `_invocationAgentName` rozjeżdża się
-    // z aktywnym przy każdym biegu suba w tle i w drugiej zakładce czatu.
-    // Brak JAKIEJKOLWIEK tożsamości (ani znacznika, ani aktywnego agenta) = ścieżka jak dotąd.
+    // FAIL-CLOSED: nazwana tożsamość bez wpisu w `agentMemories` (pad inicjalizacji pamięci,
+    // agent skasowany w trakcie biegu w tle) kończy się ODMOWĄ, a nie fallbackiem na
+    // `getActiveMemory()` — taki fallback po cichu pisałby i czytał katalog `brain/` agenta
+    // AKURAT wybranego w UI, bo `_invocationAgentName` rozjeżdża się z aktywnym przy każdym
+    // biegu suba w tle i w drugiej zakładce czatu.
+    // Brak JAKIEJKOLWIEK tożsamości (ani znacznika, ani aktywnego agenta) = pamięć aktywnego agenta.
     return agentName ? agentManager?.getAgentMemory?.(agentName) : agentManager?.getActiveMemory?.();
 }
 
@@ -112,7 +112,7 @@ function parseSummaryPath(rawPath: unknown): { level: string; filename: string }
 
 /** scope=vault: API-first read (getAbstractFileByPath → cachedRead), 1:1 z dawnym vault_read. */
 async function readVault(args: ReadToolArgs, app: ReadToolApp, plugin: ReadToolPlugin): Promise<Record<string, unknown>> {
-    // D17: read wolno wciągnąć przepis skilla (.pkm-assistant/skills/**) — odkrywalność skilli
+    // `read` wolno wciągnąć przepis skilla (.pkm-assistant/skills/**) — odkrywalność skilli
     // przez indeks+read. Reszta .pkm-assistant/ (pamięć, indeks semantyczny) pozostaje zablokowana.
     const validation = validateVaultPath(args?.path, {
         allowSkillsRead: true,

@@ -1,8 +1,8 @@
 /**
- * vault_path_validator.js — Sprint 04 Z8 (MCP_PORZADEK_v1 DRY-1).
+ * vault_path_validator.js
  *
- * Centralna walidacja path/folder dla wszystkich vault tools (Read/Write/List/Search/Delete/CreateFolder + 5 retrieval z S03).
- * Wcześniej każdy tool miał własny `sanitizePath() + isProtectedPath()` snippet — DRY-1.
+ * Centralna walidacja path/folder dla wszystkich vault tools (Read/Write/List/Search/Delete/CreateFolder + 5 retrieval).
+ * Bez tego helpera każdy tool miałby własny `sanitizePath() + isProtectedPath()` snippet.
  *
  * Helper łączy:
  * 1. `sanitizePath()` — blokuje `../`, `%2e%2e`, null bytes, zero-width unicode (security 33 testów w core/security)
@@ -69,7 +69,7 @@ interface InvocationArgs {
  * @param options.allowProtected - Czy ścieżki chronione (ustawienia, kopie, logi, `.env`, `data.json`) dozwolone (rare exception). Default false.
  * @param options.adminAccess - A1: jawny dostęp administracyjny agenta;
  *   otwiera protected + `.pkm-assistant`, ale NIE omija sanitizePath. Default false.
- * @param options.allowSkillsRead - D17: pozwól CZYTAĆ przepisy skilli pod
+ * @param options.allowSkillsRead - pozwól CZYTAĆ przepisy skilli pod
  *   `.pkm-assistant/skills/` (tylko read/list). Zapis/kasowanie tam NIE przekazują tej flagi.
  *   Default false.
  */
@@ -101,14 +101,14 @@ export function validateVaultPath(rawPath: unknown, options: VaultPathOptions = 
         return { ok: false, safePath, error: 'Path is protected (.pkm-assistant/settings.json, .env, data.json, ...)', code: 'protected' };
     }
 
-    // E1.8 (znalezione smoke'iem): `.pkm-assistant/` jest poza zasięgiem narzędzi vaulta.
+    // `.pkm-assistant/` jest poza zasięgiem narzędzi vaulta.
     // Agent czyta SWOJĄ pamięć przez memory_* (strict per-agent guard) — a vault_read
     // przez fallback adapterowy pozwalał czytać pamięci INNYCH agentów i pliki indeksu
     // semantycznego (wektory + pełny spis ścieżek vaulta). Fail-closed dla całej rodziny
     // vault tools (read/write/delete/list/... — wszystkie walidują tutaj).
     const lower = safePath.toLowerCase();
     if (!allowProtected && !adminAccess && (lower === '.pkm-assistant' || lower.startsWith('.pkm-assistant/'))) {
-        // D17 (E2.4): JEDEN wyjątek — przepisy skilli (.pkm-assistant/skills/**) wolno CZYTAĆ.
+        // JEDEN wyjątek — przepisy skilli (.pkm-assistant/skills/**) wolno CZYTAĆ.
         // Model odkrywa skille cienkim indeksem w system promptcie (nazwa + opis + ścieżka),
         // a pełny przepis wciąga narzędziem `read` (i listuje `list`). To TYLKO-ODCZYT: `write`/
         // `delete`/`create_folder` nie przekazują allowSkillsRead → ich blokada bez zmian (izolacja
@@ -135,7 +135,7 @@ export function validateVaultFolder(rawFolder: unknown, options: VaultPathOption
  * a w jego braku aktywny agent. Model nie podrabia tej nazwy sam — to ta sama tożsamość,
  * na której stoi `invocationHasAdminAccess` niżej.
  *
- * S30 Z3: JEDNA kopia (było 3 identyczne — Read/List/SearchTool).
+ * JEDNA kopia (Read/List/SearchTool importują ją stąd zamiast trzymać własne).
  *
  * @param args - Argumenty wywołania narzędzia.
  * @param agentManager - `plugin.agentManager`.

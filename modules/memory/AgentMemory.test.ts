@@ -151,9 +151,9 @@ test('AgentMemory.listBrainNotes parses one Memory v3 note', async t => {
 test('AgentMemory.listBrainNotes unquotes JSON frontmatter scalars', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory/brain';
     const { vault } = makeVault({
-        [`${base}/user_kuba.md`]: note({
-            name: '"Kuba"',
-            description: '"Kuba wants direct feedback"',
+        [`${base}/user_jan.md`]: note({
+            name: '"Jan"',
+            description: '"Jan wants direct feedback"',
             type: 'user',
         }),
     });
@@ -161,15 +161,15 @@ test('AgentMemory.listBrainNotes unquotes JSON frontmatter scalars', async t => 
 
     const notes = await memory.listBrainNotes();
 
-    t.is(notes[0].name, 'Kuba');
-    t.is(notes[0].description, 'Kuba wants direct feedback');
+    t.is(notes[0].name, 'Jan');
+    t.is(notes[0].description, 'Jan wants direct feedback');
 });
 
 test('AgentMemory.listBrainNotes returns sorted metadata for five notes', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory/brain';
     const { vault } = makeVault({
         [`${base}/project_pkm.md`]: note({ name: 'PKM', description: 'Projekt PKM Assistant', type: 'project_context' }),
-        [`${base}/user_kuba.md`]: note({ name: 'Kuba', description: 'Fakty o Kubie', type: 'user' }),
+        [`${base}/user_jan.md`]: note({ name: 'Jan', description: 'Fakty o Janie', type: 'user' }),
         [`${base}/skill_obsidian.md`]: note({ name: 'Obsidian', description: 'Jak pracować w Obsidianie', type: 'skill_hint' }),
         [`${base}/agent_rule_style.md`]: note({ name: 'Style', description: 'Zasady stylu rozmowy', type: 'agent_rule' }),
         [`${base}/reference_tracker.md`]: note({ name: 'Tracker', description: 'Pointer do systemu bugów', type: 'reference' }),
@@ -183,7 +183,7 @@ test('AgentMemory.listBrainNotes returns sorted metadata for five notes', async 
         'project_pkm.md',
         'reference_tracker.md',
         'skill_obsidian.md',
-        'user_kuba.md',
+        'user_jan.md',
     ]);
     t.deepEqual(notes.map(n => n.type), [
         'agent_rule',
@@ -214,7 +214,7 @@ test('AgentMemory.rebuildBrainIndex writes categorized links and caps Bieżące 
         [`${base}/brain/project_two.md`]: note({ name: 'Two', description: 'Projekt 2', type: 'project_context', created: '2026-05-22' }),
         [`${base}/brain/project_three.md`]: note({ name: 'Three', description: 'Projekt 3', type: 'project_context', created: '2026-05-23' }),
         [`${base}/brain/project_four.md`]: note({ name: 'Four', description: 'Projekt 4', type: 'project_context', created: '2026-05-24' }),
-        [`${base}/brain/user_kuba.md`]: note({ name: 'Kuba', description: 'Fakty o Kubie', type: 'user' }),
+        [`${base}/brain/user_jan.md`]: note({ name: 'Jan', description: 'Fakty o Janie', type: 'user' }),
         [`${base}/brain/skill_memory.md`]: note({ name: 'Memory', description: 'Jak pracować z Memory', type: 'skill_hint' }),
     });
     const memory = new AgentMemory(vault, 'Jaskier');
@@ -229,7 +229,7 @@ test('AgentMemory.rebuildBrainIndex writes categorized links and caps Bieżące 
     t.false(biezace.includes('[[brain/project_one.md]]'));
     t.true(brain.includes('## Workflow'));
     t.true(brain.includes('[[brain/skill_memory.md]] — Jak pracować z Memory'));
-    t.true(brain.includes('[[brain/user_kuba.md]] — Fakty o Kubie'));
+    t.true(brain.includes('[[brain/user_jan.md]] — Fakty o Janie'));
 });
 
 test('AgentMemory.rebuildBrainIndex backs up brain.md that has hand-added user content', async t => {
@@ -237,7 +237,7 @@ test('AgentMemory.rebuildBrainIndex backs up brain.md that has hand-added user c
     const manualBrain = '# Jaskier brain\n\n## Bieżące\n\n## User\n- ręczny fakt dopisany przez usera\n\n## Preferencje\n\n## Workflow\n\n## Projekty i referencje\n';
     const { vault, files } = makeVault({
         [`${base}/brain.md`]: manualBrain,
-        [`${base}/brain/user_kuba.md`]: note({ name: 'Kuba', description: 'Fakty o Kubie', type: 'user' }),
+        [`${base}/brain/user_jan.md`]: note({ name: 'Jan', description: 'Fakty o Janie', type: 'user' }),
     });
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -246,7 +246,7 @@ test('AgentMemory.rebuildBrainIndex backs up brain.md that has hand-added user c
     // The user's hand-added line survives in the side backup; the regenerated index drops it.
     t.true(files[`${base}/brain.md.bak`].includes('ręczny fakt dopisany przez usera'));
     t.false(files[`${base}/brain.md`].includes('ręczny fakt dopisany przez usera'));
-    t.true(files[`${base}/brain.md`].includes('[[brain/user_kuba.md]] — Fakty o Kubie'));
+    t.true(files[`${base}/brain.md`].includes('[[brain/user_jan.md]] — Fakty o Janie'));
 });
 
 test('AgentMemory.rebuildBrainIndex does not back up a clean generated index', async t => {
@@ -254,27 +254,27 @@ test('AgentMemory.rebuildBrainIndex does not back up a clean generated index', a
     const cleanBrain = '# Jaskier brain\n\n## Bieżące\n\n## User\n\n## Preferencje\n\n## Workflow\n\n## Projekty i referencje\n';
     const { vault, files } = makeVault({
         [`${base}/brain.md`]: cleanBrain,
-        [`${base}/brain/user_kuba.md`]: note({ name: 'Kuba', description: 'Fakty o Kubie', type: 'user' }),
+        [`${base}/brain/user_jan.md`]: note({ name: 'Jan', description: 'Fakty o Janie', type: 'user' }),
     });
     const memory = new AgentMemory(vault, 'Jaskier');
 
     await memory.rebuildBrainIndex();
 
     // brain.md changed (new link added) but the previous content was a pure index → no backup file.
-    t.true(files[`${base}/brain.md`].includes('[[brain/user_kuba.md]]'));
+    t.true(files[`${base}/brain.md`].includes('[[brain/user_jan.md]]'));
     t.false(Object.prototype.hasOwnProperty.call(files, `${base}/brain.md.bak`));
 });
 
-// ─── Incydent 2026-08-15: ręczna sekcja `## AKTYWNY TEST` znikała przy przebudowie indeksu ───
+// ─── Ręczna sekcja `## AKTYWNY TEST` (spoza katalogu zarządzanych) przeżywa przebudowę indeksu ───
 
 const manualSectionBrain = () =>
     `# Jaskier brain\n\n## AKTYWNY TEST — Przebudowa subów F1-F5 (2026-08-15)\n- scenariusz 1: odpal suba w tle\n- scenariusz 2: Stop w panelu\n\n## Bieżące\n\n## User\n\n## Preferencje\n\n## Workflow\n\n## Projekty i referencje\n`;
 
-test('incydent 2026-08-15: rebuildBrainIndex ZACHOWUJE ręczną sekcję spoza katalogu (bez .bak)', async t => {
+test('rebuildBrainIndex ZACHOWUJE ręczną sekcję spoza katalogu (bez .bak)', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const { vault, files } = makeVault({
         [`${base}/brain.md`]: manualSectionBrain(),
-        [`${base}/brain/user_kuba.md`]: note({ name: 'Kuba', description: 'Fakty o Kubie', type: 'user' }),
+        [`${base}/brain/user_jan.md`]: note({ name: 'Jan', description: 'Fakty o Janie', type: 'user' }),
     });
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -285,30 +285,30 @@ test('incydent 2026-08-15: rebuildBrainIndex ZACHOWUJE ręczną sekcję spoza ka
     t.true(brain.includes('- scenariusz 1: odpal suba w tle'));
     t.true(brain.includes('- scenariusz 2: Stop w panelu'));
     t.true(brain.indexOf('## AKTYWNY TEST') > brain.indexOf('## Projekty i referencje'), 'sekcja ręczna wędruje POD indeks');
-    t.true(brain.includes('[[brain/user_kuba.md]] — Fakty o Kubie'), 'indeks nadal przebudowany');
+    t.true(brain.includes('[[brain/user_jan.md]] — Fakty o Janie'), 'indeks nadal przebudowany');
     t.false(Object.prototype.hasOwnProperty.call(files, `${base}/brain.md.bak`), 'nic nie ginie → bez .bak');
 });
 
-test('incydent 2026-08-15: writeNaTeraz (ścieżka memory_save ephemeral) nie wycina ręcznej sekcji', async t => {
+test('writeNaTeraz (ścieżka memory_save ephemeral) nie wycina ręcznej sekcji', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const { vault, files } = makeVault({
         [`${base}/brain.md`]: manualSectionBrain(),
     });
     const memory = new AgentMemory(vault, 'Jaskier');
 
-    await memory.writeNaTeraz([{ section: 'user', add: 'Kuba odpala test przebudowy subów' }]);
+    await memory.writeNaTeraz([{ section: 'user', add: 'Jan odpala test przebudowy subów' }]);
 
     const brain = files[`${base}/brain.md`];
-    t.true(brain.includes('- Kuba odpala test przebudowy subów'), 'wpis „Na teraz" dopisany');
+    t.true(brain.includes('- Jan odpala test przebudowy subów'), 'wpis „Na teraz" dopisany');
     t.true(brain.includes('## AKTYWNY TEST — Przebudowa subów F1-F5 (2026-08-15)'));
     t.true(brain.includes('- scenariusz 1: odpal suba w tle'));
 });
 
-test('incydent 2026-08-15: druga przebudowa jest idempotentna — sekcja ręczna nie dubluje się', async t => {
+test('druga przebudowa jest idempotentna — sekcja ręczna nie dubluje się', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const { vault, files } = makeVault({
         [`${base}/brain.md`]: manualSectionBrain(),
-        [`${base}/brain/user_kuba.md`]: note({ name: 'Kuba', description: 'Fakty o Kubie', type: 'user' }),
+        [`${base}/brain/user_jan.md`]: note({ name: 'Jan', description: 'Fakty o Janie', type: 'user' }),
     });
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -322,12 +322,12 @@ test('incydent 2026-08-15: druga przebudowa jest idempotentna — sekcja ręczna
     t.false(Object.prototype.hasOwnProperty.call(files, `${base}/brain.md.bak`));
 });
 
-test('incydent 2026-08-15: ręczna linia w sekcji ZARZĄDZANEJ nadal ląduje w .bak, a sekcja ręczna przeżywa', async t => {
+test('ręczna linia w sekcji ZARZĄDZANEJ nadal ląduje w .bak, a sekcja ręczna przeżywa', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const mixed = `# Jaskier brain\n\n## Bieżące\n\n## User\n- ręczny fakt dopisany w sekcję indeksu\n\n## Preferencje\n\n## Workflow\n\n## Projekty i referencje\n\n## AKTYWNY TEST\n- kroki testu\n`;
     const { vault, files } = makeVault({
         [`${base}/brain.md`]: mixed,
-        [`${base}/brain/user_kuba.md`]: note({ name: 'Kuba', description: 'Fakty o Kubie', type: 'user' }),
+        [`${base}/brain/user_jan.md`]: note({ name: 'Jan', description: 'Fakty o Janie', type: 'user' }),
     });
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -384,9 +384,9 @@ test('AgentMemory.getMemoryContext lists brain notes catalogue without loading f
     const base = '.pkm-assistant/agents/jaskier/memory';
     const { vault } = makeVault({
         [`${base}/brain.md`]: '# Jaskier brain\n\n## User\n\n## Preferencje\n\n## Ustalenia\n\n## Bieżące\n',
-        [`${base}/brain/user_kuba.md`]: note({
-            name: 'Kuba',
-            description: 'Facts about Kuba',
+        [`${base}/brain/user_jan.md`]: note({
+            name: 'Jan',
+            description: 'Facts about Jan',
             type: 'user',
             body: 'FULL SECRET BODY SHOULD NOT LOAD',
         }),
@@ -396,8 +396,8 @@ test('AgentMemory.getMemoryContext lists brain notes catalogue without loading f
 
     const context = await memory.getMemoryContext();
 
-    t.true(context.includes('user_kuba.md'));
-    t.true(context.includes('Facts about Kuba'));
+    t.true(context.includes('user_jan.md'));
+    t.true(context.includes('Facts about Jan'));
     t.false(context.includes('FULL SECRET BODY SHOULD NOT LOAD'));
 });
 
@@ -437,14 +437,14 @@ test('AgentMemory.appendToActiveSession flushes events to disk synchronously', a
     });
     await memory.appendToActiveSession({
         type: 'agent_message',
-        content: 'Hej Kuba',
+        content: 'Hej Jan',
         timestamp: '2026-05-14T10:00:01.000Z'
     });
 
     t.true(files[path].includes('2026-05-14T10:00:00.000Z — user message'));
     t.true(files[path].includes('Hej Jaskier'));
     t.true(files[path].includes('2026-05-14T10:00:01.000Z — agent message'));
-    t.true(files[path].includes('Hej Kuba'));
+    t.true(files[path].includes('Hej Jan'));
 });
 
 test('AgentMemory.restoreActiveSession recovers the live session after restart simulation', async t => {
@@ -481,11 +481,11 @@ test('AgentMemory.archiveActiveSession moves active file and increments state co
     t.is(state.archived_since_last_consolidation, 1);
 });
 
-test('S36 Faza 2: archiveActiveSession konwertuje event-log na TRANSKRYPT czytany przez parseSessionFile', async t => {
+test('archiveActiveSession konwertuje event-log na TRANSKRYPT czytany przez parseSessionFile', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
 
-    const path = await memory.appendToActiveSession({ type: 'user_message', content: 'Pytanie Kuby' });
+    const path = await memory.appendToActiveSession({ type: 'user_message', content: 'Pytanie Jana' });
     await memory.appendToActiveSession({
         type: 'mcp_call', tool: 'read', args: { path: 'x.md' }, result: 'tresc pliku x',
     });
@@ -503,7 +503,7 @@ test('S36 Faza 2: archiveActiveSession konwertuje event-log na TRANSKRYPT czytan
 
     const parsed = parseSessionFile(archived);
     t.deepEqual(parsed.messages, [
-        { role: 'user', content: 'Pytanie Kuby' },
+        { role: 'user', content: 'Pytanie Jana' },
         { role: 'tool', content: 'tresc pliku x' },
         { role: 'assistant', content: 'Odpowiedz.\n## Wyniki\n- nic' },
     ], 'role i tresci 1:1, `## ` w tresci przezyl round-trip');
@@ -513,7 +513,7 @@ test('S36 Faza 2: archiveActiveSession konwertuje event-log na TRANSKRYPT czytan
     t.truthy(parsed.metadata.updated);
 });
 
-test('S36 Faza 2: archiveActiveSession kopiuje SUROWO plik, z ktorego czytnik nie wyciagnal wiadomosci', async t => {
+test('archiveActiveSession kopiuje SUROWO plik, z ktorego czytnik nie wyciagnal wiadomosci', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -525,7 +525,7 @@ test('S36 Faza 2: archiveActiveSession kopiuje SUROWO plik, z ktorego czytnik ni
     t.is(files[archivePath!], before, 'ani jeden bajt nie zginal (nie rozumiemy = nie ruszamy)');
 });
 
-test('AUD-code-review-007 (część 2): archiveActiveSession NIE kasuje źródła, gdy zapis archiwum nie zweryfikował się odczytem (torn write)', async t => {
+test('archiveActiveSession NIE kasuje źródła, gdy zapis archiwum nie zweryfikował się odczytem (torn write)', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
     const path = await memory.appendToActiveSession({
@@ -535,7 +535,7 @@ test('AUD-code-review-007 (część 2): archiveActiveSession NIE kasuje źródł
     });
     const originalContent = files[path];
 
-    // Symulacja torn write (dyski sieciowe / Dysk Google, ta sama klasa incydentu co gotchy
+    // Symulacja torn write (dyski sieciowe / Dysk Google, ten sam typ awarii co gotchy
     // 9/12 tego modułu): `write()` na ścieżce archiwum "udaje sukces" — Promise resolves —
     // ale bajty realnie nie trafiają do adaptera.
     const realWrite = vault.adapter.write.bind(vault.adapter);
@@ -584,7 +584,7 @@ test('AgentMemory.loadActiveSession parses live user and agent transcript', asyn
 
     const path = await memory.appendToActiveSession({
         type: 'user_message',
-        content: 'Pytanie Kuby',
+        content: 'Pytanie Jana',
         timestamp: '2026-05-14T10:00:00.000Z'
     });
     await memory.appendToActiveSession({
@@ -596,21 +596,21 @@ test('AgentMemory.loadActiveSession parses live user and agent transcript', asyn
     const parsed = await memory.loadActiveSession(path);
 
     t.deepEqual(parsed.messages, [
-        { role: 'user', content: 'Pytanie Kuby', seq: 1 },
+        { role: 'user', content: 'Pytanie Jana', seq: 1 },
         { role: 'assistant', content: 'Odpowiedz Jaskra', seq: 2 },
     ]);
     t.is(parsed.metadata.type, 'active_session');
 });
 
-// ─── Sieroty sesji (2026-07-29) → S36 Faza 2 (2026-07-30): plik active ma JEDNEGO pisarza ───
+// ─── Plik active ma JEDNEGO pisarza ───
 //
-// Do S36 Fazy 2 `saveSession` NADPISYWAŁ plik transkryptem („format B"), a
-// `appendToActiveSession` dopisywał event-log („format A") — plik robił się mieszanką i przy
-// każdym autozapisie tracił telemetrię (a po kompresji okna czatu także historię rozmowy).
-// Teraz autozapis tylko DOPISUJE brakujący ogon jako eventy. Czytnik zostaje trójformatowy,
-// bo pliki mieszane sprzed tej zmiany leżą u userów na dysku (testy niżej).
+// Gdyby `saveSession` NADPISYWAŁ plik transkryptem („format B"), a `appendToActiveSession`
+// dopisywał event-log („format A") — plik robiłby się mieszanką i przy każdym autozapisie
+// traciłby telemetrię (a po kompresji okna czatu także historię rozmowy).
+// Zamiast tego autozapis tylko DOPISUJE brakujący ogon jako eventy. Czytnik zostaje
+// trójformatowy, bo pliki mieszane starszego formatu leżą u userów na dysku (testy niżej).
 
-test('S36 Faza 2: saveSession NIE nadpisuje pliku transkryptem — dopisuje tylko brakujący ogon', async t => {
+test('saveSession NIE nadpisuje pliku transkryptem — dopisuje tylko brakujący ogon', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -642,7 +642,7 @@ test('S36 Faza 2: saveSession NIE nadpisuje pliku transkryptem — dopisuje tylk
     t.is(parsed.metadata.messageCount, '3');
 });
 
-test('S36 Faza 2: saveSession z PODZBIOREM wiadomości (po kompresji okna) nie rusza treści', async t => {
+test('saveSession z PODZBIOREM wiadomości (po kompresji okna) nie rusza treści', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -668,7 +668,7 @@ test('S36 Faza 2: saveSession z PODZBIOREM wiadomości (po kompresji okna) nie r
     t.is(memory._parseFrontmatter(after).messageCount, '4', 'frontmatter mówi prawdę o pliku');
 });
 
-test('S36 Faza 2: saveSession na NOWYM pliku pisze frontmatter + eventy (nie transkrypt)', async t => {
+test('saveSession na NOWYM pliku pisze frontmatter + eventy (nie transkrypt)', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -699,11 +699,11 @@ test('S36 Faza 2: saveSession na NOWYM pliku pisze frontmatter + eventy (nie tra
     ]);
 });
 
-test('AUD-code-review-009: saveSession bez activeSessionPath zakłada plik w sessions/active/, nie w płaskim sessions/', async t => {
+test('saveSession bez activeSessionPath zakłada plik w sessions/active/, nie w płaskim sessions/', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
 
-    // Scenariusz z audytu: user wczytał starą sesję (`handleLoadSession` świadomie NIE ustawia
+    // Scenariusz: user wczytał starą sesję (`handleLoadSession` świadomie NIE ustawia
     // `activeSessionPath`) i kontynuuje rozmowę — pierwszy autozapis trafia w tę gałąź.
     const path = await memory.saveSession([
         { role: 'user', content: 'Kontynuacja po wczytaniu starej sesji' },
@@ -730,7 +730,7 @@ test('AUD-code-review-009: saveSession bez activeSessionPath zakłada plik w ses
     t.deepEqual(state.active_sessions, [path.split('/').pop()], 'rejestracja w .state.json jak przy startActiveSession()');
 });
 
-test('S36 Faza 2: append × N → saveSession → append × M → saveSession zachowuje wszystko + telemetrię', async t => {
+test('append × N → saveSession → append × M → saveSession zachowuje wszystko + telemetrię', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -759,12 +759,12 @@ test('S36 Faza 2: append × N → saveSession → append × M → saveSession za
         'Pytanie 1', 'tresc x', 'Odpowiedz 1', 'Pytanie 2', 'Odpowiedz 2',
     ]);
     t.deepEqual(parsed.messages.map(m => m.seq), [1, 2, 3, 4, 5], 'numeracja ciągła 1..N+M');
-    // Telemetria narzędzia PRZEŻYŁA oba autozapisy — dawny nadpisujący saveSession ją ścinał.
+    // Telemetria narzędzia PRZEŻYWA oba autozapisy — append-only `saveSession` jej nie ścina.
     t.true(files[path].includes('**tool:**'));
     t.true(files[path].includes('**args:**'));
 });
 
-test('S36 Faza 2: nowy AgentMemory na tym samym vaulcie kontynuuje numerację (skan pliku)', async t => {
+test('nowy AgentMemory na tym samym vaulcie kontynuuje numerację (skan pliku)', async t => {
     const { vault } = makeVault();
     const first = new AgentMemory(vault, 'Jaskier');
     const path = await first.appendToActiveSession({ type: 'user_message', content: 'przed restartem' });
@@ -788,7 +788,7 @@ test('AgentMemory.loadActiveSession still parses the event-log format (no regres
 
     const path = await memory.appendToActiveSession({
         type: 'user_message',
-        content: 'Pytanie Kuby',
+        content: 'Pytanie Jana',
         timestamp: '2026-07-29T10:00:00.000Z'
     });
     await memory.appendToActiveSession({
@@ -806,7 +806,7 @@ test('AgentMemory.loadActiveSession still parses the event-log format (no regres
     const parsed = await memory.loadActiveSession(path);
 
     t.deepEqual(parsed.messages, [
-        { role: 'user', content: 'Pytanie Kuby', seq: 1 },
+        { role: 'user', content: 'Pytanie Jana', seq: 1 },
         { role: 'assistant', content: 'Odpowiedz Jaskra', seq: 2 },
         { role: 'tool', content: 'tresc notatki', seq: 3 },
     ]);
@@ -824,7 +824,7 @@ test('AgentMemory.loadActiveSession returns 0 messages for a frontmatter-only fi
     t.is(parsed.metadata.type, 'active_session');
 });
 
-// ─── Plik MIESZANY (2026-07-29 kubełek 2): jeden scalony parser zamiast „A albo B" ───
+// ─── Plik MIESZANY: jeden scalony parser zamiast „A albo B" ───
 //
 // Produkcyjna sekwencja: append × N → autozapis NADPISUJE plik transkryptem → dalsze appendy
 // doklejają eventy. Parser z fallbackiem „format B tylko przy zerze wiadomości A" zwracał z
@@ -868,7 +868,7 @@ test('AgentMemory.loadActiveSession czyta plik MIESZANY (transkrypt + dopisane e
         { role: 'user', content: 'Pierwsze pytanie', seq: null },
         { role: 'assistant', content: 'Pierwsza odpowiedz', seq: null },
         { role: 'user', content: 'Drugie pytanie', seq: null },
-        // Bloki eventowe sprzed S36 Fazy 2 nie mają `**seq:**` — czytnik zwraca null.
+        // Bloki eventowe starszego formatu nie mają `**seq:**` — czytnik zwraca null.
         { role: 'assistant', content: 'Odpowiedz dopisana po autozapisie', seq: null },
         { role: 'user', content: 'Trzecie pytanie', seq: null },
     ]);
@@ -961,11 +961,9 @@ test('AgentMemory._parseActiveSessionFile: event bez pola tresci (mcp call z pus
     ]);
 });
 
-// S36 Faza 1: pisarz A escapuje `## ` w tresci, wiec galaz eventowa parsera robi unescape.
-// Wczesniej ten test utrwalal wade: pisarz A nie escapowal niczego, wiec `## Wyniki` w tresci
-// eventu rozbijal wiadomosc na dwie przy odczycie. Nowa asercja pilnuje wlasnie tego, co bylo
-// zepsute — treść z naglowkiem markdown wraca VERBATIM.
-// Znana, dziedziczona strata (literalny `\## ` na poczatku linii wraca jako `## `) jest
+// Pisarz A escapuje `## ` w tresci, wiec galaz eventowa parsera robi unescape — tresc z
+// naglowkiem markdown wraca VERBATIM, nie rozbija wiadomosci na dwie przy odczycie.
+// Znana strata (literalny `\## ` na poczatku linii wraca jako `## `) jest
 // przypieta osobnym testem w `activeSessionFormat.test.js`.
 test('AgentMemory._parseActiveSessionFile: event robi unescape „\\## " (tresc z `## ` wraca verbatim)', async t => {
     const { vault, files } = makeVault();
@@ -1033,9 +1031,8 @@ test('AgentMemory.saveSession zachowuje `created` sesji i podbija `updated`', as
     t.true(Date.parse(second.updated as string) >= Date.parse(first.updated as string));
 });
 
-// S36b: byl to test `promoteDraft` (rodzina draftow skasowana). Asercja dotyczyla jednak ZYWEJ
-// logiki `saveSession` — kolejnosci pol przy zakladaniu NOWEGO pliku — wiec test wchodzi teraz
-// tam wprost, z ta sama asercja. Zywy wolacz podajacy `created`: `handleSaveSession` (modules/chat).
+// Sprawdza kolejnosc pol przy zakladaniu NOWEGO pliku w `saveSession`.
+// Zywy wolacz podajacy `created`: `handleSaveSession` (modules/chat).
 test('AgentMemory.saveSession: `created` od wolacza wygrywa z „teraz" na NOWYM pliku', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
@@ -1199,7 +1196,7 @@ test('appendToActiveSession: N parallel appends keep every line (per-path write 
     const harness = makeVault();
     // Widen the read→write window so a missing lock would drop lines: without
     // serialization every parallel append reads the same stale content and the
-    // last write wins. With the E1.3 queue the appends serialize and all survive.
+    // last write wins. With the write queue the appends serialize and all survive.
     const origWrite = harness.vault.adapter.write;
     harness.vault.adapter.write = async (p, c) => {
         await new Promise(r => setTimeout(r, 1));
@@ -1225,9 +1222,9 @@ test('appendToActiveSession: N parallel appends keep every line (per-path write 
     t.is(memory._writeQueues.size, 0);
 });
 
-// ─── E2.7 K1: brain/ + state.json write queue ───
+// ─── brain/ + state.json write queue ───
 
-test('E2.7 K1: parallel rebuildBrainIndex serializes on brain.md and drains the queue', async t => {
+test('parallel rebuildBrainIndex serializes on brain.md and drains the queue', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const harness = makeVault({
         [`${base}/brain/user_a.md`]: note({ name: 'A', description: 'note A', type: 'user' }),
@@ -1254,7 +1251,7 @@ test('E2.7 K1: parallel rebuildBrainIndex serializes on brain.md and drains the 
     t.is(memory._writeQueues.size, 0);
 });
 
-test('E2.7 K1: StateManager serializes parallel markArchived so no increment is lost', async t => {
+test('StateManager serializes parallel markArchived so no increment is lost', async t => {
     const statePath = '.pkm-assistant/agents/jaskier/memory/.state.json';
     const harness = makeVault({
         [statePath]: JSON.stringify({ active_sessions: [], archived_since_last_consolidation: 0 }),
@@ -1275,7 +1272,7 @@ test('E2.7 K1: StateManager serializes parallel markArchived so no increment is 
     t.is(final.archived_since_last_consolidation, N);
 });
 
-test('E2.7 K1: StateManager serializes parallel addActiveSession so every session survives', async t => {
+test('StateManager serializes parallel addActiveSession so every session survives', async t => {
     const statePath = '.pkm-assistant/agents/jaskier/memory/.state.json';
     const harness = makeVault({
         [statePath]: JSON.stringify({ active_sessions: [] }),
@@ -1294,28 +1291,28 @@ test('E2.7 K1: StateManager serializes parallel addActiveSession so every sessio
     t.is((final.active_sessions || []).length, N);
 });
 
-// ─── E2.7 W2 (K3): writeBrainNote create-with-suffix primitive ───
+// ─── writeBrainNote create-with-suffix primitive ───
 
-test('E2.7 K3: writeBrainNote appends a suffix on name collision instead of failing', async t => {
+test('writeBrainNote appends a suffix on name collision instead of failing', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
-    const existing = `${base}/brain/user_kuba.md`;
-    const { vault, files } = makeVault({ [existing]: note({ name: 'Kuba', description: 'old', type: 'user' }) });
+    const existing = `${base}/brain/user_jan.md`;
+    const { vault, files } = makeVault({ [existing]: note({ name: 'Jan', description: 'old', type: 'user' }) });
     const memory = new AgentMemory(vault, 'Jaskier');
 
     const result = await memory.writeBrainNote(
-        { name: 'Kuba', description: 'new fact', type: 'user', content: 'Kuba prefers X', why: 'stated', how_to_apply: 'always' },
+        { name: 'Jan', description: 'new fact', type: 'user', content: 'Jan prefers X', why: 'stated', how_to_apply: 'always' },
         { source: 'auto_compaction' }
     );
 
     t.not(result.path, existing, 'did not overwrite the existing note');
-    t.is(result.filename, 'user_kuba_2.md');
-    t.true(Object.prototype.hasOwnProperty.call(files, `${base}/brain/user_kuba_2.md`));
+    t.is(result.filename, 'user_jan_2.md');
+    t.true(Object.prototype.hasOwnProperty.call(files, `${base}/brain/user_jan_2.md`));
     t.true(files[existing].includes('old'), 'existing note untouched');
-    t.true(files[`${base}/brain/user_kuba_2.md`].includes('source: auto_compaction'));
-    t.true(files[`${base}/brain/user_kuba_2.md`].includes('Kuba prefers X'));
+    t.true(files[`${base}/brain/user_jan_2.md`].includes('source: auto_compaction'));
+    t.true(files[`${base}/brain/user_jan_2.md`].includes('Jan prefers X'));
 });
 
-test('E2.7 K3: writeBrainNote coerces an invalid type to reference', async t => {
+test('writeBrainNote coerces an invalid type to reference', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -1325,16 +1322,16 @@ test('E2.7 K3: writeBrainNote coerces an invalid type to reference', async t => 
     t.true(files[result.path].includes('type: reference'));
 });
 
-test('Review opusa P4 (2026-09-02): writeBrainNote resetuje _structureEnsured i próbuje RAZ JESZCZE po pierwszym padzie zapisu', async t => {
+test('writeBrainNote resetuje _structureEnsured i próbuje RAZ JESZCZE po pierwszym padzie zapisu', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
 
-    // Nagrzej bootstrap normalnie — instancja uważa strukturę za już założoną (AUD-wydajnosc-095).
+    // Nagrzej bootstrap normalnie — instancja uważa strukturę za już założoną.
     await memory.ensureMemoryStructure();
     t.true(memory._structureEnsured, 'sanity: flaga ustawiona po pierwszym bootstrapie');
 
     // Symuluj: user ręcznie skasował brain/ W TRAKCIE sesji — pierwszy zapis notatki PADA
-    // (np. brakujący folder), mimo że `_structureEnsured` wciąż mówi „zrobione". Bez furtki P4
+    // (np. brakujący folder), mimo że `_structureEnsured` wciąż mówi „zrobione". Bez tej furtki
     // ten zapis rzucałby na zawsze (memoizacja nie pozwoliłaby na samonaprawę).
     // Licznik TYLKO zapisów notatki (`.../memory/brain/<plik>.md`) — `writeBrainNote` po
     // udanym zapisie dokłada osobny wpis do `brain.log` (`.../memory/brain.log`, BEZ segmentu
@@ -1371,7 +1368,7 @@ test('Review opusa P4 (2026-09-02): writeBrainNote resetuje _structureEnsured i 
     t.true(memory._structureEnsured, 'flaga bootstrapu znów true po udanym retry (ensureMemoryStructure przeszła)');
 });
 
-test('Review opusa P4: writeBrainNote NIE dusi trwałego błędu w nieskończonej pętli — drugi pad też dochodzi do wołacza', async t => {
+test('writeBrainNote NIE dusi trwałego błędu w nieskończonej pętli — drugi pad też dochodzi do wołacza', async t => {
     const { vault } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
     await memory.ensureMemoryStructure();
@@ -1388,21 +1385,21 @@ test('Review opusa P4: writeBrainNote NIE dusi trwałego błędu w nieskończone
     );
 });
 
-// ─── E2.8 D1/D2: „Na teraz" short-term brain.md sections ───
+// ─── „Na teraz" short-term brain.md sections ───
 
 const BRAIN = '.pkm-assistant/agents/jaskier/memory/brain.md';
 
-test('E2.8 D2: writeNaTeraz adds an entry to the „Na teraz: User" section', async t => {
+test('writeNaTeraz adds an entry to the „Na teraz: User" section', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
 
-    await memory.writeNaTeraz([{ section: 'user', add: 'Kuba testuje dziś panel pamięci' }]);
+    await memory.writeNaTeraz([{ section: 'user', add: 'Jan testuje dziś panel pamięci' }]);
 
     t.true(files[BRAIN].includes('## Na teraz: User'));
-    t.true(files[BRAIN].includes('- Kuba testuje dziś panel pamięci'));
+    t.true(files[BRAIN].includes('- Jan testuje dziś panel pamięci'));
 });
 
-test('E2.8 D1: rebuildBrainIndex PRESERVES „Na teraz" (nie ląduje w .bak)', async t => {
+test('rebuildBrainIndex PRESERVES „Na teraz" (nie ląduje w .bak)', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
     await memory.writeNaTeraz([
@@ -1418,7 +1415,7 @@ test('E2.8 D1: rebuildBrainIndex PRESERVES „Na teraz" (nie ląduje w .bak)', a
     t.false(Object.prototype.hasOwnProperty.call(files, `${BRAIN}.bak`), 'no .bak — „Na teraz" is not manual content');
 });
 
-test('E2.8 D2: writeNaTeraz update (remove + add) and delete', async t => {
+test('writeNaTeraz update (remove + add) and delete', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
     await memory.writeNaTeraz([{ section: 'user', add: 'Stary stan' }]);
@@ -1434,7 +1431,7 @@ test('E2.8 D2: writeNaTeraz update (remove + add) and delete', async t => {
     t.false(files[BRAIN].includes('## Na teraz: User'), 'empty section is not emitted');
 });
 
-test('E2.8 D2: writeNaTeraz trims oldest past the per-section limit', async t => {
+test('writeNaTeraz trims oldest past the per-section limit', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
     const ops = Array.from({ length: 13 }, (_, i) => ({ section: 'environment', add: `stan ${i}` }));
@@ -1446,13 +1443,13 @@ test('E2.8 D2: writeNaTeraz trims oldest past the per-section limit', async t =>
     t.true(files[BRAIN].includes('- stan 12'), 'newest kept');
 });
 
-test('E2.8 D1: old brain.md WITHOUT „Na teraz" migrates cleanly; section appears on first write', async t => {
+test('old brain.md WITHOUT „Na teraz" migrates cleanly; section appears on first write', async t => {
     const legacyBrain = `# Brain: Jaskier
 
 ## Bieżące
 
 ## User
-- [[brain/user_kuba.md]] — Fakt o Kubie
+- [[brain/user_jan.md]] — Fakt o Janie
 
 ## Preferencje
 
@@ -1474,12 +1471,13 @@ test('E2.8 D1: old brain.md WITHOUT „Na teraz" migrates cleanly; section appea
     t.false(Object.prototype.hasOwnProperty.call(files, `${BRAIN}.bak`), 'legacy index links are not manual content');
 });
 
-// ─── Stempel covered_by_l1 (2026-07-29 kubełek 2) ───
+// ─── Stempel covered_by_l1 ───
 //
-// `_cleanupAfterL1` skladal sciezke pod `paths.sessions` (plaskie `sessions/`, relikt v2),
-// a zarchiwizowane sesje leza w `sessions/archive/`. Plik nie istnial → `continue` → stempel
-// NIGDY nie powstawal, wiec kazdy kolejny przebieg konsolidacji brał te same sesje (duplikaty
-// L1), a badge „✓ w L1" w profilu agenta nie mial sie z czego wyrenderowac.
+// `_cleanupAfterL1` szuka sciezki w `sessions/archive/`, nie pod plaskim `paths.sessions`
+// (relikt v2) — zarchiwizowane sesje leza w `sessions/archive/`, wiec zla kolejnosc konczylaby
+// sie `continue` i stemplem, ktory NIGDY by nie powstal: kazdy kolejny przebieg konsolidacji
+// bralby te same sesje (duplikaty L1), a badge „✓ w L1" w profilu agenta nie mialby sie z czego
+// wyrenderowac.
 
 const MEM = '.pkm-assistant/agents/jaskier/memory';
 const L1_NAME = '2026-07-29_10-00-00_l1.md';
@@ -1568,7 +1566,7 @@ test('listUncoveredArchiveSessions pomija ostemplowane i sortuje rosnaco po nazw
     t.is(uncovered[0].path, `${archive}/session_002.md`);
 });
 
-// ─── Retencja archiwum sesji (Z6, 2026-07-30) ───
+// ─── Retencja archiwum sesji ───
 //
 // Zasada nadrzedna: sesja BEZ stempla `covered_by_l1` jest nietykalna — to jedyny material na
 // przyszle paczki L1 i jedyna pelna kopia rozmowy. Kasujemy WYLACZNIE to, co juz wchlonelo L1.
@@ -1651,7 +1649,7 @@ test('pruneArchive z maxFiles kasuje od NAJSTARSZEJ pokrytej', async t => {
     t.true(Object.prototype.hasOwnProperty.call(files, `${ARCHIVE}/c.md`));
 });
 
-test('AUD-code-review-069: pruneArchive z maxFiles NIE kasuje jako „najstarszej" sesji o NIEUSTALONEJ dacie', async t => {
+test('pruneArchive z maxFiles NIE kasuje jako „najstarszej" sesji o NIEUSTALONEJ dacie', async t => {
     const bezDaty = `${ARCHIVE}/najnowsza_bez_daty.md`;
     const stara = `${ARCHIVE}/stara_200dni.md`;
     const srednia = `${ARCHIVE}/srednia_100dni.md`;
@@ -1662,7 +1660,7 @@ test('AUD-code-review-069: pruneArchive z maxFiles NIE kasuje jako „najstarsze
         [stara]: archivedSession({ created: daysAgo(200), covered: L1_NAME }),
         [srednia]: archivedSession({ created: daysAgo(100), covered: L1_NAME }),
     });
-    // `stat()` też nie ma nic do zaoferowania dla tego pliku — jak w reprodukcji audytu.
+    // `stat()` też nie ma nic do zaoferowania dla tego pliku.
     const realStat = vault.adapter.stat.bind(vault.adapter);
     vault.adapter.stat = async (p: string) => (p === bezDaty ? null : realStat(p));
 
@@ -1736,13 +1734,13 @@ test('StateManager.update serializuje mutacje i zachowuje klucze spoza schematu'
     t.is(final.last_used, 'x.md');
 });
 
-// ─── S32 Z1b: kronika `brain.log` (append + parse + wpięcie w realne pisarze) ───
+// ─── Kronika `brain.log` (append + parse + wpięcie w realne pisarze) ───
 
-test('S32 Z1b: appendBrainLog → parseBrainLog roundtrip, od najnowszego', async t => {
+test('appendBrainLog → parseBrainLog roundtrip, od najnowszego', async t => {
     const harness = makeVault();
     const memory = new AgentMemory(harness.vault, 'Jaskier');
 
-    t.true(await memory.appendBrainLog('create', 'user_kuba.md', 'memory_save'));
+    t.true(await memory.appendBrainLog('create', 'user_jan.md', 'memory_save'));
     t.true(await memory.appendBrainLog('delete', 'reference_stare.md'));
 
     const raw = harness.files[`${MEM}/brain.log`];
@@ -1759,7 +1757,7 @@ test('S32 Z1b: appendBrainLog → parseBrainLog roundtrip, od najnowszego', asyn
     t.false(Number.isNaN(new Date(rows[1].ts).getTime()), 'stempel jest parsowalna data ISO');
 });
 
-test('S32 Z1b: appendBrainLog nie rozjezdza wpisu na dwie linie przy tabach/enterach w polach', async t => {
+test('appendBrainLog nie rozjezdza wpisu na dwie linie przy tabach/enterach w polach', async t => {
     const harness = makeVault();
     const memory = new AgentMemory(harness.vault, 'Jaskier');
 
@@ -1770,7 +1768,7 @@ test('S32 Z1b: appendBrainLog nie rozjezdza wpisu na dwie linie przy tabach/ente
     t.is(rows[0].detail, 'linia jedna dwa');
 });
 
-test('S32 Z1b: appendBrainLog NIGDY nie rzuca przy padzie adaptera', async t => {
+test('appendBrainLog NIGDY nie rzuca przy padzie adaptera', async t => {
     const harness = makeVault();
     harness.vault.adapter.write = async () => { throw new Error('dysk pelny'); };
     const memory = new AgentMemory(harness.vault, 'Jaskier');
@@ -1780,7 +1778,7 @@ test('S32 Z1b: appendBrainLog NIGDY nie rzuca przy padzie adaptera', async t => 
     t.false(ok, 'zwraca false, zamiast udawac sukces');
 });
 
-test('S32 Z1b: parseBrainLog — limit, puste linie, wpis w nieznanym kształcie', t => {
+test('parseBrainLog — limit, puste linie, wpis w nieznanym kształcie', t => {
     t.deepEqual(parseBrainLog(''), []);
     t.deepEqual(parseBrainLog(null), []);
 
@@ -1796,11 +1794,11 @@ test('S32 Z1b: parseBrainLog — limit, puste linie, wpis w nieznanym kształcie
     t.is(rows[0].target, '');
 });
 
-test('S32 Z1b: writeBrainNote dopisuje wpis `create` do brain.log', async t => {
+test('writeBrainNote dopisuje wpis `create` do brain.log', async t => {
     const harness = makeVault();
     const memory = new AgentMemory(harness.vault, 'Jaskier');
 
-    const created = await memory.writeBrainNote({ name: 'Kuba', type: 'user', content: 'x' }, { source: 'auto_compaction' });
+    const created = await memory.writeBrainNote({ name: 'Jan', type: 'user', content: 'x' }, { source: 'auto_compaction' });
 
     const rows = parseBrainLog(harness.files[`${MEM}/brain.log`]);
     t.is(rows.length, 1);
@@ -1809,12 +1807,12 @@ test('S32 Z1b: writeBrainNote dopisuje wpis `create` do brain.log', async t => {
     t.is(rows[0].detail, 'auto_compaction');
 });
 
-test('S32 Z1b: writeNaTeraz loguje sekcje, ktore realnie ruszyl (i nic, gdy plik bez zmian)', async t => {
+test('writeNaTeraz loguje sekcje, ktore realnie ruszyl (i nic, gdy plik bez zmian)', async t => {
     const harness = makeVault();
     const memory = new AgentMemory(harness.vault, 'Jaskier');
 
     await memory.writeNaTeraz([
-        { section: 'user', add: 'Kuba testuje log' },
+        { section: 'user', add: 'Jan testuje log' },
         { section: 'environment', add: 'branch s32' },
     ]);
 
@@ -1829,7 +1827,7 @@ test('S32 Z1b: writeNaTeraz loguje sekcje, ktore realnie ruszyl (i nic, gdy plik
     t.is(harness.files[`${MEM}/brain.log`], before);
 });
 
-test('S32 Z1b: archiveBrainNote loguje `archive` z powodem', async t => {
+test('archiveBrainNote loguje `archive` z powodem', async t => {
     const filename = 'reference_stare.md';
     const harness = makeVault({ [`${MEM}/brain/${filename}`]: note({ name: 'Stare', description: 'd' }) });
     const memory = new AgentMemory(harness.vault, 'Jaskier');
@@ -1843,9 +1841,9 @@ test('S32 Z1b: archiveBrainNote loguje `archive` z powodem', async t => {
     t.is(rows[0].detail, 'projekt zamkniety');
 });
 
-// ─── K9 / AUD-security-035: indeks brain/ w prompcie musi być JEDNOLINIJKOWY ───
+// ─── Indeks brain/ w prompcie musi być JEDNOLINIJKOWY ───
 
-test('K9: description notatki brain/ z nowymi liniami nie tworzy nowej sekcji promptu', async t => {
+test('description notatki brain/ z nowymi liniami nie tworzy nowej sekcji promptu', async t => {
     // Ładunek: opis, który po odwróceniu JSON.stringify wraca z PRAWDZIWYMI \n i wstawia
     // do promptu własny nagłówek. Pisarze (`MemorySaveTool.quoteYaml`) escapują przez
     // JSON.stringify, więc w pliku to jedna linia — dopiero czytnik przywraca \n.
@@ -1875,18 +1873,17 @@ Body
         'ładunek nie stoi w prompcie jako osobny nagłówek');
 });
 
-// ─── K12 (2026-08-23): pliki sesji są MASKOWANE przy zapisie ───────────────────
+// ─── Pliki sesji są MASKOWANE przy zapisie ───────────────────
 
 /**
- * K8 wypchnął `sessions/` do `.gitignore`, bo transkrypt potrafi nieść sekret wpleciony
- * w treść błędu (padnięty strumień wypisuje nagłówki żądania). K12 (decyzja Kuby) cofa
- * ten wpis — sesje są pamięcią agentów wożoną między urządzeniami przez repo vaulta —
- * i zdejmuje ryzyko U ŹRÓDŁA: każdy zapis pliku sesji idzie przez `maskSensitiveData`.
+ * Transkrypt potrafi nieść sekret wpleciony w treść błędu (padnięty strumień wypisuje
+ * nagłówki żądania). Sesje są pamięcią agentów wożoną między urządzeniami przez repo vaulta,
+ * więc ryzyko jest zdjęte U ŹRÓDŁA: każdy zapis pliku sesji idzie przez `maskSensitiveData`.
  */
 const SEKRET_KLUCZ = 'sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 const SEKRET_TOKEN = 'TOKENTOKENTOKENTOKENTOKEN';
 
-test('K12: zapis aktywnej sesji maskuje sekrety, a wiadomości w pamięci zostają nietknięte', async t => {
+test('zapis aktywnej sesji maskuje sekrety, a wiadomości w pamięci zostają nietknięte', async t => {
     const harness = makeVault();
     const memory = new AgentMemory(harness.vault, 'Jaskier');
 
@@ -1908,7 +1905,7 @@ Authorization: Bearer ${SEKRET_TOKEN}`;
     t.is(wiadomosci[0].content, tresc, 'maska nie mutuje wiadomości w pamięci');
 });
 
-test('K12: dopisywanie do aktywnej sesji (event-log) też maskuje', async t => {
+test('dopisywanie do aktywnej sesji (event-log) też maskuje', async t => {
     const harness = makeVault();
     const memory = new AgentMemory(harness.vault, 'Jaskier');
 
@@ -1924,7 +1921,7 @@ test('K12: dopisywanie do aktywnej sesji (event-log) też maskuje', async t => {
     t.true(naDysku.includes('HTTP 401'), 'reszta linii błędu zostaje');
 });
 
-test('K12: archiwizacja sesji maskuje transkrypt (ścieżka sessions/archive)', async t => {
+test('archiwizacja sesji maskuje transkrypt (ścieżka sessions/archive)', async t => {
     const harness = makeVault();
     const memory = new AgentMemory(harness.vault, 'Jaskier');
 
@@ -1948,7 +1945,7 @@ Weź klucz Authorization: Bearer ${SEKRET_TOKEN}
     t.true(naDysku.includes('***'));
 });
 
-test('K12: pliki spoza sessions/ (brain.md) NIE przechodzą przez ten writer', async t => {
+test('pliki spoza sessions/ (brain.md) NIE przechodzą przez ten writer', async t => {
     // Maska sesji jest świadomie WĄSKA — `brain*`, `summaries/L*` i `.state.json` mają
     // własnych pisarzy. Ten test pilnuje, że nikt nie rozlał maski na całą pamięć przy okazji.
     const harness = makeVault();
@@ -1960,22 +1957,22 @@ test('K12: pliki spoza sessions/ (brain.md) NIE przechodzą przez ten writer', a
     t.true(harness.files[`${MEM}/brain.md`] !== undefined, 'brain.md ma własnego pisarza');
 });
 
-// ───────────────── K4 / AUD-bledy-061,043,044: odczyt, który padł, NIE jest „pusto" ─────────────────
+// ───────────────── Odczyt, który padł, NIE jest „pusto" ─────────────────
 
 /**
  * Adapter, którego `exists()` KŁAMIE — na plikach zawsze `false`, choć `read`/`list`/`stat`
- * normalnie je widzą. Dokładnie ten wariant awarii dysku sieciowego udokumentował ten projekt
- * jako incydent 2026-07-28 (core/CLAUDE.md gotcha 6b): jedna fałszywa odpowiedź zamieniała się
- * w nadpisanie brain.md / pliku sesji / `.state.json` domyślną treścią, bez kopii zapasowej.
+ * normalnie je widzą. Ten wariant awarii dysku sieciowego, bez ochrony poniżej, zamieniałby
+ * jedną fałszywą odpowiedź w nadpisanie brain.md / pliku sesji / `.state.json` domyślną
+ * treścią, bez kopii zapasowej.
  */
 function makeLyingVault(initialFiles: Record<string, string> = {}, initialFolders: string[] = []) {
     const harness = makeVault(initialFiles, initialFolders);
-    // Foldery odpowiadają prawdę — kłamstwo dotyczy PLIKÓW (tak wyglądał incydent).
+    // Foldery odpowiadają prawdę - kłamstwo dotyczy tylko PLIKÓW.
     harness.vault.adapter.exists = async (path: string) => harness.folders.has(path);
     return harness;
 }
 
-test('AUD-bledy-061: getBrain NIE nadpisuje brain.md, gdy exists() kłamie (false na żywym pliku)', async t => {
+test('getBrain NIE nadpisuje brain.md, gdy exists() kłamie (false na żywym pliku)', async t => {
     const brainBefore = `# Jaskier - Mózg (Długoterminowa pamięć)
 
 ## User
@@ -1994,7 +1991,7 @@ test('AUD-bledy-061: getBrain NIE nadpisuje brain.md, gdy exists() kłamie (fals
     t.true(content.includes('## AKTYWNY TEST'), 'zwrotka to prawdziwa treść, nie świeży pusty indeks');
 });
 
-test('AUD-bledy-061: rebuildBrainIndex nie kasuje treści brain.md, gdy exists() kłamie (.bak działa)', async t => {
+test('rebuildBrainIndex nie kasuje treści brain.md, gdy exists() kłamie (.bak działa)', async t => {
     const brainBefore = `# Jaskier - Mózg (Długoterminowa pamięć)
 
 ## User
@@ -2017,7 +2014,7 @@ test('AUD-bledy-061: rebuildBrainIndex nie kasuje treści brain.md, gdy exists()
         'bezpiecznik .bak MUSI zadziałać także wtedy, gdy stan pliku jest niepewny');
 });
 
-test('AUD-bledy-061: startActiveSession nie nadpisuje żywego pliku sesji, gdy exists() kłamie', async t => {
+test('startActiveSession nie nadpisuje żywego pliku sesji, gdy exists() kłamie', async t => {
     const live = `${MEM}/sessions/active/jaskier_zajety.md`;
     const { vault, files } = makeLyingVault({
         [live]: `---
@@ -2042,7 +2039,7 @@ prawdziwa rozmowa usera
     t.true(files[live].includes('prawdziwa rozmowa usera'), 'żywa sesja nietknięta');
 });
 
-test('AUD-bledy-061: StateManager nie kasuje .state.json, gdy exists() kłamie', async t => {
+test('StateManager nie kasuje .state.json, gdy exists() kłamie', async t => {
     const STATE = `${MEM}/.state.json`;
     const { vault, files } = makeLyingVault({
         [STATE]: JSON.stringify({
@@ -2059,7 +2056,7 @@ test('AUD-bledy-061: StateManager nie kasuje .state.json, gdy exists() kłamie',
     t.true(files[STATE].includes('brain_notes_limit'), 'plik nie został nadpisany defaultami');
 });
 
-test('AUD-bledy-043: nieudany odczyt .state.json nie utrwala defaultów na dysku', async t => {
+test('nieudany odczyt .state.json nie utrwala defaultów na dysku', async t => {
     const STATE = `${MEM}/.state.json`;
     const raw = JSON.stringify({
         active_sessions: ['a.md'],
@@ -2075,7 +2072,7 @@ test('AUD-bledy-043: nieudany odczyt .state.json nie utrwala defaultów na dysku
     t.is(files[STATE], raw, 'plik nietknięty — defaulty nie poszły na dysk');
 });
 
-test('AUD-bledy-044: padnięty odczyt brain.md to BŁĄD, nie „agent nie ma pamięci"', async t => {
+test('padnięty odczyt brain.md to BŁĄD, nie „agent nie ma pamięci"', async t => {
     const { vault } = makeVault({ [BRAIN]: '# Jaskier\n\n## User\n- fakt usera\n' });
     const realRead = vault.adapter.read;
     vault.adapter.read = async (path: string) => {
@@ -2091,15 +2088,15 @@ test('AUD-bledy-044: padnięty odczyt brain.md to BŁĄD, nie „agent nie ma pa
         'prompt ma NIEŚĆ informację o awarii pamięci, a nie milczeć');
 });
 
-// ─── AUD-bledy-047: nieostemplowana sesja nie ma prawa zniknąć w log.debug ───
+// ─── Nieostemplowana sesja nie ma prawa zniknąć w log.debug ───
 //
-// Pad stemplowania (blokada synchronizatora / plik tylko do odczytu) był liczony do lokalnej
-// zmiennej `skipped` i raportowany WYŁĄCZNIE w `log.debug`, a `_writeLevel1` bezwarunkowo
-// oddawał `{created: 1}`. Krok konsolidacji szedł jako `done`, a sesje bez stempla wracały
-// przez `listUncoveredArchiveSessions` do NASTĘPNEJ paczki L1 — drugie streszczenie tych
-// samych rozmów za kolejny strzał do modelu (dokładnie wtopa „12 zduplikowanych L1").
+// Bez tej zwrotki pad stemplowania (blokada synchronizatora / plik tylko do odczytu) byłby
+// liczony tylko do lokalnej zmiennej `skipped` i raportowany WYŁĄCZNIE w `log.debug`, a
+// `_writeLevel1` bezwarunkowo oddawałby `{created: 1}`. Krok konsolidacji szedłby jako `done`,
+// a sesje bez stempla wracałyby przez `listUncoveredArchiveSessions` do NASTĘPNEJ paczki L1 —
+// drugie streszczenie tych samych rozmów za kolejny strzał do modelu (duplikaty L1).
 
-test('AUD-bledy-047: pad zapisu stempla → _cleanupAfterL1 wymienia nieostemplowane sesje', async t => {
+test('pad zapisu stempla → _cleanupAfterL1 wymienia nieostemplowane sesje', async t => {
     const archived = `${MEM}/sessions/archive/session_1.md`;
     const { vault } = makeVault({ [archived]: '---\ntype: archived_session\n---\n\ntresc\n' });
     const memory = new AgentMemory(vault, 'Jaskier');
@@ -2117,7 +2114,7 @@ test('AUD-bledy-047: pad zapisu stempla → _cleanupAfterL1 wymienia nieostemplo
     t.is(outcome.skipped[1].reason, 'not_found', 'brak pliku to inny powód niż pad zapisu');
 });
 
-test('AUD-bledy-047: komplet stempli → zwrotka bez pominiętych', async t => {
+test('komplet stempli → zwrotka bez pominiętych', async t => {
     const archived = `${MEM}/sessions/archive/session_ok.md`;
     const { vault } = makeVault({ [archived]: '---\ntype: archived_session\n---\n\ntresc\n' });
     const memory = new AgentMemory(vault, 'Jaskier');

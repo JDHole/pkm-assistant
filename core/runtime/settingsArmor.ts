@@ -1,11 +1,11 @@
 /**
  * Pancerz ustawień — czysta warstwa nad `SettingsIo`.
  *
- * CZYSTA WZGLĘDEM `settings.json`: NIGDY nie pisze do `SETTINGS_PATH` (S-07/S-08) —
+ * CZYSTA WZGLĘDEM `settings.json`: NIGDY nie pisze do `SETTINGS_PATH` —
  * wolno jej dotknąć tylko odkładki `corrupt-<ts>`, `last-good` i katalogu backupów.
  *
- * S-16: NIGDY nie ufamy `exists()` — każde „czy plik jest?" robimy PRÓBĄ ODCZYTU.
- * (Incydent 2026-07-28: dysk sieciowy skłamał, że pliku nie ma, a load nadpisał userowi
+ * NIGDY nie ufamy `exists()` — każde „czy plik jest?" robimy PRÓBĄ ODCZYTU.
+ * (Dysk sieciowy potrafi skłamać, że pliku nie ma, a load nadpisałby userowi
  * klucze API pustką. Dlatego `SettingsIo` w ogóle nie ma metody `exists`.)
  */
 import { migrateNamespace } from '../utils/settingsNamespaceMigration.js';
@@ -56,7 +56,7 @@ export async function loadSettingsWithArmor(deps: SettingsArmorDeps): Promise<Se
     const surowyGlowny = await odczytaj(io, SETTINGS_PATH, log);
     let worek = sparsujWorek(surowyGlowny);
     let source: SettingsSource = 'defaults';
-    /** Treść, która SIĘ SPARSOWAŁA — tylko taka ma prawo awansować na kopię (S-11/S-12). */
+    /** Treść, która SIĘ SPARSOWAŁA — tylko taka ma prawo awansować na kopię. */
     let trescDoAwansu: string | null = null;
 
     if (worek) {
@@ -65,7 +65,7 @@ export async function loadSettingsWithArmor(deps: SettingsArmorDeps): Promise<Se
     } else {
         if (surowyGlowny !== null) {
             // Plik JEST, ale się nie parsuje. Odkładamy go 1:1 na bok i idziemy po kopię.
-            // Parser odrzuca CAŁOŚĆ — z uszkodzonej treści nie wydłubujemy ani jednego klucza (S-10).
+            // Parser odrzuca CAŁOŚĆ — z uszkodzonej treści nie wydłubujemy ani jednego klucza.
             const odkladka = `${SETTINGS_DIR}/settings.corrupt-${io.now()}.json`;
             if (await zapisz(io, odkladka, surowyGlowny, log)) wynik.quarantinedPath = odkladka;
             log?.warn(SCOPE, `Nieczytelny plik ustawień — kopia 1:1 poszła do ${odkladka}`);
@@ -103,7 +103,7 @@ export async function loadSettingsWithArmor(deps: SettingsArmorDeps): Promise<Se
 }
 
 /**
- * Tani odczyt JĘZYKA interfejsu, zanim wstanie runtime (E-21/E-22).
+ * Tani odczyt JĘZYKA interfejsu, zanim wstanie runtime.
  * Kandydaci W TEJ KOLEJNOŚCI: `SETTINGS_PATH` → `SETTINGS_LAST_GOOD_PATH`.
  * Brak / nieczytelny / padnięty adapter → `DEFAULT_UI_LANGUAGE`.
  *

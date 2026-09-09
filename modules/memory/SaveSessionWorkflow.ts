@@ -6,7 +6,7 @@ import { t } from '../../core/i18n/index.js';
 
 import type { StreamChatModelLike, StreamMessage, StreamToCompleteOptions } from './streamHelper.js';
 
-/** Błąd w catch — czytamy z niego tylko `message` (kontrakt kampanii TS §4). */
+/** Błąd w catch — czytamy z niego tylko `message`. */
 type ErrLike = { message?: string; code?: string };
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -38,8 +38,8 @@ export interface SaveAgentMemoryLike {
     listBrainNotes(): Promise<Array<{ filename: string }>>;
     archiveActiveSession(path?: string): Promise<string | null>;
     /**
-     * AUD-code-review-067/068: KANONICZNA ścieżka składania + zapisu notatki `brain/*.md`
-     * (create-with-suffix + kolejka K1 + stopka Why/How z i18n + escapowanie frontmattera
+     * KANONICZNA ścieżka składania + zapisu notatki `brain/*.md`
+     * (create-with-suffix + kolejka zapisu + stopka Why/How z i18n + escapowanie frontmattera
      * przez `JSON.stringify`) — ta sama, której używają `memory_save` i accept z poczekalni
      * rescue. `_createBrainNote` (niżej) idzie przez nią zamiast utrzymywać drugą kopię
      * kontraktu notatki.
@@ -55,7 +55,7 @@ export interface SaveAgentMemoryLike {
     appendBrainLog?(op: string, target: string, detail?: string): Promise<unknown>;
     _enqueuePathWrite?<T>(path: string, fn: () => Promise<T>): Promise<T>;
     /**
-     * D8 (2026-08-27, werdykt 27.08): poczekalnia `brain/pending_rescue/` — opcjonalne, jak
+     * Poczekalnia `brain/pending_rescue/` — opcjonalne, jak
      * reszta pola tego interfejsu, żeby stare atrapy testów (bez tej ścieżki) nie musiały się
      * zmieniać. Brak metody = `prepareProposals` po prostu nie dokłada kandydatów rescue.
      */
@@ -110,7 +110,7 @@ export interface NoteProposal {
     how_to_apply?: string;
     accepted?: boolean;
     /**
-     * D8 (2026-08-27): obecne WYŁĄCZNIE dla propozycji dołożonych z poczekalni rescue —
+     * Obecne WYŁĄCZNIE dla propozycji dołożonych z poczekalni rescue —
      * nazwa pliku w `brain/pending_rescue/`. `applyDecision` rozpoznaje po tym polu, czy
      * accept/reject ma iść przez `acceptPendingRescue`/`rejectPendingRescue`, czy zwykłą
      * ścieżkę tworzenia notatki. Zwykłe propozycje sesji tego pola NIE mają.
@@ -122,7 +122,7 @@ export interface NoteProposal {
     pendingPrefixedDescription?: string;
 }
 
-/** Propozycja zmiany w sekcjach „Na teraz" (E2.8 D3) — modal renderuje to jako diff. */
+/** Propozycja zmiany w sekcjach „Na teraz" — modal renderuje to jako diff. */
 export interface NaTerazUpdate {
     action?: string;
     section?: string;
@@ -138,7 +138,7 @@ export interface NaTerazOpLike {
     remove?: string;
 }
 
-/** Opcje strzału propozycji (S29 Z6) — idą prosto do `streamToComplete`. */
+/** Opcje strzału propozycji — idą prosto do `streamToComplete`. */
 export interface PrepareProposalsOptions extends StreamToCompleteOptions {
     /** `false` = zwis/abort ma cicho spaść na regexy (domyślnie leci w górę) */
     rethrowStreamErrors?: boolean;
@@ -152,7 +152,7 @@ export interface SaveSessionPrep {
     brainUpdates: NaTerazUpdate[];
     llmDriven: boolean;
     messageCount: number;
-    /** surowe `usage` strzału propozycji (null na ścieżce regexowej, Z4.3) */
+    /** surowe `usage` strzału propozycji (null na ścieżce regexowej) */
     usage: unknown;
 }
 
@@ -171,7 +171,7 @@ export interface CreatedBrainNote {
 }
 
 /**
- * Notatka, której zapis w `applyDecision` się nie udał (AUD-code-review-051) — pad JEDNEJ
+ * Notatka, której zapis w `applyDecision` się nie udał — pad JEDNEJ
  * pozycji (np. `write()` rzucający na dysku sieciowym) nie przerywa już pętli, więc reszta
  * przyjętych notatek, przebudowa indeksu i archiwizacja sesji dochodzą do skutku.
  */
@@ -189,7 +189,7 @@ export interface SaveSessionOutcome {
     archivedPath: string | null;
     shouldTriggerArchive?: boolean;
     counters?: { archived_since_last_consolidation?: number; brain_notes: number };
-    /** AUD-code-review-051: pole POWSTAJE tylko przy niepustej liście (wzór gotchy 10 modułu) —
+    /** Pole POWSTAJE tylko przy niepustej liście —
      *  czysty przebieg zwrotki nie zasmieca się pustą tablicą. */
     noteFailures?: NoteFailure[];
 }
@@ -243,7 +243,7 @@ const TYPE_TO_SECTION: Record<string, string> = {
 const VALID_NOTE_TYPES = new Set(['user', 'agent_rule', 'skill_hint', 'project_context', 'reference']);
 
 const AGENT_RULE_PATTERN = /\b(zawsze|nigdy|preferuj|preferenc|wol[eę] gdy|lubi[eę] gdy|nie u[zż]ywaj|m[oó]w po|pisz w |r[oó]b w |u[zż]ywaj)\b/i;
-// S35: `obsek` ZOSTAJE świadomie — to heurystyka nad TEKSTEM USERA (jego własne zdania
+// `obsek` ZOSTAJE świadomie — to heurystyka nad TEKSTEM USERA (jego własne zdania
 // z rozmowy), nie nad niczym, co generuje plugin. Stare rozmowy i notatki nadal mówią
 // „obsek", więc wycięcie słowa pogorszyłoby klasyfikację. Nic tu nie wymaga migracji.
 const PROJECT_CONTEXT_PATTERN = /\b(projekt|vault|robimy|pkm|obsek|plugin|ten plugin|tworzymy|budujemy|repo)\b/i;
@@ -256,7 +256,7 @@ function detectNoteType(content: unknown): string {
 }
 
 export class SaveSessionWorkflow {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare agentMemory: SaveAgentMemoryLike;
     declare app: unknown;
     declare settings: SaveSettingsLike;
@@ -291,10 +291,10 @@ export class SaveSessionWorkflow {
      *
      * Returned shape stays stable for both LLM and regex paths so the modal renders uniformly.
      *
-     * S29 Z6: `options` (wszystkie pola opcjonalne) idą prosto do `streamToComplete` —
+     * `options` (wszystkie pola opcjonalne) idą prosto do `streamToComplete` —
      * `onChunk` (znak życia dla licznika w modalu), `signal` (działający „Anuluj": AbortController
      * z `save_session.js`), `watchdog` (zwis streamu przestaje wisieć do twardego XHR 600 s).
-     * Bez `options` zachowanie jest identyczne jak przed S29.
+     * Bez `options` zachowanie jest niezmienione.
      *
      */
     async prepareProposals(
@@ -313,11 +313,11 @@ export class SaveSessionWorkflow {
             ? llmProposal.new_notes
             : this.proposeNotes(messages, activeSession.artifacts || []);
         // Memory v3 index contract: durable facts go into brain/*.md. brain.md is regenerated from
-        // the note catalogue after accepted notes are created. E2.8 D3: `brainUpdates` now carries
+        // the note catalogue after accepted notes are created. `brainUpdates` carries
         // proposed „Na teraz" short-term updates (add/remove) — the modal renders them as a diff.
         const brainUpdates = llmProposal ? (llmProposal.na_teraz_updates || []) : [];
 
-        // D8 (2026-08-27, werdykt 27.08): kandydaci memory_rescue czekający w poczekalni
+        // Kandydaci memory_rescue czekający w poczekalni
         // dołączają do TEJ SAMEJ listy — user je widzi i decyduje w JEDNYM, już istniejącym
         // modalu, zamiast osobnego mechanizmu review.
         const pendingNotes = await this._proposePendingRescue();
@@ -329,13 +329,13 @@ export class SaveSessionWorkflow {
             brainUpdates,
             llmDriven: Boolean(llmProposal),
             messageCount: messages.length,
-            // Z4.3: `usage` strzału propozycji (null na ścieżce regexowej) — caller księguje koszt.
+            // `usage` strzału propozycji (null na ścieżce regexowej) — caller księguje koszt.
             usage: llmProposal?.usage || null
         };
     }
 
     /**
-     * D8 (2026-08-27): kandydaci memory_rescue czekający w `brain/pending_rescue/` → propozycje
+     * Kandydaci memory_rescue czekający w `brain/pending_rescue/` → propozycje
      * kształtu `NoteProposal`, gotowe do dorzucenia do listy `notes`. Pochodzenie jest widoczne
      * jako prefiks opisu „[z kompresji okna, DATA]" (bez przebudowy renderu modalu — kolumna
      * notatek już renderuje `description` jako edytowalne pole). Prefiks jest doklejany TYLKO
@@ -345,8 +345,8 @@ export class SaveSessionWorkflow {
      *
      * Padnięte listowanie ANI padnięte mapowanie NIE wywala `/save session` w całości —
      * kandydaci po prostu nie pojawią się w TEJ rundzie (zostają bezpiecznie na dysku,
-     * `listPendingRescue` woła się ponownie przy następnej okazji). Werdykt weryfikacji opusa
-     * (nit 3): `.map()` musi siedzieć w TYM SAMYM try co `listPendingRescue` — kandydat bez
+     * `listPendingRescue` woła się ponownie przy następnej okazji). `.map()` musi siedzieć
+     * w TYM SAMYM try co `listPendingRescue` — kandydat bez
      * `name`/`filename` z obcej implementacji `AgentMemory`-podobnej (typ deklaruje te pola,
      * ale runtime niczego nie egzekwuje) rzucałby przy `p.filename.replace(...)` i ubijał cały
      * zapis sesji dla WSZYSTKICH notatek, nie tylko dla kandydatów z poczekalni.
@@ -432,7 +432,7 @@ export class SaveSessionWorkflow {
         }
 
         const notesCreated: CreatedBrainNote[] = [];
-        // AUD-code-review-051: każda notatka ma WŁASNY try/catch — pad jednej pozycji (np.
+        // Każda notatka ma WŁASNY try/catch — pad jednej pozycji (np.
         // write() rzucający na dysku sieciowym) nie ma prawa zablokować rebuildBrainIndex /
         // writeNaTeraz / archiveActiveSession niżej dla tego, co się udało. Bez tego jeden pad
         // przerywał całą metodę: utworzone notatki zostawały na dysku, ale POZA indeksem
@@ -443,7 +443,7 @@ export class SaveSessionWorkflow {
         const noteFailures: NoteFailure[] = [];
         for (const note of decision.notes || []) {
             try {
-                // D8 (2026-08-27): propozycje z poczekalni `brain/pending_rescue/` mają zawsze
+                // Propozycje z poczekalni `brain/pending_rescue/` mają zawsze
                 // rozstrzygnięcie — accept TWORZY notatkę, reject KASUJE kandydata. Zwykła
                 // propozycja sesji, gdy odznaczona, po prostu nigdy nie powstaje (bez zmian).
                 if (note?.pendingFilename) {
@@ -466,8 +466,8 @@ export class SaveSessionWorkflow {
         const indexResult = await this.agentMemory.rebuildBrainIndex?.();
         const brainChanged = Boolean(indexResult?.changed);
 
-        // E2.8 D3: apply accepted „Na teraz" short-term updates (add/remove) through the writer.
-        // These mutate brain.md's ephemeral sections in place (the sole create-only exception, S22).
+        // Apply accepted „Na teraz" short-term updates (add/remove) through the writer.
+        // These mutate brain.md's ephemeral sections in place (the sole create-only exception).
         const naTerazOps = (decision.brainUpdates || [])
             .filter(u => u && u.accepted !== false)
             .map(u => this._toNaTerazOp(u))
@@ -486,8 +486,7 @@ export class SaveSessionWorkflow {
         const brainNotes = await this.agentMemory.listBrainNotes();
         const shouldTriggerArchive = this._shouldTriggerArchive(state, brainNotes);
 
-        // Fix znaleziska TS-2 #5: martwa bramka `this.archiveWorkflow?.run(...)` SKASOWANA —
-        // `ArchiveWorkflow.run()` nie istnieje od D6 (2026-07-30), a próg konsolidacji odpala
+        // Archiwizacja nie jest wołana bezpośrednio stąd — próg konsolidacji odpala
         // wołacz przez `consolidationRunner` na podstawie zwracanego `shouldTriggerArchive`.
 
         return {
@@ -568,14 +567,14 @@ export class SaveSessionWorkflow {
         messages: SessionMessageLike[],
         options: PrepareProposalsOptions = {},
     ): Promise<AgentProposal | null> {
-        // E2.8 B3: agent no longer carries the factory prompt — resolver provides it, so a fresh
+        // Agent no longer carries the factory prompt — resolver provides it, so a fresh
         // agent still gets the LLM path. Only "no model / no active agent" falls back to regex.
         if (!this.model || !this.agent) return null;
         if (!Array.isArray(messages) || messages.length === 0) return null;
         try {
             return await this.proposeBrainUpdatesViaAgent(messages, options);
         } catch (e) {
-            // S29 Z6: zwis / anulowanie przez usera NIE MOŻE po cichu spaść na regexy — user ma
+            // Zwis / anulowanie przez usera NIE MOŻE po cichu spaść na regexy — user ma
             // zobaczyć „padło, ponów?" zamiast wyników udających propozycje modelu.
             if (options.rethrowStreamErrors !== false && this._isStreamControlError(e)) throw e;
             log.warn('SaveSessionWorkflow', `LLM proposal failed, falling back to regex: ${(e as ErrLike).message as string}`);
@@ -613,13 +612,13 @@ export class SaveSessionWorkflow {
             { role: 'system', content: savePrompt },
             { role: 'user', content: JSON.stringify(userPayload) }
         ];
-        // S29 Z6: onChunk/signal/watchdog przekazywane 1:1 (bez nich zachowanie jak dotąd).
+        // onChunk/signal/watchdog przekazywane 1:1 (bez nich zachowanie jak dotąd).
         const { text, usage } = await streamToComplete(this.model!, llmMessages, {
             onChunk: options.onChunk,
             signal: options.signal,
             watchdog: options.watchdog,
         });
-        // Z4.3: surowe `usage` z tego strzału jedzie dalej (kontrakt propozycji bez zmian, doszło
+        // Surowe `usage` z tego strzału jedzie dalej (kontrakt propozycji bez zmian, doszło
         // jedno pole). Bez niego jedyne wywołanie LLM w `/save session` było niewidzialne w koszcie
         // — `CostLog` znał tylko konsolidację.
         return { ...this._parseAgentJsonResponse(text), usage: usage || null };
@@ -669,7 +668,7 @@ export class SaveSessionWorkflow {
 
         // Legacy brain_updates are parsed for backwards compatibility, but the workflow no longer
         // applies them. Facts belong in brain/*.md; brain.md is a categorized index.
-        // E2.8 D3: na_teraz → short-term „Na teraz" updates (add/remove), reviewed in the modal.
+        // na_teraz → short-term „Na teraz" updates (add/remove), reviewed in the modal.
         return { brain_updates: [], new_notes: cleanNotes, na_teraz_updates: this._parseNaTerazUpdates(parsed?.na_teraz) };
     }
 
@@ -734,18 +733,14 @@ export class SaveSessionWorkflow {
 
     /**
      * Zapisz notatkę zaakceptowaną w modalu `/save session` przez KANONICZNĄ ścieżkę
-     * `AgentMemory.writeBrainNote` — create-with-suffix + kolejka K1 + stopka Why/How z i18n
+     * `AgentMemory.writeBrainNote` — create-with-suffix + kolejka zapisu + stopka Why/How z i18n
      * + escapowanie frontmattera przez `JSON.stringify`, ta sama, której używają `memory_save`
      * i accept z poczekalni rescue (`writeBrainNote` sam woła `ensureMemoryStructure` i
      * `appendBrainLog('create', ..., 'save_session')` — wołacz nie dubluje żadnego z nich).
      *
-     * AUD-code-review-067/068: do tej naprawy metoda REIMPLEMENTOWAŁA zapis notatki obok
-     * `writeBrainNote` — własny szablon frontmattera bez stopki Why/How (LLM w `/save session`
-     * generuje `why`/`how_to_apply`, patrz `workPrompts.ts`, ale nigdy nie trafiały na dysk tą
-     * drogą) i własne escapowanie frontmattera przez `replace(':', ' -')` zamiast
-     * `JSON.stringify` (dwukropek w treści usera, np. „spotkanie 14:30", wracał trwale
-     * okaleczony na „spotkanie 14 -30" — pozostali trzej pisarze tego samego kontraktu wracają
-     * 1:1). Trzeci, nieudokumentowany pisarz tej samej notatki miał dziś jednego właściciela.
+     * Escapowanie frontmattera musi iść przez `JSON.stringify`, nie przez prostą podmianę
+     * dwukropka — dwukropek w treści usera (np. „spotkanie 14:30") inaczej wraca trwale
+     * okaleczony (np. „spotkanie 14 -30").
      */
     async _createBrainNote(note: NoteProposal): Promise<CreatedBrainNote> {
         return this.agentMemory.writeBrainNote(
@@ -761,7 +756,7 @@ export class SaveSessionWorkflow {
         );
     }
 
-    // Fix znaleziska TS-2 #9: martwy parametr `updates` usunięty — ciało go nie czytało
+    // Martwy parametr `updates` usunięty - ciało go nie czytało
     // (metoda tylko przebudowuje indeks i raportuje, czy plik się zmienił).
     async _applyBrainUpdates(): Promise<boolean> {
         const before = await this.agentMemory.getBrain();
@@ -820,6 +815,6 @@ export interface AgentProposal {
     brain_updates: unknown[];
     new_notes: NoteProposal[];
     na_teraz_updates: NaTerazUpdate[];
-    /** surowe `usage` strzału (Z4.3) — dokładane w `proposeBrainUpdatesViaAgent` */
+    /** surowe `usage` strzału — dokładane w `proposeBrainUpdatesViaAgent` */
     usage?: unknown;
 }

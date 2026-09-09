@@ -1,8 +1,8 @@
 /**
- * Nawigacja po notatkach (PL-10) — następca `obsidian_helpers`.
+ * Nawigacja po notatkach — następca `obsidian_helpers`.
  *
  * ⚠️ Plik dotyka `obsidian` jako WARTOŚCI, więc NIE wchodzi do barrela `core/index.ts`
- * (kontrakt node-safe K-01/K-03). Deep-importuje go wyłącznie composition root.
+ * (kontrakt node-safe). Deep-importuje go wyłącznie composition root.
  */
 import { Keymap } from 'obsidian';
 

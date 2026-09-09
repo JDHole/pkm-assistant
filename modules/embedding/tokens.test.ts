@@ -1,5 +1,5 @@
 /**
- * tokens.test.ts — C-25 (AUTOR): estymata tokenów (znaki/3,7) i przycinanie do budżetu.
+ * tokens.test.ts — estymata tokenów (znaki/3,7) i przycinanie do budżetu.
  * Napisany przed implementacją (czerwony na stubie — `estimateTokens`/`trimToTokenBudget`
  * rzucały `not implemented`), dziś zielony.
  */

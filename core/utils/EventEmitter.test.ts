@@ -89,7 +89,7 @@ test('non-function handler is a no-op', t => {
     t.is(ee.listenerCount('x'), 0);
 });
 
-// ── clean-room / F2: nowy runtime stoi na `once()` i `removeAllListeners(key)` ──
+// ── Runtime stoi na `once()` i `removeAllListeners(key)` ──
 // Do tej pory żadna z tych dwóch metod nie miała testu, a `PluginRuntime` używa obu
 // (jednorazowe „poczekaj na loaded" i sprzątanie kanału przy `dispose()`).
 

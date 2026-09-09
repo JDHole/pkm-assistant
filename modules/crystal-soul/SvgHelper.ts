@@ -15,13 +15,13 @@ export function hexToRgbTriplet(hex: string): string {
 }
 
 /**
- * K11 (AUD-security-090, twardnienie) — kolor wchodzący do MARKUPU SVG.
+ * Kolor wchodzący do MARKUPU SVG.
  *
  * Generatory sklejają SVG stringiem (`fill="${color}"`), a kolor bierze się z pliku profilu
  * agenta w vaultcie. Wartość z cudzysłowem zamykała atrybut i pozwalała dopisać własny
  * element (np. `<image href="https://...">`, który po dołączeniu do DOM-u strzela żądaniem
  * na obcy serwer). Źródło jest dziś zamknięte (`.pkm-assistant/**` fail-closed dla narzędzi
- * bez `admin_access`, UI zapisuje hex z palety), więc to twardnienie, nie łata dziury —
+ * bez `admin_access`, UI zapisuje hex z palety), więc to twardnienie, nie łata dziury -
  * ale sklejanie cudzej wartości do markupu bez sprawdzenia nie ma prawa zostać.
  *
  * Przepuszczamy WYŁĄCZNIE kształty, które realnie występują w profilach i skinach:
@@ -73,9 +73,9 @@ export class SvgHelper {
   static _scrub(el: Element): void {
     for (const attr of [...(el.attributes || [])]) {
       const name = attr.name.toLowerCase();
-      // K11 (AUD-security-090): KAŻDY zdalny adres wylatuje, nie tylko `javascript:`.
+      // KAŻDY zdalny adres wylatuje, nie tylko `javascript:`.
       // `<image href="https://...">` w żywym DOM-ie strzela żądaniem na obcy serwer
-      // (potwierdzenie, że user otworzył widok) — to też jest wykonanie cudzej treści.
+      // (potwierdzenie, że user otworzył widok) - to też jest wykonanie cudzej treści.
       const isLink = name === 'href' || name === 'xlink:href' || name === 'src';
       if (name.startsWith('on') || (isLink && !/^\s*#/.test(attr.value))) {
         el.removeAttribute(attr.name);
@@ -83,15 +83,15 @@ export class SvgHelper {
     }
     for (const child of [...(el.children || [])]) {
       const tag = (child.tagName || '').toLowerCase();
-      // K11: `image` i `use` ściągają zasoby; `iframe`/`object`/`embed`/`animate` (SMIL
-      // umie ustawić dowolny atrybut) dołożone tym samym ruchem — generatory pluginu
+      // `image` i `use` ściągają zasoby; `iframe`/`object`/`embed`/`animate` (SMIL
+      // umie ustawić dowolny atrybut) dołożone tym samym ruchem - generatory pluginu
       // nie emitują żadnego z nich, więc cięcie nie ma czego zepsuć.
       if (SvgHelper._FORBIDDEN_TAGS.has(tag)) { child.remove(); continue; }
       SvgHelper._scrub(child);
     }
   }
 
-  /** K11: elementy, których markup pluginu nigdy nie emituje, a które wykonują cudzą treść. */
+  /** Elementy, których markup pluginu nigdy nie emituje, a które wykonują cudzą treść. */
   static _FORBIDDEN_TAGS: ReadonlySet<string> = new Set([
     'script', 'foreignobject', 'image', 'use', 'iframe', 'object', 'embed',
     'animate', 'animatetransform', 'animatemotion', 'set',

@@ -1,7 +1,7 @@
 export default {
     name: 'delegation',
     version: 'plugin',
-    // S28 (D3): `agent_message` OUT — poczta między agentami ma własny serwer `komunikator`.
+    // Poczta między agentami ma własny serwer `komunikator` — `agent_message` się tu nie pojawia.
     description: 'Delegacja do sub-agentów + przekazanie rozmowy innemu agentowi.',
     icon: 'users',
     tools: [

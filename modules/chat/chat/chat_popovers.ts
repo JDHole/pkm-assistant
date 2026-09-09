@@ -5,8 +5,8 @@
 import { Notice } from 'obsidian';
 import { SkinManager, UiIcons, setSvg } from '../../crystal-soul/index.js';
 import { AUTONOMY_MODES, normalizeAutonomy } from '../../../core/index.js';
-// K3 (AUD-security-025): przelaczniki uprawnien licza sie na ZYWEJ osi `disabled_tools`,
-// a nie na polach `default_permissions`, ktore Agent._normalizePermissions i tak kasuje.
+// Przelaczniki uprawnien licza sie na ZYWEJ osi `disabled_tools`, a nie na polach
+// `default_permissions`, ktore Agent._normalizePermissions i tak kasuje.
 import {
     PERMISSION_PRESET_SWITCHES,
     isPermissionSwitchOn,
@@ -17,9 +17,9 @@ import { TOOL_INFO } from '../../ui-components/index.js';
 import { log } from '../../../core/utils/Logger.js';
 import { t } from '../../../core/i18n/index.js';
 import { buildToolPopoverEntries } from './toolPopoverEntries.js';
-// AUD-code-review-016: KANONICZNY klucz zakładki — `chat_tabs.ts` ostrzega w JSDoc `_tabKey`
-// że druga kopia tej samej formuły = wynik suba (albo tu: zapis autonomii) trafiałby do złej
-// zakładki, gdy tożsamość zakładki się kiedyś rozszerzy.
+// KANONICZNY klucz zakładki - `chat_tabs.ts` ostrzega w JSDoc `_tabKey` że druga kopia tej
+// samej formuły = wynik suba (albo tu: zapis autonomii) trafiałby do złej zakładki, gdy
+// tożsamość zakładki się kiedyś rozszerzy.
 import { _tabKey } from './chat_tabs.js';
 
 // TS-any: metody są domiksowywane do ChatView.prototype składanego w runtime.
@@ -60,9 +60,9 @@ interface AskUserArguments {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// AUTONOMIA (E2.3 D21 / F12) — per-czat: czy agent PYTA zanim zrobi to, co mu wolno.
+// AUTONOMIA - per-czat: czy agent PYTA zanim zrobi to, co mu wolno.
 // Niezależna oś od uprawnień. Zmiana NIE wstrzykuje wiadomości do rozmowy (polityka UI,
-// model o niej nie wie — w przeciwieństwie do starego trybu Gadaj/Rób).
+// model o niej nie wie).
 // ══════════════════════════════════════════════════════════════════════════
 
 /**
@@ -166,10 +166,10 @@ export function _toggleToolsPopover(this: ChatViewMixinContext, btn: HTMLElement
     }
 
     const agent = this.plugin?.agentManager?.getActiveAgent() as AgentLike | undefined;
-    // AUD-dead-code-205: lista = ŻYWY rejestr (co da się TERAZ wywołać), nie klucze TOOL_INFO
-    // (mapa ikon/etykiet dla renderu STAREJ historii — celowo trzyma martwe wpisy jak
-    // `minion_task`/`connect_to_server`). `TOOL_INFO` tu tylko dostarcza ikonę/etykietę per
-    // nazwa; nazwa bez wpisu (nowe narzędzie, tool z zewnętrznego serwera MCP) dostaje fallback.
+    // Lista = ŻYWY rejestr (co da się TERAZ wywołać), nie klucze TOOL_INFO (mapa ikon/etykiet
+    // dla renderu historii - celowo trzyma wpisy dla narzędzi, których już nie ma w rejestrze).
+    // `TOOL_INFO` tu tylko dostarcza ikonę/etykietę per nazwa; nazwa bez wpisu (nowe narzędzie,
+    // tool z zewnętrznego serwera MCP) dostaje fallback.
     const registryNames: string[] = this.plugin?.toolRegistry?.getAllToolNames?.() ?? [];
     const entries = buildToolPopoverEntries(
         registryNames,
@@ -215,11 +215,11 @@ export function _toggleToolsPopover(this: ChatViewMixinContext, btn: HTMLElement
 }
 
 /**
- * K3 (AUD-security-024): JEDNA droga zapisu zmiany uprawnień z popovera.
+ * JEDNA droga zapisu zmiany uprawnień z popovera.
  *
- * Dawniej popover wołał `loader.saveAgent(agent)` wprost — a dla agenta WBUDOWANEGO (Jaskier)
- * to zapis do `jaskier.yaml`, czyli pliku, który `loadAllAgents` odfiltrowuje. Ograniczenie
- * ustawione przez usera znikało po restarcie Obsidiana, bez słowa ostrzeżenia. `updateAgent`
+ * Wołanie `loader.saveAgent(agent)` wprost byłoby błędne dla agenta WBUDOWANEGO (Jaskier):
+ * to zapis do `jaskier.yaml`, czyli pliku, który `loadAllAgents` odfiltrowuje - ograniczenie
+ * ustawione przez usera znikałoby po restarcie Obsidiana, bez słowa ostrzeżenia. `updateAgent`
  * ma poprawną gałąź dla built-ina (plik `<nazwa>_overrides.yaml`) i rozgłasza `agent:updated`.
  *
  * Zapis jest asynchroniczny, a UI przestawia kropkę od razu — stan w RAM zmienia `agent.update`
@@ -266,12 +266,12 @@ export function _togglePermPopover(this: ChatViewMixinContext): void {
     // Presets
     const presets = createDiv();
     presets.className = 'cs-perm-popover__presets';
-    // E2.3 (D21): presety NIE ustawiają już yolo_mode — to nie uprawnienie, tylko tryb
-    // autonomii per-czat. „Full” różni się od „Standard” przez delete_files: true.
-    // K3 (AUD-security-025): presety ruszają WYŁĄCZNIE oś narzędzi vaultowych (`disabled_tools`).
-    // Dawniej pisały też `memory` i `guidance_mode` — a `guidance_mode:false` w KAŻDYM presecie
-    // znaczyło, że kliknięcie „Pełne” zawężało agenta do whitelisty folderów. Te dwie osie mają
-    // w popoverze własne wiersze i tam się je przestawia.
+    // Presety NIE ustawiają yolo_mode - to nie uprawnienie, tylko tryb autonomii per-czat.
+    // „Full” różni się od „Standard” przez delete_files: true.
+    // Presety ruszają WYŁĄCZNIE oś narzędzi vaultowych (`disabled_tools`). Nie piszą `memory`
+    // ani `guidance_mode` - presety zmieniające `guidance_mode` zawężałyby agenta do whitelisty
+    // folderów bez jawnej decyzji usera na to konkretne pole. Te dwie osie mają w popoverze
+    // własne wiersze i tam się je przestawia.
     const PRESETS = {
         safe:     { label: t('chat.popover.safe'),     icon: UiIcons.lock(11),   switches: PERMISSION_PRESET_SWITCHES.safe },
         standard: { label: t('chat.popover.standard'), icon: UiIcons.scales(11), switches: PERMISSION_PRESET_SWITCHES.standard },
@@ -298,20 +298,19 @@ export function _togglePermPopover(this: ChatViewMixinContext): void {
     popover.appendChild(sep);
 
     // Permission rows.
-    // K3 (AUD-security-025): `axis` mówi, GDZIE mieszka stan wiersza.
-    //  - 'tools' = przełącznik narzędzi built-in (`disabled_tools`) — egzekwowany przez
+    // `axis` mówi, GDZIE mieszka stan wiersza.
+    //  - 'tools' = przełącznik narzędzi built-in (`disabled_tools`) - egzekwowany przez
     //    `ToolRegistry.checkToolAxis` przy widoczności I przy wykonaniu (MCPClient);
     //  - 'perm'  = żywe pole uprawnień agenta (`memory` bramkuje scope=memory, `guidance_mode`
     //    decyduje: cały vault vs whitelista folderów).
-    // WIERSZ „Narzędzia MCP" WYCIĘTY: po E3.1 dostęp do serwera zewnętrznego to opt-in per serwer
-    // (`agent.mcp_servers[]` w profilu agenta), więc jeden boolean nie miał czego włączać —
-    // a pole `permissions.mcp` i tak było kasowane przy zapisie i nigdy nie czytane.
+    // Brak wiersza „Narzędzia MCP": dostęp do serwera zewnętrznego to opt-in per serwer
+    // (`agent.mcp_servers[]` w profilu agenta) - jeden boolean nie miałby czego włączać.
     const PERM_ROWS: Array<{ key: string; label: string; icon: string; axis: 'tools' | 'perm' }> = [
         { key: 'read_notes',    label: t('chat.popover.read_notes'),    icon: UiIcons.eye(11),     axis: 'tools' },
         { key: 'edit_notes',    label: t('chat.popover.edit_notes'),    icon: UiIcons.edit(11),    axis: 'tools' },
         { key: 'create_files',  label: t('chat.popover.create_files'),  icon: UiIcons.file(11),    axis: 'tools' },
         { key: 'delete_files',  label: t('chat.popover.delete_files'),  icon: UiIcons.trash(11),   axis: 'tools' },
-        // E2.3 (D21): YOLO_MODE row removed — moved to the per-chat autonomy button/popover.
+        // No YOLO_MODE row here - it lives in the per-chat autonomy button/popover.
         { key: 'memory',        label: t('chat.popover.memory'),        icon: UiIcons.brain(11),   axis: 'perm' },
         { key: 'guidance_mode', label: t('chat.popover.guidance_mode'), icon: UiIcons.compass(11), axis: 'perm' },
     ];

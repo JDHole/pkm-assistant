@@ -1,14 +1,14 @@
 /**
  * @module ConsolidationRun
- * S29 Z2 (2026-07-29) — stan JEDNEGO przebiegu konsolidacji pamięci.
+ * Stan JEDNEGO przebiegu konsolidacji pamięci.
  *
  * Problem, który to rozwiązuje: cykl zapisu sesji + konsolidacji potrafi strzelić 5× do LLM,
  * z czego 4 strzały leciały bez ŻADNEGO UI (modal review pojawiał się dopiero z gotowym
  * wynikiem). Nikt nie wiedział, ile jeszcze zostało, co się udało, a co padło. Ta klasa jest
  * jedynym źródłem prawdy o przebiegu: plan kroków, ich statusy, wyniki, decyzje usera, koszt.
  *
- * ZERO UI, ZERO Obsidiana, ZERO I/O — czysty node, w pełni testowalny (`ConsolidationRun.test.js`).
- * Etykiety kroków (i18n) składa UI z pól `kind` / `index` / `total` — tu nie ma stringów usera.
+ * ZERO UI, ZERO Obsidiana, ZERO I/O - czysty node, w pełni testowalny (`ConsolidationRun.test.js`).
+ * Etykiety kroków (i18n) składa UI z pól `kind` / `index` / `total` - tu nie ma stringów usera.
  *
  * Cykl życia kroku:
  *
@@ -24,7 +24,7 @@
  *   dowolny nierozstrzygnięty ──skipStep──> skipped
  *   failed ──startStep──> running       (ręczne „Ponów" z UI; kasuje licznik retry)
  *
- * Nielegalne przejście rzuca — to celowe. Lepiej wywalić się na ławce testowej niż wpuścić
+ * Nielegalne przejście rzuca - to celowe. Lepiej wywalić się na ławce testowej niż wpuścić
  * modal w stan, którego nikt nie przewidział.
  */
 
@@ -43,10 +43,9 @@ export const STEP_STATUS = {
 export type StepStatus = (typeof STEP_STATUS)[keyof typeof STEP_STATUS];
 
 /**
- * Rodzaje kroków. `save_proposals` (rezerwacja S29 Z6 dla `/save session`) skasowany
- * w dead-code sweepie 2026-09-02 (AUD-dead-code-047/180) — śledztwo D8 (2026-08-27, patrz
- * `brain/pending_rescue/` w CLAUDE.md) odrzuciło drogę przez konsolidację na rzecz poczekalni
- * rescue, więc rezerwacja nigdy nie miała szans dostać producenta.
+ * Rodzaje kroków. `save_proposals` (rezerwacja dla `/save session`) nie istnieje - droga
+ * zapisu sesji przez konsolidację została odrzucona na rzecz poczekalni rescue (patrz
+ * `brain/pending_rescue/` w CLAUDE.md), więc ta rezerwacja nigdy nie dostała producenta.
  */
 export const STEP_KIND = {
     DEDUP: 'dedup',
@@ -57,7 +56,7 @@ export const STEP_KIND = {
 
 export type StepKind = (typeof STEP_KIND)[keyof typeof STEP_KIND];
 
-/** Błąd widziany przez maszynę stanów — bierzemy z niego tylko te dwa pola. */
+/** Błąd widziany przez maszynę stanów - bierzemy z niego tylko te dwa pola. */
 type ErrLike = { message?: string; code?: string };
 
 /** Znormalizowany licznik zużycia tokenów jednego kroku / całego przebiegu. */
@@ -68,7 +67,7 @@ export interface StepUsage {
     calls: number;
 }
 
-/** To samo bez `calls` — wynik `normalizeUsage` z JEDNEGO strzału. */
+/** To samo bez `calls` - wynik `normalizeUsage` z JEDNEGO strzału. */
 export type NormalizedUsage = Omit<StepUsage, 'calls'>;
 
 /**
@@ -116,7 +115,7 @@ export interface ConsolidationStepApplied {
     [key: string]: unknown;
 }
 
-/** Specyfikacja kroku (bez stanu runtime) — wynik `buildPlan` albo wejście z testu/UI. */
+/** Specyfikacja kroku (bez stanu runtime) - wynik `buildPlan` albo wejście z testu/UI. */
 export interface ConsolidationStepSpec {
     id: string;
     kind: string;
@@ -147,10 +146,10 @@ export interface ConsolidationStep {
 
 /** Krok jest „rozstrzygnięty", gdy nikt już nic z nim nie zrobi w tym przebiegu. */
 const SETTLED = new Set<string>([STEP_STATUS.DONE, STEP_STATUS.SKIPPED, STEP_STATUS.FAILED]);
-/** Krok „rozstrzygnięty pomyślnie lub świadomie odpuszczony" — do gatingu hierarchii. */
+/** Krok „rozstrzygnięty pomyślnie lub świadomie odpuszczony" - do gatingu hierarchii. */
 const RESOLVED = new Set<string>([STEP_STATUS.DONE, STEP_STATUS.SKIPPED]);
 
-/** Ile razy krok próbuje ponownie po zwisie streamu, zanim poleci jako failed (decyzja Kuby: 1×). */
+/** Ile razy krok próbuje ponownie po zwisie streamu, zanim poleci jako failed (1×). */
 const MAX_STALL_RETRIES = 1;
 
 /** Pusty licznik zużycia tokenów. */
@@ -161,7 +160,7 @@ function emptyUsage(): StepUsage {
 /**
  * Normalizuje `usage` z modelu do jednego kształtu. Adaptery oddają OpenAI
  * (`prompt_tokens`/`completion_tokens`), Anthropic (`input_tokens`/`output_tokens`) albo już
- * znormalizowane pola — bierzemy pierwsze, które jest liczbą.
+ * znormalizowane pola - bierzemy pierwsze, które jest liczbą.
  */
 export function normalizeUsage(usage: unknown): NormalizedUsage | null {
     if (!usage || typeof usage !== 'object') return null;
@@ -190,17 +189,17 @@ export interface BuildPlanCounts {
 }
 
 /**
- * Buduje plan kroków z samych liczników — czysta funkcja, zero I/O.
+ * Buduje plan kroków z samych liczników - czysta funkcja, zero I/O.
  *
- * Reguły (spec S29 + doprecyzowanie architekta):
+ * Reguły:
  * - `dedup` planowany, gdy w `brain/` są ≥ 2 notatki (poniżej `proposeDedup` i tak nic nie zwróci).
- *   `dedupThreshold` jest metadanymi kroku — o tym, CZY w ogóle startować przebieg, decyduje caller.
- * - `l1_batch_k` — po jednej paczce na każde pełne `batchSize` sesji w `sessions/archive`
+ *   `dedupThreshold` jest metadanymi kroku - o tym, CZY w ogóle startować przebieg, decyduje caller.
+ * - `l1_batch_k` - po jednej paczce na każde pełne `batchSize` sesji w `sessions/archive`
  *   (60 sesji / 5 = 12 paczek; 3 sesje = 0 paczek).
  * - `l2` / `l3` planowane TYLKO wtedy, gdy hierarchia MOŻE się wydarzyć: L2 gdy istniejące L1
  *   plus nowe paczki dają ≥ batchSize, L3 analogicznie względem L2. Inaczej nie ma ich w planie
- *   w ogóle — user nie ma oglądać kroków, które i tak by się nie odpaliły.
- * - `l2`/`l3` startują jako `gated` (kłódka) — odblokowuje je dopiero rozstrzygnięcie L1.
+ *   w ogóle - user nie ma oglądać kroków, które i tak by się nie odpaliły.
+ * - `l2`/`l3` startują jako `gated` (kłódka) - odblokowuje je dopiero rozstrzygnięcie L1.
  *
  * @param counts.archiveCount - plików w `sessions/archive`
  * @param counts.batchSize - ile sesji wchodzi w jedną paczkę L1 (i ile L1 w L2 itd.)
@@ -240,7 +239,7 @@ export function buildPlan({
             status: STEP_STATUS.PENDING,
             meta: {
                 batchSize: size,
-                // Okno w posortowanej liście `sessions/archive` — deterministyczne, bez zgadywania.
+                // Okno w posortowanej liście `sessions/archive` - deterministyczne, bez zgadywania.
                 offset: (index - 1) * size,
             },
         });
@@ -284,7 +283,7 @@ export interface ConsolidationRunOptions {
 }
 
 export class ConsolidationRun {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare agentName: string;
     declare steps: ConsolidationStep[];
     declare startedAt: number;
@@ -364,7 +363,7 @@ export class ConsolidationRun {
 
     /**
      * Czy krok jest rozstrzygnięty W SENSIE GATINGU (done albo świadomie pominięty).
-     * `failed` NIE jest rozstrzygnięciem — czeka na „Ponów" albo „Pomiń" od usera.
+     * `failed` NIE jest rozstrzygnięciem - czeka na „Ponów" albo „Pomiń" od usera.
      */
     isResolved(stepId: string): boolean {
         const step = this.getStep(stepId);
@@ -373,7 +372,7 @@ export class ConsolidationRun {
 
     /**
      * Czy WSZYSTKIE paczki L1 są rozstrzygnięte (done/skipped). `failed` NIE liczy się jako
-     * rozstrzygnięte — L2 czeka, aż user kliknie „Ponów" albo „Pomiń" (L2 syntetyzuje TREŚĆ L1,
+     * rozstrzygnięte - L2 czeka, aż user kliknie „Ponów" albo „Pomiń" (L2 syntetyzuje TREŚĆ L1,
      * nie może powstać z połowy materiału).
      */
     allL1Resolved(): boolean {
@@ -430,7 +429,7 @@ export class ConsolidationRun {
         return step;
     }
 
-    /** Propozycja gotowa — czeka na usera. NIC nie zostało zaaplikowane. */
+    /** Propozycja gotowa - czeka na usera. NIC nie zostało zaaplikowane. */
     stepProposalReady(stepId: string, result?: ConsolidationStepResult | null): ConsolidationStep {
         const step = this._require(stepId);
         this._transition(step, STEP_STATUS.RUNNING, STEP_STATUS.AWAITING_REVIEW);
@@ -441,9 +440,9 @@ export class ConsolidationRun {
     }
 
     /**
-     * User zdecydował — zaczynamy zapisywać na dysk.
+     * User zdecydował - zaczynamy zapisywać na dysk.
      *
-     * S29 Z4: legalne także z `failed` — gdy padł SAM ZAPIS (np. chwilowy błąd dysku), „Ponów"
+     * Legalne także z `failed` - gdy padł SAM ZAPIS (np. chwilowy błąd dysku), „Ponów"
      * w modalu powtarza ten sam zapis z tą samą decyzją usera. Bez tego jedyną drogą byłaby
      * ponowna GENERACJA propozycji: kolejny strzał do LLM i edycje usera do kosza.
      */
@@ -467,7 +466,7 @@ export class ConsolidationRun {
         return step;
     }
 
-    /** Krok padł (błąd inny niż zwis — bez auto-retry, zgodnie z decyzją J w specu). */
+    /** Krok padł (błąd inny niż zwis - bez auto-retry, zgodnie z decyzją J w specu). */
     failStep(stepId: string, error?: unknown): ConsolidationStep {
         const step = this._require(stepId);
         this._transition(step, [STEP_STATUS.RUNNING, STEP_STATUS.APPLYING, STEP_STATUS.AWAITING_REVIEW], STEP_STATUS.FAILED);
@@ -505,7 +504,7 @@ export class ConsolidationRun {
     }
 
     /**
-     * Stream zwisł. Polityka (decyzja Kuby 4): pierwszy raz ponawiamy automatycznie TEN SAM
+     * Stream zwisł. Polityka: pierwszy raz ponawiamy automatycznie TEN SAM
      * strzał, drugi raz krok leci jako `failed` (z przyciskiem „Ponów" w UI).
      *
      */

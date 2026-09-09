@@ -70,27 +70,26 @@ export class AgentManager {
         this.plugin = plugin;
         this.loader = new AgentLoader(vault);
         this.skillLoader = new SkillLoader(vault);
-        // E2.9 A2: biblioteka typów artefaktów żywych (wzór skillLoader — owner = AgentManager).
+        // Biblioteka typów artefaktów żywych (wzór skillLoader - owner = AgentManager).
         this.artifactTypeLoader = new ArtifactTypeLoader(vault);
         this.subAgentLoader = new SubAgentLoader(vault);
-        // S27 Z1: magazyny SZABLONÓW (Zaplecze = katalog form odlewniczych, nie żywych bytów).
-        // Owner jak przy skillLoader/subAgentLoader — jedno miejsce instancjonowania.
+        // Magazyny SZABLONÓW (Zaplecze = katalog form odlewniczych, nie żywych bytów).
+        // Owner jak przy skillLoader/subAgentLoader - jedno miejsce instancjonowania.
         this.skillTemplateStore = new SkillTemplateStore(vault);
         this.subAgentTemplateStore = new SubAgentTemplateStore(vault);
         this.playbookManager = new PlaybookManager(vault);
-        // E1.2 kill-switch: only instantiate the communicator when enabled (default false).
+        // Kill-switch: only instantiate the communicator when enabled (default false).
         // When null, every komunikatorManager callsite below is guarded with optional chaining.
         this.komunikatorManager = isKomunikatorEnabled(settings)
             ? new (KomunikatorManager as unknown as new (...args: RuntimeDependency[]) => RuntimeDependency)(vault, this)
             : null;
-        // W8 follow-up (AUD-wydajnosc-028/058/101, review koordynatora 2026-09-02): kesz
-        // nagłówków skrzynki w KomunikatorManager widzi TYLKO mutacje przez metody managera —
+        // Kesz nagłówków skrzynki w KomunikatorManager widzi TYLKO mutacje przez metody managera -
         // zapisy Z ZEWNĄTRZ (sesja Claude Code piszącą wprost na dysk przez kontrakt /agent,
         // sync Google Drive między urządzeniami, obsidian-git pull) go omijają. `attachVaultEvents`
         // dopina nasłuch create/modify/delete/rename na SKRZYNKACH; `plugin.registerEvent`
-        // (Obsidian Component) daje właściwe sprzątanie przy unload — wzór
+        // (Obsidian Component) daje właściwe sprzątanie przy unload - wzór
         // `VaultIndexer._registerHooks` w modules/embedding/VaultIndexer.ts. Bez `plugin`
-        // (np. część testów konstruuje AgentManager bez niego) po prostu nie podpinamy —
+        // (np. część testów konstruuje AgentManager bez niego) po prostu nie podpinamy -
         // TTL w KomunikatorManager (5s) zostaje jedyną siatką bezpieczeństwa.
         this.komunikatorManager?.attachVaultEvents?.(
             this.plugin?.registerEvent ? (ref: unknown) => this.plugin.registerEvent(ref) : undefined,
@@ -151,8 +150,8 @@ export class AgentManager {
                     await this.subAgentLoader.loadAllSubAgents();
                     log.debug('AgentManager', `Sub-agents: ${this.subAgentLoader.cache?.size || 0} załadowanych`);
                 })(),
-                // E3.5: po loadAll seed fabrycznych szablonów Deep Research (RAZ, marker;
-                // kasacja usera szanowana — patrz factoryTemplates.js).
+                // Po loadAll seed fabrycznych szablonów Deep Research (RAZ, marker;
+                // kasacja usera szanowana - patrz factoryTemplates.js).
                 (async () => {
                     await this.skillTemplateStore.loadAll();
                     await this.subAgentTemplateStore.loadAll();
@@ -173,10 +172,9 @@ export class AgentManager {
             ]);
 
             if (!this._unwatchAgents) {
-                // AUD-dead-code-068 (fabryka kasacji S1, 2026-09-02): emit `agents:changed`
-                // skasowany — grep po calym repo (core/modules/src/config/utils/harness, w
-                // tym testy) nie znalazl ani jednego sluchacza tej nazwy; wszyscy filtruja po
-                // `agents:reloaded`, ktore `reload()` i tak emituje linijke wyzej.
+                // emit `agents:changed` skasowany - grep po calym repo (core/modules/src/config/
+                // utils/harness, w tym testy) nie znalazl ani jednego sluchacza tej nazwy; wszyscy
+                // filtruja po `agents:reloaded`, ktore `reload()` i tak emituje linijke wyzej.
                 this._unwatchAgents = this.loader.watchAgents(() => {
                     void this.reload();
                 });
@@ -203,8 +201,8 @@ export class AgentManager {
         return Array.from(this.agents.values());
     }
 
-    // ─── Komunikator: widoczność per agent (S28 D6) ───
-    // AgentManager jest jedyną bramką dla narzędzi i UI — dzięki temu `modules/tools/`
+    // ─── Komunikator: widoczność per agent ───
+    // AgentManager jest jedyną bramką dla narzędzi i UI - dzięki temu `modules/tools/`
     // nie musi importować komunikatora, a filtr ducha ma JEDNO źródło prawdy
     // (`modules/komunikator/visibility.js`).
 
@@ -230,7 +228,7 @@ export class AgentManager {
 
     /**
      * Znajdź WIDOCZNEGO adresata po nazwie (dokładnie, potem bez wielkości liter).
-     * Agent-duch nigdy się tu nie pojawi — caller nie odróżni go od literówki.
+     * Agent-duch nigdy się tu nie pojawi - caller nie odróżni go od literówki.
      * @param {string} name
      * @returns {Agent|null}
      */
@@ -239,8 +237,8 @@ export class AgentManager {
     }
 
     /**
-     * Ping skrzynki dla promptu (S28 D4): ile nieprzeczytanych przez AI + od kogo.
-     * Zwraca `null`, gdy komunikator śpi albo agent w nim nie uczestniczy — wtedy
+     * Ping skrzynki dla promptu: ile nieprzeczytanych przez AI + od kogo.
+     * Zwraca `null`, gdy komunikator śpi albo agent w nim nie uczestniczy - wtedy
      * prompt nie dostaje ani jednej linijki więcej.
      * @param {Agent} agent
      * @returns {Promise<{count: number, senders: string[]}|null>}
@@ -285,7 +283,7 @@ export class AgentManager {
         this.activeAgent = agent;
         this.activeAgent.lastActivity = Date.now();
 
-        // Invalidate model cache — new agent may use a different model
+        // Invalidate model cache - new agent may use a different model
         clearModelCache();
 
         log.info('AgentManager', `agent:switched: ${previousAgent?.name ?? '(none)'} → ${agent.name}`);
@@ -333,11 +331,10 @@ export class AgentManager {
                 : null,
         });
 
-        // Werdykt właściciela 2026-08-27 (AUD-docs-051): Cancel/X/Esc na modalu review
-        // ma NAPRAWDĘ anulować — zero automatycznego powtórzenia w trybie non-interactive.
-        // Cała logika decyzyjna (needsMigration → run() DOKŁADNIE RAZ → notyfikacja przy
-        // odrzuceniu) siedzi w obsidian-free `runMigrationReview`, żeby dało się ją
-        // przetestować prawdziwym wykonaniem — patrz `migrationReviewFlow.ts`.
+        // Cancel/X/Esc na modalu review ma NAPRAWDĘ anulować - zero automatycznego powtórzenia
+        // w trybie non-interactive. Cała logika decyzyjna (needsMigration → run() DOKŁADNIE RAZ →
+        // notyfikacja przy odrzuceniu) siedzi w obsidian-free `runMigrationReview`, żeby dało się
+        // ją przetestować prawdziwym wykonaniem - patrz `migrationReviewFlow.ts`.
         await runMigrationReview(migration, agent.name, Boolean(this.plugin?.app), (name) => {
             log.warn('AgentManager', `Memory v3 migration deferred for ${name}: user cancelled review modal (no fallback applied; will prompt again at next startup)`);
             new Notice(t('modal.memory_migration.deferred', { agent: name }));
@@ -360,11 +357,10 @@ export class AgentManager {
     }
 
     /**
-     * Dokleja override `prompt_append` do bazowego prompta skilla/sub-agenta, wspólny separator
-     * (AUD-code-review-088) — `resolveSkillConfig` i `resolveSubAgentConfig` miały tu bajt-w-bajt
-     * ten sam blok (łącznie z literałem stringa separatora), poza resztą metody, która się
-     * realnie różni (skille dostają `model`+`pre_question_defaults`, suby `extra_tools`+`scope`+
-     * `max_iterations`).
+     * Dokleja override `prompt_append` do bazowego prompta skilla/sub-agenta, wspólny separator -
+     * `resolveSkillConfig` i `resolveSubAgentConfig` miały tu bajt-w-bajt ten sam blok (łącznie
+     * z literałem stringa separatora), poza resztą metody, która się realnie różni (skille
+     * dostają `model`+`pre_question_defaults`, suby `extra_tools`+`scope`+`max_iterations`).
      * @param {string|undefined} basePrompt - `base.prompt` przed override'em
      * @param {string} agentName - nazwa agenta (do nagłówka separatora)
      * @param {string|undefined} promptAppend - `ovr.prompt_append`
@@ -406,7 +402,7 @@ export class AgentManager {
     }
 
     /**
-     * Typy artefaktów widoczne dla agenta (E2.9 A2). Brak/puste `artifact_types` → tylko `plan`.
+     * Typy artefaktów widoczne dla agenta. Brak/puste `artifact_types` → tylko `plan`.
      * Wzór `getSkillsForAgent`. Zwraca obiekty typów z `ArtifactTypeLoader`.
      * @param {Object} [targetAgent] - agent (default: aktywny)
      * @returns {Object[]}
@@ -433,12 +429,12 @@ export class AgentManager {
     }
 
     /**
-     * Demontaż managera (AUD-bledy-035) — wołane z `onunload` pluginu.
+     * Demontaż managera - wołane z `onunload` pluginu.
      *
      * `watchAgents` wiesza na vaulcie trzy nasłuchy (`modify`/`create`/`delete`) POZA
      * `plugin.registerEvent`, a uchwyt odpięcia (`_unwatchAgents`) nie miał do tej pory ani
      * jednego wołacza. Po wyłączeniu pluginu każdy zapis pliku agenta odpalał `reload()` →
-     * `initialize()` MARTWEJ instancji — a ta dopisuje pliki do vaulta (starter playbooki,
+     * `initialize()` MARTWEJ instancji - a ta dopisuje pliki do vaulta (starter playbooki,
      * wbudowane typy artefaktów, folder skrzynki) i emituje `agents:reloaded`. Cykl
      * wyłącz/włącz mnożył to razy liczba przeładowań. Idempotentne.
      */
@@ -483,9 +479,9 @@ export class AgentManager {
         return merged;
     }
 
-    // K12 (2026-08-23, ogon K4): `saveActiveSession()` WYCIĘTA — nie miała ani jednego
-    // wołacza. Czat zapisuje sesję wprost przez `memory.saveSession(...)`
-    // (`modules/chat/chat/chat_session.ts`), więc ten przelot był martwym pośrednikiem.
+    // `saveActiveSession()` WYCIĘTA - nie miała ani jednego wołacza. Czat zapisuje sesję
+    // wprost przez `memory.saveSession(...)` (`modules/chat/chat/chat_session.ts`), więc
+    // ten przelot był martwym pośrednikiem.
 
     /**
      * Build enriched context for PromptBuilder.
@@ -498,9 +494,9 @@ export class AgentManager {
         const agent = targetAgent || this.activeAgent;
         if (!agent) return {};
 
-        // Skills metadata for the prompt index (D17): name/description/category + icon +
+        // Skills metadata for the prompt index: name/description/category + icon +
         // disableModelInvocation (manual-only skille lądują na osobnej liście) + path/slug
-        // (model dostaje gotową ścieżkę SKILL.md do read() — pełny przepis przez narzędzie).
+        // (model dostaje gotową ścieżkę SKILL.md do read() - pełny przepis przez narzędzie).
         const skills = this.skillLoader.getSkillsForAgent(agent.skills)
             .filter((s: RuntimeDependency) => s.enabled !== false)
             .map((s: RuntimeDependency) => ({
@@ -513,11 +509,11 @@ export class AgentManager {
                 path: s.path,
             }));
 
-        // E2.9 A2: typy artefaktów podpięte do agenta (brak/puste → tylko `plan`). Dane gotowe
-        // dla FAZY B (indeks typów w prompcie); FAZA A tylko je udostępnia w kontekście.
+        // Typy artefaktów podpięte do agenta (brak/puste → tylko `plan`). Dane gotowe
+        // dla indeksu typów w prompcie; tu tylko udostępniane w kontekście.
         const artifactTypes = this.getArtifactTypesForAgent(agent);
 
-        // E2.9 FAZA B (B3): artefakty agenta W TOKU (status ≠ zamkniety) — do indeksu w prompcie.
+        // Artefakty agenta W TOKU (status ≠ zamkniety) - do indeksu w prompcie.
         // Śledzenie po frontmatterze (metadataCache), synchronicznie; brak store'a/cache → pusto.
         let artifactList = [];
         try {
@@ -529,13 +525,13 @@ export class AgentManager {
         } catch { /* store niegotowy / brak cache → pusta lista */ }
 
         // Agent list for communicator (name + description for DT injection)
-        // K11 (AUD-security-047): TEN SAM filtr duchów, którego używa poczta. Blok `komunikacja`
-        // w prompcie jest bramkowany po `kom_send`/`agent_delegate`, a lista szła z `getAllAgents()`,
-        // więc agent z `komunikator_visible:false` trafiał tam z nazwą I opisem do każdego agenta
-        // z pocztą — mimo że `kom_send` do niego odbija się jak od literówki.
+        // TEN SAM filtr duchów, którego używa poczta. Blok `komunikacja` w prompcie jest
+        // bramkowany po `kom_send`/`agent_delegate`, a lista szła z `getAllAgents()`, więc agent
+        // z `komunikator_visible:false` trafiał tam z nazwą I opisem do każdego agenta z pocztą -
+        // mimo że `kom_send` do niego odbija się jak od literówki.
         const agentList = this.listKomunikatorAgents().map((a: Agent) => ({ name: a.name, description: a.description || '' }));
 
-        // Sub-agent lists (unified — from _subAgents)
+        // Sub-agent lists (unified - from _subAgents)
         const allSubAgentNames = agent.getAllSubAgentNames?.() || [];
         const subAgentList: Array<{ name: string; description: string; role: string }> = allSubAgentNames
             .map(name => {
@@ -558,26 +554,26 @@ export class AgentManager {
         // Disabled prompt sections from settings
         const disabledPromptSections = pkm.disabledPromptSections || [];
 
-        // Global prompt overrides from settings (v2.1 — user-editable sections)
+        // Global prompt overrides from settings (user-editable sections)
         const promptDefaults = pkm.promptDefaults || {};
 
-        // E2.8 A3: rola rozpuszczona — brak roleData/roleBinding w kontekście promptu.
+        // Rola rozpuszczona - brak roleData/roleBinding w kontekście promptu.
 
-        // Delegate assignments with DT overrides / behavior_inject (sesja 46c)
+        // Delegate assignments with DT overrides / behavior_inject
         const delegateAssignments = (agent.activeSubAgents || [])
             .filter(s => (s.overrides?.dt_covered_groups?.length as number) > 0 || s.overrides?.behavior_inject)
             .map(s => ({ ...s, delegateType: s.role === 'strategist' ? 'strategist' : 'researcher' }));
 
-        // Unified delegate list (E2.3 D21: tryby pracy usunięte — martwa zmienna workMode wycięta).
+        // Unified delegate list (tryby pracy usunięte - martwa zmienna workMode wycięta).
         const delegateList = agent.getActiveDelegates().map(d => {
             const config = this.subAgentLoader.getSubAgent(d.name);
             return { ...d, description: config?.description || '' };
         });
         const hasDelegates = delegateList.length > 0;
 
-        // D14: nazwy narzędzi realnie dostępnych agentowi (filterByAgent = built-in wg whitelisty
+        // Nazwy narzędzi realnie dostępnych agentowi (filterByAgent = built-in wg whitelisty
         // mcp_servers + user serwery). Chudy rdzeń drzewa renderuje instrukcję per-tool TYLKO gdy
-        // narzędzie tu jest — prompt przestaje kłamać o kom_*/narzędziach, których agent nie ma.
+        // narzędzie tu jest - prompt przestaje kłamać o kom_*/narzędziach, których agent nie ma.
         // Undefined (brak registry, np. test/preview) → PromptBuilder nie filtruje (pełny podgląd).
         let availableToolNames;
         try {
@@ -589,7 +585,7 @@ export class AgentManager {
             app: this.plugin?.app,
             vaultName: this.vault?.getName?.() || 'Unknown Vault',
             currentDate: new Date().toLocaleDateString(getDateLocale()),
-            // D14: furtka rozszerzonych reguł (dla słabszych modeli) — domyślnie OFF (chudo).
+            // Furtka rozszerzonych reguł (dla słabszych modeli) - domyślnie OFF (chudo).
             extendedPromptRules: pkm.extendedPromptRules === true,
             skills,
             artifactTypes,
@@ -604,7 +600,7 @@ export class AgentManager {
             hasDelegates,
             defaultPrepName,
             promptDefaults,
-            // E2.8 B1: named folder groups — PromptBuilder._buildEnvironment expands `{group}`
+            // Named folder groups - PromptBuilder._buildEnvironment expands `{group}`
             // references in focus_folders to their concrete folders at build time.
             vaultGroups: pkm.vaultGroups || [],
             ...(disabledPromptSections.length > 0 && { disabledPromptSections }),
@@ -615,10 +611,10 @@ export class AgentManager {
     /**
      * Get system prompt with memory context for a GIVEN agent (default: the active one).
      *
-     * K18 (AUD-security-112): czat podaje tu agenta-WŁAŚCICIELA tury. Budowa tego promptu
-     * potrafi trwać sekundy (brain.md, sesja, mapa vaulta, ping skrzynki) — a przełączenie
-     * zakładki w tym oknie przestawia `this.activeAgent`. Dopóki funkcja czytała wyłącznie
-     * lustro, prompt zaczynał się u agenta A i kończył u B: persona jednego, pamięć drugiego.
+     * Czat podaje tu agenta-WŁAŚCICIELA tury. Budowa tego promptu potrafi trwać sekundy
+     * (brain.md, sesja, mapa vaulta, ping skrzynki) - a przełączenie zakładki w tym oknie
+     * przestawia `this.activeAgent`. Dopóki funkcja czytała wyłącznie lustro, prompt zaczynał
+     * się u agenta A i kończył u B: persona jednego, pamięć drugiego.
      * Brak argumentu = dotychczasowe zachowanie (aktywny agent).
      *
      * @param {Object} [context] - Additional context
@@ -634,7 +630,7 @@ export class AgentManager {
         const enrichedContext = this._buildBaseContext(target);
 
         // Memory context (unless disabled in settings OR agent has memory permission off)
-        // K18: pamięć adresowana po NAZWIE właściciela (fail-closed), nie przez `getActiveMemory()`.
+        // Pamięć adresowana po NAZWIE właściciela (fail-closed), nie przez `getActiveMemory()`.
         const memory = this.getAgentMemory(target.name);
         const agentMemoryEnabled = target?.permissions?.memory !== false;
         const injectMemory = this.settings?.pkmAssistant?.injectMemoryToPrompt !== false && agentMemoryEnabled;
@@ -646,7 +642,7 @@ export class AgentManager {
             }
         }
 
-        // Vault map lives in AgentManager after S08 Z1 (kontekst projektowy OUT w S28 D1).
+        // Vault map lives in AgentManager (kontekst projektowy OUT).
         try {
             if (target.focusFolders?.length > 0) {
                 enrichedContext.vaultMapDescriptions = await this.getVaultMapDescriptions();
@@ -655,7 +651,7 @@ export class AgentManager {
             log.warn('AgentManager', 'Agent prompt context failed:', e);
         }
 
-        // S28 (D4): ping skrzynki — sama liczba nieprzeczytanych przez AI + nadawcy, bez treści.
+        // Ping skrzynki - sama liczba nieprzeczytanych przez AI + nadawcy, bez treści.
         try {
             enrichedContext.inboxPing = await this.getInboxPing(target);
         } catch (e) {
@@ -665,7 +661,7 @@ export class AgentManager {
         // Merge caller-provided context (overrides allowed)
         Object.assign(enrichedContext, context);
 
-        // E2.9 FAZA B (B3): AKTYWNY artefakt tej rozmowy (id per-tab z ChatView). Świeży chudy JSON
+        // AKTYWNY artefakt tej rozmowy (id per-tab z ChatView). Świeży chudy JSON
         // wstrzykiwany do promptu (PromptBuilder → buildActiveArtifactBlock). Brak id / błąd → pomiń.
         if (enrichedContext.activeArtifactId && this.plugin?.artifactStore) {
             try {
@@ -679,7 +675,7 @@ export class AgentManager {
     }
 
     /**
-     * Get system prompt for active agent (sync — no memory/projects/inbox)
+     * Get system prompt for active agent (sync - no memory/projects/inbox)
      * @param {Object} [context] - Additional context
      * @returns {string}
      */
@@ -711,13 +707,13 @@ export class AgentManager {
         const memEnabled = agent.permissions?.memory !== false;
         if (memEnabled) {
             try {
-                // K18/AUD-code-review-028: pamięć adresowana po NAZWIE oglądanego agenta
-                // (fail-closed), NIE `getActiveMemory()` — ten sam wzór co `turnOwner` i
+                // Pamięć adresowana po NAZWIE oglądanego agenta (fail-closed), NIE
+                // `getActiveMemory()` - ten sam wzór co `turnOwner` i
                 // `getActiveSystemPromptWithMemory` powyżej. Dawny `|| this.getActiveMemory()`
                 // podstawiał pamięć AKTYWNEGO agenta, gdy `agentMemories` nie miało jeszcze
-                // wpisu dla oglądanego (np. padnięta inicjalizacja pamięci w `initialize()` —
+                // wpisu dla oglądanego (np. padnięta inicjalizacja pamięci w `initialize()` -
                 // agent jest w `this.agents`, ale bez wpisu w `agentMemories`). Inspektor
-                // promptu i guziki „Podgląd" / „Kopiuj" w `profile_prompt.ts` pokazywały wtedy
+                // promptu i guziki "Podgląd" / "Kopiuj" w `profile_prompt.ts` pokazywały wtedy
                 // brain.md CUDZEGO agenta. Brak pamięci = brak sekcji pamięci w podglądzie.
                 const memory = this.getAgentMemory(agent.name);
                 if (memory) {
@@ -740,13 +736,13 @@ export class AgentManager {
      * @returns {Promise<Agent>}
      */
     async createAgent(config: ConstructorParameters<typeof Agent>[0]) {
-        // E2.8 C1: świeży agent dostaje CZYSTY default osi narzędziowej (vault+memory+core ON,
-        // reszta grup OFF) — bez migracji zawężającej po dawnych uprawnieniach edit_notes itp.
+        // Świeży agent dostaje CZYSTY default osi narzędziowej (vault+memory+core ON,
+        // reszta grup OFF) - bez migracji zawężającej po dawnych uprawnieniach edit_notes itp.
         // Migracja (computeDisabledToolsFromLegacy) dotyczy tylko WCZYTYWANYCH starych YAML-i.
         if (!Array.isArray(config.disabled_tools)) {
             config = { ...config, disabled_tools: defaultDisabledTools() };
         }
-        // E2.8 C7: świeży agent startuje w trybie „Pełen dostęp" (guidance_mode:true) — makieta.
+        // Świeży agent startuje w trybie "Pełen dostęp" (guidance_mode:true) - makieta.
         // Global DEFAULT_PERMISSIONS.guidance_mode zostaje false (zero regresji dla istniejących
         // agentów wczytywanych z YAML); nowość dotyczy tylko tworzonych tutaj.
         if (!config.default_permissions || config.default_permissions.guidance_mode === undefined) {
@@ -754,7 +750,7 @@ export class AgentManager {
         }
         const agent = new Agent(config);
 
-        // D18: brak ról systemowych — nowy agent dostaje własny custom prep sub-agent
+        // Brak ról systemowych - nowy agent dostaje własny custom prep sub-agent
         // (każdy asystent buduje własnych subów; do delegacji ad-hoc jest generyczny worker).
         if (agent._subAgents.length === 0) {
             try {
@@ -784,15 +780,15 @@ export class AgentManager {
     }
 
     /**
-     * K5 (AUD-code-review-024, CRITICAL): jedyny właściciel operacji zmiany nazwy agenta.
-     * Deleguje kolizję/YAML/folder pamięci do `renameAgentOnDisk` (czysty, testowalny — patrz
-     * `renameAgentFlow.ts`), a tutaj żyje TYLKO to, co potrzebuje żywego stanu klasy: przekluczowanie
-     * `agents`/`agentMemories` i reinicjalizacja `AgentMemory` pod nowym kluczem
-     * (folder na dysku już przeniesiony — świeża instancja po prostu wskazuje nowe ścieżki).
+     * Jedyny właściciel operacji zmiany nazwy agenta. Deleguje kolizję/YAML/folder pamięci
+     * do `renameAgentOnDisk` (czysty, testowalny - patrz `renameAgentFlow.ts`), a tutaj żyje
+     * TYLKO to, co potrzebuje żywego stanu klasy: przekluczowanie `agents`/`agentMemories`
+     * i reinicjalizacja `AgentMemory` pod nowym kluczem (folder na dysku już przeniesiony -
+     * świeża instancja po prostu wskazuje nowe ścieżki).
      *
      * @param {string} oldName - obecna nazwa agenta
      * @param {string} newName - żądana nowa nazwa
-     * @returns {Promise<boolean>} `false` = ODMOWA (kolizja/built-in/pad) — Notice już pokazany,
+     * @returns {Promise<boolean>} `false` = ODMOWA (kolizja/built-in/pad) - Notice już pokazany,
      *   zero zmian na dysku i w mapach.
      */
     async renameAgent(oldName: string, newName: string): Promise<boolean> {
@@ -803,7 +799,7 @@ export class AgentManager {
         }
 
         const trimmed = (newName || '').trim();
-        if (trimmed === agent.name) return true; // no-op — nic się nie zmieniło
+        if (trimmed === agent.name) return true; // no-op - nic się nie zmieniło
 
         const result = await renameAgentOnDisk(agent, newName, {
             vaultAdapter: this.vault.adapter,
@@ -819,12 +815,12 @@ export class AgentManager {
                     log.warn('AgentManager', `renameAgent: „${oldName}" jest agentem wbudowanym — zmiana nazwy zablokowana.`);
                     break;
                 case 'empty_name':
-                    // AUD-dead-code-135 (INFO): dziś nieosiągalne przez jedynego wołacza
-                    // (`updateAgent` odsiewa `requestedName` puste/samą-białą-spacją PRZED
-                    // wywołaniem `renameAgent`, a `renameAgent` sam robi wcześniej `trimmed
-                    // === agent.name` no-op). Gałąź zostaje — `reason` to część kontraktu
-                    // `renameAgentOnDisk` (patrz `renameAgentFlow.test.ts`), więc pełny switch
-                    // jest tańszy niż ryzyko cichej ciszy przy przyszłym drugim wołaczu.
+                    // Dziś nieosiągalne przez jedynego wołacza (`updateAgent` odsiewa
+                    // `requestedName` puste/samą-białą-spacją PRZED wywołaniem `renameAgent`,
+                    // a `renameAgent` sam robi wcześniej `trimmed === agent.name` no-op). Gałąź
+                    // zostaje - `reason` to część kontraktu `renameAgentOnDisk` (patrz
+                    // `renameAgentFlow.test.ts`), więc pełny switch jest tańszy niż ryzyko
+                    // cichej ciszy przy przyszłym drugim wołaczu.
                     new Notice(t('profile.advanced.name_required'));
                     break;
                 case 'name_collision':
@@ -847,11 +843,11 @@ export class AgentManager {
             return false;
         }
 
-        // Przekluczowanie map runtime'u — `agent` to ta sama instancja, `agent.name` już = nowa nazwa.
+        // Przekluczowanie map runtime'u - `agent` to ta sama instancja, `agent.name` już = nowa nazwa.
         this.agents.delete(oldName);
         this.agents.set(agent.name, agent);
 
-        // Folder pamięci już przeniesiony na dysku — świeża instancja AgentMemory wskazuje
+        // Folder pamięci już przeniesiony na dysku - świeża instancja AgentMemory wskazuje
         // od razu nowe ścieżki (wzór `reload()`: zero ręcznego przepinania pól wewnętrznych).
         this.agentMemories.delete(oldName);
         try {
@@ -861,7 +857,7 @@ export class AgentManager {
             log.error('AgentManager', `renameAgent: reinicjalizacja pamięci dla „${agent.name}" nie powiodła się:`, e);
         }
 
-        // F02 punkt 6a: skrzynka komunikatora jest BEST-EFFORT (patrz `renameAgentFlow.ts`) —
+        // Skrzynka komunikatora jest BEST-EFFORT (patrz `renameAgentFlow.ts`) -
         // pad przenosin nie cofa udanego rename'u, tylko melduje się głośno w logu.
         if (result.inboxMoveFailed) {
             log.warn('AgentManager', `renameAgent: skrzynka komunikatora „${oldName}"→„${agent.name}" nie została w pełni przeniesiona — stara skrzynka może zostać osierocona pod dawnym slugiem.`);
@@ -882,9 +878,9 @@ export class AgentManager {
         const agent = this.agents.get(name);
         if (!agent) return false;
 
-        // K5 (AUD-code-review-024): zmiana nazwy ma jednego właściciela (`renameAgent`) —
-        // wydzielona z reszty pól, bo kolizja/pad przenosin musi przerwać CAŁY zapis (zero
-        // połowicznego stanu), nie tylko pominąć pole `name`.
+        // Zmiana nazwy ma jednego właściciela (`renameAgent`) - wydzielona z reszty pól,
+        // bo kolizja/pad przenosin musi przerwać CAŁY zapis (zero połowicznego stanu),
+        // nie tylko pominąć pole `name`.
         const requestedName = typeof updates.name === 'string' ? updates.name.trim() : undefined;
         if (requestedName && requestedName !== agent.name) {
             const renamed = await this.renameAgent(agent.name, requestedName);
@@ -894,7 +890,7 @@ export class AgentManager {
         const { name: _renamedName, ...rest } = updates;
         agent.update(rest as Parameters<Agent['update']>[0]);
 
-        // Persist changes (agent.name może już być NOWĄ nazwą po renameAgent powyżej —
+        // Persist changes (agent.name może już być NOWĄ nazwą po renameAgent powyżej -
         // saveAgent/saveBuiltInOverrides liczą ścieżkę z aktualnej wartości).
         if (agent.isBuiltIn) {
             await this.loader.saveBuiltInOverrides(agent);
@@ -916,7 +912,7 @@ export class AgentManager {
         const memory = this.agentMemories.get(name);
         if (!agent) return null;
 
-        // E2.8 C3: liczniki dla zakładki Przegląd (Memory v3: sesje w active/archive, notatki w brain/).
+        // Liczniki dla zakładki Przegląd (Memory v3: sesje w active/archive, notatki w brain/).
         let activeSessionCount = 0, archiveCount = 0, l1Count = 0, l2Count = 0;
         let brainSize = 0, brainNoteCount = 0;
 
@@ -1028,13 +1024,13 @@ export class AgentManager {
     async deleteAgent(name: string) {
         const agent = this.agents.get(name);
         if (!agent) return false;
-        // E2.8 A6 (S25): twardy guard — agent wbudowany (Jaskier) jest nieusuwalny (defense in depth).
+        // Twardy guard - agent wbudowany (Jaskier) jest nieusuwalny (defense in depth).
         if (agent.isBuiltIn) {
             log.warn('AgentManager', `deleteAgent odmówiony: „${name}" jest agentem wbudowanym (nieusuwalny).`);
             return false;
         }
 
-        // Delete file (custom YAML) — built-in agents are already rejected above, so no
+        // Delete file (custom YAML) - built-in agents are already rejected above, so no
         // agent reaching here can have an overrides file to clean up.
         if (agent.filePath) {
             await this.loader.deleteAgent(agent);
@@ -1107,7 +1103,7 @@ export class AgentManager {
         return this.vaultMap.writeVaultMap(content);
     }
 
-    // S28 (D1): `buildPromptContext` / `buildSubAgentContext` skasowane razem z Project Hubem —
+    // `buildPromptContext` / `buildSubAgentContext` skasowane razem z Project Hubem -
     // wstrzykiwały do promptu listę projektów i zadań z Komunikatora v2. VaultMap NIETKNIĘTY.
 
     /**

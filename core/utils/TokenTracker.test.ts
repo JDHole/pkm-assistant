@@ -32,9 +32,8 @@ test('meta.estimated=true ustawia flagę per rola (hasEstimates)', t => {
     t.true(tt.getBreakdown()[0].estimated);
 });
 
-// AUD-dead-code-119 (fabryka kasacji S1, 2026-09-02): rola tu jest dowolna, dołożona
-// w runtime — dawniej użyta 'master' sugerowała, że to jeden z kubełków startowych (już nie
-// jest, patrz test niżej „zostaje 2 kubełki startowe").
+// Rola tu jest dowolna, dołożona w runtime - 'master' nie jest jednym z kubełków startowych
+// (patrz test niżej „zostaje 2 kubełki startowe").
 test('flaga estimated jest „sticky" per rola — jeden estymowany wpis wystarczy', t => {
     const tt = new TokenTracker();
     tt.record('other', 100, 50);                       // realne
@@ -72,8 +71,8 @@ test('rola nieznana z góry zakłada własny kubełek (nie ginie w agregacie)', 
     t.false(tt.hasEstimates('main'), 'flaga nie rozlewa się na inne role');
 });
 
-// Z6 (D10): sub-agenci raportują role `researcher` — wcześniej `if (this.totals[role])`
-// wycinało ją cicho i zakładka „Sub-agent" w Token Viewerze pokazywała wieczne 0.
+// Sub-agenci raportują role `researcher` — bez sumowania po nieznanych rolach
+// zakładka „Sub-agent" w Token Viewerze pokazywałaby wieczne 0.
 test('rola researcher sumuje się przez wiele wpisów', t => {
     const tt = new TokenTracker();
     tt.record('researcher', 100, 40);
@@ -96,8 +95,7 @@ test('flaga estimated działa dla roli researcher', t => {
     t.is(tt.getSessionTotal().byRole.researcher.input, 90);
 });
 
-// AUD-dead-code-119 (fabryka kasacji S1, 2026-09-02): kubełek startowy 'master' skasowany —
-// zostają 2 (main, minion), nie 3.
+// Kubełek startowy 'master' skasowany - zostają 2 (main, minion), nie 3.
 test('clear() usuwa role dołożone w runtime, zostawia 2 kubełki startowe', t => {
     const tt = new TokenTracker();
     tt.record('researcher', 30, 10, { estimated: true });

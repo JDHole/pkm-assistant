@@ -1,7 +1,7 @@
 /**
  * adaMigration — meldunek z migracji `text-embedding-ada-002` → `text-embedding-3-small`.
  *
- * WHY (AUD-bledy-040): `src/main.ts` podmieniał klucz modelu w pamięci, pokazywał
+ * WHY: `src/main.ts` podmieniał klucz modelu w pamięci, pokazywał
  * 15-sekundowy Notice „Przełączam na 3-small. Wymagany reindex", a DOPIERO POTEM próbował
  * zapisać ustawienia — w `try { save() } catch (_) {}`. Gdy zapis padał (zajęty plik, dysk
  * sieciowy), nie zostawało ani logu, ani drugiego komunikatu: user szedł robić reindex pod

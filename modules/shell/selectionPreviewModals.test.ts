@@ -1,9 +1,9 @@
 /**
- * AUD-code-review-099: `InlineCommentModal.ts` i `SendToAgentModal.ts` importują `obsidian`
+ * `InlineCommentModal.ts` i `SendToAgentModal.ts` importują `obsidian`
  * (Modal, Notice), więc AVA nie może ich zaimportować wprost (wzór `turnOwner.test.ts` w
- * modules/chat) — strażnik czyta ŹRÓDŁO. Oba modale pokazywały podgląd zaznaczonego tekstu
- * przez identyczny, dwukrotnie skopiowany blok obcinania (`text.length > 500 ? slice(0,500)+'...'
- * : text`); dziś mają wołać wspólny `truncatePreview` z `modules/ui-components`.
+ * modules/chat) - strażnik czyta ŹRÓDŁO. Strażnik pilnuje, żeby oba modale wołały wspólny
+ * `truncatePreview` z `modules/ui-components` do obcinania podglądu zaznaczonego tekstu,
+ * zamiast duplikować identyczny blok (`text.length > 500 ? slice(0,500)+'...' : text`).
  */
 import test from 'ava';
 import { readFileSync } from 'fs';

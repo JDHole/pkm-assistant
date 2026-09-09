@@ -3,8 +3,7 @@
  * Creator/Editor modal for Skills (v2 format, agentskills.io compatible).
  * Pattern: same as MinionMasterEditorModal.
  *
- * Sesja 48: Skills v2.
- * S27 D6: siatka „Dozwolone narzędzia" (pole-fasada `allowed-tools`) WYCIĘTA — nic jej
+ * Siatka „Dozwolone narzędzia" (pole-fasada `allowed-tools`) jest WYCIĘTA — nic jej
  *   nie egzekwowało, a pokazywała martwe nazwy narzędzi z TOOL_INFO.
  */
 import { Modal, Setting, Notice } from 'obsidian';
@@ -38,9 +37,9 @@ export class SkillEditorModal extends Modal {
      * @param {Object|null} existing - Existing skill object for edit mode, null for create
      * @param {Function} [onSave] - Callback after successful save/delete
      * @param {Object} [options]
-     * @param {boolean} [options.template] - S27 Z2: tryb SZABLONU (zapis do
+     * @param {boolean} [options.template] - tryb SZABLONU (zapis do
      *        `.pkm-assistant/templates/skills/`, wersja podbijana przez store, nie przez usera).
-     * @param {boolean} [options.alsoTemplate] - S27 Z6: pokaż checkbox „Zapisz też jako szablon"
+     * @param {boolean} [options.alsoTemplate] - pokaż checkbox „Zapisz też jako szablon"
      *        (tworzenie żywego skilla u agenta — pętla szablonów domknięta).
      */
     constructor(app: UiBoundary, plugin: UiBoundary, existing: SkillData | null = null, onSave: ((data?: SkillInput) => void) | null = null, options: { template?: boolean; alsoTemplate?: boolean } = {}) {
@@ -78,7 +77,7 @@ export class SkillEditorModal extends Modal {
         }
 
         // Form data
-        // AUD-code-review-049: `slug` niesie identyfikator na cache/folder z `existing` — w
+        // `slug` niesie identyfikator na cache/folder z `existing` — w
         // trybie edycji `SkillLoader.saveSkill` musi pisać do folderu, z którego skill NAPRAWDĘ
         // został wczytany, a nie przeliczać go z (możliwie ręcznie zmienionej) nazwy.
         const formData = {
@@ -309,8 +308,8 @@ export class SkillEditorModal extends Modal {
         textarea.value = formData.prompt;
         textarea.addEventListener('input', () => formData.prompt = textarea.value);
 
-        // ─── S27 Z6: „Zapisz też jako szablon w Zapleczu" ───
-        // Tworzenie żywego skilla u agenta może od razu dołożyć formę odlewniczą do Zaplecza (D4).
+        // ─── „Zapisz też jako szablon w Zapleczu" ───
+        // Tworzenie żywego skilla u agenta może od razu dołożyć formę odlewniczą do Zaplecza.
         if (this.offerTemplateCopy) {
             new Setting(contentEl)
                 .setName(t('modal.skill_editor.also_template_label'))
@@ -355,7 +354,7 @@ export class SkillEditorModal extends Modal {
         formData.preQuestions = (formData.preQuestions || []).filter((pq) => pq.key && pq.question);
 
         try {
-            // S27 Z2: tryb SZABLONU zapisuje do magazynu Zaplecza, nie do żywych skilli.
+            // Tryb SZABLONU zapisuje do magazynu Zaplecza, nie do żywych skilli.
             if (this.isTemplate) {
                 const store = this.plugin.agentManager?.skillTemplateStore;
                 if (!store) {
@@ -386,7 +385,7 @@ export class SkillEditorModal extends Modal {
 
             await skillLoader.saveSkill(formData);
 
-            // S27 Z6: opcjonalna forma odlewnicza obok żywego skilla.
+            // Opcjonalna forma odlewnicza obok żywego skilla.
             if (this._alsoTemplate) {
                 const store = this.plugin.agentManager?.skillTemplateStore;
                 const created = await store?.createFromData({ ...formData, fromTemplate: null });
@@ -423,7 +422,7 @@ export class SkillEditorModal extends Modal {
                     new Notice(t('modal.skill_editor.loader_unavailable'));
                     return;
                 }
-                // smoke-04 finding 01: sukces pokazujemy tylko gdy loader potwierdzi kasację
+                // Sukces pokazujemy tylko gdy loader potwierdzi kasację
                 const deleted = await skillLoader.deleteSkill(this.existing.name);
                 if (!deleted) {
                     new Notice(t('modal.skill_editor.delete_not_found'));

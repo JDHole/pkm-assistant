@@ -14,7 +14,7 @@ export interface StateVaultLike {
 
 /**
  * Kształt `.state.json`. Pola z `defaultState()` są zawsze obecne (merge w `_readRaw`),
- * a index signature odwzorowuje FAKT, że plik nosi też klucze spoza schematu — dopisują
+ * a index signature odwzorowuje FAKT, że plik nosi też klucze spoza schematu - dopisują
  * je wołacze przez `update()` (`brain_notes_limit`, `last_used`, …) i muszą przeżyć spread.
  */
 export interface MemoryState {
@@ -26,7 +26,7 @@ export interface MemoryState {
 }
 
 export class StateManager {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare vault: StateVaultLike;
     declare statePath: string;
     declare private _writeChain: Promise<void>;
@@ -34,11 +34,11 @@ export class StateManager {
     constructor(vault: StateVaultLike, statePath: string) {
         this.vault = vault;
         this.statePath = statePath;
-        // E2.7 K1: serialize every mutation of .state.json. All ops target a single path, so one
+        // Serialize every mutation of .state.json. All ops target a single path, so one
         // promise chain is enough. Without it, a read-modify-write (addActiveSession / markArchived
         // / write) racing another writer reads stale JSON and the last write silently drops the
-        // other's change. K2/K3 raise write frequency (proactive saves, idle saves), so this lock
-        // goes in first (F3). The tail never rejects, so one throwing op does not stall the chain.
+        // other's change. Proactive and idle saves raise write frequency, so this lock matters.
+        // The tail never rejects, so one throwing op does not stall the chain.
         this._writeChain = Promise.resolve();
     }
 
@@ -57,17 +57,17 @@ export class StateManager {
     }
 
     /**
-     * Raw read (no queue) — ścieżka MUTACJI. Awaria odczytu/parsowania leci w górę jako błąd.
+     * Raw read (no queue) - ścieżka MUTACJI. Awaria odczytu/parsowania leci w górę jako błąd.
      *
-     * K4 (AUD-bledy-061/043): „nie da się przeczytać" NIE jest tym samym co „pliku nie ma".
+     * „Nie da się przeczytać" NIE jest tym samym co „pliku nie ma".
      * Każdy mutator (`update` / `addActiveSession` / `markArchived`) czyta przez tę metodę
-     * i NATYCHMIAST zapisuje to, co dostał — więc ciche defaulty kasowały licznik konsolidacji,
+     * i NATYCHMIAST zapisuje to, co dostał - więc ciche defaulty kasowały licznik konsolidacji,
      * listę `active_sessions` i klucze spoza schematu (`brain_notes_limit` = decyzja usera),
      * bez jednej linii w logu. Teraz mutacja się po prostu nie odbywa, a plik zostaje nietknięty
      * (do przeczytania przy następnym podejściu albo do ratunku ręcznie).
      *
      * Bootstrap (pierwszy start agenta) robimy WYŁĄCZNIE na POTWIERDZONYM „nie ma"
-     * (`probeFile`), nie na gołym `exists() === false` — to ono kłamie na dyskach sieciowych.
+     * (`probeFile`), nie na gołym `exists() === false` - to ono kłamie na dyskach sieciowych.
      */
     private async _readRaw(): Promise<MemoryState> {
         if (await probeFile(this.vault.adapter, this.statePath) === 'missing') {
@@ -90,7 +90,7 @@ export class StateManager {
         }
     }
 
-    /** Raw write (no queue) — only call inside a serialized block or via write(). */
+    /** Raw write (no queue) - only call inside a serialized block or via write(). */
     private async _writeRaw(state: Partial<MemoryState> | null | undefined): Promise<void> {
         await this.vault.adapter.write(this.statePath, JSON.stringify({
             ...this.defaultState(),
@@ -99,8 +99,8 @@ export class StateManager {
     }
 
     /**
-     * Publiczny odczyt (K4): NIC nie zapisuje, więc awaria może zdegradować się do defaultów
-     * W PAMIĘCI — z logiem, nigdy na dysk. Ten kontrakt trzyma `consolidationRunner`:
+     * Publiczny odczyt: NIC nie zapisuje, więc awaria może zdegradować się do defaultów
+     * W PAMIĘCI - z logiem, nigdy na dysk. Ten kontrakt trzyma `consolidationRunner`:
      * uszkodzony `.state.json` ma spaść na próg z ustawień, a nie wywrócić konsolidacji.
      * Groźna była nie sama degradacja, tylko jej UTRWALENIE przez mutator (patrz `_readRaw`).
      */
@@ -121,15 +121,15 @@ export class StateManager {
      * Serializowany read-modify-write dla wołaczy spoza tej klasy.
      *
      * `read()` + mutacja + `write()` po stronie wołacza to była ta sama klasa błędu, przed którą
-     * broni `_writeChain` (E2.7 K1): odczyt leci POZA kolejką, a `write()` NADPISUJE cały plik,
+     * broni `_writeChain`: odczyt leci POZA kolejką, a `write()` NADPISUJE cały plik,
      * więc równoległy `markArchived`/`addActiveSession` (autozapis czatu) był po cichu cofany.
-     * `_resetArchiveCounter` w konsolidacji woła się raz na KAŻDĄ zaakceptowaną paczkę L1 —
+     * `_resetArchiveCounter` w konsolidacji woła się raz na KAŻDĄ zaakceptowaną paczkę L1 -
      * 12 paczek = 12 okien wyścigu w czasie, gdy user normalnie pisze.
      *
      * Mutator MUTUJE podany obiekt (nie buduje nowego): `_readRaw` merguje go z `defaultState`,
      * więc spread zachowuje klucze spoza schematu (`brain_notes_limit` = decyzja usera; osierocony
-     * `notes_count_at_last_check` z plików sprzed dead-code sweepu 2026-09-02, AUD-dead-code-041/122,
-     * też przeżywa merge, tylko już nikt go nie pisze ani nie czyta — pole wypadło ze schematu).
+     * `notes_count_at_last_check` z starszych plików też przeżywa merge, tylko już nikt go nie
+     * pisze ani nie czyta - pole wypadło ze schematu).
      *
      * @param mutator - mutuje podany obiekt w miejscu
      * @returns stan PO mutacji

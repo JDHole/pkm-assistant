@@ -10,8 +10,8 @@
  *   - File types (file, folder, image, pdf, attachment)
  *   - Agent/system (robot, brain, crystal, crown, zap, etc.)
  *
- * Usage (E3.4: generatory zwracają markup, ale do DOM wchodzi TYLKO przez setSvg/
- * setSvgLabel z `domUtils.js` — etykieta zawsze jako text node):
+ * Usage (generatory zwracają markup, ale do DOM wchodzi TYLKO przez setSvg/
+ * setSvgLabel z `domUtils.js` - etykieta zawsze jako text node):
  *   import { UiIcons, setSvg, setSvgLabel } from '<sciezka>/modules/crystal-soul/index.js';
  *   setSvgLabel(el, UiIcons.clipboard(16), 'Plan');
  *   setSvgLabel(el, UiIcons.check(14, '#4caf50'), 'Done');

@@ -39,11 +39,10 @@ function sink(): StreamSink & { porcje: string[] } {
 }
 
 // ── PIN ──────────────────────────────────────────────────────────────────────
-test('012: PIN — twardy limit strumienia to DOKŁADNIE 600000 ms', t => {
+test('PIN — twardy limit strumienia to DOKŁADNIE 600000 ms', t => {
     t.is(STREAM_TRANSPORT_TIMEOUT_MS, 600000);
 });
 
-// ── C13.5 ────────────────────────────────────────────────────────────────────
 test('porcje lecą do sink.onChunk w kolejności, bez sklejania i bez rozcinania na ramki', async t => {
     // Druga porcja idzie z serwera DOPIERO, gdy sink odebrał pierwszą — sztywne 10 ms sprawiało,
     // że pod obciążeniem obie lądowały w buforze gniazda zanim klient zaczął czytać i sklejały
@@ -67,7 +66,6 @@ test('porcje lecą do sink.onChunk w kolejności, bez sklejania i bez rozcinania
     });
 });
 
-// ── C13.6 ────────────────────────────────────────────────────────────────────
 test('status != 200 rozstrzyga promisę {status, headers, body} BEZ rzucania', async t => {
     let uderzenia = 0;
     await withServer((_req, res) => {
@@ -85,7 +83,6 @@ test('status != 200 rozstrzyga promisę {status, headers, body} BEZ rzucania', a
     });
 });
 
-// ── C13.7 ────────────────────────────────────────────────────────────────────
 test('abort w ŚRODKU ramki przerywa czytanie i nie dosyła ogona', async t => {
     await withServer((_req, res) => {
         res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -106,7 +103,6 @@ test('abort w ŚRODKU ramki przerywa czytanie i nie dosyła ogona', async t => {
     });
 });
 
-// ── C13.8 ────────────────────────────────────────────────────────────────────
 test('twardy timeout: brak odpowiedzi w timeoutMs kończy otwarcie', async t => {
     await withServer((_req, res) => {
         // serwer milczy — nagłówki nigdy nie lecą
@@ -122,8 +118,7 @@ test('twardy timeout: brak odpowiedzi w timeoutMs kończy otwarcie', async t => 
     });
 });
 
-// ── C13.9 (K20) ──────────────────────────────────────────────────────────────
-test('K20: pad BEZ ciała nie wypuszcza nagłówków żądania', async t => {
+test('pad BEZ ciała nie wypuszcza nagłówków żądania', async t => {
     const KLUCZ = 'sk-tajny-klucz-uzytkownika-1234567890';
     await withServer((_req, res) => {
         res.socket?.destroy(); // zerwane połączenie: zero statusu, zero ciała
@@ -138,7 +133,7 @@ test('K20: pad BEZ ciała nie wypuszcza nagłówków żądania', async t => {
 
         const tekst = `${blad?.message ?? ''} ${String(blad)} ${JSON.stringify(blad ?? {})}`.toLowerCase();
         t.false(tekst.includes(KLUCZ.toLowerCase()), 'KLUCZ API wyszedł w komunikacie błędu transportu');
-        t.false(tekst.includes('bearer'), 'komunikat niesie nagłówek autoryzacji — K20 zamyka dokładnie tę drogę');
+        t.false(tekst.includes('bearer'), 'komunikat niesie nagłówek autoryzacji — reguła "sekret nigdy w komunikacie błędu" zamyka dokładnie tę drogę');
     });
 });
 
@@ -163,7 +158,6 @@ function atrapaSygnalu(): { aborted: boolean; odpalZdarzenie(): void; jako(): Ab
     return atrapa;
 }
 
-// ── C13.10 ───────────────────────────────────────────────────────────────────
 test('pad sieci ma kod `transport` — inaczej wołacz weźmie awarię za Stop i zamilknie', async t => {
     await withServer((_req, res) => {
         res.socket?.destroy(); // zerwane połączenie: ani statusu, ani ciała
@@ -177,7 +171,6 @@ test('pad sieci ma kod `transport` — inaczej wołacz weźmie awarię za Stop i
     });
 });
 
-// ── C13.11 ───────────────────────────────────────────────────────────────────
 test('Stop zgłoszony SAMYM zdarzeniem `abort` kończy strumień kodem `aborted`', async t => {
     await withServer((_req, res) => {
         res.writeHead(200, { 'content-type': 'text/event-stream' });

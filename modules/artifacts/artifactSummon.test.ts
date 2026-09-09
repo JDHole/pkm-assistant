@@ -53,7 +53,7 @@ test('buildSummonMessage: null/pusty thin → nie wybucha', t => {
     t.true(msg.includes('art-x'));
 });
 
-// ── activateArtifactInChat (N2): przypięcie BEZ wysyłki ──────────────────────
+// ── activateArtifactInChat: przypięcie BEZ wysyłki ──────────────────────────
 
 /** Atrapa pluginu z jednym widokiem czatu; `sent` liczy wywołania `send_message`. */
 function makePlugin(thinState: unknown) {

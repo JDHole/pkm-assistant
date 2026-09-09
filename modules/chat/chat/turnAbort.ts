@@ -1,14 +1,14 @@
 /**
- * turnAbort — PRZERWANIE JEST STANEM TURY, nie stanem widoku (K5, AUD-security-037/038/068).
+ * turnAbort — PRZERWANIE JEST STANEM TURY, nie stanem widoku.
  *
- * Do K5 czat trzymał przerwanie w jednym polu widoku (`ChatView._abortedStream` — nazwa agenta
- * ostatnio zatrzymanej tury), a każde kolejne `send_message` czyściło je na wejściu („nowa
- * wiadomość = świeży start"). Skutek: pętla zaparkowana w długim narzędziu w chwili Stopu
- * nigdy nie widziała flagi, bo zanim doszła do punktu przerwania, gasiła ją albo następna
- * wiadomość usera, albo AUTO-tura z wynikiem suba, albo przełączenie zakładki (drain).
- * Zatrzymana pętla wznawiała iteracje i egzekucję narzędzi.
+ * Jedno pole widoku (`ChatView._abortedStream` — nazwa agenta ostatnio zatrzymanej tury) nie
+ * wystarcza: każde kolejne `send_message` czyściłoby je na wejściu („nowa wiadomość = świeży
+ * start"), więc pętla zaparkowana w długim narzędziu w chwili Stopu nigdy nie widziałaby flagi —
+ * zanim doszłaby do punktu przerwania, gasiłaby ją albo następna wiadomość usera, albo AUTO-tura
+ * z wynikiem suba, albo przełączenie zakładki (drain). Zatrzymana pętla wznawiałaby iteracje
+ * i egzekucję narzędzi.
  *
- * Od K5 każda tura dostaje WŁASNY uchwyt (`createTurnAbort()`): Stop zatrzaskuje flagę na TEJ
+ * Każda tura dostaje WŁASNY uchwyt (`createTurnAbort()`): Stop zatrzaskuje flagę na TEJ
  * turze, a nowa tura startuje z nowym uchwytem i nie ma jak „odkręcić" przerwania starej.
  * Pętla (`runAgentLoop`) pyta `shouldAbort: () => turn.abort.isAborted()`, czyli stan SWOJEJ
  * tury — nigdy pole widoku.
@@ -18,7 +18,7 @@
  */
 
 /** Uchwyt przerwania JEDNEJ tury. Zatrzask: raz podniesiona flaga już nie gaśnie. */
-// AUD-dead-code-231 (2026-09-02): `export` zdjęty na trzech typach w tym pliku — zero referencji
+// `export` zdjęty na trzech typach w tym pliku — zero referencji
 // spoza pliku; funkcje, które je noszą w sygnaturze (`createTurnAbort`, `collectTurnsToStop`, …),
 // zostają publiczne.
 interface TurnAbortHandle {
@@ -52,11 +52,11 @@ interface AbortableTurnCtx {
 }
 
 /**
- * 068: nazwy agentów WSZYSTKICH tur w locie — także tych na zakładkach w tle.
+ * Nazwy agentów WSZYSTKICH tur w locie — także tych na zakładkach w tle.
  *
- * Do K5 `ChatView.onClose` pytał o jedno pole widoku (`is_generating`), które przełączenie
- * zakładki nadpisuje stanem zakładki DOCELOWEJ — więc tura z zakładki w tle przeżywała
- * zamknięcie panelu (a linia wyżej rozbrajała jej watchdoga, czyli ostatniego strażnika).
+ * Pytanie o jedno pole widoku (`is_generating`) nie wystarcza: przełączenie zakładki nadpisuje
+ * je stanem zakładki DOCELOWEJ — więc tura z zakładki w tle przeżyłaby zamknięcie panelu
+ * (a rozbrojenie jej watchdoga, ostatniego strażnika, trafiłoby w niewłaściwą turę).
  * Zamykamy PO WŁAŚCICIELACH TUR, nie po tym, kto akurat jest na wierzchu.
  *
  * @returns unikalne, niepuste nazwy w kolejności wpisów (kopia — wołacz kasuje wpisy w trakcie)
@@ -82,7 +82,7 @@ interface StoppableSubTask {
 }
 
 /**
- * 068: id biegów subów zleconych Z TEGO WIDOKU — po adresie zwrotnym (`origin`), a nie po
+ * Id biegów subów zleconych Z TEGO WIDOKU — po adresie zwrotnym (`origin`), a nie po
  * agencie, który akurat je wykonuje. Zamknięcie panelu ubija tury, więc ich suby zostają
  * bez adresata: wynik i tak nie miałby dokąd wrócić, a bieg dalej paliłby tokeny i pisał
  * do vaulta.

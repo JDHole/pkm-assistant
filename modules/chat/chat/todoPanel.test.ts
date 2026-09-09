@@ -37,7 +37,7 @@ test('accepts `done` alias for checked', t => {
     t.true(m.items[0].checked);
 });
 
-// ── resolveBottomBarMode (N4): który widok pokazuje pasek dolny ──────────────
+// ── resolveBottomBarMode: który widok pokazuje pasek dolny ───────────────────
 
 const zywa = () => buildTodoPanelModel({ items: [{ text: 'a', checked: false }] });
 const pusta = () => buildTodoPanelModel(null);
@@ -68,10 +68,10 @@ test('brak listy trzyma pasek na input niezależnie od bieżącego widoku', t =>
     t.is(resolveBottomBarMode(null, pusta(), 'input'), 'input');
 });
 
-// ── Z3 (FAIL 6 smoke'a 2026-08-15): auto-przeskok nie chowa szkicu usera ──────
+// ── auto-przeskok nie chowa szkicu usera ──────────────────────────────────────
 // Auto-przeskok dokłada klasę `.is-hidden` całemu wierszowi inputu (reguła w src/styles.css),
-// więc niewysłany tekst znikał userowi z oczu przy tool-callu `todo` — wyglądało to jak
-// skasowanie szkicu.
+// więc bez tego zabezpieczenia niewysłany tekst znikałby userowi z oczu przy tool-callu
+// `todo` - wyglądałoby to jak skasowanie szkicu.
 
 test('lista się pojawia, ale user ma szkic → pasek ZOSTAJE na input', t => {
     t.is(resolveBottomBarMode(null, zywa(), 'input', true), 'input');
@@ -84,5 +84,5 @@ test('szkic nie blokuje niczego poza AUTO-przeskokiem', t => {
     const po = buildTodoPanelModel({ items: [{ text: 'a', checked: true }] });
     t.is(resolveBottomBarMode(przed, po, 'todo', true), 'todo', 'user sam wszedł na listę — zostaje');
     t.is(resolveBottomBarMode(zywa(), pusta(), 'todo', true), 'input');
-    t.is(resolveBottomBarMode(null, zywa(), 'input', false), 'todo', 'bez szkicu przeskok jak przed Z3');
+    t.is(resolveBottomBarMode(null, zywa(), 'input', false), 'todo', 'bez szkicu przeskok działa jak dotąd');
 });

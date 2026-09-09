@@ -1,20 +1,18 @@
 /**
- * AUD-testy-009 — reguła hasła głównego sejfu (`SecretsStorage`), wyciągnięta z
- * `MasterPasswordModal._submit`.
+ * Reguła hasła głównego sejfu (`SecretsStorage`), wyciągnięta z `MasterPasswordModal._submit`.
  *
  * `MasterPasswordModal.ts` importuje `Modal`/`Setting` z `obsidian` jako WARTOŚCI, więc nie
  * wstaje w środowisku testów AVA (`ava.require: []` w package.json — brak mocka `obsidian`).
- * Dwie gałęzie decyzyjne (długość hasła, zgodność z powtórzeniem), które do tej naprawy
- * mieszkały wyłącznie w `_submit()`, były przez to zerowo testowalne — 0 wystąpień
- * `MasterPasswordModal` w jakimkolwiek `*.test.ts` w repo.
+ * Gdyby dwie gałęzie decyzyjne (długość hasła, zgodność z powtórzeniem) mieszkały wyłącznie
+ * w `_submit()`, byłyby przez to zerowo testowalne.
  *
  * Ta funkcja jest CZYSTA (zero importów, zero DOM) — modal ją tylko WOŁA i podpina wynik
  * pod `_setError`/`_finish`. Logika i UI są rozdzielone; UI zostaje niepokryte (jak
  * wszystkie widoki Obsidiana w tym repo), logika ma test na obie strony.
  *
- * `MASTER_PASSWORD_MIN_LENGTH` jest WSPÓLNA z `SecretsStorage.unlock` — do tej naprawy próg
- * `12` był zapisany osobno w DWÓCH plikach (SecretsStorage.ts:158, MasterPasswordModal.ts:95),
- * więc zmiana jednego bez drugiego cicho rozjeżdżała UI z realną bramką sejfu.
+ * `MASTER_PASSWORD_MIN_LENGTH` jest WSPÓLNA z `SecretsStorage.unlock` — próg `12` żyje
+ * TYLKO TU, więc `SecretsStorage.ts` i `MasterPasswordModal.ts` nie mogą się cicho rozjechać
+ * przez dwie osobne stałe.
  */
 
 /** Próg długości hasła głównego. Współdzielony z `SecretsStorage.unlock`. */

@@ -2844,7 +2844,7 @@
 
 
 /* ═══════════════════════════════════════════════════════════════
-   E3.4 D2: statyczne inline styles wyniesione z JS (kampania katalogowa)
+   Statyczne inline styles wyniesione z JS
    Wartości przeniesione 1:1 z TriggersView.js i HomeView.js.
    ═══════════════════════════════════════════════════════════════ */
 
@@ -2937,7 +2937,7 @@
   white-space: nowrap;
 }
 
-/* ── S27: Zaplecze jako katalog SZABLONÓW ─────────────────────────────── */
+/* ── Zaplecze jako katalog SZABLONÓW ─────────────────────────────── */
 
 .cs-backstage-intro {
   font-size: 0.66rem;
@@ -3038,5 +3038,5 @@
 .cs-connector-status--error { color: var(--text-error); }
 .cs-connector-status--off { color: var(--text-faint); }
 
-/* S27: zwijanie rozwijanych list bez inline-style (lint obsidianmd/no-static-styles-assignment). */
+/* Zwijanie rozwijanych list bez inline-style (lint obsidianmd/no-static-styles-assignment). */
 .cs-collapsed { display: none; }

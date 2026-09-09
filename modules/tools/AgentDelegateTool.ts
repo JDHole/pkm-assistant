@@ -5,12 +5,12 @@
  */
 import { t } from '../../core/i18n/index.js';
 import { log } from '../../core/utils/Logger.js';
-// AUD-security-128: `maskSensitiveData` — ta sama granica maskowania, co w `SubAgentRunner` (K8).
+// `maskSensitiveData` — ta sama granica maskowania, co w `SubAgentRunner`.
 import { maskSensitiveData } from '../../core/index.js';
 import { sendAgentMail } from './KomunikatorTools.js';
 import type { KomPlugin } from './KomunikatorTools.js';
 
-/** Argumenty `agent_delegate` wg `inputSchema` (`context_summary` jest REQUIRED — D14). */
+/** Argumenty `agent_delegate` wg `inputSchema` (`context_summary` jest REQUIRED). */
 interface AgentDelegateArgs {
     to_agent?: string;
     reason?: string;
@@ -29,7 +29,7 @@ interface AgentDelegateManager {
     komunikatorManager?: unknown;
     getAgent(name: string | undefined): DelegateTargetAgent | null | undefined;
     getAllAgents(): DelegateTargetAgent[];
-    /** D6: lista WIDOCZNYCH w komunikatorze — duchy nie mogą wyciec w błędzie „dostępni: …". */
+    /** Lista WIDOCZNYCH w komunikatorze — duchy nie mogą wyciec w błędzie „dostępni: …". */
     listKomunikatorAgents?(): DelegateTargetAgent[];
     getActiveAgent(): { name?: string } | null | undefined;
     isKomunikatorVisible?(agent: DelegateTargetAgent): boolean;
@@ -61,7 +61,7 @@ export function createAgentDelegateTool() {
                     description: t('mcp.agent_delegate.param.context_summary')
                 }
             },
-            // D14 (E2.4): context_summary WYMAGANY w schemacie — twarda reguła zamiast miękkiej
+            // context_summary WYMAGANY w schemacie — twarda reguła zamiast miękkiej
             // instrukcji w prompcie. Bez niego nowy agent nie ma kontekstu rozmowy (opis + param
             // to podkreślają). execute() i tak ma fallback ''=brak, więc kontrakt bezpieczny.
             required: ['to_agent', 'context_summary']
@@ -77,7 +77,7 @@ export function createAgentDelegateTool() {
                 // Validate recipient exists
                 const toAgent = agentManager.getAgent(args.to_agent);
                 if (!toAgent) {
-                    // K6 (AUD-security-013): lista „dostępni" WYŁĄCZNIE z widocznych w
+                    // Lista „dostępni" WYŁĄCZNIE z widocznych w
                     // komunikatorze — `getAllAgents()` wypisywało też duchy, czyli błąd
                     // narzędzia był darmową enumeracją agentów ukrytych przed pocztą.
                     const available = (agentManager.listKomunikatorAgents?.() ?? agentManager.getAllAgents())
@@ -90,20 +90,19 @@ export function createAgentDelegateTool() {
 
                 const fromName = (args?._invocationAgentName as string) || agentManager.getActiveAgent()?.name || 'System';
 
-                // ── Kontekst do skrzynki adresata (K6, AUD-security-006/013) ──
-                // Delegacja BYŁA drugą drogą do cudzej skrzynki: wołała `sendMessage` wprost,
-                // więc omijała komplet bramek poczty (filtr ducha po stronie nadawcy,
-                // rate-limit, licznik odbić). Teraz idzie przez `sendAgentMail`, czyli
-                // DOKŁADNIE ten sam kod co `kom_send`.
+                // ── Kontekst do skrzynki adresata ──
+                // Delegacja idzie przez `sendAgentMail`, czyli DOKŁADNIE ten sam kod co
+                // `kom_send` — dzięki temu przechodzi komplet bramek poczty (filtr ducha po
+                // stronie nadawcy, rate-limit, licznik odbić) zamiast wołać `sendMessage` wprost.
                 //
                 // Odmowa bramki (duch po którejkolwiek stronie, wyczerpany limit, łańcuch
                 // odbić) NIE wywraca delegacji: kontekst niesie sam proposal
-                // (`context_summary` w wyniku), więc nic nie ginie — to zachowanie z S28 D6.
+                // (`context_summary` w wyniku), więc nic nie ginie.
                 if (!agentManager.komunikatorManager && args.context_summary) {
                     log.warn('AgentDelegateTool', `${t('mcp.agent_delegate.error.no_communicator')}`);
                 }
                 if (args.context_summary) {
-                    // S28 (D2): store v3 — bez osobnego pola kontekstu (powód doklejamy do treści).
+                    // Store v3 — bez osobnego pola kontekstu (powód doklejamy do treści).
                     const body = args.reason
                         ? `${args.context_summary}\n\n${t('communicator.field.context')}: ${args.reason}`
                         : args.context_summary;
@@ -132,11 +131,9 @@ export function createAgentDelegateTool() {
                     message: t('mcp.agent_delegate.msg.proposal', { name: toAgent.name })
                 };
             } catch (e) {
-                // AUD-security-128: ten sam catch i ta sama klasa co w `delegate` — komunikat
-                // idzie MODELOWI i do transkryptu. Wyjątek z zapisu poczty (adapter vaulta,
-                // błąd I/O z pełną ścieżką systemową) albo z rozwiązania agenta wracał tędy
-                // surowy, choć K8 (AUD-security-055) postawił maskę dokładnie na tę drogę
-                // wewnątrz runnera subów.
+                // Ten sam catch i ta sama klasa co w `delegate` — komunikat idzie MODELOWI
+                // i do transkryptu, więc wyjątek z zapisu poczty (adapter vaulta, błąd I/O
+                // z pełną ścieżką systemową) albo z rozwiązania agenta nie może wracać surowy.
                 log.error('AgentDelegateTool', 'Error:', e);
                 return { success: false, error: maskSensitiveData(String((e as Error)?.message ?? e)) };
             }

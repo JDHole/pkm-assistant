@@ -3,12 +3,11 @@ import { CHAT_PROVIDERS, PROVIDER_INFO, resolveProvider } from './registry.js';
 import type { ChatProvider, ChatProviderInfo, ChatProviderRegistry, ProviderId } from './contracts.js';
 
 /**
- * AUD-dead-code-026/110/112/168 (2026-09-03): azure/custom skreślone z rejestru, `google`
- * skreślony jako osobny klucz dispatchu (gemini dispatchuje dziś sam). Stara wartość
- * `pkmAssistant.chat.platform` w `settings.json` usera może wciąż nieść jedną z tych trzech
- * nazw — plugin nie migruje ustawień wstecz (jedyny user to Kuba, świadoma decyzja).
- * `resolveProvider` ma fail-safe spaść na PIERWSZY wpis rejestru zamiast rzucić albo
- * zwrócić `undefined` (B.3 SM-02).
+ * `azure`/`custom` skreślone z rejestru, `google` skreślony jako osobny klucz dispatchu
+ * (gemini dispatchuje dziś sam). Stara wartość `pkmAssistant.chat.platform` w `settings.json`
+ * usera może wciąż nieść jedną z tych trzech nazw - plugin nie migruje ustawień wstecz
+ * (świadoma decyzja). `resolveProvider` ma fail-safe spaść na PIERWSZY
+ * wpis rejestru zamiast rzucić albo zwrócić `undefined`.
  */
 function mockProvider(id: string): ChatProvider {
     return { info: { id } as ChatProviderInfo } as ChatProvider;
@@ -26,9 +25,9 @@ for (const staleKey of ['azure', 'custom', 'google']) {
 }
 
 /**
- * N38 (R6): metryczki dostawców są FAKTAMI KONTRAKTOWYMI — endpointy, nagłówki kluczy,
- * tryb strumienia i flaga `stream_options`. Te wartości pinują dziś testy adapterów
- * i harness; po clean-room pinuje je jedno miejsce.
+ * Metryczki dostawców są FAKTAMI KONTRAKTOWYMI - endpointy, nagłówki kluczy,
+ * tryb strumienia i flaga `stream_options`. Te wartości pinują testy adapterów
+ * i harness.
  */
 test('PROVIDER_INFO pinuje endpointy, nagłówki i tryb strumienia dziewięciu dostawców', t => {
     t.is(PROVIDER_INFO.deepseek.defaultEndpoint, 'https://api.deepseek.com/chat/completions');
@@ -58,7 +57,7 @@ test('PROVIDER_INFO pinuje endpointy, nagłówki i tryb strumienia dziewięciu d
     t.true(PROVIDER_INFO.openai.needsApiKey);
 });
 
-/** N39: zabezpieczenie przed powrotem martwych platform (B.1 MR-11, B.3 SM-02). */
+/** Zabezpieczenie przed powrotem martwych platform. */
 test('CHAT_PROVIDERS ma dokładnie dziewięć kluczy i żadnego google/azure/custom', t => {
     const keys = Object.keys(CHAT_PROVIDERS).sort();
     t.deepEqual(keys, [

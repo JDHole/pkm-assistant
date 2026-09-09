@@ -1,5 +1,5 @@
 /**
- * AgentPresentationModal — read-only "wizytówka" agenta.
+ * AgentPresentationModal - read-only "wizytówka" agenta.
  * Otwierany z HomeView po kliknięciu w kartę agenta.
  * Zawiera hero (kryształ + dane), statystyki, przycisk "Edytuj profil".
  */
@@ -54,7 +54,7 @@ export class AgentPresentationModal extends Modal {
             heroInfo.createDiv({ cls: 'cs-profile-hero__desc', text: agent.description });
         }
 
-        // Meta: dates (E2.8 A1: badge archetypu usunięty — byt skasowany)
+        // Meta: dates
         const heroMeta = heroInfo.createDiv({ cls: 'cs-profile-hero__meta' });
         if (agent.createdAt) {
             heroMeta.createSpan({
@@ -93,7 +93,7 @@ export class AgentPresentationModal extends Modal {
         // ── Info grid ──
         const infoGrid = contentEl.createDiv({ cls: 'cs-shards' });
         const globalLabel = t('profile.overview.global');
-        // B6-2: kanon to agent.models.main — legacy agent.model gaśnie po pierwszym zapisie
+        // Kanon to agent.models.main - legacy agent.model gaśnie po pierwszym zapisie
         // profilu (modelFieldSync.ts). Czytanie samego agent.model tu pokazywałoby „globalny"
         // dla KAŻDEGO agenta ze zmigrowanym modelem, mimo że ma jawnie ustawiony.
         const mainModel = resolveMainModelForForm({ model: agent.model, models: agent.models }).selectValue;

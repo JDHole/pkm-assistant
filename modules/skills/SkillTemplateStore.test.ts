@@ -161,5 +161,5 @@ test('delete kasuje szablon, kopie zostają nietknięte', async t => {
 
     t.is(store.count(), 0);
     t.falsy(vault.files[`${BASE}/plan/SKILL.md`]);
-    t.truthy(vault.files['.pkm-assistant/skills/plan/SKILL.md'], 'kopia (D3) przeżywa kasację szablonu');
+    t.truthy(vault.files['.pkm-assistant/skills/plan/SKILL.md'], 'kopia przeżywa kasację szablonu');
 });

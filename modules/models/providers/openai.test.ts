@@ -6,10 +6,10 @@ import { CapturingHttpClient, makeCtx, makeModel } from '../testing/harness.js';
 import type { ChatRequest } from '../contracts.js';
 
 /**
- * Poligon F2: `stream_options: { include_usage: true }` + `prompt_cache_key` per agent.
+ * `stream_options: { include_usage: true }` + `prompt_cache_key` per agent.
  *
  * Bez `stream_options` API OpenAI-kształtne NIE zwraca zużycia tokenów w streamingu, więc
- * pętla agenta zawsze spadała na estymatę i zaniżała koszt wielokrotnie. Flaga jest OPT-IN
+ * pętla agenta spada na estymatę i zaniża koszt wielokrotnie. Flaga jest OPT-IN
  * per dostawca (`ChatProviderInfo.streamUsage`).
  */
 type ParsedBody = {
@@ -34,10 +34,10 @@ test('OpenAI: żądanie streamingowe prosi o usage', t => {
 });
 
 /**
- * N17 (luka L-07/L-23): metryczka dostawcy to fakt kontraktowy — endpoint, nagłówek klucza,
- * mapowanie narzędzi i temperatura muszą trafić do żądania (B.10 OA-01).
+ * Metryczka dostawcy to fakt kontraktowy - endpoint, nagłówek klucza,
+ * mapowanie narzędzi i temperatura muszą trafić do żądania.
  */
-test('L-07: openai — endpoint, nagłówek Bearer, tools/tool_choice, temperature w body', t => {
+test('openai — endpoint, nagłówek Bearer, tools/tool_choice, temperature w body', t => {
     const req: ChatRequest = {
         messages: MESSAGES,
         temperature: 0.3,
@@ -57,8 +57,8 @@ test('L-07: openai — endpoint, nagłówek Bearer, tools/tool_choice, temperatu
 });
 
 /**
- * Klucz cache promptu jest metadaną (`ChatRequest.agentName`), nie polem API — dostawca ma go
- * ZUŻYĆ i zamienić na `prompt_cache_key`, nigdy przepuścić dalej (B.10 OA-02).
+ * Klucz cache promptu jest metadaną (`ChatRequest.agentName`), nie polem API - dostawca ma go
+ * ZUŻYĆ i zamienić na `prompt_cache_key`, nigdy przepuścić dalej.
  */
 test('OpenAI request includes prompt_cache_key per agent', async t => {
     const http = new CapturingHttpClient({ body: { choices: [], usage: {} } });
@@ -90,7 +90,7 @@ test('OpenAI request bez agentName nie ma prompt_cache_key', async t => {
 });
 
 /**
- * F10: `acceptsModel` filtruje listę `/v1/models` (L64/L65/L71) — dostawca ma odrzucić
+ * `acceptsModel` filtruje listę `/v1/models` (L64/L65/L71) - dostawca ma odrzucić
  * modele spoza czatu (whisper/tts/dall-e/…) niezależnie od wielkości liter w id, a przyjąć
  * resztę. Zabija mutanta L65 (`return undefined` = wszystko odrzucone, `listModels` pusty).
  */

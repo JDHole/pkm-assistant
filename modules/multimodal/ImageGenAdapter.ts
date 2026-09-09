@@ -1,5 +1,5 @@
 /**
- * ImageGenAdapter — generowanie obrazow przez rozne platformy.
+ * ImageGenAdapter - generowanie obrazow przez rozne platformy.
  * Kazda platforma zwraca { base64, format, revised_prompt? }.
  * Wszystkie requesty ida przez Obsidian requestUrl (CORS-free).
  */
@@ -86,7 +86,7 @@ export const IMAGE_GEN_PLATFORMS: ImageGenPlatform[] = [
 // ═══════════════════════════════════════════
 
 /**
- * OpenRouter — image generation via chat completions.
+ * OpenRouter - image generation via chat completions.
  * Models: google/gemini-2.5-flash-image, openai/gpt-5-image-mini, openai/gpt-5-image
  * Image-only models (Flux, SD): modalities: ['image']
  * Chat+image models (GPT-5, Gemini): modalities: ['image', 'text']
@@ -168,7 +168,7 @@ async function _openaiDalle(apiKey: string | undefined, params: ImageGenParams):
 }
 
 /**
- * Stability AI — Stable Diffusion (SD3, SDXL).
+ * Stability AI - Stable Diffusion (SD3, SDXL).
  */
 async function _stabilityAI(apiKey: string | undefined, params: ImageGenParams): Promise<GeneratedImage> {
     if (!apiKey) throw new Error(t('image.no_api_key', { key: 'Stability AI (stability_api_key)' }));
@@ -197,7 +197,7 @@ async function _stabilityAI(apiKey: string | undefined, params: ImageGenParams):
 }
 
 /**
- * Replicate — Flux i inne modele.
+ * Replicate - Flux i inne modele.
  */
 async function _replicate(apiKey: string | undefined, params: ImageGenParams): Promise<GeneratedImage> {
     if (!apiKey) throw new Error(t('image.no_api_key', { key: 'Replicate (replicate_api_key)' }));
@@ -229,7 +229,7 @@ async function _replicate(apiKey: string | undefined, params: ImageGenParams): P
 }
 
 /**
- * Google Gemini — Imagen 3.
+ * Google Gemini - Imagen 3.
  */
 async function _geminiImagen(apiKey: string | undefined, params: ImageGenParams): Promise<GeneratedImage> {
     if (!apiKey) throw new Error(t('image.no_api_key', { key: 'Gemini' }));
@@ -255,7 +255,7 @@ async function _geminiImagen(apiKey: string | undefined, params: ImageGenParams)
 }
 
 /**
- * xAI — Grok Imagine (image generation).
+ * xAI - Grok Imagine (image generation).
  * Endpoint: /v1/images/generations
  * Models: grok-imagine-image (standard), grok-imagine-image-pro (wyzsza jakosc)
  */

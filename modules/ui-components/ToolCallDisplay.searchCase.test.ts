@@ -1,12 +1,12 @@
 /**
- * Strażnik AUD-code-review-039: kanoniczne narzędzie `search` musi mieć `case 'search'`
+ * Strażnik: kanoniczne narzędzie `search` musi mieć `case 'search'`
  * w KAŻDYM z trzech switchy formatujących wywołanie narzędzia w `ToolCallDisplay.ts`.
  *
- * Wtopa: `formatToolInput` i `formatToolOutput` miały tylko `case 'vault_search'` (legacy
- * alias) — `search` (nazwa, którą model dostaje w `inputSchema`, `SearchTool.ts:89`) spadał
- * do gałęzi `default`: nagłówek pokazywał surowy JSON zamiast samego zapytania, a wynik
- * tracił ponumerowaną listę ścieżek na rzecz `results: N elementów`. `formatToolInputDetail`
- * miała `case 'search'` od początku — rozjazd był widoczny w TYM SAMYM pliku.
+ * Pułapka: gdyby `formatToolInput` i `formatToolOutput` miały tylko `case 'vault_search'`
+ * (legacy alias), `search` (nazwa, którą model dostaje w `inputSchema`, `SearchTool.ts:89`)
+ * spadałby do gałęzi `default`: nagłówek pokazywałby surowy JSON zamiast samego zapytania,
+ * a wynik traciłby ponumerowaną listę ścieżek na rzecz `results: N elementów`. Rozjazd między
+ * trzema switchami w TYM SAMYM pliku nie jest widoczny na pierwszy rzut oka.
  *
  * Testujemy PO ŹRÓDLE, nie przez wywołanie funkcji: `createToolCallDisplay`/
  * `createCompactToolChip` budują DOM przez rozszerzenia Obsidiana na `HTMLElement`
@@ -31,7 +31,7 @@ function functionBody(name: string): string {
 }
 
 for (const fnName of ['formatToolInput', 'formatToolInputDetail', 'formatToolOutput']) {
-    test(`${fnName}: case 'search' stoi obok case 'vault_search' (AUD-code-review-039)`, t => {
+    test(`${fnName}: case 'search' stoi obok case 'vault_search'`, t => {
         const body = functionBody(fnName);
         t.true(body.length > 0, `nie znalazłem ${fnName} w ToolCallDisplay.ts`);
         t.regex(body, /case 'search':\s*\n\s*case 'vault_search':/,

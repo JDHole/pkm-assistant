@@ -1,5 +1,5 @@
 /**
- * GenerateImageTool.test.js — regresja E3.2 (wywałka ComfyUI/Zoja).
+ * GenerateImageTool.test.js — regresja usunięcia ComfyUI/Zoja z listy platform.
  *
  * ⚠️ Ten plik jest wyjątkiem wśród testów `modules/tools/`: `GenerateImageTool.js`
  * ciągnie przez barrel `modules/multimodal/` moduł `obsidian` (`requestUrl`), a pakiet
@@ -37,7 +37,7 @@ function pluginWith(imageGen: Record<string, unknown>) {
     return { env: { settings: { pkmAssistant: { imageGen } } } };
 }
 
-test('E3.2: platforma "comfyui" jest odrzucona z listą dostępnych platform', async t => {
+test('platforma "comfyui" jest odrzucona z listą dostępnych platform', async t => {
     const tool = createGenerateImageTool();
     const res = await tool.execute(
         { prompt: 'a cat' },
@@ -52,7 +52,7 @@ test('E3.2: platforma "comfyui" jest odrzucona z listą dostępnych platform', a
     }
 });
 
-test('E3.2: IMAGE_GEN_PLATFORMS nie zawiera już comfyui', t => {
+test('IMAGE_GEN_PLATFORMS nie zawiera już comfyui', t => {
     t.false(IMAGE_GEN_PLATFORMS.some(p => p.id === 'comfyui'));
     t.deepEqual(
         IMAGE_GEN_PLATFORMS.map(p => p.id),
@@ -60,7 +60,7 @@ test('E3.2: IMAGE_GEN_PLATFORMS nie zawiera już comfyui', t => {
     );
 });
 
-test('E3.2: ścieżka chmurowa nie została ruszona — walidacja przepuszcza znaną platformę', async t => {
+test('ścieżka chmurowa nie została ruszona — walidacja przepuszcza znaną platformę', async t => {
     const tool = createGenerateImageTool();
     // Bez klucza API: request nigdy nie leci, adapter rzuca "brak klucza".
     // Ważne jest CO odrzuciło — walidacja platformy czy już adapter.
@@ -72,25 +72,25 @@ test('E3.2: ścieżka chmurowa nie została ruszona — walidacja przepuszcza zn
 
     t.false(res.success);
     t.notRegex(res.error, /Available|Dostępne/, 'to nie jest odbicie na walidacji platformy');
-    // Od 2026-09-06 etykieta w „brak klucza" to nazwa platformy, nie nazwa pola (`openai_api_key`
+    // Etykieta w „brak klucza" to nazwa platformy, nie nazwa pola (`openai_api_key`
     // nie istnieje — klucz żyje w `chat.apiKeys.openai`).
     t.regex(res.error, /OpenAI/, 'poleciało dalej, do adaptera OpenAI');
 });
 
-test('E3.2: schemat generate_image nie ma już parametru workflow (ComfyUI)', t => {
+test('schemat generate_image nie ma już parametru workflow (ComfyUI)', t => {
     const tool = createGenerateImageTool();
     t.false('workflow' in tool.inputSchema.properties);
     t.notRegex(tool.description, /comfy/i);
 });
 
-test('E3.2: schemat generate_image nie ma martwego parametru seed (żaden adapter go nie czytał)', t => {
+test('schemat generate_image nie ma martwego parametru seed (żaden adapter go nie czytał)', t => {
     const tool = createGenerateImageTool();
     t.false('seed' in tool.inputSchema.properties);
 });
 
-// ── K2 (AUD-security-048): bramka dostaje FOLDER ZAPISU, nie prompt ──────────
+// ── bramka dostaje FOLDER ZAPISU, nie prompt ──────────
 
-test('K2: contextExtractor oddaje folder zapisu, prompt idzie osobnym polem', t => {
+test('contextExtractor oddaje folder zapisu, prompt idzie osobnym polem', t => {
     const tool = createGenerateImageTool();
 
     const domyslny = tool.contextExtractor({ prompt: 'Projekty/ a serene cat' }, { plugin: pluginWith({ platform: 'openai' }) });
@@ -101,7 +101,7 @@ test('K2: contextExtractor oddaje folder zapisu, prompt idzie osobnym polem', t 
     t.is(wlasny.targetPath, 'Grafiki/AI', 'końcowy ukośnik ucięty tak samo jak w execute');
 });
 
-test('K2: niedozwolony saveFolder odbija się PRZED wywołaniem platformy', async t => {
+test('niedozwolony saveFolder odbija się PRZED wywołaniem platformy', async t => {
     const tool = createGenerateImageTool();
 
     for (const folder of ['../poza', '.pkm-assistant/agents/inny/memory', '.pkm-assistant/logs']) {

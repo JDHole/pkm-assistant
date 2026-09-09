@@ -1,17 +1,16 @@
 /**
  * @module safeErrorText
- * Bezpieczny tekst błędu dla okna rozmowy i loga czatu (K20b, AUD-security-132 — ZLEW).
+ * Bezpieczny tekst błędu dla okna rozmowy i loga czatu.
  *
- * `handle_error` wstawiał `error.message` wprost do DOM-u czatu. Na ścieżce sieciowego padu
- * strumienia ta wiadomość bywa `JSON.stringify` całego zdarzenia streamera — razem z
- * `source.headers.Authorization`, czyli SUROWYM kluczem API. Wystarczy zrzut ekranu albo
- * skopiowanie „błędu" do zgłoszenia, żeby klucz wyszedł z maszyny.
+ * Bez tej maski `handle_error` wstawiałby `error.message` wprost do DOM-u czatu. Na ścieżce
+ * sieciowego padu strumienia ta wiadomość bywa `JSON.stringify` całego zdarzenia streamera -
+ * razem z `source.headers.Authorization`, czyli SUROWYM kluczem API. Wystarczy zrzut ekranu
+ * albo skopiowanie „błędu" do zgłoszenia, żeby klucz wyszedł z maszyny.
  *
- * ŹRÓDŁO tej wady (adapter / normalizacja błędu / maska po stronie modelu) domyka osobna
- * naprawa. To jest **obrona w głąb na zlewie**: nawet gdy źródło kiedyś znów wpuści nagłówek,
- * okno rozmowy pokaże `Bear***3f8a`, a nie klucz.
+ * To jest **obrona w głąb na zlewie**: niezależnie od tego, co dokładnie wyślą adapter,
+ * normalizacja błędu czy model, okno rozmowy pokaże `Bear***3f8a`, a nie klucz.
  *
- * Plik jest CELOWO wolny od `obsidian` i DOM-u — dzięki temu ma testy jednostkowe
+ * Plik jest CELOWO wolny od `obsidian` i DOM-u - dzięki temu ma testy jednostkowe
  * (`safeErrorText.test.ts`), a `chat_streaming.ts` tylko go wywołuje.
  */
 import { maskSensitiveData } from '../../../core/index.js';

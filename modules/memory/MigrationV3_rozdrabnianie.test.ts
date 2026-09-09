@@ -1,33 +1,13 @@
 /**
- * Strażnicy NAPRAWY migratora v2→v3 — noc audytowa 2026-08-27 (moduł 20, code review CTO)
- * + naprawa 2026-08-28.
- *
- * HISTORIA: ten plik zaczął życie jako CHARAKTERYZUJĄCY audyt. Nika przysłał 2026-08-27 brief
- * „4 bugi mechanizmów pamięci" (`10_Agenci/Kustosz/_Dla_Agenta/2026-08-27_Brief_Nika_Bugi_Mechanizmow_Pamieci.md`)
- * z OBJAWAMI z vaulta załogi — m.in. „migrator tnie zdania na pół", „name urwane w pół słowa",
- * „sekcja `## Ustalenia` wycięta z brain.md". Pierwsza wersja tego pliku miała testy ZIELONE,
- * które opisywały to, co kod robił WTEDY (błędnie), plus jeden `test.failing` jako PIN kontraktu
- * „każda sekcja starego braina jest w planie policzona".
- *
- * 2026-08-28: naprawa w `MigrationV3.ts` domknęła wszystkie cztery wady:
- *   1. `buildPlan` gubiło sekcje niepasujące do żadnej gałęzi — teraz KAŻDA sekcja ląduje
- *      w notes, `keepInBrain` albo `deletedSections`.
- *   2. `_notesFromSection` cięła akapit na pojedyncze linie — teraz grupuje w bloki
- *      (akapit/bullet), jedna notatka na blok.
- *   3. `keepInBrain` było zadeklarowane i nigdy niewypełniane — teraz `applyPlan` odtwarza
- *      zachowane sekcje z `originalBrain` i przekazuje je do `buildBrainIndex` jako `foreign`.
- *   4. `needsMigration()`/`run()` brały własny format v3 (bez folderu `brain/`) za pamięć v2 —
- *      teraz doczytują treść i rozpoznają indeks v3 (`looksLikeV3Index`), migracja jest wtedy
- *      pominięta w całości (`skipped: true, reason: 'already_v3_format'`).
- *
- * Ten plik jest teraz STRAŻNIKIEM NAPRAWY — testy asertują NOWE, poprawne zachowanie.
- * `test.failing` PIN spełniony i odwrócony na zwykły, zielony `test` (patrz test 5 niżej).
+ * Strażnicy zachowania migratora v2→v3. `buildPlan` musi policzyć KAŻDĄ sekcję starego
+ * brain.md (notatka, `keepInBrain` albo `deletedSections` - nigdy cisza); `_notesFromSection`
+ * musi grupować zawinięte akapity/bullety w jedną notatkę zamiast ciąć je na pojedyncze linie;
+ * `applyPlan` musi odtwarzać zachowane sekcje (`keepInBrain`) z `originalBrain` z powrotem do
+ * `buildBrainIndex` jako `foreign`; a `needsMigration()`/`run()` muszą rozpoznawać własny
+ * format v3 (`looksLikeV3Index`) i pomijać migrację całkowicie zamiast brać go za pamięć v2
+ * (`skipped: true, reason: 'already_v3_format'`).
  *
  * Atrapa vaulta skopiowana 1:1 z `MigrationV3.test.ts` (ten sam moduł, ten sam kontrakt adaptera).
- *
- * RUNDA 2 (2026-08-28): drugi adwersaryjny przebieg (opus) znalazł blokera w korroboracji
- * `looksLikeV3Index` (Z1) i sześć dalszych dziur (Z2, Z3, Z4, Z6, Z7a/b, Z8). Testy P1-P9
- * niżej dopisane albo odwrócone wg werdyktu lidera po tej weryfikacji.
  */
 
 import test from 'ava';
@@ -96,8 +76,8 @@ const newMigration = (brainContent: string) => {
 };
 
 /**
- * Naprawa znalezisko #2: akapit zawinięty na kilka linii (hard-wrap każdego edytora markdown)
- * jest teraz JEDNĄ jednostką migracji, nie jedną notatką na linię.
+ * Akapit zawinięty na kilka linii (hard-wrap każdego edytora markdown)
+ * jest JEDNĄ jednostką migracji, nie jedną notatką na linię.
  */
 test('buildPlan: akapit zawinięty na 3 linie = JEDNA notatka, treść sklejona spacjami', t => {
     const brain = [
@@ -143,9 +123,8 @@ test('buildPlan: bullet zawinięty na 2 linie zostaje JEDNĄ notatką z pełną 
 });
 
 /**
- * Naprawa znalezisko #2 (druga połowa objawu Niki — „name urwane w pół słowa"): `shortName`
- * nadal bierze pierwsze 6 słów, ale teraz z CAŁEJ sklejonej myśli (`flat`), nie z fragmentu
- * pojedynczej linii — więc `name` jest dosłownym prefiksem `content`.
+ * `shortName` bierze pierwsze 6 słów z CAŁEJ sklejonej myśli (`flat`), nie z fragmentu
+ * pojedynczej linii - `name` jest dosłownym prefiksem `content`.
  */
 test('buildPlan: nazwa notatki to pierwsze 6 słów CAŁEJ myśli, nie fragmentu jednej linii', t => {
     const brain = [
@@ -165,14 +144,14 @@ test('buildPlan: nazwa notatki to pierwsze 6 słów CAŁEJ myśli, nie fragmentu
 });
 
 /**
- * Naprawa znalezisko #1 (podstawowe): sekcja spoza trzech znanych gałęzi (np. ręcznie dopisana
- * `## AKTYWNY TEST`, kontrakt trybu testowego CC↔plugin) NIE znika już bez śladu — trafia do
+ * Sekcja spoza trzech znanych gałęzi (np. ręcznie dopisana
+ * `## AKTYWNY TEST`, kontrakt trybu testowego CC↔plugin) NIE znika bez śladu - trafia do
  * `plan.keepInBrain`, nie staje się notatką i nie jest zgłoszona do skasowania.
  */
 test('buildPlan: sekcja nierozpoznana z treścią trafia do keepInBrain, nie znika i nie staje się notatką', t => {
     const brain = [
         '## User',
-        'Kuba pracuje wieczorami.',
+        'Jan pracuje wieczorami.',
         '',
         '## AKTYWNY TEST',
         'Tryb testowy: Kustosz czeka na wynik.',
@@ -190,14 +169,13 @@ test('buildPlan: sekcja nierozpoznana z treścią trafia do keepInBrain, nie zni
 });
 
 /**
- * PIN z dawnego `test.failing`, teraz spełniony i odwrócony: KAŻDA sekcja starego braina jest
- * w planie policzona — notatka, `keepInBrain` albo `deletedSections`. Cztery sekcje, cztery
- * różne losy, żadna nie wyparowuje.
+ * KAŻDA sekcja starego braina jest w planie policzona - notatka, `keepInBrain` albo
+ * `deletedSections`. Cztery sekcje, cztery różne losy, żadna nie wyparowuje.
  */
 test('buildPlan: KAŻDA sekcja jest policzona w planie — notes ∪ keepInBrain ∪ deletedSections', t => {
     const brain = [
         '## User',
-        'Kuba pracuje wieczorami.',
+        'Jan pracuje wieczorami.',
         '',
         '## Notatki luźne',
         'Coś, czego migrator nie rozpoznaje, ale co ma treść.',
@@ -212,7 +190,7 @@ test('buildPlan: KAŻDA sekcja jest policzona w planie — notes ∪ keepInBrain
 
     const plan = migration.buildPlan(brain);
 
-    t.true(plan.notes.some(n => n.content.includes('Kuba pracuje wieczorami.')), 'User -> notatka (rozpoznana)');
+    t.true(plan.notes.some(n => n.content.includes('Jan pracuje wieczorami.')), 'User -> notatka (rozpoznana)');
     t.true(plan.keepInBrain.includes('Notatki luźne'), 'Notatki luźne (nierozpoznana, z treścią) -> keepInBrain');
     t.true(plan.deletedSections.includes('System'), 'System (zombie) -> deletedSections');
     t.true(plan.deletedSections.includes('Pusta'), 'Pusta (nierozpoznana, bez treści) -> deletedSections');
@@ -226,12 +204,12 @@ test('buildPlan: KAŻDA sekcja jest policzona w planie — notes ∪ keepInBrain
 
 /**
  * `run()` end-to-end: sekcja obca przeżywa w nowym brain.md verbatim, pod indeksem (ten sam
- * mechanizm co incydent 2026-08-15 z `## AKTYWNY TEST` — `BrainIndex.buildBrainIndex({foreign})`).
+ * mechanizm co `## AKTYWNY TEST` w `BrainIndex.ts` - `BrainIndex.buildBrainIndex({foreign})`).
  */
 test('run({interactive:false}): sekcja nierozpoznana przeżywa w nowym brain.md verbatim, pod indeksem', async t => {
     const brain = [
         '## User',
-        'Kuba pracuje wieczorami.',
+        'Jan pracuje wieczorami.',
         '',
         '## AKTYWNY TEST',
         'Tryb testowy: Kustosz czeka na wynik.',
@@ -251,10 +229,10 @@ test('run({interactive:false}): sekcja nierozpoznana przeżywa w nowym brain.md 
 });
 
 /**
- * `SECTION_TYPES` dostał `workflow` i `projekty i referencje` — te same nagłówki, którymi
+ * `SECTION_TYPES` dostał `workflow` i `projekty i referencje` - te same nagłówki, którymi
  * `BrainIndex` kończy migrację (kontrakt round-trip). Sekcja o takim tytule w STARYM v2 brainie
  * (np. user ręcznie nazwał ją tak samo) staje się notatką odpowiedniego typu, nie `keepInBrain`
- * — verbatim sekcja pod nagłówkiem kolidującym z `INDEX_SECTIONS` zostałaby zjedzona przy
+ * - verbatim sekcja pod nagłówkiem kolidującym z `INDEX_SECTIONS` zostałaby zjedzona przy
  * najbliższym rebuildzie indeksu.
  */
 test('buildPlan: `## Workflow` i `## Projekty i referencje` w starym brainie stają się notatkami, nie keepInBrain', t => {
@@ -282,15 +260,15 @@ test('buildPlan: `## Workflow` i `## Projekty i referencje` w starym brainie sta
 });
 
 /**
- * T1(a) — runda 2 (BLOKER Z1): niekanoniczny wikilink (bez typu notatki i bez `.md`) NIE jest
- * dowodem v3. Sam v1 sygnał (przed naprawą) łapał KAŻDY `- [[brain/...`, więc taki bullet w
- * zwykłym v2 brainie fałszywie wygaszał migrację. Po naprawie: needsMigration TRUE, `run()`
- * robi normalną migrację z notatkami (nie skip).
+ * Niekanoniczny wikilink (bez typu notatki i bez `.md`) NIE jest dowodem v3 - samo dopasowanie
+ * do KAŻDEGO `- [[brain/...` złapałoby też taki bullet w zwykłym v2 brainie i fałszywie
+ * wygasiłoby migrację. needsMigration zostaje TRUE, `run()` robi normalną migrację z notatkami
+ * (nie skip).
  */
 test('needsMigration + run: niekanoniczny wikilink `- [[brain/mapa_projektu]]` NIE jest dowodem v3', async t => {
     const brain = [
         '## User',
-        '- Kuba lubi krotkie raporty.',
+        '- Jan lubi krotkie raporty.',
         '- [[brain/mapa_projektu]]',
     ].join('\n');
     const { migration, files } = newMigration(brain);
@@ -301,20 +279,20 @@ test('needsMigration + run: niekanoniczny wikilink `- [[brain/mapa_projektu]]` N
 
     t.true(result.migrated === true, 'run robi normalna migracje, nie skip');
     t.true(
-        Object.keys(files).some(p => p.endsWith('/brain/user_kuba_lubi_krotkie_raporty.md')),
+        Object.keys(files).some(p => p.endsWith('/brain/user_jan_lubi_krotkie_raporty.md')),
         'notatka z pierwszego bulletu powstaje - migracja przebiegla normalnie'
     );
 });
 
 /**
- * T1(b) — runda 2 (BLOKER Z1): ręczny nagłówek „## Na teraz" BEZ korroboracji (mniej niż dwa
+ * Ręczny nagłówek „## Na teraz" BEZ korroboracji (mniej niż dwa
  * nagłówki `INDEX_SECTIONS` obecne jako dokładne linie) nie jest dowodem v3. Tu jest tylko
- * `## User` (jeden nagłówek indeksu) — za mało.
+ * `## User` (jeden nagłówek indeksu) - za mało.
  */
 test('needsMigration: reczny naglowek "## Na teraz" bez v3-only naglowkow (< 2 INDEX_SECTIONS) NIE jest dowodem v3', async t => {
     const brain = [
         '## Na teraz',
-        'Kuba pracuje nad migratorem.',
+        'Jan pracuje nad migratorem.',
         '',
         '## User',
         '- Notatka usera.',
@@ -325,13 +303,13 @@ test('needsMigration: reczny naglowek "## Na teraz" bez v3-only naglowkow (< 2 I
 });
 
 /**
- * T1(c) — runda 2 (P2/Z1b): prawdziwy v3 (wpis `[[brain/project_context_x.md]]`, kanoniczny)
- * → needsMigration FALSE, a `run()` teraz robi backup NAWET na tej ścieżce skip — brain.md sam
+ * Prawdziwy v3 (wpis `[[brain/project_context_x.md]]`, kanoniczny)
+ * → needsMigration FALSE, a `run()` robi backup NAWET na tej ścieżce skip - brain.md sam
  * nie jest przepisywany przez migrator, ale `ensureMemoryStructure()` woła `getBrain()`, który
  * może dokleić brakujące nagłówki indeksu. Backup daje odwrót, gdyby heurystyka się myliła.
  */
 test('needsMigration + run: brain.md już w formacie v3 (bez folderu brain/) NIE jest migrowany', async t => {
-    // Wszystkie 5 nagłówków `INDEX_SECTIONS` obecne (nawet puste) — `ensureMemoryStructure()`
+    // Wszystkie 5 nagłówków `INDEX_SECTIONS` obecne (nawet puste) - `ensureMemoryStructure()`
     // (wołane w gałęzi C) w środku czyta brain przez `getBrain()`, które „łaskawie" dopisuje
     // brakujące nagłówki indeksu. Test na „bajt w bajt nietknięty" musi startować z pliku, który
     // już ma je wszystkie, inaczej łapie TĘ mutację, nie mutację migratora.
@@ -345,7 +323,7 @@ test('needsMigration + run: brain.md już w formacie v3 (bez folderu brain/) NIE
         '- [[brain/project_context_cos.md]] — projekt w toku',
         '',
         '## User',
-        '- [[brain/user_kuba.md]] — Kuba pracuje wieczorami.',
+        '- [[brain/user_jan.md]] — Jan pracuje wieczorami.',
         '',
         '## Preferencje',
         '',
@@ -363,8 +341,7 @@ test('needsMigration + run: brain.md już w formacie v3 (bez folderu brain/) NIE
     t.true(result.skipped === true);
     t.is(result.reason, 'already_v3_format');
     t.is(files[BRAIN], brainV3, 'brain.md zostaje BAJT W BAJT nietknięty');
-    // Runda 2 (P2/Z1b, odwrócone): skip na ścieżce already_v3_format teraz TWORZY backup —
-    // dawna asercja "backup NIE powstaje" opisywała wadę (Z1b), nie kontrakt.
+    // Skip na ścieżce already_v3_format TWORZY backup - kontrakt, nie wada.
     t.truthy(result.backupPath, 'skip na sciezce already_v3_format niesie backupPath');
     t.true(
         Object.keys(files).some(p => p.includes('memory.v2.backup') && p.endsWith('/brain.md')),
@@ -380,23 +357,23 @@ test('needsMigration + run: brain.md już w formacie v3 (bez folderu brain/) NIE
 /**
  * Świadome, udokumentowane ograniczenie `looksLikeV3Index`: brain zbudowany WYŁĄCZNIE z gołego
  * tekstu (żadna notatka jeszcze nie powstała, żadna sekcja „Na teraz" nietknięta) jest
- * nieodróżnialny od pamięci v2 po samej treści. `needsMigration()` zostaje `true` — bezpieczne,
+ * nieodróżnialny od pamięci v2 po samej treści. `needsMigration()` zostaje `true` - bezpieczne,
  * bo `buildPlan` poprawnie rozpozna `## User` i zrobi z niego zwykłą notatkę.
  */
 test('needsMigration: brain z samym gołym tekstem (bez wikilinków) nadal wygląda jak v2 — świadome ograniczenie', async t => {
-    const { migration } = newMigration('## User\nKuba.');
+    const { migration } = newMigration('## User\nJan.');
 
     t.true(await migration.needsMigration());
 });
 
 /**
- * ROUND-TRIP domknięty (dawne najostrzejsze znalezisko nocy): pełny brain.md w formacie v3,
+ * ROUND-TRIP domknięty: pełny brain.md w formacie v3,
  * z sekcjami `## Workflow`/`## Projekty i referencje` niosącymi wikilinki, w ogóle nie trafia
- * do `buildPlan` — `run()` rozpoznaje format v3 i pomija migrację całkowicie. Nic nie ginie,
+ * do `buildPlan` - `run()` rozpoznaje format v3 i pomija migrację całkowicie. Nic nie ginie,
  * bo nic nie jest ruszane.
  */
 test('ROUND-TRIP domknięty: pełny brain.md w formacie v3 NIE jest w ogóle migrowany — nic nie ginie', async t => {
-    // Wszystkie 5 nagłówków `INDEX_SECTIONS` obecne — patrz komentarz w teście wyżej o
+    // Wszystkie 5 nagłówków `INDEX_SECTIONS` obecne - patrz komentarz w teście wyżej o
     // `getBrain()` dopisującym brakujące nagłówki wewnątrz `ensureMemoryStructure()`.
     const brainV3 = [
         '# Tester brain',
@@ -405,7 +382,7 @@ test('ROUND-TRIP domknięty: pełny brain.md w formacie v3 NIE jest w ogóle mig
         '- [[brain/project_context_cos.md]] — projekt w toku',
         '',
         '## User',
-        '- [[brain/user_kuba.md]] — Kuba pracuje wieczorami.',
+        '- [[brain/user_jan.md]] — Jan pracuje wieczorami.',
         '',
         '## Preferencje',
         '',
@@ -420,8 +397,7 @@ test('ROUND-TRIP domknięty: pełny brain.md w formacie v3 NIE jest w ogóle mig
 
     const result = await migration.run({ interactive: false });
 
-    // Runda 2 (P2/Z1b, odwrócone): skip teraz niesie backupPath — deepEqual rozszerzony,
-    // reszta kontraktu (plik nietknięty) bez zmian.
+    // Skip niesie backupPath; reszta kontraktu (plik nietknięty) bez zmian.
     t.true(result.skipped === true);
     t.is(result.reason, 'already_v3_format');
     t.truthy(result.backupPath);
@@ -429,8 +405,7 @@ test('ROUND-TRIP domknięty: pełny brain.md w formacie v3 NIE jest w ogóle mig
 });
 
 /**
- * T2 (P4/Z2): treść PRZED pierwszym `##` (poza samym H1) liczy się do planu. Runda 1 ją
- * po cichu wyrzucała ("sentinel Preamble" + goły `continue`) — teraz staje się notatką
+ * Treść PRZED pierwszym `##` (poza samym H1) liczy się do planu - staje się notatką
  * `reference`, obok normalnej notatki z `## User`.
  */
 test('buildPlan: akapit wstępu PRZED pierwszym ## (poza H1) trafia do planu jako notatka reference', t => {
@@ -440,7 +415,7 @@ test('buildPlan: akapit wstępu PRZED pierwszym ## (poza H1) trafia do planu jak
         'To jest wstep opisujacy agenta, napisany przez usera pod automatycznym H1.',
         '',
         '## User',
-        'Kuba pracuje wieczorami.',
+        'Jan pracuje wieczorami.',
     ].join('\n');
     const { migration } = newMigration(brain);
 
@@ -451,7 +426,7 @@ test('buildPlan: akapit wstępu PRZED pierwszym ## (poza H1) trafia do planu jak
         'wstep przed H1 staje sie notatka reference'
     );
     t.true(
-        plan.notes.some(n => n.type === 'user' && n.content.includes('Kuba pracuje wieczorami.')),
+        plan.notes.some(n => n.type === 'user' && n.content.includes('Jan pracuje wieczorami.')),
         'notatka z ## User nadal powstaje'
     );
     t.false(
@@ -461,17 +436,18 @@ test('buildPlan: akapit wstępu PRZED pierwszym ## (poza H1) trafia do planu jak
 });
 
 /**
- * T3 (P3/Z8): realna, ręcznie dopisana sekcja `## Preamble` (NIE sentinel — to zwykła sekcja H2
- * o takim tytule) trafia do `keepInBrain` jak każda inna nierozpoznana sekcja z treścią. Przed
- * naprawą P3 literał 'Preamble' kolidował z sentinelem bucketa treści przed pierwszym `##`.
+ * Realna, ręcznie dopisana sekcja `## Preamble` (NIE sentinel - to zwykła sekcja H2
+ * o takim tytule) trafia do `keepInBrain` jak każda inna nierozpoznana sekcja z treścią.
+ * Literał 'Preamble' kolidowałby z sentinelem bucketa treści przed pierwszym `##`, gdyby
+ * porównanie nie szło przez sam sentinel (patrz `PREAMBLE_SENTINEL` w `MigrationV3.ts`).
  */
 test('buildPlan: reczna sekcja "## Preamble" (nie sentinel) trafia do keepInBrain', t => {
     // Sekcja rozpoznana (`## User`) obok, żeby `notes.length` nie spadło do zera i nie
-    // uruchomiła się NIEZWIĄZANA ścieżka „Legacy brain dump" (P8) — testujemy TYLKO los
+    // uruchomiła się NIEZWIĄZANA ścieżka „Legacy brain dump" - testujemy TYLKO los
     // sekcji `## Preamble`, ten sam wzorzec co test „AKTYWNY TEST" wyżej w tym pliku.
     const brain = [
         '## User',
-        'Kuba pracuje wieczorami.',
+        'Jan pracuje wieczorami.',
         '',
         '## Preamble',
         'To jest reczna sekcja usera o tytule Preamble, nie automatyczny wstep przed H1.',
@@ -486,9 +462,8 @@ test('buildPlan: reczna sekcja "## Preamble" (nie sentinel) trafia do keepInBrai
 });
 
 /**
- * T4 (P5/Z3): dwa akapity o identycznych pierwszych 6 słowach dają identyczny `makeMemoryNoteFilename`.
- * Runda 1 druga notatkę po cichu porzucała (`continue` na kolizji) — teraz dostaje sufiks `_2`
- * i ZOSTAJE w planie, obie treści są obecne.
+ * Dwa akapity o identycznych pierwszych 6 słowach dają identyczny `makeMemoryNoteFilename`.
+ * Druga notatka dostaje sufiks `_2` i ZOSTAJE w planie, obie treści są obecne.
  */
 test('buildPlan: kolizja nazwy dwoch notatek daje sufiks _2, obie tresci zostaja w planie', t => {
     const brain = [
@@ -510,8 +485,8 @@ test('buildPlan: kolizja nazwy dwoch notatek daje sufiks _2, obie tresci zostaja
 });
 
 /**
- * T5(a) (P6/Z4): bullet-rodzic + dwa WCIĘTE sub-bullety = JEDNA notatka niosąca rodzica
- * i oboje dzieci — sub-bullet to kontekst rodzica, nie osobna myśl.
+ * Bullet-rodzic + dwa WCIĘTE sub-bullety = JEDNA notatka niosąca rodzica
+ * i oboje dzieci - sub-bullet to kontekst rodzica, nie osobna myśl.
  */
 test('buildPlan: bullet-rodzic + dwa wciete sub-bullety = JEDNA notatka z rodzicem i dziecmi', t => {
     const brain = [
@@ -531,7 +506,7 @@ test('buildPlan: bullet-rodzic + dwa wciete sub-bullety = JEDNA notatka z rodzic
 });
 
 /**
- * T5(b) (P6/Z4): nagłówek `###`-`######` wewnątrz sekcji domyka bieżący blok i jego tekst
+ * Nagłówek `###`-`######` wewnątrz sekcji domyka bieżący blok i jego tekst
  * staje się PREFIXEM następnego bloku (`"<prefix>: <flat>"`). Sam nagłówek NIE tworzy własnej,
  * pustej notatki.
  */
@@ -551,8 +526,8 @@ test('buildPlan: podnaglowek `### Finanse` + tresc daje notatke z flat "Finanse:
 });
 
 /**
- * T5(c) (P6/Z4): pozioma kreska `---` między dwoma akapitami działa jak separator (jak pusta
- * linia) — nie tworzy z niej własnej notatki, a dwa akapity zostają dwiema OSOBNYMI notatkami.
+ * Pozioma kreska `---` między dwoma akapitami działa jak separator (jak pusta
+ * linia) - nie tworzy z niej własnej notatki, a dwa akapity zostają dwiema OSOBNYMI notatkami.
  */
 test('buildPlan: pozioma kreska --- miedzy akapitami nie tworzy wlasnej notatki', t => {
     const brain = [
@@ -574,9 +549,9 @@ test('buildPlan: pozioma kreska --- miedzy akapitami nie tworzy wlasnej notatki'
 });
 
 /**
- * T6 (P7/Z7a): sekcja ROZPOZNANA (`## User`), ale BEZ treści, obok innej sekcji z treścią.
- * Runda 1 taką sekcję gubiła bez śladu (zero bloków = zero notatek = nic w żadnej liście).
- * Teraz jest policzona jako `deletedSections`.
+ * Sekcja ROZPOZNANA (`## User`), ale BEZ treści, obok innej sekcji z treścią, jest policzona
+ * jako `deletedSections` (zero bloków = zero notatek, ale sekcja nadal musi trafić do jednej
+ * z list planu).
  */
 test('buildPlan: pusta rozpoznana sekcja "## User" (obok sekcji z trescia) trafia do deletedSections', t => {
     const brain = [
@@ -595,10 +570,10 @@ test('buildPlan: pusta rozpoznana sekcja "## User" (obok sekcji z trescia) trafi
 });
 
 /**
- * T7 (P8/Z7b): pusty szkielet wszystkich 5 nagłówków `INDEX_SECTIONS` (bez wikilinków, bez
- * ręcznego "Na teraz") wciąż wygląda jak v2 (świadome ograniczenie `looksLikeV3Index`) —
+ * Pusty szkielet wszystkich 5 nagłówków `INDEX_SECTIONS` (bez wikilinków, bez
+ * ręcznego "Na teraz") wciąż wygląda jak v2 (świadome ograniczenie `looksLikeV3Index`) -
  * needsMigration TRUE. Ale `run()` na takim pliku NIE tworzy ANI JEDNEJ notatki (w tym brak
- * `reference_legacy_brain_dump.md` — sam szkielet nagłówków to nie treść), a nowy brain.md
+ * `reference_legacy_brain_dump.md` - sam szkielet nagłówków to nie treść), a nowy brain.md
  * to świeży, pusty indeks.
  */
 test('run: pusty szkielet 5 naglowkow INDEX_SECTIONS -> needsMigration TRUE, ZERO notatek, brak dumpu', async t => {
@@ -626,7 +601,7 @@ test('run: pusty szkielet 5 naglowkow INDEX_SECTIONS -> needsMigration TRUE, ZER
     t.deepEqual(result.notesCreated, [], 'ZERO notatek powstaje z pustego szkieletu naglowkow');
     t.false(
         Object.keys(files).some(p => p.endsWith('/brain/reference_legacy_brain_dump.md')),
-        'brak dumpu - sam szkielet naglowkow to nie realna tresc (P8)'
+        'brak dumpu - sam szkielet naglowkow to nie realna tresc'
     );
     const nowy = files[BRAIN];
     t.true(nowy.includes('## Bieżące') && nowy.includes('## Projekty i referencje'), 'nowy brain.md to swiezy indeks');

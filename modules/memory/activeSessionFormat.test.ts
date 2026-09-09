@@ -13,11 +13,11 @@ import {
 import { formatToMarkdown, parseSessionFile } from './sessionParser.js';
 
 /**
- * TEST KONTRAKTOWY pliku `sessions/active/*.md` (S36 Faza 1, krok 6 z D6 §6).
+ * TEST KONTRAKTOWY pliku `sessions/active/*.md`.
  *
- * To jest test, którego BRAK pozwolił przeżyć wtopie z hotfiksa `71a4ffe` — trwałej utracie
+ * To jest test, którego BRAK pozwolił przeżyć hotfiksowi trwałą utratę
  * rozmowy usera. Kontrakt: co pisarz A (`formatSessionEvent`) zapisze, czytnik
- * (`parseActiveSession`) musi odzyskać 1:1 — także wtedy, gdy treść wiadomości SAMA wygląda
+ * (`parseActiveSession`) musi odzyskać 1:1 - także wtedy, gdy treść wiadomości SAMA wygląda
  * jak nagłówek bloku (`## User`), i także w pliku MIESZANYM (transkrypt + ogon event-logu).
  *
  * Ma być bezlitosny: asercje na treści VERBATIM (`t.is`/`t.deepEqual`), nie na `includes`.
@@ -46,7 +46,7 @@ interface TestEvent {
 /**
  * Składa plik event-logu dokładnie tak, jak robi to `appendToActiveSession`:
  * frontmatter + kolejne bloki doklejane na koniec (z gwarancją `\n` między nimi),
- * każdy z rosnącym `**seq:**` (S36 Faza 2). `seq: null` w evencie = symulacja bloku
+ * każdy z rosnącym `**seq:**`. `seq: null` w evencie = symulacja bloku
  * LEGACY, pisanego jeszcze bez numeracji.
  */
 function buildEventLog(
@@ -81,7 +81,7 @@ test('kontrakt: formatSessionEvent × N → parseActiveSession odzyskuje wiadomo
     const file = buildEventLog([
         { type: 'user_message', content: userText },
         { type: 'agent_message', content: agentText },
-        // mcp call, którego narzędzie zwróciło pustkę — blok BEZ pola treści, pomijany
+        // mcp call, którego narzędzie zwróciło pustkę - blok BEZ pola treści, pomijany
         { type: 'mcp_call', tool: 'write', args: { path: 'x.md' }, result: '' },
         { type: 'tool_result', tool: 'read', result: toolResultText, duration_ms: 12 },
         { type: 'subagent_call', prompt: subPrompt, result: subResult, model: 'deepseek-chat' },
@@ -92,7 +92,7 @@ test('kontrakt: formatSessionEvent × N → parseActiveSession odzyskuje wiadomo
     t.deepEqual(parsed.messages, [
         { role: 'user', content: userText, seq: 1 },
         { role: 'assistant', content: agentText, seq: 2 },
-        // seq 3 to `mcp call` bez treści — numeruje ZDARZENIA, nie wiadomości, więc w
+        // seq 3 to `mcp call` bez treści - numeruje ZDARZENIA, nie wiadomości, więc w
         // widocznych wiadomościach jest dziura. Tak ma być.
         { role: 'tool', content: toolResultText, seq: 4 },
         { role: 'assistant', content: subResult, seq: 5 },
@@ -107,7 +107,7 @@ test('kontrakt: `## User` w treści eventu NIE tworzy fałszywej granicy bloku',
         { type: 'user_message', content: 'dzięki' },
     ]);
 
-    // Escape musi być widoczny NA DYSKU — inaczej parser rozbije blok.
+    // Escape musi być widoczny NA DYSKU - inaczej parser rozbije blok.
     t.true(file.includes('\\## User'), 'pisarz A escapuje `## ` w treści pola');
     t.false(/\n## User\n/.test(file), 'w pliku nie ma nieescapowanego `## User` jako linii');
 
@@ -151,7 +151,7 @@ test('kontrakt: plik MIESZANY (transkrypt + ogon eventów) wraca w kolejności p
         ],
         { type: 'active_session', agent: 'Jaskier', created: '2026-07-30T10:00:00.000Z' },
     );
-    // Sanity: pisarz B też escapuje — obie połowy pliku używają TEJ SAMEJ pary regexów.
+    // Sanity: pisarz B też escapuje - obie połowy pliku używają TEJ SAMEJ pary regexów.
     t.true(transcript.includes('\\## User'));
 
     const file = appendEvents(transcript, [
@@ -192,7 +192,7 @@ test('kontrakt: nierozpoznany nagłówek w transkrypcie wraca do treści poprzed
 // ─── 3. Wsteczna zgodność: LEGACY event-log bez escapowania ───
 
 test('wsteczna zgodność: legacy event-log (pisany BEZ escapowania) parsuje się jak dotąd', t => {
-    // Ręcznie sklejony plik w formacie sprzed S36 — dokładnie to, co leży u usera na dysku.
+    // Ręcznie sklejony plik w formacie sprzed v2 - dokładnie to, co leży u usera na dysku.
     const legacy = [
         '---',
         'type: active_session',
@@ -233,9 +233,9 @@ test('wsteczna zgodność: legacy event-log (pisany BEZ escapowania) parsuje si�
 });
 
 test('wsteczna zgodność: legacy event z `## ` w treści dalej gubi granicę (nowe pliki już nie)', t => {
-    // Ta wtopa jest DZIEDZICZONA i nieodwracalna dla plików sprzed S36: pisarz A nie
+    // Ta wtopa jest DZIEDZICZONA i nieodwracalna dla plików sprzed v2: pisarz A nie
     // escapował, więc `## Wyniki` leży w pliku jako prawdziwa linia nagłówka. Czytnik nie
-    // ma jak odgadnąć, że to była treść — doklejka (c) ratuje ją do POPRZEDNIEJ wiadomości.
+    // ma jak odgadnąć, że to była treść - doklejka (c) ratuje ją do POPRZEDNIEJ wiadomości.
     // Test pilnuje, że tak zostaje (nic nie ginie), a nowe pliki są już escapowane (wyżej).
     const legacy = [
         '## 2026-07-29T11:00:00.000Z — agent message',
@@ -302,16 +302,16 @@ test('escape/unescape: unescape jest no-opem na tekście bez escapów (idempoten
 });
 
 test('escape/unescape: ZNANA strata — literalny `\\## ` na początku linii wraca jako `## `', t => {
-    // Świadomie udokumentowana niedoskonałość schematu, ODZIEDZICZONA po `formatToMarkdown`
+    // Świadomie udokumentowana niedoskonałość schematu - ta sama, którą ma `formatToMarkdown`
     // (pisarz B ma ją od zawsze). Naprawa = escapowanie samego backslasha, czyli zmiana
-    // formatu po stronie B i odczytu starych plików — poza zakresem S36 Fazy 1.
+    // formatu po stronie B i odczytu starych plików.
     const tricky = 'Kod:\n\\## nie ruszaj';
     t.is(unescapeActiveText(escapeActiveText(tricky)), 'Kod:\n## nie ruszaj');
-    // Ten sam efekt na pełnym round-tripie event-logu — żeby nikt nie odkrył tego przypadkiem.
+    // Ten sam efekt na pełnym round-tripie event-logu - żeby nikt nie odkrył tego przypadkiem.
     const parsed = parseActiveSession(buildEventLog([{ type: 'user_message', content: tricky }]));
     t.is(parsed.messages[0].content, 'Kod:\n## nie ruszaj');
 
-    // S36 Faza 2: escapowanie etykiet pól dziedziczy TĘ SAMĄ wadę — literalny `\**result:**`
+    // Escapowanie etykiet pól dziedziczy TĘ SAMĄ wadę - literalny `\**result:**`
     // w treści wraca bez backslasha. Ta sama przyczyna (nie escapujemy samego backslasha),
     // ta sama świadoma decyzja.
     const trickyLabel = 'Log:\n\\**result:**\nkoniec';
@@ -320,11 +320,11 @@ test('escape/unescape: ZNANA strata — literalny `\\## ` na początku linii wra
 });
 
 test('stała wersji kontraktu jest ustawiona', t => {
-    // v2 = S36 Faza 2 (pole `**seq:**` + escapowanie etykiet pól).
+    // v2 = pole `**seq:**` + escapowanie etykiet pól.
     t.is(ACTIVE_SESSION_FORMAT_VERSION, 2);
 });
 
-// ─── 5b. S36 Faza 2: numeracja `seq` + escapowanie etykiet pól ───
+// ─── Numeracja `seq` + escapowanie etykiet pól ───
 
 test('seq: pole `**seq:**` trafia do pliku tylko dla liczby', t => {
     const withSeq = formatSessionEvent('user_message', { content: 'raz', seq: 7 }, '2026-07-30T10:00:00.000Z');
@@ -354,7 +354,7 @@ test('maxSeq: największy numer w pliku, 0 gdy numeracji nie ma', t => {
     t.is(maxSeq(file), 3);
     t.is(maxSeq(file.replace(/\n/g, '\r\n')), 3, 'CRLF nie psuje skanu');
 
-    // Numeracja z dziurą / nie po kolei — liczy się MAKSIMUM, nie ostatni wpis.
+    // Numeracja z dziurą / nie po kolei - liczy się MAKSIMUM, nie ostatni wpis.
     const outOfOrder = buildEventLog([
         { type: 'user_message', content: 'raz', seq: 41 },
         { type: 'agent_message', content: 'dwa', seq: 12 },
@@ -371,7 +371,7 @@ test('maxSeq: linia `**seq:** 5` wklejona w TREŚĆ nie podbija licznika', t => 
 });
 
 test('pola: treść z linią będącą etykietą pola (`**result:**`) wraca VERBATIM', t => {
-    // Dziura bliźniacza do `## ` (znalezisko S36 Fazy 1): bez escapowania ta linia ucinała
+    // Dziura bliźniacza do `## `: bez escapowania ta linia ucinała
     // pole przy odczycie, bo lookahead brał ją za początek następnego pola.
     const trap = [
         'Zwrotka narzędzia:',
@@ -395,13 +395,13 @@ test('pola: treść z linią będącą etykietą pola (`**result:**`) wraca VERB
     ]);
 });
 
-test('AUD-code-review-007: etykieta pola WCZEŚNIEJSZEGO w EVENT_FIELDS (`content`) osadzona w treści pola PÓŹNIEJSZEGO (`result`) nie podszywa się pod prawdziwe pole', t => {
+test('etykieta pola WCZEŚNIEJSZEGO w EVENT_FIELDS (`content`) osadzona w treści pola PÓŹNIEJSZEGO (`result`) nie podszywa się pod prawdziwe pole', t => {
     // `extractEventField` sprawdzał pole `content` PRZED `result` (kolejność prób w
     // `parseActiveSession`), a bez kotwicy `^`/`\n` i przy fladze `i` etykieta wcześniejszego
-    // pola osadzona w środku treści późniejszego pola wygrywała wyścig — czytnik zwracał tylko
+    // pola osadzona w środku treści późniejszego pola wygrywała wyścig - czytnik zwracał tylko
     // ogon PO niej, gubiąc początek. Wariant małych liter pisarz ESCAPUJE (jak `**result:**`
     // w teście wyżej); wariant wielkich liter pisarz w ogóle nie rusza, bo `FIELD_LABEL_LINE_RE`
-    // (escape pisarza) nie ma flagi `i` — więc czytnik MUSI stosować dokładnie tę samą regułę
+    // (escape pisarza) nie ma flagi `i` - więc czytnik MUSI stosować dokładnie tę samą regułę
     // rozpoznawania etykiety (kotwica + wielkość liter), inaczej jedna ze stron widzi granicę,
     // której druga nie widzi.
     const trapLower = ['PIERWSZA CZESC', '', '**content:**', '', 'DRUGA CZESC'].join('\n');
@@ -420,7 +420,7 @@ test('AUD-code-review-007: etykieta pola WCZEŚNIEJSZEGO w EVENT_FIELDS (`conten
 });
 
 test('pola: NIEZNANA bold-etykieta w treści już nie ucina pola (poprawa dla plików legacy)', t => {
-    // Lookahead był `\n\*\*[^*]+:\*\*` — KAŻDA bold-etykieta kończyła pole, więc `**Uwaga:**`
+    // Lookahead był `\n\*\*[^*]+:\*\*` - KAŻDA bold-etykieta kończyła pole, więc `**Uwaga:**`
     // w odpowiedzi modelu obcinało resztę wiadomości. Teraz kończą tylko znane etykiety.
     const legacy = [
         '## 2026-07-29T11:00:00.000Z — agent message',
@@ -484,16 +484,16 @@ test('strażnik: formatToMarkdown → parseSessionFile bez zmian po przeniesieni
     t.is(parsed.summary, 'streszczenie');
 });
 
-// ─── AUD-bledy-011: padnięty bieg suba NIE MOŻE zniknąć z odtworzonej sesji ───
+// ─── Padnięty bieg suba NIE MOŻE zniknąć z odtworzonej sesji ───
 //
 // `SubAgentRunner` dopisuje awarię jako blok `subagent_error` z polem `**role:**` niosącym
 // ETYKIETĘ suba („researcher"). `roleFromEvent` nie znało tego typu, więc czytało `role` jako
-// rolę WIADOMOŚCI — nieznana wartość dawała `null` i parser POMIJAŁ cały blok. Skutki: po
+// rolę WIADOMOŚCI - nieznana wartość dawała `null` i parser POMIJAŁ cały blok. Skutki: po
 // restarcie Obsidiana odtworzona rozmowa nie ma śladu po padzie, konsolidacja karmi się
 // `parsed.messages` (pamięć długoterminowa widzi tylko udane biegi), a `archiveActiveSession`
-// przepisuje sesję z `parsed.messages` i KASUJE oryginał — zapis o awarii przestaje istnieć.
+// przepisuje sesję z `parsed.messages` i KASUJE oryginał - zapis o awarii przestaje istnieć.
 
-test('AUD-bledy-011: round-trip subagent_error — blok zapisany, blok odczytany', t => {
+test('round-trip subagent_error — blok zapisany, blok odczytany', t => {
     const errText = 'Błąd sub-agenta Researcher: model timeout po 900000 ms';
     const file = buildEventLog([
         { type: 'agent_message', content: 'Zlecam researcherowi rozpoznanie.' },
@@ -512,9 +512,9 @@ test('AUD-bledy-011: round-trip subagent_error — blok zapisany, blok odczytany
     ], 'awaria suba wraca z odczytu jak każde inne zdarzenie biegu');
 });
 
-test('AUD-bledy-011: etykieta roli suba nie podszywa się pod rolę wiadomości', t => {
+test('etykieta roli suba nie podszywa się pod rolę wiadomości', t => {
     // Sub z `role: system` w YAML-u wstrzykiwał treść błędu do odtworzonej rozmowy jako
-    // WIADOMOŚĆ SYSTEMOWĄ — typ zdarzenia musi wygrywać z polem `**role:**`.
+    // WIADOMOŚĆ SYSTEMOWĄ - typ zdarzenia musi wygrywać z polem `**role:**`.
     const file = buildEventLog([
         { type: 'subagent_error', role: 'system', prompt: 'x', result: 'padło' },
         { type: 'subagent_call', role: 'system', prompt: 'x', result: 'poszło' },

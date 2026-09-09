@@ -1,6 +1,6 @@
 /**
  * HomeView - Main sidebar view showing agents, communicator and backstage.
- * Crystal Soul design system — Faza 6.
+ * Crystal Soul design system.
  */
 import { Notice } from 'obsidian';
 import { openAgentDeleteModal } from '../AgentDeleteModal.js';
@@ -13,14 +13,14 @@ import { t } from '../../../core/i18n/index.js';
 import { log } from '../../../core/utils/Logger.js';
 import { CHAT_VIEW_TYPE } from '../../../core/index.js';
 
-// Zachowuje historyczny value-import i jego inicjalizację modułu; sam wynik pozostaje nieużywany.
+// Value-import (nie tylko typ) - inicjalizuje moduł przy imporcie; sam wynik pozostaje nieużywany.
 void Agent;
 
 // TS-any: these values cross dynamic Obsidian/plugin APIs not yet modelled by the migration.
 type Runtime = any;
 
 /**
- * E2.8 C2: pierwsza wolna nazwa domyślnego agenta (Agent1, Agent2, …).
+ * Pierwsza wolna nazwa domyślnego agenta (Agent1, Agent2, …).
  * @param {Object} agentManager
  * @returns {string}
  */
@@ -78,7 +78,7 @@ export function renderHomeView(container: Runtime, plugin: Runtime, nav: Runtime
     }
 
     // Add agent card (dashed)
-    // E2.8 C2: „czysta kartka" — od razu twórz agenta z pierwszą wolną nazwą (Agent1/Agent2…)
+    // „Czysta kartka" - od razu twórz agenta z pierwszą wolną nazwą (Agent1/Agent2…)
     // i otwórz jego profil w NORMALNYM trybie edycji (bez osobnego create-mode).
     const addCard = grid.createDiv({ cls: 'cs-agent-card cs-agent-card--add' });
     setSvg(addCard, UiIcons.plus(16));
@@ -92,7 +92,7 @@ export function renderHomeView(container: Runtime, plugin: Runtime, nav: Runtime
         }
     });
 
-    // ── Section: Komunikator ── (E1.2 kill-switch: hidden unless enabled, default off)
+    // ── Section: Komunikator ── (kill-switch: hidden unless enabled, default off)
     if (isKomunikatorEnabled(plugin.settings)) {
         renderCommunicatorSection(container, agents, plugin, nav);
     }
@@ -104,7 +104,7 @@ export function renderHomeView(container: Runtime, plugin: Runtime, nav: Runtime
 }
 
 /**
- * Render a single agent card — Crystal Soul style.
+ * Render a single agent card - Crystal Soul style.
  */
 function renderAgentCard(container: Runtime, agentInfo: Runtime, plugin: Runtime, nav: Runtime): void {
     const agent = plugin.agentManager.getAgent(agentInfo.name);
@@ -143,7 +143,7 @@ function renderAgentCard(container: Runtime, agentInfo: Runtime, plugin: Runtime
         nav.push('agent-profile', { agentName: agent.name }, t('sidebar.agents'));
     });
 
-    // E2.8 A6 (S25): kosz ukryty dla agenta wbudowanego (Jaskier) — nieusuwalny (defense in depth).
+    // Kosz ukryty dla agenta wbudowanego (Jaskier) - nieusuwalny (defense in depth).
     if (!agent.isBuiltIn) {
         const deleteBtn = actions.createEl('button', {
             cls: 'cs-agent-card__action cs-agent-card__action--danger',
@@ -176,12 +176,12 @@ function renderAgentCard(container: Runtime, agentInfo: Runtime, plugin: Runtime
 }
 
 /**
- * Render the communicator section — Crystal Soul style.
+ * Render the communicator section - Crystal Soul style.
  */
 function renderCommunicatorSection(container: Runtime, agents: Runtime[], plugin: Runtime, nav: Runtime): void {
     const section = container.createDiv({ cls: 'cs-home-section' });
 
-    // Header (clickable — opens communicator)
+    // Header (clickable - opens communicator)
     const header = section.createDiv({ cls: 'cs-home-section__header cs-home-section__header--clickable' });
     const title = header.createDiv({ cls: 'cs-section-title cs-section-title--flush' });
     setSvgLabel(title, UiIcons.chat(12), t('sidebar.communicator'));
@@ -222,7 +222,7 @@ async function updateCommunicatorChips(chipContainer: Runtime, emptyLabel: Runti
     for (const agentInfo of agents) {
         const agent = plugin.agentManager.getAgent(agentInfo.name);
         if (!agent) continue;
-        // S28 D6: agent-duch nie pokazuje skrzynki ani licznika.
+        // Agent-duch nie pokazuje skrzynki ani licznika.
         if (plugin.agentManager.isKomunikatorVisible(agent) === false) continue;
 
         try {
@@ -244,7 +244,7 @@ async function updateCommunicatorChips(chipContainer: Runtime, emptyLabel: Runti
                 });
             }
         } catch (e) {
-            // Skrzynka JEDNEGO agenta może paść (uszkodzony plik, brak folderu) — nie ma
+            // Skrzynka JEDNEGO agenta może paść (uszkodzony plik, brak folderu) - nie ma
             // powodu wywalać całej listy Home dla reszty agentów. Fail-open: pomiń ten chip,
             // ale zostaw ślad w logu (cichy `catch {}` gubił sygnał o zepsutej skrzynce).
             log.warn('HomeView', `komunikator.getUnreadCount(${agentInfo.name}) failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -257,14 +257,14 @@ async function updateCommunicatorChips(chipContainer: Runtime, emptyLabel: Runti
 }
 
 /**
- * Render the Agora section — Crystal Soul style.
+ * Render the Agora section - Crystal Soul style.
  */
 
 /**
  * Async update Agora stats on home view.
  */
 /**
- * Render the Zaplecze (Backstage) section — Crystal Soul style.
+ * Render the Zaplecze (Backstage) section - Crystal Soul style.
  */
 function renderZapleczeSection(container: Runtime, plugin: Runtime, nav: Runtime): void {
     const section = container.createDiv({ cls: 'cs-home-section' });
@@ -275,7 +275,7 @@ function renderZapleczeSection(container: Runtime, plugin: Runtime, nav: Runtime
 
     const items = section.createDiv();
 
-    // S27 Z7: definicja wierszy = czysta struktura danych (backstage_rows.js). Tu tylko DOM.
+    // Definicja wierszy = czysta struktura danych (backstage_rows.js). Tu tylko DOM.
     for (const rowData of buildZapleczeRows(readZapleczeCounts(plugin))) {
         const label = t(rowData.labelKey);
         const row = items.createDiv({ cls: 'cs-home-row' });

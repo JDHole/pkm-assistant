@@ -1,5 +1,5 @@
 /**
- * Niewidzialność per agent (S28 D6) — jedno źródło prawdy dla UI, narzędzi, pingu i paneli.
+ * Niewidzialność per agent - jedno źródło prawdy dla UI, narzędzi, pingu i paneli.
  */
 import test from 'ava';
 import {

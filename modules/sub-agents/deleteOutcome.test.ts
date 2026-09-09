@@ -1,7 +1,7 @@
 /**
- * deleteOutcome - AUD-bledy-012. Modal pokazywał „Usunięto: X" także wtedy, gdy
+ * deleteOutcome - guardrail przeciw modalowi, który pokazuje „Usunięto: X" także wtedy, gdy
  * `deleteSubAgent` zwróciło `false` (wyjątek adaptera → `catch` → `return false`),
- * a sub zostawał w cache i na liście.
+ * a sub zostaje w cache i na liście.
  */
 import test from 'ava';
 import { resolveDeleteOutcome } from './deleteOutcome.js';

@@ -41,7 +41,7 @@ test('obiekt bez message → JSON.stringify jako message', t => {
     t.is(normalizeError({ foo: 'bar' }).message, '{"foo":"bar"}');
 });
 
-// ─── K20 (AUD-security-120): gałąź JSON.stringify wycina pola niosące sekrety ────────────
+// ─── Gałąź JSON.stringify wycina pola niosące sekrety ────────────
 //
 // Zdarzenie błędu streamera niosło `source` = cały streamer Z NAGŁÓWKAMI żądania
 // (`Authorization`, `api-key`). Gdy strumień padał bez ciała, `e.data` było puste i do
@@ -49,7 +49,7 @@ test('obiekt bez message → JSON.stringify jako message', t => {
 // `message`, czyli do pliku logu i na ekran usera. `message` nie jest miejscem na kontekst
 // żądania: pola, które z definicji niosą sekrety, wypadają, a całość ma twardy limit.
 
-test('K20: pola-sekrety (source/headers/request/xhr/config/options) nie wchodzą do message', t => {
+test('Pola-sekrety (source/headers/request/xhr/config/options) nie wchodzą do message', t => {
     const event = {
         status: 0,
         data: null,
@@ -64,7 +64,7 @@ test('K20: pola-sekrety (source/headers/request/xhr/config/options) nie wchodzą
     t.true(out.message.includes('status'), out.message);
 });
 
-test('K20: każde z pól-sekretów wypada niezależnie od zagnieżdżenia', t => {
+test('Każde z pól-sekretów wypada niezależnie od zagnieżdżenia', t => {
     for (const field of ['headers', 'source', 'request', 'request_params', 'xhr', 'config', 'options']) {
         const out = normalizeError({ code: 'ECONN', [field]: { 'api-key': 'AZURE123456789SECRET' } });
         t.false(out.message.includes('AZURE123456789SECRET'), `${field}: sekret w message → ${out.message}`);
@@ -73,14 +73,14 @@ test('K20: każde z pól-sekretów wypada niezależnie od zagnieżdżenia', t =>
     }
 });
 
-test('K20: message ma twardy limit długości', t => {
+test('Message ma twardy limit długości', t => {
     const out = normalizeError({ blob: 'x'.repeat(50000) });
     t.true(out.message.length <= 4100, `message ma ${out.message.length} znaków`);
     const long_message = normalizeError({ message: 'y'.repeat(50000) });
     t.true(long_message.message.length <= 4100, `message ma ${long_message.message.length} znaków`);
 });
 
-test('K20: cykliczny obiekt nie wywala normalizacji', t => {
+test('Cykliczny obiekt nie wywala normalizacji', t => {
     const circular: Record<string, unknown> = { code: 'LOOP' };
     circular.self = circular;
     const out = normalizeError(circular);
@@ -88,13 +88,13 @@ test('K20: cykliczny obiekt nie wywala normalizacji', t => {
     t.is(out.code, 'LOOP');
 });
 
-test('K20: `details` zostaje surowym obiektem (kontrakt adapterów bez zmian)', t => {
+test('`details` zostaje surowym obiektem (kontrakt adapterów bez zmian)', t => {
     const err = { status: 500, source: { headers: { Authorization: 'Bearer X' } } };
     t.is(normalizeError(err).details, err);
 });
 
-// clean-room / F2: obie stałe stały się publiczne (właściciel typu i funkcji to ten plik,
-// a stoją na nich testy K20 klastra `models` i transport w `core/http`).
+// Obie stałe są publiczne (właściciel typu i funkcji to ten plik, a stoją na nich testy
+// klastra `models` i transport w `core/http`).
 test('MAX_ERROR_MESSAGE_LENGTH to twardy limit 4000 znaków', t => {
     t.is(MAX_ERROR_MESSAGE_LENGTH, 4000);
 });

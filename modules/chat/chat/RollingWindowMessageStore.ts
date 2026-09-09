@@ -25,7 +25,6 @@
  *   3. gdyby wyścig chwilowo rozspójnił `rw.messages`, `sanitizeToolTranscript` (RollingWindow
  *      + pętla) usuwa osierocone tool messages PRZED każdym wywołaniem modelu — API nigdy nie
  *      dostaje malformed transkryptu ani kontekstu > 100%.
- * Świadoma decyzja — patrz raport E2.1 krok B (sekcja „ryzykowne miejsca").
  */
 export interface RollingWindowLike {
     messages: RollingWindow['messages'];

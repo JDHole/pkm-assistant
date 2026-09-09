@@ -1,22 +1,21 @@
 /**
- * migrationReviewFlow — CAŁA logika decyzyjna kroku „przegląd migracji Memory v2→v3"
+ * migrationReviewFlow - CAŁA logika decyzyjna kroku "przegląd migracji Memory v2→v3"
  * wołanego z `AgentManager._initializeMemoryForAgent`.
  *
- * WERDYKT WŁAŚCICIELA (2026-08-27, AUD-docs-051): „Cancel ma naprawdę anulować". Do tej
- * naprawy `AgentManager` wołał `migration.run()` DRUGI RAZ z `{interactive:false}`, gdy user
- * odrzucił modal review (Cancel ALBO zamknięcie przez X/Esc — `MigrationModal` oddaje dla
- * obu dokładnie ten sam `{action:'cancel'}`) — czyli plan migracji i tak był stosowany, mimo
- * jawnej odmowy. Funkcja niżej jest tym krokiem w całości: sprawdza potrzebę migracji, woła
- * `run()` DOKŁADNIE RAZ, i przy odrzuceniu wyłącznie informuje wołacza przez `onCancelled` —
- * bez żadnego automatycznego powtórzenia, w żadnym trybie.
+ * "Cancel ma naprawdę anulować" - gdy user odrzuci modal review (Cancel ALBO zamknięcie przez
+ * X/Esc - `MigrationModal` oddaje dla obu dokładnie ten sam `{action:'cancel'}`), migracja NIE
+ * może zostać zastosowana przez żadną automatyczną ścieżkę. Funkcja niżej jest tym krokiem
+ * w całości: sprawdza potrzebę migracji, woła `run()` DOKŁADNIE RAZ, i przy odrzuceniu
+ * wyłącznie informuje wołacza przez `onCancelled` - bez żadnego automatycznego powtórzenia,
+ * w żadnym trybie.
  *
- * Plik jest CZYSTY — zero `obsidian`, zero DOM, zero i18n (wzorzec `subTaskPanelModel.ts`
+ * Plik jest CZYSTY - zero `obsidian`, zero DOM, zero i18n (wzorzec `subTaskPanelModel.ts`
  * z `modules/sub-agents/`). Powód jest identyczny: `AgentManager.ts` transytywnie ciągnie
  * `obsidian` przez `MigrationModal.js` (bazowa klasa `Modal`), a testy AVA nie mają jego
- * atrapy poza harnessem (esbuild alias) — `AgentManager` nie wstaje w gołym Node. Wydzielenie
+ * atrapy poza harnessem (esbuild alias) - `AgentManager` nie wstaje w gołym Node. Wydzielenie
  * tej decyzji do osobnego, obsidian-free pliku jest jedynym sposobem, żeby przetestować ją
  * PRAWDZIWYM wykonaniem (wstrzykiwana atrapa silnika migracji) zamiast testu po źródle albo
- * DOM-a. `migration` jest typowany STRUKTURALNIE — prawdziwy `MigrationV3` go spełnia bez
+ * DOM-a. `migration` jest typowany STRUKTURALNIE - prawdziwy `MigrationV3` go spełnia bez
  * żadnej zmiany, testy wstrzykują lekką atrapę.
  */
 

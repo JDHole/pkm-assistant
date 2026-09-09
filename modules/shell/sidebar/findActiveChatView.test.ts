@@ -2,12 +2,11 @@ import test from 'ava';
 import { findActiveChatView } from './findActiveChatView.js';
 import { CHAT_VIEW_TYPE } from '../../../core/index.js';
 
-// AUD-dead-code-182: `TriggersView.ts` used to carry its own local
-// `CHAT_VIEW_TYPE = 'pkm-chat'` — a stale copy of the real chat view-type id
-// (`'pkm-assistant-chat'`, `modules/chat/chat_view.ts`). `getLeavesOfType` matches
-// view types EXACTLY, so `findActiveChatView` always came back empty even with a
-// chat tab open. This test asserts the ARGUMENT the function hands to
-// `getLeavesOfType`, not just the mock's return value passed through — a return-only
+// `findActiveChatView` must use the real chat view-type id (`'pkm-assistant-chat'`,
+// `modules/chat/chat_view.ts`) via the canonical `CHAT_VIEW_TYPE` import, not a local copy -
+// `getLeavesOfType` matches view types EXACTLY, so a stale copy would make `findActiveChatView`
+// always come back empty even with a chat tab open. This test asserts the ARGUMENT the function
+// hands to `getLeavesOfType`, not just the mock's return value passed through - a return-only
 // assertion would pass just as happily with the wrong string.
 test('findActiveChatView asks the workspace for leaves of the canonical chat view type', t => {
     const seenTypes: string[] = [];

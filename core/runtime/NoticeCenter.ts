@@ -1,7 +1,7 @@
 /**
  * `NoticeCenter` — powiadomienia runtime'u.
  *
- * S-17 REGUŁA: gałąź ustawień powiadomień jest PROWIZJONOWANA w SUROWYM worku
+ * REGUŁA: gałąź ustawień powiadomień jest PROWIZJONOWANA w SUROWYM worku
  * (`settingsStore.raw`), ale getter zwraca gałąź Z PROXY — wyciszenie przez usera
  * to prawdziwa decyzja i MA planować zapis. Boot sam z siebie nie planuje zapisu.
  */
@@ -57,7 +57,7 @@ interface GlobaleObsidiana {
 }
 
 export class NoticeCenter implements NoticeLike {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare private _createNotice: CreateNoticeFn;
     declare private _store: SettingsStore;
     declare private _log: LoggerLike;
@@ -71,7 +71,7 @@ export class NoticeCenter implements NoticeLike {
     }
 
     /**
-     * Pokazuje powiadomienie. Wyciszone id (N-02) nie dociera na ekran — zwracany jest `null`,
+     * Pokazuje powiadomienie. Wyciszone id nie dociera na ekran — zwracany jest `null`,
      * więc wołacz nie ma czego zamykać i po niczym nie sprząta.
      */
     show(text: string, options: NoticeOptions = {}): NoticeHandle | null {
@@ -115,7 +115,7 @@ export class NoticeCenter implements NoticeLike {
         return galaz?.muted?.[id] === true;
     }
 
-    /** Wycisza id — mutacja PRZEZ PROXY (S-17), więc planuje zapis. */
+    /** Wycisza id — mutacja PRZEZ PROXY, więc planuje zapis. */
     mute(id: string): void {
         if (!id) return;
         // Kontenery dotwarzamy w SUROWYM worku (samo ich istnienie nie jest decyzją usera),
@@ -127,7 +127,7 @@ export class NoticeCenter implements NoticeLike {
         this.show(t('env.notice_muted'));
     }
 
-    /** N-01: zamyka wszystkie żywe powiadomienia i zdejmuje nasłuchy. */
+    /** Zamyka wszystkie żywe powiadomienia i zdejmuje nasłuchy. */
     unload(): void {
         for (const uchwyt of [...this._zywe]) {
             try {
@@ -139,7 +139,7 @@ export class NoticeCenter implements NoticeLike {
         this._zywe.clear();
     }
 
-    /** Prowizjonowanie gałęzi `pkmAssistant.notices.muted` w SUROWYM worku (S-17). */
+    /** Prowizjonowanie gałęzi `pkmAssistant.notices.muted` w SUROWYM worku. */
     private _kontenerMuted(): Record<string, boolean> {
         const raw = this._store.raw as Worek;
         const pkm = (raw['pkmAssistant'] ??= {}) as Worek;

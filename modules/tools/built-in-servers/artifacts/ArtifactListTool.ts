@@ -1,5 +1,5 @@
 /**
- * artifact_list — wylistuj artefakty żywe (domyślnie bieżącego agenta) (E2.9 A4).
+ * artifact_list — wylistuj artefakty żywe (domyślnie bieżącego agenta).
  * Śledzenie po frontmatterze (`pkm-artefakt`), nie po ścieżce — działa też po przeniesieniu notatki.
  */
 import { t } from '../../../../core/i18n/index.js';
@@ -26,9 +26,9 @@ export function createArtifactListTool() {
                 status: { type: 'string', description: t('mcp.artifact_list.param.status') },
             },
         },
-        // K2 (AUD-security-075): listowanie nie dotyczy JEDNEGO pliku, więc celem jest folder
-        // artefaktów — agent, który nie ma prawa go czytać, nie dostaje też spisu. Same WYNIKI
-        // tnie dodatkowo `AccessGuard.filterResults` w kroku 7 `MCPClient` (wzór `list`/`search`).
+        // Listowanie nie dotyczy JEDNEGO pliku, więc celem jest folder artefaktów — agent, który
+        // nie ma prawa go czytać, nie dostaje też spisu. Same WYNIKI tnie dodatkowo
+        // `AccessGuard.filterResults` w kroku 7 `MCPClient` (wzór `list`/`search`).
         contextExtractor: (_args: ArtifactListArgs, ctx: { plugin?: unknown }) => ({
             targetPath: artifactStoreFromCtx(ctx?.plugin)?.artifactsRoot?.() || '',
         }),

@@ -1,10 +1,10 @@
 /**
- * streamHelper.test.js — S29 Z1: opcje `streamToComplete` (onChunk / signal / watchdog).
+ * streamHelper.test.js - opcje `streamToComplete` (onChunk / signal / watchdog).
  *
  * Atrapy modelu wg tego samego kontraktu, co reszta testów pamięci
  * (`ArchiveWorkflow.test.js`, `modules/web/summarize.test.js`): `.stream({messages},
  * {chunk, done, error})`, gdzie `done` dostaje kształt OpenAI. Nic poza modelem nie jest
- * podmieniane — cała logika helpera jest prawdziwa.
+ * podmieniane - cała logika helpera jest prawdziwa.
  */
 import test from 'ava';
 import { streamToComplete, STREAM_ERROR_CODES } from './streamHelper.js';
@@ -90,7 +90,7 @@ function chunkingModel(pieces: string[]): StreamChatModelLike {
     };
 }
 
-/** Model, który przyjmuje request i milczy — nigdy nie woła done/chunk/error. */
+/** Model, który przyjmuje request i milczy - nigdy nie woła done/chunk/error. */
 function silentModel() {
     const state = { stopped: 0 };
     return {
@@ -193,7 +193,7 @@ test('chunki karmią watchdoga — żywy stream nie jest przerywany', async t =>
             now: clock.now,
         },
     });
-    clock.advance(250); // 2× po 100ms — nigdy 120ms ciszy pod rząd
+    clock.advance(250); // 2× po 100ms - nigdy 120ms ciszy pod rząd
 
     const res = await promise;
     t.false(stalled);

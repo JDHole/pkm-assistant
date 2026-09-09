@@ -2,7 +2,7 @@
  * ArchiveWorkflow.test.js — logika WSPÓLNA konsolidacji: dedup `brain/` (propozycja + aplikacja),
  * synteza podsumowań (`_summaryFromFiles`) i zapisywacze (`_writeLevel1/2/3`).
  *
- * D6 (2026-07-30): testy STAREGO, blokującego toru (`run()`, `createLevel1/2/3`,
+ * Testy STAREGO, blokującego toru (`run()`, `createLevel1/2/3`,
  * `ConsolidationSnapshot.create/restore`) skasowane razem z tym torem. Testy, które używały
  * `createLevelN` tylko jako WEHIKUŁU do sprawdzenia logiki wspólnej (podmiana `{{LEVEL}}`,
  * zdejmowanie ogrodzeń ```, fallback raw-concat), zostały przepisane na bezpośredni strzał
@@ -109,7 +109,7 @@ function makeMockModel(responseText: string): StreamChatModelLike {
     };
 }
 
-// ── Default archive prompt (moved to Agent constructor defaults in E2.8 A2) ──
+// ── Default archive prompt (moved to Agent constructor defaults) ──
 
 test('DEFAULT_ARCHIVE_PROMPT is the JSON-output contract for LLM-driven dedup', t => {
     t.true(DEFAULT_ARCHIVE_PROMPT.includes('OUTPUT'));
@@ -119,9 +119,9 @@ test('DEFAULT_ARCHIVE_PROMPT is the JSON-output contract for LLM-driven dedup', 
 
 // ── Zapisywacze podsumowań (kaskada L1/L2/L3) — kontrakt bez zmian ──
 //
-// Wcześniej wchodziło się tu przez `createLevelN` (stary tor). Po D6 wybór paczki i zapis to dwa
+// Wcześniej wchodziło się tu przez `createLevelN` (stary tor). Wybór paczki i zapis to dwa
 // osobne kroki: `_listSessionsForL1`/`_listMarkdown` wybierają, `_writeLevelN` zapisuje. Testy
-// robią dokładnie to, co robił `createLevelN` — minus modal.
+// robią dokładnie to, co robił `createLevelN` - minus modal.
 
 test('ArchiveWorkflow zapisuje L1 z pięciu zarchiwizowanych sesji NIE kasując sesji', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
@@ -205,20 +205,20 @@ test('ArchiveWorkflow zapisuje L3 z pięciu L2, kasuje pokryte L1 i ZOSTAWIA L2'
 test('ArchiveWorkflow.proposeDedup uses LLM when model + agent.archive_prompt are provided', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const { vault } = makeVault({
-        [`${base}/brain/user_kuba_dev.md`]: brainNoteFile('Kuba programuje', 'user', 'Kuba pisze plugin', 'dev fact'),
-        [`${base}/brain/user_kuba_writer.md`]: brainNoteFile('Kuba pisze', 'user', 'Kuba pisze posty', 'writer fact'),
+        [`${base}/brain/user_jan_dev.md`]: brainNoteFile('Jan programuje', 'user', 'Jan pisze plugin', 'dev fact'),
+        [`${base}/brain/user_jan_writer.md`]: brainNoteFile('Jan pisze', 'user', 'Jan pisze posty', 'writer fact'),
     });
     const memory = new AgentMemory(vault, 'Jaskier');
 
     const llmResponse = JSON.stringify({
         merges: [{
-            sources: ['user_kuba_dev.md', 'user_kuba_writer.md'],
-            target_name: 'kuba_profil',
+            sources: ['user_jan_dev.md', 'user_jan_writer.md'],
+            target_name: 'jan_profil',
             target_type: 'user',
-            target_description: 'Co Kuba robi',
+            target_description: 'Co Jan robi',
             target_why: 'fakty komplementarne',
-            target_how_to_apply: 'cytuj gdy o Kubie',
-            merged_content: 'Kuba pisze plugin i posty.',
+            target_how_to_apply: 'cytuj gdy o Janie',
+            merged_content: 'Jan pisze plugin i posty.',
             why: 'Dwie notatki o tej samej osobie.'
         }],
         deletions: []
@@ -231,16 +231,16 @@ test('ArchiveWorkflow.proposeDedup uses LLM when model + agent.archive_prompt ar
     const result = await workflow.proposeDedup();
     t.true(result.llmDriven);
     t.is(result.merges.length, 1);
-    t.is(result.merges[0].target_name, 'kuba_profil');
+    t.is(result.merges[0].target_name, 'jan_profil');
     t.is(result.merges[0].target_type, 'user');
-    t.is(result.merges[0].merged_content, 'Kuba pisze plugin i posty.');
+    t.is(result.merges[0].merged_content, 'Jan pisze plugin i posty.');
 });
 
 test('ArchiveWorkflow.proposeDedup falls back to prefix grouping without LLM', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const { vault } = makeVault({
-        [`${base}/brain/user_kuba_dev.md`]: brainNoteFile('Kuba dev', 'user'),
-        [`${base}/brain/user_kuba_writer.md`]: brainNoteFile('Kuba writer', 'user'),
+        [`${base}/brain/user_jan_dev.md`]: brainNoteFile('Jan dev', 'user'),
+        [`${base}/brain/user_jan_writer.md`]: brainNoteFile('Jan writer', 'user'),
     });
     const memory = new AgentMemory(vault, 'Jaskier');
     const workflow = new ArchiveWorkflow(memory); // no model, no agent
@@ -248,7 +248,7 @@ test('ArchiveWorkflow.proposeDedup falls back to prefix grouping without LLM', a
     const result = await workflow.proposeDedup();
     t.false(result.llmDriven);
     t.is(result.merges.length, 1);
-    t.deepEqual(result.merges[0].sources.sort(), ['user_kuba_dev.md', 'user_kuba_writer.md']);
+    t.deepEqual(result.merges[0].sources.sort(), ['user_jan_dev.md', 'user_jan_writer.md']);
 });
 
 test('ArchiveWorkflow.proposeDedup strips ```json fences from LLM response', async t => {
@@ -340,7 +340,7 @@ test('ArchiveWorkflow.applyDedup uses LLM-provided clean merged_content (no raw 
     t.false(Object.prototype.hasOwnProperty.call(files, `${base}/brain/user_b.md`));
 });
 
-test('AUD-code-review-008: applyDedup NIE nadpisuje notatki SPOZA sources, gdy target_name koliduje z jej nazwą', async t => {
+test('applyDedup NIE nadpisuje notatki SPOZA sources, gdy target_name koliduje z jej nazwą', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const { vault, files } = makeVault({
         [`${base}/brain/user_a.md`]: brainNoteFile('A', 'user', 'A body', 'desc A'),
@@ -371,9 +371,9 @@ test('AUD-code-review-008: applyDedup NIE nadpisuje notatki SPOZA sources, gdy t
     const collidingPath = `${base}/brain/user_ab_combined.md`;
     const suffixedPath = `${base}/brain/user_ab_combined_2.md`;
 
-    // Do naprawy (AUD-code-review-008) applyDedup pisał na ślepo pod `targetPath`: notatka
-    // usera SPOZA scalenia znikała bez `.bak` i bez wpisu `delete` w `brain.log` (log dostawał
-    // tylko `merge`, jakby nic się nie stało poza scaleniem).
+    // DLACZEGO: applyDedup pisał na ślepo pod `targetPath`: notatka usera SPOZA scalenia
+    // znikała bez `.bak` i bez wpisu `delete` w `brain.log` (log dostawał tylko `merge`,
+    // jakby nic się nie stało poza scaleniem).
     t.true(files[collidingPath].includes('BEZCENNA TRESC USERA'), 'notatka spoza sources przeżywa scalenie NIETKNIĘTA');
     t.true(Object.prototype.hasOwnProperty.call(files, suffixedPath), 'scalenie dostaje sufiks _2 zamiast nadpisać cudzą notatkę');
     t.true(files[suffixedPath].includes('Clean merged content from LLM.'));
@@ -382,7 +382,7 @@ test('AUD-code-review-008: applyDedup NIE nadpisuje notatki SPOZA sources, gdy t
     t.false(Object.prototype.hasOwnProperty.call(files, `${base}/brain/user_b.md`));
 });
 
-test('AUD-code-review-008: target_name identyczny z JEDNYM ze sources nadal działa bez sufiksu (scalenie legalnie zajmuje jego miejsce)', async t => {
+test('target_name identyczny z JEDNYM ze sources nadal działa bez sufiksu (scalenie legalnie zajmuje jego miejsce)', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const { vault, files } = makeVault({
         [`${base}/brain/user_a.md`]: brainNoteFile('A', 'user', 'A body', 'desc A'),
@@ -411,7 +411,7 @@ test('AUD-code-review-008: target_name identyczny z JEDNYM ze sources nadal dzia
     t.false(Object.prototype.hasOwnProperty.call(files, `${base}/brain/user_b.md`));
 });
 
-test('F01 (runda 2): applyDedup pomija merge po wyczerpaniu 50 sufiksów zamiast pisać nad cudzą notatką "_50"', async t => {
+test('applyDedup pomija merge po wyczerpaniu 50 sufiksów zamiast pisać nad cudzą notatką "_50"', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const targetStem = makeMemoryNoteFilename('user', 'ab_combined').replace(/\.md$/, '');
 
@@ -441,9 +441,9 @@ test('F01 (runda 2): applyDedup pomija merge po wyczerpaniu 50 sufiksów zamiast
         deletions: []
     });
 
-    // Do naprawy (F01, runda 2): `break` przy suffix>50 zostawiał `targetFilename` na `_50` —
-    // nazwie, o której ta sama pętla WŁAŚNIE orzekła że ISTNIEJE — i pisał tam mimo to,
-    // nadpisując cudzą notatkę bez `.bak` i bez wpisu `delete` w `brain.log`.
+    // DLACZEGO: `break` przy suffix>50 zostawiał `targetFilename` na `_50` - nazwie, o której
+    // ta sama pętla WŁAŚNIE orzekła że ISTNIEJE - i pisał tam mimo to, nadpisując cudzą
+    // notatkę bez `.bak` i bez wpisu `delete` w `brain.log`.
     t.is(result.merged, 0, 'wyczerpanie sufiksów = zero scaleń wykonanych, nie cichy zapis');
 
     // Zero zapisu: żadna z 50 "cudzych" notatek nie została ruszona.
@@ -547,14 +547,14 @@ test('ArchiveWorkflow._parseDedupResponse defaults missing lessons_extracted to 
     t.false(result.deletions[0].lessons_extracted);
 });
 
-// D6: dawniej przez `run()` + `modalFactory` (stary tor). Ten sam gest żyje w `_applyStep`:
-// user odznaczył WSZYSTKIE scalenia → podnosimy próg, żeby nie zaczepiać go o to samo przy
-// każdym zapisie sesji. Wejście przez `applyStepDecision` (jedyne miejsce, gdzie się zapisuje).
+// Ten gest żyje w `_applyStep`: user odznaczył WSZYSTKIE scalenia → podnosimy próg, żeby nie
+// zaczepiać go o to samo przy każdym zapisie sesji. Wejście przez `applyStepDecision` (jedyne
+// miejsce, gdzie się zapisuje).
 test('ArchiveWorkflow podnosi próg notatek brain/ o +10, gdy user odrzuci wszystkie scalenia', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const { vault, files } = makeVault({
-        [`${base}/brain/user_kuba_dev.md`]: brainNoteFile('Kuba dev', 'user'),
-        [`${base}/brain/user_kuba_writer.md`]: brainNoteFile('Kuba writer', 'user'),
+        [`${base}/brain/user_jan_dev.md`]: brainNoteFile('Jan dev', 'user'),
+        [`${base}/brain/user_jan_writer.md`]: brainNoteFile('Jan writer', 'user'),
     });
     const memory = new AgentMemory(vault, 'Jaskier');
     const workflow = new ArchiveWorkflow(memory); // bez LLM → heurystyka prefiksów proponuje scalenie
@@ -579,7 +579,7 @@ test('ArchiveWorkflow podnosi próg notatek brain/ o +10, gdy user odrzuci wszys
     t.is(state.brain_notes_limit, 30); // 20 default + 10 bump
 });
 
-// AUD-testy-043: strona PRZECIWNA testu wyżej. Ten sam warunek `_applyStep`
+// Strona PRZECIWNA testu wyżej. Ten sam warunek `_applyStep`
 // (`proposal.merges.length > 0 && applied.merged === 0 && applied.deleted === 0`) miał pokrytą
 // TYLKO gałąź „wszystko odrzucone -> bump". Gdyby ktoś przy przyszłym refaktorze poluzował
 // warunek tak, że KAŻDE zaakceptowane scalenie też podbija próg, `brain_notes_limit` rósłby
@@ -588,8 +588,8 @@ test('ArchiveWorkflow podnosi próg notatek brain/ o +10, gdy user odrzuci wszys
 test('ArchiveWorkflow NIE podnosi progu notatek brain/, gdy user zaakceptuje scalenie i zostaje ono wykonane', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const { vault, files } = makeVault({
-        [`${base}/brain/user_kuba_dev.md`]: brainNoteFile('Kuba dev', 'user'),
-        [`${base}/brain/user_kuba_writer.md`]: brainNoteFile('Kuba writer', 'user'),
+        [`${base}/brain/user_jan_dev.md`]: brainNoteFile('Jan dev', 'user'),
+        [`${base}/brain/user_jan_writer.md`]: brainNoteFile('Jan writer', 'user'),
     });
     const memory = new AgentMemory(vault, 'Jaskier');
     const workflow = new ArchiveWorkflow(memory); // bez LLM → heurystyka prefiksów proponuje scalenie
@@ -678,7 +678,7 @@ test('ArchiveWorkflow._summaryFromFiles substitutes {{LEVEL}} token in summary_p
     t.false(capturedSystemPrompt!.includes('{{LEVEL}}'));
 });
 
-test('ArchiveWorkflow._summaryFromFiles uses factory summary prompt (with {{LEVEL}}) when agent has none — E2.8 B3', async t => {
+test('ArchiveWorkflow._summaryFromFiles uses factory summary prompt (with {{LEVEL}}) when agent has none', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const initial: Record<string, string> = {};
     for (let i = 1; i <= 5; i++) {
@@ -706,7 +706,7 @@ test('ArchiveWorkflow._summaryFromFiles uses factory summary prompt (with {{LEVE
     t.true(capturedSystemPrompt!.includes('## Kluczowe tematy'), 'factory summary prompt reached the model');
 });
 
-test('ArchiveWorkflow.proposeDedup uses LLM via factory archive prompt when agent has none — E2.8 B3', async t => {
+test('ArchiveWorkflow.proposeDedup uses LLM via factory archive prompt when agent has none', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const { vault } = makeVault({
         [`${base}/brain/user_a.md`]: brainNoteFile('A', 'user'),
@@ -789,22 +789,22 @@ test('ArchiveWorkflow._summaryFromFiles falls back to raw concat without agent/m
 test('makeMemoryNoteFilename strips duplicate type prefix in name', t => {
     // Bug pre-fix: makeMemoryNoteFilename('agent_rule', 'agent_rule_polski') → 'agent_rule_agent_rule_polski.md'
     t.is(makeMemoryNoteFilename('agent_rule', 'agent_rule_polski'), 'agent_rule_polski.md');
-    t.is(makeMemoryNoteFilename('user', 'user_kuba_dev'), 'user_kuba_dev.md');
+    t.is(makeMemoryNoteFilename('user', 'user_jan_dev'), 'user_jan_dev.md');
     t.is(makeMemoryNoteFilename('reference', 'reference_cytat'), 'reference_cytat.md');
     // No prefix to strip — passes through
-    t.is(makeMemoryNoteFilename('user', 'kuba_dev'), 'user_kuba_dev.md');
+    t.is(makeMemoryNoteFilename('user', 'jan_dev'), 'user_jan_dev.md');
     // Trailing .md gets stripped before normalization
-    t.is(makeMemoryNoteFilename('user', 'kuba.md'), 'user_kuba.md');
+    t.is(makeMemoryNoteFilename('user', 'jan.md'), 'user_jan.md');
 });
 
-// ── E2.7 K1 dokończone (2026-07-29): liczniki .state.json przez kolejkę RMW ──
+// ── Liczniki .state.json przez kolejkę RMW ──
 //
 // `_resetArchiveCounter` i `_autoBumpBrainNoteLimit` robiły `read()` → mutacja → `write()`.
 // Odczyt leciał POZA kolejką, a `write()` nadpisuje CAŁY plik, więc równoległy zapis z czatu
 // (`markArchived` / `addActiveSession` przy autozapisie) był po cichu cofany. Konsolidacja woła
-// `_resetArchiveCounter` raz na KAŻDĄ zaakceptowaną paczkę L1 — 12 paczek = 12 okien wyścigu.
+// `_resetArchiveCounter` raz na KAŻDĄ zaakceptowaną paczkę L1 - 12 paczek = 12 okien wyścigu.
 
-test('E2.7 K1: równoległy _autoBumpBrainNoteLimit i addActiveSession nie kasują się nawzajem', async t => {
+test('równoległy _autoBumpBrainNoteLimit i addActiveSession nie kasują się nawzajem', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const statePath = `${base}/.state.json`;
     const { vault, files } = makeVault({
@@ -830,7 +830,7 @@ test('E2.7 K1: równoległy _autoBumpBrainNoteLimit i addActiveSession nie kasuj
     t.deepEqual(state.active_sessions, ['zywa_sesja.md'], 'sesja z czatu też przeżyła');
 });
 
-test('E2.7 K1: równoległy _resetArchiveCounter i markArchived nie gubią wpisu z czatu', async t => {
+test('równoległy _resetArchiveCounter i markArchived nie gubią wpisu z czatu', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const statePath = `${base}/.state.json`;
     const { vault, files } = makeVault({
@@ -853,9 +853,9 @@ test('E2.7 K1: równoległy _resetArchiveCounter i markArchived nie gubią wpisu
     t.deepEqual((state.active_sessions || []).sort(), ['sesja_a.md', 'sesja_b.md']);
 });
 
-// ─── AUD-bledy-047: krok L1 melduje ZE STANU stempli, nie z faktu zapisania paczki ───
+// ─── Krok L1 melduje ZE STANU stempli, nie z faktu zapisania paczki ───
 
-test('AUD-bledy-047: pad stempla → wynik kroku L1 WYMIENIA nieostemplowane sesje', async t => {
+test('pad stempla → wynik kroku L1 WYMIENIA nieostemplowane sesje', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const initial: Record<string, string> = {
         [`${base}/sessions/archive/session_1.md`]: session('session_1.md', 'Sesja 1'),
@@ -887,7 +887,7 @@ test('AUD-bledy-047: pad stempla → wynik kroku L1 WYMIENIA nieostemplowane ses
     );
 });
 
-test('AUD-bledy-047: komplet stempli → wynik kroku bez pola `unstamped`', async t => {
+test('komplet stempli → wynik kroku bez pola `unstamped`', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const { vault } = makeVault({
         [`${base}/sessions/archive/session_1.md`]: session('session_1.md', 'Sesja 1'),

@@ -1,5 +1,5 @@
 /**
- * semanticNote — uczciwa nota degradacji dla narzędzi semantic (E1.4).
+ * semanticNote — uczciwa nota degradacji dla narzędzi semantic.
  *
  * Gdy vault_semantic / memory_semantic spada z warstwy embeddingów (L3) do
  * keyword (L2), dokładamy do wyniku dla modelu jawne zdanie DLACZEGO — na

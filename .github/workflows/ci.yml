@@ -34,7 +34,7 @@ jobs:
 
       - run: npm run build
 
-      # F2.20: build NIE MA PRAWA zostawić brudnego drzewa. `esbuild.js` wpisuje wersję
+      # Build NIE MA PRAWA zostawić brudnego drzewa. `esbuild.js` wpisuje wersję
       # z package.json do ŹRÓDŁOWEGO manifest.json (linie 81-82) i dopiero potem kopiuje go
       # do dist/ — dlatego dawne porównanie package.json z dist/manifest.json było tautologią:
       # dist powstawał właśnie z package.json, więc równość była gwarantowana z konstrukcji.
@@ -42,7 +42,7 @@ jobs:
       # Prawdziwy sygnał to brudne drzewo PO buildzie: gdy zacommitowany manifest.json rozjedzie
       # się z package.json, build go po cichu przepisze i ten krok padnie (sprawdzone lokalnie:
       # manifest 2.1.9 + package 2.2.0 → `git diff --exit-code` kończy się kodem 1).
-      - name: manifest i versions nietkniete przez build (F2.20)
+      - name: manifest i versions nietkniete przez build
         run: git diff --exit-code manifest.json versions.json
 
       - name: weryfikacja artefaktów builda
@@ -75,8 +75,8 @@ jobs:
             console.log('Artefakty builda OK (wersja ' + manifest.version + ', minAppVersion ' + manifest.minAppVersion + ')');
           "
 
-      # Harness „Szklane Pudło" — prawdziwy plugin bootowany w Node bez Obsidiana. Od 2026-09-07
-      # mieszka w OSOBNYM repo (https://github.com/JDHole/pkm-assistant-harness): walidator
+      # Harness „Szklane Pudło" — prawdziwy plugin bootowany w Node bez Obsidiana. Mieszka
+      # w OSOBNYM repo (https://github.com/JDHole/pkm-assistant-harness): walidator
       # katalogu Obsidiana lintuje CAŁE repo pluginu, a narzędzie testowe nie jest częścią
       # pluginu i generowało tysiące ostrzeżeń. Bramka zostaje ta sama — klonujemy harness obok
       # i puszczamy jego skrypty na TYM checkoutcie pluginu (PKM_ASSISTANT_ROOT).

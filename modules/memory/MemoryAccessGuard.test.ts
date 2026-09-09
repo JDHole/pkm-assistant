@@ -1,18 +1,18 @@
 /**
- * MemoryAccessGuard.test.ts — AUD-testy-023 (kanon; duplikat AUD-testy-057).
+ * MemoryAccessGuard.test.ts.
  *
- * `MemoryAccessGuard` nie miał WŁASNEGO pliku testowego — jedyny dotyk w testach całego repo
+ * `MemoryAccessGuard` nie miał WŁASNEGO pliku testowego - jedyny dotyk w testach całego repo
  * był pośredni, przez `ReadTool.test.ts` (trzy asercje na samo pole `code`). Mutacyjnie
- * potwierdzone (audyt testy 2026-09-01, runda 1+3): blok odmowy ścieżki
- * (`MemoryAccessGuard.ts:85-93` — null byte, `/`, `//`, litera dysku, segment `..`) idzie się
+ * potwierdzone: blok odmowy ścieżki
+ * (`MemoryAccessGuard.ts:85-93` - null byte, `/`, `//`, litera dysku, segment `..`) idzie się
  * wyciąć w całości, a `../../../etc/passwd` i `C:/Users/x/secret.md` wciąż wpadają w SĄSIEDNIĄ
- * gałąź wielosegmentową i oddają TEN SAM kod `invalid_path` — asercja na samym `code` tego nie
+ * gałąź wielosegmentową i oddają TEN SAM kod `invalid_path` - asercja na samym `code` tego nie
  * łapie. Strażnik kształtu nazwy (`:107-109`, regex `/^[a-zA-Z0-9][a-zA-Z0-9._-]*\.md$/`) nie miał
- * w całym repo ANI JEDNEJ asercji odmowy — po wycięciu `read(scope:'memory')` przyjmowałby
+ * w całym repo ANI JEDNEJ asercji odmowy - po wycięciu `read(scope:'memory')` przyjmowałby
  * dowolny jednosegmentowy ciąg (`archive`, `note.txt`, `C:x.md`) jako nazwę notatki w `brain/`.
  *
  * Ten plik testuje `validateNoteFilename` BEZPOŚREDNIO na czystej klasie (bez `ReadTool`), po
- * jednej asercji na każdy warunek odmowy, Z ROZRÓŻNIENIEM który kod błędu wraca — bo
+ * jednej asercji na każdy warunek odmowy, Z ROZRÓŻNIENIEM który kod błędu wraca - bo
  * `MemoryAccessGuard.ts` ma DWA różne kody (`invalid_path` i `cross_agent_access_denied`), nie
  * jeden wspólny. Każdy warunek ma też stronę „przepuszcza dobre wejście".
  */
@@ -38,10 +38,10 @@ test('validateNoteFilename: nazwa bazowa "ok.md" przechodzi i buduje ścieżkę 
 });
 
 test('validateNoteFilename: znaki dozwolone przez regex (litery, cyfry, kropka, myślnik, podkreślnik) przechodzą', t => {
-    const decision = guardFor().validateNoteFilename('user_kuba-dev.notatka.v2.md', BASE_PATH);
+    const decision = guardFor().validateNoteFilename('user_jan-dev.notatka.v2.md', BASE_PATH);
 
     t.true(decision.ok);
-    if (decision.ok) t.is(decision.filename, 'user_kuba-dev.notatka.v2.md');
+    if (decision.ok) t.is(decision.filename, 'user_jan-dev.notatka.v2.md');
 });
 
 // ─── warunek 1: pusty string (przed blokiem odmowy ścieżki, ale ta sama rodzina „odmowa") ────
@@ -136,7 +136,7 @@ test('validateNoteFilename: traversal jako segment W ŚRODKU ścieżki "brain/..
 test('validateNoteFilename: ".." jako PODCIĄG nazwy (nie cały segment) NIE jest traversal - "foo..bar.md" przechodzi', t => {
     // Kontrola dodatnia: `segment === '..'` sprawdza CAŁY segment, nie podciąg. Ten string ma
     // dwie kropki w środku jednego segmentu (nie jest równy '..'), więc omija warunek traversal
-    // i trafia do regexu kształtu — który go przepuszcza (kropki są w dozwolonej klasie znaków).
+    // i trafia do regexu kształtu - który go przepuszcza (kropki są w dozwolonej klasie znaków).
     const decision = guardFor().validateNoteFilename('foo..bar.md', BASE_PATH);
 
     t.true(decision.ok);
@@ -176,7 +176,7 @@ test('validateNoteFilename: wielosegmentowa zwykła "folder/x.md" -> invalid_pat
     if (!decision.ok) t.is(decision.code, MEMORY_V3_ERROR_CODES.INVALID_PATH);
 });
 
-// ─── warunek 7: kształt nazwy pliku (regex :107-109) — JEDYNA gałąź bez ŻADNEJ asercji w repo ─
+// ─── warunek 7: kształt nazwy pliku (regex :107-109) - JEDYNA gałąź bez ŻADNEJ asercji w repo ─
 
 test('validateNoteFilename: brak rozszerzenia .md ("note.txt") -> invalid_path (regex kształtu, bez pokrycia gdzie indziej w repo)', t => {
     const decision = guardFor().validateNoteFilename('note.txt', BASE_PATH);
@@ -213,7 +213,7 @@ test('validateNoteFilename: nazwa zaczyna się od myślnika ("-note.md") -> inva
     if (!decision.ok) t.is(decision.code, MEMORY_V3_ERROR_CODES.INVALID_PATH);
 });
 
-test('validateNoteFilename: jednosegmentowa nazwa folderu bez .md ("archive") -> invalid_path (dokładnie scenariusz z audytu: read(scope:memory) nie ma prawa przyjąć nazwy podfolderu jako pliku)', t => {
+test('validateNoteFilename: jednosegmentowa nazwa folderu bez .md ("archive") -> invalid_path (read(scope:memory) nie ma prawa przyjąć nazwy podfolderu jako pliku)', t => {
     const decision = guardFor().validateNoteFilename('archive', BASE_PATH);
 
     t.false(decision.ok);

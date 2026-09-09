@@ -46,7 +46,7 @@ test('ensureBuiltinTypes seeds the plan type when missing', async t => {
     t.is(files.get(typePath('plan')), PLAN_TYPE_CONTENT);
 });
 
-test('ensureBuiltinTypes seeds the notatka type too (E2.9 D — pokrywa idea_review)', async t => {
+test('ensureBuiltinTypes seeds the notatka type too', async t => {
     const { vault, files } = makeVault();
     const loader = new ArtifactTypeLoader(vault);
     await loader.ensureBuiltinTypes();
@@ -60,7 +60,7 @@ test('ensureBuiltinTypes seeds the notatka type too (E2.9 D — pokrywa idea_rev
     t.true(notatka.template.includes('## Uwagi usera'));
 });
 
-test('ensureBuiltinTypes seeds the raport type (E3.5 Deep Research)', async t => {
+test('ensureBuiltinTypes seeds the raport type', async t => {
     const { vault, files } = makeVault();
     const loader = new ArtifactTypeLoader(vault);
     await loader.ensureBuiltinTypes();
@@ -80,7 +80,7 @@ test('ensureBuiltinTypes seeds the raport type (E3.5 Deep Research)', async t =>
     t.true(raport.template.includes('## Uwagi usera'));
 });
 
-// ── Poligon F2: przepis deep-research żądał sekcji, której typ nie miał ────────
+// ── przepis deep-research adresuje sekcję, którą typ musi mieć ────────
 
 test('świeżo zaseedowany typ raport przyjmuje set_section na „Białe plamy"', async t => {
     const { vault } = makeVault();
@@ -105,7 +105,7 @@ test('świeżo zaseedowany typ raport przyjmuje set_section na „Białe plamy"'
 });
 
 test('starszy vault (typ bez sekcji) → set_section wraca not_found, fallback „### Białe plamy" przechodzi', t => {
-    // Typ sprzed F2 — ensureBuiltinTypes NIE nadpisuje istniejących plików usera.
+    // Starszy typ (bez tej sekcji) - ensureBuiltinTypes NIE nadpisuje istniejących plików usera.
     const stary = ['## TL;DR', '', '## Ustalenia', '- Coś ustalone.', '', '## Źródła', '', '## Uwagi usera', ''].join('\n');
 
     const brak = applyPatch(stary, [{ op: 'set_section', heading: 'Białe plamy', text: '- luka' }]);

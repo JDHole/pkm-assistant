@@ -2,8 +2,8 @@
  * PlaybookManager
  * Zarządza vault_map.md per agent (mapa terenu vaulta).
  *
- * E2.8 A4 (S12/S29): Playbook Builder + playbook.md SKASOWANY (wydmuszka — prompt nie czytał
- * skompilowanej ściągi; ideę indeksu przejął chudy rdzeń E2.4). Zostaje kompilacja + starter
+ * Playbook Builder + playbook.md SKASOWANY (wydmuszka - prompt nie czytał
+ * skompilowanej ściągi; ideę indeksu przejął chudy rdzeń). Zostaje kompilacja + starter
  * vault_map (compileVaultMap / ensureStarterFiles).
  */
 
@@ -20,10 +20,10 @@ export type VaultMapFocusFolder = string | {
 };
 
 /**
- * Ścieżka folderu z wpisu focusFolders (AUD-code-review-041) — jeden kształt czytany w
+ * Ścieżka folderu z wpisu focusFolders - jeden kształt czytany w
  * DWÓCH miejscach: string | {path,access} | {group}. Wpis grupowy (Agent._normalizeFocusFolders
- * — grupy z Ustawienia→Vault) nie niesie pojedynczej ścieżki tutaj (rozwiązanie {group}→foldery
- * żyje w AccessGuard/_buildEnvironment), więc oddaje pusty string — wołacz decyduje, co z tym
+ * - grupy z Ustawienia→Vault) nie niesie pojedynczej ścieżki tutaj (rozwiązanie {group}→foldery
+ * żyje w AccessGuard/_buildEnvironment), więc oddaje pusty string - wołacz decyduje, co z tym
  * zrobić.
  */
 function focusFolderPath(entry: VaultMapFocusFolder): string {
@@ -32,7 +32,7 @@ function focusFolderPath(entry: VaultMapFocusFolder): string {
     return '';
 }
 
-/** Poziom dostępu wpisu focusFolders — domyślnie zawsze `readwrite`, jak string i grupa. */
+/** Poziom dostępu wpisu focusFolders - domyślnie zawsze `readwrite`, jak string i grupa. */
 function focusFolderAccess(entry: VaultMapFocusFolder): string {
     if (typeof entry === 'string') return 'readwrite';
     if ('access' in entry) return entry.access || 'readwrite';
@@ -40,8 +40,8 @@ function focusFolderAccess(entry: VaultMapFocusFolder): string {
 }
 
 /**
- * Czytelna etykieta wpisu focusFolders na listę w generic starterze vault_map.md
- * (AUD-code-review-041). Rzutowanie `f as string` na obiekcie dawało `[object Object]" —
+ * Czytelna etykieta wpisu focusFolders na listę w generic starterze vault_map.md.
+ * Rzutowanie `f as string` na obiekcie dawało `[object Object]" -
  * ten helper czyta ten sam kształt co `compileVaultMap`, zamiast udawać, że focusFolders
  * jest zawsze tablicą stringów.
  */
@@ -66,7 +66,7 @@ export type VaultMapPlugin = {
 /** Base path for agent configs */
 const AGENTS_BASE = '.pkm-assistant/agents';
 
-// E2.8 A4 (S12/S29): Playbook Builder skasowany. GROUP_LABELS / getSystemGuideContent /
+// Playbook Builder skasowany. GROUP_LABELS / getSystemGuideContent /
 // getStarterPlaybooks + generatory sekcji playbooka + compilePlaybook usunięte.
 // ZOSTAJE tylko część vault_map (compileVaultMap + starter vault_maps).
 
@@ -103,7 +103,7 @@ export class PlaybookManager {
 
     /**
      * Ensure vault_map.md exists for all built-in agents. Creates starter file if missing.
-     * (E2.8 A4: playbook.md już nie jest tworzony — Playbook Builder skasowany.)
+     * (playbook.md już nie jest tworzony - Playbook Builder skasowany.)
      * @param {Agent[]} agents - List of agents
      */
     async ensureStarterFiles(agents: VaultMapAgent[]): Promise<void> {
@@ -160,7 +160,7 @@ ${t('starter.generic_vaultmap.auto_fill_hint')}
     }
 
     // ═══════════════════════════════════════════
-    // VAULT MAP BUILDER — compile from global vault map + focusFolders
+    // VAULT MAP BUILDER - compile from global vault map + focusFolders
     // ═══════════════════════════════════════════
 
     /**
@@ -209,7 +209,7 @@ ${t('starter.generic_vaultmap.auto_fill_hint')}
 
         // ── Zones ──
         if (isUnrestricted) {
-            // Full access — show ALL zones from global vault map as orientation
+            // Full access - show ALL zones from global vault map as orientation
             if (userZones) {
                 sections.push(`## ${t('playbook.vm.user_zones')}\n${userZones}`);
             }
@@ -220,12 +220,12 @@ ${t('starter.generic_vaultmap.auto_fill_hint')}
                 sections.push(`## ${t('playbook.vm.user_zones')}\n> ${t('playbook.vm.add_zones_hint')}`);
             }
         } else {
-            // Restricted — show whitelist with access levels + global vault map descriptions
+            // Restricted - show whitelist with access levels + global vault map descriptions
             const lines: string[] = [`## ${t('playbook.vm.whitelist_header')}`];
             for (const folder of focusFolders) {
-                // AUD-code-review-041: wpis grupowy ({group}) nie ma pojedynczej ścieżki tutaj —
-                // dawniej `folder.path` było wtedy `undefined` (typ nie przewidywał tego kształtu),
-                // więc linia wychodziła jako `- **undefined/** [...]`. Pomijamy go w tej sekcji;
+                // Wpis grupowy ({group}) nie ma pojedynczej ścieżki tutaj - bez tej gałęzi
+                // `folder.path` byłby `undefined` (typ nie przewidywał tego kształtu),
+                // więc linia wychodziłaby jako `- **undefined/** [...]`. Pomijamy go w tej sekcji;
                 // rozwiązanie grupy → foldery żyje w AccessGuard, nie w kompilacji vault_map.md.
                 const path = focusFolderPath(folder);
                 if (!path) continue;

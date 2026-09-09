@@ -1,5 +1,5 @@
 /**
- * AUD-testy-009 — `validateNewMasterPassword` (wyciągnięte z `MasterPasswordModal._submit`,
+ * `validateNewMasterPassword` (wyciągnięte z `MasterPasswordModal._submit`,
  * patrz nagłówek masterPasswordPolicy.ts). Obie strony: za krótkie hasło i niezgodne
  * powtórzenie, plus granica progu i tryb `confirm:false` (odblokowanie istniejącego sejfu).
  */

@@ -1,7 +1,7 @@
 /**
- * `PluginItemView` — zamyka lukę F-05 (klasy bazowe UI nie miały testów).
+ * `PluginItemView` — testy klasy bazowej widoków UI.
  *
- * ⚠️ OGRANICZENIE ŚRODOWISKA (do rozstrzygnięcia w F7): baza dziedziczy po `ItemView`
+ * ⚠️ OGRANICZENIE ŚRODOWISKA: baza dziedziczy po `ItemView`
  * Obsidiana, a pakiet `obsidian` w `node_modules` to SAME TYPY. AVA nie ma dziś atrapy
  * `obsidian`, więc klasa jest importowana DYNAMICZNIE w środku każdego testu — brak atrapy
  * jest wtedy czerwienią jednego testu z czytelnym powodem, nie wywrotką całego pliku.
@@ -52,7 +52,7 @@ function makePlugin() {
     };
 }
 
-// ── C10.1 ────────────────────────────────────────────────────────────────────
+// ── register() ──────────────────────────────────────────────────────────────
 test('register() woła registerView typem viewType i dodaje komendę', async t => {
     const Base = await loadBase();
     class TestView extends Base {
@@ -69,7 +69,7 @@ test('register() woła registerView typem viewType i dodaje komendę', async t =
     t.true(komendy[0].id.includes('pkm-assistant-test'));
 });
 
-// ── C10.2 (BR-4) ─────────────────────────────────────────────────────────────
+// ── open() bez liścia ───────────────────────────────────────────────────────
 test('open() jest no-opem, gdy workspace nie dał liścia', async t => {
     const Base = await loadBase();
     class TestView extends Base {
@@ -86,7 +86,7 @@ test('open() jest no-opem, gdy workspace nie dał liścia', async t => {
     t.deepEqual(workspace.stany, []);
 });
 
-// ── C10.4 ────────────────────────────────────────────────────────────────────
+// ── open() ze state ─────────────────────────────────────────────────────────
 test('open() przekazuje state do setViewState i honoruje active', async t => {
     const Base = await loadBase();
     class TestView extends Base {
@@ -105,7 +105,7 @@ test('open() przekazuje state do setViewState i honoruje active', async t => {
     }]);
 });
 
-// ── C10.3 ────────────────────────────────────────────────────────────────────
+// ── Brak viewType ───────────────────────────────────────────────────────────
 test('podklasa bez viewType → czytelny błąd, nie undefined w rejestrze', async t => {
     const Base = await loadBase();
     class BezStatyk extends Base {}
@@ -116,7 +116,7 @@ test('podklasa bez viewType → czytelny błąd, nie undefined w rejestrze', asy
     t.deepEqual(zarejestrowane, []);
 });
 
-// ── C10.5 (cross-check §1.2 — TS2515) ────────────────────────────────────────
+// ── renderView opcjonalna ───────────────────────────────────────────────────
 test('renderView jest OPCJONALNA — podklasa bez niej się kompiluje i działa', async t => {
     const Base = await loadBase();
     // Gdyby `renderView` była `abstract`, TA klasa nie przeszłaby `tsc` (TS2515) i zatrzymała
@@ -131,7 +131,7 @@ test('renderView jest OPCJONALNA — podklasa bez niej się kompiluje i działa'
     t.is(BezRenderView.prototype.renderView, undefined, 'baza nie ma prawa dokładać własnej implementacji');
 });
 
-// ── C10.6 ────────────────────────────────────────────────────────────────────
+// ── Container po onOpen ─────────────────────────────────────────────────────
 test('container jest dostępny po onOpen', async t => {
     const Base = await loadBase();
     class TestView extends Base {
@@ -148,7 +148,7 @@ test('container jest dostępny po onOpen', async t => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// F10 (bramka mutacyjna) — przypinki zachowań, które przeżywały mutacje.
+// Bramka mutacyjna — przypinki zachowań, które muszą przeżywać mutacje.
 // ═════════════════════════════════════════════════════════════════════════════
 
 /** Atrapa runtime'u: liczy wywołania `whenLoaded()`. */
@@ -160,7 +160,7 @@ function makeRuntime() {
     return { runtime, licznik };
 }
 
-/** Atrapa pluginu z kontrolą `_ready`/`onReady`/`env` (E-26). */
+/** Atrapa pluginu z kontrolą `_ready`/`onReady`/`env`. */
 function makeLifecyclePlugin(opts: { ready?: boolean; env?: unknown } = {}) {
     const onReadyCallbacks: Array<() => void> = [];
     const plugin = {
@@ -181,7 +181,7 @@ function dzieciKontenera(widok: { container: unknown }): Array<{ className: stri
     return (widok.container as { children: Array<{ className: string; textContent: string }> }).children;
 }
 
-// ── F10.1 (commandName) ──────────────────────────────────────────────────────
+// ── commandName ──────────────────────────────────────────────────────────────
 test('commandName to tytuł zakładki i trafia do addCommand', async t => {
     const Base = await loadBase();
     class TestView extends Base {
@@ -199,7 +199,7 @@ test('commandName to tytuł zakładki i trafia do addCommand', async t => {
     t.is(komendy[0].name, 'Notatki wydania');
 });
 
-// ── F10.2 (pusta statyka = brak tożsamości) ──────────────────────────────────
+// ── Pusta statyka = brak tożsamości ────────────────────────────────────────────
 test('pusty string w statyce tożsamości jest traktowany jak jej brak', async t => {
     const Base = await loadBase();
     class PustyTyp extends Base {
@@ -222,7 +222,7 @@ test('pusty string w statyce tożsamości jest traktowany jak jej brak', async t
     t.throws(() => widok.getIcon(), undefined, 'pusta `iconName` przeszła — zakładka bez ikony');
 });
 
-// ── F10.3 (domyślne `active`) ────────────────────────────────────────────────
+// ── Domyślne `active` ──────────────────────────────────────────────────────────
 test('open() bez trzeciego argumentu aktywuje otwartą kartę', async t => {
     const Base = await loadBase();
     class TestView extends Base {
@@ -239,7 +239,7 @@ test('open() bez trzeciego argumentu aktywuje otwartą kartę', async t => {
     t.is(workspace.revealed, 1, 'otwarta karta nie została odsłonięta');
 });
 
-// ── F10.4 (tożsamość instancji) ──────────────────────────────────────────────
+// ── Tożsamość instancji ──────────────────────────────────────────────────────
 test('getViewType/getDisplayText/getIcon oddają statyki podklasy', async t => {
     const Base = await loadBase();
     class TestView extends Base {
@@ -255,7 +255,7 @@ test('getViewType/getDisplayText/getIcon oddają statyki podklasy', async t => {
     t.is(widok.getIcon(), 'scroll');
 });
 
-// ── F10.5 (akcesor env) ──────────────────────────────────────────────────────
+// ── Akcesor env ───────────────────────────────────────────────────────────────
 test('env oddaje runtime pluginu, a przed jego powstaniem null (nie undefined)', async t => {
     const Base = await loadBase();
     class TestView extends Base {
@@ -274,7 +274,7 @@ test('env oddaje runtime pluginu, a przed jego powstaniem null (nie undefined)',
     t.is(widokZ.env as unknown, runtime, 'akcesor zgubił runtime pluginu');
 });
 
-// ── F10.6 (E-26: plugin gotowy) ──────────────────────────────────────────────
+// ── Plugin gotowy ────────────────────────────────────────────────────────────
 test('onOpen z gotowym pluginem renderuje od razu, bez placeholdera', async t => {
     const Base = await loadBase();
     class TestView extends Base {
@@ -294,7 +294,7 @@ test('onOpen z gotowym pluginem renderuje od razu, bez placeholdera', async t =>
     t.is(dzieciKontenera(widok).length, 0, 'gotowy plugin dostał placeholder „ładowanie" zamiast treści');
 });
 
-// ── F10.7 (E-26: plugin jeszcze niegotowy) ───────────────────────────────────
+// ── Plugin jeszcze niegotowy ─────────────────────────────────────────────────
 test('onOpen przed gotowością stawia placeholder i dorenderowuje na onReady', async t => {
     const Base = await loadBase();
     class TestView extends Base {
@@ -309,7 +309,7 @@ test('onOpen przed gotowością stawia placeholder i dorenderowuje na onReady', 
 
     await widok.onOpen();
 
-    t.is(widok.rendery, 0, 'onOpen nie ma prawa renderować przed gotowością pluginu (deadlock E-26)');
+    t.is(widok.rendery, 0, 'onOpen nie ma prawa renderować przed gotowością pluginu (deadlock)');
     t.is(onReadyCallbacks.length, 1, 'widok nie zapisał się na powiadomienie o gotowości');
     const dzieci = dzieciKontenera(widok);
     t.is(dzieci.length, 1);
@@ -322,7 +322,7 @@ test('onOpen przed gotowością stawia placeholder i dorenderowuje na onReady', 
     t.is(dzieciKontenera(widok).length, 0, 'placeholder został pod dorysowaną treścią');
 });
 
-// ── F10.8 (widok bez renderView) ─────────────────────────────────────────────
+// ── Widok bez renderView ─────────────────────────────────────────────────────
 test('onOpen widoku bez renderView nie rusza kontenera ani onReady', async t => {
     const Base = await loadBase();
     class BezRenderView extends Base {
@@ -339,7 +339,7 @@ test('onOpen widoku bez renderView nie rusza kontenera ani onReady', async t => 
     t.is(onReadyCallbacks.length, 0, 'widok bez renderView zapisał się na gotowość bez powodu');
 });
 
-// ── F10.9 (whenRuntimeLoaded) ────────────────────────────────────────────────
+// ── whenRuntimeLoaded ────────────────────────────────────────────────────────
 test('whenRuntimeLoaded czeka na runtime, a bez niego wraca bez rzutu', async t => {
     const Base = await loadBase();
     class TestView extends Base {

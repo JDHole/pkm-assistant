@@ -1,8 +1,7 @@
 /**
  * Global vault map owned by the agents module.
  *
- * S08 migration note:
- * - New canonical path: .pkm-assistant/agents/vault_map.md
+ * - Canonical path: .pkm-assistant/agents/vault_map.md
  * - Legacy read fallback: .pkm-assistant/agora/vault_map.md
  */
 import { log } from '../../core/utils/Logger.js';
@@ -85,7 +84,7 @@ export class VaultMap {
     }
 
     /**
-     * Overwrite the whole vault map document (E2.8 B1 — raw editor in Settings→Vault).
+     * Overwrite the whole vault map document (raw editor in Settings→Vault).
      * @param {string} content
      */
     async writeVaultMap(content: string | null | undefined) {

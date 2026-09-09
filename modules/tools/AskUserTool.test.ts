@@ -1,5 +1,5 @@
 /**
- * ask_user - strażnik AUD-bledy-026.
+ * ask_user - strażnik "brak kanału pytania".
  *
  * Tura leci w zakładce W TLE, więc `chat_view._renderAskUserBlock()` nigdy nie odpalił
  * i `plugin._askUserPromise` nie istnieje. Do naprawy narzędzie brało wtedy PIERWSZĄ OPCJĘ
@@ -88,15 +88,15 @@ test('brak UI - pytanie NIE zostaje w _askUserPending (blok nie powstanie po tur
 });
 
 /**
- * AUD-bledy-030 (resztka) — budzik 5 min ma właściciela także w oknie oczekiwania.
+ * Budzik 5 min ma właściciela także w oknie oczekiwania.
  *
- * `clearTimeout` w `finally` (fala 1) zdejmuje budzik po rozstrzygnięciu wyścigu. Zostaje
+ * `clearTimeout` w `finally` zdejmuje budzik po rozstrzygnięciu wyścigu. Zostaje
  * okno, w którym user JESZCZE nie odpowiedział: wtedy obietnica nigdy się nie rozstrzyga,
  * `finally` nie odpala, a budzik tyka na pluginie po `onunload`. Uchwyt idzie więc dodatkowo
  * do cyklu życia pluginu — kanon z `src/main.ts` (`registerInterval`, `clearInterval` czyści
  * w JS uchwyty obu rodzajów).
  */
-test('AUD-bledy-030: uchwyt budzika trafia do cyklu życia pluginu', async t => {
+test('uchwyt budzika trafia do cyklu życia pluginu', async t => {
     const registered: unknown[] = [];
     const plugin: AskUserPlugin = {
         _askUserPromise: Promise.resolve('Tak'),
@@ -109,7 +109,7 @@ test('AUD-bledy-030: uchwyt budzika trafia do cyklu życia pluginu', async t => 
     t.not(registered[0], undefined, 'oddany jest realny uchwyt, nie undefined');
 });
 
-test('AUD-bledy-030: plugin bez registerInterval (starszy host, testy) nie wywraca pytania', async t => {
+test('plugin bez registerInterval (starszy host, testy) nie wywraca pytania', async t => {
     const res = await exec({ _askUserPromise: Promise.resolve('Nie') });
 
     t.true(res.success, 'rejestracja uchwytu jest opcjonalna — brak jej nie psuje ask_user');
@@ -117,9 +117,9 @@ test('AUD-bledy-030: plugin bez registerInterval (starszy host, testy) nie wywra
 });
 
 /**
- * AUD-code-review-002 — budzik 5 min NIE zmyśla zgody usera.
+ * Budzik 5 min NIE zmyśla zgody usera.
  *
- * Ta gałąź niosła DOKŁADNIE ten sam bug, który AUD-bledy-026 naprawił w gałęzi „brak UI":
+ * Ta gałąź niosła DOKŁADNIE ten sam bug, który naprawia gałąź „brak UI":
  * pierwsza opcja z listy szła do modelu jako `{success:true, answer:<opcja>, auto:true}` —
  * sfabrykowana zgoda człowieka na operację, której user nigdy nie widział (odszedł od
  * komputera na 5+ minut). `_askUserPromise` celowo NIGDY się nie rozstrzyga (user nie
@@ -133,7 +133,7 @@ const execTimeout = (plugin: AskUserPlugin, args: Record<string, unknown> = {}) 
         plugin,
     ) as Promise<AskRes>;
 
-test('AUD-code-review-002: timeout budzika - odmowa, NIE zmyślona pierwsza opcja', async t => {
+test('timeout budzika - odmowa, NIE zmyślona pierwsza opcja', async t => {
     // Promise, który świadomie nigdy się nie rozstrzyga - user nie odpowiedział.
     const plugin: AskUserPlugin = { _askUserPromise: new Promise<string | null>(() => {}) };
 
@@ -146,7 +146,7 @@ test('AUD-code-review-002: timeout budzika - odmowa, NIE zmyślona pierwsza opcj
     t.is(res.question, 'Nadpisać notatkę X?');
 });
 
-test('AUD-code-review-002: timeout budzika bez opcji - dalej odmowa, nie fallback "OK"', async t => {
+test('timeout budzika bez opcji - dalej odmowa, nie fallback "OK"', async t => {
     const plugin: AskUserPlugin = { _askUserPromise: new Promise<string | null>(() => {}) };
 
     const res = await execTimeout(plugin, { options: undefined });
@@ -155,7 +155,7 @@ test('AUD-code-review-002: timeout budzika bez opcji - dalej odmowa, nie fallbac
     t.is(res.answer, undefined, 'fallback "OK" był tak samo zmyślony jak pierwsza opcja z listy');
 });
 
-test('AUD-code-review-002: timeout budzika - model dostaje zdanie, co się stało (nie goły klucz i18n)', async t => {
+test('timeout budzika - model dostaje zdanie, co się stało (nie goły klucz i18n)', async t => {
     const plugin: AskUserPlugin = { _askUserPromise: new Promise<string | null>(() => {}) };
 
     const res = await execTimeout(plugin);
@@ -164,7 +164,7 @@ test('AUD-code-review-002: timeout budzika - model dostaje zdanie, co się stał
     t.not(res.message, 'mcp.ask_user.timeout', 'i18n rozwiązane, nie goły klucz');
 });
 
-test('AUD-code-review-002: timeout budzika - sprzątanie w finally działa jak na innych ścieżkach', async t => {
+test('timeout budzika - sprzątanie w finally działa jak na innych ścieżkach', async t => {
     const plugin: AskUserPlugin = { _askUserPromise: new Promise<string | null>(() => {}) };
 
     await execTimeout(plugin);

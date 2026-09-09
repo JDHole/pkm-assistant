@@ -1,5 +1,5 @@
 /**
- * S35 „Wielki Rename" — przeprowadzka `data.json` ze starego folderu pluginu
+ * Przeprowadzka `data.json` ze starego folderu pluginu
  * (`.obsidian/plugins/obsek/`) do nowego (`.obsidian/plugins/<manifestId>/`).
  *
  * W `data.json` siedzi TYLKO wersjonowanie (`installed_at`, `last_version`) — żywe
@@ -7,11 +7,11 @@
  * user po zmianie id dostałby powitanie „nowy użytkownik" i modal Release Notes.
  *
  * Zasady:
- *  • gdy `manifestId === 'obsek'` (stan sprzed S35 paczki 3) funkcja jest CAŁKOWICIE
+ *  • gdy `manifestId === 'obsek'` funkcja jest CAŁKOWICIE
  *    bezczynna — dzięki temu wpięcie mogło żyć w kodzie, zanim id faktycznie się zmieniło;
  *    od zmiany id na `pkm-assistant` ścieżka jest ŻYWA;
- *  • „czy nowy już istnieje" sprawdzamy PRÓBĄ ODCZYTU, nie `exists()` — po incydencie
- *    2026-07-28 wiemy, że `exists()` potrafi skłamać na dysku sieciowym (Google Drive);
+ *  • „czy nowy już istnieje" sprawdzamy PRÓBĄ ODCZYTU, nie `exists()` — `exists()`
+ *    potrafi skłamać na dysku sieciowym (Google Drive);
  *  • starego folderu NIE kasujemy (user sam wywiezie do kosza);
  *  • total-catch: to nigdy nie ma prawa wywalić `onload()`.
  */

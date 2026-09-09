@@ -16,7 +16,7 @@ import type { SubAgentData, SubAgentInput } from './types.js';
 type UiBoundary = any;
 
 // Przykładowy nagłówek Markdown pola „Sekcje" — celowo wielka litera (przykład TREŚCI, którą
-// user wpisuje w swoich notatkach, nie etykieta UI; wzorzec W3 z SkillEditorModal.ts /
+// user wpisuje w swoich notatkach, nie etykieta UI; ten sam wzorzec co w SkillEditorModal.ts /
 // modules/web/SettingsContent.ts), w stałej a nie literale inline.
 const SECTION_EXAMPLE = '## Pomysły';
 
@@ -35,9 +35,9 @@ export class SubAgentEditorModal extends Modal {
      * @param {Object|null} existing - Existing config for edit mode, null for create
      * @param {Function} [onSave] - Callback after successful save
      * @param {Object} [options]
-     * @param {boolean} [options.template] - S27 Z3: tryb SZABLONU (zapis do
+     * @param {boolean} [options.template] - tryb SZABLONU (zapis do
      *        `.pkm-assistant/templates/sub-agents/`, wersja podbijana przez store).
-     * @param {boolean} [options.alsoTemplate] - S27 Z6: checkbox „Zapisz też jako szablon".
+     * @param {boolean} [options.alsoTemplate] - checkbox „Zapisz też jako szablon".
      */
     constructor(app: UiBoundary, plugin: UiBoundary, existing: SubAgentData | null = null, onSave: ((data?: SubAgentInput) => void) | null = null, options: { template?: boolean; alsoTemplate?: boolean } = {}) {
         super(app);
@@ -138,7 +138,7 @@ export class SubAgentEditorModal extends Modal {
         }
 
         // --- Iterations ---
-        // AUD-code-review-055: min/max widełek pola biorą się z LIMIT_SPECS (config/limits.ts),
+        // Min/max widełek pola biorą się z LIMIT_SPECS (config/limits.ts),
         // nie z lokalnego literału — inaczej pole renderuje się z wartością (default 25)
         // przekraczającą własny deklarowany sufit ('10'), a spinner po cichu tnie ją do 10.
         {
@@ -264,7 +264,7 @@ export class SubAgentEditorModal extends Modal {
         textarea.value = formData.prompt;
         textarea.addEventListener('input', () => formData.prompt = textarea.value);
 
-        // --- S27 Z6: „Zapisz też jako szablon w Zapleczu" ---
+        // --- „Zapisz też jako szablon w Zapleczu" ---
         if (this.offerTemplateCopy) {
             new Setting(contentEl)
                 .setName(t('modal.sub_agent.also_template_label'))
@@ -302,7 +302,7 @@ export class SubAgentEditorModal extends Modal {
         }
 
         try {
-            // S27 Z3: tryb SZABLONU zapisuje do magazynu Zaplecza, nie do żywych subów.
+            // Tryb SZABLONU zapisuje do magazynu Zaplecza, nie do żywych subów.
             if (this.isTemplate) {
                 const store = this.plugin.agentManager?.subAgentTemplateStore;
                 if (!store) {
@@ -332,7 +332,7 @@ export class SubAgentEditorModal extends Modal {
 
             await loader.saveSubAgent(formData);
 
-            // S27 Z6: opcjonalna forma odlewnicza obok żywego suba.
+            // Opcjonalna forma odlewnicza obok żywego suba.
             if (this._alsoTemplate) {
                 const created = await this.plugin.agentManager?.subAgentTemplateStore?.createFromData(formData);
                 if (created?.success) {
@@ -361,7 +361,7 @@ export class SubAgentEditorModal extends Modal {
         if (!okToDelete) return;
 
         try {
-            // AUD-bledy-012: meldunek idzie ze STANU PO operacji. `delete`/`deleteSubAgent`
+            // Meldunek idzie ze STANU PO operacji. `delete`/`deleteSubAgent`
             // łapią wyjątek adaptera i zwracają `false` (folder suba z dodatkowym plikiem =
             // nierekurencyjny `rmdir` pada) - wtedy modal ZOSTAJE otwarty, a user widzi powód,
             // zamiast „Usunięto" nad pozycją, która dalej jest na liście.

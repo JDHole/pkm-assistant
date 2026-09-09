@@ -31,7 +31,7 @@ export interface WebSearchPlugin {
     } | null;
 }
 
-/** Wynik pojedynczego trafienia oddawany modelowi — bez pełnej treści strony (E3.3). */
+/** Wynik pojedynczego trafienia oddawany modelowi — bez pełnej treści strony. */
 interface WebSearchToolHit {
     title: string;
     url: string;
@@ -42,12 +42,11 @@ interface WebSearchToolHit {
  * web_search — MCP tool for searching the internet.
  * Uses configured provider (default: Jina AI, free).
  *
- * E3.3 — KSZTAŁT WYNIKU (mikro-decyzja 6). Do E3.2 narzędzie zwracało RÓWNOCZEŚNIE
- * `results` z PEŁNĄ treścią stron i przycięte `formatted`. Cięcie było iluzoryczne:
- * globalny limiter pętli agenta tnie surowy JSON (czyli pełną treść) ZANIM model
- * dojdzie do `formatted`. Teraz `results` niesie wyłącznie `{title, url, fragment}` —
- * pełna treść nie wychodzi z narzędzia. To jest zarazem format cytatów z L13-13:
- * gotowa karma dla Pamięci v3. Po pełną treść jest `web_read`.
+ * KSZTAŁT WYNIKU: `results` niesie wyłącznie `{title, url, fragment}`, nigdy pełną treść
+ * strony. Zwracanie pełnej treści obok przyciętego pola byłoby iluzoryczne — globalny
+ * limiter pętli agenta tnie surowy JSON (czyli pełną treść) ZANIM model dojdzie do
+ * przyciętego pola. To jest zarazem format cytatów: gotowa karma dla Pamięci v3.
+ * Po pełną treść jest `web_read`.
  */
 export function createWebSearchTool() {
     return {
@@ -96,11 +95,11 @@ export function createWebSearchTool() {
 
                 const result = await executeWebSearch(finalQuery, webSearchSettings, limit);
 
-                // E3.3: filtr domen PO pobraniu — odfiltrowane nie wchodzą ani do wyniku,
+                // Filtr domen PO pobraniu — odfiltrowane nie wchodzą ani do wyniku,
                 // ani do rejestru znanych URL-i (czyli web_read ich nie odblokuje).
                 const kept = (result.results || []).filter(r => checkDomain(r?.url, webSearchSettings) === 'allowed');
 
-                // E1.3 P6: record every result URL as known-provenance so web_read may
+                // Record every result URL as known-provenance so web_read may
                 // later fetch it. URLs the model invents (exfiltration vector) stay unknown.
                 for (const r of kept) {
                     if (r?.url) registerKnownUrl(r.url);
@@ -115,7 +114,7 @@ export function createWebSearchTool() {
                     fragment: (r.content || '').slice(0, trimLimit)
                 }));
 
-                // E3.3 (DEC L13-4): licznik zużycia — informacyjny, nigdy blokujący.
+                // Licznik zużycia — informacyjny, nigdy blokujący.
                 // Liczy dostawcę, który REALNIE odpowiedział (po fallbacku: jina, czyli nic).
                 // Trafienie w cache nie zjadło limitu u dostawcy, więc go nie liczymy.
                 if (!result.cached) {

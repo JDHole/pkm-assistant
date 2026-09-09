@@ -3,10 +3,8 @@
  * nazwa taga, potwierdzenie interaktywne). Ten plik domyka tę lukę na czystych funkcjach
  * wyjętych do `utils/releasePrep.ts`.
  *
- * clean-room / F1 (build-release) — napisany przed implementacją (czerwony na stubie),
- * dziś zielony w całości. Trzy testy dotyczące publikacji przez REST API GitHuba
- * (`buildReleasePayload`, `releaseAssetPaths`, `releaseAssetZipName`, `maskToken`)
- * skasowane 2026-09-07 razem z tymi funkcjami — publikację robi teraz
+ * Testów dotyczących publikacji przez REST API GitHuba (`buildReleasePayload`,
+ * `releaseAssetPaths`, `releaseAssetZipName`, `maskToken`) tu nie ma: publikację robi
  * `.github/workflows/release.yml`, nie `release.js` (patrz `RELEASE_PROCESS.md`).
  */
 import test from 'ava';

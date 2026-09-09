@@ -4,10 +4,10 @@
  */
 
 /**
- * Wzorce kluczy API i wrażliwych danych — maskowanie po KSZTAŁCIE wartości.
- * K8 (AUD-security-027): `sk-` przyjmuje teraz też myślniki i podkreślenia, więc jednym
- * wzorcem łapiemy `sk-proj-` (nowy OpenAI) i `sk-or-v1-` (OpenRouter); dołożone są też
- * osobne kształty Groq (`gsk_`) i xAI (`xai-`), które plugin ma w ustawieniach.
+ * Wzorce kluczy API i wrażliwych danych - maskowanie po KSZTAŁCIE wartości.
+ * `sk-` przyjmuje też myślniki i podkreślenia, więc jednym wzorcem łapiemy `sk-proj-`
+ * (OpenAI) i `sk-or-v1-` (OpenRouter); dołożone są też osobne kształty Groq (`gsk_`)
+ * i xAI (`xai-`), które plugin ma w ustawieniach.
  */
 const SENSITIVE_PATTERNS = [
     { name: 'OpenAI', regex: /\bsk-[A-Za-z0-9_-]{20,}/g },
@@ -23,7 +23,7 @@ const SENSITIVE_PATTERNS = [
 ];
 
 /**
- * K8: maskowanie po NAZWIE pola/nagłówka — drugi, niezależny filtr obok kształtów.
+ * Maskowanie po NAZWIE pola/nagłówka - drugi, niezależny filtr obok kształtów.
  * Kształt zawodzi przy każdym dostawcy, którego nie znamy (i przy `Bearer <cokolwiek>`),
  * więc wartość pola o wrażliwej nazwie maskujemy NIEZALEŻNIE od tego, jak wygląda.
  * Dopasowanie idzie po CAŁEJ nazwie pola (kotwice `^...$`), bez względu na wielkość liter,
@@ -46,17 +46,17 @@ const QUOTED_FIELD_RE = /(["'])([A-Za-z0-9_.-]{1,64})\1(\s*:\s*)(["'])([^"']*)\4
 const BARE_FIELD_RE = /\b([A-Za-z][A-Za-z0-9_.-]{0,63})(\s*[:=]\s*)(["']?)((?:bearer|basic|token)\s+)?([^\s"',;)}\]]{8,})/gi;
 
 /**
- * K20 (AUD-security-120/133): ta sama para `pole: wartość`, ale w JSON-ie ZAESCAPOWANYM —
+ * Ta sama para `pole: wartość`, ale w JSON-ie ZAESCAPOWANYM -
  * `\"api-key\":\"…\"` (jedna stringifikacja za dużo) albo `\\\"api-key\\\"` (dwie).
  *
  * Skąd się to bierze: obiekt błędu wpada jako TEKST do pola `message`, a to pole przechodzi
  * przez `JSON.stringify` w Loggerze. Wtedy cudzysłowy wokół nazwy pola są poprzedzone
- * backslashami i `QUOTED_FIELD_RE` (który wymaga gołego cudzysłowu) nie trafia — klucz
- * lądował jawny w pliku logu.
+ * backslashami i `QUOTED_FIELD_RE` (który wymaga gołego cudzysłowu) nie trafia - klucz
+ * lądowałby jawny w pliku logu.
  *
  * To ŚWIADOMIE trzeci, osobny przebieg zamiast rozluźnienia dwóch poprzednich: tamte trzymają
- * 9+ testów K8 i nie ma powodu ruszać ich kształtu. `(\\+)` z backreferencją `\1` wymaga tej
- * samej głębokości zaescapowania we wszystkich czterech miejscach — dokładnie tak, jak
+ * istniejące testy i nie ma powodu ruszać ich kształtu. `(\\+)` z backreferencją `\1` wymaga
+ * tej samej głębokości zaescapowania we wszystkich czterech miejscach - dokładnie tak, jak
  * produkuje ją `JSON.stringify`. Wartość bez cudzysłowów i backslashy: sekrety (`Bearer …`,
  * klucze) takich znaków nie mają, a backslashe muszą zostać w grupie zamykającej, żeby
  * odtworzenie tekstu było wierne co do znaku.
@@ -80,7 +80,7 @@ function _maskSecretValue(value: string): string {
     return _maskValue(value);
 }
 
-/** Trzy przebiegi po nazwie pola: forma JSON, forma zaescapowana (K20), forma nagłówka/tekstu. */
+/** Trzy przebiegi po nazwie pola: forma JSON, forma zaescapowana, forma nagłówka/tekstu. */
 function _maskSensitiveFields(text: string): string {
     QUOTED_FIELD_RE.lastIndex = 0;
     let masked = text.replace(QUOTED_FIELD_RE, (match: string, kq: string, name: string, sep: string, vq: string, value: string) => {
@@ -140,7 +140,7 @@ export function maskSensitiveData(text: unknown): unknown {
         pattern.regex.lastIndex = 0;
         masked = masked.replace(pattern.regex, (match) => _maskValue(match));
     }
-    // K8: drugi filtr — po nazwie pola. Idzie PO kształtach i jest idempotentny
+    // Drugi filtr - po nazwie pola. Idzie PO kształtach i jest idempotentny
     // (zamaskowana wartość `abcd***wxyz` przepuszczona ponownie daje samą siebie).
     return _maskSensitiveFields(masked);
 }
@@ -159,7 +159,7 @@ export function warnIfSensitive(text: unknown): { hasSensitive: boolean; warning
             warnings.push(`Wykryto potencjalny klucz: ${pattern.name}`);
         }
     }
-    // K8: pole o wrażliwej nazwie (Authorization / api_key / token / secret / *_key).
+    // Pole o wrażliwej nazwie (Authorization / api_key / token / secret / *_key).
     if (_hasSensitiveField(text)) warnings.push('Wykryto pole z sekretem (nazwa pola/nagłówka)');
     return { hasSensitive: warnings.length > 0, warnings };
 }

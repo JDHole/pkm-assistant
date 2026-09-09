@@ -1,8 +1,8 @@
 /**
- * Polityka 429 — okno backoffu (luka L-01, B.5 ST-12).
+ * Polityka 429 - okno backoffu.
  *
  * Transport NIE ponawia niczego: ujawnia `status` i `headers`, a politykę prowadzi
- * `ChatModel`. Testy przechwytują seam `ChatModel.scheduleRetry` — zero realnego czekania,
+ * `ChatModel`. Testy przechwytują seam `ChatModel.scheduleRetry` - zero realnego czekania,
  * zero pomiarów zegara ściennego (klasa usterki, której ten projekt już raz się nauczył
  * unikać: patrz nagłówek `ChatModel.concurrent.test.ts`).
  */
@@ -40,11 +40,11 @@ const flush = async () => {
 
 test.beforeEach(() => { gateTest.reset(); });
 
-test.serial('L-01: okno backoffu 429 rośnie wykładniczo od STREAM_RETRY_BASE_DELAY_MS', async t => {
+test.serial('okno backoffu 429 rośnie wykładniczo od STREAM_RETRY_BASE_DELAY_MS', async t => {
     const { model, transport, scheduled } = makeRetryModel();
     const p = model.stream(REQ, {});
 
-    // Trzy kolejne 429 — po każdym model planuje ponowienie przez seam i sam je odpala.
+    // Trzy kolejne 429 - po każdym model planuje ponowienie przez seam i sam je odpala.
     for (let round = 0; round < STREAM_MAX_RETRIES; round++) {
         await flush();
         t.is(transport.opens, round + 1, `runda ${round}: transport otwarty dokładnie raz na próbę`);
@@ -86,11 +86,11 @@ test.serial('429 z nagłówkiem Retry-After wygrywa nad backoffem wykładniczym'
 });
 
 /**
- * F10 (mutacje): `Retry-After: 0` to poprawna odpowiedź serwera („ponów od razu"), a nie
- * brak nagłówka. Bez tego testu zaostrzenie warunku do `> 0` przechodziło cały pakiet:
- * model dokładałby userowi 1,5 s czekania tam, gdzie serwer wyraźnie powiedział „już".
+ * `Retry-After: 0` to poprawna odpowiedź serwera („ponów od razu"), a nie brak nagłówka.
+ * Zaostrzenie warunku do `> 0` bez tego testu przechodziłoby cały pakiet: model dokładałby
+ * userowi 1,5 s czekania tam, gdzie serwer wyraźnie powiedział „już".
  */
-test.serial('L-01: Retry-After: 0 daje ZEROWE okno backoffu, nie bazowe 1500 ms', async t => {
+test.serial('Retry-After: 0 daje ZEROWE okno backoffu, nie bazowe 1500 ms', async t => {
     const { model, transport, scheduled } = makeRetryModel();
     const p = model.stream(REQ, {});
 
@@ -109,8 +109,8 @@ test.serial('L-01: Retry-After: 0 daje ZEROWE okno backoffu, nie bazowe 1500 ms'
     await p.catch(() => { /* sprzątanie */ });
 });
 
-/** `Retry-After` z datą (RFC 9110 dopuszcza obie formy) NIE jest liczbą — wraca backoff. */
-test.serial('L-01: Retry-After z datą jest ignorowany — zostaje backoff wykładniczy', async t => {
+/** `Retry-After` z datą (RFC 9110 dopuszcza obie formy) NIE jest liczbą - wraca backoff. */
+test.serial('Retry-After z datą jest ignorowany — zostaje backoff wykładniczy', async t => {
     const { model, transport, scheduled } = makeRetryModel();
     const p = model.stream(REQ, {});
 

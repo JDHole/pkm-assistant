@@ -8,8 +8,8 @@ import { TokenTracker } from '../../../core/index.js';
 import { t } from '../../../core/i18n/index.js';
 import { log } from '../../../core/utils/Logger.js';
 import { DEFAULT_BOTTOM_BAR_MODE } from './todoPanel.js';
-// AUD-security-114: zamknięcie zakładki zatrzymuje też JEJ suby — po tym samym adresie
-// zwrotnym, co zamknięcie całego panelu (`stop_all_turns`).
+// Zamknięcie zakładki zatrzymuje też JEJ suby - po tym samym adresie zwrotnym, co
+// zamknięcie całego panelu (`stop_all_turns`).
 import { collectSubTaskIdsForOwners } from './turnAbort.js';
 
 // TS-any: receiver legacy mixinów składany runtime przez Object.assign.
@@ -74,8 +74,8 @@ export function _renderTabBar(this: ChatViewMixinContext, container: ChatViewMix
     this._topbarTokensWrap = topbar.createDiv({ cls: 'cs-topbar-tokens' });
     this._slimBarTokenMain = this._buildTokenRow(this._topbarTokensWrap, 'main');
     this._slimBarTokenMinion = this._buildTokenRow(this._topbarTokensWrap, 'minion');
-    // Wiersz 'master' skasowany w fabryce kasacji S1 (2026-09-02, AUD-dead-code-119) — patrz
-    // modules/chat/chat/chat_ui.ts `_updateSlimBarTokens`.
+    // Nie ma trzeciego wiersza dla 'master' - patrz modules/chat/chat/chat_ui.ts
+    // `_updateSlimBarTokens`.
     this._updateSlimBarTokens();
 }
 
@@ -93,19 +93,19 @@ export async function _switchTab(this: ChatViewMixinContext, tabIdOrAgentName: s
     const agentName = targetTab.agentName;
     if (currentKey === targetKey) return;
 
-    // 0. AUD-bledy-015: rozbrój dren kolejki poprzedniej zakładki. Timer był goły
-    // (`setTimeout` bez uchwytu), więc wybudzał się po przełączeniu i startował turę
-    // u agenta, który akurat jest na wierzchu. Sam slot ZOSTAJE pełny — wiadomość czeka
-    // na powrót na swoją zakładkę (właściciela porównuje `queuedOwnerMatches`).
+    // 0. Rozbrój dren kolejki poprzedniej zakładki. Bez uchwytu na timer (goły `setTimeout`)
+    // dren wybudzałby się po przełączeniu i startował turę u agenta, który akurat jest na
+    // wierzchu. Sam slot ZOSTAJE pełny - wiadomość czeka na powrót na swoją zakładkę
+    // (właściciela porównuje `queuedOwnerMatches`).
     this._clearQueuedDrainTimer?.();
 
-    // 0b. Review opusa (P1): rozbrój throttle malowania strumienia. Klatka uzbrojona ≤80 ms
-    // przed przełączeniem wystrzeliłaby PO przerysowaniu listy (krok 7) i PO przywróceniu
-    // `scrollTop` (krok 9): tekst poszedłby w wypięte węzły starej zakładki (niewidoczny),
-    // ale `scrollToBottom` przewinąłby NOWĄ zakładkę na dół. Nic nie ginie — tura leci dalej
-    // w tle, a jej finalna treść i tak wchodzi do okna kontekstu i na listę po powrocie.
-    // Druga linia obrony (na wypadek nowego `await` przed tym miejscem): bramka
-    // `shouldPaintFrame` w `_paintStreamFrame`.
+    // 0b. Rozbrój throttle malowania strumienia. Klatka uzbrojona ≤80 ms przed przełączeniem
+    // wystrzeliłaby PO przerysowaniu listy (krok 7) i PO przywróceniu `scrollTop` (krok 9):
+    // tekst poszedłby w wypięte węzły starej zakładki (niewidoczny), ale `scrollToBottom`
+    // przewinąłby NOWĄ zakładkę na dół. Nic nie ginie - tura leci dalej w tle, a jej finalna
+    // treść i tak wchodzi do okna kontekstu i na listę po powrocie. Druga linia obrony
+    // (na wypadek nowego `await` przed tym miejscem): bramka `shouldPaintFrame` w
+    // `_paintStreamFrame`.
     this._renderThrottle?.cancel();
 
     // 1. Save current state
@@ -147,8 +147,8 @@ export async function _switchTab(this: ChatViewMixinContext, tabIdOrAgentName: s
 
     // 4. Restore or create state for new agent
     const stored = this._agentStates.get(targetKey);
-    // E2.8 A6 (S5): agent już przełączony na tym etapie — getActiveAgent() zwraca właściwego,
-    // więc jego default_autonomy startuje nową sesję (per-czat override działa dalej w locie).
+    // Agent już przełączony na tym etapie - getActiveAgent() zwraca właściwego, więc jego
+    // default_autonomy startuje nową sesję (per-czat override działa dalej w locie).
     const switchedAgent = this.plugin?.agentManager?.getActiveAgent?.();
     if (stored) {
         this.rollingWindow = stored.rollingWindow;
@@ -181,10 +181,10 @@ export async function _switchTab(this: ChatViewMixinContext, tabIdOrAgentName: s
     this.renderSubAgentButtons?.();
     this.renderSkillButtons();
     this.renderMcpServerButtons?.();
-    this._renderArtifactChip?.();   // E2.9 FAZA B (B4): chip aktywnego artefaktu per-tab
-    this._activeTodoState = null;   // E2.9 FAZA D (D2): todo jest per-agent — czyścimy przy switchu
-    this._prevTodoModel = null;     // N4: bez tego resolver widziałby listę POPRZEDNIEGO agenta
-    this._bottomBarMode = DEFAULT_BOTTOM_BAR_MODE;  // N4: nowa zakładka zaczyna od pola tekstowego
+    this._renderArtifactChip?.();   // chip aktywnego artefaktu per-tab
+    this._activeTodoState = null;   // todo jest per-agent - czyścimy przy switchu
+    this._prevTodoModel = null;     // bez tego resolver widziałby listę POPRZEDNIEGO agenta
+    this._bottomBarMode = DEFAULT_BOTTOM_BAR_MODE;  // nowa zakładka zaczyna od pola tekstowego
     this._renderTodoPanel?.();
     // Pasek biegów subów jest PER ZAKŁADKA — nowa zakładka = inne biegi (i zwinięty szczegół).
     this._subStripExpandedId = null;
@@ -227,23 +227,23 @@ export async function _switchTab(this: ChatViewMixinContext, tabIdOrAgentName: s
         this.scrollToFinalMessage();
     }
 
-    // 11. F2: wynik suba dla TEJ zakładki mógł przyjść, gdy była w tle — dostawca odmawiał
+    // 11. Wynik suba dla TEJ zakładki mógł przyjść, gdy była w tle - dostawca odmawiał
     // wtedy przyjęcia (auto-tura za plecami usera). Teraz zakładka jest na wierzchu, więc
     // ponawiamy próbę. Nic nie czeka = drain jest darmowy.
     this._drainSubTasks?.();
 }
 
 /**
- * AUD-security-114: zatrzymaj wszystko, co ZAMYKANA zakładka trzyma w locie.
+ * Zatrzymaj wszystko, co ZAMYKANA zakładka trzyma w locie.
  *
- * Co było zepsute: „Zamknij chat" zapisywał sesję i kasował stan zakładki, ale nigdy nie
- * wołał stopu — w odróżnieniu od sąsiedniego „Nowy chat" (`chat_session.ts`) i od zamknięcia
- * panelu (`onClose` → `stop_all_turns`). Tura leciała dalej: wykonywała narzędzia i po
- * zakończeniu dopisywała odpowiedź do właśnie zapisanej, „zamkniętej" sesji. Suby tej
- * zakładki przeżywały nawet późniejsze zamknięcie panelu, bo ich `origin.tabKey` wskazywał
- * zakładkę, której już nie ma w `chatTabs` (dopasowanie po właścicielach nie miało jak trafić).
+ * Bez tego „Zamknij chat" zapisywałby sesję i kasował stan zakładki bez wołania stopu -
+ * w odróżnieniu od sąsiedniego „Nowy chat" (`chat_session.ts`) i od zamknięcia panelu
+ * (`onClose` → `stop_all_turns`). Tura leciałaby dalej: wykonywałaby narzędzia i po
+ * zakończeniu dopisywałaby odpowiedź do właśnie zapisanej, „zamkniętej" sesji. Suby tej
+ * zakładki przeżywałyby nawet późniejsze zamknięcie panelu, bo ich `origin.tabKey` wskazuje
+ * zakładkę, której już nie ma w `chatTabs` (dopasowanie po właścicielach nie ma jak trafić).
  *
- * Nowego mechanizmu Stopu tu NIE MA: wołamy dokładnie to, co już istnieje — `stop_generation`
+ * Nowego mechanizmu Stopu tu NIE MA: wołamy dokładnie to, co już istnieje - `stop_generation`
  * dla tury tej zakładki i `requestStop` dla jej biegów (te same funkcje co guzik Stop i
  * `stop_all_turns`). Stop leci PRZED zapisem i przed `_agentStates.delete`.
  */
@@ -283,14 +283,14 @@ function _stopTabWork(this: ChatViewMixinContext, tab: ChatViewMixinContext, tab
 /**
  * Close the active tab.
  *
- * Zapis MUSI się domknąć przed sprzątaniem stanu: do 2026-07-29 `handleSaveSession()` i
- * `_switchTab()` leciały fire-and-forget, więc zapis pliku sesji ścigał się z przełączeniem
- * agenta (`activeSessionPath` już przestawione) i z kasacją stanu zakładki — ostatnie
- * wiadomości potrafiły wylądować nie tam, gdzie trzeba, albo przepaść.
- * Pad zapisu nie może zablokować zamknięcia zakładki — łapiemy i lecimy dalej.
+ * Zapis MUSI się domknąć przed sprzątaniem stanu: `handleSaveSession()` i `_switchTab()`
+ * fire-and-forget ścigałyby zapis pliku sesji z przełączeniem agenta (`activeSessionPath`
+ * już przestawione) i z kasacją stanu zakładki - ostatnie wiadomości potrafiłyby wylądować
+ * nie tam, gdzie trzeba, albo przepaść.
+ * Pad zapisu nie może zablokować zamknięcia zakładki - łapiemy i lecimy dalej.
  *
- * AUD-security-114: zamknięcie zakładki NAJPIERW zatrzymuje to, co ta zakładka trzyma w locie
- * (turę + jej suby), a dopiero potem zapisuje i kasuje stan — kolejność jak w `onClose` (K5).
+ * Zamknięcie zakładki NAJPIERW zatrzymuje to, co ta zakładka trzyma w locie (turę + jej
+ * suby), a dopiero potem zapisuje i kasuje stan - ta sama kolejność co w `onClose`.
  */
 export async function _closeActiveTab(this: ChatViewMixinContext) {
     const activeIndex = this.chatTabs.findIndex((t: ChatViewMixinContext) => t.isActive);
@@ -400,13 +400,13 @@ export async function handleAgentChange(this: ChatViewMixinContext, agentName: s
 }
 
 /**
- * Tożsamość zakładki — jeden klucz, po którym rozpoznajemy ją w `_agentStates` i w originie tury.
+ * Tożsamość zakładki - jeden klucz, po którym rozpoznajemy ją w `_agentStates` i w originie tury.
  *
- * F2 faza B: EKSPORTOWANE, bo adres zwrotny delegacji w tle (`turn.origin.tabKey` w
- * `chat_streaming.js`) i dopasowanie wracającego wyniku (`matchTabForOrigin`) muszą liczyć
- * ten klucz DOKŁADNIE tak samo jak `_switchTab`. Druga kopia tej logiki = wynik suba trafiałby
- * do złej zakładki. Efekt uboczny eksportu: funkcja ląduje też na `ChatView.prototype`
- * (Object.assign kopiuje wszystkie eksporty) — nie czyta `this`, więc jest to nieszkodliwe.
+ * EKSPORTOWANE, bo adres zwrotny delegacji w tle (`turn.origin.tabKey` w `chat_streaming.js`)
+ * i dopasowanie wracającego wyniku (`matchTabForOrigin`) muszą liczyć ten klucz DOKŁADNIE tak
+ * samo jak `_switchTab`. Druga kopia tej logiki = wynik suba trafiałby do złej zakładki. Efekt
+ * uboczny eksportu: funkcja ląduje też na `ChatView.prototype` (Object.assign kopiuje wszystkie
+ * eksporty) - nie czyta `this`, więc jest to nieszkodliwe.
  */
 export function _tabKey(tab: ChatViewMixinContext) {
     if (!tab) return '';

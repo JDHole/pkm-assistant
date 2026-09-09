@@ -7,11 +7,11 @@
  * (import runtime'u wtyczki), więc AVA nie zaimportuje tego modułu — wzorzec taki sam jak
  * `chat_streaming.limits.test.ts` (fs.readFileSync + asercje na treści).
  *
- * Bug (risk register 2026-09-02 / S34 z8): `_chatOnUsage` przy braku `usage.prompt_tokens`
- * z API wołało `turn.tt.record('main', inputTokens, outputTokens)` BEZ meta — Token Viewer
- * pokazywał estymatę (turn.lastInputTokens, licznik znaków/token) jako pomiar realny.
- * Dwa dalsze wołania w `_chatBeforeContinue`/`_finalizeTurn` (gałąź `!turn.responseRecorded`,
- * ZAWSZE fallback: input z estymaty, output z lokalnego `countTokens`) miały tę samą wadę.
+ * Bez tej flagi: `_chatOnUsage` przy braku `usage.prompt_tokens` z API wołałoby
+ * `turn.tt.record('main', inputTokens, outputTokens)` BEZ meta - Token Viewer pokazywałby
+ * estymatę (turn.lastInputTokens, licznik znaków/token) jako pomiar realny. Dwa dalsze
+ * wołania w `_chatBeforeContinue`/`_finalizeTurn` (gałąź `!turn.responseRecorded`, ZAWSZE
+ * fallback: input z estymaty, output z lokalnego `countTokens`) mają tę samą pułapkę.
  */
 import test from 'ava';
 import fs from 'node:fs';

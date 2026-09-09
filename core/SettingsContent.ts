@@ -9,7 +9,7 @@ import type { ChatSettingsSlice } from './runtime/contracts.js';
 // node-safe. Same wartości `Setting`/`Notice` przychodzą tu dalej przez ctx (DI).
 import type { App, Notice as ObsidianNotice, Setting as ObsidianSetting } from 'obsidian';
 
-// S31: `MasterPasswordModal` importuje `obsidian`, a ten plik wisi (przez
+// `MasterPasswordModal` importuje `obsidian`, a ten plik wisi (przez
 // SettingsSection.ts → registerSettings) na node-safe barrelu `core/index.js`.
 // Statyczny import wciągałby `obsidian` do barrela i wywalał testy AVA (brak mocka).
 // Reszta obsidianowych rzeczy (Setting/Notice) i tak przychodzi tu przez ctx (DI);
@@ -37,7 +37,7 @@ interface ApprovalManagerLike {
     removeFromAlwaysApproved: (agentName: string, actionType: string, targetPath: string | undefined) => void;
 }
 
-/** Plugin widziany przez sekcje core — X-3: bez martwych gałęzi wykluczeń i kolekcji źródeł. */
+/** Plugin widziany przez sekcje core — bez martwych gałęzi wykluczeń i kolekcji źródeł. */
 interface SettingsPluginLike {
     manifest: { version: string };
     secretsStorage?: SecretsStorage;
@@ -131,7 +131,7 @@ export function renderApiKeysSection(container: HTMLElement, ctx: SettingsSectio
                 }
                 if (secrets.backend === 'master-password') {
                     const { MasterPasswordModal } = await import('./security/MasterPasswordModal.js');
-                    // AUD-testy-009 (uwaga review): próg z JEDNEJ stałej — trzecia kopia literału „12" kłamałaby przy zmianie polityki.
+                    // Próg z JEDNEJ stałej - kolejna kopia literału „12" kłamałaby przy zmianie polityki.
                     const { MASTER_PASSWORD_MIN_LENGTH } = await import('./security/masterPasswordPolicy.js');
                     const password = await MasterPasswordModal.request(owner.app, {
                         title: 'Secure storage master password',
@@ -154,8 +154,8 @@ export function renderApiKeysSection(container: HTMLElement, ctx: SettingsSectio
                 owner.display();
             }));
 
-    // E1.3 P7: when secure storage is off, API keys live as plaintext inside the vault
-    // (.pkm-assistant/settings.json — jedyny plik ustawień pluginu, S-19)
+    // When secure storage is off, API keys live as plaintext inside the vault
+    // (.pkm-assistant/settings.json - jedyny plik ustawień pluginu)
     // and get replicated by Obsidian Sync/git/Dropbox. Warn the user and point at the
     // "Secure storage" toggle right above.
     if (secureStorage.enabled !== true) {
@@ -237,8 +237,7 @@ export function renderAdvancedSection(container: HTMLElement, ctx: SettingsSecti
     h2Adv.settingEl.addClass('cs-settings-section');
     setSvgLabel(h2Adv.nameEl, icons?.wrench?.(18) || '', t('settings.advanced_title'));
 
-    // E2.3 (D21): default autonomy for new chats (whether the agent asks before acting).
-    // Replaces the old „default work mode" dropdown (Gadaj/Rób removed).
+    // Default autonomy for new chats (whether the agent asks before acting).
     new Setting(container)
         .setName(t('settings.default_autonomy'))
         .setDesc(t('settings.default_autonomy_desc'))
@@ -253,7 +252,7 @@ export function renderAdvancedSection(container: HTMLElement, ctx: SettingsSecti
             });
         });
 
-    // E2.4 (D14): furtka rozszerzonych reguł promptu dla słabszych modeli.
+    // Furtka rozszerzonych reguł promptu dla słabszych modeli.
     new Setting(container)
         .setName(t('settings.extended_prompt_rules'))
         .setDesc(t('settings.extended_prompt_rules_desc'))
@@ -264,9 +263,9 @@ export function renderAdvancedSection(container: HTMLElement, ctx: SettingsSecti
                 await save();
             }));
 
-    // S28 (D7): globalny wyłącznik Komunikatora — poczta między agentami. Ten sam przewód
-    // co kill-switch z E1.2, tylko domyślnie ON i widoczny dla usera. Rejestracja narzędzi
-    // i katalog serwerów czytają flagę PRZY STARCIE, więc zmiana wymaga przeładowania.
+    // Globalny wyłącznik Komunikatora - poczta między agentami. Domyślnie ON i widoczny
+    // dla usera. Rejestracja narzędzi i katalog serwerów czytają flagę PRZY STARCIE,
+    // więc zmiana wymaga przeładowania.
     new Setting(container)
         .setName(t('settings.komunikator_enabled'))
         .setDesc(t('settings.komunikator_enabled_desc'))
@@ -318,7 +317,7 @@ export function renderAdvancedSection(container: HTMLElement, ctx: SettingsSecti
 }
 
 /**
- * Agent limits (E1.5 / R3 "Kagańce"). Editable overrides for config/limits.js values,
+ * Agent limits ("Kagańce"). Editable overrides for config/limits.js values,
  * stored under settings.pkmAssistant.limits.*. Empty field = use the default; getLimits()
  * validates/clamps at read time, so garbage or out-of-range input can never break runtime.
  */
@@ -340,33 +339,34 @@ export function renderLimitsSection(container: HTMLElement, ctx: SettingsSection
         { key: 'chat_max_iterations',                nameKey: 'settings.limits_chat_iter',          descKey: 'settings.limits_chat_iter_desc',          scale: 1 },
         { key: 'subagent_max_iterations_worker',     nameKey: 'settings.limits_worker_iter',        descKey: 'settings.limits_worker_iter_desc',        scale: 1 },
         { key: 'delegation_timeout_ms',              nameKey: 'settings.limits_delegation_timeout', descKey: 'settings.limits_delegation_timeout_desc', scale: 1000 },
-        // Front A — watchdog ciszy suba (chunk streamu przezbraja budzik; 0 = wyłączony).
+        // Watchdog ciszy suba (chunk streamu przezbraja budzik; 0 = wyłączony).
         { key: 'subagent_stall_timeout_ms',          nameKey: 'settings.limits_sub_stall',          descKey: 'settings.limits_sub_stall_desc',          scale: 1000 },
-        // F5 — grace-okno na finalne podsumowanie suba (timeout w trakcie backstopu odracza abort).
+        // Grace-okno na finalne podsumowanie suba (timeout w trakcie backstopu odracza abort).
         { key: 'subagent_final_grace_ms',            nameKey: 'settings.limits_final_grace',        descKey: 'settings.limits_final_grace_desc',        scale: 1000 },
-        // Front A — ratowanie dorobku: skrót wyników narzędzi przy padzie syntezy (0 = wyłączone).
+        // Ratowanie dorobku: skrót wyników narzędzi przy padzie syntezy (0 = wyłączone).
         { key: 'subagent_salvage_max_chars',         nameKey: 'settings.limits_sub_salvage',        descKey: 'settings.limits_sub_salvage_desc',        scale: 1 },
-        // Runda 2 — wynik suba przy doręczeniu do maina (0 = bez limitu).
+        // Wynik suba przy doręczeniu do maina (0 = bez limitu).
         { key: 'subagent_result_max_chars',          nameKey: 'settings.limits_sub_result',         descKey: 'settings.limits_sub_result_desc',         scale: 1 },
-        // S33 Z1 — kagańce delegacji (głębokość łańcucha + szerokość jednego wywołania).
+        // Kagańce delegacji (głębokość łańcucha + szerokość jednego wywołania).
         { key: 'max_delegation_depth',               nameKey: 'settings.limits_max_delegation_depth',      descKey: 'settings.limits_max_delegation_depth_desc',      scale: 1 },
         { key: 'max_parallel_delegations',           nameKey: 'settings.limits_max_parallel_delegations',  descKey: 'settings.limits_max_parallel_delegations_desc',  scale: 1 },
-        // S33 Z2 — bezpiecznik poczty agentów (strażnik siedzi w `kom_send`, nie w UI).
+        // Bezpiecznik poczty agentów (strażnik siedzi w `kom_send`, nie w UI).
         { key: 'kom_send_rate_max',                  nameKey: 'settings.limits_kom_send_rate_max',         descKey: 'settings.limits_kom_send_rate_max_desc',         scale: 1 },
-        // Werdykt Kuby 16.08 — sufit ŁAŃCUCHA auto-tur po subach z rzędu (bez tego rozmowa
+        // Sufit ŁAŃCUCHA auto-tur po subach z rzędu (bez tego rozmowa
         // potrafi jechać sama, agent zlecający kolejnych pomocników jednego po drugim).
         { key: 'max_consecutive_auto_turns',         nameKey: 'settings.limits_max_consecutive_auto_turns',      descKey: 'settings.limits_max_consecutive_auto_turns_desc',      scale: 1 },
-        // K12 — drugi sufit poczty: cała pula wysyłkowa jednego agenta na to samo okno.
+        // Drugi sufit poczty: cała pula wysyłkowa jednego agenta na to samo okno.
         { key: 'kom_send_rate_max_sender',           nameKey: 'settings.limits_kom_send_rate_max_sender',  descKey: 'settings.limits_kom_send_rate_max_sender_desc',  scale: 1 },
         { key: 'max_tool_result_length',             nameKey: 'settings.limits_tool_result',        descKey: 'settings.limits_tool_result_desc',        scale: 1 },
-        // F4 — dawne capy jakościowe (hardcode 6000/16000) jako konfigurowalne budżety.
+        // Dawne capy jakościowe (hardcode 6000/16000) jako konfigurowalne budżety.
         { key: 'subagent_prompt_max_chars',          nameKey: 'settings.limits_subagent_prompt',    descKey: 'settings.limits_subagent_prompt_desc',    scale: 1 },
         { key: 'delegation_context_max_chars',       nameKey: 'settings.limits_delegation_context', descKey: 'settings.limits_delegation_context_desc', scale: 1 },
         { key: 'chat_stream_stall_timeout_ms',       nameKey: 'settings.limits_stream_stall',       descKey: 'settings.limits_stream_stall_desc',       scale: 1000 },
-        // Friendly fire 2026-08-15 — budzik per-wywołanie modelu w czacie (pas ostateczny).
+        // Budzik per-wywołanie modelu w czacie (pas ostateczny).
         { key: 'chat_model_call_timeout_ms',         nameKey: 'settings.limits_chat_call_timeout',  descKey: 'settings.limits_chat_call_timeout_desc',  scale: 1000 },
-        // Bramka platform lokalnych (Zwis subagentow, lokalny most, 2026) — ile requestów naraz
-        // do lm_studio/ollama; chmura bramki nie ma.
+        // Bramka platform lokalnych — ogranicza równoległe requesty do lm_studio/ollama
+        // (bez niej subagenci potrafili zawiesić lokalny serwer nadmiarem żądań naraz);
+        // chmura bramki nie ma.
         { key: 'local_platform_max_concurrent',      nameKey: 'settings.limits_local_concurrent',   descKey: 'settings.limits_local_concurrent_desc',   scale: 1 },
     ];
 
@@ -471,12 +471,11 @@ export function renderNoGoSection(container: HTMLElement, ctx: SettingsSectionCt
                 button.setButtonText(t('settings.approved_actions_remove'));
                 // `setDestructive()` chciałby tu `@typescript-eslint/no-deprecated` (setWarning()
                 // deprecated w obsidian.d.ts), ALE jest `@since 1.13.0` (obsidianmd/no-unsupported-api),
-                // a manifest deklaruje minAppVersion 1.11.0 — na starszym Obsidianie ta metoda po
+                // a manifest deklaruje minAppVersion 1.11.0 - na starszym Obsidianie ta metoda po
                 // prostu nie istnieje (realny crash, nie lint nitpick). Zamiast tego dopisujemy
                 // ręcznie klasę CSS `mod-warning`, dokładnie to, co `setWarning()` robi pod spodem
-                // (styl przycisku ostrzegawczego bez logiki poza dodaniem klasy) — zero zmiany
-                // wyglądu/zachowania, zero podbicia minAppVersion, zero deprecated API (ogony-ogA,
-                // fala 3, 2026-09-04).
+                // (styl przycisku ostrzegawczego bez logiki poza dodaniem klasy) - zero zmiany
+                // wyglądu/zachowania, zero podbicia minAppVersion, zero deprecated API.
                 button.buttonEl.addClass('mod-warning');
                 button.onClick(async () => {
                     // `!` — do tej pętli wchodzimy tylko, gdy `getAllAlwaysApprovedRules()`

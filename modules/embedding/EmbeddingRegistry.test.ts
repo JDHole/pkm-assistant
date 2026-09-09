@@ -1,13 +1,5 @@
 /**
- * EmbeddingRegistry.test.ts — rejestr modeli embeddingu (clean-room / F4, `contracts.ts` §8).
- *
- * Reshape `standalone_base.test.ts` (12 testów — mapowanie w `plan_embedding.md` §B.3;
- * mechanizm kolekcji `<provider>#<Date.now()>` DELETE w całości, R11) + nowe testy
- * C-19..C-22, C-37 (katalog §C).
- *
- * Napisany przed implementacją (czerwony na stubie — `EmbeddingRegistry` rzucał
- * `not implemented` na każdym członie, więc WSZYSTKIE testy tego pliku były czerwone z tego
- * jednego powodu), dziś zielony.
+ * EmbeddingRegistry.test.ts - rejestr modeli embeddingu (`contracts.ts` §8).
  */
 import test from 'ava';
 import { EmbeddingRegistry } from './EmbeddingRegistry.js';
@@ -47,8 +39,6 @@ function makeDeps(settings: SettingsWithEmbedding | null, overrides: Partial<Emb
     };
 }
 
-// ── SB-03 (reshape) ──────────────────────────────────────────────────────────
-
 test('default bierze dostawcę i model z ustawień usera; worek ustawień nietknięty', t => {
     const settings: SettingsWithEmbedding = {
         pkmAssistant: { embedding: { provider: 'ollama', models: { ollama: 'snowflake-arctic-embed2' }, apiKeys: {} } },
@@ -63,10 +53,8 @@ test('default bierze dostawcę i model z ustawień usera; worek ustawień nietkn
         t.is(model.modelId, 'snowflake-arctic-embed2');
         t.is(model.modelKey, 'ollama:snowflake-arctic-embed2');
     }
-    t.deepEqual(settings, przed, 'getter `default` jest CZYSTY — nie mutuje worka ustawień (B.7 SB-03)');
+    t.deepEqual(settings, przed, 'getter `default` jest CZYSTY — nie mutuje worka ustawień');
 });
-
-// ── SB-04 (reshape) ──────────────────────────────────────────────────────────
 
 test('dwa odczyty default to ta sama instancja; zmiana ustawień ją unieważnia', t => {
     const settings: SettingsWithEmbedding = { pkmAssistant: { embedding: { provider: 'ollama', models: {}, apiKeys: {} } } };
@@ -80,8 +68,6 @@ test('dwa odczyty default to ta sama instancja; zmiana ustawień ją unieważnia
     const trzeci = registry.default;
     t.not(trzeci, pierwszy, 'zmiana dostawcy w ustawieniach unieważnia cache');
 });
-
-// ── SB-05 (reshape) ──────────────────────────────────────────────────────────
 
 test('default.embed() dowozi wektor przez wstrzyknięty http', async t => {
     const settings: SettingsWithEmbedding = {
@@ -97,8 +83,6 @@ test('default.embed() dowozi wektor przez wstrzyknięty http', async t => {
     }
 });
 
-// ── SB-07 (reshape, po R9) ───────────────────────────────────────────────────
-
 test('dostawca lokalny działa bez klucza (needsApiKey:false), bez sztucznego \'na\'', t => {
     const settings: SettingsWithEmbedding = { pkmAssistant: { embedding: { provider: 'ollama', models: {}, apiKeys: {} } } };
     const registry = new EmbeddingRegistry(makeDeps(settings));
@@ -106,8 +90,6 @@ test('dostawca lokalny działa bez klucza (needsApiKey:false), bez sztucznego \'
     t.notThrows(() => registry.default);
     t.false(EMBEDDING_PROVIDERS.ollama.info.needsApiKey);
 });
-
-// ── SB-08 (reshape) ──────────────────────────────────────────────────────────
 
 test('klucz z apiKeys.<p> trafia do kontekstu dostawcy', async t => {
     const { http, calls } = fakeHttp();
@@ -122,9 +104,7 @@ test('klucz z apiKeys.<p> trafia do kontekstu dostawcy', async t => {
     t.true(calls.some(c => c.headers.Authorization === 'Bearer sk-z-ustawien-usera'));
 });
 
-// ── SB-11 / C-37 (reshape) ───────────────────────────────────────────────────
-
-test('C-37: pełny łańcuch bootowy nie planuje zapisu ustawień (worek → default → createEmbedderFacade().isReady())', async t => {
+test('pełny łańcuch bootowy nie planuje zapisu ustawień (worek → default → createEmbedderFacade().isReady())', async t => {
     let zapisy = 0;
     const raw: SettingsWithEmbedding = {
         pkmAssistant: { embedding: { provider: 'ollama', models: {}, apiKeys: {} } },
@@ -152,13 +132,11 @@ test('C-37: pełny łańcuch bootowy nie planuje zapisu ustawień (worek → def
     void isReady;
 
     await new Promise(resolve => setTimeout(resolve, 40));
-    t.is(zapisy, 0, 'żadna ścieżka bootowa nie mutuje worek ustawień (B.7 SB-03/SB-11, harness 39)');
+    t.is(zapisy, 0, 'żadna ścieżka bootowa nie mutuje worek ustawień');
     t.deepEqual(raw, {
         pkmAssistant: { embedding: { provider: 'ollama', models: {}, apiKeys: {} } },
     });
 });
-
-// ── SB-12 (reshape) ──────────────────────────────────────────────────────────
 
 test('bez wybranego providera default nie powstaje: null, isConfigured()===false, zero http.send', t => {
     const { http, calls } = fakeHttp();
@@ -170,9 +148,9 @@ test('bez wybranego providera default nie powstaje: null, isConfigured()===false
     t.is(calls.length, 0);
 });
 
-// ── C-19 ─────────────────────────────────────────────────────────────────────
+// ── nieznany dostawca ─────────────────────────────────────────────────────────
 
-test('C-19: nieznany dostawca w ustawieniach -> default===null, ostrzeżenie w logu, zero http.send', t => {
+test('nieznany dostawca w ustawieniach -> default===null, ostrzeżenie w logu, zero http.send', t => {
     const { http, calls } = fakeHttp();
     const warns: unknown[][] = [];
     const settings: SettingsWithEmbedding = { pkmAssistant: { embedding: { provider: 'cohere', models: {}, apiKeys: {} } } };
@@ -183,17 +161,17 @@ test('C-19: nieznany dostawca w ustawieniach -> default===null, ostrzeżenie w l
     t.is(calls.length, 0);
 });
 
-// ── C-20 ─────────────────────────────────────────────────────────────────────
+// ── select() na nieznanym id ─────────────────────────────────────────────────
 
-test('C-20: select() na nieznanym id RZUCA UnknownEmbeddingProviderError, nie undefined', t => {
+test('select() na nieznanym id RZUCA UnknownEmbeddingProviderError, nie undefined', t => {
     const registry = new EmbeddingRegistry(makeDeps(null));
     // @ts-expect-error — id spoza unii, dokładnie to co testujemy (wywołanie z zewnątrz TS)
     t.throws(() => registry.select('cohere'), { instanceOf: UnknownEmbeddingProviderError });
 });
 
-// ── C-21 ─────────────────────────────────────────────────────────────────────
+// ── providers() ───────────────────────────────────────────────────────────────
 
-test('C-21: providers() oddaje 4 metryczki w kolejności EMBEDDING_PROVIDER_IDS', t => {
+test('providers() oddaje 4 metryczki w kolejności EMBEDDING_PROVIDER_IDS', t => {
     const registry = new EmbeddingRegistry(makeDeps(null));
     const infos = registry.providers();
     t.deepEqual(infos.map(i => i.id), [...EMBEDDING_PROVIDER_IDS]);
@@ -203,9 +181,9 @@ test('C-21: providers() oddaje 4 metryczki w kolejności EMBEDDING_PROVIDER_IDS'
     }
 });
 
-// ── C-22 ─────────────────────────────────────────────────────────────────────
+// ── zmiana providera ──────────────────────────────────────────────────────────
 
-test('C-22: zmiana provider w ustawieniach zmienia default bez restartu', t => {
+test('zmiana provider w ustawieniach zmienia default bez restartu', t => {
     const settings: SettingsWithEmbedding = { pkmAssistant: { embedding: { provider: 'ollama', models: {}, apiKeys: {} } } };
     const registry = new EmbeddingRegistry(makeDeps(settings));
 
@@ -214,14 +192,14 @@ test('C-22: zmiana provider w ustawieniach zmienia default bez restartu', t => {
     t.is(registry.default?.providerId, 'gemini');
 });
 
-// ── F10 (bramka mutacyjna): dwie bramki wejścia rejestru — `text()` i `positiveNumber()` ──
+// ── Bramka mutacyjna: dwie bramki wejścia rejestru - `text()` i `positiveNumber()` ──
 //
 // Rejestr normalizuje wpisy usera ZANIM zbuduje model: tekst pusty po obcięciu białych
 // znaków znaczy „nie wpisano", a knob liczbowy niedodatni (0, ujemny, śmieć) jest
 // odrzucany. Poniższe testy pinują OBSERWOWALNE skutki obu bramek, bo w środku
 // EmbeddingModel ma własne bezpieczniki i sam by je zamaskował.
 
-test('F10: model i host z samych białych znaków są traktowane jak brak wpisu (defaultModel + defaultEndpoint)', async t => {
+test('model i host z samych białych znaków są traktowane jak brak wpisu (defaultModel + defaultEndpoint)', async t => {
     const calls: HttpRequestSpec[] = [];
     const http: HttpClient = {
         async send(spec) {
@@ -248,7 +226,7 @@ test('F10: model i host z samych białych znaków są traktowane jak brak wpisu 
     );
 });
 
-test('F10: jednoznakowy klucz modelu z ustawień przechodzi w całości (bramka nie zjada krótkich nazw)', t => {
+test('jednoznakowy klucz modelu z ustawień przechodzi w całości (bramka nie zjada krótkich nazw)', t => {
     const settings: SettingsWithEmbedding = {
         pkmAssistant: { embedding: { provider: 'ollama', models: { ollama: 'x' }, apiKeys: {} } },
     };
@@ -258,7 +236,7 @@ test('F10: jednoznakowy klucz modelu z ustawień przechodzi w całości (bramka 
     t.is(registry.default?.modelKey, 'ollama:x');
 });
 
-test('F10: dodatnie knoby z ustawień (timeoutMs, batchSize.<p>) dojeżdżają do modelu', t => {
+test('dodatnie knoby z ustawień (timeoutMs, batchSize.<p>) dojeżdżają do modelu', t => {
     const settings: SettingsWithEmbedding = {
         pkmAssistant: { embedding: { provider: 'ollama', models: {}, apiKeys: {}, batchSize: { ollama: 7 }, timeoutMs: 12_345 } },
     };
@@ -268,10 +246,10 @@ test('F10: dodatnie knoby z ustawień (timeoutMs, batchSize.<p>) dojeżdżają d
     t.truthy(model);
     if (!model) return;
     t.is(model.timeoutMs, 12_345, 'sufit czasu z ustawień usera');
-    t.is(model.batchSize, 7, 'porcja doradcza usera wygrywa z katalogiem (B.6 GM-05)');
+    t.is(model.batchSize, 7, 'porcja doradcza usera wygrywa z katalogiem');
 });
 
-test('F10: 0 i liczba ujemna w knobach znaczą DOKŁADNIE to samo co brak wpisu — domyślne wartości i BEZ przebudowy modelu', t => {
+test('0 i liczba ujemna w knobach znaczą DOKŁADNIE to samo co brak wpisu - domyślne wartości i BEZ przebudowy modelu', t => {
     const slice: EmbeddingSettingsSlice = {
         provider: 'ollama',
         models: {},

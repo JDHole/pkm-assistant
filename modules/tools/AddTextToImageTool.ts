@@ -33,7 +33,7 @@ interface PermissionDecisionLike {
 type OverlayAgent = Record<string, unknown>;
 
 /**
- * K16 (AUD-security-102/126): minimalny widok pluginu — bramka uprawnień + rejestr agentów.
+ * Minimalny widok pluginu — bramka uprawnień + rejestr agentów.
  * Lokalny typ strukturalny (konwencja modułu): `PKMPlugin` nie jest importowany, bo to
  * deep-import, a barrel `core` go nie eksportuje.
  */
@@ -53,7 +53,7 @@ interface AddTextToImagePlugin {
 }
 
 /**
- * K11/K16: odczyt zaufanego znacznika-listy z args (`_invocationScopeFolders`). Wszystko,
+ * Odczyt zaufanego znacznika-listy z args (`_invocationScopeFolders`). Wszystko,
  * co nie jest niepustą tablicą stringów, znaczy „wołający nie zawęża" (kopia reguły
  * z `DelegateTool` — te znaczniki są kontraktem runtime'u, nie polem od modelu).
  */
@@ -64,7 +64,7 @@ function readScopeFolders(raw: unknown): string[] | null {
 }
 
 /**
- * K16 (AUD-security-102/126) — OBRAZ ŹRÓDŁOWY PRZEZ PEŁNĄ BRAMKĘ UPRAWNIEŃ.
+ * OBRAZ ŹRÓDŁOWY PRZEZ PEŁNĄ BRAMKĘ UPRAWNIEŃ.
  *
  * `contextExtractor` oddaje bramce `MCPClienta` WYŁĄCZNIE cel zapisu (akcja `image.generate`),
  * bo to on jest zlewem. Źródło szło dotąd tylko przez `validateVaultPath` — a ta zna
@@ -139,7 +139,7 @@ interface AddTextToImageArgs {
 }
 
 /**
- * K2 (AUD-security-016): ścieżka, pod którą narzędzie NAPRAWDĘ zapisze wynik.
+ * Ścieżka, pod którą narzędzie NAPRAWDĘ zapisze wynik.
  *
  * Domyślna wartość (`<obraz>_text.<ext>`) musi być liczona TAK SAMO w bramce i w `execute` —
  * inaczej bramka znów oceniałaby co innego niż zlew. Zwraca surowy ciąg; walidację robi wołacz.
@@ -185,11 +185,11 @@ PARAMETRY STYLU:
             properties: {
                 path: {
                     type: 'string',
-                    description: 'Ścieżka do obrazu w vaulcie (np. "Attachments/generated/foto.png"). Sprint 04 Z9: canonical name (był `image_path`).'
+                    description: 'Ścieżka do obrazu w vaulcie (np. "Attachments/generated/foto.png"). Nazwa kanoniczna (był `image_path`).'
                 },
                 image_path: {
                     type: 'string',
-                    description: 'DEPRECATED Sprint 04 — użyj `path`. Alias działa z deprecation warning, breaking v3.0.'
+                    description: 'DEPRECATED — użyj `path`. Alias działa z deprecation warning, breaking v3.0.'
                 },
                 text: {
                     type: 'string',
@@ -253,12 +253,12 @@ PARAMETRY STYLU:
                     description: 'Ścieżka zapisu wyniku. Domyślnie: oryginalny_plik_text.png'
                 },
             },
-            // Sprint 04 Z9: required is `text`; path/image_path either accepted (alias resolver in MCPClient).
+            // required is `text`; path/image_path either accepted (alias resolver in MCPClient).
             required: ['text'],
         },
 
-        // K2 (AUD-security-016): bramka dostaje CEL ZAPISU, nie źródło. Dawniej `_extractToolContext`
-        // spadał na `default` i oddawał `args.path` (obrazek wejściowy), więc AccessGuard oglądał
+        // Bramka dostaje CEL ZAPISU, nie źródło. Fallback na `default`, który oddawałby
+        // `args.path` (obrazek wejściowy), sprawiałby, że AccessGuard oglądałby
         // legalną ścieżkę, a `output_path` — pod który narzędzie NAPRAWDĘ pisało — nie był
         // sprawdzany przez nikogo (ani whitelista, ani No-Go, ani blokada `.pkm-assistant/`).
         contextExtractor: (args: AddTextToImageArgs) => ({
@@ -268,7 +268,7 @@ PARAMETRY STYLU:
 
         execute: async (args: AddTextToImageArgs, appRef: ImageOverlayApp, plugin: AddTextToImagePlugin | null | undefined) => {
             try {
-                // Sprint 04 Z9: prefer canonical `path`, fallback to legacy `image_path` (alias resolver
+                // Prefer canonical `path`, fallback to legacy `image_path` (alias resolver
                 // w MCPClient już to robi, ale duplikujemy dla robustness gdy tool jest wywoływany direct).
                 const imagePathArg = args.path || args.image_path;
                 const {
@@ -285,7 +285,7 @@ PARAMETRY STYLU:
                     outline = false,
                     outlineColor = '#000000',
                     outlineWidth = 2,
-                    // `output_path` czyta `outputPathFor` (wspólne z `contextExtractor`) — K2.
+                    // `output_path` czyta `outputPathFor` (wspólne z `contextExtractor`).
                 } = args;
 
                 if (!imagePathArg || typeof imagePathArg !== 'string') {
@@ -295,7 +295,7 @@ PARAMETRY STYLU:
                     throw new Error(t('mcp.text_overlay.text_required'));
                 }
 
-                // K2 (AUD-security-016): OBIE ścieżki przez centralną walidację (`validateVaultPath`),
+                // OBIE ścieżki przez centralną walidację (`validateVaultPath`),
                 // a nie przez lokalną parę `sanitizePath` + `isProtectedPath`. Ta para nie znała
                 // blokady `.pkm-assistant/` (pamięć innych agentów, indeks semantyczny), a cel
                 // zapisu nie przechodził przez nic. Walidacja CELU idzie PRZED odczytem i renderem —
@@ -313,7 +313,7 @@ PARAMETRY STYLU:
                 }
                 const savePath = outCheck.safePath;
 
-                // K16 (AUD-security-102/126): obraz ŹRÓDŁOWY przez PEŁNĄ bramkę uprawnień —
+                // Obraz ŹRÓDŁOWY przez PEŁNĄ bramkę uprawnień —
                 // No-Go, pliki chronione, whitelista `focusFolders`, zakres suba, `admin_access`.
                 // Idzie PRZED sprawdzeniem istnienia pliku i przed odczytem: odmowa nie ma
                 // prawa zdradzić nawet tego, czy plik istnieje. Szczegóły: `denySourceReason`.
@@ -345,10 +345,10 @@ PARAMETRY STYLU:
                     outlineWidth,
                 };
 
-                // Renderuj i zapisz (ścieżka wyjściowa policzona i zwalidowana wyżej — K2)
+                // Renderuj i zapisz (ścieżka wyjściowa policzona i zwalidowana wyżej)
                 log.info('TextOverlay', `Auto-render: "${text.slice(0, 40)}..." na ${safePath}`);
 
-                // E2.6 API-first: vault.readBinary/createBinary; adapter fallback dla ukrytych ścieżek.
+                // API-first: vault.readBinary/createBinary; adapter fallback dla ukrytych ścieżek.
                 const imageData = await readBinary(appRef, safePath);
                 const resultBuffer = await renderTextOverlay(imageData, textStyle);
 
@@ -373,7 +373,5 @@ PARAMETRY STYLU:
     };
 }
 
-// S30 Z4: re-eksport `renderTextOverlay` USUNIĘTY. Istniał wyłącznie po to, żeby gwiazdka
-// w barrelu (`export * from './AddTextToImageTool.js'`) wyniosła helper na zewnątrz modułu —
-// a nikt go tam nigdy nie wołał (jedynym konsumentem był modal z wywalonego `modules/comfy`).
-// Funkcja żyje w `text_overlay_helper.js` i importuje ją ten plik, wyżej.
+// `renderTextOverlay` żyje w `text_overlay_helper.js` i importuje ją ten plik, wyżej —
+// nie jest re-eksportowana z barrela, bo poza tym plikiem nikt jej nie woła.

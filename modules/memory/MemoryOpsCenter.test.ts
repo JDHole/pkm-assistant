@@ -1,5 +1,5 @@
 /**
- * MemoryOpsCenter.test.ts — S29 Z2: rejestr jednego aktywnego przebiegu + rozgłaszanie.
+ * MemoryOpsCenter.test.ts - rejestr jednego aktywnego przebiegu + rozgłaszanie.
  */
 import test from 'ava';
 import { MemoryOpsCenter, OPS_EVENT } from './MemoryOpsCenter.js';

@@ -1,15 +1,15 @@
 /**
- * toolAxis.js — Jedna oś narzędziowa agenta v3 (E2.8 C1).
+ * toolAxis.js - Jedna oś narzędziowa agenta v3.
  *
  * MODEL: `agent.disabled_tools[]` = NEGATYWNA lista nazw narzędzi built-in wyłączonych
  * dla agenta. Negatywna z rozmysłem: narzędzie dodane w nowej wersji pluginu jest
  * domyślnie WŁĄCZONE (nie trzeba dotykać każdego agenta). `core` (ask_user) zawsze ON,
  * nieusuwalny.
  *
- * Ten moduł jest PURE (zero importów obsidian / PromptBuilder) — dzięki temu jest
+ * Ten moduł jest PURE (zero importów obsidian / PromptBuilder) - dzięki temu jest
  * node-testowalny (`toolAxis.test.js`), w przeciwieństwie do `Agent.js`, który przez
  * łańcuch `modules/prompts` wciąga obsidian. Agent.js importuje stąd `./toolAxis.js`
- * (import wewnątrz-modułowy, `./` — poza zasięgiem reguły no-restricted-imports).
+ * (import wewnątrz-modułowy, `./` - poza zasięgiem reguły no-restricted-imports).
  *
  * ŹRÓDŁO PRAWDY nazw narzędzi to manifesty `modules/mcp/built-in-servers/*.manifest.js`
  * (+ `ToolRegistry.BUILTIN_TOOL_MAP`). Mapa niżej jest ich pure-kopią po stronie agenta;
@@ -34,14 +34,14 @@ export const BUILTIN_TOOL_GROUPS: Record<string, string[]> = {
     memory: ['memory_save', 'memory_delete'],
     web: ['web_search', 'web_read'],
     multimodal: ['generate_image', 'add_text_to_image'],
-    // S28 (D3): `agent_message` OUT z delegacji — pocztę obsługuje grupa `komunikator`.
+    // `agent_message` OUT z delegacji - pocztę obsługuje grupa `komunikator`.
     delegation: ['delegate', 'agent_delegate'],
     artifacts: ['artifact_create', 'artifact_read', 'artifact_update', 'artifact_list', 'todo'],
-    // S28 (D3): trzy prymitywy poczty zamiast 13 narzędzi Project Huba.
+    // Trzy prymitywy poczty zamiast 13 narzędzi Project Huba.
     komunikator: ['kom_send', 'kom_list', 'kom_read'],
 };
 
-/** Serwer zawsze dostępny (ask_user) — nie da się go wyłączyć. */
+/** Serwer zawsze dostępny (ask_user) - nie da się go wyłączyć. */
 export const ALWAYS_ON_GROUP = 'core';
 
 /** Wszystkie built-in tools (płasko). */
@@ -55,15 +55,15 @@ export const ALL_BUILTIN_TOOLS = Object.values(BUILTIN_TOOL_GROUPS).flat();
 export const DEFAULT_DISABLED_GROUPS = ['web', 'multimodal', 'delegation', 'artifacts', 'komunikator'];
 
 /**
- * WYJĄTKI od DEFAULT_DISABLED_GROUPS: narzędzia, które mimo wyłączonej grupy są ON u świeżego agenta
- * (E2.9 D1). `todo` (gatunek 2) = samoorganizacja pracy agenta w ukrytym `.pkm-assistant/` — nie pisze
+ * WYJĄTKI od DEFAULT_DISABLED_GROUPS: narzędzia, które mimo wyłączonej grupy są ON u świeżego agenta.
+ * `todo` = samoorganizacja pracy agenta w ukrytym `.pkm-assistant/` - nie pisze
  * do widocznego vaulta usera, więc bezpieczne domyślnie; reszta grupy `artifacts` (artifact_* piszą
  * notatki do vaultu) zostaje OFF konserwatywnie.
  */
 export const DEFAULT_ENABLED_EXCEPTIONS = ['todo'];
 
 /**
- * Metadane grup dla UI (ikona emoji + klucz i18n etykiety). Zgodne z makietą E2.8.
+ * Metadane grup dla UI (ikona emoji + klucz i18n etykiety).
  */
 export const GROUP_META: Record<string, { icon: string; labelKey: string }> = {
     core: { icon: '⚙️', labelKey: 'tools.group.core' },
@@ -93,7 +93,7 @@ export const LEGACY_DEFAULT_PERMISSIONS: Record<string, boolean> = {
 /**
  * Bramka uprawnienia per narzędzie (dawny `ACTION_TYPE_MAP → ACTION_PERMISSIONS`).
  * Narzędzie było USUWALNE ze zbioru efektywnego, gdy jego uprawnienie było `false`.
- * Narzędzia bez wpisu = niebramkowane uprawnieniem akcji (czytanie / pamięć — te ostatnie
+ * Narzędzia bez wpisu = niebramkowane uprawnieniem akcji (czytanie / pamięć - te ostatnie
  * bramkuje osobno serwer `memory` + żywe uprawnienie `memory`, nie edit_notes).
  */
 const PERMISSION_TOOL_GATES: Record<string, string> = {
@@ -111,26 +111,26 @@ const PERMISSION_TOOL_GATES: Record<string, string> = {
     // delegacja (dawne action 'delegate' → PERMISSION mcp)
     delegate: 'mcp',
     agent_delegate: 'mcp',
-    // generowanie obrazu (dawne EDIT_NOTES). AUD-dead-code-133: `agent_message` skreślony
-    // stąd — `permissionAllowsTool` jest wołane WYŁĄCZNIE dla narzędzi z `BUILTIN_TOOL_GROUPS`
-    // (pętla w `computeDisabledToolsFromLegacy`), a `agent_message` wypadło z tamtej mapy w S28
-    // D3 (pocztę obsługuje dziś grupa `komunikator`) — wpis nigdy nie był czytany. Bliźniaczy
-    // wpis w `core/security/autonomy.ts` to INNY przypadek — tam zostaje świadomie, fail-closed.
+    // generowanie obrazu (dawne EDIT_NOTES). `agent_message` skreślony stąd - `permissionAllowsTool`
+    // jest wołane WYŁĄCZNIE dla narzędzi z `BUILTIN_TOOL_GROUPS` (pętla w
+    // `computeDisabledToolsFromLegacy`); pocztę obsługuje dziś grupa `komunikator`, więc wpis
+    // nigdy nie był czytany. Bliźniaczy wpis w `core/security/autonomy.ts` to INNY przypadek -
+    // tam zostaje świadomie, fail-closed.
     generate_image: 'edit_notes',
     add_text_to_image: 'edit_notes',
-    // memory_save/memory_delete: BEZ bramki edit_notes (bypass checkPermission w runtime) —
+    // memory_save/memory_delete: BEZ bramki edit_notes (bypass checkPermission w runtime) -
     // rządzi nimi sam serwer `memory` w mcp_servers. Ungated tutaj.
     // chat_todo/idea_review/plan_review/kom_*: ungated (serwer whitelisty wystarczy).
 };
 
 /**
  * Czytelna, ludzka etykieta narzędzia na OSI UPRAWNIEŃ (i18n `tools.label.<name>`).
- * Fallback = surowa nazwa techniczna. Używane w UI Uprawnień (grupy + „kiedy pyta")
- * i approvalu — „po ludzku" (S18/C7).
+ * Fallback = surowa nazwa techniczna. Używane w UI Uprawnień (grupy + "kiedy pyta")
+ * i approvalu - "po ludzku".
  *
- * ⚠️ S30 Z3 rename z `getToolLabel`: istniała druga funkcja o tej samej nazwie i INNEJ
- * semantyce — `getToolCallLabel` w `modules/ui-components/ToolCallDisplay.js` (etykieta chipa
- * tool-calla, przestrzeń i18n `tool.*`, nie `tools.label.*`). Nie mieszać przestrzeni kluczy.
+ * ⚠️ Nie mylić z `getToolCallLabel` w `modules/ui-components/ToolCallDisplay.js` - inna
+ * semantyka (etykieta chipa tool-calla, przestrzeń i18n `tool.*`, nie `tools.label.*`).
+ * Nie mieszać przestrzeni kluczy.
  *
  * @param {string} name
  * @returns {string}
@@ -175,12 +175,12 @@ function permissionAllowsTool(tool: string, perms: Record<string, unknown>) {
 }
 
 /**
- * MIGRACJA (C1): wylicz `disabled_tools` ze starych osi (mcp_servers × enabled_tools ×
+ * MIGRACJA: wylicz `disabled_tools` ze starych osi (mcp_servers × enabled_tools ×
  * permissions), tak żeby zachować dawną efektywną widoczność+używalność narzędzi.
  *
  * Zasady:
  *  - `mcp_servers` zawiera '*' → wszystko włączone (disabled = []). Wildcard = pełny dostęp
- *    (świadomy wyjątek: nie zawężamy uprawnieniami akcji — agent '*' ma mieć wszystko).
+ *    (świadomy wyjątek: nie zawężamy uprawnieniami akcji - agent '*' ma mieć wszystko).
  *  - w przeciwnym razie: narzędzie jest EFEKTYWNE gdy: grupa `core` LUB grupa w `mcp_servers`,
  *    ORAZ (enabled_tools puste LUB narzędzie w enabled_tools), ORAZ uprawnienie akcji je dopuszcza.
  *  - `disabled_tools = ALL_BUILTIN − efektywne`.
@@ -218,7 +218,7 @@ export function computeDisabledToolsFromLegacy(config: LegacyToolAxisConfig = {}
 
 /**
  * Normalizuj `disabled_tools` z YAML: tablica stringów, odfiltruj `core` (ask_user nieusuwalny),
- * usuń duplikaty i wartości spoza built-in? (NIE — zostawiamy nieznane, mogą to być narzędzia
+ * usuń duplikaty i wartości spoza built-in? (NIE - zostawiamy nieznane, mogą to być narzędzia
  * userowych serwerów wyłączone per agent; C1 dotyczy built-in, ale lista jest wspólna).
  * @param {*} input
  * @returns {string[]}
@@ -229,7 +229,7 @@ export function normalizeDisabledTools(input: unknown) {
     const seen = new Set();
     for (const raw of input) {
         if (typeof raw !== 'string' || !raw) continue;
-        // core (ask_user) nie da się wyłączyć — pomijamy przy wczytaniu.
+        // core (ask_user) nie da się wyłączyć - pomijamy przy wczytaniu.
         if (BUILTIN_TOOL_GROUPS.core.includes(raw)) continue;
         if (seen.has(raw)) continue;
         seen.add(raw);
@@ -239,17 +239,17 @@ export function normalizeDisabledTools(input: unknown) {
 }
 
 /**
- * K3 (AUD-security-025) — PRZEŁĄCZNIKI POPOVERA UPRAWNIEŃ, PRZEPIĘTE NA ŻYWĄ OŚ.
+ * PRZEŁĄCZNIKI POPOVERA UPRAWNIEŃ, PRZEPIĘTE NA ŻYWĄ OŚ.
  *
- * Do K3 popover w czacie pisał `default_permissions.read_notes/edit_notes/create_files/
- * delete_files/mcp`. Te klucze `Agent._normalizePermissions` cicho kasuje (po E2.8 C1 żywe
- * są tylko `memory` i `guidance_mode`), a `checkPermission` ich nie czyta — kropka przesuwała
+ * Popover w czacie pisał niegdyś `default_permissions.read_notes/edit_notes/create_files/
+ * delete_files/mcp`. Te klucze `Agent._normalizePermissions` cicho kasuje (żywe są tylko
+ * `memory` i `guidance_mode`), a `checkPermission` ich nie czyta - kropka przesuwała
  * się na ekranie i nic z tego nie wynikało. Tu jest mapa tych samych etykiet na NAZWY NARZĘDZI,
- * czyli na `disabled_tools` — jedyną oś, którą ktokolwiek egzekwuje.
+ * czyli na `disabled_tools` - jedyną oś, którą ktokolwiek egzekwuje.
  *
- * `mcp` (dawne „Narzędzia MCP") NIE MA tu wpisu świadomie: po E3.1 dostęp do serwera
+ * `mcp` (dawne "Narzędzia MCP") NIE MA tu wpisu świadomie: dostęp do serwera
  * zewnętrznego to opt-in per serwer (`agent.mcp_servers[]`, ustawiany w profilu agenta),
- * a nie jeden globalny włącznik — przełącznik boolean nie miałby czego włączyć.
+ * a nie jeden globalny włącznik - przełącznik boolean nie miałby czego włączyć.
  */
 export const PERMISSION_SWITCH_TOOLS: Record<string, string[]> = {
     read_notes: ['read', 'list', 'search'],
@@ -272,7 +272,7 @@ export function isPermissionSwitchOn(disabledTools: string[] | undefined, key: s
 
 /**
  * Nowa lista `disabled_tools` po przestawieniu jednego przełącznika. Narzędzi spoza mapy
- * przełącznika NIE RUSZA — user, który wyłączył sobie np. `web_search`, nie traci tego ustawienia
+ * przełącznika NIE RUSZA - user, który wyłączył sobie np. `web_search`, nie traci tego ustawienia
  * przy klikaniu w wiersz „Usuwanie plików".
  */
 export function applyPermissionSwitch(disabledTools: string[] | undefined, key: string, on: boolean): string[] {
@@ -284,7 +284,7 @@ export function applyPermissionSwitch(disabledTools: string[] | undefined, key: 
 }
 
 /**
- * Presety popovera wyrażone w tych samych przełącznikach. Dotykają WYŁĄCZNIE osi vaultowej —
+ * Presety popovera wyrażone w tych samych przełącznikach. Dotykają WYŁĄCZNIE osi vaultowej -
  * grupy web/multimodal/delegacja/artefakty/komunikator zostają takie, jakie user ustawił
  * w profilu agenta.
  */

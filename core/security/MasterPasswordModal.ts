@@ -12,7 +12,7 @@ export interface MasterPasswordOptions {
 }
 
 export class MasterPasswordModal extends Modal {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare title: string;
     declare description: string;
     declare confirm: boolean;
@@ -93,7 +93,7 @@ export class MasterPasswordModal extends Modal {
     }
 
     _submit(): void {
-        // AUD-testy-009: reguła (długość + zgodność powtórzenia) mieszka w czystej,
+        // Reguła (długość + zgodność powtórzenia) mieszka w czystej,
         // testowalnej funkcji obok tego pliku — `_submit` tylko woła i podpina wynik pod DOM.
         const result = validateNewMasterPassword(this.password, this.confirmPassword, this.confirm);
         if (!result.ok) {
@@ -103,7 +103,7 @@ export class MasterPasswordModal extends Modal {
                 this._setError('Passwords do not match.');
             } else {
                 // Unia kodów jest dziś zamknięta (too_short|mismatch) — ten fallback łapie
-                // przyszły kod dodany do polityki bez aktualizacji modala (review 02.09).
+                // przyszły kod dodany do polityki bez aktualizacji modala.
                 this._setError('Invalid password.');
             }
             return;

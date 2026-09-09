@@ -3,7 +3,7 @@
  * ustawień (razem z samym plikiem migratora i fixture'ami obok).
  *
  * Wejście: DWA realne kształty `settings.json` trzymane jako fixture'y w pamięci —
- * `__fixtures__/settings_v2.1.json` (kształt sprzed clean-room) i
+ * `__fixtures__/settings_v2.1.json` (stary kształt ustawień) i
  * `__fixtures__/settings_v2.2_s35.json` (po rename namespace'u, z sejfem sekretów).
  */
 import fs from 'node:fs';
@@ -22,7 +22,6 @@ const load = (name: string): SettingsBag =>
 const pkm = (bag: SettingsBag): Record<string, Record<string, Record<string, string>>> =>
     bag.pkmAssistant as unknown as Record<string, Record<string, Record<string, string>>>;
 
-// ── C4.1 ─────────────────────────────────────────────────────────────────────
 test('fixture v2.1 → wszystkie klucze pod pkmAssistant.*', t => {
     const bag = load('settings_v2.1.json');
     const wynik = migrateLegacySettings(bag);
@@ -55,7 +54,6 @@ test('fixture v2.1 → wszystkie klucze pod pkmAssistant.*', t => {
     t.is(bag.smart_notices, undefined, 'stara gałąź powiadomień została po migracji');
 });
 
-// ── C4.2 ─────────────────────────────────────────────────────────────────────
 test('fixture v2.2 (po rename namespace) → migrowany razem z sejfem', t => {
     const bag = load('settings_v2.2_s35.json');
     const wynik = migrateLegacySettings(bag);
@@ -67,7 +65,6 @@ test('fixture v2.2 (po rename namespace) → migrowany razem z sejfem', t => {
     t.true(wynik.secretRefsMigrated >= 2, 'wpisy sejfu nie zostały przemianowane');
 });
 
-// ── C4.3 ─────────────────────────────────────────────────────────────────────
 test('gałąź wątków czatu jest KASOWANA, nie przenoszona', t => {
     const bag = load('settings_v2.1.json');
     const wynik = migrateLegacySettings(bag);
@@ -79,7 +76,6 @@ test('gałąź wątków czatu jest KASOWANA, nie przenoszona', t => {
     t.is(pkmBag.threads, undefined);
 });
 
-// ── C4.4 ─────────────────────────────────────────────────────────────────────
 test('idempotencja: drugi przebieg zwraca migrated:false i nie zmienia worka', t => {
     const bag = load('settings_v2.1.json');
     migrateLegacySettings(bag);
@@ -92,7 +88,6 @@ test('idempotencja: drugi przebieg zwraca migrated:false i nie zmienia worka', t
     t.is(JSON.stringify(bag), poPierwszym, 'drugi przebieg zmienił worek — migrator nie jest idempotentny');
 });
 
-// ── C4.5 ─────────────────────────────────────────────────────────────────────
 test('nowy klucz już istnieje → NIE nadpisuje, stary kasuje', t => {
     const bag: SettingsBag = {
         smart_chat_model: { platform: 'deepseek' },
@@ -105,7 +100,6 @@ test('nowy klucz już istnieje → NIE nadpisuje, stary kasuje', t => {
     t.is(bag.smart_chat_model, undefined, 'stara gałąź nie została skasowana');
 });
 
-// ── C4.6 ─────────────────────────────────────────────────────────────────────
 test('platforma google/azure/custom → "" (nieobsługiwane)', t => {
     for (const platform of ['google', 'azure', 'custom']) {
         const bag: SettingsBag = { smart_chat_model: { platform } };
@@ -114,7 +108,6 @@ test('platforma google/azure/custom → "" (nieobsługiwane)', t => {
     }
 });
 
-// ── C4.7 ─────────────────────────────────────────────────────────────────────
 test('_model wygrywa nad .model_key, gdy oba', t => {
     const bag: SettingsBag = {
         smart_chat_model: {
@@ -128,7 +121,6 @@ test('_model wygrywa nad .model_key, gdy oba', t => {
     t.is(pkm(bag).chat.models.deepseek, 'z-plaskiego-klucza');
 });
 
-// ── C4.8 ─────────────────────────────────────────────────────────────────────
 test('secureStorage: klucze refs przepięte I id sekretów przemianowane', t => {
     const bag = load('settings_v2.2_s35.json');
     const przedBloby = Object.values(
@@ -157,7 +149,6 @@ test('secureStorage: klucze refs przepięte I id sekretów przemianowane', t => 
     );
 });
 
-// ── C4.8b ────────────────────────────────────────────────────────────────────
 test('migrateNamespace NIE rusza id sekretów', t => {
     const bag = load('settings_v2.2_s35.json');
     const przed = { ...((bag.pkmAssistant as Record<string, Record<string, Record<string, string>>>).secureStorage.refs) };
@@ -166,10 +157,9 @@ test('migrateNamespace NIE rusza id sekretów', t => {
 
     const po = (bag.pkmAssistant as Record<string, Record<string, Record<string, string>>>).secureStorage.refs;
     t.deepEqual(Object.values(po).sort(), Object.values(przed).sort(),
-        'migrator namespace przemianował id sekretów — po nich chodzi odszyfrowanie (M-02)');
+        'migrator namespace przemianował id sekretów — po nich chodzi odszyfrowanie');
 });
 
-// ── C4.9 ─────────────────────────────────────────────────────────────────────
 test('martwe klucze skasowane (removedKeys > 0)', t => {
     const bag = load('settings_v2.1.json');
     const wynik = migrateLegacySettings(bag);
@@ -180,13 +170,11 @@ test('martwe klucze skasowane (removedKeys > 0)', t => {
     }
 });
 
-// ── C4.10 ────────────────────────────────────────────────────────────────────
 test('funkcja czysta — fn.length === 1, zero I/O', t => {
     t.is(migrateLegacySettings.length, 1,
         'migrator przyjmuje więcej niż worek — to strukturalna furtka do I/O w trakcie load()');
 });
 
-// ── C4.11 ────────────────────────────────────────────────────────────────────
 test('wejście null/string/liczba/tablica → {migrated:false} bez wyjątku', t => {
     for (const wejscie of [null, undefined, 'tekst', 42, true, [1, 2, 3]]) {
         const wynik = migrateLegacySettings(wejscie);
@@ -211,7 +199,6 @@ const licz = (bag: SettingsBag): [number, number, number] => {
     return [wynik.movedKeys, wynik.removedKeys, wynik.secretRefsMigrated];
 };
 
-// ── C4.12 ────────────────────────────────────────────────────────────────────
 test('platforma czatu: przeniesienie liczy sie jako przeniesienie, nie kasacja', t => {
     const bag: SettingsBag = { smart_chat_model: { platform: 'deepseek' } };
 
@@ -219,7 +206,6 @@ test('platforma czatu: przeniesienie liczy sie jako przeniesienie, nie kasacja',
     t.is(pkm(bag).chat.platform as unknown as string, 'deepseek');
 });
 
-// ── C4.13 ────────────────────────────────────────────────────────────────────
 test('platforma czatu: kolizja z nowym ksztaltem liczy sie jako kasacja', t => {
     const bag: SettingsBag = {
         smart_chat_model: { platform: 'deepseek' },
@@ -230,7 +216,6 @@ test('platforma czatu: kolizja z nowym ksztaltem liczy sie jako kasacja', t => {
     t.is(pkm(bag).chat.platform as unknown as string, 'anthropic');
 });
 
-// ── C4.14 ────────────────────────────────────────────────────────────────────
 test('limit tokenow czatu: przeniesienie liczy sie jako przeniesienie', t => {
     const bag: SettingsBag = { smart_chat_model: { max_tokens: 3000 } };
 
@@ -238,7 +223,6 @@ test('limit tokenow czatu: przeniesienie liczy sie jako przeniesienie', t => {
     t.is(pkm(bag).chat.maxTokens as unknown as number, 3000);
 });
 
-// ── C4.15 ────────────────────────────────────────────────────────────────────
 test('klucz API czatu: jedno pole = jedno przeniesienie', t => {
     const bag: SettingsBag = { smart_chat_model: { deepseek_api_key: 'sk-PLACEHOLDER' } };
 
@@ -246,7 +230,6 @@ test('klucz API czatu: jedno pole = jedno przeniesienie', t => {
     t.is(pkm(bag).chat.apiKeys.deepseek, 'sk-PLACEHOLDER');
 });
 
-// ── C4.16 ────────────────────────────────────────────────────────────────────
 test('adres serwera czatu: jedno pole = jedno przeniesienie', t => {
     const bag: SettingsBag = { smart_chat_model: { ollama_host: 'http://127.0.0.1:11434' } };
 
@@ -254,7 +237,6 @@ test('adres serwera czatu: jedno pole = jedno przeniesienie', t => {
     t.is(pkm(bag).chat.hosts.ollama, 'http://127.0.0.1:11434');
 });
 
-// ── C4.17 ────────────────────────────────────────────────────────────────────
 test('model czatu: jedno pole = jedno przeniesienie', t => {
     const bag: SettingsBag = { smart_chat_model: { deepseek_model: 'deepseek-chat' } };
 
@@ -262,7 +244,6 @@ test('model czatu: jedno pole = jedno przeniesienie', t => {
     t.is(pkm(bag).chat.models.deepseek, 'deepseek-chat');
 });
 
-// ── C4.18 ────────────────────────────────────────────────────────────────────
 test('dostawca embeddingu: jedno pole = jedno przeniesienie', t => {
     const bag: SettingsBag = { smart_sources: { embed_model: { adapter: 'openai' } } };
 
@@ -270,7 +251,6 @@ test('dostawca embeddingu: jedno pole = jedno przeniesienie', t => {
     t.is(pkm(bag).embedding.provider as unknown as string, 'openai');
 });
 
-// ── C4.19 ────────────────────────────────────────────────────────────────────
 test('podgalaz embeddingu nie-obiektowa = dokladnie jedna kasacja', t => {
     const bag: SettingsBag = { smart_sources: { embed_model: 'nonsens' } };
 
@@ -278,7 +258,6 @@ test('podgalaz embeddingu nie-obiektowa = dokladnie jedna kasacja', t => {
     t.is(bag.smart_sources, undefined);
 });
 
-// ── C4.20 ────────────────────────────────────────────────────────────────────
 test('wykluczenia w galezi zrodel: jeden martwy klucz = dokladnie jedna kasacja', t => {
     const bag: SettingsBag = { smart_sources: { excluded_folders: ['Prywatne'] } };
 
@@ -288,7 +267,6 @@ test('wykluczenia w galezi zrodel: jeden martwy klucz = dokladnie jedna kasacja'
         'martwe wykluczenia wyladowaly pod pkmAssistant.* zamiast zginac');
 });
 
-// ── C4.21 ────────────────────────────────────────────────────────────────────
 test('pole dostawcy embeddingu: jedno pole = jedno przeniesienie', t => {
     const bag: SettingsBag = {
         smart_sources: { embed_model: { openai: { api_key: 'sk-PLACEHOLDER' } } },
@@ -298,7 +276,6 @@ test('pole dostawcy embeddingu: jedno pole = jedno przeniesienie', t => {
     t.is(pkm(bag).embedding.apiKeys.openai, 'sk-PLACEHOLDER');
 });
 
-// ── C4.22 ────────────────────────────────────────────────────────────────────
 test('powiadomienia: obcy klucz-obiekt NIE staje sie wyciszeniami', t => {
     const bag: SettingsBag = { smart_notices: { costam_obcego: { a: true } } };
 
@@ -307,7 +284,6 @@ test('powiadomienia: obcy klucz-obiekt NIE staje sie wyciszeniami', t => {
         'obcy klucz galezi powiadomien przebral sie za wyciszenia');
 });
 
-// ── C4.23 ────────────────────────────────────────────────────────────────────
 test('wyciszenia: kolizja z nowym ksztaltem = dokladnie jedna kasacja', t => {
     const bag: SettingsBag = {
         smart_notices: { muted: { stare: true } },
@@ -318,7 +294,6 @@ test('wyciszenia: kolizja z nowym ksztaltem = dokladnie jedna kasacja', t => {
     t.deepEqual(pkm(bag).notices.muted as unknown as Record<string, boolean>, { nowe: true });
 });
 
-// ── C4.24 ────────────────────────────────────────────────────────────────────
 test('galaz powiadomien nie-obiektowa = dokladnie jedna kasacja', t => {
     const bag: SettingsBag = { smart_notices: 'nonsens' };
 
@@ -326,7 +301,6 @@ test('galaz powiadomien nie-obiektowa = dokladnie jedna kasacja', t => {
     t.is(bag.smart_notices, undefined);
 });
 
-// ── C4.25 ────────────────────────────────────────────────────────────────────
 test('sejf: kolizja sciezek w refs = dokladnie jedna kasacja, zero przepiec', t => {
     const bag: SettingsBag = {
         pkmAssistant: {
@@ -349,7 +323,6 @@ test('sejf: kolizja sciezek w refs = dokladnie jedna kasacja, zero przepiec', t 
         'swiadomy wpis w nowym ksztalcie przegral ze starym');
 });
 
-// ── C4.26 ────────────────────────────────────────────────────────────────────
 test('id sekretu zachowuje cyfry nazwy dostawcy', t => {
     const bag: SettingsBag = {
         pkmAssistant: {

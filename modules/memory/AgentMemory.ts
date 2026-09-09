@@ -45,19 +45,15 @@ import { getTokenCount, maskSensitiveData, probeFile, readIfExists } from '../..
 import { log } from '../../core/utils/Logger.js';
 
 /**
- * Brain hard limit (Sprint 03 Z3 — Wizja MEMORY_v2_RETRIEVAL_v2 Blok 2).
- * 350 tokenów (z buforem ~50 tok). Brain ładuje się do KAŻDEGO requestu, więc
- * każdy token tu = stały koszt per chat round-trip.
+ * Brain hard limit: 600 tokenów (z buforem). Brain ładuje się do KAŻDEGO requestu, więc
+ * każdy token tu to stały koszt per chat round-trip. Liczony w tokenach, nie znakach —
+ * limit znakowy zaniża koszt dla polskiego (jeden token EN ≠ jeden token PL).
  *
- * Pre-Z3: BRAIN_MAX_CHARS=2000 (komentarz mówił "~500 tok" ale dla polskiego
- * to było ~3500 tok — koszt rósł ~7× vs. założenia).
+ * Nowe fakty trafiają do brain/*.md, a brain.md jest przebudowywanym indeksem; legacy
+ * `updateBrain` obsługuje tylko starsze ścieżki kompatybilności i nie jest normalną drogą zapisu.
  *
- * Memory Index Rework: nowe fakty trafiają do brain/*.md, a brain.md jest
- * przebudowywanym indeksem. Legacy updateBrain został tylko dla starych ścieżek
- * kompatybilności i nie jest normalną drogą zapisu.
- *
- * E2.8 D2: podniesione 350 → 600 — brain.md niesie teraz oprócz indeksu także sekcje „Na teraz"
- * (pamięć krótkotrwała), więc budżet musi pomieścić indeks + do 2×10 wpisów stanu bieżącego.
+ * brain.md niesie oprócz indeksu także sekcje „Na teraz" (pamięć krótkotrwała), więc budżet
+ * musi pomieścić indeks + do 2×10 wpisów stanu bieżącego.
  */
 const BRAIN_MAX_TOKENS = 600;
 
@@ -68,18 +64,18 @@ const BRAIN_MAX_TOKENS = 600;
  */
 const BRAIN_MAX_CHARS_FALLBACK = 1750;
 
-// ℹ️ Kontrakt pliku `sessions/active/*.md` żyje od S36 Fazy 1 w JEDNYM miejscu:
+// ℹ️ Kontrakt pliku `sessions/active/*.md` żyje w JEDNYM miejscu:
 // `activeSessionFormat.js`. Tam są `formatSessionEvent`, `parseActiveSession`, para
 // escape/unescape `## `, escape etykiet pól i zbiór ról granicznych (`KNOWN_ROLES`).
 // Metoda `_parseActiveSessionFile` niżej to już tylko delegacja.
 //
-// ⚠️ S36 Faza 2: plik active ma JEDNEGO pisarza — event-log (`appendToActiveSession`).
+// ⚠️ Plik active ma JEDNEGO pisarza — event-log (`appendToActiveSession`).
 // `saveSession` DOPISUJE brakujący ogon jako eventy (nigdy nie nadpisuje), a transkrypt
 // (`formatToMarkdown`) powstaje dopiero przy archiwizacji. Czytnik zostaje trójformatowy,
-// bo pliki MIESZANE sprzed Fazy 2 leżą u userów na dysku.
+// bo pliki starszego formatu leżą u userów na dysku.
 
 /**
- * Rola wiadomości → typ zdarzenia event-logu (S36 Faza 2, ogon `saveSession`).
+ * Rola wiadomości → typ zdarzenia event-logu (ogon `saveSession`).
  * Lustro `roleFromEvent` z `activeSessionFormat.js`; `system_message` nie ma tam mapowania,
  * więc dla roli `system` dopisujemy jeszcze jawne pole `**role:**`.
  */
@@ -91,8 +87,8 @@ const ROLE_TO_EVENT_TYPE: Record<SessionRole, string> = {
 };
 
 /**
- * Krótki, czytelny opis `cause` z `readIfExists` (K4, self-append — gotcha 12) — do wklejenia
- * w komunikat throw/warn zamiast suchego „nie mogę odczytać X" bez powodu (za weryfikacją opus).
+ * Krótki, czytelny opis `cause` z `readIfExists` — do wklejenia
+ * w komunikat throw/warn zamiast suchego „nie mogę odczytać X" bez powodu.
  * `Error` → jego `.message`; cokolwiek innego → `String(...)`; `undefined` (adapter bez `read`,
  * próba w ogóle się nie odbyła) dostaje własny, opisowy tekst zamiast dosłownego „undefined".
  */
@@ -103,7 +99,7 @@ function causeText(cause: unknown): string {
 }
 
 /**
- * Sygnał „plik sesji, do którego dopisuję, nie istnieje" — review opusa P1/P2 (2026-09-02).
+ * Sygnał „plik sesji, do którego dopisuję, nie istnieje".
  * Odróżnia „ścieżka jest martwa, zacznij sesję od nowa" od realnego błędu I/O (dysk pełny,
  * uprawnienia), który MA prawa wywrócić turę. Rzucany WYŁĄCZNIE przez `_appendSessionFile`
  * (fallback bez natywnego `append`) — natywny `append` na brakującym pliku jest łapany osobno
@@ -112,12 +108,12 @@ function causeText(cause: unknown): string {
 class SessionFileMissingError extends Error {}
 
 /**
- * Ile appendów na CIEPŁYM cache mija między jednym tanim `exists()` (review opusa P2,
- * 2026-09-02). Natywny `adapter.append` na brakującym pliku zwykle NIE rzuca — po prostu
- * tworzy plik od nowa (jak `fs` z flagą `a`), więc zewnętrzne skasowanie sesji między
- * zdarzeniami zostałoby wykryte tylko przez ten periodyczny, metadanowy `exists()`
- * (bez odczytu treści — O(1) względem rozmiaru pliku, nie O(n) jak pełny `read()`).
- * Kompromis: nie każde zdarzenie płaci (zysk AUD-wydajnosc-094/095 zostaje), ale okno
+ * Ile appendów na CIEPŁYM cache mija między jednym tanim `exists()`. Natywny `adapter.append`
+ * na brakującym pliku zwykle NIE rzuca — po prostu tworzy plik od nowa (jak `fs` z flagą `a`),
+ * więc zewnętrzne skasowanie sesji między zdarzeniami zostałoby wykryte tylko przez ten
+ * periodyczny, metadanowy `exists()` (bez odczytu treści — O(1) względem rozmiaru pliku,
+ * nie O(n) jak pełny `read()`).
+ * Kompromis: nie każde zdarzenie płaci za pełny `exists()`, ale okno
  * „plik odtworzony bez frontmattera" jest ograniczone do N zdarzeń, nie nieskończone.
  * Eksportowana (nie tylko module-private), żeby test liczący operacje adaptera nie duplikował
  * tej liczby jako magicznej stałej.
@@ -137,7 +133,7 @@ export interface MemoryVaultAdapterLike {
     stat?(path: string): Promise<{ mtime?: number; size?: number } | null>;
     remove?(path: string): Promise<void>;
     /**
-     * AUD-wydajnosc-094: dopisanie ogona pliku bez pełnego read+write. Obsidian ma tę metodę
+     * Dopisanie ogona pliku bez pełnego read+write. Obsidian ma tę metodę
      * na `DataAdapter` (ten sam kontrakt, którego już używa `core/utils/LogFileSink.ts`);
      * atrapa testowa/adapter bez niej dostaje fallback w `_appendSessionFile`.
      */
@@ -166,7 +162,7 @@ export interface MemoryPaths {
 }
 
 /**
- * Sesja, która po zapisie L1 NIE dostała stempla `covered_by_l1` (AUD-bledy-047).
+ * Sesja, która po zapisie L1 NIE dostała stempla `covered_by_l1`.
  * `not_found` = nie ma jej ani w `sessions/archive/`, ani w płaskim `sessions/`;
  * `write_failed` = read-modify-write pliku sesji rzucił (blokada / prawa / brak miejsca).
  */
@@ -176,7 +172,7 @@ export interface L1StampSkip {
     detail?: string;
 }
 
-/** Wynik stemplowania sesji po zapisie paczki L1 (AUD-bledy-047). */
+/** Wynik stemplowania sesji po zapisie paczki L1. */
 export interface L1StampOutcome {
     marked: number;
     skipped: L1StampSkip[];
@@ -230,7 +226,7 @@ export interface BrainNoteInput {
 }
 
 /**
- * Kandydat w poczekalni `brain/pending_rescue/` (D8, 2026-08-27) — pełny kształt, nie tylko
+ * Kandydat w poczekalni `brain/pending_rescue/` — pełny kształt, nie tylko
  * metadane indeksu jak `BrainNoteInfo`. Konsument (`SaveSessionWorkflow`) potrzebuje `content`
  * do wyświetlenia w tym samym modalu co zwykłe propozycje `/save session`.
  */
@@ -264,8 +260,8 @@ export interface ChatMessageLike {
 
 /**
  * `brain.md` rozłożony na nagłówek + sekcje (`## …` → lista bulletów). Kształt legacy:
- * używają go już tylko `updateBrain` i `_archiveOverflow` (dead-code sweep 2026-09-02 wyciął
- * jedynego trzeciego konsumenta, `cleanupBrain`) — v3 buduje indeks przez `BrainIndex.buildBrainIndex`.
+ * używają go już tylko `updateBrain` i `_archiveOverflow` — v3 buduje indeks przez
+ * `BrainIndex.buildBrainIndex`.
  */
 export interface BrainSections {
     header: string;
@@ -293,17 +289,15 @@ export interface BrainLogEntry {
 }
 
 export class AgentMemory {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare vault: MemoryVaultLike;
     declare agentName: string;
     declare settings: Record<string, unknown>;
     declare safeName: string;
     declare basePath: string;
     /**
-     * Review opusa P3 (2026-09-02): CORRECTION — wcześniejszy komentarz przy `startActiveSession`
-     * twierdził „TYLKO ta instancja ustawia `activeSessionPath`". To było FAŁSZYWE — dokumentacja,
-     * która kłamie, jest w tym projekcie błędem. Zewnętrzni pisarze tego pola (podstawiają
-     * ścieżkę WPROST, z pominięciem `startActiveSession`/`saveSession`):
+     * Zewnętrzni pisarze tego pola (podstawiają ścieżkę WPROST, z pominięciem
+     * `startActiveSession`/`saveSession`):
      *  - `modules/chat/chat/chat_tabs.ts:126` — `memory.activeSessionPath = targetTab.sessionPath;`
      *    (przełączenie zakładki czatu),
      *  - `modules/chat/chat/chat_session.ts:237` — `memory.activeSessionPath = item.session.path;`
@@ -311,21 +305,21 @@ export class AgentMemory {
      *  - `modules/chat/chat/chat_session.ts:244` — `activeMemory.activeSessionPath = active.session.path;`
      *    (restore — pierwsza/aktywna zakładka).
      * Żaden z nich nie sprawdza, czy plik pod tą ścieżką WCIĄŻ istnieje (np. bo w międzyczasie
-     * `archiveActiveSession` go przeniósł i wyzerował pole u SIEBIE) — stąd P1: `startActiveSession`
+     * `archiveActiveSession` go przeniósł i wyzerował pole u SIEBIE) — dlatego `startActiveSession`
      * NIE MOŻE ufać samemu faktowi „pole niepuste", tylko ciepłemu cache pisarza tej instancji.
      */
     declare activeSessionPath: string | null;
     declare _writeQueues: Map<string, Promise<void>>;
     declare _sessionSeqCache: Map<string, number>;
     declare _sessionSavedCounts: Map<string, number>;
-    /** AUD-wydajnosc-095: `ensureMemoryStructure()` zrobiła już swoje dla tej instancji — dalsze
+    /** `ensureMemoryStructure()` zrobiła już swoje dla tej instancji — dalsze
      * wywołania są no-opem. Bezpieczne, bo `basePath`/`paths` są ustawiane raz w konstruktorze
      * i nigdy nie zmieniają się pod nogami tej instancji. */
     declare _structureEnsured: boolean;
-    /** AUD-wydajnosc-094: czy plik pod ścieżką kończy się `\n` — cache, żeby append nie musiał
+    /** Czy plik pod ścieżką kończy się `\n` — cache, żeby append nie musiał
      * czytać całego pliku na każde zdarzenie tylko po to, żeby dobrać separator. */
     declare _sessionEndsWithNewline: Map<string, boolean>;
-    /** Review opusa P2 (2026-09-02): licznik appendów od ostatniego periodycznego `exists()`
+    /** Licznik appendów od ostatniego periodycznego `exists()`
      * na ciepłym cache — patrz `APPEND_VERIFY_EVERY_N`. */
     declare _appendsSinceVerify: Map<string, number>;
     declare paths: MemoryPaths;
@@ -348,18 +342,18 @@ export class AgentMemory {
         // Track active session to prevent duplicate files
         this.activeSessionPath = null;
 
-        // Per-path write serialization (E1.3 P5). Parallel sub-agents (DelegateTool
+        // Per-path write serialization. Parallel sub-agents (DelegateTool
         // Promise.all + SubAgentRunner) append to the SAME parent session file. Without
         // a lock the read-modify-write races and one write silently overwrites the other
         // → memory lines disappear. Map<path, Promise> chains writes to each path.
         this._writeQueues = new Map();
 
-        // S36 Faza 2: numeracja zdarzeń w pliku aktywnej sesji. Map<path, ostatni użyty seq>.
+        // Numeracja zdarzeń w pliku aktywnej sesji. Map<path, ostatni użyty seq>.
         // Pierwszy zapis do danej ścieżki (albo pierwszy PO restarcie Obsidiana) inicjalizuje
         // licznik skanem pliku (`maxSeq`), dalej idzie z pamięci — bez ponownego skanowania.
         this._sessionSeqCache = new Map();
 
-        // S36 Faza 2: ile wiadomości z listy podanej przez `saveSession` już pokryliśmy w pliku.
+        // Ile wiadomości z listy podanej przez `saveSession` już pokryliśmy w pliku.
         // Potrzebne, bo event-log jest tylko CZĘŚCIOWO wyrównany z okienkiem czatu: blok bez
         // treści (np. odpowiedź modelu, która była samym wywołaniem narzędzia) nie jest dla
         // czytnika wiadomością, więc licznik z pliku byłby niższy niż faktycznie zapisany ogon
@@ -367,13 +361,13 @@ export class AgentMemory {
         // w górę — woli POMINĄĆ dopisek (pisarz A i tak zapisuje wszystko) niż zdublować.
         this._sessionSavedCounts = new Map();
 
-        // AUD-wydajnosc-095: bootstrap struktury jeszcze nie zrobiony dla tej instancji.
+        // Bootstrap struktury jeszcze nie zrobiony dla tej instancji.
         this._structureEnsured = false;
 
-        // AUD-wydajnosc-094: stan „plik kończy się \n" per ścieżka — patrz deklaracja pola.
+        // Stan „plik kończy się \n" per ścieżka — patrz deklaracja pola.
         this._sessionEndsWithNewline = new Map();
 
-        // Review opusa P2: licznik do periodycznego exists() na ciepłym cache.
+        // Licznik do periodycznego exists() na ciepłym cache.
         this._appendsSinceVerify = new Map();
 
         // Paths
@@ -386,7 +380,7 @@ export class AgentMemory {
             l3: `${this.basePath}/summaries/L3`,
             brainNotes: `${this.basePath}/brain`,
             brainArchive: `${this.basePath}/brain/archive`,
-            // D8 (2026-08-27, werdykt 27.08): poczekalnia kandydatów memory_rescue — wzorem
+            // Poczekalnia kandydatów memory_rescue — wzorem
             // `brain/archive/`, siostrzany podfolder wykluczony z `listBrainNotes()`/indeksu
             // dokładnie tym samym filtrem ("relative && !relative.includes('/')").
             pendingRescue: `${this.basePath}/brain/pending_rescue`,
@@ -394,9 +388,9 @@ export class AgentMemory {
             brain: `${this.basePath}/brain.md`,
             state: `${this.basePath}/.state.json`,
             activeSessionMeta: `${this.basePath}/.active_session.json`
-            // S36b (2026-07-30): ścieżka `draft` (`.draft/`) skasowana razem z całą rodziną
-            // draftów — nikt jej już nie czyta ani nie pisze. Pliki, które user ma na dysku,
-            // zostają nietknięte; po prostu nie powstają nowe.
+            // Ścieżka `draft` (`.draft/`) nie jest już częścią tego kontraktu — nikt jej nie
+            // czyta ani nie pisze. Pliki, które user ma na dysku, zostają nietknięte; po prostu
+            // nie powstają nowe.
         };
         this.stateManager = new StateManager(this.vault, this.paths.state);
     }
@@ -574,7 +568,7 @@ export class AgentMemory {
      * agents get only the missing pieces created.
      */
     async ensureMemoryStructure(): Promise<void> {
-        // AUD-wydajnosc-095: to jest operacja STARTOWA (11× exists + list + 2× read), nie
+        // To jest operacja STARTOWA (11× exists + list + 2× read), nie
         // per-zdarzeniowa. `appendToActiveSession` (przez `startActiveSession`) i cała reszta
         // wołaczy (`listArchiveSessions`, `listActiveSessions`, `saveSession`, `ListTool`,
         // `MemorySaveTool`, `MemoryDeleteTool`, `ReadTool`, `ArchiveWorkflow`, `MigrationV3`...)
@@ -603,7 +597,7 @@ export class AgentMemory {
         }
 
         await this._migrateLegacyRootSessionsToArchive();
-        // K4 (AUD-bledy-044): `getBrain` rzuca, gdy brain.md jest nie do odczytu. Bootstrap
+        // `getBrain` rzuca, gdy brain.md jest nie do odczytu. Bootstrap
         // struktury NIE może z tego powodu blokować zapisu sesji — rozmowa usera jest ważniejsza
         // niż indeks pamięci, a awaria i tak zamelduje się głośno przy budowie promptu.
         try {
@@ -631,7 +625,7 @@ export class AgentMemory {
             for (const path of rootSessionFiles) {
                 const name = path.split('/').pop() as string;
                 const target = `${this.paths.sessionsArchive}/${name}`;
-                // K4 (AUD-bledy-061): ten sam mechanizm co pętle sufiksów — „nie wiem" liczy się
+                // Ten sam mechanizm co pętle sufiksów — „nie wiem" liczy się
                 // jako ZAJĘTĄ, żeby kłamiący exists() nie kazał nam nadpisać realnej zarchiwizowanej
                 // sesji treścią jej płaskiego, przedmigracyjnego odpowiednika.
                 if ((await probeFile(this.vault.adapter, target)) !== 'missing') continue;
@@ -661,20 +655,20 @@ export class AgentMemory {
     }
 
     async startActiveSession(agentName: string = this.agentName): Promise<string> {
-        // Review opusa P1 (BLOKER, 2026-09-02) — poprawka na AUD-wydajnosc-095. „Ufam ścieżce"
+        // „Ufam ścieżce"
         // znaczy „ta INSTANCJA ma CIEPŁY stan pisarza dla tej ścieżki" (`_sessionSeqCache`), NIE
         // „ścieżka jest niepusta". `this.activeSessionPath` bywa wskrzeszony Z ZEWNĄTRZ (patrz
-        // P3 przy deklaracji pola `activeSessionPath` wyżej — chat_tabs.ts/chat_session.ts
+        // komentarz przy deklaracji pola `activeSessionPath` wyżej — chat_tabs.ts/chat_session.ts
         // podstawiają go wprost przy przełączeniu zakładki i restore) długo po tym, jak
         // `archiveActiveSession` skasował plik i wyzerował wskaźnik U SIEBIE. Przełączenie
         // zakładki tam i z powrotem po archiwizacji podstawia z powrotem ścieżkę już nieżywej
         // sesji — bez tego sprawdzenia pierwszy append leciałby `read()`/`append()` na plik,
         // którego nie ma, i wywracał turę (tura padała, wiadomość usera ginęła — to był realny,
-        // odtworzony scenariusz z reviewu).
+        // odtworzony scenariusz).
         if (this.activeSessionPath) {
             if (this._sessionSeqCache.has(this.activeSessionPath)) {
                 // Ciepły cache = TA instancja dopisywała do tego pliku i wie, że żyje —
-                // zero I/O, dokładnie zysk AUD-wydajnosc-095.
+                // zero I/O.
                 return this.activeSessionPath;
             }
             // Zimny cache (pierwsze użycie tej ścieżki przez TĘ instancję — może być świeżo
@@ -692,11 +686,11 @@ export class AgentMemory {
         await this.ensureMemoryStructure();
 
         const filename = this._generateActiveSessionFilename(agentName);
-        // K4 (AUD-bledy-061): „nie wiem, czy ta nazwa jest wolna" traktujemy jak ZAJĘTĄ.
+        // „Nie wiem, czy ta nazwa jest wolna" traktujemy jak ZAJĘTĄ.
         // `_writeSessionFile` nadpisuje bez pytania, a po drugiej stronie może leżeć żywa
         // rozmowa: nazwa ma rozdzielczość minutową, więc świeża instancja (restart Obsidiana,
         // `activeSessionPath` jeszcze puste) generuje DOKŁADNIE tę samą — po to jest ta pętla.
-        // AUD-testy-042: wspólna z pięcioma siostrzanymi wywołaniami w tym pliku (`collisionSuffix.ts`).
+        // Wspólna z pięcioma siostrzanymi wywołaniami w tym pliku (`collisionSuffix.ts`).
         const { path } = await findFreeCollisionPath(
             this.vault.adapter,
             this.paths.sessionsActive,
@@ -714,7 +708,7 @@ export class AgentMemory {
 
     /**
      * Frontmatter + nagłówek NOWEJ (pustej, zero zdarzeń) sesji aktywnej. WSPÓLNY z gałęzią
-     * samo-naprawy w `appendToActiveSession` (P2, review opusa) — plik odtworzony po zewnętrznym
+     * samo-naprawy w `appendToActiveSession` — plik odtworzony po zewnętrznym
      * skasowaniu dostaje TĘ SAMĄ postać co świeży, więc `archiveActiveSession`/restore go
      * rozpoznają tak samo, zamiast dostać goły blok zdarzenia bez `type: active_session`.
      */
@@ -731,13 +725,12 @@ created: ${created}
     }
 
     /**
-     * K12 (2026-08-23) — JEDYNY pisarz plików sesji. Każdy bajt idący na dysk przechodzi
+     * JEDYNY pisarz plików sesji. Każdy bajt idący na dysk przechodzi
      * przez `maskSensitiveData`.
      *
-     * DLACZEGO: K8 (AUD-security-029) wypchnął `sessions/` do `.gitignore`, bo transkrypt
-     * potrafi nieść sekret wpleciony w treść błędu (padnięty strumień wypisuje nagłówki
-     * żądania). Decyzją Kuby sesje WRACAJĄ do gita — są pamięcią agentów wożoną między
-     * urządzeniami — więc ryzyko zdejmujemy u ŹRÓDŁA, przy zapisie.
+     * DLACZEGO: transkrypt potrafi nieść sekret wpleciony w treść błędu (padnięty strumień
+     * wypisuje nagłówki żądania). Sesje są pamięcią agentów wożoną między urządzeniami (żyją
+     * w gicie) — więc ryzyko zdejmujemy u ŹRÓDŁA, przy zapisie.
      *
      * Maskujemy WYŁĄCZNIE string idący na dysk. Obiekty wiadomości w pamięci zostają
      * nietknięte: model w tej samej turze ma dalej widzieć to, co naprawdę wróciło
@@ -752,19 +745,19 @@ created: ${created}
     }
 
     /**
-     * Dopisz FRAGMENT do pliku aktywnej sesji bez czytania/przepisywania reszty (AUD-wydajnosc-094).
+     * Dopisz FRAGMENT do pliku aktywnej sesji bez czytania/przepisywania reszty.
      * Wołany WYŁĄCZNIE przez `appendToActiveSession` — ten sam kontrakt maskowania co
-     * `_writeSessionFile` (K12), tylko na nowy kawałek zamiast na cały plik. Bezpieczne: maski
+     * `_writeSessionFile`, tylko na nowy kawałek zamiast na cały plik. Bezpieczne: maski
      * `maskSensitiveData` działają w granicach linii/tokenu WEWNĄTRZ jednego, kompletnego bloku
      * zdarzenia (`formatSessionEvent`) — nigdy w poprzek dwóch osobnych zapisów.
      *
      * Adapter Obsidiana ma natywny `append` na `DataAdapter` (ten sam, którego już używa
      * `core/utils/LogFileSink.ts:268-269`). Atrapa/adapter bez tej metody dostaje fallback —
-     * ale przez `readIfExists` (K4/gotcha 12), NIE goły `exists()`+`read()` jak w `LogFileSink`:
-     * ten plik już raz zapłacił za self-append na kłamiącym `exists()` (Dysk Google, incydent
-     * 2026-07-28) i fallback append nie ma prawa cofnąć tej ochrony.
+     * ale przez `readIfExists`, NIE goły `exists()`+`read()` jak w `LogFileSink`:
+     * dyski sieciowe potrafią zwrócić nieaktualny stan z `exists()`, więc fallback append nie
+     * ma prawa cofnąć tej ochrony.
      *
-     * Review opusa P2 (2026-09-02): jeśli natywny `append` SAM rzuci (nie każda implementacja
+     * Jeśli natywny `append` SAM rzuci (nie każda implementacja
      * cicho zakłada plik od nowa jak `fs` z flagą `a` — część wymaga istniejącego pliku), błąd
      * jest odróżniany przez `probeFile`: potwierdzone `'missing'` → `SessionFileMissingError`
      * (ten sam sygnał co fallback niżej — wołacz odtwarza sesję), cokolwiek innego (uprawnienia,
@@ -791,7 +784,7 @@ created: ${created}
         }
         const probe = await readIfExists(this.vault.adapter, path);
         if (probe.state === 'missing') {
-            // Review opusa P2 (2026-09-02): adapter BEZ natywnego append i plik naprawdę nie
+            // Adapter BEZ natywnego append i plik naprawdę nie
             // istnieje (zewnętrzne skasowanie między zdarzeniami, ciepły cache). Rzucamy sygnał
             // ROZPOZNAWALNY (nie goły `Error`) — `appendToActiveSession` łapie GO i odtwarza
             // sesję z frontmatterem zamiast cicho zapisać sam fragment bez nagłówka.
@@ -806,7 +799,7 @@ created: ${created}
     }
 
     /**
-     * Serialize a read-modify-write against a single file path (E1.3 P5).
+     * Serialize a read-modify-write against a single file path.
      * Each call for a given path runs only after the previous one settles, so
      * concurrent writers never clobber each other's edits. The map entry is
      * cleared once the last queued task for a path finishes, so the map does not
@@ -831,14 +824,14 @@ created: ${created}
     }
 
     /**
-     * Dopisz jedno zdarzenie do pliku aktywnej sesji (JEDYNY pisarz tego pliku, S36 Faza 2).
+     * Dopisz jedno zdarzenie do pliku aktywnej sesji (JEDYNY pisarz tego pliku).
      *
      * Numer `seq` nadawany jest WEWNĄTRZ kolejki per-ścieżka, na podstawie treści, którą
      * właśnie odczytaliśmy — inaczej dwa równoległe appendy (sub-agenci przez `Promise.all`)
      * dostałyby ten sam numer.
      *
-     * Review opusa P1/P2 (2026-09-02): brak pliku pod `path` (stały wskaźnik wskrzeszony z
-     * zewnątrz — patrz P3 przy `startActiveSession` — albo zewnętrzne skasowanie MIĘDZY
+     * Brak pliku pod `path` (stały wskaźnik wskrzeszony z
+     * zewnątrz — patrz komentarz przy `startActiveSession` — albo zewnętrzne skasowanie MIĘDZY
      * zdarzeniami) NIE MA PRAWA wywrócić tury. Zamiast rzucać dalej, metoda zapomina stan
      * pisarza dla martwej ścieżki i zaczyna sesję OD NOWA (jak main), z bounded retry (jeden
      * dodatkowy strzał — żeby trwale zepsuty adapter, pełny dysk czy brak uprawnień, i tak
@@ -862,7 +855,7 @@ created: ${created}
         return this._enqueuePathWrite(path, async () => {
             let attemptsLeft = 1;
             for (;;) {
-                // AUD-wydajnosc-094: pełny odczyt + pełny zapis na KAŻDE zdarzenie robił zapis
+                // Pełny odczyt + pełny zapis na KAŻDE zdarzenie robił zapis
                 // kwadratowym względem długości sesji (200 zdarzeń = 110 MB zapisu na plik
                 // 1,1 MB). Odczyt CAŁOŚCI jest potrzebny WYŁĄCZNIE, żeby zainicjować cache
                 // numeracji (`_sessionSeqCache`, `_nextSeq`) i stan „czy plik kończy się nowym
@@ -875,7 +868,7 @@ created: ${created}
                 let pathIsDead = false;
 
                 if (cacheWasCold) {
-                    // Review opusa P1: `readIfExists` (K4), NIE goły `read()` — brak pliku jest
+                    // `readIfExists`, NIE goły `read()` — brak pliku jest
                     // sygnałem „ścieżka martwa, zacznij od nowa", nie błędem, który ma wywrócić turę.
                     const probe = await readIfExists(this.vault.adapter, path);
                     if (probe.state === 'missing') {
@@ -889,7 +882,7 @@ created: ${created}
                         endsWithNewline = existingForSeq.endsWith('\n');
                     }
                 } else {
-                    // Review opusa P2: ciepły cache ufa, że plik żyje, bez czytania go na każde
+                    // Ciepły cache ufa, że plik żyje, bez czytania go na każde
                     // zdarzenie — ale natywny `adapter.append` na brakującym pliku zwykle NIE
                     // rzuca (po prostu go zakłada od nowa, jak `fs` z flagą `a`), więc zewnętrzne
                     // skasowanie sesji MIĘDZY zdarzeniami byłoby inaczej niewidoczne. Co
@@ -915,7 +908,7 @@ created: ${created}
                         this._sessionEndsWithNewline.set(path, true);
                         return path;
                     } catch (e) {
-                        // Review opusa P2: fallback bez natywnego `append` (`_appendSessionFile`)
+                        // Fallback bez natywnego `append` (`_appendSessionFile`)
                         // rzuca `SessionFileMissingError`, gdy plik naprawdę zniknął — ten sam
                         // sygnał „martwa ścieżka" co wyżej, nie błąd do przerwania tury.
                         if (!(e instanceof SessionFileMissingError)) throw e;
@@ -970,7 +963,7 @@ created: ${created}
      */
     _appendMessageAsEvent(content: string, path: string, msg: ChatMessageLike, timestamp: string): string {
         const rawRole = typeof msg?.role === 'string' ? msg.role.toLowerCase() : '';
-        // Nieznana rola → `system`, dokładnie jak w `formatToMarkdown` (E1.8 fix): API odrzuca
+        // Nieznana rola → `system`, dokładnie jak w `formatToMarkdown`: API odrzuca
         // nieznane role, a wiadomość nie ma prawa zginąć.
         const role = (KNOWN_ROLES.has(rawRole) ? rawRole : 'system') as SessionRole;
         const text = Array.isArray(msg?.content)
@@ -985,7 +978,7 @@ created: ${created}
     /**
      * Przenieś aktywną sesję do `sessions/archive/`, KONWERTUJĄC event-log na transkrypt.
      *
-     * S36 Faza 2: plik active jest event-logiem (append-only, z telemetrią narzędzi), a
+     * Plik active jest event-logiem (append-only, z telemetrią narzędzi), a
      * archiwum trzyma widok pochodny — transkrypt `## User`/`## Assistant` (format B), ten
      * sam co dotąd. Dzięki temu konsolidacja L1/L2/L3, `parseSessionFile` i `loadSession`
      * pozostają nietknięte.
@@ -1020,10 +1013,10 @@ created: ${created}
                 output = formatToMarkdown(parsed.messages, meta, parsed.summary);
             }
             await this._writeSessionFile(archivePath, output);
-            // AUD-code-review-007 (część 2): kasacja ŹRÓDŁA nie ma prawa wyprzedzać
+            // Kasacja ŹRÓDŁA nie ma prawa wyprzedzać
             // POTWIERDZONEGO zapisu archiwum. `write()` adaptera potrafi zameldować sukces,
-            // mimo że bajty faktycznie nie doszły na dysk (torn write — ta sama klasa
-            // incydentu co w `writePendingRescue` niżej, dyski sieciowe / Dysk Google) — bez
+            // mimo że bajty faktycznie nie doszły na dysk (torn write — ten sam typ awarii
+            // co w `writePendingRescue` niżej, dyski sieciowe / Dysk Google) — bez
             // tej weryfikacji jedna taka awaria kasowała jedyną kopię rozmowy i zostawiała
             // pusty/okrojony plik archiwum. Porównanie idzie PO `maskSensitiveData` (tej samej
             // funkcji, którą `_writeSessionFile` stosuje przed zapisem), bo maskowanie sekretów
@@ -1052,8 +1045,7 @@ created: ${created}
      *
      * Używane przez gałąź „odrzuć" przy starcie nowej rozmowy (modules/chat): user świadomie
      * porzucił rozmowę, więc nie ma czego trzymać w ewidencji żywych sesji — inaczej zostaje
-     * zombie-wpis wiszący do najbliższego restore. (Do S36b wchodziła tędy też gałąź „draft",
-     * skasowana razem z rodziną draftów.)
+     * zombie-wpis wiszący do najbliższego restore.
      *
      * NIE kasuje twardo (filozofia Memory v3: user authority — pliki się nie niszczą). Plik ląduje
      * w podfolderze, którego `listActiveSessions` nie widzi; kolizja nazwy → suffix `_2`, `_3`...
@@ -1095,9 +1087,9 @@ created: ${created}
                     }
                 } catch { /* mkdir might race — ignore */ }
 
-                // K4 (AUD-bledy-061): jak w startActiveSession — „nie wiem, czy ta nazwa jest wolna"
+                // Jak w startActiveSession — „nie wiem, czy ta nazwa jest wolna"
                 // liczymy jako ZAJĘTĄ, żeby kłamiący exists() nie pozwolił wejść w cudzy odłożony plik.
-                // AUD-testy-042: wspólna pętla z pięcioma siostrzanymi wywołaniami (`collisionSuffix.ts`).
+                // Wspólna pętla z pięcioma siostrzanymi wywołaniami (`collisionSuffix.ts`).
                 target = (await findFreeCollisionPath(
                     this.vault.adapter,
                     discardedDir,
@@ -1146,7 +1138,7 @@ created: ${created}
     /**
      * Zapisz stan rozmowy do pliku sesji — DOPISUJĄC to, czego w pliku brakuje.
      *
-     * ⚠️ **S36 Faza 2: ta metoda NIE NADPISUJE już pliku transkryptem.** Do tej pory autozapis
+     * ⚠️ **Ta metoda NIE NADPISUJE pliku transkryptem.** Do tej pory autozapis
      * (co N minut, po bezczynności, 💾, zamknięcie zakładki) pisał cały plik od nowa z
      * `rollingWindow.messages` — ścinał telemetrię narzędzi dopisaną przez
      * `appendToActiveSession`, a po kompresji okna czatu (która ZMNIEJSZA `messages`) niszczył
@@ -1161,7 +1153,7 @@ created: ${created}
      *  - frontmatter: ruszamy WYŁĄCZNIE `updated` i `messageCount` (`_setFrontmatterField`,
      *    CRLF/BOM-safe). `created` to data POWSTANIA sesji i zostaje nietknięta.
      *
-     * Cały read-modify-write idzie przez kolejkę per-ścieżka (E1.3 P5) — ten sam plik dopisuje
+     * Cały read-modify-write idzie przez kolejkę per-ścieżka — ten sam plik dopisuje
      * równolegle `appendToActiveSession`.
      *
      * @param messages - Conversation messages
@@ -1176,21 +1168,21 @@ created: ${created}
         if (this.activeSessionPath) {
             path = this.activeSessionPath;
         } else {
-            // AUD-code-review-009: ta gałąź kiedyś zakładała plik wprost pod `paths.sessions`
-            // (płaski, legacy folder v2) — `_migrateLegacyRootSessionsToArchive` (wołany
-            // bezwarunkowo z `ensureMemoryStructure`, m.in. przez `listArchiveSessions`) traktuje
-            // KAŻDY `.md` leżący tam jako relikt do przeniesienia i natychmiast kasuje oryginał,
-            // więc żywa, dopiero co rozpoczęta rozmowa lądowała w `sessions/archive/` jako sesja
-            // ZAMKNIĘTA (materiał na L1) zanim zdążyła urosnąć. Kontrakt v3: nowy plik aktywnej
+            // Ta gałąź NIE zakłada plik wprost pod `paths.sessions` (płaski, legacy folder) —
+            // `_migrateLegacyRootSessionsToArchive` (wołany bezwarunkowo z `ensureMemoryStructure`,
+            // m.in. przez `listArchiveSessions`) traktuje KAŻDY `.md` leżący tam jako relikt do
+            // przeniesienia i natychmiast kasuje oryginał, więc żywa, dopiero co rozpoczęta
+            // rozmowa lądowałaby w `sessions/archive/` jako sesja ZAMKNIĘTA (materiał na L1)
+            // zanim zdążyłaby urosnąć. Kontrakt v3: nowy plik aktywnej
             // sesji ląduje w `sessions/active/`, z tym samym odkolizjonowaniem nazwy co
-            // `startActiveSession()` (K4, AUD-bledy-061). Nie wołamy tu wprost
+            // `startActiveSession()`. Nie wołamy tu wprost
             // `startActiveSession()`, żeby nie stracić budowy frontmattera z `metadata`
             // (`created` wołacza, ewentualny `sessionType`) niżej w tej samej metodzie —
             // rezerwujemy tylko ścieżkę i miejsce w `.state.json`, zapis robi kod poniżej,
             // dokładnie jak dotąd dla „nowego pliku".
             await this.ensureMemoryStructure();
             const filename = this._generateActiveSessionFilename();
-            // AUD-testy-042: wspólna pętla z pięcioma siostrzanymi wywołaniami (`collisionSuffix.ts`).
+            // Wspólna pętla z pięcioma siostrzanymi wywołaniami (`collisionSuffix.ts`).
             path = (await findFreeCollisionPath(
                 this.vault.adapter,
                 this.paths.sessionsActive,
@@ -1202,11 +1194,11 @@ created: ${created}
 
         const now = new Date().toISOString();
         await this._enqueuePathWrite(path, async () => {
-            // Self-append (klasa K4, siostrzana wada „wolnej nazwy" z probeFile): stary wzorzec
-            // `if (await exists()) { read() }` na Dysku Google potrafi dostać `exists()===false`
+            // Self-append (siostrzana wada „wolnej nazwy" z probeFile): stary wzorzec
+            // `if (await exists()) { read() }` na dyskach sieciowych potrafi dostać `exists()===false`
             // dla PLIKU, KTÓRY JEST — kod nigdy nie próbuje `read()` i traktuje aktywną sesję
-            // jako świeżą, więc zapis NADPISUJE całą rozmowę jednym nowym wpisem (incydent
-            // 2026-07-28). `readIfExists` czyta NAJPIERW, więc `exists()` nie ma szans skłamać.
+            // jako świeżą, więc zapis NADPISUJE całą rozmowę jednym nowym wpisem.
+            // `readIfExists` czyta NAJPIERW, więc `exists()` nie ma szans skłamać.
             const probe = await readIfExists(this.vault.adapter, path);
             if (probe.state === 'unreadable') {
                 // Sprzeczne sygnały na WŁASNYM pliku sesji — nadpisanie skasowałoby rozmowę,
@@ -1229,9 +1221,8 @@ created: ${created}
                 // od razu jako EVENTY.
                 const created = (metadata.created || now) as string;
                 const header = formatToMarkdown([], {
-                    // Sprint 03 Z4: sessionType ∈ { 'active' | 'archived' }.
+                    // sessionType ∈ { 'active' | 'archived' }.
                     // 'active' = sesja w pracy (default), 'archived' = zamknięta przez modal.
-                    // ('ephemeral' = draft — rodzina skasowana w S36b.)
                     sessionType: 'active',
                     ...metadata,
                     agent: this.agentName,
@@ -1262,8 +1253,8 @@ created: ${created}
             if (content !== existing) await this._writeSessionFile(path, content);
         });
 
-        // Persist active session path so it survives Obsidian restart. AUD-code-review-009:
-        // rejestracja w `.state.json` idzie tu, PO udanym zapisie w kolejce wyżej — ten sam
+        // Persist active session path so it survives Obsidian restart.
+        // Rejestracja w `.state.json` idzie tu, PO udanym zapisie w kolejce wyżej — ten sam
         // krok, który `startActiveSession()` robi zaraz po swoim zapisie.
         if (isNewFile) {
             await this.stateManager.addActiveSession(path.split('/').pop() as string);
@@ -1281,15 +1272,9 @@ created: ${created}
         await this._persistActiveSession();
     }
 
-    // --- Rodzina draftów SKASOWANA (S36b, 2026-07-30) ---
-    //
-    // Były tu `saveDraft` / `listDrafts` / `loadDraft` / `discardDraft` / `promoteDraft`
-    // (Sprint 03 Z4: „ulotne sesje" w `.draft/` + obiecane odzyskiwanie przy starcie pluginu).
-    // Memory v3 (Sprint M3) zabrał obie drogi powrotne — `_checkRecoverableDrafts` i slash
-    // `/drafts` nigdy nie powstały — więc `saveDraft` pisał pliki, których NIC nie czytało,
-    // a modal zamknięcia sesji obiecywał userowi odzyskiwanie, którego nie było.
-    // Pliki draftów leżące u userów na dysku ZOSTAJĄ nietknięte (dane usera); po prostu
-    // nie powstają nowe. Odzyskiwanie sesji stoi dziś na `sessions/active` + `.state.json`.
+    // Sesje „ulotne" (draft, `.draft/`) nie są obsługiwane. Pliki draftów leżące u userów
+    // na dysku ZOSTAJĄ nietknięte (dane usera); po prostu nie powstają nowe. Odzyskiwanie
+    // sesji stoi na `sessions/active` + `.state.json`.
 
     /**
      * Load a session from this agent's memory
@@ -1343,8 +1328,7 @@ created: ${created}
         }
     }
 
-    // E2.8 A4: saveActiveContext/loadActiveContext skasowane (0 wywołań w runtime; wydmuszka #6).
-    // Idea „pamięci średnioterminowej" wraca jako sekcje „Na teraz" w brain.md (faza D).
+    // Pamięć średnioterminowa żyje dziś jako sekcje „Na teraz" w brain.md.
     // Plików active_context.md na dysku NIE kasujemy (martwe dane usera zostają).
 
     /**
@@ -1353,9 +1337,9 @@ created: ${created}
      * @returns Brain index content
      */
     async getBrain(): Promise<string> {
-        // K4 (AUD-bledy-061/044): TRZY stany, nie dwa. Świeży, pusty indeks wolno założyć
+        // TRZY stany, nie dwa. Świeży, pusty indeks wolno założyć
         // wyłącznie na POTWIERDZONYM „nie ma" — gołe `exists() === false` kłamie na dyskach
-        // sieciowych (incydent 2026-07-28) i kasowało pamięć agenta bez kopii `.bak`.
+        // sieciowych, co kasowałoby pamięć agenta bez kopii `.bak`.
         if (await probeFile(this.vault.adapter, this.paths.brain) === 'missing') {
             const initialContent = buildBrainIndex({
                 agentName: this.agentName,
@@ -1441,9 +1425,9 @@ created: ${created}
             notes.sort((a, b) => a.filename.localeCompare(b.filename));
             return notes;
         } catch (error) {
-            // K4 (AUD-bledy-044): nieudane LISTOWANIE katalogu ≠ „agent nie ma notatek".
-            // Pusta tablica szła prosto do `rebuildBrainIndex`, który przebudowywał brain.md
-            // BEZ ani jednego linku — czyli kasował indeks pamięci przy jednej czkawce dysku.
+            // Nieudane LISTOWANIE katalogu ≠ „agent nie ma notatek".
+            // Pusta tablica szłaby prosto do `rebuildBrainIndex`, który przebudowywałby brain.md
+            // BEZ ani jednego linku — czyli kasowałby indeks pamięci przy jednej czkawce dysku.
             // Pojedyncza nieczytelna notatka nadal tylko warnuje (catch wyżej) i leci dalej.
             log.error(`AgentMemory:${this.agentName}`, `Error listing brain notes:`, error);
             throw error;
@@ -1454,19 +1438,19 @@ created: ${created}
      * Rebuild brain.md from the active brain/*.md catalogue.
      * @param options.mutateNaTeraz
      *   Optional transform applied to the parsed „Na teraz" sections before the file is rebuilt
-     *   (used by writeNaTeraz — D2). Without it the sections are preserved verbatim.
+     *   (used by writeNaTeraz). Without it the sections are preserved verbatim.
      */
     async rebuildBrainIndex(
         options: { mutateNaTeraz?: (naTeraz: NaTerazSections) => NaTerazSections } = {},
     ): Promise<{ changed: boolean; content: string }> {
         await this.ensureMemoryStructure();
-        // E2.7 K1: serialize the whole read→list→build→write against brain.md so a
-        // memory_save/rebuild running in parallel (K2/K3 raise their frequency) cannot
+        // Serialize the whole read→list→build→write against brain.md so a
+        // memory_save/rebuild running in parallel cannot
         // read a stale index and clobber a concurrent writer's update (lost-update race).
         return this._enqueuePathWrite(this.paths.brain, async () => {
-            // K4 (AUD-bledy-061): pusty `before` z AWARII odczytu ≠ pusty plik. Ta różnica
-            // omijała bezpiecznik `.bak` niżej (`before && …`), więc ręczne sekcje ginęły
-            // bez śladu w INNYM wariancie tej samej awarii, przed którą on powstał.
+            // Pusty `before` z AWARII odczytu ≠ pusty plik. Ta różnica
+            // omijałaby bezpiecznik `.bak` niżej (`before && …`), więc ręczne sekcje ginęłyby
+            // bez śladu przy odczycie, który padł.
             const probe = await probeFile(this.vault.adapter, this.paths.brain);
             let before = '';
             if (probe !== 'missing') {
@@ -1477,12 +1461,13 @@ created: ${created}
                     throw e;
                 }
             }
-            // E2.8 D1 (S22): brain.md now carries „Na teraz" short-term sections at the top. Parse
-            // them out of the current file and re-emit them so a rebuild NEVER drops them — pre-D
-            // these plain bullets looked like manual content and were shoved into brain.md.bak.
+            // brain.md carries „Na teraz" short-term sections at the top. Parse
+            // them out of the current file and re-emit them so a rebuild NEVER drops them —
+            // otherwise these plain bullets would look like manual content and get shoved into
+            // brain.md.bak.
             let naTeraz = parseNaTerazSections(before);
             if (typeof options.mutateNaTeraz === 'function') naTeraz = options.mutateNaTeraz(naTeraz);
-            // Incydent 2026-08-15: sekcje H2 spoza katalogu zarządzanych (ręczne, np. „## AKTYWNY
+            // Sekcje H2 spoza katalogu zarządzanych (ręczne, np. „## AKTYWNY
             // TEST") wracają do nowego pliku verbatim, na koniec — rebuild nie może ich wycinać.
             const foreign = parseForeignSections(before);
             const notes = await this.listBrainNotes();
@@ -1494,9 +1479,9 @@ created: ${created}
                 foreign
             });
             if (content !== before) {
-                // Safety net (E1.1): the rebuild still drops manual lines inside MANAGED sections
-                // (foreign sections and „Na teraz" survive since 2026-08-15). Back those up first.
-                // K4: przy niepewnym stanie pliku (`unknown` — `exists()` skłamało) backup idzie
+                // Safety net: the rebuild still drops manual lines inside MANAGED sections
+                // (foreign sections and „Na teraz" survive). Back those up first.
+                // Przy niepewnym stanie pliku (`unknown` — `exists()` skłamało) backup idzie
                 // ZAWSZE, bo nie wiemy, czy przed chwilą widzieliśmy całą prawdę o pliku.
                 // `before` puste = nie ma czego backupować (i nie kasujemy starszego `.bak`).
                 if (before && (probe === 'unknown' || this._brainHasManualContent(before))) {
@@ -1515,11 +1500,11 @@ created: ${created}
     /**
      * Detect user-authored lines in brain.md that the rebuild would DROP (anything other than the
      * header, a v3 section heading, a generated `- [[brain/...]]` link, a „Na teraz" bullet, or a
-     * foreign section — those are preserved verbatim since the 2026-08-15 incident fix).
+     * foreign section — those are preserved verbatim).
      * Triggers a one-file `brain.md.bak` backup before rebuildBrainIndex overwrites brain.md.
      */
     _brainHasManualContent(text: string | null | undefined): boolean {
-        // E2.8 D1 + incydent 2026-08-15: track which zone a line lives in. „Na teraz" bullets are
+        // Track which zone a line lives in. „Na teraz" bullets are
         // OURS (regenerated by buildBrainIndex) and foreign sections are PRESERVED verbatim by the
         // rebuild — neither may force a .bak. Manual lines inside MANAGED index sections are still
         // dropped by the rebuild, so they still do.
@@ -1541,7 +1526,7 @@ created: ${created}
     }
 
     /**
-     * E2.8 D2 (S22): mutate the „Na teraz" short-term sections of brain.md through the K1 write
+     * Mutate the „Na teraz" short-term sections of brain.md through the write
      * queue. `ops` = one or more `{ section: 'user'|'environment', add?, remove? }`.
      *
      * These ephemeral sections are the ONE conscious exception to the create-only rule that governs
@@ -1565,7 +1550,7 @@ created: ${created}
         if (trimmedTotal > 0) {
             log.debug(`AgentMemory:${this.agentName}`, `„Na teraz" trim: usunięto ${trimmedTotal} najstarszych wpisów (limit ${NA_TERAZ_MAX_ENTRIES}/sekcja).`);
         }
-        // S32 Z1b: kronika `brain.log` — po jednym wpisie na sekcję, którą operacja realnie ruszyła.
+        // Kronika `brain.log` — po jednym wpisie na sekcję, którą operacja realnie ruszyła.
         // Tylko gdy plik się zmienił: „usuń wpis, którego nie ma" nie jest zdarzeniem do zapisania.
         if (result?.changed) {
             const sections = [...new Set(list.map(op => op?.section).filter(Boolean))] as string[];
@@ -1577,13 +1562,13 @@ created: ${created}
     }
 
     /**
-     * E2.7 W2 (K3): create a brain/ note (create-with-suffix on name collision) through the K1
+     * Create a brain/ note (create-with-suffix on name collision) through the
      * write queue. Unlike memory_save (create-only refusal), this appends `_2`, `_3`… so background
      * memory-candidate saves never fail on a duplicate name. Does NOT rebuild brain.md — the caller
      * rebuilds once after a batch. Reused by chat_session._saveMemoryCandidates.
      *
-     * Review opusa P4 (2026-09-02): `ensureMemoryStructure()` jest memoizowana (AUD-wydajnosc-095)
-     * — koniec z samonaprawą struktury W TRAKCIE sesji. Jeśli user ręcznie skasuje `brain/` (albo
+     * `ensureMemoryStructure()` jest memoizowana — koniec z samonaprawą struktury W TRAKCIE
+     * sesji. Jeśli user ręcznie skasuje `brain/` (albo
      * cokolwiek innego z bootstrapu) w trakcie działania pluginu, flaga `_structureEnsured` nadal
      * mówi „zrobione" i sam zapis notatki rzucałby na zawsze, mimo że jedno odtworzenie folderów
      * by go uzdrowiło. Furtka: pad zapisu resetuje flagę i próbuje DOKŁADNIE RAZ — nie w kółko,
@@ -1599,14 +1584,14 @@ created: ${created}
         const baseFilename = makeMemoryNoteFilename(type, note?.name || note?.content);
         const basePath = `${this.paths.brainNotes}/${baseFilename}`;
         const doWrite = () => this._enqueuePathWrite(basePath, async () => {
-            // K4 (AUD-bledy-061): jak w startActiveSession — „nie wiem, czy ta nazwa jest wolna"
+            // Jak w startActiveSession — „nie wiem, czy ta nazwa jest wolna"
             // liczymy jako ZAJĘTĄ, żeby kłamiący exists() nie pozwolił nadpisać cudzej notatki.
-            // AUD-code-review-010: sufiks dokleja się do GOTOWEJ NAZWY PLIKU (jak `archiveBrainNote`,
+            // Sufiks dokleja się do GOTOWEJ NAZWY PLIKU (jak `archiveBrainNote`,
             // `clean.replace(/\.md$/, ...)`), NIE do tekstu wchodzącego do slugifikacji — inaczej
             // dla slugu ≥80 znaków `makeMemoryNoteFilename` obcina ogon ZANIM sufiks miał szansę
             // się doliczyć, więc każda iteracja daje identyczną nazwę i pętla po 50 próbach rzuca
             // zamiast dobrać wolną nazwę.
-            // AUD-testy-042: wspólna pętla z pięcioma siostrzanymi wywołaniami (`collisionSuffix.ts`).
+            // Wspólna pętla z pięcioma siostrzanymi wywołaniami (`collisionSuffix.ts`).
             const { path, filename } = await findFreeCollisionPath(
                 this.vault.adapter,
                 this.paths.brainNotes,
@@ -1628,7 +1613,7 @@ created: ${created}
             await this.ensureMemoryStructure();
             created = await doWrite();
         }
-        // S32 Z1b: kronika PO udanym zapisie (poza kolejką tej ścieżki — brain.log ma własną).
+        // Kronika PO udanym zapisie (poza kolejką tej ścieżki — brain.log ma własną).
         await this.appendBrainLog('create', created.filename, options.source || 'auto');
         return created;
     }
@@ -1659,19 +1644,19 @@ ${t('memory.note.how_label')} ${how}
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════
-    //  D8 (2026-08-27, werdykt 27.08) — poczekalnia `brain/pending_rescue/`
+    //  Poczekalnia `brain/pending_rescue/`
     //
-    //  AUD-docs-065: `memory_rescue` (ratunek kandydatów przed kompresją okna, E2.7 W2) pisał
-    //  wprost do `brain/` przez `writeBrainNote` — bez żadnego review usera, wbrew gotchy 1
-    //  („agent proponuje, user zatwierdza"). Śledztwo (sesja D8) sprawdziło, czy da się to wpiąć
-    //  w poczekalnię `ArchiveWorkflow`/`ConsolidationRun` — NIE da się bez przebudowy (globalny
-    //  singleton `MemoryOpsCenter` = jeden przebieg na CAŁY plugin, nie per agent; propozycje
-    //  żyją wyłącznie w RAM, co jest bezpieczne dla konsolidacji, ale NIE dla rescue, którego
-    //  całym sensem jest nie gubić danych przed przeglądem).
+    //  `memory_rescue` (ratunek kandydatów przed kompresją okna) nie może pisać wprost do
+    //  `brain/` przez `writeBrainNote` — kandydat musi przejść review usera zanim trafi do
+    //  pamięci trwałej („agent proponuje, user zatwierdza"). Nie da się tego wpiąć w poczekalnię
+    //  `ArchiveWorkflow`/`ConsolidationRun` bez przebudowy: `MemoryOpsCenter` to globalny
+    //  singleton — jeden przebieg na CAŁY plugin, nie per agent — a jego propozycje żyją
+    //  wyłącznie w RAM, co jest bezpieczne dla konsolidacji, ale nie dla rescue, którego całym
+    //  sensem jest nie gubić danych przed przeglądem.
     //
-    //  Werdykt lidera: HYBRYDA — trwała poczekalnia PLIKOWA (ten silnik, wzorem `brain/archive/`)
-    //  + review przez ISTNIEJĄCY modal `/save session` (`SaveSessionWorkflow`/`SaveSessionModal`,
-    //  bo kształt kandydata jest bit-identyczny z `NoteProposal`). `ConsolidationRun`/
+    //  Rozwiązanie: trwała poczekalnia PLIKOWA (ten silnik, wzorem `brain/archive/`) + review
+    //  przez ISTNIEJĄCY modal `/save session` (`SaveSessionWorkflow`/`SaveSessionModal`, bo
+    //  kształt kandydata jest bit-identyczny z `NoteProposal`). `ConsolidationRun`/
     //  `MemoryOpsCenter` NIETKNIĘTE.
     //
     //  Kontrakt folderu: `brain/pending_rescue/*.md` jest wykluczony z `listBrainNotes()`/indeksu
@@ -1681,7 +1666,7 @@ ${t('memory.note.how_label')} ${how}
 
     /**
      * Zapisz kandydata rescue do POCZEKALNI zamiast wprost do `brain/`. Ten sam kształt zapisu co
-     * `writeBrainNote` (create-with-suffix przez kolejkę K1, `probeFile` w pętli kolizji) — różni
+     * `writeBrainNote` (create-with-suffix przez kolejkę zapisu, `probeFile` w pętli kolizji) — różni
      * się WYŁĄCZNIE folderem docelowym i tym, że `why`/`how_to_apply`/`source` zostają w
      * ODZYSKIWALNEJ formie (frontmatter), bo `acceptPendingRescue` dopiero przy accept woła
      * `writeBrainNote`, który sam dokłada stopkę Why/How — dwa doklejenia zdublowałyby ją.
@@ -1700,11 +1685,11 @@ ${t('memory.note.how_label')} ${how}
         const baseFilename = makeMemoryNoteFilename(type, note?.name || note?.content);
         const basePath = `${this.paths.pendingRescue}/${baseFilename}`;
         return this._enqueuePathWrite(basePath, async () => {
-            // K4 (AUD-bledy-061): jak w `writeBrainNote` — „nie wiem, czy ta nazwa jest wolna"
+            // Jak w `writeBrainNote` — „nie wiem, czy ta nazwa jest wolna"
             // liczymy jako ZAJĘTĄ, żeby kłamiący exists() nie pozwolił nadpisać cudzego kandydata.
-            // AUD-code-review-010: sufiks dokleja się do NAZWY PLIKU, nie do tekstu wchodzącego
-            // do slugifikacji — patrz komentarz w `writeBrainNote` (ten sam bug, ta sama pętla).
-            // AUD-testy-042: wspólna pętla z pięcioma siostrzanymi wywołaniami (`collisionSuffix.ts`).
+            // Sufiks dokleja się do NAZWY PLIKU, nie do tekstu wchodzącego
+            // do slugifikacji — patrz komentarz w `writeBrainNote` (ten sam mechanizm, ta sama pętla).
+            // Wspólna pętla z pięcioma siostrzanymi wywołaniami (`collisionSuffix.ts`).
             const { path, filename } = await findFreeCollisionPath(
                 this.vault.adapter,
                 this.paths.pendingRescue,
@@ -1714,7 +1699,7 @@ ${t('memory.note.how_label')} ${how}
             try {
                 await this.vault.adapter.write(path, this._buildPendingRescueContent({ ...note, type }, options.source));
             } catch (writeError) {
-                // Werdykt weryfikacji opusa (nit 1, torn-write — klasa incydentu z lipca 2026, utrata zapisu na dysku sieciowym):
+                // Torn write (utrata zapisu na dysku sieciowym):
                 // adapter potrafi odrzucić Promise MIMO że bajty faktycznie wylądowały na
                 // dysku (dyski sieciowe / Dysk Google). Bez tej weryfikacji wołacz
                 // (`turnOwner.saveMemoryCandidatesFor`) widziałby fałszywy fail i fail-softem
@@ -1734,8 +1719,8 @@ ${t('memory.note.how_label')} ${how}
     /**
      * Frontmatter + RAW body (bez stopki Why/How — ta dokleja się dopiero przy `writeBrainNote`
      * w `acceptPendingRescue`, inaczej user zobaczyłby ją PODWÓJNIE po zaakceptowaniu). `why` i
-     * `how_to_apply` muszą przeżyć do accept, więc idą do frontmattera jak `description` (K9:
-     * `JSON.stringify` na zapisie, `parseFrontmatterScalar`→`JSON.parse` na odczycie).
+     * `how_to_apply` muszą przeżyć do accept, więc idą do frontmattera jak `description`
+     * (`JSON.stringify` na zapisie, `parseFrontmatterScalar`→`JSON.parse` na odczycie).
      */
     _buildPendingRescueContent(note: BrainNoteInput, source?: string): string {
         const quote = (v: unknown) => JSON.stringify(String(v || '').slice(0, 1000));
@@ -1829,7 +1814,7 @@ ${String(note.content || '')}
         await this.ensureMemoryStructure();
         const sourcePath = `${this.paths.pendingRescue}/${clean}`;
         return this._enqueuePathWrite(sourcePath, async () => {
-            // K4/K12 (readIfExists): sygnały sprzeczne NIE MOGĄ ani udawać sukcesu, ani kasować
+            // `readIfExists`: sygnały sprzeczne NIE MOGĄ ani udawać sukcesu, ani kasować
             // pliku, którego treści nie widzieliśmy — fail-closed, jak reszta modułu.
             const probe = await readIfExists(this.vault.adapter, sourcePath);
             if (probe.state === 'missing') {
@@ -1898,11 +1883,11 @@ ${String(note.content || '')}
             throw new Error('Project notes require lessonsReviewed=true before archiving');
         }
 
-        // K4 (AUD-bledy-061): jak w startActiveSession — „nie wiem, czy ta nazwa jest wolna"
+        // Jak w startActiveSession — „nie wiem, czy ta nazwa jest wolna"
         // liczymy jako ZAJĘTĄ. Throw tutaj ląduje PRZED write/remove niżej — kłamiący exists()
         // nie dostaje szansy nadpisać cudzego archiwum ani skasować źródła; źródło zostaje
         // nietknięte (write/remove w ogóle się nie odpalają, gdy pętla rzuci).
-        // AUD-testy-042: wspólna pętla z pięcioma siostrzanymi wywołaniami (`collisionSuffix.ts`).
+        // Wspólna pętla z pięcioma siostrzanymi wywołaniami (`collisionSuffix.ts`).
         const { path: targetPath } = await findFreeCollisionPath(
             this.vault.adapter,
             this.paths.brainArchive,
@@ -1917,13 +1902,13 @@ ${String(note.content || '')}
             archivedContent = this._setFrontmatterField(archivedContent, 'archive_reason', String(options.reason).replace(/\r?\n/g, ' '));
         }
 
-        // E2.7 K1: serialize the move (write archive copy + remove source) against the source
+        // Serialize the move (write archive copy + remove source) against the source
         // path so a parallel append/rebuild cannot resurrect or race the half-moved note.
         await this._enqueuePathWrite(sourcePath, async () => {
             await this.vault.adapter.write(targetPath, archivedContent);
             if (this.vault.adapter.remove) await this.vault.adapter.remove(sourcePath);
         });
-        // S32 Z1b: notatka zniknęła z czynnej pamięci — user musi mieć ślad kto ją odłożył.
+        // Notatka zniknęła z czynnej pamięci — user musi mieć ślad kto ją odłożył.
         await this.appendBrainLog('archive', clean, options.reason || '');
         await this.rebuildBrainIndex();
         return { sourcePath, targetPath, filename: targetPath.split('/').pop() as string };
@@ -1931,7 +1916,7 @@ ${String(note.content || '')}
 
     /**
      * Update the agent's brain with new information.
-     * Sprint 03 Z3: hard limit BRAIN_MAX_TOKENS=350 (token-based, nie char-based).
+     * Hard limit BRAIN_MAX_TOKENS (token-based, nie char-based).
      * Overflow → przenoszone do brain_archive.md.
      * @param content - New brain content
      */
@@ -1944,7 +1929,7 @@ ${String(note.content || '')}
     }
 
     /**
-     * Check if content exceeds brain hard limit (Sprint 03 Z3).
+     * Check if content exceeds brain hard limit.
      * Token-first, char-fallback if tokenCounter throws.
      */
     _brainOverLimit(content: string): boolean {
@@ -1972,9 +1957,9 @@ ${String(note.content || '')}
         const parts: string[] = [];
 
         // Add brain (long-term memory)
-        // K4 (AUD-bledy-044): awaria odczytu MELDUJE SIĘ w prompcie. Wcześniej `getBrain()`
-        // oddawał '' i blok pamięci po prostu znikał — model odpowiadał tak, jakby agent nie
-        // znał ustaleń usera, a jedyny ślad awarii siedział w konsoli developerskiej.
+        // Awaria odczytu MELDUJE SIĘ w prompcie — bez tego `getBrain()`
+        // oddawałby '' i blok pamięci po prostu by zniknął — model odpowiadałby tak, jakby agent
+        // nie znał ustaleń usera, a jedyny ślad awarii siedziałby w konsoli developerskiej.
         try {
             const brain = await this.getBrain();
             if (brain && brain.trim()) {
@@ -2003,7 +1988,7 @@ ${String(note.content || '')}
             noteLines.push('- brak notatek');
         } else {
             for (const note of notes) {
-                // K9 (AUD-security-035): opis MUSI być jednolinijkowy — z frontmattera wraca
+                // Opis MUSI być jednolinijkowy — z frontmattera wraca
                 // przez JSON.parse z prawdziwymi znakami nowej linii, a wielolinijkowy wpis
                 // wstawiłby do promptu własny nagłówek (np. `## INSTRUKCJE`) obok pozycji indeksu.
                 const flat = oneLineDescription(note.description);
@@ -2050,7 +2035,7 @@ ${String(note.content || '')}
      * Parse YAML frontmatter from a markdown file.
      * Returns an object with frontmatter fields, or {} if none.
      *
-     * Delegacja do `activeSessionFormat.parseFrontmatter` (S36 Faza 1) — implementacja
+     * Delegacja do `activeSessionFormat.parseFrontmatter` — implementacja
      * przeniosła się tam, bo blok frontmattera jest częścią kontraktu pliku sesji, a
      * `parseActiveSession` musi go czytać bez `this`. Metoda ZOSTAJE: wołają ją
      * `ArchiveWorkflow`, `modules/chat/chat_session` i `modules/tools/ReadTool`.
@@ -2081,7 +2066,7 @@ ${String(note.content || '')}
      * - Frontmatter exists & key exists → replace value
      * - Frontmatter exists & key missing → append before closing `---`
      * - No frontmatter → prepend new `---\n<key>: <value>\n---\n`
-     * Used by Sprint 03 Z2 cascade flagging (`covered_by_l1`).
+     * Used by cascade flagging (`covered_by_l1`).
      * @param content - File content
      * @param key - Frontmatter key (scalar only, no nested objects/arrays)
      * @param value - Value to set (will be stringified)
@@ -2194,7 +2179,7 @@ ${String(note.content || '')}
      *    (i L1 wracają do puli, co jest poprawne — nic nie powstało).
      *  - **stare dyski.** L2 sprzed tej naprawy też mają `l1_files`, więc pokrycie liczy się
      *    wstecz bez migracji i bez jednorazowego przeliczenia.
-     *  - **pliki usera.** Zero nowych zapisów do plików pamięci (lekcja incydentu 2026-07-28).
+     *  - **pliki usera.** Zero nowych zapisów do plików pamięci.
      *
      * ⚠️ Granica: L2 z pustym/brakującym `l1_files` (plik ręczny albo z bardzo starej wersji)
      * nie pokrywa NICZEGO — jego L1 wrócą do puli i dostaną drugie streszczenie. Świadomie:
@@ -2328,7 +2313,7 @@ ${String(note.content || '')}
 
     /**
      * Move oldest facts to brain_archive.md when brain exceeds size limit.
-     * Sprint 03 Z3: accepts predicate function (token-based) lub legacy number (char-based).
+     * Accepts predicate function (token-based) lub legacy number (char-based).
      * @param parsed - { header, sections }
      * @param sizeGate - Predicate (content) => boolean (true = still too big),
      *                   or legacy maxChars number for backward-compat.
@@ -2354,8 +2339,8 @@ ${String(note.content || '')}
 
         // Append archived facts to brain_archive.md
         if (archived.length > 0) {
-            // Self-append (klasa K4): jak w `saveSession` — stary `if (exists) read()` na
-            // kłamiącym `exists()` przechodził w gałąź „pierwsze archiwum" i NADPISYWAŁ
+            // Self-append: jak w `saveSession` — stary `if (exists) read()` na
+            // kłamiącym `exists()` przechodziłby w gałąź „pierwsze archiwum" i NADPISYWAŁBY
             // dotychczasową treść `brain_archive.md` samym nowym urywkiem. `readIfExists`
             // czyta najpierw, więc kłamstwo `exists()` nie ma jak przeciąć drogi do treści.
             const probe = await readIfExists(this.vault.adapter, archivePath);
@@ -2394,7 +2379,7 @@ ${String(note.content || '')}
 
         try {
             await this._enqueuePathWrite(logPath, async () => {
-                // Self-append (klasa K4): kronika, nie źródło prawdy — polityka jest SKIP,
+                // Self-append: kronika, nie źródło prawdy — polityka jest SKIP,
                 // nie throw. `readIfExists` broni tylko przed nadpisaniem: sygnały sprzeczne
                 // pomijają TEN wpis zamiast ryzykować utratę wcześniejszych linii audytu.
                 const probe = await readIfExists(this.vault.adapter, logPath);
@@ -2411,7 +2396,7 @@ ${String(note.content || '')}
     }
 
     /**
-     * S32 Z1b: dopisz jedną linię do `brain.log` — kroniki zapisów do pamięci TRWAŁEJ.
+     * Dopisz jedną linię do `brain.log` — kroniki zapisów do pamięci TRWAŁEJ.
      *
      * ⚠️ To NIE jest `audit.log`. Tamten to osobny, żywy mechanizm legacy (`_appendAuditLog`
      * loguje IGNOROWANE stare `brain_update`) i nie wolno go tu mieszać — user widzi w profilu
@@ -2437,7 +2422,7 @@ ${String(note.content || '')}
         const logPath = `${this.basePath}/brain.log`;
         try {
             return await this._enqueuePathWrite(logPath, async () => {
-                // Self-append (klasa K4): jak `_appendAuditLog` — kronika ma kontrakt
+                // Self-append: jak `_appendAuditLog` — kronika ma kontrakt
                 // BEST-EFFORT (dokstring wyżej: „NIGDY nie rzuca"), więc sygnały sprzeczne
                 // pomijają TEN wpis (warn + `false`) zamiast nadpisywać albo rzucać w górę.
                 const probe = await readIfExists(this.vault.adapter, logPath);
@@ -2466,10 +2451,6 @@ ${String(note.content || '')}
         return `${safeAgent}_${date}_${time}.md`;
     }
 
-    // ℹ️ `_formatSessionEvent` (delegacja do `formatSessionEvent`) SKASOWANA w S36 Fazie 2:
-    // po przeniesieniu numeracji `seq` do wnętrza kolejki `appendToActiveSession` woła
-    // `formatSessionEvent` wprost, a innych wołaczy delegacja nie miała (grep po repo).
-
     /**
      * Czytnik pliku aktywnej sesji (format A, format B i pliki MIESZANE) — delegacja
      * do jedynego źródła kontraktu. Pełny opis klasyfikacji bloków i powodów
@@ -2493,41 +2474,42 @@ ${String(note.content || '')}
         return `${agent} · ${stamp}`;
     }
 
-    // --- Cleanup methods (Sprint 03 Z2: kaskadowa konsolidacja) ---
+    // --- Cleanup methods (kaskadowa konsolidacja) ---
     //
-    // Wizja MEMORY_v2_RETRIEVAL_v2 Blok 3 (kaskada):
+    // Kaskada:
     //   5 sesji → L1   → sesje ZOSTAJĄ (z flagą covered_by_l1)
     //   3×L1 → L2      → sesje pokryte przez te 3 L1 KASOWANE, L1 zostają
     //   3×L2 → L3      → L1 pokryte przez te 3 L2 KASOWANE, L2 zostają
     //
-    // Pre-Z2 logika usuwała bezpośrednie źródło (sesje po L1, L1 po L2, L2 po L3).
-    // To powodowało wrażenie "rozmowy znikają" — user nie widział historii.
+    // Usuwanie bezpośredniego źródła od razu (sesje po L1, L1 po L2, L2 po L3) dawałoby
+    // wrażenie "rozmowy znikają" — user nie widziałby historii.
 
     /**
-     * Mark sessions as covered_by_l1 (NIE usuwa — Sprint 03 Z2).
-     * Called only by ArchiveWorkflow._writeLevel1 (E2.7 K4 removed the AgentMemory consolidation
-     * path). Covered sessions are deleted later by ArchiveWorkflow._deleteArchivedSessions when
+     * Mark sessions as covered_by_l1 (NIE usuwa).
+     * Called only by ArchiveWorkflow._writeLevel1 (AgentMemory's own consolidation path was
+     * removed). Covered sessions are deleted later by ArchiveWorkflow._deleteArchivedSessions when
      * their L1 is absorbed into an L2.
      *
-     * 🔧 2026-07-29: do tej pory stempel składał ścieżkę pod `paths.sessions` (płaskie `sessions/`,
-     * relikt v2), a zarchiwizowane sesje leżą w `sessions/archive/`. Plik nie istniał → `continue`
-     * → stempel NIGDY nie powstawał, więc każdy kolejny przebieg konsolidacji brał te same sesje
-     * do nowej paczki L1 (duplikaty) i badge „✓ w L1" w profilu nie miał się z czego wyrenderować.
-     * Teraz najpierw `sessions/archive/`, a dopiero potem stara płaska ścieżka (pozostałości v2,
-     * których migrator `_migrateLegacyRootSessionsToArchive` mógł jeszcze nie przenieść).
+     * Sprawdzamy najpierw `sessions/archive/`, dopiero potem starą płaską ścieżkę pod
+     * `paths.sessions` (pozostałości v2, których migrator `_migrateLegacyRootSessionsToArchive`
+     * mógł jeszcze nie przenieść) — w tej kolejności, bo zarchiwizowane sesje leżą w
+     * `sessions/archive/`, a próba złej ścieżki jako pierwszej kończy się `continue` i
+     * NIGDY nieustawionym stemplem, więc każdy kolejny przebieg konsolidacji brałby te same
+     * sesje do nowej paczki L1 (duplikaty) i badge „✓ w L1" w profilu nie miałby się z czego
+     * wyrenderować.
      *
-     * ⚠️ **Nieostemplowana sesja jest WYNIKIEM, nie szumem w logu** (AUD-bledy-047). Pad zapisu
-     * stempla (blokada synchronizatora / plik tylko do odczytu) był dotąd liczony do lokalnej
+     * ⚠️ **Nieostemplowana sesja jest WYNIKIEM, nie szumem w logu.** Bez tej zwrotki pad zapisu
+     * stempla (blokada synchronizatora / plik tylko do odczytu) byłby liczony tylko do lokalnej
      * zmiennej i raportowany WYŁĄCZNIE w `log.debug`, a `ArchiveWorkflow._writeLevel1` i tak
-     * oddawał `{created: 1}` — krok konsolidacji szedł jako `done`. Sesje bez stempla wracają
+     * oddawałby `{created: 1}` — krok konsolidacji szedłby jako `done`. Sesje bez stempla wracają
      * przez `listUncoveredArchiveSessions()` do NASTĘPNEJ paczki L1, czyli powstaje drugie
-     * streszczenie tych samych rozmów za kolejny strzał do modelu (wtopa „12 zduplikowanych L1").
+     * streszczenie tych samych rozmów za kolejny strzał do modelu (duplikaty L1).
      * Zwrotka niesie więc LISTĘ pominiętych z powodem — wołacz przenosi ją do wyniku kroku.
      * Sam L1 jest już zapisany, więc to jest „zapisane, nie ostemplowane", a nie porażka całości.
      *
      * @param sessionNames - Names of sessions included in the L1
      * @param l1Path - Path to the freshly created L1 file (used for the flag value).
-     *                 Pre-Z2 callers przekazywali tu liczbę `keepRecent` —
+     *                 Starsi callerzy przekazywali tu liczbę `keepRecent` —
      *                 numeric value jest ignorowany (backward-compat soft no-op).
      * @returns `{marked, skipped}` — `skipped` wymienia sesje, które NIE dostały stempla.
      *   Stemplowanie jest idempotentne (sprawdza `fm.covered_by_l1 === l1Name`), więc ponowienie
@@ -2550,7 +2532,7 @@ ${String(note.content || '')}
             try {
                 const path = await this._resolveArchivedSessionPath(name);
                 if (!path) { skipped.push({ session: name, reason: 'not_found' }); continue; }
-                // E2.7 K1: stempel to read-modify-write na pliku sesji — przez kolejkę per-ścieżka.
+                // Stempel to read-modify-write na pliku sesji — przez kolejkę per-ścieżka.
                 await this._enqueuePathWrite(path, async () => {
                     const content = await this.vault.adapter.read(path);
                     const fm = this._parseFrontmatter(content);
@@ -2609,7 +2591,7 @@ ${String(note.content || '')}
     }
 
     /**
-     * Retencja archiwum sesji (Z6, 2026-07-30) — sprząta WYŁĄCZNIE sesje już wchłonięte
+     * Retencja archiwum sesji — sprząta WYŁĄCZNIE sesje już wchłonięte
      * do podsumowania L1 (niepusty `covered_by_l1`).
      *
      * ⚠️ **Sesja bez stempla jest ŚWIĘTA.** To jedyny materiał na przyszłe paczki L1
@@ -2663,7 +2645,7 @@ ${String(note.content || '')}
             for (const session of candidates) {
                 if (total <= keepMax) break;
                 if (doomed.has(session.path)) continue;
-                // AUD-code-review-069: sama reguła co osiem linii wyżej w gałęzi wieku — sesja
+                // Sama reguła co osiem linii wyżej w gałęzi wieku — sesja
                 // o NIEUSTALONEJ dacie (sessionTime===0, brak `created` i brak `stat`) nie liczy
                 // się jako „najstarsza". `candidates` jest posortowane ROSNĄCO po `sessionTime`,
                 // więc bez tego warunku sesja bez daty zawsze ląduje na początku listy i ginie
@@ -2694,7 +2676,7 @@ ${String(note.content || '')}
     }
 
     /**
-     * Cascade after L3: usuwa L1 pokryte przez L2 wchłonięte do L3 (Sprint 03 Z2).
+     * Cascade after L3: usuwa L1 pokryte przez L2 wchłonięte do L3.
      * **L2 zostają nietknięte** — najwyższy poziom historii, manualny cleanup tylko.
      *
      * @param l2Names - L2 files included in the L3 we just created
@@ -2734,26 +2716,15 @@ ${String(note.content || '')}
         }
     }
 
-    // --- Utility methods (on-demand) ---
-    //
-    // D6 (2026-07-30): sweepy `cleanupGarbageSessions` (kasowanie sesji z <3 wiadomościami usera)
-    // i `enforceSessionLimit` (twardy limit N ostatnich sesji) SKASOWANE razem ze starym torem
-    // konsolidacji. Wołał je wyłącznie `ArchiveWorkflow.run()`, w dodatku po pustym, płaskim
-    // `sessions/` (relikt v2 — w Memory v3 sesje żyją w `sessions/active` + `sessions/archive`),
-    // więc w praktyce były no-opem kasującym pliki usera bez pytania. Razem z nimi poszedł
-    // prywatny `_isGarbageSession` (zero innych wołaczy).
-    //
-    // D6b (2026-07-30): tą samą kuracją poszedł `cleanupOrphanedSummaries()` — zero wołaczy
-    // (świadomie niewpięty od E2.7 K4) i ta sama mina co sweepy: swój spis „istniejących sesji"
-    // budował z płaskiego `sessions/` (w v3 zawsze pustego), więc WPIĘTY uznałby każde L1
-    // z referencjami za sierotę i skasował wszystkie świeże streszczenia. Gdyby kiedyś powstała
-    // realna potrzeba sprzątania sierot L1/L2, pisać od zera na `sessions/archive/` + stemplach
-    // `covered_by_l1` — nie wskrzeszać tej wersji z historii gita.
+    // Sprzątanie sierot L1/L2 (streszczenia bez sesji źródłowej) nie ma dziś dedykowanej metody.
+    // Taki mechanizm musiałby liczyć istniejące sesje z `sessions/archive/` + stempli
+    // `covered_by_l1`, NIE z płaskiego `sessions/` (w Memory v3 zawsze pustego) — inaczej uznałby
+    // każde L1 z referencjami za sierotę i skasował świeże streszczenia.
 
 }
 
 /**
- * S32 Z1b: czysty parser `brain.log` (TSV → obiekty), OD NAJNOWSZEGO.
+ * Czysty parser `brain.log` (TSV → obiekty), OD NAJNOWSZEGO.
  *
  * Bez klasy i bez adaptera, żeby dał się przetestować i żeby UI mogło go zawołać na treści
  * przeczytanej dowolną drogą. Linie w nieznanym kształcie NIE są wyrzucane — brakujące pola

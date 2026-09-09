@@ -2,7 +2,7 @@
  * Prywatne narzędzia błędów podklastra `core/http` — JEDNA kopia dla obu klientów
  * i transportu strumienia.
  *
- * DLACZEGO OSOBNY PLIK: K20 („sekret nigdy w komunikacie błędu") to reguła
+ * DLACZEGO OSOBNY PLIK: „sekret nigdy w komunikacie błędu" to reguła
  * bezpieczeństwa, a nie kosmetyka — trzy kopie tego samego filtra rozjeżdżają się przy
  * pierwszej poprawce. Plik NIE wychodzi przez `core/index.ts`: jest szczegółem
  * wewnętrznym podklastra, konsument widzi tylko zwykły `Error`.
@@ -75,7 +75,7 @@ export function opisPrzyczyny(blad: unknown): string {
 }
 
 /**
- * Druga warstwa K20: wycina z gotowego tekstu każdą wartość nagłówka, która wygląda na
+ * Druga warstwa filtra: wycina z gotowego tekstu każdą wartość nagłówka, która wygląda na
  * sekret (od 6 znaków wzwyż — krótsze to `no-cache` czy `gzip`, nie klucze).
  *
  * Podmiana idzie funkcją, a nie łańcuchem: zamiennik z `$` bywa w JS traktowany jak

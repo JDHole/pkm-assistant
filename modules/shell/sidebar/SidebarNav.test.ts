@@ -1,17 +1,17 @@
 /**
- * SidebarNav — strażnik AUD-bledy-045.
+ * SidebarNav - strażnik demontażu nawigacji.
  *
  * Widoki sidebara wieszają swoje sprzątanie na `nav._currentCleanup` (Komunikator:
- * odsubskrybowanie `agentManager.on(...)` + `clearTimeout` budzika renderu). Do naprawy
- * ten uchwyt wołał WYŁĄCZNIE `_render()` przy przejściu na inny widok — zamknięcie panelu
- * (`AgentSidebar.onClose`) zostawiało nasłuch na zawsze, a przy ponownym otwarciu powstawał
- * NOWY `SidebarNav`. Po pięciu cyklach otwórz/zamknij każda wiadomość mieliła listing
+ * odsubskrybowanie `agentManager.on(...)` + `clearTimeout` budzika renderu). Gdyby ten uchwyt
+ * był wołany WYŁĄCZNIE przez `_render()` przy przejściu na inny widok, zamknięcie panelu
+ * (`AgentSidebar.onClose`) zostawiałoby nasłuch na zawsze, a przy ponownym otwarciu powstawałby
+ * NOWY `SidebarNav`. Po pięciu cyklach otwórz/zamknij każda wiadomość mieliłaby listing
  * skrzynek pięć razy, na odpiętym DOM-ie.
  */
 import test from 'ava';
 import { SidebarNav } from './SidebarNav.js';
 
-/** Atrapa kontenera — `dispose()` nie renderuje, więc wystarczy pusty obiekt. */
+/** Atrapa kontenera - `dispose()` nie renderuje, więc wystarczy pusty obiekt. */
 const fakeContainer = () => ({ empty() { }, addClass() { } });
 
 /** Atrapa DOM-u wystarczająca do przejechania `_render()` (createDiv/createEl/scrollTop). */
@@ -36,8 +36,8 @@ function makeFakeEl(): FakeEl {
         empty() { el.children = []; },
         createDiv(opts) { const d = makeFakeEl(); d.cls = opts?.cls; el.children.push(d); return d; },
         createEl(tag, opts) { const e = makeFakeEl(); e.tag = tag; e.cls = opts?.cls; e.text = opts?.text; el.children.push(e); return e; },
-        addEventListener() { /* noop — testy nie klikają wstecz */ },
-        // `push()` szuka `.sidebar-view-content` żeby zapamiętać scroll — atrapa nie ma czego zwrócić.
+        addEventListener() { /* noop - testy nie klikają wstecz */ },
+        // `push()` szuka `.sidebar-view-content` żeby zapamiętać scroll - atrapa nie ma czego zwrócić.
         querySelector() { return null; },
     };
     return el;
@@ -80,11 +80,11 @@ test('dispose() nie przewraca demontażu, gdy sprzątanie widoku rzuci', t => {
 });
 
 /**
- * AUD-code-review-042 — `_rendering` stała przy `true` na zawsze, jeśli renderer widoku albo
- * `_currentCleanup` rzucał wyjątek (flaga była zdejmowana tylko w ostatniej linii `_render()`,
- * poza jakimkolwiek try/catch). Wszystkie wejścia nawigacji (`push`/`pop`/`replace`/`goHome`/
+ * Strażnik pilnuje, żeby `_rendering` NIE została przy `true` na zawsze, jeśli renderer widoku
+ * albo `_currentCleanup` rzuci wyjątek (flaga musi być zdejmowana w try/finally, nie tylko
+ * w ostatniej linii `_render()`). Wszystkie wejścia nawigacji (`push`/`pop`/`replace`/`goHome`/
  * `refresh`) zaczynają się od `if (this._rendering) return;`, więc jeden wywrócony render
- * zamrażał cały panel do zamknięcia i ponownego otwarcia sidebara.
+ * zamroziłby cały panel do zamknięcia i ponownego otwarcia sidebara.
  */
 test('_render() zdejmuje _rendering mimo wyjątku w renderFn — nawigacja nie zamraża się', t => {
     const container = makeFakeEl();

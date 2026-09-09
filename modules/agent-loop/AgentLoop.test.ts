@@ -31,7 +31,7 @@ function makeModel(scenario: ModelResponse[] | ((payload: Payload, i: number) =>
                 error(e);
                 return;
             }
-            if (resp && resp.__stall) return; // nigdy nie woła done() — test timeoutu
+            if (resp && resp.__stall) return; // nigdy nie woła done() - test timeoutu
             Promise.resolve().then(() => done(resp));
         }
     };
@@ -57,7 +57,7 @@ function assistantToolCall(
 
 const toolDef = (name: string) => ({ type: 'function', function: { name, description: '', parameters: {} } });
 
-/** Widok wpisu `assistant.tool_calls[]` w kształcie OpenAI — store trzyma je jako `unknown[]`. */
+/** Widok wpisu `assistant.tool_calls[]` w kształcie OpenAI - store trzyma je jako `unknown[]`. */
 type StoredToolCall = { id?: string; function?: { name?: string; arguments?: string } };
 /** Skrót do asercji „ten wpis na pewno jest" (indeks/`find` w strict zwraca `| undefined`). */
 type Msg = LoopMessage;
@@ -123,7 +123,7 @@ test('2 iteracje z tool calls → natural end; wyniki w store w kolejności; exe
 
     const asstToolMsgs = store.messages.filter((m) => m.role === 'assistant' && m.tool_calls);
     t.is(asstToolMsgs.length, 2);
-    // `tool_calls` w store jest `unknown[]` (dostawcy różnią się kształtem) — w tym teście wiemy,
+    // `tool_calls` w store jest `unknown[]` (dostawcy różnią się kształtem) - w tym teście wiemy,
     // że pętla zapisała kanoniczny kształt OpenAI, więc patrzymy przez `StoredToolCall`.
     const firstCall = (asstToolMsgs[0] as Msg).tool_calls?.[0] as StoredToolCall;
     t.is(firstCall.function?.name, 'vault_read');
@@ -140,7 +140,7 @@ test('maxIterations wyczerpane → backstop: ostatnie wywołanie BEZ tools, stop
             if (payload.tools) {
                 Promise.resolve().then(() => done(assistantToolCall('loop_tool', {}, `call_${callCount}`)));
             } else {
-                // backstop: model halucynuje tag <function_calls> — musi zostać wyczyszczony
+                // backstop: model halucynuje tag <function_calls> - musi zostać wyczyszczony
                 Promise.resolve().then(() => done(assistantText('FINAL <function_calls>garbage</function_calls> clean')));
             }
         }
@@ -167,11 +167,10 @@ test('maxIterations wyczerpane → backstop: ostatnie wywołanie BEZ tools, stop
 });
 
 /**
- * AUD-code-review-080 — gałąź `invoke` w `_stripHallucinatedToolTags` była testowana ZERO razy
- * (test wyżej dotyka wyłącznie `function_calls`). Regex miał otwarcie bez przestrzeni nazw
- * (`<invoke`) i zamknięcie NA SZTYWNO z przestrzenią (`</invoke>`) — żaden realny wariant
- * halucynacji (model albo emituje OBA tagi bez namespace'u, albo OBA z nim) nie dopasowywał
- * się do całości wzorca, więc funkcja nigdy nie czyściła tego bloku i user dostawał surowy XML.
+ * Gałąź `invoke` w `_stripHallucinatedToolTags` (test wyżej dotyka wyłącznie `function_calls`).
+ * Regex musi dopasowywać otwarcie i zamknięcie w tym samym wariancie przestrzeni nazw - model
+ * emituje ALBO oba tagi bez namespace'u, ALBO oba z nim, nigdy mieszankę. Częściowe dopasowanie
+ * (np. otwarcie bez namespace'u, zamknięcie na sztywno z nim) zostawia surowy XML w odpowiedzi.
  */
 test('backstop: halucynowany <invoke>...</invoke> BEZ przestrzeni nazw jest wyczyszczony', async (t) => {
     let callCount = 0;
@@ -200,9 +199,9 @@ test('backstop: halucynowany <invoke>...</invoke> BEZ przestrzeni nazw jest wycz
 });
 
 test('backstop: halucynowany <invoke> Z PRZESTRZENIĄ NAZW na obu tagach jest wyczyszczony', async (t) => {
-    // Namespace budowany przez konkatenację (nie jako literał ciągły w źródle) — to WŁAŚNIE
-    // ten kształt taga (otwarcie i zamknięcie oba z prefiksem) nie dopasowywał się do
-    // starego regexa, bo miał zaszyty na sztywno WYŁĄCZNIE w zamknięciu.
+    // Namespace budowany przez konkatenację (nie jako literał ciągły w źródle) - to WŁAŚNIE
+    // ten kształt taga (otwarcie i zamknięcie oba z prefiksem) regex musi dopasować; nie
+    // wystarczy wariant z prefiksem zaszytym na sztywno wyłącznie w zamknięciu.
     const ns = 'ant' + 'ml:';
     const hallucinated = `FINAL <${ns}invoke name="loop_tool">garbage</${ns}invoke> clean`;
     let callCount = 0;
@@ -298,12 +297,12 @@ test('orphan guard PO egzekucji: wywołanie bez id wykonane, ale wynik osierocon
     t.false(store.messages.some((m) => m.role === 'tool'));
 });
 
-test('apiToolCalls (AgentLoop.ts:555): wpis z id ale BEZ obu nazw jest odsiany; wpis z SAMĄ function.name zostaje (AUD-testy-054)', async (t) => {
+test('apiToolCalls (AgentLoop.ts:555): wpis z id ale BEZ obu nazw jest odsiany; wpis z SAMĄ function.name zostaje', async (t) => {
     // Filtr rekonstrukcji `tc.id && (tc.name || tc.function?.name)` ma DWIE strony AND.
     // „orphan guard PO egzekucji" wyżej pokrywa TYLKO stronę „id brak" (name jest, obecny
     // w root tool_calls). Ten test pokrywa stronę przeciwną: id JEST, a name brakuje w OBU
-    // miejscach (`tc.name` i `tc.function?.name`) → odrzucone; oraz — żeby dowieść, że OR po
-    // prawej stronie realnie coś robi, nie tylko zawsze `false` — wpis z name TYLKO w
+    // miejscach (`tc.name` i `tc.function?.name`) → odrzucone; oraz - żeby dowieść, że OR po
+    // prawej stronie realnie coś robi, nie tylko zawsze `false` - wpis z name TYLKO w
     // `tc.function.name` (kształt niespłaszczony, jak z hooka `onToolCallsParsed`, bo
     // `parseToolCalls` ZAWSZE spłaszcza do top-level `name`) → PRZYJĘTY.
     const model = makeModel([
@@ -320,7 +319,7 @@ test('apiToolCalls (AgentLoop.ts:555): wpis z id ale BEZ obu nazw jest odsiany; 
         executeToolCall: async () => { execCount++; return 'r'; },
         limits: { maxIterations: 5 },
         hooks: {
-            // Dokładamy DRUGIE wywołanie w kształcie niespłaszczonym — jedyna realna droga,
+            // Dokładamy DRUGIE wywołanie w kształcie niespłaszczonym - jedyna realna droga,
             // którą taki kształt dociera do filtra na linii 555 (parser go nigdy nie produkuje).
             onToolCallsParsed: (calls) => [
                 ...calls,
@@ -389,7 +388,7 @@ test('shouldAbort po powrocie modelu → stop przed egzekucją narzędzi', async
 test('perCallTimeoutMs → timeout error obsłużony (propaguje)', async (t) => {
     const model = {
         calls: [] as Payload[],
-        stream(payload: Payload) { this.calls.push(payload); /* stall — nigdy done() */ }
+        stream(payload: Payload) { this.calls.push(payload); /* stall - nigdy done() */ }
     };
     const store = new ArrayMessageStore([{ role: 'user', content: 'go' }]);
 
@@ -405,14 +404,13 @@ test('perCallTimeoutMs → timeout error obsłużony (propaguje)', async (t) => 
     );
 });
 
-// Fix 2026-08-11 (Zwis subagentow, lokalny most, 2026): timeout ubija request (stopStream → xhr.abort),
-// nie tylko porzuca promisa — inaczej lokalny most mieli zombie-joby dalej
-// i zapycha kolejkę dla wszystkich następnych wywołań.
+// Timeout musi ubijać request (stopStream → xhr.abort), nie tylko porzucać promisę - inaczej
+// lokalny most mieli zombie-joby dalej i zapycha kolejkę dla wszystkich następnych wywołań.
 test('perCallTimeoutMs → stopStream wołany przy timeout (zombie-request ubity)', async (t) => {
     let stopped = 0;
     const model = {
         calls: [] as Payload[],
-        stream(payload: Payload) { this.calls.push(payload); /* stall — nigdy done() */ },
+        stream(payload: Payload) { this.calls.push(payload); /* stall - nigdy done() */ },
         stopStream() { stopped++; }
     };
     const store = new ArrayMessageStore([{ role: 'user', content: 'go' }]);
@@ -435,16 +433,16 @@ test('perCallTimeoutMs → stopStream wołany przy timeout (zombie-request ubity
     t.true(traced.includes('loop.end')); // pętla domyka ślad także przy błędzie
 });
 
-// Zwis delegacji 2026-08-14: budzik per-call liczony od WYSŁANIA requestu karał suby za
-// czekanie w kolejce bramki platform lokalnych (limit 1) — kolejka rosła ponad budżet
-// i taski umierały seryjnie. Model sygnalizuje gate_admitted przy wejściu na slot,
-// pętla przezbraja budzik: faza kolejki i faza streamu dostają PO pełnym budżecie.
+// Budzik per-call liczony od wysłania requestu karałby suby za czekanie w kolejce bramki
+// platform lokalnych (limit 1) - kolejka rosłaby ponad budżet, taski umierałyby seryjnie.
+// Model sygnalizuje gate_admitted przy wejściu na slot, pętla przezbraja budzik: faza
+// kolejki i faza streamu dostają PO pełnym budżecie.
 test('perCallTimeoutMs → gate_admitted przezbraja budzik: kolejka+stream > budżet, sam stream < budżet — bez timeoutu', async (t) => {
     const model = {
         calls: [] as Payload[],
         stream(payload: Payload, handlers: StreamHandlers & { gate_admitted?: () => void }) {
             this.calls.push(payload);
-            // 100ms "w kolejce bramki", admit, 100ms "streamu" — łącznie 200ms > 150ms budżetu,
+            // 100ms "w kolejce bramki", admit, 100ms "streamu" - łącznie 200ms > 150ms budżetu,
             // ale żadna faza z osobna budżetu nie przekracza.
             setTimeout(() => {
                 handlers.gate_admitted?.();
@@ -489,7 +487,7 @@ test('perCallTimeoutMs → spóźniony gate_admitted po rozstrzygnięciu NIE uzb
     });
     t.is(res.finalText, 'ok');
 
-    // Spóźniony sygnał bramki (np. cooldown/wyścig) — martwy budzik nie może odpalić
+    // Spóźniony sygnał bramki (np. cooldown/wyścig) - martwy budzik nie może odpalić
     // stopStream, bo ubiłby CUDZY, kolejny request na tym samym modelu.
     admittedCb!();
     await new Promise((r) => setTimeout(r, 60));
@@ -547,7 +545,7 @@ test('maxToolResultLength obcina wynik narzędzia', async (t) => {
     });
 
     const toolMsg = store.messages.find((m) => m.role === 'tool') as Msg;
-    // Ten scenariusz zwraca string (obcinanie dotyczy tylko tekstu) — `content` jest szerszy.
+    // Ten scenariusz zwraca string (obcinanie dotyczy tylko tekstu) - `content` jest szerszy.
     const toolContent = toolMsg.content as string;
     t.true(toolContent.length < 500);
     t.true(toolContent.startsWith('A'.repeat(100)));
@@ -598,7 +596,7 @@ test('resolveTools wołane na start KAŻDEJ iteracji (świeża whitelista)', asy
 });
 
 test('sanitizeToolTranscript: osierocony tool message usunięty przed wysyłką do modelu', async (t) => {
-    // Port scenariusza ze streamHelper.test.js (streamToCompleteWithTools) — pętla sanityzuje
+    // Port scenariusza ze streamHelper.test.js (streamToCompleteWithTools) - pętla sanityzuje
     // transkrypt przed KAŻDYM wywołaniem modelu, więc osierocony tool message nie leci do API.
     let capturedPayload: Payload | null = null;
     const model = {
@@ -671,7 +669,7 @@ test('wynik narzędzia jako tablica (multimodal) trafia do store BEZ stringifika
         store,
         resolveTools: () => [toolDef('generate_image')],
         executeToolCall: async () => multimodal,
-        // niski limit obcinania — tablica ma go zignorować (obcinamy tylko tekst)
+        // niski limit obcinania - tablica ma go zignorować (obcinamy tylko tekst)
         limits: { maxIterations: 5, maxToolResultLength: 5 }
     });
 
@@ -681,7 +679,7 @@ test('wynik narzędzia jako tablica (multimodal) trafia do store BEZ stringifika
     t.is(toolMsg.tool_call_id, 'c1');
 });
 
-// ─── Trace (E2.2) ───
+// ─── Trace ───
 
 test('trace: 1 narzędzie → sekwencja loop.start, model.done, tool.pre, tool.post, model.done, loop.end (natural)', async (t) => {
     const traced: TraceEvent[] = [];
@@ -832,14 +830,14 @@ test('reasoning_content przekazany do store', async (t) => {
     t.is(asst.reasoning_content, 'because');
 });
 
-// ─── Audyt nocny 2026-08-15, moduł 19 (iteracje subagentów) — ZAMKNIĘTY w F5 ───
+// ─── Backstop: trace rozróżnia wynik od zaślepki ───
 // Backstop ma DWA różne zejścia: finalny strzał się udał (model oddał podsumowanie)
 // albo padł (timeout / błąd modelu) i pętla oddaje 36-znakową zaślepkę
-// `agentLoop.backstop_fallback`. Do F5 dla czytelnika trace oba wyglądały IDENTYCZNIE
-// (`loop.end stop=backstop`), więc metryki zamówione przez Kubę w module 19 —
-// „ile backstopów oddaje zaślepkę zamiast wyniku" — nie dało się policzyć z trace.
-// F5 dokłada w takim wypadku pole `fallback=1` (tylko przy zaślepce).
-test('audyt 19: trace odróżnia backstop z wynikiem od backstopu z zaślepką', async (t) => {
+// `agentLoop.backstop_fallback`. Dla czytelnika trace oba wyglądają IDENTYCZNIE
+// (`loop.end stop=backstop`), więc bez dodatkowego pola nie da się policzyć z trace,
+// ile backstopów oddaje zaślepkę zamiast wyniku. Pole `fallback=1` odróżnia je
+// (obecne tylko przy zaślepce).
+test('trace odróżnia backstop z wynikiem od backstopu z zaślepką', async (t) => {
     const runUntilBackstop = async (finalCallFails: boolean) => {
         const traced: TraceEvent[] = [];
         const model = {
@@ -862,7 +860,7 @@ test('audyt 19: trace odróżnia backstop z wynikiem od backstopu z zaślepką',
             trace: (type: string, fields: Record<string, unknown>) => traced.push({ type, fields })
         });
         const end = traced.find((e) => e.type === 'loop.end') as TraceEvent;
-        // total_ms jest z natury różne — porównujemy ślad bez niego.
+        // total_ms jest z natury różne - porównujemy ślad bez niego.
         const { total_ms: _drop, ...stable } = end.fields;
         return { stable, finalText: res.finalText, stoppedBy: res.stoppedBy };
     };
@@ -879,21 +877,21 @@ test('audyt 19: trace odróżnia backstop z wynikiem od backstopu z zaślepką',
     // Sedno pinu: ślad w trace MUSI je rozróżniać.
     t.notDeepEqual(failed.stable, ok.stable,
         'loop.end dla backstopu z zaślepką jest nie do odróżnienia od backstopu z wynikiem');
-    // I konkretnie: zaślepka niesie `fallback=1`, udany backstop NIE ma tego pola w ogóle
-    // (linia „udanego" backstopu zostaje bit w bit taka jak przed F5).
+    // I konkretnie: zaślepka niesie `fallback=1`, udany backstop NIE ma tego pola w ogóle.
     t.deepEqual(failed.stable, { stop: 'backstop', iters: 1, fallback: 1 });
     t.deepEqual(ok.stable, { stop: 'backstop', iters: 1 });
 });
 
-// ─── Front A (2026-08-17): watchdog ciszy + ratowanie dorobku ───
+// ─── Watchdog ciszy + ratowanie dorobku ───
 
-// Śledztwo 2026-08-17: zegar ścienny ubijał suby piszące finalną syntezę na wolnym moście.
-// Watchdog ciszy strzela wyłącznie po PEŁNEJ ciszy modelu — chunk streamu przezbraja budzik.
-test('Front A: watchdog ciszy — pełna cisza ubija wywołanie (stopStream + trace model.stall)', async (t) => {
+// Zegar ścienny ubijałby suby piszące finalną syntezę na wolnym moście, gdyby liczył od
+// startu wywołania. Watchdog ciszy strzela wyłącznie po PEŁNEJ ciszy modelu - chunk streamu
+// przezbraja budzik.
+test('watchdog ciszy — pełna cisza ubija wywołanie (stopStream + trace model.stall)', async (t) => {
     let stopped = 0;
     const model = {
         calls: [] as Payload[],
-        stream(payload: Payload) { this.calls.push(payload); /* cisza — zero chunków, zero done */ },
+        stream(payload: Payload) { this.calls.push(payload); /* cisza - zero chunków, zero done */ },
         stopStream() { stopped++; }
     };
     const store = new ArrayMessageStore([{ role: 'user', content: 'hi' }]);
@@ -914,12 +912,12 @@ test('Front A: watchdog ciszy — pełna cisza ubija wywołanie (stopStream + tr
     t.true(traced.includes('loop.end')); // pętla domyka ślad także przy błędzie
 });
 
-test('Front A: watchdog ciszy — chunki przezbrajają budzik (wolny, ale żywy stream przeżywa)', async (t) => {
+test('watchdog ciszy — chunki przezbrajają budzik (wolny, ale żywy stream przeżywa)', async (t) => {
     const model = {
         calls: [] as Payload[],
         stream(payload: Payload, { chunk, done }: StreamHandlers) {
             this.calls.push(payload);
-            // 6 chunków co 20 ms (~120 ms łącznie) przy watchdogu 50 ms — każdy chunk
+            // 6 chunków co 20 ms (~120 ms łącznie) przy watchdogu 50 ms - każdy chunk
             // zeruje licznik ciszy, więc bieg NIE MA PRAWA zostać ubity.
             let n = 0;
             const iv = setInterval(() => {
@@ -944,8 +942,8 @@ test('Front A: watchdog ciszy — chunki przezbrajają budzik (wolny, ale żywy 
     t.is(res.stoppedBy, 'natural');
 });
 
-test('Front A: stallTimeoutMs=0 (wyłączony) — cichy model NIE jest ubijany przez watchdog', async (t) => {
-    // Kontrola negatywna: bez watchdoga cichy stream wisi — pilnuje go per-call timeout.
+test('stallTimeoutMs=0 (wyłączony) — cichy model NIE jest ubijany przez watchdog', async (t) => {
+    // Kontrola negatywna: bez watchdoga cichy stream wisi - pilnuje go per-call timeout.
     const model = {
         calls: [] as Payload[],
         stream(payload: Payload) { this.calls.push(payload); /* cisza */ }
@@ -964,7 +962,7 @@ test('Front A: stallTimeoutMs=0 (wyłączony) — cichy model NIE jest ubijany p
     t.pass();
 });
 
-test('Front A: salvage — zaślepka backstopu niesie skrót dorobku narzędzi (pusty finalny tekst)', async (t) => {
+test('salvage — zaślepka backstopu niesie skrót dorobku narzędzi (pusty finalny tekst)', async (t) => {
     const model = makeModel([
         assistantToolCall('search', { query: 'smoke tandemowy' }, 'c1'),
         assistantText('') // backstop: model nie oddał syntezy
@@ -985,7 +983,7 @@ test('Front A: salvage — zaślepka backstopu niesie skrót dorobku narzędzi (
     t.true(res.finalText.includes('WYNIK: 26 notatek o smoke testach'));
 });
 
-test('Front A: salvage — backstop PADŁ (błąd modelu) → catch też oddaje skrót dorobku', async (t) => {
+test('salvage — backstop PADŁ (błąd modelu) → catch też oddaje skrót dorobku', async (t) => {
     const model = makeModel((_payload: Payload, i: number) => {
         if (i === 0) return assistantToolCall('read', { path: 'a.md' }, 'c1');
         throw new Error('most zwisł'); // finalny strzał backstopu pada
@@ -1002,7 +1000,7 @@ test('Front A: salvage — backstop PADŁ (błąd modelu) → catch też oddaje 
     t.true(res.finalText.includes('TREŚĆ NOTATKI A'), res.finalText);
 });
 
-test('Front A: salvage wyłączony (0/brak) — zaślepka zostaje gołą zaślepką jak przed zmianą', async (t) => {
+test('salvage wyłączony (0/brak) — zaślepka zostaje gołą zaślepką', async (t) => {
     const model = makeModel([
         assistantToolCall('search', { query: 'x' }, 'c1'),
         assistantText('')
@@ -1019,9 +1017,9 @@ test('Front A: salvage wyłączony (0/brak) — zaślepka zostaje gołą zaślep
     t.false(res.finalText.includes('ten wynik ma zostać wyrzucony'));
 });
 
-// ─── Runda 2 (2026-08-17): per-tool sufit wyniku narzędzia ───
+// ─── Per-tool sufit wyniku narzędzia ───
 
-test('runda 2: maxToolResultLengthPerTool — delegate dostaje większy sufit, reszta wspólny', async (t) => {
+test('maxToolResultLengthPerTool — delegate dostaje większy sufit, reszta wspólny', async (t) => {
     const model = makeModel([
         assistantToolCall('delegate', { task: 'x' }, 'c1'),
         assistantToolCall('search', { query: 'y' }, 'c2'),
@@ -1038,7 +1036,7 @@ test('runda 2: maxToolResultLengthPerTool — delegate dostaje większy sufit, r
     });
     t.is(res.stoppedBy, 'natural');
     const toolMsgs = store.messages.filter((m) => m.role === 'tool');
-    // delegate: 0 = bez limitu — pełne 500 znaków; search: wspólny sufit 100 + nota o przycięciu.
+    // delegate: 0 = bez limitu - pełne 500 znaków; search: wspólny sufit 100 + nota o przycięciu.
     t.is(toolMsgs[0].content, bigResult);
     t.true(String(toolMsgs[1].content).startsWith('D'.repeat(100)));
     t.true(String(toolMsgs[1].content).length < 500);

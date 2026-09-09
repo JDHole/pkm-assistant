@@ -1,8 +1,8 @@
 /**
- * S35 „Wielki Rename" — migrator namespace ustawień: `obsek` → `pkmAssistant`.
+ * Migrator namespace ustawień: `obsek` → `pkmAssistant`.
  *
  * Czysta funkcja, ZERO I/O i zero importów Obsidiana. To jest gwarancja żelaznej
- * zasady z incydentu 2026-07-28: **load niczego nie zapisuje**. Migrator przestawia
+ * zasady: **load niczego nie zapisuje**. Migrator przestawia
  * kształt obiektu wyłącznie W PAMIĘCI; na dysk nowy kształt trafia dopiero przy
  * pierwszym NORMALNYM zapisie ustawień (SettingsManager.save → PKMEnv.save_settings).
  *

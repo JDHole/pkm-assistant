@@ -1,12 +1,10 @@
 /**
- * OpenSessionModal — Sprint 03 Z16.
- *
- * User otwiera starą sesję — 3 opcje (Wizja Memory v2 Blok 1):
- *   - 'continue' — load pełną sesję (jak pre-Z16)
+ * OpenSessionModal — user otwiera starą sesję, wybiera jedną z 3 opcji:
+ *   - 'continue' — load pełną sesję
  *   - 'compress' — załaduj L1 summary który includes tę sesję (mniej tokenów)
  *   - 'fresh'    — nowa sesja z perspektywy agenta (brain + ostatnie 3 L1)
  *
- * Default focus: 'compress' (decyzja Kuby pre-flight — najczęściej best UX).
+ * Default focus: 'compress' — najczęściej best UX.
  */
 import { Modal } from 'obsidian';
 import type { App } from 'obsidian';
@@ -121,7 +119,7 @@ export class OpenSessionModal extends Modal {
         setSvgLabel(cancelBtn, UiIcons.cross(10), t('generic.cancel'));
         cancelBtn.addEventListener('click', () => this._resolveWith('cancel'));
 
-        // Default focus → compress (Sprint Notka)
+        // Default focus → compress
         window.setTimeout(() => compressBtn.focus(), 0);
     }
 

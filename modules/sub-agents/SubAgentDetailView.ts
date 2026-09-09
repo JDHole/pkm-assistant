@@ -1,5 +1,5 @@
 /**
- * Sub-Agent detail view in the Backstage sidebar (Sprint 10 Z6: extracted
+ * Sub-Agent detail view in the Backstage sidebar (extracted
  * from modules/shell/sidebar/DetailViews.js).
  */
 import { MarkdownRenderer } from 'obsidian';
@@ -14,9 +14,9 @@ type UiBoundary = any;
 /**
  * Render detailed view of a single sub-agent.
  *
- * S27 Z3: ten sam widok obsługuje SZABLON (`params.template === true` → źródłem jest
+ * Ten sam widok obsługuje SZABLON (`params.template === true` → źródłem jest
  * `subAgentTemplateStore`) i żywego suba. Szablon nie ma sekcji „agenci" — nie jest
- * używany, jest kopiowany (D3).
+ * używany, jest kopiowany.
  *
  * @param {HTMLElement} container
  * @param {Object} plugin
@@ -59,7 +59,7 @@ export function renderSubAgentDetailView(container: UiBoundary, plugin: UiBounda
         kindRow.createSpan({ cls: 'sidebar-detail-label', text: t('detail.kind') });
         kindRow.createSpan({ cls: 'sidebar-category-badge', text: `${t('detail.kind_template')} · v${subAgent.version || 1}` });
     } else if (subAgent.from_template) {
-        // S27 Z6: ślad pochodzenia kopii („z szablonu: X vN").
+        // Ślad pochodzenia kopii („z szablonu: X vN").
         const originRow = meta.createDiv({ cls: 'sidebar-detail-row' });
         originRow.createSpan({ cls: 'sidebar-detail-label', text: t('detail.from_template') });
         originRow.createSpan({ cls: 'sidebar-detail-value', text: subAgent.from_template });
@@ -77,8 +77,8 @@ export function renderSubAgentDetailView(container: UiBoundary, plugin: UiBounda
 
     const iterRow = meta.createDiv({ cls: 'sidebar-detail-row' });
     iterRow.createSpan({ cls: 'sidebar-detail-label', text: t('detail.max_iterations') });
-    // AUD-code-review-056: fallback = kanoniczny default z config/limits.ts, nie zwietrzała
-    // liczba sprzed F4/rundy 2 — szablon bez jawnego max_iterations dostaje realnie 25, nie 8.
+    // Fallback = kanoniczny default z config/limits.ts, nie zwietrzały hardcoded literał —
+    // szablon bez jawnego max_iterations dostaje realnie 25, nie 8.
     iterRow.createSpan({ cls: 'sidebar-detail-value', text: String(subAgent.max_iterations || DEFAULT_LIMITS.subagent_max_iterations_worker) });
 
     if (subAgent.model) {
@@ -112,7 +112,7 @@ export function renderSubAgentDetailView(container: UiBoundary, plugin: UiBounda
         }
     }
 
-    // S27 D3: szablon nie jest „używany" — jest kopiowany. Sekcja tylko dla żywych subów.
+    // Szablon nie jest „używany" — jest kopiowany. Sekcja tylko dla żywych subów.
     const agents = isTemplate ? [] : (plugin.agentManager?.getAllAgents() || []);
     const usedBy = agents.filter((a: UiBoundary) =>
         a.getAllSubAgentNames?.().includes(subAgent.name)

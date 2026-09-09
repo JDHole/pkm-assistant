@@ -242,7 +242,7 @@ test('dispose odpina konsumentów i czyści rejestr', t => {
     t.deepEqual(reg.list(), [], 'mapa wyczyszczona');
 });
 
-// --- F2: metadane pochodzenia + tła (rejestr ich NIE interpretuje) ---
+// --- metadane pochodzenia + tła (rejestr ich NIE interpretuje) ---
 
 test('create przechowuje background i origin 1:1', t => {
     const reg = new SubTaskRegistry();
@@ -255,7 +255,7 @@ test('create przechowuje background i origin 1:1', t => {
     t.is(reg.getTask('sub/klara-prep#z')?.origin?.tabKey, 'tab-3');
 });
 
-test('create bez nowych pól daje byt w kształcie sprzed F2 (brak kluczy, nie undefined)', t => {
+test('create bez nowych pól daje byt w kształcie bez nich (brak kluczy, nie undefined)', t => {
     const reg = new SubTaskRegistry();
 
     const task = newTask(reg, 'sub/pkm-sub#bez');
@@ -282,9 +282,9 @@ test('origin jest kopiowany — późniejsza mutacja źródła nie rusza bytu', 
     t.is(task.origin?.tabKey, 'tab-1');
 });
 
-// --- F3: side-channel abortów (attachAbort / requestStop) ---
+// --- side-channel abortów (attachAbort / requestStop) ---
 
-test('F3: requestStop woła podpięty uchwyt, znaczy byt i zostawia ślad', t => {
+test('requestStop woła podpięty uchwyt, znaczy byt i zostawia ślad', t => {
     const { traceLog, writes } = makeFakeTraceLog();
     const reg = new SubTaskRegistry({ traceLog });
     const task = newTask(reg);
@@ -303,7 +303,7 @@ test('F3: requestStop woła podpięty uchwyt, znaczy byt i zostawia ślad', t =>
     t.true(writes.some(w => w.type === 'stop.requested'), 'ślad poszedł też do trace');
 });
 
-test('F3: requestStop bez podpiętego uchwytu zwraca false i nic nie znaczy', t => {
+test('requestStop bez podpiętego uchwytu zwraca false i nic nie znaczy', t => {
     const reg = new SubTaskRegistry();
     const task = newTask(reg);
 
@@ -312,14 +312,14 @@ test('F3: requestStop bez podpiętego uchwytu zwraca false i nic nie znaczy', t 
     t.deepEqual(task.steps, [], 'brak śladu — nie było czego prosić');
 });
 
-test('F3: requestStop na nieznanym id zwraca false', t => {
+test('requestStop na nieznanym id zwraca false', t => {
     const reg = new SubTaskRegistry();
     reg.attachAbort('sub/pkm-sub#duch', () => { t.fail('uchwyt sieroty nie ma prawa się odpalić'); });
 
     t.false(reg.requestStop('sub/pkm-sub#duch'));
 });
 
-test('F3: bieg NIE running nie da się zatrzymać (status running jest wymagany)', t => {
+test('bieg NIE running nie da się zatrzymać (status running jest wymagany)', t => {
     const reg = new SubTaskRegistry();
     const task = newTask(reg);
     let wolania = 0;
@@ -330,7 +330,7 @@ test('F3: bieg NIE running nie da się zatrzymać (status running jest wymagany)
     t.is(wolania, 0);
 });
 
-test('F3: uchwyt jest kasowany po task:finished (żadnych wycieków domknięć)', t => {
+test('uchwyt jest kasowany po task:finished (żadnych wycieków domknięć)', t => {
     const reg = new SubTaskRegistry();
     const task = newTask(reg);
     let wolania = 0;
@@ -344,7 +344,7 @@ test('F3: uchwyt jest kasowany po task:finished (żadnych wycieków domknięć)'
     t.is(wolania, 0);
 });
 
-test('F3: rzucający uchwyt nie wywala requestStop (prośba i tak jest zapisana)', t => {
+test('rzucający uchwyt nie wywala requestStop (prośba i tak jest zapisana)', t => {
     const reg = new SubTaskRegistry();
     const task = newTask(reg);
     reg.attachAbort(task.id, () => { throw new Error('stop padł'); });
@@ -353,7 +353,7 @@ test('F3: rzucający uchwyt nie wywala requestStop (prośba i tak jest zapisana)
     t.true(task.stopRequested);
 });
 
-test('F3: attachAbort ignoruje śmieci zamiast rzucać', t => {
+test('attachAbort ignoruje śmieci zamiast rzucać', t => {
     const reg = new SubTaskRegistry();
     const task = newTask(reg);
 
@@ -362,7 +362,7 @@ test('F3: attachAbort ignoruje śmieci zamiast rzucać', t => {
     t.false(reg.requestStop(task.id), 'nic sensownego nie zostało podpięte');
 });
 
-test('F3: dispose puszcza uchwyty abortu', t => {
+test('dispose puszcza uchwyty abortu', t => {
     const reg = new SubTaskRegistry();
     const task = newTask(reg);
     reg.attachAbort(task.id, () => { t.fail('po dispose nie ma czego wołać'); });
@@ -372,7 +372,7 @@ test('F3: dispose puszcza uchwyty abortu', t => {
     t.false(reg.requestStop(task.id));
 });
 
-// ─── Z7 (AUD-bledy-054/056): demontaż najpierw ZATRZYMUJE, potem odpina ───────
+// ─── demontaż najpierw ZATRZYMUJE, potem odpina ───────
 
 test('Z7: stopAll woła uchwyt KAŻDEGO żywego biegu, a rzucający uchwyt nie blokuje reszty', t => {
     const { traceLog, writes } = makeFakeTraceLog();
@@ -440,9 +440,9 @@ test('Z7: stopAll na pustym rejestrze zwraca 0 i nie rzuca', t => {
     t.is(reg.stopAll('unload'), 0, 'po dispose też nie ma czego wołać');
 });
 
-// ─── F5: wiadomość do biegu w trakcie (side-channel sterowania) ───────────────
+// ─── wiadomość do biegu w trakcie (side-channel sterowania) ───────────────
 
-test('F5: postMessage wrzuca wiadomość do biegu running, takeMessages ją ZDEJMUJE', t => {
+test('postMessage wrzuca wiadomość do biegu running, takeMessages ją ZDEJMUJE', t => {
     const reg = new SubTaskRegistry();
     const task = newTask(reg);
 
@@ -456,7 +456,7 @@ test('F5: postMessage wrzuca wiadomość do biegu running, takeMessages ją ZDEJ
     t.deepEqual(reg.takeMessages(task.id), [], 'kolejka opróżniona — drugi odbiór nic nie daje');
 });
 
-test('F5: postMessage zapisuje krok user.message z samą DŁUGOŚCIĄ (treść jest w transkrypcie)', t => {
+test('postMessage zapisuje krok user.message z samą DŁUGOŚCIĄ (treść jest w transkrypcie)', t => {
     const reg = new SubTaskRegistry();
     const kroki: SubTaskStep[] = [];
     reg.events.on('task:step', (p: unknown) => kroki.push((p as { step: SubTaskStep }).step));
@@ -469,7 +469,7 @@ test('F5: postMessage zapisuje krok user.message z samą DŁUGOŚCIĄ (treść j
     t.deepEqual(kroki[0].fields, { chars: 'zmień kierunek'.length });
 });
 
-test('F5: wiadomość do biegu ZAKOŃCZONEGO albo nieznanego = false', t => {
+test('wiadomość do biegu ZAKOŃCZONEGO albo nieznanego = false', t => {
     const reg = new SubTaskRegistry();
     const task = newTask(reg);
     reg.finish(task, { text: 'ok', toolsUsed: [], durationMs: 1, usage: null, stoppedBy: 'natural' });
@@ -479,7 +479,7 @@ test('F5: wiadomość do biegu ZAKOŃCZONEGO albo nieznanego = false', t => {
     t.deepEqual(reg.takeMessages(task.id), []);
 });
 
-test('F5: pusta/biała wiadomość odrzucona, kolejka ma sufit i odmawia zamiast gubić', t => {
+test('pusta/biała wiadomość odrzucona, kolejka ma sufit i odmawia zamiast gubić', t => {
     const reg = new SubTaskRegistry({ maxMessagesPerTask: 3 });
     const task = newTask(reg);
 
@@ -494,7 +494,7 @@ test('F5: pusta/biała wiadomość odrzucona, kolejka ma sufit i odmawia zamiast
     t.true(reg.postMessage(task.id, 'd'), 'po opróżnieniu kolejki znowu jest miejsce');
 });
 
-test('F5: treść wiadomości przechodzi przez maskę (user potrafi wkleić klucz)', t => {
+test('treść wiadomości przechodzi przez maskę (user potrafi wkleić klucz)', t => {
     const reg = new SubTaskRegistry({ mask: (v: string) => v.replace(/sk-\w+/g, 'sk-***') });
     const task = newTask(reg);
 
@@ -503,7 +503,7 @@ test('F5: treść wiadomości przechodzi przez maskę (user potrafi wkleić kluc
     t.deepEqual(reg.takeMessages(task.id), ['użyj klucza sk-***']);
 });
 
-test('F5: koniec biegu i dispose puszczają niedoręczone wiadomości', t => {
+test('koniec biegu i dispose puszczają niedoręczone wiadomości', t => {
     const reg = new SubTaskRegistry();
     const a = newTask(reg, 'sub/pkm-sub#1');
     reg.postMessage(a.id, 'wisi');

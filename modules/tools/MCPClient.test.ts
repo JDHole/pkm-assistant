@@ -12,7 +12,7 @@ interface SearchToolResult {
     count?: number;
 }
 
-// Atrapy sa celowo niepelne (test sprawdza JEDEN mechanizm) — stad rzutowania na kontrakty klienta.
+// Atrapy sa celowo niepelne (test sprawdza JEDEN mechanizm) - stad rzutowania na kontrakty klienta.
 const asApp = (app: unknown) => app as unknown as MCPClientApp;
 const asPlugin = (plugin: unknown) => plugin as unknown as MCPClientPlugin;
 const asRegistry = (registry: unknown) => registry as unknown as MCPToolRegistryLike;
@@ -69,7 +69,7 @@ test('normalizeArgsAliases: multiple aliases at once', t => {
     t.is(out.text, 'literal');
 });
 
-test('executeToolCall: maps smoke 05 built-in tools to known action types', async t => {
+test('executeToolCall: maps built-in tools to known action types', async t => {
     const expectedActions = {
         ask_user: 'vault.read',
         add_text_to_image: 'image.generate',
@@ -82,11 +82,11 @@ test('executeToolCall: maps smoke 05 built-in tools to known action types', asyn
         memory_grep: 'vault.read',
         memory_links: 'vault.read',
         memory_semantic: 'vault.read',
-        // S28 (D3): trzy prymitywy poczty zamiast 12 narzędzi Project Huba.
+        // Trzy prymitywy poczty zamiast 12 narzędzi Project Huba.
         kom_send: 'agent.message',
         kom_list: 'vault.read',
         kom_read: 'vault.read',
-        // E2.9 artefakty żywe — muszą mapować na znane akcje (inaczej checkPermission fail-close → DENY).
+        // Artefakty żywe - muszą mapować na znane akcje (inaczej checkPermission fail-close → DENY).
         artifact_create: 'artifact.create',
         artifact_read: 'artifact.read',
         artifact_update: 'artifact.update',
@@ -122,12 +122,12 @@ test('executeToolCall: maps smoke 05 built-in tools to known action types', asyn
     t.false(checkedActions.includes('unknown'));
 });
 
-// ─── E2.8 A7: przycinanie wyników search/list whitelistą agenta (MCPClient post-filter) ───
+// ─── Przycinanie wyników search/list whitelistą agenta (MCPClient post-filter) ───
 //
 // Kontrakt (MCPClient.js po wykonaniu narzędzia): dla `search`/`list` scope≠memory wyniki
 // są przycinane przez AccessGuard.filterResults do przypisanych folderów agenta (gdy tryb
 // twardy = guidance_mode OFF). scope=memory nie jest przycinane; guidance ON nie przycina.
-// To pierwszy test tego scenariusza (rekonesans #2: filtr żywy od E2.5/E2.6, brak testu).
+// To pierwszy test tego scenariusza.
 
 function _makeSearchClient(agent: PermissionedAgent, toolResult: SearchToolResult) {
     return new MCPClient(asApp(null), asPlugin({
@@ -140,7 +140,7 @@ function _makeSearchClient(agent: PermissionedAgent, toolResult: SearchToolResul
         getTool: (name: string) => ({
             name,
             description: name,
-            // Klon per wywołanie — post-filter mutuje wynik.
+            // Klon per wywołanie - post-filter mutuje wynik.
             execute: async () => JSON.parse(JSON.stringify(toolResult)),
         }),
     }));
@@ -180,7 +180,7 @@ test('executeToolCall: scope=memory search is NOT pruned by vault whitelist', as
     const client = _makeSearchClient(_hardAgent, { success: true, scope: 'memory', results: _mixedResults });
     const result = await client.executeToolCall({ name: 'search', arguments: { query: 'x', scope: 'memory' } }, 'ProjectAgent') as SearchToolResult;
     t.true(result.success);
-    t.is(result.results!.length, 3); // własna pamięć agenta — nie tnie się whitelistą vaulta
+    t.is(result.results!.length, 3); // własna pamięć agenta - nie tnie się whitelistą vaulta
 });
 
 test('executeToolCall: guidance ON (soft mode) does NOT prune search results', async t => {
@@ -195,8 +195,8 @@ test('executeToolCall: guidance ON (soft mode) does NOT prune search results', a
     t.is(result.results!.length, 3); // tryb miękki: foldery to wskazówka, wyniki nietknięte
 });
 
-// E2.1: parseToolCalls deleguje do kanonu (modules/agent-loop). Publiczne API bez zmian.
-test('parseToolCalls: deleguje do kanonu — choices shape zachowany', (t) => {
+// parseToolCalls deleguje do kanonu (modules/agent-loop). Publiczne API bez zmian.
+test('parseToolCalls: deleguje do kanonu - choices shape zachowany', (t) => {
     const registry = {
         getAllToolNames: () => ['vault_read'],
         getTool: (n: string) => (n === 'vault_read' ? { name: n } : null)
@@ -226,7 +226,7 @@ test('parseToolCalls: odskleja DeepSeek concat używając registry (getTool + ge
     t.is(calls[1].arguments, '{"b":2}');
 });
 
-// ─── E3.1 R4: external tool approval seam ───────────────────────────
+// ─── External tool approval seam ───────────────────────────
 // targetPath MUST stay empty (AccessGuard sees no pseudo-path) while a distinct
 // approvalTarget (prefixed tool name) drives the per-tool "always" rule.
 function makeClientWithExternal() {
@@ -239,7 +239,7 @@ function makeClientWithExternal() {
     return new MCPClient(asApp({}), asPlugin(plugin), asRegistry(toolRegistry));
 }
 
-test('R4: _extractToolContext external tool → empty targetPath (AccessGuard safe) + approvalTarget = prefixed name', t => {
+test('_extractToolContext external tool → empty targetPath (AccessGuard safe) + approvalTarget = prefixed name', t => {
     const client = makeClientWithExternal();
     const { targetPath, approvalContext } = client._extractToolContext('blender__execute_code', { code: 'x' }, 'Jaskier');
     t.is(targetPath, '', 'no pseudo-path reaches checkPermission/AccessGuard');
@@ -247,7 +247,7 @@ test('R4: _extractToolContext external tool → empty targetPath (AccessGuard sa
     t.is(approvalContext.externalServer, 'blender');
 });
 
-test('R4: non-external tools are unaffected (no approvalTarget injected)', t => {
+test('non-external tools are unaffected (no approvalTarget injected)', t => {
     const client = makeClientWithExternal();
     const { targetPath, approvalContext } = client._extractToolContext('web_search', { query: 'cats' }, 'Jaskier');
     t.is(targetPath, 'cats');
@@ -255,9 +255,9 @@ test('R4: non-external tools are unaffected (no approvalTarget injected)', t => 
     t.is(approvalContext.externalArgs, undefined, 'args preview is external-only');
 });
 
-// S33 Z3: modal approvalu dostaje PEŁNE argumenty wywołania (user widzi, co leci do cudzego
+// Modal approvalu dostaje PEŁNE argumenty wywołania (user widzi, co leci do cudzego
 // serwera), ale BEZ naszych znaczników wewnętrznych.
-test('S33 Z3: external tool approval context carries full call arguments', t => {
+test('external tool approval context carries full call arguments', t => {
     const client = makeClientWithExternal();
     const { approvalContext } = client._extractToolContext(
         'blender__execute_code',
@@ -265,11 +265,11 @@ test('S33 Z3: external tool approval context carries full call arguments', t => 
         'Jaskier'
     );
     t.deepEqual(approvalContext.externalArgs, { code: 'print(1)', scene: { name: 'main', frames: 24 } });
-    // approvalTarget/targetPath — mechanika „zawsze zezwalaj" NIETKNIĘTA.
+    // approvalTarget/targetPath - mechanika „zawsze zezwalaj" NIETKNIĘTA.
     t.is(approvalContext.approvalTarget, 'blender__execute_code');
 });
 
-test('S33 Z3: _invocation* markers never reach the approval args preview', t => {
+test('_invocation* markers never reach the approval args preview', t => {
     const client = makeClientWithExternal();
     const { approvalContext } = client._extractToolContext(
         'blender__execute_code',
@@ -281,7 +281,7 @@ test('S33 Z3: _invocation* markers never reach the approval args preview', t => 
     t.false('_invocationDelegationDepth' in (approvalContext.externalArgs as object));
 });
 
-// ─── F2 „delegacja w tle": przelot adresu zwrotnego (`opts.origin` → `_invocationOrigin`) ───
+// ─── „Delegacja w tle": przelot adresu zwrotnego (`opts.origin` → `_invocationOrigin`) ───
 //
 // Wzorzec ten sam co `_invocationAgentName`/`_invocationDelegationDepth`: klient NICZEGO
 // nie buduje, tylko wstrzykuje do args to, co dostał od wołacza. Brak opcji = pole USUWANE,
@@ -340,10 +340,10 @@ test('executeToolCall: origin bez agentName jest ignorowany (fail-closed)', asyn
     t.false('_invocationOrigin' in seen[0]);
 });
 
-// ─── K11 (AUD-security-008/072): zakres i whitelista WOŁAJĄCEGO jako zaufane znaczniki ───
+// ─── Zakres i whitelista WOŁAJĄCEGO jako zaufane znaczniki ───
 //
 // Wzorzec ten sam co `_invocationDelegationDepth`: wartość wstrzykuje runtime, a gdy jej nie ma,
-// pole jest USUWANE z argumentów — inaczej model podstawiłby sobie szerszy zakres z palca.
+// pole jest USUWANE z argumentów - inaczej model podstawiłby sobie szerszy zakres z palca.
 
 function _makeArgSpyClient(seen: ToolCallArgs[]) {
     const agent = { name: 'Tester', permissions: { guidance_mode: true } };
@@ -362,7 +362,7 @@ function _makeArgSpyClient(seen: ToolCallArgs[]) {
     }));
 }
 
-test('K11: scopeFolders + callerToolNames wstrzykiwane do args jako znaczniki _invocation*', async t => {
+test('scopeFolders + callerToolNames wstrzykiwane do args jako znaczniki _invocation*', async t => {
     const seen: ToolCallArgs[] = [];
     const client = _makeArgSpyClient(seen);
 
@@ -376,15 +376,15 @@ test('K11: scopeFolders + callerToolNames wstrzykiwane do args jako znaczniki _i
     t.deepEqual(seen[0]._invocationToolNames, ['read', 'delegate']);
 });
 
-// ─── K21 (AUD-security-103): BRAMKA ogląda worek PO nadpisaniu znaczników ────────────────
+// ─── BRAMKA ogląda worek PO nadpisaniu znaczników ────────────────
 //
-// `executeToolCall` budował `argsWithContext` (zaufane `_invocation*` od runtime'u), ale do
-// `_extractToolContext` podawał worek SPRZED nadpisania. Każdy `contextExtractor`, który czyta
-// stamtąd tożsamość — a robi to rodzina `artifact_*` — dostawał wartość wpisaną przez MODEL.
-// Bramka oceniała wtedy inny cel, niż ten, do którego pisało `execute` (dostające już worek
-// zaufany). Poprawka jest jednolinijkowa i obejmuje WSZYSTKIE narzędzia naraz.
+// `executeToolCall` buduje `argsWithContext` (zaufane `_invocation*` od runtime'u) i podaje
+// właśnie ten worek do `_extractToolContext`, nie surowy worek SPRZED nadpisania. Gdyby
+// `contextExtractor`, który czyta stamtąd tożsamość - a robi to rodzina `artifact_*` -
+// dostawał worek sprzed nadpisania, dostałby wartość wpisaną przez MODEL, a bramka oceniałaby
+// inny cel, niż ten, do którego pisze `execute` (dostające już worek zaufany).
 
-test('K21: contextExtractor dostaje znaczniki _invocation* z runtime, nie od modelu', async t => {
+test('contextExtractor dostaje znaczniki _invocation* z runtime, nie od modelu', async t => {
     const widziane: ToolCallArgs[] = [];
     const agent = { name: 'Klara', permissions: { guidance_mode: true } };
     const client = new MCPClient(asApp(null), asPlugin({
@@ -412,7 +412,7 @@ test('K21: contextExtractor dostaje znaczniki _invocation* z runtime, nie od mod
     t.deepEqual(widziane[0]._invocationScopeFolders, ['Publiczne'], 'zakres też jest ten z runtime');
 });
 
-test('K11: bez opcji znaczniki są USUWANE, nawet gdy model poda je sam', async t => {
+test('bez opcji znaczniki są USUWANE, nawet gdy model poda je sam', async t => {
     const seen: ToolCallArgs[] = [];
     const client = _makeArgSpyClient(seen);
 
@@ -425,21 +425,21 @@ test('K11: bez opcji znaczniki są USUWANE, nawet gdy model poda je sam', async 
     t.false('_invocationToolNames' in (seen[0] as Record<string, unknown>));
 });
 
-// ─── K11 (AUD-security-020): `action` nie obniża ryzyka `write` poniżej skutku ────────────
+// ─── `action` nie obniża ryzyka `write` poniżej skutku ────────────
 //
-// `write {path, content, action:'create'}` BEZ pola `mode`: klasyfikator widział YELLOW
-// (wyciszany żółtym przełącznikiem `vault_write`), a `WriteTool` liczył `args.mode || 'replace'`
-// i NADPISYWAŁ istniejący plik — czyli operację, którą autonomia `edge` deklaruje jako RED
-// nie do wyłączenia przełącznikiem.
+// `write {path, content, action:'create'}` BEZ pola `mode`: naiwna klasyfikacja po `action`
+// widzi YELLOW (wyciszalne żółtym przełącznikiem `vault_write`), ale `WriteTool` liczy
+// `args.mode || 'replace'` i NADPISUJE istniejący plik - czyli operację, którą autonomia `edge`
+// deklaruje jako RED, nie do wyłączenia przełącznikiem.
 
-test('K11 020: write z action:create przy wyłączonym toggle vault_write NADAL pyta (RED)', async t => {
+test('write z action:create przy wyłączonym toggle vault_write NADAL pyta (RED)', async t => {
     const { PermissionSystem } = await import('../../core/index.js');
     const asked: Array<Record<string, unknown>> = [];
     const seenArgs: ToolCallArgs[] = [];
     const agent = {
         name: 'Tester',
         permissions: { guidance_mode: true },
-        // user świadomie zdjął ŻÓŁTY przełącznik — czerwone i tak ma pytać
+        // user świadomie zdjął ŻÓŁTY przełącznik - czerwone i tak ma pytać
         approvalToggles: { vault_write: false },
     };
     // Atrapa vaulta potrzebna tylko po to, żeby blok podglądu diffa (6b) miał co przeczytać.
@@ -458,7 +458,7 @@ test('K11 020: write z action:create przy wyłączonym toggle vault_write NADAL 
             execute: async (args: ToolCallArgs) => { seenArgs.push(args); return { success: true }; },
         }),
     }),
-    // Podgląd diffa nie jest przedmiotem tego testu, ale blok 6b po niego sięga — bez atrapy
+    // Podgląd diffa nie jest przedmiotem tego testu, ale blok 6b po niego sięga - bez atrapy
     // klient otworzyłby prawdziwy modal, który poza Obsidianem nigdy się nie zamyka (test
     // wisiałby do timeoutu). Atrapa zatwierdza od ręki, bramka approvalu zostaje nietknięta.
     { diffModalFactory: () => ({ waitForApproval: async () => 'approve' }) });
@@ -482,11 +482,12 @@ test('K11 020: write z action:create przy wyłączonym toggle vault_write NADAL 
     t.is(asked.length, 0, 'YELLOW z wyłączonym togglem nie pyta — zachowanie bez zmian');
 });
 
-// ─── K11 (AUD-security-069): web_read ma WŁASNĄ bramkę zgody ─────────────────────────────
+// ─── web_read ma WŁASNĄ bramkę zgody ─────────────────────────────
 //
-// Do K11 `web_read` mapował się na akcję `web.search` i na ten sam przełącznik profilu, więc
-// jedno odklikanie „Wyszukiwanie w internecie" zdejmowało pytanie także z wyjścia na adres
-// wskazany przez model, a modal (gdy się pokazywał) ogłaszał pobranie strony jako wyszukiwanie.
+// Wspólny `web.search` sprawiłby, że `web_read` mapowałby się na tę samą akcję i ten sam
+// przełącznik profilu - jedno odklikanie „Wyszukiwanie w internecie" zdejmowałoby pytanie
+// także z wyjścia na adres wskazany przez model, a modal (gdy się pokazywał) ogłaszałby
+// pobranie strony jako wyszukiwanie.
 
 async function _makeWebClient(agent: Record<string, unknown>, asked: Array<Record<string, unknown>>) {
     const { PermissionSystem } = await import('../../core/index.js');
@@ -501,7 +502,7 @@ async function _makeWebClient(agent: Record<string, unknown>, asked: Array<Recor
     }));
 }
 
-test('K11 069: wyciszony web_search NIE otwiera web_read (osobny przełącznik, domyślnie pytaj)', async t => {
+test('wyciszony web_search NIE otwiera web_read (osobny przełącznik, domyślnie pytaj)', async t => {
     const asked: Array<Record<string, unknown>> = [];
     const agent = {
         name: 'Tester',
@@ -520,7 +521,7 @@ test('K11 069: wyciszony web_search NIE otwiera web_read (osobny przełącznik, 
     t.is(asked[0].targetPath, 'https://evil.example/collect?q=tajne');
 });
 
-test('K11 069: własny przełącznik web_read wycisza TYLKO web_read', async t => {
+test('własny przełącznik web_read wycisza TYLKO web_read', async t => {
     const asked: Array<Record<string, unknown>> = [];
     const agent = {
         name: 'Tester',
@@ -536,9 +537,9 @@ test('K11 069: własny przełącznik web_read wycisza TYLKO web_read', async t =
     t.is(asked.length, 1, 'web_search ma default „pytaj" i nie dziedziczy wyciszenia web_read');
 });
 
-// ─── K11 (AUD-security-051): modal pokazuje TĘ nazwę pliku, która realnie powstanie ──────
+// ─── Modal pokazuje TĘ nazwę pliku, która realnie powstanie ──────
 
-test('K11 051: ścieżka memory_save w modalu liczona tą samą regułą co zapis', async t => {
+test('ścieżka memory_save w modalu liczona tą samą regułą co zapis', async t => {
     const { makeMemoryNoteFilename } = await import('../memory/index.js');
     const client = new MCPClient(asApp(null), asPlugin({}), asRegistry({ getTool: () => null }));
     const nazwa = 'Ważne hasło do księgowości';
@@ -554,31 +555,31 @@ test('K11 051: ścieżka memory_save w modalu liczona tą samą regułą co zapi
     t.true(ctx.targetPath.includes('wazne'), ctx.targetPath);
 });
 
-// ─── AUD-testy-060: memory_delete approvalContext niesie TREŚĆ kasowanego faktu ──────────
+// ─── memory_delete approvalContext niesie TREŚĆ kasowanego faktu ──────────
 //
-// Analogicznie do K11 051 wyżej (memory_save): `MemoryDeleteTool.ts` NIE definiuje
+// Analogicznie jak przy `memory_save` wyżej: `MemoryDeleteTool.ts` NIE definiuje
 // `contextExtractor`, więc `memory_delete` ląduje w tym samym fallback-switchu w produkcji.
 // `memory_delete` jest w `MEMORY_TOOLS` (executeToolCall pomija dla niego `checkPermission`),
 // więc `targetPath`/`approvalContext` z tej gałęzi trafiają WYŁĄCZNIE do okna zgody, które user
 // widzi tuż przed potwierdzeniem kasacji. Mutacja zerująca `approvalContext.memoryContent`/
 // `memorySection` (np. literówka przy refaktorze) zostawiałaby okno zgody z pustym cudzysłowem
-// zamiast treści faktu, który user właśnie ma zatwierdzić do skasowania z `brain.md` — bez
+// zamiast treści faktu, który user właśnie ma zatwierdzić do skasowania z `brain.md` - bez
 // żadnego testu, który by to złapał.
 
-test('AUD-testy-060: _extractToolContext memory_delete — approvalContext niesie fakt/sekcję do okna zgody', t => {
+test('_extractToolContext memory_delete - approvalContext niesie fakt/sekcję do okna zgody', t => {
     const client = new MCPClient(asApp(null), asPlugin({}), asRegistry({ getTool: () => null }));
-    const fakt = 'Kuba nie pije kawy po 15';
+    const fakt = 'Jan nie pije kawy po 15';
 
     const ctx = client._extractToolContext('memory_delete', { fact: fakt, section: 'nawyki' }, 'Jaskier');
 
     t.is(ctx.targetPath, '.pkm-assistant/agents/jaskier/memory/brain.md');
-    // Poprzeczka MUTACYJNA: `approvalContext.memoryContent = '';` (gubi treść) MUSI tu polec —
+    // Poprzeczka MUTACYJNA: `approvalContext.memoryContent = '';` (gubi treść) MUSI tu polec -
     // fakt jest niepusty i konkretny, więc pusty string albo `undefined` nie przejdzie.
     t.is(ctx.approvalContext.memoryContent, fakt, 'user w oknie zgody ma zobaczyć TREŚĆ kasowanego faktu, nie pusty cudzysłów');
     t.is(ctx.approvalContext.memorySection, 'nawyki');
 });
 
-test('AUD-testy-060: memory_delete approvalContext — brak fact/section daje bezpieczny pusty string (nie undefined)', t => {
+test('memory_delete approvalContext - brak fact/section daje bezpieczny pusty string (nie undefined)', t => {
     const client = new MCPClient(asApp(null), asPlugin({}), asRegistry({ getTool: () => null }));
     const ctx = client._extractToolContext('memory_delete', {}, 'Jaskier');
 
@@ -586,19 +587,19 @@ test('AUD-testy-060: memory_delete approvalContext — brak fact/section daje be
     t.is(ctx.approvalContext.memorySection, '');
 });
 
-// ─── AUD-testy-059: delegate — treść zadania NIE jest walidowana jak ścieżka vaultowa ────
+// ─── delegate - treść zadania NIE jest walidowana jak ścieżka vaultowa ────
 //
 // `case 'delegate'` w `_extractToolContext` oddaje bramce PUSTY cel (komentarz w źródle:
-// „sub-agent task is NOT a vault path, skip AccessGuard") — ŚWIADOMIE, bo `delegate` siedzi
-// w `NON_VAULT_TARGET_ACTIONS` (core/security/PermissionSystem.ts, K14): jego „cel" to opis
+// „sub-agent task is NOT a vault path, skip AccessGuard") - ŚWIADOMIE, bo `delegate` siedzi
+// w `NON_VAULT_TARGET_ACTIONS` (core/security/PermissionSystem.ts): jego „cel" to opis
 // zadania dla sub-agenta, nie ścieżka. Pin: nawet gdy treść zadania WYGLĄDA jak ścieżka do
 // strefy zakazanej (No-Go/protected/traversal), ekstrakcja NIE próbuje jej sanityzować ani
-// kanonizować jako ścieżkę — inaczej fałszywa odmowa delegacji zależałaby od tego, co model
-// akurat wpisał w opis zadania (dokładnie klasa błędu, którą K2 wyciął dla `generate_image`).
+// kanonizować jako ścieżkę - inaczej fałszywa odmowa delegacji zależałaby od tego, co model
+// akurat wpisał w opis zadania (dokładnie klasa błędu wycięta dla `generate_image`).
 
-test('AUD-testy-059: _extractToolContext delegate — treść zadania jak ścieżka NIE jest walidowana jak ścieżka vaultowa', t => {
+test('_extractToolContext delegate - treść zadania jak ścieżka NIE jest walidowana jak ścieżka vaultowa', t => {
     const client = new MCPClient(asApp(null), asPlugin({}), asRegistry({ getTool: () => null }));
-    // Naraz: traversal + No-Go (.obsidian) + protected (.pkm-assistant) — gdyby to poleciało
+    // Naraz: traversal + No-Go (.obsidian) + protected (.pkm-assistant) - gdyby to poleciało
     // do sanitizePath/AccessGuard jako cel, WSZYSTKIE trzy bramki by odmówiły.
     const zadanie = '../../.pkm-assistant/../.obsidian/plugins/evil/main.js';
 
@@ -609,7 +610,7 @@ test('AUD-testy-059: _extractToolContext delegate — treść zadania jak ście�
     t.is(ctx.approvalContext.delegateTask, zadanie, 'user w oknie zgody nadal widzi PEŁNĄ treść zadania');
 });
 
-test('AUD-testy-059: executeToolCall delegate — checkPermission dostaje PUSTY targetPath niezależnie od treści zadania (brak fałszywej odmowy)', async t => {
+test('executeToolCall delegate - checkPermission dostaje PUSTY targetPath niezależnie od treści zadania (brak fałszywej odmowy)', async t => {
     const seenChecks: Array<{ action: string; targetPath: string }> = [];
     const seenArgs: ToolCallArgs[] = [];
     const client = new MCPClient(asApp(null), asPlugin({
@@ -642,12 +643,12 @@ test('AUD-testy-059: executeToolCall delegate — checkPermission dostaje PUSTY 
     t.is(seenArgs[0].task, zadanie, 'narzędzie samo dostaje oryginalną treść zadania (bez okrojenia)');
 });
 
-// ─── AUD-bledy-027/058/025: JEDEN kształt porażki narzędzia ──────────────────────────────
+// ─── JEDEN kształt porażki narzędzia ──────────────────────────────
 //
 // Narzędzia wbudowane sygnalizują porażkę przez `{success:false, error}`, a MCPClient/artefakty/
-// wrapper external MCP przez `{isError:true}`. Warstwa prezentacji czatu znała TYLKO `isError`,
-// więc nieudany zapis rysował się jako sukces z linkiem do pliku, którego nie ma. Normalizacja
-// siedzi w JEDNYM miejscu — tutaj, na wyjściu z `executeToolCall`.
+// wrapper external MCP przez `{isError:true}`. Warstwa prezentacji czatu zna TYLKO `isError` -
+// bez normalizacji nieudany zapis rysowałby się jako sukces z linkiem do pliku, którego nie ma.
+// Normalizacja siedzi w JEDNYM miejscu - tutaj, na wyjściu z `executeToolCall`.
 
 /** Zwrotka narzędzia widziana przez te testy: obie flagi + komunikat. */
 interface FailingToolResult {
@@ -672,7 +673,7 @@ function _makeNormalizingClient(execute: () => Promise<unknown>) {
     }));
 }
 
-test('AUD-bledy-027: narzędzie z {success:false} dostaje isError na wyjściu z klienta', async t => {
+test('narzędzie z {success:false} dostaje isError na wyjściu z klienta', async t => {
     const client = _makeNormalizingClient(async () => ({ success: false, error: 'Plik już istnieje' }));
 
     const result = await client.executeToolCall(
@@ -681,7 +682,7 @@ test('AUD-bledy-027: narzędzie z {success:false} dostaje isError na wyjściu z 
     t.true(result.isError, 'po tej fladze czat liczy status chipa i warunek linku „otwórz zapisany plik"');
 });
 
-test('AUD-bledy-058: normalizacja NIE kasuje oryginalnych pól narzędzia', async t => {
+test('normalizacja NIE kasuje oryginalnych pól narzędzia', async t => {
     const client = _makeNormalizingClient(async () => ({ success: false, error: 'Plik już istnieje', path: 'Notatki/a.md' }));
 
     const result = await client.executeToolCall(
@@ -692,7 +693,7 @@ test('AUD-bledy-058: normalizacja NIE kasuje oryginalnych pól narzędzia', asyn
     t.is(result.path, 'Notatki/a.md');
 });
 
-test('AUD-bledy-025: udany wynik NIE dostaje isError (pusty wynik to sukces, nie porażka)', async t => {
+test('udany wynik NIE dostaje isError (pusty wynik to sukces, nie porażka)', async t => {
     const client = _makeNormalizingClient(async () => ({ success: true, results: [], count: 0 }));
 
     const result = await client.executeToolCall(
@@ -701,12 +702,13 @@ test('AUD-bledy-025: udany wynik NIE dostaje isError (pusty wynik to sukces, nie
     t.is(result.isError, undefined, 'zero wyników to PUSTY WYNIK, nie awaria narzędzia');
 });
 
-// ─── AUD-bledy-021: pamięć odmów WYGASA (jedno „Odmów" nie blokuje narzędzia na zawsze) ───
+// ─── Pamięć odmów WYGASA (jedno „Odmów" nie blokuje narzędzia na zawsze) ───
 //
 // `MCPClient` powstaje raz na cały cykl życia pluginu, a `clearDenials()` nie ma w produkcji
 // ANI JEDNEGO wołacza. Klucz odmowy narzędzia bez ścieżki to `<narzędzie>::*`, czyli CAŁE
-// narzędzie — jedno kliknięcie „Odmów" na serwerze MCP odbijało każde następne wywołanie
-// (w nowej zakładce, jutro rano) bez pokazania modala. Jedynym resetem był restart pluginu.
+// narzędzie - bez TTL jedno kliknięcie „Odmów" na serwerze MCP odbijałoby każde następne
+// wywołanie (w nowej zakładce, jutro rano) bez pokazania modala, a jedynym resetem byłby
+// restart pluginu.
 
 /** Klient z atrapą approvalu: `answers` to kolejka odpowiedzi na kolejne pytania. */
 function _makeDenialClient(answers: Array<'deny' | 'approve'>, options: { denialTtlMs?: number } = {}) {
@@ -732,7 +734,7 @@ function _makeDenialClient(answers: Array<'deny' | 'approve'>, options: { denial
     return { client, asked };
 }
 
-test('021: po wygaśnięciu TTL narzędzie PYTA ponownie zamiast odbijać się o starą odmowę', async t => {
+test('po wygaśnięciu TTL narzędzie PYTA ponownie zamiast odbijać się o starą odmowę', async t => {
     // TTL 0 ms = odmowa wygasa natychmiast (w produkcji to minuty; tu chodzi o mechanizm).
     const { client, asked } = _makeDenialClient(['deny', 'approve'], { denialTtlMs: 0 });
 
@@ -747,7 +749,7 @@ test('021: po wygaśnięciu TTL narzędzie PYTA ponownie zamiast odbijać się o
     t.true(second.success, 'user zmienił zdanie i zatwierdził');
 });
 
-test('021: w oknie TTL odmowa dalej blokuje od ręki (mechanizm nie znika, tylko wygasa)', async t => {
+test('w oknie TTL odmowa dalej blokuje od ręki (mechanizm nie znika, tylko wygasa)', async t => {
     const { client, asked } = _makeDenialClient(['deny'], { denialTtlMs: 60_000 });
 
     await client.executeToolCall({ name: 'blender__scene', arguments: {} }, 'Jaskier');
@@ -759,11 +761,11 @@ test('021: w oknie TTL odmowa dalej blokuje od ręki (mechanizm nie znika, tylko
     t.true(String(second.error).includes('WCZEŚNIEJ'), second.error);
 });
 
-// ─── AUD-security-128: zewnętrzny catch klienta oddaje modelowi TEKST BŁĘDU ───
-// Ta sama klasa co K8/K20 — komunikat wyjątku bywa zrzutem zdarzenia strumienia razem
+// ─── Zewnętrzny catch klienta oddaje modelowi TEKST BŁĘDU ───
+// Komunikat wyjątku bywa zrzutem zdarzenia strumienia razem
 // z nagłówkiem `Authorization`, a stąd leci prosto do transkryptu tury.
 
-test('128: catch w executeToolCall maskuje sekret w komunikacie oddawanym modelowi', async t => {
+test('catch w executeToolCall maskuje sekret w komunikacie oddawanym modelowi', async t => {
     const SECRET = 'sk-ant-TAJNYKLUCZ0123456789abcdef';
     const client = _makeNormalizingClient(async () => {
         throw new Error(`stream event failed: {"Authorization":"Bearer ${SECRET}"}`);
@@ -776,13 +778,13 @@ test('128: catch w executeToolCall maskuje sekret w komunikacie oddawanym modelo
     t.false(String(result.error).includes(SECRET), `klucz jawny w zwrotce: ${result.error}`);
 });
 
-// ─── AUD-code-review-064: podgląd diffa sprawdza unikalność old_text tak samo jak WriteTool ──
+// ─── Podgląd diffa sprawdza unikalność old_text tak samo jak WriteTool ──
 //
-// Krok 6b liczy `newContent` z `old_text`/`new_text` samodzielnie (kopia algorytmu WriteTool),
-// ale dotąd bez sprawdzenia drugiego wystąpienia — pokazywał diff na PIERWSZYM dopasowaniu,
-// user zatwierdzał, a `WriteTool.execute` (krok 7) i tak odrzucał zapis jako niejednoznaczny
+// Krok 6b liczy `newContent` z `old_text`/`new_text` samodzielnie (kopia algorytmu WriteTool).
+// Bez sprawdzenia drugiego wystąpienia pokazywałby diff na PIERWSZYM dopasowaniu, user by go
+// zatwierdzał, a `WriteTool.execute` (krok 7) i tak odrzucałby zapis jako niejednoznaczny
 // (`old_text_multiple`). Test dowodzi: przy dwuznacznym `old_text` diff W OGÓLE się nie pokazuje
-// (userowi nie proponuje się zmiany, której zapis i tak odrzuci); przy jednoznacznym — pokazuje
+// (userowi nie proponuje się zmiany, której zapis i tak odrzuci); przy jednoznacznym - pokazuje
 // się z poprawnie policzonym `newContent`, jak dotąd.
 
 function _makePatchDiffClient(oldContent: string, diffCalls: Array<{ oldContent: string; newContent: string }>) {
@@ -818,7 +820,7 @@ function _makePatchDiffClient(oldContent: string, diffCalls: Array<{ oldContent:
     });
 }
 
-test('064: old_text z DWOMA dopasowaniami — diff w ogóle się nie pokazuje (zamiast pokazać pierwsze losowe)', async t => {
+test('old_text z DWOMA dopasowaniami - diff w ogóle się nie pokazuje (zamiast pokazać pierwsze losowe)', async t => {
     const diffCalls: Array<{ oldContent: string; newContent: string }> = [];
     const client = _makePatchDiffClient('kot je kot', diffCalls);
 
@@ -832,7 +834,7 @@ test('064: old_text z DWOMA dopasowaniami — diff w ogóle się nie pokazuje (z
     t.true(result.success, 'wykonanie realnego narzędzia leci dalej (ono samo odrzuci old_text_multiple)');
 });
 
-test('064: old_text z JEDNYM dopasowaniem — diff pokazuje się z poprawnym newContent (bez regresji)', async t => {
+test('old_text z JEDNYM dopasowaniem - diff pokazuje się z poprawnym newContent (bez regresji)', async t => {
     const diffCalls: Array<{ oldContent: string; newContent: string }> = [];
     const client = _makePatchDiffClient('kot je rybę', diffCalls);
 
@@ -846,20 +848,20 @@ test('064: old_text z JEDNYM dopasowaniem — diff pokazuje się z poprawnym new
     t.is(diffCalls[0].newContent, 'pies je rybę');
 });
 
-// ─── AUD-code-review-006: podgląd diffa rozpoznaje ukryte ścieżki kanonicznym isHiddenVaultPath ──
+// ─── Podgląd diffa rozpoznaje ukryte ścieżki kanonicznym isHiddenVaultPath ──
 //
-// Bespoke test (`path.startsWith('.') || path.includes('/.')`) nie normalizował `\` → `/`,
-// więc ścieżka z separatorem wstecznym (`Folder\.hidden\plik.md`) NIE była rozpoznana jako
-// ukryta — krok 6b nigdy nie sięgał po adapter i pokazywał diff z pustym „starym contentem"
+// Bespoke test (`path.startsWith('.') || path.includes('/.')`) nie normalizowałby `\` → `/`,
+// więc ścieżka z separatorem wstecznym (`Folder\.hidden\plik.md`) NIE byłaby rozpoznana jako
+// ukryta - krok 6b nigdy nie sięgałby po adapter i pokazywałby diff z pustym „starym contentem"
 // zamiast realnej treści pliku. Kanoniczny `isHiddenVaultPath` (`modules/tools/vault_adapter_io.ts`)
 // normalizuje separator i łapie ten przypadek.
 
-test('006: ukryta ścieżka z separatorem `\\` jest rozpoznana — diff czyta PRAWDZIWY stary content z adaptera', async t => {
+test('ukryta ścieżka z separatorem `\\` jest rozpoznana - diff czyta PRAWDZIWY stary content z adaptera', async t => {
     const diffCalls: Array<{ oldContent: string; newContent: string }> = [];
     const agent = { name: 'Tester', permissions: { guidance_mode: true } };
     const app = {
         vault: {
-            getAbstractFileByPath: () => null, // nie w indeksie Obsidiana — plik ukryty
+            getAbstractFileByPath: () => null, // nie w indeksie Obsidiana - plik ukryty
             adapter: {
                 exists: async () => true,
                 read: async () => 'stara treść z .pkm-assistant',

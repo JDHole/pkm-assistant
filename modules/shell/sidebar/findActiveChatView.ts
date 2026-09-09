@@ -1,13 +1,12 @@
 /**
- * findActiveChatView.ts — pure lookup for the active chat leaf's view.
+ * findActiveChatView.ts - pure lookup for the active chat leaf's view.
  *
- * AUD-dead-code-182: split out of `TriggersView.ts` so it can be node-tested
- * without pulling in that file's `import { Notice } from 'obsidian'` — this file
- * itself touches zero Obsidian imports beyond the canonical `CHAT_VIEW_TYPE`
- * constant (`core/index.js`, guaranteed node-safe — see `core/utils/viewTypes.ts`).
- * The old bug was a SECOND local copy of that literal (`'pkm-chat'`, stale) living
- * inside `TriggersView.ts`; importing the one canonical constant here removes the
- * chance of that drift recurring.
+ * Split out of `TriggersView.ts` so it can be node-tested without pulling in that
+ * file's `import { Notice } from 'obsidian'` - this file itself touches zero
+ * Obsidian imports beyond the canonical `CHAT_VIEW_TYPE` constant (`core/index.js`,
+ * guaranteed node-safe - see `core/utils/viewTypes.ts`). Importing the one canonical
+ * constant here (instead of a local copy of the literal `'pkm-chat'`) removes the
+ * chance of the two copies drifting apart.
  */
 
 import { CHAT_VIEW_TYPE } from '../../../core/index.js';

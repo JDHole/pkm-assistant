@@ -1,5 +1,5 @@
 /**
- * Pure collectors for TriggersView (Sprint 05.5 H2).
+ * Pure collectors for TriggersView.
  *
  * Wydzielone do osobnego pliku żeby test (AVA, pure Node) mógł je załadować
  * bez kosztu ładowania `obsidian` i `modules/crystal-soul/index.js`.
@@ -25,7 +25,7 @@ export function collectSkillItems(agentManager: Runtime): TriggerItem[] {
 }
 
 export function collectSubAgentItems(agentManager: Runtime, activeAgent: Runtime): TriggerItem[] {
-    // D18: brak ról systemowych — zwracamy wyłącznie custom suby usera dla aktywnego agenta.
+    // Brak ról systemowych - zwracamy wyłącznie custom suby usera dla aktywnego agenta.
     const allSubs = agentManager?.subAgentLoader?.getAllSubAgents?.() || [];
     return getVisibleSubAgentsForAgent(activeAgent, allSubs)
         .map((sa: Runtime) => ({

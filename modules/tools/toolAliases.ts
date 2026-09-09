@@ -1,8 +1,8 @@
 /**
- * toolAliases — wsteczna kompatybilność nazw narzędzi (E2.5 + E2.6).
+ * toolAliases — wsteczna kompatybilność nazw narzędzi.
  *
- * E2.5: 12 narzędzi retrieval → jedno `search`.
- * E2.6: prymitywy plikowe bez prefixów ze scope w parametrze:
+ * 12 narzędzi retrieval → jedno `search`.
+ * Prymitywy plikowe bez prefixów ze scope w parametrze:
  *   vault_read → read, vault_list → list, vault_write → write, vault_delete → delete,
  *   vault_create_folder → create_folder, memory_read → read{scope:memory},
  *   memory_read_summary → read{scope:memory, path:summaries/…}, memory_list_summaries → list{scope:memory}.
@@ -13,8 +13,8 @@
  * nieznana w registry a jest aliasem → przemapuj i wykonaj, do wyniku doklej krótką notę.
  *
  * Czysty moduł-liść (bez zależności od reszty mcp) — jedyny importer to
- * `MCPClient.executeToolCall` (zweryfikowane grepem po całym repo, fabryka kasacji martwego
- * kodu S1, 2026-09-02). `ToolRegistry.ts` i `built-in-servers/artifacts/index.ts` wspominają
+ * `MCPClient.executeToolCall` (zweryfikowane grepem po całym repo). `ToolRegistry.ts` i
+ * `built-in-servers/artifacts/index.ts` wspominają
  * ten plik tylko w KOMENTARZACH, bez importu — nie mylić z realnym wołaczem.
  * `modules/sub-agents/SubAgentLoader.ts` ma WŁASNY, ODDZIELNY mechanizm rename'u
  * (`DEPRECATED_TOOL_RENAMES`, lokalna stała) — nie importuje stąd nic.
@@ -97,7 +97,7 @@ export function resolveSearchAlias(name: string, args: ToolArgs = {}): ToolAlias
 }
 
 /**
- * Mapa E2.6: stara nazwa prymitywu plikowego → { name, arguments } dla kanonicznego narzędzia.
+ * Mapa: stara nazwa prymitywu plikowego → { name, arguments } dla kanonicznego narzędzia.
  * Renamey vault_* są argumentowo 1:1 (przepuszczamy args). memory_* dostają scope:'memory'
  * i (dla summary) budują ścieżkę pamięci `summaries/<level>/<filename>`.
  */
@@ -118,13 +118,13 @@ export const PRIMITIVE_ALIASES: Record<string, (a: ToolArgs) => ToolAliasResult>
     }),
 };
 
-/** Nazwa narzędzia przemianowana na prymityw E2.6? */
+/** Nazwa narzędzia przemianowana na prymityw? */
 export function isPrimitiveAlias(name: string): boolean {
     return Object.prototype.hasOwnProperty.call(PRIMITIVE_ALIASES, name);
 }
 
 /**
- * Mapa E2.9 FAZA D: stare narzędzia artefaktów → nowy świat.
+ * Mapa: stare narzędzia artefaktów → nowy świat.
  *  - `chat_todo` (gatunek 1 stary) → `todo` (gatunek 2), z mapowaniem akcji.
  *  - `plan_review {markdown|steps}` → `artifact_create {typ:'plan'}` (kroki jako add_item na sekcji Kroki).
  *  - `idea_review {markdown}` → `artifact_create {typ:'notatka'}` (treść jako set_section Treść).
@@ -188,12 +188,12 @@ export const ARTIFACT_ALIASES: Record<string, (a: ToolArgs) => ToolAliasResult> 
     idea_review: ideaReviewToArtifact,
 };
 
-/** Nazwa narzędzia zastąpiona w E2.9 FAZA D (chat_todo/plan_review/idea_review)? */
+/** Nazwa narzędzia zastąpiona (chat_todo/plan_review/idea_review)? */
 export function isArtifactAlias(name: string): boolean {
     return Object.prototype.hasOwnProperty.call(ARTIFACT_ALIASES, name);
 }
 
-/** Dowolny alias wstecznej kompatybilności (search E2.5 / prymityw E2.6 / artefakt E2.9 D). */
+/** Dowolny alias wstecznej kompatybilności (search / prymityw plikowy / artefakt). */
 export function isToolAlias(name: string): boolean {
     return isSearchAlias(name) || isPrimitiveAlias(name) || isArtifactAlias(name);
 }

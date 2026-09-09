@@ -7,7 +7,7 @@ import { parseTriggersIfHuman, mayRunSlashCommand, registerUrlsIfHuman } from '.
 import { isUrlKnown, registerUrlsFromText } from '../../web/urlRegistry.js';
 import { HUMAN_MESSAGE_META, MACHINE_MESSAGE_META, machineMeta } from '../../../core/index.js';
 
-// Rejestr adresów jest singletonem na moduł, a AVA puszcza testy w pliku RÓWNOLEGLE —
+// Rejestr adresów jest singletonem na moduł, a AVA puszcza testy w pliku RÓWNOLEGLE -
 // każdy przypadek dostaje więc własny adres zamiast czyścić wspólny stan.
 const evil = (tag: string) => `https://evil.example/collect?q=${tag}`;
 
@@ -108,6 +108,6 @@ test('ścieżki z pola wpisywania nadają origin: human JAWNIE', t => {
     t.is((ui.match(/send_message\(\{\s*meta:\s*HUMAN_MESSAGE_META\s*\}\)/g) || []).length, 2);
 });
 
-// K19 (AUD-security-117/131): wysyłka zakolejkowanej wiadomości NIE nadaje już `human` na sztywno
-// — slot kolejki wozi własną pieczątkę (do kolejki wpada też tekst maszynowy). Strażniki tej
-// ścieżki mieszkają w `queuedMessage.test.ts`.
+// Wysyłka zakolejkowanej wiadomości nie nadaje już `human` na sztywno - slot kolejki wozi własną
+// pieczątkę (do kolejki wpada też tekst maszynowy). Strażniki tej ścieżki mieszkają w
+// `queuedMessage.test.ts`.

@@ -55,7 +55,7 @@ export function makeLog(): ModelLoggerLike & { calls: Array<{ level: string; sco
     };
 }
 
-/** Pusty, ale poprawny snapshot odpowiedzi. `usage` jest PUSTYM obiektem (B.6 BA-08). */
+/** Pusty, ale poprawny snapshot odpowiedzi. `usage` jest PUSTYM obiektem. */
 export function emptyCompletion(): OpenAiCompletion {
     return {
         choices: [{ index: 0, message: { role: 'assistant', content: '' } }],
@@ -65,7 +65,7 @@ export function emptyCompletion(): OpenAiCompletion {
 
 /**
  * Karmi dekoder kolejnymi porcjami transportu i akumuluje zdarzenia DOKŁADNIE wg tabeli
- * mapowania `StreamEvent` → snapshot (plan §0.1), a na końcu domyka `finish()`.
+ * mapowania `StreamEvent` → snapshot, a na końcu domyka `finish()`.
  *
  * Zamiennik dawnej pary „przetwórz surową porcję" + „zamień stan adaptera na kształt
  * kanoniczny": dziś dekoder mówi zdarzeniami, a akumulację robi `ChatModel` — tu jej
@@ -248,8 +248,8 @@ export function makeHttpResponse(spec: ScriptedHttpResponse = {}): HttpResponse 
 
 /**
  * Klient HTTP bez strumienia, który zapamiętuje żądania i oddaje zaplanowane odpowiedzi.
- * Zamiennik dawnej atrapy wstrzykiwanej opcją konstruktora modelu — dziś idzie przez
- * `deps.http` (B.5 ST-23).
+ * Zamiennik dawnej atrapy wstrzykiwanej opcją konstruktora modelu - dziś idzie przez
+ * `deps.http`.
  */
 export class CapturingHttpClient implements HttpClient {
     lastSpec: HttpRequestSpec | null = null;
@@ -321,7 +321,7 @@ export function makeCtx(overrides: Partial<ProviderContext> = {}): ProviderConte
     };
 }
 
-/** Worek ustawień w nowym kształcie (spec §4) — punkt startowy dla testów. */
+/** Worek ustawień w nowym kształcie — punkt startowy dla testów. */
 export function makeSettings(overrides: Partial<ModelSettingsBag['pkmAssistant']> = {}): ModelSettingsBag {
     return { pkmAssistant: { chat: {}, ...overrides } };
 }

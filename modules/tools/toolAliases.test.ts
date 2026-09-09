@@ -85,7 +85,7 @@ test('SEARCH_ALIASES pokrywa wszystkie 12 skasowanych narzędzi', t => {
     ].sort());
 });
 
-// ───────────────────────── E2.6 prymitywy plikowe ─────────────────────────
+// ───────────────────────── Prymitywy plikowe ─────────────────────────
 
 test('isPrimitiveAlias / isToolAlias rozpoznają dawne prymitywy plikowe', t => {
     t.true(isPrimitiveAlias('vault_read'));
@@ -134,7 +134,7 @@ test('PRIMITIVE_ALIASES pokrywa 8 dawnych prymitywów', t => {
     ].sort());
 });
 
-// ─── E2.9 FAZA D — aliasy artefaktów (chat_todo / plan_review / idea_review) ───
+// ─── Aliasy artefaktów (chat_todo / plan_review / idea_review) ───
 
 test('isArtifactAlias + isToolAlias rozpoznają skasowane narzędzia', t => {
     t.true(isArtifactAlias('chat_todo'));

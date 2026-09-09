@@ -1,18 +1,18 @@
 /**
- * agent_delegate (S28 D6 + K6) — kontekst delegacji chodzi TĄ SAMĄ drogą co `kom_send`.
+ * agent_delegate — kontekst delegacji chodzi TĄ SAMĄ drogą co `kom_send`.
  *
  * Duch nie ma pingu ani kom_read, więc list w jego skrzynce byłby martwy. Delegacja
  * (przełączenie rozmowy) idzie dalej — kontekst niesie sam proposal w wyniku.
  *
- * K6 (AUD-security-006/013): atrapa dostaje PRAWDZIWY `KomunikatorManager`, żeby test
- * dotykał realnych bramek poczty (rate-limit, licznik odbić, filtr ducha), a nie ich imitacji.
+ * Atrapa dostaje PRAWDZIWY `KomunikatorManager`, żeby test dotykał realnych bramek poczty
+ * (rate-limit, licznik odbić, filtr ducha), a nie ich imitacji.
  */
 import test from 'ava';
 import { createAgentDelegateTool } from './AgentDelegateTool.js';
 // Atrapa AgentManagera deleguje do PRAWDZIWEGO filtra ducha (wzór KomunikatorTools.test.js).
 import { isKomunikatorVisible, listKomunikatorAgents, findKomunikatorAgent } from '../komunikator/visibility.js';
 import { KomunikatorManager } from '../komunikator/KomunikatorManager.js';
-// K17: pełny łańcuch bramek — prawdziwy rejestr (oś narzędziowa), prawdziwy PermissionSystem
+// Pełny łańcuch bramek — prawdziwy rejestr (oś narzędziowa), prawdziwy PermissionSystem
 // (klasyfikacja ryzyka + zgody) i prawdziwy klient. Deep-import w teście jest dozwolony.
 import { ToolRegistry } from './ToolRegistry.js';
 import { MCPClient } from './MCPClient.js';
@@ -21,13 +21,13 @@ import { PermissionSystem } from '../../core/security/PermissionSystem.js';
 
 /**
  * Agent w atrapie: nazwa + (opcjonalnie) flaga ducha czytana przez prawdziwy filtr
- * + (K17) negatywna lista narzędzi, czyli oś liczona przez `ToolRegistry.checkToolAxis`.
+ * + negatywna lista narzędzi, czyli oś liczona przez `ToolRegistry.checkToolAxis`.
  */
 type FakeAgent = {
     name: string;
     komunikator_visible?: boolean;
     disabled_tools?: string[];
-    /** K17: przełączniki zgód usera (`PermissionSystem.requiresApproval`). */
+    /** Przełączniki zgód usera (`PermissionSystem.requiresApproval`). */
     approvalToggles?: Record<string, boolean>;
 };
 
@@ -71,7 +71,7 @@ function makePlugin(agents: FakeAgent[], limits?: Record<string, number>) {
     agentManager.findKomunikatorAgent = (name: string) => findKomunikatorAgent(agentManager, name);
     const vault = fakeVault();
     agentManager.komunikatorManager = new KomunikatorManager(vault, agentManager);
-    // K17: rejestr jest w KAŻDEJ atrapie — cały dotychczasowy zestaw biegnie z żywą bramką
+    // Rejestr jest w KAŻDEJ atrapie — cały zestaw testów biegnie z żywą bramką
     // osi poczty i pilnuje, że delegacja widocznych agentów działa jak dotąd.
     const toolRegistry = new ToolRegistry();
     const plugin = {
@@ -102,7 +102,7 @@ test('widoczny adresat: kontekst delegacji ląduje w skrzynce', async t => {
     t.true(vault._files.get(path)!.includes('Kontekst rozmowy'));
 });
 
-test('agent-duch: delegacja przechodzi, ale ZERO listu do skrzynki (D6)', async t => {
+test('agent-duch: delegacja przechodzi, ale ZERO listu do skrzynki', async t => {
     const { plugin, vault } = makePlugin(AGENTS());
     const tool = createAgentDelegateTool();
     const res = await tool.execute(
@@ -115,9 +115,9 @@ test('agent-duch: delegacja przechodzi, ale ZERO listu do skrzynki (D6)', async 
     t.is(listy(vault).length, 0);
 });
 
-// ═════════ K6 (AUD-security-006/013) — delegacja nie jest drugą drogą do skrzynki ═════════
+// ═════════ delegacja nie jest drugą drogą do skrzynki ═════════
 
-test('006: delegacja podlega TEMU SAMEMU rate-limitowi co kom_send', async t => {
+test('delegacja podlega TEMU SAMEMU rate-limitowi co kom_send', async t => {
     const { plugin, vault } = makePlugin(AGENTS(), { kom_send_rate_max: 2 });
     const tool = createAgentDelegateTool();
     const args = () => ({ to_agent: 'Sonny', context_summary: 'Kontekst', _invocationAgentName: 'Tola' });
@@ -127,7 +127,7 @@ test('006: delegacja podlega TEMU SAMEMU rate-limitowi co kom_send', async t => 
     t.is(listy(vault).length, 2, 'limit 2 = dwa listy, reszta odbita');
 });
 
-test('006: wsad delegacji przez Promise.all nie przebija limitu', async t => {
+test('wsad delegacji przez Promise.all nie przebija limitu', async t => {
     const { plugin, vault } = makePlugin(AGENTS(), { kom_send_rate_max: 3 });
     const tool = createAgentDelegateTool();
 
@@ -138,7 +138,7 @@ test('006: wsad delegacji przez Promise.all nie przebija limitu', async t => {
     t.is(listy(vault).length, 3);
 });
 
-test('013: duch jako NADAWCA nie przemyci listu przez delegację', async t => {
+test('duch jako NADAWCA nie przemyci listu przez delegację', async t => {
     const { plugin, vault } = makePlugin(AGENTS());
     const tool = createAgentDelegateTool();
     const res = await tool.execute(
@@ -150,7 +150,7 @@ test('013: duch jako NADAWCA nie przemyci listu przez delegację', async t => {
     t.is(listy(vault).length, 0, 'ale nazwa ducha NIE ląduje w cudzej skrzynce');
 });
 
-test('013: błąd „nie znaleziono" nie wylicza duchów', async t => {
+test('błąd „nie znaleziono" nie wylicza duchów', async t => {
     const { plugin } = makePlugin(AGENTS());
     const tool = createAgentDelegateTool();
     const res = await tool.execute(
@@ -163,8 +163,8 @@ test('013: błąd „nie znaleziono" nie wylicza duchów', async t => {
     t.true(res.error!.includes('Sonny'), 'widoczni agenci nadal są wypisani');
 });
 
-// ═════════ K17 (AUD-security-110) — delegacja podlega OSI POCZTY wołającego ═════════
-// Oś narzędziowa (K3) ocenia w `MCPClient` nazwę `agent_delegate` — grupa `delegation`.
+// ═════════ delegacja podlega OSI POCZTY wołającego ═════════
+// Oś narzędziowa ocenia w `MCPClient` nazwę `agent_delegate` — grupa `delegation`.
 // Poczta to grupa `komunikator`, więc agent z WŁĄCZONĄ delegacją i WYŁĄCZONĄ pocztą
 // (domyślny stan świeżego profilu) deponował tekst swojego modelu w cudzej skrzynce.
 // Bramka stoi w chokepoincie `sendAgentMail`, więc łapie każdą drogę do skrzynki.
@@ -175,7 +175,7 @@ const BEZ_POCZTY = (): FakeAgent[] => [
     { name: 'Sonny' },
 ];
 
-test('110: agent bez poczty deleguje, ale NIE zostawia listu w cudzej skrzynce', async t => {
+test('agent bez poczty deleguje, ale NIE zostawia listu w cudzej skrzynce', async t => {
     const { plugin, vault } = makePlugin(BEZ_POCZTY());
     const tool = createAgentDelegateTool();
 
@@ -190,7 +190,7 @@ test('110: agent bez poczty deleguje, ale NIE zostawia listu w cudzej skrzynce',
     t.is(listy(vault).length, 0, 'poczta wyłączona = zero plików w skrzynce Sonny’ego');
 });
 
-test('110: ten sam agent z włączoną pocztą deponuje list jak dotąd', async t => {
+test('ten sam agent z włączoną pocztą deponuje list jak dotąd', async t => {
     const { plugin, vault } = makePlugin([{ name: 'Tola', disabled_tools: ['web_search'] }, { name: 'Sonny' }]);
     const tool = createAgentDelegateTool();
 
@@ -203,7 +203,7 @@ test('110: ten sam agent z włączoną pocztą deponuje list jak dotąd', async 
     t.is(listy(vault).length, 1, 'wyłączona wyszukiwarka nie ma nic wspólnego z pocztą');
 });
 
-test('110: tożsamość nadawcy z runtime — model nie podszyje się pod agenta z pocztą', async t => {
+test('tożsamość nadawcy z runtime — model nie podszyje się pod agenta z pocztą', async t => {
     const { plugin, vault } = makePlugin(BEZ_POCZTY());
     const tool = createAgentDelegateTool();
 
@@ -218,7 +218,7 @@ test('110: tożsamość nadawcy z runtime — model nie podszyje się pod agenta
     t.is(listy(vault).length, 0, 'oś liczona dla Toli, nie dla nazwy podanej przez model');
 });
 
-// ═════ K17 (AUD-security-109) — delegacja pyta o zgodę tak samo jak kom_send ═════
+// ═════ delegacja pyta o zgodę tak samo jak kom_send ═════
 
 /** Wynik pojedynczego pytania o zgodę, w zakresie czytanym w asercjach. */
 type ApprovalCall = { type?: string; toolName?: string; targetPath?: string; messageContent?: string };
@@ -246,7 +246,7 @@ function makeChain(agents: FakeAgent[]) {
     return { client, approvals, vault };
 }
 
-test('109: agent_delegate wymaga zgody usera dokładnie jak kom_send (domyślne ustawienia)', async t => {
+test('agent_delegate wymaga zgody usera dokładnie jak kom_send (domyślne ustawienia)', async t => {
     const { client, approvals, vault } = makeChain(AGENTS());
 
     await client.executeToolCall(
@@ -265,7 +265,7 @@ test('109: agent_delegate wymaga zgody usera dokładnie jak kom_send (domyślne 
     t.is(listy(vault).length, 2, 'po zgodzie oba listy powstają');
 });
 
-test('109: user, który wyciszył pocztę, wycisza też delegację (jeden przełącznik)', async t => {
+test('user, który wyciszył pocztę, wycisza też delegację (jeden przełącznik)', async t => {
     const { client, approvals, vault } = makeChain([
         { name: 'Tola', approvalToggles: { kom_send: false } },
         { name: 'Sonny' },
@@ -279,12 +279,12 @@ test('109: user, który wyciszył pocztę, wycisza też delegację (jeden przeł
     t.is(listy(vault).length, 1);
 });
 
-// ─── AUD-security-128: zewnętrzny catch `agent_delegate` maskuje sekret ───
+// ─── zewnętrzny catch `agent_delegate` maskuje sekret ───
 //
 // Ta sama klasa co wyżej w `delegate`: wyjątek z zapisu poczty (adapter vaulta, błąd I/O
 // z pełną ścieżką systemową) albo z odczytu ustawień wracał modelowi surowy.
 
-test('128: catch w agent_delegate nie oddaje modelowi surowego komunikatu z sekretem', async t => {
+test('catch w agent_delegate nie oddaje modelowi surowego komunikatu z sekretem', async t => {
     const SECRET = 'sk-ant-TAJNYKLUCZ0123456789abcdef';
     const plugin = {
         agentManager: {

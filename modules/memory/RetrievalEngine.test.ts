@@ -253,7 +253,7 @@ test('brak query → listing kandydatów wg where', async t => {
     t.deepEqual(r.results[0].matched, []);
 });
 
-// ───────────────────── E2.6: app-first (getMarkdownFiles / metadataCache) ─────────────────────
+// ───────────────────── App-first (getMarkdownFiles / metadataCache) ─────────────────────
 
 /**
  * Mock Obsidian App. files: { path: { content, frontmatter? } }. resolvedLinks: {src:{target:count}}.
@@ -266,7 +266,7 @@ function makeApp(files: Record<string, AppFile>, resolvedLinks: Record<string, R
         getMarkdownFiles: () => Object.keys(files).map(p => ({ path: p, name: p.split('/').pop() })),
         getAbstractFileByPath: (p: string) => (p in files ? { path: p, name: p.split('/').pop() } : null),
         cachedRead: async (file: { path: string }) => files[file.path]?.content ?? '',
-        // Atrapa adaptera jest tu tylko po to, żeby pole istniało — ścieżka API-first
+        // Atrapa adaptera jest tu tylko po to, żeby pole istniało - ścieżka API-first
         // nigdy do niej nie schodzi, więc `read` oddaje `null` (stąd rzutowanie kształtu).
         adapter: { read: async () => null, list: async () => ({ files: [], folders: [] }), exists: async () => false } as unknown as RetrievalVaultAdapterLike
     };
@@ -341,9 +341,9 @@ test('fallback bez app: walker/parser/regex zachowane (yaml po treści ---)', as
     t.deepEqual(r.results.map(x => x.path), ['a.md']);
 });
 
-// ───────────────────── AUD-wydajnosc-024/055/075/025/056 (fabryka W3) ─────────────────────
+// ───────────────────── Sufit skanu keyword i cache treści ─────────────────────
 
-/** Owija adapter licznikiem odczytów PER ŚCIEŻKA — pozwala zliczyć I/O bez zgadywania. */
+/** Owija adapter licznikiem odczytów PER ŚCIEŻKA - pozwala zliczyć I/O bez zgadywania. */
 function countingAdapter(files: Record<string, string>, reads: Record<string, number>): RetrievalVaultAdapterLike {
     const base = makeAdapter(files);
     return {
@@ -355,7 +355,7 @@ function countingAdapter(files: Record<string, string>, reads: Record<string, nu
     };
 }
 
-test('AUD-024/055: sufit kandydatów PRZED czytaniem treści — bez `where` na 500 plikach czyta ≤300, nie 500', async t => {
+test('sufit kandydatów PRZED czytaniem treści — bez `where` na 500 plikach czyta ≤300, nie 500', async t => {
     const files: Record<string, string> = {};
     for (let i = 0; i < 500; i++) files[`n${i}.md`] = 'foo bar baz';
     const reads: Record<string, number> = {};
@@ -364,8 +364,8 @@ test('AUD-024/055: sufit kandydatów PRZED czytaniem treści — bez `where` na 
 
     const totalReads = Object.values(reads).reduce((a, b) => a + b, 0);
     // Sufit skanu (musi się zgadzać z MAX_KEYWORD_SCAN_CANDIDATES=300) + do `limit`(10)
-    // re-odczytów excerptu dla top wyniku (AUD-025: scan zwalnia treść po zliczeniu, więc
-    // top jest doczytywany ponownie) — 300+10=310. Mutacja usuwająca sufit podniesie to
+    // re-odczytów excerptu dla top wyniku (scan zwalnia treść po zliczeniu, więc
+    // top jest doczytywany ponownie) - 300+10=310. Mutacja usuwająca sufit podniesie to
     // do ~500+10 i test oblewa.
     t.true(totalReads <= 310, `totalReads=${totalReads} — skan musi być obcięty na sufit, nie skanować całego vaulta (500)`);
     t.true(totalReads < 500, 'przed naprawą było dokładnie 500 (jeden odczyt na plik)');
@@ -384,11 +384,11 @@ test('scan info NIEOBECNE poniżej sufitu — kontrakt wyniku bez zmian dla mał
     t.is(r.scan, undefined);
 });
 
-test('AUD-075: 5 równoległych identycznych `search` (ta sama vault) dzielą JEDEN skan (dedup w locie)', async t => {
+test('5 równoległych identycznych `search` (ta sama vault) dzielą JEDEN skan (dedup w locie)', async t => {
     const files: Record<string, string> = {};
     for (let i = 0; i < 50; i++) files[`n${i}.md`] = 'target content here';
     const reads: Record<string, number> = {};
-    // 5 osobnych instancji silnika nad TYM SAMYM obiektem vault — dokładnie jak
+    // 5 osobnych instancji silnika nad TYM SAMYM obiektem vault - dokładnie jak
     // `SearchTool.buildEngine` (nowa instancja per tool call) nad `plugin.app.vault`
     // wołane przez 5 równoległych sub-agentów z `delegate`.
     const vault: RetrievalVaultLike = { adapter: countingAdapter(files, reads) };
@@ -399,14 +399,14 @@ test('AUD-075: 5 równoległych identycznych `search` (ta sama vault) dzielą JE
 
     const totalReads = Object.values(reads).reduce((a, b) => a + b, 0);
     // Bez dedupu: 5 × 50 = 250 odczytów tylko na sam skan. Z dedupem: JEDEN skan (50) +
-    // każdy z 5 callerów dokłada najwyżej `limit`(5) odczytów excerptu dla swojego top —
+    // każdy z 5 callerów dokłada najwyżej `limit`(5) odczytów excerptu dla swojego top -
     // sufit górny 50 + 5*5 = 75, daleko poniżej 250.
     t.true(totalReads < 5 * 50, `totalReads=${totalReads} — musi być dużo mniej niż 5×50=250 bez dedupu`);
     t.true(totalReads <= 50 + 5 * 5, `totalReads=${totalReads} — jeden skan (~50) + do 5×limit(5) excerptów`);
     for (const o of outcomes) t.true(o.results.length > 0);
 });
 
-test('AUD-025: contentCache nie trzyma treści po zliczeniu — top wynik czytany ponownie do excerptu', async t => {
+test('contentCache nie trzyma treści po zliczeniu — top wynik czytany ponownie do excerptu', async t => {
     const files: Record<string, string> = { 'hit.md': 'target content once', 'other.md': 'no match here' };
     const reads: Record<string, number> = {};
     const engine = new RetrievalEngine({ vault: { adapter: countingAdapter(files, reads) } });
@@ -416,15 +416,15 @@ test('AUD-025: contentCache nie trzyma treści po zliczeniu — top wynik czytan
     // Bez zwolnienia po zliczeniu (stary kod): 1 odczyt (scan), excerpt bierze z cache → 1.
     // Ze zwolnieniem (naprawa): 1 (scan) + 1 (excerpt re-read, bo scan zwolnił treść) = 2.
     // Mutacja usuwająca `contentCache.delete` w `_scanKeywordCandidates` sprowadzi to do 1
-    // i test oblewa — dowód, że mapa NIE trzyma treści wszystkich zeskanowanych plików.
+    // i test oblewa - dowód, że mapa NIE trzyma treści wszystkich zeskanowanych plików.
     t.is(reads['hit.md'], 2, 'top wynik musi być doczytany ponownie do excerptu, nie brany z trzymanego cache');
 });
 
-test('AUD-056: `_excerptStart` na dużym pliku nie normalizuje całej treści (widoczny excerpt bez zmian)', async t => {
-    // Dużo białych znaków ZA granicą zapasu (max*4), właściwa treść na początku — dowód,
+test('`_excerptStart` na dużym pliku nie normalizuje całej treści (widoczny excerpt bez zmian)', async t => {
+    // Dużo białych znaków ZA granicą zapasu (max*4), właściwa treść na początku - dowód,
     // że widoczny excerpt jest identyczny z/bez optymalizacji (semantyka nie zmienia się).
     const head = 'Początek dokumentu z treścią do excerptu. '.repeat(3); // ~129 znaków, w limicie 200
-    const tail = 'x '.repeat(200000); // daleko poza zapasem max*4=800 — dawniej normalizowane niepotrzebnie
+    const tail = 'x '.repeat(200000); // daleko poza zapasem max*4=800 - dawniej normalizowane niepotrzebnie
     const vault = vaultOf({ 'big.md': head + tail });
     const engine = new RetrievalEngine({ vault });
     const r = await engine.runSearch({ where: {} }); // listing → _excerptStart
@@ -434,12 +434,12 @@ test('AUD-056: `_excerptStart` na dużym pliku nie normalizuje całej treści (w
     t.true(hit.excerpt.length <= 201); // 200 + '…'
 });
 
-// ───────────────────── Review rundy 2 (2026-09-02): bloker cross-agent + korekty ─────────────────────
+// ───────────────────── Cross-agent isolation: dedup skanu + korekty sufitu ─────────────────────
 
-test('BLOKER AUD-review-2: dedup NIE przecieka między agentami — równoległy search(scope:memory) różnych agentów widzi tylko swoje', async t => {
+test('dedup NIE przecieka między agentami — równoległy search(scope:memory) różnych agentów widzi tylko swoje', async t => {
     // Dwaj agenci, WSPÓLNY obiekt vault (jak plugin.app.vault dla wszystkich agentów w produkcji),
     // KAŻDY z własną instancją silnika (jak SearchTool.buildEngine per tool call) i WŁASNYM
-    // agentMemory.paths (różne roots). Oba pytają {scope:'memory', query:'projekt'} RÓWNOLEGLE —
+    // agentMemory.paths (różne roots). Oba pytają {scope:'memory', query:'projekt'} RÓWNOLEGLE -
     // identyczne scope+where+query, różni kandydaci. Bez naprawy dedup dzieliłby jeden skan i
     // agent B dostałby ścieżki/excerpt z brain agenta A ("sekret agenta A").
     const baseA = '.pkm-assistant/agents/agent-a/memory';
@@ -465,7 +465,7 @@ test('BLOKER AUD-review-2: dedup NIE przecieka między agentami — równoległy
     t.false(resultA.results.some(r => r.path.includes('notatka_b')));
 });
 
-test('POWAŻNE (korekta review): scope=memory ma sufit WYŁĄCZONY — trafienie w L2 znalezione mimo 400 plików archiwum przed nim', async t => {
+test('scope=memory ma sufit WYŁĄCZONY — trafienie w L2 znalezione mimo 400 plików archiwum przed nim', async t => {
     // _listMemoryFiles listuje brain -> brain/ -> sessions/active -> sessions/ARCHIVE -> L1 -> L2 -> L3.
     // Z sufitem 300 (jak dla scope=vault) 400 plików archiwum zjadłoby cały sufit i L2 nigdy
     // nie trafiłby do skanu. Bez sufitu (naprawa) trafienie w L2 jest znajdowane zawsze.
@@ -481,8 +481,8 @@ test('POWAŻNE (korekta review): scope=memory ma sufit WYŁĄCZONY — trafienie
     t.falsy(r.scan, 'scope=memory nie niesie noty o obcięciu — sufit jest wyłączony, nie tylko podniesiony');
 });
 
-test('REGRESJA (korekta review) AUD-056: 1000 pustych linii na początku pliku nie gubi treści w excerpcie', async t => {
-    // Zapas STAŁY (max*4=800) dawał dawniej pusty "…" — cała pierwsza próba trafiała w same
+test('REGRESJA: 1000 pustych linii na początku pliku nie gubi treści w excerpcie', async t => {
+    // Zapas STAŁY (max*4=800) dawał dawniej pusty "…" - cała pierwsza próba trafiała w same
     // puste linie. Zapas ROSNĄCY musi sięgnąć dalej i znaleźć prawdziwą treść.
     const blanks = '\n'.repeat(1000);
     const real = 'PRAWDZIWATRESCPOWINNABYCWIDOCZNA w excerpcie mimo tysiąca pustych linii przed nią.';
@@ -494,7 +494,7 @@ test('REGRESJA (korekta review) AUD-056: 1000 pustych linii na początku pliku n
     t.not(hit.excerpt.trim(), '…', 'excerpt nie może być samym znakiem obcięcia');
 });
 
-test('REGRESJA (korekta review) AUD-056: krótka treść + 900 białych znaków na końcu NIE dostaje fałszywego „…"', async t => {
+test('REGRESJA: krótka treść + 900 białych znaków na końcu NIE dostaje fałszywego „…"', async t => {
     // Cała treść pliku mieści się dawno przed max(200) - nic nie zostało naprawdę obcięte,
     // tylko ogon białych znaków wypełniał zapas. Fałszywe "…" sugerowałoby userowi, że jest
     // więcej treści, choć plik się skończył.

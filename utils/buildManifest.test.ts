@@ -2,9 +2,6 @@
  * `esbuild.js` nigdy nie miał ani jednego testu jednostkowego na swoją logikę
  * (stemplowanie manifestu, rozbiór `DESTINATION_VAULTS`, katalog docelowy deployu).
  * Ten plik domyka tę lukę na czystych funkcjach wyjętych do `utils/buildManifest.ts`.
- *
- * clean-room / F1 (build-release) — napisany przed implementacją (czerwony na stubie,
- * poza testem DIST_ARTIFACTS który był AUTOR), dziś zielony w całości.
  */
 import test from 'ava';
 import path from 'node:path';
@@ -76,7 +73,7 @@ test('pluginDeployDir: id bierze sie z argumentu, nie z literalu', t => {
     t.is(b, path.join('/v', '.obsidian', 'plugins', 'inne-id'));
 });
 
-// ── DIST_ARTIFACTS (AUTOR) ────────────────────────────────────────────────────────────────────
+// ── DIST_ARTIFACTS ────────────────────────────────────────────────────────────────────
 
 test('DIST_ARTIFACTS to dokladnie trzy pliki, w kolejnosci', t => {
     t.deepEqual([...DIST_ARTIFACTS], ['main.js', 'manifest.json', 'styles.css']);

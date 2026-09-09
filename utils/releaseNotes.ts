@@ -1,7 +1,7 @@
 /**
  * `utils/releaseNotes.ts` — pliki notatek wydania (`releases/`).
  *
- * Podział ról jest tu sednem naprawy AUD-docs-009:
+ * Podział ról jest tu sednem:
  *  - {@link latestReleaseFile} służy WYŁĄCZNIE do CZYTANIA poprzednich notatek
  *    i legalnie zwraca `null`, gdy w katalogu nie ma jeszcze pliku `X.Y.Z.md`;
  *  - {@link resolveNotesTarget} daje ZAWSZE-NIE-NULL ścieżkę ZAPISU i nie dotyka dysku,
@@ -127,7 +127,7 @@ export function priorNotes(dir: string, currentVersion: string): string {
 
 /**
  * ZAWSZE-NIE-NULL ścieżka ZAPISU notatek. Funkcja NIE DOTYKA DYSKU, więc fizycznie
- * nie ma jak zwrócić `null` — i o to chodzi (AUD-docs-009).
+ * nie ma jak zwrócić `null` — i o to chodzi.
  *
  * Kształt wywołania: `resolveNotesTarget(releasesDir, '2.1.0')` → `<dir>/2.1.0.md`.
  */

@@ -6,7 +6,7 @@ import type { ChatRequest } from '../contracts.js';
 
 /**
  * `stream_options: { include_usage: true }` jest OPT-IN per dostawca
- * (`ChatProviderInfo.streamUsage`) — wysłanie go do Groqa kończy się 400 (B.6 BA-05).
+ * (`ChatProviderInfo.streamUsage`) - wysłanie go do Groqa kończy się 400.
  */
 type ParsedBody = {
     stream_options?: { include_usage?: boolean };
@@ -23,10 +23,10 @@ test('platforma BEZ flagi nie dostaje stream_options (opt-in, nie globalny prze�
 });
 
 /**
- * N18 (luka L-07): endpoint i nagłówek z metryczki dostawcy + mapowanie narzędzi;
- * `finish_reason` z odpowiedzi przechodzi do kształtu kanonicznego.
+ * Endpoint i nagłówek z metryczki dostawcy + mapowanie narzędzi; `finish_reason` z odpowiedzi
+ * przechodzi do kształtu kanonicznego.
  */
-test('L-07: groq — endpoint + nagłówek + mapowanie tools; finish_reason przechodzi', t => {
+test('groq — endpoint + nagłówek + mapowanie tools; finish_reason przechodzi', t => {
     const req: ChatRequest = {
         messages: MESSAGES,
         tools: [{ type: 'function', function: { name: 'vault_read', description: 'Read', parameters: { type: 'object' } } }],

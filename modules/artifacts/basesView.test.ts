@@ -66,10 +66,10 @@ test('buildArtifactsBaseContent: folder ze spacją trafia w cudzysłowach do fil
 });
 
 test('buildArtifactsBaseContent: apostrof w folderze nie psuje YAML-a', t => {
-    const content = buildArtifactsBaseContent("Kuba's Artefakty");
+    const content = buildArtifactsBaseContent("Jan's Artefakty");
     t.notThrows(() => YAML.parse(content));
     const parsed = loadBase(content);
-    t.true(parsed.views[0].filters.and.includes('file.inFolder("Kuba\'s Artefakty")'));
+    t.true(parsed.views[0].filters.and.includes('file.inFolder("Jan\'s Artefakty")'));
 });
 
 test('buildArtifactsBaseContent: cudzysłów i backslash w folderze są zescapowane', t => {

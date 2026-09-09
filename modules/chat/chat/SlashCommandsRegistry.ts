@@ -6,11 +6,8 @@ import { runManualCompression } from './chat_ui.js';
 
 // TS-any: widok czatu jest legacy composition root składanym dynamicznie z modułów mixinów.
 type RuntimeView = any;
-// AUD-dead-code-057/187 (2026-09-02): `SlashCommandContext` skasowany — zero referencji w całym
-// repo, nawet lokalnie (`SlashCommand.handler` deklarował `(ctx: RuntimeView, raw: string)`, nie
-// ten typ).
-// AUD-dead-code-231 (2026-09-02): `export` zdjęty z `SlashCommand` — zero referencji spoza tego
-// pliku (`SlashCommandsRegistry`/`createDefaultSlashCommands` są jedynym publicznym wejściem).
+// `SlashCommand` nie jest eksportowany - `SlashCommandsRegistry`/`createDefaultSlashCommands`
+// są jedynym publicznym wejściem do tego pliku.
 type SlashCommand = {
     name: string;
     description?: string;
@@ -108,8 +105,8 @@ export function createDefaultSlashCommands(): SlashCommandsRegistry {
         name: '/compress',
         description: 'Compress current chat context.',
         handler: async ({ view }) => {
-            // AUD-code-review-053: rdzeń dzielony z guzikiem 🗜️ w chat_ui.ts (_renderSlimBar) —
-            // patrz komentarz przy `runManualCompression` tam.
+            // Rdzeń dzielony z guzikiem 🗜️ w chat_ui.ts (_renderSlimBar) - patrz komentarz przy
+            // `runManualCompression` tam.
             await runManualCompression(view);
             view.resetInputArea();
         }

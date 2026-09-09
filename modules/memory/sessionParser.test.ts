@@ -2,8 +2,7 @@ import test from 'ava';
 import { formatToMarkdown, parseSessionFile } from './sessionParser.js';
 
 /**
- * E1.8 regression (znaleziona przez smoke na żywym pluginie): odpowiedź agenta
- * zawierająca nagłówek "## Wyniki" rozjeżdżała restore sesji — parser brał go za
+ * Odpowiedź agenta zawierająca nagłówek "## Wyniki" rozjeżdżała restore sesji - parser brał go za
  * granicę wiadomości z rolą "wyniki", a API odrzucało żądanie
  * ("unknown variant 'wyniki'"). Do tego "## [object Object]" gdy rola nie była
  * stringiem.
@@ -20,7 +19,7 @@ test('roundtrip: nagłówki markdown w treści NIE stają się rolami', t => {
     t.is(parsed.messages[1].role, 'assistant');
     t.true(parsed.messages[1].content.includes('## Wyniki'));
     t.true(parsed.messages[1].content.includes('## Wnioski'));
-    // Porównanie z rolą SPOZA `SessionRole` jest sensem tego testu — typ mówi, że
+    // Porównanie z rolą SPOZA `SessionRole` jest sensem tego testu - typ mówi, że
     // takiej roli być nie może, a asercja pilnuje tego w runtime na starych plikach.
     t.false(parsed.messages.some(m => (m.role as string) === 'wyniki'));
 });

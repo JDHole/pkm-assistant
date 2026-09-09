@@ -1,17 +1,16 @@
 /**
- * Team/Ekipa tab (Ekipa) — sub-agenci agenta. E2.8 C6 (S14, rzut 1 bez szablonów).
+ * Team/Ekipa tab (Ekipa) - sub-agenci agenta.
  *
- * Kafelek członka: nazwa (etykieta F6) · model · liczba narzędzi · limit iteracji.
- * Klik = CAŁY SIDEBAR (sub-agent-detail) — dokładna instrukcja + narzędzia + model + iteracje,
+ * Kafelek członka: nazwa (etykieta roli) · model · liczba narzędzi · limit iteracji.
+ * Klik = CAŁY SIDEBAR (sub-agent-detail) - dokładna instrukcja + narzędzia + model + iteracje,
  * wszystko edytowalne (SubAgentEditorModal), zapis do YAML suba. Dodawanie „od zera".
  *
- * D18: jeden generyczny worker + custom suby (po nazwie, prefiks <agent-slug>-). Rola = etykieta
- * opisowa (F6). Overrides per-sub (prompt_append/extra_tools) WTOPIONE w edycję detalu — osobny
+ * Jeden generyczny worker + custom suby (po nazwie, prefiks <agent-slug>-). Rola = etykieta
+ * opisowa. Overrides per-sub (prompt_append/extra_tools) WTOPIONE w edycję detalu - osobny
  * formularz override skasowany (jedno miejsce edycji suba).
  *
- * S27 Z6: pętla szablonów domknięta — „+ od zera" ma checkbox „Zapisz też jako szablon",
- * doszło „+ z szablonu" (odlanie kopii z Zaplecza), a kafelek członka niesie ślad
- * „Z szablonu: X vN" (D3 — kopia, nie link).
+ * Pętla szablonów: „+ od zera" ma checkbox „Zapisz też jako szablon", jest „+ z szablonu"
+ * (odlanie kopii z Zaplecza), a kafelek członka niesie ślad „Z szablonu: X vN" (kopia, nie link).
  */
 import { UiIcons, setSvg } from '../../crystal-soul/index.js';
 import { renderToggle } from './profile_helpers.js';
@@ -56,7 +55,7 @@ export function renderEkipaTab(ctx: UiBoundary, el: HTMLElement) {
     // ── Add member ──
     _renderAssignExisting(ctx, el, visible);
     _renderAddFromScratch(ctx, el);
-    // S27 Z6: odlanie kopii z formy odlewniczej Zaplecza (D3).
+    // Odlanie kopii z formy odlewniczej Zaplecza.
     _renderAddFromTemplate(ctx, el);
     el.createDiv({ text: t('profile.team.detail_hint'), cls: 'setting-item-description' });
 
@@ -92,7 +91,7 @@ function _renderMemberTile(ctx: UiBoundary, grid: HTMLElement, assignment: UiBou
         const dfBadge = nameRow.createSpan({ cls: 'cs-badge cs-badge--prep', text: t('profile.prompt.default_badge') });
         dfBadge.addClass('cs-shard-badge');
     }
-    // S27 Z6: ślad pochodzenia kopii („z szablonu: X vN") na kafelku członka Ekipy.
+    // Ślad pochodzenia kopii („z szablonu: X vN") na kafelku członka Ekipy.
     if (cfg.from_template) {
         const originBadge = nameRow.createSpan({
             cls: 'cs-badge cs-badge--default',
@@ -190,15 +189,15 @@ function _renderAssignExisting(ctx: UiBoundary, el: HTMLElement, visible: UiBoun
 
 /**
  * Create a brand-new sub-agent from scratch (editor modal) and auto-assign it.
- * S27 Z6: modal umie od razu dołożyć formę odlewniczą do Zaplecza („Zapisz też jako szablon").
+ * Modal umie od razu dołożyć formę odlewniczą do Zaplecza („Zapisz też jako szablon").
  */
 function _renderAddFromScratch(ctx: UiBoundary, el: HTMLElement) {
     const { formData, plugin } = ctx;
     const btn = el.createEl('button', { cls: 'cs-preset-btn', text: t('profile.team.add_from_scratch') });
     btn.addEventListener('click', () => {
         void (async () => {
-            // S31: modal mieszka w `modules/sub-agents/` i statycznie ciągnie `obsidian`, więc barrel
-            // subów wydaje go leniwym akcesorem — ładujemy dopiero tutaj, w handlerze kliknięcia.
+            // Modal mieszka w `modules/sub-agents/` i statycznie ciągnie `obsidian`, więc barrel
+            // subów wydaje go leniwym akcesorem - ładujemy dopiero tutaj, w handlerze kliknięcia.
             const { loadSubAgentEditorModal } = await import('../../sub-agents/index.js');
             const SubAgentEditorModal = await loadSubAgentEditorModal();
             const loader = plugin.agentManager?.subAgentLoader;
@@ -222,7 +221,7 @@ function _renderAddFromScratch(ctx: UiBoundary, el: HTMLElement) {
     el.createDiv({ text: t('profile.team.add_from_scratch_hint'), cls: 'setting-item-description' });
 }
 
-/** S27 Z6: „+ z szablonu" — odlej kopię suba z Zaplecza do Ekipy tego agenta (D3). */
+/** „+ z szablonu" - odlej kopię suba z Zaplecza do Ekipy tego agenta. */
 function _renderAddFromTemplate(ctx: UiBoundary, el: HTMLElement) {
     const { formData, plugin } = ctx;
     const store = plugin.agentManager?.subAgentTemplateStore;

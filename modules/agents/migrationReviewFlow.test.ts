@@ -3,9 +3,9 @@ import { runMigrationReview } from './migrationReviewFlow.js';
 import type { MigrationReviewEngine } from './migrationReviewFlow.js';
 
 /**
- * Atrapa silnika migracji: NIE dotyka dysku, tylko zlicza wywołania `run()` — dokładnie to,
- * czego brakowało w produkcji przy naprawie AUD-docs-051 (Cancel wołał `run()` drugi raz
- * z `{interactive:false}`, czyli plan migracji i tak lądował na dysku mimo odmowy usera).
+ * Atrapa silnika migracji: NIE dotyka dysku, tylko zlicza wywołania `run()` - dokładnie to,
+ * czego brakowało w produkcji, gdy Cancel wołał `run()` drugi raz z `{interactive:false}`,
+ * czyli plan migracji i tak lądował na dysku mimo odmowy usera.
  */
 function makeMigration(
     runResult: { cancelled?: boolean } | null | undefined,

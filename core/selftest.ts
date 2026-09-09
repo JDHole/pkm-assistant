@@ -1,7 +1,7 @@
 /**
- * core/selftest.ts — raport "PKM Assistant: Self-test" (E1.8, 2026-07-21).
+ * core/selftest.ts — raport "PKM Assistant: Self-test".
  *
- * PO CO: agent AI (albo Kuba) testuje plugin z zewnątrz — klika w Obsidianie i
+ * PO CO: agent AI (albo user) testuje plugin z zewnątrz — klika w Obsidianie i
  * CZYTA PLIKI. `buildSelfTestReport(plugin, deps)` robi READ-ONLY zdjęcie stanu
  * pluginu (semantyka, narzędzia MCP, agenci, modele, limity, pamięć, file-log),
  * a `formatSelfTestReport(report)` renderuje je do czytelnego markdownu ze statusami
@@ -248,7 +248,7 @@ function sectionMcpTools(
     const sorted = [...names].sort();
     const count = sorted.length;
 
-    // S28 D7: flaga domyślnie ON — wyłącza ją dopiero jawne `false` (brak pola = włączone).
+    // Flaga domyślnie ON - wyłącza ją dopiero jawne `false` (brak pola = włączone).
     const komunikatorEnabled = settings?.pkmAssistant?.komunikatorEnabled !== false;
     const komTools = sorted.filter((n) => n.startsWith('kom_') || n === 'agent_message');
     const MAIL_TOOLS = ['kom_send', 'kom_list', 'kom_read'];

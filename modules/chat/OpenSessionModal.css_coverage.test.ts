@@ -1,11 +1,6 @@
 /**
- * AUD-dead-code-255 (klaster KL-09) — `OpenSessionModal` malował 8 z 9 klas `cs-open-session*`
- * bez ani jednej reguły CSS w żadnym z sześciu arkuszy repo; jego bliźniak `SessionCloseModal`
- * miał komplet. Naprawa dopisała rodzinę `.cs-open-session__*` w `chat_view.css` (wspólne
- * selektory z `.cs-session-close__*` tam, gdzie wygląd ma być identyczny).
- *
  * Ten strażnik pilnuje, żeby żadna klasa `cs-open-session*` malowana przez `OpenSessionModal.ts`
- * nigdy więcej nie została bez reguły — w KTÓRYMKOLWIEK z dwóch arkuszy, które go stylują
+ * nigdy nie została bez reguły CSS — w KTÓRYMKOLWIEK z dwóch arkuszy, które go stylują
  * (`chat_view.css` lokalnie w module + `src/styles.css`, gdzie mieszka `__cancel-row`).
  *
  * `OpenSessionModal.ts` importuje `obsidian`, więc AVA go nie zaimportuje — strażnik czyta

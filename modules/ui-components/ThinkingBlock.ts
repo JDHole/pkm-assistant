@@ -45,7 +45,7 @@ export function createThinkingBlock(thinkingText: string, isStreaming = false, s
     const body = row.createDiv({ cls: 'cs-action-row__body' });
     const content = body.createDiv({ cls: 'cs-action-row__content' });
     content.textContent = thinkingText || '';
-    // AUD-wydajnosc-096: pamięć ostatnio wpisanej treści dla `updateThinkingBlock` (dopisuje
+    // Pamięć ostatnio wpisanej treści dla `updateThinkingBlock` (dopisuje
     // deltę zamiast podmieniać całość). Trzymana na elemencie, bo blok bywa długowieczny.
     (content as ChatDynamic)._pkmThinkingText = thinkingText || '';
 
@@ -66,9 +66,9 @@ export function createThinkingBlock(thinkingText: string, isStreaming = false, s
 export function updateThinkingBlock(block: ChatDynamic, text: string, startTime: number | null = null) {
     const content = block?.querySelector('.cs-action-row__content');
     if (content) {
-        // AUD-wydajnosc-096: `text` to ślad rozumowania ZAKUMULOWANY od początku tury, więc
-        // podmiana całości przy każdym wywołaniu przepisywała O(K × długość) znaków i wymuszała
-        // przeliczenie układu (`scrollHeight`) także wtedy, gdy nic się nie zmieniło. Ostatnio
+        // `text` to ślad rozumowania ZAKUMULOWANY od początku tury, więc podmiana całości przy
+        // każdym wywołaniu przepisywałaby O(K × długość) znaków i wymuszała przeliczenie
+        // układu (`scrollHeight`) także wtedy, gdy nic się nie zmieniło. Ostatnio
         // wpisaną treść pamiętamy NA ELEMENCIE (nie czytamy `textContent` — jego getter sam jest
         // O(n) i wracałby ten sam koszt tylnymi drzwiami).
         const prev: string = typeof content._pkmThinkingText === 'string'

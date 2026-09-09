@@ -62,7 +62,7 @@ export type ToolsSettingsCtx = Pick<SettingsSectionCtx, 'save' | 'icons' | 'Sett
             close?: (id: string) => Promise<void>;
         } | null;
         /**
-         * AUD-code-review-050: `buildImportRows` + import `onConfirm` biorą stąd nazwy
+         * `buildImportRows` + import `onConfirm` biorą stąd nazwy
          * wbudowane — TA SAMA lista, którą `MCPServerEditorModal._builtinNames()` daje
          * ręcznemu dodawaniu serwera (`ToolRegistry.getBuiltinServerMap`).
          */
@@ -77,7 +77,7 @@ export type ToolsSettingsCtx = Pick<SettingsSectionCtx, 'save' | 'icons' | 'Sett
 type SaveReportCtx = Pick<ToolsSettingsCtx, 'save' | 'Notice' | 'owner'>;
 
 /**
- * AUD-bledy-028: pad zapisu MUSI być widoczny. Log z powodem, zdanie dla usera i
+ * Pad zapisu MUSI być widoczny. Log z powodem, zdanie dla usera i
  * przerysowanie ZE STANU PRAWDZIWEGO - mutacja jest już cofnięta, więc `render()`
  * pokazuje to, co realnie leży na dysku, a nie to, co user przed chwilą kliknął.
  */
@@ -139,19 +139,19 @@ export function renderMcpServersSection(container: HTMLElement, ctx: ToolsSettin
         });
     }
 
-    // ── External MCP servers (real protocol client — E3.1) ───────────
+    // ── External MCP servers (real protocol client) ───────────
     renderExternalMcpServers(container, ctx);
 }
 
 /**
- * S32 Z2.3 — read `%APPDATA%\Claude\claude_desktop_config.json` if it happens to be there.
+ * Read `%APPDATA%\Claude\claude_desktop_config.json` if it happens to be there.
  * Desktop-only and best-effort: no APPDATA (mobile), no fs, no file → null, and the caller
  * falls back to a manual file picker. Never throws.
  *
  * ⚠️ `window.require` (a nie `import('node:fs')`) świadomie: esbuild zostawia dynamiczny
  * import modułu zewnętrznego jako NATYWNY `import()`, a przeglądarkowy resolver w rendererze
  * nie zna specyfikatora `node:fs` i bundle wybucha w runtime — dokładnie ten sam bug, który
- * złapaliśmy w smoke E3.1 na `obsidian` (patrz nagłówek `ExternalMcpManager.js`).
+ * dotyka importu `obsidian` (patrz nagłówek `ExternalMcpManager.js`).
  * `window.require` istnieje w Obsidianie desktop; na mobile go nie ma → picker.
  *
  * @returns zawartość pliku albo null
@@ -171,7 +171,7 @@ function readClaudeDesktopConfigText(): string | null {
 }
 
 /**
- * S32 Z2.3 — hidden `<input type="file">` for picking claude_desktop_config.json by hand.
+ * Hidden `<input type="file">` for picking claude_desktop_config.json by hand.
  * Zero innerHTML (createEl only); the input is removed once we have the text.
  */
 function pickJsonFile(container: HTMLElement, onText: (text: string | null) => void): void {
@@ -191,7 +191,7 @@ function pickJsonFile(container: HTMLElement, onText: (text: string | null) => v
     input.click();
 }
 
-/** External MCP servers: config from settings + runtime status from the manager (R2). */
+/** External MCP servers: config from settings + runtime status from the manager. */
 function renderExternalMcpServers(container: HTMLElement, ctx: ToolsSettingsCtx): void {
     const { plugin, owner, Notice, MCPServerEditorModal, ClaudeImportModal, pkm, save } = ctx;
     const manager = plugin?.externalMcpManager;
@@ -202,7 +202,7 @@ function renderExternalMcpServers(container: HTMLElement, ctx: ToolsSettingsCtx)
     if (!Array.isArray(pkm.externalMcpServers)) pkm.externalMcpServers = [];
     const servers = pkm.externalMcpServers;
 
-    // R2: config in data.json holds ONLY user configuration — strip runtime fields at save time.
+    // config in data.json holds ONLY user configuration — strip runtime fields at save time.
     const persist = async () => {
         for (const s of servers) ExternalMcpManager.stripRuntimeFields(s);
         await save();
@@ -230,10 +230,10 @@ function renderExternalMcpServers(container: HTMLElement, ctx: ToolsSettingsCtx)
         }).open();
     });
 
-    // AUD-code-review-050: nazwy serwerów wbudowanych — TA SAMA lista, którą
+    // Nazwy serwerów wbudowanych — TA SAMA lista, którą
     // `MCPServerEditorModal._builtinNames()` daje ręcznemu dodawaniu serwera. Fail-soft: brak
     // `toolRegistry` (stary/testowy host) = pusta lista, czyli tylko kolizja z `existing` +
-    // format sluga są sprawdzane (dokładnie zachowanie sprzed tej naprawy).
+    // format sluga są sprawdzane.
     const builtinNames = (): string[] => {
         try {
             const map = plugin?.toolRegistry?.getBuiltinServerMap?.();
@@ -241,7 +241,7 @@ function renderExternalMcpServers(container: HTMLElement, ctx: ToolsSettingsCtx)
         } catch { return []; }
     };
 
-    // ── S32 Z2.3: „Importuj z Claude" — przenieś serwery z Claude Desktop ──
+    // ── „Importuj z Claude" — przenieś serwery z Claude Desktop ──
     const openImportModal = (jsonText: string | null) => {
         const parsed = parseClaudeDesktopConfig(jsonText);
         if (parsed.length === 0) {
@@ -252,7 +252,7 @@ function renderExternalMcpServers(container: HTMLElement, ctx: ToolsSettingsCtx)
             rows: buildImportRows(parsed, servers, builtinNames()),
             onConfirm: async (configs) => {
                 if (!configs.length) return;
-                // AUD-code-review-050: obrona w głąb — TA SAMA walidacja unikalności/rezerwacji
+                // Obrona w głąb — TA SAMA walidacja unikalności/rezerwacji
                 // id co ręczne dodawanie serwera (`MCPServerEditorModal._handleSave`), liczona
                 // TU, tuż przed zapisem, a nie tylko w checkboxach modala (który jest celowo
                 // GŁUPI i pokazuje stan sprzed ewentualnej edycji `servers` przez inne okno
@@ -274,7 +274,7 @@ function renderExternalMcpServers(container: HTMLElement, ctx: ToolsSettingsCtx)
                 }
                 if (accepted.length === 0) {
                     log.warn('SettingsContent', `Import serwerów z Claude: wszystkie ${configs.length} pozycji odrzucone walidacją id`, skipped);
-                    // AUD-code-review (kaseta F05, uwaga 5): `mcp_external_import_empty` mówi
+                    // `mcp_external_import_empty` mówi
                     // "nie znalazłem żadnych serwerów w pliku" — NIEPRAWDA tutaj, bo parser
                     // ZNALAZŁ `configs.length` wpisów i user je zaznaczył; to DRUGA warstwa
                     // walidacji (id zarezerwowane/duplikat/format) odrzuciła wszystkie TUŻ przed
@@ -285,7 +285,7 @@ function renderExternalMcpServers(container: HTMLElement, ctx: ToolsSettingsCtx)
                     return;
                 }
                 for (const cfg of accepted) servers.push(cfg);
-                // AUD-bledy-028: import melduje liczbę serwerów DOPIERO po udanym zapisie.
+                // Import melduje liczbę serwerów DOPIERO po udanym zapisie.
                 const outcome = await persistOrRollback(persist, () => {
                     for (const cfg of accepted) {
                         const i = servers.indexOf(cfg);
@@ -336,7 +336,7 @@ function renderExternalRow(container: HTMLElement, cfg: ExternalMcpServerConfig,
     const { manager, Notice, owner, plugin, MCPServerEditorModal, persist, save, refresh } = deps;
     const status = manager?.getStatus?.(cfg.id) || { status: 'off', lastError: null, toolCount: 0 };
     const connected = !!manager?.isConnected?.(cfg.id);
-    // S33 Z3 (kill-switch): brak pola = włączony (wstecznie zgodne ze starymi configami).
+    // Kill-switch: brak pola = włączony (wstecznie zgodne ze starymi configami).
     const enabled = cfg.enabled !== false;
 
     const box = container.createDiv({ cls: 'mcp-external-server' });
@@ -361,7 +361,7 @@ function renderExternalRow(container: HTMLElement, cfg: ExternalMcpServerConfig,
         err.addClass('pkm-mcp-error');
     } else { void metaEl; }
 
-    // S33 Z3: kill-switch per serwer. OFF = konfiguracja zostaje, ale serwer nie ma prawa
+    // Kill-switch per serwer. OFF = konfiguracja zostaje, ale serwer nie ma prawa
     // dostarczać narzędzi: rozłączamy natychmiast (wyrejestrowanie z ToolRegistry) i blokujemy
     // ręczne „Połącz". Autostart i tak respektuje `enabled` (nie ruszamy go).
     const toggleWrap = row.createDiv({ cls: 'pkm-mcp-enable' });
@@ -377,7 +377,7 @@ function renderExternalRow(container: HTMLElement, cfg: ExternalMcpServerConfig,
             const previousEnabled = cfg.enabled;
             toggle.disabled = true;
             try {
-                // AUD-bledy-028: zamknięcie serwera NIE zależy od zapisu - user, który wyłącza
+                // Zamknięcie serwera NIE zależy od zapisu - user, który wyłącza
                 // konektor, odbiera mu prawo dostarczania narzędzi tu i teraz. Zapis melduje się
                 // osobno i przy padzie cofa mutację, żeby wiersz nie malował stanu, którego nie ma.
                 const outcome = await applyServerKillSwitch({
@@ -458,7 +458,7 @@ function renderExternalRow(container: HTMLElement, cfg: ExternalMcpServerConfig,
             const list = deps.pkm.externalMcpServers!;
             const idx = list.findIndex((s: ExternalMcpServerConfig) => s.id === cfg.id);
             if (idx >= 0) list.splice(idx, 1);
-            // AUD-bledy-028: „Usunięto" tylko wtedy, gdy kasacja realnie wylądowała na dysku.
+            // „Usunięto" tylko wtedy, gdy kasacja realnie wylądowała na dysku.
             const outcome = await persistOrRollback(persist, () => { if (idx >= 0) list.splice(idx, 0, cfg); });
             if (outcome.saved) {
                 new Notice(t('settings.mcp_external_deleted_notice', { name: cfg.name || cfg.id }));
@@ -499,7 +499,7 @@ function renderImageGenSettings(container: HTMLElement, ctx: ToolsSettingsCtx): 
     if (!pkm.imageGen) pkm.imageGen = {};
     const ig = pkm.imageGen;
 
-    // E3.2: lista platform z SSOT (modules/multimodal), nie z lokalnej kopii —
+    // Lista platform z SSOT (modules/multimodal), nie z lokalnej kopii —
     // dropdown i walidacja w generate_image widzą zawsze ten sam zestaw.
     const platforms: Array<{ id: string; name: string; key?: string }> = [
         { id: 'disabled', name: t('settings.image_gen_disabled') },
@@ -511,13 +511,13 @@ function renderImageGenSettings(container: HTMLElement, ctx: ToolsSettingsCtx): 
         .setDesc(t('settings.image_gen_platform_desc'))
         .addDropdown(dd => {
             for (const p of platforms) dd.addOption(p.id, p.name);
-            // E3.2: zapisana platforma może być osierocona (np. 'comfyui' po wywałce modułu comfy)
+            // Zapisana platforma może być osierocona (np. 'comfyui' po wywałce modułu comfy)
             // — wtedy dropdown pokazuje pierwszą (domyślną) opcję zamiast pustki. Bez migracji danych.
             const savedPlatform = ig.platform || 'disabled';
             const knownPlatform = platforms.some(p => p.id === savedPlatform);
             dd.setValue(knownPlatform ? savedPlatform : platforms[0].id);
             dd.onChange(async (value) => {
-                // AUD-bledy-028: nowa platforma zostaje w UI tylko wtedy, gdy zapis przeszedł.
+                // Nowa platforma zostaje w UI tylko wtedy, gdy zapis przeszedł.
                 if (await saveField(ctx, ig, 'platform', value)) owner.render();
             });
         });

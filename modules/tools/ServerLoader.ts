@@ -1,9 +1,8 @@
 /**
  * ServerLoader — Ładuje konfiguracje wbudowanych serwerów MCP.
  *
- * E3.1 faza C: skan user-folderów `.pkm-assistant/mcp-servers/` + `.pkm-assistant/mcp-tools/`
- * (custom-JS sandbox) wycięty. Zostaje WYŁĄCZNIE ładowanie built-in manifestów z
- * `modules/tools/built-in-servers/` (bundled w plugin). Zewnętrzne serwery MCP obsługuje
+ * Ładuje WYŁĄCZNIE built-in manifesty z `modules/tools/built-in-servers/` (bundled w plugin) —
+ * nie skanuje user-folderów ani nie uruchamia custom-JS. Zewnętrzne serwery MCP obsługuje
  * ExternalMcpManager (prawdziwy klient stdio/HTTP), nie ten loader.
  *
  * Każdy entry w cache ma `source: 'built-in'`. Cache w Map.
@@ -28,8 +27,8 @@ export interface ServerLoaderOptions {
     /** Version from package.json (used for built-in manifest version sentinel) */
     pluginVersion?: string;
     /**
-     * Wyłącznik komunikatora (przewód E1.2, default ON od S28 D7). `false` = built-in serwer
-     * `komunikator` (kom_send/kom_list/kom_read) znika z katalogu. Undefined = bypass (pełny katalog).
+     * Wyłącznik komunikatora (default ON). `false` = built-in serwer `komunikator`
+     * (kom_send/kom_list/kom_read) znika z katalogu. Undefined = bypass (pełny katalog).
      */
     komunikatorEnabled?: boolean;
 }
@@ -46,8 +45,8 @@ export interface ServerCatalogEntry {
 
 export class ServerLoader {
     /**
-     * Obsidianowy Vault. E3.1 faza C wycięła skan user-folderów, więc loader go już nie czyta —
-     * pole zostaje, bo konstruktor jest częścią publicznego API (`new ServerLoader(app.vault, …)`).
+     * Obsidianowy Vault. Loader go nie czyta (nie skanuje user-folderów) — pole zostaje,
+     * bo konstruktor jest częścią publicznego API (`new ServerLoader(app.vault, …)`).
      */
     declare vault: unknown;
     declare pluginVersion: string;

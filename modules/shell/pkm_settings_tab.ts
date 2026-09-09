@@ -27,8 +27,8 @@ export class PkmSettingsTab extends PluginSettingsTab {
     declare readonly plugin: Runtime;
     declare name: string;
     declare private _showKeys: Record<string, boolean>;
-    // V-06: DWA kontenery (`pkm-settings-header` / `pkm-settings-main`). Trzeci, dawny
-    // kontener „środowiska", zniknął razem z reliktem — sekcja pluginu wchodzi do głównego.
+    // DWA kontenery (`pkm-settings-header` / `pkm-settings-main`). Nie ma trzeciego
+    // kontenera „środowiska" - sekcja pluginu wchodzi do głównego.
     declare readonly headerContainer: Runtime;
     declare readonly mainContainer: Runtime;
     declare private _settingsSectionsRegistered: boolean;
@@ -42,10 +42,10 @@ export class PkmSettingsTab extends PluginSettingsTab {
     }
 
     /**
-     * V-06: DWA stany ekranu. `state !== 'loaded'` → akapit „ładuję" i render CZEKA na
+     * DWA stany ekranu. `state !== 'loaded'` → akapit „ładuję" i render CZEKA na
      * `runtime.whenLoaded()`; `state === 'loaded'` → render od ręki (przy gotowym runtime
      * `whenLoaded()` kosztuje 0 ms, więc gałąź jest optymalizacją, nie wymogiem).
-     * Trzeciego stanu ani guzika „uruchom" nie ma — istniały wyłącznie dla `'idle'`.
+     * Nie ma trzeciego stanu ani guzika „uruchom".
      */
     async render() {
         this.containerEl.empty();
@@ -107,7 +107,7 @@ export class PkmSettingsTab extends PluginSettingsTab {
         (registerCoreSettings as Runtime)(SettingsRegistry, this.plugin);
         (registerModelsSettings as Runtime)(SettingsRegistry, this.plugin);
         (registerMemorySettings as Runtime)(SettingsRegistry, this.plugin);
-        // E2.8 B1: Settings→Vault (folder groups + vault zone descriptions). Shell-owned (vault
+        // Settings→Vault (folder groups + vault zone descriptions). Shell-owned (vault
         // entity, not agents); order 35 sits between Pamięć (30) and Web (45).
         SettingsRegistry.register({
             id: 'vault',
@@ -117,7 +117,7 @@ export class PkmSettingsTab extends PluginSettingsTab {
             render: (containerEl: Runtime, _plugin: Runtime, options: Runtime) => renderVaultSection(containerEl, options.owner.buildSectionContext()),
         });
         (registerWebSettings as Runtime)(SettingsRegistry, this.plugin);
-        // E2.8 B2: Settings→Prompt (global prompt defaults — work prompts + factory sections).
+        // Settings→Prompt (global prompt defaults - work prompts + factory sections).
         // Shell-owned; order 50 sits after Web (45), before No-Go (60).
         SettingsRegistry.register({
             id: 'prompt',
@@ -127,13 +127,12 @@ export class PkmSettingsTab extends PluginSettingsTab {
             render: (containerEl: Runtime, _plugin: Runtime, options: Runtime) => renderPromptSection(containerEl, options.owner.buildSectionContext()),
         });
         (registerMcpSettings as Runtime)(SettingsRegistry, this.plugin);
-        // E2.8 A3: sekcja Settings/Agenci (tylko role) usunięta — rola rozpuszczona (D7).
         (registerCrystalSoulSettings as Runtime)(SettingsRegistry, this.plugin);
         this._settingsSectionsRegistered = true;
     }
 
     buildSectionContext(): Runtime {
-        // To jest EKRAN USERA, nie boot — prowizjonowanie idzie świadomie przez proxy.
+        // To jest EKRAN USERA, nie boot - prowizjonowanie idzie świadomie przez proxy.
         const bag: Runtime = this.env?.settings ?? {};
         if (!bag.pkmAssistant) bag.pkmAssistant = {};
         if (!bag.pkmAssistant.chat) bag.pkmAssistant.chat = {};
@@ -151,14 +150,14 @@ export class PkmSettingsTab extends PluginSettingsTab {
             owner: this,
             save: () => this.save_settings(),
             icons: UiIcons,
-            // E3.4: core/ nie importuje z modules/ (ADR 003) — bezpieczne wstawianie
+            // core/ nie importuje z modules/ (ADR 003) - bezpieczne wstawianie
             // ikon dostaje przez ctx, tak samo jak samą kolekcję ikon.
             setSvg,
             setSvgLabel,
             Setting,
             Notice,
             MCPServerEditorModal,
-            // S32 Z2.3: modal potwierdzenia importu z Claude Desktop — jak MCPServerEditorModal,
+            // Modal potwierdzenia importu z Claude Desktop - jak MCPServerEditorModal,
             // przez ctx (modules/tools/SettingsContent.js nie może statycznie importować obsidiana).
             ClaudeImportModal,
             openCostTrackingModal: async () => {
@@ -183,9 +182,6 @@ export class PkmSettingsTab extends PluginSettingsTab {
         const minionDef = (lib.minion || []).find((m: Runtime) => m.isDefault) || lib.minion?.[0];
         pkm.minionPlatform = minionDef?.platform || '';
         pkm.minionModel = minionDef?.model || '';
-        // Slot 'master' (rola stratega) skasowany w fabryce kasacji S1 (2026-09-02,
-        // AUD-dead-code-173) — pola `masterPlatform`/`masterModel` skasowane z modelResolver.ts
-        // (PkmModelSettings) i migracji w src/main.ts; to zerowanie było ostatnim wołaczem.
     }
 
     _getAvailablePlatforms(chat: Runtime): PlatformOption[] {

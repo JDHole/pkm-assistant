@@ -69,11 +69,11 @@ test('no warnings for clean text', t => {
     t.is(warnings.length, 0);
 });
 
-// ── K8 (AUD-security-027): maskowanie po NAZWIE pola/nagłówka + brakujące kształty ──
+// ── maskowanie po NAZWIE pola/nagłówka + brakujące kształty ──
 
 const TOKEN = 'abcdef0123456789xyzQWERTY';
 
-test('K8: nagłówek Authorization: Bearer <token> nie zostaje jawny', t => {
+test('maskowanie: nagłówek Authorization: Bearer <token> nie zostaje jawny', t => {
     const result = maskSensitiveData(`Authorization: Bearer ${TOKEN}`);
     t.false(result.includes(TOKEN));
     t.true(result.includes('***'));
@@ -81,13 +81,13 @@ test('K8: nagłówek Authorization: Bearer <token> nie zostaje jawny', t => {
     t.true(result.includes('Bearer'));
 });
 
-test('K8: JSON z nagłówkiem x-api-key nie zostaje jawny', t => {
+test('maskowanie: JSON z nagłówkiem x-api-key nie zostaje jawny', t => {
     const result = maskSensitiveData(`{"x-api-key":"${TOKEN}"}`);
     t.false(result.includes(TOKEN));
     t.true(result.includes('x-api-key'));
 });
 
-test('K8: JSON z polami api_key / apiKey / token / secret / password', t => {
+test('maskowanie: JSON z polami api_key / apiKey / token / secret / password', t => {
     for (const field of ['api_key', 'apiKey', 'openrouter_key', 'token', 'secret', 'password', 'Authorization']) {
         const result = maskSensitiveData(`{"model":"gpt-4","${field}":"${TOKEN}"}`);
         t.false(result.includes(TOKEN), `pole ${field} zostało jawne`);
@@ -95,16 +95,16 @@ test('K8: JSON z polami api_key / apiKey / token / secret / password', t => {
     }
 });
 
-test('K8: nazwa pola jest bez znaczenia dla wielkości liter', t => {
+test('maskowanie: nazwa pola jest bez znaczenia dla wielkości liter', t => {
     t.false(maskSensitiveData(`AUTHORIZATION: Bearer ${TOKEN}`).includes(TOKEN));
     t.false(maskSensitiveData(`X-Api-Key=${TOKEN}`).includes(TOKEN));
 });
 
-test('K8: api_key=... (forma tekstowa) nadal maskowane', t => {
+test('maskowanie: api_key=... (forma tekstowa) nadal maskowane', t => {
     t.false(maskSensitiveData(`api_key=${TOKEN}`).includes(TOKEN));
 });
 
-test('K8: kształty OpenRouter / Groq / xAI', t => {
+test('maskowanie: kształty OpenRouter / Groq / xAI', t => {
     const or = 'sk-or-v1-0123456789abcdef0123456789abcdef';
     const groq = 'gsk_0123456789abcdefABCDEF0123456789';
     const xai = 'xai-0123456789abcdefABCDEF0123456789';
@@ -118,12 +118,12 @@ test('K8: kształty OpenRouter / Groq / xAI', t => {
     t.true(containsSensitiveData(xai));
 });
 
-test('K8: nowy klucz OpenAI (sk-proj-) też jest kształtem', t => {
+test('maskowanie: klucz OpenAI (sk-proj-) też jest kształtem', t => {
     const key = 'sk-proj-0123456789abcdefABCDEF0123456789';
     t.false(maskSensitiveData(`key=${key}`).includes(key));
 });
 
-test('K8: maskowanie po nazwie nie zjada zwykłego tekstu ani krótkich wartości', t => {
+test('maskowanie: po nazwie nie zjada zwykłego tekstu ani krótkich wartości', t => {
     t.is(maskSensitiveData('To jest zwykła notatka o projekcie.'), 'To jest zwykła notatka o projekcie.');
     // Krótka wartość (poniżej progu sekretu) zostaje czytelna.
     t.is(maskSensitiveData('key: abc'), 'key: abc');
@@ -131,25 +131,25 @@ test('K8: maskowanie po nazwie nie zjada zwykłego tekstu ani krótkich wartośc
     t.is(maskSensitiveData('{"max_tokens":16384,"model":"deepseek-chat"}'), '{"max_tokens":16384,"model":"deepseek-chat"}');
 });
 
-test('K8: maskowanie jest idempotentne (drugi przebieg nic nie psuje)', t => {
+test('maskowanie: jest idempotentne (drugi przebieg nic nie psuje)', t => {
     const once = maskSensitiveData(`Authorization: Bearer ${TOKEN}`);
     t.is(maskSensitiveData(once), once);
 });
 
-test('K8: maska po nazwie pola NIE łapie zwykłych słów kończących się na key/token', t => {
+test('maskowanie: maska po nazwie pola NIE łapie zwykłych słów kończących się na key/token', t => {
     const text = 'monkey: bananabanana\nturkey: pieczonyindyk\nhockey: superliga2026';
     t.is(maskSensitiveData(text), text);
 });
 
-// ─── K11 (AUD-security-028): weryfikacja, że K8 domknął JSON-ową drogę ───────────────────
+// ─── weryfikacja drogi JSON-owej ───────────────────
 //
-// Znalezisko mówiło, że oba wzorce vendor-agnostyczne (`api_key`/`password`) wymagają nazwy
-// BEZPOŚREDNIO przed `:` — a `JSON.stringify` wstawia tam cudzysłów, więc ogólna siatka nigdy
-// nie odpalała na drodze obiektowej Loggera. K8 dołożył DRUGI filtr — po NAZWIE pola
-// (`QUOTED_FIELD_RE`) — który tę samą wartość łapie niezależnie od kształtu. Ten test pilnuje,
-// że droga JSON-owa zostaje zamknięta, gdyby ktoś kiedyś ruszył wzorce.
+// Oba wzorce vendor-agnostyczne (`api_key`/`password`) wymagają nazwy BEZPOŚREDNIO przed `:` -
+// a `JSON.stringify` wstawia tam cudzysłów, więc ogólna siatka nigdy nie odpalałaby na drodze
+// obiektowej Loggera bez drugiego filtra po NAZWIE pola (`QUOTED_FIELD_RE`), który tę samą
+// wartość łapie niezależnie od kształtu. Ten test pilnuje, że droga JSON-owa zostaje zamknięta,
+// gdyby ktoś kiedyś ruszył wzorce.
 
-test('K11 028: maska łapie sekret w JSON-ie (pole w cudzysłowie), nie tylko w gołym tekście', t => {
+test('maskowanie: maska łapie sekret w JSON-ie (pole w cudzysłowie), nie tylko w gołym tekście', t => {
     const jawny = maskSensitiveData('api_key: "SECRETVALUE123456"');
     t.false(jawny.includes('SECRETVALUE123456'), jawny);
 
@@ -169,17 +169,17 @@ test('K11 028: maska łapie sekret w JSON-ie (pole w cudzysłowie), nie tylko w 
     t.true(maskSensitiveData('{"Authorization":"Bearer SECRETVALUE123456"}').includes('Bearer'));
 });
 
-test('K11 028: zwykły tekst notatki NIE wpada pod maskę po nazwie pola', t => {
+test('maskowanie: zwykły tekst notatki NIE wpada pod maskę po nazwie pola', t => {
     t.is(maskSensitiveData('{"monkey":"banan i jeszcze wiecej"}'), '{"monkey":"banan i jeszcze wiecej"}');
     t.is(maskSensitiveData('{"max_tokens":"2048"}'), '{"max_tokens":"2048"}');
 });
 
-// ─── K20 (AUD-security-120/133): maska widzi też ZAESCAPOWANY JSON ──────────────────────
+// ─── maska widzi też ZAESCAPOWANY JSON ──────────────────────
 //
-// Klucz nie ginie w jednej stringifikacji — ginie w DRUGIEJ. Gdy obiekt błędu wpadnie jako
+// Klucz nie ginie w jednej stringifikacji - ginie w DRUGIEJ. Gdy obiekt błędu wpadnie jako
 // tekst do pola `message`, a to pole przejdzie przez `JSON.stringify` w Loggerze, nazwa
-// nagłówka wygląda tak: `\"api-key\":\"…\"`. Filtry K8 dopasowywały cudzysłów tylko gołym,
-// więc żaden z nich nie trafiał i klucz lądował jawny w pliku logu. Poniżej — obie warstwy
+// nagłówka wygląda tak: `\"api-key\":\"…\"`. Filtry dopasowujące cudzysłów tylko goły
+// nie trafiłyby, a klucz lądowałby jawny w pliku logu. Poniżej - obie warstwy
 // zaescapowania i obie nazwy nagłówków, których używają nasze platformy.
 
 /** Azure wysyła klucz w nagłówku `api-key` — goła wartość, bez rozpoznawalnego prefiksu. */
@@ -187,7 +187,7 @@ const AZURE_SECRET = 'AZURE123456789SECRET';
 /** LM Studio / Custom / OpenRouter — `Bearer <token>` o kształcie, którego nie znamy. */
 const BEARER_TOKEN = 'lmstudio-abc123def456ghi789';
 
-test('K20: sekret w ZAESCAPOWANYM JSON-ie (Azure api-key) nie zostaje jawny', t => {
+test('maskowanie: sekret w ZAESCAPOWANYM JSON-ie (Azure api-key) nie zostaje jawny', t => {
     const payload = JSON.stringify({ message: JSON.stringify({ headers: { 'api-key': AZURE_SECRET } }) });
     t.true(payload.includes('\\"api-key\\"'), 'fixture ma być zaescapowany');
     const masked = maskSensitiveData(payload);
@@ -196,33 +196,33 @@ test('K20: sekret w ZAESCAPOWANYM JSON-ie (Azure api-key) nie zostaje jawny', t 
     t.true(containsSensitiveData(payload), 'wykrywanie też ma widzieć sekret w zaescapowanym JSON-ie');
 });
 
-test('K20: Bearer <token bez znanego kształtu> w zaescapowanym Authorization', t => {
+test('maskowanie: Bearer <token bez znanego kształtu> w zaescapowanym Authorization', t => {
     const payload = JSON.stringify({ message: JSON.stringify({ headers: { Authorization: `Bearer ${BEARER_TOKEN}` } }) });
     const masked = maskSensitiveData(payload);
     t.false(masked.includes(BEARER_TOKEN), masked);
     t.true(masked.includes('Bearer'), 'schemat autoryzacji zostaje czytelny');
 });
 
-test('K20: Bearer <token bez znanego kształtu> w gołym nagłówku i w zwykłym JSON-ie', t => {
+test('maskowanie: Bearer <token bez znanego kształtu> w gołym nagłówku i w zwykłym JSON-ie', t => {
     t.false(maskSensitiveData(`Authorization: Bearer ${BEARER_TOKEN}`).includes(BEARER_TOKEN));
     t.false(maskSensitiveData(`{"Authorization":"Bearer ${BEARER_TOKEN}"}`).includes(BEARER_TOKEN));
     t.false(maskSensitiveData(`{"api-key":"${AZURE_SECRET}"}`).includes(AZURE_SECRET));
 });
 
-test('K20: DWIE warstwy zaescapowania (stringify po stringify) też są łapane', t => {
+test('maskowanie: DWIE warstwy zaescapowania (stringify po stringify) też są łapane', t => {
     const once = JSON.stringify({ headers: { 'x-api-key': AZURE_SECRET } });
     const thrice = JSON.stringify({ message: JSON.stringify({ message: once }) });
     t.regex(thrice, /\\{3}"x-api-key\\{3}"/, 'fixture ma mieć podwójne zaescapowanie');
     t.false(maskSensitiveData(thrice).includes(AZURE_SECRET), maskSensitiveData(thrice));
 });
 
-test('K20: maska zaescapowanego JSON-a jest idempotentna', t => {
+test('maskowanie: maska zaescapowanego JSON-a jest idempotentna', t => {
     const payload = JSON.stringify({ message: JSON.stringify({ headers: { 'api-key': AZURE_SECRET, Authorization: `Bearer ${BEARER_TOKEN}` } }) });
     const once = maskSensitiveData(payload);
     t.is(maskSensitiveData(once), once);
 });
 
-test('K20: zaescapowany zwykły tekst NIE wpada pod maskę', t => {
+test('maskowanie: zaescapowany zwykły tekst NIE wpada pod maskę', t => {
     const plain = JSON.stringify({ message: JSON.stringify({ monkey: 'banan i jeszcze wiecej', max_tokens: '2048' }) });
     t.is(maskSensitiveData(plain), plain);
 });

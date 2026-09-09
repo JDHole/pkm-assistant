@@ -1,5 +1,5 @@
 /**
- * Bramka równoległości platform lokalnych — co `ChatModel` PODAJE bramce (luki L-04/L-05/L-06).
+ * Bramka równoległości platform lokalnych - co `ChatModel` PODAJE bramce.
  *
  * Sama bramka (`requestGate.ts`) ma własny komplet testów; tutaj pinujemy WEJŚCIE: klucz,
  * pojemność i priorytet, z jakimi model prosi o slot. Bramka jest wstrzykiwana, więc atrapa
@@ -15,7 +15,7 @@ const REQ: ChatRequest = { messages: [{ role: 'user', content: 'hej' }] };
 /**
  * Dekoder-atrapa kształtu OpenAI. Musi być ŻYWY, nie pusty: model rozumie wyłącznie
  * zdarzenia dekodera, więc dostawca bez dekodera nie umiałby oddać ani treści, ani
- * sentinela — a ten plik pinuje kolejność `gate_admitted` → `chunk`.
+ * sentinela - a ten plik pinuje kolejność `gate_admitted` → `chunk`.
  */
 function sseDecoderStub(): StreamDecoder {
     let buffer = '';
@@ -78,13 +78,13 @@ async function finish(transport: ScriptedTransport, p: Promise<unknown>): Promis
     await p.catch(() => { /* sprzątanie */ });
 }
 
-test('L-05: stream() PODAJE bramce priorytet z _gatePriority (brak pola = 1)', async t => {
+test('stream() PODAJE bramce priorytet z _gatePriority (brak pola = 1)', async t => {
     const settings = makeSettings({ chat: { platform: 'lm_studio' }, limits: { local_platform_max_concurrent: 2 } });
 
     const plain = makeModel('lm_studio', settings);
     const p1 = plain.model.stream(REQ, {});
     await flush();
-    t.is(plain.gate.calls[0].priority, 1, 'brak pola = 1 („to główny czat", B.3 SM-05)');
+    t.is(plain.gate.calls[0].priority, 1, 'brak pola = 1 („to główny czat")');
     await finish(plain.transport, p1);
 
     const sub = makeModel('lm_studio', settings);
@@ -95,7 +95,7 @@ test('L-05: stream() PODAJE bramce priorytet z _gatePriority (brak pola = 1)', a
     await finish(sub.transport, p2);
 });
 
-test('L-06: pojemność bramki lokalnej czytana z pkmAssistant.limits.local_platform_max_concurrent', async t => {
+test('pojemność bramki lokalnej czytana z pkmAssistant.limits.local_platform_max_concurrent', async t => {
     const cases: Array<[unknown, number, string]> = [
         [3, 3, 'wartość z ustawień jedzie wprost'],
         [undefined, 1, 'brak ustawienia = 1 (najostrożniejszy default)'],
@@ -114,7 +114,7 @@ test('L-06: pojemność bramki lokalnej czytana z pkmAssistant.limits.local_plat
     }
 });
 
-test('L-04: _streamGateLimit() oddaje pojemność bramki tej platformy (chmura = 0)', t => {
+test('_streamGateLimit() oddaje pojemność bramki tej platformy (chmura = 0)', t => {
     const local = makeModel('lm_studio', makeSettings({ chat: { platform: 'lm_studio' }, limits: { local_platform_max_concurrent: 4 } }));
     t.is(local.model._streamGateLimit(), 4, 'platforma lokalna: pojemność z ustawień');
 
@@ -141,10 +141,10 @@ test('gate_admitted leci NATYCHMIAST dla platformy bez bramki', async t => {
     t.true(order.includes('chunk'));
 });
 
-// ── F10 (mutacje): cykl życia biletu, którego nie pilnował żaden test ────────
+// ── Cykl życia biletu, którego nie pilnował żaden test ────────
 //
-// Bieg mutacyjny na `ChatModel.ts` pokazał trzy nieprzypięte miejsca: bilet toru BEZ
-// strumienia (branie i oddawanie go przy Stopie) oraz strażnik podwójnego zwolnienia slotu.
+// Trzy nieprzypięte miejsca: bilet toru BEZ strumienia (branie i oddawanie go przy Stopie)
+// oraz strażnik podwójnego zwolnienia slotu.
 
 /** Bilet sterowany z testu: wjazd rozstrzyga test, a `cancel`/`release` się liczą. */
 interface ControlledTicket extends GateTicket {
@@ -153,7 +153,7 @@ interface ControlledTicket extends GateTicket {
     admit(ok?: boolean): void;
 }
 
-/** Bramka, która NIKOGO nie wpuszcza sama z siebie — każdy bilet czeka na test. */
+/** Bramka, która NIKOGO nie wpuszcza sama z siebie - każdy bilet czeka na test. */
 function makeControlledGate(): RequestGateLike & { tickets: ControlledTicket[] } {
     const tickets: ControlledTicket[] = [];
     return {
@@ -177,7 +177,7 @@ function makeControlledGate(): RequestGateLike & { tickets: ControlledTicket[] }
 
 const WISI = Symbol('promisa nie rozstrzygnięta');
 
-/** Czeka na rozstrzygnięcie albo oddaje `WISI` — zamiast wieszać cały bieg testów. */
+/** Czeka na rozstrzygnięcie albo oddaje `WISI` - zamiast wieszać cały bieg testów. */
 async function settleOrHang(p: Promise<unknown>, ms = 400): Promise<unknown> {
     return Promise.race([
         p.then(v => ({ ok: v }), e => ({ err: e })),

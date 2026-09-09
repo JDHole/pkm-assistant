@@ -139,12 +139,12 @@ test('delete kasuje szablon, kopia u agenta zostaje', async t => {
     t.truthy(vault.files['.pkm-assistant/sub-agents/klara-zwiadowca/SUB_AGENT.yaml']);
 });
 
-// ─── AUD-bledy-010: ta sama dziura w MAGAZYNIE SZABLONÓW ────────────────────
+// ─── ta sama dziura w MAGAZYNIE SZABLONÓW ────────────────────
 //
-// `_write` pisał KNOWLEDGE.md tylko pod `if (data.prompt)`, więc „wersja v3" szablonu
-// z wyczyszczoną metodą niosła dalej metodę z v2 - i taką kopię dostawał każdy nowy sub.
+// Gdyby `_write` pisał KNOWLEDGE.md tylko pod `if (data.prompt)`, „wersja v3" szablonu
+// z wyczyszczoną metodą niosłaby dalej metodę z v2 - i taką kopię dostawałby każdy nowy sub.
 
-test('AUD-bledy-010: wyczyszczona metoda znika z szablonu (v2 nie wraca w v3)', async t => {
+test('wyczyszczona metoda znika z szablonu (v2 nie wraca w v3)', async t => {
     const vault = makeVault();
     const store = new SubAgentTemplateStore(vault);
     await store.createFromData({ name: 'Zwiadowca', description: 'zbiera', prompt: 'METODA v1' });
@@ -156,7 +156,7 @@ test('AUD-bledy-010: wyczyszczona metoda znika z szablonu (v2 nie wraca w v3)', 
     t.is(store.get('zwiadowca').prompt, '');
 });
 
-test('AUD-bledy-010: szablon z metodą zapisuje się jak dotąd', async t => {
+test('szablon z metodą zapisuje się jak dotąd', async t => {
     const vault = makeVault();
     const store = new SubAgentTemplateStore(vault);
     await store.createFromData({ name: 'Zwiadowca', description: 'zbiera', prompt: 'METODA v1' });
@@ -166,14 +166,14 @@ test('AUD-bledy-010: szablon z metodą zapisuje się jak dotąd', async t => {
     t.is(vault.files[`${BASE}/zwiadowca/KNOWLEDGE.md`], 'METODA v2');
 });
 
-// ─── AUD-testy-040 (kanon; duplikat AUD-testy-039): delete — gałąź catch (porażka) bez testu ─
+// ─── delete — gałąź catch (porażka) ─────────────────────────────────────────
 //
 // `delete()` ma dwie drogi wyjścia: `return true` po sukcesie (testowana wyżej, „delete kasuje
-// szablon...") i `return false` w `catch` — nietestowana. UWAGA: `rmdir` ma WŁASNY, wewnętrzny
+// szablon...") i `return false` w `catch`. UWAGA: `rmdir` ma WŁASNY, wewnętrzny
 // try/catch (`SubAgentTemplateStore.ts:187`, `catch { /* ok */ }`) — rzucający `rmdir` NIE
 // dotrze do zewnętrznego `catch`, trzeba użyć `remove`, żeby realnie trafić w tę gałąź.
 
-test('AUD-testy-040: delete — gałąź catch (adapter.remove rzuca) zwraca false, szablon zostaje', async t => {
+test('delete — gałąź catch (adapter.remove rzuca) zwraca false, szablon zostaje', async t => {
     const vault = makeVault();
     const store = new SubAgentTemplateStore(vault);
     await store.createFromData({ name: 'Zwiadowca', description: 'zbiera', prompt: 'Metoda.' });

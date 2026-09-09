@@ -25,7 +25,7 @@ function task(over: Partial<SubTask> & { id: string }): SubTask {
     } as SubTask;
 }
 
-/** Bieg z adresem zwrotnym — tak, jak zakłada go czat przez `origin` (F2). */
+/** Bieg z adresem zwrotnym — tak, jak zakłada go czat przez `origin`. */
 function zTabu(id: string, tabKey: string, over: Partial<SubTask> = {}): SubTask {
     return task({ id, origin: { agentName: 'Klara', tabKey }, ...over });
 }
@@ -168,7 +168,7 @@ test('formatDuration: sekundy, minuty, minuty z resztą, śmieci', t => {
     t.is(formatDuration(NaN), '0 s');
 });
 
-// --- per SESJA (incydent 2026-08-15: chipy przeżywały archiwizację sesji) ---
+// --- per SESJA (chipy nie mogą przeżyć archiwizacji sesji) ---
 
 function zSesji(id: string, sessionPath: string, over: Partial<SubTask> = {}): SubTask {
     return task({ id, origin: { agentName: 'Klara', tabKey: 'Klara', sessionPath }, ...over });
@@ -210,7 +210,7 @@ test('sesja: bieg bez adresu sesji zachowuje się jak dotąd (tabKey → agent)'
     t.is(rows.length, 1);
 });
 
-// ─── Front B (szyba, 2026-08-17): konkret kroku + zadanie od maina ───
+// ─── konkret kroku + zadanie od maina ───
 
 test('szyba: tool.pre niesie konkret z argumentów (path > inne klucze), tool.post rozmiar wyniku', t => {
     const rows = buildStripModel({

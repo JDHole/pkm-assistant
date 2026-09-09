@@ -1,5 +1,5 @@
 /**
- * Advanced tab — models, behavior, utility actions + Save/Delete logic.
+ * Advanced tab - models, behavior, utility actions + Save/Delete logic.
  */
 import { Setting, Notice } from 'obsidian';
 import { UiIcons, setSvg, setSvgLabel } from '../../crystal-soul/index.js';
@@ -11,25 +11,25 @@ import { t } from '../../../core/i18n/index.js';
 // TS-any: profile coordinator data and Obsidian's plugin extension APIs are runtime-only boundaries.
 type UiBoundary = any;
 
-/** E2.8 C9: automaty pamięci per agent (mem_proactive / ratunek / idle-global). */
+/** Automaty pamięci per agent (mem_proactive / ratunek / idle-global). */
 function _renderMemoryAutomation(ctx: UiBoundary, el: HTMLElement) {
     const { formData, plugin } = ctx;
     const head = el.createDiv({ cls: 'cs-section-head' });
     setSvg(head, UiIcons.brain ? UiIcons.brain(14) : UiIcons.zap(14));
     head.createSpan({ text: t('profile.advanced.memory_automation') });
 
-    // mem_proactive — auto-zapis faktów pod koniec tury (steruje decisionTreeInstructions.mem_proactive).
+    // mem_proactive - auto-zapis faktów pod koniec tury (steruje decisionTreeInstructions.mem_proactive).
     if (!formData.prompt_overrides) formData.prompt_overrides = {};
     if (!formData.prompt_overrides.decisionTreeInstructions) formData.prompt_overrides.decisionTreeInstructions = {};
     const dt = formData.prompt_overrides.decisionTreeInstructions;
     renderToggle(el, t('profile.advanced.mem_proactive'), t('profile.advanced.mem_proactive_hint'),
         dt.mem_proactive !== false, (v) => { if (v) delete dt.mem_proactive; else dt.mem_proactive = false; });
 
-    // ratunek przy kompresji — per-agent pole memory_rescue.
+    // ratunek przy kompresji - per-agent pole memory_rescue.
     renderToggle(el, t('profile.advanced.mem_rescue'), t('profile.advanced.mem_rescue_hint'),
         formData.memory_rescue !== false, (v) => { formData.memory_rescue = v; });
 
-    // zapis po bezczynności — GLOBALNY (read-only; per-agent za drogie — S23).
+    // zapis po bezczynności - GLOBALNY (read-only; per-agent za drogie).
     const idleMin = plugin?.env?.settings?.pkmAssistant?.idleConsolidationMinutes ?? 20;
     el.createDiv({
         text: t('profile.advanced.idle_global', { minutes: idleMin === 0 ? t('profile.advanced.idle_off') : `${idleMin} min` }),
@@ -62,13 +62,13 @@ export async function renderAdvancedTab(ctx: UiBoundary, el: HTMLElement) {
             ...models.map(m => ({ value: `${m.platform}/${m.model}`, label: `${platformNames[m.platform] || m.platform} — ${m.model}${m.isDefault ? ' ★' : ''}` }))
         ];
     };
-    // E2.8 C9: tylko model GŁÓWNY — selecty subów (researcher/strateg) wywalone (model ustawiasz
-    // per członek Ekipy, F5/E2.4; „model stratega" i tak był martwy).
-    // B6 druga runda (2026-09-02): KANON to `models.main` — select go pokazuje i go ZMIENIA;
-    // legacy `model` się nie odradza (patrz modelFieldSync.ts — był to żywy bug).
-    // Review Opusa p.4: onChange NIE dotyka formData.model — resolveMainModelForForm
-    // (AgentProfileView.ts) już je wyzerowało przy otwarciu profilu, a legacy pole nigdy nie
-    // wraca do życia (patrz modelFieldSync.ts), więc nie ma czego tu przypisywać ponownie.
+    // Tylko model GŁÓWNY - selecty subów (researcher/strateg) wywalone (model ustawiasz per
+    // członek Ekipy; „model stratega" i tak był martwy).
+    // KANON to `models.main` - select go pokazuje i go ZMIENIA; legacy `model` się nie odradza
+    // (patrz modelFieldSync.ts).
+    // onChange NIE dotyka formData.model - resolveMainModelForForm (AgentProfileView.ts) już je
+    // wyzerowało przy otwarciu profilu, a legacy pole nigdy nie wraca do życia (patrz
+    // modelFieldSync.ts), więc nie ma czego tu przypisywać ponownie.
     renderShard(modelsGrid, t('profile.advanced.main_model'), t('profile.advanced.main_model_hint'), formData.models?.main || '', 'select',
         v => {
             formData.models = applyMainModelChange(formData.models, v).models;
@@ -80,10 +80,10 @@ export async function renderAdvancedTab(ctx: UiBoundary, el: HTMLElement) {
     headBehavior.createSpan({ text: t('profile.behavior') });
 
     const behaviorGrid = el.createDiv({ cls: 'cs-shards' });
-    // Temperatura — JEDYNE miejsce po C4 (wyprowadzka z Persony).
+    // Temperatura - JEDYNE miejsce (wyprowadzka z Persony).
     renderShard(behaviorGrid, t('profile.temperature'), t('profile.advanced.temperature_hint'), formData.temperature, 'slider',
         v => formData.temperature = v, { min: 0, max: 1, step: 0.1 });
-    // E2.8 A6/C9: język odpowiedzi agenta (auto = globalny locale).
+    // Język odpowiedzi agenta (auto = globalny locale).
     renderShard(behaviorGrid, t('profile.advanced.language'), t('profile.advanced.language_hint'), formData.language || 'auto', 'select',
         v => formData.language = v, {
             options: [
@@ -93,7 +93,7 @@ export async function renderAdvancedTab(ctx: UiBoundary, el: HTMLElement) {
             ]
         });
 
-    // A1: jedyny jawny escape hatch do `.pkm-assistant`, `.obsidian`, `.trash`
+    // Jedyny jawny escape hatch do `.pkm-assistant`, `.obsidian`, `.trash`
     // i chronionych plików vaulta. Default OFF; autonomia/YOLO pozostaje osobną osią.
     const headAdmin = el.createDiv({ cls: 'cs-section-head' });
     setSvg(headAdmin, UiIcons.shield(14));
@@ -111,17 +111,15 @@ export async function renderAdvancedTab(ctx: UiBoundary, el: HTMLElement) {
         cls: 'setting-item-description cs-admin-access-warning'
     });
 
-    // Automaty pamięci (S23) — sterowanie ON/OFF wyprowadzone z Pamięci
+    // Automaty pamięci - sterowanie ON/OFF wyprowadzone z Pamięci
     _renderMemoryAutomation(ctx, el);
 
-    // Tools section — utility actions
+    // Tools section - utility actions
     const headTools = el.createDiv({ cls: 'cs-section-head' });
     setSvg(headTools, UiIcons.zap(14));
     headTools.createSpan({ text: t('profile.tools') });
 
     const toolsGrid = el.createDiv({ cls: 'cs-adv-tools' });
-
-    // E2.8 A4: guzik „Przekompiluj Playbook + Vault Map" usunięty (Playbook Builder skasowany).
 
     // Reset prompt overrides
     const resetBtn = toolsGrid.createEl('button', { cls: 'cs-adv-tools__btn cs-adv-tools__btn--warn' });
@@ -166,7 +164,7 @@ export async function handleSave(ctx: UiBoundary) {
         return;
     }
 
-    // E2.8 C2: create-mode skasowany — agent zawsze istnieje (tworzony od razu przy „+").
+    // Create-mode skasowany - agent zawsze istnieje (tworzony od razu przy „+").
     // Zapis to WYŁĄCZNIE update istniejącego agenta.
     try {
         const updates: UiBoundary = {
@@ -175,38 +173,38 @@ export async function handleSave(ctx: UiBoundary) {
             description: formData.description,
             created_at: formData.createdAt,
             temperature: formData.temperature,
-            // E2.8 A6/C7/C9: język + domyślna autonomia per agent ('' → null = globalna).
+            // Język + domyślna autonomia per agent ('' → null = globalna).
             language: formData.language || 'auto',
             default_autonomy: formData.default_autonomy || null,
             admin_access: formData.admin_access === true,
-            // S28 D6: uczestnictwo w komunikatorze (default ON, zapisywane tylko gdy false).
+            // Uczestnictwo w komunikatorze (default ON, zapisywane tylko gdy false).
             komunikator_visible: formData.komunikator_visible !== false,
             focus_folders: formData.focus_folders,
             model: formData.model || null,
             skills: formData.skills,
-            // E2.9 C1: typy artefaktów podpięte per agent.
+            // Typy artefaktów podpięte per agent.
             artifact_types: formData.artifact_types,
-            // E2.8 C1: jedna oś narzędziowa (disabled_tools) zamiast enabled_tools.
+            // Jedna oś narzędziowa (disabled_tools) zamiast enabled_tools.
             disabled_tools: formData.disabled_tools,
             preferred_servers: formData.preferred_servers,
             preferred_tools: formData.preferred_tools,
             mcp_servers: formData.mcp_servers,
             sub_agents: formData.sub_agents,
-            // F02 punkt 5 (AUD-code-review-024, druga runda): `sub_agent_enabled` WYCIĘTY z payloadu.
-            // `Agent.allowedFields` nigdy go nie miał — `AgentProfileView.ts:91` czyta
-            // `agent.subAgentEnabled`, pole które nie istnieje NIGDZIE w klasie (zawsze
-            // `undefined`), więc toggle „Deleguj do sub-agentów" (`profile_team.ts:65`) jest
-            // martwym UI bez żadnego czytelnika w runtime — delegację steruje wyłącznie oś
-            // narzędziowa (`disabled_tools`, grupa `delegation`). Zostawienie pola w `updates`
-            // po dołożeniu `log.warn` na nieznanych kluczach (punkt 030 wyżej) krzyczałoby przy
-            // KAŻDYM zapisie profilu. Świadomie NIE ożywiamy toggle'a — to osobna decyzja UI.
+            // `sub_agent_enabled` WYCIĘTY z payloadu: `Agent.allowedFields` nigdy go nie miało -
+            // `AgentProfileView.ts:91` czyta `agent.subAgentEnabled`, pole które nie istnieje
+            // NIGDZIE w klasie (zawsze `undefined`), więc toggle „Deleguj do sub-agentów"
+            // (`profile_team.ts:65`) jest martwym UI bez żadnego czytelnika w runtime -
+            // delegację steruje wyłącznie oś narzędziowa (`disabled_tools`, grupa `delegation`).
+            // Zostawienie pola w `updates` krzyczałoby przy KAŻDYM zapisie profilu, bo nieznane
+            // klucze w payloadzie są logowane jako ostrzeżenie. Świadomie NIE ożywiamy toggle'a -
+            // to osobna decyzja UI.
             default_permissions: formData.permissions,
             approval_toggles: formData.approval_toggles || {},
             models: formData.models,
             prompt_overrides: formData.prompt_overrides,
             agent_rules: formData.agent_rules || '',
             crystal_seed: formData.crystal_seed || null,
-            // E2.8 C9: prompty robocze per agent (puste = resolver global/factory).
+            // Prompty robocze per agent (puste = resolver global/factory).
             compression_prompt: formData.compression_prompt || '',
             save_session_prompt: formData.save_session_prompt || '',
             archive_prompt: formData.archive_prompt || '',
@@ -217,11 +215,11 @@ export async function handleSave(ctx: UiBoundary) {
         if (!agent.isBuiltIn && formData.name !== agent.name) {
             updates.name = formData.name;
         }
-        // AUD-code-review-025 (F02): snapshot PRZED zapisem. `agent` jest ŻYWĄ instancją, którą
-        // `agentManager.updateAgent` mutuje w miejscu (`agent.update(rest)`) — porównanie PO
-        // `await` niżej widziałoby `updates.x` kontra już-zmutowane `agent.x`, czyli zawsze
-        // równe. Cały blok „co się zmieniło" był martwy: notice „Zapisano: …, Uprawnienia"
-        // wyświetlał się (albo nie) niezależnie od tego, co user faktycznie zmienił.
+        // Snapshot PRZED zapisem: `agent` jest ŻYWĄ instancją, którą `agentManager.updateAgent`
+        // mutuje w miejscu (`agent.update(rest)`) - porównanie PO `await` niżej widziałoby
+        // `updates.x` kontra już-zmutowane `agent.x`, czyli zawsze równe. Bez snapshotu blok
+        // „co się zmieniło" jest martwy: notice „Zapisano: …, Uprawnienia" wyświetla się (albo
+        // nie) niezależnie od tego, co user faktycznie zmienił.
         const before = {
             personality: agent.personality,
             focusFolders: agent.focusFolders,
@@ -239,17 +237,16 @@ export async function handleSave(ctx: UiBoundary) {
         };
         const saved = await agentManager.updateAgent(agent.name, updates);
         if (!saved) {
-            // K5 (AUD-code-review-024): odmowa (kolizja nazwy / pad przenosin pamięci / built-in)
-            // już pokazała swój własny Notice z AgentManager. Nic nie wylądowało na dysku —
-            // cofamy bufor nazwy do tego, co NAPRAWDĘ jest zapisane, żeby panel nie kłamał
-            // „Zapisano" nad odrzuconą zmianą.
+            // Odmowa (kolizja nazwy / pad przenosin pamięci / built-in) już pokazała swój
+            // własny Notice z AgentManager. Nic nie wylądowało na dysku - cofamy bufor nazwy do
+            // tego, co NAPRAWDĘ jest zapisane, żeby panel nie kłamał „Zapisano" nad odrzuconą
+            // zmianą.
             formData.name = agent.name;
             ctx.renderActiveTab();
             return;
         }
         const updatedAgent = agentManager.getAgent(formData.name);
         if (updatedAgent && plugin.agentManager?.playbookManager) {
-            // E2.8 A4: compilePlaybook usunięty — zostaje compileVaultMap.
             await plugin.agentManager.playbookManager.compileVaultMap(updatedAgent, plugin);
         }
         const details = [];
@@ -265,10 +262,10 @@ export async function handleSave(ctx: UiBoundary) {
         if (updates.admin_access !== before.adminAccess) details.push(t('profile.advanced.admin_access'));
         if (updates.komunikator_visible !== before.komunikatorVisible) details.push(t('profile.perm.komunikator_visible'));
         if (JSON.stringify(updates.models) !== JSON.stringify(before.models)) details.push(t('profile.advanced.models_label'));
-        // AUD-code-review-030: `agent.defaultPermissions` nie istnieje — żywe pole nazywa się
-        // `permissions` (Agent.ts:178). Literówka przechodziła przez otwartą sygnaturę indeksu
-        // klasy Agent bez błędu typecheck, a warunek był PRAWDZIWY przy każdym zapisie
-        // (JSON.stringify(undefined) === undefined, nigdy nie równe stringowi z updates).
+        // `agent.defaultPermissions` nie istnieje - żywe pole nazywa się `permissions`
+        // (Agent.ts:178). Literówka przechodzi przez otwartą sygnaturę indeksu klasy Agent bez
+        // błędu typecheck, a warunek byłby PRAWDZIWY przy każdym zapisie (JSON.stringify(undefined)
+        // === undefined, nigdy nie równe stringowi z updates).
         if (JSON.stringify(updates.default_permissions) !== JSON.stringify(before.permissions)) details.push(t('profile.advanced.permissions_label'));
 
         const what = details.length > 0 ? details.join(', ') : t('profile.advanced.config');

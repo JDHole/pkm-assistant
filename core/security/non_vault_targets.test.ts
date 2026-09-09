@@ -1,26 +1,22 @@
 /**
- * K14 (2026-08-23) — WHITELISTA FOLDERÓW MIERZY WYŁĄCZNIE CELE-ŚCIEŻKI.
+ * WHITELISTA FOLDERÓW MIERZY WYŁĄCZNIE CELE-ŚCIEŻKI.
  *
- * Stan przed naprawą (zaszłość, nie regresja — zmierzona także w drzewie sprzed napraw
- * z 22.08):
+ * Bez tego rozróżnienia `PermissionSystem.checkPermission` wołałby
+ * `AccessGuard.checkAccess(agent, targetPath, …)` dla KAŻDEJ akcji z niepustym `targetPath`,
+ * także dla akcji z `NON_VAULT_TARGET_ACTIONS` (`web.search` → zapytanie, `web.read` → adres,
+ * `agent.message` → adresat, `delegate` → nazwa roli, `external.call` → nazwa narzędzia) —
+ * No-Go, pliki chronione, whitelista `focusFolders` i bariera `scope.folders` suba mierzyłyby
+ * ten ciąg JAK ŚCIEŻKĘ. Skutek: agent w trybie „Tylko przypisane" (`guidance_mode: false`)
+ * z whitelistą np. `['A/']` dostawałby dla `web.search "jak dziala X"` odmowę
+ * „Path … is outside the agent's workspace" — czyli tracił wyszukiwarkę, pobieranie stron,
+ * pocztę do innych agentów i delegację w całości.
  *
- *   • `PermissionSystem.checkPermission` woła `AccessGuard.checkAccess(agent, targetPath, …)`
- *     dla KAŻDEJ akcji z niepustym `targetPath`;
- *   • dla akcji z `NON_VAULT_TARGET_ACTIONS` (`web.search` → zapytanie, `web.read` → adres,
- *     `agent.message` → adresat, `delegate` → nazwa roli, `external.call` → nazwa narzędzia)
- *     `targetIsVaultPath: false` wyłączało TYLKO kanonizację (K13);
- *   • No-Go, pliki chronione, whitelista `focusFolders` i bariera `scope.folders` suba
- *     nadal mierzyły ten ciąg JAK ŚCIEŻKĘ.
- *
- * Skutek: agent w trybie „Tylko przypisane" (`guidance_mode: false`) z whitelistą np. `['A/']`
- * dostawał dla `web.search "jak dziala X"` odmowę „Path … is outside the agent's workspace" —
- * czyli tracił wyszukiwarkę, pobieranie stron, pocztę do innych agentów i delegację w całości.
- *
- * Naprawa: `AccessGuard.checkAccess` przy `opts.targetIsVaultPath === false` wraca NATYCHMIAST
- * (`{ allowed: true, reason: 'non-vault-target' }`), przed jakimkolwiek sprawdzeniem ścieżkowym.
- * Reszta przepływu `checkPermission` (klasyfikacja ryzyka, zgody, `disabled_tools`) bez zmian —
- * te akcje mają WŁASNE bramki: web = rejestr znanych adresów + zgoda usera, poczta = widoczność
- * i limity, delegacja = przecięcie zakresów + głębokość z runtime.
+ * `AccessGuard.checkAccess` przy `opts.targetIsVaultPath === false` wraca NATYCHMIAST
+ * (`{ allowed: true, reason: 'non-vault-target' }`), przed jakimkolwiek sprawdzeniem
+ * ścieżkowym. Reszta przepływu `checkPermission` (klasyfikacja ryzyka, zgody,
+ * `disabled_tools`) bez zmian — te akcje mają WŁASNE bramki: web = rejestr znanych adresów
+ * + zgoda usera, poczta = widoczność i limity, delegacja = przecięcie zakresów + głębokość
+ * z runtime.
  */
 import test, { type ExecutionContext } from 'ava';
 import { AccessGuard } from './AccessGuard.js';
@@ -57,12 +53,12 @@ function assertNieOdmowa(
     );
 }
 
-test.serial('K14: agent „Tylko przypisane" zachowuje web/pocztę/delegację mimo whitelisty folderów', t2 => {
+test.serial('agent „Tylko przypisane" zachowuje web/pocztę/delegację mimo whitelisty folderów', t2 => {
     AccessGuard.setNoGoFolders([]);
     const ps = new PermissionSystem(null as never, {} as never);
     const agent = makeAgent();
 
-    // Zapytanie do wyszukiwarki. Przed K14: „Path "jak dziala X" is outside the agent's workspace".
+    // Zapytanie do wyszukiwarki — nie ma trafiać w whitelistę folderów jak ścieżka.
     assertNieOdmowa(t2, ps.checkPermission(agent, 'web.search', 'jak dziala X'), 'web.search');
 
     // Adres strony — z długim query i `..` w środku (sanitizePath odrzuciłby go jako ścieżkę).
@@ -73,7 +69,7 @@ test.serial('K14: agent „Tylko przypisane" zachowuje web/pocztę/delegację mi
     assertNieOdmowa(t2, ps.checkPermission(agent, 'delegate', 'worker'), 'delegate');
 });
 
-test.serial('K14: whitelista folderów NADAL działa dla celów-ścieżek', t2 => {
+test.serial('whitelista folderów NADAL działa dla celów-ścieżek', t2 => {
     AccessGuard.setNoGoFolders([]);
     const ps = new PermissionSystem(null as never, {} as never);
     const agent = makeAgent();
@@ -85,13 +81,13 @@ test.serial('K14: whitelista folderów NADAL działa dla celów-ścieżek', t2 =
     t2.true(ps.checkPermission(agent, 'vault.read', 'A/x.md').allowed, 'plik z whitelisty przechodzi');
 });
 
-test.serial('K14: zakres sub-agenta tnie ścieżki, ale nie zapytania', t2 => {
+test.serial('zakres sub-agenta tnie ścieżki, ale nie zapytania', t2 => {
     AccessGuard.setNoGoFolders([]);
     const ps = new PermissionSystem(null as never, {} as never);
     const agent = makeAgent();
     const scopeFolders = ['A/sub/'];
 
-    // Bariera suba na prawdziwej ścieżce — bez zmian (S33 Z1).
+    // Bariera suba na prawdziwej ścieżce — bez zmian.
     const poza = ps.checkPermission(agent, 'vault.read', 'A/x.md', { scopeFolders });
     t2.false(poza.allowed, 'plik poza scope suba musi się odbić');
 
@@ -103,7 +99,7 @@ test.serial('K14: zakres sub-agenta tnie ścieżki, ale nie zapytania', t2 => {
     );
 });
 
-test.serial('K14: strażnik przepuszcza cel nie-vaultowy, ale bez flagi zostaje fail-closed', t2 => {
+test.serial('strażnik przepuszcza cel nie-vaultowy, ale bez flagi zostaje fail-closed', t2 => {
     AccessGuard.setNoGoFolders([]);
     const agent = makeAgent();
 

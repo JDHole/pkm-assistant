@@ -1,15 +1,15 @@
 /**
- * Memory tab (Pamięć) — E2.8 C8 (S21/S23 + zgodność z Memory v3). Trzy pod-zakładki:
- *  - Brain: sekcje „Na teraz" (User/Środowisko — edycja inline add/edit/delete przez writer
- *    memory.writeNaTeraz, E2.8 D4) + lista WSZYSTKICH notatek brain/*.md (klik → edytor,
+ * Memory tab (Pamięć). Trzy pod-zakładki:
+ *  - Brain: sekcje „Na teraz" (User/Środowisko - edycja inline add/edit/delete przez writer
+ *    memory.writeNaTeraz) + lista WSZYSTKICH notatek brain/*.md (klik → edytor,
  *    usuwanie ścieżką memory_delete) + audit.log.
- *    OUT: dawny inline CRUD sekcji indeksu (pisanie całego brain.md adapterem — niezgodne z v3;
- *    indeks buduje LLM/rebuildBrainIndex). S32 Z1b: doszedł „Log wpisów" (`brain.log`, read-only).
- *  - Sesje: TYLKO zarchiwizowane (aktywne → Persona, zrobione w S32 Z1c). Usuwanie + „Podsumuj rozmowy".
+ *    OUT: inline CRUD sekcji indeksu (pisanie całego brain.md adapterem - niezgodne z v3;
+ *    indeks buduje LLM/rebuildBrainIndex). Osobno: „Log wpisów" (`brain.log`, read-only).
+ *  - Sesje: TYLKO zarchiwizowane (aktywne → Persona). Usuwanie + „Podsumuj rozmowy".
  *  - Streszczenia: L1/L2/L3 czytelnia + „Sumaryzuj streszczenia" (konsolidacja w górę).
- * Oba guziki konsolidacji idą torem S29 „Puls pamięci" (`startConsolidationRun`, modules/chat) —
+ * Oba guziki konsolidacji idą torem „Puls pamięci" (`startConsolidationRun`, modules/chat) -
  * nieblokująco, z oknem przebiegu i paskiem statusu. Patrz `_runArchiveWorkflow` na dole pliku.
- * Toggles automatów (mem_proactive/ratunek/idle) — NIE tu (są w Zaawansowanych, C9).
+ * Toggles automatów (mem_proactive/ratunek/idle) - NIE tu (są w Zaawansowanych).
  */
 import { MarkdownRenderer, Notice, Setting } from 'obsidian';
 import { UiIcons, setSvg } from '../../crystal-soul/index.js';
@@ -61,7 +61,7 @@ export async function renderMemoryTab(ctx: UiBoundary, el: UiBoundary) {
     async function renderSubContent() {
         const renderSeq = ++ctx.__memorySubTabRenderSeq;
         // Element odłączony: budowany poza DOM, podmieniany przez replaceWith() dopiero po
-        // async renderze (bez migotania) — `createDiv()` globalny z obsidiana robi dokładnie
+        // async renderze (bez migotania) - `createDiv()` globalny z obsidiana robi dokładnie
         // to samo co `document.createElement('div')`, bez parenta.
         const nextContent = createDiv();
         nextContent.className = 'cs-profile-content';
@@ -90,13 +90,13 @@ export async function renderMemoryTab(ctx: UiBoundary, el: UiBoundary) {
 }
 
 // ══════════════════════════════════════════════
-// BRAIN — „Na teraz" (defensywnie) + notatki brain/ + audit
+// BRAIN - „Na teraz" (defensywnie) + notatki brain/ + audit
 // ══════════════════════════════════════════════
 
 async function _renderMemoryBrain(ctx: UiBoundary, el: UiBoundary, adapter: UiBoundary, basePath: string, memory: UiBoundary, rerender: () => void) {
     const { agent, plugin } = ctx;
 
-    // ── „Na teraz" (User / Środowisko) — E2.8 D4: edycja inline (add/edit/delete) przez writer
+    // ── „Na teraz" (User / Środowisko) - edycja inline (add/edit/delete) przez writer
     //    memory.writeNaTeraz, NIGDY przez pisanie całego brain.md adapterem. Obie sekcje zawsze
     //    widoczne, żeby user mógł zasiać wpisy w pustej sekcji.
     let brainContent = '';
@@ -160,19 +160,19 @@ async function _renderMemoryBrain(ctx: UiBoundary, el: UiBoundary, adapter: UiBo
         }
     }
 
-    // ── Log wpisów (S32 Z1b) — kronika zapisów do pamięci trwałej, read-only ──
+    // ── Log wpisów - kronika zapisów do pamięci trwałej, read-only ──
     await _renderBrainLogCard(el, adapter, `${basePath}/brain.log`);
 
-    // ── Audit log (E2.8 A4: żywy memory-audit z E1.3) ──
+    // ── Audit log ──
     const auditPath = `${basePath}/audit.log`;
     await _renderMemoryFileCard(ctx, el, adapter, auditPath, UiIcons.history(14), t('profile.memory.audit_log'), t('profile.memory.audit_log_desc'));
 }
 
 /**
- * S32 Z1b: karta „Log wpisów" — ostatnie 50 zdarzeń z `brain.log` (data + operacja + cel).
+ * Karta „Log wpisów" - ostatnie 50 zdarzeń z `brain.log` (data + operacja + cel).
  *
  * READ-ONLY, świadomie bez guzika kasowania: to jedyny ślad tego, co agent wpisał sobie do
- * pamięci sam. Zwijana jak pozostałe karty (`cs-mem-card`), domyślnie zamknięta — na dole
+ * pamięci sam. Zwijana jak pozostałe karty (`cs-mem-card`), domyślnie zamknięta - na dole
  * zakładki ma nie zasłaniać notatek.
  *
  * ⚠️ To NIE `audit.log` (osobna karta niżej, legacy mechanizm ignorowanych `brain_update`).
@@ -221,8 +221,8 @@ function _brainLogOpLabel(op: string) {
 }
 
 /**
- * E2.8 D4: render one editable „Na teraz" section (add / edit / delete per entry). Every mutation
- * goes through `memory.writeNaTeraz` (add/remove ops), NEVER by writing the whole brain.md — the
+ * Render one editable „Na teraz" section (add / edit / delete per entry). Every mutation
+ * goes through `memory.writeNaTeraz` (add/remove ops), NEVER by writing the whole brain.md - the
  * index + short-term sections are rebuilt by the writer, consistent with Memory v3.
  */
 function _renderNaTerazSection(el: UiBoundary, memory: UiBoundary, sectionKey: 'user' | 'environment', label: string, entries: string[], rerender: () => void) {
@@ -245,7 +245,7 @@ function _renderNaTerazSection(el: UiBoundary, memory: UiBoundary, sectionKey: '
         editBtn.addEventListener('click', () => {
             // Swap the text span for an inline input; Enter/blur commits via remove-old + add-new.
             // Element odłączony: budowany przed textSpan.replaceWith(input), brak parenta w tym
-            // momencie — `createEl` globalny z obsidiana robi to samo co
+            // momencie - `createEl` globalny z obsidiana robi to samo co
             // `document.createElement('input')`, bez parenta.
             const input = createEl('input');
             input.type = 'text';
@@ -337,7 +337,7 @@ async function _renderMemoryFileCard(ctx: UiBoundary, el: UiBoundary, adapter: U
 }
 
 // ══════════════════════════════════════════════
-// SESJE — TYLKO zarchiwizowane (aktywne → Persona/faza E)
+// SESJE - TYLKO zarchiwizowane (aktywne → Persona)
 // ══════════════════════════════════════════════
 
 async function _renderMemorySessions(ctx: UiBoundary, el: UiBoundary, adapter: UiBoundary, memory: UiBoundary, rerender: () => void) {
@@ -359,7 +359,7 @@ async function _renderMemorySessions(ctx: UiBoundary, el: UiBoundary, adapter: U
         pageStateKey: 'memorySessionPage',
     });
 
-    // Guzik „Podsumuj rozmowy" — przebieg konsolidacji z oknem review (nie blokuje pracy).
+    // Guzik „Podsumuj rozmowy" - przebieg konsolidacji z oknem review (nie blokuje pracy).
     const btn = el.createEl('button', { cls: 'cs-preset-btn', text: `▶ ${t('profile.memory.summarize_sessions')}` });
     btn.addEventListener('click', () => _runArchiveWorkflow(ctx, memory, rerender));
     el.createDiv({ text: t('profile.memory.summarize_sessions_desc'), cls: 'setting-item-description' });
@@ -469,7 +469,7 @@ function _renderSessionsSection(ctx: UiBoundary, parentEl: UiBoundary, adapter: 
 }
 
 // ══════════════════════════════════════════════
-// STRESZCZENIA — L1/L2/L3 (podgląd; konsolidację odpala guzik w sekcji Sesje)
+// STRESZCZENIA - L1/L2/L3 (podgląd; konsolidację odpala guzik w sekcji Sesje)
 // ══════════════════════════════════════════════
 
 async function _renderMemorySummaries(ctx: UiBoundary, el: UiBoundary, adapter: UiBoundary, basePath: string) {
@@ -515,20 +515,20 @@ async function _renderMemorySummaries(ctx: UiBoundary, el: UiBoundary, adapter: 
         }
         head.addEventListener('click', () => { card.classList.toggle('open'); });
     }
-    // D6 (2026-07-30): drugi guzik („Sumaryzuj streszczenia") WYCIĘTY. Wołał DOKŁADNIE tę samą
-    // akcję co „Podsumuj rozmowy" w sekcji Sesje — pełny plan konsolidacji, w którym L2/L3 i tak
-    // ruszają dopiero po rozstrzygnięciu paczek L1 (bramka `generateGatedSteps`). Dwa guziki
-    // obiecywały wybór, którego nie było. Zostaje jeden, ten ogólniejszy.
+    // Drugi guzik („Sumaryzuj streszczenia") został WYCIĘTY: wołał DOKŁADNIE tę samą akcję co
+    // „Podsumuj rozmowy" w sekcji Sesje - pełny plan konsolidacji, w którym L2/L3 i tak ruszają
+    // dopiero po rozstrzygnięciu paczek L1 (bramka `generateGatedSteps`). Dwa guziki obiecywały
+    // wybór, którego nie było. Zostaje jeden, ten ogólniejszy.
 }
 
 /**
  * Ręczne odpalenie konsolidacji spod guzika „Podsumuj rozmowy" (sekcja Sesje).
  *
- * Kubełek 2 (2026-07-29): przepięte ze STAREGO, blokującego `ArchiveWorkflow.run()` na tor S29
- * „Puls pamięci" (`startConsolidationRun`). Stary tor mielił bez paska statusu, bez kosztu
- * w CostLog i bez „Ponów", a przede wszystkim NIE PILNOWAŁ RÓWNOLEGŁOŚCI: user mógł kliknąć guzik
- * w trakcie trwającego przebiegu S29 i dwa procesy mieliły te same pliki. `MemoryOpsCenter`
- * przepuszcza teraz jeden przebieg na raz (drugi trigger tylko otwiera okno tego, który leci).
+ * Przepięte ze STAREGO, blokującego `ArchiveWorkflow.run()` na tor „Puls pamięci"
+ * (`startConsolidationRun`). Stary tor mielił bez paska statusu, bez kosztu w CostLog i bez
+ * „Ponów", a przede wszystkim NIE PILNOWAŁ RÓWNOLEGŁOŚCI: user mógł kliknąć guzik w trakcie
+ * trwającego przebiegu i dwa procesy mieliły te same pliki. `MemoryOpsCenter` przepuszcza teraz
+ * jeden przebieg na raz (drugi trigger tylko otwiera okno tego, który leci).
  *
  * Import chatu jest LENIWY: statycznej krawędzi agents→chat dziś nie ma i nie dokładamy jej do
  * i tak splątanego trójkąta shell↔chat↔agents. Dynamiczne `import()` jest poza regułą ESLinta.
@@ -536,20 +536,19 @@ async function _renderMemorySummaries(ctx: UiBoundary, el: UiBoundary, adapter: 
 async function _runArchiveWorkflow(ctx: UiBoundary, memory: UiBoundary, rerender: () => void) {
     const { plugin, agent } = ctx;
     let model = null;
-    // AUD-wydajnosc-079/RR-08-11: operacja W TLE (guzik "Podsumuj rozmowy") nie zna
-    // lokalnego/globalnego licznika streamow (StreamingManager.shouldUseFreshModel zyje w
-    // modules/chat, a agents->chat to swiadomie tylko leniwy import(), nie statyczna
-    // krawedz - patrz komentarz nad ta funkcja). Najprostsza bezpieczna semantyka: zawsze
-    // callerSkipCache=true. Koszt to jedna konstrukcja adaptera na klikniecie guzika, nie per
-    // request do API (klucze biora sie z tej samej globalnej puli) - i tak nie dzieli
-    // instancji z aktywna tura czatu tego samego agenta w trakcie stream().
+    // Operacja W TLE (guzik "Podsumuj rozmowy") nie zna lokalnego/globalnego licznika streamow
+    // (StreamingManager.shouldUseFreshModel zyje w modules/chat, a agents->chat to swiadomie
+    // tylko leniwy import(), nie statyczna krawedz - patrz komentarz nad ta funkcja). Najprostsza
+    // bezpieczna semantyka: zawsze callerSkipCache=true. Koszt to jedna konstrukcja adaptera na
+    // klikniecie guzika, nie per request do API (klucze biora sie z tej samej globalnej puli) -
+    // i tak nie dzieli instancji z aktywna tura czatu tego samego agenta w trakcie stream().
     try { model = createModelForRole(plugin, 'main', agent, null, true); } catch { model = null; }
     const settings = plugin?.settings?.pkmAssistant || plugin?.env?.settings?.pkmAssistant || {};
     try {
         const { startConsolidationRun } = await import('../../chat/index.js');
-        // P3-2 (review kubełka 2): przy zajętym centrum `startConsolidationRun` zwraca CUDZY,
-        // już trwający przebieg — wtedy NIE zakładamy kolejnej subskrypcji. Bez tego N klików
-        // w guzik podczas jednego przebiegu = N wiszących subskrypcji + N × rerender na koniec.
+        // Przy zajętym centrum `startConsolidationRun` zwraca CUDZY, już trwający przebieg -
+        // wtedy NIE zakładamy kolejnej subskrypcji. Bez tego N klików w guzik podczas jednego
+        // przebiegu = N wiszących subskrypcji + N × rerender na koniec.
         const alreadyRunning = memoryOpsCenter.getActiveRun();
         const run = await (startConsolidationRun as UiBoundary)({
             plugin,
@@ -558,7 +557,7 @@ async function _runArchiveWorkflow(ctx: UiBoundary, memory: UiBoundary, rerender
             agent,
             model,
             settings,
-            // Z4.4: user kliknął sam — pusty plan MUSI dać odpowiedź („nie ma czego konsolidować"),
+            // User kliknął sam - pusty plan MUSI dać odpowiedź („nie ma czego konsolidować"),
             // inaczej guzik wygląda na zepsuty. Cisza jest tylko dla triggerów automatycznych.
             source: 'manual',
         });
@@ -570,7 +569,7 @@ async function _runArchiveWorkflow(ctx: UiBoundary, memory: UiBoundary, rerender
 }
 
 /**
- * Nowy tor jest ASYNCHRONICZNY — dawne `await workflow.run(); rerender()` nie ma już sensu
+ * Ten tor jest ASYNCHRONICZNY - `await workflow.run(); rerender()` nie miałoby tu sensu
  * (guzik wraca od razu, przebieg mieli w tle). Panel odświeżamy dopiero, gdy przebieg się domknie:
  * wtedy nowe L1/L2/L3 są naprawdę na dysku i listy mają co pokazać.
  */
@@ -586,7 +585,7 @@ function _rerenderWhenRunFinishes(run: UiBoundary, rerender: () => void) {
     };
     unsubscribe = memoryOpsCenter.subscribe(({ type, run: finished }) => {
         if (type !== OPS_EVENT.RUN_FINISHED) return;
-        if (finished && finished !== run) return; // cudzy przebieg — nie nasz sygnał
+        if (finished && finished !== run) return; // cudzy przebieg - nie nasz sygnał
         finish();
     });
     // Wyścig: gdyby przebieg zdążył się domknąć, zanim zdążyliśmy się podpiąć.

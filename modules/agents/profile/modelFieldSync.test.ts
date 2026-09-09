@@ -1,15 +1,14 @@
 /**
- * B6 druga runda (2026-09-02) — model.main jest kanonem, legacy `model` się nie odradza.
+ * model.main jest kanonem, legacy `model` się nie odradza.
  *
- * Koordynator znalazł ŻYWĄ ścieżkę, której pierwsza runda B6 nie objęła: `AgentProfileView.ts`
- * budował `formData` blokiem „Sync model ↔ models.main", który KOPIOWAŁ `models.main` do
- * `formData.model` (legacy pole) przy KAŻDYM otwarciu/renderze profilu — a `profile_advanced.ts`
- * zapisuje `updates.model = formData.model || null` przy KAŻDYM „Zapisz profil" (dowolna
- * zakładka). U Kuby wszyscy agenci mają ten sam `models.main` (LM Studio) → „ta sama twarda
- * wartość model: u wszystkich agentów" — dokładnie objaw Niki.
+ * `AgentProfileView.ts` budował `formData` blokiem „Sync model ↔ models.main", który KOPIOWAŁ
+ * `models.main` do `formData.model` (legacy pole) przy KAŻDYM otwarciu/renderze profilu - a
+ * `profile_advanced.ts` zapisuje `updates.model = formData.model || null` przy KAŻDYM „Zapisz
+ * profil" (dowolna zakładka). Gdy wielu agentów dzieli ten sam `models.main`, legacy pole
+ * odradza się i twardo nadpisuje `model:` u wszystkich naraz.
  *
  * Pierwszy test niżej reprodukuje STARY algorytm (kopia diagnostyczna, nie kod produkcyjny) i
- * dowodzi, że jest CZERWONY — po czym pokazuje, że `resolveMainModelForForm` na tym samym
+ * dowodzi, że jest CZERWONY - po czym pokazuje, że `resolveMainModelForForm` na tym samym
  * wejściu jest ZIELONY.
  */
 import test from 'ava';
@@ -18,12 +17,12 @@ import { AgentLoader } from '../AgentLoader.js';
 import { parseYaml } from '../../../core/utils/yamlParser.js';
 import { resolveMainModelForForm, applyMainModelChange } from './modelFieldSync.js';
 
-// ── (a) models.main bez model: stary algorytm dopisywał model:, nowy — nie ────────────────
+// ── (a) models.main bez model: stary algorytm dopisywał model:, nowy - nie ────────────────
 
-test('B6-2 repro: KOPIA starego "Sync model ↔ models.main" dopisuje model: mimo braku edycji usera (CZERWONY dowód diagnozy)', t => {
+test('repro: KOPIA starego "Sync model ↔ models.main" dopisuje model: mimo braku edycji usera (CZERWONY dowód diagnozy)', t => {
     /**
-     * Bajt-w-bajt kopia bloku sprzed tej naprawy (`AgentProfileView.ts`, przed B6 druga runda).
-     * Zostaje tu WYŁĄCZNIE jako dowód diagnozy — nie jest wołana z kodu produkcyjnego.
+     * Bajt-w-bajt kopia bloku sprzed tej naprawy (`AgentProfileView.ts`).
+     * Zostaje tu WYŁĄCZNIE jako dowód diagnozy - nie jest wołana z kodu produkcyjnego.
      */
     function legacySync(formData: { model: string | null; models: Record<string, unknown> }) {
         if ((formData.models as { main?: unknown })?.main) {
@@ -54,10 +53,10 @@ test('B6-2 repro: KOPIA starego "Sync model ↔ models.main" dopisuje model: mim
     t.deepEqual(data.models, { main: 'lm_studio/local-model' }, 'models.main zostaje nietknięty (kanon)');
 });
 
-// ── review Opusa p.3: agent z OBOMA polami naraz (resztki starego buga rundy 2) musi się
-// doczyścić — legacy `model` gaśnie bezwarunkowo, nie jest konserwowany. ─────────────────
+// ── agent z OBOMA polami naraz (resztki starego buga) musi się doczyścić - legacy `model`
+// gaśnie bezwarunkowo, nie jest konserwowany. ─────────────────
 
-test('B6-2 (p.3): agent z OBOMA polami ustawionymi (resztki starego buga) — legacy model gaśnie, nie jest konserwowany', t => {
+test('agent z OBOMA polami ustawionymi (resztki starego buga) — legacy model gaśnie, nie jest konserwowany', t => {
     const fixed = resolveMainModelForForm({ model: 'lm_studio/local-model', models: { main: 'lm_studio/local-model' } });
     t.is(fixed.model, null, 'legacy pole gaśnie bezwarunkowo — nawet gdy niosło tę samą wartość co models.main');
     t.deepEqual(fixed.models, { main: 'lm_studio/local-model' });
@@ -69,9 +68,9 @@ test('B6-2 (p.3): agent z OBOMA polami ustawionymi (resztki starego buga) — le
     t.deepEqual(data.models, { main: 'lm_studio/local-model' });
 });
 
-test('B6-2 (p.3): agent z OBOMA polami o RÓŻNYCH wartościach — models.main (kanon) wygrywa, legacy przepada bez śladu', t => {
+test('agent z OBOMA polami o RÓŻNYCH wartościach — models.main (kanon) wygrywa, legacy przepada bez śladu', t => {
     // Skrajny przypadek: user ręcznie edytował yaml i models.main NIE zgadza się z legacy model.
-    // Kanon rozstrzyga jednoznacznie — nic nie miesza obu wartości.
+    // Kanon rozstrzyga jednoznacznie - nic nie miesza obu wartości.
     const fixed = resolveMainModelForForm({ model: 'openai/gpt-4o-STARY', models: { main: 'anthropic/claude-sonnet-4-5' } });
     t.is(fixed.selectValue, 'anthropic/claude-sonnet-4-5');
     t.is(fixed.model, null);
@@ -80,7 +79,7 @@ test('B6-2 (p.3): agent z OBOMA polami o RÓŻNYCH wartościach — models.main 
 
 // ── (b) legacy `model` bez models.main: jednorazowa migracja, model gaśnie ────────────────
 
-test('B6-2: sam legacy model (bez models.main) — jednorazowa migracja: models.main = wartość, model = null', t => {
+test('sam legacy model (bez models.main) — jednorazowa migracja: models.main = wartość, model = null', t => {
     const fixed = resolveMainModelForForm({ model: 'openai/gpt-4o', models: {} });
     t.is(fixed.selectValue, 'openai/gpt-4o');
     t.is(fixed.model, null, 'legacy pole gaśnie w formData zaraz po migracji');
@@ -95,7 +94,7 @@ test('B6-2: sam legacy model (bez models.main) — jednorazowa migracja: models.
 
 // ── (c) zmiana selecta: pisze TYLKO models.main ────────────────────────────────────────────
 
-test('B6-2: applyMainModelChange — wybór modelu w selekcie pisze TYLKO models.main, model zostaje null', t => {
+test('applyMainModelChange — wybór modelu w selekcie pisze TYLKO models.main, model zostaje null', t => {
     const result = applyMainModelChange({}, 'anthropic/claude-sonnet-4-20250514');
     t.is(result.model, null);
     t.deepEqual(result.models, { main: 'anthropic/claude-sonnet-4-20250514' });
@@ -109,7 +108,7 @@ test('B6-2: applyMainModelChange — wybór modelu w selekcie pisze TYLKO models
 
 // ── (d) wyczyszczenie selecta: brak obu ────────────────────────────────────────────────────
 
-test('B6-2: applyMainModelChange — wyczyszczenie selecta usuwa oba pola (brak model:, brak models: resztek)', t => {
+test('applyMainModelChange — wyczyszczenie selecta usuwa oba pola (brak model:, brak models: resztek)', t => {
     const result = applyMainModelChange({ main: 'openai/gpt-4o' }, '');
     t.is(result.model, null);
     t.false('main' in result.models, 'klucz main USUNIĘTY (nie main:undefined) — inaczej Object.keys(models).length>0 zostawia models:{}');
@@ -123,14 +122,14 @@ test('B6-2: applyMainModelChange — wyczyszczenie selecta usuwa oba pola (brak 
 
 // ── Skrajne wejścia i normalizacja formy obiektowej ────────────────────────────────────────
 
-test('B6-2: resolveMainModelForForm — nic nie ustawione, nic do migrowania', t => {
+test('resolveMainModelForForm — nic nie ustawione, nic do migrowania', t => {
     const fixed = resolveMainModelForForm({});
     t.is(fixed.selectValue, '');
     t.is(fixed.model, null);
     t.deepEqual(fixed.models, {});
 });
 
-test('B6-2: resolveMainModelForForm — models.main w formie obiektowej {platform,model} normalizuje się do stringa', t => {
+test('resolveMainModelForForm — models.main w formie obiektowej {platform,model} normalizuje się do stringa', t => {
     const fixed = resolveMainModelForForm({ model: null, models: { main: { platform: 'openai', model: 'gpt-4o' } } });
     t.is(fixed.selectValue, 'openai/gpt-4o');
     t.deepEqual(fixed.models, { main: 'openai/gpt-4o' });
@@ -156,7 +155,7 @@ function makeMemoryVault() {
     };
 }
 
-test('B6-2 end-to-end: agent z models.main w yamlu — otwarcie profilu + zapis NIEZWIĄZANEGO pola nie dopisuje model:', async t => {
+test('end-to-end: agent z models.main w yamlu — otwarcie profilu + zapis NIEZWIĄZANEGO pola nie dopisuje model:', async t => {
     const vault = makeMemoryVault();
     vault.files['.pkm-assistant/agents/klara.yaml'] = [
         'name: Klara',
@@ -171,7 +170,7 @@ test('B6-2 end-to-end: agent z models.main w yamlu — otwarcie profilu + zapis 
 
     // Symulacja AgentProfileView: otwarcie profilu woła resolveMainModelForForm na formData.
     const sync = resolveMainModelForForm({ model: agent!.model, models: agent!.models });
-    // Symulacja "Zapisz profil" po edycji CZEGOŚ INNEGO (np. personality na innej zakładce) —
+    // Symulacja "Zapisz profil" po edycji CZEGOŚ INNEGO (np. personality na innej zakładce) -
     // dokładnie to, co profile_advanced.handleSave robi z formData po sync.
     agent!.update({ model: sync.model, models: sync.models, personality: 'Energiczna, szybka.' });
     await loader.saveAgent(agent!);

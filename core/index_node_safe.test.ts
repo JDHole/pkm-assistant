@@ -1,16 +1,14 @@
 /**
  * `core/index.ts` musi wstawać w GOŁYM Node — bez Obsidiana.
  *
- * Do clean-room dowodem na to był sam fakt, że AVA odpala testy plików produkcyjnych: gdyby
- * barrel wciągnął `obsidian`, pół zestawu padłoby na starcie. Od chwili, gdy AVA dostała
- * alias `test-support/register-obsidian-for-ava.mjs` (`nodeArguments` w `package.json`),
- * ten dowód PRZESTAŁ ISTNIEĆ: w każdym teście `obsidian` jest rozwiązywalny, więc
- * przypadkowy import obsidianowego pliku do barrela przeszedłby niezauważony i wywalił
- * się dopiero u usera.
+ * AVA ma alias `test-support/register-obsidian-for-ava.mjs` (`nodeArguments` w
+ * `package.json`), więc `obsidian` jest rozwiązywalny w KAŻDYM teście — sam fakt, że
+ * AVA odpala testy plików produkcyjnych, NIE dowodzi node-safety barrela: przypadkowy
+ * import obsidianowego pliku do barrela przeszedłby niezauważony i wywalił się dopiero
+ * u usera.
  *
  * Dlatego ten test wychodzi z procesu AVA i odpala barrel w OSOBNYM Node BEZ aliasu.
- * Jedyne, co dokłada, to `--import=tsx` (transpilacja TS + kontrakt specifierów `.js`,
- * patrz `Refaktor/Decyzje_Sesji/2026-07-30_ts0_raport.md`).
+ * Jedyne, co dokłada, to `--import=tsx` (transpilacja TS + kontrakt specifierów `.js`).
  */
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';

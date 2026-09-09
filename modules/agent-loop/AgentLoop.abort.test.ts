@@ -1,17 +1,16 @@
 /**
- * AgentLoop — PRZERWANIE z zewnątrz kończy pętlę uczciwie, nie błędem.
+ * AgentLoop - PRZERWANIE z zewnątrz kończy pętlę uczciwie, nie błędem.
  *
- * DLACZEGO ten plik istnieje (FAIL 3 żywego smoke'a 2026-08-15, 17:58):
- * user kliknął Stop na biegu suba. `requestStop` → `abortCtl.stop()` →
- * `ChatModel.stopStream()` → `xhr.abort()`. Adapter po abercie NIE woła ani
- * `done()`, ani `error()`, więc promisa streamu wisiała — pętla stała na `await`
- * aż po 124,7 s strzelił per-call budzik. Karta biegu kończyła się jako **błąd**
- * („Model timeout"), a panel do tego czasu pokazywał „zatrzymywanie…".
+ * DLACZEGO: user klika Stop na biegu suba. `requestStop` → `abortCtl.stop()` →
+ * `ChatModel.stopStream()` → `xhr.abort()`. Adapter po abercie NIE wolno wołać
+ * ani `done()`, ani `error()` z pustymi rękami - inaczej promisa streamu wisi,
+ * pętla stoi na `await` aż strzeli per-call budzik, a bieg kończy się jako
+ * **błąd** ("Model timeout") mimo że user go świadomie zatrzymał.
  *
  * Fix ma dwie warstwy: `stopStream` ROZSTRZYGA promisę (znacznik `_aborted`,
  * `modules/models/ChatModel.stopStream.test.ts`), a pętla mapuje takie
- * odrzucenie na `stoppedBy:'abort'` — czyli na zejście, które runner tłumaczy na
- * status `aborted` i powiadomienie „przerwany". Te testy pinują drugą warstwę.
+ * odrzucenie na `stoppedBy:'abort'` - czyli na zejście, które runner tłumaczy na
+ * status `aborted` i powiadomienie "przerwany". Te testy pinują drugą warstwę.
  */
 import test from 'ava';
 import { runAgentLoop } from './AgentLoop.js';
@@ -26,7 +25,7 @@ function abortError(): Error & { _aborted: true } {
     return Object.assign(new Error('Strumień modelu przerwany (Stop).'), { _aborted: true as const });
 }
 
-/** Model, którego stream odrzuca podanym błędem — ścieżką callbackową (jak adapter). */
+/** Model, którego stream odrzuca podanym błędem - ścieżką callbackową (jak adapter). */
 function makeRejectingModel(err: unknown) {
     return {
         stopCalls: 0,
@@ -53,7 +52,7 @@ test('odrzucenie ze znacznikiem _aborted kończy pętlę jako abort, bez rzucani
     });
 
     t.is(result.stoppedBy, 'abort');
-    t.is(result.finalText, '', 'nic nie zdążyło przyjść — pusty tekst, nie komunikat błędu');
+    t.is(result.finalText, '', 'nic nie zdążyło przyjść - pusty tekst, nie komunikat błędu');
     const end = events.filter(e => e.type === 'loop.end');
     t.is(end.length, 1, 'dokładnie jedno domknięcie pętli w trace');
     t.is(end[0].fields.stop, 'abort', 'trace mówi abort, nie error');
@@ -97,7 +96,7 @@ test('per-call budzik dalej wygrywa swój wyścig: timeout to BŁĄD, nie abort'
     // Budzik woła `model.stopStream()`, a ten od tej pory odrzuca promisę streamu znacznikiem
     // `_aborted`. Kolejność jest kontraktem: odrzucenie z `stopStream` wędruje przez ŁAŃCUCH
     // mikrozadań (`Promise.race` w `_streamViaAdapter` → `await` w `stream()` → `.catch` w
-    // `stream()`), a budzik odrzuca swoją promisę SYNCHRONICZNIE tuż po `stopStream()` —
+    // `stream()`), a budzik odrzuca swoją promisę SYNCHRONICZNIE tuż po `stopStream()` -
     // więc wyścig `Promise.race` rozstrzyga timeout i tura kończy się jak dotąd błędem.
     // Atrapa oddaje tę asynchroniczność (jeden skok wystarczy, produkcja ma ich kilka).
     const model = {
@@ -122,7 +121,7 @@ test('per-call budzik dalej wygrywa swój wyścig: timeout to BŁĄD, nie abort'
     t.is(model.stopCalls, 1, 'budzik ubił request (stopStream), zanim rzucił timeoutem');
 });
 
-test('onGateAdmitted (Z2) leci do wołacza przy każdym wpuszczeniu na slot', async (t) => {
+test('onGateAdmitted leci do wołacza przy każdym wpuszczeniu na slot', async (t) => {
     // Sygnał jest fire-and-forget: wyjątek wołacza nie ma prawa wywrócić streamu.
     let admits = 0;
     const model = {
@@ -145,7 +144,7 @@ test('onGateAdmitted (Z2) leci do wołacza przy każdym wpuszczeniu na slot', as
     t.is(result.stoppedBy, 'natural', 'rzucający sygnał nie wywrócił tury');
 });
 
-// ─── K5 (AUD-security-038): backstop pod bramką abortu ───────────────────────
+// ─── Backstop pod bramką abortu ───────────────────────
 
 /** Model odgrywający listę odpowiedzi; liczy wywołania (backstop = wywołanie ponad iteracje). */
 function makeScriptedModel(responses: unknown[]) {
@@ -157,7 +156,7 @@ function makeScriptedModel(responses: unknown[]) {
             const resp = responses[idx++];
             Promise.resolve().then(() => handlers.done(resp));
         },
-        stopStream() { /* nic — ten model rozstrzyga sam */ },
+        stopStream() { /* nic - ten model rozstrzyga sam */ },
     };
 }
 
@@ -167,11 +166,11 @@ const toolCallResp = (name: string) => ({
     ] } }],
 });
 
-test('Stop w trakcie narzędzi OSTATNIEJ iteracji nie przepuszcza backstopu (AUD-security-038)', async (t) => {
-    // Sufit iteracji = 1, więc po narzędziach pętla wchodzi wprost w backstop. Stop klikamy
-    // W TRAKCIE narzędzia (egzekutor podnosi flagę) — do K5 backstop był JEDYNYM punktem
-    // trasy bez pytania `abort()`, więc leciało jeszcze jedno pełne wywołanie modelu, a tura
-    // kończyła się jako `backstop` (czyli z finalizacją: wpis w oknie kontekstu i w dzienniku).
+test('Stop w trakcie narzędzi OSTATNIEJ iteracji nie przepuszcza backstopu', async (t) => {
+    // Sufit iteracji = 1, więc po narzędziach pętla wchodzi wprost w backstop. Stop klikany
+    // W TRAKCIE narzędzia (egzekutor podnosi flagę) musi przykryć backstop - inaczej leciałoby
+    // jeszcze jedno pełne wywołanie modelu, a tura kończyłaby się jako `backstop` (czyli
+    // z finalizacją: wpis w oknie kontekstu i w dzienniku).
     let aborted = false;
     const model = makeScriptedModel([
         toolCallResp('read'),
@@ -198,7 +197,7 @@ test('Stop w trakcie narzędzi OSTATNIEJ iteracji nie przepuszcza backstopu (AUD
 });
 
 test('Stop w trakcie iteracji: narzędzia NASTĘPNEJ iteracji się nie wykonują', async (t) => {
-    // Stop klikany w trakcie narzędzia iteracji 2 — narzędzie iteracji 3 nie ma prawa ruszyć.
+    // Stop klikany w trakcie narzędzia iteracji 2 - narzędzie iteracji 3 nie ma prawa ruszyć.
     let aborted = false;
     let toolCalls = 0;
     const model = makeScriptedModel([toolCallResp('read'), toolCallResp('read'), toolCallResp('read')]);
@@ -221,14 +220,14 @@ test('Stop w trakcie iteracji: narzędzia NASTĘPNEJ iteracji się nie wykonują
     t.is(model.calls, 2, 'po Stopie nie ma kolejnego wywołania modelu');
 });
 
-// ─── Klaster I: Stop ma pierwszeństwo przed każdym „domknij turę" ────────────
+// ─── Stop ma pierwszeństwo przed każdym „domknij turę" ────────────
 
 const READ_TOOL = [{ type: 'function', function: { name: 'read', description: '', parameters: {} } }];
 
-test('Stop w trakcie FINALNEGO strzału backstopu kończy jako abort, nie jako backstop (AUD-security-113)', async (t) => {
-    // K5 zamknął bramkę PRZED backstopem, ale nie po niej: Stop kliknięty, gdy finalny strzał
-    // JUŻ LECI (potrafi trwać dziesiątki sekund — naturalny moment na Stop), lądował w `catch`
-    // backstopu, który — inaczej niż `catch` pętli głównej — nie pytał o abort. Tura schodziła
+test('Stop w trakcie FINALNEGO strzału backstopu kończy jako abort, nie jako backstop', async (t) => {
+    // Stop kliknięty, gdy finalny strzał backstopu JUŻ LECI (potrafi trwać dziesiątki sekund -
+    // naturalny moment na Stop), musi trafić w abort, nie w zwykły `catch` backstopu, który -
+    // inaczej niż `catch` pętli głównej - sam z siebie nie pyta o abort. Inaczej tura schodziłaby
     // jako `backstop`, czyli u wołacza gałęzią FINALIZACJI: wpis w oknie kontekstu i w pliku sesji.
     let aborted = false;
     let calls = 0;
@@ -239,7 +238,7 @@ test('Stop w trakcie FINALNEGO strzału backstopu kończy jako abort, nie jako b
                 Promise.resolve().then(() => handlers.done(toolCallResp('read')));
                 return;
             }
-            // Finalny strzał backstopu jest w locie — user klika Stop (stopStream odrzuca
+            // Finalny strzał backstopu jest w locie - user klika Stop (stopStream odrzuca
             // promisę znacznikiem `_aborted`, dokładnie jak ChatModel).
             aborted = true;
             Promise.resolve().then(() => handlers.error(abortError()));
@@ -265,12 +264,11 @@ test('Stop w trakcie FINALNEGO strzału backstopu kończy jako abort, nie jako b
     t.is(end[0].fields.fallback, undefined, 'przerwanie to nie zaślepka backstopu');
 });
 
-test('Stop w trakcie FINALNEGO strzału backstopu, gdy strzał SIĘ POWIÓDŁ, kończy jako abort (AUD-testy-014/037, druga bramka AUD-security-113)', async (t) => {
+test('Stop w trakcie FINALNEGO strzału backstopu, gdy strzał SIĘ POWIÓDŁ, kończy jako abort', async (t) => {
     // Test wyżej ćwiczy backstop, którego finalny strzał ODRZUCA (trafia w `catch`, linia 705).
     // Ta bramka jest INNA: `AgentLoop.ts:658`, `if (abort())` zaraz PO tym, jak finalny strzał
-    // WRÓCIŁ SUKCESEM (`handlers.done`). Żaden istniejący scenariusz nie odgrywał „Stop kliknięty,
-    // a backstop mimo to zdążył dokończyć się poprawnie" — AUD-testy-014/037 pokazały, że wycięcie
-    // tej bramki (`if (false)`) nie zapala ani jednego testu w repo (295, potem 2465 zielonych).
+    // WRÓCIŁ SUKCESEM (`handlers.done`) - pilnuje przypadku „Stop kliknięty, a backstop mimo to
+    // zdążył dokończyć się poprawnie", bo bez tej bramki udany strzał zamazywałby przerwanie.
     let aborted = false;
     let calls = 0;
     const model = {
@@ -280,11 +278,11 @@ test('Stop w trakcie FINALNEGO strzału backstopu, gdy strzał SIĘ POWIÓDŁ, k
                 Promise.resolve().then(() => handlers.done(toolCallResp('read')));
                 return;
             }
-            // Finalny strzał backstopu WRACA sukcesem — ale Stop już padł, zanim wrócił.
+            // Finalny strzał backstopu WRACA sukcesem - ale Stop już padł, zanim wrócił.
             aborted = true;
             Promise.resolve().then(() => handlers.done({ choices: [{ message: { role: 'assistant', content: 'ODPOWIEDŹ PO STOPIE' } }] }));
         },
-        stopStream() { /* ta gałąź nie odrzuca — do stopStream nie dochodzi */ },
+        stopStream() { /* ta gałąź nie odrzuca - do stopStream nie dochodzi */ },
     };
     const events: TraceEvent[] = [];
 
@@ -306,11 +304,10 @@ test('Stop w trakcie FINALNEGO strzału backstopu, gdy strzał SIĘ POWIÓDŁ, k
     t.is(end[0].fields.fallback, undefined, 'przerwanie po udanym strzale to nie zaślepka backstopu');
 });
 
-test('Stop w trakcie narzędzi: beforeContinue NIE leci, ale dorobek zostaje (AUD-security-129)', async (t) => {
-    // Do fixu pętla po `Promise.all` wołała bezwarunkowo onToolResults i beforeContinue —
-    // a chatowy `beforeContinue` potrafi tam odpalić kompresję mid-loop: OSOBNE wywołanie
-    // modelu i trwały zapis notatek do `brain/`. Po Stopie. Bramka blokuje KONTYNUACJĘ tury;
-    // zapis dorobku (dziennik/UI w onToolResults + transkrypt) zostaje.
+test('Stop w trakcie narzędzi: beforeContinue NIE leci, ale dorobek zostaje', async (t) => {
+    // Chatowy `beforeContinue` potrafi odpalić kompresję mid-loop: OSOBNE wywołanie modelu
+    // i trwały zapis notatek do `brain/`. Po Stopie to nie może polecieć - bramka blokuje
+    // KONTYNUACJĘ tury; zapis dorobku (dziennik/UI w onToolResults + transkrypt) zostaje.
     let aborted = false;
     const calls: string[] = [];
     const s = new ArrayMessageStore([{ role: 'user', content: 'zrób coś' }]);
@@ -334,15 +331,14 @@ test('Stop w trakcie narzędzi: beforeContinue NIE leci, ale dorobek zostaje (AU
     t.true(calls.includes('onToolResults'), 'zapis dorobku (dziennik + UI) leci normalnie');
     t.true(
         s.messages.some(m => m.role === 'tool' && String(m.content).includes('WYNIK NARZĘDZIA')),
-        'wykonane narzędzie zostaje w transkrypcie (kontrakt Front A)',
+        'wykonane narzędzie zostaje w transkrypcie',
     );
 });
 
-test('wyjątek z hooka domyka trace loop.end stop=error, a dorobek zostaje w transkrypcie (AUD-bledy-002)', async (t) => {
-    // Korpus iteracji (hooki, resolveTools, store) leżał poza jakimkolwiek try: rzut z chatowego
-    // `onToolResults` (pierwszy await to zapis dziennika sesji na dysku) kończył pętlę bez
-    // `loop.end` i bez groupEnd, a wykonane narzędzie znikało z transkryptu — model przy
-    // następnej turze nie widział zapisu, który już się wydarzył w vaultcie.
+test('wyjątek z hooka domyka trace loop.end stop=error, a dorobek zostaje w transkrypcie', async (t) => {
+    // Rzut z chatowego `onToolResults` (pierwszy await to zapis dziennika sesji na dysku) nie
+    // ma prawa ukryć `loop.end` ani zgubić wykonanego narzędzia z transkryptu - inaczej model
+    // przy następnej turze nie widziałby zapisu, który już się wydarzył w vaultcie.
     const s = new ArrayMessageStore([{ role: 'user', content: 'zapisz plik' }]);
     const events: TraceEvent[] = [];
     const model = makeScriptedModel([toolCallResp('read')]);
@@ -370,7 +366,7 @@ test('wyjątek z hooka domyka trace loop.end stop=error, a dorobek zostaje w tra
     );
 });
 
-test('wyjątek z resolveTools też domyka loop.end stop=error (AUD-bledy-002)', async (t) => {
+test('wyjątek z resolveTools też domyka loop.end stop=error', async (t) => {
     const events: TraceEvent[] = [];
     await t.throwsAsync(
         () => runAgentLoop({
@@ -388,10 +384,11 @@ test('wyjątek z resolveTools też domyka loop.end stop=error (AUD-bledy-002)', 
     t.is(end[0].fields.stop, 'error');
 });
 
-test('hardstop backstopu NIE zostaje w transkrypcie jako wiadomość usera (AUD-bledy-003)', async (t) => {
-    // Instrukcja „NIE wywołuj żadnych narzędzi" jechała do store rolą `user`: okno rozmowy
-    // rysowało ją jako dymek Kuby, a `getMessagesForAPI()` wiozło ją w KAŻDYM kolejnym żądaniu
-    // tej sesji. Do modelu ma polecieć raz — w payloadzie finalnego strzału, nie w transkrypcie.
+test('hardstop backstopu NIE zostaje w transkrypcie jako wiadomość usera', async (t) => {
+    // Instrukcja „NIE wywołuj żadnych narzędzi" nie może jechać do store rolą `user`: okno
+    // rozmowy narysowałoby ją jako dymek użytkownika, a `getMessagesForAPI()` wiozłoby ją w
+    // KAŻDYM kolejnym żądaniu tej sesji. Do modelu ma polecieć raz - w payloadzie finalnego
+    // strzału, nie w transkrypcie.
     const s = new ArrayMessageStore([{ role: 'user', content: 'zrób coś' }]);
     const payloads: Payload[] = [];
     let calls = 0;

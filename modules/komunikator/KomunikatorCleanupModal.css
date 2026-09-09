@@ -1,8 +1,5 @@
-/* KomunikatorCleanupModal Styles — S28 D5: modale sprzątania skrzynki
-   (podgląd po drugim ptaszku + hurtowe potwierdzenie). AUD-dead-code-072:
-   arkusz dawniej wisiał na osieroconym KomunikatorModal.ts i nie wchodził
-   do bundla — reszta reguł (dla nieużywanego modalu pełnoekranowego)
-   skasowana razem z nim, patrz git history KomunikatorModal.css. */
+/* KomunikatorCleanupModal Styles: modale sprzątania skrzynki
+   (podgląd po drugim ptaszku + hurtowe potwierdzenie). */
 
 .komunikator-cleanup-meta {
     display: flex;

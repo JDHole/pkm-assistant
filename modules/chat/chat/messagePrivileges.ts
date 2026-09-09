@@ -1,11 +1,11 @@
 /**
  * @module messagePrivileges
- * Bramki przywilejów tury czatu — co wolno zrobić z TREŚCIĄ wiadomości.
+ * Bramki przywilejów tury czatu - co wolno zrobić z TREŚCIĄ wiadomości.
  *
- * K7 (AUD-security-062 / 088 / 003): trzy rzeczy w turze czytają tekst jako POLECENIE, nie jako
- * dane — rejestr proweniencji adresów (odblokowuje `web_read`), markery inline (`@@skill:`
- * wstrzykuje pełny przepis do promptu systemowego z ramką „użytkownik uruchomił") i komendy `/`.
- * Wszystkie trzy przysługują wyłącznie tekstowi, który NAPISAŁ CZŁOWIEK.
+ * Trzy rzeczy w turze czytają tekst jako POLECENIE, nie jako dane - rejestr proweniencji adresów
+ * (odblokowuje `web_read`), markery inline (`@@skill:` wstrzykuje pełny przepis do promptu
+ * systemowego z ramką „użytkownik uruchomił") i komendy `/`. Wszystkie trzy przysługują wyłącznie
+ * tekstowi, który NAPISAŁ CZŁOWIEK.
  *
  * Źródłem prawdy o pochodzeniu jest `meta.origin` (`core/security/messageOrigin.ts`), nie to,
  * z jaką rolą dymek zostanie narysowany. Brak znacznika = maszyna (fail-closed).

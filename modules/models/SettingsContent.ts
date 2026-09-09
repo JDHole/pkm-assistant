@@ -9,27 +9,27 @@ import type { App, Notice as ObsidianNotice, Setting as ObsidianSetting } from '
 import type { EmbeddingSettingsSlice } from '../../core/index.js';
 import type { ChatSettingsSlice, ModelLibraryEntry } from './contracts.js';
 
-/** Błąd złapany w `catch` — `unknown`, więc nazywamy tylko pole, po które sięga kod. */
+/** Błąd złapany w `catch` - `unknown`, więc nazywamy tylko pole, po które sięga kod. */
 type ErrLike = { message?: string };
 
-/** Kolekcja ikon (UiIcons z `modules/crystal-soul`) — każda zwraca gotowy SVG. */
+/** Kolekcja ikon (UiIcons z `modules/crystal-soul`) - każda zwraca gotowy SVG. */
 type IconSet = Record<string, (size?: number) => string>;
 
-/** Ustawienia embeddingu (slice `settings.pkmAssistant.embedding`) — właściciel typu: `core`. */
+/** Ustawienia embeddingu (slice `settings.pkmAssistant.embedding`) - właściciel typu: `core`. */
 type EmbedModelSettings = EmbeddingSettingsSlice;
 
-/** Stan indeksera semantycznego (E1.4 — `plugin.vaultIndexer`). */
+/** Stan indeksera semantycznego (`plugin.vaultIndexer`). */
 type IndexerStatus = {
     status?: string;
     progress?: { indexed?: number; total?: number };
     lastError?: string;
 };
 
-/** Indekser wstrzyknięty na pluginie — sekcja czyta status i umie zlecić przebudowę. */
+/** Indekser wstrzyknięty na pluginie - sekcja czyta status i umie zlecić przebudowę. */
 type VaultIndexerLike = {
     getStatus?: () => IndexerStatus | null | undefined;
     rebuild: () => Promise<IndexerStatus>;
-    /** Pliki pominięte po wyczerpaniu prób (`modules/embedding` gotcha 12) — realny `Set<string>`. */
+    /** Pliki pominięte po wyczerpaniu prób (`modules/embedding` gotcha 12) - realny `Set<string>`. */
     skipped?: { size: number };
 };
 
@@ -45,11 +45,11 @@ type ModelsSettingsOwner = {
 
 /**
  * Worek DI budowany przez `pkm_settings_tab.buildSectionContext()`. Ten moduł czyta z niego
- * tylko swój wycinek — obsidianowe klasy (`Setting`, `Notice`) wchodzą tędy, bo sekcja jest
+ * tylko swój wycinek - obsidianowe klasy (`Setting`, `Notice`) wchodzą tędy, bo sekcja jest
  * ładowana także w środowisku bez Obsidiana.
  */
 export type ModelsSectionCtx = {
-    /** slice `settings.pkmAssistant.chat` — sekcja Modele rusza z niego temperaturę i limit */
+    /** slice `settings.pkmAssistant.chat` - sekcja Modele rusza z niego temperaturę i limit */
     chat: ChatSettingsSlice;
     /** slice `settings.pkmAssistant` */
     pkm: {
@@ -61,7 +61,7 @@ export type ModelsSectionCtx = {
     availablePlatforms: Array<{ id: string; name: string }>;
     env: { settings: { pkmAssistant: { embedding?: EmbedModelSettings } } };
     owner: ModelsSettingsOwner;
-    /** `oramaDb` — publikowany przez `VaultIndexer` (E1.4); `unknown` bo `AnyOrama` nie jest publicznym typem `models`. */
+    /** `oramaDb` - publikowany przez `VaultIndexer`; `unknown` bo `AnyOrama` nie jest publicznym typem `models`. */
     plugin?: { vaultIndexer?: VaultIndexerLike | null; oramaDb?: unknown } | null;
     save: () => Promise<void> | void;
     icons: IconSet;
@@ -101,7 +101,7 @@ export async function renderModelsSection(container: HTMLElement, ctx: ModelsSec
 
                 const s = new Setting(container);
                 const isLocal = isLocalPlatform(m.platform);
-                // Build the name via DOM APIs — the model name (m.model) is typed by the
+                // Build the name via DOM APIs - the model name (m.model) is typed by the
                 // user and MUST NOT be inserted as raw HTML (stored-XSS vector). Only the
                 // status dot is a static, plugin-controlled SVG string.
                 s.nameEl.empty();
@@ -194,7 +194,7 @@ export async function renderModelsSection(container: HTMLElement, ctx: ModelsSec
                 slider
                     .setLimits(0, 1, 0.1)
                     .setValue(chat.temperature ?? 0.7)
-                    // no-deprecated: setDynamicTooltip() jest przestarzałe — wartość jest dziś
+                    // no-deprecated: setDynamicTooltip() jest przestarzałe - wartość jest dziś
                     // ZAWSZE pokazywana inline obok suwaka (Obsidian core), więc wywołanie
                     // wygasło jako no-op i po prostu je usuwamy.
                     .onChange(async (value) => {
@@ -310,12 +310,11 @@ export async function renderModelsSection(container: HTMLElement, ctx: ModelsSec
                 text.inputEl.addClass('pkm-setting-input--w250');
             });
 
-        // ─── E1.4: status żywej semantyki (VaultIndexer → plugin.oramaDb) ───
-        // W13 (follow-up po review W5): `progress.total` liczy pliki PRZESKANOWANE, nie
-        // wektory faktycznie w indeksie — przy padzie pierwszego skanu (indeks pusty,
-        // `_publish()` z zerowym db) status dalej mówił "Aktywne". Prawda o zawartości
-        // indeksu to `countDocs(plugin.oramaDb)`. Import dynamiczny — jak `migrateSCToOrama`
-        // niżej — `models` nie ma statycznej zależności od `embedding`.
+        // ─── Status żywej semantyki (VaultIndexer → plugin.oramaDb) ───
+        // `progress.total` liczy pliki PRZESKANOWANE, nie wektory faktycznie w indeksie - przy
+        // padzie pierwszego skanu (indeks pusty, `_publish()` z zerowym db) status dalej mówił
+        // "Aktywne". Prawda o zawartości indeksu to `countDocs(plugin.oramaDb)`. Import dynamiczny
+        // - jak `migrateSCToOrama` niżej - `models` nie ma statycznej zależności od `embedding`.
         const semStatus = plugin?.vaultIndexer?.getStatus?.();
         const { countDocs } = await import('../embedding/index.js');
         const semDocsCount = countDocs(plugin?.oramaDb as never);
@@ -371,16 +370,16 @@ export async function renderModelsSection(container: HTMLElement, ctx: ModelsSec
                 });
         });
 
-        // SE-19 (clean-room, decyzja Kuby 2026-09-05): guzik migracji danych starego indeksu
-        // WYCIĘTY BEZ ZAMIENNIKA. Cały podsystem migracji indeksu v1.x jest skasowany,
-        // nie przemianowany — nie dochodzą też żadne nowe klucze i18n.
+        // Guzik migracji danych starego indeksu WYCIĘTY BEZ ZAMIENNIKA. Cały podsystem
+        // migracji indeksu v1.x jest skasowany, nie przemianowany - nie dochodzą też
+        // żadne nowe klucze i18n.
 
 
         // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         // SEKCJA 2: PAMIĘĆ I KONTEKST
         // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-        // S28 (D1/D8): button „Migracja Agora → Komunikator" USUNIĘTY razem z Project Hubem
-        // i migratorem. Zero kodu migracyjnego — plugin nigdy nie był wydany z Agorą.
+        // Button „Migracja Agora → Komunikator" USUNIĘTY razem z Project Hubem
+        // i migratorem. Zero kodu migracyjnego - plugin nigdy nie był wydany z Agorą.
 
         // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         // SEKCJA 4: ROLE AGENTÓW

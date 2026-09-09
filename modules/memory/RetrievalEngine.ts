@@ -1,5 +1,5 @@
 /**
- * RetrievalEngine — silnik jednego narzędzia `search` (E2.5).
+ * RetrievalEngine - silnik jednego narzędzia `search`.
  *
  * Zastępuje dawną kaskadę 3-warstwową (L1 struktura → L2 tekst → L3 semantyka) i
  * jej hybryda. Nowy kontrakt: JEDNO wyszukiwanie z filtrem kandydatów (`where`) +
@@ -11,13 +11,13 @@
  *   4. Excerpt czytany Z DYSKU (naprawa dawnego bugu pustego `body`).
  *
  * Scope:
- *   - 'vault'  — pliki poza `.pkm-assistant/`; semantyka DOSTĘPNA (plugin.oramaDb).
- *   - 'memory' — pamięć AKTUALNEGO agenta (brain.md + brain/ + sessions active/archive
+ *   - 'vault'  - pliki poza `.pkm-assistant/`; semantyka DOSTĘPNA (plugin.oramaDb).
+ *   - 'memory' - pamięć AKTUALNEGO agenta (brain.md + brain/ + sessions active/archive
  *                + summaries L1/L2/L3); semantyka NIEDOSTĘPNA (izolacja od indeksu vaulta).
  *
- * Konsument: `modules/mcp/SearchTool.js` (thin wrapper — buduje engine z pluginu,
+ * Konsument: `modules/tools/SearchTool.ts` (thin wrapper - buduje engine z pluginu,
  * bramkuje uprawnienie pamięci, formatuje wynik). Chat/sub-agenci NIE wołają engine
- * bezpośrednio — idą przez narzędzie `search`. DI (vault/embeddingHelper/oramaDb/
+ * bezpośrednio - idą przez narzędzie `search`. DI (vault/embeddingHelper/oramaDb/
  * agentMemory/vectorSearch/parseFrontmatter) trzyma silnik testowalnym.
  */
 
@@ -30,15 +30,15 @@ const RRF_K = 60;
 const EXCERPT_LEN = 200;
 
 /**
- * AUD-wydajnosc-024/055/075: sufit PRACY (nie tylko wyniku) dla skanu treści w
- * `_keywordRank`. Bez `where`, `_gatherCandidates` może zwrócić CAŁY vault — bez tego
+ * Sufit PRACY (nie tylko wyniku) dla skanu treści w
+ * `_keywordRank`. Bez `where`, `_gatherCandidates` może zwrócić CAŁY vault - bez tego
  * sufitu jedno `search` czyta i lowercase'uje treść każdej notatki (sekwencyjnie, przed
  * fuzją), a `delegate` mnoży to przez do 5 równoległych subów. Kandydaci, których
  * nazwa/basename pasuje do słowa zapytania, mają pierwszeństwo skanu (tania heurystyka
- * bez I/O w `_prioritizeForScan`) — realne trafienia po nazwie nie giną przy obcięciu.
+ * bez I/O w `_prioritizeForScan`) - realne trafienia po nazwie nie giną przy obcięciu.
  * `where` (folder/glob/yaml/links) nadal zawęża PRZED tym sufitem, więc zawężone
  * wyszukiwanie go w praktyce nie dotyka. Kontrakt niezmieniony poniżej sufitu.
- * ⚠️ Sufit dotyczy TYLKO scope='vault' — dla scope='memory' jest wyłączony w
+ * ⚠️ Sufit dotyczy TYLKO scope='vault' - dla scope='memory' jest wyłączony w
  * `_scanKeywordCandidates` (patrz komentarz tam): pamięć agenta jest jego własnymi,
  * z natury ograniczonymi danymi, a listing brain→sessions/archive→L1-L3 gubił L1-L3
  * za sufitem u agentów z długim archiwum.
@@ -49,8 +49,8 @@ type ErrLike = { message?: string };
 
 // ═════════════════════════ Kontrakty wstrzykiwane (DI) ═════════════════════════
 //
-// Wszystko strukturalnie (`type XLike`): silnik dostaje te obiekty z zewnątrz —
-// z Obsidiana (`app`, `vault`), z `AgentMemory` i z testowych atrap — i nigdy ich
+// Wszystko strukturalnie (`type XLike`): silnik dostaje te obiekty z zewnątrz -
+// z Obsidiana (`app`, `vault`), z `AgentMemory` i z testowych atrap - i nigdy ich
 // nie tworzy sam.
 
 /** Adapter FS vaulta w zakresie, którego dotyka retrieval. */
@@ -64,14 +64,14 @@ export interface RetrievalVaultLike {
     adapter: RetrievalVaultAdapterLike;
 }
 
-/** Plik vaulta widziany przez API Obsidiana (TFile) — folder (TFolder) ma `children`. */
+/** Plik vaulta widziany przez API Obsidiana (TFile) - folder (TFolder) ma `children`. */
 export interface VaultFileLike {
     path: string;
     name?: string;
     children?: unknown[];
 }
 
-/** Obsidian App w zakresie E2.6 (API-first dla scope=vault). */
+/** Obsidian App w zakresie API-first dla scope=vault. */
 export interface RetrievalAppLike {
     vault?: {
         getMarkdownFiles?: () => VaultFileLike[];
@@ -85,7 +85,7 @@ export interface RetrievalAppLike {
     };
 }
 
-/** Helper embeddingów — silnik potrzebuje z niego wyłącznie `embed`. */
+/** Helper embeddingów - silnik potrzebuje z niego wyłącznie `embed`. */
 export interface RetrievalEmbeddingHelperLike {
     embed(text: string): Promise<number[]>;
 }
@@ -116,7 +116,7 @@ export type VectorSearchFn = (
     options: { k?: number },
 ) => Promise<{ hits?: VectorHitLike[] } | null | undefined>;
 
-/** Parser frontmatteru — domyślny albo wstrzyknięty w testach. */
+/** Parser frontmatteru - domyślny albo wstrzyknięty w testach. */
 export type FrontmatterParser = (content: string) => Record<string, unknown>;
 
 export interface RetrievalEngineDeps {
@@ -132,7 +132,7 @@ export interface RetrievalEngineDeps {
 
 // ═════════════════════════ Kontrakt wejścia/wyjścia `search` ═════════════════════════
 
-/** Filtr kandydatów (`where`) — pola łączone koniunkcją. */
+/** Filtr kandydatów (`where`) - pola łączone koniunkcją. */
 export interface SearchWhere {
     folder?: string;
     glob?: string;
@@ -152,7 +152,7 @@ export interface RunSearchParams {
 }
 
 /**
- * Jeden wynik. `score` nie ma przy listingu (brak query = brak rankingu) — dokładnie
+ * Jeden wynik. `score` nie ma przy listingu (brak query = brak rankingu) - dokładnie
  * jak w oryginale, gdzie gałąź listingu po prostu nie dokłada tego pola.
  */
 export interface SearchResult {
@@ -164,9 +164,9 @@ export interface SearchResult {
 }
 
 /**
- * Uczciwa nota o obcięciu skanu keyword (AUD-wydajnosc-024/055): ile kandydatów w ogóle
+ * Uczciwa nota o obcięciu skanu keyword: ile kandydatów w ogóle
  * spełniało `where`, ile z nich faktycznie przeczytaliśmy przed obcięciem na
- * `MAX_KEYWORD_SCAN_CANDIDATES`. Obecne w wyniku TYLKO gdy `truncated` — poniżej sufitu
+ * `MAX_KEYWORD_SCAN_CANDIDATES`. Obecne w wyniku TYLKO gdy `truncated` - poniżej sufitu
  * kontrakt jest identyczny jak przed naprawą (pole nieobecne).
  */
 export interface SearchScanInfo {
@@ -180,7 +180,7 @@ export interface SearchOutcome {
     results: SearchResult[];
     total: number;
     semantic: { requested: boolean; used: boolean };
-    /** Obecne tylko gdy skan keyword został obcięty sufitem — patrz `SearchScanInfo`. */
+    /** Obecne tylko gdy skan keyword został obcięty sufitem - patrz `SearchScanInfo`. */
     scan?: SearchScanInfo;
 }
 
@@ -213,25 +213,25 @@ interface FusedHit {
 /** Czytnik z cache'em treści, przekazywany w dół z `runSearch`. */
 type ReadCached = (path: string) => Promise<string | null>;
 
-/** Wynik skanu keyword: trafienia + uczciwa nota o obcięciu (AUD-wydajnosc-024/055). */
+/** Wynik skanu keyword: trafienia + uczciwa nota o obcięciu. */
 interface KeywordScanResult {
     hits: KeywordHit[];
     scan: SearchScanInfo;
 }
 
 /**
- * Dedup równoległych identycznych skanów (AUD-wydajnosc-075): `delegate` może odpalić do
+ * Dedup równoległych identycznych skanów: `delegate` może odpalić do
  * `max_parallel_delegations` sub-agentów naraz, każdy z WŁASNĄ instancją `RetrievalEngine`
  * (`SearchTool.buildEngine` tworzy nową per tool call) ale nad TYM SAMYM `plugin.app.vault`.
  * Bez tego pięć identycznych `search({query})` bez `where` czytałoby ten sam skan pięć razy
  * równolegle. Klucz zewnętrzny to identyczność obiektu `vault` (stabilna w Obsidianie na
  * czas życia pluginu; w testach każdy `vaultOf()` to nowy obiekt, więc testy się nie mieszają).
- * Wpis żyje TYLKO na czas trwania skanu (czyszczony w `finally`) — to dedup w locie, nie cache.
+ * Wpis żyje TYLKO na czas trwania skanu (czyszczony w `finally`) - to dedup w locie, nie cache.
  */
 const _inFlightKeywordScans = new WeakMap<object, Map<string, Promise<KeywordScanResult>>>();
 
 export class RetrievalEngine {
-    // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
+    // `declare` = sama deklaracja typu, zero emitu.
     declare vault: RetrievalVaultLike;
     declare app: RetrievalAppLike | null;
     declare embeddingHelper: RetrievalEmbeddingHelperLike | null;
@@ -243,20 +243,20 @@ export class RetrievalEngine {
 
     /**
      * @param deps.vault - Obsidian Vault (używamy vault.adapter: read/list/exists)
-     * @param deps.app - Obsidian App (E2.6). Gdy obecne, scope=vault jest API-first:
+     * @param deps.app - Obsidian App. Gdy obecne, scope=vault jest API-first:
      *   getMarkdownFiles/cachedRead/metadataCache (frontmatter + resolvedLinks). Bez app → walker
      *   adapterowy + ręczny parser + regexy (wsteczna zgodność testów). scope=memory ZAWSZE adapter
      *   (metadataCache nie widzi `.pkm-assistant/`).
      * @param deps.embeddingHelper - EmbeddingHelper (embed(query)) dla semantyki vault
-     * @param deps.oramaDb - indeks Orama vaulta (VaultIndexer, E1.4)
+     * @param deps.oramaDb - indeks Orama vaulta (VaultIndexer)
      * @param deps.agentMemory - AgentMemory aktualnego agenta (scope:'memory')
      * @param deps.vectorSearch - override searchVectorTopK(db, vec, {k}) dla testów
      * @param deps.parseFrontmatter - override parsera frontmatteru dla testów
-     * @param deps.includeHiddenVault - A1: admin może przeszukiwać
+     * @param deps.includeHiddenVault - admin może przeszukiwać
      *   markdown także w ukrytych folderach vaulta (adapter walker zamiast indeksu Obsidiana)
      */
     constructor(deps: RetrievalEngineDeps = {}) {
-        // `!`: bez vaulta silnik i tak nie ma z czego czytać — kod w całości zakłada,
+        // `!`: bez vaulta silnik i tak nie ma z czego czytać - kod w całości zakłada,
         // że wołacz go podał (tak jest we wszystkich wywołaniach i atrapach testów).
         this.vault = deps.vault!;
         this.app = deps.app || null;
@@ -291,7 +291,7 @@ export class RetrievalEngine {
             if (contentCache.has(path)) return contentCache.get(path) as string | null;
             let content: string | null = null;
             try {
-                // E2.6: pliki vaulta czytamy przez vault.cachedRead (API). Pamięć (.pkm-assistant/)
+                // Pliki vaulta czytamy przez vault.cachedRead (API). Pamięć (.pkm-assistant/)
                 // nie jest w indeksie → getAbstractFileByPath zwróci null → adapter.read fallback.
                 // Feature-detect metod (testy podają czasem tylko adapter).
                 const getFile = this.app?.vault?.getAbstractFileByPath;
@@ -307,7 +307,7 @@ export class RetrievalEngine {
         // 1. Zbiór kandydatów wg where.
         const candidates = await this._gatherCandidates(scope, where, readCached);
 
-        // 2. Listing (brak query) — zwróć kandydatów bez rankingu.
+        // 2. Listing (brak query) - zwróć kandydatów bez rankingu.
         if (!query) {
             const sliced = candidates.slice(0, limit);
             const results: SearchResult[] = [];
@@ -408,7 +408,7 @@ export class RetrievalEngine {
             candidates = candidates.filter(c => this._matchesGlob(c.name, where.glob!) || this._matchesGlob(c.path, where.glob!));
         }
 
-        // E2.6: dla scope=vault z app używamy metadataCache.resolvedLinks (precyzyjne, po ścieżkach).
+        // Dla scope=vault z app używamy metadataCache.resolvedLinks (precyzyjne, po ścieżkach).
         // scope=memory (i brak app) → dawna logika basename/regex (metadataCache nie widzi pamięci).
         const useResolvedLinks = scope === 'vault' && this.app?.metadataCache?.resolvedLinks;
 
@@ -447,7 +447,7 @@ export class RetrievalEngine {
     }
 
     private async _listVaultFiles({ folder, glob }: { folder?: string; glob?: string } = {}): Promise<Candidate[]> {
-        // E2.6: z app → getMarkdownFiles (indeks Obsidiana). .pkm-assistant/ i tak niewidoczne
+        // Z app → getMarkdownFiles (indeks Obsidiana). .pkm-assistant/ i tak niewidoczne
         // dla API (podwójny bezpiecznik zostaje). Bez app → dawny walker adapterowy (fallback testów).
         if (this.app?.vault?.getMarkdownFiles && !this.includeHiddenVault) {
             const prefix = (folder && folder !== '/') ? `${String(folder).replace(/\/+$/, '')}/` : '';
@@ -488,7 +488,7 @@ export class RetrievalEngine {
         return dest?.path || null;
     }
 
-    /** Ścieżki, do których linkuje podana notatka (forward) — z resolvedLinks. */
+    /** Ścieżki, do których linkuje podana notatka (forward) - z resolvedLinks. */
     private _resolvedForwardLinkPaths(ref: unknown): Set<string> {
         const out = new Set<string>();
         const srcPath = this._resolveLinkPath(ref);
@@ -498,7 +498,7 @@ export class RetrievalEngine {
         return out;
     }
 
-    /** Ścieżki źródeł, które linkują DO podanej notatki (backlinks) — z resolvedLinks. */
+    /** Ścieżki źródeł, które linkują DO podanej notatki (backlinks) - z resolvedLinks. */
     private _resolvedBacklinkPaths(ref: unknown): Set<string> {
         const out = new Set<string>();
         const targetPath = this._resolveLinkPath(ref);
@@ -511,7 +511,7 @@ export class RetrievalEngine {
     }
 
     /**
-     * Walks the vault through the adapter (not the Vault API) on purpose — it is the only
+     * Walks the vault through the adapter (not the Vault API) on purpose - it is the only
      * way to reach hidden `.pkm-assistant` paths, which Obsidian never lists as files.
      * Reached only when `includeHiddenVault` is on (SearchTool gates that flag behind
      * `agent.admin_access`, see invocationHasAdminAccess) or when no `app` is injected
@@ -538,7 +538,7 @@ export class RetrievalEngine {
     /**
      * Pliki pamięci aktualnego agenta z logiczną etykietą folderu.
      * folderFilter (where.folder): 'brain' | 'sessions' | 'sessions/active' |
-     * 'summaries' | 'summaries/L1' ... — prefiksowe dopasowanie po etykiecie.
+     * 'summaries' | 'summaries/L1' ... - prefiksowe dopasowanie po etykiecie.
      */
     private async _listMemoryFiles(folderFilter?: string | null): Promise<MemoryCandidate[]> {
         const m = this.agentMemory;
@@ -572,21 +572,21 @@ export class RetrievalEngine {
     // ───────────────────────── Rankingi ─────────────────────────
 
     /**
-     * Ranking keyword po LICZBIE wystąpień frazy (nie boolean match) — z dedupem w locie
-     * (AUD-wydajnosc-075): pięć równoległych identycznych `search` (ta sama tożsamość
+     * Ranking keyword po LICZBIE wystąpień frazy (nie boolean match) - z dedupem w locie:
+     * pięć równoległych identycznych `search` (ta sama tożsamość
      * `vault` + scope + where + query) dzieli JEDEN skan zamiast pięciu.
      *
-     * ⚠️ BLOKER naprawiony w review rundy 2 (2026-09-02): `plugin.app.vault` jest JEDNYM
+     * ⚠️ WAŻNE: `plugin.app.vault` jest JEDNYM
      * obiektem dla WSZYSTKICH agentów (`SearchTool.buildEngine` tworzy nową instancję
-     * silnika per tool call, ale nad tym samym vaultem) — klucz musi więc identyfikować
+     * silnika per tool call, ale nad tym samym vaultem) - klucz musi więc identyfikować
      * FAKTYCZNY zbiór kandydatów, nie tylko etykiety `scope`/`where`/`query`, inaczej dwaj
      * suby różnych agentów pytający `{scope:'memory', query:'projekt'}` RÓWNOLEGLE dzielą
      * ten sam skan i jeden dostaje wyniki z `brain/` drugiego (złamanie strict cross-agent
      * isolation Memory v3). Klucz niesie teraz explicit root pamięci agenta (`agentMemory.
-     * paths.brain` — pusty dla scope='vault') + `includeHiddenVault` (admin widzi INNY
+     * paths.brain` - pusty dla scope='vault') + `includeHiddenVault` (admin widzi INNY
      * zbiór plików niż zwykły user na tym samym `where`) + odcisk POSORTOWANYCH ścieżek
      * `candidates` PO filtrze scope/where (`_candidateFingerprint`) jako ostateczny,
-     * niezależny od powyższych dwóch, dowód identyczności zbioru — fail-closed na
+     * niezależny od powyższych dwóch, dowód identyczności zbioru - fail-closed na
      * wszystko, czego jeszcze nie wymyśliliśmy jako źródła różnicy w kandydatach.
      */
     private async _keywordRank(
@@ -624,10 +624,10 @@ export class RetrievalEngine {
     }
 
     /**
-     * Odcisk (nie kryptograficzny) POSORTOWANEGO zbioru ścieżek kandydatów — jedyny cel to
+     * Odcisk (nie kryptograficzny) POSORTOWANEGO zbioru ścieżek kandydatów - jedyny cel to
      * odróżnić dwa `_keywordRank` wywołania, których `scope`/`where`/`query` wyglądają
      * identycznie, ale kandydaci są RÓŻNI (dwaj agenci, admin vs zwykły user). Liczony raz
-     * na wywołanie `runSearch` (nie per plik) — dla typowego zbioru kilkuset-kilku tysięcy
+     * na wywołanie `runSearch` (nie per plik) - dla typowego zbioru kilkuset-kilku tysięcy
      * ścieżek to ułamek milisekundy, nieporównywalnie tańsze niż sam skan treści.
      */
     private _candidateFingerprint(candidates: Candidate[]): string {
@@ -646,21 +646,21 @@ export class RetrievalEngine {
     /**
      * Skan właściwy (jedno wykonanie na klucz dedupu z `_keywordRank`).
      *
-     * Trzy naprawy naraz:
-     *  - AUD-wydajnosc-024/055: kandydaci powyżej `MAX_KEYWORD_SCAN_CANDIDATES` są cięci
-     *    PRZED czytaniem treści (nie tylko wynik) — `_prioritizeForScan` daje pierwszeństwo
+     * Trzy mechanizmy naraz:
+     *  - Kandydaci powyżej `MAX_KEYWORD_SCAN_CANDIDATES` są cięci
+     *    PRZED czytaniem treści (nie tylko wynik) - `_prioritizeForScan` daje pierwszeństwo
      *    trafieniom w nazwie, żeby obcięcie nie gubiło oczywistych wyników.
-     *  - AUD-wydajnosc-025: `contentCache` NIE ma trzymać treści wszystkich zeskanowanych
-     *    plików do końca `runSearch` — po zliczeniu trafień dla kandydata jego treść jest
+     *  - `contentCache` NIE trzyma treści wszystkich zeskanowanych
+     *    plików do końca `runSearch` - po zliczeniu trafień dla kandydata jego treść jest
      *    od razu zwalniana (`contentCache.delete`). Excerpt dla `top` (:327, <= limit<=50)
-     *    czyta ponownie — tani re-read, bez trzymania N pełnych treści naraz.
-     *  - ⚠️ Korekta review rundy 2 (2026-09-02, POWAŻNE): sufit jest WYŁĄCZONY dla
+     *    czyta ponownie - tani re-read, bez trzymania N pełnych treści naraz.
+     *  - ⚠️ WAŻNE: sufit jest WYŁĄCZONY dla
      *    `scope==='memory'`. `_listMemoryFiles` listuje w kolejności brain → brain/ →
-     *    sessions/active → sessions/**ARCHIVE** → dopiero L1 → L2 → L3 — u agenta z długim
-     *    archiwum (>300 plików) podsumowania L1-L3 nigdy nie wpadały w pierwsze 300 i
+     *    sessions/active → sessions/**ARCHIVE** → dopiero L1 → L2 → L3 - u agenta z długim
+     *    archiwum (>300 plików) podsumowania L1-L3 nigdy nie wpadałyby w pierwsze 300, a
      *    `_prioritizeForScan` nie ratuje (nazwy L1/L2/L3 są datowane, nie niosą słów
      *    zapytania). Pamięć JEDNEGO agenta jest z natury ograniczona (to jego własne dane,
-     *    nie cały vault) — ryzyko O(rozmiar vaulta) z 024/055/075 tu nie występuje, więc
+     *    nie cały vault) - ryzyko O(rozmiar vaulta) ze skanu treści tu nie występuje, więc
      *    sufit zostaje TYLKO dla scope='vault'.
      */
     private async _scanKeywordCandidates(
@@ -779,7 +779,7 @@ export class RetrievalEngine {
     }
 
     private _semanticAvailable(scope: string): boolean {
-        // Pamięć agentów jest z założenia poza indeksem vaulta (izolacja) — semantyki brak.
+        // Pamięć agentów jest z założenia poza indeksem vaulta (izolacja) - semantyki brak.
         if (scope === 'memory') return false;
         return !!(this.embeddingHelper?.embed && this.oramaDb);
     }
@@ -844,7 +844,7 @@ export class RetrievalEngine {
 
     // `this: void` = uczciwa deklaracja: metoda NIE dotyka `this`, dlatego konstruktor
     // może podać ją jako goły callback (`deps.parseFrontmatter || this._defaultParseFrontmatter`).
-    // Parametr `this` znika przy transpilacji — zero emitu.
+    // Parametr `this` znika przy transpilacji - zero emitu.
     private _defaultParseFrontmatter(this: void, content: string): Record<string, unknown> {
         const match = content.match(/^---\n([\s\S]*?)\n---/);
         if (!match) return {};
@@ -903,18 +903,17 @@ export class RetrievalEngine {
     /**
      * Początek treści po frontmatterze (semantic-only hit / listing).
      *
-     * AUD-wydajnosc-056: `\s+` normalizował dawniej CAŁY plik dla 200 znaków wyniku —
-     * O(rozmiar pliku) na jeden excerpt. Tniemy PRZED normalizacją — ale zapas STAŁY
-     * (`max*4`) był regresją znalezioną w review rundy 2: `\s+` zwija DOWOLNIE DUŻO
-     * białych znaków, więc plik z 1000 pustymi liniami na początku dawał `rawSlice`
-     * złożony w całości z whitespace'u → widoczny excerpt to sam „…" (treść zgubiona),
-     * a krótka treść + setki białych znaków NA KOŃCU dawała fałszywe „…" (nic nie zostało
-     * obcięte, tylko zapas się skończył w środku ogona spacji). Naprawa: zapas ROŚNIE —
-     * `max*4` → `max*16` → cała treść — dopóki albo normalizacja da już `max` znaków,
+     * Normalizacja `\s+` CAŁEGO pliku dla 200 znaków wyniku byłaby O(rozmiar pliku) na jeden
+     * excerpt, więc tniemy PRZED normalizacją. Ale STAŁY zapas (samo `max*4`) ma dziurę:
+     * `\s+` zwija DOWOLNIE DUŻO białych znaków, więc plik z 1000 pustymi liniami na początku
+     * dałby `rawSlice` złożony w całości z whitespace'u → widoczny excerpt to sam „…" (treść
+     * zgubiona), a krótka treść + setki białych znaków NA KOŃCU dawałaby fałszywe „…" (nic nie
+     * zostało obcięte, tylko zapas się skończył w środku ogona spacji). Dlatego zapas ROŚNIE -
+     * `max*4` → `max*16` → cała treść - dopóki albo normalizacja da już `max` znaków,
      * albo zapas objął już cały plik. Typowa notatka (treść w pierwszych kilkuset
-     * znakach) kończy na pierwszej próbie — nie wraca do O(rozmiar pliku) w normalnym
+     * znakach) kończy na pierwszej próbie - nie wraca do O(rozmiar pliku) w normalnym
      * przypadku; patologiczny plik (góra pustych linii/spacji) płaci pełną normalizację,
-     * świadomie, tak jak prosił review.
+     * świadomie.
      */
     private _excerptStart(content: string, max = EXCERPT_LEN): string {
         const stripped = String(content || '').replace(/^---\n[\s\S]*?\n---\n?/, '');

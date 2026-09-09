@@ -1,5 +1,5 @@
 /**
- * WebReadTool.test.js — E3.3: streszczanie zamiast cięcia, filtr domen, cache, provenance.
+ * WebReadTool.test.js — streszczanie zamiast cięcia, filtr domen, cache, provenance.
  *
  * ⚠️ Wzorzec z `GenerateImageTool.test.js` (obsidian = same typy, brak runtime'u):
  * `module.registerHooks` podstawia moduł delegujący `requestUrl` do atrapy sieci.
@@ -17,8 +17,8 @@ import type { WebReadPlugin } from './WebReadTool.js';
 import { __test__ as modelsTest } from '../models/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// clean-room: model NIE powstaje już z mapy DI (`config.modules.chatModel.class`) — powstaje przez
-// `createChatModel(deps)` w `modelResolver`. Ten test bada, KTÓRY model dostał Badacz i z jakim
+// Model powstaje przez `createChatModel(deps)` w `modelResolver`, nie z mapy DI
+// (`config.modules.chatModel.class`). Ten test bada, KTÓRY model dostał Badacz i z jakim
 // kontekstem, więc podstawia własną klasę przez seam fabryki resolvera.
 //
 // ⚠️ Klasa jedzie NA DOSTAWCY z configu tego konkretnego pluginu, nie w globalnej zmiennej —

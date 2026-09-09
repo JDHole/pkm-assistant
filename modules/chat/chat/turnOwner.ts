@@ -1,13 +1,13 @@
 /**
- * turnOwner — kto jest WŁAŚCICIELEM tury/okna rozmowy (K4, AUD-security-064/065/066).
+ * turnOwner — kto jest WŁAŚCICIELEM tury/okna rozmowy.
  *
  * Zasada: wszystko, czego potrzebuje bieg, jest ZAMROŻONE w chwili zlecenia i odczytywane
  * STAMTĄD — nigdy z globalnych luster pluginu (`agentManager.activeAgent`, `getActiveMemory()`,
  * `plugin.currentAutonomy`). Okno rozmowy (`RollingWindow`) powstaje raz per zakładka, a jego
  * providery (indeks pamięci, model kompresji, ratunek pamięci) bywają wołane DŁUGO PO tym, jak
- * user przełączył zakładkę — do K4 rozstrzygały się wtedy po agencie, który akurat był na
- * wierzchu, i transkrypt agenta X jechał modelem agenta Y, a jego trwałe notatki `brain/`
- * lądowały w pamięci Y.
+ * user przełączył zakładkę — bez zamrożenia rozstrzygałyby się wtedy po agencie, który akurat
+ * jest na wierzchu, i transkrypt agenta X pojechałby modelem agenta Y, a jego trwałe notatki
+ * `brain/` wylądowałyby w pamięci Y.
  *
  * Ten plik jest CELOWO wolny od `obsidian` i od DOM-u — dzięki temu ma testy jednostkowe
  * (`turnOwner.test.ts`), a `chat_session.ts` (który importuje `Notice`) tylko go wywołuje.
@@ -19,9 +19,9 @@ import { DEFAULT_COMPRESSION_PROMPT } from './compressionPrompt.js';
 // TS-any: granica runtime'u — AgentManager/AgentMemory/ChatView są składane dynamicznie.
 type Runtime = any;
 
-// AUD-dead-code-231 (2026-09-02): `export` zdjęty z trzech typów niżej (i z `FrozenTurnOwner` dalej
-// w pliku) — zero referencji spoza tego pliku; funkcje, których sygnatury je noszą
-// (`resolveOwnerAgentName`, `resolveOwnerAgent`, `buildOwnerWindowOptions`, …), zostają publiczne.
+// Trzy typy niżej (i `FrozenTurnOwner` dalej w pliku) nie są eksportowane — zero referencji
+// spoza tego pliku; funkcje, których sygnatury je noszą (`resolveOwnerAgentName`,
+// `resolveOwnerAgent`, `buildOwnerWindowOptions`, …), zostają publiczne.
 type OwnerAgentLike = { name?: string; memory_rescue?: boolean } | null;
 type OwnerMemoryLike = Runtime;
 
@@ -47,7 +47,7 @@ export function resolveOwnerAgentName(
 
 /**
  * Profil agenta-właściciela. Gdy nazwa jest znana, NIE ma zjazdu na aktywnego — inaczej model
- * i uprawnienia kompresji brałyby się od agenta, który akurat jest na wierzchu (AUD-security-066).
+ * i uprawnienia kompresji brałyby się od agenta, który akurat jest na wierzchu.
  */
 export function resolveOwnerAgent(
     agentManager: OwnerManagerLike,
@@ -59,7 +59,7 @@ export function resolveOwnerAgent(
 
 /**
  * Pamięć agenta-właściciela. Fail-closed: znana nazwa bez wpisu w `agentMemories` = `null`
- * (odmowa), a nie cudzy katalog `brain/` (AUD-security-064/065, wzór 036 w narzędziach pamięci).
+ * (odmowa), a nie cudzy katalog `brain/` — ten sam wzór stosują narzędzia pamięci.
  */
 export function resolveOwnerMemory(
     agentManager: OwnerManagerLike,
@@ -70,13 +70,13 @@ export function resolveOwnerMemory(
 }
 
 /**
- * Ratunek pamięci przed kompresją (E2.7 W2 / K3) — zapis kandydatów jako notatek W POCZEKALNI
- * `brain/pending_rescue/` (D8, 2026-08-27, werdykt 27.08), NIE wprost do `brain/`. User zatwierdza
- * je istniejącą drogą `/save session` (`SaveSessionWorkflow`/`SaveSessionModal`) — patrz
- * `AgentMemory.acceptPendingRescue`/`rejectPendingRescue`. K4: i wyłącznik `memory_rescue`, i
+ * Ratunek pamięci przed kompresją — zapis kandydatów jako notatek W POCZEKALNI
+ * `brain/pending_rescue/`, NIE wprost do `brain/`. User zatwierdza je istniejącą drogą
+ * `/save session` (`SaveSessionWorkflow`/`SaveSessionModal`) — patrz
+ * `AgentMemory.acceptPendingRescue`/`rejectPendingRescue`. Wyłącznik `memory_rescue` i
  * katalog docelowy biorą się od WŁAŚCICIELA okna.
  *
- * Fail-soft (werdykt 27.08): gdy `mem` nie ma jeszcze `writePendingRescue` (stara atrapa) albo
+ * Fail-soft: gdy `mem` nie ma jeszcze `writePendingRescue` (stara atrapa) albo
  * zapis do poczekalni PADNIE, wracamy do dawnej ścieżki — `writeBrainNote` wprost. Lepszy
  * niezreview'owany zapis niż utrata kandydata, którego okno kompresji zaraz odrzuci.
  *
@@ -88,17 +88,17 @@ export async function saveMemoryCandidatesFor(
     candidates: Runtime[] = [],
 ): Promise<number> {
     const ownerAgent = resolveOwnerAgent(agentManager, ownerName);
-    // E2.8 C9 (S23): per-agent wyłącznik ratunku pamięci przed kompresją (default ON).
+    // Per-agent wyłącznik ratunku pamięci przed kompresją (default ON).
     if (ownerAgent && ownerAgent.memory_rescue === false) return 0;
     const mem = resolveOwnerMemory(agentManager, ownerName);
     if (!mem?.writeBrainNote || !Array.isArray(candidates) || candidates.length === 0) return 0;
     let saved = 0;
     for (const candidate of candidates) {
         if (mem.writePendingRescue) {
-            // Ścieżka poczekalni: fallback do writeBrainNote odpala się TYLKO stąd (werdykt
-            // weryfikacji opusa, nit 1) — nigdy z gałęzi „atrapa bez poczekalni" niżej, żeby
-            // padnięty writeBrainNote nie był ponawiany drugi raz z tymi samymi argumentami
-            // (nit C1(a)). AgentMemory.writePendingRescue sam już broni się przed torn-write
+            // Ścieżka poczekalni: fallback do writeBrainNote odpala się TYLKO stąd — nigdy
+            // z gałęzi „atrapa bez poczekalni" niżej, żeby padnięty writeBrainNote nie był
+            // ponawiany drugi raz z tymi samymi argumentami.
+            // AgentMemory.writePendingRescue sam już broni się przed torn-write
             // (probeFile po catchu), więc ten catch łapie WYŁĄCZNIE zapisy, które NA PEWNO
             // nie doszły.
             try {
@@ -134,14 +134,14 @@ export async function saveMemoryCandidatesFor(
 }
 
 /**
- * AUD-code-review-013: czy zakładka WŁAŚCICIELA okna jest AKURAT na wierzchu.
+ * Czy zakładka WŁAŚCICIELA okna jest AKURAT na wierzchu.
  *
  * Callbacki okna (`onSummarized`/`onToolsTrimmed`/`onMemoryCandidates`) malują do JEDYNEGO
- * `messages_container` widoku (jeden kontener na cały `ChatView`, nie per zakładka). K4 mówi że
- * kompresja końca tury LECI bezwarunkowo także dla zakładki w tle — to jest zasada o DANYCH
- * (transkrypt, plik sesji), nie o DOM-ie. Bez tej bramki blok „skompresowano #N" agenta A malował
- * się fizycznie w rozmowie agenta B, którą user akurat czyta (z licznikami policzonymi z okna A),
- * i znikał dopiero przy najbliższym `render_messages()` — czysty artefakt cudzej tury.
+ * `messages_container` widoku (jeden kontener na cały `ChatView`, nie per zakładka). Kompresja
+ * końca tury LECI bezwarunkowo także dla zakładki w tle — to jest zasada o DANYCH (transkrypt,
+ * plik sesji), nie o DOM-ie. Bez tej bramki blok „skompresowano #N" agenta A malowałby się
+ * fizycznie w rozmowie agenta B, którą user akurat czyta (z licznikami policzonymi z okna A),
+ * i znikałby dopiero przy najbliższym `render_messages()` — czysty artefakt cudzej tury.
  */
 export function isOwnerTabActive(view: Runtime, ownerName: string | null): boolean {
     const tabs = view?.chatTabs;
@@ -161,7 +161,7 @@ export function isOwnerTabActive(view: Runtime, ownerName: string | null): boole
  */
 export function buildOwnerWindowOptions(view: Runtime, ownerName: string | null) {
     const am = (): OwnerManagerLike => view?.plugin?.agentManager;
-    // E2.8 B3: szkielet kompresji rozstrzygany raz, przy zakładaniu okna (agent>global>factory).
+    // Szkielet kompresji rozstrzygany raz, przy zakładaniu okna (agent>global>factory).
     const compressionPrompt = resolveWorkPrompt(
         resolveOwnerAgent(am(), ownerName),
         'compression_prompt',
@@ -170,9 +170,8 @@ export function buildOwnerWindowOptions(view: Runtime, ownerName: string | null)
     );
     return {
         compressionPrompt,
-        // K18: zjazd awaryjny (`minionEnabled === false`) też celuje w WŁAŚCICIELA — `get_chat_model`
-        // przyjmuje od K18 agenta, więc znika ostatnie miejsce, w którym kompresja okna A mogła
-        // pojechać modelem agenta B (znana granica K4, domknięta).
+        // Zjazd awaryjny (`minionEnabled === false`) też celuje w WŁAŚCICIELA — `get_chat_model`
+        // przyjmuje agenta jawnie, więc kompresja okna A nie może pojechać modelem agenta B.
         modelProvider: () => {
             const ownerAgent = resolveOwnerAgent(am(), ownerName);
             return view._getMinionModel(ownerAgent) || view.get_chat_model?.({ agent: ownerAgent });
@@ -184,7 +183,7 @@ export function buildOwnerWindowOptions(view: Runtime, ownerName: string | null)
         emergencyContextProvider: () => view._buildEmergencyTaskContext(ownerName),
         onMemoryCandidates: async (candidates: Runtime[]) => {
             const saved = await saveMemoryCandidatesFor(am(), ownerName, candidates);
-            // AUD-code-review-013: nota „N kandydatów czeka" jest DOM-em jednego widoku — malujemy
+            // Nota „N kandydatów czeka" jest DOM-em jednego widoku — malujemy
             // ją tylko, gdy zakładka właściciela jest akurat na wierzchu (patrz `isOwnerTabActive`).
             if (saved > 0 && isOwnerTabActive(view, ownerName)) view._renderMemorySavedNote(saved);
             if (isOwnerTabActive(view, ownerName)) view._updateTokenPanel?.();
@@ -193,16 +192,15 @@ export function buildOwnerWindowOptions(view: Runtime, ownerName: string | null)
 }
 
 /**
- * WŁAŚCICIEL TURY — wszystko, co tura czatu bierze z widoku, ZAMROŻONE w jednej chwili
- * (K18, AUD-security-112).
+ * WŁAŚCICIEL TURY — wszystko, co tura czatu bierze z widoku, ZAMROŻONE w jednej chwili.
  *
- * Do K18 `send_message` zapalał Stop, wchodził w `getActiveSystemPromptWithMemory` (brain.md,
- * sesja, mapa vaulta, ping skrzynki — okno „potrafi trwać sekundy") i DOPIERO POTEM czytał
- * `getActiveAgent()`, `view.rollingWindow`, `getActiveMemory().activeSessionPath`. Przełączenie
- * zakładki w tym oknie (`_switchTab` nie jest blokowane w trakcie generowania i przestawia
- * `agentManager.activeAgent`, `view.rollingWindow`, `view.tokenTracker`) sprawiało, że tura
- * zaczęta u agenta A — z promptem złożonym z JEGO pamięci — kończyła jako tura agenta B:
- * modelem B, z uprawnieniami narzędzi B i zapisami do sesji B.
+ * `send_message` zapala Stop, wchodzi w `getActiveSystemPromptWithMemory` (brain.md,
+ * sesja, mapa vaulta, ping skrzynki — okno „potrafi trwać sekundy") i DOPIERO POTEM czyta
+ * `getActiveAgent()`, `view.rollingWindow`, `getActiveMemory().activeSessionPath`. Bez zamrożenia
+ * przełączenie zakładki w tym oknie (`_switchTab` nie jest blokowane w trakcie generowania i
+ * przestawia `agentManager.activeAgent`, `view.rollingWindow`, `view.tokenTracker`) sprawiałoby,
+ * że tura zaczęta u agenta A — z promptem złożonym z JEGO pamięci — kończyłaby jako tura
+ * agenta B: modelem B, z uprawnieniami narzędzi B i zapisami do sesji B.
  */
 interface FrozenTurnOwner {
     /** Nazwa agenta, do którego należy tura (pusta = brak agenta). */
@@ -219,9 +217,9 @@ interface FrozenTurnOwner {
     sessionPath: string;
     /** Zakładka, z której wyszła tura (adres zwrotny delegacji w tle). */
     tab: Runtime;
-    /** Autonomia tej zakładki (E2.3) — polityka „czy pytać" dla egzekutora narzędzi. */
+    /** Autonomia tej zakładki — polityka „czy pytać" dla egzekutora narzędzi. */
     autonomy: Runtime;
-    /** Aktywny artefakt tej zakładki (E2.9 B3) — wstrzykiwany do promptu. */
+    /** Aktywny artefakt tej zakładki — wstrzykiwany do promptu. */
     artifactId: Runtime;
 }
 

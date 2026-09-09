@@ -1,5 +1,5 @@
 /**
- * save_session.noteFailures — strażnik OKABLOWANIA `result.noteFailures` (AUD-code-review-051).
+ * save_session.noteFailures — strażnik OKABLOWANIA `result.noteFailures`.
  *
  * Dlaczego test po ŹRÓDLE, a nie po zachowaniu: `save_session.ts` importuje `obsidian`
  * (`Notice`, `App`) na górze modułu, więc AVA nie zaimportuje pliku produkcyjnego — to samo

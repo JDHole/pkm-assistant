@@ -1,5 +1,5 @@
 /**
- * Strażnik dryfu dokumentacji (audyt nocny 2026-08-20, moduł 12 katalogu audytów).
+ * Strażnik dryfu dokumentacji.
  *
  * DLACZEGO ten plik istnieje: główny `CLAUDE.md` stawia regułę „Dokumentacja, która
  * kłamie, jest w tym projekcie traktowana jak błąd" (sekcja „Dla agenta", punkt 6),
@@ -12,8 +12,7 @@
  * ich poprawiania („nie poprawiamy ich, bo sfałszowałoby to historię"), więc pilnowanie
  * ich aktualności byłoby pilnowaniem historii.
  *
- * Testy dopisane w nocnym przebiegu audytowym: pinują stan, NIE zmieniają zachowania
- * pluginu. Naprawa należy do sesji dziennej.
+ * Te testy pinują stan, NIE zmieniają zachowania pluginu.
  */
 import test from 'ava';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
@@ -40,24 +39,21 @@ function zywieDokumenty(): string[] {
 }
 
 /**
- * ZNALEZISKO (audyt nocny 2026-08-20), naprawione 2026-09-04: `npm run dev` był reklamowany
- * w CLAUDE.md („Build z watch mode") i w README.md („Watch mode for development"), a takiego
- * skryptu NIGDY nie było w package.json (zweryfikowane `git log -S'"dev"' -- package.json` =
- * pusto). Nowy user szedł za README i dostawał błąd npm zamiast build-watcha.
+ * `npm run dev` bywał reklamowany w CLAUDE.md („Build z watch mode") i w README.md
+ * („Watch mode for development"), zanim taki skrypt istniał w `package.json` — user szedł
+ * za README i dostawał błąd npm zamiast build-watcha.
  *
- * Naprawa poszła w stronę dopisania funkcji, nie skreślenia obietnicy z dokumentacji:
- * `esbuild.js` umiał tylko jednorazowy `esbuild.build()`. Dziś stoi na `esbuild.context()` —
- * `npm run build` robi `ctx.rebuild()` + `ctx.dispose()` (zachowanie identyczne jak przedtem),
- * `npm run dev` (nowy skrypt, `node esbuild.js --watch`) robi `ctx.watch()` i zostaje żywy.
- * Deploy do `DESTINATION_VAULTS` przeniesiony do wspólnego `onEnd` pluginu (`deploy_plugin`),
- * więc odpala się po KAŻDYM udanym buildzie — jednorazowym i każdym rebuildzie watcha — bez
- * duplikowania logiki kopiowania. Uzasadnienie wyboru (dopisać watcha, nie zdjąć docs):
- * `.hotreload` marker już istnieje w deployu (dla community pluginu Hot-Reload w Obsidianie),
- * więc `npm run dev` domyka istniejącą infrastrukturę, a nie dokłada nowej funkcji pluginowi.
+ * `esbuild.js` stoi na `esbuild.context()`: `npm run build` robi `ctx.rebuild()` +
+ * `ctx.dispose()` (zachowanie jednorazowego builda), `npm run dev` (`node esbuild.js --watch`)
+ * robi `ctx.watch()` i zostaje żywy. Deploy do `DESTINATION_VAULTS` jedzie przez wspólny
+ * `onEnd` pluginu (`deploy_plugin`), więc odpala się po KAŻDYM udanym buildzie — jednorazowym
+ * i każdym rebuildzie watcha — bez duplikowania logiki kopiowania. `.hotreload` marker już
+ * istnieje w deployu (dla community pluginu Hot-Reload w Obsidianie), więc `npm run dev`
+ * domyka istniejącą infrastrukturę, a nie dokłada nowej funkcji pluginowi.
  */
 /**
- * 2026-09-07: dokumentacja wskazuje też komendy CUDZEGO repo — harnessu „Szklane Pudło"
- * (https://github.com/JDHole/pkm-assistant-harness), który wyjechał z tego repo, bo walidator
+ * Dokumentacja wskazuje też komendy CUDZEGO repo — harnessu „Szklane Pudło"
+ * (https://github.com/JDHole/pkm-assistant-harness), który żyje poza tym repo, bo walidator
  * katalogu lintuje CAŁE repo pluginu. Te komendy MAJĄ być nieobecne w naszym package.json,
  * więc są tu wypisane z nazwy — lista celowo krótka i zamknięta, żeby literówka w komendzie
  * pluginu dalej wychodziła na czerwono.

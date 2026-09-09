@@ -1,9 +1,9 @@
 /**
- * Nazwa narzędzia AKUMULUJE SIĘ z fragmentów — nie nadpisuje.
+ * Nazwa narzędzia AKUMULUJE SIĘ z fragmentów - nie nadpisuje.
  *
  * DeepSeek Reasoner potrafi wypchnąć DWA wywołania na TYM SAMYM `index` (`read` z własnymi
  * argumentami, zaraz po nim `list` z własnymi). Nadpisanie nazwy zostawia JEDNO wywołanie
- * o nazwie drugiego i sklejonym ciele `{…}{…}` — pierwsze narzędzie znika po cichu, a to,
+ * o nazwie drugiego i sklejonym ciele `{…}{…}` - pierwsze narzędzie znika po cichu, a to,
  * które zostało, dostaje argumenty, o których nikt nie prosił. Sklejanie daje `readlist`,
  * czyli kształt, który rozkleja kanon pętli (`splitConcatenatedToolCalls` +
  * `_decomposeToolName` w `modules/agent-loop`) na dwa poprawne wywołania.
@@ -27,7 +27,7 @@ function ramka(toolCall: Record<string, unknown>): string {
     return `data: ${JSON.stringify({ id: 'c1', choices: [{ index: 0, delta: { tool_calls: [toolCall] } }] })}\n\n`;
 }
 
-/** Czeka na warunek albo pada — zamiast wieszać cały bieg testów. */
+/** Czeka na warunek albo pada - zamiast wieszać cały bieg testów. */
 async function czekajNa(predykat: () => boolean, timeoutMs = 1000): Promise<void> {
     const start = Date.now();
     while (!predykat()) {
@@ -105,8 +105,8 @@ test.serial('różne indeksy zostają OSOBNYMI wywołaniami — sklejanie ich ni
 });
 
 /**
- * F10 (mutacje): `id` przychodzi RAZ, w pierwszej delcie wywołania — kolejne porcje go nie
- * niosą. Odwrócenie warunku przechodziło pakiet, a pętla bez `id` nie ma czym sparować
+ * `id` przychodzi RAZ, w pierwszej delcie wywołania - kolejne porcje go nie niosą. Bez tego
+ * pinu odwrócenie warunku przechodziłoby pakiet, a pętla bez `id` nie ma czym sparować
  * wyniku narzędzia z wywołaniem (`tool_call_id` w wiadomości zwrotnej).
  */
 test.serial('id wywołania z pierwszej delty zostaje — kolejne porcje go nie kasują', async t => {

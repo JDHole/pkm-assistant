@@ -1,13 +1,10 @@
 /**
- * MCPServerEditorModal — Add / edit an EXTERNAL MCP server (E3.1 faza B).
+ * MCPServerEditorModal - Add / edit an EXTERNAL MCP server.
  *
  * Real MCP protocol client (ExternalMcpManager): stdio = local process (desktop only),
  * http = remote server (also mobile). Config is persisted in plugin settings
- * (`settings.pkmAssistant.externalMcpServers[]` → data.json), NOT in vault files — command/env may
- * carry secrets that must not sync with the vault (decyzja D-D).
- *
- * Replaces the Sprint 04 template/slug/sandbox flow (custom-JS servers), fully removed in
- * faza C (custom-JS sandbox + templates/ deleted, decyzja D-A).
+ * (`settings.pkmAssistant.externalMcpServers[]` → data.json), NOT in vault files - command/env may
+ * carry secrets that must not sync with the vault.
  */
 import { Modal, Setting, Notice } from 'obsidian';
 import { t } from '../../core/i18n/index.js';
@@ -16,7 +13,7 @@ import { ExternalMcpManager, MCP_SERVER_PRESETS, getMcpServerPreset } from '../t
 // TS-any: this modal is the boundary to the dynamically extended Obsidian plugin and external MCP manager facades.
 type Runtime = any;
 
-// Fallback list if the registry is unavailable — must mirror BUILTIN_TOOL_MAP keys.
+// Fallback list if the registry is unavailable - must mirror BUILTIN_TOOL_MAP keys.
 const BUILTIN_SERVER_NAMES = ['core', 'artifacts', 'vault', 'memory', 'web', 'multimodal', 'delegation', 'komunikator'];
 
 /** Parse a textarea into a trimmed, non-empty line array (args). */
@@ -85,7 +82,7 @@ export class MCPServerEditorModal extends Modal {
         this.existing = options.existingServer || null;
         this._save = options.save || (async () => this.plugin?.env?.settingsStore?.save?.());
         this.isEdit = !!this.existing;
-        /** S32 Z2.2: wybrany preset (tylko w trybie NOWEGO serwera); '' = „własny". */
+        /** Wybrany preset (tylko w trybie NOWEGO serwera); '' = „własny". */
         this._presetId = '';
 
         const src = this.existing || {};
@@ -99,9 +96,9 @@ export class MCPServerEditorModal extends Modal {
             url: src.url || '',
             headersText: toHeadersText(src.headers),
             autostart: !!src.autostart,
-            // S33 Z3 (kill-switch): przy EDYCJI zachowujemy stan włącznika; nowy serwer = włączony.
-            // Wcześniej `_handleSave` wpisywał `enabled: true` bezwarunkowo, więc każda edycja
-            // po cichu odwracała wyłączenie serwera przez usera.
+            // Kill-switch: przy EDYCJI zachowujemy stan włącznika; nowy serwer = włączony.
+            // `_handleSave` NIE MOŻE wpisywać `enabled: true` bezwarunkowo, bo wtedy każda edycja
+            // po cichu odwracałaby wyłączenie serwera przez usera.
             enabled: src.enabled !== false,
         };
     }
@@ -115,7 +112,7 @@ export class MCPServerEditorModal extends Modal {
             .setName(this.isEdit ? t('modal.mcp_server_editor.edit_title') : t('modal.mcp_server_editor.new_title'))
             .setHeading();
 
-        // Preset (S32 Z2.2) — only when adding a new server; it just fills the form below.
+        // Preset - only when adding a new server; it just fills the form below.
         if (!this.isEdit) this._renderPresetPicker(contentEl);
 
         // Name
@@ -128,7 +125,7 @@ export class MCPServerEditorModal extends Modal {
                 text.onChange(v => { this.form.name = v; });
             });
 
-        // Id (slug) — immutable in edit mode (it is the tool prefix + the agent pin key).
+        // Id (slug) - immutable in edit mode (it is the tool prefix + the agent pin key).
         new Setting(contentEl)
             .setName(t('modal.mcp_server_editor.id_label'))
             .setDesc(t('modal.mcp_server_editor.id_desc'))
@@ -153,7 +150,7 @@ export class MCPServerEditorModal extends Modal {
         this._transportEl = contentEl.createDiv({ cls: 'mcp-server-editor-transport' });
         this._renderTransportFields();
 
-        // S33 Z3: voluntary connection test — see the server's tool list BEFORE saving it.
+        // Voluntary connection test - see the server's tool list BEFORE saving it.
         this._renderPreviewSection(contentEl);
 
         // Autostart
@@ -176,10 +173,10 @@ export class MCPServerEditorModal extends Modal {
     }
 
     /**
-     * S32 Z2.2 — dropdown „Preset": gotowe serwery MCP wpisane w kodzie (`MCP_SERVER_PRESETS`).
+     * Dropdown „Preset": gotowe serwery MCP wpisane w kodzie (`MCP_SERVER_PRESETS`).
      * Wybór tylko WYPEŁNIA formularz (name/id/command/args/env) i pokazuje podpowiedź co uzupełnić;
      * user może potem zmienić każde pole, a walidacja przy zapisie działa jak zawsze (id może
-     * kolidować z już dodanym serwerem — wtedy zapis odbije z komunikatem).
+     * kolidować z już dodanym serwerem - wtedy zapis odbije z komunikatem).
      */
     _renderPresetPicker(contentEl: Runtime): void {
         new Setting(contentEl)
@@ -213,13 +210,13 @@ export class MCPServerEditorModal extends Modal {
             this.form.url = '';
             this.form.headersText = '';
         }
-        this.onOpen(); // onOpen zaczyna od contentEl.empty() — bezpieczne przerysowanie
+        this.onOpen(); // onOpen zaczyna od contentEl.empty() - bezpieczne przerysowanie
     }
 
     /**
-     * S33 Z3: „Sprawdź połączenie i pokaż narzędzia" — DOBROWOLNY podgląd. Nie blokuje zapisu
+     * „Sprawdź połączenie i pokaż narzędzia" - DOBROWOLNY podgląd. Nie blokuje zapisu
      * (serwer bywa offline), ale daje szansę zobaczyć, co dokładnie dostanie agent, ZANIM
-     * konfiguracja wyląduje w data.json. Próba jest efemeryczna — `previewTools` zamyka
+     * konfiguracja wyląduje w data.json. Próba jest efemeryczna - `previewTools` zamyka
      * połączenie po sobie i niczego nie rejestruje.
      */
     _renderPreviewSection(contentEl: Runtime): void {
@@ -261,7 +258,7 @@ export class MCPServerEditorModal extends Modal {
         result.empty();
 
         const cfg = this._buildConfigFromForm();
-        // Minimalne wymagania transportu — bez nich nie ma czego próbować.
+        // Minimalne wymagania transportu - bez nich nie ma czego próbować.
         if (cfg.transport === 'stdio' && !cfg.command) {
             new Notice(t('modal.mcp_server_editor.error_command_required'));
             return;
@@ -377,7 +374,7 @@ export class MCPServerEditorModal extends Modal {
                 });
         }
 
-        // Trust warning — honest, transport-specific, no theatre (spec B2).
+        // Trust warning - honest, transport-specific, no theatre.
         const warn = el.createDiv({ cls: 'mcp-server-editor-trust cs-warning-banner' });
         warn.addClass('pkm-editor-warn');
         warn.createEl('strong', { text: '⚠ ' });
@@ -411,7 +408,7 @@ export class MCPServerEditorModal extends Modal {
             return;
         }
 
-        // R3: id validation (slug + no built-in collision) — defense in depth with connect().
+        // Id validation (slug + no built-in collision) - defense in depth with connect().
         const idCheck = ExternalMcpManager.validateServerId(f.id, this._builtinNames());
         if (!idCheck.ok) {
             new Notice(idCheck.reason === 'reserved'
@@ -437,15 +434,15 @@ export class MCPServerEditorModal extends Modal {
             return;
         }
 
-        // Build clean config (config-only — no runtime status; R2).
-        // S33 Z3: `enabled` pochodzi z formularza (edycja zachowuje stan wyłącznika usera).
+        // Build clean config (config-only - no runtime status).
+        // `enabled` pochodzi z formularza (edycja zachowuje stan wyłącznika usera).
         const config = this._buildConfigFromForm();
 
         // Persist into settings (data.json). On edit, replace by id in place.
-        // AUD-code-review-040: mutacja PRZED zapisem musi się cofnąć, jeśli zapis padnie —
+        // Mutacja PRZED zapisem musi się cofnąć, jeśli zapis padnie -
         // inaczej `servers[idx]` zostaje podmieniony w RAM (stara, działająca konfiguracja
         // usera znika z pamięci), a na dysku wciąż leży poprzednia wersja. Wzór
-        // `persistOrRollback` z `modules/tools/settingsPersist.ts` (K3-E) — nie importowany
+        // `persistOrRollback` z `modules/tools/settingsPersist.ts` - nie importowany
         // wprost, bo nie jest w barrelu `modules/tools/index.ts` (deep-import zakazany przez
         // ZŁOTĄ ZASADĘ / no-restricted-imports); logika jest jednak identyczna: cofnij mutację,
         // zamelduj, przerysowanie ze stanu prawdziwego robi wołacz przez `refresh()` (nie leci

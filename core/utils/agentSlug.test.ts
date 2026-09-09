@@ -1,7 +1,7 @@
 import test from 'ava';
 import { getAgentSafeName } from './agentSlug.js';
 
-// AUD-code-review-029: test równoważności — helper MUSI dawać dokładnie ten sam wynik co
+// Test równoważności — helper MUSI dawać dokładnie ten sam wynik co
 // stare, ~20-krotnie skopiowane wyrażenie inline `toLowerCase().replace(/[^a-z0-9]/g, '_')`.
 // Zero zmiany formatu = zero migracji folderów `.pkm-assistant/agents/<safeName>/` u usera.
 function legacyInline(name: unknown): string {

@@ -10,8 +10,8 @@
  * złamałoby ten kontrakt od razu. Zamiast tego moduł trzyma silnik jako slot wstrzykiwany
  * przez `setYamlEngine()` — composition root (`src/main.ts`) wstawia tam prawdziwe
  * `parseYaml`/`stringifyYaml` Obsidiana, a poza Obsidianem (testy AVA, harness) wstawia je
- * preload/atrapa na pakiecie `yaml` (devDependency, zob. `harness/mock/register-obsidian-for-ava.mjs`
- * i `harness/mock/obsidian.ts`). Silnik nie ustawiony = czytelny błąd, NIE cichy null —
+ * preload/atrapa na pakiecie `yaml` (devDependency, zob. `test-support/register-obsidian-for-ava.mjs`
+ * i `test-support/obsidian.ts`). Silnik nie ustawiony = czytelny błąd, NIE cichy null —
  * inaczej pierwsza próba zapisu agenta/artefaktu ginęłaby bez śladu.
  */
 import { log } from './Logger.js';
@@ -115,7 +115,7 @@ export function validateAgentSchema(
     }
 
     // Optional but typed fields
-    // E2.8 A1: `archetype` nie jest już walidowane (byt skasowany) — stare YAML-e z tym polem
+    // `archetype` nie jest już walidowane (byt skasowany) - stare YAML-e z tym polem
     // przechodzą walidację i są ignorowane przez konstruktor Agenta.
 
     if (agentData.personality && typeof agentData.personality !== 'string') {
@@ -199,7 +199,7 @@ export function validateAgentSchema(
         errors.push('"master_enabled" must be a boolean');
     }
 
-    // Sprint 04 MCP_PORZADEK_v1: mcp_servers[] whitelist (strings)
+    // mcp_servers[] whitelist (strings)
     if (agentData.mcp_servers !== undefined) {
         if (!Array.isArray(agentData.mcp_servers)) {
             errors.push('"mcp_servers" must be an array of strings (server names or "*")');
@@ -213,19 +213,18 @@ export function validateAgentSchema(
         }
     }
 
-    // S33 Z2 (B3): walidacja `can_message[]` USUNIĘTA razem z polem (skasowane jako byt
-    // w E2.8 A4/F7). Schemat jest permissive — stary YAML z tym polem przechodzi walidację
-    // i ląduje w ignorowanej reszcie configu.
+    // `can_message[]` nie jest już walidowane (pole skasowane). Schemat jest permissive -
+    // stary YAML z tym polem przechodzi walidację i ląduje w ignorowanej reszcie configu.
 
     if (agentData.models !== undefined) {
         // `models === null` musi wpaść tu, nie do Object.entries: `typeof null === 'object'`,
-        // a puste `models:` w YAML parsuje się właśnie do null (fix znaleziska TS-1 #2).
+        // a puste `models:` w YAML parsuje się właśnie do null.
         if (agentData.models === null || typeof agentData.models !== 'object' || Array.isArray(agentData.models)) {
             errors.push('"models" must be an object with optional keys: main, researcher, strategist');
         } else {
             const allowedRoles = ['main', 'researcher', 'strategist', 'minion', 'master'];
             // `as object`: `typeof null === 'object'`, więc `models: null` wpada TUTAJ i wywala
-            // `Object.entries` — zastane zachowanie (patrz raport TS-1), nie zmieniamy go typami.
+            // `Object.entries` — zastane zachowanie, nie zmieniamy go typami.
             for (const [role, cfg] of Object.entries(agentData.models as Record<string, unknown>)) {
                 if (!allowedRoles.includes(role)) {
                     errors.push(`"models.${role}" is not valid. Allowed: ${allowedRoles.join(', ')}`);

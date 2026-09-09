@@ -1,12 +1,12 @@
 /**
- * TodoTool — gatunek 2 (todo): prymitywne, jednorazowe zadania agenta (E2.9 FAZA D / D1, A13).
+ * TodoTool — gatunek 2 (todo): prymitywne, jednorazowe zadania agenta.
  *
  * Osobne narzędzie od rodziny `artifact_*` (gatunek 1). Celowo bezmyślnie prosty kontrakt
  * (lista + odhacz), bo agent używa go non stop — samoorganizacja pracy „na oczach".
  *
  * Plik JEDNORAZOWY: `.pkm-assistant/artifacts/todo/<agent>-<sessionId>.md`. Dotfolder → Vault API go
  * NIE widzi, więc idziemy ADAPTEREM (wzór AgentMemory). Silnik = TEN SAM parser/patcher co gatunek 1
- * (`artifactParser`) — „wspólna mechanika, nie sklejanie gatunków" (F4). `finish` (albo nowa sesja)
+ * (`artifactParser`) — „wspólna mechanika, nie sklejanie gatunków". `finish` (albo nowa sesja)
  * kasuje plik; stan i tak leci do trace.log przez tool.post.
  *
  * `todo` jest default ON dla nowych agentów (wyjątek z grupy `artifacts` w `toolAxis`) — samoorganizacja
@@ -14,11 +14,10 @@
  */
 import { t } from '../../../../core/i18n/index.js';
 import { log } from '../../../../core/utils/Logger.js';
-// K4 self-append (za weryfikacją opus): odczyt-najpierw WŁASNEGO pliku listy przed patchem —
-// eksport z barrela, jak w modules/memory. Duck-typuje adapter, więc `TodoAdapter` (poniżej)
-// pasuje bez castowania.
+// Self-append: odczyt-najpierw WŁASNEGO pliku listy przed patchem — eksport z barrela, jak
+// w modules/memory. Duck-typuje adapter, więc `TodoAdapter` (poniżej) pasuje bez castowania.
 import { readIfExists } from '../../../../core/index.js';
-// Silnik treści todo = TEN SAM parser/patcher co gatunek 1 (F4), przez publiczne
+// Silnik treści todo = TEN SAM parser/patcher co gatunek 1, przez publiczne
 // drzwi modułu artifacts (barrel jest node-safe).
 import { parseArtifact, applyPatch } from '../../../artifacts/index.js';
 
@@ -145,8 +144,8 @@ export class TodoFileStore {
     }
 
     /**
-     * Serializuj read-modify-write na JEDNEJ ścieżce (AUD-bledy-057; wzór
-     * `AgentMemory._enqueuePathWrite`, E1.3 P5 — świadoma kopia, nie wspólny moduł).
+     * Serializuj read-modify-write na JEDNEJ ścieżce (wzór `AgentMemory._enqueuePathWrite` —
+     * świadoma kopia, nie wspólny moduł).
      *
      * DLACZEGO: `AgentLoop` puszcza wszystkie tool_calle jednej tury przez `Promise.all`,
      * a dwa `todo` w turze to domyślny tryb pracy modelu. Bez kolejki obie operacje czytają
@@ -172,7 +171,7 @@ export class TodoFileStore {
     }
 
     /**
-     * Stan PO zapisie, odczytany z DYSKU (AUD-bledy-057) — nie z lokalnie policzonej kopii.
+     * Stan PO zapisie, odczytany z DYSKU — nie z lokalnie policzonej kopii.
      * Model ma widzieć to, co realnie leży w pliku, także gdy dopisał tam coś ktoś spoza
      * naszej kolejki. Padnięty odczyt kontrolny nie wywraca udanego zapisu: wtedy oddajemy
      * to, co właśnie zapisaliśmy.
@@ -226,16 +225,16 @@ export class TodoFileStore {
     /**
      * Nałóż opsy patcha na plik (tworzy pusty, jeśli brak). Zwraca stan + błędy patcha.
      * CAŁY read-modify-write siedzi w kolejce per ścieżka — inaczej równoległe wywołania
-     * tury czytają ten sam nieświeży plik i kasują sobie zmiany (AUD-bledy-057).
+     * tury czytają ten sam nieświeży plik i kasują sobie zmiany.
      */
     async patch(agent: string, sessionId: string, ops: object[], { title }: { title?: string } = {}): Promise<TodoOpResult> {
         const p = this.path(agent, sessionId);
         return this._enqueuePathWrite(p, async () => {
             await this._ensureFolder();
-            // Self-append (klasa K4, za weryfikacją opus): stary wzorzec `(await exists(p)) ?
-            // read(p) : emptyMarkdown()` na Dysku Google (exists()===false DLA PLIKU, KTÓRY JEST)
-            // zamieniał CAŁĄ listę todo agenta pustym szkieletem — patch dopisywał/odznaczał na
-            // PUSTYM stanie, więc reszta zadań znikała z dysku przy pierwszym patchu po kłamstwie.
+            // Self-append: wzorzec `(await exists(p)) ? read(p) : emptyMarkdown()` na Dysku
+            // Google (exists()===false DLA PLIKU, KTÓRY JEST) zamieniałby CAŁĄ listę todo agenta
+            // pustym szkieletem — patch dopisywałby/odznaczał na PUSTYM stanie, więc reszta
+            // zadań znikałaby z dysku przy pierwszym patchu po kłamstwie.
             // `readIfExists` czyta NAJPIERW, więc `exists()` nie ma szans przeciąć drogi do treści.
             const probe = await readIfExists(this.adapter, p);
             if (probe.state === 'unreadable') {
@@ -258,8 +257,8 @@ export class TodoFileStore {
      * zakolejkowanego zapisu (ani zapis wskrzesić pliku po kasacji).
      *
      * Brak pliku = sukces (idempotencja). Ale realny błąd kasowania NIE jest sukcesem:
-     * wraca w `removeError`, bo posprzątanie po sobie jest tu JEDYNYM zadaniem akcji
-     * (AUD-bledy-031 — do tej pory `catch` zjadał wszystko pod komentarzem „już nie ma").
+     * wraca w `removeError`, bo posprzątanie po sobie jest tu JEDYNYM zadaniem akcji —
+     * `catch` nie wolno tu zjeść pod komentarzem „już nie ma".
      */
     async finish(agent: string, sessionId: string): Promise<TodoOpResult> {
         const p = this.path(agent, sessionId);
@@ -319,8 +318,9 @@ export class TodoFileStore {
 /**
  * Rozwiąż sessionId rozmowy WOŁAJĄCEGO agenta (basename aktywnej sesji; fallback stały).
  *
- * K4: tożsamość bierze się z zaufanego `_invocationAgentName`, nie z globalnego aktywnego —
- * `todo` wywołane przez suba w tle po przełączeniu zakładki kluczowało plik sesją obcego agenta.
+ * Tożsamość bierze się z zaufanego `_invocationAgentName`, nie z globalnego aktywnego —
+ * inaczej `todo` wywołane przez suba w tle po przełączeniu zakładki kluczowałoby plik sesją
+ * obcego agenta.
  */
 function resolveSessionId(plugin: TodoToolPlugin | null | undefined, agentName: string | null): string {
     try {
@@ -382,7 +382,7 @@ export function createTodoTool() {
                     out = await store.finish(agent, sessionId);
                     if (out.removeError) {
                         // Bez `type:'todo'` — live-widok ma ZOSTAĆ na żywej liście, bo ona nadal leży
-                        // na dysku. Meldunek „zakończono" byłby tu zwykłym kłamstwem (AUD-bledy-031).
+                        // na dysku. Meldunek „zakończono" byłby tu zwykłym kłamstwem.
                         log.error('TodoTool', `finish: nie udało się skasować ${store.path(agent, sessionId)}`, out.removeError);
                         return {
                             isError: true,

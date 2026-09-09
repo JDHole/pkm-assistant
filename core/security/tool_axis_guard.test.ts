@@ -1,5 +1,5 @@
 /**
- * K3 (AUD-security-052 / 004 / 024 / 025) — UPRAWNIENIE USERA MA EGZEKUCJĘ, NIE TYLKO WIDOK.
+ * UPRAWNIENIE USERA MA EGZEKUCJĘ, NIE TYLKO WIDOK.
  *
  * Oś `disabled_tools` i opt-in `mcp_servers[]` żyły wyłącznie w filtrze WIDOCZNOŚCI
  * (`ToolRegistry.filterByAgent`), a `MCPClient.executeToolCall` brał narzędzie z GLOBALNEGO
@@ -110,9 +110,9 @@ function makeChain(agent: TestAgent | null, files: Record<string, string> = {}) 
     return { client, registry, approvals, touched, app };
 }
 
-// ── AUD-security-052: disabled_tools egzekwowane przy WYWOŁANIU ────────────────
+// ── disabled_tools egzekwowane przy WYWOŁANIU ────────────────
 
-test.serial('K3: wyłączone `write` odbija się przed wykonaniem — vault nietknięty, bez modala', async t2 => {
+test.serial('wyłączone `write` odbija się przed wykonaniem — vault nietknięty, bez modala', async t2 => {
     const agent = makeAgent({ disabled_tools: ['write'] });
     const { client, approvals, touched } = makeChain(agent);
 
@@ -128,7 +128,7 @@ test.serial('K3: wyłączone `write` odbija się przed wykonaniem — vault niet
     t2.is(touched.modify, 0, 'żaden plik nie został zmieniony');
 });
 
-test.serial('K3: alias starej nazwy (`vault_write`) NIE omija wyłączenia', async t2 => {
+test.serial('alias starej nazwy (`vault_write`) NIE omija wyłączenia', async t2 => {
     const agent = makeAgent({ disabled_tools: ['write'] });
     const { client, approvals, touched } = makeChain(agent);
 
@@ -143,7 +143,7 @@ test.serial('K3: alias starej nazwy (`vault_write`) NIE omija wyłączenia', asy
     t2.is(touched.create, 0, 'alias nie może dotknąć vaulta');
 });
 
-test.serial('K3: narzędzie NIE wyłączone dalej działa (brak fałszywych alarmów)', async t2 => {
+test.serial('narzędzie NIE wyłączone dalej działa (brak fałszywych alarmów)', async t2 => {
     const agent = makeAgent({ disabled_tools: ['delete'] });
     const { client, touched } = makeChain(agent);
 
@@ -156,13 +156,13 @@ test.serial('K3: narzędzie NIE wyłączone dalej działa (brak fałszywych alar
     t2.is(touched.create, 1, 'plik powstał');
 });
 
-test.serial('K3: `ask_user` (grupa core) jest nieusuwalny także przy egzekucji', t2 => {
+test.serial('`ask_user` (grupa core) jest nieusuwalny także przy egzekucji', t2 => {
     const registry = new ToolRegistry();
     const agent = makeAgent({ disabled_tools: ['ask_user'] });
     t2.true(registry.checkToolAxis(agent, 'ask_user').allowed);
 });
 
-// ── AUD-security-004: opt-in `mcp_servers[]` egzekwowany przy WYWOŁANIU ────────
+// ── opt-in `mcp_servers[]` egzekwowany przy WYWOŁANIU ────────
 
 /** Narzędzie serwera zewnętrznego tak, jak rejestruje je `ExternalMcpManager`. */
 function makeExternalTool(calls: string[]) {
@@ -176,7 +176,7 @@ function makeExternalTool(calls: string[]) {
     };
 }
 
-test.serial('K3: narzędzie serwera zewnętrznego BEZ opt-inu w mcp_servers = odmowa', async t2 => {
+test.serial('narzędzie serwera zewnętrznego BEZ opt-inu w mcp_servers = odmowa', async t2 => {
     const agent = makeAgent();                                // mcp_servers bez 'blender'
     const { client, registry, approvals } = makeChain(agent);
     const calls: string[] = [];
@@ -193,7 +193,7 @@ test.serial('K3: narzędzie serwera zewnętrznego BEZ opt-inu w mcp_servers = od
     t2.is(approvals.length, 0, 'brak opt-inu to odmowa, nie pytanie');
 });
 
-test.serial('K3: ten sam agent Z opt-inem przechodzi przez oś narzędziową', async t2 => {
+test.serial('ten sam agent Z opt-inem przechodzi przez oś narzędziową', async t2 => {
     const agent = makeAgent({ mcp_servers: ['vault', 'memory', 'core', 'blender'] });
     const { client, registry } = makeChain(agent);
     const calls: string[] = [];
@@ -208,7 +208,7 @@ test.serial('K3: ten sam agent Z opt-inem przechodzi przez oś narzędziową', a
     t2.deepEqual(calls, ['blender__execute_code']);
 });
 
-test.serial('K3: BRAK listy mcp_servers = brak opt-inu = odmowa (fail-closed)', t2 => {
+test.serial('BRAK listy mcp_servers = brak opt-inu = odmowa (fail-closed)', t2 => {
     const registry = new ToolRegistry();
     const calls: string[] = [];
     registry.registerTool(makeExternalTool(calls) as never);
@@ -224,7 +224,7 @@ test.serial('K3: BRAK listy mcp_servers = brak opt-inu = odmowa (fail-closed)', 
 
 // ── Widoczność == egzekucja (jedna funkcja liczy oba zbiory) ──────────────────
 
-test.serial('K3: zbiór WIDOCZNYCH narzędzi == zbiór WYKONYWALNYCH', t2 => {
+test.serial('zbiór WIDOCZNYCH narzędzi == zbiór WYKONYWALNYCH', t2 => {
     const registry = new ToolRegistry();
     registry.registerTool(createWriteTool());
     registry.registerTool(createReadTool() as never);
@@ -252,7 +252,7 @@ test.serial('K3: zbiór WIDOCZNYCH narzędzi == zbiór WYKONYWALNYCH', t2 => {
     }
 });
 
-test.serial('K3: bez agenta klient nie wywraca się na osi (zachowanie jak dotąd)', async t2 => {
+test.serial('bez agenta klient nie wywraca się na osi (zachowanie jak dotąd)', async t2 => {
     const { client, touched } = makeChain(null);
     const out = await client.executeToolCall(
         { name: 'write', arguments: { path: 'Notes/a.md', content: 'X', mode: 'create' } },

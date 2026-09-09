@@ -1,9 +1,9 @@
 /**
- * ArtifactCreateTool.test.js — S32 Z5: egzekwowanie typów artefaktów per agent.
+ * ArtifactCreateTool.test.js — egzekwowanie typów artefaktów per agent.
  *
- * `agent.artifact_types` sterowało dotąd TYLKO indeksem w prompcie; `artifact_create`
- * przyjmował każdy typ z biblioteki. Tu pilnujemy nowej bramki i jej OPT-IN natury:
- * pusta lista = wszystko wolno (zero regresji dla istniejących profili).
+ * `agent.artifact_types` ogranicza, jaki `typ` wolno podać w `artifact_create`, nie tylko
+ * indeks w prompcie. Tu pilnujemy tej bramki i jej OPT-IN natury: pusta lista = wszystko
+ * wolno (zero regresji dla profili bez ograniczenia).
  *
  * Fake plugin zamiast prawdziwego ArtifactStore — sprawdzamy granicę narzędzia
  * (czy odmówiło / czy doszło do `store.create`), nie silnik artefaktów (ma własne testy
@@ -32,7 +32,7 @@ function makePlugin({ agents = {}, patchResult }: { agents?: Record<string, Fake
         create: async (typ: string, data: { tytul: string; agent: string }) => {
             created.push({ typ, ...data });
             return {
-                // K10: silnik mówi wprost, czy notatka POWSTAŁA (odmowa bramki pól = `false`).
+                // Silnik mówi wprost, czy notatka POWSTAŁA (odmowa bramki pól = `false`).
                 created: true,
                 id: 'art-20260730-abcd',
                 path: `Artefakty/${data.tytul}.md`,

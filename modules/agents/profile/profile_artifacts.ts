@@ -1,13 +1,13 @@
 /**
- * Artifacts tab (Artefakty) — E2.9 FAZA C / C1.
+ * Artifacts tab (Artefakty).
  *
  * Dwie sekcje:
- *  1. INSTANCJE — artefakty żywe tego agenta (`ArtifactStore.list` po frontmatterze). Akcje per wiersz:
+ *  1. INSTANCJE - artefakty żywe tego agenta (`ArtifactStore.list` po frontmatterze). Akcje per wiersz:
  *     Otwórz (workspace.openLinkText), „Dodaj do Vaulta" (modal ze ścieżką + podpowiedzi folderów →
  *     `store.move`), Usuń (confirm → `store.remove`, do kosza).
- *  2. TYPY — checkboxy z biblioteki typów (`ArtifactTypeLoader.getAllTypes`). Zaznaczenie zapisuje
+ *  2. TYPY - checkboxy z biblioteki typów (`ArtifactTypeLoader.getAllTypes`). Zaznaczenie zapisuje
  *     `artifact_types` przez zwykły flow zapisu profilu (formData → handleSave → Agent.update).
- *     Puste = agent widzi tylko wbudowany typ `plan` (sensowny default, A2).
+ *     Puste = agent widzi tylko wbudowany typ `plan` (sensowny default).
  *
  * Logika sortowania/wierszy = pure helpery z `modules/artifacts` (node-testowalne). Tu tylko DOM.
  */
@@ -33,7 +33,7 @@ export function renderArtifactsTab(ctx: ArtifactContext, el: UiBoundary) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// INSTANCJE — artefakty żywe tego agenta
+// INSTANCJE - artefakty żywe tego agenta
 // ─────────────────────────────────────────────────────────────
 
 function _renderInstances(ctx: ArtifactContext, el: UiBoundary) {
@@ -109,7 +109,7 @@ function _renderInstanceRow(ctx: ArtifactContext, el: UiBoundary, store: Artifac
 }
 
 // ─────────────────────────────────────────────────────────────
-// TYPY — biblioteka typów podpinana per agent (jak skille)
+// TYPY - biblioteka typów podpinana per agent (jak skille)
 // ─────────────────────────────────────────────────────────────
 
 function _renderTypes(ctx: ArtifactContext, el: UiBoundary) {
@@ -151,7 +151,7 @@ function _renderTypes(ctx: ArtifactContext, el: UiBoundary) {
         });
     }
 
-    // Puste podpięcie = agent i tak dostaje wbudowany `plan` (A2). Powiedz to wprost.
+    // Puste podpięcie = agent i tak dostaje wbudowany `plan`. Powiedz to wprost.
     if (formData.artifact_types.length === 0) {
         el.createDiv({ text: t('profile.artifacts.types_default_hint'), cls: 'setting-item-description' });
     }
@@ -168,7 +168,7 @@ function _statusLabel(status: string | undefined) {
 
 /**
  * Dołącz podpowiadacz folderów do pola tekstowego (Obsidian `AbstractInputSuggest`, od 1.4).
- * Definicja klasy jest LENIWA — `extends AbstractInputSuggest` ewaluowane dopiero przy wywołaniu,
+ * Definicja klasy jest LENIWA - `extends AbstractInputSuggest` ewaluowane dopiero przy wywołaniu,
  * pod strażą `typeof`. Na starszym Obsidianie (manifest minAppVersion 1.1.0) pole działa bez
  * podpowiedzi (ścieżkę wpisujesz ręcznie) zamiast wywalić ładowanie całego bundla (`class extends undefined`).
  */

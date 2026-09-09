@@ -1,11 +1,11 @@
 /**
- * AudioRecorder — nagrywanie audio przez MediaRecorder API.
+ * AudioRecorder - nagrywanie audio przez MediaRecorder API.
  * Prosty komponent: start() → stop() → onComplete(blob).
  */
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
 
-/** Callbacki nagrywania. Wszystkie opcjonalne — recorder działa i bez nich. */
+/** Callbacki nagrywania. Wszystkie opcjonalne - recorder działa i bez nich. */
 export interface AudioRecorderOptions {
     /** gotowe nagranie (po `stop()`); `cancel()` go NIE woła */
     onComplete?: (audioBlob: Blob) => void | Promise<void>;
@@ -15,7 +15,7 @@ export interface AudioRecorderOptions {
 }
 
 /**
- * Uchwyt timera zwracany przez `window.setInterval` — zawsze `number` (DOM).
+ * Uchwyt timera zwracany przez `window.setInterval` - zawsze `number` (DOM).
  * `ReturnType<typeof setInterval>` (bez `window.`) rozjeżdża się na `NodeJS.Timeout`, bo
  * globals.d.ts z @types/node zlewa się z `Window & typeof globalThis`; `Window['setInterval']`
  * bierze sygnaturę wprost z DOM, bez tej kolizji.
@@ -25,11 +25,11 @@ type TickTimer = ReturnType<Window['setInterval']>;
 export class AudioRecorder {
     // `declare` (a nie zwykła deklaracja pola): przy `useDefineForClassFields: true`
     // realne pole wyemitowałoby `Object.defineProperty` przed ciałem konstruktora.
-    // Tu wszystko nadaje konstruktor — dokładnie jak w JS przed konwersją.
+    // Tu wszystko nadaje konstruktor - dokładnie jak w JS przed konwersją.
     declare onComplete?: AudioRecorderOptions['onComplete'];
     declare onError?: AudioRecorderOptions['onError'];
     declare onTick?: AudioRecorderOptions['onTick'];
-    /** czyta to `chat_model._toggleRecording` — dlatego bez `private` */
+    /** czyta to `chat_model._toggleRecording` - dlatego bez `private` */
     declare recording: boolean;
     declare private _mediaRecorder: MediaRecorder | null;
     declare private _chunks: Blob[];
@@ -41,7 +41,7 @@ export class AudioRecorder {
     constructor(options: AudioRecorderOptions = {}) {
         this.onComplete = options.onComplete; // (audioBlob) => {}
         this.onError = options.onError;       // (error) => {}
-        this.onTick = options.onTick;         // (seconds) => {} — co sekunde
+        this.onTick = options.onTick;         // (seconds) => {} - co sekunde
         this.recording = false;
         this._mediaRecorder = null;
         this._chunks = [];
@@ -73,7 +73,7 @@ export class AudioRecorder {
             this._mediaRecorder.onstop = async () => {
                 // cancel() already released everything and does NOT want transcription.
                 if (this._cancelled) { this._cleanup(); return; }
-                // Zawsze ustawiony — ten handler wisi na tej samej instancji, którą tu czytamy.
+                // Zawsze ustawiony - ten handler wisi na tej samej instancji, którą tu czytamy.
                 const blob = new Blob(this._chunks, { type: this._mediaRecorder!.mimeType || 'audio/webm' });
                 this._cleanup();
                 log.debug('AudioRecorder', t('audio.recorded', { size: (blob.size / 1024).toFixed(0), seconds: this._seconds }));
@@ -83,7 +83,7 @@ export class AudioRecorder {
             this._mediaRecorder.onerror = (e) => {
                 this._cleanup();
                 // lib.dom typuje ten event jako gołe `Event`; spec (MediaRecorderErrorEvent)
-                // niesie `error` — czytamy je przez asercję, bez zmiany wykonania.
+                // niesie `error` - czytamy je przez asercję, bez zmiany wykonania.
                 this.onError?.((e as Event & { error?: DOMException }).error || new Error(t('audio.error')));
             };
 
@@ -121,7 +121,7 @@ export class AudioRecorder {
         if (rec && rec.state !== 'inactive') {
             // onstop fires later and early-returns on _cancelled; cleanup below is synchronous
             // so the mic is released even if the event never arrives (view being destroyed).
-            try { rec.stop(); } catch { /* ignore — _cleanup() releases everything */ }
+            try { rec.stop(); } catch { /* ignore - _cleanup() releases everything */ }
         }
         this._cleanup();
     }

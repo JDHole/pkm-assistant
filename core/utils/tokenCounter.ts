@@ -1,5 +1,5 @@
 /**
- * Lekki estymator tokenów — ZERO zależności (js-tiktoken RIP, decyzja D23/E1.7).
+ * Lekki estymator tokenów — ZERO zależności (js-tiktoken RIP).
  *
  * Dlaczego estymator zamiast prawdziwego tokenizera:
  * - Realne zużycie tokenów bierzemy z API usage (adaptery modeli zwracają usage).
@@ -19,7 +19,7 @@ import { log } from './Logger.js';
 
 // Bazowy stosunek znaki/token (angielski tekst ~4). Świeży start = ten default.
 const DEFAULT_CHARS_PER_TOKEN = 4.0;
-// Margines bezpieczeństwa dla okna kontekstu — celowo przeszacowujemy (D23/E1.7).
+// Margines bezpieczeństwa dla okna kontekstu — celowo przeszacowujemy.
 const SAFETY_MARGIN = 1.2;
 // Waga uczenia EMA przy kalibracji z realnego usage (0..1, wyżej = szybciej zapomina).
 const EMA_ALPHA = 0.2;
@@ -32,7 +32,7 @@ const MIN_OBSERVED_CPT = 1.0;
 const MAX_OBSERVED_CPT = 20.0;
 
 // Kalibrowane chars-per-token per platforma. In-memory (brak persystencji =
-// świeży start po restarcie Obsidiana daje default 4.0 — świadomie, patrz E1.7).
+// świeży start po restarcie Obsidiana daje default 4.0 — świadomie).
 const _cptByPlatform = new Map<string, number>();
 
 // Globalny kalibrowany chars-per-token — używany przez estymaty BEZ platformy.
@@ -117,7 +117,7 @@ export function countTokens(text: unknown, modelOrOpts?: TokenCountOpts): number
  * o tych statystykach — obie wartości są addytywne po konkatenacji, więc wołacz może je
  * utrzymywać przyrostowo zamiast sklejać cały materiał i skanować go od nowa.
  *
- * Konsument: okno kontekstu czatu (`modules/chat/chat/RollingWindow.ts`, AUD-wydajnosc-017/048)
+ * Konsument: okno kontekstu czatu (`modules/chat/chat/RollingWindow.ts`)
  * — bez tego KAŻDY dopisek wiadomości przeliczał całą historię od zera.
  * @param charCount - łączna liczba znaków
  * @param nonAsciiCount - ile z nich jest spoza ASCII (patrz `countNonAsciiChars`)

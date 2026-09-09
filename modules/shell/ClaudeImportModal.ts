@@ -1,12 +1,12 @@
 /**
- * ClaudeImportModal — S32 Z2.3: potwierdzenie importu serwerów MCP z Claude Desktop.
+ * ClaudeImportModal - potwierdzenie importu serwerów MCP z Claude Desktop.
  *
  * Modal jest GŁUPI: dostaje gotowe wiersze (`buildImportRows` z `modules/tools/claudeConfigImport.js`)
- * i callback `onConfirm`. Nie parsuje pliku, nie zna ustawień, nie zapisuje — cała logika
+ * i callback `onConfirm`. Nie parsuje pliku, nie zna ustawień, nie zapisuje - cała logika
  * (wczytanie configu, selekcja, zapis do `settings.pkmAssistant.externalMcpServers`) siedzi u wołającego
  * (`modules/tools/SettingsContent.js`), żeby dała się testować w Node bez obsidiana.
  *
- * Serwer, którego `id` już mamy w ustawieniach, ma checkbox odznaczony i zablokowany — import
+ * Serwer, którego `id` już mamy w ustawieniach, ma checkbox odznaczony i zablokowany - import
  * NIGDY nie nadpisuje istniejącej konfiguracji (mogła nieść ręcznie wpisany token).
  */
 import { Modal } from 'obsidian';
@@ -28,8 +28,8 @@ interface ClaudeImportRow {
     exists: boolean;
     selected: boolean;
     /**
-     * AUD-code-review-050: `exists:true` dziś znaczy „nie wolno zaznaczyć/zapisać", nie tylko
-     * „ten id już jest w ustawieniach" — `blockedReason` niesie POWÓD, żeby modal (celowo GŁUPI,
+     * `exists:true` znaczy „nie wolno zaznaczyć/zapisać", nie tylko
+     * „ten id już jest w ustawieniach" - `blockedReason` niesie POWÓD, żeby modal (celowo GŁUPI,
      * bez własnej logiki) mógł pokazać zdanie dopasowane do sytuacji zamiast jednego uniwersalnego
      * „już istnieje" dla trzech różnych rzeczy (patrz `buildImportRows` w `claudeConfigImport.ts`).
      */
@@ -88,9 +88,9 @@ export class ClaudeImportModal extends Modal {
             meta.push(row.config?.transport === 'http'
                 ? String(row.config?.url || '')
                 : [row.config?.command, ...(row.config?.args || [])].filter(Boolean).join(' '));
-            // AUD-code-review-050: `exists:true` niesie TRZY różne powody blokady (już w
+            // `exists:true` niesie TRZY różne powody blokady (już w
             // ustawieniach / duplikat wewnątrz importowanego pliku / nazwa zarezerwowana albo
-            // format id odrzucony przez validateServerId) — `blockedReason` mówi który, żeby
+            // format id odrzucony przez validateServerId) - `blockedReason` mówi który, żeby
             // serwer o nazwie `"memory"` nie dostał kłamliwego „już istnieje".
             if (row.exists) {
                 const reasonKey = row.blockedReason === 'duplicate' ? 'modal.claude_import.duplicate_in_batch'

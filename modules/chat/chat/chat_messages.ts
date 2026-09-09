@@ -15,7 +15,7 @@ import {
 import { t, getDateLocale } from '../../../core/i18n/index.js';
 import { registerUrlsFromText } from '../../web/index.js';
 import { registerUrlsIfHuman } from './messagePrivileges.js';
-// AUD-bledy-027/058: historia liczy status narzędzia TĄ SAMĄ regułą co żywa tura (chat_streaming).
+// Historia liczy status narzędzia TĄ SAMĄ regułą co żywa tura (chat_streaming).
 import { resolveMessageOrigin, toolResultStatus } from '../../../core/index.js';
 
 // TS-any: receiver legacy mixinów jest składany runtime przez Object.assign(ChatView.prototype, ...).
@@ -39,10 +39,10 @@ interface TrimInfo {
  * @param {string} role - 'user' | 'assistant'
  * @param {string|Array} content - Text string or multimodal content blocks array
  * @param {string} [displayText] - Optional display text for UI (when content is array)
- * @param {Object} [meta] - F2: dodatkowe pola na wiadomości w oknie kontekstu (np.
+ * @param {Object} [meta] - dodatkowe pola na wiadomości w oknie kontekstu (np.
  *   `{_subTaskNotification: true}` — znacznik, że turę wywołał wynik suba z tła, a nie user).
  *   Trafiają tam, gdzie `timestamp`; render ich nie czyta.
- *   K7: pole `origin` (`'human'` | `'machine'`) jest PROWENIENCJĄ — decyduje o przywilejach
+ *   Pole `origin` (`'human'` | `'machine'`) jest PROWENIENCJĄ — decyduje o przywilejach
  *   bezpieczeństwa (rejestr adresów dla `web_read`). Brak = maszyna, patrz
  *   `core/security/messageOrigin.ts`.
  */
@@ -61,10 +61,10 @@ export async function append_message(this: ChatViewMixinContext, role: MessageRo
     const idx = this.rollingWindow.messages.length - 1;
 
     if (role === 'user') {
-        // E1.3 P6: URLs the user types are known-provenance and may be fetched by web_read.
-        // K7 (AUD-security-062/003): o proweniencji decyduje JAWNY znacznik `meta.origin`, a nie
-        // to, że dymek jest rysowany z rolą 'user'. Bez znacznika = maszyna (fail-closed), więc
-        // adres z treści artefaktu czy z wyniku suba NIE odblokowuje `web_read`.
+        // URLs the user types are known-provenance and may be fetched by web_read. O proweniencji
+        // decyduje JAWNY znacznik `meta.origin`, a nie to, że dymek jest rysowany z rolą 'user'.
+        // Bez znacznika = maszyna (fail-closed), więc adres z treści artefaktu czy z wyniku suba
+        // NIE odblokowuje `web_read`.
         registerUrlsIfHuman(uiText, meta, registerUrlsFromText);
         const userDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--user' });
         userDiv.style.setProperty('--cs-agent-color-rgb', agentRgb);
@@ -175,10 +175,10 @@ export async function render_messages(this: ChatViewMixinContext): Promise<void>
                         const _hName = _hArgs.aspect || '';
                         const block = createSubAgentBlock({
                             type: tcName,
-                            // K7/AUD-code-review-044: status z JEDNEJ reguły (jak makeDisplay
-                            // kilka linii niżej), nie z dopasowania stringa 'Błąd' w response —
-                            // ten literał sklejał WYŁĄCZNIE chat_streaming.ts, więc padnięta
-                            // delegacja odtworzona z historii świeciła na zielono.
+                            // Status z JEDNEJ reguły (jak makeDisplay kilka linii niżej), nie
+                            // z dopasowania stringa 'Błąd' w response — dopasowanie stringa
+                            // łapałoby tylko literał sklejany przez chat_streaming.ts, więc
+                            // padnięta delegacja odtworzona z historii świeciłaby na zielono.
                             status: toolResultStatus(tcOutput),
                             agentName: _hName,
                             query: taskQuery,
@@ -379,7 +379,7 @@ export async function regenerateLastResponse(this: ChatViewMixinContext): Promis
     if (lastUserIdx === -1) return;
 
     const userContent = messages[lastUserIdx].content;
-    // K7: proweniencja jedzie ZA tekstem — ponowienie nie może awansować wiadomości maszynowej
+    // Proweniencja jedzie ZA tekstem — ponowienie nie może awansować wiadomości maszynowej
     // (np. powiadomienia o wyniku suba) do rangi „to pisał człowiek". Brak znacznika = maszyna.
     const userOrigin = resolveMessageOrigin(messages[lastUserIdx]);
 
@@ -440,7 +440,7 @@ export function _renderCompressionBlock(this: ChatViewMixinContext, summary: str
         : t('chat.msg.compressed_above');
     block.createDiv({ cls: 'pkm-compression-hint', text: hintText });
 
-    // E2.7 W2 (K3): keep a handle so the async "saved N memories" note can attach to this block.
+    // Keep a handle so the async "saved N memories" note can attach to this block.
     this._lastCompressionBlockEl = block;
 
     // Scroll to compression block
@@ -451,12 +451,11 @@ export function _renderCompressionBlock(this: ChatViewMixinContext, summary: str
 }
 
 /**
- * E2.7 W2 (K3): show a note after the compaction rescue queues candidates.
- * D8 (2026-08-27, werdykt 27.08): candidates now go into the `brain/pending_rescue/` waiting
- * room, NOT straight into brain/ — the text says what really happens ("awaiting your review")
- * instead of "saved". Preview only, not a gate (D2) still holds, but the wording is now honest
- * about it. Attaches to the most recent compression block when it is still in the DOM, otherwise
- * falls back to a standalone note in the message stream.
+ * Show a note after the compaction rescue queues candidates.
+ * Candidates go into the `brain/pending_rescue/` waiting room, NOT straight into brain/ — the
+ * text says what really happens ("awaiting your review") instead of "saved". This is preview
+ * only, not a gate. Attaches to the most recent compression block when it is still in the DOM,
+ * otherwise falls back to a standalone note in the message stream.
  * @param {number} count - How many memory candidates were queued (N>0).
  */
 export function _renderMemorySavedNote(this: ChatViewMixinContext, count: number): void {

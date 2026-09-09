@@ -1,12 +1,12 @@
 /**
- * Permissions tab (Uprawnienia) — E2.8 C7 (S18/S19/S20). Trzy sekcje:
- *  1. „Co może robić" — grupy narzędzi (manifesty) → dropdown z toggle per narzędzie
- *     (edytuje jedną oś `disabled_tools` z C1) + „Pamięć agenta (odczyt)" (permissions.memory).
- *  2. „Miejsce pracy" — tryb Pełen dostęp / Tylko przypisane (guidance_mode) + przypisane
+ * Permissions tab (Uprawnienia). Trzy sekcje:
+ *  1. „Co może robić" - grupy narzędzi (manifesty) → dropdown z toggle per narzędzie
+ *     (edytuje jedną oś `disabled_tools`) + „Pamięć agenta (odczyt)" (permissions.memory).
+ *  2. „Miejsce pracy" - tryb Pełen dostęp / Tylko przypisane (guidance_mode) + przypisane
  *     foldery (chipy 👁️/📝) + GRUPY z Settings→Vault + podgląd mapy vaulta.
- *  3. „Kiedy pyta" — domyślna autonomia per agent + pytania przed działaniem (approval).
+ *  3. „Kiedy pyta" - domyślna autonomia per agent + pytania przed działaniem (approval).
  *
- * Terminologia (S20b): w UI ZAWSZE „przypisane foldery"; zero „guidance mode"/„whitelist".
+ * Terminologia: w UI ZAWSZE „przypisane foldery"; zero „guidance mode"/„whitelist".
  */
 import { Notice } from 'obsidian';
 import { APPROVAL_DEFAULTS, getAgentSafeName } from '../../../core/index.js';
@@ -26,10 +26,10 @@ import { log } from '../../../core/utils/Logger.js';
  */
 export function renderPermissionsTab(ctx: UiBoundary, el: HTMLElement) {
     const { formData, agent } = ctx;
-    // AUD-code-review-025: bufor inicjalizowany TYLKO gdy jeszcze nie istnieje — wzór linii
-    // niżej (`disabled_tools`) i `approval_toggles` (sekcja 3). Bez tego guardu każdy powrót na
-    // tę zakładkę nadpisywał niezapisane zmiany (tryb dostępu, pamięć agenta) kopią z dysku —
-    // `formData.permissions` już RAZ powstaje w `AgentProfileView.ts` przy otwarciu panelu.
+    // Bufor inicjalizowany TYLKO gdy jeszcze nie istnieje - wzór linii niżej (`disabled_tools`)
+    // i `approval_toggles` (sekcja 3). Bez tego guardu każdy powrót na tę zakładkę nadpisywał
+    // niezapisane zmiany (tryb dostępu, pamięć agenta) kopią z dysku - `formData.permissions`
+    // już RAZ powstaje w `AgentProfileView.ts` przy otwarciu panelu.
     if (agent && !formData.permissions) formData.permissions = { ...agent.permissions };
     if (!Array.isArray(formData.disabled_tools)) formData.disabled_tools = [...(agent?.disabled_tools || [])];
 
@@ -39,7 +39,7 @@ export function renderPermissionsTab(ctx: UiBoundary, el: HTMLElement) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// SEKCJA 1 — Co może robić (narzędzia, jedna oś disabled_tools)
+// SEKCJA 1 - Co może robić (narzędzia, jedna oś disabled_tools)
 // ─────────────────────────────────────────────────────────────
 
 function _renderToolGroups(ctx: UiBoundary, el: HTMLElement) {
@@ -91,7 +91,7 @@ function _renderToolGroups(ctx: UiBoundary, el: HTMLElement) {
                 formData.permissions.memory === true, (v) => { formData.permissions.memory = v; });
         }
 
-        // S28 D6: komunikator ma DRUGĄ oś — samo uczestnictwo. Wyłączony agent jest duchem
+        // Komunikator ma DRUGĄ oś - samo uczestnictwo. Wyłączony agent jest duchem
         // (nie ma go na liście adresatów, skrzynka znika z paneli, ping milczy), niezależnie
         // od tego, czy ma włączone narzędzia poczty.
         if (group === 'komunikator') {
@@ -102,7 +102,7 @@ function _renderToolGroups(ctx: UiBoundary, el: HTMLElement) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// SEKCJA 2 — Miejsce pracy (tryb + przypisane foldery + grupy)
+// SEKCJA 2 - Miejsce pracy (tryb + przypisane foldery + grupy)
 // ─────────────────────────────────────────────────────────────
 
 function _renderWorkspace(ctx: UiBoundary, el: HTMLElement) {
@@ -327,7 +327,7 @@ function _renderVaultMapPreview(ctx: UiBoundary, parentEl: HTMLElement) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// SEKCJA 3 — Kiedy pyta (autonomia per agent + approval toggles)
+// SEKCJA 3 - Kiedy pyta (autonomia per agent + approval toggles)
 // ─────────────────────────────────────────────────────────────
 
 function _renderWhenAsks(ctx: UiBoundary, el: HTMLElement) {
@@ -362,16 +362,16 @@ function _renderApprovalToggles(ctx: UiBoundary, el: HTMLElement) {
 
     el.createDiv({ text: t('profile.perm.action_notifications_desc'), cls: 'setting-item-description' });
 
-    // A3 YELLOW — odwracalne/ograniczone akcje. Toggle działa wyłącznie dla żółtych.
+    // YELLOW - odwracalne/ograniczone akcje. Toggle działa wyłącznie dla żółtych.
     const groupA = [
         { key: 'vault_write', tool: 'write', label: t('profile.perm.create_file_only') },
         { key: 'vault_create_folder', tool: 'create_folder' },
         { key: 'memory_save', tool: 'memory_save' },
         { key: 'web_search', tool: 'web_search' },
-        // K11 (AUD-security-069): osobny wiersz dla pobierania strony.
+        // Osobny wiersz dla pobierania strony - niezależny toggle od web_search.
         { key: 'web_read', tool: 'web_read' },
         { key: 'generate_image', tool: 'generate_image' },
-        // S28: wysyłka poczty do innego agenta (YELLOW, default „pytaj").
+        // Wysyłka poczty do innego agenta (YELLOW, default „pytaj").
         { key: 'kom_send', tool: 'kom_send' },
     ];
     for (const { key, tool, label } of groupA) {
@@ -381,7 +381,7 @@ function _renderApprovalToggles(ctx: UiBoundary, el: HTMLElement) {
             v => { formData.approval_toggles[key] = v; });
     }
 
-    // Pozostałe YELLOW — domyślnie ciche (rozwijane).
+    // Pozostałe YELLOW - domyślnie ciche (rozwijane).
     const groupBHead = el.createDiv({ cls: 'cs-section-head cs-section-head--clickable' });
     setSvg(groupBHead, UiIcons.settings(14));
     groupBHead.createSpan({ text: t('profile.perm.optional_notifications') });
@@ -392,7 +392,7 @@ function _renderApprovalToggles(ctx: UiBoundary, el: HTMLElement) {
 
     const groupB = [
         { key: 'delegate', tool: 'delegate' },
-        // E2.9: artefakty żywe (idea_review/plan_review skasowane → artifact_*). Domyślnie bez pytania.
+        // Artefakty żywe - domyślnie bez pytania.
         { key: 'artifact_create', tool: 'artifact_create' },
         { key: 'artifact_update', tool: 'artifact_update' },
         { key: 'todo', tool: 'todo' },

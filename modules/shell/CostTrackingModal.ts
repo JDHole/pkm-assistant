@@ -1,8 +1,8 @@
 /**
- * CostTrackingModal — Sprint 03 Z17.
+ * CostTrackingModal.
  *
  * Wyświetla agregację kosztów LLM calls z `.pkm-assistant/cost_log.jsonl`
- * (zapisywane przez CostLog — archiwista + sub-agenci).
+ * (zapisywane przez CostLog - archiwista + sub-agenci).
  *
  * Agregacje:
  *   - Total all-time
@@ -68,7 +68,7 @@ export class CostTrackingModal extends Modal {
 
         const desc = contentEl.createEl('p', { cls: 'cs-cost-desc' });
         desc.textContent = t('modal.cost_tracking.desc')
-            || 'Koszty z .pkm-assistant/cost_log.jsonl (przybliżone — pricing per model 2026-04). Zapisywane przez archiwistę (Z10) + generator kontekstu sesji (Z11).';
+            || 'Koszty z .pkm-assistant/cost_log.jsonl (przybliżone - cennik per model). Zapisywane przez archiwistę i generator kontekstu sesji.';
 
         const status = contentEl.createDiv({ cls: 'cs-cost-status' });
         status.textContent = '⏳ Wczytywanie...';

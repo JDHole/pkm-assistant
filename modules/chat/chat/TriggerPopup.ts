@@ -1,7 +1,5 @@
 /**
- * TriggerPopup — Z8 z Sprintu 05 Hotfix.
- *
- * Popup uruchamiany z keypress `/` lub `@` w textarea czatu.
+ * TriggerPopup - popup uruchamiany z keypress `/` lub `@` w textarea czatu.
  * Pokazuje 3 sekcje (Skille / Sub-Agenty / MCP servery) filtrowane po
  * tym co user dopisze po triggerze. Wybór wstawia marker
  * (`@@skill:foo`, `@sub-agent:foo`, `@@tool:foo`) do textarea.
@@ -167,7 +165,7 @@ export class TriggerPopup {
             });
         }
 
-        // ── Sub-agenty (D18: custom suby usera dla aktywnego agenta; brak ról systemowych) ──
+        // ── Sub-agenty: custom suby usera dla aktywnego agenta; brak ról systemowych ──
         const subAgentLoader = agentManager?.subAgentLoader;
         const allSubs = (subAgentLoader?.getAllSubAgents?.() || []);
         for (const sa of getVisibleSubAgentsForAgent(activeAgent, allSubs)) {

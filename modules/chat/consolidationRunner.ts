@@ -1,8 +1,8 @@
 /**
  * @module consolidationRunner
- * S29 Z5 (2026-07-29) — KONTROLER PRZEBIEGU konsolidacji pamięci: klej między silnikiem
+ * KONTROLER PRZEBIEGU konsolidacji pamięci: klej między silnikiem
  * (`ConsolidationRun` + `ArchiveWorkflow`, modules/memory) a widokami (modal przebiegu
- * `ConsolidationProgressModal.js` — od S31 obok, w tym module — pasek statusu w `core/PKMEnv.js`,
+ * `ConsolidationProgressModal.js` — obok, w tym module — pasek statusu w `core/PKMEnv.js`,
  * kryształowe powiadomienia z `main.js`).
  *
  * Dlaczego klej mieszka w `modules/chat`, a nie w shell albo memory:
@@ -10,8 +10,8 @@
  *    ani notice'ów,
  *  - `modules/shell` to widoki; import chatu/pluginu stamtąd robi cykl,
  *  - `modules/chat` JUŻ jest właścicielem triggera (`slash-commands/save_session.js` — próg po
- *    zapisie sesji). Klej ląduje po stronie tego, kto konsolidację odpala. S31 dołożył do tego
- *    sam modal przebiegu: skoro jedyny wołacz siedzi tutaj, to i okno mieszka tutaj.
+ *    zapisie sesji). Klej ląduje po stronie tego, kto konsolidację odpala — skoro jedyny wołacz
+ *    siedzi tutaj, to i okno modalu przebiegu mieszka tutaj.
  *
  * Plik siedzi w KORZENIU modułu (nie w `chat/`, gdzie mieszkają mixiny ChatView) z dwóch powodów:
  * to nie jest mixin prototypu, a `slash-commands/save_session.js` musi go zaimportować — specyfikator
@@ -19,7 +19,7 @@
  *
  * Modal jest ładowany LENIWIE (`await import('./ConsolidationProgressModal.js')`
  * w `openConsolidationModal`). Statyczny import ciągnąłby `obsidian` i przez to CAŁY kontroler —
- * najbardziej stanowy kawałek S29 — nie dawałby się zaimportować w AVA (zero testów). Tak się da:
+ * najbardziej stanowy kawałek modułu — nie dawałby się zaimportować w AVA (zero testów). Tak się da:
  * `consolidationRunner.test.js` wstrzykuje atrapę modalu przez `_setModalClassForTests`.
  *
  * Co tu się dzieje:
@@ -208,7 +208,7 @@ async function listUncoveredSessions(agentMemory: RunnerAgentMemory): Promise<Ar
     }
 }
 
-/** Timeout zwisu wspólny z czatem (decyzja Kuby 5) — `chat_stream_stall_timeout_ms`. */
+/** Timeout zwisu wspólny z czatem - `chat_stream_stall_timeout_ms`. */
 function stallTimeoutMs(settings: RunnerSettings): number {
     const full = settings?.pkmAssistant ? settings : { pkmAssistant: settings || {} };
     return getLimits(full).chat_stream_stall_timeout_ms;
@@ -380,9 +380,6 @@ class RunController {
      * Jeden wpis kosztu na domknięcie przebiegu — ale liczony jako PRZYROST względem tego, co już
      * zaksięgowane. `run.totalUsage()` jest skumulowane, a przebieg potrafi domknąć się drugi raz
      * (po „Ponów"); bez delty ten sam koszt trafiłby do dziennika dwa razy.
-     *
-     * ⚠️ Do S29 `CostLog.append` nie miał w produkcji ANI JEDNEGO wołacza — `CostTrackingModal`
-     * czytał plik, którego nikt nie pisał.
      */
     async _writeCostLog(summary: RunSummary): Promise<void> {
         const usage = summary.usage || {};
@@ -446,10 +443,10 @@ class RunController {
 /**
  * Otwiera (albo przywraca) modal przebiegu. Jedno okno na raz.
  *
- * Klasa modalu jest ładowana LENIWIE — i po S31 (modal mieszka tuż obok, w tym samym module)
- * powód został JEDEN: modal statycznie importuje `obsidian`, a statyczny import stąd zaciągnąłby
- * go do całego tego pliku — najbardziej stanowego kawałka S29 — i wywalił jego testowalność
- * w AVA (node nie rozwiąże `obsidian`). Dynamiczny import siedzi w jedynym miejscu, które
+ * Klasa modalu jest ładowana LENIWIE — modal mieszka tuż obok, w tym samym module, ale statycznie
+ * importuje `obsidian`, a statyczny import stąd zaciągnąłby go do całego tego pliku — najbardziej
+ * stanowego kawałka kontrolera — i wywalił jego testowalność w AVA (node nie rozwiąże `obsidian`).
+ * Dynamiczny import siedzi w jedynym miejscu, które
  * modalu naprawdę potrzebuje.
  */
 export async function openConsolidationModal(app: Runtime, run: ConsolidationRun | null): Promise<ConsolidationModalLike | null> {
@@ -485,8 +482,8 @@ export async function openConsolidationModal(app: Runtime, run: ConsolidationRun
  * — modal otwierałby się w martwym workspace (albo wcale). Dlatego zmiana `app` odpina starą
  * subskrypcję i zakłada świeżą, zamiast po cichu zwrócić zombie.
  *
- * AUD-dead-code-231 (2026-09-02): `export` zdjęty — jedyny wołacz jest w tym pliku
- * (`startConsolidationRun`); poza modułem nikt tej funkcji nie importował.
+ * Funkcja nie jest eksportowana — jedyny wołacz jest w tym pliku
+ * (`startConsolidationRun`); poza modułem nikt tej funkcji nie importuje.
  */
 function registerConsolidationModalOpener(app: Runtime): (() => void) | null {
     if (openerUnsubscribe && openerApp === app) return openerUnsubscribe;
@@ -543,10 +540,10 @@ export async function startConsolidationRun({ plugin, app, agentMemory, agent, m
     });
 
     if (steps.length === 0) {
-        // Z4.4 (2026-07-30): automat MILCZY na pusty plan. Licznik
+        // Automat MILCZY na pusty plan. Licznik
         // `archived_since_last_consolidation` zeruje się dopiero przy realnym zapisie paczki L1,
         // więc gdy niepokrytych sesji jest MNIEJ niż `batchSize`, a licznik już przebił próg,
-        // KAŻDY kolejny zapis sesji trafiał tutaj — i user dostawał „nie ma czego konsolidować"
+        // KAŻDY kolejny zapis sesji trafiałby tutaj — i user dostawałby „nie ma czego konsolidować"
         // po każdym `/save session`, w nieskończoność. Licznika świadomie NIE zerujemy: materiał
         // wciąż rośnie do pełnej paczki, próg ma zostać przebity.
         if (source === 'auto') {

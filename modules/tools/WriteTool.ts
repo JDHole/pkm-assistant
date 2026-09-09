@@ -62,7 +62,7 @@ interface WriteResult {
     warnings?: string[];
 }
 
-/** Zapewnia istnienie folderu nadrzędnego dla ścieżki vaulta (API-first, E2.6). */
+/** Zapewnia istnienie folderu nadrzędnego dla ścieżki vaulta (API-first). */
 async function ensureParentFolder(app: WriteToolApp, path: string): Promise<void> {
     const parent = path.substring(0, path.lastIndexOf('/'));
     if (!parent) return;
@@ -101,7 +101,6 @@ export function createWriteTool() {
             },
             required: ['path']
         },
-        // Sprint 04 Z10 (DRY-2): contextExtractor
         contextExtractor: (args: WriteToolArgs) => ({ targetPath: args.path || '' }),
         execute: async (args: WriteToolArgs, app: WriteToolApp, plugin: PathValidatorPlugin) => {
             try {

@@ -1,6 +1,6 @@
 /**
  * @module consolidationRunState
- * Kubełek 2 (2026-07-29) — CZYSTE decyzje stanu dla `ConsolidationProgressModal`.
+ * CZYSTE decyzje stanu dla `ConsolidationProgressModal`.
  *
  * Sam modal jest nietestowalny w node (`obsidian` w imporcie), a akurat te dwie decyzje —
  * „czy przebieg utknął, gdy zamykam okno" i „z czego startuje panel review" — są tymi, na których
@@ -21,7 +21,7 @@ type RunLike = {
     isSettled?: () => boolean;
 };
 
-// AUD-dead-code-231 (2026-09-02): `export` zdjęty na obu typach niżej — zero referencji spoza
+// `export` zdjęty na obu typach niżej — zero referencji spoza
 // tego pliku (`resolveStepDraft`, który je zwraca, zostaje publiczny).
 type DedupStepDraft = {
     merges: Array<MergeReview & { accepted: boolean }>;
@@ -50,7 +50,7 @@ const TERMINAL: ReadonlySet<string> = new Set([STEP_STATUS.DONE, STEP_STATUS.FAI
 /**
  * Czy przebieg UTKNĄŁ — czyli nie jest rozstrzygnięty, nic się nie mieli i nie ma czego kliknąć.
  *
- * Scenariusz-zabójca (do kubełka 2 kończył się restartem Obsidiana): paczka L1 leci `failed`,
+ * Scenariusz-zabójca (kończył się restartem Obsidiana): paczka L1 leci `failed`,
  * L2 i L3 zostają pod kłódką `gated`, a user zamyka okno przebiegu. Nikt już nie kliknie
  * „Ponów"/„Pomiń", więc `isSettled()` nigdy nie będzie prawdą, `finishIfSettled()` nic nie zrobi,
  * `MemoryOpsCenter` zostaje na zawsze „zajęty" i 🧠 świeci na pasku statusu do restartu.
@@ -61,7 +61,7 @@ const TERMINAL: ReadonlySet<string> = new Set([STEP_STATUS.DONE, STEP_STATUS.FAI
  *  - kroku w biegu — przebieg leci w tle, o to chodzi w nieblokującym modalu,
  *  - kroku `pending` — robota jest PRZED nami (świeży plan albo krok świeżo odgatowany:
  *    `generateGatedSteps` robi `ungate` przed pierwszym await, więc „pending" znaczy
- *    „generator zaraz po niego sięgnie"; review kubełka 2, P3-1),
+ *    „generator zaraz po niego sięgnie"),
  *  - przebiegu świeżo zbudowanego, w którym nic jeszcze nie ruszyło (`anyTerminal === false`) —
  *    generacja dopiero startuje; pad na starcie i tak zwalnia centrum w `startConsolidationRun`.
  *
@@ -86,7 +86,7 @@ export function isRunStuck(run: RunLike | null | undefined): boolean {
 /**
  * Szkic review kroku — TEN SAM obiekt między otwarciami panelu.
  *
- * Do kubełka 2 `_openReview` robił przy KAŻDYM otwarciu świeże kopie z `step.result`: user
+ * `_openReview` robił przy KAŻDYM otwarciu świeże kopie z `step.result`: user
  * poprawiał treść L1 albo odznaczał scalenia, zwijał panel (żeby zerknąć na checklistę), otwierał
  * ponownie — i wracała wersja modelu. Szkic trzymamy na kroku (wzorem `step.meta`), bo krok żyje
  * dokładnie tyle, co przebieg, a modal potrafi się w międzyczasie zamknąć i otworzyć od nowa.

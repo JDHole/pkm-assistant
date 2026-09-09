@@ -56,7 +56,7 @@ test('parseToolCalls: choices bez id nadaje fallback call_*', (t) => {
     t.is(calls[0].name, 'vault_list');
 });
 
-test('parseToolCalls: DWA tool_calls bez id w JEDNEJ odpowiedzi dostają RÓŻNE syntetyczne id (AUD-testy-053)', (t) => {
+test('parseToolCalls: DWA tool_calls bez id w JEDNEJ odpowiedzi dostają RÓŻNE syntetyczne id', (t) => {
     // Kolizja slotów: dostawca OpenAI-shape z indeksami, ale bez id (typowy artefakt mostu
     // LM Studio/Ollama) — goły `call_${Date.now()}` dawał IDENTYCZNY fallback dla obu wywołań
     // w tej samej milisekundzie (pętla synchroniczna), więc dwa różne wyniki narzędzi lądowały

@@ -1,10 +1,10 @@
 /**
  * promptFence.ts — JEDNO ogrodzenie niezaufanej treści w system prompcie.
  *
- * Problem (audyt 2026-08-22, klaster K9): treść, której nie pisał operator — body notatki,
- * frontmatter, pamięć agenta, wynik `web_read` zapisany do vaulta — trafia do promptu
- * systemowego. Bez ogrodzenia jest nie do odróżnienia od instrukcji; z ogrodzeniem, które
- * da się zamknąć od środka (`</vault_content>` w treści), jest tak samo źle.
+ * Problem: treść, której nie pisał operator — body notatki, frontmatter, pamięć agenta,
+ * wynik `web_read` zapisany do vaulta — trafia do promptu systemowego. Bez ogrodzenia jest
+ * nie do odróżnienia od instrukcji; z ogrodzeniem, które da się zamknąć od środka
+ * (`</vault_content>` w treści), jest tak samo źle.
  *
  * Kontrakt:
  *  - `fenceUntrusted(content, source)` zwraca blok `<vault_content source="...">…</vault_content>`,

@@ -60,12 +60,12 @@ function getInvocationMemory(
     agentManager: MemoryDeleteAgentManager | null | undefined,
 ): AgentMemoryLike | null | undefined {
     const agentName = (args?._invocationAgentName as string) || agentManager?.getActiveAgent?.()?.name || null;
-    // K4 (AUD-security-036): FAIL-CLOSED. Nazwana tożsamość bez wpisu w `agentMemories`
-    // (pad inicjalizacji pamięci, agent skasowany w trakcie biegu w tle) kończy się ODMOWĄ.
-    // Do K4 stał tu `|| getActiveMemory()`, więc narzędzie po cichu pisało i czytało katalog
-    // `brain/` agenta AKURAT wybranego w UI — a `_invocationAgentName` rozjeżdża się
-    // z aktywnym przy każdym biegu suba w tle i w drugiej zakładce czatu.
-    // Brak JAKIEJKOLWIEK tożsamości (ani znacznika, ani aktywnego agenta) = ścieżka jak dotąd.
+    // FAIL-CLOSED: nazwana tożsamość bez wpisu w `agentMemories` (pad inicjalizacji pamięci,
+    // agent skasowany w trakcie biegu w tle) kończy się ODMOWĄ, a nie fallbackiem na
+    // `getActiveMemory()` — taki fallback po cichu pisałby i czytał katalog `brain/` agenta
+    // AKURAT wybranego w UI, bo `_invocationAgentName` rozjeżdża się z aktywnym przy każdym
+    // biegu suba w tle i w drugiej zakładce czatu.
+    // Brak JAKIEJKOLWIEK tożsamości (ani znacznika, ani aktywnego agenta) = pamięć aktywnego agenta.
     return agentName ? agentManager?.getAgentMemory?.(agentName) : agentManager?.getActiveMemory?.();
 }
 
@@ -133,7 +133,7 @@ export function createMemoryDeleteTool() {
                     return { success: false, code: 'delete_unavailable', error: 'Vault adapter cannot delete files.' };
                 }
 
-                // E2.7 K1: serialize the delete against the note path (consistent with the
+                // Serialize the delete against the note path (consistent with the
                 // create/rebuild queue) so a concurrent writer can't race the removal.
                 const enqueue: <T>(path: string, fn: () => Promise<T>) => Promise<T> = agentMemory._enqueuePathWrite
                     ? agentMemory._enqueuePathWrite.bind(agentMemory)
@@ -141,11 +141,11 @@ export function createMemoryDeleteTool() {
                 await enqueue(match.path, async () => {
                     await agentMemory.vault.adapter.remove!(match.path);
                 });
-                // AUD-bledy-029: PLIKU JUŻ NIE MA. Przebudowa indeksu to osobny krok i osobny
-                // `try` — od K4 (gotcha 9 w `modules/memory/CLAUDE.md`) `rebuildBrainIndex` jest
-                // fail-closed i RZUCA przy niepewnym odczycie brain.md. Dopóki siedziała w tym
-                // samym `try` co kasacja, jej pad meldował `{success:false}` o notatce, której
-                // już nie ma: model ponawiał `memory_delete` i dostawał `note_not_found`.
+                // PLIKU JUŻ NIE MA. Przebudowa indeksu to osobny krok i osobny `try` —
+                // `rebuildBrainIndex` (gotcha 9 w `modules/memory/CLAUDE.md`) jest fail-closed
+                // i RZUCA przy niepewnym odczycie brain.md. Gdyby siedziała w tym samym `try`
+                // co kasacja, jej pad meldowałby `{success:false}` o notatce, której już nie ma:
+                // model ponawiałby `memory_delete` i dostawał `note_not_found`.
                 // Meldunek ma opisywać STAN: skasowane naprawdę, indeks jeszcze o tym nie wie.
                 let indexStale = false;
                 try {
@@ -182,7 +182,7 @@ async function findMatchingNotes(agentMemory: AgentMemoryLike, fact: string): Pr
     const notes = await agentMemory.listBrainNotes();
     const matches: BrainNoteMatch[] = [];
 
-    // E1.1 (ryzyko B): match only on note identity — filename, name, description — never the full
+    // Match only on note identity — filename, name, description — never the full
     // body. Substring-matching the whole body risked deleting the wrong note when the phrase
     // happened to appear inside an unrelated note's text.
     for (const note of notes) {

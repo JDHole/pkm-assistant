@@ -47,11 +47,10 @@ export function createDeleteTool() {
             },
             required: ['path']
         },
-        // Sprint 04 Z10 (DRY-2): contextExtractor
         contextExtractor: (args: DeleteToolArgs) => ({ targetPath: args.path || '' }),
         execute: async (args: DeleteToolArgs, app: DeleteToolApp, plugin: PathValidatorPlugin) => {
             try {
-                // Sprint 04 Z8 (DRY-1): centralized vault path validation
+                // Centralized vault path validation
                 const adminAccess = invocationHasAdminAccess(args, plugin);
                 const validation = validateVaultPath(args.path, { adminAccess });
                 if (!validation.ok) {

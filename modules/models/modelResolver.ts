@@ -1,7 +1,7 @@
 /**
  * Model Resolver — centralna fabryka modelu czatu dla wszystkich ról.
  *
- * Drabinka resolucji (B.1 MR-04..MR-22):
+ * Drabinka resolucji:
  * 1. `agent.models[role]` (nadpisanie per agent)
  * 2. default z biblioteki modeli dla roli
  * 3. legacy: `pkmAssistant.chat.platform` + `pkmAssistant.chat.models[platform]`
@@ -67,14 +67,13 @@ const _cache = new Map<string, ChatModel>();
 /**
  * Default models per platform — legacy fallback (Step 4, pre-modelLibrary settings).
  *
- * AUD-code-review-083: `google`/`azure`/`custom`/`xai` brakowało tu wpisów, więc dla starego
- * `data.json` (sprzed S10) albo ręcznie wpisanego klucza bez wybranego modelu, resolucja tych
- * czterech platform cicho wracała `null` (log.debug, nie error) — pozostałe 8 dostawało sensowny
- * default. `xai` bierze DOKŁADNIE `default_model` z własnego adaptera
+ * Dla starego `data.json` albo ręcznie wpisanego klucza bez wybranego modelu, resolucja
+ * platformy bez wpisu w tej mapie cicho wraca `null` (log.debug, nie error) — platformy z
+ * wpisem dostają sensowny default. `xai` bierze DOKŁADNIE `default_model` z własnego adaptera
  * (`adapters/xai_chat_adapter.ts`) — to samo, co user zobaczy jako pierwszą pozycję dropdownu,
- * gdyby skonfigurował platformę od nowa. (`google`/`azure`/`custom` skreślone 2026-09-03 razem
- * z martwymi adapterami/kluczem dispatchu — AUD-dead-code-026/110/112/168; `gemini` ma wpis
- * od zawsze, patrz gotcha 15 w CLAUDE.md.)
+ * gdyby skonfigurował platformę od nowa. (`google`/`azure`/`custom` nie mają wpisu — martwe
+ * adaptery skreślone razem z kluczem dispatchu; `gemini` ma wpis od zawsze, patrz gotcha 15
+ * w CLAUDE.md.)
  */
 export const DEFAULT_MODELS: Readonly<Record<string, string>> = {
     anthropic: 'claude-sonnet-4-20250514',
@@ -103,9 +102,8 @@ export function getModelsForRole(pkmSettings: PkmModelSettings | null | undefine
  * Returns the entry marked isDefault, or the first entry, or null.
  * @param pkmSettings - obiekt settings.pkmAssistant
  */
-// AUD-dead-code-214: `export` zdjęty — jedyny wołacz jest w tym pliku (Krok 3 drabinki
-// niżej). Barrel `index.ts` i tak jej nie eksportował (S30 Z4), a komentarz tam mylił
-// czytelnika sugerując, że robi to ktoś na zewnątrz modułu.
+// `export` zdjęty — jedyny wołacz jest w tym pliku (Krok 3 drabinki niżej). Barrel `index.ts`
+// jej nie eksportuje.
 function getDefaultModelForRole(pkmSettings: PkmModelSettings | null | undefined, role: ModelRole): ModelLibraryEntry | null {
     const models = getModelsForRole(pkmSettings, role);
     if (models.length === 0) return null;
@@ -132,7 +130,7 @@ function _detectPlatform(chat: ChatSettingsSlice): string | null {
  * Small LOCAL copy of the normalization `modules/agents/profile/modelFieldSync.ts` does for
  * the same shape — `models` cannot import from `agents` (agents already imports `models`;
  * the reverse would create a cycle), so this stays a standalone one-off instead of a shared
- * helper. Used only by Step 4b (last-resort sub-role fallback, gotcha B6-2).
+ * helper. Used only by Step 4b (last-resort sub-role fallback).
  */
 function normalizeAgentModelOverride(value: ModelOverride | undefined | null): string {
     if (!value) return '';
@@ -148,11 +146,11 @@ function normalizeAgentModelOverride(value: ModelOverride | undefined | null): s
  * @param role - Model role
  * @param [agent] - Agent instance (for per-agent overrides)
  * @param [delegateConfig] - Sub-agent/delegate config — checks .model field for override
- * @param [callerSkipCache] - AUD-wydajnosc-079/RR-08-11: wołacz WYMUSZA świeżą instancję dla roli
- *   `main` (np. `chat_model.ts` gdy `skipCache` z `get_chat_model` trafia w gałąź agenta z
- *   WŁASNYM modelem — do tego fixu ta flaga tam ginęła i dwa taby czatu tego samego agenta
- *   dzieliły jedną instancję adaptera w trakcie `stream()`, patrz gotcha 2 w CLAUDE.md). Rolom
- *   sub i tak zawsze skipuje (linia niżej) — ten parametr dokłada wymuszenie TEŻ dla `main`.
+ * @param [callerSkipCache] - wołacz WYMUSZA świeżą instancję dla roli `main` (np. `chat_model.ts`
+ *   gdy `skipCache` z `get_chat_model` trafia w gałąź agenta z WŁASNYM modelem — bez tej flagi
+ *   dwa taby czatu tego samego agenta dzieliłyby jedną instancję adaptera w trakcie `stream()`,
+ *   patrz gotcha 2 w CLAUDE.md). Rolom sub i tak zawsze skipuje (linia niżej) — ten parametr
+ *   dokłada wymuszenie TEŻ dla `main`.
  * @returns ChatModel instance or null
  */
 export function createModelForRole(plugin: ResolverPluginLike, role: ModelRole, agent: ResolverAgentLike = null, delegateConfig: DelegateConfigLike = null, callerSkipCache = false): ChatModel | null {
@@ -165,7 +163,7 @@ export function createModelForRole(plugin: ResolverPluginLike, role: ModelRole, 
 
     // Normalize legacy alias: 'researcher' → 'minion' (nazwa slotu w bibliotece modeli).
     const normalizedRole = role === 'researcher' ? 'minion' : role;
-    // F4: `sub_worker` = sub klasy rodzica. Do RESOLUCJI udaje `main` (ta sama drabinka, ten sam
+    // `sub_worker` = sub klasy rodzica. Do RESOLUCJI udaje `main` (ta sama drabinka, ten sam
     // model co czat), ale nadal jest subem — dlatego pamiętamy o tym osobną flagą i niżej
     // wymuszamy świeżą instancję (współdzielenie instancji z czatem = wyścig na `stream()`).
     const isSubWorker = normalizedRole === 'sub_worker';
@@ -193,7 +191,7 @@ export function createModelForRole(plugin: ResolverPluginLike, role: ModelRole, 
         }
     };
 
-    // Step 0 (F4, tylko `sub_worker`): model z configu suba (YAML `model:`) wygrywa nad CAŁĄ
+    // Step 0 (tylko `sub_worker`): model z configu suba (YAML `model:`) wygrywa nad CAŁĄ
     // drabinką rodzica. Dla `sub_worker` „model rodzica" jest domyślnym wyborem, nie przymusem —
     // user, który jawnie wpisał model w SUB_AGENT.yaml, ma dostać dokładnie ten model.
     if (isSubWorker && delegateConfig?.model) applyOverride(delegateConfig.model);
@@ -231,12 +229,11 @@ export function createModelForRole(plugin: ResolverPluginLike, role: ModelRole, 
             modelId = pkm.minionModel || null;
             platform = platform || pkm.minionPlatform || null;
         }
-        // Slot 'master' (rola stratega) skasowany w fabryce kasacji S1 (2026-09-02,
-        // AUD-dead-code-173) — po E3.6 żaden produkcyjny wołacz nie pytał o tę rolę.
+        // Slot 'master' (rola stratega) skasowany — żaden produkcyjny wołacz nie pytał o tę rolę.
     }
 
     // Step 4b: sub roles — top-level agent.model (legacy) OR normalized agent.models.main
-    // (canon after the B6-2 migration, see modules/agents/profile/modelFieldSync.ts) as LAST
+    // (canon after the modelFieldSync migration, see modules/agents/profile/modelFieldSync.ts) as LAST
     // resort, so delegation still works when the user configured nothing sub-specific (no
     // library entry, no legacy slot). Both are normalized to the same "platform/model" string
     // shape before falling through to `applyOverride` — models CANNOT import from agents
@@ -266,11 +263,11 @@ export function createModelForRole(plugin: ResolverPluginLike, role: ModelRole, 
 
     // Cache check — skip for non-main roles: they may run in parallel,
     // and ChatModel.stream() is NOT safe for concurrent calls on same instance.
-    // F4: `sub_worker` rozwiązuje się JAK main (effectiveRole==='main'), ale biegnie równolegle
+    // `sub_worker` rozwiązuje się JAK main (effectiveRole==='main'), ale biegnie równolegle
     // z czatem — musi dostać własną instancję, inaczej sub i czat dzielą jeden `stream()`.
-    // AUD-wydajnosc-079/RR-08-11: `callerSkipCache` dokłada wymuszenie TEŻ dla `main` — bez tego
-    // dwie tury na roli main (dwa taby, albo tura + konsolidacja pamięci w tle) zawsze dostawały
-    // TĘ SAMĄ instancję z `_cache`, niezależnie od tego, co wołacz jawnie zażądał.
+    // `callerSkipCache` dokłada wymuszenie TEŻ dla `main` — bez tego dwie tury na roli main
+    // (dwa taby, albo tura + konsolidacja pamięci w tle) zawsze dostawały TĘ SAMĄ instancję
+    // z `_cache`, niezależnie od tego, co wołacz jawnie zażądał.
     const skipCache = (effectiveRole !== 'main') || isSubWorker || callerSkipCache;
     const agentName = agent?.name || '_global';
     const cacheKey = `${agentName}:${effectiveRole}:${platform}:${modelId.trim()}`;
@@ -287,7 +284,7 @@ export function createModelForRole(plugin: ResolverPluginLike, role: ModelRole, 
     if (!chatConfig?.providers || !chatConfig.http || !chatConfig.transport) return null;
 
     try {
-        // B.3 SM-02: znana platforma = wpis wprost z rejestru; NIEZNANA nazwa (`azure`/`custom`/
+        // Znana platforma = wpis wprost z rejestru; NIEZNANA nazwa (`azure`/`custom`/
         // `google` ze starego `settings.json`) idzie przez fail-safe, który spada na PIERWSZY wpis.
         const provider = chatConfig.providers[platform as ProviderId]
             ?? resolveProvider(chatConfig.providers, platform);

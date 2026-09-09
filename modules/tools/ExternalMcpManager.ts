@@ -1,20 +1,20 @@
 /**
- * ExternalMcpManager — E3.1 faza A (prawdziwy klient protokołu MCP).
+ * ExternalMcpManager — prawdziwy klient protokołu MCP.
  *
  * Podłącza ZEWNĘTRZNE serwery MCP przez oficjalny `@modelcontextprotocol/sdk`:
  *   - transport `stdio` = lokalny proces (Blender, DaVinci, ...) — TYLKO desktop.
  *   - transport `http`  = zdalny serwer (konektory typu Gmail) — działa też na mobile.
  * Narzędzia serwera trafiają do istniejącego `ToolRegistry` jako `source:'user'`, więc
- * łańcuch bezpieczeństwa E3.0 klasyfikuje je jako RED (isExternalTool → classifyToolRisk).
+ * łańcuch bezpieczeństwa klasyfikuje je jako RED (isExternalTool → classifyToolRisk).
  * Ten manager NICZEGO w tym łańcuchu nie zmienia — tylko rejestruje narzędzia.
  *
- * ZASADY (spec E3.1 sekcja 5):
+ * ZASADY:
  *  - Wszystko node-owe (SDK, `child_process` ciągnięty przez transport stdio) importowane
  *    LENIWIE — dynamic import wewnątrz metod. `obsidian` NIE jest importowany W OGÓLE
  *    (Platform.isMobile wchodzi przez DI `options.isMobile` z main.js — dynamic import
  *    externala nie przeżywa bundlowania). Testy AVA (fake `clientFactory`) nie ciągną SDK.
  *  - Status runtime (connected/off/error + lastError zamaskowany) żyje w WEWNĘTRZNEJ mapie managera
- *    (R2: `getStatus(id)`), NIE na obiekcie configu — data.json trzyma tylko konfigurację usera.
+ *    (`getStatus(id)`), NIE na obiekcie configu — data.json trzyma tylko konfigurację usera.
  *    NIGDY nie rzuca przy autostarcie (cichy fail, decyzja D-D).
  *  - Rejestracja narzędzi wrapperem identycznym w kształcie z `ServerManager` (source:'user').
  *  - Timeout per call: `resolveTimeoutMs` (domyślnie 60s, sufit 180s — te same zasady co reszta).
@@ -49,7 +49,7 @@ function _nodeSafeClearTimeout(...args: Parameters<typeof clearTimeout>): void {
 }
 
 /**
- * AUD-bledy-023: sufit czasu na zamknięcie JEDNEGO serwera w `closeAll()` (ms).
+ * Sufit czasu na zamknięcie JEDNEGO serwera w `closeAll()` (ms).
  *
  * `StdioClientTransport.close()` ma własny budżet do ~4 s (stdin.end → 2 s → SIGTERM → 2 s →
  * SIGKILL), więc 5 s daje mu dojść do SIGKILL-a. Po tym czasie porzucamy obietnicę z logiem —
@@ -64,7 +64,7 @@ type ErrLike = { message?: string };
 /**
  * Transport SDK w zakresie, w jakim go dotykamy: dwa haki cyklu życia.
  *
- * AUD-bledy-022: `StdioClientTransport` woła `onclose` po `close` procesu i `onerror` przy
+ * `StdioClientTransport` woła `onclose` po `close` procesu i `onerror` przy
  * padzie spawnu / stdin / stdout (`client/stdio.js`); `StreamableHTTPClientTransport` ma te
  * same pola. Podpinamy się PRZED `client.connect()`, bo `Protocol.connect` zachowuje
  * poprzedni hak i wywołuje oba (`shared/protocol.js`) — nasz nie wypiera obsługi SDK.
@@ -75,7 +75,7 @@ interface TransportLifecycle {
 }
 
 /**
- * AUD-bledy-024: tłumaczenie błędu połączenia po KSZTAŁCIE, nie po treści.
+ * Tłumaczenie błędu połączenia po KSZTAŁCIE, nie po treści.
  *
  * Do tej naprawy `connect` rozpoznawał wyłącznie 401, a wszystko inne oddawał userowi jako
  * surowy tekst z SDK/systemu — czyli `Notice` „Nie udało się połączyć „Filesystem": spawn npx
@@ -88,10 +88,10 @@ interface TransportLifecycle {
  * @returns zdanie i18n albo `null`, gdy kształtu nie rozpoznajemy (wtedy stara ścieżka).
  */
 function _explainConnectError(raw: string, serverConfig: ExternalMcpServerConfig): string | null {
-    // Kolejność: 401 pierwszy (Z2.4, zachowanie nietknięte).
+    // Kolejność: 401 pierwszy.
     if (/401|unauthorized/i.test(raw)) return t('settings.mcp_external_error_401');
     // Wstawki idą przez maskę: `url` usera potrafi nieść token w query stringu, a to zdanie
-    // ląduje w `Notice` i w wierszu serwera (kontrakt K8/K20 — sekret nie wychodzi na ekran).
+    // ląduje w `Notice` i w wierszu serwera — sekret nie ma prawa wyjść na ekran.
     const cmd = maskSensitiveData(serverConfig?.command || serverConfig?.url || '?');
     if (/\bENOENT\b/.test(raw)) return t('settings.mcp_external_error_enoent', { cmd });
     if (/\bEACCES\b|\bEPERM\b/.test(raw)) return t('settings.mcp_external_error_eacces', { cmd });
@@ -105,7 +105,7 @@ function _explainConnectError(raw: string, serverConfig: ExternalMcpServerConfig
 /**
  * Config ZEWNĘTRZNEGO serwera MCP — dokładnie to, co user trzyma w
  * `settings.pkmAssistant.externalMcpServers[]` (data.json). WYŁĄCZNIE konfiguracja:
- * status runtime żyje w wewnętrznej mapie managera (R2), a `status`/`lastError` są tu
+ * status runtime żyje w wewnętrznej mapie managera, a `status`/`lastError` są tu
  * tylko po to, żeby `stripRuntimeFields` miało co skasować po starszych wersjach.
  */
 export interface ExternalMcpServerConfig {
@@ -131,7 +131,7 @@ export interface ExternalMcpServerConfig {
     lastError?: string | null;
 }
 
-/** Status runtime serwera (R2) — mapa w managerze, NIGDY w data.json. */
+/** Status runtime serwera — mapa w managerze, NIGDY w data.json. */
 export interface ExternalServerStatus {
     status: 'connected' | 'off' | 'error';
     lastError: string | null;
@@ -220,7 +220,7 @@ export interface ExternalMcpPluginLike {
 }
 
 /**
- * S32 Z2.1 — normalizacja wyniku narzędzia MCP na CZYSTY TEKST dla modelu.
+ * Normalizacja wyniku narzędzia MCP na CZYSTY TEKST dla modelu.
  *
  * Po co: SDK zwraca `{content:[{type:'text'|'image'|'resource', ...}]}`, a pętla agenta
  * (`AgentLoop`) wkłada wynik do promptu przez `JSON.stringify(raw)`. Bez tej funkcji
@@ -273,14 +273,14 @@ export function normalizeMcpResult(result: unknown): unknown {
 export class ExternalMcpManager {
     declare plugin: ExternalMcpPluginLike;
     declare _clientFactory: McpClientFactory | null;
-    /** K11: obietnica ostatniego `autostart()` — patrz `whenAutostartSettled()`. */
+    /** Obietnica ostatniego `autostart()` — patrz `whenAutostartSettled()`. */
     declare _autostartSettled: Promise<void> | null;
     declare _toolRegistry: ExternalToolRegistryLike | null;
     declare _isMobile: boolean;
     declare _pluginVersion: string;
     declare _connections: Map<string, { client: McpClientLike; transport: unknown; config: ExternalMcpServerConfig; toolNames: string[] }>;
     /**
-     * AUD-code-review-061: obietnica handshake'u W TRAKCIE, per `serverId`.
+     * Obietnica handshake'u W TRAKCIE, per `serverId`.
      *
      * `connect()` był check-then-act na `_connections` bez żadnej rezerwacji „w trakcie
      * łączenia" — dwa równoczesne wywołania dla tego samego serwera (typowo: `autostart()`
@@ -295,13 +295,13 @@ export class ExternalMcpManager {
     /** prefixedName → routing info */
     declare _toolIndex: Map<string, { serverId: string; toolName: string }>;
     /**
-     * R2: status RUNTIME żyje TU, nie na obiekcie configu. Config w
+     * Status RUNTIME żyje TU, nie na obiekcie configu. Config w
      * `settings.pkmAssistant.externalMcpServers[]` trafia do data.json i musi trzymać WYŁĄCZNIE
      * konfigurację usera — status/lastError/toolCount nie mogą się utrwalać.
      */
     declare _status: Map<string, ExternalServerStatus>;
     /**
-     * AUD-bledy-034: menedżer jest zdemontowany (`closeAll()` już poszło).
+     * Menedżer jest zdemontowany (`closeAll()` już poszło).
      *
      * `onunload` woła `closeAll()` fire-and-forget, a `autostart()` leci w tle i może
      * dokończyć handshake JUŻ PO demontażu — bez tej flagi świeże połączenie lądowało
@@ -317,7 +317,7 @@ export class ExternalMcpManager {
      * @param options.isMobile - DI z main.js (`Platform.isMobile`). NIE importujemy
      *        `obsidian` w tym pliku — nawet dynamicznie: esbuild zostawia dynamic import
      *        externala jako natywny import() i bundle wybucha w runtime
-     *        („Failed to resolve module specifier 'obsidian'" — bug znaleziony w smoke E3.1).
+     *        („Failed to resolve module specifier 'obsidian'").
      */
     constructor(plugin: ExternalMcpPluginLike, options: ExternalMcpManagerOptions = {}) {
         this.plugin = plugin;
@@ -339,26 +339,26 @@ export class ExternalMcpManager {
         return { status: 'off', lastError: null, toolCount: 0 };
     }
 
-    /** @private Nadpisz część statusu serwera w wewnętrznej mapie (R2). */
+    /** @private Nadpisz część statusu serwera w wewnętrznej mapie. */
     _setStatus(serverId: string, patch: Partial<ExternalServerStatus>): void {
         const prev = this._status.get(serverId) || this._defaultStatus();
         this._status.set(serverId, { ...prev, ...patch });
     }
 
     /**
-     * Status runtime serwera (R2) — UI czyta STĄD, nie z obiektu configu.
+     * Status runtime serwera — UI czyta STĄD, nie z obiektu configu.
      */
     getStatus(serverId: string): ExternalServerStatus {
         return this._status.get(serverId) || this._defaultStatus();
     }
 
     /**
-     * R2 (defensywnie przy save): zdejmij pola runtime, które faza A mogła utrwalić na obiekcie
+     * Defensywnie przy save: zdejmij pola runtime, które starsza wersja mogła utrwalić na obiekcie
      * configu. Obiekty w `externalMcpServers[]` mają trzymać TYLKO konfigurację usera. Mutuje + zwraca.
      */
     static stripRuntimeFields(cfg: ExternalMcpServerConfig | null | undefined): ExternalMcpServerConfig | null | undefined {
         if (cfg && typeof cfg === 'object') {
-            // no-deprecated (AUD F02/W4): `status`/`lastError` są @deprecated na
+            // no-deprecated: `status`/`lastError` są @deprecated na
             // ExternalMcpServerConfig — dostęp jest TU legalny (to WŁAŚNIE ta funkcja je zdejmuje),
             // ale inline-disable jest zablokowany configiem (`eslint-comments/no-restricted-disable`
             // obejmuje `@typescript-eslint/no-deprecated`). Rzut na worek generyczny odrywa dostęp
@@ -371,7 +371,7 @@ export class ExternalMcpManager {
     }
 
     /**
-     * R3: walidacja id serwera (defense in depth — także w UI przy zapisie). Slug
+     * Walidacja id serwera (defense in depth — także w UI przy zapisie). Slug
      * `[a-z0-9-]{2,32}` ORAZ brak kolizji z nazwami serwerów wbudowanych. Powód (security):
      * default `agent.mcp_servers = ['vault','memory','core']` — external o id `vault` byłby
      * auto-wpuszczony każdemu agentowi przez `ToolRegistry.filterByAgent` (tool.serverName===id).
@@ -439,7 +439,7 @@ export class ExternalMcpManager {
 
     /**
      * Snapshot skonfigurowanych serwerów dla UI (Settings + profil agenta): config usera
-     * + status runtime z wewnętrznej mapy (R2). UI nie sięga do settings ani do statusu bezpośrednio.
+     * + status runtime z wewnętrznej mapy. UI nie sięga do settings ani do statusu bezpośrednio.
      * @param servers - configi (domyślnie z settings.pkmAssistant.externalMcpServers).
      */
     listServersForUi(servers?: ExternalMcpServerConfig[]): ExternalServerUiRow[] {
@@ -463,7 +463,7 @@ export class ExternalMcpManager {
     /**
      * Połącz z pojedynczym serwerem wg configu i zarejestruj jego narzędzia w ToolRegistry.
      * NIE rzuca — zwraca `{success, tools?|error?}` i zapisuje status w WEWNĘTRZNEJ mapie
-     * managera (R2: getStatus(id)); obiekt configu NIE jest mutowany (data.json = tylko config).
+     * managera (getStatus(id)); obiekt configu NIE jest mutowany (data.json = tylko config).
      * @param serverConfig - {id, name, transport, command,args,env | url,headers, ...}.
      */
     async connect(
@@ -473,7 +473,7 @@ export class ExternalMcpManager {
         if (!serverId) {
             return { success: false, error: 'Brak id serwera MCP' };
         }
-        // AUD-bledy-034: po `closeAll()` menedżer jest martwy — nie stawiamy nowych procesów.
+        // Po `closeAll()` menedżer jest martwy — nie stawiamy nowych procesów.
         if (this._unloaded) {
             log.info('ExternalMcpManager', `Pomijam połączenie z "${serverId}" — menedżer jest już zdemontowany`);
             return { success: false, error: 'Menedżer serwerów MCP jest zdemontowany' };
@@ -482,7 +482,7 @@ export class ExternalMcpManager {
             const existing = this._connections.get(serverId);
             return { success: true, alreadyConnected: true, tools: existing!.toolNames };
         }
-        // AUD-code-review-061: blokada współbieżności PER SERVERID — patrz komentarz przy
+        // Blokada współbieżności PER SERVERID — patrz komentarz przy
         // `_connecting`. Drugie wywołanie w oknie handshake'u dostaje TĘ SAMĄ obietnicę.
         const inFlight = this._connecting.get(serverId);
         if (inFlight) return inFlight;
@@ -508,7 +508,7 @@ export class ExternalMcpManager {
             return { success: false, error: 'ToolRegistry niedostępny' };
         }
 
-        // R3: walidacja id serwera (defense in depth — UI waliduje niezależnie przy zapisie).
+        // Walidacja id serwera (defense in depth — UI waliduje niezależnie przy zapisie).
         const builtinNames = typeof registry.getBuiltinServerMap === 'function'
             ? Object.keys(registry.getBuiltinServerMap())
             : [];
@@ -527,12 +527,12 @@ export class ExternalMcpManager {
             const created = await this._createClient(serverConfig);
             client = created.client;
             const transport = created.transport;
-            // AUD-bledy-022: haki cyklu życia PRZED handshakiem — `Protocol.connect` zachowuje
+            // Haki cyklu życia PRZED handshakiem — `Protocol.connect` zachowuje
             // poprzedni `onclose`/`onerror` transportu i woła oba, więc nie wypieramy SDK.
             this._watchTransport(serverId, transport);
-            // K11 (AUD-security-005): JEDEN budzet na cale podlaczenie, nie dwa. Do K11
-            // `connect` i `listTools` dostawaly po pelnym `timeout`, wiec jeden serwer
-            // potrafil zjesc 2x60 s (a przy podniesionym suficie 2x180 s).
+            // JEDEN budzet na cale podlaczenie, nie dwa — gdyby `connect` i `listTools`
+            // dostawaly po pelnym `timeout`, jeden serwer potrafilby zjesc 2x60 s
+            // (a przy podniesionym suficie 2x180 s).
             const timeout = resolveTimeoutMs(serverConfig);
             const deadline = Date.now() + timeout;
 
@@ -540,7 +540,7 @@ export class ExternalMcpManager {
             const listed = await client.listTools(undefined, { timeout: Math.max(1, deadline - Date.now()) });
             const tools = Array.isArray(listed?.tools) ? listed.tools : [];
 
-            // AUD-bledy-034: wyścig autostartu z demontażem. Handshake przez `npx` potrafi trwać
+            // Wyścig autostartu z demontażem. Handshake przez `npx` potrafi trwać
             // kilkanaście sekund (pierwszy start ciągnie paczkę); jeśli w tym czasie poszło
             // `closeAll()`, świeży klient NIE MOŻE wejść do mapy ani zarejestrować narzędzi —
             // nikt by go już nie zamknął, a proces potomny na Windows nie ginie z rodzicem.
@@ -574,8 +574,8 @@ export class ExternalMcpManager {
         } catch (e) {
             const raw = String((e as ErrLike)?.message || e);
             const rawSafe = maskSensitiveData(raw);
-            // AUD-bledy-024: DWÓCH odbiorców jednego zdarzenia. Człowiek dostaje zdanie
-            // rozpoznane po KSZTAŁCIE błędu (`_explainConnectError` — 401 jak w Z2.4, brak
+            // DWÓCH odbiorców jednego zdarzenia. Człowiek dostaje zdanie
+            // rozpoznane po KSZTAŁCIE błędu (`_explainConnectError` — 401, brak
             // programu w PATH, odmowa dostępu, zerwane połączenie, timeout); pełny tekst
             // techniczny idzie do logu. Nierozpoznany kształt = stara ścieżka (surowy, maskowany).
             const safeMsg = _explainConnectError(raw, serverConfig) || rawSafe;
@@ -588,13 +588,13 @@ export class ExternalMcpManager {
     }
 
     /**
-     * AUD-bledy-022: nasłuch śmierci serwera — status, rejestr i UI przestają kłamać.
+     * Nasłuch śmierci serwera — status, rejestr i UI przestają kłamać.
      *
-     * Do tej naprawy manager nie podpinał niczego: po padzie procesu stdio (user zamknął
-     * Blendera, `npx` się wywalił) wpis zostawał w `_connections`, `getStatus()` dalej mówił
-     * `connected`, Ustawienia i Konektory rysowały zieloną kropkę z przyciskiem „Rozłącz",
-     * a martwe narzędzia szły modelowi w definicjach — każde wywołanie wracało `isError`
-     * z „Connection closed" i paliło turę.
+     * Bez tego, po padzie procesu stdio (user zamknął Blendera, `npx` się wywalił) wpis
+     * zostawałby w `_connections`, `getStatus()` dalej mówiłby `connected`, Ustawienia
+     * i Konektory rysowałyby zieloną kropkę z przyciskiem „Rozłącz", a martwe narzędzia
+     * szłyby modelowi w definicjach — każde wywołanie wracałoby `isError` z „Connection
+     * closed" i paliłoby turę.
      *
      * Haki idą na TRANSPORT, bo to on wie o procesie; `Protocol.connect` zachowuje wcześniej
      * ustawiony hak i woła oba, więc SDK dalej sprząta u siebie. Podpinamy PRZED handshakiem.
@@ -616,7 +616,7 @@ export class ExternalMcpManager {
     }
 
     /**
-     * AUD-bledy-022: sprzątanie po serwerze, który UMARŁ sam (nie po naszym `close`).
+     * Sprzątanie po serwerze, który UMARŁ sam (nie po naszym `close`).
      *
      * Idempotentne i milczące, gdy połączenia już nie ma — zamierzone `close(id)` zdejmuje
      * wpis z mapy PIERWSZE, więc wywołany przy nim `onclose` transportu przechodzi tędy bez
@@ -637,7 +637,7 @@ export class ExternalMcpManager {
     }
 
     /**
-     * S33 Z3: PODGLĄD narzędzi PRZED zapisem serwera (przejrzystość przy dodawaniu).
+     * PODGLĄD narzędzi PRZED zapisem serwera (przejrzystość przy dodawaniu).
      * Efemeryczne: własny klient + transport, handshake, `listTools`, **close**. NICZEGO nie
      * rejestruje w ToolRegistry, nie dotyka `_connections` ani `_status` (mapa statusów zostaje
      * czysta — podgląd nie jest „połączeniem"). NIE rzuca: błąd wraca jako `{success:false,error}`
@@ -683,7 +683,7 @@ export class ExternalMcpManager {
      *   inputSchema: JSON Schema z MCP as-is (modele to jedzą)
      *   serverName:  serverId (filterByAgent opt-in przez agent.mcp_servers[] = serverId)
      *   source:      'user' (→ RED w łańcuchu bezpieczeństwa)
-     *   execute:     routing do callTool + normalizacja wyniku (Z2.1 — model dostaje tekst)
+     *   execute:     routing do callTool + normalizacja wyniku (model dostaje tekst)
      * @private
      */
     _wrapTool(serverConfig: ExternalMcpServerConfig, toolDef: McpToolDefinition): ToolDefinition | null {
@@ -735,10 +735,10 @@ export class ExternalMcpManager {
 
     /**
      * Usuwa wewnętrzne znaczniki wywołania przed pokazaniem/wysłaniem argumentów.
-     * S33 Z1: filtr po PREFIKSIE `_invocation` zamiast listy nazw — nowy znacznik
+     * Filtr po PREFIKSIE `_invocation` zamiast listy nazw — nowy znacznik
      * (`_invocationDelegationDepth`) i każdy przyszły są odcinane automatycznie.
      * Cudzy serwer nie ma powodu znać naszej tożsamości ani głębokości delegacji.
-     * S33 Z3: publiczny static, bo tego samego filtra używa `MCPClient` przy budowie
+     * Publiczny static, bo tego samego filtra używa `MCPClient` przy budowie
      * podglądu argumentów w modalu approvalu (JEDNA definicja reguły, nie dwie kopie).
      * Wejścia nie-obiektowe (null/undefined/tablica/string/liczba) wracają NIETKNIĘTE.
      */
@@ -763,13 +763,13 @@ export class ExternalMcpManager {
     async close(serverId: string): Promise<void> {
         const entry = this._connections.get(serverId);
         if (!entry) return;
-        // AUD-bledy-022: wpis schodzi z mapy JAKO PIERWSZY — to zamknięcie ZAMIERZONE, więc
+        // Wpis schodzi z mapy JAKO PIERWSZY — to zamknięcie ZAMIERZONE, więc
         // `onclose` transportu (który zaraz padnie z `client.close()`) ma przejść przez `_reap`
         // bez skutku i nie przemalować statusu `off` na `error`.
         this._connections.delete(serverId);
         const registry = this._registry();
         for (const name of entry.toolNames) {
-            // R1: publiczne API rejestru zamiast grzebania w bebechach Mapy (registry.tools.delete).
+            // Publiczne API rejestru zamiast grzebania w bebechach Mapy (registry.tools.delete).
             registry?.unregisterTool?.(name);
             this._toolIndex.delete(name);
         }
@@ -785,14 +785,15 @@ export class ExternalMcpManager {
     /**
      * Zamknij WSZYSTKIE połączenia — wołane w plugin.onunload (nie zostawiać procesów-zombie).
      *
-     * AUD-bledy-023: RÓWNOLEGLE (`Promise.allSettled`) i z sufitem czasu PER SERWER. Do tej
-     * naprawy pętla była sekwencyjna z `await`, a `StdioClientTransport.close()` daje jednemu
-     * serwerowi do ~4 s (stdin.end → SIGTERM → SIGKILL) — przy trzech serwerach trzeci dostawał
-     * swój `close()` dopiero po ~8 s od `onunload`, którego Obsidian nie czeka. Ogon listy
-     * nie dostawał sygnału w ogóle. Po przekroczeniu sufitu porzucamy obietnicę z logiem;
-     * rejestr narzędzi i mapa połączeń są wtedy i tak już posprzątane (patrz `close`).
+     * RÓWNOLEGLE (`Promise.allSettled`) i z sufitem czasu PER SERWER: sekwencyjna pętla
+     * z `await` byłaby zbyt wolna, bo `StdioClientTransport.close()` daje jednemu
+     * serwerowi do ~4 s (stdin.end → SIGTERM → SIGKILL) — przy trzech serwerach trzeci
+     * dostawałby swój `close()` dopiero po ~8 s od `onunload`, którego Obsidian nie czeka,
+     * a ogon listy nie dostawałby sygnału w ogóle. Po przekroczeniu sufitu porzucamy
+     * obietnicę z logiem; rejestr narzędzi i mapa połączeń są wtedy i tak już posprzątane
+     * (patrz `close`).
      *
-     * AUD-bledy-034: podnosi flagę `_unloaded` NA POCZĄTKU — od tej chwili `autostart()`
+     * Podnosi flagę `_unloaded` NA POCZĄTKU — od tej chwili `autostart()`
      * i `connect()` odmawiają startu, więc handshake, który dojedzie po czasie, nie wpisze
      * się do mapy martwego menedżera.
      *
@@ -829,10 +830,10 @@ export class ExternalMcpManager {
     /**
      * Autostart: polacz serwery z configu ktore maja `enabled && autostart`. Cichy fail (D-D).
      *
-     * K11 (AUD-security-005): **NIE BLOKUJE WOLACZA i laczy ROWNOLEGLE.** Do K11 petla byla
-     * sekwencyjna z `await`, a `main.ts` czekal na nia przed ustawieniem `plugin._ready` —
-     * czyli jeden serwer, ktory przyjmuje transport i milczy, zawieszal czat i sidebar na
-     * caly swoj budzet (a trzy takie serwery sumowaly budzety). SECURITY.md obiecuje wprost,
+     * **NIE BLOKUJE WOLACZA i laczy ROWNOLEGLE.** Sekwencyjna petla z `await`, ktora
+     * `main.ts` czekalby przed ustawieniem `plugin._ready`, oznaczalaby, ze jeden serwer,
+     * ktory przyjmuje transport i milczy, zawiesilby czat i sidebar na caly swoj budzet
+     * (a trzy takie serwery sumowalyby budzety). SECURITY.md obiecuje wprost,
      * ze zawieszony serwer nie zawiesza pluginu.
      *
      * Serwery dolaczaja, kiedy wstana; do tego czasu ich narzedzi po prostu nie ma
@@ -842,7 +843,7 @@ export class ExternalMcpManager {
      * @param servers - lista configow; domyslnie z settings.pkmAssistant.externalMcpServers.
      */
     async autostart(servers?: ExternalMcpServerConfig[]): Promise<void> {
-        // AUD-bledy-034: po demontażu autostart nie ma czego startować — inaczej proces
+        // Po demontażu autostart nie ma czego startować — inaczej proces
         // wstawałby dla menedżera, który już nikogo nie zamknie.
         if (this._unloaded) {
             log.info('ExternalMcpManager', 'Autostart pominięty — menedżer jest już zdemontowany');
@@ -863,7 +864,7 @@ export class ExternalMcpManager {
     }
 
     /**
-     * K11: obietnica „wszystkie proby autostartu sie rozstrzygnely". Dla testow i harnessa —
+     * Obietnica „wszystkie proby autostartu sie rozstrzygnely". Dla testow i harnessa —
      * produkcyjny `main.ts` na nia NIE CZEKA. Brak autostartu = obietnica juz spelniona.
      */
     whenAutostartSettled(): Promise<void> {
@@ -906,7 +907,7 @@ export class ExternalMcpManager {
         const transportType = serverConfig.transport || 'stdio';
 
         if (transportType === 'stdio') {
-            // stdio = lokalny proces → TYLKO desktop (gate options.isMobile z DI, wzór D6).
+            // stdio = lokalny proces → TYLKO desktop (gate options.isMobile z DI).
             if (this._isMobile) {
                 throw new Error('Serwery stdio (lokalny proces) działają tylko na desktopie');
             }

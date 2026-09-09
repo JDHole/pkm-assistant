@@ -3,8 +3,8 @@
  * Streaming, tool-call handling and generation control methods extracted from ChatView.
  * All functions use `this` — they are mixed into ChatView.prototype via Object.assign.
  *
- * E2.1 krok B (v2.2): mechanika pętli narzędziowej przeniesiona do modules/agent-loop
- * (runAgentLoop). Ten plik jest TWARZĄ tury czatu: przygotowanie tury (send_message),
+ * Mechanika pętli narzędziowej żyje w modules/agent-loop (runAgentLoop). Ten plik jest TWARZĄ
+ * tury czatu: przygotowanie tury (send_message),
  * rendering (handle_chunk), placeholdery/UI narzędzi (hooki) i finalizacja (_finalizeTurn).
  * Iteracje, backstop, sanityzacja transkryptu i obcinanie wyników robi pętla.
  */
@@ -13,8 +13,8 @@ import { MarkdownRenderer, Notice } from 'obsidian';
 import { SkinManager, hexToRgbTriplet, UiIcons, setSvg, setSvgLabel } from '../../crystal-soul/index.js';
 import { buildCacheMetadata, isLocalPlatform } from '../../models/index.js';
 import { log } from '../../../core/utils/Logger.js';
-// AUD-bledy-027/058/025: status narzędzia i warunek linku „otwórz zapisany plik" liczy JEDNA
-// czysta funkcja z core (tę samą czyta MCPClient przy normalizacji i runner subów).
+// Status narzędzia i warunek linku „otwórz zapisany plik" liczy JEDNA czysta funkcja z core
+// (tę samą czyta MCPClient przy normalizacji i runner subów).
 import { countTokens, getTokenCount, calibrate, StreamWatchdog, resolveMessageOrigin, machineMeta, toolResultStatus, shouldLinkWrittenFile } from '../../../core/index.js';
 import {
     createCompactToolChip,
@@ -68,10 +68,11 @@ function getAgentServerFilter(serverManager: ChatViewMixinContext, agent: ChatVi
 }
 
 /**
- * AUD-code-review-017: `toolCall.arguments` bywa stringiem JSON zależnie od platformy — ten
- * sam wzorzec „string → JSON.parse w try/catch, inaczej obiekt" żył 7× w tym pliku pod 7 różnymi
- * nazwami (`_subArgs`/`_bgArgs`/`_saArgs`/`_saErrArgs`/`_saArgs2`/`readArgs`/`writeArgs`).
- * Jedna kopia zamiast siedmiu — pominięcie jednej przy przyszłej poprawce dawało po cichu `{}`.
+ * `toolCall.arguments` bywa stringiem JSON zależnie od platformy. Musi być JEDNA kopia
+ * wzorca „string → JSON.parse w try/catch, inaczej obiekt" dla wszystkich siedmiu call-site'ów
+ * (`_subArgs`/`_bgArgs`/`_saArgs`/`_saErrArgs`/`_saArgs2`/`readArgs`/`writeArgs`) — siedem
+ * osobnych kopii dawałoby okazję do pominięcia jednej przy przyszłej poprawce, po cichu
+ * zwracając `{}`.
  */
 function parseToolCallArgs(toolCall: ChatViewMixinContext): ChatViewMixinContext {
     return typeof toolCall.arguments === 'string'
@@ -79,11 +80,11 @@ function parseToolCallArgs(toolCall: ChatViewMixinContext): ChatViewMixinContext
         : (toolCall.arguments || {});
 }
 
-/** Licznik tur w procesie — tożsamość tury dla strażnika friendly fire (2026-08-15). */
+/** Licznik tur w procesie — tożsamość tury, żeby watchdog nie ubił cudzej tury po nazwie agenta. */
 let _turnSeq = 0;
 
 /**
- * @param opts - F2 faza B: `injectedText` = treść tury, która NIE pochodzi z pola wpisywania
+ * @param opts - `injectedText` = treść tury, która NIE pochodzi z pola wpisywania
  *   (powiadomienie o wyniku suba z tła). Wtedy `input_area` jest NIETYKANE — user może mieć
  *   tam własny szkic — a ścieżki „to pisał człowiek" (historia inputu, wzmianki `@`, załączniki,
  *   komendy `/`) są pominięte. `meta` ląduje na wiadomości w oknie kontekstu (znacznik
@@ -94,7 +95,7 @@ let _turnSeq = 0;
  *   być `MouseEvent`. Dlatego czytamy z `opts` wyłącznie `injectedText` (z jawnym
  *   `typeof === 'string'`) i `meta` — nigdy nie zakładamy, że to NASZ obiekt.
  *
- *   K7 (2026-08-22): `meta.origin` to PROWENIENCJA — kto napisał tekst. `'human'` nadają
+ *   `meta.origin` to PROWENIENCJA — kto napisał tekst. `'human'` nadają
  *   wyłącznie ścieżki z pola wpisywania (guzik Wyślij, Enter, kolejka); brak znacznika =
  *   maszyna (fail-closed). To OSOBNA oś od `injectedText`: ta mówi tylko „tekst NIE pochodzi
  *   z pola wpisywania" (mechanika inputu: historia, załączniki, czyszczenie pola). Wysyłki
@@ -106,7 +107,7 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
     const injectedText = typeof opts?.injectedText === 'string' ? opts.injectedText.trim() : '';
     const isInjected = injectedText.length > 0;
 
-    // K7: proweniencja liczona RAZ i doklejana do meta wiadomości — dalej pytamy już tylko o nią.
+    // Proweniencja liczona RAZ i doklejana do meta wiadomości — dalej pytamy już tylko o nią.
     const messageOrigin = resolveMessageOrigin(opts?.meta);
     const isHuman = messageOrigin === 'human';
     const rawMeta = opts?.meta && typeof opts.meta === 'object' ? opts.meta : {};
@@ -130,13 +131,13 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
             log.warn('Chat', 'Powiadomienie o subie trafiło na trwającą turę — pomijam wstrzyknięcie');
             return;
         }
-        // K19 (AUD-security-117/131): kolejka wozi PROWENIENCJĘ razem z tekstem. Slot NIE bierze
-        // się wyłącznie z pola wpisywania — ścieżki, które wypełniają pole z kodu (guzik
-        // artefaktu, propozycja delegacji, komentarz inline), trafiają tu tak samo. Bez pieczątki
-        // dren nadawał im `human` i treść artefaktu wracała z przywilejami usera.
-        // AUD-bledy-015: slot należy do ZAKŁADKI, nie do widoku — zapamiętujemy, kto był na
-        // wierzchu. Dren (`set_generating(false)`, wołane też przez `_switchTab`) porówna to
-        // z aktualną zakładką i nie wystrzeli wiadomości pisanej do Jaskra w turę Borysa.
+        // Kolejka wozi PROWENIENCJĘ razem z tekstem. Slot NIE bierze się wyłącznie z pola
+        // wpisywania — ścieżki, które wypełniają pole z kodu (guzik artefaktu, propozycja
+        // delegacji, komentarz inline), trafiają tu tak samo. Bez pieczątki dren nadawałby im
+        // `human` i treść artefaktu wracałaby z przywilejami usera.
+        // Slot należy do ZAKŁADKI, nie do widoku — zapamiętujemy, kto był na wierzchu. Dren
+        // (`set_generating(false)`, wołane też przez `_switchTab`) porówna to z aktualną
+        // zakładką i nie wystrzeli wiadomości pisanej do Jaskra w turę Borysa.
         this._queuedMessage = queueChatMessage(rawText, messageMeta, this._queueOwner());
         this.resetInputArea();
         this._showQueuedIndicator(text);
@@ -144,24 +145,23 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
         return;
     }
 
-    // K5 (AUD-security-037): TU stało `this._abortedStream = null` („nowa wiadomość = świeży
-    // start"). To była dziura: przerwanie było JEDNYM polem widoku, więc kolejna wiadomość —
-    // albo auto-tura z wynikiem suba, albo drain przy przełączeniu zakładki — gasiła przerwanie
-    // tury, która WCIĄŻ biegła w narzędziu, i zatrzymana pętla wznawiała iteracje. Od K5
-    // przerwanie jest stanem TURY (`turn.abort`, niżej): nowa tura dostaje własny uchwyt
-    // i nie ma jak odkręcić przerwania starej. Tu nie ma już czego zerować.
+    // Tu NIE MA `this._abortedStream = null` („nowa wiadomość = świeży start"): przerwanie jako
+    // JEDNO pole widoku byłoby dziurą — kolejna wiadomość (auto-tura z wynikiem suba, albo drain
+    // przy przełączeniu zakładki) gasiłaby przerwanie tury, która WCIĄŻ biegnie w narzędziu,
+    // i zatrzymana pętla wznawiałaby iteracje. Przerwanie jest stanem TURY (`turn.abort`, niżej):
+    // nowa tura dostaje własny uchwyt i nie ma jak odkręcić przerwania starej. Tu nie ma już
+    // czego zerować.
 
     const sendStart = Date.now();
-    // Sprint 03 Z7 hotfix: log.group → log.info (flat) — console.group jest GLOBAL
-    // stack, multi-tab parallel send_message powodował że logi Borysa nest-owały
-    // się pod grupą Jaskra zamiast osobno. Agent prefix dodany dla czytelności.
+    // log.info (flat), nie log.group: console.group jest GLOBAL stack, więc multi-tab
+    // parallel send_message zagnieżdżałby logi Borysa pod grupą Jaskra zamiast osobno.
+    // Agent prefix dodany dla czytelności.
     const activeAgentName = this.plugin?.agentManager?.getActiveAgent()?.name || '?';
     log.info('Chat', `[${activeAgentName}] send_message → "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`);
 
     // After long inactivity — just save (session continues, no reset)
-    // E2.7 K4 fix: read from settings.pkmAssistant.* (every other pkm setting lives there); the old
-    // settings.sessionTimeoutMinutes was the wrong level and always fell back to 30. Now wired to
-    // the Settings → Pamięć control (default 30 preserved).
+    // Read from settings.pkmAssistant.* (every other pkm setting lives there) — wired to the
+    // Settings → Pamięć control (default 30).
     const timeoutMs = (this.env?.settings?.pkmAssistant?.sessionTimeoutMinutes || 30) * 60 * 1000;
     if (this.lastMessageTimestamp && this.rollingWindow.messages.length > 0) {
         if (Date.now() - this.lastMessageTimestamp > timeoutMs) {
@@ -171,8 +171,8 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
     }
     this.lastMessageTimestamp = Date.now();
 
-    // Handle slash commands through registry (Sprint 09 Z8).
-    // K7: komenda `/` to polecenie, więc wykonujemy ją WYŁĄCZNIE z tekstu człowieka — tekst
+    // Handle slash commands through registry.
+    // Komenda `/` to polecenie, więc wykonujemy ją WYŁĄCZNIE z tekstu człowieka — tekst
     // maszynowy (wynik suba, treść artefaktu, `context_summary`) może zaczynać się od czegokolwiek.
     if (mayRunSlashCommand(messageMeta) && text.startsWith('/')) {
         if (await this.slashCommands?.execute(text, { view: this, plugin: this.plugin })) {
@@ -217,8 +217,8 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
     // Wstrzyknięta tura nie ma prawa skasować szkicu, który user właśnie pisze.
     if (!isInjected) {
         this.resetInputArea();
-        // Z3: szkic przechwycony przez kolejkę wiadomości (patrz `set_generating`) wraca
-        // dokładnie tutaj — jednorazowo, po wyczyszczeniu pola przez `resetInputArea`.
+        // Szkic przechwycony przez kolejkę wiadomości (patrz `set_generating`) wraca dokładnie
+        // tutaj — jednorazowo, po wyczyszczeniu pola przez `resetInputArea`.
         if (this._draftAfterSend) {
             this.input_area.value = this._draftAfterSend;
             this._draftAfterSend = null;
@@ -247,30 +247,30 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
         timestamp: new Date().toISOString()
     });
 
-    // K18 (AUD-security-112): WŁAŚCICIEL TURY zamrożony DOKŁADNIE TU — razem z zapaleniem
-    // guzika Stop i PRZED pierwszym awaitem przygotowania. Za chwilę wchodzimy w budowę promptu
-    // z pamięcią (okno „potrafi trwać sekundy", patrz K5 niżej), a `_switchTab` nie jest w tym
-    // czasie blokowany i przestawia `agentManager.activeAgent`, `this.rollingWindow`,
-    // `this.tokenTracker`. Do K18 tura czytała te lustra PO awaitach, więc rozmowa zaczęta
-    // u agenta A — z promptem z JEGO pamięci — kończyła jako tura agenta B (jego model,
-    // jego uprawnienia narzędzi, jego plik sesji). Od tej linii wszystko w `send_message`
-    // idzie z `owner`; `getActiveAgent()` / `this.rollingWindow` są tu zakazane (pilnuje tego
-    // strażnik po źródle w `turnOwner.test.ts`).
+    // WŁAŚCICIEL TURY zamrożony DOKŁADNIE TU — razem z zapaleniem guzika Stop i PRZED pierwszym
+    // awaitem przygotowania. Za chwilę wchodzimy w budowę promptu z pamięcią (okno „potrafi
+    // trwać sekundy", patrz niżej przy `turnAbort`), a `_switchTab` nie jest w tym czasie
+    // blokowany i przestawia `agentManager.activeAgent`, `this.rollingWindow`,
+    // `this.tokenTracker`. Czytanie tych luster PO awaitach zamiast z zamrożonego `owner`
+    // pozwoliłoby rozmowie zaczętej u agenta A — z promptem z JEGO pamięci — skończyć jako
+    // tura agenta B (jego model, jego uprawnienia narzędzi, jego plik sesji). Od tej linii
+    // wszystko w `send_message` idzie z `owner`; `getActiveAgent()` / `this.rollingWindow` są
+    // tu zakazane (pilnuje tego strażnik po źródle w `turnOwner.test.ts`).
     const owner = freezeTurnOwner(this);
-    // AUD-code-review-012 (F04, poprawka po blokadzie mergem): klucz `_agentStates` liczony
-    // RAZ, TU — zaraz po zamrożeniu właściciela, przed KAŻDYM awaitem tej funkcji — i wożony
-    // dalej jako STRING (`turn.origin.tabKey`, `ownerTabKey` w catchu). `_tabKey(turn.owner?.tab)`
-    // przeliczany LENIWIE przy sprzątaniu (finalize/error/watchdog, czyli po długich awaitach
-    // albo minutach oczekiwania na model) czyta ŻYWE pole `tab.sessionPath` — a `/save session`
-    // → „Archiwizuj i nowa sesja" (`archive_new`) podmienia `activeTab.sessionPath` NA MIEJSCU,
-    // bez re-keyowania `_agentStates`. Zamrożony klucz sprzed mutacji trafia we wpis, pod którym
-    // stan NAPRAWDĘ leży; przeliczony po fakcie — nie.
+    // Klucz `_agentStates` liczony RAZ, TU — zaraz po zamrożeniu właściciela, przed KAŻDYM
+    // awaitem tej funkcji — i wożony dalej jako STRING (`turn.origin.tabKey`, `ownerTabKey`
+    // w catchu). `_tabKey(turn.owner?.tab)` przeliczany LENIWIE przy sprzątaniu
+    // (finalize/error/watchdog, czyli po długich awaitach albo minutach oczekiwania na model)
+    // czyta ŻYWE pole `tab.sessionPath` — a `/save session` → „Archiwizuj i nowa sesja"
+    // (`archive_new`) podmienia `activeTab.sessionPath` NA MIEJSCU, bez re-keyowania
+    // `_agentStates`. Zamrożony klucz sprzed mutacji trafia we wpis, pod którym stan NAPRAWDĘ
+    // leży; przeliczony po fakcie — nie.
     const ownerTabKey = _tabKey(owner.tab);
-    // Werdykt Kuby 16.08: prawdziwa wiadomość człowieka przerywa ŁAŃCUCH auto-tur PO SUBACH
-    // (`_deliverSubTaskResult`, niżej) dla TEGO agenta — inaczej sufit `max_consecutive_auto_turns`
-    // liczyłby też tury, które user zaczął sam. `isHuman` to `resolveMessageOrigin(opts?.meta)`
-    // policzone na starcie tej funkcji; klucz mapy = `owner.agentName`, ten sam co reszta
-    // bookkeepingu per-agent w tym pliku (`_streamCtxMap` / `_agentStates` / `_preparingTurns`).
+    // Prawdziwa wiadomość człowieka przerywa ŁAŃCUCH auto-tur PO SUBACH (`_deliverSubTaskResult`,
+    // niżej) dla TEGO agenta — inaczej sufit `max_consecutive_auto_turns` liczyłby też tury,
+    // które user zaczął sam. `isHuman` to `resolveMessageOrigin(opts?.meta)` policzone na
+    // starcie tej funkcji; klucz mapy = `owner.agentName`, ten sam co reszta bookkeepingu
+    // per-agent w tym pliku (`_streamCtxMap` / `_agentStates` / `_preparingTurns`).
     // `resetAutoTurnChain()` (zamiast gołego `.delete()`) — reset ma się czytać jako ZDARZENIE,
     // symetryczne do `evaluateAutoTurnChain()` w `_deliverSubTaskResult`, nie jako sprzątanie mapy.
     if (isHuman) this._autoTurnChainCounts?.set(owner.agentName, resetAutoTurnChain());
@@ -279,16 +279,16 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
     const rw = owner.rollingWindow;
     const tt = owner.tokenTracker;
 
-    // K5: uchwyt przerwania powstaje RAZEM z zapaleniem guzika Stop, nie dopiero przy
-    // rejestracji tury w `_streamCtxMap`. Między jednym a drugim jest budowa promptu z pamięcią
-    // (potrafi trwać sekundy) — w tym oknie user MOŻE kliknąć Stop, a mapa tur jeszcze nic
-    // o tej turze nie wie. `_preparingTurns` to skrzynka kontaktowa na ten czas.
+    // Uchwyt przerwania powstaje RAZEM z zapaleniem guzika Stop, nie dopiero przy rejestracji
+    // tury w `_streamCtxMap`. Między jednym a drugim jest budowa promptu z pamięcią (potrafi
+    // trwać sekundy) — w tym oknie user MOŻE kliknąć Stop, a mapa tur jeszcze nic o tej turze
+    // nie wie. `_preparingTurns` to skrzynka kontaktowa na ten czas.
     const turnAbort = createTurnAbort();
     this._preparingTurns.set(owner.agentName, turnAbort);
 
     // Toggle UI state + show immediate visual feedback
     this.set_generating(true);
-    // F2: od tej chwili serializację przejmuje `is_generating` — bezpiecznik „tura powiadomienia
+    // Od tej chwili serializację przejmuje `is_generating` — bezpiecznik „tura powiadomienia
     // już rusza" (ustawiany przez dostawcę PRZED tym awaitem) nie jest już potrzebny.
     this._subTaskTurnPending = false;
     this.showTypingIndicator(t('chat.streaming.preparing'));
@@ -300,20 +300,19 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
         const platform = this.env?.settings?.pkmAssistant?.chat?.platform || '';
         const isLocalModel = isLocalPlatform(platform);
         // Pass artifacts via context → PromptBuilder handles them in build().
-        // E2.3 (D21): workMode już nie istnieje — nie ma sekcji trybu w promptcie.
-        // K18: drugi argument = agent-WŁAŚCICIEL. Bez niego prompt składałby się z persony
-        // i pamięci agenta, który akurat jest na wierzchu (AUD-security-112).
+        // Nie ma sekcji trybu w promptcie — workMode nie istnieje.
+        // Drugi argument = agent-WŁAŚCICIEL. Bez niego prompt składałby się z persony i pamięci
+        // agenta, który akurat jest na wierzchu.
         const basePrompt = await agentManager.getActiveSystemPromptWithMemory({
             isLocalModel,
-            // E2.9 FAZA B (B3): aktywny artefakt tej rozmowy (per-tab) → świeży chudy JSON w prompcie.
-            // (Stary przepływ artifacts:{todos,plans} z _chatTodoStore/_planStore usunięty w fazie D.)
+            // Aktywny artefakt tej rozmowy (per-tab) → świeży chudy JSON w prompcie.
             activeArtifactId: owner.artifactId,
         }, owner.agent);
         rw.setSystemPrompt(basePrompt);
         if (inlineTriggers.length > 0) {
-            // D17 (E2.4): marker @@skill: nie woła już skill_execute (skasowany). Resolwujemy skill
-            // TU (async/plugin-zależne) z overridami per-agent — „doczepki nie giną" (prompt_append)
-            // — i wstrzykujemy PEŁNY przepis do instrukcji tury. Nieznany skill → krótka nota.
+            // Marker @@skill: nie woła skill_execute. Resolwujemy skill TU (async/plugin-zależne)
+            // z overridami per-agent — „doczepki nie giną" (prompt_append) — i wstrzykujemy
+            // PEŁNY przepis do instrukcji tury. Nieznany skill → krótka nota.
             const resolvedSkills: Record<string, ChatViewMixinContext> = {};
             for (const m of inlineTriggers) {
                 if (m.type !== 'skill') continue;
@@ -367,22 +366,22 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
         }
     }
 
-    // K18: profil i nazwa właściciela — z zamrożenia sprzed budowy promptu, nie z lustra.
+    // Profil i nazwa właściciela — z zamrożenia sprzed budowy promptu, nie z lustra.
     const activeAgent = owner.agent;
     const streamAgentName = owner.agentName;
 
     // === STREAMING CONTEXT (per-tab) — MINIMALNY wpis ===
-    // Po E2.1 krok B mechanika tury żyje w zamknięciu `turn` niżej. _streamCtxMap trzyma tylko
-    // to, co czytają INNE metody: handle_chunk (ctx.agent → nagłówek/kolor) oraz needsFreshModel
-    // (size > 1 = współbieżny stream w tym ChatView).
+    // Mechanika tury żyje w zamknięciu `turn` niżej. _streamCtxMap trzyma tylko to, co czytają
+    // INNE metody: handle_chunk (ctx.agent → nagłówek/kolor) oraz needsFreshModel (size > 1 =
+    // współbieżny stream w tym ChatView).
     //
-    // Friendly fire 2026-08-15: `turnId` = tożsamość TEJ tury. Mapa jest kluczowana nazwą
-    // agenta, więc porzucona tura (nowa sesja wystartowała następną) i tura żywa dzielą wpis —
-    // watchdog porzuconej tury strzelał „po agencie" i ubijał requesty tury ŻYWEJ. Strażnik
+    // `turnId` = tożsamość TEJ tury. Mapa jest kluczowana nazwą agenta, więc porzucona tura
+    // (nowa sesja wystartowała następną) i tura żywa dzieliłyby wpis bez niego — watchdog
+    // porzuconej tury strzelałby „po agencie" i ubijałby requesty tury ŻYWEJ. Strażnik
     // w _onStreamStall porównuje turnId zanim komukolwiek przerwie.
     const turnId = ++_turnSeq;
-    // K5: uchwyt przerwania TEJ tury (`turnAbort`, założony wyżej razem z guzikiem Stop)
-    // wchodzi teraz do wpisu `_streamCtxMap` — stamtąd sięga po niego `stop_generation(agentName)`
+    // Uchwyt przerwania TEJ tury (`turnAbort`, założony wyżej razem z guzikiem Stop) wchodzi
+    // teraz do wpisu `_streamCtxMap` — stamtąd sięga po niego `stop_generation(agentName)`
     // i zamknięcie widoku. Ten sam obiekt niesie `turn` (czyta go pętla i watchdog) — nie kopia.
     this._streamCtxMap.set(streamAgentName, {
         agentName: streamAgentName,
@@ -411,14 +410,14 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
         // Get or create chat model — fresh instance if another stream is already active.
         // ChatModel.stream() is NOT concurrent-safe on the same instance.
         //
-        // Sprint 03 Z7: pre-Z7 guard `_streamCtxMap.size > 1` był per ChatView —
-        // przy 4 tabach każdy widział size=1 i używał shared cache → cross-tab race.
-        // Teraz sprawdzamy plugin-globalnie przez StreamingManager — fresh instance gdy
-        // jakikolwiek inny stream już leci albo gdy w obrębie tego ChatView jest współbieżność.
-        // AUD-testy-027: sama decyzja („lokalna współbieżność ALBO jakikolwiek inny stream")
-        // mieszka w `StreamingManager.ts` — pliku bez `obsidian`, z testami obu stron.
+        // Sprawdzać trzeba plugin-globalnie przez StreamingManager, nie tylko po rozmiarze
+        // `_streamCtxMap` tego ChatView: przy wielu tabach każdy widziałby swój lokalny size=1
+        // i używałby shared cache → cross-tab race. Fresh instance gdy jakikolwiek inny stream
+        // już leci albo gdy w obrębie tego ChatView jest współbieżność.
+        // Sama decyzja („lokalna współbieżność ALBO jakikolwiek inny stream") mieszka w
+        // `StreamingManager.ts` — pliku bez `obsidian`, z testami obu stron.
         const needsFreshModel = shouldUseFreshModel(this._streamCtxMap.size, streamingManager.getActiveStreams().length);
-        // K18: model rozwiązywany dla agenta-WŁAŚCICIELA. Bez `agent` `get_chat_model` czyta
+        // Model rozwiązywany dla agenta-WŁAŚCICIELA. Bez `agent` `get_chat_model` czyta
         // `getActiveAgent()`, więc tura zaczęta u A jechałaby modelem (i kluczem) agenta B.
         const chat_model = this.get_chat_model({ skipCache: needsFreshModel, agent: owner.agent });
         if (!chat_model?.stream) {
@@ -437,21 +436,19 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
         this.showTypingIndicator();
 
         // Extended thinking: universal flag for all providers that support it.
-        // E2.1 krok B: liczony RAZ na turę (dawniej per kontynuację — negligible, user rzadko
-        // przełącza w trakcie tury).
+        // Liczony RAZ na turę, nie per kontynuację.
         const showThinking = this.env?.settings?.pkmAssistant?.showThinking ?? true;
         const thinkingFlag = showThinking ? true : undefined;
 
-        // ADRES ZWROTNY TURY (F2 faza B): dokąd ma wrócić wynik suba odpalonego w tle.
+        // ADRES ZWROTNY TURY: dokąd ma wrócić wynik suba odpalonego w tle.
         // Liczony RAZ na turę (nie per tool call), bo user może w trakcie przełączyć zakładkę
         // albo agent może zacząć nową sesję — powiadomienie ma trafić tam, SKĄD wyszło zlecenie.
-        // K18: sesja i zakładka pochodzą z zamrożenia sprzed budowy promptu (dawniej czytane
-        // TUTAJ, czyli już po awaitach — po przełączeniu adres zwrotny celował w cudzą zakładkę).
+        // Sesja i zakładka MUSZĄ pochodzić z zamrożenia sprzed budowy promptu: czytanie ich
+        // tutaj, czyli już po awaitach, po przełączeniu zakładki celowałoby w cudzą zakładkę.
         const turnSessionPath = owner.sessionPath;
-        // AUD-code-review-012 (F04): `ownerTabKey` — liczony RAZ, na samym starcie send_message,
-        // przed pierwszym awaitem (patrz komentarz przy jego deklaracji). Reużyty tu zamiast
-        // ponownego `_tabKey(owner.tab)`, żeby nie było DWÓCH miejsc liczących ten sam klucz
-        // w jednej turze.
+        // `ownerTabKey` — liczony RAZ, na samym starcie send_message, przed pierwszym awaitem
+        // (patrz komentarz przy jego deklaracji). Reużyty tu zamiast ponownego
+        // `_tabKey(owner.tab)`, żeby nie było DWÓCH miejsc liczących ten sam klucz w jednej turze.
         const turnOrigin = {
             agentName: streamAgentName,
             ...(turnSessionPath ? { sessionPath: turnSessionPath } : {}),
@@ -462,21 +459,21 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
         const turn: ChatViewMixinContext = {
             agentName: streamAgentName,
             agent: activeAgent,
-            owner,                       // K18: zamrożony właściciel tury (AUD-security-112)
-            turnId,                      // friendly fire 2026-08-15: tożsamość tury (patrz _streamCtxMap wyżej)
-            abort: turnAbort,            // K5: przerwanie TEJ tury (zatrzask, patrz turnAbort.ts)
-            origin: turnOrigin,          // F2: adres zwrotny dla delegacji w tle
+            owner,                       // zamrożony właściciel tury
+            turnId,                      // tożsamość tury (patrz _streamCtxMap wyżej)
+            abort: turnAbort,            // przerwanie TEJ tury (zatrzask, patrz turnAbort.ts)
+            origin: turnOrigin,          // adres zwrotny dla delegacji w tle
             rw,
             tt,
             chatModel: chat_model,
             model: chat_model?.modelKey || '',
             platform: this.env?.settings?.pkmAssistant?.chat?.platform || '',
-            // E2.3 (D21): tryb PYTAŃ per-czat → egzekutor. K18: z zamrożenia, bo `_switchTab`
-            // przestawia `this.currentAutonomy` — zlecenie wydane w `edge` kończyłoby w `yolo`.
+            // Tryb PYTAŃ per-czat → egzekutor, z zamrożenia: `_switchTab` przestawia
+            // `this.currentAutonomy`, więc bez zamrożenia zlecenie wydane w `edge` kończyłoby w `yolo`.
             autonomy: owner.autonomy,
             hasUsedDelegate: false,
-            // D17 (E2.4): tura z markerem @@skill: startuje z aktywnym skillem (iteracja 0) —
-            // przepis wstrzyknięty do promptu, więc nie ma tu wywołania narzędzia do wykrycia.
+            // Tura z markerem @@skill: startuje z aktywnym skillem (iteracja 0) — przepis
+            // wstrzyknięty do promptu, więc nie ma tu wywołania narzędzia do wykrycia.
             skillActiveAt: inlineTriggers.some(m => m.type === 'skill') ? 0 : null,
             skillArtifactCreated: false,         // czy po skillu stworzono todo/plan
             cacheTelemetryEnabled: this.env?.settings?.pkmAssistant?.cacheTelemetryEnabled !== false,
@@ -489,13 +486,13 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
             lastApiOutput: 0,
             lastCacheMeta: null,
             responseRecorded: false,             // czy onUsage już zapisał tę odpowiedź do TokenTracker
-            // AUD-code-review-014: estymata wejścia PER TURA (_captureInputEstimate), nie per widok —
-            // dwie tury naraz w jednym ChatView dzieliłyby dotąd jedno pole `this._lastInputTokens`.
+            // Estymata wejścia PER TURA (_captureInputEstimate), nie per widok — inaczej dwie
+            // tury naraz w jednym ChatView dzieliłyby jedno pole `this._lastInputTokens`.
             lastInputTokens: 0,
             lastInputChars: 0,
         };
 
-        // Watchdog martwego streamu (2026-07-29): zdechnięty lokalny most/serwer potrafi trzymać
+        // Watchdog martwego streamu: zdechnięty lokalny most/serwer potrafi trzymać
         // połączenie bez ANI JEDNEGO chunka (log "[ChatAdapter] no chunk") — bez watchdoga tura
         // wisiała aż do ręcznego Stopa (twardy timeout XHR to dopiero 600 s). Zbrojony na start
         // każdego wywołania modelu (onIterationStart/onBackstop), karmiony chunkami, rozbrajany
@@ -511,7 +508,7 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
         });
         if (sCtx) sCtx.watchdog = turn.watchdog; // stop_generation / onClose rozbrajają przez ctx
 
-        // Sprint 03 Z7: tracking multi-tab (StreamingManager).
+        // Tracking multi-tab (StreamingManager).
         const streamId = `${this.leaf?.id || 'main'}::${streamAgentName}`;
         turn.streamId = streamId; // _onStreamStall wyrejestrowuje stream sam (finally może nie ruszyć)
         const modelId = chat_model?.modelKey || chat_model?.modelId || null;
@@ -525,7 +522,7 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
         // 1. wywołanie (start tury) BEZ filtra enabledTools (parytet z dawnym send_message),
         // kolejne (kontynuacje) Z filtrem (parytet z dawnym continueWithToolResults).
         let toolIterIdx = 0;
-        // E2.2: trace pętli → .pkm-assistant/logs/trace.log. Label chat/<agent>#<8 znaków id sesji>
+        // Trace pętli → .pkm-assistant/logs/trace.log. Label chat/<agent>#<8 znaków id sesji>
         // (id sesji z basename activeSessionPath; brak sesji → sam label agenta).
         // Ta sama ścieżka sesji, którą niesie `turn.origin` — liczona raz, wyżej.
         const _sessionId = turnSessionPath ? (turnSessionPath.split('/').pop() || '').replace(/\.md$/, '') : '';
@@ -542,18 +539,17 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
                 executeToolCall: (toolCall) => this._chatExecuteToolCall(turn, toolCall),
                 trace,
                 limits: {
-                    // E2.1 krok B: maxIterations liczone RAZ na turę (dawniej per kontynuację).
+                    // maxIterations liczone RAZ na turę, nie per kontynuację.
                     maxIterations: getLimits(this.env?.settings).chat_max_iterations,
                     maxToolResultLength: getLimits(this.env?.settings).max_tool_result_length,
-                    // Runda 2 (2026-08-17): wynik suba = deliverable, nie zrzut narzędzia.
-                    // Wspólny sufit 15k ucinał deep-research suba w połowie (żywy smoke).
+                    // Wynik suba = deliverable, nie zrzut narzędzia. Wspólny sufit 15k ucinałby
+                    // deep-research suba w połowie.
                     maxToolResultLengthPerTool: {
                         delegate: getLimits(this.env?.settings).subagent_result_max_chars,
                         agent_delegate: getLimits(this.env?.settings).subagent_result_max_chars,
                     },
-                    // Friendly fire 2026-08-15: pas ostateczny per wywołanie modelu (dawniej:
-                    // „czat historycznie nie miał"). Watchdog ciszy łapie brak chunków, ale NIE
-                    // łapie promisy ubitej z zewnątrz (xhr.abort nie emituje zdarzenia — await
+                    // Pas ostateczny per wywołanie modelu. Watchdog ciszy łapie brak chunków, ale
+                    // NIE łapie promisy ubitej z zewnątrz (xhr.abort nie emituje zdarzenia — await
                     // wisiałby wiecznie). Kolejka bramki mostu się nie liczy (gate_admitted).
                     perCallTimeoutMs: getLimits(this.env?.settings).chat_model_call_timeout_ms,
                 },
@@ -569,15 +565,16 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
                     onUsage: (usage) => this._chatOnUsage(turn, usage),
                     onBackstop: () => this._chatOnBackstop(turn),
                 },
-                // K5: chunki przerwanej tury nie malują już nic — bramka stoi PRZED `handle_chunk`,
-                // bo wpis `_streamCtxMap` znika przy Stopie (a to on niesie uchwyt dla widoku).
+                // Chunki przerwanej tury nie mogą nic namalować — bramka stoi PRZED
+                // `handle_chunk`, bo wpis `_streamCtxMap` znika przy Stopie (a to on niesie
+                // uchwyt dla widoku).
                 callbacks: { chunk: (resp) => { if (turnAbort.isAborted()) return; turn.watchdog.feed(); this.handle_chunk(resp, streamAgentName); } },
-                // Runda 2 (2026-08-17): watchdog ciszy zbroi się dopiero, gdy request WEJDZIE
-                // na slot bramki mostu. Czekanie w kolejce za długą syntezą suba (smoke: 5:39)
-                // nie jest ciszą modelu — zbrojenie w onIterationStart ubijało turę usera po
-                // 120 s stania w kolejce (incydent 09:15Z). Chmura emituje gate_admitted
-                // natychmiast (kontrakt ChatModel), więc tam nic się nie zmienia;
-                // pas ostateczny na „sygnał nigdy nie przyszedł" to perCallTimeoutMs wyżej.
+                // Watchdog ciszy MUSI zbroić się dopiero, gdy request WEJDZIE na slot bramki
+                // mostu, nie w onIterationStart: czekanie w kolejce za długą syntezą suba nie
+                // jest ciszą modelu, a zbrojenie wcześniej ubijałoby turę usera po długim
+                // staniu w kolejce. Chmura emituje gate_admitted natychmiast (kontrakt
+                // ChatModel), więc tam nic się nie zmienia; pas ostateczny na „sygnał nigdy nie
+                // przyszedł" to perCallTimeoutMs wyżej.
                 onGateAdmitted: () => turn.watchdog?.arm(),
                 shouldAbort: () => turnAbort.isAborted(),
             });
@@ -600,10 +597,10 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
             this._releaseStreamCtx(streamAgentName, turnId);
             log.info('Chat', `[${streamAgentName}] stream aborted (mid-request)`);
         } else {
-            // K20b: log tury też przez maskę — Logger pisze do pliku w vaultcie.
+            // Log tury też przez maskę — Logger pisze do pliku w vaultcie.
             log.error('Chat', `[${streamAgentName}] send_message ERROR:`, safeErrorText(error));
-            // F04: `ownerTabKey` (string, zamrożony przy starcie tury) — nie obiekt `owner.tab`,
-            // żeby `handle_error` nie musiał go sam przeliczać leniwie (patrz sygnatura niżej).
+            // `ownerTabKey` (string, zamrożony przy starcie tury) — nie obiekt `owner.tab`, żeby
+            // `handle_error` nie musiał go sam przeliczać leniwie (patrz sygnatura niżej).
             this.handle_error(error, streamAgentName, turnId, ownerTabKey);
         }
     }
@@ -613,7 +610,7 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
 export function handle_chunk(this: ChatViewMixinContext, response: ChatViewMixinContext, agentName: string) {
     // Look up per-agent streaming context from Map
     const ctx = agentName ? this._streamCtxMap.get(agentName) : null;
-    // K5: chunk przerwanej tury nie ma prawa nic namalować. Główną bramką jest domknięcie
+    // Chunk przerwanej tury nie ma prawa nic namalować. Główną bramką jest domknięcie
     // `callbacks.chunk` w `send_message` (ono ma uchwyt tury nawet po skasowaniu wpisu);
     // to jest pas zapasowy dla dowolnego innego wołacza.
     if (ctx?.abort?.isAborted()) return;
@@ -623,8 +620,8 @@ export function handle_chunk(this: ChatViewMixinContext, response: ChatViewMixin
 
     this.hideTypingIndicator();
     if (!this.current_message_container) {
-        // AUD-code-review-017: budowa kontenera wiadomości agenta to bajt-w-bajt to samo ciało co
-        // `_ensureAgentMessageContainer` (poniżej) — jedyna różnica była w SKĄD bierze się agent
+        // Budowa kontenera wiadomości agenta MUSI iść przez `_ensureAgentMessageContainer`
+        // (poniżej), nie mieć własnej kopii ciała — jedyna różnica jest w SKĄD bierze się agent
         // (tu: kontekst streamu, tam: parametr wołacza). Kontener bez tekstu poprzedzającego
         // (tool calls bez czatu) idzie tą samą drogą przez `_ensureAgentMessageContainer`.
         // Use captured agent, not getActiveAgent()
@@ -637,17 +634,17 @@ export function handle_chunk(this: ChatViewMixinContext, response: ChatViewMixin
     const reasoningContent = response?.choices?.[0]?.message?.reasoning_content || '';
     const showThinking = this.env?.settings?.pkmAssistant?.showThinking ?? true;
 
-    // AUD-wydajnosc-071/015/070: NIE malujemy per chunk. `response` niesie treść ZAKUMULOWANĄ
-    // (adapter dokłada deltę do `message.content`), więc malowanie na każdą ramkę SSE dawało
-    // koszt kwadratowy względem długości odpowiedzi, a chunki z samą deltą `tool_calls`
-    // przemalowywały bajt-w-bajt to samo. Zgłaszamy klatkę do throttle'a (`renderThrottle.ts`):
-    // maluje najwyżej raz na okno, zawsze OSTATNIĄ treścią, a klatkę identyczną pomija.
+    // NIE malujemy per chunk. `response` niesie treść ZAKUMULOWANĄ (adapter dokłada deltę do
+    // `message.content`), więc malowanie na każdą ramkę SSE dawałoby koszt kwadratowy względem
+    // długości odpowiedzi, a chunki z samą deltą `tool_calls` przemalowywałyby bajt-w-bajt to
+    // samo. Zgłaszamy klatkę do throttle'a (`renderThrottle.ts`): maluje najwyżej raz na okno,
+    // zawsze OSTATNIĄ treścią, a klatkę identyczną pomija.
     this._streamRenderThrottle().request({
         text: content,
         reasoning: showThinking ? reasoningContent : '',
-        // Review opusa (P1): klatka wozi WŁAŚCICIELA. Timer uzbrojony ≤80 ms przed przełączeniem
-        // zakładki wystrzeliwuje już na cudzej — bez tego znacznika malowanie nie miało jak
-        // poznać, że jego zakładka zeszła z wierzchu.
+        // Klatka wozi WŁAŚCICIELA. Timer uzbrojony ≤80 ms przed przełączeniem zakładki
+        // wystrzeliwałby już na cudzej bez tego znacznika — malowanie nie miałoby jak poznać,
+        // że jego zakładka zeszła z wierzchu.
         owner: agentName || '',
     });
 }
@@ -676,9 +673,9 @@ export function _streamRenderThrottle(this: ChatViewMixinContext): RenderThrottl
  */
 export function _paintStreamFrame(this: ChatViewMixinContext, frame: StreamFrame) {
     if (!this.current_message_container || !this.current_message_text) return;
-    // Review opusa (P1): sama niepustość wskaźników NIE wystarcza — po `_switchTab` celują one
-    // w węzły WYPIĘTE z DOM-u starej zakładki (tekst poszedłby w nicość), ale skutek uboczny
-    // malowania — `scrollToBottom` — przewinąłby NOWĄ zakładkę i skasował przywrócony `scrollTop`.
+    // Sama niepustość wskaźników NIE wystarcza — po `_switchTab` celują one w węzły WYPIĘTE
+    // z DOM-u starej zakładki (tekst poszedłby w nicość), ale skutek uboczny malowania —
+    // `scrollToBottom` — przewinąłby NOWĄ zakładkę i skasował przywrócony `scrollTop`.
     const activeTabAgent = this.chatTabs?.find((tab: ChatViewMixinContext) => tab.isActive)?.agentName;
     if (!shouldPaintFrame(frame, activeTabAgent)) return;
 
@@ -698,12 +695,10 @@ export function _paintStreamFrame(this: ChatViewMixinContext, frame: StreamFrame
     }
 
     // Update text (render as markdown)
-    // ✅ release 2.2.0/W2 (@typescript-eslint/no-deprecated): `renderMarkdown` → `render`.
-    // Dawny TODO v2.1 zakładał, że przejście na `.render()` WPROWADZA asynchroniczność, której
-    // dotąd nie było — nieprawda: `renderMarkdown` też zwraca `Promise<void>` (obsidian.d.ts) i był
-    // wołany BEZ await, dokładnie jak tu. `.render()` przyjmuje dodatkowo `app` (pierwszy argument);
-    // reszta sygnatury i wywołanie fire-and-forget bez zmian — zero nowego ryzyka out-of-order
-    // ponad to, co już istniało.
+    // `MarkdownRenderer.render` (nie `renderMarkdown`, deprecated). Wołane fire-and-forget bez
+    // await, tak samo jak `renderMarkdown` (obie zwracają `Promise<void>`, obsidian.d.ts) —
+    // `.render()` przyjmuje dodatkowo `app` jako pierwszy argument, reszta sygnatury bez zmian,
+    // więc to nie wprowadza żadnego nowego ryzyka out-of-order.
     this.current_message_text.empty();
     void MarkdownRenderer.render(
         this.app,
@@ -714,9 +709,9 @@ export function _paintStreamFrame(this: ChatViewMixinContext, frame: StreamFrame
     );
     this._lastPaintedContent = frame.text;
 
-    // Scroll to bottom. AUD-wydajnosc-072/014: BEZ przerysowania łączników — rosnący tekst
-    // ostatniej wiadomości nie przesuwa ani kryształu, ani wierszy akcji, a przerysowanie
-    // ciągnęło skan całej listy wiadomości z przeplotem odczytów layoutu.
+    // Scroll to bottom, BEZ przerysowania łączników — rosnący tekst ostatniej wiadomości nie
+    // przesuwa ani kryształu, ani wierszy akcji, a przerysowanie ciągnęłoby skan całej listy
+    // wiadomości z przeplotem odczytów layoutu.
     this.scrollToBottom(true, { drawConnectors: false });
 }
 
@@ -732,7 +727,7 @@ export function _isTurnActiveTab(this: ChatViewMixinContext, turn: ChatViewMixin
 }
 
 /**
- * AUD-bledy-016: JEDNO miejsce prawdy o wskaźnikach malowania.
+ * JEDNO miejsce prawdy o wskaźnikach malowania.
  *
  * `handle_chunk` maluje do ISTNIEJĄCEGO `current_message_container`, więc każde wyjście z tury
  * musi je wyzerować — inaczej następna odpowiedź trafia do dymka poprzedniej wiadomości (albo,
@@ -747,15 +742,15 @@ export function _resetPaintTargets(this: ChatViewMixinContext) {
     this.current_message_bubble = null;
     this.current_message_text = null;
     this._lastPaintedContent = null;
-    // AUD-wydajnosc-071: throttle malowania trzyma WŁASNĄ pamięć ostatniej klatki i potrafi
-    // mieć uzbrojony timer. Zerujemy razem ze wskaźnikami — inaczej klatka poprzedniej tury
+    // Throttle malowania trzyma WŁASNĄ pamięć ostatniej klatki i potrafi mieć uzbrojony timer.
+    // Zerujemy razem ze wskaźnikami — inaczej klatka poprzedniej tury
     // wystrzeliłaby w nieistniejący już dymek. Ścieżki, które chcą ZACHOWAĆ ostatni fragment
     // (koniec tury, Stop, przerwa na wyniki narzędzi), wołają `flush()` PRZED tym helperem.
     this._renderThrottle?.reset();
 }
 
 /**
- * AUD-security-116: zwolnij wpis mapy tur TYLKO wtedy, gdy nadal należy do TEJ tury.
+ * Zwolnij wpis mapy tur TYLKO wtedy, gdy nadal należy do TEJ tury.
  *
  * `_streamCtxMap` jest kluczowana NAZWĄ agenta, a pod jedną nazwą potrafią żyć dwie tury
  * (zakładka dodana ponownie z pickera, wyścig z przygotowaniem promptu). Bezwarunkowy
@@ -776,7 +771,7 @@ export function _releaseStreamCtx(this: ChatViewMixinContext, agentName: string,
     this._streamCtxMap.delete(agentName);
 }
 
-/** Kto jest na wierzchu — właściciel slotu kolejki i punkt odniesienia dla drenu (AUD-bledy-015). */
+/** Kto jest na wierzchu — właściciel slotu kolejki i punkt odniesienia dla drenu. */
 export function _queueOwner(this: ChatViewMixinContext): QueueOwner {
     const tab = (this.chatTabs || []).find((t: ChatViewMixinContext) => t.isActive);
     return { agentName: tab?.agentName || '', tabKey: tab ? _tabKey(tab) : '' };
@@ -815,10 +810,10 @@ export function _ensureAgentMessageContainer(this: ChatViewMixinContext, streamA
 /**
  * Przelicza estymatę tokenów wejścia (kalibracja + fallback token trackingu) z okna tury.
  *
- * AUD-code-review-014: estymata żyje w OBIEKCIE TURY (`turn.lastInputTokens`/`lastInputChars`),
- * nie na widoku — dwie tury naraz w jednym `ChatView` (`needsFreshModel`, `_streamCtxMap` per
- * agent) dzieliły dotąd `this._lastInputTokens`, więc tura A czytała estymatę nadpisaną przez
- * turę B (`_chatOnUsage`, `_chatBeforeContinue`, `_finalizeTurn`), co psuło zarówno TokenTracker
+ * Estymata MUSI żyć w OBIEKCIE TURY (`turn.lastInputTokens`/`lastInputChars`), nie na widoku:
+ * dwie tury naraz w jednym `ChatView` (`needsFreshModel`, `_streamCtxMap` per agent) dzieliłyby
+ * `this._lastInputTokens`, więc tura A czytałaby estymatę nadpisaną przez turę B
+ * (`_chatOnUsage`, `_chatBeforeContinue`, `_finalizeTurn`), co psułoby zarówno TokenTracker
  * agenta A, jak i globalną kalibrację chars→token (`calibrate`, `core/utils/tokenCounter.ts`).
  */
 export function _captureInputEstimate(this: ChatViewMixinContext, turn: ChatViewMixinContext) {
@@ -834,8 +829,8 @@ export function _captureInputEstimate(this: ChatViewMixinContext, turn: ChatView
 
 /**
  * resolveTools — świeża whitelista narzędzi na start iteracji + aktualizacja rozbicia tokenów okna.
- * @param {boolean} _applyEnabledFilter - E2.8 C1: IGNOROWANY (dawna oś `enabled_tools` skasowana;
- *   jedyna oś to `disabled_tools` przez filterByAgent). Param zostaje w kontrakcie hooka pętli.
+ * @param {boolean} _applyEnabledFilter - IGNOROWANY: jedyna oś to `disabled_tools` przez
+ *   filterByAgent. Param zostaje w kontrakcie hooka pętli.
  */
 export function _chatResolveTools(this: ChatViewMixinContext, turn: ChatViewMixinContext, _applyEnabledFilter: boolean) {
     const agent = turn.agent;
@@ -844,10 +839,10 @@ export function _chatResolveTools(this: ChatViewMixinContext, turn: ChatViewMixi
     let mcpActiveTools: ChatViewMixinContext[] = [];
 
     if (agent && this.plugin?.toolRegistry) {
-        // E2.8 C1: JEDNA OŚ NARZĘDZIOWA. filterByAgent = wszystkie built-in − disabled_tools
-        // (+ user-serwery wg mcp_servers). Dawny master-gate `permissions.mcp` USUNIĘTY (pole nie
-        // istnieje), dawny filtr `enabled_tools` USUNIĘTY, dawny filtr memory-tools po permissions.memory
-        // USUNIĘTY (memory_save/delete rządzi disabled_tools; read scope=memory bramkuje sam tool fail-closed).
+        // JEDNA OŚ NARZĘDZIOWA. filterByAgent = wszystkie built-in − disabled_tools (+ user-serwery
+        // wg mcp_servers). Nie ma master-gate `permissions.mcp` (pole nie istnieje), nie ma filtra
+        // `enabled_tools`, nie ma filtra memory-tools po permissions.memory: memory_save/delete
+        // rządzi disabled_tools, read scope=memory bramkuje sam tool fail-closed.
         const mcpAllowed = this.plugin.toolRegistry.filterByAgent(agent);
         const mcpAllowedNames = new Set(mcpAllowed.map((t: ChatViewMixinContext) => t.name));
 
@@ -872,9 +867,9 @@ export function _chatResolveTools(this: ChatViewMixinContext, turn: ChatViewMixi
 
 /** onIterationStart — reset per-response stash + estymata wejścia (przed wywołaniem modelu). */
 export function _chatOnIterationStart(this: ChatViewMixinContext, turn: ChatViewMixinContext) {
-    // Runda 2 (2026-08-17): watchdog NIE zbroi się już tutaj — zbroi go `onGateAdmitted`
-    // pętli (wejście requestu na slot bramki). Zbrojenie przed kolejką liczyło czekanie
-    // za subem jako ciszę modelu i ubijało żywą turę usera (incydent 09:15Z).
+    // Watchdog NIE może zbroić się tutaj — zbroi go `onGateAdmitted` pętli (wejście requestu
+    // na slot bramki). Zbrojenie przed kolejką liczyłoby czekanie za subem jako ciszę modelu
+    // i ubijałoby żywą turę usera.
     turn.responseRecorded = false;
     turn.lastApiInput = 0;
     turn.lastApiOutput = 0;
@@ -885,7 +880,7 @@ export function _chatOnIterationStart(this: ChatViewMixinContext, turn: ChatView
 
 /** onBackstop — finalna iteracja bez narzędzi. Reset per-response stash (brak onIterationStart). */
 export function _chatOnBackstop(this: ChatViewMixinContext, turn: ChatViewMixinContext) {
-    // Runda 2: finalne wywołanie też pilnowane, ale zbrojenie robi `onGateAdmitted` (jak wyżej).
+    // Finalne wywołanie też pilnowane, ale zbrojenie robi `onGateAdmitted` (jak wyżej).
     turn.responseRecorded = false;
     turn.lastApiInput = 0;
     turn.lastApiOutput = 0;
@@ -899,8 +894,8 @@ export function _chatOnUsage(this: ChatViewMixinContext, turn: ChatViewMixinCont
     const apiInput = usage?.prompt_tokens || 0;
     const apiOutput = usage?.completion_tokens || 0;
 
-    // Kalibracja estymatora okna kontekstu (E1.7 P2): gdy API zwróciło realne prompt_tokens,
-    // ucz chars-per-token per platforma.
+    // Kalibracja estymatora okna kontekstu: gdy API zwróciło realne prompt_tokens, ucz
+    // chars-per-token per platforma.
     if (apiInput > 0 && turn.lastInputChars > 0) {
         calibrate(turn.platform, apiInput, turn.lastInputChars);
     }
@@ -958,9 +953,8 @@ export function _chatOnToolCallsParsed(this: ChatViewMixinContext, turn: ChatVie
         memory_summaries: t('chat.tool_status.memory_summaries'),
         memory_list_summaries: t('chat.tool_status.memory_summaries'),
         memory_read_summary: t('chat.tool_status.memory_read'),
-        // AUD-dead-code-054 (2026-09-02): `skill_list`/`skill_execute` skasowane — oba narzędzia
-        // nie istnieją (skill_execute skasowany w D17/E2.4, skill_list nigdy nie miał odpowiednika
-        // w modules/tools) i żaden alias nie mapuje na nie żywego narzędzia.
+        // Brak `skill_list`/`skill_execute` tutaj: oba narzędzia nie istnieją w modules/tools,
+        // i żaden alias nie mapuje na nie żywego narzędzia.
         delegate: t('chat.tool_status.delegate'),
         todo: t('chat.tool_status.todo'),
         generate_image: t('chat.tool_status.generate_image'),
@@ -1014,11 +1008,11 @@ export async function _chatExecuteToolCall(this: ChatViewMixinContext, turn: Cha
     let raw;
     let error = null;
     try {
-        // E2.3 (D21): read limiter 1x/turę (tryb gadaj) USUNIĘTY wraz z trybami pracy —
-        // narzędzia = uprawnienia agenta, nie tryb. Odczyt nie jest już racjonowany.
+        // Odczyt nie jest racjonowany limiterem per turę: narzędzia = uprawnienia agenta,
+        // nie tryb pracy.
         log.debug('Chat', `Wykonuję tool (parallel): ${toolCall.name}`, toolCall.arguments);
-        // F2: `origin` = adres zwrotny tury (policzony raz w send_message). MCPClient wstrzykuje
-        // go jako zaufany znacznik `_invocationOrigin`, a `delegate` przenosi do rejestru biegów —
+        // `origin` = adres zwrotny tury (policzony raz w send_message). MCPClient wstrzykuje go
+        // jako zaufany znacznik `_invocationOrigin`, a `delegate` przenosi do rejestru biegów —
         // dzięki temu wynik suba z tła wie, do której zakładki/sesji ma wrócić.
         raw = await this.plugin.mcpClient.executeToolCall(toolCall, turn.agentName, { autonomy: turn.autonomy, origin: turn.origin });
     } catch (err: ChatViewMixinContext) {
@@ -1032,8 +1026,8 @@ export async function _chatExecuteToolCall(this: ChatViewMixinContext, turn: Cha
     // generate_image + non-vision → JSON bez base64 (żeby nie wysadzić kontekstu);
     // reszta → JSON.stringify. Nie mutujemy `raw` (onToolResults renderuje z niego obraz).
     if (toolCall.name === 'generate_image' && raw?.base64) {
-        // AUD-code-review-073: model WŁAŚCICIELA tury, nie globalnie aktywnego agenta — user mógł
-        // przełączyć zakładkę, gdy ta tura generowała obraz w tle (K18, tura ma własny `turn.agent`).
+        // Model WŁAŚCICIELA tury, nie globalnie aktywnego agenta — user mógł przełączyć
+        // zakładkę, gdy ta tura generowała obraz w tle (tura ma własny `turn.agent`).
         if (this._isCurrentModelVision(turn.agent)) {
             const textPart = Object.assign({}, raw);
             delete textPart.base64;
@@ -1101,7 +1095,7 @@ export async function _chatOnToolResults(this: ChatViewMixinContext, turn: ChatV
                     }));
                 }
             } else if (isSubAgent && result?.started === true) {
-                // F2: delegacja W TLE. Nie ma wyniku do pokazania — jest pokwitowanie startu.
+                // Delegacja W TLE. Nie ma wyniku do pokazania — jest pokwitowanie startu.
                 // Bez tej gałęzi leciała gałąź „success" niżej i rysowała PUSTĄ ramkę
                 // (brak `result.result`, `tools_used`, `duration_ms`) z zielonym „gotowe".
                 const _bgArgs = parseToolCallArgs(toolCall);
@@ -1158,9 +1152,9 @@ export async function _chatOnToolResults(this: ChatViewMixinContext, turn: ChatV
                     name: toolCall.name,
                     input: toolCall.arguments,
                     output: result,
-                    // AUD-bledy-027/058/025: status z JEDNEJ reguły. Sam `result.isError` znał
-                    // wyłącznie konwencję artefaktów i MCPClienta, więc odmowa `write`/`kom_send`/
-                    // `memory_save` (`{success:false}`) dostawała zielony kryształ „zrobione".
+                    // Status z JEDNEJ reguły. Sam `result.isError` zna wyłącznie konwencję
+                    // artefaktów i MCPClienta, więc bez tej reguły odmowa `write`/`kom_send`/
+                    // `memory_save` (`{success:false}`) dostawałaby zielony kryształ „zrobione".
                     status: toolResultStatus(result),
                     error: result.error
                 }));
@@ -1192,7 +1186,7 @@ export async function _chatOnToolResults(this: ChatViewMixinContext, turn: ChatV
         }
 
         // --- Sub-agent token tracking (always, using captured tracker) ---
-        // F2: bieg w tle (`started`) NIE ma tu czego liczyć — zwrotka to pokwitowanie, więc
+        // Bieg w tle (`started`) NIE ma tu czego liczyć — zwrotka to pokwitowanie, więc
         // fallback estymaty policzyłby tokeny samego pokwitowania i wpisał je jako pracę suba
         // (śmieciowy słupek w Token Viewerze). Prawdziwe zużycie przyjdzie z wynikiem biegu.
         if (!error && isSubAgent && result?.success && result?.started !== true) {
@@ -1200,14 +1194,12 @@ export async function _chatOnToolResults(this: ChatViewMixinContext, turn: ChatV
             let subInput = result.usage?.prompt_tokens || 0;
             let subOutput = result.usage?.completion_tokens || 0;
             // Fallback: estymuj z task + toolCallDetails + wynik (gdy usage=null, np. error path).
-            // L07-6: oficjalny estymator getTokenCount zamiast ad-hoc znaki/4; wpis oznaczony estimated.
+            // Oficjalny estymator getTokenCount, nie ad-hoc znaki/4; wpis oznaczony estimated.
             let estimated = false;
             if (subInput === 0) {
                 const _saArgs2 = parseToolCallArgs(toolCall);
                 let estText = _saArgs2.task || '';
-                // AUD-dead-code-127 (2026-09-02): alias camelCase skasowany — `DelegateTool`
-                // zawsze zwraca `tool_call_details` (snake_case), lewa strona `||` była zawsze
-                // co najmniej pustą tablicą (truthy), więc prawa nigdy nie była osiągalna.
+                // `DelegateTool` zawsze zwraca `tool_call_details` w snake_case.
                 const tcd = result.tool_call_details;
                 if (tcd?.length) {
                     for (const td of tcd) {
@@ -1233,17 +1225,17 @@ export async function _chatOnToolResults(this: ChatViewMixinContext, turn: ChatV
                 const parsed = typeof result === 'object' ? result : JSON.parse(JSON.stringify(result));
                 if (parsed.delegation === true) this._pendingDelegation = parsed;
             } catch (e) {
-                // AUD-bledy-018: `_pendingDelegation` to JEDYNE wejście do `_renderDelegationButton`
-                // — po cichym `catch {}` guzik „przekaż rozmowę agentowi X" po prostu nie powstawał
-                // i nie było o tym śladu ani w UI, ani w logu. Tekst przez maskę: w wyniku narzędzia
-                // potrafi siedzieć cudza treść.
+                // `_pendingDelegation` to JEDYNE wejście do `_renderDelegationButton` — cichy
+                // `catch {}` tutaj sprawiałby, że guzik „przekaż rozmowę agentowi X" po prostu
+                // nie powstawałby, bez śladu ani w UI, ani w logu. Tekst przez maskę: w wyniku
+                // narzędzia potrafi siedzieć cudza treść.
                 log.warn('Chat', 'Nie udało się odczytać propozycji delegacji:', safeErrorText(e));
             }
         }
         // Track skill activation for todo/plan enforcement.
-        // D17 (E2.4): skill_execute skasowany — skill uruchamia się przez read przepisu
-        // (.pkm-assistant/skills/**). Wykrywamy udany read pod tą ścieżką jako aktywację skilla
-        // (marker @@skill: ustawia skillActiveAt=0 osobno, na starcie tury).
+        // Skill uruchamia się przez read przepisu (.pkm-assistant/skills/**), nie przez
+        // skill_execute (nie istnieje). Wykrywamy udany read pod tą ścieżką jako aktywację
+        // skilla (marker @@skill: ustawia skillActiveAt=0 osobno, na starcie tury).
         if (toolCall.name === 'read' && !error) {
             const readArgs = parseToolCallArgs(toolCall);
             const readPath = String(readArgs.path || '');
@@ -1252,7 +1244,7 @@ export async function _chatOnToolResults(this: ChatViewMixinContext, turn: ChatV
                 turn.skillArtifactCreated = false;
             }
         }
-        // Track todo/artifact creation after skill (E2.9 FAZA D: nowe nazwy — todo/artifact_*).
+        // Track todo/artifact creation after skill.
         if (['artifact_create', 'todo'].includes(toolCall.name)) {
             turn.skillArtifactCreated = true;
         }
@@ -1264,9 +1256,8 @@ export async function _chatOnToolResults(this: ChatViewMixinContext, turn: ChatV
             toolCallsContainer,
             isActiveTab
         });
-        // D6d: warunek na DZISIEJSZĄ nazwę (E2.6 przemianował vault_write → write) — do tej pory
-        // gałąź nie odpalała się dla `write`, więc przeładowanie skilli po zapisie przepisu
-        // i link do zapisanego pliku były martwe.
+        // Warunek MUSI objąć DZISIEJSZĄ nazwę `write` (nie tylko `vault_write`) — inaczej
+        // przeładowanie skilli po zapisie przepisu i link do zapisanego pliku byłyby martwe.
         // ⚠️ `toolCall.name` to nazwa, którą wypisał MODEL: alias vault_write→write remapuje
         // LOKALNIE w `MCPClient.executeToolCall` (`toolCall = {...toolCall, name}` — rebind, nie
         // mutacja), a `results[].toolCall` z pętli niesie oryginał. Stara nazwa nadal tu dociera,
@@ -1279,15 +1270,12 @@ export async function _chatOnToolResults(this: ChatViewMixinContext, turn: ChatV
                 await this.plugin?.agentManager?.reloadSkills();
                 if (isActiveTab) this.renderSkillButtons();
             }
-            // D6d: dwie martwe gałęzie wycięte razem z ożywieniem tej:
-            //  - `/minions/` → `agentManager.reloadMinions()` — TAKIEJ METODY NIE MA w repo
-            //    (`?.` stoi na agentManager, nie na metodzie), więc po ożywieniu rzucałaby
-            //    TypeError w środku _chatOnToolResults. „Minions" to nazwa sprzed E2.4;
-            //    sub-agenci mieszkają w `.pkm-assistant/sub-agents/` i nie mają hot-reloadu.
-            //  - `playbook.md`/`vault_map.md` → `this._playbookDirty = true` — flaga write-only,
-            //    zero czytelników w repo (Playbook Builder skasowany w E2.8 A4).
-            // AUD-bledy-027: link wisi na POWODZENIU zapisu, nie na braku jednej flagi —
-            // `writePath` pochodzi z argumentów wywołania, czyli z tego, co model CHCIAŁ zapisać.
+            // NIE dodawaj analogicznych gałęzi dla `/minions/` czy `playbook.md`/`vault_map.md`:
+            //  - `agentManager.reloadMinions()` NIE ISTNIEJE w repo — rzucałaby TypeError.
+            //    Sub-agenci mieszkają w `.pkm-assistant/sub-agents/` i nie mają hot-reloadu.
+            //  - `this._playbookDirty = true` byłaby flagą write-only — zero czytelników w repo.
+            // Link wisi na POWODZENIU zapisu, nie na braku jednej flagi — `writePath` pochodzi
+            // z argumentów wywołania, czyli z tego, co model CHCIAŁ zapisać.
             if (isActiveTab && shouldLinkWrittenFile(result, writePath) && toolCallsContainer) {
                 const linkDiv = createDiv();
                 linkDiv.addClass('cs-vault-link');
@@ -1302,8 +1290,6 @@ export async function _chatOnToolResults(this: ChatViewMixinContext, turn: ChatV
                 toolCallsContainer.appendChild(linkDiv);
             }
         }
-
-        // S28 (D1): auto-ping po `kom_create_project` skasowany razem z Project Hubem.
     }
 }
 
@@ -1380,9 +1366,6 @@ export async function _chatBeforeContinue(this: ChatViewMixinContext, turn: Chat
         const nudgeMsg = nudgeLevel === 'strong'
             ? t('chat.streaming.delegation_nudge_strong', { count: iterCount })
             : t('chat.streaming.delegation_nudge_soft', { count: iterCount });
-        // AUD-dead-code-156 (2026-09-02): znacznik `_systemNudge: true` skasowany — nikt w
-        // repo go nie czytał (dopisywany do KAŻDEJ wiadomości-szturchańca, bez odsiewu w
-        // render_messages/getMessagesForAPI).
         await rw.addMessage('user', nudgeMsg);
         log.info('Chat', `Delegation nudge (${nudgeLevel}) po ${iterCount} iteracjach`);
     }
@@ -1402,12 +1385,12 @@ export async function _chatBeforeContinue(this: ChatViewMixinContext, turn: Chat
         log.info('Chat', `Token Economy: mid-loop compression (${compressionNeeded}) po iteracji ${iterCount}`);
         if (isActiveTab) this.showTypingIndicator(t('chat.streaming.compressing_context'));
         if (compressionNeeded === 'summarize') {
-            // AUD-code-review-052: sama ścieżka co end-of-turn (_finalizeTurn) — bez tego pierwsze
-            // przekroczenie progu 90% wypadające W ŚRODKU pętli (przed jakąkolwiek kompresją
-            // end-of-turn w tym oknie) leciało z `rw.sessionPath === ''`, a Summarizer.getSummaryPrompt
-            // gubił podpowiedź „📂 Pełna rozmowa zapisana w: …". Zdarzenia tury są już dopisane na
-            // bieżąco przez `appendToActiveSession`, więc `activeSessionPath` jest tu żywy bez
-            // dodatkowego zapisu.
+            // Sama ścieżka co end-of-turn (_finalizeTurn) — bez tego pierwsze przekroczenie
+            // progu 90% wypadające W ŚRODKU pętli (przed jakąkolwiek kompresją end-of-turn
+            // w tym oknie) leciałoby z `rw.sessionPath === ''`, a Summarizer.getSummaryPrompt
+            // gubiłby podpowiedź „📂 Pełna rozmowa zapisana w: …". Zdarzenia tury są już dopisane
+            // na bieżąco przez `appendToActiveSession`, więc `activeSessionPath` jest tu żywy
+            // bez dodatkowego zapisu.
             rw.sessionPath = this.plugin?.agentManager?.getAgentMemory?.(turn.agentName)?.activeSessionPath || rw.sessionPath || '';
         }
         await rw.performTwoPhaseCompression(false);
@@ -1415,8 +1398,8 @@ export async function _chatBeforeContinue(this: ChatViewMixinContext, turn: Chat
 
     // Reset current container before continuing
     if (isActiveTab) {
-        // AUD-wydajnosc-071: ostatnia zebrana klatka MUSI trafić na ekran, zanim zerujemy
-        // wskaźniki malowania — inaczej ogon tekstu sprzed wywołania narzędzia by zniknął.
+        // Ostatnia zebrana klatka MUSI trafić na ekran, zanim zerujemy wskaźniki malowania —
+        // inaczej ogon tekstu sprzed wywołania narzędzia by zniknął.
         this._renderThrottle?.flush();
         if (this.current_message_bubble) {
             this.current_message_bubble.classList.remove('streaming');
@@ -1438,12 +1421,11 @@ export async function _chatBeforeContinue(this: ChatViewMixinContext, turn: Chat
         this._queuedMessage = null;
         log.info('Chat', `Injecting queued message into context (${queued.meta.origin}): "${injectedText.slice(0, 60)}..."`);
 
-        // K7 (AUD-security-003, druga strona wady): ta ścieżka omija `append_message`, więc do
-        // K7 tekst WPISANY przez usera nie zasilał rejestru adresów — `web_read` odrzucał link,
-        // który user sam wkleił.
-        // K19 (AUD-security-117/131): proweniencja NIE jest tu jednoznaczna — do kolejki wpada
-        // też tekst maszynowy (guzik artefaktu i spółka wypełniają pole wpisywania z kodu).
-        // Oddajemy ZAPAMIĘTANĄ pieczątkę; twarde `human` w tym miejscu cofało K7.
+        // Ta ścieżka omija `append_message`, więc rejestr adresów musi być zasilony tu osobno —
+        // inaczej `web_read` odrzucałby link, który user sam wkleił i wpisał do pola.
+        // Proweniencja NIE jest tu jednoznaczna — do kolejki wpada też tekst maszynowy (guzik
+        // artefaktu i spółka wypełniają pole wpisywania z kodu). Oddajemy ZAPAMIĘTANĄ pieczątkę;
+        // twarde `human` w tym miejscu nadawałoby przywileje człowieka tekstowi maszyny.
         registerUrlsIfHuman(queued.text, queued.meta, registerUrlsFromText);
         await rw.addMessage('user', injectedText, {
             timestamp: new Date().toLocaleTimeString(getDateLocale(), { hour: '2-digit', minute: '2-digit' }),
@@ -1483,7 +1465,7 @@ export async function _finalizeTurn(this: ChatViewMixinContext, turn: ChatViewMi
     const content = result.finalText || '';
 
     if (isActiveTab) this.hideTypingIndicator();
-    // AUD-wydajnosc-071: domalowanie ostatniej zebranej klatki PRZED porównaniem finalnej treści
+    // Domalowanie ostatniej zebranej klatki MUSI stać PRZED porównaniem finalnej treści
     // z `_lastPaintedContent` niżej. Bez tego throttle zostawałby z niepomalowanym ogonem, a
     // porównanie widziałoby treść starszą niż to, co user faktycznie ma na ekranie.
     if (isActiveTab) this._renderThrottle?.flush();
@@ -1532,9 +1514,8 @@ export async function _finalizeTurn(this: ChatViewMixinContext, turn: ChatViewMi
         // _ensureAgentMessageContainer NIE jest idempotentny (zawsze tworzy nowy node) — tylko gdy brak.
         if (!this.current_message_container) this._ensureAgentMessageContainer(streamAgent);
         this.current_message_text.empty();
-        // release 2.2.0/W2 (@typescript-eslint/no-deprecated): renderMarkdown → render, patrz
-        // komentarz przy analogicznym wywołaniu w _paintStreamFrame wyżej — sama sygnatura zyskuje
-        // `app`, fire-and-forget bez zmian (renderMarkdown też był Promise<void> bez await).
+        // `MarkdownRenderer.render` (nie `renderMarkdown`, deprecated) — patrz komentarz przy
+        // analogicznym wywołaniu w _paintStreamFrame wyżej.
         void MarkdownRenderer.render(this.app, content, this.current_message_text, '', this);
         this._lastPaintedContent = content;
     }
@@ -1564,20 +1545,20 @@ export async function _finalizeTurn(this: ChatViewMixinContext, turn: ChatViewMi
         this._resetPaintTargets();
         this.set_generating(false);
         this.scrollToFinalMessage();
-        // AUD-wydajnosc-072/014: malowanie strumienia świadomie NIE rysowało łączników — tu,
-        // po dołożeniu wiersza meta i akcji, przerysowujemy je raz, na koniec tury.
+        // Malowanie strumienia świadomie NIE rysuje łączników — tu, po dołożeniu wiersza meta
+        // i akcji, przerysowujemy je raz, na koniec tury.
         this._scheduleConnectorRedraw();
     } else {
         // Background tab finished — mark as not generating in saved state.
-        // AUD-code-review-012: `_agentStates` jest kluczowana `_tabKey(tab)` (patrz `_switchTab`
-        // / `_restoreActiveSession`), NIE nazwą agenta — po restarcie z sesji na dysku klucz
-        // zakładki to ścieżka sesji, więc `.get(streamAgentName)` chybiał i flaga `isGenerating`
-        // zostawała `true` na zawsze (zakładka wisiała na „generuję").
-        // F04: klucz z `turn.origin.tabKey` — ZAMROŻONY na starcie tury (`ownerTabKey` w
-        // `send_message`), NIE `_tabKey(turn.owner?.tab)` przeliczony TU, godziny później.
+        // `_agentStates` jest kluczowana `_tabKey(tab)` (patrz `_switchTab` / `_restoreActiveSession`),
+        // NIE nazwą agenta — po restarcie z sesji na dysku klucz zakładki to ścieżka sesji, więc
+        // `.get(streamAgentName)` chybiałby i flaga `isGenerating` zostawałaby `true` na zawsze
+        // (zakładka wisiałaby na „generuję").
+        // Klucz MUSI być z `turn.origin.tabKey` — ZAMROŻONY na starcie tury (`ownerTabKey` w
+        // `send_message`), nie `_tabKey(turn.owner?.tab)` przeliczony TU, godziny później:
         // `/save session` → „Archiwizuj i nowa sesja" podmienia `tab.sessionPath` NA MIEJSCU
-        // bez re-keyowania `_agentStates` — przeliczony klucz czyta już nową wartość i chybia
-        // wpis zapisany pod starą.
+        // bez re-keyowania `_agentStates` — przeliczony klucz czytałby już nową wartość i
+        // chybiałby wpis zapisany pod starą.
         const savedState = this._agentStates.get(turn.origin?.tabKey ?? '');
         if (savedState) savedState.isGenerating = false;
         const tab = this.chatTabs.find((t: ChatViewMixinContext) => t.agentName === streamAgentName);
@@ -1585,8 +1566,8 @@ export async function _finalizeTurn(this: ChatViewMixinContext, turn: ChatViewMi
     }
 
     // Clear streaming context for this agent — this stream is complete.
-    // AUD-security-116: warunkowo, po `turnId` — pod tą samą nazwą agenta może już żyć NOWSZA
-    // tura, a skasowanie jej wpisu odebrałoby Stopowi uchwyt przerwania.
+    // Warunkowo, po `turnId` — pod tą samą nazwą agenta może już żyć NOWSZA tura, a skasowanie
+    // jej wpisu odebrałoby Stopowi uchwyt przerwania.
     this._releaseStreamCtx(streamAgentName, turn.turnId);
 
     // DWUFAZOWA KOMPRESJA PO zakończeniu taska (jak Claude Code):
@@ -1597,9 +1578,9 @@ export async function _finalizeTurn(this: ChatViewMixinContext, turn: ChatViewMi
         log.info('Chat', `Kompresja (${compressionNeeded}) — kontekst: ${rw.getCurrentTokenCount()} / ${rw.maxTokens} tokenów`);
 
         if (compressionNeeded === 'summarize') {
-            // K4 (AUD-security-064/065): kompresja końca tury leci TAKŻE dla zakładki w tle,
-            // więc i zapis transkryptu, i ścieżka sesji w prompcie kompresji muszą celować
-            // w agenta TEJ tury, a nie w tego, który akurat jest globalnie aktywny.
+            // Kompresja końca tury leci TAKŻE dla zakładki w tle, więc i zapis transkryptu,
+            // i ścieżka sesji w prompcie kompresji muszą celować w agenta TEJ tury, a nie
+            // w tego, który akurat jest globalnie aktywny.
             await this.handleSaveSession(turn.agentName, rw);
             const sessionPath = this.plugin?.agentManager?.getAgentMemory?.(turn.agentName)?.activeSessionPath || '';
             rw.sessionPath = sessionPath;
@@ -1626,10 +1607,10 @@ export async function _finalizeTurn(this: ChatViewMixinContext, turn: ChatViewMi
 
 export function handle_error(this: ChatViewMixinContext, error: ChatViewMixinContext, agentName: string, turnId?: number, ownerTabKey?: string) {
     this.hideTypingIndicator();
-    // K20b (AUD-security-132, ZLEW): tekst błędu idzie do DOM-u czatu i do loga (który pisze
-    // też do pliku). Na sieciowym padzie strumienia `error.message` bywa zrzutem całego
-    // zdarzenia streamera razem z `source.headers.Authorization` — czyli SUROWYM kluczem API.
-    // Źródło domyka osobna naprawa; tu stoi obrona w głąb: normalizacja → maska → sufit.
+    // Tekst błędu idzie do DOM-u czatu i do loga (który pisze też do pliku). Na sieciowym
+    // padzie strumienia `error.message` bywa zrzutem całego zdarzenia streamera razem z
+    // `source.headers.Authorization` — czyli SUROWYM kluczem API. Obrona w głąb: normalizacja
+    // → maska → sufit, niezależnie od tego, co robi źródło zdarzenia.
     const safeText = safeErrorText(error) || 'Unknown error occurred';
     log.error('Chat', 'Chat error:', safeErrorText(error));
 
@@ -1654,15 +1635,15 @@ export function handle_error(this: ChatViewMixinContext, error: ChatViewMixinCon
             const textDiv = error_msg.createDiv({ cls: 'cs-message__text' });
             textDiv.createEl('p', { text: t('chat.streaming.error_prefix', { message: safeText }), cls: 'pkm-chat-error' });
         }
-        // AUD-bledy-016: ścieżka błędu zeruje wskaźniki malowania DOKŁADNIE tak, jak ścieżka
-        // sukcesu (`_finalizeTurn`) i Stop. Bez tego `handle_chunk` następnej tury widział
-        // niepusty `current_message_container` i malował odpowiedź do dymka poprzedniej
-        // wiadomości — fizycznie NAD nowym pytaniem, bez nagłówka agenta; a po przerysowaniu
-        // listy (przełączenie zakładki) do węzła wypiętego z drzewa, czyli w nicość.
-        // Review opusa (bonus): ścieżka błędu zerowała wskaźniki malowania, ale NIE
-        // `_currentThinkingBlock` — blok myśli następnej tury wpadał wtedy do dymka poprzedniej
-        // wiadomości (`insertBefore` w `_paintStreamFrame` celuje w stary kontener). Zerujemy
-        // tak samo jak `_finalizeTurn`, `_chatBeforeContinue` i `stop_generation`.
+        // Ścieżka błędu MUSI zerować wskaźniki malowania DOKŁADNIE tak, jak ścieżka sukcesu
+        // (`_finalizeTurn`) i Stop. Bez tego `handle_chunk` następnej tury widziałby niepusty
+        // `current_message_container` i malowałby odpowiedź do dymka poprzedniej wiadomości —
+        // fizycznie NAD nowym pytaniem, bez nagłówka agenta; a po przerysowaniu listy
+        // (przełączenie zakładki) do węzła wypiętego z drzewa, czyli w nicość.
+        // To obejmuje też `_currentThinkingBlock`, nie tylko wskaźniki malowania tekstu —
+        // inaczej blok myśli następnej tury wpadałby do dymka poprzedniej wiadomości
+        // (`insertBefore` w `_paintStreamFrame` celuje w stary kontener). Zerujemy tak samo
+        // jak `_finalizeTurn`, `_chatBeforeContinue` i `stop_generation`.
         if (this._currentThinkingBlock) {
             this._currentThinkingBlock.classList.remove('streaming');
             this._currentThinkingBlock = null;
@@ -1671,12 +1652,12 @@ export function handle_error(this: ChatViewMixinContext, error: ChatViewMixinCon
         this.set_generating(false);
     } else {
         // Background tab errored — mark as not generating in saved state.
-        // AUD-code-review-012: klucz `_agentStates` to `_tabKey(tab)`, nie nazwa agenta —
-        // `ownerTabKey` przychodzi od wołacza (`ownerTabKey` policzony RAZ na starcie
-        // `send_message`, patrz jej catch), bo `handle_error` sam nie ma dostępu do
-        // zamrożonego właściciela tury. F04: STRING zamrożony na starcie tury, nie obiekt
-        // `tab` przeliczany tu leniwie (ten sam powód co w `_finalizeTurn` — `archive_new`
-        // podmienia `tab.sessionPath` bez re-keyowania `_agentStates`).
+        // Klucz `_agentStates` to `_tabKey(tab)`, nie nazwa agenta — `ownerTabKey` przychodzi
+        // od wołacza (`ownerTabKey` policzony RAZ na starcie `send_message`, patrz jej catch),
+        // bo `handle_error` sam nie ma dostępu do zamrożonego właściciela tury. Musi być STRING
+        // zamrożony na starcie tury, nie obiekt `tab` przeliczany tu leniwie (ten sam powód co
+        // w `_finalizeTurn` — `archive_new` podmienia `tab.sessionPath` bez re-keyowania
+        // `_agentStates`).
         const savedState = this._agentStates.get(ownerTabKey ?? '');
         if (savedState) savedState.isGenerating = false;
         const tab = this.chatTabs.find((t: ChatViewMixinContext) => t.agentName === streamAgentName);
@@ -1686,7 +1667,7 @@ export function handle_error(this: ChatViewMixinContext, error: ChatViewMixinCon
     // Resolve hanging ask_user promise to unblock tool execution
     this._cleanupAskUser();
 
-    // Always clear streaming context on error — ale wyłącznie wpis TEJ tury (AUD-security-116).
+    // Always clear streaming context on error — ale wyłącznie wpis TEJ tury.
     if (agentName) this._releaseStreamCtx(agentName, turnId);
 }
 
@@ -1703,16 +1684,16 @@ export function handle_error(this: ChatViewMixinContext, error: ChatViewMixinCon
 export function _onStreamStall(this: ChatViewMixinContext, turn: ChatViewMixinContext, silentMs: number) {
     const agentName = turn.agentName;
     // Tura już zatrzymana (ręczny Stop) albo zakończona/wyczyszczona — watchdog milczy.
-    // K5: pytamy o stan TEJ tury, nie o pole widoku (które po Stopie innej tury kłamało).
+    // Pytamy o stan TEJ tury, nie o pole widoku (które po Stopie innej tury kłamałoby).
     if (turn.abort?.isAborted()) return;
     if (!this._streamCtxMap.has(agentName)) return;
 
-    // Friendly fire 2026-08-15: mapa kontekstów jest kluczowana NAZWĄ agenta, więc watchdog
-    // PORZUCONEJ tury (user wystartował nową sesję, stara wisiała w tle) widział wpis żywej
-    // tury tego samego agenta i strzelał do niej: stop_generation ubijał świeży request
-    // wspólnej instancji modelu i rozbrajał CUDZY watchdog — żywa tura zostawała bez
-    // strażnika, z promisą, która nigdy się nie rozstrzygnie (incydent 2026-08-15 17:13).
-    // Przeterminowany watchdog sprząta wyłącznie po sobie i NIE dotyka żywej tury.
+    // Mapa kontekstów jest kluczowana NAZWĄ agenta, więc watchdog PORZUCONEJ tury (user
+    // wystartował nową sesję, stara wisiała w tle) widziałby wpis żywej tury tego samego
+    // agenta i strzelałby do niej: stop_generation ubijałby świeży request wspólnej instancji
+    // modelu i rozbrajał CUDZY watchdog — żywa tura zostawałaby bez strażnika, z promisą,
+    // która nigdy się nie rozstrzygnie. Przeterminowany watchdog musi sprzątać wyłącznie po
+    // sobie i NIE dotykać żywej tury.
     const liveCtx = this._streamCtxMap.get(agentName);
     if (typeof turn.turnId === 'number' && typeof liveCtx?.turnId === 'number' && liveCtx.turnId !== turn.turnId) {
         log.warn('Chat', `[${agentName}] Watchdog porzuconej tury #${turn.turnId} (żywa: #${liveCtx.turnId}) — sprzątam bez strzelania`);
@@ -1736,11 +1717,11 @@ export function _onStreamStall(this: ChatViewMixinContext, turn: ChatViewMixinCo
         const bgModel = this._streamCtxMap.get(agentName)?.chatModel || this.env.chatModel;
         bgModel?.stopStream?.();
         this._releaseStreamCtx(agentName, turn.turnId);
-        // AUD-code-review-012: klucz `_agentStates` to `_tabKey(tab)`, nie nazwa agenta —
-        // patrz uzasadnienie w `_finalizeTurn`. F04: `turn.origin.tabKey` (zamrożony na starcie
-        // tury) zamiast `_tabKey(turn.owner?.tab)` — watchdog strzela nawet PO KILKU MINUTACH
-        // ciszy modelu, czyli z największym oknem na to, żeby `/save session` → „Archiwizuj
-        // i nowa sesja" zdążył podmienić `tab.sessionPath` pod nogami tej tury.
+        // Klucz `_agentStates` to `_tabKey(tab)`, nie nazwa agenta — patrz uzasadnienie
+        // w `_finalizeTurn`. `turn.origin.tabKey` (zamrożony na starcie tury), nie
+        // `_tabKey(turn.owner?.tab)` — watchdog strzela nawet PO KILKU MINUTACH ciszy modelu,
+        // czyli z największym oknem na to, żeby `/save session` → „Archiwizuj i nowa sesja"
+        // zdążył podmienić `tab.sessionPath` pod nogami tej tury.
         const savedState = this._agentStates.get(turn.origin?.tabKey ?? '');
         if (savedState) savedState.isGenerating = false;
         const bgTab = this.chatTabs.find((tab: ChatViewMixinContext) => tab.agentName === agentName);
@@ -1761,8 +1742,8 @@ export function _onStreamStall(this: ChatViewMixinContext, turn: ChatViewMixinCo
 }
 
 export function stop_generation(this: ChatViewMixinContext, agentName: string, reason = 'stop') {
-    // K5 (AUD-security-037): przerwanie ZATRZASKUJEMY na uchwycie TEJ tury — pętla
-    // (`shouldAbort`) i bramka chunków czytają stan swojej tury, nie pole widoku. Nowa tura
+    // Przerwanie ZATRZASKUJEMY na uchwycie TEJ tury — pętla (`shouldAbort`) i bramka chunków
+    // czytają stan swojej tury, nie pole widoku. Nowa tura
     // dostaje własny uchwyt, więc kolejna wiadomość usera (ani auto-tura z wynikiem suba,
     // ani drain przy przełączeniu zakładki) nie ma jak odkręcić tego przerwania.
     // agentName opcjonalny: watchdog (_onStreamStall) podaje agenta SWOJEJ tury;
@@ -1783,12 +1764,12 @@ export function stop_generation(this: ChatViewMixinContext, agentName: string, r
     // była rola dawnej flagi widoku, dziś osobny, jawny bezpiecznik na czas do następnej tury.
     this._drainSuppressed = true;
 
-    // AUD-bledy-055: Stop kasuje TEŻ zakolejkowaną wiadomość. Bez tego `set_generating(false)`
-    // na końcu tej funkcji planował jej wysyłkę na 100 ms po kliknięciu Stop — user przerywał
-    // WSZYSTKO, a chwilę później ruszała pełna tura (przy autonomii `yolo` razem z zapisami
+    // Stop musi kasować TEŻ zakolejkowaną wiadomość. Bez tego `set_generating(false)` na końcu
+    // tej funkcji planowałby jej wysyłkę na 100 ms po kliknięciu Stop — user przerywałby
+    // WSZYSTKO, a chwilę później ruszałaby pełna tura (przy autonomii `yolo` razem z zapisami
     // i delegacjami, na które nie miał jak się zgodzić). Tekst nie ginie: jeśli pole wpisywania
     // jest puste, wraca do niego, więc user widzi, co przerwał, i decyduje sam.
-    // AUD-testy-024: decyzję („czy kasować slot" + „czy oddać tekst do pola") liczy czysta
+    // Decyzję („czy kasować slot" + „czy oddać tekst do pola") liczy czysta
     // `evaluateStopQueueCancel` (`queuedMessage.ts`) — tutaj zostaje samo wykonanie.
     this._clearQueuedDrainTimer();
     const cancel = evaluateStopQueueCancel(this._queuedMessage, this.input_area?.value);
@@ -1815,9 +1796,9 @@ export function stop_generation(this: ChatViewMixinContext, agentName: string, r
     // Clean up streaming state (natychmiastowy feedback — pętla może jeszcze wisieć na przerwanym XHR;
     // finalizacja jest pominięta bo shouldAbort → stoppedBy='abort' albo catch łapie flagę).
     this._releaseStreamCtx(activeAgent, sCtx?.turnId);
-    // AUD-wydajnosc-071: Stop zatrzymuje strumień, ale NIE kasuje tego, co user już dostał —
-    // ostatnia zebrana klatka jest domalowana przed wyzerowaniem wskaźników (żaden fragment
-    // odpowiedzi sprzed kliknięcia nie ginie).
+    // Stop zatrzymuje strumień, ale NIE kasuje tego, co user już dostał — ostatnia zebrana
+    // klatka jest domalowana przed wyzerowaniem wskaźników (żaden fragment odpowiedzi sprzed
+    // kliknięcia nie ginie).
     this._renderThrottle?.flush();
     if (this.current_message_bubble) {
         this.current_message_bubble.classList.remove('streaming');
@@ -1833,16 +1814,16 @@ export function stop_generation(this: ChatViewMixinContext, agentName: string, r
 }
 
 /**
- * K5 (AUD-security-068): zatrzymaj WSZYSTKO, co ten widok trzyma w locie — tury na zakładkach
- * w tle też, plus suby zlecone z tych zakładek.
+ * Zatrzymaj WSZYSTKO, co ten widok trzyma w locie — tury na zakładkach w tle też, plus suby
+ * zlecone z tych zakładek.
  *
- * Po co: `onClose` warunkował zatrzymanie generowania polem `is_generating`, które przełączenie
- * zakładki nadpisuje stanem zakładki DOCELOWEJ. Tura agenta z zakładki w tle przeżywała więc
- * zamknięcie panelu — bez flagi przerwania, bez watchdoga (linia wyżej rozbrajała watchdogi
- * WSZYSTKICH tur) — i leciała do końca budżetu iteracji, wykonując narzędzia i dopisując
- * odpowiedź do pliku sesji z zamkniętego widoku.
+ * Po co: warunkowanie zatrzymania generowania samym polem `is_generating` byłoby błędne, bo
+ * przełączenie zakładki nadpisuje je stanem zakładki DOCELOWEJ. Tura agenta z zakładki w tle
+ * przeżywałaby więc zamknięcie panelu — bez flagi przerwania, bez watchdoga — i leciałaby do
+ * końca budżetu iteracji, wykonując narzędzia i dopisując odpowiedź do pliku sesji z
+ * zamkniętego widoku.
  *
- * Zamykamy PO WŁAŚCICIELACH TUR (K4): każdy wpis `_streamCtxMap` dostaje ten sam Stop co guzik.
+ * Zamykamy PO WŁAŚCICIELACH TUR: każdy wpis `_streamCtxMap` dostaje ten sam Stop co guzik.
  * Watchdogów NIE rozbrajamy wcześniej — robi to `stop_generation` dla tury, którą właśnie ubija.
  *
  * @param reason - powód zapisywany na uchwycie tury (`'close'` z `onClose`)
@@ -1857,9 +1838,9 @@ export function stop_all_turns(this: ChatViewMixinContext, reason = 'close'): st
 
     // Zakolejkowana wiadomość nie ma dokąd polecieć: `set_generating(false)` wystrzeliłby ją
     // w zamykany widok (setTimeout 100 ms). Kasujemy PRZED zatrzymaniem tur.
-    // AUD-bledy-015: sam pusty slot nie wystarczał — timer mógł być JUŻ uzbrojony (tura
-    // skończyła się do 100 ms przed zamknięciem), a wtedy budził się w zamkniętym widoku
-    // i odpalał pełną turę: model, narzędzia, zapis do pliku sesji. Rozbrajamy go jawnie.
+    // Sam pusty slot nie wystarcza — timer mógłby być JUŻ uzbrojony (tura skończyła się do
+    // 100 ms przed zamknięciem), a wtedy budziłby się w zamkniętym widoku i odpalał pełną
+    // turę: model, narzędzia, zapis do pliku sesji. Rozbrajamy go jawnie.
     this._clearQueuedDrainTimer();
     this._queuedMessage = null;
     this._drainSuppressed = true;
@@ -1892,9 +1873,9 @@ export function stop_all_turns(this: ChatViewMixinContext, reason = 'close'): st
 }
 
 /**
- * F2 faza B: podłącz czat jako DOSTAWCĘ wyników subów odpalonych w tle i odbierz to,
- * co już czeka. Wołane z `ChatView.onOpen` PO odtworzeniu sesji — wcześniej nie byłoby
- * do czego dopasować originu (zakładki jeszcze nie istnieją).
+ * Podłącz czat jako DOSTAWCĘ wyników subów odpalonych w tle i odbierz to, co już czeka.
+ * Wołane z `ChatView.onOpen` PO odtworzeniu sesji - wcześniej nie byłoby do czego dopasować
+ * originu (zakładki jeszcze nie istnieją).
  *
  * ⚠️ Notifier trzyma JEDNEGO dostawcę. Przy dwóch otwartych widokach czatu wygrywa ten
  * otwarty jako ostatni, a jego zamknięcie odpina dostarczanie dla obu (`setDeliverer(null)`).
@@ -1922,13 +1903,13 @@ export function _drainSubTasks(this: ChatViewMixinContext) {
  * `false` = zostaw na później (ponowi `drain`).
  *
  * Bramki liczy czysta `evaluateSubTaskDelivery` (`subTaskDelivery.ts` — ma testy obu stron
- * każdej gałęzi, AUD-testy-024). Tu zostaje tylko wykonanie werdyktu. Kolejność:
+ * każdej gałęzi). Tu zostaje tylko wykonanie werdyktu. Kolejność:
  *   1. brak zakładki adresata → `false` (agent nieotwarty — wynik czeka);
  *   2. zakładka NIEAKTYWNA → `false` (auto-tura w tle byłaby robotą za plecami usera;
  *      dowiezie ją `drain` przy przełączeniu zakładki);
  *   3. trwa tura (własna albo już wstrzyknięta) → `false` (dowiezie `drain` po finalizacji);
- *   4. po Stopie / watchdogu (`_drainSuppressed`) → `false` (AUD-security-115);
- *   5. sufit łańcucha auto-tur po subach → `false` + `Notice` (werdykt Kuby 16.08).
+ *   4. po Stopie / watchdogu (`_drainSuppressed`) → `false`;
+ *   5. sufit łańcucha auto-tur po subach → `false` + `Notice`.
  * Dopiero zakładka aktywna i bezczynna dostaje AUTO-TURĘ z treścią powiadomienia.
  *
  * Poza bramką (i celowo PRZED nią) zostaje jedno pytanie: zadanie bez `id` odpada od razu,
@@ -1945,9 +1926,9 @@ export function _deliverSubTaskResult(this: ChatViewMixinContext, task: ChatView
         };
         const tab = matchTabForOrigin(this.chatTabs, origin, _tabKey);
 
-        // Werdykt Kuby 16.08: sufit ŁAŃCUCHA auto-tur po subach z rzędu. Bez tego agent
-        // w auto-turze może zlecić kolejnego suba, jego wynik znów odpala auto-turę — i tak
-        // w kółko (`max_delegation_depth` NIE chroni: auto-tura to nowa tura agenta GŁÓWNEGO,
+        // Sufit ŁAŃCUCHA auto-tur po subach z rzędu. Bez tego agent w auto-turze może zlecić
+        // kolejnego suba, jego wynik znów odpala auto-turę — i tak w kółko (`max_delegation_depth`
+        // NIE chroni: auto-tura to nowa tura agenta GŁÓWNEGO,
         // głębokość delegacji liczy się od zera). Licznik żyje per agent (ten sam klucz co
         // `_streamCtxMap`), zerowany w `send_message` prawdziwą wiadomością człowieka.
         // Jedno wywołanie `getLimits` na doręczenie — czytany niżej też dla `subagent_result_max_chars`.
@@ -1956,15 +1937,15 @@ export function _deliverSubTaskResult(this: ChatViewMixinContext, task: ChatView
         const limits = getLimits(this.env?.settings);
         const chain = evaluateAutoTurnChain(this._autoTurnChainCounts?.get(tab?.agentName) || 0, limits.max_consecutive_auto_turns);
 
-        // AUD-testy-024: KOMPLET bramek dostarczenia liczy czysta `evaluateSubTaskDelivery`
-        // (`subTaskDelivery.ts`) — zakładka → aktywność → trwająca tura → Stop → sufit łańcucha.
-        // Tutaj zostaje wyłącznie wykonanie werdyktu, bo `chat_streaming.ts` wisi na `obsidian`
-        // i w AVA nie wstaje: dopóki decyzje siedziały w tym pliku, pilnował ich wyłącznie regex
-        // po tekście źródła, który nie odróżniał `if (x) return false;` od `if (x) { }`.
-        // Bramka „po Stopie nie startujemy tury sami" (AUD-security-115) jest tam czwarta w
-        // kolejności i stoi TUTAJ, a nie tylko w `set_generating`, bo to jedyne wspólne wąskie
-        // gardło dostarczania: `SubTaskNotifier._onFinished` woła dostawcę WPROST na
-        // `task:finished`, a `_switchTab` drenuje w kroku 11.
+        // KOMPLET bramek dostarczenia liczy czysta `evaluateSubTaskDelivery` (`subTaskDelivery.ts`)
+        // — zakładka → aktywność → trwająca tura → Stop → sufit łańcucha. Tutaj zostaje wyłącznie
+        // wykonanie werdyktu, bo `chat_streaming.ts` wisi na `obsidian` i w AVA nie wstaje: gdyby
+        // decyzje siedziały w tym pliku, pilnowałby ich wyłącznie regex po tekście źródła, który
+        // nie odróżnia `if (x) return false;` od `if (x) { }`.
+        // Bramka „po Stopie nie startujemy tury sami" jest tam czwarta w kolejności i stoi TUTAJ,
+        // a nie tylko w `set_generating`, bo to jedyne wspólne wąskie gardło dostarczania:
+        // `SubTaskNotifier._onFinished` woła dostawcę WPROST na `task:finished`, a `_switchTab`
+        // drenuje w kroku 11.
         // Fail-soft na całej linii: KAŻDA odmowa zwraca `false`, więc wynik nie ginie — zostaje
         // w kolejce notifiera do najbliższego `drain()` po następnej turze usera.
         const delivery = evaluateSubTaskDelivery({
@@ -1989,8 +1970,8 @@ export function _deliverSubTaskResult(this: ChatViewMixinContext, task: ChatView
         this._autoTurnChainCounts.set(tab.agentName, chain.nextCount);
 
         const text = buildSubTaskNotificationText(task, {
-            // Runda 2 (2026-08-17): wynik suba ma WŁASNY sufit (60k default, 0 = bez limitu) —
-            // wspólne 15k z surowymi zrzutami narzędzi ucinało deep-research w połowie.
+            // Wynik suba ma WŁASNY sufit (60k default, 0 = bez limitu) — wspólne 15k z
+            // surowymi zrzutami narzędzi ucinałoby deep-research w połowie.
             maxResultChars: limits.subagent_result_max_chars,
         });
 
@@ -2000,7 +1981,7 @@ export function _deliverSubTaskResult(this: ChatViewMixinContext, task: ChatView
         this._subTaskTurnPending = true;
         log.info('Chat', `[${tab.agentName}] wynik suba z tła → auto-tura (${task.id}, ${task.status})`);
         void Promise.resolve()
-            // K7: wynik suba to tekst MASZYNY — żadnych przywilejów człowieka (rejestr adresów,
+            // Wynik suba to tekst MASZYNY — żadnych przywilejów człowieka (rejestr adresów,
             // markery `@@skill:`, komendy `/`).
             .then(() => this.send_message({ injectedText: text, meta: machineMeta({ _subTaskNotification: true, subTaskId: task.id }) }))
             .catch((e: ChatViewMixinContext) => log.warn('Chat', `Auto-tura po subie padła: ${e?.message || e}`))
@@ -2016,9 +1997,9 @@ export function set_generating(this: ChatViewMixinContext, is_generating: boolea
     this.is_generating = is_generating;
 
     if (is_generating) {
-        // Nowa tura ruszyła — bezpiecznik „po Stopie nie drenujemy" wygasa (dawniej gasiło go
-        // zerowanie `_abortedStream` w `send_message`, które przy okazji gasiło przerwanie
-        // wciąż biegnącej tury — patrz K5).
+        // Nowa tura ruszyła — bezpiecznik „po Stopie nie drenujemy" wygasa. Nie może wygasać
+        // przy okazji zerowania `_abortedStream` w `send_message` — to gasiłoby też przerwanie
+        // wciąż biegnącej tury (patrz `turn.abort` wyżej).
         this._drainSuppressed = false;
         this.send_button.addClass('hidden');
         this.stop_button.removeClass('hidden');
@@ -2032,18 +2013,18 @@ export function set_generating(this: ChatViewMixinContext, is_generating: boolea
         this._hideQueuedIndicator();
 
         // ── PROCESS QUEUED MESSAGE after generation completes ──
-        // AUD-bledy-015: slot opróżniamy DOPIERO w timerze, po sprawdzeniu warunków. Do tej
-        // zmiany leciało tu `this._queuedMessage = null` i goły `setTimeout` — timer bez
-        // właściciela, którego nikt nie umiał anulować, a wiadomość była już „w powietrzu".
+        // Slot opróżniamy DOPIERO w timerze, po sprawdzeniu warunków - `this._queuedMessage = null`
+        // z gołym `setTimeout` dałby timer bez właściciela, którego nikt nie umiałby anulować,
+        // z wiadomością już „w powietrzu".
         if (readQueuedMessage(this._queuedMessage)) {
             this._clearQueuedDrainTimer();
             // Use setTimeout to let current stack unwind before sending
             this._queuedDrainTimer = window.setTimeout(() => {
                 this._queuedDrainTimer = null;
-                // AUD-testy-024: trzy pytania drenu liczy czysta `evaluateQueuedDrain`
-                // (`queuedMessage.ts`), tutaj zostaje wykonanie werdyktu.
-                //  - `empty`: Stop / zamknięcie widoku zdążyły anulować (AUD-bledy-055);
-                //  - `wait_owner` (AUD-bledy-015): `set_generating(false)` woła też `_switchTab`
+                // Trzy pytania drenu liczy czysta `evaluateQueuedDrain` (`queuedMessage.ts`),
+                // tutaj zostaje wykonanie werdyktu.
+                //  - `empty`: Stop / zamknięcie widoku zdążyły anulować;
+                //  - `wait_owner`: `set_generating(false)` woła też `_switchTab`
                 //    (krok 5) przy każdym przejściu na niegenerującą zakładkę. Bez tego pytania
                 //    wybudzony timer wklejał tekst pisany do Jaskra w pole Borysa i startował
                 //    turę JEGO modelem, promptem, pamięcią i uprawnieniami narzędzi
@@ -2063,23 +2044,23 @@ export function set_generating(this: ChatViewMixinContext, is_generating: boolea
 
                 this._queuedMessage = null;
                 log.info('Chat', `Wysyłam zakolejkowaną wiadomość (${queued.meta.origin}): "${queued.text.slice(0, 60)}..."`);
-                // Z3 (FAIL 6, 2026-08-15): pole mogło NIE być puste — user zakolejkował
-                // wiadomość, a potem zaczął pisać kolejną. Podmiana na `queued` kasowała mu
-                // ten szkic bez śladu. Odkładamy go i oddajemy w `send_message` zaraz po
+                // Pole mogło NIE być puste - user zakolejkował wiadomość, a potem zaczął pisać
+                // kolejną. Podmiana na `queued` bez zabezpieczenia kasowałaby mu ten szkic bez
+                // śladu. Odkładamy go i oddajemy w `send_message` zaraz po
                 // `resetInputArea()` (tam, gdzie pole jest czyszczone — czyli PO awaitach
                 // send_message, więc restore „od ręki" tutaj i tak by nie przetrwał).
                 const draft = this.input_area.value;
                 if (draft.trim() && draft.trim() !== queued.text.trim()) this._draftAfterSend = draft;
                 this.input_area.value = queued.text;
                 this.handleInputResize();
-                // K19 (AUD-security-117/131): oddajemy pieczątkę, z którą wiadomość weszła do
-                // kolejki. Stało tu twarde `HUMAN_MESSAGE_META` — a slot zajmuje też tekst
-                // maszynowy (guzik artefaktu wypełnia pole wpisywania z kodu), więc treść
-                // artefaktu wracała z przywilejami człowieka i cofała K7.
+                // Oddajemy pieczątkę, z którą wiadomość weszła do kolejki. Twarde
+                // `HUMAN_MESSAGE_META` tutaj byłoby błędne - slot zajmuje też tekst maszynowy
+                // (guzik artefaktu wypełnia pole wpisywania z kodu), więc treść artefaktu
+                // wracałaby z przywilejami człowieka.
                 this.send_message({ meta: queued.meta });
             }, 100);
         } else if (!this._drainSuppressed) {
-            // F2: wiadomość USERA ma pierwszeństwo — po wyniki subów z tła sięgamy dopiero,
+            // Wiadomość USERA ma pierwszeństwo - po wyniki subów z tła sięgamy dopiero,
             // gdy nikt nie czeka w kolejce. `setTimeout` tym samym wzorem co wyżej: pozwala
             // rozwinąć się stosowi bieżącej tury (drain woła send_message re-entrantnie).
             //

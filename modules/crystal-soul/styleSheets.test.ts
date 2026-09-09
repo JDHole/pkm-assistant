@@ -1,12 +1,12 @@
 /**
- * styleSheets — strażnik AUD-bledy-037.
+ * styleSheets - testy pilnujące (de)montażu arkuszy w `document.adoptedStyleSheets`.
  *
- * Siedem miejsc w repo dokładało arkusze do `document.adoptedStyleSheets` wzorcem
- * „sprawdź `.includes` → rozwiń tablicę". ZERO miejsc coś z niej zdejmowało: wyłączony plugin
- * dalej nadpisywał zmienne motywu aż do restartu Obsidiana, a każdy cykl wyłącz/włącz dokładał
- * kolejne arkusze (świeży bundle = świeże obiekty `CSSStyleSheet`, więc `.includes` ich nie
- * widzi). Tu pilnujemy drugiej strony kontraktu: co weszło przez `adoptSheet`, wychodzi przy
- * demontażu.
+ * Wiele miejsc w repo dokłada arkusze do `document.adoptedStyleSheets` wzorcem
+ * „sprawdź `.includes` → rozwiń tablicę". Bez zdejmowania: wyłączony plugin
+ * dalej nadpisywałby zmienne motywu aż do restartu Obsidiana, a każdy cykl wyłącz/włącz
+ * dokładałby kolejne arkusze (świeży bundle = świeże obiekty `CSSStyleSheet`, więc `.includes`
+ * ich nie widzi). Tu pilnujemy drugiej strony kontraktu: co weszło przez `adoptSheet`, wychodzi
+ * przy demontażu.
  */
 import test from 'ava';
 import { adoptSheet, removeSheet, removeAdoptedSheets } from './styleSheets.js';

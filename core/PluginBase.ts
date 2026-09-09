@@ -5,7 +5,7 @@
  * KONTRAKT NAZW: wszystkie metody i pola w `camelCase`.
  *
  * ⚠️ Plik dotyka `obsidian` jako WARTOŚCI — NIE wchodzi do barrela `core/index.ts`
- * (kontrakt node-safe K-01/K-03). Deep-importuje go wyłącznie composition root.
+ * (kontrakt node-safe). Deep-importuje go wyłącznie composition root.
  */
 import { Plugin } from 'obsidian';
 
@@ -91,7 +91,7 @@ export abstract class PluginBase extends Plugin {
     declare env: PluginRuntime | null;
 
     /**
-     * C-02/C-03: konfiguracja runtime'u zbudowana w KONSTRUKTORZE pluginu.
+     * Konfiguracja runtime'u zbudowana w KONSTRUKTORZE pluginu.
      * `onload()` przekazuje TĘ SAMĄ referencję konstruktorowi runtime'u.
      *
      * Odstępstwo od kontraktu: pole nie jest `readonly`, bo przypisuje je konstruktor
@@ -100,11 +100,11 @@ export abstract class PluginBase extends Plugin {
      */
     declare runtimeConfig: RuntimeConfig;
 
-    /** E-24/E-25: gotowość PEŁNEJ inicjalizacji (nie samego runtime'u). */
+    /** Gotowość PEŁNEJ inicjalizacji (nie samego runtime'u). */
     declare _ready: boolean;
 
     /**
-     * PL-08: wąskie wejście dla modułów. NIGDY `undefined`.
+     * Wąskie wejście dla modułów. NIGDY `undefined`.
      *
      * Pole, nie akcesor: `Plugin` Obsidiana deklaruje `settings?: unknown` jako WŁASNOŚĆ,
      * a TS nie pozwala nadpisać własności akcesorem (TS2611). Implementacja podstawia tu
@@ -114,36 +114,36 @@ export abstract class PluginBase extends Plugin {
      */
     declare settings: SettingsBag;
 
-    /** Kolejka `onReady` (E-25). Powstaje leniwie — konstruktor podklasy może jej nie ruszyć. */
+    /** Kolejka `onReady`. Powstaje leniwie — konstruktor podklasy może jej nie ruszyć. */
     private _readyQueue?: Array<() => void>;
 
-    /** Skrót na `env.notices` (N-01). */
+    /** Skrót na `env.notices`. */
     get notices(): NoticeCenter | null {
         return this.env?.notices ?? null;
     }
 
-    /** PL-02: mapa nazwa→klasa widoku. */
+    /** Mapa nazwa→klasa widoku. */
     abstract get itemViews(): ItemViewMap;
 
     /**
-     * PL-03: komendy bazowe. Podklasa rozszerza je przez `...super.commands`, więc
+     * Komendy bazowe. Podklasa rozszerza je przez `...super.commands`, więc
      * getter jest KONKRETNY, nie `abstract` (odstępstwo od kontraktu wymuszone
      * przez `super` — do abstrakcyjnego akcesora nie da się sięgnąć przez `super`).
      *
-     * Baza nie wnosi własnych komend: komenda „otwórz" powstaje przy REJESTRACJI widoku
-     * (V-02), a reszta należy do composition roota.
+     * Baza nie wnosi własnych komend: komenda „otwórz" powstaje przy REJESTRACJI widoku,
+     * a reszta należy do composition roota.
      */
     get commands(): Record<string, CommandDef> {
         return {};
     }
 
-    /** PL-04: ikony wstążki. Kolejność w mapie = kolejność ikon na pasku. */
+    /** Ikony wstążki. Kolejność w mapie = kolejność ikon na pasku. */
     abstract get ribbonIcons(): Record<string, RibbonIconDef>;
 
     /** Klasa zakładki ustawień. */
     abstract get settingsTabClass(): PluginSettingsTabClass;
 
-    /** E-17: MUSI biec w `onload()` — Obsidian odtwarza zapisane zakładki przy layoutReady. */
+    /** MUSI biec w `onload()` — Obsidian odtwarza zapisane zakładki przy layoutReady. */
     registerItemViews(): void {
         for (const [name, ViewClass] of Object.entries(this.itemViews ?? {})) {
             try {
@@ -156,7 +156,7 @@ export abstract class PluginBase extends Plugin {
         }
     }
 
-    /** E-18/E-19: w `onload()`, PO `setLocale()`. */
+    /** W `onload()`, PO `setLocale()`. */
     registerCommands(): void {
         for (const [slug, command] of Object.entries(this.commands ?? {})) {
             try {
@@ -182,7 +182,7 @@ export abstract class PluginBase extends Plugin {
     }
 
     /**
-     * PL-05: powitanie jednorazowe; stoi na `PluginVersionData`.
+     * Powitanie jednorazowe; stoi na `PluginVersionData`.
      *
      * Pierwszy start STEMPLUJE `installed_at` — bez tego każde uruchomienie wyglądałoby
      * jak pierwsze. Nazwa pola jest zamrożona (BR-1/Y-4), fixture harnessu na niej stoi.
@@ -195,7 +195,7 @@ export abstract class PluginBase extends Plugin {
     }
 
     /**
-     * PL-06: para sterująca modalem „co nowego".
+     * Para sterująca modalem „co nowego".
      *
      * `true` gdy user nie widział jeszcze notatek TEJ wersji. Brak `last_version` = pierwsza
      * instalacja, więc też `true`. Cofnięcie wersji (wersja starsza niż zapamiętana) NIE jest
@@ -214,7 +214,7 @@ export abstract class PluginBase extends Plugin {
         await this._writeVersionData({ ...data, last_version: version });
     }
 
-    /** E-25: odpala natychmiast, gdy już gotowe; inaczej kolejkuje. */
+    /** Odpala natychmiast, gdy już gotowe; inaczej kolejkuje. */
     onReady(callback: () => void): void {
         if (typeof callback !== 'function') return;
         if (this._ready) {
@@ -240,7 +240,7 @@ export abstract class PluginBase extends Plugin {
         for (const callback of queue) this._runReadyCallback(callback);
     }
 
-    /** Wywrotka jednego konsumenta nie ma prawa zabrać pozostałych (E-25). */
+    /** Wywrotka jednego konsumenta nie ma prawa zabrać pozostałych. */
     private _runReadyCallback(callback: () => void): void {
         try {
             callback();
@@ -250,7 +250,7 @@ export abstract class PluginBase extends Plugin {
     }
 
     /**
-     * N-05/C-1: own-code powiadomienie w stylu skina.
+     * Own-code powiadomienie w stylu skina.
      *
      * Treść i cykl życia należą do centrum powiadomień (dzięki temu działa wyciszanie
      * i zamknięcie wszystkiego przy unload); ten kod dokłada WYŁĄCZNIE warstwę wyglądu:
@@ -316,7 +316,7 @@ export abstract class PluginBase extends Plugin {
     }
 
     /**
-     * PL-09: dopisuje TYLKO brakujące wpisy; no-op gdy nie ma pliku. Idempotentne.
+     * Dopisuje TYLKO brakujące wpisy; no-op gdy nie ma pliku. Idempotentne.
      *
      * „Czy plik jest?" sprawdzamy PRÓBĄ ODCZYTU, nie `exists()` — a brak pliku znaczy
      * „user nie prowadzi vaulta w gicie", więc niczego nie tworzymy.
@@ -349,7 +349,7 @@ export abstract class PluginBase extends Plugin {
         }
     }
 
-    /** PL-10: otwarcie notatki z obsługą modyfikatorów. */
+    /** Otwarcie notatki z obsługą modyfikatorów. */
     openNote(path: string, event?: unknown): Promise<void> {
         return openNoteInWorkspace(this.app as never, path, event);
     }
@@ -376,7 +376,7 @@ export abstract class PluginBase extends Plugin {
     }
 
 
-    /** `data.json` pluginu — WYŁĄCZNIE wersjonowanie (S-19). */
+    /** `data.json` pluginu — WYŁĄCZNIE wersjonowanie. */
     private async _readVersionData(): Promise<PluginVersionData> {
         try {
             const data = await this.loadData() as PluginVersionData | null;
@@ -396,7 +396,7 @@ export abstract class PluginBase extends Plugin {
     }
 }
 
-// PL-08: akcesor na PROTOTYPIE, bo `Plugin.settings` jest w typach Obsidiana WŁASNOŚCIĄ
+// Akcesor na PROTOTYPIE, bo `Plugin.settings` jest w typach Obsidiana WŁASNOŚCIĄ
 // (TS2611 blokuje `get settings()` w ciele klasy). Definicja poza klasą omija sprawdzenie
 // typów, a runtime dostaje dokładnie to, co obiecuje kontrakt: worek, nigdy `undefined`.
 Object.defineProperty(PluginBase.prototype, 'settings', {

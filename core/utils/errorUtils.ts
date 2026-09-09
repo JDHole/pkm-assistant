@@ -1,5 +1,5 @@
 /**
- * errorUtils — normalizacja błędów API modeli (S30 Z3, konsolidacja duplikatów).
+ * errorUtils — normalizacja błędów API modeli (konsolidacja duplikatów).
  *
  * `normalizeError` żyła kiedyś w PIĘCIU identycznych (bajt w bajt) kopiach w
  * `modules/models/` — w klasie modelu, w bazie dostawców i w trzech dostawcach osobno.
@@ -32,7 +32,7 @@ export interface NormalizedError {
 }
 
 /**
- * K20 (AUD-security-120) — pola, które z definicji niosą KONTEKST ŻĄDANIA, nie treść błędu.
+ * Pola, które z definicji niosą KONTEKST ŻĄDANIA, nie treść błędu.
  *
  * `message` idzie do pliku logu i na ekran usera, więc nie ma prawa nieść nagłówków
  * (`Authorization`, `api-key`) ani całego obiektu transportu. Filtr jest CZYSTY (po nazwie
@@ -42,11 +42,6 @@ export interface NormalizedError {
  *
  * ⚠️ Dotyczy WYŁĄCZNIE gałęzi `JSON.stringify` budującej `message`. Pole `details` zostaje
  * surowym obiektem — to ustalony kontrakt adapterów, a obiekt idzie do loggera przez maskę.
- */
-/**
- * Pola, które z definicji niosą kontekst żądania (a więc i klucz API) — gałąź
- * `JSON.stringify` budująca `message` wycina je w całości. Publiczne, bo stoją na nich
- * testy K20 klastra `models` i transport w `core/http`.
  */
 export const SECRET_BEARING_FIELDS = new Set([
   'headers', 'source', 'request', 'request_params', 'xhr', 'config', 'options',
@@ -94,7 +89,7 @@ function _safeStringify(value: unknown): string {
 export function normalizeError(error: unknown, http_status: number | null = null): NormalizedError {
   if (!error) return { message: 'Unknown error', code: 'UNKNOWN', http_status };
   if (typeof error === 'string') return { message: _truncate(error), code: 'UNKNOWN', http_status };
-  // K20: gałąź `JSON.stringify` wycina pola-sekrety i przycina wynik — patrz
+  // Gałąź `JSON.stringify` wycina pola-sekrety i przycina wynik — patrz
   // SECRET_BEARING_FIELDS. `message` z samego błędu też dostaje limit długości.
   const raw_message = (error as ErrLike).message || (error as ErrLike).error?.message;
   const message = _truncate(typeof raw_message === 'string' && raw_message ? raw_message : _safeStringify(error));

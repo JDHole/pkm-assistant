@@ -66,19 +66,19 @@ test.serial('trailing-slash equivalence: search result without slash matches rea
     t.true(isUrlKnown('https://example.com'));
 });
 
-// Ceiling (risk register 2026-09-02 / S34 z8): the registry is a module-level singleton with
-// plugin-runtime lifetime, so without a cap it would grow unbounded (slow memory leak).
-// F2.22 (release 2.2.0/W3): imported from the module (above) instead of a local duplicate
-// literal that could silently drift from the real cap.
+// Ceiling: the registry is a module-level singleton with plugin-runtime lifetime, so
+// without a cap it would grow unbounded (slow memory leak). MAX_KNOWN_URLS is imported
+// from the module (above) instead of a local duplicate literal that could silently drift
+// from the real cap.
 
 test.serial('registry stays capped at MAX_KNOWN_URLS even when more unique URLs are registered', t => {
     for (let i = 0; i < MAX_KNOWN_URLS + 500; i++) {
         registerKnownUrl(`https://example.com/page-${i}`);
     }
-    // B1 (klaster C4b nit): this used to probe only indirectly (newest URL known, no throw) —
-    // that also passes with a ceiling that is a no-op (unbounded growth never evicts anything,
-    // so the newest URL is trivially known regardless). `_knownUrlCount()` proves the ceiling
-    // actually held the registry AT the cap, not past it.
+    // WHY `_knownUrlCount()`, NOT just "newest URL known, no throw": that check also
+    // passes with a ceiling that is a no-op (unbounded growth never evicts anything, so the
+    // newest URL is trivially known regardless). `_knownUrlCount()` proves the ceiling
+    // actually holds the registry AT the cap, not past it.
     t.is(_knownUrlCount(), MAX_KNOWN_URLS, 'registering 500 URLs past the cap must not leave the registry bigger than MAX_KNOWN_URLS');
     t.true(isUrlKnown(`https://example.com/page-${MAX_KNOWN_URLS + 499}`));
 });

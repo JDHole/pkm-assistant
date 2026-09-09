@@ -1,11 +1,8 @@
 /**
- * `ReleaseNotesView.ts` importuje `obsidian`, więc AVA go nie zaimportuje wprost — testy
+ * `ReleaseNotesView.ts` importuje `obsidian`, więc AVA go nie zaimportuje wprost - testy
  * czytają ŹRÓDŁO regexem (wzór: `modules/chat/OpenSessionModal.css_coverage.test.ts`,
  * `modules/chat/chat/stopSemantics.test.ts`). Luka katalogu: „ZERO testów jednostkowych na
  * samą klasę widoku".
- *
- * clean-room / F1 (build-release) — napisany przed implementacją (czerwony na stubie),
- * dziś zielony.
  */
 import test from 'ava';
 import { existsSync, readFileSync } from 'node:fs';
@@ -15,10 +12,9 @@ const readSource = (rel: string) => readFileSync(fileURLToPath(new URL(rel, impo
 const sourceExists = (rel: string) => existsSync(fileURLToPath(new URL(rel, import.meta.url)));
 
 const viewSource = readSource('./ReleaseNotesView.ts');
-// `open()` NIE jest nadpisywane w ReleaseNotesView (decyzja A4) — guard na leaf==null zyje
-// w bazie wspolnej WSZYSTKICH widokow (`modules/ui-components/PluginItemView.ts`, wlasnosc
-// klastra core-env/F2). Ten plik go tylko CZYTA, zeby przypiac zachowanie B40/BR-4, ktore
-// dotyczy praktycznie tego widoku.
+// `open()` NIE jest nadpisywane w ReleaseNotesView - guard na leaf==null zyje
+// w bazie wspolnej WSZYSTKICH widokow (`modules/ui-components/PluginItemView.ts`).
+// Ten plik go tylko CZYTA, zeby przypiac zachowanie, ktore dotyczy praktycznie tego widoku.
 const baseViewSource = readSource('../ui-components/PluginItemView.ts');
 
 test('viewType to pkm-release-notes-view', t => {
@@ -39,13 +35,12 @@ test('tresc widoku pochodzi z releases/latest_release.md', t => {
     t.true(notes.trim().length > 0, 'releases/latest_release.md jest puste');
 });
 
-test('open() ma guard na null leaf (BR-4)', t => {
+test('open() ma guard na null leaf', t => {
     // `open` NIE jest nadpisywane w ReleaseNotesView.ts.
     t.notRegex(viewSource, /static\s+(?:async\s+)?open\s*\(\s*_?workspace/, 'ReleaseNotesView nie ma prawa przedefiniowac open()');
 
     // Guard mieszka w bazie: `getLeaf(...)` sprawdzone na falszywosc, z wczesniejszym `return`
-    // PRZED uzyciem leafa. Napisany przed implementacja (czerwony na stubie) — baza
-    // (`PluginItemView.ts`) ma dzis realny guard, test zielony.
+    // PRZED uzyciem leafa.
     t.regex(
         baseViewSource,
         /getLeaf\([^)]*\)/,
@@ -61,8 +56,8 @@ test('open() ma guard na null leaf (BR-4)', t => {
 test('openForVersion deleguje do open ze stanem { version }', t => {
     t.regex(viewSource, /static\s+(?:async\s+)?openForVersion\s*\(/);
 
-    // Statyka `open` NIE jest przedeklarowana z drugim argumentem typowanym jako string —
-    // jedna sygnatura open(workspace, state?, active?) w calym repo (decyzja A4).
+    // Statyka `open` NIE jest przedeklarowana z drugim argumentem typowanym jako string -
+    // jedna sygnatura open(workspace, state?, active?) w calym repo.
     t.notRegex(
         viewSource,
         /static\s+(?:async\s+)?open\s*\([^)]*version\s*:\s*string/,
@@ -71,11 +66,11 @@ test('openForVersion deleguje do open ze stanem { version }', t => {
 });
 
 /**
- * `openForVersion` WYKONUJE swoje ciało (nie tylko dopasowanie tekstu) — plik nie da się
+ * `openForVersion` WYKONUJE swoje ciało (nie tylko dopasowanie tekstu) - plik nie da się
  * zaimportować wprost w AVA (import atrybutowy markdownu, `ERR_UNKNOWN_FILE_EXTENSION` bez
  * dedykowanego loadera), więc ciało metody wycinamy regexem i odpalamy jako prawdziwy kod
  * z podstawionym `this.open`. Pina konkretne zachowanie: `openForVersion` WOLA `this.open`
- * z workspace'em i stanem `{ version }`, i ZWRACA to, co `open` zwrócił — mutant
+ * z workspace'em i stanem `{ version }`, i ZWRACA to, co `open` zwrócił - mutant
  * `return this.open(...)` → `return undefined` gubi OBIE te rzeczy naraz (open nigdy
  * niewołane, wynik zawsze `undefined` zamiast Promise).
  */
@@ -91,7 +86,7 @@ test('openForVersion faktycznie woła this.open(workspace, { version }) i zwraca
         calls.push(args);
         return 'OPEN_RESULT_SENTINEL';
     };
-    // Ciało metody statycznej odwołuje się do `this.open` i parametrów `workspace`/`version` —
+    // Ciało metody statycznej odwołuje się do `this.open` i parametrów `workspace`/`version` -
     // odtwarzamy dokładnie ten kontekst wywołania, zero importu produkcyjnego modułu.
     const runBody = new Function(`return function(workspace, version) { ${body} };`)() as (
         this: { open: (...args: unknown[]) => unknown },

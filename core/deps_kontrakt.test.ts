@@ -1,5 +1,5 @@
 /**
- * Strażnik kontraktu dostawy (audyt nocny 2026-08-21, moduł 11 - dead code i zależności).
+ * Strażnik kontraktu dostawy.
  *
  * Pilnuje jednej rzeczy: każdy pakiet, który importuje kod PRODUKCYJNY, musi mieć
  * deklarację - albo w `dependencies` package.json, albo na liście `external` esbuilda
@@ -26,13 +26,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ZRODLA = ['src', 'core', 'modules', 'config', 'utils'];
 
 /**
- * Stan faktyczny. Nocą 2026-08-21 (commit `962908d`) na liście był `js-yaml` — importowany
- * przez `core/utils/yamlParser.ts`, a wpadający do drzewa wyłącznie tranzytywnie. Naprawione
- * najpierw przenosinami do `dependencies`, a od TS-4 (2026-09-07) inaczej i trwalej: `js-yaml`
- * WYLECIAŁ z `package.json` w całości — `core/utils/yamlParser.ts` nie importuje ŻADNEGO
- * silnika YAML statycznie (silnik wstrzykiwany przez `setYamlEngine()`; w Obsidianie to
- * wbudowany `parseYaml`/`stringifyYaml` z modułu `obsidian`, już na liście `external`).
- * Lista jest PUSTA i ma taka zostać.
+ * Stan faktyczny: lista jest PUSTA i ma taka zostać. `core/utils/yamlParser.ts` nie importuje
+ * ŻADNEGO silnika YAML statycznie — silnik jest wstrzykiwany przez `setYamlEngine()`;
+ * w Obsidianie to wbudowany `parseYaml`/`stringifyYaml` z modułu `obsidian`, już na liście
+ * `external`, więc `js-yaml` nie jest zależnością produkcyjną w ogóle.
  */
 const ZNANE_NIEZADEKLAROWANE: string[] = [];
 

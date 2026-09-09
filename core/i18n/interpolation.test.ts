@@ -1,9 +1,9 @@
 /**
- * interpolation.test.ts — strażnik gałęzi interpolacji `t()` (audyt nocny 2026-08-31, moduł 13).
+ * interpolation.test.ts — strażnik gałęzi interpolacji `t()`.
  *
- * DLACZEGO ten plik powstał w module WYDAJNOŚCI: doba 30.08 (fabryka F10 i18n) przepięła
- * kilkadziesiąt twardych napisów na `t()`, więc gałąź interpolacji jest dziś wołana z 471
- * miejsc. Zmierzone tej nocy: `t()` bez parametrów kosztuje 0,018 µs, z jednym parametrem
+ * DLACZEGO ten plik powstał w module WYDAJNOŚCI: przepięcie kilkudziesięciu twardych napisów
+ * na `t()` sprawiło, że gałąź interpolacji jest dziś wołana z 471 miejsc. Zmierzone: `t()`
+ * bez parametrów kosztuje 0,018 µs, z jednym parametrem
  * 0,398 µs — 22× więcej, bo pętla po parametrach kompiluje NOWY `RegExp` na każdy parametr
  * i każde wywołanie (`core/i18n/index.ts`). W liczbach bezwzględnych to setne milisekundy
  * przy realnym renderze, więc to NIE jest powód do optymalizacji — i ta uwaga jest tu
@@ -65,8 +65,8 @@ test('i18n: placeholder bez odpowiadającego parametru zostaje SUROWY, nie znika
 });
 
 // ── T4 ──────────────────────────────────────────────────────────────────────
-// Pin z nocy 2026-08-31 (czerwony na `replace(new RegExp(...), String(v))`), zdjęty naprawą
-// `t()` 2026-09-02: `split(ph).join(String(v))` — wartość idzie do napisu dosłownie.
+// `t()` używa `split(ph).join(String(v))`, nie `replace(new RegExp(...), String(v))` —
+// wartość idzie do napisu dosłownie, bez wzorców zamiany.
 test('i18n: PIN — wartość parametru trafia do napisu DOSŁOWNIE, także gdy zawiera `$`', t2 => {
     setLocale('pl');
     // Wszystkie cztery formy są wzorcami zamiany w `String.prototype.replace`:

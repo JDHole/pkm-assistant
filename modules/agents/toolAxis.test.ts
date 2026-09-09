@@ -9,7 +9,7 @@ import {
     DEFAULT_DISABLED_GROUPS,
     DEFAULT_ENABLED_EXCEPTIONS,
 } from './toolAxis.js';
-// Deep-import dozwolony w testach (ESLint ignoruje *.test.js) — guard zgodności ze źródłem prawdy.
+// Deep-import dozwolony w testach (ESLint ignoruje *.test.js) - guard zgodności ze źródłem prawdy.
 import { BUILTIN_MANIFESTS } from '../tools/built-in-servers/index.js';
 
 // ─── Guard: mapa grup zgodna z manifestami MCP (źródło prawdy nazw narzędzi) ───
@@ -92,7 +92,7 @@ test('defaultDisabledTools: 5 grup wyłączonych (web/multimodal/delegation/arti
     for (const tool of [...BUILTIN_TOOL_GROUPS.vault, ...BUILTIN_TOOL_GROUPS.memory, ...BUILTIN_TOOL_GROUPS.core]) {
         t.false(disabled.includes(tool));
     }
-    // E2.9 D1: `todo` jest wyjątkiem — default ON mimo grupy artifacts wyłączonej.
+    // `todo` jest wyjątkiem - default ON mimo grupy artifacts wyłączonej.
     t.false(disabled.includes('todo'), 'todo default ON (wyjątek z grupy artifacts)');
     t.true(disabled.includes('artifact_create'), 'reszta grupy artifacts zostaje OFF');
 });

@@ -1,13 +1,13 @@
 /**
- * SubAgentTemplateStore — magazyn SZABLONÓW sub-agentów (S27 Z1).
+ * SubAgentTemplateStore — magazyn SZABLONÓW sub-agentów.
  *
  * Szablon: `.pkm-assistant/templates/sub-agents/<slug>/SUB_AGENT.yaml` (+ opcjonalny
  * `KNOWLEDGE.md`) w formacie IDENTYCZNYM z żywym subem + pole `version: N` (int, start 1).
  *
- * Decyzje kanoniczne (S27):
- *  - D2: szablon może zostać wyznaczony GLOBALNYM subem (`settings.pkmAssistant.globalSubTemplate`).
+ * Zasady:
+ *  - szablon może zostać wyznaczony GLOBALNYM subem (`settings.pkmAssistant.globalSubTemplate`).
  *    Wtedy `delegate` bez `aspect` używa jego configu zamiast fabrycznego `pkm-sub`.
- *  - D3 „kopia, nie link": `instantiate()` tworzy niezależną kopię w `.pkm-assistant/sub-agents/`
+ *  - „kopia, nie link": `instantiate()` tworzy niezależną kopię w `.pkm-assistant/sub-agents/`
  *    pod nazwą `<agent-slug>-<slug>` (konwencja widoczności `getVisibleSubAgentsForAgent`).
  *    Kopia niesie `from_template: "<nazwa> vN"`; wersja szablonu nie nadpisuje żywego bytu.
  *
@@ -37,9 +37,9 @@ type StoredTemplate = {
     isTemplate: true;
 };
 
-// `export` zdjęty w D7 (AUD-dead-code-010/164): zero importerów spoza pliku (S30 Z4 wyciął
-// tę stałą z barrela z uzasadnieniem "testy deep-importują wprost" — dla tej akurat nazwy
-// nieprawdziwym, żaden test po nią nie sięga).
+// Nie eksportowana: zero importerów spoza pliku. Barrel wyciął tę stałą
+// z uzasadnieniem "testy deep-importują wprost" — dla tej akurat nazwy
+// nieprawdziwym, żaden test po nią nie sięga.
 const SUB_AGENT_TEMPLATES_PATH = '.pkm-assistant/templates/sub-agents';
 const LIVE_SUB_AGENTS_PATH = '.pkm-assistant/sub-agents';
 
@@ -174,7 +174,7 @@ export class SubAgentTemplateStore {
     }
 
     /**
-     * Skasuj szablon (YAML + KNOWLEDGE.md + folder). Kopie u agentów zostają (D3).
+     * Skasuj szablon (YAML + KNOWLEDGE.md + folder). Kopie u agentów zostają (kopia, nie link).
      * @param {string} slug
      * @returns {Promise<boolean>}
      */
@@ -197,7 +197,7 @@ export class SubAgentTemplateStore {
     }
 
     /**
-     * Odlej KOPIĘ szablonu jako żywego suba konkretnego agenta (D3).
+     * Odlej KOPIĘ szablonu jako żywego suba konkretnego agenta (kopia, nie link).
      * Nazwa kopii = `<agent-slug>-<slug szablonu>` (konwencja `getVisibleSubAgentsForAgent`),
      * kolizja → sufiks `-2`, `-3`…
      *
@@ -260,7 +260,7 @@ export class SubAgentTemplateStore {
         yamlConfig.version = Number(data.version) || 1;
 
         await this.vault.adapter.write(`${folderPath}/SUB_AGENT.yaml`, stringifyYaml(yamlConfig));
-        // AUD-bledy-010: ta sama reguła co w `SubAgentLoader.saveSubAgent` - wyczyszczona
+        // Ta sama reguła co w `SubAgentLoader.saveSubAgent` - wyczyszczona
         // metoda MUSI zniknąć z dysku, inaczej „wersja v3" szablonu niesie metodę z v2
         // i taką kopię dostaje każdy sub odlany z tego szablonu.
         const knowledgePath = `${folderPath}/KNOWLEDGE.md`;

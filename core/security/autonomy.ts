@@ -1,8 +1,8 @@
 /**
- * autonomy.js — Rdzeń modelu autonomii (D21 / F12, refaktor v2.2 E2.3).
+ * autonomy.js — Rdzeń modelu autonomii.
  *
- * NOWY MODEL KONTROLI (D21) — dwie NIEZALEŻNE osie:
- *   1. UPRAWNIENIA = własność AGENTA (co agentowi WOLNO). Bez zmian — żyją w
+ * MODEL KONTROLI — dwie NIEZALEŻNE osie:
+ *   1. UPRAWNIENIA = własność AGENTA (co agentowi WOLNO). Żyją w
  *      `agent.permissions` i egzekwuje je PermissionSystem/AccessGuard.
  *   2. AUTONOMIA = własność CZATU (czy PYTAĆ, zanim zrobi to, co mu wolno). TU.
  *
@@ -10,7 +10,7 @@
  *   Agent bez `edit_notes` nie zapisze pliku nawet w trybie `yolo`; agent z
  *   whitelistą (focusFolders) w `yolo` dalej nie wyjdzie poza whitelistę.
  *
- * TRZY TRYBY (F12):
+ * TRZY TRYBY:
  *   - 'yolo' — nie pytaj o nic. Znosi WSZYSTKIE pytania (approval + diff).
  *              No-Go i pliki chronione dalej blokują ABSOLUTNIE (to nie „pytania”,
  *              to twarde granice uprawnień — patrz PermissionSystem.checkPermission).
@@ -19,7 +19,7 @@
  *   - 'all'  — pytaj-o-wszystko. Pyta o KAŻDE narzędzie (poza ask_user — pytanie
  *              o zgodę na zadanie pytania to absurd).
  *
- * DEFINICJA KRAWĘDZI (F12): zapis / kasowanie / web / wysyłka / delegacja / mcp /
+ * DEFINICJA KRAWĘDZI: zapis / kasowanie / web / wysyłka / delegacja / mcp /
  *   komendy / budowanie agentów.
  *   Implementacja FAIL-CLOSED: BEZPIECZNE są TYLKO odczyt (`read_notes`) i myślenie
  *   (`thinking`). KAŻDA inna kategoria uprawnienia — również przyszła, jeszcze
@@ -47,7 +47,7 @@ export const AUTONOMY_MODES: AutonomyMode[] = ['yolo', 'edge', 'all'];
 export const DEFAULT_AUTONOMY: AutonomyMode = 'edge';
 
 /**
- * Trzy poziomy ryzyka narzędzia (A3, 2026-07-24).
+ * Trzy poziomy ryzyka narzędzia (A3).
  *
  * GREEN  — czysty odczyt / myślenie / pytanie usera.
  * YELLOW — akcja odwracalna albo ograniczona; user może wyłączyć pytanie per narzędzie.
@@ -118,7 +118,7 @@ export function classifyToolRisk({
         'read', 'list', 'search',
         'artifact_read', 'artifact_list',
         'vault_read', 'vault_list', 'vault_search',
-        // S28: czytanie WŁASNEJ skrzynki. `kom_read` odhacza `ai_read` w swoim pliku, ale to
+        // Czytanie WŁASNEJ skrzynki. `kom_read` odhacza `ai_read` w swoim pliku, ale to
         // techniczny ptaszek statusu, nie zmiana danych usera — dla usera to czysty odczyt.
         'kom_list', 'kom_read',
     ]);
@@ -140,21 +140,21 @@ export function classifyToolRisk({
             : TOOL_RISK_LEVELS.RED;
     }
 
-    // S28 (D3): `kom_send` tworzy JEDEN nowy plik w skrzynce wewnątrz vaulta (create-only,
+    // `kom_send` tworzy JEDEN nowy plik w skrzynce wewnątrz vaulta (create-only,
     // nic nie nadpisuje, nic nie wychodzi na zewnątrz) → YELLOW z przełącznikiem. Jawny
     // wyjątek narzędziowy musi wyprzedzić szeroką regułę `action === 'agent.message'` niżej —
     // ten sam wzór co artifact_update vs write.
     //
-    // K17 (AUD-security-109): `agent_delegate` dołącza do wyjątku, bo od tej naprawy jedzie
-    // pod akcją `agent.message` (wysyła list TYM SAMYM kodem co `kom_send`). Bez wpisu tutaj
-    // szeroka reguła niżej dałaby mu RED, czyli pytanie MOCNIEJSZE niż przy zwykłej poczcie —
-    // a to ta sama czynność o tym samym skutku i ma podlegać temu samemu przełącznikowi.
+    // `agent_delegate` dołącza do wyjątku, bo jedzie pod akcją `agent.message` (wysyła list
+    // TYM SAMYM kodem co `kom_send`). Bez wpisu tutaj szeroka reguła niżej dałaby mu RED,
+    // czyli pytanie MOCNIEJSZE niż przy zwykłej poczcie — a to ta sama czynność o tym samym
+    // skutku i ma podlegać temu samemu przełącznikowi.
     if (tool === 'kom_send' || tool === 'agent_delegate') return TOOL_RISK_LEVELS.YELLOW;
 
     const redTools = new Set([
         'delete', 'vault_delete', 'memory_delete',
         // `agent_message`/`connect_to_server` już nie istnieją — wpisy zostają fail-closed
-        // na wypadek wywołania po starej nazwie (wzór E3.1 faza C).
+        // na wypadek wywołania po starej nazwie.
         'agent_message', 'connect_to_server',
     ]);
     if (redTools.has(tool)) return TOOL_RISK_LEVELS.RED;
@@ -167,7 +167,7 @@ export function classifyToolRisk({
         'memory_save',
         'artifact_create', 'artifact_update',
         'web_search', 'web_read',
-        // K17: `agent_delegate` NIE stoi już w tym zbiorze — ma jawny wyjątek wyżej, tak jak
+        // `agent_delegate` NIE stoi już w tym zbiorze — ma jawny wyjątek wyżej, tak jak
         // `kom_send`. Jedna nazwa w dwóch miejscach kończy się pytaniem „która wygrywa".
         'delegate',
         'generate_image', 'add_text_to_image',

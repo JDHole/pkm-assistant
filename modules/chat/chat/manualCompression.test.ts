@@ -1,10 +1,11 @@
 /**
- * AUD-code-review-053: guzik 🗜️ „Sumaryzuj chat" (`chat_ui.ts`) i komenda `/compress`
- * (`SlashCommandsRegistry.ts`) miały osobno wklejoną tę samą gałąź decyzyjną kompresji ręcznej —
- * i gałąź „nic się nie zmieniło" zdążyła się rozjechać na dwa różne teksty i18n
- * (`chat.nothing_to_summarize` vs `chat.streaming.below_threshold`) dla TEGO SAMEGO stanu.
+ * Guzik 🗜️ „Sumaryzuj chat" (`chat_ui.ts`) i komenda `/compress` (`SlashCommandsRegistry.ts`)
+ * muszą wołać JEDNĄ wspólną gałąź decyzyjną kompresji ręcznej (`runManualCompression`) - dwie
+ * osobne kopie tej gałęzi mogłyby się rozjechać na dwa różne teksty i18n dla gałęzi „nic się
+ * nie zmieniło" (`chat.nothing_to_summarize` vs `chat.streaming.below_threshold`) dla TEGO
+ * SAMEGO stanu.
  *
- * Oba pliki importują `obsidian` (Notice), więc AVA nie może ich zaimportować wprost — strażnik
+ * Oba pliki importują `obsidian` (Notice), więc AVA nie może ich zaimportować wprost - strażnik
  * czyta ŹRÓDŁO (wzór `turnOwner.test.ts`) + testuje wyciągnięte ciało `runManualCompression`
  * jako prawdziwy JS (funkcja nie ma zależności od `this`/obsidian poza wstrzykniętym `Notice`/`t`).
  */
@@ -16,9 +17,9 @@ const readSource = (rel: string) => readFileSync(fileURLToPath(new URL(rel, impo
 const uiSource = readSource('./chat_ui.ts');
 const slashSource = readSource('./SlashCommandsRegistry.ts');
 
-test('chat.streaming.below_threshold zniknął jako WOŁANIE t() (duplikat i18n skasowany, AUD-code-review-053)', t => {
+test('chat.streaming.below_threshold nie jest wołany jako t() (duplikat i18n skasowany)', t => {
     for (const src of [uiSource, slashSource]) {
-        t.false(src.includes("t('chat.streaming.below_threshold')"), 'klucz nie ma prawa być już wołany przez t() — może zostać wyłącznie jako historyczna wzmianka w komentarzu');
+        t.false(src.includes("t('chat.streaming.below_threshold')"), 'klucz nie ma prawa być już wołany przez t() - może zostać wyłącznie jako historyczna wzmianka w komentarzu');
     }
     const en = readSource('../../../core/i18n/en.ts');
     const pl = readSource('../../../core/i18n/pl.ts');

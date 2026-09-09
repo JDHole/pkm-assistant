@@ -1,5 +1,5 @@
 /**
- * `core/ui/safeHtml` — dwie funkcje, które zostały po dawnej warstwie renderu (V-09).
+ * `core/ui/safeHtml` - sanityzacja i czyszczenie fragmentów HTML.
  *
  * Sanityzacja jest tu jedynym powodem istnienia `fragmentFromHtml`: fragment bywa budowany
  * z treści, której plugin nie napisał (odpowiedź modelu, notatka usera), więc `javascript:`
@@ -14,8 +14,8 @@ const html = (frag: DocumentFragment): string =>
 
 /**
  * Poza przeglądarką (AVA nie ma `document`) `fragmentFromHtml` oddaje atrapę `PlainNode`
- * o wąskim, udokumentowanym kształcie — ten interfejs opisuje dokładnie te pola, żeby
- * testy F10 mogły sprawdzać strukturę drzewa bez castowania do `HTMLElement` na siłę.
+ * o wąskim, udokumentowanym kształcie - ten interfejs opisuje dokładnie te pola, żeby
+ * testy mogły sprawdzać strukturę drzewa bez castowania do `HTMLElement` na siłę.
  */
 interface PlainLike {
     readonly tagName: string;
@@ -28,7 +28,6 @@ interface PlainLike {
 
 const asPlain = (frag: DocumentFragment): PlainLike => frag as unknown as PlainLike;
 
-// ── C11.1 ────────────────────────────────────────────────────────────────────
 test('fragmentFromHtml usuwa href/src z javascript:', t => {
     const frag = fragmentFromHtml(
         '<a href="javascript:alert(1)">klik</a><img src="JavaScript:alert(2)">',
@@ -39,7 +38,6 @@ test('fragmentFromHtml usuwa href/src z javascript:', t => {
     t.true(wynik.includes('klik'), 'sanityzacja zjadła treść, nie tylko atrybut');
 });
 
-// ── C11.2 ────────────────────────────────────────────────────────────────────
 test('fragmentFromHtml usuwa atrybuty on*', t => {
     const frag = fragmentFromHtml('<div onclick="alert(1)" onmouseover="alert(2)">tekst</div>');
     const wynik = html(frag).toLowerCase();
@@ -49,7 +47,6 @@ test('fragmentFromHtml usuwa atrybuty on*', t => {
     t.true(wynik.includes('tekst'));
 });
 
-// ── C11.3 ────────────────────────────────────────────────────────────────────
 test('clearElement czyści dzieci', t => {
     const frag = fragmentFromHtml('<div id="cel"><span>a</span><span>b</span></div>');
     const el = (frag as unknown as { querySelector(sel: string): HTMLElement }).querySelector('#cel');
@@ -59,9 +56,9 @@ test('clearElement czyści dzieci', t => {
     t.is(el.childNodes.length, 0);
 });
 
-// ═══ F10 — mutacje parsera i sanityzacji (core/ui/safeHtml.ts) ═══════════════
+// ═══ Mutacje parsera i sanityzacji (core/ui/safeHtml.ts) ═════════════════════
 
-// ── F10.1 (NAME_CHARS musi łapać WSZYSTKIE cyfry, nie tylko 0-1) ──────────────
+// ── (NAME_CHARS musi łapać WSZYSTKIE cyfry, nie tylko 0-1) ──────────────
 test('fragmentFromHtml zachowuje wszystkie cyfry w nazwie znacznika (np. h2)', t => {
     const frag = asPlain(fragmentFromHtml('<h2>Tytul</h2>'));
     const el = frag.querySelector('h2');
@@ -70,7 +67,7 @@ test('fragmentFromHtml zachowuje wszystkie cyfry w nazwie znacznika (np. h2)', t
     t.is(el?.textContent, 'Tytul');
 });
 
-// ── F10.2 (wejście bez ŻADNEGO znacznika kończy parser normalnie) ────────────
+// ── (wejście bez ŻADNEGO znacznika kończy parser normalnie) ────────────
 test('fragmentFromHtml zwraca cały tekst bez zniekształceń, gdy wejście nie ma znaczników', t => {
     const frag = asPlain(fragmentFromHtml('hello world'));
 
@@ -79,7 +76,7 @@ test('fragmentFromHtml zwraca cały tekst bez zniekształceń, gdy wejście nie 
     t.is(frag.textContent, 'hello world');
 });
 
-// ── F10.3 (niedomknięty komentarz nie przecieka treści) ──────────────────────
+// ── (niedomknięty komentarz nie przecieka treści) ──────────────────────
 test('fragmentFromHtml nie przecieka treści niedomkniętego komentarza', t => {
     const frag = asPlain(fragmentFromHtml('<!-- oops'));
 
@@ -87,7 +84,7 @@ test('fragmentFromHtml nie przecieka treści niedomkniętego komentarza', t => {
     t.is(frag.textContent, '');
 });
 
-// ── F10.4 (parser idzie dalej po prawidłowo zamkniętym znaczniku) ────────────
+// ── (parser idzie dalej po prawidłowo zamkniętym znaczniku) ────────────
 test('fragmentFromHtml parsuje kolejny element po prawidłowo zamkniętym poprzednim', t => {
     const frag = asPlain(fragmentFromHtml('<div>hi</div><p>world</p>'));
 
@@ -96,7 +93,7 @@ test('fragmentFromHtml parsuje kolejny element po prawidłowo zamkniętym poprze
     t.true(frag.textContent.includes('world'));
 });
 
-// ── F10.5 (nazwa znacznika zamykającego musi pasować DOKŁADNIE) ──────────────
+// ── (nazwa znacznika zamykającego musi pasować DOKŁADNIE) ──────────────
 test('fragmentFromHtml domyka zagnieżdżony znacznik, tekst po nim trafia do rodzica jako rodzeństwo', t => {
     const frag = fragmentFromHtml('<div>a<span>b</span>c</div>');
     const wynik = html(frag);
@@ -104,7 +101,7 @@ test('fragmentFromHtml domyka zagnieżdżony znacznik, tekst po nim trafia do ro
     t.is(wynik, '<div>a<span>b</span>c</div>');
 });
 
-// ── F10.6 (domknięcie elementu NAJWYŻSZEGO poziomu, nie tylko zagnieżdżonego) ─
+// ── (domknięcie elementu NAJWYŻSZEGO poziomu, nie tylko zagnieżdżonego) ─
 test('fragmentFromHtml domyka element najwyższego poziomu, kolejny tekst trafia do korzenia', t => {
     const frag = fragmentFromHtml('<div>a</div>b');
     const wynik = html(frag);
@@ -112,7 +109,7 @@ test('fragmentFromHtml domyka element najwyższego poziomu, kolejny tekst trafia
     t.is(wynik, '<div>a</div>b');
 });
 
-// ── F10.7 (niedomknięty cudzysłów atrybutu konsumuje resztę wejścia RAZ) ─────
+// ── (niedomknięty cudzysłów atrybutu konsumuje resztę wejścia RAZ) ─────
 // Realna właściwość parsera "tolerancyjnego": wartość bez zamykającego cudzysłowu
 // leci do końca łańcucha w JEDNYM przebiegu, parser się kończy. (Bug bliźniaczy:
 // zła arytmetyka tu potrafi cofnąć `i` do 0 i wejść w nieskończoną pętlę.)
@@ -123,7 +120,7 @@ test('fragmentFromHtml domyka niedomknięty cudzysłów atrybutu do końca wejś
     t.is(wynik, '<div attr="never closes"></div>');
 });
 
-// ── F10.8 (niedomknięta GOŁA wartość atrybutu na końcu wejścia) ──────────────
+// ── (niedomknięta GOŁA wartość atrybutu na końcu wejścia) ──────────────
 test('fragmentFromHtml domyka niedomkniętą, gołą (bez cudzysłowu) wartość atrybutu na końcu wejścia', t => {
     const frag = fragmentFromHtml('<div class=foo');
     const wynik = html(frag);
@@ -131,7 +128,7 @@ test('fragmentFromHtml domyka niedomkniętą, gołą (bez cudzysłowu) wartość
     t.is(wynik, '<div class="foo"></div>');
 });
 
-// ── F10.9 (encja liczbowa z cyfrą 0 musi dekodować się w CAŁOŚCI) ────────────
+// ── (encja liczbowa z cyfrą 0 musi dekodować się w CAŁOŚCI) ────────────
 // `&#106;` = 'j' — pierwsza litera "javascript:" zaszyta jako encja HTML. Realny
 // wektor obejścia filtra schematu, jeśli dekoder gubi cyfrę '0' w numerze encji.
 test('fragmentFromHtml wykrywa javascript: gdy pierwsza litera jest encją liczbową (&#106;)', t => {
@@ -142,7 +139,7 @@ test('fragmentFromHtml wykrywa javascript: gdy pierwsza litera jest encją liczb
     t.true(wynik.includes('klik'), 'sanityzacja zjadła treść, nie tylko atrybut');
 });
 
-// ── F10.10 (granica Unicode 0x10FFFF/0x110000 nie może wywalić parsera) ──────
+// ── (granica Unicode 0x10FFFF/0x110000 nie może wywalić parsera) ──────
 test('fragmentFromHtml nie rzuca na encji liczbowej dokładnie na granicy Unicode (0x110000)', t => {
     t.notThrows(() => {
         const frag = fragmentFromHtml('<a href="&#1114112;test">link</a>');
@@ -150,7 +147,7 @@ test('fragmentFromHtml nie rzuca na encji liczbowej dokładnie na granicy Unicod
     });
 });
 
-// ── F10.11 (schemat javascript: w ŚRODKU wartości stylu, nie tylko na początku) ─
+// ── (schemat javascript: w ŚRODKU wartości stylu, nie tylko na początku) ─
 test('fragmentFromHtml usuwa styl, gdy javascript: występuje w środku wartości', t => {
     const frag = fragmentFromHtml('<div style="background: url(javascript:alert(1))">x</div>');
     const wynik = html(frag).toLowerCase();
@@ -158,7 +155,7 @@ test('fragmentFromHtml usuwa styl, gdy javascript: występuje w środku wartośc
     t.false(wynik.includes('javascript:'), 'schemat javascript: w środku stylu przeszedł do DOM');
 });
 
-// ── F10.12 (outerHTML jest TYLKO dla elementów, nie dla węzłów tekstowych) ───
+// ── (outerHTML jest TYLKO dla elementów, nie dla węzłów tekstowych) ───
 test('fragmentFromHtml udostępnia outerHTML na elemencie, nie tylko textContent', t => {
     const frag = asPlain(fragmentFromHtml('<div>hi</div>'));
     const el = frag.childNodes[0];
@@ -166,7 +163,7 @@ test('fragmentFromHtml udostępnia outerHTML na elemencie, nie tylko textContent
     t.is(el.outerHTML, '<div>hi</div>');
 });
 
-// ── F10.13 (querySelector nigdy nie dopasowuje węzła tekstowego) ─────────────
+// ── (querySelector nigdy nie dopasowuje węzła tekstowego) ─────────────
 test('fragmentFromHtml querySelector nigdy nie dopasowuje węzła tekstowego do selektora', t => {
     const frag = asPlain(fragmentFromHtml('before<div id="cel">x</div>'));
     const el = frag.querySelector('#cel');
@@ -175,7 +172,7 @@ test('fragmentFromHtml querySelector nigdy nie dopasowuje węzła tekstowego do 
     t.is(el?.tagName, 'div');
 });
 
-// ── F10.14 (selektor klasy ".x" ≠ selektor znacznika "x") ────────────────────
+// ── (selektor klasy ".x" ≠ selektor znacznika "x") ────────────────────
 test('fragmentFromHtml querySelector rozróżnia selektor klasy od selektora znacznika', t => {
     const frag = asPlain(fragmentFromHtml('<div class="foo">a</div><span>b</span>'));
 
@@ -188,7 +185,7 @@ test('fragmentFromHtml querySelector rozróżnia selektor klasy od selektora zna
     t.is(byTag?.tagName, 'span');
 });
 
-// ── F10.15 (pierwsze NIEDOPASOWANE dziecko nie może zostać zwrócone) ─────────
+// ── (pierwsze NIEDOPASOWANE dziecko nie może zostać zwrócone) ─────────
 test('fragmentFromHtml querySelector nie zwraca przypadkowego pierwszego dziecka, gdy ono nie pasuje', t => {
     const frag = asPlain(fragmentFromHtml('<span>x</span><div id="cel">y</div>'));
     const el = frag.querySelector('#cel');
@@ -198,7 +195,7 @@ test('fragmentFromHtml querySelector nie zwraca przypadkowego pierwszego dziecka
     t.is(el?.textContent, 'y');
 });
 
-// ── F10.16 (ścieżka PRAWDZIWEGO DOM, gdy `document` istnieje w środowisku) ───
+// ── (ścieżka PRAWDZIWEGO DOM, gdy `document` istnieje w środowisku) ───
 // AVA nie ma `document` — ta ścieżka (browserDocument + toDom) inaczej nigdy się
 // nie wykona. Podstawiamy minimalną atrapę `Document`, żeby przejść przez nią naprawdę.
 interface FakeDomNode {
@@ -253,7 +250,7 @@ test('fragmentFromHtml buduje prawdziwe drzewo DOM, gdy document.createDocumentF
     }
 });
 
-// ── F10.17 (wejście nie-stringowe, ale FAŁSZYWE-nie-nullish, np. `0`) ────────
+// ── (wejście nie-stringowe, ale FAŁSZYWE-nie-nullish, np. `0`) ────────
 // `String(html ?? '')` musi zostać nullish-coalescingiem: `0`, `false` to wartości,
 // nie brak wartości — `||` zamieniłby je po cichu na pusty ciąg.
 test('fragmentFromHtml dla nie-stringowego, fałszywego wejścia (0) oddaje jego tekst, nie pusty ciąg', t => {

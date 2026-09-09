@@ -1,7 +1,7 @@
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
 import { arrayBufferToBase64, fenceUntrusted } from '../../core/index.js';
-// `import type` = ZERO emitu — plik dalej nie wciąga `obsidian` do runtime'u
+// `import type` = ZERO emitu - plik dalej nie wciąga `obsidian` do runtime'u
 // (test `active_note.test.ts` importuje go w gołym Node, bez mocka).
 import type { App, TFile } from 'obsidian';
 
@@ -17,14 +17,14 @@ export interface ActiveNoteContext {
     images: ImageUrlBlock[];
 }
 
-/** Opcje `buildActiveNoteContext` — patrz `canReadImage` (K23). */
+/** Opcje `buildActiveNoteContext` - patrz `canReadImage`. */
 export interface ActiveNoteOptions {
     /**
-     * K23 (AUD-security-119): bramka dostępu do OSADZONYCH obrazów (`![[…]]`).
+     * Bramka dostępu do OSADZONYCH obrazów (`![[…]]`).
      *
      * Dostaje ścieżkę vaultową rozwiązanego pliku i mówi, czy agent tej tury ma prawo ją
      * czytać. Wołacz buduje ją z pełnego `PermissionSystem.checkPermission(agent,'vault.read',…)`
-     * — No-Go, pliki chronione, whitelista `focusFolders`, `admin_access`. Ten moduł ma
+     * - No-Go, pliki chronione, whitelista `focusFolders`, `admin_access`. Ten moduł ma
      * zostać node-testowalny, więc NIE importuje `core/security` sam.
      *
      * BRAK predykatu = fail-closed: żaden osadzony obraz nie zejdzie z dysku. Nowy wołacz,
@@ -40,13 +40,13 @@ const ACTIVE_NOTE_OPTIMIZE_THRESHOLD = 1024 * 1024;
 const ACTIVE_NOTE_MAX_DIM = 1568;
 
 /**
- * Ogrodzenie Oczka (K9 / AUD-security-002).
+ * Ogrodzenie Oczka.
  *
  * `text` z tej funkcji dokleja się na KONIEC promptu systemowego (`chat_streaming`), a niesie
- * nazwę pliku, frontmatter i do 2000 znaków body — czyli tekst, którego operator nie pisał
+ * nazwę pliku, frontmatter i do 2000 znaków body - czyli tekst, którego operator nie pisał
  * (notatka z clippera, wynik `web_read` zapisany przez agenta, plik z synca). Bez ogrodzenia
  * nagłówek `## …` z notatki jest nagłówkiem promptu. Jedna funkcja dla wszystkich kanałów:
- * `core/security/promptFence.js` — escapuje treść, więc znacznika nie da się zamknąć od środka.
+ * `core/security/promptFence.js` - escapuje treść, więc znacznika nie da się zamknąć od środka.
  */
 function fenceActiveNote(text: string): string {
     return fenceUntrusted(text, 'active_note');
@@ -57,14 +57,14 @@ function fenceActiveNote(text: string): string {
  * Returns { text, images } where images are OpenAI-style image_url blocks.
  * `text` wraca ZAWSZE w ogrodzeniu `<vault_content source="active_note">` (patrz `fenceActiveNote`).
  *
- * DWIE BRAMKI, DWIE RÓŻNE RZECZY (K9 + K23):
- *  - `text` (nazwa pliku, frontmatter, do 2000 znaków body) jest OGRODZONY — to obrona przed
+ * DWIE BRAMKI, DWIE RÓŻNE RZECZY:
+ *  - `text` (nazwa pliku, frontmatter, do 2000 znaków body) jest OGRODZONY - to obrona przed
  *    wstrzyknięciem instrukcji, nie przed wyciekiem.
- *  - `images` z OSADZEŃ przechodzą przez `opts.canReadImage` — to obrona przed wyniesieniem
+ *  - `images` z OSADZEŃ przechodzą przez `opts.canReadImage` - to obrona przed wyniesieniem
  *    pliku, którego agent nie ma prawa czytać.
  *
  * Granica idzie po INTENCJI USERA: aktywny plik user otworzył SAM (jego wybór, jego ryzyko),
- * ale osadzenia `![[…]]` wciąga za nim treść notatki — a tę mógł napisać ktokolwiek
+ * ale osadzenia `![[…]]` wciąga za nim treść notatki - a tę mógł napisać ktokolwiek
  * (clipper, sync, plik od kogoś). Dlatego bramkujemy osadzenia, nie sam otwarty plik.
  */
 export async function buildActiveNoteContext(app: App, opts: ActiveNoteOptions = {}): Promise<ActiveNoteContext | null> {
@@ -115,12 +115,12 @@ export async function buildActiveNoteContext(app: App, opts: ActiveNoteOptions =
     }
 
     if (raw) {
-        // K23: predykat czytany RAZ, przed pętlą — brak = żadnych bajtów (fail-closed).
+        // Predykat czytany RAZ, przed pętlą - brak = żadnych bajtów (fail-closed).
         const canReadImage = typeof opts?.canReadImage === 'function' ? opts.canReadImage : null;
         const embeddedImages = extractEmbeddedImagePaths(raw);
 
         if (embeddedImages.length > 0 && !canReadImage) {
-            log.warn('ActiveNote', `Embedded images skipped (${embeddedImages.length}): no access predicate (K23 fail-closed)`);
+            log.warn('ActiveNote', `Embedded images skipped (${embeddedImages.length}): no access predicate (fail-closed)`);
         }
 
         for (const imgPath of embeddedImages.slice(0, ACTIVE_NOTE_MAX_IMAGES)) {
@@ -164,13 +164,13 @@ export async function readVaultImageAsBlock(app: App, file: TFile): Promise<Imag
                 const newW = Math.round(width * scale);
                 const newH = Math.round(height * scale);
                 // Element odłączony: bufor offscreen do zmiany rozmiaru obrazu, nigdy nie
-                // trafia do DOM — `createEl` globalny z obsidiana robi to samo co
+                // trafia do DOM - `createEl` globalny z obsidiana robi to samo co
                 // `document.createElement('canvas')`, bez parenta. Ta gałąź kodu nie jest
                 // wołana przez testy AVA (`active_note.test.ts`), więc plik zostaje node-safe.
                 const canvas = createEl('canvas');
                 canvas.width = newW;
                 canvas.height = newH;
-                // Świeży `<canvas>` zawsze oddaje kontekst 2D; gdyby nie — TypeError leci
+                // Świeży `<canvas>` zawsze oddaje kontekst 2D; gdyby nie - TypeError leci
                 // do `catch (optErr)` poniżej i wracamy do oryginału, tak jak dotąd.
                 const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
                 ctx.drawImage(bitmap, 0, 0, newW, newH);
@@ -178,7 +178,7 @@ export async function readVaultImageAsBlock(app: App, file: TFile): Promise<Imag
                 const optimizedBlob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/jpeg', 0.85));
                 canvas.width = 0;
                 canvas.height = 0;
-                // `toBlob` może oddać null — wtedy leci TypeError w to samo `catch` co wyżej.
+                // `toBlob` może oddać null - wtedy leci TypeError w to samo `catch` co wyżej.
                 const optimizedBuffer = await optimizedBlob!.arrayBuffer();
                 const base64 = arrayBufferToBase64(optimizedBuffer);
                 log.info('ActiveNote', `Optimized ${file.name} ${width}x${height} -> ${newW}x${newH}`);
@@ -222,7 +222,7 @@ export function extractEmbeddedImagePaths(content: string): string[] {
 
 function looksLikeImage(path: string): boolean {
     const ext = path.split('.').pop()?.toLowerCase();
-    // `pop()` na wyniku `split` nie jest undefined, ale TS tego nie wie — asercja zamiast
+    // `pop()` na wyniku `split` nie jest undefined, ale TS tego nie wie - asercja zamiast
     // dokładania strażnika (runtime bez zmian).
     return ACTIVE_NOTE_IMAGE_EXTENSIONS.includes(ext as string);
 }

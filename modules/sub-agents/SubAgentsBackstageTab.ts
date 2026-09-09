@@ -1,13 +1,13 @@
 /**
- * Zaplecze → zakładka „Szablony subów" (S27 Z3).
+ * Zaplecze → zakładka „Szablony subów".
  *
  * Pierwsza karta to zawsze **pkm-sub** — fabryczny worker wpisany w kod (nie na dysku),
  * więc read-only i niezniszczalny. Dalej idą SZABLONY subów z
- * `.pkm-assistant/templates/sub-agents/` (formy odlewnicze — D3/D4).
+ * `.pkm-assistant/templates/sub-agents/` (formy odlewnicze).
  *
  * Dokładnie JEDEN byt jest „globalny": konfiguracja, której używa `delegate` wywołane
  * BEZ `aspect`, dla wszystkich agentów (`settings.pkmAssistant.globalSubTemplate`;
- * null = fabryczny pkm-sub, zawsze dostępny jako odwrót — D2).
+ * null = fabryczny pkm-sub, zawsze dostępny jako odwrót).
  */
 import {
     IconGenerator,
@@ -31,8 +31,8 @@ import {
 import { DEFAULT_SUB_AGENT_TOOLS, PKM_SUB_NAME } from './SubAgentLoader.js';
 import { resolveDeleteOutcome } from './deleteOutcome.js';
 import { guardTemplateUse } from './templateUseOutcome.js';
-// AUD-testy-021: decyzje stanu ("Użyj u agenta" + reset globalnego suba po kasacji)
-// wyjęte do czystego pliku obok deleteOutcome.js/templateUseOutcome.js.
+// Decyzje stanu ("Użyj u agenta" + reset globalnego suba po kasacji)
+// żyją w czystym pliku obok deleteOutcome.js/templateUseOutcome.js.
 import { computeSubAgentsAfterTemplateUse, computeGlobalSubAfterTemplateDelete } from './templateAssignmentOutcome.js';
 import { t } from '../../core/i18n/index.js';
 import { log } from '../../core/utils/Logger.js';
@@ -189,12 +189,12 @@ function renderTemplateCard(list: UiBoundary, tpl: UiBoundary, { plugin, nav, st
 
     const actions = card.createDiv({ cls: 'cs-item-card__actions' });
     renderUseAtAgentButton(actions, agents, (agentName: string) => {
-        // AUD-bledy-014: `renderUseAtAgentButton` PORZUCA zwróconą obietnicę (`onPick(name)`
+        // `renderUseAtAgentButton` PORZUCA zwróconą obietnicę (`onPick(name)`
         // bez `await`/`.catch`), a `useTemplateAtAgent` robi dwa zapisy pod rząd. Bez tego
-        // bezpiecznika rzut z któregokolwiek leciał w próżnię: zero komunikatu, lista bez
-        // odświeżenia, a kopia suba potrafiła już leżeć na dysku bez przypisania do agenta
-        // (drugie kliknięcie odlewało kolejną, z sufiksem `-2`). Ta sama operacja z
-        // `SubAgentEditorModal` ma `catch` od zawsze - tu była luka, nie konwencja.
+        // bezpiecznika rzut z któregokolwiek leciałby w próżnię: zero komunikatu, lista bez
+        // odświeżenia, a kopia suba mogłaby już leżeć na dysku bez przypisania do agenta
+        // (drugie kliknięcie odlałoby kolejną, z sufiksem `-2`). Ta sama operacja z
+        // `SubAgentEditorModal` ma `catch` - tu bezpiecznik jest lokalny, nie konwencja globalna.
         void (async () => {
             const outcome = await guardTemplateUse(() => useTemplateAtAgent(tpl, agentName, { plugin, store, nav }));
             if (outcome.ok) return;
@@ -228,16 +228,16 @@ function renderTemplateCard(list: UiBoundary, tpl: UiBoundary, { plugin, nav, st
                 destructive: true,
             });
             if (!okToDelete) return;
-            // AUD-bledy-012: `store.delete` zwraca `false`, gdy kasowanie padło - bez tego
-            // kafel znikał z widoku po `nav.refresh()`, a szablon zostawał na dysku.
+            // `store.delete` zwraca `false`, gdy kasowanie padnie - bez sprawdzenia tego
+            // kafel znikałby z widoku po `nav.refresh()`, a szablon zostawałby na dysku.
             const outcome = resolveDeleteOutcome(await store.delete(tpl.slug), tpl.name);
             if (!outcome.ok) {
                 const { Notice } = await import('obsidian');
                 new Notice(t(outcome.messageKey, outcome.params));
                 return;
             }
-            // AUD-testy-021: ta sama reguła, teraz z testem (computeGlobalSubAfterTemplateDelete).
-            // Globalny wskaźnik nie może wisieć na skasowanym szablonie — wracamy na pkm-sub.
+            // Ta sama reguła, z testem w computeGlobalSubAfterTemplateDelete:
+            // globalny wskaźnik nie może wisieć na skasowanym szablonie — wracamy na pkm-sub.
             const globalReset = computeGlobalSubAfterTemplateDelete(isGlobal);
             if (globalReset.changed) await setGlobalSub(plugin, null, globalReset.slug, PKM_SUB_NAME, { silent: true });
             nav.refresh();
@@ -250,7 +250,7 @@ function renderTemplateCard(list: UiBoundary, tpl: UiBoundary, { plugin, nav, st
 }
 
 /**
- * S27 D2: zawsze dokładnie jeden globalny. `null` = fabryczny pkm-sub.
+ * Zawsze dokładnie jeden globalny. `null` = fabryczny pkm-sub.
  */
 async function setGlobalSub(plugin: UiBoundary, nav: UiBoundary, slug: string | null, label: string, { silent = false }: { silent?: boolean } = {}) {
     const pkm = plugin?.env?.settings?.pkmAssistant;
@@ -264,7 +264,7 @@ async function setGlobalSub(plugin: UiBoundary, nav: UiBoundary, slug: string | 
     nav?.refresh?.();
 }
 
-/** Odlej kopię szablonu suba do Ekipy wybranego agenta (D3). */
+/** Odlej kopię szablonu suba do Ekipy wybranego agenta. */
 async function useTemplateAtAgent(tpl: UiBoundary, agentName: string, { plugin, store, nav }: { plugin: UiBoundary; store: UiBoundary; nav: UiBoundary }) {
     const { Notice } = await import('obsidian');
     const agentManager = plugin.agentManager;
@@ -288,7 +288,7 @@ async function useTemplateAtAgent(tpl: UiBoundary, agentName: string, { plugin, 
         .map((name: string) => agent.getSubAgentAssignment?.(name))
         .filter(Boolean)
         .map((s: UiBoundary) => ({ ...s }));
-    // AUD-testy-021: decyzja (idempotencja + „pierwszy sub = domyślny") wyjęta do czystej
+    // Decyzja (idempotencja + „pierwszy sub = domyślny") żyje w czystej
     // funkcji z testami — widok zostaje z wywołaniem i zapisem.
     const decision = computeSubAgentsAfterTemplateUse(existingAssignments, result.name);
     if (decision.changed) {

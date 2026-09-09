@@ -1,9 +1,9 @@
 /**
- * factoryTemplates.js — fabryczne szablony Warsztatu/Zaplecza (E3.5 Deep Research).
+ * factoryTemplates.js - fabryczne szablony Warsztatu/Zaplecza (Deep Research).
  *
  * Seed 3 szablonów przy starcie: sub `researcher` + skille `deep-research-web` /
- * `deep-research-vault`. Wykonywany RAZ — marker `.pkm-assistant/templates/.factory-seeded-v1`
- * (wzór migratora `.migrated-v2` z E2.9). Kasacja usera jest SZANOWANA: szablon nie wraca
+ * `deep-research-vault`. Wykonywany RAZ - marker `.pkm-assistant/templates/.factory-seeded-v1`
+ * (wzór migratora `.migrated-v2`). Kasacja usera jest SZANOWANA: szablon nie wraca
  * przy restarcie (inaczej niż builtin typy artefaktów — typ to infrastruktura silnika,
  * szablon to oferta w Zapleczu). Podbicie treści fabrycznych w przyszłości = nowy sufiks
  * markera (`.factory-seeded-v2`) — świadoma decyzja, nie automat.
@@ -57,7 +57,7 @@ export function getFactorySubAgentTemplates() {
 
 /**
  * Fabryczne szablony SKILLI (kształt danych jak `SkillTemplateStore.createFromData`).
- * Głębokość = pre-question select (D4) — user decyduje przy każdym odpaleniu.
+ * Głębokość = pre-question select - user decyduje przy każdym odpaleniu.
  */
 export function getFactorySkillTemplates() {
     const glebokosc = {
@@ -96,7 +96,7 @@ export function getFactorySkillTemplates() {
 /**
  * Zaseeduj fabryczne szablony (idempotentne przez marker).
  *
- * Wołane z `AgentManager.initialize()` PO `loadAll()` obu store'ów — sprawdzanie kolizji
+ * Wołane z `AgentManager.initialize()` PO `loadAll()` obu store'ów - sprawdzanie kolizji
  * idzie po cache (`store.get` szuka po slugu i nazwie), a `createFromData` wpisuje nowe
  * szablony do cache, więc po seedzie nie trzeba przeładowywać.
  *
@@ -129,7 +129,7 @@ export async function ensureFactoryTemplates({ vault, skillTemplateStore, subAge
         }
         await vault.adapter.write(
             FACTORY_TEMPLATES_MARKER,
-            `E3.5 Deep Research — fabryczne szablony zaseedowane. Skasowanie tego pliku wywoła seed ponownie przy starcie.\n`
+            `Deep Research - fabryczne szablony zaseedowane. Skasowanie tego pliku wywoła seed ponownie przy starcie.\n`
         );
         log.debug('factoryTemplates', `Zaseedowano ${seeded} fabrycznych szablonów (marker utworzony)`);
         return true;

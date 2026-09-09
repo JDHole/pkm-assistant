@@ -1,5 +1,5 @@
 /**
- * Skill detail view in the Backstage sidebar (Sprint 10 Z6: extracted from
+ * Skill detail view in the Backstage sidebar (extracted from
  * modules/shell/sidebar/DetailViews.js so the rendering lives with its
  * owning module).
  */
@@ -13,9 +13,9 @@ type UiBoundary = any;
 /**
  * Render detailed view of a single skill.
  *
- * S27 Z2: ten sam widok obsługuje SZABLON (`params.template === true` → źródłem jest
+ * Ten sam widok obsługuje SZABLON (`params.template === true` → źródłem jest
  * `skillTemplateStore`) i żywy skill. Szablon nie ma sekcji „agenci" — nie jest używany,
- * jest kopiowany (D3); zamiast tego dostaje badge wersji.
+ * jest kopiowany; zamiast tego dostaje badge wersji.
  *
  * @param {HTMLElement} container
  * @param {Object} plugin
@@ -54,7 +54,7 @@ export function renderSkillDetailView(container: UiBoundary, plugin: UiBoundary,
         kindRow.createSpan({ cls: 'sidebar-detail-label', text: t('detail.kind') });
         kindRow.createSpan({ cls: 'sidebar-category-badge', text: t('detail.kind_template') });
     } else if (skill.fromTemplate) {
-        // S27 Z6: ślad pochodzenia kopii — user widzi z której formy odlewniczej to wyszło.
+        // Ślad pochodzenia kopii — user widzi z której formy odlewniczej to wyszło.
         const originRow = meta.createDiv({ cls: 'sidebar-detail-row' });
         originRow.createSpan({ cls: 'sidebar-detail-label', text: t('detail.from_template') });
         originRow.createSpan({ cls: 'sidebar-detail-value', text: skill.fromTemplate });
@@ -112,7 +112,7 @@ export function renderSkillDetailView(container: UiBoundary, plugin: UiBoundary,
         skill.userInvocable !== false ? UiIcons.eye(12) : UiIcons.lock(12),
         skill.userInvocable !== false ? t('detail.visible_in_ui') : t('detail.hidden'));
 
-    // S27 D3: szablon nie jest „używany" przez agentów — jest kopiowany. Sekcja tylko dla żywych.
+    // Szablon nie jest „używany" przez agentów — jest kopiowany. Sekcja tylko dla żywych.
     const agents = isTemplate ? [] : (plugin.agentManager?.getAllAgents() || []);
     const usedBy = agents.filter((a: UiBoundary) => a.skills?.includes(skill.slug) || a.skills?.includes(skill.name));
 
@@ -142,7 +142,7 @@ export function renderSkillDetailView(container: UiBoundary, plugin: UiBoundary,
         });
     }
 
-    // S27 D6: sekcja „Dozwolone narzędzia" (chipy z pola-fasady `allowed-tools`) WYCIĘTA.
+    // Sekcja „Dozwolone narzędzia" (chipy z pola-fasady `allowed-tools`) jest WYCIĘTA.
 
     if (skill.preQuestions?.length > 0) {
         const pqSection = container.createDiv({ cls: 'sidebar-detail-section' });

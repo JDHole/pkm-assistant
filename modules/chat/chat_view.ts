@@ -55,7 +55,7 @@ export class ChatView extends PluginItemView {
         this.is_generating = false;
         this.current_message_container = null;
 
-        // AUD-wydajnosc-071/072: koalescencja malowania strumienia (`chat/renderThrottle.ts`,
+        // Koalescencja malowania strumienia (`chat/renderThrottle.ts`,
         // leniwie w `_streamRenderThrottle`) + uchwyt zaplanowanego przerysowania łączników.
         // Oba rozbrajane w `onClose` — timer w zamkniętym widoku malowałby w nicość.
         this._renderThrottle = null;
@@ -68,36 +68,35 @@ export class ChatView extends PluginItemView {
         // Session timeout tracking (detect return after long inactivity)
         this.lastMessageTimestamp = null;
 
-        // Autonomy (E2.3 D21 / F12) — per-chat: whether the agent ASKS before acting.
+        // Autonomy — per-chat: whether the agent ASKS before acting.
         // Independent axis from permissions (what the agent MAY do). Mirrored on plugin
-        // for sub-agent inheritance. Replaces the old Gadaj/Rób work mode entirely.
-        // E2.8 A6 (S5): wartość startowa może przyjść z agenta (agent.default_autonomy).
+        // for sub-agent inheritance.
+        // Wartość startowa może przyjść z agenta (agent.default_autonomy).
         this.currentAutonomy = this._getDefaultAutonomy(this.plugin?.agentManager?.getActiveAgent?.());
         if (this.plugin) this.plugin.currentAutonomy = this.currentAutonomy;
 
-        // E2.9 FAZA B (B3/A17): aktywny artefakt tej rozmowy (per-tab, wzór currentAutonomy).
-        // Ustawiany przez przywołanie (B2) albo segment slim bara (C); null = brak aktywnego.
+        // Aktywny artefakt tej rozmowy (per-tab, wzór currentAutonomy).
+        // Ustawiany przez przywołanie albo segment slim bara; null = brak aktywnego.
         this.currentArtifactId = null;
 
-        // E2.9 FAZA D (D2): ostatni stan listy `todo` (live-widok w slocie inputu). Aktualizowany przez
+        // Ostatni stan listy `todo` (live-widok w slocie inputu). Aktualizowany przez
         // reactor po tool-callu `todo`; czyszczony przy przełączeniu agenta (unikamy stanu cross-agent).
         this._activeTodoState = null;
 
-        // N4: który widok pokazuje slot paska dolnego ('input' = textarea, 'todo' = lista zadań)
+        // Który widok pokazuje slot paska dolnego ('input' = textarea, 'todo' = lista zadań)
         // + model z poprzedniego renderu, po którym resolver poznaje pojawienie się/zniknięcie listy.
         this._bottomBarMode = DEFAULT_BOTTOM_BAR_MODE;
         this._prevTodoModel = null;
 
-        // F2: bezpiecznik serializacji auto-tur z wynikami subów z tła. Ustawiany przez
+        // Bezpiecznik serializacji auto-tur z wynikami subów z tła. Ustawiany przez
         // `_deliverSubTaskResult` synchronicznie (drain woła dostawcę w pętli), gaszony
         // w `send_message` na `set_generating(true)` — dalej pilnuje już `is_generating`.
         this._subTaskTurnPending = false;
 
-        // K5: „po Stopie nie sięgamy sami po zaległe wyniki subów". Dawniej rolę tego
-        // bezpiecznika pełniło pole `_abortedStream` (jedna flaga przerwania na cały widok) —
-        // a że gasiła je każda kolejna wiadomość, gasiła przy okazji przerwanie tury, która
-        // wciąż biegła. Przerwanie zamieszkało w turze (`turnAbort.ts`), a bezpiecznik drenu
-        // został tutaj: podnosi go Stop/watchdog, gasi start następnej tury.
+        // „Po Stopie nie sięgamy sami po zaległe wyniki subów". Przerwanie żyje w turze
+        // (`turnAbort.ts`, per-tura, nie per-widok) — jedna globalna flaga przerwania na cały
+        // widok gasiłaby przy okazji przerwanie tury, która wciąż biegnie w innej zakładce.
+        // Bezpiecznik drenu żyje tutaj: podnosi go Stop/watchdog, gasi start następnej tury.
         this._drainSuppressed = false;
 
         // Pasek biegów subów pod zakładkami: który bieg jest rozwinięty (jeden naraz) +
@@ -107,7 +106,7 @@ export class ChatView extends PluginItemView {
         this._subStripUnsubs = [];
         this._subStripTimer = null;
 
-        // Z3 (FAIL 6): szkic usera przechwycony przez kolejkę wiadomości. Ustawia go
+        // Szkic usera przechwycony przez kolejkę wiadomości. Ustawia go
         // `set_generating(false)` tuż przed wysłaniem zakolejkowanej treści, a oddaje
         // `send_message` po `resetInputArea()`. Jednorazowy — poza tym oknem zawsze `null`.
         this._draftAfterSend = null;
@@ -119,7 +118,7 @@ export class ChatView extends PluginItemView {
         this.chatTabs = []; // [{agentName, isActive}]
         this._agentStates = new Map(); // agentName -> {rollingWindow, tokenTracker, autonomy, scrollTop, isGenerating}
         this._streamCtxMap = new Map(); // agentName -> streaming context (active streams)
-        // K5: agentName -> uchwyt przerwania tury, która jest jeszcze W PRZYGOTOWANIU (guzik Stop
+        // agentName -> uchwyt przerwania tury, która jest jeszcze W PRZYGOTOWANIU (guzik Stop
         // już się pali, ale prompt z pamięcią się buduje i wpisu w `_streamCtxMap` jeszcze nie ma).
         this._preparingTurns = new Map();
         this.slashCommands = createDefaultSlashCommands();
@@ -152,7 +151,7 @@ export class ChatView extends PluginItemView {
         await this.initSessionManager();
         this._subscribeAgentManagerEvents();
         this._subscribeSkinEvents();
-        // F2: dopiero TU, po `initSessionManager` (czyli po `_restoreActiveSession`) — dostawca
+        // Dopiero TU, po `initSessionManager` (czyli po `_restoreActiveSession`) — dostawca
         // dopasowuje wynik do zakładki, więc zakładki muszą już stać. Wpięcie robi też pierwszy
         // `drain`: wyniki subów, które skończyły przy zamkniętym czacie, wjeżdżają od razu.
         this._wireSubTaskDeliverer();
@@ -161,7 +160,7 @@ export class ChatView extends PluginItemView {
     }
 
     onClose(): Runtime {
-        // F2: zamknięty czat nie ma jak dostarczyć wyniku suba (ani gdzie odpalić auto-tury).
+        // Zamknięty czat nie ma jak dostarczyć wyniku suba (ani gdzie odpalić auto-tury).
         // Odpinamy dostawcę — wyniki zostają w kolejce notifiera do następnego otwarcia.
         this.plugin?.subTaskNotifier?.setDeliverer?.(null);
         this._unwireSubTaskStrip?.();
@@ -184,7 +183,7 @@ export class ChatView extends PluginItemView {
             this.attachmentManager = null;
         }
 
-        // N3: obserwator wysokości pływającego paska (rezerwuje miejsce pod nim w liście
+        // Obserwator wysokości pływającego paska (rezerwuje miejsce pod nim w liście
         // wiadomości) — zamknięty widok nie ma czego mierzyć ani gdzie zapisywać paddingu.
         if (this._bottomPanelObserver) {
             this._bottomPanelObserver.disconnect();
@@ -204,16 +203,16 @@ export class ChatView extends PluginItemView {
 
         this._cleanupAskUser();
 
-        // K5 (AUD-security-068): zamknięcie panelu zatrzymuje KAŻDĄ turę tego widoku — także
-        // te z zakładek w tle — i suby z nich zlecone. Wcześniej stało tu pytanie o jedno pole
-        // widoku (`if (this.is_generating) this.stop_generation()`), które przełączenie zakładki
-        // nadpisuje stanem zakładki DOCELOWEJ: tura z tła przeżywała zamknięcie, a linia wyżej
-        // rozbrajała jej watchdoga, czyli ostatniego strażnika. Kolejność jest istotna —
+        // Zamknięcie panelu zatrzymuje KAŻDĄ turę tego widoku — także te z zakładek w tle —
+        // i suby z nich zlecone. Pytanie o jedno pole widoku
+        // (`if (this.is_generating) this.stop_generation()`) nie wystarcza: przełączenie
+        // zakładki nadpisuje je stanem zakładki DOCELOWEJ, więc tura z tła przeżyłaby zamknięcie,
+        // a rozbrojenie watchdoga niżej trafiłoby w niewłaściwą turę. Kolejność jest istotna —
         // najpierw STOP (każdy `stop_generation` rozbraja watchdog SWOJEJ tury), dopiero potem
         // pas zapasowy na timery, które mogły zostać bez wpisu w mapie.
         this.stop_all_turns('close');
         for (const ctx of this._streamCtxMap.values()) ctx.watchdog?.disarm();
-        // AUD-wydajnosc-071/072: pas zapasowy na timery malowania. `stop_all_turns` rozbraja je
+        // Pas zapasowy na timery malowania. `stop_all_turns` rozbraja je
         // przez `stop_generation` → `_resetPaintTargets`, ale tylko dla tur, które BYŁY w mapie.
         this._renderThrottle?.cancel();
         this._cancelConnectorRedraw?.();

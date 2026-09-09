@@ -8,14 +8,13 @@ import { CapturingHttpClient, ScriptedTransport } from './testing/harness.js';
 import type { ChatModel, ChatModelDeps, ChatProvider, ModelLibraryEntry, ProviderId, ResolverPluginLike } from './contracts.js';
 
 /**
- * Kształt, w jakim atrapa modelu wystawia to, co dostała z fabryki.
- * Dawniej pola nazywały się `adapter`/`model_key` — dziś dostawca i model siedzą w `deps`.
+ * Kształt, w jakim atrapa modelu wystawia to, co dostała z fabryki —
+ * dostawca i model siedzą w `deps`.
  */
 type ResolvedModelProbe = { providerId: string; modelId: string } | null;
 
-// AUD-dead-code-173 (fabryka kasacji martwego kodu S1, 2026-09-02): rola 'strategist' i slot
-// modelLibrary.master skasowane — po E3.6 żaden produkcyjny wołacz nie pytał o tę rolę, slot
-// był tylko do zapisu (migracja main.ts pisała, nic nie czytało). Test pilnuje dwóch rzeczy:
+// Rola 'strategist' i slot modelLibrary.master skasowane — żaden produkcyjny wołacz nie pytał
+// o tę rolę, slot był tylko do zapisu (migracja main.ts pisała, nic nie czytało). Test pilnuje dwóch rzeczy:
 // mapowanie researcher→minion nadal żyje, a stary klucz `master`, który może wciąż leżeć
 // w cudzym settings.json, jest po prostu ignorowany (nie wywala resolvera, nie wycieka).
 test('getModelsForRole maps researcher to legacy minion slot; stray master key is ignored', t => {
@@ -35,8 +34,8 @@ test('createModelForRole: stary klucz masterPlatform/masterModel w ustawieniach 
             main: [{ platform: 'openai', model: 'gpt-4o', isDefault: true }],
         },
     });
-    // Symulacja danych na dysku sprzed czystki S1 (AUD-dead-code-173) — klucze mogą wciąż
-    // leżeć w cudzym settings.json, resolver ma je po prostu zignorować, nie wywalić się.
+    // Symulacja starych kluczy, które mogą wciąż leżeć w cudzym settings.json — resolver ma
+    // je po prostu zignorować, nie wywalić się.
     (plugin!.env!.settings!.pkmAssistant as Record<string, unknown>).masterPlatform = 'anthropic';
     (plugin!.env!.settings!.pkmAssistant as Record<string, unknown>).masterModel = 'claude-3-opus';
 
@@ -70,8 +69,8 @@ function fakeProvider(id: string): ChatProvider {
  * Rejestr dostawców-atrap dla testowego `env.config.chat`.
  *
  * Klucze wypisane WPROST, nie wzięte z `CHAT_PROVIDERS` — te testy badają DRABINKĘ resolvera
- * (logikę własną, nietkniętą przez clean-room), więc nie mogą być zakładnikami tego, czy
- * rejestr dostawców jest już zaimplementowany.
+ * (logikę własną), więc nie mogą być zakładnikami tego, czy rejestr dostawców jest już
+ * zaimplementowany.
  */
 const PROVIDER_IDS: ProviderId[] = [
     'openai', 'anthropic', 'gemini', 'ollama', 'deepseek', 'groq', 'lm_studio', 'open_router', 'xai',
@@ -80,7 +79,7 @@ const fakeProviders = Object.fromEntries(
     PROVIDER_IDS.map(id => [id, fakeProvider(id)]),
 ) as typeof CHAT_PROVIDERS;
 
-/** Slice czatu w NOWYM kształcie (spec §4): platforma + mapy `apiKeys`/`models`/`hosts`. */
+/** Slice czatu w NOWYM kształcie: platforma + mapy `apiKeys`/`models`/`hosts`. */
 type ChatOverrides = { platform?: string; apiKeys?: Record<string, string>; models?: Record<string, string> };
 
 function makePlugin({ modelLibrary = {}, chat = {} }: { modelLibrary?: Record<string, ModelLibraryEntry[]>; chat?: ChatOverrides } = {}): ResolverPluginLike {
@@ -122,9 +121,8 @@ test.afterEach.always(() => {
     resolverTest.reset();
 });
 
-// Fix 2026-08-11 (Zwis subagentow, lokalny most, 2026): top-level agent.model NIE hijackuje ról
-// sub-agentowych — slot subów w bibliotece modeli musi wygrywać, inaczej każdy agent
-// z własnym modelem głównym mieli suby na modelu głównym (Sol zamiast Luny u Kuby).
+// Top-level agent.model NIE hijackuje ról sub-agentowych — slot subów w bibliotece modeli
+// musi wygrywać, inaczej każdy agent z własnym modelem głównym mieli suby na modelu głównym.
 test('createModelForRole prefers library sub slot over top-level agent.model for researcher', t => {
     const plugin = makePlugin({
         modelLibrary: {
@@ -157,13 +155,13 @@ test('createModelForRole falls back to top-level agent.model for researcher when
     t.is(model!.modelId, 'grok-code-fast-1');
 });
 
-// ─── B6 druga runda (2026-09-02, review Opusa): po migracji legacy `model`→`models.main` w
-// `modules/agents/profile/modelFieldSync.ts`, agent bez wpisu roli w bibliotece i bez legacy
-// `pkm.minionModel` musiał dalej dostawać model dla ról SUB (researcher/strategist) — Step 4b
-// znał tylko `agent.model`, nie `agent.models.main`. Bez tego fixu DelegateTool/WebReadTool/
-// chat_model.ts dostają `null` dla każdego zmigrowanego agenta. ───────────────────────────
+// ─── Po migracji legacy `model`→`models.main` w `modules/agents/profile/modelFieldSync.ts`,
+// agent bez wpisu roli w bibliotece i bez legacy `pkm.minionModel` musi dalej dostawać model
+// dla ról SUB (researcher/strategist) — Step 4b musi znać `agent.models.main`, nie tylko
+// `agent.model`. Bez tego DelegateTool/WebReadTool/chat_model.ts dostają `null` dla każdego
+// zmigrowanego agenta. ───────────────────────────
 
-test('B6-2: createModelForRole spada na agent.models.main dla roli sub, gdy nic innego nie jest skonfigurowane (agent PO migracji, bez legacy model)', t => {
+test('createModelForRole spada na agent.models.main dla roli sub, gdy nic innego nie jest skonfigurowane (agent PO migracji, bez legacy model)', t => {
     const plugin = makePlugin();
     const agent = {
         name: 'Tola',
@@ -179,7 +177,7 @@ test('B6-2: createModelForRole spada na agent.models.main dla roli sub, gdy nic 
     t.is(model!.modelId, 'gpt-4o');
 });
 
-test('B6-2: legacy agent.model nadal działa jako ostatnia deska ratunku dla ról sub (bez regresji)', t => {
+test('legacy agent.model nadal działa jako ostatnia deska ratunku dla ról sub', t => {
     const plugin = makePlugin();
     const agent = {
         name: 'Jaskier',
@@ -224,9 +222,9 @@ test('createModelForRole uses global role default when no agent override exists'
     t.is(model!.modelId, 'gemini-2.5-flash-lite');
 });
 
-// ─── F4 (model policy v2): rola `sub_worker` = model RODZICA + świeża instancja ───
+// ─── Rola `sub_worker` (model policy v2) = model RODZICA + świeża instancja ───
 
-test('F4: sub_worker bierze model GŁÓWNY agenta, a nie slot sub-agentów', t => {
+test('sub_worker bierze model GŁÓWNY agenta, a nie slot sub-agentów', t => {
     const plugin = makePlugin({
         modelLibrary: {
             main: [{ platform: 'openai', model: 'gpt-duzy', isDefault: true }],
@@ -241,7 +239,7 @@ test('F4: sub_worker bierze model GŁÓWNY agenta, a nie slot sub-agentów', t =
     t.is(explorer!.modelId, 'gemini-flash-lite', 'explorer nadal slotem sub-agentów');
 });
 
-test('F4: sub_worker respektuje agent.model (ta sama drabinka co main)', t => {
+test('sub_worker respektuje agent.model (ta sama drabinka co main)', t => {
     const plugin = makePlugin({
         modelLibrary: {
             main: [{ platform: 'openai', model: 'gpt-globalny', isDefault: true }],
@@ -258,7 +256,7 @@ test('F4: sub_worker respektuje agent.model (ta sama drabinka co main)', t => {
     t.is(worker!.modelId, main!.modelId, 'worker = dokładnie model rodzica');
 });
 
-test('F4: config.model suba wygrywa nad drabinką rodzica dla sub_worker', t => {
+test('config.model suba wygrywa nad drabinką rodzica dla sub_worker', t => {
     const plugin = makePlugin({
         modelLibrary: { main: [{ platform: 'openai', model: 'gpt-duzy', isDefault: true }] },
     });
@@ -272,7 +270,7 @@ test('F4: config.model suba wygrywa nad drabinką rodzica dla sub_worker', t => 
     t.is(model!.modelId, 'gemini-2.5-pro');
 });
 
-test.serial('F4: sub_worker NIGDY nie oddaje instancji z cache (concurrent safety)', t => {
+test.serial('sub_worker NIGDY nie oddaje instancji z cache (concurrent safety)', t => {
     const plugin = makePlugin({
         modelLibrary: { main: [{ platform: 'openai', model: 'gpt-duzy', isDefault: true }] },
     });
@@ -288,13 +286,13 @@ test.serial('F4: sub_worker NIGDY nie oddaje instancji z cache (concurrent safet
     t.not(worker1, main1, 'worker nie współdzieli instancji z czatem');
 });
 
-// AUD-wydajnosc-079/RR-08-11: `createModelForRole(plugin, 'main', agent, delegateConfig,
-// callerSkipCache)` musi wymusić świeżą instancję TEŻ dla roli main, gdy wołacz jawnie o to
-// prosi — nie tylko dla ról sub (te i tak zawsze skipują, patrz test F4 wyżej). Bez piątego
-// argumentu `chat_model.ts` wołał resolver bez flagi, więc dwie tury roli main (dwa taby tego
-// samego agenta, tura + konsolidacja pamięci w tle) zawsze trafiały w tę samą instancję z
-// `_cache`, mimo że `skipCache: true` doszło do `get_chat_model`.
-test.serial('AUD-wydajnosc-079: createModelForRole(callerSkipCache=true) tworzy nową instancję dla roli main zamiast oddawać z cache', t => {
+// `createModelForRole(plugin, 'main', agent, delegateConfig, callerSkipCache)` musi wymusić
+// świeżą instancję TEŻ dla roli main, gdy wołacz jawnie o to prosi — nie tylko dla ról sub (te
+// i tak zawsze skipują, patrz test sub_worker wyżej). Bez piątego argumentu `chat_model.ts`
+// wołał resolver bez flagi, więc dwie tury roli main (dwa taby tego samego agenta, tura +
+// konsolidacja pamięci w tle) zawsze trafiały w tę samą instancję z `_cache`, mimo że
+// `skipCache: true` doszło do `get_chat_model`.
+test.serial('createModelForRole(callerSkipCache=true) tworzy nową instancję dla roli main zamiast oddawać z cache', t => {
     let factoryCalls = 0;
     resolverTest.setChatModelFactory((deps: ChatModelDeps) => {
         factoryCalls += 1;
@@ -335,12 +333,11 @@ test.serial('AUD-wydajnosc-079: createModelForRole(callerSkipCache=true) tworzy 
     t.is(factoryCalls, 2, 'trzecie wołanie bez flagi nie tworzy nowej instancji — nadal z cache');
 });
 
-// AUD-code-review-083: Step 4 (legacy fallback, pre-modelLibrary settings) resolvował
-// google/azure/custom/xai cicho do null (`DEFAULT_MODELS[platform]` brakowało wpisu) — tylko
-// dlatego, że nikt nie wybrał modelu jawnie. Pozostałe 8 platform dostawało sensowny default.
-// `google`/`azure`/`custom` skreślone z DEFAULT_MODELS 2026-09-03 razem z martwymi adapterami/
-// kluczem dispatchu (AUD-dead-code-026/110/112/168, decyzja Kuby) — `xai` zostaje jedynym
-// świadkiem oryginalnej naprawy.
+// Step 4 (legacy fallback, pre-modelLibrary settings) resolwuje platformę cicho do null, gdy
+// `DEFAULT_MODELS[platform]` nie ma wpisu — tylko dlatego, że nikt nie wybrał modelu jawnie.
+// Pozostałe platformy dostają sensowny default. `google`/`azure`/`custom` skreślone z
+// DEFAULT_MODELS razem z martwymi adapterami/kluczem dispatchu — `xai` zostaje jedynym
+// świadkiem tej naprawy.
 test('createModelForRole main: legacy fallback (Step 4) ma default dla xai', t => {
     const expected: Record<string, string> = {
         xai: 'grok-3-mini-beta',
@@ -359,11 +356,11 @@ test('createModelForRole main: legacy fallback (Step 4) ma default dla xai', t =
     }
 });
 
-// AUD-dead-code-026/110/112/168 (2026-09-03): `google`/`azure`/`custom` skreślone z mapy DI i z
-// DEFAULT_MODELS. Stary `data.json` usera może wciąż nieść jedną z tych wartości pod
-// `chatModel.platform` (nikt nie migruje ustawień wstecz — świadoma decyzja, jedyny user
-// pluginu to Kuba). Resolucja ma fail-safe wrócić `null` (żaden model bez sensownego defaultu),
-// NIE rzucić — to samo zachowanie co dla każdej innej nieznanej nazwy platformy.
+// `google`/`azure`/`custom` skreślone z mapy DI i z DEFAULT_MODELS. Stary `data.json` usera
+// może wciąż nieść jedną z tych wartości pod `chatModel.platform` (nikt nie migruje ustawień
+// wstecz — świadoma decyzja). Resolucja ma fail-safe wrócić
+// `null` (żaden model bez sensownego defaultu), NIE rzucić — to samo zachowanie co dla
+// każdej innej nieznanej nazwy platformy.
 test('createModelForRole main: stara wartość platform=google/azure/custom nie wywala resolvera — cichy null, nie throw', t => {
     for (const platform of ['google', 'azure', 'custom']) {
         const plugin = makePlugin({
@@ -377,11 +374,11 @@ test('createModelForRole main: stara wartość platform=google/azure/custom nie 
     }
 });
 
-test('LEGACY-1 regression: no new direct minion/master model role references', async t => {
+test('regresja: no new direct minion/master model role references', async t => {
     const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
     const roots = ['core', 'modules', 'src', 'config'].map(root => path.join(repoRoot, root));
-    // Oba rozszerzenia: kampania TS przenosi pliki `.js` → `.ts` fala po fali, a ten strażnik
-    // ma pilnować całego drzewa niezależnie od tego, gdzie fala już doszła.
+    // Oba rozszerzenia: konwersja `.js` → `.ts` idzie plik po pliku, a ten strażnik
+    // ma pilnować całego drzewa niezależnie od tego, gdzie doszła.
     const ignoredFiles = new Set([
         path.normalize(path.join(repoRoot, 'modules/models/modelResolver.js')),
         path.normalize(path.join(repoRoot, 'modules/models/modelResolver.ts')),
@@ -425,14 +422,14 @@ test('LEGACY-1 regression: no new direct minion/master model role references', a
 
 
 // ────────────────────────────────────────────────────────────────────────────
-// Luki L-16..L-19 + zwrotka listy modeli (clean-room)
+// Wykrywanie platformy i zwrotka listy modeli
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * N30 (luka L-16, B.1 MR-14): wykrycie platformy po kluczach idzie USTALONĄ kolejnością,
- * a `ollama`/`lm_studio` przechodzą BEZ klucza (platformy lokalne).
+ * Wykrycie platformy po kluczach idzie USTALONĄ kolejnością, a `ollama`/`lm_studio` przechodzą
+ * BEZ klucza (platformy lokalne).
  */
-test('L-16: _detectPlatform — kolejność, a ollama/lm_studio przechodzą bez klucza', t => {
+test('_detectPlatform — kolejność, a ollama/lm_studio przechodzą bez klucza', t => {
     const both = makePlugin({ chat: { apiKeys: { openai: 'k-openai', groq: 'k-groq' } } });
     // `makePlugin` dokłada domyślne klucze — kasujemy je, żeby zostały dokładnie dwa z testu.
     both!.env!.settings!.pkmAssistant!.chat!.apiKeys = { openai: 'k-openai', groq: 'k-groq' };
@@ -445,8 +442,8 @@ test('L-16: _detectPlatform — kolejność, a ollama/lm_studio przechodzą bez 
     t.is(local!.providerId, 'ollama', 'worek bez kluczy spada na pierwszą platformę lokalną');
 });
 
-/** N31 (luka L-17, B.1 MR-13): nadpisanie `"platforma/model"` rozcina się na PIERWSZYM ukośniku. */
-test('L-17: "open_router/anthropic/claude-…" rozcina się na PIERWSZYM ukośniku', t => {
+/** Nadpisanie `"platforma/model"` rozcina się na PIERWSZYM ukośniku. */
+test('"open_router/anthropic/claude-…" rozcina się na PIERWSZYM ukośniku', t => {
     const plugin = makePlugin({ chat: { apiKeys: { open_router: 'or-key' } } });
     const agent = { name: 'Jaskier', model: 'open_router/anthropic/claude-sonnet-4-20250514' };
 
@@ -456,8 +453,8 @@ test('L-17: "open_router/anthropic/claude-…" rozcina się na PIERWSZYM ukośni
     t.is(model!.modelId, 'anthropic/claude-sonnet-4-20250514', 'reszta — razem z ukośnikami — to nazwa modelu');
 });
 
-/** N32 (luka L-18, B.1 MR-24): `clearModelCache()` zmusza fabrykę do ponownego stworzenia instancji. */
-test.serial('L-18: clearModelCache() zmusza fabrykę do ponownego stworzenia instancji', t => {
+/** `clearModelCache()` zmusza fabrykę do ponownego stworzenia instancji. */
+test.serial('clearModelCache() zmusza fabrykę do ponownego stworzenia instancji', t => {
     let calls = 0;
     resolverTest.setChatModelFactory((deps: ChatModelDeps) => {
         calls += 1;
@@ -474,8 +471,8 @@ test.serial('L-18: clearModelCache() zmusza fabrykę do ponownego stworzenia ins
     t.is(calls, 2, 'po wyczyszczeniu cache fabryka woła się od nowa');
 });
 
-/** N33 (luka L-19, B.1 MR-07): cztery argumenty z UI — config delegata wygrywa nad slotem biblioteki. */
-test('L-19: createModelForRole(plugin, \'researcher\', agent, delegateConfig) — cztery argumenty z UI', t => {
+/** Cztery argumenty z UI — config delegata wygrywa nad slotem biblioteki. */
+test('createModelForRole(plugin, \'researcher\', agent, delegateConfig) — cztery argumenty z UI', t => {
     const plugin = makePlugin({
         modelLibrary: { minion: [{ platform: 'gemini', model: 'gemini-flash-lite', isDefault: true }] },
     });
@@ -488,7 +485,7 @@ test('L-19: createModelForRole(plugin, \'researcher\', agent, delegateConfig) �
     t.is(overridden!.modelId, 'gpt-4o', 'delegateConfig.model wygrywa nad slotem biblioteki dla roli sub');
 });
 
-/** N44 (R15, B.5 ST-21): `listModels()` oddaje TABLICĘ `ModelInfo[]`, nie mapę. */
+/** `listModels()` oddaje TABLICĘ `ModelInfo[]`, nie mapę. */
 test.serial('listModels() oddaje ModelInfo[], nie mapę', async t => {
     resolverTest.reset(); // prawdziwa fabryka — badamy powierzchnię modelu, nie drabinkę
     const plugin = makePlugin({ modelLibrary: { main: [{ platform: 'openai', model: 'gpt-4o', isDefault: true }] } });

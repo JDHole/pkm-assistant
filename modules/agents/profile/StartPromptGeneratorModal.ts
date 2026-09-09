@@ -1,5 +1,5 @@
 /**
- * Modal generatora promptu startowego (S32 Z1a).
+ * Modal generatora promptu startowego.
  *
  * Trzy pytania → live podglad → jeden guzik „Wstaw do Persony". Cała logika składania siedzi
  * w czystym `startPromptGenerator.js`; tutaj jest wyłącznie formularz.
@@ -46,7 +46,7 @@ export class StartPromptGeneratorModal extends Modal {
         // Sam kolor idzie zmienną CSS (reszta stylu w `src/styles.css`), żeby nie ustawiać
         // statycznych właściwości `element.style.*` (reguła katalogu Obsidiana).
         const wrap = contentEl.createDiv({ cls: 'cs-startprompt__wrap' });
-        // Fix znaleziska TS-4: `pickColor` zwraca ColorEntry — do CSS szedł cały obiekt
+        // Fix znaleziska: `pickColor` zwraca ColorEntry — do CSS szedł cały obiekt
         // („[object Object]"), więc pasek akcentu nigdy nie dostawał koloru. Kolor to `.hex`.
         wrap.style.setProperty('--cs-startprompt-accent', pickColor(this.agentName || 'default').hex);
 

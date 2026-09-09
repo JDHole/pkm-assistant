@@ -1,21 +1,18 @@
 /**
- * `modules/models/providers/anthropic.ts` — dostawca `anthropic` (Messages API).
+ * `modules/models/providers/anthropic.ts` - dostawca `anthropic` (Messages API).
  *
  * Anthropic ma WŁASNY kształt żądania, więc ten plik nie dziedziczy po bazie kształtu
  * OpenAI: instrukcja systemowa jedzie osobnym polem `system`, wywołania narzędzi są
  * blokami `tool_use`/`tool_result` wewnątrz `content`, a strumień to nazwane zdarzenia
  * (`message_start` → `content_block_*` → `message_delta` → `message_stop`).
  *
- * Zakres zachowań: B.7 AN-01..AN-19, B.6 BA-02 (nagłówek klucza), BA-22 (jeden kształt
- * błędu), B.12 (cache promptu).
- *
  * Trzy rzeczy, o które najłatwiej się tu potknąć:
  *  1. **Trzy liczniki wejścia są ROZŁĄCZNE.** `input_tokens` NIE zawiera tokenów cache,
- *     więc kanoniczne `prompt_tokens` to ich suma (AN-09) — inaczej `cached_tokens`
+ *     więc kanoniczne `prompt_tokens` to ich suma - inaczej `cached_tokens`
  *     wychodzi większe niż `prompt_tokens` i oszczędność przekracza 100%.
- *  2. **`output_tokens` z `message_start` to placeholder.** Merge go pomija (AN-08),
+ *  2. **`output_tokens` z `message_start` to placeholder.** Merge go pomija,
  *     żeby urwany strumień zostawił prawdziwe zero zamiast fałszywej jedynki.
- *  3. **Budżet myślenia musi być MNIEJSZY niż `max_tokens`** (AN-19) — myślenie liczy się
+ *  3. **Budżet myślenia musi być MNIEJSZY niż `max_tokens`** - myślenie liczy się
  *     do tego samego limitu wyjścia, a Anthropic odbija żądanie, które tego nie spełnia.
  *
  * Źródła (publiczna dokumentacja API, wrzesień 2026): `docs.anthropic.com/en/api/messages`,
@@ -45,29 +42,29 @@ import type {
 } from '../contracts.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Stałe protokołu (FAKT-API — nie nasze do zmiany)
+// Stałe protokołu (FAKT-API - nie nasze do zmiany)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/** Wersja API w nagłówku `anthropic-version` — Anthropic wymaga jej przy każdym żądaniu. */
+/** Wersja API w nagłówku `anthropic-version` - Anthropic wymaga jej przy każdym żądaniu. */
 const API_VERSION = '2023-06-01';
 
 /** Bez tego nagłówka przeglądarkowy `fetch` z `app://obsidian.md` dostaje odmowę CORS. */
 const BROWSER_ACCESS_HEADER = 'anthropic-dangerous-direct-browser-access';
 
-/** AN-19: myślenie przeplecione z narzędziami (sekwencja tekst → `tool_use` → tekst). */
+/** Myślenie przeplecione z narzędziami (sekwencja tekst → `tool_use` → tekst). */
 const INTERLEAVED_THINKING_BETA = 'interleaved-thinking-2025-05-14';
 
 const DEFAULT_BASE_URL = 'https://api.anthropic.com';
 const MESSAGES_PATH = '/v1/messages';
 const MODELS_PATH = '/v1/models';
 
-/** Katalog stronicuje po 20 pozycji — jednym żądaniem bierzemy maksimum dozwolone przez API. */
+/** Katalog stronicuje po 20 pozycji - jednym żądaniem bierzemy maksimum dozwolone przez API. */
 const MODELS_PAGE_SIZE = 1000;
 
 /** Dolna granica budżetu myślenia narzucona przez API. */
 const MIN_THINKING_BUDGET = 1024;
 
-/** AN-03: cztery znaczniki `cache_control` to SUFIT całego żądania, nie wymóg. */
+/** Cztery znaczniki `cache_control` to SUFIT całego żądania, nie wymóg. */
 const MAX_CACHE_BREAKPOINTS = 4;
 
 /** Ile ostatnich wiadomości dostaje znacznik cache (reszta sufitu idzie na system i narzędzia). */
@@ -78,14 +75,14 @@ const DATA_FIELD = 'data:';
 
 /**
  * Sufit ogona bez końca wiersza (1 MiB). Zepsute proxy potrafi lać treść, która nigdy nie
- * dopnie się do ramki — bufor ma wtedy pójść do kosza, a nie rosnąć przez całą turę.
+ * dopnie się do ramki - bufor ma wtedy pójść do kosza, a nie rosnąć przez całą turę.
  */
 const MAX_BUFFERED_TAIL = 1024 * 1024;
 
-/** AN-15: dwa bloki tekstu tej samej odpowiedzi skleja pusty wiersz. */
+/** Dwa bloki tekstu tej samej odpowiedzi skleja pusty wiersz. */
 const TEXT_BLOCK_SEPARATOR = '\n\n';
 
-/** Metryczka dostawcy — fakty kontraktowe czytane przez rejestr i Ustawienia. */
+/** Metryczka dostawcy - fakty kontraktowe czytane przez rejestr i Ustawienia. */
 const ANTHROPIC_INFO: ChatProviderInfo = {
     id: 'anthropic',
     label: 'Anthropic',
@@ -100,12 +97,12 @@ const ANTHROPIC_INFO: ChatProviderInfo = {
     supportsTools: true,
     supportsVision: 'per-model',
     supportsReasoning: true,
-    // BA-06: `stream_options` to pole kształtu OpenAI — Messages API odbiłoby je jako nieznane.
+    // `stream_options` to pole kształtu OpenAI - Messages API odbiłoby je jako nieznane.
     streamUsage: false,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Kształty żądania (prywatne — publiczny jest tylko `ChatProvider`)
+// Kształty żądania (prywatne - publiczny jest tylko `ChatProvider`)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 interface CacheMark {
@@ -158,7 +155,7 @@ function asCount(value: unknown): number | null {
 }
 
 /**
- * Klucz bloku strumienia — bramka zakresu `[0, TOOL_CALL_MAX_INDEX)` opisana w kontrakcie
+ * Klucz bloku strumienia - bramka zakresu `[0, TOOL_CALL_MAX_INDEX)` opisana w kontrakcie
  * przy zdarzeniu `tool_call`. Brak pola, liczba ujemna, ułamkowa albo powyżej sufitu NIE rzuca
  * i nie otwiera osobnego bytu: wszystko takie adresuje blok zerowy, więc zepsuty dostawca nie
  * jest w stanie ani wywrócić tury, ani napchać pustych slotów.
@@ -171,7 +168,7 @@ function blockKey(value: unknown): number {
 /**
  * Adres z kontekstu (host harnessu / proxy) albo produkcyjny.
  *
- * W Ustawieniach użytkownik podaje adres TURY ROZMOWY, a katalog modeli mieszka obok niego —
+ * W Ustawieniach użytkownik podaje adres TURY ROZMOWY, a katalog modeli mieszka obok niego -
  * dlatego znana ścieżka jest najpierw odcinana, żeby nie skleić `/v1/messages/v1/models`.
  */
 function endpointFor(ctx: ProviderContext, path: string, fallback: string): string {
@@ -188,7 +185,7 @@ function endpointFor(ctx: ProviderContext, path: string, fallback: string): stri
     return base + path;
 }
 
-/** BA-02: klucz idzie WYŁĄCZNIE w `x-api-key`, nigdy w Bearerze i nigdy w URL-u. */
+/** Klucz idzie WYŁĄCZNIE w `x-api-key`, nigdy w Bearerze i nigdy w URL-u. */
 function headersFor(ctx: ProviderContext): Record<string, string> {
     const headers: Record<string, string> = {
         'content-type': 'application/json',
@@ -200,12 +197,12 @@ function headersFor(ctx: ProviderContext): Record<string, string> {
     return headers;
 }
 
-/** Nagłówki tury rozmowy — te same plus beta myślenia przeplecionego (AN-19). */
+/** Nagłówki tury rozmowy - te same plus beta myślenia przeplecionego. */
 function messagesHeaders(ctx: ProviderContext): Record<string, string> {
     return { ...headersFor(ctx), 'anthropic-beta': INTERLEAVED_THINKING_BETA };
 }
 
-/** AN-04: Messages API WYMAGA `max_tokens` — brak pola to 400 od dostawcy. */
+/** Messages API WYMAGA `max_tokens` - brak pola to 400 od dostawcy. */
 function resolveMaxTokens(req: ChatRequest, ctx: ProviderContext): number {
     const explicit = asCount(req.max_tokens);
     if (explicit !== null && explicit > 0) return Math.floor(explicit);
@@ -215,20 +212,20 @@ function resolveMaxTokens(req: ChatRequest, ctx: ProviderContext): number {
 }
 
 /**
- * AN-19: budżet myślenia MUSI zmieścić się pod `max_tokens` — myślenie zjada ten sam limit.
+ * Budżet myślenia MUSI zmieścić się pod `max_tokens` - myślenie zjada ten sam limit.
  * `true` bierze połowę limitu wyjścia (nie mniej niż minimum API), liczba jedzie wprost,
  * a sufit i tak przycina wynik o jeden token poniżej `max_tokens`.
  */
 function resolveThinkingBudget(thinking: ChatRequest['thinking'], maxTokens: number): number | null {
     if (thinking === undefined || thinking === false) return null;
-    // Pod dolną granicą API myślenia po prostu NIE DA SIĘ włączyć — lepsza zwykła odpowiedź
+    // Pod dolną granicą API myślenia po prostu NIE DA SIĘ włączyć - lepsza zwykła odpowiedź
     // niż 400 na całą turę.
     if (maxTokens <= MIN_THINKING_BUDGET) return null;
     const requested = typeof thinking === 'number' ? Math.floor(thinking) : Math.floor(maxTokens / 2);
     return Math.min(Math.max(requested, MIN_THINKING_BUDGET), maxTokens - 1);
 }
 
-/** Argumenty narzędzia zawsze jako OBIEKT — Anthropic nie przyjmuje stringa w `input`. */
+/** Argumenty narzędzia zawsze jako OBIEKT - Anthropic nie przyjmuje stringa w `input`. */
 function toolInput(call: OpenAiToolCall): Record<string, unknown> {
     const raw = call.function?.arguments;
     if (raw && typeof raw === 'object') return raw;
@@ -238,7 +235,7 @@ function toolInput(call: OpenAiToolCall): Record<string, unknown> {
         const parsed: unknown = JSON.parse(text);
         return asRecord(parsed) ?? {};
     } catch {
-        // Zepsuty JSON od modelu nie może wywrócić wysyłki — pusty obiekt zamiast wyjątku.
+        // Zepsuty JSON od modelu nie może wywrócić wysyłki - pusty obiekt zamiast wyjątku.
         return {};
     }
 }
@@ -274,7 +271,7 @@ function contentBlocks(content: OpenAiRequestMessage['content']): SentBlock[] {
     return blocks;
 }
 
-/** Zwykły tekst wiadomości — do wariantu, w którym `content` zostaje STRINGIEM (AN-17). */
+/** Zwykły tekst wiadomości - do wariantu, w którym `content` zostaje STRINGIEM. */
 function plainText(content: OpenAiRequestMessage['content']): string {
     if (typeof content === 'string') return content;
     if (!Array.isArray(content)) return '';
@@ -285,7 +282,7 @@ function plainText(content: OpenAiRequestMessage['content']): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Transkrypt kanoniczny → `system` + `messages` Anthropica (AN-02, AN-16, AN-17)
+// Transkrypt kanoniczny → `system` + `messages` Anthropica
 // ═══════════════════════════════════════════════════════════════════════════════
 
 interface Transcript {
@@ -304,8 +301,8 @@ function toolResultBlock(message: OpenAiRequestMessage): SentBlock {
 }
 
 /**
- * Assistant: tekst i `tool_use` idą JEDNĄ tablicą `content` (AN-16), przy czym sam tekst
- * zostaje zwykłym stringiem, a same narzędzia — tablicą bez pustego bloku tekstu (AN-17).
+ * Assistant: tekst i `tool_use` idą JEDNĄ tablicą `content`, przy czym sam tekst
+ * zostaje zwykłym stringiem, a same narzędzia - tablicą bez pustego bloku tekstu.
  */
 function assistantMessage(message: OpenAiRequestMessage): SentMessage | null {
     const calls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
@@ -332,7 +329,7 @@ function splitTranscript(messages: OpenAiRequestMessage[]): Transcript {
         const role = message.role;
 
         if (role === 'system') {
-            // AN-02: instrukcja systemowa NIE jest wiadomością — ma własne pole żądania.
+            // Instrukcja systemowa NIE jest wiadomością - ma własne pole żądania.
             for (const block of contentBlocks(message.content)) {
                 if (block.type === 'text') transcript.system.push(block);
             }
@@ -390,7 +387,7 @@ function mapToolChoice(choice: ChatToolChoice | undefined): RequestBody['tool_ch
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Cache promptu (AN-03, luka L-22)
+// Cache promptu
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function mark(target: Markable | undefined): boolean {
@@ -409,9 +406,9 @@ function markableTail(message: SentMessage): Markable | undefined {
 }
 
 /**
- * AN-03: znaczniki `cache_control` w hierarchii narzędzia → system → wiadomości, SUFIT cztery.
+ * Znaczniki `cache_control` w hierarchii narzędzia → system → wiadomości, SUFIT cztery.
  * Przy pełnym układzie wychodzą dokładnie cztery; przy mniejszej liczbie kandydatów po prostu
- * mniej — brak kandydata nie jest błędem (L-22).
+ * mniej - brak kandydata nie jest błędem.
  *
  * Ogon rozmowy stempluje się tylko wtedy, gdy są co najmniej dwie wiadomości: przy jednej nie
  * ma jeszcze prefiksu, który dałoby się odczytać z cache w następnej turze.
@@ -432,7 +429,7 @@ function applyCacheControl(body: RequestBody): void {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Zużycie tokenów (AN-05, AN-07..AN-11)
+// Zużycie tokenów
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /** Cztery liczniki Anthropica w jednym miejscu; `output` dokłada dopiero `message_delta`. */
@@ -444,9 +441,9 @@ interface TokenCounters {
 }
 
 /**
- * AN-09: `prompt_tokens` to SUMA trzech rozłącznych liczników wejścia. Konwencja OpenAI
+ * `prompt_tokens` to SUMA trzech rozłącznych liczników wejścia. Konwencja OpenAI
  * zakłada, że cache jest PODZBIOREM promptu, a u Anthropica `input_tokens` liczy wyłącznie
- * tokeny spoza cache — bez sumowania oszczędność wychodziłaby powyżej 100%.
+ * tokeny spoza cache - bez sumowania oszczędność wychodziłaby powyżej 100%.
  */
 function canonicalUsage(counters: TokenCounters): UsageLike {
     const prompt = counters.input + counters.cacheCreate + counters.cacheRead;
@@ -454,7 +451,7 @@ function canonicalUsage(counters: TokenCounters): UsageLike {
         prompt_tokens: prompt,
         completion_tokens: counters.output,
         total_tokens: prompt + counters.output,
-        // AN-10: oba liczniki zostają w zwrotce jako detal obok `prompt_tokens_details`.
+        // Oba liczniki zostają w zwrotce jako detal obok `prompt_tokens_details`.
         cache_creation_input_tokens: counters.cacheCreate,
         cache_read_input_tokens: counters.cacheRead,
         prompt_tokens_details: {
@@ -465,9 +462,9 @@ function canonicalUsage(counters: TokenCounters): UsageLike {
 }
 
 /**
- * Wciąga liczniki z jednego ładunku. `skipOutput` obsługuje AN-08: `output_tokens`
+ * Wciąga liczniki z jednego ładunku. `skipOutput` obsługuje przypadek, gdy `output_tokens`
  * z `message_start` jest tylko placeholderem, więc urwany strumień ma zostać z zerem.
- * Zwraca `true`, gdy cokolwiek się zmieniło — wtedy warto wypuścić zdarzenie `usage`.
+ * Zwraca `true`, gdy cokolwiek się zmieniło - wtedy warto wypuścić zdarzenie `usage`.
  */
 function absorbUsage(counters: TokenCounters, raw: unknown, skipOutput: boolean): boolean {
     const usage = asRecord(raw);
@@ -519,7 +516,7 @@ function canonicalFinishReason(stopReason: string | undefined): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Dekoder strumienia (AN-06..AN-15)
+// Dekoder strumienia
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
@@ -527,7 +524,7 @@ function canonicalFinishReason(stopReason: string | undefined): string {
  *
  * Bufor ramek trzyma dekoder (kontrakt {@link StreamDecoder}), bo porcja transportu może
  * rozciąć wiersz w połowie. Ogon porcji jest konsumowany dopiero wtedy, gdy jego ładunek
- * daje się sparsować — inaczej czeka na dalszy ciąg.
+ * daje się sparsować - inaczej czeka na dalszy ciąg.
  *
  * Sloty `tool_calls` numerujemy WŁASNYM licznikiem, a nie indeksem bloku: `tool_use` bywa
  * drugim blokiem po tekście, a kształt kanoniczny nie może mieć dziury w tablicy narzędzi.
@@ -544,7 +541,7 @@ class AnthropicStreamDecoder implements StreamDecoder {
     private nextSlot = 0;
     private lastTextBlock: number | null = null;
     private stopReason: string | undefined;
-    /** ST-11: ile ramek poszło do kosza jako nieczytelne — `ChatModel` z tego robi ostrzeżenie. */
+    /** Ile ramek poszło do kosza jako nieczytelne - `ChatModel` z tego robi ostrzeżenie. */
     private dropped = 0;
 
     get droppedFrames(): number {
@@ -565,7 +562,7 @@ class AnthropicStreamDecoder implements StreamDecoder {
      * Porcje transportu → wiersze ramek. Wiersz zakończony `\n` idzie od razu; ogon bez
      * końca wiersza rozstrzyga {@link tailVerdict}: kompletna ramka leci dalej (dostawcy
      * bywają skąpi w znaki końca wiersza), urwana czeka na dalszy ciąg, a śmieć jest
-     * wycinany, żeby nie zablokował kolejnych ramek (ST-11).
+     * wycinany, żeby nie zablokował kolejnych ramek.
      */
     private drain(chunk: string, flush: boolean): StreamEvent[] {
         const events: StreamEvent[] = [];
@@ -596,7 +593,7 @@ class AnthropicStreamDecoder implements StreamDecoder {
                 this.buffer = afterNoise(this.buffer);
                 continue;
             }
-            // 'wait' — ogon jest początkiem ramki, która jeszcze nie dojechała.
+            // 'wait' - ogon jest początkiem ramki, która jeszcze nie dojechała.
             if (this.buffer.length > MAX_BUFFERED_TAIL) this.buffer = '';
             break;
         }
@@ -605,14 +602,14 @@ class AnthropicStreamDecoder implements StreamDecoder {
 
     /** Wiersz ramki → zdarzenia. Niesparsowalna porcja NIE rzuca i NIE kończy strumienia. */
     private consumeLine(line: string, events: StreamEvent[]): void {
-        // Wiersze `event:` / `id:` / komentarze pomijamy — routing idzie po polu `type` ładunku.
+        // Wiersze `event:` / `id:` / komentarze pomijamy - routing idzie po polu `type` ładunku.
         const payload = dataPayload(line);
         if (!payload) return;
         let parsed: unknown;
         try {
             parsed = JSON.parse(payload);
         } catch {
-            // Ramka `data:` nie do przeczytania — do kosza, ale ze śladem w logu (ST-11).
+            // Ramka `data:` nie do przeczytania - do kosza, ale ze śladem w logu.
             this.dropped += 1;
             return;
         }
@@ -627,7 +624,7 @@ class AnthropicStreamDecoder implements StreamDecoder {
 
         switch (event.type) {
             case 'message_start': {
-                // AN-07: input i oba liczniki cache przychodzą TYLKO tutaj.
+                // Input i oba liczniki cache przychodzą TYLKO tutaj.
                 const message = asRecord(event.message);
                 if (message && absorbUsage(this.counters, message.usage, true)) {
                     events.push({ type: 'usage', usage: canonicalUsage(this.counters) });
@@ -647,7 +644,7 @@ class AnthropicStreamDecoder implements StreamDecoder {
                 const delta = asRecord(event.delta);
                 const stop = asText(delta?.stop_reason);
                 if (stop) this.stopReason = stop;
-                // AN-11: skumulowane `usage` z poziomu głównego NADPISUJE (zera też).
+                // Skumulowane `usage` z poziomu głównego NADPISUJE (zera też).
                 if (absorbUsage(this.counters, event.usage, false)) {
                     events.push({ type: 'usage', usage: canonicalUsage(this.counters) });
                 }
@@ -660,7 +657,7 @@ class AnthropicStreamDecoder implements StreamDecoder {
                 events.push({ type: 'error', error: normalizeError(event.error ?? event) });
                 return;
             default:
-                // `ping` i wszystko, czego jeszcze nie znamy — cisza, strumień jedzie dalej.
+                // `ping` i wszystko, czego jeszcze nie znamy - cisza, strumień jedzie dalej.
                 return;
         }
     }
@@ -702,21 +699,21 @@ class AnthropicStreamDecoder implements StreamDecoder {
             return;
         }
         if (delta.type === 'input_json_delta') {
-            // AN-14: przeplecione delty dwóch narzędzi trafiają każda do SWOJEGO slotu.
+            // Przeplecione delty dwóch narzędzi trafiają każda do SWOJEGO slotu.
             const partial = asText(delta.partial_json);
             if (!partial) return;
             const slot = this.slotFor(index);
             this.slotHasJson.set(slot, true);
             events.push({ type: 'tool_call', index: slot, argumentsDelta: partial });
         }
-        // `signature_delta` podpisuje blok myślenia — dla kształtu kanonicznego bez znaczenia.
+        // `signature_delta` podpisuje blok myślenia - dla kształtu kanonicznego bez znaczenia.
     }
 
     private closeBlock(event: Record<string, unknown>, events: StreamEvent[]): void {
         const index = blockKey(event.index);
         const slot = this.slots.get(index);
         if (slot === undefined || this.slotHasJson.get(slot)) return;
-        // AN-13: narzędzie bezargumentowe domyka się PUSTYM obiektem, nie cudzymi argumentami.
+        // Narzędzie bezargumentowe domyka się PUSTYM obiektem, nie cudzymi argumentami.
         this.slotHasJson.set(slot, true);
         events.push({ type: 'tool_call', index: slot, argumentsDelta: '{}' });
     }
@@ -724,7 +721,7 @@ class AnthropicStreamDecoder implements StreamDecoder {
     /**
      * Blok Anthropica → slot kanonicznej tablicy `tool_calls`. Numeracja jest WŁASNA i gęsta,
      * bo `tool_use` bywa drugim blokiem po tekście, a tablica narzędzi nie może mieć dziury.
-     * Powyżej sufitu zakresu numeracja stoi na ostatnim dopuszczalnym slocie — kształt
+     * Powyżej sufitu zakresu numeracja stoi na ostatnim dopuszczalnym slocie - kształt
      * kanoniczny i tak nie unosi wyższych indeksów.
      */
     private slotFor(blockKeyValue: number): number {
@@ -737,7 +734,7 @@ class AnthropicStreamDecoder implements StreamDecoder {
         return slot;
     }
 
-    /** AN-15: nowy blok tekstu po innym bloku tekstu dostaje separator, żeby zdania się nie zlepiły. */
+    /** Nowy blok tekstu po innym bloku tekstu dostaje separator, żeby zdania się nie zlepiły. */
     private pushText(blockIndex: number, text: string, events: StreamEvent[]): void {
         if (this.lastTextBlock !== null && this.lastTextBlock !== blockIndex) {
             events.push({ type: 'text', delta: TEXT_BLOCK_SEPARATOR });
@@ -756,10 +753,10 @@ function dataPayload(line: string): string | null {
 /**
  * Co zrobić z ogonem porcji, który nie ma jeszcze końca wiersza.
  *
- *  • `emit` — kompletna ramka `data: {…}`; dostawcy potrafią przysłać ją bez `
+ *  • `emit` - kompletna ramka `data: {…}`; dostawcy potrafią przysłać ją bez `
 `.
- *  • `wait` — początek wiersza `data:` (rozcięty w prefiksie albo w środku JSON-a).
- *  • `drop` — cokolwiek innego: wiersz spoza `data:`, ładunek nie-obiektowy (`[DONE]`
+ *  • `wait` - początek wiersza `data:` (rozcięty w prefiksie albo w środku JSON-a).
+ *  • `drop` - cokolwiek innego: wiersz spoza `data:`, ładunek nie-obiektowy (`[DONE]`
  *    dokładany przez proxy), HTML błędu. Czekanie na to nigdy się nie skończy.
  */
 function tailVerdict(tail: string): 'emit' | 'wait' | 'drop' {
@@ -782,7 +779,7 @@ function afterNoise(buffer: string): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Odpowiedź bez strumienia (AN-05, BA-22)
+// Odpowiedź bez strumienia
 // ═══════════════════════════════════════════════════════════════════════════════
 
 interface ParsedContent {
@@ -812,7 +809,7 @@ function readContentBlocks(raw: unknown): ParsedContent {
                 type: 'function',
                 function: {
                     name: asText(block.name),
-                    // Kształt kanoniczny trzyma argumenty STRINGIEM (BA-13).
+                    // Kształt kanoniczny trzyma argumenty STRINGIEM.
                     arguments: JSON.stringify(asRecord(block.input) ?? {}),
                 },
             });
@@ -824,7 +821,7 @@ function readContentBlocks(raw: unknown): ParsedContent {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Lista modeli (AN-18, B.5 ST-21)
+// Lista modeli
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function toModelInfo(entry: unknown): ModelInfo | null {
@@ -833,7 +830,7 @@ function toModelInfo(entry: unknown): ModelInfo | null {
     if (!model || !id) return null;
 
     const info: ModelInfo = { id, name: asText(model.display_name) || id };
-    // Metadana rozstrzygająca vision (VC-02) — bierzemy ją z katalogu, nie zgadujemy z nazwy.
+    // Metadana rozstrzygająca vision - bierzemy ją z katalogu, nie zgadujemy z nazwy.
     const capabilities = asRecord(model.capabilities);
     const imageInput = asRecord(capabilities?.image_input);
     if (typeof imageInput?.supported === 'boolean') info.multimodal = imageInput.supported;
@@ -856,7 +853,7 @@ export class AnthropicProvider implements ChatProvider {
 
     /**
      * Katalog modeli z `/v1/models`. Brak sieci, błędny status albo ciało nie-JSON kończą się
-     * PUSTĄ listą (ST-21) — nigdy wyjątkiem i nigdy listą zaszytą w kodzie (AN-18).
+     * PUSTĄ listą - nigdy wyjątkiem i nigdy listą zaszytą w kodzie.
      */
     async listModels(ctx: ProviderContext, http: HttpClient): Promise<ModelInfo[]> {
         try {
@@ -873,13 +870,13 @@ export class AnthropicProvider implements ChatProvider {
             const data = Array.isArray(body?.data) ? body.data : [];
             return data.map(toModelInfo).filter((model): model is ModelInfo => model !== null);
         } catch (err) {
-            // K20: do logu idzie sam komunikat po normalizacji, nigdy opis żądania z kluczem.
+            // Do logu idzie sam komunikat po normalizacji, nigdy opis żądania z kluczem.
             ctx.log.debug('models.list_failed', { provider: 'anthropic', message: normalizeError(err).message });
             return [];
         }
     }
 
-    /** Żądanie kanoniczne → Messages API (AN-02..AN-04, AN-19). `body` jest STRINGIEM JSON. */
+    /** Żądanie kanoniczne → Messages API. `body` jest STRINGIEM JSON. */
     buildRequest(req: ChatRequest, ctx: ProviderContext, stream: boolean): HttpRequestSpec {
         const maxTokens = resolveMaxTokens(req, ctx);
         const transcript = splitTranscript(req.messages ?? []);
@@ -916,7 +913,7 @@ export class AnthropicProvider implements ChatProvider {
         };
     }
 
-    /** Odpowiedź Messages API → kształt kanoniczny. Ładunek z polem `error` NIE rzuca (BA-22). */
+    /** Odpowiedź Messages API → kształt kanoniczny. Ładunek z polem `error` NIE rzuca. */
     parseCompletion(body: unknown, _req: ChatRequest, ctx: ProviderContext): OpenAiCompletion {
         const raw = asRecord(body);
         const completion: OpenAiCompletion = {
@@ -940,18 +937,18 @@ export class AnthropicProvider implements ChatProvider {
         if (content.toolCalls.length) message.tool_calls = content.toolCalls;
         completion.choices[0].finish_reason = canonicalFinishReason(asText(raw.stop_reason) || undefined);
 
-        // Tor bez strumienia oddaje `output_tokens` finalne, więc tu NIE pomijamy go jak w AN-08.
-        // BA-08: bez danych `usage` zostaje PUSTYM obiektem — sygnał dla pętli „estymuj".
+        // Tor bez strumienia oddaje `output_tokens` finalne, więc tu NIE pomijamy go.
+        // Bez danych `usage` zostaje PUSTYM obiektem - sygnał dla pętli „estymuj".
         const counters: TokenCounters = { input: 0, cacheCreate: 0, cacheRead: 0, output: 0 };
         if (absorbUsage(counters, raw.usage, false)) completion.usage = canonicalUsage(counters);
         return completion;
     }
 
-    /** Świeży dekoder na JEDNĄ turę — stan bloków i liczników nie przechodzi między turami. */
+    /** Świeży dekoder na JEDNĄ turę - stan bloków i liczników nie przechodzi między turami. */
     createStreamDecoder(_req: ChatRequest, _ctx: ProviderContext): StreamDecoder {
         return new AnthropicStreamDecoder();
     }
 }
 
-/** Jedyna instancja — dostawcy są BEZSTANOWI (stan tury żyje w dekoderze i w `ChatModel`). */
+/** Jedyna instancja - dostawcy są BEZSTANOWI (stan tury żyje w dekoderze i w `ChatModel`). */
 export const anthropicProvider = new AnthropicProvider();

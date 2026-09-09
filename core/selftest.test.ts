@@ -192,7 +192,7 @@ test('communicator disabled, no kom_* → mcp OK', async (t) => {
     t.is(m.details.kom_tools_present, 'none');
 });
 
-test('S28: komunikator włączony + komplet kom_send/kom_list/kom_read → mcp OK', async (t) => {
+test('komunikator włączony + komplet kom_send/kom_list/kom_read → mcp OK', async (t) => {
     const report = await buildSelfTestReport(
         makePlugin({ komunikatorEnabled: true, tools: ['read', 'kom_send', 'kom_list', 'kom_read'] }),
         {}
@@ -203,7 +203,7 @@ test('S28: komunikator włączony + komplet kom_send/kom_list/kom_read → mcp O
     t.is(m.details.kom_tools_present, 'kom_list, kom_read, kom_send');
 });
 
-test('S28: komunikator włączony, ale narzędzia poczty się nie zarejestrowały → mcp ERROR', async (t) => {
+test('komunikator włączony, ale narzędzia poczty się nie zarejestrowały → mcp ERROR', async (t) => {
     const report = await buildSelfTestReport(
         makePlugin({ komunikatorEnabled: true, tools: ['read', 'kom_send'] }),
         {}
@@ -214,7 +214,7 @@ test('S28: komunikator włączony, ale narzędzia poczty się nie zarejestrował
     t.regex(m.reason, /kom_read/);
 });
 
-test('S28: brak pola w ustawieniach = komunikator WŁĄCZONY (default ON)', async (t) => {
+test('brak pola w ustawieniach = komunikator WŁĄCZONY (default ON)', async (t) => {
     const plugin = makePlugin({ tools: ['read', 'kom_send', 'kom_list', 'kom_read'] });
     delete plugin.settings.pkmAssistant.komunikatorEnabled;
     const report = await buildSelfTestReport(plugin, {});

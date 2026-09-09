@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   CRYSTAL SOUL DESIGN SYSTEM v2 — Foundation
+   CRYSTAL SOUL DESIGN SYSTEM v2 - Foundation
    All variables use --cs- prefix (Crystal Soul)
    Agent color: set --cs-agent-color via inline style
    Inherits Obsidian theme → works with ANY theme
@@ -8,7 +8,7 @@
 
 .theme-dark, .theme-light {
 
-  /* ── Agent color (primary accent — set per element) ── */
+  /* ── Agent color (primary accent - set per element) ── */
   --cs-agent-color: var(--interactive-accent);
 
   /* ── Derived agent color variants (auto-calculated from --cs-agent-color) ── */
@@ -17,7 +17,7 @@
   --cs-agent-faded: color-mix(in srgb, var(--cs-agent-color) 50%, transparent);
   --cs-agent-strong: color-mix(in srgb, var(--cs-agent-color) 85%, white);
 
-  /* ── User color (personal accent — set globally via settings) ── */
+  /* ── User color (personal accent - set globally via settings) ── */
   --cs-user-color: var(--interactive-accent);
   --cs-user-glow: color-mix(in srgb, var(--cs-user-color) 35%, transparent);
   --cs-user-subtle: color-mix(in srgb, var(--cs-user-color) 12%, transparent);
@@ -93,7 +93,7 @@
   --cs-glow-blur: 16px;
 }
 
-/* ── CS Root — contextual foreground-based vars ── */
+/* ── CS Root - contextual foreground-based vars ── */
 .cs-root {
   --cs-fg-rgb: 180, 170, 155;
   --cs-border: rgba(var(--cs-fg-rgb), 0.08);
@@ -114,7 +114,7 @@
   display: flex;
   align-items: center;
 }
-/* S29 Z5: podczas konsolidacji pamięci pasek jest klikalny (otwiera modal przebiegu). */
+/* podczas konsolidacji pamięci pasek jest klikalny (otwiera modal przebiegu). */
 .pkm-status-bar-item--clickable,
 .pkm-status-bar-item--clickable .pkm-status-container {
   cursor: pointer;
@@ -198,11 +198,11 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   E3.4 D2 — statyczne inline styles wyniesione z JS (kampania katalogowa)
+   statyczne inline styles wyniesione z JS (kampania katalogowa)
    Wymóg-ostrzeżenie review katalogu Obsidian: żadnego stylowania z JS.
    Wartości przeniesione 1:1 z `el.style.cssText` / `el.style.X`.
    Reguły scope'owane pod klasą-rodzicem tam, gdzie element to input/
-   textarea/select/button — inaczej selektory Obsidiana typu
+   textarea/select/button - inaczej selektory Obsidiana typu
    `input[type="text"]` (0,1,1) wygrałyby z gołą klasą (0,1,0).
    ═══════════════════════════════════════════════════════════════ */
 
@@ -371,7 +371,7 @@
   text-align: center;
   transition: color 0.2s ease, opacity 0.2s ease;
 }
-/* S29 Z6: puls na chunku modelu — widoczna różnica „myśli" vs „zdechł". */
+/* puls na chunku modelu - widoczna różnica „myśli" vs „zdechł". */
 .cs-save-session__loading-hint.is-pulsing {
   color: var(--interactive-accent);
   opacity: 1;
@@ -388,7 +388,7 @@
   margin-top: 14px;
 }
 
-/* ── S29 Z4: chat/ConsolidationProgressModal.js (Puls pamięci) ── */
+/* ── chat/ConsolidationProgressModal.js (Puls pamięci) ── */
 .cs-consolidation__checklist {
   display: flex;
   flex-direction: column;
@@ -733,8 +733,8 @@ canvas.cs-cost-chart {
   text-align: right;
 }
 
-/* S36b (2026-07-30): blok `.cs-drafts-list*` (shell/DraftsListModal.js) skasowany razem
-   z całą rodziną draftów — modalu, który go renderował, już nie ma. */
+/* blok `.cs-drafts-list*` (shell/DraftsListModal.js) skasowany razem
+   z całą rodziną draftów - modalu, który go renderował, już nie ma. */
 
 /* -- chat: modale sesji (SessionCloseModal + OpenSessionModal) -- */
 .modal.cs-session-modal-narrow {
@@ -977,7 +977,7 @@ input.cs-artifact-name-input {
   margin-top: 8px;
 }
 
-/* ConfirmModal (ui-components) — zamiennik confirm(), release 2.2.0 */
+/* ConfirmModal (ui-components) - zamiennik confirm(), release 2.2.0 */
 .pkm-confirm-btn-row {
   display: flex;
   gap: 8px;
@@ -1081,7 +1081,7 @@ textarea.cs-prompt-textarea--instr {
   margin: 4px 0 0 0;
   padding-left: 18px;
 }
-/* S32 Z2.2/Z2.3: preset hint + wiersz guzików (Dodaj / Importuj z Claude) + lista importu */
+/* preset hint + wiersz guzików (Dodaj / Importuj z Claude) + lista importu */
 .mcp-server-editor-preset-hint {
   margin: -6px 0 10px 0;
 }
@@ -1217,7 +1217,7 @@ input.pkm-onboarding-key-input {
   position: relative;
 }
 
-/* -- profil agenta: modal generatora promptu startowego (S32 Z1a) --
+/* -- profil agenta: modal generatora promptu startowego --
    Akcent kolorystyczny agenta wchodzi zmienną --cs-startprompt-accent (ustawianą w JS
    przez setProperty), żeby sam kolor był dynamiczny, a reszta stylu została w CSS. */
 .cs-startprompt__wrap {
@@ -1252,7 +1252,7 @@ input.pkm-onboarding-key-input {
 
 /* -- shell/ApprovalModal.js + modules/tools/SettingsContent.js: pola/elementy ukrywane
    od startu (deny/redirect reason, hidden file <input>). Świadomie NIE `cs-collapsed`
-   (SidebarViews.css) — te dwa surface'y (modal approvala, zakładka Ustawień) mogą
+   (SidebarViews.css) - te dwa surface'y (modal approvala, zakładka Ustawień) mogą
    renderować się zanim user w ogóle otworzy sidebar agentów, czyli zanim ten arkusz
    zostanie zaadoptowany do dokumentu; `.pkm-hidden` żyje w document stylesheet (styles.css),
    więc działa od pierwszej klatki pluginu. */
@@ -1268,18 +1268,17 @@ input.pkm-onboarding-key-input {
 .cs-trigger-row:hover {
   background: var(--background-modifier-hover);
 }
-/* === lint-zero B: chat/core/ui-components (2026-08-27) === */
-/* obsidianmd/no-static-styles-assignment — statyczne `element.style.x = '...'` zamienione na
+/* obsidianmd/no-static-styles-assignment - statyczne `element.style.x = '...'` zamienione na
    klasy CSS + addClass/removeClass/classList.toggle. Wartości dosłownie 1:1 z usuniętego inline
    stylu. Miejsca z wartością DYNAMICZNĄ (np. `--cs-agent-color-rgb` przez `style.setProperty`
-   w chat_ui.ts) reguła i tak nie łapie — zostały bez zmian. */
+   w chat_ui.ts) reguła i tak nie łapie - zostały bez zmian. */
 
 /* -- chat/chat_ui.ts: guzik-przełącznik listy todo + mikrofon (chowane, gdy nieaktywne) -- */
 .cs-input-ctrl.is-hidden {
   display: none;
 }
 
-/* -- chat/chat_ui.ts: przyciski Konsoliduj / Sumaryzuj — przygaszone na czas operacji async -- */
+/* -- chat/chat_ui.ts: przyciski Konsoliduj / Sumaryzuj - przygaszone na czas operacji async -- */
 .cs-skillbar__icon--busy {
   opacity: 0.3;
 }
@@ -1324,9 +1323,9 @@ input.pkm-onboarding-key-input {
   display: none;
 }
 
-/* ── release 2.2.0 / W2 chat-ui ── */
-/* -- chat/chat_ui.ts (_applyBottomBarMode, N4): dwustanowy przełącznik slotu paska dolnego --
-   (textarea vs lista todo) — obsidianmd/no-static-styles-assignment zamiast bezpośredniego
+/* ── release 2.2.0 chat-ui ── */
+/* -- chat/chat_ui.ts (_applyBottomBarMode): dwustanowy przełącznik slotu paska dolnego --
+   (textarea vs lista todo) - obsidianmd/no-static-styles-assignment zamiast bezpośredniego
    `.style.display`. Bazowe style (.cs-input-row/.cs-todo-panel-bar) żyją w chat_view.css;
    te dwie reguły tylko dokładają `display: none` po drugiej stronie przełącznika. */
 .cs-input-row.is-hidden,
@@ -1334,11 +1333,11 @@ input.pkm-onboarding-key-input {
   display: none;
 }
 
-/* ── release 2.2.0 / W3 agents-etc ── */
+/* ── release 2.2.0 agents-etc ── */
 /* Utility współdzielony przez wiele dotów/swatchy koloru (agent/kategoria/paleta) w:
    agents/profile_overview.ts, crystal-soul/SettingsContent.ts, skills/SkillsBackstageTab.ts,
    sub-agents/SubAgentsBackstageTab.ts, komunikator/CommunicatorView.ts. Wartość koloru jest
-   PER-INSTANCJA dynamiczna (kolor agenta/kategorii/palety) — wchodzi zmienną `--cs-dyn-bg`
+   PER-INSTANCJA dynamiczna (kolor agenta/kategorii/palety) - wchodzi zmienną `--cs-dyn-bg`
    ustawianą w JS przez `style.setProperty`, żeby sam kolor był dynamiczny, a `background`
    został w CSS (obsidianmd: bez stylowania z JS poza zmiennymi). Brak wartości = `initial`
    (transparent), czyli identycznie jak przed ustawieniem inline stylu. */
@@ -1346,9 +1345,9 @@ input.pkm-onboarding-key-input {
   background: var(--cs-dyn-bg);
 }
 
-/* ── release 2.2.0 / W4 tools-models ── */
+/* ── release 2.2.0 tools-models ── */
 /* modules/models/SettingsContent.ts: plakietka lokalny/chmurowy przy modelu w Sub-agenci/Model
-   główny (dawniej setAttr('style', ...) inline — wytyczna katalogu Obsidiana zabrania inline style). */
+   główny (dawniej setAttr('style', ...) inline - wytyczna katalogu Obsidiana zabrania inline style). */
 .pkm-model-badge {
   padding: 1px 5px;
   border-radius: 3px;

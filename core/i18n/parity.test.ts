@@ -1,5 +1,5 @@
 /**
- * Parity PL ↔ EN (S27 Z9).
+ * Parity PL ↔ EN.
  *
  * Reguła repo: każdy string UI idzie przez `t('...')`, a klucz istnieje w OBU plikach.
  * Brak klucza nie wybucha — `t()` zwraca sam klucz, więc user widzi „backstage.foo" zamiast
@@ -53,18 +53,16 @@ test('i18n: placeholdery {{...}} zgadzają się między PL i EN', t => {
     t.deepEqual(mismatched, [], 'te klucze mają rozjechane placeholdery — interpolacja zgubi dane');
 });
 
-// ─── AUD-bledy-041: klucz użyty w kodzie, którego NIE MA w ŻADNYM słowniku ───
+// ─── Klucz użyty w kodzie, którego NIE MA w ŻADNYM słowniku ───
 //
 // Parytet pl↔en przepuszcza literówkę i klucz wymyślony od zera: brak w OBU plikach
 // jest „zgodny". `KomunikatorManager` wołał tak czterech kluczy (`komunikator.*`),
 // więc user dostawał w `Notice` napis „komunikator.invalid_recipient", a model ten sam
 // napis w polu `error` narzędzia `kom_send`/`kom_read`. Ten test skanuje ŹRÓDŁA.
 
-// Noc 24/25.08: zasięg rozszerzony z jednego katalogu (`modules/komunikator`) na całe
-// drzewo źródłowe pluginu — wąski skan łapał tylko literówki w Komunikatorze, a 10 kluczy
-// `modal.cost_tracking.*` / `settings.cost_tracking*` (Ustawienia → „Koszty LLM" → modal)
-// świeciły gołym kluczem od 2026-07-31 (`988ff55`) bez żadnego strażnika, bo mieszkały
-// poza jedynym skanowanym katalogiem. Charakteryzacja mechanizmu + pin stanu repo:
+// Zasięg obejmuje całe drzewo źródłowe pluginu, nie jeden katalog — wąski skan łapie
+// tylko literówki w jednym module, a klucze mieszkające gdzie indziej świecą gołym
+// kluczem bez żadnego strażnika. Charakteryzacja mechanizmu + pin stanu repo:
 // `core/i18n/parity_repo.test.ts` (ten sam regex, ten sam zestaw katalogów).
 
 /** Katalogi ze źródłami pluginu skanowane pod kątem literałów `t('...')`. */
@@ -128,18 +126,19 @@ test('i18n: każdy klucz t(\'...\') użyty w kodzie modułów istnieje w pl i en
     t.deepEqual([...new Set(missing)], [], 'te klucze wyjdą do usera i do modelu jako GOŁY KLUCZ');
 });
 
-// ── M (AUD-security-105): etykieta przełącznika mówi to, co przełącznik robi ────
+// ── Etykieta przełącznika mówi to, co przełącznik robi ────
 // Wiersz popovera Uprawnień gasi WYŁĄCZNIE `create_folder` (`PERMISSION_SWITCH_TOOLS`
 // w `modules/agents/toolAxis.ts`). Pliki agent zakłada przez `write {mode:'create'}`,
-// czyli wierszem „Edycja notatek" — napis „Tworzenie plików" obiecywał blokadę, której
-// ten przełącznik nie daje. Decyzja K12: popover bez nowych funkcji, prawdę mówi napis.
+// czyli wierszem „Edycja notatek" - napis „Tworzenie plików" obiecywał blokadę, której
+// ten przełącznik nie daje.
 test('i18n: `chat.popover.create_files` opisuje FOLDERY, nie pliki', t => {
     t.regex(pl['chat.popover.create_files'], /folder/i, 'pl: etykieta ma mówić o folderach');
     t.notRegex(pl['chat.popover.create_files'], /plik/i, 'pl: etykieta nie może obiecywać plików');
     t.regex(en['chat.popover.create_files'], /folder/i, 'en: etykieta ma mówić o folderach');
     t.notRegex(en['chat.popover.create_files'], /file/i, 'en: etykieta nie może obiecywać plików');
 
-    // Kontrola: `perm.create_files` (PermissionSystem) obejmuje vault.create + create_folder
-    // + artifact.create — tam „pliki" są PRAWDĄ i etykieta zostaje bez zmian.
+    // Kontrola: klucz `perm.create_files` (etykieta uprawnienia obejmującego vault.create +
+    // create_folder + artifact.create) - tam „pliki" są PRAWDĄ i etykieta zostaje bez zmian.
+    // Klucz żyje w i18n dla tej kontroli i etykiet uprawnień - nie kasować.
     t.regex(pl['perm.create_files'], /plik/i);
 });

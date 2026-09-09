@@ -24,7 +24,7 @@ test('collectSkillItems handles missing agentManager gracefully', t => {
     t.deepEqual(collectSkillItems({ getActiveAgentSkills: () => null }), []);
 });
 
-test('collectSubAgentItems returns ONLY active-agent custom subs (D18: no system roles)', t => {
+test('collectSubAgentItems returns ONLY active-agent custom subs (no system roles)', t => {
     const activeAgent = { name: 'Klara', activeSubAgents: [{ name: 'klara-prep' }] };
     const agentManager = {
         subAgentLoader: {
@@ -40,7 +40,7 @@ test('collectSubAgentItems returns ONLY active-agent custom subs (D18: no system
     const items = collectSubAgentItems(agentManager, activeAgent);
     const names = items.map(i => i.name);
     t.deepEqual(names, ['klara-prep', 'klara-strateg'], 'only Klara-prefixed custom subs, no system roles');
-    // D18: brak dekoracji isSystem/badge — wszystkie widoczne suby są custom.
+    // Brak dekoracji isSystem/badge - wszystkie widoczne suby są custom.
     t.true(items.every(i => i.isSystem === undefined && i.badge === undefined));
     t.false(names.includes('kustosz-prep'));
     t.false(names.includes('prep-memory'));
@@ -48,7 +48,7 @@ test('collectSubAgentItems returns ONLY active-agent custom subs (D18: no system
     t.is(items[0].kind, 'sub-agent');
 });
 
-test('collectSubAgentItems returns empty when no sub matches the agent prefix (D18)', t => {
+test('collectSubAgentItems returns empty when no sub matches the agent prefix', t => {
     const activeAgent = { activeSubAgents: [] };
     const agentManager = {
         subAgentLoader: {

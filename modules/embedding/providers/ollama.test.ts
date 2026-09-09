@@ -1,5 +1,5 @@
 /**
- * providers/ollama.test.ts — nowe testy C-12/C-13 (spec §1.2 — Ollama REST API).
+ * providers/ollama.test.ts — nowe testy (spec §1.2 — Ollama REST API).
  * Napisany przed implementacją (czerwony na stubie — każda metoda `OllamaEmbeddingProvider`
  * rzucała `not implemented`), dziś zielony.
  */
@@ -38,7 +38,7 @@ function fakeHttp(router: (spec: HttpRequestSpec) => HttpResponse): { http: Http
     };
 }
 
-test('C-12: listModels filtruje po nazwie (embed/embedding/bge) i czyta context_length z /api/show', async t => {
+test('listModels filtruje po nazwie (embed/embedding/bge) i czyta context_length z /api/show', async t => {
     const provider = new OllamaEmbeddingProvider();
     const { http } = fakeHttp((spec) => {
         if (spec.url.endsWith('/api/tags')) {
@@ -60,7 +60,7 @@ test('C-12: listModels filtruje po nazwie (embed/embedding/bge) i czyta context_
     t.false(ids.includes('llama3') || ids.includes('mistral'), 'model bez embed/embedding/bge w nazwie nie jest modelem embeddingu');
 });
 
-test('C-13: żądanie embeddingu leci na host z ustawień, nie na domyślny', t => {
+test('żądanie embeddingu leci na host z ustawień, nie na domyślny', t => {
     const provider = new OllamaEmbeddingProvider();
     const spec = provider.buildEmbedRequest(['a'], makeCtx({ endpoint: 'http://192.168.0.9:11434' }));
     t.true(spec.url.startsWith('http://192.168.0.9:11434'), `URL powinien zawierać host z ustawień: ${spec.url}`);

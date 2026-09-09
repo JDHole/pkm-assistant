@@ -1,7 +1,7 @@
 /**
- * AUD-code-review-024 (CRITICAL) — zmiana nazwy agenta ma jednego właściciela dyskowej operacji.
- * Testy pokrywają dokładnie to, czego żądał audyt: rename szczęśliwy, kolizja nazw, pad przenosin
- * pamięci — plus pad zapisu YAML i guard built-ina, żeby rollback nie miał dziur.
+ * Zmiana nazwy agenta ma jednego właściciela dyskowej operacji.
+ * Testy pokrywają: rename szczęśliwy, kolizja nazw, pad przenosin
+ * pamięci - plus pad zapisu YAML i guard built-ina, żeby rollback nie miał dziur.
  */
 import test from 'ava';
 import { renameAgentOnDisk, type RenameAgentDeps, type RenameAgentLike } from './renameAgentFlow.js';
@@ -37,7 +37,7 @@ function makeAgent(overrides: Partial<RenameAgentLike> = {}): RenameAgentLike {
     return { name: 'Agent2', isBuiltIn: false, filePath: '.pkm-assistant/agents/agent2.yaml', ...overrides };
 }
 
-/** Kopiowanie folderu — atrapa `AgentManager._copyFolderRecursive` na tej samej vault-atrapie. */
+/** Kopiowanie folderu - atrapa `AgentManager._copyFolderRecursive` na tej samej vault-atrapie. */
 function makeCopyFolder(vault: ReturnType<typeof makeVault>, { failOn }: { failOn?: string } = {}) {
     return async (src: string, dest: string) => {
         vault.folders.add(dest);
@@ -238,9 +238,9 @@ test('agent bez folderu pamięci (świeży, jeszcze nieinicjalizowany): rename p
     t.false(copyCalled, 'brak folderu = nic do skopiowania');
 });
 
-// ── F02 (AUD-code-review-024, druga runda) — same-slug, fail-closed, osierocony folder ──────
+// ── Same-slug, fail-closed, osierocony folder ──────
 
-test('F02.1: rename na ten sam slug (tylko wielkość liter) — zapis w miejscu, ZERO ruszania pamięci, ZERO bramki kolizji z samym sobą', async t => {
+test('rename na ten sam slug (tylko wielkość liter) — zapis w miejscu, ZERO ruszania pamięci, ZERO bramki kolizji z samym sobą', async t => {
     const vault = makeVault(
         {
             '.pkm-assistant/agents/badacz.yaml': 'name: badacz\n',
@@ -272,7 +272,7 @@ test('F02.1: rename na ten sam slug (tylko wielkość liter) — zapis w miejscu
     t.is(vault.files['.pkm-assistant/agents/badacz/memory/brain.md'], '# brain', 'pamięć nietknięta');
 });
 
-test('F02.2: bramka kolizji fail-CLOSED — pad exists() jest odmową, nie cichym przepuszczeniem', async t => {
+test('bramka kolizji fail-CLOSED — pad exists() jest odmową, nie cichym przepuszczeniem', async t => {
     const vault = makeVault({ '.pkm-assistant/agents/agent2.yaml': 'name: Agent2\n' });
     const agent = makeAgent();
     let saveCalled = false;
@@ -296,7 +296,7 @@ test('F02.2: bramka kolizji fail-CLOSED — pad exists() jest odmową, nie cichy
     t.false(copyCalled, 'zero kopiowania pamięci na padzie sprawdzenia kolizji');
 });
 
-test('F02.3: osierocony folder pamięci pod nowym slugiem (po skasowanym agencie) jest kolizją — cudze notatki NIE zostają wchłonięte', async t => {
+test('osierocony folder pamięci pod nowym slugiem (po skasowanym agencie) jest kolizją — cudze notatki NIE zostają wchłonięte', async t => {
     const vault = makeVault(
         {
             '.pkm-assistant/agents/agent2.yaml': 'name: Agent2\n',
@@ -319,7 +319,7 @@ test('F02.3: osierocony folder pamięci pod nowym slugiem (po skasowanym agencie
     t.is(vault.files['.pkm-assistant/agents/klara/memory/brain.md'], 'cudze notatki', 'cudza pamięć nietknięta');
 });
 
-test('F02.4: pad zapisu YAML gdy agent nie ma własnej pamięci — rollback NIE kasuje folderu, którego sam nie stworzył', async t => {
+test('pad zapisu YAML gdy agent nie ma własnej pamięci — rollback NIE kasuje folderu, którego sam nie stworzył', async t => {
     const vault = makeVault({ '.pkm-assistant/agents/agent2.yaml': 'name: Agent2\n' });
     const agent = makeAgent();
     const deps = makeDeps(vault, {
@@ -334,9 +334,9 @@ test('F02.4: pad zapisu YAML gdy agent nie ma własnej pamięci — rollback NIE
     t.false(vault.calls.rmdir.includes('.pkm-assistant/agents/badacz'), 'rollback nie woła rmdir na folderze, który nigdy nie powstał');
 });
 
-// ── F02.6a — skrzynka komunikatora wędruje z agentem, best-effort ──────────────────────────
+// ── Skrzynka komunikatora wędruje z agentem, best-effort ──────────────────────────
 
-test('F02.5: rename przenosi skrzynkę komunikatora na nowy slug (create-before-delete)', async t => {
+test('rename przenosi skrzynkę komunikatora na nowy slug (create-before-delete)', async t => {
     const vault = makeVault(
         {
             '.pkm-assistant/agents/agent2.yaml': 'name: Agent2\n',
@@ -355,7 +355,7 @@ test('F02.5: rename przenosi skrzynkę komunikatora na nowy slug (create-before-
     t.false('.pkm-assistant/komunikator/inbox/agent2/msg-1.md' in vault.files, 'stara skrzynka skasowana');
 });
 
-test('F02.7: istniejąca skrzynka pod NOWYM slugiem = zero kopiowania (cudza poczta nie jest wchłaniana), inboxMoveFailed', async t => {
+test('istniejąca skrzynka pod NOWYM slugiem = zero kopiowania (cudza poczta nie jest wchłaniana), inboxMoveFailed', async t => {
     const vault = makeVault(
         {
             '.pkm-assistant/agents/agent2.yaml': 'name: Agent2\n',
@@ -375,7 +375,7 @@ test('F02.7: istniejąca skrzynka pod NOWYM slugiem = zero kopiowania (cudza poc
     t.true('.pkm-assistant/komunikator/inbox/agent2/msg-1.md' in vault.files, 'stara skrzynka zostaje (nic nie skasowane)');
 });
 
-test('F02.6: pad przenosin skrzynki komunikatora NIE wywala rename — agent zapisany, zwrotka niesie inboxMoveFailed', async t => {
+test('pad przenosin skrzynki komunikatora NIE wywala rename — agent zapisany, zwrotka niesie inboxMoveFailed', async t => {
     const vault = makeVault(
         {
             '.pkm-assistant/agents/agent2.yaml': 'name: Agent2\n',

@@ -1,15 +1,15 @@
 /**
- * `modules/models/registry.ts` — metryczki dostawców i rejestr instancji.
+ * `modules/models/registry.ts` - metryczki dostawców i rejestr instancji.
  *
  * Dwie rzeczy i ani jednej więcej:
- *  • {@link PROVIDER_INFO} — FAKTY KONTRAKTOWE dziewięciu platform (adresy, nagłówek klucza,
+ *  • {@link PROVIDER_INFO} - FAKTY KONTRAKTOWE dziewięciu platform (adresy, nagłówek klucza,
  *    tryb strumienia, domyślny model, flagi zdolności). Wartości pochodzą z publicznej
- *    dokumentacji API dostawców — linki przy każdym wpisie;
- *  • {@link CHAT_PROVIDERS} + {@link resolveProvider} — jawny rejestr instancji i fail-safe
+ *    dokumentacji API dostawców - linki przy każdym wpisie;
+ *  • {@link CHAT_PROVIDERS} + {@link resolveProvider} - jawny rejestr instancji i fail-safe
  *    na nazwę platformy, której już nie ma.
  *
  * Rejestr jest KOMPLETNY z konstrukcji (dziewięć wpisów). Harness podmienia wpisy,
- * nigdy ich nie usuwa — dlatego typ to `Record`, nie `Partial<Record<…>>`.
+ * nigdy ich nie usuwa - dlatego typ to `Record`, nie `Partial<Record<…>>`.
  */
 import { anthropicProvider } from './providers/anthropic.js';
 import { deepseekProvider } from './providers/deepseek.js';
@@ -26,34 +26,34 @@ import type { ChatProvider, ChatProviderInfo, ChatProviderRegistry, ProviderId }
  * Metryczki dziewięciu dostawców.
  *
  * `defaultEndpoint` ma DWA znaczenia, zależnie od tego, czy adres jest stały:
- *  • platformy chmurowe — PEŁNY adres wywołania czatu (dostawca strzela w niego wprost);
- *  • platformy lokalne (`ollama`, `lm_studio`) — sam ADRES BAZOWY, bo user i tak podaje
+ *  • platformy chmurowe - PEŁNY adres wywołania czatu (dostawca strzela w niego wprost);
+ *  • platformy lokalne (`ollama`, `lm_studio`) - sam ADRES BAZOWY, bo user i tak podaje
  *    własny host w ustawieniach, a ścieżkę dokleja dostawca.
  *
  * `streamUsage` jest OPT-IN: `stream_options` rozumieją tylko OpenAI i DeepSeek, reszta
  * serwerów kształtu OpenAI odbija nieznane pole statusem 400.
  *
- * Źródła (publiczna dokumentacja API; adresy i nagłówki sprawdzone 2026-09-06):
- *  • OpenAI — platform.openai.com/docs/api-reference/chat, /models
- *    (dokumentacja odbija roboty statusem 403 — kształt `/v1/chat/completions`,
+ * Źródła (publiczna dokumentacja API; adresy i nagłówki sprawdzone względem dokumentacji dostawców):
+ *  • OpenAI - platform.openai.com/docs/api-reference/chat, /models
+ *    (dokumentacja odbija roboty statusem 403 - kształt `/v1/chat/completions`,
  *    `/v1/models` i `Authorization: Bearer` potwierdzają opisy zgodności u Groqa
  *    i LM Studio, a w repo pinuje go `providers/openai.test.ts`)
- *  • Anthropic — platform.claude.com/docs/en/api/models-list (stary adres
+ *  • Anthropic - platform.claude.com/docs/en/api/models-list (stary adres
  *    docs.anthropic.com przekierowuje 301): `GET https://api.anthropic.com/v1/models`,
  *    klucz w nagłówku `x-api-key`
- *  • Google Gemini — ai.google.dev/api/models: baza `generativelanguage.googleapis.com/v1beta`.
+ *  • Google Gemini - ai.google.dev/api/models: baza `generativelanguage.googleapis.com/v1beta`.
  *    Dokumentacja pokazuje klucz jako parametr `?key=`, my WYBIERAMY nagłówek
- *    `x-goog-api-key` — sekret nie ma prawa wylądować w adresie (loguje się i cache'uje)
- *  • Ollama — github.com/ollama/ollama/blob/main/docs/api.md: `http://localhost:11434`,
+ *    `x-goog-api-key` - sekret nie ma prawa wylądować w adresie (loguje się i cache'uje)
+ *  • Ollama - github.com/ollama/ollama/blob/main/docs/api.md: `http://localhost:11434`,
  *    czat `POST /api/chat`, katalog `GET /api/tags`, strumień = NDJSON z `done`/`done_reason`
- *  • DeepSeek — api-docs.deepseek.com/api/create-chat-completion:
+ *  • DeepSeek - api-docs.deepseek.com/api/create-chat-completion:
  *    `https://api.deepseek.com/chat/completions`, `stream_options.include_usage` wspierane
- *  • Groq — console.groq.com/docs/openai: baza `https://api.groq.com/openai/v1`
- *  • OpenRouter — openrouter.ai/docs/api-reference/chat-completion:
+ *  • Groq - console.groq.com/docs/openai: baza `https://api.groq.com/openai/v1`
+ *  • OpenRouter - openrouter.ai/docs/api-reference/chat-completion:
  *    `https://openrouter.ai/api/v1/chat/completions`, klucz w `Authorization: Bearer`
- *  • LM Studio — lmstudio.ai/docs/app/api/endpoints/openai: `http://localhost:1234/v1`
+ *  • LM Studio - lmstudio.ai/docs/app/api/endpoints/openai: `http://localhost:1234/v1`
  *    z `/v1/models` i `/v1/chat/completions`, bez wymogu klucza
- *  • xAI — docs.x.ai/docs/api-reference: baza `https://api.x.ai/v1`,
+ *  • xAI - docs.x.ai/docs/api-reference: baza `https://api.x.ai/v1`,
  *    `Authorization: Bearer`
  */
 export const PROVIDER_INFO: Readonly<Record<ProviderId, ChatProviderInfo>> = {
@@ -207,11 +207,10 @@ export const PROVIDER_INFO: Readonly<Record<ProviderId, ChatProviderInfo>> = {
 };
 
 /**
- * Komplet dostawców czatu — jawna rejestracja, którą `config/runtimeConfig.ts` wkłada
+ * Komplet dostawców czatu - jawna rejestracja, którą `config/runtimeConfig.ts` wkłada
  * do `RuntimeConfig.chat.providers`. Harness PODMIENIA wpisy, nigdy ich nie usuwa.
  *
- * Dziewięć wpisów, ani jednego więcej: `google`/`azure`/`custom` nie wracają (wycięte
- * 2026-09-03, AUD-dead-code-026/110/112/168).
+ * Dziewięć wpisów, ani jednego więcej: `google`/`azure`/`custom` nie wracają.
  */
 export const CHAT_PROVIDERS: ChatProviderRegistry = {
     openai: openaiProvider,
@@ -226,15 +225,15 @@ export const CHAT_PROVIDERS: ChatProviderRegistry = {
 };
 
 /**
- * Fail-safe wyboru dostawcy (B.3 SM-02).
+ * Fail-safe wyboru dostawcy.
  *
- * Nieznana nazwa platformy — `azure`, `custom`, `google` z cudzego, starego `settings.json` —
+ * Nieznana nazwa platformy - `azure`, `custom`, `google` z cudzego, starego `settings.json` -
  * NIE rzuca i NIE oddaje `undefined`: zwracany jest PIERWSZY wpis rejestru. Nikt nie migruje
  * ustawień wstecz, a plugin, który wywala się na starym pliku, jest gorszy niż plugin,
  * który gada z domyślną platformą.
  *
  * @param registry Rejestr dostawców (produkcyjny {@link CHAT_PROVIDERS} albo podmieniony w harnessie).
- * @param id Nazwa platformy z ustawień — dowolny tekst z dysku, nie tylko {@link ProviderId}.
+ * @param id Nazwa platformy z ustawień - dowolny tekst z dysku, nie tylko {@link ProviderId}.
  */
 export function resolveProvider(registry: ChatProviderRegistry, id: string): ChatProvider {
     const bag = registry as unknown as Record<string, ChatProvider | undefined>;
