@@ -94,7 +94,7 @@ Jak szukasz "gdzie jest zdefiniowany konkretny agent użytkownika" - nie w kodzi
 
 ```bash
 npm run dev              # Build z watch mode (dla developmentu)
-npm run build            # Production build → dist/main.js
+npm run build            # Production build → dist/main.js + deploy do vaultów z DESTINATION_VAULTS w .env (żywy vault właściciela - ostatnia bramka, nie krok roboczy)
 npm test                 # AVA - testy unit, darmowe, offline
 npm run typecheck        # tsc --noEmit - bramka TypeScript strict (noUnusedLocals + noUnusedParameters)
 npm run lint              # ESLint na modules/ + src/ + config/ + utils/ + test-support/
@@ -214,3 +214,44 @@ Zachowuje:
 - **Public API** (eksporty index.js)
 - **Gotchas / decyzje historyczne** istotne dla dzisiejszego zachowania
 - Link do znalezisk/testów modułu, jeśli dotyczy
+
+---
+
+## Dowód, nie deklaracja
+
+1. Każde twierdzenie w raporcie z roboty niesie w tym samym zdaniu dowód albo etykietę: `[measured]` - odpalone albo odczytane, `[inferred]` - wynika z kodu lub logów, ale nieodpalone, `[guess]` - domysł (przewidywanie i niewidziana przyczyna to zawsze guess). Nigdy nie oddawaj właścicielowi projektu checka, który możesz odpalić sam.
+2. Dowód to realny artefakt: odpalona funkcja, odczytana wartość, output komendy wklejony verbatim, diff. "Kompiluje się", zielony build i zielone CI to NIE dowód. Typ dowodu dopasowany do zmiany: CLI - realna komenda, UI - przejście zmienionego flow w Obsidianie, parser/migracja - replay realnego wejścia, storage - odczyt zapisanej wartości.
+3. "Niejednoznaczne" jest poprawną odpowiedzią; pewność bez dowodu to czerwona flaga. Weryfikuje agent inny niż autor (drabina modeli w globalnym CLAUDE.md: sonnet pisze, opus sprawdza).
+
+### Opis PR
+
+Tytuł (rozszerza format commitów z Git flow wyżej): Conventional Commits `type(scope): subject`, tryb rozkazujący, bez kropki na końcu. Opis to briefing, nie dziennik pokładowy - sekcje w kolejności Why / Scope / Tradeoffs / Blast Radius / Verification, tylko niepuste, maks ok. 40 linii. Verification = co odpalono i co to pokazało, z etykietami z punktu 1. Pięć wąskich PR-ów zamiast jednego dużego.
+
+---
+
+## TypeScript i testy
+
+| Reguła | Zamiast czego |
+|---|---|
+| Discriminated unions (`kind` jako literal dyskryminator) | worka pól opcjonalnych |
+| Branded types dla semantycznych prymitywów, walidacja raz na granicy | gołych `string` / `number` wszędzie |
+| Kształt typu czyni nielegalny stan niereprezentowalnym | runtime guarda, który go pilnuje w locie |
+| `unknown` dla danych zewnętrznych | `any` |
+| Parsowanie na granicy schematem | ręcznego type guarda pole po polu |
+| Cast `as` dopiero po walidacji | castu `as` na wiarę |
+| Zawężanie w kolejności: discriminant switch, `in`, typeof/instanceof, guard, `as` na końcu | `as` jako pierwszego wyboru |
+| `satisfies` | `as` (poszerza typ i go ukrywa) |
+| Walidacja na granicy (Obsidian API, pliki vaulta, sieć, provider LLM), zaufanie wewnątrz | guardów porozrzucanych po całym kodzie |
+| `Pick` / `Omit` / `Parameters` / `ReturnType` | nowego interfejsu od zera |
+| Switch wyczerpujący z `never` w gałęzi default | switcha bez kontroli wyczerpania |
+| Logowanie przez `core/utils/Logger.ts` | `console.log` |
+
+### Testy: zachowanie, nie implementacja
+
+Test wywołuje kod tak, jak jego użytkownik, i sprawdza obserwowalny wynik wobec literalnej wartości oczekiwanej. Test kontrolny: czy test przejdzie, gdy każda importowana funkcja zwróci undefined? Jeśli tak - przepisz asercję albo skasuj test. Pięć wzorców fałszywych testów:
+
+- Słaba albo żadna asercja - samo `t.pass()`, `t.truthy()` czy `t.notThrows()` bez sprawdzenia konkretnej wartości.
+- Sprawdzasz tylko wywołanie mocka albo brak czegoś - pusta tablica, `undefined`, porównanie z "złą wartością" zamiast realnego wyniku.
+- Test samoodnoszący się - oczekiwana wartość liczona tą samą funkcją, którą testujesz.
+- Pinowanie stałej - asercja powtarza ręcznie utrzymywaną stałą, domyślny config albo tekst promptu.
+- Fixture sprawdza fixture - asercja czyta dane zbudowane przez sam test, kod pod testem nigdy realnie nie odpala się w środku.
