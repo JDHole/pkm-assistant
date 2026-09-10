@@ -94,7 +94,7 @@ Jak szukasz "gdzie jest zdefiniowany konkretny agent użytkownika" - nie w kodzi
 
 ```bash
 npm run dev              # Build z watch mode (dla developmentu)
-npm run build            # Production build → dist/main.js
+npm run build            # Production build → dist/main.js + deploy do vaultów z DESTINATION_VAULTS w .env (żywy vault właściciela - ostatnia bramka, nie krok roboczy)
 npm test                 # AVA - testy unit, darmowe, offline
 npm run typecheck        # tsc --noEmit - bramka TypeScript strict (noUnusedLocals + noUnusedParameters)
 npm run lint              # ESLint na modules/ + src/ + config/ + utils/ + test-support/
