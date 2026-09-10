@@ -45,3 +45,6 @@ audyt/biegi/*/surowe/
 
 # Skille agentów Claude Code to prywatne narzędzia właściciela (ścieżki lokalne, nazwy agentów) — nie są częścią pluginu.
 .claude/skills/
+
+# Prywatna, polska wersja CLAUDE.md dla właściciela - publiczny CLAUDE.md w repo jest po angielsku, dla obcych kontrybutorów i ich agentów.
+CLAUDE.local.md

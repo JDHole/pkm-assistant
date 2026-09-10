@@ -1,257 +1,126 @@
 # PKM Assistant
 
-**Co to jest:** plugin do Obsidian. Agenci AI wewnątrz vaulta z hierarchiczną pamięcią, skillami i narzędziami (MCP). GPL-3.0.
+**What this is:** A plugin for Obsidian. AI agents living inside your vault, with hierarchical memory, skills, and tools (MCP). License: GPL-3.0. Repo: https://github.com/JDHole/pkm-assistant
 
-**Dla kogo:** osoby chcące własnego asystenta AI w Obsidianie - lokalnego (Ollama), chmurowego (OpenAI/Anthropic/xAI/inne) lub mieszanego. User nie-programista zarządza agentami przez UI, nie kod.
+**Who it's for:** People who want their own AI assistant inside Obsidian - local (Ollama), cloud (OpenAI/Anthropic/xAI/other), or a mix. Non-programmer users manage agents through the UI, not code.
 
-**Rozmiar:** kod modułowy siedzi w `modules/<nazwa>/` + `core/` (fundament) + `src/` (dwa pliki: composition root i style) + `config/` + `utils/` (root-level). Build: esbuild → `dist/main.js` (~2 MB). Testy: AVA. Licencja: GPL-3.0. Repo: https://github.com/JDHole/pkm-assistant.
+**Authorship:** This project is built entirely with Claude Code (JDHole: vision, prompt engineering, testing; Claude Code sessions: implementation). See `QUICK_START.md`.
 
-**Autorstwo:** projekt jest w całości napisany z pomocą Claude Code (JDHole - wizja, prompt engineering, testowanie; sesje Claude Code - implementacja). Zobacz `QUICK_START.md`.
+## Priorities (in this order)
 
----
+1. **Zero regressions.** Something breaks - stop, fix it, then continue. The plugin is in production and people use it daily.
+2. **Git hygiene** - a commit per meaningful change, tests pass before every commit, a clean history so someone new can land and understand what is going on.
 
-## Priorytety pracy (w tej kolejności)
+Stability comes before new features - the plugin is headed for the public Obsidian community directory and has to stay predictable.
 
-1. **Zero regresji.** Coś się psuje → STOP, naprawa, potem dalej. Plugin jest w produkcji, użytkownicy go używają codziennie.
-2. **Git hygiene** - commity po każdej sensownej zmianie, testy pass przed commitem, porządek na GitHub żeby ktoś mógł wejść z ulicy i dojść co się dzieje.
-3. **Edukacja właściciela projektu** - JDHole nie jest programistą. Każda zmiana to okazja do zrozumienia, nie tylko wykonania. Jak nie rozumie zmiany → nie wchodzi. Jak rozumie → zostaje mu to na zawsze.
+## Main rule - how this project is organized
 
-Stabilność ma pierwszeństwo przed nowymi funkcjami - plugin idzie do publicznego katalogu Obsidiana i musi być przewidywalny.
+**Every module is a physical folder** in `modules/<name>/` with:
+- `index.ts` - the only public door, a physical file (import specifiers in code end in `.js` but point at this same physical `.ts` file). It exports whatever the module makes available to the rest of the codebase.
+- `CLAUDE.md` - module documentation: what it does, how, and its gotchas.
+- Everything else - private internals.
 
----
+**Golden rule:** outside a module, you may only import from `modules/<name>/index.js`. Never from its internals. Inside a module, files may import each other freely.
 
-## REGUŁA GŁÓWNA - jak ten projekt jest zorganizowany
+**The golden rule also covers `core/`** - its door is `core/index.ts`. Official exceptions, allowed to be deep-imported from anywhere: `core/i18n/index.ts` and `core/utils/Logger.ts` (global utilities with a very large number of importers). The second exception is a single file: `src/main.ts`, the composition root, deep-imports a handful of core Obsidian-facing files (`PluginBase.ts`, `runtime/PluginRuntime.ts`, `runtime/settingsArmor.ts`, `utils/obsidianNav.ts`, `security/MasterPasswordModal.ts`) because they cannot be added to the barrel: `core/index.ts` has to load in plain Node, and the AVA tests have no mock for `obsidian`. Import specifiers still deliberately end in `.js` and point at the physical `.ts` files.
 
-**Każdy moduł to fizyczny folder** w `modules/<nazwa>/` z:
-- `index.ts` - **jedyne drzwi publiczne**, plik fizyczny (specifiery importu w kodzie kończą się na `.js`, ale wskazują ten sam fizyczny plik `.ts`); eksportuje to, co moduł udostępnia reszcie
-- `CLAUDE.md` - dokumentacja modułu: co robi, jak, gotchas
-- Reszta plików - bebechy, prywatne
+**ESLint enforces this**, not "convention plus review": `no-restricted-imports` in `eslint.config.js` covers `modules/**`, `src/**`, `config/**`, `utils/**`, and `test-support/**` (tests excluded), and `npm run lint` runs across all five trees. A deep import is a lint error, not a review comment.
 
-**ZŁOTA ZASADA:** poza modułem wolno importować TYLKO z `modules/<nazwa>/index.js`. **Nigdy** z bebechów. Wewnątrz modułu pliki importują się swobodnie.
+**Why:** (a) a session working inside a single folder saves tokens, (b) it keeps changes scoped module by module instead of to the whole codebase at once, (c) changes to internals cannot break the plugin from the outside.
 
-**Złota zasada obejmuje też `core/`** - jego drzwiami jest `core/index.ts`. Oficjalne wyjątki (wolno deep-importować wszędzie): `core/i18n/index.ts` i `core/utils/Logger.ts` - globalne narzędzia z bardzo dużą liczbą importerów. Drugi wyjątek jest jednoosobowy: `src/main.ts` jako **composition root** deep-importuje obsidianowe pliki core (`PluginBase.ts`, `runtime/PluginRuntime.ts`, `runtime/settingsArmor.ts`, `utils/obsidianNav.ts`, `security/MasterPasswordModal.ts`) - nie mogą wejść do barrela, bo `core/index.ts` musi wstawać w gołym Node (testy AVA nie mają mocka `obsidian`). Specifiery w kodzie nadal celowo kończą się na `.js` i wskazują fizyczne pliki `.ts`.
+## Module map
 
-**Egzekwuje to ESLint**, nie "konwencja + review": `no-restricted-imports` w `eslint.config.js` obejmuje `modules/**`, `src/**`, `config/**`, `utils/**` oraz `test-support/**` (testy pominięte), a `npm run lint` przechodzi po wszystkich pięciu drzewach. Deep-import = błąd lintu, nie uwaga na review.
+All modular code lives in `modules/<name>/`. `src/` holds only two files: `src/main.ts` (composition root) and `src/styles.css`.
 
-**Dlaczego:** (a) sesja pracująca w kontekście JEDNEGO folderu = oszczędność tokenów, (b) właściciel projektu uczy się moduł po module, nie całości na raz, (c) zmiany w bebechach nie wywalają pluginu.
-
----
-
-## Mapa modułów
-
-**Cały kod modułowy siedzi w `modules/<nazwa>/`.** Stan `src/`: dwa pliki - `src/main.ts` (composition root) i `src/styles.css`. Nic więcej tam nie mieszka.
-
-| Moduł | Rola |
+| Module | Role |
 |---|---|
-| `core/` | Fundament: `PluginBase`, runtime (`runtime/PluginRuntime` + `SettingsStore` + `NoticeCenter` + `StatusBar`), transport HTTP (`core/http/`), security, i18n, utils. Szczegóły: [`core/CLAUDE.md`](core/CLAUDE.md) |
-| `modules/memory/` | Pamięć agenta: `brain.md` krótki index + `brain/` trwałe notatki + `sessions/active` + `sessions/archive` + summaries L1-L3, create-only `memory_save`, konsolidacja LLM-driven, izolacja między agentami |
-| `modules/embedding/` | Wektoryzacja (Orama): `EmbeddingModel` + `EmbeddingRegistry` + `providers/` (OpenAI/Ollama/Gemini/LM Studio i inne) + `VaultIndexer` |
-| `modules/prompts/` | `PromptBuilder` + Decision Tree - instrukcje zachowania agenta, grupowane i przełączalne |
-| `modules/sub-agents/` | `SubAgentLoader` + `Runner` (delegacja) + role systemowe ładowane przez `loadSystemRoles()` + custom YAML scope (folders / frontmatter / sections / pinned_notes) + DelegateTool DI + parallel execution + timeout per zadanie |
-| `modules/tools/` | Narzędzia agenta: built-in (vault, artefakty, komunikacja, media…) + klient MCP external (stdio/HTTP) |
-| `modules/skills/` | Skill engine (przepisy dla agentów) |
-| `modules/chat/` | `ChatView` + mixiny + `InlineChipPlugin` + `StreamingManager` + `RollingWindow`/`Summarizer` + `TriggerPopup` (inline triggers `/` i `@`) |
-| `modules/models/` | `ChatModel` + dostawcy w `providers/` (wiele platform: DeepSeek, Anthropic, OpenAI, Google, Groq, OpenRouter, Ollama, LM Studio, xAI…) + rejestr `registry.ts`; DI z `config/runtimeConfig.ts` |
-| `modules/artifacts/` | Plany i notatki (user-facing z approval flow) - todo agent-internal w `tools/` |
-| `modules/agents/` | `AgentManager`, `AgentProfile`, Jaskier (agent systemowy), model osobowości agenta (Persona + Umiejętności + Uprawnienia + Ekipa + Pamięć) |
-| `modules/multimodal/` | Audio STT + generowanie obrazu + vision + Oczko (świadomość aktywnej notatki) |
+| `core/` | Foundation: `PluginBase`, runtime (`runtime/PluginRuntime` + `SettingsStore` + `NoticeCenter` + `StatusBar`), HTTP transport (`core/http/`), security, i18n, utils. Details: `core/CLAUDE.md` |
+| `modules/memory/` | Agent memory: `brain.md` short index + `brain/` persistent notes + `sessions/active` + `sessions/archive` + L1-L3 summaries, create-only `memory_save`, LLM-driven consolidation, isolation between agents |
+| `modules/embedding/` | Vectorization (Orama): `EmbeddingModel` + `EmbeddingRegistry` + `providers/` (OpenAI/Ollama/Gemini/LM Studio and others) + `VaultIndexer` |
+| `modules/prompts/` | `PromptBuilder` + Decision Tree - agent behavior instructions, grouped and toggleable |
+| `modules/sub-agents/` | `SubAgentLoader` + `Runner` (delegation) + system roles loaded via `loadSystemRoles()` + custom YAML scope (folders / frontmatter / sections / pinned_notes) + DelegateTool DI + parallel execution + per-task timeout |
+| `modules/tools/` | Agent tools: built-in (vault, artifacts, communication, media...) + external MCP client (stdio/HTTP) |
+| `modules/skills/` | Skill engine (recipes for agents) |
+| `modules/chat/` | `ChatView` + mixins + `InlineChipPlugin` + `StreamingManager` + `RollingWindow`/`Summarizer` + `TriggerPopup` (inline `/` and `@` triggers) |
+| `modules/models/` | `ChatModel` + providers in `providers/` (many platforms: DeepSeek, Anthropic, OpenAI, Google, Groq, OpenRouter, Ollama, LM Studio, xAI...) + `registry.ts`; DI from `config/runtimeConfig.ts` |
+| `modules/artifacts/` | Plans and notes (user-facing, with an approval flow) - agent-internal todos live in `tools/` |
+| `modules/agents/` | `AgentManager`, `AgentProfile`, the built-in onboarding agent, agent personality model (Persona + Skills + Permissions + Team + Memory) |
+| `modules/multimodal/` | Audio STT + image generation + vision + active-note awareness |
 | `modules/onboarding/` | Wizard + `PlaybookManager` |
-| `modules/komunikator/` | Poczta międzyagentowa: skrzynka plik-per-wiadomość, prymitywy `kom_send`/`kom_list`/`kom_read`, niewidzialność per agent, sprzątanie pół-automatem |
-| `modules/crystal-soul/` | UI generators (ikony, kryształy, kolory) + `SkinManager` |
-| `modules/shell/` | Settings tab, sidebar, modale |
-| `modules/agent-loop/` | **Serce pętli narzędziowej - bez UI.** `runAgentLoop()`, `ArrayMessageStore`, kanon `parseToolCalls()` (kilka kształtów odpowiedzi) + `splitConcatenatedToolCalls()` (anty-sklejanie odpowiedzi modelu) + `sanitizeToolTranscript()`. Konsumenci: sub-agents, chat, `tools/MCPClient` |
-| `modules/ui-components/` | Współdzielone UI primitives: `ToolCallDisplay`, `ThinkingBlock`, `SubAgentBlock`, `AttachmentManager`, `MentionAutocomplete` |
-| `modules/web/` | Web access layer: `WebSearchProvider` (kilku dostawców), `urlRegistry` (proweniencja adresów), ustawienia wyszukiwania |
+| `modules/komunikator/` | Inter-agent mail: one file per message, `kom_send`/`kom_list`/`kom_read` primitives, per-agent invisibility, semi-automatic cleanup |
+| `modules/crystal-soul/` | UI generators (icons, crystals, colors) + `SkinManager` |
+| `modules/shell/` | Settings tab, sidebar, modals |
+| `modules/agent-loop/` | **The core tool loop, no UI.** `runAgentLoop()`, `ArrayMessageStore`, canonical `parseToolCalls()` (handles several response shapes) + `splitConcatenatedToolCalls()` (anti-merging for model output) + `sanitizeToolTranscript()`. Consumers: sub-agents, chat, `tools/MCPClient` |
+| `modules/ui-components/` | Shared UI primitives: `ToolCallDisplay`, `ThinkingBlock`, `SubAgentBlock`, `AttachmentManager`, `MentionAutocomplete` |
+| `modules/web/` | Web access layer: `WebSearchProvider` (several providers), `urlRegistry` (URL provenance), search settings |
 
-⚠️ Kilka plików logiki przekracza 800 LOC (oznaczone markerem w `CLAUDE.md` swoich modułów) - świadomie nierozbite; zmiana w którymkolwiek wymaga przeczytania całości przed edycją. `src/main.ts` nie ma modułowego `CLAUDE.md`, więc jego status monolitu odnotowany jest tutaj.
-
----
-
-## Agenci - gdzie żyją
-
-**W pluginie jest TYLKO Jaskier** (hardcoded w `modules/agents/archetypes/HumanVibe.js` jako systemowy onboarding agent - bez niego nowy user nie wie od czego zacząć).
-
-**Pozostali agenci to agenci użytkownika (własne pliki YAML w `.pkm-assistant/agents/`)** - żyją TYLKO w vaulcie użytkownika. Plugin daje:
-- **Runtime** (ChatView, SubAgentRunner, ServerExecutor, AccessGuard)
-- **UI do produkcji agentów** (agent użytkownika jako asystent tworzenia, AgentProfileModal)
-- **Monitoring i diagnostykę**
-
-Jak szukasz "gdzie jest zdefiniowany konkretny agent użytkownika" - nie w kodzie pluginu. W vaulcie usera.
-
----
-
-## Stos
-
-- Runtime: Obsidian API + ES Modules. 100% źródeł w `core/`, `modules/`, `src/`, `config/`, `utils/` i `test-support/` jest w TypeScript strict (`npm run typecheck` = `tsc --noEmit`; transpilacja: esbuild w buildzie, tsx w testach). Specifiery importów zostają z `.js` i wskazują fizyczne pliki `.ts`.
-- Build: esbuild (`npm run build` → `dist/main.js`)
-- Tests: AVA framework
-- Licencja: **GPL-3.0**
-- Repo: https://github.com/JDHole/pkm-assistant
-
----
-
-## Komendy
+## Commands and gates
 
 ```bash
-npm run dev              # Build z watch mode (dla developmentu)
-npm run build            # Production build → dist/main.js + deploy do vaultów z DESTINATION_VAULTS w .env (żywy vault właściciela - ostatnia bramka, nie krok roboczy)
-npm test                 # AVA - testy unit, darmowe, offline
-npm run typecheck        # tsc --noEmit - bramka TypeScript strict (noUnusedLocals + noUnusedParameters)
-npm run lint              # ESLint na modules/ + src/ + config/ + utils/ + test-support/
-npm run lint:obsidian     # ESLint z regułami katalogu społeczności Obsidiana, na core + modules + src + config + utils + test-support
-npm run release           # Przygotowanie release'u (patrz RELEASE_PROCESS.md) - publikację robi CI po pushu taga
+npm test                 # AVA - unit tests, free, offline
+npm run typecheck        # tsc --noEmit - strict TypeScript gate (noUnusedLocals + noUnusedParameters)
+npm run lint              # ESLint over modules/ + src/ + config/ + utils/ + test-support/
+npm run lint:obsidian     # ESLint with the Obsidian community-directory ruleset, over core + modules + src + config + utils + test-support
+npm run build             # Production build -> dist/main.js
 ```
 
-> **Weryfikacja zmian:** testy → typecheck → lint → lint:obsidian → build → **harness** (`selftest` + `scenarios`).
-> Harness odpala prawdziwy plugin w Node bez Obsidiana; mieszka w OSOBNYM repo
-> (https://github.com/JDHole/pkm-assistant-harness), bo walidator katalogu Obsidiana lintuje CAŁE
-> repo pluginu, a narzędzie testowe nie jest jego częścią. Klonuj je OBOK katalogu pluginu;
-> szczegóły w jego README. Zastępuje ad-hoc smoke testy klikane ręcznie w Obsidianie.
-> Biegi z żywym modelem (`--live`, bez `--offline`) wymagają klucza w `.env.local` tamtego repo
-> i kosztują - świadomie, nigdy w `npm test`.
-> **Te same bramki jadą automatycznie w CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) na każdy push i pull request do `main` - sieć bezpieczeństwa, nie zamiennik lokalnego przebiegu przed commitem.
+`npm run build` also deploys to every vault listed in `DESTINATION_VAULTS` in `.env`. For the owner that includes their live, daily-use vault - treat that as the last gate, not a work step.
 
----
+Full verification order: tests -> typecheck -> lint -> lint:obsidian -> build -> harness (`npm run selftest` + `npm run scenarios`). The harness runs the real plugin in Node without Obsidian and lives in a separate repo (`pkm-assistant-harness`, https://github.com/JDHole/pkm-assistant-harness) because the community-directory linter scans the whole plugin repo, and the test harness is not part of the plugin. Clone it next to this repo; see its own README for details.
+
+The same gates run automatically in CI (`.github/workflows/ci.yml`) on every push and pull request to `main` - a safety net, not a substitute for running them locally before you commit.
 
 ## Git flow
 
-### Hierarchia branchy
+- One task, one branch. Do not commit code directly to `main` (small doc fixes are the only exception).
+- Tests pass before every commit. Red - stop and fix, then commit.
+- Commit titles follow Conventional Commits: `type(scope): subject`, for example `fix(memory): correct session index lookup`.
+- Merge a finished branch into `main` with `git merge --no-ff`.
+- Update the documentation touched by the change as part of the same piece of work, not as a follow-up.
 
-```
-main (stable, jedyny długożyjący branch)
-  ├── refactor/v2.2-<nazwa>   ← branch roboczy per zadanie, po bramkach merge --no-ff → main
-  └── refactor/v2.2-<inne>    ← równoległa sesja = własny branch (worktree)
-```
+## Documentation rule
 
-Bezpośrednie commity na `main` **TYLKO drobne docs** (literówka w CLAUDE.md, odznaczenie checkboxa). Kod - nigdy.
+Documentation that lies is treated as a bug in this project. After a change, update the affected module's `CLAUDE.md` if the public API changed, a gotcha was added, or a TODO was resolved.
 
-### Workflow per zadanie
+Each module's `CLAUDE.md` keeps:
+- **What lives here** (module structure)
+- **Public API** (what `index.js` exports)
+- **Gotchas / historical decisions** still relevant to today's behavior
+- A link to module-specific findings or tests, if relevant
 
-```bash
-git checkout main
-git pull origin main
-git checkout -b refactor/v2.2-<nazwa>
-# ... commity na tym branchu ...
+## Evidence, not claims
 
-# Bramki (wszystkie zielone):
-npm test && npm run typecheck && npm run lint && npm run lint:obsidian && npm run build
-cd ../pkm-assistant-harness && npm run selftest && npm run scenarios && cd -   # osobne repo harnessu
+1. Every claim in a report carries its proof in the same sentence, or a label: `[measured]` - actually run or read, `[inferred]` - follows from code or logs but not run, `[guess]` - a guess (a prediction, or an unseen cause, is always a guess). Never hand back a check you could have run yourself.
+2. Evidence means a real artifact: a function actually run, a value actually read, command output pasted verbatim, a diff. "It compiles", a green build, or green CI are not evidence by themselves. Match the type of evidence to the change: CLI - a real command; UI - walking the changed flow in Obsidian; parser/migration - replaying real input; storage - reading back the stored value.
+3. "Inconclusive" is a valid answer; confidence without evidence is a red flag. Whoever verifies a change should not be the same person, or agent, who wrote it.
 
-# Merge do main:
-git checkout main
-git merge --no-ff refactor/v2.2-<nazwa>
-git push origin main
-```
+### PR description
 
-Przy równoległych sesjach - osobny worktree (`git worktree add .claude/worktrees/<nazwa> -b refactor/v2.2-<nazwa> origin/main`), nie przełączaj brancha pod cudzą sesją. Przed KAŻDYM commitem sprawdź `git branch --show-current` - drugi worktree/sesja mógł przełączyć branch pod tobą.
+Title: Conventional Commits `type(scope): subject`, imperative mood, no trailing period. The body is a briefing, not a log: sections in order Why / Scope / Tradeoffs / Blast Radius / Verification, only the non-empty ones, about 40 lines max. Verification lists what you ran and what it showed, using the labels from point 1. Prefer five narrow PRs over one large one.
 
-### Commit message format
+## TypeScript and tests
 
-```
-refactor(<moduł>): <co zrobione>
-docs(<obszar>): <co zrobione>
-fix(<moduł>): <co zrobione>
-```
-
-### Twarde reguły
-
-- **Testy pass przed commitem.** Komplet zielony → commit. Czerwony → STOP, naprawiamy, potem commit.
-- **NIGDY nie commituj kodu bezpośrednio na `main`.** Kod wchodzi tylko przez `refactor/v2.2-*` + merge `--no-ff`.
-- **Jedno zadanie = jeden branch** (czystsze history + łatwiejsze cofnięcie jak coś się sypnie). Branch zostaje na origin jako historical marker.
-- **Nie dotykaj dwóch modułów w jednym commicie** - patrz "Co NIE-WOLNO".
-
----
-
-## Root-level (NIE moduły)
-
-Oprócz `core/` + `modules/`, w roocie są:
-
-- **`config/`** (kilka plików `.ts`) - `runtimeConfig.ts` (`buildRuntimeConfig` - jawna rejestracja dostawców czatu i embeddingu, HTTP, transportu), `defaultSettings.ts` (domyślne ustawienia), `default_prompts.ts` (fabryczne szkielety promptów), `limits.ts` + `limits.test.ts` (twarde limity pętli agenta)
-- **`utils/`** (root-level, kilka plików `.ts` + testy) - `releaseNotes.ts` (notatki wydania: `compareSemver`, `latestReleaseFile`, `priorNotes`, `resolveNotesTarget`), `releasePrep.ts` (walidacja wersji + nazwa taga dla `release.js` - publikację robi `.github/workflows/release.yml` po pushu taga), `buildManifest.ts` (wersja z `package.json` do manifestu), `banner.ts` (copyright banner do bundla, użyty w `esbuild.js`). Workflow release: `RELEASE_PROCESS.md`
-- **`assets/`** - screenshoty do README
-- **`releases/`** - notatki wydania: `{wersja}.md` dla każdej wersji z `versions.json` (kontrakt `build_kontrakt.test.ts`; `release.yml` czyta je jako treść release'u), `latest_release.md` czyta widok "Co nowego" w pluginie
-- **`test-support/`** - atrapa `obsidian` + shim DOM + preload AVA; pierwszy zewnętrzny konsument pluginu to harness (osobne repo), a `test-support/` to jego most na ten checkout - objęte i `lint`, i `lint:obsidian`
-
----
-
-## Co NIE-WOLNO
-
-- ❌ **Nowych feature'ów kosztem stabilności** przed zgłoszeniem do katalogu - priorytet ma domykanie, nie rozbudowa
-- ❌ **Deep imports** (z bebechów innego modułu) - tylko przez jego `index.js`
-- ❌ Commitować `dist/` ani kluczy API
-- ❌ Mockować testów. Integracyjne > jednostkowe
-- ❌ Dotykać dwóch modułów w jednym commicie
-- ❌ Usuwać kodu bez zrozumienia - właściciel projektu się uczy, każda zmiana to lekcja
-- ❌ Sugerować tworzenie osobnych repo dla dokumentacji / ADR-ów / wiedzy deweloperskiej - dokumentacja per moduł żyje w plikach `CLAUDE.md` tego repo
-
----
-
-## Dla agenta (Claude Code / inny agent pracujący na kodzie) - jak pracować
-
-### Klepanie zadania
-
-0. **Otwórz sesję agenta w root pluginu** (NIE w pojedynczym module). Agent ma w cwd root pluginu, dostęp do wszystkich `modules/`, `core/`.
-1. **Start od `main`:** `git checkout main && git pull origin main` → `git checkout -b refactor/v2.2-<nazwa>`. Przy równoległych sesjach - osobny worktree, NIE przełączaj brancha pod cudzą sesją.
-2. **Źródło zadania:** przekazane w handoffie sesji. Zanim spytasz o coś, co da się sprawdzić - grepnij kod: pytania tylko o decyzje, nie o fakty.
-3. **Iteruj zadania; commity na branchu roboczym.** Testy pass przed każdym commitem. Przed commitem `git branch --show-current` (równoległe sesje!).
-4. **Bramki przed merge:** `npm test` → `npm run typecheck` → `npm run lint` → `npm run lint:obsidian` → `npm run build`, a potem w sklonowanym obok repo harnessu `npm run selftest` + `npm run scenarios`.
-5. **Koniec zadania:** push brancha + merge `--no-ff` do `main` (albo zgłoszenie do przeglądu, jeśli sesja nie merguje sama) + aktualizacja dokumentacji, której dotknęła zmiana.
-
-### Reguły ogólne
-
-1. **Otwieraj root pluginu**, NIE pojedynczy moduł. Zmiany bywają cross-module (np. zmiana w pamięci dotyka kilku modułów naraz). Agent potrzebuje dostępu do wszystkich.
-   - **Deep dive per moduł** (gdy potrzeba research) → subagent do przeszukiwania z poziomu root, nie osobna sesja.
-2. **Stan dzisiejszy:** cały kod modułowy siedzi w `modules/<nazwa>/` - `src/` to już tylko `main.ts` (composition root) i `styles.css`.
-3. Przed zmianą w module → przeczytaj jego `CLAUDE.md`. Tam są gotchas i decyzje historyczne istotne dziś.
-4. **Właściciel projektu jest nie-programistą** - tłumacz po polsku, prostymi słowami, metaforami. Bez żargonu bez wyjaśnienia.
-5. Po zmianie → zaktualizuj per-moduł `CLAUDE.md` jeśli zmieniło się public API, doszło gotcha, lub skreślono TODO. **Dokumentacja, która kłamie, jest w tym projekcie traktowana jak błąd.**
-6. **Token economy matters** - oszczędzaj gdzie się da. Przed dużym refactorem rozważ czy nie da się tego zrobić mniejszym diff'em.
-
-### Per-moduł CLAUDE.md w pluginie
-
-Zachowuje:
-- **Co tu jest** (struktura modułu)
-- **Public API** (eksporty index.js)
-- **Gotchas / decyzje historyczne** istotne dla dzisiejszego zachowania
-- Link do znalezisk/testów modułu, jeśli dotyczy
-
----
-
-## Dowód, nie deklaracja
-
-1. Każde twierdzenie w raporcie z roboty niesie w tym samym zdaniu dowód albo etykietę: `[measured]` - odpalone albo odczytane, `[inferred]` - wynika z kodu lub logów, ale nieodpalone, `[guess]` - domysł (przewidywanie i niewidziana przyczyna to zawsze guess). Nigdy nie oddawaj właścicielowi projektu checka, który możesz odpalić sam.
-2. Dowód to realny artefakt: odpalona funkcja, odczytana wartość, output komendy wklejony verbatim, diff. "Kompiluje się", zielony build i zielone CI to NIE dowód. Typ dowodu dopasowany do zmiany: CLI - realna komenda, UI - przejście zmienionego flow w Obsidianie, parser/migracja - replay realnego wejścia, storage - odczyt zapisanej wartości.
-3. "Niejednoznaczne" jest poprawną odpowiedzią; pewność bez dowodu to czerwona flaga. Weryfikuje agent inny niż autor (drabina modeli w globalnym CLAUDE.md: sonnet pisze, opus sprawdza).
-
-### Opis PR
-
-Tytuł (rozszerza format commitów z Git flow wyżej): Conventional Commits `type(scope): subject`, tryb rozkazujący, bez kropki na końcu. Opis to briefing, nie dziennik pokładowy - sekcje w kolejności Why / Scope / Tradeoffs / Blast Radius / Verification, tylko niepuste, maks ok. 40 linii. Verification = co odpalono i co to pokazało, z etykietami z punktu 1. Pięć wąskich PR-ów zamiast jednego dużego.
-
----
-
-## TypeScript i testy
-
-| Reguła | Zamiast czego |
+| Rule | Instead of |
 |---|---|
-| Discriminated unions (`kind` jako literal dyskryminator) | worka pól opcjonalnych |
-| Branded types dla semantycznych prymitywów, walidacja raz na granicy | gołych `string` / `number` wszędzie |
-| Kształt typu czyni nielegalny stan niereprezentowalnym | runtime guarda, który go pilnuje w locie |
-| `unknown` dla danych zewnętrznych | `any` |
-| Parsowanie na granicy schematem | ręcznego type guarda pole po polu |
-| Cast `as` dopiero po walidacji | castu `as` na wiarę |
-| Zawężanie w kolejności: discriminant switch, `in`, typeof/instanceof, guard, `as` na końcu | `as` jako pierwszego wyboru |
-| `satisfies` | `as` (poszerza typ i go ukrywa) |
-| Walidacja na granicy (Obsidian API, pliki vaulta, sieć, provider LLM), zaufanie wewnątrz | guardów porozrzucanych po całym kodzie |
-| `Pick` / `Omit` / `Parameters` / `ReturnType` | nowego interfejsu od zera |
-| Switch wyczerpujący z `never` w gałęzi default | switcha bez kontroli wyczerpania |
-| Logowanie przez `core/utils/Logger.ts` | `console.log` |
+| Discriminated unions (`kind` as a literal discriminant) | a bag of optional fields |
+| Branded types for semantic primitives, validated once at the boundary | bare `string` / `number` everywhere |
+| A type shape that makes illegal state unrepresentable | a runtime guard that polices it at runtime |
+| `unknown` for external data | `any` |
+| Parsing at the boundary with a schema | a hand-written type guard field by field |
+| `as` only after validation | an `as` cast on faith |
+| Narrow in this order: discriminant switch, `in`, typeof/instanceof, guard, `as` last | reaching for `as` first |
+| `satisfies` | `as` (widens the type and hides it) |
+| Validate at the boundary (Obsidian API, vault files, network, LLM provider), trust the inside | guards scattered through the whole codebase |
+| `Pick` / `Omit` / `Parameters` / `ReturnType` | a new interface from scratch |
+| An exhaustive switch with `never` in the default branch | a switch with no exhaustiveness check |
+| Logging through `core/utils/Logger.ts` | `console.log` |
 
-### Testy: zachowanie, nie implementacja
+### Tests: behavior, not implementation
 
-Test wywołuje kod tak, jak jego użytkownik, i sprawdza obserwowalny wynik wobec literalnej wartości oczekiwanej. Test kontrolny: czy test przejdzie, gdy każda importowana funkcja zwróci undefined? Jeśli tak - przepisz asercję albo skasuj test. Pięć wzorców fałszywych testów:
+A test calls the code the way its caller would, and checks the observable result against a literal expected value. Control test: would it still pass if every imported function returned undefined? If yes, rewrite the assertion or delete the test. Five patterns of a false test:
 
-- Słaba albo żadna asercja - samo `t.pass()`, `t.truthy()` czy `t.notThrows()` bez sprawdzenia konkretnej wartości.
-- Sprawdzasz tylko wywołanie mocka albo brak czegoś - pusta tablica, `undefined`, porównanie z "złą wartością" zamiast realnego wyniku.
-- Test samoodnoszący się - oczekiwana wartość liczona tą samą funkcją, którą testujesz.
-- Pinowanie stałej - asercja powtarza ręcznie utrzymywaną stałą, domyślny config albo tekst promptu.
-- Fixture sprawdza fixture - asercja czyta dane zbudowane przez sam test, kod pod testem nigdy realnie nie odpala się w środku.
+- Weak or missing assertion - just `t.pass()`, `t.truthy()`, or `t.notThrows()` with no check of a specific value.
+- Checking only that a mock was called, or that something is absent - an empty array, `undefined`, comparing against a "wrong value" instead of the real result.
+- A self-referential test - the expected value is computed by the same function under test.
+- Pinning a constant - the assertion just repeats a hand-maintained constant, a default config, or prompt text.
+- Fixture checks fixture - the assertion reads data built by the test itself, and the code under test never actually runs in the middle.
