@@ -1,11 +1,13 @@
 /**
  * Strażnik dryfu dokumentacji.
  *
- * DLACZEGO ten plik istnieje: główny `CLAUDE.md` stawia regułę „Dokumentacja, która
- * kłamie, jest w tym projekcie traktowana jak błąd" (sekcja „Dla agenta", punkt 6),
- * ale nic w repo tej reguły nie egzekwuje. Lint pilnuje kodu, typecheck pilnuje typów,
- * a dokumentacja może się rozjechać z package.json i drzewem modułów bez ani jednego
- * czerwonego sygnału. Tu są pierwsze dwa strażniki tej reguły.
+ * DLACZEGO ten plik istnieje: publiczny `CLAUDE.md` (po angielsku) stawia regułę
+ * "Documentation that lies is treated as a bug" (sekcja "Documentation rule");
+ * to samo po polsku niesie `CLAUDE.local.md` (sekcja "Dla agenta"), prywatna kopia
+ * dawnej treści tego pliku - ale nic w repo tej reguły nie egzekwuje. Lint pilnuje
+ * kodu, typecheck pilnuje typów, a dokumentacja może się rozjechać z package.json
+ * i drzewem modułów bez ani jednego czerwonego sygnału. Tu są pierwsze dwa
+ * strażniki tej reguły.
  *
  * ZAKRES: wyłącznie dokumenty ŻYWE (root + per-moduł). Świadomie pomijamy
  * `Refaktor/` i `Nauka/` — główny CLAUDE.md nazywa je archiwum ery v2.0 i zakazuje
@@ -25,6 +27,7 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 function zywieDokumenty(): string[] {
     const stale = [
         'CLAUDE.md',
+        'CLAUDE.local.md',
         'README.md',
         'QUICK_START.md',
         'RELEASE_PROCESS.md',
