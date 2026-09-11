@@ -19,7 +19,7 @@ function makeStore() {
         pathById: (id: string) => (id === 'art-wlasny' ? OWN : id === 'art-obcy' ? FOREIGN : null),
         read: async (id: string) => {
             calls.push(`read:${id}`);
-            return { id, typ: 'plan', status: 'do-akceptacji', tytul: 'Plan' };
+            return { id, typ: 'plan', status: 'do-akceptacji', tytul: 'Plan', path: null, agent: null, frontmatter: {}, sections: [], buttons: true };
         },
         update: async (id: string) => { calls.push(`update:${id}`); return { applied: 1, errors: [], artifact: null }; },
     };

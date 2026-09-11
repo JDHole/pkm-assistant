@@ -80,7 +80,7 @@ interface ArtifactBlockElement {
  *  + `read`/`update` (te same sygnatury co realny `ArtifactStore`, `./ArtifactStore.ts`). */
 interface ArtifactBlockStore {
     pathById?: (id: string) => string | null;
-    read(id: string): Promise<Partial<ThinArtifact> | null>;
+    read(id: string): Promise<ThinArtifact | null>;
     update(id: string, ops: ArtifactPatchOp[]): Promise<{ applied: number; errors: ArtifactPatchError[]; artifact: ThinArtifact | null }>;
 }
 
@@ -116,13 +116,17 @@ export function registerArtifactBlocks(plugin: ArtifactBlocksPlugin): void {
             return;
         }
 
-        let thin: Partial<ThinArtifact> | null = null;
+        let thin: ThinArtifact | null = null;
         try { thin = await store.read(id); } catch { thin = null; }
         if (!thin) {
             root.createSpan({ cls: 'pkm-artefakt-block__note', text: t('artifact.block.not_found') });
             return;
         }
 
+        // TS-boundary: ZASTANE - `thin.typ`/`thin.status` to `string | null` (ThinArtifact), ale
+        // `getType`/`computeArtifactButtons` chcą `string`; artefakt z pustym `typ`/`status` w
+        // frontmatterze dostałby tu `null` mimo asercji. Naprawa (walidacja przy tworzeniu /
+        // guard tutaj) to zmiana runtime, poza zakresem tej fali.
         const type = plugin.agentManager?.artifactTypeLoader?.getType?.(thin.typ as string);
         const buttons = computeArtifactButtons(thin.status as string, type?.statusy);
 
