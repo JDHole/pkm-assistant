@@ -147,6 +147,8 @@ Brak wybranego dostawcy = `null`, koniec. Zero czytania zmiennych środowiskowyc
 
 `VaultIndexer._isExcluded()` to bramka ZAKAZU, więc porównuje po `NFC` + `toLowerCase()` po obu stronach (spójne z regułą globalną w `core/security/AccessGuard`). Indekser trzyma zero zależności od `core/` - wszystko wstrzykiwane - więc normalizacja jest liczona LOKALNIE.
 
+**Nazwy folderu konfiguracji NIE MA w `HARD_EXCLUDES`** (zostały tam `.pkm-assistant` i `.trash`, jedyne dwie nazwy stałe). User może ten folder przemianować, więc jego nazwę dokłada `_hardExcludes()` z żywego `Vault#configDir` - jedną migawką, w której zapamiętuje też, czy nazwa w ogóle była znana. Nieznana (harness, testy, wstrzyknięty vault bez tego pola) = `_isExcluded` idzie **fail-closed: do indeksu nie wchodzi żaden ukryty folder** (pierwszy segment od kropki). Znana = zachowanie dotychczasowe, czyli `HARD_EXCLUDES` + ten jeden folder; inne ukryte foldery są zwykłymi folderami, bo `Vault#getMarkdownFiles()` (jedyne źródło skanu) i tak ich nie zwraca. Ten sam wzorzec po stronie uprawnień: `core/security/AccessGuard._isNoGo`.
+
 ### 8. Klucz API nie ma prawa trafić do komunikatu błędu
 
 `EmbedBatchError.message`/`.cause` nie niosą nagłówków ani wartości klucza. Gemini trzyma klucz w nagłówku `x-goog-api-key`, nie w `?key=` - inaczej wyciekłby przez log URL-a.

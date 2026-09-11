@@ -84,6 +84,8 @@ interface IndexerOverrides {
     artifactsExclude?: () => string | null;
     now?: () => number;
     debounceMs?: number;
+    /** Nazwa folderu konfiguracji Obsidiana; pominięta = vault jej NIE zna (fail-closed). */
+    configDir?: string;
 }
 
 function makePlugin(): IndexerPluginLike {
@@ -102,6 +104,7 @@ function newIndexer(overrides: IndexerOverrides = {}) {
     const files = overrides.files || baseFiles();
     const store = overrides.store || new Map();
     const { vault } = makeVault(files, store);
+    if (overrides.configDir !== undefined) vault.configDir = overrides.configDir;
     const embedder = overrides.embedder || makeEmbedder(overrides.embedderOpts);
     const plugin = overrides.plugin || makePlugin();
     const indexer = new VaultIndexer({
@@ -122,9 +125,9 @@ function newIndexer(overrides: IndexerOverrides = {}) {
     return { indexer, files, store, vault, embedder, plugin };
 }
 
-// 1. Pełny skan: wszystkie .md poza wykluczeniami; .pkm-assistant NIGDY.
-test('full scan indexes markdown, excludes .pkm-assistant / .obsidian / NoGo', async t => {
-    const files = new Map<string, FakeFile>([
+/** Zestaw plików dla obu wariantów testu 1 (z configDirem i bez). */
+function plikiZUkrytymi(): Map<string, FakeFile> {
+    return new Map<string, FakeFile>([
         ['car.md', { content: 'samochód', mtime: 1 }],
         ['notes/cat.md', { content: 'kot', mtime: 1 }],
         ['sky.md', { content: 'niebo', mtime: 1 }],
@@ -133,7 +136,14 @@ test('full scan indexes markdown, excludes .pkm-assistant / .obsidian / NoGo', a
         ['.trash/old.md', { content: 'trash', mtime: 1 }],
         ['Prywatne/dziennik.md', { content: 'prywatne', mtime: 1 }],
     ]);
-    const { indexer, plugin } = newIndexer({ files, noGoFolders: ['Prywatne'] });
+}
+
+// 1. Pełny skan BEZ znanego configDira: wszystkie .md poza wykluczeniami; .pkm-assistant NIGDY.
+// Nazwa folderu konfiguracji nie jest nigdzie wpisana na sztywno (`HARD_EXCLUDES` to
+// `.pkm-assistant` + `.trash`), więc gdy vault jej nie poda, `_isExcluded` idzie fail-closed:
+// do indeksu nie wchodzi ŻADEN ukryty folder.
+test('full scan (configDir nieznany): fail-closed wycina wszystkie ukryte foldery', async t => {
+    const { indexer, plugin } = newIndexer({ files: plikiZUkrytymi(), noGoFolders: ['Prywatne'] });
     await indexer.initialize();
 
     t.is(indexer.getStatus().status, 'ready');
@@ -143,6 +153,23 @@ test('full scan indexes markdown, excludes .pkm-assistant / .obsidian / NoGo', a
     t.deepEqual(indexed, ['car.md', 'notes/cat.md', 'sky.md']);
     // Twarda granica bezpieczeństwa: żadna ścieżka .pkm-assistant nie może być w indeksie.
     t.false(indexed.some(p => p.startsWith('.pkm-assistant')));
+});
+
+// 1b. Ten sam skan ze ZNANYM, przemianowanym configDirem. Fail-closed się wtedy wyłącza
+// i zostaje zachowanie dotychczasowe: `HARD_EXCLUDES` + ten jeden folder. `.obsidian/` staje
+// się zwykłym ukrytym folderem - świadomie, bo `Vault#getMarkdownFiles()` ukrytych folderów
+// i tak nie zwraca (fake vault w tym teście jest hojniejszy niż Obsidian).
+test('full scan (configDir znany): wyklucza configDir, ukrytych folderów nie zgaduje', async t => {
+    const files = plikiZUkrytymi();
+    files.set('.mojkonfig/workspace.md', { content: 'config', mtime: 1 });
+    const { indexer } = newIndexer({ files, noGoFolders: ['Prywatne'], configDir: '.mojkonfig' });
+    await indexer.initialize();
+
+    const indexed = [...indexer._mtimes.keys()].sort();
+    t.false(indexed.includes('.mojkonfig/workspace.md'), 'przemianowany folder configu wszedł do indeksu');
+    t.false(indexed.some(p => p.startsWith('.pkm-assistant')), 'bebechy pluginu weszły do indeksu');
+    t.false(indexed.includes('.trash/old.md'), 'kosz wszedł do indeksu');
+    t.true(indexed.includes('.obsidian/workspace.md'), 'przy ZNANYM (innym) configDirze `.obsidian` musi być zwykłym folderem — inaczej nazwa siedzi gdzieś na sztywno');
 });
 
 // 1a. Wykluczenia to bramka ZAKAZU - bez rozróżniania wielkości liter.
