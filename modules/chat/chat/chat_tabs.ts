@@ -262,7 +262,7 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
         try {
             this.stop_generation(agentName, 'close_tab');
         } catch (e) {
-            log.warn('Chat', `Zatrzymanie tury zamykanej zakładki padło (zamykamy dalej): ${(e as Error)?.message || (e as string)}`);
+            log.warn('Chat', `Zatrzymanie tury zamykanej zakładki padło (zamykamy dalej): ${(e as Error)?.message || (e as { toString(): string })}`);
         }
     }
 
@@ -280,7 +280,7 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
             registry.requestStop(id);
         }
     } catch (e) {
-        log.warn('Chat', `Zatrzymanie subów zamykanej zakładki padło: ${(e as Error)?.message || (e as string)}`);
+        log.warn('Chat', `Zatrzymanie subów zamykanej zakładki padło: ${(e as Error)?.message || (e as { toString(): string })}`);
     }
 }
 
@@ -309,7 +309,7 @@ export async function _closeActiveTab(this: ChatViewLike) {
         try {
             await this.handleSaveSession();
         } catch (e) {
-            log.warn('Chat', `Save on tab close failed (non-fatal): ${(e as Error)?.message || (e as string)}`);
+            log.warn('Chat', `Save on tab close failed (non-fatal): ${(e as Error)?.message || (e as { toString(): string })}`);
         }
     }
 

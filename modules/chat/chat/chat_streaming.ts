@@ -1972,7 +1972,7 @@ export function stop_all_turns(this: ChatViewLike, reason = 'close'): string[] {
         try {
             this.stop_generation(name, reason);
         } catch (e) {
-            log.warn('Chat', `Zatrzymanie tury [${name}] padło (zamykamy dalej): ${(e as Error)?.message || (e as string)}`);
+            log.warn('Chat', `Zatrzymanie tury [${name}] padło (zamykamy dalej): ${(e as Error)?.message || (e as { toString(): string })}`);
         }
     }
 
@@ -1988,7 +1988,7 @@ export function stop_all_turns(this: ChatViewLike, reason = 'close'): string[] {
                 registry.requestStop(id);
             }
         } catch (e) {
-            log.warn('Chat', `Zatrzymanie subów przy zamknięciu padło: ${(e as Error)?.message || (e as string)}`);
+            log.warn('Chat', `Zatrzymanie subów przy zamknięciu padło: ${(e as Error)?.message || (e as { toString(): string })}`);
         }
     }
 
@@ -2017,7 +2017,7 @@ export function _drainSubTasks(this: ChatViewLike) {
     try {
         this.plugin?.subTaskNotifier?.drain?.();
     } catch (e) {
-        log.warn('Chat', `Drain wyników subów padł (nieszkodliwie): ${(e as Error)?.message || (e as string)}`);
+        log.warn('Chat', `Drain wyników subów padł (nieszkodliwie): ${(e as Error)?.message || (e as { toString(): string })}`);
     }
 }
 
@@ -2108,11 +2108,11 @@ export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
             // Wynik suba to tekst MASZYNY — żadnych przywilejów człowieka (rejestr adresów,
             // markery `@@skill:`, komendy `/`).
             .then(() => this.send_message({ injectedText: text, meta: machineMeta({ _subTaskNotification: true, subTaskId: task.id }) }))
-            .catch((e: unknown) => log.warn('Chat', `Auto-tura po subie padła: ${(e as Error)?.message || (e as string)}`))
+            .catch((e: unknown) => log.warn('Chat', `Auto-tura po subie padła: ${(e as Error)?.message || (e as { toString(): string })}`))
             .finally(() => { this._subTaskTurnPending = false; });
         return true;
     } catch (e) {
-        log.warn('Chat', `Dostarczenie wyniku suba padło (zostaje w kolejce): ${(e as Error)?.message || (e as string)}`);
+        log.warn('Chat', `Dostarczenie wyniku suba padło (zostaje w kolejce): ${(e as Error)?.message || (e as { toString(): string })}`);
         return false;
     }
 }

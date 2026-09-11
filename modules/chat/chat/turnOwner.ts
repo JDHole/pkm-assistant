@@ -145,9 +145,9 @@ export async function saveMemoryCandidatesFor(
                 try {
                     const fallback = await mem.writeBrainNote(candidate, { source: 'auto_compaction' });
                     if (fallback?.path) saved++;
-                    log.warn('Chat', `Memory candidate: poczekalnia padła, zapis wprost do brain/ (fail-soft): ${(e as Error)?.message || (e as string)}`);
+                    log.warn('Chat', `Memory candidate: poczekalnia padła, zapis wprost do brain/ (fail-soft): ${(e as Error)?.message || (e as { toString(): string })}`);
                 } catch (e2) {
-                    log.warn('Chat', `Memory candidate save failed (poczekalnia i fallback): ${(e2 as Error)?.message || (e2 as string)}`);
+                    log.warn('Chat', `Memory candidate save failed (poczekalnia i fallback): ${(e2 as Error)?.message || (e2 as { toString(): string })}`);
                 }
             }
             continue;
@@ -158,7 +158,7 @@ export async function saveMemoryCandidatesFor(
             const result = await mem.writeBrainNote(candidate, { source: 'auto_compaction' });
             if (result?.path) saved++;
         } catch (e) {
-            log.warn('Chat', `Memory candidate save failed: ${(e as Error)?.message || (e as string)}`);
+            log.warn('Chat', `Memory candidate save failed: ${(e as Error)?.message || (e as { toString(): string })}`);
         }
     }
     if (saved > 0) {

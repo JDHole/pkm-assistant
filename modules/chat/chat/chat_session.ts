@@ -86,7 +86,7 @@ export async function _idleTick(this: ChatViewLike) {
         await this.handleSaveSession();
         log.info('Chat', `Idle consolidation: saved session after ${this._idleScheduler.idleMinutes} min idle (${newEntries} new entries)`);
     } catch (e) {
-        log.warn('Chat', `Idle tick failed (non-fatal): ${(e as Error)?.message || (e as string)}`);
+        log.warn('Chat', `Idle tick failed (non-fatal): ${(e as Error)?.message || (e as { toString(): string })}`);
     }
 }
 
@@ -135,7 +135,7 @@ async function _retireActiveSession(agentMemory: AgentMemory | null | undefined,
         const moved = await agentMemory.discardActiveSession();
         if (moved) log.info('Chat', `Old session retired to .discarded/ (${reason}): ${moved}`);
     } catch (e) {
-        log.warn('Chat', `Retiring old session failed (non-fatal): ${(e as Error)?.message || (e as string)}`);
+        log.warn('Chat', `Retiring old session failed (non-fatal): ${(e as Error)?.message || (e as { toString(): string })}`);
     }
 }
 

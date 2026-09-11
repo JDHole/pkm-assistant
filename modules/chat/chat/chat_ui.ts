@@ -339,7 +339,7 @@ export function _renderSlimBar(this: ChatViewLike) {
         try {
             await this._closeActiveTab();
         } catch (e) {
-            log.warn('Chat', `Close tab failed: ${(e as Error)?.message || (e as string)}`);
+            log.warn('Chat', `Close tab failed: ${(e as Error)?.message || (e as { toString(): string })}`);
         }
     });
 
@@ -832,7 +832,7 @@ export function _showArtifactPicker(this: ChatViewLike, triggerBtn: HTMLElement 
                         // a `instanceof` w tym miejscu byłoby zmianą runtime'u.
                         await this.app.workspace.getLeaf('tab').openFile(file as TFile);
                     } catch (e) {
-                        log.warn('Chat', `Open artifact note failed: ${(e as Error)?.message || (e as string)}`);
+                        log.warn('Chat', `Open artifact note failed: ${(e as Error)?.message || (e as { toString(): string })}`);
                     }
                 })();
             });
