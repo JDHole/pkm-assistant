@@ -7,11 +7,13 @@
  * więc pod AVA nie da się go uruchomić. Logika, która ma bramkę, mieszka tutaj.
  *
  * Plik jest świadomą sierotą grafu produkcyjnego — woła go build, nie kod wtyczki.
+ *
+ * `pluginDeployDir` nie importuje wbudowanego modułu `path` — walidator katalogu
+ * Obsidiana lintuje ten plik BEZ typów Node (`@types/node` jest w `devDependencies`
+ * repo, ale walidator jedzie własną konfiguracją, która ich nie widzi), więc
+ * `import * as path` byłby dla niego typem-błędem. `join` wchodzi jako parametr;
+ * `esbuild.js` woła funkcję z prawdziwym `path.join`.
  */
-// `import * as path`, nie `import path`: walidator katalogu Obsidiana jedzie własną
-// konfiguracją BEZ `esModuleInterop`, więc default-import z modułu CJS jest dla niego
-// typem-błędem i każde `path.join(...)` daje mu kaskadę `no-unsafe-*`. Zachowanie identyczne.
-import * as path from 'node:path';
 
 /** Marker dla community-pluginu Hot-Reload: pusty plik zakładany przy każdym deployu. */
 export const HOT_RELOAD_MARKER = '.hotreload';
@@ -85,7 +87,10 @@ export function parseDestinationVaults(raw: string | undefined): string[] {
  *   `esbuild.js`) — nazwę folderu konfiguracji ustala user vaulta docelowego i build
  *   z gołego Node'a nie ma jak jej odczytać, więc jej NIE ZGADUJE: brak zmiennej =
  *   jedno ostrzeżenie i pominięty deploy, nie strzał w domyślną nazwę.
+ *
+ * `join` wstrzykiwany z wołacza (patrz nagłówek pliku) — `esbuild.js` przekazuje
+ * prawdziwe `path.join`.
  */
-export function pluginDeployDir(vaultPath: string, configDir: string, pluginId: string): string {
-    return path.join(vaultPath, configDir, 'plugins', pluginId);
+export function pluginDeployDir(vaultPath: string, configDir: string, pluginId: string, join: (...parts: string[]) => string): string {
+    return join(vaultPath, configDir, 'plugins', pluginId);
 }

@@ -154,12 +154,19 @@ export function renderMcpServersSection(container: HTMLElement, ctx: ToolsSettin
  * dotyka importu `obsidian` (patrz nagłówek `ExternalMcpManager.js`).
  * `window.require` istnieje w Obsidianie desktop; na mobile go nie ma → picker.
  *
+ * Odczyt jedzie WYŁĄCZNIE przez `window` (nigdy przez gołe identyfikatory `process`),
+ * bo walidator katalogu Obsidiana lintuje ten plik bez typów Node — `process` i
+ * `NodeJS`-owe typy są dla niego typem-błędem. W Electronie i w harnessie testowym
+ * (`window = globalThis`) `window.process` to dokładnie ten sam obiekt co globalny
+ * `process`, więc zachowanie jest identyczne.
+ *
  * @returns zawartość pliku albo null
  */
 function readClaudeDesktopConfigText(): string | null {
     try {
-        const appData = (typeof process !== 'undefined' && process?.env?.APPDATA) || '';
-        const nodeRequire = typeof window !== 'undefined' ? window.require : null;
+        const win = window as Window & { process?: { env?: Record<string, string | undefined> }; require?: (id: string) => unknown };
+        const appData = win.process?.env?.APPDATA || '';
+        const nodeRequire = typeof win.require === 'function' ? win.require : null;
         if (!appData || typeof nodeRequire !== 'function') return null;
         const fs = nodeRequire('fs') as { existsSync(p: string): boolean; readFileSync(p: string, enc: string): string };
         const file = `${appData}\\Claude\\claude_desktop_config.json`;

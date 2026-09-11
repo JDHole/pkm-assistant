@@ -40,6 +40,12 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 // `.env` wczytuje sam Node (`process.loadEnvFile`) — bez pakietu `dotenv`, patrz esbuild.js.
 if (fs.existsSync(path.join(ROOT, '.env'))) process.loadEnvFile(path.join(ROOT, '.env'));
 
+// IO wstrzykiwane do `utils/releaseNotes.ts` — ten plik nie importuje `node:fs`/`node:path`
+// sam (walidator katalogu Obsidiana lintuje go bez typów Node, patrz komentarz przy
+// `ReleaseNotesIo`), więc tu, w wołaczu, składamy prawdziwe `fs`/`path` w kształt, jakiego
+// oczekują jego funkcje.
+const releaseNotesIo = { ...fs, join: path.join };
+
 /* ── drobne narzędzia ──────────────────────────────────────────────────────────── */
 
 function say(text) {
@@ -80,19 +86,19 @@ async function confirmVersion(rl, packageVersion) {
  * `release.yml`) — bez niego push taga obleje bramkę już na pierwszym kroku.
  */
 async function prepareNotes(rl, releasesDir, version) {
-    const target = resolveNotesTarget(releasesDir, version);
+    const target = resolveNotesTarget(releasesDir, version, releaseNotesIo);
     if (fs.existsSync(target)) {
         say(`[release] notatki: biore gotowy ${path.relative(ROOT, target)}`);
         return fs.readFileSync(target, 'utf8');
     }
 
-    const previousFile = latestReleaseFile(releasesDir, version);
+    const previousFile = latestReleaseFile(releasesDir, version, releaseNotesIo);
     if (previousFile) {
         say(`[release] notatki: dokladam historie z ${path.relative(ROOT, previousFile)}`);
     }
 
     const description = (await rl.question('Opis wydania (jedno zdanie, ENTER konczy): ')).trim();
-    const previous = priorNotes(releasesDir, version);
+    const previous = priorNotes(releasesDir, version, releaseNotesIo);
     const composed = [`# ${version}`, description, previous].filter(part => part.length > 0).join('\n\n');
 
     fs.mkdirSync(releasesDir, { recursive: true });
@@ -168,6 +174,7 @@ async function main() {
         path.join(ROOT, RELEASES_DIR_NAME),
         version,
         formatReleaseNotesContent(notes, version),
+        releaseNotesIo,
     );
     say(`[release] widok „co nowego": ${path.relative(ROOT, pluginNotes)}`);
 

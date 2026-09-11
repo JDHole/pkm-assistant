@@ -146,7 +146,7 @@ function deployToVaults(pluginId) {
     }
 
     for (const vault of vaults) {
-        const target = pluginDeployDir(vault, configDir, pluginId);
+        const target = pluginDeployDir(vault, configDir, pluginId, path.join);
         try {
             fs.mkdirSync(target, { recursive: true });
             for (const artifact of DIST_ARTIFACTS) {

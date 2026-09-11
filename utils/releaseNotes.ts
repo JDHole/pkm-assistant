@@ -11,8 +11,23 @@
  *
  * Plik jest świadomą sierotą grafu produkcyjnego — woła go wydanie, nie kod wtyczki.
  */
-import * as fs from 'node:fs';
-import * as path from 'node:path';
+
+/**
+ * IO wstrzykiwane z wołacza (`release.js`), NIE importowane wprost z wbudowanych
+ * modułów `fs`/`path`. Walidator katalogu Obsidiana lintuje ten plik BEZ typów Node
+ * (`@types/node` jest w `devDependencies` repo, ale walidator jedzie własną
+ * konfiguracją, która ich nie widzi) — taki import byłby dla niego typem-błędem.
+ * Kształt jest DOKŁADNIE tym podzbiorem `fs`/`path`, którego funkcje niżej realnie
+ * potrzebują; `release.js` woła je z `{ ...fs, join: path.join }` (prawdziwy Node,
+ * nic nie udaje).
+ */
+export interface ReleaseNotesIo {
+    readdirSync(dir: string): string[];
+    readFileSync(file: string, encoding: 'utf8'): string;
+    mkdirSync(dir: string, opts: { recursive: true }): void;
+    writeFileSync(file: string, data: string, encoding: 'utf8'): void;
+    join(...parts: string[]): string;
+}
 
 /**
  * Rozpoznawany kształt nazwy pliku notatek — DOKŁADNIE trzy segmenty semver + `.md`,
@@ -73,12 +88,12 @@ export function compareSemver(a: string, b: string): number {
  * - NIEISTNIEJĄCY katalog → `null`, nie rzuca;
  * - ignoruje pliki niepasujące do wzorca (`v2.0.1.md`, `2.0.md`).
  *
- * Zwracana ścieżka jest złączona przez `path.join(dir, plik)`.
+ * Zwracana ścieżka jest złączona przez `io.join(dir, plik)`.
  */
-export function latestReleaseFile(dir: string, currentVersion: string): string | null {
+export function latestReleaseFile(dir: string, currentVersion: string, io: ReleaseNotesIo): string | null {
     let entries: string[];
     try {
-        entries = fs.readdirSync(dir);
+        entries = io.readdirSync(dir);
     } catch {
         return null; // nieistniejący / nieczytelny katalog to brak poprzednich notatek, nie awaria
     }
@@ -97,7 +112,7 @@ export function latestReleaseFile(dir: string, currentVersion: string): string |
         }
     }
 
-    return bestName === null ? null : path.join(dir, bestName);
+    return bestName === null ? null : io.join(dir, bestName);
 }
 
 /** Porównanie rozłożonych trójek — tańsze niż sklejanie ich z powrotem w string. */
@@ -115,11 +130,11 @@ function compareTriples(a: [number, number, number], b: [number, number, number]
  * @returns treść pliku, albo `''` gdy {@link latestReleaseFile} dał `null`
  *          (funkcja NIE RZUCA na pustym ani nieistniejącym katalogu).
  */
-export function priorNotes(dir: string, currentVersion: string): string {
-    const file = latestReleaseFile(dir, currentVersion);
+export function priorNotes(dir: string, currentVersion: string, io: ReleaseNotesIo): string {
+    const file = latestReleaseFile(dir, currentVersion, io);
     if (!file) return '';
     try {
-        return fs.readFileSync(file, 'utf8');
+        return io.readFileSync(file, 'utf8');
     } catch {
         return '';
     }
@@ -129,10 +144,10 @@ export function priorNotes(dir: string, currentVersion: string): string {
  * ZAWSZE-NIE-NULL ścieżka ZAPISU notatek. Funkcja NIE DOTYKA DYSKU, więc fizycznie
  * nie ma jak zwrócić `null` — i o to chodzi.
  *
- * Kształt wywołania: `resolveNotesTarget(releasesDir, '2.1.0')` → `<dir>/2.1.0.md`.
+ * Kształt wywołania: `resolveNotesTarget(releasesDir, '2.1.0', io)` → `<dir>/2.1.0.md`.
  */
-export function resolveNotesTarget(dir: string, version: string): string {
-    return path.join(dir, `${version}.md`);
+export function resolveNotesTarget(dir: string, version: string, io: ReleaseNotesIo): string {
+    return io.join(dir, `${version}.md`);
 }
 
 /** Jedna sekcja notatek: nagłówek wersji (albo jego brak) plus tekst pod nim. */
@@ -206,11 +221,11 @@ export function formatReleaseNotesContent(markdown: string, currentVersion: stri
  * `_version` nie jest używana w ciele — zostaje w sygnaturze, bo bez niej wołacz
  * traci jedyny ślad tego, CZYJĄ notatkę właśnie nadpisuje.
  *
- * @returns ścieżka zapisanego pliku (`path.join(dir, LATEST_RELEASE_NOTES_FILENAME)`)
+ * @returns ścieżka zapisanego pliku (`io.join(dir, LATEST_RELEASE_NOTES_FILENAME)`)
  */
-export function writePluginReleaseNotes(dir: string, _version: string, notes: string): string {
-    fs.mkdirSync(dir, { recursive: true });
-    const target = path.join(dir, LATEST_RELEASE_NOTES_FILENAME);
-    fs.writeFileSync(target, notes, 'utf8');
+export function writePluginReleaseNotes(dir: string, _version: string, notes: string, io: ReleaseNotesIo): string {
+    io.mkdirSync(dir, { recursive: true });
+    const target = io.join(dir, LATEST_RELEASE_NOTES_FILENAME);
+    io.writeFileSync(target, notes, 'utf8');
     return target;
 }
