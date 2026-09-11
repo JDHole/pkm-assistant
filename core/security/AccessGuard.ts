@@ -77,13 +77,23 @@ export class AccessGuard {
     static _regexCache: Map<string, RegExp> = new Map();
 
     /** Hardcoded system No-Go — blocked unless agent has explicit admin_access.
-     *  .obsidian/ = cala konfiguracja Obsidiana — domyslnie zablokowana.
-     *  .trash = kosz Obsidiana — bez sensu dawac dostep.
-     *  User moze dodac konkretne podfoldery .obsidian/ do whitelist agenta jesli potrzebuje. */
-    static SYSTEM_NO_GO = ['.obsidian', '.trash'];
+     *  `.trash` = kosz Obsidiana — bez sensu dawac dostep, i jako JEDYNY wpis tej listy nie ma
+     *  odpowiednika w API Obsidiana (nazwa jest stała).
+     *
+     *  Folderu konfiguracji Obsidiana TU NIE MA i nie wolno go tu dopisywać: jego nazwę ustala
+     *  user (`Vault#configDir`), więc przychodzi z ŻYWEGO odczytu przez `setConfigDir`, a do
+     *  strefy zakazanej dokłada ją `setNoGoFolders`. Dopóki nie jest znana, dna pilnuje
+     *  fail-closed w `_isNoGo`. */
+    static SYSTEM_NO_GO = ['.trash'];
 
-    /** Obsidian config folder — user-configurable, not always `.obsidian`. */
-    static _configDir = '.obsidian';
+    /**
+     * Nazwa folderu konfiguracji Obsidiana, wzięta z żywego `Vault#configDir`.
+     *
+     * `null` NIE znaczy „`.obsidian`" — znaczy „JESZCZE NIE WIEM". Ta różnica jest tu
+     * sednem: zgadnięta nazwa przepuszczałaby prawdziwy folder configu (przemianowany),
+     * a `null` włącza fail-closed w `_isNoGo` (patrz tam).
+     */
+    static _configDir: string | null = null;
 
     /**
      * Honor Vault#configDir (catalog guideline): the config folder can be renamed
@@ -108,8 +118,10 @@ export class AccessGuard {
         // Tą normalizacją jest `_normalizeForDenyCompare` - wpisy lądują tu złożone
         // z małych liter, więc „Prywatne/" i „prywatne" to JEDEN wpis, a nie dwa.
         const userFolders = (folders || []).map(f => AccessGuard._normalizeForDenyCompare(f));
-        // Merge: hardcoded system No-Go + real config dir + user No-Go (deduplicate)
-        const all = [...AccessGuard.SYSTEM_NO_GO, AccessGuard._configDir, ...userFolders]
+        // Merge: hardcoded system No-Go + real config dir (TYLKO gdy znany) + user No-Go (deduplicate).
+        // Nieznany configDir NIE wchodzi tu żadnym zamiennikiem — dna pilnuje wtedy `_isNoGo`.
+        const configDir = AccessGuard._configDir ? [AccessGuard._configDir] : [];
+        const all = [...AccessGuard.SYSTEM_NO_GO, ...configDir, ...userFolders]
             .map(f => AccessGuard._normalizeForDenyCompare(f))
             .filter(Boolean);
         AccessGuard._noGoFolders = [...new Set(all)];
@@ -146,8 +158,9 @@ export class AccessGuard {
      * Porównanie ze strefą No-Go musi być NIEWRAŻLIWE na wielkość liter: Windows i macOS
      * jej nie rozróżniają, więc `Projekty/prywatne/tajne.md` i `Projekty/Prywatne/tajne.md`
      * to na tych systemach JEDEN I TEN SAM PLIK - a porównanie bajt w bajt (bez `toLowerCase`)
-     * przepuszczałoby jeden zapis i blokowało drugi. To samo dotyczy `SYSTEM_NO_GO`
-     * (`.Obsidian/workspace.json`, `.TRASH/x.md`). `isProtectedPath` (`keySanitizer.ts`)
+     * przepuszczałoby jeden zapis i blokowało drugi. To samo dotyczy wpisów systemowych i
+     * folderu konfiguracji (`.TRASH/x.md`, `.Obsidian/workspace.json` przy configDir
+     * `.obsidian`). `isProtectedPath` (`keySanitizer.ts`)
      * składa litery od zawsze i dlatego tej luki nie ma.
      *
      * Ta funkcja robi więc DOKŁADNIE to samo co `isProtectedPath`: `\` → `/`, `NFC`,
@@ -181,12 +194,29 @@ export class AccessGuard {
      * `_normalizeForDenyCompare`). To jedyne miejsce, w którym pytamy „czy to strefa
      * zakazana" - wołacze poza `PermissionSystem` (m.in. bramka załączników w
      * `modules/chat/chat/chat_model.ts`) dostają tę samą regułę przez tę funkcję.
+     *
+     * FAIL-CLOSED przy NIEZNANYM folderze konfiguracji (`_configDir === null`, czyli przed
+     * `setConfigDir` albo gdy Obsidian nic nie podał): nie wiem, gdzie jest konfiguracja
+     * Obsidiana, więc nie wpuszczam do żadnego ukrytego folderu. Każda ścieżka, której
+     * PIERWSZY segment zaczyna się od kropki, jest wtedy strefą zakazaną.
+     *
+     * Jedyny wyjątek to `.pkm-assistant` (i jego wnętrze) — bebechy pluginu mają WŁASNĄ
+     * bramkę `_checkPkmPath`, sprawdzaną w `checkAccess` PO tej; bez wyjątku agent straciłby
+     * własną pamięć, skille i artefakty.
+     *
+     * Gdy configDir jest znany, zgadywanie przestaje być potrzebne i decyduje wyłącznie
+     * migawka `_noGoFolders` (system + configDir + wpisy usera) - jak dotąd.
      */
     static _isNoGo(targetPath: string | null | undefined): boolean {
-        if (!targetPath || AccessGuard._noGoFolders.length === 0) return false;
+        if (!targetPath) return false;
         // Cel w tej samej normalizacji co wpisy (patrz `_normalizeForDenyCompare`).
         const norm = AccessGuard._normalizeForDenyCompare(targetPath);
         if (!norm) return false;
+        if (AccessGuard._configDir === null) {
+            const firstSegment = norm.split('/')[0];
+            if (firstSegment.startsWith('.') && firstSegment !== '.pkm-assistant') return true;
+        }
+        if (AccessGuard._noGoFolders.length === 0) return false;
         return AccessGuard._noGoFolders.some(ng =>
             norm === ng || norm.startsWith(ng + '/')
         );
@@ -455,10 +485,11 @@ export class AccessGuard {
 
         if (agent?.admin_access === true) return results;
 
-        // Zwykli agenci nigdy nie widzą No-Go w wynikach.
-        if (AccessGuard._noGoFolders.length > 0) {
-            results = results.filter(item => !AccessGuard._isNoGo(pathExtractor(item)));
-        }
+        // Zwykli agenci nigdy nie widzą No-Go w wynikach. Filtr idzie BEZWARUNKOWO przez
+        // `_isNoGo`: pusta migawka `_noGoFolders` nie znaczy „nie ma czego blokować" - przy
+        // nieznanym folderze konfiguracji `_isNoGo` sam trzyma fail-closed na ukrytych
+        // folderach, a skrót `length > 0` po cichu by to wyłączał właśnie w listingach.
+        results = results.filter(item => !AccessGuard._isNoGo(pathExtractor(item)));
 
         const folders = agent?.focusFolders;
         // Guidance mode = tylko filtr No-Go; bebechy pluginu bramkuje validator.
