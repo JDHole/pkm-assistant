@@ -137,7 +137,7 @@ test('DiffModal.onOpen wiring: an all-zero diff renders a dedicated "no changes"
     t.regex(source, /stats\.added === 0 && stats\.removed === 0/, 'onOpen must special-case the no-op diff');
     t.regex(source, /this\._renderNoChanges\(diffBody\)/, 'must call a dedicated no-changes renderer instead of _renderDiff for that case');
 
-    const rendererMatch = /_renderNoChanges\(container: ModalDynamic\) \{[\s\S]*?\n {4}\}/.exec(source);
+    const rendererMatch = /_renderNoChanges\(container: HTMLElement\) \{[\s\S]*?\n {4}\}/.exec(source);
     t.truthy(rendererMatch, 'nie znalazłem metody _renderNoChanges w DiffModal.ts');
     t.regex(rendererMatch![0], /t\('modal\.diff\.no_changes'\)/, 'musi użyć nowego klucza i18n modal.diff.no_changes');
 });
