@@ -26,8 +26,8 @@ import type { ChatView } from '../chat_view.js';
 import type { TokenTracker } from '../../../core/index.js';
 
 import type { Agent, AgentManager } from '../../agents/index.js';
+import type { SkillData } from '../../skills/index.js';
 import type { AgentMemory } from '../../memory/index.js';
-import type { SubAgentData } from '../../sub-agents/index.js';
 import type { MCPClient, OpenAiToolDefinition, ServerVisibilityAgent, ToolRegistry } from '../../tools/index.js';
 import type { ChatModel, ChatRuntimeConfig, ModelLibraryEntry, PkmModelSettings } from '../../models/index.js';
 import type { SubTaskNotifier, SubTaskRegistry } from '../../sub-agents/index.js';
@@ -88,18 +88,22 @@ export interface ChatSkillPreQuestion {
 /**
  * `AgentManager` w zakresie, jaki czyta czat.
  *
- * Menedżer jest już typowany, ale trzy wejścia oddaje jeszcze jako `any` (pamięć agenta,
- * loader subów, przepisy skilli — należą do modułów, które kampania typowania obrabia osobno).
- * Zawężamy je TUTAJ, typami właścicieli; redeklaracja jest legalna, bo wszystko jest
- * przypisywalne do `any`.
+ * Menedżer jest już otypowany u właściciela (`modules/agents`), więc redeklaracje MUSZĄ być
+ * PODTYPAMI jego kontraktu (inaczej `extends` nie przechodzi):
+ *  • pamięć — zwrotki modułu `memory`, czytane wprost;
+ *  • skille — zwrotka właściciela (`SkillData` z `modules/skills`) PRZECIĘTA z widokiem czatu.
+ *    Ten sam obiekt niesie `icon_category` (pole z YAML-a usera, którego `SkillData` nie
+ *    deklaruje) i wąskie pre-pytania, które maluje pasek skilli; przecięcie zamiast podmiany
+ *    trzyma deklarację zgodną z właścicielem i oszczędza asercje w miejscach użycia.
+ * `subAgentLoader` nie jest redeklarowany w ogóle — kształt należy do `modules/sub-agents`
+ * (`AgentManager.subAgentLoader: SubAgentLoader`, nigdy null).
  */
 export interface ChatAgentManager extends AgentManager {
     getAgentMemory(agentName: string): AgentMemory | null;
     getActiveMemory(): AgentMemory | null;
     getMemoryForAgent(agent: Agent | string | null | undefined): AgentMemory | null;
-    getActiveAgentSkills(): ChatSkillConfig[];
-    resolveSkillConfig(skillName: string, agent: Agent): ChatSkillConfig | null;
-    subAgentLoader: { getAllSubAgents?(): SubAgentData[] } | null;
+    getActiveAgentSkills(): Array<SkillData & ChatSkillConfig>;
+    resolveSkillConfig(skillName: string, agent: Agent): (SkillData & ChatSkillConfig) | null;
 }
 
 /**

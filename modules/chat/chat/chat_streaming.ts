@@ -58,6 +58,7 @@ import type { CacheMetadata, ChatModel } from '../../models/index.js';
 import type { OpenAiToolDefinition, ServerVisibilityAgent, ToolDefinition } from '../../tools/index.js';
 import type { LoopMessage, ParsedToolCall, RunAgentLoopOptions, RunAgentLoopResult, ToolResultEntry, Usage } from '../../agent-loop/index.js';
 import type { ToolCall as ToolsToolCall } from '../../tools/index.js';
+import type { SubAgentToolCallDetail } from '../../ui-components/index.js';
 import type { SubTask, SubTaskOrigin } from '../../sub-agents/index.js';
 import type { ContentBlock, RollingWindow } from './RollingWindow.js';
 import type { FrozenTurnOwner } from './turnOwner.js';
@@ -92,8 +93,9 @@ interface ChatToolResult {
     result?: string;
     aspect?: string;
     aspect_type?: string;
-    tools_used?: unknown[];
-    tool_call_details?: Array<{ resultPreview?: string }>;
+    /** Leci PROSTO do bloku subagenta (`modules/ui-components`) - jego typy, nie nasze. */
+    tools_used?: string[];
+    tool_call_details?: Array<SubAgentToolCallDetail & { resultPreview?: string }>;
     duration_ms?: number;
     usage?: Usage;
     base64?: string;
@@ -1103,7 +1105,7 @@ export function _chatOnToolCallsParsed(this: ChatViewLike, turn: ChatTurn, toolC
                 this.showTypingIndicator(statusMsg);
                 const makeDisplay = this.env?.settings?.pkmAssistant?.compactToolChips === false ? createToolCallDisplay : createCompactToolChip;
                 toolDisplay = makeDisplay({
-                    name: toolCall.name,
+                    name: toolCall.name as string,
                     input: toolCall.arguments,
                     status: 'pending'
                 }) as HTMLElement;
@@ -1179,7 +1181,11 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
 
     for (let ti = 0; ti < results.length; ti++) {
         const r = results[ti];
-        const toolCall = r.toolCall;
+        // TS-boundary: `ParsedToolCall.name` (modules/agent-loop) jest opcjonalne, bo dostawca
+        // potrafi nie podać nazwy przy PARSOWANIU. Tutaj jesteśmy po WYKONANIU - pętla dispatchuje
+        // narzędzia po nazwie, więc wynik bez niej nie istnieje; rendery bloków
+        // (`modules/ui-components`) słusznie żądają `string`, a nie `string | undefined`.
+        const toolCall = r.toolCall as ParsedToolCall & { name: string };
         const pending = turn.pendingEntries?.[ti] || {};
         const toolDisplay = pending.toolDisplay;
         const isSubAgent = pending.isSubAgent ?? (toolCall.name === 'delegate');

@@ -10,8 +10,10 @@ import { Notice } from 'obsidian';
 import { SkinManager, UiIcons, IconGenerator, setSvg, setSvgLabel, adoptSheet } from '../../crystal-soul/index.js';
 import { substituteVariables } from '../../skills/index.js';
 import { MentionAutocomplete, AttachmentManager } from '../../ui-components/index.js';
+import type { MentionAutocompletePlugin, MentionChip } from '../../ui-components/index.js';
 import { getVisibleSubAgentsForAgent } from '../../sub-agents/index.js';
 import { summonAgentForArtifact, activateArtifactInChat, buildArtifactPickerItems } from '../../artifacts/index.js';
+import type { SummonPlugin } from '../../artifacts/index.js';
 import { buildTodoPanelModel, resolveBottomBarMode, DEFAULT_BOTTOM_BAR_MODE } from './todoPanel.js';
 import { renderSubTaskStrip } from './subTaskStrip.js';
 import { _tabKey } from './chat_tabs.js';
@@ -39,14 +41,6 @@ import type { SlashCommand } from './SlashCommandsRegistry.js';
 import type { RoleTotals } from '../../../core/index.js';
 import type { CacheMetadata } from '../../models/index.js';
 import type { TokenRowRefs } from './chatViewShape.js';
-
-/** Wzmianka `@` wpięta do paska chipów (`MentionAutocomplete` jest jeszcze nietypowany). */
-interface ChatMentionChip {
-    type: string;
-    name: string;
-    path: string;
-    icon?: string;
-}
 
 /** Opcja listy rozwijanej w mini-formularzu skilla. */
 type PreQuestionOption = string | { value: string; label?: string; group?: string };
@@ -253,8 +247,11 @@ export async function renderView(this: ChatViewLike, container = this.container)
     this.toolbar = bar;
 
     // @ Mentions autocomplete — chips rendered in AttachmentManager's chip bar
-    this.mentionAutocomplete = new MentionAutocomplete(this.input_area, this.plugin, {
-        onChange: (mentions: ChatMentionChip[]) => {
+    // TS-boundary: luka core - `PluginApi.app` to node-safe `AppLike`, a `MentionAutocomplete`
+    // żąda prawdziwego `App` Obsidiana (woła `app.vault.*`, czego `AppLike` nie modeluje).
+    // Runtime podaje ten sam, jeden obiekt pluginu; rozjazd jest wyłącznie w kontrakcie core.
+    this.mentionAutocomplete = new MentionAutocomplete(this.input_area, this.plugin as unknown as MentionAutocompletePlugin, {
+        onChange: (mentions: MentionChip[]) => {
             this.attachmentManager!.setMentionChips(mentions, (index: number) => {
                 this.mentionAutocomplete!.removeMention(index);
             });
@@ -551,7 +548,10 @@ export function _renderArtifactChip(this: ChatViewLike) {
     refreshBtn.addEventListener('click', (e: MouseEvent) => {
         e.stopPropagation();
         if (this.is_generating) return;
-        void summonAgentForArtifact(this.plugin, { id, actionLabel: t('artifact.summon.action.refresh') });
+        // TS-boundary: ta sama luka core co przy `MentionAutocomplete` wyżej - `SummonPlugin`
+        // (modules/artifacts) czyta `app.workspace.getLeavesOfType`, a `AppLike.workspace` jest
+        // w core otwartym `Record<string, unknown>`, więc nie pokrywa się z nim w żadną stronę.
+        void summonAgentForArtifact(this.plugin as unknown as SummonPlugin, { id, actionLabel: t('artifact.summon.action.refresh') });
     });
 
     const unpinBtn = chip.createEl('button', {
@@ -823,7 +823,8 @@ export function _showArtifactPicker(this: ChatViewLike, triggerBtn: HTMLElement 
                     overlay.remove();
                     // Klik = przypnij artefakt + otwórz notatkę. ŻADNEJ wysyłki do modelu — dump
                     // stanu robią guziki w notatce i 🔄 na chipie, nie samo wybranie z listy.
-                    const res = await activateArtifactInChat(this.plugin, { id: item.id });
+                    // TS-boundary: patrz `summonAgentForArtifact` wyżej - luka core `AppLike` vs `App`.
+                    const res = await activateArtifactInChat(this.plugin as unknown as SummonPlugin, { id: item.id });
                     if (!res.ok || !res.path) return;
                     const file = this.app.vault.getAbstractFileByPath(res.path);
                     if (!file) return;

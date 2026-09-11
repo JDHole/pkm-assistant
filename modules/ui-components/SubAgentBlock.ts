@@ -32,13 +32,13 @@ const TYPE_CONFIG: Record<string, TypeConfigEntry> = {
 };
 
 /** Jeden wpis `opts.toolCallDetails` — narzędzie wołane przez sub-agenta w trakcie zadania. */
-interface SubAgentToolCallDetail {
+export interface SubAgentToolCallDetail {
     name: string;
     args?: unknown;
 }
 
 /** Zużycie tokenów zadania sub-agenta (`opts.usage`). */
-interface SubAgentUsage {
+export interface SubAgentUsage {
     prompt_tokens: number;
     completion_tokens: number;
 }

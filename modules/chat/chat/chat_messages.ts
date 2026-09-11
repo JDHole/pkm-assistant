@@ -20,6 +20,7 @@ import { resolveMessageOrigin, toolResultStatus } from '../../../core/index.js';
 // Receiver mixina = złożony `ChatView` (klasa + osiem deklaracji mixinów). Cykl typów
 // chat_view ↔ mixin jest legalny i znika w buildzie (`import type`).
 import type { ChatViewLike } from './chatViewShape.js';
+import type { SubAgentToolCallDetail, SubAgentUsage } from '../../ui-components/index.js';
 import type { ContentBlock, RollingMessage, ToolCall } from './RollingWindow.js';
 
 type MessageRole = 'user' | 'assistant';
@@ -27,15 +28,17 @@ type MessageContent = string | ContentBlock[];
 
 /**
  * Wynik narzędzia odtwarzany z historii. Kształt zależy od serwera, więc modelujemy
- * DOKŁADNIE pola, które render czyta; `unknown` tam, gdzie tylko przekazujemy dalej.
+ * DOKŁADNIE pola, które render czyta. Trzy ostatnie lecą PROSTO do bloku subagenta
+ * (`modules/ui-components`), więc nazywamy je jego typami — właściciel kształtu jest tam,
+ * nie tutaj (dawne `unknown[]`/`unknown` nie przechodziły do jego wymaganych pól).
  */
 interface HistoryToolOutput {
     result?: string;
     error?: string;
-    tools_used?: unknown[];
-    tool_call_details?: unknown[];
+    tools_used?: string[];
+    tool_call_details?: SubAgentToolCallDetail[];
     duration_ms?: number;
-    usage?: unknown;
+    usage?: SubAgentUsage | null;
 }
 
 /** Argumenty wywołania `delegate` odtworzone z historii. */

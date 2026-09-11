@@ -80,7 +80,7 @@ interface SummonChatView {
 }
 
 /** Plugin widziany przez przywołanie — TYLKO pola, które ten plik realnie czyta. */
-interface SummonPlugin {
+export interface SummonPlugin {
     artifactStore?: { read(id: string): Promise<unknown> } | null;
     openChatView?: () => void;
     app?: { workspace?: { getLeavesOfType?: (viewType: string) => Array<{ view?: SummonChatView }> } } | null;

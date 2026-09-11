@@ -10,14 +10,14 @@ import type { App, TFile, TAbstractFile, EventRef } from 'obsidian';
  *  sygnatury indeksowej `AppLike.vault.adapter`, a `extends` na interfejsie to sprawdza.
  *  `Omit<PluginApi,'app'>` też nie działa — `PluginApi` ma `[key:string]: unknown`, więc
  *  `keyof PluginApi` zwija się do `string` i `Omit`/`Pick` gubią konkretne sygnatury metod. */
-type MentionAutocompletePlugin = PluginApi & { app: App };
+export type MentionAutocompletePlugin = PluginApi & { app: App };
 
 interface MentionAutocompleteOptions {
     onChange?: (mentions: MentionChip[]) => void;
 }
 
 /** Chip dodany nad polem czatu (`getMentions()`). */
-interface MentionChip {
+export interface MentionChip {
     type: string;
     name: string;
     path: string;
