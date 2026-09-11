@@ -268,6 +268,32 @@ test('fragmentFromHtml buduje prawdziwe drzewo DOM, gdy document.createDocumentF
     }
 });
 
+/**
+ * `document` bywa obecny BEZ globali Obsidiana (goły DOM/jsdom bez patcha) - `browserDocument()`
+ * bramkuje na `typeof createFragment === 'function'`, nie na natywną `document.createDocumentFragment`
+ * (którą taki DOM ma). Bez tej bramki `fragmentFromHtml` wpadłaby w ścieżkę "prawdziwy DOM" i
+ * `createFragment()` wybuchłby `ReferenceError` zamiast bezpiecznie spaść do atrapy `PlainNode`.
+ */
+test('fragmentFromHtml: document jest, ale globalnej createFragment (Obsidian) brak - spada do PlainNode, nie rzuca', t => {
+    const globalWithDocument = globalThis as unknown as { document?: unknown; createFragment?: unknown };
+    const previousDocument = globalWithDocument.document;
+    const previousCreateFragment = globalWithDocument.createFragment;
+    globalWithDocument.document = fakeDocument;
+    delete globalWithDocument.createFragment;
+
+    try {
+        const frag = asPlain(fragmentFromHtml('<div>tekst</div>'));
+
+        t.is(frag.tagName, '#fragment', 'ma wrócić atrapa PlainNode (#fragment) - dowód, że NIE poszło przez toDom/atrapę Document mimo że document istnieje');
+        t.is(frag.textContent, 'tekst');
+    } finally {
+        if (previousDocument === undefined) delete globalWithDocument.document;
+        else globalWithDocument.document = previousDocument;
+        if (previousCreateFragment === undefined) delete globalWithDocument.createFragment;
+        else globalWithDocument.createFragment = previousCreateFragment;
+    }
+});
+
 // ── (wejście nie-stringowe, ale FAŁSZYWE-nie-nullish, np. `0`) ────────
 // `String(html ?? '')` musi zostać nullish-coalescingiem: `0`, `false` to wartości,
 // nie brak wartości — `||` zamieniłby je po cichu na pusty ciąg.

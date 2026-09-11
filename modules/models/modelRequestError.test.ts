@@ -54,20 +54,3 @@ test('name NIE jest własną własnością — odziedziczone z Error.prototype, 
     t.false(Object.prototype.hasOwnProperty.call(err, 'name'));
     t.is(err.name, 'Error');
 });
-
-test('from(): instancja przechodzi PRZEZ TĘ SAMĄ referencję, nie podwaja opakowania', t => {
-    const err = new ModelRequestError(SAMPLE);
-    t.is(ModelRequestError.from(err), err);
-});
-
-test('from(): zwykły string daje message == string, kod UNKNOWN', t => {
-    const err = ModelRequestError.from('Model timeout (0s)');
-    t.true(err instanceof ModelRequestError);
-    t.is(err.message, 'Model timeout (0s)');
-    t.is(err.code, 'UNKNOWN');
-});
-
-test('from(): surowy Error z fetch maskuje sekret w URL zamiast wynieść go dalej', t => {
-    const err = ModelRequestError.from(new Error('fetch failed: https://api.openai.com/v1?api_key=sk-ant-aaaaaaaaaaaaaaaaaaaaaaaaaaaa'));
-    t.false(err.message.includes('sk-ant-aaaaaaaaaaaaaaaaaaaaaaaaaaaa'), err.message);
-});

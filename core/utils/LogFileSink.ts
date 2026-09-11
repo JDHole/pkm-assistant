@@ -48,8 +48,9 @@ export function truncate(text: unknown, maxLen: number = DEFAULT_MAX_LEN): strin
  * Bezpiecznie serializuje pojedynczy argument logu do jednej linii tekstu.
  * String → jak jest; Error → `Name: message | pierwsza linia stacku | {własne pola}`
  * (ogon JSON TYLKO gdy Error niesie własne enumerowalne pola poza `name`/`message`/
- * `stack`/`cause` — patrz `ModelRequestError` w `modules/models`, `code`/`http_status`/
- * `details`); obiekt/tablica → JSON (fallback String); reszta → String. Zawsze przycięte.
+ * `stack`/`cause` — dotyczy KAŻDEGO takiego Errora, nie tylko błędów modeli: `ModelRequestError`
+ * z `modules/models` (`code`/`http_status`/`details`), ale też np. `errno`/`syscall`/`path`
+ * na błędach `fs`); obiekt/tablica → JSON (fallback String); reszta → String. Zawsze przycięte.
  * @param value
  * @param maxLen
  */
@@ -67,9 +68,11 @@ export function serializeArg(value: unknown, maxLen: number = DEFAULT_MAX_LEN): 
         // `details` jako WŁASNE enumerowalne pola na prawdziwym `Error` (`only-throw-error` -
         // patrz `ChatModel._completeOnce`). Bez tego ogona ginęłyby z pliku logu: klon Errora
         // w `Logger.maskLogValue` je kopiuje (konsola je widzi), ale `serializeArg` ich dotąd
-        // nie czytał. Maska sekretów już poszła wyżej w `Logger._toSink` (przed `write()` -
-        // patrz komentarz klasy) — `JSON.stringify` tu tylko SERIALIZUJE, tak samo jak gałąź
-        // "obiekt/tablica" niżej, która też nie maskuje sama.
+        // nie czytał. Ten ogon nie jest specyficzny dla błędów modeli — DOWOLNY `Error` z
+        // własnymi polami dostaje go tak samo (np. `errno`/`syscall`/`path` na błędzie `fs`).
+        // Maska sekretów już poszła wyżej w `Logger._toSink` (przed `write()` - patrz komentarz
+        // klasy) — `JSON.stringify` tu tylko SERIALIZUJE, tak samo jak gałąź "obiekt/tablica"
+        // niżej, która też nie maskuje sama.
         // TS-boundary: `value` jest tu `Error`, ale dodatkowe pola dokłada WOŁAJĄCY
         // (ModelRequestError i inni) — kształt nieznany z góry, stąd odczyt po kluczu.
         const errBag = value as unknown as Record<string, unknown>;

@@ -297,7 +297,7 @@ dochodzą też żadne nowe klucze i18n.
 | `ChatModel.retry.test.ts` | Backoff wykładniczy + `Retry-After` (seam `scheduleRetry`) |
 | `ChatModel.gate.test.ts` | Co model PODAJE bramce: klucz, pojemność, priorytet |
 | `ChatModel.complete.test.ts` | Tor bez strumienia + normalizacja błędu dostawcy |
-| `modelRequestError.test.ts` | `ModelRequestError`: instanceof Error, pola enumerowalne, `JSON.stringify` = jak goły obiekt, `from()` (instancja przechodzi, `string` → `message`) |
+| `modelRequestError.test.ts` | `ModelRequestError`: instanceof Error, pola enumerowalne, `JSON.stringify`/`{...err}` = jak goły obiekt, `name` nie jest własną własnością |
 | `ChatModel.errors.test.ts` | Sekrety nie wychodzą do konsumenta ani do logu |
 | `ChatModel.notifications.test.ts` | Moduł NIE pokazuje notek |
 | `ReasoningTagFilter.test.ts` | Rezerwa i rollback jednostkowo, bez dostawcy |
