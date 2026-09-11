@@ -450,7 +450,7 @@ export class MCPClient {
         // `App`; `MCPClientApp` to celowo zawężony widok TEGO SAMEGO runtime'owego obiektu
         // (tylko `vault`), zawężony na potrzeby tego klienta - stąd rzut na granicy zamiast
         // poszerzania kontraktu klienta o cały interfejs `App`.
-        return new DiffModal(this.app as unknown as App, options).waitForApproval();
+        return new DiffModal(this.app as App, options).waitForApproval();
     }
 
     /**

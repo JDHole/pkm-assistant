@@ -177,7 +177,7 @@ export async function migrateJsonArtifactsToNotes({ adapter, store, now }: Parti
                 // TS-boundary: stary JSON artefaktu z dysku - kilka historycznych, nieudokumentowanych
                 // wariantów (patrz LegacyArtifactRecord wyżej), bez walidacji schematem (migrator
                 // jednorazowy, nieczytelny/niepasujący wpis i tak ląduje w backupie niżej).
-                record = JSON.parse(raw as string) as LegacyArtifactRecord;
+                record = JSON.parse(raw) as LegacyArtifactRecord;
             } catch {
                 // Nieczytelny JSON → backup, nie kasujemy na ślepo.
                 await moveToBackup(adapter, path, raw, backupDir);
@@ -194,8 +194,8 @@ export async function migrateJsonArtifactsToNotes({ adapter, store, now }: Parti
 
             try {
                 await store.importInstance(typ, {
-                    tytul: (record.title || record.data?.title || 'Artefakt') as string,
-                    agent: (record.createdBy || record.data?.createdBy || record.agentName || 'agent') as string,
+                    tytul: record.title || record.data?.title || 'Artefakt',
+                    agent: record.createdBy || record.data?.createdBy || record.agentName || 'agent',
                     status: mapStatus(record),
                     body: buildBody(typ, record),
                     utworzono: dateOnly(record.createdAt),

@@ -30,11 +30,11 @@ interface CommunicatorAgentManager {
     _emit(event: string): void;
 }
 
-/** Kontrakt pluginu widziany przez ten moduł — `app` zawężony do realnego Obsidian `App`
- *  (modal sprzątania hurtowego woła `new KomunikatorBulkDeleteModal(plugin.app, ...)`, który
- *  wymaga prawdziwego `Modal.super`). Intersection zamiast `extends PluginApi { app: App }` —
- *  ten sam problem i wyjaśnienie co w `MentionAutocomplete.ts` (DataAdapter kontra sygnatura
- *  indeksowa `AppLike.vault.adapter`). */
+/** Kontrakt pluginu widziany przez ten moduł — lokalny interfejs (nie `PluginApi` z `core/` -
+ *  moduł go tu nie potrzebuje, bo `agentManager` jest duck-type'em wyżej, nie `unknown` z
+ *  kontraktu). `app` to od razu prawdziwy Obsidian `App`: modal sprzątania hurtowego woła
+ *  `new KomunikatorBulkDeleteModal(plugin.app, ...)`, który przez `Modal.super` wymaga
+ *  dokładnie tego typu. */
 interface CommunicatorPlugin {
     agentManager?: CommunicatorAgentManager | null;
     app: App;

@@ -50,6 +50,10 @@ function makePlugin() {
             createFolder: async (p: string) => { folders.add(p); },
             cachedRead: async (file: FileLike) => files.get(file.path)!,
             process: async (file: FileLike, fn: (md: string) => string) => { const next = fn(files.get(file.path) as string); files.set(file.path, next); return next; },
+            // `ArtifactStoreVault.trash` jest wymagana (fallback bez `fileManager.trashFile` w
+            // `store.remove()`) - ta suita nigdy go nie woła, więc atrapa jest tylko po to, żeby
+            // typ się zgadzał (wzór `ArtifactStore.test.ts`).
+            trash: async (file: FileLike) => { files.delete(file.path); },
         },
         metadataCache: { getFileCache: (file: FileLike) => { const c = files.get(file.path); return c == null ? null : { frontmatter: parseArtifact(c).frontmatter }; } },
         fileManager: {
@@ -59,6 +63,12 @@ function makePlugin() {
                 const fm: ArtifactFrontmatter = m ? ((parseYaml(m[2]) as ArtifactFrontmatter | null) || {}) : {};
                 fn(fm);
                 files.set(file.path, `---\n${stringifyYaml(fm)}---\n${m ? content.slice(m[0].length) : content}`);
+            },
+            // `ArtifactStoreFileManager.renameFile` jest wymagana (`store.move()` woła ją bez
+            // guardu) - ta suita nigdy nie przenosi artefaktów, atrapa tylko dla zgodności typu.
+            renameFile: async (file: FileLike, newPath: string) => {
+                const content = files.get(file.path);
+                if (content !== undefined) { files.delete(file.path); files.set(newPath, content); }
             },
         },
     };

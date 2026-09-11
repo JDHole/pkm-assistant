@@ -40,7 +40,9 @@ interface ArtifactStoreVault {
     cachedRead?(file: ArtifactFileLike): Promise<string>;
     read?(file: ArtifactFileLike): Promise<string>;
     process(file: ArtifactFileLike, fn: (text: string) => string | null): Promise<string>;
-    trash?(file: ArtifactFileLike, system: boolean): Promise<void>;
+    // Wymagana (nie opcjonalna): `remove()` woła ją BEZWARUNKOWO w gałęzi fallbacku (brak
+    // `fileManager.trashFile`) - opcjonalny typ z `!` przy wywołaniu kłamałby o realnej gwarancji.
+    trash(file: ArtifactFileLike, system: boolean): Promise<void>;
     on?(event: string, callback: (file: ArtifactFileLike, oldPath?: string) => void): unknown;
 }
 
@@ -51,7 +53,8 @@ interface ArtifactStoreMetadataCache {
 
 interface ArtifactStoreFileManager {
     processFrontMatter(file: ArtifactFileLike, fn: (frontmatter: ArtifactFrontmatter) => void): Promise<void>;
-    renameFile?(file: ArtifactFileLike, newPath: string): Promise<void>;
+    // Wymagana: `move()` woła ją BEZWARUNKOWO (bez `fileManager?.` guardu) - patrz `trash` wyżej.
+    renameFile(file: ArtifactFileLike, newPath: string): Promise<void>;
     trashFile?(file: ArtifactFileLike): Promise<void>;
 }
 
@@ -422,7 +425,7 @@ export class ArtifactStore {
         // dokładnej ścieżce.
         if (!this._isUnderRoot(target)) return false;
         await this._ensureFolder(folder);
-        await this.app.fileManager.renameFile!(file, target);
+        await this.app.fileManager.renameFile(file, target);
         // Indeks idzie za plikiem - inaczej bramka oceniałaby starą ścieżkę. `target` jest TU już
         // zagwarantowany pod rootem (early return kilka linii wyżej), więc "przenosiny poza root"
         // do tego miejsca nie dojdą.
@@ -437,7 +440,7 @@ export class ArtifactStore {
         const file = await this._findFileById(id);
         if (!file) return false;
         if (this.app.fileManager?.trashFile) await this.app.fileManager.trashFile(file);
-        else await this.app.vault.trash!(file, false);
+        else await this.app.vault.trash(file, false);
         this._pathIndex.delete(id);
         this._registry?.delete(id);
         return true;
@@ -604,7 +607,12 @@ export class ArtifactStore {
             const fm = cache.frontmatter;
             const id = fm && fm['pkm-artefakt'];
             if (!id) continue;
-            registry.set(id as string, this._entryFrom(id as string, f, fm as ArtifactFrontmatter));
+            // TS-boundary: ZASTANE (poza tą falą) - `fm['pkm-artefakt']` jest `ArtifactScalar`
+            // (string|number|boolean|null), więc YAML z `pkm-artefakt: 20260911` (liczba bez
+            // cudzysłowu) dałby tu `id` typu number; `registry`/`_pathIndex` są kluczowane
+            // stringiem, więc taki artefakt byłby niewidoczny do końca sesji. Naprawa (walidacja
+            // kształtu przy zapisie / normalizacja przy odczycie) to zmiana runtime, poza zakresem.
+            registry.set(id as string, this._entryFrom(id as string, f, fm));
         }
         this._registry = registry;
         this._registryRoot = allWarm ? root : null; // prowizoryczny — następne pytanie przebuduje
@@ -677,6 +685,10 @@ export class ArtifactStore {
             throw new Error('Nie udało się zbudować bezpiecznej ścieżki artefaktu');
         }
         // Kolizja nazwy → sufiks " 2", " 3", …
+        // TS-boundary: ZASTANE - `sanitizePath` zwraca `string | null`; pierwsze przypisanie jest
+        // strzeżone (throw wyżej), ale reasygnacja w pętli gubi to zawężenie - `path!`/`as string`
+        // ufają, że kolejne sufiksy nadal sanityzują się poprawnie (nieudowodnione tu statycznie).
+        // Naprawa (np. throw przy null w pętli) to zmiana runtime, poza zakresem tej fali.
         let n = 2;
         while (this.app.vault.getAbstractFileByPath?.(path!)) {
             path = sanitizePath(`${root}/${agentSeg}/${base} ${n}.md`);

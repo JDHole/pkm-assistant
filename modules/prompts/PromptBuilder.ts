@@ -354,7 +354,7 @@ export class PromptBuilder {
             label,
             content: trimmed,
             _tokens: null, // lazy-computed on first access via getSections/getTokenBreakdown
-            get tokens() { if ((this as PromptSection)._tokens === null) (this as PromptSection)._tokens = getTokenCount(trimmed); return (this as PromptSection)._tokens!; },
+            get tokens(): number { if (this._tokens === null) this._tokens = getTokenCount(trimmed); return this._tokens; },
             enabled: true,
             required: opts.required || false,
             category: opts.category || 'core',
@@ -370,6 +370,10 @@ export class PromptBuilder {
      * @returns {string}
      */
     _resolveSection(key: string, agentOverrides: PromptOverrides, globalDefaults: PromptGlobalDefaults, factoryContent: string): string {
+        // TS-boundary: nadpisania sekcji to JSON zapisany przez UI profilu agenta / ustawień
+        // globalnych (sygnatura indeksowa `PromptOverrides`/`PromptGlobalDefaults` niesie
+        // `unknown`), bez walidacji schematem - `key` tu jest zawsze kluczem sekcji tekstowej
+        // (nigdy `decisionTreeInstructions`/`decisionTreeOverrides`), ale typ tego nie wymusza.
         if (agentOverrides[key]) return agentOverrides[key] as string;
         if (globalDefaults[key]) return globalDefaults[key] as string;
         return factoryContent;
@@ -566,6 +570,8 @@ export class PromptBuilder {
 
         if (groupId === 'delegacja') {
             // Tryby v2: unified delegate list from context
+            // `as number`: bez asercji TS18048, `?? 0` zmieniłoby bundle; `undefined > 0` daje
+            // false jak w JS od zawsze (patrz też `groups?.length` niżej w tej metodzie).
             if ((ctx.delegateList?.length as number) > 0) {
                 const delegates = ctx.delegateAssignments || [];
                 const desc = (ctx.delegateList as NonNullable<PromptContext['delegateList']>).map(d => {
