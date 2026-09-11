@@ -86,10 +86,9 @@ class SettingsRegistryClass {
         return this.sections.has(id as string) ? id : defaultId;
     }
 
-    // TS-any: Obsidian augments HTMLElement with the UI helpers used by legacy settings renderers.
     // This render() paints ONLY the live `pkm-settings-*` names (`src/styles.css:831-847`) - the
     // `pkm-settings-v2*` namespace has no CSS rule in any stylesheet and must not be painted.
-    async render(containerEl: any, plugin: unknown, options: { defaultId?: string } = {}): Promise<void> {
+    async render(containerEl: HTMLElement, plugin: unknown, options: { defaultId?: string } = {}): Promise<void> {
         containerEl.empty();
         containerEl.classList.add('cs-root');
 
