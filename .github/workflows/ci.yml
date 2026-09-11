@@ -24,6 +24,27 @@ jobs:
 
       - run: npm ci --no-audit --no-fund
 
+      # Harness „Szklane Pudło" — prawdziwy plugin bootowany w Node bez Obsidiana. Mieszka
+      # w OSOBNYM repo (https://github.com/JDHole/pkm-assistant-harness): walidator
+      # katalogu Obsidiana lintuje CAŁE repo pluginu, a narzędzie testowe nie jest częścią
+      # pluginu i generowało tysiące ostrzeżeń. Od 2026-09-11 mieszka tam też atrapa `obsidian`
+      # + shim DOM + właściwy preload AVA (`test-support/`, ten sam powód) — więc te dwa kroki
+      # MUSZĄ stanąć PRZED `npm test`: lokator w `test-support/register-obsidian-for-ava.mjs`
+      # (ten checkout, zostaje jako cienka warstwa) szuka tego checkoutu pod `.harness-ci`
+      # (kolejność szukania: `PKM_ASSISTANT_HARNESS`, `.harness-ci`, katalog-brat), a atrapa
+      # `obsidian.ts` ma własny statyczny `import 'yaml'`, rozwiązywany z node_modules TEGO
+      # checkoutu harnessu — bez `npm ci` niżej `npm test` padnie na `Cannot find package 'yaml'`.
+      - name: harness — checkout osobnego repo
+        uses: actions/checkout@v4
+        with:
+          repository: JDHole/pkm-assistant-harness
+          ref: main
+          path: .harness-ci
+
+      - name: harness — zależności
+        run: npm ci --no-audit --no-fund
+        working-directory: .harness-ci
+
       - run: npm test
 
       - run: npm run typecheck
@@ -75,22 +96,8 @@ jobs:
             console.log('Artefakty builda OK (wersja ' + manifest.version + ', minAppVersion ' + manifest.minAppVersion + ')');
           "
 
-      # Harness „Szklane Pudło" — prawdziwy plugin bootowany w Node bez Obsidiana. Mieszka
-      # w OSOBNYM repo (https://github.com/JDHole/pkm-assistant-harness): walidator
-      # katalogu Obsidiana lintuje CAŁE repo pluginu, a narzędzie testowe nie jest częścią
-      # pluginu i generowało tysiące ostrzeżeń. Bramka zostaje ta sama — klonujemy harness obok
-      # i puszczamy jego skrypty na TYM checkoutcie pluginu (PKM_ASSISTANT_ROOT).
-      - name: harness — checkout osobnego repo
-        uses: actions/checkout@v4
-        with:
-          repository: JDHole/pkm-assistant-harness
-          ref: main
-          path: .harness-ci
-
-      - name: harness — zależności
-        run: npm ci --no-audit --no-fund
-        working-directory: .harness-ci
-
+      # Harness już wyklonowany + `npm ci` wyżej (przed `npm test` — patrz komentarz tam).
+      # Tu tylko puszczamy jego skrypty na TYM checkoucie pluginu (PKM_ASSISTANT_ROOT).
       - name: harness — selftest
         run: npm run selftest
         working-directory: .harness-ci
