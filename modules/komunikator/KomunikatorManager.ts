@@ -35,8 +35,20 @@ import { sanitizePath, parseFrontmatter, probeFile, getAgentSafeName } from '../
 import type { FileProbe } from '../../core/index.js';
 import { DEFAULT_LIMITS } from '../../config/limits.js';
 import type { AgentManagerLike, Message, MessageFrontmatter, MessageHeader, VaultEventFile, VaultEventRef, VaultLike } from './types.js';
-// TS-any: parseFrontmatter reads compatibility YAML from user-authored message files.
-type ParsedFrontmatter = Record<string, any>;
+
+/** Kształt frontmattera wiadomości, jaki `parseMessage` realnie czyta z pliku `.md` skrzynki.
+ *  Plik bywa edytowany ręcznie albo zsynchronizowany z innego urządzenia, więc `user_read`/
+ *  `ai_read`/`hop` dopuszczają zarówno formę YAML-owego booleana/liczby, jak i string —
+ *  kod niżej akceptuje obie (`=== true || === 'true'`, `Number(...)`). */
+interface ParsedMessageFrontmatter {
+    user_read?: boolean | string;
+    ai_read?: boolean | string;
+    od?: string;
+    do?: string;
+    temat?: string;
+    data?: string;
+    hop?: number | string;
+}
 
 /** Maksymalny rozmiar pojedynczej wiadomości. */
 // Nieeksportowana: zero konsumentów spoza tego pliku (test importuje tylko
@@ -1012,7 +1024,10 @@ export function buildMessageMarkdown(fm: MessageFrontmatter, body: string): stri
  * @returns {{header: Object, body: string}|null}
  */
 export function parseMessage(raw: string, id: string): { header: MessageHeader; body: string } | null {
-    const { frontmatter, content } = parseFrontmatter(String(raw || '')) as { frontmatter: ParsedFrontmatter | null; content: string };
+    // TS-boundary: frontmatter YAML pliku wiadomości w skrzynce - dane na dysku, poza kontrolą
+    // pluginu (user edytuje ręcznie, vault bywa synchronizowany między urządzeniami), bez
+    // walidacji schematem (poza zakresem tej fali). `parseFrontmatter` zwraca `unknown`.
+    const { frontmatter, content } = parseFrontmatter(String(raw || '')) as { frontmatter: ParsedMessageFrontmatter | null; content: string };
     if (!frontmatter) return null;
 
     const userRead = frontmatter.user_read === true || frontmatter.user_read === 'true';

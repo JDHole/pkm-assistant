@@ -4,16 +4,27 @@
  * Non-programmer friendly: strikethrough for removed, highlighted for added.
  */
 import { Modal } from 'obsidian';
+import type { App } from 'obsidian';
 import { UiIcons, setSvg, setSvgLabel } from '../crystal-soul/index.js';
 import { t } from '../../core/i18n/index.js';
 import { computeLineDiff, computeDiffStats, selectVisibleDiffLines } from './diffLines.js';
-// TS-any: modal interoperuje z dynamicznymi obiektami Obsidiana oraz wynikiem Promise.
-type ModalDynamic = any;
+import type { DiffOp } from './diffLines.js';
+
+/** Wejście modala — ten sam kształt, który buduje `modules/tools/MCPClient.ts`
+ *  (`DiffApprovalOptions`, jedyny prawdziwy wołacz poza testowym hakiem `diffModalFactory`). */
+interface DiffModalOptions {
+    path: string;
+    oldContent: string;
+    newContent: string;
+    agentName: string;
+}
+
+type DiffModalResult = 'approve' | 'deny';
 
 export class DiffModal extends Modal {
-    declare opts: ModalDynamic;
-    declare result: ModalDynamic;
-    declare resolvePromise: ModalDynamic;
+    declare opts: DiffModalOptions;
+    declare result: DiffModalResult | null;
+    declare resolvePromise: ((result: DiffModalResult) => void) | null;
     /**
      * @param {App} app
      * @param {Object} opts
@@ -22,7 +33,7 @@ export class DiffModal extends Modal {
      * @param {string} opts.newContent - Proposed new content
      * @param {string} [opts.agentName] - Agent requesting the write
      */
-    constructor(app: ModalDynamic, opts: ModalDynamic) {
+    constructor(app: App, opts: DiffModalOptions) {
         super(app);
         this.opts = opts;
         this.result = null;
@@ -106,7 +117,7 @@ export class DiffModal extends Modal {
      * window; long runs of unchanged lines collapse into a single "N unchanged lines"
      * placeholder row. Nothing about a change itself is ever hidden — only the surrounding noise.
      */
-    _renderDiff(container: ModalDynamic, ops: ModalDynamic) {
+    _renderDiff(container: HTMLElement, ops: DiffOp[]): void {
         for (const segment of selectVisibleDiffLines(ops, 3)) {
             if (segment.kind === 'line') {
                 this._renderDiffLine(container, segment.op);
@@ -116,7 +127,7 @@ export class DiffModal extends Modal {
         }
     }
 
-    _renderDiffLine(container: ModalDynamic, op: ModalDynamic) {
+    _renderDiffLine(container: HTMLElement, op: DiffOp): void {
         const line = container.createDiv({ cls: `diff-line diff-line--${op.type}` });
         const marker = line.createSpan({ cls: 'diff-marker' });
         if (op.type === 'remove') marker.textContent = '−';
@@ -125,7 +136,7 @@ export class DiffModal extends Modal {
         line.createSpan({ text: op.text, cls: 'diff-text' });
     }
 
-    _renderCollapsedPlaceholder(container: ModalDynamic, hiddenCount: number) {
+    _renderCollapsedPlaceholder(container: HTMLElement, hiddenCount: number): void {
         const line = container.createDiv({ cls: 'diff-line diff-line--collapsed' });
         line.createSpan({ cls: 'diff-marker', text: '⋯' });
         line.createSpan({
@@ -134,17 +145,17 @@ export class DiffModal extends Modal {
         });
     }
 
-    _renderNoChanges(container: ModalDynamic) {
+    _renderNoChanges(container: HTMLElement) {
         container.createDiv({ cls: 'diff-no-changes', text: t('modal.diff.no_changes') });
     }
 
-    _resolve(result: ModalDynamic) {
+    _resolve(result: DiffModalResult): void {
         this.result = result;
         this.resolvePromise?.(result);
         this.close();
     }
 
-    onClose() {
+    onClose(): void {
         this.contentEl.empty();
         if (this.result === null) this.resolvePromise?.('deny');
     }
@@ -153,7 +164,7 @@ export class DiffModal extends Modal {
      * Show modal and wait for user decision.
      * @returns {Promise<'approve'|'deny'>}
      */
-    async waitForApproval() {
+    async waitForApproval(): Promise<DiffModalResult> {
         return new Promise(resolve => {
             this.resolvePromise = resolve;
             this.open();

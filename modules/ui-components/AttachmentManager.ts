@@ -1,8 +1,7 @@
 import { log } from '../../core/utils/Logger.js';
 import { UiIcons, setSvg } from '../crystal-soul/index.js';
 import { t } from '../../core/i18n/index.js';
-// TS-any: granica między DOM, Obsidianem i opcjonalnym PDF.js nie ma stabilnych deklaracji.
-type AttachmentDynamic = any;
+import type { PluginApi } from '../../core/index.js';
 
 /**
  * AttachmentManager — manages file attachments in chat input.
@@ -24,6 +23,71 @@ type AttachmentDynamic = any;
  *   // Cleanup: mgr.destroy()
  */
 
+/** Załącznik gotowy do wysyłki — kształt, który realnie budują `_processFile`/`_optimizeImage`. */
+interface Attachment {
+    type: 'image' | 'pdf' | 'text';
+    name: string;
+    content: string;
+    mimeType: string;
+    size: number;
+}
+
+/** Chip mencji renderowany obok chipów załączników (ten sam kształt co `MentionChip`
+ *  w `MentionAutocomplete.ts` — ten plik go nie importuje, bo mencje przychodzą z zewnątrz
+ *  jako zwykłe obiekty przez `setMentionChips`, bez zależności między dwoma klasami modułu). */
+interface AttachmentMentionChip {
+    type: string;
+    name: string;
+    path: string;
+    icon: string;
+}
+
+interface AttachmentManagerOptions {
+    onChange?: (attachments: Attachment[]) => void;
+    dropZone?: HTMLElement;
+    pasteTarget?: HTMLElement | null;
+}
+
+interface MessageContentTextBlock {
+    type: 'text';
+    text: string;
+}
+
+interface MessageContentImageBlock {
+    type: 'image_url';
+    image_url: { url: string };
+}
+
+type MessageContentBlock = MessageContentTextBlock | MessageContentImageBlock;
+
+interface BuiltMessageContent {
+    content: string | MessageContentBlock[];
+    displayText: string;
+}
+
+// TS-boundary: pdf.js jest ładowany dynamicznie z globalnego `window.pdfjsLib` (bundlowany
+// przez Obsidiana przy otwartym viewerze PDF, albo w ogóle nieobecny) — brak stabilnych
+// deklaracji typów dla tej biblioteki. Modelujemy tylko kształt, który ten plik realnie czyta.
+interface PdfJsTextItem {
+    str: string;
+}
+interface PdfJsTextContent {
+    items: PdfJsTextItem[];
+}
+interface PdfJsPage {
+    getTextContent(): Promise<PdfJsTextContent>;
+}
+interface PdfJsDocument {
+    numPages: number;
+    getPage(pageNumber: number): Promise<PdfJsPage>;
+}
+interface PdfJsLib {
+    getDocument(opts: { data: ArrayBuffer }): { promise: Promise<PdfJsDocument> };
+}
+interface WindowWithPdfJs {
+    pdfjsLib?: PdfJsLib;
+}
+
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'];
 const TEXT_EXTENSIONS = [
     'md', 'txt', 'js', 'ts', 'jsx', 'tsx', 'css', 'scss', 'html', 'htm',
@@ -38,7 +102,22 @@ const MAX_TEXT_SIZE = 100 * 1024;         // 100 KB
 const MAX_ATTACHMENTS = 10;
 
 export class AttachmentManager {
-    [key: string]: AttachmentDynamic;
+    declare container: HTMLElement;
+    declare plugin: PluginApi;
+    declare onChange: (attachments: Attachment[]) => void;
+    declare dropZone: HTMLElement;
+    declare pasteTarget: HTMLElement | null;
+    declare attachments: Attachment[];
+    declare mentionChips: AttachmentMentionChip[];
+    declare onMentionRemove: ((index: number) => void) | null;
+    declare chipBar: HTMLDivElement | null;
+    declare attachButton: HTMLButtonElement | null;
+    declare _onDragEnter: (e: DragEvent) => void;
+    declare _onDragOver: (e: DragEvent) => void;
+    declare _onDragLeave: (e: DragEvent) => void;
+    declare _onDrop: (e: DragEvent) => Promise<void>;
+    declare _onPaste: ((e: ClipboardEvent) => Promise<void>) | undefined;
+
     /**
      * @param {HTMLElement} container - Where to render chip bar + attach button
      * @param {Object} plugin - PKM Assistant plugin instance
@@ -47,7 +126,7 @@ export class AttachmentManager {
      * @param {HTMLElement} [options.dropZone] - Element for drag & drop (default: container)
      * @param {HTMLElement} [options.pasteTarget] - Element for paste events (default: null)
      */
-    constructor(container: AttachmentDynamic, plugin: AttachmentDynamic, options: AttachmentDynamic = {}) {
+    constructor(container: HTMLElement, plugin: PluginApi, options: AttachmentManagerOptions = {}) {
         this.container = container;
         this.plugin = plugin;
         this.onChange = options.onChange || (() => {});
@@ -72,7 +151,7 @@ export class AttachmentManager {
     // UI
     // ═══════════════════════════════════════════
 
-    _buildUI() {
+    _buildUI(): void {
         // Chip bar (above input, hidden when empty)
         this.chipBar = createDiv();
         this.chipBar.className = 'pkm-attachment-chips is-hidden';
@@ -90,7 +169,7 @@ export class AttachmentManager {
      * Returns the 📎 button element for external placement.
      * @returns {HTMLElement}
      */
-    getAttachButton() {
+    getAttachButton(): HTMLButtonElement | null {
         return this.attachButton;
     }
 
@@ -99,22 +178,22 @@ export class AttachmentManager {
      * @param {Array<{type: string, name: string, path: string, icon: string}>} mentions
      * @param {Function} onRemove - Called with (index) when user removes a mention chip
      */
-    setMentionChips(mentions: AttachmentDynamic[], onRemove: AttachmentDynamic) {
+    setMentionChips(mentions: AttachmentMentionChip[] | null | undefined, onRemove: ((index: number) => void) | null | undefined): void {
         this.mentionChips = mentions || [];
         this.onMentionRemove = onRemove || null;
         this._renderChips();
     }
 
-    _renderChips() {
-        this.chipBar.empty();
+    _renderChips(): void {
+        this.chipBar!.empty();
 
         const hasAny = this.attachments.length > 0 || this.mentionChips.length > 0;
         if (!hasAny) {
-            this.chipBar.classList.add('is-hidden');
+            this.chipBar!.classList.add('is-hidden');
             return;
         }
 
-        this.chipBar.classList.remove('is-hidden');
+        this.chipBar!.classList.remove('is-hidden');
 
         // Render mention chips first (📄/📁 notes/folders)
         for (let i = 0; i < this.mentionChips.length; i++) {
@@ -142,7 +221,7 @@ export class AttachmentManager {
             });
             chip.appendChild(removeBtn);
 
-            this.chipBar.appendChild(chip);
+            this.chipBar!.appendChild(chip);
         }
 
         // Render attachment chips (📎 files/images)
@@ -191,11 +270,11 @@ export class AttachmentManager {
             });
             chip.appendChild(removeBtn);
 
-            this.chipBar.appendChild(chip);
+            this.chipBar!.appendChild(chip);
         }
     }
 
-    _formatSize(bytes: number) {
+    _formatSize(bytes: number): string {
         if (bytes < 1024) return `${bytes} B`;
         if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
         return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -205,7 +284,7 @@ export class AttachmentManager {
     // FILE PICKER
     // ═══════════════════════════════════════════
 
-    _openFilePicker() {
+    _openFilePicker(): void {
         const input = createEl('input');
         input.type = 'file';
         input.multiple = true;
@@ -233,45 +312,45 @@ export class AttachmentManager {
     /**
      * Check if drag event target is within our drop zone or input container.
      */
-    _isInDropZone(e: AttachmentDynamic) {
+    _isInDropZone(e: DragEvent): boolean {
         if (!this.dropZone) return false;
-        const target = e.target;
+        const target = e.target as Node | null;
         return this.dropZone.contains(target) || this.container.contains(target);
     }
 
-    _setupDragDrop() {
-        this._onDragEnter = (e: AttachmentDynamic) => {
+    _setupDragDrop(): void {
+        this._onDragEnter = (e: DragEvent) => {
             if (!this._isInDropZone(e)) return;
             e.preventDefault();
             e.stopImmediatePropagation();
             this.dropZone.classList.add('pkm-drag-over');
         };
 
-        this._onDragOver = (e: AttachmentDynamic) => {
+        this._onDragOver = (e: DragEvent) => {
             if (!this._isInDropZone(e)) return;
             e.preventDefault();
             e.stopImmediatePropagation();
-            e.dataTransfer.dropEffect = 'copy';
+            e.dataTransfer!.dropEffect = 'copy';
             this.dropZone.classList.add('pkm-drag-over');
         };
 
-        this._onDragLeave = (e: AttachmentDynamic) => {
+        this._onDragLeave = (e: DragEvent) => {
             if (!this.dropZone) return;
             // Only remove highlight if pointer left the drop zone entirely
-            const related = e.relatedTarget;
+            const related = e.relatedTarget as Node | null;
             if (!related || (!this.dropZone.contains(related) && !this.container.contains(related))) {
                 this.dropZone.classList.remove('pkm-drag-over');
             }
         };
 
-        this._onDrop = async (e: AttachmentDynamic) => {
+        this._onDrop = async (e: DragEvent) => {
             if (!this._isInDropZone(e)) return;
             e.preventDefault();
             e.stopImmediatePropagation();
             this.dropZone.classList.remove('pkm-drag-over');
 
-            if (e.dataTransfer?.files?.length > 0) {
-                await this._processFileList(e.dataTransfer.files);
+            if ((e.dataTransfer?.files?.length as number) > 0) {
+                await this._processFileList(e.dataTransfer!.files);
             }
         };
 
@@ -286,14 +365,14 @@ export class AttachmentManager {
     // PASTE
     // ═══════════════════════════════════════════
 
-    _setupPaste() {
+    _setupPaste(): void {
         if (!this.pasteTarget) return;
 
-        this._onPaste = async (e: AttachmentDynamic) => {
+        this._onPaste = async (e: ClipboardEvent) => {
             const items = e.clipboardData?.items;
             if (!items) return;
 
-            const files = [];
+            const files: File[] = [];
             for (const item of items) {
                 if (item.kind === 'file') {
                     const file = item.getAsFile();
@@ -317,7 +396,7 @@ export class AttachmentManager {
     // FILE PROCESSING
     // ═══════════════════════════════════════════
 
-    async _processFileList(files: AttachmentDynamic) {
+    async _processFileList(files: FileList | File[]): Promise<void> {
         for (const file of files) {
             if (this.attachments.length >= MAX_ATTACHMENTS) {
                 log.warn('Attachments', t('attach.limit_reached', { max: MAX_ATTACHMENTS }));
@@ -335,7 +414,7 @@ export class AttachmentManager {
         this.onChange(this.attachments);
     }
 
-    async _processFile(file: AttachmentDynamic) {
+    async _processFile(file: File): Promise<void> {
         const ext = (file.name.split('.').pop() || '').toLowerCase();
         const name = file.name;
         const mime = (file.type || '').toLowerCase();
@@ -388,7 +467,7 @@ export class AttachmentManager {
         }
     }
 
-    _mimeToExt(mime: string) {
+    _mimeToExt(mime: string): string {
         const map: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/svg+xml': 'svg', 'image/bmp': 'bmp' };
         return map[mime] || 'png';
     }
@@ -397,7 +476,7 @@ export class AttachmentManager {
      * Optimize image if >1MB: resize to max 1568px longest side, compress as JPEG 0.85.
      * Returns { file: File|Blob, mimeType: string }.
      */
-    async _optimizeImage(file: AttachmentDynamic) {
+    async _optimizeImage(file: File): Promise<{ file: File | Blob; mimeType: string | null }> {
         const ONE_MB = 1024 * 1024;
         const MAX_DIM = 1568; // Claude's optimal image dimension
         if (file.size <= ONE_MB) return { file, mimeType: null }; // pass-through
@@ -430,8 +509,8 @@ export class AttachmentManager {
         }
     }
 
-    _fileToBase64(file: AttachmentDynamic) {
-        return new Promise((resolve, reject) => {
+    _fileToBase64(file: Blob): Promise<string> {
+        return new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => {
                 // reader.result = "data:image/png;base64,ABC..." → extract just base64 part
@@ -448,26 +527,26 @@ export class AttachmentManager {
      * Extract text from PDF using pdf.js (lazy-loaded).
      * Falls back to a placeholder message if pdf.js is not available.
      */
-    async _extractPdfText(file: AttachmentDynamic) {
+    async _extractPdfText(file: File): Promise<string> {
         try {
             // Try to use Obsidian's built-in PDF support or pdf.js
             const arrayBuffer = await file.arrayBuffer();
 
             // Attempt to load pdf.js from Obsidian's bundled copy
-            const pdfjsLib = (window as AttachmentDynamic).pdfjsLib || await this._loadPdfJs();
+            const pdfjsLib = (window as WindowWithPdfJs).pdfjsLib || await this._loadPdfJs();
 
             if (!pdfjsLib) {
                 return t('attach.pdf_attached', { name: file.name, size: this._formatSize(file.size) });
             }
 
             const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-            const pages = [];
+            const pages: string[] = [];
             const maxPages = Math.min(pdf.numPages, 50); // limit to 50 pages
 
             for (let i = 1; i <= maxPages; i++) {
                 const page = await pdf.getPage(i);
                 const textContent = await page.getTextContent();
-                const pageText = textContent.items.map((item: AttachmentDynamic) => item.str).join(' ');
+                const pageText = textContent.items.map((item) => item.str).join(' ');
                 if (pageText.trim()) {
                     pages.push(`--- ${t('attach.pdf_page', { num: i })} ---\n${pageText}`);
                 }
@@ -486,15 +565,15 @@ export class AttachmentManager {
         }
     }
 
-    async _loadPdfJs() {
+    async _loadPdfJs(): Promise<PdfJsLib | null> {
         // Obsidian bundles pdf.js internally — try to access it
-        if ((window as AttachmentDynamic).pdfjsLib) return (window as AttachmentDynamic).pdfjsLib;
+        if ((window as WindowWithPdfJs).pdfjsLib) return (window as WindowWithPdfJs).pdfjsLib as PdfJsLib;
 
         // Try dynamic import (may not work in all environments)
         try {
             // Obsidian exposes pdf.js as a global when PDF viewer is used
             // Trigger a dummy operation to load it
-            return (window as AttachmentDynamic).pdfjsLib || null;
+            return (window as WindowWithPdfJs).pdfjsLib || null;
         } catch {
             return null;
         }
@@ -508,7 +587,7 @@ export class AttachmentManager {
      * Check if there are any attachments.
      * @returns {boolean}
      */
-    hasAttachments() {
+    hasAttachments(): boolean {
         return this.attachments.length > 0;
     }
 
@@ -520,18 +599,18 @@ export class AttachmentManager {
      * @param {string} userText - The user's text message
      * @returns {{ content: string|Array, displayText: string }}
      */
-    buildMessageContent(userText: string) {
-        const textAttachments = this.attachments.filter((a: AttachmentDynamic) => a.type === 'text' || a.type === 'pdf');
-        const imageAttachments = this.attachments.filter((a: AttachmentDynamic) => a.type === 'image');
+    buildMessageContent(userText: string): BuiltMessageContent {
+        const textAttachments = this.attachments.filter((a) => a.type === 'text' || a.type === 'pdf');
+        const imageAttachments = this.attachments.filter((a) => a.type === 'image');
 
         // Build text context from text/PDF attachments
-        let contextParts = [];
+        let contextParts: string[] = [];
         for (const att of textAttachments) {
             contextParts.push(`📎 ${t('attach.attachment_label')}: ${att.name}\n\`\`\`\n${att.content}\n\`\`\``);
         }
 
         // Display text (what user sees in chat)
-        const chipLabels = this.attachments.map((a: AttachmentDynamic) => {
+        const chipLabels = this.attachments.map((a) => {
             const icon = a.type === 'image' ? '🖼️' : a.type === 'pdf' ? '📕' : '📄';
             return `${icon} ${a.name}`;
         });
@@ -548,7 +627,7 @@ export class AttachmentManager {
         }
 
         // Has images → build content blocks array (multimodal)
-        const contentBlocks = [];
+        const contentBlocks: MessageContentBlock[] = [];
 
         // Text context first
         if (contextParts.length > 0) {
@@ -574,7 +653,7 @@ export class AttachmentManager {
     /**
      * Clear all attachments (call after send).
      */
-    clear() {
+    clear(): void {
         this.attachments = [];
         this._renderChips();
     }
@@ -582,7 +661,7 @@ export class AttachmentManager {
     /**
      * Cleanup listeners and DOM.
      */
-    destroy() {
+    destroy(): void {
         // Drag & drop — registered on document with capture: true
         document.removeEventListener('dragenter', this._onDragEnter, true);
         document.removeEventListener('dragover', this._onDragOver, true);

@@ -186,7 +186,15 @@ test.serial('_updateSuggestions: 8 keystrokes inside one @mention scan the vault
         const vault = makeFakeVault(files, []);
         const textarea = makeFakeTextarea();
         const plugin = { app: { vault } };
-        const mention = new MentionAutocomplete(textarea, plugin, {});
+        // Atrapy (FakeTextarea/plugin) są strukturalnie zbieżne z HTMLTextAreaElement/
+        // MentionAutocompletePlugin, ale nie identyczne (ten drugi typ jest zresztą lokalny,
+        // nieeksportowany) — rzut przez `unknown` na typ parametru konstruktora zamiast
+        // duplikowania kontraktu w teście.
+        const mention = new MentionAutocomplete(
+            textarea as unknown as ConstructorParameters<typeof MentionAutocomplete>[0],
+            plugin as unknown as ConstructorParameters<typeof MentionAutocomplete>[1],
+            {}
+        );
 
         // Simulate typing "@projekt" one character at a time — 8 input events.
         const chars = '@projekt'.split('');
@@ -216,7 +224,15 @@ test.serial('vault "create" event invalidates the cache — next query re-scans'
         const vault = makeFakeVault(files, []);
         const textarea = makeFakeTextarea();
         const plugin = { app: { vault } };
-        const mention = new MentionAutocomplete(textarea, plugin, {});
+        // Atrapy (FakeTextarea/plugin) są strukturalnie zbieżne z HTMLTextAreaElement/
+        // MentionAutocompletePlugin, ale nie identyczne (ten drugi typ jest zresztą lokalny,
+        // nieeksportowany) — rzut przez `unknown` na typ parametru konstruktora zamiast
+        // duplikowania kontraktu w teście.
+        const mention = new MentionAutocomplete(
+            textarea as unknown as ConstructorParameters<typeof MentionAutocomplete>[0],
+            plugin as unknown as ConstructorParameters<typeof MentionAutocomplete>[1],
+            {}
+        );
 
         textarea.value = '@a';
         textarea.selectionStart = 2;
@@ -245,7 +261,15 @@ test.serial('destroy() unregisters vault listeners and cancels the pending debou
         const vault = makeFakeVault(files, []);
         const textarea = makeFakeTextarea();
         const plugin = { app: { vault } };
-        const mention = new MentionAutocomplete(textarea, plugin, {});
+        // Atrapy (FakeTextarea/plugin) są strukturalnie zbieżne z HTMLTextAreaElement/
+        // MentionAutocompletePlugin, ale nie identyczne (ten drugi typ jest zresztą lokalny,
+        // nieeksportowany) — rzut przez `unknown` na typ parametru konstruktora zamiast
+        // duplikowania kontraktu w teście.
+        const mention = new MentionAutocomplete(
+            textarea as unknown as ConstructorParameters<typeof MentionAutocomplete>[0],
+            plugin as unknown as ConstructorParameters<typeof MentionAutocomplete>[1],
+            {}
+        );
 
         t.deepEqual(vault.listenerCounts, { create: 1, delete: 1, rename: 1 });
 
@@ -267,7 +291,15 @@ test.serial('mouseover on an already-selected row skips the dropdown rebuild', a
         const vault = makeFakeVault(files, []);
         const textarea = makeFakeTextarea();
         const plugin = { app: { vault } };
-        const mention = new MentionAutocomplete(textarea, plugin, {});
+        // Atrapy (FakeTextarea/plugin) są strukturalnie zbieżne z HTMLTextAreaElement/
+        // MentionAutocompletePlugin, ale nie identyczne (ten drugi typ jest zresztą lokalny,
+        // nieeksportowany) — rzut przez `unknown` na typ parametru konstruktora zamiast
+        // duplikowania kontraktu w teście.
+        const mention = new MentionAutocomplete(
+            textarea as unknown as ConstructorParameters<typeof MentionAutocomplete>[0],
+            plugin as unknown as ConstructorParameters<typeof MentionAutocomplete>[1],
+            {}
+        );
 
         textarea.value = '@';
         textarea.selectionStart = 1;
@@ -275,7 +307,9 @@ test.serial('mouseover on an already-selected row skips the dropdown rebuild', a
         await sleep(120);
         t.true(mention.items.length >= 2, 'trzeba co najmniej 2 wierszy, żeby test cokolwiek sprawdzał');
 
-        const dropdown = mention.dropdown as FakeEl;
+        // `mention.dropdown` jest teraz realnie `HTMLElement | null` w źródle; w tym gołym-Node
+        // teście to zawsze nasza atrapa `FakeEl` (patrz `withFakeDocument`/`_createDetachedDiv`).
+        const dropdown = mention.dropdown as unknown as FakeEl;
         const rowsBefore = dropdown.emptyCalls;
 
         // Row 0 is already selectedIndex (0) — three "mouseover" events landing on it
@@ -307,7 +341,15 @@ test.serial('Enter picks the suggestion for the LATEST typed query, not a stale 
         const vault = makeFakeVault(files, []);
         const textarea = makeFakeTextarea();
         const plugin = { app: { vault } };
-        const mention = new MentionAutocomplete(textarea, plugin, {});
+        // Atrapy (FakeTextarea/plugin) są strukturalnie zbieżne z HTMLTextAreaElement/
+        // MentionAutocompletePlugin, ale nie identyczne (ten drugi typ jest zresztą lokalny,
+        // nieeksportowany) — rzut przez `unknown` na typ parametru konstruktora zamiast
+        // duplikowania kontraktu w teście.
+        const mention = new MentionAutocomplete(
+            textarea as unknown as ConstructorParameters<typeof MentionAutocomplete>[0],
+            plugin as unknown as ConstructorParameters<typeof MentionAutocomplete>[1],
+            {}
+        );
 
         // Type the whole "@dailyp" query keystroke by keystroke, WITHOUT ever awaiting —
         // the 50ms debounce genuinely cannot have fired by the time we reach Enter below.
@@ -334,7 +376,15 @@ test.serial('ArrowDown/ArrowUp also flush a pending debounce before navigating',
         const vault = makeFakeVault(files, []);
         const textarea = makeFakeTextarea();
         const plugin = { app: { vault } };
-        const mention = new MentionAutocomplete(textarea, plugin, {});
+        // Atrapy (FakeTextarea/plugin) są strukturalnie zbieżne z HTMLTextAreaElement/
+        // MentionAutocompletePlugin, ale nie identyczne (ten drugi typ jest zresztą lokalny,
+        // nieeksportowany) — rzut przez `unknown` na typ parametru konstruktora zamiast
+        // duplikowania kontraktu w teście.
+        const mention = new MentionAutocomplete(
+            textarea as unknown as ConstructorParameters<typeof MentionAutocomplete>[0],
+            plugin as unknown as ConstructorParameters<typeof MentionAutocomplete>[1],
+            {}
+        );
 
         for (const typed of ['@da', '@dailyp']) {
             textarea.value = typed;
@@ -359,7 +409,15 @@ test.serial('Enter right after a bare "@" (before the debounce fires) picks the 
         const vault = makeFakeVault(files, []);
         const textarea = makeFakeTextarea();
         const plugin = { app: { vault } };
-        const mention = new MentionAutocomplete(textarea, plugin, {});
+        // Atrapy (FakeTextarea/plugin) są strukturalnie zbieżne z HTMLTextAreaElement/
+        // MentionAutocompletePlugin, ale nie identyczne (ten drugi typ jest zresztą lokalny,
+        // nieeksportowany) — rzut przez `unknown` na typ parametru konstruktora zamiast
+        // duplikowania kontraktu w teście.
+        const mention = new MentionAutocomplete(
+            textarea as unknown as ConstructorParameters<typeof MentionAutocomplete>[0],
+            plugin as unknown as ConstructorParameters<typeof MentionAutocomplete>[1],
+            {}
+        );
 
         textarea.value = '@';
         textarea.selectionStart = 1;
@@ -384,7 +442,15 @@ test.serial('regular character keydowns do NOT flush a pending debounce', async 
         const vault = makeFakeVault(files, []);
         const textarea = makeFakeTextarea();
         const plugin = { app: { vault } };
-        const mention = new MentionAutocomplete(textarea, plugin, {});
+        // Atrapy (FakeTextarea/plugin) są strukturalnie zbieżne z HTMLTextAreaElement/
+        // MentionAutocompletePlugin, ale nie identyczne (ten drugi typ jest zresztą lokalny,
+        // nieeksportowany) — rzut przez `unknown` na typ parametru konstruktora zamiast
+        // duplikowania kontraktu w teście.
+        const mention = new MentionAutocomplete(
+            textarea as unknown as ConstructorParameters<typeof MentionAutocomplete>[0],
+            plugin as unknown as ConstructorParameters<typeof MentionAutocomplete>[1],
+            {}
+        );
 
         textarea.value = '@p';
         textarea.selectionStart = 2;
@@ -413,7 +479,15 @@ test.serial('close() cancels a pending debounce and reopening does not flash the
         const vault = makeFakeVault(files, []);
         const textarea = makeFakeTextarea();
         const plugin = { app: { vault } };
-        const mention = new MentionAutocomplete(textarea, plugin, {});
+        // Atrapy (FakeTextarea/plugin) są strukturalnie zbieżne z HTMLTextAreaElement/
+        // MentionAutocompletePlugin, ale nie identyczne (ten drugi typ jest zresztą lokalny,
+        // nieeksportowany) — rzut przez `unknown` na typ parametru konstruktora zamiast
+        // duplikowania kontraktu w teście.
+        const mention = new MentionAutocomplete(
+            textarea as unknown as ConstructorParameters<typeof MentionAutocomplete>[0],
+            plugin as unknown as ConstructorParameters<typeof MentionAutocomplete>[1],
+            {}
+        );
 
         textarea.value = '@a';
         textarea.selectionStart = 2;
@@ -436,7 +510,9 @@ test.serial('close() cancels a pending debounce and reopening does not flash the
         function collectText(el: FakeEl): string {
             return (el.textContent || '') + el.children.map(collectText).join('');
         }
-        const dropdown = mention.dropdown as FakeEl;
+        // `mention.dropdown` jest teraz realnie `HTMLElement | null` w źródle; w tym gołym-Node
+        // teście to zawsze nasza atrapa `FakeEl` (patrz `withFakeDocument`/`_createDetachedDiv`).
+        const dropdown = mention.dropdown as unknown as FakeEl;
         t.false(collectText(dropdown).includes('alpha'), 'stale "alpha" row must not be visible right after reopening');
 
         mention.destroy();
@@ -449,7 +525,15 @@ test.serial('a leaked instance (textarea detached from DOM) self-destroys on the
         const vault = makeFakeVault(files, []);
         const textarea = makeFakeTextarea();
         const plugin = { app: { vault } };
-        const mention = new MentionAutocomplete(textarea, plugin, {});
+        // Atrapy (FakeTextarea/plugin) są strukturalnie zbieżne z HTMLTextAreaElement/
+        // MentionAutocompletePlugin, ale nie identyczne (ten drugi typ jest zresztą lokalny,
+        // nieeksportowany) — rzut przez `unknown` na typ parametru konstruktora zamiast
+        // duplikowania kontraktu w teście.
+        const mention = new MentionAutocomplete(
+            textarea as unknown as ConstructorParameters<typeof MentionAutocomplete>[0],
+            plugin as unknown as ConstructorParameters<typeof MentionAutocomplete>[1],
+            {}
+        );
         t.truthy(mention, 'sanity: the orphan instance was constructed (it tears itself down below, no explicit destroy() call)');
 
         t.deepEqual(vault.listenerCounts, { create: 1, delete: 1, rename: 1 });
@@ -475,7 +559,15 @@ test.serial('a normal (still-attached) instance does NOT self-destroy on vault e
         const vault = makeFakeVault(files, []);
         const textarea = makeFakeTextarea(); // isConnected: true by default
         const plugin = { app: { vault } };
-        const mention = new MentionAutocomplete(textarea, plugin, {});
+        // Atrapy (FakeTextarea/plugin) są strukturalnie zbieżne z HTMLTextAreaElement/
+        // MentionAutocompletePlugin, ale nie identyczne (ten drugi typ jest zresztą lokalny,
+        // nieeksportowany) — rzut przez `unknown` na typ parametru konstruktora zamiast
+        // duplikowania kontraktu w teście.
+        const mention = new MentionAutocomplete(
+            textarea as unknown as ConstructorParameters<typeof MentionAutocomplete>[0],
+            plugin as unknown as ConstructorParameters<typeof MentionAutocomplete>[1],
+            {}
+        );
 
         vault._trigger('create');
 

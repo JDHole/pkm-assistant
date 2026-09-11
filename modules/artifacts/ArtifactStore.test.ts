@@ -340,7 +340,7 @@ test('archive moves closed artifacts older than the type retention window', asyn
     const { id } = await store.create('plan', { tytul: 'Stary', agent: 'Jaskier' });
     // Zamknij i cofnij zaktualizowano o 40 dni (typ plan: sprzatanie 30).
     await store.update(id, [{ op: 'set_field', key: 'status', value: 'zamkniety' }]);
-    await store.app.fileManager.processFrontMatter(await store._findFileById(id), (fm: ArtifactFrontmatter) => { fm.zaktualizowano = '2026-06-01'; });
+    await store.app.fileManager.processFrontMatter((await store._findFileById(id))!, (fm: ArtifactFrontmatter) => { fm.zaktualizowano = '2026-06-01'; });
 
     const moved = await store.archive();
     t.is(moved, 1);
@@ -509,7 +509,7 @@ test('`metadataCache.changed` (edycja frontmattera z zewnątrz store\'a) odświe
     t.is(store.list({ status: 'zamkniety' }).length, 0);
 
     const file = await store._findFileById(id);
-    await store.app.fileManager.processFrontMatter(file, (fm: ArtifactFrontmatter) => { fm.status = 'zamkniety'; });
+    await store.app.fileManager.processFrontMatter(file!, (fm: ArtifactFrontmatter) => { fm.status = 'zamkniety'; });
 
     t.is(store.list({ status: 'zamkniety' }).length, 1, 'zmiana zrobiona mimo store powinna dotrzeć do rejestru przez event `changed`');
 });

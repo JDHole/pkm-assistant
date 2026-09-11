@@ -127,6 +127,7 @@ export { normalizeError, MAX_ERROR_MESSAGE_LENGTH, SECRET_BEARING_FIELDS } from 
 // JEDNA reguła „co jest porażką narzędzia" (czytają ją tools, chat
 // i sub-agents - stąd `core/`, nie barrel narzędzi).
 export { toolResultStatus, shouldLinkWrittenFile } from './utils/toolResultStatus.js';
+export type { ToolResultStatus } from './utils/toolResultStatus.js';
 // Adapterowy mkdir -p (1 kopia zamiast 3 wariantów).
 export { ensureAdapterFolder } from './utils/vaultFs.js';
 // „Czy plik jest?" w trzech stanach - `exists()` kłamie na dyskach sieciowych.

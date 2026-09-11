@@ -2,8 +2,53 @@
 import { UiIcons, setSvg } from '../crystal-soul/index.js';
 import { IconGenerator } from '../crystal-soul/index.js';
 import { t } from '../../core/i18n/index.js';
-// TS-any: payloady narzędzi pochodzą z rozszerzalnych serwerów MCP i zapisów sesji.
-type ToolDynamic = any;
+import type { UiIcon } from '../crystal-soul/index.js';
+
+/** Karta wywołania narzędzia — kształt, który realnie czytają render-funkcje niżej. */
+interface ToolCallData {
+    name: string;
+    status?: string;
+    input?: unknown;
+    output?: unknown;
+    error?: unknown;
+}
+
+/** Pojedynczy wpis wyniku `search`/`vault_search`/`memory_sessions`/`memory_summaries`. */
+interface ToolSearchResultItem {
+    path?: string;
+    score?: number;
+    snippet?: string;
+}
+
+/** Pojedynczy wpis pliku z `list`/`vault_list` — sam string albo obiekt z metadanymi. */
+type ToolFileEntry = string | { path?: string; name?: string; size?: string | number };
+
+/** Pojedynczy wpis wyniku `web_search`. */
+interface ToolWebResultItem {
+    title?: string;
+    url?: string;
+    snippet?: string;
+    description?: string;
+}
+
+/** Pojedynczy wpis katalogu z `skill_list` — sam string albo obiekt z nazwą/sluggiem. */
+type ToolSkillEntry = string | { name?: string; slug?: string };
+
+/** Pojedyncza wiadomość z `kom_list`. */
+interface ToolKomMessageItem {
+    data?: string;
+    od?: string;
+    temat?: string;
+    przeczytana?: boolean;
+}
+
+/** Pojedynczy task z `chat_todo`/`todo`. */
+interface ToolTodoItem {
+    done?: boolean;
+    checked?: boolean;
+    text?: string;
+    content?: string;
+}
 
 // Node-safe DOM shim: `ToolCallDisplay.ts` nie importuje `obsidian` i jego
 // testy (`ToolCallDisplay.truncate.test.ts`, `ToolCallDisplay.searchCase.test.ts`) go wołają
@@ -16,8 +61,8 @@ type ToolDynamic = any;
 // `isDocumentType` reguły (patrzy na STRUKTURĘ typu) go nie rozpoznał. W prawdziwym Obsidianie
 // to dokładnie ten sam `document.createElement`, którego wołały `createDiv`/`createEl`/`createSpan`
 // pod maską — zero zmiany zachowania.
-function _createDetachedEl(tag: string): ToolDynamic {
-    return (document as unknown as { createElement(tag: string): ToolDynamic }).createElement(tag);
+function _createDetachedEl(tag: string): HTMLElement {
+    return (document as unknown as { createElement(tag: string): HTMLElement }).createElement(tag);
 }
 
 /**
@@ -25,9 +70,14 @@ function _createDetachedEl(tag: string): ToolDynamic {
  * `info.label` is a getter that calls t() at access time (respects current locale).
  * Exported for reuse in BackstageViews and SubAgentBlock.
  */
-function _toolEntry(iconFn: ToolDynamic, toolName: string) {
+function _toolEntry(iconFn: UiIcon, toolName: string) {
     return { icon: iconFn, get label() { return t('tool.' + toolName); } };
 }
+
+/** Kształt wpisu katalogu `TOOL_INFO` — ikona (leniwie wołana) + i18n etykieta-getter.
+ *  Eksportowany: `SubAgentBlock.ts` (ten sam moduł, import bezpośredni z pliku) go potrzebuje
+ *  do otypowania odczytów `TOOL_INFO[...]` katalogu narzędzi sub-agenta. */
+export type ToolInfoEntry = ReturnType<typeof _toolEntry>;
 
 export const TOOL_INFO = {
     // Prymitywy (read/list ze scope vault|memory):
@@ -101,10 +151,46 @@ export function getToolCallLabel(toolName: string) {
  * @returns {string} SVG markup
  */
 export function getToolIcon(toolName: string, color = 'currentColor', size = 14) {
-    const info = (TOOL_INFO as Record<string, ToolDynamic>)[toolName];
+    const info = (TOOL_INFO as Record<string, ToolInfoEntry>)[toolName];
     if (info?.icon) return info.icon();
     // Fallback to IconGenerator for unknown tools
     return IconGenerator.generate(toolName, 'mixed', { size, color });
+}
+
+/**
+ * Kształt payloadu `input` narzędzia — pola, które realnie czytają formatToolInput/-Detail
+ * niżej. Narzędzia z zewnętrznych serwerów MCP mogą dosyłać dowolne inne pola (stąd sygnatura
+ * indeksowa) — kod czyta je generycznie w gałęziach `default`.
+ */
+interface ToolInputPayload {
+    query?: string;
+    url?: string;
+    path?: string;
+    mode?: string;
+    folder?: string;
+    recursive?: boolean;
+    task?: string;
+    description?: string;
+    server?: string;
+    skill_name?: string;
+    name?: string;
+    to?: string;
+    to_agent?: string;
+    target?: string;
+    agent?: string;
+    id?: string;
+    fact?: string;
+    action?: string;
+    question?: string;
+    content?: string;
+    limit?: number;
+    section?: string;
+    old_fact?: string;
+    variables?: Record<string, unknown>;
+    message?: string;
+    reason?: string;
+    options?: string[];
+    [key: string]: unknown;
 }
 
 /**
@@ -113,9 +199,11 @@ export function getToolIcon(toolName: string, color = 'currentColor', size = 14)
  * @param {*} input
  * @returns {string}
  */
-function formatToolInput(toolName: string, input: ToolDynamic) {
+function formatToolInput(toolName: string, input: unknown) {
     try {
-        const data = typeof input === 'string' ? JSON.parse(input) : (input || {});
+        // TS-boundary: input narzędzia to JSON zbudowany przez wołający kod (model/UI) — bez
+        // walidacji schematem, dokładnie jak w wersji `any` sprzed tej fali.
+        const data = (typeof input === 'string' ? JSON.parse(input) : (input || {})) as ToolInputPayload;
         switch (toolName) {
             case 'search':
             case 'vault_search':
@@ -182,9 +270,10 @@ function formatToolInput(toolName: string, input: ToolDynamic) {
  * @param {*} input
  * @returns {string}
  */
-function formatToolInputDetail(toolName: string, input: ToolDynamic) {
+function formatToolInputDetail(toolName: string, input: unknown) {
     try {
-        const data = typeof input === 'string' ? JSON.parse(input) : (input || {});
+        // TS-boundary: jak w formatToolInput — JSON od wołającego, bez walidacji schematem.
+        const data = (typeof input === 'string' ? JSON.parse(input) : (input || {})) as ToolInputPayload;
         switch (toolName) {
             case 'read':
             case 'vault_read':
@@ -266,14 +355,61 @@ function formatToolInputDetail(toolName: string, input: ToolDynamic) {
 }
 
 /**
+ * Kształt payloadu `output` narzędzia — pola, które realnie czytają formatToolOutput /
+ * _formatGenericOutput niżej. Jak przy input: sygnatura indeksowa, bo gałęzie `default`
+ * czytają pola generycznie (dowolny serwer MCP, dowolny kształt).
+ */
+interface ToolOutputPayload {
+    success?: boolean;
+    error?: string;
+    message?: string;
+    path?: string;
+    results?: Array<ToolSearchResultItem & ToolWebResultItem>;
+    count?: number;
+    totalCount?: number;
+    searchType?: string;
+    content?: string;
+    files?: ToolFileEntry[];
+    entries?: ToolFileEntry[];
+    already_existed?: boolean;
+    title?: string;
+    charCount?: number | string;
+    warning?: string;
+    skills?: ToolSkillEntry[];
+    result?: string;
+    output?: string;
+    delegation?: boolean;
+    target?: string;
+    reason?: string;
+    comments?: string;
+    approved?: boolean;
+    cancelled?: boolean;
+    type?: string;
+    userComments?: string;
+    answer?: string;
+    response?: string;
+    auto?: boolean;
+    messages?: ToolKomMessageItem[];
+    unread?: number;
+    od?: string;
+    tresc?: string;
+    items?: ToolTodoItem[];
+    action?: string;
+    question?: string;
+    [key: string]: unknown;
+}
+
+/**
  * Format tool output in a human-readable way — for body.
  * Returns { summary: string, detail: string|null }.
  * summary = short one-liner, detail = full data (for expand).
  */
-function formatToolOutput(toolName: string, output: ToolDynamic) {
+function formatToolOutput(toolName: string, output: unknown) {
     if (!output) return { summary: '', detail: null };
     try {
-        const data: ToolDynamic = typeof output === 'string' ? JSON.parse(output) : output;
+        // TS-boundary: wynik narzędzia to JSON zwrócony przez serwer MCP / narzędzie lokalne —
+        // bez walidacji schematem, dokładnie jak w wersji `any` sprzed tej fali.
+        const data = (typeof output === 'string' ? JSON.parse(output) : output) as ToolOutputPayload;
 
         // Handle arrays (some tools return raw arrays)
         if (Array.isArray(data)) {
@@ -291,7 +427,7 @@ function formatToolOutput(toolName: string, output: ToolDynamic) {
                 const results = data.results || [];
                 const count = data.count || data.totalCount || results.length;
                 const type = data.searchType || '';
-                const paths = results.map((r: ToolDynamic, i: number) => {
+                const paths = results.map((r, i) => {
                     let line = `${i + 1}. ${r.path || _shortPath(r.path)}`;
                     if (r.score != null) line += `  [${(r.score * 100).toFixed(0)}%]`;
                     if (r.snippet) line += `\n   ${_truncate(r.snippet, 200)}`;
@@ -324,9 +460,12 @@ function formatToolOutput(toolName: string, output: ToolDynamic) {
             case 'vault_list': {
                 const files = data.files || data.entries || [];
                 const count = files.length;
-                const list = files.map((f: ToolDynamic, i: number) => {
+                const list = files.map((f, i) => {
                     const path = typeof f === 'string' ? f : (f.path || f.name || '');
-                    const size = f.size ? `  (${f.size})` : '';
+                    // TS-boundary: `.size` czytany niezależnie od kształtu (string vs obiekt) —
+                    // jak w wersji `any` sprzed tej fali; rzut lokalny zamiast nowej zmiennej,
+                    // żeby bundle zostały bajt-w-bajt identyczne (asercje `as` są wycinane).
+                    const size = (f as { size?: string | number }).size ? `  (${(f as { size?: string | number }).size})` : '';
                     return `${i + 1}. ${path}${size}`;
                 }).join('\n');
                 return {
@@ -350,7 +489,7 @@ function formatToolOutput(toolName: string, output: ToolDynamic) {
                 };
             case 'web_search': {
                 const results = data.results || [];
-                const list = results.map((r: ToolDynamic, i: number) => {
+                const list = results.map((r, i) => {
                     let line = `${i + 1}. ${r.title || '?'}`;
                     if (r.url) line += `\n   ${r.url}`;
                     if (r.snippet || r.description) line += `\n   ${_truncate(r.snippet || r.description, 200)}`;
@@ -381,7 +520,7 @@ function formatToolOutput(toolName: string, output: ToolDynamic) {
             case 'skill_list': {
                 const skills = data.skills || data || [];
                 const list = Array.isArray(skills)
-                    ? skills.map((s: ToolDynamic, i: number) => `${i + 1}. ${typeof s === 'string' ? s : (s.name || s.slug || '?')}`).join('\n')
+                    ? skills.map((s, i) => `${i + 1}. ${typeof s === 'string' ? s : (s.name || s.slug || '?')}`).join('\n')
                     : null;
                 return {
                     summary: t('tool.out.skills', { count: Array.isArray(skills) ? skills.length : '?' }),
@@ -402,7 +541,7 @@ function formatToolOutput(toolName: string, output: ToolDynamic) {
             case 'kom_list':
                 return {
                     summary: t('tool.out.kom_list', { count: data.count ?? 0, unread: data.unread ?? 0 }),
-                    detail: (data.messages || []).map((m: ToolDynamic) => `${m.data} · ${m.od} — ${m.temat}${m.przeczytana ? '' : ' •'}`).join('\n') || null
+                    detail: (data.messages || []).map((m) => `${m.data} · ${m.od} — ${m.temat}${m.przeczytana ? '' : ' •'}`).join('\n') || null
                 };
             case 'kom_read':
                 return {
@@ -417,7 +556,7 @@ function formatToolOutput(toolName: string, output: ToolDynamic) {
             case 'todo':
             case 'chat_todo': {
                 if (data.items && Array.isArray(data.items)) {
-                    const list = data.items.map((item: ToolDynamic) => `${(item.done || item.checked) ? '  ✓' : '  ○'} ${item.text || item.content || ''}`).join('\n');
+                    const list = data.items.map((item) => `${(item.done || item.checked) ? '  ✓' : '  ○'} ${item.text || item.content || ''}`).join('\n');
                     return { summary: t('tool.out.tasks', { count: data.items.length }), detail: list };
                 }
                 return { summary: data.action || t('tool.out.task_list'), detail: null };
@@ -464,7 +603,7 @@ function formatToolOutput(toolName: string, output: ToolDynamic) {
  * Smart formatter for generic tool outputs (MCP server tools, unknown tools).
  * Detects common patterns: success/error, counts, text content, objects/arrays.
  */
-function _formatGenericOutput(data: ToolDynamic) {
+function _formatGenericOutput(data: ToolOutputPayload) {
     const isSuccess = data.success !== undefined ? data.success !== false : null;
     const error = data.error;
 
@@ -537,14 +676,14 @@ function _friendlyKey(key: string) {
 }
 
 /** Shorten path: keep last 2 segments */
-function _shortPath(p: string) {
+function _shortPath(p: string | undefined) {
     if (!p) return '';
     const parts = p.replace(/\\/g, '/').split('/');
     return parts.length > 2 ? '…/' + parts.slice(-2).join('/') : p;
 }
 
 /** Truncate string */
-function _truncate(s: string, max: number) {
+function _truncate(s: string | undefined, max: number) {
     if (!s) return '';
     return s.length > max ? s.slice(0, max - 3) + '...' : s;
 }
@@ -561,11 +700,11 @@ function _truncate(s: string, max: number) {
  * @param {Object} toolCall - {name, input, output, status, error?}
  * @returns {HTMLElement}
  */
-export function createToolCallDisplay(toolCall: ToolDynamic) {
+export function createToolCallDisplay(toolCall: ToolCallData) {
     const row = _createDetachedEl('div');
     row.className = 'cs-action-row';
 
-    const info = (TOOL_INFO as Record<string, ToolDynamic>)[toolCall.name] || { icon: null };
+    const info = (TOOL_INFO as Record<string, ToolInfoEntry>)[toolCall.name] || { icon: null };
     const label = getToolCallLabel(toolCall.name);
     const status = toolCall.status || 'pending';
 
@@ -630,8 +769,8 @@ export function createToolCallDisplay(toolCall: ToolDynamic) {
     return row;
 }
 
-export function createCompactToolChip(toolCall: ToolDynamic) {
-    const chip = _createDetachedEl('button');
+export function createCompactToolChip(toolCall: ToolCallData) {
+    const chip = _createDetachedEl('button') as HTMLButtonElement;
     chip.type = 'button';
     chip.className = `cs-tool-chip cs-tool-chip--${toolCall.status || 'pending'}`;
 

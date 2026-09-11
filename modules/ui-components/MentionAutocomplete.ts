@@ -1,8 +1,50 @@
 import { log } from '../../core/utils/Logger.js';
 import { UiIcons, setSvg } from '../crystal-soul/index.js';
 import { t } from '../../core/i18n/index.js';
-// TS-any: lista i plugin są dynamicznym kontraktem chat/Obsidian.
-type MentionDynamic = any;
+import type { PluginApi } from '../../core/index.js';
+import type { App, TFile, TFolder, EventRef } from 'obsidian';
+
+/** Kontrakt pluginu widziany przez ten moduł — `app` zawężony do realnego Obsidian `App`
+ *  (moduł realnie woła `app.vault.*`, których minimalny `AppLike` z `PluginApi` nie modeluje).
+ *  Intersection zamiast `extends PluginApi { app: App }`: `DataAdapter` (prawdziwy typ) nie ma
+ *  sygnatury indeksowej `AppLike.vault.adapter`, a `extends` na interfejsie to sprawdza.
+ *  `Omit<PluginApi,'app'>` też nie działa — `PluginApi` ma `[key:string]: unknown`, więc
+ *  `keyof PluginApi` zwija się do `string` i `Omit`/`Pick` gubią konkretne sygnatury metod. */
+type MentionAutocompletePlugin = PluginApi & { app: App };
+
+interface MentionAutocompleteOptions {
+    onChange?: (mentions: MentionChip[]) => void;
+}
+
+/** Chip dodany nad polem czatu (`getMentions()`). */
+interface MentionChip {
+    type: string;
+    name: string;
+    path: string;
+    icon: string;
+}
+
+/** Wiersz podpowiedzi w dropdownie (`this.items`). */
+interface MentionSuggestionItem {
+    type: 'note' | 'folder';
+    name: string;
+    path: string;
+    icon: string;
+}
+
+/** Wpis cache'u notatek — patrz `_ensureCaches`. */
+interface NoteCacheEntry {
+    file: TFile;
+    basenameLower: string;
+    pathLower: string;
+}
+
+/** Wpis cache'u folderów — patrz `_ensureCaches`. */
+interface FolderCacheEntry {
+    folder: TFolder;
+    nameLower: string;
+    pathLower: string;
+}
 
 // Node-safe DOM/timer shims: ten plik CELOWO nie importuje `obsidian`
 // (dokumentacja modułu: „Prawie ZERO testów… jedyny plik z pokryciem" — MentionAutocomplete.test.ts
@@ -20,8 +62,8 @@ const _nodeSafeClearTimeout: typeof clearTimeout = clearTimeout;
 /** `document` jest LENIWY (wołany dopiero tu, nie przy imporcie) — testy podstawiają
  *  `globalThis.document` dopiero WEWNĄTRZ `withFakeDocument`, więc eager-odczyt na szczycie
  *  modułu wywaliłby import PRZED podstawieniem atrapy. */
-function _createDetachedDiv(): MentionDynamic {
-    return (document as unknown as { createElement(tag: string): MentionDynamic }).createElement('div');
+function _createDetachedDiv(): HTMLElement {
+    return (document as unknown as { createElement(tag: string): HTMLElement }).createElement('div');
 }
 
 /**
@@ -41,8 +83,28 @@ function _createDetachedDiv(): MentionDynamic {
  *   // autocomplete.destroy() → cleanup
  */
 export class MentionAutocomplete {
-    [key: string]: MentionDynamic;
-    constructor(textarea: MentionDynamic, plugin: MentionDynamic, options: MentionDynamic = {}) {
+    declare textarea: HTMLTextAreaElement;
+    declare plugin: MentionAutocompletePlugin;
+    declare onChange: (mentions: MentionChip[]) => void;
+    declare dropdown: HTMLElement | null;
+    declare isOpen: boolean;
+    declare items: MentionSuggestionItem[];
+    declare selectedIndex: number;
+    declare triggerStart: number;
+    declare currentQuery: string;
+    declare currentCategory: 'folder' | null;
+    declare mentions: MentionChip[];
+    declare _notesCache: NoteCacheEntry[] | null;
+    declare _foldersCache: FolderCacheEntry[] | null;
+    declare _vaultCacheRefs: EventRef[];
+    declare _invalidateVaultCache: () => void;
+    declare _suggestTimer: ReturnType<typeof setTimeout> | null;
+    declare _suggestDebounceMs: number;
+    declare _onInput: () => void;
+    declare _onKeydown: (e: KeyboardEvent) => void;
+    declare _onBlur: () => void;
+
+    constructor(textarea: HTMLTextAreaElement, plugin: MentionAutocompletePlugin, options: MentionAutocompleteOptions = {}) {
         this.textarea = textarea;
         this.plugin = plugin;
         this.onChange = options.onChange || (() => {});
@@ -119,8 +181,8 @@ export class MentionAutocomplete {
         const vault = this.plugin.app.vault;
         if (this._notesCache === null) {
             this._notesCache = vault.getMarkdownFiles()
-                .filter((f: MentionDynamic) => !f.path.startsWith('.')) // skip hidden
-                .map((f: MentionDynamic) => ({
+                .filter((f) => !f.path.startsWith('.')) // skip hidden
+                .map((f) => ({
                     file: f,
                     basenameLower: f.basename.toLowerCase(),
                     pathLower: f.path.toLowerCase(),
@@ -129,9 +191,11 @@ export class MentionAutocomplete {
         if (this._foldersCache === null) {
             const allFiles = vault.getAllLoadedFiles();
             this._foldersCache = allFiles
-                .filter((f: MentionDynamic) => f.children !== undefined) // TFolder has children
-                .filter((f: MentionDynamic) => !f.path.startsWith('.')) // skip hidden
-                .map((f: MentionDynamic) => ({
+                // TS-boundary: TFolder ma `children`, TFile nie — to samo zawężenie po strukturze,
+                // które kod robił jako `any`; `f is TFolder` tylko nazywa istniejący warunek.
+                .filter((f): f is TFolder => (f as TFolder).children !== undefined) // TFolder has children
+                .filter((f) => !f.path.startsWith('.')) // skip hidden
+                .map((f) => ({
                     folder: f,
                     nameLower: f.name.toLowerCase(),
                     pathLower: f.path.toLowerCase(),
@@ -145,7 +209,9 @@ export class MentionAutocomplete {
 
     _handleInput() {
         const value = this.textarea.value;
-        const cursor = this.textarea.selectionStart;
+        // `selectionStart` jest `number | null` w typach DOM (dzielony z inputami bez
+        // selekcji), ale dla <textarea> zawsze zwraca liczbę — gwarancja z kształtu pola.
+        const cursor = this.textarea.selectionStart!;
         const before = value.slice(0, cursor);
 
         // Match @folder: or plain @
@@ -248,16 +314,17 @@ export class MentionAutocomplete {
 
         if (this.currentCategory === 'folder') {
             // Search folders (cached list, lowercase pre-computed)
-            const folders = this._foldersCache
-                .filter((entry: MentionDynamic) => entry.pathLower.includes(query))
+            // `_ensureCaches()` powyżej gwarantuje niepustą (nie-null) wartość obu cache'y.
+            const folders = this._foldersCache!
+                .filter((entry) => entry.pathLower.includes(query))
                 .slice(0, 10)
-                .map((entry: MentionDynamic) => ({ type: 'folder', name: entry.folder.name, path: entry.folder.path, icon: UiIcons.folder(14) }));
+                .map((entry): MentionSuggestionItem => ({ type: 'folder', name: entry.folder.name, path: entry.folder.path, icon: UiIcons.folder(14) }));
             this.items = folders;
         } else {
             // Search notes (cached list, lowercase pre-computed)
-            const notes = this._notesCache
-                .filter((entry: MentionDynamic) => entry.basenameLower.includes(query) || entry.pathLower.includes(query))
-                .sort((a: MentionDynamic, b: MentionDynamic) => {
+            const notes = this._notesCache!
+                .filter((entry) => entry.basenameLower.includes(query) || entry.pathLower.includes(query))
+                .sort((a, b) => {
                     // Prioritize basename match over path match
                     const aBase = a.basenameLower.includes(query) ? 0 : 1;
                     const bBase = b.basenameLower.includes(query) ? 0 : 1;
@@ -266,14 +333,14 @@ export class MentionAutocomplete {
                     return (b.file.stat?.mtime || 0) - (a.file.stat?.mtime || 0);
                 })
                 .slice(0, 10)
-                .map((entry: MentionDynamic) => ({ type: 'note', name: entry.file.basename, path: entry.file.path, icon: UiIcons.file(14) }));
+                .map((entry): MentionSuggestionItem => ({ type: 'note', name: entry.file.basename, path: entry.file.path, icon: UiIcons.file(14) }));
 
             // Also show folders if no category filter and few notes
             if (notes.length < 5 && query.length > 0) {
-                const folders = this._foldersCache
-                    .filter((entry: MentionDynamic) => entry.nameLower.includes(query))
+                const folders = this._foldersCache!
+                    .filter((entry) => entry.nameLower.includes(query))
                     .slice(0, 3)
-                    .map((entry: MentionDynamic) => ({ type: 'folder', name: entry.folder.name, path: entry.folder.path, icon: UiIcons.folder(14) }));
+                    .map((entry): MentionSuggestionItem => ({ type: 'folder', name: entry.folder.name, path: entry.folder.path, icon: UiIcons.folder(14) }));
                 this.items = [...notes, ...folders];
             } else {
                 this.items = notes;
@@ -288,10 +355,11 @@ export class MentionAutocomplete {
     // SELECTION — adds chip instead of inline text
     // ═══════════════════════════════════════════
 
-    _selectItem(item: MentionDynamic) {
+    _selectItem(item: MentionSuggestionItem) {
         // Replace @query with @[Name] inline in textarea
         const value = this.textarea.value;
-        const cursor = this.textarea.selectionStart;
+        // Patrz komentarz w `_handleInput` — <textarea> zawsze ma selekcję, więc nigdy `null`.
+        const cursor = this.textarea.selectionStart!;
         const before = value.slice(0, this.triggerStart);
         const after = value.slice(cursor);
         const mentionTag = `@[${item.name}] `;
@@ -301,7 +369,7 @@ export class MentionAutocomplete {
         this.textarea.focus();
 
         // Check for duplicates
-        if (this.mentions.some((m: MentionDynamic) => m.path === item.path)) {
+        if (this.mentions.some((m) => m.path === item.path)) {
             log.debug('MentionAutocomplete', `Already added: ${item.path}`);
             this.close();
             return;
@@ -333,11 +401,14 @@ export class MentionAutocomplete {
         if (isNewDropdown) {
             this.dropdown = _createDetachedDiv();
             this.dropdown.addClass('pkm-mention-dropdown');
-            // Position relative to textarea wrapper
-            this.textarea.parentElement.addClass('pkm-mention-anchor');
-            this.textarea.parentElement.appendChild(this.dropdown);
+            // Position relative to textarea wrapper — textarea czatu jest zawsze owinięta w
+            // wrapper (dokumentacja modułu), więc parentElement jest tu zagwarantowany.
+            this.textarea.parentElement!.addClass('pkm-mention-anchor');
+            this.textarea.parentElement!.appendChild(this.dropdown);
         }
-        this.dropdown.addClass('is-open');
+        // `isNewDropdown` wyżej gwarantuje przypisanie; gdy `false`, `this.dropdown` było już
+        // truthy PRZED wejściem do metody (`isNewDropdown = !this.dropdown`).
+        this.dropdown!.addClass('is-open');
         this.isOpen = true;
         // The debounced `_updateSuggestions()` (scheduled right before this call, see
         // `_handleInput`) renders once it fires — rendering again here on every keystroke would
@@ -379,7 +450,7 @@ export class MentionAutocomplete {
         }
 
         // Category headers
-        let lastType = null;
+        let lastType: 'note' | 'folder' | null = null;
         for (let i = 0; i < this.items.length; i++) {
             const item = this.items[i];
 
