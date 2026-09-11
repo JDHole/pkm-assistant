@@ -15,20 +15,20 @@
 import { IconGenerator, UiIcons, setSvg } from '../../crystal-soul/index.js';
 import { showSkillOverrideForm } from './profile_skills_overrides.js';
 import { t } from '../../../core/i18n/index.js';
+import type { ProfileCtx, AgentsPlugin } from './profile_types.js';
+import type { AgentSkillAssignment as SkillAssignment } from '../Agent.js';
+import type { SkillData as Skill, SkillInput } from '../../skills/index.js';
+import type { SidebarNav } from '../../shell/index.js';
+import type { ExternalServerUiRow } from '../../tools/index.js';
 
-// TS-any: Obsidian's augmented HTMLElement helpers and plugin UI services cross an untyped runtime boundary here.
-type UiBoundary = any;
-type Skill = { name: string; slug?: string; category?: string; icon_category?: string; description?: string; hasTemplate?: boolean; hasReferences?: boolean; hasExamples?: boolean; fromTemplate?: string };
-type SkillAssignment = { name: string };
 type SkillTemplate = { name: string; slug: string; version?: number; description?: string };
 type Connector = { key: string; label: string; description: string; toolCount: number; icon: null };
-type SkillsContext = { formData: { name?: string; skills: SkillAssignment[]; mcp_servers: string[]; preferred_servers: string[] }; nav: UiBoundary; plugin: UiBoundary; renderActiveTab(): void };
 
 /**
  * @param {Object} ctx - shared context
  * @param {HTMLElement} el
  */
-export function renderSkillsTab(ctx: SkillsContext, el: UiBoundary) {
+export function renderSkillsTab(ctx: ProfileCtx, el: HTMLElement) {
     _renderSkillsSection(ctx, el);
     _renderKonektorySection(ctx, el);
 }
@@ -37,7 +37,7 @@ export function renderSkillsTab(ctx: SkillsContext, el: UiBoundary) {
 // SKILLE - biblioteka umiejętności grupowana kategoriami
 // ─────────────────────────────────────────────────────────────
 
-function _renderSkillsSection(ctx: SkillsContext, el: UiBoundary) {
+function _renderSkillsSection(ctx: ProfileCtx, el: HTMLElement) {
     const { formData, nav } = ctx;
     const skillLoader = ctx.plugin.agentManager?.skillLoader;
 
@@ -92,7 +92,7 @@ function _renderSkillsSection(ctx: SkillsContext, el: UiBoundary) {
     _renderSkillFromTemplate(ctx, el);
 }
 
-function _renderSkillShard(ctx: SkillsContext, grid: UiBoundary, parentEl: UiBoundary, skill: Skill, assignment: SkillAssignment, nav: UiBoundary) {
+function _renderSkillShard(ctx: ProfileCtx, grid: HTMLElement, parentEl: HTMLElement, skill: Skill, assignment: SkillAssignment, nav: SidebarNav) {
     const { formData } = ctx;
     const hasAttachments = skill.hasTemplate || skill.hasReferences || skill.hasExamples;
 
@@ -100,7 +100,7 @@ function _renderSkillShard(ctx: SkillsContext, grid: UiBoundary, parentEl: UiBou
     shard.addClass('cs-shard--clickable');
 
     const iconEl = shard.createDiv({ cls: 'cs-shard__icon' });
-    setSvg(iconEl, IconGenerator.generate(skill.name || 'skill', skill.icon_category || 'arcane', { size: 24, color: 'currentColor' }));
+    setSvg(iconEl, IconGenerator.generate(skill.name || 'skill', (skill as unknown as { icon_category?: string }).icon_category || 'arcane', { size: 24, color: 'currentColor' }));
 
     const labelEl = shard.createDiv({ cls: 'cs-shard__main-label' });
     labelEl.textContent = skill.name;
@@ -142,7 +142,7 @@ function _renderSkillShard(ctx: SkillsContext, grid: UiBoundary, parentEl: UiBou
     });
 }
 
-function _renderAddSkill(ctx: SkillsContext, el: UiBoundary, allSkills: Skill[]) {
+function _renderAddSkill(ctx: ProfileCtx, el: HTMLElement, allSkills: Skill[]) {
     const { formData } = ctx;
     const isAssigned = (id: string) => formData.skills.some((s: SkillAssignment) => s.name === id);
     const unassigned = allSkills.filter((s: Skill) => !isAssigned(s.slug || s.name));
@@ -174,7 +174,7 @@ function _renderAddSkill(ctx: SkillsContext, el: UiBoundary, allSkills: Skill[])
         for (const skill of filtered) {
             const opt = optionsEl.createDiv({ cls: 'cs-picker__option' });
             const optIcon = opt.createDiv({ cls: 'cs-picker__option-icon' });
-            setSvg(optIcon, IconGenerator.generate(skill.name || 'skill', skill.icon_category || 'arcane', { size: 16, color: 'currentColor' }));
+            setSvg(optIcon, IconGenerator.generate(skill.name || 'skill', (skill as unknown as { icon_category?: string }).icon_category || 'arcane', { size: 16, color: 'currentColor' }));
             opt.createSpan({ cls: 'cs-picker__option-name', text: skill.name });
             if (skill.description) opt.createSpan({ cls: 'cs-picker__option-desc', text: skill.description });
             opt.addEventListener('click', () => {
@@ -192,7 +192,7 @@ function _renderAddSkill(ctx: SkillsContext, el: UiBoundary, allSkills: Skill[])
     });
 
     const closeHandler = (e: Event) => {
-        if ((e as KeyboardEvent).key === 'Escape' || (e.type === 'click' && !dropWrap.contains(e.target) && !addBtn.contains(e.target))) {
+        if ((e as KeyboardEvent).key === 'Escape' || (e.type === 'click' && !dropWrap.contains(e.target as Node | null) && !addBtn.contains(e.target as Node | null))) {
             dropdown.addClass('cs-collapsed');
         }
     };
@@ -212,13 +212,13 @@ function _renderAddSkill(ctx: SkillsContext, el: UiBoundary, allSkills: Skill[])
  * „+ nowy skill" - jedyne miejsce narodzin ŻYWEGO skilla (Zaplecze trzyma szablony).
  * Modal umie od razu dołożyć formę odlewniczą („Zapisz też jako szablon w Zapleczu").
  */
-function _renderNewSkill(ctx: SkillsContext, el: UiBoundary) {
+function _renderNewSkill(ctx: ProfileCtx, el: HTMLElement) {
     const { formData, plugin } = ctx;
     const btn = el.createEl('button', { cls: 'cs-preset-btn', text: t('profile.skills.new_skill') });
     btn.addEventListener('click', async () => {
         const { loadSkillEditorModal } = await import('../../skills/index.js');
         const SkillEditorModal = await loadSkillEditorModal();
-        new SkillEditorModal(plugin.app, plugin, null, (saved?: UiBoundary) => {
+        new SkillEditorModal(plugin.app, plugin, null, (saved?: SkillInput) => {
             void (async () => {
                 const loader = plugin.agentManager?.skillLoader;
                 try { await loader?.reloadSkills?.(); } catch { /* best effort */ }
@@ -236,7 +236,7 @@ function _renderNewSkill(ctx: SkillsContext, el: UiBoundary) {
 }
 
 /** „+ z szablonu" - odlej kopię z Zaplecza i przypisz ją temu agentowi. */
-function _renderSkillFromTemplate(ctx: SkillsContext, el: UiBoundary) {
+function _renderSkillFromTemplate(ctx: ProfileCtx, el: HTMLElement) {
     const { formData, plugin } = ctx;
     const store = plugin.agentManager?.skillTemplateStore;
     const templates: SkillTemplate[] = store?.list() || [];
@@ -265,7 +265,7 @@ function _renderSkillFromTemplate(ctx: SkillsContext, el: UiBoundary) {
             }
             if (result.renamed) new Notice(t('backstage.template_slug_taken', { name: result.name }));
             if (!formData.skills.some((s: SkillAssignment) => s.name === result.slug)) {
-                formData.skills.push({ name: result.slug });
+                formData.skills.push({ name: result.slug as string });
             }
             ctx.renderActiveTab();
         });
@@ -286,7 +286,7 @@ function _categoryLabel(cat: string) {
 // KONEKTORY - zewnętrzne serwery MCP usera przypięte do agenta
 // ─────────────────────────────────────────────────────────────
 
-function _renderKonektorySection(ctx: SkillsContext, el: UiBoundary) {
+function _renderKonektorySection(ctx: ProfileCtx, el: HTMLElement) {
     const { formData, plugin } = ctx;
 
     const head = el.createDiv({ cls: 'cs-section-head cs-section-head--spaced' });
@@ -344,19 +344,19 @@ function _renderKonektorySection(ctx: SkillsContext, el: UiBoundary) {
  * narzędzi ze snapshotu managera (`listServersForUi`), a gdy manager niedostępny - z samego configu.
  * @returns {Array<{key:string,label:string,description:string,toolCount:number,icon:null}>}
  */
-function _externalConnectors(plugin: UiBoundary): Connector[] {
+function _externalConnectors(plugin: AgentsPlugin): Connector[] {
     const transportDesc = (tr: string) => (tr === 'http'
         ? t('profile.skills.connector_transport_http')
         : t('profile.skills.connector_transport_stdio'));
-    const mgr = plugin?.externalMcpManager;
+    const mgr = plugin?.externalMcpManager as { listServersForUi?: () => ExternalServerUiRow[] } | undefined;
     if (mgr?.listServersForUi) {
         try {
-            return mgr.listServersForUi().map((s: { id: string; name: string; transport: string; toolCount?: number }) => ({
+            return mgr.listServersForUi().map((s) => ({
                 key: s.id, label: s.name, description: transportDesc(s.transport), toolCount: s.toolCount || 0, icon: null,
             }));
         } catch { /* fall through to raw config */ }
     }
-    const cfgs = plugin?.env?.settings?.pkmAssistant?.externalMcpServers;
+    const cfgs = plugin?.env?.settings?.pkmAssistant?.externalMcpServers as Array<{ id: string; name?: string; transport?: string }> | undefined;
     if (!Array.isArray(cfgs)) return [];
     return cfgs.map((c: { id: string; name?: string; transport?: string }) => ({
         key: c.id, label: c.name || c.id, description: transportDesc(c.transport || 'stdio'), toolCount: 0, icon: null,

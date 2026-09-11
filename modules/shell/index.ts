@@ -37,6 +37,9 @@ export { PkmSettingsTab } from './pkm_settings_tab.js';
 
 // ── Sidebar (rejestracja + otwarcie; klasa widoku zostaje wewnątrz shella) ─
 export { registerAgentSidebar, openAgentSidebar } from './AgentSidebar.js';
+// Typ nawigacji stosu widoków sidebara - konsument spoza modułu: modules/agents (profile/*.ts,
+// `nav.push/pop/goHome`). Wartość (klasa) nie wychodzi stąd, tylko kształt.
+export type { SidebarNav } from './sidebar/SidebarNav.js';
 
 // ── Modale ────────────────────────────────────────────────────────────────
 // Approval wchodzi WYŁĄCZNIE przez funkcję-fasadę (core/security/ApprovalManager).

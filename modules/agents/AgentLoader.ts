@@ -12,16 +12,19 @@ import { createJaskier } from './archetypes/index.js';
 interface AgentVaultAdapter {
     exists(path: string): Promise<boolean>;
     mkdir(path: string): Promise<void>;
-    list(path: string): Promise<{ files?: string[] } | null>;
+    list(path: string): Promise<{ files?: string[]; folders?: string[] } | null>;
     read(path: string): Promise<string>;
     write(path: string, content: string): Promise<void>;
     remove(path: string): Promise<void>;
+    rmdir(path: string, recursive?: boolean): Promise<void>;
 }
 
-interface AgentVault {
+// Exported: also the "real" vault shape for AgentManager.ts (same module, no barrel needed).
+export interface AgentVault {
     adapter: AgentVaultAdapter;
     on?(event: string, callback: (file: string | { path?: string }) => void): unknown;
     offref?(ref: unknown): void;
+    getName?(): string;
 }
 
 interface LegacyAgentConfig extends AgentConfig {

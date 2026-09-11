@@ -22,9 +22,13 @@ import { renderArtifactsTab } from './profile/profile_artifacts.js';
 import { renderAdvancedTab, handleSave, showDeleteConfirmation } from './profile/profile_advanced.js';
 import { resolveMainModelForForm } from './profile/modelFieldSync.js';
 import { log } from '../../core/utils/Logger.js';
+import type { AgentsPlugin, ProfileCtx, ProfileFormData } from './profile/profile_types.js';
+// Entry-point plugin type: `agentManager` here is genuinely optional (checked below) - the
+// narrowed `AgentsPlugin` (non-optional `agentManager`) is only true from `ctx` onward.
+import type { AgentsPlugin as AgentsPluginEntry } from './AgentManager.js';
+import type { SidebarNav } from '../shell/index.js';
+import type { AgentSkillAssignment, AgentSubAgentAssignment } from './Agent.js';
 
-// TS-any: profile rendering crosses Obsidian's runtime-extended plugin and sidebar APIs.
-type UiBoundary = any;
 interface ProfileParams { agentName?: string | null; }
 
 // Tab definitions (Crystal Soul 8-tab layout).
@@ -49,7 +53,7 @@ const TABS = [
  * @param {import('../shell/sidebar/SidebarNav.js').SidebarNav} nav
  * @param {Object} params - { agentName: string|null }
  */
-export function renderAgentProfileView(container: HTMLElement, plugin: UiBoundary, nav: UiBoundary, params: ProfileParams) {
+export function renderAgentProfileView(container: HTMLElement, plugin: AgentsPluginEntry, nav: SidebarNav, params: ProfileParams) {
     const agentManager = plugin.agentManager;
     if (!agentManager) {
         container.createEl('p', { text: t('profile.not_init'), cls: 'agent-error' });
@@ -65,7 +69,7 @@ export function renderAgentProfileView(container: HTMLElement, plugin: UiBoundar
     }
 
     // Form data (copy from agent)
-    const formData = {
+    const formData: ProfileFormData = {
         name: agent.name,
         color: agent.color || null,
         personality: agent.personality || '',
@@ -80,7 +84,7 @@ export function renderAgentProfileView(container: HTMLElement, plugin: UiBoundar
         komunikator_visible: agent.komunikator_visible !== false,
         focus_folders: [...(agent.focusFolders || [])],
         model: agent.model || null,
-        skills: JSON.parse(JSON.stringify(agent._skills || [])),
+        skills: JSON.parse(JSON.stringify(agent._skills || [])) as AgentSkillAssignment[],
         // Typy artefaktów podpięte per agent (jak skille). Puste = tylko wbudowany `plan`.
         artifact_types: [...(agent.artifact_types || [])],
         // Jedna oś narzędziowa (disabled_tools). enabled_tools skasowane.
@@ -88,11 +92,11 @@ export function renderAgentProfileView(container: HTMLElement, plugin: UiBoundar
         preferred_servers: [...(agent.preferredServers || [])],
         preferred_tools: [...(agent.preferredTools || [])],
         mcp_servers: Array.isArray(agent.mcp_servers) ? [...agent.mcp_servers] : ['vault', 'memory', 'core'],
-        sub_agents: JSON.parse(JSON.stringify(agent._subAgents || [])),
+        sub_agents: JSON.parse(JSON.stringify(agent._subAgents || [])) as AgentSubAgentAssignment[],
         sub_agent_enabled: agent.subAgentEnabled !== false,
         permissions: { ...agent.permissions },
-        models: JSON.parse(JSON.stringify(agent.models || {})),
-        prompt_overrides: JSON.parse(JSON.stringify(agent.promptOverrides || {})),
+        models: JSON.parse(JSON.stringify(agent.models || {})) as Record<string, unknown>,
+        prompt_overrides: JSON.parse(JSON.stringify(agent.promptOverrides || {})) as Record<string, unknown>,
         agent_rules: agent.agentRules || '',
         crystal_seed: agent.crystalSeed || null,
         // Prompty robocze per agent (puste = global/factory przez resolver).
@@ -120,10 +124,12 @@ export function renderAgentProfileView(container: HTMLElement, plugin: UiBoundar
     container.style.setProperty('--cs-agent-color-rgb', agentRgb);
 
     // ── Shared context object (passed to all tab modules) ──
-    const ctx = {
+    const ctx: ProfileCtx = {
         formData,
         agent,
-        plugin,
+        // `plugin.agentManager` non-null is guaranteed by the guard above (this narrowing
+        // doesn't propagate through the object literal on its own).
+        plugin: plugin as AgentsPlugin,
         nav,
         agentManager,
         container,
@@ -136,8 +142,9 @@ export function renderAgentProfileView(container: HTMLElement, plugin: UiBoundar
         dtExpandedGroups: new Set(),
         memorySessionPage: 0,
         memorySessionFilter: '',
-        // Will be set after tabContent is created
-        renderActiveTab: null as (() => Promise<void>) | null,
+        // Will be set after tabContent is created (before any tab ever reads `ctx.renderActiveTab`
+        // - see ProfileCtx's field doc). TS-boundary: genuinely null for these few lines only.
+        renderActiveTab: null as unknown as () => Promise<void>,
     };
 
     // ── HEADER ──
@@ -194,7 +201,7 @@ export function renderAgentProfileView(container: HTMLElement, plugin: UiBoundar
                 // Persona jest async (panel aktywnych sesji czyta pamięć z dysku).
                 case 'profile': await renderProfileTab(ctx, tabContent); break;
                 case 'permissions': renderPermissionsTab(ctx, tabContent); break;
-                case 'skills': renderSkillsTab(ctx as unknown as Parameters<typeof renderSkillsTab>[0], tabContent); break;
+                case 'skills': renderSkillsTab(ctx, tabContent); break;
                 case 'team': renderEkipaTab(ctx, tabContent); break;
                 case 'prompt': await renderPromptTab(ctx, tabContent); break;
                 case 'memory': await renderMemoryTab(ctx, tabContent); break;
