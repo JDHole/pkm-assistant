@@ -41,8 +41,8 @@
 // (barrels only); the two per-file deep-import whitelists that used to serve harness scenarios 33
 // and 35 left with the harness.
 
-import fs from 'node:fs';
-import path from 'node:path';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import tseslint from 'typescript-eslint';
 
 const MODULE_NAMES = fs
