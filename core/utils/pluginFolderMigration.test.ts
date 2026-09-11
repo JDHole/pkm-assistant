@@ -55,7 +55,7 @@ test('manifestId nadal "obsek" → zero wywołań adaptera (wpięcie jest inertn
 
 test('brak adaptera → no-op', async t => {
     t.false((await migrateOldPluginFolder({ ...BASE, adapter: null })).migrated);
-    t.false((await migrateOldPluginFolder()).migrated);
+    t.false((await migrateOldPluginFolder({ ...BASE, adapter: undefined })).migrated);
     t.false((await migrateOldPluginFolder({ ...BASE, adapter: {} })).migrated);
 });
 
@@ -126,9 +126,24 @@ test('brak mkdir w adapterze → nie wywala się', async t => {
     t.true(res.migrated);
 });
 
-test('configDir domyślnie .obsidian gdy nie podany', async t => {
+test('bez configDir migracja się NIE odpala (reason no-config-dir, zero dotknięć dysku)', async t => {
+    // Nazwa folderu konfiguracji należy do usera (`Vault#configDir`) i nie ma tu nazwy
+    // zapasowej: stary folder leży WEWNĄTRZ konfiguracji, więc bez jej nazwy nie ma czego
+    // szukać. Zgadywanie `.obsidian` albo nie trafiłoby w nic (folder przemianowany), albo
+    // trafiło w cudzy folder. Lepiej nie zmigrować niż czytać i pisać po omacku.
     const adapter = makeAdapter({ [OLD]: '{"installed_at":1}' });
-    const res = await migrateOldPluginFolder({ adapter, manifestId: 'pkm-assistant' });
+    const res = await migrateOldPluginFolder({ adapter, configDir: '', manifestId: 'pkm-assistant' });
+    t.false(res.migrated);
+    t.is(res.reason, 'no-config-dir');
+    t.is(adapter.calls.read.length, 0);
+    t.is(adapter.calls.write.length, 0);
+});
+
+test('configDir przemianowany → migracja celuje w NIEGO, nie w nazwę domyślną', async t => {
+    const OLD_ALT = '.mojkonfig/plugins/obsek/data.json';
+    const adapter = makeAdapter({ [OLD_ALT]: '{"installed_at":7}' });
+    const res = await migrateOldPluginFolder({ adapter, configDir: '.mojkonfig', manifestId: 'pkm-assistant' });
     t.true(res.migrated);
-    t.is(adapter.calls.write[0][0], NEW);
+    t.is(adapter.calls.write[0][0], '.mojkonfig/plugins/pkm-assistant/data.json');
+    t.is(adapter.calls.write[0][1], '{"installed_at":7}');
 });
