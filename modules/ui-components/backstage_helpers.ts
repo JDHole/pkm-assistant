@@ -10,11 +10,19 @@
 import { getToolIcon } from './ToolCallDisplay.js';
 import { t } from '../../core/i18n/index.js';
 import { setSvg, setSvgLabel, UiIcons } from '../crystal-soul/index.js';
-// TS-any: pomocniki są współdzieloną granicą dynamicznych modeli widoków.
-type BackstageDynamic = any;
+
+/** Wpis paska filtrów. Dokładnie jedno z `iconFn` (kategoria, `SkillsBackstageTab`) /
+ *  `toolName` (narzędzie z katalogu `TOOL_INFO`, `SubAgentsBackstageTab`) bywa ustawione —
+ *  bez żadnego z nich chip dostaje sam tekst etykiety. */
+interface FilterBarEntry {
+    value: string;
+    label: string;
+    iconFn?: (size: number) => string;
+    toolName?: string;
+}
 
 /** Render a horizontal filter chip bar. `onToggle(value)` toggles the filter. */
-export function renderFilterBar(container: BackstageDynamic, filters: BackstageDynamic[], activeFilters: Set<string>, onToggle: (value: string) => void) {
+export function renderFilterBar(container: HTMLElement, filters: FilterBarEntry[], activeFilters: Set<string>, onToggle: (value: string) => void): HTMLElement {
     const bar = container.createDiv({ cls: 'cs-filter-bar' });
     for (const f of filters) {
         const chip = bar.createSpan({
@@ -33,10 +41,15 @@ export function renderFilterBar(container: BackstageDynamic, filters: BackstageD
 }
 
 /** Resolve i18n label for a category (tries `backstage.cat.<name>`, falls back to raw). */
-export function getCategoryLabel(category: string) {
+export function getCategoryLabel(category: string): string {
     const key = `backstage.cat.${category}`;
     const translated = t(key, {});
     return translated !== key ? translated : category;
+}
+
+/** Agent, do którego można „odlać kopię" szablonu — tylko pole, które ten guzik czyta. */
+interface BackstageAgentRef {
+    name: string;
 }
 
 /**
@@ -50,7 +63,7 @@ export function getCategoryLabel(category: string) {
  * @param {string} [label] - etykieta guzika
  * @returns {HTMLElement} wrapper
  */
-export function renderUseAtAgentButton(container: BackstageDynamic, agents: BackstageDynamic[], onPick: (agentName: string) => void, label = t('backstage.use_at_agent')) {
+export function renderUseAtAgentButton(container: HTMLElement, agents: BackstageAgentRef[], onPick: (agentName: string) => void, label = t('backstage.use_at_agent')): HTMLElement {
     const wrap = container.createDiv({ cls: 'cs-template-use' });
     const btn = wrap.createEl('button', { cls: 'cs-template-use__btn' });
     setSvgLabel(btn, UiIcons.users(11), label);
@@ -82,11 +95,19 @@ export function renderUseAtAgentButton(container: BackstageDynamic, agents: Back
  * @param {HTMLElement} container
  * @param {number} version
  */
-export function renderTemplateVersionBadge(container: BackstageDynamic, version: number) {
+export function renderTemplateVersionBadge(container: HTMLElement, version: number): HTMLElement {
     return container.createSpan({
         cls: 'cs-item-card__badge cs-item-card__badge--version',
         text: `v${Number(version) || 1}`,
     });
+}
+
+/** Opcje małego guzika akcji na karcie szablonu (edycja / kasowanie / ustaw globalny). */
+interface CardActionOptions {
+    iconFn: (size: number) => string;
+    label: string;
+    danger?: boolean;
+    onClick: () => void | Promise<void>;
 }
 
 /**
@@ -94,7 +115,7 @@ export function renderTemplateVersionBadge(container: BackstageDynamic, version:
  * @param {HTMLElement} container
  * @param {Object} opts - { iconFn, label, danger?, onClick }
  */
-export function renderCardAction(container: BackstageDynamic, { iconFn, label, danger = false, onClick }: BackstageDynamic) {
+export function renderCardAction(container: HTMLElement, { iconFn, label, danger = false, onClick }: CardActionOptions): HTMLElement {
     const btn = container.createEl('button', {
         cls: `cs-template-action ${danger ? 'cs-template-action--danger' : ''}`,
         attr: { 'aria-label': label, title: label },
