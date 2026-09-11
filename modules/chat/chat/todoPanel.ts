@@ -12,11 +12,10 @@
  * @returns {{visible:boolean, title:string|null, items:Array<{text:string, checked:boolean}>, done:number, total:number, allDone:boolean}}
  */
 type TodoItemInput = { text?: unknown; checked?: unknown; done?: unknown };
-type TodoState = { items?: TodoItemInput[]; title?: string; finished?: boolean };
-// Nie eksportowany (tu i na `BottomBarMode` niżej) - brak referencji spoza tego pliku;
-// funkcje/stałe, których sygnatury je noszą (`buildTodoPanelModel`, `resolveBottomBarMode`,
-// `DEFAULT_BOTTOM_BAR_MODE`), zostają publiczne.
-type TodoPanelModel = {
+/** Surowy stan narzędzia `todo` — widok trzyma go w `ChatView._activeTodoState`. */
+export type TodoState = { items?: TodoItemInput[]; title?: string; finished?: boolean };
+/** Model widoku listy — widok trzyma poprzedni render w `ChatView._prevTodoModel`. */
+export type TodoPanelModel = {
     visible: boolean;
     title: string | null;
     items: Array<{ text: string; checked: boolean }>;
@@ -43,7 +42,7 @@ export function buildTodoPanelModel(state: TodoState | null | undefined): TodoPa
 }
 
 /** Który widok pokazuje pasek dolny: pole tekstowe czy lista `todo`. */
-type BottomBarMode = 'input' | 'todo';
+export type BottomBarMode = 'input' | 'todo';
 
 /** Startowy widok paska (i ten, do którego wracamy, gdy nie ma czego pokazać). */
 export const DEFAULT_BOTTOM_BAR_MODE: BottomBarMode = 'input';

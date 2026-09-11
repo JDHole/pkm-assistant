@@ -4,10 +4,12 @@
  * ⚠️ Ten plik jest wyjątkiem wśród testów `modules/tools/`: `GenerateImageTool.js`
  * ciągnie przez barrel `modules/multimodal/` moduł `obsidian` (`requestUrl`), a pakiet
  * `obsidian` z npm to SAME TYPY — nie ma runtime'u, więc Node nie potrafi go zaimportować.
- * Dlatego PRZED importem podstawiamy tę samą atrapę, którą wpina preload AVA
- * (`test-support/obsidian.ts`), przez `module.registerHooks` — hook działa tylko w tym
- * procesie testowym (AVA daje plikowi własny worker), więc nie dotyka reszty suite'u.
- * Sam kod narzędzia jest wykonywany PRAWDZIWY, nic nie jest podmieniane.
+ * Dlatego PRZED importem podstawiamy tę samą atrapę, którą wpina preload AVA (od 2026-09-11
+ * `obsidian.ts` mieszka w repo harnessu — ścieżkę do niej ustawia lokator
+ * `test-support/register-obsidian-for-ava.mjs` w zmiennej `PKM_TEST_SUPPORT_DIR`, PRZED
+ * jakimkolwiek testem), przez `module.registerHooks` — hook działa tylko w tym procesie
+ * testowym (AVA daje plikowi własny worker), więc nie dotyka reszty suite'u. Sam kod
+ * narzędzia jest wykonywany PRAWDZIWY, nic nie jest podmieniane.
  */
 import test from 'ava';
 import { registerHooks } from 'node:module';
@@ -18,9 +20,18 @@ import path from 'node:path';
 /** Wynik `generate_image` czytany w asercjach. */
 type ImageRes = { success?: boolean; error: string };
 
-const OBSIDIAN_MOCK = pathToFileURL(
-    path.join(import.meta.dirname, '..', '..', 'test-support', 'obsidian.ts')
-).href;
+// Preload AVA (`test-support/register-obsidian-for-ava.mjs`, patrz `ava.nodeArguments` w
+// `package.json`) ustawia tę zmienną na fizyczną ścieżkę `test-support/` w repo harnessu,
+// zanim jakikolwiek plik testowy zacznie działać.
+const TEST_SUPPORT_DIR = process.env.PKM_TEST_SUPPORT_DIR;
+if (!TEST_SUPPORT_DIR) {
+    throw new Error(
+        '[GenerateImageTool.test] Brak PKM_TEST_SUPPORT_DIR — ten test oczekuje preloadu '
+        + 'test-support/register-obsidian-for-ava.mjs (ava.nodeArguments w package.json).',
+    );
+}
+
+const OBSIDIAN_MOCK = pathToFileURL(path.join(TEST_SUPPORT_DIR, 'obsidian.ts')).href;
 
 registerHooks({
     resolve(specifier, context, next) {

@@ -14,9 +14,10 @@
  * oraz `globalThis` w ogóle (reguła `obsidianmd/no-global-this`; jedyny most do gołego Node,
  * `core/utils/hostWindow.ts`, pyta o okno przez `typeof window`, bez globalnego obiektu).
  *
- * ZASIĘG: drzewa źródłowe pluginu. `test-support/` zostaje poza bramką celowo — atrapa `app`
- * i atrapa `obsidian` odwzorowują HOSTA, nie plugin: muszą mieć puste `enablePlugin`/`disablePlugin`
- * i własne globale, bo tak wygląda prawdziwy Obsidian.
+ * ZASIĘG: drzewa źródłowe pluginu. `test-support/` zostaje poza bramką celowo — od 2026-09-11
+ * mieszka tam tylko lokator preloadu AVA (`register-obsidian-for-ava.mjs`), a atrapy `app` i
+ * `obsidian`, które odwzorowują HOSTA (nie plugin: mają puste `enablePlugin`/`disablePlugin`
+ * i własne globale, bo tak wygląda prawdziwy Obsidian), przeniosły się do repo harnessu.
  * Pliki testowe sprawdza tylko zakaz wyłączania pluginu: walidator pomija testy, a rigi
  * testowe (atrapa `document` w `globalThis`, `new Function` wykonujące wycinek źródła) są legalne.
  */

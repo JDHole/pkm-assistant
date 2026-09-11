@@ -1,15 +1,17 @@
 /**
- * Przemianowany folder konfiguracji Obsidiana (`Vault#configDir`) jako
- * strefa No-Go. `AccessGuard.setConfigDir` (core/security/AccessGuard.ts:112-116) dokłada
- * NAZWĘ przemianowanego folderu do `_noGoFolders`, wpięte w `setNoGoFolders` (linia 130:
- * `const all = [...SYSTEM_NO_GO, AccessGuard._configDir, ...userFolders]`). Ta gałąź nie
- * miała ŻADNEGO testu — `setConfigDir` nie występuje w żadnym `*.test.ts` w repo.
+ * Folder konfiguracji Obsidiana (`Vault#configDir`) jako strefa No-Go — i co się dzieje,
+ * zanim strażnik pozna jego nazwę.
  *
- * PUŁAPKA: domyślna wartość `.obsidian` jest i tak zablokowana przez `SYSTEM_NO_GO`
- * (hardcoded), więc test WYŁĄCZNIE na `.obsidian` nie dowodzi niczego o tej gałęzi — mutacja
- * usuwająca `_configDir` ze scalania i tak by przeszła. Testy niżej dlatego świadomie używają
- * nazwy INNEJ niż `.obsidian` (przemianowany folder), żeby dowód dotyczył realnie gałęzi
- * `_configDir`, nie hardcoded wpisu.
+ * KONTRAKT (od fali B): `SYSTEM_NO_GO` to WYŁĄCZNIE `['.trash']`. Nazwy folderu konfiguracji
+ * nie ma nigdzie na sztywno — przychodzi z żywego `Vault#configDir` przez `setConfigDir`,
+ * a `setNoGoFolders` dokłada ją do migawki `_noGoFolders`. Dlatego `.obsidian` blokuje się
+ * DOKŁADNIE tak samo jak `.mojkonfig`: bo akurat jest configDirem, nie bo jest `.obsidian`.
+ *
+ * Druga połowa kontraktu to fail-closed: dopóki `_configDir === null` (przed `setConfigDir`),
+ * `_isNoGo` blokuje KAŻDY ukryty folder (pierwszy segment od kropki) poza `.pkm-assistant`,
+ * bo nie wiadomo, który z nich jest konfiguracją. Wyjątek `.pkm-assistant` jest konieczny:
+ * bebechy pluginu mają własną bramkę `_checkPkmPath` sprawdzaną PO No-Go, więc bez wyjątku
+ * agent straciłby dostęp do własnej pamięci.
  */
 import test from 'ava';
 import { AccessGuard } from './AccessGuard.js';
@@ -19,8 +21,10 @@ const agentZCalymVaultem: GuardedAgent = { name: 'Tester', permissions: { guidan
 
 // Static state na AccessGuard — testy w tym pliku muszą iść po kolei (test.serial) i
 // posprzątać po sobie, inaczej zanieczyszczą się nawzajem (ten sam wzorzec co nogo_case.test.ts).
+// Sprzątanie wraca do stanu STARTOWEGO procesu: configDir nieznany (`null`), pusta migawka.
+// `setConfigDir` nie umie cofnąć do `null` (ignoruje puste wejście), więc idzie to polem.
 test.serial.afterEach(() => {
-    AccessGuard.setConfigDir('.obsidian');
+    AccessGuard._configDir = null;
     AccessGuard.setNoGoFolders([]);
 });
 
@@ -49,40 +53,106 @@ test.serial('przepuszcza: zwykła notatka NIE jest dotknięta przemianowaniem fo
     t.true(AccessGuard.checkAccess(agentZCalymVaultem, 'Notatki/dziennik.md', 'read').allowed);
 });
 
-test.serial('mechanizm: gałąź działa PRZEZ _configDir, nie tylko dzięki hardcoded SYSTEM_NO_GO', t => {
-    // Kontrola (nie dowód na TĘ gałąź — `.obsidian` blokuje TAK CZY OWAK przez SYSTEM_NO_GO):
+test.serial('mechanizm: `.obsidian` blokuje JAKO configDir, a nie z listy SYSTEM_NO_GO', t => {
+    // Ten test pilnuje właśnie tego, że nazwa domyślna NIE jest już nigdzie wpisana na sztywno.
+    t.deepEqual(AccessGuard.SYSTEM_NO_GO, ['.trash'], 'do SYSTEM_NO_GO wróciła nazwa folderu configu');
+
     AccessGuard.setConfigDir('.obsidian');
     AccessGuard.setNoGoFolders([]);
+    t.true(AccessGuard._noGoFolders.includes('.obsidian'), 'configDir nie wszedł do migawki No-Go');
     t.false(
         AccessGuard.checkAccess(agentZCalymVaultem, '.obsidian/plugins/x/main.js', 'read').allowed,
-        'baseline (nazwa domyślna) zepsuty — sam SYSTEM_NO_GO nie działa',
+        'folder konfiguracji (tu: nazwa domyślna) przeszedł bramkę No-Go',
     );
 
-    // Realny dowód na gałąź `_configDir`: nazwa RÓŻNA od `.obsidian` blokuje WYŁĄCZNIE
-    // dzięki setConfigDir — SYSTEM_NO_GO jej nie zna.
+    // Dowód, że decyduje gałąź `_configDir`, a nie sama nazwa: po przemianowaniu blokuje
+    // nazwa NOWA, a stara `.obsidian` staje się zwykłym ukrytym folderem.
     AccessGuard.setConfigDir('.workspace-config');
     AccessGuard.setNoGoFolders([]);
     t.false(
         AccessGuard.checkAccess(agentZCalymVaultem, '.workspace-config/plugins/x/main.js', 'read').allowed,
         'przemianowany folder configu NIE zablokował — gałąź _configDir jest martwa albo pominięta w scalaniu',
     );
+    t.true(
+        AccessGuard.checkAccess(agentZCalymVaultem, '.obsidian/plugins/x/main.js', 'read').allowed,
+        'przy ZNANYM (innym) configDirze `.obsidian` musi być zwykłym folderem — inaczej nazwa siedzi gdzieś na sztywno',
+    );
 });
 
 test.serial('kolejność wywołań: setConfigDir PO setNoGoFolders NIE działa wstecz (migawka, nie żywy odczyt)', t => {
     // Dokumentuje realny kontrakt: `_noGoFolders` to migawka policzona W CHWILI wywołania
-    // `setNoGoFolders` (linia 130 scala `_configDir` z TEGO momentu). `src/main.ts:568-569`
-    // woła setConfigDir PRZED setNoGoFolders celowo — poprawna kolejność jest zdrowa
-    // (testy wyżej), ale odwrócona po cichu wypuszcza przemianowany folder configu.
-    AccessGuard.setNoGoFolders([]); // configDir w tym momencie to jeszcze '.obsidian' (z afterEach)
+    // `setNoGoFolders` (scala `_configDir` z TEGO momentu). `src/main.ts:542-543` woła
+    // setConfigDir PRZED setNoGoFolders celowo — poprawna kolejność jest zdrowa (testy wyżej),
+    // a przy odwróconej ratuje fail-closed, nie migawka.
+    AccessGuard.setNoGoFolders([]); // configDir w tym momencie jeszcze NIEZNANY (null, z afterEach)
     AccessGuard.setConfigDir('.mojkonfig'); // za późno — `_noGoFolders` już policzone bez niego
 
-    // Uwaga: asercja mierzy MECHANIZM (wpis nie wszedł do migawki), a NIE
-    // pinuje `allowed === true` — gdyby ktoś kiedyś utwardził `_noGoFolders` na żywy odczyt
-    // `_configDir` (czyste ulepszenie), ten test ma pęknąć TYLKO jeśli poniższy inwariant
-    // przestanie opisywać rzeczywistość, a nie naciskać na cofnięcie ulepszenia.
+    // Asercja mierzy MECHANIZM (wpis nie wszedł do migawki), a NIE pinuje `allowed === true`
+    // — gdyby ktoś kiedyś utwardził `_noGoFolders` na żywy odczyt `_configDir` (czyste
+    // ulepszenie), ten test ma pęknąć TYLKO jeśli poniższy inwariant przestanie opisywać
+    // rzeczywistość, a nie naciskać na cofnięcie ulepszenia.
     t.false(
         AccessGuard._noGoFolders.some((f: string) => f.includes('mojkonfig')),
         'setConfigDir PO setNoGoFolders MIAŁ nie zdążyć wejść do migawki — jeśli wpis tu jest, ' +
         '_noGoFolders stało się żywym odczytem _configDir i test wyżej ("kolejność") jest już nieaktualny',
+    );
+});
+
+// ─── FAIL-CLOSED: configDir jeszcze nieznany ───────────────────────────────────────────
+
+test.serial('fail-closed: nieznany configDir blokuje KAŻDY ukryty folder', t => {
+    AccessGuard.setNoGoFolders([]); // configDir = null (stan startowy procesu / po afterEach)
+
+    const d = AccessGuard.checkAccess(agentZCalymVaultem, '.cokolwiek/x.md', 'read');
+    t.false(d.allowed, 'ukryty folder przeszedł, choć nie wiadomo jeszcze, który z nich jest configiem');
+    t.regex(d.reason, /No-Go/i, `odmowa przyszła z innej bramki niż No-Go (reason: ${d.reason})`);
+
+    // Zwykła notatka fail-closed NIE dotyczy — blokada jest wąska, tylko na ukryte foldery.
+    t.true(AccessGuard.checkAccess(agentZCalymVaultem, 'Notatki/a.md', 'read').allowed);
+});
+
+test.serial('fail-closed: `.pkm-assistant` zostaje przy swojej bramce (_checkPkmPath), nie przy No-Go', t => {
+    AccessGuard.setNoGoFolders([]); // configDir = null
+
+    // Cudzy folder agenta ma odpaść — ale z bramki pluginu, nie z No-Go. Gdyby fail-closed
+    // zjadał `.pkm-assistant`, agent straciłby też WŁASNĄ pamięć (asercja niżej).
+    const cudzy = AccessGuard.checkAccess(agentZCalymVaultem, '.pkm-assistant/agents/inny/memory/brain.md', 'read');
+    t.false(cudzy.allowed);
+    t.notRegex(cudzy.reason, /No-Go/i, `bebechy pluginu wpadły do No-Go zamiast do _checkPkmPath (reason: ${cudzy.reason})`);
+
+    // Własny folder agenta („Tester" → safeName „tester") przechodzi mimo fail-closed.
+    const wlasny = AccessGuard.checkAccess(agentZCalymVaultem, '.pkm-assistant/agents/tester/memory/brain.md', 'read');
+    t.true(wlasny.allowed, 'fail-closed odciął agenta od jego własnej pamięci');
+    t.is(wlasny.reason, 'own-agent-folder');
+});
+
+test.serial('configDir znany = fail-closed się wyłącza: inne ukryte foldery przechodzą', t => {
+    AccessGuard.setConfigDir('.mojkonfig');
+    AccessGuard.setNoGoFolders([]);
+
+    t.true(
+        AccessGuard.checkAccess(agentZCalymVaultem, '.inny-ukryty/x.md', 'read').allowed,
+        'fail-closed nie wyłączył się mimo znanego configDira — blokuje ukryte foldery na zapas',
+    );
+    t.false(
+        AccessGuard.checkAccess(agentZCalymVaultem, '.mojkonfig/x', 'read').allowed,
+        'sam configDir przestał blokować',
+    );
+});
+
+test.serial('filterResults: fail-closed wycina ukryte foldery z listingów (poza .pkm-assistant)', t => {
+    AccessGuard.setNoGoFolders([]); // configDir = null, migawka pusta
+
+    const wyniki = [
+        { path: '.ukryty/a.md' },
+        { path: '.trash/b.md' },
+        { path: '.pkm-assistant/skills/s.md' },
+        { path: 'Notatki/c.md' },
+    ];
+
+    t.deepEqual(
+        AccessGuard.filterResults(agentZCalymVaultem, wyniki).map(r => r.path),
+        ['.pkm-assistant/skills/s.md', 'Notatki/c.md'],
+        'do wyników search/list przeciekł ukryty folder przy nieznanym configDirze',
     );
 });

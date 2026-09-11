@@ -11,8 +11,8 @@
  *
  * Plik jest świadomą sierotą grafu produkcyjnego — woła go wydanie, nie kod wtyczki.
  */
-import fs from 'node:fs';
-import path from 'node:path';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 /**
  * Rozpoznawany kształt nazwy pliku notatek — DOKŁADNIE trzy segmenty semver + `.md`,

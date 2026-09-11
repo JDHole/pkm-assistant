@@ -268,6 +268,25 @@ export async function runAgentLoop({
     let lastText = '';
     let currentToolDefs: ToolDefinition[] = [];
 
+    /**
+     * `.catch()` na promisie zwróconej przez `model.stream()` dostaje `reason: any` (standardowa
+     * sygnatura `Promise.prototype.catch`) - `@typescript-eslint/prefer-promise-reject-errors`
+     * wymaga, żeby `reject(...)` dostawał coś PROWALNIE `Error`em. Adapter modeli (`ChatModel`,
+     * `modules/models`) rzuca `NormalizedError`/`ModelRequestError` - konsumenci pętli czytają
+     * z odrzucenia `code`/`http_status`/`message`, więc zwykłe `new Error(String(reason))`
+     * zgubiłoby te pola. `agent-loop` świadomie NIE zależy od `modules/models` (patrz komentarz
+     * modułu i `LoopModelLike` wyżej), więc to jest LOKALNY, strukturalny odpowiednik takiego
+     * opakowania - `Object.assign` dokleja oryginalne pola na odrzucany `Error` zamiast je
+     * gubić. Realny `Error` (już poprawny) przechodzi nietknięty.
+     */
+    const toRejectableError = (reason: unknown): Error => {
+        if (reason instanceof Error) return reason;
+        const hasMessage = reason && typeof reason === 'object' && typeof (reason as { message?: unknown }).message === 'string';
+        const err = new Error(hasMessage ? (reason as { message: string }).message : String(reason));
+        if (reason && typeof reason === 'object') Object.assign(err, reason);
+        return err;
+    };
+
     logger.group?.('AgentLoop', `runAgentLoop (min ${minIterations}, max ${maxIterations} iteracji)${agentName ? ` — ${agentName}` : ''}`);
 
     // Trace: start pętli. model = tania nazwa/id modelu jeśli dostępna, inaczej pomiń pole.
@@ -304,7 +323,7 @@ export async function runAgentLoop({
                     // w template literal to błąd `lint:obsidian`.
                     catch (e) { logger.warn?.('AgentLoop', 'onGateAdmitted rzucił (ignorowane):', e); }
                 }
-            })).catch((err) => reject(err));
+            })).catch((err: unknown) => reject(toRejectableError(err)));
         });
         const racers: Promise<ModelResponse>[] = [streamPromise];
         // Wspólne sprzątanie budzików po rozstrzygniętym wyścigu (wzór DelegateTool._withTimeout) -

@@ -265,7 +265,13 @@ function browserDocument(): Document | null {
     // `typeof` zamiast `globalThis.document`: w gołym Node zmienna po prostu nie istnieje,
     // a `window` nie ma tu prawa wystąpić — ten plik musi wstawać poza Obsidianem.
     if (typeof document === 'undefined') return null;
-    return typeof document.createDocumentFragment === 'function' ? document : null;
+    // Bramka na globalną `createFragment` (Obsidian), NIE na `document.createDocumentFragment`:
+    // `toDom`/`fragmentFromHtml` wołają dziś `createFragment()` i `parent.createEl(...)` (Obsidianowe
+    // rozszerzenia DOM - patrz komentarze przy tych wywołaniach), nie natywne metody `document`.
+    // Środowisko bywa "document jest, globali Obsidiana nie ma" (goły DOM bez patcha Obsidiana,
+    // np. jsdom) - sprawdzenie natywnej metody puszczałoby dalej, a `createFragment()` wybuchłby
+    // ReferenceError zamiast bezpiecznie spaść do ścieżki `PlainNode`.
+    return typeof createFragment === 'function' ? document : null;
 }
 
 function toDom(doc: Document, nodes: ParsedNode[], parent: Node): void {
@@ -273,7 +279,12 @@ function toDom(doc: Document, nodes: ParsedNode[], parent: Node): void {
         if (!isElement(node)) { parent.appendChild(doc.createTextNode(node.text)); continue; }
         let el: HTMLElement;
         try {
-            el = doc.createElement(node.tag);
+            // `obsidianmd/prefer-create-el`: Obsidian rozszerza `Node` o `createEl` - w
+            // odróżnieniu od `doc.createElement`, ten TWORZY znacznik I OD RAZU dopina go do
+            // `parent` (kolejność: dopięcie, potem atrybuty i dzieci). Końcowy DOM wychodzi
+            // identyczny, bo zawsze budujemy w ODERWANYM fragmencie (nigdy w żywym dokumencie)
+            // - wcześniejsze dopięcie nie odpala layoutu ani obserwatorów.
+            el = parent.createEl(node.tag as keyof HTMLElementTagNameMap);
         } catch {
             // Nazwa, której przeglądarka nie przyjmuje — wpuszczamy samą treść.
             toDom(doc, node.children, parent);
@@ -283,7 +294,6 @@ function toDom(doc: Document, nodes: ParsedNode[], parent: Node): void {
             try { el.setAttribute(attr.name, attr.value); } catch { /* nazwa nie do przyjęcia */ }
         }
         toDom(doc, node.children, el);
-        parent.appendChild(el);
     }
 }
 
@@ -307,7 +317,14 @@ export function fragmentFromHtml(html: string): DocumentFragment {
 
     const doc = browserDocument();
     if (doc) {
-        const fragment = doc.createDocumentFragment();
+        // `obsidianmd/prefer-create-el` flaguje też `doc.createDocumentFragment()` - ale
+        // `Window` w opublikowanym `obsidian.d.ts` NIE MA `createFragment` (`doc.win.createFragment()`,
+        // sugestia reguły, nie przechodzi `tsc`), więc jedynym TYPOWANYM odpowiednikiem jest
+        // globalna pomocnicza Obsidiana `createFragment()`. `browserDocument()` wyżej i tak
+        // zwraca WYŁĄCZNIE globalny `document` (nigdy `activeDocument` z innego okna), a w
+        // zainstalowanym Obsidianie `createFragment()` to dosłownie `document.createDocumentFragment()`
+        // (zweryfikowane w `test-support/dom-shim.ts`) - zero różnicy w zachowaniu.
+        const fragment = createFragment();
         toDom(doc, clean, fragment);
         return fragment;
     }

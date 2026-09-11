@@ -6,12 +6,14 @@ import { Notice } from 'obsidian';
 import { UiIcons } from '../../crystal-soul/index.js';
 import { HiddenFileEditorModal } from './HiddenFileEditorModal.js';
 import { t } from '../../../core/i18n/index.js';
+import type { AppLike } from '../../../core/index.js';
 
 // Preserve the legacy Crystal Soul module initialization after TypeScript import elision.
 void UiIcons;
 
-// TS-any: Obsidian augments DOM elements and vault nodes at runtime beyond its static declarations.
-type UiBoundary = any;
+/** Obsidian's TAbstractFile tree shape, in the fields getAllVaultFolders reads. */
+interface VaultFolderLike { name: string; path: string; children?: VaultFolderLike[]; }
+
 interface ShardOptions {
     big?: boolean;
     placeholder?: string;
@@ -25,7 +27,7 @@ interface ShardOptions {
 /**
  * Render a Crystal Soul shard-style form field.
  */
-export function renderShard(container: HTMLElement, label: string, sublabel: string | null, value: UiBoundary, type: string, onChange: (value: UiBoundary) => void, opts: ShardOptions = {}) {
+export function renderShard(container: HTMLElement, label: string, sublabel: string | null, value: string | number, type: string, onChange: (value: string | number) => void, opts: ShardOptions = {}) {
     const shard = container.createDiv({
         cls: `cs-shard ${value ? 'cs-shard--filled' : 'cs-shard--empty'} ${opts.big ? 'cs-shard--big' : ''}`
     });
@@ -43,7 +45,7 @@ export function renderShard(container: HTMLElement, label: string, sublabel: str
         });
     } else if (type === 'textarea') {
         const textarea = shard.createEl('textarea', { cls: 'cs-shard__textarea' });
-        textarea.value = value || '';
+        textarea.value = (value as string) || '';
         textarea.rows = opts.rows || 5;
         textarea.placeholder = opts.placeholder || '';
         textarea.addEventListener('change', (e: Event) => onChange((e.target as HTMLTextAreaElement).value));
@@ -52,7 +54,7 @@ export function renderShard(container: HTMLElement, label: string, sublabel: str
         for (const opt of (opts.options || [])) {
             select.createEl('option', { value: opt.value, text: opt.label });
         }
-        select.value = value || '';
+        select.value = (value as string) || '';
         select.addEventListener('change', (e: Event) => {
             onChange((e.target as HTMLSelectElement).value);
         });
@@ -99,9 +101,9 @@ export function renderToggle(container: HTMLElement, label: string, desc: string
  * @param {import('obsidian').App} app
  * @returns {string[]}
  */
-export function getAllVaultFolders(app: UiBoundary) {
+export function getAllVaultFolders(app: AppLike) {
     const folders: string[] = [];
-    function traverse(folder: UiBoundary) {
+    function traverse(folder: VaultFolderLike) {
         for (const child of folder.children || []) {
             if (child.children !== undefined) {
                 if (child.name.startsWith('.')) continue;
@@ -110,14 +112,16 @@ export function getAllVaultFolders(app: UiBoundary) {
             }
         }
     }
-    traverse(app.vault.getRoot());
+    // TS-boundary: AppLike.vault has no `getRoot` (node-safe core contract, real Obsidian
+    // Vault has it) - same real object, this module's own read of its TAbstractFile tree shape.
+    traverse((app.vault as unknown as { getRoot(): VaultFolderLike }).getRoot());
     return folders.sort();
 }
 
 /**
  * Open a file from .pkm-assistant in an editor modal.
  */
-export async function openHiddenFile(app: UiBoundary, hiddenPath: string, title: string, opts: Record<string, unknown> = {}) {
+export async function openHiddenFile(app: AppLike, hiddenPath: string, title: string, opts: Record<string, unknown> = {}) {
     try {
         const adapter = app.vault.adapter;
         const exists = await adapter.exists(hiddenPath);
@@ -126,7 +130,11 @@ export async function openHiddenFile(app: UiBoundary, hiddenPath: string, title:
             return;
         }
         const content = await adapter.read(hiddenPath);
-        new HiddenFileEditorModal(app, hiddenPath, title, content, opts).open();
+        // TS-boundary: `app` here is AppLike (core's minimal node-safe contract);
+        // HiddenFileEditorModal wants the real obsidian App, whose workspace/vault members
+        // carry concrete class types AppLike's open shape doesn't structurally match in either
+        // direction.
+        new HiddenFileEditorModal(app as unknown as ConstructorParameters<typeof HiddenFileEditorModal>[0], hiddenPath, title, content, opts).open();
     } catch (e: unknown) {
         new Notice(t('profile.helpers.cannot_open') + (e as Error).message);
     }

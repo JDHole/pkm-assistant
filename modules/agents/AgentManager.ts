@@ -3,7 +3,9 @@
  * Central manager for all agents - loading, switching, and managing agent state
  */
 import { Notice } from 'obsidian';
+import type { App } from 'obsidian';
 import { AgentLoader } from './AgentLoader.js';
+import type { AgentVault } from './AgentLoader.js';
 import { Agent } from './Agent.js';
 import type { AgentPromptContext } from './Agent.js';
 import { defaultDisabledTools } from './toolAxis.js';
@@ -11,9 +13,12 @@ import { AgentMemory, MigrationV3 } from '../../modules/memory/index.js';
 import { MigrationModal } from './MigrationModal.js';
 import { runMigrationReview } from './migrationReviewFlow.js';
 import { SkillLoader, SkillTemplateStore } from '../../modules/skills/index.js';
+import type { SkillQuestion } from '../../modules/skills/index.js';
 import { ArtifactTypeLoader } from '../../modules/artifacts/index.js';
+import type { ThinArtifact } from '../../modules/artifacts/index.js';
 import { SubAgentLoader, SubAgentTemplateStore } from '../../modules/sub-agents/index.js';
 import { PlaybookManager } from '../../modules/onboarding/index.js';
+import type { VaultMapAgent } from '../../modules/onboarding/index.js';
 import {
     KomunikatorManager,
     isKomunikatorEnabled,
@@ -25,46 +30,60 @@ import { log } from '../../core/utils/Logger.js';
 import { clearModelCache } from '../../modules/models/index.js';
 import { getDateLocale, t } from '../../core/i18n/index.js';
 import { getAgentSafeName } from '../../core/index.js';
+import type { SettingsBag, PluginApi } from '../../core/index.js';
+import type { ToolRegistry } from '../../modules/tools/index.js';
+import type { ArtifactStore } from '../../modules/artifacts/index.js';
 import { createJaskier } from './archetypes/HumanVibe.js';
 import { VaultMap } from './VaultMap.js';
 import { ensureFactoryTemplates } from './factoryTemplates.js';
 import { renameAgentOnDisk } from './renameAgentFlow.js';
 
-// TS-any: manager is the DI boundary for runtime loaders still supplied by JavaScript modules in this migration wave.
-type RuntimeDependency = any;
+/**
+ * Local plugin boundary: narrows the few `PluginApi` fields this module actually reads/writes
+ * (base contract types them `unknown` - every module that touches one owns its own narrowing).
+ * Exported so `modules/agents/profile/*.ts` (2+ consumers) shares this shape instead of
+ * re-declaring it - see `profile/profile_types.ts`.
+ */
+export interface AgentsPlugin extends PluginApi {
+    agentManager?: AgentManager;
+    toolRegistry?: ToolRegistry;
+    artifactStore?: ArtifactStore;
+    registerEvent(ref: unknown): void;
+}
+
 interface PromptRuntimeContext extends AgentPromptContext {
     vaultMapDescriptions?: Record<string, string>;
     inboxPing?: { count: number; senders: string[] } | null;
     activeArtifactId?: string;
-    activeArtifact?: RuntimeDependency;
+    activeArtifact?: ThinArtifact | null;
 }
 
 /**
  * AgentManager class - manages all agents and their state
  */
 export class AgentManager {
-    declare vault: RuntimeDependency;
-    declare settings: RuntimeDependency;
-    declare plugin: RuntimeDependency;
+    declare vault: AgentVault;
+    declare settings: SettingsBag;
+    declare plugin: AgentsPlugin | null;
     declare loader: AgentLoader;
-    declare skillLoader: RuntimeDependency;
-    declare artifactTypeLoader: RuntimeDependency;
-    declare subAgentLoader: RuntimeDependency;
-    declare skillTemplateStore: RuntimeDependency;
-    declare subAgentTemplateStore: RuntimeDependency;
-    declare playbookManager: RuntimeDependency;
-    declare komunikatorManager: RuntimeDependency;
+    declare skillLoader: SkillLoader;
+    declare artifactTypeLoader: ArtifactTypeLoader;
+    declare subAgentLoader: SubAgentLoader;
+    declare skillTemplateStore: SkillTemplateStore;
+    declare subAgentTemplateStore: SubAgentTemplateStore;
+    declare playbookManager: PlaybookManager;
+    declare komunikatorManager: KomunikatorManager | null;
     declare vaultMap: VaultMap;
     declare agents: Map<string, Agent>;
     declare activeAgent: Agent | null;
-    declare agentMemories: Map<string, RuntimeDependency>;
-    declare listeners: Array<(event: string, data: RuntimeDependency) => void>;
+    declare agentMemories: Map<string, AgentMemory>;
+    declare listeners: Array<(event: string, data: Record<string, unknown>) => void>;
     declare _unwatchAgents: (() => void) | null;
     /**
      * @param {Object} vault - Obsidian Vault object
      * @param {Object} settings - Plugin settings
      */
-    constructor(vault: RuntimeDependency, settings: RuntimeDependency, plugin: RuntimeDependency = null) {
+    constructor(vault: AgentVault, settings: SettingsBag, plugin: AgentsPlugin | null = null) {
         this.vault = vault;
         this.settings = settings;
         this.plugin = plugin;
@@ -77,11 +96,11 @@ export class AgentManager {
         // Owner jak przy skillLoader/subAgentLoader - jedno miejsce instancjonowania.
         this.skillTemplateStore = new SkillTemplateStore(vault);
         this.subAgentTemplateStore = new SubAgentTemplateStore(vault);
-        this.playbookManager = new PlaybookManager(vault);
+        this.playbookManager = new PlaybookManager(vault as ConstructorParameters<typeof PlaybookManager>[0]);
         // Kill-switch: only instantiate the communicator when enabled (default false).
         // When null, every komunikatorManager callsite below is guarded with optional chaining.
         this.komunikatorManager = isKomunikatorEnabled(settings)
-            ? new (KomunikatorManager as unknown as new (...args: RuntimeDependency[]) => RuntimeDependency)(vault, this)
+            ? new KomunikatorManager(vault, this)
             : null;
         // Kesz nagłówków skrzynki w KomunikatorManager widzi TYLKO mutacje przez metody managera -
         // zapisy Z ZEWNĄTRZ (sesja Claude Code piszącą wprost na dysk przez kontrakt /agent,
@@ -92,7 +111,7 @@ export class AgentManager {
         // (np. część testów konstruuje AgentManager bez niego) po prostu nie podpinamy -
         // TTL w KomunikatorManager (5s) zostaje jedyną siatką bezpieczeństwa.
         this.komunikatorManager?.attachVaultEvents?.(
-            this.plugin?.registerEvent ? (ref: unknown) => this.plugin.registerEvent(ref) : undefined,
+            this.plugin?.registerEvent ? (ref: unknown) => this.plugin!.registerEvent(ref) : undefined,
         );
         this.vaultMap = new VaultMap(vault);
 
@@ -134,7 +153,9 @@ export class AgentManager {
             }));
 
             // Set default active agent (Jaskier or first available)
-            const defaultAgentName = this.settings?.defaultAgent || 'Jaskier';
+            // TS-boundary: `settings` is the open plugin settings bag (SettingsBag index signature
+            // types unknown keys `unknown`); `defaultAgent` has never been a declared field.
+            const defaultAgentName = (this.settings?.defaultAgent as string | undefined) || 'Jaskier';
             this.activeAgent = this.agents.get(defaultAgentName) || allAgents[0] || null;
             log.info('AgentManager', `Aktywny agent: ${this.activeAgent?.name || 'BRAK'}`);
 
@@ -181,7 +202,10 @@ export class AgentManager {
             }
 
             // Playbooks depend on skills + sub-agents being loaded
-            await this.playbookManager.ensureStarterFiles(allAgents);
+            // TS-boundary: Agent.focusFolders (AgentFocusFolder - path/access/group all optional
+            // on one shape) vs VaultMapFocusFolder (string | {path,access} | {group}, path
+            // required in the object branch) - same runtime entries, stricter union on this side.
+            await this.playbookManager.ensureStarterFiles(allAgents as VaultMapAgent[]);
 
             this._emit('agents:loaded', { count: this.agents.size });
 
@@ -326,8 +350,15 @@ export class AgentManager {
     async _initializeMemoryForAgent(agent: Agent) {
         const memory = new AgentMemory(this.vault, agent.name, this.settings);
         const migration = new MigrationV3(memory, {
+            // TS-boundary: this.plugin.app is AppLike (minimal node-safe contract), MigrationModal
+            // wants the real obsidian App - AppLike doesn't structurally match App in either
+            // direction. `as never` (odziedziczone z main): memory/MigrationV3.ts and
+            // agents/MigrationModal.ts each declare their OWN `MigrationPlan` interface and the
+            // two have drifted apart, so the modalFactory's real MigrationModal return doesn't
+            // structurally satisfy MigrationV3's MigrationModalLike shape - fix belongs to whoever
+            // unifies the two MigrationPlan declarations, out of scope for this typing wave.
             modalFactory: this.plugin?.app
-                ? (opts) => new MigrationModal(this.plugin.app, opts) as never
+                ? (opts) => new MigrationModal(this.plugin!.app as unknown as App, opts) as never
                 : null,
         });
 
@@ -366,7 +397,7 @@ export class AgentManager {
      * @param {string|undefined} promptAppend - `ovr.prompt_append`
      * @returns {string|undefined} `basePrompt` niezmieniony, gdy `promptAppend` jest puste
      */
-    _applyPromptAppend(basePrompt: string | undefined, agentName: string, promptAppend: string | undefined): string | undefined {
+    _applyPromptAppend(basePrompt: string, agentName: string, promptAppend: string | undefined): string {
         if (!promptAppend) return basePrompt;
         return (basePrompt || '') + '\n\n--- Instrukcje per-agent (' + agentName + ') ---\n' + promptAppend;
     }
@@ -391,10 +422,13 @@ export class AgentManager {
             merged.prompt = this._applyPromptAppend(base.prompt, agent.name, ovr.prompt_append);
         }
         if (ovr.model) merged.model = ovr.model;
-        if (ovr.pre_question_defaults && merged.preQuestions?.length > 0) {
-            merged.preQuestions = merged.preQuestions.map((pq: RuntimeDependency) => ({
+        if (ovr.pre_question_defaults && (merged.preQuestions?.length as number) > 0) {
+            // `!`: the `merged.preQuestions?.length > 0` guard just above runtime-guarantees a
+            // non-null, non-empty array here (optional chaining makes a null/undefined base
+            // produce `undefined > 0` = false, which would have skipped this branch).
+            merged.preQuestions = merged.preQuestions!.map((pq: SkillQuestion) => ({
                 ...pq,
-                default: ovr.pre_question_defaults![pq.key] ?? pq.default
+                default: (ovr.pre_question_defaults![pq.key] as string | undefined) ?? pq.default
             }));
         }
 
@@ -472,7 +506,9 @@ export class AgentManager {
             merged.tools = [...new Set([...(base.tools || []), ...ovr.extra_tools!])];
         }
         if (ovr.scope) {
-            merged.scope = { ...(base.scope || {}), ...ovr.scope };
+            // TS-boundary: ovr.scope is an open user-config bag (Record<string, unknown>, per
+            // AgentSubAgentOverrides); merged with base.scope exactly as before, shape untouched.
+            merged.scope = { ...(base.scope || {}), ...ovr.scope } as typeof base.scope;
         }
         if (ovr.max_iterations) merged.max_iterations = ovr.max_iterations;
 
@@ -498,8 +534,8 @@ export class AgentManager {
         // disableModelInvocation (manual-only skille lądują na osobnej liście) + path/slug
         // (model dostaje gotową ścieżkę SKILL.md do read() - pełny przepis przez narzędzie).
         const skills = this.skillLoader.getSkillsForAgent(agent.skills)
-            .filter((s: RuntimeDependency) => s.enabled !== false)
-            .map((s: RuntimeDependency) => ({
+            .filter((s) => s.enabled !== false)
+            .map((s) => ({
                 name: s.name,
                 slug: s.slug,
                 description: s.description,
@@ -515,12 +551,12 @@ export class AgentManager {
 
         // Artefakty agenta W TOKU (status ≠ zamkniety) - do indeksu w prompcie.
         // Śledzenie po frontmatterze (metadataCache), synchronicznie; brak store'a/cache → pusto.
-        let artifactList = [];
+        let artifactList: unknown[] = [];
         try {
             const store = this.plugin?.artifactStore;
             if (store?.list) {
                 artifactList = store.list({ agent: agent.name })
-                    .filter((a: RuntimeDependency) => a.status !== 'zamkniety');
+                    .filter((a) => a.status !== 'zamkniety');
             }
         } catch { /* store niegotowy / brak cache → pusta lista */ }
 
@@ -551,11 +587,14 @@ export class AgentManager {
 
         const pkm = this.settings?.pkmAssistant || {};
 
+        // TS-boundary: PkmAssistantSettings has an open index signature for these three fields
+        // (plugin settings.json, user-editable) - cast each to the shape this method already
+        // assumed of them.
         // Disabled prompt sections from settings
-        const disabledPromptSections = pkm.disabledPromptSections || [];
+        const disabledPromptSections = (pkm.disabledPromptSections as string[] | undefined) || [];
 
         // Global prompt overrides from settings (user-editable sections)
-        const promptDefaults = pkm.promptDefaults || {};
+        const promptDefaults = (pkm.promptDefaults as Record<string, unknown> | undefined) || {};
 
         // Rola rozpuszczona - brak roleData/roleBinding w kontekście promptu.
 
@@ -772,7 +811,9 @@ export class AgentManager {
         this.agentMemories.set(agent.name, memory);
 
         // Create playbook.md + vault_map.md for the new agent
-        await this.playbookManager.ensureStarterFiles([agent]);
+        // TS-boundary: same AgentFocusFolder vs VaultMapFocusFolder path-optionality mismatch as
+        // above (initialize()).
+        await this.playbookManager.ensureStarterFiles([agent] as VaultMapAgent[]);
 
         this._emit('agent:created', { agent: agent.name });
 
@@ -888,7 +929,7 @@ export class AgentManager {
         }
 
         const { name: _renamedName, ...rest } = updates;
-        agent.update(rest as Parameters<Agent['update']>[0]);
+        agent.update(rest);
 
         // Persist changes (agent.name może już być NOWĄ nazwą po renameAgent powyżej -
         // saveAgent/saveBuiltInOverrides liczą ścieżkę z aktualnej wartości).
@@ -1042,7 +1083,10 @@ export class AgentManager {
         // If deleted agent was active, switch to another or recreate Jaskier
         if (this.activeAgent?.name === name) {
             if (this.agents.size > 0) {
-                const firstAgent = this.agents.values().next().value;
+                // `as Agent`: `IteratorResult.value` types `any` for the `done:true` arm (its
+                // `TReturn` generic defaults to `any`) - `this.agents.size > 0` guarantees a real
+                // entry here.
+                const firstAgent = this.agents.values().next().value as Agent;
                 this.switchAgent(firstAgent.name);
             } else {
                 // No agents left - recreate Jaskier as fallback
@@ -1066,7 +1110,9 @@ export class AgentManager {
         const memory = await this._initializeMemoryForAgent(jaskier);
         this.agentMemories.set(jaskier.name, memory);
 
-        await this.playbookManager.ensureStarterFiles([jaskier]);
+        // TS-boundary: same AgentFocusFolder vs VaultMapFocusFolder path-optionality mismatch as
+        // above (initialize()).
+        await this.playbookManager.ensureStarterFiles([jaskier] as VaultMapAgent[]);
 
         this.activeAgent = jaskier;
         this._emit('agent:created', { agent: jaskier.name });
@@ -1111,7 +1157,7 @@ export class AgentManager {
      * @param {Function} callback - Event handler (event, data) => void
      * @returns {Function} Unsubscribe function
      */
-    on(callback: (event: string, data: RuntimeDependency) => void) {
+    on(callback: (event: string, data: Record<string, unknown>) => void) {
         this.listeners.push(callback);
         return () => {
             const index = this.listeners.indexOf(callback);
@@ -1123,7 +1169,7 @@ export class AgentManager {
      * Emit event to all listeners
      * @private
      */
-    _emit(event: string, data: RuntimeDependency) {
+    _emit(event: string, data: Record<string, unknown>) {
         for (const listener of this.listeners) {
             try {
                 listener(event, data);

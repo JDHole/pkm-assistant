@@ -7,13 +7,13 @@
  *   nie egzekwowało, a pokazywała martwe nazwy narzędzi z TOOL_INFO.
  */
 import { Modal, Setting, Notice } from 'obsidian';
+import type { App } from 'obsidian';
 import { UiIcons, setSvgLabel } from '../crystal-soul/index.js';
 import { confirmModal } from '../ui-components/index.js';
 import { t } from '../../core/i18n/index.js';
 import { log } from '../../core/utils/Logger.js';
-import type { SkillData, SkillInput } from './types.js';
-// TS-any: Obsidian Modal/App and plugin services are runtime-provided structural APIs.
-type UiBoundary = any;
+import type { SkillData, SkillInput, SkillQuestion, SkillsPlugin } from './types.js';
+import type { SkillTemplateRecord } from './SkillTemplateStore.js';
 
 /** Suggested categories (user can type anything) */
 const CATEGORY_SUGGESTIONS = ['productivity', 'writing', 'organization', 'analysis', 'system', 'creative'];
@@ -24,8 +24,8 @@ const CATEGORY_PLACEHOLDER = 'productivity';
 const TAGS_PLACEHOLDER = 'weekly, review, planning';
 
 export class SkillEditorModal extends Modal {
-    declare plugin: UiBoundary;
-    declare existing: SkillData | null;
+    declare plugin: SkillsPlugin;
+    declare existing: SkillData | SkillTemplateRecord | null;
     declare onSave: ((data?: SkillInput) => void) | null;
     declare isEditMode: boolean;
     declare isTemplate: boolean;
@@ -42,7 +42,7 @@ export class SkillEditorModal extends Modal {
      * @param {boolean} [options.alsoTemplate] - pokaż checkbox „Zapisz też jako szablon"
      *        (tworzenie żywego skilla u agenta — pętla szablonów domknięta).
      */
-    constructor(app: UiBoundary, plugin: UiBoundary, existing: SkillData | null = null, onSave: ((data?: SkillInput) => void) | null = null, options: { template?: boolean; alsoTemplate?: boolean } = {}) {
+    constructor(app: App, plugin: SkillsPlugin, existing: SkillData | SkillTemplateRecord | null = null, onSave: ((data?: SkillInput) => void) | null = null, options: { template?: boolean; alsoTemplate?: boolean } = {}) {
         super(app);
         this.plugin = plugin;
         this.existing = existing;
@@ -92,7 +92,10 @@ export class SkillEditorModal extends Modal {
             model: this.existing?.model || '',
             disableModelInvocation: this.existing?.disableModelInvocation ?? false,
             userInvocable: this.existing?.userInvocable !== false,
-            preQuestions: JSON.parse(JSON.stringify(this.existing?.preQuestions || [])),
+            // `as SkillQuestion[]`: `JSON.parse` (lib.es5.d.ts) zwraca `any` — round-trip przez
+            // stringify/parse to celowy deep-clone (edycja pytań w formularzu nie mutuje
+            // `this.existing`), kształt po drugiej stronie jest ten sam co przed.
+            preQuestions: JSON.parse(JSON.stringify(this.existing?.preQuestions || [])) as SkillQuestion[],
             prompt: this.existing?.prompt || ''
         };
 
@@ -361,7 +364,11 @@ export class SkillEditorModal extends Modal {
                     new Notice(t('modal.skill_editor.loader_unavailable'));
                     return;
                 }
-                const result = this.isEditMode
+                // Adnotacja: `save`/`createFromData` mają RÓŻNE kształty zwrotki (jedna niesie
+                // `version`, druga `name`+`renamed`) — oba są strukturalnie zgodne z tym szerszym
+                // typem (brakujące pole jest tu opcjonalne), więc przypisanie nie zwęża go z
+                // powrotem do unii, na której `result.version`/`result.name` niżej by nie istniały.
+                const result: { success: boolean; slug?: string; name?: string; version?: number; renamed?: boolean; error?: string } = this.isEditMode
                     ? await store.save(this.existing!.slug, formData)
                     : await store.createFromData(formData);
                 if (!result?.success) {

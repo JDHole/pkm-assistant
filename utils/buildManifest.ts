@@ -8,7 +8,10 @@
  *
  * Plik jest świadomą sierotą grafu produkcyjnego — woła go build, nie kod wtyczki.
  */
-import path from 'node:path';
+// `import * as path`, nie `import path`: walidator katalogu Obsidiana jedzie własną
+// konfiguracją BEZ `esModuleInterop`, więc default-import z modułu CJS jest dla niego
+// typem-błędem i każde `path.join(...)` daje mu kaskadę `no-unsafe-*`. Zachowanie identyczne.
+import * as path from 'node:path';
 
 /** Marker dla community-pluginu Hot-Reload: pusty plik zakładany przy każdym deployu. */
 export const HOT_RELOAD_MARKER = '.hotreload';
@@ -73,17 +76,16 @@ export function parseDestinationVaults(raw: string | undefined): string[] {
 
 /**
  * Katalog docelowy deployu dla jednego vaulta:
- * `<vaultPath>/.obsidian/plugins/<pluginId>`.
+ * `<vaultPath>/<configDir>/plugins/<pluginId>`.
  *
- * `pluginId` przychodzi z `manifest.id`, nigdy z literału w skrypcie — inaczej
- * zmiana identyfikatora wtyczki cicho rozjechałaby deploy z instalacją.
- *
- * ⚠️ Nazwa katalogu konfiguracyjnego jest tu ZAPISANA NA SZTYWNO i walidator katalogu
- * słusznie to zauważa (`Vault#configDir` pozwala ją userowi zmienić). To świadome:
- * funkcję woła build z gołego Node'a, gdzie żadnego `Vault` nie ma — a deploy celuje
- * w vault dewelopera, nie w instalację użytkownika. Zmiana wymagałaby przekazania
- * nazwy katalogu z `.env`, czego dziś nikt nie potrzebuje.
+ * ŻADEN z trzech członów nie jest literałem w tym pliku, i to jest cała jego treść:
+ * - `pluginId` przychodzi z `manifest.id` — inaczej zmiana identyfikatora wtyczki cicho
+ *   rozjechałaby deploy z instalacją;
+ * - `configDir` przychodzi ze zmiennej `DESTINATION_CONFIG_DIR` z `.env` (patrz
+ *   `esbuild.js`) — nazwę folderu konfiguracji ustala user vaulta docelowego i build
+ *   z gołego Node'a nie ma jak jej odczytać, więc jej NIE ZGADUJE: brak zmiennej =
+ *   jedno ostrzeżenie i pominięty deploy, nie strzał w domyślną nazwę.
  */
-export function pluginDeployDir(vaultPath: string, pluginId: string): string {
-    return path.join(vaultPath, '.obsidian', 'plugins', pluginId);
+export function pluginDeployDir(vaultPath: string, configDir: string, pluginId: string): string {
+    return path.join(vaultPath, configDir, 'plugins', pluginId);
 }

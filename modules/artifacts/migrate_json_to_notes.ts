@@ -18,10 +18,56 @@ const ARTIFACTS_BASE = '.pkm-assistant/artifacts';
 const MIGRATED_MARKER = `${ARTIFACTS_BASE}/.migrated-v2`;
 const PLAN_REVIEW_SUBFOLDER = `${ARTIFACTS_BASE}/plan_review`;
 
-// TS-any: legacy JSON records have several historical, undocumented payload schemas.
-interface LegacyArtifactRecord { [key: string]: any; data?: Record<string, any>; type?: string; status?: string; title?: string; createdBy?: string; agentName?: string; createdAt?: string; updatedAt?: string; }
-// TS-any: migration adapter mirrors Obsidian's untyped dot-folder adapter.
-interface MigrationDependencies { adapter: any; store: { importInstance(typ: string, opts: Record<string, unknown>): Promise<unknown> }; now?: () => Date; }
+/** Kształt starego JSON-a artefaktu — kilka historycznych, nieudokumentowanych wariantów
+ *  (`ArtifactManager` sprzed `ArtifactStore`), stąd same pola opcjonalne. */
+interface LegacyArtifactRecord {
+    data?: {
+        artifactType?: string;
+        title?: string;
+        createdBy?: string;
+        approved?: boolean;
+        status?: string;
+        markdown?: string;
+        steps?: unknown;
+    };
+    type?: string;
+    status?: string;
+    title?: string;
+    createdBy?: string;
+    agentName?: string;
+    createdAt?: string;
+    updatedAt?: string;
+    markdown?: string;
+    steps?: unknown;
+}
+
+/** Jeden krok starego `plan_review` — sam string albo obiekt; string ma te pola `undefined`
+ *  w JS (nie rzuca), więc jeden kształt z samymi opcjonalnymi polami pokrywa oba warianty. */
+interface LegacyStepRecord {
+    action?: string;
+    text?: string;
+    label?: string;
+    status?: string;
+    done?: boolean;
+}
+
+/** Powierzchnia `vault.adapter`, jakiej potrzebuje migrator (dotfolder: exists/read/write/
+ *  remove/mkdir/list) — ten sam duck-type co realny Obsidian `DataAdapter`, wstrzykiwany dla
+ *  testowalności na fixture (komentarz modułu: „node-testowalny na fixture"). */
+interface MigrationAdapter {
+    exists(path: string): Promise<boolean>;
+    read(path: string): Promise<string>;
+    write(path: string, content: string): Promise<void>;
+    remove(path: string): Promise<void>;
+    mkdir(path: string): Promise<void>;
+    list(path: string): Promise<{ files?: string[]; folders?: string[] } | null | undefined>;
+}
+
+interface MigrationDependencies {
+    adapter: MigrationAdapter;
+    store: { importInstance(typ: string, opts: Record<string, unknown>): Promise<unknown> };
+    now?: () => Date;
+}
 
 /** Data w formacie YYYY-MM-DD (do nazwy folderu backupu) - JEDEN helper. */
 function today(now?: () => Date): string {
@@ -48,12 +94,16 @@ function mapStatus(record: LegacyArtifactRecord): string {
 /** Kroki starego plan_review → linie checkboxów `- [ ] text ^kN`. */
 function stepsToCheckboxes(steps: unknown): string {
     if (!Array.isArray(steps)) return '';
-    const lines = [];
+    const lines: string[] = [];
     let n = 1;
-    for (const step of steps) {
-        const text = typeof step === 'string' ? step : (step && (step.action || step.text || step.label)) || '';
+    // Array.isArray() zawęża `unknown` do `any[]` (sygnatura lib.es5.d.ts) - rzutujemy inline
+    // z powrotem na `unknown[]`, żeby dalsze odczyty szły przez jawne asercje niżej, nie przez `any`.
+    for (const step of steps as unknown[]) {
+        // TS-boundary: krok starego JSON-a plan_review - string albo obiekt, bez walidacji
+        // schematem (dane historyczne, migrator jednorazowy, patrz LegacyStepRecord wyżej).
+        const text = typeof step === 'string' ? step : (step && ((step as LegacyStepRecord).action || (step as LegacyStepRecord).text || (step as LegacyStepRecord).label)) || '';
         if (!text) continue;
-        const checked = step && (step.status === 'done' || step.done === true);
+        const checked = step && ((step as LegacyStepRecord).status === 'done' || (step as LegacyStepRecord).done === true);
         lines.push(`- [${checked ? 'x' : ' '}] ${String(text).replace(/\s*\r?\n\s*/g, ' ').trim()} ^k${n}`);
         n++;
     }
@@ -102,7 +152,7 @@ export async function migrateJsonArtifactsToNotes({ adapter, store, now }: Parti
         if (await adapter.exists(MIGRATED_MARKER)) return { migrated: 0, backedUp: 0, skipped: true, reason: 'already_migrated' };
 
         // Zbierz źródłowe JSONy: top-level + zakopany plan_review/.
-        const sources = [];
+        const sources: string[] = [];
         const top = await adapter.list(ARTIFACTS_BASE);
         for (const f of (top?.files || [])) if (f.endsWith('.json')) sources.push(f);
         if (await adapter.exists(PLAN_REVIEW_SUBFOLDER)) {
@@ -124,7 +174,10 @@ export async function migrateJsonArtifactsToNotes({ adapter, store, now }: Parti
             let raw: string | undefined;
             try {
                 raw = await adapter.read(path);
-                record = JSON.parse(raw as string) as LegacyArtifactRecord;
+                // TS-boundary: stary JSON artefaktu z dysku - kilka historycznych, nieudokumentowanych
+                // wariantów (patrz LegacyArtifactRecord wyżej), bez walidacji schematem (migrator
+                // jednorazowy, nieczytelny/niepasujący wpis i tak ląduje w backupie niżej).
+                record = JSON.parse(raw) as LegacyArtifactRecord;
             } catch {
                 // Nieczytelny JSON → backup, nie kasujemy na ślepo.
                 await moveToBackup(adapter, path, raw, backupDir);
@@ -141,8 +194,8 @@ export async function migrateJsonArtifactsToNotes({ adapter, store, now }: Parti
 
             try {
                 await store.importInstance(typ, {
-                    tytul: (record.title || record.data?.title || 'Artefakt') as string,
-                    agent: (record.createdBy || record.data?.createdBy || record.agentName || 'agent') as string,
+                    tytul: record.title || record.data?.title || 'Artefakt',
+                    agent: record.createdBy || record.data?.createdBy || record.agentName || 'agent',
                     status: mapStatus(record),
                     body: buildBody(typ, record),
                     utworzono: dateOnly(record.createdAt),
@@ -166,8 +219,7 @@ export async function migrateJsonArtifactsToNotes({ adapter, store, now }: Parti
 }
 
 /** Przenieś plik źródłowy do folderu backupu (zachowuje surową treść) i usuń oryginał. */
-// TS-any: migration adapter mirrors Obsidian's untyped dot-folder adapter.
-async function moveToBackup(adapter: any, path: string, raw: string | undefined, backupDir: string): Promise<void> {
+async function moveToBackup(adapter: MigrationAdapter, path: string, raw: string | undefined, backupDir: string): Promise<void> {
     try {
         if (!(await adapter.exists(backupDir))) await adapter.mkdir(backupDir);
         const name = path.split('/').pop();
@@ -177,8 +229,7 @@ async function moveToBackup(adapter: any, path: string, raw: string | undefined,
     } catch { /* best-effort — nie wywalaj migracji przez jeden plik */ }
 }
 
-// TS-any: migration adapter mirrors Obsidian's untyped dot-folder adapter.
-async function safeRead(adapter: any, path: string): Promise<string> {
+async function safeRead(adapter: MigrationAdapter, path: string): Promise<string> {
     try { return await adapter.read(path); } catch { return ''; }
 }
 

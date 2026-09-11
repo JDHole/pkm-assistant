@@ -6,9 +6,10 @@
  * global), a ten sam kod `core/` i `modules/` jedzie też w Node — testy AVA i harness
  * bootują plugin bez Obsidiana. Tam `window` z natury nie istnieje, więc KAŻDY kontekst
  * Node, który naprawdę wykonuje kod pluginu, dostarcza je sam:
- *   * testy AVA — preload `test-support/register-obsidian-for-ava.mjs` (okno = global Node),
+ *   * testy AVA — `test-support/register-obsidian-for-ava.mjs` (od 2026-09-11 lokator: znajduje
+ *     checkout harnessu i importuje stamtąd właściwy preload, który ustawia okno = global Node),
  *   * harness „Szklane Pudło" (osobne repo, https://github.com/JDHole/pkm-assistant-harness) —
- *     `test-support/dom-shim.ts` (to samo, plus atrapa `document`).
+ *     jego WŁASNY `test-support/dom-shim.ts` (to samo, plus atrapa `document`).
  * Jedyny kontekst BEZ okna to test importu barrela (`core/index_node_safe.test.ts`), który
  * tylko ładuje moduły — dlatego most nie może rzucać przy imporcie, tylko przy użyciu.
  *

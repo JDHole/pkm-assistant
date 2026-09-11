@@ -16,18 +16,19 @@ import { UiIcons, setSvg } from '../../crystal-soul/index.js';
 import { sortArtifactsForView, buildTypeCheckboxRows, toggleTypeName } from '../../artifacts/index.js';
 import { t } from '../../../core/i18n/index.js';
 import { log } from '../../../core/utils/Logger.js';
+import type { ProfileCtx } from './profile_types.js';
 
-// TS-any: Obsidian's augmented HTMLElement helpers are not represented in this module's UI boundary.
-type UiBoundary = any;
-type ArtifactEntry = { id: string; path: string; tytul?: string; typ?: string; status?: string; zaktualizowano?: string; utworzono?: string };
+type ArtifactEntry = { id: string; path: string; tytul?: string | null; typ?: string; status?: string; zaktualizowano?: string; utworzono?: string };
 type ArtifactStore = { list(filters: { agent?: string }): ArtifactEntry[]; move(id: string, folder: string): Promise<boolean>; remove(id: string): Promise<boolean> };
-type ArtifactContext = UiBoundary;
+// TS-boundary: buildTypeCheckboxRows (modules/artifacts, out of scope) takes/returns unknown-derived
+// shapes internally; this is the row shape it actually builds.
+type ArtifactTypeRow = { name: string; opis: string; checked: boolean; builtin: boolean };
 
 /**
  * @param {Object} ctx - shared context {formData, agent, plugin, agentManager, nav, renderActiveTab}
  * @param {HTMLElement} el
  */
-export function renderArtifactsTab(ctx: ArtifactContext, el: UiBoundary) {
+export function renderArtifactsTab(ctx: ProfileCtx, el: HTMLElement) {
     _renderInstances(ctx, el);
     _renderTypes(ctx, el);
 }
@@ -36,7 +37,7 @@ export function renderArtifactsTab(ctx: ArtifactContext, el: UiBoundary) {
 // INSTANCJE - artefakty żywe tego agenta
 // ─────────────────────────────────────────────────────────────
 
-function _renderInstances(ctx: ArtifactContext, el: UiBoundary) {
+function _renderInstances(ctx: ProfileCtx, el: HTMLElement) {
     const { agent, plugin } = ctx;
 
     const head = el.createDiv({ cls: 'cs-section-head' });
@@ -66,7 +67,7 @@ function _renderInstances(ctx: ArtifactContext, el: UiBoundary) {
     }
 }
 
-function _renderInstanceRow(ctx: ArtifactContext, el: UiBoundary, store: ArtifactStore, entry: ArtifactEntry) {
+function _renderInstanceRow(ctx: ProfileCtx, el: HTMLElement, store: ArtifactStore, entry: ArtifactEntry) {
     const row = el.createDiv({ cls: 'cs-artifact-manage-row' });
 
     row.createSpan({ text: '📄', cls: 'cs-artifact-manage-row__icon' });
@@ -88,22 +89,26 @@ function _renderInstanceRow(ctx: ArtifactContext, el: UiBoundary, store: Artifac
     };
 
     mkBtn(UiIcons.externalLink(14), t('profile.artifacts.open'), () => {
-        try { ctx.plugin.app.workspace.openLinkText(entry.path, '', false); } catch { new Notice(t('profile.artifacts.open_error')); }
+        try { (ctx.plugin.app.workspace as { openLinkText: (path: string, source: string, newLeaf: boolean) => void }).openLinkText(entry.path, '', false); } catch { new Notice(t('profile.artifacts.open_error')); }
     });
 
     mkBtn(UiIcons.folder(14), t('profile.artifacts.move'), () => {
-        new MoveArtifactModal(ctx.plugin.app, {
+        // TS-boundary: ctx.plugin.app is AppLike (core's minimal node-safe contract);
+        // MoveArtifactModal wants the real obsidian App, whose workspace/vault members carry
+        // concrete class types AppLike's open shape doesn't structurally match in either direction.
+        new MoveArtifactModal(ctx.plugin.app as unknown as App, {
             artifact: entry,
             store,
-            onDone: () => ctx.renderActiveTab(),
+            onDone: () => { void ctx.renderActiveTab(); },
         }).open();
     });
 
     mkBtn(UiIcons.trash(14), t('profile.artifacts.remove'), () => {
-        new ConfirmRemoveModal(ctx.plugin.app, {
+        // TS-boundary: same AppLike vs real obsidian App mismatch as MoveArtifactModal above.
+        new ConfirmRemoveModal(ctx.plugin.app as unknown as App, {
             artifact: entry,
             store,
-            onDone: () => ctx.renderActiveTab(),
+            onDone: () => { void ctx.renderActiveTab(); },
         }).open();
     });
 }
@@ -112,7 +117,7 @@ function _renderInstanceRow(ctx: ArtifactContext, el: UiBoundary, store: Artifac
 // TYPY - biblioteka typów podpinana per agent (jak skille)
 // ─────────────────────────────────────────────────────────────
 
-function _renderTypes(ctx: ArtifactContext, el: UiBoundary) {
+function _renderTypes(ctx: ProfileCtx, el: HTMLElement) {
     const { formData, plugin } = ctx;
 
     const head = el.createDiv({ cls: 'cs-section-head cs-section-head--spaced' });
@@ -129,7 +134,7 @@ function _renderTypes(ctx: ArtifactContext, el: UiBoundary) {
         return;
     }
 
-    const rows = buildTypeCheckboxRows(allTypes, formData.artifact_types);
+    const rows = buildTypeCheckboxRows(allTypes, formData.artifact_types) as ArtifactTypeRow[];
     const grid = el.createDiv({ cls: 'cs-shards cs-shards--compact' });
     for (const rowData of rows) {
         const shard = grid.createDiv({ cls: `cs-shard cs-shard--mcp-server ${rowData.checked ? 'cs-shard--filled' : 'cs-shard--empty'}` });
@@ -147,7 +152,7 @@ function _renderTypes(ctx: ArtifactContext, el: UiBoundary) {
         toggle.addEventListener('click', (e: Event) => {
             e.stopPropagation();
             formData.artifact_types = toggleTypeName(formData.artifact_types, rowData.name);
-            ctx.renderActiveTab();
+            void ctx.renderActiveTab();
         });
     }
 

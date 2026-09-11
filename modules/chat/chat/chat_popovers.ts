@@ -21,25 +21,11 @@ import { buildToolPopoverEntries } from './toolPopoverEntries.js';
 // samej formuły = wynik suba (albo tu: zapis autonomii) trafiałby do złej zakładki, gdy
 // tożsamość zakładki się kiedyś rozszerzy.
 import { _tabKey } from './chat_tabs.js';
+// Receiver mixina = ZŁOŻONY widok (`ChatViewLike`: klasa + osiem paczek mixinów).
+import type { ChatTab, ChatViewLike } from './chatViewShape.js';
+import type { AutonomyMode } from '../../../core/index.js';
 
-// TS-any: metody są domiksowywane do ChatView.prototype składanego w runtime.
-type ChatViewMixinContext = any;
-// TS-any: argumenty ask_user są dynamicznymi metadanymi wywołania narzędzia.
-type Runtime = any;
-
-type AutonomyId = 'yolo' | 'edge' | 'all';
-
-interface ChatTabState {
-    isActive?: boolean;
-    sessionId?: string;
-    sessionPath?: string;
-    sessionName?: string;
-    agentName?: string;
-}
-
-interface StoredChatState {
-    autonomy: AutonomyId;
-}
+type AutonomyId = AutonomyMode;
 
 interface AgentLike {
     disabled_tools?: string[];
@@ -50,7 +36,8 @@ interface AgentLike {
 }
 
 interface AskUserToolCall {
-    arguments: Runtime;
+    /** Argumenty wywołania: string JSON albo już sparsowany obiekt — zależnie od dostawcy. */
+    arguments?: unknown;
 }
 
 interface AskUserArguments {
@@ -79,7 +66,7 @@ export function _getAutonomyIcon(autonomyId: AutonomyId, size = 16): string {
 }
 
 /** Refresh the autonomy button label + icon from this.currentAutonomy. */
-export function _updateAutonomyButton(this: ChatViewMixinContext): void {
+export function _updateAutonomyButton(this: ChatViewLike): void {
     if (!this._autonomyBtn) return;
     const label = t(`autonomy.${this.currentAutonomy}`);
     setSvg(this._autonomyBtn, this._getAutonomyIcon(this.currentAutonomy, 12));
@@ -91,15 +78,15 @@ export function _updateAutonomyButton(this: ChatViewMixinContext): void {
  * Apply an autonomy change. Unlike the old mode change, this does NOT inject any system
  * message into the conversation — autonomy is a UI-only policy the model never sees.
  */
-export function _applyAutonomyChange(this: ChatViewMixinContext, newAutonomy: unknown): void {
+export function _applyAutonomyChange(this: ChatViewLike, newAutonomy: unknown): void {
     const normalized = normalizeAutonomy(newAutonomy);
     this.currentAutonomy = normalized;
     if (this.plugin) this.plugin.currentAutonomy = normalized;
     // Persist onto the active tab's stored state so tab switches restore it.
-    const activeTab = this.chatTabs?.find((t: ChatTabState) => t.isActive) as ChatTabState | undefined;
+    const activeTab = this.chatTabs?.find((t: ChatTab) => t.isActive);
     const activeKey = _tabKey(activeTab) || null;
     const state = activeKey
-        ? this._agentStates?.get(activeKey) as StoredChatState | undefined
+        ? this._agentStates?.get(activeKey)
         : null;
     if (state) state.autonomy = normalized;
     this._updateAutonomyButton();
@@ -108,7 +95,7 @@ export function _applyAutonomyChange(this: ChatViewMixinContext, newAutonomy: un
 }
 
 /** Toggle the autonomy selector popover (3 states with one-line descriptions). */
-export function _toggleAutonomyPopover(this: ChatViewMixinContext): void {
+export function _toggleAutonomyPopover(this: ChatViewLike): void {
     if (this._autonomyPopover) {
         this._autonomyPopover.remove();
         this._autonomyPopover = null;
@@ -146,7 +133,7 @@ export function _toggleAutonomyPopover(this: ChatViewMixinContext): void {
     this._autonomyPopover = popover;
 
     const closeHandler = (e: MouseEvent) => {
-        if (!popover.contains(e.target as Node | null) && !this._autonomyBtn.contains(e.target)) {
+        if (!popover.contains(e.target as Node | null) && !this._autonomyBtn.contains(e.target as Node | null)) {
             popover.remove();
             this._autonomyPopover = null;
             document.removeEventListener('click', closeHandler);
@@ -158,7 +145,7 @@ export function _toggleAutonomyPopover(this: ChatViewMixinContext): void {
 /**
  * Toggle the tools popover.
  */
-export function _toggleToolsPopover(this: ChatViewMixinContext, btn: HTMLElement): void {
+export function _toggleToolsPopover(this: ChatViewLike, btn: HTMLElement): void {
     if (this._toolsPopover) {
         this._toolsPopover.remove();
         this._toolsPopover = null;
@@ -226,7 +213,7 @@ export function _toggleToolsPopover(this: ChatViewMixinContext, btn: HTMLElement
  * wewnątrz `updateAgent`, więc popover nie czeka na dysk.
  */
 function _persistAgentChange(
-    view: ChatViewMixinContext,
+    view: ChatViewLike,
     agent: AgentLike,
     updates: { default_permissions?: Record<string, boolean>; disabled_tools?: string[] },
 ): void {
@@ -243,7 +230,7 @@ function _persistAgentChange(
 /**
  * Toggle the permissions popover.
  */
-export function _togglePermPopover(this: ChatViewMixinContext): void {
+export function _togglePermPopover(this: ChatViewLike): void {
     if (this._permPopover) {
         this._permPopover.remove();
         this._permPopover = null;
@@ -353,7 +340,7 @@ export function _togglePermPopover(this: ChatViewMixinContext): void {
     this._permPopover = popover;
 
     const closeHandler = (e: MouseEvent) => {
-        if (!popover.contains(e.target as Node | null) && !this._permBtn.contains(e.target)) {
+        if (!popover.contains(e.target as Node | null) && !this._permBtn.contains(e.target as Node | null)) {
             popover.remove();
             this._permPopover = null;
             document.removeEventListener('click', closeHandler);
@@ -366,17 +353,19 @@ export function _togglePermPopover(this: ChatViewMixinContext): void {
  * Render an inline ask_user question block with clickable options.
  */
 export function _renderAskUserBlock(
-    this: ChatViewMixinContext,
+    this: ChatViewLike,
     toolCall: AskUserToolCall,
     _container: HTMLElement,
 ): HTMLDivElement {
-    let args: Runtime = toolCall.arguments;
+    // TS-boundary: argumenty wywołania narzędzia pochodzą od modelu — string JSON albo obiekt;
+    // render czyta z nich wyłącznie trzy pola opisane w `AskUserArguments`.
+    let args: AskUserArguments = toolCall.arguments as AskUserArguments;
     if (typeof args === 'string') {
-        try { args = JSON.parse(args); } catch { args = {}; }
+        try { args = JSON.parse(args) as AskUserArguments; } catch { args = {}; }
     }
-    const question = (args as AskUserArguments).question || 'Agent pyta...';
-    const options = (args as AskUserArguments).options || [];
-    const context = (args as AskUserArguments).context || '';
+    const question = args.question || 'Agent pyta...';
+    const options = args.options || [];
+    const context = args.context || '';
 
     const block = createDiv();
     block.addClass('cs-ask-user');
@@ -435,8 +424,10 @@ export function _renderAskUserBlock(
     }
 
     // Promise for AskUserTool to await
-    let resolveAnswer: ((answer: string) => void) | undefined;
-    this.plugin._askUserPromise = new Promise<string>(resolve => { resolveAnswer = resolve; });
+    // `null` wchodzi tą samą drogą przy sprzątaniu widoku (`_cleanupAskUser`) — obietnica
+    // musi to dopuszczać, inaczej typ kłamie o realnym zachowaniu.
+    let resolveAnswer: ((answer: string | null) => void) | undefined;
+    this.plugin._askUserPromise = new Promise<string | null>(resolve => { resolveAnswer = resolve; });
     this.plugin._askUserResolve = resolveAnswer;
 
     submitBtn.addEventListener('click', () => {

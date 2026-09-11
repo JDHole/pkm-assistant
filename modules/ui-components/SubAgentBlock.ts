@@ -1,8 +1,8 @@
 import { TOOL_INFO } from './ToolCallDisplay.js';
+import type { ToolInfoEntry } from './ToolCallDisplay.js';
 import { UiIcons, setSvg } from '../crystal-soul/index.js';
 import { t, getDateLocale } from '../../core/i18n/index.js';
-// TS-any: zapis sesji narzędzi jest elastycznym kontraktem historycznym chat.
-type SubAgentDynamic = any;
+import type { ToolResultStatus } from '../../core/index.js';
 
 // Node-safe DOM shim: `SubAgentBlock.ts` nie importuje `obsidian`, a jego
 // test (`SubAgentBlock.test.ts`) woła prawdziwe funkcje w gołym Node, podstawiając WŁASNĄ atrapę
@@ -13,17 +13,51 @@ type SubAgentDynamic = any;
 // reguły (patrzy na STRUKTURĘ typu) go nie rozpoznał — w prawdziwym Obsidianie to dokładnie ten
 // sam `document.createElement`, którego wołał `createDiv` pod maską (patrz ToolCallDisplay.ts,
 // ten sam wzorzec).
-function _createDetachedDiv(): SubAgentDynamic {
-    return (document as unknown as { createElement(tag: string): SubAgentDynamic }).createElement('div');
+function _createDetachedDiv(): HTMLElement {
+    return (document as unknown as { createElement(tag: string): HTMLElement }).createElement('div');
 }
 
-const TYPE_CONFIG = {
+/** Wpis katalogu wyglądu wiersza per typ delegacji (ikona + klucz i18n etykiety). */
+interface TypeConfigEntry {
+    labelKey: string;
+    iconFn: () => string;
+}
+
+const TYPE_CONFIG: Record<string, TypeConfigEntry> = {
     'delegate':     { labelKey: 'subagent.label',            iconFn: () => UiIcons.robot(14) },
     'delegate_master': { labelKey: 'subagent.expert',        iconFn: () => UiIcons.crown(14) },
     // Backward compat (old sessions)
     'minion_task':  { labelKey: 'subagent.minion_task',      iconFn: () => UiIcons.robot(14) },
     'master_task':  { labelKey: 'subagent.master_consult',   iconFn: () => UiIcons.crown(14) },
 };
+
+/** Jeden wpis `opts.toolCallDetails` — narzędzie wołane przez sub-agenta w trakcie zadania. */
+export interface SubAgentToolCallDetail {
+    name: string;
+    args?: unknown;
+}
+
+/** Zużycie tokenów zadania sub-agenta (`opts.usage`). */
+export interface SubAgentUsage {
+    prompt_tokens: number;
+    completion_tokens: number;
+}
+
+/** Kontrakt `createSubAgentBlock` — kształt, który realnie czyta render niżej. */
+interface SubAgentBlockOptions {
+    type: string;
+    aspectType?: string;
+    agentName?: string;
+    query?: string;
+    response?: string;
+    toolsUsed?: string[];
+    toolCallDetails?: SubAgentToolCallDetail[];
+    duration?: number;
+    usage?: SubAgentUsage | null;
+    summary?: string;
+    pending?: boolean;
+    status?: ToolResultStatus;
+}
 
 /**
  * Creates a Crystal Soul .cs-action-row for a sub-agent (minion/master) result.
@@ -52,11 +86,11 @@ const TYPE_CONFIG = {
  *   renderu nie ma prawa wywalić czatu).
  * @returns {HTMLElement}
  */
-export function createSubAgentBlock(opts: SubAgentDynamic) {
+export function createSubAgentBlock(opts: SubAgentBlockOptions): HTMLElement {
     // Resolve config: delegate + aspectType=master → delegate_master config
     let cfgKey = opts.type;
     if (opts.type === 'delegate' && opts.aspectType === 'master') cfgKey = 'delegate_master';
-    const cfg = (TYPE_CONFIG as Record<string, SubAgentDynamic>)[cfgKey] || TYPE_CONFIG['delegate'];
+    const cfg = TYPE_CONFIG[cfgKey] || TYPE_CONFIG['delegate'];
 
     const row = _createDetachedDiv();
     row.className = 'cs-action-row';
@@ -111,17 +145,19 @@ export function createSubAgentBlock(opts: SubAgentDynamic) {
     }
 
     // Tool call details
-    if (opts.toolCallDetails?.length > 0) {
+    // `as number`: bez asercji TS18048, `?? 0` zmieniłoby bundle; `undefined > 0` daje false
+    // jak w JS od zawsze.
+    if ((opts.toolCallDetails?.length as number) > 0) {
         const detailDiv = body.createDiv({ cls: 'cs-action-row__content' });
-        const lines = opts.toolCallDetails.map((d: SubAgentDynamic) => {
-            const info = (TOOL_INFO as Record<string, SubAgentDynamic>)[d.name] || { label: d.name };
+        const lines = opts.toolCallDetails!.map((d) => {
+            const info = (TOOL_INFO as Record<string, ToolInfoEntry | undefined>)[d.name] || { label: d.name };
             const hint = _extractArgHint(d.name, d.args);
             return hint ? `${info.label}: ${hint}` : info.label;
         });
         detailDiv.textContent = lines.join('\n');
-    } else if (opts.toolsUsed?.length > 0) {
+    } else if ((opts.toolsUsed?.length as number) > 0) {
         const toolDiv = body.createDiv({ cls: 'cs-action-row__content' });
-        const names = opts.toolsUsed.map((t: string) => (TOOL_INFO[t as keyof typeof TOOL_INFO]?.label) || t);
+        const names = opts.toolsUsed!.map((t: string) => (TOOL_INFO[t as keyof typeof TOOL_INFO]?.label) || t);
         toolDiv.textContent = t('subagent.tools', { tools: names.join(', ') });
     }
 
@@ -147,8 +183,8 @@ export function createSubAgentBlock(opts: SubAgentDynamic) {
  * @param {string} [agentName] - Name of the aspect
  * @returns {HTMLElement}
  */
-export function createPendingSubAgentBlock(type: string, agentName: string) {
-    const cfg = (TYPE_CONFIG as Record<string, SubAgentDynamic>)[type] || TYPE_CONFIG['delegate'];
+export function createPendingSubAgentBlock(type: string, agentName: string): HTMLElement {
+    const cfg = TYPE_CONFIG[type] || TYPE_CONFIG['delegate'];
 
     const row = _createDetachedDiv();
     row.className = 'cs-action-row';
@@ -167,12 +203,25 @@ export function createPendingSubAgentBlock(type: string, agentName: string) {
     return row;
 }
 
+/** Kształt argumentów narzędzia, z którego `_extractArgHint` wyciąga podpowiedź do etykiety —
+ *  tylko pola, które ta funkcja realnie czyta (ścieżka/zapytanie/fakt), nie pełny kontrakt narzędzia. */
+interface ToolArgHintShape {
+    path?: string;
+    folder?: string;
+    query?: string;
+    fact?: string;
+}
+
 /**
  * Extract a human-readable hint from tool call arguments.
  */
-function _extractArgHint(toolName: string, args: SubAgentDynamic) {
+function _extractArgHint(toolName: string, args: unknown): string {
     if (!args) return '';
-    const parsed = typeof args === 'string' ? (() => { try { return JSON.parse(args); } catch { return {}; } })() : args;
+    // TS-boundary: argumenty wywołania narzędzia z zapisu sesji sub-agenta — string JSON albo
+    // już sparsowany obiekt z odpowiedzi modelu, bez walidacji schematem (poza zakresem tej fali).
+    const parsed = (typeof args === 'string'
+        ? (() => { try { return JSON.parse(args) as unknown; } catch { return {}; } })()
+        : args) as Partial<ToolArgHintShape>;
 
     switch (toolName) {
         case 'read':

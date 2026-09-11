@@ -22,7 +22,9 @@ export function substituteVariables(prompt: string, values: Record<string, strin
     if (!prompt || typeof prompt !== 'string') return prompt || '';
     if (!values || Object.keys(values).length === 0) return prompt;
 
-    return prompt.replace(/\{\{(\w+)\}\}/g, (match, key) => {
+    // `key: string`: sygnatura callbacku `String.prototype.replace` w lib.es5.d.ts nie zna
+    // liczby/nazw grup przechwytujących regexa — bez adnotacji `key` byłby `any`.
+    return prompt.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {
         return values[key] !== undefined ? String(values[key]) : match;
     });
 }

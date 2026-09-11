@@ -1,11 +1,10 @@
 import { Setting } from 'obsidian';
 import { UiIcons, setSvgLabel, setSvg } from '../../crystal-soul/index.js';
 import { t } from '../../../core/i18n/index.js';
+import type { AgentSkillAssignment } from '../Agent.js';
+import type { SkillData } from '../../skills/index.js';
 
-// TS-any: skill editor data is an open-ended persisted user schema.
-type UiBoundary = any;
-
-export function showSkillOverrideForm(container: HTMLElement, baseSkill: UiBoundary, assignment: UiBoundary, onDone: (() => void) | null) {
+export function showSkillOverrideForm(container: HTMLElement, baseSkill: SkillData, assignment: AgentSkillAssignment, onDone: (() => void) | null) {
     container.querySelector('.skill-override-form')?.remove();
 
     const ovr = assignment.overrides || {};
@@ -46,16 +45,16 @@ export function showSkillOverrideForm(container: HTMLElement, baseSkill: UiBound
                 });
         });
 
-    if (baseSkill.preQuestions?.length > 0) {
+    if ((baseSkill.preQuestions?.length as number) > 0) {
         const preqHeading = new Setting(form).setHeading();
         setSvg(preqHeading.nameEl, UiIcons.question(12));
         preqHeading.nameEl.appendText(t('profile.skills.default_answers'));
-        for (const pq of baseSkill.preQuestions) {
+        for (const pq of baseSkill.preQuestions!) {
             new Setting(form)
                 .setName(`{{${pq.key}}} — ${pq.question}`)
                 .addText(text => {
                     text.setPlaceholder(pq.default || t('profile.skills.no_default'))
-                        .setValue(ovr.pre_question_defaults?.[pq.key] || '')
+                        .setValue((ovr.pre_question_defaults?.[pq.key] as string | undefined) || '')
                         .onChange(v => {
                             if (!assignment.overrides) assignment.overrides = {};
                             if (!assignment.overrides.pre_question_defaults) assignment.overrides.pre_question_defaults = {};

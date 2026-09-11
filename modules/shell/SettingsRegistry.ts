@@ -5,13 +5,25 @@
  * shell owns only the tab layout and calls each section renderer.
  */
 import { hostWindow } from '../../core/index.js';
+import type { PluginApi, SettingsSectionCtx } from '../../core/index.js';
+
+/**
+ * Trzeci argument renderera sekcji/pod-pola - kształt 1:1 z
+ * `core/runtime/contracts.ts:SettingsSectionDef['render']` (`options.owner` to jedyne pole,
+ * po które sięgają renderery - `defaultId` czyta tylko `render()` niżej, żeby wybrać aktywną
+ * sekcję na starcie).
+ */
+export interface SettingsSectionRenderOptions {
+    owner: { buildSectionContext(): SettingsSectionCtx };
+    defaultId?: string;
+}
 
 export interface SettingsSection {
     id: string;
     label?: string;
     icon?: string;
     order?: number;
-    render: (...args: unknown[]) => unknown;
+    render(containerEl: HTMLElement, plugin: PluginApi, options: SettingsSectionRenderOptions): void | Promise<void>;
 }
 
 export interface SettingsSubField {
@@ -86,10 +98,12 @@ class SettingsRegistryClass {
         return this.sections.has(id as string) ? id : defaultId;
     }
 
-    // TS-any: Obsidian augments HTMLElement with the UI helpers used by legacy settings renderers.
     // This render() paints ONLY the live `pkm-settings-*` names (`src/styles.css:831-847`) - the
     // `pkm-settings-v2*` namespace has no CSS rule in any stylesheet and must not be painted.
-    async render(containerEl: any, plugin: unknown, options: { defaultId?: string } = {}): Promise<void> {
+    // TS-boundary: domyślny `{}` zostaje z oryginału (bezpiecznik na wywołanie bez trzeciego
+    // argumentu) - `{}` nie spełnia `SettingsSectionRenderOptions` (wymaga `owner`), ale jedyni
+    // wołacze (`pkm_settings_tab.ts`, testy) zawsze podają wszystkie 3 argumenty.
+    async render(containerEl: HTMLElement, plugin: PluginApi, options: SettingsSectionRenderOptions = {} as SettingsSectionRenderOptions): Promise<void> {
         containerEl.empty();
         containerEl.classList.add('cs-root');
 
@@ -112,10 +126,12 @@ class SettingsRegistryClass {
             });
             button.textContent = `${section.icon ? section.icon + ' ' : ''}${section.label}`;
             if (section.id === activeId) button.classList.add('mod-cta');
-            button.addEventListener('click', async () => {
-                // `hostWindow` - patrz uzasadnienie przy getActiveId() wyżej.
-                if (hostWindow.location) hostWindow.location.hash = `settings/${section.id}`;
-                await this.render(containerEl, plugin, options);
+            button.addEventListener('click', () => {
+                void (async () => {
+                    // `hostWindow` - patrz uzasadnienie przy getActiveId() wyżej.
+                    if (hostWindow.location) hostWindow.location.hash = `settings/${section.id}`;
+                    await this.render(containerEl, plugin, options);
+                })();
             });
         }
 

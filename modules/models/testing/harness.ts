@@ -257,7 +257,7 @@ export class CapturingHttpClient implements HttpClient {
     sends = 0;
 
     private responses: ScriptedHttpResponse[] = [];
-    private thrown: unknown = null;
+    private thrown: Error | null = null;
 
     constructor(...responses: ScriptedHttpResponse[]) {
         this.responses.push(...responses);
@@ -270,7 +270,7 @@ export class CapturingHttpClient implements HttpClient {
     }
 
     /** Od tej chwili KAŻDE wywołanie rzuca (awaria transportu, nie status HTTP). */
-    throwOn(err: unknown = new Error('network down')): this {
+    throwOn(err: Error = new Error('network down')): this {
         this.thrown = err;
         return this;
     }

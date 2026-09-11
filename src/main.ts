@@ -1,5 +1,5 @@
 import Obsidian from "obsidian";
-import type { EventRef } from "obsidian";
+import type { App, EventRef, PluginManifest, PluginSettingTab } from "obsidian";
 // Silnik YAML wbudowany w Obsidiana, zamiast paczki `js-yaml` - katalog społeczności wytyka
 // `js-yaml` (module-replacements) i tak czy inaczej dubluje bibliotekę, którą Obsidian już
 // wozi. `core/utils/yamlParser.ts` musi zostać node-safe (barrel core/ wstaje bez `obsidian`),
@@ -34,6 +34,8 @@ import { PluginBase } from '../core/PluginBase.js';
 
 // PKM Assistant custom components
 import { ChatView } from "../modules/chat/index.js";
+import type { AgentsPlugin } from "../modules/agents/index.js";
+import type { ChatViewLike } from "../modules/chat/index.js";
 import { AgentManager } from "../modules/agents/index.js";
 import { isKomunikatorEnabled, registerKomunikatorCleanup } from "../modules/komunikator/index.js";
 // Obsidianowe bebechy core/ (PluginBase, runtime/PluginRuntime, utils/obsidianNav,
@@ -82,6 +84,7 @@ import {
   createGenerateImageTool,
   createAddTextToImageTool,
 } from "../modules/tools/index.js";
+import type { ServerVisibilityAgent } from "../modules/tools/index.js";
 import { ArtifactStore, registerArtifactBlocks, migrateJsonArtifactsToNotes, DEFAULT_ARTIFACTS_FOLDER, buildArtifactsBaseContent, buildArtifactsBasePath } from "../modules/artifacts/index.js";
 // Księga biegów sub-agentów. Stoi obok traceLog, bo trace.log jest jej pierwszym konsumentem
 // (patrz modules/sub-agents/CLAUDE.md).
@@ -104,6 +107,19 @@ import {
   CHAT_VIEW_TYPE,
   setYamlEngine,
 } from "../core/index.js";
+import type {
+  AppLike,
+  CrystalNoticeOptions,
+  ItemViewMap,
+  PluginApi,
+  PluginHost,
+  PluginItemViewClass,
+  PluginSettingsTabClass,
+  RibbonIconDef,
+  VaultAdapterLike,
+  VaultGroup,
+} from "../core/index.js";
+import type { SelfTestDeps } from "../core/selftest.js";
 
 // Silnik YAML wstrzyknięty NATYCHMIAST po imporcie - zanim jakikolwiek loader (agentów,
 // sub-agentów, skilli, artefaktów) zdąży wywołać `parseYaml`/`stringifyYaml` z barrela `core/`.
@@ -117,13 +133,49 @@ import {
   EmbeddingRegistry,
   countDocs,
 } from "../modules/embedding/index.js";
+import type { EmbeddingProvider, EmbeddingProviderId, VaultLike } from "../modules/embedding/index.js";
 import { EmbeddingHelper } from "../modules/memory/index.js";
 
-// TS-any: composition root scala dynamiczne API Obsidiana oraz otwarte kontrakty modułów pluginu.
-type PluginDynamic = any;
+/** Kształt jednorazowej migracji `pkm.modelLibrary` (patrz `_migrateToModelLibrary`). */
+interface ModelLibraryEntry {
+  platform: string;
+  model: string;
+  isDefault: boolean;
+}
+interface ModelLibraryMigration {
+  main: ModelLibraryEntry[];
+  minion: ModelLibraryEntry[];
+}
 
 export default class PkmAssistantPlugin extends PluginBase {
-  [key: string]: PluginDynamic;
+  // Pola pluginu przypisywane w `onload()`/`initialize()`. `declare` (nie zwykłe pole klasy!) -
+  // `useDefineForClassFields` wyemitowałby `pole;` w ciele klasy i nadpisał wartości z bazy PO
+  // `super()`. Realne typy z barreli modułów-właścicieli (import type wyżej); żadna instancja
+  // klasy pluginu nie żyje poza tym plikiem, więc to jedyne miejsce, które je zestawia.
+  /** TS-boundary: nic w repo nie przypisuje `_api` (getter `api` jest martwy, zawsze `undefined`
+   * w runtime) - `unknown` jest jedynym prawdziwym typem, który tego nie kłamie. */
+  declare _api: unknown;
+  declare _readyCallbacks: Array<() => void>;
+  declare _crystalSoulSheet: CSSStyleSheet | null;
+  declare _komunikatorCleanupUnsub: (() => void) | null;
+  // `| undefined` - przypisanie leży w `try` bloku `initialize()`, który wywrotkę loguje i leci
+  // dalej (nie rethrow); pole może więc zostać nieprzypisane przez resztę życia pluginu.
+  declare agentManager: AgentManager | undefined;
+  declare toolRegistry: ToolRegistry | undefined;
+  declare mcpClient: MCPClient | undefined;
+  declare serverManager: ServerManager | undefined;
+  declare externalMcpManager: ExternalMcpManager | undefined;
+  declare permissionSystem: PermissionSystem | undefined;
+  declare approvalManager: ApprovalManager | undefined;
+  declare secretsStorage: SecretsStorage;
+  declare artifactStore: ArtifactStore | undefined;
+  declare vaultIndexer: VaultIndexer | undefined;
+  // Nullowane w `onunload()` - patrz tam.
+  declare subTaskRegistry: SubTaskRegistry | null;
+  declare subTaskNotifier: SubTaskNotifier | null;
+  declare traceLog: TraceLog | undefined;
+  declare skinManager: typeof SkinManager | undefined;
+
   /**
    * Konfiguracja runtime'u powstaje w KONSTRUKTORZE (tanio, bez I/O), a `onload()` podaje TĘ
    * SAMĄ referencję konstruktorowi runtime'u - dzięki temu harness podmienia dostawców RAZ,
@@ -131,19 +183,28 @@ export default class PkmAssistantPlugin extends PluginBase {
    *
    * Klient HTTP (razem z pomocnikiem żądań Obsidiana) powstaje w `config/runtimeConfig.ts`, NIE tutaj.
    */
-  constructor(app: PluginDynamic, manifest: PluginDynamic) {
+  constructor(app: App, manifest: PluginManifest) {
     super(app, manifest);
-    this.runtimeConfig = buildRuntimeConfig({ app: this.app as PluginDynamic });
+    // TS-boundary: `App` (Obsidian) vs `AppLike` (core, node-safe) - patrz komentarz przy
+    // `this.env = new PluginRuntime(...)` w `onload()`.
+    this.runtimeConfig = buildRuntimeConfig({ app: this.app as unknown as AppLike });
   }
 
-  get settingsTabClass(): PluginDynamic { return PkmSettingsTab; }
+  // TS-boundary: `PkmSettingsTab` (modules/shell) bierze `App` prawdziwego Obsidiana w
+  // konstruktorze; `PluginSettingsTabClass` (core, node-safe) obiecuje `AppLike` - ten sam
+  // rozjazd App/AppLike co wyżej, tym razem na konstruktorze klasy zamiast na wartości.
+  get settingsTabClass(): PluginSettingsTabClass { return PkmSettingsTab as unknown as PluginSettingsTabClass; }
 
 
-  get itemViews(): PluginDynamic {
+  get itemViews(): ItemViewMap {
     return {
       // Widoki starego panelu podobieństw wycofane razem ze starym frameworkiem.
       ReleaseNotesView,
-      ChatView,
+      // TS-boundary: `ChatView` (modules/chat) chce `agentManager: ChatAgentManager | undefined`
+      // we własnym lokalnym kontrakcie pluginu; `PluginItemViewClass` (core) daje modułom tylko
+      // `agentManager?: unknown` (patrz `PluginApi`) - rozjazd kontraktu chat vs core, nie coś,
+      // co da się naprawić w composition roocie bez zmiany jednego z dwóch właścicieli.
+      ChatView: ChatView as unknown as PluginItemViewClass,
     };
   }
 
@@ -158,7 +219,13 @@ export default class PkmAssistantPlugin extends PluginBase {
     this.app.workspace.onLayoutReady(this.initialize.bind(this));
     // Runtime powstaje synchronicznie i tanio, PRZED pierwszym `await` - od tej linijki
     // `this.env` jest różne od `null` przez całe życie pluginu. `boot()` leci fire-and-forget.
-    this.env = new PluginRuntime(this as PluginDynamic, this.runtimeConfig);
+    // TS-boundary: `App` (Obsidian) nie spełnia strukturalnie node-safe `AppLike` (`core/`) -
+    // `DataAdapter` Obsidiana nie ma indeksu `[key: string]: unknown`, którego `VaultAdapterLike`
+    // wymaga. Ten sam rozjazd (App vs AppLike) wraca w każdym miejscu niżej, gdzie `this`/`this.app`
+    // trafia w kontrakt oparty o `AppLike`/`PluginApi`/`PluginHost` - asercja na nazwany typ
+    // docelowy (nie `as never`: `never` przyjąłby WSZYSTKO, więc realna zmiana kontraktu modułu
+    // przeszłaby cicho, bez błędu tsc przy następnym probie).
+    this.env = new PluginRuntime(this as unknown as PluginHost, this.runtimeConfig);
     // Rejestr embeddingu jest SLOTEM runtime'u, nie jego wytwórnią (`core/` nie importuje
     // z modułów) - wstawia go composition root, ZANIM `boot()` obudzi konsumentów
     // (`VaultIndexer`, `EmbeddingHelper`, sekcja „Modele" w Ustawieniach). Bez tej linijki
@@ -170,19 +237,32 @@ export default class PkmAssistantPlugin extends PluginBase {
       // z modułów - zawężenie do konkretnego kontraktu należy do composition roota. Mapa jest
       // ta sama, którą zarejestrował `buildRuntimeConfig`, więc harness podmienia ją JEDNYM
       // podstawieniem w `plugin.runtimeConfig`, przed `onload()`.
-      providers: this.runtimeConfig.embedding.providers as PluginDynamic,
+      // TS-boundary: `RuntimeConfig` (core, node-safe) opisuje dostawców STRUKTURALNIE
+      // (`Record<string, EmbeddingProviderLike>`); `EmbeddingRegistry` (modules/embedding) chce
+      // swój własny, ostrzejszy kształt (`Record<EmbeddingProviderId, EmbeddingProvider>`) - ta
+      // sama mapa, dwa kontrakty. `buildRuntimeConfig` wstawia tu naprawdę obiekty z
+      // `EMBEDDING_PROVIDERS` (modules/embedding), więc zawężenie jest bezpieczne w produkcji.
+      // Harness (testy) podmienia tę mapę w `plugin.runtimeConfig` PRZED `onload()` i może
+      // podać CZĘŚCIOWĄ mapę (mniej niż 4 klucze `EmbeddingProviderId`) - `Record<Id, Provider>`
+      // wtedy zawyża kompletność (obiecuje wszystkie klucze, choć część może brakować);
+      // konsumenci (`EmbeddingRegistry`) i tak indeksują ostrożnie, więc runtime nie cierpi.
+      providers: this.runtimeConfig.embedding.providers as unknown as Record<EmbeddingProviderId, EmbeddingProvider>,
       http: this.runtimeConfig.embedding.http,
       settings: () => this.env?.settings,
       log,
     });
     void this.env.boot();
     log.debug('Plugin', 'PluginRuntime utworzony, boot() wystartował');
-    this.addSettingTab(new this.settingsTabClass(this.app as PluginDynamic, this as PluginDynamic));
+    // TS-boundary: `PluginSettingsTabClass.new()` (core, generyczny kontrakt) zwraca `object` -
+    // za luźno dla `addSettingTab()` Obsidiana, który chce prawdziwy `PluginSettingTab`. Realna
+    // klasa (`PkmSettingsTab`) NIM jest (`extends PluginSettingsTab`) - asercja tylko wyrównuje
+    // ogólny typ gettera do tego, co runtime naprawdę tworzy.
+    this.addSettingTab(new this.settingsTabClass(this.app as unknown as AppLike, this as unknown as PluginApi) as PluginSettingTab);
     registerPkmIcon();
     // `registerItemViews()` ZOSTAJE tutaj: Obsidian odtwarza zapisane zakładki przy
     // layoutReady, więc typ widoku musi być znany zanim to nastąpi.
     this.registerItemViews();
-    registerAgentSidebar(this);
+    registerAgentSidebar(this as unknown as Parameters<typeof registerAgentSidebar>[0]);
     // Render bloku ```pkm-artefakt``` (guziki akceptacji/przywołania w notatce).
     registerArtifactBlocks(this);
 
@@ -195,7 +275,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     // niezależny od całego env. `initialize()` woła `setLocale()` jeszcze raz na w pełni
     // zmergowanych ustawieniach - to idempotentne i pilnuje przypadku, w którym tani odczyt
     // nic nie znalazł.
-    setLocale(await readUiLanguage(this.app?.vault?.adapter as PluginDynamic));
+    setLocale(await readUiLanguage(this.app?.vault?.adapter as unknown as VaultAdapterLike));
     this.registerCommands();
     this.registerRibbonIcons();
     log.debug('Plugin', 'onload() zakończone — czekam na layoutReady → initialize()');
@@ -254,18 +334,23 @@ export default class PkmAssistantPlugin extends PluginBase {
     if (!pkm || pkm.modelLibrary) return; // already migrated or no settings
 
     const sc = this.env?.settings?.pkmAssistant?.chat || {};
-    const lib: PluginDynamic = { main: [], minion: [] };
+    const lib: ModelLibraryMigration = { main: [], minion: [] };
 
     // Main model
     const mainPlatform = sc.platform;
     const mainModel = mainPlatform ? sc[`${mainPlatform}_model`] : null;
     if (mainPlatform && mainModel) {
-      lib.main.push({ platform: mainPlatform, model: mainModel, isDefault: true });
+      // TS-boundary: klucz per-platforma (`<platform>_model`) w starych ustawieniach czatu
+      // nie ma własnego typu (indeks `ChatSettingsSlice[key]: unknown`) - migracja jednorazowa
+      // czyta go jak string, tak jak go zawsze zapisywał dropdown ustawień.
+      lib.main.push({ platform: mainPlatform, model: mainModel as string, isDefault: true });
     }
 
     // Minion model
     if (pkm.minionPlatform && pkm.minionModel) {
-      lib.minion.push({ platform: pkm.minionPlatform, model: pkm.minionModel, isDefault: true });
+      // TS-boundary: `minionPlatform`/`minionModel` żyją pod indeksem otwartym
+      // `PkmAssistantSettings[key]: unknown` (pola nie mają własnej deklaracji w kontrakcie).
+      lib.minion.push({ platform: pkm.minionPlatform as string, model: pkm.minionModel as string, isDefault: true });
     }
 
     const hasAnything = lib.main.length + lib.minion.length > 0;
@@ -280,16 +365,16 @@ export default class PkmAssistantPlugin extends PluginBase {
       // mutacja przez proxy zaplanowałaby zapis ustawień, a boot nie może pisać na dysk
       // (nie wolno pisać podczas bootu - pancerz na utratę ustawień). Na dysk
       // trafi przy pierwszym realnym zapisie.
-      const rawBag = (this.env?.settingsStore.raw as PluginDynamic)?.pkmAssistant;
+      const rawBag = this.env?.settingsStore.raw?.pkmAssistant;
       if (rawBag) rawBag.modelLibrary = lib;
     }
   }
 
-  showCrystalNotice(message: string, opts: PluginDynamic = {}) {
+  showCrystalNotice(message: string, opts: CrystalNoticeOptions = {}) {
     const { type = 'info', timeout = 4000, agentColor } = opts;
     // `createFragment()` - globalna pomocnicza Obsidiana (obsidianmd/prefer-create-el).
-    // `test-support/dom-shim.ts` dokłada ją do `globalThis`, więc kod wstaje identycznie
-    // i w Obsidianie, i w harnessie (goły Node).
+    // `test-support/dom-shim.ts` (repo harnessu) dokłada ją do `globalThis`, więc kod wstaje
+    // identycznie i w Obsidianie, i w harnessie (goły Node).
     const frag = createFragment();
 
     const header = frag.createDiv({ cls: 'cs-notice__header' });
@@ -333,7 +418,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     try { stopAllDelegations('unload'); } catch (e) { log.warn('Main', 'stopAllDelegations padł (demontaż leci dalej):', e); }
     // Zamknij zewnętrzne serwery MCP (SIGTERM procesów stdio) - nie zostawiać zombie.
     // Fire-and-forget: onunload jest synchroniczne, Obsidian nie czeka na obietnicę.
-    this.externalMcpManager?.closeAll?.();
+    void this.externalMcpManager?.closeAll?.();
     // Odepnij nasłuch sprzątania skrzynki (i porzuć kolejkę czekających modali).
     this._komunikatorCleanupUnsub?.();
     this._komunikatorCleanupUnsub = null;
@@ -359,7 +444,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     } catch (e) {
       log.warn('Main', 'Zdejmowanie arkuszy CSS padło:', e);
     }
-    this.traceLog?.dispose();   // flush + dispose trace sink (fail-soft, fire-and-forget)
+    void this.traceLog?.dispose();   // flush + dispose trace sink (fail-soft, fire-and-forget)
     this.notices?.unload();
     void this.env?.dispose();
     // Sink `pkm-assistant.log` zamykamy NA KOŃCU - kroki wyżej jeszcze logują, a bufor czeka
@@ -377,9 +462,9 @@ export default class PkmAssistantPlugin extends PluginBase {
     // pluginu user dostaje powitanie „nowy użytkownik" i modal Release Notes.
     await migrateOldPluginFolder({
       adapter: this.app?.vault?.adapter,
-      // Folder konfiguracji NIE musi się nazywać `.obsidian` — user może go zmienić, więc
-      // pytamy Obsidiana. Twardy fallback zniknął stąd; `migrateOldPluginFolder` ma własny
-      // (`configDir || '.obsidian'`), więc zachowanie bez zmian.
+      // Nazwę folderu konfiguracji ustala user, więc pytamy Obsidiana — nazwy zapasowej nie
+      // ma już nigdzie w kodzie. Pusta wartość = `migrateOldPluginFolder` nic nie robi
+      // (`reason: 'no-config-dir'`) zamiast czytać i pisać po omacku.
       configDir: this.app?.vault?.configDir,
       manifestId: this.manifest?.id,
       log,
@@ -484,7 +569,10 @@ export default class PkmAssistantPlugin extends PluginBase {
 
     // SkinManager: active visual skin (Crystal Soul by default, Default/Custom optional)
     try {
-      await SkinManager.initialize(this as PluginDynamic);
+      // TS-boundary: `SkinPluginLike.env` (modules/crystal-soul) nie dopuszcza `null`, a
+      // `this.env` (core, `PluginBase`) jest `PluginRuntime | null` do pierwszej linijki
+      // `onload()` - rozjazd kontraktu, nie realna możliwość `null` w tym miejscu wywołania.
+      await SkinManager.initialize(this as Parameters<typeof SkinManager.initialize>[0]);
       this.skinManager = SkinManager;
       log.info('Plugin', `SkinManager OK: aktywny skin ${SkinManager.getActiveSkinId()}`);
     } catch (e) {
@@ -500,7 +588,11 @@ export default class PkmAssistantPlugin extends PluginBase {
     // AgentManager
     try {
       log.debug('Plugin', 'Inicjalizacja AgentManager...');
-      this.agentManager = new AgentManager(this.app.vault, this.env?.settings || {}, this as PluginDynamic);
+      // TS-boundary: `AgentsPlugin` (modules/agents) rozszerza `PluginApi`, więc żąda
+      // node-safe `AppLike` z core - a `this.app` to prawdziwy `App` Obsidiana, którego
+      // `vault.adapter` (`DataAdapter`) nie ma otwartego indeksu `VaultAdapterLike`.
+      // Ta sama luka core co przy `PluginRuntime`/`PkmSettingsTab` wyżej.
+      this.agentManager = new AgentManager(this.app.vault, this.env?.settings || {}, this as unknown as AgentsPlugin);
       await this.agentManager.initialize();
       const agentCount = this.agentManager.agents?.size || 0;
       const activeAgent = this.agentManager.activeAgent?.name || 'brak';
@@ -518,7 +610,12 @@ export default class PkmAssistantPlugin extends PluginBase {
     try {
       this.artifactStore = new ArtifactStore({
         app: this.app,
-        typeLoader: this.agentManager?.artifactTypeLoader,
+        // TS-boundary: `AgentManager.artifactTypeLoader` (modules/agents) jest wciąż
+        // `RuntimeDependency` (= `any` - modul nie przeszedł jeszcze tej fali typowania).
+        // Kształt bierzemy STRUKTURALNIE z konstruktora `ArtifactStore` (właściciel typu), nie
+        // z nazwy jego prywatnego interfejsu (`ArtifactStoreType`/`ArtifactStoreDependencies`
+        // nie są eksportowane) - zero zmian w modules/artifacts.
+        typeLoader: this.agentManager?.artifactTypeLoader as NonNullable<ConstructorParameters<typeof ArtifactStore>[0]>['typeLoader'],
         getArtifactsFolder: () => this.env?.settings?.pkmAssistant?.artifactsFolder as string,
         // Rejestr artefaktów utrzymuje się zdarzeniami vaulta/metadataCache (patrz
         // modules/artifacts/CLAUDE.md) - sprzątanie nasłuchów przy onunload/reload pluginu,
@@ -528,10 +625,20 @@ export default class PkmAssistantPlugin extends PluginBase {
       // Jednorazowy migrator starych JSONów (ArtifactManager) -> notatki (fire-and-forget,
       // idempotentny przez marker). Musi biec PO seedowaniu typów (AgentManager.ensureBuiltinTypes) -
       // AgentManager jest już zainicjalizowany wyżej. Sprzątanie po migratorze.
-      migrateJsonArtifactsToNotes({ adapter: this.app.vault.adapter, store: this.artifactStore })
+      // TS-boundary: `migrateJsonArtifactsToNotes` (modules/artifacts) deklaruje `store` lokalnie
+      // jako `importInstance(typ, opts: Record<string, unknown>)`, luźniej niż prawdziwa
+      // `ArtifactStore.importInstance` (drugi argument to opcjonalny `ArtifactImportOptions` z
+      // wymaganym `tytul`) - rozjazd kontraktu WEWNĄTRZ modules/artifacts (migrator vs store),
+      // nie coś do naprawy w composition roocie. Typ docelowy bierzemy z sygnatury migratora
+      // (właściciel), nie przepisujemy jego prywatnego kształtu ręcznie.
+      migrateJsonArtifactsToNotes({ adapter: this.app.vault.adapter, store: this.artifactStore as unknown as NonNullable<Parameters<typeof migrateJsonArtifactsToNotes>[0]>['store'] })
         .then((res) => {
           if (res && !res.skipped) log.info('Plugin', `Migrator artefaktów: ${res.migrated} zmigrowanych, ${res.backedUp} do backupu`);
-          return this.artifactStore.archive();
+          // `!`: przypisany bezwarunkowo dwie linijki wyżej, w tym samym `try` - `undefined`
+          // w typie pola istnieje tylko dla ścieżki „konstruktor rzucił", która nigdy nie
+          // dotrze do tego domknięcia (rzut przerywa blok PRZED `.then()`). TS gubi to przez
+          // granicę domknięcia async - `?.` zmieniłby runtime (cichy no-op zamiast wywołania).
+          return this.artifactStore!.archive();
         })
         .catch(() => {});
     } catch (e) {
@@ -542,7 +649,9 @@ export default class PkmAssistantPlugin extends PluginBase {
     AccessGuard.setConfigDir(this.app?.vault?.configDir);
     AccessGuard.setNoGoFolders(this.env?.settings?.pkmAssistant?.no_go_folders);
     // Vault folder groups (Settings->Vault) -> AccessGuard for `{group}` focus resolution.
-    AccessGuard.setVaultGroups(this.env?.settings?.pkmAssistant?.vaultGroups as PluginDynamic);
+    // TS-boundary: `vaultGroups` w `PkmAssistantSettings` (core) jest `unknown` (dane usera z
+    // dysku, core nie zna kształtu `VaultGroup`) - `AccessGuard` (właściciel typu) go zna.
+    AccessGuard.setVaultGroups(this.env?.settings?.pkmAssistant?.vaultGroups as VaultGroup[] | undefined);
 
     // Żywy indeks semantyczny (Orama) -> publikuje plugin.oramaDb.
     // Fire-and-forget - start pluginu NIE czeka na skan vaulta (własny catch w initialize()).
@@ -565,7 +674,11 @@ export default class PkmAssistantPlugin extends PluginBase {
       };
       this.vaultIndexer = new VaultIndexer({
         plugin: this,
-        vault: this.app.vault as PluginDynamic,
+        // TS-boundary: `VaultLike.on()` (modules/embedding, node-safe) opisuje callback
+        // generycznie (`(...args: never[]) => void`); prawdziwy `Vault.on()` Obsidiana ma
+        // przeciążenia z konkretnymi sygnaturami per nazwa zdarzenia - kontrawariancja
+        // callbacków ich nie godzi bez asercji.
+        vault: this.app.vault as unknown as VaultLike,
         embedder,
         isMobile: !!Platform?.isMobile,
         logger: log,
@@ -575,7 +688,7 @@ export default class PkmAssistantPlugin extends PluginBase {
           ? null
           : (this.env?.settings?.pkmAssistant?.artifactsFolder || 'PKM Assistant/Artefakty')),
       });
-      this.vaultIndexer.initialize(); // no await
+      void this.vaultIndexer.initialize(); // no await
     } catch (e) {
       log.error('Plugin', 'VaultIndexer init FAIL:', e);
     }
@@ -603,7 +716,12 @@ export default class PkmAssistantPlugin extends PluginBase {
       const komunikatorEnabled = isKomunikatorEnabled(this.settings);
 
       this.toolRegistry = new ToolRegistry();
-      this.mcpClient = new MCPClient(this.app, this as PluginDynamic, this.toolRegistry);
+      // TS-boundary: `MCPClientPlugin.agentManager.getAgent()` (modules/tools) zwraca
+      // `PermissionedAgent` (core/security/PermissionSystem.ts:21, `approvalToggles?:
+      // Record<string, boolean>`) - core obiecuje za dużo dla surowego `approval_toggles`
+      // z YAML-a usera: prawdziwy `Agent.approvalToggles` (modules/agents/Agent.ts:179) jest
+      // `Record<string, unknown>`, bo nikt tych wartości nie waliduje przy wczytaniu.
+      this.mcpClient = new MCPClient(this.app, this as ConstructorParameters<typeof MCPClient>[1], this.toolRegistry);
 
       // read/list = prymitywy ze scope (vault|memory). memory_read/read_summary/
       // list_summaries wchłonięte przez read/list (scope=memory bramkowane uprawnieniem).
@@ -653,16 +771,23 @@ export default class PkmAssistantPlugin extends PluginBase {
       // ServerManager - dynamic MCP server packages
       this.serverManager = new ServerManager(this.app, this, { komunikatorEnabled });
       await this.serverManager.initialize();
-      this.serverManager.syncBuiltInServersForAgent(this.agentManager?.getActiveAgent?.());
+      // TS-boundary: `Agent` (modules/agents, `permissions: AgentPermissions`) vs
+      // `ServerVisibilityAgent` (modules/tools) - dwa moduły, dwa lokalne kontrakty dla „agenta
+      // widzianego z zewnątrz"; `name`/`mcp_servers`/`effective_mcp_servers` się zgadzają,
+      // niezgodny jest tylko podobiekt `permissions` (`AgentPermissions` vs `{ mcp?: boolean }`).
+      this.serverManager.syncBuiltInServersForAgent(this.agentManager?.getActiveAgent?.() as unknown as ServerVisibilityAgent | null | undefined);
 
       // Built-in MCP servers follow the active agent's mcp_servers whitelist.
       if (this.agentManager) {
-        this.agentManager.on((event: string, data: PluginDynamic) => {
+        this.agentManager.on((event: string, data: unknown) => {
           const lifecycleEvents = ['agent:switched', 'agents:loaded', 'agents:reloaded', 'agent:updated'];
           if (!lifecycleEvents.includes(event)) return;
           const activeAgent = this.agentManager?.getActiveAgent?.();
-          if (event === 'agent:updated' && data?.agent !== activeAgent?.name) return;
-          this.serverManager?.syncBuiltInServersForAgent(activeAgent);
+          // TS-boundary: payload zdarzenia AgentManagera jest `RuntimeDependency` (= `any`) u
+          // źródła (modules/agents nie jest jeszcze w tej fali typowania) - duck-type do `.agent`.
+          if (event === 'agent:updated' && (data as { agent?: string } | null)?.agent !== activeAgent?.name) return;
+          // TS-boundary: patrz komentarz przy pierwszym `syncBuiltInServersForAgent` wyżej.
+          this.serverManager?.syncBuiltInServersForAgent(activeAgent as unknown as ServerVisibilityAgent | null | undefined);
         });
       }
 
@@ -675,29 +800,38 @@ export default class PkmAssistantPlugin extends PluginBase {
       // trzyma czat i sidebar na spinnerze przez cały swój budżet.
       // Serwery dołączają, kiedy wstaną — do tego czasu ich narzędzi po prostu nie ma.
       try {
-        this.externalMcpManager = new ExternalMcpManager(this as PluginDynamic, { isMobile: !!Platform?.isMobile });
+        // TS-boundary: `ExternalMcpPluginLike.env.settings.pkmAssistant` (modules/tools) nazywa
+        // lokalnie pole `externalMcpServers`, którego `PkmAssistantSettings` (core) nie deklaruje
+        // wprost (żyje pod jej otwartym indeksem `[key: string]: unknown`) - TS traktuje oba
+        // kształty jako rozłączne, nie jako podtyp przez indeks.
+        this.externalMcpManager = new ExternalMcpManager(this as ConstructorParameters<typeof ExternalMcpManager>[0], { isMobile: !!Platform?.isMobile });
         void this.externalMcpManager.autostart();
-      } catch (e: PluginDynamic) {
-        log.warn('Plugin', 'External MCP autostart problem (ignorowane):', e?.message);
+      } catch (e: unknown) {
+        // TS-boundary: catch łapie cokolwiek zostało rzucone (nie zawsze `Error`) - duck-type
+        // do `.message`, bez zmiany runtime (asercja, nie guard; `?.` zostaje jak było).
+        log.warn('Plugin', 'External MCP autostart problem (ignorowane):', (e as { message?: string } | null)?.message);
       }
-    } catch (e: PluginDynamic) {
+    } catch (e: unknown) {
       log.error('Plugin', 'MCP system FAIL:', e);
     }
 
     // Context menu: "Send to assistant" + "Inline comment"
     this.registerEvent(
-      this.app.workspace.on('editor-menu', (menu: PluginDynamic, editor: PluginDynamic, view: PluginDynamic) => {
+      this.app.workspace.on('editor-menu', (menu, editor, view) => {
         const selection = editor.getSelection();
         if (selection && selection.trim().length > 0) {
-          menu.addItem((item: PluginDynamic) => {
+          menu.addItem((item) => {
             item.setTitle(t('main.send_to_assistant'))
               .setIcon('message-square')
               .onClick(() => {
                 const filePath = view?.file?.path || '';
-                new SendToAgentModal(this.app, this as PluginDynamic, selection, filePath).open();
+                // TS-boundary: `SendToAgentPluginLike.agentManager._emit` (modules/shell,
+                // lokalny kontrakt 1-argumentowy) jest węższy niż prawdziwy
+                // `AgentManager._emit(event, data)` (modules/agents) - rozjazd kontraktu.
+                new SendToAgentModal(this.app, this as unknown as ConstructorParameters<typeof SendToAgentModal>[1], selection, filePath).open();
               });
           });
-          menu.addItem((item: PluginDynamic) => {
+          menu.addItem((item) => {
             item.setTitle(t('main.comment_to_assistant'))
               .setIcon('edit')
               .onClick(() => {
@@ -747,7 +881,10 @@ export default class PkmAssistantPlugin extends PluginBase {
 
     const refs = secureStorage.refs || {};
     if (Object.keys(refs).length === 0) {
-      return this.secretsStorage.hydrateSettings(settings);
+      // TS-boundary: `SecureStorageSlice` żyje dwa razy z tą samą nazwą - `core/runtime/
+      // contracts.ts` (`encrypted: Record<string, unknown>`) i `core/security/SecretsStorage.ts`
+      // (`encrypted: Record<string, EncryptedSecret>`) - dwa lokalne kontrakty tego samego worka.
+      return this.secretsStorage.hydrateSettings(settings as Parameters<SecretsStorage['hydrateSettings']>[0]);
     }
 
     const password = await MasterPasswordModal.request(this.app, {
@@ -760,8 +897,9 @@ export default class PkmAssistantPlugin extends PluginBase {
     if (password) {
       try {
         await this.secretsStorage.unlock(password, secureStorage.masterSalt);
-      } catch (error: PluginDynamic) {
-        log.warn('Plugin', 'Secure storage unlock failed:', error?.message || error);
+      } catch (error: unknown) {
+        // TS-boundary: patrz komentarz katalogowy przy catch-blokach wyżej (duck-type `.message`).
+        log.warn('Plugin', 'Secure storage unlock failed:', (error as { message?: string } | null)?.message || error);
         new Notice('Secure storage unlock failed. API keys stay locked.', 10000);
       }
     } else {
@@ -771,7 +909,9 @@ export default class PkmAssistantPlugin extends PluginBase {
       new Notice('Secure storage locked. API keys unavailable until unlock in Settings.', 10000);
     }
 
-    const status = await this.secretsStorage.hydrateSettings(settings);
+    // TS-boundary: patrz komentarz przy pierwszym `hydrateSettings` wyżej (dwa lokalne
+    // `SecureStorageSlice`).
+    const status = await this.secretsStorage.hydrateSettings(settings as Parameters<SecretsStorage['hydrateSettings']>[0]);
     if (status?.missing?.length) {
       log.warn('Plugin', `Secure storage hydrate incomplete: ${status.missing.length} key(s) unavailable.`);
     }
@@ -802,7 +942,7 @@ export default class PkmAssistantPlugin extends PluginBase {
         adoptSheet(this._crystalSoulSheet);
       }
       log.info('Plugin', 'Crystal Soul custom theme loaded');
-    } catch (e: PluginDynamic) {
+    } catch (e: unknown) {
       log.warn('Plugin', 'Crystal Soul theme load failed:', e);
     }
   }
@@ -845,7 +985,7 @@ export default class PkmAssistantPlugin extends PluginBase {
    * Initialize ribbon icons with default visibility.
    */
 
-  get ribbonIcons () {
+  get ribbonIcons(): Record<string, RibbonIconDef> {
     return {
       chat: {
         iconName: "pkm-icon",
@@ -856,7 +996,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       agents: {
         iconName: "users",
         description: t('main.agent_sidebar'),
-        callback: () => { void openAgentSidebar(this); }
+        callback: () => { void openAgentSidebar(this as unknown as Parameters<typeof openAgentSidebar>[0]); }
       }
     }
   }
@@ -888,7 +1028,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     this.registerInterval(window.setTimeout(() => {
       const leaves = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE);
       if (leaves.length === 0) return;
-      const chatView = leaves[0].view as PluginDynamic;
+      const chatView = leaves[0].view as ChatViewLike;
       if (!chatView?.input_area || typeof chatView.send_message !== 'function') {
         log.warn('Main', 'sendInlineComment: widok czatu jeszcze nie gotowy — komentarz porzucony');
         return;
@@ -906,7 +1046,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       // Wiadomość składa KOD z fragmentu notatki — user dopisał tylko komentarz, więc
       // przywileje człowieka (rejestr adresów, markery `@@skill:`, komendy `/`) nie należą się
       // treści zaznaczenia. Patrz core/security/messageOrigin.ts.
-      chatView.send_message({ meta: MACHINE_MESSAGE_META });
+      void chatView.send_message({ meta: MACHINE_MESSAGE_META });
     }, 300));
   }
 
@@ -922,7 +1062,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     if (await this.isNewPluginVersion(this.manifest.version)) {
       log.debug('Main', "opening release notes modal");
       try {
-        void (ReleaseNotesView as PluginDynamic).openForVersion(this.app.workspace, this.manifest.version);
+        void ReleaseNotesView.openForVersion(this.app.workspace, this.manifest.version);
       } catch (e) {
         log.error('Main', 'Failed to open ReleaseNotesView', e);
       }
@@ -953,8 +1093,9 @@ export default class PkmAssistantPlugin extends PluginBase {
           12000
         );
       }
-    } catch (e: PluginDynamic) {
-      log.debug('Plugin', 'embedding provider check error (env not ready):', e?.message || e);
+    } catch (e: unknown) {
+      // TS-boundary: patrz komentarz katalogowy przy catch-blokach wyżej (duck-type `.message`).
+      log.debug('Plugin', 'embedding provider check error (env not ready):', (e as { message?: string } | null)?.message || e);
     }
   }
 
@@ -981,7 +1122,7 @@ export default class PkmAssistantPlugin extends PluginBase {
         id: "pkm-open-agents",
         name: t('command.open_agents'),
         callback: () => {
-          void openAgentSidebar(this);
+          void openAgentSidebar(this as unknown as Parameters<typeof openAgentSidebar>[0]);
         }
       },
       pkm_selftest: {
@@ -1023,9 +1164,10 @@ export default class PkmAssistantPlugin extends PluginBase {
       await this.app.vault.create(path, buildArtifactsBaseContent(folder));
       log.info('Plugin', `Widok Bases artefaktów wygenerowany: ${path}`);
       new Notice(t('artifact.base.created', { path }), 8000);
-    } catch (e: PluginDynamic) {
+    } catch (e: unknown) {
       log.error('Plugin', 'Generowanie widoku Bases nie powiodło się:', e);
-      new Notice(t('artifact.base.failed', { error: e?.message || String(e) }), 8000);
+      // TS-boundary: patrz komentarz katalogowy przy catch-blokach wyżej (duck-type `.message`).
+      new Notice(t('artifact.base.failed', { error: (e as { message?: string } | null)?.message || String(e) }), 8000);
     }
   }
 
@@ -1036,8 +1178,15 @@ export default class PkmAssistantPlugin extends PluginBase {
   async run_self_test() {
     try {
       const { buildSelfTestReport, formatSelfTestReport } = await import('../core/selftest.js');
-      const report = await buildSelfTestReport(this as PluginDynamic, {
-        countDocs: countDocs as PluginDynamic,
+      // TS-boundary: `SelfTestPlugin` (core/selftest) ma DWIE rozbieżności z prawdziwym pluginem:
+      // (1) `settings.pkmAssistant.modelLibrary: { main?: ModelEntry[] }` (lokalny) węższy niż
+      // prawdziwy `PkmAssistantSettings.modelLibrary: unknown` (core/runtime/contracts);
+      // (2) `agentManager.getMemoryForAgent?: (agent: AgentLike) => ...` (param `{name?: string}`)
+      // węższy niż prawdziwy `AgentManager.getMemoryForAgent(agent: Agent | string | null | undefined)`.
+      const report = await buildSelfTestReport(this as unknown as Parameters<typeof buildSelfTestReport>[0], {
+        // TS-boundary: `countDocs` (modules/embedding) bierze `AnyOrama | null | undefined`;
+        // `SelfTestDeps.countDocs` (core, node-safe - nie zna `AnyOrama`) chce `(db: unknown)`.
+        countDocs: countDocs as unknown as SelfTestDeps['countDocs'],
         isMobile: !!Platform?.isMobile,
         fileLogActive: log.fileSinkActive,
       });
@@ -1054,14 +1203,15 @@ export default class PkmAssistantPlugin extends PluginBase {
       const { ok, warn, error } = report.summary;
       log.info('Plugin', `Self-test: ${ok} OK, ${warn} warn, ${error} error → ${path}`);
       new Notice(t('selftest.notice_done', { ok, warn, errors: error, path }), 8000);
-    } catch (e: PluginDynamic) {
+    } catch (e: unknown) {
       log.error('Plugin', 'Self-test failed:', e);
-      new Notice(t('selftest.notice_fail', { error: e?.message || String(e) }), 8000);
+      // TS-boundary: patrz komentarz katalogowy przy catch-blokach wyżej (duck-type `.message`).
+      new Notice(t('selftest.notice_fail', { error: (e as { message?: string } | null)?.message || String(e) }), 8000);
     }
   }
 
   show_release_notes() {
-    return void (ReleaseNotesView as PluginDynamic).openForVersion(this.app.workspace, this.manifest.version);
+    return void ReleaseNotesView.openForVersion(this.app.workspace, this.manifest.version);
   }
 
   async open_random_connection() {
@@ -1070,7 +1220,10 @@ export default class PkmAssistantPlugin extends PluginBase {
     new Notice('Connections feature wycofany w v2.0 — przywrócenie planowane na v3.0 z silnikiem Orama.');
   }
 
-  async openNote(target_path: string, event: PluginDynamic = null) { await openNote(this as PluginDynamic, target_path, event); }
+  // TS-boundary: ZASTANE - podajemy PLUGIN tam, gdzie sygnatura chce AppLike; runtime ratuje
+  // `resolveApp` (core/utils/obsidianNav.ts:34-39), który przyjmuje też `{ app: AppLike }`.
+  // Naprawa = sygnatura `openNote` w core (poza zakresem tej fali - composition root jej nie zmienia).
+  async openNote(target_path: string, event: unknown = null) { await openNote(this as unknown as AppLike, target_path, event); }
 
   /**
    * TODO: wynieść do `core/utils/` jako wspólne narzędzie.

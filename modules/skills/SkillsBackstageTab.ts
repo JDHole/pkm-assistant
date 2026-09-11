@@ -25,10 +25,12 @@ import {
     confirmModal,
 } from '../ui-components/index.js';
 import { t } from '../../core/i18n/index.js';
-// TS-any: Obsidian UI and plugin services expose dynamic runtime contracts.
-type UiBoundary = any;
+import type { SidebarNav } from '../shell/index.js';
+import type { Agent } from '../agents/index.js';
+import type { SkillsPlugin } from './types.js';
+import type { SkillTemplateStore, SkillTemplateRecord } from './SkillTemplateStore.js';
 
-export function renderSkillsTab(content: UiBoundary, plugin: UiBoundary, nav: UiBoundary) {
+export function renderSkillsTab(content: HTMLElement, plugin: SkillsPlugin, nav: SidebarNav): void {
     const store = plugin.agentManager?.skillTemplateStore;
     const templates = store?.list() || [];
     const agents = plugin.agentManager?.getAllAgents() || [];
@@ -38,7 +40,8 @@ export function renderSkillsTab(content: UiBoundary, plugin: UiBoundary, nav: Ui
     const createBtn = content.createEl('button', { cls: 'cs-create-btn' });
     setSvgLabel(createBtn, UiIcons.plus(11), t('backstage.new_skill_template'));
     createBtn.addEventListener('click', () => {
-        new SkillEditorModal(plugin.app, plugin, null, () => nav.refresh(), { template: true }).open();
+        // `plugin.app as never`: patrz komentarz w SkillDetailView.ts (most AppLike→App).
+        new SkillEditorModal(plugin.app as never, plugin, null, () => nav.refresh(), { template: true }).open();
     });
 
     if (templates.length === 0) {
@@ -51,9 +54,9 @@ export function renderSkillsTab(content: UiBoundary, plugin: UiBoundary, nav: Ui
     });
 
     const activeFilters = new Set<string>();
-    const categories = [...new Set(templates.map((s: UiBoundary) => s.category).filter(Boolean))];
+    const categories = [...new Set(templates.map((s) => s.category).filter(Boolean))];
     const filterDefs = categories.map(c => ({
-        value: `cat:${c as string}`, label: getCategoryLabel(c as string), iconFn: (s: number) => UiIcons.folder(s),
+        value: `cat:${c}`, label: getCategoryLabel(c), iconFn: (s: number) => UiIcons.folder(s),
     }));
 
     const filterContainer = content.createDiv();
@@ -76,19 +79,22 @@ export function renderSkillsTab(content: UiBoundary, plugin: UiBoundary, nav: Ui
         let filtered = templates;
 
         if (filter) {
-            filtered = filtered.filter((s: UiBoundary) =>
+            filtered = filtered.filter((s) =>
                 s.name.toLowerCase().includes(filter) || s.description?.toLowerCase().includes(filter)
             );
         }
         for (const f of activeFilters) {
             if (f.startsWith('cat:')) {
                 const cat = f.slice(4);
-                filtered = filtered.filter((s: UiBoundary) => s.category === cat);
+                filtered = filtered.filter((s) => s.category === cat);
             }
         }
 
         for (const tpl of filtered) {
-            renderTemplateCard(list, tpl, { plugin, nav, store, agents });
+            // `!`: templates.length > 0 (guard wyżej) wymaga, że `store?.list()` naprawdę
+            // zwrócił dane — więc `store` musiało być zdefiniowane (`store?.list() || []`
+            // daje [] gdy store jest undefined).
+            renderTemplateCard(list, tpl, { plugin, nav, store: store!, agents });
         }
     };
 
@@ -97,7 +103,7 @@ export function renderSkillsTab(content: UiBoundary, plugin: UiBoundary, nav: Ui
     renderList();
 }
 
-function renderTemplateCard(list: UiBoundary, tpl: UiBoundary, { plugin, nav, store, agents }: { plugin: UiBoundary; nav: UiBoundary; store: UiBoundary; agents: UiBoundary }) {
+function renderTemplateCard(list: HTMLElement, tpl: SkillTemplateRecord, { plugin, nav, store, agents }: { plugin: SkillsPlugin; nav: SidebarNav; store: SkillTemplateStore; agents: Agent[] }): void {
     const category = tpl.category || 'general';
     const catColor = getCategoryColor(category);
 
@@ -128,7 +134,8 @@ function renderTemplateCard(list: UiBoundary, tpl: UiBoundary, { plugin, nav, st
         iconFn: UiIcons.edit,
         label: t('generic.edit'),
         onClick: () => {
-            new SkillEditorModal(plugin.app, plugin, tpl, () => nav.refresh(), { template: true }).open();
+            // `plugin.app as never`: patrz komentarz w SkillDetailView.ts (most AppLike→App).
+            new SkillEditorModal(plugin.app as never, plugin, tpl, () => nav.refresh(), { template: true }).open();
         },
     });
     renderCardAction(actions, {
@@ -136,7 +143,7 @@ function renderTemplateCard(list: UiBoundary, tpl: UiBoundary, { plugin, nav, st
         label: t('generic.delete'),
         danger: true,
         onClick: async () => {
-            const okToDelete = await confirmModal(plugin.app, {
+            const okToDelete = await confirmModal(plugin.app as never, {
                 title: t('generic.delete'),
                 message: t('backstage.confirm_delete_template', { name: tpl.name }),
                 destructive: true,
@@ -156,7 +163,7 @@ function renderTemplateCard(list: UiBoundary, tpl: UiBoundary, { plugin, nav, st
  * „Użyj u agenta…" — odlej kopię szablonu i dopisz ją do `skills[]` agenta.
  * Zapis profilu agenta idzie przez AgentManager (jedyny owner), żeby YAML nie rozjechał się z cache.
  */
-async function useTemplateAtAgent(tpl: UiBoundary, agentName: string, { plugin, store, nav }: { plugin: UiBoundary; store: UiBoundary; nav: UiBoundary }) {
+async function useTemplateAtAgent(tpl: SkillTemplateRecord, agentName: string, { plugin, store, nav }: { plugin: SkillsPlugin; store: SkillTemplateStore; nav: SidebarNav }): Promise<void> {
     const { Notice } = await import('obsidian');
     const agentManager = plugin.agentManager;
     const agent = agentManager?.getAgent?.(agentName);
@@ -164,8 +171,10 @@ async function useTemplateAtAgent(tpl: UiBoundary, agentName: string, { plugin, 
         new Notice(t('backstage.template_use_failed', { error: agentName }));
         return;
     }
-
-    const result = await store.instantiate(tpl.slug, { skillLoader: agentManager.skillLoader });
+    // `agentManager!`: `agent` doszedł z `agentManager?.getAgent?.(...)` — skoro jest prawdziwy
+    // (guard wyżej), `agentManager` musiało być zdefiniowane (optional chaining inaczej dałoby
+    // undefined).
+    const result = await store.instantiate(tpl.slug, { skillLoader: agentManager!.skillLoader });
     if (!result?.success) {
         new Notice(t('backstage.template_use_failed', { error: result?.error || '?' }));
         return;
@@ -175,9 +184,13 @@ async function useTemplateAtAgent(tpl: UiBoundary, agentName: string, { plugin, 
     }
 
     const skills = Array.isArray(agent.skills) ? [...agent.skills] : [];
-    if (!skills.some((s: UiBoundary) => (typeof s === 'string' ? s : s?.name) === result.slug)) {
-        skills.push(result.slug);
-        await agentManager.updateAgent(agentName, { skills });
+    // `s: string | { name?: string }`: realny `Agent.skills` jest dziś zawsze `string[]`, ale
+    // ternary niżej broni się defensywnie przed starszym kształtem (obiekt z `name`) — adnotacja
+    // (czysto typowa) trzyma obie gałęzie bez zmiany warunku.
+    if (!skills.some((s: string | { name?: string }) => (typeof s === 'string' ? s : s?.name) === result.slug)) {
+        // `!`: `store.instantiate` zawsze ustawia `slug` w gałęzi sukcesu (`result.success` wyżej).
+        skills.push(result.slug!);
+        await agentManager!.updateAgent(agentName, { skills });
     }
 
     new Notice(t('backstage.template_used', { name: result.name, agent: agentName }));

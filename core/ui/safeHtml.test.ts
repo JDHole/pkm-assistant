@@ -198,6 +198,11 @@ test('fragmentFromHtml querySelector nie zwraca przypadkowego pierwszego dziecka
 // ── (ścieżka PRAWDZIWEGO DOM, gdy `document` istnieje w środowisku) ───
 // AVA nie ma `document` — ta ścieżka (browserDocument + toDom) inaczej nigdy się
 // nie wykona. Podstawiamy minimalną atrapę `Document`, żeby przejść przez nią naprawdę.
+//
+// `toDom`/`fragmentFromHtml` (obsidianmd/prefer-create-el) wołają dziś Obsidianowe
+// `parent.createEl(tag)` i globalne `createFragment()`, nie `doc.createElement`/
+// `doc.createDocumentFragment` — atrapa musi więc dać CIAŁO tym dwóm, inaczej produkcyjny
+// kod dostanie `TypeError`/`ReferenceError` w tym teście, nie przejdzie przez tę ścieżkę wcale.
 interface FakeDomNode {
     kind: 'fragment' | 'element' | 'text';
     tagName?: string;
@@ -206,6 +211,8 @@ interface FakeDomNode {
     attrs: Record<string, string>;
     appendChild(child: FakeDomNode): FakeDomNode;
     setAttribute(name: string, value: string): void;
+    /** Obsidian `Node.createEl`: tworzy znacznik i OD RAZU dopina go do `this`. */
+    createEl(tag: string): FakeDomNode;
 }
 
 const makeFakeDomNode = (kind: FakeDomNode['kind'], tagName?: string, text?: string): FakeDomNode => {
@@ -217,6 +224,11 @@ const makeFakeDomNode = (kind: FakeDomNode['kind'], tagName?: string, text?: str
         attrs: {},
         appendChild(child) { node.children.push(child); return child; },
         setAttribute(name, value) { node.attrs[name] = value; },
+        createEl(tag) {
+            const el = makeFakeDomNode('element', tag);
+            node.children.push(el);
+            return el;
+        },
     };
     return node;
 };
@@ -228,9 +240,13 @@ const fakeDocument = {
 };
 
 test('fragmentFromHtml buduje prawdziwe drzewo DOM, gdy document.createDocumentFragment istnieje', t => {
-    const globalWithDocument = globalThis as unknown as { document?: unknown };
-    const previous = globalWithDocument.document;
+    const globalWithDocument = globalThis as unknown as { document?: unknown; createFragment?: unknown };
+    const previousDocument = globalWithDocument.document;
+    const previousCreateFragment = globalWithDocument.createFragment;
     globalWithDocument.document = fakeDocument;
+    // Produkcyjny kod woła globalne `createFragment()` (patrz komentarz w safeHtml.ts przy
+    // wywołaniu) - w prawdziwym Obsidianie to `document.createDocumentFragment()`, tu tak samo.
+    globalWithDocument.createFragment = () => fakeDocument.createDocumentFragment();
 
     try {
         const frag = fragmentFromHtml('<div>tekst</div>') as unknown as FakeDomNode;
@@ -245,8 +261,36 @@ test('fragmentFromHtml buduje prawdziwe drzewo DOM, gdy document.createDocumentF
         t.is(div.children[0].kind, 'text');
         t.is(div.children[0].text, 'tekst');
     } finally {
-        if (previous === undefined) delete globalWithDocument.document;
-        else globalWithDocument.document = previous;
+        if (previousDocument === undefined) delete globalWithDocument.document;
+        else globalWithDocument.document = previousDocument;
+        if (previousCreateFragment === undefined) delete globalWithDocument.createFragment;
+        else globalWithDocument.createFragment = previousCreateFragment;
+    }
+});
+
+/**
+ * `document` bywa obecny BEZ globali Obsidiana (goły DOM/jsdom bez patcha) - `browserDocument()`
+ * bramkuje na `typeof createFragment === 'function'`, nie na natywną `document.createDocumentFragment`
+ * (którą taki DOM ma). Bez tej bramki `fragmentFromHtml` wpadłaby w ścieżkę "prawdziwy DOM" i
+ * `createFragment()` wybuchłby `ReferenceError` zamiast bezpiecznie spaść do atrapy `PlainNode`.
+ */
+test('fragmentFromHtml: document jest, ale globalnej createFragment (Obsidian) brak - spada do PlainNode, nie rzuca', t => {
+    const globalWithDocument = globalThis as unknown as { document?: unknown; createFragment?: unknown };
+    const previousDocument = globalWithDocument.document;
+    const previousCreateFragment = globalWithDocument.createFragment;
+    globalWithDocument.document = fakeDocument;
+    delete globalWithDocument.createFragment;
+
+    try {
+        const frag = asPlain(fragmentFromHtml('<div>tekst</div>'));
+
+        t.is(frag.tagName, '#fragment', 'ma wrócić atrapa PlainNode (#fragment) - dowód, że NIE poszło przez toDom/atrapę Document mimo że document istnieje');
+        t.is(frag.textContent, 'tekst');
+    } finally {
+        if (previousDocument === undefined) delete globalWithDocument.document;
+        else globalWithDocument.document = previousDocument;
+        if (previousCreateFragment === undefined) delete globalWithDocument.createFragment;
+        else globalWithDocument.createFragment = previousCreateFragment;
     }
 });
 

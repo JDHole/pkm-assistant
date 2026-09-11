@@ -8,18 +8,21 @@
  */
 import { t } from '../../../core/i18n/index.js';
 import { MACHINE_MESSAGE_META } from '../../../core/index.js';
+// Receiver mixina = ZŁOŻONY widok (`ChatViewLike`: klasa + osiem paczek mixinów).
+// interfejs). Cykl typów chat_view ↔ mixin jest legalny i znika w buildzie (`import type`).
+import type { ChatViewLike } from './chatViewShape.js';
 
-// TS-any: receiver legacy mixina jest składany runtime przez Object.assign(ChatView.prototype, ...).
-type ChatViewMixinContext = any;
-type DelegationProposal = {
+/** Propozycja delegacji z wyniku narzędzia `agent_delegate` (czyta ją `chat_streaming`). */
+export type DelegationProposal = {
     reason?: string;
     to_name: string;
-    to_agent: unknown;
+    /** Nazwa agenta-adresata — jedzie wprost do `handleAgentChange`. */
+    to_agent: string;
     context_summary?: string;
 };
 
 export function _renderDelegationButton(
-    this: ChatViewMixinContext,
+    this: ChatViewLike,
     container: HTMLElement,
     data: DelegationProposal,
 ): void {
@@ -48,7 +51,7 @@ export function _renderDelegationButton(
             // `context_summary` pisze MODEL - ta wysyłka jest maszynowa, choć klika ją user. Bez
             // tego znacznika marker `@@skill:` z tekstu modelu wjeżdżałby do promptu systemowego
             // nowego agenta z ramką „użytkownik uruchomił skill".
-            window.setTimeout(() => this.send_message({ meta: MACHINE_MESSAGE_META }), 200);
+            window.setTimeout(() => { void this.send_message({ meta: MACHINE_MESSAGE_META }); }, 200);
         })();
     });
 }

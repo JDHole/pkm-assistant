@@ -64,7 +64,59 @@ function captureConsole(method: 'log' | 'warn' | 'error', fn: () => void): unkno
     return calls;
 }
 
+/** Liczniki wywołań per metoda - pod test kontraktu „tylko console.debug, zero groupCollapsed/groupEnd/table". */
+type ConsoleCallCounts = { debug: number; warn: number; error: number; groupCollapsed: number; groupEnd: number; table: number };
+
+/** Podmienia WSZYSTKIE sześć metod na liczniki wywołań (nie treść) na czas `fn()`. */
+function captureConsoleCounts(fn: () => void): ConsoleCallCounts {
+    const counts: ConsoleCallCounts = { debug: 0, warn: 0, error: 0, groupCollapsed: 0, groupEnd: 0, table: 0 };
+    const keys = Object.keys(counts) as Array<keyof ConsoleCallCounts>;
+    const originals = {} as Record<keyof ConsoleCallCounts, typeof console.log>;
+    for (const k of keys) {
+        originals[k] = console[k];
+        console[k] = (() => { counts[k] += 1; }) as typeof console.log;
+    }
+    try { fn(); } finally {
+        for (const k of keys) console[k] = originals[k];
+    }
+    return counts;
+}
+
 const SECRET = 'SEKRET12345ABCDEF';
+
+/**
+ * Walidator katalogu Obsidiana dopuszcza WYŁĄCZNIE `console.warn/error/debug` (nie uznaje
+ * per-plikowego override'u w `eslint.obsidian.config.js`) - `tool()`/`group()` kiedyś
+ * otwierały grupę przez `console.groupCollapsed()`, dziś logują płasko przez `console.debug`.
+ */
+test.serial('tool()/group() w trybie debug wołają WYŁĄCZNIE console.debug - zero groupCollapsed/groupEnd/table', t => {
+    const internals = log as unknown as LoggerInternals;
+    const wasDebug = internals._debug;
+    internals._debug = true;
+    try {
+        const counts = captureConsoleCounts(() => {
+            log.tool('fake_tool', { a: 1 }, { b: 2 });
+            log.group('Mod', 'label');
+        });
+        t.is(counts.groupCollapsed, 0, 'console.groupCollapsed nie jest na białej liście walidatora');
+        t.is(counts.groupEnd, 0, 'group() już nie otwiera grupy konsoli - nie ma czego zamykać');
+        t.is(counts.table, 0, 'metoda table() jest skasowana - nikt jej nie woła');
+        t.is(counts.warn, 0);
+        t.is(counts.error, 0);
+        // tool(): nagłówek + „Args:" + „Result:" = 3 console.debug; group(): 1 console.debug.
+        t.is(counts.debug, 4, 'tool() = 3 console.debug, group() = 1 console.debug, razem 4');
+    } finally { internals._debug = wasDebug; }
+});
+
+test.serial('groupEnd() jest udokumentowanym no-opem - nie woła ŻADNEJ metody console', t => {
+    const internals = log as unknown as LoggerInternals;
+    const wasDebug = internals._debug;
+    internals._debug = true;
+    try {
+        const counts = captureConsoleCounts(() => { log.groupEnd(); });
+        t.deepEqual(counts, { debug: 0, warn: 0, error: 0, groupCollapsed: 0, groupEnd: 0, table: 0 });
+    } finally { internals._debug = wasDebug; }
+});
 
 test.serial('Obiekt z ZAESCAPOWANYM JSON-em w polu message nie wynosi klucza do pliku logu', t => {
     const lines = installFakeSink();

@@ -10,9 +10,12 @@
  * złamałoby ten kontrakt od razu. Zamiast tego moduł trzyma silnik jako slot wstrzykiwany
  * przez `setYamlEngine()` — composition root (`src/main.ts`) wstawia tam prawdziwe
  * `parseYaml`/`stringifyYaml` Obsidiana, a poza Obsidianem (testy AVA, harness) wstawia je
- * preload/atrapa na pakiecie `yaml` (devDependency, zob. `test-support/register-obsidian-for-ava.mjs`
- * i `test-support/obsidian.ts`). Silnik nie ustawiony = czytelny błąd, NIE cichy null —
- * inaczej pierwsza próba zapisu agenta/artefaktu ginęłaby bez śladu.
+ * preload/atrapa na pakiecie `yaml` (devDependency). Od 2026-09-11 ten preload i ta atrapa
+ * mieszkają w repo harnessu (`test-support/register-obsidian-for-ava.mjs`,
+ * `test-support/obsidian.ts` — TAM, nie tutaj); w tym repo pod tą samą ścieżką
+ * `test-support/register-obsidian-for-ava.mjs` zostaje tylko lokator, który je stamtąd znajduje.
+ * Silnik nie ustawiony = czytelny błąd, NIE cichy null — inaczej pierwsza próba zapisu
+ * agenta/artefaktu ginęłaby bez śladu.
  */
 import { log } from './Logger.js';
 

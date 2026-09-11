@@ -115,9 +115,9 @@ export interface AgentConfig {
     [extra: string]: unknown;
 }
 
-// TS-any: update() intentionally accepts permissive user-YAML values before its existing normalizers validate them.
-type AgentUpdateValue = any;
-export type AgentUpdate = Partial<AgentConfig> & Record<string, AgentUpdateValue>;
+// `AgentConfig` already carries `[extra: string]: unknown;`, so `Partial<AgentConfig>` alone
+// types every known field AND arbitrary extra keys (unknown) - no separate value alias needed.
+export type AgentUpdate = Partial<AgentConfig>;
 
 /**
  * Max sub-agents per agent
@@ -198,7 +198,7 @@ export class Agent implements ToolVisibilityAgent {
     declare compression_prompt: string;
     declare subagent_frame_prompt: string;
     declare memory_rescue: boolean;
-    declare lastActivity: unknown;
+    declare lastActivity: number | null;
     /**
      * @param {Object} config - Agent configuration
      * @param {string} config.name - Agent name
@@ -317,8 +317,10 @@ export class Agent implements ToolVisibilityAgent {
         //   Zostawało jako wydmuszka udająca uprawnienie. Kto z kim rozmawia, rozstrzyga dziś
         //   `komunikator_visible`. Stare YAML-e z tym polem ładują się bez zmian - nieznane
         //   pola są po prostu ignorowane.
+        // TS-boundary: config.mcp_servers is unvalidated user-YAML (AgentConfig types it
+        // `unknown`); the Array.isArray guard is the only runtime validation this had.
         this.mcp_servers = Array.isArray(config.mcp_servers)
-            ? [...config.mcp_servers]
+            ? [...(config.mcp_servers as string[])]
             : ['vault', 'memory', 'core'];
         // Rola rozpuszczona - effective_mcp_servers to teraz zwykłe lustro mcp_servers
         // (roleDefinition skasowane).
@@ -621,38 +623,42 @@ export class Agent implements ToolVisibilityAgent {
             'memory_rescue',
         ];
 
+        // TS-boundary: `updates` is `Partial<AgentConfig>` (permissive user-YAML/UI shape);
+        // the runtime `key === '...'` switch below is the only validation each `value` gets,
+        // so each branch asserts `value` to the type its target already declares (matches
+        // what the branch's own normalizer/field expects, not a new check).
         for (const [key, value] of Object.entries(updates)) {
             if (allowedFields.includes(key)) {
                 if (key === 'focus_folders') {
-                    this.focusFolders = Agent._normalizeFocusFolders(value);
+                    this.focusFolders = Agent._normalizeFocusFolders(value as AgentConfig['focus_folders']);
                 } else if (key === 'default_permissions') {
-                    this.permissions = Agent._normalizePermissions(value);
+                    this.permissions = Agent._normalizePermissions(value as AgentConfig['default_permissions']);
                 } else if (key === 'approval_toggles') {
-                    this.approvalToggles = value || {};
+                    this.approvalToggles = (value as AgentConfig['approval_toggles']) || {};
                 } else if (key === 'sub_agents') {
-                    this._subAgents = Agent._normalizeSubAgentAssignments(value);
+                    this._subAgents = Agent._normalizeSubAgentAssignments(value as AgentConfig['sub_agents']);
                 } else if (key === 'disabled_tools') {
                     // Jedyna oś narzędziowa (negatywna lista, core nieusuwalny).
                     this.disabled_tools = normalizeDisabledTools(value);
                 } else if (key === 'models') {
-                    this.models = Agent._normalizeModelOverrides(value);
+                    this.models = Agent._normalizeModelOverrides(value as AgentConfig['models']);
                 } else if (key === 'preferred_servers') {
-                    this.preferredServers = value || [];
+                    this.preferredServers = (value as AgentConfig['preferred_servers']) || [];
                 } else if (key === 'preferred_tools') {
-                    this.preferredTools = value || [];
+                    this.preferredTools = (value as AgentConfig['preferred_tools']) || [];
                 } else if (key === 'mcp_servers') {
                     // Whitelist of MCP servers.
                     // effective_mcp_servers = lustro mcp_servers (roleDefinition skasowane).
-                    this.mcp_servers = Array.isArray(value) ? [...value] : ['vault', 'memory', 'core'];
+                    this.mcp_servers = Array.isArray(value) ? [...(value as string[])] : ['vault', 'memory', 'core'];
                     this.effective_mcp_servers = [...this.mcp_servers];
                 } else if (key === 'prompt_overrides') {
-                    this.promptOverrides = value || {};
+                    this.promptOverrides = (value as AgentConfig['prompt_overrides']) || {};
                 } else if (key === 'agent_rules') {
-                    this.agentRules = value || '';
+                    this.agentRules = (value as AgentConfig['agent_rules']) || '';
                 } else if (key === 'created_at') {
-                    this.createdAt = value;
+                    this.createdAt = value as string | null;
                 } else if (key === 'crystal_seed') {
-                    this.crystalSeed = value || null;
+                    this.crystalSeed = (value as AgentConfig['crystal_seed']) || null;
                 } else if (key === 'komunikator_visible') {
                     // Tylko jawne `false` robi ducha - śmieć z UI/YAML nie wyłącza poczty.
                     this.komunikator_visible = value !== false;
@@ -672,7 +678,7 @@ export class Agent implements ToolVisibilityAgent {
                     // nie ma). Flaga zostaje `true` nawet gdy `value` jest puste/null: user, który
                     // ŚWIADOMIE czyści pole, nadal "ma o nim zdanie" - serialize() i tak nic nie
                     // wypisze, bo `this.model` będzie falsy (bramka jest `&&`, nie samo `_modelFromSource`).
-                    this.model = value || null;
+                    this.model = (value as AgentConfig['model']) || null;
                     this._modelFromSource = true;
                 } else {
                     // covers: language (plain), emoji, and any other allowed scalar field

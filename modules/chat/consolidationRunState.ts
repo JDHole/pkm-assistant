@@ -21,14 +21,14 @@ type RunLike = {
     isSettled?: () => boolean;
 };
 
-// `export` zdjęty na obu typach niżej — zero referencji spoza
-// tego pliku (`resolveStepDraft`, który je zwraca, zostaje publiczny).
-type DedupStepDraft = {
+// Oba kształty czyta też modal przebiegu (`ConsolidationProgressModal` renderuje review),
+// więc wychodzą typem razem z `resolveStepDraft`.
+export type DedupStepDraft = {
     merges: Array<MergeReview & { accepted: boolean }>;
     deletions: Array<DeletionReview & { accepted: boolean }>;
 };
-type SummaryStepDraft = { body: string };
-type StepDraft = DedupStepDraft | SummaryStepDraft;
+export type SummaryStepDraft = { body: string };
+export type StepDraft = DedupStepDraft | SummaryStepDraft;
 
 type DraftSource = {
     merges?: MergeReview[];
@@ -36,7 +36,7 @@ type DraftSource = {
     body?: unknown;
 };
 
-type StepLike = {
+export type StepLike = {
     draft?: StepDraft;
     result?: unknown;
     decision?: unknown;

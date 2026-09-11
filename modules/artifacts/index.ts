@@ -24,6 +24,9 @@ export { migrateJsonArtifactsToNotes } from './migrate_json_to_notes.js';
 
 // Przywołanie agenta + guziki w notatce (rejestracja code-blocku):
 export { summonAgentForArtifact, activateArtifactInChat } from './artifactSummon.js';
+// Powierzchnia pluginu, jakiej żądają oba wejścia przywołania (wołacz spoza modułu
+// nazywa nią swój cast na granicy `AppLike` vs `App`).
+export type { SummonPlugin } from './artifactSummon.js';
 export { registerArtifactBlocks } from './artifactBlocks.js';
 
 // Czyste helpery widoku (zakładka panelu + segment slim bara):

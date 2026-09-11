@@ -471,7 +471,9 @@ export class OnboardingModal extends Modal {
 
             if (resp.status < 200 || resp.status >= 300) throw new Error(`Status ${resp.status}`);
 
-            const data: LocalDiscoveryResponse = resp.json;
+            // TS-boundary: JSON katalogu modeli z lokalnego serwera (Ollama / OpenAI-compatible),
+            // bez walidacji schematem - `resp.json` niesie typ `any` z deklaracji Obsidiana.
+            const data = resp.json as LocalDiscoveryResponse;
 
             // Ollama returns { models: [...] }, OpenAI-compatible returns { data: [...] }
             let models: LocalModel[] = [];

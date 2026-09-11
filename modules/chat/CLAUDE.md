@@ -30,6 +30,7 @@ modules/chat/
     ├── chat_session.js            # session save/load/restore (z `modules/memory/`) + _createRollingWindow
     ├── chat_tabs.js                # multiple chat tabs, tożsamość zakładki (`_tabKey`)
     ├── chat_popovers.js            # agent popovers, context menus
+    ├── chatViewShape.js            # TYP złożonego widoku (`ChatViewLike`) + kształty pluginu/zakładek; plik type-only
     ├── InlineChipPlugin.js         # marker parser: @@skill:, @sub-agent:, @@tool:
     ├── messagePrivileges.js        # bramki przywilejów tury (rejestr URL / markery / komendy `/`) - wszystkie pytają `meta.origin` z core/security/messageOrigin
     ├── queuedMessage.js            # slot kolejki wiadomości (tekst + proweniencja + WŁAŚCICIEL zakładki) + decyzje drenu i Stopu; pure, testowalny
@@ -97,6 +98,15 @@ import * as streaming from './chat/chat_streaming.js';
 
 Object.assign(ChatView.prototype, messages, streaming, ...);
 ```
+
+**Typ `this` mixina to `ChatViewLike` (`chat/chatViewShape.ts`), nie sama klasa.**
+`ChatViewLike = ChatView & ChatViewMixins` — klasa (pola z konstruktora, deklarowane jako
+`declare x: T`, zero emitu) plus wszystko, co dokładają mixiny (metody ośmiu modułów +
+pola budowane w `renderView`). Kształt mieszka w OSOBNYM pliku i jest w całości type-only
+z dwóch powodów: deklaracja scalona z klasą tej samej nazwy jest błędem lintera
+(`@typescript-eslint/no-unsafe-declaration-merging`), a plik importowany wyłącznie przez
+`import type` nie wchodzi do bundla. Nowe pole widoku dopisujesz w JEDNYM z dwóch miejsc:
+ustawiane w konstruktorze → `declare` w `chat_view.ts`; dokładane przez mixin → `ChatViewMixins`.
 
 Mixin pattern daje: separację konceptualną + zachowanie `this` (każdy submoduł jest
 `ChatView`-em) + brak breaking change przy dalszym dzieleniu. Wymaga `this` consistency -

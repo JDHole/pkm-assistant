@@ -15,6 +15,7 @@ import { makeMemoryNoteFilename } from '../memory/index.js';
 import { ExternalMcpManager } from './ExternalMcpManager.js';
 import type { PermissionDecision, PermissionedAgent, ScopeFolders } from '../../core/index.js';
 import type { ModelResponse, ParsedToolCall } from '../agent-loop/index.js';
+import type { App } from 'obsidian';
 
 /** Złapany błąd - `catch` daje `unknown`, a kod czyta z niego tylko `.message`. */
 type ErrLike = { message?: string };
@@ -445,7 +446,11 @@ export class MCPClient {
             return this.diffModalFactory(this.app, options).waitForApproval();
         }
         const { DiffModal } = await import('../ui-components/index.js');
-        return new DiffModal(this.app, options).waitForApproval();
+        // TS-boundary: DiffModal rozszerza Obsidian `Modal` i woła `super(app)` z prawdziwym
+        // `App`; `MCPClientApp` to celowo zawężony widok TEGO SAMEGO runtime'owego obiektu
+        // (tylko `vault`), zawężony na potrzeby tego klienta - stąd rzut na granicy zamiast
+        // poszerzania kontraktu klienta o cały interfejs `App`.
+        return new DiffModal(this.app as App, options).waitForApproval();
     }
 
     /**

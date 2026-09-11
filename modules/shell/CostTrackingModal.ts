@@ -13,11 +13,34 @@
  * Otwierany z Settings tab (sekcja "Koszty").
  */
 import { Modal } from 'obsidian';
+import type { App } from 'obsidian';
 import { CostLog } from '../memory/index.js';
 import { t } from '../../core/i18n/index.js';
+import type { PluginApi } from '../../core/index.js';
 
-// TS-any: the modal crosses the dynamic Obsidian plugin and persisted cost-log boundary.
-type Runtime = any;
+/** Kształt błędu w `catch` bez narzucania typu wyjątku. */
+type ErrLike = { message?: string };
+
+/** Plugin widziany przez ten modal: tylko `app.vault`, przekazywane do `CostLog`. */
+type CostTrackingModalPlugin = PluginApi;
+
+/**
+ * TS-boundary: wiersz wczytany z `.pkm-assistant/cost_log.jsonl` (`CostLog.readAll()` zwraca
+ * `unknown[]` - plik może zawierać stare wpisy sprzed normalizacji `append()`, stąd oba warianty
+ * cache/model tu obok siebie; wszystkie pola opcjonalne, dokładnie tak jak czyta je `_aggregate`).
+ */
+interface RawCostLogEntry {
+    cost_usd?: number;
+    input_tokens?: number;
+    output_tokens?: number;
+    cached_tokens?: number;
+    savings_usd?: number;
+    cache?: { cached_tokens?: number; savings_usd?: number } | null;
+    agent?: string;
+    ts?: string;
+    model?: string;
+    model_name?: string;
+}
 
 interface CostSummary {
     cost_usd: number;
@@ -51,9 +74,9 @@ function fmtUsd(n: unknown): string {
 }
 
 export class CostTrackingModal extends Modal {
-    declare private plugin: Runtime;
+    declare private plugin: CostTrackingModalPlugin;
 
-    constructor(app: Runtime, plugin: Runtime) {
+    constructor(app: App, plugin: CostTrackingModalPlugin) {
         super(app);
         this.plugin = plugin;
     }
@@ -89,7 +112,7 @@ export class CostTrackingModal extends Modal {
             }
             status.remove();
 
-            const stats = this._aggregate(entries);
+            const stats = this._aggregate(entries as RawCostLogEntry[]);
 
             // Section: Total
             const totalBox = contentEl.createDiv({ cls: 'cs-cost-section cs-cost-section--total' });
@@ -156,12 +179,12 @@ export class CostTrackingModal extends Modal {
             const footer = contentEl.createDiv({ cls: 'cs-cost-footer' });
             const closeBtn = footer.createEl('button', { text: t('generic.close') || 'Zamknij' });
             closeBtn.addEventListener('click', () => this.close());
-        } catch (e: Runtime) {
-            status.textContent = `✗ ${e.message}`;
+        } catch (e) {
+            status.textContent = `✗ ${(e as ErrLike).message}`;
         }
     }
 
-    _aggregate(entries: Runtime[]): CostStats {
+    _aggregate(entries: RawCostLogEntry[]): CostStats {
         const stats: CostStats = {
             total: { cost_usd: 0, calls: 0, input_tokens: 0, output_tokens: 0, cached_tokens: 0, savings_usd: 0 },
             byAgent: {},

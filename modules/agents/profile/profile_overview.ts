@@ -11,15 +11,13 @@ import { COLOR_GROUPS, getColorByHex } from '../../crystal-soul/index.js';
 import { UiIcons } from '../../crystal-soul/index.js';
 import { hexToRgbTriplet } from '../../crystal-soul/index.js';
 import { t, getDateLocale } from '../../../core/i18n/index.js';
-
-// TS-any: the profile coordinator and Obsidian UI extensions are dynamic runtime boundaries.
-type UiBoundary = any;
+import type { ProfileCtx, ProfileFormData } from './profile_types.js';
 
 /**
  * @param {Object} ctx - shared context
  * @param {HTMLElement} el
  */
-export async function renderOverviewTab(ctx: UiBoundary, el: HTMLElement) {
+export async function renderOverviewTab(ctx: ProfileCtx, el: HTMLElement) {
     const { formData, agent, agentManager, container, plugin } = ctx;
     const agentColor = agent?.color || formData.color || '#888888';
     const skillCount = formData.skills?.length || 0;
@@ -201,7 +199,7 @@ function _shard(grid: HTMLElement, label: string, value: string, sub: string | n
 }
 
 /** Human summary of the agent workspace (focus folders / whole vault). */
-function _workspaceSummary(formData: UiBoundary) {
+function _workspaceSummary(formData: ProfileFormData) {
     const focus = formData.focus_folders || [];
     if (focus.length === 0) {
         return { value: t('profile.overview.whole_vault'), sub: null, filled: false };

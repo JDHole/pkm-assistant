@@ -11,15 +11,17 @@ import { DEFAULT_BOTTOM_BAR_MODE } from './todoPanel.js';
 // Zamknięcie zakładki zatrzymuje też JEJ suby - po tym samym adresie zwrotnym, co
 // zamknięcie całego panelu (`stop_all_turns`).
 import { collectSubTaskIdsForOwners } from './turnAbort.js';
-
-// TS-any: receiver legacy mixinów składany runtime przez Object.assign.
-type ChatViewMixinContext = any;
+// Receiver mixina = ZŁOŻONY widok (`ChatViewLike`: klasa + osiem paczek mixinów). Cykl typów
+// chatViewShape ↔ mixin jest legalny i znika w buildzie (`import type`).
+import type { ChatTab, ChatViewLike } from './chatViewShape.js';
+import type { Agent } from '../../agents/index.js';
+import type { ServerVisibilityAgent } from '../../tools/index.js';
 
 /**
  * Initialize chatTabs from the current active agent.
  * Called once in renderView.
  */
-export function _initTabs(this: ChatViewMixinContext) {
+export function _initTabs(this: ChatViewLike) {
     const activeAgent = this.plugin?.agentManager?.getActiveAgent();
     const activeAgentName = activeAgent?.name || 'Jaskier';
 
@@ -27,7 +29,7 @@ export function _initTabs(this: ChatViewMixinContext) {
         this.chatTabs.push({ agentName: activeAgentName, sessionId: activeAgentName, isActive: true });
     }
 
-    const activeTab = this.chatTabs.find((t: ChatViewMixinContext) => t.isActive) || this.chatTabs[0];
+    const activeTab = this.chatTabs.find((t: ChatTab) => t.isActive) || this.chatTabs[0];
     const activeKey = _tabKey(activeTab);
     if (!this._agentStates.has(activeKey)) {
         this._agentStates.set(activeKey, {
@@ -43,7 +45,7 @@ export function _initTabs(this: ChatViewMixinContext) {
 /**
  * Render the tab bar (replaces old pkm-chat-header).
  */
-export function _renderTabBar(this: ChatViewMixinContext, container: ChatViewMixinContext) {
+export function _renderTabBar(this: ChatViewLike, container: HTMLElement) {
     container.empty();
     const topbar = container.createDiv({ cls: 'cs-chat-topbar cs-root' });
     const activeAgentColor = this._getAgentColor();
@@ -63,7 +65,7 @@ export function _renderTabBar(this: ChatViewMixinContext, container: ChatViewMix
 
         tabEl.createSpan({ cls: 'cs-tab__name', text: tab.sessionLabel || tab.agentName });
 
-        tabEl.addEventListener('click', () => this._switchTab(_tabKey(tab)));
+        tabEl.addEventListener('click', () => { void this._switchTab(_tabKey(tab)); });
     }
 
     const addTab = topbar.createDiv({ cls: 'cs-tab cs-tab--add' });
@@ -82,10 +84,10 @@ export function _renderTabBar(this: ChatViewMixinContext, container: ChatViewMix
 /**
  * Switch to a different agent tab.
  */
-export async function _switchTab(this: ChatViewMixinContext, tabIdOrAgentName: string) {
-    const currentTab = this.chatTabs.find((t: ChatViewMixinContext) => t.isActive);
-    const targetTab = this.chatTabs.find((t: ChatViewMixinContext) => _tabKey(t) === tabIdOrAgentName)
-        || this.chatTabs.find((t: ChatViewMixinContext) => t.agentName === tabIdOrAgentName);
+export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
+    const currentTab = this.chatTabs.find((t: ChatTab) => t.isActive);
+    const targetTab = this.chatTabs.find((t: ChatTab) => _tabKey(t) === tabIdOrAgentName)
+        || this.chatTabs.find((t: ChatTab) => t.agentName === tabIdOrAgentName);
     if (!targetTab) return;
 
     const currentKey = currentTab ? _tabKey(currentTab) : null;
@@ -111,7 +113,8 @@ export async function _switchTab(this: ChatViewMixinContext, tabIdOrAgentName: s
     // 1. Save current state
     if (currentTab) {
         const scrollTop = this.messages_container?.scrollTop || 0;
-        this._agentStates.set(currentKey, {
+        // `currentKey` liczy się z `currentTab` tuż wyżej — w tej gałęzi jest stringiem.
+        this._agentStates.set(currentKey!, {
             rollingWindow: this.rollingWindow,
             tokenTracker: this.tokenTracker,
             autonomy: this.currentAutonomy,
@@ -138,7 +141,8 @@ export async function _switchTab(this: ChatViewMixinContext, tabIdOrAgentName: s
     }
 
     // 3a. Sync built-in MCP servers for the newly active agent
-    this.plugin?.serverManager?.syncBuiltInServersForAgent?.(agentManager?.getActiveAgent?.());
+    // TS-boundary: `modules/tools` czyta agenta własnym, węższym kontraktem widoczności serwerów.
+    this.plugin?.serverManager?.syncBuiltInServersForAgent?.(agentManager?.getActiveAgent?.() as ServerVisibilityAgent | null);
 
     // 3b. Invalidate global model singleton
     if (this.env?.chatModel) {
@@ -194,7 +198,7 @@ export async function _switchTab(this: ChatViewMixinContext, tabIdOrAgentName: s
 
     // 6. Update agent color
     const agentRgb = this._getAgentRgb();
-    const bottomPanel = this.container?.querySelector('.cs-input-panel');
+    const bottomPanel = this.container?.querySelector<HTMLElement>('.cs-input-panel');
     if (bottomPanel) {
         bottomPanel.style.setProperty('--cs-agent-color-rgb', agentRgb);
     }
@@ -204,7 +208,7 @@ export async function _switchTab(this: ChatViewMixinContext, tabIdOrAgentName: s
     }
 
     // 7. Re-render messages
-    this.render_messages();
+    void this.render_messages();
     if (this.rollingWindow.messages.length === 0) {
         this.add_welcome_message();
     }
@@ -220,10 +224,10 @@ export async function _switchTab(this: ChatViewMixinContext, tabIdOrAgentName: s
     }
 
     // 10. Refresh if background stream completed
-    const switchedTab = this.chatTabs.find((t: ChatViewMixinContext) => _tabKey(t) === targetKey);
+    const switchedTab = this.chatTabs.find((t: ChatTab) => _tabKey(t) === targetKey);
     if (switchedTab?._needsRefresh) {
         delete switchedTab._needsRefresh;
-        this.render_messages();
+        void this.render_messages();
         this.scrollToFinalMessage();
     }
 
@@ -247,7 +251,7 @@ export async function _switchTab(this: ChatViewMixinContext, tabIdOrAgentName: s
  * dla tury tej zakładki i `requestStop` dla jej biegów (te same funkcje co guzik Stop i
  * `stop_all_turns`). Stop leci PRZED zapisem i przed `_agentStates.delete`.
  */
-function _stopTabWork(this: ChatViewMixinContext, tab: ChatViewMixinContext, tabKey: string) {
+function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: string) {
     const agentName = tab?.agentName;
     // Tylko gdy ta zakładka NAPRAWDĘ coś trzyma — `stop_generation` czyści stan streamingu
     // i podnosi `_drainSuppressed`, więc na cichej zakładce byłoby to szkodliwe.
@@ -257,8 +261,8 @@ function _stopTabWork(this: ChatViewMixinContext, tab: ChatViewMixinContext, tab
     if (wLocie) {
         try {
             this.stop_generation(agentName, 'close_tab');
-        } catch (e: ChatViewMixinContext) {
-            log.warn('Chat', `Zatrzymanie tury zamykanej zakładki padło (zamykamy dalej): ${e?.message || e}`);
+        } catch (e) {
+            log.warn('Chat', `Zatrzymanie tury zamykanej zakładki padło (zamykamy dalej): ${(e as Error)?.message || String(e)}`);
         }
     }
 
@@ -275,8 +279,8 @@ function _stopTabWork(this: ChatViewMixinContext, tab: ChatViewMixinContext, tab
             log.info('Chat', `Zamknięcie zakładki → zatrzymuję bieg suba ${id}`);
             registry.requestStop(id);
         }
-    } catch (e: ChatViewMixinContext) {
-        log.warn('Chat', `Zatrzymanie subów zamykanej zakładki padło: ${e?.message || e}`);
+    } catch (e) {
+        log.warn('Chat', `Zatrzymanie subów zamykanej zakładki padło: ${(e as Error)?.message || String(e)}`);
     }
 }
 
@@ -292,8 +296,8 @@ function _stopTabWork(this: ChatViewMixinContext, tab: ChatViewMixinContext, tab
  * Zamknięcie zakładki NAJPIERW zatrzymuje to, co ta zakładka trzyma w locie (turę + jej
  * suby), a dopiero potem zapisuje i kasuje stan - ta sama kolejność co w `onClose`.
  */
-export async function _closeActiveTab(this: ChatViewMixinContext) {
-    const activeIndex = this.chatTabs.findIndex((t: ChatViewMixinContext) => t.isActive);
+export async function _closeActiveTab(this: ChatViewLike) {
+    const activeIndex = this.chatTabs.findIndex((t: ChatTab) => t.isActive);
     if (activeIndex === -1) return;
 
     const activeTab = this.chatTabs[activeIndex];
@@ -304,8 +308,8 @@ export async function _closeActiveTab(this: ChatViewMixinContext) {
     if (this.rollingWindow?.messages?.length > 0) {
         try {
             await this.handleSaveSession();
-        } catch (e: ChatViewMixinContext) {
-            log.warn('Chat', `Save on tab close failed (non-fatal): ${e?.message || e}`);
+        } catch (e) {
+            log.warn('Chat', `Save on tab close failed (non-fatal): ${(e as Error)?.message || String(e)}`);
         }
     }
 
@@ -313,7 +317,7 @@ export async function _closeActiveTab(this: ChatViewMixinContext) {
 
     if (this.chatTabs.length <= 1) {
         this.rollingWindow = this._createRollingWindow();
-        this.render_messages();
+        void this.render_messages();
         this.add_welcome_message();
         this.updateTokenCounter();
         this._updateTokenPanel();
@@ -328,13 +332,13 @@ export async function _closeActiveTab(this: ChatViewMixinContext) {
 /**
  * Open the agent picker modal — grid of crystal cards.
  */
-export function _openAgentPickerModal(this: ChatViewMixinContext) {
+export function _openAgentPickerModal(this: ChatViewLike) {
     const agentManager = this.plugin?.agentManager;
     if (!agentManager) return;
 
     const allAgents = agentManager.getAllAgents();
-    const openNames = new Set(this.chatTabs.map((t: ChatViewMixinContext) => t.agentName));
-    const available = allAgents.filter((a: ChatViewMixinContext) => !openNames.has(a.name));
+    const openNames = new Set(this.chatTabs.map((t: ChatTab) => t.agentName));
+    const available = allAgents.filter((a: Agent) => !openNames.has(a.name));
 
     if (available.length === 0) {
         new Notice(t('chat.all_agents_open'));
@@ -380,7 +384,7 @@ export function _openAgentPickerModal(this: ChatViewMixinContext) {
         card.addEventListener('click', () => {
             this.chatTabs.push({ agentName: agent.name, sessionId: agent.name, isActive: false });
             overlay.remove();
-            this._switchTab(agent.name);
+            void this._switchTab(agent.name);
         });
     }
 
@@ -390,9 +394,9 @@ export function _openAgentPickerModal(this: ChatViewMixinContext) {
 /**
  * Handle agent change (delegate to tab system).
  */
-export async function handleAgentChange(this: ChatViewMixinContext, agentName: string) {
+export async function handleAgentChange(this: ChatViewLike, agentName: string) {
     if (!agentName) return;
-    const hasTab = this.chatTabs.some((t: ChatViewMixinContext) => t.agentName === agentName);
+    const hasTab = this.chatTabs.some((t: ChatTab) => t.agentName === agentName);
     if (!hasTab) {
         this.chatTabs.push({ agentName, sessionId: agentName, isActive: false });
     }
@@ -408,7 +412,7 @@ export async function handleAgentChange(this: ChatViewMixinContext, agentName: s
  * uboczny eksportu: funkcja ląduje też na `ChatView.prototype` (Object.assign kopiuje wszystkie
  * eksporty) - nie czyta `this`, więc jest to nieszkodliwe.
  */
-export function _tabKey(tab: ChatViewMixinContext) {
+export function _tabKey(tab: ChatTab | null | undefined): string {
     if (!tab) return '';
     return tab.sessionId || tab.sessionPath || tab.sessionName || tab.agentName;
 }

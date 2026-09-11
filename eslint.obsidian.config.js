@@ -86,21 +86,13 @@ export default [
       // (działały tak samo na .js — reguła ich tam nie widziała). Zamknięcie = podbicie
       // minAppVersion (decyzja produktowa bazy, poza kampanią) albo zmiana runtime'u.
       'obsidianmd/no-unsupported-api': 'warn',
-      // Dostawcy modeli (`modules/models/providers/*`) ×3: `reject(normalizeError(...))` odrzuca
-      // zwykły obiekt (kontrakt tej warstwy od zawsze) — opakowanie w Error = zmiana kształtu błędu dla wołaczy.
-      '@typescript-eslint/prefer-promise-reject-errors': 'warn',
-      // `modules/models/ChatModel.ts` ×1: `throw normalizeError(resp.error)` — jw., obiekt-błąd to kontrakt.
-      '@typescript-eslint/only-throw-error': 'warn',
     },
   },
-  // Profile/backstage/modal code sits on dynamic Obsidian DOM extensions
-  // (`createEl`, `createDiv`, lazy view modules) and plugin DI objects assembled in `src/main`.
-  // The strict compiler contracts the owned kernels (Agent, loaders, managers, stores), while
-  // these five rules recursively report every operation after the deliberately marked `any`
-  // UI/YAML compatibility boundaries (`// TS-any:`). Replacing those boundaries with guessed
-  // closed interfaces would either lie about user-authored schemas or require runtime guards —
-  // both outside the zero-runtime-diff campaign. Keep the findings visible as warnings; the
-  // compiler and all other typed rules remain errors.
+  // Kampania typów (2026-09) zamknęła pięć reguł `no-unsafe-*` w całym repo (0 wystąpień), więc
+  // wróciły do rangi błędu z `recommended-type-checked` - regresja `any` w tych folderach jest
+  // teraz ERROREM lintu, nie ostrzeżeniem (ratchet). Zostają trzy reguły widoczne dopiero przy
+  // prawdziwych typach; ich naprawa zmienia emitowany kod (fixer przepisuje API DOM/timerów,
+  // `String()` w interpolacji), więc czeka na osobną falę - do tego czasu warning, nie error.
   {
     files: [
       'modules/agents/**/*.ts',
@@ -118,68 +110,12 @@ export default [
       'src/**/*.ts',
     ],
     rules: {
-      '@typescript-eslint/no-unsafe-member-access': 'warn',
-      '@typescript-eslint/no-unsafe-call': 'warn',
-      '@typescript-eslint/no-unsafe-assignment': 'warn',
-      '@typescript-eslint/no-unsafe-argument': 'warn',
-      '@typescript-eslint/no-unsafe-return': 'warn',
       // Te trzy reguły widzą dopiero adnotacje typu. Ich automatyczny fixer
       // jednocześnie przepisywał zastane API DOM/timerów, więc w kampanii zero-runtime-diff
       // pozostawiamy znaleziska widoczne jako warningi zamiast mieszać refaktor behawioralny.
       '@typescript-eslint/no-redundant-type-constituents': 'warn',
       '@typescript-eslint/no-unnecessary-type-assertion': 'warn',
       '@typescript-eslint/restrict-template-expressions': 'warn',
-    },
-  },
-  // Override scoped WYŁĄCZNIE do core/utils/Logger.ts. Logger to KANONICZNY
-  // logger pluginu (globalny wyjątek importowy, ~230 importerów) — jedyne miejsce, które ma
-  // świadomie wołać `console.*` bezpośrednio. `obsidianmd/rule-custom-message` tu naprawdę
-  // owija wbudowaną regułę ESLint `no-console` z `options: [{ allow: ['warn','error','debug'] }]`.
-  // Gołe `console.log` w tym pliku idą przez `console.debug` (zero zmiany w runtime: Node/Chromium
-  // traktują je jak alias), więc łapią się na domyślną białą listę. `groupCollapsed`/`groupEnd`/
-  // `table` NIE MAJĄ odpowiednika w białej liście wytycznych Obsidiana — ich sensem istnienia
-  // jest wizualne grupowanie/tabela w DevTools, którego `warn/error/debug` nie potrafią odtworzyć.
-  // `log` CELOWO ZOSTAJE zakazany (nie dopisany do allow) — przyszły przypadkowy
-  // `console.log`/`console.info`/`console.trace` w tym pliku ma się dalej łapać.
-  //
-  // Inline `eslint-disable` jest tu ZABLOKOWANY: sekcja `eslint-comments/no-restricted-disable`
-  // w configu `eslint-plugin-obsidianmd` (spread wyżej przez `...obsidianmd.configs.recommended`)
-  // wprost wymienia `obsidianmd/*` i `no-console` jako niewyłączalne komentarzem — próba disable'a
-  // (nawet blankietowego, bez nazwy reguły) kończy się osobnym błędem `no-restricted-disable`
-  // zamiast przejść. Stąd override na poziomie configu, nie komentarz w pliku.
-  //
-  // ⚠️ PUŁAPKA #1: `obsidianmd/rule-custom-message` dostaje dla dopasowanego pliku CAŁY obiekt
-  // opcji NA NOWO — nie da się „dopisać" tylko `no-console` i zostawić resztę domyślnego configu
-  // pluginu. Dlatego `no-new-func` niżej jest PRZEPISANY 1:1 z domyślnego configu
-  // `eslint-plugin-obsidianmd` (`dist/lib/index.js`) — nie dotykamy go merytorycznie, tylko
-  // zapobiegamy temu, żeby ochrona przed `new Function(...)` zniknęła po cichu w Logger.ts razem
-  // z podmianą `no-console`.
-  //
-  // ⚠️ PUŁAPKA #2: klucz w `messages` MUSI być DOKŁADNYM tekstem, jaki wygeneruje bazowa reguła
-  // DLA NASZEGO `allow` — ESLint składa `allowed.join(', ')` do szablonu `messageId: 'limited'`
-  // (`node_modules/eslint/lib/rules/no-console.js`). Kopiowanie klucza 1:1 z domyślnego configu
-  // pluginu (kończącego się na "...debug.") NIE działa z rozszerzonym `allow` — dopasowanie
-  // w `ruleCustomMessage.js` jest exact-albo-substring, więc przy niedopasowanym kluczu
-  // `context.report` NIGDY się nie woła i cała reguła gaśnie CICHO dla tego pliku (gorzej niż
-  // brak override'u — zero błędu, zero ostrzeżenia). Klucz niżej kończy się więc na pełnej liście
-  // z NASZEGO `allow`, w tej samej kolejności co tablica.
-  {
-    files: ['core/utils/Logger.ts'],
-    rules: {
-      'obsidianmd/rule-custom-message': ['error', {
-        'no-console': {
-          messages: {
-            'Unexpected console statement. Only these console methods are allowed: warn, error, debug, groupCollapsed, groupEnd, table.':
-              'Avoid unnecessary logging to console. See https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines#Avoid+unnecessary+logging+to+console',
-          },
-          options: [{ allow: ['warn', 'error', 'debug', 'groupCollapsed', 'groupEnd', 'table'] }],
-        },
-        'no-new-func': {
-          messages: {
-            'The Function constructor is eval': 'Using the `Function` constructor is dangerous because it executes arbitrary code, similar to `eval()`',
-          },
-        },
-      }],
     },
   },
   // ── Jawne wyjątki zamiast obejść ──
@@ -253,38 +189,6 @@ export default [
   // zablokowany, patrz override Loggera wyżej).
   {
     files: ['core/i18n/en.ts', 'core/i18n/pl.ts'],
-    rules: {
-      'obsidianmd/hardcoded-config-path': 'off',
-    },
-  },
-  // (4) obsidianmd/hardcoded-config-path — trzy pliki z UDOKUMENTOWANYM, TESTOWANYM
-  // defaultem. Wszystkie trzy już mają mechanizm ŻYWEGO
-  // `vault.configDir` — literał '.obsidian' jest w nich celowym, bezpiecznym stanem
-  // PRZED/BEZ niego, nie miejscem, gdzie live value jest ignorowana:
-  //   - core/security/AccessGuard.ts `SYSTEM_NO_GO` (linia ~100) jest TWARDYM,
-  //     bezwarunkowym dnem bezpieczeństwa (blokuje niezależnie od configDir; '.trash' w
-  //     ogóle nie ma odpowiednika configDir) — usunięcie literału osłabiłoby fail-closed.
-  //     `_configDir` (linia ~103) to WARTOŚĆ DOMYŚLNA pola nadpisywanego przez
-  //     `setConfigDir()` (wołane z src/main.ts:656,
-  //     `AccessGuard.setConfigDir(this.app?.vault?.configDir)`) — usunięcie literału
-  //     zostawiłoby pole `undefined` w oknie między załadowaniem modułu a `initialize()`.
-  //   - core/utils/pluginFolderMigration.ts:61 — `configDir` to udokumentowany
-  //     OPCJONALNY parametr (`configDir?: string`), realna wartość dochodzi z
-  //     src/main.ts:493 (`configDir: this.app?.vault?.configDir`); fallback
-  //     `|| '.obsidian'` jest wprost przetestowany (pluginFolderMigration.test.ts,
-  //     przypadek „configDir domyślnie .obsidian gdy nie podany”).
-  //   - modules/embedding/VaultIndexer.ts:112 — `HARD_EXCLUDES` to statyczna baza (razem
-  //     z '.pkm-assistant'/'.trash', żadne z nich nie ma odpowiednika configDir); realne
-  //     wykluczenie idzie przez `_hardExcludes()` (linia ~923), która DOKŁADA żywy
-  //     `vault.configDir` do tej bazy przy KAŻDYM wywołaniu (`_isExcluded` →
-  //     `_hardExcludes()`, linia ~951) — literał w `HARD_EXCLUDES` jest fallbackiem na
-  //     wypadek braku configDir (harness/testy), nie miejscem ignorującym go.
-  {
-    files: [
-      'core/security/AccessGuard.ts',
-      'core/utils/pluginFolderMigration.ts',
-      'modules/embedding/VaultIndexer.ts',
-    ],
     rules: {
       'obsidianmd/hardcoded-config-path': 'off',
     },

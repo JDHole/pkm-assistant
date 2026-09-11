@@ -7,11 +7,47 @@
  * carry secrets that must not sync with the vault.
  */
 import { Modal, Setting, Notice } from 'obsidian';
+import type { App } from 'obsidian';
 import { t } from '../../core/i18n/index.js';
 import { ExternalMcpManager, MCP_SERVER_PRESETS, getMcpServerPreset } from '../tools/index.js';
+import type { ExternalMcpServerConfig, ExternalToolRegistryLike } from '../tools/index.js';
+import type { PluginApi, PkmAssistantSettings } from '../../core/index.js';
 
-// TS-any: this modal is the boundary to the dynamically extended Obsidian plugin and external MCP manager facades.
-type Runtime = any;
+/** Kształt błędu w `catch` bez narzucania typu wyjątku (jak `ExternalMcpManager._configuredServers`). */
+type ErrLike = { message?: string };
+
+/** Plugin widziany przez ten modal: managery MCP + ustawienia; reszta z `PluginApi`. */
+interface McpServerEditorPlugin extends PluginApi {
+    toolRegistry?: ExternalToolRegistryLike;
+    externalMcpManager?: ExternalMcpManager;
+}
+
+/** Callback po udanym zapisie serwera. */
+type OnSavedCallback = (config: ExternalMcpServerConfig) => void;
+
+/** Opcje konstruktora - patrz JSDoc niżej. */
+interface McpServerEditorOptions {
+    onSaved?: OnSavedCallback | null;
+    existingServer?: ExternalMcpServerConfig | null;
+    save?: () => Promise<void> | void;
+}
+
+/** `PkmAssistantSettings` (core) nie modeluje `externalMcpServers` - to pole tools-module-owned. */
+type PkmSettingsWithServers = PkmAssistantSettings & { externalMcpServers?: ExternalMcpServerConfig[] };
+
+/** Stan formularza - wszystkie pola są tekstowe/bool, parsowane dopiero przy zapisie. */
+interface McpEditorForm {
+    id: string;
+    name: string;
+    transport: string;
+    command: string;
+    argsText: string;
+    envText: string;
+    url: string;
+    headersText: string;
+    autostart: boolean;
+    enabled: boolean;
+}
 
 // Fallback list if the registry is unavailable - must mirror BUILTIN_TOOL_MAP keys.
 const BUILTIN_SERVER_NAMES = ['core', 'artifacts', 'vault', 'memory', 'web', 'multimodal', 'delegation', 'komunikator'];
@@ -57,16 +93,19 @@ function toHeadersText(headers: unknown): string {
 }
 
 export class MCPServerEditorModal extends Modal {
-    declare private plugin: Runtime;
-    declare private onSaved: Runtime;
-    declare private existing: Runtime;
-    declare private _save: Runtime;
+    declare private plugin: McpServerEditorPlugin;
+    declare private onSaved: OnSavedCallback | null;
+    declare private existing: ExternalMcpServerConfig | null;
+    declare private _save: () => Promise<void> | void;
     declare private isEdit: boolean;
     declare private _presetId: string;
-    declare private form: Runtime;
-    declare private _transportEl: Runtime;
-    declare private _previewBtn: Runtime;
-    declare private _previewResultEl: Runtime;
+    declare private form: McpEditorForm;
+    // `| undefined` - pola żyją dopiero PO `onOpen()` (Obsidian tworzy modal, potem otwiera);
+    // kod już się przed tym broni gołymi `if`/`?.` (patrz `_runPreview()` i `_renderTransportFields()`
+    // niżej) - `HTMLElement` bez `undefined` czyniło te guardy martwe na poziomie typów.
+    declare private _transportEl: HTMLElement | undefined;
+    declare private _previewBtn: HTMLButtonElement | undefined;
+    declare private _previewResultEl: HTMLElement | undefined;
     /**
      * @param {Object} app - Obsidian App
      * @param {Object} plugin - Plugin instance (settings + toolRegistry + externalMcpManager)
@@ -75,7 +114,7 @@ export class MCPServerEditorModal extends Modal {
      * @param {Object|null} [options.existingServer] - config to edit (null = add new)
      * @param {Function} [options.save] - async persistence callback (defaults to env.settingsStore.save)
      */
-    constructor(app: Runtime, plugin: Runtime, options: Runtime = {}) {
+    constructor(app: App, plugin: McpServerEditorPlugin, options: McpServerEditorOptions = {}) {
         super(app);
         this.plugin = plugin;
         this.onSaved = options.onSaved || null;
@@ -85,7 +124,7 @@ export class MCPServerEditorModal extends Modal {
         /** Wybrany preset (tylko w trybie NOWEGO serwera); '' = „własny". */
         this._presetId = '';
 
-        const src = this.existing || {};
+        const src: Partial<ExternalMcpServerConfig> = this.existing || {};
         this.form = {
             id: src.id || '',
             name: src.name || '',
@@ -178,7 +217,7 @@ export class MCPServerEditorModal extends Modal {
      * user może potem zmienić każde pole, a walidacja przy zapisie działa jak zawsze (id może
      * kolidować z już dodanym serwerem - wtedy zapis odbije z komunikatem).
      */
-    _renderPresetPicker(contentEl: Runtime): void {
+    _renderPresetPicker(contentEl: HTMLElement): void {
         new Setting(contentEl)
             .setName(t('modal.mcp_server_editor.preset_label'))
             .setDesc(t('modal.mcp_server_editor.preset_desc'))
@@ -219,7 +258,7 @@ export class MCPServerEditorModal extends Modal {
      * konfiguracja wyląduje w data.json. Próba jest efemeryczna - `previewTools` zamyka
      * połączenie po sobie i niczego nie rejestruje.
      */
-    _renderPreviewSection(contentEl: Runtime): void {
+    _renderPreviewSection(contentEl: HTMLElement): void {
         const wrap = contentEl.createDiv({ cls: 'mcp-server-editor-preview' });
         wrap.createEl('p', {
             text: t('modal.mcp_server_editor.preview_desc'),
@@ -227,13 +266,13 @@ export class MCPServerEditorModal extends Modal {
         });
         this._previewBtn = wrap.createEl('button', { text: t('modal.mcp_server_editor.preview_button') });
         this._previewResultEl = wrap.createDiv({ cls: 'mcp-server-editor-preview-result' });
-        this._previewBtn.addEventListener('click', () => this._runPreview());
+        this._previewBtn.addEventListener('click', () => { void this._runPreview(); });
     }
 
     /** @private Zbuduj config z AKTUALNYCH pól formularza (bez zapisu, bez walidacji nazwy). */
-    _buildConfigFromForm(): Runtime {
+    _buildConfigFromForm(): ExternalMcpServerConfig {
         const f = this.form;
-        const config: Runtime = {
+        const config: ExternalMcpServerConfig = {
             id: f.id,
             name: f.name.trim(),
             transport: f.transport,
@@ -282,12 +321,12 @@ export class MCPServerEditorModal extends Modal {
         }
         result.createDiv({ text: t('modal.mcp_server_editor.preview_running'), cls: 'setting-item-description' });
 
-        let res;
+        let res: { success: boolean; tools?: Array<{ name: string; description: string }>; error?: string };
         try {
             res = await manager.previewTools(cfg);
-        } catch (e: Runtime) {
+        } catch (e) {
             // previewTools nie rzuca, ale defensywnie: modal nigdy nie zostaje z martwym guzikiem.
-            res = { success: false, error: e?.message || String(e) };
+            res = { success: false, error: (e as ErrLike)?.message || String(e) };
         } finally {
             if (btn) {
                 btn.disabled = false;
@@ -321,7 +360,10 @@ export class MCPServerEditorModal extends Modal {
     }
 
     _renderTransportFields() {
-        const el = this._transportEl;
+        // `!` - zawsze wołane PO `onOpen()` przypisującym `_transportEl` (bezpośrednio na końcu
+        // `onOpen()`, albo z listenera dropdownu, który istnieje dopiero PO tym przypisaniu);
+        // TS nie widzi tej kolejności między metodami.
+        const el = this._transportEl!;
         el.empty();
         // Zmiana transportu unieważnia poprzedni podgląd (dotyczył innego połączenia).
         if (this._previewResultEl) this._previewResultEl.empty();
@@ -385,7 +427,7 @@ export class MCPServerEditorModal extends Modal {
         });
     }
 
-    _builtinNames() {
+    _builtinNames(): string[] {
         try {
             const map = this.plugin?.toolRegistry?.getBuiltinServerMap?.();
             if (map) return Object.keys(map);
@@ -393,11 +435,14 @@ export class MCPServerEditorModal extends Modal {
         return BUILTIN_SERVER_NAMES;
     }
 
-    _servers() {
+    _servers(): ExternalMcpServerConfig[] {
         const pkm = this.plugin?.env?.settings?.pkmAssistant || this.plugin?.settings?.pkmAssistant;
         if (!pkm) return [];
-        if (!Array.isArray(pkm.externalMcpServers)) pkm.externalMcpServers = [];
-        return pkm.externalMcpServers;
+        // TS-boundary: `externalMcpServers` jest polem tools-module-owned w data.json, którego
+        // core/runtime/contracts.ts (właściciel PkmAssistantSettings) nie modeluje - mirror
+        // ExternalMcpManager._configuredServers().
+        if (!Array.isArray((pkm as PkmSettingsWithServers).externalMcpServers)) (pkm as PkmSettingsWithServers).externalMcpServers = [];
+        return (pkm as PkmSettingsWithServers).externalMcpServers as ExternalMcpServerConfig[];
     }
 
     async _handleSave() {
@@ -419,7 +464,7 @@ export class MCPServerEditorModal extends Modal {
 
         const servers = this._servers();
         // Uniqueness: on add, id must be free; on edit the id is fixed so we skip self.
-        if (!this.isEdit && servers.some((s: Runtime) => s.id === f.id)) {
+        if (!this.isEdit && servers.some((s: ExternalMcpServerConfig) => s.id === f.id)) {
             new Notice(t('modal.mcp_server_editor.error_id_exists', { id: f.id }));
             return;
         }
@@ -448,9 +493,9 @@ export class MCPServerEditorModal extends Modal {
         // zamelduj, przerysowanie ze stanu prawdziwego robi wołacz przez `refresh()` (nie leci
         // `onSaved`, więc lista w Ustawieniach nie odświeży się na fałszywym stanie).
         let editedIdx = -1;
-        let previousAtIdx: Runtime;
+        let previousAtIdx: ExternalMcpServerConfig | undefined;
         if (this.isEdit) {
-            const idx = servers.findIndex((s: Runtime) => s.id === f.id);
+            const idx = servers.findIndex((s: ExternalMcpServerConfig) => s.id === f.id);
             if (idx >= 0) {
                 editedIdx = idx;
                 previousAtIdx = servers[idx];
@@ -464,13 +509,14 @@ export class MCPServerEditorModal extends Modal {
 
         try {
             await this._save();
-        } catch (e: Runtime) {
+        } catch (e) {
             if (editedIdx >= 0) {
-                servers[editedIdx] = previousAtIdx;
+                // `previousAtIdx` jest zawsze ustawione razem z `editedIdx >= 0` wyżej.
+                servers[editedIdx] = previousAtIdx!;
             } else {
                 servers.pop();
             }
-            new Notice(t('modal.mcp_server_editor.error_write_failed', { error: e.message }));
+            new Notice(t('modal.mcp_server_editor.error_write_failed', { error: (e as ErrLike).message }));
             return;
         }
 

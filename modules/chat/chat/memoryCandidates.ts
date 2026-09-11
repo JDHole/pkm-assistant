@@ -14,8 +14,22 @@ import { isValidNoteType } from '../../memory/index.js';
 export const MEMORY_CANDIDATES_SENTINEL = '===MEMORY_CANDIDATES===';
 const MAX_CANDIDATES = 3;
 
-// TS-any: wynik JSON.parse jest dynamicznym payloadem LLM walidowanym pole po polu poniżej.
-type RuntimeJson = any;
+/**
+ * Surowy kandydat z bloku LLM: KAŻDE pole może nie istnieć albo mieć zły typ, więc wszystko
+ * jest `unknown` i przechodzi walidację pole po polu niżej (`isValidNoteType`, `String(...)`).
+ */
+interface RawCandidate {
+    name?: unknown;
+    description?: unknown;
+    type?: unknown;
+    content?: unknown;
+    why?: unknown;
+    how_to_apply?: unknown;
+    howToApply?: unknown;
+}
+
+/** Blok `memory_candidates` z odpowiedzi Summarizera — tablica albo obiekt ją opakowujący. */
+type RawCandidateBlock = { memory_candidates?: RawCandidate[] } | RawCandidate[] | null;
 
 export type MemoryCandidate = {
     name: string;
@@ -48,16 +62,18 @@ function extractCandidates(tail: unknown): MemoryCandidate[] {
         .trim();
     if (!jsonText) return [];
 
-    let parsed: RuntimeJson;
+    // TS-boundary: treść pisze MODEL — kształt niżej opisuje to, co parser realnie czyta,
+    // a każde pole i tak przechodzi walidację (typ notatki, puste name/content).
+    let parsed: RawCandidateBlock;
     try {
-        parsed = JSON.parse(jsonText);
+        parsed = JSON.parse(jsonText) as RawCandidateBlock;
     } catch {
         const match = jsonText.match(/\{[\s\S]*\}/);
         if (!match) return [];
-        try { parsed = JSON.parse(match[0]); } catch { return []; }
+        try { parsed = JSON.parse(match[0]) as RawCandidateBlock; } catch { return []; }
     }
 
-    const list: RuntimeJson[] = Array.isArray(parsed?.memory_candidates) ? parsed.memory_candidates
+    const list: RawCandidate[] = Array.isArray((parsed as { memory_candidates?: RawCandidate[] })?.memory_candidates) ? (parsed as { memory_candidates: RawCandidate[] }).memory_candidates
         : Array.isArray(parsed) ? parsed
         : [];
 

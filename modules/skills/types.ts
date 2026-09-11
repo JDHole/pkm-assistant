@@ -1,8 +1,17 @@
+import type { PluginApi } from '../../core/index.js';
+import type { Agent } from '../agents/index.js';
+import type { SkillLoader } from './SkillLoader.js';
+import type { SkillTemplateStore } from './SkillTemplateStore.js';
+
 export type SkillQuestion = {
     key: string;
     question: string;
     default: string;
-    type: string;
+    // Opcjonalne: `SkillEditorModal` (formularz „+ dodaj pytanie") nie ma pola UI na `type` i
+    // nigdy go nie ustawia — na dysku brakujący `type` dostaje default `'text'` DOPIERO przy
+    // odczycie (`parseSkillMarkdown`). Wymaganie go tu złamałoby literał `{key,question,default}`
+    // dopisywany przez modal.
+    type?: string;
     options?: unknown;
     depends_on?: unknown;
     placeholder?: unknown;
@@ -50,3 +59,26 @@ export type VaultAdapterLike = {
 };
 
 export type VaultLike = { adapter: VaultAdapterLike };
+
+/**
+ * Minimalny widok AgentManagera, jakiego potrzebuje UI skilli (karty Zaplecza, modal edycji,
+ * widok detalu). Ten sam wzorzec co `SubAgentsAgentManagerLike` (`modules/sub-agents/types.ts`)
+ * i `DelegateAgentManager` (`modules/tools/DelegateTool.ts`) — lokalny duck-type, bo
+ * `AgentManager` (moduł-właściciel, `modules/agents/`) jeszcze nie typuje własnych pól
+ * (`skillLoader`/`skillTemplateStore` są tam `any` — osobna fala refaktoru).
+ */
+export interface SkillsAgentManagerLike {
+    getActiveAgent?(): Agent | null | undefined;
+    /** Wołane pod pojedynczym `agentManager?.` (bez drugiego `?.`) — więc NIE opcjonalna. */
+    getAllAgents(): Agent[];
+    getAgent?(name: string): Agent | null | undefined;
+    /** Wołane bez `?.` w ogóle (za strażnikiem `if (!agent) return`) — NIE opcjonalna. */
+    updateAgent(name: string, updates: Parameters<Agent['update']>[0]): Promise<unknown>;
+    skillLoader?: SkillLoader;
+    skillTemplateStore?: SkillTemplateStore;
+}
+
+/** Kształt pluginu widziany przez UI skilli (karty Zaplecza, modal, widok detalu). */
+export interface SkillsPlugin extends PluginApi {
+    agentManager?: SkillsAgentManagerLike | null;
+}

@@ -3,13 +3,49 @@
  * Accordion messages, delete, scroll, full Crystal Soul design.
  */
 import { Notice } from 'obsidian';
+import type { App } from 'obsidian';
 import { SkinManager, UiIcons, hexToRgbTriplet, setSvg, setSvgLabel } from '../crystal-soul/index.js';
 import { t } from '../../core/i18n/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { KomunikatorBulkDeleteModal } from './KomunikatorCleanupModal.js';
 import type { Message, MessageHeader } from './types.js';
-// TS-any: Obsidian DOM extensions and plugin/sidebar services are dynamic runtime APIs.
-type UiBoundary = any;
+import type { KomunikatorManager } from './KomunikatorManager.js';
+
+/** Agent na pasku/liście — tylko pole, które ten sidebar czyta z realnego `Agent`
+ *  (`modules/agents`, poza zakresem tej fali; moduł go celowo nie importuje — CLAUDE.md
+ *  „Zależności": kierunek jest agents → komunikator, nie odwrotnie). Przekazywany też do
+ *  `SkinManager.getAgentColor`/`getCrystal` (`AgentVisual` z crystal-soul — duck-type,
+ *  wszystkie pola opcjonalne, więc ten kształt tam pasuje strukturalnie). */
+interface CommunicatorAgentRef {
+    name: string;
+}
+
+/** Manager agentów widziany przez ten sidebar — duck-type lokalny (wzorem `AgentManagerLike`
+ *  w `types.ts`), nie prawdziwa klasa z `modules/agents`. */
+interface CommunicatorAgentManager {
+    komunikatorManager: KomunikatorManager | null;
+    listKomunikatorAgents(): CommunicatorAgentRef[];
+    getAgent(name: string): CommunicatorAgentRef | undefined;
+    on(callback: (event: string) => void): () => void;
+    _emit(event: string): void;
+}
+
+/** Kontrakt pluginu widziany przez ten moduł — lokalny interfejs (nie `PluginApi` z `core/` -
+ *  moduł go tu nie potrzebuje, bo `agentManager` jest duck-type'em wyżej, nie `unknown` z
+ *  kontraktu). `app` to od razu prawdziwy Obsidian `App`: modal sprzątania hurtowego woła
+ *  `new KomunikatorBulkDeleteModal(plugin.app, ...)`, który przez `Modal.super` wymaga
+ *  dokładnie tego typu. */
+interface CommunicatorPlugin {
+    agentManager?: CommunicatorAgentManager | null;
+    app: App;
+}
+
+/** Panel sidebaru — tylko pole, które ten widok ustawia (sprzątanie przy zmianie zakładki,
+ *  patrz `modules/shell/CLAUDE.md` gotcha 9). Moduł nie importuje `SidebarNav` z
+ *  `modules/shell` (ta sama zasada kierunku zależności co dla `AgentManager`). */
+interface CommunicatorNav {
+    _currentCleanup?: (() => void) | null;
+}
 
 /**
  * Render the communicator view inline in sidebar.
@@ -18,7 +54,7 @@ type UiBoundary = any;
  * @param {import('../shell/sidebar/SidebarNav.js').SidebarNav} nav
  * @param {Object} params - { agentName?: string }
  */
-export function renderCommunicatorView(container: UiBoundary, plugin: UiBoundary, nav: UiBoundary, params: { agentName?: string }) {
+export function renderCommunicatorView(container: HTMLElement, plugin: CommunicatorPlugin, nav: CommunicatorNav, params: { agentName?: string }) {
     container.classList.add('cs-root');
     const agentManager = plugin.agentManager;
     if (!agentManager) {
@@ -32,7 +68,7 @@ export function renderCommunicatorView(container: UiBoundary, plugin: UiBoundary
         return;
     }
 
-    let selectedAgent = params.agentName || null;
+    let selectedAgent: string | null = params.agentName || null;
     let expandedMsgId: string | null = null; // accordion: only one at a time
 
     // Auto-select first agent if none specified
@@ -82,8 +118,8 @@ export function renderCommunicatorView(container: UiBoundary, plugin: UiBoundary
 
     async function renderAgentStrip() {
         agentStrip.empty();
-        const agents = agentManager.listKomunikatorAgents();
-        const komunikator = agentManager.komunikatorManager;
+        const agents = agentManager!.listKomunikatorAgents();
+        const komunikator = agentManager!.komunikatorManager;
 
         for (const agent of agents) {
             const isSelected = agent.name === selectedAgent;
@@ -138,10 +174,10 @@ export function renderCommunicatorView(container: UiBoundary, plugin: UiBoundary
             return;
         }
 
-        const komunikator = agentManager.komunikatorManager;
+        const komunikator = agentManager!.komunikatorManager;
         if (!komunikator) return;
 
-        const agent = agentManager.getAgent(selectedAgent);
+        const agent = agentManager!.getAgent(selectedAgent);
         const agentColor = agent ? SkinManager.getAgentColor(agent) : 'var(--text-muted)';
 
         // Inbox header
@@ -163,11 +199,13 @@ export function renderCommunicatorView(container: UiBoundary, plugin: UiBoundary
             attr: { title: t('communicator.mark_all_read') }
         });
         setSvg(markReadBtn, UiIcons.check(12));
-        markReadBtn.addEventListener('click', async () => {
-            for (const msg of await komunikator.listMessages(selectedAgent)) {
-                if (!msg.userRead) await komunikator.markUserRead(selectedAgent, msg.id);
-            }
-            agentManager._emit('communicator:message_read');
+        markReadBtn.addEventListener('click', () => {
+            void (async () => {
+                for (const msg of await komunikator.listMessages(selectedAgent!)) {
+                    if (!msg.userRead) await komunikator.markUserRead(selectedAgent!, msg.id);
+                }
+                agentManager!._emit('communicator:message_read');
+            })();
         });
 
         // Guzik hurtowy - kasuje WSZYSTKIE obustronnie przeczytane, bez podglądu,
@@ -177,26 +215,28 @@ export function renderCommunicatorView(container: UiBoundary, plugin: UiBoundary
             attr: { title: t('communicator.cleanup.bulk_title') }
         });
         setSvg(purgeBtn, UiIcons.trash(12));
-        purgeBtn.addEventListener('click', async () => {
-            const readMessages = await komunikator.listAllRead(selectedAgent);
-            if (readMessages.length === 0) {
-                new Notice(t('communicator.cleanup.bulk_nothing'));
-                return;
-            }
-            new KomunikatorBulkDeleteModal(
-                plugin.app,
-                { count: readMessages.length, agent: selectedAgent as string },
-                async (confirmed: boolean) => {
-                    if (!confirmed) return;
-                    let removed = 0;
-                    for (const msg of readMessages) {
-                        if (await komunikator.deleteMessage(selectedAgent, msg.id)) removed++;
-                    }
-                    expandedMsgId = null;
-                    agentManager._emit('communicator:message_sent');
-                    new Notice(t('communicator.cleanup.bulk_done', { count: removed }));
-                },
-            ).open();
+        purgeBtn.addEventListener('click', () => {
+            void (async () => {
+                const readMessages = await komunikator.listAllRead(selectedAgent!);
+                if (readMessages.length === 0) {
+                    new Notice(t('communicator.cleanup.bulk_nothing'));
+                    return;
+                }
+                new KomunikatorBulkDeleteModal(
+                    plugin.app,
+                    { count: readMessages.length, agent: selectedAgent as string },
+                    async (confirmed: boolean) => {
+                        if (!confirmed) return;
+                        let removed = 0;
+                        for (const msg of readMessages) {
+                            if (await komunikator.deleteMessage(selectedAgent!, msg.id)) removed++;
+                        }
+                        expandedMsgId = null;
+                        agentManager!._emit('communicator:message_sent');
+                        new Notice(t('communicator.cleanup.bulk_done', { count: removed }));
+                    },
+                ).open();
+            })();
         });
 
         // Messages scroll area (listMessages zwraca najnowsze pierwsze).
@@ -217,7 +257,7 @@ export function renderCommunicatorView(container: UiBoundary, plugin: UiBoundary
         renderComposeForm(inboxEl, komunikator, agentColor);
     }
 
-    function renderMessageCard(messagesContainer: UiBoundary, msg: MessageHeader, komunikator: UiBoundary, agentColor: string) {
+    function renderMessageCard(messagesContainer: HTMLElement, msg: MessageHeader, komunikator: KomunikatorManager, agentColor: string) {
         // Statusy przychodzą z frontmattera wiadomości, nie z regexa na całym pliku.
         const userRead = msg.userRead === true;
         const aiRead = msg.aiRead === true;
@@ -259,16 +299,18 @@ export function renderCommunicatorView(container: UiBoundary, plugin: UiBoundary
             attr: { title: t('communicator.delete_message') }
         });
         setSvg(deleteBtn, UiIcons.trash(10));
-        deleteBtn.addEventListener('click', async (e: Event) => {
-            e.stopPropagation();
-            const ok = await komunikator.deleteMessage(selectedAgent, msg.id);
-            if (ok) {
-                expandedMsgId = null;
-                agentManager._emit('communicator:message_sent');
-                new Notice(t('communicator.message_deleted'));
-            } else {
-                new Notice(t('communicator.delete_failed'));
-            }
+        deleteBtn.addEventListener('click', (e: Event) => {
+            void (async () => {
+                e.stopPropagation();
+                const ok = await komunikator.deleteMessage(selectedAgent!, msg.id);
+                if (ok) {
+                    expandedMsgId = null;
+                    agentManager!._emit('communicator:message_sent');
+                    new Notice(t('communicator.message_deleted'));
+                } else {
+                    new Notice(t('communicator.delete_failed'));
+                }
+            })();
         });
 
         // Chevron
@@ -276,19 +318,21 @@ export function renderCommunicatorView(container: UiBoundary, plugin: UiBoundary
         setSvg(chevron, UiIcons.chevronDown(10));
 
         // Click handler - accordion (only on non-button areas)
-        headerRow.addEventListener('click', async (e: Event) => {
-            if ((e.target as HTMLElement).closest('.cs-comm-msg__delete')) return;
-            if (expandedMsgId === msg.id) {
-                expandedMsgId = null;
-            } else {
-                expandedMsgId = msg.id;
-                // Rozwinięcie karty = user przeczytał (jego ptaszek; `ai_read` odhacza tylko agent).
-                if (isUnread && komunikator) {
-                    await komunikator.markUserRead(selectedAgent, msg.id);
-                    agentManager._emit('communicator:message_read');
+        headerRow.addEventListener('click', (e: Event) => {
+            void (async () => {
+                if ((e.target as HTMLElement).closest('.cs-comm-msg__delete')) return;
+                if (expandedMsgId === msg.id) {
+                    expandedMsgId = null;
+                } else {
+                    expandedMsgId = msg.id;
+                    // Rozwinięcie karty = user przeczytał (jego ptaszek; `ai_read` odhacza tylko agent).
+                    if (isUnread && komunikator) {
+                        await komunikator.markUserRead(selectedAgent!, msg.id);
+                        agentManager!._emit('communicator:message_read');
+                    }
                 }
-            }
-            void renderInbox();
+                void renderInbox();
+            })();
         });
 
         // Expanded body — treść dociągana leniwie (lista niesie same nagłówki).
@@ -297,7 +341,7 @@ export function renderCommunicatorView(container: UiBoundary, plugin: UiBoundary
 
             // Message content (no max-height — scroll on outer container)
             const contentEl = body.createDiv({ cls: 'cs-comm-msg__content' });
-            komunikator.getMessage(selectedAgent, msg.id)
+            komunikator.getMessage(selectedAgent!, msg.id)
                 .then((full: Message | null) => { contentEl.textContent = full?.body || ''; })
                 .catch(() => { contentEl.textContent = ''; });
 
@@ -313,7 +357,7 @@ export function renderCommunicatorView(container: UiBoundary, plugin: UiBoundary
         }
     }
 
-    function renderComposeForm(parentEl: UiBoundary, komunikator: UiBoundary, agentColor: string) {
+    function renderComposeForm(parentEl: HTMLElement, komunikator: KomunikatorManager, agentColor: string) {
         const form = parentEl.createDiv({ cls: 'cs-comm-compose' });
 
         const composeHeader = form.createDiv({ cls: 'cs-comm-compose__header' });
@@ -336,28 +380,30 @@ export function renderCommunicatorView(container: UiBoundary, plugin: UiBoundary
         setSvgLabel(sendBtn, UiIcons.send(11), t('communicator.send'));
         sendBtn.style.setProperty('--cs-send-color', agentColor);
 
-        sendBtn.addEventListener('click', async () => {
-            const subject = subjectInput.value.trim();
-            const content = contentArea.value.trim();
+        sendBtn.addEventListener('click', () => {
+            void (async () => {
+                const subject = subjectInput.value.trim();
+                const content = contentArea.value.trim();
 
-            if (!subject || !content) {
-                new Notice(t('communicator.fill_subject_and_body'));
-                return;
-            }
-
-            try {
-                const res = await komunikator.sendMessage('User', selectedAgent, subject, content);
-                if (!res?.success) {
-                    new Notice(res?.error || t('communicator.delete_failed'));
+                if (!subject || !content) {
+                    new Notice(t('communicator.fill_subject_and_body'));
                     return;
                 }
-                agentManager._emit('communicator:message_sent');
-                new Notice(t('communicator.sent_to', { agent: selectedAgent }));
-                subjectInput.value = '';
-                contentArea.value = '';
-            } catch (e) {
-                new Notice(t('generic.error') + ': ' + (e as { message?: string }).message);
-            }
+
+                try {
+                    const res = await komunikator.sendMessage('User', selectedAgent!, subject, content);
+                    if (!res?.success) {
+                        new Notice(res?.error || t('communicator.delete_failed'));
+                        return;
+                    }
+                    agentManager!._emit('communicator:message_sent');
+                    new Notice(t('communicator.sent_to', { agent: selectedAgent! }));
+                    subjectInput.value = '';
+                    contentArea.value = '';
+                } catch (e) {
+                    new Notice(t('generic.error') + ': ' + (e as { message?: string }).message);
+                }
+            })();
         });
     }
 }

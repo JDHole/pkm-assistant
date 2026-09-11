@@ -10,13 +10,41 @@
  */
 
 import { makeInlineTriggerMarker, type InlineTriggerType } from './InlineChipPlugin.js';
+import type { ChatSkillConfig } from './chatViewShape.js';
+import type { SubAgentData } from '../../sub-agents/index.js';
+
+/** Tożsamość agenta w zakresie, jakiego dotyka popup (`@`-wzmianki, etykiety subów). */
+interface PopupAgentLike { name?: string }
+
+/** Narzędzie w zakresie, jakiego dotyka sekcja MCP: nazwa serwera pod jednym z czterech pól. */
+interface PopupToolLike {
+    name?: string;
+    description?: string;
+    serverName?: string;
+    server?: string;
+    serverId?: string;
+}
+
+/**
+ * Plugin w zakresie, jaki czyta popup `/@`. Świadomie STRUKTURALNY, nie `ChatPlugin`:
+ * plik jest node-testowalny, a jego test podstawia własne, częściowe atrapy.
+ */
+interface PopupPluginLike {
+    agentManager?: {
+        getActiveAgent?(): PopupAgentLike | null;
+        getActiveAgentSkills?(): ChatSkillConfig[];
+        subAgentLoader?: { getAllSubAgents?(): SubAgentData[] } | null;
+    } | null;
+    toolRegistry?: {
+        /** `unknown` w parametrze: rejestr czyta agenta WŁASNYM kontraktem widoczności narzędzi. */
+        filterByAgent?(agent: unknown): PopupToolLike[];
+        getAllTools?(): PopupToolLike[];
+    } | null;
+}
 import { getVisibleSubAgentsForAgent } from '../../sub-agents/index.js';
 import { t } from '../../../core/i18n/index.js';
 
 const POPUP_CLASS = 'pkm-trigger-popup';
-
-// TS-any: plugin, agent manager, registry i rekordy skilli/narzędzi są składane runtime z wielu modułów.
-type Runtime = any;
 
 type TriggerSection = 'slash' | 'skills' | 'sub-agents' | 'mcp';
 type TriggerItemType = InlineTriggerType | 'slash';
@@ -35,8 +63,8 @@ interface TriggerPopupOptions {
 }
 
 export class TriggerPopup {
-    declare plugin: Runtime;
-    declare agent: Runtime;
+    declare plugin: PopupPluginLike | null | undefined;
+    declare agent: PopupAgentLike | null | undefined;
     declare textarea: HTMLTextAreaElement;
     declare onSelect: ((item: TriggerItem, marker: string) => void) | null;
     declare slashCommands: SlashCommandItem[];
@@ -48,7 +76,7 @@ export class TriggerPopup {
     declare filter: string;
     declare _docMouseHandler: ((event: MouseEvent) => void) | null;
 
-    constructor(plugin: Runtime, agent: Runtime, textarea: HTMLTextAreaElement, opts: TriggerPopupOptions = {}) {
+    constructor(plugin: PopupPluginLike | null | undefined, agent: PopupAgentLike | null | undefined, textarea: HTMLTextAreaElement, opts: TriggerPopupOptions = {}) {
         this.plugin = plugin;
         this.agent = agent;
         this.textarea = textarea;
@@ -158,7 +186,7 @@ export class TriggerPopup {
             items.push({
                 type: 'skill',
                 name: skill.slug || skill.name,
-                label: skill.name || skill.slug,
+                label: skill.name || (skill.slug as string),
                 description: skill.description || '',
                 section: 'skills',
                 isSystem: false,

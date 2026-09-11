@@ -44,11 +44,124 @@ import { freezeTurnOwner } from './turnOwner.js';
 import { evaluateAutoTurnChain, resetAutoTurnChain } from './autoTurnChain.js';
 import { RenderThrottle, shouldPaintFrame } from './renderThrottle.js';
 import type { StreamFrame } from './renderThrottle.js';
+// Receiver mixina = ZŁOŻONY widok (`ChatViewLike`: klasa + osiem paczek mixinów).
+import type { ChatServerManager, ChatTab, ChatViewLike } from './chatViewShape.js';
 
-// TS-any: receiver legacy mixinów składany runtime przez Object.assign.
-type ChatViewMixinContext = any;
+/**
+ * Definicja narzędzia w formacie OpenAI. Nazwa siedzi w `function.name`, ale część
+ * dostawców (i stare wpisy rejestru) trzyma ją płasko w `name` — czat czyta OBIE.
+ */
+type ChatToolDefinition = OpenAiToolDefinition & { name?: string };
+import type { Agent } from '../../agents/index.js';
+import type { AutonomyMode, StreamWatchdog as StreamWatchdogType, TokenTracker } from '../../../core/index.js';
+import type { CacheMetadata, ChatModel } from '../../models/index.js';
+import type { OpenAiToolDefinition, ServerVisibilityAgent, ToolDefinition } from '../../tools/index.js';
+import type { LoopMessage, ParsedToolCall, RunAgentLoopOptions, RunAgentLoopResult, ToolResultEntry, Usage } from '../../agent-loop/index.js';
+import type { ToolCall as ToolsToolCall } from '../../tools/index.js';
+import type { SubAgentToolCallDetail } from '../../ui-components/index.js';
+import type { SubTask, SubTaskOrigin } from '../../sub-agents/index.js';
+import type { ContentBlock, RollingWindow } from './RollingWindow.js';
+import type { FrozenTurnOwner } from './turnOwner.js';
+import type { DelegationProposal } from './chat_artifacts.js';
+import type { TurnAbortHandle } from './turnAbort.js';
 
-function dedupeToolDefinitions(definitions: ChatViewMixinContext[]) {
+/**
+ * Opcje `send_message`. ⚠️ Funkcja bywa wpięta WPROST jako listener kliknięcia, więc
+ * pierwszym argumentem potrafi być `MouseEvent` — dlatego oba pola są `unknown` i czytane
+ * z jawnym `typeof` / `resolveMessageOrigin`, nigdy jako „nasz obiekt".
+ */
+interface SendMessageOptions {
+    injectedText?: unknown;
+    meta?: unknown;
+}
+
+/**
+ * Wynik wywołania narzędzia w zakresie, jaki czyta czat (render bloku, token tracking,
+ * side-effecty). Kształt należy do SERWERA narzędzia, więc wszystko jest opcjonalne,
+ * a indeks zostaje otwarty na `unknown`.
+ */
+interface ChatToolResult {
+    isError?: boolean;
+    error?: string;
+    success?: boolean;
+    /** Delegacja w tle: pokwitowanie startu zamiast wyniku. */
+    started?: boolean;
+    task_id?: string;
+    name?: string;
+    tasks?: Array<{ task_id?: string; name?: string }>;
+    queued?: number;
+    result?: string;
+    aspect?: string;
+    aspect_type?: string;
+    /** Leci PROSTO do bloku subagenta (`modules/ui-components`) - jego typy, nie nasze. */
+    tools_used?: string[];
+    tool_call_details?: Array<SubAgentToolCallDetail & { resultPreview?: string }>;
+    duration_ms?: number;
+    usage?: Usage;
+    base64?: string;
+    format?: string;
+    path?: string;
+    revised_prompt?: string;
+    delegation?: boolean;
+    [key: string]: unknown;
+}
+
+/** Argumenty wywołania narzędzia po sparsowaniu (kształt zależny od narzędzia). */
+interface ChatToolArgs {
+    task?: string;
+    aspect?: string;
+    path?: string;
+    [key: string]: unknown;
+}
+
+/** Placeholder UI jednego wywołania narzędzia (Faza 1 → Faza 3). */
+interface PendingToolEntry {
+    toolCall: ParsedToolCall;
+    toolDisplay: HTMLElement | null;
+    isSubAgent: boolean;
+}
+
+/** Zakumulowana odpowiedź modelu, w zakresie, jaki maluje `handle_chunk`. */
+interface StreamResponse {
+    choices?: Array<{ message?: { content?: string; reasoning_content?: string } }>;
+}
+
+/**
+ * Kontekst TURY — zamknięcie `send_message`. Zastępuje dawny bogaty wpis `_streamCtxMap`;
+ * wszystko, co tura trzyma na własność, żyje TUTAJ, nie na widoku (patrz CLAUDE.md modułu).
+ */
+interface ChatTurn {
+    agentName: string;
+    agent: Agent | null;
+    owner: FrozenTurnOwner;
+    turnId: number;
+    abort: TurnAbortHandle;
+    origin: SubTaskOrigin;
+    rw: RollingWindow;
+    tt: TokenTracker;
+    chatModel: ChatModel;
+    model: string;
+    platform: string;
+    autonomy: AutonomyMode | undefined;
+    hasUsedDelegate: boolean;
+    skillActiveAt: number | null;
+    skillArtifactCreated: boolean;
+    cacheTelemetryEnabled: boolean;
+    rawResults: Map<string | undefined, { result: ChatToolResult | undefined; error: Error | null }>;
+    pendingEntries: PendingToolEntry[];
+    toolCallsContainer: HTMLElement | null | undefined;
+    lastRoundToolResults: Array<{ id: string | undefined; content: string | unknown[] }>;
+    lastApiInput: number;
+    lastApiOutput: number;
+    lastCacheMeta: CacheMetadata | null;
+    responseRecorded: boolean;
+    lastInputTokens: number;
+    lastInputChars: number;
+    watchdog?: StreamWatchdogType;
+    streamId?: string;
+}
+
+function dedupeToolDefinitions(definitions: ChatToolDefinition[]) {
     const seen = new Set();
     const out = [];
     for (const def of definitions || []) {
@@ -60,9 +173,10 @@ function dedupeToolDefinitions(definitions: ChatViewMixinContext[]) {
     return out;
 }
 
-function getAgentServerFilter(serverManager: ChatViewMixinContext, agent: ChatViewMixinContext) {
+function getAgentServerFilter(serverManager: ChatServerManager | undefined, agent: Agent | null) {
     if (serverManager?.getAllowedServerNamesForAgent) {
-        return serverManager.getAllowedServerNamesForAgent(agent);
+        // TS-boundary: `modules/tools` czyta agenta własnym, węższym kontraktem widoczności serwerów.
+        return serverManager.getAllowedServerNamesForAgent(agent as ServerVisibilityAgent | null);
     }
     return agent?.preferredServers || [];
 }
@@ -74,10 +188,12 @@ function getAgentServerFilter(serverManager: ChatViewMixinContext, agent: ChatVi
  * osobnych kopii dawałoby okazję do pominięcia jednej przy przyszłej poprawce, po cichu
  * zwracając `{}`.
  */
-function parseToolCallArgs(toolCall: ChatViewMixinContext): ChatViewMixinContext {
-    return typeof toolCall.arguments === 'string'
-        ? (() => { try { return JSON.parse(toolCall.arguments); } catch { return {}; } })()
-        : (toolCall.arguments || {});
+function parseToolCallArgs(toolCall: ParsedToolCall): ChatToolArgs {
+    // TS-boundary: argumenty wypisuje MODEL — string JSON (OpenAI) albo obiekt (Anthropic);
+    // czytamy z nich wyłącznie pola opisane w `ChatToolArgs`.
+    return (typeof toolCall.arguments === 'string'
+        ? (() => { try { return JSON.parse(toolCall.arguments) as ChatToolArgs; } catch { return {}; } })()
+        : (toolCall.arguments || {})) as ChatToolArgs;
 }
 
 /** Licznik tur w procesie — tożsamość tury, żeby watchdog nie ubił cudzej tury po nazwie agenta. */
@@ -103,7 +219,7 @@ let _turnSeq = 0;
  *   inline), są `isInjected === false`, a mimo to maszynowe. Nie mylić też z `turnOrigin` niżej
  *   — tamto jest adresem zwrotnym delegacji w tle.
  */
-export async function send_message(this: ChatViewMixinContext, opts: ChatViewMixinContext = {}) {
+export async function send_message(this: ChatViewLike, opts: SendMessageOptions = {}) {
     const injectedText = typeof opts?.injectedText === 'string' ? opts.injectedText.trim() : '';
     const isInjected = injectedText.length > 0;
 
@@ -200,16 +316,19 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
     let attachmentResult = null;
     if (hasAttachments) {
         const textWithMentions = mentionContextText ? mentionContextText + '\n\n' + mentionDisplayText : mentionDisplayText;
-        attachmentResult = this.attachmentManager.buildMessageContent(textWithMentions);
+        attachmentResult = this.attachmentManager!.buildMessageContent(textWithMentions);
         // Warn if sending images to a non-vision model (images will be stripped by adapter)
-        const hasImages = Array.isArray(attachmentResult?.content) && attachmentResult.content.some((b: ChatViewMixinContext) => b.type === 'image_url');
+        const hasImages = Array.isArray(attachmentResult?.content) && attachmentResult.content.some((b: ContentBlock) => b.type === 'image_url');
         if (hasImages) {
             try {
                 if (!this._isCurrentModelVision()) {
                     const modelName = this.get_chat_model()?.modelKey || 'model';
                     new Notice(t('chat.streaming.model_no_vision', { model: modelName }), 6000);
                 }
-            } catch (e) { /* ignore — adapter will strip anyway */ }
+            // `void e;` to no-op: `no-unused-vars` chce użycia `e`, a strażnik w
+            // `stopSemantics.test.ts` (`catch\s*\{\s*\}` po zdjęciu komentarzy) odrzuciłby
+            // gołe `catch {}` - ten catch łyka tylko ostrzeżenie o braku vision, świadomie.
+            } catch (e) { void e; /* ignore - adapter will strip anyway */ }
         }
     }
 
@@ -224,7 +343,7 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
             this._draftAfterSend = null;
             this.handleInputResize();
         }
-        if (hasAttachments) this.attachmentManager.clear();
+        if (hasAttachments) this.attachmentManager!.clear();
         if (this.mentionAutocomplete?.hasMentions()) this.mentionAutocomplete.clear();
     }
 
@@ -276,8 +395,9 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
     if (isHuman) this._autoTurnChainCounts?.set(owner.agentName, resetAutoTurnChain());
     // Przechwycone okno + tracker tury: store pętli i cała finalizacja operują na TYM oknie,
     // nawet jeśli user przełączy zakładkę.
-    const rw = owner.rollingWindow;
-    const tt = owner.tokenTracker;
+    // Konstruktor widoku zakłada oba pola i żadna ścieżka ich nie zeruje — zamrożenie je tylko kopiuje.
+    const rw = owner.rollingWindow!;
+    const tt = owner.tokenTracker!;
 
     // Uchwyt przerwania powstaje RAZEM z zapaleniem guzika Stop, nie dopiero przy rejestracji
     // tury w `_streamCtxMap`. Między jednym a drugim jest budowa promptu z pamięcią (potrafi
@@ -306,17 +426,17 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
         const basePrompt = await agentManager.getActiveSystemPromptWithMemory({
             isLocalModel,
             // Aktywny artefakt tej rozmowy (per-tab) → świeży chudy JSON w prompcie.
-            activeArtifactId: owner.artifactId,
+            activeArtifactId: owner.artifactId as string | undefined,
         }, owner.agent);
         rw.setSystemPrompt(basePrompt);
         if (inlineTriggers.length > 0) {
             // Marker @@skill: nie woła skill_execute. Resolwujemy skill TU (async/plugin-zależne)
             // z overridami per-agent — „doczepki nie giną" (prompt_append) — i wstrzykujemy
             // PEŁNY przepis do instrukcji tury. Nieznany skill → krótka nota.
-            const resolvedSkills: Record<string, ChatViewMixinContext> = {};
+            const resolvedSkills: Record<string, { name: string; prompt?: string }> = {};
             for (const m of inlineTriggers) {
                 if (m.type !== 'skill') continue;
-                const cfg = agentManager.resolveSkillConfig?.(m.name, owner.agent);
+                const cfg = agentManager.resolveSkillConfig?.(m.name, owner.agent!);
                 if (cfg) resolvedSkills[m.name] = { name: cfg.name, prompt: cfg.prompt };
             }
             const triggerInstruction = buildInlineTriggerInstruction(inlineTriggers, resolvedSkills);
@@ -350,7 +470,7 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
                         }
                         // Append Oczko image blocks
                         for (const imgBlock of noteCtx.images) {
-                            msg.content.push(imgBlock);
+                            (msg.content as ContentBlock[]).push(imgBlock);
                         }
                         // Warn if model likely can't see images
                         if (!this._isCurrentModelVision()) {
@@ -456,7 +576,7 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
         };
 
         // Kontekst tury (zamknięcie). Zastępuje dawny bogaty wpis _streamCtxMap.
-        const turn: ChatViewMixinContext = {
+        const turn: ChatTurn = {
             agentName: streamAgentName,
             agent: activeAgent,
             owner,                       // zamrożony właściciel tury
@@ -509,7 +629,8 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
         if (sCtx) sCtx.watchdog = turn.watchdog; // stop_generation / onClose rozbrajają przez ctx
 
         // Tracking multi-tab (StreamingManager).
-        const streamId = `${this.leaf?.id || 'main'}::${streamAgentName}`;
+        // `WorkspaceLeaf.id` nie jest w `obsidian.d.ts`, ale jest w runtime — stąd węższy odczyt.
+        const streamId = `${(this.leaf as { id?: string })?.id || 'main'}::${streamAgentName}`;
         turn.streamId = streamId; // _onStreamStall wyrejestrowuje stream sam (finally może nie ruszyć)
         const modelId = chat_model?.modelKey || chat_model?.modelId || null;
         streamingManager.startStream(streamId, {
@@ -532,10 +653,12 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
         const trace = this.plugin?.traceLog?.scope?.(_traceLabel);
         let result;
         try {
+            // `model`/`resolveTools` niżej: pętla opisuje model i narzędzia WŁASNYMI, węższymi
+            // kontraktami (`RunAgentLoopOptions`) — zawężenie stoi w miejscu przekazania.
             result = await runAgentLoop({
-                model: chat_model,
+                model: chat_model as unknown as RunAgentLoopOptions['model'],
                 store: new RollingWindowMessageStore(rw),
-                resolveTools: () => this._chatResolveTools(turn, toolIterIdx++ > 0),
+                resolveTools: () => this._chatResolveTools(turn, toolIterIdx++ > 0) as ReturnType<NonNullable<RunAgentLoopOptions['resolveTools']>>,
                 executeToolCall: (toolCall) => this._chatExecuteToolCall(turn, toolCall),
                 trace,
                 limits: {
@@ -562,13 +685,13 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
                     onToolCallsParsed: (toolCalls) => this._chatOnToolCallsParsed(turn, toolCalls),
                     onToolResults: (results, i) => this._chatOnToolResults(turn, results, i),
                     beforeContinue: (i) => this._chatBeforeContinue(turn, i),
-                    onUsage: (usage) => this._chatOnUsage(turn, usage),
+                    onUsage: (usage) => this._chatOnUsage(turn, usage as Usage),
                     onBackstop: () => this._chatOnBackstop(turn),
                 },
                 // Chunki przerwanej tury nie mogą nic namalować — bramka stoi PRZED
                 // `handle_chunk`, bo wpis `_streamCtxMap` znika przy Stopie (a to on niesie
                 // uchwyt dla widoku).
-                callbacks: { chunk: (resp) => { if (turnAbort.isAborted()) return; turn.watchdog.feed(); this.handle_chunk(resp, streamAgentName); } },
+                callbacks: { chunk: (resp) => { if (turnAbort.isAborted()) return; turn.watchdog!.feed(); this.handle_chunk(resp as StreamResponse, streamAgentName); } },
                 // Watchdog ciszy MUSI zbroić się dopiero, gdy request WEJDZIE na slot bramki
                 // mostu, nie w onIterationStart: czekanie w kolejce za długą syntezą suba nie
                 // jest ciszą modelu, a zbrojenie wcześniej ubijałoby turę usera po długim
@@ -607,7 +730,7 @@ export async function send_message(this: ChatViewMixinContext, opts: ChatViewMix
     log.debug('Chat', `[${streamAgentName}] send_message END (${Date.now() - sendStart}ms)`);
 }
 
-export function handle_chunk(this: ChatViewMixinContext, response: ChatViewMixinContext, agentName: string) {
+export function handle_chunk(this: ChatViewLike, response: StreamResponse, agentName: string) {
     // Look up per-agent streaming context from Map
     const ctx = agentName ? this._streamCtxMap.get(agentName) : null;
     // Chunk przerwanej tury nie ma prawa nic namalować. Główną bramką jest domknięcie
@@ -615,7 +738,7 @@ export function handle_chunk(this: ChatViewMixinContext, response: ChatViewMixin
     // to jest pas zapasowy dla dowolnego innego wołacza.
     if (ctx?.abort?.isAborted()) return;
     // If user switched to a different tab, skip rendering (finalization will save full content)
-    const currentTabAgent = this.chatTabs.find((t: ChatViewMixinContext) => t.isActive)?.agentName;
+    const currentTabAgent = this.chatTabs.find((t: ChatTab) => t.isActive)?.agentName;
     if (agentName && currentTabAgent !== agentName) return;
 
     this.hideTypingIndicator();
@@ -653,7 +776,7 @@ export function handle_chunk(this: ChatViewMixinContext, response: ChatViewMixin
 const STREAM_PAINT_INTERVAL_MS = 80;
 
 /** Throttle malowania TEGO widoku (leniwy, cykl życia jak `current_message_container`). */
-export function _streamRenderThrottle(this: ChatViewMixinContext): RenderThrottle {
+export function _streamRenderThrottle(this: ChatViewLike): RenderThrottle {
     if (!this._renderThrottle) {
         this._renderThrottle = new RenderThrottle({
             intervalMs: STREAM_PAINT_INTERVAL_MS,
@@ -671,12 +794,12 @@ export function _streamRenderThrottle(this: ChatViewMixinContext): RenderThrottl
  * ⚠️ Cel malowania mógł zniknąć między zgłoszeniem klatki a jej wystrzałem (Stop, przełączenie
  * zakładki, `_resetPaintTargets` w przerwie na wyniki narzędzi) — wtedy nie malujemy nic.
  */
-export function _paintStreamFrame(this: ChatViewMixinContext, frame: StreamFrame) {
+export function _paintStreamFrame(this: ChatViewLike, frame: StreamFrame) {
     if (!this.current_message_container || !this.current_message_text) return;
     // Sama niepustość wskaźników NIE wystarcza — po `_switchTab` celują one w węzły WYPIĘTE
     // z DOM-u starej zakładki (tekst poszedłby w nicość), ale skutek uboczny malowania —
     // `scrollToBottom` — przewinąłby NOWĄ zakładkę i skasował przywrócony `scrollTop`.
-    const activeTabAgent = this.chatTabs?.find((tab: ChatViewMixinContext) => tab.isActive)?.agentName;
+    const activeTabAgent = this.chatTabs?.find((tab: ChatTab) => tab.isActive)?.agentName;
     if (!shouldPaintFrame(frame, activeTabAgent)) return;
 
     // Render thinking block if reasoning_content present
@@ -721,8 +844,8 @@ export function _paintStreamFrame(this: ChatViewMixinContext, frame: StreamFrame
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Czy tura dzieje się na aktualnie aktywnej zakładce (może się zmienić w trakcie streamu). */
-export function _isTurnActiveTab(this: ChatViewMixinContext, turn: ChatViewMixinContext) {
-    const currentTabAgent = this.chatTabs.find((t: ChatViewMixinContext) => t.isActive)?.agentName;
+export function _isTurnActiveTab(this: ChatViewLike, turn: ChatTurn) {
+    const currentTabAgent = this.chatTabs.find((t: ChatTab) => t.isActive)?.agentName;
     return currentTabAgent === turn.agentName;
 }
 
@@ -737,7 +860,7 @@ export function _isTurnActiveTab(this: ChatViewMixinContext, turn: ChatViewMixin
  * ⚠️ Wołać wyłącznie na ścieżce AKTYWNEJ zakładki. Pola są per-WIDOK, nie per-zakładka, więc
  * zerowanie z tury kończącej się w tle wyrwałoby dymek żywej turze na wierzchu.
  */
-export function _resetPaintTargets(this: ChatViewMixinContext) {
+export function _resetPaintTargets(this: ChatViewLike) {
     this.current_message_container = null;
     this.current_message_bubble = null;
     this.current_message_text = null;
@@ -760,7 +883,7 @@ export function _resetPaintTargets(this: ChatViewMixinContext) {
  *
  * Wzór porównania tożsamości jest ten sam, co u watchdoga w `_onStreamStall`.
  */
-export function _releaseStreamCtx(this: ChatViewMixinContext, agentName: string, turnId?: number) {
+export function _releaseStreamCtx(this: ChatViewLike, agentName: string, turnId?: number) {
     if (!agentName) return;
     const live = this._streamCtxMap.get(agentName);
     if (!live) return;
@@ -772,13 +895,13 @@ export function _releaseStreamCtx(this: ChatViewMixinContext, agentName: string,
 }
 
 /** Kto jest na wierzchu — właściciel slotu kolejki i punkt odniesienia dla drenu. */
-export function _queueOwner(this: ChatViewMixinContext): QueueOwner {
-    const tab = (this.chatTabs || []).find((t: ChatViewMixinContext) => t.isActive);
+export function _queueOwner(this: ChatViewLike): QueueOwner {
+    const tab = (this.chatTabs || []).find((t: ChatTab) => t.isActive);
     return { agentName: tab?.agentName || '', tabKey: tab ? _tabKey(tab) : '' };
 }
 
 /** Rozbraja timer drenu kolejki (Stop / przełączenie zakładki / zamknięcie widoku). */
-export function _clearQueuedDrainTimer(this: ChatViewMixinContext) {
+export function _clearQueuedDrainTimer(this: ChatViewLike) {
     if (this._queuedDrainTimer) {
         window.clearTimeout(this._queuedDrainTimer);
         this._queuedDrainTimer = null;
@@ -786,7 +909,7 @@ export function _clearQueuedDrainTimer(this: ChatViewMixinContext) {
 }
 
 /** Tworzy kontener wiadomości agenta (gdy handle_chunk go nie stworzył — np. tool calls bez tekstu). */
-export function _ensureAgentMessageContainer(this: ChatViewMixinContext, streamAgent: ChatViewMixinContext) {
+export function _ensureAgentMessageContainer(this: ChatViewLike, streamAgent: Agent | null | undefined) {
     const streamColor = SkinManager.getAgentColor(streamAgent || 'default');
     const agName = streamAgent?.name || 'Agent';
 
@@ -816,11 +939,11 @@ export function _ensureAgentMessageContainer(this: ChatViewMixinContext, streamA
  * (`_chatOnUsage`, `_chatBeforeContinue`, `_finalizeTurn`), co psułoby zarówno TokenTracker
  * agenta A, jak i globalną kalibrację chars→token (`calibrate`, `core/utils/tokenCounter.ts`).
  */
-export function _captureInputEstimate(this: ChatViewMixinContext, turn: ChatViewMixinContext) {
+export function _captureInputEstimate(this: ChatViewLike, turn: ChatTurn) {
     const messages = turn.rw.getMessagesForAPI();
-    const inputText = messages.map((m: ChatViewMixinContext) => {
+    const inputText = messages.map((m: LoopMessage) => {
         if (typeof m.content === 'string') return m.content;
-        if (Array.isArray(m.content)) return m.content.filter((b: ChatViewMixinContext) => b.type === 'text').map((b: ChatViewMixinContext) => b.text).join('\n');
+        if (Array.isArray(m.content)) return (m.content as ContentBlock[]).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
         return '';
     }).join('\n');
     turn.lastInputTokens = countTokens(inputText);
@@ -832,11 +955,11 @@ export function _captureInputEstimate(this: ChatViewMixinContext, turn: ChatView
  * @param {boolean} _applyEnabledFilter - IGNOROWANY: jedyna oś to `disabled_tools` przez
  *   filterByAgent. Param zostaje w kontrakcie hooka pętli.
  */
-export function _chatResolveTools(this: ChatViewMixinContext, turn: ChatViewMixinContext, _applyEnabledFilter: boolean) {
+export function _chatResolveTools(this: ChatViewLike, turn: ChatTurn, _applyEnabledFilter: boolean) {
     const agent = turn.agent;
-    let tools: ChatViewMixinContext[] = [];
-    let systemTools: ChatViewMixinContext[] = [];
-    let mcpActiveTools: ChatViewMixinContext[] = [];
+    let tools: ChatToolDefinition[] = [];
+    let systemTools: ChatToolDefinition[] = [];
+    let mcpActiveTools: ChatToolDefinition[] = [];
 
     if (agent && this.plugin?.toolRegistry) {
         // JEDNA OŚ NARZĘDZIOWA. filterByAgent = wszystkie built-in − disabled_tools (+ user-serwery
@@ -844,17 +967,17 @@ export function _chatResolveTools(this: ChatViewMixinContext, turn: ChatViewMixi
         // `enabled_tools`, nie ma filtra memory-tools po permissions.memory: memory_save/delete
         // rządzi disabled_tools, read scope=memory bramkuje sam tool fail-closed.
         const mcpAllowed = this.plugin.toolRegistry.filterByAgent(agent);
-        const mcpAllowedNames = new Set(mcpAllowed.map((t: ChatViewMixinContext) => t.name));
+        const mcpAllowedNames = new Set<string | undefined>(mcpAllowed.map((t: ToolDefinition) => t.name));
 
-        systemTools = this.plugin.toolRegistry.getToolDefinitions()
-            .filter((t: ChatViewMixinContext) => mcpAllowedNames.has(t.function?.name || t.name));
+        systemTools = (this.plugin.toolRegistry.getToolDefinitions() as ChatToolDefinition[])
+            .filter((t: ChatToolDefinition) => mcpAllowedNames.has(t.function?.name || t.name));
 
         // Layer 2: active user/custom MCP server tools + standalone. Odfiltruj wyłączone (disabled_tools).
         const preferredServers = getAgentServerFilter(this.plugin.serverManager, agent);
-        const preferredTools = agent?.preferredTools || [];
-        const disabledSet = new Set(Array.isArray(agent.disabled_tools) ? agent.disabled_tools : []);
+        const preferredTools = (agent?.preferredTools as string[] | undefined) || [];
+        const disabledSet = new Set<string | undefined>(Array.isArray(agent.disabled_tools) ? agent.disabled_tools : []);
         mcpActiveTools = (this.plugin.serverManager?.getActiveToolDefinitions(preferredServers, preferredTools) || [])
-            .filter((t: ChatViewMixinContext) => !disabledSet.has(t.function?.name || t.name));
+            .filter((t: ChatToolDefinition) => !disabledSet.has(t.function?.name || t.name));
         tools = dedupeToolDefinitions([...systemTools, ...mcpActiveTools]);
 
         log.debug('Chat', `Tools: ${tools.length} narzędzi`);
@@ -866,7 +989,7 @@ export function _chatResolveTools(this: ChatViewMixinContext, turn: ChatViewMixi
 }
 
 /** onIterationStart — reset per-response stash + estymata wejścia (przed wywołaniem modelu). */
-export function _chatOnIterationStart(this: ChatViewMixinContext, turn: ChatViewMixinContext) {
+export function _chatOnIterationStart(this: ChatViewLike, turn: ChatTurn) {
     // Watchdog NIE może zbroić się tutaj — zbroi go `onGateAdmitted` pętli (wejście requestu
     // na slot bramki). Zbrojenie przed kolejką liczyłoby czekanie za subem jako ciszę modelu
     // i ubijałoby żywą turę usera.
@@ -879,7 +1002,7 @@ export function _chatOnIterationStart(this: ChatViewMixinContext, turn: ChatView
 }
 
 /** onBackstop — finalna iteracja bez narzędzi. Reset per-response stash (brak onIterationStart). */
-export function _chatOnBackstop(this: ChatViewMixinContext, turn: ChatViewMixinContext) {
+export function _chatOnBackstop(this: ChatViewLike, turn: ChatTurn) {
     // Finalne wywołanie też pilnowane, ale zbrojenie robi `onGateAdmitted` (jak wyżej).
     turn.responseRecorded = false;
     turn.lastApiInput = 0;
@@ -889,7 +1012,7 @@ export function _chatOnBackstop(this: ChatViewMixinContext, turn: ChatViewMixinC
 }
 
 /** onUsage — TokenTracker record (rola main) + cache badge z usage odpowiedzi. */
-export function _chatOnUsage(this: ChatViewMixinContext, turn: ChatViewMixinContext, usage: ChatViewMixinContext) {
+export function _chatOnUsage(this: ChatViewLike, turn: ChatTurn, usage: Usage | null | undefined) {
     const isActiveTab = this._isTurnActiveTab(turn);
     const apiInput = usage?.prompt_tokens || 0;
     const apiOutput = usage?.completion_tokens || 0;
@@ -924,7 +1047,7 @@ export function _chatOnUsage(this: ChatViewMixinContext, turn: ChatViewMixinCont
  * ask_user WYMAGA tego przed egzekucją (placeholder tworzy plugin._askUserPromise, na który czeka
  * AskUserTool.execute). NIE filtruje (zwraca undefined).
  */
-export function _chatOnToolCallsParsed(this: ChatViewMixinContext, turn: ChatViewMixinContext, toolCalls: ChatViewMixinContext[]) {
+export function _chatOnToolCallsParsed(this: ChatViewLike, turn: ChatTurn, toolCalls: ParsedToolCall[]) {
     turn.watchdog?.disarm(); // model skończył mówić — narzędzia mogą trwać minuty, cisza legalna
     const isActiveTab = this._isTurnActiveTab(turn);
     const streamAgent = turn.agent;
@@ -979,13 +1102,13 @@ export function _chatOnToolCallsParsed(this: ChatViewMixinContext, turn: ChatVie
                 this.hideTypingIndicator();
                 const _subArgs = parseToolCallArgs(toolCall);
                 const _subName = _subArgs.aspect || '';
-                toolDisplay = createPendingSubAgentBlock(toolCall.name, _subName);
+                toolDisplay = createPendingSubAgentBlock(toolCall.name as string, _subName);
             } else {
-                const statusMsg = (TOOL_STATUS as Record<string, string>)[toolCall.name] || `${toolCall.name}...`;
+                const statusMsg = (TOOL_STATUS as Record<string, string>)[toolCall.name as string] || `${toolCall.name}...`;
                 this.showTypingIndicator(statusMsg);
                 const makeDisplay = this.env?.settings?.pkmAssistant?.compactToolChips === false ? createToolCallDisplay : createCompactToolChip;
                 toolDisplay = makeDisplay({
-                    name: toolCall.name,
+                    name: toolCall.name as string,
                     input: toolCall.arguments,
                     status: 'pending'
                 });
@@ -1004,9 +1127,9 @@ export function _chatOnToolCallsParsed(this: ChatViewMixinContext, turn: ChatVie
  * (string albo tablica multimodalna dla generate_image+vision). Surowy wynik + błąd stashuje w
  * turn.rawResults (id → {result, error}) dla onToolResults (UI + side effects).
  */
-export async function _chatExecuteToolCall(this: ChatViewMixinContext, turn: ChatViewMixinContext, toolCall: ChatViewMixinContext) {
-    let raw;
-    let error = null;
+export async function _chatExecuteToolCall(this: ChatViewLike, turn: ChatTurn, toolCall: ParsedToolCall) {
+    let raw: ChatToolResult | undefined;
+    let error: Error | null = null;
     try {
         // Odczyt nie jest racjonowany limiterem per turę: narzędzia = uprawnienia agenta,
         // nie tryb pracy.
@@ -1014,10 +1137,12 @@ export async function _chatExecuteToolCall(this: ChatViewMixinContext, turn: Cha
         // `origin` = adres zwrotny tury (policzony raz w send_message). MCPClient wstrzykuje go
         // jako zaufany znacznik `_invocationOrigin`, a `delegate` przenosi do rejestru biegów —
         // dzięki temu wynik suba z tła wie, do której zakładki/sesji ma wrócić.
-        raw = await this.plugin.mcpClient.executeToolCall(toolCall, turn.agentName, { autonomy: turn.autonomy, origin: turn.origin });
-    } catch (err: ChatViewMixinContext) {
-        raw = { isError: true, error: err.message };
-        error = err;
+        // TS-boundary: wynik narzędzia należy do SERWERA, który je wykonał — czat czyta z niego
+        // wyłącznie pola opisane w `ChatToolResult`, bez walidacji schematem (ta byłaby zmianą runtime).
+        raw = await this.plugin.mcpClient!.executeToolCall(toolCall as ToolsToolCall, turn.agentName, { autonomy: turn.autonomy, origin: turn.origin }) as ChatToolResult;
+    } catch (err) {
+        raw = { isError: true, error: (err as Error).message };
+        error = err as Error;
     }
     turn.rawResults.set(toolCall.id, { result: raw, error });
 
@@ -1049,7 +1174,7 @@ export async function _chatExecuteToolCall(this: ChatViewMixinContext, turn: Cha
  * do store (robi to pętla) i NIE journaluje agent_message/tool_result (to beforeContinue).
  * @param {number} i - indeks iteracji (dla skillActiveAt).
  */
-export async function _chatOnToolResults(this: ChatViewMixinContext, turn: ChatViewMixinContext, results: ChatViewMixinContext[], i: number) {
+export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, results: ToolResultEntry[], i: number) {
     const isActiveTab = this._isTurnActiveTab(turn);
     const toolCallsContainer = turn.toolCallsContainer;
     const agentName = turn.agentName;
@@ -1059,7 +1184,11 @@ export async function _chatOnToolResults(this: ChatViewMixinContext, turn: ChatV
 
     for (let ti = 0; ti < results.length; ti++) {
         const r = results[ti];
-        const toolCall = r.toolCall;
+        // TS-boundary: `ParsedToolCall.name` (modules/agent-loop) jest opcjonalne, bo dostawca
+        // potrafi nie podać nazwy przy PARSOWANIU. Tutaj jesteśmy po WYKONANIU - pętla dispatchuje
+        // narzędzia po nazwie, więc wynik bez niej nie istnieje; rendery bloków
+        // (`modules/ui-components`) słusznie żądają `string`, a nie `string | undefined`.
+        const toolCall = r.toolCall as ParsedToolCall & { name: string };
         const pending = turn.pendingEntries?.[ti] || {};
         const toolDisplay = pending.toolDisplay;
         const isSubAgent = pending.isSubAgent ?? (toolCall.name === 'delegate');
@@ -1102,11 +1231,11 @@ export async function _chatOnToolResults(this: ChatViewMixinContext, turn: ChatV
                 const startedList = Array.isArray(result.tasks)
                     ? result.tasks
                     : [{ task_id: result.task_id, name: result.name }];
-                const lines = startedList.map((task: ChatViewMixinContext) => t('chat.subagent_background_task', {
+                const lines = startedList.map((task) => t('chat.subagent_background_task', {
                     name: task?.name || _bgArgs.aspect || '?',
                     task_id: task?.task_id || '?',
                 }));
-                if (result.queued > 0) lines.push(t('chat.subagent_background_queued', { count: result.queued }));
+                if ((result.queued as number) > 0) lines.push(t('chat.subagent_background_queued', { count: result.queued }));
                 lines.push(t('chat.subagent_background_note'));
                 const bgBlock = createSubAgentBlock({
                     type: toolCall.name,
@@ -1156,7 +1285,7 @@ export async function _chatOnToolResults(this: ChatViewMixinContext, turn: ChatV
                     // artefaktów i MCPClienta, więc bez tej reguły odmowa `write`/`kom_send`/
                     // `memory_save` (`{success:false}`) dostawałaby zielony kryształ „zrobione".
                     status: toolResultStatus(result),
-                    error: result.error
+                    error: (result as ChatToolResult).error
                 }));
             }
 
@@ -1177,7 +1306,7 @@ export async function _chatOnToolResults(this: ChatViewMixinContext, turn: ChatV
                     link.href = '#';
                     link.addEventListener('click', (e) => {
                         e.preventDefault();
-                        this.app.workspace.openLinkText(result.path, '');
+                        void this.app.workspace.openLinkText(result.path as string, '');
                     });
                     imgContainer.appendChild(link);
                 }
@@ -1222,7 +1351,9 @@ export async function _chatOnToolResults(this: ChatViewMixinContext, turn: ChatV
         // --- Side effects (always run, regardless of tab) ---
         if (toolCall.name === 'agent_delegate') {
             try {
-                const parsed = typeof result === 'object' ? result : JSON.parse(JSON.stringify(result));
+                // TS-boundary: wynik `agent_delegate` pisze narzędzie — czat czyta z niego tylko
+                // pola `DelegationProposal` (guzik „przekaż rozmowę agentowi X”).
+                const parsed = (typeof result === 'object' ? result : JSON.parse(JSON.stringify(result))) as DelegationProposal & { delegation?: boolean };
                 if (parsed.delegation === true) this._pendingDelegation = parsed;
             } catch (e) {
                 // `_pendingDelegation` to JEDYNE wejście do `_renderDelegationButton` — cichy
@@ -1284,7 +1415,7 @@ export async function _chatOnToolResults(this: ChatViewMixinContext, turn: ChatV
                 link.href = '#';
                 link.addEventListener('click', (e) => {
                     e.preventDefault();
-                    this.app.workspace.openLinkText(writePath, '');
+                    void this.app.workspace.openLinkText(writePath, '');
                 });
                 linkDiv.appendChild(link);
                 toolCallsContainer.appendChild(linkDiv);
@@ -1299,7 +1430,7 @@ export async function _chatOnToolResults(this: ChatViewMixinContext, turn: ChatV
  * potem tool_result — parytet z dawnym handle_done), token economy (nudges + mid-loop compression),
  * reset kontenera, wstrzyknięcie zakolejkowanej wiadomości.
  */
-export async function _chatBeforeContinue(this: ChatViewMixinContext, turn: ChatViewMixinContext, i: number) {
+export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i: number) {
     turn.watchdog?.disarm(); // defensywnie: kompresja mid-loop może chwilę trwać, nie pilnujemy jej
     const isActiveTab = this._isTurnActiveTab(turn);
     const rw = turn.rw;
@@ -1315,7 +1446,7 @@ export async function _chatBeforeContinue(this: ChatViewMixinContext, turn: Chat
 
     // Cache telemetry na wiadomości pośredniej (tool-call) — parytet z dawnym toolMsgMeta.cache.
     // Historia (chat_messages) renderuje badge z msg.cache przy re-renderze, więc musi być zapisane.
-    if (asstMsg && turn.lastCacheMeta?.cached_tokens > 0) {
+    if (asstMsg && (turn.lastCacheMeta?.cached_tokens as number) > 0) {
         asstMsg.cache = turn.lastCacheMeta;
     }
 
@@ -1355,10 +1486,10 @@ export async function _chatBeforeContinue(this: ChatViewMixinContext, turn: Chat
 
     // ── TOKEN ECONOMY: Track iterations + delegation nudge + skill nudge ──
     const iterCount = i + 1;
-    const usedDelegate = (turn.pendingEntries || []).some((p: ChatViewMixinContext) => p.toolCall.name === 'delegate');
+    const usedDelegate = (turn.pendingEntries || []).some((p) => p.toolCall.name === 'delegate');
     if (usedDelegate) turn.hasUsedDelegate = true;
 
-    const hasDelegates = turn.agent?.getActiveDelegates?.()?.length > 0;
+    const hasDelegates = (turn.agent?.getActiveDelegates?.()?.length as number) > 0;
 
     // Delegation nudge — agent has delegates, must delegate
     if (hasDelegates && !turn.hasUsedDelegate && iterCount >= 2) {
@@ -1457,7 +1588,7 @@ export async function _chatBeforeContinue(this: ChatViewMixinContext, turn: Chat
  * handle_done: crystal notice, zapis finalnej wiadomości + journal, timestamp/akcje, restore mode,
  * cleanup, dwufazowa kompresja end-of-turn.
  */
-export async function _finalizeTurn(this: ChatViewMixinContext, turn: ChatViewMixinContext, result: ChatViewMixinContext) {
+export async function _finalizeTurn(this: ChatViewLike, turn: ChatTurn, result: RunAgentLoopResult) {
     const isActiveTab = this._isTurnActiveTab(turn);
     const rw = turn.rw;
     const streamAgent = turn.agent;
@@ -1496,7 +1627,7 @@ export async function _finalizeTurn(this: ChatViewMixinContext, turn: ChatViewMi
     }
     const timestamp = new Date().toLocaleTimeString(getDateLocale(), { hour: '2-digit', minute: '2-digit' });
     const idx = rw.messages.length; // Will be the index after adding
-    await rw.addMessage('assistant', content, { timestamp, ...(cacheMeta?.cached_tokens > 0 ? { cache: cacheMeta } : {}) });
+    await rw.addMessage('assistant', content, { timestamp, ...((cacheMeta?.cached_tokens as number) > 0 ? { cache: cacheMeta } : {}) });
     await this.appendToActiveSession?.({
         type: 'agent_message',
         agentName: streamAgentName,
@@ -1513,10 +1644,10 @@ export async function _finalizeTurn(this: ChatViewMixinContext, turn: ChatViewMi
     if (isActiveTab && content && content !== this._lastPaintedContent) {
         // _ensureAgentMessageContainer NIE jest idempotentny (zawsze tworzy nowy node) — tylko gdy brak.
         if (!this.current_message_container) this._ensureAgentMessageContainer(streamAgent);
-        this.current_message_text.empty();
+        this.current_message_text!.empty();
         // `MarkdownRenderer.render` (nie `renderMarkdown`, deprecated) — patrz komentarz przy
         // analogicznym wywołaniu w _paintStreamFrame wyżej.
-        void MarkdownRenderer.render(this.app, content, this.current_message_text, '', this);
+        void MarkdownRenderer.render(this.app, content, this.current_message_text!, '', this);
         this._lastPaintedContent = content;
     }
 
@@ -1561,7 +1692,7 @@ export async function _finalizeTurn(this: ChatViewMixinContext, turn: ChatViewMi
         // chybiałby wpis zapisany pod starą.
         const savedState = this._agentStates.get(turn.origin?.tabKey ?? '');
         if (savedState) savedState.isGenerating = false;
-        const tab = this.chatTabs.find((t: ChatViewMixinContext) => t.agentName === streamAgentName);
+        const tab = this.chatTabs.find((t: ChatTab) => t.agentName === streamAgentName);
         if (tab) tab._needsRefresh = true;
     }
 
@@ -1600,12 +1731,12 @@ export async function _finalizeTurn(this: ChatViewMixinContext, turn: ChatViewMi
 
     // If stream finished on a background tab, mark the tab for refresh
     if (!isActiveTab && streamAgentName) {
-        const tab = this.chatTabs.find((t: ChatViewMixinContext) => t.agentName === streamAgentName);
+        const tab = this.chatTabs.find((t: ChatTab) => t.agentName === streamAgentName);
         if (tab) tab._needsRefresh = true;
     }
 }
 
-export function handle_error(this: ChatViewMixinContext, error: ChatViewMixinContext, agentName: string, turnId?: number, ownerTabKey?: string) {
+export function handle_error(this: ChatViewLike, error: unknown, agentName?: string, turnId?: number, ownerTabKey?: string) {
     this.hideTypingIndicator();
     // Tekst błędu idzie do DOM-u czatu i do loga (który pisze też do pliku). Na sieciowym
     // padzie strumienia `error.message` bywa zrzutem całego zdarzenia streamera razem z
@@ -1617,13 +1748,14 @@ export function handle_error(this: ChatViewMixinContext, error: ChatViewMixinCon
     // Determine which tab this error belongs to
     const ctx = agentName ? this._streamCtxMap.get(agentName) : null;
     const streamAgentName = agentName || ctx?.agentName || '';
-    const currentTabAgent = this.chatTabs.find((t: ChatViewMixinContext) => t.isActive)?.agentName;
+    const currentTabAgent = this.chatTabs.find((t: ChatTab) => t.isActive)?.agentName;
     const isActiveTab = !agentName || currentTabAgent === agentName;
 
     if (isActiveTab) {
         if (this.current_message_container) {
-            this.current_message_text.empty();
-            this.current_message_text.createEl('p', {
+            // Wskazniki malowania powstaja i gasna RAZEM (`_resetPaintTargets`).
+            this.current_message_text!.empty();
+            this.current_message_text!.createEl('p', {
                 text: t('chat.streaming.error_prefix', { message: safeText }),
                 cls: 'pkm-chat-error'
             });
@@ -1660,7 +1792,7 @@ export function handle_error(this: ChatViewMixinContext, error: ChatViewMixinCon
         // `_agentStates`).
         const savedState = this._agentStates.get(ownerTabKey ?? '');
         if (savedState) savedState.isGenerating = false;
-        const tab = this.chatTabs.find((t: ChatViewMixinContext) => t.agentName === streamAgentName);
+        const tab = this.chatTabs.find((t: ChatTab) => t.agentName === streamAgentName);
         if (tab) tab._needsRefresh = true;
     }
 
@@ -1681,7 +1813,7 @@ export function handle_error(this: ChatViewMixinContext, error: ChatViewMixinCon
  * zdarzenia na abort), więc finally w send_message może nigdy nie ruszyć — dlatego
  * stream jest wyrejestrowywany ze StreamingManagera tutaj.
  */
-export function _onStreamStall(this: ChatViewMixinContext, turn: ChatViewMixinContext, silentMs: number) {
+export function _onStreamStall(this: ChatViewLike, turn: ChatTurn, silentMs: number) {
     const agentName = turn.agentName;
     // Tura już zatrzymana (ręczny Stop) albo zakończona/wyczyszczona — watchdog milczy.
     // Pytamy o stan TEJ tury, nie o pole widoku (które po Stopie innej tury kłamałoby).
@@ -1724,7 +1856,7 @@ export function _onStreamStall(this: ChatViewMixinContext, turn: ChatViewMixinCo
         // zdążył podmienić `tab.sessionPath` pod nogami tej tury.
         const savedState = this._agentStates.get(turn.origin?.tabKey ?? '');
         if (savedState) savedState.isGenerating = false;
-        const bgTab = this.chatTabs.find((tab: ChatViewMixinContext) => tab.agentName === agentName);
+        const bgTab = this.chatTabs.find((tab: ChatTab) => tab.agentName === agentName);
         if (bgTab) bgTab._needsRefresh = true;
     }
     if (turn.streamId) streamingManager.stopStream(turn.streamId);
@@ -1741,7 +1873,7 @@ export function _onStreamStall(this: ChatViewMixinContext, turn: ChatViewMixinCo
     }
 }
 
-export function stop_generation(this: ChatViewMixinContext, agentName: string, reason = 'stop') {
+export function stop_generation(this: ChatViewLike, agentName?: string, reason = 'stop') {
     // Przerwanie ZATRZASKUJEMY na uchwycie TEJ tury — pętla (`shouldAbort`) i bramka chunków
     // czytają stan swojej tury, nie pole widoku. Nowa tura
     // dostaje własny uchwyt, więc kolejna wiadomość usera (ani auto-tura z wynikiem suba,
@@ -1829,7 +1961,7 @@ export function stop_generation(this: ChatViewMixinContext, agentName: string, r
  * @param reason - powód zapisywany na uchwycie tury (`'close'` z `onClose`)
  * @returns nazwy agentów, których tury zatrzymano
  */
-export function stop_all_turns(this: ChatViewMixinContext, reason = 'close'): string[] {
+export function stop_all_turns(this: ChatViewLike, reason = 'close'): string[] {
     // Kopia nazw PRZED pętlą — `stop_generation` kasuje wpisy z mapy w trakcie. Bierzemy też
     // tury W PRZYGOTOWANIU (prompt się buduje, wpisu w mapie jeszcze nie ma).
     const preparing = Array.from<string>(this._preparingTurns?.keys?.() || [])
@@ -1848,8 +1980,8 @@ export function stop_all_turns(this: ChatViewMixinContext, reason = 'close'): st
     for (const name of names) {
         try {
             this.stop_generation(name, reason);
-        } catch (e: ChatViewMixinContext) {
-            log.warn('Chat', `Zatrzymanie tury [${name}] padło (zamykamy dalej): ${e?.message || e}`);
+        } catch (e) {
+            log.warn('Chat', `Zatrzymanie tury [${name}] padło (zamykamy dalej): ${(e as Error)?.message || String(e)}`);
         }
     }
 
@@ -1858,14 +1990,14 @@ export function stop_all_turns(this: ChatViewMixinContext, reason = 'close'): st
     const registry = this.plugin?.subTaskRegistry;
     if (registry?.list && registry.requestStop) {
         try {
-            const tabKeys = (this.chatTabs || []).map((tab: ChatViewMixinContext) => _tabKey(tab));
+            const tabKeys = (this.chatTabs || []).map((tab: ChatTab) => _tabKey(tab));
             const ids = collectSubTaskIdsForOwners(registry.list(), { tabKeys, agentNames: names });
             for (const id of ids) {
                 log.info('Chat', `Zamknięcie czatu → zatrzymuję bieg suba ${id}`);
                 registry.requestStop(id);
             }
-        } catch (e: ChatViewMixinContext) {
-            log.warn('Chat', `Zatrzymanie subów przy zamknięciu padło: ${e?.message || e}`);
+        } catch (e) {
+            log.warn('Chat', `Zatrzymanie subów przy zamknięciu padło: ${(e as Error)?.message || String(e)}`);
         }
     }
 
@@ -1881,20 +2013,20 @@ export function stop_all_turns(this: ChatViewMixinContext, reason = 'close'): st
  * otwarty jako ostatni, a jego zamknięcie odpina dostarczanie dla obu (`setDeliverer(null)`).
  * Wyniki nie giną — zostają w kolejce do następnego otwarcia czatu.
  */
-export function _wireSubTaskDeliverer(this: ChatViewMixinContext) {
+export function _wireSubTaskDeliverer(this: ChatViewLike) {
     const notifier = this.plugin?.subTaskNotifier;
     if (!notifier?.setDeliverer) return;
-    notifier.setDeliverer((task: ChatViewMixinContext) => this._deliverSubTaskResult(task));
+    notifier.setDeliverer((task: SubTask) => this._deliverSubTaskResult(task));
     // `setDeliverer` świadomie NIC nie dostarcza — moment wybiera wołacz. Teraz.
     this._drainSubTasks();
 }
 
 /** Ponów próbę dostarczenia zaległych wyników. Nigdy nie rzuca (powiadomienia nie wywracają czatu). */
-export function _drainSubTasks(this: ChatViewMixinContext) {
+export function _drainSubTasks(this: ChatViewLike) {
     try {
         this.plugin?.subTaskNotifier?.drain?.();
-    } catch (e: ChatViewMixinContext) {
-        log.warn('Chat', `Drain wyników subów padł (nieszkodliwie): ${e?.message || e}`);
+    } catch (e) {
+        log.warn('Chat', `Drain wyników subów padł (nieszkodliwie): ${(e as Error)?.message || String(e)}`);
     }
 }
 
@@ -1915,7 +2047,7 @@ export function _drainSubTasks(this: ChatViewMixinContext) {
  * Poza bramką (i celowo PRZED nią) zostaje jedno pytanie: zadanie bez `id` odpada od razu,
  * bo to ono chroni wyliczenie adresu zwrotnego niżej przed wywrotką na pustym zadaniu.
  */
-export function _deliverSubTaskResult(this: ChatViewMixinContext, task: ChatViewMixinContext) {
+export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
     try {
         if (!task?.id) return false;
 
@@ -1935,7 +2067,7 @@ export function _deliverSubTaskResult(this: ChatViewMixinContext, task: ChatView
         // Sam odczyt licznika NIE zakłada mapy (`?.get`) — mapa powstaje dopiero przy zapisie,
         // czyli tylko na ścieżce, która naprawdę startuje auto-turę.
         const limits = getLimits(this.env?.settings);
-        const chain = evaluateAutoTurnChain(this._autoTurnChainCounts?.get(tab?.agentName) || 0, limits.max_consecutive_auto_turns);
+        const chain = evaluateAutoTurnChain(this._autoTurnChainCounts?.get(tab?.agentName as string) || 0, limits.max_consecutive_auto_turns);
 
         // KOMPLET bramek dostarczenia liczy czysta `evaluateSubTaskDelivery` (`subTaskDelivery.ts`)
         // — zakładka → aktywność → trwająca tura → Stop → sufit łańcucha. Tutaj zostaje wyłącznie
@@ -1957,7 +2089,7 @@ export function _deliverSubTaskResult(this: ChatViewMixinContext, task: ChatView
         });
         if (!delivery.allowed) {
             if (delivery.reason === 'chain_limit') {
-                log.warn('Chat', `[${tab.agentName}] limit łańcucha auto-tur po subach (${limits.max_consecutive_auto_turns}) osiągnięty — wynik ${task.id} zostaje w kolejce do tury usera`);
+                log.warn('Chat', `[${tab!.agentName}] limit łańcucha auto-tur po subach (${limits.max_consecutive_auto_turns}) osiągnięty — wynik ${task.id} zostaje w kolejce do tury usera`);
                 // Cisza wobec usera byłaby myląca — z jego perspektywy rozmowa po prostu przestała
                 // reagować. Zdarzenie z definicji rzadkie (trzeba max_consecutive_auto_turns auto-tur
                 // z rzędu), więc jeden Notice na zaparkowanie nie spamuje (aktywność zakładki jest
@@ -1967,7 +2099,8 @@ export function _deliverSubTaskResult(this: ChatViewMixinContext, task: ChatView
             return false;
         }
         if (!this._autoTurnChainCounts) this._autoTurnChainCounts = new Map();
-        this._autoTurnChainCounts.set(tab.agentName, chain.nextCount);
+        // `evaluateSubTaskDelivery` odmawia bez zakładki — za bramką `tab` na pewno istnieje.
+        this._autoTurnChainCounts.set(tab!.agentName, chain.nextCount);
 
         const text = buildSubTaskNotificationText(task, {
             // Wynik suba ma WŁASNY sufit (60k default, 0 = bez limitu) — wspólne 15k z
@@ -1979,21 +2112,21 @@ export function _deliverSubTaskResult(this: ChatViewMixinContext, task: ChatView
         // dochodzi do `set_generating(true)` dopiero po kilku awaitach — bez tej flagi drugi
         // czekający wynik wystartowałby RÓWNOLEGŁĄ turę na tej samej zakładce.
         this._subTaskTurnPending = true;
-        log.info('Chat', `[${tab.agentName}] wynik suba z tła → auto-tura (${task.id}, ${task.status})`);
+        log.info('Chat', `[${tab!.agentName}] wynik suba z tła → auto-tura (${task.id}, ${task.status})`);
         void Promise.resolve()
             // Wynik suba to tekst MASZYNY — żadnych przywilejów człowieka (rejestr adresów,
             // markery `@@skill:`, komendy `/`).
             .then(() => this.send_message({ injectedText: text, meta: machineMeta({ _subTaskNotification: true, subTaskId: task.id }) }))
-            .catch((e: ChatViewMixinContext) => log.warn('Chat', `Auto-tura po subie padła: ${e?.message || e}`))
+            .catch((e: unknown) => log.warn('Chat', `Auto-tura po subie padła: ${(e as Error)?.message || String(e)}`))
             .finally(() => { this._subTaskTurnPending = false; });
         return true;
-    } catch (e: ChatViewMixinContext) {
-        log.warn('Chat', `Dostarczenie wyniku suba padło (zostaje w kolejce): ${e?.message || e}`);
+    } catch (e) {
+        log.warn('Chat', `Dostarczenie wyniku suba padło (zostaje w kolejce): ${(e as Error)?.message || String(e)}`);
         return false;
     }
 }
 
-export function set_generating(this: ChatViewMixinContext, is_generating: boolean) {
+export function set_generating(this: ChatViewLike, is_generating: boolean) {
     this.is_generating = is_generating;
 
     if (is_generating) {
@@ -2057,7 +2190,7 @@ export function set_generating(this: ChatViewMixinContext, is_generating: boolea
                 // `HUMAN_MESSAGE_META` tutaj byłoby błędne - slot zajmuje też tekst maszynowy
                 // (guzik artefaktu wypełnia pole wpisywania z kodu), więc treść artefaktu
                 // wracałaby z przywilejami człowieka.
-                this.send_message({ meta: queued.meta });
+                void this.send_message({ meta: queued.meta });
             }, 100);
         } else if (!this._drainSuppressed) {
             // Wiadomość USERA ma pierwszeństwo - po wyniki subów z tła sięgamy dopiero,
@@ -2077,7 +2210,7 @@ export function set_generating(this: ChatViewMixinContext, is_generating: boolea
 /**
  * Show visual indicator that a message is queued
  */
-export function _showQueuedIndicator(this: ChatViewMixinContext, text: string) {
+export function _showQueuedIndicator(this: ChatViewLike, text: string) {
     this._hideQueuedIndicator();
     const indicator = createDiv();
     indicator.className = 'cs-queued-indicator';
@@ -2095,7 +2228,7 @@ export function _showQueuedIndicator(this: ChatViewMixinContext, text: string) {
     this._queuedIndicatorEl = indicator;
 }
 
-export function _hideQueuedIndicator(this: ChatViewMixinContext) {
+export function _hideQueuedIndicator(this: ChatViewLike) {
     if (this._queuedIndicatorEl) {
         this._queuedIndicatorEl.remove();
         this._queuedIndicatorEl = null;

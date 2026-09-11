@@ -17,10 +17,59 @@ import { parseArtifact, applyPatch, validateArtifactBodyText, isArtifactScalar, 
 import { sanitizePath, stringifyYaml } from '../../core/index.js';
 import type { ArtifactFrontmatter, ArtifactPatchError, ArtifactPatchOp, ArtifactScalar, ThinArtifact } from './types.js';
 
+/** Kształt pliku/folderu, jaki ten moduł czyta z Vault API. Real `TFile`/`TFolder` mają
+ *  wszystkie te pola, ale store'owi wolno też podawać SYNTETYCZNE obiekty (np. `{ path: target }`
+ *  w `move()`/`importInstance()`), więc to jest duck-type - nie import realnych klas Obsidiana. */
+interface ArtifactFileLike {
+    path: string;
+    name?: string;
+    basename?: string;
+}
+
+/**
+ * Powierzchnia `app.vault`, jakiej realnie potrzebuje ten store. Metody, które kod woła za
+ * `?.`/`if (x.metoda)` (patrz gotcha „metadataCache asynchroniczny") są tu opcjonalne —
+ * dokładnie tak, jak store je traktuje w runtime; testowe atrapy nie muszą implementować
+ * całej powierzchni Obsidiana.
+ */
+interface ArtifactStoreVault {
+    getMarkdownFiles?(): ArtifactFileLike[];
+    getAbstractFileByPath?(path: string): ArtifactFileLike | null | undefined;
+    create(path: string, content: string): Promise<ArtifactFileLike>;
+    createFolder(path: string): Promise<unknown>;
+    cachedRead?(file: ArtifactFileLike): Promise<string>;
+    read?(file: ArtifactFileLike): Promise<string>;
+    process(file: ArtifactFileLike, fn: (text: string) => string | null): Promise<string>;
+    // Wymagana (nie opcjonalna): `remove()` woła ją BEZWARUNKOWO w gałęzi fallbacku (brak
+    // `fileManager.trashFile`) - opcjonalny typ z `!` przy wywołaniu kłamałby o realnej gwarancji.
+    trash(file: ArtifactFileLike, system: boolean): Promise<void>;
+    on?(event: string, callback: (file: ArtifactFileLike, oldPath?: string) => void): unknown;
+}
+
+interface ArtifactStoreMetadataCache {
+    getFileCache?(file: ArtifactFileLike): { frontmatter?: ArtifactFrontmatter } | null | undefined;
+    on?(event: string, callback: (file: ArtifactFileLike) => void): unknown;
+}
+
+interface ArtifactStoreFileManager {
+    processFrontMatter(file: ArtifactFileLike, fn: (frontmatter: ArtifactFrontmatter) => void): Promise<void>;
+    // Wymagana: `move()` woła ją BEZWARUNKOWO (bez `fileManager?.` guardu) - patrz `trash` wyżej.
+    renameFile(file: ArtifactFileLike, newPath: string): Promise<void>;
+    trashFile?(file: ArtifactFileLike): Promise<void>;
+}
+
+/** Widziany przez store kształt Obsidian `App` — wstrzykiwany (komentarz modułu: „node-testowalne
+ *  z mockiem vaulta"), więc duck-type lokalny zamiast importu realnego `App`/`Vault`/`TFile`
+ *  (testy budują uproszczone atrapy plikowe, nie prawdziwe klasy Obsidiana). */
+interface ArtifactStoreApp {
+    vault: ArtifactStoreVault;
+    fileManager: ArtifactStoreFileManager;
+    metadataCache?: ArtifactStoreMetadataCache;
+}
+
 interface ArtifactStoreType { name: string; statusy?: string[]; sprzatanie?: number; pola?: Record<string, { opis?: string; domyslne?: ArtifactScalar }>; template?: string; }
 interface ArtifactStoreDependencies {
-    // TS-any: Obsidian's runtime vault surface is injected and has no stable public type in this module.
-    app: any;
+    app: ArtifactStoreApp;
     typeLoader: { getType(name: string): ArtifactStoreType | null } | null;
     getArtifactsFolder?: () => string;
     now?: () => Date;
@@ -53,8 +102,7 @@ export const DEFAULT_ARTIFACTS_FOLDER = 'PKM Assistant/Artefakty';
 export const ARCHIVE_SUBFOLDER = '_archiwum';
 
 export class ArtifactStore {
-    // TS-any: Obsidian runtime facade is intentionally structural at the plugin boundary.
-    declare app: any;
+    declare app: ArtifactStoreApp;
     declare typeLoader: ArtifactStoreDependencies['typeLoader'] | undefined;
     declare _getFolder: () => string;
     declare _now: () => Date;
@@ -87,7 +135,9 @@ export class ArtifactStore {
      * @param {Function} [deps.registerEvent] - sprzątanie nasłuchów vaulta (opcjonalne)
      */
     constructor({ app, typeLoader, getArtifactsFolder, now, registerEvent }: Partial<ArtifactStoreDependencies> = {}) {
-        this.app = app;
+        // `app` jest w praktyce obowiązkowy (bez fallbacku, w przeciwieństwie do reszty pól
+        // niżej) - `Partial<>` obejmuje całą sygnaturę tylko dla wygody jednego obiektu opcji.
+        this.app = app as ArtifactStoreApp;
         this.typeLoader = typeLoader;
         this._getFolder = typeof getArtifactsFolder === 'function' ? getArtifactsFolder : () => DEFAULT_ARTIFACTS_FOLDER;
         this._now = typeof now === 'function' ? now : () => new Date();
@@ -557,7 +607,12 @@ export class ArtifactStore {
             const fm = cache.frontmatter;
             const id = fm && fm['pkm-artefakt'];
             if (!id) continue;
-            registry.set(id, this._entryFrom(id, f, fm));
+            // TS-boundary: ZASTANE (poza tą falą) - `fm['pkm-artefakt']` jest `ArtifactScalar`
+            // (string|number|boolean|null), więc YAML z `pkm-artefakt: 20260911` (liczba bez
+            // cudzysłowu) dałby tu `id` typu number; `registry`/`_pathIndex` są kluczowane
+            // stringiem, więc taki artefakt byłby niewidoczny do końca sesji. Naprawa (walidacja
+            // kształtu przy zapisie / normalizacja przy odczycie) to zmiana runtime, poza zakresem.
+            registry.set(id as string, this._entryFrom(id as string, f, fm));
         }
         this._registry = registry;
         this._registryRoot = allWarm ? root : null; // prowizoryczny — następne pytanie przebuduje
@@ -565,8 +620,7 @@ export class ArtifactStore {
     }
 
     /** Zbuduj wpis rejestru/`list()` z pliku + jego frontmattera. */
-    // TS-any: Obsidian file objects come from the dynamically injected vault facade.
-    _entryFrom(id: string, file: any, fm: ArtifactFrontmatter): ArtifactListEntry {
+    _entryFrom(id: string, file: ArtifactFileLike, fm: ArtifactFrontmatter): ArtifactListEntry {
         return {
             id,
             path: String(file.path),
@@ -589,7 +643,7 @@ export class ArtifactStore {
      */
     _rescanForId(id: string): string | null {
         const root = this._artifactsRoot();
-        const files = (this.app?.vault?.getMarkdownFiles?.() || []).filter((f: any) => this._underRoot(f?.path, root));
+        const files = (this.app?.vault?.getMarkdownFiles?.() || []).filter((f) => this._underRoot(f?.path, root));
         for (const f of files) {
             const fm = this.app.metadataCache?.getFileCache?.(f)?.frontmatter;
             if (fm && fm['pkm-artefakt'] === id) {
@@ -631,8 +685,12 @@ export class ArtifactStore {
             throw new Error('Nie udało się zbudować bezpiecznej ścieżki artefaktu');
         }
         // Kolizja nazwy → sufiks " 2", " 3", …
+        // TS-boundary: ZASTANE - `sanitizePath` zwraca `string | null`; pierwsze przypisanie jest
+        // strzeżone (throw wyżej), ale reasygnacja w pętli gubi to zawężenie - `path!`/`as string`
+        // ufają, że kolejne sufiksy nadal sanityzują się poprawnie (nieudowodnione tu statycznie).
+        // Naprawa (np. throw przy null w pętli) to zmiana runtime, poza zakresem tej fali.
         let n = 2;
-        while (this.app.vault.getAbstractFileByPath?.(path)) {
+        while (this.app.vault.getAbstractFileByPath?.(path!)) {
             path = sanitizePath(`${root}/${agentSeg}/${base} ${n}.md`);
             n++;
             if (n > 999) break;
@@ -670,8 +728,7 @@ export class ArtifactStore {
      * rejestrze). Dla id nigdy niewidzianego fallback się NIE odpala - inaczej każde nieznane id
      * kosztowałoby pełny skan + odczyt z dysku, zamiast O(1).
      */
-    // TS-any: Obsidian file objects come from the dynamically injected vault facade.
-    async _findFileById(id: string): Promise<any> {
+    async _findFileById(id: string): Promise<ArtifactFileLike | null> {
         if (!id) return null;
         const resolved = this.pathById(id);
         if (resolved) {
@@ -686,9 +743,9 @@ export class ArtifactStore {
      * Jednorazowy odczyt z dysku po plikach folderu artefaktów - TYLKO wołane z `_findFileById`
      * dla id, które `_wasEverKnown` (nigdy dla nowego/nieznanego id). Root liczony RAZ.
      */
-    async _diskFallbackForId(id: string): Promise<any> {
+    async _diskFallbackForId(id: string): Promise<ArtifactFileLike | null> {
         const root = this._artifactsRoot();
-        const files = (this.app?.vault?.getMarkdownFiles?.() || []).filter((f: any) => this._underRoot(f?.path, root));
+        const files = (this.app?.vault?.getMarkdownFiles?.() || []).filter((f) => this._underRoot(f?.path, root));
         for (const f of files) {
             try {
                 const content = await this._readFile(f);
@@ -721,12 +778,12 @@ export class ArtifactStore {
         if (typeof vault?.on !== 'function') return;
 
         const reg = (ref: unknown) => { if (ref != null) this._registerEventHook?.(ref); };
-        reg(vault.on('create', (file: any) => { void this._onVaultCreate(file); }));
-        reg(vault.on('delete', (file: any) => { this._onVaultDelete(file); }));
-        reg(vault.on('rename', (file: any, oldPath: string) => { void this._onVaultRename(file, oldPath); }));
+        reg(vault.on('create', (file) => { void this._onVaultCreate(file); }));
+        reg(vault.on('delete', (file) => { this._onVaultDelete(file); }));
+        reg(vault.on('rename', (file, oldPath) => { void this._onVaultRename(file, oldPath as string); }));
         const mc = this.app?.metadataCache;
         if (typeof mc?.on === 'function') {
-            reg(mc.on('changed', (file: any) => { void this._onMetadataChanged(file); }));
+            reg(mc.on('changed', (file) => { void this._onMetadataChanged(file); }));
             // `resolved` = Obsidian skończył PIERWSZE pełne rozwiązanie metadanych całego
             // vaulta - zdarzenie JEDNORAZOWE. Jeśli rejestr zbudował się wcześniej (np.
             // `archive()` w `initialize()` na `onLayoutReady`) z częścią plików pod rootem
@@ -739,28 +796,28 @@ export class ArtifactStore {
     }
 
     /** Nowy plik pod rootem (spoza `store.create()`, np. sync/user) — pojedynczy indeks. */
-    async _onVaultCreate(file: any): Promise<void> {
+    async _onVaultCreate(file: ArtifactFileLike): Promise<void> {
         if (!this._registry) return;
         if (!this._underRoot(file?.path, this._artifactsRoot())) return;
         await this._indexSingleFile(file);
     }
 
     /** Plik skasowany spod rootem — wypisz z rejestru (i indeksu sesji, jeśli tam też był). */
-    _onVaultDelete(file: any): void {
+    _onVaultDelete(file: ArtifactFileLike): void {
         if (!this._registry) return;
         const path = String(file?.path ?? '').replace(/\\/g, '/');
         this._forgetPath(path);
     }
 
     /** Rename/move — stara ścieżka znika, nowa (jeśli pod rootem) wchodzi. */
-    async _onVaultRename(file: any, oldPath: string): Promise<void> {
+    async _onVaultRename(file: ArtifactFileLike, oldPath: string): Promise<void> {
         if (!this._registry) return;
         this._forgetPath(String(oldPath ?? '').replace(/\\/g, '/'));
         if (this._underRoot(file?.path, this._artifactsRoot())) await this._indexSingleFile(file);
     }
 
     /** Frontmatter zmieniony (edycja usera, patch narzędzia, cache dogonił zimny `create`). */
-    async _onMetadataChanged(file: any): Promise<void> {
+    async _onMetadataChanged(file: ArtifactFileLike): Promise<void> {
         if (!this._registry) return;
         if (!this._underRoot(file?.path, this._artifactsRoot())) return;
         await this._indexSingleFile(file);
@@ -788,7 +845,7 @@ export class ArtifactStore {
      * dlatego fallback jest "do dotychczasowej ścieżki dla pojedynczego pliku", nie skanu całego
      * vaulta: czytamy TEN plik z dysku, nic więcej.
      */
-    async _indexSingleFile(file: any): Promise<void> {
+    async _indexSingleFile(file: ArtifactFileLike): Promise<void> {
         if (!this._registry) return;
         const path = String(file?.path ?? '');
         if (!path) return;
@@ -806,15 +863,13 @@ export class ArtifactStore {
         this._registry.set(String(id), this._entryFrom(String(id), file, fm));
     }
 
-    // TS-any: File instance belongs to Obsidian's dynamically injected vault API.
-    async _readFile(file: any): Promise<string> {
+    async _readFile(file: ArtifactFileLike): Promise<string> {
         if (this.app.vault.cachedRead) return this.app.vault.cachedRead(file);
-        return this.app.vault.read(file);
+        return this.app.vault.read!(file);
     }
 
     /** Zbuduj chudy JSON dla agenta. */
-    // TS-any: File instance belongs to Obsidian's dynamically injected vault API.
-    _toThin(file: any, content: string, { truncate = false }: { truncate?: boolean } = {}): ThinArtifact {
+    _toThin(file: ArtifactFileLike | null | undefined, content: string, { truncate = false }: { truncate?: boolean } = {}): ThinArtifact {
         const parsed = parseArtifact(content);
         const sections = parsed.sections.map(s => ({
             ...s,
@@ -833,8 +888,7 @@ export class ArtifactStore {
         };
     }
 
-    // TS-any: File instance belongs to Obsidian's dynamically injected vault API.
-    _basename(file: any): string | null {
+    _basename(file: ArtifactFileLike | null | undefined): string | null {
         if (!file) return null;
         if (file.basename) return file.basename;
         return String(file.path || '').split('/').pop()!.replace(/\.md$/i, '');
@@ -854,7 +908,7 @@ export class ArtifactStore {
 
 /** Podstaw `{{pole}}` w szablonie; niezmapowane placeholdery zostają jak są. */
 function substitutePlaceholders(template: string, values: ArtifactFrontmatter): string {
-    return String(template || '').replace(/\{\{(\w+)\}\}/g, (m, key) => {
+    return String(template || '').replace(/\{\{(\w+)\}\}/g, (m: string, key: string) => {
         const v = values[key];
         return v != null ? String(v) : m;
     });

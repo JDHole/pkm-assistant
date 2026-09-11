@@ -21,33 +21,74 @@ import * as artifactMethods from './chat/chat_artifacts.js';
 import * as popoverMethods from './chat/chat_popovers.js';
 import * as sessionMethods from './chat/chat_session.js';
 
-// TS-any: ChatView jest composition rootem składanym runtime z ośmiu modułów mixinów.
-type Runtime = any;
+import type { AutonomyMode } from '../../core/index.js';
+import type { Agent } from '../agents/index.js';
+import type {
+    ChatPlugin,
+    ChatStreamContext,
+    ChatTab,
+    ChatTabState,
+    ChatViewLike,
+} from './chat/chatViewShape.js';
+import type { RollingWindow } from './chat/RollingWindow.js';
+import type { RenderThrottle } from './chat/renderThrottle.js';
+import type { SlashCommandsRegistry } from './chat/SlashCommandsRegistry.js';
+import type { ToolReactorRegistry } from './chat/ToolReactorRegistry.js';
+import type { BottomBarMode, TodoPanelModel, TodoState } from './chat/todoPanel.js';
+import type { TurnAbortHandle } from './chat/turnAbort.js';
 
 /**
  * ChatView - Main chat interface for PKM Assistant
  * Provides a simple chat UI with streaming support
  */
 export class ChatView extends PluginItemView {
-    // Osiem miksinów dokłada metody i pola do prototypu w runtime (`Object.assign` na dole
-    // pliku), więc widok potrzebuje otwartego indeksu. Baza `PluginItemView` go NIE ma —
-    // trzyma zamknięty kontrakt (patrz `core/runtime/contracts.ts`), a otwartość jest
-    // własnością TEJ klasy, nie każdego widoku.
-    [key: string]: Runtime;
     // Widok czatu sięga po pola pluginu dokładane w inicjalizacji (menedżer agentów, rejestr
     // subów, notifier) — w kontrakcie `PluginApi` są `unknown` z premedytacją, bo ich kształt
-    // należy do modułów właścicieli. Tutaj zawężamy je do otwartego typu widoku.
-    declare readonly plugin: Runtime;
-    // `renderView` jest w bazie OPCJONALNA (widok czatu dostaje ją miksinem, nie definiuje jej
-    // w ciele klasy — `abstract` dałoby TS2515). Tutaj zawężamy ją z powrotem do obowiązkowej:
-    // `Object.assign(ChatView.prototype, uiMethods)` na dole pliku ją wstrzykuje.
-    declare renderView: (params?: Runtime) => Promise<void>;
+    // należy do modułów właścicieli. Tutaj zawężamy je do `ChatPlugin`.
+    declare readonly plugin: ChatPlugin;
+
+    // ── Stan ustawiany w KONSTRUKTORZE ──
+    // Wyłącznie `declare` (zero emitu): przy `useDefineForClassFields: true` zwykłe `x: T;`
+    // wyemitowałoby w ciele klasy puste pole, czyli realną zmianę runtime'u.
+    // Pola dokładane dopiero przez mixiny stoją w `chat/chatViewShape.ts`.
+    declare rollingWindow: RollingWindow;
+    declare tokenTracker: TokenTracker;
+    declare is_generating: boolean;
+    declare lastMessageTimestamp: number | null;
+    declare inputHistory: string[];
+    declare historyIndex: number;
+    declare chatTabs: ChatTab[];
+    declare _agentStates: Map<string, ChatTabState>;
+    declare _streamCtxMap: Map<string, ChatStreamContext>;
+    declare _preparingTurns: Map<string, TurnAbortHandle>;
+    declare currentAutonomy: AutonomyMode;
+    declare currentArtifactId: string | null;
+    declare slashCommands: SlashCommandsRegistry;
+    declare toolReactors: ToolReactorRegistry;
+    declare _renderThrottle: RenderThrottle | null;
+    declare _connectorRedrawCancel: (() => void) | null;
+    declare current_message_container: HTMLElement | null;
+    declare _subTaskTurnPending: boolean;
+    declare _drainSuppressed: boolean;
+    declare _draftAfterSend: string | null;
+    declare _subStripExpandedId: string | null;
+    declare _subStripUnsubs: Array<() => void>;
+    declare _subStripTimer: number | null;
+    declare _activeTodoState: TodoState | null;
+    declare _prevTodoModel: TodoPanelModel | null;
+    declare _bottomBarMode: BottomBarMode;
+
+    // ── Metody mixinów wołane z KONSTRUKTORA (reszta jedzie przez `ChatViewLike`) ──
+    declare _createRollingWindow: (agentName?: string | null) => RollingWindow;
+    /** `renderView` jest w bazie OPCJONALNA (widok czatu dostaje ją miksinem) — tu obowiązkowa. */
+    declare renderView: (container?: HTMLElement) => Promise<void>;
+    declare _getDefaultAutonomy: (agent?: Agent | null) => AutonomyMode;
 
     static get viewType() { return CHAT_VIEW_TYPE; }
     static get displayText() { return 'PKM Assistant'; }
     static get iconName() { return 'pkm-icon'; }
 
-    constructor(leaf: Runtime, plugin: Runtime) {
+    constructor(leaf: unknown, plugin: ChatPlugin) {
         super(leaf, plugin);
 
         // Initialize RollingWindow (summarizer attached later when model available)
@@ -125,7 +166,7 @@ export class ChatView extends PluginItemView {
         this.toolReactors = createDefaultToolReactorRegistry();
     }
 
-    async onOpen() {
+    async onOpen(this: ChatViewLike) {
         if (!this.plugin._ready) {
             this.container.empty();
             this.container.addClass('pkm-chat-view');
@@ -135,14 +176,16 @@ export class ChatView extends PluginItemView {
                 .style.color = SkinManager.getColor('accent', 'var(--interactive-accent)');
             loadingDiv.createDiv({ cls: 'pkm-chat-loading__label', text: t('main.loading') });
 
-            this.plugin.onReady(async () => {
-                loadingDiv.remove();
-                await this.renderView();
-                await this.initSessionManager();
-                this._subscribeAgentManagerEvents();
-                this._subscribeSkinEvents();
-                this._wireSubTaskDeliverer();
-                this._wireSubTaskStrip();
+            this.plugin.onReady(() => {
+                void (async () => {
+                    loadingDiv.remove();
+                    await this.renderView();
+                    await this.initSessionManager();
+                    this._subscribeAgentManagerEvents();
+                    this._subscribeSkinEvents();
+                    this._wireSubTaskDeliverer();
+                    this._wireSubTaskStrip();
+                })();
             });
             return;
         }
@@ -159,7 +202,11 @@ export class ChatView extends PluginItemView {
         this._wireSubTaskStrip();
     }
 
-    onClose(): Runtime {
+    // Obsidian deklaruje `View.onClose(): Promise<void>`, a sprzątanie czatu jest w całości
+    // SYNCHRONICZNE (`async` byłoby zmianą runtime'u). Sygnatura przeciążenia oddaje kontrakt
+    // bazy, implementacja mówi prawdę o tym, co realnie wraca: nic.
+    onClose(this: ChatViewLike): Promise<void>;
+    onClose(this: ChatViewLike): Promise<void> | void {
         // Zamknięty czat nie ma jak dostarczyć wyniku suba (ani gdzie odpalić auto-tury).
         // Odpinamy dostawcę — wyniki zostają w kolejce notifiera do następnego otwarcia.
         this.plugin?.subTaskNotifier?.setDeliverer?.(null);
@@ -217,11 +264,11 @@ export class ChatView extends PluginItemView {
         this._renderThrottle?.cancel();
         this._cancelConnectorRedraw?.();
         if (this.rollingWindow?.messages?.length > 0) {
-            this.handleSaveSession();
+            void this.handleSaveSession();
         }
     }
 
-    _subscribeAgentManagerEvents() {
+    _subscribeAgentManagerEvents(this: ChatViewLike) {
         if (this._agentManagerUnsub || !this.plugin?.agentManager?.on) return;
         this._agentManagerUnsub = this.plugin.agentManager.on((event: string) => {
             if (!['agents:loaded', 'agents:reloaded', 'agent:created', 'agent:deleted', 'agent:updated', 'communicator:project_updated'].includes(event)) {
@@ -237,7 +284,7 @@ export class ChatView extends PluginItemView {
         });
     }
 
-    _subscribeSkinEvents() {
+    _subscribeSkinEvents(this: ChatViewLike) {
         if (this._unsubscribeSkinEvents) return;
         this._unsubscribeSkinEvents = SkinManager.on('skin_changed', () => {
             void (async () => {

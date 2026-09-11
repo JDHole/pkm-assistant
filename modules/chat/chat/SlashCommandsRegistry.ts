@@ -4,14 +4,13 @@ import { log } from '../../../core/utils/Logger.js';
 import { createSaveSessionCommand } from '../slash-commands/save_session.js';
 import { runManualCompression } from './chat_ui.js';
 
-// TS-any: widok czatu jest legacy composition root składanym dynamicznie z modułów mixinów.
-type RuntimeView = any;
-// `SlashCommand` nie jest eksportowany - `SlashCommandsRegistry`/`createDefaultSlashCommands`
-// są jedynym publicznym wejściem do tego pliku.
-type SlashCommand = {
+import type { SlashCommandContext } from './chatViewShape.js';
+
+/** Jedna komenda `/` — eksportowana, bo pasek inputu renderuje z niej listę podpowiedzi. */
+export type SlashCommand = {
     name: string;
     description?: string;
-    handler: (ctx: RuntimeView, raw: string) => unknown;
+    handler: (ctx: SlashCommandContext, raw: string) => unknown;
 };
 
 export class SlashCommandsRegistry {
@@ -34,7 +33,7 @@ export class SlashCommandsRegistry {
         return [...this.commands.values()];
     }
 
-    async execute(input: unknown, ctx: RuntimeView): Promise<boolean> {
+    async execute(input: unknown, ctx: SlashCommandContext): Promise<boolean> {
         const raw = String(input || '').trim();
         const command = [...this.commands.values()]
             .sort((a, b) => b.name.length - a.name.length)
@@ -56,7 +55,7 @@ export function createDefaultSlashCommands(): SlashCommandsRegistry {
         name: '/clear',
         description: 'Start a new chat session.',
         handler: async ({ view }) => {
-            view.handleNewSession();
+            void view.handleNewSession();
             view.resetInputArea();
         }
     });

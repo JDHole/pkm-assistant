@@ -15,26 +15,36 @@
  */
 import { parseYaml, stringifyYaml, slugify } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
-import type { SubAgentData, SubAgentInput, SubAgentYaml, VaultLike } from './types.js';
-// TS-any: template YAML is a backwards-compatible user-data boundary.
-type TemplateYaml = Record<string, any>;
-type StoredTemplate = {
+import type { SubAgentData, SubAgentInput, SubAgentYaml, SubAgentYamlRaw, VaultLike } from './types.js';
+// Pola BEZ `?`: obie konstrukcje (`_loadFromFolder`/`_write`, niżej) ZAWSZE dają im konkretną
+// wartość (default przez `||`/`??`, nigdy `undefined`) — kształt jest więc zgodny z `SubAgentData`
+// (ten sam wzór pól, ten sam moduł), co pozwala jednemu UI (SubAgentEditorModal/DetailView)
+// czytać żywego suba i szablon bez rozgałęziania typu. Wyjątek: `model` — `_write` ustawia
+// `yamlConfig.model` TYLKO gdy `data.model` jest prawdziwe (patrz niżej), więc dla świeżo
+// zapisanego/edytowanego szablonu bez modelu klucz w ogóle nie trafia do cache (realnie
+// `undefined`, nie `null`). `_loadFromFolder` normalizuje to na `null` przy odczycie z dysku —
+// rozjazd między dwiema ścieżkami zapisu tego samego pliku, zastany, nie mój do naprawy w tej fali.
+export type SubAgentTemplateRecord = {
     name: string;
     slug: string;
     description: string;
     role: string | null;
     model?: string | null;
-    tools?: string[];
-    scope?: SubAgentData['scope'];
-    max_iterations?: number | null;
-    min_iterations?: number | null;
-    max_tool_result_length?: number | null;
-    enabled?: boolean;
-    version?: number;
-    prompt?: string;
-    path?: string;
+    tools: string[];
+    scope: SubAgentData['scope'];
+    max_iterations: number | null;
+    min_iterations: number | null;
+    max_tool_result_length: number | null;
+    enabled: boolean;
+    version: number;
+    prompt: string;
+    path: string;
     folderPath: string;
     isTemplate: true;
+    // Szablon sam nie niesie pochodzenia (nic go nie ustawia) — pole tu wyłącznie po to,
+    // żeby SubAgentDetailView.ts mogło czytać `.from_template` na unii żywy-sub|szablon
+    // bez rozgałęziania typu. Zawsze `undefined` w praktyce dla szablonu.
+    from_template?: string | null;
 };
 
 // Nie eksportowana: zero importerów spoza pliku. Barrel wyciął tę stałą
@@ -45,7 +55,7 @@ const LIVE_SUB_AGENTS_PATH = '.pkm-assistant/sub-agents';
 
 export class SubAgentTemplateStore {
     declare vault: VaultLike;
-    declare cache: Map<string, StoredTemplate>;
+    declare cache: Map<string, SubAgentTemplateRecord>;
     /**
      * @param {Object} vault - Obsidian Vault object (używany jest wyłącznie `vault.adapter`)
      */
@@ -81,12 +91,12 @@ export class SubAgentTemplateStore {
     }
 
     /** @returns {Object[]} szablony z cache (posortowane po nazwie) */
-    list(): StoredTemplate[] {
+    list(): SubAgentTemplateRecord[] {
         return [...this.cache.values()].sort((a, b) => a.name.localeCompare(b.name));
     }
 
     /** @param {string} slug @returns {Object|null} */
-    get(slug: string): StoredTemplate | null {
+    get(slug: string): SubAgentTemplateRecord | null {
         if (!slug) return null;
         return this.cache.get(slug)
             || [...this.cache.values()].find(tpl => tpl.name === slug)
@@ -99,13 +109,15 @@ export class SubAgentTemplateStore {
     }
 
     /** @private */
-    async _loadFromFolder(folderPath: string): Promise<StoredTemplate | null> {
+    async _loadFromFolder(folderPath: string): Promise<SubAgentTemplateRecord | null> {
         const yamlPath = `${folderPath}/SUB_AGENT.yaml`;
         if (!await this.vault.adapter.exists(yamlPath)) return null;
         const raw = await this.vault.adapter.read(yamlPath);
         if (!raw?.trim()) return null;
 
-        const config = parseYaml(raw) as TemplateYaml;
+        // TS-boundary: SUB_AGENT.yaml szablonu jest edytowalny przez usera — kształt
+        // sprawdzamy niżej (name/description), reszta pól ma defaulty poniżej.
+        const config = parseYaml(raw) as SubAgentYamlRaw;
         if (!config?.name || !config?.description) {
             log.warn('SubAgentTemplateStore', 'Szablon suba bez name/description:', yamlPath);
             return null;
@@ -270,8 +282,12 @@ export class SubAgentTemplateStore {
             await this.vault.adapter.remove(knowledgePath);
         }
 
+        // `... (yamlConfig as ...)`: `enabled`/`version` są w `SubAgentYaml` opcjonalne (kształt
+        // zapisu żywego suba, gdzie nie zawsze są nadpisywane), ale KILKA linii wyżej ten kod
+        // ustawił je bezwarunkowo — cast na samym rozlaniu (nie nowe klucze niżej) mówi to
+        // samo bez dokładania pól do literału obiektu.
         this.cache.set(slug, {
-            ...yamlConfig,
+            ...(yamlConfig as SubAgentYaml & { enabled: boolean; version: number }),
             slug,
             tools: yamlConfig.tools || [],
             scope: yamlConfig.scope || null,

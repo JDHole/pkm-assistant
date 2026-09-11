@@ -1,6 +1,8 @@
 /**
  * Przeprowadzka `data.json` ze starego folderu pluginu
- * (`.obsidian/plugins/obsek/`) do nowego (`.obsidian/plugins/<manifestId>/`).
+ * (`<configDir>/plugins/obsek/`) do nowego (`<configDir>/plugins/<manifestId>/`),
+ * gdzie `configDir` to ŻYWY `Vault#configDir` - nazwę folderu konfiguracji ustala user
+ * i ten kod jej nie zna ani nie zgaduje.
  *
  * W `data.json` siedzi TYLKO wersjonowanie (`installed_at`, `last_version`) — żywe
  * ustawienia mieszkają w vaultcie w `.pkm-assistant/settings.json`. Bez tej kopii
@@ -13,6 +15,9 @@
  *  • „czy nowy już istnieje" sprawdzamy PRÓBĄ ODCZYTU, nie `exists()` — `exists()`
  *    potrafi skłamać na dysku sieciowym (Google Drive);
  *  • starego folderu NIE kasujemy (user sam wywiezie do kosza);
+ *  • bez `configDir` funkcja NIC nie robi (`reason: 'no-config-dir'`) - stary folder leży
+ *    WEWNĄTRZ folderu konfiguracji, więc bez jego nazwy nie ma czego szukać, a zgadnięta
+ *    nazwa albo nie trafia w nic, albo trafia w cudzy folder;
  *  • total-catch: to nigdy nie ma prawa wywalić `onload()`.
  */
 
@@ -41,16 +46,18 @@ type MigrationLog = {
 /**
  * @param params
  * @param params.adapter - `app.vault.adapter` (read/write/mkdir)
- * @param params.configDir - `app.vault.configDir` (zwykle `.obsidian`)
+ * @param params.configDir - `app.vault.configDir`, czyli ŻYWA nazwa folderu konfiguracji.
+ *   WYMAGANY: pusty/brak = `{ migrated: false, reason: 'no-config-dir' }`. Nie ma tu żadnej
+ *   nazwy zapasowej - lepiej nie zmigrować niczego niż czytać i pisać po omacku.
  * @param params.manifestId - id z manifest.json
  * @param params.log - logger (info/warn), opcjonalny
  */
 export async function migrateOldPluginFolder({ adapter, configDir, manifestId, log }: {
     adapter?: PluginFolderAdapter | null;
-    configDir?: string;
+    configDir: string;
     manifestId?: string;
     log?: MigrationLog | null;
-} = {}): Promise<{ migrated: boolean; reason?: string }> {
+}): Promise<{ migrated: boolean; reason?: string }> {
     try {
         if (!adapter || typeof adapter.read !== 'function' || typeof adapter.write !== 'function') {
             return { migrated: false, reason: 'no-adapter' };
@@ -58,7 +65,10 @@ export async function migrateOldPluginFolder({ adapter, configDir, manifestId, l
         if (!manifestId || manifestId === OLD_PLUGIN_ID) {
             return { migrated: false, reason: 'same-id' };
         }
-        const base = `${configDir || '.obsidian'}/plugins`;
+        if (!configDir) {
+            return { migrated: false, reason: 'no-config-dir' };
+        }
+        const base = `${configDir}/plugins`;
         const oldPath = `${base}/${OLD_PLUGIN_ID}/${DATA_FILE}`;
         const newDir = `${base}/${manifestId}`;
         const newPath = `${newDir}/${DATA_FILE}`;

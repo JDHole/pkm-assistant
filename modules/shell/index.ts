@@ -11,7 +11,9 @@
  * Kilka symboli z tego katalogu NIE jest re-eksportowanych stąd, choć definicje ŻYJĄ - kasujemy
  * tylko drzwi. Rama i rejestry ustawień (`PluginSettingsTab`, `SettingsRegistry`/`SettingsRegistryClass`,
  * `BackstageRegistry`/`BackstageRegistryClass`) - moduły dostają rejestr ARGUMENTEM
- * w `registerSettings(registry, plugin)` / `registerBackstage(...)`, nie importem.
+ * w `registerSettings(registry)` / `registerBackstage(registry)` (jednoargumentowe - shell
+ * dokłada `plugin` jako drugi, martwy na poziomie typów argument przy `registerSettings`, patrz
+ * `pkm_settings_tab.ts:WithDeadArg`), nie importem.
  * Helpery Zaplecza `renderAgentLinks`/`agentHasSubAgent`. Klasy, których wołacz i tak
  * dostaje przez funkcję-fasadę: `AgentSidebar` + `AGENT_SIDEBAR_VIEW_TYPE`
  * (zostają `registerAgentSidebar`/`openAgentSidebar`), `ApprovalModal`
@@ -37,6 +39,11 @@ export { PkmSettingsTab } from './pkm_settings_tab.js';
 
 // ── Sidebar (rejestracja + otwarcie; klasa widoku zostaje wewnątrz shella) ─
 export { registerAgentSidebar, openAgentSidebar } from './AgentSidebar.js';
+// Typ (nie wartość) - renderery widoków Zaplecza spoza shella (modules/sub-agents, modules/skills)
+// i profile agentów (modules/agents, `nav.push/pop/goHome`) dostają instancję jako parametr `nav`;
+// potrzebują TYLKO adnotacji typu, nie konstruktora. Zero-kosztowy re-eksport (`export type`,
+// ginie w transpilacji).
+export type { SidebarNav } from './sidebar/SidebarNav.js';
 
 // ── Modale ────────────────────────────────────────────────────────────────
 // Approval wchodzi WYŁĄCZNIE przez funkcję-fasadę (core/security/ApprovalManager).

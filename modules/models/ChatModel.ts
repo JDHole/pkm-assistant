@@ -26,6 +26,7 @@ import { log } from '../../core/utils/Logger.js';
 import { hostWindow, maskSensitiveData, normalizeError, STREAM_TRANSPORT_TIMEOUT_MS } from '../../core/index.js';
 import { t } from '../../core/i18n/index.js';
 import { STREAM_MAX_RETRIES, STREAM_RETRY_BASE_DELAY_MS, TOOL_CALL_MAX_INDEX } from './contracts.js';
+import { ModelRequestError } from './ModelRequestError.js';
 import type {
     ChatModelDeps,
     ChatProvider,
@@ -224,12 +225,20 @@ function errorFromBody(body: string, status: number): NormalizedError {
 /**
  * Czy to jest już rozliczony błąd, którego NIE WOLNO przerabiać.
  *
- * Dwie rodziny: gotowy {@link NormalizedError} (goły obiekt - taki właśnie kształt widzi
- * pętla) oraz znaczniki Stopu (`_aborted`) i anulowania w kolejce (`_queueCancelled`),
- * które niosą sens ponad treścią i po normalizacji przestałyby działać.
+ * Trzy rodziny: gotowy {@link NormalizedError} (goły obiekt - taki właśnie kształt widzi
+ * pętla), instancja {@link ModelRequestError} (TEN SAM kształt, tyle że `throw`-owalny jako
+ * prawdziwy `Error` - patrz `only-throw-error` w pięciu miejscach `_completeOnce`) oraz
+ * znaczniki Stopu (`_aborted`) i anulowania w kolejce (`_queueCancelled`), które niosą sens
+ * ponad treścią i po normalizacji przestałyby działać.
+ *
+ * ⚠️ `ModelRequestError` JEST `instanceof Error` - bez jawnego sprawdzenia niżej wpadłaby
+ * w gałąź „nierozliczone" i `toConsumerError` odczytałby z niej goły `.message`, gubiąc
+ * `code`/`details`/`http_status` przy KAŻDYM powtórnym przejściu przez tę funkcję (np. gdy
+ * `_emulateStream` łapie błąd `_completeOnce` i normalizuje go DRUGI RAZ).
  */
 function isSettledError(e: unknown): boolean {
     if (!e || typeof e !== 'object') return false;
+    if (e instanceof ModelRequestError) return true;
     const bag = e as { _aborted?: boolean; _queueCancelled?: boolean; message?: unknown };
     if (bag._aborted === true || bag._queueCancelled === true) return true;
     return !(e instanceof Error) && typeof bag.message === 'string';
@@ -734,7 +743,8 @@ export class ChatModel {
     /**
      * Jedno wywołanie toru bez strumienia - bez bramki, bo bramkę trzyma wołacz.
      *
-     * Z tej metody wychodzi WYŁĄCZNIE {@link NormalizedError}: pad sieci,
+     * Z tej metody wychodzi WYŁĄCZNIE {@link ModelRequestError} (kształt {@link NormalizedError},
+     * `throw`-owalny jako prawdziwy `Error` - `@typescript-eslint/only-throw-error`): pad sieci,
      * wybuch dostawcy przy składaniu żądania i nieczytelne ciało wyglądają dla konsumenta
      * tak samo jak błąd zwrócony przez API. Surowy `Error` z `fetch` bywa niesie adres,
      * a w nim klucz - stąd maska na granicy.
@@ -744,29 +754,29 @@ export class ChatModel {
         try {
             spec = this._provider.buildRequest(req, this._ctx, false);
         } catch (e) {
-            throw toConsumerError(e, 'Nie udało się złożyć żądania do modelu.');
+            throw new ModelRequestError(toConsumerError(e, 'Nie udało się złożyć żądania do modelu.'));
         }
 
         let response: Awaited<ReturnType<HttpClient['send']>>;
         try {
             response = await this._http.send(spec);
         } catch (e) {
-            throw toConsumerError(e, 'Model nie odpowiedział (brak połączenia).');
+            throw new ModelRequestError(toConsumerError(e, 'Model nie odpowiedział (brak połączenia).'));
         }
 
-        if (response.status >= 400) throw errorFromBody(response.text, response.status);
+        if (response.status >= 400) throw new ModelRequestError(errorFromBody(response.text, response.status));
 
         let body: unknown;
         try {
             body = response.json();
         } catch {
-            throw normalizeError('Model oddał odpowiedź, której nie da się odczytać jako JSON.', response.status);
+            throw new ModelRequestError(normalizeError('Model oddał odpowiedź, której nie da się odczytać jako JSON.', response.status));
         }
 
         try {
             return this._provider.parseCompletion(body, req, this._ctx);
         } catch (e) {
-            throw toConsumerError(e, 'Nie udało się odczytać odpowiedzi modelu.');
+            throw new ModelRequestError(toConsumerError(e, 'Nie udało się odczytać odpowiedzi modelu.'));
         }
     }
 

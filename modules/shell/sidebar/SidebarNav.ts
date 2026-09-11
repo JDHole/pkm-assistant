@@ -4,15 +4,30 @@
  */
 import { t } from '../../../core/i18n/index.js';
 import { log } from '../../../core/utils/Logger.js';
+import type { PluginApi } from '../../../core/index.js';
 
-// TS-any: Obsidian augments HTMLElement with createDiv/empty/addClass at runtime.
-type Runtime = any;
-type ViewEntry = { viewId: string; params: Runtime; title: string; scrollTop: number };
-type ViewRenderer = (container: Runtime, plugin: Runtime, nav: SidebarNav, params: Runtime) => void;
+/**
+ * Dane widoku przekazywane przez `push`/`replace` - kształt zależy od widoku
+ * (`{}`, `{agentName}`, `{tab}`, ...), więc kontrakt rejestru zna tylko worek kluczy.
+ */
+export type ViewParams = Record<string, unknown>;
+type ViewEntry = { viewId: string; params: ViewParams; title: string; scrollTop: number };
+/**
+ * Kontrakt renderera widoku. `plugin` zostaje na `PluginApi` (nie zawężamy tu do
+ * managera konkretnego modułu) - ten sam typ rejestruje widoki z modules/agents,
+ * modules/komunikator i shell, więc renderFn musi się zgadzać z jednym wspólnym kształtem;
+ * właściciel widoku zawęża `plugin.<manager>` do realnego typu lokalnie, w swoim pliku.
+ * Zwrotka `void | Promise<void>` - `renderSkillDetailView`/`renderSubAgentDetailView`
+ * (modules/skills/index.ts, modules/sub-agents/index.ts - leniwe barrel-wrappery) są `async`;
+ * goły `void` dawałby `no-misused-promises` przy ich rejestracji w `AgentSidebar.ts`, mimo że
+ * `_render()` (`renderFn(content, this.plugin, this, current.params);` niżej) i tak nie czeka na
+ * zwrotkę - to zachowanie runtime bez zmian, tylko typ przestaje kłamać.
+ */
+export type ViewRenderer = (container: HTMLElement, plugin: PluginApi, nav: SidebarNav, params: ViewParams) => void | Promise<void>;
 
 export class SidebarNav {
-    declare containerEl: Runtime;
-    declare plugin: Runtime;
+    declare containerEl: HTMLElement;
+    declare plugin: PluginApi;
     declare stack: ViewEntry[];
     declare viewRenderers: Record<string, ViewRenderer>;
     declare _currentCleanup: (() => void) | null;
@@ -21,7 +36,7 @@ export class SidebarNav {
      * @param {HTMLElement} containerEl - The sidebar content container
      * @param {Object} plugin - PKM Assistant plugin instance
      */
-    constructor(containerEl: Runtime, plugin: Runtime) {
+    constructor(containerEl: HTMLElement, plugin: PluginApi) {
         this.containerEl = containerEl;
         this.plugin = plugin;
         this.stack = [];
@@ -45,7 +60,7 @@ export class SidebarNav {
      * @param {Object} params - View-specific data
      * @param {string} title - Label shown in back button of this view
      */
-    push(viewId: string, params: Runtime = {}, title = ''): void {
+    push(viewId: string, params: ViewParams = {}, title = ''): void {
         if (this._rendering) return;
         // Save scroll position of current view
         if (this.stack.length > 0) {
@@ -70,7 +85,7 @@ export class SidebarNav {
     /**
      * Replace current view without growing the stack.
      */
-    replace(viewId: string, params: Runtime = {}, title = ''): void {
+    replace(viewId: string, params: ViewParams = {}, title = ''): void {
         if (this._rendering) return;
         if (this.stack.length > 0) {
             this.stack[this.stack.length - 1] = { viewId, params, title, scrollTop: 0 };
@@ -173,7 +188,13 @@ export class SidebarNav {
             const renderFn = this.viewRenderers[current.viewId];
             if (renderFn) {
                 try {
-                    renderFn(content, this.plugin, this, current.params);
+                    // ZASTANE: `ViewRenderer` dopuszcza `Promise<void>` (async renderer), ale ten
+                    // `try/catch` jest SYNCHRONICZNY - odrzucenie promisy z async renderera omija
+                    // go i nie trafia do przyjaznego `sidebar.render_error` niżej (staje się
+                    // unhandled rejection). `void` zachowuje dotychczasowe zachowanie zamiast
+                    // dokładać await/.catch, co zmieniłoby moment powrotu z `_render()` (patrz
+                    // raport fali C).
+                    void renderFn(content, this.plugin, this, current.params);
                 } catch (e) {
                     log.warn('SidebarNav', `render widoku '${current.viewId}' padł:`, e);
                     content.empty();

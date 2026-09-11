@@ -15,9 +15,13 @@
  * Kiedy DEBUG=false: tylko warn/error.
  * Kiedy DEBUG=true: WSZYSTKO (debug, info, tool, model, timing).
  *
- * `debug`/`info`/`model`/`timing` oraz etykiety w `tool()`/`table()` wołają
- * `console.debug` (nie `console.log`) — zgodność z wytyczną Obsidiana „Avoid unnecessary
- * logging to console" (dozwolone metody: warn/error/debug; patrz eslint.obsidian.config.js).
+ * `debug`/`info`/`model`/`timing`/`tool`/`group` wołają WYŁĄCZNIE `console.debug` (nie
+ * `console.log`) — zgodność z wytyczną Obsidiana „Avoid unnecessary logging to console"
+ * (dozwolone metody: warn/error/debug; patrz eslint.obsidian.config.js). `console.groupCollapsed`,
+ * `console.groupEnd` i `console.table` NIE są na tej białej liście i walidator katalogu je zgłasza
+ * bez wyjątków (nie uznaje per-plikowych override'ów configu) — `group()` loguje więc płasko przez
+ * `console.debug` zamiast otwierać grupę DevTools, `groupEnd()` jest udokumentowanym no-opem
+ * (nic już nie zamyka), a `table()` zniknął (nikt go nie wołał — `grep`em potwierdzone).
  * W Chromium DevTools poziom Verbose jest DOMYŚLNIE UKRYTY, więc po włączeniu debugMode trzeba
  * ręcznie zaznaczyć filtr Verbose w konsoli, inaczej wygląda to jak brak logów — stąd wskazówka
  * dopisana wprost do komunikatu w `setDebug()`.
@@ -242,13 +246,14 @@ class Logger {
         const argStr = maskSensitiveData(typeof args === 'string' ? args : JSON.stringify(args, null, 2));
         const resultStr = maskSensitiveData(typeof result === 'string' ? result : JSON.stringify(result));
         const truncResult = resultStr?.length > 500 ? resultStr.slice(0, 500) + '...' : resultStr;
-        console.groupCollapsed(
+        // Nagłówek grupy: był `console.groupCollapsed` (poza białą listą walidatora), teraz płaski
+        // `console.debug` z tym samym tekstem/stylem — Args/Result i tak lądowały osobnymi liniami.
+        console.debug(
             `%c${ICONS.tool} [PKM:Tool] ${toolName}`,
             COLORS.tool
         );
         console.debug('Args:', argStr);
         console.debug('Result:', truncResult);
-        console.groupEnd();
     }
 
     /** Model selection log - debug only */
@@ -270,29 +275,28 @@ class Logger {
         );
     }
 
-    /** Group start - debug only */
+    /**
+     * Group start - debug only. Był `console.groupCollapsed` (poza białą listą walidatora
+     * Obsidiana: warn/error/debug), teraz płaski `console.debug` z tym samym tekstem/stylem —
+     * bez wizualnego zagnieżdżenia w DevTools, ale caller (AgentManager, SubAgentRunner) nadal
+     * woła `group()`/`groupEnd()` w parach, więc API zostaje.
+     */
     group(module: string, label: string): void {
         if (!this._debug) return;
-        console.groupCollapsed(
+        console.debug(
             `%c📂 [PKM:${module}] ${label}`,
             'color: #90a4ae; font-weight: bold'
         );
     }
 
-    /** Group end - debug only */
+    /**
+     * Group end - udokumentowany no-op. `console.groupEnd` nie jest na białej liście walidatora
+     * i nie ma czego zamykać, skoro `group()` już nie otwiera grupy konsoli. Metoda zostaje dla
+     * callerów, którzy nadal wołają `group()`/`groupEnd()` w parach (AgentManager, SubAgentRunner).
+     */
     groupEnd(): void {
         if (!this._debug) return;
-        console.groupEnd();
-    }
-
-    /** Table log - debug only */
-    table(module: string, label: string, data: unknown): void {
-        if (!this._debug) return;
-        console.debug(
-            `%c📊 [PKM:${module}] ${label}`,
-            'color: #90a4ae'
-        );
-        console.table(data);
+        // no-op, celowo puste — patrz komentarz metody.
     }
 }
 

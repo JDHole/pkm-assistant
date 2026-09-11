@@ -19,25 +19,43 @@ import {
 } from './triggers_collectors.js';
 import type { TriggerItem as CollectorTriggerItem } from './triggers_collectors.js';
 import { findActiveChatView } from './findActiveChatView.js';
+import type { AgentManager } from '../../../modules/agents/index.js';
+import type { ToolRegistry } from '../../../modules/tools/index.js';
+import type { PluginApi } from '../../../core/index.js';
 
 // Re-export for tests / outside callers that want pure logic.
 export { collectSkillItems, collectSubAgentItems, collectMcpServerItems } from './triggers_collectors.js';
 
-// TS-any: sidebar values originate in Obsidian and dynamic plugin registries.
-type Runtime = any;
 type TriggerItem = CollectorTriggerItem;
 type TriggerSection = { sectionLabel: string; emptyText: string; items: TriggerItem[]; onSelect: (item: TriggerItem) => void };
 
+/** Plugin widziany przez ten widok: managery agentów i narzędzi. */
+interface TriggersViewPlugin extends PluginApi {
+    agentManager?: AgentManager;
+    toolRegistry?: ToolRegistry;
+}
+
+/** Karta czatu, jaką zwraca `findActiveChatView` - tylko pola, których ten widok dotyka. */
+interface ChatViewLike {
+    input_area?: HTMLTextAreaElement;
+    handleInputResize?: () => void;
+}
+
 /**
  * Render the triggers view.
+ *
+ * TS-boundary: zarejestrowany w `SidebarNav` (`AgentSidebar.ts`) pod wspólnym `ViewRenderer`
+ * (`plugin: PluginApi`) - węższy `TriggersViewPlugin` zostaje WŁASNOŚCIĄ tej funkcji (zawężenie u
+ * źródła wiedzy), rejestracja nie potrzebuje castu. `_nav`/`_params` są tu i tak `unknown` (szersze
+ * niż `SidebarNav`/`ViewParams` z `ViewRenderer` - zgodne bez zmian).
  * @param {HTMLElement} container
  * @param {Object} plugin
  * @param {import('./SidebarNav.js').SidebarNav} nav
  * @param {Object} _params
  */
-export function renderTriggersView(container: Runtime, plugin: Runtime, _nav: Runtime, _params: Runtime): void {
+export function renderTriggersView(container: HTMLElement, plugin: PluginApi, _nav: unknown, _params: unknown): void {
     container.classList.add('cs-root');
-    const agentManager = plugin?.agentManager;
+    const agentManager = (plugin as TriggersViewPlugin)?.agentManager;
     const activeAgent = agentManager?.getActiveAgent?.();
 
     if (activeAgent) {
@@ -62,7 +80,7 @@ export function renderTriggersView(container: Runtime, plugin: Runtime, _nav: Ru
         sectionLabel: t('triggers.section.skills'),
         emptyText: t('triggers.empty.skills'),
         items: collectSkillItems(agentManager),
-    onSelect: (item: TriggerItem) => { void insertTriggerMarker(plugin, 'skill', item.name); },
+    onSelect: (item: TriggerItem) => { void insertTriggerMarker(plugin as TriggersViewPlugin, 'skill', item.name); },
     });
 
     // ── Section: Sub-agents ──
@@ -70,21 +88,21 @@ export function renderTriggersView(container: Runtime, plugin: Runtime, _nav: Ru
         sectionLabel: t('triggers.section.sub_agents'),
         emptyText: t('triggers.empty.sub_agents'),
         items: collectSubAgentItems(agentManager, activeAgent),
-    onSelect: (item: TriggerItem) => { void insertTriggerMarker(plugin, 'sub-agent', item.name); },
+    onSelect: (item: TriggerItem) => { void insertTriggerMarker(plugin as TriggersViewPlugin, 'sub-agent', item.name); },
     });
 
     // ── Section: MCP servers ──
     renderTriggerSection(container, {
         sectionLabel: t('triggers.section.mcp'),
         emptyText: t('triggers.empty.mcp'),
-        items: collectMcpServerItems(plugin, activeAgent),
-    onSelect: (item: TriggerItem) => { void insertTriggerMarker(plugin, 'tool', item.name); },
+        items: collectMcpServerItems(plugin as TriggersViewPlugin, activeAgent),
+    onSelect: (item: TriggerItem) => { void insertTriggerMarker(plugin as TriggersViewPlugin, 'tool', item.name); },
     });
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────
 
-function renderTriggerSection(container: Runtime, { sectionLabel, emptyText, items, onSelect }: TriggerSection): void {
+function renderTriggerSection(container: HTMLElement, { sectionLabel, emptyText, items, onSelect }: TriggerSection): void {
     const section = container.createDiv({ cls: 'cs-home-section' });
     const titleEl = section.createDiv({ cls: 'cs-section-title cs-section-title--trigger' });
     titleEl.textContent = sectionLabel;
@@ -134,8 +152,11 @@ function renderIcon(item: TriggerItem): string {
     return UiIcons.tool(14);
 }
 
-async function insertTriggerMarker(plugin: Runtime, type: string, name: string): Promise<void> {
-    const chatView = findActiveChatView(plugin);
+async function insertTriggerMarker(plugin: TriggersViewPlugin, type: string, name: string): Promise<void> {
+    // TS-boundary: `AppLike.workspace` (core, node-safe) nie modeluje `getLeavesOfType`/
+    // `activeLeaf` - findActiveChatView jest node-safe z tego samego powodu i trzyma własny,
+    // luźniejszy kontrakt; shell już importuje obsidian wprost gdzie indziej.
+    const chatView = findActiveChatView(plugin as unknown as Parameters<typeof findActiveChatView>[0]) as ChatViewLike | null;
     if (!chatView || !chatView.input_area) {
         new Notice(t('sidebar.no_chat_open'));
         return;

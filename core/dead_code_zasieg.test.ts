@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** Katalogi poza grafem produkcyjnym: narzędzia biegu, atrapy testowe, wynik builda. */
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'audyt', 'scripts', 'test-support', '.claude', 'Refaktor', 'Nauka']); // test-support: atrapa `obsidian` + shim DOM dla AVA, z definicji poza grafem produkcyjnym (harness, ktory tez ich uzywa, mieszka w osobnym repo); .claude: worktree'y agentow (kopie repo) i skille - nie kod pluginu; Refaktor + Nauka: archiwum decyzji i materialy nauki, a zalaczone kontrakty `.ts` to specyfikacje, nie kod produkcyjny
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'audyt', 'scripts', 'test-support', '.claude', 'Refaktor', 'Nauka', '.harness-ci']); // test-support: od 2026-09-11 tylko lokator preloadu AVA (atrapa `obsidian` + shim DOM mieszkaja w repo harnessu), z definicji poza grafem produkcyjnym; .claude: worktree'y agentow (kopie repo) i skille - nie kod pluginu; Refaktor + Nauka: archiwum decyzji i materialy nauki, a zalaczone kontrakty `.ts` to specyfikacje, nie kod produkcyjny; .harness-ci: checkout osobnego repo harnessu, ktory CI stawia w tym katalogu PRZED `npm test` (patrz `.github/workflows/ci.yml`) - gitignorowany, nie kod pluginu, wlasny graf importow (`@plugin/...`) nie jest zwiazany z tym grafem
 
 function walk(dir: string, out: string[] = []): string[] {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {

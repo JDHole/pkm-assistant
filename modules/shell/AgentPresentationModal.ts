@@ -4,22 +4,33 @@
  * Zawiera hero (kryształ + dane), statystyki, przycisk "Edytuj profil".
  */
 import { Modal } from 'obsidian';
+import type { App } from 'obsidian';
 import { SkinManager, UiIcons, setSvg, setSvgLabel } from '../../modules/crystal-soul/index.js';
 import { getColorByHex } from '../../modules/crystal-soul/index.js';
 import { hexToRgbTriplet } from '../../modules/crystal-soul/index.js';
 import { resolveMainModelForForm } from '../../modules/agents/index.js';
+import type { AgentManager } from '../../modules/agents/index.js';
 import { t } from '../../core/i18n/index.js';
+import type { PluginApi } from '../../core/index.js';
 
-// TS-any: plugin agent and UI services are dynamically composed at the Obsidian boundary.
-type Runtime = any;
+/** Plugin widziany przez ten modal: tylko `agentManager` ponad bazowy `PluginApi`. */
+interface AgentPresentationModalPlugin extends PluginApi {
+    agentManager?: AgentManager;
+}
+
+/** Callbacki nawigacji z modala - wołacz (HomeView) przekazuje TYLKO te dwa. */
+interface AgentPresentationCallbacks {
+    onEditNavigate?: () => void;
+    onChatNavigate?: () => void;
+}
 
 export class AgentPresentationModal extends Modal {
-    declare private plugin: Runtime;
+    declare private plugin: AgentPresentationModalPlugin;
     declare private agentName: string;
-    declare private onEditNavigate: Runtime;
-    declare private onChatNavigate: Runtime;
+    declare private onEditNavigate: (() => void) | undefined;
+    declare private onChatNavigate: (() => void) | undefined;
 
-    constructor(app: Runtime, plugin: Runtime, agentName: string, { onEditNavigate, onChatNavigate }: Runtime = {}) {
+    constructor(app: App, plugin: AgentPresentationModalPlugin, agentName: string, { onEditNavigate, onChatNavigate }: AgentPresentationCallbacks = {}) {
         super(app);
         this.plugin = plugin;
         this.agentName = agentName;
@@ -75,7 +86,7 @@ export class AgentPresentationModal extends Modal {
         setSvg(crystalBox, SkinManager.getCrystal(agent, { size: 80, color: agentColor, glow: true }));
 
         // ── Stats grid (async) ──
-        let stats = null;
+        let stats: Awaited<ReturnType<AgentManager['getAgentStats']>> | undefined = null;
         try { stats = await this.plugin.agentManager?.getAgentStats?.(agent.name); } catch { /* ignore */ }
 
         const statsGrid = contentEl.createDiv({ cls: 'cs-shards' });
@@ -105,7 +116,11 @@ export class AgentPresentationModal extends Modal {
         ]) {
             const filled = info.value !== '0' && info.value !== globalLabel;
             const shard = infoGrid.createDiv({ cls: `cs-shard ${filled ? 'cs-shard--filled' : 'cs-shard--empty'}` });
-            shard.createDiv({ cls: 'cs-shard__value', text: info.value });
+            // TS-boundary: `Brain` (stats.brainSize) jest liczbą, reszta stringiem (`info.value:
+            // string | number`) - DOM (createDiv → textContent) i tak konwertuje niejawnie; brak
+            // String() w oryginale. Jeden `as` (nie `as unknown as`) - zawężenie unii do jednego
+            // członu jest zawsze bezpośrednio dozwolone.
+            shard.createDiv({ cls: 'cs-shard__value', text: info.value as string });
             shard.createDiv({ cls: 'cs-shard__main-label', text: info.label });
         }
 
@@ -138,6 +153,6 @@ export class AgentPresentationModal extends Modal {
  * @param {string} agentName
  * @param {Object} callbacks - { onEditNavigate, onChatNavigate }
  */
-export function openAgentPresentationModal(plugin: Runtime, agentName: string, callbacks: Runtime): void {
-    new AgentPresentationModal(plugin.app, plugin, agentName, callbacks).open();
+export function openAgentPresentationModal(plugin: AgentPresentationModalPlugin, agentName: string, callbacks: AgentPresentationCallbacks): void {
+    new AgentPresentationModal(plugin.app as unknown as App, plugin, agentName, callbacks).open();
 }

@@ -71,14 +71,19 @@ export function toggleTypeName(names: unknown, name: unknown): string[] {
  * @param {Array<string>} assignedNames - `agent.artifact_types`
  * @returns {Array<{name,opis,checked,builtin}>}
  */
+/** Wpis biblioteki typów, jaki ta funkcja czyta z `ArtifactTypeLoader.getAllTypes()`. */
+interface ArtifactTypeEntry { name?: string; opis?: string; description?: string; builtin?: boolean; }
+
 export function buildTypeCheckboxRows(allTypes: unknown, assignedNames: unknown) {
     const assigned = new Set(Array.isArray(assignedNames) ? assignedNames.filter(n => typeof n === 'string') : []);
-    return (Array.isArray(allTypes) ? allTypes : [])
+    // Array.isArray() zawęża `unknown` do `any[]` (sygnatura lib.es5.d.ts) - rzutujemy inline
+    // z powrotem na `unknown[]`, żeby dalsze odczyty szły przez jawne asercje, nie przez `any`.
+    return ((Array.isArray(allTypes) ? allTypes : []) as unknown[])
         .map(tp => ({
-            name: tp && tp.name,
-            opis: (tp && (tp.opis || tp.description)) || '',
-            checked: assigned.has(tp && tp.name),
-            builtin: !!(tp && tp.builtin),
+            name: tp && (tp as ArtifactTypeEntry).name,
+            opis: (tp && ((tp as ArtifactTypeEntry).opis || (tp as ArtifactTypeEntry).description)) || '',
+            checked: assigned.has((tp && (tp as ArtifactTypeEntry).name) as string),
+            builtin: !!(tp && (tp as ArtifactTypeEntry).builtin),
         }))
         .filter(r => typeof r.name === 'string' && r.name);
 }

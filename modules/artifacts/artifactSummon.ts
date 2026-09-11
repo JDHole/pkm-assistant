@@ -68,19 +68,35 @@ function formatThinState(thin: unknown): string {
 // żeby `obsidianmd/prefer-window-timers` nie widziała tu bare-globala do zgłoszenia).
 const scheduleTimeout: typeof setTimeout = typeof window !== 'undefined' ? window.setTimeout.bind(window) : setTimeout;
 
+/** Widok czatu, jakiego potrzebuje przywołanie — `ChatView` (`modules/chat`) dokleja te pola
+ *  DOPIERO w runtime przez osiem miksinów (`Object.assign(ChatView.prototype, ...)`, patrz
+ *  `chat_view.ts`), więc statyczny typ klasy ich nie niesie - duck-type lokalny zamiast importu. */
+interface SummonChatView {
+    currentArtifactId?: string | null;
+    _renderArtifactChip?: () => void;
+    input_area?: { value: string } | null;
+    send_message?: (opts: { meta: unknown }) => void | Promise<void>;
+    handleAgentChange?: (agent: string) => unknown;
+}
+
+/** Plugin widziany przez przywołanie — TYLKO pola, które ten plik realnie czyta. */
+export interface SummonPlugin {
+    artifactStore?: { read(id: string): Promise<unknown> } | null;
+    openChatView?: () => void;
+    app?: { workspace?: { getLeavesOfType?: (viewType: string) => Array<{ view?: SummonChatView }> } } | null;
+}
+
 /** Świeży stan artefaktu ze store'a; null gdy brak store'a / id / nieznane id. */
-// TS-any: plugin objects are Obsidian runtime integrations without a stable module-local API.
-async function readFreshArtifact(plugin: any, id: string): Promise<any> {
+async function readFreshArtifact(plugin: SummonPlugin | null | undefined, id: string): Promise<ThinArtifact | null> {
     if (!plugin?.artifactStore || !id) return null;
-    try { return await plugin.artifactStore.read(id); } catch { return null; }
+    try { return (await plugin.artifactStore.read(id)) as ThinArtifact | null; } catch { return null; }
 }
 
 /**
  * Otwórz/aktywuj czat (wzór main.openChatView) i wykonaj `fn(view)` po ticku (leaf render).
  * Wspólny przewód obu wejść — czatu szukamy tak samo, niezależnie czy wysyłamy wiadomość.
  */
-// TS-any: view objects are Obsidian runtime integrations without a stable module-local API.
-function withChatView(plugin: any, fn: (view: any) => void): void {
+function withChatView(plugin: SummonPlugin, fn: (view: SummonChatView) => void): void {
     try { plugin.openChatView?.(); } catch { /* brak metody / layout */ }
     scheduleTimeout(() => {
         const leaves = plugin.app?.workspace?.getLeavesOfType?.(CHAT_VIEW_TYPE) || [];
@@ -91,8 +107,7 @@ function withChatView(plugin: any, fn: (view: any) => void): void {
 }
 
 /** Ustaw artefakt jako AKTYWNY w tej rozmowie (B3) + odśwież chip nad inputem (B4). */
-// TS-any: view objects are Obsidian runtime integrations without a stable module-local API.
-function setActiveArtifact(view: any, id: string): void {
+function setActiveArtifact(view: SummonChatView, id: string): void {
     view.currentArtifactId = id;
     try { view._renderArtifactChip?.(); } catch { /* UI jeszcze nie gotowe */ }
 }
@@ -105,8 +120,7 @@ function setActiveArtifact(view: any, id: string): void {
  * @param {string} [opts.actionLabel] - zlokalizowana fraza akcji usera (do wiadomości)
  * @returns {Promise<boolean>} false gdy brak store'a / artefaktu
  */
-// TS-any: plugin and view objects are Obsidian runtime integrations without a stable module-local API.
-export async function summonAgentForArtifact(plugin: any, { id, actionLabel = '' }: { id: string; actionLabel?: string } = {} as { id: string; actionLabel?: string }): Promise<boolean> {
+export async function summonAgentForArtifact(plugin: SummonPlugin, { id, actionLabel = '' }: { id: string; actionLabel?: string } = {} as { id: string; actionLabel?: string }): Promise<boolean> {
     const thin = await readFreshArtifact(plugin, id);
     if (!thin) return false;
 
@@ -121,7 +135,13 @@ export async function summonAgentForArtifact(plugin: any, { id, actionLabel = ''
                 // maszynowa mimo kliknięcia usera - inaczej adres wpisany przez model do sekcji
                 // „Źródła" odblokowywałby `web_read`, a marker `@@skill:` udawałby polecenie
                 // człowieka.
-                try { view.send_message?.({ meta: MACHINE_MESSAGE_META }); } catch { /* model niekonfigurowany itp. */ }
+                // ZASTANE: `send_message` jest asynchroniczna - ten `try/catch` łapie WYŁĄCZNIE
+                // synchroniczny throw sprzed zwrotu promisy, nie jej odrzucenie. Komentarz niżej
+                // obiecuje ochronę „model niekonfigurowany itp.", ale realny pad wywołania
+                // (np. brak klucza API) leci jako odrzucona promisa, mijając ten catch -
+                // zostawałby unhandled rejection. `void` zachowuje dotychczasowe zachowanie,
+                // naprawa (await + catch) byłaby zmianą runtime (patrz raport fali C).
+                try { void view.send_message?.({ meta: MACHINE_MESSAGE_META }); } catch { /* model niekonfigurowany itp. */ }
             }
         };
 
@@ -148,8 +168,7 @@ export async function summonAgentForArtifact(plugin: any, { id, actionLabel = ''
  * @param {string} opts.id - id artefaktu (frontmatter `pkm-artefakt`)
  * @returns {Promise<{ok:boolean, path?:string|null}>} `{ok:false}` gdy brak store'a / artefaktu
  */
-// TS-any: plugin objects are Obsidian runtime integrations without a stable module-local API.
-export async function activateArtifactInChat(plugin: any, { id }: { id: string } = {} as { id: string }): Promise<{ ok: boolean; path?: string | null }> {
+export async function activateArtifactInChat(plugin: SummonPlugin, { id }: { id: string } = {} as { id: string }): Promise<{ ok: boolean; path?: string | null }> {
     const thin = await readFreshArtifact(plugin, id);
     if (!thin) return { ok: false };
 

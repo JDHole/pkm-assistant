@@ -15,15 +15,14 @@ import { UiIcons, setSvg } from '../../crystal-soul/index.js';
 import { t } from '../../../core/i18n/index.js';
 import type { Agent } from '../Agent.js';
 import type { AgentManager } from '../AgentManager.js';
+import type { AgentsPlugin } from './profile_types.js';
+import type { ActiveSessionInfo } from '../../memory/index.js';
 
-// TS-any: profile tabs receive the Obsidian plugin instance, whose runtime extension API is outside this module.
-type ProfilePlugin = any;
-interface ActiveSession { name?: string; path: string; }
 interface PersonaContext {
     formData: { personality: string };
     agent: Agent;
     agentManager: AgentManager;
-    plugin: ProfilePlugin;
+    plugin: AgentsPlugin;
 }
 
 /**
@@ -37,7 +36,7 @@ export async function renderProfileTab(ctx: PersonaContext, el: HTMLElement) {
     // Osobowość - jedyny prawdziwy głos duszy w prompcie (sekcja „KIM JESTEM").
     renderShard(grid, t('profile.persona.personality'), t('profile.persona.personality_hint'),
         formData.personality, 'textarea',
-        (v: string) => formData.personality = v,
+        (v) => formData.personality = v as string,
         { big: true, placeholder: t('profile.persona.personality_placeholder'), rows: 10 });
 
     await _renderActiveSessions(ctx, el);
@@ -59,7 +58,7 @@ async function _renderActiveSessions(ctx: PersonaContext, el: HTMLElement) {
     head.createSpan({ text: t('profile.persona.sessions_header') });
     el.createDiv({ text: t('profile.persona.sessions_hint'), cls: 'setting-item-description' });
 
-    let sessions: ActiveSession[] = [];
+    let sessions: ActiveSessionInfo[] = [];
     try {
         sessions = await memory.listActiveSessions() || [];
     } catch (e: unknown) {
@@ -90,7 +89,7 @@ async function _renderActiveSessions(ctx: PersonaContext, el: HTMLElement) {
  * Czytelna data z nazwy pliku `<agent>_YYYY-MM-DD_HH-mm.md` („2026-07-30 14:05").
  * Bez trafienia w wzorzec - sama nazwa pliku (lepiej surowa niż zmyślona).
  */
-function _sessionLabel(session: ActiveSession) {
+function _sessionLabel(session: ActiveSessionInfo) {
     const name = String(session?.name || session?.path || '').split('/').pop()!.replace(/\.md$/, '');
     const match = name.match(/(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})/);
     return match ? `${match[1]}  ${match[2]}:${match[3]}` : name;

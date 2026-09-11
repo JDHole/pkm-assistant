@@ -7,8 +7,8 @@ import { MarkdownRenderer } from 'obsidian';
 import { UiIcons, setSvgLabel } from '../crystal-soul/index.js';
 import { SkillEditorModal } from './SkillEditorModal.js';
 import { t } from '../../core/i18n/index.js';
-// TS-any: Obsidian element extensions and plugin/SidebarNav contracts are dynamically supplied.
-type UiBoundary = any;
+import type { SidebarNav } from '../shell/index.js';
+import type { SkillsPlugin } from './types.js';
 
 /**
  * Render detailed view of a single skill.
@@ -22,7 +22,7 @@ type UiBoundary = any;
  * @param {import('../shell/sidebar/SidebarNav.js').SidebarNav} nav
  * @param {Object} params - { skillName: string, template?: boolean }
  */
-export function renderSkillDetailView(container: UiBoundary, plugin: UiBoundary, nav: UiBoundary, params: { skillName: string; template?: boolean }) {
+export function renderSkillDetailView(container: HTMLElement, plugin: SkillsPlugin, nav: SidebarNav, params: { skillName: string; template?: boolean }): void {
     const isTemplate = params.template === true;
     const skill = isTemplate
         ? plugin.agentManager?.skillTemplateStore?.get(params.skillName)
@@ -44,7 +44,10 @@ export function renderSkillDetailView(container: UiBoundary, plugin: UiBoundary,
     const editBtn = headerRow.createEl('button', { cls: 'cs-detail-edit-btn' });
     setSvgLabel(editBtn, UiIcons.edit(14), t('generic.edit'));
     editBtn.addEventListener('click', () => {
-        new SkillEditorModal(plugin.app, plugin, skill, () => nav.refresh(), { template: isTemplate }).open();
+        // `plugin.app as never`: `PluginApi.app` to strukturalny `AppLike` (core/ nie importuje
+        // 'obsidian'); most do prawdziwego `App` — ten sam idiom co `core/PluginBase.ts` i
+        // `modules/shell/PluginSettingsTab.ts` (`plugin as never` do bazowego `Plugin`).
+        new SkillEditorModal(plugin.app as never, plugin, skill, () => nav.refresh(), { template: isTemplate }).open();
     });
 
     const meta = container.createDiv({ cls: 'sidebar-detail-meta' });
@@ -72,11 +75,14 @@ export function renderSkillDetailView(container: UiBoundary, plugin: UiBoundary,
         catRow.createSpan({ cls: 'sidebar-category-badge', text: skill.category });
     }
 
-    if (skill.tags?.length > 0) {
+    // `as number`/`!`: `tags: string[] | null` (nigdy `undefined`) — `?.length` mimo to
+    // dodaje `| undefined` do typu porównania (kwirk optional chaining na typie z `null`);
+    // cast czysto typowy, zero zmiany runtime (`undefined > 0` jest i tak `false`).
+    if ((skill.tags?.length as number) > 0) {
         const tagsRow = meta.createDiv({ cls: 'sidebar-detail-row' });
         tagsRow.createSpan({ cls: 'sidebar-detail-label', text: t('detail.tags') });
         const tagsVal = tagsRow.createSpan({ cls: 'sidebar-detail-value' });
-        for (const tag of skill.tags) {
+        for (const tag of skill.tags!) {
             tagsVal.createSpan({ cls: 'sidebar-category-badge', text: tag });
         }
     }
@@ -114,7 +120,7 @@ export function renderSkillDetailView(container: UiBoundary, plugin: UiBoundary,
 
     // Szablon nie jest „używany" przez agentów — jest kopiowany. Sekcja tylko dla żywych.
     const agents = isTemplate ? [] : (plugin.agentManager?.getAllAgents() || []);
-    const usedBy = agents.filter((a: UiBoundary) => a.skills?.includes(skill.slug) || a.skills?.includes(skill.name));
+    const usedBy = agents.filter((a) => a.skills?.includes(skill.slug) || a.skills?.includes(skill.name));
 
     if (isTemplate) {
         // nic — karta w Zapleczu ma akcję „Użyj u agenta…", detal jest podglądem formy
@@ -144,12 +150,13 @@ export function renderSkillDetailView(container: UiBoundary, plugin: UiBoundary,
 
     // Sekcja „Dozwolone narzędzia" (chipy z pola-fasady `allowed-tools`) jest WYCIĘTA.
 
-    if (skill.preQuestions?.length > 0) {
+    // `as number`/`!`: patrz komentarz przy `skill.tags` wyżej — `preQuestions: SkillQuestion[] | null`.
+    if ((skill.preQuestions?.length as number) > 0) {
         const pqSection = container.createDiv({ cls: 'sidebar-detail-section' });
         const pqH4 = pqSection.createEl('h4', { cls: 'sidebar-detail-subtitle' });
-        setSvgLabel(pqH4, UiIcons.question(14), `${t('detail.questions')} (${skill.preQuestions.length})`);
+        setSvgLabel(pqH4, UiIcons.question(14), `${t('detail.questions')} (${skill.preQuestions!.length})`);
 
-        for (const pq of skill.preQuestions) {
+        for (const pq of skill.preQuestions!) {
             const pqRow = pqSection.createDiv({ cls: 'sidebar-detail-row' });
             pqRow.createSpan({ cls: 'sidebar-detail-label', text: `{{${pq.key}}}` });
             pqRow.createSpan({ cls: 'sidebar-detail-value', text: pq.question + (pq.default ? ` (${t('detail.default')}: ${pq.default})` : '') });
@@ -164,12 +171,14 @@ export function renderSkillDetailView(container: UiBoundary, plugin: UiBoundary,
         const promptContent = promptSection.createDiv({ cls: 'sidebar-detail-prompt' });
 
         try {
+            // `plugin.app`/`plugin` as `never`: patrz komentarz przy edycji wyżej (most AppLike→App,
+            // Component). Runtime bez zmian - to zawsze te same, prawdziwe obiekty Obsidiana.
             void MarkdownRenderer.render(
-                plugin.app,
+                plugin.app as never,
                 skill.prompt,
                 promptContent,
                 skill.path || '',
-                plugin
+                plugin as never
             );
         } catch {
             promptContent.createEl('pre', { text: skill.prompt, cls: 'sidebar-detail-pre' });

@@ -1,8 +1,13 @@
 
 import { UiIcons, setSvg } from '../crystal-soul/index.js';
 import { t } from '../../core/i18n/index.js';
-// TS-any: blok przyjmuje rozszerzane przez chat dane DOM.
-type ChatDynamic = any;
+
+/** Element `.cs-action-row__content` z prywatnym expando polem, którym `updateThinkingBlock`
+ *  pamięta ostatnio wpisaną treść NA ELEMENCIE (nie czyta `textContent` — jego getter jest O(n),
+ *  patrz komentarz niżej). Zwykłe rozszerzenie `HTMLElement`, nie osobny typ DOM-u. */
+interface ThinkingContentElement extends HTMLElement {
+    _pkmThinkingText?: string;
+}
 
 /**
  * Creates a Crystal Soul .cs-action-row for AI thinking/reasoning.
@@ -12,7 +17,7 @@ type ChatDynamic = any;
  * @param {number|null} startTime - Timestamp when thinking started
  * @returns {HTMLElement}
  */
-export function createThinkingBlock(thinkingText: string, isStreaming = false, startTime: number | null = null) {
+export function createThinkingBlock(thinkingText: string, isStreaming = false, startTime: number | null = null): HTMLElement {
     const row = createDiv();
     row.className = 'cs-action-row';
     if (isStreaming) row.classList.add('streaming');
@@ -43,11 +48,11 @@ export function createThinkingBlock(thinkingText: string, isStreaming = false, s
 
     // ── BODY ──
     const body = row.createDiv({ cls: 'cs-action-row__body' });
-    const content = body.createDiv({ cls: 'cs-action-row__content' });
+    const content = body.createDiv({ cls: 'cs-action-row__content' }) as ThinkingContentElement;
     content.textContent = thinkingText || '';
     // Pamięć ostatnio wpisanej treści dla `updateThinkingBlock` (dopisuje
     // deltę zamiast podmieniać całość). Trzymana na elemencie, bo blok bywa długowieczny.
-    (content as ChatDynamic)._pkmThinkingText = thinkingText || '';
+    content._pkmThinkingText = thinkingText || '';
 
     // Toggle
     head.addEventListener('click', () => {
@@ -63,8 +68,8 @@ export function createThinkingBlock(thinkingText: string, isStreaming = false, s
  * @param {string} text - New reasoning text
  * @param {number|null} startTime - If provided, update elapsed time
  */
-export function updateThinkingBlock(block: ChatDynamic, text: string, startTime: number | null = null) {
-    const content = block?.querySelector('.cs-action-row__content');
+export function updateThinkingBlock(block: HTMLElement | null | undefined, text: string, startTime: number | null = null): void {
+    const content = block?.querySelector('.cs-action-row__content') as ThinkingContentElement | null;
     if (content) {
         // `text` to ślad rozumowania ZAKUMULOWANY od początku tury, więc podmiana całości przy
         // każdym wywołaniu przepisywałaby O(K × długość) znaków i wymuszała przeliczenie
@@ -82,7 +87,7 @@ export function updateThinkingBlock(block: ChatDynamic, text: string, startTime:
             }
             content._pkmThinkingText = text;
             // Auto-scroll if expanded
-            if (block.classList.contains('open')) {
+            if (block!.classList.contains('open')) {
                 content.scrollTop = content.scrollHeight;
             }
         }
