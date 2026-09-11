@@ -9,14 +9,14 @@
  * Kilka wiadomości naraz → kolejka (`cleanupQueue.js`), jeden modal na raz.
  */
 import { Modal, Notice } from 'obsidian';
+import type { App } from 'obsidian';
 import { t } from '../../core/i18n/index.js';
 // To jedyny plik, który maluje klasy `.komunikator-cleanup-*`.
 import komunikator_cleanup_styles from './KomunikatorCleanupModal.css' with { type: 'css' };
 import { UiIcons, setSvgLabel, adoptSheet } from '../crystal-soul/index.js';
 import { CleanupQueue } from './cleanupQueue.js';
 import type { Message } from './types.js';
-// TS-any: Obsidian UI/plugin event APIs are runtime-provided structural boundaries.
-type UiBoundary = any;
+import type { KomunikatorManager } from './KomunikatorManager.js';
 
 /** Modal podglądu jednej wiadomości z pytaniem „usuń / zostaw". */
 export class KomunikatorCleanupModal extends Modal {
@@ -28,7 +28,7 @@ export class KomunikatorCleanupModal extends Modal {
      * @param {Object} message - nagłówek + `body` (z `getMessage`)
      * @param {(remove: boolean) => any} onDecision
      */
-    constructor(app: UiBoundary, message: Partial<Message> | null | undefined, onDecision: ((remove: boolean) => void | Promise<void>) | null) {
+    constructor(app: App, message: Partial<Message> | null | undefined, onDecision: ((remove: boolean) => void | Promise<void>) | null) {
         super(app);
         this.message = message || {};
         this.onDecision = onDecision;
@@ -100,7 +100,7 @@ export class KomunikatorBulkDeleteModal extends Modal {
      * @param {{count: number, agent: string}} info
      * @param {(confirmed: boolean) => any} onDecision
      */
-    constructor(app: UiBoundary, info: { count?: number; agent?: string } | null | undefined, onDecision: ((confirmed: boolean) => void | Promise<void>) | null) {
+    constructor(app: App, info: { count?: number; agent?: string } | null | undefined, onDecision: ((confirmed: boolean) => void | Promise<void>) | null) {
         super(app);
         this.info = info || {};
         this.onDecision = onDecision;
@@ -148,6 +148,19 @@ export class KomunikatorBulkDeleteModal extends Modal {
     }
 }
 
+/** Manager agentów, jaki potrzebuje ten plik — duck-type lokalny (wzorem `AgentManagerLike`
+ *  w `types.ts`), NIE prawdziwa klasa z `modules/agents` (CLAUDE.md „Zależności": kierunek
+ *  jest agents → komunikator, nie odwrotnie — moduł jej celowo nie importuje). */
+interface CleanupAgentManager {
+    komunikatorManager?: KomunikatorManager | null;
+    on(callback: (event: string, data: { agent?: string; id?: string }) => void): () => void;
+}
+
+interface CleanupPlugin {
+    agentManager?: CleanupAgentManager | null;
+    app: App;
+}
+
 /**
  * Podłącz sprzątanie do zdarzeń komunikatora. Wołane raz z `main.js` (za flagą).
  * Zwraca funkcję odsubskrybowania — plugin woła ją przy unload.
@@ -155,7 +168,7 @@ export class KomunikatorBulkDeleteModal extends Modal {
  * @param {Object} plugin
  * @returns {() => void}
  */
-export function registerKomunikatorCleanup(plugin: UiBoundary): () => void {
+export function registerKomunikatorCleanup(plugin: CleanupPlugin): () => void {
     const agentManager = plugin?.agentManager;
     if (!agentManager?.on) return () => {};
 
