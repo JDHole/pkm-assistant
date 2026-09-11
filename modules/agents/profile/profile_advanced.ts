@@ -7,12 +7,12 @@ import { getModelsForRole } from '../../models/index.js';
 import { renderShard, renderToggle } from './profile_helpers.js';
 import { applyMainModelChange } from './modelFieldSync.js';
 import { t } from '../../../core/i18n/index.js';
-
-// TS-any: profile coordinator data and Obsidian's plugin extension APIs are runtime-only boundaries.
-type UiBoundary = any;
+import type { ProfileCtx } from './profile_types.js';
+import type { AgentUpdate } from '../Agent.js';
+import type { VaultMapAgent, VaultMapPlugin } from '../../onboarding/index.js';
 
 /** Automaty pamięci per agent (mem_proactive / ratunek / idle-global). */
-function _renderMemoryAutomation(ctx: UiBoundary, el: HTMLElement) {
+function _renderMemoryAutomation(ctx: ProfileCtx, el: HTMLElement) {
     const { formData, plugin } = ctx;
     const head = el.createDiv({ cls: 'cs-section-head' });
     setSvg(head, UiIcons.brain ? UiIcons.brain(14) : UiIcons.zap(14));
@@ -21,7 +21,7 @@ function _renderMemoryAutomation(ctx: UiBoundary, el: HTMLElement) {
     // mem_proactive - auto-zapis faktów pod koniec tury (steruje decisionTreeInstructions.mem_proactive).
     if (!formData.prompt_overrides) formData.prompt_overrides = {};
     if (!formData.prompt_overrides.decisionTreeInstructions) formData.prompt_overrides.decisionTreeInstructions = {};
-    const dt = formData.prompt_overrides.decisionTreeInstructions;
+    const dt = formData.prompt_overrides.decisionTreeInstructions as Record<string, boolean>;
     renderToggle(el, t('profile.advanced.mem_proactive'), t('profile.advanced.mem_proactive_hint'),
         dt.mem_proactive !== false, (v) => { if (v) delete dt.mem_proactive; else dt.mem_proactive = false; });
 
@@ -43,7 +43,7 @@ const SVG_TRASH = '<svg viewBox="0 0 14 14" width="14" height="14"><path d="M3,4
  * @param {Object} ctx - shared context
  * @param {HTMLElement} el
  */
-export async function renderAdvancedTab(ctx: UiBoundary, el: HTMLElement) {
+export async function renderAdvancedTab(ctx: ProfileCtx, el: HTMLElement) {
     const { agent, plugin, formData } = ctx;
     if (!agent) return;
 
@@ -53,7 +53,7 @@ export async function renderAdvancedTab(ctx: UiBoundary, el: HTMLElement) {
     headModels.createSpan({ text: t('profile.models') });
 
     const modelsGrid = el.createDiv({ cls: 'cs-shards' });
-    const pkmM = plugin.env?.settings?.pkmAssistant || {};
+    const pkmM = (plugin.env?.settings?.pkmAssistant || {}) as unknown as Parameters<typeof getModelsForRole>[0];
     const platformNames: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI', open_router: 'OpenRouter', ollama: 'Ollama', gemini: 'Gemini', groq: 'Groq', deepseek: 'DeepSeek', lm_studio: 'LM Studio' };
     const buildModelOptions = (role: Parameters<typeof getModelsForRole>[1]) => {
         const models = getModelsForRole(pkmM, role);
@@ -69,9 +69,9 @@ export async function renderAdvancedTab(ctx: UiBoundary, el: HTMLElement) {
     // onChange NIE dotyka formData.model - resolveMainModelForForm (AgentProfileView.ts) już je
     // wyzerowało przy otwarciu profilu, a legacy pole nigdy nie wraca do życia (patrz
     // modelFieldSync.ts), więc nie ma czego tu przypisywać ponownie.
-    renderShard(modelsGrid, t('profile.advanced.main_model'), t('profile.advanced.main_model_hint'), formData.models?.main || '', 'select',
+    renderShard(modelsGrid, t('profile.advanced.main_model'), t('profile.advanced.main_model_hint'), (formData.models?.main as string | undefined) || '', 'select',
         v => {
-            formData.models = applyMainModelChange(formData.models, v).models;
+            formData.models = applyMainModelChange(formData.models, v as string).models;
         }, { options: buildModelOptions('main') });
 
     // Behavior tuning
@@ -82,10 +82,10 @@ export async function renderAdvancedTab(ctx: UiBoundary, el: HTMLElement) {
     const behaviorGrid = el.createDiv({ cls: 'cs-shards' });
     // Temperatura - JEDYNE miejsce (wyprowadzka z Persony).
     renderShard(behaviorGrid, t('profile.temperature'), t('profile.advanced.temperature_hint'), formData.temperature, 'slider',
-        v => formData.temperature = v, { min: 0, max: 1, step: 0.1 });
+        v => formData.temperature = v as number, { min: 0, max: 1, step: 0.1 });
     // Język odpowiedzi agenta (auto = globalny locale).
     renderShard(behaviorGrid, t('profile.advanced.language'), t('profile.advanced.language_hint'), formData.language || 'auto', 'select',
-        v => formData.language = v, {
+        v => formData.language = v as string, {
             options: [
                 { value: 'auto', label: t('profile.advanced.language_auto') },
                 { value: 'pl', label: 'Polski' },
@@ -143,7 +143,7 @@ export async function renderAdvancedTab(ctx: UiBoundary, el: HTMLElement) {
             if (!ag) { new Notice(t('profile.advanced.save_first')); return; }
             try {
                 const yaml = ag.serialize ? ag.serialize() : JSON.stringify(ag, null, 2);
-                await navigator.clipboard.writeText(yaml);
+                await navigator.clipboard.writeText(yaml as unknown as string);
                 new Notice(t('profile.advanced.profile_copied'));
             } catch (e: unknown) {
                 new Notice(t('profile.advanced.export_error') + (e as Error).message);
@@ -156,7 +156,7 @@ export async function renderAdvancedTab(ctx: UiBoundary, el: HTMLElement) {
  * Handle save (create or update agent).
  * @param {Object} ctx - shared context
  */
-export async function handleSave(ctx: UiBoundary) {
+export async function handleSave(ctx: ProfileCtx) {
     const { formData, agent, agentManager, plugin } = ctx;
 
     if (!formData.name.trim()) {
@@ -167,7 +167,7 @@ export async function handleSave(ctx: UiBoundary) {
     // Create-mode skasowany - agent zawsze istnieje (tworzony od razu przy „+").
     // Zapis to WYŁĄCZNIE update istniejącego agenta.
     try {
-        const updates: UiBoundary = {
+        const updates: AgentUpdate = {
             color: formData.color,
             personality: formData.personality,
             description: formData.description,
@@ -247,7 +247,7 @@ export async function handleSave(ctx: UiBoundary) {
         }
         const updatedAgent = agentManager.getAgent(formData.name);
         if (updatedAgent && plugin.agentManager?.playbookManager) {
-            await plugin.agentManager.playbookManager.compileVaultMap(updatedAgent, plugin);
+            await plugin.agentManager.playbookManager.compileVaultMap(updatedAgent as unknown as VaultMapAgent, plugin as unknown as VaultMapPlugin);
         }
         const details = [];
         if (updates.personality !== before.personality) details.push(t('profile.advanced.personality'));
@@ -283,7 +283,7 @@ export async function handleSave(ctx: UiBoundary) {
  * @param {Object} ctx - shared context
  * @param {HTMLElement} tabContent
  */
-export function showDeleteConfirmation(ctx: UiBoundary, tabContent: HTMLElement) {
+export function showDeleteConfirmation(ctx: ProfileCtx, tabContent: HTMLElement) {
     const { agent, agentManager, nav } = ctx;
     tabContent.empty();
 

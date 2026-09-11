@@ -15,16 +15,22 @@ import { UiIcons, setSvgLabel, setSvg } from '../../crystal-soul/index.js';
 import { renderToggle, renderShard, getAllVaultFolders } from './profile_helpers.js';
 import { BUILTIN_TOOL_GROUPS, GROUP_META, getGroupLabel, getPermissionToolLabel } from '../toolAxis.js';
 import { t } from '../../../core/i18n/index.js';
-
-// TS-any: permissions UI reads dynamic vault/group and plugin extension data.
-type UiBoundary = any;
 import { log } from '../../../core/utils/Logger.js';
+import type { ProfileCtx, AgentsPlugin } from './profile_types.js';
+import type { AgentFocusFolder } from '../Agent.js';
+import type { VaultMapAgent, VaultMapPlugin } from '../../onboarding/index.js';
+
+// TS-boundary: `plugin.env.settings.pkmAssistant.vaultGroups` (open user-config, Settings→Vault) -
+// this file's own reads of it are always object entries (no bare-string handling here, unlike
+// focus_folders elsewhere), so modelled narrower than core's own VaultGroup/FocusFolder.
+interface VaultGroupFolder { path: string; access?: string; }
+interface LocalVaultGroup { name?: string; folders?: VaultGroupFolder[]; }
 
 /**
  * @param {Object} ctx - shared context
  * @param {HTMLElement} el
  */
-export function renderPermissionsTab(ctx: UiBoundary, el: HTMLElement) {
+export function renderPermissionsTab(ctx: ProfileCtx, el: HTMLElement) {
     const { formData, agent } = ctx;
     // Bufor inicjalizowany TYLKO gdy jeszcze nie istnieje - wzór linii niżej (`disabled_tools`)
     // i `approval_toggles` (sekcja 3). Bez tego guardu każdy powrót na tę zakładkę nadpisywał
@@ -42,7 +48,7 @@ export function renderPermissionsTab(ctx: UiBoundary, el: HTMLElement) {
 // SEKCJA 1 - Co może robić (narzędzia, jedna oś disabled_tools)
 // ─────────────────────────────────────────────────────────────
 
-function _renderToolGroups(ctx: UiBoundary, el: HTMLElement) {
+function _renderToolGroups(ctx: ProfileCtx, el: HTMLElement) {
     const { formData, plugin } = ctx;
 
     const head = el.createDiv({ cls: 'cs-section-head' });
@@ -105,7 +111,7 @@ function _renderToolGroups(ctx: UiBoundary, el: HTMLElement) {
 // SEKCJA 2 - Miejsce pracy (tryb + przypisane foldery + grupy)
 // ─────────────────────────────────────────────────────────────
 
-function _renderWorkspace(ctx: UiBoundary, el: HTMLElement) {
+function _renderWorkspace(ctx: ProfileCtx, el: HTMLElement) {
     const { formData } = ctx;
 
     const head = el.createDiv({ cls: 'cs-section-head' });
@@ -135,7 +141,7 @@ function _renderWorkspace(ctx: UiBoundary, el: HTMLElement) {
     _renderVaultMapPreview(ctx, el);
 }
 
-function _renderFocusFoldersSection(ctx: UiBoundary, el: HTMLElement) {
+function _renderFocusFoldersSection(ctx: ProfileCtx, el: HTMLElement) {
     const { formData, plugin } = ctx;
     const section = el.createDiv({ cls: 'cs-focus-section' });
     section.createDiv({ text: t('profile.perm.assigned_folders'), cls: 'setting-item-name' });
@@ -156,7 +162,7 @@ function _renderFocusFoldersSection(ctx: UiBoundary, el: HTMLElement) {
         const query = input.value.trim().toLowerCase();
         dropdown.empty();
         if (!query) { dropdown.addClass('cs-collapsed'); return; }
-        const existing = formData.focus_folders.filter((f: UiBoundary) => !f.group).map((f: UiBoundary) => typeof f === 'string' ? f : f.path);
+        const existing = formData.focus_folders.filter((f: AgentFocusFolder) => !f.group).map((f: AgentFocusFolder) => typeof f === 'string' ? f : f.path);
         const matches = allFolders.filter(f => f.toLowerCase().includes(query) && !existing.includes(f)).slice(0, 10);
         if (matches.length === 0) { dropdown.addClass('cs-collapsed'); return; }
         dropdown.removeClass('cs-collapsed');
@@ -171,7 +177,7 @@ function _renderFocusFoldersSection(ctx: UiBoundary, el: HTMLElement) {
     const addManualFolder = () => {
         const value = input.value.trim();
         if (!value) return;
-        const existing = formData.focus_folders.filter((f: UiBoundary) => !f.group).map((f: UiBoundary) => typeof f === 'string' ? f : f.path);
+        const existing = formData.focus_folders.filter((f: AgentFocusFolder) => !f.group).map((f: AgentFocusFolder) => typeof f === 'string' ? f : f.path);
         if (existing.includes(value)) return;
         formData.focus_folders.push({ path: value, access: 'readwrite' });
         rerender();
@@ -186,7 +192,7 @@ function _renderFocusFoldersSection(ctx: UiBoundary, el: HTMLElement) {
 }
 
 /** Render both plain-folder chips and group-reference chips (📦). */
-function _renderFocusChips(ctx: UiBoundary, container: HTMLElement, rerender: () => void) {
+function _renderFocusChips(ctx: ProfileCtx, container: HTMLElement, rerender: () => void) {
     const { formData, plugin } = ctx;
     container.empty();
     if (formData.focus_folders.length === 0) {
@@ -200,7 +206,7 @@ function _renderFocusChips(ctx: UiBoundary, container: HTMLElement, rerender: ()
 
         // Group reference chip
         if (entry && entry.group) {
-            const def = vaultGroups.find((g: UiBoundary) => g.name === entry.group);
+            const def = vaultGroups.find((g: LocalVaultGroup) => g.name === entry.group);
             const folderCount = def?.folders?.length ?? 0;
             const chip = container.createDiv({ cls: 'cs-focus-chip cs-focus-chip--group' });
             const nameSpan = chip.createSpan({ cls: 'cs-focus-chip__name' });
@@ -223,7 +229,7 @@ function _renderFocusChips(ctx: UiBoundary, container: HTMLElement, rerender: ()
         }
 
         // Plain folder chip (per-folder 👁️/📝)
-        const path = typeof entry === 'string' ? entry : entry.path;
+        const path = typeof entry === 'string' ? entry : entry.path!;
         const access = typeof entry === 'string' ? 'readwrite' : (entry.access || 'readwrite');
         const chip = container.createDiv({ cls: 'cs-focus-chip' });
         const chipNameSpan = chip.createSpan({ cls: 'cs-focus-chip__name' });
@@ -244,7 +250,7 @@ function _renderFocusChips(ctx: UiBoundary, container: HTMLElement, rerender: ()
 }
 
 /** „+ grupa z Vaulta" button (menu of defined groups) + manage-groups link. */
-function _renderGroupAdd(ctx: UiBoundary, section: HTMLElement, rerender: () => void) {
+function _renderGroupAdd(ctx: ProfileCtx, section: HTMLElement, rerender: () => void) {
     const { formData, plugin } = ctx;
     const row = section.createDiv({ cls: 'cs-focus-group-row' });
 
@@ -254,8 +260,8 @@ function _renderGroupAdd(ctx: UiBoundary, section: HTMLElement, rerender: () => 
     addGroupBtn.addEventListener('click', () => {
         menu.empty();
         const groups = _getVaultGroups(plugin);
-        const used = new Set(formData.focus_folders.filter((f: UiBoundary) => f.group).map((f: UiBoundary) => f.group));
-        const available = groups.filter((g: UiBoundary) => g.name && !used.has(g.name));
+        const used = new Set(formData.focus_folders.filter((f: AgentFocusFolder) => f.group).map((f: AgentFocusFolder) => f.group));
+        const available = groups.filter((g: LocalVaultGroup) => g.name && !used.has(g.name));
         if (available.length === 0) {
             menu.removeClass('cs-collapsed');
             menu.createDiv({ cls: 'cs-focus-suggestion', text: t('profile.perm.no_groups') });
@@ -278,18 +284,18 @@ function _renderGroupAdd(ctx: UiBoundary, section: HTMLElement, rerender: () => 
     link.addEventListener('click', (e) => {
         e.preventDefault();
         try {
-            plugin.app.setting?.open?.();
-            plugin.app.setting?.openTabById?.(plugin.manifest?.id || 'pkm-assistant');
+            (plugin.app.setting as { open?: () => void; openTabById?: (id: string) => void } | undefined)?.open?.();
+            (plugin.app.setting as { open?: () => void; openTabById?: (id: string) => void } | undefined)?.openTabById?.(plugin.manifest?.id || 'pkm-assistant');
         } catch { /* opening settings is best-effort */ }
     });
 }
 
-function _getVaultGroups(plugin: UiBoundary) {
+function _getVaultGroups(plugin: AgentsPlugin): LocalVaultGroup[] {
     const pkm = plugin?.env?.settings?.pkmAssistant || plugin?.settings?.pkmAssistant || {};
-    return Array.isArray(pkm.vaultGroups) ? pkm.vaultGroups : [];
+    return Array.isArray(pkm.vaultGroups) ? (pkm.vaultGroups as LocalVaultGroup[]) : [];
 }
 
-function _renderVaultMapPreview(ctx: UiBoundary, parentEl: HTMLElement) {
+function _renderVaultMapPreview(ctx: ProfileCtx, parentEl: HTMLElement) {
     const { agent, plugin, formData } = ctx;
     const section = parentEl.createDiv({ cls: 'cs-vault-map' });
 
@@ -306,10 +312,10 @@ function _renderVaultMapPreview(ctx: UiBoundary, parentEl: HTMLElement) {
                 const playbookManager = plugin.agentManager?.playbookManager;
                 if (!playbookManager) { new Notice(t('profile.perm.playbook_unavailable')); return; }
                 agent.focusFolders = formData.focus_folders;
-                const compiled = await playbookManager.compileVaultMap(agent, plugin);
+                const compiled = await playbookManager.compileVaultMap(agent as unknown as VaultMapAgent, plugin as unknown as VaultMapPlugin);
                 const safeName = getAgentSafeName(agent.name);
                 const path = `.pkm-assistant/agents/${safeName}/vault_map.md`;
-                new HiddenFileEditorModal(plugin.app, path, `Vault Map: ${agent.name}`, compiled, {
+                new HiddenFileEditorModal(plugin.app as unknown as ConstructorParameters<typeof HiddenFileEditorModal>[0], path, `Vault Map: ${agent.name}`, compiled, {
                     agentName: agent.name, agentColor: agent.color || '', readOnly: true
                 }).open();
             } catch (e: unknown) {
@@ -330,7 +336,7 @@ function _renderVaultMapPreview(ctx: UiBoundary, parentEl: HTMLElement) {
 // SEKCJA 3 - Kiedy pyta (autonomia per agent + approval toggles)
 // ─────────────────────────────────────────────────────────────
 
-function _renderWhenAsks(ctx: UiBoundary, el: HTMLElement) {
+function _renderWhenAsks(ctx: ProfileCtx, el: HTMLElement) {
     const { formData } = ctx;
 
     const head = el.createDiv({ cls: 'cs-section-head' });
@@ -341,7 +347,7 @@ function _renderWhenAsks(ctx: UiBoundary, el: HTMLElement) {
     const grid = el.createDiv({ cls: 'cs-shards' });
     renderShard(grid, t('profile.perm.default_autonomy'), t('profile.perm.default_autonomy_hint'),
         formData.default_autonomy || '', 'select',
-        v => formData.default_autonomy = v, {
+        v => formData.default_autonomy = v as string, {
             options: [
                 { value: '', label: t('profile.perm.autonomy_global') },
                 { value: 'yolo', label: t('autonomy.yolo') },
@@ -353,7 +359,7 @@ function _renderWhenAsks(ctx: UiBoundary, el: HTMLElement) {
     _renderApprovalToggles(ctx, el);
 }
 
-function _renderApprovalToggles(ctx: UiBoundary, el: HTMLElement) {
+function _renderApprovalToggles(ctx: ProfileCtx, el: HTMLElement) {
     const { formData, agent } = ctx;
 
     if (!formData.approval_toggles) {
@@ -376,9 +382,9 @@ function _renderApprovalToggles(ctx: UiBoundary, el: HTMLElement) {
     ];
     for (const { key, tool, label } of groupA) {
         const defaultVal = APPROVAL_DEFAULTS[key] ?? true;
-        const currentVal = formData.approval_toggles[key] ?? defaultVal;
+        const currentVal = (formData.approval_toggles![key] as boolean | undefined) ?? defaultVal;
         renderToggle(el, label || getPermissionToolLabel(tool), t('profile.perm.ask_before'), currentVal,
-            v => { formData.approval_toggles[key] = v; });
+            v => { formData.approval_toggles![key] = v; });
     }
 
     // Pozostałe YELLOW - domyślnie ciche (rozwijane).
@@ -399,9 +405,9 @@ function _renderApprovalToggles(ctx: UiBoundary, el: HTMLElement) {
     ];
     for (const { key, tool } of groupB) {
         const defaultVal = APPROVAL_DEFAULTS[key] ?? false;
-        const currentVal = formData.approval_toggles[key] ?? defaultVal;
+        const currentVal = (formData.approval_toggles![key] as boolean | undefined) ?? defaultVal;
         renderToggle(groupBContainer, getPermissionToolLabel(tool), t('profile.perm.ask_before'), currentVal,
-            v => { formData.approval_toggles[key] = v; });
+            v => { formData.approval_toggles![key] = v; });
     }
 
     const redHead = el.createDiv({ cls: 'cs-section-head' });

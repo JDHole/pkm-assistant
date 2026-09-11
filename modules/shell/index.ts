@@ -37,9 +37,10 @@ export { PkmSettingsTab } from './pkm_settings_tab.js';
 
 // ── Sidebar (rejestracja + otwarcie; klasa widoku zostaje wewnątrz shella) ─
 export { registerAgentSidebar, openAgentSidebar } from './AgentSidebar.js';
-// Typ (nie wartość) — renderery widoków Zaplecza spoza shella (modules/sub-agents,
-// modules/skills) dostają instancję jako parametr `nav`; potrzebują TYLKO adnotacji
-// typu, nie konstruktora. Zero-kosztowy re-eksport (`export type`, ginie w transpilacji).
+// Typ (nie wartość) - renderery widoków Zaplecza spoza shella (modules/sub-agents, modules/skills)
+// i profile agentów (modules/agents, `nav.push/pop/goHome`) dostają instancję jako parametr `nav`;
+// potrzebują TYLKO adnotacji typu, nie konstruktora. Zero-kosztowy re-eksport (`export type`,
+// ginie w transpilacji).
 export type { SidebarNav } from './sidebar/SidebarNav.js';
 
 // ── Modale ────────────────────────────────────────────────────────────────

@@ -193,10 +193,12 @@ function permissionAllowsTool(tool: string, perms: Record<string, unknown>) {
  * @returns {string[]} disabled_tools
  */
 export function computeDisabledToolsFromLegacy(config: LegacyToolAxisConfig = {}) {
-    const servers = Array.isArray(config.mcp_servers) ? config.mcp_servers : ['vault', 'memory', 'core'];
+    // TS-boundary: mcp_servers/enabled_tools are `unknown` (legacy YAML config) - Array.isArray
+    // narrows an unknown value to `any[]` (lib.d.ts quirk), so the element type is cast explicitly.
+    const servers = Array.isArray(config.mcp_servers) ? (config.mcp_servers as string[]) : ['vault', 'memory', 'core'];
     if (servers.includes('*')) return [];
 
-    const enabledTools = Array.isArray(config.enabled_tools) ? config.enabled_tools : [];
+    const enabledTools = Array.isArray(config.enabled_tools) ? (config.enabled_tools as string[]) : [];
     const hasEnabledFilter = enabledTools.length > 0;
     const perms = { ...LEGACY_DEFAULT_PERMISSIONS, ...(config.default_permissions || {}) };
     const serverSet = new Set([ALWAYS_ON_GROUP, ...servers]);
