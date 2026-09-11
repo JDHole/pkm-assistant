@@ -17,15 +17,20 @@
 import { slugify } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { parseSkillMarkdown, serializeSkillFile } from './skillFrontmatter.js';
-import type { SkillInput, VaultLike } from './types.js';
-type StoredTemplate = SkillInput & { slug: string; prompt: string; path: string; folderPath: string; isTemplate: true };
+import type { SkillData, SkillInput, VaultLike } from './types.js';
+// `SkillData & {...}`, nie `SkillInput & {...}`: obie konstrukcje niżej (`_loadFromFolder`
+// przez `parseSkillMarkdown`, `_write` przez formData `SkillEditorModal` — patrz jego
+// `formData`, każde pole ma fallback `||`/`??`) ZAWSZE dają konkretną wartość każdemu polu,
+// nigdy `undefined`; kształt jest więc zgodny z `SkillData` (ten sam moduł), co pozwala
+// jednemu UI (SkillEditorModal/DetailView) czytać żywy skill i szablon bez rozgałęziania typu.
+export type SkillTemplateRecord = SkillData & { folderPath: string; isTemplate: true };
 
 export const SKILL_TEMPLATES_PATH = '.pkm-assistant/templates/skills';
 const LIVE_SKILLS_PATH = '.pkm-assistant/skills';
 
 export class SkillTemplateStore {
     declare vault: VaultLike;
-    declare cache: Map<string, StoredTemplate>;
+    declare cache: Map<string, SkillTemplateRecord>;
     /**
      * @param {Object} vault - Obsidian Vault object (używany jest wyłącznie `vault.adapter`)
      */
@@ -61,12 +66,12 @@ export class SkillTemplateStore {
     }
 
     /** @returns {Object[]} szablony z cache (posortowane po nazwie) */
-    list(): StoredTemplate[] {
+    list(): SkillTemplateRecord[] {
         return [...this.cache.values()].sort((a, b) => a.name.localeCompare(b.name));
     }
 
     /** @param {string} slug @returns {Object|null} */
-    get(slug: string): StoredTemplate | null {
+    get(slug: string): SkillTemplateRecord | null {
         if (!slug) return null;
         return this.cache.get(slug)
             || [...this.cache.values()].find(tpl => tpl.name === slug)
@@ -79,7 +84,7 @@ export class SkillTemplateStore {
     }
 
     /** @private */
-    async _loadFromFolder(folderPath: string): Promise<StoredTemplate | null> {
+    async _loadFromFolder(folderPath: string): Promise<SkillTemplateRecord | null> {
         const filePath = `${folderPath}/SKILL.md`;
         if (!await this.vault.adapter.exists(filePath)) return null;
         const raw = await this.vault.adapter.read(filePath);
@@ -91,7 +96,7 @@ export class SkillTemplateStore {
         }
         tpl.isTemplate = true;
         tpl.folderPath = folderPath;
-        return tpl as StoredTemplate;
+        return tpl as SkillTemplateRecord;
     }
 
     // ─── zapis ──────────────────────────────────────────────────
@@ -202,8 +207,12 @@ export class SkillTemplateStore {
             if (!await this.vault.adapter.exists(dir)) await this.vault.adapter.mkdir(dir);
         }
         await this.vault.adapter.write(filePath, serializeSkillFile(payload));
+        // `payload as SkillData`: `SkillInput` deklaruje większość pól opcjonalnie (kształt
+        // zapisu, gdzie wołacz mógłby coś pominąć), ale JEDYNY realny wołacz (`SkillEditorModal`
+        // formData) ZAWSZE ustawia je konkretnie (fallbacki `||`/`??` przy każdym polu) — cast
+        // na źródle rozlania, nie nowe klucze niżej.
         this.cache.set(slug, {
-            ...payload,
+            ...(payload as SkillData),
             slug,
             prompt: (payload.prompt || '').trim(),
             path: filePath,

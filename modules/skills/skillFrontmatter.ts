@@ -10,8 +10,38 @@
  */
 import { parseFrontmatter, stringifyYaml } from '../../core/index.js';
 import type { SkillData, SkillInput, SkillQuestion } from './types.js';
-// TS-any: parser output comes from the dynamically typed YAML compatibility boundary.
-type FrontmatterData = Record<string, any>;
+
+/** Jedna pozycja `pre-questions:` w surowym frontmatterze — wszystko opcjonalne, user pisze
+ * YAML ręcznie. Walidacja obecności `key`/`question` dzieje się niżej (`parseSkillMarkdown`). */
+interface RawSkillQuestion {
+    key?: string;
+    question?: string;
+    default?: string;
+    type?: string;
+    options?: unknown;
+    depends_on?: unknown;
+    placeholder?: unknown;
+    rows?: unknown;
+}
+
+/** Kształt frontmattera SKILL.md jak wraca z `parseFrontmatter`, PRZED walidacją
+ * `name`/`description` (sprawdzaną niżej) — wszystko opcjonalne, user edytuje plik ręcznie. */
+interface FrontmatterData {
+    name?: string;
+    description?: string;
+    slug?: string;
+    category?: string;
+    version?: number;
+    enabled?: boolean;
+    'pre-questions'?: RawSkillQuestion[];
+    tags?: string[] | string;
+    icon?: string;
+    model?: string;
+    'argument-hint'?: string;
+    'disable-model-invocation'?: boolean;
+    'user-invocable'?: boolean;
+    from_template?: string;
+}
 
 /**
  * Parse a SKILL.md file into the canonical skill object.
@@ -26,14 +56,18 @@ type FrontmatterData = Record<string, any>;
 export function parseSkillMarkdown(raw: string, { slug = null, path = '' }: { slug?: string | null; path?: string } = {}): SkillData | null {
     if (!raw?.trim()) return null;
 
+    // TS-boundary: SKILL.md jest plikiem edytowalnym przez usera — kształt sprawdzamy
+    // niżej (name/description), reszta pól ma defaulty poniżej.
     const { frontmatter, content } = parseFrontmatter(raw) as { frontmatter: FrontmatterData; content: string };
     if (!frontmatter?.name || !frontmatter?.description) return null;
 
     // pre-questions (array of {key, question, default, options?})
     let preQuestions: SkillQuestion[] | null = null;
     if (Array.isArray(frontmatter['pre-questions'])) {
-        preQuestions = frontmatter['pre-questions']
-            .filter(q => q && q.key && q.question)
+        // `as ...`: `.filter` bez predykatu typu nie zwęża `key`/`question` do `string` (brak
+        // wsparcia w tej wersji TS) — cast na WYNIKU filtra, warunek i kolejność bez zmian.
+        preQuestions = (frontmatter['pre-questions']
+            .filter(q => q && q.key && q.question) as Array<RawSkillQuestion & { key: string; question: string }>)
             .map(q => ({
                 key: q.key,
                 question: q.question,
