@@ -40,6 +40,9 @@ interface AgentMigration {
     messages: string[];
 }
 
+/** Legacy `minion(s)`/`master(s)` YAML entry: a bare name, or an object carrying `name`/`role`. */
+type LegacyDelegateEntry = string | null | undefined | (Record<string, unknown> & { name?: string; role?: string });
+
 function isPlainObject(v: unknown): v is Record<string, unknown> {
     return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -246,9 +249,9 @@ export class AgentLoader {
                 try {
                     await this.vault.adapter.write(filePath, stringifyYaml(agent.serialize()));
                     log.warn('AgentLoader', `Migracja osi narzędziowej (C1) dla "${agent.name}" → disabled_tools`);
-                // TS-any: vault adapter errors are legacy untyped values and this path only reports their message.
-                } catch (e: any) {
-                    log.warn('AgentLoader', `Zapis po migracji osi narzędziowej nie powiódł się dla "${agent.name}": ${e.message}`);
+                } catch (e) {
+                    // TS-boundary: vault adapter errors are legacy untyped values; only their message is read.
+                    log.warn('AgentLoader', `Zapis po migracji osi narzędziowej nie powiódł się dla "${agent.name}": ${(e as { message?: string }).message}`);
                 }
             }
 
@@ -345,11 +348,13 @@ export class AgentLoader {
                 data.default_permissions = { ...agent.permissions, ...data.default_permissions };
             }
             agent.update(data);
-        // TS-any: vault adapter errors are legacy untyped values and this path only reports their message.
-        } catch (e: any) {
+        } catch (e) {
+            // TS-boundary: vault adapter errors are legacy untyped values; only their message is read.
             // File not found is expected (no overrides) - only log unexpected errors
-            if (e?.message && !e.message.includes('ENOENT') && !e.message.includes('not found')) {
-                log.warn('AgentLoader', `Override read error for ${agent.name}:`, e.message);
+            if ((e as { message?: string })?.message
+                && !(e as { message?: string }).message!.includes('ENOENT')
+                && !(e as { message?: string }).message!.includes('not found')) {
+                log.warn('AgentLoader', `Override read error for ${agent.name}:`, (e as { message?: string }).message);
             }
         }
     }
@@ -429,9 +434,12 @@ export class AgentLoader {
             const pushLegacy = (value: unknown, role: string) => {
                 if (typeof value === 'string' && value.trim()) migrated.push({ name: value.trim(), role, default: true });
                 if (Array.isArray(value)) {
-                    for (const item of value) {
+                    // TS-boundary: legacy minion/master YAML fields are unvalidated user data.
+                    for (const item of value as LegacyDelegateEntry[]) {
                         if (typeof item === 'string') migrated.push({ name: item, role });
-                        else if (item?.name) migrated.push({ ...item, role: role === 'strategist' ? 'strategist' : (item.role || role) });
+                        // TS-boundary: spread of a legacy YAML entry already known (guard above) to carry
+                        // a `name`; TS can't infer that through the spread, so assert the resulting shape.
+                        else if (item?.name) migrated.push({ ...item, role: role === 'strategist' ? 'strategist' : (item.role || role) } as AgentSubAgentAssignment);
                     }
                 }
             };
