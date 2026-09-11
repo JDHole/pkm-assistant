@@ -16,15 +16,16 @@ import { UiIcons, setSvg } from '../../crystal-soul/index.js';
 import { renderToggle } from './profile_helpers.js';
 import { getVisibleSubAgentsForAgent } from '../../sub-agents/index.js';
 import { t } from '../../../core/i18n/index.js';
-
-// TS-any: team editor consumes dynamic sub-agent loader records and sidebar navigation extensions.
-type UiBoundary = any;
+import type { ProfileCtx } from './profile_types.js';
+import type { AgentSubAgentAssignment } from '../Agent.js';
+import type { SubAgentData, SubAgentLoader } from '../../sub-agents/index.js';
+import type { SidebarNav } from '../../shell/index.js';
 
 /**
  * @param {Object} ctx - shared context
  * @param {HTMLElement} el
  */
-export function renderEkipaTab(ctx: UiBoundary, el: HTMLElement) {
+export function renderEkipaTab(ctx: ProfileCtx, el: HTMLElement) {
     const { formData, nav, plugin } = ctx;
     const loader = plugin.agentManager?.subAgentLoader;
     const visible = _visibleSubs(ctx);
@@ -33,13 +34,13 @@ export function renderEkipaTab(ctx: UiBoundary, el: HTMLElement) {
     setSvg(head, UiIcons.users(14));
     head.createSpan({ text: t('profile.team.members_header') });
 
-    const assigned = formData.sub_agents.filter((a: UiBoundary) => visible.some((s: UiBoundary) => s.name === a.name));
-    const missing = formData.sub_agents.filter((a: UiBoundary) => !visible.some((s: UiBoundary) => s.name === a.name));
+    const assigned = formData.sub_agents.filter((a: AgentSubAgentAssignment) => visible.some((s: SubAgentData) => s.name === a.name));
+    const missing = formData.sub_agents.filter((a: AgentSubAgentAssignment) => !visible.some((s: SubAgentData) => s.name === a.name));
 
     if (missing.length > 0) {
         const warn = el.createDiv({ cls: 'cs-warning-banner' });
         setSvg(warn, UiIcons.info(14));
-        warn.createSpan({ text: ` ${t('profile.team.missing_subs', { names: missing.map((m: UiBoundary) => m.name).join(', ') })}` });
+        warn.createSpan({ text: ` ${t('profile.team.missing_subs', { names: missing.map((m: AgentSubAgentAssignment) => m.name).join(', ') })}` });
     }
 
     // ── Member tiles ──
@@ -64,14 +65,14 @@ export function renderEkipaTab(ctx: UiBoundary, el: HTMLElement) {
         formData.sub_agent_enabled, v => { formData.sub_agent_enabled = v; });
 }
 
-function _visibleSubs(ctx: UiBoundary) {
+function _visibleSubs(ctx: ProfileCtx) {
     const all = ctx.plugin.agentManager?.subAgentLoader?.getAllSubAgents?.() || [];
     return getVisibleSubAgentsForAgent({ name: ctx.formData?.name, activeSubAgents: ctx.formData?.sub_agents || [] } as unknown as { name?: string }, all);
 }
 
-function _renderMemberTile(ctx: UiBoundary, grid: HTMLElement, assignment: UiBoundary, loader: UiBoundary, nav: UiBoundary) {
+function _renderMemberTile(ctx: ProfileCtx, grid: HTMLElement, assignment: AgentSubAgentAssignment, loader: SubAgentLoader | undefined, nav: SidebarNav) {
     const { formData } = ctx;
-    const cfg = loader?.getSubAgent?.(assignment.name) || {};
+    const cfg = (loader?.getSubAgent?.(assignment.name) || {}) as Partial<SubAgentData>;
     const isDefault = assignment.default === true;
     const isActive = assignment.active !== false;
 
@@ -117,7 +118,7 @@ function _renderMemberTile(ctx: UiBoundary, grid: HTMLElement, assignment: UiBou
     star.addEventListener('click', (e: Event) => {
         e.stopPropagation();
         if (isDefault) { assignment.default = false; }
-        else { formData.sub_agents.forEach((it: UiBoundary) => { it.default = false; }); assignment.default = true; }
+        else { formData.sub_agents.forEach((it: AgentSubAgentAssignment) => { it.default = false; }); assignment.default = true; }
         ctx.renderActiveTab();
     });
 
@@ -133,16 +134,16 @@ function _renderMemberTile(ctx: UiBoundary, grid: HTMLElement, assignment: UiBou
     setSvg(removeBtn, UiIcons.x(10));
     removeBtn.addEventListener('click', (e: Event) => {
         e.stopPropagation();
-        const idx = formData.sub_agents.findIndex((m: UiBoundary) => m.name === assignment.name);
+        const idx = formData.sub_agents.findIndex((m: AgentSubAgentAssignment) => m.name === assignment.name);
         if (idx >= 0) formData.sub_agents.splice(idx, 1);
         ctx.renderActiveTab();
     });
 }
 
 /** Assign an already-defined (prefixed) sub that isn't assigned yet. */
-function _renderAssignExisting(ctx: UiBoundary, el: HTMLElement, visible: UiBoundary[]) {
+function _renderAssignExisting(ctx: ProfileCtx, el: HTMLElement, visible: SubAgentData[]) {
     const { formData } = ctx;
-    const unassigned = visible.filter((s: UiBoundary) => !formData.sub_agents.some((a: UiBoundary) => a.name === s.name));
+    const unassigned = visible.filter((s: SubAgentData) => !formData.sub_agents.some((a: AgentSubAgentAssignment) => a.name === s.name));
     if (unassigned.length === 0) return;
 
     const wrap = el.createDiv({ cls: 'cs-picker' });
@@ -160,7 +161,7 @@ function _renderAssignExisting(ctx: UiBoundary, el: HTMLElement, visible: UiBoun
         opt.createSpan({ cls: 'cs-picker__option-name', text: sub.name });
         if (sub.description) opt.createSpan({ cls: 'cs-picker__option-desc', text: sub.description });
         opt.addEventListener('click', () => {
-            const entry: UiBoundary = { name: sub.name, role: sub.role || 'researcher' };
+            const entry: AgentSubAgentAssignment = { name: sub.name, role: sub.role || 'researcher' };
             if (formData.sub_agents.length === 0) entry.default = true;
             formData.sub_agents.push(entry);
             ctx.renderActiveTab();
@@ -191,7 +192,7 @@ function _renderAssignExisting(ctx: UiBoundary, el: HTMLElement, visible: UiBoun
  * Create a brand-new sub-agent from scratch (editor modal) and auto-assign it.
  * Modal umie od razu dołożyć formę odlewniczą do Zaplecza („Zapisz też jako szablon").
  */
-function _renderAddFromScratch(ctx: UiBoundary, el: HTMLElement) {
+function _renderAddFromScratch(ctx: ProfileCtx, el: HTMLElement) {
     const { formData, plugin } = ctx;
     const btn = el.createEl('button', { cls: 'cs-preset-btn', text: t('profile.team.add_from_scratch') });
     btn.addEventListener('click', () => {
@@ -201,14 +202,14 @@ function _renderAddFromScratch(ctx: UiBoundary, el: HTMLElement) {
             const { loadSubAgentEditorModal } = await import('../../sub-agents/index.js');
             const SubAgentEditorModal = await loadSubAgentEditorModal();
             const loader = plugin.agentManager?.subAgentLoader;
-            const before = new Set(_visibleSubs(ctx).map((s: UiBoundary) => s.name));
+            const before = new Set(_visibleSubs(ctx).map((s: SubAgentData) => s.name));
             new SubAgentEditorModal(plugin.app, plugin, null, () => {
                 void (async () => {
                     try { await loader?.reloadSubAgents?.(); } catch { /* best effort */ }
                     // Auto-assign any newly-created sub that is visible to this agent (prefix <agent>-).
                     for (const s of _visibleSubs(ctx)) {
-                        if (!before.has(s.name) && !formData.sub_agents.some((a: UiBoundary) => a.name === s.name)) {
-                            const entry: UiBoundary = { name: s.name, role: s.role || 'researcher' };
+                        if (!before.has(s.name) && !formData.sub_agents.some((a: AgentSubAgentAssignment) => a.name === s.name)) {
+                            const entry: AgentSubAgentAssignment = { name: s.name, role: s.role || 'researcher' };
                             if (formData.sub_agents.length === 0) entry.default = true;
                             formData.sub_agents.push(entry);
                         }
@@ -222,7 +223,7 @@ function _renderAddFromScratch(ctx: UiBoundary, el: HTMLElement) {
 }
 
 /** „+ z szablonu" - odlej kopię suba z Zaplecza do Ekipy tego agenta. */
-function _renderAddFromTemplate(ctx: UiBoundary, el: HTMLElement) {
+function _renderAddFromTemplate(ctx: ProfileCtx, el: HTMLElement) {
     const { formData, plugin } = ctx;
     const store = plugin.agentManager?.subAgentTemplateStore;
     const templates = store?.list() || [];
@@ -254,8 +255,8 @@ function _renderAddFromTemplate(ctx: UiBoundary, el: HTMLElement) {
                     return;
                 }
                 if (result.renamed) new Notice(t('backstage.template_slug_taken', { name: result.name }));
-                if (!formData.sub_agents.some((a: UiBoundary) => a.name === result.name)) {
-                    const entry: UiBoundary = { name: result.name, role: 'researcher' };
+                if (!formData.sub_agents.some((a: AgentSubAgentAssignment) => a.name === result.name)) {
+                    const entry: AgentSubAgentAssignment = { name: result.name as string, role: 'researcher' };
                     if (formData.sub_agents.length === 0) entry.default = true;
                     formData.sub_agents.push(entry);
                 }
