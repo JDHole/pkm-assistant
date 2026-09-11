@@ -14,7 +14,7 @@ import { registerSettings as registerWebSettings } from '../web/index.js';
 import { registerSettings as registerCrystalSoulSettings } from '../crystal-soul/index.js';
 import { renderVaultSection } from './vault_settings.js';
 import { renderPromptSection } from './prompt_settings.js';
-import type { PluginApi, SettingsSectionCtx, ChatSettingsSlice, EmbeddingSettingsSlice } from '../../core/index.js';
+import type { PluginApi, SettingsSectionCtx, ChatSettingsSlice, EmbeddingSettingsSlice, PkmAssistantSettings } from '../../core/index.js';
 import type { ModelLibraryEntry } from '../models/index.js';
 
 interface PlatformOption {
@@ -23,15 +23,43 @@ interface PlatformOption {
 }
 
 /**
- * TS-boundary: każdy owner-modul (core/models/memory/tools/web/crystal-soul) ma WŁASNY,
- * strukturalnie inny `SettingsRegistryLike`/Ctx nad tym samym rejestrem i workerem DI -
- * `SettingsRegistry.register`/`registerXSettings` żyją za generycznym
- * `(...args: unknown[]) => unknown` (patrz `SettingsRegistry.ts`/`BackstageRegistry.ts` - ten
- * sam wzorzec rejestru wielu niezależnie typowanych wołaczy). Zawężenie do jednego precyzyjnego
- * typu współdzielonego przez wszystkich wołaczy nie istnieje bez zmiany ich plików (poza
- * zakresem); wywołania zostają 1:1, tylko z realną (nie `any`) funkcją zamiast `Runtime`.
+ * Worek DI z `buildSectionContext()`, węższy niż gołe `SettingsSectionCtx` (core) tam, gdzie core
+ * widzi mniej niż realnie istnieje w `bag.pkmAssistant` (`pkm`), i szerszy tam, gdzie core w ogóle
+ * nie zna pól, których core NIE CZYTA (`availablePlatforms`/modale) - wzór:
+ * `modules/tools/SettingsContent.ts:ToolsSettingsCtx`. `save` zawężone do realnego zwrotu
+ * `save_settings()` (zawsze `Promise<void>`, core dopuszcza też goły `void`).
  */
-type GenericFn = (...args: unknown[]) => unknown;
+type ShellSectionCtx = Omit<SettingsSectionCtx, 'pkm' | 'save'> & {
+    pkm: PkmAssistantSettings;
+    save: () => Promise<void>;
+    availablePlatforms: PlatformOption[];
+    MCPServerEditorModal: typeof MCPServerEditorModal;
+    ClaudeImportModal: typeof ClaudeImportModal;
+};
+
+/**
+ * TS-boundary: wszystkie `registerXSettings` (core/models/memory/tools/web/crystal-soul) mają
+ * sygnaturę JEDNOargumentową `(registry: SettingsRegistryLike): void` - drugi argument
+ * (`this.plugin`) poniżej jest MARTWY na poziomie typów, żaden z wołanych modułów go nie czyta.
+ * Zostaje (to zachowanie runtime, zmiana sygnatury `registerX` w cudzym module jest poza
+ * zakresem). `WithDeadArg<typeof fn>` bierze typ registry Z SAMEJ wołanej funkcji
+ * (`Parameters<Fn>[0]`, WŁASNY prywatny `SettingsRegistryLike` TEGO modułu - kanoniczny
+ * `SettingsRegistryLike` z `core/index.ts` tu nie pasuje, bo core/models/memory/web/tools/
+ * crystal-soul mają każdy swoją, niekompatybilną kopię) i formalnie dokłada `...rest: unknown[]`
+ * na martwy drugi argument (arity, nie shape) - ten cast jest bezpieczny (jeden `as`) dla
+ * WSZYSTKICH sześciu wołań, bo poszerza tylko arity, nie zmienia typu `registry`.
+ * Drugi, osobny cast siedzi na SAMYM `SettingsRegistry` w wywołaniu - dla `core` NIE jest
+ * potrzebny (rejestr realnie spełnia `core`'s `SettingsSectionCtx` strukturalnie), ale dla
+ * pozostałych pięciu tak: każdy ma WŁASNY, SZERSZY niż wspólny `SettingsSectionCtx` kontrakt Ctx
+ * (np. `ModelsSectionCtx` dokłada `availablePlatforms`, `ToolsSettingsCtx` dwa modale) -
+ * `SettingsRegistry` (typowany generycznie dla WSZYSTKICH wołaczy naraz, patrz `SettingsSection`
+ * w `SettingsRegistry.ts`) formalnie obiecuje tylko wspólny, węższy `SettingsSectionCtx`, więc
+ * żaden pojedynczy `as` między konkretnym `SettingsRegistryClass` a takim rejestrem nie przechodzi
+ * (realny worek z `buildSectionContext()` te pola ma - to jest TA SAMA "kontrawariancja rejestru
+ * wielu niezależnie typowanych wołaczy", co przy `SidebarNav`/`BackstageRegistry`, patrz
+ * `AgentSidebar.ts`).
+ */
+type WithDeadArg<Fn extends (registry: never) => void> = (registry: Parameters<Fn>[0], ...rest: unknown[]) => void;
 
 export class PkmSettingsTab extends PluginSettingsTab {
     declare readonly plugin: PluginApi;
@@ -105,7 +133,7 @@ export class PkmSettingsTab extends PluginSettingsTab {
     async render_global_settings(container: HTMLElement): Promise<void> {
         if (!container) return;
         this._registerDefaultSettingsSections();
-        await (SettingsRegistry.render as unknown as GenericFn)(container, this.plugin, {
+        await SettingsRegistry.render(container, this.plugin, {
             owner: this,
             defaultId: 'models',
         });
@@ -114,9 +142,9 @@ export class PkmSettingsTab extends PluginSettingsTab {
     _registerDefaultSettingsSections() {
         if (this._settingsSectionsRegistered) return;
         SettingsRegistry.clear();
-        (registerCoreSettings as unknown as GenericFn)(SettingsRegistry, this.plugin);
-        (registerModelsSettings as unknown as GenericFn)(SettingsRegistry, this.plugin);
-        (registerMemorySettings as unknown as GenericFn)(SettingsRegistry, this.plugin);
+        (registerCoreSettings as WithDeadArg<typeof registerCoreSettings>)(SettingsRegistry, this.plugin);
+        (registerModelsSettings as WithDeadArg<typeof registerModelsSettings>)(SettingsRegistry as unknown as Parameters<typeof registerModelsSettings>[0], this.plugin);
+        (registerMemorySettings as WithDeadArg<typeof registerMemorySettings>)(SettingsRegistry as unknown as Parameters<typeof registerMemorySettings>[0], this.plugin);
         // Settings→Vault (folder groups + vault zone descriptions). Shell-owned (vault
         // entity, not agents); order 35 sits between Pamięć (30) and Web (45).
         SettingsRegistry.register({
@@ -124,9 +152,9 @@ export class PkmSettingsTab extends PluginSettingsTab {
             label: t('settings.vault_label'),
             icon: '🗂️',
             order: 35,
-            render: (containerEl: HTMLElement, _plugin: unknown, options: { owner: PkmSettingsTab }) => renderVaultSection(containerEl, options.owner.buildSectionContext() as unknown as Parameters<typeof renderVaultSection>[1]),
-        } as unknown as Parameters<typeof SettingsRegistry.register>[0]);
-        (registerWebSettings as unknown as GenericFn)(SettingsRegistry, this.plugin);
+            render: (containerEl: HTMLElement, _plugin: PluginApi, options: { owner: { buildSectionContext(): ShellSectionCtx } }) => renderVaultSection(containerEl, options.owner.buildSectionContext() as unknown as Parameters<typeof renderVaultSection>[1]),
+        });
+        (registerWebSettings as WithDeadArg<typeof registerWebSettings>)(SettingsRegistry as unknown as Parameters<typeof registerWebSettings>[0], this.plugin);
         // Settings→Prompt (global prompt defaults - work prompts + factory sections).
         // Shell-owned; order 50 sits after Web (45), before No-Go (60).
         SettingsRegistry.register({
@@ -134,22 +162,24 @@ export class PkmSettingsTab extends PluginSettingsTab {
             label: t('settings.prompt_label'),
             icon: '📝',
             order: 50,
-            render: (containerEl: HTMLElement, _plugin: unknown, options: { owner: PkmSettingsTab }) => renderPromptSection(containerEl, options.owner.buildSectionContext() as unknown as Parameters<typeof renderPromptSection>[1]),
-        } as unknown as Parameters<typeof SettingsRegistry.register>[0]);
-        (registerMcpSettings as unknown as GenericFn)(SettingsRegistry, this.plugin);
-        (registerCrystalSoulSettings as unknown as GenericFn)(SettingsRegistry, this.plugin);
+            render: (containerEl: HTMLElement, _plugin: PluginApi, options: { owner: { buildSectionContext(): ShellSectionCtx } }) => renderPromptSection(containerEl, options.owner.buildSectionContext() as unknown as Parameters<typeof renderPromptSection>[1]),
+        });
+        (registerMcpSettings as WithDeadArg<typeof registerMcpSettings>)(SettingsRegistry as unknown as Parameters<typeof registerMcpSettings>[0], this.plugin);
+        (registerCrystalSoulSettings as WithDeadArg<typeof registerCrystalSoulSettings>)(SettingsRegistry as unknown as Parameters<typeof registerCrystalSoulSettings>[0], this.plugin);
         this._settingsSectionsRegistered = true;
     }
 
     /**
      * TS-boundary: worek DI współdzielony przez WSZYSTKIE sekcje ustawień (core/models/memory/
      * tools/web/vault/prompt/crystal-soul) - każdy owner-modul ma WŁASNY, węższy typ Ctx nad tym
-     * samym obiektem (np. `modules/models/SettingsContent.ts:ModelsSectionCtx`). `SettingsSectionCtx`
-     * (core, ten plik jest jego wołaczem referencyjnym) opisuje `pkm` wąsko (`PkmSettingsSlice`,
-     * nieeksportowany) - realny `bag.pkmAssistant` ma więcej pól niż ta jedna sekcja czyta,
-     * stąd jedna asercja całego zwracanego workera zamiast rozbijania pól z osobna.
+     * samym obiektem (np. `modules/models/SettingsContent.ts:ModelsSectionCtx`). Zwrotka jest
+     * `ShellSectionCtx` (patrz definicja niżej), nie gołym `SettingsSectionCtx` z core - core widzi
+     * węższy `pkm: PkmSettingsSlice` (nieeksportowany) i nie zna w ogóle `availablePlatforms`/
+     * `MCPServerEditorModal`/`ClaudeImportModal` (ADR 003: core nie importuje z modules/), a ten
+     * worek je realnie niesie dla sekcji spoza core. Jedna asercja całego zwracanego obiektu
+     * zamiast rozbijania pól z osobna, bo żaden pojedynczy typ nie opisuje THIS worka w całości.
      */
-    buildSectionContext(): SettingsSectionCtx {
+    buildSectionContext(): ShellSectionCtx {
         // To jest EKRAN USERA, nie boot - prowizjonowanie idzie świadomie przez proxy.
         const bag = this.env?.settings ?? {};
         if (!bag.pkmAssistant) bag.pkmAssistant = {};
@@ -182,7 +212,7 @@ export class PkmSettingsTab extends PluginSettingsTab {
                 const { CostTrackingModal } = await import('./CostTrackingModal.js');
                 new CostTrackingModal(this.app, this.plugin).open();
             },
-        } as unknown as SettingsSectionCtx;
+        } as unknown as ShellSectionCtx;
     }
 
     /**

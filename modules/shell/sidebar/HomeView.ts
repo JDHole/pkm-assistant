@@ -37,9 +37,9 @@ interface HomeViewPlugin extends PluginApi {
 type AgentListItem = ReturnType<AgentManager['getAgentListForUI']>[number];
 
 /**
- * `AgentManager.komunikatorManager` jest wciąż `unknown`-owym polem dynamicznym
- * (migracja modules/agents jeszcze go nie otypowała) - Home czyta z niego wyłącznie
- * `getUnreadCount`, więc zawężamy TYLKO ten kawałek powierzchni.
+ * `AgentManager.komunikatorManager` jest wciąż `any`-owym polem dynamicznym (`RuntimeDependency`,
+ * `modules/agents/AgentManager.ts` - migracja modules/agents jeszcze go nie otypowała) - Home
+ * czyta z niego wyłącznie `getUnreadCount`, więc zawężamy TYLKO ten kawałek powierzchni.
  */
 interface KomunikatorManagerLike {
     getUnreadCount(agentName: string): Promise<number>;
@@ -65,14 +65,16 @@ function firstFreeAgentName(agentManager: AgentManager | null | undefined): stri
 
 /**
  * Role display text mapping (resolved at render time via t()).
+ * `role` bierze `string | undefined` - jedyny wołacz (`renderAgentCard` niżej) przekazuje
+ * ZAWSZE `undefined` (`Agent.getDisplayInfo()` nie ma pola `role`, patrz TS-boundary tam).
  */
-function getRoleLabel(role: string): string {
+function getRoleLabel(role: string | undefined): string {
     const labels: Record<string, string> = {
         'orchestrator': 'Orchestrator',
         'specialist': t('sidebar.specialist'),
         'meta_agent': t('sidebar.meta_agent')
     };
-    return labels[role] || role || '';
+    return labels[role as string] || role || '';
 }
 
 /**
@@ -82,9 +84,16 @@ function getRoleLabel(role: string): string {
  * @param {import('./SidebarNav.js').SidebarNav} nav
  * @param {Object} params
  */
-export function renderHomeView(container: HTMLElement, plugin: HomeViewPlugin, nav: SidebarNav, _params: Record<string, unknown>): void {
+/**
+ * TS-boundary: `renderHomeView` jest zarejestrowany w `SidebarNav` (`AgentSidebar.ts`) pod
+ * wspólnym `ViewRenderer` (`plugin: PluginApi`) - węższy `HomeViewPlugin` zostaje WŁASNOŚCIĄ tej
+ * funkcji (zawężenie u źródła wiedzy, nie w rejestrze), więc rejestracja nie potrzebuje żadnego
+ * castu. Wewnętrzne helpery (`renderAgentCard`/`renderCommunicatorSection`/`renderZapleczeSection`)
+ * zostają typowane WĄSKO jak dotąd - dostają zawężony `plugin` w miejscu wywołania.
+ */
+export function renderHomeView(container: HTMLElement, plugin: PluginApi, nav: SidebarNav, _params: Record<string, unknown>): void {
     container.classList.add('cs-root');
-    const agentManager = plugin.agentManager;
+    const agentManager = (plugin as HomeViewPlugin).agentManager;
     if (!agentManager) {
         container.createEl('p', {
             text: t('sidebar.agent_manager_not_init'),
@@ -105,7 +114,7 @@ export function renderHomeView(container: HTMLElement, plugin: HomeViewPlugin, n
     const grid = container.createDiv({ cls: `cs-agent-grid cs-agent-grid--${colCount}col` });
 
     for (const agentInfo of agents) {
-        renderAgentCard(grid, agentInfo, plugin, nav);
+        renderAgentCard(grid, agentInfo, plugin as HomeViewPlugin, nav);
     }
 
     // Add agent card (dashed)
@@ -115,8 +124,8 @@ export function renderHomeView(container: HTMLElement, plugin: HomeViewPlugin, n
     setSvg(addCard, UiIcons.plus(16));
     addCard.addEventListener('click', async () => {
         try {
-            const name = firstFreeAgentName(plugin.agentManager);
-            await plugin.agentManager!.createAgent({ name });
+            const name = firstFreeAgentName((plugin as HomeViewPlugin).agentManager);
+            await (plugin as HomeViewPlugin).agentManager!.createAgent({ name });
             nav.push('agent-profile', { agentName: name }, t('sidebar.agents'));
         } catch (e) {
             new Notice(t('profile.advanced.create_error') + (((e as ErrLike)?.message || (e as ErrLike)) as string));
@@ -125,13 +134,13 @@ export function renderHomeView(container: HTMLElement, plugin: HomeViewPlugin, n
 
     // ── Section: Komunikator ── (kill-switch: hidden unless enabled, default off)
     if (isKomunikatorEnabled(plugin.settings)) {
-        renderCommunicatorSection(container, agents, plugin, nav);
+        renderCommunicatorSection(container, agents, plugin as HomeViewPlugin, nav);
     }
 
     // ── Section: Agora ──
 
     // ── Section: Zaplecze ──
-    renderZapleczeSection(container, plugin, nav);
+    renderZapleczeSection(container, plugin as HomeViewPlugin, nav);
 }
 
 /**
@@ -157,8 +166,9 @@ function renderAgentCard(container: HTMLElement, agentInfo: AgentListItem, plugi
 
     // Role
     // TS-boundary: `role` nie jest polem `Agent.getDisplayInfo()` (name/color/description/isBuiltIn) -
-    // w praktyce zawsze `undefined`; zachowane 1:1 z oryginałem (getRoleLabel(undefined) → '').
-    const roleText = getRoleLabel((agentInfo as unknown as { role: string }).role);
+    // zastane: `role` nigdy nie ma, blok jest martwy; kasacja tego bloku byłaby zmianą runtime
+    // (poza zakresem tej migracji), więc zostaje 1:1 z oryginałem (getRoleLabel(undefined) → '').
+    const roleText = getRoleLabel((agentInfo as unknown as { role?: string }).role);
     if (roleText) {
         card.createDiv({ cls: 'cs-agent-card__role', text: roleText });
     }

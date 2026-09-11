@@ -70,8 +70,14 @@ function registerDefaultBackstageTabs() {
 
 /**
  * Main unified Backstage view - tabs registered by their owning modules.
+ *
+ * TS-boundary: zarejestrowany w `SidebarNav` (`AgentSidebar.ts`) pod wspólnym `ViewRenderer`
+ * (`plugin: PluginApi`) - węższy `BackstageViewsPlugin` zostaje WŁASNOŚCIĄ tej funkcji (zawężenie
+ * u źródła wiedzy), rejestracja nie potrzebuje castu. `tab?.render(content, plugin, nav)` niżej
+ * bierze `plugin` gołe - `BackstageTab.render` jest generyczne (`(...args: unknown[]) => unknown`,
+ * patrz `BackstageRegistry.ts`), nie zawęża.
  */
-export function renderZapleczeView(container: HTMLElement, plugin: BackstageViewsPlugin, nav: SidebarNav, params: ViewParams): void {
+export function renderZapleczeView(container: HTMLElement, plugin: PluginApi, nav: SidebarNav, params: ViewParams): void {
     container.classList.add('cs-root');
     registerDefaultBackstageTabs();
 
@@ -85,9 +91,9 @@ export function renderZapleczeView(container: HTMLElement, plugin: BackstageView
         const btn = tabBar.createEl('button', {
             cls: `cs-profile-tab ${tab.id === activeTab ? 'cs-profile-tab--active' : ''}`
         });
-        setSvgLabel(btn, tab.iconFn!(14), tab.label as string);
+        setSvgLabel(btn, tab.iconFn(14), tab.label as string);
 
-        const count = getTabCount(plugin, tab.id);
+        const count = getTabCount(plugin as BackstageViewsPlugin, tab.id);
         if (count > 0) {
             btn.createSpan({ cls: 'cs-zaplecze-tab__count', text: `${count}` });
         }

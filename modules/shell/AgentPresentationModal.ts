@@ -116,9 +116,11 @@ export class AgentPresentationModal extends Modal {
         ]) {
             const filled = info.value !== '0' && info.value !== globalLabel;
             const shard = infoGrid.createDiv({ cls: `cs-shard ${filled ? 'cs-shard--filled' : 'cs-shard--empty'}` });
-            // TS-boundary: `Brain` (stats.brainSize) jest liczbą, reszta stringiem - DOM
-            // (createDiv → textContent) i tak konwertuje niejawnie; brak String() w oryginale.
-            shard.createDiv({ cls: 'cs-shard__value', text: info.value as unknown as string });
+            // TS-boundary: `Brain` (stats.brainSize) jest liczbą, reszta stringiem (`info.value:
+            // string | number`) - DOM (createDiv → textContent) i tak konwertuje niejawnie; brak
+            // String() w oryginale. Jeden `as` (nie `as unknown as`) - zawężenie unii do jednego
+            // członu jest zawsze bezpośrednio dozwolone.
+            shard.createDiv({ cls: 'cs-shard__value', text: info.value as string });
             shard.createDiv({ cls: 'cs-shard__main-label', text: info.label });
         }
 

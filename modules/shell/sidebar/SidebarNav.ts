@@ -17,8 +17,13 @@ type ViewEntry = { viewId: string; params: ViewParams; title: string; scrollTop:
  * managera konkretnego modułu) - ten sam typ rejestruje widoki z modules/agents,
  * modules/komunikator i shell, więc renderFn musi się zgadzać z jednym wspólnym kształtem;
  * właściciel widoku zawęża `plugin.<manager>` do realnego typu lokalnie, w swoim pliku.
+ * Zwrotka `void | Promise<void>` - `renderSkillDetailView`/`renderSubAgentDetailView`
+ * (modules/skills/index.ts, modules/sub-agents/index.ts - leniwe barrel-wrappery) są `async`;
+ * goły `void` dawałby `no-misused-promises` przy ich rejestracji w `AgentSidebar.ts`, mimo że
+ * `_render()` (`renderFn(content, this.plugin, this, current.params);` niżej) i tak nie czeka na
+ * zwrotkę - to zachowanie runtime bez zmian, tylko typ przestaje kłamać.
  */
-export type ViewRenderer = (container: HTMLElement, plugin: PluginApi, nav: SidebarNav, params: ViewParams) => void;
+export type ViewRenderer = (container: HTMLElement, plugin: PluginApi, nav: SidebarNav, params: ViewParams) => void | Promise<void>;
 
 export class SidebarNav {
     declare containerEl: HTMLElement;

@@ -43,14 +43,19 @@ interface ChatViewLike {
 
 /**
  * Render the triggers view.
+ *
+ * TS-boundary: zarejestrowany w `SidebarNav` (`AgentSidebar.ts`) pod wspólnym `ViewRenderer`
+ * (`plugin: PluginApi`) - węższy `TriggersViewPlugin` zostaje WŁASNOŚCIĄ tej funkcji (zawężenie u
+ * źródła wiedzy), rejestracja nie potrzebuje castu. `_nav`/`_params` są tu i tak `unknown` (szersze
+ * niż `SidebarNav`/`ViewParams` z `ViewRenderer` - zgodne bez zmian).
  * @param {HTMLElement} container
  * @param {Object} plugin
  * @param {import('./SidebarNav.js').SidebarNav} nav
  * @param {Object} _params
  */
-export function renderTriggersView(container: HTMLElement, plugin: TriggersViewPlugin, _nav: unknown, _params: unknown): void {
+export function renderTriggersView(container: HTMLElement, plugin: PluginApi, _nav: unknown, _params: unknown): void {
     container.classList.add('cs-root');
-    const agentManager = plugin?.agentManager;
+    const agentManager = (plugin as TriggersViewPlugin)?.agentManager;
     const activeAgent = agentManager?.getActiveAgent?.();
 
     if (activeAgent) {
@@ -75,7 +80,7 @@ export function renderTriggersView(container: HTMLElement, plugin: TriggersViewP
         sectionLabel: t('triggers.section.skills'),
         emptyText: t('triggers.empty.skills'),
         items: collectSkillItems(agentManager),
-    onSelect: (item: TriggerItem) => { void insertTriggerMarker(plugin, 'skill', item.name); },
+    onSelect: (item: TriggerItem) => { void insertTriggerMarker(plugin as TriggersViewPlugin, 'skill', item.name); },
     });
 
     // ── Section: Sub-agents ──
@@ -83,15 +88,15 @@ export function renderTriggersView(container: HTMLElement, plugin: TriggersViewP
         sectionLabel: t('triggers.section.sub_agents'),
         emptyText: t('triggers.empty.sub_agents'),
         items: collectSubAgentItems(agentManager, activeAgent),
-    onSelect: (item: TriggerItem) => { void insertTriggerMarker(plugin, 'sub-agent', item.name); },
+    onSelect: (item: TriggerItem) => { void insertTriggerMarker(plugin as TriggersViewPlugin, 'sub-agent', item.name); },
     });
 
     // ── Section: MCP servers ──
     renderTriggerSection(container, {
         sectionLabel: t('triggers.section.mcp'),
         emptyText: t('triggers.empty.mcp'),
-        items: collectMcpServerItems(plugin, activeAgent),
-    onSelect: (item: TriggerItem) => { void insertTriggerMarker(plugin, 'tool', item.name); },
+        items: collectMcpServerItems(plugin as TriggersViewPlugin, activeAgent),
+    onSelect: (item: TriggerItem) => { void insertTriggerMarker(plugin as TriggersViewPlugin, 'tool', item.name); },
     });
 }
 
