@@ -275,9 +275,9 @@ export async function runAgentLoop({
      * `modules/models`) rzuca `NormalizedError`/`ModelRequestError` - konsumenci pętli czytają
      * z odrzucenia `code`/`http_status`/`message`, więc zwykłe `new Error(String(reason))`
      * zgubiłoby te pola. `agent-loop` świadomie NIE zależy od `modules/models` (patrz komentarz
-     * modułu i `LoopModelLike` wyżej), więc to jest LOKALNY, strukturalny odpowiednik
-     * `ModelRequestError.from()` - `Object.assign` dokleja oryginalne pola na odrzucany `Error`
-     * zamiast je gubić. Realny `Error` (już poprawny) przechodzi nietknięty.
+     * modułu i `LoopModelLike` wyżej), więc to jest LOKALNY, strukturalny odpowiednik takiego
+     * opakowania - `Object.assign` dokleja oryginalne pola na odrzucany `Error` zamiast je
+     * gubić. Realny `Error` (już poprawny) przechodzi nietknięty.
      */
     const toRejectableError = (reason: unknown): Error => {
         if (reason instanceof Error) return reason;
