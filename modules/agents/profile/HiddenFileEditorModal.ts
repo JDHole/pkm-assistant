@@ -101,7 +101,7 @@ export class HiddenFileEditorModal extends Modal {
                 this._renderChild = renderChild;
                 await MarkdownRenderer.render(this.app, displayContent, previewShard, this.filePath || '', renderChild);
                 // If render produced nothing, fallback
-                if (!previewShard.textContent!.trim()) {
+                if (!(previewShard.textContent ?? '').trim()) {
                     previewShard.empty();
                     previewShard.createEl('pre', { text: displayContent, cls: 'cs-file-editor__plaintext' });
                 }
