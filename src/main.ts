@@ -34,6 +34,7 @@ import { PluginBase } from '../core/PluginBase.js';
 
 // PKM Assistant custom components
 import { ChatView } from "../modules/chat/index.js";
+import type { AgentsPlugin } from "../modules/agents/index.js";
 import type { ChatViewLike } from "../modules/chat/index.js";
 import { AgentManager } from "../modules/agents/index.js";
 import { isKomunikatorEnabled, registerKomunikatorCleanup } from "../modules/komunikator/index.js";
@@ -587,7 +588,11 @@ export default class PkmAssistantPlugin extends PluginBase {
     // AgentManager
     try {
       log.debug('Plugin', 'Inicjalizacja AgentManager...');
-      this.agentManager = new AgentManager(this.app.vault, this.env?.settings || {}, this);
+      // TS-boundary: `AgentsPlugin` (modules/agents) rozszerza `PluginApi`, więc żąda
+      // node-safe `AppLike` z core - a `this.app` to prawdziwy `App` Obsidiana, którego
+      // `vault.adapter` (`DataAdapter`) nie ma otwartego indeksu `VaultAdapterLike`.
+      // Ta sama luka core co przy `PluginRuntime`/`PkmSettingsTab` wyżej.
+      this.agentManager = new AgentManager(this.app.vault, this.env?.settings || {}, this as unknown as AgentsPlugin);
       await this.agentManager.initialize();
       const agentCount = this.agentManager.agents?.size || 0;
       const activeAgent = this.agentManager.activeAgent?.name || 'brak';

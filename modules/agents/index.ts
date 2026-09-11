@@ -39,6 +39,9 @@ export type {
 
 // ── Manager (jedyny owner lifecycle'u agentów; loadery instancjuje sam) ──
 export { AgentManager } from './AgentManager.js';
+// Powierzchnia pluginu, jakiej menedżer żąda w konstruktorze - `src/main.ts` nazywa nią
+// swój cast na granicy `App` (Obsidian) vs `AppLike` (core).
+export type { AgentsPlugin } from './AgentManager.js';
 // Kontekst projektowy nie istnieje w prompcie (Project Hub skasowany). VaultMap żyje dalej
 // (osobny byt, wewnątrz modułu).
 
