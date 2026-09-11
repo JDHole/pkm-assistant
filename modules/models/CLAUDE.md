@@ -208,6 +208,21 @@ transportu. Buduj własny krótki komunikat (`Stream error (HTTP 503)` / `(no re
 i zachowaj `http_status`. Klucz API nie może pojawić się w `handlers.error`, w odrzuceniu
 promisy ani w logu; słowo `bearer` też nie.
 
+### 🔴 7b. `_completeOnce()` rzuca `ModelRequestError`, nie goły obiekt
+
+Walidator katalogu (`@typescript-eslint/only-throw-error`) nie akceptuje `throw` na gołym
+obiekcie. Pięć `throw` w `_completeOnce()` opakowuje więc wynik `toConsumerError`/`errorFromBody`/
+`normalizeError` w `new ModelRequestError(...)` (`ModelRequestError.ts` - `extends Error
+implements NormalizedError`, `message` jest wymuszone jako WŁASNA enumerowalna własność, żeby
+`{...err}`/`Object.keys`/`JSON.stringify` nie odróżniały się od starego kształtu).
+
+⚠️ **`isSettledError()` MUSI znać `ModelRequestError`.** Skoro to prawdziwy `Error`, bez
+jawnego `e instanceof ModelRequestError` wpadłby w gałąź „nierozliczone" przy KAŻDYM
+powtórnym przejściu przez `toConsumerError` (np. `_emulateStream` łapiące błąd
+`_completeOnce()`) - `code`/`details`/`http_status` ginęłyby, zostałby sam zamaskowany
+`.message`. Ten sam wzorzec (znacznik rozpoznawany PRZED „czy to Error" w `isSettledError`)
+już istniał dla `_aborted`/`_queueCancelled` - `ModelRequestError` dołącza do tej samej listy.
+
 ### 🔴 8. `stream_options: { include_usage: true }` jest OPT-IN
 
 Włączone dla `openai` i `deepseek` (`ChatProviderInfo.streamUsage`). Wysłanie go do Groqa,
@@ -282,6 +297,7 @@ dochodzą też żadne nowe klucze i18n.
 | `ChatModel.retry.test.ts` | Backoff wykładniczy + `Retry-After` (seam `scheduleRetry`) |
 | `ChatModel.gate.test.ts` | Co model PODAJE bramce: klucz, pojemność, priorytet |
 | `ChatModel.complete.test.ts` | Tor bez strumienia + normalizacja błędu dostawcy |
+| `modelRequestError.test.ts` | `ModelRequestError`: instanceof Error, pola enumerowalne, `JSON.stringify` = jak goły obiekt, `from()` (instancja przechodzi, `string` → `message`) |
 | `ChatModel.errors.test.ts` | Sekrety nie wychodzą do konsumenta ani do logu |
 | `ChatModel.notifications.test.ts` | Moduł NIE pokazuje notek |
 | `ReasoningTagFilter.test.ts` | Rezerwa i rollback jednostkowo, bez dostawcy |
