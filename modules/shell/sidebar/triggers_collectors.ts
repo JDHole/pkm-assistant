@@ -6,29 +6,41 @@
  */
 
 import { getVisibleSubAgentsForAgent } from '../../sub-agents/index.js';
+import type { SubAgentData } from '../../sub-agents/index.js';
+import type { AgentManager } from '../../agents/index.js';
+import type { ToolRegistry, ToolVisibilityAgent } from '../../tools/index.js';
 
-// TS-any: manager and registry shapes are runtime plugin contracts.
-type Runtime = any;
 export type TriggerItem = { name: string; label: string; description: string; icon?: string; kind: string; isSystem?: undefined; badge?: undefined };
 
-export function collectSkillItems(agentManager: Runtime): TriggerItem[] {
-    const skills = agentManager?.getActiveAgentSkills?.() || [];
+/** Kształt skilla po rozwiązaniu override'ów (`AgentManager.resolveSkillConfig`) - `skillLoader`
+ * jest jeszcze nieotypowanym polem dynamicznym (migracja modules/agents), więc granica jest tu. */
+type ResolvedSkillLike = { userInvocable?: boolean; slug?: string; name: string; description?: string; icon_category?: string };
+
+export function collectSkillItems(agentManager: AgentManager | null | undefined): TriggerItem[] {
+    // TS-boundary: `getActiveAgentSkills()` przechodzi przez `skillLoader` (jeszcze nieotypowany
+    // w AgentManager) - zawężamy do pól realnie czytanych niżej.
+    const skills = (agentManager?.getActiveAgentSkills?.() || []) as ResolvedSkillLike[];
     return skills
-        .filter((skill: Runtime) => skill?.userInvocable !== false)
-        .map((skill: Runtime) => ({
+        .filter((skill: ResolvedSkillLike) => skill?.userInvocable !== false)
+        .map((skill: ResolvedSkillLike) => ({
             name: skill.slug || skill.name,
-            label: skill.name || skill.slug,
+            // TS-boundary: `skill.name` jest wymagane (nigdy puste w praktyce), ale `||`
+            // formalnie daje `string | undefined` (fallback na `slug`) - `label` w TriggerItem
+            // jest `string`.
+            label: (skill.name || skill.slug) as string,
             description: skill.description || '',
             icon: skill.icon_category || 'arcane',
             kind: 'skill',
         }));
 }
 
-export function collectSubAgentItems(agentManager: Runtime, activeAgent: Runtime): TriggerItem[] {
+export function collectSubAgentItems(agentManager: AgentManager | null | undefined, activeAgent: string | { name?: string } | null | undefined): TriggerItem[] {
     // Brak ról systemowych - zwracamy wyłącznie custom suby usera dla aktywnego agenta.
-    const allSubs = agentManager?.subAgentLoader?.getAllSubAgents?.() || [];
+    // TS-boundary: `subAgentLoader` jest jeszcze nieotypowanym polem dynamicznym (migracja
+    // modules/agents) - zawężamy do jedynej metody, której tu potrzeba.
+    const allSubs = (agentManager?.subAgentLoader as { getAllSubAgents?(): SubAgentData[] } | undefined)?.getAllSubAgents?.() || [];
     return getVisibleSubAgentsForAgent(activeAgent, allSubs)
-        .map((sa: Runtime) => ({
+        .map((sa: SubAgentData) => ({
             name: sa.name,
             label: sa.name,
             description: sa.description || '',
@@ -36,12 +48,12 @@ export function collectSubAgentItems(agentManager: Runtime, activeAgent: Runtime
         }));
 }
 
-export function collectMcpServerItems(plugin: Runtime, activeAgent: Runtime): TriggerItem[] {
+export function collectMcpServerItems(plugin: { toolRegistry?: ToolRegistry } | null | undefined, activeAgent: ToolVisibilityAgent | null | undefined): TriggerItem[] {
     const registry = plugin?.toolRegistry;
     if (!registry) return [];
     const visibleTools = registry.filterByAgent?.(activeAgent) || registry.getAllTools?.() || [];
     const seen = new Set<string>();
-    const items: Runtime[] = [];
+    const items: TriggerItem[] = [];
     for (const tool of visibleTools) {
         const serverName = tool?.serverName || registry.getBuiltinServerForTool?.(tool?.name) || tool?.name;
         if (!serverName || seen.has(serverName)) continue;

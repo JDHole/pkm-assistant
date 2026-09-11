@@ -5,6 +5,11 @@ import {
     collectMcpServerItems,
 } from './triggers_collectors.js';
 
+// TS-boundary: testy Node-safe (AVA, bez Obsidiana) atrapują AgentManager/ToolRegistry
+// minimalnymi obiektami - kolektory czytają tylko te pola.
+const asAgentManager = (x: unknown) => x as unknown as Parameters<typeof collectSkillItems>[0];
+const asPlugin = (x: unknown) => x as unknown as Parameters<typeof collectMcpServerItems>[0];
+
 test('collectSkillItems filters out userInvocable=false', t => {
     const agentManager = {
         getActiveAgentSkills: () => [
@@ -13,15 +18,15 @@ test('collectSkillItems filters out userInvocable=false', t => {
             { name: 'plan', slug: 'plan' },
         ],
     };
-    const items = collectSkillItems(agentManager);
+    const items = collectSkillItems(asAgentManager(agentManager));
     t.deepEqual(items.map((i: { name: string }) => i.name).sort(), ['daily-review', 'plan']);
     t.is(items[0].kind, 'skill');
 });
 
 test('collectSkillItems handles missing agentManager gracefully', t => {
     t.deepEqual(collectSkillItems(null), []);
-    t.deepEqual(collectSkillItems({}), []);
-    t.deepEqual(collectSkillItems({ getActiveAgentSkills: () => null }), []);
+    t.deepEqual(collectSkillItems(asAgentManager({})), []);
+    t.deepEqual(collectSkillItems(asAgentManager({ getActiveAgentSkills: () => null })), []);
 });
 
 test('collectSubAgentItems returns ONLY active-agent custom subs (no system roles)', t => {
@@ -37,7 +42,7 @@ test('collectSubAgentItems returns ONLY active-agent custom subs (no system role
             ],
         },
     };
-    const items = collectSubAgentItems(agentManager, activeAgent);
+    const items = collectSubAgentItems(asAgentManager(agentManager), activeAgent);
     const names = items.map(i => i.name);
     t.deepEqual(names, ['klara-prep', 'klara-strateg'], 'only Klara-prefixed custom subs, no system roles');
     // Brak dekoracji isSystem/badge - wszystkie widoczne suby są custom.
@@ -58,7 +63,7 @@ test('collectSubAgentItems returns empty when no sub matches the agent prefix', 
             ],
         },
     };
-    const items = collectSubAgentItems(agentManager, activeAgent);
+    const items = collectSubAgentItems(asAgentManager(agentManager), activeAgent as unknown as { name?: string });
     t.deepEqual(items, []);
 });
 
@@ -72,13 +77,13 @@ test('collectMcpServerItems deduplicates by serverName', t => {
             ],
         },
     };
-    const items = collectMcpServerItems(plugin, null);
+    const items = collectMcpServerItems(asPlugin(plugin), null);
     t.deepEqual(items.map(i => i.name).sort(), ['core', 'demo-server']);
 });
 
 test('collectMcpServerItems returns empty when registry missing', t => {
-    t.deepEqual(collectMcpServerItems({}, null), []);
-    t.deepEqual(collectMcpServerItems({ toolRegistry: null }, null), []);
+    t.deepEqual(collectMcpServerItems(asPlugin({}), null), []);
+    t.deepEqual(collectMcpServerItems(asPlugin({ toolRegistry: null }), null), []);
 });
 
 test('collectMcpServerItems falls back to getBuiltinServerForTool when serverName missing', t => {
@@ -95,6 +100,6 @@ test('collectMcpServerItems falls back to getBuiltinServerForTool when serverNam
             },
         },
     };
-    const items = collectMcpServerItems(plugin, null);
+    const items = collectMcpServerItems(asPlugin(plugin), null);
     t.deepEqual(items.map(i => i.name).sort(), ['core', 'memory']);
 });

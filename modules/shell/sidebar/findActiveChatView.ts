@@ -11,15 +11,27 @@
 
 import { CHAT_VIEW_TYPE } from '../../../core/index.js';
 
-// TS-any: workspace/leaf/view objects are Obsidian runtime shapes not modelled here.
-type Runtime = any;
+/**
+ * Kształt liścia/workspace'u, jakiego dotyka ten lookup - lokalny, żeby plik zostawał
+ * node-safe (zero importu `obsidian` jako wartości ani typu realnego `WorkspaceLeaf`).
+ */
+interface WorkspaceLeafLike {
+    view: unknown;
+}
+interface WorkspaceLike {
+    getLeavesOfType?(viewType: string): WorkspaceLeafLike[];
+    activeLeaf?: WorkspaceLeafLike | null;
+}
+interface FindActiveChatViewPlugin {
+    app?: { workspace?: WorkspaceLike };
+}
 
-export function findActiveChatView(plugin: Runtime): Runtime {
+export function findActiveChatView(plugin: FindActiveChatViewPlugin | null | undefined): unknown {
     const workspace = plugin?.app?.workspace;
     if (!workspace?.getLeavesOfType) return null;
     const leaves = workspace.getLeavesOfType(CHAT_VIEW_TYPE) || [];
     if (!leaves.length) return null;
     // Prefer most recently active leaf; fallback to first
-    const active = leaves.find((l: Runtime) => l === workspace.activeLeaf) || leaves[0];
+    const active = leaves.find((l: WorkspaceLeafLike) => l === workspace.activeLeaf) || leaves[0];
     return active?.view || null;
 }
