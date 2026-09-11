@@ -3,16 +3,27 @@
  * Confirmation dialog for deleting an agent with optional memory archiving.
  */
 import { Modal, Setting, Notice } from 'obsidian';
+import type { App } from 'obsidian';
 import { UiIcons, setSvgLabel } from '../../modules/crystal-soul/index.js';
 import { t } from '../../core/i18n/index.js';
+import type { Agent, AgentManager } from '../../modules/agents/index.js';
+import type { PluginApi } from '../../core/index.js';
 
-// TS-any: agent manager and agent records are plugin-owned runtime integrations.
-type Runtime = any;
+/** Kształt błędu w `catch` bez narzucania typu wyjątku. */
+type ErrLike = { message?: string };
+
+/** Plugin widziany przez ten modal: tylko `agentManager` ponad bazowy `PluginApi`. */
+interface AgentDeleteModalPlugin extends PluginApi {
+    agentManager?: AgentManager;
+}
+
+/** Callback po usunięciu agenta. */
+type OnConfirmCallback = (() => void) | null;
 
 export class AgentDeleteModal extends Modal {
-    declare private plugin: Runtime;
-    declare private agent: Runtime;
-    declare private onConfirm: Runtime;
+    declare private plugin: AgentDeleteModalPlugin;
+    declare private agent: Agent;
+    declare private onConfirm: OnConfirmCallback;
     declare private archiveMemory: boolean;
     /**
      * @param {App} app
@@ -20,7 +31,7 @@ export class AgentDeleteModal extends Modal {
      * @param {Agent} agent - Agent to delete
      * @param {Function|null} onConfirm - Callback after deletion
      */
-    constructor(app: Runtime, plugin: Runtime, agent: Runtime, onConfirm: Runtime = null) {
+    constructor(app: App, plugin: AgentDeleteModalPlugin, agent: Agent, onConfirm: OnConfirmCallback = null) {
         super(app);
         this.plugin = plugin;
         this.agent = agent;
@@ -93,8 +104,8 @@ export class AgentDeleteModal extends Modal {
 
             if (this.onConfirm) this.onConfirm();
             this.close();
-        } catch (error: Runtime) {
-            new Notice(t('modal.agent_delete.error', { error: error.message }));
+        } catch (error) {
+            new Notice(t('modal.agent_delete.error', { error: (error as ErrLike).message }));
         }
     }
 
@@ -110,6 +121,6 @@ export class AgentDeleteModal extends Modal {
  * @param {Agent} agent
  * @param {Function|null} onConfirm
  */
-export function openAgentDeleteModal(plugin: Runtime, agent: Runtime, onConfirm: Runtime = null): void {
-    new AgentDeleteModal(plugin.app, plugin, agent, onConfirm).open();
+export function openAgentDeleteModal(plugin: AgentDeleteModalPlugin, agent: Agent, onConfirm: OnConfirmCallback = null): void {
+    new AgentDeleteModal(plugin.app as unknown as App, plugin, agent, onConfirm).open();
 }
