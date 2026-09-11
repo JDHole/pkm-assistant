@@ -11,19 +11,19 @@ import type { CacheMetadata } from '../../models/index.js';
 import type { SummarizerModel, SummaryOptions } from './Summarizer.js';
 
 /**
- * Blok tresci multimodalnej. Dostawcy roznia sie polami, wiec typ opisuje DOKLADNIE to, co
- * okno i czat realnie czytaja (`type`, `text`, `image_url.url`); wszystkie pola opcjonalne,
- * bo ten sam typ przyjmuje bloki od kazdego z nich. Zawezenie do konkretnego wariantu robia
- * predykaty w miejscu uzycia (`b is TextContentBlock`).
+ * Blok treści multimodalnej. Dostawcy różnią się polami, więc typ opisuje DOKŁADNIE to, co
+ * okno i czat realnie czytają (`type`, `text`, `image_url.url`); wszystkie pola opcjonalne,
+ * bo ten sam typ przyjmuje bloki od każdego z nich. Zawężenie do konkretnego wariantu robią
+ * predykaty w miejscu użycia (`b is TextContentBlock`).
  */
 export interface ContentBlock {
     type?: string;
     text?: string;
     image_url?: { url: string };
 }
-/** Blok, ktory PRZESZEDL juz kontrole `type === 'text'`. */
+/** Blok, który PRZESZEDŁ już kontrolę `type === 'text'`. */
 export type TextContentBlock = ContentBlock & { text: string };
-/** Blok, ktory PRZESZEDL juz kontrole `type === 'image_url'`. */
+/** Blok, który PRZESZEDŁ już kontrolę `type === 'image_url'`. */
 export type ImageContentBlock = ContentBlock & { image_url: { url: string } };
 
 // SUFIT na wycenę obrazu w oknie kontekstu - realny koszt wizji u providerów to ~85-1600

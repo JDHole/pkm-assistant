@@ -24,8 +24,8 @@ import type { ChatModel } from '../../models/index.js';
 import type { AutonomyMode, TokenTracker, WorkPromptSettings } from '../../../core/index.js';
 
 /**
- * Agent w zakresie, jakiego dotyka WŁASNOŚĆ tury: tożsamość + jeden wyłącznik.
- * Reszta profilu należy do `modules/agents` i ten plik jej nie czyta.
+ * Profil agenta-właściciela. Właścicielem typu jest `modules/agents` — ten plik czyta z niego
+ * DWA pola (`name`, `memory_rescue`), a resztę tylko przenosi do okna i do modelu.
  */
 export type OwnerAgentLike = Agent | null;
 export type OwnerMemoryLike = AgentMemory | null;

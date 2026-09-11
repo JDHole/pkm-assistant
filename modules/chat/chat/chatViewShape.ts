@@ -105,9 +105,9 @@ export interface ChatAgentManager extends AgentManager {
 /**
  * `ServerManager` w zakresie, jaki czyta czat.
  *
- * NIE `extends ServerManager`: czat wola `getActiveToolDefinitions(serwery, narzedzia)`
- * DWOMA argumentami, a menedzer przyjmuje dziś tylko pierwszy (drugi jest ignorowany —
- * znana, zastana rozbieznosc; naprawa nalezy do `modules/tools`, nie do fali typowania).
+ * NIE `extends ServerManager`: czat woła `getActiveToolDefinitions(serwery, narzędzia)`
+ * DWOMA argumentami, a menedżer przyjmuje dziś tylko pierwszy (drugi jest ignorowany —
+ * znana, zastana rozbieżność; naprawa należy do `modules/tools`, nie do fali typowania).
  */
 export interface ChatServerManager {
     getAllowedServerNamesForAgent?(agent: ServerVisibilityAgent | null): string[];

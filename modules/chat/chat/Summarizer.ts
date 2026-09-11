@@ -19,10 +19,10 @@ type ContentBlock = { type?: string; text?: string; [key: string]: unknown };
 type SummarizerToolCall = { function?: { name?: string } };
 type ChatMessage = { role: string; content?: string | ContentBlock[]; tool_calls?: SummarizerToolCall[]; tool_call_id?: string };
 /**
- * Model, ktorym Summarizer strzela do LLM. `ChatModel` (modules/models) i `StreamChatModelLike`
- * (modules/memory) opisuja TEN SAM adapter dwoma kontraktami - roznia sie ksztaltem `content`
- * wiadomosci, wiec zaden nie jest przypisywalny do drugiego. Summarizer tylko PRZEKAZUJE
- * instancje do `streamToComplete`; sam nie czyta jej pol.
+ * Model, którym Summarizer strzela do LLM. `ChatModel` (modules/models) i `StreamChatModelLike`
+ * (modules/memory) opisują TEN SAM adapter dwoma kontraktami — różnią się kształtem `content`
+ * wiadomości, więc żaden nie jest przypisywalny do drugiego. Summarizer tylko PRZEKAZUJE
+ * instancję do `streamToComplete`; sam nie czyta jej pól.
  */
 export type SummarizerModel = ChatModel | StreamChatModelLike;
 type SummarizerOptions = { triggerThreshold?: number; chatModel?: SummarizerModel | null; compressionPrompt?: string };

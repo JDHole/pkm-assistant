@@ -13,10 +13,10 @@ import { makeInlineTriggerMarker, type InlineTriggerType } from './InlineChipPlu
 import type { ChatSkillConfig } from './chatViewShape.js';
 import type { SubAgentData } from '../../sub-agents/index.js';
 
-/** Tozsamosc agenta w zakresie, jakiego dotyka popup (`@`-wzmianki, etykiety subow). */
+/** Tożsamość agenta w zakresie, jakiego dotyka popup (`@`-wzmianki, etykiety subów). */
 interface PopupAgentLike { name?: string }
 
-/** Narzedzie w zakresie, jakiego dotyka sekcja MCP: nazwa serwera pod jednym z czterech pol. */
+/** Narzędzie w zakresie, jakiego dotyka sekcja MCP: nazwa serwera pod jednym z czterech pól. */
 interface PopupToolLike {
     name?: string;
     description?: string;
@@ -26,8 +26,8 @@ interface PopupToolLike {
 }
 
 /**
- * Plugin w zakresie, jaki czyta popup `/@`. Swiadomie STRUKTURALNY, nie `ChatPlugin`:
- * plik jest node-testowalny, a jego test podstawia wlasne, czesciowe atrapy.
+ * Plugin w zakresie, jaki czyta popup `/@`. Świadomie STRUKTURALNY, nie `ChatPlugin`:
+ * plik jest node-testowalny, a jego test podstawia własne, częściowe atrapy.
  */
 interface PopupPluginLike {
     agentManager?: {

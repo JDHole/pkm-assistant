@@ -40,8 +40,8 @@ test('parseToolCallArgs: zachowanie identyczne ze starym inline wzorcem (string 
         else if (source[i] === '}') depth--;
         i++;
     }
-    // Cialo jest w TypeScripcie - asercje typow znikaja przy transpilacji, wiec przed
-    // uruchomieniem jako JS robimy dokladnie to samo (kampania typowania: `as X` na granicy).
+    // Ciało jest w TypeScripcie — asercje typów znikają przy transpilacji, więc przed
+    // uruchomieniem jako JS robimy dokładnie to samo (kampania typowania: `as X` na granicy).
     const body = source.slice(braceStart + 1, i - 1).replace(/\s+as\s+[A-Za-z_$][\w$]*/g, '');
     const parseToolCallArgs = new Function('toolCall', body) as (toolCall: unknown) => unknown;
 

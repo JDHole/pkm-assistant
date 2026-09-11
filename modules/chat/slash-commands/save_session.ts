@@ -158,7 +158,7 @@ export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandCon
     }
 
     // TS-boundary: `modules/models` czyta agenta własnym, węższym kontraktem
-    // (`ResolverAgentLike`) - to samo zawężenie co w `chat/chat_model.ts`.
+    // (`ResolverAgentLike`) — to samo zawężenie co w `chat/chat_model.ts`.
     const activeAgent = (agentManager!.getActiveAgent?.() || null) as ResolverAgentLike;
     // Memory v3 LLM proposal: hand the workflow the agent + main-role model so it can run
     // save_session_prompt against transcript+brain.md. Both may be null on cold startup —

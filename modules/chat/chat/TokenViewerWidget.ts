@@ -6,7 +6,7 @@ import { log } from '../../../core/utils/Logger.js';
 import type { ChatViewLike } from './chatViewShape.js';
 import type { ModelLibraryEntry } from '../../models/index.js';
 
-/** Wpis modelu: skrót `platforma/model` albo rozbity obiekt - oba ksztalty leza w ustawieniach. */
+/** Wpis modelu: skrót `platforma/model` albo rozbity obiekt — oba kształty leżą w ustawieniach. */
 type ConfiguredModel = string | { platform?: string; model?: string };
 
 type CompressionPreset = 'delicate' | 'medium' | 'aggressive';
@@ -177,7 +177,7 @@ export class TokenViewerWidget {
         const lib = pkm?.modelLibrary?.[role] || (legacyKey ? pkm?.modelLibrary?.[legacyKey] : null);
         const configured = (agent?.models?.[role]
             || lib?.find?.((m: ModelLibraryEntry) => m.isDefault) || lib?.[0] || null) as ConfiguredModel | null;
-        // `typeof null === 'object'`, wiec gałąź obiektowa łapie też pusty wpis - to ZASTANE
+        // `typeof null === 'object'`, więc gałąź obiektowa łapie też pusty wpis — to ZASTANE
         // zachowanie, typ tylko je opisuje (naprawa = zmiana runtime, poza tą falą).
         const platform = typeof configured === 'object' ? (configured as { platform?: string }).platform : '';
         const model = typeof configured === 'object' ? (configured as { model?: string }).model : String(configured || '');

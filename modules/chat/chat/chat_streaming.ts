@@ -44,7 +44,7 @@ import { freezeTurnOwner } from './turnOwner.js';
 import { evaluateAutoTurnChain, resetAutoTurnChain } from './autoTurnChain.js';
 import { RenderThrottle, shouldPaintFrame } from './renderThrottle.js';
 import type { StreamFrame } from './renderThrottle.js';
-// Receiver mixina = ZLOZONY widok (`ChatViewLike`: klasa + osiem paczek mixinow).
+// Receiver mixina = ZŁOŻONY widok (`ChatViewLike`: klasa + osiem paczek mixinów).
 import type { ChatServerManager, ChatTab, ChatViewLike } from './chatViewShape.js';
 
 /**
@@ -65,9 +65,9 @@ import type { DelegationProposal } from './chat_artifacts.js';
 import type { TurnAbortHandle } from './turnAbort.js';
 
 /**
- * Opcje `send_message`. UWAGA: funkcja bywa wpieta WPROST jako listener klikniecia, wiec
- * pierwszym argumentem potrafi byc `MouseEvent` - dlatego oba pola sa `unknown` i czytane
- * z jawnym `typeof` / `resolveMessageOrigin`, nigdy jako "nasz obiekt".
+ * Opcje `send_message`. ⚠️ Funkcja bywa wpięta WPROST jako listener kliknięcia, więc
+ * pierwszym argumentem potrafi być `MouseEvent` — dlatego oba pola są `unknown` i czytane
+ * z jawnym `typeof` / `resolveMessageOrigin`, nigdy jako „nasz obiekt".
  */
 interface SendMessageOptions {
     injectedText?: unknown;
@@ -75,8 +75,8 @@ interface SendMessageOptions {
 }
 
 /**
- * Wynik wywolania narzedzia w zakresie, jaki czyta czat (render bloku, token tracking,
- * side-effecty). Ksztalt nalezy do SERWERA narzedzia, wiec wszystko jest opcjonalne,
+ * Wynik wywołania narzędzia w zakresie, jaki czyta czat (render bloku, token tracking,
+ * side-effecty). Kształt należy do SERWERA narzędzia, więc wszystko jest opcjonalne,
  * a indeks zostaje otwarty na `unknown`.
  */
 interface ChatToolResult {
@@ -104,7 +104,7 @@ interface ChatToolResult {
     [key: string]: unknown;
 }
 
-/** Argumenty wywolania narzedzia po sparsowaniu (ksztalt zalezny od narzedzia). */
+/** Argumenty wywołania narzędzia po sparsowaniu (kształt zależny od narzędzia). */
 interface ChatToolArgs {
     task?: string;
     aspect?: string;
@@ -112,21 +112,21 @@ interface ChatToolArgs {
     [key: string]: unknown;
 }
 
-/** Placeholder UI jednego wywolania narzedzia (Faza 1 -> Faza 3). */
+/** Placeholder UI jednego wywołania narzędzia (Faza 1 → Faza 3). */
 interface PendingToolEntry {
     toolCall: ParsedToolCall;
     toolDisplay: HTMLElement | null;
     isSubAgent: boolean;
 }
 
-/** Zakumulowana odpowiedz modelu, w zakresie, jaki maluje `handle_chunk`. */
+/** Zakumulowana odpowiedź modelu, w zakresie, jaki maluje `handle_chunk`. */
 interface StreamResponse {
     choices?: Array<{ message?: { content?: string; reasoning_content?: string } }>;
 }
 
 /**
- * Kontekst TURY - zamkniecie `send_message`. Zastepuje dawny bogaty wpis `_streamCtxMap`;
- * wszystko, co tura trzyma na wlasnosc, zyje TUTAJ, nie na widoku (patrz CLAUDE.md modulu).
+ * Kontekst TURY — zamknięcie `send_message`. Zastępuje dawny bogaty wpis `_streamCtxMap`;
+ * wszystko, co tura trzyma na własność, żyje TUTAJ, nie na widoku (patrz CLAUDE.md modułu).
  */
 interface ChatTurn {
     agentName: string;
@@ -173,7 +173,7 @@ function dedupeToolDefinitions(definitions: ChatToolDefinition[]) {
 
 function getAgentServerFilter(serverManager: ChatServerManager | undefined, agent: Agent | null) {
     if (serverManager?.getAllowedServerNamesForAgent) {
-        // TS-boundary: `modules/tools` czyta agenta wlasnym, wezszym kontraktem widocznosci serwerow.
+        // TS-boundary: `modules/tools` czyta agenta własnym, węższym kontraktem widoczności serwerów.
         return serverManager.getAllowedServerNamesForAgent(agent as ServerVisibilityAgent | null);
     }
     return agent?.preferredServers || [];
@@ -187,8 +187,8 @@ function getAgentServerFilter(serverManager: ChatServerManager | undefined, agen
  * zwracając `{}`.
  */
 function parseToolCallArgs(toolCall: ParsedToolCall): ChatToolArgs {
-    // TS-boundary: argumenty wypisuje MODEL - string JSON (OpenAI) albo obiekt (Anthropic);
-    // czytamy z nich wylacznie pola opisane w `ChatToolArgs`.
+    // TS-boundary: argumenty wypisuje MODEL — string JSON (OpenAI) albo obiekt (Anthropic);
+    // czytamy z nich wyłącznie pola opisane w `ChatToolArgs`.
     return (typeof toolCall.arguments === 'string'
         ? (() => { try { return JSON.parse(toolCall.arguments) as ChatToolArgs; } catch { return {}; } })()
         : (toolCall.arguments || {})) as ChatToolArgs;
@@ -390,7 +390,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     if (isHuman) this._autoTurnChainCounts?.set(owner.agentName, resetAutoTurnChain());
     // Przechwycone okno + tracker tury: store pętli i cała finalizacja operują na TYM oknie,
     // nawet jeśli user przełączy zakładkę.
-    // Konstruktor widoku zaklada oba pola i zadna sciezka ich nie zeruje - zamrozenie je tylko kopiuje.
+    // Konstruktor widoku zakłada oba pola i żadna ścieżka ich nie zeruje — zamrożenie je tylko kopiuje.
     const rw = owner.rollingWindow!;
     const tt = owner.tokenTracker!;
 
@@ -624,7 +624,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         if (sCtx) sCtx.watchdog = turn.watchdog; // stop_generation / onClose rozbrajają przez ctx
 
         // Tracking multi-tab (StreamingManager).
-        // `WorkspaceLeaf.id` nie jest w `obsidian.d.ts`, ale jest w runtime - stad wezszy odczyt.
+        // `WorkspaceLeaf.id` nie jest w `obsidian.d.ts`, ale jest w runtime — stąd węższy odczyt.
         const streamId = `${(this.leaf as { id?: string })?.id || 'main'}::${streamAgentName}`;
         turn.streamId = streamId; // _onStreamStall wyrejestrowuje stream sam (finally może nie ruszyć)
         const modelId = chat_model?.modelKey || chat_model?.modelId || null;
@@ -1132,8 +1132,8 @@ export async function _chatExecuteToolCall(this: ChatViewLike, turn: ChatTurn, t
         // `origin` = adres zwrotny tury (policzony raz w send_message). MCPClient wstrzykuje go
         // jako zaufany znacznik `_invocationOrigin`, a `delegate` przenosi do rejestru biegów —
         // dzięki temu wynik suba z tła wie, do której zakładki/sesji ma wrócić.
-        // TS-boundary: wynik narzedzia nalezy do SERWERA, ktory je wykonal - czat czyta z niego
-        // wylacznie pola opisane w `ChatToolResult`, bez walidacji schematem (to zmiana runtime).
+        // TS-boundary: wynik narzędzia należy do SERWERA, który je wykonał — czat czyta z niego
+        // wyłącznie pola opisane w `ChatToolResult`, bez walidacji schematem (ta byłaby zmianą runtime).
         raw = await this.plugin.mcpClient!.executeToolCall(toolCall as ToolsToolCall, turn.agentName, { autonomy: turn.autonomy, origin: turn.origin }) as ChatToolResult;
     } catch (err) {
         raw = { isError: true, error: (err as Error).message };
@@ -2090,7 +2090,7 @@ export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
             return false;
         }
         if (!this._autoTurnChainCounts) this._autoTurnChainCounts = new Map();
-        // `evaluateSubTaskDelivery` odmawia bez zakladki - za bramka `tab` na pewno istnieje.
+        // `evaluateSubTaskDelivery` odmawia bez zakładki — za bramką `tab` na pewno istnieje.
         this._autoTurnChainCounts.set(tab!.agentName, chain.nextCount);
 
         const text = buildSubTaskNotificationText(task, {
