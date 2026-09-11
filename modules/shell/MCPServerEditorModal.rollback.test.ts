@@ -36,7 +36,7 @@ test('_handleSave: mutacja jest cofana, gdy zapis padnie', t => {
     const body = methodBody(source, '_handleSave');
     t.true(body.length > 0, 'nie znalazłem _handleSave w MCPServerEditorModal.ts');
 
-    const catchMatch = /catch\s*\(e: Runtime\)\s*\{([\s\S]*?)\n        \}/.exec(body);
+    const catchMatch = /catch\s*\(e\)\s*\{([\s\S]*?)\n        \}/.exec(body);
     t.truthy(catchMatch, 'brak bloku catch dookoła await this._save()');
     const catchBody = catchMatch![1];
 

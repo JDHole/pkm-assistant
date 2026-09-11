@@ -12,11 +12,25 @@
  * `count: null` = wiersz bez licznika.
  */
 
+import type { AgentManager } from '../../../modules/agents/index.js';
+
 /** Id widoków sidebara, na które wolno celować wierszom (rejestrowane w AgentSidebar). */
 export const SIDEBAR_VIEW_IDS: readonly (string | undefined)[] = ['home', 'agent-profile', 'communicator', 'zaplecze', 'skill-detail', 'sub-agent-detail', 'triggers'];
 
-// TS-any: plugin managers are dynamic runtime integrations during the migration.
-type Runtime = any;
+/** Wiersz zwrócony przez `ExternalMcpManager.listServersForUi()` - tylko pole, które tu liczymy. */
+type ConnectedRow = { connected: boolean };
+
+/**
+ * Plugin widziany przez liczniki Zaplecza: TYLKO managery, których dotyka ta funkcja
+ * (nie `PluginApi extends` - readZapleczeCounts nie czyta app/settings/etc., a wołacze
+ * przekazują obiekt szerszy strukturalnie i tak pasujący). `externalMcpManager` zawężony
+ * do jedynej metody, której tu potrzeba (bez importu realnej klasy z modules/tools).
+ */
+interface BackstageRowsPlugin {
+    agentManager?: AgentManager;
+    externalMcpManager?: { listServersForUi?(): ConnectedRow[] };
+}
+
 type ZapleczeCounts = {
     skillTemplates?: number;
     subTemplates?: number;
@@ -57,16 +71,16 @@ export function buildZapleczeRows({
  * @param {Object} plugin
  * @returns {{skillTemplates: number, subTemplates: number, connectedServers: number}}
  */
-export function readZapleczeCounts(plugin: Runtime): Required<ZapleczeCounts> {
+export function readZapleczeCounts(plugin: BackstageRowsPlugin | null | undefined): Required<ZapleczeCounts> {
     const am = plugin?.agentManager;
     let connectedServers = 0;
     try {
-        connectedServers = (plugin?.externalMcpManager?.listServersForUi?.() || []).filter((s: Runtime) => s.connected).length;
+        connectedServers = (plugin?.externalMcpManager?.listServersForUi?.() || []).filter((s: ConnectedRow) => s.connected).length;
     } catch { connectedServers = 0; }
     return {
-        skillTemplates: am?.skillTemplateStore?.count?.() || 0,
+        skillTemplates: (am?.skillTemplateStore as { count?(): number } | undefined)?.count?.() || 0,
         // pkm-sub (wbudowany) zawsze jest na liście zakładki - stąd +1.
-        subTemplates: (am?.subAgentTemplateStore?.count?.() || 0) + 1,
+        subTemplates: ((am?.subAgentTemplateStore as { count?(): number } | undefined)?.count?.() || 0) + 1,
         connectedServers,
     };
 }
