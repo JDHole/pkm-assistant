@@ -108,7 +108,11 @@ export class AgentSidebar extends ItemView {
         // (`plugin: PluginApi`) nie może być jednocześnie kontrawariantny względem wszystkich tych
         // węższych typów naraz, więc cast w miejscu rejestracji jest jedyną uczciwą granicą.
         this.nav.register('agent-profile', renderAgentProfileView as ViewRenderer);
-        this.nav.register('communicator', renderCommunicatorView as ViewRenderer);
+        // Komunikator dostaje DWA kroki (`as unknown as`), bo jego `CommunicatorPlugin` żąda
+        // prawdziwego `App` Obsidiana (odpala `KomunikatorBulkDeleteModal`), a `PluginApi.app`
+        // to node-safe `AppLike` z core - te dwa typy nie pokrywają się w ŻADNĄ stronę, więc
+        // pojedynczy `as` jest tu błędem TS2352. Luka core, nie kłamstwo komunikatora.
+        this.nav.register('communicator', renderCommunicatorView as unknown as ViewRenderer);
         this.nav.register('zaplecze', renderZapleczeView);
         this.nav.register('skill-detail', renderSkillDetailView as ViewRenderer);
         this.nav.register('sub-agent-detail', renderSubAgentDetailView as ViewRenderer);
