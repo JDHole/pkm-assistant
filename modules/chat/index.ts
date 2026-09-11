@@ -14,6 +14,10 @@
  * `insertInlineTriggerMarker` u siebie.
  */
 export { ChatView } from './chat_view.js';
+// `ChatView` (klasa) mixinów prototype nie widzi statycznie (`input_area`, `send_message`, ...
+// - patrz nagłówek wyżej) - `ChatViewLike` to PEŁNY, zmiksowany kształt egzemplarza. Jedyny
+// konsument spoza modułu: `src/main.ts` (`sendInlineComment`, rzutowanie leaf.view).
+export type { ChatViewLike } from './chat/chatViewShape.js';
 
 // Kanoniczny typ widoku czatu — obsidian-free re-export
 // (`chatViewType.js` → `core/index.js`), więc importowalny z barrela BEZ ciągnięcia
