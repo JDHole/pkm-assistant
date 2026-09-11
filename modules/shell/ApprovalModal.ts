@@ -4,19 +4,42 @@
  * i18n-aware UI, content preview, deny reason field.
  */
 import { Modal } from 'obsidian';
+import type { App } from 'obsidian';
 import { UiIcons, setSvg } from '../../modules/crystal-soul/index.js';
 import { t } from '../../core/i18n/index.js';
-
-// TS-any: approval payloads are open-ended tool action records assembled by heterogeneous runtime tools.
-type Runtime = any;
+import type { ApprovalAction, ApprovalModalResult } from '../../core/index.js';
 
 /** Sufit długości JSON-a argumentów w modalu (dłuższe tniemy z dopiskiem). */
 const EXTERNAL_ARGS_LIMIT = 1500;
 
+/**
+ * TS-boundary: `ApprovalAction` (core, kontrakt `ApprovalHandler`) trzyma tylko wspólny rdzeń
+ * (type/targetPath/agentName/preview/approvalTarget) + indeks `[key: string]: unknown` dla pól
+ * dokładanych przez poszczególnych wołaczy narzędzi (MCPClient i inni). Ten modal czyta
+ * konkretne z nich po typie akcji - zawężamy do kształtu, który realnie czytają
+ * `_getHumanDescription`/`_renderContentPreview`/`_renderExternalArgs`.
+ */
+interface ApprovalActionDetails extends ApprovalAction {
+    sourcePath?: string;
+    operationMode?: string;
+    toolName?: string;
+    serverName?: string;
+    memoryContent?: string;
+    memorySection?: string;
+    memoryOldContent?: string;
+    memoryOperation?: string;
+    messageSubject?: string;
+    messageContent?: string;
+    contentPreview?: string;
+    externalServer?: string;
+    externalArgs?: unknown;
+    imagePrompt?: string;
+}
+
 export class ApprovalModal extends Modal {
-    declare private action: Runtime;
-    declare private result: Runtime;
-    declare private resolvePromise: Runtime;
+    declare private action: ApprovalActionDetails;
+    declare private result: ApprovalModalResult | null;
+    declare private resolvePromise: ((result: ApprovalModalResult) => void) | null;
     /**
      * @param {App} app - Obsidian App
      * @param {Object} action - Action to approve
@@ -27,9 +50,9 @@ export class ApprovalModal extends Modal {
      * @param {string} [action.contentPreview] - Actual content for vault_write
      * @param {string} action.agentName - Name of the agent requesting
      */
-    constructor(app: Runtime, action: Runtime) {
+    constructor(app: App, action: ApprovalAction) {
         super(app);
-        this.action = action;
+        this.action = action as ApprovalActionDetails;
         this.result = null;
         this.resolvePromise = null;
     }
@@ -270,7 +293,7 @@ export class ApprovalModal extends Modal {
 
     /** @returns {[string, string]} `[iconMarkup, labelText]` - label is ALWAYS inserted as text. */
     _getActionLabel() {
-        const labels: Record<string, [Runtime, string]> = {
+        const labels: Record<string, [string, string]> = {
             'vault.write': [UiIcons.edit(14), t('approval.type.vault_write')],
             'vault.delete': [UiIcons.trash(14), t('approval.type.vault_delete')],
             'vault.create_folder': [UiIcons.folder(14), t('approval.type.vault_create_folder')],
@@ -309,7 +332,7 @@ export class ApprovalModal extends Modal {
      * Znaczniki `_invocation*` są odcięte wcześniej (MCPClient → stripInternalArgs).
      * @param {HTMLElement} contentEl
      */
-    _renderExternalArgs(contentEl: Runtime): void {
+    _renderExternalArgs(contentEl: HTMLElement): void {
         const args = this.action.externalArgs;
         const previewSection = contentEl.createDiv('approval-preview');
         previewSection.createEl('h4', { text: t('approval.preview.external_args') });
@@ -331,7 +354,7 @@ export class ApprovalModal extends Modal {
         previewSection.createEl('pre', { cls: 'approval-content-preview' }).createEl('code', { text });
     }
 
-    _renderContentPreview(contentEl: Runtime): void {
+    _renderContentPreview(contentEl: HTMLElement): void {
         const a = this.action;
 
         if (a.type === 'external.call') {
@@ -373,7 +396,7 @@ export class ApprovalModal extends Modal {
         }
     }
 
-    _resolve(result: Runtime): void {
+    _resolve(result: ApprovalModalResult): void {
         this.result = result;
         if (this.resolvePromise) {
             this.resolvePromise(result);
@@ -395,8 +418,8 @@ export class ApprovalModal extends Modal {
      * Show modal and wait for user response
      * @returns {Promise<{result: 'approve'|'deny'|'always'|'redirect', reason?: string, instruction?: string}>}
      */
-    async waitForResponse() {
-        return new Promise((resolve) => {
+    async waitForResponse(): Promise<ApprovalModalResult> {
+        return new Promise<ApprovalModalResult>((resolve) => {
             this.resolvePromise = resolve;
             this.open();
         });
@@ -409,7 +432,7 @@ export class ApprovalModal extends Modal {
  * @param {Object} action
  * @returns {Promise<{result: 'approve'|'deny'|'always', reason: string}>}
  */
-export async function requestApproval(app: Runtime, action: Runtime): Promise<Runtime> {
-    const modal = new ApprovalModal(app, action);
+export async function requestApproval(app: unknown, action: ApprovalAction): Promise<ApprovalModalResult> {
+    const modal = new ApprovalModal(app as App, action);
     return modal.waitForResponse();
 }
