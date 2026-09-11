@@ -30,7 +30,7 @@ test('chat.streaming.below_threshold nie jest wołany jako t() (duplikat i18n sk
 });
 
 test('guzik 🗜️ i komenda /compress wołają WSPÓLNY runManualCompression, nie powielają gałęzi decyzyjnej', t => {
-    t.regex(uiSource, /export async function runManualCompression\(view: ChatViewMixinContext\): Promise<boolean> \{/);
+    t.regex(uiSource, /export async function runManualCompression\(view: ChatViewLike\): Promise<boolean> \{/);
     t.regex(uiSource, /await runManualCompression\(this\)/, 'guzik w _renderSlimBar ma wołać wspólny helper');
     t.regex(slashSource, /import \{ runManualCompression \} from '\.\/chat_ui\.js';/);
     t.regex(slashSource, /await runManualCompression\(view\)/, "handler /compress ma wołać wspólny helper");

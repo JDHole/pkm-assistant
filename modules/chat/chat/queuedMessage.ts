@@ -36,7 +36,7 @@ export interface QueueOwner {
 
 /** Wiadomość czekająca na koniec tury: treść + jej pieczątka pochodzenia + właściciel. */
 // Nie eksportowany - brak referencji spoza tego pliku (tu i na czterech typach niżej).
-interface QueuedChatMessage {
+export interface QueuedChatMessage {
     text: string;
     meta: MessageOriginMeta;
     owner?: QueueOwner;

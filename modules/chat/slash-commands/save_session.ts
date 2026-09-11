@@ -7,9 +7,10 @@ import { startConsolidationRun } from '../consolidationRunner.js';
 import { getLimits } from '../../../config/limits.js';
 import { t } from '../../../core/i18n/index.js';
 import { log } from '../../../core/utils/Logger.js';
+import type { Agent } from '../../agents/index.js';
+import type { CrystalNoticeOptions } from '../../../core/index.js';
+import type { ResolverAgentLike, ResolverPluginLike } from '../../models/index.js';
 
-// TS-any: `env` pluginu i rolling window widoku są składane z modułów dopiero w runtime.
-type Runtime = any;
 type ErrLike = { message?: string };
 
 type WorkflowAgentMemory = ConstructorParameters<typeof SaveSessionWorkflow>[0];
@@ -47,7 +48,7 @@ interface SaveSessionView {
     rollingWindow?: RollingWindowLike;
     tokenTracker?: { clear?(): void };
     resetInputArea?(): void;
-    _createRollingWindow(): Runtime;
+    _createRollingWindow(): RollingWindowLike;
     render_messages?(): void;
     add_welcome_message?(): void;
     updateTokenCounter?(): void;
@@ -57,16 +58,10 @@ interface SaveSessionView {
     _switchTab?(key: string | undefined): void;
 }
 
-interface AgentLike {
-    name?: string;
-    model?: string | { platform?: string; model?: string };
-    models?: Record<string, string | { platform?: string; model?: string } | undefined>;
-    [key: string]: unknown;
-}
-
 interface AgentManagerLike {
     getActiveMemory?(): AgentMemoryLike | null;
-    getActiveAgent?(): AgentLike | null;
+    /** Pełny profil agenta — `modules/agents` jest jego właścicielem. */
+    getActiveAgent?(): Agent | null;
 }
 
 interface PkmAssistantSettings extends Record<string, unknown> {
@@ -76,8 +71,8 @@ interface PkmAssistantSettings extends Record<string, unknown> {
 interface SaveSessionPlugin {
     agentManager?: AgentManagerLike;
     settings?: { pkmAssistant?: PkmAssistantSettings };
-    env?: Runtime;
-    showCrystalNotice?(message: string, options: { type?: string; timeout?: number }): unknown;
+    env?: NonNullable<ResolverPluginLike>['env'];
+    showCrystalNotice?(message: string, options?: CrystalNoticeOptions): unknown;
 }
 
 interface SaveSessionCommandContext {
@@ -162,7 +157,9 @@ export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandCon
         return;
     }
 
-    const activeAgent = agentManager!.getActiveAgent?.() || null;
+    // TS-boundary: `modules/models` czyta agenta własnym, węższym kontraktem
+    // (`ResolverAgentLike`) - to samo zawężenie co w `chat/chat_model.ts`.
+    const activeAgent = (agentManager!.getActiveAgent?.() || null) as ResolverAgentLike;
     // Memory v3 LLM proposal: hand the workflow the agent + main-role model so it can run
     // save_session_prompt against transcript+brain.md. Both may be null on cold startup —
     // workflow falls back to regex proposeNotes() in that case (graceful degradation).

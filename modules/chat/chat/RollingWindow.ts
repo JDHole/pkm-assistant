@@ -7,9 +7,24 @@ import { parseMemoryCandidates } from './memoryCandidates.js';
 import { log } from '../../../core/utils/Logger.js';
 import type { LoopMessage } from '../../agent-loop/index.js';
 import type { MemoryCandidate } from './memoryCandidates.js';
+import type { CacheMetadata } from '../../models/index.js';
+import type { SummarizerModel, SummaryOptions } from './Summarizer.js';
 
-// TS-any: bloki multimodalne, tool_calls, cache i model są payloadami różnych providerów API.
-type Runtime = any;
+/**
+ * Blok tresci multimodalnej. Dostawcy roznia sie polami, wiec typ opisuje DOKLADNIE to, co
+ * okno i czat realnie czytaja (`type`, `text`, `image_url.url`); wszystkie pola opcjonalne,
+ * bo ten sam typ przyjmuje bloki od kazdego z nich. Zawezenie do konkretnego wariantu robia
+ * predykaty w miejscu uzycia (`b is TextContentBlock`).
+ */
+export interface ContentBlock {
+    type?: string;
+    text?: string;
+    image_url?: { url: string };
+}
+/** Blok, ktory PRZESZEDL juz kontrole `type === 'text'`. */
+export type TextContentBlock = ContentBlock & { text: string };
+/** Blok, ktory PRZESZEDL juz kontrole `type === 'image_url'`. */
+export type ImageContentBlock = ContentBlock & { image_url: { url: string } };
 
 // SUFIT na wycenę obrazu w oknie kontekstu - realny koszt wizji u providerów to ~85-1600
 // tokenów/obraz, nie proporcja do długości base64. Bez sufitu pełna długość base64 wysadzałaby
@@ -48,22 +63,31 @@ interface MessageStats extends TextStats {
     reasoningRef: unknown;
 }
 
-interface ToolCall {
+export interface ToolCall {
     id?: string;
+    /** Nazwa narzędzia, gdy dostawca nie pakuje jej w `function`. */
+    name?: string;
+    /** Argumenty: string JSON albo już sparsowany obiekt — zależnie od dostawcy. */
+    arguments?: string | Record<string, unknown>;
     function?: { name?: string; arguments?: string };
+    [key: string]: unknown;
 }
 
-interface RollingMessage extends LoopMessage {
+export interface RollingMessage extends LoopMessage {
     tool_call_id?: string;
-    content?: string | null | Runtime[];
+    content?: string | null | ContentBlock[];
     tool_calls?: ToolCall[];
     reasoning_content?: string;
-    cache?: Runtime;
+    cache?: Partial<CacheMetadata> | null;
+    /** Godzina dopisana przez czat (render dymka). */
+    timestamp?: string;
+    /** Reakcje usera (kciuki) — pisane przez `chat_messages.addMessageActions`. */
+    metadata?: { reaction?: 'positive' | 'negative' };
 }
 
 interface SummarizerLike {
     triggerThreshold: number;
-    summarize(messages: RollingMessage[], previousSummary: string, options: Runtime): Promise<string | null>;
+    summarize(messages: RollingMessage[], previousSummary: string, options: SummaryOptions): Promise<string | null>;
 }
 
 interface TrimDetail { toolName: string; originalSize: number }
@@ -85,7 +109,7 @@ interface RollingWindowOptions {
     maxTokens?: number;
     systemPrompt?: string;
     summarizer?: SummarizerLike | null;
-    modelProvider?: (() => Runtime) | null;
+    modelProvider?: (() => SummarizerModel | null | undefined) | null;
     compressionPrompt?: string | null;
     triggerThreshold?: number;
     toolTrimThreshold?: number;
@@ -118,7 +142,7 @@ export class RollingWindow {
     declare baseSystemPrompt: string;
     declare conversationSummary: string;
     declare summarizer: SummarizerLike | null;
-    declare _modelProvider: (() => Runtime) | null;
+    declare _modelProvider: (() => SummarizerModel | null | undefined) | null;
     declare _compressionPrompt: string | null;
     declare _triggerThreshold: number;
     declare _toolTrimThreshold: number;
@@ -852,7 +876,7 @@ export class RollingWindow {
      * @returns {Object|null}
      * @private
      */
-    _lastCacheMetadata(): Runtime {
+    _lastCacheMetadata(): Partial<CacheMetadata> | null {
         for (let i = this.messages.length - 1; i >= 0; i--) {
             const cache = this.messages[i]?.cache;
             if (cache) return cache;

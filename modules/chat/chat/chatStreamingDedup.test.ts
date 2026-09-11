@@ -40,7 +40,9 @@ test('parseToolCallArgs: zachowanie identyczne ze starym inline wzorcem (string 
         else if (source[i] === '}') depth--;
         i++;
     }
-    const body = source.slice(braceStart + 1, i - 1);
+    // Cialo jest w TypeScripcie - asercje typow znikaja przy transpilacji, wiec przed
+    // uruchomieniem jako JS robimy dokladnie to samo (kampania typowania: `as X` na granicy).
+    const body = source.slice(braceStart + 1, i - 1).replace(/\s+as\s+[A-Za-z_$][\w$]*/g, '');
     const parseToolCallArgs = new Function('toolCall', body) as (toolCall: unknown) => unknown;
 
     t.deepEqual(parseToolCallArgs({ arguments: '{"aspect":"researcher"}' }), { aspect: 'researcher' });
@@ -62,7 +64,7 @@ test('handle_chunk deleguje budowę kontenera agenta do _ensureAgentMessageConta
 });
 
 test('_ensureAgentMessageContainer nadal istnieje jako jedyne źródło prawdy o budowie kontenera', t => {
-    t.regex(source, /export function _ensureAgentMessageContainer\(this: ChatViewMixinContext, streamAgent: ChatViewMixinContext\)/);
+    t.regex(source, /export function _ensureAgentMessageContainer\(this: ChatViewLike, streamAgent: Agent \| null \| undefined\)/);
     // Wołane też z _chatOnToolCallsParsed (tool calls bez poprzedzającego tekstu) i _finalizeTurn —
     // oba call-site'y muszą przeżyć dedup bez zmian.
     const calls = source.match(/this\._ensureAgentMessageContainer\(/g) || [];

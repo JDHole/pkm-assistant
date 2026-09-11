@@ -52,8 +52,8 @@ test('getBreakdown().cache bierze metadane z najnowszej wiadomości i nie wchodz
     await rw.addMessage('assistant', 'newer', { cache: { cached_tokens: 900, savings_pct: 75 } });
 
     const breakdown = rw.getBreakdown();
-    t.is(breakdown.cache.cached_tokens, 900);
-    t.is(breakdown.cache.savings_pct, 75);
+    t.is(breakdown.cache!.cached_tokens, 900);
+    t.is(breakdown.cache!.savings_pct, 75);
     t.is(breakdown.total, rw.getCurrentTokenCount(), 'cache nie zmienia licznika okna');
 });
 

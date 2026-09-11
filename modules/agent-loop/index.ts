@@ -18,4 +18,4 @@ export { sanitizeToolTranscript } from './toolTranscriptSanitizer.js';
 // `export type` jest kasowany przy transpilacji, więc runtime bez zmian.
 export type { ModelResponse, ParsedToolCall } from './toolCallParser.js';
 export type { LoopMessage, MessageStoreLike } from './MessageStore.js';
-export type { RunAgentLoopOptions, RunAgentLoopResult, Usage } from './AgentLoop.js';
+export type { RunAgentLoopOptions, RunAgentLoopResult, ToolResultEntry, Usage } from './AgentLoop.js';

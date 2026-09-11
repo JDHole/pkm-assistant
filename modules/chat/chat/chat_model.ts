@@ -10,14 +10,19 @@ import { log } from '../../../core/utils/Logger.js';
 import { DEFAULT_AUTONOMY, normalizeAutonomy } from '../../../core/index.js';
 import { t } from '../../../core/i18n/index.js';
 import { createVaultReadPredicate } from './vaultReadGate.js';
-
-// TS-any: receiver legacy mixinów składany runtime przez Object.assign.
-type ChatViewMixinContext = any;
+// Receiver mixina = złożony `ChatView` (klasa + osiem deklaracji mixinów). Cykl typów
+// chat_view ↔ mixin jest legalny i znika w buildzie (`import type`).
+import type { ChatViewLike } from './chatViewShape.js';
+import type { Agent } from '../../agents/index.js';
+import type { TFile, TFolder } from 'obsidian';
+import type { ContentBlock, ImageContentBlock } from './RollingWindow.js';
+import type { DelegateConfigLike, ResolverAgentLike } from '../../models/index.js';
+import type { SttSettings } from './chatViewShape.js';
 
 /**
  * Create a crystal SVG avatar element for an agent.
  */
-export function _createCrystalAvatar(agent: ChatViewMixinContext, size = 28) {
+export function _createCrystalAvatar(agent: Agent | null | undefined, size = 28) {
     const svgStr = SkinManager.getCrystal(agent || 'default', { size, glow: false });
     const wrapper = createDiv();
     wrapper.className = 'cs-crystal-avatar';
@@ -28,7 +33,7 @@ export function _createCrystalAvatar(agent: ChatViewMixinContext, size = 28) {
 /**
  * Get the active agent's color (hex).
  */
-export function _getAgentColor(this: ChatViewMixinContext) {
+export function _getAgentColor(this: ChatViewLike) {
     const agent = this.plugin?.agentManager?.getActiveAgent();
     return SkinManager.getAgentColor(agent || 'default');
 }
@@ -36,7 +41,7 @@ export function _getAgentColor(this: ChatViewMixinContext) {
 /**
  * Get the active agent's color as RGB triplet for CSS rgba().
  */
-export function _getAgentRgb(this: ChatViewMixinContext) {
+export function _getAgentRgb(this: ChatViewLike) {
     return hexToRgbTriplet(this._getAgentColor());
 }
 
@@ -48,10 +53,14 @@ export function _getAgentRgb(this: ChatViewMixinContext) {
  * (aktywny agent), bo tak woła to jeszcze UI (podgląd vision itp.).
  */
 export function get_chat_model(
-    this: ChatViewMixinContext,
-    { skipCache = false, agent }: { skipCache?: boolean; agent?: ChatViewMixinContext } = {},
+    this: ChatViewLike,
+    { skipCache = false, agent }: { skipCache?: boolean; agent?: Agent | null } = {},
 ) {
-    const activeAgent = agent || this.plugin?.agentManager?.getActiveAgent?.();
+    // TS-boundary: `modules/models` czyta agenta własnym, węższym kontraktem
+    // (`ResolverAgentLike`: `name`/`model`/`models`). Pełny `Agent` trzyma te pola luźniej
+    // (`model: string | null`, `models: Record<string, unknown>`), więc różnicę zamykamy raz,
+    // przy rozwiązaniu agenta — czat żadnego z tych pól nie interpretuje.
+    const activeAgent = (agent || this.plugin?.agentManager?.getActiveAgent?.()) as ResolverAgentLike;
     const hasAgentModel = activeAgent?.models?.main || activeAgent?.model;
 
     if (hasAgentModel) {
@@ -92,7 +101,7 @@ export function get_chat_model(
  * `settings.pkmAssistant.defaultAutonomy`. Kolejność: agent > global > DEFAULT_AUTONOMY.
  * @param {Object} [agent] - aktywny agent (opcjonalny; brak → tylko global default)
  */
-export function _getDefaultAutonomy(this: ChatViewMixinContext, agent: ChatViewMixinContext) {
+export function _getDefaultAutonomy(this: ChatViewLike, agent?: Agent | null) {
     return normalizeAutonomy(
         agent?.default_autonomy || this.env?.settings?.pkmAssistant?.defaultAutonomy || DEFAULT_AUTONOMY
     );
@@ -101,10 +110,11 @@ export function _getDefaultAutonomy(this: ChatViewMixinContext, agent: ChatViewM
 /**
  * Get the researcher model for an agent.
  */
-export function _getMinionModel(this: ChatViewMixinContext, agent: ChatViewMixinContext, minionConfig: ChatViewMixinContext) {
+export function _getMinionModel(this: ChatViewLike, agent: Agent | null | undefined, minionConfig?: DelegateConfigLike) {
     const targetAgent = agent || this.plugin?.agentManager?.getActiveAgent();
     if (targetAgent?.minionEnabled === false) return null;
-    return createModelForRole(this.plugin, 'researcher', targetAgent, minionConfig);
+    // Zawężenie jak w `get_chat_model` — patrz komentarz tam.
+    return createModelForRole(this.plugin, 'researcher', targetAgent as ResolverAgentLike, minionConfig);
 }
 
 /**
@@ -124,7 +134,7 @@ export function _getMinionModel(this: ChatViewMixinContext, agent: ChatViewMixin
  * `obsidian`, więc predykat tutaj musi zostać PODANIEM trzech rzeczy z pluginu: systemu
  * uprawnień, tożsamości agenta i logu ostrzeżenia, bez własnej logiki decyzyjnej.
  */
-function _vaultReadPredicate(view: ChatViewMixinContext): (vaultPath: string) => boolean {
+function _vaultReadPredicate(view: ChatViewLike): (vaultPath: string) => boolean {
     return createVaultReadPredicate({
         permissionSystem: view?.plugin?.permissionSystem,
         resolveAgent: () => view?.plugin?.agentManager?.getActiveAgent?.(),
@@ -142,7 +152,7 @@ function _vaultReadPredicate(view: ChatViewMixinContext): (vaultPath: string) =>
  * Osadzone obrazy przechodzą przez bramkę uprawnień agenta - bez `canReadImage` producent
  * nie wczyta ŻADNEGO (fail-closed, patrz `modules/multimodal/active_note.ts`).
  */
-export async function _buildActiveNoteContext(this: ChatViewMixinContext) {
+export async function _buildActiveNoteContext(this: ChatViewLike) {
     return buildActiveNoteContext(this.app, { canReadImage: _vaultReadPredicate(this) });
 }
 
@@ -156,7 +166,7 @@ export async function _buildActiveNoteContext(this: ChatViewMixinContext) {
  * jeszcze przed zamrożeniem właściciela) zostają bez argumentu - tam „aktywny agent" jest
  * właściwym pytaniem.
  */
-export function _isCurrentModelVision(this: ChatViewMixinContext, agent?: ChatViewMixinContext) {
+export function _isCurrentModelVision(this: ChatViewLike, agent?: Agent | null) {
     try {
         return isVisionModel(this.get_chat_model({ agent }));
     } catch { return false; }
@@ -165,7 +175,7 @@ export function _isCurrentModelVision(this: ChatViewMixinContext, agent?: ChatVi
 /**
  * Show full-size image overlay.
  */
-export function _showImageOverlay(this: ChatViewMixinContext, src: string) {
+export function _showImageOverlay(this: ChatViewLike, src: string) {
     const overlay = createDiv();
     overlay.className = 'pkm-image-overlay';
     const fullImg = createEl('img');
@@ -178,7 +188,7 @@ export function _showImageOverlay(this: ChatViewMixinContext, src: string) {
 /**
  * Toggle audio recording for STT.
  */
-export function _toggleRecording(this: ChatViewMixinContext) {
+export function _toggleRecording(this: ChatViewLike) {
     if (this._audioRecorder?.recording) {
         this._audioRecorder.stop();
         return;
@@ -192,7 +202,7 @@ export function _toggleRecording(this: ChatViewMixinContext) {
             this._micBtn.empty();
             this._micBtn.createSpan({ cls: 'pkm-stt-spinner', text: '⏳' });
             try {
-                const sttSettings = this.env?.settings?.pkmAssistant?.stt || {};
+                const sttSettings: SttSettings = this.env?.settings?.pkmAssistant?.stt || {};
                 // Klucze czatu żyją w JEDNEJ puli `pkmAssistant.chat.apiKeys.<platforma>` (ta sama,
                 // z której czyta modelResolver i GenerateImageTool). Czytanie z płaskiego pola
                 // `groq_api_key` byłoby ZAWSZE puste, bo migrator ustawień przenosi klucze do puli -
@@ -206,7 +216,7 @@ export function _toggleRecording(this: ChatViewMixinContext) {
                     assemblyai: sttSettings.assemblyai_api_key,
                 };
                 const result = await transcribeAudio(
-                    sttSettings.platform,
+                    sttSettings.platform as string,
                     keys,
                     blob,
                     sttSettings.language || 'pl'
@@ -219,16 +229,16 @@ export function _toggleRecording(this: ChatViewMixinContext) {
                 } else {
                     new Notice(t('chat.model.stt_empty'), 3000);
                 }
-            } catch (e: ChatViewMixinContext) {
-                new Notice(t('chat.model.stt_error', { error: e.message }), 5000);
+            } catch (e) {
+                new Notice(t('chat.model.stt_error', { error: (e as Error).message }), 5000);
             } finally {
                 setSvg(this._micBtn, UiIcons.microphone(12));
             }
         },
-        onError: (e: ChatViewMixinContext) => {
+        onError: (e) => {
             this._micBtn.classList.remove('recording');
             setSvg(this._micBtn, UiIcons.microphone(12));
-            new Notice(t('chat.model.recording_error', { error: e.message }), 4000);
+            new Notice(t('chat.model.recording_error', { error: (e as Error).message }), 4000);
         },
         onTick: (seconds) => {
             this._micBtn.empty();
@@ -245,7 +255,7 @@ export function _toggleRecording(this: ChatViewMixinContext) {
 /**
  * Resolve @ mentions in user text.
  */
-export async function _resolveMentions(this: ChatViewMixinContext, text: string) {
+export async function _resolveMentions(this: ChatViewLike, text: string) {
     const mentionChips = this.mentionAutocomplete?.getMentions() || [];
 
     if (mentionChips.length === 0) {
@@ -266,12 +276,12 @@ export async function _resolveMentions(this: ChatViewMixinContext, text: string)
 
             if (m.type === 'folder') {
                 const folder = this.app.vault.getAbstractFileByPath(m.path);
-                const fileCount = folder?.children?.filter((f: ChatViewMixinContext) => f.extension === 'md').length || 0;
+                const fileCount = (folder as TFolder | null)?.children?.filter((f) => (f as TFile).extension === 'md').length || 0;
                 refs.push(`- 📁 Folder: "${m.path}" (${t('chat.model.folder_notes', { count: fileCount })})`);
             } else {
                 let file = this.app.vault.getAbstractFileByPath(m.path);
                 if (!file) file = this.app.vault.getAbstractFileByPath(m.path + '.md');
-                const size = file?.stat?.size ? `${Math.round(file.stat.size / 1024)}KB` : '?';
+                const size = (file as TFile | null)?.stat?.size ? `${Math.round((file as TFile).stat.size / 1024)}KB` : '?';
                 refs.push(`- 📄 ${t('chat.model.note_label')}: "${file?.path || m.path}" (${size})`);
             }
         } catch (err) {
@@ -290,7 +300,7 @@ export async function _resolveMentions(this: ChatViewMixinContext, text: string)
 /**
  * Extract text from multimodal content blocks array.
  */
-export function _contentBlocksToText(blocks: ChatViewMixinContext[]) {
+export function _contentBlocksToText(blocks: ContentBlock[] | null | undefined) {
     if (!Array.isArray(blocks)) return String(blocks || '');
     return blocks
         .filter(b => b.type === 'text')
@@ -301,10 +311,10 @@ export function _contentBlocksToText(blocks: ChatViewMixinContext[]) {
 /**
  * Render multimodal user content (text + image thumbnails).
  */
-export function _renderMultimodalUserContent(this: ChatViewMixinContext, container: ChatViewMixinContext, contentBlocks: ChatViewMixinContext[], displayText: string) {
+export function _renderMultimodalUserContent(this: ChatViewLike, container: HTMLElement, contentBlocks: ContentBlock[], displayText: string) {
     container.createEl('p', { text: displayText });
 
-    const images = contentBlocks.filter(b => b.type === 'image_url');
+    const images = contentBlocks.filter((b): b is ImageContentBlock => b.type === 'image_url');
     if (images.length > 0) {
         const thumbRow = container.createDiv({ cls: 'pkm-attachment-thumbs' });
         for (const img of images) {
@@ -323,7 +333,7 @@ export function _renderMultimodalUserContent(this: ChatViewMixinContext, contain
 /**
  * Cleanup any pending ask_user promise.
  */
-export function _cleanupAskUser(this: ChatViewMixinContext) {
+export function _cleanupAskUser(this: ChatViewLike) {
     if (this.plugin?._askUserResolve) {
         this.plugin._askUserResolve(null);
     }

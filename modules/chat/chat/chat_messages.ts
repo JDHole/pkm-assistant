@@ -17,14 +17,40 @@ import { registerUrlsFromText } from '../../web/index.js';
 import { registerUrlsIfHuman } from './messagePrivileges.js';
 // Historia liczy status narzędzia TĄ SAMĄ regułą co żywa tura (chat_streaming).
 import { resolveMessageOrigin, toolResultStatus } from '../../../core/index.js';
-
-// TS-any: receiver legacy mixinów jest składany runtime przez Object.assign(ChatView.prototype, ...).
-type ChatViewMixinContext = any;
-// TS-any: multimodal content, tool calls and provider metadata have provider-specific runtime shapes.
-type Runtime = any;
+// Receiver mixina = złożony `ChatView` (klasa + osiem deklaracji mixinów). Cykl typów
+// chat_view ↔ mixin jest legalny i znika w buildzie (`import type`).
+import type { ChatViewLike } from './chatViewShape.js';
+import type { ContentBlock, RollingMessage, ToolCall } from './RollingWindow.js';
 
 type MessageRole = 'user' | 'assistant';
-type MessageContent = string | Runtime[];
+type MessageContent = string | ContentBlock[];
+
+/**
+ * Wynik narzędzia odtwarzany z historii. Kształt zależy od serwera, więc modelujemy
+ * DOKŁADNIE pola, które render czyta; `unknown` tam, gdzie tylko przekazujemy dalej.
+ */
+interface HistoryToolOutput {
+    result?: string;
+    error?: string;
+    tools_used?: unknown[];
+    tool_call_details?: unknown[];
+    duration_ms?: number;
+    usage?: unknown;
+}
+
+/** Argumenty wywołania `delegate` odtworzone z historii. */
+/**
+ * Wiersz akcji zwrócony przez rendery z `modules/ui-components` (ich sygnatury są jeszcze
+ * `any` — osobna fala kampanii). Alias, a NIE `as HTMLElement` wprost: asercja na globalny
+ * typ ambientowy dokłada esbuildowi nowy symbol nieznany modułowi i przestawia mangler nazw,
+ * czyli zmienia bajty bundla przy zerowej zmianie kodu.
+ */
+type RenderedRow = HTMLElement;
+
+interface DelegateArgs {
+    task?: string;
+    aspect?: string;
+}
 interface TrimInfo {
     trimmed: number;
     details?: Array<{ toolName: string; originalSize: number }>;
@@ -46,7 +72,7 @@ interface TrimInfo {
  *   bezpieczeństwa (rejestr adresów dla `web_read`). Brak = maszyna, patrz
  *   `core/security/messageOrigin.ts`.
  */
-export async function append_message(this: ChatViewMixinContext, role: MessageRole, content: MessageContent, displayText?: string, meta?: Runtime): Promise<void> {
+export async function append_message(this: ChatViewLike, role: MessageRole, content: MessageContent, displayText?: string, meta?: Partial<RollingMessage>): Promise<void> {
     const timestamp = new Date().toLocaleTimeString(getDateLocale(), { hour: '2-digit', minute: '2-digit' });
 
     // Add to history with timestamp
@@ -100,7 +126,7 @@ export async function append_message(this: ChatViewMixinContext, role: MessageRo
     this.scrollToBottom();
 }
 
-export async function render_messages(this: ChatViewMixinContext): Promise<void> {
+export async function render_messages(this: ChatViewLike): Promise<void> {
     this.messages_container.empty();
     const agent = this.plugin?.agentManager?.getActiveAgent();
     const agentColor = SkinManager.getAgentColor(agent || 'default');
@@ -153,24 +179,28 @@ export async function render_messages(this: ChatViewMixinContext): Promise<void>
                 const thinkRow = createThinkingBlock(msg.reasoning_content, false);
                 agentDiv.appendChild(thinkRow);
             }
-            if (msg.tool_calls?.length > 0) {
-                for (const tc of msg.tool_calls) {
+            if ((msg.tool_calls?.length as number) > 0) {
+                for (const tc of msg.tool_calls as ToolCall[]) {
                     const tcName = tc.function?.name || tc.name || 'unknown';
                     const tcArgs = tc.function?.arguments || tc.arguments;
                     // Find matching tool result in next messages
-                    let tcOutput = null;
+                    let tcOutput: HistoryToolOutput | string | null = null;
                     for (let j = idx + 1; j < this.rollingWindow.messages.length; j++) {
                         const m = this.rollingWindow.messages[j];
                         if (m.role === 'tool' && m.tool_call_id === tc.id) {
-                            try { tcOutput = JSON.parse(m.content); } catch { tcOutput = m.content; }
+                            // TS-boundary: transkrypt z dysku — treść wyniku narzędzia jest stringiem
+                            // JSON dowolnego serwera; render czyta z niego tylko pola `HistoryToolOutput`.
+                            try { tcOutput = JSON.parse(m.content as string) as HistoryToolOutput; } catch { tcOutput = m.content as string; }
                             break;
                         }
                     }
                     const isSubAgent = tcName === 'delegate';
                     if (isSubAgent) {
-                        const _hArgs = typeof tcArgs === 'string'
-                            ? (() => { try { return JSON.parse(tcArgs); } catch { return {}; } })()
-                            : (tcArgs || {});
+                        // TS-boundary: argumenty wywołania `delegate` odtworzone z historii —
+                        // string JSON albo już sparsowany obiekt, zależnie od dostawcy.
+                        const _hArgs = (typeof tcArgs === 'string'
+                            ? (() => { try { return JSON.parse(tcArgs) as DelegateArgs; } catch { return {}; } })()
+                            : (tcArgs || {})) as DelegateArgs;
                         const taskQuery = _hArgs.task || '';
                         const _hName = _hArgs.aspect || '';
                         const block = createSubAgentBlock({
@@ -183,11 +213,11 @@ export async function render_messages(this: ChatViewMixinContext): Promise<void>
                             agentName: _hName,
                             query: taskQuery,
                             response: typeof tcOutput === 'string' ? tcOutput : (tcOutput?.result || ''),
-                            toolsUsed: tcOutput?.tools_used || [],
-                            toolCallDetails: tcOutput?.tool_call_details || [],
-                            duration: tcOutput?.duration_ms || 0,
-                            usage: tcOutput?.usage,
-                        });
+                            toolsUsed: (tcOutput as HistoryToolOutput)?.tools_used || [],
+                            toolCallDetails: (tcOutput as HistoryToolOutput)?.tool_call_details || [],
+                            duration: (tcOutput as HistoryToolOutput)?.duration_ms || 0,
+                            usage: (tcOutput as HistoryToolOutput)?.usage,
+                        }) as RenderedRow;
                         agentDiv.appendChild(block);
                     } else {
                         const makeDisplay = this.env?.settings?.pkmAssistant?.compactToolChips === false ? createToolCallDisplay : createCompactToolChip;
@@ -196,8 +226,8 @@ export async function render_messages(this: ChatViewMixinContext): Promise<void>
                             input: typeof tcArgs === 'string' ? (() => { try { return JSON.parse(tcArgs); } catch { return tcArgs; } })() : tcArgs,
                             output: tcOutput,
                             status: toolResultStatus(tcOutput),
-                            error: tcOutput?.error
-                        });
+                            error: (tcOutput as HistoryToolOutput)?.error
+                        }) as RenderedRow;
                         agentDiv.appendChild(display);
                     }
                 }
@@ -229,7 +259,7 @@ export async function render_messages(this: ChatViewMixinContext): Promise<void>
  * Render user text with inline @[Name] mention badges.
  * Falls back to plain text if no mentions found.
  */
-export function _renderUserText(this: ChatViewMixinContext, container: HTMLElement, text: string): void {
+export function _renderUserText(this: ChatViewLike, container: HTMLElement, text: string): void {
     if (!text.includes('@[')) {
         container.createEl('p', { text });
         return;
@@ -247,7 +277,7 @@ export function _renderUserText(this: ChatViewMixinContext, container: HTMLEleme
     }
 }
 
-export function addMessageActions(this: ChatViewMixinContext, metaEl: HTMLElement, content: string, role: MessageRole, idx: number): void {
+export function addMessageActions(this: ChatViewLike, metaEl: HTMLElement, content: string, role: MessageRole, idx: number): void {
     // Copy button
     const copyBtn = metaEl.createEl('button', { cls: 'cs-message__meta-btn' });
     setSvg(copyBtn, UiIcons.copy(12));
@@ -272,7 +302,7 @@ export function addMessageActions(this: ChatViewMixinContext, metaEl: HTMLElemen
             this.render_messages();
             this.updateTokenCounter();
         } else {
-            const foundIdx = this.rollingWindow.messages.findIndex((m: Runtime) => m.content === content && m.role === role);
+            const foundIdx = this.rollingWindow.messages.findIndex((m: RollingMessage) => m.content === content && m.role === role);
             if (foundIdx > -1) {
                 this.rollingWindow.messages.splice(foundIdx, 1);
                 this.render_messages();
@@ -340,7 +370,7 @@ export function addMessageActions(this: ChatViewMixinContext, metaEl: HTMLElemen
     }
 }
 
-export function startEditMessage(this: ChatViewMixinContext, msgIndex: number, originalContent: string): void {
+export function startEditMessage(this: ChatViewLike, msgIndex: number, originalContent: string): void {
     // For simplicity, just remove messages from index and resend
     const messages = this.rollingWindow.messages;
     if (msgIndex >= 0 && msgIndex < messages.length) {
@@ -354,7 +384,7 @@ export function startEditMessage(this: ChatViewMixinContext, msgIndex: number, o
     }
 }
 
-export function isLastAssistantMessage(this: ChatViewMixinContext, content: string): boolean {
+export function isLastAssistantMessage(this: ChatViewLike, content: string): boolean {
     const messages = this.rollingWindow.messages;
     for (let i = messages.length - 1; i >= 0; i--) {
         if (messages[i].role === 'assistant') {
@@ -364,7 +394,7 @@ export function isLastAssistantMessage(this: ChatViewMixinContext, content: stri
     return false;
 }
 
-export async function regenerateLastResponse(this: ChatViewMixinContext): Promise<void> {
+export async function regenerateLastResponse(this: ChatViewLike): Promise<void> {
     const messages = this.rollingWindow.messages;
 
     // Find last user message
@@ -378,7 +408,9 @@ export async function regenerateLastResponse(this: ChatViewMixinContext): Promis
 
     if (lastUserIdx === -1) return;
 
-    const userContent = messages[lastUserIdx].content;
+    // TS-boundary: pole wpisywania dostaje TEKST ponawianej wiadomości; treść multimodalna
+    // (tablica bloków) trafia tu tylko z historii sprzed ery załączników i jest tam stringiem.
+    const userContent = messages[lastUserIdx].content as string;
     // Proweniencja jedzie ZA tekstem — ponowienie nie może awansować wiadomości maszynowej
     // (np. powiadomienia o wyniku suba) do rangi „to pisał człowiek". Brak znacznika = maszyna.
     const userOrigin = resolveMessageOrigin(messages[lastUserIdx]);
@@ -400,7 +432,7 @@ export async function regenerateLastResponse(this: ChatViewMixinContext): Promis
  * @param {number} messagesKept - How many messages were kept
  * @param {boolean} isEmergency - Was this an emergency (hard limit) summarization?
  */
-export function _renderCompressionBlock(this: ChatViewMixinContext, summary: string, count: number, messagesKept: number, isEmergency = false): void {
+export function _renderCompressionBlock(this: ChatViewLike, summary: string, count: number, messagesKept: number, isEmergency = false): void {
     if (!this.messages_container) return;
 
     const cls = isEmergency ? 'pkm-compression-block emergency' : 'pkm-compression-block';
@@ -458,7 +490,7 @@ export function _renderCompressionBlock(this: ChatViewMixinContext, summary: str
  * otherwise falls back to a standalone note in the message stream.
  * @param {number} count - How many memory candidates were queued (N>0).
  */
-export function _renderMemorySavedNote(this: ChatViewMixinContext, count: number): void {
+export function _renderMemorySavedNote(this: ChatViewLike, count: number): void {
     if (!count || count < 1) return;
     const attached = this._lastCompressionBlockEl && this._lastCompressionBlockEl.isConnected;
     const target = attached ? this._lastCompressionBlockEl : this.messages_container;
@@ -473,7 +505,7 @@ export function _renderMemorySavedNote(this: ChatViewMixinContext, count: number
  * Renders Phase 1 trim notification as a user-message-style bubble.
  * @param {Object} info - {trimmed, details, savedChars, tokensBefore, tokensAfterTrim, totalTrimmed}
  */
-export function _renderTrimBlock(this: ChatViewMixinContext, info: TrimInfo): void {
+export function _renderTrimBlock(this: ChatViewLike, info: TrimInfo): void {
     if (!this.messages_container) return;
 
     const block = this.messages_container.createDiv({ cls: 'cs-message cs-message--user cs-trim-bubble' });
@@ -525,7 +557,7 @@ export function _renderTrimBlock(this: ChatViewMixinContext, info: TrimInfo): vo
  * Draw a continuous vertical line from crystal header through all action rows.
  * Uses absolute positioning within messages_container so it spans across multiple agent divs.
  */
-export function _drawConnectorLines(this: ChatViewMixinContext): void {
+export function _drawConnectorLines(this: ChatViewLike): void {
     // Remove old lines
     this.messages_container.querySelectorAll('.cs-connector-line').forEach((el: Element) => el.remove());
 

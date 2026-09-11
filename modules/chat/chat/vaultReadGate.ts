@@ -34,7 +34,7 @@ interface PermissionVerdict {
  * ⚠️ Trzymamy CAŁY obiekt, nie samą metodę — `checkPermission` jest wołane NA NIM, więc
  * odpięcie metody zabrałoby jej `this` (i przy okazji cały stan systemu uprawnień).
  */
-interface PermissionSystemLike {
+export interface PermissionSystemLike {
     checkPermission?: (agent: unknown, action: string, vaultPath: string) => PermissionVerdict;
 }
 

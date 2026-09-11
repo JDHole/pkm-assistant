@@ -50,6 +50,7 @@ import {
 import { getLimits } from '../../config/limits.js';
 import { t } from '../../core/i18n/index.js';
 import { log } from '../../core/utils/Logger.js';
+import type { CrystalNoticeOptions } from '../../core/index.js';
 
 import type {
     ArchiveSessionInfo,
@@ -82,13 +83,11 @@ type RunnerAgentMemory = WorkflowAgentMemory & {
     };
 };
 
-interface NoticeOptions {
-    type?: string;
-    timeout?: number;
-}
+/** Opcje powiadomienia — kanoniczny kształt należy do `core/runtime/contracts.ts`. */
+type NoticeOptions = CrystalNoticeOptions;
 
 interface PluginLike {
-    showCrystalNotice?(message: string, options: NoticeOptions): unknown;
+    showCrystalNotice?(message: string, options?: NoticeOptions): unknown;
 }
 
 interface ModelMetadata {

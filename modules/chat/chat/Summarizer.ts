@@ -7,20 +7,30 @@
  * - Po polsku, maks ~800 słów
  */
 import { streamToComplete } from '../../memory/index.js';
+import type { StreamChatModelLike } from '../../memory/index.js';
+import type { ChatModel } from '../../models/index.js';
 import { t } from '../../../core/i18n/index.js';
 import { DEFAULT_COMPRESSION_PROMPT } from './compressionPrompt.js';
 import { log } from '../../../core/utils/Logger.js';
 
-// TS-any: adapter modelu i bloków narzędziowych mają rozszerzalny payload runtime.
-type RuntimePayload = any;
-type ContentBlock = { type?: string; text?: string; [key: string]: RuntimePayload };
-type ChatMessage = { role: string; content?: string | ContentBlock[]; tool_calls?: RuntimePayload[]; tool_call_id?: string };
-type SummarizerOptions = { triggerThreshold?: number; chatModel?: RuntimePayload; compressionPrompt?: string };
-type SummaryOptions = { isEmergency?: boolean; activeTaskContext?: string; sessionPath?: string; memoryIndex?: string };
+// Bloki treści i wywołania narzędzi przychodzą od RÓŻNYCH dostawców — modelujemy kształt,
+// który ten plik realnie czyta (`type`/`text`, `function.name`), reszta zostaje `unknown`.
+type ContentBlock = { type?: string; text?: string; [key: string]: unknown };
+type SummarizerToolCall = { function?: { name?: string } };
+type ChatMessage = { role: string; content?: string | ContentBlock[]; tool_calls?: SummarizerToolCall[]; tool_call_id?: string };
+/**
+ * Model, ktorym Summarizer strzela do LLM. `ChatModel` (modules/models) i `StreamChatModelLike`
+ * (modules/memory) opisuja TEN SAM adapter dwoma kontraktami - roznia sie ksztaltem `content`
+ * wiadomosci, wiec zaden nie jest przypisywalny do drugiego. Summarizer tylko PRZEKAZUJE
+ * instancje do `streamToComplete`; sam nie czyta jej pol.
+ */
+export type SummarizerModel = ChatModel | StreamChatModelLike;
+type SummarizerOptions = { triggerThreshold?: number; chatModel?: SummarizerModel | null; compressionPrompt?: string };
+export type SummaryOptions = { isEmergency?: boolean; activeTaskContext?: string; sessionPath?: string; memoryIndex?: string };
 
 export class Summarizer {
     declare triggerThreshold: number;
-    declare chatModel: RuntimePayload;
+    declare chatModel: SummarizerModel | null | undefined;
     declare compressionPrompt: string;
     /**
      * @param {Object} options
@@ -57,7 +67,7 @@ export class Summarizer {
 
             const mode = options.isEmergency ? 'EMERGENCY structured' : 'structured';
             log.debug('Summarizer', `Generating ${mode} summary from`, messages.length, 'messages...');
-            const response = await streamToComplete(this.chatModel, apiMessages);
+            const response = await streamToComplete(this.chatModel as StreamChatModelLike, apiMessages);
             const text = response.text || null;
             if (text) {
                 log.debug('Summarizer', 'Summary generated:', text.length, 'chars');
@@ -92,7 +102,7 @@ export class Summarizer {
      * @returns {string[]} Unikalne nazwy tooli
      */
     _extractToolNames(messages: ChatMessage[]) {
-        const tools = new Set();
+        const tools = new Set<string>();
         for (const msg of messages) {
             if (msg.tool_calls) {
                 for (const tc of msg.tool_calls) {
@@ -147,7 +157,7 @@ export class Summarizer {
                 // Oznacz tool_calls w assistant messages
                 let toolCallInfo = '';
                 if (m.tool_calls) {
-                    const names = m.tool_calls.map((tc: RuntimePayload) => tc.function?.name).filter(Boolean);
+                    const names = m.tool_calls.map((tc: SummarizerToolCall) => tc.function?.name).filter(Boolean);
                     if (names.length > 0) {
                         toolCallInfo = t('summarizer.called', { names: names.join(', ') });
                     }
