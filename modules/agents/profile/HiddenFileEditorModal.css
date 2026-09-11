@@ -8,11 +8,11 @@
 /* ── Crystal Soul File Editor Modal ── */
 
 /* Force large modal container (Obsidian wrapper) */
-.cs-file-editor-modal-container {
-    width: 85vw !important;
-    max-width: 900px !important;
-    height: 80vh !important;
-    max-height: 80vh !important;
+.modal.cs-file-editor-modal-container {
+    width: 85vw;
+    max-width: 900px;
+    height: 80vh;
+    max-height: 80vh;
 }
 .cs-file-editor-modal-container .modal-content {
     height: 100%;
@@ -21,8 +21,8 @@
 }
 
 /* Inner modal — zero padding, flex column fills container */
-.cs-file-editor-modal {
-    padding: 0 !important;
+.modal-content.cs-file-editor-modal {
+    padding: 0;
     display: flex;
     flex-direction: column;
     height: 100%;
