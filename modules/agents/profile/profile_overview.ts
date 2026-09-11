@@ -11,15 +11,13 @@ import { COLOR_GROUPS, getColorByHex } from '../../crystal-soul/index.js';
 import { UiIcons } from '../../crystal-soul/index.js';
 import { hexToRgbTriplet } from '../../crystal-soul/index.js';
 import { t, getDateLocale } from '../../../core/i18n/index.js';
-
-// TS-any: the profile coordinator and Obsidian UI extensions are dynamic runtime boundaries.
-type UiBoundary = any;
+import type { ProfileCtx, ProfileFormData } from './profile_types.js';
 
 /**
  * @param {Object} ctx - shared context
  * @param {HTMLElement} el
  */
-export async function renderOverviewTab(ctx: UiBoundary, el: HTMLElement) {
+export async function renderOverviewTab(ctx: ProfileCtx, el: HTMLElement) {
     const { formData, agent, agentManager, container, plugin } = ctx;
     const agentColor = agent?.color || formData.color || '#888888';
     const skillCount = formData.skills?.length || 0;
@@ -92,7 +90,9 @@ export async function renderOverviewTab(ctx: UiBoundary, el: HTMLElement) {
         heroMeta.createSpan({ text: new Date(formData.createdAt).toLocaleDateString(getDateLocale()), cls: 'cs-profile-hero__date' });
     }
     if (stats?.lastActivity) {
-        heroMeta.createSpan({ text: t('profile.overview.active_prefix') + new Date(stats.lastActivity).toLocaleDateString(getDateLocale()), cls: 'cs-profile-hero__date' });
+        // TS-boundary: Agent.lastActivity (owning module) is `unknown` - callers have always
+        // fed it straight to `new Date(...)`, so the real runtime value is string | number.
+        heroMeta.createSpan({ text: t('profile.overview.active_prefix') + new Date(stats.lastActivity as string | number).toLocaleDateString(getDateLocale()), cls: 'cs-profile-hero__date' });
     }
 
     // Color picker row
@@ -163,7 +163,9 @@ export async function renderOverviewTab(ctx: UiBoundary, el: HTMLElement) {
     // Kanon to models.main - legacy formData.model gaśnie po sync w AgentProfileView.ts
     // (modelFieldSync.ts), więc czytanie samego formData.model tu pokazywałoby „globalny" dla
     // KAŻDEGO agenta ze zmigrowanym modelem, mimo że ma jawnie ustawiony.
-    const mainModel = formData.models?.main || '';
+    // TS-boundary: formData.models to otwarty worek (Record<string, unknown>) - "main" to jedyny
+    // klucz ten plik czyta.
+    const mainModel = (formData.models?.main as string | undefined) || '';
     _shard(infoGrid, t('profile.overview.model'), mainModel || t('profile.overview.global'), null, !!mainModel);
     _shard(infoGrid, t('profile.overview.default_autonomy'), t(`autonomy.${autonomyMode}`),
         agent?.default_autonomy ? t('profile.overview.autonomy_per_agent') : t('profile.overview.autonomy_global'), true);
@@ -201,7 +203,7 @@ function _shard(grid: HTMLElement, label: string, value: string, sub: string | n
 }
 
 /** Human summary of the agent workspace (focus folders / whole vault). */
-function _workspaceSummary(formData: UiBoundary) {
+function _workspaceSummary(formData: ProfileFormData) {
     const focus = formData.focus_folders || [];
     if (focus.length === 0) {
         return { value: t('profile.overview.whole_vault'), sub: null, filled: false };
