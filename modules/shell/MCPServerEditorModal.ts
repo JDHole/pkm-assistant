@@ -100,9 +100,12 @@ export class MCPServerEditorModal extends Modal {
     declare private isEdit: boolean;
     declare private _presetId: string;
     declare private form: McpEditorForm;
-    declare private _transportEl: HTMLElement;
-    declare private _previewBtn: HTMLButtonElement;
-    declare private _previewResultEl: HTMLElement;
+    // `| undefined` - pola żyją dopiero PO `onOpen()` (Obsidian tworzy modal, potem otwiera);
+    // kod już się przed tym broni gołymi `if`/`?.` (patrz `_runPreview()` i `_renderTransportFields()`
+    // niżej) - `HTMLElement` bez `undefined` czyniło te guardy martwe na poziomie typów.
+    declare private _transportEl: HTMLElement | undefined;
+    declare private _previewBtn: HTMLButtonElement | undefined;
+    declare private _previewResultEl: HTMLElement | undefined;
     /**
      * @param {Object} app - Obsidian App
      * @param {Object} plugin - Plugin instance (settings + toolRegistry + externalMcpManager)
@@ -357,7 +360,10 @@ export class MCPServerEditorModal extends Modal {
     }
 
     _renderTransportFields() {
-        const el = this._transportEl;
+        // `!` - zawsze wołane PO `onOpen()` przypisującym `_transportEl` (bezpośrednio na końcu
+        // `onOpen()`, albo z listenera dropdownu, który istnieje dopiero PO tym przypisaniu);
+        // TS nie widzi tej kolejności między metodami.
+        const el = this._transportEl!;
         el.empty();
         // Zmiana transportu unieważnia poprzedni podgląd (dotyczył innego połączenia).
         if (this._previewResultEl) this._previewResultEl.empty();

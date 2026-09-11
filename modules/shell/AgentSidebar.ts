@@ -96,16 +96,23 @@ export class AgentSidebar extends ItemView {
     _initSidebar(container: HTMLElement): void {
         // Initialize navigation
         this.nav = new SidebarNav(container, this.plugin);
-        // TS-boundary: rejestr trzyma wspólny ViewRenderer (plugin: PluginApi) - każdy renderer
-        // zawęża plugin do managerów, których realnie czyta (kontrawariancja parametrów metod
-        // nie pozwala inaczej pogodzić wspólnego rejestru z węższymi sygnaturami widoków).
-        this.nav.register('home', renderHomeView as unknown as ViewRenderer);
-        this.nav.register('agent-profile', renderAgentProfileView);
-        this.nav.register('communicator', renderCommunicatorView);
-        this.nav.register('zaplecze', renderZapleczeView as unknown as ViewRenderer);
-        this.nav.register('skill-detail', renderSkillDetailView);
-        this.nav.register('sub-agent-detail', renderSubAgentDetailView);
-        this.nav.register('triggers', renderTriggersView as unknown as ViewRenderer);
+        // `home`/`zaplecze`/`triggers` są shell-owned - `plugin: PluginApi` siedzi wprost w ICH
+        // WŁASNEJ sygnaturze (zawężenie do HomeViewPlugin/BackstageViewsPlugin/TriggersViewPlugin
+        // przeniesione do wnętrza rendererów, patrz TS-boundary nad każdym z nich), więc rejestracja
+        // nie potrzebuje castu.
+        this.nav.register('home', renderHomeView);
+        // TS-boundary: `agent-profile`/`communicator`/`skill-detail`/`sub-agent-detail` są CUDZE
+        // (modules/agents, modules/komunikator, modules/skills, modules/sub-agents) - każdy ma
+        // WŁASNY, węższy typ pluginu (np. `AgentsPlugin`/`CommunicatorPlugin`), bo zawęża go do
+        // pól, które faktycznie czyta. Sidebar przekazuje KOMPLETNY obiekt pluginu; `ViewRenderer`
+        // (`plugin: PluginApi`) nie może być jednocześnie kontrawariantny względem wszystkich tych
+        // węższych typów naraz, więc cast w miejscu rejestracji jest jedyną uczciwą granicą.
+        this.nav.register('agent-profile', renderAgentProfileView as ViewRenderer);
+        this.nav.register('communicator', renderCommunicatorView as ViewRenderer);
+        this.nav.register('zaplecze', renderZapleczeView);
+        this.nav.register('skill-detail', renderSkillDetailView as ViewRenderer);
+        this.nav.register('sub-agent-detail', renderSubAgentDetailView as ViewRenderer);
+        this.nav.register('triggers', renderTriggersView);
         // Widoku `sub-agent-runs` już tu nie ma - biegi subów pokazuje pasek w OKNIE CZATU
         // (per agent i per sesja), patrz `modules/chat/chat/subTaskStrip.ts`.
 
@@ -180,11 +187,15 @@ export async function openAgentSidebar(plugin: AgentSidebarPlugin): Promise<void
 
     if (!leaf) {
         leaf = workspace.getRightLeaf(false);
+        // zastane: `getRightLeaf` zwraca `WorkspaceLeaf | null`, oryginał nie sprawdzał `null` -
+        // naprawa (guard/Notice na brak leafa) byłaby zmianą runtime, poza zakresem tej migracji.
         await leaf!.setViewState({
             type: AGENT_SIDEBAR_VIEW_TYPE,
             active: true
         });
     }
 
+    // zastane: jak wyżej - `leaf` może być `null` gdy oba kroki powyżej go nie dały; oryginał
+    // i tak woła `revealLeaf` bez sprawdzenia.
     workspace.revealLeaf(leaf!);
 }

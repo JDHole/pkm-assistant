@@ -13,6 +13,14 @@ import test from 'ava';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { SettingsRegistryClass } from './SettingsRegistry.js';
+import type { SettingsSectionRenderOptions } from './SettingsRegistry.js';
+import type { PluginApi, SettingsSectionCtx } from '../../core/index.js';
+
+// TS-boundary: atrapa Node-safe (AVA, bez Obsidiana) - `render()` samo nie czyta `plugin` ani
+// `options.owner`, tylko przekazuje je do sekcji/pod-pól, a oba testy niżej rejestrują wyłącznie
+// no-op renderery (`render() {}`) które ignorują argumenty.
+const fakePlugin = {} as unknown as PluginApi;
+const fakeOptions = { owner: { buildSectionContext: () => ({} as unknown as SettingsSectionCtx) } } as SettingsSectionRenderOptions;
 
 class FakeEl {
     tagName: string;
@@ -57,7 +65,7 @@ test('render() never paints a pkm-settings-v2* class', async t => {
     registry.registerSubFields('memory', [{ id: 'sub', order: 10, render() {} }]);
 
     const containerEl = new FakeEl('div') as unknown as any;
-    await registry.render(containerEl, {}, {});
+    await registry.render(containerEl, fakePlugin, fakeOptions);
 
     const classes = collectClasses(containerEl as unknown as FakeEl);
     for (const c of classes) {
@@ -70,7 +78,7 @@ test('render() paints the live pkm-settings-* names (layout/nav/content/nav__btn
     registry.register({ id: 'memory', label: 'Memory', order: 10, render() {} });
 
     const containerEl = new FakeEl('div') as unknown as any;
-    await registry.render(containerEl, {}, {});
+    await registry.render(containerEl, fakePlugin, fakeOptions);
 
     const classes = collectClasses(containerEl as unknown as FakeEl);
     t.true(classes.has('pkm-settings-layout'));

@@ -52,7 +52,7 @@ export class ApprovalModal extends Modal {
      */
     constructor(app: App, action: ApprovalAction) {
         super(app);
-        this.action = action as ApprovalActionDetails;
+        this.action = action;
         this.result = null;
         this.resolvePromise = null;
     }
