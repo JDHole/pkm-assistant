@@ -55,6 +55,7 @@ test('wiersze mają stabilne id i klucze i18n', t => {
 });
 
 test('liczniki: szablony ze store, konektory tylko PODŁĄCZONE, pkm-sub doliczony do subów', t => {
+    // TS-boundary: atrapa Node-safe (AVA, bez Obsidiana) - `readZapleczeCounts` czyta tylko te pola.
     const plugin = {
         agentManager: {
             skillTemplateStore: { count: () => 4 },
@@ -67,7 +68,7 @@ test('liczniki: szablony ze store, konektory tylko PODŁĄCZONE, pkm-sub doliczo
                 { id: 'c', connected: true },
             ]),
         },
-    };
+    } as unknown as Parameters<typeof readZapleczeCounts>[0];
 
     const counts = readZapleczeCounts(plugin);
 
@@ -88,7 +89,7 @@ test('liczniki są odporne na brak pluginu / rzucający manager', t => {
     t.deepEqual(
         readZapleczeCounts({
             externalMcpManager: { listServersForUi: () => { throw new Error('boom'); } },
-        }),
+        } as unknown as Parameters<typeof readZapleczeCounts>[0]),
         pusto
     );
 });

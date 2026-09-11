@@ -19,14 +19,27 @@ import {
 } from './triggers_collectors.js';
 import type { TriggerItem as CollectorTriggerItem } from './triggers_collectors.js';
 import { findActiveChatView } from './findActiveChatView.js';
+import type { AgentManager } from '../../../modules/agents/index.js';
+import type { ToolRegistry } from '../../../modules/tools/index.js';
+import type { PluginApi } from '../../../core/index.js';
 
 // Re-export for tests / outside callers that want pure logic.
 export { collectSkillItems, collectSubAgentItems, collectMcpServerItems } from './triggers_collectors.js';
 
-// TS-any: sidebar values originate in Obsidian and dynamic plugin registries.
-type Runtime = any;
 type TriggerItem = CollectorTriggerItem;
 type TriggerSection = { sectionLabel: string; emptyText: string; items: TriggerItem[]; onSelect: (item: TriggerItem) => void };
+
+/** Plugin widziany przez ten widok: managery agentów i narzędzi. */
+interface TriggersViewPlugin extends PluginApi {
+    agentManager?: AgentManager;
+    toolRegistry?: ToolRegistry;
+}
+
+/** Karta czatu, jaką zwraca `findActiveChatView` - tylko pola, których ten widok dotyka. */
+interface ChatViewLike {
+    input_area?: HTMLTextAreaElement;
+    handleInputResize?: () => void;
+}
 
 /**
  * Render the triggers view.
@@ -35,7 +48,7 @@ type TriggerSection = { sectionLabel: string; emptyText: string; items: TriggerI
  * @param {import('./SidebarNav.js').SidebarNav} nav
  * @param {Object} _params
  */
-export function renderTriggersView(container: Runtime, plugin: Runtime, _nav: Runtime, _params: Runtime): void {
+export function renderTriggersView(container: HTMLElement, plugin: TriggersViewPlugin, _nav: unknown, _params: unknown): void {
     container.classList.add('cs-root');
     const agentManager = plugin?.agentManager;
     const activeAgent = agentManager?.getActiveAgent?.();
@@ -84,7 +97,7 @@ export function renderTriggersView(container: Runtime, plugin: Runtime, _nav: Ru
 
 // ── Internal helpers ─────────────────────────────────────────────────
 
-function renderTriggerSection(container: Runtime, { sectionLabel, emptyText, items, onSelect }: TriggerSection): void {
+function renderTriggerSection(container: HTMLElement, { sectionLabel, emptyText, items, onSelect }: TriggerSection): void {
     const section = container.createDiv({ cls: 'cs-home-section' });
     const titleEl = section.createDiv({ cls: 'cs-section-title cs-section-title--trigger' });
     titleEl.textContent = sectionLabel;
@@ -134,8 +147,11 @@ function renderIcon(item: TriggerItem): string {
     return UiIcons.tool(14);
 }
 
-async function insertTriggerMarker(plugin: Runtime, type: string, name: string): Promise<void> {
-    const chatView = findActiveChatView(plugin);
+async function insertTriggerMarker(plugin: TriggersViewPlugin, type: string, name: string): Promise<void> {
+    // TS-boundary: `AppLike.workspace` (core, node-safe) nie modeluje `getLeavesOfType`/
+    // `activeLeaf` - findActiveChatView jest node-safe z tego samego powodu i trzyma własny,
+    // luźniejszy kontrakt; shell już importuje obsidian wprost gdzie indziej.
+    const chatView = findActiveChatView(plugin as unknown as Parameters<typeof findActiveChatView>[0]) as ChatViewLike | null;
     if (!chatView || !chatView.input_area) {
         new Notice(t('sidebar.no_chat_open'));
         return;

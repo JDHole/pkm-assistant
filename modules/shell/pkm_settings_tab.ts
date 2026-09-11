@@ -14,26 +14,36 @@ import { registerSettings as registerWebSettings } from '../web/index.js';
 import { registerSettings as registerCrystalSoulSettings } from '../crystal-soul/index.js';
 import { renderVaultSection } from './vault_settings.js';
 import { renderPromptSection } from './prompt_settings.js';
-
-// TS-any: settings UI is the composition boundary for plugin-owned registries, persisted settings, and modal services.
-type Runtime = any;
+import type { PluginApi, SettingsSectionCtx, ChatSettingsSlice, EmbeddingSettingsSlice } from '../../core/index.js';
+import type { ModelLibraryEntry } from '../models/index.js';
 
 interface PlatformOption {
     id: string;
     name: string;
 }
 
+/**
+ * TS-boundary: każdy owner-modul (core/models/memory/tools/web/crystal-soul) ma WŁASNY,
+ * strukturalnie inny `SettingsRegistryLike`/Ctx nad tym samym rejestrem i workerem DI -
+ * `SettingsRegistry.register`/`registerXSettings` żyją za generycznym
+ * `(...args: unknown[]) => unknown` (patrz `SettingsRegistry.ts`/`BackstageRegistry.ts` - ten
+ * sam wzorzec rejestru wielu niezależnie typowanych wołaczy). Zawężenie do jednego precyzyjnego
+ * typu współdzielonego przez wszystkich wołaczy nie istnieje bez zmiany ich plików (poza
+ * zakresem); wywołania zostają 1:1, tylko z realną (nie `any`) funkcją zamiast `Runtime`.
+ */
+type GenericFn = (...args: unknown[]) => unknown;
+
 export class PkmSettingsTab extends PluginSettingsTab {
-    declare readonly plugin: Runtime;
+    declare readonly plugin: PluginApi;
     declare name: string;
     declare private _showKeys: Record<string, boolean>;
     // DWA kontenery (`pkm-settings-header` / `pkm-settings-main`). Nie ma trzeciego
     // kontenera „środowiska" - sekcja pluginu wchodzi do głównego.
-    declare readonly headerContainer: Runtime;
-    declare readonly mainContainer: Runtime;
+    declare readonly headerContainer: HTMLElement;
+    declare readonly mainContainer: HTMLElement;
     declare private _settingsSectionsRegistered: boolean;
 
-    constructor(app: App, plugin: Runtime) {
+    constructor(app: App, plugin: PluginApi) {
         super(app, plugin);
         this.plugin = plugin;
         this.name = 'PKM Assistant';
@@ -59,7 +69,7 @@ export class PkmSettingsTab extends PluginSettingsTab {
         await this.render_global_settings(this.mainContainer);
     }
 
-    async render_header(container: Runtime): Promise<void> {
+    async render_header(container: HTMLElement): Promise<void> {
         if (!container) return;
         container.empty();
         container.createEl('h1', { text: t('settings.header_title') });
@@ -69,7 +79,7 @@ export class PkmSettingsTab extends PluginSettingsTab {
         });
     }
 
-    async render_plugin_settings(container: Runtime): Promise<void> {
+    async render_plugin_settings(container: HTMLElement): Promise<void> {
         if (!container) return;
         container.empty();
 
@@ -92,10 +102,10 @@ export class PkmSettingsTab extends PluginSettingsTab {
         }
     }
 
-    async render_global_settings(container: Runtime): Promise<void> {
+    async render_global_settings(container: HTMLElement): Promise<void> {
         if (!container) return;
         this._registerDefaultSettingsSections();
-        await (SettingsRegistry.render as Runtime)(container, this.plugin, {
+        await (SettingsRegistry.render as unknown as GenericFn)(container, this.plugin, {
             owner: this,
             defaultId: 'models',
         });
@@ -104,9 +114,9 @@ export class PkmSettingsTab extends PluginSettingsTab {
     _registerDefaultSettingsSections() {
         if (this._settingsSectionsRegistered) return;
         SettingsRegistry.clear();
-        (registerCoreSettings as Runtime)(SettingsRegistry, this.plugin);
-        (registerModelsSettings as Runtime)(SettingsRegistry, this.plugin);
-        (registerMemorySettings as Runtime)(SettingsRegistry, this.plugin);
+        (registerCoreSettings as unknown as GenericFn)(SettingsRegistry, this.plugin);
+        (registerModelsSettings as unknown as GenericFn)(SettingsRegistry, this.plugin);
+        (registerMemorySettings as unknown as GenericFn)(SettingsRegistry, this.plugin);
         // Settings→Vault (folder groups + vault zone descriptions). Shell-owned (vault
         // entity, not agents); order 35 sits between Pamięć (30) and Web (45).
         SettingsRegistry.register({
@@ -114,9 +124,9 @@ export class PkmSettingsTab extends PluginSettingsTab {
             label: t('settings.vault_label'),
             icon: '🗂️',
             order: 35,
-            render: (containerEl: Runtime, _plugin: Runtime, options: Runtime) => renderVaultSection(containerEl, options.owner.buildSectionContext()),
-        });
-        (registerWebSettings as Runtime)(SettingsRegistry, this.plugin);
+            render: (containerEl: HTMLElement, _plugin: unknown, options: { owner: PkmSettingsTab }) => renderVaultSection(containerEl, options.owner.buildSectionContext() as unknown as Parameters<typeof renderVaultSection>[1]),
+        } as unknown as Parameters<typeof SettingsRegistry.register>[0]);
+        (registerWebSettings as unknown as GenericFn)(SettingsRegistry, this.plugin);
         // Settings→Prompt (global prompt defaults - work prompts + factory sections).
         // Shell-owned; order 50 sits after Web (45), before No-Go (60).
         SettingsRegistry.register({
@@ -124,16 +134,24 @@ export class PkmSettingsTab extends PluginSettingsTab {
             label: t('settings.prompt_label'),
             icon: '📝',
             order: 50,
-            render: (containerEl: Runtime, _plugin: Runtime, options: Runtime) => renderPromptSection(containerEl, options.owner.buildSectionContext()),
-        });
-        (registerMcpSettings as Runtime)(SettingsRegistry, this.plugin);
-        (registerCrystalSoulSettings as Runtime)(SettingsRegistry, this.plugin);
+            render: (containerEl: HTMLElement, _plugin: unknown, options: { owner: PkmSettingsTab }) => renderPromptSection(containerEl, options.owner.buildSectionContext() as unknown as Parameters<typeof renderPromptSection>[1]),
+        } as unknown as Parameters<typeof SettingsRegistry.register>[0]);
+        (registerMcpSettings as unknown as GenericFn)(SettingsRegistry, this.plugin);
+        (registerCrystalSoulSettings as unknown as GenericFn)(SettingsRegistry, this.plugin);
         this._settingsSectionsRegistered = true;
     }
 
-    buildSectionContext(): Runtime {
+    /**
+     * TS-boundary: worek DI współdzielony przez WSZYSTKIE sekcje ustawień (core/models/memory/
+     * tools/web/vault/prompt/crystal-soul) - każdy owner-modul ma WŁASNY, węższy typ Ctx nad tym
+     * samym obiektem (np. `modules/models/SettingsContent.ts:ModelsSectionCtx`). `SettingsSectionCtx`
+     * (core, ten plik jest jego wołaczem referencyjnym) opisuje `pkm` wąsko (`PkmSettingsSlice`,
+     * nieeksportowany) - realny `bag.pkmAssistant` ma więcej pól niż ta jedna sekcja czyta,
+     * stąd jedna asercja całego zwracanego workera zamiast rozbijania pól z osobna.
+     */
+    buildSectionContext(): SettingsSectionCtx {
         // To jest EKRAN USERA, nie boot - prowizjonowanie idzie świadomie przez proxy.
-        const bag: Runtime = this.env?.settings ?? {};
+        const bag = this.env?.settings ?? {};
         if (!bag.pkmAssistant) bag.pkmAssistant = {};
         if (!bag.pkmAssistant.chat) bag.pkmAssistant.chat = {};
         if (!bag.pkmAssistant.embedding) bag.pkmAssistant.embedding = {};
@@ -164,27 +182,27 @@ export class PkmSettingsTab extends PluginSettingsTab {
                 const { CostTrackingModal } = await import('./CostTrackingModal.js');
                 new CostTrackingModal(this.app, this.plugin).open();
             },
-        };
+        } as unknown as SettingsSectionCtx;
     }
 
     /**
      * Sync modelLibrary defaults to legacy settings keys for backward compat.
      * Called after any modelLibrary change.
      */
-    _syncLegacyModelKeys(pkm: Runtime, chat: Runtime): void {
+    _syncLegacyModelKeys(pkm: { modelLibrary?: Record<string, ModelLibraryEntry[]>; minionPlatform?: string; minionModel?: string }, chat: ChatSettingsSlice): void {
         const lib = pkm.modelLibrary || {};
-        const mainDef = (lib.main || []).find((m: Runtime) => m.isDefault) || lib.main?.[0];
+        const mainDef = (lib.main || []).find((m: ModelLibraryEntry) => m.isDefault) || lib.main?.[0];
         if (mainDef) {
             chat.platform = mainDef.platform;
             if (!chat.models) chat.models = {};
             chat.models[mainDef.platform] = mainDef.model;
         }
-        const minionDef = (lib.minion || []).find((m: Runtime) => m.isDefault) || lib.minion?.[0];
+        const minionDef = (lib.minion || []).find((m: ModelLibraryEntry) => m.isDefault) || lib.minion?.[0];
         pkm.minionPlatform = minionDef?.platform || '';
         pkm.minionModel = minionDef?.model || '';
     }
 
-    _getAvailablePlatforms(chat: Runtime): PlatformOption[] {
+    _getAvailablePlatforms(chat: ChatSettingsSlice): PlatformOption[] {
         const platforms: PlatformOption[] = [];
         const apiProviders = ['anthropic', 'openai', 'deepseek', 'gemini', 'groq', 'xai', 'open_router'];
         const localProviders = ['ollama', 'lm_studio'];
@@ -202,12 +220,12 @@ export class PkmSettingsTab extends PluginSettingsTab {
         return platforms;
     }
 
-    _getEmbedModelKey(provider: string, embedding: Runtime): string {
+    _getEmbedModelKey(provider: string, embedding: EmbeddingSettingsSlice): string {
         if (!provider) return '';
         return embedding?.models?.[provider] || '';
     }
 
-    _setEmbedModelKey(provider: string, value: string, embedding: Runtime): void {
+    _setEmbedModelKey(provider: string, value: string, embedding: EmbeddingSettingsSlice): void {
         if (!embedding.models) embedding.models = {};
         embedding.models[provider] = value;
     }

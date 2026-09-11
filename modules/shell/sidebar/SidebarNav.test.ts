@@ -10,9 +10,12 @@
  */
 import test from 'ava';
 import { SidebarNav } from './SidebarNav.js';
+import type { PluginApi } from '../../../core/index.js';
+
+const fakePlugin = {} as unknown as PluginApi;
 
 /** Atrapa kontenera - `dispose()` nie renderuje, więc wystarczy pusty obiekt. */
-const fakeContainer = () => ({ empty() { }, addClass() { } });
+const fakeContainer = () => ({ empty() { }, addClass() { } }) as unknown as HTMLElement;
 
 /** Atrapa DOM-u wystarczająca do przejechania `_render()` (createDiv/createEl/scrollTop). */
 type FakeEl = {
@@ -44,7 +47,7 @@ function makeFakeEl(): FakeEl {
 }
 
 test('dispose() woła sprzątanie bieżącego widoku', t => {
-    const nav = new SidebarNav(fakeContainer(), {});
+    const nav = new SidebarNav(fakeContainer(), fakePlugin);
     let calls = 0;
     nav._currentCleanup = () => { calls++; };
 
@@ -54,7 +57,7 @@ test('dispose() woła sprzątanie bieżącego widoku', t => {
 });
 
 test('dispose() jest idempotentny — drugie zamknięcie nie odpala sprzątania ponownie', t => {
-    const nav = new SidebarNav(fakeContainer(), {});
+    const nav = new SidebarNav(fakeContainer(), fakePlugin);
     let calls = 0;
     nav._currentCleanup = () => { calls++; };
 
@@ -66,13 +69,13 @@ test('dispose() jest idempotentny — drugie zamknięcie nie odpala sprzątania 
 });
 
 test('dispose() bez zarejestrowanego sprzątania nie rzuca', t => {
-    const nav = new SidebarNav(fakeContainer(), {});
+    const nav = new SidebarNav(fakeContainer(), fakePlugin);
 
     t.notThrows(() => nav.dispose());
 });
 
 test('dispose() nie przewraca demontażu, gdy sprzątanie widoku rzuci', t => {
-    const nav = new SidebarNav(fakeContainer(), {});
+    const nav = new SidebarNav(fakeContainer(), fakePlugin);
     nav._currentCleanup = () => { throw new Error('widok padł przy sprzątaniu'); };
 
     t.notThrows(() => nav.dispose(), 'onClose leci dalej — reszta panelu też musi się odpiąć');
@@ -88,7 +91,7 @@ test('dispose() nie przewraca demontażu, gdy sprzątanie widoku rzuci', t => {
  */
 test('_render() zdejmuje _rendering mimo wyjątku w renderFn — nawigacja nie zamraża się', t => {
     const container = makeFakeEl();
-    const nav = new SidebarNav(container, {});
+    const nav = new SidebarNav(container as unknown as HTMLElement, fakePlugin);
     nav.register('boom', () => { throw new Error('widok padł'); });
     nav.register('ok', () => { /* renderuje się bez problemu */ });
 
@@ -102,7 +105,7 @@ test('_render() zdejmuje _rendering mimo wyjątku w renderFn — nawigacja nie z
 
 test('_render() zdejmuje _rendering mimo wyjątku w sprzątaniu poprzedniego widoku', t => {
     const container = makeFakeEl();
-    const nav = new SidebarNav(container, {});
+    const nav = new SidebarNav(container as unknown as HTMLElement, fakePlugin);
     nav.register('a', () => { /* noop */ });
     nav.register('b', () => { /* noop */ });
     nav.push('a');

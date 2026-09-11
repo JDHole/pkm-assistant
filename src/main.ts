@@ -182,7 +182,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     // `registerItemViews()` ZOSTAJE tutaj: Obsidian odtwarza zapisane zakładki przy
     // layoutReady, więc typ widoku musi być znany zanim to nastąpi.
     this.registerItemViews();
-    registerAgentSidebar(this);
+    registerAgentSidebar(this as unknown as Parameters<typeof registerAgentSidebar>[0]);
     // Render bloku ```pkm-artefakt``` (guziki akceptacji/przywołania w notatce).
     registerArtifactBlocks(this);
 
@@ -856,7 +856,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       agents: {
         iconName: "users",
         description: t('main.agent_sidebar'),
-        callback: () => { void openAgentSidebar(this); }
+        callback: () => { void openAgentSidebar(this as unknown as Parameters<typeof openAgentSidebar>[0]); }
       }
     }
   }
@@ -981,7 +981,7 @@ export default class PkmAssistantPlugin extends PluginBase {
         id: "pkm-open-agents",
         name: t('command.open_agents'),
         callback: () => {
-          void openAgentSidebar(this);
+          void openAgentSidebar(this as unknown as Parameters<typeof openAgentSidebar>[0]);
         }
       },
       pkm_selftest: {

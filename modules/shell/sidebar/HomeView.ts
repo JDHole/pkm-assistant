@@ -3,28 +3,59 @@
  * Crystal Soul design system.
  */
 import { Notice } from 'obsidian';
+import type { App } from 'obsidian';
 import { openAgentDeleteModal } from '../AgentDeleteModal.js';
 import { openAgentPresentationModal } from '../AgentPresentationModal.js';
 import { Agent } from '../../../modules/agents/index.js';
+import type { AgentManager } from '../../../modules/agents/index.js';
 import { SkinManager, UiIcons, hexToRgbTriplet, setSvg, setSvgLabel } from '../../../modules/crystal-soul/index.js';
 import { isKomunikatorEnabled } from '../../../modules/komunikator/index.js';
 import { buildZapleczeRows, readZapleczeCounts } from './backstage_rows.js';
 import { t } from '../../../core/i18n/index.js';
 import { log } from '../../../core/utils/Logger.js';
 import { CHAT_VIEW_TYPE } from '../../../core/index.js';
+import type { PluginApi } from '../../../core/index.js';
+import type { SidebarNav } from './SidebarNav.js';
 
 // Value-import (nie tylko typ) - inicjalizuje moduł przy imporcie; sam wynik pozostaje nieużywany.
 void Agent;
 
-// TS-any: these values cross dynamic Obsidian/plugin APIs not yet modelled by the migration.
-type Runtime = any;
+/** Kształt błędu w `catch` bez narzucania typu wyjątku. */
+type ErrLike = { message?: string };
+
+/**
+ * Plugin widziany przez Home. `externalMcpManager` zawężony do jedynej metody, której
+ * potrzebuje `readZapleczeCounts` (backstage_rows.ts) - bez importu realnej klasy
+ * `ExternalMcpManager` z modules/tools (Home jej samej nie woła).
+ */
+interface HomeViewPlugin extends PluginApi {
+    agentManager?: AgentManager;
+    externalMcpManager?: { listServersForUi?(): Array<{ connected: boolean }> };
+}
+
+/** Jeden wpis listy agentów w UI - kształt zwracany przez `Agent.getDisplayInfo()`. */
+type AgentListItem = ReturnType<AgentManager['getAgentListForUI']>[number];
+
+/**
+ * `AgentManager.komunikatorManager` jest wciąż `unknown`-owym polem dynamicznym
+ * (migracja modules/agents jeszcze go nie otypowała) - Home czyta z niego wyłącznie
+ * `getUnreadCount`, więc zawężamy TYLKO ten kawałek powierzchni.
+ */
+interface KomunikatorManagerLike {
+    getUnreadCount(agentName: string): Promise<number>;
+}
+
+/** Powierzchnia `ChatView`, jakiej dotyka Home (przełączenie agenta w otwartej karcie czatu). */
+interface ChatViewLike {
+    handleAgentChange?: (agentName: string) => void;
+}
 
 /**
  * Pierwsza wolna nazwa domyślnego agenta (Agent1, Agent2, …).
  * @param {Object} agentManager
  * @returns {string}
  */
-function firstFreeAgentName(agentManager: Runtime): string {
+function firstFreeAgentName(agentManager: AgentManager | null | undefined): string {
     for (let i = 1; i <= 999; i++) {
         const name = `Agent${i}`;
         if (!agentManager?.getAgent?.(name)) return name;
@@ -51,7 +82,7 @@ function getRoleLabel(role: string): string {
  * @param {import('./SidebarNav.js').SidebarNav} nav
  * @param {Object} params
  */
-export function renderHomeView(container: Runtime, plugin: Runtime, nav: Runtime, _params: Runtime): void {
+export function renderHomeView(container: HTMLElement, plugin: HomeViewPlugin, nav: SidebarNav, _params: Record<string, unknown>): void {
     container.classList.add('cs-root');
     const agentManager = plugin.agentManager;
     if (!agentManager) {
@@ -85,10 +116,10 @@ export function renderHomeView(container: Runtime, plugin: Runtime, nav: Runtime
     addCard.addEventListener('click', async () => {
         try {
             const name = firstFreeAgentName(plugin.agentManager);
-            await plugin.agentManager.createAgent({ name });
+            await plugin.agentManager!.createAgent({ name });
             nav.push('agent-profile', { agentName: name }, t('sidebar.agents'));
-        } catch (e: Runtime) {
-            new Notice(t('profile.advanced.create_error') + (e?.message || e));
+        } catch (e) {
+            new Notice(t('profile.advanced.create_error') + (((e as ErrLike)?.message || (e as ErrLike)) as string));
         }
     });
 
@@ -106,8 +137,8 @@ export function renderHomeView(container: Runtime, plugin: Runtime, nav: Runtime
 /**
  * Render a single agent card - Crystal Soul style.
  */
-function renderAgentCard(container: Runtime, agentInfo: Runtime, plugin: Runtime, nav: Runtime): void {
-    const agent = plugin.agentManager.getAgent(agentInfo.name);
+function renderAgentCard(container: HTMLElement, agentInfo: AgentListItem, plugin: HomeViewPlugin, nav: SidebarNav): void {
+    const agent = plugin.agentManager!.getAgent(agentInfo.name);
     if (!agent) return;
 
     const agentColor = SkinManager.getAgentColor(agent || agentInfo.name);
@@ -125,7 +156,9 @@ function renderAgentCard(container: Runtime, agentInfo: Runtime, plugin: Runtime
     card.createDiv({ cls: 'cs-agent-card__name', text: agentInfo.name });
 
     // Role
-    const roleText = getRoleLabel(agentInfo.role);
+    // TS-boundary: `role` nie jest polem `Agent.getDisplayInfo()` (name/color/description/isBuiltIn) -
+    // w praktyce zawsze `undefined`; zachowane 1:1 z oryginałem (getRoleLabel(undefined) → '').
+    const roleText = getRoleLabel((agentInfo as unknown as { role: string }).role);
     if (roleText) {
         card.createDiv({ cls: 'cs-agent-card__role', text: roleText });
     }
@@ -138,7 +171,7 @@ function renderAgentCard(container: Runtime, agentInfo: Runtime, plugin: Runtime
         attr: { 'aria-label': t('sidebar.profile') }
     });
     setSvg(profileBtn, UiIcons.settings(10));
-    profileBtn.addEventListener('click', (e: Runtime) => {
+    profileBtn.addEventListener('click', (e: MouseEvent) => {
         e.stopPropagation();
         nav.push('agent-profile', { agentName: agent.name }, t('sidebar.agents'));
     });
@@ -150,7 +183,7 @@ function renderAgentCard(container: Runtime, agentInfo: Runtime, plugin: Runtime
             attr: { 'aria-label': t('generic.delete') }
         });
         setSvg(deleteBtn, UiIcons.trash(10));
-        deleteBtn.addEventListener('click', (e: Runtime) => {
+        deleteBtn.addEventListener('click', (e: MouseEvent) => {
             e.stopPropagation();
             openAgentDeleteModal(plugin, agent, () => {
                 nav.refresh();
@@ -166,7 +199,9 @@ function renderAgentCard(container: Runtime, agentInfo: Runtime, plugin: Runtime
             },
             onChatNavigate: () => {
                 // Switch to or create a tab for this agent in the chat view
-                const chatView = plugin.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)?.[0]?.view;
+                // TS-boundary: `AppLike.workspace` (core, node-safe) erasuje realne Obsidian API -
+                // shell już importuje `obsidian` wprost, więc sięga po prawdziwy `App`/`WorkspaceLeaf`.
+                const chatView = ((plugin.app as unknown as App).workspace.getLeavesOfType(CHAT_VIEW_TYPE)?.[0]?.view as unknown) as ChatViewLike | undefined;
                 if (chatView?.handleAgentChange) {
                     chatView.handleAgentChange(agentInfo.name);
                 }
@@ -178,7 +213,7 @@ function renderAgentCard(container: Runtime, agentInfo: Runtime, plugin: Runtime
 /**
  * Render the communicator section - Crystal Soul style.
  */
-function renderCommunicatorSection(container: Runtime, agents: Runtime[], plugin: Runtime, nav: Runtime): void {
+function renderCommunicatorSection(container: HTMLElement, agents: AgentListItem[], plugin: HomeViewPlugin, nav: SidebarNav): void {
     const section = container.createDiv({ cls: 'cs-home-section' });
 
     // Header (clickable - opens communicator)
@@ -191,7 +226,7 @@ function renderCommunicatorSection(container: Runtime, agents: Runtime[], plugin
         attr: { 'aria-label': t('sidebar.open_communicator') }
     });
     setSvg(openBtn, UiIcons.externalLink(10));
-    openBtn.addEventListener('click', (e: Runtime) => {
+    openBtn.addEventListener('click', (e: MouseEvent) => {
         e.stopPropagation();
         nav.push('communicator', {}, t('sidebar.agents'));
     });
@@ -211,8 +246,10 @@ function renderCommunicatorSection(container: Runtime, agents: Runtime[], plugin
  * Async: render compact chips for agents with unread messages.
  * Shows "Brak nowych wiadomości" if no unread.
  */
-async function updateCommunicatorChips(chipContainer: Runtime, emptyLabel: Runtime, agents: Runtime[], plugin: Runtime, nav: Runtime): Promise<void> {
-    const komunikator = plugin.agentManager?.komunikatorManager;
+async function updateCommunicatorChips(chipContainer: HTMLElement, emptyLabel: HTMLElement, agents: AgentListItem[], plugin: HomeViewPlugin, nav: SidebarNav): Promise<void> {
+    // TS-boundary: `AgentManager.komunikatorManager` jest wciąż nieotypowanym polem dynamicznym
+    // (migracja modules/agents go jeszcze nie dotknęła) - zawężamy do jedynej metody, którą Home woła.
+    const komunikator = plugin.agentManager?.komunikatorManager as KomunikatorManagerLike | undefined;
     if (!komunikator) {
         emptyLabel.textContent = t('sidebar.communicator_unavailable');
         return;
@@ -220,10 +257,10 @@ async function updateCommunicatorChips(chipContainer: Runtime, emptyLabel: Runti
 
     let hasUnread = false;
     for (const agentInfo of agents) {
-        const agent = plugin.agentManager.getAgent(agentInfo.name);
+        const agent = plugin.agentManager!.getAgent(agentInfo.name);
         if (!agent) continue;
         // Agent-duch nie pokazuje skrzynki ani licznika.
-        if (plugin.agentManager.isKomunikatorVisible(agent) === false) continue;
+        if (plugin.agentManager!.isKomunikatorVisible(agent) === false) continue;
 
         try {
             const count = await komunikator.getUnreadCount(agentInfo.name);
@@ -266,7 +303,7 @@ async function updateCommunicatorChips(chipContainer: Runtime, emptyLabel: Runti
 /**
  * Render the Zaplecze (Backstage) section - Crystal Soul style.
  */
-function renderZapleczeSection(container: Runtime, plugin: Runtime, nav: Runtime): void {
+function renderZapleczeSection(container: HTMLElement, plugin: Parameters<typeof readZapleczeCounts>[0], nav: SidebarNav): void {
     const section = container.createDiv({ cls: 'cs-home-section' });
 
     // Header

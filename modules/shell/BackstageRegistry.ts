@@ -7,6 +7,8 @@ export interface BackstageTab {
     id: string;
     label?: string;
     icon?: string;
+    /** Ikona jako funkcja (rozmiar → SVG string) - wzór z `UiIcons`; ustawiana przez każdy owner-moduł. */
+    iconFn?: (size: number) => string;
     order?: number;
     render: (...args: unknown[]) => unknown;
 }
