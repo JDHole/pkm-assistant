@@ -13,6 +13,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import test from 'ava';
+import type { ReleaseNotesIo } from './releaseNotes.js';
 import {
     compareSemver,
     formatReleaseNotesContent,
@@ -25,6 +26,17 @@ import {
 function makeTempDir(): string {
     return fs.mkdtempSync(path.join(os.tmpdir(), 'pkm-release-notes-'));
 }
+
+// Realny fs/path (nie fake) — ten plik nie jest lintowany przez walidator katalogu
+// Obsidiana, więc może importować `node:fs`/`node:path` wprost; testy mają wołać
+// prawdziwy dysk, tak jak `release.js` w produkcji.
+const io: ReleaseNotesIo = {
+    readdirSync: (dir: string) => fs.readdirSync(dir),
+    readFileSync: (file: string, encoding: 'utf8') => fs.readFileSync(file, encoding),
+    mkdirSync: (dir: string, opts: { recursive: true }) => { fs.mkdirSync(dir, opts); },
+    writeFileSync: (file: string, data: string, encoding: 'utf8') => { fs.writeFileSync(file, data, encoding); },
+    join: (...parts: string[]) => path.join(...parts),
+};
 
 // ── compareSemver ──────────────────────────────────────────────────────────────────────────
 
@@ -49,7 +61,7 @@ test('latestReleaseFile: pusty katalog zwraca null, nie rzuca', t => {
     t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));
 
     t.notThrows(() => {
-        const result = latestReleaseFile(dir, '2.1.0');
+        const result = latestReleaseFile(dir, '2.1.0', io);
         t.is(result, null);
     });
 });
@@ -60,14 +72,14 @@ test('latestReleaseFile: katalog z samymi nie-wersyjnymi plikami zwraca null', t
     fs.writeFileSync(path.join(dir, 'latest_release.md'), 'nie jest to plik wersji');
     fs.writeFileSync(path.join(dir, 'README.md'), 'tez nie');
 
-    t.is(latestReleaseFile(dir, '2.1.0'), null);
+    t.is(latestReleaseFile(dir, '2.1.0', io), null);
 });
 
 test('latestReleaseFile: nieistniejacy katalog zwraca null, nie rzuca', t => {
     const missing = path.join(os.tmpdir(), `pkm-release-notes-missing-${Date.now()}-a`);
 
     t.notThrows(() => {
-        t.is(latestReleaseFile(missing, '2.1.0'), null);
+        t.is(latestReleaseFile(missing, '2.1.0', io), null);
     });
 });
 
@@ -78,7 +90,7 @@ test('latestReleaseFile: wybiera najnowszy semver i pomija plik BIEZACEJ wersji'
     fs.writeFileSync(path.join(dir, '2.1.0.md'), 'v2.1.0 notes - biezaca wersja, ma byc pominieta');
     fs.writeFileSync(path.join(dir, '1.9.5.md'), 'v1.9.5 notes');
 
-    const result = latestReleaseFile(dir, '2.1.0');
+    const result = latestReleaseFile(dir, '2.1.0', io);
 
     t.is(result, path.join(dir, '2.0.0.md'));
 });
@@ -90,7 +102,7 @@ test('latestReleaseFile: ignoruje pliki, ktore nie pasuja do wzorca X.Y.Z.md', t
     fs.writeFileSync(path.join(dir, 'v2.0.1.md'), 'prefiks v - nie pasuje do wzorca');
     fs.writeFileSync(path.join(dir, '2.0.md'), 'brak trzeciego segmentu');
 
-    t.is(latestReleaseFile(dir, '9.9.9'), path.join(dir, '2.0.0.md'));
+    t.is(latestReleaseFile(dir, '9.9.9', io), path.join(dir, '2.0.0.md'));
 });
 
 test('latestReleaseFile: dwucyfrowy segment glowny bije jednocyfrowy mimo porzadku alfabetycznego nazw', t => {
@@ -102,7 +114,7 @@ test('latestReleaseFile: dwucyfrowy segment glowny bije jednocyfrowy mimo porzad
     fs.writeFileSync(path.join(dir, '10.0.0.md'), 'najnowsza');
     fs.writeFileSync(path.join(dir, '9.0.0.md'), 'starsza mimo alfabetu');
 
-    t.is(latestReleaseFile(dir, '99.99.99'), path.join(dir, '10.0.0.md'));
+    t.is(latestReleaseFile(dir, '99.99.99', io), path.join(dir, '10.0.0.md'));
 });
 
 test('latestReleaseFile: przy remisie trojek wersji wygrywa PIERWSZA napotkana nazwa', t => {
@@ -114,7 +126,7 @@ test('latestReleaseFile: przy remisie trojek wersji wygrywa PIERWSZA napotkana n
     fs.writeFileSync(path.join(dir, '2.01.0.md'), 'A');
     fs.writeFileSync(path.join(dir, '2.1.0.md'), 'B');
 
-    t.is(latestReleaseFile(dir, '9.9.9'), path.join(dir, '2.01.0.md'));
+    t.is(latestReleaseFile(dir, '9.9.9', io), path.join(dir, '2.01.0.md'));
 });
 
 // ── priorNotes ──────────────────────────────────────────────────────────────────────────────
@@ -124,8 +136,8 @@ test('priorNotes: pusty/nieistniejacy katalog daje pusty string, nie null i nie 
     t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));
     const missing = path.join(os.tmpdir(), `pkm-release-notes-missing-${Date.now()}-b`);
 
-    t.is(priorNotes(dir, '2.1.0'), '');
-    t.is(priorNotes(missing, '2.1.0'), '');
+    t.is(priorNotes(dir, '2.1.0', io), '');
+    t.is(priorNotes(missing, '2.1.0', io), '');
 });
 
 test('priorNotes: zwraca tresc pliku najnowszej wczesniejszej wersji', t => {
@@ -133,7 +145,7 @@ test('priorNotes: zwraca tresc pliku najnowszej wczesniejszej wersji', t => {
     t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));
     fs.writeFileSync(path.join(dir, '2.0.0.md'), 'X');
 
-    t.is(priorNotes(dir, '2.1.0'), 'X');
+    t.is(priorNotes(dir, '2.1.0', io), 'X');
 });
 
 test('priorNotes: blad odczytu pliku (np. sciezka jest katalogiem) daje pusty string, nie rzuca', t => {
@@ -145,7 +157,7 @@ test('priorNotes: blad odczytu pliku (np. sciezka jest katalogiem) daje pusty st
     fs.mkdirSync(path.join(dir, '2.0.0.md'));
 
     t.notThrows(() => {
-        t.is(priorNotes(dir, '9.9.9'), '');
+        t.is(priorNotes(dir, '9.9.9', io), '');
     });
 });
 
@@ -159,7 +171,7 @@ test('resolveNotesTarget: zwraca releases/<wersja>.md w pustym katalogu (dokladn
     const dir = makeTempDir();
     t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));
 
-    const target = resolveNotesTarget(dir, '2.1.0');
+    const target = resolveNotesTarget(dir, '2.1.0', io);
 
     t.is(target, path.join(dir, '2.1.0.md'));
     t.not(target, null);
@@ -168,7 +180,7 @@ test('resolveNotesTarget: zwraca releases/<wersja>.md w pustym katalogu (dokladn
 test('resolveNotesTarget: nie zalezy od tego, czy releases_dir w ogole istnieje na dysku', t => {
     const missing = path.join(os.tmpdir(), `pkm-release-notes-missing-${Date.now()}-c`);
 
-    t.is(resolveNotesTarget(missing, '3.0.0'), path.join(missing, '3.0.0.md'));
+    t.is(resolveNotesTarget(missing, '3.0.0', io), path.join(missing, '3.0.0.md'));
 });
 
 test('resolveNotesTarget: wynik jest niezalezny od tego, co lezy w katalogu obok', t => {
@@ -176,7 +188,7 @@ test('resolveNotesTarget: wynik jest niezalezny od tego, co lezy w katalogu obok
     t.teardown(() => fs.rmSync(dir, { recursive: true, force: true }));
     fs.writeFileSync(path.join(dir, '2.0.0.md'), 'stara wersja obok - nie ma wplywu na target');
 
-    t.is(resolveNotesTarget(dir, '2.1.0'), path.join(dir, '2.1.0.md'));
+    t.is(resolveNotesTarget(dir, '2.1.0', io), path.join(dir, '2.1.0.md'));
 });
 
 // ── formatReleaseNotesContent (kontrakt słaby, treść jest redakcyjna) ────────────────
@@ -226,7 +238,7 @@ test('writePluginReleaseNotes: nadpisuje latest_release.md, nie dotyka <wersja>.
     fs.writeFileSync(path.join(dir, '2.1.0.md'), 'A');
     fs.writeFileSync(path.join(dir, 'latest_release.md'), 'stara tresc');
 
-    const result = writePluginReleaseNotes(dir, '2.2.0', 'nowe notatki');
+    const result = writePluginReleaseNotes(dir, '2.2.0', 'nowe notatki', io);
 
     t.is(result, path.join(dir, 'latest_release.md'));
     t.is(fs.readFileSync(path.join(dir, 'latest_release.md'), 'utf8'), 'nowe notatki');
