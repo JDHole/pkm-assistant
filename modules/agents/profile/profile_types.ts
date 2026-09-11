@@ -17,6 +17,15 @@ export interface AgentsPlugin extends AgentsPluginBase {
     agentManager: AgentManager;
 }
 
+/** Custom per-agent decision-tree instruction (`custom_<group>_<ts>` keys) - profile_prompt.ts's
+ * editor UI and profile_advanced.ts's mem_proactive toggle both read/write this same bag
+ * (2+ consumers - hoisted here per modules/agents/CLAUDE.md "Technika"). */
+export type DTCustomEntry = { group: string; text: string; tool: string | null };
+/** A decisionTreeInstructions entry: plain bool/string overrides, or a full custom entry object -
+ * `Record<string, boolean>` (profile_advanced.ts's old local cast) undersold this: `custom_*`
+ * keys carry {@link DTCustomEntry} objects, not booleans. */
+export type DTInstrValue = boolean | string | DTCustomEntry;
+
 /** Editable working copy of an agent's config while the profile panel is open (pre-save). */
 export interface ProfileFormData {
     name: string;
@@ -40,7 +49,8 @@ export interface ProfileFormData {
     sub_agents: AgentSubAgentAssignment[];
     sub_agent_enabled: boolean;
     permissions: AgentPermissions;
-    models: Record<string, unknown>;
+    /** `main` is the only key every consumer names explicitly; rest is an open per-role bag. */
+    models: { main?: string; [key: string]: unknown };
     prompt_overrides: Record<string, unknown>;
     agent_rules: string;
     crystal_seed: string | null;

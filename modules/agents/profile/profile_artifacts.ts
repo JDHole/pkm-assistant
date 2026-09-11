@@ -89,10 +89,13 @@ function _renderInstanceRow(ctx: ProfileCtx, el: HTMLElement, store: ArtifactSto
     };
 
     mkBtn(UiIcons.externalLink(14), t('profile.artifacts.open'), () => {
-        try { (ctx.plugin.app.workspace as unknown as { openLinkText: (path: string, source: string, newLeaf: boolean) => void }).openLinkText(entry.path, '', false); } catch { new Notice(t('profile.artifacts.open_error')); }
+        try { (ctx.plugin.app.workspace as { openLinkText: (path: string, source: string, newLeaf: boolean) => void }).openLinkText(entry.path, '', false); } catch { new Notice(t('profile.artifacts.open_error')); }
     });
 
     mkBtn(UiIcons.folder(14), t('profile.artifacts.move'), () => {
+        // TS-boundary: ctx.plugin.app is AppLike (core's minimal node-safe contract);
+        // MoveArtifactModal wants the real obsidian App, whose workspace/vault members carry
+        // concrete class types AppLike's open shape doesn't structurally match in either direction.
         new MoveArtifactModal(ctx.plugin.app as unknown as App, {
             artifact: entry,
             store,
@@ -101,6 +104,7 @@ function _renderInstanceRow(ctx: ProfileCtx, el: HTMLElement, store: ArtifactSto
     });
 
     mkBtn(UiIcons.trash(14), t('profile.artifacts.remove'), () => {
+        // TS-boundary: same AppLike vs real obsidian App mismatch as MoveArtifactModal above.
         new ConfirmRemoveModal(ctx.plugin.app as unknown as App, {
             artifact: entry,
             store,

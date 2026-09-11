@@ -130,6 +130,10 @@ export async function openHiddenFile(app: AppLike, hiddenPath: string, title: st
             return;
         }
         const content = await adapter.read(hiddenPath);
+        // TS-boundary: `app` here is AppLike (core's minimal node-safe contract);
+        // HiddenFileEditorModal wants the real obsidian App, whose workspace/vault members
+        // carry concrete class types AppLike's open shape doesn't structurally match in either
+        // direction.
         new HiddenFileEditorModal(app as unknown as ConstructorParameters<typeof HiddenFileEditorModal>[0], hiddenPath, title, content, opts).open();
     } catch (e: unknown) {
         new Notice(t('profile.helpers.cannot_open') + (e as Error).message);

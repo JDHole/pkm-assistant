@@ -198,7 +198,7 @@ export class Agent implements ToolVisibilityAgent {
     declare compression_prompt: string;
     declare subagent_frame_prompt: string;
     declare memory_rescue: boolean;
-    declare lastActivity: unknown;
+    declare lastActivity: number | null;
     /**
      * @param {Object} config - Agent configuration
      * @param {string} config.name - Agent name
