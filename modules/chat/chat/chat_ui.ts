@@ -445,6 +445,8 @@ export function renderSkillButtons(this: ChatViewLike) {
         btn.addEventListener('click', () => {
             if (this.is_generating) return;
 
+            // Bez `as number` (inaczej niż w AgentManager/SkillDetailView): tu typ to przecięcie
+            // `SkillData & ChatSkillConfig`, w którym `preQuestions` nie bywa `null`.
             if ((skill.preQuestions?.length) > 0) {
                 this._showSkillPreQuestions(skill);
                 return;
@@ -834,8 +836,11 @@ export function _showArtifactPicker(this: ChatViewLike, triggerBtn: HTMLElement 
                     const file = this.app.vault.getAbstractFileByPath(res.path);
                     // `openFile` żąda instancji `TFile`; `getAbstractFileByPath` może też zwrócić
                     // `TFolder`, gdyby `res.path` wskazywał katalog — `instanceof` odsiewa ten
-                    // przypadek zamiast wywoływać `openFile` na złym typie (patrz raport fali C:
-                    // ZASTANE — wcześniej leciałoby do `catch` niżej z wyjątkiem Obsidiana).
+                    // przypadek zamiast wywoływać `openFile` na złym typie. Wcześniej wywołanie
+                    // szło dalej; `obsidian.d.ts` typuje tylko `openFile(file: TFile)`, więc co
+                    // robiło z folderem, nie wiadomo z API (prawdopodobnie wyjątek do `catch`
+                    // niżej). Dziś: cichy return bez wpisu w logu - scenariusz teoretyczny,
+                    // bo `res.path` to zawsze notatka artefaktu.
                     if (!(file instanceof TFile)) return;
                     try {
                         await this.app.workspace.getLeaf('tab').openFile(file);

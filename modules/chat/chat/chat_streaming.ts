@@ -325,7 +325,10 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
                     const modelName = this.get_chat_model()?.modelKey || 'model';
                     new Notice(t('chat.streaming.model_no_vision', { model: modelName }), 6000);
                 }
-            } catch (e) { void e; /* ignore — adapter will strip anyway */ }
+            // `void e;` to no-op: `no-unused-vars` chce użycia `e`, a strażnik w
+            // `stopSemantics.test.ts` (`catch\s*\{\s*\}` po zdjęciu komentarzy) odrzuciłby
+            // gołe `catch {}` - ten catch łyka tylko ostrzeżenie o braku vision, świadomie.
+            } catch (e) { void e; /* ignore - adapter will strip anyway */ }
         }
     }
 
