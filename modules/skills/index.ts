@@ -23,10 +23,11 @@ export type { SkillData, SkillInput, SkillQuestion, VaultLike } from './types.js
 // SkillDetailView.js statically imports `obsidian` (MarkdownRenderer). Lazy-load it via
 // dynamic import so this barrel stays obsidian-free — it is imported by chat_ui / AgentManager,
 // whose AVA tests cannot resolve `obsidian`. SidebarNav invokes route renderers fire-and-forget.
-// TS-any: lazy module preserves the historical dynamic UI call contract.
-export async function renderSkillDetailView(...args: any[]) {
+export async function renderSkillDetailView(
+    ...args: Parameters<typeof import('./SkillDetailView.js').renderSkillDetailView>
+): Promise<void> {
     const mod = await import('./SkillDetailView.js');
-    return mod.renderSkillDetailView(...args as [any, any, any, any]);
+    return mod.renderSkillDetailView(...args);
 }
 
 // `SkillEditorModal` żyje tu, nie w `modules/shell/` (edytor skilla = sprawa skilli).

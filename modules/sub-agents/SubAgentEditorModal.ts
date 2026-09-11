@@ -4,16 +4,17 @@
  * Replaces MinionMasterEditorModal.
  */
 import { Modal, Setting, Notice } from 'obsidian';
+import type { App } from 'obsidian';
 import { TOOL_INFO, confirmModal } from '../ui-components/index.js';
 import { UiIcons, setSvg, setSvgLabel } from '../crystal-soul/index.js';
 import { getModelsForRole } from '../models/index.js';
+import type { PkmModelSettings } from '../models/index.js';
 import { t } from '../../core/i18n/index.js';
 import { DEFAULT_LIMITS, LIMIT_SPECS } from '../../config/limits.js';
 import { log } from '../../core/utils/Logger.js';
 import { resolveDeleteOutcome } from './deleteOutcome.js';
-import type { SubAgentData, SubAgentInput } from './types.js';
-// TS-any: Obsidian modal and plugin-provided registries are dynamic runtime APIs.
-type UiBoundary = any;
+import type { SubAgentData, SubAgentInput, SubAgentsPlugin } from './types.js';
+import type { SubAgentTemplateRecord } from './SubAgentTemplateStore.js';
 
 // Przykładowy nagłówek Markdown pola „Sekcje" — celowo wielka litera (przykład TREŚCI, którą
 // user wpisuje w swoich notatkach, nie etykieta UI; ten sam wzorzec co w SkillEditorModal.ts /
@@ -21,9 +22,9 @@ type UiBoundary = any;
 const SECTION_EXAMPLE = '## Pomysły';
 
 export class SubAgentEditorModal extends Modal {
-    declare plugin: UiBoundary;
+    declare plugin: SubAgentsPlugin;
     declare role: string;
-    declare existing: SubAgentData | null;
+    declare existing: SubAgentData | SubAgentTemplateRecord | null;
     declare onSave: ((data?: SubAgentInput) => void) | null;
     declare isEditMode: boolean;
     declare isTemplate: boolean;
@@ -39,7 +40,7 @@ export class SubAgentEditorModal extends Modal {
      *        `.pkm-assistant/templates/sub-agents/`, wersja podbijana przez store).
      * @param {boolean} [options.alsoTemplate] - checkbox „Zapisz też jako szablon".
      */
-    constructor(app: UiBoundary, plugin: UiBoundary, existing: SubAgentData | null = null, onSave: ((data?: SubAgentInput) => void) | null = null, options: { template?: boolean; alsoTemplate?: boolean } = {}) {
+    constructor(app: App, plugin: SubAgentsPlugin, existing: SubAgentData | SubAgentTemplateRecord | null = null, onSave: ((data?: SubAgentInput) => void) | null = null, options: { template?: boolean; alsoTemplate?: boolean } = {}) {
         super(app);
         this.plugin = plugin;
         this.role = 'researcher';
@@ -120,7 +121,10 @@ export class SubAgentEditorModal extends Modal {
 
         // --- Model override ---
         {
-            const pkmM = this.plugin?.env?.settings?.pkmAssistant || {};
+            // TS-boundary: `PkmAssistantSettings.modelLibrary` jest `unknown` w kontrakcie core
+            // (core/ nie zna kształtu biblioteki modeli); `modules/models` jest właścicielem
+            // realnego kształtu (`PkmModelSettings`) i to on czyta to pole w `getModelsForRole`.
+            const pkmM = (this.plugin?.env?.settings?.pkmAssistant || {}) as PkmModelSettings;
             const models = getModelsForRole(pkmM, 'researcher');
             const platformNames = { anthropic: 'Anthropic', openai: 'OpenAI', open_router: 'OpenRouter', ollama: 'Ollama', gemini: 'Gemini', groq: 'Groq', deepseek: 'DeepSeek', lm_studio: 'LM Studio' };
 
@@ -196,11 +200,11 @@ export class SubAgentEditorModal extends Modal {
 
         const activeAgent = this.plugin?.agentManager?.getActiveAgent?.();
         const visibleToolNames = this.plugin?.toolRegistry?.filterByAgent
-            ? new Set<string>(this.plugin.toolRegistry.filterByAgent(activeAgent).map((tool: UiBoundary) => tool.name))
+            ? new Set<string>(this.plugin.toolRegistry.filterByAgent(activeAgent).map((tool) => tool.name))
             : null;
         const allToolNames = Object.keys(TOOL_INFO).filter(name => !visibleToolNames || visibleToolNames.has(name));
         for (const toolName of allToolNames) {
-            const info = (TOOL_INFO as Record<string, UiBoundary>)[toolName];
+            const info = (TOOL_INFO as Record<string, { label: string }>)[toolName];
             new Setting(toolsContainer)
                 .setName(info.label)
                 .setDesc(toolName)
@@ -309,7 +313,11 @@ export class SubAgentEditorModal extends Modal {
                     new Notice(t('modal.sub_agent.loader_unavailable'));
                     return;
                 }
-                const result = this.isEditMode
+                // Adnotacja: `save`/`createFromData` mają RÓŻNE kształty zwrotki (jedna niesie
+                // `version`, druga `name`+`renamed`) — oba są strukturalnie zgodne z tym szerszym
+                // typem (brakujące pole jest tu opcjonalne), więc przypisanie nie zwęża go z
+                // powrotem do unii, na której `result.version`/`result.name` niżej by nie istniały.
+                const result: { success: boolean; slug?: string; name?: string; version?: number; renamed?: boolean; error?: string } = this.isEditMode
                     ? await store.save(this.existing!.slug!, formData)
                     : await store.createFromData(formData);
                 if (!result?.success) {

@@ -17,15 +17,25 @@
 import { slugify } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { parseSkillMarkdown, serializeSkillFile } from './skillFrontmatter.js';
-import type { SkillInput, VaultLike } from './types.js';
-type StoredTemplate = SkillInput & { slug: string; prompt: string; path: string; folderPath: string; isTemplate: true };
+import type { SkillData, SkillInput, VaultLike } from './types.js';
+// Pola bez `?`: `_loadFromFolder` (przez `parseSkillMarkdown`) ZAWSZE daje im konkretną
+// wartość. `_write` ma DWÓCH wołaczy przez `createFromData`/`save`: `SkillEditorModal.formData`
+// (każde pole ma fallback `||`/`??`) i `ensureFactoryTemplates` → `getFactorySkillTemplates()`
+// (`modules/agents/factoryTemplates.ts`) — ta druga ścieżka niesie WYŁĄCZNIE
+// name/description/category/icon/preQuestions/prompt, więc `enabled`/`tags`/`model`/
+// `argumentHint`/`disableModelInvocation`/`userInvocable` zostają opcjonalne (naprawdę bywają
+// nieobecne w cache, nie tylko w typie) — tak samo jak na `main` (`StoredTemplate = SkillInput & {...}`).
+type SkillTemplateOptionalFields = 'enabled' | 'tags' | 'model' | 'argumentHint' | 'disableModelInvocation' | 'userInvocable';
+export type SkillTemplateRecord = Omit<SkillData, SkillTemplateOptionalFields>
+    & Partial<Pick<SkillData, SkillTemplateOptionalFields>>
+    & { folderPath: string; isTemplate: true };
 
 export const SKILL_TEMPLATES_PATH = '.pkm-assistant/templates/skills';
 const LIVE_SKILLS_PATH = '.pkm-assistant/skills';
 
 export class SkillTemplateStore {
     declare vault: VaultLike;
-    declare cache: Map<string, StoredTemplate>;
+    declare cache: Map<string, SkillTemplateRecord>;
     /**
      * @param {Object} vault - Obsidian Vault object (używany jest wyłącznie `vault.adapter`)
      */
@@ -61,12 +71,12 @@ export class SkillTemplateStore {
     }
 
     /** @returns {Object[]} szablony z cache (posortowane po nazwie) */
-    list(): StoredTemplate[] {
+    list(): SkillTemplateRecord[] {
         return [...this.cache.values()].sort((a, b) => a.name.localeCompare(b.name));
     }
 
     /** @param {string} slug @returns {Object|null} */
-    get(slug: string): StoredTemplate | null {
+    get(slug: string): SkillTemplateRecord | null {
         if (!slug) return null;
         return this.cache.get(slug)
             || [...this.cache.values()].find(tpl => tpl.name === slug)
@@ -79,7 +89,7 @@ export class SkillTemplateStore {
     }
 
     /** @private */
-    async _loadFromFolder(folderPath: string): Promise<StoredTemplate | null> {
+    async _loadFromFolder(folderPath: string): Promise<SkillTemplateRecord | null> {
         const filePath = `${folderPath}/SKILL.md`;
         if (!await this.vault.adapter.exists(filePath)) return null;
         const raw = await this.vault.adapter.read(filePath);
@@ -91,7 +101,7 @@ export class SkillTemplateStore {
         }
         tpl.isTemplate = true;
         tpl.folderPath = folderPath;
-        return tpl as StoredTemplate;
+        return tpl as SkillTemplateRecord;
     }
 
     // ─── zapis ──────────────────────────────────────────────────
@@ -202,8 +212,15 @@ export class SkillTemplateStore {
             if (!await this.vault.adapter.exists(dir)) await this.vault.adapter.mkdir(dir);
         }
         await this.vault.adapter.write(filePath, serializeSkillFile(payload));
+        // `payload as Omit<SkillData, SkillTemplateOptionalFields>`: `SkillInput` deklaruje
+        // `name`/`description` jako jedyne pewne pola. `category`/`preQuestions`/`prompt`/`icon`
+        // (część `SkillTemplateRecord`, która ZOSTAJE wymagana) dostają konkretną wartość od OBU
+        // wołaczy `_write` (formData `SkillEditorModal` i `getFactorySkillTemplates()`) — cast na
+        // źródle rozlania obejmuje TYLKO tę część; `enabled`/`tags`/`model`/`argumentHint`/
+        // `disableModelInvocation`/`userInvocable` (opcjonalne w `SkillTemplateRecord`) płyną
+        // przez spread SWOIM realnym kształtem `SkillInput`, bez castu.
         this.cache.set(slug, {
-            ...payload,
+            ...(payload as Omit<SkillData, SkillTemplateOptionalFields>),
             slug,
             prompt: (payload.prompt || '').trim(),
             path: filePath,

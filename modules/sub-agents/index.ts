@@ -51,10 +51,11 @@ export type { SubTaskDeliverer } from './SubTaskNotifier.js';
 // via dynamic import so this barrel stays obsidian-free — it is imported by TriggerPopup /
 // chat_ui / DelegateTool, whose AVA tests cannot resolve `obsidian`. SidebarNav invokes
 // route renderers fire-and-forget, so an async renderer is fine (see registerBackstage).
-// TS-any: lazy UI export preserves its existing dynamic renderer signature.
-export async function renderSubAgentDetailView(...args: any[]) {
+export async function renderSubAgentDetailView(
+    ...args: Parameters<typeof import('./SubAgentDetailView.js').renderSubAgentDetailView>
+): Promise<void> {
     const mod = await import('./SubAgentDetailView.js');
-    return mod.renderSubAgentDetailView(...args as [any, any, any, any]);
+    return mod.renderSubAgentDetailView(...args);
 }
 
 // `SubAgentEditorModal` żyje tu, nie w `modules/shell/` (edytor suba = sprawa subów).

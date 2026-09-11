@@ -22,7 +22,9 @@
  */
 export interface SubAgentAssignment {
     name: string;
-    role: string;
+    // Opcjonalne: zgodnie z realnym `AgentSubAgentAssignment` (modules/agents/Agent.ts) —
+    // istniejące przypisanie może nie mieć roli w YAML-u; tylko NOWY wpis niżej ją ustawia.
+    role?: string;
     default?: boolean;
     [key: string]: unknown;
 }
