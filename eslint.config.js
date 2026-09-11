@@ -41,14 +41,35 @@
 // linted any more; the two per-file deep-import whitelists that used to serve harness scenarios
 // 33 and 35 left with the harness.
 
-import * as fs from 'node:fs';
-import * as path from 'node:path';
 import tseslint from 'typescript-eslint';
 
-const MODULE_NAMES = fs
-  .readdirSync(path.join(import.meta.dirname, 'modules'), { withFileTypes: true })
-  .filter((d) => d.isDirectory())
-  .map((d) => d.name);
+// Statyczna, posortowana lista katalogów `modules/*` — NIE `fs.readdirSync` w runtime.
+// Walidator katalogu Obsidiana lintuje TEN plik (wyjątkowo, mimo że to `.js`, nie `.ts`)
+// bez typów Node, więc wbudowany moduł `fs`, wbudowany moduł `path` i `import.meta.dirname`
+// są dla niego typem-błędem. Strażnik dryfu: `eslint_config_modules.test.ts` w roocie repo
+// importuje `MODULE_NAMES` i porównuje ją z realnym listingiem `modules/` na dysku (ten test
+// NIE jest lintowany przez walidator, więc może importować node'owy `fs` wprost) — rozjazd
+// wywala test od razu, nie cichnie.
+export const MODULE_NAMES = [
+  'agent-loop',
+  'agents',
+  'artifacts',
+  'chat',
+  'crystal-soul',
+  'embedding',
+  'komunikator',
+  'memory',
+  'models',
+  'multimodal',
+  'onboarding',
+  'prompts',
+  'shell',
+  'skills',
+  'sub-agents',
+  'tools',
+  'ui-components',
+  'web',
+];
 
 // `../` at depths 1-4 (deepest real case: modules/mcp/built-in-servers/artifacts/*).
 const UP = ['../', '../../', '../../../', '../../../../'];
