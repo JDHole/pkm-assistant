@@ -408,8 +408,11 @@ export async function regenerateLastResponse(this: ChatViewLike): Promise<void> 
 
     if (lastUserIdx === -1) return;
 
-    // TS-boundary: pole wpisywania dostaje TEKST ponawianej wiadomości; treść multimodalna
-    // (tablica bloków) trafia tu tylko z historii sprzed ery załączników i jest tam stringiem.
+    // TS-boundary: `content` okna to `string | null | ContentBlock[]` (patrz `RollingWindow.ts`),
+    // a niżej leci wprost do `input_area.value`.
+    // ⚠️ ZASTANE: dla ponawianej wiadomości Z ZAŁĄCZNIKIEM (tablica bloków) do pola wpisywania
+    // wpadnie `[object Object]`. Asercja opisuje przypadek, który kod obsługuje (goły tekst);
+    // wyciągnięcie tekstu z bloków byłoby zmianą runtime'u — poza falą typowania.
     const userContent = messages[lastUserIdx].content as string;
     // Proweniencja jedzie ZA tekstem — ponowienie nie może awansować wiadomości maszynowej
     // (np. powiadomienia o wyniku suba) do rangi „to pisał człowiek". Brak znacznika = maszyna.

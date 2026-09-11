@@ -45,9 +45,6 @@ export class ChatView extends PluginItemView {
     // Widok czatu sięga po pola pluginu dokładane w inicjalizacji (menedżer agentów, rejestr
     // subów, notifier) — w kontrakcie `PluginApi` są `unknown` z premedytacją, bo ich kształt
     // należy do modułów właścicieli. Tutaj zawężamy je do `ChatPlugin`.
-    // Widok czatu sięga po pola pluginu dokładane w inicjalizacji (menedżer agentów, rejestr
-    // subów, notifier) — w kontrakcie `PluginApi` są `unknown` z premedytacją, bo ich kształt
-    // należy do modułów właścicieli. Tutaj zawężamy je do `ChatPlugin`.
     declare readonly plugin: ChatPlugin;
 
     // ── Stan ustawiany w KONSTRUKTORZE ──

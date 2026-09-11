@@ -46,9 +46,6 @@ import { t } from '../../../core/i18n/index.js';
 
 const POPUP_CLASS = 'pkm-trigger-popup';
 
-// TS-any: plugin, agent manager, registry i rekordy skilli/narzędzi są składane runtime z wielu modułów.
-
-
 type TriggerSection = 'slash' | 'skills' | 'sub-agents' | 'mcp';
 type TriggerItemType = InlineTriggerType | 'slash';
 export interface TriggerItem {

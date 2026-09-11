@@ -177,8 +177,11 @@ export class TokenViewerWidget {
         const lib = pkm?.modelLibrary?.[role] || (legacyKey ? pkm?.modelLibrary?.[legacyKey] : null);
         const configured = (agent?.models?.[role]
             || lib?.find?.((m: ModelLibraryEntry) => m.isDefault) || lib?.[0] || null) as ConfiguredModel | null;
-        // `typeof null === 'object'`, więc gałąź obiektowa łapie też pusty wpis — to ZASTANE
-        // zachowanie, typ tylko je opisuje (naprawa = zmiana runtime, poza tą falą).
+        // ⚠️ ZASTANE: `configured` bywa `null` (agent bez modelu dla tej roli I pusty
+        // `modelLibrary`), a `typeof null === 'object'` — więc gałąź obiektowa wchodzi na `null`
+        // i RZUCA `TypeError` na `null.platform`. Asercje niżej zdejmują `null` z TYPU, żeby
+        // opisać to, co kod zakłada; nie naprawiają zachowania. Naprawa = nowy guard, czyli
+        // zmiana runtime'u — poza falą typowania.
         const platform = typeof configured === 'object' ? (configured as { platform?: string }).platform : '';
         const model = typeof configured === 'object' ? (configured as { model?: string }).model : String(configured || '');
         return estimateContextWindow({ role, platform, model });

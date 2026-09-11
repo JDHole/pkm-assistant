@@ -42,6 +42,10 @@ test('parseToolCallArgs: zachowanie identyczne ze starym inline wzorcem (string 
     }
     // Ciało jest w TypeScripcie — asercje typów znikają przy transpilacji, więc przed
     // uruchomieniem jako JS robimy dokładnie to samo (kampania typowania: `as X` na granicy).
+    // ⚠️ Regex łapie tylko asercję na GOŁĄ nazwę typu. Asercja generyczna (`as Record<string,
+    // unknown>`), tablicowa (`as X[]`) albo literał ze spacją i słowem `as` w środku zostaną
+    // — `new Function` wywali się wtedy `SyntaxError`, czyli GŁOŚNO. Jeśli ten test padnie na
+    // składni, popraw regex (albo wyciągnij ciało inaczej), nie samą funkcję produkcyjną.
     const body = source.slice(braceStart + 1, i - 1).replace(/\s+as\s+[A-Za-z_$][\w$]*/g, '');
     const parseToolCallArgs = new Function('toolCall', body) as (toolCall: unknown) => unknown;
 
