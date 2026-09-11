@@ -265,7 +265,13 @@ function browserDocument(): Document | null {
     // `typeof` zamiast `globalThis.document`: w gołym Node zmienna po prostu nie istnieje,
     // a `window` nie ma tu prawa wystąpić — ten plik musi wstawać poza Obsidianem.
     if (typeof document === 'undefined') return null;
-    return typeof document.createDocumentFragment === 'function' ? document : null;
+    // Bramka na globalną `createFragment` (Obsidian), NIE na `document.createDocumentFragment`:
+    // `toDom`/`fragmentFromHtml` wołają dziś `createFragment()` i `parent.createEl(...)` (Obsidianowe
+    // rozszerzenia DOM - patrz komentarze przy tych wywołaniach), nie natywne metody `document`.
+    // Środowisko bywa "document jest, globali Obsidiana nie ma" (goły DOM bez patcha Obsidiana,
+    // np. jsdom) - sprawdzenie natywnej metody puszczałoby dalej, a `createFragment()` wybuchłby
+    // ReferenceError zamiast bezpiecznie spaść do ścieżki `PlainNode`.
+    return typeof createFragment === 'function' ? document : null;
 }
 
 function toDom(doc: Document, nodes: ParsedNode[], parent: Node): void {
