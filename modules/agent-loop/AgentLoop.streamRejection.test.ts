@@ -16,7 +16,17 @@
  * `#<Object>`, bo `normalized_error` jest gołym obiektem, nie `Error`.
  *
  * Testy NIE zmieniają zachowania pluginu - pinują je: pętla musi zawsze oglądać promisę
- * zwróconą przez adapter (`Promise.resolve(model.stream(...)).catch(reject)` w `stream()`).
+ * zwróconą przez adapter (`Promise.resolve(model.stream(...)).catch(...)` w `_streamCall`).
+ *
+ * ⚠️ Od `only-throw-error`/`prefer-promise-reject-errors` (walidator katalogu) `.catch` NIE
+ * robi już gołego `reject(err)` - owija w `toRejectableError()` (lokalna funkcja w
+ * `AgentLoop.ts`, bo moduł świadomie nie zależy od `modules/models`), żeby odrzucenie było
+ * PRAWDZIWYM `Error`em, ale z `code`/`http_status`/`message` doklejonymi z oryginału. To
+ * dotyczy WYŁĄCZNIE ścieżki „sama promisa się odrzuciła" (test niżej: „bez handlers.error");
+ * gdy adapter woła `handlers.error(err)` SYNCHRONICZNIE (jak w tym pliku), ten `reject()`
+ * (inny, w handlerze `error`) wygrywa wyścig i `.catch`/`toRejectableError` nigdy nie dostają
+ * szansy zadziałać - stąd `thrown instanceof Error` w teście „ścieżka callbackowa" NADAL jest
+ * `false`, to NIE regresja.
  */
 import test from 'ava';
 import { runAgentLoop } from './AgentLoop.js';
@@ -84,6 +94,40 @@ test('pętla odrzuca błędem z handlers.error (ścieżka callbackowa działa)',
     t.false(thrown instanceof Error, 'powodem odrzucenia jest goły obiekt, nie Error — stąd „#<Object>" w logu Node');
     t.is((thrown as { message?: string })?.message, 'stream error');
     t.is((thrown as { http_status?: number })?.http_status, 500);
+});
+
+/**
+ * `error: (err) => reject(err)` (linia z callbackiem) i `.catch((err) => reject(toRejectableError(err)))`
+ * (odrzucenie SAMEJ promisy `model.stream()`) to DWA różne miejsca w `_streamCall`. Test wyżej
+ * ("ścieżka callbackowa") gasi ten drugi, bo `handlers.error()` strzela SYNCHRONICZNIE i pierwszy
+ * `reject()` wygrywa wyścig - promisa jest już rozliczona, zanim odrzucenie zwróconej promisy
+ * (mikrozadanie) dotrze do `.catch`. Ten test wyłącza ścieżkę callbackową (atrapa jej NIE woła)
+ * - jedynym sygnałem jest odrzucenie SAMEJ promisy, więc o kształt odrzucenia odpowiada
+ * WYŁĄCZNIE `.catch((err) => reject(toRejectableError(err)))`.
+ */
+test('pętla po odrzuceniu SAMEJ promisy stream() (bez handlers.error) oddaje prawdziwy Error z code/message/http_status', async (t) => {
+    const err = { message: 'model padł', code: 'invalid_request_error', http_status: 400, details: { retryable: false } };
+    const model = {
+        // Adapter, który pada PRZED pierwszym callbackiem (np. buildRequest rzucił zanim
+        // handlers.error mógł wystrzelić) - jedynym śladem jest odrzucenie zwróconej promisy.
+        stream(_payload: Payload, _handlers: StreamHandlers): void {
+            return Promise.reject(err) as unknown as void;
+        },
+    };
+    const store = new ArrayMessageStore([{ role: 'user', content: 'hi' }]);
+
+    const thrown = await rejectionOf(runAgentLoop({
+        model,
+        store,
+        resolveTools: () => [],
+        executeToolCall: async () => 'x',
+        limits: { maxIterations: 2 },
+    }));
+
+    t.true(thrown instanceof Error, 'prefer-promise-reject-errors: odrzucenie musi być prawdziwym Errorem');
+    t.is((thrown as Error).message, 'model padł', 'komunikat błędu modelu ma zostać, nie zniknąć za ogólnym tekstem');
+    t.is((thrown as Error & { code?: string }).code, 'invalid_request_error', 'code ma przejść na odrzucany Error');
+    t.is((thrown as Error & { http_status?: number }).http_status, 400, 'http_status ma przejść na odrzucany Error');
 });
 
 test.serial('pętla obserwuje promisę zwróconą przez model.stream() (Promise.resolve().catch w stream())', async (t) => {

@@ -46,8 +46,10 @@ export function truncate(text: unknown, maxLen: number = DEFAULT_MAX_LEN): strin
 
 /**
  * Bezpiecznie serializuje pojedynczy argument logu do jednej linii tekstu.
- * String → jak jest; Error → `Name: message | pierwsza linia stacku`;
- * obiekt/tablica → JSON (fallback String); reszta → String. Zawsze przycięte.
+ * String → jak jest; Error → `Name: message | pierwsza linia stacku | {własne pola}`
+ * (ogon JSON TYLKO gdy Error niesie własne enumerowalne pola poza `name`/`message`/
+ * `stack`/`cause` — patrz `ModelRequestError` w `modules/models`, `code`/`http_status`/
+ * `details`); obiekt/tablica → JSON (fallback String); reszta → String. Zawsze przycięte.
  * @param value
  * @param maxLen
  */
@@ -60,7 +62,27 @@ export function serializeArg(value: unknown, maxLen: number = DEFAULT_MAX_LEN): 
         const stackLines = String(value.stack || '').split('\n').map((l) => l.trim()).filter(Boolean);
         const frame = stackLines.find((l) => l.startsWith('at ')) || '';
         const base = value.message ? `${value.name || 'Error'}: ${value.message}` : String(value);
-        const combined = frame ? `${base} | ${frame}` : base;
+        let combined = frame ? `${base} | ${frame}` : base;
+        // Błędy modeli (`ModelRequestError`, `modules/models`) niosą `code`/`http_status`/
+        // `details` jako WŁASNE enumerowalne pola na prawdziwym `Error` (`only-throw-error` -
+        // patrz `ChatModel._completeOnce`). Bez tego ogona ginęłyby z pliku logu: klon Errora
+        // w `Logger.maskLogValue` je kopiuje (konsola je widzi), ale `serializeArg` ich dotąd
+        // nie czytał. Maska sekretów już poszła wyżej w `Logger._toSink` (przed `write()` -
+        // patrz komentarz klasy) — `JSON.stringify` tu tylko SERIALIZUJE, tak samo jak gałąź
+        // "obiekt/tablica" niżej, która też nie maskuje sama.
+        // TS-boundary: `value` jest tu `Error`, ale dodatkowe pola dokłada WOŁAJĄCY
+        // (ModelRequestError i inni) — kształt nieznany z góry, stąd odczyt po kluczu.
+        const errBag = value as unknown as Record<string, unknown>;
+        const extraKeys = Object.keys(value).filter((k) => k !== 'name' && k !== 'message' && k !== 'stack' && k !== 'cause');
+        if (extraKeys.length > 0) {
+            try {
+                const extra: Record<string, unknown> = {};
+                for (const k of extraKeys) extra[k] = errBag[k];
+                combined += ` | ${JSON.stringify(extra)}`;
+            } catch {
+                // pola niesparsowalne (np. cykl) — linia zostaje bez ogona, log nie ma prawa rzucić
+            }
+        }
         return truncate(combined, maxLen);
     }
     if (typeof value === 'string') return truncate(value, maxLen);

@@ -69,8 +69,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function deepMerge(base: Record<string, unknown> | undefined, override: Record<string, unknown> | undefined): Record<string, unknown> {
     const out = { ...(base || {}) };
     for (const [key, value] of Object.entries(override || {})) {
-        if (isPlainObject(value) && isPlainObject(out[key])) {
-            out[key] = deepMerge(out[key] as Record<string, unknown>, value);
+        const existing = out[key];
+        if (isPlainObject(value) && isPlainObject(existing)) {
+            out[key] = deepMerge(existing, value);
         } else {
             out[key] = value;
         }
