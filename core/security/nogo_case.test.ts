@@ -4,9 +4,9 @@
  * Gdyby `AccessGuard._isNoGo` porównywał ścieżkę ze strefą No-Go BAJT W BAJT, na Windows
  * i macOS (system plików wielkości liter NIE rozróżnia) `Projekty/prywatne/tajne.md`
  * przechodziłby bramkę na zielono (bez okna zgody), choć `Projekty/Prywatne/tajne.md` byłby
- * odrzucany — a to JEDEN I TEN SAM PLIK. To samo dotyczyłoby `SYSTEM_NO_GO`:
- * `.Obsidian/workspace.json` i `.TRASH/x.md` przechodziłyby, mimo że `.obsidian/` i `.trash/`
- * są zablokowane z definicji.
+ * odrzucany — a to JEDEN I TEN SAM PLIK. To samo dotyczyłoby strefy systemowej:
+ * `.Obsidian/workspace.json` i `.TRASH/x.md` przechodziłyby, mimo że folder konfiguracji
+ * (`Vault#configDir`, tu `.obsidian`) i `.trash/` są zablokowane z definicji.
  *
  * Kontrast: `isProtectedPath` (`keySanitizer.ts`) od zawsze robi `.toLowerCase()`, więc
  * `.PKM-Assistant/settings.json` jest łapany poprawnie.
@@ -80,9 +80,14 @@ test.serial('No-Go łapie plik niezależnie od wielkości liter (guidance_mode)'
     t2.true(ps.checkPermission(agent, 'vault.read', 'Projekty/Publiczne/x.md').allowed);
 });
 
-// ─── 2. SYSTEM_NO_GO: `.obsidian` i `.trash` w przebraniu wielkich liter ───
+// ─── 2. Strefa systemowa (`.trash` + folder configu) w przebraniu wielkich liter ───
 
-test.serial('SYSTEM_NO_GO trzyma mimo wielkich liter — odczyt i zapis', t2 => {
+test.serial('strefa systemowa trzyma mimo wielkich liter — odczyt i zapis', t2 => {
+    // configDir ustawiony JAWNIE: od fali B nazwa folderu konfiguracji nie jest nigdzie
+    // wpisana na sztywno (`SYSTEM_NO_GO` to samo `['.trash']`), więc `.Obsidian/...` ma tu
+    // blokować DLATEGO, że jest configDirem. Bez tej linii test przechodziłby na fail-closed
+    // (nieznany configDir = każdy ukryty folder zakazany) i nie mierzyłby normalizacji.
+    AccessGuard.setConfigDir('.obsidian');
     AccessGuard.setNoGoFolders([]);
     const agent = agentZCalymVaultem();
 
@@ -152,6 +157,9 @@ test.serial('zakres sub-agenta NADAL rozróżnia wielkość liter', t2 => {
 // ─── 5. Wyniki `search`/`list` — ten sam filtr, ta sama normalizacja ───
 
 test.serial('filterResults wycina No-Go w każdym zapisie wielkości liter', t2 => {
+    // Jak w teście 2: configDir jawnie, żeby `.Obsidian/...` odpadał jako folder konfiguracji,
+    // a nie przypadkiem na fail-closed dla nieznanego configDira.
+    AccessGuard.setConfigDir('.obsidian');
     AccessGuard.setNoGoFolders(['Projekty/Prywatne']);
     const agent = agentZCalymVaultem();
 

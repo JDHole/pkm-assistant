@@ -377,9 +377,9 @@ export default class PkmAssistantPlugin extends PluginBase {
     // pluginu user dostaje powitanie „nowy użytkownik" i modal Release Notes.
     await migrateOldPluginFolder({
       adapter: this.app?.vault?.adapter,
-      // Folder konfiguracji NIE musi się nazywać `.obsidian` — user może go zmienić, więc
-      // pytamy Obsidiana. Twardy fallback zniknął stąd; `migrateOldPluginFolder` ma własny
-      // (`configDir || '.obsidian'`), więc zachowanie bez zmian.
+      // Nazwę folderu konfiguracji ustala user, więc pytamy Obsidiana — nazwy zapasowej nie
+      // ma już nigdzie w kodzie. Pusta wartość = `migrateOldPluginFolder` nic nie robi
+      // (`reason: 'no-config-dir'`) zamiast czytać i pisać po omacku.
       configDir: this.app?.vault?.configDir,
       manifestId: this.manifest?.id,
       log,

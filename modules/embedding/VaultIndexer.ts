@@ -106,8 +106,14 @@ function embedFailureKind(e: unknown): EmbedFailure {
     return 'transient'; // nie wiemy → zakładamy, że minie (nie kasujemy pracy na zapas)
 }
 
-/** Foldery zawsze wykluczone z indeksu (poza NoGo z ustawień). */
-const HARD_EXCLUDES = ['.pkm-assistant', '.obsidian', '.trash'];
+/**
+ * Foldery zawsze wykluczone z indeksu (poza NoGo z ustawień).
+ *
+ * Folderu konfiguracji Obsidiana TU NIE MA: jego nazwę ustala user (`Vault#configDir`),
+ * więc dokłada ją `_hardExcludes()` z żywego odczytu, a gdy jest nieznana, wykluczenie
+ * przejmuje fail-closed w `_isExcluded`.
+ */
+const HARD_EXCLUDES = ['.pkm-assistant', '.trash'];
 
 /** Plik vaulta widziany przez indekser (TFile Obsidiana pasuje strukturalnie). */
 export interface VaultFileLike {
@@ -267,6 +273,8 @@ export class VaultIndexer {
     declare private _scanFailures: number;
     /** memoizowana lista twardych wykluczeń (liczona przy pierwszym użyciu) */
     declare private _hardEx?: string[];
+    /** Czy migawka `_hardEx` zna nazwę folderu konfiguracji. `false` = fail-closed w `_isExcluded`. */
+    declare private _configDirKnown?: boolean;
 
     constructor(deps: VaultIndexerDeps = {} as VaultIndexerDeps) {
         this.plugin = deps.plugin || null;
@@ -918,10 +926,18 @@ export class VaultIndexer {
         return !this._isExcluded(norm);
     }
 
-    /** HARD_EXCLUDES + the real config dir (user-configurable, not always `.obsidian`). */
+    /**
+     * HARD_EXCLUDES + the real config dir from live `Vault#configDir` (user-configurable,
+     * nazwa nie jest nigdzie w tym pliku zapisana).
+     *
+     * Przy okazji zapamiętuje, CZY nazwa była znana - `_isExcluded` robi z tego fail-closed.
+     * Obie rzeczy liczą się z tej samej migawki, więc nie da się dostać stanu „fail-closed
+     * wyłączony, a configDir mimo to poza listą".
+     */
     _hardExcludes(): string[] {
         if (!this._hardEx) {
             const cd = String(this.vault?.configDir || '').replace(/\\/g, '/').replace(/\/$/, '');
+            this._configDirKnown = cd.length > 0;
             this._hardEx = cd && !HARD_EXCLUDES.includes(cd) ? [...HARD_EXCLUDES, cd] : HARD_EXCLUDES;
         }
         return this._hardEx;
@@ -941,13 +957,25 @@ export class VaultIndexer {
      * Świadomie BEZ importu `AccessGuard`: indekser trzyma zero zależności od `core/`,
      * wszystko dostaje wstrzyknięte (patrz nagłówek pliku) - dlatego ta sama reguła jest
      * tu wyliczona lokalnie, a nie zawołana.
+     *
+     * FAIL-CLOSED przy NIEZNANYM folderze konfiguracji (`vault.configDir` pusty - harness,
+     * testy, wstrzyknięty obiekt bez tego pola): nie wiem, gdzie jest konfiguracja Obsidiana,
+     * więc do indeksu nie wchodzi ŻADEN ukryty folder (pierwszy segment od kropki).
+     *
+     * Gdy configDir jest ZNANY, zostaje zachowanie dotychczasowe: wykluczamy `HARD_EXCLUDES`
+     * + ten jeden folder, a inne ukryte foldery są zwykłymi folderami. To nie jest furtka -
+     * `Vault#getMarkdownFiles()` (jedyne źródło skanu, `_listVaultMarkdown`) ukrytych folderów
+     * i tak nie zwraca, a zgadywanie ich nazw kosztowałoby wykluczenia, których user nie prosił.
      */
     _isExcluded(norm: string): boolean {
         const cel = norm.normalize('NFC').toLowerCase();
         const wpis = (v: string): string =>
             String(v || '').replace(/\\/g, '/').replace(/\/$/, '').normalize('NFC').toLowerCase();
 
-        for (const ex of this._hardExcludes()) {
+        const hard = this._hardExcludes(); // ustawia też `_configDirKnown` (ta sama migawka)
+        if (!this._configDirKnown && cel.split('/')[0].startsWith('.')) return true;
+
+        for (const ex of hard) {
             const e = wpis(ex);
             if (e && (cel === e || cel.startsWith(e + '/'))) return true;
         }

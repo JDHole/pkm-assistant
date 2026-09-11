@@ -58,19 +58,32 @@ test('parseDestinationVaults: rozdziela przecinkami i przycina biale znaki', t =
 
 // ── pluginDeployDir ───────────────────────────────────────────────────────────────────────────
 
-test('pluginDeployDir: <vault>/.obsidian/plugins/<manifest.id>', t => {
+test('pluginDeployDir: <vault>/<configDir>/plugins/<manifest.id>', t => {
     t.is(
-        pluginDeployDir('/v', 'pkm-assistant'),
+        pluginDeployDir('/v', '.obsidian', 'pkm-assistant'),
         path.join('/v', '.obsidian', 'plugins', 'pkm-assistant'),
     );
 });
 
 test('pluginDeployDir: id bierze sie z argumentu, nie z literalu', t => {
-    const a = pluginDeployDir('/v', 'pkm-assistant');
-    const b = pluginDeployDir('/v', 'inne-id');
+    const a = pluginDeployDir('/v', '.obsidian', 'pkm-assistant');
+    const b = pluginDeployDir('/v', '.obsidian', 'inne-id');
 
     t.not(a, b);
     t.is(b, path.join('/v', '.obsidian', 'plugins', 'inne-id'));
+});
+
+test('pluginDeployDir: nazwa folderu configu tez bierze sie z argumentu, nie z literalu', t => {
+    // Nazwe folderu konfiguracji user vaulta docelowego moze przemianowac; build podaje ja
+    // ze zmiennej DESTINATION_CONFIG_DIR, a ta funkcja nie zna zadnej nazwy domyslnej.
+    t.is(
+        pluginDeployDir('/v', '.mojkonfig', 'pkm-assistant'),
+        path.join('/v', '.mojkonfig', 'plugins', 'pkm-assistant'),
+    );
+    t.not(
+        pluginDeployDir('/v', '.mojkonfig', 'pkm-assistant'),
+        pluginDeployDir('/v', '.obsidian', 'pkm-assistant'),
+    );
 });
 
 // ── DIST_ARTIFACTS ────────────────────────────────────────────────────────────────────

@@ -207,11 +207,13 @@ Ma to znaczenie, bo granica `.pkm-assistant/` w strażniku stoi na `startsWith`:
 | No-Go, `SYSTEM_NO_GO`, `isProtectedPath` | ZAKAZUJE | **składa** (`toLowerCase`) | ma łapać za dużo, nie za mało |
 | whitelista `focusFolders`, `scope.folders` suba | ZEZWALA | **rozróżnia** | ma wpuszczać za mało, nie za dużo |
 
-Na Windows i macOS system plików wielkości liter NIE rozróżnia - porównanie bajt w bajt przepuszczałoby `Projekty/prywatne/tajne.md` na zielono, choć `Projekty/Prywatne/tajne.md` byłby odrzucany, a to JEDEN I TEN SAM PLIK; tak samo dla `.Obsidian/workspace.json` i `.TRASH/x.md` wobec `SYSTEM_NO_GO`. Normalizacja zakazu mieszka w `AccessGuard._normalizeForDenyCompare` (`\`→`/`, `NFC`, `toLowerCase`, puste segmenty i `.` won) i jest wołana z `_isNoGo` ORAZ z `setNoGoFolders` - wpisy lądują w `_noGoFolders` złożone, więc `Prywatne/` i `prywatne` to jeden wpis. `_normalizeForCompare` zostaje jako czysta normalizacja KSZTAŁTU (baza tamtej, bez ruszania liter).
+Na Windows i macOS system plików wielkości liter NIE rozróżnia - porównanie bajt w bajt przepuszczałoby `Projekty/prywatne/tajne.md` na zielono, choć `Projekty/Prywatne/tajne.md` byłby odrzucany, a to JEDEN I TEN SAM PLIK; tak samo dla `.TRASH/x.md` wobec `SYSTEM_NO_GO` i `.Obsidian/workspace.json` wobec folderu konfiguracji. Normalizacja zakazu mieszka w `AccessGuard._normalizeForDenyCompare` (`\`→`/`, `NFC`, `toLowerCase`, puste segmenty i `.` won) i jest wołana z `_isNoGo` ORAZ z `setNoGoFolders` - wpisy lądują w `_noGoFolders` złożone, więc `Prywatne/` i `prywatne` to jeden wpis. `_normalizeForCompare` zostaje jako czysta normalizacja KSZTAŁTU (baza tamtej, bez ruszania liter).
 
 **Cena, świadomie zaakceptowana:** na vaultcie naprawdę case-sensitive (Linux) zakaz obejmie też "sąsiada" różniącego się literą - `prywatne/` obok zakazanego `Prywatne/` przestanie być dostępny. Lepiej zakazać za dużo niż wypuścić plik, który miał być zakazany.
 
 **Dokładasz bramkę ZAKAZU dotyczącą ścieżek → składaj litery.** Ta sama reguła obowiązuje poza `core/`: wykluczenia indeksu semantycznego (`modules/embedding/VaultIndexer._isExcluded`) liczą ją u siebie lokalnie, bo indekser trzyma zero zależności od `core/`. Strażnik: `core/security/nogo_case.test.ts`.
+
+**Nazwa folderu konfiguracji nie jest nigdzie wpisana na sztywno - i nieznana znaczy ZAKAZ.** `SYSTEM_NO_GO` to wyłącznie `['.trash']` (jedyny wpis bez odpowiednika w API Obsidiana). Folder konfiguracji user może przemianować, więc jego nazwa przychodzi z żywego `Vault#configDir` przez `AccessGuard.setConfigDir` (`src/main.ts`, PRZED `setNoGoFolders` - migawka `_noGoFolders` liczy się w chwili wywołania) i dopiero stamtąd trafia do strefy zakazanej. Dopóki `_configDir === null` (przed inicjalizacją, harness, testy), `_isNoGo` idzie **fail-closed: zakazany jest KAŻDY ukryty folder** (pierwszy segment od kropki), bo nie wiadomo, który z nich jest konfiguracją. Jedyny wyjątek to `.pkm-assistant/**` - bebechy pluginu mają własną bramkę `_checkPkmPath`, sprawdzaną PO No-Go, więc bez wyjątku agent straciłby własną pamięć. Ten sam wzorzec (żywy `configDir` + fail-closed na ukrytych folderach) powtarza `modules/embedding/VaultIndexer._hardExcludes`. Strażnik: `core/security/configDir_nogo.test.ts`.
 
 ### 4b. Maska sekretów ma DWA filtry: kształt i NAZWĘ pola
 
@@ -304,7 +306,7 @@ Start jest lekki: żadnego stałego opóźnienia startowego, żadnego ślepego s
 
 ### 8. Jedyny escape hatch chronionych ścieżek to `agent.admin_access === true`
 
-`AccessGuard` i `PermissionSystem` przepuszczają wtedy No-Go, protected files, `.pkm-assistant`, `.obsidian` i `.trash`, ale wyłącznie wewnątrz vaulta. `sanitizePath` nadal odrzuca ścieżki absolutne, UNC i traversal. Admin nie włącza narzędzi i nie zmienia autonomii.
+`AccessGuard` i `PermissionSystem` przepuszczają wtedy No-Go, protected files, `.pkm-assistant`, folder konfiguracji Obsidiana (`Vault#configDir`) i `.trash`, ale wyłącznie wewnątrz vaulta. `sanitizePath` nadal odrzuca ścieżki absolutne, UNC i traversal. Admin nie włącza narzędzi i nie zmienia autonomii.
 
 **Workspace v2:** `guidance_mode:true` = cały zwykły vault; `guidance_mode:false` + puste `focusFolders` = zero zwykłego vaulta. Jednorazowa migracja zachowująca zachowanie starych agentów żyje w `modules/agents/accessPolicy.js`.
 

@@ -125,17 +125,28 @@ function copyStaticArtifacts() {
 /**
  * Wdrożenie świeżego builda do vaultów deweloperskich wskazanych przez `.env`.
  *
- * Brak zmiennej albo pusta wartość = zero deployów, zero błędów, zero ostrzeżeń
+ * Brak `DESTINATION_VAULTS` albo pusta wartość = zero deployów, zero błędów, zero ostrzeżeń
  * (CI ustawia ją jawnie na pusty string, żeby nie polegać na braku pliku `.env`).
  * Błąd kopiowania do jednego vaulta nie wywraca builda — to wygoda dewelopera,
  * nie artefakt wydania.
+ *
+ * `DESTINATION_CONFIG_DIR` to nazwa folderu konfiguracji Obsidiana w vaultach docelowych.
+ * Build z gołego Node'a nie ma `Vault#configDir`, a user może ten folder przemianować, więc
+ * nazwy NIE ZGADUJEMY: gdy vaulty są podane, a ta zmienna nie, leci jedno ostrzeżenie
+ * i deploy jest pomijany. Sam build kończy się sukcesem — deploy to wygoda, nie artefakt.
  */
 function deployToVaults(pluginId) {
     const vaults = parseDestinationVaults(process.env.DESTINATION_VAULTS);
     if (vaults.length === 0) return;
 
+    const configDir = (process.env.DESTINATION_CONFIG_DIR ?? '').trim();
+    if (!configDir) {
+        console.warn('[build] pomijam deploy do vaultow: DESTINATION_VAULTS jest ustawione, a DESTINATION_CONFIG_DIR nie - podaj nazwe folderu konfiguracji Obsidiana w vaultach docelowych (patrz .env.example)');
+        return;
+    }
+
     for (const vault of vaults) {
-        const target = pluginDeployDir(vault, pluginId);
+        const target = pluginDeployDir(vault, configDir, pluginId);
         try {
             fs.mkdirSync(target, { recursive: true });
             for (const artifact of DIST_ARTIFACTS) {
