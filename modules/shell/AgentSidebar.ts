@@ -4,35 +4,45 @@
  * All rendering logic is in modules/shell/sidebar/ modules.
  */
 import { ItemView } from 'obsidian';
-import type { WorkspaceLeaf } from 'obsidian';
+import type { WorkspaceLeaf, View, App } from 'obsidian';
 import { t } from '../../core/i18n/index.js';
 import agent_sidebar_styles from './AgentSidebar.css' with { type: 'css' };
 import sidebar_view_styles from './sidebar/SidebarViews.css' with { type: 'css' };
 import { SidebarNav } from './sidebar/SidebarNav.js';
+import type { ViewRenderer } from './sidebar/SidebarNav.js';
 import { renderHomeView } from './sidebar/HomeView.js';
 import { renderAgentProfileView } from '../../modules/agents/index.js';
+import type { AgentManager } from '../../modules/agents/index.js';
 import { renderCommunicatorView } from '../../modules/komunikator/index.js';
 import { renderZapleczeView } from './sidebar/BackstageViews.js';
 import { renderSkillDetailView, renderSubAgentDetailView } from './sidebar/DetailViews.js';
 import { renderTriggersView } from './sidebar/TriggersView.js';
 import { SkinManager, adoptSheet } from '../crystal-soul/index.js';
+import type { PluginApi } from '../../core/index.js';
 
-// TS-any: the sidebar is a composition boundary for the dynamically assembled plugin and view renderers.
-type Runtime = any;
+/**
+ * Plugin widziany przez sidebar: `agentManager` ponad bazowy `PluginApi`, plus `registerView`
+ * (prawdziwa metoda Obsidian `Plugin`, spoza `PluginApi` - moduły nie rejestrują widoków,
+ * robi to composition root; sidebar jest wyjątkiem, bo SAM jest widokiem).
+ */
+interface AgentSidebarPlugin extends PluginApi {
+    agentManager?: AgentManager;
+    registerView(type: string, viewCreator: (leaf: WorkspaceLeaf) => View): void;
+}
 
 export const AGENT_SIDEBAR_VIEW_TYPE = 'pkm-agent-sidebar';
 
 export class AgentSidebar extends ItemView {
-    declare private plugin: Runtime;
+    declare private plugin: AgentSidebarPlugin;
     declare private unsubscribe: (() => void) | null;
     // `number`, nie `ReturnType<typeof window.setTimeout>` - z `@types/node` w tym samym projekcie
     // (harness/testy), `globalThis`/`window` mieszają przeciążenia Node+DOM i ReturnType<> łapie
     // wtedy `NodeJS.Timeout` zamiast liczby, którą naprawdę zwraca `window.setTimeout` w Obsidianie.
     declare private _renderTimer: number | null;
-    declare private nav: Runtime;
+    declare private nav: SidebarNav | null;
     declare private _unsubscribeSkinEvents: (() => void) | null;
 
-    constructor(leaf: WorkspaceLeaf, plugin: Runtime) {
+    constructor(leaf: WorkspaceLeaf, plugin: AgentSidebarPlugin) {
         super(leaf);
         this.plugin = plugin;
         this.unsubscribe = null;
@@ -86,13 +96,16 @@ export class AgentSidebar extends ItemView {
     _initSidebar(container: HTMLElement): void {
         // Initialize navigation
         this.nav = new SidebarNav(container, this.plugin);
-        this.nav.register('home', renderHomeView);
+        // TS-boundary: rejestr trzyma wspólny ViewRenderer (plugin: PluginApi) - każdy renderer
+        // zawęża plugin do managerów, których realnie czyta (kontrawariancja parametrów metod
+        // nie pozwala inaczej pogodzić wspólnego rejestru z węższymi sygnaturami widoków).
+        this.nav.register('home', renderHomeView as unknown as ViewRenderer);
         this.nav.register('agent-profile', renderAgentProfileView);
         this.nav.register('communicator', renderCommunicatorView);
-        this.nav.register('zaplecze', renderZapleczeView);
+        this.nav.register('zaplecze', renderZapleczeView as unknown as ViewRenderer);
         this.nav.register('skill-detail', renderSkillDetailView);
         this.nav.register('sub-agent-detail', renderSubAgentDetailView);
-        this.nav.register('triggers', renderTriggersView);
+        this.nav.register('triggers', renderTriggersView as unknown as ViewRenderer);
         // Widoku `sub-agent-runs` już tu nie ma - biegi subów pokazuje pasek w OKNIE CZATU
         // (per agent i per sesja), patrz `modules/chat/chat/subTaskStrip.ts`.
 
@@ -104,21 +117,29 @@ export class AgentSidebar extends ItemView {
             this.unsubscribe = this.plugin.agentManager.on((event: string) => {
                 if (['agents:loaded', 'agents:reloaded',
                      'agent:created', 'agent:deleted', 'agent:updated'].includes(event)) {
-                    this.nav.refresh();
+                    this.nav!.refresh();
                 }
                 // Communicator events: debounce to prevent duplicate renders
                 if (event === 'communicator:message_sent' || event === 'communicator:message_read' || event === 'communicator:project_updated') {
                     if (this._renderTimer) window.clearTimeout(this._renderTimer);
                     this._renderTimer = window.setTimeout(() => {
                         this._renderTimer = null;
-                        this.nav.refresh();
+                        this.nav!.refresh();
                     }, 200);
                 }
             });
         }
     }
 
-    onClose(): Runtime {
+    // FLAGGED (nie "wersja czysto typowa" - do przeglądu Fable): `View.onClose()` (obsidian.d.ts)
+    // jest `protected onClose(): Promise<void>`; ciało poniżej nie ma `await` (synchroniczne
+    // sprzątanie), więc `async` jest tu wyłącznie adnotacją zgodności z bazą - bez `await`
+    // efekty uboczne (unsubscribe/dispose/clearTimeout) wykonują się w tym samym ticku co
+    // przed zmianą, a wołający i tak `await`-uje zwrotkę. Bez `async` `void` nie satysfakcjonuje
+    // kontraktu bazy (TS2416) i nie ma czysto-typowej adnotacji, która by to obeszła (sprawdzone:
+    // `Promise<void>` bez `async` daje TS2355 - funkcja musi zwrócić wartość). Ten sam konflikt
+    // czeka na `modules/chat/chat_view.ts` (`onClose(): Runtime` - jeszcze niemigrowany).
+    async onClose() {
         this._unsubscribeSkinEvents?.();
         this._unsubscribeSkinEvents = null;
         // Sprzątanie BIEŻĄCEGO widoku woła wyłącznie `SidebarNav._render` przy przełączeniu
@@ -139,7 +160,7 @@ export class AgentSidebar extends ItemView {
  * Register the sidebar view
  * @param {Plugin} plugin
  */
-export function registerAgentSidebar(plugin: Runtime): void {
+export function registerAgentSidebar(plugin: AgentSidebarPlugin): void {
     plugin.registerView(
         AGENT_SIDEBAR_VIEW_TYPE,
         (leaf: WorkspaceLeaf) => new AgentSidebar(leaf, plugin)
@@ -150,18 +171,20 @@ export function registerAgentSidebar(plugin: Runtime): void {
  * Open or reveal the agent sidebar
  * @param {Plugin} plugin
  */
-export async function openAgentSidebar(plugin: Runtime): Promise<void> {
-    const { workspace } = plugin.app;
+export async function openAgentSidebar(plugin: AgentSidebarPlugin): Promise<void> {
+    // TS-boundary: `AppLike` (core, node-safe) nie modeluje `Workspace` - shell już importuje
+    // obsidian wprost gdzie indziej (patrz HomeView.ts).
+    const { workspace } = plugin.app as unknown as App;
 
-    let leaf = workspace.getLeavesOfType(AGENT_SIDEBAR_VIEW_TYPE)[0];
+    let leaf: WorkspaceLeaf | null | undefined = workspace.getLeavesOfType(AGENT_SIDEBAR_VIEW_TYPE)[0];
 
     if (!leaf) {
         leaf = workspace.getRightLeaf(false);
-        await leaf.setViewState({
+        await leaf!.setViewState({
             type: AGENT_SIDEBAR_VIEW_TYPE,
             active: true
         });
     }
 
-    workspace.revealLeaf(leaf);
+    workspace.revealLeaf(leaf!);
 }
