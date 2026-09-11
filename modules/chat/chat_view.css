@@ -56,8 +56,8 @@
 
 /* ===== OLD SKILL BUTTONS + INPUT AREA — removed (migrated to cs-skillbar, cs-input-panel) ===== */
 
-.hidden {
-  display: none !important;
+.hidden.hidden {
+  display: none;
 }
 
 
@@ -65,9 +65,9 @@
 
 /* ===== ERROR MESSAGES ===== */
 .pkm-chat-error {
-  color: var(--text-error) !important;
-  background-color: rgba(255, 82, 82, 0.08) !important;
-  border: 1px solid rgba(255, 82, 82, 0.2) !important;
+  color: var(--text-error);
+  background-color: rgba(255, 82, 82, 0.08);
+  border: 1px solid rgba(255, 82, 82, 0.2);
 }
 
 /* ===== SCROLLBAR ===== */
@@ -792,8 +792,8 @@
 }
 
 /* ===== TRIM BUBBLE — Phase 1 as user-message-style bubble ===== */
-.cs-trim-bubble {
-  max-width: 80% !important;
+.cs-message--user.cs-trim-bubble {
+  max-width: 80%;
 }
 
 .cs-trim-details {
@@ -866,8 +866,7 @@
   top: 50%;
   width: 5px;
   height: 6px;
-  transform: translateY(-50%);
-  clip-path: polygon(30% 0%, 100% 20%, 80% 100%, 0% 70%);
+  transform: translateY(-50%) rotate(20deg) skew(-10deg, 4deg);
   background: rgba(var(--cs-agent-color-rgb, 150,130,100), 0.20);
 }
 
@@ -1071,7 +1070,7 @@
 .cs-action-row__status {
   width: 6px;
   height: 6px;
-  clip-path: polygon(30% 0%, 100% 20%, 80% 100%, 0% 70%);
+  transform: rotate(20deg) skew(-10deg, 4deg);
   flex-shrink: 0;
 }
 .cs-action-row__status--done {
@@ -1079,7 +1078,9 @@
 }
 .cs-action-row__status--pending {
   background: rgba(var(--cs-agent-color-rgb, 150,130,100), 0.12);
-  animation: cs-crystal-pulse 2s ease-in-out infinite;
+  /* Wariant cs-crystal-pulse z zachowanym rotate/skew - gołe keyframes ze `scale()`
+     nadpisałyby statyczny transform kryształu (patrz cs-crystal-pulse-shard niżej). */
+  animation: cs-crystal-pulse-shard 2s ease-in-out infinite;
 }
 .cs-action-row__status--error {
   background: var(--text-error, #e55);
@@ -1208,6 +1209,13 @@
   50% { opacity: 0.7; transform: scale(1.15); }
 }
 
+/* Jak cs-crystal-pulse, ale zachowuje rotate/skew statycznego kryształu
+   (.cs-action-row__status), bo gołe `scale()` w keyframes nadpisałoby cały transform. */
+@keyframes cs-crystal-pulse-shard {
+  0%, 100% { opacity: 0.3; transform: rotate(20deg) skew(-10deg, 4deg) scale(1); }
+  50% { opacity: 0.7; transform: rotate(20deg) skew(-10deg, 4deg) scale(1.15); }
+}
+
 @keyframes cs-message-enter {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
@@ -1293,8 +1301,7 @@
   top: 50%;
   width: 7px;
   height: 9px;
-  transform: translateY(-50%);
-  clip-path: polygon(30% 0%, 100% 20%, 80% 100%, 0% 70%);
+  transform: translateY(-50%) rotate(20deg) skew(-10deg, 4deg);
   background: rgba(var(--cs-agent-color-rgb, 150,130,100), 0.22);
   transition: background 0.35s, filter 0.35s;
 }
@@ -1472,16 +1479,21 @@
   justify-content: center;
   cursor: pointer;
   transition: border-color 0.2s, background 0.2s, transform 0.15s;
-  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  /* Romb bez polygon()-clipa: kwadrat obrócony 45° ma przekątną bok*sqrt(2), więc razem ze
+     scale(0.7071 = 1/sqrt(2)) przekątna wraca do dokładnie tej samej szerokości/wysokości
+     boxa (36px), czyli ten sam ślad co dawny polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%).
+     Ikona w środku dostaje kontr-obrót I kontr-skalę (1.4142 = sqrt(2)) niżej, żeby zostać
+     tej samej wielkości i nie obrócona. */
+  transform: rotate(45deg) scale(0.7071);
   flex-shrink: 0;
 }
 .cs-input-send:hover {
   border-color: rgba(var(--cs-agent-color-rgb, 150,130,100), 0.50);
   background: rgba(var(--cs-agent-color-rgb, 150,130,100), 0.18);
-  transform: scale(1.08);
+  transform: rotate(45deg) scale(0.7637);
 }
 .cs-input-send:active {
-  transform: scale(0.92);
+  transform: rotate(45deg) scale(0.6505);
   background: rgba(var(--cs-agent-color-rgb, 150,130,100), 0.22);
   transition-duration: 0.05s;
 }
@@ -1489,6 +1501,7 @@
   width: 14px;
   height: 14px;
   opacity: 0.65;
+  transform: rotate(-45deg) scale(1.4142);
 }
 .cs-input-send:hover svg {
   opacity: 0.9;
@@ -2319,8 +2332,8 @@
 
 /* Crystal build — shape materializes */
 @keyframes cs-crystal-build {
-  from { opacity: 0; transform: scale(0.3); clip-path: inset(50%); }
-  to { opacity: 1; transform: scale(1); clip-path: inset(0%); }
+  from { opacity: 0; transform: scale(0.3); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 /* Tab switch fade-in */
@@ -2443,9 +2456,9 @@
 
 /* ─── Session Close Modal + Open Session Modal (bliźniacze modale sesji - wspólne selektory
    zamiast duplikatu) ─── */
-.cs-session-close-modal,
-.cs-open-session-modal {
-  padding: 20px !important;
+.modal-content.cs-session-close-modal,
+.modal-content.cs-open-session-modal {
+  padding: 20px;
 }
 .cs-session-close__header,
 .cs-open-session__header {
