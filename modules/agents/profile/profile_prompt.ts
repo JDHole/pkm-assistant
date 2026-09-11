@@ -7,9 +7,20 @@ import { HiddenFileEditorModal } from './HiddenFileEditorModal.js';
 import { StartPromptGeneratorModal } from './StartPromptGeneratorModal.js';
 import { UiIcons, setSvg, setSvgLabel } from '../../crystal-soul/index.js';
 import { t } from '../../../core/i18n/index.js';
+import type { ProfileCtx } from './profile_types.js';
 
-// TS-any: prompt inspector consumes open-ended prompt section and plugin runtime records.
-type UiBoundary = any;
+/** Matches PromptBuilder.getSections()'s inline object shape (modules/prompts/PromptBuilder.ts). */
+type PromptSection = { key: string; label: string; tokens: number; enabled: boolean; required: boolean; category: string; content: string; editable: boolean };
+/** Custom per-agent decision-tree instruction (`custom_<group>_<ts>` keys). */
+type DTCustomEntry = { group: string; text: string; tool: string | null };
+type DTInstrValue = boolean | string | DTCustomEntry;
+/** TS-boundary: `plugin.env.settings.pkmAssistant` fields this file reads - open user-config bag. */
+type PkmPromptSettings = { disabledPromptSections?: string[]; promptDefaults?: Record<string, unknown> };
+/** Work-prompt fields on ProfileFormData (all plain strings) - see _renderWorkPrompts. */
+type WorkPromptKey = 'compression_prompt' | 'save_session_prompt' | 'archive_prompt' | 'summary_prompt' | 'subagent_frame_prompt';
+/** TS-boundary: formData.prompt_overrides is an open user-config bag (Record<string, unknown>) -
+ * these are the fields this file actually reads/writes on it. */
+type PromptOverridesBag = Record<string, unknown> & { disabledSections?: string[]; decisionTreeInstructions?: Record<string, DTInstrValue> };
 
 const SVG_X = '<svg viewBox="0 0 12 12" width="12" height="12"><line x1="3" y1="3" x2="9" y2="9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="9" y1="3" x2="3" y2="9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 
@@ -17,7 +28,7 @@ const SVG_X = '<svg viewBox="0 0 12 12" width="12" height="12"><line x1="3" y1="
  * @param {Object} ctx - shared context
  * @param {HTMLElement} el
  */
-export async function renderPromptTab(ctx: UiBoundary, el: HTMLElement) {
+export async function renderPromptTab(ctx: ProfileCtx, el: HTMLElement) {
     const subTabBar = el.createDiv({ cls: 'cs-profile-tabs cs-profile-tabs--2col' });
 
     const inspectorBtn = subTabBar.createEl('button', {
@@ -43,7 +54,7 @@ export async function renderPromptTab(ctx: UiBoundary, el: HTMLElement) {
         }
     }
 
-    for (const [btn, key] of [[inspectorBtn, 'inspector'], [editorBtn, 'editor']] as Array<[HTMLButtonElement, string]>) {
+    for (const [btn, key] of [[inspectorBtn, 'inspector'], [editorBtn, 'editor']] as Array<[HTMLButtonElement, 'inspector' | 'editor']>) {
         btn.addEventListener('click', () => {
             ctx.activePromptSubTab = key;
             subTabBar.querySelectorAll('.cs-profile-tab').forEach((t: Element) => t.classList.remove('cs-profile-tab--active'));
@@ -55,16 +66,16 @@ export async function renderPromptTab(ctx: UiBoundary, el: HTMLElement) {
     await renderSubContent();
 }
 
-async function _renderPromptInspector(ctx: UiBoundary, el: HTMLElement) {
+async function _renderPromptInspector(ctx: ProfileCtx, el: HTMLElement) {
     const { agent, formData, plugin, agentManager } = ctx;
     if (!agent) {
         el.createEl('p', { text: t('profile.prompt.save_to_inspect'), cls: 'setting-item-description' });
         return;
     }
 
-    const pkm = plugin.env?.settings?.pkmAssistant || {};
+    const pkm = (plugin.env?.settings?.pkmAssistant || {}) as PkmPromptSettings;
     const globalDisabled = pkm.disabledPromptSections || [];
-    const agentDisabled = formData.prompt_overrides.disabledSections || [];
+    const agentDisabled = (formData.prompt_overrides.disabledSections as string[] | undefined) || [];
     const mergedDisabled = [...new Set([...globalDisabled, ...agentDisabled])];
 
     _renderStartPromptBanner(ctx, el);
@@ -81,8 +92,8 @@ async function _renderPromptInspector(ctx: UiBoundary, el: HTMLElement) {
         context:  { label: t('profile.prompt.dynamic_context'), dot: UiIcons.layers?.(10) || '◎' },
     };
 
-    let allSections: UiBoundary[] = [];
-    const catTokenEls = new Map();
+    let allSections: PromptSection[] = [];
+    const catTokenEls = new Map<string, HTMLSpanElement>();
 
     const updateTokenDisplays = () => {
         let total = 0, enabledCount = 0;
@@ -148,8 +159,8 @@ async function _renderPromptInspector(ctx: UiBoundary, el: HTMLElement) {
         void (async () => {
             try {
                 const data = await agentManager.getPromptInspectorDataForAgent(formData.name, extraContext);
-                const fullText = (data.sections || []).filter((s: UiBoundary) => s.enabled).map((s: UiBoundary) => s.content).join('\n\n');
-                new HiddenFileEditorModal(plugin.app, '', `System Prompt — ${formData.name}`, fullText, { readOnly: true }).open();
+                const fullText = (data.sections || []).filter((s) => s.enabled).map((s) => s.content).join('\n\n');
+                new HiddenFileEditorModal(plugin.app as unknown as ConstructorParameters<typeof HiddenFileEditorModal>[0], '', `System Prompt — ${formData.name}`, fullText, { readOnly: true }).open();
             } catch (e: unknown) { new Notice(t('profile.prompt.error', { error: (e as Error).message })); }
         })();
     });
@@ -161,7 +172,7 @@ async function _renderPromptInspector(ctx: UiBoundary, el: HTMLElement) {
         void (async () => {
             try {
                 const data = await agentManager.getPromptInspectorDataForAgent(formData.name, extraContext);
-                const fullText = (data.sections || []).filter((s: UiBoundary) => s.enabled).map((s: UiBoundary) => s.content).join('\n\n');
+                const fullText = (data.sections || []).filter((s) => s.enabled).map((s) => s.content).join('\n\n');
                 await navigator.clipboard.writeText(fullText);
                 setSvg(copyBtn, UiIcons.check(12));
                 copyBtn.appendText(t('profile.prompt.copied'));
@@ -178,7 +189,7 @@ async function _renderPromptInspector(ctx: UiBoundary, el: HTMLElement) {
  * składa się prompt - i od razu, że sekcja „KIM JESTEM" jest pusta. Generator wypełnia
  * `formData.personality` (bufor panelu), więc zmiana ląduje w YAML-u dopiero po „Zapisz profil".
  */
-function _renderStartPromptBanner(ctx: UiBoundary, el: HTMLElement) {
+function _renderStartPromptBanner(ctx: ProfileCtx, el: HTMLElement) {
     const { formData, plugin, agent } = ctx;
     const card = el.createDiv({ cls: 'cs-prompt-override' });
     const header = card.createDiv({ cls: 'cs-prompt-override__header' });
@@ -193,7 +204,7 @@ function _renderStartPromptBanner(ctx: UiBoundary, el: HTMLElement) {
     setSvg(btn, UiIcons.edit(11));
     btn.appendText(t('profile.start_prompt.open'));
     btn.addEventListener('click', () => {
-        new StartPromptGeneratorModal(plugin.app, {
+        new StartPromptGeneratorModal(plugin.app as unknown as ConstructorParameters<typeof StartPromptGeneratorModal>[0], {
             agentName: agent?.name || formData.name || '',
             currentPersonality: formData.personality,
             onInsert: (text) => {
@@ -205,10 +216,10 @@ function _renderStartPromptBanner(ctx: UiBoundary, el: HTMLElement) {
     });
 }
 
-function _renderInspectorRow(ctx: UiBoundary, parentEl: HTMLElement, section: UiBoundary, updateTokenDisplays: () => void) {
+function _renderInspectorRow(ctx: ProfileCtx, parentEl: HTMLElement, section: PromptSection, updateTokenDisplays: () => void) {
     const { formData, plugin } = ctx;
-    const po = formData.prompt_overrides;
-    const pkm = plugin.env?.settings?.pkmAssistant || {};
+    const po = formData.prompt_overrides as PromptOverridesBag;
+    const pkm = (plugin.env?.settings?.pkmAssistant || {}) as PkmPromptSettings;
 
     const rowEl = parentEl.createDiv({ cls: `cs-prompt-row${section.enabled ? '' : ' cs-prompt-row--disabled'}` });
 
@@ -279,10 +290,10 @@ function _renderInspectorRow(ctx: UiBoundary, parentEl: HTMLElement, section: Ui
     labelEl.addEventListener('click', toggleExpand);
 }
 
-function _renderPromptEditor(ctx: UiBoundary, el: HTMLElement) {
+function _renderPromptEditor(ctx: ProfileCtx, el: HTMLElement) {
     const { formData, plugin } = ctx;
-    const po = formData.prompt_overrides;
-    const pkm = plugin.env?.settings?.pkmAssistant || {};
+    const po = formData.prompt_overrides as PromptOverridesBag;
+    const pkm = (plugin.env?.settings?.pkmAssistant || {}) as PkmPromptSettings;
     const globalDefaults = pkm.promptDefaults || {};
 
     // Agent Rules
@@ -341,7 +352,7 @@ function _renderPromptEditor(ctx: UiBoundary, el: HTMLElement) {
         const body = sectionEl.createDiv({ cls: 'cs-prompt-override__body cs-collapsed' });
         header.addEventListener('click', () => { body.classList.toggle('cs-collapsed'); });
 
-        const effectiveText = globalDefaults[def.key] || FACTORY_DEFAULTS[def.key as keyof typeof FACTORY_DEFAULTS] || '';
+        const effectiveText = (globalDefaults[def.key] as string | undefined) || FACTORY_DEFAULTS[def.key as keyof typeof FACTORY_DEFAULTS] || '';
         if (effectiveText) {
             const refBlock = body.createDiv({ cls: 'cs-prompt-ref' });
             const refLabel = refBlock.createDiv({ cls: 'cs-prompt-ref__label' });
@@ -351,7 +362,7 @@ function _renderPromptEditor(ctx: UiBoundary, el: HTMLElement) {
         }
 
         const textarea = body.createEl('textarea', { placeholder: t('profile.prompt.empty_uses_default'), cls: 'cs-prompt-textarea' });
-        textarea.value = po[def.key] || '';
+        textarea.value = (po[def.key] as string | undefined) || '';
 
         const _updateBadge = () => {
             const badge = header.querySelector('.cs-prompt-badge');
@@ -388,15 +399,15 @@ function _renderPromptEditor(ctx: UiBoundary, el: HTMLElement) {
     el.createEl('p', { text: t('profile.prompt.decision_tree_desc'), cls: 'setting-item-description' });
 
     if (!po.decisionTreeInstructions) po.decisionTreeInstructions = {};
-    const agentDT = po.decisionTreeInstructions;
+    const agentDT = po.decisionTreeInstructions as Record<string, DTInstrValue>;
 
     const sortedDTGroups = Object.entries(DECISION_TREE_GROUPS).sort(([, a], [, b]) => a.order - b.order);
-    const globalDT = globalDefaults.decisionTreeOverrides || {};
+    const globalDT = (globalDefaults.decisionTreeOverrides as Record<string, DTInstrValue> | undefined) || {};
 
     for (const [groupId, groupDef] of sortedDTGroups) {
         const groupInstructions = DECISION_TREE_DEFAULTS.filter(d => d.group === groupId);
         const customKeys = Object.keys(agentDT).filter(k =>
-            k.startsWith('custom_') && typeof agentDT[k] === 'object' && agentDT[k]?.group === groupId
+            k.startsWith('custom_') && typeof agentDT[k] === 'object' && (agentDT[k] as DTCustomEntry | undefined)?.group === groupId
         );
         const totalCount = groupInstructions.length + customKeys.length;
         const disabledCount = groupInstructions.filter(i => agentDT[i.id] === false).length;
@@ -522,7 +533,7 @@ function _renderPromptEditor(ctx: UiBoundary, el: HTMLElement) {
 
         // Custom per-agent instructions
         for (const key of customKeys) {
-            const custom = agentDT[key];
+            const custom = agentDT[key] as DTCustomEntry;
             const row = groupBody.createDiv({ cls: 'cs-dt-row' });
             const customCb = row.createEl('input', { type: 'checkbox' });
             customCb.checked = true;
@@ -555,7 +566,7 @@ function _renderPromptEditor(ctx: UiBoundary, el: HTMLElement) {
  * Ostrzeżenie o kontrakcie przy compression/save/archive (parsery: MEMORY_CANDIDATES fence,
  * JSON new_notes, {{LEVEL}}). Sloty promptów artefaktów jeszcze nie budujemy.
  */
-function _renderWorkPrompts(ctx: UiBoundary, el: HTMLElement) {
+function _renderWorkPrompts(ctx: ProfileCtx, el: HTMLElement) {
     const { formData } = ctx;
 
     const head = el.createDiv({ cls: 'cs-section-head' });
@@ -563,7 +574,7 @@ function _renderWorkPrompts(ctx: UiBoundary, el: HTMLElement) {
     head.createSpan({ text: t('profile.prompt.work_prompts') });
     el.createEl('p', { text: t('profile.prompt.work_prompts_desc'), cls: 'setting-item-description' });
 
-    const defs = [
+    const defs: Array<{ key: WorkPromptKey; label: string; contract: boolean }> = [
         { key: 'compression_prompt', label: `🗜️ ${t('profile.prompt.wp_compression')}`, contract: true },
         { key: 'save_session_prompt', label: `💾 ${t('profile.prompt.wp_save')}`, contract: true },
         { key: 'archive_prompt', label: `🔀 ${t('profile.prompt.wp_archive')}`, contract: true },
