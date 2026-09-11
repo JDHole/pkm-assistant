@@ -92,6 +92,9 @@ export class SkillEditorModal extends Modal {
             model: this.existing?.model || '',
             disableModelInvocation: this.existing?.disableModelInvocation ?? false,
             userInvocable: this.existing?.userInvocable !== false,
+            // `as SkillQuestion[]`: `JSON.parse` (lib.es5.d.ts) zwraca `any` — round-trip przez
+            // stringify/parse to celowy deep-clone (edycja pytań w formularzu nie mutuje
+            // `this.existing`), kształt po drugiej stronie jest ten sam co przed.
             preQuestions: JSON.parse(JSON.stringify(this.existing?.preQuestions || [])) as SkillQuestion[],
             prompt: this.existing?.prompt || ''
         };
