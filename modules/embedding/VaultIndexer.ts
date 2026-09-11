@@ -44,7 +44,13 @@ import type { EmbeddingDoc } from './orama_engine.js';
 // imporcie — `fn` czyta `setTimeout`/`clearTimeout` DYNAMICZNIE przy każdym wywołaniu, więc
 // zachowanie jest 1:1 jak bezpośrednie wywołanie globala. Reguła pomija wywołanie, bo `fn`
 // jest lokalną zmienną, nie globalną referencją.
-function _nodeSafeSetTimeout(...args: Parameters<typeof setTimeout>): ReturnType<typeof setTimeout> {
+// Typ bezpieczny pod OBIE strony hosta: Obsidian (przeglądarka) oddaje `setTimeout` jako
+// `ReturnType<typeof setTimeout>` BEZ `.unref` (przeglądarkowy timer), a harness AVA w Node
+// oddaje `NodeJS.Timeout`, który `.unref` ma naprawdę. Pole intersekcyjne przyjmuje obie
+// wartości; `?.()` w miejscach użycia obsługuje brak metody na przeglądarkowym wariancie.
+type NodeSafeTimer = ReturnType<typeof setTimeout> & { unref?: () => void };
+
+function _nodeSafeSetTimeout(...args: Parameters<typeof setTimeout>): NodeSafeTimer {
     const fn = setTimeout;
     return fn(...args);
 }
@@ -257,8 +263,8 @@ export class VaultIndexer {
     declare _ready: boolean;
     declare private _processing: boolean;
     declare private _hooksRegistered: boolean;
-    declare private _debounceTimer: ReturnType<typeof setTimeout> | null;
-    declare private _persistTimer: ReturnType<typeof setTimeout> | null;
+    declare private _debounceTimer: NodeSafeTimer | null;
+    declare private _persistTimer: NodeSafeTimer | null;
     /** Liczba KOLEJNYCH nieudanych flushów - steruje backoffem ponowienia. */
     declare private _flushFailures: number;
     /** Kiedy (wg `now()`) ma wystrzelić uzbrojone ponowienie po padzie - `null` = brak. */
@@ -269,7 +275,7 @@ export class VaultIndexer {
     declare private _fileAttempts: Map<string, number>;
     /** Pliki pominięte po wyczerpaniu prób — bez stempla mtime, wrócą przy następnym skanie. */
     declare skipped: Set<string>;
-    declare private _scanRetryTimer: ReturnType<typeof setTimeout> | null;
+    declare private _scanRetryTimer: NodeSafeTimer | null;
     declare private _scanFailures: number;
     /** memoizowana lista twardych wykluczeń (liczona przy pierwszym użyciu) */
     declare private _hardEx?: string[];
