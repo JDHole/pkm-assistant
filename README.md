@@ -229,6 +229,13 @@ npm test             # Run 3023 unit tests (AVA)
 npm run typecheck    # tsc --noEmit (TypeScript strict)
 ```
 
+`npm test` needs one more thing: a clone of
+[pkm-assistant-harness](https://github.com/JDHole/pkm-assistant-harness) next to this repo (or a
+`PKM_ASSISTANT_HARNESS` environment variable pointing at one). The `obsidian` module stub and DOM
+shim that the unit tests run against live there, not in this repo's `test-support/` - a small
+locator script under that same path finds the clone and hands off to it. Missing it fails fast
+with a message naming exactly what to clone.
+
 The integration harness (the real plugin booted in Node without Obsidian - offline agent loop,
 34 scenario tests) lives in its own repository:
 [pkm-assistant-harness](https://github.com/JDHole/pkm-assistant-harness). Clone it next to this

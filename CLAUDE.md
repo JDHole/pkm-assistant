@@ -24,7 +24,7 @@ Stability comes before new features - the plugin is headed for the public Obsidi
 
 **The golden rule also covers `core/`** - its door is `core/index.ts`. Official exceptions, allowed to be deep-imported from anywhere: `core/i18n/index.ts` and `core/utils/Logger.ts` (global utilities with a very large number of importers). The second exception is a single file: `src/main.ts`, the composition root, deep-imports a handful of core Obsidian-facing files (`PluginBase.ts`, `runtime/PluginRuntime.ts`, `runtime/settingsArmor.ts`, `utils/obsidianNav.ts`, `security/MasterPasswordModal.ts`) because they cannot be added to the barrel: `core/index.ts` has to load in plain Node, and the AVA tests have no mock for `obsidian`. Import specifiers still deliberately end in `.js` and point at the physical `.ts` files.
 
-**ESLint enforces this**, not "convention plus review": `no-restricted-imports` in `eslint.config.js` covers `modules/**`, `src/**`, `config/**`, `utils/**`, and `test-support/**` (tests excluded), and `npm run lint` runs across all five trees. A deep import is a lint error, not a review comment.
+**ESLint enforces this**, not "convention plus review": `no-restricted-imports` in `eslint.config.js` covers `modules/**`, `src/**`, `config/**`, and `utils/**` (tests excluded), and `npm run lint` runs across all four trees. A deep import is a lint error, not a review comment. (`test-support/` dropped out of this scope on 2026-09-11: it now holds only a locator script, not module source with a barrel to enforce - see "Commands and gates" below for what replaced it.)
 
 **Why:** (a) a session working inside a single folder saves tokens, (b) it keeps changes scoped module by module instead of to the whole codebase at once, (c) changes to internals cannot break the plugin from the outside.
 
@@ -59,14 +59,16 @@ All modular code lives in `modules/<name>/`. `src/` holds only two files: `src/m
 ```bash
 npm test                 # AVA - unit tests, free, offline
 npm run typecheck        # tsc --noEmit - strict TypeScript gate (noUnusedLocals + noUnusedParameters)
-npm run lint              # ESLint over modules/ + src/ + config/ + utils/ + test-support/
-npm run lint:obsidian     # ESLint with the Obsidian community-directory ruleset, over core + modules + src + config + utils + test-support
+npm run lint              # ESLint over modules/ + src/ + config/ + utils/
+npm run lint:obsidian     # ESLint with the Obsidian community-directory ruleset, over core + modules + src + config + utils
 npm run build             # Production build -> dist/main.js
 ```
 
 `npm run build` also deploys to every vault listed in `DESTINATION_VAULTS` in `.env`. For the owner that includes their live, daily-use vault - treat that as the last gate, not a work step.
 
 Full verification order: tests -> typecheck -> lint -> lint:obsidian -> build -> harness (`npm run selftest` + `npm run scenarios`). The harness runs the real plugin in Node without Obsidian and lives in a separate repo (`pkm-assistant-harness`, https://github.com/JDHole/pkm-assistant-harness) because the community-directory linter scans the whole plugin repo, and the test harness is not part of the plugin. Clone it next to this repo; see its own README for details.
+
+`test-support/` (root-level, one file: `register-obsidian-for-ava.mjs`) is a **locator**, not source: since 2026-09-11 the `obsidian` module stub, its DOM shim, and the actual AVA preload live in the harness repo (same reason as above - the directory validator flagged things the stub needs by definition, like `globalThis` and bare timers). This means `npm test` itself now also needs that harness clone next to this repo (or a `PKM_ASSISTANT_HARNESS` env var pointing at it, or CI's `.harness-ci` checkout) - without it, `npm test` fails immediately with an error naming exactly what to clone or set.
 
 The same gates run automatically in CI (`.github/workflows/ci.yml`) on every push and pull request to `main` - a safety net, not a substitute for running them locally before you commit.
 
