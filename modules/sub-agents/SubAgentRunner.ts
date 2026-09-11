@@ -11,6 +11,7 @@ import { t } from '../../core/i18n/index.js';
 import { getLimits } from '../../config/limits.js';
 // „Co jest porażką narzędzia" liczy ta sama funkcja, co status chipa w czacie.
 import { resolveWorkPrompt, maskSensitiveData, toolResultStatus } from '../../core/index.js';
+import type { PluginApi, AppLike, WorkPromptSettings } from '../../core/index.js';
 import { DEFAULT_SUBAGENT_FRAME_PROMPT } from './framePrompt.js';
 // Rozpoznaje stare nazwy retrieval przy budowie whitelisty (fail-safe, gdyby
 // config nie przeszedł migracji przez loader) - np. vault_grep → search.
@@ -19,10 +20,60 @@ import { DEPRECATED_TOOL_RENAMES, DEFAULT_SUB_AGENT_TOOLS } from './SubAgentLoad
 import type { SubAgentData } from './types.js';
 // Bieg suba jest BYTEM w rejestrze (`plugin.subTaskRegistry`).
 // Sam rejestr przychodzi z pluginu (DI), stąd tylko typ - runner go nie tworzy.
-import type { SubTask, SubTaskOrigin } from './SubTaskRegistry.js';
-// TS-any: these services are plugin-managed dynamic runtime adapters.
-type RunnerBoundary = any;
+import type { SubTask, SubTaskOrigin, SubTaskRegistry, SubTaskTrace } from './SubTaskRegistry.js';
+import type { ChatModel } from '../models/index.js';
+
 type AgentLike = { name: string };
+
+/** Narzędzie tak, jak oddaje je `ToolRegistry.getTool`/`filterByAgent` — pełny kształt
+ * (execute/inputSchema itd.) mieszka w `modules/tools`, poza zakresem tej fali; runner
+ * czyta z niego wyłącznie te pola. */
+interface RunnerToolDefinition {
+    name: string;
+    description: string;
+    inputSchema: unknown;
+    execute: (args: unknown, app: AppLike, plugin: RunnerPlugin) => Promise<unknown>;
+}
+
+/** Rejestr narzędzi w zakresie, jakiego używa runner (`modules/tools/ToolRegistry.ts`,
+ * poza zakresem — lokalny duck-type, ten sam wzorzec co `DelegateAgentManager`
+ * w `modules/tools/DelegateTool.ts`). */
+interface RunnerToolRegistry {
+    filterByAgent(agent: unknown): RunnerToolDefinition[];
+    getTool(name: string): RunnerToolDefinition | null;
+}
+
+/** `MCPClient` w zakresie, jakiego używa runner — trasuje wywołanie narzędzia przez
+ * uprawnienia/whitelistę (`modules/tools/MCPClient.ts`, poza zakresem). */
+interface RunnerMcpClient {
+    executeToolCall(
+        toolCall: ToolCall,
+        agentName: string,
+        opts: {
+            autonomy?: string | null;
+            delegationDepth?: number;
+            scopeFolders?: string[] | null;
+            callerToolNames?: string[];
+        },
+    ): Promise<unknown>;
+}
+
+/** Pamięć agenta w zakresie, jakiego dotyka runner (`modules/memory`, poza zakresem) —
+ * dziennik biegu dopisuje się do aktywnej sesji WŁAŚCICIELA biegu. */
+interface RunnerAgentMemory {
+    appendToActiveSession?(event: Record<string, unknown>): Promise<void>;
+}
+
+/** Kształt pluginu widziany przez runnera. */
+interface RunnerPlugin extends PluginApi {
+    mcpClient?: RunnerMcpClient | null;
+    subTaskRegistry?: SubTaskRegistry | null;
+    traceLog?: { scope?(label: string): SubTaskTrace } | null;
+    agentManager?: { getAgentMemory?(agentName: string): RunnerAgentMemory | null | undefined } | null;
+    /** Zwierciadło trybu pytań — WYŁĄCZNIE fallback, gdy `execOptions.autonomy` go nie niesie. */
+    currentAutonomy?: string | null;
+}
+
 type RunOptions = {
     delegationDepth?: number;
     scopeFolders?: string[];
@@ -85,7 +136,6 @@ export type SubRunResult = {
 };
 
 type ToolCall = { name: string; arguments: unknown };
-type ToolDefinition = { name: string; description: string; inputSchema: unknown; execute: (args: unknown, app: RunnerBoundary, plugin: RunnerBoundary) => Promise<unknown> };
 type ErrLike = { message?: unknown; error?: unknown; details?: { message?: unknown }; cause?: { message?: unknown } };
 
 /**
@@ -139,21 +189,27 @@ function _deliverableResultCap(subCommonCap: number, deliverableDefault: number)
 }
 
 export class SubAgentRunner {
-    declare toolRegistry: RunnerBoundary;
-    declare app: RunnerBoundary;
-    declare plugin: RunnerBoundary;
-    declare mcpClient: RunnerBoundary;
+    declare toolRegistry: RunnerToolRegistry;
+    declare app: AppLike;
+    declare plugin: RunnerPlugin;
+    declare mcpClient: RunnerMcpClient | null;
     /**
      * @param {Object} options
      * @param {Object} options.toolRegistry - ToolRegistry instance
      * @param {Object} options.app - Obsidian App instance
      * @param {Object} options.plugin - Plugin instance (for tool execution context)
      */
-    constructor({ toolRegistry, app, plugin }: { toolRegistry: RunnerBoundary; app: RunnerBoundary; plugin: RunnerBoundary }) {
-        this.toolRegistry = toolRegistry;
-        this.app = app;
-        this.plugin = plugin;
-        this.mcpClient = plugin?.mcpClient || null;
+    // TS-boundary: jedyny wołacz konstruktora (`DelegateTool.ts`, poza zakresem) DI-uje przez
+    // WŁASNE, węższe lokalne typy (`DelegatePlugin`, `toolRegistry: {filterByAgent?}`, `app: object`)
+    // i od razu rzutuje wynik `new SubAgentRunner(...)` na SWÓJ `SubAgentRunnerLike` — runner tu
+    // dostaje więc parametry `unknown` i zawęża je do tego, czego SAM realnie potrzebuje
+    // (`getTool` na registry, pełny `PluginApi` na plugin). W praktyce to zawsze te same,
+    // realne obiekty `ToolRegistry`/`App`/plugin.
+    constructor({ toolRegistry, app, plugin }: { toolRegistry: unknown; app: unknown; plugin: unknown }) {
+        this.toolRegistry = toolRegistry as RunnerToolRegistry;
+        this.app = app as AppLike;
+        this.plugin = plugin as RunnerPlugin;
+        this.mcpClient = (plugin as RunnerPlugin)?.mcpClient || null;
     }
 
     /**
@@ -171,7 +227,7 @@ export class SubAgentRunner {
      * @returns {Promise<SubRunResult>} - zwrotka niesie też `stoppedBy` (sposób zejścia)
      *   i `failed: true` w gałęzi błędu. Patrz `SubRunResult`.
      */
-    async runTask(taskPrompt: string, agent: AgentLike, config: SubAgentData, model: RunnerBoundary, options: RunOptions = {}): Promise<SubRunResult> {
+    async runTask(taskPrompt: string, agent: AgentLike, config: SubAgentData, model: ChatModel, options: RunOptions = {}): Promise<SubRunResult> {
         const startTime = Date.now();
         // Kaganiec delegacji + bariera scope - przenoszone przez cały bieg suba.
         const delegationDepth = Number(options.delegationDepth) || 0;
@@ -190,7 +246,7 @@ export class SubAgentRunner {
         log.debug(logTag, `Zadanie: "${taskPrompt.slice(0, 200)}..."`);
 
         // Deklaracja PRZED `try`, bo domknięcie biegu robi też gałąź `catch` (fail).
-        const registry: RunnerBoundary = this.plugin?.subTaskRegistry || null;
+        const registry: SubTaskRegistry | null = this.plugin?.subTaskRegistry || null;
         let subTask: SubTask | undefined;
 
         try {
@@ -262,8 +318,11 @@ export class SubAgentRunner {
             }
             // Tee też pod bezpiecznikiem (kontrakt: KAŻDE wołanie rejestru przez _safeRegistry) —
             // rejestr bez `traceFor` nie może wywrócić suba; wtedy spadamy na trace wprost.
+            // `subTask as SubTask`: narrowing z `(registry && subTask)` nie przeżywa domknięcia
+            // przekazanego do `_safeRegistry` (TS gubi zawężenie zmiennej `let` w zagnieżdżonej
+            // strzałce) - ten sam wzorzec co `onTaskCreated!(subTask as SubTask)` wyżej.
             const traceTee = (registry && subTask)
-                ? _safeRegistry(() => registry.traceFor?.(subTask))
+                ? _safeRegistry(() => registry.traceFor?.(subTask as SubTask))
                 : undefined;
             const trace = traceTee || this.plugin?.traceLog?.scope?.(label);
 
@@ -321,7 +380,13 @@ export class SubAgentRunner {
                 }
                 : null;
             const response = await runAgentLoop({
-                model,
+                // `model as never`: `runAgentLoop` przyjmuje własny, WĄSKI strukturalny kontrakt
+                // (`LoopModelLike`, nieeksportowany — `modules/agent-loop` świadomie NIE zależy od
+                // `modules/models`, patrz komentarz przy `LoopModelLike` w AgentLoop.ts), którego
+                // kształt handlera `done` nie unifikuje się nominalnie z `ChatModel.stream` (dwie
+                // niezależnie zadeklarowane, ale operacyjnie zgodne odpowiedzi API). Runtime bez
+                // zmian — to zawsze ten sam obiekt `ChatModel`.
+                model: model as never,
                 store,
                 resolveTools: () => tools,
                 // Numer wywołania łapiemy PRZY STARCIE (kolejność tablicy pętli),
@@ -356,7 +421,7 @@ export class SubAgentRunner {
             });
             // Domknięcie bytu wynikiem (status z `stoppedBy`: abort → aborted, reszta → done).
             if (subTask) {
-                _safeRegistry(() => registry?.finish?.(subTask, {
+                _safeRegistry(() => registry?.finish?.(subTask as SubTask, {
                     text: response.finalText || '',
                     toolsUsed: response.toolsUsed || [],
                     durationMs: Date.now() - startTime,
@@ -393,7 +458,7 @@ export class SubAgentRunner {
                 duration_ms: Date.now() - startTime
             });
             // Bieg mógł się nie założyć (błąd przed `create`) - wtedy nie ma czego domykać.
-            if (subTask) _safeRegistry(() => registry?.fail?.(subTask, safeErrorMsg));
+            if (subTask) _safeRegistry(() => registry?.fail?.(subTask as SubTask, safeErrorMsg));
             return {
                 result: t('subagent.error', { name: config.name, error: safeErrorMsg }),
                 toolsUsed: [],
@@ -474,7 +539,11 @@ export class SubAgentRunner {
 
         // The fixed frame (header/pull/ZASADY) lives in framePrompt.js and is overridable
         // (agent>global>factory). The mechanical sections below are still composed here and injected.
-        const frame = resolveWorkPrompt(agent, 'subagent_frame_prompt', this.plugin?.env?.settings, DEFAULT_SUBAGENT_FRAME_PROMPT);
+        // TS-boundary: `resolveWorkPrompt` czyta WYŁĄCZNIE `settings.pkmAssistant.promptDefaults`
+        // (`WorkPromptSettings`, core/utils/workPromptResolver.ts) - węższy kontrakt niż realny
+        // `SettingsBag` (którego `pkmAssistant.promptDefaults` schodzi przez otwarty indeks
+        // `[key: string]: unknown` w `PkmAssistantSettings`, więc nominalnie się nie unifikuje).
+        const frame = resolveWorkPrompt(agent, 'subagent_frame_prompt', this.plugin?.env?.settings as WorkPromptSettings | undefined, DEFAULT_SUBAGENT_FRAME_PROMPT);
 
         // METHOD — custom sub method (KNOWLEDGE.md), soft cap z limits.
         let methodBlock = '';
@@ -544,17 +613,20 @@ export class SubAgentRunner {
         if (!toolNames || toolNames.length === 0) return [];
 
         const parentVisible = parentAgent && typeof this.toolRegistry.filterByAgent === 'function'
-            ? new Set<string>(this.toolRegistry.filterByAgent(parentAgent).map((t: ToolDefinition) => t.name))
+            ? new Set<string>(this.toolRegistry.filterByAgent(parentAgent).map((t) => t.name))
             : null;
         const callerVisible = Array.isArray(callerToolNames) && callerToolNames.length > 0
             ? new Set<string>(callerToolNames)
             : null;
 
-        return toolNames
+        // `as RunnerToolDefinition[]`: TS 5.4 nie zwęża `.filter(Boolean)` (brak predykatu typu w
+        // lib.es5.d.ts w tej wersji) - cast na WYNIKU (nie nowy statement, nie zmieniony warunek)
+        // trzyma resztę łańcucha bez zmian w emitowanym JS.
+        return (toolNames
             .map(name => this.toolRegistry.getTool(name))
-            .filter(Boolean)
-            .filter((tool: ToolDefinition) => !parentVisible || parentVisible.has(tool.name))
-            .filter((tool: ToolDefinition) => !callerVisible || callerVisible.has(tool.name))
+            .filter(Boolean) as RunnerToolDefinition[])
+            .filter((tool) => !parentVisible || parentVisible.has(tool.name))
+            .filter((tool) => !callerVisible || callerVisible.has(tool.name))
             .map(tool => ({
                 type: "function",
                 function: {
@@ -653,7 +725,7 @@ export class SubAgentRunner {
             }
 
             log.warn('SubAgent', `_executeTool fallback (brak MCPClient): ${toolCall.name}`);
-            const tool: ToolDefinition | null = this.toolRegistry.getTool(toolCall.name);
+            const tool: RunnerToolDefinition | null = this.toolRegistry.getTool(toolCall.name);
             if (!tool) {
                 onFailure?.();
                 return t('subagent.tool_not_found', { name: toolCall.name });

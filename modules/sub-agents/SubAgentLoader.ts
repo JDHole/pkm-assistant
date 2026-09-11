@@ -8,9 +8,7 @@ import { parseYaml, stringifyYaml, slugify } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
 import { DEFAULT_LIMITS } from '../../config/limits.js';
-import type { ScopeData, SubAgentData, SubAgentInput, SubAgentYaml, VaultLike } from './types.js';
-// TS-any: YAML parser input is a dynamic, backward-compatible user file format.
-type YamlData = Record<string, any>;
+import type { ScopeData, SubAgentData, SubAgentInput, SubAgentYaml, SubAgentYamlRaw, VaultLike } from './types.js';
 
 const SUB_AGENTS_PATH = '.pkm-assistant/sub-agents';
 // JEDNO źródło prawdy jest `config/limits.ts` (DEFAULT_LIMITS) — ta stała
@@ -54,13 +52,13 @@ export const DEPRECATED_TOOL_RENAMES = {
     'memory_summaries': 'read',
 };
 
-export function migrateDeprecatedTools(yamlData: YamlData = {}): { changed: boolean; renamed: number; deduped: number; mappings: Array<{ from: string; to: string; count: number }> } {
+export function migrateDeprecatedTools(yamlData: SubAgentYamlRaw = {}): { changed: boolean; renamed: number; deduped: number; mappings: Array<{ from: string; to: string; count: number }> } {
     const result: { changed: boolean; renamed: number; deduped: number; mappings: Array<{ from: string; to: string; count: number }> } = { changed: false, renamed: 0, deduped: 0, mappings: [] };
     if (!Array.isArray(yamlData.tools)) return result;
 
-    const seen = new Set();
-    const mappingCounts = new Map();
-    const nextTools = [];
+    const seen = new Set<string>();
+    const mappingCounts = new Map<string, number>();
+    const nextTools: string[] = [];
 
     for (const tool of yamlData.tools) {
         const nextTool = DEPRECATED_TOOL_RENAMES[tool as keyof typeof DEPRECATED_TOOL_RENAMES] || tool;
@@ -92,8 +90,13 @@ function normalizeScope(scope: unknown): ScopeData | null {
     if (!scope || typeof scope !== 'object' || Array.isArray(scope)) {
         return null;
     }
+    // `value as unknown[]`: `Array.isArray` z lib.es5.d.ts zwęża do `any[]`, nie `unknown[]`
+    // (znany kwirk sygnatury stdlib) — bez castu `item` w `.filter` byłby `any`. `item as string`
+    // w `.map` (zamiast predykatu typu na `.filter`) - żeby nie zmieniać warunku filtra ani
+    // dokładać nowych statement'ów (kontrakt „bundle identyczny"); obie adnotacje są czysto
+    // typowe, znikają przy transpilacji.
     const normalizeArray = (value: unknown): string[] => Array.isArray(value)
-        ? value.filter(item => typeof item === 'string' && item.trim()).map(item => item.trim())
+        ? (value as unknown[]).filter(item => typeof item === 'string' && item.trim()).map(item => (item as string).trim())
         : [];
     return {
         folders: normalizeArray((scope as Record<string, unknown>).folders),
@@ -219,7 +222,9 @@ export class SubAgentLoader {
         const raw = await this.vault.adapter.read(yamlPath);
         if (!raw?.trim()) return null;
 
-        const config = parseYaml(raw) as YamlData;
+        // TS-boundary: SUB_AGENT.yaml jest plikiem edytowalnym przez usera — kształt
+        // sprawdzamy niżej (name/description), reszta pól ma defaulty poniżej.
+        const config = parseYaml(raw) as SubAgentYamlRaw;
         if (!config?.name || !config?.description) {
             log.warn('SubAgentLoader', 'Sub-agent missing name or description:', yamlPath);
             return null;
@@ -259,7 +264,7 @@ export class SubAgentLoader {
         };
     }
 
-    async _saveMigratedSubAgentYaml(yamlPath: string, config: YamlData, migration: ReturnType<typeof migrateDeprecatedTools>): Promise<void> {
+    async _saveMigratedSubAgentYaml(yamlPath: string, config: SubAgentYamlRaw, migration: ReturnType<typeof migrateDeprecatedTools>): Promise<void> {
         await this.vault.adapter.write(yamlPath, stringifyYaml(config));
         for (const item of migration.mappings) {
             log.info('SubAgentLoader', `Migrated tools for ${config.name}: ${item.from} -> ${item.to}`);

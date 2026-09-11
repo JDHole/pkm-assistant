@@ -8,8 +8,8 @@ import { UiIcons, setSvgLabel, setSvg } from '../crystal-soul/index.js';
 import { SubAgentEditorModal } from './SubAgentEditorModal.js';
 import { t } from '../../core/i18n/index.js';
 import { DEFAULT_LIMITS } from '../../config/limits.js';
-// TS-any: Obsidian rendering and plugin/SidebarNav services are runtime-provided APIs.
-type UiBoundary = any;
+import type { SidebarNav } from '../shell/index.js';
+import type { SubAgentsPlugin } from './types.js';
 
 /**
  * Render detailed view of a single sub-agent.
@@ -23,8 +23,9 @@ type UiBoundary = any;
  * @param {import('../shell/sidebar/SidebarNav.js').SidebarNav} nav
  * @param {Object} params - { subAgentName | minionName | masterName: string, template?: boolean }
  */
-export function renderSubAgentDetailView(container: UiBoundary, plugin: UiBoundary, nav: UiBoundary, params: { subAgentName?: string; minionName?: string; masterName?: string; template?: boolean }) {
-    const name = params.subAgentName || params.minionName || params.masterName;
+export function renderSubAgentDetailView(container: HTMLElement, plugin: SubAgentsPlugin, nav: SidebarNav, params: { subAgentName?: string; minionName?: string; masterName?: string; template?: boolean }): void {
+    // `!`: kontrakt wołacza (JSDoc @param wyżej) gwarantuje dokładnie jedno z trzech pól.
+    const name = (params.subAgentName || params.minionName || params.masterName)!;
     const isTemplate = params.template === true;
     const subAgent = isTemplate
         ? plugin.agentManager?.subAgentTemplateStore?.get(name)
@@ -49,7 +50,10 @@ export function renderSubAgentDetailView(container: UiBoundary, plugin: UiBounda
     const editBtn = headerRow.createEl('button', { cls: 'cs-detail-edit-btn' });
     setSvgLabel(editBtn, UiIcons.edit(14), t('generic.edit'));
     editBtn.addEventListener('click', () => {
-        new SubAgentEditorModal(plugin.app, plugin, subAgent, () => nav.refresh(), { template: isTemplate }).open();
+        // `plugin.app as never`: `PluginApi.app` to strukturalny `AppLike` (core/ nie importuje
+        // 'obsidian'); most do prawdziwego `App` — ten sam idiom co `core/PluginBase.ts` i
+        // `modules/shell/PluginSettingsTab.ts` (`plugin as never` do bazowego `Plugin`).
+        new SubAgentEditorModal(plugin.app as never, plugin, subAgent, () => nav.refresh(), { template: isTemplate }).open();
     });
 
     const meta = container.createDiv({ cls: 'sidebar-detail-meta' });
@@ -103,10 +107,13 @@ export function renderSubAgentDetailView(container: UiBoundary, plugin: UiBounda
 
         const toolsList = toolsSection.createDiv({ cls: 'sidebar-detail-tools' });
         for (const toolName of subAgent.tools) {
-            const info = (TOOL_INFO as Record<string, UiBoundary>)[toolName] || { category: 'mixed', label: toolName };
+            const info = (TOOL_INFO as Record<string, { label: string }>)[toolName] || { category: 'mixed', label: toolName };
             const toolCard = toolsList.createDiv({ cls: 'sidebar-tool-mini-card' });
             const toolIconSpan = toolCard.createSpan({ cls: 'sidebar-tool-icon' });
-            setSvg(toolIconSpan, getToolIcon(toolName, 'currentColor', 14));
+            // TS-boundary: `getToolIcon` (modules/ui-components, poza zakresem tej fali) nadal
+            // rozwiązuje się do `any` u siebie — realnie zawsze zwraca SVG string
+            // (`IconGenerator.generate(...): string`).
+            setSvg(toolIconSpan, getToolIcon(toolName, 'currentColor', 14) as string);
             toolCard.createSpan({ cls: 'sidebar-tool-label', text: info.label });
             toolCard.createSpan({ cls: 'sidebar-tool-name', text: toolName });
         }
@@ -114,7 +121,7 @@ export function renderSubAgentDetailView(container: UiBoundary, plugin: UiBounda
 
     // Szablon nie jest „używany" — jest kopiowany. Sekcja tylko dla żywych subów.
     const agents = isTemplate ? [] : (plugin.agentManager?.getAllAgents() || []);
-    const usedBy = agents.filter((a: UiBoundary) =>
+    const usedBy = agents.filter((a) =>
         a.getAllSubAgentNames?.().includes(subAgent.name)
     );
 
@@ -152,12 +159,17 @@ export function renderSubAgentDetailView(container: UiBoundary, plugin: UiBounda
         const promptContent = promptSection.createDiv({ cls: 'sidebar-detail-prompt' });
 
         try {
+            // `plugin.app`/`plugin` as `never`: `PluginApi.app` jest strukturalnym `AppLike`
+            // (core/ nie importuje 'obsidian'), a `MarkdownRenderer.render` chce prawdziwych
+            // `App`/`Component` z pakietu obsidian — ten sam most co gdzie indziej w repo
+            // (np. `core/PluginBase.ts`, `modules/shell/PluginSettingsTab.ts`). Runtime bez zmian:
+            // to zawsze te same, prawdziwe obiekty Obsidiana, tylko inaczej opisane po stronie TS.
             void MarkdownRenderer.render(
-                plugin.app,
+                plugin.app as never,
                 subAgent.prompt,
                 promptContent,
                 subAgent.path || '',
-                plugin
+                plugin as never
             );
         } catch {
             promptContent.createEl('pre', { text: subAgent.prompt, cls: 'sidebar-detail-pre' });

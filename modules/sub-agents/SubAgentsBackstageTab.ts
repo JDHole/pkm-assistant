@@ -36,21 +36,26 @@ import { guardTemplateUse } from './templateUseOutcome.js';
 import { computeSubAgentsAfterTemplateUse, computeGlobalSubAfterTemplateDelete } from './templateAssignmentOutcome.js';
 import { t } from '../../core/i18n/index.js';
 import { log } from '../../core/utils/Logger.js';
-// TS-any: Obsidian UI and plugin services are dynamic runtime APIs.
-type UiBoundary = any;
+import type { SidebarNav } from '../shell/index.js';
+import type { Agent, AgentSubAgentAssignment } from '../agents/index.js';
+import type { SubAgentsPlugin } from './types.js';
+import type { SubAgentTemplateStore, SubAgentTemplateRecord } from './SubAgentTemplateStore.js';
 
-export function renderSubAgentsTab(content: UiBoundary, plugin: UiBoundary, nav: UiBoundary) {
+export function renderSubAgentsTab(content: HTMLElement, plugin: SubAgentsPlugin, nav: SidebarNav): void {
     const store = plugin.agentManager?.subAgentTemplateStore;
     const templates = store?.list() || [];
     const agents = plugin.agentManager?.getAllAgents() || [];
-    const globalSlug = plugin?.env?.settings?.pkmAssistant?.globalSubTemplate || null;
+    // TS-boundary: `globalSubTemplate` wisi w `PkmAssistantSettings` na indeksie
+    // `[key: string]: unknown` (kontrakt core nie zna nazw pól, które dokłada ten moduł).
+    const globalSlug = (plugin?.env?.settings?.pkmAssistant?.globalSubTemplate as string | null | undefined) || null;
 
     content.createEl('p', { text: t('backstage.sub_templates_intro'), cls: 'cs-backstage-intro' });
 
     const createBtn = content.createEl('button', { cls: 'cs-create-btn' });
     setSvgLabel(createBtn, UiIcons.plus(11), t('backstage.new_sub_template'));
     createBtn.addEventListener('click', () => {
-        new SubAgentEditorModal(plugin.app, plugin, null, () => nav.refresh(), { template: true }).open();
+        // `plugin.app as never`: patrz komentarz w SubAgentDetailView.ts (most AppLike→App).
+        new SubAgentEditorModal(plugin.app as never, plugin, null, () => nav.refresh(), { template: true }).open();
     });
 
     if (templates.length === 0) {
@@ -60,15 +65,14 @@ export function renderSubAgentsTab(content: UiBoundary, plugin: UiBoundary, nav:
         content.createEl('p', { text: t('backstage.no_sub_templates'), cls: 'sidebar-empty-text' });
         return;
     }
-
     const searchInput = content.createEl('input', {
         type: 'text', placeholder: t('backstage.search_sub_template'), cls: 'cs-search-input'
     });
 
     const activeFilters = new Set<string>();
-    const toolsInTemplates = [...new Set<string>(templates.flatMap((tpl: UiBoundary) => tpl.tools || []) as string[])];
+    const toolsInTemplates = [...new Set<string>(templates.flatMap((tpl) => tpl.tools || []))];
     const filterDefs = toolsInTemplates.slice(0, 6).map(toolName => ({
-        value: `tool:${toolName}`, label: (TOOL_INFO as Record<string, UiBoundary>)[toolName]?.label || toolName, toolName,
+        value: `tool:${toolName}`, label: (TOOL_INFO as Record<string, { label: string }>)[toolName]?.label || toolName, toolName,
     }));
 
     const filterContainer = content.createDiv();
@@ -88,23 +92,27 @@ export function renderSubAgentsTab(content: UiBoundary, plugin: UiBoundary, nav:
 
     const renderList = (filter = '') => {
         list.empty();
-        renderPkmSubCard(list, plugin, nav, plugin?.env?.settings?.pkmAssistant?.globalSubTemplate || null);
+        // TS-boundary: patrz komentarz przy `globalSlug` wyżej.
+        renderPkmSubCard(list, plugin, nav, (plugin?.env?.settings?.pkmAssistant?.globalSubTemplate as string | null | undefined) || null);
 
         let filtered = templates;
         if (filter) {
-            filtered = filtered.filter((s: UiBoundary) =>
+            filtered = filtered.filter((s) =>
                 s.name.toLowerCase().includes(filter) || s.description?.toLowerCase().includes(filter)
             );
         }
         for (const f of activeFilters) {
             if (f.startsWith('tool:')) {
                 const tool = f.slice(5);
-                filtered = filtered.filter((s: UiBoundary) => s.tools?.includes(tool));
+                filtered = filtered.filter((s) => s.tools?.includes(tool));
             }
         }
 
         for (const tpl of filtered) {
-            renderTemplateCard(list, tpl, { plugin, nav, store, agents });
+            // `!`: templates.length > 0 (guard wyżej) wymaga, że `store?.list()` naprawdę
+            // zwrócił dane — więc `store` musiało być zdefiniowane (`store?.list() || []`
+            // daje [] gdy store jest undefined).
+            renderTemplateCard(list, tpl, { plugin, nav, store: store!, agents });
         }
     };
 
@@ -117,7 +125,7 @@ export function renderSubAgentsTab(content: UiBoundary, plugin: UiBoundary, nav:
  * Fabryczny pkm-sub — syntetyczny byt, więc bez edycji i bez kosza (nie ma czego kasować).
  * Gwiazdka wraca na niego, gdy user chce się wycofać ze złego wyboru globalnego szablonu.
  */
-function renderPkmSubCard(list: UiBoundary, plugin: UiBoundary, nav: UiBoundary, globalSlug: string | null) {
+function renderPkmSubCard(list: HTMLElement, plugin: SubAgentsPlugin, nav: SidebarNav, globalSlug: string | null): void {
     const catColor = getCategoryColor(deriveDelegateCategory(DEFAULT_SUB_AGENT_TOOLS));
     const card = list.createDiv({ cls: 'cs-item-card cs-item-card--categorized cs-item-card--builtin' });
     card.style.setProperty('--cs-category-color-rgb', hexToRgbTriplet(catColor));
@@ -134,9 +142,11 @@ function renderPkmSubCard(list: UiBoundary, plugin: UiBoundary, nav: UiBoundary,
         });
     }
     for (const toolName of DEFAULT_SUB_AGENT_TOOLS) {
-        const info = (TOOL_INFO as Record<string, UiBoundary>)[toolName] || { label: toolName };
+        const info = (TOOL_INFO as Record<string, { label: string }>)[toolName] || { label: toolName };
         const badge = meta.createSpan({ cls: 'cs-item-card__badge' });
-        setSvgLabel(badge, getToolIcon(toolName, 'currentColor', 10), info.label);
+        // TS-boundary: `getToolIcon` (modules/ui-components, poza zakresem tej fali) nadal
+        // rozwiązuje się do `any` u siebie — realnie zawsze zwraca SVG string.
+        setSvgLabel(badge, getToolIcon(toolName, 'currentColor', 10) as string, info.label);
     }
 
     card.createDiv({ cls: 'cs-item-card__desc', text: t('backstage.pkm_sub_desc') });
@@ -151,8 +161,9 @@ function renderPkmSubCard(list: UiBoundary, plugin: UiBoundary, nav: UiBoundary,
     }
 }
 
-function renderTemplateCard(list: UiBoundary, tpl: UiBoundary, { plugin, nav, store, agents }: { plugin: UiBoundary; nav: UiBoundary; store: UiBoundary; agents: UiBoundary }) {
-    const globalSlug = plugin?.env?.settings?.pkmAssistant?.globalSubTemplate || null;
+function renderTemplateCard(list: HTMLElement, tpl: SubAgentTemplateRecord, { plugin, nav, store, agents }: { plugin: SubAgentsPlugin; nav: SidebarNav; store: SubAgentTemplateStore; agents: Agent[] }): void {
+    // TS-boundary: patrz komentarz przy `globalSlug` w `renderSubAgentsTab`.
+    const globalSlug = (plugin?.env?.settings?.pkmAssistant?.globalSubTemplate as string | null | undefined) || null;
     const isGlobal = globalSlug === tpl.slug;
     const category = deriveDelegateCategory(tpl.tools);
     const catColor = getCategoryColor(category);
@@ -178,9 +189,11 @@ function renderTemplateCard(list: UiBoundary, tpl: UiBoundary, { plugin, nav, st
     catBadge.appendText(' ' + getCategoryLabel(category));
     if (tpl.model) meta.createSpan({ cls: 'cs-item-card__badge', text: tpl.model });
     for (const toolName of tpl.tools || []) {
-        const info = (TOOL_INFO as Record<string, UiBoundary>)[toolName] || { label: toolName };
+        const info = (TOOL_INFO as Record<string, { label: string }>)[toolName] || { label: toolName };
         const badge = meta.createSpan({ cls: 'cs-item-card__badge' });
-        setSvgLabel(badge, getToolIcon(toolName, 'currentColor', 10), info.label);
+        // TS-boundary: `getToolIcon` (modules/ui-components, poza zakresem tej fali) nadal
+        // rozwiązuje się do `any` u siebie — realnie zawsze zwraca SVG string.
+        setSvgLabel(badge, getToolIcon(toolName, 'currentColor', 10) as string, info.label);
     }
 
     if (tpl.description) {
@@ -214,7 +227,8 @@ function renderTemplateCard(list: UiBoundary, tpl: UiBoundary, { plugin, nav, st
         iconFn: UiIcons.edit,
         label: t('generic.edit'),
         onClick: () => {
-            new SubAgentEditorModal(plugin.app, plugin, tpl, () => nav.refresh(), { template: true }).open();
+            // `plugin.app as never`: patrz komentarz w SubAgentDetailView.ts (most AppLike→App).
+            new SubAgentEditorModal(plugin.app as never, plugin, tpl, () => nav.refresh(), { template: true }).open();
         },
     });
     renderCardAction(actions, {
@@ -222,7 +236,7 @@ function renderTemplateCard(list: UiBoundary, tpl: UiBoundary, { plugin, nav, st
         label: t('generic.delete'),
         danger: true,
         onClick: async () => {
-            const okToDelete = await confirmModal(plugin.app, {
+            const okToDelete = await confirmModal(plugin.app as never, {
                 title: t('generic.delete'),
                 message: t('backstage.confirm_delete_template', { name: tpl.name }),
                 destructive: true,
@@ -252,7 +266,7 @@ function renderTemplateCard(list: UiBoundary, tpl: UiBoundary, { plugin, nav, st
 /**
  * Zawsze dokładnie jeden globalny. `null` = fabryczny pkm-sub.
  */
-async function setGlobalSub(plugin: UiBoundary, nav: UiBoundary, slug: string | null, label: string, { silent = false }: { silent?: boolean } = {}) {
+async function setGlobalSub(plugin: SubAgentsPlugin, nav: SidebarNav | null, slug: string | null, label: string, { silent = false }: { silent?: boolean } = {}): Promise<void> {
     const pkm = plugin?.env?.settings?.pkmAssistant;
     if (!pkm) return;
     pkm.globalSubTemplate = slug;
@@ -265,7 +279,7 @@ async function setGlobalSub(plugin: UiBoundary, nav: UiBoundary, slug: string | 
 }
 
 /** Odlej kopię szablonu suba do Ekipy wybranego agenta. */
-async function useTemplateAtAgent(tpl: UiBoundary, agentName: string, { plugin, store, nav }: { plugin: UiBoundary; store: UiBoundary; nav: UiBoundary }) {
+async function useTemplateAtAgent(tpl: SubAgentTemplateRecord, agentName: string, { plugin, store, nav }: { plugin: SubAgentsPlugin; store: SubAgentTemplateStore; nav: SidebarNav }): Promise<void> {
     const { Notice } = await import('obsidian');
     const agentManager = plugin.agentManager;
     const agent = agentManager?.getAgent?.(agentName);
@@ -273,8 +287,10 @@ async function useTemplateAtAgent(tpl: UiBoundary, agentName: string, { plugin, 
         new Notice(t('backstage.template_use_failed', { error: agentName }));
         return;
     }
-
-    const result = await store.instantiate(tpl.slug, agentName, { subAgentLoader: agentManager.subAgentLoader });
+    // `agentManager!`: `agent` doszedł z `agentManager?.getAgent?.(...)` — skoro jest prawdziwy
+    // (guard wyżej), `agentManager` musiało być zdefiniowane (optional chaining inaczej dałoby
+    // undefined).
+    const result = await store.instantiate(tpl.slug, agentName, { subAgentLoader: agentManager!.subAgentLoader });
     if (!result?.success) {
         new Notice(t('backstage.template_use_failed', { error: result?.error || '?' }));
         return;
@@ -284,15 +300,17 @@ async function useTemplateAtAgent(tpl: UiBoundary, agentName: string, { plugin, 
     }
 
     const existingNames = agent.getAllSubAgentNames?.() || [];
-    const existingAssignments = existingNames
-        .map((name: string) => agent.getSubAgentAssignment?.(name))
-        .filter(Boolean)
-        .map((s: UiBoundary) => ({ ...s }));
+    // `as AgentSubAgentAssignment[]`: TS 5.4 nie zwęża `.filter(Boolean)` — cast na wyniku,
+    // nie zmieniony warunek ani nowy statement (zero-kosztowy, zero różnicy w emitowanym JS).
+    const existingAssignments = (existingNames
+        .map((name) => agent.getSubAgentAssignment?.(name))
+        .filter(Boolean) as AgentSubAgentAssignment[])
+        .map((s) => ({ ...s }));
     // Decyzja (idempotencja + „pierwszy sub = domyślny") żyje w czystej
     // funkcji z testami — widok zostaje z wywołaniem i zapisem.
-    const decision = computeSubAgentsAfterTemplateUse(existingAssignments, result.name);
+    const decision = computeSubAgentsAfterTemplateUse(existingAssignments, result.name!);
     if (decision.changed) {
-        await agentManager.updateAgent(agentName, { sub_agents: decision.subAgents });
+        await agentManager!.updateAgent(agentName, { sub_agents: decision.subAgents });
     }
 
     new Notice(t('backstage.template_used', { name: result.name, agent: agentName }));
