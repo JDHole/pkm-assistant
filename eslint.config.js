@@ -32,14 +32,14 @@
 //     documented `modules/crystal-soul/icons.js` (same reason — obsidian). Any other
 //     deep import from main.js is still an error.
 //
-// (harness poza repo) — `test-support/**` takes the harness slot among the linted
-// trees. The harness (which boots the real plugin in Node) moved to its own repository,
+// (harness poza repo) — the harness (which boots the real plugin in Node) and the `obsidian`
+// module stub + DOM shim live in their own repository,
 // https://github.com/JDHole/pkm-assistant-harness, because the Obsidian catalog validator lints
-// the WHOLE plugin repo and a test tool is not part of the plugin. What stayed here is the one
-// piece the plugin's own `npm test` cannot live without: the `obsidian` module stub plus its DOM
-// shim and the AVA preload that aliases them (`test-support/`). It is linted like any other tree
-// (barrels only); the two per-file deep-import whitelists that used to serve harness scenarios 33
-// and 35 left with the harness.
+// the WHOLE plugin repo and a test tool is not part of the plugin. What stayed here is a single
+// locator preload (`test-support/register-obsidian-for-ava.mjs`, plain `.mjs`, no `.ts`) that
+// finds the harness checkout and hands over to its preload. Nothing under `test-support/` is
+// linted any more; the two per-file deep-import whitelists that used to serve harness scenarios
+// 33 and 35 left with the harness.
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
