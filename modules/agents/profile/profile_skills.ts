@@ -100,7 +100,9 @@ function _renderSkillShard(ctx: ProfileCtx, grid: HTMLElement, parentEl: HTMLEle
     shard.addClass('cs-shard--clickable');
 
     const iconEl = shard.createDiv({ cls: 'cs-shard__icon' });
-    setSvg(iconEl, IconGenerator.generate(skill.name || 'skill', (skill as unknown as { icon_category?: string }).icon_category || 'arcane', { size: 24, color: 'currentColor' }));
+    // TS-boundary: SkillData (modules/skills, out of scope) doesn't declare `icon_category`,
+    // though real skill files carry it - contract gap to close by the module owner (fala C).
+    setSvg(iconEl, IconGenerator.generate(skill.name || 'skill', (skill as { icon_category?: string }).icon_category || 'arcane', { size: 24, color: 'currentColor' }));
 
     const labelEl = shard.createDiv({ cls: 'cs-shard__main-label' });
     labelEl.textContent = skill.name;
@@ -174,7 +176,9 @@ function _renderAddSkill(ctx: ProfileCtx, el: HTMLElement, allSkills: Skill[]) {
         for (const skill of filtered) {
             const opt = optionsEl.createDiv({ cls: 'cs-picker__option' });
             const optIcon = opt.createDiv({ cls: 'cs-picker__option-icon' });
-            setSvg(optIcon, IconGenerator.generate(skill.name || 'skill', (skill as unknown as { icon_category?: string }).icon_category || 'arcane', { size: 16, color: 'currentColor' }));
+            // TS-boundary: SkillData (modules/skills, out of scope) doesn't declare `icon_category`,
+            // though real skill files carry it - contract gap to close by the module owner (fala C).
+            setSvg(optIcon, IconGenerator.generate(skill.name || 'skill', (skill as { icon_category?: string }).icon_category || 'arcane', { size: 16, color: 'currentColor' }));
             opt.createSpan({ cls: 'cs-picker__option-name', text: skill.name });
             if (skill.description) opt.createSpan({ cls: 'cs-picker__option-desc', text: skill.description });
             opt.addEventListener('click', () => {

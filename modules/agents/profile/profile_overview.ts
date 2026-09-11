@@ -90,9 +90,7 @@ export async function renderOverviewTab(ctx: ProfileCtx, el: HTMLElement) {
         heroMeta.createSpan({ text: new Date(formData.createdAt).toLocaleDateString(getDateLocale()), cls: 'cs-profile-hero__date' });
     }
     if (stats?.lastActivity) {
-        // TS-boundary: Agent.lastActivity (owning module) is `unknown` - callers have always
-        // fed it straight to `new Date(...)`, so the real runtime value is string | number.
-        heroMeta.createSpan({ text: t('profile.overview.active_prefix') + new Date(stats.lastActivity as string | number).toLocaleDateString(getDateLocale()), cls: 'cs-profile-hero__date' });
+        heroMeta.createSpan({ text: t('profile.overview.active_prefix') + new Date(stats.lastActivity).toLocaleDateString(getDateLocale()), cls: 'cs-profile-hero__date' });
     }
 
     // Color picker row
@@ -163,9 +161,7 @@ export async function renderOverviewTab(ctx: ProfileCtx, el: HTMLElement) {
     // Kanon to models.main - legacy formData.model gaśnie po sync w AgentProfileView.ts
     // (modelFieldSync.ts), więc czytanie samego formData.model tu pokazywałoby „globalny" dla
     // KAŻDEGO agenta ze zmigrowanym modelem, mimo że ma jawnie ustawiony.
-    // TS-boundary: formData.models to otwarty worek (Record<string, unknown>) - "main" to jedyny
-    // klucz ten plik czyta.
-    const mainModel = (formData.models?.main as string | undefined) || '';
+    const mainModel = formData.models?.main || '';
     _shard(infoGrid, t('profile.overview.model'), mainModel || t('profile.overview.global'), null, !!mainModel);
     _shard(infoGrid, t('profile.overview.default_autonomy'), t(`autonomy.${autonomyMode}`),
         agent?.default_autonomy ? t('profile.overview.autonomy_per_agent') : t('profile.overview.autonomy_global'), true);

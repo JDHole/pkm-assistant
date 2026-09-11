@@ -67,7 +67,7 @@ export function renderEkipaTab(ctx: ProfileCtx, el: HTMLElement) {
 
 function _visibleSubs(ctx: ProfileCtx) {
     const all = ctx.plugin.agentManager?.subAgentLoader?.getAllSubAgents?.() || [];
-    return getVisibleSubAgentsForAgent({ name: ctx.formData?.name, activeSubAgents: ctx.formData?.sub_agents || [] } as unknown as { name?: string }, all);
+    return getVisibleSubAgentsForAgent({ name: ctx.formData?.name, activeSubAgents: ctx.formData?.sub_agents || [] } as { name?: string }, all);
 }
 
 function _renderMemberTile(ctx: ProfileCtx, grid: HTMLElement, assignment: AgentSubAgentAssignment, loader: SubAgentLoader | undefined, nav: SidebarNav) {

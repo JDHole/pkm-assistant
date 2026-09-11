@@ -18,7 +18,7 @@ import { t } from '../../../core/i18n/index.js';
 import { log } from '../../../core/utils/Logger.js';
 import type { ProfileCtx, AgentsPlugin } from './profile_types.js';
 import type { AgentFocusFolder } from '../Agent.js';
-import type { VaultMapAgent, VaultMapPlugin } from '../../onboarding/index.js';
+import type { VaultMapAgent } from '../../onboarding/index.js';
 
 // TS-boundary: `plugin.env.settings.pkmAssistant.vaultGroups` (open user-config, Settings→Vault) -
 // this file's own reads of it are always object entries (no bare-string handling here, unlike
@@ -312,9 +312,16 @@ function _renderVaultMapPreview(ctx: ProfileCtx, parentEl: HTMLElement) {
                 const playbookManager = plugin.agentManager?.playbookManager;
                 if (!playbookManager) { new Notice(t('profile.perm.playbook_unavailable')); return; }
                 agent.focusFolders = formData.focus_folders;
-                const compiled = await playbookManager.compileVaultMap(agent as unknown as VaultMapAgent, plugin as unknown as VaultMapPlugin);
+                // TS-boundary: Agent.focusFolders (AgentFocusFolder - path/access/group all
+                // optional on one shape) vs VaultMapFocusFolder (string | {path,access} | {group},
+                // path required in the object branch) - same runtime entries, stricter union here.
+                const compiled = await playbookManager.compileVaultMap(agent as VaultMapAgent, plugin);
                 const safeName = getAgentSafeName(agent.name);
                 const path = `.pkm-assistant/agents/${safeName}/vault_map.md`;
+                // TS-boundary: plugin.app is AppLike (core's minimal node-safe contract);
+                // HiddenFileEditorModal wants the real obsidian App, whose workspace/vault
+                // members carry concrete class types AppLike's open shape doesn't structurally
+                // match in either direction.
                 new HiddenFileEditorModal(plugin.app as unknown as ConstructorParameters<typeof HiddenFileEditorModal>[0], path, `Vault Map: ${agent.name}`, compiled, {
                     agentName: agent.name, agentColor: agent.color || '', readOnly: true
                 }).open();
@@ -382,8 +389,10 @@ function _renderApprovalToggles(ctx: ProfileCtx, el: HTMLElement) {
     ];
     for (const { key, tool, label } of groupA) {
         const defaultVal = APPROVAL_DEFAULTS[key] ?? true;
-        const currentVal = (formData.approval_toggles![key] as boolean | undefined) ?? defaultVal;
+        const currentVal = (formData.approval_toggles[key] as boolean | undefined) ?? defaultVal;
         renderToggle(el, label || getPermissionToolLabel(tool), t('profile.perm.ask_before'), currentVal,
+            // TS-boundary: narrowing from the `if (!formData.approval_toggles)` guard above
+            // doesn't propagate into this closure - real object is guaranteed set by then.
             v => { formData.approval_toggles![key] = v; });
     }
 
@@ -405,8 +414,10 @@ function _renderApprovalToggles(ctx: ProfileCtx, el: HTMLElement) {
     ];
     for (const { key, tool } of groupB) {
         const defaultVal = APPROVAL_DEFAULTS[key] ?? false;
-        const currentVal = (formData.approval_toggles![key] as boolean | undefined) ?? defaultVal;
+        const currentVal = (formData.approval_toggles[key] as boolean | undefined) ?? defaultVal;
         renderToggle(groupBContainer, getPermissionToolLabel(tool), t('profile.perm.ask_before'), currentVal,
+            // TS-boundary: narrowing from the `if (!formData.approval_toggles)` guard above
+            // doesn't propagate into this closure - real object is guaranteed set by then.
             v => { formData.approval_toggles![key] = v; });
     }
 

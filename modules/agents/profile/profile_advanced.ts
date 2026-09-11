@@ -7,9 +7,9 @@ import { getModelsForRole } from '../../models/index.js';
 import { renderShard, renderToggle } from './profile_helpers.js';
 import { applyMainModelChange } from './modelFieldSync.js';
 import { t } from '../../../core/i18n/index.js';
-import type { ProfileCtx } from './profile_types.js';
+import type { ProfileCtx, DTInstrValue } from './profile_types.js';
 import type { AgentUpdate } from '../Agent.js';
-import type { VaultMapAgent, VaultMapPlugin } from '../../onboarding/index.js';
+import type { VaultMapAgent } from '../../onboarding/index.js';
 
 /** Automaty pamięci per agent (mem_proactive / ratunek / idle-global). */
 function _renderMemoryAutomation(ctx: ProfileCtx, el: HTMLElement) {
@@ -21,7 +21,7 @@ function _renderMemoryAutomation(ctx: ProfileCtx, el: HTMLElement) {
     // mem_proactive - auto-zapis faktów pod koniec tury (steruje decisionTreeInstructions.mem_proactive).
     if (!formData.prompt_overrides) formData.prompt_overrides = {};
     if (!formData.prompt_overrides.decisionTreeInstructions) formData.prompt_overrides.decisionTreeInstructions = {};
-    const dt = formData.prompt_overrides.decisionTreeInstructions as Record<string, boolean>;
+    const dt = formData.prompt_overrides.decisionTreeInstructions as Record<string, DTInstrValue>;
     renderToggle(el, t('profile.advanced.mem_proactive'), t('profile.advanced.mem_proactive_hint'),
         dt.mem_proactive !== false, (v) => { if (v) delete dt.mem_proactive; else dt.mem_proactive = false; });
 
@@ -30,7 +30,9 @@ function _renderMemoryAutomation(ctx: ProfileCtx, el: HTMLElement) {
         formData.memory_rescue !== false, (v) => { formData.memory_rescue = v; });
 
     // zapis po bezczynności - GLOBALNY (read-only; per-agent za drogie).
-    const idleMin = plugin?.env?.settings?.pkmAssistant?.idleConsolidationMinutes ?? 20;
+    // TS-boundary: idleConsolidationMinutes is not a declared PkmAssistantSettings field (open
+    // index signature -> unknown); cast avoids `{}` landing in the template below.
+    const idleMin = (plugin?.env?.settings?.pkmAssistant?.idleConsolidationMinutes as number | undefined) ?? 20;
     el.createDiv({
         text: t('profile.advanced.idle_global', { minutes: idleMin === 0 ? t('profile.advanced.idle_off') : `${idleMin} min` }),
         cls: 'setting-item-description'
@@ -53,7 +55,7 @@ export async function renderAdvancedTab(ctx: ProfileCtx, el: HTMLElement) {
     headModels.createSpan({ text: t('profile.models') });
 
     const modelsGrid = el.createDiv({ cls: 'cs-shards' });
-    const pkmM = (plugin.env?.settings?.pkmAssistant || {}) as unknown as Parameters<typeof getModelsForRole>[0];
+    const pkmM = (plugin.env?.settings?.pkmAssistant || {}) as Parameters<typeof getModelsForRole>[0];
     const platformNames: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI', open_router: 'OpenRouter', ollama: 'Ollama', gemini: 'Gemini', groq: 'Groq', deepseek: 'DeepSeek', lm_studio: 'LM Studio' };
     const buildModelOptions = (role: Parameters<typeof getModelsForRole>[1]) => {
         const models = getModelsForRole(pkmM, role);
@@ -69,7 +71,7 @@ export async function renderAdvancedTab(ctx: ProfileCtx, el: HTMLElement) {
     // onChange NIE dotyka formData.model - resolveMainModelForForm (AgentProfileView.ts) już je
     // wyzerowało przy otwarciu profilu, a legacy pole nigdy nie wraca do życia (patrz
     // modelFieldSync.ts), więc nie ma czego tu przypisywać ponownie.
-    renderShard(modelsGrid, t('profile.advanced.main_model'), t('profile.advanced.main_model_hint'), (formData.models?.main as string | undefined) || '', 'select',
+    renderShard(modelsGrid, t('profile.advanced.main_model'), t('profile.advanced.main_model_hint'), formData.models?.main || '', 'select',
         v => {
             formData.models = applyMainModelChange(formData.models, v as string).models;
         }, { options: buildModelOptions('main') });
@@ -143,7 +145,9 @@ export async function renderAdvancedTab(ctx: ProfileCtx, el: HTMLElement) {
             if (!ag) { new Notice(t('profile.advanced.save_first')); return; }
             try {
                 const yaml = ag.serialize ? ag.serialize() : JSON.stringify(ag, null, 2);
-                await navigator.clipboard.writeText(yaml as unknown as string);
+                // TS-boundary: ZASTANE - serialize() zwraca obiekt, writeText dostaje [object Object];
+                // naprawa (stringifyYaml) = runtime, poza falą.
+                await navigator.clipboard.writeText(yaml as string);
                 new Notice(t('profile.advanced.profile_copied'));
             } catch (e: unknown) {
                 new Notice(t('profile.advanced.export_error') + (e as Error).message);
@@ -247,7 +251,10 @@ export async function handleSave(ctx: ProfileCtx) {
         }
         const updatedAgent = agentManager.getAgent(formData.name);
         if (updatedAgent && plugin.agentManager?.playbookManager) {
-            await plugin.agentManager.playbookManager.compileVaultMap(updatedAgent as unknown as VaultMapAgent, plugin as unknown as VaultMapPlugin);
+            // TS-boundary: Agent.focusFolders (AgentFocusFolder - path/access/group all optional
+            // on one shape) vs VaultMapFocusFolder (string | {path,access} | {group}, path
+            // required in the object branch) - same runtime entries, stricter union on this side.
+            await plugin.agentManager.playbookManager.compileVaultMap(updatedAgent as VaultMapAgent, plugin);
         }
         const details = [];
         if (updates.personality !== before.personality) details.push(t('profile.advanced.personality'));

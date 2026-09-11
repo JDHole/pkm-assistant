@@ -326,6 +326,10 @@ async function _renderMemoryFileCard(ctx: ProfileCtx, el: HTMLElement, adapter: 
     if (!exists || !fileContent.trim()) {
         content.createEl('p', { text: t('profile.memory.no_file_data'), cls: 'cs-focus-hint' });
     } else {
+        // TS-boundary: plugin.app is AppLike (minimal node-safe contract, doesn't structurally
+        // match real obsidian App in either direction); the 5th param wants a real obsidian
+        // Component (lifecycle owner for the rendered markdown) - AgentsPlugin isn't one, this
+        // mirrors the plugin-as-component pattern already used at this call site before typing.
         await MarkdownRenderer.render(plugin.app as unknown as App, fileContent, content, '', plugin as unknown as Parameters<typeof MarkdownRenderer.render>[4]);
         const actionsEl = body.createDiv({ cls: 'cs-mem-card__actions' });
         const viewBtn = actionsEl.createEl('button');
@@ -544,7 +548,7 @@ async function _runArchiveWorkflow(ctx: ProfileCtx, memory: AgentMemory, rerende
     // bezpieczna semantyka: zawsze callerSkipCache=true. Koszt to jedna konstrukcja adaptera na
     // klikniecie guzika, nie per request do API (klucze biora sie z tej samej globalnej puli) -
     // i tak nie dzieli instancji z aktywna tura czatu tego samego agenta w trakcie stream().
-    try { model = createModelForRole(plugin as unknown as ResolverPluginLike, 'main', agent as unknown as Parameters<typeof createModelForRole>[2], null, true); } catch { model = null; }
+    try { model = createModelForRole(plugin as ResolverPluginLike, 'main', agent as Parameters<typeof createModelForRole>[2], null, true); } catch { model = null; }
     const settings = plugin?.settings?.pkmAssistant || plugin?.env?.settings?.pkmAssistant || {};
     try {
         const { startConsolidationRun } = await import('../../chat/index.js');
@@ -552,17 +556,24 @@ async function _runArchiveWorkflow(ctx: ProfileCtx, memory: AgentMemory, rerende
         // wtedy NIE zakładamy kolejnej subskrypcji. Bez tego N klików w guzik podczas jednego
         // przebiegu = N wiszących subskrypcji + N × rerender na koniec.
         const alreadyRunning = memoryOpsCenter.getActiveRun();
+        type StartConsolidationParams = Parameters<typeof startConsolidationRun>[0];
         const run = await startConsolidationRun({
-            plugin,
+            // TS-boundary: chat's local PluginLike.showCrystalNotice wants `options: NoticeOptions`
+            // ({type?: string}); AgentsPlugin's real showCrystalNotice takes CrystalNoticeOptions
+            // (`type?` narrowed to a literal union) - same call, narrower param type on our side.
+            plugin: plugin as unknown as StartConsolidationParams['plugin'],
             app: plugin.app,
-            agentMemory: memory,
+            // TS-boundary: chat's RunnerAgentMemory wants stateManager.read(): Promise<{
+            // brain_notes_limit?: number }>; the real StateManager.read() returns MemoryState,
+            // whose open index signature types brain_notes_limit as `unknown`, not `number`.
+            agentMemory: memory as unknown as StartConsolidationParams['agentMemory'],
             agent,
             model,
             settings,
             // User kliknął sam - pusty plan MUSI dać odpowiedź („nie ma czego konsolidować"),
             // inaczej guzik wygląda na zepsuty. Cisza jest tylko dla triggerów automatycznych.
             source: 'manual',
-        } as unknown as Parameters<typeof startConsolidationRun>[0]);
+        });
         // Pusty plan → kontroler sam powiedział „nie ma czego konsolidować". Nie ma na co czekać.
         if (run && run !== alreadyRunning) _rerenderWhenRunFinishes(run, rerender);
     } catch (e) {

@@ -96,7 +96,7 @@ export class AgentManager {
         // Owner jak przy skillLoader/subAgentLoader - jedno miejsce instancjonowania.
         this.skillTemplateStore = new SkillTemplateStore(vault);
         this.subAgentTemplateStore = new SubAgentTemplateStore(vault);
-        this.playbookManager = new PlaybookManager(vault as unknown as ConstructorParameters<typeof PlaybookManager>[0]);
+        this.playbookManager = new PlaybookManager(vault as ConstructorParameters<typeof PlaybookManager>[0]);
         // Kill-switch: only instantiate the communicator when enabled (default false).
         // When null, every komunikatorManager callsite below is guarded with optional chaining.
         this.komunikatorManager = isKomunikatorEnabled(settings)
@@ -202,7 +202,10 @@ export class AgentManager {
             }
 
             // Playbooks depend on skills + sub-agents being loaded
-            await this.playbookManager.ensureStarterFiles(allAgents as unknown as VaultMapAgent[]);
+            // TS-boundary: Agent.focusFolders (AgentFocusFolder - path/access/group all optional
+            // on one shape) vs VaultMapFocusFolder (string | {path,access} | {group}, path
+            // required in the object branch) - same runtime entries, stricter union on this side.
+            await this.playbookManager.ensureStarterFiles(allAgents as VaultMapAgent[]);
 
             this._emit('agents:loaded', { count: this.agents.size });
 
@@ -347,6 +350,13 @@ export class AgentManager {
     async _initializeMemoryForAgent(agent: Agent) {
         const memory = new AgentMemory(this.vault, agent.name, this.settings);
         const migration = new MigrationV3(memory, {
+            // TS-boundary: this.plugin.app is AppLike (minimal node-safe contract), MigrationModal
+            // wants the real obsidian App - AppLike doesn't structurally match App in either
+            // direction. `as never` (odziedziczone z main): memory/MigrationV3.ts and
+            // agents/MigrationModal.ts each declare their OWN `MigrationPlan` interface and the
+            // two have drifted apart, so the modalFactory's real MigrationModal return doesn't
+            // structurally satisfy MigrationV3's MigrationModalLike shape - fix belongs to whoever
+            // unifies the two MigrationPlan declarations, out of scope for this typing wave.
             modalFactory: this.plugin?.app
                 ? (opts) => new MigrationModal(this.plugin!.app as unknown as App, opts) as never
                 : null,
@@ -801,7 +811,9 @@ export class AgentManager {
         this.agentMemories.set(agent.name, memory);
 
         // Create playbook.md + vault_map.md for the new agent
-        await this.playbookManager.ensureStarterFiles([agent] as unknown as VaultMapAgent[]);
+        // TS-boundary: same AgentFocusFolder vs VaultMapFocusFolder path-optionality mismatch as
+        // above (initialize()).
+        await this.playbookManager.ensureStarterFiles([agent] as VaultMapAgent[]);
 
         this._emit('agent:created', { agent: agent.name });
 
@@ -1098,7 +1110,9 @@ export class AgentManager {
         const memory = await this._initializeMemoryForAgent(jaskier);
         this.agentMemories.set(jaskier.name, memory);
 
-        await this.playbookManager.ensureStarterFiles([jaskier] as unknown as VaultMapAgent[]);
+        // TS-boundary: same AgentFocusFolder vs VaultMapFocusFolder path-optionality mismatch as
+        // above (initialize()).
+        await this.playbookManager.ensureStarterFiles([jaskier] as VaultMapAgent[]);
 
         this.activeAgent = jaskier;
         this._emit('agent:created', { agent: jaskier.name });

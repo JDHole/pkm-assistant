@@ -7,13 +7,10 @@ import { HiddenFileEditorModal } from './HiddenFileEditorModal.js';
 import { StartPromptGeneratorModal } from './StartPromptGeneratorModal.js';
 import { UiIcons, setSvg, setSvgLabel } from '../../crystal-soul/index.js';
 import { t } from '../../../core/i18n/index.js';
-import type { ProfileCtx } from './profile_types.js';
+import type { ProfileCtx, DTCustomEntry, DTInstrValue } from './profile_types.js';
 
 /** Matches PromptBuilder.getSections()'s inline object shape (modules/prompts/PromptBuilder.ts). */
 type PromptSection = { key: string; label: string; tokens: number; enabled: boolean; required: boolean; category: string; content: string; editable: boolean };
-/** Custom per-agent decision-tree instruction (`custom_<group>_<ts>` keys). */
-type DTCustomEntry = { group: string; text: string; tool: string | null };
-type DTInstrValue = boolean | string | DTCustomEntry;
 /** TS-boundary: `plugin.env.settings.pkmAssistant` fields this file reads - open user-config bag. */
 type PkmPromptSettings = { disabledPromptSections?: string[]; promptDefaults?: Record<string, unknown> };
 /** Work-prompt fields on ProfileFormData (all plain strings) - see _renderWorkPrompts. */
@@ -160,6 +157,10 @@ async function _renderPromptInspector(ctx: ProfileCtx, el: HTMLElement) {
             try {
                 const data = await agentManager.getPromptInspectorDataForAgent(formData.name, extraContext);
                 const fullText = (data.sections || []).filter((s) => s.enabled).map((s) => s.content).join('\n\n');
+                // TS-boundary: plugin.app is AppLike (core's minimal node-safe contract);
+                // HiddenFileEditorModal wants the real obsidian App, whose workspace/vault
+                // members carry concrete class types AppLike's open shape doesn't structurally
+                // match in either direction.
                 new HiddenFileEditorModal(plugin.app as unknown as ConstructorParameters<typeof HiddenFileEditorModal>[0], '', `System Prompt — ${formData.name}`, fullText, { readOnly: true }).open();
             } catch (e: unknown) { new Notice(t('profile.prompt.error', { error: (e as Error).message })); }
         })();
@@ -204,6 +205,10 @@ function _renderStartPromptBanner(ctx: ProfileCtx, el: HTMLElement) {
     setSvg(btn, UiIcons.edit(11));
     btn.appendText(t('profile.start_prompt.open'));
     btn.addEventListener('click', () => {
+        // TS-boundary: plugin.app is AppLike (core's minimal node-safe contract);
+        // StartPromptGeneratorModal wants the real obsidian App, whose workspace/vault members
+        // carry concrete class types AppLike's open shape doesn't structurally match in either
+        // direction.
         new StartPromptGeneratorModal(plugin.app as unknown as ConstructorParameters<typeof StartPromptGeneratorModal>[0], {
             agentName: agent?.name || formData.name || '',
             currentPersonality: formData.personality,
@@ -399,7 +404,7 @@ function _renderPromptEditor(ctx: ProfileCtx, el: HTMLElement) {
     el.createEl('p', { text: t('profile.prompt.decision_tree_desc'), cls: 'setting-item-description' });
 
     if (!po.decisionTreeInstructions) po.decisionTreeInstructions = {};
-    const agentDT = po.decisionTreeInstructions as Record<string, DTInstrValue>;
+    const agentDT = po.decisionTreeInstructions;
 
     const sortedDTGroups = Object.entries(DECISION_TREE_GROUPS).sort(([, a], [, b]) => a.order - b.order);
     const globalDT = (globalDefaults.decisionTreeOverrides as Record<string, DTInstrValue> | undefined) || {};
