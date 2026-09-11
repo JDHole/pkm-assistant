@@ -110,10 +110,7 @@ export function renderSubAgentDetailView(container: HTMLElement, plugin: SubAgen
             const info = (TOOL_INFO as Record<string, { label: string }>)[toolName] || { category: 'mixed', label: toolName };
             const toolCard = toolsList.createDiv({ cls: 'sidebar-tool-mini-card' });
             const toolIconSpan = toolCard.createSpan({ cls: 'sidebar-tool-icon' });
-            // TS-boundary: `getToolIcon` (modules/ui-components, poza zakresem tej fali) nadal
-            // rozwiązuje się do `any` u siebie — realnie zawsze zwraca SVG string
-            // (`IconGenerator.generate(...): string`).
-            setSvg(toolIconSpan, getToolIcon(toolName, 'currentColor', 14) as string);
+            setSvg(toolIconSpan, getToolIcon(toolName, 'currentColor', 14));
             toolCard.createSpan({ cls: 'sidebar-tool-label', text: info.label });
             toolCard.createSpan({ cls: 'sidebar-tool-name', text: toolName });
         }

@@ -259,7 +259,7 @@ export function _toggleRecording(this: ChatViewLike) {
         },
     });
 
-    this._audioRecorder.start();
+    void this._audioRecorder.start();
     this._micBtn.classList.add('recording');
     this._micBtn.empty();
     this._micBtn.createSpan({ cls: 'pkm-rec-timer', text: '0s' });

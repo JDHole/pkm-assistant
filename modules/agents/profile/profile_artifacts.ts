@@ -99,7 +99,7 @@ function _renderInstanceRow(ctx: ProfileCtx, el: HTMLElement, store: ArtifactSto
         new MoveArtifactModal(ctx.plugin.app as unknown as App, {
             artifact: entry,
             store,
-            onDone: () => ctx.renderActiveTab(),
+            onDone: () => { void ctx.renderActiveTab(); },
         }).open();
     });
 
@@ -108,7 +108,7 @@ function _renderInstanceRow(ctx: ProfileCtx, el: HTMLElement, store: ArtifactSto
         new ConfirmRemoveModal(ctx.plugin.app as unknown as App, {
             artifact: entry,
             store,
-            onDone: () => ctx.renderActiveTab(),
+            onDone: () => { void ctx.renderActiveTab(); },
         }).open();
     });
 }
@@ -152,7 +152,7 @@ function _renderTypes(ctx: ProfileCtx, el: HTMLElement) {
         toggle.addEventListener('click', (e: Event) => {
             e.stopPropagation();
             formData.artifact_types = toggleTypeName(formData.artifact_types, rowData.name);
-            ctx.renderActiveTab();
+            void ctx.renderActiveTab();
         });
     }
 

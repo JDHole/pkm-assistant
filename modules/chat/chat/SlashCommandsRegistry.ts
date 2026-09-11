@@ -55,7 +55,7 @@ export function createDefaultSlashCommands(): SlashCommandsRegistry {
         name: '/clear',
         description: 'Start a new chat session.',
         handler: async ({ view }) => {
-            view.handleNewSession();
+            void view.handleNewSession();
             view.resetInputArea();
         }
     });

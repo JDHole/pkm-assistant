@@ -257,7 +257,7 @@ export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandCon
             // po każdym zapisie sesji.
             source: 'auto',
         }).catch((e: unknown) => {
-            log.error('SaveSession', `Start konsolidacji padł: ${(e as ErrLike)?.message || (e as { toString(): string })}`);
+            log.error('SaveSession', `Start konsolidacji padł: ${(e as ErrLike)?.message || String(e)}`);
             new Notice(t('memory.consolidation.notice_error', { reason: (e as ErrLike)?.message || String(e) }), 6000);
         });
     }

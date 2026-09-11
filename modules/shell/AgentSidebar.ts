@@ -201,5 +201,8 @@ export async function openAgentSidebar(plugin: AgentSidebarPlugin): Promise<void
 
     // zastane: jak wyżej - `leaf` może być `null` gdy oba kroki powyżej go nie dały; oryginał
     // i tak woła `revealLeaf` bez sprawdzenia.
-    workspace.revealLeaf(leaf!);
+    // ZASTANE: `revealLeaf` zwraca Promise, oryginał nigdy go nie awaitował - `void` zachowuje
+    // fire-and-forget zamiast dokładać await, który zmieniłby moment zwrotu z tej funkcji
+    // (patrz raport fali C).
+    void workspace.revealLeaf(leaf!);
 }

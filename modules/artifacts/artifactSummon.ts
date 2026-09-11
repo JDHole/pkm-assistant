@@ -135,7 +135,13 @@ export async function summonAgentForArtifact(plugin: SummonPlugin, { id, actionL
                 // maszynowa mimo kliknięcia usera - inaczej adres wpisany przez model do sekcji
                 // „Źródła" odblokowywałby `web_read`, a marker `@@skill:` udawałby polecenie
                 // człowieka.
-                try { view.send_message?.({ meta: MACHINE_MESSAGE_META }); } catch { /* model niekonfigurowany itp. */ }
+                // ZASTANE: `send_message` jest asynchroniczna - ten `try/catch` łapie WYŁĄCZNIE
+                // synchroniczny throw sprzed zwrotu promisy, nie jej odrzucenie. Komentarz niżej
+                // obiecuje ochronę „model niekonfigurowany itp.", ale realny pad wywołania
+                // (np. brak klucza API) leci jako odrzucona promisa, mijając ten catch -
+                // zostawałby unhandled rejection. `void` zachowuje dotychczasowe zachowanie,
+                // naprawa (await + catch) byłaby zmianą runtime (patrz raport fali C).
+                try { void view.send_message?.({ meta: MACHINE_MESSAGE_META }); } catch { /* model niekonfigurowany itp. */ }
             }
         };
 

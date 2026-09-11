@@ -199,11 +199,13 @@ export function renderCommunicatorView(container: HTMLElement, plugin: Communica
             attr: { title: t('communicator.mark_all_read') }
         });
         setSvg(markReadBtn, UiIcons.check(12));
-        markReadBtn.addEventListener('click', async () => {
-            for (const msg of await komunikator.listMessages(selectedAgent!)) {
-                if (!msg.userRead) await komunikator.markUserRead(selectedAgent!, msg.id);
-            }
-            agentManager!._emit('communicator:message_read');
+        markReadBtn.addEventListener('click', () => {
+            void (async () => {
+                for (const msg of await komunikator.listMessages(selectedAgent!)) {
+                    if (!msg.userRead) await komunikator.markUserRead(selectedAgent!, msg.id);
+                }
+                agentManager!._emit('communicator:message_read');
+            })();
         });
 
         // Guzik hurtowy - kasuje WSZYSTKIE obustronnie przeczytane, bez podglądu,
@@ -213,26 +215,28 @@ export function renderCommunicatorView(container: HTMLElement, plugin: Communica
             attr: { title: t('communicator.cleanup.bulk_title') }
         });
         setSvg(purgeBtn, UiIcons.trash(12));
-        purgeBtn.addEventListener('click', async () => {
-            const readMessages = await komunikator.listAllRead(selectedAgent!);
-            if (readMessages.length === 0) {
-                new Notice(t('communicator.cleanup.bulk_nothing'));
-                return;
-            }
-            new KomunikatorBulkDeleteModal(
-                plugin.app,
-                { count: readMessages.length, agent: selectedAgent as string },
-                async (confirmed: boolean) => {
-                    if (!confirmed) return;
-                    let removed = 0;
-                    for (const msg of readMessages) {
-                        if (await komunikator.deleteMessage(selectedAgent!, msg.id)) removed++;
-                    }
-                    expandedMsgId = null;
-                    agentManager!._emit('communicator:message_sent');
-                    new Notice(t('communicator.cleanup.bulk_done', { count: removed }));
-                },
-            ).open();
+        purgeBtn.addEventListener('click', () => {
+            void (async () => {
+                const readMessages = await komunikator.listAllRead(selectedAgent!);
+                if (readMessages.length === 0) {
+                    new Notice(t('communicator.cleanup.bulk_nothing'));
+                    return;
+                }
+                new KomunikatorBulkDeleteModal(
+                    plugin.app,
+                    { count: readMessages.length, agent: selectedAgent as string },
+                    async (confirmed: boolean) => {
+                        if (!confirmed) return;
+                        let removed = 0;
+                        for (const msg of readMessages) {
+                            if (await komunikator.deleteMessage(selectedAgent!, msg.id)) removed++;
+                        }
+                        expandedMsgId = null;
+                        agentManager!._emit('communicator:message_sent');
+                        new Notice(t('communicator.cleanup.bulk_done', { count: removed }));
+                    },
+                ).open();
+            })();
         });
 
         // Messages scroll area (listMessages zwraca najnowsze pierwsze).
@@ -295,16 +299,18 @@ export function renderCommunicatorView(container: HTMLElement, plugin: Communica
             attr: { title: t('communicator.delete_message') }
         });
         setSvg(deleteBtn, UiIcons.trash(10));
-        deleteBtn.addEventListener('click', async (e: Event) => {
-            e.stopPropagation();
-            const ok = await komunikator.deleteMessage(selectedAgent!, msg.id);
-            if (ok) {
-                expandedMsgId = null;
-                agentManager!._emit('communicator:message_sent');
-                new Notice(t('communicator.message_deleted'));
-            } else {
-                new Notice(t('communicator.delete_failed'));
-            }
+        deleteBtn.addEventListener('click', (e: Event) => {
+            void (async () => {
+                e.stopPropagation();
+                const ok = await komunikator.deleteMessage(selectedAgent!, msg.id);
+                if (ok) {
+                    expandedMsgId = null;
+                    agentManager!._emit('communicator:message_sent');
+                    new Notice(t('communicator.message_deleted'));
+                } else {
+                    new Notice(t('communicator.delete_failed'));
+                }
+            })();
         });
 
         // Chevron
@@ -312,19 +318,21 @@ export function renderCommunicatorView(container: HTMLElement, plugin: Communica
         setSvg(chevron, UiIcons.chevronDown(10));
 
         // Click handler - accordion (only on non-button areas)
-        headerRow.addEventListener('click', async (e: Event) => {
-            if ((e.target as HTMLElement).closest('.cs-comm-msg__delete')) return;
-            if (expandedMsgId === msg.id) {
-                expandedMsgId = null;
-            } else {
-                expandedMsgId = msg.id;
-                // Rozwinięcie karty = user przeczytał (jego ptaszek; `ai_read` odhacza tylko agent).
-                if (isUnread && komunikator) {
-                    await komunikator.markUserRead(selectedAgent!, msg.id);
-                    agentManager!._emit('communicator:message_read');
+        headerRow.addEventListener('click', (e: Event) => {
+            void (async () => {
+                if ((e.target as HTMLElement).closest('.cs-comm-msg__delete')) return;
+                if (expandedMsgId === msg.id) {
+                    expandedMsgId = null;
+                } else {
+                    expandedMsgId = msg.id;
+                    // Rozwinięcie karty = user przeczytał (jego ptaszek; `ai_read` odhacza tylko agent).
+                    if (isUnread && komunikator) {
+                        await komunikator.markUserRead(selectedAgent!, msg.id);
+                        agentManager!._emit('communicator:message_read');
+                    }
                 }
-            }
-            void renderInbox();
+                void renderInbox();
+            })();
         });
 
         // Expanded body — treść dociągana leniwie (lista niesie same nagłówki).
@@ -372,28 +380,30 @@ export function renderCommunicatorView(container: HTMLElement, plugin: Communica
         setSvgLabel(sendBtn, UiIcons.send(11), t('communicator.send'));
         sendBtn.style.setProperty('--cs-send-color', agentColor);
 
-        sendBtn.addEventListener('click', async () => {
-            const subject = subjectInput.value.trim();
-            const content = contentArea.value.trim();
+        sendBtn.addEventListener('click', () => {
+            void (async () => {
+                const subject = subjectInput.value.trim();
+                const content = contentArea.value.trim();
 
-            if (!subject || !content) {
-                new Notice(t('communicator.fill_subject_and_body'));
-                return;
-            }
-
-            try {
-                const res = await komunikator.sendMessage('User', selectedAgent!, subject, content);
-                if (!res?.success) {
-                    new Notice(res?.error || t('communicator.delete_failed'));
+                if (!subject || !content) {
+                    new Notice(t('communicator.fill_subject_and_body'));
                     return;
                 }
-                agentManager!._emit('communicator:message_sent');
-                new Notice(t('communicator.sent_to', { agent: selectedAgent! }));
-                subjectInput.value = '';
-                contentArea.value = '';
-            } catch (e) {
-                new Notice(t('generic.error') + ': ' + (e as { message?: string }).message);
-            }
+
+                try {
+                    const res = await komunikator.sendMessage('User', selectedAgent!, subject, content);
+                    if (!res?.success) {
+                        new Notice(res?.error || t('communicator.delete_failed'));
+                        return;
+                    }
+                    agentManager!._emit('communicator:message_sent');
+                    new Notice(t('communicator.sent_to', { agent: selectedAgent! }));
+                    subjectInput.value = '';
+                    contentArea.value = '';
+                } catch (e) {
+                    new Notice(t('generic.error') + ': ' + (e as { message?: string }).message);
+                }
+            })();
         });
     }
 }

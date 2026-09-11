@@ -132,7 +132,7 @@ function _renderSkillShard(ctx: ProfileCtx, grid: HTMLElement, parentEl: HTMLEle
     editBtn.title = t('profile.skills.edit_for_agent');
     editBtn.addEventListener('click', (e: Event) => {
         e.stopPropagation();
-        showSkillOverrideForm(parentEl, skill, assignment, () => ctx.renderActiveTab());
+        showSkillOverrideForm(parentEl, skill, assignment, () => { void ctx.renderActiveTab(); });
     });
 
     const removeBtn = shard.createEl('button', { cls: 'clickable-icon cs-shard__remove' });
@@ -141,7 +141,7 @@ function _renderSkillShard(ctx: ProfileCtx, grid: HTMLElement, parentEl: HTMLEle
     removeBtn.addEventListener('click', (e: Event) => {
         e.stopPropagation();
         formData.skills = formData.skills.filter((s: SkillAssignment) => s.name !== (skill.slug || skill.name));
-        ctx.renderActiveTab();
+        void ctx.renderActiveTab();
     });
 }
 
@@ -184,7 +184,7 @@ function _renderAddSkill(ctx: ProfileCtx, el: HTMLElement, allSkills: Skill[]) {
             if (skill.description) opt.createSpan({ cls: 'cs-picker__option-desc', text: skill.description });
             opt.addEventListener('click', () => {
                 formData.skills.push({ name: skill.slug || skill.name });
-                ctx.renderActiveTab();
+                void ctx.renderActiveTab();
             });
         }
     }
@@ -220,25 +220,27 @@ function _renderAddSkill(ctx: ProfileCtx, el: HTMLElement, allSkills: Skill[]) {
 function _renderNewSkill(ctx: ProfileCtx, el: HTMLElement) {
     const { formData, plugin } = ctx;
     const btn = el.createEl('button', { cls: 'cs-preset-btn', text: t('profile.skills.new_skill') });
-    btn.addEventListener('click', async () => {
-        const { loadSkillEditorModal } = await import('../../skills/index.js');
-        const SkillEditorModal = await loadSkillEditorModal();
-        // TS-boundary: luka core - `plugin.app` to `AppLike` (node-safe kontrakt `core/`),
-        // a modal skilli bierze prawdziwy `App` Obsidiana (`Modal.super`). Ten sam rozjazd,
-        // co przy modalach artefaktów w `profile_artifacts.ts`; runtime podaje jeden obiekt.
-        new SkillEditorModal(plugin.app as unknown as App, plugin, null, (saved?: SkillInput) => {
-            void (async () => {
-                const loader = plugin.agentManager?.skillLoader;
-                try { await loader?.reloadSkills?.(); } catch { /* best effort */ }
-                // Auto-przypisanie świeżo utworzonego skilla temu agentowi.
-                const created = saved?.name ? loader?.getSkill?.(saved.name) : null;
-                const id = created ? (created.slug || created.name) : null;
-                if (id && !formData.skills.some((s: SkillAssignment) => s.name === id)) {
-                    formData.skills.push({ name: id });
-                }
-                ctx.renderActiveTab();
-            })();
-        }, { alsoTemplate: true }).open();
+    btn.addEventListener('click', () => {
+        void (async () => {
+            const { loadSkillEditorModal } = await import('../../skills/index.js');
+            const SkillEditorModal = await loadSkillEditorModal();
+            // TS-boundary: luka core - `plugin.app` to `AppLike` (node-safe kontrakt `core/`),
+            // a modal skilli bierze prawdziwy `App` Obsidiana (`Modal.super`). Ten sam rozjazd,
+            // co przy modalach artefaktów w `profile_artifacts.ts`; runtime podaje jeden obiekt.
+            new SkillEditorModal(plugin.app as unknown as App, plugin, null, (saved?: SkillInput) => {
+                void (async () => {
+                    const loader = plugin.agentManager?.skillLoader;
+                    try { await loader?.reloadSkills?.(); } catch { /* best effort */ }
+                    // Auto-przypisanie świeżo utworzonego skilla temu agentowi.
+                    const created = saved?.name ? loader?.getSkill?.(saved.name) : null;
+                    const id = created ? (created.slug || created.name) : null;
+                    if (id && !formData.skills.some((s: SkillAssignment) => s.name === id)) {
+                        formData.skills.push({ name: id });
+                    }
+                    void ctx.renderActiveTab();
+                })();
+            }, { alsoTemplate: true }).open();
+        })();
     });
     el.createDiv({ text: t('profile.skills.new_skill_hint'), cls: 'setting-item-description' });
 }
@@ -263,19 +265,21 @@ function _renderSkillFromTemplate(ctx: ProfileCtx, el: HTMLElement) {
         const opt = optionsEl.createDiv({ cls: 'cs-picker__option' });
         opt.createSpan({ cls: 'cs-picker__option-name', text: `${tpl.name} · v${tpl.version || 1}` });
         if (tpl.description) opt.createSpan({ cls: 'cs-picker__option-desc', text: tpl.description });
-        opt.addEventListener('click', async () => {
-            dropdown.classList.add('cs-collapsed');
-            const { Notice } = await import('obsidian');
-            const result = await store.instantiate(tpl.slug, { skillLoader: plugin.agentManager.skillLoader });
-            if (!result?.success) {
-                new Notice(t('backstage.template_use_failed', { error: result?.error || '?' }));
-                return;
-            }
-            if (result.renamed) new Notice(t('backstage.template_slug_taken', { name: result.name }));
-            if (!formData.skills.some((s: SkillAssignment) => s.name === result.slug)) {
-                formData.skills.push({ name: result.slug as string });
-            }
-            ctx.renderActiveTab();
+        opt.addEventListener('click', () => {
+            void (async () => {
+                dropdown.classList.add('cs-collapsed');
+                const { Notice } = await import('obsidian');
+                const result = await store.instantiate(tpl.slug, { skillLoader: plugin.agentManager.skillLoader });
+                if (!result?.success) {
+                    new Notice(t('backstage.template_use_failed', { error: result?.error || '?' }));
+                    return;
+                }
+                if (result.renamed) new Notice(t('backstage.template_slug_taken', { name: result.name }));
+                if (!formData.skills.some((s: SkillAssignment) => s.name === result.slug)) {
+                    formData.skills.push({ name: result.slug as string });
+                }
+                void ctx.renderActiveTab();
+            })();
         });
     }
 
@@ -342,7 +346,7 @@ function _renderKonektorySection(ctx: ProfileCtx, el: HTMLElement) {
                 formData.mcp_servers = formData.mcp_servers.filter((n: string) => n !== server.key);
                 formData.preferred_servers = formData.preferred_servers.filter((n: string) => n !== server.key);
             }
-            ctx.renderActiveTab();
+            void ctx.renderActiveTab();
         });
     }
 }

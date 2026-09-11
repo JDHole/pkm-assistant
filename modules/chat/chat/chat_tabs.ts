@@ -65,7 +65,7 @@ export function _renderTabBar(this: ChatViewLike, container: HTMLElement) {
 
         tabEl.createSpan({ cls: 'cs-tab__name', text: tab.sessionLabel || tab.agentName });
 
-        tabEl.addEventListener('click', () => this._switchTab(_tabKey(tab)));
+        tabEl.addEventListener('click', () => { void this._switchTab(_tabKey(tab)); });
     }
 
     const addTab = topbar.createDiv({ cls: 'cs-tab cs-tab--add' });
@@ -208,7 +208,7 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
     }
 
     // 7. Re-render messages
-    this.render_messages();
+    void this.render_messages();
     if (this.rollingWindow.messages.length === 0) {
         this.add_welcome_message();
     }
@@ -227,7 +227,7 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
     const switchedTab = this.chatTabs.find((t: ChatTab) => _tabKey(t) === targetKey);
     if (switchedTab?._needsRefresh) {
         delete switchedTab._needsRefresh;
-        this.render_messages();
+        void this.render_messages();
         this.scrollToFinalMessage();
     }
 
@@ -262,7 +262,7 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
         try {
             this.stop_generation(agentName, 'close_tab');
         } catch (e) {
-            log.warn('Chat', `Zatrzymanie tury zamykanej zakładki padło (zamykamy dalej): ${(e as Error)?.message || (e as { toString(): string })}`);
+            log.warn('Chat', `Zatrzymanie tury zamykanej zakładki padło (zamykamy dalej): ${(e as Error)?.message || String(e)}`);
         }
     }
 
@@ -280,7 +280,7 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
             registry.requestStop(id);
         }
     } catch (e) {
-        log.warn('Chat', `Zatrzymanie subów zamykanej zakładki padło: ${(e as Error)?.message || (e as { toString(): string })}`);
+        log.warn('Chat', `Zatrzymanie subów zamykanej zakładki padło: ${(e as Error)?.message || String(e)}`);
     }
 }
 
@@ -309,7 +309,7 @@ export async function _closeActiveTab(this: ChatViewLike) {
         try {
             await this.handleSaveSession();
         } catch (e) {
-            log.warn('Chat', `Save on tab close failed (non-fatal): ${(e as Error)?.message || (e as { toString(): string })}`);
+            log.warn('Chat', `Save on tab close failed (non-fatal): ${(e as Error)?.message || String(e)}`);
         }
     }
 
@@ -317,7 +317,7 @@ export async function _closeActiveTab(this: ChatViewLike) {
 
     if (this.chatTabs.length <= 1) {
         this.rollingWindow = this._createRollingWindow();
-        this.render_messages();
+        void this.render_messages();
         this.add_welcome_message();
         this.updateTokenCounter();
         this._updateTokenPanel();
@@ -384,7 +384,7 @@ export function _openAgentPickerModal(this: ChatViewLike) {
         card.addEventListener('click', () => {
             this.chatTabs.push({ agentName: agent.name, sessionId: agent.name, isActive: false });
             overlay.remove();
-            this._switchTab(agent.name);
+            void this._switchTab(agent.name);
         });
     }
 

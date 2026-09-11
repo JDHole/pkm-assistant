@@ -144,9 +144,7 @@ function renderPkmSubCard(list: HTMLElement, plugin: SubAgentsPlugin, nav: Sideb
     for (const toolName of DEFAULT_SUB_AGENT_TOOLS) {
         const info = (TOOL_INFO as Record<string, { label: string }>)[toolName] || { label: toolName };
         const badge = meta.createSpan({ cls: 'cs-item-card__badge' });
-        // TS-boundary: `getToolIcon` (modules/ui-components, poza zakresem tej fali) nadal
-        // rozwiązuje się do `any` u siebie — realnie zawsze zwraca SVG string.
-        setSvgLabel(badge, getToolIcon(toolName, 'currentColor', 10) as string, info.label);
+        setSvgLabel(badge, getToolIcon(toolName, 'currentColor', 10), info.label);
     }
 
     card.createDiv({ cls: 'cs-item-card__desc', text: t('backstage.pkm_sub_desc') });
@@ -191,9 +189,7 @@ function renderTemplateCard(list: HTMLElement, tpl: SubAgentTemplateRecord, { pl
     for (const toolName of tpl.tools || []) {
         const info = (TOOL_INFO as Record<string, { label: string }>)[toolName] || { label: toolName };
         const badge = meta.createSpan({ cls: 'cs-item-card__badge' });
-        // TS-boundary: `getToolIcon` (modules/ui-components, poza zakresem tej fali) nadal
-        // rozwiązuje się do `any` u siebie — realnie zawsze zwraca SVG string.
-        setSvgLabel(badge, getToolIcon(toolName, 'currentColor', 10) as string, info.label);
+        setSvgLabel(badge, getToolIcon(toolName, 'currentColor', 10), info.label);
     }
 
     if (tpl.description) {

@@ -188,7 +188,13 @@ export class SidebarNav {
             const renderFn = this.viewRenderers[current.viewId];
             if (renderFn) {
                 try {
-                    renderFn(content, this.plugin, this, current.params);
+                    // ZASTANE: `ViewRenderer` dopuszcza `Promise<void>` (async renderer), ale ten
+                    // `try/catch` jest SYNCHRONICZNY - odrzucenie promisy z async renderera omija
+                    // go i nie trafia do przyjaznego `sidebar.render_error` niżej (staje się
+                    // unhandled rejection). `void` zachowuje dotychczasowe zachowanie zamiast
+                    // dokładać await/.catch, co zmieniłoby moment powrotu z `_render()` (patrz
+                    // raport fali C).
+                    void renderFn(content, this.plugin, this, current.params);
                 } catch (e) {
                     log.warn('SidebarNav', `render widoku '${current.viewId}' padł:`, e);
                     content.empty();

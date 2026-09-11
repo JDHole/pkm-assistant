@@ -175,8 +175,8 @@ export class TokenViewerWidget {
         // lookup below.
         const legacyKey = ({ researcher: 'minion', strategist: 'master' } as Record<string, string>)[role];
         const lib = pkm?.modelLibrary?.[role] || (legacyKey ? pkm?.modelLibrary?.[legacyKey] : null);
-        const configured = (agent?.models?.[role]
-            || lib?.find?.((m: ModelLibraryEntry) => m.isDefault) || lib?.[0] || null) as ConfiguredModel | null;
+        const configured: ConfiguredModel | null = agent?.models?.[role]
+            || lib?.find?.((m: ModelLibraryEntry) => m.isDefault) || lib?.[0] || null;
         // ⚠️ ZASTANE: `configured` bywa `null` (agent bez modelu dla tej roli I pusty
         // `modelLibrary`), a `typeof null === 'object'` — więc gałąź obiektowa wchodzi na `null`
         // i RZUCA `TypeError` na `null.platform`. Asercje niżej zdejmują `null` z TYPU, żeby

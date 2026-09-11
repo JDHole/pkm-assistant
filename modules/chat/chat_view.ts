@@ -176,14 +176,16 @@ export class ChatView extends PluginItemView {
                 .style.color = SkinManager.getColor('accent', 'var(--interactive-accent)');
             loadingDiv.createDiv({ cls: 'pkm-chat-loading__label', text: t('main.loading') });
 
-            this.plugin.onReady(async () => {
-                loadingDiv.remove();
-                await this.renderView();
-                await this.initSessionManager();
-                this._subscribeAgentManagerEvents();
-                this._subscribeSkinEvents();
-                this._wireSubTaskDeliverer();
-                this._wireSubTaskStrip();
+            this.plugin.onReady(() => {
+                void (async () => {
+                    loadingDiv.remove();
+                    await this.renderView();
+                    await this.initSessionManager();
+                    this._subscribeAgentManagerEvents();
+                    this._subscribeSkinEvents();
+                    this._wireSubTaskDeliverer();
+                    this._wireSubTaskStrip();
+                })();
             });
             return;
         }
@@ -262,7 +264,7 @@ export class ChatView extends PluginItemView {
         this._renderThrottle?.cancel();
         this._cancelConnectorRedraw?.();
         if (this.rollingWindow?.messages?.length > 0) {
-            this.handleSaveSession();
+            void this.handleSaveSession();
         }
     }
 

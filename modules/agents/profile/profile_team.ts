@@ -120,7 +120,7 @@ function _renderMemberTile(ctx: ProfileCtx, grid: HTMLElement, assignment: Agent
         e.stopPropagation();
         if (isDefault) { assignment.default = false; }
         else { formData.sub_agents.forEach((it: AgentSubAgentAssignment) => { it.default = false; }); assignment.default = true; }
-        ctx.renderActiveTab();
+        void ctx.renderActiveTab();
     });
 
     const activeBtn = shard.createEl('button', { cls: 'clickable-icon cs-shard__action', title: t('profile.team.toggle_active') });
@@ -128,7 +128,7 @@ function _renderMemberTile(ctx: ProfileCtx, grid: HTMLElement, assignment: Agent
     activeBtn.addEventListener('click', (e: Event) => {
         e.stopPropagation();
         if (isActive) assignment.active = false; else delete assignment.active;
-        ctx.renderActiveTab();
+        void ctx.renderActiveTab();
     });
 
     const removeBtn = shard.createEl('button', { cls: 'clickable-icon cs-shard__remove', title: t('profile.team.remove_member') });
@@ -137,7 +137,7 @@ function _renderMemberTile(ctx: ProfileCtx, grid: HTMLElement, assignment: Agent
         e.stopPropagation();
         const idx = formData.sub_agents.findIndex((m: AgentSubAgentAssignment) => m.name === assignment.name);
         if (idx >= 0) formData.sub_agents.splice(idx, 1);
-        ctx.renderActiveTab();
+        void ctx.renderActiveTab();
     });
 }
 
@@ -165,7 +165,7 @@ function _renderAssignExisting(ctx: ProfileCtx, el: HTMLElement, visible: SubAge
             const entry: AgentSubAgentAssignment = { name: sub.name, role: sub.role || 'researcher' };
             if (formData.sub_agents.length === 0) entry.default = true;
             formData.sub_agents.push(entry);
-            ctx.renderActiveTab();
+            void ctx.renderActiveTab();
         });
     }
 
@@ -217,7 +217,7 @@ function _renderAddFromScratch(ctx: ProfileCtx, el: HTMLElement) {
                             formData.sub_agents.push(entry);
                         }
                     }
-                    ctx.renderActiveTab();
+                    void ctx.renderActiveTab();
                 })();
             }, { alsoTemplate: true }).open();
         })();
@@ -263,7 +263,7 @@ function _renderAddFromTemplate(ctx: ProfileCtx, el: HTMLElement) {
                     if (formData.sub_agents.length === 0) entry.default = true;
                     formData.sub_agents.push(entry);
                 }
-                ctx.renderActiveTab();
+                void ctx.renderActiveTab();
             })();
         });
     }
