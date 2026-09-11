@@ -15,22 +15,56 @@
 import { resolveWorkPrompt } from '../../../core/index.js';
 import { log } from '../../../core/utils/Logger.js';
 import { DEFAULT_COMPRESSION_PROMPT } from './compressionPrompt.js';
+import type { AgentMemory } from '../../memory/index.js';
+import type { Agent } from '../../agents/index.js';
+import type { ChatTab } from './chatViewShape.js';
+import type { BrainNoteInput } from '../../memory/index.js';
+import type { RollingWindow } from './RollingWindow.js';
+import type { ChatModel } from '../../models/index.js';
+import type { AutonomyMode, TokenTracker, WorkPromptSettings } from '../../../core/index.js';
 
-// TS-any: granica runtime'u — AgentManager/AgentMemory/ChatView są składane dynamicznie.
-type Runtime = any;
+/**
+ * Profil agenta-właściciela. Właścicielem typu jest `modules/agents` — ten plik czyta z niego
+ * DWA pola (`name`, `memory_rescue`), a resztę tylko przenosi do okna i do modelu.
+ */
+export type OwnerAgentLike = Agent | null;
+export type OwnerMemoryLike = AgentMemory | null;
 
-// Trzy typy niżej (i `FrozenTurnOwner` dalej w pliku) nie są eksportowane — zero referencji
-// spoza tego pliku; funkcje, których sygnatury je noszą (`resolveOwnerAgentName`,
-// `resolveOwnerAgent`, `buildOwnerWindowOptions`, …), zostają publiczne.
-type OwnerAgentLike = { name?: string; memory_rescue?: boolean } | null;
-type OwnerMemoryLike = Runtime;
-
-type OwnerManagerLike = {
+export type OwnerManagerLike = {
     getAgent?(name: string): OwnerAgentLike | undefined;
     getActiveAgent?(): OwnerAgentLike | undefined;
     getAgentMemory?(name: string): OwnerMemoryLike;
     getActiveMemory?(): OwnerMemoryLike;
 } | null | undefined;
+
+/** Zakładka w zakresie, jakiego dotyka pytanie „czy właściciel jest na wierzchu". */
+type OwnerTabLike = ChatTab;
+
+/**
+ * Widok w zakresie, jaki czyta ten plik. Świadomie STRUKTURALNY, nie `ChatViewLike`:
+ * moduł jest node-testowalny, a jego test podstawia własne atrapy widoku.
+ *
+ * Modele (`_getMinionModel`/`get_chat_model`) są tu `unknown` — plik ich nie interpretuje,
+ * tylko przekazuje do okna; zawężenie stoi w JEDNYM miejscu, przy `modelProvider` niżej.
+ */
+/** Widok w zakresie, jaki czyta samo ZAMROŻENIE właściciela (bez providerów okna). */
+export interface FreezeViewLike {
+    plugin?: { agentManager?: OwnerManagerLike } | null;
+    chatTabs?: OwnerTabLike[];
+    rollingWindow?: RollingWindow | null;
+    tokenTracker?: TokenTracker | null;
+    currentAutonomy?: AutonomyMode;
+    currentArtifactId?: string | null;
+}
+
+export interface OwnerViewLike extends FreezeViewLike {
+    env?: { settings?: WorkPromptSettings | null } | null;
+    _getMinionModel(agent: OwnerAgentLike): unknown;
+    get_chat_model?(opts: { agent?: OwnerAgentLike }): unknown;
+    _buildEmergencyTaskContext(agentName: string | null): string;
+    _renderMemorySavedNote(count: number): void;
+    _updateTokenPanel?(): void;
+}
 
 /**
  * Nazwa agenta-właściciela. Jawna nazwa (z zakładki / ze zdarzenia) WYGRYWA; brak nazwy =
@@ -85,7 +119,7 @@ export function resolveOwnerMemory(
 export async function saveMemoryCandidatesFor(
     agentManager: OwnerManagerLike,
     ownerName: string | null | undefined,
-    candidates: Runtime[] = [],
+    candidates: BrainNoteInput[] = [],
 ): Promise<number> {
     const ownerAgent = resolveOwnerAgent(agentManager, ownerName);
     // Per-agent wyłącznik ratunku pamięci przed kompresją (default ON).
@@ -104,16 +138,16 @@ export async function saveMemoryCandidatesFor(
             try {
                 const result = await mem.writePendingRescue(candidate, { source: 'auto_compaction' });
                 if (result?.path) saved++;
-            } catch (e: Runtime) {
+            } catch (e) {
                 // Fail-soft: zapis DO POCZEKALNI padł. Lepszy niezreview'owany zapis wprost do
                 // brain/ niż utrata kandydata — okno kompresji, z którego przyszedł, zaraz
                 // odrzuci surową rozmowę, więc to jedyna kopia tego faktu.
                 try {
                     const fallback = await mem.writeBrainNote(candidate, { source: 'auto_compaction' });
                     if (fallback?.path) saved++;
-                    log.warn('Chat', `Memory candidate: poczekalnia padła, zapis wprost do brain/ (fail-soft): ${e?.message || e}`);
-                } catch (e2: Runtime) {
-                    log.warn('Chat', `Memory candidate save failed (poczekalnia i fallback): ${e2?.message || e2}`);
+                    log.warn('Chat', `Memory candidate: poczekalnia padła, zapis wprost do brain/ (fail-soft): ${(e as Error)?.message || (e as { toString(): string })}`);
+                } catch (e2) {
+                    log.warn('Chat', `Memory candidate save failed (poczekalnia i fallback): ${(e2 as Error)?.message || (e2 as { toString(): string })}`);
                 }
             }
             continue;
@@ -123,8 +157,8 @@ export async function saveMemoryCandidatesFor(
         try {
             const result = await mem.writeBrainNote(candidate, { source: 'auto_compaction' });
             if (result?.path) saved++;
-        } catch (e: Runtime) {
-            log.warn('Chat', `Memory candidate save failed: ${e?.message || e}`);
+        } catch (e) {
+            log.warn('Chat', `Memory candidate save failed: ${(e as Error)?.message || (e as { toString(): string })}`);
         }
     }
     if (saved > 0) {
@@ -143,12 +177,12 @@ export async function saveMemoryCandidatesFor(
  * fizycznie w rozmowie agenta B, którą user akurat czyta (z licznikami policzonymi z okna A),
  * i znikałby dopiero przy najbliższym `render_messages()` — czysty artefakt cudzej tury.
  */
-export function isOwnerTabActive(view: Runtime, ownerName: string | null): boolean {
+export function isOwnerTabActive(view: { chatTabs?: OwnerTabLike[] } | null | undefined, ownerName: string | null): boolean {
     const tabs = view?.chatTabs;
     // Brak modelu zakładek (atrapy widoku bez `chatTabs`, kontekst bez multi-tab) = nie ma czego
     // gasić — stare zachowanie, maluj.
     if (!Array.isArray(tabs) || tabs.length === 0) return true;
-    return (tabs.find((tab: Runtime) => tab?.isActive)?.agentName ?? null) === ownerName;
+    return (tabs.find((tab) => tab?.isActive)?.agentName ?? null) === ownerName;
 }
 
 /**
@@ -159,7 +193,7 @@ export function isOwnerTabActive(view: Runtime, ownerName: string | null): boole
  * @param view - odbiorca mixinów ChatView (`_getMinionModel`, `_buildEmergencyTaskContext`, …)
  * @param ownerName - nazwa agenta zakładki, do której należy to okno
  */
-export function buildOwnerWindowOptions(view: Runtime, ownerName: string | null) {
+export function buildOwnerWindowOptions(view: OwnerViewLike, ownerName: string | null) {
     const am = (): OwnerManagerLike => view?.plugin?.agentManager;
     // Szkielet kompresji rozstrzygany raz, przy zakładaniu okna (agent>global>factory).
     const compressionPrompt = resolveWorkPrompt(
@@ -174,14 +208,16 @@ export function buildOwnerWindowOptions(view: Runtime, ownerName: string | null)
         // przyjmuje agenta jawnie, więc kompresja okna A nie może pojechać modelem agenta B.
         modelProvider: () => {
             const ownerAgent = resolveOwnerAgent(am(), ownerName);
-            return view._getMinionModel(ownerAgent) || view.get_chat_model?.({ agent: ownerAgent });
+            // TS-boundary: ten plik nie zna kontraktu modelu (celowo — ma być node-testowalny),
+            // więc zawężenie do typu, jakiego wymaga okno, stoi TUTAJ, w jedynym przejściu.
+            return (view._getMinionModel(ownerAgent) || view.get_chat_model?.({ agent: ownerAgent })) as ChatModel | null | undefined;
         },
         memoryIndexProvider: async () => {
             const mem = resolveOwnerMemory(am(), ownerName);
             try { return mem ? await mem.getBrain() : ''; } catch { return ''; }
         },
         emergencyContextProvider: () => view._buildEmergencyTaskContext(ownerName),
-        onMemoryCandidates: async (candidates: Runtime[]) => {
+        onMemoryCandidates: async (candidates: BrainNoteInput[]) => {
             const saved = await saveMemoryCandidatesFor(am(), ownerName, candidates);
             // Nota „N kandydatów czeka" jest DOM-em jednego widoku — malujemy
             // ją tylko, gdy zakładka właściciela jest akurat na wierzchu (patrz `isOwnerTabActive`).
@@ -202,25 +238,25 @@ export function buildOwnerWindowOptions(view: Runtime, ownerName: string | null)
  * że tura zaczęta u agenta A — z promptem złożonym z JEGO pamięci — kończyłaby jako tura
  * agenta B: modelem B, z uprawnieniami narzędzi B i zapisami do sesji B.
  */
-interface FrozenTurnOwner {
+export interface FrozenTurnOwner {
     /** Nazwa agenta, do którego należy tura (pusta = brak agenta). */
     agentName: string;
     /** Profil agenta z chwili zamrożenia. */
     agent: OwnerAgentLike;
     /** Okno rozmowy zakładki-właściciela (`RollingWindow`). */
-    rollingWindow: Runtime;
+    rollingWindow: RollingWindow | null;
     /** Licznik tokenów zakładki-właściciela. */
-    tokenTracker: Runtime;
+    tokenTracker: TokenTracker | null;
     /** Pamięć właściciela — rozstrzygnięta po nazwie, fail-closed (patrz `resolveOwnerMemory`). */
     memory: OwnerMemoryLike;
     /** Ścieżka aktywnej sesji właściciela w chwili startu tury (adres zwrotny + label trace). */
     sessionPath: string;
     /** Zakładka, z której wyszła tura (adres zwrotny delegacji w tle). */
-    tab: Runtime;
+    tab: OwnerTabLike | null;
     /** Autonomia tej zakładki — polityka „czy pytać" dla egzekutora narzędzi. */
-    autonomy: Runtime;
+    autonomy: AutonomyMode | undefined;
     /** Aktywny artefakt tej zakładki — wstrzykiwany do promptu. */
-    artifactId: Runtime;
+    artifactId: string | null;
 }
 
 /**
@@ -232,7 +268,7 @@ interface FrozenTurnOwner {
  *
  * @param view - odbiorca mixinów ChatView (`rollingWindow`, `tokenTracker`, `chatTabs`, …)
  */
-export function freezeTurnOwner(view: Runtime): FrozenTurnOwner {
+export function freezeTurnOwner(view: FreezeViewLike): FrozenTurnOwner {
     const agentManager: OwnerManagerLike = view?.plugin?.agentManager;
     const agent = agentManager?.getActiveAgent?.() || null;
     const agentName = agent?.name || '';
@@ -249,7 +285,7 @@ export function freezeTurnOwner(view: Runtime): FrozenTurnOwner {
         tokenTracker: view?.tokenTracker ?? null,
         memory,
         sessionPath: memory?.activeSessionPath || '',
-        tab: tabs.find((tab: Runtime) => tab?.isActive) || null,
+        tab: tabs.find((tab) => tab?.isActive) || null,
         autonomy: view?.currentAutonomy,
         artifactId: view?.currentArtifactId ?? null,
     };

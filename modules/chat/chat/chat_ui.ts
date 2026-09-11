@@ -22,9 +22,43 @@ import { t } from '../../../core/i18n/index.js';
 import { HUMAN_MESSAGE_META } from '../../../core/index.js';
 import chat_view_styles from '../chat_view.css' with { type: 'css' };
 import { log } from '../../../core/utils/Logger.js';
+// Receiver mixina = ZŁOŻONY widok (`ChatViewLike`: klasa + osiem paczek mixinów).
+import type { ChatSkillConfig, ChatSkillPreQuestion, ChatTab, ChatViewLike } from './chatViewShape.js';
+/**
+ * Wpis rejestru artefaktów w zakresie, jaki czyta czat (chip aktywnego + picker).
+ * Pełny kształt jest wewnętrzny dla `modules/artifacts` i nie wychodzi jego barrelem.
+ */
+interface ArtifactListEntry {
+    id: string;
+    tytul?: string | null;
+}
+import type { ToolDefinition } from '../../tools/index.js';
+import type { TFile } from 'obsidian';
+import type { TriggerItem } from './TriggerPopup.js';
+import type { SlashCommand } from './SlashCommandsRegistry.js';
+import type { RoleTotals } from '../../../core/index.js';
+import type { CacheMetadata } from '../../models/index.js';
+import type { TokenRowRefs } from './chatViewShape.js';
 
-// TS-any: receiver legacy mixinów składany runtime przez Object.assign.
-type ChatViewMixinContext = any;
+/** Wzmianka `@` wpięta do paska chipów (`MentionAutocomplete` jest jeszcze nietypowany). */
+interface ChatMentionChip {
+    type: string;
+    name: string;
+    path: string;
+    icon?: string;
+}
+
+/** Opcja listy rozwijanej w mini-formularzu skilla. */
+type PreQuestionOption = string | { value: string; label?: string; group?: string };
+
+/**
+ * Kontrolka mini-formularza skilla. Pola `_dependsOn`/`_allOptions` dokleja do węzła sam render
+ * (kaskada „rodzic filtruje opcje dziecka"), więc typ musi je znać.
+ */
+type PreQuestionInput = (HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement) & {
+    _dependsOn?: string;
+    _allOptions?: PreQuestionOption[];
+};
 
 /**
  * Rdzeń ręcznej kompresji kontekstu, dzielony przez guzik 🗜️ „Sumaryzuj chat" (`_renderSlimBar`
@@ -39,7 +73,7 @@ type ChatViewMixinContext = any;
  *
  * @returns `false` gdy za mało wiadomości (kompresja NIE wystartowała), `true` gdy się odbyła.
  */
-export async function runManualCompression(view: ChatViewMixinContext): Promise<boolean> {
+export async function runManualCompression(view: ChatViewLike): Promise<boolean> {
     if (view.rollingWindow.messages.length < 4) {
         new Notice(t('chat.too_few_messages'));
         return false;
@@ -59,7 +93,7 @@ export async function runManualCompression(view: ChatViewMixinContext): Promise<
 
 // ── Main view render ────────────────────────────────────────────────
 
-export async function renderView(this: ChatViewMixinContext, container = this.container) {
+export async function renderView(this: ChatViewLike, container = this.container) {
     // Adopt chat styles (CSSStyleSheet from import) przez `adoptSheet`, żeby demontaż pluginu
     // zdjął arkusz zamiast zostawiać go w dokumencie do restartu.
     adoptSheet(chat_view_styles);
@@ -211,7 +245,8 @@ export async function renderView(this: ChatViewMixinContext, container = this.co
     });
     // Wire attach button click
     attachBtnWrapper.addEventListener('click', () => {
-        this.attachmentManager.getAttachButton()?.click();
+        // TS-boundary: `AttachmentManager` (modules/ui-components) ma jeszcze sygnatury `any`.
+        (this.attachmentManager!.getAttachButton() as HTMLElement | null)?.click();
     });
 
     // Keep toolbar ref for mode popover positioning
@@ -219,9 +254,9 @@ export async function renderView(this: ChatViewMixinContext, container = this.co
 
     // @ Mentions autocomplete — chips rendered in AttachmentManager's chip bar
     this.mentionAutocomplete = new MentionAutocomplete(this.input_area, this.plugin, {
-        onChange: (mentions: ChatViewMixinContext) => {
-            this.attachmentManager.setMentionChips(mentions, (index: number) => {
-                this.mentionAutocomplete.removeMention(index);
+        onChange: (mentions: ChatMentionChip[]) => {
+            this.attachmentManager!.setMentionChips(mentions, (index: number) => {
+                this.mentionAutocomplete!.removeMention(index);
             });
             this.handleInputResize();
         },
@@ -282,7 +317,7 @@ export async function renderView(this: ChatViewMixinContext, container = this.co
  * TOP: utility icons (artifacts, new chat, consolidate, save, close, tokens)
  * BOTTOM: agent skills in 2-column grid
  */
-export function _renderSlimBar(this: ChatViewMixinContext) {
+export function _renderSlimBar(this: ChatViewLike) {
     if (!this._slimBar) return;
     this._slimBar.empty();
 
@@ -303,8 +338,8 @@ export function _renderSlimBar(this: ChatViewMixinContext) {
     closeBtn.addEventListener('click', async () => {
         try {
             await this._closeActiveTab();
-        } catch (e: ChatViewMixinContext) {
-            log.warn('Chat', `Close tab failed: ${e?.message || e}`);
+        } catch (e) {
+            log.warn('Chat', `Close tab failed: ${(e as Error)?.message || (e as { toString(): string })}`);
         }
     });
 
@@ -381,7 +416,7 @@ export function _renderSlimBar(this: ChatViewMixinContext) {
 
 // ── Skill buttons ───────────────────────────────────────────────────
 
-export function renderSkillButtons(this: ChatViewMixinContext) {
+export function renderSkillButtons(this: ChatViewLike) {
     if (!this.skillButtonsBar) return;
     this.skillButtonsBar.empty();
 
@@ -408,7 +443,7 @@ export function renderSkillButtons(this: ChatViewMixinContext) {
         btn.addEventListener('click', () => {
             if (this.is_generating) return;
 
-            if (skill.preQuestions?.length > 0) {
+            if ((skill.preQuestions?.length as number) > 0) {
                 this._showSkillPreQuestions(skill);
                 return;
             }
@@ -419,7 +454,7 @@ export function renderSkillButtons(this: ChatViewMixinContext) {
     }
 }
 
-export function renderSubAgentButtons(this: ChatViewMixinContext) {
+export function renderSubAgentButtons(this: ChatViewLike) {
     if (!this.subAgentButtonsBar) return;
     this.subAgentButtonsBar.empty();
 
@@ -448,7 +483,7 @@ export function renderSubAgentButtons(this: ChatViewMixinContext) {
     }
 }
 
-export function renderMcpServerButtons(this: ChatViewMixinContext) {
+export function renderMcpServerButtons(this: ChatViewLike) {
     if (!this.mcpServerButtonsBar) return;
     this.mcpServerButtonsBar.empty();
 
@@ -457,7 +492,7 @@ export function renderMcpServerButtons(this: ChatViewMixinContext) {
     if (!registry) return;
 
     const visibleTools = registry.filterByAgent ? registry.filterByAgent(agent) : (registry.getAllTools?.() || []);
-    const servers = new Set();
+    const servers = new Set<string>();
     for (const tool of visibleTools) {
         const server = tool.serverName || registry.getBuiltinServerForTool?.(tool.name);
         if (server && server !== 'core') servers.add(server);
@@ -481,7 +516,7 @@ export function renderMcpServerButtons(this: ChatViewMixinContext) {
  * Chip aktywnego artefaktu nad inputem. Tytuł + „odśwież stan" (ponowne wstrzyknięcie
  * sparsowanego JSON przez przywołanie) + „odepnij" (czyści aktywny artefakt).
  */
-export function _renderArtifactChip(this: ChatViewMixinContext) {
+export function _renderArtifactChip(this: ChatViewLike) {
     const bar = this._artifactChipBar;
     if (!bar) return;
     bar.empty();
@@ -496,7 +531,7 @@ export function _renderArtifactChip(this: ChatViewMixinContext) {
     // Tytuł ze store'a (śledzenie po frontmatterze); brak → sam id.
     let tytul = id;
     try {
-        const found = this.plugin?.artifactStore?.list?.()?.find((a: ChatViewMixinContext) => a.id === id);
+        const found = this.plugin?.artifactStore?.list?.()?.find((a: ArtifactListEntry) => a.id === id);
         if (found?.tytul) tytul = found.tytul;
     } catch { /* store niegotowy → pokaż id */ }
 
@@ -535,7 +570,7 @@ export function _renderArtifactChip(this: ChatViewMixinContext) {
  * Pokaż właściwy widok slotu paska dolnego — textarea ('input') albo listę `todo` ('todo').
  * Dolny rząd guzików (wyślij/stop, spinacz, mikrofon, autonomia…) zostaje widoczny w OBU.
  */
-export function _applyBottomBarMode(this: ChatViewMixinContext) {
+export function _applyBottomBarMode(this: ChatViewLike) {
     const todoMode = this._bottomBarMode === 'todo';
     // Wytyczne katalogu wtyczek Obsidiana (obsidianmd/no-static-styles-assignment) wymagają
     // klasy CSS zamiast inline `.style.display`. Przełącznik widoku slotu jest dwustanowy
@@ -546,7 +581,7 @@ export function _applyBottomBarMode(this: ChatViewMixinContext) {
 }
 
 /** Ręczne przełączenie widoku slotu (klik w chip `📋 done/total`). */
-export function _toggleBottomBarMode(this: ChatViewMixinContext) {
+export function _toggleBottomBarMode(this: ChatViewLike) {
     this._bottomBarMode = this._bottomBarMode === 'todo' ? 'input' : 'todo';
     this._applyBottomBarMode();
     if (this._bottomBarMode === 'input') this.input_area?.focus();
@@ -561,7 +596,7 @@ export function _toggleBottomBarMode(this: ChatViewMixinContext) {
  * przeskakuje na 'todo', jej zniknięcie wraca na 'input', a ręczny wybór usera w trakcie życia
  * listy jest respektowany (check/add nie wyrzuca go z pisania).
  */
-export function _renderTodoPanel(this: ChatViewMixinContext) {
+export function _renderTodoPanel(this: ChatViewLike) {
     const bar = this._todoPanelBar;
     if (!bar) return;
     bar.empty();
@@ -615,10 +650,10 @@ export function _renderTodoPanel(this: ChatViewMixinContext) {
  * userowi co kilka sekund (ta sama mina, która w sidebarze zjadała wpisywaną wiadomość).
  * Rozwinięcie biegu, którego już nie ma na liście, gasimy — inaczej zostałoby na zawsze.
  */
-export function _renderSubTaskStrip(this: ChatViewMixinContext) {
+export function _renderSubTaskStrip(this: ChatViewLike) {
     const host = this._subStripContainer;
     if (!host) return;
-    const tab = this.chatTabs?.find((x: ChatViewMixinContext) => x.isActive) || this.chatTabs?.[0];
+    const tab = this.chatTabs?.find((x: ChatTab) => x.isActive) || this.chatTabs?.[0];
     const count = renderSubTaskStrip(host, {
         plugin: this.plugin,
         tabKey: _tabKey(tab),
@@ -641,7 +676,7 @@ export function _renderSubTaskStrip(this: ChatViewMixinContext) {
  * w 250 ms okno. Świadomie NIE dotykamy pola tekstowego ani jego focusa — pasek jest
  * osobnym kontenerem nad wiadomościami, przerysowanie nie rusza inputu.
  */
-export function _wireSubTaskStrip(this: ChatViewMixinContext) {
+export function _wireSubTaskStrip(this: ChatViewLike) {
     const events = this.plugin?.subTaskRegistry?.events;
     if (!events?.on || this._subStripUnsubs?.length) return;
     this._subStripUnsubs = [];
@@ -659,7 +694,7 @@ export function _wireSubTaskStrip(this: ChatViewMixinContext) {
 }
 
 /** Odpięcie subskrypcji + timera (zamknięty czat nie ma czego przerysowywać). */
-export function _unwireSubTaskStrip(this: ChatViewMixinContext) {
+export function _unwireSubTaskStrip(this: ChatViewLike) {
     for (const off of this._subStripUnsubs || []) {
         try { off(); } catch { /* sprzątanie nie ma prawa wywalić zamykania widoku */ }
     }
@@ -670,14 +705,14 @@ export function _unwireSubTaskStrip(this: ChatViewMixinContext) {
     }
 }
 
-export function _showMcpToolPicker(this: ChatViewMixinContext, server: string, triggerBtn: ChatViewMixinContext) {
+export function _showMcpToolPicker(this: ChatViewLike, server: string, triggerBtn: HTMLElement | null) {
     this._chatBody?.querySelector('.pkm-trigger-picker')?.remove();
     const registry = this.plugin?.toolRegistry;
     const agent = this.plugin?.agentManager?.getActiveAgent?.();
     if (!registry) return;
 
     const visibleTools = registry.filterByAgent ? registry.filterByAgent(agent) : (registry.getAllTools?.() || []);
-    const tools = visibleTools.filter((tool: ChatViewMixinContext) => (tool.serverName || registry.getBuiltinServerForTool?.(tool.name)) === server);
+    const tools = visibleTools.filter((tool: ToolDefinition) => (tool.serverName || registry.getBuiltinServerForTool?.(tool.name)) === server);
     if (tools.length === 0) return;
 
     const overlay = createDiv();
@@ -720,7 +755,7 @@ export function _showMcpToolPicker(this: ChatViewMixinContext, server: string, t
  * even before the first artifact — picker handles the empty case; artifact tool-calls don't emit a
  * slim-bar refresh event, so hide-when-empty would leave a new artifact hidden until re-render).
  */
-export function renderArtifactButtons(this: ChatViewMixinContext) {
+export function renderArtifactButtons(this: ChatViewLike) {
     if (!this.artifactButtonsBar) return;
     this.artifactButtonsBar.empty();
 
@@ -742,12 +777,12 @@ export function renderArtifactButtons(this: ChatViewMixinContext) {
  * Picker of the active agent's artifacts (mirror of `_showMcpToolPicker`). Active artifact marked ✓;
  * click = set active + inject fresh state via the B4 summon path; „✕ odepnij" clears the active one.
  */
-export function _showArtifactPicker(this: ChatViewMixinContext, triggerBtn: ChatViewMixinContext) {
+export function _showArtifactPicker(this: ChatViewLike, triggerBtn: HTMLElement | null) {
     this._chatBody?.querySelector('.pkm-trigger-picker')?.remove();
 
     const store = this.plugin?.artifactStore;
     const agent = this.plugin?.agentManager?.getActiveAgent?.();
-    let list = [];
+    let list: ArtifactListEntry[] = [];
     try { list = store ? store.list({ agent: agent?.name }) : []; } catch { list = []; }
     const { items } = buildArtifactPickerItems(list, this.currentArtifactId);
 
@@ -793,9 +828,11 @@ export function _showArtifactPicker(this: ChatViewMixinContext, triggerBtn: Chat
                     const file = this.app.vault.getAbstractFileByPath(res.path);
                     if (!file) return;
                     try {
-                        await this.app.workspace.getLeaf('tab').openFile(file);
-                    } catch (e: ChatViewMixinContext) {
-                        log.warn('Chat', `Open artifact note failed: ${e?.message || e}`);
+                        // `openFile` żąda instancji `TFile`; picker wskazuje notatkę artefaktu,
+                        // a `instanceof` w tym miejscu byłoby zmianą runtime'u.
+                        await this.app.workspace.getLeaf('tab').openFile(file as TFile);
+                    } catch (e) {
+                        log.warn('Chat', `Open artifact note failed: ${(e as Error)?.message || (e as { toString(): string })}`);
                     }
                 })();
             });
@@ -831,13 +868,13 @@ export function _showArtifactPicker(this: ChatViewMixinContext, triggerBtn: Chat
  * Show pre-questions mini-form overlay for a skill.
  * User fills in variables, then prompt is injected with substitutions.
  */
-export function _showSkillPreQuestions(this: ChatViewMixinContext, skill: ChatViewMixinContext) {
+export function _showSkillPreQuestions(this: ChatViewLike, skill: ChatSkillConfig) {
     // Remove existing overlay if any
     this._chatBody?.querySelector('.pkm-skill-pq-overlay')?.remove();
 
     const overlay = createDiv();
     overlay.className = 'pkm-skill-pq-overlay';
-    const hasAdvanced = skill.preQuestions.some((pq: ChatViewMixinContext) => pq.type === 'select' || pq.type === 'textarea');
+    const hasAdvanced = skill.preQuestions!.some((pq) => pq.type === 'select' || pq.type === 'textarea');
     const overlayWidth = hasAdvanced ? 320 : 240;
     // Static styling lives in chat_view.css (.pkm-skill-pq-overlay); only the width is dynamic.
     overlay.style.width = `${overlayWidth}px`;
@@ -856,9 +893,9 @@ export function _showSkillPreQuestions(this: ChatViewMixinContext, skill: ChatVi
     setSvgLabel(title, IconGenerator.generate(skill.name, skill.icon_category || 'arcane', { size: 16, color: 'currentColor' }), skill.name);
     overlay.appendChild(title);
 
-    const inputs: Record<string, ChatViewMixinContext> = {};
+    const inputs: Record<string, PreQuestionInput> = {};
 
-    for (const pq of skill.preQuestions as ChatViewMixinContext[]) {
+    for (const pq of skill.preQuestions as ChatSkillPreQuestion[]) {
         const row = createDiv();
         row.className = 'pkm-skill-pq-row';
 
@@ -867,7 +904,7 @@ export function _showSkillPreQuestions(this: ChatViewMixinContext, skill: ChatVi
         label.textContent = pq.question;
         row.appendChild(label);
 
-        let inputEl;
+        let inputEl: PreQuestionInput;
         const pqType = pq.type || 'text';
 
         if (pqType === 'select') {
@@ -907,8 +944,8 @@ export function _showSkillPreQuestions(this: ChatViewMixinContext, skill: ChatVi
 
         // Store metadata for depends_on wiring
         if (pq.depends_on) {
-            (inputEl as ChatViewMixinContext)._dependsOn = pq.depends_on;
-            (inputEl as ChatViewMixinContext)._allOptions = Array.isArray(pq.options) ? [...pq.options] : [];
+            inputEl._dependsOn = pq.depends_on;
+            inputEl._allOptions = Array.isArray(pq.options) ? [...pq.options] : [];
         }
 
         overlay.appendChild(row);
@@ -919,7 +956,7 @@ export function _showSkillPreQuestions(this: ChatViewMixinContext, skill: ChatVi
         if (!el._dependsOn || !inputs[el._dependsOn]) continue;
         const parentEl = inputs[el._dependsOn];
         const childEl = el;
-        const allOpts = el._allOptions;
+        const allOpts = el._allOptions as PreQuestionOption[];
 
         const filterOptions = () => {
             const parentVal = parentEl.value;
@@ -978,7 +1015,7 @@ export function _showSkillPreQuestions(this: ChatViewMixinContext, skill: ChatVi
 
 // ── Typing indicator ────────────────────────────────────────────────
 
-export function showTypingIndicator(this: ChatViewMixinContext, statusText: string) {
+export function showTypingIndicator(this: ChatViewLike, statusText?: string) {
     if (!statusText) statusText = t('chat.crystallizing');
     if (this.typingIndicator) {
         this.updateTypingStatus(statusText);
@@ -998,14 +1035,14 @@ export function showTypingIndicator(this: ChatViewMixinContext, statusText: stri
     this.scrollToBottom();
 }
 
-export function updateTypingStatus(this: ChatViewMixinContext, statusText: string) {
+export function updateTypingStatus(this: ChatViewLike, statusText: string) {
     if (this.typingStatusEl) {
         this.typingStatusEl.textContent = statusText;
     }
     this.scrollToBottom();
 }
 
-export function hideTypingIndicator(this: ChatViewMixinContext) {
+export function hideTypingIndicator(this: ChatViewLike) {
     if (this.typingIndicator) {
         this.typingIndicator.remove();
         this.typingIndicator = null;
@@ -1022,7 +1059,7 @@ export function hideTypingIndicator(this: ChatViewMixinContext) {
  *   ani kryształu, ani wierszy akcji — a `_drawConnectorLines` skanuje CAŁĄ listę wiadomości
  *   i przeplata odczyty `getBoundingClientRect` z wstawianiem węzłów.
  */
-export function scrollToBottom(this: ChatViewMixinContext, smooth = true, opts: { drawConnectors?: boolean } = {}) {
+export function scrollToBottom(this: ChatViewLike, smooth = true, opts: { drawConnectors?: boolean } = {}) {
     const container = this.messages_container;
     if (!container) return;
 
@@ -1055,7 +1092,7 @@ export function scrollToBottom(this: ChatViewMixinContext, smooth = true, opts: 
  * zwraca wtedy zera, więc rysowanie i tak dałoby śmieci. Zaległe rysowanie wykona się, gdy okno
  * wróci. Fallback na `setTimeout` dla środowisk bez rAF (harness/testy).
  */
-export function _scheduleConnectorRedraw(this: ChatViewMixinContext) {
+export function _scheduleConnectorRedraw(this: ChatViewLike) {
     if (this._connectorRedrawCancel) return;
     const run = () => {
         this._connectorRedrawCancel = null;
@@ -1071,7 +1108,7 @@ export function _scheduleConnectorRedraw(this: ChatViewMixinContext) {
 }
 
 /** Rozbraja zaplanowane przerysowanie łączników (zamknięcie widoku). */
-export function _cancelConnectorRedraw(this: ChatViewMixinContext) {
+export function _cancelConnectorRedraw(this: ChatViewLike) {
     if (!this._connectorRedrawCancel) return;
     try { this._connectorRedrawCancel(); } catch { /* best-effort */ }
     this._connectorRedrawCancel = null;
@@ -1080,7 +1117,7 @@ export function _cancelConnectorRedraw(this: ChatViewMixinContext) {
 /**
  * After generation completes, smoothly center the final agent message.
  */
-export function scrollToFinalMessage(this: ChatViewMixinContext) {
+export function scrollToFinalMessage(this: ChatViewLike) {
     const container = this.messages_container;
     if (!container) return;
     const lastMessage = container.querySelector('.cs-message--agent:last-of-type');
@@ -1091,7 +1128,7 @@ export function scrollToFinalMessage(this: ChatViewMixinContext) {
 
 // ── Welcome message ─────────────────────────────────────────────────
 
-export function add_welcome_message(this: ChatViewMixinContext) {
+export function add_welcome_message(this: ChatViewLike) {
     const agentManager = this.plugin?.agentManager;
     const activeAgent = agentManager?.getActiveAgent();
     const agentName = activeAgent?.name || 'PKM Assistant';
@@ -1112,7 +1149,7 @@ export function add_welcome_message(this: ChatViewMixinContext) {
 
 // ── Input handling ──────────────────────────────────────────────────
 
-export function handleInputResize(this: ChatViewMixinContext) {
+export function handleInputResize(this: ChatViewLike) {
     if (!this.input_area) return;
     const textarea = this.input_area;
     textarea.style.removeProperty('height'); // Reset to count scrollHeight correctly (falls back to CSS auto)
@@ -1120,14 +1157,14 @@ export function handleInputResize(this: ChatViewMixinContext) {
     textarea.style.height = newHeight + 'px';
 }
 
-export function resetInputArea(this: ChatViewMixinContext) {
+export function resetInputArea(this: ChatViewLike) {
     if (!this.input_area) return;
     this.input_area.value = '';
     this.input_area.style.removeProperty('height'); // Reset to min-height (CSS floor, .cs-input-textarea)
     this.historyIndex = -1;
 }
 
-export function handle_input_keydown(this: ChatViewMixinContext, e: KeyboardEvent) {
+export function handle_input_keydown(this: ChatViewLike, e: KeyboardEvent) {
     // @ mention autocomplete takes priority when open
     if (this.mentionAutocomplete?.isOpen) {
         if (['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape'].includes(e.key)) {
@@ -1171,7 +1208,7 @@ export function handle_input_keydown(this: ChatViewMixinContext, e: KeyboardEven
     }
 }
 
-export function handleGlobalKeydown(this: ChatViewMixinContext, e: KeyboardEvent) {
+export function handleGlobalKeydown(this: ChatViewLike, e: KeyboardEvent) {
     if (e.key === 'Escape' && this.is_generating) {
         e.preventDefault();
         this.stop_generation();
@@ -1180,7 +1217,7 @@ export function handleGlobalKeydown(this: ChatViewMixinContext, e: KeyboardEvent
 
 // ── Token counter & context ─────────────────────────────────────────
 
-export function updateTokenCounter(this: ChatViewMixinContext) {
+export function updateTokenCounter(this: ChatViewLike) {
     const el = this._tokenDisplay || this.container?.querySelector('.cs-input-tokens');
     if (!el) return;
 
@@ -1211,7 +1248,7 @@ export function updateTokenCounter(this: ChatViewMixinContext) {
 }
 
 /** Update token panels — redirects to slim bar counters. */
-export function _updateTokenPanel(this: ChatViewMixinContext) {
+export function _updateTokenPanel(this: ChatViewLike) {
     this._updateSlimBarTokens();
     this._tokenViewer?.update();
 }
@@ -1228,7 +1265,7 @@ export function _updateTokenPanel(this: ChatViewMixinContext) {
  * @param {'main'|'minion'} role
  * @returns {{el: HTMLElement, valEl: HTMLElement}}
  */
-export function _buildTokenRow(this: ChatViewMixinContext, parent: ChatViewMixinContext, role: string) {
+export function _buildTokenRow(this: ChatViewLike, parent: HTMLElement, role: string): TokenRowRefs {
     const row = parent.createDiv({ cls: `cs-skillbar__token-row cs-skillbar__token-row--${role}` });
     const sessionTooltip = t('chat.token_viewer.session_total_tooltip');
     row.setAttribute('title', sessionTooltip);
@@ -1252,12 +1289,12 @@ export function _buildTokenRow(this: ChatViewMixinContext, parent: ChatViewMixin
  * Update the slim bar token display (2 counters: main/minion).
  * Each shows in↑ out↓ from API.
  */
-export function _updateSlimBarTokens(this: ChatViewMixinContext) {
+export function _updateSlimBarTokens(this: ChatViewLike) {
     if (!this._slimBarTokenMain) return;
     const s = this.tokenTracker.getSessionTotal();
     const fmt = (n: number) => n > 999 ? `${(n / 1000).toFixed(1)}k` : String(n);
 
-    const update = (ref: ChatViewMixinContext, data: ChatViewMixinContext) => {
+    const update = (ref: TokenRowRefs, data: RoleTotals) => {
         const total = (data.input || 0) + (data.output || 0);
         if (total > 0) {
             ref.valEl.textContent = `${fmt(data.input)}↑${fmt(data.output)}↓`;
@@ -1275,8 +1312,9 @@ export function _updateSlimBarTokens(this: ChatViewMixinContext) {
     // Nie ma wiersza 'master': żadna konfiguracja produkowana przez plugin nie zasila
     // `byRole.master`, więc taki wiersz byłby trwale ukryty (`is-hidden` przy totalu 0).
 
+    // `_slimBarTokenMain` sprawdzone na wejściu funkcji; oba wiersze powstają razem.
     update(this._slimBarTokenMain, main);
-    update(this._slimBarTokenMinion, minion);
+    update(this._slimBarTokenMinion!, minion);
 
     // Show main always if session has any tokens
     if (s.total > 0) {
@@ -1286,7 +1324,7 @@ export function _updateSlimBarTokens(this: ChatViewMixinContext) {
 
 // ── Permissions badge ───────────────────────────────────────────────
 
-export function updatePermissionsBadge(this: ChatViewMixinContext) {
+export function updatePermissionsBadge(this: ChatViewLike) {
     const agent = this.plugin.agentManager?.getActiveAgent();
     if (!agent) return;
 
@@ -1308,7 +1346,7 @@ export function updatePermissionsBadge(this: ChatViewMixinContext) {
 
 // ── Inline trigger popup ───────────────────────────
 
-export function _handleTriggerKeyDown(this: ChatViewMixinContext, e: KeyboardEvent) {
+export function _handleTriggerKeyDown(this: ChatViewLike, e: KeyboardEvent) {
     // If popup open, give it first chance to consume key
     if (this._triggerPopup?.isOpen()) {
         if (this._triggerPopup.handleKeyDown(e)) {
@@ -1329,7 +1367,7 @@ export function _handleTriggerKeyDown(this: ChatViewMixinContext, e: KeyboardEve
     window.setTimeout(() => this._openTriggerPopup(triggerChar, triggerPos), 0);
 }
 
-export function _handleTriggerInput(this: ChatViewMixinContext) {
+export function _handleTriggerInput(this: ChatViewLike) {
     if (!this._triggerPopup?.isOpen()) return;
     const value = this.input_area.value || '';
     const cursor = this.input_area.selectionStart ?? value.length;
@@ -1354,15 +1392,15 @@ export function _handleTriggerInput(this: ChatViewMixinContext) {
     this._triggerPopup.setFilter(filter);
 }
 
-export function _openTriggerPopup(this: ChatViewMixinContext, triggerChar: string, triggerPos: number) {
+export function _openTriggerPopup(this: ChatViewLike, triggerChar: string, triggerPos: number) {
     this._closeTriggerPopup();
     const agent = this.plugin?.agentManager?.getActiveAgent?.();
     this._triggerPos = triggerPos;
     const slashList = (typeof this.slashCommands?.list === 'function' ? this.slashCommands.list() : [])
-        .map((cmd: ChatViewMixinContext) => ({ name: cmd.name, description: cmd.description || '' }));
+        .map((cmd: SlashCommand) => ({ name: cmd.name, description: cmd.description || '' }));
     this._triggerPopup = new TriggerPopup(this.plugin, agent, this.input_area, {
         slashCommands: slashList,
-        onSelect: (item: ChatViewMixinContext, marker: string) => {
+        onSelect: (item: TriggerItem, marker: string) => {
             const value = this.input_area.value || '';
             const cursor = this.input_area.selectionStart ?? value.length;
             const cutStart = Math.max(0, this._triggerPos);
@@ -1392,7 +1430,7 @@ export function _openTriggerPopup(this: ChatViewMixinContext, triggerChar: strin
     this._triggerPopup.open(triggerChar, this.input_area);
 }
 
-export function _closeTriggerPopup(this: ChatViewMixinContext) {
+export function _closeTriggerPopup(this: ChatViewLike) {
     if (this._triggerPopup) {
         this._triggerPopup.close();
         this._triggerPopup = null;
@@ -1400,7 +1438,7 @@ export function _closeTriggerPopup(this: ChatViewMixinContext) {
     this._triggerPos = -1;
 }
 
-export function _renderCacheSavingsBadge(this: ChatViewMixinContext, container: ChatViewMixinContext, cacheMeta: ChatViewMixinContext) {
+export function _renderCacheSavingsBadge(this: ChatViewLike, container: HTMLElement | null, cacheMeta: Partial<CacheMetadata> | null | undefined) {
     if (!container || !cacheMeta?.cached_tokens) return;
     const cached = Number(cacheMeta.cached_tokens || 0).toLocaleString();
     const total = Number(cacheMeta.total_input_tokens || 0).toLocaleString();

@@ -19,9 +19,9 @@ import type { SubTask, SubTaskOrigin } from '../../sub-agents/index.js';
 
 /** Minimalny kształt zakładki, jakiego potrzebuje dopasowanie (czat ma na niej więcej pól). */
 // Nie eksportowany - brak referencji spoza tego pliku (tu i na obu typach niżej).
+/** Zakladka w zakresie, jakiego dotyka dopasowanie adresu zwrotnego. */
 interface TabLike {
     agentName?: string;
-    [extra: string]: unknown;
 }
 
 interface SubTaskNotificationOptions {

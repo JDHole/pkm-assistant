@@ -50,6 +50,8 @@ import {
 import { getLimits } from '../../config/limits.js';
 import { t } from '../../core/i18n/index.js';
 import { log } from '../../core/utils/Logger.js';
+import type { CrystalNoticeOptions } from '../../core/index.js';
+import type { ChatModel } from '../models/index.js';
 
 import type {
     ArchiveSessionInfo,
@@ -64,8 +66,18 @@ import type {
     StreamChatModelLike,
 } from '../memory/index.js';
 
-// TS-any: App/plugin/model/modal are assembled by the composition root and test DI at runtime.
-type Runtime = any;
+/**
+ * `App` Obsidiana PRZELOTEM: kontroler nic z niego nie czyta (jedynie porównuje tożsamość
+ * i podaje modalowi), a musi zostać node-testowalny — stąd `unknown`, nie typ z `obsidian`.
+ */
+type RunnerApp = unknown;
+
+/**
+ * Model kompresji/dedupu. `ChatModel` (`modules/models`) i `StreamChatModelLike`
+ * (`modules/memory`) opisują TEN SAM adapter dwoma kontraktami — kontroler tylko go przenosi
+ * (nazwę czyta przez `ModelMetadata`, egzekucję robi `ArchiveWorkflow`).
+ */
+type RunnerModel = ChatModel | StreamChatModelLike | null;
 type ErrLike = { message?: string };
 type WorkflowAgentMemory = ConstructorParameters<typeof ArchiveWorkflow>[0];
 type WorkflowOptions = NonNullable<ConstructorParameters<typeof ArchiveWorkflow>[1]>;
@@ -82,13 +94,11 @@ type RunnerAgentMemory = WorkflowAgentMemory & {
     };
 };
 
-interface NoticeOptions {
-    type?: string;
-    timeout?: number;
-}
+/** Opcje powiadomienia — kanoniczny kształt należy do `core/runtime/contracts.ts`. */
+type NoticeOptions = CrystalNoticeOptions;
 
 interface PluginLike {
-    showCrystalNotice?(message: string, options: NoticeOptions): unknown;
+    showCrystalNotice?(message: string, options?: NoticeOptions): unknown;
 }
 
 interface ModelMetadata {
@@ -105,12 +115,12 @@ interface LoggedUsage {
 
 interface RunControllerOptions {
     plugin: PluginLike;
-    app: Runtime;
+    app: RunnerApp;
     run: ConsolidationRun;
     workflow: ArchiveWorkflow;
     agentMemory: RunnerAgentMemory;
     agentName: string;
-    model: Runtime;
+    model?: RunnerModel;
     settings: RunnerSettings;
 }
 
@@ -128,15 +138,15 @@ interface ConsolidationModalLike {
 }
 
 interface ConsolidationModalConstructor {
-    new (app: Runtime, options: ConsolidationModalOptions): ConsolidationModalLike;
+    new (app: RunnerApp, options: ConsolidationModalOptions): ConsolidationModalLike;
 }
 
 interface StartConsolidationOptions {
     plugin: PluginLike;
-    app: Runtime;
+    app: RunnerApp;
     agentMemory?: RunnerAgentMemory | null;
     agent?: RunnerAgent | null;
-    model?: Runtime;
+    model?: RunnerModel;
     settings?: RunnerSettings;
     source?: 'auto' | 'manual';
 }
@@ -148,7 +158,7 @@ const CONTROLLERS = new WeakMap<ConsolidationRun, RunController>();
 let openModal: ConsolidationModalLike | null = null;
 let openerUnsubscribe: (() => void) | null = null;
 /** Obiekt `app`, z którym zasubskrybowano opener (dev-reload pluginu podstawia nowy). */
-let openerApp: Runtime = null;
+let openerApp: RunnerApp = null;
 /** Atrapa klasy modalu dla testów — produkcja bierze klasę leniwym importem z shella. */
 let modalClassOverride: ConsolidationModalConstructor | null = null;
 
@@ -214,7 +224,7 @@ function stallTimeoutMs(settings: RunnerSettings): number {
     return getLimits(full).chat_stream_stall_timeout_ms;
 }
 
-function modelNameOf(model: Runtime): string | null {
+function modelNameOf(model: RunnerModel | undefined): string | null {
     return (model as ModelMetadata)?.modelKey || (model as ModelMetadata)?.modelId || (model as ModelMetadata)?.model_name || null;
 }
 
@@ -232,12 +242,12 @@ function notice(plugin: PluginLike | null | undefined, message: string, opts: No
  */
 class RunController {
     declare plugin: PluginLike;
-    declare app: Runtime;
+    declare app: RunnerApp;
     declare run: ConsolidationRun;
     declare workflow: ArchiveWorkflow;
     declare agentMemory: RunnerAgentMemory;
     declare agentName: string;
-    declare model: Runtime;
+    declare model: RunnerModel | undefined;
     declare settings: RunnerSettings;
     declare _finished: boolean;
     declare _fallbackNotified: Set<string>;
@@ -449,7 +459,7 @@ class RunController {
  * Dynamiczny import siedzi w jedynym miejscu, które
  * modalu naprawdę potrzebuje.
  */
-export async function openConsolidationModal(app: Runtime, run: ConsolidationRun | null): Promise<ConsolidationModalLike | null> {
+export async function openConsolidationModal(app: RunnerApp, run: ConsolidationRun | null): Promise<ConsolidationModalLike | null> {
     if (!run) return null;
     if (openModal && openModal.run === run) return openModal; // szybka ścieżka: bez importu
 
@@ -485,7 +495,7 @@ export async function openConsolidationModal(app: Runtime, run: ConsolidationRun
  * Funkcja nie jest eksportowana — jedyny wołacz jest w tym pliku
  * (`startConsolidationRun`); poza modułem nikt tej funkcji nie importuje.
  */
-function registerConsolidationModalOpener(app: Runtime): (() => void) | null {
+function registerConsolidationModalOpener(app: RunnerApp): (() => void) | null {
     if (openerUnsubscribe && openerApp === app) return openerUnsubscribe;
     if (openerUnsubscribe) {
         try { openerUnsubscribe(); } catch { /* best-effort */ }

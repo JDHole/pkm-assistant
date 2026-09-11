@@ -21,7 +21,7 @@
 // `export` zdjęty na trzech typach w tym pliku — zero referencji
 // spoza pliku; funkcje, które je noszą w sygnaturze (`createTurnAbort`, `collectTurnsToStop`, …),
 // zostają publiczne.
-interface TurnAbortHandle {
+export interface TurnAbortHandle {
     /** Czy ta tura została przerwana (Stop / watchdog / zamknięcie widoku). */
     isAborted(): boolean;
     /** Powód pierwszego przerwania (`'stop'`, `'stall'`, `'close'`, …) albo `null`. */

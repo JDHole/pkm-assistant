@@ -64,8 +64,11 @@ export class RollingWindowMessageStore {
      * @param {string|Array} content - wynik (string albo tablica bloków content multimodalnych)
      * @param {string} toolCallId
      */
-    appendToolResult(content: MessageContent, toolCallId: string): void {
-        void this.rw.addMessage('tool', content, { tool_call_id: toolCallId });
+    appendToolResult(content: string | unknown[], toolCallId: string): void {
+        // TS-boundary: `MessageStoreLike` (agent-loop) oddaje wynik narzędzia jako `unknown[]`
+        // — bloki treści różnych dostawców. Adapter tylko je PRZEKAZUJE do okna, nie czyta ich
+        // pól, więc walidacja kształtu (zmiana runtime) nie należy do tej warstwy.
+        void this.rw.addMessage('tool', content as MessageContent, { tool_call_id: toolCallId });
     }
 
     /**

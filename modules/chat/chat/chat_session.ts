@@ -22,15 +22,27 @@ import {
 // żeby nie było czwartego miejsca przepisującego
 // `sessionId || sessionPath || sessionName || agentName` ręcznie.
 import { _tabKey } from './chat_tabs.js';
+// Receiver mixina = ZŁOŻONY widok (`ChatViewLike`: klasa + osiem paczek mixinów).
+import type { ChatViewLike } from './chatViewShape.js';
+import type { AgentMemory } from '../../memory/index.js';
+import type { ActiveSessionEventInput, ActiveSessionInfo } from '../../memory/index.js';
 
-// TS-any: receiver legacy mixinów składany runtime przez Object.assign.
-type ChatViewMixinContext = any;
+/**
+ * Sesja odtworzona z dysku. Gałąź główna dostaje pełny wpis `ActiveSessionInfo`, gałąź
+ * ratunkowa (`restoreActiveSession`) składa minimalny — stąd wszystko poza ścieżką opcjonalne.
+ */
+interface RestoredSession {
+    agentName: string;
+    session: { path: string; name?: string; label?: string; mtime?: number };
+    rollingWindow: RollingWindow;
+    tokenTracker: TokenTracker;
+}
 
 /**
  * Initialize session manager — auto-save timer + restore last active session.
  * Memory v3 drops the v2 draft recovery flow: sessions live in active/ and archive/ only.
  */
-export async function initSessionManager(this: ChatViewMixinContext) {
+export async function initSessionManager(this: ChatViewLike) {
     // registerInterval ties the timer to the view lifecycle (Component clears it on unload),
     // same as the idle tick below — no manual field, no clearInterval in onClose.
     const autoSaveInterval = this.env?.settings?.pkmAssistant?.autoSaveInterval;
@@ -57,7 +69,7 @@ export async function initSessionManager(this: ChatViewMixinContext) {
  * One idle check. Live-reads idleConsolidationMinutes (default 20, 0=off) so a Settings
  * change takes effect without reloading the view. Best-effort — never throws upward.
  */
-export async function _idleTick(this: ChatViewMixinContext) {
+export async function _idleTick(this: ChatViewLike) {
     try {
         if (!this._idleScheduler) return;
         const idleMinutes = this.env?.settings?.pkmAssistant?.idleConsolidationMinutes ?? 20;
@@ -73,8 +85,8 @@ export async function _idleTick(this: ChatViewMixinContext) {
         this._lastIdleSaveMsgCount = msgCount;
         await this.handleSaveSession();
         log.info('Chat', `Idle consolidation: saved session after ${this._idleScheduler.idleMinutes} min idle (${newEntries} new entries)`);
-    } catch (e: ChatViewMixinContext) {
-        log.warn('Chat', `Idle tick failed (non-fatal): ${e?.message || e}`);
+    } catch (e) {
+        log.warn('Chat', `Idle tick failed (non-fatal): ${(e as Error)?.message || (e as { toString(): string })}`);
     }
 }
 
@@ -89,7 +101,7 @@ export async function _idleTick(this: ChatViewMixinContext) {
  * again. State-only pruning is the safe contract.
  * @private
  */
-async function _pruneEmptyActiveSessionFromState(agentMemory: ChatViewMixinContext, session: ChatViewMixinContext) {
+async function _pruneEmptyActiveSessionFromState(agentMemory: AgentMemory, session: ActiveSessionInfo) {
     try {
         const path = session?.path;
         const name = session?.name || (path ? path.split('/').pop() : null);
@@ -102,8 +114,8 @@ async function _pruneEmptyActiveSessionFromState(agentMemory: ChatViewMixinConte
             agentMemory.activeSessionPath = null;
             await agentMemory._persistActiveSession?.();
         }
-    } catch (e: ChatViewMixinContext) {
-        log.warn('Chat', `Prune empty active session pointer failed (non-fatal): ${e.message}`);
+    } catch (e) {
+        log.warn('Chat', `Prune empty active session pointer failed (non-fatal): ${(e as Error).message}`);
     }
 }
 
@@ -117,27 +129,27 @@ async function _pruneEmptyActiveSessionFromState(agentMemory: ChatViewMixinConte
  * z ewidencji. Best-effort: pad nie może zablokować otwarcia nowej rozmowy.
  * @private
  */
-async function _retireActiveSession(agentMemory: ChatViewMixinContext, reason: string) {
+async function _retireActiveSession(agentMemory: AgentMemory | null | undefined, reason: string) {
     try {
         if (!agentMemory?.discardActiveSession) return;
         const moved = await agentMemory.discardActiveSession();
         if (moved) log.info('Chat', `Old session retired to .discarded/ (${reason}): ${moved}`);
-    } catch (e: ChatViewMixinContext) {
-        log.warn('Chat', `Retiring old session failed (non-fatal): ${e?.message || e}`);
+    } catch (e) {
+        log.warn('Chat', `Retiring old session failed (non-fatal): ${(e as Error)?.message || (e as { toString(): string })}`);
     }
 }
 
 /**
  * Restore the last active session from disk.
  */
-export async function _restoreActiveSession(this: ChatViewMixinContext) {
+export async function _restoreActiveSession(this: ChatViewLike) {
     try {
         const agentManager = this.plugin?.agentManager;
         if (!agentManager) return;
 
         const agents = agentManager.getAllAgents?.() || [];
         const activeAgentName = agentManager.getActiveAgent?.()?.name || 'Jaskier';
-        const restored = [];
+        const restored: RestoredSession[] = [];
 
         for (const agent of agents) {
             const agentName = agent?.name;
@@ -150,8 +162,8 @@ export async function _restoreActiveSession(this: ChatViewMixinContext) {
                 let parsed = null;
                 try {
                     parsed = await agentMemory.loadActiveSession(session);
-                } catch (e: ChatViewMixinContext) {
-                    log.warn('Chat', `Could not load active session ${session?.name}: ${e.message}`);
+                } catch (e) {
+                    log.warn('Chat', `Could not load active session ${session?.name}: ${(e as Error).message}`);
                 }
                 if (!parsed?.messages?.length) {
                     // Memory v3: do NOT delete the underlying file. We previously called
@@ -185,7 +197,8 @@ export async function _restoreActiveSession(this: ChatViewMixinContext) {
             // ZERO wiadomości i restore po cichu by się nie odbył - dlatego czytamy tym samym
             // czytnikiem co gałąź główna wyżej (`loadActiveSession` → `parseActiveSession`,
             // rozumie format A, B i pliki MIESZANE).
-            const parsed = await agentMemory.loadActiveSession(restoredPath);
+            // `restoredPath` jest niepuste tylko wtedy, gdy `agentMemory` istnieje (linia wyżej).
+            const parsed = await agentMemory!.loadActiveSession(restoredPath);
             if (!parsed?.messages?.length) return;
 
             const rollingWindow = this._createRollingWindow(activeAgentName);
@@ -251,17 +264,18 @@ export async function _restoreActiveSession(this: ChatViewMixinContext) {
         this._updateTokenPanel();
         if (this._tabBarContainer) this._renderTabBar(this._tabBarContainer);
         log.info('Chat', `Restored ${restored.length} active session(s)`);
-    } catch (e: ChatViewMixinContext) {
-        log.warn('Chat', `Session restore failed: ${e.message}`);
+    } catch (e) {
+        log.warn('Chat', `Session restore failed: ${(e as Error).message}`);
     }
 }
 
-export async function startActiveSession(this: ChatViewMixinContext, agentName: string) {
+export async function startActiveSession(this: ChatViewLike, agentName: string) {
     const agentManager = this.plugin?.agentManager;
     const owner = resolveOwnerAgentName(agentManager, agentName);
     const agentMemory = resolveOwnerMemory(agentManager, owner);
     if (!agentMemory?.startActiveSession) return null;
-    return agentMemory.startActiveSession(owner);
+    // `resolveOwnerMemory` oddaje pamiec TYLKO dla znanej nazwy - w tej galezi `owner` jest stringiem.
+    return agentMemory.startActiveSession(owner!);
 }
 
 /**
@@ -272,7 +286,7 @@ export async function startActiveSession(this: ChatViewMixinContext, agentName: 
  * aktywnej pamięci wsypywałoby wiadomości, wywołania narzędzi i ich WYNIKI do
  * `sessions/active/` zupełnie innego agenta, gdyby user przełączył zakładkę w trakcie tury.
  */
-export async function appendToActiveSession(this: ChatViewMixinContext, event: ChatViewMixinContext) {
+export async function appendToActiveSession(this: ChatViewLike, event: ActiveSessionEventInput) {
     const agentManager = this.plugin?.agentManager;
     const owner = resolveOwnerAgentName(agentManager, event?.agentName);
     const agentMemory = resolveOwnerMemory(agentManager, owner);
@@ -283,7 +297,7 @@ export async function appendToActiveSession(this: ChatViewMixinContext, event: C
 /**
  * Handle new session — save, optionally compress, reset.
  */
-export async function handleNewSession(this: ChatViewMixinContext) {
+export async function handleNewSession(this: ChatViewLike) {
     // Nowa sesja NIE może zostawić trwającej tury jako zombie. Porzucona tura wisiałaby w tle
     // z uzbrojonym watchdogiem, który strzela „po agencie" i ubijałby requesty KOLEJNEJ tury
     // tego samego agenta. Ubijamy jawnie, zanim wymienimy sesję.
@@ -303,7 +317,7 @@ export async function handleNewSession(this: ChatViewMixinContext) {
         });
         // prompt() returns { choice }. SessionCloseModal nie ma kanału `options` - byłby
         // strukturalnie pusty i nieczytany.
-        const { choice } = await modal.prompt() as ChatViewMixinContext || { choice: 'cancel' };
+        const { choice } = await modal.prompt() || { choice: 'cancel' };
 
         if (choice === 'cancel') return;
 
@@ -359,7 +373,7 @@ export async function handleNewSession(this: ChatViewMixinContext) {
  * @param agentName - właściciel tury (opcjonalny)
  * @param rollingWindow - okno tury (opcjonalne; brak = okno bieżącej zakładki)
  */
-export async function handleSaveSession(this: ChatViewMixinContext, agentName?: string | null, rollingWindow?: ChatViewMixinContext) {
+export async function handleSaveSession(this: ChatViewLike, agentName?: string | null, rollingWindow?: RollingWindow | null) {
     log.debug('Chat', 'handleSaveSession');
     const rw = rollingWindow || this.rollingWindow;
     if (!rw?.messages?.length) return;
@@ -392,7 +406,7 @@ export async function handleSaveSession(this: ChatViewMixinContext, agentName?: 
 /**
  * Load a session from disk. Modal z 3 opcjami przed loadem.
  */
-export async function handleLoadSession(this: ChatViewMixinContext, path: string) {
+export async function handleLoadSession(this: ChatViewLike, path: string) {
     log.info('Chat', `handleLoadSession: ${path}`);
     try {
         const agentMemory = this.plugin?.agentManager?.getActiveMemory();
@@ -408,7 +422,7 @@ export async function handleLoadSession(this: ChatViewMixinContext, path: string
             agentName: agent?.name || 'Agent',
             agentColor: agent?.color || '',
             sessionTitle: filename.replace(/\.md$/, ''),
-            sessionDate: parsed.metadata?.created || filename
+            sessionDate: (parsed.metadata?.created as string) || filename
         });
         const choice = await modal.prompt();
         if (choice === 'cancel') return;
@@ -454,7 +468,7 @@ export async function handleLoadSession(this: ChatViewMixinContext, path: string
  * Znajdź L1 summary który includes sesję.
  * Wykorzystuje frontmatter `sessions:` w L1 (cascade contract).
  */
-async function _findCoveringL1Summary(agentMemory: ChatViewMixinContext, sessionFilename: string) {
+async function _findCoveringL1Summary(agentMemory: AgentMemory, sessionFilename: string) {
     try {
         const listed = await agentMemory.vault.adapter.list(agentMemory.paths.l1);
         for (const filePath of listed?.files || []) {
@@ -476,7 +490,7 @@ async function _findCoveringL1Summary(agentMemory: ChatViewMixinContext, session
 /**
  * Zbuduj fresh agent context — brain + ostatnie 3 L1 summaries.
  */
-async function _buildFreshAgentContext(agentMemory: ChatViewMixinContext) {
+async function _buildFreshAgentContext(agentMemory: AgentMemory) {
     const parts = [];
     try {
         const brain = await agentMemory.getBrain();
@@ -515,14 +529,14 @@ async function _buildFreshAgentContext(agentMemory: ChatViewMixinContext) {
  * These entry points open the save-session review modal - they do not silently consolidate.
  * See modules/memory/CLAUDE.md.
  */
-export async function consolidateSession(this: ChatViewMixinContext) {
+export async function consolidateSession(this: ChatViewLike) {
     await runSaveSessionFlow({ view: this, plugin: this.plugin });
 }
 
 /**
  * Creates a RollingWindow with optional Summarizer.
  */
-export function _createRollingWindow(this: ChatViewMixinContext, agentName?: string | null) {
+export function _createRollingWindow(this: ChatViewLike, agentName?: string | null) {
     const maxTokens = this.env?.settings?.pkmAssistant?.maxContextTokens || 100000;
     const threshold = this.env?.settings?.pkmAssistant?.summarizationThreshold || 0.9;
     const toolTrimThreshold = this.env?.settings?.pkmAssistant?.toolTrimThreshold || 0.7;
@@ -561,7 +575,7 @@ export function _createRollingWindow(this: ChatViewMixinContext, agentName?: str
 /**
  * Build emergency task context for summarization.
  */
-export function _buildEmergencyTaskContext(this: ChatViewMixinContext, agentName?: string | null) {
+export function _buildEmergencyTaskContext(this: ChatViewLike, agentName?: string | null) {
     const parts = [];
 
     // Ścieżka sesji do promptu awaryjnego = sesja WŁAŚCICIELA okna (inaczej kompresja
@@ -575,7 +589,7 @@ export function _buildEmergencyTaskContext(this: ChatViewMixinContext, agentName
     // w vaulcie (aktywny idzie do promptu osobno przez activeArtifactId).
     const todo = this._activeTodoState;
     if (todo?.items?.length) {
-        const done = todo.items.filter((i: ChatViewMixinContext) => i.checked || i.done).length;
+        const done = todo.items.filter((i) => i.checked || i.done).length;
         const total = todo.items.length;
         const lines = [`📋 TODO "${todo.title || t('chat.todo.panel_title')}" (${done}/${total} ${t('prompt.dt.done')}):`];
         for (const item of todo.items) {
