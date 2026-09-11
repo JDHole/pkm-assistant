@@ -2,7 +2,7 @@ import { log } from '../../core/utils/Logger.js';
 import { UiIcons, setSvg } from '../crystal-soul/index.js';
 import { t } from '../../core/i18n/index.js';
 import type { PluginApi } from '../../core/index.js';
-import type { App, TFile, TFolder, EventRef } from 'obsidian';
+import type { App, TFile, TAbstractFile, EventRef } from 'obsidian';
 
 /** Kontrakt pluginu widziany przez ten moduł — `app` zawężony do realnego Obsidian `App`
  *  (moduł realnie woła `app.vault.*`, których minimalny `AppLike` z `PluginApi` nie modeluje).
@@ -39,9 +39,11 @@ interface NoteCacheEntry {
     pathLower: string;
 }
 
-/** Wpis cache'u folderów — patrz `_ensureCaches`. */
+/** Wpis cache'u folderów — patrz `_ensureCaches`. `TAbstractFile`, nie `TFolder`: kod czyta
+ *  tylko `.name`/`.path` (oba na `TAbstractFile`), a odsianie folderów niżej celowo nie
+ *  zawęża typu (patrz komentarz przy filtrze). */
 interface FolderCacheEntry {
-    folder: TFolder;
+    folder: TAbstractFile;
     nameLower: string;
     pathLower: string;
 }
@@ -191,9 +193,12 @@ export class MentionAutocomplete {
         if (this._foldersCache === null) {
             const allFiles = vault.getAllLoadedFiles();
             this._foldersCache = allFiles
-                // TS-boundary: TFolder ma `children`, TFile nie — to samo zawężenie po strukturze,
-                // które kod robił jako `any`; `f is TFolder` tylko nazywa istniejący warunek.
-                .filter((f): f is TFolder => (f as TFolder).children !== undefined) // TFolder has children
+                // TS-boundary: TAbstractFile nie ma wspólnego dyskryminatora TFolder/TFile w
+                // typach - `children` istnieje tylko na TFolder. Test obecności pola (nie
+                // predykat `f is TFolder`, którego `obsidianmd/no-tfile-tfolder-cast` zabrania;
+                // nie `instanceof TFolder` - nowy warunek runtime zmieniłby bundle). `folder`
+                // w cache'u zostaje `TAbstractFile` - kod niżej czyta tylko .name/.path.
+                .filter((f) => (f as { children?: unknown }).children !== undefined)
                 .filter((f) => !f.path.startsWith('.')) // skip hidden
                 .map((f) => ({
                     folder: f,
@@ -209,9 +214,9 @@ export class MentionAutocomplete {
 
     _handleInput() {
         const value = this.textarea.value;
-        // `selectionStart` jest `number | null` w typach DOM (dzielony z inputami bez
-        // selekcji), ale dla <textarea> zawsze zwraca liczbę — gwarancja z kształtu pola.
-        const cursor = this.textarea.selectionStart!;
+        // `HTMLTextAreaElement.selectionStart` jest `number` w typach DOM (nie `number | null`
+        // jak `HTMLInputElement.selectionStart`) — asercja niepotrzebna.
+        const cursor = this.textarea.selectionStart;
         const before = value.slice(0, cursor);
 
         // Match @folder: or plain @
@@ -358,8 +363,8 @@ export class MentionAutocomplete {
     _selectItem(item: MentionSuggestionItem) {
         // Replace @query with @[Name] inline in textarea
         const value = this.textarea.value;
-        // Patrz komentarz w `_handleInput` — <textarea> zawsze ma selekcję, więc nigdy `null`.
-        const cursor = this.textarea.selectionStart!;
+        // Patrz komentarz w `_handleInput` — `HTMLTextAreaElement.selectionStart` jest `number`.
+        const cursor = this.textarea.selectionStart;
         const before = value.slice(0, this.triggerStart);
         const after = value.slice(cursor);
         const mentionTag = `@[${item.name}] `;

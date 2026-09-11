@@ -145,10 +145,12 @@ export function createSubAgentBlock(opts: SubAgentBlockOptions): HTMLElement {
     }
 
     // Tool call details
+    // `as number`: bez asercji TS18048, `?? 0` zmieniłoby bundle; `undefined > 0` daje false
+    // jak w JS od zawsze.
     if ((opts.toolCallDetails?.length as number) > 0) {
         const detailDiv = body.createDiv({ cls: 'cs-action-row__content' });
         const lines = opts.toolCallDetails!.map((d) => {
-            const info = (TOOL_INFO as Record<string, ToolInfoEntry>)[d.name] || { label: d.name };
+            const info = (TOOL_INFO as Record<string, ToolInfoEntry | undefined>)[d.name] || { label: d.name };
             const hint = _extractArgHint(d.name, d.args);
             return hint ? `${info.label}: ${hint}` : info.label;
         });
@@ -218,7 +220,7 @@ function _extractArgHint(toolName: string, args: unknown): string {
     // TS-boundary: argumenty wywołania narzędzia z zapisu sesji sub-agenta — string JSON albo
     // już sparsowany obiekt z odpowiedzi modelu, bez walidacji schematem (poza zakresem tej fali).
     const parsed = (typeof args === 'string'
-        ? (() => { try { return JSON.parse(args as string) as unknown; } catch { return {}; } })()
+        ? (() => { try { return JSON.parse(args) as unknown; } catch { return {}; } })()
         : args) as Partial<ToolArgHintShape>;
 
     switch (toolName) {

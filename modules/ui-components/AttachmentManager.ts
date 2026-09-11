@@ -110,8 +110,8 @@ export class AttachmentManager {
     declare attachments: Attachment[];
     declare mentionChips: AttachmentMentionChip[];
     declare onMentionRemove: ((index: number) => void) | null;
-    declare chipBar: HTMLDivElement | null;
-    declare attachButton: HTMLButtonElement | null;
+    declare chipBar: HTMLDivElement;
+    declare attachButton: HTMLButtonElement;
     declare _onDragEnter: (e: DragEvent) => void;
     declare _onDragOver: (e: DragEvent) => void;
     declare _onDragLeave: (e: DragEvent) => void;
@@ -169,7 +169,7 @@ export class AttachmentManager {
      * Returns the 📎 button element for external placement.
      * @returns {HTMLElement}
      */
-    getAttachButton(): HTMLButtonElement | null {
+    getAttachButton(): HTMLButtonElement {
         return this.attachButton;
     }
 
@@ -185,15 +185,15 @@ export class AttachmentManager {
     }
 
     _renderChips(): void {
-        this.chipBar!.empty();
+        this.chipBar.empty();
 
         const hasAny = this.attachments.length > 0 || this.mentionChips.length > 0;
         if (!hasAny) {
-            this.chipBar!.classList.add('is-hidden');
+            this.chipBar.classList.add('is-hidden');
             return;
         }
 
-        this.chipBar!.classList.remove('is-hidden');
+        this.chipBar.classList.remove('is-hidden');
 
         // Render mention chips first (📄/📁 notes/folders)
         for (let i = 0; i < this.mentionChips.length; i++) {
@@ -221,7 +221,7 @@ export class AttachmentManager {
             });
             chip.appendChild(removeBtn);
 
-            this.chipBar!.appendChild(chip);
+            this.chipBar.appendChild(chip);
         }
 
         // Render attachment chips (📎 files/images)
@@ -270,7 +270,7 @@ export class AttachmentManager {
             });
             chip.appendChild(removeBtn);
 
-            this.chipBar!.appendChild(chip);
+            this.chipBar.appendChild(chip);
         }
     }
 
@@ -349,6 +349,8 @@ export class AttachmentManager {
             e.stopImmediatePropagation();
             this.dropZone.classList.remove('pkm-drag-over');
 
+            // `as number`: bez asercji TS18048, `?? 0` zmieniłoby bundle; `undefined > 0` daje
+            // false jak w JS od zawsze.
             if ((e.dataTransfer?.files?.length as number) > 0) {
                 await this._processFileList(e.dataTransfer!.files);
             }
@@ -676,11 +678,14 @@ export class AttachmentManager {
         // DOM
         if (this.chipBar) {
             this.chipBar.remove();
-            this.chipBar = null;
+            // `null!`: pole ma nieopcjonalny typ (zawsze przypisany w `_buildUI()` z konstruktora,
+            // czytany bez asercji w `_renderChips()`) - destroy() jest terminalne, więc `!` na
+            // literale `null` zamiast poszerzania typu z powrotem do `| null` w całej klasie.
+            this.chipBar = null!;
         }
         if (this.attachButton) {
             this.attachButton.remove();
-            this.attachButton = null;
+            this.attachButton = null!;
         }
     }
 }

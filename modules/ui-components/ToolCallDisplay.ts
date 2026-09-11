@@ -151,7 +151,7 @@ export function getToolCallLabel(toolName: string) {
  * @returns {string} SVG markup
  */
 export function getToolIcon(toolName: string, color = 'currentColor', size = 14) {
-    const info = (TOOL_INFO as Record<string, ToolInfoEntry>)[toolName];
+    const info = (TOOL_INFO as Record<string, ToolInfoEntry | undefined>)[toolName];
     if (info?.icon) return info.icon();
     // Fallback to IconGenerator for unknown tools
     return IconGenerator.generate(toolName, 'mixed', { size, color });
@@ -704,7 +704,7 @@ export function createToolCallDisplay(toolCall: ToolCallData) {
     const row = _createDetachedEl('div');
     row.className = 'cs-action-row';
 
-    const info = (TOOL_INFO as Record<string, ToolInfoEntry>)[toolCall.name] || { icon: null };
+    const info = (TOOL_INFO as Record<string, ToolInfoEntry | undefined>)[toolCall.name] || { icon: null };
     const label = getToolCallLabel(toolCall.name);
     const status = toolCall.status || 'pending';
 
