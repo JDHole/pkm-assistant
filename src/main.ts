@@ -418,7 +418,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     try { stopAllDelegations('unload'); } catch (e) { log.warn('Main', 'stopAllDelegations padł (demontaż leci dalej):', e); }
     // Zamknij zewnętrzne serwery MCP (SIGTERM procesów stdio) - nie zostawiać zombie.
     // Fire-and-forget: onunload jest synchroniczne, Obsidian nie czeka na obietnicę.
-    this.externalMcpManager?.closeAll?.();
+    void this.externalMcpManager?.closeAll?.();
     // Odepnij nasłuch sprzątania skrzynki (i porzuć kolejkę czekających modali).
     this._komunikatorCleanupUnsub?.();
     this._komunikatorCleanupUnsub = null;
@@ -444,7 +444,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     } catch (e) {
       log.warn('Main', 'Zdejmowanie arkuszy CSS padło:', e);
     }
-    this.traceLog?.dispose();   // flush + dispose trace sink (fail-soft, fire-and-forget)
+    void this.traceLog?.dispose();   // flush + dispose trace sink (fail-soft, fire-and-forget)
     this.notices?.unload();
     void this.env?.dispose();
     // Sink `pkm-assistant.log` zamykamy NA KOŃCU - kroki wyżej jeszcze logują, a bufor czeka
@@ -688,7 +688,7 @@ export default class PkmAssistantPlugin extends PluginBase {
           ? null
           : (this.env?.settings?.pkmAssistant?.artifactsFolder || 'PKM Assistant/Artefakty')),
       });
-      this.vaultIndexer.initialize(); // no await
+      void this.vaultIndexer.initialize(); // no await
     } catch (e) {
       log.error('Plugin', 'VaultIndexer init FAIL:', e);
     }
@@ -1046,7 +1046,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       // Wiadomość składa KOD z fragmentu notatki — user dopisał tylko komentarz, więc
       // przywileje człowieka (rejestr adresów, markery `@@skill:`, komendy `/`) nie należą się
       // treści zaznaczenia. Patrz core/security/messageOrigin.ts.
-      chatView.send_message({ meta: MACHINE_MESSAGE_META });
+      void chatView.send_message({ meta: MACHINE_MESSAGE_META });
     }, 300));
   }
 
