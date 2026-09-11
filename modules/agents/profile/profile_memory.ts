@@ -12,24 +12,26 @@
  * Toggles automatów (mem_proactive/ratunek/idle) - NIE tu (są w Zaawansowanych).
  */
 import { MarkdownRenderer, Notice, Setting } from 'obsidian';
+import type { App } from 'obsidian';
+import type { VaultAdapterLike } from '../../../core/index.js';
 import { UiIcons, setSvg } from '../../crystal-soul/index.js';
 import { openHiddenFile } from './profile_helpers.js';
 import { memoryOpsCenter, OPS_EVENT, parseNaTerazSections, parseBrainLog } from '../../memory/index.js';
+import type { AgentMemory, ArchiveSessionInfo, ConsolidationRun } from '../../memory/index.js';
 import { createModelForRole } from '../../models/index.js';
+import type { ResolverPluginLike } from '../../models/index.js';
 import { t } from '../../../core/i18n/index.js';
 import { getAgentSafeName } from '../../../core/index.js';
+import type { ProfileCtx } from './profile_types.js';
 
-// TS-any: Obsidian's augmented HTMLElement helpers and memory/plugin UI bridge are untyped runtime boundaries.
-type UiBoundary = any;
 type MemoryLogEntry = { ts: string; op: string; target?: string };
-type MemorySession = { path: string; sessionTime?: string | number; mtime?: string | number; size?: number; covered_by_l1?: boolean };
-type SessionsOptions = { sessions: MemorySession[]; headerKey: string; emptyKey: string; showFilter: boolean; pageStateKey: string };
+type SessionsOptions = { sessions: ArchiveSessionInfo[]; headerKey: string; emptyKey: string; showFilter: boolean; pageStateKey: 'memorySessionPage' };
 
 /**
  * @param {Object} ctx - shared context
  * @param {HTMLElement} el
  */
-export async function renderMemoryTab(ctx: UiBoundary, el: UiBoundary) {
+export async function renderMemoryTab(ctx: ProfileCtx, el: HTMLElement) {
     const { agent, agentManager, plugin } = ctx;
     if (!agent) return;
 
@@ -59,16 +61,16 @@ export async function renderMemoryTab(ctx: UiBoundary, el: UiBoundary) {
     ctx.__memorySubTabRenderSeq = ctx.__memorySubTabRenderSeq || 0;
 
     async function renderSubContent() {
-        const renderSeq = ++ctx.__memorySubTabRenderSeq;
+        const renderSeq = ++ctx.__memorySubTabRenderSeq!;
         // Element odłączony: budowany poza DOM, podmieniany przez replaceWith() dopiero po
         // async renderze (bez migotania) - `createDiv()` globalny z obsidiana robi dokładnie
         // to samo co `document.createElement('div')`, bez parenta.
         const nextContent = createDiv();
         nextContent.className = 'cs-profile-content';
         if (ctx.activeMemorySubTab === 'brain') {
-            await _renderMemoryBrain(ctx, nextContent, adapter, basePath, memory, () => { void renderSubContent(); });
+            await _renderMemoryBrain(ctx, nextContent, adapter, basePath, memory!, () => { void renderSubContent(); });
         } else if (ctx.activeMemorySubTab === 'sessions') {
-            await _renderMemorySessions(ctx, nextContent, adapter, memory, () => { void renderSubContent(); });
+            await _renderMemorySessions(ctx, nextContent, adapter, memory!, () => { void renderSubContent(); });
         } else {
             await _renderMemorySummaries(ctx, nextContent, adapter, basePath);
         }
@@ -77,10 +79,10 @@ export async function renderMemoryTab(ctx: UiBoundary, el: UiBoundary) {
         subContent = nextContent;
     }
 
-    for (const [tab, key] of [[brainSubTab, 'brain'], [sessionsSubTab, 'sessions'], [summariesSubTab, 'summaries']]) {
+    for (const [tab, key] of [[brainSubTab, 'brain'], [sessionsSubTab, 'sessions'], [summariesSubTab, 'summaries']] as [HTMLButtonElement, 'brain' | 'sessions' | 'summaries'][]) {
         tab.addEventListener('click', () => {
             ctx.activeMemorySubTab = key;
-            subTabBar.querySelectorAll('.cs-profile-tab').forEach((t: UiBoundary) => t.classList.remove('cs-profile-tab--active'));
+            subTabBar.querySelectorAll('.cs-profile-tab').forEach((t: Element) => t.classList.remove('cs-profile-tab--active'));
             tab.classList.add('cs-profile-tab--active');
             void renderSubContent();
         });
@@ -93,7 +95,7 @@ export async function renderMemoryTab(ctx: UiBoundary, el: UiBoundary) {
 // BRAIN - „Na teraz" (defensywnie) + notatki brain/ + audit
 // ══════════════════════════════════════════════
 
-async function _renderMemoryBrain(ctx: UiBoundary, el: UiBoundary, adapter: UiBoundary, basePath: string, memory: UiBoundary, rerender: () => void) {
+async function _renderMemoryBrain(ctx: ProfileCtx, el: HTMLElement, adapter: VaultAdapterLike, basePath: string, memory: AgentMemory, rerender: () => void) {
     const { agent, plugin } = ctx;
 
     // ── „Na teraz" (User / Środowisko) - edycja inline (add/edit/delete) przez writer
@@ -122,7 +124,7 @@ async function _renderMemoryBrain(ctx: UiBoundary, el: UiBoundary, adapter: UiBo
     notesHead.createSpan({ text: t('profile.memory.brain_notes_header') });
 
     const brainNotesPath = `${basePath}/brain`;
-    let noteFiles = [];
+    let noteFiles: string[] = [];
     try {
         const listed = await adapter.list(brainNotesPath);
         noteFiles = (listed?.files || []).filter((f: string) => f.endsWith('.md'));
@@ -133,7 +135,7 @@ async function _renderMemoryBrain(ctx: UiBoundary, el: UiBoundary, adapter: UiBo
     } else {
         const list = el.createDiv({ cls: 'cs-mem-list' });
         for (const notePath of noteFiles) {
-            const fileName = notePath.split('/').pop().replace(/\.md$/, '');
+            const fileName = notePath.split('/').pop()!.replace(/\.md$/, '');
             const item = list.createDiv({ cls: 'cs-mem-item' });
             const ico = item.createSpan({ cls: 'cs-mem-item__icon' });
             setSvg(ico, UiIcons.file(12));
@@ -146,7 +148,7 @@ async function _renderMemoryBrain(ctx: UiBoundary, el: UiBoundary, adapter: UiBo
                 e.stopPropagation();
                 try {
                     // Ścieżka memory_delete: usuń notatkę + przebuduj indeks brain.md.
-                    await adapter.remove(notePath);
+                    await adapter.remove!(notePath);
                     await memory.rebuildBrainIndex?.();
                     new Notice(t('profile.memory.note_deleted'));
                     rerender();
@@ -177,7 +179,7 @@ async function _renderMemoryBrain(ctx: UiBoundary, el: UiBoundary, adapter: UiBo
  *
  * ⚠️ To NIE `audit.log` (osobna karta niżej, legacy mechanizm ignorowanych `brain_update`).
  */
-async function _renderBrainLogCard(el: UiBoundary, adapter: UiBoundary, logPath: string) {
+async function _renderBrainLogCard(el: HTMLElement, adapter: VaultAdapterLike, logPath: string) {
     let entries: MemoryLogEntry[] = [];
     try {
         if (await adapter.exists(logPath)) entries = parseBrainLog(await adapter.read(logPath), 50);
@@ -225,7 +227,7 @@ function _brainLogOpLabel(op: string) {
  * goes through `memory.writeNaTeraz` (add/remove ops), NEVER by writing the whole brain.md - the
  * index + short-term sections are rebuilt by the writer, consistent with Memory v3.
  */
-function _renderNaTerazSection(el: UiBoundary, memory: UiBoundary, sectionKey: 'user' | 'environment', label: string, entries: string[], rerender: () => void) {
+function _renderNaTerazSection(el: HTMLElement, memory: AgentMemory, sectionKey: 'user' | 'environment', label: string, entries: string[], rerender: () => void) {
     const card = el.createDiv({ cls: 'cs-mem-card cs-mem-card--has open' });
     const cHead = card.createDiv({ cls: 'cs-mem-card__head' });
     cHead.createSpan({ cls: 'cs-mem-card__title', text: `${label} (${entries.length})` });
@@ -303,7 +305,7 @@ function _renderNaTerazSection(el: UiBoundary, memory: UiBoundary, sectionKey: '
     addInput.addEventListener('keydown', (e: KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); void submit(); } });
 }
 
-async function _renderMemoryFileCard(ctx: UiBoundary, el: UiBoundary, adapter: UiBoundary, filePath: string, icon: string, title: string, subtitle: string) {
+async function _renderMemoryFileCard(ctx: ProfileCtx, el: HTMLElement, adapter: VaultAdapterLike, filePath: string, icon: string, title: string, subtitle: string) {
     const { agent, plugin } = ctx;
     let fileContent = '';
     let exists = false;
@@ -324,7 +326,7 @@ async function _renderMemoryFileCard(ctx: UiBoundary, el: UiBoundary, adapter: U
     if (!exists || !fileContent.trim()) {
         content.createEl('p', { text: t('profile.memory.no_file_data'), cls: 'cs-focus-hint' });
     } else {
-        await MarkdownRenderer.render(plugin.app, fileContent, content, '', plugin);
+        await MarkdownRenderer.render(plugin.app as unknown as App, fileContent, content, '', plugin as unknown as Parameters<typeof MarkdownRenderer.render>[4]);
         const actionsEl = body.createDiv({ cls: 'cs-mem-card__actions' });
         const viewBtn = actionsEl.createEl('button');
         setSvg(viewBtn, UiIcons.eye(11));
@@ -340,8 +342,8 @@ async function _renderMemoryFileCard(ctx: UiBoundary, el: UiBoundary, adapter: U
 // SESJE - TYLKO zarchiwizowane (aktywne → Persona)
 // ══════════════════════════════════════════════
 
-async function _renderMemorySessions(ctx: UiBoundary, el: UiBoundary, adapter: UiBoundary, memory: UiBoundary, rerender: () => void) {
-    let archiveSessions: MemorySession[] = [];
+async function _renderMemorySessions(ctx: ProfileCtx, el: HTMLElement, adapter: VaultAdapterLike, memory: AgentMemory, rerender: () => void) {
+    let archiveSessions: ArchiveSessionInfo[] = [];
     try {
         archiveSessions = await memory.listArchiveSessions?.() || [];
     } catch (e) {
@@ -365,13 +367,13 @@ async function _renderMemorySessions(ctx: UiBoundary, el: UiBoundary, adapter: U
     el.createDiv({ text: t('profile.memory.summarize_sessions_desc'), cls: 'setting-item-description' });
 }
 
-function _formatSessionDate(session: MemorySession) {
+function _formatSessionDate(session: ArchiveSessionInfo) {
     const d = new Date(session.sessionTime || session.mtime || 0);
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}  ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function _renderSessionsSection(ctx: UiBoundary, parentEl: UiBoundary, adapter: UiBoundary, opts: SessionsOptions) {
+function _renderSessionsSection(ctx: ProfileCtx, parentEl: HTMLElement, adapter: VaultAdapterLike, opts: SessionsOptions) {
     const { agent, plugin } = ctx;
     const PER_PAGE = 25;
     let { sessions, headerKey, emptyKey, showFilter, pageStateKey } = opts;
@@ -410,7 +412,7 @@ function _renderSessionsSection(ctx: UiBoundary, parentEl: UiBoundary, adapter: 
     function renderList() {
         listEl.empty();
         paginationEl.empty();
-        const filtered = filterValue ? sessions.filter((s: MemorySession) => _formatSessionDate(s).includes(filterValue)) : sessions;
+        const filtered = filterValue ? sessions.filter((s: ArchiveSessionInfo) => _formatSessionDate(s).includes(filterValue)) : sessions;
         if (filtered.length === 0) {
             listEl.createEl('p', { text: t('profile.memory.no_filter_results'), cls: 'cs-focus-hint' });
             return;
@@ -438,8 +440,8 @@ function _renderSessionsSection(ctx: UiBoundary, parentEl: UiBoundary, adapter: 
             delBtn.addEventListener('click', async (e: Event) => {
                 e.stopPropagation();
                 try {
-                    await adapter.remove(session.path);
-                    sessions = sessions.filter((s: MemorySession) => s.path !== session.path);
+                    await adapter.remove!(session.path);
+                    sessions = sessions.filter((s: ArchiveSessionInfo) => s.path !== session.path);
                     renderList();
                     new Notice(t('profile.memory.session_deleted'));
                 } catch (err) { new Notice(t('profile.memory.delete_error') + (err as Error).message); }
@@ -472,7 +474,7 @@ function _renderSessionsSection(ctx: UiBoundary, parentEl: UiBoundary, adapter: 
 // STRESZCZENIA - L1/L2/L3 (podgląd; konsolidację odpala guzik w sekcji Sesje)
 // ══════════════════════════════════════════════
 
-async function _renderMemorySummaries(ctx: UiBoundary, el: UiBoundary, adapter: UiBoundary, basePath: string) {
+async function _renderMemorySummaries(ctx: ProfileCtx, el: HTMLElement, adapter: VaultAdapterLike, basePath: string) {
     const { agent, plugin } = ctx;
     const levels = [
         { key: 'L1', path: `${basePath}/summaries/L1`, desc: t('profile.memory.every_5_sessions') },
@@ -481,7 +483,7 @@ async function _renderMemorySummaries(ctx: UiBoundary, el: UiBoundary, adapter: 
     ];
 
     for (const level of levels) {
-        let files = [];
+        let files: string[] = [];
         try {
             const listed = await adapter.list(level.path);
             files = (listed?.files || []).filter((f: string) => f.endsWith('.md')).reverse();
@@ -500,7 +502,7 @@ async function _renderMemorySummaries(ctx: UiBoundary, el: UiBoundary, adapter: 
         } else {
             const listEl = body.createDiv({ cls: 'cs-mem-list' });
             for (const filePath of files) {
-                const fileName = filePath.split('/').pop().replace('.md', '');
+                const fileName = filePath.split('/').pop()!.replace('.md', '');
                 const dateParts = fileName.match(/(\d{4}-\d{2}-\d{2})/);
                 const dateStr = dateParts ? dateParts[1] : fileName;
                 const item = listEl.createDiv({ cls: 'cs-mem-item' });
@@ -533,7 +535,7 @@ async function _renderMemorySummaries(ctx: UiBoundary, el: UiBoundary, adapter: 
  * Import chatu jest LENIWY: statycznej krawędzi agents→chat dziś nie ma i nie dokładamy jej do
  * i tak splątanego trójkąta shell↔chat↔agents. Dynamiczne `import()` jest poza regułą ESLinta.
  */
-async function _runArchiveWorkflow(ctx: UiBoundary, memory: UiBoundary, rerender: () => void) {
+async function _runArchiveWorkflow(ctx: ProfileCtx, memory: AgentMemory, rerender: () => void) {
     const { plugin, agent } = ctx;
     let model = null;
     // Operacja W TLE (guzik "Podsumuj rozmowy") nie zna lokalnego/globalnego licznika streamow
@@ -542,7 +544,7 @@ async function _runArchiveWorkflow(ctx: UiBoundary, memory: UiBoundary, rerender
     // bezpieczna semantyka: zawsze callerSkipCache=true. Koszt to jedna konstrukcja adaptera na
     // klikniecie guzika, nie per request do API (klucze biora sie z tej samej globalnej puli) -
     // i tak nie dzieli instancji z aktywna tura czatu tego samego agenta w trakcie stream().
-    try { model = createModelForRole(plugin, 'main', agent, null, true); } catch { model = null; }
+    try { model = createModelForRole(plugin as unknown as ResolverPluginLike, 'main', agent as unknown as Parameters<typeof createModelForRole>[2], null, true); } catch { model = null; }
     const settings = plugin?.settings?.pkmAssistant || plugin?.env?.settings?.pkmAssistant || {};
     try {
         const { startConsolidationRun } = await import('../../chat/index.js');
@@ -550,7 +552,7 @@ async function _runArchiveWorkflow(ctx: UiBoundary, memory: UiBoundary, rerender
         // wtedy NIE zakładamy kolejnej subskrypcji. Bez tego N klików w guzik podczas jednego
         // przebiegu = N wiszących subskrypcji + N × rerender na koniec.
         const alreadyRunning = memoryOpsCenter.getActiveRun();
-        const run = await (startConsolidationRun as UiBoundary)({
+        const run = await startConsolidationRun({
             plugin,
             app: plugin.app,
             agentMemory: memory,
@@ -560,7 +562,7 @@ async function _runArchiveWorkflow(ctx: UiBoundary, memory: UiBoundary, rerender
             // User kliknął sam - pusty plan MUSI dać odpowiedź („nie ma czego konsolidować"),
             // inaczej guzik wygląda na zepsuty. Cisza jest tylko dla triggerów automatycznych.
             source: 'manual',
-        });
+        } as unknown as Parameters<typeof startConsolidationRun>[0]);
         // Pusty plan → kontroler sam powiedział „nie ma czego konsolidować". Nie ma na co czekać.
         if (run && run !== alreadyRunning) _rerenderWhenRunFinishes(run, rerender);
     } catch (e) {
@@ -573,7 +575,7 @@ async function _runArchiveWorkflow(ctx: UiBoundary, memory: UiBoundary, rerender
  * (guzik wraca od razu, przebieg mieli w tle). Panel odświeżamy dopiero, gdy przebieg się domknie:
  * wtedy nowe L1/L2/L3 są naprawdę na dysku i listy mają co pokazać.
  */
-function _rerenderWhenRunFinishes(run: UiBoundary, rerender: () => void) {
+function _rerenderWhenRunFinishes(run: ConsolidationRun, rerender: () => void) {
     if (typeof rerender !== 'function') return;
     let unsubscribe: (() => void) | null = null;
     let done = false;

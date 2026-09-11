@@ -49,9 +49,12 @@ test('_runArchiveWorkflow woła createModelForRole z callerSkipCache=true', t =>
     // Bez tej asercji `createModelForRole(plugin, 'main', agent)` (3 argumenty, bez flagi)
     // przechodziłby niezauważony - dokładnie ten sam typ regresu, jaki wcześniej wystąpił w
     // chat_model.ts.
+    // `(?:\s+as\s+[^,]+)?` po `plugin`/`agent` toleruje asercje typu (TS-boundary cast do
+    // ResolverPluginLike/Parameters<...> w profile_memory.ts) - erased w runtime, nie zmienia
+    // liczby ani wartości ani kolejności argumentów, które ten test pilnuje.
     t.regex(
         body,
-        /createModelForRole\(\s*plugin,\s*'main',\s*agent,\s*null,\s*true\s*\)/,
+        /createModelForRole\(\s*plugin(?:\s+as\s+[^,]+)?,\s*'main',\s*agent(?:\s+as\s+[^,]+)?,\s*null,\s*true\s*\)/,
         'guzik „Podsumuj rozmowy" przestał wymuszać świeżą instancję (callerSkipCache=true) — ' +
         'znów może dzielić instancję main z aktywną turą czatu tego samego agenta w trakcie stream()'
     );
