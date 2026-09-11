@@ -24,17 +24,61 @@ import { log } from '../../core/utils/Logger.js';
 import type { PromptSkill } from './skillIndex.js';
 import type { DecisionTreeOverrides } from './decisionTree.js';
 
-// TS-any: persisted per-agent overrides are an open-ended user-defined schema.
-interface PromptAgent { name: string; personality?: string; focusFolders?: unknown[]; language?: string; permissions?: Record<string, unknown>; agentRules?: string; promptOverrides?: Record<string, any>; }
+/** Nadpisania promptu trzymane per agent (`agent.promptOverrides`) - otwarty, zapisany przez UI
+ *  schemat: klucze sekcji (`environment`/`rules`/`delegate_guide`) niosą string do wstawienia
+ *  wprost (`_resolveSection`), `decisionTreeInstructions` niesie strukturę override'ów drzewa,
+ *  legacy `decision_tree` to string ostrzegany jako przestarzały. Granica bez walidacji
+ *  schematem (JSON zapisany przez UI profilu agenta). */
+interface PromptOverrides {
+    decisionTreeInstructions?: DecisionTreeOverrides;
+    decision_tree?: string;
+    [key: string]: unknown;
+}
+
+/** Globalne domyślne (`pkmAssistant.promptDefaults` z ustawień) - ten sam otwarty schemat co
+ *  `PromptOverrides`, ale klucz drzewa decyzyjnego nazywa się inaczej (`decisionTreeOverrides`). */
+interface PromptGlobalDefaults {
+    decisionTreeOverrides?: DecisionTreeOverrides;
+    decision_tree?: string;
+    [key: string]: unknown;
+}
+
+interface PromptAgent { name: string; personality?: string; focusFolders?: unknown[]; language?: string; permissions?: Record<string, unknown>; agentRules?: string; promptOverrides?: PromptOverrides; }
 interface PromptSection { key: string; label: string; content: string; tokens: number; _tokens: number | null; enabled: boolean; required: boolean; category: string; }
-// TS-any: delegate descriptors are supplied by the concurrently converted agent kernel.
+
+/** Override'y konkretnej delegacji (aspektu suba) - `dt_covered_groups` steruje tagiem
+ *  `[→ grupa1, grupa2]` przy nazwie w indeksie subów, `behavior_inject` dokleja sekcję promptu. */
+interface DelegateOverrides {
+    behavior_inject?: string;
+    dt_covered_groups?: string[];
+}
+
+/** Przypisanie delegacji widziane przez builder promptu - pełny kształt żyje w jądrze agentów
+ *  (poza zakresem tej fali; ten plik dostaje gotowe tablice przez `ctx`, TYLKO pola czytane tu). */
+interface DelegateAssignment {
+    name: string;
+    delegateType?: string;
+    overrides?: DelegateOverrides;
+}
+
+/** Wpis `ctx.delegateList` (tryby v2, unified) - nazwa + opis + opcjonalny typ 'strategist'. */
+interface DelegateListItem {
+    name: string;
+    type?: string;
+    description?: string;
+}
+
+/** Wpis `ctx.researcherList`/`ctx.strategistList` (fallback bez `delegateAssignments`). */
+interface DelegateMemberItem {
+    name: string;
+    description?: string;
+}
+
 interface PromptContext {
     vaultName?: string; currentDate?: string; hasResearcher?: boolean; hasStrategist?: boolean; hasDelegates?: boolean;
-    // TS-any: prompt defaults are persisted open-ended section overrides.
-    promptDefaults?: Record<string, any>; availableToolNames?: string[]; skills?: PromptSkill[]; extendedPromptRules?: boolean;
+    promptDefaults?: PromptGlobalDefaults; availableToolNames?: string[]; skills?: PromptSkill[]; extendedPromptRules?: boolean;
     vaultGroups?: unknown[]; vaultMapDescriptions?: Record<string, string>; artifactTypes?: unknown[]; artifactList?: unknown[]; activeArtifact?: unknown;
-    // TS-any: delegate descriptors cross the dynamic agent/sub-agent composition boundary.
-    delegateAssignments?: any[]; delegateList?: any[]; researcherList?: any[]; strategistList?: any[]; agentList?: Array<string | { name: string; description?: string }>;
+    delegateAssignments?: DelegateAssignment[]; delegateList?: DelegateListItem[]; researcherList?: DelegateMemberItem[]; strategistList?: DelegateMemberItem[]; agentList?: Array<string | { name: string; description?: string }>;
     inboxPing?: { count: number; senders?: string[] };
 }
 
@@ -310,7 +354,7 @@ export class PromptBuilder {
             label,
             content: trimmed,
             _tokens: null, // lazy-computed on first access via getSections/getTokenBreakdown
-            get tokens() { if (this._tokens === null) this._tokens = getTokenCount(trimmed); return this._tokens; },
+            get tokens() { if ((this as PromptSection)._tokens === null) (this as PromptSection)._tokens = getTokenCount(trimmed); return (this as PromptSection)._tokens!; },
             enabled: true,
             required: opts.required || false,
             category: opts.category || 'core',
@@ -325,10 +369,9 @@ export class PromptBuilder {
      * @param {string} factoryContent - built-in default from code
      * @returns {string}
      */
-    // TS-any: persisted section overrides are an open-ended user-defined schema.
-    _resolveSection(key: string, agentOverrides: Record<string, any>, globalDefaults: Record<string, any>, factoryContent: string): string {
-        if (agentOverrides[key]) return agentOverrides[key];
-        if (globalDefaults[key]) return globalDefaults[key];
+    _resolveSection(key: string, agentOverrides: PromptOverrides, globalDefaults: PromptGlobalDefaults, factoryContent: string): string {
+        if (agentOverrides[key]) return agentOverrides[key] as string;
+        if (globalDefaults[key]) return globalDefaults[key] as string;
         return factoryContent;
     }
 
@@ -528,7 +571,7 @@ export class PromptBuilder {
                 const desc = (ctx.delegateList as NonNullable<PromptContext['delegateList']>).map(d => {
                     const da = delegates.find(da2 => da2.name === d.name);
                     const groups = da?.overrides?.dt_covered_groups;
-                    const tag = groups?.length > 0 ? ` [→ ${groups.join(', ')}]` : '';
+                    const tag = (groups?.length as number) > 0 ? ` [→ ${groups!.join(', ')}]` : '';
                     const typeTag = d.type === 'strategist' ? ` [${t('prompt.dt.expert')}]` : '';
                     return `${d.name}${typeTag} (${d.description || ''})${tag}`;
                 }).join(', ');
@@ -541,7 +584,7 @@ export class PromptBuilder {
                     const desc = researchers.map(m => {
                         const da = delegates.find(d => d.name === m.name && d.delegateType === 'researcher');
                         const groups = da?.overrides?.dt_covered_groups;
-                        const tag = groups?.length > 0 ? ` [→ ${groups.join(', ')}]` : '';
+                        const tag = (groups?.length as number) > 0 ? ` [→ ${groups!.join(', ')}]` : '';
                         return `${m.name} (${m.description})${tag}`;
                     }).join(', ');
                     lines.push(`- ${t('prompt.dt.your_subagents')}: ${desc}`);
@@ -552,7 +595,7 @@ export class PromptBuilder {
                     const desc = strategists.map(m => {
                         const da = delegates.find(d => d.name === m.name && d.delegateType === 'strategist');
                         const groups = da?.overrides?.dt_covered_groups;
-                        const tag = groups?.length > 0 ? ` [→ ${groups.join(', ')}]` : '';
+                        const tag = (groups?.length as number) > 0 ? ` [→ ${groups!.join(', ')}]` : '';
                         return `${m.name} [${t('prompt.dt.expert')}] (${m.description})${tag}`;
                     }).join(', ');
                     lines.push(`- ${t('prompt.dt.expert_subagents')}: ${desc}`);
