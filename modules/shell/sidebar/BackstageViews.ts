@@ -20,32 +20,42 @@ import { registerBackstage as registerSubAgentsBackstage } from '../../sub-agent
 import { registerBackstage as registerConnectorsBackstage } from '../../tools/index.js';
 import { t } from '../../../core/i18n/index.js';
 import { setSvgLabel } from '../../../modules/crystal-soul/index.js';
+import type { ExternalMcpManager } from '../../tools/index.js';
+import type { PluginApi } from '../../../core/index.js';
+import type { SidebarNav, ViewParams } from './SidebarNav.js';
 
-// TS-any: sidebar tab renderers and plugin managers are dynamic Obsidian integrations.
-type Runtime = any;
+/** `AgentManager.skillTemplateStore`/`.subAgentTemplateStore` - jeszcze nieotypowane pola
+ * dynamiczne (migracja modules/agents) - zawężamy do jedynej metody, której tu potrzeba. */
+type CountableStore = { count(): number };
+
+/** Plugin widziany przez ten widok: managery agentów i zewnętrznych serwerów MCP. */
+interface BackstageViewsPlugin extends PluginApi {
+    agentManager?: { skillTemplateStore?: unknown; subAgentTemplateStore?: unknown };
+    externalMcpManager?: ExternalMcpManager;
+}
 
 /**
  * Liczniki zakładek liczą SZABLONY (Zaplecze = katalog form odlewniczych),
  * a nie żywe byty. Zakładka Konektory liczy PODŁĄCZONE serwery MCP.
  */
-function getTabCount(plugin: Runtime, tabId: string): number {
+function getTabCount(plugin: BackstageViewsPlugin, tabId: string): number {
     switch (tabId) {
-        case 'skills':     return plugin.agentManager?.skillTemplateStore?.count() || 0;
+        case 'skills':     return (plugin.agentManager?.skillTemplateStore as CountableStore | undefined)?.count() || 0;
         // pkm-sub (wbudowany) zawsze jest na liście, stąd +1 do szablonów.
-        case 'sub-agents': return (plugin.agentManager?.subAgentTemplateStore?.count() || 0) + 1;
+        case 'sub-agents': return ((plugin.agentManager?.subAgentTemplateStore as CountableStore | undefined)?.count() || 0) + 1;
         case 'connectors': return countConnectedServers(plugin);
         // Backward compat for old tab IDs - redirect to sub-agents
         case 'minions':
-        case 'masters':    return (plugin.agentManager?.subAgentTemplateStore?.count() || 0) + 1;
+        case 'masters':    return ((plugin.agentManager?.subAgentTemplateStore as CountableStore | undefined)?.count() || 0) + 1;
         default: return 0;
     }
 }
 
 /** Ile zewnętrznych serwerów MCP jest realnie podłączonych. */
-export function countConnectedServers(plugin: Runtime): number {
+export function countConnectedServers(plugin: BackstageViewsPlugin): number {
     try {
         const servers = plugin?.externalMcpManager?.listServersForUi?.() || [];
-        return servers.filter((s: Runtime) => s.connected).length;
+        return servers.filter(s => s.connected).length;
     } catch {
         return 0;
     }
@@ -61,11 +71,13 @@ function registerDefaultBackstageTabs() {
 /**
  * Main unified Backstage view - tabs registered by their owning modules.
  */
-export function renderZapleczeView(container: Runtime, plugin: Runtime, nav: Runtime, params: Runtime): void {
+export function renderZapleczeView(container: HTMLElement, plugin: BackstageViewsPlugin, nav: SidebarNav, params: ViewParams): void {
     container.classList.add('cs-root');
     registerDefaultBackstageTabs();
 
-    const requestedTab = params.tab || 'skills';
+    // TS-boundary: `params` jest workiem kluczy widoku (SidebarNav.ViewParams); `.tab` zawężamy
+    // do tego, co ten widok realnie czyta.
+    const requestedTab = (params.tab as string | undefined) || 'skills';
     const activeTab = ['minions', 'masters'].includes(requestedTab) ? 'sub-agents' : requestedTab;
     const tabBar = container.createDiv({ cls: 'cs-profile-tabs cs-zaplecze-tabs' });
 
@@ -73,7 +85,7 @@ export function renderZapleczeView(container: Runtime, plugin: Runtime, nav: Run
         const btn = tabBar.createEl('button', {
             cls: `cs-profile-tab ${tab.id === activeTab ? 'cs-profile-tab--active' : ''}`
         });
-        setSvgLabel(btn, (tab as Runtime).iconFn(14), tab.label as string);
+        setSvgLabel(btn, tab.iconFn!(14), tab.label as string);
 
         const count = getTabCount(plugin, tab.id);
         if (count > 0) {
