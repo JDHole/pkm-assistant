@@ -7,6 +7,7 @@ import { ArtifactStore } from '../../../artifacts/ArtifactStore.js';
 import { parseArtifact } from '../../../artifacts/artifactParser.js';
 import { parseYaml, stringifyYaml } from '../../../../core/utils/yamlParser.js';
 import type { ArtifactToolPlugin } from './ArtifactReadTool.js';
+import type { ArtifactFrontmatter } from '../../../artifacts/types.js';
 import { MCPClient } from '../../MCPClient.js';
 import { PermissionSystem } from '../../../../core/security/PermissionSystem.js';
 import { AccessGuard } from '../../../../core/security/AccessGuard.js';
@@ -47,15 +48,15 @@ function makePlugin() {
             getAbstractFileByPath: (p: string) => (files.has(p) ? fileObj(p) : (folders.has(p) ? { path: p, children: [] } : null)),
             create: async (path: string, content: string) => { files.set(path, content); return fileObj(path); },
             createFolder: async (p: string) => { folders.add(p); },
-            cachedRead: async (file: FileLike) => files.get(file.path),
+            cachedRead: async (file: FileLike) => files.get(file.path)!,
             process: async (file: FileLike, fn: (md: string) => string) => { const next = fn(files.get(file.path) as string); files.set(file.path, next); return next; },
         },
         metadataCache: { getFileCache: (file: FileLike) => { const c = files.get(file.path); return c == null ? null : { frontmatter: parseArtifact(c).frontmatter }; } },
         fileManager: {
-            processFrontMatter: async (file: FileLike, fn: (fm: Record<string, unknown>) => void) => {
+            processFrontMatter: async (file: FileLike, fn: (fm: ArtifactFrontmatter) => void) => {
                 const content = files.get(file.path) as string;
                 const m = content.match(/^(---\n)([\s\S]*?)(\n---\n?)/);
-                const fm: Record<string, unknown> = m ? ((parseYaml(m[2]) as Record<string, unknown> | null) || {}) : {};
+                const fm: ArtifactFrontmatter = m ? ((parseYaml(m[2]) as ArtifactFrontmatter | null) || {}) : {};
                 fn(fm);
                 files.set(file.path, `---\n${stringifyYaml(fm)}---\n${m ? content.slice(m[0].length) : content}`);
             },
