@@ -122,14 +122,16 @@ export function renderHomeView(container: HTMLElement, plugin: PluginApi, nav: S
     // i otwórz jego profil w NORMALNYM trybie edycji (bez osobnego create-mode).
     const addCard = grid.createDiv({ cls: 'cs-agent-card cs-agent-card--add' });
     setSvg(addCard, UiIcons.plus(16));
-    addCard.addEventListener('click', async () => {
-        try {
-            const name = firstFreeAgentName((plugin as HomeViewPlugin).agentManager);
-            await (plugin as HomeViewPlugin).agentManager!.createAgent({ name });
-            nav.push('agent-profile', { agentName: name }, t('sidebar.agents'));
-        } catch (e) {
-            new Notice(t('profile.advanced.create_error') + (((e as ErrLike)?.message || (e as ErrLike)) as string));
-        }
+    addCard.addEventListener('click', () => {
+        void (async () => {
+            try {
+                const name = firstFreeAgentName((plugin as HomeViewPlugin).agentManager);
+                await (plugin as HomeViewPlugin).agentManager!.createAgent({ name });
+                nav.push('agent-profile', { agentName: name }, t('sidebar.agents'));
+            } catch (e) {
+                new Notice(t('profile.advanced.create_error') + (((e as ErrLike)?.message || (e as ErrLike)) as string));
+            }
+        })();
     });
 
     // ── Section: Komunikator ── (kill-switch: hidden unless enabled, default off)

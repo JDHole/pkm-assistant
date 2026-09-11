@@ -126,10 +126,12 @@ class SettingsRegistryClass {
             });
             button.textContent = `${section.icon ? section.icon + ' ' : ''}${section.label}`;
             if (section.id === activeId) button.classList.add('mod-cta');
-            button.addEventListener('click', async () => {
-                // `hostWindow` - patrz uzasadnienie przy getActiveId() wyżej.
-                if (hostWindow.location) hostWindow.location.hash = `settings/${section.id}`;
-                await this.render(containerEl, plugin, options);
+            button.addEventListener('click', () => {
+                void (async () => {
+                    // `hostWindow` - patrz uzasadnienie przy getActiveId() wyżej.
+                    if (hostWindow.location) hostWindow.location.hash = `settings/${section.id}`;
+                    await this.render(containerEl, plugin, options);
+                })();
             });
         }
 

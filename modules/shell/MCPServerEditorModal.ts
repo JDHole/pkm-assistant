@@ -266,7 +266,7 @@ export class MCPServerEditorModal extends Modal {
         });
         this._previewBtn = wrap.createEl('button', { text: t('modal.mcp_server_editor.preview_button') });
         this._previewResultEl = wrap.createDiv({ cls: 'mcp-server-editor-preview-result' });
-        this._previewBtn.addEventListener('click', () => this._runPreview());
+        this._previewBtn.addEventListener('click', () => { void this._runPreview(); });
     }
 
     /** @private Zbuduj config z AKTUALNYCH pól formularza (bez zapisu, bez walidacji nazwy). */

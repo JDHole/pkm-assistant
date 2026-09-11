@@ -122,10 +122,12 @@ export class PkmSettingsTab extends PluginSettingsTab {
                 cls: 'pkm-onboarding-banner__text',
             });
             const skipBtn = banner.createEl('button', { text: 'Skip onboarding', cls: 'mod-cta' });
-            skipBtn.addEventListener('click', async () => {
-                pkmSettings.onboardingCompleted = true;
-                await this.save_settings();
-                void this.render();
+            skipBtn.addEventListener('click', () => {
+                void (async () => {
+                    pkmSettings.onboardingCompleted = true;
+                    await this.save_settings();
+                    void this.render();
+                })();
             });
         }
     }
