@@ -245,7 +245,8 @@ export async function renderView(this: ChatViewLike, container = this.container)
     });
     // Wire attach button click
     attachBtnWrapper.addEventListener('click', () => {
-        this.attachmentManager!.getAttachButton()?.click();
+        // TS-boundary: `AttachmentManager` (modules/ui-components) ma jeszcze sygnatury `any`.
+        (this.attachmentManager!.getAttachButton() as HTMLElement | null)?.click();
     });
 
     // Keep toolbar ref for mode popover positioning
@@ -827,6 +828,8 @@ export function _showArtifactPicker(this: ChatViewLike, triggerBtn: HTMLElement 
                     const file = this.app.vault.getAbstractFileByPath(res.path);
                     if (!file) return;
                     try {
+                        // `openFile` żąda instancji `TFile`; picker wskazuje notatkę artefaktu,
+                        // a `instanceof` w tym miejscu byłoby zmianą runtime'u.
                         await this.app.workspace.getLeaf('tab').openFile(file as TFile);
                     } catch (e) {
                         log.warn('Chat', `Open artifact note failed: ${(e as Error)?.message || (e as string)}`);
@@ -1310,12 +1313,12 @@ export function _updateSlimBarTokens(this: ChatViewLike) {
     // `byRole.master`, więc taki wiersz byłby trwale ukryty (`is-hidden` przy totalu 0).
 
     // `_slimBarTokenMain` sprawdzone na wejściu funkcji; oba wiersze powstają razem.
-    update(this._slimBarTokenMain!, main);
+    update(this._slimBarTokenMain, main);
     update(this._slimBarTokenMinion!, minion);
 
     // Show main always if session has any tokens
     if (s.total > 0) {
-        this._slimBarTokenMain!.el.classList.remove('is-hidden');
+        this._slimBarTokenMain.el.classList.remove('is-hidden');
     }
 }
 

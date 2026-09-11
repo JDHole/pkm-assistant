@@ -27,9 +27,6 @@ import type { ChatViewLike } from './chatViewShape.js';
 import type { AgentMemory } from '../../memory/index.js';
 import type { ActiveSessionEventInput, ActiveSessionInfo } from '../../memory/index.js';
 
-/** Wybór z modalu zamknięcia sesji (`SessionCloseModal.prompt`). */
-type SessionCloseChoice = { choice?: string };
-
 /**
  * Sesja odtworzona z dysku. Gałąź główna dostaje pełny wpis `ActiveSessionInfo`, gałąź
  * ratunkowa (`restoreActiveSession`) składa minimalny — stąd wszystko poza ścieżką opcjonalne.
@@ -320,7 +317,7 @@ export async function handleNewSession(this: ChatViewLike) {
         });
         // prompt() returns { choice }. SessionCloseModal nie ma kanału `options` - byłby
         // strukturalnie pusty i nieczytany.
-        const { choice } = await modal.prompt() as SessionCloseChoice || { choice: 'cancel' };
+        const { choice } = await modal.prompt() || { choice: 'cancel' };
 
         if (choice === 'cancel') return;
 

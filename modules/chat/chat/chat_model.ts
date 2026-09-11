@@ -14,8 +14,21 @@ import { createVaultReadPredicate } from './vaultReadGate.js';
 // chat_view ↔ mixin jest legalny i znika w buildzie (`import type`).
 import type { ChatViewLike } from './chatViewShape.js';
 import type { Agent } from '../../agents/index.js';
-import type { TFile, TFolder } from 'obsidian';
+/**
+ * Folder i plik vaulta w zakresie, jaki czyta rozwiązywanie wzmianek. Kształty strukturalne
+ * zamiast `TFolder`/`TFile`: rzut na klasy Obsidiana jest w katalogu wtyczek odradzany
+ * (`obsidianmd/no-tfile-tfolder-cast`), a `instanceof` byłoby zmianą runtime'u.
+ */
+interface NoteFileLike { extension?: string; stat?: { size: number } }
+interface FolderLike { children?: NoteFileLike[] }
 import type { ContentBlock, ImageContentBlock } from './RollingWindow.js';
+
+/** Wzmianka `@` w pasku chipów: co czyta rozwiązywanie wzmianek. */
+interface ChatMentionChip {
+    type: string;
+    path: string;
+    name?: string;
+}
 import type { DelegateConfigLike, ResolverAgentLike } from '../../models/index.js';
 import type { SttSettings } from './chatViewShape.js';
 
@@ -256,7 +269,9 @@ export function _toggleRecording(this: ChatViewLike) {
  * Resolve @ mentions in user text.
  */
 export async function _resolveMentions(this: ChatViewLike, text: string) {
-    const mentionChips = this.mentionAutocomplete?.getMentions() || [];
+    // TS-boundary: `MentionAutocomplete` (modules/ui-components) ma jeszcze sygnatury `any`
+    // — chipy zawężamy tu, do kształtu, który ta funkcja realnie czyta.
+    const mentionChips = (this.mentionAutocomplete?.getMentions() || []) as ChatMentionChip[];
 
     if (mentionChips.length === 0) {
         return { displayText: text, contextText: '' };
@@ -276,12 +291,12 @@ export async function _resolveMentions(this: ChatViewLike, text: string) {
 
             if (m.type === 'folder') {
                 const folder = this.app.vault.getAbstractFileByPath(m.path);
-                const fileCount = (folder as TFolder | null)?.children?.filter((f) => (f as TFile).extension === 'md').length || 0;
+                const fileCount = (folder as FolderLike | null)?.children?.filter((f) => f.extension === 'md').length || 0;
                 refs.push(`- 📁 Folder: "${m.path}" (${t('chat.model.folder_notes', { count: fileCount })})`);
             } else {
                 let file = this.app.vault.getAbstractFileByPath(m.path);
                 if (!file) file = this.app.vault.getAbstractFileByPath(m.path + '.md');
-                const size = (file as TFile | null)?.stat?.size ? `${Math.round((file as TFile).stat.size / 1024)}KB` : '?';
+                const size = (file as NoteFileLike | null)?.stat?.size ? `${Math.round((file as NoteFileLike).stat!.size / 1024)}KB` : '?';
                 refs.push(`- 📄 ${t('chat.model.note_label')}: "${file?.path || m.path}" (${size})`);
             }
         } catch (err) {

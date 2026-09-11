@@ -61,6 +61,7 @@ import type { ToolCall as ToolsToolCall } from '../../tools/index.js';
 import type { SubTask, SubTaskOrigin } from '../../sub-agents/index.js';
 import type { ContentBlock, RollingWindow } from './RollingWindow.js';
 import type { FrozenTurnOwner } from './turnOwner.js';
+import type { DelegationProposal } from './chat_artifacts.js';
 import type { TurnAbortHandle } from './turnAbort.js';
 
 /**
@@ -464,7 +465,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
                         }
                         // Append Oczko image blocks
                         for (const imgBlock of noteCtx.images) {
-                            (msg.content as ContentBlock[]).push(imgBlock as ContentBlock);
+                            (msg.content as ContentBlock[]).push(imgBlock);
                         }
                         // Warn if model likely can't see images
                         if (!this._isCurrentModelVision()) {
@@ -696,7 +697,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
                 shouldAbort: () => turnAbort.isAborted(),
             });
         } finally {
-            turn.watchdog!.disarm();
+            turn.watchdog.disarm();
             streamingManager.stopStream(streamId);
         }
 
@@ -970,7 +971,7 @@ export function _chatResolveTools(this: ChatViewLike, turn: ChatTurn, _applyEnab
         const preferredServers = getAgentServerFilter(this.plugin.serverManager, agent);
         const preferredTools = (agent?.preferredTools as string[] | undefined) || [];
         const disabledSet = new Set<string | undefined>(Array.isArray(agent.disabled_tools) ? agent.disabled_tools : []);
-        mcpActiveTools = ((this.plugin.serverManager?.getActiveToolDefinitions(preferredServers as string[], preferredTools) || []) as ChatToolDefinition[])
+        mcpActiveTools = (this.plugin.serverManager?.getActiveToolDefinitions(preferredServers as string[], preferredTools) || [])
             .filter((t: ChatToolDefinition) => !disabledSet.has(t.function?.name || t.name));
         tools = dedupeToolDefinitions([...systemTools, ...mcpActiveTools]);
 
@@ -1105,7 +1106,7 @@ export function _chatOnToolCallsParsed(this: ChatViewLike, turn: ChatTurn, toolC
                     name: toolCall.name,
                     input: toolCall.arguments,
                     status: 'pending'
-                });
+                }) as HTMLElement;
             }
             toolCallsContainer.appendChild(toolDisplay);
             if (isSubAgent || isAskUser) toolDisplay.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1203,7 +1204,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                         type: toolCall.name,
                         status: 'error',
                         response: t('chat.streaming.error_prefix', { message: error.message }),
-                    }));
+                    }) as HTMLElement);
                 } else {
                     const makeDisplay = this.env?.settings?.pkmAssistant?.compactToolChips === false ? createToolCallDisplay : createCompactToolChip;
                     toolDisplay.replaceWith(makeDisplay({
@@ -1211,7 +1212,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                         input: toolCall.arguments,
                         status: 'error',
                         error: error.message
-                    }));
+                    }) as HTMLElement);
                 }
             } else if (isSubAgent && result?.started === true) {
                 // Delegacja W TLE. Nie ma wyniku do pokazania — jest pokwitowanie startu.
@@ -1234,7 +1235,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                     agentName: startedList.length > 1 ? '' : (startedList[0]?.name || _bgArgs.aspect || ''),
                     query: _bgArgs.task || '',
                     response: lines.join('\n'),
-                });
+                }) as HTMLElement;
                 toolDisplay.replaceWith(bgBlock);
                 bgBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } else if (isSubAgent && result?.success) {
@@ -1250,7 +1251,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                     toolCallDetails: result.tool_call_details || [],
                     duration: result.duration_ms || 0,
                     usage: result.usage,
-                });
+                }) as HTMLElement;
                 toolDisplay.replaceWith(fullBlock);
                 fullBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } else if (isSubAgent && !result?.success) {
@@ -1262,7 +1263,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                     query: _saErrArgs.task || '',
                     response: t('chat.streaming.error_prefix', { message: result?.error || t('chat.subagent_notification.unknown_error') }),
                     duration: 0,
-                });
+                }) as HTMLElement;
                 toolDisplay.replaceWith(errorBlock);
                 errorBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } else {
@@ -1276,7 +1277,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                     // `memory_save` (`{success:false}`) dostawałaby zielony kryształ „zrobione".
                     status: toolResultStatus(result),
                     error: (result as ChatToolResult).error
-                }));
+                }) as HTMLElement);
             }
 
             // Render generated image inline
@@ -1341,7 +1342,9 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
         // --- Side effects (always run, regardless of tab) ---
         if (toolCall.name === 'agent_delegate') {
             try {
-                const parsed = typeof result === 'object' ? result : JSON.parse(JSON.stringify(result));
+                // TS-boundary: wynik `agent_delegate` pisze narzędzie — czat czyta z niego tylko
+                // pola `DelegationProposal` (guzik „przekaż rozmowę agentowi X”).
+                const parsed = (typeof result === 'object' ? result : JSON.parse(JSON.stringify(result))) as DelegationProposal & { delegation?: boolean };
                 if (parsed.delegation === true) this._pendingDelegation = parsed;
             } catch (e) {
                 // `_pendingDelegation` to JEDYNE wejście do `_renderDelegationButton` — cichy

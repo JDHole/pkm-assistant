@@ -223,7 +223,7 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
                         const makeDisplay = this.env?.settings?.pkmAssistant?.compactToolChips === false ? createToolCallDisplay : createCompactToolChip;
                         const display = makeDisplay({
                             name: tcName,
-                            input: typeof tcArgs === 'string' ? (() => { try { return JSON.parse(tcArgs); } catch { return tcArgs; } })() : tcArgs,
+                            input: typeof tcArgs === 'string' ? (() => { try { return JSON.parse(tcArgs) as unknown; } catch { return tcArgs; } })() : tcArgs,
                             output: tcOutput,
                             status: toolResultStatus(tcOutput),
                             error: (tcOutput as HistoryToolOutput)?.error

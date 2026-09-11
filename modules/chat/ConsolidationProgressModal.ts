@@ -28,12 +28,15 @@ import {
     renderReviewBanner,
 } from './archiveReviewRenders.js';
 import { isRunStuck, resolveStepDraft } from './consolidationRunState.js';
+import type { DedupStepDraft, StepLike, SummaryStepDraft } from './consolidationRunState.js';
 
-// TS-any: kontroler przebiegu i plugin są składane runtime w consolidationRunner i nie mają publicznego kontraktu.
-type Runtime = any;
+/** Plugin w zakresie, jaki czyta to okno: jeden kanał powiadomień. */
+interface ProgressPlugin {
+    showCrystalNotice?(message: string, options?: NoticeOptions): unknown;
+}
 
 interface ProgressController {
-    plugin?: Runtime;
+    plugin?: ProgressPlugin | null;
     applyDecision?(stepId: string, decision: StepDecision): unknown;
     retry?(stepId: string): unknown;
     skip?(stepId: string): unknown;
@@ -363,7 +366,10 @@ export class ConsolidationProgressModal extends Modal {
         // okna) nie może wyrzucić poprawek usera i wrócić do wersji modelu.
         const proposal = step.result || {};
         const isDedup = step.kind === STEP_KIND.DEDUP;
-        const draft: Runtime = resolveStepDraft(step as Runtime, { dedup: isDedup });
+        // Krok ma szkic dedupu ALBO streszczenia — rozstrzyga `step.kind`, sprawdzony linijkę
+        // wyżej. Przecięcie opisuje „jeden z dwóch kształtów”, żeby obie gałęzie niżej czytały
+        // swoje pola bez ponawiania tej samej decyzji w typie.
+        const draft = resolveStepDraft(step as StepLike, { dedup: isDedup as false }) as DedupStepDraft & SummaryStepDraft;
         if (isDedup) {
             renderDedupReview(this._panelEl!, {
                 merges: draft.merges,

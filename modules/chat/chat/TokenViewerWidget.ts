@@ -3,9 +3,11 @@ import { t } from '../../../core/i18n/index.js';
 import { UiIcons, setSvg } from '../../crystal-soul/index.js';
 import { estimateContextWindow, formatTokenCount, getContextLevel } from './TokenViewerUtils.js';
 import { log } from '../../../core/utils/Logger.js';
+import type { ChatViewLike } from './chatViewShape.js';
+import type { ModelLibraryEntry } from '../../models/index.js';
 
-// TS-any: ChatView agreguje runtime rozszerzenia pluginu, trackera, rolling window i Obsidian DOM.
-type Runtime = any;
+/** Wpis modelu: skrót `platforma/model` albo rozbity obiekt - oba ksztalty leza w ustawieniach. */
+type ConfiguredModel = string | { platform?: string; model?: string };
 
 type CompressionPreset = 'delicate' | 'medium' | 'aggressive';
 type TokenUsage = { input?: number; output?: number };
@@ -56,7 +58,7 @@ class ConfirmCompressionModal extends Modal {
 }
 
 export class TokenViewerWidget {
-    declare view: Runtime;
+    declare view: ChatViewLike;
     declare parent: HTMLElement;
     declare selectedRole: string;
     declare autoUpdate: boolean;
@@ -68,7 +70,7 @@ export class TokenViewerWidget {
     declare popover: HTMLDivElement | null;
     declare closeHandler: ((event: MouseEvent) => void) | null;
 
-    constructor(view: Runtime, parent: HTMLElement) {
+    constructor(view: ChatViewLike, parent: HTMLElement) {
         this.view = view;
         this.parent = parent;
         // Legacy role names may linger in the per-view state from before the rename.
@@ -173,10 +175,12 @@ export class TokenViewerWidget {
         // lookup below.
         const legacyKey = ({ researcher: 'minion', strategist: 'master' } as Record<string, string>)[role];
         const lib = pkm?.modelLibrary?.[role] || (legacyKey ? pkm?.modelLibrary?.[legacyKey] : null);
-        const configured: Runtime = agent?.models?.[role]
-            || lib?.find?.((m: Runtime) => m.isDefault) || lib?.[0] || null;
-        const platform = typeof configured === 'object' ? configured.platform : '';
-        const model = typeof configured === 'object' ? configured.model : String(configured || '');
+        const configured = (agent?.models?.[role]
+            || lib?.find?.((m: ModelLibraryEntry) => m.isDefault) || lib?.[0] || null) as ConfiguredModel | null;
+        // `typeof null === 'object'`, wiec gałąź obiektowa łapie też pusty wpis - to ZASTANE
+        // zachowanie, typ tylko je opisuje (naprawa = zmiana runtime, poza tą falą).
+        const platform = typeof configured === 'object' ? (configured as { platform?: string }).platform : '';
+        const model = typeof configured === 'object' ? (configured as { model?: string }).model : String(configured || '');
         return estimateContextWindow({ role, platform, model });
     }
 

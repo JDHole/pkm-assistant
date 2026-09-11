@@ -66,6 +66,7 @@ import type { DelegationProposal } from './chat_artifacts.js';
 export interface ChatSkillConfig {
     name: string;
     slug?: string;
+    description?: string;
     prompt?: string;
     icon_category?: string;
     userInvocable?: boolean;
@@ -351,6 +352,11 @@ export interface ChatViewMixins extends
     mentionAutocomplete: MentionAutocomplete | null;
     attachmentManager: AttachmentManager | null;
     _audioRecorder: AudioRecorder | null;
+
+    // ── Token Viewer (stan widgetu, trwały między otwarciami popovera) ──
+    _tokenViewerRole?: string;
+    _tokenViewerAutoUpdate?: boolean;
+    _tokenViewerCompactView?: boolean;
 
     // ── Sesja ──
     _idleScheduler: IdleScheduler | null;

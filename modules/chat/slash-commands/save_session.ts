@@ -256,9 +256,9 @@ export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandCon
             // Trigger automatyczny (próg / idle-scheduler). Pusty plan = cisza, nie notice
             // po każdym zapisie sesji.
             source: 'auto',
-        }).catch((e) => {
-            log.error('SaveSession', `Start konsolidacji padł: ${e?.message || e}`);
-            new Notice(t('memory.consolidation.notice_error', { reason: e?.message || String(e) }), 6000);
+        }).catch((e: unknown) => {
+            log.error('SaveSession', `Start konsolidacji padł: ${(e as ErrLike)?.message || (e as string)}`);
+            new Notice(t('memory.consolidation.notice_error', { reason: (e as ErrLike)?.message || String(e) }), 6000);
         });
     }
     view.resetInputArea?.();

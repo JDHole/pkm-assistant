@@ -83,7 +83,7 @@ export function _applyAutonomyChange(this: ChatViewLike, newAutonomy: unknown): 
     this.currentAutonomy = normalized;
     if (this.plugin) this.plugin.currentAutonomy = normalized;
     // Persist onto the active tab's stored state so tab switches restore it.
-    const activeTab = this.chatTabs?.find((t: ChatTab) => t.isActive) as ChatTab | undefined;
+    const activeTab = this.chatTabs?.find((t: ChatTab) => t.isActive);
     const activeKey = _tabKey(activeTab) || null;
     const state = activeKey
         ? this._agentStates?.get(activeKey)
