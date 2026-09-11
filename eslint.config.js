@@ -135,7 +135,7 @@ export default [
     },
   },
   {
-    files: ['modules/**/*.{js,ts}', 'src/**/*.{js,ts}', 'config/**/*.{js,ts}', 'utils/**/*.{js,ts}', 'test-support/**/*.{js,ts}'],
+    files: ['modules/**/*.{js,ts}', 'src/**/*.{js,ts}', 'config/**/*.{js,ts}', 'utils/**/*.{js,ts}'],
     ignores: ['**/*.test.js', '**/*.test.ts'],
     languageOptions: {
       ecmaVersion: 'latest',

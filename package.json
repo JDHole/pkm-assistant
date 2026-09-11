@@ -12,8 +12,8 @@
     "release": "node release.js",
     "test": "npx ava --verbose",
     "typecheck": "tsc --noEmit",
-    "lint": "npx eslint \"modules/**/*.ts\" \"src/**/*.ts\" \"config/**/*.ts\" \"utils/**/*.ts\" \"test-support/**/*.ts\"",
-    "lint:obsidian": "npx eslint --config eslint.obsidian.config.js core modules src config utils test-support"
+    "lint": "npx eslint \"modules/**/*.ts\" \"src/**/*.ts\" \"config/**/*.ts\" \"utils/**/*.ts\"",
+    "lint:obsidian": "npx eslint --config eslint.obsidian.config.js core modules src config utils"
   },
   "repository": {
     "type": "git",

@@ -6,8 +6,9 @@
  * `Plugin` Obsidiana, a pakiet `obsidian` w `node_modules` to SAME TYPY - nie ma runtime'u.
  * AVA nie ma atrapy `obsidian`, więc import klasy jest zrobiony DYNAMICZNIE, w środku
  * każdego testu: dzięki temu brak atrapy jest czerwienią JEDNEGO testu z czytelnym powodem,
- * a nie wywrotką całego pliku. Gdy atrapa się pojawi (jest w `test-support/obsidian.ts`, wpinana
- * preloadem AVA), testy zaczną trafiać w rzuty stubów bez żadnej zmiany w treści asercji.
+ * a nie wywrotką całego pliku. Gdy atrapa się pojawi (mieszka w repo harnessu jako
+ * `test-support/obsidian.ts`, wpinana preloadem AVA przez lokator w tym repo), testy zaczną
+ * trafiać w rzuty stubów bez żadnej zmiany w treści asercji.
  */
 import test from 'ava';
 
