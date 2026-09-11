@@ -123,7 +123,7 @@ export function renderCardAction(container: HTMLElement, { iconFn, label, danger
     setSvg(btn, iconFn(11));
     btn.addEventListener('click', (e: Event) => {
         e.stopPropagation();
-        onClick();
+        void onClick();
     });
     return btn;
 }

@@ -115,8 +115,8 @@ export class AttachmentManager {
     declare _onDragEnter: (e: DragEvent) => void;
     declare _onDragOver: (e: DragEvent) => void;
     declare _onDragLeave: (e: DragEvent) => void;
-    declare _onDrop: (e: DragEvent) => Promise<void>;
-    declare _onPaste: ((e: ClipboardEvent) => Promise<void>) | undefined;
+    declare _onDrop: (e: DragEvent) => void;
+    declare _onPaste: ((e: ClipboardEvent) => void) | undefined;
 
     /**
      * @param {HTMLElement} container - Where to render chip bar + attach button
@@ -343,7 +343,7 @@ export class AttachmentManager {
             }
         };
 
-        this._onDrop = async (e: DragEvent) => {
+        this._onDrop = (e: DragEvent) => {
             if (!this._isInDropZone(e)) return;
             e.preventDefault();
             e.stopImmediatePropagation();
@@ -352,7 +352,7 @@ export class AttachmentManager {
             // `as number`: bez asercji TS18048, `?? 0` zmieniłoby bundle; `undefined > 0` daje
             // false jak w JS od zawsze.
             if ((e.dataTransfer?.files?.length as number) > 0) {
-                await this._processFileList(e.dataTransfer!.files);
+                void this._processFileList(e.dataTransfer!.files);
             }
         };
 
@@ -370,7 +370,7 @@ export class AttachmentManager {
     _setupPaste(): void {
         if (!this.pasteTarget) return;
 
-        this._onPaste = async (e: ClipboardEvent) => {
+        this._onPaste = (e: ClipboardEvent) => {
             const items = e.clipboardData?.items;
             if (!items) return;
 
@@ -385,7 +385,7 @@ export class AttachmentManager {
             if (files.length > 0) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
-                await this._processFileList(files);
+                void this._processFileList(files);
             }
             // If no files, let normal text paste through
         };
