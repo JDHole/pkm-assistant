@@ -74,8 +74,10 @@ function _toolEntry(iconFn: UiIcon, toolName: string) {
     return { icon: iconFn, get label() { return t('tool.' + toolName); } };
 }
 
-/** Kształt wpisu katalogu `TOOL_INFO` — ikona (leniwie wołana) + i18n etykieta-getter. */
-type ToolInfoEntry = ReturnType<typeof _toolEntry>;
+/** Kształt wpisu katalogu `TOOL_INFO` — ikona (leniwie wołana) + i18n etykieta-getter.
+ *  Eksportowany: `SubAgentBlock.ts` (ten sam moduł, import bezpośredni z pliku) go potrzebuje
+ *  do otypowania odczytów `TOOL_INFO[...]` katalogu narzędzi sub-agenta. */
+export type ToolInfoEntry = ReturnType<typeof _toolEntry>;
 
 export const TOOL_INFO = {
     // Prymitywy (read/list ze scope vault|memory):
