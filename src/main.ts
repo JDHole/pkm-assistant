@@ -288,8 +288,8 @@ export default class PkmAssistantPlugin extends PluginBase {
   showCrystalNotice(message: string, opts: PluginDynamic = {}) {
     const { type = 'info', timeout = 4000, agentColor } = opts;
     // `createFragment()` - globalna pomocnicza Obsidiana (obsidianmd/prefer-create-el).
-    // `test-support/dom-shim.ts` dokłada ją do `globalThis`, więc kod wstaje identycznie
-    // i w Obsidianie, i w harnessie (goły Node).
+    // `test-support/dom-shim.ts` (repo harnessu) dokłada ją do `globalThis`, więc kod wstaje
+    // identycznie i w Obsidianie, i w harnessie (goły Node).
     const frag = createFragment();
 
     const header = frag.createDiv({ cls: 'cs-notice__header' });

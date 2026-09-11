@@ -32,6 +32,6 @@
     "noUnusedParameters": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": ["config", "utils", "modules", "core", "src", "test-support"],
+  "include": ["config", "utils", "modules", "core", "src"],
   "exclude": ["node_modules"]
 }
