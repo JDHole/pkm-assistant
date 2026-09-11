@@ -199,12 +199,6 @@ export class SubAgentRunner {
      * @param {Object} options.app - Obsidian App instance
      * @param {Object} options.plugin - Plugin instance (for tool execution context)
      */
-    // TS-boundary: jedyny wołacz konstruktora (`DelegateTool.ts`, poza zakresem) DI-uje przez
-    // WŁASNE, węższe lokalne typy (`DelegatePlugin`, `toolRegistry: {filterByAgent?}`, `app: object`)
-    // i od razu rzutuje wynik `new SubAgentRunner(...)` na SWÓJ `SubAgentRunnerLike` — runner tu
-    // dostaje więc parametry `unknown` i zawęża je do tego, czego SAM realnie potrzebuje
-    // (`getTool` na registry, pełny `PluginApi` na plugin). W praktyce to zawsze te same,
-    // realne obiekty `ToolRegistry`/`App`/plugin.
     constructor({ toolRegistry, app, plugin }: { toolRegistry: unknown; app: unknown; plugin: unknown }) {
         this.toolRegistry = toolRegistry as RunnerToolRegistry;
         this.app = app as AppLike;
@@ -380,12 +374,6 @@ export class SubAgentRunner {
                 }
                 : null;
             const response = await runAgentLoop({
-                // `model as never`: `runAgentLoop` przyjmuje własny, WĄSKI strukturalny kontrakt
-                // (`LoopModelLike`, nieeksportowany — `modules/agent-loop` świadomie NIE zależy od
-                // `modules/models`, patrz komentarz przy `LoopModelLike` w AgentLoop.ts), którego
-                // kształt handlera `done` nie unifikuje się nominalnie z `ChatModel.stream` (dwie
-                // niezależnie zadeklarowane, ale operacyjnie zgodne odpowiedzi API). Runtime bez
-                // zmian — to zawsze ten sam obiekt `ChatModel`.
                 model: model as never,
                 store,
                 resolveTools: () => tools,
