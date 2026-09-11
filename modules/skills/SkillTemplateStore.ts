@@ -18,12 +18,17 @@ import { slugify } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { parseSkillMarkdown, serializeSkillFile } from './skillFrontmatter.js';
 import type { SkillData, SkillInput, VaultLike } from './types.js';
-// `SkillData & {...}`, nie `SkillInput & {...}`: obie konstrukcje niżej (`_loadFromFolder`
-// przez `parseSkillMarkdown`, `_write` przez formData `SkillEditorModal` — patrz jego
-// `formData`, każde pole ma fallback `||`/`??`) ZAWSZE dają konkretną wartość każdemu polu,
-// nigdy `undefined`; kształt jest więc zgodny z `SkillData` (ten sam moduł), co pozwala
-// jednemu UI (SkillEditorModal/DetailView) czytać żywy skill i szablon bez rozgałęziania typu.
-export type SkillTemplateRecord = SkillData & { folderPath: string; isTemplate: true };
+// Pola bez `?`: `_loadFromFolder` (przez `parseSkillMarkdown`) ZAWSZE daje im konkretną
+// wartość. `_write` ma DWÓCH wołaczy przez `createFromData`/`save`: `SkillEditorModal.formData`
+// (każde pole ma fallback `||`/`??`) i `ensureFactoryTemplates` → `getFactorySkillTemplates()`
+// (`modules/agents/factoryTemplates.ts`) — ta druga ścieżka niesie WYŁĄCZNIE
+// name/description/category/icon/preQuestions/prompt, więc `enabled`/`tags`/`model`/
+// `argumentHint`/`disableModelInvocation`/`userInvocable` zostają opcjonalne (naprawdę bywają
+// nieobecne w cache, nie tylko w typie) — tak samo jak na `main` (`StoredTemplate = SkillInput & {...}`).
+type SkillTemplateOptionalFields = 'enabled' | 'tags' | 'model' | 'argumentHint' | 'disableModelInvocation' | 'userInvocable';
+export type SkillTemplateRecord = Omit<SkillData, SkillTemplateOptionalFields>
+    & Partial<Pick<SkillData, SkillTemplateOptionalFields>>
+    & { folderPath: string; isTemplate: true };
 
 export const SKILL_TEMPLATES_PATH = '.pkm-assistant/templates/skills';
 const LIVE_SKILLS_PATH = '.pkm-assistant/skills';
@@ -207,12 +212,15 @@ export class SkillTemplateStore {
             if (!await this.vault.adapter.exists(dir)) await this.vault.adapter.mkdir(dir);
         }
         await this.vault.adapter.write(filePath, serializeSkillFile(payload));
-        // `payload as SkillData`: `SkillInput` deklaruje większość pól opcjonalnie (kształt
-        // zapisu, gdzie wołacz mógłby coś pominąć), ale JEDYNY realny wołacz (`SkillEditorModal`
-        // formData) ZAWSZE ustawia je konkretnie (fallbacki `||`/`??` przy każdym polu) — cast
-        // na źródle rozlania, nie nowe klucze niżej.
+        // `payload as Omit<SkillData, SkillTemplateOptionalFields>`: `SkillInput` deklaruje
+        // `name`/`description` jako jedyne pewne pola. `category`/`preQuestions`/`prompt`/`icon`
+        // (część `SkillTemplateRecord`, która ZOSTAJE wymagana) dostają konkretną wartość od OBU
+        // wołaczy `_write` (formData `SkillEditorModal` i `getFactorySkillTemplates()`) — cast na
+        // źródle rozlania obejmuje TYLKO tę część; `enabled`/`tags`/`model`/`argumentHint`/
+        // `disableModelInvocation`/`userInvocable` (opcjonalne w `SkillTemplateRecord`) płyną
+        // przez spread SWOIM realnym kształtem `SkillInput`, bez castu.
         this.cache.set(slug, {
-            ...(payload as SkillData),
+            ...(payload as Omit<SkillData, SkillTemplateOptionalFields>),
             slug,
             prompt: (payload.prompt || '').trim(),
             path: filePath,
