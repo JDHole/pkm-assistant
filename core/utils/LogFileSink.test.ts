@@ -57,6 +57,34 @@ test('serializeArg extracts Error name + message + first stack line', (t) => {
     t.true(out.includes('|')); // stack first line appended
 });
 
+test('serializeArg dla golego Errora NIE dokleja ogona JSON (brak wlasnych pol poza name/message/stack)', (t) => {
+    const out = serializeArg(new Error('boom'));
+    t.true(out.startsWith('Error: boom'), out);
+    t.false(out.includes('{'), `goly Error nie ma wlasnych pol - format ma zostac jak dotad, bez ogona JSON: ${out}`);
+});
+
+test('serializeArg dokleja wlasne pola bledu modelu (code/http_status) jako JSON po stacku', (t) => {
+    // Ksztalt ModelRequestError (modules/models/ModelRequestError.ts): prawdziwy Error z
+    // code/http_status/details jako WLASNYMI enumerowalnymi polami - byl throw-owany goly
+    // obiekt, dzis throw-owany Error z tymi samymi polami (only-throw-error), ale serializeArg
+    // ich dotad nie czytal i log tracil code/http_status na tej sciezce.
+    const err = Object.assign(new Error('model padl'), { code: 'invalid_request_error', http_status: 400 });
+    const out = serializeArg(err);
+    t.true(out.startsWith('Error: model padl'), out);
+    t.true(out.includes('{"code":"invalid_request_error","http_status":400}'), out);
+});
+
+test('serializeArg: pole niesparsowalne (cykl) na Errorze nie rzuca, linia zostaje bez ogona', (t) => {
+    const err = new Error('boom') as Error & { details?: unknown };
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    err.details = cyclic;
+    const out = serializeArg(err);
+    t.is(typeof out, 'string');
+    t.true(out.startsWith('Error: boom'), out);
+    t.false(out.includes('{'), `cykl nie da sie zserializowac - ma zostac bez ogona JSON: ${out}`);
+});
+
 test('serializeArg falls back to String on circular JSON (never throws)', (t) => {
     const circ: Record<string, unknown> = {};
     circ.self = circ;
