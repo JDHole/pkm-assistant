@@ -107,11 +107,15 @@ import {
   setYamlEngine,
 } from "../core/index.js";
 import type {
+  AppLike,
   CrystalNoticeOptions,
   ItemViewMap,
+  PluginApi,
+  PluginHost,
   PluginItemViewClass,
   PluginSettingsTabClass,
   RibbonIconDef,
+  VaultAdapterLike,
   VaultGroup,
 } from "../core/index.js";
 import type { SelfTestDeps } from "../core/selftest.js";
@@ -153,21 +157,23 @@ export default class PkmAssistantPlugin extends PluginBase {
   declare _readyCallbacks: Array<() => void>;
   declare _crystalSoulSheet: CSSStyleSheet | null;
   declare _komunikatorCleanupUnsub: (() => void) | null;
-  declare agentManager: AgentManager;
-  declare toolRegistry: ToolRegistry;
-  declare mcpClient: MCPClient;
-  declare serverManager: ServerManager;
-  declare externalMcpManager: ExternalMcpManager;
-  declare permissionSystem: PermissionSystem;
-  declare approvalManager: ApprovalManager;
+  // `| undefined` - przypisanie leży w `try` bloku `initialize()`, który wywrotkę loguje i leci
+  // dalej (nie rethrow); pole może więc zostać nieprzypisane przez resztę życia pluginu.
+  declare agentManager: AgentManager | undefined;
+  declare toolRegistry: ToolRegistry | undefined;
+  declare mcpClient: MCPClient | undefined;
+  declare serverManager: ServerManager | undefined;
+  declare externalMcpManager: ExternalMcpManager | undefined;
+  declare permissionSystem: PermissionSystem | undefined;
+  declare approvalManager: ApprovalManager | undefined;
   declare secretsStorage: SecretsStorage;
-  declare artifactStore: ArtifactStore;
-  declare vaultIndexer: VaultIndexer;
+  declare artifactStore: ArtifactStore | undefined;
+  declare vaultIndexer: VaultIndexer | undefined;
   // Nullowane w `onunload()` - patrz tam.
   declare subTaskRegistry: SubTaskRegistry | null;
   declare subTaskNotifier: SubTaskNotifier | null;
-  declare traceLog: TraceLog;
-  declare skinManager: typeof SkinManager;
+  declare traceLog: TraceLog | undefined;
+  declare skinManager: typeof SkinManager | undefined;
 
   /**
    * Konfiguracja runtime'u powstaje w KONSTRUKTORZE (tanio, bez I/O), a `onload()` podaje TĘ
@@ -180,7 +186,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     super(app, manifest);
     // TS-boundary: `App` (Obsidian) vs `AppLike` (core, node-safe) - patrz komentarz przy
     // `this.env = new PluginRuntime(...)` w `onload()`.
-    this.runtimeConfig = buildRuntimeConfig({ app: this.app as never });
+    this.runtimeConfig = buildRuntimeConfig({ app: this.app as unknown as AppLike });
   }
 
   // TS-boundary: `PkmSettingsTab` (modules/shell) bierze `App` prawdziwego Obsidiana w
@@ -215,9 +221,10 @@ export default class PkmAssistantPlugin extends PluginBase {
     // TS-boundary: `App` (Obsidian) nie spełnia strukturalnie node-safe `AppLike` (`core/`) -
     // `DataAdapter` Obsidiana nie ma indeksu `[key: string]: unknown`, którego `VaultAdapterLike`
     // wymaga. Ten sam rozjazd (App vs AppLike) wraca w każdym miejscu niżej, gdzie `this`/`this.app`
-    // trafia w kontrakt oparty o `AppLike`/`PluginApi`/`PluginHost` - `as never` jak w `PluginBase`
-    // (`this.app as never` w `openNote`), nie `as any`.
-    this.env = new PluginRuntime(this as never, this.runtimeConfig);
+    // trafia w kontrakt oparty o `AppLike`/`PluginApi`/`PluginHost` - asercja na nazwany typ
+    // docelowy (nie `as never`: `never` przyjąłby WSZYSTKO, więc realna zmiana kontraktu modułu
+    // przeszłaby cicho, bez błędu tsc przy następnym probie).
+    this.env = new PluginRuntime(this as unknown as PluginHost, this.runtimeConfig);
     // Rejestr embeddingu jest SLOTEM runtime'u, nie jego wytwórnią (`core/` nie importuje
     // z modułów) - wstawia go composition root, ZANIM `boot()` obudzi konsumentów
     // (`VaultIndexer`, `EmbeddingHelper`, sekcja „Modele" w Ustawieniach). Bez tej linijki
@@ -233,7 +240,11 @@ export default class PkmAssistantPlugin extends PluginBase {
       // (`Record<string, EmbeddingProviderLike>`); `EmbeddingRegistry` (modules/embedding) chce
       // swój własny, ostrzejszy kształt (`Record<EmbeddingProviderId, EmbeddingProvider>`) - ta
       // sama mapa, dwa kontrakty. `buildRuntimeConfig` wstawia tu naprawdę obiekty z
-      // `EMBEDDING_PROVIDERS` (modules/embedding), więc zawężenie jest bezpieczne.
+      // `EMBEDDING_PROVIDERS` (modules/embedding), więc zawężenie jest bezpieczne w produkcji.
+      // Harness (testy) podmienia tę mapę w `plugin.runtimeConfig` PRZED `onload()` i może
+      // podać CZĘŚCIOWĄ mapę (mniej niż 4 klucze `EmbeddingProviderId`) - `Record<Id, Provider>`
+      // wtedy zawyża kompletność (obiecuje wszystkie klucze, choć część może brakować);
+      // konsumenci (`EmbeddingRegistry`) i tak indeksują ostrożnie, więc runtime nie cierpi.
       providers: this.runtimeConfig.embedding.providers as unknown as Record<EmbeddingProviderId, EmbeddingProvider>,
       http: this.runtimeConfig.embedding.http,
       settings: () => this.env?.settings,
@@ -245,12 +256,12 @@ export default class PkmAssistantPlugin extends PluginBase {
     // za luźno dla `addSettingTab()` Obsidiana, który chce prawdziwy `PluginSettingTab`. Realna
     // klasa (`PkmSettingsTab`) NIM jest (`extends PluginSettingsTab`) - asercja tylko wyrównuje
     // ogólny typ gettera do tego, co runtime naprawdę tworzy.
-    this.addSettingTab(new this.settingsTabClass(this.app as never, this as never) as PluginSettingTab);
+    this.addSettingTab(new this.settingsTabClass(this.app as unknown as AppLike, this as unknown as PluginApi) as PluginSettingTab);
     registerPkmIcon();
     // `registerItemViews()` ZOSTAJE tutaj: Obsidian odtwarza zapisane zakładki przy
     // layoutReady, więc typ widoku musi być znany zanim to nastąpi.
     this.registerItemViews();
-    registerAgentSidebar(this as never);
+    registerAgentSidebar(this as unknown as Parameters<typeof registerAgentSidebar>[0]);
     // Render bloku ```pkm-artefakt``` (guziki akceptacji/przywołania w notatce).
     registerArtifactBlocks(this);
 
@@ -263,7 +274,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     // niezależny od całego env. `initialize()` woła `setLocale()` jeszcze raz na w pełni
     // zmergowanych ustawieniach - to idempotentne i pilnuje przypadku, w którym tani odczyt
     // nic nie znalazł.
-    setLocale(await readUiLanguage(this.app?.vault?.adapter as never));
+    setLocale(await readUiLanguage(this.app?.vault?.adapter as unknown as VaultAdapterLike));
     this.registerCommands();
     this.registerRibbonIcons();
     log.debug('Plugin', 'onload() zakończone — czekam na layoutReady → initialize()');
@@ -560,7 +571,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       // TS-boundary: `SkinPluginLike.env` (modules/crystal-soul) nie dopuszcza `null`, a
       // `this.env` (core, `PluginBase`) jest `PluginRuntime | null` do pierwszej linijki
       // `onload()` - rozjazd kontraktu, nie realna możliwość `null` w tym miejscu wywołania.
-      await SkinManager.initialize(this as never);
+      await SkinManager.initialize(this as Parameters<typeof SkinManager.initialize>[0]);
       this.skinManager = SkinManager;
       log.info('Plugin', `SkinManager OK: aktywny skin ${SkinManager.getActiveSkinId()}`);
     } catch (e) {
@@ -613,11 +624,16 @@ export default class PkmAssistantPlugin extends PluginBase {
       // jako `importInstance(typ, opts: Record<string, unknown>)`, luźniej niż prawdziwa
       // `ArtifactStore.importInstance` (drugi argument to opcjonalny `ArtifactImportOptions` z
       // wymaganym `tytul`) - rozjazd kontraktu WEWNĄTRZ modules/artifacts (migrator vs store),
-      // nie coś do naprawy w composition roocie.
-      migrateJsonArtifactsToNotes({ adapter: this.app.vault.adapter, store: this.artifactStore as unknown as { importInstance(typ: string, opts: Record<string, unknown>): Promise<unknown> } })
+      // nie coś do naprawy w composition roocie. Typ docelowy bierzemy z sygnatury migratora
+      // (właściciel), nie przepisujemy jego prywatnego kształtu ręcznie.
+      migrateJsonArtifactsToNotes({ adapter: this.app.vault.adapter, store: this.artifactStore as unknown as NonNullable<Parameters<typeof migrateJsonArtifactsToNotes>[0]>['store'] })
         .then((res) => {
           if (res && !res.skipped) log.info('Plugin', `Migrator artefaktów: ${res.migrated} zmigrowanych, ${res.backedUp} do backupu`);
-          return this.artifactStore.archive();
+          // `!`: przypisany bezwarunkowo dwie linijki wyżej, w tym samym `try` - `undefined`
+          // w typie pola istnieje tylko dla ścieżki „konstruktor rzucił", która nigdy nie
+          // dotrze do tego domknięcia (rzut przerywa blok PRZED `.then()`). TS gubi to przez
+          // granicę domknięcia async - `?.` zmieniłby runtime (cichy no-op zamiast wywołania).
+          return this.artifactStore!.archive();
         })
         .catch(() => {});
     } catch (e) {
@@ -695,11 +711,12 @@ export default class PkmAssistantPlugin extends PluginBase {
       const komunikatorEnabled = isKomunikatorEnabled(this.settings);
 
       this.toolRegistry = new ToolRegistry();
-      // TS-boundary: `MCPClientPlugin.agentManager.getAgent()` (modules/tools, lokalny
-      // `PermissionedAgent.approvalToggles: Record<string, boolean>`) jest węższy niż prawdziwy
-      // `Agent.approvalToggles: Record<string, unknown>` (modules/agents) - rozjazd kontraktu
-      // dwóch modułów, nie coś do naprawy w composition roocie.
-      this.mcpClient = new MCPClient(this.app, this as never, this.toolRegistry);
+      // TS-boundary: `MCPClientPlugin.agentManager.getAgent()` (modules/tools) zwraca
+      // `PermissionedAgent` (core/security/PermissionSystem.ts:21, `approvalToggles?:
+      // Record<string, boolean>`) - core obiecuje za dużo dla surowego `approval_toggles`
+      // z YAML-a usera: prawdziwy `Agent.approvalToggles` (modules/agents/Agent.ts:179) jest
+      // `Record<string, unknown>`, bo nikt tych wartości nie waliduje przy wczytaniu.
+      this.mcpClient = new MCPClient(this.app, this as ConstructorParameters<typeof MCPClient>[1], this.toolRegistry);
 
       // read/list = prymitywy ze scope (vault|memory). memory_read/read_summary/
       // list_summaries wchłonięte przez read/list (scope=memory bramkowane uprawnieniem).
@@ -750,8 +767,9 @@ export default class PkmAssistantPlugin extends PluginBase {
       this.serverManager = new ServerManager(this.app, this, { komunikatorEnabled });
       await this.serverManager.initialize();
       // TS-boundary: `Agent` (modules/agents, `permissions: AgentPermissions`) vs
-      // `ServerVisibilityAgent` (modules/tools, `permissions?: { mcp?: boolean }`) - dwa moduły,
-      // dwa lokalne kontrakty dla „agenta widzianego z zewnątrz", zero wspólnych pól.
+      // `ServerVisibilityAgent` (modules/tools) - dwa moduły, dwa lokalne kontrakty dla „agenta
+      // widzianego z zewnątrz"; `name`/`mcp_servers`/`effective_mcp_servers` się zgadzają,
+      // niezgodny jest tylko podobiekt `permissions` (`AgentPermissions` vs `{ mcp?: boolean }`).
       this.serverManager.syncBuiltInServersForAgent(this.agentManager?.getActiveAgent?.() as unknown as ServerVisibilityAgent | null | undefined);
 
       // Built-in MCP servers follow the active agent's mcp_servers whitelist.
@@ -781,7 +799,7 @@ export default class PkmAssistantPlugin extends PluginBase {
         // lokalnie pole `externalMcpServers`, którego `PkmAssistantSettings` (core) nie deklaruje
         // wprost (żyje pod jej otwartym indeksem `[key: string]: unknown`) - TS traktuje oba
         // kształty jako rozłączne, nie jako podtyp przez indeks.
-        this.externalMcpManager = new ExternalMcpManager(this as never, { isMobile: !!Platform?.isMobile });
+        this.externalMcpManager = new ExternalMcpManager(this as ConstructorParameters<typeof ExternalMcpManager>[0], { isMobile: !!Platform?.isMobile });
         void this.externalMcpManager.autostart();
       } catch (e: unknown) {
         // TS-boundary: catch łapie cokolwiek zostało rzucone (nie zawsze `Error`) - duck-type
@@ -805,7 +823,7 @@ export default class PkmAssistantPlugin extends PluginBase {
                 // TS-boundary: `SendToAgentPluginLike.agentManager._emit` (modules/shell,
                 // lokalny kontrakt 1-argumentowy) jest węższy niż prawdziwy
                 // `AgentManager._emit(event, data)` (modules/agents) - rozjazd kontraktu.
-                new SendToAgentModal(this.app, this as never, selection, filePath).open();
+                new SendToAgentModal(this.app, this as unknown as ConstructorParameters<typeof SendToAgentModal>[1], selection, filePath).open();
               });
           });
           menu.addItem((item) => {
@@ -861,7 +879,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       // TS-boundary: `SecureStorageSlice` żyje dwa razy z tą samą nazwą - `core/runtime/
       // contracts.ts` (`encrypted: Record<string, unknown>`) i `core/security/SecretsStorage.ts`
       // (`encrypted: Record<string, EncryptedSecret>`) - dwa lokalne kontrakty tego samego worka.
-      return this.secretsStorage.hydrateSettings(settings as never);
+      return this.secretsStorage.hydrateSettings(settings as Parameters<SecretsStorage['hydrateSettings']>[0]);
     }
 
     const password = await MasterPasswordModal.request(this.app, {
@@ -888,7 +906,7 @@ export default class PkmAssistantPlugin extends PluginBase {
 
     // TS-boundary: patrz komentarz przy pierwszym `hydrateSettings` wyżej (dwa lokalne
     // `SecureStorageSlice`).
-    const status = await this.secretsStorage.hydrateSettings(settings as never);
+    const status = await this.secretsStorage.hydrateSettings(settings as Parameters<SecretsStorage['hydrateSettings']>[0]);
     if (status?.missing?.length) {
       log.warn('Plugin', `Secure storage hydrate incomplete: ${status.missing.length} key(s) unavailable.`);
     }
@@ -973,7 +991,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       agents: {
         iconName: "users",
         description: t('main.agent_sidebar'),
-        callback: () => { void openAgentSidebar(this as never); }
+        callback: () => { void openAgentSidebar(this as unknown as Parameters<typeof openAgentSidebar>[0]); }
       }
     }
   }
@@ -1099,7 +1117,7 @@ export default class PkmAssistantPlugin extends PluginBase {
         id: "pkm-open-agents",
         name: t('command.open_agents'),
         callback: () => {
-          void openAgentSidebar(this as never);
+          void openAgentSidebar(this as unknown as Parameters<typeof openAgentSidebar>[0]);
         }
       },
       pkm_selftest: {
@@ -1155,10 +1173,12 @@ export default class PkmAssistantPlugin extends PluginBase {
   async run_self_test() {
     try {
       const { buildSelfTestReport, formatSelfTestReport } = await import('../core/selftest.js');
-      // TS-boundary: `SelfTestPlugin.settings.pkmAssistant.modelLibrary` (core/selftest, lokalny
-      // `{ main?: ModelEntry[] }`) jest węższy niż prawdziwy `PkmAssistantSettings.modelLibrary:
-      // unknown` (core/runtime/contracts) - dwa lokalne kontrakty tego samego worka ustawień.
-      const report = await buildSelfTestReport(this as never, {
+      // TS-boundary: `SelfTestPlugin` (core/selftest) ma DWIE rozbieżności z prawdziwym pluginem:
+      // (1) `settings.pkmAssistant.modelLibrary: { main?: ModelEntry[] }` (lokalny) węższy niż
+      // prawdziwy `PkmAssistantSettings.modelLibrary: unknown` (core/runtime/contracts);
+      // (2) `agentManager.getMemoryForAgent?: (agent: AgentLike) => ...` (param `{name?: string}`)
+      // węższy niż prawdziwy `AgentManager.getMemoryForAgent(agent: Agent | string | null | undefined)`.
+      const report = await buildSelfTestReport(this as unknown as Parameters<typeof buildSelfTestReport>[0], {
         // TS-boundary: `countDocs` (modules/embedding) bierze `AnyOrama | null | undefined`;
         // `SelfTestDeps.countDocs` (core, node-safe - nie zna `AnyOrama`) chce `(db: unknown)`.
         countDocs: countDocs as unknown as SelfTestDeps['countDocs'],
@@ -1195,10 +1215,10 @@ export default class PkmAssistantPlugin extends PluginBase {
     new Notice('Connections feature wycofany w v2.0 — przywrócenie planowane na v3.0 z silnikiem Orama.');
   }
 
-  // TS-boundary: `openNote` (core/utils/obsidianNav.js) deklaruje `app: AppLike`, ale jej
-  // `resolveApp` przyjmuje w runtime też `{ app: AppLike }` - composition root podaje SIEBIE
-  // (patrz komentarz `resolveApp` w źródle), typ eksportu tego nie ujawnia.
-  async openNote(target_path: string, event: unknown = null) { await openNote(this as never, target_path, event); }
+  // TS-boundary: ZASTANE - podajemy PLUGIN tam, gdzie sygnatura chce AppLike; runtime ratuje
+  // `resolveApp` (core/utils/obsidianNav.ts:34-39), który przyjmuje też `{ app: AppLike }`.
+  // Naprawa = sygnatura `openNote` w core (poza zakresem tej fali - composition root jej nie zmienia).
+  async openNote(target_path: string, event: unknown = null) { await openNote(this as unknown as AppLike, target_path, event); }
 
   /**
    * TODO: wynieść do `core/utils/` jako wspólne narzędzie.
