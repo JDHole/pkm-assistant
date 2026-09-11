@@ -64,7 +64,7 @@ npm run lint:obsidian     # ESLint with the Obsidian community-directory ruleset
 npm run build             # Production build -> dist/main.js
 ```
 
-`npm run build` also deploys to every vault listed in `DESTINATION_VAULTS` in `.env`. For the owner that includes their live, daily-use vault - treat that as the last gate, not a work step.
+`npm run build` also deploys to every vault listed in `DESTINATION_VAULTS` in `.env`. For the owner that includes their live, daily-use vault - treat that as the last gate, not a work step. The deploy also needs `DESTINATION_CONFIG_DIR` (the name of the Obsidian configuration folder in those vaults): a build in plain Node has no `Vault#configDir` and never guesses the name, so with vaults listed and that variable empty the build prints one warning and skips the deploy. See `.env.example`.
 
 Full verification order: tests -> typecheck -> lint -> lint:obsidian -> build -> harness (`npm run selftest` + `npm run scenarios`). The harness runs the real plugin in Node without Obsidian and lives in a separate repo (`pkm-assistant-harness`, https://github.com/JDHole/pkm-assistant-harness) because the community-directory linter scans the whole plugin repo, and the test harness is not part of the plugin. Clone it next to this repo; see its own README for details.
 

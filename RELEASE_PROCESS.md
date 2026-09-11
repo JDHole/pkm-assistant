@@ -57,7 +57,7 @@ npm run scenarios
 
 `lint:obsidian` nie ma żadnego wyjątku ani porównania z baseline - ma wyjść zielony (`exit 0`), tak jak reszta. Czerwone cokolwiek → STOP, napraw, dopiero potem dalej.
 
-> Jeśli masz `DESTINATION_VAULTS` ustawione w swoim `.env` (auto-deploy pluginu do vaulta po buildzie, patrz `esbuild.js`), `npm run build` w tym kroku (i drugi raz wewnątrz `release.js` w kroku 5) wdroży bieżący build do tych vaultów jak przy zwykłej pracy deweloperskiej - to nie jest coś specjalnego dla release'u, ale warto wiedzieć, że się dzieje.
+> Jeśli masz `DESTINATION_VAULTS` ustawione w swoim `.env` (auto-deploy pluginu do vaulta po buildzie, patrz `esbuild.js`), `npm run build` w tym kroku (i drugi raz wewnątrz `release.js` w kroku 5) wdroży bieżący build do tych vaultów jak przy zwykłej pracy deweloperskiej - to nie jest coś specjalnego dla release'u, ale warto wiedzieć, że się dzieje. Deploy wymaga też `DESTINATION_CONFIG_DIR` (nazwa folderu konfiguracji Obsidiana w tych vaultach) - bez niej build wypisuje jedno ostrzeżenie i pomija deploy, sam build przechodzi.
 
 ## Krok 4 - merge do main
 
