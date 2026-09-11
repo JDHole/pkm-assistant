@@ -325,7 +325,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
                     const modelName = this.get_chat_model()?.modelKey || 'model';
                     new Notice(t('chat.streaming.model_no_vision', { model: modelName }), 6000);
                 }
-            } catch (e) { /* ignore — adapter will strip anyway */ }
+            } catch (e) { void e; /* ignore — adapter will strip anyway */ }
         }
     }
 
@@ -973,7 +973,7 @@ export function _chatResolveTools(this: ChatViewLike, turn: ChatTurn, _applyEnab
         const preferredServers = getAgentServerFilter(this.plugin.serverManager, agent);
         const preferredTools = (agent?.preferredTools as string[] | undefined) || [];
         const disabledSet = new Set<string | undefined>(Array.isArray(agent.disabled_tools) ? agent.disabled_tools : []);
-        mcpActiveTools = (this.plugin.serverManager?.getActiveToolDefinitions(preferredServers as string[], preferredTools) || [])
+        mcpActiveTools = (this.plugin.serverManager?.getActiveToolDefinitions(preferredServers, preferredTools) || [])
             .filter((t: ChatToolDefinition) => !disabledSet.has(t.function?.name || t.name));
         tools = dedupeToolDefinitions([...systemTools, ...mcpActiveTools]);
 
@@ -1099,7 +1099,7 @@ export function _chatOnToolCallsParsed(this: ChatViewLike, turn: ChatTurn, toolC
                 this.hideTypingIndicator();
                 const _subArgs = parseToolCallArgs(toolCall);
                 const _subName = _subArgs.aspect || '';
-                toolDisplay = createPendingSubAgentBlock(toolCall.name as string, _subName) as HTMLElement;
+                toolDisplay = createPendingSubAgentBlock(toolCall.name as string, _subName);
             } else {
                 const statusMsg = (TOOL_STATUS as Record<string, string>)[toolCall.name as string] || `${toolCall.name}...`;
                 this.showTypingIndicator(statusMsg);
@@ -1108,7 +1108,7 @@ export function _chatOnToolCallsParsed(this: ChatViewLike, turn: ChatTurn, toolC
                     name: toolCall.name as string,
                     input: toolCall.arguments,
                     status: 'pending'
-                }) as HTMLElement;
+                });
             }
             toolCallsContainer.appendChild(toolDisplay);
             if (isSubAgent || isAskUser) toolDisplay.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1210,7 +1210,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                         type: toolCall.name,
                         status: 'error',
                         response: t('chat.streaming.error_prefix', { message: error.message }),
-                    }) as HTMLElement);
+                    }));
                 } else {
                     const makeDisplay = this.env?.settings?.pkmAssistant?.compactToolChips === false ? createToolCallDisplay : createCompactToolChip;
                     toolDisplay.replaceWith(makeDisplay({
@@ -1218,7 +1218,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                         input: toolCall.arguments,
                         status: 'error',
                         error: error.message
-                    }) as HTMLElement);
+                    }));
                 }
             } else if (isSubAgent && result?.started === true) {
                 // Delegacja W TLE. Nie ma wyniku do pokazania — jest pokwitowanie startu.
@@ -1241,7 +1241,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                     agentName: startedList.length > 1 ? '' : (startedList[0]?.name || _bgArgs.aspect || ''),
                     query: _bgArgs.task || '',
                     response: lines.join('\n'),
-                }) as HTMLElement;
+                });
                 toolDisplay.replaceWith(bgBlock);
                 bgBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } else if (isSubAgent && result?.success) {
@@ -1257,7 +1257,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                     toolCallDetails: result.tool_call_details || [],
                     duration: result.duration_ms || 0,
                     usage: result.usage,
-                }) as HTMLElement;
+                });
                 toolDisplay.replaceWith(fullBlock);
                 fullBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } else if (isSubAgent && !result?.success) {
@@ -1269,7 +1269,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                     query: _saErrArgs.task || '',
                     response: t('chat.streaming.error_prefix', { message: result?.error || t('chat.subagent_notification.unknown_error') }),
                     duration: 0,
-                }) as HTMLElement;
+                });
                 toolDisplay.replaceWith(errorBlock);
                 errorBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } else {
@@ -1283,7 +1283,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                     // `memory_save` (`{success:false}`) dostawałaby zielony kryształ „zrobione".
                     status: toolResultStatus(result),
                     error: (result as ChatToolResult).error
-                }) as HTMLElement);
+                }));
             }
 
             // Render generated image inline
@@ -1303,7 +1303,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                     link.href = '#';
                     link.addEventListener('click', (e) => {
                         e.preventDefault();
-                        this.app.workspace.openLinkText(result.path as string, '');
+                        void this.app.workspace.openLinkText(result.path as string, '');
                     });
                     imgContainer.appendChild(link);
                 }
@@ -1373,10 +1373,10 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
             }
         }
         // Track todo/artifact creation after skill.
-        if (['artifact_create', 'todo'].includes(toolCall.name as string)) {
+        if (['artifact_create', 'todo'].includes(toolCall.name)) {
             turn.skillArtifactCreated = true;
         }
-        await this.toolReactors?.run(toolCall.name as string, result, {
+        await this.toolReactors?.run(toolCall.name, result, {
             view: this,
             plugin: this.plugin,
             toolCall,
@@ -1412,7 +1412,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                 link.href = '#';
                 link.addEventListener('click', (e) => {
                     e.preventDefault();
-                    this.app.workspace.openLinkText(writePath, '');
+                    void this.app.workspace.openLinkText(writePath, '');
                 });
                 linkDiv.appendChild(link);
                 toolCallsContainer.appendChild(linkDiv);
@@ -1978,7 +1978,7 @@ export function stop_all_turns(this: ChatViewLike, reason = 'close'): string[] {
         try {
             this.stop_generation(name, reason);
         } catch (e) {
-            log.warn('Chat', `Zatrzymanie tury [${name}] padło (zamykamy dalej): ${(e as Error)?.message || (e as { toString(): string })}`);
+            log.warn('Chat', `Zatrzymanie tury [${name}] padło (zamykamy dalej): ${(e as Error)?.message || String(e)}`);
         }
     }
 
@@ -1994,7 +1994,7 @@ export function stop_all_turns(this: ChatViewLike, reason = 'close'): string[] {
                 registry.requestStop(id);
             }
         } catch (e) {
-            log.warn('Chat', `Zatrzymanie subów przy zamknięciu padło: ${(e as Error)?.message || (e as { toString(): string })}`);
+            log.warn('Chat', `Zatrzymanie subów przy zamknięciu padło: ${(e as Error)?.message || String(e)}`);
         }
     }
 
@@ -2023,7 +2023,7 @@ export function _drainSubTasks(this: ChatViewLike) {
     try {
         this.plugin?.subTaskNotifier?.drain?.();
     } catch (e) {
-        log.warn('Chat', `Drain wyników subów padł (nieszkodliwie): ${(e as Error)?.message || (e as { toString(): string })}`);
+        log.warn('Chat', `Drain wyników subów padł (nieszkodliwie): ${(e as Error)?.message || String(e)}`);
     }
 }
 
@@ -2114,11 +2114,11 @@ export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
             // Wynik suba to tekst MASZYNY — żadnych przywilejów człowieka (rejestr adresów,
             // markery `@@skill:`, komendy `/`).
             .then(() => this.send_message({ injectedText: text, meta: machineMeta({ _subTaskNotification: true, subTaskId: task.id }) }))
-            .catch((e: unknown) => log.warn('Chat', `Auto-tura po subie padła: ${(e as Error)?.message || (e as { toString(): string })}`))
+            .catch((e: unknown) => log.warn('Chat', `Auto-tura po subie padła: ${(e as Error)?.message || String(e)}`))
             .finally(() => { this._subTaskTurnPending = false; });
         return true;
     } catch (e) {
-        log.warn('Chat', `Dostarczenie wyniku suba padło (zostaje w kolejce): ${(e as Error)?.message || (e as { toString(): string })}`);
+        log.warn('Chat', `Dostarczenie wyniku suba padło (zostaje w kolejce): ${(e as Error)?.message || String(e)}`);
         return false;
     }
 }
@@ -2187,7 +2187,7 @@ export function set_generating(this: ChatViewLike, is_generating: boolean) {
                 // `HUMAN_MESSAGE_META` tutaj byłoby błędne - slot zajmuje też tekst maszynowy
                 // (guzik artefaktu wypełnia pole wpisywania z kodu), więc treść artefaktu
                 // wracałaby z przywilejami człowieka.
-                this.send_message({ meta: queued.meta });
+                void this.send_message({ meta: queued.meta });
             }, 100);
         } else if (!this._drainSuppressed) {
             // Wiadomość USERA ma pierwszeństwo - po wyniki subów z tła sięgamy dopiero,

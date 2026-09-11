@@ -49,7 +49,7 @@ export async function initSessionManager(this: ChatViewLike) {
     if (autoSaveInterval && autoSaveInterval > 0) {
         this.registerInterval(window.setInterval(() => {
             if (this.rollingWindow?.messages?.length > 0) {
-                this.handleSaveSession();
+                void this.handleSaveSession();
             }
         }, autoSaveInterval * 60 * 1000));
     }
@@ -60,7 +60,7 @@ export async function initSessionManager(this: ChatViewLike) {
     // it clears on unload.
     this._idleScheduler = new IdleScheduler({ minNewEntries: 2 });
     this._lastIdleSaveMsgCount = 0;
-    this.registerInterval(window.setInterval(() => { this._idleTick(); }, 60 * 1000));
+    this.registerInterval(window.setInterval(() => { void this._idleTick(); }, 60 * 1000));
 
     await this._restoreActiveSession();
 }
@@ -86,7 +86,7 @@ export async function _idleTick(this: ChatViewLike) {
         await this.handleSaveSession();
         log.info('Chat', `Idle consolidation: saved session after ${this._idleScheduler.idleMinutes} min idle (${newEntries} new entries)`);
     } catch (e) {
-        log.warn('Chat', `Idle tick failed (non-fatal): ${(e as Error)?.message || (e as { toString(): string })}`);
+        log.warn('Chat', `Idle tick failed (non-fatal): ${(e as Error)?.message || String(e)}`);
     }
 }
 
@@ -135,7 +135,7 @@ async function _retireActiveSession(agentMemory: AgentMemory | null | undefined,
         const moved = await agentMemory.discardActiveSession();
         if (moved) log.info('Chat', `Old session retired to .discarded/ (${reason}): ${moved}`);
     } catch (e) {
-        log.warn('Chat', `Retiring old session failed (non-fatal): ${(e as Error)?.message || (e as { toString(): string })}`);
+        log.warn('Chat', `Retiring old session failed (non-fatal): ${(e as Error)?.message || String(e)}`);
     }
 }
 
@@ -259,7 +259,7 @@ export async function _restoreActiveSession(this: ChatViewLike) {
         }
         this.rollingWindow = active.rollingWindow;
         this.tokenTracker = active.tokenTracker;
-        this.render_messages();
+        void this.render_messages();
         this.updateTokenCounter();
         this._updateTokenPanel();
         if (this._tabBarContainer) this._renderTabBar(this._tabBarContainer);
@@ -356,7 +356,7 @@ export async function handleNewSession(this: ChatViewLike) {
 
     this.rollingWindow = this._createRollingWindow();
     this.tokenTracker.clear();
-    this.render_messages();
+    void this.render_messages();
     this.add_welcome_message();
     this.updateTokenCounter();
     this._updateTokenPanel();
@@ -456,7 +456,7 @@ export async function handleLoadSession(this: ChatViewLike, path: string) {
             new Notice(t('chat.session.loaded_fresh') || 'Nowy chat z perspektywy agenta (brain + 3 L1)', 4000);
         }
 
-        this.render_messages();
+        void this.render_messages();
         this.updateTokenCounter();
         this._updateTokenPanel?.();
     } catch (e) {
@@ -593,7 +593,7 @@ export function _buildEmergencyTaskContext(this: ChatViewLike, agentName?: strin
         const total = todo.items.length;
         const lines = [`📋 TODO "${todo.title || t('chat.todo.panel_title')}" (${done}/${total} ${t('prompt.dt.done')}):`];
         for (const item of todo.items) {
-            lines.push(`  ${(item.checked || item.done) ? '✅' : '⬜'} ${item.text}`);
+            lines.push(`  ${(item.checked || item.done) ? '✅' : '⬜'} ${String(item.text)}`);
         }
         parts.push(lines.join('\n'));
     }

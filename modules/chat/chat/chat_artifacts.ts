@@ -51,7 +51,7 @@ export function _renderDelegationButton(
             // `context_summary` pisze MODEL - ta wysyłka jest maszynowa, choć klika ją user. Bez
             // tego znacznika marker `@@skill:` z tekstu modelu wjeżdżałby do promptu systemowego
             // nowego agenta z ramką „użytkownik uruchomił skill".
-            window.setTimeout(() => this.send_message({ meta: MACHINE_MESSAGE_META }), 200);
+            window.setTimeout(() => { void this.send_message({ meta: MACHINE_MESSAGE_META }); }, 200);
         })();
     });
 }

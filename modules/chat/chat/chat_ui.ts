@@ -6,7 +6,7 @@
  * via Object.assign(ChatView.prototype, { ...exports }).
  */
 
-import { Notice } from 'obsidian';
+import { Notice, TFile } from 'obsidian';
 import { SkinManager, UiIcons, IconGenerator, setSvg, setSvgLabel, adoptSheet } from '../../crystal-soul/index.js';
 import { substituteVariables } from '../../skills/index.js';
 import { MentionAutocomplete, AttachmentManager } from '../../ui-components/index.js';
@@ -35,7 +35,6 @@ interface ArtifactListEntry {
     tytul?: string | null;
 }
 import type { ToolDefinition } from '../../tools/index.js';
-import type { TFile } from 'obsidian';
 import type { TriggerItem } from './TriggerPopup.js';
 import type { SlashCommand } from './SlashCommandsRegistry.js';
 import type { RoleTotals } from '../../../core/index.js';
@@ -114,7 +113,7 @@ export async function renderView(this: ChatViewLike, container = this.container)
 
     // Messages area (cs-root activates Crystal Soul CSS variables)
     this.messages_container = chatMain.createDiv({ cls: 'pkm-chat-messages cs-root' });
-    this.render_messages();
+    void this.render_messages();
 
     // ── SLIM BAR (right side, 66px) ──
     this._slimBar = chatBody.createDiv({ cls: 'cs-skillbar cs-root' });
@@ -189,7 +188,7 @@ export async function renderView(this: ChatViewLike, container = this.container)
         const newValue = pkm.enableOczko === false;
         pkm.enableOczko = newValue;
         oczkoBtn.classList.toggle('active', newValue);
-        this.env.settingsStore?.save();
+        void this.env.settingsStore?.save();
     });
 
     // Skills + Artifacts are now in the slim bar (cs-skillbar)
@@ -264,7 +263,7 @@ export async function renderView(this: ChatViewLike, container = this.container)
     this.input_area.addEventListener('keydown', this.handle_input_keydown.bind(this));
     // Guzik Wyślij to jedna z dwóch ścieżek z pola wpisywania — jawny znacznik człowieka.
     // (`.bind(this)` podawałoby jako `opts` MouseEvent, więc proweniencja szłaby z UI, nie stąd.)
-    this.send_button.addEventListener('click', () => this.send_message({ meta: HUMAN_MESSAGE_META }));
+    this.send_button.addEventListener('click', () => { void this.send_message({ meta: HUMAN_MESSAGE_META }); });
     // TO SAMO co wyżej z guzikiem Wyślij — `.bind(this)` podawałoby jako `agentName` MouseEvent,
     // więc Stop nie trafiałby w kontekst ŻADNEJ tury (mapa jest kluczowana nazwą agenta).
     // Zostawałby tylko ubity XHR wspólnej instancji modelu; tura stojąca w narzędziu nie
@@ -276,7 +275,7 @@ export async function renderView(this: ChatViewLike, container = this.container)
     document.addEventListener('keydown', this.handleGlobalKeydownBound);
 
     // Best-effort save on browser/Obsidian unload (additional safety net)
-    this.handleBeforeUnloadBound = () => { this.handleSaveSession(); };
+    this.handleBeforeUnloadBound = () => { void this.handleSaveSession(); };
     window.addEventListener('beforeunload', this.handleBeforeUnloadBound);
 
     // Widok slotu liczy się dopiero teraz — chip-przełącznik musi już istnieć w DOM.
@@ -326,68 +325,74 @@ export function _renderSlimBar(this: ChatViewLike) {
     // Row 1: Nowy chat | Zamknij chat
     const newChatBtn = actionsGrid.createDiv({ cls: 'cs-skillbar__icon', attr: { 'data-tip': t('chat.new_chat') } });
     setSvg(newChatBtn, UiIcons.refresh(16));
-    newChatBtn.addEventListener('click', () => this.handleNewSession());
+    newChatBtn.addEventListener('click', () => { void this.handleNewSession(); });
 
     const closeBtn = actionsGrid.createDiv({ cls: 'cs-skillbar__icon', attr: { 'data-tip': t('chat.close_chat') } });
     setSvg(closeBtn, UiIcons.x(16));
     // _closeActiveTab jest async (czeka na zapis sesji przed przełączeniem zakładki) —
     // handler łyka ewentualny błąd, żeby nie zostawić unhandled rejection w konsoli.
-    closeBtn.addEventListener('click', async () => {
-        try {
-            await this._closeActiveTab();
-        } catch (e) {
-            log.warn('Chat', `Close tab failed: ${(e as Error)?.message || (e as { toString(): string })}`);
-        }
+    closeBtn.addEventListener('click', () => {
+        void (async () => {
+            try {
+                await this._closeActiveTab();
+            } catch (e) {
+                log.warn('Chat', `Close tab failed: ${(e as Error)?.message || String(e)}`);
+            }
+        })();
     });
 
     // Row 2: Zapisz sesję | Konsolidacja
     const saveBtn = actionsGrid.createDiv({ cls: 'cs-skillbar__icon', attr: { 'data-tip': t('chat.save_session') } });
     setSvg(saveBtn, UiIcons.save(16));
-    saveBtn.addEventListener('click', () => this.handleSaveSession());
+    saveBtn.addEventListener('click', () => { void this.handleSaveSession(); });
 
     const consolidateBtn = actionsGrid.createDiv({ cls: 'cs-skillbar__icon', attr: { 'data-tip': t('chat.consolidate') } });
     setSvg(consolidateBtn, UiIcons.brain(16));
-    consolidateBtn.addEventListener('click', async () => {
-        const agentMemory = this.plugin?.agentManager?.getActiveMemory();
-        const hasCurrentMessages = this.rollingWindow.messages.length >= 2;
-        let hasDiskSessions = false;
-        if (agentMemory) {
+    consolidateBtn.addEventListener('click', () => {
+        void (async () => {
+            const agentMemory = this.plugin?.agentManager?.getActiveMemory();
+            const hasCurrentMessages = this.rollingWindow.messages.length >= 2;
+            let hasDiskSessions = false;
+            if (agentMemory) {
+                try {
+                    const unconsolidated = await agentMemory.getUnconsolidatedSessions();
+                    hasDiskSessions = unconsolidated.length >= 1;
+                } catch { /* ignore */ }
+            }
+            if (!hasCurrentMessages && !hasDiskSessions) {
+                new Notice(t('chat.no_sessions'));
+                return;
+            }
+            consolidateBtn.addClass('cs-skillbar__icon--busy');
             try {
-                const unconsolidated = await agentMemory.getUnconsolidatedSessions();
-                hasDiskSessions = unconsolidated.length >= 1;
-            } catch { /* ignore */ }
-        }
-        if (!hasCurrentMessages && !hasDiskSessions) {
-            new Notice(t('chat.no_sessions'));
-            return;
-        }
-        consolidateBtn.addClass('cs-skillbar__icon--busy');
-        try {
-            new Notice(t('chat.consolidating'));
-            await this.consolidateSession();
-            new Notice(t('chat.memory_saved'));
-        } catch (e) {
-            log.error('Chat', 'Memory consolidation failed:', e);
-            new Notice(t('chat.consolidate_error'));
-        } finally {
-            consolidateBtn.removeClass('cs-skillbar__icon--busy');
-        }
+                new Notice(t('chat.consolidating'));
+                await this.consolidateSession();
+                new Notice(t('chat.memory_saved'));
+            } catch (e) {
+                log.error('Chat', 'Memory consolidation failed:', e);
+                new Notice(t('chat.consolidate_error'));
+            } finally {
+                consolidateBtn.removeClass('cs-skillbar__icon--busy');
+            }
+        })();
     });
 
     // Row 3: Sumaryzuj chat. Artefakty mają własny segment slim bara w renderArtifactButtons,
     // a todo — live-widok nad inputem.
     const summarizeBtn = actionsGrid.createDiv({ cls: 'cs-skillbar__icon', attr: { 'data-tip': t('chat.summarize') } });
     setSvg(summarizeBtn, UiIcons.layers(16));
-    summarizeBtn.addEventListener('click', async () => {
-        summarizeBtn.addClass('cs-skillbar__icon--busy');
-        try {
-            await runManualCompression(this);
-        } catch (e) {
-            log.error('Chat', 'Manual compression failed:', e);
-            new Notice(t('chat.summarize_error'));
-        } finally {
-            summarizeBtn.removeClass('cs-skillbar__icon--busy');
-        }
+    summarizeBtn.addEventListener('click', () => {
+        void (async () => {
+            summarizeBtn.addClass('cs-skillbar__icon--busy');
+            try {
+                await runManualCompression(this);
+            } catch (e) {
+                log.error('Chat', 'Manual compression failed:', e);
+                new Notice(t('chat.summarize_error'));
+            } finally {
+                summarizeBtn.removeClass('cs-skillbar__icon--busy');
+            }
+        })();
     });
 
     const tokenSection = this._slimBar.createDiv({ cls: 'cs-skillbar__section cs-token-viewer-section' });
@@ -440,7 +445,7 @@ export function renderSkillButtons(this: ChatViewLike) {
         btn.addEventListener('click', () => {
             if (this.is_generating) return;
 
-            if ((skill.preQuestions?.length as number) > 0) {
+            if ((skill.preQuestions?.length) > 0) {
                 this._showSkillPreQuestions(skill);
                 return;
             }
@@ -827,13 +832,15 @@ export function _showArtifactPicker(this: ChatViewLike, triggerBtn: HTMLElement 
                     const res = await activateArtifactInChat(this.plugin as unknown as SummonPlugin, { id: item.id });
                     if (!res.ok || !res.path) return;
                     const file = this.app.vault.getAbstractFileByPath(res.path);
-                    if (!file) return;
+                    // `openFile` żąda instancji `TFile`; `getAbstractFileByPath` może też zwrócić
+                    // `TFolder`, gdyby `res.path` wskazywał katalog — `instanceof` odsiewa ten
+                    // przypadek zamiast wywoływać `openFile` na złym typie (patrz raport fali C:
+                    // ZASTANE — wcześniej leciałoby do `catch` niżej z wyjątkiem Obsidiana).
+                    if (!(file instanceof TFile)) return;
                     try {
-                        // `openFile` żąda instancji `TFile`; picker wskazuje notatkę artefaktu,
-                        // a `instanceof` w tym miejscu byłoby zmianą runtime'u.
-                        await this.app.workspace.getLeaf('tab').openFile(file as TFile);
+                        await this.app.workspace.getLeaf('tab').openFile(file);
                     } catch (e) {
-                        log.warn('Chat', `Open artifact note failed: ${(e as Error)?.message || (e as { toString(): string })}`);
+                        log.warn('Chat', `Open artifact note failed: ${(e as Error)?.message || String(e)}`);
                     }
                 })();
             });
@@ -1177,7 +1184,7 @@ export function handle_input_keydown(this: ChatViewLike, e: KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         // Druga (i ostatnia) ścieżka z pola wpisywania — jawny znacznik człowieka.
-        this.send_message({ meta: HUMAN_MESSAGE_META });
+        void this.send_message({ meta: HUMAN_MESSAGE_META });
         return;
     }
 

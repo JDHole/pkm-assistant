@@ -42,14 +42,6 @@ interface HistoryToolOutput {
 }
 
 /** Argumenty wywołania `delegate` odtworzone z historii. */
-/**
- * Wiersz akcji zwrócony przez rendery z `modules/ui-components` (ich sygnatury są jeszcze
- * `any` — osobna fala kampanii). Alias, a NIE `as HTMLElement` wprost: asercja na globalny
- * typ ambientowy dokłada esbuildowi nowy symbol nieznany modułowi i przestawia mangler nazw,
- * czyli zmienia bajty bundla przy zerowej zmianie kodu.
- */
-type RenderedRow = HTMLElement;
-
 interface DelegateArgs {
     task?: string;
     aspect?: string;
@@ -220,7 +212,7 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
                             toolCallDetails: (tcOutput as HistoryToolOutput)?.tool_call_details || [],
                             duration: (tcOutput as HistoryToolOutput)?.duration_ms || 0,
                             usage: (tcOutput as HistoryToolOutput)?.usage,
-                        }) as RenderedRow;
+                        });
                         agentDiv.appendChild(block);
                     } else {
                         const makeDisplay = this.env?.settings?.pkmAssistant?.compactToolChips === false ? createToolCallDisplay : createCompactToolChip;
@@ -230,7 +222,7 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
                             output: tcOutput,
                             status: toolResultStatus(tcOutput),
                             error: (tcOutput as HistoryToolOutput)?.error
-                        }) as RenderedRow;
+                        });
                         agentDiv.appendChild(display);
                     }
                 }
@@ -302,13 +294,13 @@ export function addMessageActions(this: ChatViewLike, metaEl: HTMLElement, conte
             this.rollingWindow.messages[idx].content === content &&
             this.rollingWindow.messages[idx].role === role) {
             this.rollingWindow.messages.splice(idx, 1);
-            this.render_messages();
+            void this.render_messages();
             this.updateTokenCounter();
         } else {
             const foundIdx = this.rollingWindow.messages.findIndex((m: RollingMessage) => m.content === content && m.role === role);
             if (foundIdx > -1) {
                 this.rollingWindow.messages.splice(foundIdx, 1);
-                this.render_messages();
+                void this.render_messages();
                 this.updateTokenCounter();
             }
         }
@@ -368,7 +360,7 @@ export function addMessageActions(this: ChatViewLike, metaEl: HTMLElement, conte
             const regenBtn = metaEl.createEl('button', { cls: 'cs-message__meta-btn' });
             setSvg(regenBtn, UiIcons.refresh(12));
             regenBtn.setAttribute('aria-label', t('chat.msg.regenerate'));
-            regenBtn.onclick = (e: MouseEvent) => { e.stopPropagation(); this.regenerateLastResponse(); };
+            regenBtn.onclick = (e: MouseEvent) => { e.stopPropagation(); void this.regenerateLastResponse(); };
         }
     }
 }
@@ -380,7 +372,7 @@ export function startEditMessage(this: ChatViewLike, msgIndex: number, originalC
         // Remove edited message and all subsequent
         messages.splice(msgIndex);
 
-        this.render_messages();
+        void this.render_messages();
         this.input_area.value = originalContent;
         this.input_area.focus();
         // User can now edit and resend
@@ -425,7 +417,7 @@ export async function regenerateLastResponse(this: ChatViewLike): Promise<void> 
     messages.splice(lastUserIdx);
 
     // Re-render and resend
-    this.render_messages();
+    void this.render_messages();
     this.input_area.value = userContent;
     await this.send_message({ meta: { origin: userOrigin } });
 }
