@@ -6,6 +6,7 @@
  * z czatem. SubAgentRunner buduje store/tools/limity/egzekutor i mapuje wynik.
  */
 import { runAgentLoop, ArrayMessageStore } from '../agent-loop/index.js';
+import type { RunAgentLoopOptions } from '../agent-loop/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
 import { getLimits } from '../../config/limits.js';
@@ -380,13 +381,17 @@ export class SubAgentRunner {
                 }
                 : null;
             const response = await runAgentLoop({
-                // `model as never`: `runAgentLoop` przyjmuje własny, WĄSKI strukturalny kontrakt
+                // TS-boundary: `runAgentLoop` przyjmuje własny, WĄSKI strukturalny kontrakt
                 // (`LoopModelLike`, nieeksportowany — `modules/agent-loop` świadomie NIE zależy od
                 // `modules/models`, patrz komentarz przy `LoopModelLike` w AgentLoop.ts), którego
-                // kształt handlera `done` nie unifikuje się nominalnie z `ChatModel.stream` (dwie
-                // niezależnie zadeklarowane, ale operacyjnie zgodne odpowiedzi API). Runtime bez
+                // handlery i kształt odpowiedzi nie unifikują się nominalnie z `ChatModel.stream`
+                // (handlery opcjonalne vs wymagane, `NormalizedError` nie jest `Error`,
+                // `OpenAiCompletion` vs `ModelResponse` — dwie niezależnie zadeklarowane, ale
+                // operacyjnie zgodne odpowiedzi API). Cast na typie eksportowanym z barrela
+                // (`RunAgentLoopOptions['model']`), nie `as never` — zawęzi się sam, gdy
+                // `LoopModelLike` dostanie kiedyś realną unifikację (poza tą falą). Runtime bez
                 // zmian — to zawsze ten sam obiekt `ChatModel`.
-                model: model as never,
+                model: model as RunAgentLoopOptions['model'],
                 store,
                 resolveTools: () => tools,
                 // Numer wywołania łapiemy PRZY STARCIE (kolejność tablicy pętli),
