@@ -246,7 +246,7 @@ export async function handleSave(ctx: ProfileCtx) {
             // tego, co NAPRAWDĘ jest zapisane, żeby panel nie kłamał „Zapisano" nad odrzuconą
             // zmianą.
             formData.name = agent.name;
-            ctx.renderActiveTab();
+            void ctx.renderActiveTab();
             return;
         }
         const updatedAgent = agentManager.getAgent(formData.name);
@@ -282,7 +282,7 @@ export async function handleSave(ctx: ProfileCtx) {
         return;
     }
 
-    ctx.renderActiveTab();
+    void ctx.renderActiveTab();
 }
 
 /**
@@ -317,7 +317,7 @@ export function showDeleteConfirmation(ctx: ProfileCtx, tabContent: HTMLElement)
     const btnRow = el.createDiv({ cls: 'sidebar-delete-actions' });
 
     const cancelDeleteBtn = btnRow.createEl('button', { text: t('profile.cancel') });
-    cancelDeleteBtn.addEventListener('click', () => ctx.renderActiveTab());
+    cancelDeleteBtn.addEventListener('click', () => { void ctx.renderActiveTab(); });
 
     const confirmBtn = btnRow.createEl('button', { text: t('profile.delete'), cls: 'mod-warning' });
     confirmBtn.addEventListener('click', () => {

@@ -144,15 +144,17 @@ async function _renderMemoryBrain(ctx: ProfileCtx, el: HTMLElement, adapter: Vau
             const actions = item.createDiv({ cls: 'cs-mem-item__actions' });
             const delBtn = actions.createSpan({ cls: 'cs-mem-entry__btn cs-mem-entry__btn--danger', title: t('profile.memory.delete_note') });
             setSvg(delBtn, UiIcons.trash(11));
-            delBtn.addEventListener('click', async (e: Event) => {
-                e.stopPropagation();
-                try {
-                    // Ścieżka memory_delete: usuń notatkę + przebuduj indeks brain.md.
-                    await adapter.remove!(notePath);
-                    await memory.rebuildBrainIndex?.();
-                    new Notice(t('profile.memory.note_deleted'));
-                    rerender();
-                } catch (err) { new Notice(t('profile.memory.delete_error') + (err as Error).message); }
+            delBtn.addEventListener('click', (e: Event) => {
+                void (async () => {
+                    e.stopPropagation();
+                    try {
+                        // Ścieżka memory_delete: usuń notatkę + przebuduj indeks brain.md.
+                        await adapter.remove!(notePath);
+                        await memory.rebuildBrainIndex?.();
+                        new Notice(t('profile.memory.note_deleted'));
+                        rerender();
+                    } catch (err) { new Notice(t('profile.memory.delete_error') + (err as Error).message); }
+                })();
             });
 
             // Klik = pełna treść notatki, edytowalna.
@@ -277,12 +279,14 @@ function _renderNaTerazSection(el: HTMLElement, memory: AgentMemory, sectionKey:
 
         const delBtn = actions.createSpan({ cls: 'cs-mem-entry__btn cs-mem-entry__btn--danger', title: t('profile.memory.na_teraz_delete') });
         setSvg(delBtn, UiIcons.trash(11));
-        delBtn.addEventListener('click', async () => {
-            try {
-                await memory.writeNaTeraz([{ section: sectionKey, remove: entry }]);
-                new Notice(t('profile.memory.na_teraz_entry_deleted'));
-            } catch (err) { new Notice(t('profile.memory.delete_error') + (err as Error).message); }
-            rerender();
+        delBtn.addEventListener('click', () => {
+            void (async () => {
+                try {
+                    await memory.writeNaTeraz([{ section: sectionKey, remove: entry }]);
+                    new Notice(t('profile.memory.na_teraz_entry_deleted'));
+                } catch (err) { new Notice(t('profile.memory.delete_error') + (err as Error).message); }
+                rerender();
+            })();
         });
     }
 
@@ -301,7 +305,7 @@ function _renderNaTerazSection(el: HTMLElement, memory: AgentMemory, sectionKey:
         } catch (err) { new Notice(t('profile.memory.delete_error') + (err as Error).message); }
         rerender();
     };
-    addBtn.addEventListener('click', submit);
+    addBtn.addEventListener('click', () => { void submit(); });
     addInput.addEventListener('keydown', (e: KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); void submit(); } });
 }
 
@@ -367,7 +371,7 @@ async function _renderMemorySessions(ctx: ProfileCtx, el: HTMLElement, adapter: 
 
     // Guzik „Podsumuj rozmowy" - przebieg konsolidacji z oknem review (nie blokuje pracy).
     const btn = el.createEl('button', { cls: 'cs-preset-btn', text: `▶ ${t('profile.memory.summarize_sessions')}` });
-    btn.addEventListener('click', () => _runArchiveWorkflow(ctx, memory, rerender));
+    btn.addEventListener('click', () => { void _runArchiveWorkflow(ctx, memory, rerender); });
     el.createDiv({ text: t('profile.memory.summarize_sessions_desc'), cls: 'setting-item-description' });
 }
 
@@ -441,20 +445,24 @@ function _renderSessionsSection(ctx: ProfileCtx, parentEl: HTMLElement, adapter:
             const itemActions = item.createDiv({ cls: 'cs-mem-item__actions' });
             const delBtn = itemActions.createSpan({ cls: 'cs-mem-entry__btn cs-mem-entry__btn--danger', title: t('profile.memory.delete_session') });
             setSvg(delBtn, UiIcons.trash(11));
-            delBtn.addEventListener('click', async (e: Event) => {
-                e.stopPropagation();
-                try {
-                    await adapter.remove!(session.path);
-                    sessions = sessions.filter((s: ArchiveSessionInfo) => s.path !== session.path);
-                    renderList();
-                    new Notice(t('profile.memory.session_deleted'));
-                } catch (err) { new Notice(t('profile.memory.delete_error') + (err as Error).message); }
+            delBtn.addEventListener('click', (e: Event) => {
+                void (async () => {
+                    e.stopPropagation();
+                    try {
+                        await adapter.remove!(session.path);
+                        sessions = sessions.filter((s: ArchiveSessionInfo) => s.path !== session.path);
+                        renderList();
+                        new Notice(t('profile.memory.session_deleted'));
+                    } catch (err) { new Notice(t('profile.memory.delete_error') + (err as Error).message); }
+                })();
             });
 
-            item.addEventListener('click', async () => {
-                await openHiddenFile(plugin.app, session.path, t('profile.memory.session_prefix') + dateStr, {
-                    agentName: agent.name, agentColor: agent.color || '', readOnly: true
-                });
+            item.addEventListener('click', () => {
+                void (async () => {
+                    await openHiddenFile(plugin.app, session.path, t('profile.memory.session_prefix') + dateStr, {
+                        agentName: agent.name, agentColor: agent.color || '', readOnly: true
+                    });
+                })();
             });
         }
 
@@ -512,10 +520,12 @@ async function _renderMemorySummaries(ctx: ProfileCtx, el: HTMLElement, adapter:
                 const item = listEl.createDiv({ cls: 'cs-mem-item' });
                 setSvg(item.createSpan({ cls: 'cs-mem-item__icon' }), UiIcons.file(12));
                 item.createSpan({ cls: 'cs-mem-item__date', text: `${level.key}: ${dateStr}` });
-                item.addEventListener('click', async () => {
-                    await openHiddenFile(plugin.app, filePath, `${level.key}: ${dateStr}`, {
-                        agentName: agent.name, agentColor: agent.color || '', readOnly: true
-                    });
+                item.addEventListener('click', () => {
+                    void (async () => {
+                        await openHiddenFile(plugin.app, filePath, `${level.key}: ${dateStr}`, {
+                            agentName: agent.name, agentColor: agent.color || '', readOnly: true
+                        });
+                    })();
                 });
             }
         }
@@ -558,10 +568,7 @@ async function _runArchiveWorkflow(ctx: ProfileCtx, memory: AgentMemory, rerende
         const alreadyRunning = memoryOpsCenter.getActiveRun();
         type StartConsolidationParams = Parameters<typeof startConsolidationRun>[0];
         const run = await startConsolidationRun({
-            // TS-boundary: chat's local PluginLike.showCrystalNotice wants `options: NoticeOptions`
-            // ({type?: string}); AgentsPlugin's real showCrystalNotice takes CrystalNoticeOptions
-            // (`type?` narrowed to a literal union) - same call, narrower param type on our side.
-            plugin: plugin as unknown as StartConsolidationParams['plugin'],
+            plugin,
             app: plugin.app,
             // TS-boundary: chat's RunnerAgentMemory wants stateManager.read(): Promise<{
             // brain_notes_limit?: number }>; the real StateManager.read() returns MemoryState,

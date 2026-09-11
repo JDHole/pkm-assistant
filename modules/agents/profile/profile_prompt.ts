@@ -215,7 +215,7 @@ function _renderStartPromptBanner(ctx: ProfileCtx, el: HTMLElement) {
             onInsert: (text) => {
                 formData.personality = text;
                 new Notice(t('profile.start_prompt.inserted'));
-                ctx.renderActiveTab();
+                void ctx.renderActiveTab();
             }
         }).open();
     });
@@ -280,7 +280,7 @@ function _renderInspectorRow(ctx: ProfileCtx, parentEl: HTMLElement, section: Pr
                     const hint = expandEl.createEl('p', { text: t('profile.prompt.edit_in_editor'), cls: 'cs-prompt-expand__hint' });
                     hint.addEventListener('click', () => {
                         ctx.activePromptSubTab = 'editor';
-                        ctx.renderActiveTab();
+                        void ctx.renderActiveTab();
                     });
                 }
                 expandEl.dataset.rendered = 'true';
@@ -557,7 +557,7 @@ function _renderPromptEditor(ctx: ProfileCtx, el: HTMLElement) {
         addBtn.addEventListener('click', () => {
             const customId = `custom_${groupId}_${Date.now()}`;
             agentDT[customId] = { group: groupId, text: t('profile.prompt.new_instruction'), tool: null };
-            ctx.renderActiveTab();
+            void ctx.renderActiveTab();
         });
     }
 
