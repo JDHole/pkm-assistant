@@ -16,6 +16,7 @@ import { UiIcons, setSvg } from '../../crystal-soul/index.js';
 import { renderToggle } from './profile_helpers.js';
 import { getVisibleSubAgentsForAgent } from '../../sub-agents/index.js';
 import { t } from '../../../core/i18n/index.js';
+import type { App } from 'obsidian';
 import type { ProfileCtx } from './profile_types.js';
 import type { AgentSubAgentAssignment } from '../Agent.js';
 import type { SubAgentData, SubAgentLoader } from '../../sub-agents/index.js';
@@ -203,7 +204,9 @@ function _renderAddFromScratch(ctx: ProfileCtx, el: HTMLElement) {
             const SubAgentEditorModal = await loadSubAgentEditorModal();
             const loader = plugin.agentManager?.subAgentLoader;
             const before = new Set(_visibleSubs(ctx).map((s: SubAgentData) => s.name));
-            new SubAgentEditorModal(plugin.app, plugin, null, () => {
+            // TS-boundary: luka core - `plugin.app` to `AppLike`, a modal subów bierze
+            // prawdziwy `App` Obsidiana (`Modal.super`), patrz `profile_skills.ts`.
+            new SubAgentEditorModal(plugin.app as unknown as App, plugin, null, () => {
                 void (async () => {
                     try { await loader?.reloadSubAgents?.(); } catch { /* best effort */ }
                     // Auto-assign any newly-created sub that is visible to this agent (prefix <agent>-).

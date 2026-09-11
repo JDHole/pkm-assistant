@@ -15,6 +15,7 @@
 import { IconGenerator, UiIcons, setSvg } from '../../crystal-soul/index.js';
 import { showSkillOverrideForm } from './profile_skills_overrides.js';
 import { t } from '../../../core/i18n/index.js';
+import type { App } from 'obsidian';
 import type { ProfileCtx, AgentsPlugin } from './profile_types.js';
 import type { AgentSkillAssignment as SkillAssignment } from '../Agent.js';
 import type { SkillData as Skill, SkillInput } from '../../skills/index.js';
@@ -222,7 +223,10 @@ function _renderNewSkill(ctx: ProfileCtx, el: HTMLElement) {
     btn.addEventListener('click', async () => {
         const { loadSkillEditorModal } = await import('../../skills/index.js');
         const SkillEditorModal = await loadSkillEditorModal();
-        new SkillEditorModal(plugin.app, plugin, null, (saved?: SkillInput) => {
+        // TS-boundary: luka core - `plugin.app` to `AppLike` (node-safe kontrakt `core/`),
+        // a modal skilli bierze prawdziwy `App` Obsidiana (`Modal.super`). Ten sam rozjazd,
+        // co przy modalach artefaktów w `profile_artifacts.ts`; runtime podaje jeden obiekt.
+        new SkillEditorModal(plugin.app as unknown as App, plugin, null, (saved?: SkillInput) => {
             void (async () => {
                 const loader = plugin.agentManager?.skillLoader;
                 try { await loader?.reloadSkills?.(); } catch { /* best effort */ }
