@@ -5,6 +5,28 @@ All notable user-facing changes to PKM Assistant are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 2.2.3 - 2026-09-12
+
+A maintenance release prepared for the community catalogue review. The sources pass the
+catalogue's static checks without warnings; behaviour matches 2.2.2 apart from the fixes below.
+
+### Fixed
+
+- **Manual notes in the "Current" section of an agent's brain file survive memory saves.**
+  Previously every memory save rebuilt the file and dropped what you had written there.
+- **Custom configuration folders are respected.** Access rules and the plugin folder
+  migration use the configuration folder Obsidian reports instead of assuming `.obsidian`.
+- **The log file keeps the full details of a failed model request** (error code, HTTP status,
+  provider details), not only the message.
+
+### Changed
+
+- Sidebar and chat crystal animations use transforms instead of clip paths; same shapes,
+  rendered on every Obsidian build.
+- Less console output: only debug, warning and error messages are logged.
+
+Upgrade notes: no migration. Settings and agent files are untouched.
+
 ## 2.2.2 - 2026-09-09
 
 A source-hygiene release before the community catalogue listing. No functional changes
