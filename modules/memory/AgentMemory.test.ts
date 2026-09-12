@@ -232,9 +232,9 @@ test('AgentMemory.rebuildBrainIndex writes categorized links and caps Bieżące 
     t.true(brain.includes('[[brain/user_jan.md]] — Fakty o Janie'));
 });
 
-test('AgentMemory.rebuildBrainIndex ZACHOWUJE ręczne bullety w „## Bieżące" (bulletу sesji Claude Code), przed linkami', async t => {
+test('AgentMemory.rebuildBrainIndex ZACHOWUJE ręczne bullety w „## Bieżące" (bullety sesji Claude Code), przed linkami', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
-    const manualBrain = '# Jaskier brain\n\n## Bieżące\n- Kuba testuje panel Ram\n- Sprint dogrywki walidatora w toku\n\n## User\n\n## Preferencje\n\n## Workflow\n\n## Projekty i referencje\n';
+    const manualBrain = '# Jaskier brain\n\n## Bieżące\n- Jan testuje panel Ram\n- Sprint dogrywki walidatora w toku\n\n## User\n\n## Preferencje\n\n## Workflow\n\n## Projekty i referencje\n';
     const { vault, files } = makeVault({
         [`${base}/brain.md`]: manualBrain,
         [`${base}/brain/project_context_dogrywka.md`]: note({ name: 'Dogrywka', description: 'Dogrywka walidatora katalogu', type: 'project_context', created: '2026-09-10' }),
@@ -244,14 +244,14 @@ test('AgentMemory.rebuildBrainIndex ZACHOWUJE ręczne bullety w „## Bieżące"
     await memory.rebuildBrainIndex();
     const brain = files[`${base}/brain.md`];
 
-    t.true(brain.includes('- Kuba testuje panel Ram'), 'pierwszy ręczny bullet przeżył rebuild');
+    t.true(brain.includes('- Jan testuje panel Ram'), 'pierwszy ręczny bullet przeżył rebuild');
     t.true(brain.includes('- Sprint dogrywki walidatora w toku'), 'drugi ręczny bullet przeżył rebuild');
     t.true(brain.includes('[[brain/project_context_dogrywka.md]] — Dogrywka walidatora katalogu'), 'indeks nadal przebudowany');
     const biezace = brain.slice(brain.indexOf('## Bieżące'), brain.indexOf('## User'));
     t.is(
         biezace,
         '## Bieżące\n'
-            + '- Kuba testuje panel Ram\n'
+            + '- Jan testuje panel Ram\n'
             + '- Sprint dogrywki walidatora w toku\n'
             + '- [[brain/project_context_dogrywka.md]] — Dogrywka walidatora katalogu\n'
             + '\n',
