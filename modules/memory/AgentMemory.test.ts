@@ -232,6 +232,33 @@ test('AgentMemory.rebuildBrainIndex writes categorized links and caps Bieżące 
     t.true(brain.includes('[[brain/user_jan.md]] — Fakty o Janie'));
 });
 
+test('AgentMemory.rebuildBrainIndex ZACHOWUJE ręczne bullety w „## Bieżące" (bulletу sesji Claude Code), przed linkami', async t => {
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const manualBrain = '# Jaskier brain\n\n## Bieżące\n- Kuba testuje panel Ram\n- Sprint dogrywki walidatora w toku\n\n## User\n\n## Preferencje\n\n## Workflow\n\n## Projekty i referencje\n';
+    const { vault, files } = makeVault({
+        [`${base}/brain.md`]: manualBrain,
+        [`${base}/brain/project_context_dogrywka.md`]: note({ name: 'Dogrywka', description: 'Dogrywka walidatora katalogu', type: 'project_context', created: '2026-09-10' }),
+    });
+    const memory = new AgentMemory(vault, 'Jaskier');
+
+    await memory.rebuildBrainIndex();
+    const brain = files[`${base}/brain.md`];
+
+    t.true(brain.includes('- Kuba testuje panel Ram'), 'pierwszy ręczny bullet przeżył rebuild');
+    t.true(brain.includes('- Sprint dogrywki walidatora w toku'), 'drugi ręczny bullet przeżył rebuild');
+    t.true(brain.includes('[[brain/project_context_dogrywka.md]] — Dogrywka walidatora katalogu'), 'indeks nadal przebudowany');
+    const biezace = brain.slice(brain.indexOf('## Bieżące'), brain.indexOf('## User'));
+    t.is(
+        biezace,
+        '## Bieżące\n'
+            + '- Kuba testuje panel Ram\n'
+            + '- Sprint dogrywki walidatora w toku\n'
+            + '- [[brain/project_context_dogrywka.md]] — Dogrywka walidatora katalogu\n'
+            + '\n',
+        'ręczne bullety PRZED wygenerowanym linkiem, w oryginalnej kolejności'
+    );
+});
+
 test('AgentMemory.rebuildBrainIndex backs up brain.md that has hand-added user content', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const manualBrain = '# Jaskier brain\n\n## Bieżące\n\n## User\n- ręczny fakt dopisany przez usera\n\n## Preferencje\n\n## Workflow\n\n## Projekty i referencje\n';
@@ -243,10 +270,17 @@ test('AgentMemory.rebuildBrainIndex backs up brain.md that has hand-added user c
 
     await memory.rebuildBrainIndex();
 
-    // The user's hand-added line survives in the side backup; the regenerated index drops it.
+    // Bezpiecznik `.bak` zostaje NIETKNIĘTY (kopia starej treści zawsze powstaje przy zmianie
+    // pliku z ręczną linią w sekcji zarządzanej) - ale sama ręczna linia TERAZ przeżywa rebuild
+    // w brain.md, przed wygenerowanym linkiem.
     t.true(files[`${base}/brain.md.bak`].includes('ręczny fakt dopisany przez usera'));
-    t.false(files[`${base}/brain.md`].includes('ręczny fakt dopisany przez usera'));
+    t.true(files[`${base}/brain.md`].includes('ręczny fakt dopisany przez usera'));
     t.true(files[`${base}/brain.md`].includes('[[brain/user_jan.md]] — Fakty o Janie'));
+    t.true(
+        files[`${base}/brain.md`].indexOf('ręczny fakt dopisany przez usera')
+            < files[`${base}/brain.md`].indexOf('[[brain/user_jan.md]]'),
+        'ręczna linia jest PRZED wygenerowanym linkiem'
+    );
 });
 
 test('AgentMemory.rebuildBrainIndex does not back up a clean generated index', async t => {
@@ -322,7 +356,7 @@ test('druga przebudowa jest idempotentna — sekcja ręczna nie dubluje się', a
     t.false(Object.prototype.hasOwnProperty.call(files, `${base}/brain.md.bak`));
 });
 
-test('ręczna linia w sekcji ZARZĄDZANEJ nadal ląduje w .bak, a sekcja ręczna przeżywa', async t => {
+test('ręczna linia w sekcji ZARZĄDZANEJ przeżywa rebuild i nadal ląduje w .bak (bezpiecznik)', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const mixed = `# Jaskier brain\n\n## Bieżące\n\n## User\n- ręczny fakt dopisany w sekcję indeksu\n\n## Preferencje\n\n## Workflow\n\n## Projekty i referencje\n\n## AKTYWNY TEST\n- kroki testu\n`;
     const { vault, files } = makeVault({
@@ -336,8 +370,12 @@ test('ręczna linia w sekcji ZARZĄDZANEJ nadal ląduje w .bak, a sekcja ręczna
     const brain = files[`${base}/brain.md`];
     t.true(brain.includes('## AKTYWNY TEST'), 'sekcja spoza katalogu przeżywa rebuild');
     t.true(brain.includes('- kroki testu'));
-    t.false(brain.includes('ręczny fakt dopisany w sekcję indeksu'), 'linia w sekcji zarządzanej nadal jest wycinana');
-    t.true(files[`${base}/brain.md.bak`].includes('ręczny fakt dopisany w sekcję indeksu'), '…więc idzie do .bak');
+    t.true(brain.includes('ręczny fakt dopisany w sekcję indeksu'), 'linia w sekcji zarządzanej TERAZ przeżywa rebuild');
+    t.true(brain.includes('[[brain/user_jan.md]] — Fakty o Janie'), 'indeks nadal przebudowany');
+    t.true(
+        files[`${base}/brain.md.bak`].includes('ręczny fakt dopisany w sekcję indeksu'),
+        'bezpiecznik .bak zostaje NIETKNIĘTY - kopia starej treści powstaje mimo że linia już nie jest usuwana'
+    );
 });
 
 test('AgentMemory.archiveBrainNote moves completed projects to brain/archive after lessons review', async t => {

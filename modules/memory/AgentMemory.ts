@@ -33,6 +33,7 @@ import {
     buildBrainIndex,
     parseNaTerazSections,
     parseForeignSections,
+    parseManualIndexLines,
     applyNaTerazOps,
     isNaTerazHeading,
     NA_TERAZ_MAX_ENTRIES,
@@ -1470,13 +1471,19 @@ created: ${created}
             // Sekcje H2 spoza katalogu zarządzanych (ręczne, np. „## AKTYWNY
             // TEST") wracają do nowego pliku verbatim, na koniec — rebuild nie może ich wycinać.
             const foreign = parseForeignSections(before);
+            // Ręcznie dopisane linie w sekcjach ZARZĄDZANYCH (np. kilka bulletów sesji Claude
+            // Code w `## Bieżące`) - bez tego rebuild je bezpowrotnie kasuje (patrz gotcha
+            // w modules/memory/CLAUDE.md). Index-like linki są tu odsiane - te regeneruje
+            // `buildBrainIndex` z realnych notatek.
+            const manual = parseManualIndexLines(before);
             const notes = await this.listBrainNotes();
             const content = buildBrainIndex({
                 agentName: this.agentName,
                 header: this._brainHeaderFromContent(before),
                 notes,
                 naTeraz,
-                foreign
+                foreign,
+                manual
             });
             if (content !== before) {
                 // Safety net: the rebuild still drops manual lines inside MANAGED sections

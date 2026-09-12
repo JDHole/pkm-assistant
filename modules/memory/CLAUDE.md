@@ -189,9 +189,23 @@ indeks.
 testowego) są ZACHOWYWANE przy przebudowie - `parseForeignSections` wyciąga je ze starego
 pliku, a `buildBrainIndex` emituje je verbatim NA KOŃCU nowego pliku (kolejność względna
 zachowana; sekcja dopisana na górze po pierwszej przebudowie wędruje na dół - świadomy koszt).
-Ręczne linie WEWNĄTRZ sekcji zarządzanych (np. goły bullet w `## User`) nadal są wycinane przy
-przebudowie i lądują w `brain.md.bak` (`_brainHasManualContent` rozpoznaje strefowo:
-`managed`/`na_teraz`/`foreign` - tylko linie w strefie `managed` triggerują backup).
+
+**Od 2026-09-12 ręczne linie WEWNĄTRZ sekcji zarządzanych też przeżywają rebuild.** Praktyczny
+przypadek: sesje Claude Code dopisują 3-5 bulletów ręcznie do `## Bieżące` (bieżący kontekst
+roboczy), a każdy `memory_save`/`/save session`/konsolidacja wywołuje `rebuildBrainIndex()` -
+bez tej naprawy wpisy ginęły przy pierwszym kolejnym zapisie. `parseManualIndexLines(before)`
+(`BrainIndex.ts`) wyciąga z KAŻDEJ sekcji zarządzanej (`INDEX_SECTIONS`) jej niepuste linie,
+które NIE są linkiem do notatki (`- [[brain/…]]`, niezależnie od tego co po nim - taki link
+jest ZAWSZE regenerowany z metadanych notatek i traktowany jako wygenerowany, nie ręczny; stary
+link do usuniętej notatki więc dalej znika, to zamierzone). `buildBrainIndex({manual})` emituje
+te linie NA POCZĄTKU danej sekcji, PRZED wygenerowanymi linkami, w oryginalnej kolejności;
+sekcja z samymi ręcznymi liniami i bez notatek i tak dostaje nagłówek (jak dotąd - puste sekcje
+nigdy nie były omijane). `AgentMemory.rebuildBrainIndex()` woła
+`manual: parseManualIndexLines(before)` przy każdej przebudowie. Rebuild(rebuild) jest bajtowo
+idempotentny - druga przebudowa z tych samych notatek parsuje własne ręczne linie z powrotu i
+odtwarza identyczny plik. Bezpiecznik `.bak` (`_brainHasManualContent`) zostaje NIETKNIĘTY -
+nadal tworzy kopię przy zmianie pliku z ręczną linią w strefie `managed`, teraz już tylko jako
+redundantna siatka bezpieczeństwa, bo treść i tak przeżywa w samym `brain.md`.
 
 **Fabryczne prompty robocze** (`workPrompts.ts`, owned przez memory, żeby workflow miał własne
 defaulty bez cyklu memory→agents): `DEFAULT_SAVE_SESSION_PROMPT` / `DEFAULT_ARCHIVE_PROMPT` /

@@ -3,6 +3,7 @@ import {
     buildBrainIndex,
     parseNaTerazSections,
     parseForeignSections,
+    parseManualIndexLines,
     applyNaTerazOps,
     naTerazSectionKey,
     isNaTerazHeading,
@@ -162,4 +163,99 @@ test('buildBrainIndex emituje foreign NA KOŃCU, a round-trip jest stabilny', t 
     t.true(md.includes('- krok 1'));
     const md2 = buildBrainIndex({ agentName: 'X', notes: [noteMeta()], foreign: parseForeignSections(md) });
     t.is(md2, md, 'parse(build) → build daje identyczny plik');
+});
+
+// ─── Ręczne linie WEWNĄTRZ sekcji zarządzanych (bulletу sesji Claude Code w np. „## Bieżące") ───
+
+test('parseManualIndexLines wyciąga ręczne bullety z sekcji zarządzanych, ignoruje linki', t => {
+    const md = `# X brain
+
+## Bieżące
+- Kuba testuje panel Ram
+- Sprint dogrywki walidatora w toku
+- [[brain/project_context_dogrywka.md]] — Dogrywka walidatora katalogu
+
+## User
+
+## Preferencje
+- Nie pytaj drugi raz o rozstrzygnięte
+
+## Workflow
+
+## Projekty i referencje
+`;
+    const manual = parseManualIndexLines(md);
+    t.deepEqual(manual.get('## Bieżące'), ['- Kuba testuje panel Ram', '- Sprint dogrywki walidatora w toku']);
+    t.deepEqual(manual.get('## Preferencje'), ['- Nie pytaj drugi raz o rozstrzygnięte']);
+    t.false(manual.has('## User'), 'brak ręcznych linii → brak wpisu dla tej sekcji');
+    t.false(manual.has('## Workflow'));
+    t.false(manual.has('## Projekty i referencje'));
+});
+
+test('parseManualIndexLines na pustej/nieistniejącej treści → pusta mapa', t => {
+    t.is(parseManualIndexLines('').size, 0);
+    t.is(parseManualIndexLines(null).size, 0);
+    t.is(parseManualIndexLines(undefined).size, 0);
+});
+
+test('buildBrainIndex emituje ręczne linie PRZED wygenerowanymi linkami, w oryginalnej kolejności', t => {
+    const notes = [
+        { filename: 'project_context_a.md', name: 'A', description: 'Projekt A', type: 'project_context', created: '2026-09-01' },
+        { filename: 'project_context_b.md', name: 'B', description: 'Projekt B', type: 'project_context', created: '2026-09-02' },
+    ];
+    const manual = new Map([['## Bieżące', ['- Kuba testuje panel Ram', '- Sprint dogrywki walidatora w toku']]]);
+    const md = buildBrainIndex({ agentName: 'Jaskier', notes, manual });
+    const biezace = md.slice(md.indexOf('## Bieżące'), md.indexOf('## User'));
+    t.is(
+        biezace,
+        '## Bieżące\n'
+            + '- Kuba testuje panel Ram\n'
+            + '- Sprint dogrywki walidatora w toku\n'
+            + '- [[brain/project_context_b.md]] — Projekt B\n'
+            + '- [[brain/project_context_a.md]] — Projekt A\n'
+            + '\n'
+    );
+});
+
+test('rebuild(rebuild) z ręcznymi liniami jest idempotentny bajtowo', t => {
+    const notes = [
+        { filename: 'user_jan.md', name: 'Jan', description: 'Fakt o Janie', type: 'user', created: '2026-05-14' },
+    ];
+    const before = `# Jaskier brain
+
+## Bieżące
+- Kuba testuje panel Ram
+
+## User
+- ręczna notatka usera
+
+## Preferencje
+
+## Workflow
+
+## Projekty i referencje
+`;
+    const once = buildBrainIndex({ agentName: 'Jaskier', notes, manual: parseManualIndexLines(before) });
+    const twice = buildBrainIndex({ agentName: 'Jaskier', notes, manual: parseManualIndexLines(once) });
+    t.is(twice, once, 'druga przebudowa z tych samych notatek nie zmienia bajtu');
+    t.true(once.includes('- Kuba testuje panel Ram'));
+    t.true(once.includes('- ręczna notatka usera'));
+});
+
+test('index-like linia dopisana ręcznie (np. do usuniętej notatki) jest wycinana, nie zachowywana', t => {
+    const before = `# X brain
+
+## Bieżące
+- [[brain/project_context_usunieta.md]] - stary, martwy link
+
+## User
+
+## Preferencje
+
+## Workflow
+
+## Projekty i referencje
+`;
+    const manual = parseManualIndexLines(before);
+    t.false(manual.has('## Bieżące'), 'stary link jest index-like → nie ląduje w manualu, będzie regenerowany/zniknie');
 });
