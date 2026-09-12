@@ -58,19 +58,15 @@ jobs:
             console.log('Wersja ' + tag + ' spójna (minAppVersion ' + manifest.minAppVersion + ')');
           "
 
-      # Te same bramki co w ci.yml — wydanie nie ma prawa być mniej sprawdzone niż zwykły push.
-      - run: npm test
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm run lint:obsidian
-      - run: npm run build
-      - name: manifest i versions nietkniete przez build
-        run: git diff --exit-code manifest.json versions.json
       # Harness „Szklane Pudło" — prawdziwy plugin bootowany w Node bez Obsidiana. Mieszka
       # w OSOBNYM repo (https://github.com/JDHole/pkm-assistant-harness): walidator
       # katalogu Obsidiana lintuje CAŁE repo pluginu, a narzędzie testowe nie jest częścią
-      # pluginu i generowało tysiące ostrzeżeń. Bramka zostaje ta sama — klonujemy harness obok
-      # i puszczamy jego skrypty na TYM checkoutcie pluginu (PKM_ASSISTANT_ROOT).
+      # pluginu i generowało tysiące ostrzeżeń. Od 2026-09-11 mieszka tam też atrapa `obsidian`
+      # + shim DOM + właściwy preload AVA (`test-support/`) — więc te dwa kroki MUSZĄ stanąć
+      # PRZED `npm test`, dokładnie jak w ci.yml: lokator `test-support/register-obsidian-for-ava.mjs`
+      # szuka checkoutu pod `.harness-ci`, a atrapa `obsidian.ts` importuje `yaml` z node_modules
+      # TEGO checkoutu (bez `npm ci` niżej `npm test` pada na `Cannot find package 'yaml'`).
+      # Wydanie 2.2.3 (pierwsza próba) obleciało dokładnie na tym: harness klonowany dopiero po bramkach.
       - name: harness — checkout osobnego repo
         uses: actions/checkout@v4
         with:
@@ -82,6 +78,17 @@ jobs:
         run: npm ci --no-audit --no-fund
         working-directory: .harness-ci
 
+      # Te same bramki co w ci.yml — wydanie nie ma prawa być mniej sprawdzone niż zwykły push.
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run lint:obsidian
+      - run: npm run build
+      - name: manifest i versions nietkniete przez build
+        run: git diff --exit-code manifest.json versions.json
+
+      # Harness już wyklonowany + `npm ci` wyżej. Tu tylko jego skrypty na TYM checkoucie
+      # pluginu (PKM_ASSISTANT_ROOT).
       - name: harness — selftest
         run: npm run selftest
         working-directory: .harness-ci
