@@ -165,13 +165,13 @@ test('buildBrainIndex emituje foreign NA KOŃCU, a round-trip jest stabilny', t 
     t.is(md2, md, 'parse(build) → build daje identyczny plik');
 });
 
-// ─── Ręczne linie WEWNĄTRZ sekcji zarządzanych (bulletу sesji Claude Code w np. „## Bieżące") ───
+// ─── Ręczne linie WEWNĄTRZ sekcji zarządzanych (bullety sesji Claude Code w np. „## Bieżące") ───
 
 test('parseManualIndexLines wyciąga ręczne bullety z sekcji zarządzanych, ignoruje linki', t => {
     const md = `# X brain
 
 ## Bieżące
-- Kuba testuje panel Ram
+- Jan testuje panel Ram
 - Sprint dogrywki walidatora w toku
 - [[brain/project_context_dogrywka.md]] — Dogrywka walidatora katalogu
 
@@ -185,7 +185,7 @@ test('parseManualIndexLines wyciąga ręczne bullety z sekcji zarządzanych, ign
 ## Projekty i referencje
 `;
     const manual = parseManualIndexLines(md);
-    t.deepEqual(manual.get('## Bieżące'), ['- Kuba testuje panel Ram', '- Sprint dogrywki walidatora w toku']);
+    t.deepEqual(manual.get('## Bieżące'), ['- Jan testuje panel Ram', '- Sprint dogrywki walidatora w toku']);
     t.deepEqual(manual.get('## Preferencje'), ['- Nie pytaj drugi raz o rozstrzygnięte']);
     t.false(manual.has('## User'), 'brak ręcznych linii → brak wpisu dla tej sekcji');
     t.false(manual.has('## Workflow'));
@@ -203,13 +203,13 @@ test('buildBrainIndex emituje ręczne linie PRZED wygenerowanymi linkami, w oryg
         { filename: 'project_context_a.md', name: 'A', description: 'Projekt A', type: 'project_context', created: '2026-09-01' },
         { filename: 'project_context_b.md', name: 'B', description: 'Projekt B', type: 'project_context', created: '2026-09-02' },
     ];
-    const manual = new Map([['## Bieżące', ['- Kuba testuje panel Ram', '- Sprint dogrywki walidatora w toku']]]);
+    const manual = new Map([['## Bieżące', ['- Jan testuje panel Ram', '- Sprint dogrywki walidatora w toku']]]);
     const md = buildBrainIndex({ agentName: 'Jaskier', notes, manual });
     const biezace = md.slice(md.indexOf('## Bieżące'), md.indexOf('## User'));
     t.is(
         biezace,
         '## Bieżące\n'
-            + '- Kuba testuje panel Ram\n'
+            + '- Jan testuje panel Ram\n'
             + '- Sprint dogrywki walidatora w toku\n'
             + '- [[brain/project_context_b.md]] — Projekt B\n'
             + '- [[brain/project_context_a.md]] — Projekt A\n'
@@ -224,7 +224,7 @@ test('rebuild(rebuild) z ręcznymi liniami jest idempotentny bajtowo', t => {
     const before = `# Jaskier brain
 
 ## Bieżące
-- Kuba testuje panel Ram
+- Jan testuje panel Ram
 
 ## User
 - ręczna notatka usera
@@ -238,7 +238,7 @@ test('rebuild(rebuild) z ręcznymi liniami jest idempotentny bajtowo', t => {
     const once = buildBrainIndex({ agentName: 'Jaskier', notes, manual: parseManualIndexLines(before) });
     const twice = buildBrainIndex({ agentName: 'Jaskier', notes, manual: parseManualIndexLines(once) });
     t.is(twice, once, 'druga przebudowa z tych samych notatek nie zmienia bajtu');
-    t.true(once.includes('- Kuba testuje panel Ram'));
+    t.true(once.includes('- Jan testuje panel Ram'));
     t.true(once.includes('- ręczna notatka usera'));
 });
 
