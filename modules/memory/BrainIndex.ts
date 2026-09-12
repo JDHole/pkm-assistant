@@ -132,6 +132,37 @@ export function parseForeignSections(content: string | null | undefined): Foreig
     return out;
 }
 
+const INDEX_LINK_LINE = /^\s*-\s*\[\[brain\/[^\]]+\]\]/;
+
+/**
+ * Wyciąga ręcznie dopisane linie z sekcji ZARZĄDZANYCH (`INDEX_SECTIONS`) istniejącego
+ * `brain.md`, żeby `buildBrainIndex` mógł je wstawić z powrotem przy przebudowie indeksu
+ * (patrz `AgentMemory.rebuildBrainIndex`). Linia „index-like" (link do notatki `brain/`, np.
+ * `- [[brain/x.md]] — opis`) jest WYCINANA - to wygenerowana treść, regenerowana z metadanych
+ * notatek przy każdej przebudowie, więc np. stary link do usuniętej notatki ma zniknąć, nie
+ * przeżyć jako „ręczny". Wszystko inne niepuste w sekcji zarządzanej jest ręcznym wpisem i
+ * wraca verbatim (przycięte tylko z końca linii). Linie spoza sekcji zarządzanych są
+ * ignorowane tutaj - sekcje obce mają własny parser (`parseForeignSections`).
+ */
+export function parseManualIndexLines(content: string | null | undefined): Map<string, string[]> {
+    const result = new Map<string, string[]>();
+    if (!content) return result;
+    let current: string | null = null;
+    for (const line of String(content).split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (/^##\s+/.test(trimmed)) {
+            current = INDEX_SECTIONS.includes(trimmed) ? trimmed : null;
+            continue;
+        }
+        if (!current || !trimmed) continue;
+        if (INDEX_LINK_LINE.test(line)) continue;
+        const bucket = result.get(current) ?? [];
+        bucket.push(line.replace(/\s+$/, ''));
+        result.set(current, bucket);
+    }
+    return result;
+}
+
 /** Coerce any shape into `{ user: string[], environment: string[] }` with cleaned, deduped bullets. */
 function normalizeNaTeraz(naTeraz: Partial<NaTerazSections> | null | undefined): NaTerazSections {
     const src = naTeraz || {};
@@ -218,9 +249,14 @@ export interface BuildBrainIndexInput {
     naTeraz?: Partial<NaTerazSections> | null;
     /** sekcje spoza katalogu zarządzanych (`parseForeignSections`) - emitowane verbatim NA KOŃCU */
     foreign?: ForeignSection[] | null;
+    /**
+     * Ręczne linie w sekcjach zarządzanych (`parseManualIndexLines`) - emitowane PRZED
+     * wygenerowanymi linkami danej sekcji, w oryginalnej kolejności.
+     */
+    manual?: Map<string, string[]> | null;
 }
 
-export function buildBrainIndex({ agentName, notes = [], header = null, naTeraz = null, foreign = null }: BuildBrainIndexInput = {}): string {
+export function buildBrainIndex({ agentName, notes = [], header = null, naTeraz = null, foreign = null, manual = null }: BuildBrainIndexInput = {}): string {
     const safeHeader = header || `# ${agentName || 'Agent'} brain`;
     const activeNotes = notes.filter(note => !isArchivedNote(note));
     const currentProjects = activeNotes
@@ -253,7 +289,11 @@ export function buildBrainIndex({ agentName, notes = [], header = null, naTeraz 
     }
     for (const section of INDEX_SECTIONS) {
         parts.push(section);
-        const lines = sections.get(section) || [];
+        // Ręczne linie (dopisane przez usera/sesję Claude Code) idą PRZED wygenerowanymi
+        // linkami - patrz `parseManualIndexLines` i gotcha w modules/memory/CLAUDE.md.
+        const handWritten = manual?.get(section) || [];
+        const generated = sections.get(section) || [];
+        const lines = handWritten.length > 0 ? [...handWritten, ...generated] : generated;
         if (lines.length > 0) parts.push(...lines);
         parts.push('');
     }
