@@ -1,6 +1,6 @@
 {
   "name": "pkm-assistant",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "type": "module",
   "description": "AI Agent system for Obsidian - chat with your vault, edit files with AI assistance.",
   "engines": {
