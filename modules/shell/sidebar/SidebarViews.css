@@ -844,8 +844,10 @@
     padding: 16px 20px;
     font-size: 0.82em;
     line-height: 1.6;
-    overflow: auto !important;
-    overflow-x: hidden !important;
+}
+.cs-file-editor__shard.cs-file-editor__shard--preview {
+    overflow: auto;
+    overflow-x: hidden;
 }
 
 .cs-file-editor__shard--preview h1 {
@@ -1663,7 +1665,7 @@
   top: 20px;
   width: 5px;
   height: 5px;
-  clip-path: polygon(30% 0%, 100% 20%, 80% 100%, 0% 70%);
+  transform: rotate(20deg) skew(-10deg, 4deg);
   background: rgba(var(--cs-agent-color-rgb, 150,130,100), 0.12);
 }
 
@@ -1956,7 +1958,7 @@
   content: '';
   width: 4px;
   height: 4px;
-  clip-path: polygon(30% 0%, 100% 20%, 80% 100%, 0% 70%);
+  transform: rotate(20deg) skew(-10deg, 4deg);
   border: 1px solid var(--cs-border, rgba(235,219,178,0.08));
   flex-shrink: 0;
   margin-right: 10px;
@@ -2100,8 +2102,8 @@
   border-radius: 2px;
   transition: all 0.2s;
 }
-.cs-mem-entry__btn:hover {
-  opacity: 1 !important;
+.cs-mem-entry:hover .cs-mem-entry__btn:hover {
+  opacity: 1;
   background: rgba(var(--cs-agent-color-rgb, 150,130,100), 0.08);
 }
 .cs-mem-entry__btn--danger:hover {
