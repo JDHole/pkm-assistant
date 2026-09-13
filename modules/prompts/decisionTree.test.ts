@@ -5,8 +5,27 @@ import {
     DECISION_TREE_DEFAULTS,
     resolveDecisionTreeInstructions,
     splitDecisionTreeRules,
+    ruleTextKey,
 } from './decisionTree.js';
+import { PromptBuilder } from './PromptBuilder.js';
 import { setLocale } from '../../core/i18n/index.js';
+// Aliasy, bo testy niżej używają lokalnych `pl`/`en` na rozstrzygnięte reguły.
+import { pl as plDict } from '../../core/i18n/pl.js';
+import { en as enDict } from '../../core/i18n/en.js';
+
+/**
+ * Testy językowe są `serial` i KAŻDY wraca do `'en'` (domyślny locale procesu) - `setLocale()`
+ * przestawia stan globalny modułu i18n, więc zostawienie po sobie `'pl'` przewróciłoby inne pliki.
+ */
+const AGENT = { name: 'Tola', personality: '', disabled_tools: [] };
+const CTX = { vaultName: 'Vault', currentDate: '2026-09-13' };
+
+/** Sekcja „JAK PRACUJĘ" tak, jak realnie dostaje ją model (render przez `PromptBuilder`). */
+function renderDecisionTree(agentOverrides: Record<string, unknown> = {}): string {
+    const builder = new PromptBuilder();
+    builder.build({ ...AGENT, promptOverrides: { decisionTreeInstructions: agentOverrides } } as never, CTX as never);
+    return builder.getSections().find(s => s.key === 'decision_tree')!.content;
+}
 
 test('DECISION_TREE_DEFAULTS = rdzeń (tier core) + rozszerzone (tier extended)', t => {
     t.is(DECISION_TREE_DEFAULTS.length, CORE_RULES.length + EXTENDED_RULES.length);
@@ -19,16 +38,21 @@ test('DECISION_TREE_DEFAULTS = rdzeń (tier core) + rozszerzone (tier extended)'
     }
 });
 
-test('mem_proactive w rdzeniu — rdzeń + rozszerzenie ulotne', t => {
-    const rule = CORE_RULES.find(r => r.id === 'mem_proactive')!;
-    t.truthy(rule);
-    t.true(rule.text.startsWith('POD KONIEC TURY sam oceń'));
-    // Durable-first framing zachowane…
-    t.true(rule.text.includes('Lepiej nie zapisać niż zaśmiecić pamięć.'));
-    // …a dokłada ścieżkę ulotną „na teraz" (ephemeral + section) na końcu.
-    t.true(rule.text.includes('ephemeral:true'));
-    t.true(rule.text.includes('„Na teraz"'));
-    t.is(rule.tool, 'memory_save');
+test.serial('mem_proactive w rdzeniu — rdzeń + rozszerzenie ulotne', t => {
+    setLocale('pl');
+    try {
+        const rule = CORE_RULES.find(r => r.id === 'mem_proactive')!;
+        t.truthy(rule);
+        t.true(rule.text.startsWith('POD KONIEC TURY sam oceń'));
+        // Durable-first framing zachowane…
+        t.true(rule.text.includes('Lepiej nie zapisać niż zaśmiecić pamięć.'));
+        // …a dokłada ścieżkę ulotną „na teraz" (ephemeral + section) na końcu.
+        t.true(rule.text.includes('ephemeral:true'));
+        t.true(rule.text.includes('„Na teraz"'));
+        t.is(rule.tool, 'memory_save');
+    } finally {
+        setLocale('en');
+    }
 });
 
 test('resolveDecisionTreeInstructions: override false wyłącza, string podmienia', t => {
@@ -147,4 +171,75 @@ test.serial('nieznany placeholder przechodzi nietknięty (to nie jest silnik sza
     setLocale('en');
     const resolved = resolveDecisionTreeInstructions({ art_existing: 'Zostaw {{cokolwiek_innego}} w spokoju.' });
     t.is(resolved.find(r => r.id === 'art_existing')!.text, 'Zostaw {{cokolwiek_innego}} w spokoju.');
+});
+
+// ─── Drzewo idzie za językiem interfejsu (2.2.5) ───
+
+test.serial('drzewo renderuje się PO ANGIELSKU dla locale en - zero polszczyzny', t => {
+    setLocale('en');
+    try {
+        const tree = renderDecisionTree();
+        t.true(tree.includes('ESCALATION: you know → answer'), 'reguła eskalacji po angielsku');
+        t.true(tree.includes('"User notes"'), 'nazwa sekcji artefaktu z rejestru EN');
+        t.regex(tree, /A ping about unread messages/, 'reguła skrzynki po angielsku');
+        // Najtwardsza asercja: w całej sekcji nie ma ani jednej polskiej litery.
+        const polskie = tree.match(/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/g);
+        t.is(polskie, null, `polskie znaki w angielskim drzewie: ${polskie?.join('')}`);
+    } finally {
+        setLocale('en');
+    }
+});
+
+test.serial('drzewo renderuje się PO POLSKU dla locale pl', t => {
+    setLocale('pl');
+    try {
+        const tree = renderDecisionTree();
+        t.true(tree.includes('ESKALACJA: wiesz → odpowiadaj'), 'reguła eskalacji po polsku');
+        t.true(tree.includes('„Uwagi usera"'), 'nazwa sekcji artefaktu z rejestru PL');
+        t.false(tree.includes('ESCALATION'), 'ani śladu wersji angielskiej');
+    } finally {
+        setLocale('en');
+    }
+});
+
+test.serial('treść reguły liczy się przy ODCZYCIE, nie przy imporcie modułu', t => {
+    // Sedno zmiany: `DECISION_TREE_DEFAULTS` powstaje przed `setLocale()` z `src/main.ts`.
+    // Gdyby `text` był zwykłym napisem, oba odczyty oddałyby ten sam język.
+    const rule = DECISION_TREE_DEFAULTS.find(r => r.id === 'deleg_escalation')!;
+    setLocale('pl');
+    const poPolsku = rule.text;
+    setLocale('en');
+    const poAngielsku = rule.text;
+    setLocale('en');
+
+    t.true(poPolsku.startsWith('ESKALACJA'));
+    t.true(poAngielsku.startsWith('ESCALATION'));
+    t.not(poPolsku, poAngielsku);
+});
+
+test.serial('override po id wygrywa nad fabryką w OBU językach', t => {
+    try {
+        for (const locale of ['pl', 'en']) {
+            setLocale(locale);
+            const tree = renderDecisionTree({ deleg_escalation: 'MOJA WLASNA REGULA ESKALACJI' });
+            t.true(tree.includes('MOJA WLASNA REGULA ESKALACJI'), `${locale}: override w prompcie`);
+            t.false(tree.includes('ESKALACJA: wiesz'), `${locale}: fabryczny PL zniknął`);
+            t.false(tree.includes('ESCALATION: you know'), `${locale}: fabryczny EN zniknął`);
+        }
+    } finally {
+        setLocale('en');
+    }
+});
+
+test('każda reguła ma treść w OBU słownikach', t => {
+    // Klucz jest SKŁADANY (`'prompt.dt.rule.' + id`), więc skaner literałów `t('...')`
+    // w `core/i18n/parity.test.ts` go nie widzi - literówka w `id` dałaby modelowi goły klucz.
+    const braki: string[] = [];
+    for (const rule of DECISION_TREE_DEFAULTS) {
+        const key = ruleTextKey(rule.id);
+        if (!(key in plDict)) braki.push(`pl: ${key}`);
+        if (!(key in enDict)) braki.push(`en: ${key}`);
+    }
+    t.deepEqual(braki, []);
+    t.is(DECISION_TREE_DEFAULTS.length, 17, 'pin liczby reguł - nowa reguła = nowy klucz w obu słownikach');
 });

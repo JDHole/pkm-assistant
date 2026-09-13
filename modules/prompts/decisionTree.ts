@@ -18,8 +18,23 @@ export interface DecisionTreeRule {
     id: string;
     group: string;
     tool: string | null;
+    /**
+     * Treść reguły W JĘZYKU INTERFEJSU. Dla reguł fabrycznych to GETTER (patrz `liveRule`) -
+     * czytaj to pole dopiero w chwili renderu/wyświetlenia, nigdy do stałej modułowej.
+     */
     text: string;
     tier?: 'core' | 'extended';
+    requiresSkills?: boolean;
+}
+
+/**
+ * Definicja reguły fabrycznej. TREŚCI tu NIE MA - mieszka w słownikach i18n pod kluczem
+ * `prompt.dt.rule.<id>` (pl + en) i wchodzi do reguły leniwie przez `liveRule`.
+ */
+interface DecisionTreeRuleDef {
+    id: string;
+    group: string;
+    tool: string | null;
     requiresSkills?: boolean;
 }
 export type DecisionTreeOverride = false | string | { text?: string; group?: string; tool?: string } | undefined;
@@ -42,69 +57,6 @@ export const DECISION_TREE_GROUPS = {
 };
 
 /**
- * CHUDY RDZEŃ - always-on reguły cross-tool i sądy modelu. Per-rule: id (klucz override),
- * group (UI), tool (renderuj tylko gdy narzędzie dostępne wg availableToolNames), requiresSkills
- * (renderuj gdy agent ma skille), text. Teksty inline PL (drzewo to polski korpus promptu).
- */
-export const CORE_RULES: DecisionTreeRule[] = [
-    { id: 'deleg_escalation', group: 'delegacja', tool: null,
-      text: 'ESKALACJA: wiesz → odpowiadaj; brakuje danych → zbierz (narzędzia albo delegate); brak wyniku → ask_user; user odmówił → STOP.' },
-    { id: 'deleg_core', group: 'delegacja', tool: 'delegate',
-      text: 'Dużo danych z vaulta/weba do zebrania (przeszukanie wielu plików, analiza zbiorcza, synteza) → delegate. Drobiazgi (jeden read/search) rób sam.' },
-    // Świat artefaktów żywych. `art_todo_default` gate'owany na `todo`, które
-    // dochodzi dopiero w fazie D - do tego czasu reguła się NIE renderuje (świadome).
-    { id: 'art_todo_default', group: 'artefakty', tool: 'todo',
-      text: 'Zadanie na 3+ kroków → od razu todo (lista kroków) i odhaczaj po kolei — masz je na oczach, nie gubisz wątku.' },
-    { id: 'art_hierarchy', group: 'artefakty', tool: 'artifact_create',
-      text: 'Proponujesz plan/dokument do zatwierdzenia przez usera → artifact_create(typ:"plan", tytul, sekcje z krokami). Powstaje notatka w vaultcie z guzikami akceptacji — user ją przegląda, poprawia i zatwierdza. NIE pisz artefaktów przez write.' },
-    // `{{user_notes}}` - patrz `fillSectionNames` niżej. Nazwa sekcji NIE może tu stać na sztywno:
-    // w angielskim vaultcie szablon typu ma „## User notes", więc reguła chroniłaby sekcję,
-    // której w notatce nie ma.
-    { id: 'art_existing', group: 'artefakty', tool: 'artifact_update',
-      text: 'Istniejący artefakt → artifact_update po jego ID (patch na świeżym stanie), nie twórz nowego. Sekcji „{{user_notes}}" NIGDY nie nadpisuj — to strefa usera: czytaj ją, zmieniaj tylko własne sekcje.' },
-    // Proaktywny zapis w tle (bramka istotności) + rozszerzenie o ulotne „na teraz".
-    { id: 'mem_proactive', group: 'pamiec', tool: 'memory_save', text: 'POD KONIEC TURY sam oceń, czy pojawiło się coś TRWAŁEGO wartego zapamiętania na przyszłość — jeśli tak, wywołaj memory_save bez proszenia usera. ZAPISUJ tylko: trwałe fakty/preferencje usera, reguły współpracy, korekty od usera ("nie tak, rób X"), kontekst projektu wart >1 sesji. NIE zapisuj: jednorazowych detali zadania, rzeczy które już są w brain.md (sprawdź katalog ## sekcji powyżej — nie duplikuj), spekulacji. Lepiej nie zapisać niż zaśmiecić pamięć. Osobno: ULOTNY stan „na teraz" (nad czym user pracuje DZIŚ, bieżący stan projektu/środowiska) to NIE trwały fakt → memory_save({ephemeral:true, section:"user"|"environment", content:"..."}) dopisuje go do sekcji „Na teraz" w brain.md (nie tworzy notatki); gdy coś się zdezaktualizowało, w tym samym wywołaniu dodaj remove:"stary wpis", żeby je wyczyścić.' },
-    { id: 'mem_dedup', group: 'pamiec', tool: 'memory_save',
-      text: 'Brain.md to indeks pamięci — przed zapisem sprawdź istniejące notatki (katalog ## sekcji wyżej), nie duplikuj tematów.' },
-    { id: 'skille', group: 'skille', tool: null, requiresSkills: true,
-      text: 'Masz indeks skilli niżej — zadanie pasuje do opisu skilla → read(ścieżka przepisu) i wykonaj kroki, bez pytania. Skille manual-only tylko na wyraźne życzenie usera.' },
-    // Reakcja na ping skrzynki to reguła zachowania (rdzeń), a nie opis narzędzia.
-    // „Kiedy wysłać pocztę vs zdelegować" siedzi w `mcp.kom_send.desc` + furtce niżej.
-    { id: 'kom_inbox', group: 'komunikator', tool: 'kom_read',
-      text: 'Ping o nieprzeczytanych wiadomościach → kom_list() po nagłówki i kom_read(id) tylko dla tych, które wyglądają na istotne. Nie czytaj wszystkiego hurtem i nie kasuj poczty — skrzynkę sprząta user.' },
-];
-
-/**
- * FURTKA - ROZSZERZONE REGUŁY dla słabszych modeli (np. małe lokalne, słabo czytające opisy
- * narzędzi). Domyślnie OFF (settings.pkmAssistant.extendedPromptRules). ON → dokładane po rdzeniu jako
- * osobna sekcja. Zachowane pełne treści starych instrukcji (guidance „kiedy użyć narzędzia"),
- * przefiltrowane po dostępności narzędzia jak rdzeń. BEZ skill_use/skill_known, file_write/
- * file_delete (approval/desc w kodzie), deleg_mandatory/strateg/multi/no_overkill (w delegate.desc),
- * comms_ask_user/art_skill_todo (dup/nudge).
- */
-export const EXTENDED_RULES: DecisionTreeRule[] = [
-    { id: 'mem_save',   group: 'pamiec', tool: 'memory_save',   text: '"zapamiętaj że..." → memory_save({name, description, type, content, why, how_to_apply}) — tworzy NOWĄ notatkę w brain/ i odświeża brain.md jako indeks; nie nadpisuje istniejących notatek.' },
-    { id: 'mem_read',   group: 'pamiec', tool: 'read',          text: 'Gdy lista brain/ pokazuje konkretną notatkę → read(path:"nazwa.md", scope:"memory"). Czyta tylko pamięć aktualnego agenta.' },
-    { id: 'mem_sum',    group: 'pamiec', tool: 'read',          text: 'Podsumowania sesji → read(path:"summaries/L1/plik.md", scope:"memory"). Czyta tylko aktualnego agenta.' },
-    { id: 'mem_delete', group: 'pamiec', tool: 'memory_delete', text: '"zapomnij o..." → memory_delete(fact:"konkretny tekst/filename/opis") usuwa dokładnie jedną notatkę z brain/ i odświeża indeks; project_context wymaga archiwizacji z lekcjami.' },
-    { id: 'file_mkdir', group: 'pliki', tool: 'create_folder',  text: 'create_folder(path) — tworzy folder + nadrzędne. UŻYWAJ przed write jeśli folder nie istnieje.' },
-    { id: 'comms_delegate', group: 'komunikacja', tool: 'agent_delegate', text: 'Temat poza kompetencjami → agent_delegate (ZAWSZE podaj context_summary!).' },
-    { id: 'art_plan_todo', group: 'artefakty', tool: 'artifact_create', text: 'Złożone zadanie do uzgodnienia → artifact_create(typ:"plan"); user komentuje/zatwierdza w notatce, wracasz i realizujesz. Bieżący postęp pracy dla siebie prowadź w todo.' },
-    { id: 'kom_send', group: 'komunikator', tool: 'kom_send', text: 'Chcesz coś przekazać innemu agentowi „na później" → kom_send(to, subject, content). To poczta, nie rozmowa — adresat przeczyta przy swojej następnej sesji. Pilne przekazanie rozmowy TERAZ → agent_delegate.' },
-];
-
-/**
- * Wszystkie instrukcje (rdzeń + rozszerzone) - źródło dla UI overridów (profile_prompt) i resolvera.
- * Każda niesie `tier` ('core'|'extended'). Override `promptOverrides.decisionTreeInstructions[id]`
- * działa dla obu. Stare id (deleg_mandatory, skill_use, file_write, ...) już tu nie występują -
- * overridy na nie przestają matchować (świadome).
- */
-export const DECISION_TREE_DEFAULTS: DecisionTreeRule[] = [
-    ...CORE_RULES.map(r => ({ ...r, tier: 'core' as const })),
-    ...EXTENDED_RULES.map(r => ({ ...r, tier: 'extended' as const })),
-];
-
-/**
  * Wypełnij placeholdery nazw sekcji artefaktu (`{{user_notes}}`, `{{steps}}`, `{{goal}}`…)
  * wartościami z rejestru `modules/artifacts`, w JĘZYKU INTERFEJSU.
  *
@@ -114,9 +66,8 @@ export const DECISION_TREE_DEFAULTS: DecisionTreeRule[] = [
  * Napis wpisany na sztywno rozjechałby się przy pierwszej zmianie w rejestrze; placeholder
  * nie ma jak.
  *
- * Liczone PRZY KAŻDYM wywołaniu, nie przy imporcie: `DECISION_TREE_DEFAULTS` powstaje na
- * poziomie modułu (spread zamraża wartości), więc gotowy napis zamroziłby tam angielski
- * na zawsze - `setLocale()` leci dopiero z `src/main.ts`.
+ * Liczone PRZY KAŻDYM wywołaniu, nie przy imporcie: stałe modułowe (`DECISION_TREE_DEFAULTS`)
+ * powstają przed `setLocale()` z `src/main.ts`, więc gotowy napis zamroziłby tam angielski.
  *
  * Podmieniane są WYŁĄCZNIE klucze z rejestru - `{{cokolwiek_innego}}` w regule własnej usera
  * przechodzi nietknięte. Zamiennik idzie przez funkcję, więc `$&`/`$'` w nazwie sekcji nie
@@ -129,10 +80,108 @@ function fillSectionNames(text: string): string {
 }
 
 /**
+ * Klucz i18n treści reguły fabrycznej. Jedno miejsce wyliczenia, żeby słownik, render i test
+ * liczyły ten sam napis. Klucz jest SKŁADANY (`'prompt.dt.rule.' + id`), więc skaner literałów
+ * `t('...')` w `core/i18n/parity.test.ts` go pomija - parytetu pilnuje test w tym module.
+ */
+export function ruleTextKey(id: string): string {
+    return `prompt.dt.rule.${id}`;
+}
+
+/**
+ * Definicja → reguła z LENIWĄ treścią.
+ *
+ * `text` jest GETTEREM, nie napisem: `DECISION_TREE_DEFAULTS` powstaje na poziomie modułu, a
+ * `setLocale()` leci dopiero z `src/main.ts`, więc treść policzona przy imporcie zamroziłaby
+ * angielski dla wszystkich. Getter woła `t()` w chwili odczytu, czyli przy renderze promptu
+ * (`resolveDecisionTreeInstructions`) albo przy rysowaniu UI overridów (`profile_prompt`).
+ * Przechodzi też przez `fillSectionNames`, więc czytelnik dostaje NAPIS GOTOWY - także UI, które
+ * nie ma po co znać placeholderów rejestru sekcji.
+ *
+ * ⚠️ Nie rób `{ ...rule }` na tych obiektach i nie wkładaj `rule.text` do stałej modułowej -
+ * spread liczy getter NA MIEJSCU i zamraża język. Kopiowanie jest legalne wyłącznie w funkcji
+ * wołanej przy renderze (tak robi `resolveDecisionTreeInstructions`).
+ */
+function liveRule(def: DecisionTreeRuleDef, tier: 'core' | 'extended'): DecisionTreeRule {
+    return {
+        id: def.id,
+        group: def.group,
+        tool: def.tool,
+        tier,
+        requiresSkills: def.requiresSkills,
+        get text() { return fillSectionNames(t(ruleTextKey(def.id))); },
+    };
+}
+
+/**
+ * CHUDY RDZEŃ - always-on reguły cross-tool i sądy modelu. Per-rule: id (klucz override ORAZ
+ * klucz i18n treści), group (UI), tool (renderuj tylko gdy narzędzie dostępne wg
+ * availableToolNames), requiresSkills (renderuj gdy agent ma skille).
+ *
+ * Treści mieszkają w słownikach (`prompt.dt.rule.<id>`, pl + en) - drzewo idzie za językiem
+ * interfejsu. Dokładasz regułę → dopisz klucz do OBU słowników (pilnuje tego test w module).
+ */
+const CORE_RULE_DEFS: DecisionTreeRuleDef[] = [
+    { id: 'deleg_escalation', group: 'delegacja', tool: null },
+    { id: 'deleg_core', group: 'delegacja', tool: 'delegate' },
+    // Świat artefaktów żywych. `art_todo_default` gate'owany na `todo`, które
+    // dochodzi dopiero w fazie D - do tego czasu reguła się NIE renderuje (świadome).
+    { id: 'art_todo_default', group: 'artefakty', tool: 'todo' },
+    { id: 'art_hierarchy', group: 'artefakty', tool: 'artifact_create' },
+    // Treść `art_existing` niesie `{{user_notes}}` - patrz `fillSectionNames` wyżej. Nazwa sekcji
+    // NIE może stać w słowniku na sztywno: w angielskim vaultcie szablon typu ma „## User notes",
+    // więc reguła chroniłaby sekcję, której w notatce nie ma.
+    { id: 'art_existing', group: 'artefakty', tool: 'artifact_update' },
+    // Proaktywny zapis w tle (bramka istotności) + rozszerzenie o ulotne „na teraz".
+    { id: 'mem_proactive', group: 'pamiec', tool: 'memory_save' },
+    { id: 'mem_dedup', group: 'pamiec', tool: 'memory_save' },
+    { id: 'skille', group: 'skille', tool: null, requiresSkills: true },
+    // Reakcja na ping skrzynki to reguła zachowania (rdzeń), a nie opis narzędzia.
+    // „Kiedy wysłać pocztę vs zdelegować" siedzi w `mcp.kom_send.desc` + furtce niżej.
+    { id: 'kom_inbox', group: 'komunikator', tool: 'kom_read' },
+];
+
+export const CORE_RULES: DecisionTreeRule[] = CORE_RULE_DEFS.map(def => liveRule(def, 'core'));
+
+/**
+ * FURTKA - ROZSZERZONE REGUŁY dla słabszych modeli (np. małe lokalne, słabo czytające opisy
+ * narzędzi). Domyślnie OFF (settings.pkmAssistant.extendedPromptRules). ON → dokładane po rdzeniu jako
+ * osobna sekcja. Zachowane pełne treści starych instrukcji (guidance „kiedy użyć narzędzia"),
+ * przefiltrowane po dostępności narzędzia jak rdzeń. BEZ skill_use/skill_known, file_write/
+ * file_delete (approval/desc w kodzie), deleg_mandatory/strateg/multi/no_overkill (w delegate.desc),
+ * comms_ask_user/art_skill_todo (dup/nudge).
+ */
+const EXTENDED_RULE_DEFS: DecisionTreeRuleDef[] = [
+    { id: 'mem_save',   group: 'pamiec', tool: 'memory_save' },
+    { id: 'mem_read',   group: 'pamiec', tool: 'read' },
+    { id: 'mem_sum',    group: 'pamiec', tool: 'read' },
+    { id: 'mem_delete', group: 'pamiec', tool: 'memory_delete' },
+    { id: 'file_mkdir', group: 'pliki', tool: 'create_folder' },
+    { id: 'comms_delegate', group: 'komunikacja', tool: 'agent_delegate' },
+    { id: 'art_plan_todo', group: 'artefakty', tool: 'artifact_create' },
+    { id: 'kom_send', group: 'komunikator', tool: 'kom_send' },
+];
+
+export const EXTENDED_RULES: DecisionTreeRule[] = EXTENDED_RULE_DEFS.map(def => liveRule(def, 'extended'));
+
+/**
+ * Wszystkie instrukcje (rdzeń + rozszerzone) - źródło dla UI overridów (profile_prompt) i resolvera.
+ * Każda niesie `tier` ('core'|'extended'). Override `promptOverrides.decisionTreeInstructions[id]`
+ * działa dla obu. Stare id (deleg_mandatory, skill_use, file_write, ...) już tu nie występują -
+ * overridy na nie przestają matchować (świadome).
+ *
+ * ⚠️ Spread leci po TABLICACH, nie po obiektach reguł: `{ ...rule }` policzyłby getter `text`
+ * przy imporcie (czyli PRZED `setLocale()`) i zamroził angielski. `tier` jest już nadany przez
+ * `liveRule`, więc nie ma po co przepisywać obiektów.
+ */
+export const DECISION_TREE_DEFAULTS: DecisionTreeRule[] = [...CORE_RULES, ...EXTENDED_RULES];
+
+/**
  * Rozstrzygnij instrukcje: factory + global override + agent override + custom (custom_*).
  * false = wyłącz (na dowolnym poziomie); string = podmień tekst. Zachowuje tier/requiresSkills.
- * Nazwy sekcji artefaktu wchodzą tu przez `fillSectionNames` - także w tekstach NADPISANYCH
- * przez usera, żeby własna reguła z `{{user_notes}}` działała tak samo jak fabryczna.
+ * Nazwy sekcji artefaktu wchodzą tu przez `fillSectionNames` - tekst fabryczny ma je wypełnione
+ * już z gettera (`liveRule`), a ten przebieg obsługuje teksty NADPISANE przez usera, żeby własna
+ * reguła z `{{user_notes}}` działała tak samo jak fabryczna (wypełnianie jest idempotentne).
  * @returns {Array<{id, group, tool, text, tier?, requiresSkills?}>}
  */
 export function resolveDecisionTreeInstructions(agentOverrides: DecisionTreeOverrides = {}, globalOverrides: DecisionTreeOverrides = {}): DecisionTreeRule[] {
