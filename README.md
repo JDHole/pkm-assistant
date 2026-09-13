@@ -10,6 +10,9 @@ Send a plan back with notes and the agent revises it in place:
 
 ![Send back with notes - the agent revises the plan](assets/pkm-send-back.gif)
 
+> [!NOTE]
+> **A note from the author.** PKM Assistant is built by one person - a non-programmer with Claude Code doing the typing, a solo "vibe-dev" project. It is early days: rough edges exist, and fixes ship continuously as you report them, but each one takes time. If the plugin helps you, the best support is a bug report, an idea, a star on the repo, or a word of patience. Thank you for being here at the start of the road.
+
 ---
 
 ## What is this?
