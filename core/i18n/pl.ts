@@ -2190,7 +2190,9 @@ export const pl: Record<string, string> = {
   'prompt.dt.artifact_type_sections': 'sekcje (heading musi być DOKŁADNIE taki)',
   'prompt.dt.artifacts_in_progress': 'Twoje artefakty w toku (artifact_update po ID, nie twórz nowego)',
   'prompt.dt.artifacts_more': '…i {{count}} kolejnych — artifact_list()',
-  'prompt.dt.active_artifact': 'AKTYWNY ARTEFAKT (świeży stan; edytuj przez artifact_update, „Uwagi usera" NIE nadpisuj)',
+  // `{{user_notes}}` wypełnia wołacz (`modules/prompts/artifactIndex.ts`) z rejestru sekcji
+  // artefaktów, a nie tłumacz - nazwa MUSI zgadzać się z nagłówkiem w szablonie typu na dysku.
+  'prompt.dt.active_artifact': 'AKTYWNY ARTEFAKT (świeży stan; edytuj przez artifact_update, „{{user_notes}}" NIE nadpisuj)',
   'prompt.dt.artifact_truncated': '(przycięte)',
   'prompt.dt.skill_recipe': 'przepis: read("{{path}}")',
   'prompt.dt.skill_index_more': '…i {{count}} kolejnych — list(".pkm-assistant/skills")',
@@ -3022,4 +3024,43 @@ Status raportu → \`gotowy\`. Powiedz userowi 2-3 zdania esencji + gdzie leży 
   'main.ribbon_chat': 'PKM Assistant: Otwórz czat',
   'modal.session_close.discard_confirm_title': 'Wyrzuć wiadomości?',
   'subagent.tool_scope_unenforceable': 'Odmowa: narzędzie "{{name}}" wymaga ograniczenia do folderów sub-agenta, którego ta ścieżka wykonania (bez klienta narzędzi) nie umie wyegzekwować.',
+
+  // ─── Drzewo decyzyjne: TREŚCI reguł (`prompt.dt.rule.<id>`) ───
+  // Klucz liczy się z `id` reguły w `modules/prompts/decisionTree.ts` (`'prompt.dt.rule.' + id`),
+  // a `text` reguły jest getterem, więc `t()` leci dopiero PO `setLocale()`.
+  // ADRESY zostają identyczne w obu językach: nazwy narzędzi, nazwy parametrów
+  // (`typ`/`tytul`/`sekcje`/`scope`/`ephemeral`/`fact`), strzałki oraz nagłówki brain.md
+  // („Na teraz", `## Bieżące`) - to nie napisy do tłumaczenia, tylko miejsca w plikach.
+  // Nazwy sekcji artefaktu ZMIENIAJĄ się z językiem (`modules/artifacts/artifactSections.ts`).
+  'prompt.dt.rule.deleg_escalation': 'ESKALACJA: wiesz → odpowiadaj; brakuje danych → zbierz (narzędzia albo delegate); brak wyniku → ask_user; user odmówił → STOP.',
+  'prompt.dt.rule.deleg_core': 'Dużo danych z vaulta/weba do zebrania (przeszukanie wielu plików, analiza zbiorcza, synteza) → delegate. Drobiazgi (jeden read/search) rób sam.',
+  'prompt.dt.rule.art_todo_default': 'Zadanie na 3+ kroków → od razu todo (lista kroków) i odhaczaj po kolei — masz je na oczach, nie gubisz wątku.',
+  'prompt.dt.rule.art_hierarchy': 'Proponujesz plan/dokument do zatwierdzenia przez usera → artifact_create(typ:"plan", tytul, sekcje z krokami). Powstaje notatka w vaultcie z guzikami akceptacji — user ją przegląda, poprawia i zatwierdza. NIE pisz artefaktów przez write.',
+  'prompt.dt.rule.art_existing': 'Istniejący artefakt → artifact_update po jego ID (patch na świeżym stanie), nie twórz nowego. Sekcji „Uwagi usera" NIGDY nie nadpisuj — to strefa usera: czytaj ją, zmieniaj tylko własne sekcje.',
+  'prompt.dt.rule.mem_proactive': 'POD KONIEC TURY sam oceń, czy pojawiło się coś TRWAŁEGO wartego zapamiętania na przyszłość — jeśli tak, wywołaj memory_save bez proszenia usera. ZAPISUJ tylko: trwałe fakty/preferencje usera, reguły współpracy, korekty od usera ("nie tak, rób X"), kontekst projektu wart >1 sesji. NIE zapisuj: jednorazowych detali zadania, rzeczy które już są w brain.md (sprawdź katalog ## sekcji powyżej — nie duplikuj), spekulacji. Lepiej nie zapisać niż zaśmiecić pamięć. Osobno: ULOTNY stan „na teraz" (nad czym user pracuje DZIŚ, bieżący stan projektu/środowiska) to NIE trwały fakt → memory_save({ephemeral:true, section:"user"|"environment", content:"..."}) dopisuje go do sekcji „Na teraz" w brain.md (nie tworzy notatki); gdy coś się zdezaktualizowało, w tym samym wywołaniu dodaj remove:"stary wpis", żeby je wyczyścić.',
+  'prompt.dt.rule.mem_dedup': 'Brain.md to indeks pamięci — przed zapisem sprawdź istniejące notatki (katalog ## sekcji wyżej), nie duplikuj tematów.',
+  'prompt.dt.rule.skille': 'Masz indeks skilli niżej — zadanie pasuje do opisu skilla → read(ścieżka przepisu) i wykonaj kroki, bez pytania. Skille manual-only tylko na wyraźne życzenie usera.',
+  'prompt.dt.rule.kom_inbox': 'Ping o nieprzeczytanych wiadomościach → kom_list() po nagłówki i kom_read(id) tylko dla tych, które wyglądają na istotne. Nie czytaj wszystkiego hurtem i nie kasuj poczty — skrzynkę sprząta user.',
+  'prompt.dt.rule.mem_save': '"zapamiętaj że..." → memory_save({name, description, type, content, why, how_to_apply}) — tworzy NOWĄ notatkę w brain/ i odświeża brain.md jako indeks; nie nadpisuje istniejących notatek.',
+  'prompt.dt.rule.mem_read': 'Gdy lista brain/ pokazuje konkretną notatkę → read(path:"nazwa.md", scope:"memory"). Czyta tylko pamięć aktualnego agenta.',
+  'prompt.dt.rule.mem_sum': 'Podsumowania sesji → read(path:"summaries/L1/plik.md", scope:"memory"). Czyta tylko aktualnego agenta.',
+  'prompt.dt.rule.mem_delete': '"zapomnij o..." → memory_delete(fact:"konkretny tekst/filename/opis") usuwa dokładnie jedną notatkę z brain/ i odświeża indeks; project_context wymaga archiwizacji z lekcjami.',
+  'prompt.dt.rule.file_mkdir': 'create_folder(path) — tworzy folder + nadrzędne. UŻYWAJ przed write jeśli folder nie istnieje.',
+  'prompt.dt.rule.comms_delegate': 'Temat poza kompetencjami → agent_delegate (ZAWSZE podaj context_summary!).',
+  'prompt.dt.rule.art_plan_todo': 'Złożone zadanie do uzgodnienia → artifact_create(typ:"plan"); user komentuje/zatwierdza w notatce, wracasz i realizujesz. Bieżący postęp pracy dla siebie prowadź w todo.',
+  'prompt.dt.rule.kom_send': 'Chcesz coś przekazać innemu agentowi „na później" → kom_send(to, subject, content). To poczta, nie rozmowa — adresat przeczyta przy swojej następnej sesji. Pilne przekazanie rozmowy TERAZ → agent_delegate.',
+
+  // ─── Summarizer: dynamiczna główka szkieletu kompresji ───
+  // Szkielet (sekcje 1-8 + ZASADY + blok kandydatów) mieszka w `config/default_prompts.ts`;
+  // te kawałki `Summarizer.getSummaryPrompt` skleja w locie i wstrzykuje w `{{DYNAMIC_HEADER}}`
+  // / `{{EMERGENCY_SECTION}}` / `{{SESSION_PATH}}`. Numer sekcji „## 9." musi trzymać się
+  // numeracji szkieletu (1-8) w OBU językach.
+  'summarizer.user_messages_header': 'WIADOMOŚCI USERA (zachowaj ich treść — ważne dla kontynuacji):',
+  'summarizer.tools_used': 'UŻYTE NARZĘDZIA: {{names}}',
+  'summarizer.previous_summary_header': 'POPRZEDNIE PODSUMOWANIE (buduj na nim — rozszerzaj, nie zastępuj):',
+  'summarizer.memory_index_header': 'AKTUALNA PAMIĘĆ DŁUGOTERMINOWA (indeks brain.md — NIE proponuj kandydatów, które już tu są):',
+  'summarizer.task_context_header': '⚠️ AKTYWNE ZADANIE W MOMENCIE KOMPRESJI (KRYTYCZNE — agent MUSI to kontynuować):',
+  'summarizer.emergency_section': '## 9. ⚠️ ZADANIE W TOKU (KRYTYCZNE)\nCo DOKŁADNIE agent robił w momencie kompresji? Jaki był następny krok? Jakie narzędzia miał zamiar wywołać?\nAgent MUSI wiedzieć od czego zacząć po wznowieniu — opisz to tak szczegółowo jak to możliwe. Uwzględnij aktywne TODO/PLAN jeśli są.',
+  'summarizer.emergency_warning': '⚠️ TO JEST AWARYJNA KOMPRESJA — agent był W TRAKCIE ZADANIA. Sekcja "Zadanie w toku" jest NAJWAŻNIEJSZA. Agent po wznowieniu musi wiedzieć DOKŁADNIE co robić dalej.',
+  'summarizer.session_path': '📂 Pełna rozmowa zapisana w: {{path}} — agent może ją przeczytać żeby zweryfikować szczegóły.',
 };

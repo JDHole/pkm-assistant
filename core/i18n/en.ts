@@ -2184,7 +2184,9 @@ export const en: Record<string, string> = {
   'prompt.dt.artifact_type_sections': 'sections (heading must match EXACTLY)',
   'prompt.dt.artifacts_in_progress': 'Your artifacts in progress (artifact_update by ID, do not create a new one)',
   'prompt.dt.artifacts_more': '…and {{count}} more — artifact_list()',
-  'prompt.dt.active_artifact': 'ACTIVE ARTIFACT (fresh state; edit via artifact_update, do NOT overwrite "User notes")',
+  // `{{user_notes}}` wypełnia wołacz (`modules/prompts/artifactIndex.ts`) z rejestru sekcji
+  // artefaktów, a nie tłumacz - nazwa MUSI zgadzać się z nagłówkiem w szablonie typu na dysku.
+  'prompt.dt.active_artifact': 'ACTIVE ARTIFACT (fresh state; edit via artifact_update, do NOT overwrite "{{user_notes}}")',
   'prompt.dt.artifact_truncated': '(truncated)',
   'prompt.dt.skill_recipe': 'recipe: read("{{path}}")',
   'prompt.dt.skill_index_more': '…and {{count}} more — list(".pkm-assistant/skills")',
@@ -3013,4 +3015,44 @@ Report status → \`gotowy\`. Tell the user 2-3 sentences of essence + where the
   'main.ribbon_chat': 'PKM Assistant: Open chat',
   'modal.session_close.discard_confirm_title': 'Discard messages?',
   'subagent.tool_scope_unenforceable': 'Refused: tool "{{name}}" requires the sub-agent\'s folder scope, which this execution path (no tool client) cannot enforce.',
+
+  // ─── Decision tree: rule TEXTS (`prompt.dt.rule.<id>`) ───
+  // The key is derived from the rule `id` in `modules/prompts/decisionTree.ts`
+  // (`'prompt.dt.rule.' + id`); the rule's `text` is a getter, so `t()` runs AFTER `setLocale()`.
+  // ADDRESSES stay identical in both languages: tool names, parameter names
+  // (`typ`/`tytul`/`sekcje`/`scope`/`ephemeral`/`fact`), arrows and brain.md headings
+  // („Na teraz", `## Bieżące`) — those are places in files, not prose to translate.
+  // Artifact section names DO follow the language (`modules/artifacts/artifactSections.ts`).
+  'prompt.dt.rule.deleg_escalation': 'ESCALATION: you know → answer; data missing → gather it (tools or delegate); no result → ask_user; user refused → STOP.',
+  'prompt.dt.rule.deleg_core': 'A lot of data to gather from the vault/web (searching many files, bulk analysis, synthesis) → delegate. Small things (a single read/search) do yourself.',
+  'prompt.dt.rule.art_todo_default': 'A task of 3+ steps → a todo right away (the list of steps) and tick them off one by one — you keep them in front of you and do not lose the thread.',
+  'prompt.dt.rule.art_hierarchy': 'You are proposing a plan/document for the user to approve → artifact_create(typ:"plan", tytul, sekcje with the steps). A note with approval buttons appears in the vault — the user reviews it, corrects it and approves it. Do NOT write artifacts through write.',
+  'prompt.dt.rule.art_existing': 'An existing artifact → artifact_update by its ID (a patch on the fresh state), do not create a new one. NEVER overwrite the "User notes" section — that is the user\'s zone: read it, change only your own sections.',
+  'prompt.dt.rule.mem_proactive': 'AT THE END OF THE TURN judge for yourself whether anything DURABLE worth remembering for the future came up — if so, call memory_save without asking the user. SAVE only: durable facts/preferences of the user, rules of cooperation, corrections from the user ("no, do X instead"), project context worth >1 session. Do NOT save: one-off details of the task, things already in brain.md (check the catalogue of ## sections above — do not duplicate), speculation. Better not to save than to litter the memory. Separately: EPHEMERAL "right now" state (what the user is working on TODAY, the current state of the project/environment) is NOT a durable fact → memory_save({ephemeral:true, section:"user"|"environment", content:"..."}) appends it to the „Na teraz" section in brain.md (it does not create a note); when something has gone stale, add remove:"old entry" in the same call to clear it.',
+  'prompt.dt.rule.mem_dedup': 'Brain.md is the memory index — before saving, check the existing notes (the catalogue of ## sections above), do not duplicate topics.',
+  'prompt.dt.rule.skille': 'You have the skill index below — the task matches a skill\'s description → read(path of the recipe) and carry out the steps, without asking. Manual-only skills only at the user\'s explicit request.',
+  'prompt.dt.rule.kom_inbox': 'A ping about unread messages → kom_list() for the headers and kom_read(id) only for the ones that look relevant. Do not read everything in bulk and do not delete mail — the user cleans up the mailbox.',
+  'prompt.dt.rule.mem_save': '"remember that..." → memory_save({name, description, type, content, why, how_to_apply}) — creates a NEW note in brain/ and refreshes brain.md as the index; it does not overwrite existing notes.',
+  'prompt.dt.rule.mem_read': 'When the brain/ listing shows a specific note → read(path:"name.md", scope:"memory"). It reads only the current agent\'s memory.',
+  'prompt.dt.rule.mem_sum': 'Session summaries → read(path:"summaries/L1/file.md", scope:"memory"). It reads only the current agent.',
+  'prompt.dt.rule.mem_delete': '"forget about..." → memory_delete(fact:"exact text/filename/description") removes exactly one note from brain/ and refreshes the index; project_context requires archiving with the lessons.',
+  'prompt.dt.rule.file_mkdir': 'create_folder(path) — creates the folder + its parents. USE IT before write if the folder does not exist.',
+  'prompt.dt.rule.comms_delegate': 'A topic outside your competence → agent_delegate (ALWAYS pass context_summary!).',
+  'prompt.dt.rule.art_plan_todo': 'A complex task to agree on → artifact_create(typ:"plan"); the user comments/approves in the note, you come back and carry it out. Keep your own running progress in a todo.',
+  'prompt.dt.rule.kom_send': 'You want to pass something to another agent "for later" → kom_send(to, subject, content). This is mail, not a conversation — the recipient will read it during their next session. Handing the conversation over urgently NOW → agent_delegate.',
+
+  // ─── Summarizer: the dynamic header of the compression skeleton ───
+  // The skeleton (sections 1-8 + RULES + the candidates block) lives in
+  // `config/default_prompts.ts`; these pieces are assembled on the fly by
+  // `Summarizer.getSummaryPrompt` and injected into `{{DYNAMIC_HEADER}}` /
+  // `{{EMERGENCY_SECTION}}` / `{{SESSION_PATH}}`. The "## 9." section number has to stay in
+  // step with the skeleton's numbering (1-8) in BOTH languages.
+  'summarizer.user_messages_header': 'USER MESSAGES (keep their content — important for continuing):',
+  'summarizer.tools_used': 'TOOLS USED: {{names}}',
+  'summarizer.previous_summary_header': 'PREVIOUS SUMMARY (build on it — extend it, do not replace it):',
+  'summarizer.memory_index_header': 'CURRENT LONG-TERM MEMORY (the brain.md index — do NOT propose candidates that are already here):',
+  'summarizer.task_context_header': '⚠️ ACTIVE TASK AT THE MOMENT OF COMPRESSION (CRITICAL — the agent MUST continue it):',
+  'summarizer.emergency_section': '## 9. ⚠️ TASK IN PROGRESS (CRITICAL)\nWhat EXACTLY was the agent doing at the moment of compression? What was the next step? Which tools was it about to call?\nThe agent MUST know where to start after resuming — describe it in as much detail as possible. Include the active TODO/PLAN if there is one.',
+  'summarizer.emergency_warning': '⚠️ THIS IS AN EMERGENCY COMPRESSION — the agent was IN THE MIDDLE OF A TASK. The "Task in progress" section is THE MOST IMPORTANT one. After resuming, the agent has to know EXACTLY what to do next.',
+  'summarizer.session_path': '📂 The full conversation is saved in: {{path}} — the agent can read it to verify details.',
 };
