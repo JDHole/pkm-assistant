@@ -31,7 +31,7 @@ test('placeholdery szkieletu są IDENTYCZNE w obu językach', t => {
     t.deepEqual(placeholders(defaultCompressionPrompt('en')), expected);
 });
 
-test('szkielet i główka dynamiczna idą za językiem interfejsu', t => {
+test.serial('szkielet i główka dynamiczna idą za językiem interfejsu', t => {
     t.teardown(() => setLocale('en'));
 
     setLocale('en');
@@ -51,7 +51,7 @@ test('szkielet i główka dynamiczna idą za językiem interfejsu', t => {
     t.not(en, pl);
 });
 
-test('sekcja awaryjna trzyma numer „## 9" po numeracji szkieletu 1-8 w obu językach', t => {
+test.serial('sekcja awaryjna trzyma numer „## 9" po numeracji szkieletu 1-8 w obu językach', t => {
     t.teardown(() => setLocale('en'));
 
     for (const locale of ['pl', 'en']) {
