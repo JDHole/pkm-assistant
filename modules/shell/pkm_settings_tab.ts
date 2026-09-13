@@ -116,11 +116,14 @@ export class PkmSettingsTab extends PluginSettingsTab {
         const pkmSettings = this.env?.settings?.pkmAssistant;
         if (pkmSettings && !pkmSettings.onboardingCompleted) {
             const banner = container.createDiv({ cls: 'pkm-onboarding-banner' });
+            // Baner pierwszego uruchomienia. Nie wspomina „wyłączonego wizarda": nowy user nigdy
+            // nie widział wizarda, więc informacja o jego braku niczego mu nie mówi - zamiast tego
+            // dostaje dwa pierwsze kroki i nazwę agenta, który poprowadzi go dalej.
             banner.createEl('p', {
-                text: '⚠️ Wizard onboardingu wyłączony w v2.0 (planowany powrót w v3.0). Skonfiguruj plugin: Klucze API → Modele → Agenci.',
+                text: t('settings.onboarding_banner'),
                 cls: 'pkm-onboarding-banner__text',
             });
-            const skipBtn = banner.createEl('button', { text: 'Skip onboarding', cls: 'mod-cta' });
+            const skipBtn = banner.createEl('button', { text: t('settings.onboarding_banner_dismiss'), cls: 'mod-cta' });
             skipBtn.addEventListener('click', () => {
                 void (async () => {
                     pkmSettings.onboardingCompleted = true;

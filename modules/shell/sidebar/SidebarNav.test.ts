@@ -115,3 +115,47 @@ test('_render() zdejmuje _rendering mimo wyjątku w sprzątaniu poprzedniego wid
     t.false(nav._rendering);
     t.is(nav.currentView(), 'b', 'nawigacja przeszła na kolejny widok mimo wywrotki sprzątania');
 });
+
+/**
+ * Przemianowanie agenta: wpisy stosu trzymają `{ agentName }` z chwili `push()`, więc bez
+ * przepisania ich parametrów `refresh()` po rename'ie rysuje profil po STAREJ nazwie
+ * i user dostaje „Nie znaleziono agenta". Konsument: `AgentSidebar` na evencie `agent:renamed`.
+ */
+test('updateParams przepisuje parametry we WSZYSTKICH pasujących wpisach stosu', t => {
+    const container = makeFakeEl();
+    const nav = new SidebarNav(container as unknown as HTMLElement, fakePlugin);
+    const widziane: Array<Record<string, unknown>> = [];
+    nav.register('home', () => { /* noop */ });
+    nav.register('agent-profile', (_el, _plugin, _nav, params) => { widziane.push({ ...params }); });
+
+    nav.push('home');
+    nav.push('agent-profile', { agentName: 'Agent1' });
+    nav.push('agent-profile', { agentName: 'Agent1', tab: 'pamiec' });
+    nav.push('agent-profile', { agentName: 'Ktos inny' });
+
+    const zmienione = nav.updateParams(params => params.agentName === 'Agent1', { agentName: 'Atlas' });
+
+    t.is(zmienione, 2, 'oba wpisy adresujące starą nazwę, także ten spod wierzchu');
+    t.deepEqual(nav.stack.map(e => e.params), [
+        {},
+        { agentName: 'Atlas' },
+        { agentName: 'Atlas', tab: 'pamiec' },
+        { agentName: 'Ktos inny' },
+    ], 'pozostałe pola wpisu zostają, cudzy agent nietknięty');
+
+    // Zmiana jest czysta: żadnego renderu, dopóki wołacz sam nie odświeży.
+    const przedRefreshem = widziane.length;
+    nav.refresh();
+    t.is(widziane.length, przedRefreshem + 1);
+    t.deepEqual(widziane[widziane.length - 1], { agentName: 'Ktos inny' });
+});
+
+test('updateParams bez trafień zwraca 0 i nie rusza stosu', t => {
+    const container = makeFakeEl();
+    const nav = new SidebarNav(container as unknown as HTMLElement, fakePlugin);
+    nav.register('home', () => { /* noop */ });
+    nav.push('home', { agentName: 'Agent1' });
+
+    t.is(nav.updateParams(params => params.agentName === 'Kogos nie ma', { agentName: 'X' }), 0);
+    t.deepEqual(nav.stack[0].params, { agentName: 'Agent1' });
+});
