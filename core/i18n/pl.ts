@@ -3066,4 +3066,28 @@ Status raportu → \`gotowy\`. Powiedz userowi 2-3 zdania esencji + gdzie leży 
   'summarizer.emergency_section': '## 9. ⚠️ ZADANIE W TOKU (KRYTYCZNE)\nCo DOKŁADNIE agent robił w momencie kompresji? Jaki był następny krok? Jakie narzędzia miał zamiar wywołać?\nAgent MUSI wiedzieć od czego zacząć po wznowieniu — opisz to tak szczegółowo jak to możliwe. Uwzględnij aktywne TODO/PLAN jeśli są.',
   'summarizer.emergency_warning': '⚠️ TO JEST AWARYJNA KOMPRESJA — agent był W TRAKCIE ZADANIA. Sekcja "Zadanie w toku" jest NAJWAŻNIEJSZA. Agent po wznowieniu musi wiedzieć DOKŁADNIE co robić dalej.',
   'summarizer.session_path': '📂 Pełna rozmowa zapisana w: {{path}} — agent może ją przeczytać żeby zweryfikować szczegóły.',
+
+  // ─── Rama zadania sub-agenta: bloki składane w kodzie ───
+  // Sam szkielet (nagłówek + PAMIĘĆ AGENTA + ZASADY) mieszka w `modules/sub-agents/framePrompt.ts`;
+  // te kawałki `SubAgentRunner._buildTaskPrompt` skleja w locie i wstrzykuje w `{{METHOD}}`,
+  // `{{SCOPE}}`, `{{BUDGET}}` i `{{DESCRIPTION}}`. Nagłówek `SCOPE:` oraz nazwy narzędzi
+  // (`delegate`/`agent_delegate`, `search/read/list`, `scope="memory"`) to ADRESY - zostają
+  // identyczne w obu językach.
+  'subagent.frame.method_truncated': '[... instrukcja obcięta do {{count}} znaków]',
+  'subagent.frame.scope_folders_label': 'Foldery',
+  'subagent.frame.scope_frontmatter_label': 'Frontmatter',
+  'subagent.frame.scope_sections_label': 'Sekcje',
+  'subagent.frame.scope_pinned_label': 'Przypiete notatki',
+  'subagent.frame.scope_no_folders': 'brak explicit folderow',
+  'subagent.frame.scope_no_frontmatter': 'brak frontmatter',
+  'subagent.frame.scope_no_sections': 'brak explicit sekcji',
+  'subagent.frame.scope_no_pinned': 'brak przypietych notatek',
+  'subagent.frame.scope_folders_enforced': '(EGZEKWOWANE technicznie — proba dostepu poza nie zostanie odrzucona)',
+  'subagent.frame.budget_header': 'BUDŻET:',
+  'subagent.frame.budget_iterations': '- Dostępne iteracje narzędzi: {{count}}',
+  'subagent.frame.budget_tool_result': '- Max rozmiar wyniku narzędzia: {{value}}',
+  'subagent.frame.budget_delegate': '- Wyjątek `delegate`/`agent_delegate` (wynik suba to deliverable, nie zrzut narzędzia): {{value}}',
+  'subagent.frame.budget_chars': '{{count}} znaków',
+  'subagent.frame.budget_unlimited': 'bez limitu',
+  'subagent.frame.default_description': 'asystent agenta',
 };

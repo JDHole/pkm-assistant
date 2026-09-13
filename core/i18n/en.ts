@@ -3058,4 +3058,28 @@ Report status → \`gotowy\`. Tell the user 2-3 sentences of essence + where the
   'summarizer.emergency_section': '## 9. ⚠️ TASK IN PROGRESS (CRITICAL)\nWhat EXACTLY was the agent doing at the moment of compression? What was the next step? Which tools was it about to call?\nThe agent MUST know where to start after resuming — describe it in as much detail as possible. Include the active TODO/PLAN if there is one.',
   'summarizer.emergency_warning': '⚠️ THIS IS AN EMERGENCY COMPRESSION — the agent was IN THE MIDDLE OF A TASK. The "Task in progress" section is THE MOST IMPORTANT one. After resuming, the agent has to know EXACTLY what to do next.',
   'summarizer.session_path': '📂 The full conversation is saved in: {{path}} — the agent can read it to verify details.',
+
+  // ─── Sub-agent task frame: the blocks composed in code ───
+  // The skeleton itself (header + AGENT MEMORY + RULES) lives in
+  // `modules/sub-agents/framePrompt.ts`; these pieces are assembled on the fly by
+  // `SubAgentRunner._buildTaskPrompt` and injected into `{{METHOD}}`, `{{SCOPE}}`, `{{BUDGET}}`
+  // and `{{DESCRIPTION}}`. The `SCOPE:` header and the tool names (`delegate`/`agent_delegate`,
+  // `search/read/list`, `scope="memory"`) are ADDRESSES — identical in both languages.
+  'subagent.frame.method_truncated': '[... instruction truncated to {{count}} characters]',
+  'subagent.frame.scope_folders_label': 'Folders',
+  'subagent.frame.scope_frontmatter_label': 'Frontmatter',
+  'subagent.frame.scope_sections_label': 'Sections',
+  'subagent.frame.scope_pinned_label': 'Pinned notes',
+  'subagent.frame.scope_no_folders': 'no explicit folders',
+  'subagent.frame.scope_no_frontmatter': 'no frontmatter',
+  'subagent.frame.scope_no_sections': 'no explicit sections',
+  'subagent.frame.scope_no_pinned': 'no pinned notes',
+  'subagent.frame.scope_folders_enforced': '(ENFORCED technically — an attempt to reach outside them will be refused)',
+  'subagent.frame.budget_header': 'BUDGET:',
+  'subagent.frame.budget_iterations': '- Tool iterations available: {{count}}',
+  'subagent.frame.budget_tool_result': '- Max size of a tool result: {{value}}',
+  'subagent.frame.budget_delegate': '- Exception for `delegate`/`agent_delegate` (a sub-agent result is a deliverable, not a tool dump): {{value}}',
+  'subagent.frame.budget_chars': '{{count}} characters',
+  'subagent.frame.budget_unlimited': 'unlimited',
+  'subagent.frame.default_description': 'assistant of the agent',
 };
