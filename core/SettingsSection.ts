@@ -1,4 +1,5 @@
 import { renderAdvancedSection, renderApiKeysSection, renderInfoSection, renderNoGoSection, renderLimitsSection } from './SettingsContent.js';
+import { t } from './i18n/index.js';
 import type { SettingsSectionCtx } from './SettingsContent.js';
 
 /** Trzeci argument renderera z `SettingsRegistry.render(container, plugin, options)`. */
@@ -30,28 +31,28 @@ export function registerSettings(registry: SettingsRegistryLike): void {
     });
     registry.register({
         id: 'limits',
-        label: 'Limity',
+        label: t('settings.nav.limits'),
         icon: '🎚️',
         order: 75,
         render: (containerEl, _plugin, options) => renderLimitsSection(containerEl, options.owner.buildSectionContext()),
     });
     registry.register({
         id: 'advanced',
-        label: 'Zaawansowane',
+        label: t('settings.nav.advanced'),
         icon: '🔧',
         order: 80,
         render: (containerEl, _plugin, options) => renderAdvancedSection(containerEl, options.owner.buildSectionContext()),
     });
     registry.register({
         id: 'api-keys',
-        label: 'Klucze API',
+        label: t('settings.nav.api_keys'),
         icon: '🔑',
         order: 90,
         render: (containerEl, _plugin, options) => renderApiKeysSection(containerEl, options.owner.buildSectionContext()),
     });
     registry.register({
         id: 'info',
-        label: 'Informacje',
+        label: t('settings.nav.info'),
         icon: 'ℹ️',
         order: 110,
         render: (containerEl, _plugin, options) => renderInfoSection(containerEl, options.owner.buildSectionContext()),

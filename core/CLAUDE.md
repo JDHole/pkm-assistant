@@ -73,7 +73,7 @@ Powód: AVA nie ma mocka `obsidian` (`"ava".require: []`), a testuje pliki produ
 - `probeFile` - "czy plik jest?" w trzech stanach (`'exists'|'missing'|'unknown'`), bo `exists()` kłamie na dyskach sieciowych (gotcha "boot nie pisze ustawień" niżej)
 - `readIfExists` - odczyt-najpierw WŁASNEGO pliku przed dopisaniem nowego wpisu; siostrzana wada `probeFile`
 - `migrateOldPluginFolder` - migrator plikowy, czysty/node-safe
-- `registerSettings` (`SettingsSection.js`) - rejestracja sekcji ustawień core
+- `registerSettings` (`SettingsSection.js`) - rejestracja sekcji ustawień core (etykiety nawigacji przez `t('settings.nav.*')` - sekcje rejestrują się po `setLocale()` z `onload`, więc `t()` w polu `label` daje właściwy język; napis na sztywno = polska etykieta u anglojęzycznego usera, wtopa z 2.2.3)
 - `parseYaml`, `stringifyYaml`, `parseFrontmatter`, `validateAgentSchema`, `setYamlEngine` + typ `YamlEngine` - silnik YAML wstrzykiwany (patrz sekcja "Zależności" niżej)
 - `slugify`, `getAgentSafeName` (slug tożsamości agenta, format zamrożony, jeden wspólny helper zamiast wielu kopii), `countTokens`, `countTokensSimple`, `getTokenCount`, `calibrate` (lekki estymator tokenów, bez zależności zewnętrznych)
 - `EventEmitter`, `StreamWatchdog`, `TraceLog`, `LogFileSink`
