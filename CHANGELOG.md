@@ -5,6 +5,38 @@ All notable user-facing changes to PKM Assistant are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 2.2.5 - 2026-09-13
+
+The whole first session follows the interface language: an English user no longer meets
+Polish in the built-in agent, the artifact templates or the system prompt. Polish users see
+exactly what they saw before.
+
+### Fixed
+
+- **Jaskier, the built-in agent, speaks the interface language.** English persona by default,
+  Polish when the interface language is Polish; your overrides file is untouched.
+- **Factory artifact templates follow the interface language.** New vaults get English section
+  names (Goal / Steps / Risks and assumptions / User notes; Content; TL;DR / Findings / Blind
+  spots / Sources). An untouched factory template is switched on the next start; edited ones are
+  left alone. Type ids, statuses and frontmatter keys are unchanged.
+- **Prompt rules and factory work prompts** (save session, archive, summaries, compression) and the sub-agent frame prompt are
+  English for English users; your own prompt overrides still win.
+- **Renaming a freshly created agent** removes the old YAML file and the sidebar keeps showing
+  the agent instead of "Agent not found".
+- Command palette entries are named "PKM Assistant: Chat" and "PKM Assistant: What's new";
+  the first-run banner, sub-agent editor labels and model-settings descriptions are translated;
+  a "{{count}}" placeholder no longer leaks into a chat notice.
+
+Known limits: `brain.md` keeps its section headings; the `<agent>-prep` sub-agent keeps the
+name it got at creation.
+
+Never picked a language? The plugin has always used English for its interface, and from 2.2.5
+Jaskier, the templates and the prompts follow it too. To keep everything Polish, set Settings →
+PKM Assistant → Appearance → Language to Polski.
+
+Upgrade notes: no migration, no settings changes. Untouched factory artifact templates may be
+rewritten in the interface language.
+
 ## 2.2.4 - 2026-09-13
 
 A small follow-up to 2.2.3 for the community catalogue: settings and first-run messages

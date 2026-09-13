@@ -2,7 +2,7 @@
 
 **Build your own AI agents inside Obsidian - with full transparency and control over every part of the prompt.**
 
-[![Version](https://img.shields.io/badge/version-2.2.4-blue)]() [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-green)](LICENSE) [![Tests](https://img.shields.io/badge/tests-3645%20PASS-brightgreen)]() [![CI](https://github.com/JDHole/pkm-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/JDHole/pkm-assistant/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-2.2.5-blue)]() [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-green)](LICENSE) [![Tests](https://img.shields.io/badge/tests-3688%20PASS-brightgreen)]() [![CI](https://github.com/JDHole/pkm-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/JDHole/pkm-assistant/actions/workflows/ci.yml)
 
 ![Chat with Jaskier](assets/pkm-chat.png)
 
