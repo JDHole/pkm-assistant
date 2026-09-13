@@ -110,7 +110,14 @@ function stepsToCheckboxes(steps: unknown): string {
     return lines.join('\n');
 }
 
-/** Zbuduj body notatki nowego typu z rekordu (VERBATIM markdown usera + ew. kroki). */
+/**
+ * Zbuduj body notatki nowego typu z rekordu (VERBATIM markdown usera + ew. kroki).
+ *
+ * ⚠️ Nagłówki sekcji zostają POLSKIE na sztywno - świadomie, NIE przez `artifactSection()`.
+ * To migrator jednorazowy stanu sprzed 2.2.5: stare JSONy artefaktów istnieją wyłącznie
+ * w vaultach, które chodziły na polskich szablonach typów, więc angielski nagłówek rozjechałby
+ * zmigrowaną notatkę z jej własnym typem na dysku.
+ */
 function buildBody(typ: string, record: LegacyArtifactRecord): string {
     const markdown = String(record?.data?.markdown || record?.markdown || '').trim();
     if (typ === 'plan') {

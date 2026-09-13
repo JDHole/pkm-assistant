@@ -17,6 +17,11 @@
 export { parseArtifact, applyPatch } from './artifactParser.js';
 export type { ArtifactFrontmatter, ArtifactItem, ArtifactPatchError, ArtifactPatchOp, ArtifactScalar, ArtifactSection, ArtifactType, ArtifactTypeField, ParsedArtifact, ThinArtifact } from './types.js';
 export { ArtifactTypeLoader } from './ArtifactTypeLoader.js';
+// Nazwy sekcji artefaktów: rejestr + selektor po języku. W barrelu, bo adresują je
+// TAKŻE `modules/tools` (alias `plan_review`) i `modules/prompts` (drzewo decyzyjne) -
+// rozjazd nagłówka z szablonem typu daje ciche `not_found` przy patchu.
+export { ARTIFACT_SECTION_NAMES, artifactSection } from './artifactSections.js';
+export type { ArtifactSectionKey } from './artifactSections.js';
 // DEFAULT_ARTIFACTS_FOLDER eksportowany z barrela: konsumuje go src/main.js
 // (komenda generate_artifacts_base).
 export { ArtifactStore, DEFAULT_ARTIFACTS_FOLDER } from './ArtifactStore.js';

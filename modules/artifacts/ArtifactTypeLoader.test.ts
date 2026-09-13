@@ -6,9 +6,14 @@ import {
     PLAN_TYPE_CONTENT,
     NOTATKA_TYPE_CONTENT,
     RAPORT_TYPE_CONTENT,
+    PLAN_TYPE_CONTENT_EN,
+    NOTATKA_TYPE_CONTENT_EN,
+    RAPORT_TYPE_CONTENT_EN,
 } from './ArtifactTypeLoader.js';
+import { ARTIFACT_SECTION_NAMES, artifactSection } from './artifactSections.js';
 import { computeArtifactButtons } from './artifactButtons.js';
 import { applyPatch, parseArtifact } from './artifactParser.js';
+import { setLocale } from '../../core/i18n/index.js';
 
 // ── In-memory adapter (wzór mocków vaulta) ──
 function makeVault(files: Map<string, string> = new Map<string, string>()) {
@@ -39,14 +44,27 @@ function makeVault(files: Map<string, string> = new Map<string, string>()) {
 
 const typePath = (name: string) => `${ARTIFACT_TYPES_PATH}/${name}.md`;
 
-test('ensureBuiltinTypes seeds the plan type when missing', async t => {
+/**
+ * Testy dotykające języka jadą `test.serial` (AVA puszcza je PRZED współbieżnymi i po jednym),
+ * bo `setLocale` to stan globalny procesu testowego. Każdy oddaje 'en' - domyślny locale, na
+ * którym stoi reszta pliku.
+ */
+function useLocale(t: { teardown: (fn: () => void) => void }, locale: string) {
+    setLocale(locale);
+    t.teardown(() => setLocale('en'));
+}
+
+test.serial('ensureBuiltinTypes seeds the plan type when missing (locale pl)', async t => {
+    useLocale(t, 'pl');
     const { vault, files } = makeVault();
     const loader = new ArtifactTypeLoader(vault);
     await loader.ensureBuiltinTypes();
     t.is(files.get(typePath('plan')), PLAN_TYPE_CONTENT);
+    t.true(files.get(typePath('plan'))!.includes('## Kroki'));
 });
 
-test('ensureBuiltinTypes seeds the notatka type too', async t => {
+test.serial('ensureBuiltinTypes seeds the notatka type too (locale pl)', async t => {
+    useLocale(t, 'pl');
     const { vault, files } = makeVault();
     const loader = new ArtifactTypeLoader(vault);
     await loader.ensureBuiltinTypes();
@@ -60,7 +78,8 @@ test('ensureBuiltinTypes seeds the notatka type too', async t => {
     t.true(notatka.template.includes('## Uwagi usera'));
 });
 
-test('ensureBuiltinTypes seeds the raport type', async t => {
+test.serial('ensureBuiltinTypes seeds the raport type (locale pl)', async t => {
+    useLocale(t, 'pl');
     const { vault, files } = makeVault();
     const loader = new ArtifactTypeLoader(vault);
     await loader.ensureBuiltinTypes();
@@ -82,7 +101,8 @@ test('ensureBuiltinTypes seeds the raport type', async t => {
 
 // ── przepis deep-research adresuje sekcję, którą typ musi mieć ────────
 
-test('świeżo zaseedowany typ raport przyjmuje set_section na „Białe plamy"', async t => {
+test.serial('świeżo zaseedowany typ raport przyjmuje set_section na „Białe plamy"', async t => {
+    useLocale(t, 'pl');
     const { vault } = makeVault();
     const loader = new ArtifactTypeLoader(vault);
     await loader.ensureBuiltinTypes();
@@ -127,6 +147,87 @@ test('raport statuses drive the generic button branch (summon while open, none w
     t.deepEqual(computeArtifactButtons('w-trakcie', statusy).map(b => b.action), ['summon']);
     t.deepEqual(computeArtifactButtons('gotowy', statusy).map(b => b.action), ['summon']);
     t.deepEqual(computeArtifactButtons('zamkniety', statusy), []);
+});
+
+// ── seed idzie za językiem interfejsu (2.2.5) ─────────────────────────
+
+test.serial('locale en + pusty vault → wbudowane typy po angielsku, bez polskich nagłówków', async t => {
+    useLocale(t, 'en');
+    const { vault, files } = makeVault();
+    const loader = new ArtifactTypeLoader(vault);
+    await loader.ensureBuiltinTypes();
+
+    const plan = files.get(typePath('plan'))!;
+    t.true(plan.includes('## Steps'));
+    t.true(plan.includes('## User notes'));
+    t.false(plan.includes('Kroki'));
+    t.true(files.get(typePath('notatka'))!.includes('## Content'));
+    const raport = files.get(typePath('raport'))!;
+    t.true(raport.includes('## Findings'));
+    t.true(raport.includes('## Blind spots'));
+
+    // Semantyka silnika (id typu, statusy, pola) jest wspólna dla obu języków.
+    await loader.loadAllTypes();
+    const typ = loader.getType('plan')!;
+    t.is(typ.name, 'plan');
+    t.deepEqual(typ.statusy, ['do-akceptacji', 'uwagi', 'zaakceptowany', 'zamkniety']);
+    t.deepEqual(Object.keys(typ.pola), ['cel', 'termin']);
+});
+
+test.serial('locale en + NIETKNIĘTY polski plik fabryczny (nawet z CRLF) → podmiana na angielski', async t => {
+    useLocale(t, 'en');
+    const zCrlf = PLAN_TYPE_CONTENT.replace(/\n/g, '\r\n');
+    const { vault, files } = makeVault(new Map([[typePath('plan'), zCrlf]]));
+    const loader = new ArtifactTypeLoader(vault);
+    await loader.ensureBuiltinTypes();
+    t.is(files.get(typePath('plan')), PLAN_TYPE_CONTENT_EN);
+});
+
+test.serial('locale pl + NIETKNIĘTY angielski plik fabryczny → podmiana na polski', async t => {
+    useLocale(t, 'pl');
+    const { vault, files } = makeVault(new Map([
+        [typePath('notatka'), NOTATKA_TYPE_CONTENT_EN],
+        [typePath('raport'), RAPORT_TYPE_CONTENT_EN],
+    ]));
+    const loader = new ArtifactTypeLoader(vault);
+    await loader.ensureBuiltinTypes();
+    t.is(files.get(typePath('notatka')), NOTATKA_TYPE_CONTENT);
+    t.is(files.get(typePath('raport')), RAPORT_TYPE_CONTENT);
+});
+
+test.serial('locale en + plik RUSZONY przez usera → zostaje bajt w bajt', async t => {
+    useLocale(t, 'en');
+    const mojaWersja = PLAN_TYPE_CONTENT + '\n## Moja sekcja\n(moje notatki)\n';
+    const { vault, files } = makeVault(new Map([[typePath('plan'), mojaWersja]]));
+    const loader = new ArtifactTypeLoader(vault);
+    await loader.ensureBuiltinTypes();
+    t.is(files.get(typePath('plan')), mojaWersja);
+});
+
+test.serial('artifactSection wybiera nazwę sekcji po języku', t => {
+    useLocale(t, 'en');
+    t.is(artifactSection('user_notes'), 'User notes');
+    t.is(artifactSection('steps'), 'Steps');
+    setLocale('pl');
+    t.is(artifactSection('user_notes'), 'Uwagi usera');
+    t.is(artifactSection('steps'), 'Kroki');
+    // Jawny locale wygrywa nad globalnym; nieznany kod = angielski (jak `t()`).
+    t.is(artifactSection('findings', 'en'), 'Findings');
+    t.is(artifactSection('findings', 'de'), 'Findings');
+});
+
+test('nagłówki tekstów fabrycznych zgadzają się z rejestrem sekcji (oba języki)', t => {
+    const naglowki = (content: string) => content
+        .split('\n').filter(line => line.startsWith('## ')).map(line => line.slice(3).trim());
+
+    const pl = ARTIFACT_SECTION_NAMES.pl;
+    const en = ARTIFACT_SECTION_NAMES.en;
+    t.deepEqual(naglowki(PLAN_TYPE_CONTENT), [pl.goal, pl.steps, pl.risks, pl.user_notes]);
+    t.deepEqual(naglowki(PLAN_TYPE_CONTENT_EN), [en.goal, en.steps, en.risks, en.user_notes]);
+    t.deepEqual(naglowki(NOTATKA_TYPE_CONTENT), [pl.content, pl.user_notes]);
+    t.deepEqual(naglowki(NOTATKA_TYPE_CONTENT_EN), [en.content, en.user_notes]);
+    t.deepEqual(naglowki(RAPORT_TYPE_CONTENT), [pl.tldr, pl.findings, pl.blind_spots, pl.sources, pl.user_notes]);
+    t.deepEqual(naglowki(RAPORT_TYPE_CONTENT_EN), [en.tldr, en.findings, en.blind_spots, en.sources, en.user_notes]);
 });
 
 test('ensureBuiltinTypes is idempotent (does not overwrite user edits)', async t => {

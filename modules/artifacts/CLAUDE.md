@@ -16,7 +16,8 @@ Wspólny silnik (parser/patcher), osobne interfejsy - wspólna mechanika, nie sk
 ```
 modules/artifacts/
 ├── artifactParser.ts         # PURE parser + patcher (parseArtifact/applyPatch) + `validateArtifactBodyText` - JEDYNA bramka treści agenta (code-fence/HTML/nagłówki) + protected keys
-├── ArtifactTypeLoader.ts     # biblioteka TYPÓW (.pkm-assistant/artifacts/types/*.md); seed plan + notatka
+├── ArtifactTypeLoader.ts     # biblioteka TYPÓW (.pkm-assistant/artifacts/types/*.md); seed plan + notatka + raport, PL/EN wg języka interfejsu (`builtinTypeContent`)
+├── artifactSections.ts       # PURE rejestr nazw sekcji PL/EN (`ARTIFACT_SECTION_NAMES`) + `artifactSection(key)` po języku
 ├── ArtifactStore.ts          # CRUD instancji jako notatek vaulta (create/read/update/list/move/remove/archive/importInstance)
 ├── artifactButtons.ts        # computeArtifactButtons (guziki wg statusu instancji + statusy typu)
 ├── artifactSummon.ts         # przywołanie agenta (buildSummonMessage + summonAgentForArtifact) + ciche przypięcie (activateArtifactInChat)
@@ -35,6 +36,7 @@ Specifiery importów w kodzie zostają z `.js` (konwencja repo dla plików TypeS
 
 - `parseArtifact`, `applyPatch` - silnik (pure)
 - `ArtifactTypeLoader` - biblioteka typów
+- `ARTIFACT_SECTION_NAMES`, `artifactSection(key, locale?)` - nazwy sekcji wbudowanych typów w obu językach. W barrelu, bo adresują je także `modules/tools` (alias `plan_review` → `heading`) i `modules/prompts` (reguła drzewa o „Uwagach usera”)
 - `ArtifactStore`, `DEFAULT_ARTIFACTS_FOLDER` - CRUD instancji jako notatek vaulta + domyślny folder
 - `summonAgentForArtifact` - przywołanie agenta po interakcji z notatką (ustawia aktywny + WYSYŁA stan)
 - `activateArtifactInChat` - ciche przypięcie artefaktu do rozmowy (ustawia aktywny, **zero wysyłki**); wołacz: klik w pickerze slim bara
@@ -50,6 +52,12 @@ Narzędzie `todo` żyje w `modules/tools/built-in-servers/artifacts/TodoTool.ts`
 ## Typy artefaktów
 
 Typ = plik `.pkm-assistant/artifacts/types/<nazwa>.md`: frontmatter meta (`nazwa`, `opis`, `pola{opis[,domyslne]}`, `statusy[]`, `sprzatanie` dni) + body = szablon ciała (placeholdery `{{pole}}`). Body szablonu jest **nieprzezroczysty** - user może w nim mieć dataviewjs. **Trzy typy wbudowane** seedowane przy starcie: **`plan`** (Cel/Kroki/Ryzyka/Uwagi usera) + **`notatka`** (Treść/Uwagi usera) + **`raport`** (Deep Research: TL;DR/Ustalenia/**Białe plamy**/Źródła/Uwagi usera - istniejące vaulty, w których typ `raport` już był utworzony ze starszym szablonem, sekcji „Białe plamy" nie dostaną automatycznie, bo `ensureBuiltinTypes` nie nadpisuje plików usera, dlatego przepisy mają fallback na podsekcję `### Białe plamy` w „Ustaleniach"; pola `pytanie`+`tryb`; statusy `[w-trakcie, gotowy, zamkniety]` - bez approval flow, raport się CZYTA; `sprzatanie: 0` - raporty się nie przedawniają; `w-trakcie`/`gotowy` dostają generyczny guzik „Przywołaj agenta" = żywy raport). Podpinane per agent przez `artifact_types:` w YAML. **Lista działa na dwie strony:** widoczność w indeksie promptu (brak/pusta = agent widzi tylko `plan`) ORAZ egzekwowanie przy tworzeniu - `artifact_create` z typem spoza NIEPUSTEJ listy dostaje odmowę (`mcp.artifact.type_not_allowed`). **Pusta/nieustawiona lista = wszystkie typy z biblioteki wolno** (egzekwowanie jest opt-in, zero regresji dla istniejących profili) - dzięki temu przepisy deep-research nadal podają `typ:"raport"` explicite u agenta bez podpięć.
+
+### Język tekstów fabrycznych (2.2.5)
+
+Szablon typu wbudowanego ma DWA warianty: polski (`PLAN_TYPE_CONTENT` itd.) i angielski (`*_CONTENT_EN`). Różnią się **wyłącznie tekstem dla człowieka** - opisem typu, nagłówkami sekcji i podpowiedziami w nawiasach. Klucze frontmattera (`nazwa`/`opis`/`pola`/`statusy`/`sprzatanie`), identyfikatory typów (`plan`/`notatka`/`raport`) i wartości statusów (`do-akceptacji`, `zamkniety`, …) są **wspólne dla obu języków** - to semantyka silnika, nie tłumaczenie. Wybiera `builtinTypeContent(name, locale = getLocale())`; nazwy sekcji mieszkają w `artifactSections.ts`, bo ten sam napis musi znać alias `plan_review` (`modules/tools`) i drzewo decyzyjne (`modules/prompts`) - rozjazd = ciche `not_found` przy patchu.
+
+**Reguła „nietknięty tekst fabryczny idzie za językiem":** `ensureBuiltinTypes` przy starcie (a) pisze plik, gdy go nie ma, (b) PODMIENIA plik, który jest co do znaku tekstem fabrycznym DRUGIEGO języka (porównanie po normalizacji CRLF→LF i obcięciu białych znaków na końcach linii/pliku), (c) w każdym innym przypadku zostawia plik w spokoju. Czyli: user, który nigdy nie ruszył szablonu, po przełączeniu języka dostaje szablon w nowym języku; user, który dopisał choćby jedną linię, nie traci nic.
 
 ## Kluczowe decyzje
 

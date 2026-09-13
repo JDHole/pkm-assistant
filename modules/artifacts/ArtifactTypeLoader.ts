@@ -12,8 +12,14 @@
  *
  * Klucze frontmattera PO POLSKU, raz na zawsze. Wartości statusów to semantyczne identyfikatory
  * (renderowanie przycisków zależy od statusu) - NIE tłumaczone.
+ *
+ * TEKST DLA CZŁOWIEKA (opis typu, nagłówki sekcji, podpowiedzi w nawiasach) idzie za językiem
+ * interfejsu: `builtinTypeContent(name)` wybiera wariant PL/EN, a nazwy sekcji trzyma
+ * `artifactSections.ts` - ten sam rejestr, z którego korzystają alias `plan_review` i drzewo
+ * decyzyjne, żeby adres patcha zgadzał się z nagłówkiem na dysku.
  */
 import { parseFrontmatter } from '../../core/index.js';
+import { getLocale } from '../../core/i18n/index.js';
 import { log } from '../../core/utils/Logger.js';
 import type { ArtifactScalar, ArtifactType, ArtifactTypeField } from './types.js';
 
@@ -93,6 +99,10 @@ sprzatanie: 30
  * najcenniejszej wg przepisu części. `ensureBuiltinTypes` seeduje plik TYLKO gdy nie istnieje
  * (user authority), więc ISTNIEJĄCE vaulty tej sekcji nie dostaną automatycznie - dlatego przepisy
  * mają jawny fallback na podsekcję `### Białe plamy` w „Ustaleniach".
+ *
+ * (Od 2.2.5 `ensureBuiltinTypes` podmienia plik też wtedy, gdy jest CO DO ZNAKU tekstem
+ * fabrycznym drugiego języka - ale tylko wtedy. Vault z RĘCZNIE zmienionym szablonem nadal
+ * nie dostaje niczego automatycznie, więc fallback zostaje.)
  */
 export const RAPORT_TYPE_CONTENT = `---
 nazwa: raport
@@ -121,6 +131,103 @@ sprzatanie: 0
 ## Uwagi usera
 (strefa usera — agent czyta, nigdy nie nadpisuje)
 `;
+
+/**
+ * Angielskie bliźniaki trzech tekstów wyżej. Różnią się WYŁĄCZNIE tekstem dla człowieka:
+ * klucze frontmattera (`nazwa`/`opis`/`pola`/`statusy`/`sprzatanie`), identyfikatory typów
+ * i wartości statusów zostają te same w obu językach - to semantyka silnika, nie tłumaczenie.
+ */
+export const PLAN_TYPE_CONTENT_EN = `---
+nazwa: plan
+opis: Action plan — the agent proposes, you approve before any work starts
+pola:
+  cel:
+    opis: One sentence — why this plan exists
+  termin:
+    opis: Due date (optional)
+statusy: [do-akceptacji, uwagi, zaakceptowany, zamkniety]
+sprzatanie: 30
+---
+
+## Goal
+{{cel}}
+
+## Steps
+(the agent adds the steps as checkboxes)
+
+## Risks and assumptions
+
+## User notes
+(your space — the agent reads it, never overwrites it)
+`;
+
+export const NOTATKA_TYPE_CONTENT_EN = `---
+nazwa: notatka
+opis: A note or piece of text for approval — the agent writes, you review and approve
+statusy: [do-akceptacji, uwagi, zaakceptowany, zamkniety]
+sprzatanie: 30
+---
+
+## Content
+(the agent writes the content here)
+
+## User notes
+(your space — the agent reads it, never overwrites it)
+`;
+
+export const RAPORT_TYPE_CONTENT_EN = `---
+nazwa: raport
+opis: Research report — the agent investigates a topic and assembles findings with quotes
+pola:
+  pytanie:
+    opis: The question / topic under research
+  tryb:
+    opis: Research source — web or vault
+statusy: [w-trakcie, gotowy, zamkniety]
+sprzatanie: 0
+---
+
+## TL;DR
+(3-5 sentences of essence — the agent fills this in at the end)
+
+## Findings
+(thematic sections; every claim with a quote and its source)
+
+## Blind spots
+(what could NOT be established — gaps in the sources; this is a result, not a failure)
+
+## Sources
+(web: list of URLs with titles · vault: wikilinks to notes)
+
+## User notes
+(your space — the agent reads it, never overwrites it)
+`;
+
+/** Nazwa typu wbudowanego - zawężenie, żeby `builtinTypeContent` nie brało dowolnego stringa. */
+export type BuiltinTypeName = 'plan' | 'notatka' | 'raport';
+
+/** Teksty fabryczne per język. Jedyny czytelnik: `builtinTypeContent` niżej. */
+const BUILTIN_TYPE_CONTENT = {
+    pl: { plan: PLAN_TYPE_CONTENT, notatka: NOTATKA_TYPE_CONTENT, raport: RAPORT_TYPE_CONTENT },
+    en: { plan: PLAN_TYPE_CONTENT_EN, notatka: NOTATKA_TYPE_CONTENT_EN, raport: RAPORT_TYPE_CONTENT_EN },
+} as const;
+
+/**
+ * Tekst fabryczny typu wbudowanego w podanym języku (domyślnie: bieżący język interfejsu).
+ * Locale czytany PRZY WYWOŁANIU - `setLocale()` leci w `src/main.ts` po imporcie modułów.
+ */
+export function builtinTypeContent(name: BuiltinTypeName, locale: string = getLocale()): string {
+    return BUILTIN_TYPE_CONTENT[locale === 'pl' ? 'pl' : 'en'][name];
+}
+
+/**
+ * Porównanie „czy to nadal goły tekst fabryczny": końce linii z dysku bywają CRLF (Windows,
+ * sync), a edytory lubią doklejać/zjadać biały znak na końcu pliku. Sama TREŚĆ sekcji musi się
+ * zgadzać co do znaku - inaczej plik jest już dziełem usera i nikt go nie rusza.
+ */
+function normalizeSeed(text: string): string {
+    return text.replace(/\r\n/g, '\n').replace(/[ \t]+$/gm, '').trimEnd();
+}
 
 interface ArtifactAdapter {
     exists(path: string): Promise<boolean>;
@@ -226,22 +333,40 @@ export class ArtifactTypeLoader {
         return typeNames.map(n => this.getType(n)).filter(Boolean) as ArtifactType[];
     }
 
-    /** Seed wbudowanych typów `plan` + `notatka` + `raport`, jeśli plik jeszcze nie istnieje (idempotentne). */
+    /**
+     * Seed wbudowanych typów `plan` + `notatka` + `raport` w JĘZYKU INTERFEJSU (idempotentne).
+     *
+     * Trzy przypadki, w tej kolejności:
+     *  1. plik nie istnieje → zapis tekstu fabrycznego w bieżącym języku;
+     *  2. plik istnieje i jest CO DO ZNAKU tekstem fabrycznym DRUGIEGO języka (user go nigdy
+     *     nie tknął, a język interfejsu się zmienił) → podmiana na bieżący język;
+     *  3. cokolwiek innego → plik zostaje nietknięty. Szablon typu to dokument usera
+     *     (wolno mu tam mieć nawet dataviewjs) i nikt go nie nadpisuje.
+     */
     async ensureBuiltinTypes() {
         try {
             if (!await this.vault.adapter.exists(ARTIFACT_TYPES_PATH)) {
                 await this.vault.adapter.mkdir(ARTIFACT_TYPES_PATH);
             }
-            const seeds = [
-                [BUILTIN_PLAN_TYPE_NAME, PLAN_TYPE_CONTENT],
-                [BUILTIN_NOTATKA_TYPE_NAME, NOTATKA_TYPE_CONTENT],
-                [BUILTIN_RAPORT_TYPE_NAME, RAPORT_TYPE_CONTENT],
+            const locale = getLocale();
+            const otherLocale = locale === 'pl' ? 'en' : 'pl';
+            const names: BuiltinTypeName[] = [
+                BUILTIN_PLAN_TYPE_NAME,
+                BUILTIN_NOTATKA_TYPE_NAME,
+                BUILTIN_RAPORT_TYPE_NAME,
             ];
-            for (const [name, content] of seeds) {
+            for (const name of names) {
                 const path = `${ARTIFACT_TYPES_PATH}/${name}.md`;
-                if (await this.vault.adapter.exists(path)) continue;
+                const content = builtinTypeContent(name, locale);
+                if (!await this.vault.adapter.exists(path)) {
+                    await this.vault.adapter.write(path, content);
+                    log.debug('ArtifactTypeLoader', `Zaseedowano wbudowany typ „${name}"`);
+                    continue;
+                }
+                const current = await this.vault.adapter.read(path);
+                if (normalizeSeed(current) !== normalizeSeed(builtinTypeContent(name, otherLocale))) continue;
                 await this.vault.adapter.write(path, content);
-                log.debug('ArtifactTypeLoader', `Zaseedowano wbudowany typ „${name}"`);
+                log.debug('ArtifactTypeLoader', `Nietknięty typ „${name}" przełożony na język interfejsu`);
             }
         } catch (e) {
             log.error('ArtifactTypeLoader', 'Błąd seedowania typów wbudowanych:', e);
