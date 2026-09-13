@@ -302,7 +302,7 @@ PARAMETRY STYLU:
                 // odmowa ma być natychmiastowa, nie po przerobieniu obrazka.
                 const sourceCheck = validateVaultPath(imagePathArg);
                 if (!sourceCheck.ok) {
-                    throw new Error(t('mcp.text_overlay.invalid_path', { path: imagePathArg }) || `Invalid path: ${imagePathArg}`);
+                    throw new Error(t('mcp.text_overlay.invalid_path', { path: imagePathArg }));
                 }
                 const safePath = sourceCheck.safePath;
 

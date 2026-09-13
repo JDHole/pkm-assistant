@@ -107,7 +107,7 @@ export function createMemoryDeleteTool() {
                     return {
                         success: false,
                         code: 'note_not_found',
-                        error: t('mcp.memory_delete.not_found', { fact }) || `No matching memory note found for: ${fact}`
+                        error: t('mcp.memory_delete.not_found', { fact })
                     };
                 }
                 if (matches.length > 1) {
@@ -115,7 +115,7 @@ export function createMemoryDeleteTool() {
                         success: false,
                         code: 'ambiguous_match',
                         matches: matches.map(m => m.note.filename),
-                        error: t('mcp.memory_delete.ambiguous') || 'More than one memory note matches. Read the note first and delete a more specific fact.'
+                        error: t('mcp.memory_delete.ambiguous')
                     };
                 }
 
@@ -125,7 +125,7 @@ export function createMemoryDeleteTool() {
                         success: false,
                         code: 'project_archive_required',
                         filename: match.note.filename,
-                        error: t('mcp.memory_delete.project_archive_required') || 'Project context notes must go through archive review so lessons can be extracted first.'
+                        error: t('mcp.memory_delete.project_archive_required')
                     };
                 }
 
