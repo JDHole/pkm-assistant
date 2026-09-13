@@ -85,7 +85,13 @@ export class ChatView extends PluginItemView {
     declare _getDefaultAutonomy: (agent?: Agent | null) => AutonomyMode;
 
     static get viewType() { return CHAT_VIEW_TYPE; }
-    static get displayText() { return 'PKM Assistant'; }
+    /**
+     * Tytuł zakładki czatu. Napis NIE może brzmieć „PKM Assistant": Obsidian dokleja nazwę
+     * pluginu w palecie komend sam, a drugi widok pluginu (notatki wydania) miał ten sam tytuł -
+     * paleta pokazywała dwa nieodróżnialne wpisy „PKM Assistant: PKM Assistant".
+     * `t()` czytane leniwie, w getterze - pole policzyłoby je przed `setLocale()`.
+     */
+    static get displayText() { return t('chat.view_title'); }
     static get iconName() { return 'pkm-icon'; }
 
     constructor(leaf: unknown, plugin: ChatPlugin) {

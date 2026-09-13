@@ -73,7 +73,7 @@ export class OpenSessionModal extends Modal {
             if (el) header.appendChild(el);
         }
         header.createSpan({
-            text: t('modal.open_session.title') || 'Otwierasz starą sesję',
+            text: t('modal.open_session.title'),
             cls: 'cs-open-session__title'
         });
 
@@ -90,7 +90,7 @@ export class OpenSessionModal extends Modal {
             cls: 'cs-open-session__btn cs-open-session__btn--primary'
         });
         setSvgLabel(compressBtn, UiIcons.brain(14),
-            t('modal.open_session.compress') || 'Skompresuj kontekst');
+            t('modal.open_session.compress'));
         compressBtn.title = t('modal.open_session.compress_tooltip')
             || 'Załaduj L1 summary tej sesji (mniej tokenów)';
         compressBtn.addEventListener('click', () => this._resolveWith('compress'));
@@ -98,7 +98,7 @@ export class OpenSessionModal extends Modal {
         // 2) Continue (full load)
         const continueBtn = actions.createEl('button', { cls: 'cs-open-session__btn' });
         setSvgLabel(continueBtn, UiIcons.chat(14),
-            t('modal.open_session.continue') || 'Kontynuuj sesję');
+            t('modal.open_session.continue'));
         continueBtn.title = t('modal.open_session.continue_tooltip')
             || 'Załaduj pełną sesję i kontynuuj rozmowę';
         continueBtn.addEventListener('click', () => this._resolveWith('continue'));
@@ -106,7 +106,7 @@ export class OpenSessionModal extends Modal {
         // 3) Fresh (new from agent perspective)
         const freshBtn = actions.createEl('button', { cls: 'cs-open-session__btn' });
         setSvgLabel(freshBtn, UiIcons.brain(14),
-            t('modal.open_session.fresh') || 'Nowy chat z perspektywy agenta');
+            t('modal.open_session.fresh'));
         freshBtn.title = t('modal.open_session.fresh_tooltip')
             || 'Brain + ostatnie 3 L1 jako kontekst, fresh start';
         freshBtn.addEventListener('click', () => this._resolveWith('fresh'));

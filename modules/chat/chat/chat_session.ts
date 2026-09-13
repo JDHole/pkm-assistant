@@ -434,18 +434,18 @@ export async function handleLoadSession(this: ChatViewLike, path: string) {
             for (const msg of parsed.messages) {
                 await this.rollingWindow.addMessage(msg.role, msg.content);
             }
-            new Notice(t('chat.session.loaded_full') || `Sesja załadowana: ${parsed.messages.length} wiad.`, 4000);
+            new Notice(t('chat.session.loaded_full', { count: parsed.messages.length }), 4000);
         } else if (choice === 'compress') {
             // Załaduj L1 summary który includes tę sesję — przez frontmatter `included_in: [[l1_xxx]]`
             const summaryText = await _findCoveringL1Summary.call(this, agentMemory, filename);
             if (summaryText) {
                 await this.rollingWindow.addMessage('system', `Kontekst poprzedniej sesji (L1 summary):\n\n${summaryText}`);
-                new Notice(t('chat.session.loaded_compressed') || 'Załadowano L1 summary (skompresowany kontekst)', 4000);
+                new Notice(t('chat.session.loaded_compressed'), 4000);
             } else {
                 // Fallback: brak L1 jeszcze (sesja niezaczęta przez consolidateLevel1) — załaduj summary z pliku jeśli jest
                 const fallback = parsed.summary || `${parsed.messages.length} wiadomości — pełen kontekst niedostępny w skompresowanej formie.`;
                 await this.rollingWindow.addMessage('system', `Kontekst poprzedniej sesji:\n\n${fallback}`);
-                new Notice(t('chat.session.compressed_fallback') || 'Brak L1 — załadowano summary z sesji', 4000);
+                new Notice(t('chat.session.compressed_fallback'), 4000);
             }
         } else if (choice === 'fresh') {
             // Brain + ostatnie 3 L1 jako kontekst, fresh start
@@ -453,7 +453,7 @@ export async function handleLoadSession(this: ChatViewLike, path: string) {
             if (fresh) {
                 await this.rollingWindow.addMessage('system', fresh);
             }
-            new Notice(t('chat.session.loaded_fresh') || 'Nowy chat z perspektywy agenta (brain + 3 L1)', 4000);
+            new Notice(t('chat.session.loaded_fresh'), 4000);
         }
 
         void this.render_messages();

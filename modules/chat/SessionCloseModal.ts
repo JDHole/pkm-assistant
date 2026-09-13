@@ -112,7 +112,7 @@ export class SessionCloseModal extends Modal {
             cls: 'cs-session-close__btn cs-session-close__btn--primary'
         });
         setSvgLabel(archiveBtn, UiIcons.brain(14),
-            t('modal.session_close.archive') || 'Archiwizuj');
+            t('modal.session_close.archive'));
         archiveBtn.title = t('modal.session_close.archive_tooltip')
             || 'Skompresuj sesję do pamięci długoterminowej i zostaw historię';
         archiveBtn.addEventListener('click', () => this._resolveWith('archive'));
@@ -122,7 +122,7 @@ export class SessionCloseModal extends Modal {
             cls: 'cs-session-close__btn cs-session-close__btn--cancel'
         });
         setSvgLabel(discardBtn, UiIcons.cross(12),
-            t('modal.session_close.discard') || 'Wyrzuć');
+            t('modal.session_close.discard'));
         discardBtn.title = t('modal.session_close.discard_tooltip')
             || 'Bezpowrotne wyrzucenie wiadomości — wymaga potwierdzenia';
         discardBtn.addEventListener('click', () => {

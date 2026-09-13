@@ -12,7 +12,7 @@ koordynatorem, logika jest rozsiana po submodułach zaimplementowanych jako mixi
 modules/chat/
 ├── index.js                       # publiczne drzwi
 ├── CLAUDE.md                      # ten plik
-├── chat_view.js                   # ChatView (Obsidian ItemView), koordynator
+├── chat_view.js                   # ChatView (Obsidian ItemView), koordynator. `displayText` to getter przez `t('chat.view_title')` („Czat"/„Chat") - napis „PKM Assistant" powtarzał się z widokiem notatek wydania i dawał w palecie dwa identyczne wpisy (paleta dokleja nazwę pluginu sama)
 ├── consolidationRunner.js         # kontroler przebiegu konsolidacji pamięci (klej memory ↔ modal/pasek/notice)
 ├── SaveSessionModal.js            # `/save session` - review propozycji notatek brain/
 ├── SessionCloseModal.js           # zamknięcie sesji - archive / discard
