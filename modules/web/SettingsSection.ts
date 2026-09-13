@@ -1,5 +1,6 @@
 import { renderWebSearchSection } from './SettingsContent.js';
 import type { WebSettingsSectionCtx } from './SettingsContent.js';
+import { t } from '../../core/i18n/index.js';
 
 /** Trzeci argument renderera z `SettingsRegistry.render(container, plugin, options)`. */
 interface SettingsRenderOptions {
@@ -23,7 +24,7 @@ interface SettingsRegistryLike {
 export function registerSettings(registry: SettingsRegistryLike): void {
     registry.register({
         id: 'web-search',
-        label: 'Web Search',
+        label: t('settings.web_search_title'),
         icon: '🌐',
         order: 45,
         render: (containerEl, _plugin, options) => renderWebSearchSection(containerEl, options.owner.buildSectionContext()),
