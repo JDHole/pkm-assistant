@@ -1945,6 +1945,8 @@ export const pl: Record<string, string> = {
   'subagent.editor.folders_name': 'Foldery',
   'subagent.editor.folders_desc': 'Jeden folder vaulta na linię. Puste = brak ograniczenia folderów.',
   'subagent.editor.sections_name': 'Sekcje',
+  // Przykład TREŚCI, którą user ma w swoich notatkach (nie etykieta UI) - stąd wielka litera.
+  'subagent.editor.sections_example': '## Pomysły',
   'subagent.editor.sections_desc': 'Nagłówki Markdown, np. "{{example}}". Puste = brak ograniczenia sekcji.',
   'subagent.editor.pinned_notes_name': 'Przypięte notatki',
   'subagent.editor.pinned_notes_desc': 'Jedna notatka na linię. Te notatki są zawsze częścią kontekstu sub-agenta.',
