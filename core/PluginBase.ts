@@ -156,8 +156,22 @@ export abstract class PluginBase extends Plugin {
         }
     }
 
-    /** W `onload()`, PO `setLocale()`. */
+    /**
+     * W `onload()`, PO `setLocale()`.
+     *
+     * Obok komend z `this.commands` rejestruje tu też komendy „otwórz widok" (`itemViews`).
+     * Same TYPY widoków idą wcześniej (`registerItemViews()`, przed odtworzeniem zakładek
+     * przez Obsidiana), ale ich NAZWY muszą powstać już po ustawieniu języka - Obsidian
+     * zapamiętuje napis w chwili `addCommand`.
+     */
     registerCommands(): void {
+        for (const [name, ViewClass] of Object.entries(this.itemViews ?? {})) {
+            try {
+                ViewClass.registerOpenCommand(this as never);
+            } catch (e) {
+                log.error(SCOPE, `Nie udało się zarejestrować komendy widoku "${name}"`, e);
+            }
+        }
         for (const [slug, command] of Object.entries(this.commands ?? {})) {
             try {
                 this.addCommand({

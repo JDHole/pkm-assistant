@@ -292,6 +292,15 @@ src/main.ts onload()
           ustawień.
 ```
 
+⚠️ **Komendy „otwórz widok" (`itemViews`) też idą przez `registerCommands()`** - nie przez
+`registerItemViews()`. Same TYPY widoków muszą być zarejestrowane wcześniej (Obsidian odtwarza
+zapisane zakładki przy `onLayoutReady`, a odczyt języka to `await`), ale ich NAZWY powstają
+dopiero po `setLocale()`. Stąd rozbicie w `modules/ui-components/PluginItemView.ts`:
+`register(plugin)` = sam typ widoku, `registerOpenCommand(plugin)` = komenda palety;
+`PluginBase.registerCommands()` przelatuje `this.itemViews` i woła to drugie. Do 2.2.5 komenda
+szła razem z typem - czyli PRZED `setLocale()` - więc paleta miała nazwy widoków po angielsku
+niezależnie od ustawienia języka.
+
 Start jest lekki: żadnego stałego opóźnienia startowego, żadnego ślepego snu przed ładowaniem danych - każdy krok czeka na konkretne zdarzenie (layout ready, sync Obsidiana jeśli jest aktywny), nie na zegar.
 
 ⚠️ **Gotcha:** jeśli ktoś kiedyś doda kolekcję z `process_load_queue`, która potrzebuje gotowego indeksu Obsidiana - **ta kolekcja ma zadbać o własną gotowość** (np. `metadataCache.on('resolved')`), a nie przywracać tu zegar. Start jest sprawdzany behawioralnie (`core/layoutReady.test.ts`, `core/waitForLoaded.test.ts`), nie regexem po źródle.
