@@ -113,8 +113,7 @@ export class SessionCloseModal extends Modal {
         });
         setSvgLabel(archiveBtn, UiIcons.brain(14),
             t('modal.session_close.archive'));
-        archiveBtn.title = t('modal.session_close.archive_tooltip')
-            || 'Skompresuj sesję do pamięci długoterminowej i zostaw historię';
+        archiveBtn.title = t('modal.session_close.archive_tooltip');
         archiveBtn.addEventListener('click', () => this._resolveWith('archive'));
 
         // 2) Discard — wyrzuć (z confirm)
@@ -123,12 +122,10 @@ export class SessionCloseModal extends Modal {
         });
         setSvgLabel(discardBtn, UiIcons.cross(12),
             t('modal.session_close.discard'));
-        discardBtn.title = t('modal.session_close.discard_tooltip')
-            || 'Bezpowrotne wyrzucenie wiadomości — wymaga potwierdzenia';
+        discardBtn.title = t('modal.session_close.discard_tooltip');
         discardBtn.addEventListener('click', () => {
             void (async () => {
-                const msg = t('modal.session_close.discard_confirm', { count: this.messageCount })
-                    || `Stracisz ${this.messageCount} wiadomości. Na pewno?`;
+                const msg = t('modal.session_close.discard_confirm', { count: this.messageCount });
                 // no-alert (wytyczne katalogu Obsidiana): natywny `window.confirm()` blokuje pętlę
                 // zdarzeń i wygląda obco - `confirmModal` z modules/ui-components jest jego
                 // promise'owym zamiennikiem.

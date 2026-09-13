@@ -193,7 +193,6 @@ export class SaveSessionModal extends Modal {
         contentEl.createEl('p', {
             cls: 'setting-item-description',
             text: t('modal.save_session.info', { agent: this.agentName, count: this.messageCount })
-                || `Sesja ${this.agentName}: ${this.messageCount} wiadomości.`
         });
 
         if (this.state === 'loading') {
@@ -268,8 +267,7 @@ export class SaveSessionModal extends Modal {
     _renderProposals(parent: HTMLElement): void {
         if (this.llmDriven) {
             const banner = parent.createDiv({ cls: 'cs-save-session__llm-banner pkm-review__banner' });
-            banner.textContent = t('modal.save_session.llm_driven', { agent: this.agentName })
-                || `Propozycje wygenerowane przez ${this.agentName} na bazie transcriptu + brain.md.`;
+            banner.textContent = t('modal.save_session.llm_driven', { agent: this.agentName });
         }
 
         this._renderNotesColumn(parent, this.notes);
