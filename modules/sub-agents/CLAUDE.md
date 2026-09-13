@@ -25,7 +25,7 @@ modules/sub-agents/
 ├── SubAgentTemplateStore.js    # magazyn szablonów subów (.pkm-assistant/templates/sub-agents/)
 ├── SubAgentEditorModal.js      # modal tworzenia/edycji suba; importuje `obsidian`, poza barrelem (lazy-load)
 ├── types.js                    # wspólne typy modułu (SubAgentData, ScopeData, …)
-├── framePrompt.js              # DEFAULT_SUBAGENT_FRAME_PROMPT (fabryczny szkielet ramy suba, placeholdery)
+├── framePrompt.js              # defaultSubAgentFramePrompt() - fabryczna rama suba PL+EN (placeholdery), leniwa
 ├── BackstageTab.js             # register tab + lazy-load renderSubAgentsTab
 ├── SubAgentsBackstageTab.js    # render Sub-Agents tab w Backstage sidebar
 ├── SubAgentDetailView.js       # render single sub-agent detail view
@@ -65,7 +65,7 @@ modules/sub-agents/
 | `PKM_SUB_NAME` | Nazwa syntetycznego workera (`'pkm-sub'`) dla `delegate` bez `aspect`. |
 | `SubAgentTemplateStore` | Magazyn szablonów subów (Zaplecze). Owner: `AgentManager.subAgentTemplateStore`. |
 | `registerBackstage` / `renderSubAgentDetailView` | Rejestracja zakładki Zaplecza + widok detalu (lazy-load, barrel zostaje obsidian-free). |
-| `DEFAULT_SUBAGENT_FRAME_PROMPT` | Fabryczny szkielet ramy suba (`framePrompt.js`, pure/obsidian-free). Wystawiony w Settings→Prompt, rozwiązywany łańcuchem agent>global>factory przez `resolveWorkPrompt`. |
+| `defaultSubAgentFramePrompt(locale?)` | Fabryczna rama suba (`framePrompt.js`, pure/obsidian-free), w JĘZYKU INTERFEJSU. Wystawiona w Settings→Prompt, rozwiązywana łańcuchem agent>global>factory przez `resolveWorkPrompt`. **Funkcja, nie stała** - patrz gotcha „Rama suba idzie za językiem interfejsu". |
 
 > Kilka eksportów nie wchodzi do barrela (zero konsumentów spoza modułu):
 > `DEPRECATED_TOOL_RENAMES`, `migrateDeprecatedTools`, `SUB_AGENT_TEMPLATES_PATH`.
@@ -351,12 +351,30 @@ Odlew per agent = `<agent-slug>-researcher` (standardowe `instantiate`). Przepis
   tłumaczy roli na `minion/master`, a `modelResolver` mapuje nazwy do legacy slotów biblioteki
   modeli bez deprecation warning.
 - ⚠️ **Rama suba = fabryka `framePrompt.js`, nie hardcode w runnerze.** Stały szkielet (nagłówek
-  + „pull pamięć" + ZASADY) żyje w `DEFAULT_SUBAGENT_FRAME_PROMPT` z placeholderami;
-  `_buildTaskPrompt` rozwiązuje go przez `resolveWorkPrompt(agent, 'subagent_frame_prompt',
-  settings, factory)` (łańcuch agent>global>factory) i wstrzykuje mechaniczne sekcje (METHOD
-  z `config.prompt`, SCOPE z `config.scope`, BUDŻET z limits). Treść nadal PL inline, ale
-  **user-editowalna** globalnie (Settings→Prompt) i per agent rodzic (nie przez template z
-  `modules/prompts/`).
+  + „pull pamięć" + ZASADY) żyje w `framePrompt.js` z placeholderami; `_buildTaskPrompt`
+  rozwiązuje go przez `resolveWorkPrompt(agent, 'subagent_frame_prompt', settings, factory)`
+  (łańcuch agent>global>factory) i wstrzykuje mechaniczne sekcje (METHOD z `config.prompt`,
+  SCOPE z `config.scope`, BUDŻET z limits). **User-editowalna** globalnie (Settings→Prompt)
+  i per agent rodzic (nie przez template z `modules/prompts/`).
+- ⚠️ **Rama suba idzie za JĘZYKIEM INTERFEJSU i liczy się RAZ NA BIEG.** Od 2.2.5 szkielet ma
+  wersję PL i EN (`framePrompt.js`), a wołacz bierze go przez `defaultSubAgentFramePrompt()`.
+  Stała `DEFAULT_SUBAGENT_FRAME_PROMPT` została SKASOWANA celowo: `setLocale()` leci z
+  `src/main.ts` PO załadowaniu modułów, więc stała wybrałaby język przy imporcie i zamroziła go.
+  Bloki składane w kodzie (METHOD/SCOPE/BUDGET + domyślny opis suba) idą przez klucze
+  `subagent.frame.*` w i18n; `_buildTaskPrompt` skleja je przy każdym biegu, więc zmiana języka
+  w sesji działa bez restartu.
+  **ADRESY zostają identyczne w obu językach** (to nie proza): literal `scope="memory"`, nazwy
+  narzędzi `search`/`read`/`list` i `delegate`/`agent_delegate`, nagłówek `SCOPE:`. `BUDŻET:` →
+  `BUDGET:` SIĘ tłumaczy - nic go nie parsuje.
+  **Nic w kodzie nie parsuje tej ramy ani odpowiedzi suba po tekście:** status biegu liczy
+  `toolResultStatus` (flagi `isError`/`success`, `core/utils/toolResultStatus.ts`), a `stoppedBy`
+  nadaje runner - żadnych markerów tekstowych. Dlatego tłumaczenie jest bezpieczne; scenariusze
+  harnessu subów (40/41/43) też nie pinują treści ramy.
+  Strażnicy: `SubAgentRunner.test.ts` - render EN bez ani jednego polskiego znaku, render PL,
+  lista ADRESÓW obecna w obu, literalna lista placeholderów `[AGENT_NAME, BUDGET, DESCRIPTION,
+  METHOD, SCOPE, SUB_NAME]` w obu i zero placeholderów w gotowym prompcie, override
+  agent > global > fabryka w obu językach. Testy pinujące polskie napisy jadą pod
+  `setLocale('pl')` i wracają do `'en'`.
 - ⚠️ **`_getTools(toolNames, parentAgent, callerToolNames)` ma TRZY składniki przecięcia.** Na
   piętrze >1 `parentAgent` to nadal agent GŁÓWNY (sub chodzi pod jego tożsamością), więc
   `filterByAgent` sam nie chroni: read-only sub z `tools: [read, delegate]` mógłby wystawić

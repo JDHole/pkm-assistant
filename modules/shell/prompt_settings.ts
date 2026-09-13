@@ -8,7 +8,7 @@ import { t } from '../../core/i18n/index.js';
 import { factoryWorkPrompt } from '../memory/index.js';
 // Szkielet kompresji mieszka w `config/` (nie w barrelu czatu) - przecięta krawędź shell→chat.
 import { defaultCompressionPrompt } from '../../config/default_prompts.js';
-import { DEFAULT_SUBAGENT_FRAME_PROMPT } from '../sub-agents/index.js';
+import { defaultSubAgentFramePrompt } from '../sub-agents/index.js';
 import { FACTORY_DEFAULTS } from '../prompts/index.js';
 import { setSvgLabel } from '../../modules/crystal-soul/index.js';
 
@@ -33,7 +33,7 @@ const WORK_PROMPTS = [
     { key: 'save_session_prompt', factory: () => factoryWorkPrompt('save_session'), warn: true },
     { key: 'archive_prompt', factory: () => factoryWorkPrompt('archive'), warn: true },
     { key: 'summary_prompt', factory: () => factoryWorkPrompt('summary'), warn: true },
-    { key: 'subagent_frame_prompt', factory: () => DEFAULT_SUBAGENT_FRAME_PROMPT, warn: true },
+    { key: 'subagent_frame_prompt', factory: () => defaultSubAgentFramePrompt(), warn: true },
 ];
 
 // Factory prompt sections - resolved from FACTORY_DEFAULTS (getters → current locale).

@@ -105,7 +105,7 @@ Reszta symboli modułu (rama i rejestry ustawień `PluginSettingsTab`, `Settings
 - `modules/memory` - pakiet etykiet przebiegu konsolidacji (`stepLabel`/`stepDetail`/`stepStatusIcon`/`stepStatusLabel`/`stepDurationMs`/`isFallbackStep`/`formatDuration`/`formatUsageLine`/`buildRunSummary`/`summaryToText`) + `ConsolidationRun`/`STEP_KIND`/`STEP_STATUS`/`memoryOpsCenter` + `CostLog` + fabryczne prompty robocze + `registerSettings`
 - `modules/models` - `getModelsForRole`, `registerSettings`
 - `modules/prompts` - `FACTORY_DEFAULTS`
-- `modules/skills` / `modules/sub-agents` / `modules/tools` / `modules/web` - `registerBackstage` / `registerSettings` (+ `getVisibleSubAgentsForAgent`, `DEFAULT_SUBAGENT_FRAME_PROMPT`, `ExternalMcpManager`)
+- `modules/skills` / `modules/sub-agents` / `modules/tools` / `modules/web` - `registerBackstage` / `registerSettings` (+ `getVisibleSubAgentsForAgent`, `defaultSubAgentFramePrompt()`, `ExternalMcpManager`)
 - `modules/ui-components` - `TOOL_INFO`, `getToolIcon`
 
 **Importowany przez:**
