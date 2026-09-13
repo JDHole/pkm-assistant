@@ -45,7 +45,7 @@ modules/chat/
     ├── Summarizer.js               # kompresja starych tur + sekcja MEMORY_CANDIDATES
     ├── turnOwner.js                # kto jest WŁAŚCICIELEM okna/tury: resolvery + providery RollingWindow + `freezeTurnOwner(view)`; pure, testowalny
     ├── turnAbort.js                # uchwyt przerwania tury (zatrzask); pure, testowalny
-    ├── compressionPrompt.js        # czysty re-export z `config/default_prompts.js` (tam mieszka DEFAULT_COMPRESSION_PROMPT) - lokalne drzwi dla wnętrza czatu
+    ├── compressionPrompt.js        # czysty re-export z `config/default_prompts.js` (tam mieszka `defaultCompressionPrompt()`) - lokalne drzwi dla wnętrza czatu
     ├── memoryCandidates.js         # parser bloku MEMORY_CANDIDATES z odpowiedzi Summarizera
     ├── subTaskNotification.js      # treść powiadomienia o wyniku suba z tła + matchTabForOrigin (pure, testowalny)
     ├── subTaskStrip.js             # pasek biegów subów POD zakładkami czatu; obsidian-free DOM, model z modules/sub-agents
@@ -80,7 +80,7 @@ przeczytania całości przed edycją.
 
 Mixinów `chat_*` NIE eksportujemy - to wewnętrzna struktura (prototype mixin pattern).
 `TriggerPopup` jest wewnętrzną klasą, nie w barrelu (używana tylko przez `chat_ui.js`).
-`DEFAULT_COMPRESSION_PROMPT` NIE jest w barrelu - mieszka w `config/default_prompts.js`,
+`defaultCompressionPrompt()` NIE jest w barrelu - mieszka w `config/default_prompts.js`,
 Settings→Prompt bierze ją wprost stamtąd; lokalne drzwi `chat/compressionPrompt.js` zostają
 dla wnętrza modułu (Summarizer, turnOwner). Singleton `StreamingManager` i `RollingWindow`
 też nie wychodzą przez barrel - żyją i są używane wewnątrz `chat/`.
@@ -140,7 +140,7 @@ gdzie), nigdy na samą obecność identyfikatora.
 - `modules/agents/` (AgentManager dla aktywnego agenta)
 - `modules/sub-agents/` (DelegateTool integration)
 - `modules/ui-components/` (bloki narzędzi/myślenia/subów + `PluginItemView` - baza `ChatView`)
-- `config/default_prompts.js` (`DEFAULT_COMPRESSION_PROMPT`, przez `chat/compressionPrompt.js`)
+- `config/default_prompts.js` (`defaultCompressionPrompt()`, przez `chat/compressionPrompt.js`)
 - `obsidian` (ItemView, Notice, TFile)
 
 Moduł **nie importuje z `modules/shell/`** - modale sesji (`SaveSessionModal`,
@@ -638,11 +638,23 @@ ON). `RollingWindow` sama NIE pisze do pamięci - `onMemoryCandidates` to fire-a
 callback wstrzykiwany z `chat_session._createRollingWindow`, nie blokuje kompresji.
 
 Prompt kompresji jest per-agent, override'owalny: stały szkielet
-(`DEFAULT_COMPRESSION_PROMPT`, `config/default_prompts.js`, placeholdery
+(`defaultCompressionPrompt()`, `config/default_prompts.js`, placeholdery
 `{{DYNAMIC_HEADER}}`/`{{CONVERSATION}}`/`{{EMERGENCY_SECTION}}`/`{{SESSION_PATH}}`) idzie przez
-`resolveWorkPrompt(activeAgent, 'compression_prompt', settings, DEFAULT_COMPRESSION_PROMPT)`
+`resolveWorkPrompt(activeAgent, 'compression_prompt', settings, defaultCompressionPrompt())`
 (łańcuch agent>global>factory). Sentinel bloku kandydatów MUSI przeżyć override - Settings→Prompt
 ostrzega przy polu.
+
+⚠️ **Szkielet ORAZ dynamiczna główka idą za JĘZYKIEM INTERFEJSU (2.2.5) i liczą się leniwie.**
+Szkielet ma wersję PL i EN w `config/default_prompts.ts` (stała nie umie być leniwa, dlatego to
+funkcja), a kawałki sklejane w `Summarizer.getSummaryPrompt` (poprzednie podsumowanie, indeks
+brain.md, wiadomości usera, użyte narzędzia, kontekst zadania, ostrzeżenie awaryjne, stopka
+ścieżki sesji) idą przez klucze `summarizer.*` w i18n. `Summarizer` trzyma pusty
+`compressionPrompt` gdy nie dostał override'u i sięga po fabrykę DOPIERO w `getSummaryPrompt` -
+wybór przy konstrukcji obiektu zamroziłby język na czas życia okna. **Numeracja sekcji musi się
+zgadzać w obu językach**: szkielet daje `## 1`-`## 8`, a sekcja awaryjna
+(`summarizer.emergency_section`) wpina się jako `## 9`. Strażnik:
+`modules/chat/chat/compressionPrompt.test.ts` (parytet placeholderów z listą literalną, sentinel
+w obu językach, `## 8` + `## 9` w obu językach).
 
 ### Reload skilli po zapisie pliku skilla
 

@@ -4,13 +4,14 @@
  * Produkuje STRUKTURALNE podsumowanie (jak Claude Code compaction):
  * - Sekcje: Cel, Przebieg, Wiadomości usera, Pliki/narzędzia, Problemy, Ustalenia, Stan pracy, Otwarte wątki
  * - Progressive: nowe streszczenie buduje na poprzednim (nie nadpisuje)
- * - Po polsku, maks ~800 słów
+ * - W JĘZYKU INTERFEJSU (szkielet z `config/default_prompts.ts`, główka dynamiczna z
+ *   `summarizer.*` w i18n), maks ~800 słów
  */
 import { streamToComplete } from '../../memory/index.js';
 import type { StreamChatModelLike } from '../../memory/index.js';
 import type { ChatModel } from '../../models/index.js';
 import { t } from '../../../core/i18n/index.js';
-import { DEFAULT_COMPRESSION_PROMPT } from './compressionPrompt.js';
+import { defaultCompressionPrompt } from './compressionPrompt.js';
 import { log } from '../../../core/utils/Logger.js';
 
 // Bloki treści i wywołania narzędzi przychodzą od RÓŻNYCH dostawców — modelujemy kształt,
@@ -37,13 +38,15 @@ export class Summarizer {
      * @param {number} options.triggerThreshold - % limitu (0.9 = 90%)
      * @param {Object} options.chatModel - ChatModel instance
      * @param {string} [options.compressionPrompt] - Resolved compression skeleton
-     *   (agent>global>factory). Defaults to the factory skeleton. chat_session resolves it
-     *   (Summarizer doesn't know the active agent).
+     *   (agent>global>factory). chat_session resolves it (Summarizer doesn't know the active
+     *   agent). Puste = fabryka rozstrzygana DOPIERO PRZY UŻYCIU (`getSummaryPrompt`), bo
+     *   `defaultCompressionPrompt()` idzie za językiem interfejsu i wybór przy konstrukcji
+     *   obiektu zamroziłby język na czas życia okna.
      */
     constructor(options: SummarizerOptions = {}) {
         this.triggerThreshold = options.triggerThreshold || 0.9;
         this.chatModel = options.chatModel;
-        this.compressionPrompt = options.compressionPrompt || DEFAULT_COMPRESSION_PROMPT;
+        this.compressionPrompt = options.compressionPrompt || '';
     }
 
     /**
@@ -135,7 +138,7 @@ export class Summarizer {
     /**
      * Buduje prompt do progressive summarization.
      * Produkuje STRUKTURALNE podsumowanie z sekcjami — jak Claude Code compaction.
-     * W trybie emergency: dodaje sekcję "ZADANIE W TOKU" z aktywnym todo/planem.
+     * W trybie emergency: dodaje sekcję „## 9" (zadanie w toku) z aktywnym todo/planem.
      * @param {Array} messages
      * @param {string} previousSummary
      * @param {Object} options - { isEmergency, activeTaskContext }
@@ -171,43 +174,41 @@ export class Summarizer {
         // Wyciągnij wiadomości usera osobno
         const userMessages = this._extractUserMessages(messages);
         const userMessagesSection = userMessages.length > 0
-            ? `\nWIADOMOŚCI USERA (zachowaj ich treść — ważne dla kontynuacji):\n${userMessages.map((m, i) => `${i + 1}. "${m}"`).join('\n')}\n`
+            ? `\n${t('summarizer.user_messages_header')}\n${userMessages.map((m, i) => `${i + 1}. "${m}"`).join('\n')}\n`
             : '';
 
         // Wyciągnij użyte narzędzia
         const toolNames = this._extractToolNames(messages);
         const toolsSection = toolNames.length > 0
-            ? `\nUŻYTE NARZĘDZIA: ${toolNames.join(', ')}\n`
+            ? `\n${t('summarizer.tools_used', { names: toolNames.join(', ') })}\n`
             : '';
 
         const previousSection = previousSummary
-            ? `\nPOPRZEDNIE PODSUMOWANIE (buduj na nim — rozszerzaj, nie zastępuj):\n---\n${previousSummary}\n---\n`
+            ? `\n${t('summarizer.previous_summary_header')}\n---\n${previousSummary}\n---\n`
             : '';
 
         // Dedup context for MEMORY_CANDIDATES - pass only the brain.md index
         // (pointers), never full note bodies, to keep the token budget tight.
         const memoryIndexSection = memoryIndex
-            ? `\nAKTUALNA PAMIĘĆ DŁUGOTERMINOWA (indeks brain.md — NIE proponuj kandydatów, które już tu są):\n---\n${memoryIndex}\n---\n`
+            ? `\n${t('summarizer.memory_index_header')}\n---\n${memoryIndex}\n---\n`
             : '';
 
         // Emergency: kontekst aktywnego zadania (todos, plany)
         const taskContextSection = (isEmergency && activeTaskContext)
-            ? `\n⚠️ AKTYWNE ZADANIE W MOMENCIE KOMPRESJI (KRYTYCZNE — agent MUSI to kontynuować):\n---\n${activeTaskContext}\n---\n`
+            ? `\n${t('summarizer.task_context_header')}\n---\n${activeTaskContext}\n---\n`
             : '';
 
         // Emergency: dodatkowa sekcja w formacie
         const emergencySection = isEmergency
-            ? `\n## 9. ⚠️ ZADANIE W TOKU (KRYTYCZNE)
-Co DOKŁADNIE agent robił w momencie kompresji? Jaki był następny krok? Jakie narzędzia miał zamiar wywołać?
-Agent MUSI wiedzieć od czego zacząć po wznowieniu — opisz to tak szczegółowo jak to możliwe. Uwzględnij aktywne TODO/PLAN jeśli są.\n`
+            ? `\n${t('summarizer.emergency_section')}\n`
             : '';
 
         const emergencyWarning = isEmergency
-            ? `\n⚠️ TO JEST AWARYJNA KOMPRESJA — agent był W TRAKCIE ZADANIA. Sekcja "Zadanie w toku" jest NAJWAŻNIEJSZA. Agent po wznowieniu musi wiedzieć DOKŁADNIE co robić dalej.\n`
+            ? `\n${t('summarizer.emergency_warning')}\n`
             : '';
 
         const sessionPathSuffix = sessionPath
-            ? `\n\n📂 Pełna rozmowa zapisana w: ${sessionPath} — agent może ją przeczytać żeby zweryfikować szczegóły.`
+            ? `\n\n${t('summarizer.session_path', { path: sessionPath })}`
             : '';
 
         // The fixed skeleton (intro + sekcje 1-8 + ZASADY + blok MEMORY_CANDIDATES) lives in
@@ -215,7 +216,7 @@ Agent MUSI wiedzieć od czego zacząć po wznowieniu — opisz to tak szczegół
         // The dynamic pieces below are still composed here and injected into the placeholders.
         // Function replacers avoid `$`-sequence interpretation from user-provided content.
         const dynamicHeader = `${emergencyWarning}${previousSection}${memoryIndexSection}${userMessagesSection}${toolsSection}${taskContextSection}`;
-        const skeleton = this.compressionPrompt || DEFAULT_COMPRESSION_PROMPT;
+        const skeleton = this.compressionPrompt || defaultCompressionPrompt();
         return skeleton
             .replace('{{DYNAMIC_HEADER}}', () => dynamicHeader)
             .replace('{{CONVERSATION}}', () => conversationText)

@@ -99,7 +99,7 @@ Reszta symboli modułu (rama i rejestry ustawień `PluginSettingsTab`, `Settings
 - `core/utils/Logger` (`log`)
 - `modules/agents` - `Agent`, `renderAgentProfileView`
 - `modules/chat` - `insertInlineTriggerMarker` (leniwym `import()` z `TriggersView`)
-- `config/default_prompts.ts` - `DEFAULT_COMPRESSION_PROMPT`
+- `config/default_prompts.ts` - `defaultCompressionPrompt()` (funkcja, nie stala - szkielet idzie za jezykiem interfejsu)
 - `modules/crystal-soul` - `UiIcons`, `SkinManager`, `IconGenerator`, `SvgHelper`, `setSvg`, `setSvgLabel`, `getColorByHex`, `hexToRgbTriplet`, `registerSettings`
 - `modules/komunikator` - `renderCommunicatorView`, `isKomunikatorEnabled`
 - `modules/memory` - pakiet etykiet przebiegu konsolidacji (`stepLabel`/`stepDetail`/`stepStatusIcon`/`stepStatusLabel`/`stepDurationMs`/`isFallbackStep`/`formatDuration`/`formatUsageLine`/`buildRunSummary`/`summaryToText`) + `ConsolidationRun`/`STEP_KIND`/`STEP_STATUS`/`memoryOpsCenter` + `CostLog` + fabryczne prompty robocze + `registerSettings`
