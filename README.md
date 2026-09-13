@@ -4,7 +4,11 @@
 
 [![Version](https://img.shields.io/badge/version-2.2.5-blue)]() [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-green)](LICENSE) [![Tests](https://img.shields.io/badge/tests-3688%20PASS-brightgreen)]() [![CI](https://github.com/JDHole/pkm-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/JDHole/pkm-assistant/actions/workflows/ci.yml)
 
-![Chat with Jaskier](assets/pkm-chat.png)
+![An agent creates a plan as a living note with approve and send-back buttons](assets/pkm-chat.png)
+
+Send a plan back with notes and the agent revises it in place:
+
+![Send back with notes - the agent revises the plan](assets/pkm-send-back.gif)
 
 ---
 
@@ -22,11 +26,11 @@ Everything the agent sends to the model - system prompt, memory, tools, skills -
 
 | Chat View | Agent Panel |
 |:-:|:-:|
-| ![Chat](assets/pkm-chat.png) | ![Agents](assets/pkm-agents.png) |
+| ![Chat and living artifact](assets/pkm-chat.png) | ![Agents panel](assets/pkm-agents.png) |
 
 | Agent Profile | Prompt Inspector |
 |:-:|:-:|
-| ![Profile](assets/pkm-profile.png) | ![Inspector](assets/pkm-prompt-inspector.png) |
+| ![Agent profile](assets/pkm-profile.png) | ![Prompt inspector](assets/pkm-prompt-inspector.png) |
 
 ---
 
