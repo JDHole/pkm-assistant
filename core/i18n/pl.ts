@@ -1135,6 +1135,7 @@ export const pl: Record<string, string> = {
   'settings.ollama_keep_alive_desc': 'Jak długo Ollama ma trzymać model w RAM po odpowiedzi.',
   // Baner pierwszego uruchomienia w Ustawieniach → Plugin (dopóki `onboardingCompleted` jest OFF).
   'settings.onboarding_banner': 'Na start: dodaj klucz w Klucze API, potem wybierz model główny w Modele. Dalej poprowadzi Cię wbudowany agent Jaskier.',
+  'settings.onboarding_banner_dismiss': 'Rozumiem',
   'settings.embedding_title': 'Embedding (wektory)',
   'settings.embedding_desc': 'Model do indeksowania vaulta (semantic search). Zmiana wymaga re-indeksowania.',
   'settings.embed_platform': 'Platforma embeddingu',
