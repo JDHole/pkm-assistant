@@ -5,6 +5,23 @@ All notable user-facing changes to PKM Assistant are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 2.2.4 - 2026-09-13
+
+A small follow-up to 2.2.3 for the community catalogue: settings and first-run messages
+follow the interface language everywhere. Behaviour is otherwise identical to 2.2.3.
+
+### Fixed
+
+- **Settings navigation follows the interface language.** The section labels Models, Memory,
+  Limits, Advanced, API Keys and Information were shown in Polish regardless of the language
+  setting; they now use the built-in translations.
+- **First-run messages are translated.** The welcome notice for new users, the "embedding
+  provider not configured" notice and the retired Connections command use the interface language.
+- **API key rows keep their platform names in a narrow settings pane.** The key field wraps
+  below the label instead of squeezing the name out of view.
+
+Upgrade notes: no migration. Settings and agent files are untouched.
+
 ## 2.2.3 - 2026-09-12
 
 A maintenance release prepared for the community catalogue review. The sources pass the
