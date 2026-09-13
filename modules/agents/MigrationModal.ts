@@ -47,20 +47,19 @@ export class MigrationModal extends Modal {
             modalEl.addClass('cs-migration-modal-wide');
         }
 
-        contentEl.createEl('h2', { text: t('modal.memory_migration.title') || 'Memory v3 migration' });
+        contentEl.createEl('h2', { text: t('modal.memory_migration.title') });
         contentEl.createEl('p', {
             cls: 'setting-item-description',
             text: t('modal.memory_migration.info', { agent: this.agentName })
-                || `Agent ${this.agentName}: review notes created from old brain.md.`
         });
 
         const pre = contentEl.createEl('pre', { cls: 'cs-migration-modal__preview' });
         pre.textContent = this._preview();
 
         const actions = contentEl.createDiv({ cls: 'cs-migration-modal__actions' });
-        this._button(actions, t('generic.cancel') || 'Cancel', 'cancel');
-        this._button(actions, t('modal.memory_migration.fallback') || 'Fallback dump', 'fallback');
-        const accept = this._button(actions, t('generic.save') || 'Save', 'accept');
+        this._button(actions, t('generic.cancel'), 'cancel');
+        this._button(actions, t('modal.memory_migration.fallback'), 'fallback');
+        const accept = this._button(actions, t('generic.save'), 'accept');
         accept.addClass('mod-cta');
     }
 
