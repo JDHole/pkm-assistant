@@ -1,6 +1,6 @@
 import { streamToComplete, STREAM_ERROR_CODES } from './streamHelper.js';
 import { resolveWorkPrompt } from '../../core/index.js';
-import { DEFAULT_SAVE_SESSION_PROMPT } from './workPrompts.js';
+import { factoryWorkPrompt } from './workPrompts.js';
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
 
@@ -607,7 +607,7 @@ export class SaveSessionWorkflow {
                     : (m.content || '')
             }))
         };
-        const savePrompt = resolveWorkPrompt(this.agent, 'save_session_prompt', this.settings, DEFAULT_SAVE_SESSION_PROMPT);
+        const savePrompt = resolveWorkPrompt(this.agent, 'save_session_prompt', this.settings, factoryWorkPrompt('save_session'));
         const llmMessages: StreamMessage[] = [
             { role: 'system', content: savePrompt },
             { role: 'user', content: JSON.stringify(userPayload) }

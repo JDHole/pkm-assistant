@@ -36,6 +36,8 @@ sidebar/
 
 `AgentSidebar` subskrybuje `agentManager.on(...)` z 200ms debounce dla komunikator events. Sprzątanie widoku idzie przez `SidebarNav.dispose()` (patrz gotcha niżej).
 
+**`agent:renamed` ma konsumenta (2.2.5).** Wpisy stosu nawigacji trzymają `{ agentName }` z chwili `push()`, więc po zmianie nazwy agenta zwykłe `refresh()` (leci i tak, z obserwatora plików jako `agents:reloaded`) rysowało profil po STAREJ nazwie i user widział „Nie znaleziono agenta" aż do ręcznego cofnięcia się do listy. `AgentSidebar` łapie teraz `agent:renamed` (`{ from, to }`), woła `nav.updateParams(p => p.agentName === from, { agentName: to })` - czystą operację na tablicy stosu, obejmującą TAKŻE wpisy pod wierzchem (profil i komunikator) - i dopiero potem odświeża widok.
+
 ### Modale
 
 Każdy `extends Modal` z Obsidiana (onOpen/onClose lifecycle). Promise-based result pattern.
@@ -59,7 +61,7 @@ Modale sesji (`SessionCloseModal`, `SaveSessionModal`, `OpenSessionModal`) miesz
 
 | Plik | Co robi |
 |------|---------|
-| `ReleaseNotesView.ts` | `ReleaseNotesView` - viewType `pkm-release-notes-view`. Otwiera tab z markdown z `releases/latest_release.md`. Dziedziczy z `PluginItemView` (importowanego z `modules/ui-components/`); statyka `openForVersion(workspace, version)` woła bazowe `open(workspace, {version})` (jedna sygnatura `open` w całym repo). |
+| `ReleaseNotesView.ts` | `ReleaseNotesView` - viewType `pkm-release-notes-view`. Otwiera tab z markdown z `releases/latest_release.md`. Dziedziczy z `PluginItemView` (importowanego z `modules/ui-components/`); statyka `openForVersion(workspace, version)` woła bazowe `open(workspace, {version})` (jedna sygnatura `open` w całym repo). `displayText` to **getter** przez `t('release_notes.view_title')` („Co nowego"/„What's new"), nie pole: pole policzyłoby `t()` przy ładowaniu klasy, czyli przed `setLocale()`. Napis celowo NIE brzmi „PKM Assistant" - paleta dokleja nazwę pluginu sama, a oba widoki pluginu miały ten sam tytuł i dawały dwa nieodróżnialne wpisy. |
 
 Bazowa klasa widoku (`PluginItemView`) mieszka w `modules/ui-components/`, bo dziedziczą z niej dwa moduły (chat → `ChatView`, shell → `ReleaseNotesView`) - jej dom jest tam, gdzie klocki dla ≥2 modułów. Shell nie trzyma re-exportu tej bazy.
 
@@ -97,13 +99,13 @@ Reszta symboli modułu (rama i rejestry ustawień `PluginSettingsTab`, `Settings
 - `core/utils/Logger` (`log`)
 - `modules/agents` - `Agent`, `renderAgentProfileView`
 - `modules/chat` - `insertInlineTriggerMarker` (leniwym `import()` z `TriggersView`)
-- `config/default_prompts.ts` - `DEFAULT_COMPRESSION_PROMPT`
+- `config/default_prompts.ts` - `defaultCompressionPrompt()` (funkcja, nie stala - szkielet idzie za jezykiem interfejsu)
 - `modules/crystal-soul` - `UiIcons`, `SkinManager`, `IconGenerator`, `SvgHelper`, `setSvg`, `setSvgLabel`, `getColorByHex`, `hexToRgbTriplet`, `registerSettings`
 - `modules/komunikator` - `renderCommunicatorView`, `isKomunikatorEnabled`
 - `modules/memory` - pakiet etykiet przebiegu konsolidacji (`stepLabel`/`stepDetail`/`stepStatusIcon`/`stepStatusLabel`/`stepDurationMs`/`isFallbackStep`/`formatDuration`/`formatUsageLine`/`buildRunSummary`/`summaryToText`) + `ConsolidationRun`/`STEP_KIND`/`STEP_STATUS`/`memoryOpsCenter` + `CostLog` + fabryczne prompty robocze + `registerSettings`
 - `modules/models` - `getModelsForRole`, `registerSettings`
 - `modules/prompts` - `FACTORY_DEFAULTS`
-- `modules/skills` / `modules/sub-agents` / `modules/tools` / `modules/web` - `registerBackstage` / `registerSettings` (+ `getVisibleSubAgentsForAgent`, `DEFAULT_SUBAGENT_FRAME_PROMPT`, `ExternalMcpManager`)
+- `modules/skills` / `modules/sub-agents` / `modules/tools` / `modules/web` - `registerBackstage` / `registerSettings` (+ `getVisibleSubAgentsForAgent`, `defaultSubAgentFramePrompt()`, `ExternalMcpManager`)
 - `modules/ui-components` - `TOOL_INFO`, `getToolIcon`
 
 **Importowany przez:**

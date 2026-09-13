@@ -4,6 +4,7 @@ import {
     isPrimitiveAlias, isToolAlias, resolveToolAlias, PRIMITIVE_ALIASES,
     isArtifactAlias, ARTIFACT_ALIASES
 } from './toolAliases.js';
+import { setLocale } from '../../core/i18n/index.js';
 
 test('isSearchAlias: rozpoznaje stare nazwy retrieval, nie żywe narzędzia', t => {
     t.true(isSearchAlias('vault_grep'));
@@ -163,7 +164,9 @@ test('chat_todo add_item → todo add; list/remove_item → todo list (read-only
     t.deepEqual(resolveToolAlias('chat_todo', { action: 'remove_item', item_index: 2 })!.arguments, { action: 'list' });
 });
 
-test('plan_review → artifact_create{typ:plan} — kroki ze steps', t => {
+test.serial('plan_review → artifact_create{typ:plan} — kroki ze steps (locale pl)', t => {
+    setLocale('pl');
+    t.teardown(() => setLocale('en'));
     const r = resolveToolAlias('plan_review', { title: 'Plan X', steps: ['Krok 1', { action: 'Krok 2' }] })!;
     t.is(r.name, 'artifact_create');
     t.is(r.arguments.typ, 'plan');
@@ -174,12 +177,29 @@ test('plan_review → artifact_create{typ:plan} — kroki ze steps', t => {
     ]);
 });
 
+/**
+ * Nagłówek sekcji MUSI zgadzać się z szablonem typu na dysku (`modules/artifacts`,
+ * `builtinTypeContent`) - inaczej `add_item`/`set_section` wraca `not_found` i artefakt
+ * wychodzi pusty. Angielski vault ma „## Steps" / „## Content", nie „Kroki"/„Treść".
+ */
+test.serial('plan_review i idea_review celują w angielskie nagłówki przy locale en', t => {
+    setLocale('en');
+    t.teardown(() => setLocale('en'));
+    const plan = resolveToolAlias('plan_review', { title: 'Plan X', steps: ['Step 1'] })!;
+    t.deepEqual(plan.arguments.sekcje, [{ op: 'add_item', heading: 'Steps', text: 'Step 1' }]);
+
+    const notatka = resolveToolAlias('idea_review', { title: 'Post', markdown: 'Body' })!;
+    t.deepEqual(notatka.arguments.sekcje, [{ op: 'set_section', heading: 'Content', text: 'Body' }]);
+});
+
 test('plan_review bez steps → kroki wyłuskane z markdownu', t => {
     const r = resolveToolAlias('plan_review', { markdown: '1. Zrób A\n- [ ] Zrób B\n* Zrób C' })!;
     t.deepEqual((r.arguments.sekcje as Array<{ text: string }>).map(s => s.text), ['Zrób A', 'Zrób B', 'Zrób C']);
 });
 
-test('idea_review → artifact_create{typ:notatka} — treść jako set_section', t => {
+test.serial('idea_review → artifact_create{typ:notatka} — treść jako set_section (locale pl)', t => {
+    setLocale('pl');
+    t.teardown(() => setLocale('en'));
     const r = resolveToolAlias('idea_review', { title: 'Post', markdown: 'Treść posta' })!;
     t.is(r.arguments.typ, 'notatka');
     t.is(r.arguments.tytul, 'Post');

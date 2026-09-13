@@ -13,7 +13,7 @@ import { getLimits } from '../../config/limits.js';
 // „Co jest porażką narzędzia" liczy ta sama funkcja, co status chipa w czacie.
 import { resolveWorkPrompt, maskSensitiveData, toolResultStatus } from '../../core/index.js';
 import type { PluginApi, AppLike, WorkPromptSettings } from '../../core/index.js';
-import { DEFAULT_SUBAGENT_FRAME_PROMPT } from './framePrompt.js';
+import { defaultSubAgentFramePrompt } from './framePrompt.js';
 // Rozpoznaje stare nazwy retrieval przy budowie whitelisty (fail-safe, gdyby
 // config nie przeszedł migracji przez loader) - np. vault_grep → search.
 // Jednolity domyślny zestaw narzędzi workera (brak podziału research/strateg).
@@ -548,32 +548,35 @@ export class SubAgentRunner {
         // (`WorkPromptSettings`, core/utils/workPromptResolver.ts) - węższy kontrakt niż realny
         // `SettingsBag` (którego `pkmAssistant.promptDefaults` schodzi przez otwarty indeks
         // `[key: string]: unknown` w `PkmAssistantSettings`, więc nominalnie się nie unifikuje).
-        const frame = resolveWorkPrompt(agent, 'subagent_frame_prompt', this.plugin?.env?.settings as WorkPromptSettings | undefined, DEFAULT_SUBAGENT_FRAME_PROMPT);
+        // Rama idzie za JĘZYKIEM INTERFEJSU i liczy się RAZ NA BIEG (tu), nie przy imporcie -
+        // `setLocale()` leci z `src/main.ts` dopiero po załadowaniu modułów.
+        const frame = resolveWorkPrompt(agent, 'subagent_frame_prompt', this.plugin?.env?.settings as WorkPromptSettings | undefined, defaultSubAgentFramePrompt());
 
         // METHOD — custom sub method (KNOWLEDGE.md), soft cap z limits.
         let methodBlock = '';
         if (config.prompt) {
             const method = config.prompt.length > configPromptCap
-                ? config.prompt.slice(0, configPromptCap) + `\n[... instrukcja obcięta do ${configPromptCap} znaków]`
+                ? config.prompt.slice(0, configPromptCap) + `\n${t('subagent.frame.method_truncated', { count: configPromptCap })}`
                 : config.prompt;
             methodBlock = `${method}\n`;
         }
 
-        // SCOPE — only when the custom sub defines it (content unchanged).
+        // SCOPE — only when the custom sub defines it. Nagłówek `SCOPE:` zostaje dosłowny
+        // w obu językach (i tak jest angielski); tłumaczą się etykiety i wartości puste.
         let scopeBlock = '';
         if (config.scope) {
-            const folders = config.scope.folders?.length ? config.scope.folders.join(', ') : 'brak explicit folderow';
-            const sections = config.scope.sections?.length ? config.scope.sections.join(', ') : 'brak explicit sekcji';
-            const pinned = config.scope.pinned_notes?.length ? config.scope.pinned_notes.join(', ') : 'brak przypietych notatek';
+            const folders = config.scope.folders?.length ? config.scope.folders.join(', ') : t('subagent.frame.scope_no_folders');
+            const sections = config.scope.sections?.length ? config.scope.sections.join(', ') : t('subagent.frame.scope_no_sections');
+            const pinned = config.scope.pinned_notes?.length ? config.scope.pinned_notes.join(', ') : t('subagent.frame.scope_no_pinned');
             const frontmatter = config.scope.frontmatter && Object.keys(config.scope.frontmatter).length
                 ? JSON.stringify(config.scope.frontmatter)
-                : 'brak frontmatter';
+                : t('subagent.frame.scope_no_frontmatter');
             // Foldery są egzekwowane technicznie (bariera w łańcuchu uprawnień), reszta
             // pól scope to nadal wskazówki. Model ma to wiedzieć, żeby nie próbował ich obchodzić.
             const foldersNote = config.scope.folders?.length
-                ? ' (EGZEKWOWANE technicznie — proba dostepu poza nie zostanie odrzucona)'
+                ? ` ${t('subagent.frame.scope_folders_enforced')}`
                 : '';
-            scopeBlock = `SCOPE:\n- Foldery: ${folders}${foldersNote}\n- Frontmatter: ${frontmatter}\n- Sekcje: ${sections}\n- Przypiete notatki: ${pinned}\n\n`;
+            scopeBlock = `SCOPE:\n- ${t('subagent.frame.scope_folders_label')}: ${folders}${foldersNote}\n- ${t('subagent.frame.scope_frontmatter_label')}: ${frontmatter}\n- ${t('subagent.frame.scope_sections_label')}: ${sections}\n- ${t('subagent.frame.scope_pinned_label')}: ${pinned}\n\n`;
         }
 
         // BUDŻET - spójny z runtime (runTask limits): iteracje + obcięcie wyniku narzędzia +
@@ -583,13 +586,16 @@ export class SubAgentRunner {
         const maxIter = config.max_iterations || limits.subagent_max_iterations_worker;
         const maxLen = config.max_tool_result_length ?? limits.max_tool_result_length;
         const delegateCap = _deliverableResultCap(maxLen, limits.subagent_result_max_chars);
-        const budgetBlock = `BUDŻET:\n- Dostępne iteracje narzędzi: ${maxIter}\n- Max rozmiar wyniku narzędzia: ${maxLen ? maxLen + ' znaków' : 'bez limitu'}\n- Wyjątek \`delegate\`/\`agent_delegate\` (wynik suba to deliverable, nie zrzut narzędzia): ${delegateCap ? delegateCap + ' znaków' : 'bez limitu'}\n`;
+        const budgetValue = (chars: number | null | undefined) => chars
+            ? t('subagent.frame.budget_chars', { count: chars })
+            : t('subagent.frame.budget_unlimited');
+        const budgetBlock = `${t('subagent.frame.budget_header')}\n${t('subagent.frame.budget_iterations', { count: maxIter })}\n${t('subagent.frame.budget_tool_result', { value: budgetValue(maxLen) })}\n${t('subagent.frame.budget_delegate', { value: budgetValue(delegateCap) })}\n`;
 
         // Function replacers avoid `$`-sequence interpretation from injected content.
         return frame
             .replace('{{SUB_NAME}}', () => config.name)
             .replace('{{AGENT_NAME}}', () => agent.name)
-            .replace('{{DESCRIPTION}}', () => config.description || 'asystent agenta')
+            .replace('{{DESCRIPTION}}', () => config.description || t('subagent.frame.default_description'))
             .replace('{{METHOD}}', () => methodBlock)
             .replace('{{SCOPE}}', () => scopeBlock)
             .replace('{{BUDGET}}', () => budgetBlock)

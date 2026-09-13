@@ -89,13 +89,33 @@ export abstract class PluginItemView extends ItemView {
         return requireIdentity(this, 'displayText');
     }
 
-    /** Rejestruje widok + komendę „otwórz". */
+    /**
+     * Rejestruje TYP widoku w Obsidianie. Bez komendy palety - ta idzie osobno, patrz
+     * {@link PluginItemView.registerOpenCommand}.
+     *
+     * DLACZEGO OSOBNO: typ widoku musi być znany, zanim Obsidian odtworzy zapisane zakładki
+     * (`onLayoutReady`), więc `registerItemViews()` leci w `onload()` PRZED `setLocale()`
+     * (język czytany z dysku = `await`). Obsidian zapamiętuje nazwę komendy w chwili
+     * `addCommand`, więc komenda zarejestrowana w tym samym miejscu miałaby na zawsze nazwę
+     * w domyślnym (angielskim) języku - dokładnie ta wada, której pilnuje strażnik
+     * „registerCommands PO setLocale" w `core/i18n/commands_no_prefix.test.ts`.
+     */
     static register(plugin: PluginApi): void {
         const type = requireIdentity(this, 'viewType');
         const host = plugin as unknown as RegistrationHost;
         const ViewClass = this as unknown as new (leaf: unknown, plugin: PluginApi) => PluginItemView;
 
         host.registerView(type, (leaf: unknown) => new ViewClass(leaf, plugin));
+    }
+
+    /**
+     * Dodaje komendę palety „otwórz ten widok". Wołane z `PluginBase.registerCommands()`,
+     * czyli PO `setLocale()` - nazwa idzie w języku interfejsu.
+     */
+    static registerOpenCommand(plugin: PluginApi): void {
+        const type = requireIdentity(this, 'viewType');
+        const host = plugin as unknown as RegistrationHost;
+
         host.addCommand({
             id: `open-${type}`,
             name: this.commandName,

@@ -53,7 +53,7 @@ modules/tools/
 │   ├── vault_path_validator.ts         # validateVaultPath/Folder() + wyjątek allowSkillsRead
 │   ├── vault_adapter_io.ts             # listAdapterFolder + isHiddenVaultPath dla dotfolderów .pkm-assistant
 │   ├── vault_binary_io.ts              # createBinary/modifyBinary/readBinary (obrazy) + app-aware ensureFolder
-│   ├── toolAliases.ts                  # stare nazwy → nowe prymitywy/serwer (backward-compat; remap w MCPClient)
+│   ├── toolAliases.ts                  # stare nazwy → nowe prymitywy/serwer (backward-compat; remap w MCPClient). Aliasy `plan_review`/`idea_review` biorą nagłówek sekcji z `artifactSection()` (barrel artefaktów) - napis zależy od języka interfejsu i MUSI zgadzać się z szablonem typu na dysku, inaczej patch wraca `not_found`
 │   ├── settingsPersist.ts              # zapis/rollback ustawień serwerów MCP + kill-switch
 │   ├── mcpServerPresets.ts             # gotowe presety zewnętrznych serwerów (dane w kodzie, zero sieci)
 │   ├── claudeConfigImport.ts           # parser configu Claude Desktop → nasz kształt serwera

@@ -53,7 +53,13 @@ function makePlugin() {
 }
 
 // ── register() ──────────────────────────────────────────────────────────────
-test('register() woła registerView typem viewType i dodaje komendę', async t => {
+/**
+ * `register()` rejestruje SAM TYP widoku, bez komendy: typ musi być znany, zanim Obsidian
+ * odtworzy zapisane zakładki (`onLayoutReady`), czyli jeszcze przed `setLocale()` w `onload()`.
+ * Komenda idzie osobnym wejściem (`registerOpenCommand`), wołanym z `registerCommands()` już
+ * po ustawieniu języka - Obsidian zapamiętuje napis w chwili `addCommand`.
+ */
+test('register() woła registerView typem viewType i NIE dodaje komendy', async t => {
     const Base = await loadBase();
     class TestView extends Base {
         static get viewType() { return 'pkm-assistant-test'; }
@@ -65,8 +71,24 @@ test('register() woła registerView typem viewType i dodaje komendę', async t =
     TestView.register(plugin);
 
     t.deepEqual(zarejestrowane, ['pkm-assistant-test']);
-    t.is(komendy.length, 1, 'rejestracja widoku nie dołożyła komendy „otwórz"');
+    t.deepEqual(komendy, [], 'komenda zarejestrowana tutaj miałaby nazwę sprzed setLocale()');
+});
+
+test('registerOpenCommand() dodaje komendę „otwórz", która otwiera widok', async t => {
+    const Base = await loadBase();
+    class TestView extends Base {
+        static get viewType() { return 'pkm-assistant-test'; }
+        static get displayText() { return 'Test'; }
+        static get iconName() { return 'bot'; }
+    }
+    const { plugin, zarejestrowane, komendy } = makePlugin();
+
+    TestView.registerOpenCommand(plugin);
+
+    t.is(komendy.length, 1);
     t.true(komendy[0].id.includes('pkm-assistant-test'));
+    t.is(komendy[0].name, 'Test');
+    t.deepEqual(zarejestrowane, [], 'komenda nie rejestruje typu widoku po raz drugi');
 });
 
 // ── open() bez liścia ───────────────────────────────────────────────────────
@@ -194,7 +216,7 @@ test('commandName to tytuł zakładki i trafia do addCommand', async t => {
     t.is(TestView.commandName, 'Notatki wydania',
         'komenda „otwórz" bez etykiety — user zobaczyłby pustą pozycję w palecie');
 
-    TestView.register(plugin);
+    TestView.registerOpenCommand(plugin);
 
     t.is(komendy[0].name, 'Notatki wydania');
 });

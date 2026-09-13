@@ -73,7 +73,7 @@ export class OpenSessionModal extends Modal {
             if (el) header.appendChild(el);
         }
         header.createSpan({
-            text: t('modal.open_session.title') || 'Otwierasz starą sesję',
+            text: t('modal.open_session.title'),
             cls: 'cs-open-session__title'
         });
 
@@ -81,7 +81,7 @@ export class OpenSessionModal extends Modal {
         info.textContent = t('modal.open_session.info', {
             title: this.sessionTitle,
             date: this.sessionDate
-        }) || `${this.sessionTitle} (${this.sessionDate}). Co zrobić?`;
+        });
 
         const actions = contentEl.createDiv({ cls: 'cs-open-session__actions' });
 
@@ -90,25 +90,22 @@ export class OpenSessionModal extends Modal {
             cls: 'cs-open-session__btn cs-open-session__btn--primary'
         });
         setSvgLabel(compressBtn, UiIcons.brain(14),
-            t('modal.open_session.compress') || 'Skompresuj kontekst');
-        compressBtn.title = t('modal.open_session.compress_tooltip')
-            || 'Załaduj L1 summary tej sesji (mniej tokenów)';
+            t('modal.open_session.compress'));
+        compressBtn.title = t('modal.open_session.compress_tooltip');
         compressBtn.addEventListener('click', () => this._resolveWith('compress'));
 
         // 2) Continue (full load)
         const continueBtn = actions.createEl('button', { cls: 'cs-open-session__btn' });
         setSvgLabel(continueBtn, UiIcons.chat(14),
-            t('modal.open_session.continue') || 'Kontynuuj sesję');
-        continueBtn.title = t('modal.open_session.continue_tooltip')
-            || 'Załaduj pełną sesję i kontynuuj rozmowę';
+            t('modal.open_session.continue'));
+        continueBtn.title = t('modal.open_session.continue_tooltip');
         continueBtn.addEventListener('click', () => this._resolveWith('continue'));
 
         // 3) Fresh (new from agent perspective)
         const freshBtn = actions.createEl('button', { cls: 'cs-open-session__btn' });
         setSvgLabel(freshBtn, UiIcons.brain(14),
-            t('modal.open_session.fresh') || 'Nowy chat z perspektywy agenta');
-        freshBtn.title = t('modal.open_session.fresh_tooltip')
-            || 'Brain + ostatnie 3 L1 jako kontekst, fresh start';
+            t('modal.open_session.fresh'));
+        freshBtn.title = t('modal.open_session.fresh_tooltip');
         freshBtn.addEventListener('click', () => this._resolveWith('fresh'));
 
         // Cancel

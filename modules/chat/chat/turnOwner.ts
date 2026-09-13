@@ -14,7 +14,7 @@
  */
 import { resolveWorkPrompt } from '../../../core/index.js';
 import { log } from '../../../core/utils/Logger.js';
-import { DEFAULT_COMPRESSION_PROMPT } from './compressionPrompt.js';
+import { defaultCompressionPrompt } from './compressionPrompt.js';
 import type { AgentMemory } from '../../memory/index.js';
 import type { Agent } from '../../agents/index.js';
 import type { ChatTab } from './chatViewShape.js';
@@ -200,7 +200,7 @@ export function buildOwnerWindowOptions(view: OwnerViewLike, ownerName: string |
         resolveOwnerAgent(am(), ownerName),
         'compression_prompt',
         view?.env?.settings,
-        DEFAULT_COMPRESSION_PROMPT,
+        defaultCompressionPrompt(),
     );
     return {
         compressionPrompt,

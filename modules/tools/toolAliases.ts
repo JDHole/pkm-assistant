@@ -18,7 +18,12 @@
  * ten plik tylko w KOMENTARZACH, bez importu — nie mylić z realnym wołaczem.
  * `modules/sub-agents/SubAgentLoader.ts` ma WŁASNY, ODDZIELNY mechanizm rename'u
  * (`DEPRECATED_TOOL_RENAMES`, lokalna stała) — nie importuje stąd nic.
+ *
+ * Jedyna zależność zewnętrzna: `artifactSection` z barrela artefaktów (nazwa sekcji „Kroki"/
+ * „Steps" zależy od języka interfejsu, a alias MUSI trafić w ten sam nagłówek, który stoi
+ * w szablonie typu na dysku - inaczej `add_item` wraca `not_found` i plan wychodzi bez kroków).
  */
+import { artifactSection } from '../artifacts/index.js';
 
 /**
  * Argumenty wywołania narzędzia — worek od modelu / z YAML-a sub-agenta, więc wartości
@@ -171,14 +176,15 @@ function planReviewToArtifact(a: ToolArgs = {}): ToolAliasResult {
     const steps = (Array.isArray(a.steps) && a.steps.length)
         ? (a.steps as Array<string | LegacyLabeledItem | null>).map(s => (typeof s === 'string' ? s : (s && (s.action || s.text || s.label)) || '')).filter(Boolean)
         : splitStepsFromMarkdown((a.markdown as string) || '');
-    const sekcje = steps.map(text => ({ op: 'add_item', heading: 'Kroki', text }));
+    const heading = artifactSection('steps');
+    const sekcje = steps.map(text => ({ op: 'add_item', heading, text }));
     return { name: 'artifact_create', arguments: cleanWhere({ typ: 'plan', tytul: a.title || 'Plan', sekcje }) };
 }
 
-/** idea_review → artifact_create{typ:'notatka'} — treść jako set_section „Treść". */
+/** idea_review → artifact_create{typ:'notatka'} — treść jako set_section „Treść"/„Content". */
 function ideaReviewToArtifact(a: ToolArgs = {}): ToolAliasResult {
     const md = (a.markdown as string) || '';
-    const sekcje = md ? [{ op: 'set_section', heading: 'Treść', text: md }] : [];
+    const sekcje = md ? [{ op: 'set_section', heading: artifactSection('content'), text: md }] : [];
     return { name: 'artifact_create', arguments: cleanWhere({ typ: 'notatka', tytul: a.title || 'Notatka', sekcje }) };
 }
 

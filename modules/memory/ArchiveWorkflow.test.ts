@@ -12,7 +12,7 @@ import test from 'ava';
 import { AgentMemory } from './AgentMemory.js';
 import { ArchiveWorkflow } from './ArchiveWorkflow.js';
 import { ConsolidationRun, STEP_KIND } from './ConsolidationRun.js';
-import { DEFAULT_ARCHIVE_PROMPT } from './workPrompts.js';
+import { factoryWorkPrompt } from './workPrompts.js';
 import { makeMemoryNoteFilename } from './MemoryAccessGuard.js';
 import type { StreamChatModelLike, StreamHandlers, StreamMessage } from './streamHelper.js';
 
@@ -111,10 +111,13 @@ function makeMockModel(responseText: string): StreamChatModelLike {
 
 // ── Default archive prompt (moved to Agent constructor defaults) ──
 
-test('DEFAULT_ARCHIVE_PROMPT is the JSON-output contract for LLM-driven dedup', t => {
-    t.true(DEFAULT_ARCHIVE_PROMPT.includes('OUTPUT'));
-    t.true(DEFAULT_ARCHIVE_PROMPT.includes('merges'));
-    t.true(DEFAULT_ARCHIVE_PROMPT.includes('deletions'));
+test('factory archive prompt is the JSON-output contract for LLM-driven dedup (both languages)', t => {
+    for (const locale of ['pl', 'en']) {
+        const prompt = factoryWorkPrompt('archive', locale);
+        t.true(prompt.includes('OUTPUT'), locale);
+        t.true(prompt.includes('merges'), locale);
+        t.true(prompt.includes('deletions'), locale);
+    }
 });
 
 // ── Zapisywacze podsumowań (kaskada L1/L2/L3) — kontrakt bez zmian ──
@@ -224,7 +227,7 @@ test('ArchiveWorkflow.proposeDedup uses LLM when model + agent.archive_prompt ar
         deletions: []
     });
     const workflow = new ArchiveWorkflow(memory, {
-        agent: { name: 'Jaskier', archive_prompt: DEFAULT_ARCHIVE_PROMPT },
+        agent: { name: 'Jaskier', archive_prompt: factoryWorkPrompt('archive') },
         model: makeMockModel(llmResponse)
     });
 
@@ -269,7 +272,7 @@ test('ArchiveWorkflow.proposeDedup strips ```json fences from LLM response', asy
         deletions: []
     }) + '\n```';
     const workflow = new ArchiveWorkflow(memory, {
-        agent: { name: 'Jaskier', archive_prompt: DEFAULT_ARCHIVE_PROMPT },
+        agent: { name: 'Jaskier', archive_prompt: factoryWorkPrompt('archive') },
         model: makeMockModel(wrapped)
     });
 
@@ -295,7 +298,7 @@ test('ArchiveWorkflow.proposeDedup rejects invalid merges (single source, bad ty
         deletions: []
     });
     const workflow = new ArchiveWorkflow(memory, {
-        agent: { name: 'Jaskier', archive_prompt: DEFAULT_ARCHIVE_PROMPT },
+        agent: { name: 'Jaskier', archive_prompt: factoryWorkPrompt('archive') },
         model: makeMockModel(llmResponse)
     });
 
@@ -703,7 +706,7 @@ test('ArchiveWorkflow._summaryFromFiles uses factory summary prompt (with {{LEVE
     await workflow._summaryFromFiles(archivePaths(base), 'L1');
     t.true(capturedSystemPrompt!.includes('L1'), 'factory {{LEVEL}} substituted to L1');
     t.false(capturedSystemPrompt!.includes('{{LEVEL}}'));
-    t.true(capturedSystemPrompt!.includes('## Kluczowe tematy'), 'factory summary prompt reached the model');
+    t.true(capturedSystemPrompt!.includes('## Key topics'), 'factory summary prompt reached the model in the interface language (default en)');
 });
 
 test('ArchiveWorkflow.proposeDedup uses LLM via factory archive prompt when agent has none', async t => {

@@ -144,7 +144,7 @@ export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandCon
     const agentManager = plugin?.agentManager;
     const agentMemory = agentManager?.getActiveMemory?.();
     if (!agentMemory) {
-        new Notice(t('chat.session.no_active_agent') || 'Brak aktywnego agenta', 3000);
+        new Notice(t('chat.session.no_active_agent'), 3000);
         return;
     }
 
@@ -152,7 +152,7 @@ export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandCon
     const path = activeTab?.sessionPath || agentMemory.activeSessionPath;
     const messages = view.rollingWindow?.messages || [];
     if (messages.length === 0) {
-        new Notice(t('modal.save_session.empty') || 'Brak aktywnej sesji do archiwizacji', 3000);
+        new Notice(t('modal.save_session.empty'), 3000);
         view.resetInputArea?.();
         return;
     }

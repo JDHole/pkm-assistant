@@ -17,7 +17,7 @@ modules/ui-components/
 ├── MentionAutocomplete.ts   # dropdown `@` nad polem czatu: notatki i foldery vaulta, wynik jako chip nad inputem (nie tekst inline)
 ├── SubAgentBlock.ts         # rozwijalny wiersz wyniku sub-agenta (zapytanie, odpowiedź, narzędzia, tokeny)
 ├── ThinkingBlock.ts         # rozwijalny wiersz „Myślenie" (reasoning modelu + czas + status)
-├── PluginItemView.ts        # bazowa klasa widoków (extends Obsidian `ItemView`)
+├── PluginItemView.ts        # bazowa klasa widoków (extends Obsidian `ItemView`); rejestracja rozbita na `register` (typ widoku, przed odtworzeniem zakładek) i `registerOpenCommand` (komenda palety, PO `setLocale()` - Obsidian zapamiętuje nazwę w chwili `addCommand`)
 ├── DiffModal.ts             # podgląd diffa przed `vault_write`
 ├── diffLines.ts             # silnik diffa linia-po-linii dla DiffModal, bez importu `obsidian` (testowalny w AVA)
 ├── ConfirmModal.ts          # zamiennik natywnego `confirm()` (wytyczne katalogu: no-alert)
@@ -46,7 +46,7 @@ Wszystkie bloki renderują się jako Crystal Soul `.cs-action-row` - wygląd i C
 | `renderFilterBar` / `getCategoryLabel` / `renderUseAtAgentButton` / `renderTemplateVersionBadge` / `renderCardAction` | Prymitywy kart Zaplecza (pasek filtrów, etykieta kategorii, guzik „Użyj u agenta…", plakietka `vN`, akcja na karcie) z `backstage_helpers.js`. Wołają je zakładki Zaplecza z `modules/skills` i `modules/sub-agents` - dwa moduły, więc dom klocka jest tutaj, nie w shellu. |
 | `DiffModal` | Przyjazny diff przed `vault_write` (przekreślenia / podświetlenia zamiast surowego patcha) + `waitForApproval()`. Jedyny wołacz: `modules/tools/MCPClient.js` leniwym `import()`. |
 | `ConfirmModal` / `confirmModal(app, opts)` | Zamiennik natywnego `confirm()` (wytyczne katalogu: no-alert). Kontrakt: rozstrzyga się raz - klik guzika potwierdzenia = `true`, Anuluj / Esc / klik poza modalem = `false`. `opts: ConfirmModalOptions`, w tym `destructive: true` → guzik potwierdzenia dostaje klasę `mod-warning` (zamiast `mod-cta`) i fokus startowy leci na Anuluj, żeby przypadkowy Enter/Spacja zaraz po otwarciu nie potwierdziły akcji niszczącej. |
-| `PluginItemView` | Baza widoków workspace'u - `extends` Obsidian `ItemView`. Statyki `viewType` / `displayText` / `iconName`, `register(plugin)` (widok + komenda otwarcia), JEDNA sygnatura `open(workspace, state?, active?)`, `whenRuntimeLoaded()` i **opcjonalna** `renderView` (widok czatu dostaje ją miksinem, więc `abstract` dałoby TS2515). Kontrakt: `core/runtime/contracts.ts`. Dziedziczą: `ChatView` (`modules/chat`) i `ReleaseNotesView` (`modules/shell`). |
+| `PluginItemView` | Baza widoków workspace'u - `extends` Obsidian `ItemView`. Statyki `viewType` / `displayText` / `iconName`, `register(plugin)` (**sam typ widoku**) + `registerOpenCommand(plugin)` (komenda palety „otwórz"), JEDNA sygnatura `open(workspace, state?, active?)`, `whenRuntimeLoaded()` i **opcjonalna** `renderView` (widok czatu dostaje ją miksinem, więc `abstract` dałoby TS2515). Kontrakt: `core/runtime/contracts.ts`. Dziedziczą: `ChatView` (`modules/chat`) i `ReleaseNotesView` (`modules/shell`). |
 
 `TOOL_DESCRIPTIONS` świadomie NIE jest w barrelu - zero konsumentów. Opisy narzędzi, które REALNIE widzi user i model, żyją w i18n `mcp.<tool>.desc` (idą do API razem z definicją narzędzia).
 

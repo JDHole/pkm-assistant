@@ -35,7 +35,9 @@ export { registerBackstage } from './BackstageTab.js';
 // Magazyn szablonów sub-agentów (Zaplecze) — forma odlewnicza, nie żywy byt.
 export { SubAgentTemplateStore } from './SubAgentTemplateStore.js';
 // Factory sub-agent task frame — surfaced in Settings→Prompt. Pure (obsidian-free).
-export { DEFAULT_SUBAGENT_FRAME_PROMPT } from './framePrompt.js';
+// FUNKCJA, nie stała (2.2.5): rama ma wersję PL i EN, a `setLocale()` leci PO załadowaniu
+// modułów - stała wybrana przy imporcie zamroziłaby jeden język.
+export { defaultSubAgentFramePrompt } from './framePrompt.js';
 export type { ScopeData, SubAgentData, SubAgentInput, VaultLike } from './types.js';
 export type {
     SubTask,

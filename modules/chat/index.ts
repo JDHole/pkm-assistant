@@ -30,7 +30,7 @@ export { CHAT_VIEW_TYPE } from './chatViewType.js';
 // `modules/shell/sidebar/TriggersView.js` leniwym `import()`.
 export { insertInlineTriggerMarker } from './chat/InlineChipPlugin.js';
 
-// `DEFAULT_COMPRESSION_PROMPT` (factory compression skeleton) OUT z barrela — Settings→Prompt
+// `defaultCompressionPrompt()` (factory compression skeleton) OUT z barrela — Settings→Prompt
 // (`modules/shell/prompt_settings.ts`) bierze ją wprost
 // z `config/default_prompts.js`, nie stąd; zero konsumentów spoza modułu. Definicja i lokalne
 // drzwi `chat/compressionPrompt.ts` zostają — czyta je Summarizer/turnOwner wewnątrz czatu.

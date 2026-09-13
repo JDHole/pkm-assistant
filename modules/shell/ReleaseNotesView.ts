@@ -15,6 +15,7 @@ import { MarkdownRenderer } from 'obsidian';
 
 import releaseNotesMarkdown from '../../releases/latest_release.md' with { type: 'markdown' };
 
+import { t } from '../../core/i18n/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { PluginItemView } from '../ui-components/index.js';
 
@@ -37,7 +38,15 @@ export class ReleaseNotesView extends PluginItemView {
      */
     static readonly viewType = 'pkm-release-notes-view';
 
-    static readonly displayText = 'PKM Assistant';
+    /**
+     * Tytuł zakładki i (przez `commandName` bazy) nazwa komendy „otwórz". GETTER, nie pole:
+     * pole policzyłoby `t()` przy ładowaniu klasy, czyli PRZED `setLocale()` w `src/main.ts`.
+     *
+     * Napis NIE może brzmieć „PKM Assistant": Obsidian dokleja nazwę pluginu w palecie sam,
+     * a oba widoki pluginu (ten i czat) miały ten sam tytuł - paleta pokazywała dwa
+     * nieodróżnialne wpisy „PKM Assistant: PKM Assistant".
+     */
+    static get displayText(): string { return t('release_notes.view_title'); }
 
     static readonly iconName = 'scroll-text';
 

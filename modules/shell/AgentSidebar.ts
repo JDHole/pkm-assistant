@@ -120,12 +120,26 @@ export class AgentSidebar extends ItemView {
         // Widoku `sub-agent-runs` już tu nie ma - biegi subów pokazuje pasek w OKNIE CZATU
         // (per agent i per sesja), patrz `modules/chat/chat/subTaskStrip.ts`.
 
-        this.nav.push('home', {}, 'Agenci');
+        this.nav.push('home', {}, t('sidebar.agents'));
         this._unsubscribeSkinEvents = SkinManager.on('skin_changed', () => this.nav?.refresh?.());
 
         // Subscribe to agent changes
         if (this.plugin.agentManager) {
-            this.unsubscribe = this.plugin.agentManager.on((event: string) => {
+            this.unsubscribe = this.plugin.agentManager.on((event: string, data: Record<string, unknown>) => {
+                // Przemianowanie agenta MUSI zostać przepisane w stosie nawigacji, zanim
+                // cokolwiek się przerysuje: wpisy trzymają `{ agentName }` z chwili `push()`,
+                // a zaraz po rename'ie leci `agents:reloaded` z obserwatora plików. Bez tego
+                // `refresh()` rysuje profil po STAREJ nazwie i user widzi „Nie znaleziono
+                // agenta" aż do ręcznego cofnięcia się do listy.
+                if (event === 'agent:renamed') {
+                    const from = typeof data?.from === 'string' ? data.from : null;
+                    const to = typeof data?.to === 'string' ? data.to : null;
+                    if (from && to) {
+                        this.nav!.updateParams(params => params.agentName === from, { agentName: to });
+                    }
+                    this.nav!.refresh();
+                    return;
+                }
                 if (['agents:loaded', 'agents:reloaded',
                      'agent:created', 'agent:deleted', 'agent:updated'].includes(event)) {
                     this.nav!.refresh();

@@ -110,6 +110,12 @@ export const en: Record<string, string> = {
   'tool.field.error': 'Error: ',
   'tool.field.result': 'Result: ',
 
+  // ── Tytuły zakładek widoków (ItemView.displayText) ──
+  // Nie powtarzają nazwy pluginu: Obsidian dokleja ją sam w palecie komend, a dwa widoki
+  // pod tym samym napisem „PKM Assistant" dawały w palecie dwa identyczne wpisy.
+  'chat.view_title': 'Chat',
+  'release_notes.view_title': 'What\'s new',
+
   // ── Chat UI ──
   'chat.eye': 'Eye — active note context',
   'chat.permissions': 'Permissions',
@@ -1119,6 +1125,11 @@ export const en: Record<string, string> = {
   'settings.temperature_desc': '0 = precise, 1 = creative',
   'settings.max_tokens': 'Max response tokens',
   'settings.max_tokens_desc': 'Maximum length of a single AI response',
+  'settings.max_tokens_platform_desc': 'Advanced: default response limit for this platform.',
+  'settings.ollama_keep_alive_desc': 'How long Ollama keeps the model in RAM after a reply.',
+  // Baner pierwszego uruchomienia w Ustawieniach → Plugin (dopóki `onboardingCompleted` jest OFF).
+  'settings.onboarding_banner': 'Getting started: add an API key under API Keys, then pick your main model under Models. The built-in agent Jaskier will guide you from there.',
+  'settings.onboarding_banner_dismiss': 'Got it',
   'settings.embedding_title': 'Embedding (vectors)',
   'settings.embedding_desc': 'Model for vault indexing (semantic search). Changing requires re-indexing.',
   'settings.embed_platform': 'Embedding platform',
@@ -1924,6 +1935,16 @@ export const en: Record<string, string> = {
   'modal.sub_agent.create': 'Create',
   'modal.sub_agent.delete_btn': 'Delete',
 
+  // ── SubAgentEditorModal: sekcja „Scope" ──
+  'subagent.editor.folders_name': 'Folders',
+  'subagent.editor.folders_desc': 'One vault folder per line. Empty = no folder restriction.',
+  'subagent.editor.sections_name': 'Sections',
+  // Przykład TREŚCI, którą user ma w swoich notatkach (nie etykieta UI) - stąd wielka litera.
+  'subagent.editor.sections_example': '## Ideas',
+  'subagent.editor.sections_desc': 'Markdown headings, e.g. "{{example}}". Empty = no section restriction.',
+  'subagent.editor.pinned_notes_name': 'Pinned notes',
+  'subagent.editor.pinned_notes_desc': 'One note per line. These notes are always part of the sub-agent context.',
+
   // ── SkillEditorModal ──
   'modal.skill_editor.edit_title': 'Edit skill: {{name}}',
   'modal.skill_editor.new_title': 'New Skill',
@@ -2163,7 +2184,9 @@ export const en: Record<string, string> = {
   'prompt.dt.artifact_type_sections': 'sections (heading must match EXACTLY)',
   'prompt.dt.artifacts_in_progress': 'Your artifacts in progress (artifact_update by ID, do not create a new one)',
   'prompt.dt.artifacts_more': '…and {{count}} more — artifact_list()',
-  'prompt.dt.active_artifact': 'ACTIVE ARTIFACT (fresh state; edit via artifact_update, do NOT overwrite "Uwagi usera")',
+  // `{{user_notes}}` wypełnia wołacz (`modules/prompts/artifactIndex.ts`) z rejestru sekcji
+  // artefaktów, a nie tłumacz - nazwa MUSI zgadzać się z nagłówkiem w szablonie typu na dysku.
+  'prompt.dt.active_artifact': 'ACTIVE ARTIFACT (fresh state; edit via artifact_update, do NOT overwrite "{{user_notes}}")',
   'prompt.dt.artifact_truncated': '(truncated)',
   'prompt.dt.skill_recipe': 'recipe: read("{{path}}")',
   'prompt.dt.skill_index_more': '…and {{count}} more — list(".pkm-assistant/skills")',
@@ -2410,7 +2433,7 @@ export const en: Record<string, string> = {
   'mcp.artifact_create.param.sekcje': 'Initial content operations (same as artifact_update): add_item/set_section. E.g. adding plan steps as checkboxes. No code fences.\n\nNOTE: "heading" must match EXACTLY an "##" heading from the type template (the heading list is shown with the type in the artifact index). A wrong heading is a "not_found" error — it comes back in the "errors" field and the section stays empty.',
   'mcp.artifact_read.desc': 'Read the current state of a living artifact (parsed, thin JSON — frontmatter + sections + checkboxes). Use it before patching so you have a fresh state and block ids.',
   'mcp.artifact_read.param.id': 'Artifact id (frontmatter "pkm-artefakt", format art-YYYYMMDD-xxxx). Don\'t know it? Use artifact_list.',
-  'mcp.artifact_update.desc': 'Change a living artifact with a structural patch (applied to the fresh state). You don\'t overwrite the whole note — you address a specific field/section/checkbox.\n\nOPERATIONS (ops):\n- set_field {key, value} — a frontmatter field (base keys pkm-artefakt/typ/agent/utworzono are immutable)\n- set_section {heading, text} — replace a section\'s content (no code fences)\n- add_item {heading, text} — add a checkbox at the end of the section\'s list (no code fences, single line)\n- check_item/uncheck_item/remove_item {blockId} — by block id (e.g. "k2")\n\nDo NOT overwrite user-edited sections ("Uwagi usera").',
+  'mcp.artifact_update.desc': 'Change a living artifact with a structural patch (applied to the fresh state). You don\'t overwrite the whole note — you address a specific field/section/checkbox.\n\nOPERATIONS (ops):\n- set_field {key, value} — a frontmatter field (base keys pkm-artefakt/typ/agent/utworzono are immutable)\n- set_section {heading, text} — replace a section\'s content (no code fences)\n- add_item {heading, text} — add a checkbox at the end of the section\'s list (no code fences, single line)\n- check_item/uncheck_item/remove_item {blockId} — by block id (e.g. "k2")\n\nDo NOT overwrite user-edited sections ("User notes").',
   'mcp.artifact_update.param.id': 'Artifact id (frontmatter "pkm-artefakt").',
   'mcp.artifact_update.param.ops': 'List of operations applied in order. Each has an "op" field + parameters (key/value, heading/text, blockId).',
   'mcp.artifact_list.desc': 'List the current agent\'s living artifacts (id, title, type, status). Use it when you don\'t know an artifact id or want to check what is in progress.',
@@ -2442,7 +2465,7 @@ export const en: Record<string, string> = {
   'artifact.block.status': 'Status: {{status}}',
   'artifact.summon.header': '📄 Artifact "{{tytul}}" ({{id}}) — user: {{akcja}}',
   'artifact.summon.action.approve': 'approved the plan — carry out the steps',
-  'artifact.summon.action.revise': 'sent it back with notes — read the "Uwagi usera" section and revise the plan',
+  'artifact.summon.action.revise': 'sent it back with notes — read the "User notes" section and revise the plan',
   'artifact.summon.action.summon': 'summoned you to the artifact',
   'artifact.summon.action.refresh': 'refreshed the artifact state',
   'artifact.chip.active': 'Active artifact',
@@ -2464,6 +2487,28 @@ export const en: Record<string, string> = {
 
 
 
+
+  // Globalna mapa vaulta (`modules/agents/VaultMap.ts`) - zasiewana RAZ, przy pierwszym starcie.
+  // Istniejącego pliku nikt nie podmienia: to dokument usera, nie tekst fabryczny pod podmianę.
+  'starter.vault_map.global': `# Global Vault Map
+
+## System zones
+- **.pkm-assistant/** - PKM Assistant system folder
+  - **agents/** - agent configs, playbooks, memory, and global vault map
+  - **skills/** - skill library
+  - **komunikator/** - inboxes and shared project workspace
+- **.obsidian/** - Obsidian configuration (do not modify)
+- **.pkm-assistant/settings.json** - plugin settings (protected)
+
+## User zones
+> This section will be filled in by the agents.
+
+## Agent zones
+> This section will be filled in by the agents.
+
+## No-Go
+> Folders listed here are off limits to agents and excluded from indexing.
+`,
 
   'starter.vault_map.jaskier': `# Vault Map: Jaskier 🎭
 
@@ -2891,8 +2936,8 @@ Each task's content: the sub-question + instruction: "Investigate on the web (we
 When the workers return:
 - merge findings, drop duplicates
 - show contradictions between sources openly (don't average them out)
-- \`artifact_update\`: section **Ustalenia** (thematic subsections; every claim with quote and URL), section **Białe plamy** (what could NOT be established — collect the workers' GAPS), section **Źródła** (full list of URLs with titles), then **TL;DR** at the end (3-5 sentences of essence)
-- if \`set_section\` on **Białe plamy** returns \`not_found\` (older vault, type without that section) — write them as a \`### Białe plamy\` subsection at the end of **Ustalenia**. Never put \`#\`/\`##\` headings into content (the engine rejects them)
+- \`artifact_update\`: section **Findings** (thematic subsections; every claim with quote and URL), section **Blind spots** (what could NOT be established — collect the workers' GAPS), section **Sources** (full list of URLs with titles), then **TL;DR** at the end (3-5 sentences of essence)
+- if \`set_section\` on **Blind spots** returns \`not_found\` (older vault, type without that section) — write them as a \`### Blind spots\` subsection at the end of **Findings**. Never put \`#\`/\`##\` headings into content (the engine rejects them)
 
 ## Step 6 — follow-up round ("deep dive" only)
 
@@ -2906,7 +2951,7 @@ Set the report status to \`gotowy\`. Tell the user 2-3 sentences of essence + wh
 
 - Every claim in the report has a quote and a source. No backing = it doesn't go in.
 - An honest "not established" beats invented certainty.
-- Never edit the "Uwagi usera" section.`,
+- Never edit the "User notes" section.`,
 
   'factory.template.research_vault.desc': 'Research of your own vault — what you already know about a topic; a report with wikilinks and blind spots. Use when user asks: what do I know about X, search my notes, gather my knowledge.',
   'factory.template.research_vault.pre_q.temat': 'What to research in your vault? (question / topic)',
@@ -2947,8 +2992,8 @@ Each task's content: the sub-question + instruction: "Search ONLY the vault (sea
 
 When the workers return:
 - merge findings, drop duplicates; show contradictions between notes openly (e.g. an old note says something different than a new one — that's valuable information)
-- \`artifact_update\`: section **Ustalenia** (every claim with quote and wikilink), section **Białe plamy** (areas of the question the vault has NOTHING about — the unique value of this research), section **Źródła** (full list of wikilinks), then **TL;DR** at the end (3-5 sentences)
-- if \`set_section\` on **Białe plamy** returns \`not_found\` (older vault, type without that section) — write them as a \`### Białe plamy\` subsection at the end of **Ustalenia**. Never put \`#\`/\`##\` headings into content (the engine rejects them)
+- \`artifact_update\`: section **Findings** (every claim with quote and wikilink), section **Blind spots** (areas of the question the vault has NOTHING about — the unique value of this research), section **Sources** (full list of wikilinks), then **TL;DR** at the end (3-5 sentences)
+- if \`set_section\` on **Blind spots** returns \`not_found\` (older vault, type without that section) — write them as a \`### Blind spots\` subsection at the end of **Findings**. Never put \`#\`/\`##\` headings into content (the engine rejects them)
 
 ## Step 6 — follow-up round ("deep dive" only)
 
@@ -2962,7 +3007,7 @@ Report status → \`gotowy\`. Tell the user 2-3 sentences of essence + where the
 
 - Every claim has a quote from a note and a wikilink. No backing = it doesn't go in.
 - Blind spots are a result, not a failure — name them openly.
-- Never edit the "Uwagi usera" section.`,
+- Never edit the "User notes" section.`,
 
   // Chat ribbon icon tooltip. The "PKM Assistant: " prefix stays - same pattern as its twin
   // `main.agent_sidebar`: unlike the command palette, the ribbon does not prepend the plugin
@@ -2970,4 +3015,71 @@ Report status → \`gotowy\`. Tell the user 2-3 sentences of essence + where the
   'main.ribbon_chat': 'PKM Assistant: Open chat',
   'modal.session_close.discard_confirm_title': 'Discard messages?',
   'subagent.tool_scope_unenforceable': 'Refused: tool "{{name}}" requires the sub-agent\'s folder scope, which this execution path (no tool client) cannot enforce.',
+
+  // ─── Decision tree: rule TEXTS (`prompt.dt.rule.<id>`) ───
+  // The key is derived from the rule `id` in `modules/prompts/decisionTree.ts`
+  // (`'prompt.dt.rule.' + id`); the rule's `text` is a getter, so `t()` runs AFTER `setLocale()`.
+  // ADDRESSES stay identical in both languages: tool names, parameter names
+  // (`typ`/`tytul`/`sekcje`/`scope`/`ephemeral`/`fact`), arrows and brain.md headings
+  // („Na teraz", `## Bieżące`) — those are places in files, not prose to translate.
+  // Artifact section names DO follow the language (`modules/artifacts/artifactSections.ts`).
+  'prompt.dt.rule.deleg_escalation': 'ESCALATION: you know → answer; data missing → gather it (tools or delegate); no result → ask_user; user refused → STOP.',
+  'prompt.dt.rule.deleg_core': 'A lot of data to gather from the vault/web (searching many files, bulk analysis, synthesis) → delegate. Small things (a single read/search) do yourself.',
+  'prompt.dt.rule.art_todo_default': 'A task of 3+ steps → a todo right away (the list of steps) and tick them off one by one — you keep them in front of you and do not lose the thread.',
+  'prompt.dt.rule.art_hierarchy': 'You are proposing a plan/document for the user to approve → artifact_create(typ:"plan", tytul, sekcje with the steps). A note with approval buttons appears in the vault — the user reviews it, corrects it and approves it. Do NOT write artifacts through write.',
+  // `{{user_notes}}` is filled by `fillSectionNames` (`modules/prompts/decisionTree.ts`) from the
+  // artifact section registry — the section name is a patch ADDRESS and has to match the type
+  // template on disk, so it must never be hardcoded here.
+  'prompt.dt.rule.art_existing': 'An existing artifact → artifact_update by its ID (a patch on the fresh state), do not create a new one. NEVER overwrite the "{{user_notes}}" section — that is the user\'s zone: read it, change only your own sections.',
+  'prompt.dt.rule.mem_proactive': 'AT THE END OF THE TURN judge for yourself whether anything DURABLE worth remembering for the future came up — if so, call memory_save without asking the user. SAVE only: durable facts/preferences of the user, rules of cooperation, corrections from the user ("no, do X instead"), project context worth >1 session. Do NOT save: one-off details of the task, things already in brain.md (check the catalogue of ## sections above — do not duplicate), speculation. Better not to save than to litter the memory. Separately: EPHEMERAL "right now" state (what the user is working on TODAY, the current state of the project/environment) is NOT a durable fact → memory_save({ephemeral:true, section:"user"|"environment", content:"..."}) appends it to the „Na teraz" section in brain.md (it does not create a note); when something has gone stale, add remove:"old entry" in the same call to clear it.',
+  'prompt.dt.rule.mem_dedup': 'Brain.md is the memory index — before saving, check the existing notes (the catalogue of ## sections above), do not duplicate topics.',
+  'prompt.dt.rule.skille': 'You have the skill index below — the task matches a skill\'s description → read(path of the recipe) and carry out the steps, without asking. Manual-only skills only at the user\'s explicit request.',
+  'prompt.dt.rule.kom_inbox': 'A ping about unread messages → kom_list() for the headers and kom_read(id) only for the ones that look relevant. Do not read everything in bulk and do not delete mail — the user cleans up the mailbox.',
+  'prompt.dt.rule.mem_save': '"remember that..." → memory_save({name, description, type, content, why, how_to_apply}) — creates a NEW note in brain/ and refreshes brain.md as the index; it does not overwrite existing notes.',
+  'prompt.dt.rule.mem_read': 'When the brain/ listing shows a specific note → read(path:"name.md", scope:"memory"). It reads only the current agent\'s memory.',
+  'prompt.dt.rule.mem_sum': 'Session summaries → read(path:"summaries/L1/file.md", scope:"memory"). It reads only the current agent.',
+  'prompt.dt.rule.mem_delete': '"forget about..." → memory_delete(fact:"exact text/filename/description") removes exactly one note from brain/ and refreshes the index; project_context requires archiving with the lessons.',
+  'prompt.dt.rule.file_mkdir': 'create_folder(path) — creates the folder + its parents. USE IT before write if the folder does not exist.',
+  'prompt.dt.rule.comms_delegate': 'A topic outside your competence → agent_delegate (ALWAYS pass context_summary!).',
+  'prompt.dt.rule.art_plan_todo': 'A complex task to agree on → artifact_create(typ:"plan"); the user comments/approves in the note, you come back and carry it out. Keep your own running progress in a todo.',
+  'prompt.dt.rule.kom_send': 'You want to pass something to another agent "for later" → kom_send(to, subject, content). This is mail, not a conversation — the recipient will read it during their next session. Handing the conversation over urgently NOW → agent_delegate.',
+
+  // ─── Summarizer: the dynamic header of the compression skeleton ───
+  // The skeleton (sections 1-8 + RULES + the candidates block) lives in
+  // `config/default_prompts.ts`; these pieces are assembled on the fly by
+  // `Summarizer.getSummaryPrompt` and injected into `{{DYNAMIC_HEADER}}` /
+  // `{{EMERGENCY_SECTION}}` / `{{SESSION_PATH}}`. The "## 9." section number has to stay in
+  // step with the skeleton's numbering (1-8) in BOTH languages.
+  'summarizer.user_messages_header': 'USER MESSAGES (keep their content — important for continuing):',
+  'summarizer.tools_used': 'TOOLS USED: {{names}}',
+  'summarizer.previous_summary_header': 'PREVIOUS SUMMARY (build on it — extend it, do not replace it):',
+  'summarizer.memory_index_header': 'CURRENT LONG-TERM MEMORY (the brain.md index — do NOT propose candidates that are already here):',
+  'summarizer.task_context_header': '⚠️ ACTIVE TASK AT THE MOMENT OF COMPRESSION (CRITICAL — the agent MUST continue it):',
+  'summarizer.emergency_section': '## 9. ⚠️ TASK IN PROGRESS (CRITICAL)\nWhat EXACTLY was the agent doing at the moment of compression? What was the next step? Which tools was it about to call?\nThe agent MUST know where to start after resuming — describe it in as much detail as possible. Include the active TODO/PLAN if there is one.',
+  'summarizer.emergency_warning': '⚠️ THIS IS AN EMERGENCY COMPRESSION — the agent was IN THE MIDDLE OF A TASK. The "Task in progress" section is THE MOST IMPORTANT one. After resuming, the agent has to know EXACTLY what to do next.',
+  'summarizer.session_path': '📂 The full conversation is saved in: {{path}} — the agent can read it to verify details.',
+
+  // ─── Sub-agent task frame: the blocks composed in code ───
+  // The skeleton itself (header + AGENT MEMORY + RULES) lives in
+  // `modules/sub-agents/framePrompt.ts`; these pieces are assembled on the fly by
+  // `SubAgentRunner._buildTaskPrompt` and injected into `{{METHOD}}`, `{{SCOPE}}`, `{{BUDGET}}`
+  // and `{{DESCRIPTION}}`. The `SCOPE:` header and the tool names (`delegate`/`agent_delegate`,
+  // `search/read/list`, `scope="memory"`) are ADDRESSES — identical in both languages.
+  'subagent.frame.method_truncated': '[... instruction truncated to {{count}} characters]',
+  'subagent.frame.scope_folders_label': 'Folders',
+  'subagent.frame.scope_frontmatter_label': 'Frontmatter',
+  'subagent.frame.scope_sections_label': 'Sections',
+  'subagent.frame.scope_pinned_label': 'Pinned notes',
+  'subagent.frame.scope_no_folders': 'no explicit folders',
+  'subagent.frame.scope_no_frontmatter': 'no frontmatter',
+  'subagent.frame.scope_no_sections': 'no explicit sections',
+  'subagent.frame.scope_no_pinned': 'no pinned notes',
+  'subagent.frame.scope_folders_enforced': '(ENFORCED technically — an attempt to reach outside them will be refused)',
+  'subagent.frame.budget_header': 'BUDGET:',
+  'subagent.frame.budget_iterations': '- Tool iterations available: {{count}}',
+  'subagent.frame.budget_tool_result': '- Max size of a tool result: {{value}}',
+  'subagent.frame.budget_delegate': '- Exception for `delegate`/`agent_delegate` (a sub-agent result is a deliverable, not a tool dump): {{value}}',
+  'subagent.frame.budget_chars': '{{count}} characters',
+  'subagent.frame.budget_unlimited': 'unlimited',
+  'subagent.frame.default_description': 'assistant of the agent',
 };

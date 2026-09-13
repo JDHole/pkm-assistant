@@ -105,6 +105,30 @@ export class SidebarNav {
     }
 
     /**
+     * Podmień parametry we WSZYSTKICH wpisach stosu pasujących do predykatu.
+     *
+     * Po co: parametry wpisu są zamrożone w chwili `push()`. Gdy byt, który wpis adresuje,
+     * zmieni tożsamość (agent przemianowany: `{ agentName: 'Agent1' }` → `'Atlas'`), zwykły
+     * `refresh()` przerysowuje widok ze STARYM parametrem i user dostaje „Nie znaleziono
+     * agenta" - także po cofnięciu się na dowolny głębszy wpis stosu, nie tylko na wierzchu.
+     * Dlatego przelot idzie po CAŁYM stosie, nie po jego szczycie.
+     *
+     * Czysta operacja na tablicy: zero renderu, zero DOM-u. Wołacz sam decyduje, czy po niej
+     * odświeżyć widok (`refresh()`), stąd zwrotka z liczbą zmienionych wpisów.
+     *
+     * @returns liczba podmienionych wpisów (0 = nic do przerysowania)
+     */
+    updateParams(predicate: (params: ViewParams) => boolean, patch: ViewParams): number {
+        let changed = 0;
+        for (const entry of this.stack) {
+            if (!predicate(entry.params)) continue;
+            entry.params = { ...entry.params, ...patch };
+            changed++;
+        }
+        return changed;
+    }
+
+    /**
      * Re-render current top-of-stack view.
      */
     refresh(): void {

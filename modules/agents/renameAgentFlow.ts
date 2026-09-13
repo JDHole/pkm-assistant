@@ -139,7 +139,11 @@ export async function renameAgentOnDisk(
 
     const oldMemoryDir = memoryDirFor(oldSafeName);
     const newMemoryDir = memoryDirFor(newSafeName);
-    const oldFilePath = agent.filePath;
+    // Druga warstwa po naprawie `AgentManager.createAgent` (2.2.5): gdyby `filePath` znowu kiedyś
+    // był pusty, stary YAML i tak zostanie skasowany - ścieżkę odtwarzamy ze slugu starej nazwy,
+    // czyli dokładnie tak, jak policzył ją `AgentLoader.saveAgent`. `remove()` nieistniejącego
+    // pliku jest tu nieszkodliwe: kasacja siedzi w best-effort try/catch niżej.
+    const oldFilePath = agent.filePath || `${deps.agentsPath}/${oldSafeName}.yaml`;
 
     // Kolizja: nazwa zajęta w pamięci (built-in LUB custom), plik pod nowym slugiem już istnieje
     // na dysku (osierocony plik), ALBO osierocony folder pamięci po skasowanym agencie pod tym

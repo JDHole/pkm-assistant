@@ -1,12 +1,14 @@
 import { Setting } from 'obsidian';
 import { t } from '../../core/i18n/index.js';
 // Factory work-prompts surfaced here for "insert factory" / "restore default". Imported
-// through each module's barrel (golden rule - no deep imports). The barrels re-export only the pure
-// string constants, so no heavy graph is pulled in beyond what the plugin already loads.
-import { DEFAULT_SAVE_SESSION_PROMPT, DEFAULT_ARCHIVE_PROMPT, DEFAULT_SUMMARY_PROMPT } from '../memory/index.js';
+// through each module's barrel (golden rule - no deep imports). The barrels expose pure string
+// accessors, so no heavy graph is pulled in beyond what the plugin already loads. Od 2.2.5 to
+// FUNKCJE, nie stałe - tekst fabryczny idzie za językiem interfejsu, a `factory: () => …` niżej
+// woła je dopiero przy renderze/kliknięciu, więc nic nie zamraża języka.
+import { factoryWorkPrompt } from '../memory/index.js';
 // Szkielet kompresji mieszka w `config/` (nie w barrelu czatu) - przecięta krawędź shell→chat.
-import { DEFAULT_COMPRESSION_PROMPT } from '../../config/default_prompts.js';
-import { DEFAULT_SUBAGENT_FRAME_PROMPT } from '../sub-agents/index.js';
+import { defaultCompressionPrompt } from '../../config/default_prompts.js';
+import { defaultSubAgentFramePrompt } from '../sub-agents/index.js';
 import { FACTORY_DEFAULTS } from '../prompts/index.js';
 import { setSvgLabel } from '../../modules/crystal-soul/index.js';
 
@@ -27,11 +29,11 @@ import { setSvgLabel } from '../../modules/crystal-soul/index.js';
 
 // key → factory text + whether the prompt has a hard parser contract (warning shown).
 const WORK_PROMPTS = [
-    { key: 'compression_prompt', factory: () => DEFAULT_COMPRESSION_PROMPT, warn: true },
-    { key: 'save_session_prompt', factory: () => DEFAULT_SAVE_SESSION_PROMPT, warn: true },
-    { key: 'archive_prompt', factory: () => DEFAULT_ARCHIVE_PROMPT, warn: true },
-    { key: 'summary_prompt', factory: () => DEFAULT_SUMMARY_PROMPT, warn: true },
-    { key: 'subagent_frame_prompt', factory: () => DEFAULT_SUBAGENT_FRAME_PROMPT, warn: true },
+    { key: 'compression_prompt', factory: () => defaultCompressionPrompt(), warn: true },
+    { key: 'save_session_prompt', factory: () => factoryWorkPrompt('save_session'), warn: true },
+    { key: 'archive_prompt', factory: () => factoryWorkPrompt('archive'), warn: true },
+    { key: 'summary_prompt', factory: () => factoryWorkPrompt('summary'), warn: true },
+    { key: 'subagent_frame_prompt', factory: () => defaultSubAgentFramePrompt(), warn: true },
 ];
 
 // Factory prompt sections - resolved from FACTORY_DEFAULTS (getters → current locale).

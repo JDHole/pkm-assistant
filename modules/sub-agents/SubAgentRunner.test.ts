@@ -2,7 +2,8 @@ import test from 'ava';
 import { SubAgentRunner as RuntimeSubAgentRunner } from './SubAgentRunner.js';
 import { SubTaskRegistry } from './SubTaskRegistry.js';
 // ⚠️ i18n importujemy jako `tr` — `t` to obiekt asercji AVA (konwencja repo).
-import { t as tr } from '../../core/i18n/index.js';
+import { t as tr, setLocale } from '../../core/i18n/index.js';
+import { defaultSubAgentFramePrompt } from './framePrompt.js';
 import { DEFAULT_LIMITS } from '../../config/limits.js';
 // Kontrakt pliku sesji: zdarzenie biegu musi przejść przez pisarza I czytnik.
 import { formatSessionEvent, parseActiveSession } from '../memory/activeSessionFormat.js';
@@ -48,7 +49,12 @@ test('SubAgentRunner returns readable error when stream throws object-like messa
 
 // --- THIN prompt template (brak brain injection; pull zamiast push) ---
 
-test('_buildTaskPrompt is thin: no brain push, memory PULL hint + budget + rules', async t => {
+test.serial('_buildTaskPrompt is thin: no brain push, memory PULL hint + budget + rules', async t => {
+    // Asercje na polskim korpusie ramy — od 2.2.5 rama idzie za językiem interfejsu,
+    // a domyślnym locale procesu testowego jest 'en'.
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
+
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: () => null },
         app: {},
@@ -86,7 +92,9 @@ test('_buildTaskPrompt renders identically regardless of role label', async t =>
 // Cap ISTNIEJE i TNIE — to jest intencja tego testu. Wartość bierze się z
 // `config/limits.js` (`subagent_prompt_max_chars`), a nie z liczby wpisanej w test,
 // bo user może ją zmienić w Ustawieniach → Limity.
-test('_buildTaskPrompt soft-caps config.prompt at the configured budget', async t => {
+test.serial('_buildTaskPrompt soft-caps config.prompt at the configured budget', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
     const cap = DEFAULT_LIMITS.subagent_prompt_max_chars;
     const runner = new SubAgentRunner({ toolRegistry: { getTool: () => null }, app: {}, plugin: {} });
     const big = 'y'.repeat(cap + 3000);
@@ -101,7 +109,9 @@ test('_buildTaskPrompt soft-caps config.prompt at the configured budget', async 
     t.false(prompt.includes('y'.repeat(cap + 1)));
 });
 
-test('budżet instrukcji suba jedzie z ustawień usera (override tnie mocniej)', async t => {
+test.serial('budżet instrukcji suba jedzie z ustawień usera (override tnie mocniej)', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: () => null },
         app: {},
@@ -117,7 +127,9 @@ test('budżet instrukcji suba jedzie z ustawień usera (override tnie mocniej)',
     t.false(prompt.includes('y'.repeat(1501)));
 });
 
-test('blok BUDŻET nie kłamie — pokazuje limity, którymi realnie karmimy pętlę', async t => {
+test.serial('blok BUDŻET nie kłamie — pokazuje limity, którymi realnie karmimy pętlę', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: () => null },
         app: {},
@@ -1436,4 +1448,118 @@ test('config.min_iterations custom suba REALNIE wymusza kontynuację (nie tylko 
 
     t.is(calls, 2, 'z min_iterations=2 model MUSI zostać zawołany dwa razy — default=1 kończyłby po pierwszym');
     t.is(result.stoppedBy, 'natural');
+});
+
+// ─── Rama zadania suba idzie za językiem interfejsu (2.2.5) ───
+//
+// Rama i bloki składane w kodzie (METHOD/SCOPE/BUDGET) były inline PL dla OBU locale, więc
+// anglojęzyczny user dostawał sub-agenta z polskim promptem systemowym. Nic w kodzie NIE
+// parsuje tej ramy ani odpowiedzi suba po tekście — status biegu liczy `toolResultStatus`
+// (flagi `isError`/`success`), więc tłumaczenie jest bezpieczne. Adresy zostają dosłowne.
+
+/** Rama zbudowana na czystym runnerze — jeden kształt wejścia dla wszystkich testów niżej. */
+async function framePrompt(config: Record<string, unknown> = { name: 'worker', tools: [] }): Promise<string> {
+    const runner = new SubAgentRunner({ toolRegistry: { getTool: () => null }, app: {}, plugin: {} });
+    return runner._buildTaskPrompt({ name: 'Jaskier' }, config);
+}
+
+test.serial('rama suba renderuje się PO ANGIELSKU dla locale en - zero polszczyzny', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+
+    const prompt = await framePrompt({
+        name: 'worker', tools: [],
+        scope: { folders: ['30_X/'], sections: [], pinned_notes: [], frontmatter: {} },
+    });
+
+    t.true(prompt.startsWith('You are the sub-agent "worker" of agent Jaskier'), prompt.slice(0, 60));
+    t.true(prompt.includes('AGENT MEMORY:'), 'wskazówka pull po angielsku');
+    t.true(prompt.includes('BUDGET:'), 'nagłówek bloku budżetu po angielsku');
+    t.true(prompt.includes('RULES:'), 'lista zasad po angielsku');
+    t.true(prompt.includes('- Folders: 30_X/'), 'etykiety SCOPE po angielsku');
+    t.true(prompt.includes('ENFORCED technically'), 'nota o egzekwowaniu folderów po angielsku');
+    t.true(prompt.includes('Pinned notes: no pinned notes'), 'wartości puste SCOPE po angielsku');
+    t.true(prompt.includes('characters'), 'jednostka budżetu po angielsku');
+
+    const polskie = prompt.match(/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/g);
+    t.is(polskie, null, `polskie znaki w angielskiej ramie: ${polskie?.join('')}`);
+});
+
+test.serial('rama suba renderuje się PO POLSKU dla locale pl', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
+
+    const prompt = await framePrompt({
+        name: 'worker', tools: [],
+        scope: { folders: ['30_X/'], sections: [], pinned_notes: [], frontmatter: {} },
+    });
+
+    t.true(prompt.startsWith('Jesteś sub-agentem "worker" agenta Jaskier'), prompt.slice(0, 60));
+    t.true(prompt.includes('PAMIĘĆ AGENTA:'));
+    t.true(prompt.includes('BUDŻET:'));
+    t.true(prompt.includes('ZASADY:'));
+    t.true(prompt.includes('- Foldery: 30_X/'));
+    t.true(prompt.includes('EGZEKWOWANE technicznie'));
+    t.true(prompt.includes('znaków'));
+    t.false(prompt.includes('You are the sub-agent'));
+});
+
+test.serial('ADRESY ramy są IDENTYCZNE w obu językach', async t => {
+    t.teardown(() => setLocale('en'));
+
+    // Napisy, które NIE są prozą: argument narzędzia, nazwy narzędzi i nagłówek bloku SCOPE.
+    // Rozjazd tutaj = model dostaje instrukcję wołania czegoś, czego nie ma.
+    const ADRESY = ['scope="memory"', 'search/read/list', 'SCOPE:', '`delegate`/`agent_delegate`'];
+
+    setLocale('pl');
+    const pl = await framePrompt({ name: 'w', tools: [], scope: { folders: ['A/'] } });
+    setLocale('en');
+    const en = await framePrompt({ name: 'w', tools: [], scope: { folders: ['A/'] } });
+
+    for (const adres of ADRESY) {
+        t.true(pl.includes(adres), `pl: brak ${adres}`);
+        t.true(en.includes(adres), `en: brak ${adres}`);
+    }
+    t.not(pl, en, 'poza adresami rama ma się realnie różnić');
+});
+
+test.serial('placeholdery ramy fabrycznej są IDENTYCZNE w obu językach i wszystkie wypełnione', async t => {
+    t.teardown(() => setLocale('en'));
+
+    // Lista literalna: token zgubiony w tłumaczeniu = dziura, której `_buildTaskPrompt` nie wypełni.
+    const OCZEKIWANE = ['AGENT_NAME', 'BUDGET', 'DESCRIPTION', 'METHOD', 'SCOPE', 'SUB_NAME'];
+    const tokeny = (s: string) => [...new Set([...s.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]))].sort();
+
+    t.deepEqual(tokeny(defaultSubAgentFramePrompt('pl')), OCZEKIWANE);
+    t.deepEqual(tokeny(defaultSubAgentFramePrompt('en')), OCZEKIWANE);
+    // Nieznany kod języka = angielski, dokładnie jak `t()`.
+    t.is(defaultSubAgentFramePrompt('de'), defaultSubAgentFramePrompt('en'));
+
+    for (const locale of ['pl', 'en']) {
+        setLocale(locale);
+        const prompt = await framePrompt({ name: 'w', tools: [], description: 'd', prompt: 'm', scope: { folders: ['A/'] } });
+        t.deepEqual(tokeny(prompt), [], `${locale}: placeholder wyciekł do promptu`);
+    }
+});
+
+test.serial('override subagent_frame_prompt (agent > global > fabryka) wygrywa w obu językach', async t => {
+    t.teardown(() => setLocale('en'));
+
+    const GLOBAL = 'GLOBALNA RAMA {{SUB_NAME}} / {{AGENT_NAME}} {{DESCRIPTION}}{{METHOD}}{{SCOPE}}{{BUDGET}}';
+    const AGENT = 'AGENTOWA RAMA {{SUB_NAME}} / {{AGENT_NAME}} {{DESCRIPTION}}{{METHOD}}{{SCOPE}}{{BUDGET}}';
+    const settings = { pkmAssistant: { promptDefaults: { subagent_frame_prompt: GLOBAL } } };
+
+    for (const locale of ['pl', 'en']) {
+        setLocale(locale);
+
+        const globalny = new SubAgentRunner({ toolRegistry: { getTool: () => null }, app: {}, plugin: { env: { settings } } });
+        const zGlobalu = await globalny._buildTaskPrompt({ name: 'Jaskier' }, { name: 'w', tools: [] });
+        t.true(zGlobalu.startsWith('GLOBALNA RAMA w / Jaskier'), `${locale}: global bije fabrykę`);
+        t.false(zGlobalu.includes('Jesteś sub-agentem'), `${locale}: fabryczna PL zniknęła`);
+        t.false(zGlobalu.includes('You are the sub-agent'), `${locale}: fabryczna EN zniknęła`);
+
+        const zAgenta = await globalny._buildTaskPrompt(
+            { name: 'Jaskier', subagent_frame_prompt: AGENT }, { name: 'w', tools: [] });
+        t.true(zAgenta.startsWith('AGENTOWA RAMA w / Jaskier'), `${locale}: agent bije global`);
+    }
 });

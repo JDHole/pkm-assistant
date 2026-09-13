@@ -88,7 +88,7 @@ Import z zewnątrz tylko przez `modules/memory/index.js`.
 | `streamToComplete` | Stream -> complete z opcjonalnym `{onChunk, signal, watchdog}`. |
 | `RetrievalEngine` | Silnik narzędzia `search` - patrz sekcja "Odczyt pamięci" niżej. |
 | `CostLog`, `EmbeddingHelper` | Koszt operacji memory/sub-agent + helper wektoryzacji. |
-| `DEFAULT_SAVE_SESSION_PROMPT`, `DEFAULT_ARCHIVE_PROMPT`, `DEFAULT_SUMMARY_PROMPT` | Fabryczne prompty robocze (`workPrompts.ts`), owned przez memory. |
+| `factoryWorkPrompt(kind, locale?)` + typ `WorkPromptKind` | Fabryczne prompty robocze (`workPrompts.ts`), owned przez memory. FUNKCJA, nie stałe - patrz gotcha "prompty robocze idą za językiem interfejsu". |
 | `registerSettings` | Rejestracja sekcji "Pamięć i kontekst" w Settings. |
 
 Sporo pomocniczych symboli (helpery listujące, `StateManager`, większość `BrainIndex`,
@@ -208,11 +208,10 @@ nadal tworzy kopię przy zmianie pliku z ręczną linią w strefie `managed`, te
 redundantna siatka bezpieczeństwa, bo treść i tak przeżywa w samym `brain.md`.
 
 **Fabryczne prompty robocze** (`workPrompts.ts`, owned przez memory, żeby workflow miał własne
-defaulty bez cyklu memory→agents): `DEFAULT_SAVE_SESSION_PROMPT` / `DEFAULT_ARCHIVE_PROMPT` /
-`DEFAULT_SUMMARY_PROMPT`. Konsumowane przez `resolveWorkPrompt(agent, key, settings, factory)`
-(`core/`) - łańcuch **per-agent > global (Settings→Prompt) > factory**. Override musi zachować
-kształt outputu (JSON `new_notes`, `{{LEVEL}}`, `merges`/`deletions`) - parsery workflow na tym
-stoją.
+defaulty bez cyklu memory→agents): `factoryWorkPrompt('save_session' | 'archive' | 'summary')`.
+Konsumowane przez `resolveWorkPrompt(agent, key, settings, factory)` (`core/`) - łańcuch
+**per-agent > global (Settings→Prompt) > factory**. Override musi zachować kształt outputu
+(JSON `new_notes`, `{{LEVEL}}`, `merges`/`deletions`) - parsery workflow na tym stoją.
 
 ### `brain/archive/`
 
@@ -369,6 +368,20 @@ Flow:
     `getActiveMemory()` zostaje dla akcji usera na aktywnej zakładce (zapis ręczny, `/save
     session`, UI).
 - ⚠️ **Nowe user-facing stringi idą do `core/i18n/pl.ts` i `core/i18n/en.ts`.**
+- ⚠️ **Prompty robocze idą za JĘZYKIEM INTERFEJSU i liczą się LENIWIE.** Od 2.2.5 każdy
+  z trzech promptów (`save_session`/`archive`/`summary`) ma wersję PL i EN w `workPrompts.ts`,
+  a wołacz bierze je WYŁĄCZNIE przez `factoryWorkPrompt(kind)`. Stałe `DEFAULT_*_PROMPT` zostały
+  skasowane celowo: `setLocale()` leci z `src/main.ts` PO załadowaniu modułów, więc stała
+  wybrałaby język przy imporcie i zamroziła go na zawsze (domyślna wartość parametru `locale`
+  liczy się dopiero przy wywołaniu - dlatego funkcja jest bezpieczna).
+  **Co NIE tłumaczy się razem z prozą** (to ADRESY, wpisane na sztywno w `BrainIndex.ts` /
+  `SaveSessionWorkflow.ts` / parserach): nagłówki `## Bieżące`, `## User`, `## Preferencje`,
+  `## Workflow`, `## Projekty i referencje`, sekcje „Na teraz: User" / „Na teraz: Środowisko",
+  klucze JSON (`brain_updates`, `new_notes`, `na_teraz.*`, `merges`, `deletions`, `target_*`,
+  `merged_content`, `lessons_extracted`), wartości `type` i token `{{LEVEL}}`. Nagłówki `##`
+  W WYNIKU promptu `summary` (Kluczowe tematy / Key topics …) nikt nie parsuje - te SIĘ
+  tłumaczą. Strażnicy: `workPrompts.test.ts` (parytet placeholderów z literalną listą per
+  prompt, polskie nagłówki w angielskim tekście, łańcuch resolvera w obu językach).
 - ⚠️ **Stopka notatki `brain/` (`**Dlaczego:**` / `**Jak stosować:**` + zdania domyślne) idzie z
   i18n** (`memory.note.why_label` / `how_label` / `why_unspecified` / `how_default`). Kanoniczny
   pisarz to `AgentMemory._buildBrainNoteContent` / `MemorySaveTool.buildNoteContent` (oba muszą

@@ -20,13 +20,14 @@ modules/prompts/
 ├── index.js            # publiczne drzwi
 ├── CLAUDE.md            # ten plik
 ├── PromptBuilder.js     # builder + _buildDecisionTree (chudy rdzeń) + _buildSkillIndex + _addArtifactContext
-├── decisionTree.js      # CORE_RULES / EXTENDED_RULES / DECISION_TREE_* + resolve/split (pure, testowalne)
+├── decisionTree.js      # CORE_RULES / EXTENDED_RULES / DECISION_TREE_* (treści z i18n, leniwie) + resolve/split (pure, testowalne)
 ├── skillIndex.js        # buildSkillIndex - indeks skilli z budżetem (pure, testowalne)
 └── artifactIndex.js     # indeks typów artefaktów (opis + nagłówki sekcji szablonu) + aktywny artefakt (pure, testowalne)
 ```
 
-`decisionTree.js`, `skillIndex.js` i `artifactIndex.js` żyją jako **moduły pure** (zależność
-tylko od i18n, node-testowalne), bo `PromptBuilder` przez łańcuch importów wciąga `obsidian`
+`decisionTree.js`, `skillIndex.js` i `artifactIndex.js` żyją jako **moduły pure** (zależności:
+i18n + barrel `modules/artifacts`, sam bez `obsidian`; node-testowalne), bo `PromptBuilder`
+przez łańcuch importów wciąga `obsidian`
 i nie da się go testować node'em - logika rdzenia/indeksów żyje osobno i ma własne pokrycie
 (`decisionTree.test.ts`, `skillIndex.test.ts`, `artifactIndex.test.ts`).
 
@@ -102,8 +103,8 @@ daty. Guard test: `PromptBuilder.cache.test.ts` pilnuje, żeby `new Date()` nie 
 | `DECISION_TREE_DEFAULTS` | `CORE_RULES` (tier core) + `EXTENDED_RULES` (tier extended), re-eksport z `decisionTree.js`. Źródło UI overridów i resolvera |
 | typy `PromptSkill`, `DecisionTreeOverride`, `DecisionTreeOverrides`, `DecisionTreeRule` | Kształty danych dla konsumentów UI |
 
-Pure helpery `resolveDecisionTreeInstructions` / `splitDecisionTreeRules` / `buildSkillIndex`
-NIE są w barrelu - wewnętrzne, importowane wprost przez `PromptBuilder` i przez testy.
+Pure helpery `resolveDecisionTreeInstructions` / `splitDecisionTreeRules` / `buildSkillIndex` /
+`ruleTextKey` NIE są w barrelu - wewnętrzne, importowane wprost przez `PromptBuilder` i przez testy.
 
 ---
 
@@ -116,8 +117,9 @@ NIE są w barrelu - wewnętrzne, importowane wprost przez `PromptBuilder` i prze
 | `getTokenCount` | `core/utils/tokenCounter.js` | Estymata tokenów prompta |
 | `fenceUntrusted` | `core/security/promptFence.js` (barrel `core/index.js`) | Ogrodzenie niezaufanej treści w bloku D - patrz Gotcha niżej |
 | Dane agenta | `modules/agents` przez `AgentManager` | `_buildIdentity` = tylko `name`+`vault`; `personality` wchodzi wprost; `agent.language` steruje regułą językową w `_buildRules` |
-| `t`, `getDateLocale` | `core/i18n/index.js` | i18n PL/EN dla wszystkich instrukcji + format daty + `t(key, params, forcedLocale)` dla reguły językowej per agent |
+| `t`, `getDateLocale` | `core/i18n/index.js` | i18n PL/EN dla wszystkich instrukcji (w tym TREŚCI reguł drzewa: `prompt.dt.rule.<id>`) + format daty + `t(key, params, forcedLocale)` dla reguły językowej per agent |
 | `parseArtifact` | `modules/artifacts` (barrel, node-safe) | `artifactIndex.js` liczy nagłówki sekcji szablonu TYM SAMYM parserem, którego patcher używa w `findSection` - własny regex rozjechałby się z silnikiem |
+| `artifactSection`, `ARTIFACT_SECTION_NAMES` | `modules/artifacts` (barrel, node-safe) | Nazwy sekcji wbudowanych typów są PL albo EN (język interfejsu). `decisionTree.js` wypełnia nimi placeholdery `{{user_notes}}`/`{{steps}}`/… w regułach, `artifactIndex.js` - w `prompt.dt.active_artifact` |
 
 **Kto importuje `modules/prompts`:**
 
@@ -154,12 +156,33 @@ NIE są w barrelu - wewnętrzne, importowane wprost przez `PromptBuilder` i prze
 - ⚠️ **`requiredGroups` na grupach drzewa nie istnieje.** Render (`_buildDecisionTree`) gatuje
   WYŁĄCZNIE po `ctx.availableToolNames` (dostępność narzędzia) i `ctx.skills` (skille) -
   grupy niosą tylko `label`+`order` dla UI overridów w `profile_prompt`.
-- 🟡 **Teksty instrukcji drzewa są INLINE PL, nie i18n.** `CORE_RULES` / `EXTENDED_RULES`
-  (`decisionTree.js`) mają `text` jako twarde polskie stringi - drzewo to polski korpus
-  promptu, `def.text` NIE przechodzi przez `t()`. Przez i18n idą tylko **etykiety
-  strukturalne**: `dt.group.*`, `prompt.dt.*` (nagłówki, indeks skilli, furtka) oraz opisy
-  narzędzi `mcp.*.desc`. Dodając regułę do rdzenia/furtki - pisz `text` po polsku inline;
-  guidance „kiedy użyć narzędzia" pisz w `mcp.<tool>.desc` (pl+en), nie w drzewie.
+- ⚠️ **Treści reguł drzewa idą przez i18n i są LENIWE.** Od 2.2.5 `CORE_RULES` /
+  `EXTENDED_RULES` (`decisionTree.js`) nie niosą napisów: definicja to `{id, group, tool,
+  requiresSkills?}`, a treść mieszka w słownikach pod kluczem **`prompt.dt.rule.<id>`**
+  (`ruleTextKey(id)`, pl + en). Pole `text` na regule jest **getterem** - woła
+  `fillSectionNames(t(...))` dopiero W CHWILI ODCZYTU. Musi tak być: `DECISION_TREE_DEFAULTS`
+  powstaje na poziomie modułu, a `setLocale()` leci dopiero z `src/main.ts`, więc napis
+  policzony przy imporcie zamroziłby angielski dla wszystkich.
+  **⛔ Nie rób `{ ...rule }` na tych obiektach i nie wkładaj `rule.text` do stałej modułowej** -
+  spread liczy getter na miejscu. Kopiowanie jest legalne tylko w funkcji wołanej przy renderze
+  (`resolveDecisionTreeInstructions`) albo przy rysowaniu UI (`profile_prompt`).
+  Klucz jest SKŁADANY, więc skaner literałów `t('...')` z `core/i18n/parity.test.ts` go nie
+  widzi - parytetu pilnuje test „każda reguła ma treść w OBU słownikach"
+  (`decisionTree.test.ts`), tam też stoi pin liczby reguł. **Dokładasz regułę → dopisz klucz do
+  pl.ts I en.ts.** Guidance „kiedy użyć narzędzia" nadal pisz w `mcp.<tool>.desc`, nie w drzewie.
+- ⚠️ **NAZWY SEKCJI ARTEFAKTU zostają placeholderem także w słowniku.** Nagłówek sekcji to ADRES patcha
+  (`set_section`/`add_item` trafiają po nazwie), a szablon typu na dysku jest od 2.2.5 polski
+  albo angielski. Napis wpisany na sztywno kazałby modelowi chronić/wypełniać sekcję,
+  której w notatce nie ma. Dlatego **wartość słownikowa** `prompt.dt.rule.art_existing` niesie
+  `{{user_notes}}` (analogicznie `{{steps}}`, `{{goal}}`, … - klucze rejestru
+  `ARTIFACT_SECTION_NAMES`), a `fillSectionNames()` wypełnia je z `artifactSection()` -
+  **przy każdym odczycie**: raz w getterze `text` (tekst fabryczny) i raz w
+  `resolveDecisionTreeInstructions` (teksty NADPISANE przez usera i reguły `custom_*`;
+  wypełnianie jest idempotentne). Nieznany placeholder przechodzi nietknięty - to nie jest
+  silnik szablonów. `t()` bez `params` nie rusza `{{…}}`, więc placeholder dojeżdża z i18n cały.
+  Ten sam mechanizm w `artifactIndex.js` dla `prompt.dt.active_artifact`
+  (słownik trzyma `{{user_notes}}`, wołacz podaje wartość). **Nazywasz sekcję w regule albo
+  w kluczu `prompt.dt.*` - użyj placeholdera, nie napisu.**
 - ⚠️ **Playbook (onboarding) nie jest częścią tego modułu.** `PlaybookManager` (compile
   playbook + vault map per agent) mieszka w `modules/onboarding/` - konceptualnie inny
   koncern, choć historycznie bywał tu wymieniany.

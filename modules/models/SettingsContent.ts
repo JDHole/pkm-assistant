@@ -228,7 +228,7 @@ export async function renderModelsSection(container: HTMLElement, ctx: ModelsSec
         for (const [platform, def] of tokenDefaults) {
             new Setting(container)
                 .setName(`max_tokens: ${platform}`)
-                .setDesc('Zaawansowane: domyślny limit odpowiedzi dla tej platformy.')
+                .setDesc(t('settings.max_tokens_platform_desc'))
                 .addText(text => {
                     text
                         .setPlaceholder(String(def))
@@ -243,7 +243,7 @@ export async function renderModelsSection(container: HTMLElement, ctx: ModelsSec
 
         new Setting(container)
             .setName('Ollama keep_alive')
-            .setDesc('Jak długo Ollama ma trzymać model w RAM po odpowiedzi.')
+            .setDesc(t('settings.ollama_keep_alive_desc'))
             .addText(text => {
                 text
                     .setPlaceholder('60m')

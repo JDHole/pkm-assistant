@@ -619,8 +619,14 @@ export interface PluginItemViewClass {
     readonly displayText: string;
     /** Ikona. */
     readonly iconName: string;
-    /** Rejestruje widok + komendę „otwórz". */
+    /** Rejestruje TYP widoku (w `onload()`, przed odtworzeniem zakładek przez Obsidiana). */
     register(plugin: PluginApi): void;
+    /**
+     * Dodaje komendę palety „otwórz ten widok". OSOBNO od `register`, bo Obsidian zapamiętuje
+     * nazwę komendy w chwili `addCommand` - musi więc lecieć PO `setLocale()`
+     * (`PluginBase.registerCommands()`), inaczej paleta zostaje po angielsku.
+     */
+    registerOpenCommand(plugin: PluginApi): void;
     /** Otwiera widok; no-op, gdy workspace nie dał liścia. */
     open(workspace: unknown, state?: Record<string, unknown>, active?: boolean): Promise<void>;
     new (leaf: unknown, plugin: PluginApi): object;

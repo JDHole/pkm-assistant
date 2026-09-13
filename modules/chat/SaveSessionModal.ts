@@ -189,11 +189,10 @@ export class SaveSessionModal extends Modal {
         const { contentEl } = this;
         contentEl.empty();
 
-        contentEl.createEl('h2', { text: t('modal.save_session.title') || 'Zapisz sesję' });
+        contentEl.createEl('h2', { text: t('modal.save_session.title') });
         contentEl.createEl('p', {
             cls: 'setting-item-description',
             text: t('modal.save_session.info', { agent: this.agentName, count: this.messageCount })
-                || `Sesja ${this.agentName}: ${this.messageCount} wiadomości.`
         });
 
         if (this.state === 'loading') {
@@ -268,24 +267,23 @@ export class SaveSessionModal extends Modal {
     _renderProposals(parent: HTMLElement): void {
         if (this.llmDriven) {
             const banner = parent.createDiv({ cls: 'cs-save-session__llm-banner pkm-review__banner' });
-            banner.textContent = t('modal.save_session.llm_driven', { agent: this.agentName })
-                || `Propozycje wygenerowane przez ${this.agentName} na bazie transcriptu + brain.md.`;
+            banner.textContent = t('modal.save_session.llm_driven', { agent: this.agentName });
         }
 
         this._renderNotesColumn(parent, this.notes);
         this._renderNaTerazColumn(parent, this.brainUpdates);
 
         const actions = parent.createDiv({ cls: 'cs-save-session__actions pkm-review__actions' });
-        this._button(actions, t('modal.save_session.archive') || 'Archiwizuj sesję', 'archive');
-        this._button(actions, t('modal.save_session.archive_close') || 'Archiwizuj i zamknij chat', 'archive_close');
-        this._button(actions, t('modal.save_session.archive_new') || 'Archiwizuj i nowa sesja', 'archive_new');
-        this._button(actions, t('generic.cancel') || 'Anuluj', 'cancel');
+        this._button(actions, t('modal.save_session.archive'), 'archive');
+        this._button(actions, t('modal.save_session.archive_close'), 'archive_close');
+        this._button(actions, t('modal.save_session.archive_new'), 'archive_new');
+        this._button(actions, t('generic.cancel'), 'cancel');
     }
 
     _renderNotesColumn(parent: HTMLElement, notes: SessionNote[]): void {
-        const wrap = this._columnWrap(parent, '📒', t('modal.save_session.col_notes') || 'Nowe notatki w brain/', notes.length);
+        const wrap = this._columnWrap(parent, '📒', t('modal.save_session.col_notes'), notes.length);
         if (notes.length === 0) {
-            this._emptyState(wrap, t('modal.save_session.no_notes') || 'Brak nowych notatek do brain/.');
+            this._emptyState(wrap, t('modal.save_session.no_notes'));
             return;
         }
         for (const note of notes) {
@@ -295,7 +293,7 @@ export class SaveSessionModal extends Modal {
             }, note.accepted !== false);
 
             const desc = item.createEl('input', { type: 'text', value: note.description || '', cls: 'cs-save-session__note-field' });
-            desc.placeholder = t('modal.save_session.note_description_placeholder') || 'Opis (jednolinijkowy)';
+            desc.placeholder = t('modal.save_session.note_description_placeholder');
             desc.addEventListener('input', () => { note.description = desc.value; });
 
             const body = item.createEl('textarea', { cls: 'cs-save-session__note-field' });
@@ -310,9 +308,9 @@ export class SaveSessionModal extends Modal {
      * (− removed / + added, editable), one item per section. Empty = a friendly no-op state.
      */
     _renderNaTerazColumn(parent: HTMLElement, updates: BrainUpdate[]): void {
-        const wrap = this._columnWrap(parent, '🕒', t('modal.save_session.col_na_teraz') || '„Na teraz" — pamięć krótkotrwała', updates.length);
+        const wrap = this._columnWrap(parent, '🕒', t('modal.save_session.col_na_teraz'), updates.length);
         if (updates.length === 0) {
-            this._emptyState(wrap, t('modal.save_session.no_na_teraz') || 'Brak zmian w „Na teraz".');
+            this._emptyState(wrap, t('modal.save_session.no_na_teraz'));
             return;
         }
         for (const update of updates) {
@@ -338,8 +336,8 @@ export class SaveSessionModal extends Modal {
     }
 
     _naTerazLabel(section: string): string {
-        if (section === 'environment') return t('modal.save_session.na_teraz_env') || 'Na teraz: Środowisko';
-        return t('modal.save_session.na_teraz_user') || 'Na teraz: User';
+        if (section === 'environment') return t('modal.save_session.na_teraz_env');
+        return t('modal.save_session.na_teraz_user');
     }
 
     _columnWrap(parent: HTMLElement, icon: string, label: string, count: number): HTMLDivElement {
