@@ -2,10 +2,18 @@
  * artifactSections — nazwy sekcji artefaktów wbudowanych, JEDNO źródło prawdy dla obu języków.
  *
  * Nagłówek sekcji artefaktu jest ADRESEM patcha (`set_section`/`add_item` trafiają po nazwie
- * nagłówka), więc ten sam napis musi znać: szablon typu seedowany na dysk
- * (`ArtifactTypeLoader`), alias `plan_review` w `modules/tools/toolAliases.ts` i reguła drzewa
- * decyzyjnego w `modules/prompts/decisionTree.ts`. Rozjazd któregokolwiek z nich = `not_found`
- * przy patchu, czyli cicho pusta sekcja w notatce usera.
+ * nagłówka), więc ten sam napis muszą znać wszyscy, którzy go wypisują. Rozjazd
+ * któregokolwiek = `not_found` przy patchu, czyli cicho pusta sekcja w notatce usera.
+ *
+ * Żywi konsumenci (stan na 2.2.5 - sprawdzone grepem, nie „planowane"):
+ *  - `modules/tools/toolAliases.ts` - aliasy `plan_review` (`steps`) i `idea_review` (`content`);
+ *  - `modules/prompts/decisionTree.ts` - `fillSectionNames()` wypełnia placeholdery
+ *    (`{{user_notes}}` itd.) w regułach drzewa, także nadpisanych przez usera;
+ *  - `modules/prompts/artifactIndex.ts` - nazwa chronionej sekcji w `prompt.dt.active_artifact`.
+ *
+ * Teksty fabryczne typów (`ArtifactTypeLoader`) są statyczne i NIE wołają `artifactSection()` -
+ * ich nagłówki pilnuje test porównujący je z tym rejestrem (`ArtifactTypeLoader.test.ts`,
+ * „nagłówki tekstów fabrycznych zgadzają się z rejestrem sekcji").
  *
  * ⚠️ Locale czytamy ZAWSZE w środku funkcji (domyślna wartość parametru liczy się przy
  * wywołaniu), nigdy na poziomie modułu: `setLocale()` leci w `src/main.ts` PO załadowaniu
