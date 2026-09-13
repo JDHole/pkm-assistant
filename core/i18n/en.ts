@@ -110,6 +110,12 @@ export const en: Record<string, string> = {
   'tool.field.error': 'Error: ',
   'tool.field.result': 'Result: ',
 
+  // ── Tytuły zakładek widoków (ItemView.displayText) ──
+  // Nie powtarzają nazwy pluginu: Obsidian dokleja ją sam w palecie komend, a dwa widoki
+  // pod tym samym napisem „PKM Assistant" dawały w palecie dwa identyczne wpisy.
+  'chat.view_title': 'Chat',
+  'release_notes.view_title': 'What\'s new',
+
   // ── Chat UI ──
   'chat.eye': 'Eye — active note context',
   'chat.permissions': 'Permissions',
@@ -1119,6 +1125,10 @@ export const en: Record<string, string> = {
   'settings.temperature_desc': '0 = precise, 1 = creative',
   'settings.max_tokens': 'Max response tokens',
   'settings.max_tokens_desc': 'Maximum length of a single AI response',
+  'settings.max_tokens_platform_desc': 'Advanced: default response limit for this platform.',
+  'settings.ollama_keep_alive_desc': 'How long Ollama keeps the model in RAM after a reply.',
+  // Baner pierwszego uruchomienia w Ustawieniach → Plugin (dopóki `onboardingCompleted` jest OFF).
+  'settings.onboarding_banner': 'Getting started: add an API key under API Keys, then pick your main model under Models. The built-in agent Jaskier will guide you from there.',
   'settings.embedding_title': 'Embedding (vectors)',
   'settings.embedding_desc': 'Model for vault indexing (semantic search). Changing requires re-indexing.',
   'settings.embed_platform': 'Embedding platform',
@@ -1924,6 +1934,14 @@ export const en: Record<string, string> = {
   'modal.sub_agent.create': 'Create',
   'modal.sub_agent.delete_btn': 'Delete',
 
+  // ── SubAgentEditorModal: sekcja „Scope" ──
+  'subagent.editor.folders_name': 'Folders',
+  'subagent.editor.folders_desc': 'One vault folder per line. Empty = no folder restriction.',
+  'subagent.editor.sections_name': 'Sections',
+  'subagent.editor.sections_desc': 'Markdown headings, e.g. "{{example}}". Empty = no section restriction.',
+  'subagent.editor.pinned_notes_name': 'Pinned notes',
+  'subagent.editor.pinned_notes_desc': 'One note per line. These notes are always part of the sub-agent context.',
+
   // ── SkillEditorModal ──
   'modal.skill_editor.edit_title': 'Edit skill: {{name}}',
   'modal.skill_editor.new_title': 'New Skill',
@@ -2163,7 +2181,7 @@ export const en: Record<string, string> = {
   'prompt.dt.artifact_type_sections': 'sections (heading must match EXACTLY)',
   'prompt.dt.artifacts_in_progress': 'Your artifacts in progress (artifact_update by ID, do not create a new one)',
   'prompt.dt.artifacts_more': '…and {{count}} more — artifact_list()',
-  'prompt.dt.active_artifact': 'ACTIVE ARTIFACT (fresh state; edit via artifact_update, do NOT overwrite "Uwagi usera")',
+  'prompt.dt.active_artifact': 'ACTIVE ARTIFACT (fresh state; edit via artifact_update, do NOT overwrite "User notes")',
   'prompt.dt.artifact_truncated': '(truncated)',
   'prompt.dt.skill_recipe': 'recipe: read("{{path}}")',
   'prompt.dt.skill_index_more': '…and {{count}} more — list(".pkm-assistant/skills")',
@@ -2410,7 +2428,7 @@ export const en: Record<string, string> = {
   'mcp.artifact_create.param.sekcje': 'Initial content operations (same as artifact_update): add_item/set_section. E.g. adding plan steps as checkboxes. No code fences.\n\nNOTE: "heading" must match EXACTLY an "##" heading from the type template (the heading list is shown with the type in the artifact index). A wrong heading is a "not_found" error — it comes back in the "errors" field and the section stays empty.',
   'mcp.artifact_read.desc': 'Read the current state of a living artifact (parsed, thin JSON — frontmatter + sections + checkboxes). Use it before patching so you have a fresh state and block ids.',
   'mcp.artifact_read.param.id': 'Artifact id (frontmatter "pkm-artefakt", format art-YYYYMMDD-xxxx). Don\'t know it? Use artifact_list.',
-  'mcp.artifact_update.desc': 'Change a living artifact with a structural patch (applied to the fresh state). You don\'t overwrite the whole note — you address a specific field/section/checkbox.\n\nOPERATIONS (ops):\n- set_field {key, value} — a frontmatter field (base keys pkm-artefakt/typ/agent/utworzono are immutable)\n- set_section {heading, text} — replace a section\'s content (no code fences)\n- add_item {heading, text} — add a checkbox at the end of the section\'s list (no code fences, single line)\n- check_item/uncheck_item/remove_item {blockId} — by block id (e.g. "k2")\n\nDo NOT overwrite user-edited sections ("Uwagi usera").',
+  'mcp.artifact_update.desc': 'Change a living artifact with a structural patch (applied to the fresh state). You don\'t overwrite the whole note — you address a specific field/section/checkbox.\n\nOPERATIONS (ops):\n- set_field {key, value} — a frontmatter field (base keys pkm-artefakt/typ/agent/utworzono are immutable)\n- set_section {heading, text} — replace a section\'s content (no code fences)\n- add_item {heading, text} — add a checkbox at the end of the section\'s list (no code fences, single line)\n- check_item/uncheck_item/remove_item {blockId} — by block id (e.g. "k2")\n\nDo NOT overwrite user-edited sections ("User notes").',
   'mcp.artifact_update.param.id': 'Artifact id (frontmatter "pkm-artefakt").',
   'mcp.artifact_update.param.ops': 'List of operations applied in order. Each has an "op" field + parameters (key/value, heading/text, blockId).',
   'mcp.artifact_list.desc': 'List the current agent\'s living artifacts (id, title, type, status). Use it when you don\'t know an artifact id or want to check what is in progress.',
@@ -2442,7 +2460,7 @@ export const en: Record<string, string> = {
   'artifact.block.status': 'Status: {{status}}',
   'artifact.summon.header': '📄 Artifact "{{tytul}}" ({{id}}) — user: {{akcja}}',
   'artifact.summon.action.approve': 'approved the plan — carry out the steps',
-  'artifact.summon.action.revise': 'sent it back with notes — read the "Uwagi usera" section and revise the plan',
+  'artifact.summon.action.revise': 'sent it back with notes — read the "User notes" section and revise the plan',
   'artifact.summon.action.summon': 'summoned you to the artifact',
   'artifact.summon.action.refresh': 'refreshed the artifact state',
   'artifact.chip.active': 'Active artifact',
@@ -2464,6 +2482,28 @@ export const en: Record<string, string> = {
 
 
 
+
+  // Globalna mapa vaulta (`modules/agents/VaultMap.ts`) - zasiewana RAZ, przy pierwszym starcie.
+  // Istniejącego pliku nikt nie podmienia: to dokument usera, nie tekst fabryczny pod podmianę.
+  'starter.vault_map.global': `# Global Vault Map
+
+## System zones
+- **.pkm-assistant/** - PKM Assistant system folder
+  - **agents/** - agent configs, playbooks, memory, and global vault map
+  - **skills/** - skill library
+  - **komunikator/** - inboxes and shared project workspace
+- **.obsidian/** - Obsidian configuration (do not modify)
+- **.pkm-assistant/settings.json** - plugin settings (protected)
+
+## User zones
+> This section will be filled in by the agents.
+
+## Agent zones
+> This section will be filled in by the agents.
+
+## No-Go
+> Folders listed here are off limits to agents and excluded from indexing.
+`,
 
   'starter.vault_map.jaskier': `# Vault Map: Jaskier 🎭
 
@@ -2891,8 +2931,8 @@ Each task's content: the sub-question + instruction: "Investigate on the web (we
 When the workers return:
 - merge findings, drop duplicates
 - show contradictions between sources openly (don't average them out)
-- \`artifact_update\`: section **Ustalenia** (thematic subsections; every claim with quote and URL), section **Białe plamy** (what could NOT be established — collect the workers' GAPS), section **Źródła** (full list of URLs with titles), then **TL;DR** at the end (3-5 sentences of essence)
-- if \`set_section\` on **Białe plamy** returns \`not_found\` (older vault, type without that section) — write them as a \`### Białe plamy\` subsection at the end of **Ustalenia**. Never put \`#\`/\`##\` headings into content (the engine rejects them)
+- \`artifact_update\`: section **Findings** (thematic subsections; every claim with quote and URL), section **Blind spots** (what could NOT be established — collect the workers' GAPS), section **Sources** (full list of URLs with titles), then **TL;DR** at the end (3-5 sentences of essence)
+- if \`set_section\` on **Blind spots** returns \`not_found\` (older vault, type without that section) — write them as a \`### Blind spots\` subsection at the end of **Findings**. Never put \`#\`/\`##\` headings into content (the engine rejects them)
 
 ## Step 6 — follow-up round ("deep dive" only)
 
@@ -2906,7 +2946,7 @@ Set the report status to \`gotowy\`. Tell the user 2-3 sentences of essence + wh
 
 - Every claim in the report has a quote and a source. No backing = it doesn't go in.
 - An honest "not established" beats invented certainty.
-- Never edit the "Uwagi usera" section.`,
+- Never edit the "User notes" section.`,
 
   'factory.template.research_vault.desc': 'Research of your own vault — what you already know about a topic; a report with wikilinks and blind spots. Use when user asks: what do I know about X, search my notes, gather my knowledge.',
   'factory.template.research_vault.pre_q.temat': 'What to research in your vault? (question / topic)',
@@ -2947,8 +2987,8 @@ Each task's content: the sub-question + instruction: "Search ONLY the vault (sea
 
 When the workers return:
 - merge findings, drop duplicates; show contradictions between notes openly (e.g. an old note says something different than a new one — that's valuable information)
-- \`artifact_update\`: section **Ustalenia** (every claim with quote and wikilink), section **Białe plamy** (areas of the question the vault has NOTHING about — the unique value of this research), section **Źródła** (full list of wikilinks), then **TL;DR** at the end (3-5 sentences)
-- if \`set_section\` on **Białe plamy** returns \`not_found\` (older vault, type without that section) — write them as a \`### Białe plamy\` subsection at the end of **Ustalenia**. Never put \`#\`/\`##\` headings into content (the engine rejects them)
+- \`artifact_update\`: section **Findings** (every claim with quote and wikilink), section **Blind spots** (areas of the question the vault has NOTHING about — the unique value of this research), section **Sources** (full list of wikilinks), then **TL;DR** at the end (3-5 sentences)
+- if \`set_section\` on **Blind spots** returns \`not_found\` (older vault, type without that section) — write them as a \`### Blind spots\` subsection at the end of **Findings**. Never put \`#\`/\`##\` headings into content (the engine rejects them)
 
 ## Step 6 — follow-up round ("deep dive" only)
 
@@ -2962,7 +3002,7 @@ Report status → \`gotowy\`. Tell the user 2-3 sentences of essence + where the
 
 - Every claim has a quote from a note and a wikilink. No backing = it doesn't go in.
 - Blind spots are a result, not a failure — name them openly.
-- Never edit the "Uwagi usera" section.`,
+- Never edit the "User notes" section.`,
 
   // Chat ribbon icon tooltip. The "PKM Assistant: " prefix stays - same pattern as its twin
   // `main.agent_sidebar`: unlike the command palette, the ribbon does not prepend the plugin

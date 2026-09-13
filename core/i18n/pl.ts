@@ -110,6 +110,12 @@ export const pl: Record<string, string> = {
   'tool.field.error': 'Błąd: ',
   'tool.field.result': 'Wynik: ',
 
+  // ── Tytuły zakładek widoków (ItemView.displayText) ──
+  // Nie powtarzają nazwy pluginu: Obsidian dokleja ją sam w palecie komend, a dwa widoki
+  // pod tym samym napisem „PKM Assistant" dawały w palecie dwa identyczne wpisy.
+  'chat.view_title': 'Czat',
+  'release_notes.view_title': 'Co nowego',
+
   // ── Chat UI ──
   'chat.eye': 'Oczko — kontekst otwartej notatki',
   'chat.permissions': 'Uprawnienia',
@@ -1125,6 +1131,10 @@ export const pl: Record<string, string> = {
   'settings.temperature_desc': '0 = precyzyjny, 1 = kreatywny',
   'settings.max_tokens': 'Max tokenów odpowiedzi',
   'settings.max_tokens_desc': 'Maksymalna długość jednej odpowiedzi AI',
+  'settings.max_tokens_platform_desc': 'Zaawansowane: domyślny limit odpowiedzi dla tej platformy.',
+  'settings.ollama_keep_alive_desc': 'Jak długo Ollama ma trzymać model w RAM po odpowiedzi.',
+  // Baner pierwszego uruchomienia w Ustawieniach → Plugin (dopóki `onboardingCompleted` jest OFF).
+  'settings.onboarding_banner': 'Na start: dodaj klucz w Klucze API, potem wybierz model główny w Modele. Dalej poprowadzi Cię wbudowany agent Jaskier.',
   'settings.embedding_title': 'Embedding (wektory)',
   'settings.embedding_desc': 'Model do indeksowania vaulta (semantic search). Zmiana wymaga re-indeksowania.',
   'settings.embed_platform': 'Platforma embeddingu',
@@ -1930,6 +1940,14 @@ export const pl: Record<string, string> = {
   'modal.sub_agent.create': 'Utwórz',
   'modal.sub_agent.delete_btn': 'Usuń',
 
+  // ── SubAgentEditorModal: sekcja „Scope" ──
+  'subagent.editor.folders_name': 'Foldery',
+  'subagent.editor.folders_desc': 'Jeden folder vaulta na linię. Puste = brak ograniczenia folderów.',
+  'subagent.editor.sections_name': 'Sekcje',
+  'subagent.editor.sections_desc': 'Nagłówki Markdown, np. "{{example}}". Puste = brak ograniczenia sekcji.',
+  'subagent.editor.pinned_notes_name': 'Przypięte notatki',
+  'subagent.editor.pinned_notes_desc': 'Jedna notatka na linię. Te notatki są zawsze częścią kontekstu sub-agenta.',
+
   // ── SkillEditorModal ──
   'modal.skill_editor.edit_title': 'Edytuj skill: {{name}}',
   'modal.skill_editor.new_title': 'Nowy Skill',
@@ -2472,6 +2490,28 @@ export const pl: Record<string, string> = {
 
 
 
+
+  // Globalna mapa vaulta (`modules/agents/VaultMap.ts`) - zasiewana RAZ, przy pierwszym starcie.
+  // Treść 1:1 z dotychczasowym `starterVaultMap()` (mieszanka PL/EN) - zero zmian dla vaultów PL.
+  'starter.vault_map.global': `# Global Vault Map
+
+## Strefy systemowe
+- **.pkm-assistant/** - PKM Assistant system folder
+  - **agents/** - agent configs, playbooks, memory, and global vault map
+  - **skills/** - skill library
+  - **komunikator/** - inboxes and shared project workspace
+- **.obsidian/** - Obsidian configuration (do not modify)
+- **.pkm-assistant/settings.json** - ustawienia pluginu (chronione)
+
+## Strefy uzytkownika
+> Ta sekcja zostanie uzupelniona przez agentow.
+
+## Strefy agentowe
+> Ta sekcja zostanie uzupelniona przez agentow.
+
+## No-Go
+> Foldery wpisane tutaj sa niedostepne dla agentow i wykluczone z indeksowania.
+`,
 
   'starter.vault_map.jaskier': `# Vault Map: Jaskier 🎭
 
