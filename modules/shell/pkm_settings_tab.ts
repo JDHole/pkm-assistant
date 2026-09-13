@@ -69,7 +69,6 @@ export class PkmSettingsTab extends PluginSettingsTab {
     // kontenera „środowiska" - sekcja pluginu wchodzi do głównego.
     declare readonly headerContainer: HTMLElement;
     declare readonly mainContainer: HTMLElement;
-    declare private _settingsSectionsRegistered: boolean;
 
     constructor(app: App, plugin: PluginApi) {
         super(app, plugin);
@@ -142,7 +141,9 @@ export class PkmSettingsTab extends PluginSettingsTab {
     }
 
     _registerDefaultSettingsSections() {
-        if (this._settingsSectionsRegistered) return;
+        // Bez strażnika "już zarejestrowane": `clear()` czyści sekcje I sub-fields, więc rejestracja
+        // jest idempotentna, a etykiety (`t(...)` liczone przy rejestracji) nadążają za zmianą języka
+        // w trakcie sesji (Appearance → język → `owner.render()`).
         SettingsRegistry.clear();
         (registerCoreSettings as WithDeadArg<typeof registerCoreSettings>)(SettingsRegistry, this.plugin);
         (registerModelsSettings as WithDeadArg<typeof registerModelsSettings>)(SettingsRegistry as unknown as Parameters<typeof registerModelsSettings>[0], this.plugin);
@@ -168,7 +169,6 @@ export class PkmSettingsTab extends PluginSettingsTab {
         });
         (registerMcpSettings as WithDeadArg<typeof registerMcpSettings>)(SettingsRegistry as unknown as Parameters<typeof registerMcpSettings>[0], this.plugin);
         (registerCrystalSoulSettings as WithDeadArg<typeof registerCrystalSoulSettings>)(SettingsRegistry as unknown as Parameters<typeof registerCrystalSoulSettings>[0], this.plugin);
-        this._settingsSectionsRegistered = true;
     }
 
     /**

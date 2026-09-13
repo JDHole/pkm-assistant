@@ -115,7 +115,7 @@ Reszta symboli modułu (rama i rejestry ustawień `PluginSettingsTab`, `Settings
 
 ## Settings tab - sekcje rejestrowane przez ownerów
 
-Shell trzyma tylko ramę + `SettingsRegistry`. Poszczególne sekcje są **u ownerów** jako `<module>/SettingsContent.ts` i rejestrują się przez `registerSettings(...)`. Hash routing `#settings/<id>`, sort po `order`, sub-fields.
+Shell trzyma tylko ramę + `SettingsRegistry`. Poszczególne sekcje są **u ownerów** jako `<module>/SettingsContent.ts` i rejestrują się przez `registerSettings(...)`. Hash routing `#settings/<id>`, sort po `order`, sub-fields. Rejestracja biegnie na KAŻDE otwarcie ustawień (`clear()` + `register…`, od 2.2.4 bez strażnika "już zarejestrowane") - etykiety nawigacji to `t(...)` liczone przy rejestracji, więc zmiana języka w sesji je odświeża.
 
 | Sekcja | Owner (`SettingsContent.ts`) |
 |---|---|
