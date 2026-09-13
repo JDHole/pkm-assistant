@@ -800,8 +800,12 @@ export class AgentManager {
             }
         }
 
-        // Save to file
-        await this.loader.saveAgent(agent);
+        // Save to file. Ścieżkę PRZYPISUJEMY agentowi: `agent.filePath` jest jedynym adresem,
+        // pod którym późniejsze operacje szukają starego pliku (`renameAgentOnDisk` kasuje po nim
+        // stary YAML, `AgentLoader.deleteAgent` bez niego zwraca `false` i nic nie kasuje).
+        // Do 2.2.5 zwrotka leciała w kosmos, więc agent utworzony guzikiem „+" miał `filePath:null`
+        // aż do restartu pluginu - rename w tej samej sesji zostawiał `agent1.yaml` obok `atlas.yaml`.
+        agent.filePath = await this.loader.saveAgent(agent);
 
         // Add to manager
         this.agents.set(agent.name, agent);

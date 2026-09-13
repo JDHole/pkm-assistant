@@ -96,6 +96,34 @@ test('rename szczęśliwy: nowy YAML + folder pamięci powstają, stare znikają
     t.false('.pkm-assistant/agents/agent2/memory/brain.md' in vault.files, 'stara pamięć skasowana');
 });
 
+/**
+ * Regresja 2.2.5: agent utworzony guzikiem „+" miał `filePath: null` (AgentManager.createAgent
+ * gubił zwrotkę `saveAgent`), więc bramka `if (oldFilePath && …)` nie kasowała starego YAML-a
+ * i w vaultcie zostawał `agent1.yaml` obok `atlas.yaml`. Ścieżkę odtwarzamy ze slugu.
+ */
+test('rename agenta bez znanego filePath i tak kasuje stary YAML (odtworzenie ścieżki ze slugu)', async t => {
+    const vault = makeVault({ '.pkm-assistant/agents/agent1.yaml': 'name: Agent1\n' });
+    const agent = makeAgent({ name: 'Agent1', filePath: null });
+
+    const result = await renameAgentOnDisk(agent, 'Atlas', makeDeps(vault));
+
+    t.true(result.ok);
+    t.is(agent.filePath, '.pkm-assistant/agents/atlas.yaml');
+    t.true('.pkm-assistant/agents/atlas.yaml' in vault.files);
+    t.false('.pkm-assistant/agents/agent1.yaml' in vault.files, 'stary YAML nie może zostać osierocony');
+    t.deepEqual(vault.calls.remove, ['.pkm-assistant/agents/agent1.yaml']);
+});
+
+test('rename bez filePath, gdy starego pliku nie ma na dysku, nadal kończy się sukcesem', async t => {
+    const vault = makeVault();
+    const agent = makeAgent({ name: 'Agent1', filePath: null });
+
+    const result = await renameAgentOnDisk(agent, 'Atlas', makeDeps(vault));
+
+    t.true(result.ok);
+    t.is(result.filePath, '.pkm-assistant/agents/atlas.yaml');
+});
+
 test('rename z tą samą nazwą (trim) jest no-opem — zero zapisów na dysk', async t => {
     const vault = makeVault({ '.pkm-assistant/agents/agent2.yaml': 'name: Agent2\n' });
     const agent = makeAgent();

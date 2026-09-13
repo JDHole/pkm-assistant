@@ -4,6 +4,7 @@
  * - Canonical path: .pkm-assistant/agents/vault_map.md
  * - Legacy read fallback: .pkm-assistant/agora/vault_map.md
  */
+import { t } from '../../core/i18n/index.js';
 import { log } from '../../core/utils/Logger.js';
 
 interface VaultMapAdapter {
@@ -20,26 +21,16 @@ export interface VaultMapVault {
 export const VAULT_MAP_PATH = '.pkm-assistant/agents/vault_map.md';
 export const LEGACY_VAULT_MAP_PATH = '.pkm-assistant/agora/vault_map.md';
 
+/**
+ * Tekst zasiewany do `vault_map.md` przy PIERWSZYM starcie, w języku interfejsu.
+ *
+ * Czytany przez `t()` w środku funkcji, nie na poziomie modułu: `setLocale()` leci
+ * w `src/main.ts` po imporcie modułów. ISTNIEJĄCEGO pliku nikt nie podmienia przy zmianie
+ * języka (inaczej niż szablony typów artefaktów) - mapa vaulta to dokument, który agenci
+ * dopisują od pierwszej sesji, więc nie ma tu „nietkniętego tekstu fabrycznego".
+ */
 function starterVaultMap() {
-    return `# Global Vault Map
-
-## Strefy systemowe
-- **.pkm-assistant/** - PKM Assistant system folder
-  - **agents/** - agent configs, playbooks, memory, and global vault map
-  - **skills/** - skill library
-  - **komunikator/** - inboxes and shared project workspace
-- **.obsidian/** - Obsidian configuration (do not modify)
-- **.pkm-assistant/settings.json** - ustawienia pluginu (chronione)
-
-## Strefy uzytkownika
-> Ta sekcja zostanie uzupelniona przez agentow.
-
-## Strefy agentowe
-> Ta sekcja zostanie uzupelniona przez agentow.
-
-## No-Go
-> Foldery wpisane tutaj sa niedostepne dla agentow i wykluczone z indeksowania.
-`;
+    return t('starter.vault_map.global');
 }
 
 export class VaultMap {

@@ -107,3 +107,21 @@ test('konstruktor podpina attachVaultEvents komunikatora z plugin.registerEvent'
     t.true(assignIdx >= 0 && attachIdx > assignIdx,
         'attachVaultEvents musi iść PO przypisaniu this.komunikatorManager, nie przed');
 });
+
+// `createAgent` gubił zwrotkę `saveAgent` (ścieżka zapisanego YAML-a), więc agent utworzony
+// guzikiem „+" chodził z `filePath: null` aż do restartu pluginu. Konsekwencje w tej samej
+// sesji: rename zostawiał stary `agent1.yaml` obok nowego (`renameAgentOnDisk` kasuje stary plik
+// po `agent.filePath`), a `AgentLoader.deleteAgent` wracał `false` bez kasowania czegokolwiek
+// (`if (!agent.filePath) return false`). Zachowanie dyskowe rename'u pokrywa
+// `renameAgentFlow.test.ts` (czysty moduł, realne wywołanie) - tutaj, jak w całym tym pliku,
+// zostaje strażnik po ŹRÓDLE, bo `AgentManager.ts` nie daje się zaimportować w AVA.
+test('createAgent zapisuje ścieżkę pliku na agencie (bez tego rename osierocał stary YAML)', t => {
+    const body = methodBodyOf(source, 'createAgent');
+    t.true(body.length > 0, 'nie znalazłem createAgent w AgentManager.ts — zmieniła się sygnatura?');
+
+    t.regex(body, /agent\.filePath\s*=\s*await\s+this\.loader\.saveAgent\(agent\)/,
+        'zwrotka saveAgent (ścieżka YAML-a) musi wylądować na agencie, nie w koszu');
+
+    t.notRegex(body, /(?<!filePath = )await this\.loader\.saveAgent\(agent\)/,
+        'drugie, „gołe" wywołanie saveAgent w createAgent znowu gubiłoby ścieżkę');
+});
