@@ -16,10 +16,6 @@ import { resolveDeleteOutcome } from './deleteOutcome.js';
 import type { SubAgentData, SubAgentInput, SubAgentsPlugin } from './types.js';
 import type { SubAgentTemplateRecord } from './SubAgentTemplateStore.js';
 
-// Przykładowy nagłówek Markdown pola „Sekcje" — celowo wielka litera (przykład TREŚCI, którą
-// user wpisuje w swoich notatkach, nie etykieta UI; ten sam wzorzec co w SkillEditorModal.ts /
-// modules/web/SettingsContent.ts), w stałej a nie literale inline.
-const SECTION_EXAMPLE = '## Pomysły';
 
 export class SubAgentEditorModal extends Modal {
     declare plugin: SubAgentsPlugin;
@@ -231,8 +227,8 @@ export class SubAgentEditorModal extends Modal {
         const textToScope = (value: string) => value.split('\n').map((v) => v.trim()).filter(Boolean);
 
         new Setting(contentEl)
-            .setName('Foldery')
-            .setDesc('Jeden folder vaulta na linię. Puste = brak ograniczenia folderów.')
+            .setName(t('subagent.editor.folders_name'))
+            .setDesc(t('subagent.editor.folders_desc'))
             .addTextArea(text => {
                 text.setValue(scopeToText(formData.scope.folders))
                     .onChange(v => formData.scope.folders = textToScope(v));
@@ -240,8 +236,10 @@ export class SubAgentEditorModal extends Modal {
             });
 
         new Setting(contentEl)
-            .setName('Sekcje')
-            .setDesc(`Nagłówki Markdown, np. "${SECTION_EXAMPLE}". Puste = brak ograniczenia sekcji.`)
+            .setName(t('subagent.editor.sections_name'))
+            // Przykład nagłówka jest osobnym kluczem (TREŚĆ notatki usera, nie etykieta UI),
+            // wstrzykiwanym przez `{{example}}` - ten sam wzorzec co w SkillEditorModal.ts.
+            .setDesc(t('subagent.editor.sections_desc', { example: t('subagent.editor.sections_example') }))
             .addTextArea(text => {
                 text.setValue(scopeToText(formData.scope.sections))
                     .onChange(v => formData.scope.sections = textToScope(v));
@@ -249,8 +247,8 @@ export class SubAgentEditorModal extends Modal {
             });
 
         new Setting(contentEl)
-            .setName('Przypięte notatki')
-            .setDesc('Jedna notatka na linię. Te notatki są zawsze częścią kontekstu sub-agenta.')
+            .setName(t('subagent.editor.pinned_notes_name'))
+            .setDesc(t('subagent.editor.pinned_notes_desc'))
             .addTextArea(text => {
                 text.setValue(scopeToText(formData.scope.pinned_notes))
                     .onChange(v => formData.scope.pinned_notes = textToScope(v));
