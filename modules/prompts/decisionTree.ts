@@ -1,8 +1,9 @@
 /**
  * decisionTree.js - dane i logika chudego rdzenia drzewa decyzyjnego.
  *
- * Pure module (zależność tylko od i18n) → testowalny node'em. PromptBuilder przez łańcuch importów
- * wciąga `obsidian`, więc filtrowanie/rozstrzyganie instrukcji musi żyć osobno, żeby dało się je pokryć.
+ * Pure module (zależności: i18n + rejestr nazw sekcji z barrela `modules/artifacts`, sam bez
+ * `obsidian`) → testowalny node'em. PromptBuilder przez łańcuch importów wciąga `obsidian`, więc
+ * filtrowanie/rozstrzyganie instrukcji musi żyć osobno, żeby dało się je pokryć.
  *
  * Chudy rdzeń always-on (CORE_RULES) = reguły cross-tool i sądy modelu. Guidance
  * „kiedy użyć KONKRETNEGO narzędzia" wyprowadzone do opisów narzędzi (i18n mcp.*.desc → API);
@@ -10,6 +11,8 @@
  * Furtka `extendedPromptRules` dokłada EXTENDED_RULES (verbose, dla słabszych modeli).
  */
 import { t } from '../../core/i18n/index.js';
+import { ARTIFACT_SECTION_NAMES, artifactSection } from '../artifacts/index.js';
+import type { ArtifactSectionKey } from '../artifacts/index.js';
 
 export interface DecisionTreeRule {
     id: string;
@@ -54,8 +57,11 @@ export const CORE_RULES: DecisionTreeRule[] = [
       text: 'Zadanie na 3+ kroków → od razu todo (lista kroków) i odhaczaj po kolei — masz je na oczach, nie gubisz wątku.' },
     { id: 'art_hierarchy', group: 'artefakty', tool: 'artifact_create',
       text: 'Proponujesz plan/dokument do zatwierdzenia przez usera → artifact_create(typ:"plan", tytul, sekcje z krokami). Powstaje notatka w vaultcie z guzikami akceptacji — user ją przegląda, poprawia i zatwierdza. NIE pisz artefaktów przez write.' },
+    // `{{user_notes}}` - patrz `fillSectionNames` niżej. Nazwa sekcji NIE może tu stać na sztywno:
+    // w angielskim vaultcie szablon typu ma „## User notes", więc reguła chroniłaby sekcję,
+    // której w notatce nie ma.
     { id: 'art_existing', group: 'artefakty', tool: 'artifact_update',
-      text: 'Istniejący artefakt → artifact_update po jego ID (patch na świeżym stanie), nie twórz nowego. Sekcji „Uwagi usera" NIGDY nie nadpisuj — to strefa usera: czytaj ją, zmieniaj tylko własne sekcje.' },
+      text: 'Istniejący artefakt → artifact_update po jego ID (patch na świeżym stanie), nie twórz nowego. Sekcji „{{user_notes}}" NIGDY nie nadpisuj — to strefa usera: czytaj ją, zmieniaj tylko własne sekcje.' },
     // Proaktywny zapis w tle (bramka istotności) + rozszerzenie o ulotne „na teraz".
     { id: 'mem_proactive', group: 'pamiec', tool: 'memory_save', text: 'POD KONIEC TURY sam oceń, czy pojawiło się coś TRWAŁEGO wartego zapamiętania na przyszłość — jeśli tak, wywołaj memory_save bez proszenia usera. ZAPISUJ tylko: trwałe fakty/preferencje usera, reguły współpracy, korekty od usera ("nie tak, rób X"), kontekst projektu wart >1 sesji. NIE zapisuj: jednorazowych detali zadania, rzeczy które już są w brain.md (sprawdź katalog ## sekcji powyżej — nie duplikuj), spekulacji. Lepiej nie zapisać niż zaśmiecić pamięć. Osobno: ULOTNY stan „na teraz" (nad czym user pracuje DZIŚ, bieżący stan projektu/środowiska) to NIE trwały fakt → memory_save({ephemeral:true, section:"user"|"environment", content:"..."}) dopisuje go do sekcji „Na teraz" w brain.md (nie tworzy notatki); gdy coś się zdezaktualizowało, w tym samym wywołaniu dodaj remove:"stary wpis", żeby je wyczyścić.' },
     { id: 'mem_dedup', group: 'pamiec', tool: 'memory_save',
@@ -99,8 +105,34 @@ export const DECISION_TREE_DEFAULTS: DecisionTreeRule[] = [
 ];
 
 /**
+ * Wypełnij placeholdery nazw sekcji artefaktu (`{{user_notes}}`, `{{steps}}`, `{{goal}}`…)
+ * wartościami z rejestru `modules/artifacts`, w JĘZYKU INTERFEJSU.
+ *
+ * DLACZEGO PLACEHOLDER, A NIE GOTOWY NAPIS: reguła leci do promptu dosłownie
+ * (`PromptBuilder` wypycha `instr.text` bez zmian), a nagłówek sekcji jest ADRESEM patcha -
+ * musi zgadzać się co do znaku z szablonem typu na dysku, który od 2.2.5 jest PL albo EN.
+ * Napis wpisany na sztywno rozjechałby się przy pierwszej zmianie w rejestrze; placeholder
+ * nie ma jak.
+ *
+ * Liczone PRZY KAŻDYM wywołaniu, nie przy imporcie: `DECISION_TREE_DEFAULTS` powstaje na
+ * poziomie modułu (spread zamraża wartości), więc gotowy napis zamroziłby tam angielski
+ * na zawsze - `setLocale()` leci dopiero z `src/main.ts`.
+ *
+ * Podmieniane są WYŁĄCZNIE klucze z rejestru - `{{cokolwiek_innego}}` w regule własnej usera
+ * przechodzi nietknięte. Zamiennik idzie przez funkcję, więc `$&`/`$'` w nazwie sekcji nie
+ * mają szansy zostać zinterpretowane.
+ */
+function fillSectionNames(text: string): string {
+    if (!text.includes('{{')) return text;
+    return text.replace(/\{\{([a-z_]+)\}\}/g, (calosc, klucz: string) =>
+        klucz in ARTIFACT_SECTION_NAMES.pl ? artifactSection(klucz as ArtifactSectionKey) : calosc);
+}
+
+/**
  * Rozstrzygnij instrukcje: factory + global override + agent override + custom (custom_*).
  * false = wyłącz (na dowolnym poziomie); string = podmień tekst. Zachowuje tier/requiresSkills.
+ * Nazwy sekcji artefaktu wchodzą tu przez `fillSectionNames` - także w tekstach NADPISANYCH
+ * przez usera, żeby własna reguła z `{{user_notes}}` działała tak samo jak fabryczna.
  * @returns {Array<{id, group, tool, text, tier?, requiresSkills?}>}
  */
 export function resolveDecisionTreeInstructions(agentOverrides: DecisionTreeOverrides = {}, globalOverrides: DecisionTreeOverrides = {}): DecisionTreeRule[] {
@@ -115,7 +147,7 @@ export function resolveDecisionTreeInstructions(agentOverrides: DecisionTreeOver
                    : (typeof globalVal === 'string') ? globalVal
                    : def.text;
 
-        result.push({ id: def.id, group: def.group, tool: def.tool, text, tier: def.tier, requiresSkills: def.requiresSkills });
+        result.push({ id: def.id, group: def.group, tool: def.tool, text: fillSectionNames(text), tier: def.tier, requiresSkills: def.requiresSkills });
     }
 
     // Custom (custom_*) - traktowane jak rdzeń (always-on).
@@ -132,7 +164,7 @@ export function resolveDecisionTreeInstructions(agentOverrides: DecisionTreeOver
                      : (typeof globalVal === 'object' && globalVal?.text) ? globalVal
                      : null;
         if (source) {
-            result.push({ id: key, group: source.group || 'delegacja', tool: source.tool || null, text: source.text!, tier: 'core' });
+            result.push({ id: key, group: source.group || 'delegacja', tool: source.tool || null, text: fillSectionNames(source.text!), tier: 'core' });
         }
     }
 

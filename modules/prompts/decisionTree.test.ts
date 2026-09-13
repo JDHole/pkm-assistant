@@ -6,6 +6,7 @@ import {
     resolveDecisionTreeInstructions,
     splitDecisionTreeRules,
 } from './decisionTree.js';
+import { setLocale } from '../../core/i18n/index.js';
 
 test('DECISION_TREE_DEFAULTS = rdzeń (tier core) + rozszerzone (tier extended)', t => {
     t.is(DECISION_TREE_DEFAULTS.length, CORE_RULES.length + EXTENDED_RULES.length);
@@ -101,4 +102,49 @@ test('reguły poczty renderują się TYLKO gdy agent ma narzędzia komunikatora'
     const withoutMail = splitDecisionTreeRules(resolved, { available: new Set(['read']), hasSkills: false, extended: true });
     t.false(withoutMail.core.some(r => r.id === 'kom_inbox'));
     t.false(withoutMail.extended.some(r => r.id === 'kom_send'));
+});
+
+// ── nazwy sekcji artefaktu idą za językiem interfejsu ───────────────────
+
+/**
+ * Reguła `art_existing` trafia do promptu DOSŁOWNIE (`PromptBuilder` wypycha `instr.text`),
+ * a nazwa sekcji jest ADRESEM patcha: w angielskim vaultcie szablon typu ma „## User notes",
+ * w polskim „## Uwagi usera". Napis wpisany w regułę na sztywno chroniłby sekcję, której
+ * w notatce nie ma - stąd placeholder wypełniany z rejestru `modules/artifacts`.
+ */
+test.serial('art_existing: rozstrzygnięta reguła nazywa sekcję w języku interfejsu', t => {
+    t.teardown(() => setLocale('en'));
+
+    setLocale('en');
+    const en = resolveDecisionTreeInstructions().find(r => r.id === 'art_existing')!;
+    t.true(en.text.includes('User notes'), en.text);
+    t.false(en.text.includes('Uwagi usera'));
+    t.false(en.text.includes('{{user_notes}}'), 'placeholder nie może wyciec do promptu');
+
+    setLocale('pl');
+    const pl = resolveDecisionTreeInstructions().find(r => r.id === 'art_existing')!;
+    t.true(pl.text.includes('Uwagi usera'), pl.text);
+    t.false(pl.text.includes('{{user_notes}}'));
+});
+
+test.serial('placeholder działa też w regule NADPISANEJ i WŁASNEJ usera', t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+
+    const resolved = resolveDecisionTreeInstructions(
+        { art_existing: 'Nie dotykaj sekcji {{user_notes}}; kroki dopisuj do {{steps}}.' },
+        { custom_moja: { text: 'Cel planu trzymaj w {{goal}}.', group: 'artefakty' } },
+    );
+
+    t.is(resolved.find(r => r.id === 'art_existing')!.text,
+        'Nie dotykaj sekcji User notes; kroki dopisuj do Steps.');
+    t.is(resolved.find(r => r.id === 'custom_moja')!.text,
+        'Cel planu trzymaj w Goal.');
+});
+
+test.serial('nieznany placeholder przechodzi nietknięty (to nie jest silnik szablonów)', t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+    const resolved = resolveDecisionTreeInstructions({ art_existing: 'Zostaw {{cokolwiek_innego}} w spokoju.' });
+    t.is(resolved.find(r => r.id === 'art_existing')!.text, 'Zostaw {{cokolwiek_innego}} w spokoju.');
 });

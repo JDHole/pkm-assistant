@@ -89,3 +89,24 @@ test('buildActiveArtifactBlock: przekroczony limit → przycięcie', t => {
     t.true(out.length < 1300); // nagłówek + fence + ~1000 zn
     t.true(out.includes('przycięte'));
 });
+
+/**
+ * Nagłówek bloku aktywnego artefaktu nazywa sekcję, której model NIE ma nadpisywać. Ta nazwa
+ * musi zgadzać się co do znaku z nagłówkiem w notatce (PL albo EN, zależnie od języka
+ * interfejsu), więc słownik trzyma placeholder `{{user_notes}}`, a wypełnia go rejestr sekcji.
+ * Ten plik ustawia globalnie 'pl' (linia 5) - teardown wraca do tamtego stanu.
+ */
+test.serial('buildActiveArtifactBlock: nazwa chronionej sekcji idzie za językiem interfejsu', t => {
+    t.teardown(() => setLocale('pl'));
+    const thin = { id: 'art-1', typ: 'plan', status: 'szkic', frontmatter: {}, sections: [] };
+
+    setLocale('en');
+    const en = buildActiveArtifactBlock(thin);
+    t.true(en.includes('do NOT overwrite "User notes"'), en.split('\n')[0]);
+    t.false(en.includes('{{user_notes}}'), 'placeholder nie może wyciec do promptu');
+
+    setLocale('pl');
+    const pl = buildActiveArtifactBlock(thin);
+    t.true(pl.includes('„Uwagi usera" NIE nadpisuj'), pl.split('\n')[0]);
+    t.false(pl.includes('{{user_notes}}'));
+});

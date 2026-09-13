@@ -14,7 +14,7 @@
 import { t } from '../../core/i18n/index.js';
 // Nagłówki sekcji szablonu liczymy TYM SAMYM parserem, którym patcher szuka sekcji
 // (`findSection`) - własny regex tutaj rozjechałby się z silnikiem i indeks kłamałby modelowi.
-import { parseArtifact } from '../artifacts/index.js';
+import { artifactSection, parseArtifact } from '../artifacts/index.js';
 
 /** Budżet znaków indeksu typów + listy artefaktów (nadmiar → „…i N kolejnych"). */
 export const ARTIFACT_INDEX_MAX_CHARS = 2000;
@@ -123,5 +123,8 @@ export function buildActiveArtifactBlock(thin: unknown, maxChars: number = ACTIV
     };
     let json = JSON.stringify(slim, null, 2);
     if (json.length > maxChars) json = json.slice(0, maxChars) + `\n… ${t('prompt.dt.artifact_truncated')}`;
-    return `${t('prompt.dt.active_artifact')}:\n\`\`\`json\n${json}\n\`\`\``;
+    // Nazwa chronionej sekcji idzie z rejestru artefaktów, nie ze słownika: musi zgadzać się
+    // co do znaku z nagłówkiem w notatce (PL albo EN, zależnie od języka interfejsu).
+    const naglowek = t('prompt.dt.active_artifact', { user_notes: artifactSection('user_notes') });
+    return `${naglowek}:\n\`\`\`json\n${json}\n\`\`\``;
 }

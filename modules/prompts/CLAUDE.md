@@ -25,8 +25,9 @@ modules/prompts/
 └── artifactIndex.js     # indeks typów artefaktów (opis + nagłówki sekcji szablonu) + aktywny artefakt (pure, testowalne)
 ```
 
-`decisionTree.js`, `skillIndex.js` i `artifactIndex.js` żyją jako **moduły pure** (zależność
-tylko od i18n, node-testowalne), bo `PromptBuilder` przez łańcuch importów wciąga `obsidian`
+`decisionTree.js`, `skillIndex.js` i `artifactIndex.js` żyją jako **moduły pure** (zależności:
+i18n + barrel `modules/artifacts`, sam bez `obsidian`; node-testowalne), bo `PromptBuilder`
+przez łańcuch importów wciąga `obsidian`
 i nie da się go testować node'em - logika rdzenia/indeksów żyje osobno i ma własne pokrycie
 (`decisionTree.test.ts`, `skillIndex.test.ts`, `artifactIndex.test.ts`).
 
@@ -118,6 +119,7 @@ NIE są w barrelu - wewnętrzne, importowane wprost przez `PromptBuilder` i prze
 | Dane agenta | `modules/agents` przez `AgentManager` | `_buildIdentity` = tylko `name`+`vault`; `personality` wchodzi wprost; `agent.language` steruje regułą językową w `_buildRules` |
 | `t`, `getDateLocale` | `core/i18n/index.js` | i18n PL/EN dla wszystkich instrukcji + format daty + `t(key, params, forcedLocale)` dla reguły językowej per agent |
 | `parseArtifact` | `modules/artifacts` (barrel, node-safe) | `artifactIndex.js` liczy nagłówki sekcji szablonu TYM SAMYM parserem, którego patcher używa w `findSection` - własny regex rozjechałby się z silnikiem |
+| `artifactSection`, `ARTIFACT_SECTION_NAMES` | `modules/artifacts` (barrel, node-safe) | Nazwy sekcji wbudowanych typów są PL albo EN (język interfejsu). `decisionTree.js` wypełnia nimi placeholdery `{{user_notes}}`/`{{steps}}`/… w regułach, `artifactIndex.js` - w `prompt.dt.active_artifact` |
 
 **Kto importuje `modules/prompts`:**
 
@@ -160,6 +162,17 @@ NIE są w barrelu - wewnętrzne, importowane wprost przez `PromptBuilder` i prze
   strukturalne**: `dt.group.*`, `prompt.dt.*` (nagłówki, indeks skilli, furtka) oraz opisy
   narzędzi `mcp.*.desc`. Dodając regułę do rdzenia/furtki - pisz `text` po polsku inline;
   guidance „kiedy użyć narzędzia" pisz w `mcp.<tool>.desc` (pl+en), nie w drzewie.
+- ⚠️ **JEDEN wyjątek od inline PL: NAZWY SEKCJI ARTEFAKTU.** Nagłówek sekcji to ADRES patcha
+  (`set_section`/`add_item` trafiają po nazwie), a szablon typu na dysku jest od 2.2.5 polski
+  albo angielski. Napis wpisany w regułę na sztywno kazałby modelowi chronić/wypełniać sekcję,
+  której w notatce nie ma. Dlatego reguła pisze `{{user_notes}}` (analogicznie `{{steps}}`,
+  `{{goal}}`, … - klucze rejestru `ARTIFACT_SECTION_NAMES`), a `resolveDecisionTreeInstructions`
+  wypełnia je przez `fillSectionNames()` z `artifactSection()` - **przy każdym wywołaniu**, bo
+  `DECISION_TREE_DEFAULTS` powstaje na poziomie modułu i gotowy napis zamroziłby tam angielski.
+  Podmiana obejmuje też teksty NADPISANE przez usera i reguły `custom_*`; nieznany placeholder
+  przechodzi nietknięty. Ten sam mechanizm w `artifactIndex.js` dla `prompt.dt.active_artifact`
+  (słownik trzyma `{{user_notes}}`, wołacz podaje wartość). **Nazywasz sekcję w regule albo
+  w kluczu `prompt.dt.*` - użyj placeholdera, nie napisu.**
 - ⚠️ **Playbook (onboarding) nie jest częścią tego modułu.** `PlaybookManager` (compile
   playbook + vault map per agent) mieszka w `modules/onboarding/` - konceptualnie inny
   koncern, choć historycznie bywał tu wymieniany.
