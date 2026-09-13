@@ -1,5 +1,6 @@
 import { renderMcpServersSection, renderMediaToolsSection } from './SettingsContent.js';
 import type { ToolsSettingsCtx } from './SettingsContent.js';
+import { t } from '../../core/i18n/index.js';
 
 /** Trzeci argument renderera z `SettingsRegistry.render(container, plugin, options)`. */
 interface SettingsRenderOptions {
@@ -24,14 +25,14 @@ interface SettingsRegistryLike {
 export function registerSettings(registry: SettingsRegistryLike): void {
     registry.register({
         id: 'media-tools',
-        label: 'Media Tools',
+        label: t('settings.nav.media_tools'),
         icon: '🎛️',
         order: 40,
         render: (containerEl, _plugin, options) => renderMediaToolsSection(containerEl, options.owner.buildSectionContext()),
     });
     registry.register({
         id: 'mcp',
-        label: 'MCP Servers',
+        label: t('settings.mcp_servers_title'),
         icon: '🔌',
         order: 100,
         render: (containerEl, _plugin, options) => renderMcpServersSection(containerEl, options.owner.buildSectionContext()),

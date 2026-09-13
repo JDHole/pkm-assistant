@@ -146,10 +146,10 @@ export default [
   // (placeholder pola ID — celowo lowercase, bo pole samo robi .toLowerCase() na
   // wpisanej wartości; 'Blender' z dużą literą kłamałoby o oczekiwanym kształcie),
   // placeholder argumentów npx z pakietem 'blender-mcp' (REALNA, case-sensitive nazwa
-  // pakietu npm — wymuszenie wielkiej litery byłoby błędną podpowiedzią), oraz dwa
-  // Notice w src/main.ts ('Onboarding wizard...'/'Secure storage locked...') — oba
-  // wskazują ścieżkę UI ('Settings', 'API Keys') nazwami WŁASNYMI zakładek Ustawień, nie
-  // prozą; ten sam powód ma już sąsiedni komentarz przy tym Notice w main.ts.
+  // pakietu npm — wymuszenie wielkiej litery byłoby błędną podpowiedzią), oraz jeden
+  // Notice w src/main.ts ('Secure storage locked...') — wskazuje ścieżkę UI ('Settings',
+  // 'API Keys') nazwami WŁASNYMI zakładek Ustawień, nie prozą. (Dawny drugi wpis
+  // '^Onboarding wizard' wypadł w 2.2.4: ten Notice idzie teraz przez i18n.)
   {
     files: ['**/*.ts'],
     rules: {
@@ -167,7 +167,6 @@ export default [
           '^\\[CUSTOM\\]$',   // badge TriggerPopup.ts
           '^blender$',                 // placeholder pola ID (lowercase celowo)
           '^-y\\nblender-mcp$', // placeholder argumentów npx (nazwa pakietu npm)
-          '^Onboarding wizard',         // Notice main.ts — ścieżka UI, nazwy własne zakładek
           '^Secure storage locked',     // Notice main.ts — jw.
         ],
       }],

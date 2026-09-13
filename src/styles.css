@@ -1030,6 +1030,12 @@ textarea.cs-prompt-textarea--instr {
 .setting-item-control .pkm-setting-input--w280 { width: 280px; }
 .setting-item-control .pkm-setting-input--w300 { width: 300px; }
 
+/* Narrow settings pane: the row label (e.g. the platform name next to an API key field) must
+   not collapse under a fixed-width control - when space runs out the control wraps below
+   the label instead of squeezing it to zero width. */
+.cs-root .setting-item { flex-wrap: wrap; }
+.cs-root .setting-item-info { min-width: 140px; }
+
 /* -- modules/tools/SettingsContent.js -- */
 .mcp-servers-listing {
   display: flex;

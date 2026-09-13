@@ -308,11 +308,10 @@ export function renderAdvancedSection(container: HTMLElement, ctx: SettingsSecti
             }));
 
     new Setting(container)
-        .setName(t('settings.cost_tracking') || 'Koszty LLM')
-        .setDesc(t('settings.cost_tracking_desc')
-            || 'Agregacja .pkm-assistant/cost_log.jsonl (archiwista + sub-agenci).')
+        .setName(t('settings.cost_tracking'))
+        .setDesc(t('settings.cost_tracking_desc'))
         .addButton(btn => btn
-            .setButtonText(t('settings.cost_tracking_btn') || 'Otwórz cost log')
+            .setButtonText(t('settings.cost_tracking_btn'))
             .onClick(openCostTrackingModal));
 }
 

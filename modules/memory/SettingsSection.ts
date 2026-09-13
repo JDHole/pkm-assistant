@@ -1,5 +1,6 @@
 import { renderMemorySection } from './SettingsContent.js';
 import type { MemorySettingsCtx } from './SettingsContent.js';
+import { t } from '../../core/i18n/index.js';
 
 /** Trzeci argument renderera z `SettingsRegistry.render(container, plugin, options)`. */
 interface SettingsRenderOptions {
@@ -23,7 +24,7 @@ interface SettingsRegistryLike {
 export function registerSettings(registry: SettingsRegistryLike): void {
     registry.register({
         id: 'memory',
-        label: 'Pamiec',
+        label: t('settings.nav.memory'),
         icon: '🧠',
         order: 30,
         render: (containerEl, _plugin, options) => renderMemorySection(containerEl, options.owner.buildSectionContext()),
