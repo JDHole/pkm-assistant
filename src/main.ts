@@ -482,12 +482,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       if (!is_new) return;
       log.info('Plugin', 'Nowy użytkownik - wizard wyłączony w v2.0, pokazuję notice');
       await this.env?.whenLoaded();
-      // sentence-case chciałby „settings → API keys → modele → agenci" — a to nazwy pozycji
-      // w UI (zakładka Obsidiana + nasze sekcje ustawień), nie zdanie do zdekapitalizowania.
-      new Notice(
-        "Onboarding wizard niedostępny w v2.0. Skonfiguruj plugin manualnie w Settings → API Keys → Modele → Agenci.",
-        10000
-      );
+      new Notice(t('settings.new_user_notice'), 10000);
     });
 
     await this.env?.whenLoaded();
@@ -1086,12 +1081,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       const provider = this.env?.settings?.pkmAssistant?.embedding?.provider;
       if (!provider) {
         log.info('Plugin', 'Embedding provider niewybrany — pokazuję notice.');
-        new Notice(
-          'Embedding niedostępny.\n' +
-          'Wybierz providera w Settings → Embedding\n' +
-          '(Ollama / OpenAI / Gemini / LM Studio).',
-          12000
-        );
+        new Notice(t('settings.embedding_unavailable_notice'), 12000);
       }
     } catch (e: unknown) {
       // TS-boundary: patrz komentarz katalogowy przy catch-blokach wyżej (duck-type `.message`).
@@ -1217,7 +1207,7 @@ export default class PkmAssistantPlugin extends PluginBase {
   async open_random_connection() {
     // Panel podobieństw wycofany razem ze starym frameworkiem bazowym.
     // Restore w v3.0 z Orama scoring jeśli wymagane.
-    new Notice('Connections feature wycofany w v2.0 — przywrócenie planowane na v3.0 z silnikiem Orama.');
+    new Notice(t('settings.connections_retired_notice'));
   }
 
   // TS-boundary: ZASTANE - podajemy PLUGIN tam, gdzie sygnatura chce AppLike; runtime ratuje
