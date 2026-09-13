@@ -94,11 +94,12 @@ export { registerSettings } from './SettingsSection.js';
 // Consumed by the workflows + Settings→Prompt UI. DEFAULT_BRIEF_PROMPT re-export CUT -
 // the slot had zero readers since ContextSessionGenerator was
 // deleted; the constant itself was deleted from workPrompts.ts too.
-export {
-    DEFAULT_SAVE_SESSION_PROMPT,
-    DEFAULT_ARCHIVE_PROMPT,
-    DEFAULT_SUMMARY_PROMPT,
-} from './workPrompts.js';
+//
+// FUNKCJA, nie stałe (2.2.5): teksty mają wersję PL i EN, a `setLocale()` leci z `src/main.ts`
+// PO załadowaniu modułów - stała wybrana przy imporcie zamroziłaby jeden język. Wołaj
+// `factoryWorkPrompt(kind)` w momencie użycia.
+export { factoryWorkPrompt } from './workPrompts.js';
+export type { WorkPromptKind } from './workPrompts.js';
 
 // ── Typy publiczne ─────────────────────────────────────────────────────
 //

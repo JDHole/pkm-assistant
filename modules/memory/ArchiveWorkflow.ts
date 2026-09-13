@@ -3,7 +3,7 @@ import { makeMemoryNoteFilename } from './MemoryAccessGuard.js';
 import { streamToComplete, STREAM_ERROR_CODES } from './streamHelper.js';
 import { STEP_KIND, STEP_STATUS } from './ConsolidationRun.js';
 import { resolveWorkPrompt, probeFile } from '../../core/index.js';
-import { DEFAULT_ARCHIVE_PROMPT, DEFAULT_SUMMARY_PROMPT } from './workPrompts.js';
+import { factoryWorkPrompt } from './workPrompts.js';
 import { getLimits } from '../../config/limits.js';
 import { log } from '../../core/utils/Logger.js';
 
@@ -743,7 +743,7 @@ export class ArchiveWorkflow {
     private async _tryProposeDedupViaAgent(notes: BrainNoteLike[], opts: LlmCallOptions = {}): Promise<{ merges: DedupMerge[]; deletions: DedupDeletion[] } | null> {
         // Resolver (agent>global>factory) — LLM path as soon as a model is present.
         if (!this.model) return null;
-        const archivePrompt = resolveWorkPrompt(this.agent, 'archive_prompt', this.settings, DEFAULT_ARCHIVE_PROMPT);
+        const archivePrompt = resolveWorkPrompt(this.agent, 'archive_prompt', this.settings, factoryWorkPrompt('archive'));
         if (!archivePrompt) return null;
         try {
             // Read full body per note so the LLM sees content, not just frontmatter.
@@ -1237,7 +1237,7 @@ ${String(body || '').trim()}
                 content: stripped.slice(0, 5000)
             };
         }));
-        const resolved = resolveWorkPrompt(this.agent, 'summary_prompt', this.settings, DEFAULT_SUMMARY_PROMPT);
+        const resolved = resolveWorkPrompt(this.agent, 'summary_prompt', this.settings, factoryWorkPrompt('summary'));
         const prompt = String(resolved || '').replace(/\{\{LEVEL\}\}/g, level);
         const payload = {
             level,
