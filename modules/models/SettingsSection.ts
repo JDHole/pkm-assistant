@@ -1,5 +1,6 @@
 import { renderModelsSection } from './SettingsContent.js';
 import type { ModelsSectionCtx } from './SettingsContent.js';
+import { t } from '../../core/i18n/index.js';
 
 /** Trzeci argument renderera z `SettingsRegistry.render(container, plugin, options)`. */
 interface SettingsRenderOptions {
@@ -24,7 +25,7 @@ interface SettingsRegistryLike {
 export function registerSettings(registry: SettingsRegistryLike): void {
     registry.register({
         id: 'models',
-        label: 'Modele',
+        label: t('settings.nav.models'),
         icon: '🤖',
         order: 20,
         render: (containerEl, _plugin, options) => renderModelsSection(containerEl, options.owner.buildSectionContext()),
