@@ -87,14 +87,13 @@ export class CostTrackingModal extends Modal {
         contentEl.addClass('cs-cost-tracking-modal');
         if (modalEl) modalEl.addClass('cs-cost-tracking-modal-wide');
 
-        contentEl.createEl('h2', { text: t('modal.cost_tracking.title') || 'Koszty LLM (cost log)' });
+        contentEl.createEl('h2', { text: t('modal.cost_tracking.title') });
 
         const desc = contentEl.createEl('p', { cls: 'cs-cost-desc' });
-        desc.textContent = t('modal.cost_tracking.desc')
-            || 'Koszty z .pkm-assistant/cost_log.jsonl (przybliżone - cennik per model). Zapisywane przez archiwistę i generator kontekstu sesji.';
+        desc.textContent = t('modal.cost_tracking.desc');
 
         const status = contentEl.createDiv({ cls: 'cs-cost-status' });
-        status.textContent = '⏳ Wczytywanie...';
+        status.textContent = `⏳ ${t('generic.loading')}`;
 
         try {
             const vault = this.plugin?.app?.vault;
@@ -106,8 +105,7 @@ export class CostTrackingModal extends Modal {
             const entries = await costLog.readAll();
 
             if (entries.length === 0) {
-                status.textContent = t('modal.cost_tracking.empty')
-                    || 'Brak zarejestrowanych kosztów. Pierwszy archiwista lub sub-agent stworzy wpis.';
+                status.textContent = t('modal.cost_tracking.empty');
                 return;
             }
             status.remove();
@@ -116,7 +114,7 @@ export class CostTrackingModal extends Modal {
 
             // Section: Total
             const totalBox = contentEl.createDiv({ cls: 'cs-cost-section cs-cost-section--total' });
-            totalBox.createEl('strong', { text: t('modal.cost_tracking.total') || 'TOTAL' });
+            totalBox.createEl('strong', { text: t('modal.cost_tracking.total') });
             totalBox.createDiv({
                 text: `${fmtUsd(stats.total.cost_usd)} (${stats.total.calls} calls, ${stats.total.input_tokens.toLocaleString()} → ${stats.total.output_tokens.toLocaleString()} tok)`
             });
@@ -127,7 +125,7 @@ export class CostTrackingModal extends Modal {
 
             // Section: Per agent
             const agentBox = contentEl.createDiv({ cls: 'cs-cost-section' });
-            agentBox.createEl('strong', { text: t('modal.cost_tracking.per_agent') || 'Per agent' });
+            agentBox.createEl('strong', { text: t('modal.cost_tracking.per_agent') });
             const agentTable = agentBox.createEl('table', { cls: 'cs-cost-table' });
             const aHeader = agentTable.createEl('tr');
             ['Agent', 'Calls', 'Input tok', 'Output tok', 'Cache saved', 'USD'].forEach(h => {
@@ -142,7 +140,7 @@ export class CostTrackingModal extends Modal {
 
             // Section: Per day (last 14)
             const dayBox = contentEl.createDiv({ cls: 'cs-cost-section cs-cost-section--spaced' });
-            dayBox.createEl('strong', { text: t('modal.cost_tracking.per_day') || 'Per dzień (last 14)' });
+            dayBox.createEl('strong', { text: t('modal.cost_tracking.per_day') });
             const dayList = dayBox.createDiv({ cls: 'cs-cost-list' });
             const recentDays = Object.entries(stats.byDay).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 14);
             for (const [day, info] of recentDays) {
@@ -157,7 +155,7 @@ export class CostTrackingModal extends Modal {
 
             // Section: Per month
             const monthBox = contentEl.createDiv({ cls: 'cs-cost-section cs-cost-section--spaced' });
-            monthBox.createEl('strong', { text: t('modal.cost_tracking.per_month') || 'Per miesiąc' });
+            monthBox.createEl('strong', { text: t('modal.cost_tracking.per_month') });
             const monthList = monthBox.createDiv({ cls: 'cs-cost-list' });
             for (const [month, info] of Object.entries(stats.byMonth).sort((a, b) => b[0].localeCompare(a[0]))) {
                 const row = monthList.createDiv();
@@ -167,7 +165,7 @@ export class CostTrackingModal extends Modal {
             // Section: Per model
             if (Object.keys(stats.byModel).length > 0) {
                 const modelBox = contentEl.createDiv({ cls: 'cs-cost-section cs-cost-section--spaced' });
-                modelBox.createEl('strong', { text: t('modal.cost_tracking.per_model') || 'Per model' });
+                modelBox.createEl('strong', { text: t('modal.cost_tracking.per_model') });
                 const modelList = modelBox.createDiv({ cls: 'cs-cost-list' });
                 for (const [model, info] of Object.entries(stats.byModel).sort((a, b) => b[1].cost_usd - a[1].cost_usd).slice(0, 10)) {
                     const row = modelList.createDiv();
@@ -177,7 +175,7 @@ export class CostTrackingModal extends Modal {
 
             // Footer: close button
             const footer = contentEl.createDiv({ cls: 'cs-cost-footer' });
-            const closeBtn = footer.createEl('button', { text: t('generic.close') || 'Zamknij' });
+            const closeBtn = footer.createEl('button', { text: t('generic.close') });
             closeBtn.addEventListener('click', () => this.close());
         } catch (e) {
             status.textContent = `✗ ${(e as ErrLike).message}`;
