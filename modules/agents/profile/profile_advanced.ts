@@ -6,6 +6,7 @@ import { UiIcons, setSvg, setSvgLabel } from '../../crystal-soul/index.js';
 import { getModelsForRole } from '../../models/index.js';
 import { renderShard, renderToggle } from './profile_helpers.js';
 import { applyMainModelChange } from './modelFieldSync.js';
+import { buildAgentExportYaml } from './agentExportYaml.js';
 import { t } from '../../../core/i18n/index.js';
 import type { ProfileCtx, DTInstrValue } from './profile_types.js';
 import type { AgentUpdate } from '../Agent.js';
@@ -144,10 +145,10 @@ export async function renderAdvancedTab(ctx: ProfileCtx, el: HTMLElement) {
             const ag = ctx.agentManager.getAgent(formData.name);
             if (!ag) { new Notice(t('profile.advanced.save_first')); return; }
             try {
-                const yaml = ag.serialize ? ag.serialize() : JSON.stringify(ag, null, 2);
-                // TS-boundary: ZASTANE - serialize() zwraca obiekt, writeText dostaje [object Object];
-                // naprawa (stringifyYaml) = runtime, poza falą.
-                await navigator.clipboard.writeText(yaml as string);
+                // Naprawa B3: `buildAgentExportYaml` (agentExportYaml.ts) serializuje przez
+                // stringifyYaml - dawny `as unknown as string` na obiekcie z serialize()
+                // wynosił do schowka "[object Object]".
+                await navigator.clipboard.writeText(buildAgentExportYaml(ag));
                 new Notice(t('profile.advanced.profile_copied'));
             } catch (e: unknown) {
                 new Notice(t('profile.advanced.export_error') + (e as Error).message);

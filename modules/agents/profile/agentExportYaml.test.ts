@@ -33,3 +33,16 @@ test('buildAgentExportYaml: wynik jest STRINGIEM (nie obiektem z rzutu na typie)
     const out = buildAgentExportYaml(agent);
     t.is(typeof out, 'string');
 });
+
+test('buildAgentExportYaml: eksport zaczyna się YAML-em agenta (dosłowna treść)', t => {
+    const agent = { serialize: () => ({ name: 'Atlas', access_policy_version: 2, temperature: 0.7 }) };
+    const out = buildAgentExportYaml(agent);
+    t.true(out.startsWith('name: Atlas'), out);
+    t.is(out, 'name: Atlas\naccess_policy_version: 2\ntemperature: 0.7\n');
+});
+
+test('buildAgentExportYaml: bez serialize() (duck-typing zastany) - stringifyYaml na całym obiekcie', t => {
+    const agent = { name: 'Bezimienny' };
+    const out = buildAgentExportYaml(agent);
+    t.is(out, 'name: Bezimienny\n');
+});

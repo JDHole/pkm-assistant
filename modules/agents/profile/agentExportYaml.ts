@@ -7,21 +7,28 @@
  * }`, którego AVA/tsx nie wstaje) - `profile_advanced.ts` importuje ten plik i zostaje cienkim
  * wołaczem, wzorem `chat/turnOwner.ts` i innych czystych helperów obok mixinów `obsidian` w
  * `modules/chat/` (patrz `modules/chat/CLAUDE.md`, sekcja "Pattern: prototype mixin").
+ *
+ * Bug B3: `Agent.serialize()` oddaje OBIEKT — ten sam kontrakt, którym `AgentLoader` zapisuje
+ * pliki YAML agentów (`stringifyYaml(agent.serialize())`, `AgentLoader.ts`) — nie string.
+ * Stary kod robił `yaml as unknown as string` na tym obiekcie: rzutowanie zdejmuje TYP, nie
+ * serializuje wartość, więc `navigator.clipboard.writeText` dostawał obiekt zamiast tekstu
+ * (`out.includes is not a function` w teście - `typeof out === 'object'`, nie `'string'`).
  */
+import { stringifyYaml } from '../../../core/index.js';
 
 /** Kształt, jakiego potrzebuje `buildAgentExportYaml` — `Agent` ma `serialize()` zawsze, ale
- * funkcja zostaje duck-typowana (bez importu klasy `Agent`), tak jak dawny kod. */
-export type SerializableAgent = { serialize?: () => unknown };
+ * funkcja zostaje duck-typowana (bez importu klasy `Agent`), tak jak dawny kod. Indeks otwarty,
+ * bo gałąź bez `serialize()` serializuje CAŁY obiekt (np. `{name: ...}` bez metody). */
+export type SerializableAgent = { serialize?: () => unknown; [key: string]: unknown };
 
 /**
- * Zamienia agenta na tekst do eksportu.
- *
- * ⚠️ ZASTANE (bug B3): `serialize()` oddaje OBIEKT, nie string — rzutowanie `as unknown as
- * string` na obiekcie nie SERIALIZUJE go, tylko zdejmuje typ. `navigator.clipboard.writeText`
- * dostawał więc obiekt, a przeglądarka woła na nim `String(...)` -> `"[object Object]"` do
- * schowka, zamiast treści agenta.
+ * Zamienia agenta na tekst YAML do eksportu - TEN SAM silnik, którym pliki agentów są pisane
+ * na dysk (`stringifyYaml`, `core/index.js`), więc eksport wygląda dokładnie jak plik YAML.
+ * @param ag - agent (albo dowolny obiekt z opcjonalnym `serialize()`, dla zgodności z dawnym
+ *   duck-typingiem); wołacz (`profile_advanced.ts`) odmawia WCZEŚNIEJ (notice „zapisz
+ *   najpierw"), gdy agenta jeszcze nie ma - ta funkcja zawsze dostaje coś, na czym ma pracować.
  */
 export function buildAgentExportYaml(ag: SerializableAgent): string {
-    const yaml = typeof ag.serialize === 'function' ? ag.serialize() : JSON.stringify(ag, null, 2);
-    return yaml as unknown as string;
+    const data = typeof ag.serialize === 'function' ? ag.serialize() : ag;
+    return stringifyYaml(data);
 }
