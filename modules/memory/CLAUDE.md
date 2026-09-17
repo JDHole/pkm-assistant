@@ -303,6 +303,22 @@ chatu), z index signature (`[key: string]: unknown`) lustrzaną do `ToolCall`
 (`modules/chat/chat/RollingWindow.ts`) - bez niej TS odmawia przypisania na granicy modułów
 (typ z index signature wymaga jej też po stronie źródła).
 
+⚠️ **Downgrade NIE jest bezpieczny - plik v3 czytany starszym pluginem trwale się psuje.**
+Starszy parser (sprzed v3) nie zna etykiet `**tool_call_id:**`/`**tool_calls:**` - jego
+`FIELD_END_LOOKAHEAD` rozpoznaje koniec pola WYŁĄCZNIE po znanych etykietach ze SWOJEJ,
+starszej listy `EVENT_FIELDS`. Blok `tool_result` zapisany przez v3 (`**result:**` + zaraz
+potem `**tool_call_id:**`) czyta się starym parserem jako JEDNO pole `result`, które
+POŁYKA cały ogon `**tool_call_id:**\n\ncall_1` jako część swojej TREŚCI - zweryfikowane
+bezpośrednio (stary parser na pliku v3): `content` wychodzi jako
+`"tresc\n\n**tool_call_id:**\n\ncall_1"` zamiast `"tresc"` + osobnego pola id. To samo
+dotyczy `**tool_calls:**` w evencie `agent_message`. Ponieważ `archiveActiveSession`
+PRZEPISUJE archiwum z `parsed.messages` i KASUJE oryginał, downgrade + dowolna archiwizacja
+tej sesji (ręczna, `/save session`, próg konsolidacji) zamraża tę pomyłkę na stałe w
+`sessions/archive/` - nie ma już z czego odtworzyć czystej treści. Release notes MUSZĄ
+ostrzec: nie instaluj starszej wersji pluginu na vaultcie, w którym są aktywne sesje zapisane
+nowszą wersją (v3+); jeśli trzeba się cofnąć, zrób to na kopii vaulta albo dokończ/zarchiwizuj
+najpierw wszystkie aktywne sesje na nowej wersji.
+
 ⚠️ **`agent_message` z PUSTĄ `content` (typowa odpowiedź tool-calling: sam `tool_calls`, zero
 tekstu) liczy się jako wiadomość TYLKO odkąd `parseActiveSession` sprawdza też
 `**tool_calls:**`, nie tylko `content`/`result`/`prompt`.** Bez tej gałęzi CAŁY blok assistant
