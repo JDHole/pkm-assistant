@@ -21,3 +21,14 @@ export function isShardFilled(value: string | number, globalLabel: string): bool
     const s = String(value);
     return s !== '0' && s !== globalLabel;
 }
+
+/**
+ * Wartość sharda `Brain`: liczba notatek w `brain/` (`brainNoteCount`), NIE `brainSize`.
+ *
+ * `brainSize` to liczba znaków `brain.md`, a ten plik u nowego agenta ma od razu szablon
+ * z nagłówkami sekcji (ponad 100 znaków) - nigdy nie jest `0`, więc shard świecił przy pustej
+ * pamięci (smoke 2.2.6). Szablon indeksu nie jest wiedzą agenta; notatka w `brain/` jest.
+ */
+export function brainShardValue(stats: { brainSize?: number; brainNoteCount?: number } | null | undefined): string {
+    return String(stats?.brainNoteCount ?? 0);
+}
