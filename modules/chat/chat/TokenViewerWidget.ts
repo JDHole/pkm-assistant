@@ -177,13 +177,17 @@ export class TokenViewerWidget {
         const lib = pkm?.modelLibrary?.[role] || (legacyKey ? pkm?.modelLibrary?.[legacyKey] : null);
         const configured: ConfiguredModel | null = agent?.models?.[role]
             || lib?.find?.((m: ModelLibraryEntry) => m.isDefault) || lib?.[0] || null;
-        // ⚠️ ZASTANE: `configured` bywa `null` (agent bez modelu dla tej roli I pusty
-        // `modelLibrary`), a `typeof null === 'object'` — więc gałąź obiektowa wchodzi na `null`
-        // i RZUCA `TypeError` na `null.platform`. Asercje niżej zdejmują `null` z TYPU, żeby
-        // opisać to, co kod zakłada; nie naprawiają zachowania. Naprawa = nowy guard, czyli
-        // zmiana runtime'u — poza falą typowania.
-        const platform = typeof configured === 'object' ? (configured as { platform?: string }).platform : '';
-        const model = typeof configured === 'object' ? (configured as { model?: string }).model : String(configured || '');
+        // `configured` bywa `null` (agent bez modelu dla tej roli I pusty `modelLibrary`) -
+        // `typeof null === 'object'` też jest `true`, więc goły `typeof` wysyłał `null` w gałąź
+        // obiektową i `null.platform` rzucało `TypeError` (bug B2). Narrowing musi więc
+        // odrzucić `null`/`undefined` PRZED sprawdzeniem `typeof` - `configured &&` robi
+        // dokładnie to, string i `null` idą tą samą gałęzią co dotąd (`String(configured ||
+        // '')` dla stringa oddaje ten string, dla `null` oddaje `''`). Puste `platform`/`model`
+        // nie są nowym przypadkiem: `estimateContextWindow` już oddaje dla nich swój
+        // `fallback` (200000) - to samo, co dostaje dziś KAŻDY nierozpoznany model.
+        const configuredObject = configured && typeof configured === 'object' ? configured : null;
+        const platform = configuredObject ? configuredObject.platform : '';
+        const model = configuredObject ? configuredObject.model : String(configured || '');
         return estimateContextWindow({ role, platform, model });
     }
 
