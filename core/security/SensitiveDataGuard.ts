@@ -29,10 +29,13 @@ const SENSITIVE_PATTERNS = [
  * Dopasowanie idzie po CAŁEJ nazwie pola (kotwice `^...$`), bez względu na wielkość liter,
  * więc `max_tokens` (liczba mnoga) ani `prompt_tokens` nie łapią się przypadkiem.
  */
-// Generyczne słowa (`key`, `token`, `secret`, `password`) liczą się TYLKO jako osobny człon:
-// całe pole (`token`), po separatorze (`api_key`, `x-api-key`) albo w camelCase (`apiKey`).
-// Inaczej `monkey: ...` czy `turkey: ...` w zwykłej notatce szłoby pod maskę.
-const SENSITIVE_KEY_RE = /^(?:[a-z0-9_.-]*(?:authorization|apikey)|(?:[a-z0-9_.-]*[_.-])?(?:key|token|secret|password|passwd|passphrase))$/i;
+// Generyczne słowa (`key`, `token`, `secret`, `password`, `cookie`) liczą się TYLKO jako osobny
+// człon: całe pole (`token`, `cookie`), po separatorze (`api_key`, `x-api-key`, `set-cookie`)
+// albo w camelCase (`apiKey`). Inaczej `monkey: ...` czy `turkey: ...` w zwykłej notatce szłoby
+// pod maskę. `cookie`/`set-cookie` łapie nagłówek `Set-Cookie` odbity przez proxy w treści błędu
+// dostawcy - bez tego token sesji wychodził jawny w logu (bug B1: `details` w `errorUtils.ts`
+// zostaje CELOWO surowym obiektem i to WYŁĄCZNIE ta maska po nazwie pola go osłania).
+const SENSITIVE_KEY_RE = /^(?:[a-z0-9_.-]*(?:authorization|apikey)|(?:[a-z0-9_.-]*[_.-])?(?:key|token|secret|password|passwd|passphrase|cookie))$/i;
 /** camelCase — osobno, bo tu wielkość liter niesie granicę członu (`apiKey` tak, `monkey` nie). */
 const SENSITIVE_CAMEL_RE = /^[A-Za-z0-9_.-]*[a-z0-9](?:Key|Token|Secret|Password|Passphrase)$/;
 
