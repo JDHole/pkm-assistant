@@ -886,7 +886,14 @@ export class ArtifactStore {
             text: truncate ? clip(s.text, ARTIFACT_CONTEXT_MAX_CHARS) : s.text,
         }));
         return {
-            id: (parsed.frontmatter['pkm-artefakt'] || null) as ThinArtifact['id'],
+            // `String()` przed zwrotką do modelu - `pkm-artefakt` bywa `number` (YAML bez
+            // cudzysłowu, patrz gotcha "porównuj/kluczuj ZAWSZE po Stringu" w CLAUDE.md).
+            // Model ECHUJE dosłownie to, co dostał w `artifact_read`/`create`/`update` - surowa
+            // liczba tutaj wracałaby w kolejnym `artifact_read({id: 20260911})` jako JSON
+            // `number`, a `artifactTargetPath` (ArtifactReadTool.ts) odmawia celu dla
+            // `typeof id !== 'string'`: bramka dostaje pusty `targetPath` i odmawia fail-closed,
+            // mimo że artefakt naprawdę istnieje.
+            id: parsed.frontmatter['pkm-artefakt'] ? String(parsed.frontmatter['pkm-artefakt']) : null,
             path: file?.path || null,
             tytul: this._basename(file),
             typ: (parsed.frontmatter.typ || null) as ThinArtifact['typ'],

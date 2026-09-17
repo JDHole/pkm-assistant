@@ -624,9 +624,9 @@ test('id NIGDY niewidziane nie dostaje fallbacku z dysku (zostaje O(1))', async 
 // `pathById('20260911')` (string) pytał `registry.get('20260911')` — Map nie zrównuje `20260911`
 // (number) z `'20260911'` (string), więc artefakt był niewidoczny, dopóki jakiś event
 // (`_indexSingleFile`, który POPRAWNIE robi `String(id)`) nie doindeksował go na nowo.
-test('numeryczny pkm-artefakt w YAML jest widoczny natychmiast po (pierwszym, pełnym) skanie rejestru', async t => {
+test('numeryczny pkm-artefakt w YAML jest widoczny natychmiast po (pierwszym, pełnym) skanie rejestru — O(1), bez ciągłego samoleczenia', async t => {
     const nowRef = { value: new Date('2026-07-23') };
-    const { store, files } = makeStore(nowRef);
+    const { store, files, getMarkdownFilesCalls } = makeStore(nowRef);
     const path = `${DEFAULT_ARTIFACTS_FOLDER}/Jaskier/2026-07-23 Numeryczny.md`;
     // Zapis WPROST do mapy plików — BEZ eventu `vault.on('create')` — żeby jedyną drogą
     // zbudowania rejestru był pełny skan (`_ensureRegistry`), nie `_indexSingleFile`.
@@ -644,7 +644,64 @@ test('numeryczny pkm-artefakt w YAML jest widoczny natychmiast po (pierwszym, pe
 
     t.is(store.pathById('20260911'), path,
         'rejestr musi kluczować String(id) — inaczej artefakt z numerycznym id jest niewidoczny do końca sesji');
+    const scansAfterFirst = getMarkdownFilesCalls();
+    t.is(scansAfterFirst, 1, 'pierwsze pytanie buduje rejestr — dokładnie jeden skan, bez samoleczenia');
+
+    // Drugie (i trzecie) pytanie MUSZĄ trafić z `_pathIndex`/rejestru, nie z `_rescanForId` —
+    // jeśli `_pathIndexEntryValid` porównuje `fm['pkm-artefakt'] === id` (number vs string) BEZ
+    // Stringa, wpis numeryczny wygląda jak "nieaktualny" przy KAŻDYM pytaniu, samoleczenie i tak
+    // go znajduje (bo `_rescanForId` jest naprawiony osobno), a test wyżej i tak by przeszedł —
+    // maskując regresję. Licznik skanów jest jedynym dowodem, że trafiamy z pamięci podręcznej.
+    t.is(store.pathById('20260911'), path, 'drugie pytanie — ten sam wynik');
+    t.is(getMarkdownFilesCalls(), scansAfterFirst,
+        'drugie pytanie NIE MA wywoływać kolejnego skanu — inaczej `_pathIndexEntryValid` odrzuca poprawny numeryczny wpis i samoleczenie to maskuje za każdym razem');
+    t.is(store.pathById('20260911'), path, 'trzecie pytanie — dalej bez skanu');
+    t.is(getMarkdownFilesCalls(), scansAfterFirst);
+
     t.is(store.list().length, 1, 'list() musi też widzieć wpis kluczowany stringiem');
+});
+
+// `_diskFallbackForId` (asynchroniczny fallback z dysku w `_findFileById`) ma TĘ SAMĄ wadę
+// niezależnie od `_pathIndexEntryValid`/`_rescanForId` — porównuje `parsed.frontmatter['pkm-
+// artefakt'] === id` wprost. Reprodukuje scenariusz „przenosiny bez eventu do zimnej lokalizacji"
+// (wzór testu wyżej w pliku), ale dla numerycznego id — i kończy na LITERALNEJ ścieżce.
+test('numeryczny pkm-artefakt: `_diskFallbackForId` znajduje przeniesiony plik i zwraca literalną ścieżkę', async t => {
+    const nowRef = { value: new Date('2026-07-23') };
+    const { store, files, coldPaths } = makeStore(nowRef);
+    const path = `${DEFAULT_ARTIFACTS_FOLDER}/Jaskier/2026-07-23 Numeryczny.md`;
+    const content = [
+        '---',
+        'pkm-artefakt: 20260911',
+        'typ: plan',
+        'agent: Jaskier',
+        'status: do-akceptacji',
+        'utworzono: 2026-07-23',
+        'zaktualizowano: 2026-07-23',
+        '---',
+        '',
+    ].join('\n');
+    files.set(path, content);
+
+    // Id staje się "znane" (rejestr) przed przenosinami.
+    t.is(store.pathById('20260911'), path);
+
+    // User przenosi notatkę bez eventu `rename`, a nowa lokalizacja ma ZIMNY metadataCache —
+    // samoleczenie synchroniczne (tylko cache) nie może jej znaleźć.
+    const moved = `${DEFAULT_ARTIFACTS_FOLDER}/Jaskier/2026-07-23 Numeryczny przeniesiony.md`;
+    files.set(moved, content);
+    files.delete(path);
+    coldPaths.add(moved);
+
+    t.is(store.pathById('20260911'), null, 'samoleczenie SYNCHRONICZNE (tylko metadataCache) nie znajduje pod zimnym cache');
+
+    const file = await store._findFileById('20260911');
+    t.truthy(file, '_findFileById MUSI spróbować fallbacku z dysku — id BYŁO kiedyś znane');
+    t.is(file?.path, `${DEFAULT_ARTIFACTS_FOLDER}/Jaskier/2026-07-23 Numeryczny przeniesiony.md`,
+        '_diskFallbackForId ma porównywać String(fm[\'pkm-artefakt\']) === id, nie surowy `===`');
+
+    // Fallback z dysku odświeżył indeks/rejestr — kolejne pytanie (sync) trafia bez dysku.
+    coldPaths.delete(moved);
+    t.is(store.pathById('20260911'), moved);
 });
 
 // ── BUG D1b: kolizja nazwy w `_buildInstancePathSync` gubi zawężenie typu z `sanitizePath` ──
