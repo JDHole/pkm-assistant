@@ -186,10 +186,7 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
     this.renderSkillButtons();
     this.renderMcpServerButtons?.();
     this._renderArtifactChip?.();   // chip aktywnego artefaktu per-tab
-    this._activeTodoState = null;   // todo jest per-agent - czyścimy przy switchu
-    this._prevTodoModel = null;     // bez tego resolver widziałby listę POPRZEDNIEGO agenta
-    this._bottomBarMode = DEFAULT_BOTTOM_BAR_MODE;  // nowa zakładka zaczyna od pola tekstowego
-    this._renderTodoPanel?.();
+    this._resetTodoPanelState?.();  // todo jest per-agent - czyścimy przy switchu
     // Pasek biegów subów jest PER ZAKŁADKA — nowa zakładka = inne biegi (i zwinięty szczegół).
     this._subStripExpandedId = null;
     this._renderSubTaskStrip?.();
@@ -282,6 +279,23 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
     } catch (e) {
         log.warn('Chat', `Zatrzymanie subów zamykanej zakładki padło: ${(e as Error)?.message || String(e)}`);
     }
+}
+
+/**
+ * Czyści stan panelu `todo` (lista w slocie inputu — patrz `todoPanel.ts`) i przemalowuje pasek.
+ *
+ * Lista jest per agent/sesja - wołacz, który wymienia sesję pod zakładką (przełączenie
+ * zakładki w `_switchTab`, nowa rozmowa w `handleNewSession`), musi zgasić panel POPRZEDNIEJ
+ * rozmowy, inaczej user widzi listę sesji, która już nie istnieje (BUG C3: `handleNewSession`
+ * czyścił tylko na switchu agenta, nie na nowej sesji tego samego agenta). Jedno miejsce
+ * prawdy - `_switchTab` i `handleNewSession` (`chat_session.ts`) wołają TĘ SAMĄ funkcję,
+ * zamiast dwóch kopii tych samych trzech przypisań.
+ */
+export function _resetTodoPanelState(this: ChatViewLike) {
+    this._activeTodoState = null;   // bez tego resolver widziałby listę POPRZEDNIEJ rozmowy
+    this._prevTodoModel = null;     // bez tego resolver widziałby model POPRZEDNIEJ rozmowy
+    this._bottomBarMode = DEFAULT_BOTTOM_BAR_MODE;  // nowa rozmowa zaczyna od pola tekstowego
+    this._renderTodoPanel?.();
 }
 
 /**

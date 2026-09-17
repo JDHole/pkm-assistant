@@ -6,4 +6,5 @@ export { createArtifactUpdateTool } from './ArtifactUpdateTool.js';
 export { createArtifactListTool } from './ArtifactListTool.js';
 
 // Todo agenta (gatunek 2) — prymitywne, jednorazowe zadania:
-export { createTodoTool, TodoFileStore, TODO_FOLDER } from './TodoTool.js';
+export { createTodoTool, TodoFileStore, TODO_FOLDER, retireTodoFile } from './TodoTool.js';
+export type { TodoAdapter } from './TodoTool.js';

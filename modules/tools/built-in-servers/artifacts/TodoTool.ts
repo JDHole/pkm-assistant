@@ -316,6 +316,21 @@ export class TodoFileStore {
 }
 
 /**
+ * Skasuj jednorazowy plik todo KONKRETNEJ (agent, sesja) - publiczna furtka dla wołaczy
+ * spoza tego modułu (np. `modules/chat` przy odrzuceniu sesji, BUG C3: plik
+ * `.pkm-assistant/artifacts/todo/<agent>-<sessionId>.md` zostawał sierotą po `handleNewSession`,
+ * mimo że sama sesja szła do `sessions/active/.discarded/`).
+ *
+ * Cienki wrapper na `TodoFileStore.finish` (ta sama semantyka: brak pliku = sukces,
+ * idempotencja) - żaden wołacz spoza modułu nie dostaje dostępu do `create`/`patch` (surowa
+ * mutacja listy zostaje wewnętrzna, ten jeden akt sprzątania jest publiczny).
+ */
+export async function retireTodoFile(adapter: TodoAdapter, agent: string, sessionId: string): Promise<void> {
+    const store = new TodoFileStore({ adapter });
+    await store.finish(agent, sessionId);
+}
+
+/**
  * Rozwiąż sessionId rozmowy WOŁAJĄCEGO agenta (basename aktywnej sesji; fallback stały).
  *
  * Tożsamość bierze się z zaufanego `_invocationAgentName`, nie z globalnego aktywnego —

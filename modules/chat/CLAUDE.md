@@ -599,6 +599,21 @@ zakolejkowaniu (`_draftAfterSend`) i oddaje go w `send_message` zaraz po zreseto
 restore musi być tam, nie w oddzielnym `setTimeout`, bo `resetInputArea` leci dopiero po
 awaitach `send_message` i zjadłby wcześniejszy restore.
 
+**Reset panelu jest JEDNĄ funkcją, wołaną z DWÓCH miejsc.** `_resetTodoPanelState()`
+(`chat_tabs.ts`, eksportowana - nie w barrelu, wewnętrzna dla modułu jak reszta mixinów) zeruje
+`_activeTodoState`/`_prevTodoModel`/`_bottomBarMode` i przemalowuje pasek. Wołają ją `_switchTab`
+(zmiana agenta - lista jest per agent) i `handleNewSession` (`chat_session.ts`, KAŻDE wyjście
+funkcji, nie tylko po modalu - BUG C3: `handleNewSession` kiedyś w ogóle nie czyścił panelu,
+więc nowa rozmowa TEGO SAMEGO agenta pokazywała listę zadań sesji, która już poszła do
+archiwum/`.discarded/`). Drugi ogon tego samego buga: jednorazowy plik
+`.pkm-assistant/artifacts/todo/<agent>-<sessionId>.md` (silnik: `modules/tools`,
+`TodoTool.ts`) żyje w OSOBNYM drzewie od `sessions/active/*.md` - przeniesienie sesji do
+`.discarded/` go nie dotyka. Gałąź `discard` w `handleNewSession` woła
+`retireTodoFile(adapter, agentName, sessionId)` (publiczna furtka `modules/tools/index.js` -
+patrz `modules/tools/CLAUDE.md`) z `sessionId` liczonym DOKŁADNIE jak `TodoTool.resolveSessionId`
+(basename ścieżki sesji bez `.md`), best-effort (pad sprzątania nie blokuje odrzucenia sesji).
+Testy: `chat/handleNewSessionTodoCleanup.test.ts`, `tools/.../TodoTool.test.ts` (`retireTodoFile`).
+
 ### Cykl życia sesji w zakładce
 
 - **Zamknięcie zakładki czeka na zapis.** `_closeActiveTab` jest `async` i `await`-uje

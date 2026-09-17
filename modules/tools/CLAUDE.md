@@ -86,6 +86,13 @@ Realny `app` dociera do narzędzia jako 2. argument `execute(args, app, plugin)`
 
 **Cykl życia:** `stopAllDelegations(reason)` - wołane z `PluginBase.onunload` (patrz Gotchas).
 
+**Sprzątanie todo:** `retireTodoFile(adapter, agent, sessionId)` - cienki wrapper na
+`TodoFileStore.finish` (ta sama semantyka: brak pliku = sukces, idempotencja). Jedyny publiczny
+akt mutacji pliku `.pkm-assistant/artifacts/todo/<agent>-<sessionId>.md` dla wołaczy spoza tego
+modułu - `modules/chat` go woła w `handleNewSession` przy odrzuceniu sesji (BUG C3), żeby plik
+jednorazowy nie zostawał sierotą na dysku po tym, jak sesja poszła do `.discarded/`.
+`TodoFileStore` sama (create/patch/clearForAgent - surowa mutacja listy) zostaje wewnętrzna.
+
 ### Co świadomie NIE jest w barrelu (deep-import wewnątrz modułu + w testach)
 
 - `validateVaultPath` / `validateVaultFolder` - `vault_path_validator.ts` (tam też `invocationHasAdminAccess` + `getInvocationAgentName` - jedna kopia dla całego modułu)
