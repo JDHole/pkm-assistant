@@ -5,6 +5,31 @@ All notable user-facing changes to PKM Assistant are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 2.2.6 - unreleased
+
+Nine bug fixes from the post-release review, no new features.
+
+### Fixed
+
+- **Restarting Obsidian no longer loses tool calls from the restored chat.** The active session
+  file (format v3) keeps `tool_call_id` and `tool_calls`, so restored tool results are no longer
+  dropped as orphans. An empty tool result is restored too.
+- **Session secrets stay out of the log file.** `cookie` / `set-cookie` (also camelCase) are
+  masked by the field-name mask like API keys.
+- **Artifacts with a numeric `pkm-artefakt` id** are found by the registry, the disk fallback
+  and the read tool.
+- **"Export profile"** copies YAML instead of `[object Object]`.
+- **Regenerating a message with an attachment** pastes its text instead of `[object Object]`.
+- **A new chat clears the todo panel** and removes the discarded session's todo file.
+- **Token counter** no longer throws for an agent without a model.
+- **Sidebar views and artifact summon** route async failures to the friendly error path.
+- **Brain shard** in the agent presentation renders empty for an empty memory.
+
+Known limits: `preferred_tools` and `default_permissions.mcp` are legacy fields with no effect.
+
+Downgrade warning: do not open 2.2.6 active sessions with an older build; archive or discard
+them first (see `modules/memory/CLAUDE.md`).
+
 ## 2.2.5 - 2026-09-13
 
 The whole first session follows the interface language: an English user no longer meets
