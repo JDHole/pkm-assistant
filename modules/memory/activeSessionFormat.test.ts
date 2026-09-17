@@ -321,8 +321,8 @@ test('escape/unescape: ZNANA strata — literalny `\\## ` na początku linii wra
 });
 
 test('stała wersji kontraktu jest ustawiona', t => {
-    // v2 = pole `**seq:**` + escapowanie etykiet pól.
-    t.is(ACTIVE_SESSION_FORMAT_VERSION, 2);
+    // v3 = doszły pola `**tool_call_id:**`/`**tool_calls:**` (round-trip tool_call_id po restarcie).
+    t.is(ACTIVE_SESSION_FORMAT_VERSION, 3);
 });
 
 // ─── Numeracja `seq` + escapowanie etykiet pól ───
@@ -462,11 +462,13 @@ test('pola: escape/unescape etykiet = identyczność, unescape jest no-opem bez 
 
 test('EVENT_FIELDS: kolejność pól w bloku idzie z jednej listy', t => {
     t.deepEqual(EVENT_FIELDS, [
-        'content', 'tool', 'args', 'result', 'model', 'tokens', 'duration_ms', 'role', 'prompt', 'seq',
+        'content', 'tool', 'args', 'result', 'model', 'tokens', 'duration_ms', 'role', 'prompt',
+        'tool_call_id', 'tool_calls', 'seq',
     ]);
     const block = formatSessionEvent('tool_result', {
         seq: 1, prompt: 'p', role: 'tool', duration_ms: 5, tokens: 3, model: 'm',
         result: 'r', args: { a: 1 }, tool: 't', content: 'c',
+        tool_call_id: 'call_1', tool_calls: [{ id: 'call_1', function: { name: 'x', arguments: '{}' } }],
     }, '2026-07-30T10:00:00.000Z');
     const order = [...block.matchAll(/^\*\*([a-z_]+):\*\*$/gm)].map(m => m[1]);
     t.deepEqual(order, EVENT_FIELDS, 'blok zapisuje pola w kolejności EVENT_FIELDS');

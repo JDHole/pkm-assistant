@@ -1466,19 +1466,28 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
     const inputTokens = turn.lastApiInput > 0 ? turn.lastApiInput : (turn.lastInputTokens || 0);
     const outputTokens = turn.lastApiOutput > 0 ? turn.lastApiOutput : countTokens(assistantContent);
 
+    // `tool_calls` jedzie do event-logu TYLKO gdy runda faktycznie wołała narzędzia — bez tej
+    // bramki `formatSessionEvent` pisałby `**tool_calls:** []` na KAŻDEJ odpowiedzi (tablica
+    // pusta jest truthy). Round-trip po restarcie Obsidiana potrzebuje tego pola, żeby
+    // `sanitizeToolTranscript` odzyskał dopasowanie assistant.tool_calls ↔ tool.tool_call_id
+    // (patrz `modules/memory/activeSessionFormat.ts`, `ACTIVE_SESSION_FORMAT_VERSION` v3).
     await this.appendToActiveSession?.({
         type: 'agent_message',
         agentName,
         content: assistantContent,
         model: turn.model || '',
         tokens: { input: inputTokens, output: outputTokens },
+        ...(asstMsg?.tool_calls?.length ? { tool_calls: asstMsg.tool_calls } : {}),
         timestamp: new Date().toISOString()
     });
     for (const tr of (turn.lastRoundToolResults || [])) {
         await this.appendToActiveSession?.({
             type: 'tool_result',
             agentName,
-            tool: tr.id,
+            // `tr.id` to `tool_call_id` (patrz `turn.lastRoundToolResults` w `_chatOnToolResults`:
+            // `{id: r.toolCall.id, content: r.result}`) - MUSI przetrwać restore, żeby ta sama
+            // wiadomość dopasowała się z powrotem do `assistant.tool_calls[]` po restarcie.
+            tool_call_id: tr.id,
             result: tr.content,
             timestamp: new Date().toISOString()
         });

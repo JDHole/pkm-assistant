@@ -279,6 +279,43 @@ produkcji plik po pierwszym autozapisie bywał mieszanką obu), `KNOWN_ROLES`, `
 escape/unescape stąd - jedno źródło pary regexów, kierunek `sessionParser -> activeSessionFormat`,
 bez cyklu.
 
+**Format v3 (2026-09): pola `**tool_call_id:**`/`**tool_calls:**` - round-trip narzędzi
+przez restart Obsidiana.** Bug: po restarcie pluginu odtworzona sesja gubiła
+`tool_call_id` KAŻDEGO wyniku narzędzia (log `sanitizeToolTranscript`:
+`drop orphan tool message (tool_call_id="undefined")`), bo event-log (v2) nie miał gdzie
+zapisać ani `tool_call_id` (event `tool_result`), ani `tool_calls[]` asystenta (event
+`agent_message`, gdy odpowiedź wołała narzędzia). `EVENT_FIELDS` dostało dwa nowe,
+OPCJONALNE pola:
+- `**tool_call_id:**` - string, na evencie `tool_result` (`chat_streaming._chatBeforeContinue`
+  podaje `tool_call_id: tr.id`, gdzie `tr.id` = `toolCall.id` z rundy narzędzi, NIE nazwę
+  narzędzia - starsza wersja pisała tu błędnie `tool: tr.id`, czyli id pod złą etykietą).
+- `**tool_calls:**` - JSON (kształt OpenAI: `{id, type, function:{name, arguments}}[]`), na
+  evencie `agent_message`, TYLKO gdy runda faktycznie wołała narzędzia (`asstMsg.tool_calls`
+  niepuste - pusta tablica jest truthy, więc bramka jest jawna, inaczej pole leciałoby na
+  KAŻDEJ odpowiedzi jako `[]`).
+
+`ActiveSessionMessage.toolCallId?: string` / `toolCalls?: SessionToolCall[]` są OPCJONALNE -
+klucz jest NIEOBECNY (nie `null`) na wiadomości bez tych pól (legacy/v1/v2, albo zwykła
+wiadomość tekstowa), więc stare porównania `{role, content, seq}` (`t.deepEqual`) nie widzą
+zmiany kształtu. `SessionToolCall` żyje w `activeSessionFormat.ts` jako minimalny kształt
+STRUKTURALNY (nie import z `modules/chat` - kierunek zależności zostaje: memory nie zna
+chatu), z index signature (`[key: string]: unknown`) lustrzaną do `ToolCall`
+(`modules/chat/chat/RollingWindow.ts`) - bez niej TS odmawia przypisania na granicy modułów
+(typ z index signature wymaga jej też po stronie źródła).
+
+⚠️ **`agent_message` z PUSTĄ `content` (typowa odpowiedź tool-calling: sam `tool_calls`, zero
+tekstu) liczy się jako wiadomość TYLKO odkąd `parseActiveSession` sprawdza też
+`**tool_calls:**`, nie tylko `content`/`result`/`prompt`.** Bez tej gałęzi CAŁY blok assistant
+(razem z jego `tool_calls`) znikał z restore - nie tylko `tool_call_id` samego wyniku
+narzędzia, tak jak w logu z 2026-08-09 ("every tool call ... was cut"). Ta sama gałąź NIE
+obejmuje `tool_result` bez treści - pusty wynik narzędzia bez dowodu w logach zostaje jak
+dotąd (pomijany), żeby nie zmieniać zachowania bez ewidencji.
+
+Restore w `modules/chat/chat/chat_session.ts` (`_restoreActiveSession`) MUSI przekazać
+`{tool_call_id, tool_calls}` jako TRZECI argument `RollingWindow.addMessage()` - samo
+odzyskanie pól przez `parseActiveSession` nie wystarcza, bo `addMessage(role, content)` bez
+metadanych je odrzuca (`chat/chat_session.test.ts`, `BUG C1`).
+
 ### Konsolidacja
 
 `ArchiveWorkflow` odpala flow user-review, JEDEN tor: `runWithRun(consolidationRun)` generuje

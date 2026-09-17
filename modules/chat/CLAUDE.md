@@ -611,6 +611,18 @@ awaitach `send_message` i zjadłby wcześniejszy restore.
   każdym powrocie na nią. Nowa sesja powstaje leniwie, przy pierwszym kolejnym zdarzeniu, jak
   dla świeżej zakładki. Warianty `archive_new` (od razu nowa sesja) i `archive_close` (zamknij
   zakładkę) mają własną, jawną obsługę tych samych pól.
+- ⚠️ **`_restoreActiveSession` MUSI przekazać `tool_call_id`/`tool_calls` jako TRZECI argument
+  `RollingWindow.addMessage()`.** Bug (2026-08-09): po restarcie Obsidiana odtworzona sesja
+  gubiła `tool_call_id` KAŻDEGO wyniku narzędzia sprzed restartu - `sanitizeToolTranscript`
+  (`modules/agent-loop`) widział `tool` message bez id i kasował go jako sierotę (log
+  `drop orphan tool message (tool_call_id="undefined")`). Root cause był DWUCZĘŚCIOWY:
+  (1) `activeSessionFormat.ts` (format v2, `modules/memory`) nie miało gdzie zapisać
+  `tool_call_id`/`tool_calls` w ogóle - naprawione formatem v3 (pola `**tool_call_id:**`/
+  `**tool_calls:**`, patrz `modules/memory/CLAUDE.md`, "Sesje aktywne"); (2) NAWET po naprawie
+  czytnika, `_restoreActiveSession` wołało `addMessage(msg.role, msg.content)` bez trzeciego
+  argumentu - `parsed.messages[i].toolCallId`/`toolCalls` (kiedy obecne) muszą jechać dalej do
+  `RollingWindow`, inaczej odczytane dane i tak giną na ostatnim kroku. Test:
+  `chat/chat_session.test.ts` (`BUG C1`).
 
 ### Rozliczanie tokenów: estymaty oznaczone jako przybliżone
 
@@ -668,8 +680,15 @@ narzędzia, które ma alias.
 ### Watchdog vs test bez `ChatView`
 
 `chat_streaming.ts`, `chat_ui.ts`, `chat_model.ts`, `chat_popovers.ts`, `chat_session.ts` i
-`chat_tabs.ts` importują `obsidian` i nie są importowalne w AVA (node). Cała logika decyzyjna
-wymieniona wyżej dlatego żyje w czystych plikach obok (patrz sekcja "Pattern: prototype mixin").
+`chat_tabs.ts` importują `obsidian`. Historycznie żaden z nich nie dawał się zaimportować w AVA
+(node), bo AVA nie miało dla `obsidian` atrapy. **Od atrapy `obsidian` w harnessie (2026-09-11,
+`test-support/register-obsidian-for-ava.mjs`) to już nieprawda dla `chat_session.ts`** -
+`chat/chat_session.test.ts` go importuje wprost i woła `_restoreActiveSession` na sfabrykowanym
+`this` (patrz gotcha "Cykl życia sesji w zakładce" wyżej, `BUG C1`). Reszta listy nie została
+ponownie sprawdzona po tej zmianie w atrapie - traktuj ich niedostępność jako niepotwierdzoną,
+nie jako pewnik, zanim ktoś realnie spróbuje. Cała logika decyzyjna
+wymieniona wyżej i tak żyje w czystych plikach obok (patrz sekcja "Pattern: prototype mixin") -
+ten wzorzec zostaje niezależnie od tego, co dziś da się zaimportować wprost.
 Strażnik "po źródle" (regex nad plikiem z `obsidian`) pilnuje wyłącznie OKABLOWANIA - że dana
 funkcja jest wołana, z odpowiednim kształtem warunku (`if (!x.allowed)` z negacją, który
 argument leci gdzie) - nie samej obecności identyfikatora, bo taki test nie odróżnia poprawnej

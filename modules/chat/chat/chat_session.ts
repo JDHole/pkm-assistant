@@ -139,6 +139,27 @@ async function _retireActiveSession(agentMemory: AgentMemory | null | undefined,
     }
 }
 
+/** Jedna wiadomość odzyskana z pliku sesji — kształt `AgentMemory.loadActiveSession()`. */
+type RestoredMessage = Awaited<ReturnType<AgentMemory['loadActiveSession']>>['messages'][number];
+
+/**
+ * Metadata do przekazania `RollingWindow.addMessage` przy restore z dysku.
+ *
+ * Bez tego `_restoreActiveSession` wołał `addMessage(role, content)` BEZ trzeciego
+ * argumentu — nawet gdy plik sesji (format v3, `activeSessionFormat.ts`) niósł
+ * `tool_call_id`/`tool_calls`, restore je odrzucał. Kolejna tura widziała `tool`
+ * bez `tool_call_id` i `sanitizeToolTranscript` (`modules/agent-loop`) kasował go jako
+ * sierotę (log `drop orphan tool message (tool_call_id="undefined")`) — KAŻDY tool
+ * result sprzed restartu Obsidiana znikał z okna. Klucze są dokładane TYLKO gdy obecne
+ * (`ActiveSessionMessage.toolCallId`/`toolCalls` są opcjonalne — brak w pliku legacy/v1/v2).
+ */
+function _restoredMessageMeta(msg: RestoredMessage) {
+    const meta: { tool_call_id?: string; tool_calls?: NonNullable<RestoredMessage['toolCalls']> } = {};
+    if (msg.toolCallId) meta.tool_call_id = msg.toolCallId;
+    if (msg.toolCalls) meta.tool_calls = msg.toolCalls;
+    return meta;
+}
+
 /**
  * Restore the last active session from disk.
  */
@@ -176,7 +197,7 @@ export async function _restoreActiveSession(this: ChatViewLike) {
 
                 const rollingWindow = this._createRollingWindow(agentName);
                 for (const msg of parsed.messages) {
-                    await rollingWindow.addMessage(msg.role, msg.content);
+                    await rollingWindow.addMessage(msg.role, msg.content, _restoredMessageMeta(msg));
                 }
 
                 restored.push({
@@ -203,7 +224,7 @@ export async function _restoreActiveSession(this: ChatViewLike) {
 
             const rollingWindow = this._createRollingWindow(activeAgentName);
             for (const msg of parsed.messages) {
-                await rollingWindow.addMessage(msg.role, msg.content);
+                await rollingWindow.addMessage(msg.role, msg.content, _restoredMessageMeta(msg));
             }
             restored.push({
                 agentName: activeAgentName,

@@ -39,12 +39,21 @@
  * + treść, treść pól escapowana przez `escapeActiveText`.
  * v2: doszło pole `**seq:**` (numer zdarzenia w pliku) + escapowanie linii
  * treści, które są etykietą znanego pola (`\**result:**`).
+ * v3: doszły pola `**tool_call_id:**` (na evencie `tool_result`) i `**tool_calls:**`
+ * (JSON, na evencie `agent_message`, gdy odpowiedź asystenta wołała narzędzia) - bez nich
+ * restore po restarcie Obsidiana odtwarzał `assistant`/`tool` bez id, więc
+ * `sanitizeToolTranscript` widział sierotę (`tool_call_id="undefined"`) i kasował KAŻDY
+ * wynik narzędzia z sesji sprzed restartu. Pola są ADDYTYWNE i opcjonalne - plik bez nich
+ * (legacy, v1, v2) czyta się identycznie jak dotąd, tyle że
+ * `ActiveSessionMessage.toolCallId`/`toolCalls` zostają nieobecne (nie `null` - klucz
+ * w ogóle nie istnieje na obiekcie wiadomości, żeby nie zmieniać kształtu dla wołaczy,
+ * którzy porównują wiadomość 1:1).
  *
  * ⚠️ Nie jest zapisywana do pliku - pliki usera sprzed v2 nie mają żadnego znacznika
- * wersji, a czytnik musi rozumieć je NA ZAWSZE: **v2 czyta v1 i legacy
+ * wersji, a czytnik musi rozumieć je NA ZAWSZE: **v2/v3 czytają v1 i legacy
  * identycznie jak dotąd.** Stała jest jawną kotwicą kontraktu w kodzie.
  */
-export const ACTIVE_SESSION_FORMAT_VERSION = 2;
+export const ACTIVE_SESSION_FORMAT_VERSION = 3;
 
 /**
  * Rola wiadomości uznawana przez format sesji za granicę bloku (`## Rola`).
@@ -66,6 +75,8 @@ export type EventFieldName =
     | 'duration_ms'
     | 'role'
     | 'prompt'
+    | 'tool_call_id'
+    | 'tool_calls'
     | 'seq';
 
 /**
@@ -86,13 +97,37 @@ export type SessionEvent = {
 };
 
 /**
+ * Wywołanie narzędzia odzyskane z pola `**tool_calls:**` (kształt OpenAI, ten sam,
+ * który `AgentLoop._streamOnce` składa jako `apiToolCalls` - `id` + `function.name` +
+ * `function.arguments` jako STRING JSON, nie obiekt). Minimalny kształt STRUKTURALNY,
+ * nie import z `modules/chat` - `modules/memory` nie zależy od chatu (patrz CLAUDE.md).
+ */
+export interface SessionToolCall {
+    id: string;
+    type?: string;
+    function: { name: string; arguments: string };
+    // Lustro index signature `ToolCall` (`modules/chat/chat/RollingWindow.ts`) - bez niej TS
+    // odmawia przypisania `SessionToolCall[]` do `RollingMessage['tool_calls']` przy restore
+    // w `chat_session.ts` (typ z index signature wymaga jej też po stronie źródła).
+    [key: string]: unknown;
+}
+
+/**
  * Jedna wiadomość odzyskana z pliku sesji. `seq` = numer ZDARZENIA z pola `**seq:**`
  * albo `null` (wiadomość transkryptowa / blok legacy sprzed numeracji).
+ *
+ * `toolCallId`/`toolCalls` są OPCJONALNE (klucz nieobecny, nie `null`) - present TYLKO
+ * gdy blok event-logu niósł pole `**tool_call_id:**`/`**tool_calls:**` (format v3, patrz
+ * `ACTIVE_SESSION_FORMAT_VERSION`). Blok transkryptowy (format B) i legacy event bez tych
+ * pól nie dokładają klucza wcale - wołacz, który porównuje wiadomość 1:1
+ * (`t.deepEqual`), nie widzi zmiany kształtu.
  */
 export interface ActiveSessionMessage {
     role: SessionRole;
     content: string;
     seq: number | null;
+    toolCallId?: string;
+    toolCalls?: SessionToolCall[];
 }
 
 /**
@@ -138,6 +173,8 @@ export const EVENT_FIELDS: EventFieldName[] = [
     'duration_ms',
     'role',
     'prompt',
+    'tool_call_id',
+    'tool_calls',
     'seq',
 ];
 
@@ -351,15 +388,29 @@ export function parseActiveSession(text: unknown): ParsedActiveSession {
         const contentValue = extractEventField(rawBody, 'content')
             || extractEventField(rawBody, 'result')
             || extractEventField(rawBody, 'prompt');
-        if (contentValue) {
+        // v3: `agent_message` wołające WYŁĄCZNIE narzędzia ma pustą `content` (typowy kształt
+        // odpowiedzi tool-calling) - blok bez `contentValue` liczy się MIMO TO jako wiadomość,
+        // gdy niesie `**tool_calls:**`. Bez tej gałęzi CAŁY blok (assistant + jego tool_calls)
+        // znikał z restore, więc kolejny `tool_result` i tak zostawał sierotą - dokładnie
+        // scenariusz z logu 2026-08-09 ("every tool call ... was cut").
+        const toolCallsRaw = extractEventField(rawBody, 'tool_calls');
+        if (contentValue || toolCallsRaw) {
             const eventRole = roleFromEvent(eventTypeFromHeader(rawHeader), rawBody);
             // Event o nierozpoznanej roli pomijamy jak dotąd, ale NIE doklejamy go do
             // poprzedniej wiadomości - blok z polem eventowym nigdy nie jest treścią.
             if (eventRole) {
+                // v3: `tool_call_id` (event `tool_result`) i `tool_calls` (event `agent_message`
+                // z wywołaniami narzędzi) - klucz dokładany TYLKO gdy pole realnie jest w bloku,
+                // żeby wiadomość bez nich zostawała bit w bit takim samym obiektem jak przed v3
+                // (kontrakt: `t.deepEqual` na `{role, content, seq}` gdzie indziej w tym pliku).
+                const toolCallId = extractEventField(rawBody, 'tool_call_id') || null;
+                const toolCalls = parseSessionToolCalls(toolCallsRaw);
                 result.messages.push({
                     role: eventRole,
                     content: unescapeActiveText(contentValue.trim()),
                     seq: seqFromEvent(rawBody),
+                    ...(toolCallId ? { toolCallId } : {}),
+                    ...(toolCalls ? { toolCalls } : {}),
                 });
                 lastWasTranscript = false;
             }
@@ -427,6 +478,40 @@ function seqFromEvent(body: unknown): number | null {
     if (!/^\d+$/.test(raw)) return null;
     const value = Number(raw);
     return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Parsuje pole `**tool_calls:**` (JSON, pisany przez `formatSessionEvent` jako
+ * `JSON.stringify(value, null, 2)` - patrz gałąź generyczna `add()`). Fail-soft:
+ * JSON niepoprawny, nie-tablica, albo wpis bez `id`/`function.name` → `null` (blok
+ * traktowany tak, jakby pola w ogóle nie było - restore nie ma prawa rzucić na
+ * uszkodzonym/ręcznie edytowanym pliku sesji).
+ */
+function parseSessionToolCalls(raw: string): SessionToolCall[] | null {
+    if (!raw) return null;
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        return null;
+    }
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    const calls: SessionToolCall[] = [];
+    for (const entry of parsed) {
+        if (!entry || typeof entry !== 'object') return null;
+        const id = (entry as Record<string, unknown>).id;
+        const fn = (entry as Record<string, unknown>).function;
+        if (typeof id !== 'string' || !id) return null;
+        if (!fn || typeof fn !== 'object') return null;
+        const name = (fn as Record<string, unknown>).name;
+        const args = (fn as Record<string, unknown>).arguments;
+        if (typeof name !== 'string' || !name) return null;
+        calls.push({
+            id,
+            function: { name, arguments: typeof args === 'string' ? args : JSON.stringify(args ?? {}) },
+        });
+    }
+    return calls;
 }
 
 /**
