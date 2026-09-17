@@ -226,3 +226,50 @@ test('maskowanie: zaescapowany zwykły tekst NIE wpada pod maskę', t => {
     const plain = JSON.stringify({ message: JSON.stringify({ monkey: 'banan i jeszcze wiecej', max_tokens: '2048' }) });
     t.is(maskSensitiveData(plain), plain);
 });
+
+// ─── `cookie` / `set-cookie` w nazwie pola (bug B1) ──────────────────────
+//
+// `normalizeError` (core/utils/errorUtils.ts) świadomie zostawia `details` surowym obiektem -
+// kontrakt adapterów, obiekt idzie do logu przez TĘ maskę (Logger.maskLogValue → JSON.stringify
+// → maskSensitiveData). Proxy potrafi odbić nagłówek `Set-Cookie` w treści błędu dostawcy - bez
+// `cookie`/`set-cookie` w SENSITIVE_KEY_RE token sesji wychodził jawny w `.pkm-assistant/logs/`,
+// limitowany wyłącznie przez cap długości linii w LogFileSink (500/200 znaków), nie przez maskę.
+
+test('maskowanie: nagłówek set-cookie w JSON-ie (kształt `details` błędu dostawcy) - wynik dosłowny', t => {
+    // `details` dokładnie w kształcie, jaki `normalizeError` zostawia surowym: obiekt z nagłówkami
+    // odbitymi przez proxy, `set-cookie` obok pola bearer-podobnego.
+    const details = {
+        headers: {
+            'set-cookie': 'sid=SUPERSECRETSESSIONVAL1234567890',
+            Authorization: 'Bearer ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+            'content-type': 'application/json',
+        },
+        status: 403,
+    };
+    const payload = JSON.stringify(details);
+    t.is(
+        payload,
+        '{"headers":{"set-cookie":"sid=SUPERSECRETSESSIONVAL1234567890","Authorization":"Bearer ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789","content-type":"application/json"},"status":403}',
+        'fixture ma być dokładnie ten kształt'
+    );
+    t.is(
+        maskSensitiveData(payload),
+        '{"headers":{"set-cookie":"sid=***7890","Authorization":"Bearer ABCD***6789","content-type":"application/json"},"status":403}'
+    );
+});
+
+test('maskowanie: pole `cookie` (bez set-) też jest wrażliwą nazwą', t => {
+    const masked = maskSensitiveData('{"cookie":"sid=SUPERSECRETSESSIONVAL1234567890"}');
+    t.is(masked, '{"cookie":"sid=***7890"}');
+});
+
+test('maskowanie: Set-Cookie i inna wielkość liter też są łapane', t => {
+    const masked = maskSensitiveData('{"Set-Cookie":"sid=SUPERSECRETSESSIONVAL1234567890"}');
+    t.is(masked, '{"Set-Cookie":"sid=***7890"}');
+});
+
+test('maskowanie: `details` bez pól-sekretów przechodzi bez zmian', t => {
+    const harmless = { headers: { 'content-type': 'application/json', 'x-request-id': 'req-42' }, status: 200, model: 'gpt-4' };
+    const payload = JSON.stringify(harmless);
+    t.is(maskSensitiveData(payload), payload);
+});
