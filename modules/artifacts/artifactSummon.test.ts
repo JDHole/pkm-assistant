@@ -64,7 +64,7 @@ function makePlugin(thinState: unknown) {
         sent: 0,
         agentChanges: 0,
         _renderArtifactChip() { this.chipRenders++; },
-        send_message() { this.sent++; },
+        send_message(_opts: { meta: unknown }): void | Promise<void> { this.sent++; },
         handleAgentChange() { this.agentChanges++; },
     };
     const plugin = {
@@ -114,7 +114,17 @@ test.serial('activateArtifactInChat: brak store\'a / nieznane id → {ok:false}'
 // rejection.
 test.serial('summonAgentForArtifact: odrzucenie send_message NIE ucieka jako unhandled rejection', async t => {
     const { plugin, view } = makePlugin(thin());
-    view.send_message = () => Promise.reject(new Error('model niekonfigurowany'));
+    // Atrapa NAGRYWA wywołanie (argumenty + licznik `sent`) zamiast po prostu odrzucać — samo
+    // `t.is(unhandled, null)` przechodziłoby też, gdyby `send_message` w ogóle nie został
+    // wywołany (np. podmieniony na `undefined`), więc test musi dowieść, że wysyłka NAPRAWDĘ
+    // poszła, z prawdziwą treścią, i DOPIERO POTEM odrzuciła.
+    const calls: Array<{ meta: unknown }> = [];
+    view.send_message = (opts: { meta: unknown }) => {
+        view.sent++;
+        calls.push(opts);
+        return Promise.reject(new Error('model niekonfigurowany'));
+    };
+    const expectedMessage = buildSummonMessage(thin(), 'zatwierdził plan');
 
     let unhandled: unknown = null;
     const onUnhandled = (reason: unknown) => { unhandled = reason; };
@@ -128,6 +138,10 @@ test.serial('summonAgentForArtifact: odrzucenie send_message NIE ucieka jako unh
     } finally {
         process.removeListener('unhandledRejection', onUnhandled);
     }
+
+    t.is(view.sent, 1, 'send_message MUSI być realnie wywołane — nie tylko "nic nie wybuchło"');
+    t.is(calls.length, 1);
+    t.is(view.input_area.value, expectedMessage, 'input_area ma nieść DOKŁADNIE tę wiadomość, którą send_message potem odrzucił');
 
     t.is(unhandled, null,
         'odrzucenie send_message MUSI być złapane wewnątrz summonAgentForArtifact — nie może wyciec jako unhandled rejection');

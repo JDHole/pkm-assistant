@@ -140,6 +140,48 @@ test('_render() łapie odrzucenie async renderera i pokazuje TEN SAM render_erro
 });
 
 /**
+ * `refresh()` re-renderuje TEN SAM wpis stosu (nie zmienia `this.stack`) — porównanie "czy ten
+ * render jest jeszcze aktualny" PO WPISIE STOSU nie odróżnia więc refresh od zwykłej nawigacji:
+ * `this.stack[this.stack.length-1] === current` zostaje `true` nawet PO refreshu, mimo że
+ * `_render()` już stworzył NOWY element `.sidebar-view-content` i odpiął stary od kontenera.
+ * Spóźnione odrzucenie renderu SPRZED refresha musi rozpoznać, że jego `content` już nie jest
+ * bieżący, i nic nie dopisywać — inaczej pisze (na szczęście nieszkodliwie, bo do WĘZŁA
+ * ODPIĘTEGO, nie do tego co user widzi) do węzła, którego już nikt nie ogląda.
+ */
+test('_render() rozróżnia refresh() (ten sam wpis stosu) od nawigacji — spóźnione odrzucenie nie pisze do odpiętego contentu', async t => {
+    const container = makeFakeEl();
+    const nav = new SidebarNav(container as unknown as HTMLElement, fakePlugin);
+
+    let callNum = 0;
+    let rejectFirst: ((e: Error) => void) | null = null;
+    nav.register('view', () => {
+        callNum++;
+        if (callNum === 1) {
+            // Render #1 (push) zostaje "w locie" - jego promise nie rozwiązuje się od razu.
+            return new Promise<void>((_resolve, reject) => { rejectFirst = reject; });
+        }
+        return Promise.resolve();
+    });
+
+    nav.push('view'); // render #1
+    const staleContent = container.children.find(c => c.cls === 'sidebar-view-content')!;
+    t.truthy(staleContent);
+
+    nav.refresh(); // render #2 na TYM SAMYM wpisie stosu — refresh nie zmienia `this.stack`
+    const freshContent = container.children.find(c => c.cls === 'sidebar-view-content')!;
+    t.not(staleContent, freshContent, 'refresh ma stworzyć NOWY element contentu, nie ponownie użyć starego');
+
+    // Spóźnione odrzucenie renderu #1 dociera PO refreshu.
+    rejectFirst!(new Error('spóźniony async render'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setImmediate(resolve));
+
+    t.is(staleContent.children.length, 0,
+        'spóźnione odrzucenie NIE MA pisać do już odpiętego (refresh) contentu — porównanie po wpisie stosu nie odróżnia refresh od nawigacji');
+    t.is(freshContent.children.length, 0, 'świeży content (z refresh) zostaje nietknięty');
+});
+
+/**
  * Przemianowanie agenta: wpisy stosu trzymają `{ agentName }` z chwili `push()`, więc bez
  * przepisania ich parametrów `refresh()` po rename'ie rysuje profil po STAREJ nazwie
  * i user dostaje „Nie znaleziono agenta". Konsument: `AgentSidebar` na evencie `agent:renamed`.
