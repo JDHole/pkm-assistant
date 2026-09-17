@@ -11,6 +11,7 @@ import {
     maxSeq,
 } from './activeSessionFormat.js';
 import { formatToMarkdown, parseSessionFile } from './sessionParser.js';
+import { sanitizeToolTranscript } from '../agent-loop/index.js';
 
 /**
  * TEST KONTRAKTOWY pliku `sessions/active/*.md`.
@@ -524,4 +525,57 @@ test('etykieta roli suba nie podszywa się pod rolę wiadomości', t => {
 
     t.deepEqual(parsed.messages.map(m => m.role), ['assistant', 'assistant'],
         'oba biegi suba to wypowiedź asystenta, nie wiadomość systemowa');
+});
+
+// ─── BUG C1: round-trip `tool_call_id` — restart Obsidiana kasował KAŻDY tool result ───
+//
+// Dowód z logów (2026-08-09): restart 12:43 ("Restored 1 active session(s)"), tura 12:49
+// zalogowała 5 ostrzeżeń "drop orphan tool message (tool_call_id=\"undefined\")", tura 12:55
+// ~20. Każde wywołanie narzędzia sprzed restartu (todo, list, read×5) zniknęło z okna.
+//
+// Przyczyna: `formatSessionEvent`/`EVENT_FIELDS` (v2) nie miały pola na `tool_call_id`
+// (event `tool_result`) ani na `tool_calls` (event `agent_message`, gdy odpowiedź wołała
+// narzędzia) - pisarz A po prostu nie miał gdzie ich zapisać. `sanitizeToolTranscript`
+// (`modules/agent-loop`) wymaga dopasowania `assistant.tool_calls[].id` ↔
+// `tool.tool_call_id` - bez obu pól w pliku restore odtwarzał `tool` message zawsze jako
+// sierotę.
+
+test('BUG C1: formatSessionEvent → parseActiveSession odzyskuje tool_call_id/tool_calls 1:1', t => {
+    const toolCalls = [
+        { id: 'call_abc123', type: 'function', function: { name: 'list', arguments: '{"path":"."}' } },
+    ];
+
+    const file = buildEventLog([
+        { type: 'user_message', content: 'pokaż listę plików' },
+        { type: 'agent_message', content: '', tool_calls: toolCalls },
+        { type: 'tool_result', tool_call_id: 'call_abc123', result: 'a.md\nb.md' },
+    ]);
+
+    const parsed = parseActiveSession(file);
+
+    // Ids MUSZĄ przetrwać round-trip bit w bit - to jest CAŁY kontrakt tego testu.
+    t.is(parsed.messages[1].toolCalls?.[0]?.id, 'call_abc123', 'assistant.tool_calls[0].id przeżył zapis+odczyt');
+    t.is(parsed.messages[1].toolCalls?.[0]?.function.name, 'list', 'function.name przeżył zapis+odczyt');
+    t.is(parsed.messages[2].toolCallId, 'call_abc123', 'tool.tool_call_id przeżył zapis+odczyt');
+
+    // Wiadomość BEZ tool_calls/tool_call_id (user_message) nie dostaje kluczy wcale -
+    // kontrakt „nie zmieniamy kształtu istniejących wiadomości" z reszty tego pliku.
+    t.deepEqual(parsed.messages[0], { role: 'user', content: 'pokaż listę plików', seq: 1 });
+
+    // Odtworzone wiadomości (dokładnie to, co `_restoreActiveSession` wkłada do
+    // `RollingWindow.addMessage`) MUSZĄ przejść przez sanitizer bez utraty tool message -
+    // to jest realny skutek buga: `sanitizeToolTranscript` kasował go jako sierotę.
+    const asLoopMessages = parsed.messages.map(m => ({
+        role: m.role,
+        content: m.content,
+        ...(m.toolCallId ? { tool_call_id: m.toolCallId } : {}),
+        ...(m.toolCalls ? { tool_calls: m.toolCalls } : {}),
+    }));
+    const sanitized = sanitizeToolTranscript(asLoopMessages);
+
+    t.is(sanitized.droppedOrphanTools, 0, 'zero sierot po round-tripie - to jest fix buga C1');
+    t.true(
+        sanitized.messages.some(m => m.role === 'tool' && m.tool_call_id === 'call_abc123'),
+        'wynik narzędzia sprzed restartu przeżył sanityzację transkryptu',
+    );
 });
