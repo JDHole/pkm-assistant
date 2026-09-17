@@ -514,7 +514,9 @@ export class ArtifactStore {
         if (!file) return false;
         const fm = this.app?.metadataCache?.getFileCache?.(file)?.frontmatter;
         if (!fm) return true;
-        return fm['pkm-artefakt'] === id;
+        // `pkm-artefakt` jest `ArtifactScalar` - YAML `pkm-artefakt: 20260911` (bez cudzysłowu)
+        // parsuje na `number`, więc porównanie musi iść po Stringu, tak jak klucze rejestru.
+        return fm['pkm-artefakt'] != null && String(fm['pkm-artefakt']) === id;
     }
 
     /**
@@ -607,12 +609,13 @@ export class ArtifactStore {
             const fm = cache.frontmatter;
             const id = fm && fm['pkm-artefakt'];
             if (!id) continue;
-            // TS-boundary: ZASTANE (poza tą falą) - `fm['pkm-artefakt']` jest `ArtifactScalar`
-            // (string|number|boolean|null), więc YAML z `pkm-artefakt: 20260911` (liczba bez
-            // cudzysłowu) dałby tu `id` typu number; `registry`/`_pathIndex` są kluczowane
-            // stringiem, więc taki artefakt byłby niewidoczny do końca sesji. Naprawa (walidacja
-            // kształtu przy zapisie / normalizacja przy odczycie) to zmiana runtime, poza zakresem.
-            registry.set(id as string, this._entryFrom(id as string, f, fm));
+            // `fm['pkm-artefakt']` jest `ArtifactScalar` (string|number|boolean|null) - YAML
+            // z `pkm-artefakt: 20260911` (liczba bez cudzysłowu) daje tu `id` typu number.
+            // `registry`/`_pathIndex` są kluczowane STRINGIEM (tak samo jak `_indexSingleFile`
+            // niżej i `pathById`, który pyta stringiem) - normalizacja na granicy rejestru, nie
+            // cast na wiarę, inaczej taki artefakt jest niewidoczny do końca sesji.
+            const key = String(id);
+            registry.set(key, this._entryFrom(key, f, fm));
         }
         this._registry = registry;
         this._registryRoot = allWarm ? root : null; // prowizoryczny — następne pytanie przebuduje
@@ -646,7 +649,8 @@ export class ArtifactStore {
         const files = (this.app?.vault?.getMarkdownFiles?.() || []).filter((f) => this._underRoot(f?.path, root));
         for (const f of files) {
             const fm = this.app.metadataCache?.getFileCache?.(f)?.frontmatter;
-            if (fm && fm['pkm-artefakt'] === id) {
+            // Porównanie po Stringu - patrz `_pathIndexEntryValid` (numeryczny `pkm-artefakt`).
+            if (fm && fm['pkm-artefakt'] != null && String(fm['pkm-artefakt']) === id) {
                 const path = String(f.path);
                 this._pathIndex.set(id, path);
                 this._registry?.set(id, this._entryFrom(id, f, fm));
@@ -680,22 +684,27 @@ export class ArtifactStore {
         const root = this._artifactsRoot();
         const agentSeg = safeSegment(agent) || 'agent';
         const base = `${this._today()} ${safeSegment(tytul) || 'artefakt'}`;
-        let path = sanitizePath(`${root}/${agentSeg}/${base}.md`);
-        if (!path || !path.startsWith(root + '/')) {
-            throw new Error('Nie udało się zbudować bezpiecznej ścieżki artefaktu');
-        }
+        // `sanitizePath` zwraca `string | null` - żadna z jego wywołań (bazowe ani sufiksowane)
+        // nie może wejść do `path` bez sprawdzenia, inaczej ta funkcja (zadeklarowana jako
+        // `string`) potrafiłaby oddać `null` wołaczowi, który liczy na string (`create()` woła
+        // `path.slice(...)` bez straży). Kolejny sufiks NIE jest z natury bezpieczny - dłuższa
+        // nazwa (" 2", " 3", …) może przebić `MAX_SEGMENT_LENGTH`, mimo że bazowa nazwa mieściła
+        // się dokładnie na granicy.
+        const validated = (candidate: string | null): string => {
+            if (!candidate || !candidate.startsWith(root + '/')) {
+                throw new Error('Nie udało się zbudować bezpiecznej ścieżki artefaktu');
+            }
+            return candidate;
+        };
+        let path = validated(sanitizePath(`${root}/${agentSeg}/${base}.md`));
         // Kolizja nazwy → sufiks " 2", " 3", …
-        // TS-boundary: ZASTANE - `sanitizePath` zwraca `string | null`; pierwsze przypisanie jest
-        // strzeżone (throw wyżej), ale reasygnacja w pętli gubi to zawężenie - `path!`/`as string`
-        // ufają, że kolejne sufiksy nadal sanityzują się poprawnie (nieudowodnione tu statycznie).
-        // Naprawa (np. throw przy null w pętli) to zmiana runtime, poza zakresem tej fali.
         let n = 2;
-        while (this.app.vault.getAbstractFileByPath?.(path!)) {
-            path = sanitizePath(`${root}/${agentSeg}/${base} ${n}.md`);
+        while (this.app.vault.getAbstractFileByPath?.(path)) {
+            path = validated(sanitizePath(`${root}/${agentSeg}/${base} ${n}.md`));
             n++;
             if (n > 999) break;
         }
-        return path as string;
+        return path;
     }
 
     /** Utwórz folder + wszystkie nadrzędne (API-first, mkdir -p). */
@@ -750,7 +759,8 @@ export class ArtifactStore {
             try {
                 const content = await this._readFile(f);
                 const parsed = parseArtifact(content);
-                if (parsed.frontmatter['pkm-artefakt'] === id) {
+                // Porównanie po Stringu - patrz `_pathIndexEntryValid` (numeryczny `pkm-artefakt`).
+                if (parsed.frontmatter['pkm-artefakt'] != null && String(parsed.frontmatter['pkm-artefakt']) === id) {
                     const path = String(f.path);
                     this._pathIndex.set(id, path);
                     this._registry?.set(id, this._entryFrom(id, f, parsed.frontmatter));
@@ -876,7 +886,14 @@ export class ArtifactStore {
             text: truncate ? clip(s.text, ARTIFACT_CONTEXT_MAX_CHARS) : s.text,
         }));
         return {
-            id: (parsed.frontmatter['pkm-artefakt'] || null) as ThinArtifact['id'],
+            // `String()` przed zwrotką do modelu - `pkm-artefakt` bywa `number` (YAML bez
+            // cudzysłowu, patrz gotcha "porównuj/kluczuj ZAWSZE po Stringu" w CLAUDE.md).
+            // Model ECHUJE dosłownie to, co dostał w `artifact_read`/`create`/`update` - surowa
+            // liczba tutaj wracałaby w kolejnym `artifact_read({id: 20260911})` jako JSON
+            // `number`, a `artifactTargetPath` (ArtifactReadTool.ts) odmawia celu dla
+            // `typeof id !== 'string'`: bramka dostaje pusty `targetPath` i odmawia fail-closed,
+            // mimo że artefakt naprawdę istnieje.
+            id: parsed.frontmatter['pkm-artefakt'] ? String(parsed.frontmatter['pkm-artefakt']) : null,
             path: file?.path || null,
             tytul: this._basename(file),
             typ: (parsed.frontmatter.typ || null) as ThinArtifact['typ'],

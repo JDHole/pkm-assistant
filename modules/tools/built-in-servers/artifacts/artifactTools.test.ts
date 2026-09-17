@@ -431,3 +431,40 @@ test('czyste `pola` nadal tworzą artefakt (bramka nie blokuje normalnej pracy)'
     t.is(files.size, 1);
     t.true([...files.values()][0]!.includes('ogarnąć porządki'));
 });
+
+// ── BUG D1 nit: `_toThin` musi oddać `id` jako STRING, nie jako `number` ──
+//
+// `pkm-artefakt: 20260911` (YAML bez cudzysłowu) parsuje na `number`. `_toThin` (silnik pod
+// artifact_create/read/update) kiedyś zwracał tę wartość SUROWĄ - model DOSŁOWNIE ECHUJE co
+// dostał, więc kolejne `artifact_read({id: 20260911})` wysyłałoby liczbę; `artifactTargetPath`
+// (ArtifactReadTool.ts, `typeof id !== 'string'`) liczy wtedy PUSTY cel, a bramka uprawnień
+// odmawia fail-closed, mimo że artefakt naprawdę istnieje. Test idzie przez PEŁNY łańcuch
+// (MCPClient → PermissionSystem → AccessGuard), nie tylko `execute()` gołe - właśnie tam żyje
+// bramka, którą pusty cel oszukiwał.
+test('numeryczny pkm-artefakt w YAML: artifact_list/read oddają id jako STRING literalny, nie liczbę', async t => {
+    const { plugin, app, files } = makePlugin();
+    const agent = { name: 'Jaskier', permissions: { guidance_mode: true }, focusFolders: [] };
+    const client = makeClient(plugin, app, agent);
+
+    // Notatka z numerycznym `pkm-artefakt` - jakby user wpisał frontmatter ręcznie w Obsidianie.
+    files.set('PKM Assistant/Artefakty/Jaskier/2026-07-23 Numeryczny.md', [
+        '---',
+        'pkm-artefakt: 20260911',
+        'typ: plan',
+        'agent: Jaskier',
+        'status: do-akceptacji',
+        '---',
+        '',
+        '## Kroki',
+        '',
+    ].join('\n'));
+
+    const listed = await client.executeToolCall({ name: 'artifact_list', arguments: {} }, 'Jaskier') as unknown as ArtifactRes;
+    t.is(listed.artifacts[0]!.id, '20260911', 'artifact_list ma oddać literalny string');
+    t.is(typeof listed.artifacts[0]!.id, 'string');
+
+    const readRes = await client.executeToolCall({ name: 'artifact_read', arguments: { id: '20260911' } }, 'Jaskier') as unknown as ArtifactRes & { isError?: boolean };
+    t.falsy(readRes.isError, 'bramka musi znaleźć ścieżkę po id-stringu i wpuścić odczyt');
+    t.is(readRes.id, '20260911', 'artifact_read ma oddać TEN SAM literalny string, który model potem echuje z powrotem');
+    t.is(typeof readRes.id, 'string');
+});
