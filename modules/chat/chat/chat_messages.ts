@@ -156,6 +156,16 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
             this.addMessageActions(meta, uiText, 'user', idx);
 
         } else if (msg.role === 'assistant') {
+            const hasToolCalls = (msg.tool_calls?.length as number) > 0;
+            // Kod review MINOR #4: `content` puste, BRAK `tool_calls` i BRAK `reasoning_content`
+            // nie ma czego pokazać poza rzędem akcji (kopiuj/usuń/kciuki) przyczepionym do
+            // pustej treści - realny, obserwowalny defekt: `restore` po BUG C1 potrafi zwrócić
+            // taką wiadomość, gdy `**tool_calls:**` w pliku istniało, ale nie dało się
+            // sparsować (`parseSessionToolCalls` → `null`, `activeSessionFormat.ts`). Wiadomość
+            // z realną treścią (tekst, tool_calls, myślenie) renderuje się jak dotąd - to NIE
+            // jest zmiana zachowania dla legalnych tool-calling tur (mają chip, patrz niżej).
+            if (!uiText && !hasToolCalls && !msg.reasoning_content) continue;
+
             // ── AGENT MESSAGE — .cs-message--agent ──
             const agentDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--agent' });
             agentDiv.style.setProperty('--cs-agent-color-rgb', agentRgb);
@@ -174,7 +184,7 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
                 const thinkRow = createThinkingBlock(msg.reasoning_content, false);
                 agentDiv.appendChild(thinkRow);
             }
-            if ((msg.tool_calls?.length as number) > 0) {
+            if (hasToolCalls) {
                 for (const tc of msg.tool_calls as ToolCall[]) {
                     const tcName = tc.function?.name || tc.name || 'unknown';
                     const tcArgs = tc.function?.arguments || tc.arguments;

@@ -644,6 +644,15 @@ Testy: `chat/handleNewSessionTodoCleanup.test.ts`, `tools/.../TodoTool.test.ts` 
   argumentu - `parsed.messages[i].toolCallId`/`toolCalls` (kiedy obecne) muszą jechać dalej do
   `RollingWindow`, inaczej odczytane dane i tak giną na ostatnim kroku. Test:
   `chat/chat_session.test.ts` (`BUG C1`).
+- ⚠️ **`render_messages` pomija `assistant` bez treści DO POKAZANIA, nie bez treści.**
+  Wiadomość z pustym `content` renderuje się jak dotąd, gdy niesie `tool_calls` (chip
+  narzędzia) albo `reasoning_content` (blok myślenia) - dopiero brak WSZYSTKICH trzech
+  (content/tool_calls/reasoning_content) pomija render całego bubla. Bez tej bramki
+  restore po naprawie `BUG C1` potrafił namalować pusty `.cs-message--agent` (sam rząd akcji
+  kopiuj/usuń/kciuki na pustej treści) dla wiadomości, której plik miał `**tool_calls:**`, ale
+  JSON się nie sparsował (`parseSessionToolCalls` → `null`, kod review MINOR #4). Test:
+  `chat/render_messages.emptyAssistant.test.ts` (mierzy realne dzieci DOM-u atrapy harnessu,
+  nie sam fakt wywołania).
 
 ### Rozliczanie tokenów: estymaty oznaczone jako przybliżone
 
