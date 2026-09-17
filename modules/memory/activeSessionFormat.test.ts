@@ -1,6 +1,5 @@
 import test from 'ava';
 import {
-    ACTIVE_SESSION_FORMAT_VERSION,
     EVENT_FIELDS,
     escapeActiveText,
     unescapeActiveText,
@@ -320,11 +319,6 @@ test('escape/unescape: ZNANA strata — literalny `\\## ` na początku linii wra
     t.is(parsedLabel.messages[0].content, 'Log:\n**result:**\nkoniec');
 });
 
-test('stała wersji kontraktu jest ustawiona', t => {
-    // v3 = doszły pola `**tool_call_id:**`/`**tool_calls:**` (round-trip tool_call_id po restarcie).
-    t.is(ACTIVE_SESSION_FORMAT_VERSION, 3);
-});
-
 // ─── Numeracja `seq` + escapowanie etykiet pól ───
 
 test('seq: pole `**seq:**` trafia do pliku tylko dla liczby', t => {
@@ -557,6 +551,7 @@ test('BUG C1: formatSessionEvent → parseActiveSession odzyskuje tool_call_id/t
 
     // Ids MUSZĄ przetrwać round-trip bit w bit - to jest CAŁY kontrakt tego testu.
     t.is(parsed.messages[1].toolCalls?.[0]?.id, 'call_abc123', 'assistant.tool_calls[0].id przeżył zapis+odczyt');
+    t.is(parsed.messages[1].toolCalls?.[0]?.type, 'function', 'type przeżył zapis+odczyt (kod review: MAJOR #2)');
     t.is(parsed.messages[1].toolCalls?.[0]?.function.name, 'list', 'function.name przeżył zapis+odczyt');
     t.is(parsed.messages[2].toolCallId, 'call_abc123', 'tool.tool_call_id przeżył zapis+odczyt');
 
@@ -580,4 +575,115 @@ test('BUG C1: formatSessionEvent → parseActiveSession odzyskuje tool_call_id/t
         sanitized.messages.some(m => m.role === 'tool' && m.tool_call_id === 'call_abc123'),
         'wynik narzędzia sprzed restartu przeżył sanityzację transkryptu',
     );
+});
+
+// ─── Code review BLOCKER #1: drugi tool_call z PUSTYM wynikiem zostawał sierotą ───
+//
+// `formatSessionEvent` pomija pola, których wartość jest '' (`add()`, linia ~275) - więc
+// blok `tool_result` narzędzia, które zwróciło pusty string, na dysku ma TYLKO
+// `**tool_call_id:**` + `**seq:**`, bez `**result:**`. Stara bramka
+// (`contentValue || toolCallsRaw`) NIE widziała w takim bloku żadnego z tych dwóch pól →
+// blok się gubił, mimo że `assistant.tool_calls[]` obiecywał odpowiedź dla OBU wywołań.
+// `sanitizeToolTranscript` sam z siebie NIE odsiewa "assistant.tool_calls bez odpowiedzi"
+// (tylko odwrotność: "tool bez rodzica") - taki transkrypt idzie do providera 1:1 i wraca
+// błędem 400 (tool_use bez tool_result).
+
+test('BLOCKER #1: tool_call z PUSTYM wynikiem restoruje się jako wiadomość tool z pustą treścią, nie ginie', t => {
+    const toolCalls = [
+        { id: 'call_1', type: 'function', function: { name: 'read', arguments: '{}' } },
+        { id: 'call_2', type: 'function', function: { name: 'grep', arguments: '{}' } },
+    ];
+    const file = buildEventLog([
+        { type: 'agent_message', content: '', tool_calls: toolCalls },
+        { type: 'tool_result', tool_call_id: 'call_1', result: 'tresc' },
+        { type: 'tool_result', tool_call_id: 'call_2', result: '' },
+    ]);
+
+    const parsed = parseActiveSession(file);
+    const toolMsgs = parsed.messages.filter(m => m.role === 'tool');
+
+    t.is(toolMsgs.length, 2, 'OBIE odpowiedzi wracają - żadna nie ginie mimo pustego result');
+    t.deepEqual(toolMsgs.map(m => m.toolCallId), ['call_1', 'call_2']);
+    t.is(toolMsgs[1].content, '', 'treść pustego wyniku zostaje pustym stringiem, nie znika razem z wiadomością');
+
+    // Skutek realny: sanitizer widzi OBIE odpowiedzi dopasowane do obu tool_calls - zero sierot,
+    // co znaczy też zero NIEODPOWIEDZIANYCH tool_calls (call bez pary tool w wyniku).
+    const asLoopMessages = parsed.messages.map(m => ({
+        role: m.role,
+        content: m.content,
+        ...(m.toolCallId ? { tool_call_id: m.toolCallId } : {}),
+        ...(m.toolCalls ? { tool_calls: m.toolCalls } : {}),
+    }));
+    const sanitized = sanitizeToolTranscript(asLoopMessages);
+    t.is(sanitized.droppedOrphanTools, 0);
+    const answeredIds = sanitized.messages.filter(m => m.role === 'tool').map(m => m.tool_call_id);
+    t.deepEqual(answeredIds.sort(), ['call_1', 'call_2'], 'obie odpowiedzi przetrwały sanityzację');
+});
+
+// ─── Code review MAJOR #2: `type` pola tool_call musi przetrwać round-trip ───
+//
+// Kanoniczny kształt (`AgentLoop._streamOnce`, `apiToolCalls`) zawsze niesie `type: 'function'`,
+// a dostawcy OpenAI-compatible (`OpenAiCompatibleProvider.prepareMessages`) przepuszczają
+// wiadomości BEZ zmian - brak `type` w odtworzonym `tool_calls[]` wysyła do API kształt,
+// jakiego żaden provider nigdy nie widział z tej strony.
+
+test('MAJOR #2: parseSessionToolCalls odzyskuje `type`, domyślnie "function" gdy go brak (legacy)', t => {
+    const withType = parseActiveSession(buildEventLog([
+        { type: 'agent_message', content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'n', arguments: '{}' } }] },
+    ])).messages[0];
+    t.is(withType.toolCalls?.[0]?.type, 'function');
+
+    // Plik ręcznie sklejony bez pola `type` (albo z wcześniejszej wersji formatu) - fail-soft
+    // domyka na "function", jedyny typ, jaki dziś w ogóle istnieje w kontrakcie OpenAI tool_calls.
+    const noType = buildEventLog([
+        { type: 'agent_message', content: '', tool_calls: [{ id: 'c2', function: { name: 'n', arguments: '{}' } }] },
+    ]);
+    t.is(parseActiveSession(noType).messages[0].toolCalls?.[0]?.type, 'function');
+});
+
+// ─── Code review MINOR #5: legacy blok z `**tool_calls:**` w TREŚCI (nie w polu) nie ginie ───
+//
+// Plik pisany starą sekwencją (append × N, treść nigdy nie przechodziła przez escape par
+// EVENT_FIELDS z v3, bo w v1/v2 `tool_calls` nie było w ogóle w `EVENT_FIELDS`) może mieć w
+// treści wiadomości dosłowny fragment `## Wyniki\n\n**tool_calls:**\n\n[...]` - nagłówek BEZ
+// rozpoznawalnej roli/typu. Bramka szeroka o `toolCallsRaw`/`tool_call_id` bez warunku
+// "rola się rozwiązała" traktowała taki fragment jak PRAWDZIWY event i go KASOWAŁA
+// (`continue` bezwarunkowy) zamiast doklejać z powrotem do poprzedniej wiadomości (zasada
+// „nic nie ginie" z reszty tego pliku).
+
+test('MINOR #5: legacy `**tool_calls:**` w treści (nie w polu) wraca do poprzedniej wiadomości jak dotąd', t => {
+    const legacy = '# s\n\n## 2026-01-01T00:00:00.000Z — agent message\n\n**content:**\n\nodpowiedz\n\n'
+        + '## Wyniki\n\n**tool_calls:**\n\n[{"id":"c1","function":{"name":"n","arguments":"{}"}}]\n';
+
+    const parsed = parseActiveSession(legacy);
+
+    // Literalny stary wynik (dowód: /tmp/probe/run.mjs, gałąź OLD).
+    t.deepEqual(parsed.messages, [{
+        role: 'assistant',
+        content: 'odpowiedz\n## Wyniki\n**tool_calls:**\n\n[{"id":"c1","function":{"name":"n","arguments":"{}"}}]',
+        seq: null,
+    }]);
+});
+
+// ─── Code review NIT #6: v2 (bez tool_call_id/tool_calls) dalej parsuje się jak stary parser ───
+
+test('NIT #6: plik v2 (bez tool_call_id/tool_calls, `**tool:**` = id połączenia) parsuje się identycznie jak przed v3', t => {
+    const v2file = buildEventLog([
+        { type: 'user_message', content: 'Przeczytaj notatkę X' },
+        { type: 'agent_message', content: '', model: 'gpt-4o', tokens: { input: 10, output: 2 } },
+        { type: 'tool_result', tool: 'call_abc123', result: 'treść notatki' },
+        { type: 'agent_message', content: 'Notatka mówi tak.', model: 'gpt-4o', tokens: { input: 30, output: 5 } },
+        { type: 'mcp_call', tool: 'srv.x', args: { a: 1 }, result: '', duration_ms: 12 },
+        { type: 'subagent_error', role: 'researcher', content: 'sub padł' },
+    ]);
+
+    // Literalny wynik STAREGO parsera (dowód: /tmp/probe/run.mjs, `v2 messages(new)` - pisarz i
+    // czytnik v2 są bajtowo identyczne między starym a nowym kodem, patrz test wyżej
+    // "WRITER byte-identical" - ten test pilnuje PARSERA na tym samym wejściu).
+    t.deepEqual(parseActiveSession(v2file).messages, [
+        { role: 'user', content: 'Przeczytaj notatkę X', seq: 1 },
+        { role: 'tool', content: 'treść notatki', seq: 3 },
+        { role: 'assistant', content: 'Notatka mówi tak.', seq: 4 },
+        { role: 'assistant', content: 'sub padł', seq: 6 },
+    ]);
 });
