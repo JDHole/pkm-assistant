@@ -264,6 +264,12 @@ komendy `/`.
   ponawianej wiadomości, więc powtórka ma dokładnie te same prawa co oryginał. Wiadomości
   odtwarzane z zapisanej sesji omijają `append_message` i nie zasilają rejestru adresów.
   Komendy `/` z tekstu maszynowego nie działają - żadna ze ścieżek maszynowych ich nie używa.
+- **`regenerateLastResponse` wkłada do `input_area.value` TEKST, nigdy surową `content`.**
+  `RollingMessage.content` bywa `ContentBlock[]` (wiadomość Z ZAŁĄCZNIKIEM), nie tylko `string`
+  - wsadzenie tablicy wprost do pola wpisywania dawało `[object Object]` (BUG C2). Fix reużywa
+  `RollingWindow._contentToTokenText(content)` (już wołane w tym samym module do liczenia
+  tokenów/podglądu wiadomości) - łączy TYLKO bloki `type === 'text'`, string zostaje bez
+  zmian. Test: `chat/regenerateLastResponse.test.ts`.
 
 ### Stop i przerwanie tury
 

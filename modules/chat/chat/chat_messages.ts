@@ -403,12 +403,12 @@ export async function regenerateLastResponse(this: ChatViewLike): Promise<void> 
 
     if (lastUserIdx === -1) return;
 
-    // TS-boundary: `content` okna to `string | null | ContentBlock[]` (patrz `RollingWindow.ts`),
-    // a niżej leci wprost do `input_area.value`.
-    // ⚠️ ZASTANE: dla ponawianej wiadomości Z ZAŁĄCZNIKIEM (tablica bloków) do pola wpisywania
-    // wpadnie `[object Object]`. Asercja opisuje przypadek, który kod obsługuje (goły tekst);
-    // wyciągnięcie tekstu z bloków byłoby zmianą runtime'u — poza falą typowania.
-    const userContent = messages[lastUserIdx].content as string;
+    // `content` okna to `string | null | ContentBlock[]` (patrz `RollingWindow.ts`) - wiadomość
+    // Z ZAŁĄCZNIKIEM niesie tablicę bloków, nie string. `_contentToTokenText` (silnik okna,
+    // już wołane w tym samym module do liczenia tokenów/podglądu) łączy TYLKO bloki
+    // `type === 'text'` i zwraca string bez zmian - bez tego pole wpisywania dostawało
+    // `[object Object]` (BUG C2).
+    const userContent = this.rollingWindow._contentToTokenText(messages[lastUserIdx].content);
     // Proweniencja jedzie ZA tekstem — ponowienie nie może awansować wiadomości maszynowej
     // (np. powiadomienia o wyniku suba) do rangi „to pisał człowiek". Brak znacznika = maszyna.
     const userOrigin = resolveMessageOrigin(messages[lastUserIdx]);
