@@ -61,9 +61,12 @@ test('AgentPresentationModal.ts: 8+ literałów PL zastąpione t()', t => {
 test('AgentPresentationModal.ts: filled-shard porównanie używa TEJ SAMEJ etykiety global co wyświetlana (regresja locale)', t => {
     // Display i porównanie `filled` muszą czytać JEDNĄ zmienną `globalLabel` (obie strony przez
     // t()) - gdyby porównanie użyło hardcoded 'Globalny' zamiast tej zmiennej, w EN locale
-    // porównanie nigdy by nie trafiało (zawsze "filled").
+    // porównanie nigdy by nie trafiało (zawsze "filled"). Porównanie samo (`isShardFilled`,
+    // string-safe dla `stats.brainSize` liczbowego - BUG D3a) mieszka w czystym
+    // `agentPresentationShards.ts` obok; tu pilnujemy tylko, że modal przekazuje TĘ SAMĄ
+    // zmienną `globalLabel`, nie osobny literał.
     t.regex(agentPresentation, /const globalLabel = t\('profile\.overview\.global'\);/);
-    t.regex(agentPresentation, /info\.value !== '0' && info\.value !== globalLabel/);
+    t.regex(agentPresentation, /isShardFilled\(info\.value, globalLabel\)/);
 });
 
 // ── common.cancel: osierocony klucz bez wołaczy ───────────────────────────
