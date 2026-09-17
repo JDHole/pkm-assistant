@@ -5,6 +5,11 @@ import { parseSessionFile } from './sessionParser.js';
 // Alias — goły `t` jest wewnątrz każdego testu zajęty przez ExecutionContext AVA.
 import { t as tr } from '../../core/i18n/index.js';
 
+// TS-any: `saveSession` przyjmuje `ChatMessageLike[]` (role/content), a testy poniżej podają
+// wiadomości `RollingMessage`-owate (z `tool_calls`/`tool_call_id`) - dokładnie to, co realnie
+// wchodzi z `rw.messages` w produkcji (patrz `ChatMessageLike` w AgentMemory.ts).
+type TestDynamic = any;
+
 function makeVault(initialFiles: Record<string, string> = {}, initialFolders: string[] = []) {
     const files: Record<string, string> = { ...initialFiles };
     const folders = new Set<string>(initialFolders);
@@ -678,6 +683,34 @@ test('saveSession NIE nadpisuje pliku transkryptem — dopisuje tylko brakujący
     ]);
     t.is(parsed.metadata.agent, 'Jaskier');
     t.is(parsed.metadata.messageCount, '3');
+});
+
+// Kod review MAJOR #3: `_appendMessageAsEvent` (ogon dopisywany przez `saveSession`, gdy
+// pisarz per-event w `chat_streaming.ts` przegapił wiadomość) budował event tylko z
+// {content, seq, role?} - `tool_call_id`/`tool_calls` z `RollingMessage` przechodzącej przez
+// TEN pisarz ginęły identycznie jak w BUG C1, tylko na DRUGIEJ ścieżce zapisu tej samej sesji.
+
+test('saveSession (ogon spoza event-logu) niesie tool_call_id/tool_calls tak jak appendToActiveSession', async t => {
+    const { vault, files } = makeVault();
+    const memory = new AgentMemory(vault, 'Jaskier');
+
+    // Sesja startuje pusta - CAŁA tura (3 wiadomości) trafia do pliku dopiero przez
+    // `saveSession`, czyli DOKŁADNIE tą samą ścieżką, którą reviewer wskazał jako drugiego
+    // pisarza (`_appendMessageAsEvent`, wołane z `saveSession` dla „brakującego ogona").
+    const toolCalls = [{ id: 'call_1', type: 'function', function: { name: 'list', arguments: '{}' } }];
+    const path = await memory.saveSession([
+        { role: 'user', content: 'pokaż listę plików' },
+        { role: 'assistant', content: '', tool_calls: toolCalls },
+        { role: 'tool', content: 'a.md\nb.md', tool_call_id: 'call_1' },
+    ] as TestDynamic, { agent: 'Jaskier' });
+
+    t.true(files[path].includes('**tool_call_id:**'), 'pole fizycznie trafiło do pliku');
+    t.true(files[path].includes('**tool_calls:**'), 'pole fizycznie trafiło do pliku');
+
+    const parsed = await memory.loadActiveSession(path);
+
+    t.is(parsed.messages[1].toolCalls?.[0]?.id, 'call_1', 'tool_calls asystenta przeżyły zapis przez saveSession');
+    t.is(parsed.messages[2].toolCallId, 'call_1', 'tool_call_id wyniku narzędzia przeżył zapis przez saveSession');
 });
 
 test('saveSession z PODZBIOREM wiadomości (po kompresji okna) nie rusza treści', async t => {

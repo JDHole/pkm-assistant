@@ -86,6 +86,20 @@ Realny `app` dociera do narzędzia jako 2. argument `execute(args, app, plugin)`
 
 **Cykl życia:** `stopAllDelegations(reason)` - wołane z `PluginBase.onunload` (patrz Gotchas).
 
+**Sprzątanie todo:** `retireTodoFile(adapter, agent, sessionId)` - cienki wrapper na
+`TodoFileStore.finish`: SAM AKT kasowania ma tę samą logikę (brak pliku = sukces, idempotencja),
+ale **NIE tę samą serializację**. `retireTodoFile` konstruuje WŁASNĄ, jednorazową instancję
+`TodoFileStore` - jej kolejka zapisu (`_writeQueues`, pole INSTANCJI) jest pusta i niezależna od
+kolejki `plugin._todoStore` (instancja, której realnie używa narzędzie `todo` do
+`create`/`patch`/`finish` w trakcie tury). Kasowanie przez `retireTodoFile` NIE czeka więc w tej
+samej kolejce co zapis narzędzia na TEN SAM plik - to best-effort delete obok, nie zakolejkowana
+operacja tego samego pisarza. Bezpieczne w praktyce tylko dlatego, że dziś woła go WYŁĄCZNIE
+`modules/chat`'s `handleNewSession` na `discard`, czyli w momencie, gdy user już zamknął starą
+sesję i żaden tool call `todo` tej sesji nie powinien być w locie - to założenie usera/UI, nie
+gwarancja silnika. Jedyny publiczny akt mutacji pliku
+`.pkm-assistant/artifacts/todo/<agent>-<sessionId>.md` dla wołaczy spoza tego modułu (BUG C3).
+`TodoFileStore` sama (create/patch/clearForAgent - surowa mutacja listy) zostaje wewnętrzna.
+
 ### Co świadomie NIE jest w barrelu (deep-import wewnątrz modułu + w testach)
 
 - `validateVaultPath` / `validateVaultFolder` - `vault_path_validator.ts` (tam też `invocationHasAdminAccess` + `getInvocationAgentName` - jedna kopia dla całego modułu)

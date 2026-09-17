@@ -55,13 +55,17 @@ export { createMemoryDeleteTool } from './MemoryDeleteTool.js';
 // cienki indeks w system promptcie (nazwa + opis + ścieżka), pełny przepis przez read().
 
 // ── Artifact tools (Artefakty żywe + todo). `TodoFileStore`/`TODO_FOLDER` ZOSTAJĄ
-// wewnątrz modułu (`TodoTool.js` + jego test) — barrel wystawia tylko fabryki narzędzi.
+// wewnątrz modułu (`TodoTool.js` + jego test) — barrel wystawia fabryki narzędzi PLUS
+// `retireTodoFile` (cienki wrapper na `TodoFileStore.finish`, jedyny publiczny akt mutacji
+// pliku todo dla wołaczy spoza modułu - `modules/chat` go woła przy odrzuceniu sesji,
+// BUG C3, żeby plik `<agent>-<sessionId>.md` nie zostawał sierotą).
 export {
     createArtifactCreateTool,
     createArtifactReadTool,
     createArtifactUpdateTool,
     createArtifactListTool,
     createTodoTool,
+    retireTodoFile,
 } from './built-in-servers/artifacts/index.js';
 
 // ── Web tools ──────────────────────────────────────────────────────────────

@@ -264,6 +264,16 @@ komendy `/`.
   ponawianej wiadomości, więc powtórka ma dokładnie te same prawa co oryginał. Wiadomości
   odtwarzane z zapisanej sesji omijają `append_message` i nie zasilają rejestru adresów.
   Komendy `/` z tekstu maszynowego nie działają - żadna ze ścieżek maszynowych ich nie używa.
+- **`regenerateLastResponse` wkłada do `input_area.value` TEKST, nigdy surową `content`.**
+  `RollingMessage.content` bywa `ContentBlock[]` (wiadomość Z ZAŁĄCZNIKIEM), nie tylko `string`
+  - wsadzenie tablicy wprost do pola wpisywania dawało `[object Object]` (BUG C2). Fix to lokalny
+  `_joinTextBlocksForInput(content)` (`chat_messages.ts`) - łączy TYLKO bloki `type === 'text'`
+  znakiem NOWEJ LINII, string zostaje bez zmian. Świadomie NIE reużywa
+  `RollingWindow._contentToTokenText` (silnik liczenia tokenów, kod review #8) - ten łączy
+  bloki BEZ separatora (liczy się długość, nie czytelność dla usera), a `RollingWindow.ts` jest
+  świadomym monolitem, więc zmiana jego zachowania wymagałaby przeczytania całego pliku i
+  ruszyłaby też liczenie tokenów/podgląd wiadomości gdzie indziej. Test:
+  `chat/regenerateLastResponse.test.ts`.
 
 ### Stop i przerwanie tury
 
@@ -593,6 +603,21 @@ zakolejkowaniu (`_draftAfterSend`) i oddaje go w `send_message` zaraz po zreseto
 restore musi być tam, nie w oddzielnym `setTimeout`, bo `resetInputArea` leci dopiero po
 awaitach `send_message` i zjadłby wcześniejszy restore.
 
+**Reset panelu jest JEDNĄ funkcją, wołaną z DWÓCH miejsc.** `_resetTodoPanelState()`
+(`chat_tabs.ts`, eksportowana - nie w barrelu, wewnętrzna dla modułu jak reszta mixinów) zeruje
+`_activeTodoState`/`_prevTodoModel`/`_bottomBarMode` i przemalowuje pasek. Wołają ją `_switchTab`
+(zmiana agenta - lista jest per agent) i `handleNewSession` (`chat_session.ts`, KAŻDE wyjście
+funkcji, nie tylko po modalu - BUG C3: `handleNewSession` kiedyś w ogóle nie czyścił panelu,
+więc nowa rozmowa TEGO SAMEGO agenta pokazywała listę zadań sesji, która już poszła do
+archiwum/`.discarded/`). Drugi ogon tego samego buga: jednorazowy plik
+`.pkm-assistant/artifacts/todo/<agent>-<sessionId>.md` (silnik: `modules/tools`,
+`TodoTool.ts`) żyje w OSOBNYM drzewie od `sessions/active/*.md` - przeniesienie sesji do
+`.discarded/` go nie dotyka. Gałąź `discard` w `handleNewSession` woła
+`retireTodoFile(adapter, agentName, sessionId)` (publiczna furtka `modules/tools/index.js` -
+patrz `modules/tools/CLAUDE.md`) z `sessionId` liczonym DOKŁADNIE jak `TodoTool.resolveSessionId`
+(basename ścieżki sesji bez `.md`), best-effort (pad sprzątania nie blokuje odrzucenia sesji).
+Testy: `chat/handleNewSessionTodoCleanup.test.ts`, `tools/.../TodoTool.test.ts` (`retireTodoFile`).
+
 ### Cykl życia sesji w zakładce
 
 - **Zamknięcie zakładki czeka na zapis.** `_closeActiveTab` jest `async` i `await`-uje
@@ -611,6 +636,27 @@ awaitach `send_message` i zjadłby wcześniejszy restore.
   każdym powrocie na nią. Nowa sesja powstaje leniwie, przy pierwszym kolejnym zdarzeniu, jak
   dla świeżej zakładki. Warianty `archive_new` (od razu nowa sesja) i `archive_close` (zamknij
   zakładkę) mają własną, jawną obsługę tych samych pól.
+- ⚠️ **`_restoreActiveSession` MUSI przekazać `tool_call_id`/`tool_calls` jako TRZECI argument
+  `RollingWindow.addMessage()`.** Bug (2026-08-09): po restarcie Obsidiana odtworzona sesja
+  gubiła `tool_call_id` KAŻDEGO wyniku narzędzia sprzed restartu - `sanitizeToolTranscript`
+  (`modules/agent-loop`) widział `tool` message bez id i kasował go jako sierotę (log
+  `drop orphan tool message (tool_call_id="undefined")`). Root cause był DWUCZĘŚCIOWY:
+  (1) `activeSessionFormat.ts` (format v2, `modules/memory`) nie miało gdzie zapisać
+  `tool_call_id`/`tool_calls` w ogóle - naprawione formatem v3 (pola `**tool_call_id:**`/
+  `**tool_calls:**`, patrz `modules/memory/CLAUDE.md`, "Sesje aktywne"); (2) NAWET po naprawie
+  czytnika, `_restoreActiveSession` wołało `addMessage(msg.role, msg.content)` bez trzeciego
+  argumentu - `parsed.messages[i].toolCallId`/`toolCalls` (kiedy obecne) muszą jechać dalej do
+  `RollingWindow`, inaczej odczytane dane i tak giną na ostatnim kroku. Test:
+  `chat/chat_session.test.ts` (`BUG C1`).
+- ⚠️ **`render_messages` pomija `assistant` bez treści DO POKAZANIA, nie bez treści.**
+  Wiadomość z pustym `content` renderuje się jak dotąd, gdy niesie `tool_calls` (chip
+  narzędzia) albo `reasoning_content` (blok myślenia) - dopiero brak WSZYSTKICH trzech
+  (content/tool_calls/reasoning_content) pomija render całego bubla. Bez tej bramki
+  restore po naprawie `BUG C1` potrafił namalować pusty `.cs-message--agent` (sam rząd akcji
+  kopiuj/usuń/kciuki na pustej treści) dla wiadomości, której plik miał `**tool_calls:**`, ale
+  JSON się nie sparsował (`parseSessionToolCalls` → `null`, kod review MINOR #4). Test:
+  `chat/render_messages.emptyAssistant.test.ts` (mierzy realne dzieci DOM-u atrapy harnessu,
+  nie sam fakt wywołania).
 
 ### Rozliczanie tokenów: estymaty oznaczone jako przybliżone
 
@@ -668,8 +714,15 @@ narzędzia, które ma alias.
 ### Watchdog vs test bez `ChatView`
 
 `chat_streaming.ts`, `chat_ui.ts`, `chat_model.ts`, `chat_popovers.ts`, `chat_session.ts` i
-`chat_tabs.ts` importują `obsidian` i nie są importowalne w AVA (node). Cała logika decyzyjna
-wymieniona wyżej dlatego żyje w czystych plikach obok (patrz sekcja "Pattern: prototype mixin").
+`chat_tabs.ts` importują `obsidian`. Historycznie żaden z nich nie dawał się zaimportować w AVA
+(node), bo AVA nie miało dla `obsidian` atrapy. **Od atrapy `obsidian` w harnessie (2026-09-11,
+`test-support/register-obsidian-for-ava.mjs`) to już nieprawda dla `chat_session.ts`** -
+`chat/chat_session.test.ts` go importuje wprost i woła `_restoreActiveSession` na sfabrykowanym
+`this` (patrz gotcha "Cykl życia sesji w zakładce" wyżej, `BUG C1`). Reszta listy nie została
+ponownie sprawdzona po tej zmianie w atrapie - traktuj ich niedostępność jako niepotwierdzoną,
+nie jako pewnik, zanim ktoś realnie spróbuje. Cała logika decyzyjna
+wymieniona wyżej i tak żyje w czystych plikach obok (patrz sekcja "Pattern: prototype mixin") -
+ten wzorzec zostaje niezależnie od tego, co dziś da się zaimportować wprost.
 Strażnik "po źródle" (regex nad plikiem z `obsidian`) pilnuje wyłącznie OKABLOWANIA - że dana
 funkcja jest wołana, z odpowiednim kształtem warunku (`if (!x.allowed)` z negacją, który
 argument leci gdzie) - nie samej obecności identyfikatora, bo taki test nie odróżnia poprawnej
