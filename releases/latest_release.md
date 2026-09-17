@@ -23,7 +23,9 @@ Highlights:
 - **The token counter no longer crashes** for an agent with no model configured.
 - **A failing sidebar view shows the friendly error** instead of an unhandled rejection in the
   console; the same for sending an artifact into the chat.
-- **The Brain shard in the agent presentation** renders empty when the memory is empty.
+- **The Brain shard in the agent presentation** shows the number of notes in the agent's
+  long-term memory, so a brand-new agent shows 0 and stays dim instead of lighting up with the
+  size of its empty memory template.
 
 Known limits: `preferred_tools` in an agent's YAML has no effect and no editor in the UI; it is
 a legacy field kept for compatibility. The `mcp` key under `default_permissions` has no effect
