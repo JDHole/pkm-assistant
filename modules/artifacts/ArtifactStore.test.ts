@@ -617,3 +617,56 @@ test('id NIGDY niewidziane nie dostaje fallbacku z dysku (zostaje O(1))', async 
     // id od modelu.
     t.is(cachedReadCalls(), 0, 'zero odczytów z dysku dla id, którego rejestr nigdy nie znał');
 });
+
+// ── BUG D1a: `pkm-artefakt` zapisany w YAML jako liczba (bez cudzysłowu) ──
+// `_ensureRegistry` (pełny skan) kluczował rejestr SUROWYM `id` (`registry.set(id as string, …)`),
+// więc `pkm-artefakt: 20260911` (YAML parsuje na `number`) lądował pod kluczem numerycznym.
+// `pathById('20260911')` (string) pytał `registry.get('20260911')` — Map nie zrównuje `20260911`
+// (number) z `'20260911'` (string), więc artefakt był niewidoczny, dopóki jakiś event
+// (`_indexSingleFile`, który POPRAWNIE robi `String(id)`) nie doindeksował go na nowo.
+test('numeryczny pkm-artefakt w YAML jest widoczny natychmiast po (pierwszym, pełnym) skanie rejestru', async t => {
+    const nowRef = { value: new Date('2026-07-23') };
+    const { store, files } = makeStore(nowRef);
+    const path = `${DEFAULT_ARTIFACTS_FOLDER}/Jaskier/2026-07-23 Numeryczny.md`;
+    // Zapis WPROST do mapy plików — BEZ eventu `vault.on('create')` — żeby jedyną drogą
+    // zbudowania rejestru był pełny skan (`_ensureRegistry`), nie `_indexSingleFile`.
+    files.set(path, [
+        '---',
+        'pkm-artefakt: 20260911',
+        'typ: plan',
+        'agent: Jaskier',
+        'status: do-akceptacji',
+        'utworzono: 2026-07-23',
+        'zaktualizowano: 2026-07-23',
+        '---',
+        '',
+    ].join('\n'));
+
+    t.is(store.pathById('20260911'), path,
+        'rejestr musi kluczować String(id) — inaczej artefakt z numerycznym id jest niewidoczny do końca sesji');
+    t.is(store.list().length, 1, 'list() musi też widzieć wpis kluczowany stringiem');
+});
+
+// ── BUG D1b: kolizja nazwy w `_buildInstancePathSync` gubi zawężenie typu z `sanitizePath` ──
+// Pętla sufiksów (" 2", " 3", …) przypisuje do `path` wynik `sanitizePath(...)` (typ
+// `string | null`) BEZ walidacji przed przypisaniem — funkcja deklaruje zwrot `string`, ale
+// `path as string` na końcu jest kłamstwem, jeśli kolejny sufiks faktycznie nie sanityzuje się
+// (np. przekroczenie limitu 255 znaków na segment, gdy sufiks dopycha nazwę powyżej granicy,
+// którą bazowy tytuł mieścił dokładnie). `create()` woła `path.slice(...)` na wyniku bez
+// żadnego sprawdzenia null — realny `TypeError`, nie kontrolowany błąd.
+test('kolizja nazwy, która przez sufiks przekracza limit segmentu, rzuca czytelny błąd (nie TypeError na null)', async t => {
+    const nowRef = { value: new Date('2026-07-23') };
+    const { store } = makeStore(nowRef);
+    // "2026-07-23 " (11) + tytul (241) + ".md" (3) = 255 — dokładnie na granicy MAX_SEGMENT_LENGTH.
+    const tytul = 'A'.repeat(241);
+    const agent = 'Jaskier';
+
+    // Pierwszy `create` zajmuje ścieżkę bez sufiksu (255 znaków — jeszcze przechodzi).
+    await store.create('plan', { tytul, agent });
+
+    // Drugi `create` z TYM SAMYM tytułem/agentem trafia na kolizję → próbuje sufiksu " 2",
+    // co wydłuża nazwę do 257 znaków — POWYŻEJ limitu. `sanitizePath` w pętli wraca `null`.
+    const err = await t.throwsAsync(() => store.create('plan', { tytul, agent }));
+    t.is(err?.message, 'Nie udało się zbudować bezpiecznej ścieżki artefaktu',
+        'funkcja ma rzucać ten sam, czytelny błąd co przy pierwszym niepowodzeniu sanityzacji — nie przepuszczać null dalej jako "string"');
+});
