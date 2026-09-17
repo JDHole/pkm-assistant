@@ -13,9 +13,12 @@ import { regenerateLastResponse } from './chat_messages.js';
  * `"[object Object],[object Object]"` w przeglądarce - user widział śmieci zamiast
  * swojego pytania.
  *
- * Fix: reużywa `RollingWindow._contentToTokenText` (już wołane w tym samym pliku silnika
- * do liczenia tokenów/podglądu) - łączy TYLKO bloki `type === 'text'`, string zostaje
- * bez zmian.
+ * Fix: lokalny helper `_joinTextBlocksForInput` łączy TYLKO bloki `type === 'text'` znakiem
+ * NOWEJ LINII, string zostaje bez zmian. Osobno od `RollingWindow._contentToTokenText` (silnik
+ * liczenia tokenów) celowo - kod review #8: ten drugi łączy bloki BEZ separatora (liczy się
+ * długość, nie czytelność) i zmiana jego zachowania ruszyłaby też liczenie tokenów/podgląd
+ * wiadomości gdzie indziej w tym pliku silnika (`RollingWindow.ts`, świadomy monolit -
+ * zmiana w nim wymaga przeczytania całości).
  */
 type TestDynamic = any;
 
@@ -42,8 +45,8 @@ test('BUG C2: regenerate z content jako tablica bloków wkleja połączony TEKST
     const fakeThis = buildFakeThis(rw);
     await regenerateLastResponse.call(fakeThis);
 
-    t.is(fakeThis.input_area.value, 'Podsumuj ten plik: dzięki',
-        'pole wpisywania dostaje tekst POŁĄCZONYCH bloków text, bez [object Object] i bez base64 obrazu');
+    t.is(fakeThis.input_area.value, 'Podsumuj ten plik: \ndzięki',
+        'pole wpisywania dostaje tekst POŁĄCZONYCH bloków text (rozdzielonych \\n), bez [object Object] i bez base64 obrazu');
 });
 
 test('regenerate z content jako string zostaje bez zmian (brak regresji)', async t => {
