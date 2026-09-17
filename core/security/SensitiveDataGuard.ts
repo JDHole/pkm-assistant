@@ -36,8 +36,10 @@ const SENSITIVE_PATTERNS = [
 // dostawcy - bez tego token sesji wychodził jawny w logu (bug B1: `details` w `errorUtils.ts`
 // zostaje CELOWO surowym obiektem i to WYŁĄCZNIE ta maska po nazwie pola go osłania).
 const SENSITIVE_KEY_RE = /^(?:[a-z0-9_.-]*(?:authorization|apikey)|(?:[a-z0-9_.-]*[_.-])?(?:key|token|secret|password|passwd|passphrase|cookie))$/i;
-/** camelCase — osobno, bo tu wielkość liter niesie granicę członu (`apiKey` tak, `monkey` nie). */
-const SENSITIVE_CAMEL_RE = /^[A-Za-z0-9_.-]*[a-z0-9](?:Key|Token|Secret|Password|Passphrase)$/;
+/** camelCase — osobno, bo tu wielkość liter niesie granicę członu (`apiKey` tak, `monkey` nie,
+ * `setCookie` tak, `cookiePolicy` nie — dopasowanie jest na SUFIKSIE, więc pole opisujące
+ * politykę ciasteczek, a nie niosące ich wartość, zostaje czytelne). */
+const SENSITIVE_CAMEL_RE = /^[A-Za-z0-9_.-]*[a-z0-9](?:Key|Token|Secret|Password|Passphrase|Cookie)$/;
 
 /** Poniżej tej długości wartość nie jest traktowana jak sekret (chroni zwykły tekst). */
 const MIN_SECRET_VALUE_LENGTH = 8;

@@ -248,11 +248,6 @@ test('maskowanie: nagłówek set-cookie w JSON-ie (kształt `details` błędu do
     };
     const payload = JSON.stringify(details);
     t.is(
-        payload,
-        '{"headers":{"set-cookie":"sid=SUPERSECRETSESSIONVAL1234567890","Authorization":"Bearer ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789","content-type":"application/json"},"status":403}',
-        'fixture ma być dokładnie ten kształt'
-    );
-    t.is(
         maskSensitiveData(payload),
         '{"headers":{"set-cookie":"sid=***7890","Authorization":"Bearer ABCD***6789","content-type":"application/json"},"status":403}'
     );
@@ -271,5 +266,25 @@ test('maskowanie: Set-Cookie i inna wielkość liter też są łapane', t => {
 test('maskowanie: `details` bez pól-sekretów przechodzi bez zmian', t => {
     const harmless = { headers: { 'content-type': 'application/json', 'x-request-id': 'req-42' }, status: 200, model: 'gpt-4' };
     const payload = JSON.stringify(harmless);
+    t.is(maskSensitiveData(payload), payload);
+});
+
+test('maskowanie: camelCase `setCookie` (sufiks `Cookie`) jest wrażliwą nazwą', t => {
+    const masked = maskSensitiveData('{"setCookie":"sid=SUPERSECRETSESSIONVAL1234567890"}');
+    t.is(masked, '{"setCookie":"sid=***7890"}');
+});
+
+// `cookie_consent` (zgoda na ciasteczka, nie ich WARTOŚĆ) i `cookiePolicy` (opis polityki, nie
+// nagłówek) NIE kończą się dosłownie na `cookie`/`Cookie` - ten sam wzór co `monkey`/`turkey`
+// dla `key`/`token` wyżej: dopasowanie jest po SUFIKSIE pola, nie po tym, że słowo "cookie"
+// gdziekolwiek w nim występuje, więc pole OPISUJĄCE ciasteczka (a nie niosące ich wartość)
+// zostaje czytelne.
+test('maskowanie: `cookie_consent` NIE jest wrażliwą nazwą (nie kończy się na "cookie")', t => {
+    const payload = '{"cookie_consent":"accepted-2026-09-17"}';
+    t.is(maskSensitiveData(payload), payload);
+});
+
+test('maskowanie: `cookiePolicy` NIE jest wrażliwą nazwą (camelCase kończy się na "Policy", nie "Cookie")', t => {
+    const payload = '{"cookiePolicy":"strict"}';
     t.is(maskSensitiveData(payload), payload);
 });

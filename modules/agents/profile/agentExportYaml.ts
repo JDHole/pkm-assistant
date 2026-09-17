@@ -16,19 +16,17 @@
  */
 import { stringifyYaml } from '../../../core/index.js';
 
-/** Kształt, jakiego potrzebuje `buildAgentExportYaml` — `Agent` ma `serialize()` zawsze, ale
- * funkcja zostaje duck-typowana (bez importu klasy `Agent`), tak jak dawny kod. Indeks otwarty,
- * bo gałąź bez `serialize()` serializuje CAŁY obiekt (np. `{name: ...}` bez metody). */
-export type SerializableAgent = { serialize?: () => unknown; [key: string]: unknown };
+/** Kształt, jakiego potrzebuje `buildAgentExportYaml` — duck-typowany (bez importu klasy
+ * `Agent`), ale `serialize()` jest WYMAGANE: `Agent.serialize()` istnieje zawsze (metoda klasy,
+ * nie pole opcjonalne), a wołacz (`profile_advanced.ts`) odmawia WCZEŚNIEJ (notice „zapisz
+ * najpierw"), gdy agenta jeszcze nie ma - ta funkcja nigdy nie dostaje czegoś bez `serialize()`. */
+export type SerializableAgent = { serialize: () => unknown };
 
 /**
  * Zamienia agenta na tekst YAML do eksportu - TEN SAM silnik, którym pliki agentów są pisane
  * na dysk (`stringifyYaml`, `core/index.js`), więc eksport wygląda dokładnie jak plik YAML.
- * @param ag - agent (albo dowolny obiekt z opcjonalnym `serialize()`, dla zgodności z dawnym
- *   duck-typingiem); wołacz (`profile_advanced.ts`) odmawia WCZEŚNIEJ (notice „zapisz
- *   najpierw"), gdy agenta jeszcze nie ma - ta funkcja zawsze dostaje coś, na czym ma pracować.
+ * @param ag - agent (albo dowolny obiekt kształtu `{serialize: () => unknown}`)
  */
 export function buildAgentExportYaml(ag: SerializableAgent): string {
-    const data = typeof ag.serialize === 'function' ? ag.serialize() : ag;
-    return stringifyYaml(data);
+    return stringifyYaml(ag.serialize());
 }
