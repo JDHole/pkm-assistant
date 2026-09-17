@@ -21,7 +21,7 @@ import { resolveMessageOrigin, toolResultStatus } from '../../../core/index.js';
 // chat_view ↔ mixin jest legalny i znika w buildzie (`import type`).
 import type { ChatViewLike } from './chatViewShape.js';
 import type { SubAgentToolCallDetail, SubAgentUsage } from '../../ui-components/index.js';
-import type { ContentBlock, RollingMessage, ToolCall } from './RollingWindow.js';
+import type { ContentBlock, RollingMessage, TextContentBlock, ToolCall } from './RollingWindow.js';
 
 type MessageRole = 'user' | 'assistant';
 type MessageContent = string | ContentBlock[];
@@ -399,6 +399,24 @@ export function isLastAssistantMessage(this: ChatViewLike, content: string): boo
     return false;
 }
 
+/**
+ * Łączy bloki `type === 'text'` znakiem NOWEJ LINII, string zostaje bez zmian - do wklejenia
+ * w pole wpisywania przy "ponów odpowiedź" (BUG C2). Osobno od
+ * `RollingWindow._contentToTokenText` (silnik liczenia tokenów, kod review #8): tamten łączy
+ * bloki BEZ separatora (liczy się DŁUGOŚĆ treści, nie jej czytelność) - user, który ma
+ * odczytać tekst z powrotem, potrzebuje bloków rozdzielonych, inaczej dwa sąsiednie bloki
+ * text zlewają się w jedną linijkę bez spacji.
+ */
+function _joinTextBlocksForInput(content: RollingMessage['content']): string {
+    if (!content) return '';
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return '';
+    return content
+        .filter((b): b is TextContentBlock => b?.type === 'text')
+        .map(b => b.text || '')
+        .join('\n');
+}
+
 export async function regenerateLastResponse(this: ChatViewLike): Promise<void> {
     const messages = this.rollingWindow.messages;
 
@@ -414,11 +432,10 @@ export async function regenerateLastResponse(this: ChatViewLike): Promise<void> 
     if (lastUserIdx === -1) return;
 
     // `content` okna to `string | null | ContentBlock[]` (patrz `RollingWindow.ts`) - wiadomość
-    // Z ZAŁĄCZNIKIEM niesie tablicę bloków, nie string. `_contentToTokenText` (silnik okna,
-    // już wołane w tym samym module do liczenia tokenów/podglądu) łączy TYLKO bloki
-    // `type === 'text'` i zwraca string bez zmian - bez tego pole wpisywania dostawało
-    // `[object Object]` (BUG C2).
-    const userContent = this.rollingWindow._contentToTokenText(messages[lastUserIdx].content);
+    // Z ZAŁĄCZNIKIEM niesie tablicę bloków, nie string. `_joinTextBlocksForInput` łączy TYLKO
+    // bloki `type === 'text'` (nowa linia między nimi) i zwraca string bez zmian - bez tego
+    // pole wpisywania dostawało `[object Object]` (BUG C2).
+    const userContent = _joinTextBlocksForInput(messages[lastUserIdx].content);
     // Proweniencja jedzie ZA tekstem — ponowienie nie może awansować wiadomości maszynowej
     // (np. powiadomienia o wyniku suba) do rangi „to pisał człowiek". Brak znacznika = maszyna.
     const userOrigin = resolveMessageOrigin(messages[lastUserIdx]);

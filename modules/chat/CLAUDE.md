@@ -266,10 +266,14 @@ komendy `/`.
   Komendy `/` z tekstu maszynowego nie działają - żadna ze ścieżek maszynowych ich nie używa.
 - **`regenerateLastResponse` wkłada do `input_area.value` TEKST, nigdy surową `content`.**
   `RollingMessage.content` bywa `ContentBlock[]` (wiadomość Z ZAŁĄCZNIKIEM), nie tylko `string`
-  - wsadzenie tablicy wprost do pola wpisywania dawało `[object Object]` (BUG C2). Fix reużywa
-  `RollingWindow._contentToTokenText(content)` (już wołane w tym samym module do liczenia
-  tokenów/podglądu wiadomości) - łączy TYLKO bloki `type === 'text'`, string zostaje bez
-  zmian. Test: `chat/regenerateLastResponse.test.ts`.
+  - wsadzenie tablicy wprost do pola wpisywania dawało `[object Object]` (BUG C2). Fix to lokalny
+  `_joinTextBlocksForInput(content)` (`chat_messages.ts`) - łączy TYLKO bloki `type === 'text'`
+  znakiem NOWEJ LINII, string zostaje bez zmian. Świadomie NIE reużywa
+  `RollingWindow._contentToTokenText` (silnik liczenia tokenów, kod review #8) - ten łączy
+  bloki BEZ separatora (liczy się długość, nie czytelność dla usera), a `RollingWindow.ts` jest
+  świadomym monolitem, więc zmiana jego zachowania wymagałaby przeczytania całego pliku i
+  ruszyłaby też liczenie tokenów/podgląd wiadomości gdzie indziej. Test:
+  `chat/regenerateLastResponse.test.ts`.
 
 ### Stop i przerwanie tury
 
