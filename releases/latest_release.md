@@ -1,39 +1,35 @@
-# PKM Assistant 2.2.5
+# PKM Assistant 2.2.6
 
-**English first** - PKM Assistant 2.2.5
+**Maintenance release** - PKM Assistant 2.2.6
 
-The plugin was born in a Polish vault, and until now an English-speaking user still met Polish in
-a few places: the built-in agent introduced itself in Polish, the factory artifact templates had
-Polish section names, and the rules the plugin adds to every system prompt were Polish. 2.2.5
-makes the whole first session follow the interface language. Polish users see exactly what they
-saw before.
+Nine bug fixes from the post-release review, no new features. Every fix ships with a regression
+test that was red before the change and green after it.
 
 Highlights:
 
-- **Jaskier, the built-in agent, speaks your language.** His persona is now English by default and
-  Polish when the interface language is Polish. Your own edits to Jaskier (the overrides file) are
-  untouched.
-- **Artifact templates follow the interface language.** New vaults get `plan`, `notatka` and
-  `raport` types with English section names (Goal / Steps / Risks and assumptions / User notes;
-  Content; TL;DR / Findings / Blind spots / Sources). A factory template you never edited is
-  switched to the interface language on the next start; anything you edited is left alone.
-  Type ids, statuses and frontmatter keys do not change, so existing artifacts keep working.
-- **The rules in the system prompt and the factory work prompts** (save session, archive,
-  summaries, context compression) and the sub-agent frame prompt are English for English users and unchanged for Polish users.
-  Your own prompt overrides still win.
-- **Renaming a freshly created agent is clean.** The old YAML file is removed, and the sidebar
-  keeps showing the agent instead of "Agent not found".
-- **Smaller fixes:** the command palette shows "PKM Assistant: Chat" and "PKM Assistant: What's
-  new" instead of two entries named "PKM Assistant"; the first-run banner in settings, the
-  sub-agent editor labels and the model-settings descriptions are translated; a "{{count}}"
-  placeholder no longer leaks into a chat notice.
+- **Restarting Obsidian no longer loses tool calls from the restored chat.** The active session
+  file now keeps the id of every tool call and its result, so the model sees the tool results
+  from before the restart instead of orphan warnings in the log. A tool that returned an empty
+  result is restored too, so the provider never sees an unanswered tool call.
+- **Session secrets stay out of the log file.** A `Set-Cookie` or `cookie` header echoed by a
+  proxy inside a provider error is masked in the plugin log like API keys already were.
+- **Artifacts with a hand-typed numeric id** (`pkm-artefakt: 20260911`) are found again by the
+  registry, the disk fallback and the agent's read tool.
+- **"Export profile" copies the agent's YAML** instead of `[object Object]`.
+- **Regenerating a message that carried an attachment** pastes the message text into the input
+  box instead of `[object Object]`.
+- **A new chat clears the todo panel** left by the discarded conversation and removes its
+  one-off todo file.
+- **The token counter no longer crashes** for an agent with no model configured.
+- **A failing sidebar view shows the friendly error** instead of an unhandled rejection in the
+  console; the same for sending an artifact into the chat.
+- **The Brain shard in the agent presentation** renders empty when the memory is empty.
 
-Known limits: the memory index file (`brain.md`) keeps its section headings, and the
-`<agent>-prep` sub-agent created for a new agent keeps the name it got at creation.
+Known limits: `preferred_tools` in an agent's YAML has no effect and no editor in the UI; it is
+a legacy field kept for compatibility. The `mcp` key under `default_permissions` has no effect
+either; use the tool switches (`disabled_tools`) to keep an agent away from MCP servers.
 
-Never picked a language? The plugin has always used English for its interface, and from 2.2.5
-Jaskier, the templates and the prompts follow it too. To keep everything Polish, set Settings →
-PKM Assistant → Appearance → Language to Polski.
-
-Upgrading from 2.2.4: no migration, no changes to settings. Untouched factory artifact templates
-may be rewritten in the interface language (see above).
+Upgrading from 2.2.5: no migration, no changes to settings. **Do not downgrade** to 2.2.5 or
+older with active chat sessions written by 2.2.6: the older plugin reads the new session file
+fields as text, and archiving such a session with an older build corrupts its transcript.
+Archive or discard active sessions before a downgrade.
