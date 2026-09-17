@@ -211,21 +211,29 @@ export class SidebarNav {
             // Render the view
             const renderFn = this.viewRenderers[current.viewId];
             if (renderFn) {
-                try {
-                    // ZASTANE: `ViewRenderer` dopuszcza `Promise<void>` (async renderer), ale ten
-                    // `try/catch` jest SYNCHRONICZNY - odrzucenie promisy z async renderera omija
-                    // go i nie trafia do przyjaznego `sidebar.render_error` niżej (staje się
-                    // unhandled rejection). `void` zachowuje dotychczasowe zachowanie zamiast
-                    // dokładać await/.catch, co zmieniłoby moment powrotu z `_render()` (patrz
-                    // raport fali C).
-                    void renderFn(content, this.plugin, this, current.params);
-                } catch (e) {
-                    log.warn('SidebarNav', `render widoku '${current.viewId}' padł:`, e);
+                const showRenderError = (e: unknown, when: string) => {
+                    log.warn('SidebarNav', `render widoku '${current.viewId}' padł (${when}):`, e);
+                    // Nawigacja mogła odejść z tego widoku, zanim odrzucenie async renderera
+                    // dotarło (`_render()` jest synchroniczne, `.catch` niżej nie) - nie nadpisuj
+                    // treści widoku, na którym user już jest.
+                    if (this.stack[this.stack.length - 1] !== current) return;
                     content.empty();
                     content.createEl('p', {
                         text: t('sidebar.render_error'),
                         cls: 'agent-error'
                     });
+                };
+                try {
+                    // `ViewRenderer` dopuszcza `Promise<void>` (dwa renderery są `async`) - nie
+                    // czekamy na nią (`_render()` zostaje synchroniczne, zero zmiany momentu
+                    // powrotu), ale JEJ ODRZUCENIE ma trafić do TEGO SAMEGO `render_error` co
+                    // throw synchroniczny, zamiast uciec jako unhandled rejection.
+                    const result = renderFn(content, this.plugin, this, current.params);
+                    if (result && typeof (result as Promise<void>).then === 'function') {
+                        (result as Promise<void>).catch((e: unknown) => showRenderError(e, 'async'));
+                    }
+                } catch (e) {
+                    showRenderError(e, 'sync');
                 }
             } else {
                 content.createEl('p', {
