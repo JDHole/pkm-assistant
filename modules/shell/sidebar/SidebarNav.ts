@@ -33,6 +33,16 @@ export class SidebarNav {
     declare _currentCleanup: (() => void) | null;
     declare _rendering: boolean;
     /**
+     * Element `.sidebar-view-content` wypuszczony przez OSTATNIE zakończone `_render()` -
+     * identyfikator "czy TA konkretna renderka jest jeszcze aktualna" dla `.catch()` async
+     * renderera. `this.stack[this.stack.length-1] === current` (wpis stosu) NIE WYSTARCZA:
+     * `refresh()` re-renderuje TEN SAM wpis stosu (nie zmienia `this.stack`), więc po
+     * `push('x') -> refresh()` odrzucenie ze STAREGO renderu widziałoby ten sam `current` i
+     * pisałoby do JUŻ ODPIĘTEGO (`containerEl.empty()` w drugim `_render()`) diva. Tożsamość
+     * `content` jest ZAWSZE świeża po każdym `_render()`, refresh czy nie.
+     */
+    declare _currentContentEl: HTMLElement | null;
+    /**
      * @param {HTMLElement} containerEl - The sidebar content container
      * @param {Object} plugin - PKM Assistant plugin instance
      */
@@ -43,6 +53,7 @@ export class SidebarNav {
         this.viewRenderers = {};
         this._currentCleanup = null;
         this._rendering = false;
+        this._currentContentEl = null;
     }
 
     /**
@@ -207,25 +218,38 @@ export class SidebarNav {
 
             // View content area (scrollable)
             const content = this.containerEl.createDiv({ cls: 'sidebar-view-content' });
+            // Znacznik "ten `content` jest jeszcze aktualny" dla `.catch()` async renderera
+            // niżej - PORÓWNANIE PO WPISIE STOSU (`current`) NIE WYSTARCZA, bo `refresh()`
+            // re-renderuje TEN SAM wpis (nowy `content`, ten sam `current`).
+            this._currentContentEl = content;
 
             // Render the view
             const renderFn = this.viewRenderers[current.viewId];
             if (renderFn) {
-                try {
-                    // ZASTANE: `ViewRenderer` dopuszcza `Promise<void>` (async renderer), ale ten
-                    // `try/catch` jest SYNCHRONICZNY - odrzucenie promisy z async renderera omija
-                    // go i nie trafia do przyjaznego `sidebar.render_error` niżej (staje się
-                    // unhandled rejection). `void` zachowuje dotychczasowe zachowanie zamiast
-                    // dokładać await/.catch, co zmieniłoby moment powrotu z `_render()` (patrz
-                    // raport fali C).
-                    void renderFn(content, this.plugin, this, current.params);
-                } catch (e) {
-                    log.warn('SidebarNav', `render widoku '${current.viewId}' padł:`, e);
+                const showRenderError = (e: unknown, when: string) => {
+                    log.warn('SidebarNav', `render widoku '${current.viewId}' padł (${when}):`, e);
+                    // Nawigacja ODESZŁA z tej renderki, zanim odrzucenie async renderera dotarło
+                    // (`_render()` jest synchroniczne, `.catch` niżej nie) - nie nadpisuj treści
+                    // widoku, na którym user już jest. Tożsamość `content` (nie wpisu stosu -
+                    // `refresh()` zostawia TEN SAM `current`, ale tworzy NOWY `content`).
+                    if (this._currentContentEl !== content) return;
                     content.empty();
                     content.createEl('p', {
                         text: t('sidebar.render_error'),
                         cls: 'agent-error'
                     });
+                };
+                try {
+                    // `ViewRenderer` dopuszcza `Promise<void>` (dwa renderery są `async`) - nie
+                    // czekamy na nią (`_render()` zostaje synchroniczne, zero zmiany momentu
+                    // powrotu), ale JEJ ODRZUCENIE ma trafić do TEGO SAMEGO `render_error` co
+                    // throw synchroniczny, zamiast uciec jako unhandled rejection.
+                    const result = renderFn(content, this.plugin, this, current.params);
+                    if (result && typeof result.then === 'function') {
+                        result.catch((e: unknown) => showRenderError(e, 'async'));
+                    }
+                } catch (e) {
+                    showRenderError(e, 'sync');
                 }
             } else {
                 content.createEl('p', {

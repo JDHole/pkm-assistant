@@ -21,7 +21,7 @@ import { resolveMessageOrigin, toolResultStatus } from '../../../core/index.js';
 // chat_view ↔ mixin jest legalny i znika w buildzie (`import type`).
 import type { ChatViewLike } from './chatViewShape.js';
 import type { SubAgentToolCallDetail, SubAgentUsage } from '../../ui-components/index.js';
-import type { ContentBlock, RollingMessage, ToolCall } from './RollingWindow.js';
+import type { ContentBlock, RollingMessage, TextContentBlock, ToolCall } from './RollingWindow.js';
 
 type MessageRole = 'user' | 'assistant';
 type MessageContent = string | ContentBlock[];
@@ -156,6 +156,16 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
             this.addMessageActions(meta, uiText, 'user', idx);
 
         } else if (msg.role === 'assistant') {
+            const hasToolCalls = (msg.tool_calls?.length as number) > 0;
+            // Kod review MINOR #4: `content` puste, BRAK `tool_calls` i BRAK `reasoning_content`
+            // nie ma czego pokazać poza rzędem akcji (kopiuj/usuń/kciuki) przyczepionym do
+            // pustej treści - realny, obserwowalny defekt: `restore` po BUG C1 potrafi zwrócić
+            // taką wiadomość, gdy `**tool_calls:**` w pliku istniało, ale nie dało się
+            // sparsować (`parseSessionToolCalls` → `null`, `activeSessionFormat.ts`). Wiadomość
+            // z realną treścią (tekst, tool_calls, myślenie) renderuje się jak dotąd - to NIE
+            // jest zmiana zachowania dla legalnych tool-calling tur (mają chip, patrz niżej).
+            if (!uiText && !hasToolCalls && !msg.reasoning_content) continue;
+
             // ── AGENT MESSAGE — .cs-message--agent ──
             const agentDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--agent' });
             agentDiv.style.setProperty('--cs-agent-color-rgb', agentRgb);
@@ -174,7 +184,7 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
                 const thinkRow = createThinkingBlock(msg.reasoning_content, false);
                 agentDiv.appendChild(thinkRow);
             }
-            if ((msg.tool_calls?.length as number) > 0) {
+            if (hasToolCalls) {
                 for (const tc of msg.tool_calls as ToolCall[]) {
                     const tcName = tc.function?.name || tc.name || 'unknown';
                     const tcArgs = tc.function?.arguments || tc.arguments;
@@ -389,6 +399,24 @@ export function isLastAssistantMessage(this: ChatViewLike, content: string): boo
     return false;
 }
 
+/**
+ * Łączy bloki `type === 'text'` znakiem NOWEJ LINII, string zostaje bez zmian - do wklejenia
+ * w pole wpisywania przy "ponów odpowiedź" (BUG C2). Osobno od
+ * `RollingWindow._contentToTokenText` (silnik liczenia tokenów, kod review #8): tamten łączy
+ * bloki BEZ separatora (liczy się DŁUGOŚĆ treści, nie jej czytelność) - user, który ma
+ * odczytać tekst z powrotem, potrzebuje bloków rozdzielonych, inaczej dwa sąsiednie bloki
+ * text zlewają się w jedną linijkę bez spacji.
+ */
+function _joinTextBlocksForInput(content: RollingMessage['content']): string {
+    if (!content) return '';
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return '';
+    return content
+        .filter((b): b is TextContentBlock => b?.type === 'text')
+        .map(b => b.text || '')
+        .join('\n');
+}
+
 export async function regenerateLastResponse(this: ChatViewLike): Promise<void> {
     const messages = this.rollingWindow.messages;
 
@@ -403,12 +431,11 @@ export async function regenerateLastResponse(this: ChatViewLike): Promise<void> 
 
     if (lastUserIdx === -1) return;
 
-    // TS-boundary: `content` okna to `string | null | ContentBlock[]` (patrz `RollingWindow.ts`),
-    // a niżej leci wprost do `input_area.value`.
-    // ⚠️ ZASTANE: dla ponawianej wiadomości Z ZAŁĄCZNIKIEM (tablica bloków) do pola wpisywania
-    // wpadnie `[object Object]`. Asercja opisuje przypadek, który kod obsługuje (goły tekst);
-    // wyciągnięcie tekstu z bloków byłoby zmianą runtime'u — poza falą typowania.
-    const userContent = messages[lastUserIdx].content as string;
+    // `content` okna to `string | null | ContentBlock[]` (patrz `RollingWindow.ts`) - wiadomość
+    // Z ZAŁĄCZNIKIEM niesie tablicę bloków, nie string. `_joinTextBlocksForInput` łączy TYLKO
+    // bloki `type === 'text'` (nowa linia między nimi) i zwraca string bez zmian - bez tego
+    // pole wpisywania dostawało `[object Object]` (BUG C2).
+    const userContent = _joinTextBlocksForInput(messages[lastUserIdx].content);
     // Proweniencja jedzie ZA tekstem — ponowienie nie może awansować wiadomości maszynowej
     // (np. powiadomienia o wyniku suba) do rangi „to pisał człowiek". Brak znacznika = maszyna.
     const userOrigin = resolveMessageOrigin(messages[lastUserIdx]);

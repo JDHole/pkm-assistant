@@ -1,5 +1,5 @@
 import test from 'ava';
-import { TodoFileStore, TODO_FOLDER, createTodoTool } from './TodoTool.js';
+import { TodoFileStore, TODO_FOLDER, createTodoTool, retireTodoFile } from './TodoTool.js';
 import type { TodoAdapter, TodoToolPlugin } from './TodoTool.js';
 import { parseArtifact } from '../../../artifacts/artifactParser.js';
 
@@ -293,4 +293,37 @@ test('sprzeczne sygnały (exists=true, read rzuca) na WŁASNYM pliku listy → t
         'przyczyna (cause z readIfExists) niesiona w komunikacie, nie sam suchy „nie mogę odczytać"',
     );
     t.is(files.get(path), originalContent, 'plik listy NIETKNIĘTY — throw ląduje przed jakimkolwiek write()');
+});
+
+// ── retireTodoFile: publiczna furtka dla wołaczy spoza modułu (BUG C3, modules/chat) ──
+
+test('retireTodoFile kasuje plik jednorazowy istniejącej listy', async t => {
+    const { adapter, files } = makeAdapter();
+    const store = new TodoFileStore({ adapter, now: () => new Date('2026-08-09T12:43:00Z') });
+    await store.create('Jaskier', 'sesja1', ['zrób X']);
+    const path = store.path('Jaskier', 'sesja1');
+    t.true(files.has(path), 'sanity: plik realnie powstał');
+
+    await retireTodoFile(adapter, 'Jaskier', 'sesja1');
+
+    t.false(files.has(path), 'retireTodoFile skasował dokładnie ten plik');
+});
+
+test('retireTodoFile na nieistniejącym pliku jest no-opem (idempotencja, ta sama semantyka co finish)', async t => {
+    const { adapter } = makeAdapter();
+    await t.notThrowsAsync(() => retireTodoFile(adapter, 'Jaskier', 'brak-takiej-sesji'));
+});
+
+test('retireTodoFile NIE rusza plików innego agenta ani innej sesji', async t => {
+    const { adapter, files } = makeAdapter();
+    const store = new TodoFileStore({ adapter, now: () => new Date('2026-08-09T12:43:00Z') });
+    await store.create('Jaskier', 'sesja1', ['a']);
+    await store.create('Jaskier', 'sesja2', ['b']);
+    await store.create('Klara', 'sesja1', ['c']);
+
+    await retireTodoFile(adapter, 'Jaskier', 'sesja1');
+
+    t.false(files.has(store.path('Jaskier', 'sesja1')));
+    t.true(files.has(store.path('Jaskier', 'sesja2')), 'inna sesja TEGO SAMEGO agenta zostaje');
+    t.true(files.has(store.path('Klara', 'sesja1')), 'ten sam sessionId, inny agent — zostaje');
 });

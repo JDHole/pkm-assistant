@@ -17,7 +17,7 @@ import { t } from '../../core/i18n/index.js';
 // CHAT_VIEW_TYPE - kanoniczna stała żyje w core/ (node-safe barrel), nie w
 // `modules/chat/index.js` (ten ciągnie `obsidian` przez ChatView/chat_streaming.js i złamałby
 // "BEZ importu obsidian" tego pliku - patrz `core/utils/viewTypes.ts`).
-import { MACHINE_MESSAGE_META, CHAT_VIEW_TYPE } from '../../core/index.js';
+import { MACHINE_MESSAGE_META, CHAT_VIEW_TYPE, log } from '../../core/index.js';
 import type { ThinArtifact } from './types.js';
 
 /**
@@ -135,13 +135,19 @@ export async function summonAgentForArtifact(plugin: SummonPlugin, { id, actionL
                 // maszynowa mimo kliknięcia usera - inaczej adres wpisany przez model do sekcji
                 // „Źródła" odblokowywałby `web_read`, a marker `@@skill:` udawałby polecenie
                 // człowieka.
-                // ZASTANE: `send_message` jest asynchroniczna - ten `try/catch` łapie WYŁĄCZNIE
-                // synchroniczny throw sprzed zwrotu promisy, nie jej odrzucenie. Komentarz niżej
-                // obiecuje ochronę „model niekonfigurowany itp.", ale realny pad wywołania
-                // (np. brak klucza API) leci jako odrzucona promisa, mijając ten catch -
-                // zostawałby unhandled rejection. `void` zachowuje dotychczasowe zachowanie,
-                // naprawa (await + catch) byłaby zmianą runtime (patrz raport fali C).
-                try { void view.send_message?.({ meta: MACHINE_MESSAGE_META }); } catch { /* model niekonfigurowany itp. */ }
+                // `send_message` jest asynchroniczna - `try/catch` sam łapie WYŁĄCZNIE synchroniczny
+                // throw sprzed zwrotu promisy, nie jej odrzucenie (model niekonfigurowany, brak
+                // klucza API itp. wraca jako odrzucona promisa). `.catch` niżej zamyka tę drugą
+                // drogę - bez niej realny pad uciekał jako unhandled rejection zamiast ginąć cicho
+                // tak samo, jak throw synchroniczny.
+                try {
+                    const result = view.send_message?.({ meta: MACHINE_MESSAGE_META });
+                    if (result && typeof result.then === 'function') {
+                        result.catch((e: unknown) => {
+                            log.warn('artifactSummon', 'send_message po przywołaniu agenta padł:', e);
+                        });
+                    }
+                } catch (e) { log.warn('artifactSummon', 'send_message po przywołaniu agenta padł (sync):', e); }
             }
         };
 

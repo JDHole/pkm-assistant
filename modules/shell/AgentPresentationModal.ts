@@ -12,6 +12,7 @@ import { resolveMainModelForForm } from '../../modules/agents/index.js';
 import type { AgentManager } from '../../modules/agents/index.js';
 import { t } from '../../core/i18n/index.js';
 import type { PluginApi } from '../../core/index.js';
+import { isShardFilled } from './agentPresentationShards.js';
 
 /** Plugin widziany przez ten modal: tylko `agentManager` ponad bazowy `PluginApi`. */
 interface AgentPresentationModalPlugin extends PluginApi {
@@ -114,13 +115,12 @@ export class AgentPresentationModal extends Modal {
             { label: 'L2', value: String(stats?.l2Count ?? 0) },
             { label: 'Brain', value: stats?.brainSize ?? '0' },
         ]) {
-            const filled = info.value !== '0' && info.value !== globalLabel;
+            const filled = isShardFilled(info.value, globalLabel);
             const shard = infoGrid.createDiv({ cls: `cs-shard ${filled ? 'cs-shard--filled' : 'cs-shard--empty'}` });
-            // TS-boundary: `Brain` (stats.brainSize) jest liczbą, reszta stringiem (`info.value:
-            // string | number`) - DOM (createDiv → textContent) i tak konwertuje niejawnie; brak
-            // String() w oryginale. Jeden `as` (nie `as unknown as`) - zawężenie unii do jednego
-            // członu jest zawsze bezpośrednio dozwolone.
-            shard.createDiv({ cls: 'cs-shard__value', text: info.value as string });
+            // `info.value: string | number` - `Brain` (stats.brainSize) jest liczbą, reszta
+            // stringiem; `String()` zamiast `as` - DOM i tak konwertuje niejawnie, ale tekst ma
+            // być prawdziwym stringiem, nie kłamstwem typu.
+            shard.createDiv({ cls: 'cs-shard__value', text: String(info.value) });
             shard.createDiv({ cls: 'cs-shard__main-label', text: info.label });
         }
 

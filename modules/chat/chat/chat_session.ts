@@ -8,6 +8,9 @@ import { IdleScheduler } from '../../memory/index.js';
 import { runSaveSessionFlow } from '../slash-commands/save_session.js';
 import { SessionCloseModal } from '../SessionCloseModal.js';
 import { OpenSessionModal } from '../OpenSessionModal.js';
+// Jedyny publiczny akt sprzątania pliku todo (`modules/tools`, publiczne drzwi) - patrz
+// `handleNewSession`, gałąź `discard` (BUG C3).
+import { retireTodoFile } from '../../tools/index.js';
 import { log } from '../../../core/utils/Logger.js';
 import { t } from '../../../core/i18n/index.js';
 import { TokenTracker } from '../../../core/index.js';
@@ -140,6 +143,49 @@ async function _retireActiveSession(agentMemory: AgentMemory | null | undefined,
 }
 
 /**
+ * Skasuj plik jednorazowego todo sesji, która właśnie odeszła do `.discarded/` (BUG C3,
+ * drugi ogon). Sam plik `sessions/active/*.md` idzie do `.discarded/` przez
+ * `_retireActiveSession` - `.pkm-assistant/artifacts/todo/<agent>-<sessionId>.md` żyje w
+ * OSOBNYM drzewie (adapter, nie Vault API) i tamten przenos go nie dotyka.
+ *
+ * `sessionId` jest liczony DOKŁADNIE tak, jak `TodoTool.resolveSessionId` liczy go dla
+ * wywołań narzędzia w tej sesji (basename ścieżki bez `.md`) - inny wzór dawałby złą nazwę
+ * pliku i sprzątanie trafiałoby w próżnię. Best-effort: brak agenta/ścieżki albo pad
+ * kasowania nie mają prawa zablokować odrzucenia sesji - user już to potwierdził w modalu.
+ */
+async function _retireTodoFileFor(view: ChatViewLike, agentName: string | undefined, sessionPath: string): Promise<void> {
+    try {
+        const adapter = view.app?.vault?.adapter;
+        const sessionId = sessionPath.split('/').pop()?.replace(/\.md$/i, '');
+        if (!adapter || !agentName || !sessionId) return;
+        await retireTodoFile(adapter, agentName, sessionId);
+    } catch (e) {
+        log.warn('Chat', `Retiring todo file failed (non-fatal): ${(e as Error)?.message || String(e)}`);
+    }
+}
+
+/** Jedna wiadomość odzyskana z pliku sesji — kształt `AgentMemory.loadActiveSession()`. */
+type RestoredMessage = Awaited<ReturnType<AgentMemory['loadActiveSession']>>['messages'][number];
+
+/**
+ * Metadata do przekazania `RollingWindow.addMessage` przy restore z dysku.
+ *
+ * Bez tego `_restoreActiveSession` wołał `addMessage(role, content)` BEZ trzeciego
+ * argumentu — nawet gdy plik sesji (format v3, `activeSessionFormat.ts`) niósł
+ * `tool_call_id`/`tool_calls`, restore je odrzucał. Kolejna tura widziała `tool`
+ * bez `tool_call_id` i `sanitizeToolTranscript` (`modules/agent-loop`) kasował go jako
+ * sierotę (log `drop orphan tool message (tool_call_id="undefined")`) — KAŻDY tool
+ * result sprzed restartu Obsidiana znikał z okna. Klucze są dokładane TYLKO gdy obecne
+ * (`ActiveSessionMessage.toolCallId`/`toolCalls` są opcjonalne — brak w pliku legacy/v1/v2).
+ */
+function _restoredMessageMeta(msg: RestoredMessage) {
+    const meta: { tool_call_id?: string; tool_calls?: NonNullable<RestoredMessage['toolCalls']> } = {};
+    if (msg.toolCallId) meta.tool_call_id = msg.toolCallId;
+    if (msg.toolCalls) meta.tool_calls = msg.toolCalls;
+    return meta;
+}
+
+/**
  * Restore the last active session from disk.
  */
 export async function _restoreActiveSession(this: ChatViewLike) {
@@ -176,7 +222,7 @@ export async function _restoreActiveSession(this: ChatViewLike) {
 
                 const rollingWindow = this._createRollingWindow(agentName);
                 for (const msg of parsed.messages) {
-                    await rollingWindow.addMessage(msg.role, msg.content);
+                    await rollingWindow.addMessage(msg.role, msg.content, _restoredMessageMeta(msg));
                 }
 
                 restored.push({
@@ -203,7 +249,7 @@ export async function _restoreActiveSession(this: ChatViewLike) {
 
             const rollingWindow = this._createRollingWindow(activeAgentName);
             for (const msg of parsed.messages) {
-                await rollingWindow.addMessage(msg.role, msg.content);
+                await rollingWindow.addMessage(msg.role, msg.content, _restoredMessageMeta(msg));
             }
             restored.push({
                 agentName: activeAgentName,
@@ -341,6 +387,11 @@ export async function handleNewSession(this: ChatViewLike) {
             // zombie-wpis do najbliższego restore.
             log.info('Chat', `Session discarded by user (${msgCount} msgs)`);
             await _retireActiveSession(agentMemoryForOpts, 'discard');
+            // Plik jednorazowy `.pkm-assistant/artifacts/todo/<agent>-<sessionId>.md` NIE idzie
+            // do `.discarded/` z sesją - żyje osobno (adapter, nie Vault API). Bez tego
+            // sprzątania zostaje sierotą na dysku (harmless, ale się kumuluje - BUG C3, drugi
+            // ogon). Best-effort: pad sprzątania nie może zablokować odrzucenia sesji.
+            await _retireTodoFileFor(this, agent?.name, closingSessionPath);
         }
 
         // SessionCloseModal ma tylko dwie gałęzie: „archiwizuj" i „odrzuć". Nie ma checkboxa
@@ -360,6 +411,12 @@ export async function handleNewSession(this: ChatViewLike) {
     this.add_welcome_message();
     this.updateTokenCounter();
     this._updateTokenPanel();
+    // Lista `todo` jest per rozmowa - bez tego panel dalej pokazywał listę sesji, która
+    // WŁAŚNIE odeszła (archive/discard), mimo że plik sesji już był w `.discarded/`/
+    // zarchiwizowany (BUG C3). Ta sama funkcja co przy przełączeniu zakładki (`_switchTab`,
+    // `chat_tabs.ts`) - jedno miejsce prawdy, wołane na KAŻDYM wyjściu tej funkcji (także
+    // wczesnym, `msgCount === 0`), nie tylko po modalu.
+    this._resetTodoPanelState?.();
 }
 
 /**

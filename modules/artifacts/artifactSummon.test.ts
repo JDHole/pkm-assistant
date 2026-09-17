@@ -1,6 +1,6 @@
 import test from 'ava';
 import { setLocale } from '../../core/i18n/index.js';
-import { buildSummonMessage, activateArtifactInChat } from './artifactSummon.js';
+import { buildSummonMessage, activateArtifactInChat, summonAgentForArtifact } from './artifactSummon.js';
 import { parseArtifactBlockId } from './artifactBlocks.js';
 
 setLocale('pl');
@@ -64,7 +64,7 @@ function makePlugin(thinState: unknown) {
         sent: 0,
         agentChanges: 0,
         _renderArtifactChip() { this.chipRenders++; },
-        send_message() { this.sent++; },
+        send_message(_opts: { meta: unknown }): void | Promise<void> { this.sent++; },
         handleAgentChange() { this.agentChanges++; },
     };
     const plugin = {
@@ -106,6 +106,45 @@ test.serial('activateArtifactInChat: brak store\'a / nieznane id → {ok:false}'
     const { plugin } = makePlugin(null);
     t.deepEqual(await activateArtifactInChat(plugin, { id: 'art-nieznane' }), { ok: false });
     t.deepEqual(await activateArtifactInChat({}, { id: 'art-x' }), { ok: false });
+});
+
+// ── BUG D2: `send_message` odrzuca — `try/catch` synchroniczny nie łapie odrzucenia ──
+// Komentarz przy wywołaniu mówił wprost: `try/catch` łapie WYŁĄCZNIE synchroniczny throw sprzed
+// zwrotu promisy, nie jej odrzucenie. Realny pad (np. brak klucza API) leci jako unhandled
+// rejection.
+test.serial('summonAgentForArtifact: odrzucenie send_message NIE ucieka jako unhandled rejection', async t => {
+    const { plugin, view } = makePlugin(thin());
+    // Atrapa NAGRYWA wywołanie (argumenty + licznik `sent`) zamiast po prostu odrzucać — samo
+    // `t.is(unhandled, null)` przechodziłoby też, gdyby `send_message` w ogóle nie został
+    // wywołany (np. podmieniony na `undefined`), więc test musi dowieść, że wysyłka NAPRAWDĘ
+    // poszła, z prawdziwą treścią, i DOPIERO POTEM odrzuciła.
+    const calls: Array<{ meta: unknown }> = [];
+    view.send_message = (opts: { meta: unknown }) => {
+        view.sent++;
+        calls.push(opts);
+        return Promise.reject(new Error('model niekonfigurowany'));
+    };
+    const expectedMessage = buildSummonMessage(thin(), 'zatwierdził plan');
+
+    let unhandled: unknown = null;
+    const onUnhandled = (reason: unknown) => { unhandled = reason; };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+        const ok = await summonAgentForArtifact(plugin, { id: 'art-20260723-a1b2', actionLabel: 'zatwierdził plan' });
+        t.true(ok);
+        await settle();
+        // Node emituje 'unhandledRejection' dopiero PO opróżnieniu microtasków — daj mu turę więcej.
+        await new Promise(resolve => setImmediate(resolve));
+    } finally {
+        process.removeListener('unhandledRejection', onUnhandled);
+    }
+
+    t.is(view.sent, 1, 'send_message MUSI być realnie wywołane — nie tylko "nic nie wybuchło"');
+    t.is(calls.length, 1);
+    t.is(view.input_area.value, expectedMessage, 'input_area ma nieść DOKŁADNIE tę wiadomość, którą send_message potem odrzucił');
+
+    t.is(unhandled, null,
+        'odrzucenie send_message MUSI być złapane wewnątrz summonAgentForArtifact — nie może wyciec jako unhandled rejection');
 });
 
 test('parseArtifactBlockId: „id: art-..." → id', t => {
