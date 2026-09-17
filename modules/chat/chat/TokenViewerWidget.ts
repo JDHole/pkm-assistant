@@ -185,9 +185,8 @@ export class TokenViewerWidget {
         // '')` dla stringa oddaje ten string, dla `null` oddaje `''`). Puste `platform`/`model`
         // nie są nowym przypadkiem: `estimateContextWindow` już oddaje dla nich swój
         // `fallback` (200000) - to samo, co dostaje dziś KAŻDY nierozpoznany model.
-        const configuredObject = configured && typeof configured === 'object' ? configured : null;
-        const platform = configuredObject ? configuredObject.platform : '';
-        const model = configuredObject ? configuredObject.model : String(configured || '');
+        const platform = configured && typeof configured === 'object' ? configured.platform : '';
+        const model = configured && typeof configured === 'object' ? configured.model : String(configured || '');
         return estimateContextWindow({ role, platform, model });
     }
 
