@@ -189,6 +189,28 @@ test.serial('Sekret w polu dopiętym do błędu (`response`) nie wychodzi na kon
     } finally { internals._debug = wasDebug; }
 });
 
+// ─── set-cookie w `details` (bug B1) - droga PLIKU logu, nie konsoli ────────────
+//
+// `normalizeError` (`core/utils/errorUtils.ts`) zostawia `details` CELOWO surowym obiektem
+// (kontrakt adapterów) - jedyna osłona jest ta sama maska po nazwie pola, którą ten plik
+// testuje wyżej dla `response`/`cause`. Tu chodzi o `.pkm-assistant/logs/pkm-assistant.log`
+// (sink), nie o konsolę: dokładnie tam ląduje token sesji odbity przez proxy w nagłówku
+// `Set-Cookie`, a limitowałby go tylko cap długości linii (`LogFileSink`), nie maska - stąd
+// osobny, literalny test na TEN zlew, wzorem `err.response.headers['api-key']` wyżej.
+test.serial('Set-Cookie w `details` błędu dostawcy trafia do pliku logu ZAMASKOWANE', t => {
+    const lines = installFakeSink();
+    try {
+        const err = new Error('boom') as Error & { details?: unknown };
+        err.details = { headers: { 'set-cookie': SECRET, Authorization: `Bearer ${SECRET}` }, status: 403 };
+        captureConsole('error', () => log.error('X', 'padło', err));
+        const text = fileText(lines);
+        t.false(text.includes(SECRET), text);
+        t.true(text.includes('"set-cookie":"SEKR***CDEF"'), text);
+        t.true(text.includes('"Authorization":"Bearer SEKR***CDEF"'), text);
+        t.true(text.includes('403'), 'kontekst błędu (status) ma zostać, tylko sekrety znikają');
+    } finally { removeFakeSink(); }
+});
+
 test.serial('Zwykły log nie jest kaleczony przez maskę', t => {
     const lines = installFakeSink();
     try {
