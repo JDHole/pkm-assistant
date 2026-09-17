@@ -388,33 +388,52 @@ export function parseActiveSession(text: unknown): ParsedActiveSession {
         const contentValue = extractEventField(rawBody, 'content')
             || extractEventField(rawBody, 'result')
             || extractEventField(rawBody, 'prompt');
-        // v3: `agent_message` wołające WYŁĄCZNIE narzędzia ma pustą `content` (typowy kształt
-        // odpowiedzi tool-calling) - blok bez `contentValue` liczy się MIMO TO jako wiadomość,
-        // gdy niesie `**tool_calls:**`. Bez tej gałęzi CAŁY blok (assistant + jego tool_calls)
-        // znikał z restore, więc kolejny `tool_result` i tak zostawał sierotą - dokładnie
-        // scenariusz z logu 2026-08-09 ("every tool call ... was cut").
-        const toolCallsRaw = extractEventField(rawBody, 'tool_calls');
-        if (contentValue || toolCallsRaw) {
+        // v3: dwa pola bez `contentValue` liczą się MIMO TO jako wiadomość:
+        //  - `tool_call_id` na `tool_result`, gdy narzędzie zwróciło PUSTY string (`result`
+        //    znika z pliku - `formatSessionEvent` pomija pola `''` - ale wpis MUSI zostać, bo
+        //    `assistant.tool_calls[]` obiecał odpowiedź dla tego id; bez tej gałęzi drugi
+        //    tool_call z pary [call_1, call_2] zostawał NIEODPOWIEDZIANY, co provider odbija
+        //    błędem 400, kod review BLOCKER #1),
+        //  - `tool_calls` na `agent_message` wołającym WYŁĄCZNIE narzędzia (typowy kształt
+        //    tool-calling, `content` puste) - bez tej gałęzi CAŁY blok znikał z restore, więc
+        //    kolejny `tool_result` i tak zostawał sierotą (scenariusz z logu 2026-08-09,
+        //    "every tool call ... was cut").
+        const toolCallIdRaw = extractEventField(rawBody, 'tool_call_id');
+        const toolCalls = parseSessionToolCalls(extractEventField(rawBody, 'tool_calls'));
+        if (contentValue || toolCallIdRaw || toolCalls) {
             const eventRole = roleFromEvent(eventTypeFromHeader(rawHeader), rawBody);
-            // Event o nierozpoznanej roli pomijamy jak dotąd, ale NIE doklejamy go do
-            // poprzedniej wiadomości - blok z polem eventowym nigdy nie jest treścią.
             if (eventRole) {
                 // v3: `tool_call_id` (event `tool_result`) i `tool_calls` (event `agent_message`
                 // z wywołaniami narzędzi) - klucz dokładany TYLKO gdy pole realnie jest w bloku,
                 // żeby wiadomość bez nich zostawała bit w bit takim samym obiektem jak przed v3
                 // (kontrakt: `t.deepEqual` na `{role, content, seq}` gdzie indziej w tym pliku).
-                const toolCallId = extractEventField(rawBody, 'tool_call_id') || null;
-                const toolCalls = parseSessionToolCalls(toolCallsRaw);
                 result.messages.push({
                     role: eventRole,
                     content: unescapeActiveText(contentValue.trim()),
                     seq: seqFromEvent(rawBody),
-                    ...(toolCallId ? { toolCallId } : {}),
+                    ...(toolCallIdRaw ? { toolCallId: toolCallIdRaw } : {}),
                     ...(toolCalls ? { toolCalls } : {}),
                 });
                 lastWasTranscript = false;
+                continue;
             }
-            continue;
+            // Rola nierozpoznana. Blok z prawdziwym polem eventowym (`content`/`result`/
+            // `prompt`) jest NIEDWUZNACZNIE zamierzonym eventem (`user_message`/`agent_message`/
+            // `tool_result`/`mcp_call`/`subagent_*` ZAWSZE rozwiązują rolę - patrz
+            // `roleFromEvent` - więc nierozpoznanie tu znaczy typ naprawdę nieznany), więc
+            // pomijamy go jak dotąd, NIE doklejając do poprzedniej wiadomości (kontrakt:
+            // "event z jawną rolą i nieznanym typem" test wyżej).
+            //
+            // Blok, który dostał się tutaj TYLKO przez `toolCallIdRaw`/`toolCalls` (bez
+            // żadnego realnego pola treści) i którego rola się NIE rozwiązała, prawie na
+            // pewno NIE jest prawdziwym v3 eventem - `agent_message`/`tool_result` MAJĄ
+            // zawsze rozwiązywalną rolę wprost z typu (pierwsza gałąź `roleFromEvent`), więc
+            // rola nierozpoznana tu oznacza w praktyce legacy treść, która przypadkiem
+            // zawiera literalny fragment `**tool_calls:**`/`**tool_call_id:**` (pre-v3 pliki
+            // nigdy nie escapowały tych etykiet, bo `EVENT_FIELDS` ich jeszcze nie znało).
+            // Kod review MINOR #5: taki fragment ma wrócić do poprzedniej wiadomości jak
+            // KAŻDY inny nierozpoznany nagłówek (case (c) niżej), nie zniknąć bezpowrotnie.
+            if (contentValue) continue;
         }
 
         // (c) nagłówek z treści wiadomości - wraca tam, skąd przyszedł
@@ -506,8 +525,16 @@ function parseSessionToolCalls(raw: string): SessionToolCall[] | null {
         const name = (fn as Record<string, unknown>).name;
         const args = (fn as Record<string, unknown>).arguments;
         if (typeof name !== 'string' || !name) return null;
+        // Kod review MAJOR #2: `type` MUSI przetrwać round-trip - kanoniczny kształt
+        // (`AgentLoop._streamOnce`, `apiToolCalls`) zawsze pisze `type: 'function'`, a
+        // dostawcy OpenAI-compatible przepuszczają `tool_calls[]` do API bez zmian. Domyślne
+        // `'function'`, gdy pole brakuje (plik ręczny / bardzo stary v3) - to jedyny typ, jaki
+        // kontrakt OpenAI tool_calls dziś zna.
+        const rawType = (entry as Record<string, unknown>).type;
+        const type = typeof rawType === 'string' && rawType ? rawType : 'function';
         calls.push({
             id,
+            type,
             function: { name, arguments: typeof args === 'string' ? args : JSON.stringify(args ?? {}) },
         });
     }
