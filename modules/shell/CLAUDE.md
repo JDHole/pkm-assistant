@@ -47,7 +47,7 @@ Każdy `extends Modal` z Obsidiana (onOpen/onClose lifecycle). Promise-based res
 | `ApprovalModal.ts` | Approval/deny modal dla AccessGuard. Action type badge, content preview, deny reason. Eksportuje `requestApproval(app, action)` używane przez `core/security/ApprovalManager`. Dla `external.call` renderuje `action.externalArgs` jako JSON (indent 2, cięcie ~1500 znaków, „(bez argumentów)" gdy pusto) - user widzi, co dokładnie leci do cudzego serwera. |
 | `MCPServerEditorModal.ts` | Dodaj/edytuj ZEWNĘTRZNY serwer MCP (nazwa, id, transport stdio/http + pola, autostart, ostrzeżenie zaufania per transport). Zapis do ustawień pluginu (`data.json`), nie do vaulta - komenda/env/nagłówki niosą sekrety. Guzik „Sprawdź połączenie i pokaż narzędzia" (`ExternalMcpManager.previewTools` na configu z pól, bez zapisu; efemeryczne, nic nie rejestruje) + `enabled` zachowywane przy edycji (kill-switch usera nie odwraca się po edycji). Dostęp per agent żyje wyłącznie w `mcp_servers[]`. |
 | `ClaudeImportModal.ts` | Potwierdzenie importu serwerów MCP z Claude Desktop. Modal jest GŁUPI: dostaje gotowe wiersze (`buildImportRows` z `modules/tools/claudeConfigImport.ts`) i callback `onConfirm` - nie parsuje pliku, nie zna ustawień, nie zapisuje; cała logika siedzi u wołającego (`modules/tools/SettingsContent.ts`). Serwer, którego `id` już mamy w ustawieniach, ma checkbox odznaczony i zablokowany - import NIGDY nie nadpisuje istniejącej konfiguracji. |
-| `AgentPresentationModal.ts` | Karta prezentacji agenta - Crystal Soul styling, info read-only. |
+| `AgentPresentationModal.ts` | Karta prezentacji agenta - Crystal Soul styling, info read-only. Decyzja "czy shard jest wypełniony" (`isShardFilled`) mieszka w czystym `agentPresentationShards.ts` obok - wzór "prototype mixin" (patrz gotcha 8 niżej). |
 | `SendToAgentModal.ts` | Selektor agenta + textarea do wysłania wiadomości. |
 | `AgentDeleteModal.ts` | Confirmation modal usunięcia agenta z listą rzeczy do zniszczenia. Guard `agent.isBuiltIn` - dla wbudowanego agenta przycisk delete `disabled` (ochrona wielowarstwowa: modal + `HomeView` kosz ukryty + `AgentManager.deleteAgent` throw). |
 | `InlineCommentModal.ts` | Inline comments w czacie. |
@@ -166,13 +166,17 @@ CSS vars `--cs-user-color` (UI accents) + `--cs-category-color-rgb` (per-card). 
 
 Widok wiesza swoje odpięcia na `nav._currentCleanup` (np. Komunikator: `agentManager.on(...)` + budzik renderu 150 ms). Jeśli ten uchwyt woła WYŁĄCZNIE `_render()` przy przełączeniu widoku, zamknięcie panelu zostawia nasłuch do końca sesji Obsidiana, a ponowne otwarcie buduje NOWY `SidebarNav` - powielone nasłuchy mielą pracę wielokrotnie na odpiętym DOM-ie. `AgentSidebar.onClose()` woła `this.nav?.dispose?.()` - idempotentne, fail-soft. **Nowy widok sidebara rejestruje sprzątanie tą samą drogą** - nie dokładaj własnej ścieżki zamykania.
 
-### 6a. `SidebarNav._render()` łapie ODRZUCENIE async renderera, nie tylko synchroniczny throw
-
-`ViewRenderer` dopuszcza `void | Promise<void>` (dwa renderery w repo są `async`). `_render()` woła `renderFn(...)` w `try/catch` synchronicznym - to łapie throw sprzed zwrotu promisy, ale NIE jej odrzucenie (inaczej unhandled rejection, mijając przyjazny komunikat `sidebar.render_error`). Naprawa: jeśli wynik jest thenable, doczepiony `.catch()` woła TĘ SAMĄ ścieżkę błędu (`showRenderError`) co throw synchroniczny - ale dopiero po sprawdzeniu, że `this.stack[this.stack.length - 1] === current` (user mógł już zdążyć nawigować gdzie indziej, zanim odrzucenie dotarło - `_render()` samo w sobie zostaje synchroniczne, nic nie czeka na tę promisę). **Dokładając kolejny async renderer, nie zakładaj że rzucony wyjątek zawsze trafi do UI - to gwarantuje właśnie ten `.catch`, nie sam typ.**
-
 ### 6. Dead CSS jest pilnowane pin-listą, nie „każdy selektor ma wołacza"
 
 `modules/shell/deadCssPins.test.ts` pilnuje, że raz skasowane martwe selektory nie wracają + że żywe sąsiadki zostały na miejscu. Pełny strażnik typu „każdy selektor ma wołacza" dawałby fałszywe alarmy - w arkuszach CSS tego modułu jest mnóstwo klas budowanych szablonem (np. `cs-agent-grid--${col}col`).
+
+### 7. `SidebarNav._render()` łapie ODRZUCENIE async renderera, nie tylko synchroniczny throw
+
+`ViewRenderer` dopuszcza `void | Promise<void>` (dwa renderery w repo są `async`). `_render()` woła `renderFn(...)` w `try/catch` synchronicznym - to łapie throw sprzed zwrotu promisy, ale NIE jej odrzucenie (inaczej unhandled rejection, mijając przyjazny komunikat `sidebar.render_error`). Naprawa: jeśli wynik jest thenable, doczepiony `.catch()` woła TĘ SAMĄ ścieżkę błędu (`showRenderError`) co throw synchroniczny - ale dopiero po sprawdzeniu, że `this.stack[this.stack.length - 1] === current` (user mógł już zdążyć nawigować gdzie indziej, zanim odrzucenie dotarło - `_render()` samo w sobie zostaje synchroniczne, nic nie czeka na tę promisę). **Dokładając kolejny async renderer, nie zakładaj że rzucony wyjątek zawsze trafi do UI - to gwarantuje właśnie ten `.catch`, nie sam typ.**
+
+### 8. `AgentPresentationModal` importuje `obsidian` → decyzje idą do plików czystych obok (wzór "prototype mixin")
+
+`AgentPresentationModal.ts` (jak inne modale `extends Modal`) ciągnie `obsidian`, a transytywnie (przez `modules/komunikator/`) też `.css` - AVA (goły Node) nie potrafi go zaimportować (`ERR_UNKNOWN_FILE_EXTENSION` na pierwszym arkuszu stylów w łańcuchu). `isShardFilled` (`agentPresentationShards.ts`) - "czy shard info-grid jest wypełniony" - wyszła więc do czystego pliku obok, tym samym wzorem co `modules/chat` (patrz `modules/chat/CLAUDE.md`, sekcja "Pattern: prototype mixin"). Porównanie idzie po `String(value)`: `info.value` bywa liczbą (`stats.brainSize`) - `0 !== '0'` (liczba vs string) jest zawsze `true`, więc pusty Brain renderował się jako wypełniony niezależnie od realnej wartości. **Dokładając kolejną decyzję do modala tego typu, sprawdź najpierw, czy się da wydzielić czysto - test na regexie po źródle nie odróżnia poprawnej gałęzi od takiej, która zachowuje kształt kodu, ale kasuje skutek.**
 
 ---
 
