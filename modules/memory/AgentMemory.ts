@@ -253,10 +253,19 @@ export interface ActiveSessionEventInput {
     [key: string]: unknown;
 }
 
-/** Wiadomość okna czatu, którą `saveSession` dopisuje jako ogon. */
+/**
+ * Wiadomość okna czatu, którą `saveSession` dopisuje jako ogon.
+ *
+ * `tool_call_id`/`tool_calls` są opcjonalne i strukturalne (nie import z `modules/chat` -
+ * memory nie zależy od chatu) - `rw.messages` (`RollingMessage[]`) je niesie, a
+ * `_appendMessageAsEvent` musi je przekazać do `formatSessionEvent` (kod review MAJOR #3,
+ * ta sama utrata id co BUG C1, na DRUGIM pisarzu tego samego pliku).
+ */
 export interface ChatMessageLike {
     role?: string;
     content?: unknown;
+    tool_call_id?: string;
+    tool_calls?: unknown[];
 }
 
 /**
@@ -970,8 +979,15 @@ created: ${created}
         const text = Array.isArray(msg?.content)
             ? (msg.content as Array<{ text?: string; content?: string }>).map(c => c?.text || c?.content || '').filter(Boolean).join('\n')
             : String(msg?.content ?? '');
-        const event: { content: string; seq: number; role?: string } = { content: text, seq: this._nextSeq(path, content) };
+        const event: { content: string; seq: number; role?: string; tool_call_id?: string; tool_calls?: unknown[] } =
+            { content: text, seq: this._nextSeq(path, content) };
         if (role === 'system') event.role = 'system';
+        // Kod review MAJOR #3: SAMA gałąź co pisarz per-event w `chat_streaming.ts`
+        // (`_chatBeforeContinue`) - `tool_call_id` na `tool`, `tool_calls` na `assistant` TYLKO
+        // gdy realnie niepuste (pusta tablica jest truthy - bez tej bramki `formatSessionEvent`
+        // pisałby `**tool_calls:** []` na KAŻDEJ wiadomości asystenta z tego ogona).
+        if (typeof msg?.tool_call_id === 'string' && msg.tool_call_id) event.tool_call_id = msg.tool_call_id;
+        if (Array.isArray(msg?.tool_calls) && msg.tool_calls.length > 0) event.tool_calls = msg.tool_calls;
         const block = formatSessionEvent(ROLE_TO_EVENT_TYPE[role], event, timestamp);
         return content.endsWith('\n') ? content + block : `${content}\n${block}`;
     }
