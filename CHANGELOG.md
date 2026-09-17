@@ -5,7 +5,7 @@ All notable user-facing changes to PKM Assistant are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
-## 2.2.6 - unreleased
+## 2.2.6 - 2026-09-17
 
 Nine bug fixes from the post-release review, no new features.
 
