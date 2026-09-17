@@ -117,6 +117,29 @@ test('_render() zdejmuje _rendering mimo wyjątku w sprzątaniu poprzedniego wid
 });
 
 /**
+ * BUG D2: `ViewRenderer` dopuszcza `Promise<void>` (dwa renderery w repo są `async`), ale ten
+ * `try/catch` w `_render()` jest SYNCHRONICZNY - odrzucenie promisy z async renderera omija go
+ * i nigdy nie trafia do przyjaznego `sidebar.render_error`, zamiast tego staje się unhandled
+ * rejection. Naprawa ma dawać TĘ SAMĄ treść w UI co throw synchroniczny (test wyżej).
+ */
+test('_render() łapie odrzucenie async renderera i pokazuje TEN SAM render_error co throw synchroniczny', async t => {
+    const container = makeFakeEl();
+    const nav = new SidebarNav(container as unknown as HTMLElement, fakePlugin);
+    nav.register('asyncBoom', async () => { throw new Error('async widok padł'); });
+
+    nav.push('asyncBoom');
+    // Odrzucenie leci po microtaskach — daj promisie szansę się rozwiązać.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setImmediate(resolve));
+
+    const content = container.children.find(c => c.cls === 'sidebar-view-content');
+    t.truthy(content, 'kontener widoku istnieje');
+    const errorP = content?.children.find(c => c.tag === 'p' && c.cls === 'agent-error');
+    t.is(errorP?.text, 'This view failed to load. Go back and try again.',
+        'odrzucenie async renderera ma trafić do TEGO SAMEGO render_error co throw synchroniczny');
+});
+
+/**
  * Przemianowanie agenta: wpisy stosu trzymają `{ agentName }` z chwili `push()`, więc bez
  * przepisania ich parametrów `refresh()` po rename'ie rysuje profil po STAREJ nazwie
  * i user dostaje „Nie znaleziono agenta". Konsument: `AgentSidebar` na evencie `agent:renamed`.
