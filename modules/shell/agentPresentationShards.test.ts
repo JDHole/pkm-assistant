@@ -1,5 +1,5 @@
 import test from 'ava';
-import { isShardFilled } from './agentPresentationShards.js';
+import { brainShardValue, isShardFilled } from './agentPresentationShards.js';
 
 const GLOBAL_LABEL = 'globalny';
 
@@ -29,4 +29,25 @@ test('etykieta "globalny" (model) NIE jest wypełniona', t => {
 
 test('nazwa modelu realna JEST wypełniona', t => {
     t.true(isShardFilled('claude-opus-4', GLOBAL_LABEL));
+});
+
+// ── Smoke 2.2.6 (2026-09-17): nowy agent pokazywał Brain "116" i świecił ──
+// `stats.brainSize` to liczba ZNAKÓW `brain.md`, a nowy agent ma tam szablon z nagłówkami
+// (nigdy 0), więc shard był wypełniony przy pustej pamięci. Shard pokazuje liczbę notatek
+// w `brain/` (`brainNoteCount`) - szablon indeksu nie jest wiedzą agenta.
+test('nowy agent: szablon brain.md (116 znaków), zero notatek -> Brain "0", shard pusty', t => {
+    const value = brainShardValue({ brainSize: 116, brainNoteCount: 0 });
+    t.is(value, '0');
+    t.false(isShardFilled(value, GLOBAL_LABEL));
+});
+
+test('agent z notatkami w brain/ -> Brain pokazuje ich liczbę, shard wypełniony', t => {
+    const value = brainShardValue({ brainSize: 8246, brainNoteCount: 42 });
+    t.is(value, '42');
+    t.true(isShardFilled(value, GLOBAL_LABEL));
+});
+
+test('brak statystyk (agent bez pamięci) -> Brain "0"', t => {
+    t.is(brainShardValue(null), '0');
+    t.is(brainShardValue(undefined), '0');
 });

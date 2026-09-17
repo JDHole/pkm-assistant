@@ -23,7 +23,7 @@ Nine bug fixes from the post-release review, no new features.
 - **A new chat clears the todo panel** and removes the discarded session's todo file.
 - **Token counter** no longer throws for an agent without a model.
 - **Sidebar views and artifact summon** route async failures to the friendly error path.
-- **Brain shard** in the agent presentation renders empty for an empty memory.
+- **Brain shard** in the agent presentation shows the brain note count; a new agent shows 0 and stays dim.
 
 Known limits: `preferred_tools` and `default_permissions.mcp` are legacy fields with no effect.
 

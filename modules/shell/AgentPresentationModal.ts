@@ -12,7 +12,7 @@ import { resolveMainModelForForm } from '../../modules/agents/index.js';
 import type { AgentManager } from '../../modules/agents/index.js';
 import { t } from '../../core/i18n/index.js';
 import type { PluginApi } from '../../core/index.js';
-import { isShardFilled } from './agentPresentationShards.js';
+import { brainShardValue, isShardFilled } from './agentPresentationShards.js';
 
 /** Plugin widziany przez ten modal: tylko `agentManager` ponad bazowy `PluginApi`. */
 interface AgentPresentationModalPlugin extends PluginApi {
@@ -113,13 +113,12 @@ export class AgentPresentationModal extends Modal {
             { label: t('profile.overview.model'), value: mainModel || globalLabel },
             { label: 'L1', value: String(stats?.l1Count ?? 0) },
             { label: 'L2', value: String(stats?.l2Count ?? 0) },
-            { label: 'Brain', value: stats?.brainSize ?? '0' },
+            { label: 'Brain', value: brainShardValue(stats) },
         ]) {
             const filled = isShardFilled(info.value, globalLabel);
             const shard = infoGrid.createDiv({ cls: `cs-shard ${filled ? 'cs-shard--filled' : 'cs-shard--empty'}` });
-            // `info.value: string | number` - `Brain` (stats.brainSize) jest liczbą, reszta
-            // stringiem; `String()` zamiast `as` - DOM i tak konwertuje niejawnie, ale tekst ma
-            // być prawdziwym stringiem, nie kłamstwem typu.
+            // `Brain` = liczba notatek w `brain/` (`brainShardValue`), nie znaki `brain.md` - szablon
+            // nowego agenta ma ponad 100 znaków i shard świecił przy pustej pamięci.
             shard.createDiv({ cls: 'cs-shard__value', text: String(info.value) });
             shard.createDiv({ cls: 'cs-shard__main-label', text: info.label });
         }
