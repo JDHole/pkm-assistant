@@ -229,8 +229,8 @@ export class SidebarNav {
                     // powrotu), ale JEJ ODRZUCENIE ma trafić do TEGO SAMEGO `render_error` co
                     // throw synchroniczny, zamiast uciec jako unhandled rejection.
                     const result = renderFn(content, this.plugin, this, current.params);
-                    if (result && typeof (result as Promise<void>).then === 'function') {
-                        (result as Promise<void>).catch((e: unknown) => showRenderError(e, 'async'));
+                    if (result && typeof result.then === 'function') {
+                        result.catch((e: unknown) => showRenderError(e, 'async'));
                     }
                 } catch (e) {
                     showRenderError(e, 'sync');
