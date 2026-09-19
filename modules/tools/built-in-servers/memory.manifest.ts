@@ -1,7 +1,7 @@
 export default {
     name: 'memory',
     version: 'plugin',
-    description: 'Hierarchical agent memory (brain + sessions + summaries L1/L2/L3). Read/list/search memory via read/list/search (scope=memory).',
+    // Opis dla UI: resolveServerDescription('memory') → t('mcp.server.memory.desc') (index.ts).
     icon: 'brain-circuit',
     tools: [
         'memory_save', 'memory_delete'

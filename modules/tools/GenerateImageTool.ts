@@ -59,49 +59,23 @@ export function createGenerateImageTool() {
 
     return {
         name: 'generate_image',
-        description: `Wygeneruj obraz na podstawie opisu tekstowego.
-
-JAK DZIALA:
-- Wysylasz opis (prompt) → dostajesz wygenerowany obraz zapisany w vaultcie
-- Obslugiwane platformy: ${platformNames}
-- Platforma jest konfigurowalna w ustawieniach pluginu
-
-KIEDY UZYWAC:
-- User prosi o wygenerowanie obrazu, grafiki, ilustracji
-- User mowi: "wygeneruj obraz", "zrob grafike", "narysuj", "create image"
-- Potrzebujesz wizualizacji do notatki
-- User chce thumbnail, ikone, ilustracje do artykulu
-
-JAK FORMULOWAC PROMPTY:
-- Pisz po angielsku (lepsze wyniki na wiekszosci platform)
-- Badz szczegolowy: "A serene mountain landscape at sunset with purple clouds" > "gory"
-- Opisz styl jesli wazny: "digital art", "oil painting", "photorealistic", "minimalist"
-
-ROZMIARY:
-- 1024x1024 (kwadrat, domyslny)
-- 1024x1792 (portret)
-- 1792x1024 (krajobraz)
-
-UWAGI:
-- Wymaga skonfigurowanej platformy i klucza API w ustawieniach
-- Obraz jest automatycznie zapisywany do Attachments/generated/ (albo ustawionego folderu — Ustawienia -> Image Gen; .pkm-assistant/ jest niedostepne dla tego narzedzia)
-- Generowanie moze trwac 5-30 sekund (zalezne od platformy)`,
+        description: t('mcp.generate_image.desc', { platforms: platformNames }),
 
         inputSchema: {
             type: 'object',
             properties: {
                 prompt: {
                     type: 'string',
-                    description: 'Opis obrazu do wygenerowania. Najlepiej po angielsku, szczegolowy.'
+                    description: t('mcp.generate_image.param.prompt')
                 },
                 size: {
                     type: 'string',
                     enum: ['1024x1024', '1024x1792', '1792x1024'],
-                    description: 'Rozmiar obrazu. Domyslnie 1024x1024 (kwadrat).'
+                    description: t('mcp.generate_image.param.size')
                 },
                 style: {
                     type: 'string',
-                    description: 'Styl obrazu (np. vivid, natural, digital-art). Opcjonalny.'
+                    description: t('mcp.generate_image.param.style')
                 },
             },
             required: ['prompt'],

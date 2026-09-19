@@ -1,7 +1,7 @@
 export default {
     name: 'vault',
     version: 'plugin',
-    description: 'Vault file operations + unified search (keyword/semantic hybrid via RRF, where filters).',
+    // Opis dla UI: resolveServerDescription('vault') → t('mcp.server.vault.desc') (index.ts).
     icon: 'folder',
     tools: [
         'read', 'write', 'list',

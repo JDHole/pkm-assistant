@@ -1,7 +1,7 @@
 export default {
     name: 'web',
     version: 'plugin',
-    description: 'Web search (Google/Brave/Bing) + page reader. Wymaga klucza API providera.',
+    // Opis dla UI: resolveServerDescription('web') → t('mcp.server.web.desc') (index.ts).
     icon: 'globe',
     tools: ['web_search', 'web_read'],
     requires_permission: ['web_search'],

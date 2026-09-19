@@ -1,5 +1,5 @@
 import test from 'ava';
-import { BUILTIN_MANIFESTS, resolveBuiltinManifests, getBuiltinManifest } from './built-in-servers/index.js';
+import { BUILTIN_MANIFESTS, resolveBuiltinManifests, getBuiltinManifest, resolveServerDescription } from './built-in-servers/index.js';
 import { ServerLoader } from './ServerLoader.js';
 
 const emptyVault = () => ({ adapter: { exists: async () => false, list: async () => ({ folders: [] }) } });
@@ -15,7 +15,10 @@ test('every built-in manifest has required fields', t => {
     for (const m of BUILTIN_MANIFESTS) {
         t.truthy(m.name, `manifest missing name`);
         t.truthy(m.version, `${m.name}: missing version`);
-        t.truthy(m.description, `${m.name}: missing description`);
+        // `description` was dropped from the manifest itself (i18n bug: hardcoded literal was
+        // wrong-language for half the servers) — `resolveServerDescription(name)` is the
+        // equivalent live check, same as what ServerLoader/ServerManager call at read time.
+        t.truthy(resolveServerDescription(m.name), `${m.name}: missing resolvable description`);
         t.true(Array.isArray(m.tools) && m.tools.length > 0, `${m.name}: tools must be non-empty array`);
         t.is(m.source, 'built-in');
         t.is(m.removable, false);
