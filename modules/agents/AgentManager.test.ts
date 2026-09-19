@@ -125,3 +125,18 @@ test('createAgent zapisuje ścieżkę pliku na agencie (bez tego rename osieroca
     t.notRegex(body, /(?<!filePath = )await this\.loader\.saveAgent\(agent\)/,
         'drugie, „gołe" wywołanie saveAgent w createAgent znowu gubiłoby ścieżkę');
 });
+
+// Guzik „+" zawsze nadawał nazwę Agent1, a rename nie przenosił `agent1-prep` na nowy slug -
+// więc kolejny Agent1 (po zmianie nazwy poprzedniego) dostawał TEGO SAMEGO suba, dzielonego
+// przez dwóch agentów. Decyzja: nowy agent startuje z PUSTĄ Ekipą (`_subAgents = []`), zero
+// auto-tworzenia suba na dysku - delegacja ad-hoc i tak działa przez generycznego workera
+// (`pkm-sub`), a własne suby user odlewa z szablonów (Zaplecze).
+test('createAgent nie tworzy automatycznie prep sub-agenta', t => {
+    const body = methodBodyOf(source, 'createAgent');
+    t.true(body.length > 0, 'nie znalazłem createAgent w AgentManager.ts — zmieniła się sygnatura?');
+
+    t.notRegex(body, /createPrepSubAgent/,
+        'createAgent nie może wołać createPrepSubAgent — nowy agent startuje bez subów');
+    t.notRegex(body, /_subAgents\.push\(/,
+        'createAgent nie może dopisywać niczego do _subAgents — Ekipa świeżego agenta zostaje pusta');
+});
