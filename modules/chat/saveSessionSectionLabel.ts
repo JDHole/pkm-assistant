@@ -21,7 +21,7 @@ export function sectionDisplayLabel(section: string | undefined): string {
         case '## Projekty i referencje': return t('modal.save_session.section.projects');
         // Nieznany adres (ręczna sekcja usera, przyszły typ) pokazujemy dosłownie - lepszy surowy
         // nagłówek niż etykieta, która kłamie, dokąd trafi notatka.
-        default: return (section || '').replace(/^#+\s*/, '');
+        default: return (section || '').trim().replace(/^#+\s*/, '');
     }
 }
 

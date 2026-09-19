@@ -34,6 +34,7 @@ test.serial('nieznany adres pokazuje się dosłownie, nie pod cudzą etykietą',
     t.teardown(() => setLocale('en'));
     setLocale('en');
     t.is(sectionDisplayLabel('## AKTYWNY TEST'), 'AKTYWNY TEST');
+    t.is(sectionDisplayLabel('  ## AKTYWNY TEST '), 'AKTYWNY TEST');
 });
 
 test.serial('nazwa notatki: podana zostaje, pusta dostaje zastępczą w języku interfejsu', t => {
