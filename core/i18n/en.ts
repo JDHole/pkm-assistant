@@ -2484,11 +2484,11 @@ export const en: Record<string, string> = {
   // (do-akceptacji/uwagi/zaakceptowany/zamkniety/w-trakcie/gotowy/szkic) in every UI language.
   // See modules/artifacts/artifactStatusLabel.ts.
   'artifact.status.do_akceptacji': 'Awaiting approval',
-  'artifact.status.uwagi': 'Changes requested',
+  'artifact.status.uwagi': 'Sent back with notes',
   'artifact.status.zaakceptowany': 'Approved',
   'artifact.status.zamkniety': 'Closed',
   'artifact.status.w_trakcie': 'In progress',
-  'artifact.status.gotowy': 'Ready',
+  'artifact.status.gotowy': 'Done',
   'artifact.status.szkic': 'Draft',
   'artifact.summon.header': '📄 Artifact "{{tytul}}" ({{id}}) — user: {{akcja}}',
   'artifact.summon.action.approve': 'approved the plan — carry out the steps',
