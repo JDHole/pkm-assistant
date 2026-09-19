@@ -10,6 +10,7 @@
 import { t } from '../../core/i18n/index.js';
 import { computeArtifactButtons } from './artifactButtons.js';
 import { summonAgentForArtifact } from './artifactSummon.js';
+import { artifactStatusLabel } from './artifactStatusLabel.js';
 import { log } from '../../core/utils/Logger.js';
 import type { ArtifactType, ArtifactPatchOp, ArtifactPatchError, ThinArtifact } from './types.js';
 
@@ -131,10 +132,11 @@ export function registerArtifactBlocks(plugin: ArtifactBlocksPlugin): void {
         const buttons = computeArtifactButtons(thin.status as string, type?.statusy);
 
         if (buttons.length === 0) {
-            // Domknięty artefakt — pokazujemy sam status, bez akcji.
+            // Domknięty artefakt — pokazujemy sam status, bez akcji. Etykieta idzie za językiem
+            // interfejsu (artifactStatusLabel) — surowy identyfikator zostaje TYLKO we frontmatterze.
             root.createSpan({
                 cls: 'pkm-artefakt-block__status',
-                text: t('artifact.block.status', { status: thin.status || '' }),
+                text: t('artifact.block.status', { status: artifactStatusLabel(thin.status) }),
             });
             return;
         }
