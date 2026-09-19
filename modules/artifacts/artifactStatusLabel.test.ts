@@ -1,6 +1,7 @@
 import test from 'ava';
 import { setLocale } from '../../core/i18n/index.js';
 import { artifactStatusLabel } from './artifactStatusLabel.js';
+import { DEFAULT_STATUSY, BUILTIN_PLAN_TYPE_NAME, BUILTIN_NOTATKA_TYPE_NAME, BUILTIN_RAPORT_TYPE_NAME, builtinTypeContent } from './ArtifactTypeLoader.js';
 
 // Status artefaktu (`do-akceptacji`/`uwagi`/`zaakceptowany`/`zamkniety`/`w-trakcie`/`gotowy`/
 // `szkic`) jest identyfikatorem silnika - w PLIKU i w PROMPCIE zostaje bez zmian, w każdym
@@ -12,11 +13,11 @@ test.serial('angielski interfejs: siedem statusów silnika dostaje angielskie et
     t.teardown(() => setLocale('en'));
     setLocale('en');
     t.is(artifactStatusLabel('do-akceptacji'), 'Awaiting approval');
-    t.is(artifactStatusLabel('uwagi'), 'Changes requested');
+    t.is(artifactStatusLabel('uwagi'), 'Sent back with notes');
     t.is(artifactStatusLabel('zaakceptowany'), 'Approved');
     t.is(artifactStatusLabel('zamkniety'), 'Closed');
     t.is(artifactStatusLabel('w-trakcie'), 'In progress');
-    t.is(artifactStatusLabel('gotowy'), 'Ready');
+    t.is(artifactStatusLabel('gotowy'), 'Done');
     t.is(artifactStatusLabel('szkic'), 'Draft');
 });
 
@@ -51,4 +52,23 @@ test.serial('pusty / null / undefined status pokazuje myślnik, nie pusty string
     t.is(artifactStatusLabel(undefined), '—');
     t.is(artifactStatusLabel(''), '—');
     t.is(artifactStatusLabel('   '), '—');
+});
+
+// Reguła z CLAUDE.md modułu: nowy status wbudowanego typu = nowy `case` + klucze w obu
+// słownikach. Bez strażnika status dopisany do `statusy:` w tekście fabrycznym przechodzi
+// wszystkie bramki, a user widzi surowy token. Źródłem listy są SAME teksty fabryczne (PL i EN)
+// plus domyślne statusy typu usera - nie ręcznie utrzymywana kopia.
+test.serial('każdy status z tekstów fabrycznych typów i z DEFAULT_STATUSY ma etykietę', t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+    const statuses = new Set<string>(DEFAULT_STATUSY);
+    for (const name of [BUILTIN_PLAN_TYPE_NAME, BUILTIN_NOTATKA_TYPE_NAME, BUILTIN_RAPORT_TYPE_NAME] as const) {
+        for (const locale of ['pl', 'en']) {
+            const line = builtinTypeContent(name, locale).split(/\r?\n/).find(l => l.startsWith('statusy:'));
+            t.truthy(line, `${name}/${locale}: brak linii statusy: w tekście fabrycznym`);
+            for (const s of (line || '').replace(/^statusy:\s*\[|\]\s*$/g, '').split(',')) statuses.add(s.trim());
+        }
+    }
+    t.deepEqual([...statuses].sort(), ['do-akceptacji', 'gotowy', 'szkic', 'uwagi', 'w-trakcie', 'zaakceptowany', 'zamkniety']);
+    for (const s of statuses) t.not(artifactStatusLabel(s), s, `status "${s}" nie ma etykiety - user zobaczy surowy identyfikator`);
 });

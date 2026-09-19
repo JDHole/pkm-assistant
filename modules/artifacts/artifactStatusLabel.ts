@@ -7,7 +7,7 @@
  * MODEL (parametr `status` narzędzia `artifact_list`). W PLIKU, W PROMPCIE i przy KAŻDEJ logice/
  * porównaniu status zostaje surowy — w KAŻDYM języku interfejsu. Ta funkcja NIE tłumaczy tej
  * wartości — daje jej etykietę wyłącznie tam, gdzie status rysuje SAM PLUGIN (blok w notatce,
- * panel profilu agenta), żeby anglojęzyczny user nie widział polskiego tokenu. Properties i Bases
+ * panel profilu agenta, picker artefaktów pod `@` w czacie), żeby anglojęzyczny user nie widział polskiego tokenu. Properties i Bases
  * rysuje Obsidian wprost z surowego YAML — poza zasięgiem tej funkcji, świadomie nie ruszane.
  *
  * Czysty plik (zero `obsidian`/DOM), zero konsumenta narusza to przez import z barrela.
