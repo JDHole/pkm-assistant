@@ -583,7 +583,6 @@ export class AgentManager {
         // Availability flags
         const hasResearcher = researcherList.length > 0;
         const hasStrategist = strategistList.length > 0;
-        const defaultPrepName = agent.prepSubAgent?.name || agent.defaultSubAgent?.name || null;
 
         const pkm = this.settings?.pkmAssistant || {};
 
@@ -637,7 +636,6 @@ export class AgentManager {
             hasResearcher,
             hasStrategist,
             hasDelegates,
-            defaultPrepName,
             promptDefaults,
             // Named folder groups - PromptBuilder._buildEnvironment expands `{group}`
             // references in focus_folders to their concrete folders at build time.
@@ -809,7 +807,8 @@ export class AgentManager {
         const memory = await this._initializeMemoryForAgent(agent);
         this.agentMemories.set(agent.name, memory);
 
-        // Create playbook.md + vault_map.md for the new agent
+        // Create vault_map.md for the new agent (playbook.md doesn't exist - Playbook Builder
+        // was deleted, see modules/onboarding/CLAUDE.md).
         // TS-boundary: same AgentFocusFolder vs VaultMapFocusFolder path-optionality mismatch as
         // above (initialize()).
         await this.playbookManager.ensureStarterFiles([agent] as VaultMapAgent[]);
