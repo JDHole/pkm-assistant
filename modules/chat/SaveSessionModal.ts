@@ -1,5 +1,6 @@
 import { Modal, type App } from 'obsidian';
 import { t } from '../../core/i18n/index.js';
+import { noteDisplayName, sectionDisplayLabel } from './saveSessionSectionLabel.js';
 
 type ModalState = 'loading' | 'proposals';
 type SaveAction = 'archive' | 'archive_close' | 'archive_new' | 'cancel';
@@ -288,7 +289,7 @@ export class SaveSessionModal extends Modal {
         }
         for (const note of notes) {
             const item = this._itemBox(wrap);
-            this._itemHeader(item, note.name || 'Notatka', note.section || '## Bieżące', (checked) => {
+            this._itemHeader(item, noteDisplayName(note.name), sectionDisplayLabel(note.section), (checked) => {
                 note.accepted = checked;
             }, note.accepted !== false);
 

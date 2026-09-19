@@ -429,7 +429,8 @@ Flow:
   liczy się dopiero przy wywołaniu - dlatego funkcja jest bezpieczna).
   **Co NIE tłumaczy się razem z prozą** (to ADRESY, wpisane na sztywno w `BrainIndex.ts` /
   `SaveSessionWorkflow.ts` / parserach): nagłówki `## Bieżące`, `## User`, `## Preferencje`,
-  `## Workflow`, `## Projekty i referencje`, sekcje „Na teraz: User" / „Na teraz: Środowisko",
+  `## Workflow`, `## Projekty i referencje`, sekcje „Na teraz: User" / „Na teraz: Środowisko" (w PLIKU i w PROMPCIE zostają surowe; okno review
+  `/save session` pokazuje userowi etykietę w języku UI - `modules/chat/saveSessionSectionLabel.ts`),
   klucze JSON (`brain_updates`, `new_notes`, `na_teraz.*`, `merges`, `deletions`, `target_*`,
   `merged_content`, `lessons_extracted`), wartości `type` i token `{{LEVEL}}`. Nagłówki `##`
   W WYNIKU promptu `summary` (Kluczowe tematy / Key topics …) nikt nie parsuje - te SIĘ

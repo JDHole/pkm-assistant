@@ -15,6 +15,7 @@ modules/chat/
 ├── chat_view.js                   # ChatView (Obsidian ItemView), koordynator. `displayText` to getter przez `t('chat.view_title')` („Czat"/„Chat") - napis „PKM Assistant" powtarzał się z widokiem notatek wydania i dawał w palecie dwa identyczne wpisy (paleta dokleja nazwę pluginu sama)
 ├── consolidationRunner.js         # kontroler przebiegu konsolidacji pamięci (klej memory ↔ modal/pasek/notice)
 ├── SaveSessionModal.js            # `/save session` - review propozycji notatek brain/
+├── saveSessionSectionLabel.js     # etykieta sekcji brain.md w oknie review w JĘZYKU UI (adres `## Bieżące` zostaje w pliku - parsują go `modules/memory`; tu tylko nazwa dla oczu usera); pure, test obok
 ├── SessionCloseModal.js           # zamknięcie sesji - archive / discard
 ├── OpenSessionModal.js            # otwórz starą sesję - continue / compress / fresh
 ├── ConsolidationProgressModal.js  # nieblokujące okno PRZEBIEGU konsolidacji
