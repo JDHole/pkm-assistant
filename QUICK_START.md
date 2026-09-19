@@ -300,7 +300,6 @@ Each agent has its own memory:
 ### How it works in practice
 - Agent **always** sees your brain.md in the system prompt
 - Agent **can search** memory semantically (tools: `memory_brain`, `memory_sessions`, `memory_summaries`)
-- On a new session: sub-agent automatically prepares context (auto-prep)
 
 ---
 
@@ -311,8 +310,7 @@ Each agent has its own memory:
 An agent can delegate tasks to sub-agents - specialized versions running on cheaper AI models:
 
 - **Generic worker** - delegating without naming a specific sub-agent runs a built-in "pkm-sub" worker (search/list/read/web search - a cheap, researcher-level toolset). Always available; shown as a read-only card in Backstage.
-- **`<agent-name>-prep`** - a new custom agent automatically gets one sub-agent of its own with this name, used to gather context at the start of a new session (auto-prep).
-- Build additional custom sub-agents yourself with your own tools and instructions (Agent profile → Team, or Backstage → Sub-agents).
+- Build custom sub-agents yourself with your own tools and instructions (Agent profile → Team, or Backstage → Sub-agents).
 - Visible as "Sub-agent working..." blocks in chat.
 
 ### MCP Servers (extensible tools)
