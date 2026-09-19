@@ -116,7 +116,7 @@ Archetyp i Rola nie istnieją jako osobne byty - nie sterują niczym, nawet jeś
 - `modules/memory/` (AgentMemory per agent)
 - `modules/skills/` (SkillLoader per agent)
 - `modules/tools/` (`ToolRegistry.filterByAgent` po osi `disabled_tools`)
-- `modules/sub-agents/` (nowy agent dostaje jeden `<slug>-prep` sub-agent przez `createPrepSubAgent`)
+- `modules/sub-agents/` (`SubAgentLoader` per agent - nowy agent startuje z pustą Ekipą, zero auto-tworzonego suba)
 - `obsidian` (Vault.adapter dla scan agentów)
 
 **Importowany przez:**
@@ -174,7 +174,7 @@ Zapis do `<nazwa>_overrides.yaml` jest **diffem** względem fabrycznej konfigura
 - **Folder pamięci i skrzynka komunikatora** przenoszą się create-before-delete (kopia → kasacja starego), przed zapisem YAML-a; pad kopiowania przerywa cały rename, agent/dysk/mapy zostają nietknięte. Przenosiny skrzynki są best-effort po potwierdzonym sukcesie YAML+pamięci - pad nie cofa rename'u (agent i pamięć są już bezpieczne), zwrotka niesie `inboxMoveFailed: true`.
 - **Po sukcesie:** przekluczowanie map runtime (`agents`/`agentMemories`) + reinicjalizacja `AgentMemory` pod nowym kluczem + event `agent:renamed` (`{ from, to }`; konsument: `AgentSidebar`, przepisuje nazwę w stosie nawigacji).
 - **Stary YAML kasuje się po `agent.filePath`**, a gdy ten jest pusty - po ścieżce odtworzonej ze slugu starej nazwy. Druga warstwa jest po incydencie 2.2.5: `createAgent` gubił zwrotkę `saveAgent`, więc agent utworzony guzikiem „+" chodził z `filePath: null` do końca sesji i rename zostawiał `agent1.yaml` obok `atlas.yaml` (ten sam brak psuł `AgentLoader.deleteAgent`, który bez `filePath` wraca `false`). Dziś `createAgent` przypisuje ścieżkę od razu.
-- **Świadomie nie przenosi się:** prefiksy sub-agentów (auto-tworzony `<stary-slug>-prep` zostaje w Ekipie i na dysku pod starą nazwą - przeniesienie wymagałoby `renameSubAgent` w `modules/sub-agents` i ruszania folderu wiedzy suba, czego 2.2.5 świadomie nie robi), reguły „Zawsze zezwalaj" w `ApprovalManager` (kluczowane starą nazwą), zakładki otwarte w czacie (trzymają starą nazwę do ręcznego odświeżenia).
+- **Świadomie nie przenosi się:** prefiksy sub-agentów (suby z prefiksem starego slugu - np. odlane z szablonu, albo `<stary-slug>-prep` utworzony automatycznie przez wersje <= 2.2.6 - zostają w Ekipie i na dysku pod starą nazwą; przeniesienie wymagałoby `renameSubAgent` w `modules/sub-agents` i ruszania folderu wiedzy suba, czego się świadomie nie robi), reguły „Zawsze zezwalaj" w `ApprovalManager` (kluczowane starą nazwą), zakładki otwarte w czacie (trzymają starą nazwę do ręcznego odświeżenia).
 - `updateAgent(name, updates)` wydziela `updates.name` przed resztą pól: gdy nazwa się zmienia, najpierw woła `renameAgent` - odmowa/pad przerywa cały zapis (żadne inne pole z tego samego „Zapisz profil" też nie ląduje), nie tylko pomija `name`.
 
 ---
