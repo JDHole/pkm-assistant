@@ -128,6 +128,8 @@ Nie ma sandboxa custom-JS - user nie ładuje `.js` z vaulta. Zewnętrzne serwery
 - **Argumenty w approvalu:** `MCPClient._extractToolContext` dokłada do `approvalContext` pole `externalArgs` (kopia argumentów bez znaczników wewnętrznych), a `ApprovalModal` renderuje je jako JSON - user widzi, co dokładnie leci do cudzego serwera.
 - **Filtr znaczników wewnętrznych** (`ExternalMcpManager.stripInternalArgs`) jest jedną, wspólną funkcją - używają jej i wysyłka, i podgląd w approvalu.
 
+- **`new Function` w bundlu pochodzi z Ajv wewnątrz SDK MCP, nie z naszego kodu.** W `dist/main.js` jest dokładnie jedno wystąpienie (kompilator schematów Ajv); `Client` z `@modelcontextprotocol/sdk` bez opcji `jsonSchemaValidator` bierze domyślnie `AjvJsonSchemaValidator` i używa go WYŁĄCZNIE do walidacji `outputSchema`/`structuredContent` wyników narzędzi zewnętrznych serwerów. Własnych `eval`/`new Function` plugin nie ma - pilnuje tego `core/catalog_policy_guard.test.ts` (skanuje źródła, nie bundel). Wpis `ajv` w `dependencies` to pin dedupu wersji, nie import (`core/dead_code_zasieg.test.ts`). Scorecard katalogu Obsidiana rekomenduje usunięcie tego wystąpienia; droga istnieje (`jsonSchemaValidator: new CfWorkerJsonSchemaValidator()` + dowód grepem po bundlu), ale wymaga nowej zależności `@cfworker/json-schema` - świadomie NIEzrobione z marszu, decyzja i eksperyment żyją w inicjatywie właściciela projektu („Ajv new Function poza bundlem").
+
 Bramka `.pkm-assistant/**` + No-Go + `sanitizePath` w prymitywach vaultowych działa niezależnie od tego wszystkiego.
 
 ---
