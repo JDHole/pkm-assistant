@@ -1,37 +1,43 @@
-# PKM Assistant 2.2.6
+# PKM Assistant 2.2.7
 
-**Maintenance release** - PKM Assistant 2.2.6
+**Maintenance release** - PKM Assistant 2.2.7
 
-Nine bug fixes from the post-release review, no new features. Every fix ships with a regression
-test that was red before the change and green after it.
+**In plain words.** Two things were getting in the way. First, every time you created a new
+agent, the plugin quietly added a helper sub-agent to its team that you never asked for - and
+with similarly named agents those helpers could get mixed up. That no longer happens: a new
+agent starts with an empty team, and you add helpers only when you want them. Second, if you
+use the plugin in one language, bits of the other language kept leaking through: descriptions
+of built-in tool servers, image tools, the window where you review what an agent wants to
+remember, and the status of plans and notes. Those places now speak the language you picked in
+settings. No new features, nothing to set up after the update.
 
-Highlights:
+What changed, in detail:
 
-- **Restarting Obsidian no longer loses tool calls from the restored chat.** The active session
-  file now keeps the id of every tool call and its result, so the model sees the tool results
-  from before the restart instead of orphan warnings in the log. A tool that returned an empty
-  result is restored too, so the provider never sees an unanswered tool call.
-- **Session secrets stay out of the log file.** A `Set-Cookie` or `cookie` header echoed by a
-  proxy inside a provider error is masked in the plugin log like API keys already were.
-- **Artifacts with a hand-typed numeric id** (`pkm-artefakt: 20260911`) are found again by the
-  registry, the disk fallback and the agent's read tool.
-- **"Export profile" copies the agent's YAML** instead of `[object Object]`.
-- **Regenerating a message that carried an attachment** pastes the message text into the input
-  box instead of `[object Object]`.
-- **A new chat clears the todo panel** left by the discarded conversation and removes its
-  one-off todo file.
-- **The token counter no longer crashes** for an agent with no model configured.
-- **A failing sidebar view shows the friendly error** instead of an unhandled rejection in the
-  console; the same for sending an artifact into the chat.
-- **The Brain shard in the agent presentation** shows the number of notes in the agent's
-  long-term memory, so a brand-new agent shows 0 and stays dim instead of lighting up with the
-  size of its empty memory template.
+- **A new agent starts with an empty team.** The automatic "prep" sub-agent is gone, together
+  with its starter texts and the promises about it in the vault map starter, the health-check
+  skill and the quick start guide. Sub-agents you already have are not touched.
+- **Built-in MCP server descriptions and the image tools** (`generate_image`,
+  `add_text_to_image`: descriptions, parameters, the save-folder error, the invalid output path
+  error, the generated image note and its date) follow the interface language.
+- **The save-session review window** names the agent's memory sections in the interface
+  language. The section headings inside the memory file itself stay as they were.
+- **Artifact statuses** are shown in the interface language in the note block, the agent
+  profile and the `@` picker. The value stored in the file stays a fixed identifier, and the
+  agent is told so.
+- **Memory note types** in the consolidation review are shown in the interface language, with
+  the same wording as the save-session window.
+- **"What's new" always ends with the author's note**, the same one as in the README.
+- The Filesystem server preset shows a `<PATH>` placeholder instead of a sample path.
+- Internal hardening: the "current context" memory section is normalized in one place before
+  a save-session update is applied.
 
-Known limits: `preferred_tools` in an agent's YAML has no effect and no editor in the UI; it is
-a legacy field kept for compatibility. The `mcp` key under `default_permissions` has no effect
-either; use the tool switches (`disabled_tools`) to keep an agent away from MCP servers.
+Every fix ships with a regression test that was red before the change and green after it.
 
-Upgrading from 2.2.5: no migration, no changes to settings. **Do not downgrade** to 2.2.5 or
-older with active chat sessions written by 2.2.6: the older plugin reads the new session file
-fields as text, and archiving such a session with an older build corrupts its transcript.
-Archive or discard active sessions before a downgrade.
+Known limits: Obsidian's own Properties and Bases views draw artifact statuses straight from
+the file, so they still show the stored identifier, not the translated label. Memory section
+headings inside an agent's memory file stay in the language they were created in. Reasons for
+a refused vault path are still in English only.
+
+Upgrading from 2.2.6: no migration, no changes to settings. The downgrade warning from 2.2.6
+still stands: **do not downgrade** below 2.2.6 with active chat sessions written by 2.2.6 or
+newer - archive or discard them first.
