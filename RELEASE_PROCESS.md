@@ -31,7 +31,8 @@ git checkout -b refactor/v2.2-release-<wersja>
 - `package.json` → pole `version` (to jest właściwe źródło prawdy - czyta je i `esbuild.js`, i `release.js`).
 - `package-lock.json` → pole `version` w dwóch miejscach (root + `packages[""]`).
 - `versions.json` → dopisz nowy wpis `"<wersja>": "<minAppVersion>"`, gdzie `<minAppVersion>` to aktualna wartość `manifest.json.minAppVersion`.
-- `manifest.json` → pole `version` możesz zostawić bez ręcznej edycji: **`npm run build` nadpisuje je wartością z `package.json` automatycznie** (stemplowanie manifestu w `esbuild.js` - dzieje się przy KAŻDYM buildzie). Masz `npm run build` w bramkach kroku 3, więc do tego momentu `manifest.json` i tak się zsynchronizuje.
+- `manifest.json` → pole `version` podbij ręcznie razem z `package.json`. `npm run build` i tak nadpisuje je wartością z `package.json` (stemplowanie manifestu w `esbuild.js` - dzieje się przy KAŻDYM buildzie), ale build jest OSTATNIĄ bramką kroku 3, a `npm test` pierwszą: strażnik w `build_kontrakt.test.ts` (`package.json.version === manifest.json.version`) obleje testy, jeśli manifest czeka na stempel z builda (tak było przy 2.2.7).
+- `releases/<wersja>.md` → napisz notatkę wydania JUŻ TERAZ (kształt: Krok 5.3). Ten sam plik testów wymaga notatki dla każdego wpisu w `versions.json`, więc bez niej `npm test` z kroku 3 też jest czerwony.
 
 ⚠️ **Pułapka:** ten auto-zapis `manifest.json` przez `npm run build` zostawia zmianę w working tree. Zanim zrobisz commit release prep, sprawdź `git status` - `manifest.json` MUSI wejść do tego samego commita, inaczej `release.js` odbije się o guard niezgodności wersji.
 
