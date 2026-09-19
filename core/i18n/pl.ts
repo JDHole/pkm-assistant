@@ -1643,9 +1643,11 @@ export const pl: Record<string, string> = {
 
   // Badge typu notatki pamięci (review konsolidacji) — etykieta UI dla surowego `type`
   // trzymanego na notatkach brain/ (user/agent_rule/skill_hint/project_context/reference).
-  'memory.note_type.user': 'Fakt o userze',
-  'memory.note_type.agent_rule': 'Zasada pracy',
-  'memory.note_type.skill_hint': 'Instrukcja',
+  // Słownictwo zgodne z modal.save_session.section.* (kolumny review `/save session`) —
+  // te same typy notatek, jedno wspólne słownictwo.
+  'memory.note_type.user': 'User',
+  'memory.note_type.agent_rule': 'Preferencja',
+  'memory.note_type.skill_hint': 'Workflow',
   'memory.note_type.project_context': 'Kontekst projektu',
   'memory.note_type.reference': 'Referencja',
 

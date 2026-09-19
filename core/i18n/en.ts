@@ -1637,9 +1637,11 @@ export const en: Record<string, string> = {
 
   // Memory note type badges (consolidation review) — UI label for the raw `type`
   // stored on brain/ notes (user/agent_rule/skill_hint/project_context/reference).
-  'memory.note_type.user': 'User fact',
-  'memory.note_type.agent_rule': 'Work rule',
-  'memory.note_type.skill_hint': 'How-to',
+  // Wording matches modal.save_session.section.* (the /save session review columns) —
+  // same underlying note types, one shared vocabulary.
+  'memory.note_type.user': 'User',
+  'memory.note_type.agent_rule': 'Preference',
+  'memory.note_type.skill_hint': 'Workflow',
   'memory.note_type.project_context': 'Project context',
   'memory.note_type.reference': 'Reference',
 
