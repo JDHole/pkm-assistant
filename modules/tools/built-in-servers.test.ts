@@ -18,7 +18,11 @@ test('every built-in manifest has required fields', t => {
         // `description` was dropped from the manifest itself (i18n bug: hardcoded literal was
         // wrong-language for half the servers) — `resolveServerDescription(name)` is the
         // equivalent live check, same as what ServerLoader/ServerManager call at read time.
-        t.truthy(resolveServerDescription(m.name), `${m.name}: missing resolvable description`);
+        // Nieznany serwer wraca z resolvera gołą nazwą, a `t()` na brakującym kluczu oddaje sam
+        // klucz - oba są truthy, więc sprawdzamy, że opis NIE jest żadnym z tych odwrotów.
+        const description = resolveServerDescription(m.name);
+        t.not(description, m.name, `${m.name}: brak gałęzi w resolveServerDescription`);
+        t.not(description, `mcp.server.${m.name}.desc`, `${m.name}: brak klucza opisu w słowniku`);
         t.true(Array.isArray(m.tools) && m.tools.length > 0, `${m.name}: tools must be non-empty array`);
         t.is(m.source, 'built-in');
         t.is(m.removable, false);

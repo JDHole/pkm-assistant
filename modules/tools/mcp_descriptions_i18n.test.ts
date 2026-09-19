@@ -12,7 +12,7 @@
 import test from 'ava';
 import { setLocale, t as tr } from '../../core/i18n/index.js';
 import { ServerLoader } from './ServerLoader.js';
-import { MCP_SERVER_PRESETS, getMcpServerPreset, PRESET_PATH_PLACEHOLDER } from './mcpServerPresets.js';
+import { getMcpServerPreset } from './mcpServerPresets.js';
 import { createAddTextToImageTool } from './AddTextToImageTool.js';
 
 const emptyVault = () => ({ adapter: { exists: async () => false, list: async () => ({ folders: [] }) } });
@@ -25,6 +25,26 @@ async function catalogDescription(name: string): Promise<string | undefined> {
     await loader.loadAllServers();
     return loader.getServerCatalog().find(s => s.name === name)?.description;
 }
+
+// Pomyłka w mapowaniu nazwa serwera -> klucz (np. `web` podpięty pod opis `vault`) przechodzi
+// strażnika parytetu słowników, więc każdy z 8 serwerów ma tu swoje literalne zdanie.
+test.serial('katalog serwerów: każdy z 8 serwerów dostaje WŁASNY angielski opis', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+    const loader = new ServerLoader(emptyVault(), { pluginVersion: '2.0.0' });
+    await loader.loadAllServers();
+    const byName = Object.fromEntries(loader.getServerCatalog().map(s => [s.name, s.description]));
+    t.deepEqual(byName, {
+        core: 'Always-available agent essentials (asking user).',
+        vault: 'Vault file operations + unified search (keyword/semantic hybrid via RRF, where filters).',
+        memory: 'Hierarchical agent memory (brain + sessions + summaries L1/L2/L3). Read/list/search memory via read/list/search (scope=memory).',
+        web: "Web search (Google/Brave/Bing) + page reader. Requires the provider's API key.",
+        multimodal: 'Image generation (cloud platforms) + adding text to images.',
+        delegation: 'Delegation to sub-agents + handing off the conversation to another agent.',
+        artifacts: "Artifacts: living notes co-authored with the user (artifact_*) + the agent's primitive todo tool.",
+        komunikator: 'Komunikator: simple mail between agents (send / list / read).',
+    });
+});
 
 test.serial('katalog serwerów: "komunikator" (dziś PL na sztywno) mówi po angielsku pod setLocale("en")', async t => {
     t.teardown(() => setLocale('en'));
@@ -73,11 +93,7 @@ test.serial('createAddTextToImageTool: opis narzędzia zostaje po polsku pod set
 
 test('preset Filesystem niesie neutralny placeholder ścieżki <PATH> (nie polskie słowo)', t => {
     const fsPreset = getMcpServerPreset('filesystem');
-    t.truthy(fsPreset);
-    t.is(PRESET_PATH_PLACEHOLDER, '<PATH>');
     t.true(fsPreset!.args.includes('<PATH>'));
-    // Kontrola redundantna z importem MCP_SERVER_PRESETS - lista NIE jest pusta (żywy import).
-    t.true(MCP_SERVER_PRESETS.length > 0);
 });
 
 test.serial('hint filesystem po angielsku wskazuje na <PATH>, nie na <ŚCIEŻKA>', t => {

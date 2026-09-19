@@ -45,7 +45,7 @@ modules/tools/
 │   ├── artifacts.manifest.ts           # artifact_create/read/update/list + todo
 │   ├── komunikator.manifest.ts         # kom_send/kom_list/kom_read
 │   ├── artifacts/                      # ArtifactCreate/Read/Update/ListTool.ts + TodoTool.ts + index.ts
-│   └── index.ts                        # resolveBuiltinManifests({pluginVersion}) + getBuiltinManifest(name)
+│   └── index.ts                        # resolveBuiltinManifests({pluginVersion}) + getBuiltinManifest(name) + resolveServerDescription(name)
 │
 ├── Helpery (bez obsidian / testowalne AVA):
 │   ├── server_timeout.ts               # resolveTimeoutMs (60s default, 180s ceiling)
@@ -104,7 +104,7 @@ gwarancja silnika. Jedyny publiczny akt mutacji pliku
 
 - `validateVaultPath` / `validateVaultFolder` - `vault_path_validator.ts` (tam też `invocationHasAdminAccess` + `getInvocationAgentName` - jedna kopia dla całego modułu)
 - `resolveTimeoutMs` - `server_timeout.ts`
-- `BUILTIN_MANIFESTS` / `resolveBuiltinManifests` / `getBuiltinManifest` - `built-in-servers/index.ts`
+- `BUILTIN_MANIFESTS` / `resolveBuiltinManifests` / `getBuiltinManifest` / `resolveServerDescription` - `built-in-servers/index.ts`
 - `buildSemanticNote` - `semanticNote.ts`; `resolveToolAlias` / `isToolAlias` - `toolAliases.ts`; `listAdapterFolder` / `isHiddenVaultPath` / `ensureAdapterFolder` - `vault_adapter_io.ts`; I/O binarne - `vault_binary_io.ts`
 - `TodoFileStore` / `TODO_FOLDER` - `built-in-servers/artifacts/index.ts` (żyją w `TodoTool.ts`, wołane u siebie + w teście)
 - `renderTextOverlay` - `text_overlay_helper.ts` (używa jej `AddTextToImageTool`)
@@ -214,7 +214,7 @@ Bramka `.pkm-assistant/**` + No-Go + `sanitizePath` w prymitywach vaultowych dzi
 
 - ⚠️ **Opis wbudowanego serwera (katalog Ustawienia → Serwery MCP) NIE mieszka w manifeście.** `BuiltinServerManifest` (`built-in-servers/index.ts`) świadomie nie ma pola `description` — hardkodowany literał w jednym języku pokazywał userowi zły język dla połowy serwerów (`core`/`vault`/`memory` tylko po angielsku, `artifacts`/`delegation`/`komunikator`/`multimodal` tylko po polsku, niezależnie od ustawienia UI). Tekst liczy `resolveServerDescription(name)`, eksportowana z `built-in-servers/index.ts`: switch po `name` z LITERALNYMI wywołaniami `t('mcp.server.<id>.desc')` (nie szablon `t('mcp.server.' + name + '.desc')` — `core/i18n/parity_repo.test.ts` skanuje tylko literalne wywołania i inaczej nie złapałby brakującego klucza). Wołacze: `ServerLoader.getServerCatalog()` i `ServerManager.connectServer()`.
 - ⚠️ **Ten opis jest liczony PRZY KAŻDYM WYWOŁANIU, nie raz przy `loadAllServers()`.** Ustawienia → dropdown język → `setLocale()` → `owner.render()` wołają `getServerCatalog()` na nowo, więc zmiana języka w sesji działa bez restartu pluginu TYLKO jeśli nikt nie cache'uje przetłumaczonego tekstu w polu obiektu — cache'uj `name`, tłumacz przy odczycie.
-- ⚠️ **`t()` narzędzia (opis + parametry `inputSchema`) idzie przez fabrykę, nie przez stałą modułową** — jak we WSZYSTKICH pozostałych narzędziach (`ReadTool`, `WriteTool`, `WebSearchTool`…): wywołania `t('mcp.<tool>.desc')` / `t('mcp.<tool>.param.<name>')` siedzą W CIELE `create...Tool()`, bo `setLocale()` leci z `src/main.ts` PO imporcie modułów — stała modułowa policzona przy imporcie zamroziłaby język startu na resztę sesji. `GenerateImageTool`/`AddTextToImageTool` miały dotąd opis i WSZYSTKIE opisy parametrów na sztywno (mieszanka polskiego bez ogonków i pełnego polskiego) — poprawka trzyma się dokładnie tej samej konwencji nazw kluczy co reszta modułu.
+- ⚠️ **`t()` narzędzia (opis + parametry `inputSchema`) idzie przez fabrykę, nie przez stałą modułową** — jak we WSZYSTKICH pozostałych narzędziach (`ReadTool`, `WriteTool`, `WebSearchTool`…): wywołania `t('mcp.<tool>.desc')` / `t('mcp.<tool>.param.<name>')` siedzą W CIELE `create...Tool()`, bo `setLocale()` leci z `src/main.ts` PO imporcie modułów — stała modułowa policzona przy imporcie dostałaby domyślne `'en'`, zanim plugin w ogóle pozna język usera. ⚠️ Fabryka też liczy tekst RAZ (`src/main.ts`, `initialize()`, po `setLocale`): definicje narzędzi idące do MODELU zostają w języku startu do przeładowania pluginu - zmiana języka w Ustawieniach odświeża od razu tylko to, co liczy się przy renderze (katalog serwerów przez `resolveServerDescription`). `GenerateImageTool`/`AddTextToImageTool` miały dotąd opis i WSZYSTKIE opisy parametrów na sztywno (mieszanka polskiego bez ogonków i pełnego polskiego) — poprawka trzyma się dokładnie tej samej konwencji nazw kluczy co reszta modułu.
 - ⚠️ **Placeholder ścieżki w presetach zewnętrznych serwerów jest NEUTRALNYM tokenem technicznym, nie słowem w żadnym języku ludzkim.** `PRESET_PATH_PLACEHOLDER` (`mcpServerPresets.ts`) to `'<PATH>'` — polskie `'<ŚCIEŻKA>'` wstrzykiwane w argumenty presetu Filesystem wychodziłoby tak samo pod angielskim UI. Hint (`settings.mcp_preset_hint_filesystem`, en+pl) ma wskazywać na TEN SAM token co stała.
 
 ### Bezpieczne skróty, których świadomie NIE zrobiliśmy
