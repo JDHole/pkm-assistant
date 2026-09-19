@@ -1641,6 +1641,14 @@ export const pl: Record<string, string> = {
   'memory.note.why_unspecified': 'Jeszcze nieokreślone.',
   'memory.note.how_default': 'Użyj, gdy pasuje do bieżącej rozmowy.',
 
+  // Badge typu notatki pamięci (review konsolidacji) — etykieta UI dla surowego `type`
+  // trzymanego na notatkach brain/ (user/agent_rule/skill_hint/project_context/reference).
+  'memory.note_type.user': 'Fakt o userze',
+  'memory.note_type.agent_rule': 'Zasada pracy',
+  'memory.note_type.skill_hint': 'Instrukcja',
+  'memory.note_type.project_context': 'Kontekst projektu',
+  'memory.note_type.reference': 'Referencja',
+
   // SaveSessionModal (Memory v3 progress + notes column)
   'modal.save_session.analyzing': '{{agent}} analizuje sesję…',
   // Obietnica „Zwykle 4-10s" dotyczyła tylko pierwszego strzału, a kaskada konsolidacji

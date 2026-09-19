@@ -1635,6 +1635,14 @@ export const en: Record<string, string> = {
   'memory.note.why_unspecified': 'Not specified yet.',
   'memory.note.how_default': 'Use this when it is relevant to the current conversation.',
 
+  // Memory note type badges (consolidation review) — UI label for the raw `type`
+  // stored on brain/ notes (user/agent_rule/skill_hint/project_context/reference).
+  'memory.note_type.user': 'User fact',
+  'memory.note_type.agent_rule': 'Work rule',
+  'memory.note_type.skill_hint': 'How-to',
+  'memory.note_type.project_context': 'Project context',
+  'memory.note_type.reference': 'Reference',
+
   // SaveSessionModal (Memory v3 progress + notes column)
   'modal.save_session.analyzing': '{{agent}} is analyzing the session…',
   // The "Usually 4-10s" promise only ever covered the first LLM call, while
