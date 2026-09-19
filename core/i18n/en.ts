@@ -2546,7 +2546,7 @@ Full vault access, with particular emphasis on structure and templates.
   - agents/borys/ — your configuration and memory
 
 ## User vault structure
-> This section will be auto-filled by the sub-agent.
+> This section will be filled in by the agent on first use.
 
 - / (root) — to be filled
 `,
@@ -2568,7 +2568,7 @@ Full access, with particular emphasis on .pkm-assistant/ (system configuration).
     - {slug}/SUB_AGENT.yaml — sub-agent definition
 
 ## User vault structure
-> This section will be auto-filled by the sub-agent.
+> This section will be filled in by the agent on first use.
 
 - / (root) — to be filled
 `,
@@ -2578,7 +2578,7 @@ Full access, with particular emphasis on .pkm-assistant/ (system configuration).
   'starter.generic_vaultmap.system_structure': `## System structure
 - .pkm-assistant/ — PKM Assistant system
 - .obsidian/ — Obsidian configuration`,
-  'starter.generic_vaultmap.auto_fill_hint': '> This section will be auto-filled by the sub-agent.',
+  'starter.generic_vaultmap.auto_fill_hint': '> This section will be filled in by the agent on first use.',
 
   // ── Starter templates: PlaybookManager compileVaultMap ──
   'starter.compile_vm.system_structure': `## System structure
@@ -2814,7 +2814,7 @@ Explain each step in simple language.`,
 Perform a comprehensive system diagnostic:
 
 1. **Agents** — list(".pkm-assistant/agents/")
-   - How many agents? Does each have playbook.md and vault_map.md?
+   - How many agents? Does each have vault_map.md?
    - Check if YAML files are valid (read a few)
 
 2. **Skills** — list(".pkm-assistant/skills")
@@ -2822,7 +2822,7 @@ Perform a comprehensive system diagnostic:
    - Are there disabled skills?
 
 3. **Sub-agents** — list(".pkm-assistant/sub-agents/")
-   - Do prep and strateg exist?
+   - List the sub-agents that exist. No sub-agents is a normal state - ad-hoc delegation still works through the generic worker (pkm-sub).
    - Does each have SUB_AGENT.yaml and KNOWLEDGE.md?
 
 4. **Memory** — list(folder: "sessions", scope: "memory") — count the saved sessions
@@ -2837,7 +2837,7 @@ Perform a comprehensive system diagnostic:
 6. **Report** — Summarize:
    - What works correctly
    - What needs attention
-   - Recommendations (e.g. "missing playbook for agent X")
+   - Recommendations (e.g. "missing vault_map for agent X")
 
 Report clearly, use emoji for statuses.`,
 
