@@ -2531,8 +2531,8 @@ Pełny dostęp do całego vaulta użytkownika.
 - **.obsidian/** — konfiguracja Obsidiana (NIE MODYFIKUJ)
 
 ## Struktura vaulta użytkownika
-> Ta sekcja zostanie uzupełniona automatycznie przez sub-agenta
-> przy pierwszym użyciu (auto-prep przeskanuje vault).
+> Ta sekcja zostanie uzupełniona przez agenta
+> przy pierwszym użyciu.
 
 - / (root) — do uzupełnienia
 `,
@@ -2595,31 +2595,6 @@ Pełny dostęp, ze szczególnym naciskiem na .pkm-assistant/ (konfiguracja syste
   - **skills/** — centralna biblioteka umiejętności
   - **sub-agents/** — konfiguracje sub-agentów
 - **.obsidian/** — konfiguracja Obsidiana (NIE MODYFIKUJ)`,
-
-  // ── Starter templates: SubAgentLoader ──
-
-  'starter.sub_agent.prep_for_agent.desc': 'Przygotowuje kontekst dla {{agent}} na start sesji',
-  'starter.sub_agent.prep_for_agent.knowledge': `# Sub-Agent Prep — {{agent}}
-
-## ROLA
-Jesteś sub-agent przygotowujący kontekst dla agenta {{agent}}.
-Twoje zadanie: ZNAJDŹ informacje które pomogą agentowi odpowiedzieć LEPIEJ.
-
-## STRATEGIA SZUKANIA
-1. Przeczytaj pytanie usera — wyciągnij 2-3 słowa kluczowe
-2. search — przejrzyj snippety wyników
-3. read na 2-3 najbardziej trafnych plikach
-4. search ze scope: "memory" (where.folder: "sessions") jeśli pytanie dotyczy wcześniejszych rozmów
-5. Jeśli wyniki słabe — ZMIEŃ słowa kluczowe i szukaj ponownie
-
-## ZWRACANIE WYNIKÓW
-- Zwracaj SUROWE DANE — pełne fragmenty, cytaty, ścieżki
-- NIE streszczaj — agent sam zdecyduje co ważne
-- Format: ### [nazwa pliku] (ścieżka) + odpowiedni fragment treści
-
-## ZASADY
-- Tylko fakty, zero analizy
-- Nie wymyślaj informacji`,
 
   // ── Starter templates: SkillLoader ──
   'starter.skill.welcome_tour.desc': 'Prezentacja możliwości PKM Assistant. Używaj gdy user prosi o: pokaż co potrafisz, tour, onboarding, pomoc na start, co umiesz.',

@@ -2523,8 +2523,8 @@ Full access to the entire user vault.
 - **.obsidian/** — Obsidian configuration (DO NOT MODIFY)
 
 ## User vault structure
-> This section will be auto-filled by the sub-agent
-> on first use (auto-prep will scan the vault).
+> This section will be filled in by the agent
+> on first use.
 
 - / (root) — to be filled
 `,
@@ -2587,31 +2587,6 @@ Full access, with particular emphasis on .pkm-assistant/ (system configuration).
   - **skills/** — central skill library
   - **sub-agents/** — sub-agent configurations
 - **.obsidian/** — Obsidian configuration (DO NOT MODIFY)`,
-
-  // ── Starter templates: SubAgentLoader ──
-
-  'starter.sub_agent.prep_for_agent.desc': 'Prepares context for {{agent}} at session start',
-  'starter.sub_agent.prep_for_agent.knowledge': `# Sub-Agent Prep — {{agent}}
-
-## ROLE
-You are a sub-agent preparing context for agent {{agent}}.
-Your task: FIND information that will help the agent answer BETTER.
-
-## SEARCH STRATEGY
-1. Read the user question — extract 2-3 keywords
-2. search — review result snippets
-3. read on 2-3 most relevant files
-4. search with scope: "memory" (where.folder: "sessions") if the question relates to previous conversations
-5. If results are weak — CHANGE keywords and search again
-
-## RETURNING RESULTS
-- Return RAW DATA — full fragments, quotes, paths
-- Do NOT summarize — the agent decides what's important
-- Format: ### [file name] (path) + relevant content fragment
-
-## RULES
-- Facts only, zero analysis
-- Do not make up information`,
 
   // ── Starter templates: SkillLoader ──
   'starter.skill.welcome_tour.desc': 'PKM Assistant capability showcase. Use when user asks for: show what you can do, tour, onboarding, getting started help, what can you do.',
