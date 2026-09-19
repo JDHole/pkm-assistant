@@ -140,7 +140,9 @@ test.serial('opis generate_image mówi po polsku pod setLocale("pl")', t => {
     );
 });
 
-test('niedozwolony saveFolder odbija się PRZED wywołaniem platformy', async t => {
+test.serial('niedozwolony saveFolder odbija się PRZED wywołaniem platformy - en', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
     const tool = createGenerateImageTool();
 
     for (const folder of ['../poza', '.pkm-assistant/agents/inny/memory', '.pkm-assistant/logs']) {
@@ -150,6 +152,22 @@ test('niedozwolony saveFolder odbija się PRZED wywołaniem platformy', async t 
             pluginWith({ platform: 'openai', saveFolder: folder }),
         ) as ImageRes;
         t.false(res.success, `saveFolder "${folder}" przeszedł`);
-        t.regex(res.error, /folder zapisu/i, `saveFolder "${folder}" odbił się o inną warstwę`);
+        t.regex(res.error, /Save folder ".*" is not allowed/, `saveFolder "${folder}" pod EN musi dostać angielski komunikat, nie polski wpisany na sztywno`);
+    }
+});
+
+test.serial('niedozwolony saveFolder odbija się PRZED wywołaniem platformy - pl', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
+    const tool = createGenerateImageTool();
+
+    for (const folder of ['../poza', '.pkm-assistant/agents/inny/memory', '.pkm-assistant/logs']) {
+        const res = await tool.execute(
+            { prompt: 'a cat' },
+            {} as never,
+            pluginWith({ platform: 'openai', saveFolder: folder }),
+        ) as ImageRes;
+        t.false(res.success, `saveFolder "${folder}" przeszedł`);
+        t.regex(res.error, /Niedozwolony folder zapisu ".*"/, `saveFolder "${folder}" odbił się o inną warstwę`);
     }
 });
