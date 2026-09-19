@@ -164,13 +164,19 @@ dla lintera importów jak deep import w cudzy moduł.
 ### Fallback sekcji "Na teraz" musi być KLUCZEM API, nie nagłówkiem pliku
 
 `SaveSessionModal._normalizeUpdate` domyślał `BrainUpdate.section` na `'## Bieżące'` (nagłówek
-`brain.md`), a `_naTerazLabel` i tak pokazywało taki wpis userowi jako „Na teraz: User" (fallback
-= wszystko poza `'environment'`). User zatwierdzał, ale `naTerazSectionKey('## Bieżące')`
-(`modules/memory/BrainIndex.ts`) zwraca `null` (nie pasuje do wzorców user/environment), więc
-`applyNaTerazOps` po cichu odrzucał operację (`if (!key) continue;`) - zatwierdzona zmiana nigdy
-się nie zapisywała. Fix: `naTerazUpdate.ts` (`normalizeNaTerazSection`/`naTerazLabel`, pure) jest
-JEDYNYM miejscem tej reguły - etykieta i zapis czytają dokładnie tę samą funkcję, więc nie mogą
-się już rozjechać; modal jest cienkim wołaczem obu.
+`brain.md`), zamiast na klucz API (`'user'`/`'environment'`). To było utwardzenie kontraktu, nie
+naprawa żywej utraty danych: jedyny producent `BrainUpdate` to
+`SaveSessionWorkflow._parseNaTerazUpdates` (`modules/memory/`), który iteruje literalną tablicę
+`['user', 'environment']`, więc `section` zawsze przychodzi jako jeden z tych dwóch kluczy -
+stary fallback był w praktyce martwą gałęzią, u userów nic się nie gubiło. Ale gdyby kiedyś
+dotarła inna wartość, stary fallback rozjeżdżałby etykietę z zapisem: `_naTerazLabel` i tak
+pokazywałby taki wpis jako „Na teraz: User" (fallback = wszystko poza `'environment'`), a zapis
+szedłby przez `applyNaTerazOps` (`modules/memory/BrainIndex.ts`), której
+`naTerazSectionKey('## Bieżące')` zwraca `null` (nie pasuje do wzorców user/environment) -
+`if (!key) continue;` cicho odrzuciłby operację, mimo że etykieta obiecywała zapis pod „User".
+Fix: `naTerazUpdate.ts` (`normalizeNaTerazSection`/`naTerazLabel`, pure) jest JEDYNYM miejscem
+tej reguły - etykieta i zapis czytają dokładnie tę samą funkcję, więc nie mogą się już rozjechać,
+niezależnie od tego, co kiedyś doda kolejny producent; modal jest cienkim wołaczem obu.
 
 ### Właściciel tury i okna - stan tury żyje w OBIEKCIE TURY, nigdy w polu widoku
 
