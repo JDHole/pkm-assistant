@@ -2523,8 +2523,8 @@ Full access to the entire user vault.
 - **.obsidian/** — Obsidian configuration (DO NOT MODIFY)
 
 ## User vault structure
-> This section will be auto-filled by the sub-agent
-> on first use (auto-prep will scan the vault).
+> This section will be filled in by the agent
+> on first use.
 
 - / (root) — to be filled
 `,
@@ -2546,7 +2546,7 @@ Full vault access, with particular emphasis on structure and templates.
   - agents/borys/ — your configuration and memory
 
 ## User vault structure
-> This section will be auto-filled by the sub-agent.
+> This section will be filled in by the agent on first use.
 
 - / (root) — to be filled
 `,
@@ -2568,7 +2568,7 @@ Full access, with particular emphasis on .pkm-assistant/ (system configuration).
     - {slug}/SUB_AGENT.yaml — sub-agent definition
 
 ## User vault structure
-> This section will be auto-filled by the sub-agent.
+> This section will be filled in by the agent on first use.
 
 - / (root) — to be filled
 `,
@@ -2578,7 +2578,7 @@ Full access, with particular emphasis on .pkm-assistant/ (system configuration).
   'starter.generic_vaultmap.system_structure': `## System structure
 - .pkm-assistant/ — PKM Assistant system
 - .obsidian/ — Obsidian configuration`,
-  'starter.generic_vaultmap.auto_fill_hint': '> This section will be auto-filled by the sub-agent.',
+  'starter.generic_vaultmap.auto_fill_hint': '> This section will be filled in by the agent on first use.',
 
   // ── Starter templates: PlaybookManager compileVaultMap ──
   'starter.compile_vm.system_structure': `## System structure
@@ -2587,31 +2587,6 @@ Full access, with particular emphasis on .pkm-assistant/ (system configuration).
   - **skills/** — central skill library
   - **sub-agents/** — sub-agent configurations
 - **.obsidian/** — Obsidian configuration (DO NOT MODIFY)`,
-
-  // ── Starter templates: SubAgentLoader ──
-
-  'starter.sub_agent.prep_for_agent.desc': 'Prepares context for {{agent}} at session start',
-  'starter.sub_agent.prep_for_agent.knowledge': `# Sub-Agent Prep — {{agent}}
-
-## ROLE
-You are a sub-agent preparing context for agent {{agent}}.
-Your task: FIND information that will help the agent answer BETTER.
-
-## SEARCH STRATEGY
-1. Read the user question — extract 2-3 keywords
-2. search — review result snippets
-3. read on 2-3 most relevant files
-4. search with scope: "memory" (where.folder: "sessions") if the question relates to previous conversations
-5. If results are weak — CHANGE keywords and search again
-
-## RETURNING RESULTS
-- Return RAW DATA — full fragments, quotes, paths
-- Do NOT summarize — the agent decides what's important
-- Format: ### [file name] (path) + relevant content fragment
-
-## RULES
-- Facts only, zero analysis
-- Do not make up information`,
 
   // ── Starter templates: SkillLoader ──
   'starter.skill.welcome_tour.desc': 'PKM Assistant capability showcase. Use when user asks for: show what you can do, tour, onboarding, getting started help, what can you do.',
@@ -2839,7 +2814,7 @@ Explain each step in simple language.`,
 Perform a comprehensive system diagnostic:
 
 1. **Agents** — list(".pkm-assistant/agents/")
-   - How many agents? Does each have playbook.md and vault_map.md?
+   - How many agents? Does each have vault_map.md?
    - Check if YAML files are valid (read a few)
 
 2. **Skills** — list(".pkm-assistant/skills")
@@ -2847,7 +2822,7 @@ Perform a comprehensive system diagnostic:
    - Are there disabled skills?
 
 3. **Sub-agents** — list(".pkm-assistant/sub-agents/")
-   - Do prep and strateg exist?
+   - List the sub-agents that exist. No sub-agents is a normal state - ad-hoc delegation still works through the generic worker (pkm-sub).
    - Does each have SUB_AGENT.yaml and KNOWLEDGE.md?
 
 4. **Memory** — list(folder: "sessions", scope: "memory") — count the saved sessions
@@ -2862,7 +2837,7 @@ Perform a comprehensive system diagnostic:
 6. **Report** — Summarize:
    - What works correctly
    - What needs attention
-   - Recommendations (e.g. "missing playbook for agent X")
+   - Recommendations (e.g. "missing vault_map for agent X")
 
 Report clearly, use emoji for statuses.`,
 

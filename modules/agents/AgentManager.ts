@@ -583,7 +583,6 @@ export class AgentManager {
         // Availability flags
         const hasResearcher = researcherList.length > 0;
         const hasStrategist = strategistList.length > 0;
-        const defaultPrepName = agent.prepSubAgent?.name || agent.defaultSubAgent?.name || null;
 
         const pkm = this.settings?.pkmAssistant || {};
 
@@ -637,7 +636,6 @@ export class AgentManager {
             hasResearcher,
             hasStrategist,
             hasDelegates,
-            defaultPrepName,
             promptDefaults,
             // Named folder groups - PromptBuilder._buildEnvironment expands `{group}`
             // references in focus_folders to their concrete folders at build time.
@@ -789,16 +787,11 @@ export class AgentManager {
         }
         const agent = new Agent(config);
 
-        // Brak ról systemowych - nowy agent dostaje własny custom prep sub-agent
-        // (każdy asystent buduje własnych subów; do delegacji ad-hoc jest generyczny worker).
-        if (agent._subAgents.length === 0) {
-            try {
-                const prepName = await this.subAgentLoader.createPrepSubAgent(agent.name);
-                agent._subAgents.push({ name: prepName, role: 'researcher', default: true });
-            } catch (e: unknown) {
-                log.warn('AgentManager', 'Could not auto-create prep sub-agent:', (e as Error).message);
-            }
-        }
+        // Nowy agent startuje z PUSTĄ Ekipą (`_subAgents = []`) - zero auto-tworzenia suba na
+        // dysku. Delegacja ad-hoc i tak działa przez generycznego workera (`pkm-sub`), a własne
+        // suby user odlewa z szablonów (Zaplecze). Automat wyleciał: guzik „+" zawsze nadawał
+        // nazwę Agent1, rename nie przenosił `agent1-prep` na nowy slug, więc kolejny Agent1
+        // dostawał TEGO SAMEGO suba co poprzedni - dwóch agentów dzieliło jednego.
 
         // Save to file. Ścieżkę PRZYPISUJEMY agentowi: `agent.filePath` jest jedynym adresem,
         // pod którym późniejsze operacje szukają starego pliku (`renameAgentOnDisk` kasuje po nim
@@ -814,7 +807,8 @@ export class AgentManager {
         const memory = await this._initializeMemoryForAgent(agent);
         this.agentMemories.set(agent.name, memory);
 
-        // Create playbook.md + vault_map.md for the new agent
+        // Create vault_map.md for the new agent (playbook.md doesn't exist - Playbook Builder
+        // was deleted, see modules/onboarding/CLAUDE.md).
         // TS-boundary: same AgentFocusFolder vs VaultMapFocusFolder path-optionality mismatch as
         // above (initialize()).
         await this.playbookManager.ensureStarterFiles([agent] as VaultMapAgent[]);

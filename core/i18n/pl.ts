@@ -2531,8 +2531,8 @@ Pełny dostęp do całego vaulta użytkownika.
 - **.obsidian/** — konfiguracja Obsidiana (NIE MODYFIKUJ)
 
 ## Struktura vaulta użytkownika
-> Ta sekcja zostanie uzupełniona automatycznie przez sub-agenta
-> przy pierwszym użyciu (auto-prep przeskanuje vault).
+> Ta sekcja zostanie uzupełniona przez agenta
+> przy pierwszym użyciu.
 
 - / (root) — do uzupełnienia
 `,
@@ -2554,7 +2554,7 @@ Pełny dostęp do vaulta, ze szczególnym naciskiem na strukturę i szablony.
   - agents/borys/ — Twoja konfiguracja i pamięć
 
 ## Struktura vaulta użytkownika
-> Ta sekcja zostanie uzupełniona automatycznie przez sub-agenta.
+> Ta sekcja zostanie uzupełniona przez agenta przy pierwszym użyciu.
 
 - / (root) — do uzupełnienia
 `,
@@ -2576,7 +2576,7 @@ Pełny dostęp, ze szczególnym naciskiem na .pkm-assistant/ (konfiguracja syste
     - {slug}/SUB_AGENT.yaml — definicja sub-agenta
 
 ## Struktura vaulta użytkownika
-> Ta sekcja zostanie uzupełniona automatycznie przez sub-agenta.
+> Ta sekcja zostanie uzupełniona przez agenta przy pierwszym użyciu.
 
 - / (root) — do uzupełnienia
 `,
@@ -2586,7 +2586,7 @@ Pełny dostęp, ze szczególnym naciskiem na .pkm-assistant/ (konfiguracja syste
   'starter.generic_vaultmap.system_structure': `## Struktura systemu
 - .pkm-assistant/ — system PKM Assistant
 - .obsidian/ — konfiguracja Obsidiana`,
-  'starter.generic_vaultmap.auto_fill_hint': '> Ta sekcja zostanie uzupełniona automatycznie przez sub-agenta.',
+  'starter.generic_vaultmap.auto_fill_hint': '> Ta sekcja zostanie uzupełniona przez agenta przy pierwszym użyciu.',
 
   // ── Starter templates: PlaybookManager compileVaultMap ──
   'starter.compile_vm.system_structure': `## Struktura systemu
@@ -2595,31 +2595,6 @@ Pełny dostęp, ze szczególnym naciskiem na .pkm-assistant/ (konfiguracja syste
   - **skills/** — centralna biblioteka umiejętności
   - **sub-agents/** — konfiguracje sub-agentów
 - **.obsidian/** — konfiguracja Obsidiana (NIE MODYFIKUJ)`,
-
-  // ── Starter templates: SubAgentLoader ──
-
-  'starter.sub_agent.prep_for_agent.desc': 'Przygotowuje kontekst dla {{agent}} na start sesji',
-  'starter.sub_agent.prep_for_agent.knowledge': `# Sub-Agent Prep — {{agent}}
-
-## ROLA
-Jesteś sub-agent przygotowujący kontekst dla agenta {{agent}}.
-Twoje zadanie: ZNAJDŹ informacje które pomogą agentowi odpowiedzieć LEPIEJ.
-
-## STRATEGIA SZUKANIA
-1. Przeczytaj pytanie usera — wyciągnij 2-3 słowa kluczowe
-2. search — przejrzyj snippety wyników
-3. read na 2-3 najbardziej trafnych plikach
-4. search ze scope: "memory" (where.folder: "sessions") jeśli pytanie dotyczy wcześniejszych rozmów
-5. Jeśli wyniki słabe — ZMIEŃ słowa kluczowe i szukaj ponownie
-
-## ZWRACANIE WYNIKÓW
-- Zwracaj SUROWE DANE — pełne fragmenty, cytaty, ścieżki
-- NIE streszczaj — agent sam zdecyduje co ważne
-- Format: ### [nazwa pliku] (ścieżka) + odpowiedni fragment treści
-
-## ZASADY
-- Tylko fakty, zero analizy
-- Nie wymyślaj informacji`,
 
   // ── Starter templates: SkillLoader ──
   'starter.skill.welcome_tour.desc': 'Prezentacja możliwości PKM Assistant. Używaj gdy user prosi o: pokaż co potrafisz, tour, onboarding, pomoc na start, co umiesz.',
@@ -2848,7 +2823,7 @@ Wyjaśniaj każdy krok prostym językiem.`,
 Wykonaj kompleksową diagnostykę systemu:
 
 1. **Agenci** — list(".pkm-assistant/agents/")
-   - Ile agentów? Czy każdy ma playbook.md i vault_map.md?
+   - Ile agentów? Czy każdy ma vault_map.md?
    - Sprawdź czy pliki YAML są poprawne (read kilku)
 
 2. **Skille** — list(".pkm-assistant/skills")
@@ -2856,7 +2831,7 @@ Wykonaj kompleksową diagnostykę systemu:
    - Czy są wyłączone skille?
 
 3. **Sub-agenci** — list(".pkm-assistant/sub-agents/")
-   - Czy prep i strateg istnieją?
+   - Wylistuj sub-agentów, jacy istnieją. Brak subów to normalny stan - delegacja ad-hoc i tak działa przez generycznego workera (pkm-sub).
    - Czy każdy ma SUB_AGENT.yaml i KNOWLEDGE.md?
 
 4. **Pamięć** — list(folder: "sessions", scope: "memory") — policz zapisane sesje
@@ -2871,7 +2846,7 @@ Wykonaj kompleksową diagnostykę systemu:
 6. **Raport** — Podsumuj:
    - Co działa prawidłowo
    - Co wymaga uwagi
-   - Rekomendacje (np. "brakuje playbooka dla agenta X")
+   - Rekomendacje (np. "brakuje vault_map dla agenta X")
 
 Raportuj czytelnie, używaj emoji do statusów.`,
 

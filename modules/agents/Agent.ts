@@ -374,18 +374,6 @@ export class Agent implements ToolVisibilityAgent {
         return this._subAgents.find(s => s.default && s.active !== false) || null;
     }
 
-    /**
-     * @returns {Object|null} Preferowany sub-agent "prep" (heurystyka po nazwie / default / pierwszy).
-     * Brak podziału research/strateg - szukamy wśród WSZYSTKICH aktywnych subów.
-     */
-    get prepSubAgent() {
-        const subs = this.activeSubAgents;
-        if (subs.length === 0) return null;
-        return subs.find(s => s.name?.includes('prep'))
-            || subs.find(s => s.default)
-            || subs[0];
-    }
-
     /** @returns {Object|null} Get sub-agent assignment by name */
     getSubAgentAssignment(name: string) {
         return this._subAgents.find(s => s.name === name) || null;

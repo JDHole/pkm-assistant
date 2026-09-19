@@ -6,7 +6,6 @@
  */
 import { parseYaml, stringifyYaml, slugify } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
-import { t } from '../../core/i18n/index.js';
 import { DEFAULT_LIMITS } from '../../config/limits.js';
 import type { ScopeData, SubAgentData, SubAgentInput, SubAgentYaml, SubAgentYamlRaw, VaultLike } from './types.js';
 
@@ -416,31 +415,5 @@ export class SubAgentLoader {
         } catch (e) {
             log.error('SubAgentLoader', 'Error creating sub-agents folder:', e);
         }
-    }
-
-    /**
-     * Create a prep sub-agent for a specific agent. Idempotent.
-     * @param {string} agentName
-     * @returns {Promise<string>} Sub-agent name
-     */
-    async createPrepSubAgent(agentName: string): Promise<string> {
-        const slug = slugify(agentName);
-        const name = `${slug}-prep`;
-
-        if (this.cache.has(name)) return name;
-
-        await this.saveSubAgent({
-            name,
-            description: t('starter.sub_agent.prep_for_agent.desc', { agent: agentName }),
-            role: 'researcher',
-            tools: ['search', 'list', 'read'],
-            max_iterations: defaultMaxIterations(),
-            min_iterations: defaultMinIterations(),
-            max_tool_result_length: defaultMaxToolResultLength(),
-            enabled: true,
-            prompt: t('starter.sub_agent.prep_for_agent.knowledge', { agent: agentName }),
-        });
-
-        return name;
     }
 }

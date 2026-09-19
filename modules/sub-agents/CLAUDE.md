@@ -53,7 +53,7 @@ modules/sub-agents/
 
 | Export | Po co |
 |---|---|
-| `SubAgentLoader` | Klasa - skanowanie `.pkm-assistant/sub-agents/`, parse YAML + KNOWLEDGE.md, cache, save/delete, ensureStarter, createPrepSubAgent |
+| `SubAgentLoader` | Klasa - skanowanie `.pkm-assistant/sub-agents/`, parse YAML + KNOWLEDGE.md, cache, save/delete, ensureStarter |
 | `SubAgentRunner` | Klasa - wykonanie sub-agent (`runTask()`), ujednolicony system prompt builder (`framePrompt.js`, NIE zależy od roli - patrz „Model delegacji" niżej), tool-calling loop przez `runAgentLoop` (`modules/agent-loop`, wspólna pętla z czatem) |
 | `SubTaskRegistry` | Księga biegów subów + szyna zdarzeń (`task:created` / `task:step` / `task:finished`). Stawia go composition root (`plugin.subTaskRegistry`), konsumują trace.log i pasek biegów w czacie. Pure - zero `obsidian`, zero I/O. Dodatkowo skrzynka kontaktowa do biegu - `attachAbort(id, fn)` / `requestStop(id)`. Ta sama skrzynka przyjmuje WIADOMOŚCI - `postMessage(id, text)` / `takeMessages(id)`. |
 | `SubRunResult`, `SubRunStoppedBy` (typy) | Kształt zwrotki `runTask` - `stoppedBy` (`natural`/`backstop`/`abort`/`error`) + `failed?: true`. Czyta je `DelegateTool`. |
@@ -83,7 +83,6 @@ modules/sub-agents/
 - `getSubAgent(name)` / `getAllSubAgents()` - read cache (sidebar views)
 - `saveSubAgent(data)` / `deleteSubAgent(name)` - UI tworzenia (SubAgentEditorModal)
 - `ensureStarterSubAgents()` - **ensure-folder, NIE factory:** tylko sprawdza/tworzy `.pkm-assistant/sub-agents/` jeśli nie istnieje. Plugin nie zasiewa żadnych domyślnych subów.
-- `createPrepSubAgent(agentName)` - factory `<agent>-prep` per agent
 - `reloadSubAgents()` - hot reload (clear cache + re-load)
 
 **`SubAgentRunner` ma TYLKO 1 metodę publiczną:**
@@ -98,7 +97,7 @@ modules/sub-agents/
 1. **Generyczny worker** - `delegate(task:"...")` bez `aspect`. `DelegateTool.buildGenericWorkerConfig()` tworzy syntetyczny config `{ name:'worker', tools: DEFAULT_SUB_AGENT_TOOLS }` (bez `config.prompt`, bez roli). Działa **nawet gdy agent nie ma żadnych subów**. Model = slot sub-agentów.
 2. **Custom sub usera** - `delegate(task:"...", aspect:"<nazwa>")`. Rozpoznawany po nazwie (exact → fuzzy po nazwie; **brak fallbacku po roli**). Widoczny tylko dla swojego agenta (prefiks `<agent-slug>-`).
 
-Stary YAML agenta z przypisaniem nieistniejącej roli systemowej (np. dawne `prep-memory`) sprawia, że `delegate` zwraca czysty błąd „konfiguracja sub-agenta X nie znaleziona" - te nazwy nie istnieją jako suby. Nowy agent dostaje własny `<slug>-prep` (`createPrepSubAgent`), nie role systemowe.
+Stary YAML agenta z przypisaniem nieistniejącej roli systemowej (np. dawne `prep-memory`) sprawia, że `delegate` zwraca czysty błąd „konfiguracja sub-agenta X nie znaleziona" - te nazwy nie istnieją jako suby. Nowy agent (od wersji po 2.2.6) startuje bez żadnych subów - zero auto-tworzenia na dysku. Suby `<slug>-prep`, które istnieją u userów z wcześniejszych wersji, to pozostałość po wyciętym automacie i działają dalej jak każdy custom sub - nikt ich nie kasuje ani nie migruje.
 
 **Jednolite defaulty (rola nie steruje wyborem narzędzi/promptu/limitów):** `DEFAULT_SUB_AGENT_TOOLS = search/list/read/web_search/web_read` (`connect_to_server` wyłączony), `max_iterations` = worker (`subagent_max_iterations_worker` w `config/limits.ts`, **default 25**, sufit 100; zob. gotcha „Limity iteracji/timeout/długości" niżej), `min_iterations` = 1, `max_tool_result_length` = 15000, cap kontekstu delegata = **`delegation_context_max_chars`, default 48000**. **Precedencja config-vs-default:** `config.max_iterations || limits.subagent_max_iterations_worker` - pole z YAML custom suba wygrywa, gdy jest ustawione na wartość prawdziwą (0/brak/undefined spadają na default z `config/limits.ts`); ta sama zasada dotyczy `config.tools` (wygrywa nad `DEFAULT_SUB_AGENT_TOOLS`), a przecięcie z uprawnieniami rodzica robi `SubAgentRunner._getTools` DOPIERO PO tym wyborze.
 
@@ -176,7 +175,6 @@ Odlew per agent = `<agent-slug>-researcher` (standardowe `instantiate`). Przepis
   (`DelegateTool`/`TriggerPopup` mają testy w AVA).
 - `modules/shell/sidebar/{BackstageViews,DetailViews,HomeView}.js` - listing + counter (DI)
 - `modules/agents/profile/{profile_prompt,profile_team}.js` - profil agenta (DI)
-- `modules/onboarding/PlaybookManager.js` - `generateDelegowanieSection`
 
 ---
 
