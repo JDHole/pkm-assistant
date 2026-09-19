@@ -12,9 +12,9 @@ test.serial('en: każdy z pięciu typów dostaje angielską etykietę', t => {
     setLocale('en');
     t.teardown(() => setLocale('en'));
 
-    t.is(memoryNoteTypeLabel('user'), 'User fact');
-    t.is(memoryNoteTypeLabel('agent_rule'), 'Work rule');
-    t.is(memoryNoteTypeLabel('skill_hint'), 'How-to');
+    t.is(memoryNoteTypeLabel('user'), 'User');
+    t.is(memoryNoteTypeLabel('agent_rule'), 'Preference');
+    t.is(memoryNoteTypeLabel('skill_hint'), 'Workflow');
     t.is(memoryNoteTypeLabel('project_context'), 'Project context');
     t.is(memoryNoteTypeLabel('reference'), 'Reference');
 });
@@ -23,9 +23,9 @@ test.serial('pl: każdy z pięciu typów dostaje polską etykietę', t => {
     setLocale('pl');
     t.teardown(() => setLocale('en'));
 
-    t.is(memoryNoteTypeLabel('user'), 'Fakt o userze');
-    t.is(memoryNoteTypeLabel('agent_rule'), 'Zasada pracy');
-    t.is(memoryNoteTypeLabel('skill_hint'), 'Instrukcja');
+    t.is(memoryNoteTypeLabel('user'), 'User');
+    t.is(memoryNoteTypeLabel('agent_rule'), 'Preferencja');
+    t.is(memoryNoteTypeLabel('skill_hint'), 'Workflow');
     t.is(memoryNoteTypeLabel('project_context'), 'Kontekst projektu');
     t.is(memoryNoteTypeLabel('reference'), 'Referencja');
 });
