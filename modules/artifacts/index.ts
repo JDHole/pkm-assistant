@@ -23,6 +23,9 @@ export { ArtifactTypeLoader } from './ArtifactTypeLoader.js';
 // Rozjazd nagłówka z szablonem typu daje ciche `not_found` przy patchu.
 export { ARTIFACT_SECTION_NAMES, artifactSection } from './artifactSections.js';
 export type { ArtifactSectionKey } from './artifactSections.js';
+// Etykieta statusu DLA OCZU usera (blok w notatce + panel profilu agenta + picker `@` w czacie) — status w pliku/
+// prompcie zostaje surowym identyfikatorem silnika. Patrz artifactStatusLabel.ts.
+export { artifactStatusLabel } from './artifactStatusLabel.js';
 // DEFAULT_ARTIFACTS_FOLDER eksportowany z barrela: konsumuje go src/main.js
 // (komenda generate_artifacts_base).
 export { ArtifactStore, DEFAULT_ARTIFACTS_FOLDER } from './ArtifactStore.js';

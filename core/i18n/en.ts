@@ -2455,7 +2455,7 @@ export const en: Record<string, string> = {
   'mcp.artifact_update.param.ops': 'List of operations applied in order. Each has an "op" field + parameters (key/value, heading/text, blockId).',
   'mcp.artifact_list.desc': 'List the current agent\'s living artifacts (id, title, type, status). Use it when you don\'t know an artifact id or want to check what is in progress.',
   'mcp.artifact_list.param.typ': 'Filter by type (e.g. "plan"). Empty = all types.',
-  'mcp.artifact_list.param.status': 'Filter by status (e.g. "do-akceptacji"). Empty = all statuses.',
+  'mcp.artifact_list.param.status': 'Filter by status. Use the exact identifier stored in the artifact (e.g. "do-akceptacji") - status values are fixed engine identifiers and are not translated. Empty = all statuses.',
   // todo: the agent's primitive, one-shot task list.
   'mcp.todo.desc': 'Keep your own task list (todo) while you work — steps stay in front of you so you don\'t lose the thread.\n\nWHEN TO USE:\n- A task with 3+ steps → create the list up front, then check each one off as you finish\n- You are executing a plan step by step\n\nHOW IT WORKS:\n- create — new list (items); check/uncheck — by block-id (e.g. "k2"); add — append a step; finish — close it (deletes the list)\n- The list is YOURS (shown in chat), one-shot, gone when the session closes. It is NOT an artifact for approval — for that use artifact_create(typ:"plan").',
   'mcp.todo.param.action': '"create" = new list. "check"/"uncheck" = tick/untick an item by block-id. "add" = append a step. "finish" = close the list.',
@@ -2480,6 +2480,16 @@ export const en: Record<string, string> = {
   'artifact.block.foreign': 'This block belongs to a different artifact than this note — actions are disabled.',
   'artifact.block.not_found': 'Artifact not found.',
   'artifact.block.status': 'Status: {{status}}',
+  // Artifact status labels FOR DISPLAY ONLY - the frontmatter/prompt identifier stays raw
+  // (do-akceptacji/uwagi/zaakceptowany/zamkniety/w-trakcie/gotowy/szkic) in every UI language.
+  // See modules/artifacts/artifactStatusLabel.ts.
+  'artifact.status.do_akceptacji': 'Awaiting approval',
+  'artifact.status.uwagi': 'Sent back with notes',
+  'artifact.status.zaakceptowany': 'Approved',
+  'artifact.status.zamkniety': 'Closed',
+  'artifact.status.w_trakcie': 'In progress',
+  'artifact.status.gotowy': 'Done',
+  'artifact.status.szkic': 'Draft',
   'artifact.summon.header': '📄 Artifact "{{tytul}}" ({{id}}) — user: {{akcja}}',
   'artifact.summon.action.approve': 'approved the plan — carry out the steps',
   'artifact.summon.action.revise': 'sent it back with notes — read the "User notes" section and revise the plan',

@@ -2463,7 +2463,7 @@ export const pl: Record<string, string> = {
   'mcp.artifact_update.param.ops': 'Lista operacji do nałożenia po kolei. Każda ma pole "op" + parametry (key/value, heading/text, blockId).',
   'mcp.artifact_list.desc': 'Wypisz artefakty żywe bieżącego agenta (id, tytuł, typ, status). Użyj, gdy nie znasz ID artefaktu albo chcesz sprawdzić, co jest w toku.',
   'mcp.artifact_list.param.typ': 'Filtr po typie (np. "plan"). Puste = wszystkie typy.',
-  'mcp.artifact_list.param.status': 'Filtr po statusie (np. "do-akceptacji"). Puste = wszystkie statusy.',
+  'mcp.artifact_list.param.status': 'Filtr po statusie. Użyj dokładnego identyfikatora zapisanego w artefakcie (np. "do-akceptacji") - wartości statusów to stałe identyfikatory silnika i nie są tłumaczone. Puste = wszystkie statusy.',
   // todo: prymitywna, jednorazowa lista zadań agenta.
   'mcp.todo.desc': 'Prowadź własną listę zadań (todo) na czas pracy — masz kroki na oczach i nie gubisz wątku.\n\nKIEDY UŻYWAĆ:\n- Zadanie na 3+ kroków → od razu create z listą kroków, potem check po każdym gotowym\n- Realizujesz plan krok po kroku\n\nJAK DZIAŁA:\n- create — nowa lista (items); check/uncheck — po block-idzie (np. "k2"); add — dopisz krok; finish — zamknij (kasuje listę)\n- Lista jest TWOJA (widoczna w czacie), jednorazowa, znika po zamknięciu sesji. To NIE artefakt do zatwierdzenia — do tego użyj artifact_create(typ:"plan").',
   'mcp.todo.param.action': '"create" = nowa lista. "check"/"uncheck" = odhacz/odznacz element po block-idzie. "add" = dopisz krok. "finish" = zamknij listę.',
@@ -2488,6 +2488,16 @@ export const pl: Record<string, string> = {
   'artifact.block.foreign': 'Ten blok należy do innego artefaktu niż ta notatka — akcje są wyłączone.',
   'artifact.block.not_found': 'Artefakt nie znaleziony.',
   'artifact.block.status': 'Status: {{status}}',
+  // Etykiety statusu artefaktu TYLKO DO WYŚWIETLENIA - identyfikator we frontmatterze/prompcie
+  // zostaje surowy (do-akceptacji/uwagi/zaakceptowany/zamkniety/w-trakcie/gotowy/szkic) w każdym
+  // języku interfejsu. Patrz modules/artifacts/artifactStatusLabel.ts.
+  'artifact.status.do_akceptacji': 'Do akceptacji',
+  'artifact.status.uwagi': 'Uwagi',
+  'artifact.status.zaakceptowany': 'Zaakceptowany',
+  'artifact.status.zamkniety': 'Zamknięty',
+  'artifact.status.w_trakcie': 'W trakcie',
+  'artifact.status.gotowy': 'Gotowy',
+  'artifact.status.szkic': 'Szkic',
   'artifact.summon.header': '📄 Artefakt „{{tytul}}" ({{id}}) — user: {{akcja}}',
   'artifact.summon.action.approve': 'zatwierdził plan — realizuj kroki',
   'artifact.summon.action.revise': 'odesłał z uwagami — przeczytaj sekcję „Uwagi usera" i popraw plan',

@@ -12,7 +12,7 @@ import { substituteVariables } from '../../skills/index.js';
 import { MentionAutocomplete, AttachmentManager } from '../../ui-components/index.js';
 import type { MentionAutocompletePlugin, MentionChip } from '../../ui-components/index.js';
 import { getVisibleSubAgentsForAgent } from '../../sub-agents/index.js';
-import { summonAgentForArtifact, activateArtifactInChat, buildArtifactPickerItems } from '../../artifacts/index.js';
+import { summonAgentForArtifact, activateArtifactInChat, buildArtifactPickerItems, artifactStatusLabel } from '../../artifacts/index.js';
 import type { SummonPlugin } from '../../artifacts/index.js';
 import { buildTodoPanelModel, resolveBottomBarMode, DEFAULT_BOTTOM_BAR_MODE } from './todoPanel.js';
 import { renderSubTaskStrip } from './subTaskStrip.js';
@@ -817,7 +817,9 @@ export function _showArtifactPicker(this: ChatViewLike, triggerBtn: HTMLElement 
             titleSpan.textContent = `${item.active ? '✓ ' : ''}📄 ${item.tytul}`;
             row.appendChild(titleSpan);
 
-            const metaBits = [item.typ, item.status].filter(Boolean).join(' · ');
+            // Status w pliku to identyfikator silnika (polski w każdym języku UI) - userowi etykieta.
+            // Pusty status pomijamy (w ciasnej linii meta myślnik byłby szumem; profil agenta go pokazuje).
+            const metaBits = [item.typ, item.status ? artifactStatusLabel(item.status) : ''].filter(Boolean).join(' · ');
             if (metaBits) {
                 const metaSpan = createSpan();
                 metaSpan.className = 'pkm-artifact-pick-status';

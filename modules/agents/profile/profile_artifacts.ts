@@ -13,7 +13,7 @@
  */
 import { App, Modal, Notice, AbstractInputSuggest, TFolder } from 'obsidian';
 import { UiIcons, setSvg } from '../../crystal-soul/index.js';
-import { sortArtifactsForView, buildTypeCheckboxRows, toggleTypeName } from '../../artifacts/index.js';
+import { sortArtifactsForView, buildTypeCheckboxRows, toggleTypeName, artifactStatusLabel } from '../../artifacts/index.js';
 import { t } from '../../../core/i18n/index.js';
 import { log } from '../../../core/utils/Logger.js';
 import type { ProfileCtx } from './profile_types.js';
@@ -74,7 +74,7 @@ function _renderInstanceRow(ctx: ProfileCtx, el: HTMLElement, store: ArtifactSto
 
     const info = row.createDiv({ cls: 'cs-artifact-manage-row__info' });
     info.createDiv({ cls: 'cs-shard__main-label cs-artifact-manage-row__title', text: entry.tytul || entry.id });
-    const meta = [entry.typ || '—', _statusLabel(entry.status), entry.zaktualizowano || entry.utworzono || '—']
+    const meta = [entry.typ || '—', artifactStatusLabel(entry.status), entry.zaktualizowano || entry.utworzono || '—']
         .filter(Boolean).join(' · ');
     info.createDiv({ cls: 'cs-shard__sub-label', text: meta });
 
@@ -160,11 +160,6 @@ function _renderTypes(ctx: ProfileCtx, el: HTMLElement) {
     if (formData.artifact_types.length === 0) {
         el.createDiv({ text: t('profile.artifacts.types_default_hint'), cls: 'setting-item-description' });
     }
-}
-
-/** Status to semantyczny identyfikator (nietłumaczony w silniku); pokaż go wprost. */
-function _statusLabel(status: string | undefined) {
-    return status || '—';
 }
 
 // ─────────────────────────────────────────────────────────────
