@@ -13,13 +13,13 @@ const OWN = 'PKM Assistant/Artefakty/Jaskier/2026-08-22 Plan.md';
 const FOREIGN = 'PKM Assistant/Artefakty/Igor/2026-08-22 Plan Igora.md';
 
 /** Atrapa store'a: `pathById` to jedyne źródło prawdy o właścicielu bloku. */
-function makeStore() {
+function makeStore(status = 'do-akceptacji') {
     const calls: string[] = [];
     const store = {
         pathById: (id: string) => (id === 'art-wlasny' ? OWN : id === 'art-obcy' ? FOREIGN : null),
         read: async (id: string) => {
             calls.push(`read:${id}`);
-            return { id, typ: 'plan', status: 'do-akceptacji', tytul: 'Plan', path: null, agent: null, frontmatter: {}, sections: [], buttons: true };
+            return { id, typ: 'plan', status, tytul: 'Plan', path: null, agent: null, frontmatter: {}, sections: [], buttons: true };
         },
         update: async (id: string) => { calls.push(`update:${id}`); return { applied: 1, errors: [], artifact: null }; },
     };
@@ -61,8 +61,8 @@ function fakeEl(tag = 'div'): FakeEl {
 }
 
 /** Wyrenderuj blok i oddaj drzewko + ślad wywołań store'a. */
-async function render(source: string, sourcePath: string | undefined) {
-    const { store, calls } = makeStore();
+async function render(source: string, sourcePath: string | undefined, status = 'do-akceptacji') {
+    const { store, calls } = makeStore(status);
     let handler: ((src: string, el: FakeEl, ctx: { sourcePath?: string }) => Promise<void>) | null = null;
     const plugin = {
         artifactStore: store,
@@ -123,4 +123,23 @@ test('parseArtifactBlockId: `id: x` oraz goły token', t => {
     t.is(parseArtifactBlockId('id: art-1'), 'art-1');
     t.is(parseArtifactBlockId('art-2'), 'art-2');
     t.is(parseArtifactBlockId(''), '');
+});
+
+// Status jest identyfikatorem silnika (frontmatter, czytany dosłownie przez computeArtifactButtons
+// / ArtifactStore.archive / basesView) - anglojęzyczny user nie ma widzieć w notatce polskiego
+// tokenu. Etykieta idzie za językiem interfejsu, logika guzików dalej dostaje SUROWY status.
+test.serial('pod angielskim interfejsem: guziki dla "do-akceptacji" nadal dwa - logika dostaje surowy status, nie etykietę', async t => {
+    t.teardown(() => setLocale('pl'));
+    setLocale('en');
+    const { flat } = await render('id: art-wlasny', OWN, 'do-akceptacji');
+    t.is(flat.filter(n => n.tag === 'button').length, 2, 'computeArtifactButtons musi dostać surowy identyfikator "do-akceptacji"');
+});
+
+test.serial('pod angielskim interfejsem: zamknięty artefakt pokazuje etykietę statusu w języku UI', async t => {
+    t.teardown(() => setLocale('pl'));
+    setLocale('en');
+    const { root, flat } = await render('id: art-wlasny', OWN, 'zamkniety');
+    t.is(flat.filter(n => n.tag === 'button').length, 0, 'status domknięty = bez akcji');
+    const statusNode = root.children.find(n => n.cls.includes('pkm-artefakt-block__status'));
+    t.is(statusNode?.text, 'Status: Closed');
 });
