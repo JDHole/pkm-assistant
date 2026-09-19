@@ -5,7 +5,6 @@ import {
     migrateDeprecatedTools as runtimeMigrateDeprecatedTools,
     DEFAULT_SUB_AGENT_TOOLS,
 } from './SubAgentLoader.js';
-import { DEFAULT_LIMITS } from '../../config/limits.js';
 
 type TestSubAgent = Record<string, unknown> & {
     name: string;
@@ -18,7 +17,6 @@ type TestLoader = {
     loadSystemRoles?: unknown;
     loadAllSubAgents(): Promise<void>;
     getSubAgent(name: string): TestSubAgent;
-    createPrepSubAgent(agentName: string): Promise<string>;
     deleteSubAgent(name: string): Promise<boolean>;
 };
 const SubAgentLoader = RuntimeSubAgentLoader as unknown as new (vault: unknown) => TestLoader;
@@ -105,21 +103,6 @@ test('loadAllSubAgents parses custom YAML scope', async t => {
     t.deepEqual(config.scope.sections, ['## Drafty']);
     t.deepEqual(config.scope.pinned_notes, ['Strategia X.md']);
     t.is(config.max_tool_result_length, 15000);
-});
-
-// createPrepSubAgent NIE wolno hardcodować literałów
-// (max_iterations: 8, max_tool_result_length: 15000) — musi czytać z config/limits.ts przez
-// defaultMaxIterations()/defaultMaxToolResultLength(), żeby zmiana kanonicznych defaultów
-// dotarła też do nowo odlewanych prep-subów, nie tylko do runtime fallbacku w runnerze.
-test('createPrepSubAgent zapisuje KANONICZNE defaulty z config/limits.ts, nie zwietrzałe literały', async t => {
-    const loader = new SubAgentLoader(makeVault());
-
-    await loader.createPrepSubAgent('Jaskier');
-    const config = loader.getSubAgent('jaskier-prep');
-
-    t.is(config.max_iterations, DEFAULT_LIMITS.subagent_max_iterations_worker);
-    t.not(config.max_iterations, 8, 'stary hardcodowany default nie może wrócić');
-    t.is(config.max_tool_result_length, DEFAULT_LIMITS.max_tool_result_length);
 });
 
 // Dawne czytniki pamięci mapują wprost na prymitywy list/read (single-pass, bez łańcuchów).
