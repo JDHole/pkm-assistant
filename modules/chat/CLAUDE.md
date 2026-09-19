@@ -19,7 +19,8 @@ modules/chat/
 ├── SessionCloseModal.js           # zamknięcie sesji - archive / discard
 ├── OpenSessionModal.js            # otwórz starą sesję - continue / compress / fresh
 ├── ConsolidationProgressModal.js  # nieblokujące okno PRZEBIEGU konsolidacji
-├── archiveReviewRenders.js        # rendery review (dedup + L1/L2/L3) pod modal przebiegu
+├── archiveReviewRenders.js        # rendery review (dedup + L1/L2/L3) pod modal przebiegu; badge typu notatki (kolumna scaleń) idzie przez `memoryNoteTypeLabel` (etykieta TYLKO do wyświetlenia - `merge.target_type` w danych zostaje surowym adresem dla `modules/memory`)
+├── memoryNoteTypeLabel.js         # etykieta UI dla typu notatki pamięci (user/agent_rule/skill_hint/project_context/reference) w JĘZYKU UI; pure, test obok
 ├── consolidationRunState.js       # czyste decyzje modalu (isRunStuck/resolveStepDraft) + test
 ├── slash-commands/                # definicje komend slash (save_session.js)
 └── chat/                          # mixiny (prototype) + helpery/rejestry

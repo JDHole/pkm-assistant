@@ -7,6 +7,7 @@
  * caller potem odda do `applyStepDecision`). Checkboxy/inputy zapisują wprost do tych obiektów.
  */
 import { t } from '../../core/i18n/index.js';
+import { memoryNoteTypeLabel } from './memoryNoteTypeLabel.js';
 
 export type MergeReview = {
     accepted?: boolean;
@@ -102,7 +103,7 @@ function renderMergesColumn(parent: HTMLElement, merges: MergeReview[]): void {
         nameInput.placeholder = t('modal.archive.target_name_placeholder');
         nameInput.addClass('cs-archive-modal__name-input');
         nameInput.addEventListener('input', () => { merge.target_name = nameInput.value; });
-        head.createSpan({ text: merge.target_type || 'reference', cls: 'pkm-review__badge' });
+        head.createSpan({ text: memoryNoteTypeLabel(merge.target_type), cls: 'pkm-review__badge' });
 
         // Źródła (chipsy)
         const sources = item.createDiv({ cls: 'cs-archive-modal__sources' });
