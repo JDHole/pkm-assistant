@@ -115,6 +115,7 @@ export const pl: Record<string, string> = {
   // pod tym samym napisem „PKM Assistant" dawały w palecie dwa identyczne wpisy.
   'chat.view_title': 'Czat',
   'release_notes.view_title': 'Co nowego',
+  'release_notes.author_note': '**Słowo od autora.** PKM Assistant buduje jedna osoba - nie-programista, któremu kod pisze Claude Code; solowy projekt w duchu „vibe-dev". To dopiero początek drogi: zdarzają się niedoróbki, a poprawki wychodzą na bieżąco, w miarę jak je zgłaszacie, ale każda wymaga czasu. Jeśli plugin Ci pomaga, najlepszym wsparciem jest zgłoszenie błędu, pomysł, gwiazdka na repo albo odrobina cierpliwości. Dziękuję, że jesteś tu od początku drogi.',
 
   // ── Chat UI ──
   'chat.eye': 'Oczko — kontekst otwartej notatki',
