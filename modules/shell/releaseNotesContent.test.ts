@@ -5,7 +5,7 @@
  */
 import test from 'ava';
 
-import { setLocale } from '../../core/i18n/index.js';
+import { setLocale, t } from '../../core/i18n/index.js';
 import { withAuthorNote } from './releaseNotesContent.js';
 
 test.serial('en: dokleja literalny angielski callout pod oryginalną treścią', t => {
@@ -57,4 +57,33 @@ test.serial('trailing whitespace oryginalnej treści jest przycinany przed dokle
     const result = withAuthorNote('# Release\n\nBody text.   \n\n\n');
 
     t.true(result.startsWith('# Release\n\nBody text.\n\n---\n\n> [!NOTE]\n>'));
+});
+
+// ── Idempotencja: widok wołałby to dwa razy tylko przez pomyłkę, ale contract ma być
+// odporny - notka nie ma prawa się zdublować. ──
+
+test.serial('idempotentne: treść, która już zawiera notkę, nie dostaje drugiej kopii (en)', t => {
+    setLocale('en');
+    t.teardown(() => setLocale('en'));
+
+    const once = withAuthorNote('# Release 2.2.7\n\nSome fixes.');
+    const twice = withAuthorNote(once);
+
+    t.is(twice, once, 'druga sklejka nie ma prawa nic zmienić w treści, która już niesie notkę');
+    const note = t('release_notes.author_note');
+    const occurrences = twice.split(note).length - 1;
+    t.is(occurrences, 1, `notka musi wystąpić dokładnie raz, wystąpiła ${occurrences}x`);
+});
+
+test.serial('idempotentne: treść, która już zawiera notkę, nie dostaje drugiej kopii (pl)', t => {
+    setLocale('pl');
+    t.teardown(() => setLocale('en'));
+
+    const once = withAuthorNote('# Wydanie 2.2.7\n\nPoprawki.');
+    const twice = withAuthorNote(once);
+
+    t.is(twice, once);
+    const note = t('release_notes.author_note');
+    const occurrences = twice.split(note).length - 1;
+    t.is(occurrences, 1, `notka musi wystąpić dokładnie raz, wystąpiła ${occurrences}x`);
 });
