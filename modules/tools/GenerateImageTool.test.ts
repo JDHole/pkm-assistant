@@ -15,6 +15,7 @@ import test from 'ava';
 import { registerHooks } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
+import { setLocale } from '../../core/i18n/index.js';
 
 
 /** Wynik `generate_image` czytany w asercjach. */
@@ -110,6 +111,33 @@ test('contextExtractor oddaje folder zapisu, prompt idzie osobnym polem', t => {
 
     const wlasny = tool.contextExtractor({ prompt: 'x' }, { plugin: pluginWith({ platform: 'openai', saveFolder: 'Grafiki/AI/' }) });
     t.is(wlasny.targetPath, 'Grafiki/AI', 'końcowy ukośnik ucięty tak samo jak w execute');
+});
+
+// ── BUG (fix/mcp-descriptions-i18n): opis i parametry były na sztywno po polsku, więc
+// user z angielskim UI widział polski tekst narzędzia wysyłanego do modelu. ──
+
+test.serial('opis generate_image i parametru "prompt" mówią po angielsku pod setLocale("en")', t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+    const tool = createGenerateImageTool();
+    t.true(tool.description.startsWith('Generate an image from a text description.'));
+    t.false(/[ąćęłńóśźż]/i.test(tool.description), 'opis pod EN nie może nieść polskich znaków diakrytycznych');
+    t.false(/\bWygeneruj\b|\bobrazow\b|\bszczegolowy\b/.test(tool.description), 'opis pod EN nie może nieść starych polskich słów bez ogonków');
+    t.is(
+        (tool.inputSchema.properties as Record<string, { description: string }>).prompt.description,
+        'Description of the image to generate. Preferably in English, detailed.'
+    );
+});
+
+test.serial('opis generate_image mówi po polsku pod setLocale("pl")', t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
+    const tool = createGenerateImageTool();
+    t.true(tool.description.startsWith('Wygeneruj obraz na podstawie opisu tekstowego.'));
+    t.is(
+        (tool.inputSchema.properties as Record<string, { description: string }>).prompt.description,
+        'Opis obrazu do wygenerowania. Najlepiej po angielsku, szczegółowy.'
+    );
 });
 
 test('niedozwolony saveFolder odbija się PRZED wywołaniem platformy', async t => {

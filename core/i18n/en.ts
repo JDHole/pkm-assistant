@@ -1420,6 +1420,17 @@ export const en: Record<string, string> = {
   'settings.mcp_servers_builtin_header': 'Built-in (bundled with plugin)',
   'settings.mcp_servers_builtin_badge': '🔒 Built-in',
   'settings.mcp_servers_tools_count': '{{count}} tools',
+  // Built-in server descriptions (Settings → MCP Servers catalog) - resolved at read time by
+  // `resolveServerDescription()` (modules/tools/built-in-servers/index.ts), never baked into
+  // the manifest itself. Literal t() calls for each key below live there, for the parity guard.
+  'mcp.server.core.desc': 'Always-available agent essentials (asking user).',
+  'mcp.server.vault.desc': 'Vault file operations + unified search (keyword/semantic hybrid via RRF, where filters).',
+  'mcp.server.memory.desc': 'Hierarchical agent memory (brain + sessions + summaries L1/L2/L3). Read/list/search memory via read/list/search (scope=memory).',
+  'mcp.server.web.desc': 'Web search (Google/Brave/Bing) + page reader. Requires the provider\'s API key.',
+  'mcp.server.multimodal.desc': 'Image generation (cloud platforms) + adding text to images.',
+  'mcp.server.delegation.desc': 'Delegation to sub-agents + handing off the conversation to another agent.',
+  'mcp.server.artifacts.desc': 'Artifacts: living notes co-authored with the user (artifact_*) + the agent\'s primitive todo tool.',
+  'mcp.server.komunikator.desc': 'Komunikator: simple mail between agents (send / list / read).',
   'modal.mcp_server_editor.new_title': 'Add new MCP server',
   'modal.mcp_server_editor.error_write_failed': 'Failed to write files: {{error}}',
   // External servers (real MCP client: stdio = local process, http = remote server)
@@ -1462,7 +1473,7 @@ export const en: Record<string, string> = {
   'settings.mcp_external_import_added': 'Added {{count}} server(s) from Claude Desktop.',
   'settings.mcp_external_import_failed': 'Could not read the configuration file.',
   // Preset hints (what the user still has to fill in)
-  'settings.mcp_preset_hint_filesystem': 'Replace <ŚCIEŻKA> in the arguments with the folder the server may access.',
+  'settings.mcp_preset_hint_filesystem': 'Replace <PATH> in the arguments with the folder the server may access.',
   'settings.mcp_preset_hint_github': 'Paste your GitHub token into the GITHUB_PERSONAL_ACCESS_TOKEN variable.',
   'settings.mcp_preset_hint_memory': 'Nothing to fill in — this is the MCP server\'s own memory, separate from agent memory.',
   'settings.mcp_preset_hint_fetch': 'Requires uv/uvx (Python) installed. Nothing to fill in.',
@@ -2481,6 +2492,32 @@ export const en: Record<string, string> = {
   // web_read
   'mcp.web_read.desc': 'Read the content of a web page.\n\nHOW IT WORKS:\n- You provide a URL → you get the page text without HTML and ads (Jina Reader)\n- It also reads PDFs — the reader extracts their text. Images, archives and login-walled pages are out of reach\n- A page longer than the limit comes back as a SUMMARY from a cheap model plus a citations field with verbatim quotes. Without a Researcher model the content is truncated — the note field says so\n- Only URLs of known provenance may be read: returned by an earlier web_search or provided by the user. Do not guess URLs\n\nWHEN TO USE:\n- After web_search, when the fragment is not enough and you need the whole thing\n- User provides a link: "read this article", "what is on this page"\n\nWHEN NOT TO USE:\n- When the fragments from web_search are enough\n\nNOTES:\n- When quoting, take the text from the citations field — those are verbatim; the summary is a paraphrase',
   'mcp.web_read.param.url': 'Full URL of page to read (e.g. https://example.com/article)',
+
+  // generate_image
+  'mcp.generate_image.desc': 'Generate an image from a text description.\n\nHOW IT WORKS:\n- You send a description (prompt) → you get a generated image saved in the vault\n- Supported platforms: {{platforms}}\n- The platform is configurable in the plugin settings\n\nWHEN TO USE:\n- User asks to generate an image, graphic, illustration\n- User says: "generate an image", "make a graphic", "draw", "create image"\n- You need a visualization for a note\n- User wants a thumbnail, icon, illustration for an article\n\nHOW TO WRITE PROMPTS:\n- Write in English (better results on most platforms)\n- Be detailed: "A serene mountain landscape at sunset with purple clouds" beats "mountains"\n- Describe the style if it matters: "digital art", "oil painting", "photorealistic", "minimalist"\n\nSIZES:\n- 1024x1024 (square, default)\n- 1024x1792 (portrait)\n- 1792x1024 (landscape)\n\nNOTES:\n- Requires a configured platform and API key in settings\n- The image is automatically saved to Attachments/generated/ (or the configured folder — Settings -> Image Gen; .pkm-assistant/ is unavailable to this tool)\n- Generation can take 5-30 seconds (depends on platform)',
+  'mcp.generate_image.param.prompt': 'Description of the image to generate. Preferably in English, detailed.',
+  'mcp.generate_image.param.size': 'Image size. Default 1024x1024 (square).',
+  'mcp.generate_image.param.style': 'Image style (e.g. vivid, natural, digital-art). Optional.',
+
+  // add_text_to_image
+  'mcp.add_text_to_image.desc': 'Overlay text (a caption) onto an existing image in the vault.\n\nHOW IT WORKS:\n- You provide the image path, the text and a position → you get a new image with the text overlaid\n- Predefined positions: top-left, top-center, top-right, center, bottom-left, bottom-center, bottom-right\n- Or provide exact x,y (in pixels)\n\nWHEN TO USE:\n- User asks to add a caption/text/watermark to an image\n- User says: "add a caption", "put text on the graphic", "caption the photo"\n- User wants a title, watermark, or caption on a generated graphic\n\nSTYLE PARAMETERS:\n- fontSize: font size (default 32)\n- fontFamily: font name (default "Arial")\n- color: text color (default "#ffffff")\n- shadow: true/false — shadow under the text (default true)\n- shadowColor: shadow color (default "rgba(0,0,0,0.7)")\n- bold: true/false (default false)\n- italic: true/false (default false)\n- outline: true/false — outline around the text (default false)\n- outlineColor: outline color (default "#000000")\n- outlineWidth: outline thickness (default 2)',
+  'mcp.add_text_to_image.param.path': 'Path to the image in the vault (e.g. "Attachments/generated/photo.png"). Canonical name (used to be `image_path`).',
+  'mcp.add_text_to_image.param.image_path': 'DEPRECATED — use `path`. The alias works with a deprecation warning, breaking in v3.0.',
+  'mcp.add_text_to_image.param.text': 'Text to overlay on the image',
+  'mcp.add_text_to_image.param.position': 'Text position. Default "bottom-left". Use "custom" with x/y.',
+  'mcp.add_text_to_image.param.x': 'X position in pixels (only when position="custom")',
+  'mcp.add_text_to_image.param.y': 'Y position in pixels (only when position="custom")',
+  'mcp.add_text_to_image.param.fontSize': 'Font size (default 32)',
+  'mcp.add_text_to_image.param.fontFamily': 'Font (default "Arial")',
+  'mcp.add_text_to_image.param.color': 'Text color, e.g. "#ffffff" (default white)',
+  'mcp.add_text_to_image.param.shadow': 'Add a shadow under the text (default true)',
+  'mcp.add_text_to_image.param.shadowColor': 'Shadow color (default "rgba(0,0,0,0.7)")',
+  'mcp.add_text_to_image.param.bold': 'Bold (default false)',
+  'mcp.add_text_to_image.param.italic': 'Italic (default false)',
+  'mcp.add_text_to_image.param.outline': 'Outline around the text (default false)',
+  'mcp.add_text_to_image.param.outlineColor': 'Outline color (default "#000000")',
+  'mcp.add_text_to_image.param.outlineWidth': 'Outline thickness in px (default 2)',
+  'mcp.add_text_to_image.param.output_path': 'Path to save the result. Default: original_file_text.png',
 
 
   // ── Starter templates: PlaybookManager ──

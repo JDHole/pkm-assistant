@@ -1426,6 +1426,17 @@ export const pl: Record<string, string> = {
   'settings.mcp_servers_builtin_header': 'Built-in (wbudowane w plugin)',
   'settings.mcp_servers_builtin_badge': '🔒 Wbudowany',
   'settings.mcp_servers_tools_count': '{{count}} narzędzi',
+  // Opisy serwerów wbudowanych (katalog Ustawienia → Serwery MCP) - rozwiązywane przy odczycie
+  // przez `resolveServerDescription()` (modules/tools/built-in-servers/index.ts), nigdy zaszyte
+  // w samym manifeście. Literalne wywołania t() dla kluczy niżej żyją tam, pod strażnika parytetu.
+  'mcp.server.core.desc': 'Zawsze dostępne podstawy agenta (pytanie użytkownika).',
+  'mcp.server.vault.desc': 'Operacje na plikach vaulta + zunifikowane wyszukiwanie (hybryda keyword/semantic przez RRF, filtry where).',
+  'mcp.server.memory.desc': 'Hierarchiczna pamięć agenta (brain + sesje + podsumowania L1/L2/L3). Odczyt/listing/szukanie pamięci przez read/list/search (scope=memory).',
+  'mcp.server.web.desc': 'Wyszukiwanie w internecie (Google/Brave/Bing) + czytnik stron. Wymaga klucza API providera.',
+  'mcp.server.multimodal.desc': 'Generowanie obrazów (platformy chmurowe) + dodawanie tekstu na obrazy.',
+  'mcp.server.delegation.desc': 'Delegacja do sub-agentów + przekazanie rozmowy innemu agentowi.',
+  'mcp.server.artifacts.desc': 'Artefakty: żywe notatki współtworzone z userem (artifact_*) + prymitywne todo agenta.',
+  'mcp.server.komunikator.desc': 'Komunikator: prosta poczta między agentami (wyślij / lista / przeczytaj).',
   'modal.mcp_server_editor.new_title': 'Dodaj nowy serwer MCP',
   'modal.mcp_server_editor.error_write_failed': 'Nie udało się zapisać plików: {{error}}',
   // Serwery zewnętrzne (prawdziwy klient MCP: stdio = lokalny proces, http = zdalny serwer)
@@ -1468,7 +1479,7 @@ export const pl: Record<string, string> = {
   'settings.mcp_external_import_added': 'Dodano {{count}} serwer(y) z Claude Desktop.',
   'settings.mcp_external_import_failed': 'Nie udało się odczytać pliku konfiguracji.',
   // Podpowiedzi presetów (co user musi uzupełnić po wybraniu)
-  'settings.mcp_preset_hint_filesystem': 'Podmień <ŚCIEŻKA> w argumentach na folder, do którego serwer ma mieć dostęp.',
+  'settings.mcp_preset_hint_filesystem': 'Podmień <PATH> w argumentach na folder, do którego serwer ma mieć dostęp.',
   'settings.mcp_preset_hint_github': 'Wklej swój token GitHuba w zmiennej GITHUB_PERSONAL_ACCESS_TOKEN.',
   'settings.mcp_preset_hint_memory': 'Nic nie musisz uzupełniać — to osobna pamięć serwera MCP, niezależna od pamięci agenta.',
   'settings.mcp_preset_hint_fetch': 'Wymaga zainstalowanego uv/uvx (Python). Nic nie musisz uzupełniać.',
@@ -2489,6 +2500,32 @@ export const pl: Record<string, string> = {
   // web_read
   'mcp.web_read.desc': 'Odczytaj treść strony internetowej.\n\nJAK DZIAŁA:\n- Podajesz URL → dostajesz tekst strony bez HTML i reklam (Jina Reader)\n- Czyta też PDF-y — reader sam wyciąga z nich tekst. Obrazów, archiwów i stron za logowaniem nie przeczyta\n- Strona dłuższa niż limit wraca jako STRESZCZENIE tanim modelem + pole citations z dosłownymi cytatami. Bez modelu Badacza treść jest ucinana — mówi o tym pole note\n- Wolno czytać tylko adresy znanego pochodzenia: zwrócone wcześniej przez web_search albo podane przez użytkownika. Nie zgaduj URL-i\n\nKIEDY UŻYWAĆ:\n- Po web_search, gdy fragment nie wystarcza i trzeba przeczytać całość\n- User podaje link: "przeczytaj ten artykuł", "co jest na tej stronie"\n\nKIEDY NIE UŻYWAĆ:\n- Gdy wystarczą fragmenty z web_search\n\nUWAGI:\n- Cytując, bierz tekst z pola citations — to dosłowne fragmenty, streszczenie jest parafrazą',
   'mcp.web_read.param.url': 'Pełny URL strony do odczytania (np. https://example.com/article)',
+
+  // generate_image
+  'mcp.generate_image.desc': 'Wygeneruj obraz na podstawie opisu tekstowego.\n\nJAK DZIAŁA:\n- Wysyłasz opis (prompt) → dostajesz wygenerowany obraz zapisany w vaultcie\n- Obsługiwane platformy: {{platforms}}\n- Platforma jest konfigurowalna w ustawieniach pluginu\n\nKIEDY UŻYWAĆ:\n- User prosi o wygenerowanie obrazu, grafiki, ilustracji\n- User mówi: "wygeneruj obraz", "zrób grafikę", "narysuj", "create image"\n- Potrzebujesz wizualizacji do notatki\n- User chce thumbnail, ikonę, ilustrację do artykułu\n\nJAK FORMUŁOWAĆ PROMPTY:\n- Pisz po angielsku (lepsze wyniki na większości platform)\n- Bądź szczegółowy: "A serene mountain landscape at sunset with purple clouds" > "góry"\n- Opisz styl jeśli ważny: "digital art", "oil painting", "photorealistic", "minimalist"\n\nROZMIARY:\n- 1024x1024 (kwadrat, domyślny)\n- 1024x1792 (portret)\n- 1792x1024 (krajobraz)\n\nUWAGI:\n- Wymaga skonfigurowanej platformy i klucza API w ustawieniach\n- Obraz jest automatycznie zapisywany do Attachments/generated/ (albo ustawionego folderu — Ustawienia -> Image Gen; .pkm-assistant/ jest niedostępne dla tego narzędzia)\n- Generowanie może trwać 5-30 sekund (zależne od platformy)',
+  'mcp.generate_image.param.prompt': 'Opis obrazu do wygenerowania. Najlepiej po angielsku, szczegółowy.',
+  'mcp.generate_image.param.size': 'Rozmiar obrazu. Domyślnie 1024x1024 (kwadrat).',
+  'mcp.generate_image.param.style': 'Styl obrazu (np. vivid, natural, digital-art). Opcjonalny.',
+
+  // add_text_to_image
+  'mcp.add_text_to_image.desc': 'Nałóż tekst (napis) na istniejący obraz w vaultcie.\n\nJAK DZIAŁA:\n- Podajesz ścieżkę do obrazu, tekst i pozycję → dostajesz nowy obraz z nałożonym tekstem\n- Pozycje predefiniowane: top-left, top-center, top-right, center, bottom-left, bottom-center, bottom-right\n- Albo podaj dokładne x,y (w pikselach)\n\nKIEDY UŻYWAĆ:\n- User prosi o dodanie napisu/tekstu/watermarku na obraz\n- User mówi: "dodaj napis", "wstaw tekst na grafikę", "podpisz zdjęcie"\n- User chce tytuł, watermark, podpis na wygenerowanej grafice\n\nPARAMETRY STYLU:\n- fontSize: rozmiar czcionki (domyślnie 32)\n- fontFamily: nazwa czcionki (domyślnie "Arial")\n- color: kolor tekstu (domyślnie "#ffffff")\n- shadow: true/false — cień pod tekstem (domyślnie true)\n- shadowColor: kolor cienia (domyślnie "rgba(0,0,0,0.7)")\n- bold: true/false (domyślnie false)\n- italic: true/false (domyślnie false)\n- outline: true/false — obrys wokół tekstu (domyślnie false)\n- outlineColor: kolor obrysu (domyślnie "#000000")\n- outlineWidth: grubość obrysu (domyślnie 2)',
+  'mcp.add_text_to_image.param.path': 'Ścieżka do obrazu w vaulcie (np. "Attachments/generated/foto.png"). Nazwa kanoniczna (był `image_path`).',
+  'mcp.add_text_to_image.param.image_path': 'DEPRECATED — użyj `path`. Alias działa z deprecation warning, breaking v3.0.',
+  'mcp.add_text_to_image.param.text': 'Tekst do nałożenia na obraz',
+  'mcp.add_text_to_image.param.position': 'Pozycja tekstu. Domyślnie "bottom-left". Użyj "custom" z x/y.',
+  'mcp.add_text_to_image.param.x': 'Pozycja X w pikselach (tylko gdy position="custom")',
+  'mcp.add_text_to_image.param.y': 'Pozycja Y w pikselach (tylko gdy position="custom")',
+  'mcp.add_text_to_image.param.fontSize': 'Rozmiar czcionki (domyślnie 32)',
+  'mcp.add_text_to_image.param.fontFamily': 'Czcionka (domyślnie "Arial")',
+  'mcp.add_text_to_image.param.color': 'Kolor tekstu, np. "#ffffff" (domyślnie biały)',
+  'mcp.add_text_to_image.param.shadow': 'Dodaj cień pod tekstem (domyślnie true)',
+  'mcp.add_text_to_image.param.shadowColor': 'Kolor cienia (domyślnie "rgba(0,0,0,0.7)")',
+  'mcp.add_text_to_image.param.bold': 'Pogrubienie (domyślnie false)',
+  'mcp.add_text_to_image.param.italic': 'Kursywa (domyślnie false)',
+  'mcp.add_text_to_image.param.outline': 'Obrys wokół tekstu (domyślnie false)',
+  'mcp.add_text_to_image.param.outlineColor': 'Kolor obrysu (domyślnie "#000000")',
+  'mcp.add_text_to_image.param.outlineWidth': 'Grubość obrysu w px (domyślnie 2)',
+  'mcp.add_text_to_image.param.output_path': 'Ścieżka zapisu wyniku. Domyślnie: oryginalny_plik_text.png',
 
 
   // ── Starter templates: PlaybookManager ──

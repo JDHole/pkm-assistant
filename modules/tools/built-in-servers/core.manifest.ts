@@ -1,7 +1,7 @@
 export default {
     name: 'core',
     version: 'plugin',
-    description: 'Always-available agent essentials (asking user).',
+    // Opis dla UI: resolveServerDescription('core') → t('mcp.server.core.desc') (index.ts).
     icon: 'circle-dot',
     tools: ['ask_user'],
     requires_permission: [],

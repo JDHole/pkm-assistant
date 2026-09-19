@@ -8,7 +8,7 @@
  * Każdy entry w cache ma `source: 'built-in'`. Cache w Map.
  */
 import { log } from '../../core/utils/Logger.js';
-import { resolveBuiltinManifests } from './built-in-servers/index.js';
+import { resolveBuiltinManifests, resolveServerDescription } from './built-in-servers/index.js';
 import type { BuiltinServerManifest } from './built-in-servers/index.js';
 
 /**
@@ -110,11 +110,16 @@ export class ServerLoader {
 
     /**
      * Get server catalog (name + description + tool count + source for UI badge).
+     *
+     * `description` idzie przez `resolveServerDescription()` TUTAJ, na KAŻDE wywołanie — nie
+     * z pola cache'owanego przy `loadAllServers()`. Ustawienia → Serwery MCP wołają tę metodę
+     * na każdy render, więc zmiana języka w sesji (dropdown → `setLocale()` → `owner.render()`)
+     * pokazuje właściwy tekst bez restartu pluginu.
      */
     getServerCatalog(): ServerCatalogEntry[] {
         return this.getAllServers().map(s => ({
             name: s.name,
-            description: s.description,
+            description: resolveServerDescription(s.name),
             toolCount: s.tools.length,
             icon: s.icon,
             source: s.source || 'built-in',

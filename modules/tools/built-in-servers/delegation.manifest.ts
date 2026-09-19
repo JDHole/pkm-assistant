@@ -2,7 +2,7 @@ export default {
     name: 'delegation',
     version: 'plugin',
     // Poczta między agentami ma własny serwer `komunikator` — `agent_message` się tu nie pojawia.
-    description: 'Delegacja do sub-agentów + przekazanie rozmowy innemu agentowi.',
+    // Opis dla UI: resolveServerDescription('delegation') → t('mcp.server.delegation.desc') (index.ts).
     icon: 'users',
     tools: [
         'delegate', 'agent_delegate'

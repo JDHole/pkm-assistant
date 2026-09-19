@@ -20,15 +20,21 @@ import web from './web.manifest.js';
 import multimodal from './multimodal.manifest.js';
 import delegation from './delegation.manifest.js';
 import komunikator from './komunikator.manifest.js';
+import { t } from '../../../core/i18n/index.js';
 
 /**
  * Manifest wbudowanego serwera MCP — dokładnie to, co eksportują pliki `*.manifest.ts`.
  * `version` bywa wartownikiem `'plugin'` (rozwijanym przez `resolveBuiltinManifests`).
+ *
+ * ŚWIADOMIE bez pola `description` — manifesty PL/EN na sztywno pokazywały userowi opis w
+ * niewłaściwym języku (user z angielskim UI widział polskie zdania dla artifacts/delegation/
+ * komunikator/multimodal, user z polskim UI widział angielskie dla core/vault/memory). Tekst
+ * dla UI liczy `resolveServerDescription(name)` NIŻEJ, przy KAŻDYM odczycie (nie raz, przy
+ * imporcie modułu — `t()` zależy od `setLocale()`, która leci z `src/main.ts` PO imporcie).
  */
 export interface BuiltinServerManifest {
     name: string;
     version: string;
-    description: string;
     icon: string;
     tools: string[];
     requires_permission: string[];
@@ -79,6 +85,32 @@ export function resolveBuiltinManifests({ pluginVersion, komunikatorEnabled = tr
  */
 export function getBuiltinManifest(name: string): BuiltinServerManifest | null {
     return BUILTIN_MANIFESTS.find(m => m.name === name) || null;
+}
+
+/**
+ * Opis wbudowanego serwera dla UI (Ustawienia → Serwery MCP), w aktualnym języku interfejsu.
+ * Liczony PRZY KAŻDYM WYWOŁANIU — wołacze (`ServerLoader.getServerCatalog()`,
+ * `ServerManager.connectServer()`) mają wołać tę funkcję na każdy odczyt/render, nie cache'ować
+ * wyniku, żeby zmiana języka w sesji (Ustawienia → dropdown język → `owner.render()`) pokazała
+ * właściwy tekst BEZ restartu pluginu.
+ *
+ * Klucze są LITERALNE (`t('mcp.server.core.desc')` itd.), nie sklejane z `name` w locie —
+ * `core/i18n/parity_repo.test.ts` skanuje dokładnie literalne wywołania `t('...')` i pilnuje,
+ * żeby każdy klucz istniał w obu słownikach. Szablon `t('mcp.server.' + name + '.desc')`
+ * byłby dla tego strażnika niewidzialny.
+ */
+export function resolveServerDescription(name: string): string {
+    switch (name) {
+        case 'core': return t('mcp.server.core.desc');
+        case 'vault': return t('mcp.server.vault.desc');
+        case 'memory': return t('mcp.server.memory.desc');
+        case 'web': return t('mcp.server.web.desc');
+        case 'multimodal': return t('mcp.server.multimodal.desc');
+        case 'delegation': return t('mcp.server.delegation.desc');
+        case 'artifacts': return t('mcp.server.artifacts.desc');
+        case 'komunikator': return t('mcp.server.komunikator.desc');
+        default: return name;
+    }
 }
 
 // Nie dodawaj aliasów re-eksportu (coreManifest…komunikatorManifest) — realni wołacze chodzą

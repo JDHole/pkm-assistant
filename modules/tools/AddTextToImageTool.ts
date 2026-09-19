@@ -156,101 +156,79 @@ function outputPathFor(args: AddTextToImageArgs | null | undefined, sourceOverri
 export function createAddTextToImageTool() {
     return {
         name: 'add_text_to_image',
-        description: `Nałóż tekst (napis) na istniejący obraz w vaultcie.
-
-JAK DZIAŁA:
-- Podajesz ścieżkę do obrazu, tekst i pozycję → dostajesz nowy obraz z nałożonym tekstem
-- Pozycje predefiniowane: top-left, top-center, top-right, center, bottom-left, bottom-center, bottom-right
-- Albo podaj dokładne x,y (w pikselach)
-
-KIEDY UŻYWAĆ:
-- User prosi o dodanie napisu/tekstu/watermarku na obraz
-- User mówi: "dodaj napis", "wstaw tekst na grafikę", "podpisz zdjęcie"
-- User chce tytuł, watermark, podpis na wygenerowanej grafice
-
-PARAMETRY STYLU:
-- fontSize: rozmiar czcionki (domyślnie 32)
-- fontFamily: nazwa czcionki (domyślnie "Arial")
-- color: kolor tekstu (domyślnie "#ffffff")
-- shadow: true/false — cień pod tekstem (domyślnie true)
-- shadowColor: kolor cienia (domyślnie "rgba(0,0,0,0.7)")
-- bold: true/false (domyślnie false)
-- italic: true/false (domyślnie false)
-- outline: true/false — obrys wokół tekstu (domyślnie false)
-- outlineColor: kolor obrysu (domyślnie "#000000")
-- outlineWidth: grubość obrysu (domyślnie 2)`,
+        description: t('mcp.add_text_to_image.desc'),
 
         inputSchema: {
             type: 'object',
             properties: {
                 path: {
                     type: 'string',
-                    description: 'Ścieżka do obrazu w vaulcie (np. "Attachments/generated/foto.png"). Nazwa kanoniczna (był `image_path`).'
+                    description: t('mcp.add_text_to_image.param.path')
                 },
                 image_path: {
                     type: 'string',
-                    description: 'DEPRECATED — użyj `path`. Alias działa z deprecation warning, breaking v3.0.'
+                    description: t('mcp.add_text_to_image.param.image_path')
                 },
                 text: {
                     type: 'string',
-                    description: 'Tekst do nałożenia na obraz'
+                    description: t('mcp.add_text_to_image.param.text')
                 },
                 position: {
                     type: 'string',
                     enum: ['top-left', 'top-center', 'top-right', 'center', 'bottom-left', 'bottom-center', 'bottom-right', 'custom'],
-                    description: 'Pozycja tekstu. Domyślnie "bottom-left". Użyj "custom" z x/y.'
+                    description: t('mcp.add_text_to_image.param.position')
                 },
                 x: {
                     type: 'number',
-                    description: 'Pozycja X w pikselach (tylko gdy position="custom")'
+                    description: t('mcp.add_text_to_image.param.x')
                 },
                 y: {
                     type: 'number',
-                    description: 'Pozycja Y w pikselach (tylko gdy position="custom")'
+                    description: t('mcp.add_text_to_image.param.y')
                 },
                 fontSize: {
                     type: 'number',
-                    description: 'Rozmiar czcionki (domyślnie 32)'
+                    description: t('mcp.add_text_to_image.param.fontSize')
                 },
                 fontFamily: {
                     type: 'string',
-                    description: 'Czcionka (domyślnie "Arial")'
+                    description: t('mcp.add_text_to_image.param.fontFamily')
                 },
                 color: {
                     type: 'string',
-                    description: 'Kolor tekstu, np. "#ffffff" (domyślnie biały)'
+                    description: t('mcp.add_text_to_image.param.color')
                 },
                 shadow: {
                     type: 'boolean',
-                    description: 'Dodaj cień pod tekstem (domyślnie true)'
+                    description: t('mcp.add_text_to_image.param.shadow')
                 },
                 shadowColor: {
                     type: 'string',
-                    description: 'Kolor cienia (domyślnie "rgba(0,0,0,0.7)")'
+                    description: t('mcp.add_text_to_image.param.shadowColor')
                 },
                 bold: {
                     type: 'boolean',
-                    description: 'Pogrubienie (domyślnie false)'
+                    description: t('mcp.add_text_to_image.param.bold')
                 },
                 italic: {
                     type: 'boolean',
-                    description: 'Kursywa (domyślnie false)'
+                    description: t('mcp.add_text_to_image.param.italic')
                 },
                 outline: {
                     type: 'boolean',
-                    description: 'Obrys wokół tekstu (domyślnie false)'
+                    description: t('mcp.add_text_to_image.param.outline')
                 },
                 outlineColor: {
                     type: 'string',
-                    description: 'Kolor obrysu (domyślnie "#000000")'
+                    description: t('mcp.add_text_to_image.param.outlineColor')
                 },
                 outlineWidth: {
                     type: 'number',
-                    description: 'Grubość obrysu w px (domyślnie 2)'
+                    description: t('mcp.add_text_to_image.param.outlineWidth')
                 },
                 output_path: {
                     type: 'string',
-                    description: 'Ścieżka zapisu wyniku. Domyślnie: oryginalny_plik_text.png'
+                    description: t('mcp.add_text_to_image.param.output_path')
                 },
             },
             // required is `text`; path/image_path either accepted (alias resolver in MCPClient).

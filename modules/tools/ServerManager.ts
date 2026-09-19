@@ -12,6 +12,7 @@
  */
 import { ServerLoader } from './ServerLoader.js';
 import type { LoadedServerConfig } from './ServerLoader.js';
+import { resolveServerDescription } from './built-in-servers/index.js';
 import { log } from '../../core/utils/Logger.js';
 import type { ToolDefinition } from './ToolRegistry.js';
 
@@ -181,7 +182,8 @@ export class ServerManager {
             success: true,
             tools: registeredTools,
             knowledge: config.knowledge ? config.knowledge.slice(0, 2000) : '',
-            description: config.description,
+            // Liczony na ten odczyt, nie cache'owany opis (patrz `ServerLoader.getServerCatalog`).
+            description: resolveServerDescription(config.name),
         };
     }
 

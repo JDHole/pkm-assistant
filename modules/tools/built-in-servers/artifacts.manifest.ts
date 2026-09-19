@@ -1,7 +1,7 @@
 export default {
     name: 'artifacts',
     version: 'plugin',
-    description: 'Artefakty: żywe notatki współtworzone z userem (artifact_*) + prymitywne todo agenta.',
+    // Opis dla UI: resolveServerDescription('artifacts') → t('mcp.server.artifacts.desc') (index.ts).
     icon: 'clipboard-list',
     tools: [
         // Artefakty żywe (gatunek 1) — notatki w vaultcie z approval flow.

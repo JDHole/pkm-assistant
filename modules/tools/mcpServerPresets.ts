@@ -14,8 +14,12 @@
  *   - `hint`— KLUCZ i18n z jednozdaniowym „co jeszcze musisz uzupełnić".
  */
 
-/** Placeholder w argumentach, który user MUSI podmienić na swoją ścieżkę. */
-export const PRESET_PATH_PLACEHOLDER = '<ŚCIEŻKA>';
+/**
+ * Placeholder w argumentach, który user MUSI podmienić na swoją ścieżkę. Neutralny token
+ * techniczny (nie polskie słowo) - preset i jego hint (`settings.mcp_preset_hint_filesystem`,
+ * en/pl) muszą się zgadzać niezależnie od języka UI.
+ */
+export const PRESET_PATH_PLACEHOLDER = '<PATH>';
 
 /** Gotowy serwer MCP do wypełnienia formularza (kształt opisany w nagłówku pliku). */
 export interface McpServerPreset {
