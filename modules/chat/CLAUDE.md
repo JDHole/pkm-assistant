@@ -16,6 +16,7 @@ modules/chat/
 ├── consolidationRunner.js         # kontroler przebiegu konsolidacji pamięci (klej memory ↔ modal/pasek/notice)
 ├── SaveSessionModal.js            # `/save session` - review propozycji notatek brain/
 ├── saveSessionSectionLabel.js     # etykieta sekcji brain.md w oknie review w JĘZYKU UI (adres `## Bieżące` zostaje w pliku - parsują go `modules/memory`; tu tylko nazwa dla oczu usera); pure, test obok
+├── naTerazUpdate.js               # normalizacja sekcji `BrainUpdate` ("Na teraz") do klucza API 'user'/'environment' + etykieta w oknie review - patrz gotcha niżej; pure, test obok
 ├── SessionCloseModal.js           # zamknięcie sesji - archive / discard
 ├── OpenSessionModal.js            # otwórz starą sesję - continue / compress / fresh
 ├── ConsolidationProgressModal.js  # nieblokujące okno PRZEBIEGU konsolidacji
@@ -159,6 +160,17 @@ dla lintera importów jak deep import w cudzy moduł.
 ---
 
 ## Kontrakty i gotchas
+
+### Fallback sekcji "Na teraz" musi być KLUCZEM API, nie nagłówkiem pliku
+
+`SaveSessionModal._normalizeUpdate` domyślał `BrainUpdate.section` na `'## Bieżące'` (nagłówek
+`brain.md`), a `_naTerazLabel` i tak pokazywało taki wpis userowi jako „Na teraz: User" (fallback
+= wszystko poza `'environment'`). User zatwierdzał, ale `naTerazSectionKey('## Bieżące')`
+(`modules/memory/BrainIndex.ts`) zwraca `null` (nie pasuje do wzorców user/environment), więc
+`applyNaTerazOps` po cichu odrzucał operację (`if (!key) continue;`) - zatwierdzona zmiana nigdy
+się nie zapisywała. Fix: `naTerazUpdate.ts` (`normalizeNaTerazSection`/`naTerazLabel`, pure) jest
+JEDYNYM miejscem tej reguły - etykieta i zapis czytają dokładnie tę samą funkcję, więc nie mogą
+się już rozjechać; modal jest cienkim wołaczem obu.
 
 ### Właściciel tury i okna - stan tury żyje w OBIEKCIE TURY, nigdy w polu widoku
 
