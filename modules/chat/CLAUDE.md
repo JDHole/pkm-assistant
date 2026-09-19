@@ -16,10 +16,12 @@ modules/chat/
 ├── consolidationRunner.js         # kontroler przebiegu konsolidacji pamięci (klej memory ↔ modal/pasek/notice)
 ├── SaveSessionModal.js            # `/save session` - review propozycji notatek brain/
 ├── saveSessionSectionLabel.js     # etykieta sekcji brain.md w oknie review w JĘZYKU UI (adres `## Bieżące` zostaje w pliku - parsują go `modules/memory`; tu tylko nazwa dla oczu usera); pure, test obok
+├── naTerazUpdate.js               # normalizacja sekcji `BrainUpdate` ("Na teraz") do klucza API 'user'/'environment' + etykieta w oknie review - patrz gotcha niżej; pure, test obok
 ├── SessionCloseModal.js           # zamknięcie sesji - archive / discard
 ├── OpenSessionModal.js            # otwórz starą sesję - continue / compress / fresh
 ├── ConsolidationProgressModal.js  # nieblokujące okno PRZEBIEGU konsolidacji
-├── archiveReviewRenders.js        # rendery review (dedup + L1/L2/L3) pod modal przebiegu
+├── archiveReviewRenders.js        # rendery review (dedup + L1/L2/L3) pod modal przebiegu; badge typu notatki (kolumna scaleń) idzie przez `memoryNoteTypeLabel` (etykieta TYLKO do wyświetlenia - `merge.target_type` w danych zostaje surowym adresem dla `modules/memory`)
+├── memoryNoteTypeLabel.js         # etykieta UI dla typu notatki pamięci (user/agent_rule/skill_hint/project_context/reference) w JĘZYKU UI; pure, test obok
 ├── consolidationRunState.js       # czyste decyzje modalu (isRunStuck/resolveStepDraft) + test
 ├── slash-commands/                # definicje komend slash (save_session.js)
 └── chat/                          # mixiny (prototype) + helpery/rejestry
@@ -158,6 +160,23 @@ dla lintera importów jak deep import w cudzy moduł.
 ---
 
 ## Kontrakty i gotchas
+
+### Fallback sekcji "Na teraz" musi być KLUCZEM API, nie nagłówkiem pliku
+
+`SaveSessionModal._normalizeUpdate` domyślał `BrainUpdate.section` na `'## Bieżące'` (nagłówek
+`brain.md`), zamiast na klucz API (`'user'`/`'environment'`). To było utwardzenie kontraktu, nie
+naprawa żywej utraty danych: jedyny producent `BrainUpdate` to
+`SaveSessionWorkflow._parseNaTerazUpdates` (`modules/memory/`), który iteruje literalną tablicę
+`['user', 'environment']`, więc `section` zawsze przychodzi jako jeden z tych dwóch kluczy -
+stary fallback był w praktyce martwą gałęzią, u userów nic się nie gubiło. Ale gdyby kiedyś
+dotarła inna wartość, stary fallback rozjeżdżałby etykietę z zapisem: `_naTerazLabel` i tak
+pokazywałby taki wpis jako „Na teraz: User" (fallback = wszystko poza `'environment'`), a zapis
+szedłby przez `applyNaTerazOps` (`modules/memory/BrainIndex.ts`), której
+`naTerazSectionKey('## Bieżące')` zwraca `null` (nie pasuje do wzorców user/environment) -
+`if (!key) continue;` cicho odrzuciłby operację, mimo że etykieta obiecywała zapis pod „User".
+Fix: `naTerazUpdate.ts` (`normalizeNaTerazSection`/`naTerazLabel`, pure) jest JEDYNYM miejscem
+tej reguły - etykieta i zapis czytają dokładnie tę samą funkcję, więc nie mogą się już rozjechać,
+niezależnie od tego, co kiedyś doda kolejny producent; modal jest cienkim wołaczem obu.
 
 ### Właściciel tury i okna - stan tury żyje w OBIEKCIE TURY, nigdy w polu widoku
 

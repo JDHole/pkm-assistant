@@ -41,7 +41,7 @@ registerHooks({
     },
 });
 
-const { createGenerateImageTool } = await import('./GenerateImageTool.js');
+const { createGenerateImageTool, buildImageNoteContent } = await import('./GenerateImageTool.js');
 const { IMAGE_GEN_PLATFORMS } = await import('../multimodal/index.js');
 
 /** Minimalny plugin z ustawieniami image gen (jak w runtime: plugin.env.settings.pkmAssistant.imageGen). */
@@ -140,7 +140,9 @@ test.serial('opis generate_image mówi po polsku pod setLocale("pl")', t => {
     );
 });
 
-test('niedozwolony saveFolder odbija się PRZED wywołaniem platformy', async t => {
+test.serial('niedozwolony saveFolder odbija się PRZED wywołaniem platformy - en', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
     const tool = createGenerateImageTool();
 
     for (const folder of ['../poza', '.pkm-assistant/agents/inny/memory', '.pkm-assistant/logs']) {
@@ -150,6 +152,65 @@ test('niedozwolony saveFolder odbija się PRZED wywołaniem platformy', async t 
             pluginWith({ platform: 'openai', saveFolder: folder }),
         ) as ImageRes;
         t.false(res.success, `saveFolder "${folder}" przeszedł`);
-        t.regex(res.error, /folder zapisu/i, `saveFolder "${folder}" odbił się o inną warstwę`);
+        t.regex(res.error, /Save folder ".*" is not allowed/, `saveFolder "${folder}" pod EN musi dostać angielski komunikat, nie polski wpisany na sztywno`);
     }
+});
+
+test.serial('niedozwolony saveFolder odbija się PRZED wywołaniem platformy - pl', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
+    const tool = createGenerateImageTool();
+
+    for (const folder of ['../poza', '.pkm-assistant/agents/inny/memory', '.pkm-assistant/logs']) {
+        const res = await tool.execute(
+            { prompt: 'a cat' },
+            {} as never,
+            pluginWith({ platform: 'openai', saveFolder: folder }),
+        ) as ImageRes;
+        t.false(res.success, `saveFolder "${folder}" przeszedł`);
+        t.regex(res.error, /Niedozwolony folder zapisu ".*"/, `saveFolder "${folder}" odbił się o inną warstwę`);
+    }
+});
+
+// ── BUG: treść notatki obrazu miała etykiety "Platforma"/"Wygenerowano" i datę pl-PL
+// na sztywno, niezależnie od języka interfejsu. ──
+
+const NOTE_DATE = new Date('2026-09-19T14:30:00Z');
+
+test.serial('buildImageNoteContent pod en: etykiety po angielsku, data NIE w formacie pl-PL', t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+
+    const content = buildImageNoteContent({
+        filename: 'generated_2026-09-19.png',
+        prompt: 'a serene cat',
+        platform: 'openai',
+        model: 'dall-e-3',
+        date: NOTE_DATE,
+    });
+
+    t.true(content.includes('**Platform:**'), 'brak angielskiej etykiety Platform');
+    t.true(content.includes('**Generated:**'), 'brak angielskiej etykiety Generated');
+    t.false(content.includes('Platforma'), 'polska etykieta Platforma nie może wyciekać pod EN');
+    t.false(content.includes('Wygenerowano'), 'polska etykieta Wygenerowano nie może wyciekać pod EN');
+    t.false(/\d{2}\.\d{2}\.\d{4}/.test(content), `data nie może być w formacie pl-PL (DD.MM.RRRR): ${content}`);
+});
+
+test.serial('buildImageNoteContent pod pl: etykiety po polsku, data w formacie pl-PL', t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
+
+    const content = buildImageNoteContent({
+        filename: 'generated_2026-09-19.png',
+        prompt: 'spokojny kot',
+        platform: 'openai',
+        model: 'dall-e-3',
+        date: NOTE_DATE,
+    });
+
+    t.true(content.includes('**Platforma:**'), 'brak polskiej etykiety Platforma');
+    t.true(content.includes('**Wygenerowano:**'), 'brak polskiej etykiety Wygenerowano');
+    t.false(content.includes('**Platform:**'), 'angielska etykieta Platform nie może wyciekać pod PL');
+    t.false(content.includes('**Generated:**'), 'angielska etykieta Generated nie może wyciekać pod PL');
+    t.regex(content, /\d{2}\.\d{2}\.\d{4}/, `data musi być w formacie pl-PL (DD.MM.RRRR): ${content}`);
 });

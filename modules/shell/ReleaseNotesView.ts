@@ -18,6 +18,7 @@ import releaseNotesMarkdown from '../../releases/latest_release.md' with { type:
 import { t } from '../../core/i18n/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { PluginItemView } from '../ui-components/index.js';
+import { withAuthorNote } from './releaseNotesContent.js';
 
 /** Etykieta w logu. */
 const SCOPE = 'ReleaseNotesView';
@@ -71,7 +72,7 @@ export class ReleaseNotesView extends PluginItemView {
         const target = this.container;
         target.empty();
         target.addClass(NOTES_CSS_CLASS);
-        await this.paintMarkdown(this.notes, target);
+        await this.paintMarkdown(withAuthorNote(this.notes), target);
     }
 
     /**

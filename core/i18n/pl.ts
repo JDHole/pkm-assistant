@@ -115,6 +115,7 @@ export const pl: Record<string, string> = {
   // pod tym samym napisem „PKM Assistant" dawały w palecie dwa identyczne wpisy.
   'chat.view_title': 'Czat',
   'release_notes.view_title': 'Co nowego',
+  'release_notes.author_note': '**Słowo od autora.** PKM Assistant buduje jedna osoba - nie-programista, któremu kod pisze Claude Code; solowy projekt w duchu „vibe-dev". To dopiero początek drogi: zdarzają się niedoróbki, a poprawki wychodzą na bieżąco, w miarę jak je zgłaszacie, ale każda wymaga czasu. Jeśli plugin Ci pomaga, najlepszym wsparciem jest zgłoszenie błędu, pomysł, gwiazdka na repo albo odrobina cierpliwości. Dziękuję, że jesteś tu od początku drogi.',
 
   // ── Chat UI ──
   'chat.eye': 'Oczko — kontekst otwartej notatki',
@@ -1640,6 +1641,16 @@ export const pl: Record<string, string> = {
   'memory.note.why_unspecified': 'Jeszcze nieokreślone.',
   'memory.note.how_default': 'Użyj, gdy pasuje do bieżącej rozmowy.',
 
+  // Badge typu notatki pamięci (review konsolidacji) — etykieta UI dla surowego `type`
+  // trzymanego na notatkach brain/ (user/agent_rule/skill_hint/project_context/reference).
+  // Słownictwo zgodne z modal.save_session.section.* (kolumny review `/save session`) —
+  // te same typy notatek, jedno wspólne słownictwo.
+  'memory.note_type.user': 'User',
+  'memory.note_type.agent_rule': 'Preferencja',
+  'memory.note_type.skill_hint': 'Workflow',
+  'memory.note_type.project_context': 'Kontekst projektu',
+  'memory.note_type.reference': 'Referencja',
+
   // SaveSessionModal (Memory v3 progress + notes column)
   'modal.save_session.analyzing': '{{agent}} analizuje sesję…',
   // Obietnica „Zwykle 4-10s" dotyczyła tylko pierwszego strzału, a kaskada konsolidacji
@@ -1793,12 +1804,16 @@ export const pl: Record<string, string> = {
   'mcp.image.default_model': '(domyślny)',
   'mcp.image.generated': 'Obraz wygenerowany i zapisany: {{path}}',
   'mcp.image.error': 'Błąd generowania obrazu: {{error}}',
+  'mcp.image.save_folder_denied': 'Niedozwolony folder zapisu "{{folder}}": {{reason}}',
+  'mcp.image.note.platform': 'Platforma',
+  'mcp.image.note.generated': 'Wygenerowano',
 
   // AddTextToImageTool
   'mcp.text_overlay.image_required': 'image_path jest wymagany i musi być tekstem',
   'mcp.text_overlay.text_required': 'text jest wymagany i musi być tekstem',
   'mcp.text_overlay.image_not_found': 'Obraz nie znaleziony: {{path}}',
   'mcp.text_overlay.invalid_path': 'Niedozwolona ścieżka obrazu źródłowego: {{path}}',
+  'mcp.text_overlay.invalid_output_path': 'Nieprawidłowa ścieżka zapisu: {{path}}',
   // Obraz źródłowy przechodzi przez pełną bramkę uprawnień.
   'mcp.text_overlay.source_denied': 'Brak dostępu do obrazu źródłowego "{{path}}": {{reason}}',
   'mcp.text_overlay.no_permission_gate': 'nie da się sprawdzić uprawnień (brak agenta albo bramki uprawnień w kontekście wywołania)',

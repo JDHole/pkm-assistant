@@ -115,6 +115,7 @@ export const en: Record<string, string> = {
   // pod tym samym napisem „PKM Assistant" dawały w palecie dwa identyczne wpisy.
   'chat.view_title': 'Chat',
   'release_notes.view_title': 'What\'s new',
+  'release_notes.author_note': '**A note from the author.** PKM Assistant is built by one person - a non-programmer with Claude Code doing the typing, a solo "vibe-dev" project. It is early days: rough edges exist, and fixes ship continuously as you report them, but each one takes time. If the plugin helps you, the best support is a bug report, an idea, a star on the repo, or a word of patience. Thank you for being here at the start of the road.',
 
   // ── Chat UI ──
   'chat.eye': 'Eye — active note context',
@@ -1634,6 +1635,16 @@ export const en: Record<string, string> = {
   'memory.note.why_unspecified': 'Not specified yet.',
   'memory.note.how_default': 'Use this when it is relevant to the current conversation.',
 
+  // Memory note type badges (consolidation review) — UI label for the raw `type`
+  // stored on brain/ notes (user/agent_rule/skill_hint/project_context/reference).
+  // Wording matches modal.save_session.section.* (the /save session review columns) —
+  // same underlying note types, one shared vocabulary.
+  'memory.note_type.user': 'User',
+  'memory.note_type.agent_rule': 'Preference',
+  'memory.note_type.skill_hint': 'Workflow',
+  'memory.note_type.project_context': 'Project context',
+  'memory.note_type.reference': 'Reference',
+
   // SaveSessionModal (Memory v3 progress + notes column)
   'modal.save_session.analyzing': '{{agent}} is analyzing the session…',
   // The "Usually 4-10s" promise only ever covered the first LLM call, while
@@ -1787,12 +1798,16 @@ export const en: Record<string, string> = {
   'mcp.image.default_model': '(default)',
   'mcp.image.generated': 'Image generated and saved: {{path}}',
   'mcp.image.error': 'Image generation error: {{error}}',
+  'mcp.image.save_folder_denied': 'Save folder "{{folder}}" is not allowed: {{reason}}',
+  'mcp.image.note.platform': 'Platform',
+  'mcp.image.note.generated': 'Generated',
 
   // AddTextToImageTool
   'mcp.text_overlay.image_required': 'image_path is required and must be text',
   'mcp.text_overlay.text_required': 'text is required and must be text',
   'mcp.text_overlay.image_not_found': 'Image not found: {{path}}',
   'mcp.text_overlay.invalid_path': 'Source image path is not allowed: {{path}}',
+  'mcp.text_overlay.invalid_output_path': 'Invalid output path: {{path}}',
   // The source image goes through the full permission gate.
   'mcp.text_overlay.source_denied': 'Access to source image "{{path}}" denied: {{reason}}',
   'mcp.text_overlay.no_permission_gate': 'permissions cannot be checked (no agent or no permission gate in the call context)',

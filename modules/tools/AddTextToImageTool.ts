@@ -287,7 +287,7 @@ export function createAddTextToImageTool() {
                 const wantedOut = outputPathFor(args, safePath);
                 const outCheck = validateVaultPath(wantedOut);
                 if (!outCheck.ok) {
-                    throw new Error(`Invalid output path: ${wantedOut}`);
+                    throw new Error(t('mcp.text_overlay.invalid_output_path', { path: wantedOut }));
                 }
                 const savePath = outCheck.safePath;
 

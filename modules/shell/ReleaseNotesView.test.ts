@@ -17,6 +17,19 @@ const viewSource = readSource('./ReleaseNotesView.ts');
 // Ten plik go tylko CZYTA, zeby przypiac zachowanie, ktore dotyczy praktycznie tego widoku.
 const baseViewSource = readSource('../ui-components/PluginItemView.ts');
 
+test('renderView przepuszcza this.notes przez withAuthorNote przed malowaniem', t => {
+    t.regex(
+        viewSource,
+        /import\s*\{\s*withAuthorNote\s*\}\s*from\s*['"]\.\/releaseNotesContent\.js['"]/,
+        'brak importu withAuthorNote z releaseNotesContent.js',
+    );
+    t.regex(
+        viewSource,
+        /paintMarkdown\(\s*withAuthorNote\(\s*this\.notes\s*\)\s*,\s*target\s*\)/,
+        'renderView musi wołać paintMarkdown(withAuthorNote(this.notes), target) - notka autora ma zawsze iść pod treść notatek wydania',
+    );
+});
+
 test('viewType to pkm-release-notes-view', t => {
     t.regex(viewSource, /viewType\s*[=:].*['"]pkm-release-notes-view['"]/);
 });

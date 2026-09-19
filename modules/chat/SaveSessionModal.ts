@@ -1,6 +1,7 @@
 import { Modal, type App } from 'obsidian';
 import { t } from '../../core/i18n/index.js';
 import { noteDisplayName, sectionDisplayLabel } from './saveSessionSectionLabel.js';
+import { naTerazLabel, normalizeNaTerazSection } from './naTerazUpdate.js';
 
 type ModalState = 'loading' | 'proposals';
 type SaveAction = 'archive' | 'archive_close' | 'archive_new' | 'cancel';
@@ -320,7 +321,7 @@ export class SaveSessionModal extends Modal {
             const checkbox = label.createEl('input', { type: 'checkbox' });
             checkbox.checked = update.accepted !== false;
             checkbox.addEventListener('change', () => { update.accepted = checkbox.checked; });
-            label.createSpan({ text: this._naTerazLabel(update.section), cls: 'cs-save-session__na-teraz-badge' });
+            label.createSpan({ text: naTerazLabel(update.section), cls: 'cs-save-session__na-teraz-badge' });
 
             const diff = item.createDiv({ cls: 'cs-save-session__diff' });
             const action = String(update.action || 'ADD').toUpperCase();
@@ -334,11 +335,6 @@ export class SaveSessionModal extends Modal {
                 input.addEventListener('input', () => { update.content = input.value; });
             }
         }
-    }
-
-    _naTerazLabel(section: string): string {
-        if (section === 'environment') return t('modal.save_session.na_teraz_env');
-        return t('modal.save_session.na_teraz_user');
     }
 
     _columnWrap(parent: HTMLElement, icon: string, label: string, count: number): HTMLDivElement {
@@ -399,7 +395,10 @@ export class SaveSessionModal extends Modal {
         const action = String(u?.action || 'ADD').toUpperCase();
         return {
             action,
-            section: u?.section || '## Bieżące',
+            // Kanoniczny klucz API ('user'/'environment'), nie nagłówek pliku brain.md - patrz
+            // gotcha „Na teraz" w modules/chat/CLAUDE.md. Brak/nieznana sekcja -> 'user', tak
+            // samo jak naTerazLabel() pokazuje userowi PRZED zatwierdzeniem.
+            section: normalizeNaTerazSection(u?.section),
             content: u?.content || '',
             oldContent: u?.oldContent || '',
             why: u?.why || '',

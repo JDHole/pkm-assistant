@@ -5,7 +5,7 @@
 import { generateImage, IMAGE_GEN_PLATFORMS } from '../../modules/multimodal/index.js';
 import type { ImageGenKeys } from '../../modules/multimodal/index.js';
 import { log } from '../../core/utils/Logger.js';
-import { t } from '../../core/i18n/index.js';
+import { getDateLocale, t } from '../../core/i18n/index.js';
 import { writeBinary, writeText } from './vault_binary_io.js';
 import { validateVaultPath } from './vault_path_validator.js';
 import type { BinaryIoApp } from './vault_binary_io.js';
@@ -52,6 +52,28 @@ interface GenerateImagePlugin {
             };
         };
     } | null;
+}
+
+/** Wejście {@link buildImageNoteContent}. */
+interface ImageNoteContentArgs {
+    filename: string;
+    prompt: string;
+    platform: string;
+    model: string;
+    date: Date;
+}
+
+/**
+ * Treść notatki Obsidiana utworzonej razem z wygenerowanym obrazem.
+ *
+ * Etykiety `Platforma`/`Wygenerowano` i data (`toLocaleString`) szły dotąd na sztywno po polsku
+ * niezależnie od języka interfejsu (`mcp.image.note.platform`/`mcp.image.note.generated` +
+ * `getDateLocale()`). `Prompt`/`Model` zostają neutralne (nie są zdaniem w żadnym języku).
+ * Czysta funkcja (bez I/O) - wydzielona, żeby dało się przypiąć testem bez atrapy vaulta.
+ */
+export function buildImageNoteContent(args: ImageNoteContentArgs): string {
+    const { filename, prompt, platform, model, date } = args;
+    return `![[${filename}]]\n\n**Prompt:** ${prompt}\n**${t('mcp.image.note.platform')}:** ${platform}\n**Model:** ${model}\n**${t('mcp.image.note.generated')}:** ${date.toLocaleString(getDateLocale())}\n`;
 }
 
 export function createGenerateImageTool() {
@@ -113,7 +135,9 @@ export function createGenerateImageTool() {
                 if (!folderCheck.ok) {
                     return {
                         success: false,
-                        error: t('mcp.image.error', { error: `Niedozwolony folder zapisu "${saveFolder}": ${folderCheck.error}` }),
+                        error: t('mcp.image.error', {
+                            error: t('mcp.image.save_folder_denied', { folder: saveFolder, reason: folderCheck.error }),
+                        }),
                     };
                 }
 
@@ -168,7 +192,7 @@ export function createGenerateImageTool() {
                 const noteFilename = `generated_${timestamp}.md`;
                 const notePath = `${folderCheck.safePath}/${noteFilename}`;
                 const modelUsed = (imageGenSettings[`${platform}_model`] as string) || t('mcp.image.default_model');
-                const noteContent = `![[${filename}]]\n\n**Prompt:** ${prompt}\n**Platforma:** ${platform}\n**Model:** ${modelUsed}\n**Wygenerowano:** ${new Date().toLocaleString('pl-PL')}\n`;
+                const noteContent = buildImageNoteContent({ filename, prompt, platform, model: modelUsed, date: new Date() });
                 await writeText(appRef, notePath, noteContent);
 
                 log.info('ImageGen', `Zapisano: ${savePath} + notatka: ${notePath} (${Math.round(binaryData.length / 1024)} KB)`);
