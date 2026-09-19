@@ -20,6 +20,7 @@
  */
 import test from 'ava';
 import { AccessGuard, PermissionSystem } from '../../core/index.js';
+import { setLocale } from '../../core/i18n/index.js';
 import { createAddTextToImageTool } from './AddTextToImageTool.js';
 
 /** Wynik narzędzia w zakresie, którego dotykają asercje. */
@@ -108,6 +109,20 @@ test.serial('output_path z traversalem = odmowa przed jakimkolwiek zapisem', asy
     const res = await tool.execute({ ...BAZA, output_path: '../x.png' }, app as never, null) as OverlayRes;
     t.false(res.success);
     t.regex(res.error!, /output path/i);
+    t.deepEqual(written, [], 'nic nie poleciało do vaulta');
+});
+
+// ── BUG: "Invalid output path" był po angielsku na sztywno, niezależnie od języka UI. ──
+
+test.serial('output_path z traversalem pod pl: komunikat po polsku', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
+    const { app, written } = makeApp();
+    const tool = createAddTextToImageTool();
+
+    const res = await tool.execute({ ...BAZA, output_path: '../x.png' }, app as never, null) as OverlayRes;
+    t.false(res.success);
+    t.regex(res.error!, /Nieprawidłowa ścieżka zapisu/, `komunikat pod PL musi być po polsku, nie na sztywno po angielsku: ${res.error}`);
     t.deepEqual(written, [], 'nic nie poleciało do vaulta');
 });
 
