@@ -818,6 +818,7 @@ export function _showArtifactPicker(this: ChatViewLike, triggerBtn: HTMLElement 
             row.appendChild(titleSpan);
 
             // Status w pliku to identyfikator silnika (polski w każdym języku UI) - userowi etykieta.
+            // Pusty status pomijamy (w ciasnej linii meta myślnik byłby szumem; profil agenta go pokazuje).
             const metaBits = [item.typ, item.status ? artifactStatusLabel(item.status) : ''].filter(Boolean).join(' · ');
             if (metaBits) {
                 const metaSpan = createSpan();
