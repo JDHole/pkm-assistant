@@ -11,10 +11,17 @@ import { t } from '../../core/i18n/index.js';
 
 /**
  * Dokleja notkę autora jako Obsidianowy callout `[!NOTE]` pod treścią notatek wydania.
+ *
+ * Idempotentne: jeśli `notesMarkdown` JUŻ niesie dosłowny tekst notki (drugie wywołanie na
+ * wyniku pierwszego, albo treść wklejona ręcznie do `releases/*.md`), funkcja oddaje wejście
+ * bez zmian zamiast dokładać drugą kopię.
+ *
  * @param notesMarkdown - surowa treść `releases/latest_release.md` (może być pusta)
  */
 export function withAuthorNote(notesMarkdown: string): string {
+    const note = t('release_notes.author_note');
+    if (notesMarkdown.includes(note)) return notesMarkdown;
     const trimmed = notesMarkdown.trimEnd();
-    const notePart = `---\n\n> [!NOTE]\n> ${t('release_notes.author_note')}\n`;
+    const notePart = `---\n\n> [!NOTE]\n> ${note}\n`;
     return trimmed ? `${trimmed}\n\n${notePart}` : notePart;
 }

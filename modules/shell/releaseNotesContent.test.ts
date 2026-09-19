@@ -5,7 +5,7 @@
  */
 import test from 'ava';
 
-import { setLocale, t } from '../../core/i18n/index.js';
+import { setLocale, t as translate } from '../../core/i18n/index.js';
 import { withAuthorNote } from './releaseNotesContent.js';
 
 test.serial('en: dokleja literalny angielski callout pod oryginalną treścią', t => {
@@ -70,7 +70,7 @@ test.serial('idempotentne: treść, która już zawiera notkę, nie dostaje drug
     const twice = withAuthorNote(once);
 
     t.is(twice, once, 'druga sklejka nie ma prawa nic zmienić w treści, która już niesie notkę');
-    const note = t('release_notes.author_note');
+    const note = translate('release_notes.author_note');
     const occurrences = twice.split(note).length - 1;
     t.is(occurrences, 1, `notka musi wystąpić dokładnie raz, wystąpiła ${occurrences}x`);
 });
@@ -83,7 +83,7 @@ test.serial('idempotentne: treść, która już zawiera notkę, nie dostaje drug
     const twice = withAuthorNote(once);
 
     t.is(twice, once);
-    const note = t('release_notes.author_note');
+    const note = translate('release_notes.author_note');
     const occurrences = twice.split(note).length - 1;
     t.is(occurrences, 1, `notka musi wystąpić dokładnie raz, wystąpiła ${occurrences}x`);
 });
