@@ -1794,12 +1794,16 @@ export const pl: Record<string, string> = {
   'mcp.image.default_model': '(domyślny)',
   'mcp.image.generated': 'Obraz wygenerowany i zapisany: {{path}}',
   'mcp.image.error': 'Błąd generowania obrazu: {{error}}',
+  'mcp.image.save_folder_denied': 'Niedozwolony folder zapisu "{{folder}}": {{reason}}',
+  'mcp.image.note.platform': 'Platforma',
+  'mcp.image.note.generated': 'Wygenerowano',
 
   // AddTextToImageTool
   'mcp.text_overlay.image_required': 'image_path jest wymagany i musi być tekstem',
   'mcp.text_overlay.text_required': 'text jest wymagany i musi być tekstem',
   'mcp.text_overlay.image_not_found': 'Obraz nie znaleziony: {{path}}',
   'mcp.text_overlay.invalid_path': 'Niedozwolona ścieżka obrazu źródłowego: {{path}}',
+  'mcp.text_overlay.invalid_output_path': 'Nieprawidłowa ścieżka zapisu: {{path}}',
   // Obraz źródłowy przechodzi przez pełną bramkę uprawnień.
   'mcp.text_overlay.source_denied': 'Brak dostępu do obrazu źródłowego "{{path}}": {{reason}}',
   'mcp.text_overlay.no_permission_gate': 'nie da się sprawdzić uprawnień (brak agenta albo bramki uprawnień w kontekście wywołania)',

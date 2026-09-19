@@ -1788,12 +1788,16 @@ export const en: Record<string, string> = {
   'mcp.image.default_model': '(default)',
   'mcp.image.generated': 'Image generated and saved: {{path}}',
   'mcp.image.error': 'Image generation error: {{error}}',
+  'mcp.image.save_folder_denied': 'Save folder "{{folder}}" is not allowed: {{reason}}',
+  'mcp.image.note.platform': 'Platform',
+  'mcp.image.note.generated': 'Generated',
 
   // AddTextToImageTool
   'mcp.text_overlay.image_required': 'image_path is required and must be text',
   'mcp.text_overlay.text_required': 'text is required and must be text',
   'mcp.text_overlay.image_not_found': 'Image not found: {{path}}',
   'mcp.text_overlay.invalid_path': 'Source image path is not allowed: {{path}}',
+  'mcp.text_overlay.invalid_output_path': 'Invalid output path: {{path}}',
   // The source image goes through the full permission gate.
   'mcp.text_overlay.source_denied': 'Access to source image "{{path}}" denied: {{reason}}',
   'mcp.text_overlay.no_permission_gate': 'permissions cannot be checked (no agent or no permission gate in the call context)',
