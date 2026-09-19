@@ -175,7 +175,6 @@ Odlew per agent = `<agent-slug>-researcher` (standardowe `instantiate`). Przepis
   (`DelegateTool`/`TriggerPopup` mają testy w AVA).
 - `modules/shell/sidebar/{BackstageViews,DetailViews,HomeView}.js` - listing + counter (DI)
 - `modules/agents/profile/{profile_prompt,profile_team}.js` - profil agenta (DI)
-- `modules/onboarding/PlaybookManager.js` - `generateDelegowanieSection`
 
 ---
 
