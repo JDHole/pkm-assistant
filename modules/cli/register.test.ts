@@ -1,6 +1,5 @@
 import test from 'ava';
 import { registerCliCommands } from './register.js';
-import { buildCliCommands } from './commands.js';
 
 import type { CliHandler, CliFlags } from 'obsidian';
 import type { CliDeps } from './commands.js';
@@ -117,11 +116,11 @@ test('host rzucajacy przy DRUGIEJ komendzie (duplikat) -> pozostale trzy zarejes
             if (callIndex === 2) throw new Error('command already registered');
         },
     };
-    const deps = makeDeps();
-    const result = registerCliCommands(host, deps);
-    const expectedIds = buildCliCommands(deps).map(spec => spec.id);
+    const result = registerCliCommands(host, makeDeps());
 
-    t.deepEqual(result.registered, [expectedIds[0], expectedIds[2], expectedIds[3]]);
-    t.deepEqual(result.failed, [{ id: expectedIds[1], message: 'command already registered' }]);
+    // Literały, nie `buildCliCommands(deps)` - oczekiwanie liczone funkcją spod testu
+    // przeszłoby zielono także wtedy, gdy ta funkcja nie zwraca nic.
+    t.deepEqual(result.registered, ['pkm-assistant:status', 'pkm-assistant:agent-prompt', 'pkm-assistant:memory-status']);
+    t.deepEqual(result.failed, [{ id: 'pkm-assistant:selftest', message: 'command already registered' }]);
     t.is(result.skipped, null);
 });
