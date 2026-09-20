@@ -1,6 +1,8 @@
 import { probeFile } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
 
+import type { MemoryStateSource } from './consolidationStatus.js';
+
 /** Adapter FS vaulta w zakresie potrzebnym `.state.json` (typowany strukturalnie). */
 export interface StateVaultAdapterLike {
     exists(path: string): Promise<boolean>;
@@ -115,6 +117,33 @@ export class StateManager {
 
     async write(state: Partial<MemoryState> | null | undefined): Promise<void> {
         return this._enqueue(() => this._writeRaw(state));
+    }
+
+    /**
+     * Czysty odczyt BEZ bootstrapu — w odróżnieniu od `read()`, na potwierdzonym `'missing'`
+     * NIE zakłada pliku (żaden `_writeRaw`). Dla diagnostyki (CLI `memory-status`), gdzie samo
+     * odpytanie o stan nie może materializować `.state.json` na dysku agenta, którego nikt
+     * jeszcze nie użył. Poza tym idzie kolejką odczytu, bez blokowania na `_writeChain` — to
+     * czysty odczyt, nie mutacja, więc nie musi czekać w tej samej kolejce co zapisy.
+     */
+    async peek(): Promise<{ state: MemoryState; source: MemoryStateSource }> {
+        if (await probeFile(this.vault.adapter, this.statePath) === 'missing') {
+            return { state: this.defaultState(), source: 'missing' };
+        }
+        let raw: string;
+        try {
+            raw = await this.vault.adapter.read(this.statePath);
+        } catch (e) {
+            log.warn('StateManager', `peek: nie mogę przeczytać ${this.statePath} — defaulty TYLKO w pamięci:`, e);
+            return { state: this.defaultState(), source: 'unreadable' };
+        }
+        try {
+            const state = { ...this.defaultState(), ...(JSON.parse(raw || '{}') as Partial<MemoryState>) };
+            return { state, source: 'file' };
+        } catch (e) {
+            log.warn('StateManager', `peek: uszkodzony JSON w ${this.statePath} — defaulty TYLKO w pamięci:`, e);
+            return { state: this.defaultState(), source: 'unreadable' };
+        }
     }
 
     /**

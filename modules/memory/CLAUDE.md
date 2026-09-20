@@ -37,6 +37,7 @@ modules/memory/
 ├── MemoryAccessGuard.ts      # strict per-agent path guard dla brain/
 ├── collisionSuffix.ts       # findFreeCollisionPath() - jedna wspólna pętla "wolna nazwa przy kolizji", wołana z kilku miejsc w AgentMemory.ts. Wewnętrzny, nie w barrelu
 ├── SaveSessionWorkflow.ts    # /save session: propozycje notatek + archiwizacja aktywnej sesji
+├── consolidationStatus.ts    # status konsolidacji JEDNEGO agenta - czysty odczyt (zero zapisu/modelu/UI) dla diagnostyki (CLI `memory-status`); `resolveConsolidationThresholds`/`shouldTriggerConsolidation` to JEDNO liczydło progów, którego używa też `SaveSessionWorkflow._shouldTriggerArchive`
 ├── ArchiveWorkflow.ts        # dedup brain/ + L1/L2/L3 user-reviewed consolidation
 ├── ConsolidationRun.ts       # stan przebiegu konsolidacji (plan kroków, statusy, retry, koszt) - czysty node
 ├── MemoryOpsCenter.ts        # rejestr JEDNEGO aktywnego przebiegu + subskrypcja dla UI
@@ -82,6 +83,7 @@ Import z zewnątrz tylko przez `modules/memory/index.js`.
 | `ArchiveWorkflow` | Automatyczna konsolidacja po progach: brain/ dedup, L1, L2, L3. Jeden tor: `runWithRun(consolidationRun)` (generuje propozycje wszystkich paczek, nic nie zapisuje) + `applyStepDecision()` (zapisuje po decyzji usera) + `generateGatedSteps()` (zdejmuje kłódkę z L2/L3 dopiero gdy L1 są rozstrzygnięte) - generacja oddzielona od zapisu. |
 | `parseNaTerazSections`, `naTerazSectionKey` | Pure helpery sekcji "Na teraz" brain.md, czytane przez UI panelu Pamięć, `MemorySaveTool` i `modules/chat/naTerazUpdate.ts` (normalizacja sekcji `BrainUpdate` w oknie review `/save session`). |
 | `ConsolidationRun`, `buildConsolidationPlan`, `STEP_STATUS`, `STEP_KIND`, `normalizeUsage` | Stan jednego przebiegu konsolidacji - plan paczek z liczników, maszyna stanów kroku. Zero UI, zero Obsidiana. |
+| `resolveConsolidationThresholds`, `shouldTriggerConsolidation`, `getConsolidationStatus` | Status konsolidacji jednego agenta - czysty odczyt (`consolidationStatus.ts`) dla diagnostyki (CLI `memory-status`). `getConsolidationStatus(agentMemory)` czyta przez metody instancji + `stateManager.peek()` (BEZ bootstrapu `.state.json`). |
 | `memoryOpsCenter` (singleton), `OPS_EVENT` | Rejestr jednego aktywnego przebiegu. `startRun/getActiveRun/finishRun/subscribe/requestOpenModal`. Drugi trigger przy aktywnym przebiegu NIE startuje drugiego - zwraca bieżący i prosi o modal. |
 | `stepLabel`, `stepDetail`, `stepStatusIcon`, `stepStatusLabel`, `stepDurationMs`, `isFallbackStep`, `formatDuration`, `formatUsageLine`, `statusBarLine`, `buildRunSummary`, `summaryToText`, `planToText` | Warstwa OPISOWA przebiegu (`consolidationLabels.ts`) - jedno źródło etykiet dla paska statusu i modalu przebiegu. Czyste funkcje, zero DOM. |
 | `MigrationV3` | Migracja v2 -> v3: najpierw `memory.v2.backup/`, potem notatki `brain/`. |
@@ -407,6 +409,20 @@ Flow:
 
 ## Gotchas
 
+- ⚠️ **Jedno liczydło progów konsolidacji.** `resolveConsolidationThresholds`/
+  `shouldTriggerConsolidation` (`consolidationStatus.ts`) to JEDYNE miejsce, które liczy próg
+  sesji (`memoryV3SessionThreshold || archiveSessionThreshold || 10`, `>=`) i limit notatek
+  `brain/` (`state.brain_notes_limit` ma pierwszeństwo nad ustawieniami globalnymi,
+  `memoryV3BrainNotesThreshold || archiveBrainNotesThreshold || 20`, `>`).
+  `SaveSessionWorkflow._shouldTriggerArchive` DELEGUJE tutaj zamiast trzymać własną kopię -
+  druga implementacja tej samej logiki (np. w CLI `memory-status`) rozjechałaby się przy
+  pierwszej zmianie jednego z dwóch miejsc. `getConsolidationStatus(agentMemory)` woła
+  `stateManager.peek()` (czysty odczyt, BEZ bootstrapu `.state.json` - w odróżnieniu od
+  `stateManager.read()`, którego wołają wszystkie metody listujące `AgentMemory` przez
+  `ensureMemoryStructure()`), więc samo odpytanie o status agenta, którego jeszcze nikt nie
+  użył, nie materializuje jego folderu pamięci - `peek()` w izolacji jest jedynym miejscem,
+  gdzie ten kontrakt da się w ogóle zaobserwować testem (`getConsolidationStatus` i tak
+  bootstrapuje strukturę przez inne, wołane obok metody listujące).
 - ⚠️ **User authority absolute.** Agent proponuje, user zatwierdza. `brain.md` i sesje nie są
   niszczone bez jawnego flow.
 - ⚠️ **Plik sesji jest źródłem prawdy.** L1/L2/L3 są pochodne. Nie kasuj niższego poziomu, zanim
@@ -631,6 +647,9 @@ Memory v3 critical path ma testy w:
 - `modules/memory/collisionSuffix.test.ts`
 - `modules/memory/EmbeddingHelper.test.ts`
 - `modules/memory/workPrompts.test.ts`
+- `modules/memory/consolidationStatus.test.ts` - progi (`resolveConsolidationThresholds`,
+  granice), `shouldTriggerConsolidation`, `getConsolidationStatus` na realnej `AgentMemory`,
+  `StateManager.peek()` (brakujący plik NIE tworzy pliku, uszkodzony JSON -> `unreadable`)
 
 ---
 
