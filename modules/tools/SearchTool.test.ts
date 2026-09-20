@@ -1,6 +1,8 @@
 import test from 'ava';
-import { createSearchTool } from './SearchTool.js';
-import type { SearchToolArgs, SearchToolPlugin } from './SearchTool.js';
+import { createSearchTool, resolveSearchScope } from './SearchTool.js';
+import type { SearchToolArgs, SearchToolPlugin, SearchScopeDecision } from './SearchTool.js';
+import { setLocale } from '../../core/i18n/index.js';
+import { resolveSearchAlias } from './toolAliases.js';
 
 /** Trafienie wyszukiwania czytane w asercjach. */
 type SearchHit = { path: string; title?: string; excerpt?: string; matched?: unknown };
@@ -12,6 +14,7 @@ type SearchRes = {
     scope?: string;
     mode_used?: string;
     note?: string;
+    scope_hint?: string;
     results: SearchHit[];
 };
 
@@ -120,12 +123,15 @@ test('scope=memory happy path → wyniki + nota degradacji semantyki', async t =
 
 // ───────────────────────── vault scope ─────────────────────────
 
+// ⚠️ `scope: 'vault'` musi być JAWNE od naprawy „default scope = memory" (poniżej) - bez `scope`
+// ten sam wywołanie szukałoby domyślnie w pamięci wołającego, nie w vaultcie usera. Ta zmiana
+// kontraktu jest opisana w raporcie zadania.
 test('scope=vault mode=keyword → wyniki bez noty, poprawny kształt', async t => {
     const plugin = makePlugin({
         'a.md': 'jakiś target tutaj',
         'b.md': 'nic ciekawego'
     });
-    const res = await run(plugin, { query: 'target', mode: 'keyword' });
+    const res = await run(plugin, { query: 'target', mode: 'keyword', scope: 'vault' });
     t.true(res.success);
     t.is(res.scope, 'vault');
     t.is(res.mode_used, 'keyword');
@@ -210,4 +216,149 @@ test('scan: NIEOBECNE w silniku (skan nieobcięty) → brak pola `scan` w wyniku
     } finally {
         proto.runSearch = original;
     }
+});
+
+// ───────────────────────── default scope (brak `scope`) → pamięć wołającego ─────────────────
+//
+// Kontrakt: brak `scope` (albo nierozpoznana wartość) domyślnie przeszukuje PAMIĘĆ wołającego
+// agenta, nie notatki usera. Notatki usera wymagają jawnego `scope: "vault"`. Trzy wyjątki
+// (sub-agent / pamięć wyłączona / brak pamięci) spadają na `vault` zamiast na odmowę.
+
+test.serial('brak scope + agent z pamięcią → domyślny zakres to memory (nowy default) + scope_hint', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+    const plugin = makePlugin(
+        {
+            'Notatka.md': 'target w vaulcie',
+            [`${MEM_BASE}/brain.md`]: 'target w pamięci'
+        },
+        { agent: { permissions: { memory: true } }, memory: { paths: memoryPaths() } }
+    );
+    const res = await run(plugin, { query: 'target' });
+    t.true(res.success);
+    t.is(res.scope, 'memory');
+    t.true(res.results.some(x => x.path === `${MEM_BASE}/brain.md`), 'notatka pamięci jest w wynikach');
+    t.false(res.results.some(x => x.path === 'Notatka.md'), 'notatka vaulta NIE jest w wynikach');
+    // Literał, nie `t()` — oczekiwana wartość nie może być liczona tą samą funkcją co wynik.
+    // Kontrakt podpowiedzi: nazywa DOKŁADNY parametr, którym model poszerza zakres.
+    t.regex(String(res.scope_hint), /scope: "vault"/);
+    t.regex(String(res.scope_hint), /does NOT mean/);
+});
+
+// Stara nazwa `vault_search` obiecuje vault. Alias niesie `scope:'vault'` jawnie — bez tego
+// po zmianie defaultu przeszukiwałby po cichu pamięć agenta. Test idzie przez PRAWDZIWE
+// wykonanie (alias → execute), nie przez samo mapowanie argumentów.
+test('alias vault_search → realne wykonanie trafia w vault mimo domyślnego memory', async t => {
+    const plugin = makePlugin(
+        {
+            'Notatka.md': 'target w vaulcie',
+            [`${MEM_BASE}/brain.md`]: 'target w pamięci'
+        },
+        { agent: { permissions: { memory: true } }, memory: { paths: memoryPaths() } }
+    );
+    const mapped = resolveSearchAlias('vault_search', { query: 'target' });
+    t.is(mapped?.name, 'search');
+    const res = await run(plugin, mapped!.arguments as SearchToolArgs);
+    t.true(res.success);
+    t.is(res.scope, 'vault');
+    t.deepEqual(res.results.map(x => x.path), ['Notatka.md']);
+    t.false('scope_hint' in res);
+});
+
+test('jawne scope="vault" → notatka vaulta, brak pola scope_hint', async t => {
+    const plugin = makePlugin(
+        {
+            'Notatka.md': 'target w vaulcie',
+            [`${MEM_BASE}/brain.md`]: 'target w pamięci'
+        },
+        { agent: { permissions: { memory: true } }, memory: { paths: memoryPaths() } }
+    );
+    const res = await run(plugin, { query: 'target', scope: 'vault' });
+    t.true(res.success);
+    t.is(res.scope, 'vault');
+    t.true(res.results.some(x => x.path === 'Notatka.md'));
+    t.false('scope_hint' in res, 'scope jawny → brak scope_hint');
+});
+
+test('jawne scope="memory" → brak pola scope_hint', async t => {
+    const plugin = makePlugin(
+        { [`${MEM_BASE}/brain.md`]: 'target w pamięci' },
+        { agent: { permissions: { memory: true } }, memory: { paths: memoryPaths() } }
+    );
+    const res = await run(plugin, { query: 'target', scope: 'memory' });
+    t.true(res.success);
+    t.is(res.scope, 'memory');
+    t.false('scope_hint' in res, 'scope jawny → brak scope_hint, nawet gdy jawny scope=memory');
+});
+
+test('brak scope + permissions.memory === false → fallback na vault (sukces, NIE odmowa)', async t => {
+    const plugin = makePlugin(
+        {
+            'Notatka.md': 'target w vaulcie',
+            [`${MEM_BASE}/brain.md`]: 'target w pamięci'
+        },
+        { agent: { permissions: { memory: false } }, memory: { paths: memoryPaths() } }
+    );
+    const res = await run(plugin, { query: 'target' });
+    t.true(res.success, 'domyślne wywołanie bez scope nie odmawia, gdy pamięć jest wyłączona');
+    t.is(res.scope, 'vault');
+    t.true(res.results.some(x => x.path === 'Notatka.md'));
+});
+
+test('brak scope + _invocationDelegationDepth:1 (sub-agent) → fallback na vault', async t => {
+    const plugin = makePlugin(
+        {
+            'Notatka.md': 'target w vaulcie',
+            [`${MEM_BASE}/brain.md`]: 'target w pamięci'
+        },
+        { agent: { permissions: { memory: true } }, memory: { paths: memoryPaths() } }
+    );
+    const res = await run(plugin, { query: 'target', _invocationDelegationDepth: 1 });
+    t.true(res.success);
+    t.is(res.scope, 'vault');
+    t.true(res.results.some(x => x.path === 'Notatka.md'), 'sub-agent bez scope trafia notatkę vaulta');
+    t.false(res.results.some(x => x.path === `${MEM_BASE}/brain.md`), 'sub-agent bez scope NIE dostaje pamięci rodzica');
+});
+
+test('brak scope + brak pamięci agenta (getAgentMemory zwraca null) → fallback na vault', async t => {
+    const plugin = makePlugin(
+        { 'Notatka.md': 'target w vaulcie' },
+        { agent: { permissions: { memory: true } }, memory: null }
+    );
+    const res = await run(plugin, { query: 'target' });
+    t.true(res.success);
+    t.is(res.scope, 'vault');
+    t.true(res.results.some(x => x.path === 'Notatka.md'));
+});
+
+// ───────────────────────── contextExtractor: targetPath zależny od zakresu ─────────────────────
+
+test('contextExtractor: brak scope + where.folder przy domyślnym memory → targetPath vide (folder = podfolder pamięci, nie ścieżka vaulta)', t => {
+    const plugin = makePlugin(
+        {},
+        { agent: { permissions: { memory: true } }, memory: { paths: memoryPaths() } }
+    );
+    const tool = createSearchTool();
+    const ctxDefault = tool.contextExtractor(
+        { query: 'x', where: { folder: 'Projekty' } },
+        { plugin }
+    );
+    t.is(ctxDefault.targetPath, '');
+
+    const ctxVault = tool.contextExtractor(
+        { query: 'x', scope: 'vault', where: { folder: 'Projekty' } },
+        { plugin }
+    );
+    t.is(ctxVault.targetPath, 'Projekty');
+});
+
+// ───────────────────────── resolveSearchScope — bezpośrednio ─────────────────────
+
+test('resolveSearchScope: literówka scope="Vault" traktowana jak brak scope → default memory (agent z pamięcią)', t => {
+    const plugin = makePlugin(
+        {},
+        { agent: { permissions: { memory: true } }, memory: { paths: memoryPaths() } }
+    );
+    const decision: SearchScopeDecision = resolveSearchScope({ query: 'x', scope: 'Vault' }, plugin);
+    t.deepEqual(decision, { scope: 'memory', source: 'default' });
 });

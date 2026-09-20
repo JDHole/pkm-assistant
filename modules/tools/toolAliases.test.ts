@@ -22,34 +22,36 @@ test('resolveSearchAlias: nieznana nazwa spoza aliasów → null (→ dotychczas
 test('vault_grep → search {query, mode:keyword, where:{folder,glob}}', t => {
     const r = resolveSearchAlias('vault_grep', { pattern: 'foo', folder: 'P', glob: '*.md' })!;
     t.is(r.name, 'search');
-    t.deepEqual(r.arguments, { query: 'foo', mode: 'keyword', where: { folder: 'P', glob: '*.md' } });
+    t.deepEqual(r.arguments, { query: 'foo', mode: 'keyword', scope: 'vault', where: { folder: 'P', glob: '*.md' } });
 });
 
-test('vault_search → search {query, where:{folder}}', t => {
+// Każdy alias `vault_*` niesie `scope:'vault'` JAWNIE: domyślny zakres `search` to pamięć
+// agenta, więc alias bez `scope` przeszukiwałby po cichu pamięć zamiast obiecanego vaulta.
+test('vault_search → search {query, scope:vault, where:{folder}}', t => {
     t.deepEqual(resolveSearchAlias('vault_search', { query: 'x', folder: 'P' })!.arguments,
-        { query: 'x', where: { folder: 'P' } });
-    // bez folderu → gołe query
-    t.deepEqual(resolveSearchAlias('vault_search', { query: 'x' })!.arguments, { query: 'x' });
+        { query: 'x', scope: 'vault', where: { folder: 'P' } });
+    // bez folderu → query + jawny scope
+    t.deepEqual(resolveSearchAlias('vault_search', { query: 'x' })!.arguments, { query: 'x', scope: 'vault' });
 });
 
-test('vault_semantic → search {query, mode:semantic} (puste where usunięte)', t => {
+test('vault_semantic → search {query, mode:semantic, scope:vault} (puste where usunięte)', t => {
     t.deepEqual(resolveSearchAlias('vault_semantic', { query: 'x' })!.arguments,
-        { query: 'x', mode: 'semantic' });
+        { query: 'x', mode: 'semantic', scope: 'vault' });
 });
 
-test('vault_glob → search {where:{glob}}', t => {
+test('vault_glob → search {scope:vault, where:{glob}}', t => {
     t.deepEqual(resolveSearchAlias('vault_glob', { pattern: '**/*.md' })!.arguments,
-        { where: { glob: '**/*.md' } });
+        { scope: 'vault', where: { glob: '**/*.md' } });
 });
 
-test('vault_filter_yaml → search {where:{yaml, folder}}', t => {
+test('vault_filter_yaml → search {scope:vault, where:{yaml, folder}}', t => {
     t.deepEqual(resolveSearchAlias('vault_filter_yaml', { filter: { status: 'wip' }, folder: 'P' })!.arguments,
-        { where: { yaml: { status: 'wip' }, folder: 'P' } });
+        { scope: 'vault', where: { yaml: { status: 'wip' }, folder: 'P' } });
 });
 
-test('vault_links → search {where:{links_from, links_to}}', t => {
+test('vault_links → search {scope:vault, where:{links_from, links_to}}', t => {
     t.deepEqual(resolveSearchAlias('vault_links', { from: 'A', to: 'B' })!.arguments,
-        { where: { links_from: 'A', links_to: 'B' } });
+        { scope: 'vault', where: { links_from: 'A', links_to: 'B' } });
 });
 
 test('memory_* → search ze scope:memory', t => {
@@ -124,7 +126,7 @@ test('memory_list_summaries → list{folder:summaries[/level], scope:memory}', t
 });
 
 test('resolveToolAlias przepuszcza dawne aliasy search przez wspólny resolver', t => {
-    t.deepEqual(resolveToolAlias('vault_grep', { pattern: 'foo' }), { name: 'search', arguments: { query: 'foo', mode: 'keyword' } });
+    t.deepEqual(resolveToolAlias('vault_grep', { pattern: 'foo' }), { name: 'search', arguments: { query: 'foo', mode: 'keyword', scope: 'vault' } });
     t.is(resolveToolAlias('nonexistent', {}), null);
 });
 
