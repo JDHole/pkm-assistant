@@ -16,8 +16,8 @@
 modules/skills/
 ├── index.js                        # Public API barrel
 ├── types.js                        # typy współdzielone: SkillData/SkillInput/SkillQuestion/VaultLike
-├── SkillLoader.js                  # 522 LOC - scan vaulta, parse SKILL.md, CRUD, cache, starter skills
-├── SkillLoader.test.js             # testy SkillLoader (CRUD, cache, starter skills, migracja legacy)
+├── SkillLoader.js                  # ~280 LOC - scan vaulta, parse SKILL.md, CRUD, cache (zero fabrycznych skilli - patrz "Historia" niżej)
+├── SkillLoader.test.js             # testy SkillLoader (CRUD, cache, boot bez siewu na brakującym folderze)
 ├── SkillVariables.js               # 43 LOC - substitute / extract {{placeholders}}
 ├── skillFrontmatter.js             # wspólny parse/serialize SKILL.md (SkillLoader + SkillTemplateStore, pure)
 ├── SkillTemplateStore.js           # magazyn szablonów skilli (Zaplecze): loadAll/list/get/instantiate/save/delete
@@ -29,7 +29,7 @@ modules/skills/
 ├── CLAUDE.md                       # ten plik
 ```
 
-Razem **~870 LOC** (obejmuje ~300 LOC przeniesione z `modules/shell/sidebar/` - zakładka Backstage + widok szczegółu skilla).
+Razem **~1700 LOC** bez testów (liczby per plik wyżej są orientacyjne; obejmuje ~300 LOC przeniesione z `modules/shell/sidebar/` - zakładka Backstage + widok szczegółu skilla).
 
 **Skille NIE MAJĄ już narzędzi.** `skill_list` + `skill_execute` (pliki `SkillExecuteTool.js`/`SkillListTool.js` w `modules/mcp/`) **SKASOWANE**. Model odkrywa skille przez **cienki indeks w system promptcie** (nazwa + opis + ścieżka SKILL.md), a **pełny przepis wciąga narzędziem `read`** (`.pkm-assistant/skills/<slug>/SKILL.md`). Silnik (`SkillLoader`/`SkillVariables`/`resolveSkillConfig`) bez zmian.
 
@@ -48,7 +48,6 @@ Razem **~870 LOC** (obejmuje ~300 LOC przeniesione z `modules/shell/sidebar/` - 
 - `reloadSkills()` - alias dla `loadAllSkills()`
 - `saveSkill(skillData)` - zapisuje skill na dysk (create lub update), zapisuje jako `SKILL.md`
 - `deleteSkill(skillName)` - kasuje folder skilla REKURENCYJNIE (references/, examples/ też), czyści cache; przyjmuje nazwę wyświetlaną LUB slug (zwrot `false` = nic nie skasowano, modal to raportuje)
-- `ensureStarterSkills()` - przy pierwszym uruchomieniu tworzy 8 starter skilli (welcome-tour, daily-review, etc.)
 
 **Funkcje `SkillVariables`:**
 - `substituteVariables(prompt, values)` - zamienia `{{key}}` na `values[key]`. Niezmapowane zostają jak są.
@@ -138,8 +137,8 @@ Przeanalizuj dzień {{dzien}} i przygotuj refleksję...
 4. **Ścieżka UI (marker `@@skill:`) - przepis inline.** Klik w slim barze / TriggerPopup wstawia marker; `chat_streaming` resolwuje skill przez `resolveSkillConfig` (overrides `prompt_append` DZIAŁAJĄ - doczepki nie giną) i wstrzykuje PEŁNY przepis do instrukcji tury (`buildInlineTriggerInstruction`, `modules/chat/`). `pre-questions` (frontmatter) obsługuje `_showSkillPreQuestions` w `chat_ui.js` (ścieżka guzika slim baru - podstawia `{{key}}` i wrzuca prompt do inputu); marker `pre-questions` NIE nosi. Schemat `pre-questions` bez zmian.
 5. **Nudge todo po skillu** - kodowy hook w `chat_streaming`: marker → `turn.skillActiveAt=0`; `read` pod `.pkm-assistant/skills/**` → `turn.skillActiveAt=i`. Nudge kodowy jest jedynym enforcementem.
 
-Starter skille (`SkillLoader.getStarterSkills`) i treści playbooków w i18n nie zawierają
-`allowed-tools` ani odniesień do `skill_list`/`skill_execute`.
+Treści playbooków w i18n nie zawierają `allowed-tools` ani odniesień do
+`skill_list`/`skill_execute`.
 
 **Badge „📎 dodatki" w zakładce Umiejętności panelu agenta.** `SkillLoader._loadSkillFromFolder`
 ustawia `hasTemplate`/`hasReferences`/`hasExamples` (istnienie `template.md` / katalogu
@@ -172,7 +171,7 @@ jako `fromTemplate`) i startuje od `version: 1`. Kolizja slugu → sufiks doklej
 rozjechać z formatem odlewu. Pure, bez `obsidian`.
 
 **`allowed-tools` wycięte z całego łańcucha:** parser, zapis, cache, siatka w `SkillEditorModal`,
-chipy w `SkillDetailView`, pole w starterach, klucze i18n. Pole nigdy nie było egzekwowane
+chipy w `SkillDetailView`, klucze i18n. Pole nigdy nie było egzekwowane
 (fasada) - o tym, co agent może zrobić, decyduje oś `disabled_tools` + `ToolRegistry.filterByAgent`.
 Stare pliki usera z tym polem: parser ignoruje nieznane pola.
 
@@ -186,21 +185,24 @@ szablonu"). W Zapleczu tworzy się już tylko szablony.
 
 ---
 
-## Starter skill: create-agent
+## Historia: fabryczne startery (wycięte 2026-09)
 
-Fabryczny starter `create-agent` (wersja 3) to przepis używający wyłącznie `list`, `read`,
-`create_folder` i `write`; nie istnieje narzędzie `agent_create`.
+Do 2026-09 plugin siał **8 fabrycznych starter skilli** (`welcome-tour`, `daily-review`,
+`vault-organization`, `note-from-idea`, `weekly-review`, `create-agent`, `create-skill`,
+`system-health-check`) do `.pkm-assistant/skills/` przy KAŻDYM starcie, gdy folder nie
+istniał albo był pusty (`SkillLoader.ensureStarterSkills()`, wołane z
+`AgentManager.initialize()`). Decyzja właściciela: plugin nie dostarcza już ŻADNYCH
+fabrycznych skilli - user tworzy własne (edytor skilli w profilu agenta), ewentualnie
+odlewa je z fabrycznych SZABLONÓW Zaplecza (`SkillTemplateStore`/`factoryTemplates.ts`,
+mechanizm ODRĘBNY, nietknięty tą decyzją - patrz sekcja niżej).
 
-Przepis wymaga admin access u agenta wykonującego, zbiera świadomą decyzję usera, zapisuje
-create-only `.pkm-assistant/agents/<slug>.yaml` z `access_policy_version:2`, bezpieczną
-negatywną listą `disabled_tools` i `admin_access:false`, a potem weryfikuje plik przez `read`.
-
-Aktualizacja istniejącego profilu = `read` + precyzyjny `write mode:patch`, nie pełne
-nadpisanie.
-
-`SkillLoader._migrateLegacyCreateAgentStarter()` podmienia wyłącznie rozpoznaną fabryczną
-wersję v2 (mocne sygnatury), zachowując `SKILL.v2-backup.md`. Własny/przerobiony skill usera
-jest nietykalny.
+`ensureStarterSkills()`, `getStarterSkills()` i `_migrateLegacyCreateAgentStarter()`
+(jednorazowa migracja fabrycznego `create-agent` v2→v3 po sygnaturach starej treści)
+SKASOWANE. Migracja jest świadomie odpuszczona, nie tylko usunięta wraz z resztą: każda
+publiczna wersja 2.2.x już ją wykonała przy pierwszym starcie, więc nowy kod migracyjny nie
+miałby czego jeszcze naprawiać u kogokolwiek, kto zaktualizował plugin choć raz. Pliki
+starterów, które już leżą na dysku u istniejących userów, są ICH plikami - plugin ich nie
+kasuje ani nie migruje, `loadAllSkills()` po prostu wczytuje je jak każdy inny skill usera.
 
 ---
 
@@ -210,8 +212,8 @@ jest nietykalny.
 po `loadAll`) seeduje fabryczne szablony skilli `deep-research-web` (🔎) i `deep-research-vault`
 (🧠) + szablon suba `researcher`. Seed następuje RAZ - marker `.pkm-assistant/templates/.factory-seeded-v1`;
 kasacja usera jest szanowana (szablon nie wraca po restarcie); userowy szablon pod fabryczną
-nazwą wygrywa (zero sufiksów). Treści przez i18n (`factory.template.*`, pl+en) - wzór starter
-skills.
+nazwą wygrywa (zero sufiksów). Treści przez i18n (`factory.template.*`, pl+en) - wołane w
+runtime po `setLocale()`, nie przy imporcie modułu.
 
 **Przepisy deep-research (7 kroków):** wymagania (`delegate` + `artifact_*` + `web`) → pytanie
 badawcze → `artifact_create typ:"raport"` → podpytania wg pre-question głębokości (szybki 2-3 /
@@ -236,7 +238,6 @@ MA). Worker jest read-only; raport składa agent główny.
 
 - ⚠️ **Cache klucz to slug, ale `getSkill(skillName)` próbuje najpierw cache.get(skillName)** - działa tylko gdy `skillName === slug`. W innym przypadku fallback przez `Array.from(...).find()`. Niespójność semantyki klucza.
 - ⚠️ **`substituteVariables` ma jedno źródło** - `modules/chat/chat/chat_ui.ts` importuje ją z `modules/skills/index.js` (kanon `SkillVariables.ts`). Nie duplikować lokalnie.
-- ⚠️ **i18n race condition** w starter skills - `getStarterSkills()` woła `t('starter.skill...')` w runtime. Wymaga zainicjalizowanego locale ZANIM `ensureStarterSkills()` się wywoła.
 - ⚠️ **Skan pełny, nie watcher - koszt rośnie z liczbą skilli, nie z rozmiarem vaulta.** Skoro nie ma `watch()` (gotcha wyżej), nie ma co „lagować" w tle. `loadAllSkills()` robi `list('.pkm-assistant/skills/')`, po czym dla KAŻDEGO folderu osobno sprawdza istnienie i czyta `SKILL.md` (`_loadSkillFromFolder`) - zakres na twardo ograniczony do folderu skilli, nie cały vault. Ten pełny skan odpala się tylko w dwóch momentach: raz przy boot pluginu (`AgentManager.initialize`) i raz po KAŻDYM zapisie narzędziem `write`/`vault_write` pod `.pkm-assistant/skills/**` (`chat_streaming.ts` → `agentManager.reloadSkills()`). User z bardzo dużą liczbą skilli poczuje krótkie zamrożenie przy KAŻDYM takim zapisie (skan jest `await`-owany), nie ciągłe obciążenie w tle.
 - ⚠️ **Skill bez frontmatter `agent:`** = core skill, dostępny dla wszystkich. (Faktycznie obecne API: każdy skill jest globalny - przypisywanie do agenta dzieje się przez `skills:[]` w yaml agenta, nie przez `agent:` field w skillu.)
 - ⚠️ **`{{nested.path}}`** nie obsługiwane (regex `\{\{(\w+)\}\}` matchuje tylko `\w+`). Jak chcesz głębokie path → flatten w args.

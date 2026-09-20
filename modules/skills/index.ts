@@ -1,7 +1,10 @@
 /**
  * modules/skills — Public API barrel
  *
- * Skill engine v2: SkillLoader (CRUD + cache + starter skills) + SkillVariables ({{placeholders}}).
+ * Skill engine v2: SkillLoader (CRUD + cache) + SkillVariables ({{placeholders}}).
+ * Plugin nie dostarcza żadnych fabrycznych skilli (wycięte 2026-09) - user tworzy własne
+ * w profilu agenta, ewentualnie z fabrycznych SZABLONÓW Zaplecza (osobny mechanizm,
+ * `SkillTemplateStore`, patrz CLAUDE.md tego modułu).
  * Patrz CLAUDE.md tego modułu dla decyzji architektonicznych.
  *
  * `SKILL_TEMPLATES_PATH`, `parseSkillMarkdown` i `serializeSkillFile` NIE są
