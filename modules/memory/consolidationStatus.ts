@@ -6,7 +6,7 @@
  *  1. `SaveSessionWorkflow._shouldTriggerArchive` (`modules/memory/SaveSessionWorkflow.ts`) —
  *     deleguje tutaj zamiast trzymać własną kopię tej samej logiki.
  *  2. Prywatna wtyczka deweloperska właściciela w repo `pkm-assistant-harness`
- *     (branch `feat/companion-cli`, katalog `companion/`) — importuje obie funkcje PRZY BUILDZIE
+ *     (katalog `companion/`) — importuje obie funkcje PRZY BUILDZIE
  *     wprost z `@plugin/modules/memory/consolidationStatus.js`. To repo pluginu nie widzi tego
  *     konsumenta w swoich testach ani typecheku.
  *

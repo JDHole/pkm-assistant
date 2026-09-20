@@ -419,8 +419,8 @@ Flow:
   refaktoruj formuł przy okazji.
 
   Drugi konsument (poza `SaveSessionWorkflow` wewnątrz tego modułu) to prywatna wtyczka
-  deweloperska właściciela w repo `pkm-assistant-harness` (branch `feat/companion-cli`, katalog
-  `companion/`) - importuje obie funkcje PRZY BUILDZIE wprost z pliku
+  deweloperska właściciela w repo `pkm-assistant-harness` (katalog `companion/`) - importuje
+  obie funkcje PRZY BUILDZIE wprost z pliku
   `@plugin/modules/memory/consolidationStatus.js`. Dlatego NAZWA TEGO PLIKU i sygnatury tych
   dwóch funkcji zostają BEZ ZMIAN bez poprawki w harnessie - zmiana = czerwony build harnessu i
   jego CI, którego to repo nie zobaczy we własnym typecheku ani testach. Status konsolidacji dla
