@@ -128,7 +128,7 @@ The plugin supports 9 platforms. Each requires an API key (except Ollama/LM Stud
 |  (bubbles, tool calls, thinking)     |
 |                                      |
 +--------------------------------------+
-| [Skill 1] [Skill 2] [Skill 3]       |  <- Skill bar (clickable)
+| [Skill 1] [Skill 2] [Skill 3]       |  <- Skill bar (shown once the agent has skills)
 +--------------------------------------+
 | [Clip] [Type a message...] [> Send]  |  <- Input + attachments + send
 +--------------------------------------+
@@ -139,7 +139,7 @@ The plugin supports 9 platforms. Each requires an API key (except Ollama/LM Stud
 Click the agent icon in the ribbon. You'll see:
 - **Home screen** - agent cards + sections (communicator, backstage)
 - **Agent profile** - click a card → 9 tabs (Overview, Persona, Skills...)
-- **Backstage** - overview of skills, MCP tools, sub-agents
+- **Backstage** - templates for skills and sub-agents, MCP connectors
 
 ---
 
@@ -271,16 +271,15 @@ Skills are ready-made "recipes" that an agent can execute. Like macros, but inte
 2. If the skill has **pre-questions** - fill out the form
 3. The skill's prompt is inserted into the input → send
 
-### Example built-in skills
+### The plugin ships no skills
 
-- **daily-review** - review of the day, what you did, what's next
-- **vault-organization** - analysis and organization of notes
-- **note-from-idea** - creating a note from a loose idea
-- **weekly-review** - weekly summary
+There are no factory/starter skills - there is no skill bar until you create a skill and
+assign it to an agent. A few ideas to start from: a daily review, vault organization and
+cleanup, turning a loose idea into a note, a weekly summary.
 
 ### Creating your own skills
 
-Agent Manager → Backstage → Skills → "New Skill" → form with 13 fields. Or ask Jaskier: *"Create a skill for analyzing scientific articles"*
+Agent Manager → agent profile → **Skills** tab → "+ new skill from scratch". The recipe is created and assigned to that agent right away. "From template" casts a skill from a Backstage template instead (Backstage itself only stores templates). An agent can help you draft the recipe text in chat, but it does not write skill files for you.
 
 ---
 
