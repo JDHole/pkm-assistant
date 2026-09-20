@@ -9,11 +9,12 @@ otwierania Obsidiana w przeglądarce ani klikania w UI.
 **Fala 1 = WYŁĄCZNIE odczyt, precyzyjnie.** `status`/`selftest`/`memory-status` nie zapisują
 NIC w vaultcie (poza własnym logiem diagnostycznym pluginu, gdy user włączył zapis logu do
 pliku - to log pluginu, nie efekt komendy). `agent-prompt` idzie TĄ SAMĄ drogą co budowa
-promptu w każdej turze czatu (`getMemoryContext()` → `getBrain()`), a ten silnik potrafi
-samonaprawić indeks `brain.md` i ZAPISAĆ plik - to istniejące zachowanie silnika, którego ta
-fala świadomie nie zmienia. Zamiast udawać, że tego nie ma, koperta mierzy to `stat`-em pliku
-przed/po wywołaniu i raportuje uczciwie w polu `effect` (`unchanged`/`changed`/`unknown` - patrz
-„Kontrakt koperty" niżej). Żadna z czterech komend nie woła modelu ani nie zmienia aktywnego
+promptu w każdej turze czatu (`getMemoryContext()` → `getBrain()` + `listBrainNotes()`), a ten
+silnik potrafi samonaprawić indeks `brain.md` i ZAPISAĆ plik oraz ZAŁOŻYĆ folder `brain/`, gdy
+zniknął spod instancji - to istniejące zachowanie silnika, którego ta fala świadomie nie zmienia.
+Zamiast udawać, że tego nie ma, koperta robi migawkę OBU bytów (`stat` pliku `brain.md` +
+obecność folderu `brain/`) przed/po wywołaniu i raportuje uczciwie w polu `effect`
+(`unchanged`/`changed`/`unknown` - patrz „Kontrakt koperty" niżej). Żadna z czterech komend nie woła modelu ani nie zmienia aktywnego
 agenta. Kontrakt zostawia miejsce na komendy piszące później (`CliEffect` ma już
 `'changed'`/`'created'`), ale dziś ich nikt nie produkuje.
 
@@ -46,15 +47,25 @@ modules/cli/
 ```ts
 type CliResponse<T> =
     | { ok: true; command: string; verified: boolean; effect: CliEffect; data: T }
-    | { ok: false; command: string; verified: false; effect: 'unchanged'; error: { code: CliErrorCode; message: string } };
+    | { ok: false; command: string; verified: boolean; effect: CliEffect; error: { code: CliErrorCode; message: string } };
 ```
 
 `verified` w gałęzi `ok:true` NIE jest literałem `true` - `status`/`selftest`/`memory-status` są
-czyste z konstrukcji i dostają `verified:true` zawsze, ale `agent-prompt` mierzy `stat` pliku
-`brain.md` przed/po wywołaniu (patrz gotcha wyżej o samonaprawie indeksu) i podaje własny,
-zmierzony `verified`/`effect`: identyczny `stat` -> `verified:true, effect:'unchanged'`; różny
--> `verified:true, effect:'changed'`; nie dało się nawet sprawdzić (agent bez pamięci, adapter
-bez `stat`, `stat()` rzucił) -> `verified:false, effect:'unknown'`.
+czyste z konstrukcji i dostają `verified:true` zawsze, ale `agent-prompt` robi migawkę pamięci
+agenta przed/po wywołaniu (`stat` pliku `brain.md` + obecność folderu `brain/` - patrz wyżej o
+samonaprawie) i podaje własny, zmierzony `verified`/`effect`: identyczna migawka ->
+`verified:true, effect:'unchanged'`; różna (plik zmieniony/pojawił się/zniknął albo folder
+`brain/` pojawił się/zniknął) -> `verified:true, effect:'changed'`; nie dało się nawet sprawdzić
+(agent bez pamięci, adapter bez `stat`, `stat()` rzucił) -> `verified:false, effect:'unknown'`.
+Fałszywe `changed` jest możliwe (inny pisarz w tle, np. tura czatu tego samego agenta między
+migawkami) - świadomie po bezpiecznej stronie: nadmiarowe `changed`, nigdy nadmiarowe `unchanged`.
+
+Gałąź `ok:false` niesie ten sam rodzaj prawdy, nie literał `unchanged`: błędy wykryte, ZANIM
+cokolwiek ruszyło (`bad_flag`, `not_ready`, `agent_not_found`, `agent_ambiguous`), mają
+`verified:false, effect:'unchanged'`; `section_not_found` pada dopiero PO przejściu silnika
+(klucze sekcji zna tylko jego wynik), więc niesie ZMIERZONY werdykt migawki; złapany wyjątek
+(`internal`) w komendzie wymagającej gotowości ma `effect:'unknown'` - nie wiadomo, w którym
+miejscu drogi padło.
 
 Wyjście na stdout to zawsze `JSON.stringify(response, null, 2)` - kod wyjścia procesu CLI bywa
 `0` nawet przy błędzie, więc wołający musi czytać `ok`/`error.code` z TREŚCI, nie z exit code.

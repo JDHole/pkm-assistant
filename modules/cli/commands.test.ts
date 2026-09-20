@@ -42,21 +42,29 @@ function markerOf(memory: AgentMemory): string {
     return (memory as unknown as { __fakeMarker: string }).__fakeMarker;
 }
 
+const FAKE_BRAIN_FILE = '.pkm-assistant/agents/jaskier/memory/brain.md';
+const FAKE_BRAIN_DIR = '.pkm-assistant/agents/jaskier/memory/brain';
+
 /**
- * Fejkowa pamięć ze STEROWANYM `stat` pliku `brain.md` (P4) - kolejne wywołania zwracają kolejne
- * wpisy z `stats` (pierwsze = "przed", drugie = "po"); ostatni wpis powtarza się, gdyby ktoś
- * zawołał więcej razy niż podano.
+ * Fejkowa pamięć ze STEROWANYM `stat` (P4) - migawka mierzy DWA byty: plik `brain.md` (`stats`)
+ * i obecność folderu `brain/` (`dirs`). Indeks 0 = "przed", indeks 1 = "po"; faza przełącza się
+ * po odczytaniu obu ścieżek (dwa wywołania `stat` na migawkę), ostatni wpis powtarza się, gdyby
+ * ktoś zawołał więcej razy niż podano.
  */
-function fakeMemoryWithStat(stats: Array<{ mtime: number; size: number } | null>): AgentMemory {
+function fakeMemoryWithStat(
+    stats: Array<{ mtime: number; size: number } | null>,
+    dirs: boolean[] = [true, true],
+): AgentMemory {
     let call = 0;
     return {
-        paths: { brain: '.pkm-assistant/agents/jaskier/memory/brain.md' },
+        paths: { brain: FAKE_BRAIN_FILE, brainNotes: FAKE_BRAIN_DIR },
         vault: {
             adapter: {
-                stat: async () => {
-                    const value = stats[Math.min(call, stats.length - 1)];
+                stat: async (path: string) => {
+                    const phase = Math.floor(call / 2);
                     call++;
-                    return value;
+                    if (path === FAKE_BRAIN_DIR) return dirs[Math.min(phase, dirs.length - 1)] ? { mtime: 1, size: 0 } : null;
+                    return stats[Math.min(phase, stats.length - 1)];
                 },
             },
         },
@@ -66,7 +74,7 @@ function fakeMemoryWithStat(stats: Array<{ mtime: number; size: number } | null>
 /** Fejkowa pamięć, której `stat` RZUCA - gałąź "nie da się nawet spróbować" (P4). */
 function fakeMemoryWithThrowingStat(): AgentMemory {
     return {
-        paths: { brain: '.pkm-assistant/agents/jaskier/memory/brain.md' },
+        paths: { brain: FAKE_BRAIN_FILE, brainNotes: FAKE_BRAIN_DIR },
         vault: { adapter: { stat: async () => { throw new Error('stat padł'); } } },
     } as unknown as AgentMemory;
 }
@@ -219,7 +227,7 @@ test('selftest: wyjatek z deps.selfTest() -> internal, handler nie rzuca', async
         ok: false,
         command: 'pkm-assistant:selftest',
         verified: false,
-        effect: 'unchanged',
+        effect: 'unknown',
         error: { code: 'internal', message: 'raport padl' },
     });
 });
@@ -331,6 +339,43 @@ test('agent-prompt: verified:false effect:unknown, gdy stat brain.md rzuca (nie 
     const response = await run(deps, 'agent-prompt', { agent: 'Jaskier' });
 
     t.true(response.ok);
+    t.false(response.verified);
+    t.is(response.effect, 'unknown');
+});
+
+test('agent-prompt: effect:changed, gdy brain.md IDENTYCZNY, ale silnik ZAŁOŻYŁ folder brain/ (listBrainNotes -> mkdir)', async t => {
+    const memory = fakeMemoryWithStat([{ mtime: 100, size: 10 }, { mtime: 100, size: 10 }], [false, true]);
+    const am = makeAgentManager({ names: ['Jaskier'], prompts: { Jaskier: PROMPT_FIXTURE }, memories: { Jaskier: memory } });
+    const deps = makeDeps({ agentManager: am });
+    const response = await run(deps, 'agent-prompt', { agent: 'Jaskier' });
+
+    t.true(response.ok);
+    t.true(response.verified);
+    t.is(response.effect, 'changed');
+});
+
+test('agent-prompt: section_not_found pada PO przejściu silnika - błąd niesie ZMIERZONY effect:changed, nie "unchanged" na wiarę', async t => {
+    const memory = fakeMemoryWithStat([{ mtime: 100, size: 10 }, { mtime: 200, size: 12 }]);
+    const am = makeAgentManager({ names: ['Jaskier'], prompts: { Jaskier: PROMPT_FIXTURE }, memories: { Jaskier: memory } });
+    const deps = makeDeps({ agentManager: am });
+    const response = await run(deps, 'agent-prompt', { agent: 'Jaskier', section: 'nie-ma-takiej' });
+
+    t.false(response.ok);
+    if (response.ok) return;
+    t.is(response.error.code, 'section_not_found');
+    t.true(response.verified);
+    t.is(response.effect, 'changed');
+});
+
+test('internal: złapany wyjątek w komendzie wymagającej gotowości -> effect:unknown (nie wiadomo, gdzie padło), verified:false', async t => {
+    const am = makeAgentManager({ names: ['Jaskier'], prompts: { Jaskier: PROMPT_FIXTURE } });
+    am.getPromptInspectorDataForAgent = async () => { throw new Error('silnik padł w połowie'); };
+    const deps = makeDeps({ agentManager: am });
+    const response = await run(deps, 'agent-prompt', { agent: 'Jaskier' });
+
+    t.false(response.ok);
+    if (response.ok) return;
+    t.is(response.error.code, 'internal');
     t.false(response.verified);
     t.is(response.effect, 'unknown');
 });
@@ -525,7 +570,7 @@ test('wyjatek rzucony przez deps (agentManager()) -> internal, handler nie rzuca
         ok: false,
         command: 'pkm-assistant:selftest',
         verified: false,
-        effect: 'unchanged',
+        effect: 'unknown',
         error: { code: 'internal', message: 'deps padly' },
     });
 });

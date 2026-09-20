@@ -206,17 +206,31 @@ type BrainStatMemory = Pick<AgentMemory, 'vault' | 'paths'>;
 type BrainFileStat = { mtime?: number; size?: number } | null;
 
 /**
- * `stat` pliku `brain.md` agenta - `undefined`, gdy nie da się w ogóle spróbować (brak instancji
- * pamięci, adapter bez `stat`, albo `stat()` rzucił). Odróżnione świadomie od `null` (wynik
- * `stat()` na nieistniejącym pliku) - obie wartości muszą być rozróżnialne dla `brainStatVerdict`.
+ * Migawka DWÓCH bytów, które droga budowy promptu potrafi zmaterializować na dysku:
+ *  - plik `brain.md` (`getBrain()` dokleja brakujące nagłówki indeksu i ZAPISUJE plik),
+ *  - folder `brain/` (`listBrainNotes()` sam go zakłada, gdy zniknął spod rozgrzanej instancji).
+ * Sam `stat` pliku przepuszczał drugi przypadek jako `unchanged` przy realnym `mkdir`. Dla folderu
+ * liczy się wyłącznie OBECNOŚĆ - jego mtime rusza każda nowa notatka pisana w tle przez kogoś innego.
  */
-async function statBrainFile(memory: BrainStatMemory | null): Promise<BrainFileStat | undefined> {
+interface BrainSnapshot {
+    file: BrainFileStat;
+    notesDirPresent: boolean;
+}
+
+/**
+ * Migawka pamięci agenta - `undefined`, gdy nie da się w ogóle spróbować (brak instancji pamięci,
+ * adapter bez `stat`, albo `stat()` rzucił). Odróżnione świadomie od `file: null` (wynik `stat()`
+ * na nieistniejącym pliku) - obie wartości muszą być rozróżnialne dla `brainStatVerdict`.
+ */
+async function snapshotBrain(memory: BrainStatMemory | null): Promise<BrainSnapshot | undefined> {
     // `stat` wołane NA `memory.vault.adapter` (`obj.method(...)`), nigdy jako odpięta referencja -
     // ten sam powód co P1 w `register.ts`: `@typescript-eslint/unbound-method` (i realny bug w
     // prawdziwym Obsidianie) czają się na `const f = obj.method; f(...)`.
     if (!memory || typeof memory.vault.adapter.stat !== 'function') return undefined;
     try {
-        return (await memory.vault.adapter.stat(memory.paths.brain)) ?? null;
+        const file = (await memory.vault.adapter.stat(memory.paths.brain)) ?? null;
+        const notesDir = (await memory.vault.adapter.stat(memory.paths.brainNotes)) ?? null;
+        return { file, notesDirPresent: notesDir !== null };
     } catch {
         return undefined;
     }
@@ -228,15 +242,16 @@ function sameBrainStat(a: BrainFileStat, b: BrainFileStat): boolean {
 }
 
 /**
- * `verified`/`effect` koperty `agent-prompt` (P4): `stat` niedostępny przed ALBO po (adapter bez
+ * `verified`/`effect` koperty `agent-prompt` (P4): migawka niedostępna przed ALBO po (adapter bez
  * `stat`, agent bez pamięci, `stat()` rzucił) -> `verified:false, effect:'unknown'` - nie ma jak
- * porównać, więc koperta nie ma prawa obiecywać `unchanged`. Identyczny `stat` przed i po ->
- * `verified:true, effect:'unchanged'`; różny (albo plik pojawił się/zniknął) ->
- * `verified:true, effect:'changed'`.
+ * porównać, więc koperta nie ma prawa obiecywać `unchanged`. Identyczna migawka przed i po ->
+ * `verified:true, effect:'unchanged'`; różna (plik zmieniony/pojawił się/zniknął ALBO folder
+ * `brain/` pojawił się/zniknął) -> `verified:true, effect:'changed'`.
  */
-function brainStatVerdict(before: BrainFileStat | undefined, after: BrainFileStat | undefined): { verified: boolean; effect: CliEffect } {
+function brainStatVerdict(before: BrainSnapshot | undefined, after: BrainSnapshot | undefined): { verified: boolean; effect: CliEffect } {
     if (before === undefined || after === undefined) return { verified: false, effect: 'unknown' };
-    return sameBrainStat(before, after) ? { verified: true, effect: 'unchanged' } : { verified: true, effect: 'changed' };
+    const same = sameBrainStat(before.file, after.file) && before.notesDirPresent === after.notesDirPresent;
+    return same ? { verified: true, effect: 'unchanged' } : { verified: true, effect: 'changed' };
 }
 
 /**
@@ -279,7 +294,9 @@ async function runGuardedReady(
         }
         return serializeCliResponse(await handler(am));
     } catch (e) {
-        return serializeCliResponse(errorResponse(id, 'internal', errorMessage(e)));
+        // `unknown`, nie `unchanged`: wyjątek mógł paść W POŁOWIE drogi silnika (po samonaprawie
+        // `brain.md`, przed zwrotką) - nie wiemy, co zdążyło się zapisać, więc tego nie obiecujemy.
+        return serializeCliResponse(errorResponse(id, 'internal', errorMessage(e), 'unknown'));
     }
 }
 
@@ -328,9 +345,12 @@ async function runAgentPrompt(id: string, params: CliData, am: CliAgentManager):
     // `getMemoryContext()`/`getBrain()` może samonaprawić i ZAPISAĆ `brain.md`. `stat` przed/po
     // mierzy, czy się to naprawdę zdarzyło, żeby koperta nie kłamała `unchanged` na wiarę.
     const memory = am.getAgentMemory(resolved.name);
-    const before = await statBrainFile(memory);
+    const before = await snapshotBrain(memory);
     const inspected = await am.getPromptInspectorDataForAgent(resolved.name);
-    const after = await statBrainFile(memory);
+    const after = await snapshotBrain(memory);
+    // Werdykt liczony OD RAZU po przejściu silnika - niesie go też gałąź błędu niżej
+    // (`section_not_found` znamy dopiero z listy sekcji, czyli PO tym, jak silnik mógł już pisać).
+    const verdict = brainStatVerdict(before, after);
 
     const data: AgentPromptData = {
         agent: resolved.name,
@@ -351,12 +371,11 @@ async function runAgentPrompt(id: string, params: CliData, am: CliAgentManager):
         if (!found) {
             const keys = inspected.sections.map(s => s.key);
             const available = keys.length > 0 ? keys.join(', ') : '(none)';
-            return errorResponse(id, 'section_not_found', `Section "${sectionKey}" not found. Available sections: ${available}`);
+            return errorResponse(id, 'section_not_found', `Section "${sectionKey}" not found. Available sections: ${available}`, verdict.effect, verdict.verified);
         }
         data.section = { key: found.key, label: found.label, tokens: found.tokens, content: found.content };
     }
 
-    const verdict = brainStatVerdict(before, after);
     return okResponse(id, data, verdict.effect, verdict.verified);
 }
 
