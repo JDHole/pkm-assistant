@@ -140,3 +140,22 @@ test('createAgent nie tworzy automatycznie prep sub-agenta', t => {
     t.notRegex(body, /_subAgents\.push\(/,
         'createAgent nie może dopisywać niczego do _subAgents — Ekipa świeżego agenta zostaje pusta');
 });
+
+// Decyzja właściciela 2026-09: plugin nie dostarcza już ŻADNYCH fabrycznych skilli.
+// `SkillLoader.ensureStarterSkills()` (i cały siew starterów) zostały skasowane; `initialize()`
+// nie ma prawa ich wołać z powrotem. `AgentManager.ts` importuje `obsidian` przez `Notice`,
+// więc `initialize()` nie da się bezpiecznie odpalić w AVA (nie ma jak podstawić prawdziwego
+// vaulta bez pociągnięcia całego runtime'u Obsidiana) — jak w całym tym pliku, zostaje strażnik
+// po ŹRÓDLE. Zachowanie "boot nie zakłada folderu .pkm-assistant/skills/" pokrywa
+// `SkillLoader.test.ts` (`loadAllSkills bez folderu .pkm-assistant/skills/ nie rzuca...`) -
+// wywołaniem PRAWDZIWEGO kodu na atrapie vaulta, nie regexem.
+test('initialize() nie sieje fabrycznych skilli (ensureStarterSkills skasowane)', t => {
+    const body = methodBodyOf(source, 'initialize');
+    t.true(body.length > 0, 'nie znalazłem initialize w AgentManager.ts — zmieniła się sygnatura?');
+
+    // Komplet wywołań na skillLoaderze, nie nieobecność jednej nazwy: siew przywrócony pod
+    // INNĄ nazwą (seedDefaultSkills, ensureFactorySkills...) też musi tu paść.
+    const calls = [...body.matchAll(/this\.skillLoader\.(\w+)\(/g)].map(m => m[1]);
+    t.deepEqual(calls, ['loadAllSkills'],
+        'initialize() ma na skillLoaderze wołać WYŁĄCZNIE loadAllSkills — każde inne wywołanie to kandydat na siew');
+});

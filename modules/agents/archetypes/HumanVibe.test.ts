@@ -40,6 +40,8 @@ test.serial('reszta konfiguracji nie zależy od języka', t => {
     t.is(pl.name, 'Jaskier');
     t.is(en.name, 'Jaskier');
     t.is(en.temperature, pl.temperature);
-    t.deepEqual(en.skills, pl.skills);
+    // Plugin nie dostarcza skilli: Jaskier startuje bez przypisań w OBU językach.
+    t.deepEqual(pl.skills, []);
+    t.deepEqual(en.skills, []);
     t.is(en.isBuiltIn, true);
 });

@@ -8,9 +8,9 @@ type TestSkill = Record<string, unknown> & {
 };
 type TestSkillLoader = {
     _loadSkillFromFolder(path: string): Promise<TestSkill | null>;
-    ensureStarterSkills(): Promise<void>;
     saveSkill(input: unknown): Promise<void>;
     getSkill(name: string): TestSkill | null;
+    getAllSkills(): TestSkill[];
     loadAllSkills(): Promise<void>;
     deleteSkill(name: string): Promise<boolean>;
 };
@@ -71,45 +71,6 @@ test('loadSkillFromFolder detects supporting files before returning', async t =>
     t.true(Boolean(skill?.hasExamples));
 });
 
-test('A4 migrates only factory create-agent v2, keeps backup and installs primitive v3 recipe', async t => {
-    const path = '.pkm-assistant/skills/create-agent/SKILL.md';
-    const backup = '.pkm-assistant/skills/create-agent/SKILL.v2-backup.md';
-    const files: Record<string, string> = {
-        [path]: [
-            '---',
-            'name: create-agent',
-            'version: 2',
-            '---',
-            'Archetyp',
-            'vault_write(".pkm-assistant/agents/{nazwa}/agent.yaml", "---',
-            'minion: null',
-        ].join('\n'),
-    };
-    const folders = new Set<string>(['.pkm-assistant/skills', '.pkm-assistant/skills/create-agent']);
-    const vault = {
-        adapter: {
-            exists: async (p: string) => Object.hasOwn(files, p) || folders.has(p),
-            read: async (p: string) => files[p],
-            write: async (p: string, value: string) => { files[p] = value; },
-            list: async () => ({ folders: [...folders], files: Object.keys(files) }),
-        }
-    };
-
-    const loader = new SkillLoader(vault as unknown as ConstructorParameters<typeof SkillLoader>[0]);
-    await loader.ensureStarterSkills();
-
-    t.truthy(files[backup]);
-    t.true(files[path].includes('version: 3'));
-    t.true(files[path].includes('create_folder'));
-    t.true(files[path].includes('mode: "create"'));
-    t.true(files[path].includes('access_policy_version: 2'));
-    t.true(files[path].includes('disabled_tools:'));
-    t.true(files[path].includes('- web_search'));
-    t.false(files[path].includes('agent_create('));
-    t.false(files[path].includes('allowed-tools:'));
-    t.false(files[path].includes('vault_write'));
-});
-
 test('stary skill z allowed-tools wczytuje się, pole jest ignorowane (zero migracji)', async t => {
     const loader = new SkillLoader(makeVault({
         '.pkm-assistant/skills/stary/SKILL.md': [
@@ -152,46 +113,6 @@ test('saveSkill nie zapisuje allowed-tools nawet gdy wołający je poda', async 
     t.false(raw!.includes('allowed-tools'));
     t.falsy(loader.getSkill('nowy')?.allowedTools);
 });
-
-test('startery nie niosą już pola allowed-tools', async t => {
-    const files: Record<string, string> = {};
-    const folders = new Set<string>();
-    const loader = new SkillLoader({
-        adapter: {
-            exists: async (p: string) => Object.hasOwn(files, p) || folders.has(p),
-            read: async (p: string) => files[p],
-            write: async (p: string, v: string) => { files[p] = v; },
-            mkdir: async (p: string) => { folders.add(p); },
-            list: async () => ({ folders: [], files: [] }),
-        },
-    });
-
-    await loader.ensureStarterSkills();
-
-    const starters = Object.entries(files).filter(([p]) => p.endsWith('SKILL.md'));
-    t.is(starters.length, 8);
-    for (const [path, content] of starters) {
-        t.false(content.includes('allowed-tools'), `${path} bez pola-fasady`);
-    }
-});
-
-test('A4 does not overwrite a user-customized create-agent skill', async t => {
-    const path = '.pkm-assistant/skills/create-agent/SKILL.md';
-    const custom = '---\nname: create-agent\nversion: 2\n---\nMój własny przepis.';
-    const files: Record<string, string> = { [path]: custom };
-    const vault = {
-        adapter: {
-            exists: async (p: string) => Object.hasOwn(files, p) || p === '.pkm-assistant/skills',
-            read: async (p: string) => files[p],
-            write: async (p: string, value: string) => { files[p] = value; },
-            list: async () => ({ folders: ['.pkm-assistant/skills/create-agent'], files: [path] }),
-        }
-    };
-
-    await new SkillLoader(vault).ensureStarterSkills();
-    t.is(files[path], custom);
-});
-
 
 // ── regression guard: `preQuestions` musi przetrwać return z `parseSkillMarkdown` ──
 // (inaczej każdy load z dysku traciłby pre-questions → modal pytań przed skillem byłby martwy).
@@ -347,4 +268,66 @@ test('saveSkill bez slug (nowy skill) zakłada folder ze slugify(name), jak dot�
 
     t.true(await vault.adapter.exists('.pkm-assistant/skills/zupelnie-nowy/SKILL.md'));
     t.truthy(loader.getSkill('zupelnie-nowy'));
+});
+
+// ── boot nie sieje (decyzja 2026-09: zero fabrycznych skilli) ──
+// loadAllSkills() jest jedyną drogą wołaną przy starcie pluginu (AgentManager.initialize).
+// Brak folderu `.pkm-assistant/skills/` ma skończyć się cicho: pusta lista, zero wyjątków,
+// zero zapisów na dysk — plugin nie ma prawa niczego zasiać sam z siebie.
+test('loadAllSkills bez folderu .pkm-assistant/skills/ nie rzuca, lista pusta, zero zapisów', async t => {
+    let writes = 0;
+    let mkdirs = 0;
+    const loader = new SkillLoader({
+        adapter: {
+            exists: async () => false,
+            list: async () => ({ folders: [], files: [] }),
+            read: async () => { throw new Error('read nie powinien być wołany, gdy folderu nie ma'); },
+            write: async () => { writes++; },
+            mkdir: async () => { mkdirs++; },
+        },
+    });
+
+    await t.notThrowsAsync(() => loader.loadAllSkills());
+
+    t.deepEqual(loader.getAllSkills(), []);
+    t.is(writes, 0, 'boot nie pisze — zero adapter.write()');
+    t.is(mkdirs, 0, 'boot nie pisze — zero adapter.mkdir()');
+});
+
+test('loadAllSkills z JEDNYM skillem usera: lista ma dokładnie ten skill, plik nietknięty, zero zapisów', async t => {
+    let writes = 0;
+    let mkdirs = 0;
+    const original = [
+        '---',
+        'name: Mój Przepis',
+        'description: prywatny skill usera',
+        '---',
+        '',
+        'Treść, której plugin nie ma prawa ruszyć.',
+    ].join('\n');
+    const files: Record<string, string> = {
+        '.pkm-assistant/skills/moj-przepis/SKILL.md': original,
+    };
+    const folders = new Set<string>(['.pkm-assistant/skills', '.pkm-assistant/skills/moj-przepis']);
+    const loader = new SkillLoader({
+        adapter: {
+            exists: async (p: string) => Object.hasOwn(files, p) || folders.has(p),
+            read: async (p: string) => files[p],
+            list: async (p: string) => ({
+                folders: Array.from(folders).filter(f => f.startsWith(`${p}/`)),
+                files: Object.keys(files).filter(f => f.startsWith(`${p}/`)),
+            }),
+            write: async (p: string, v: string) => { writes++; files[p] = v; },
+            mkdir: async () => { mkdirs++; },
+        },
+    });
+
+    await loader.loadAllSkills();
+
+    const all = loader.getAllSkills();
+    t.is(all.length, 1);
+    t.is(all[0].name, 'Mój Przepis');
+    t.is(files['.pkm-assistant/skills/moj-przepis/SKILL.md'], original, 'plik usera bajtowo bez zmian');
+    t.is(writes, 0, 'load nigdy nie pisze');
+    t.is(mkdirs, 0, 'load nigdy nie tworzy folderów');
 });

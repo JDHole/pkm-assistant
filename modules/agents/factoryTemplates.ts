@@ -8,7 +8,7 @@
  * szablon to oferta w Zapleczu). Podbicie treści fabrycznych w przyszłości = nowy sufiks
  * markera (`.factory-seeded-v2`) — świadoma decyzja, nie automat.
  *
- * Treści przez `t()` (i18n pl/en, wzór starter skills — wołane w runtime po setLocale).
+ * Treści przez `t()` (i18n pl/en) — wołane w runtime po setLocale, nie przy imporcie modułu.
  * Slugi i `name` STAŁE (nie tłumaczone): przepisy skilli delegują po `aspect:"researcher"`
  * (fuzzy match `endsWith('-researcher')` w DelegateTool), więc nazwa jest częścią kontraktu.
  *
