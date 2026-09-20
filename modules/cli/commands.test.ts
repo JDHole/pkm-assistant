@@ -114,7 +114,7 @@ function consolidationFixture(agent: string): ConsolidationStatus {
         agent,
         state: { source: 'file', lastArchiveAt: null },
         brainNotes: { count: 3, limit: 20, limitSource: 'default', overLimit: false },
-        sessions: { archivedSinceLastConsolidation: 1, threshold: 10, overThreshold: false, uncoveredArchive: 1, activeFiles: 0 },
+        sessions: { archivedSinceLastConsolidation: 1, threshold: 10, overThreshold: false, uncoveredArchive: 1, activeFiles: 0, stateActive: 0 },
         summaries: { uncoveredL1: 0, uncoveredL2: 0, batchSize: 5 },
         wouldTrigger: false,
         plan: [],

@@ -1,6 +1,6 @@
 /**
  * @module consolidationStatus
- * Status konsolidacji pamięci JEDNEGO agenta — czysty odczyt, zero zapisu, zero UI.
+ * Status konsolidacji pamięci JEDNEGO agenta.
  *
  * Powód istnienia: diagnostyka (CLI `memory-status`) potrzebuje dokładnie tej samej decyzji
  * "czy konsolidacja by wystartowała", jaką liczy produkcyjny trigger
@@ -9,11 +9,21 @@
  * `resolveConsolidationThresholds`/`shouldTriggerConsolidation` są tym JEDNYM liczydłem —
  * `SaveSessionWorkflow._shouldTriggerArchive` deleguje do `shouldTriggerConsolidation` zamiast
  * trzymać własną kopię tej samej logiki (patrz `SaveSessionWorkflow.ts`).
+ *
+ * **Kontrakt zapisu, PRAWDZIWIE (nie "zero zapisu" bez zastrzeżeń):** na ROZGRZANEJ instancji
+ * (taką trzyma `AgentManager.agentMemories` dla każdego agenta, którego ktoś już użył)
+ * `getConsolidationStatus` jest czystym odczytem — zero write/mkdir, nawet gdy `.state.json`
+ * albo `brain/` zniknęły spod instancji PO starcie (`peek()` zamiast `read()`, pominięty
+ * `listActiveSessions()`, warunkowy `listBrainNotes()` — patrz niżej). Na ZIMNEJ instancji
+ * (agent, którego jeszcze nikt nie użył) `listUncoveredArchiveSessions()` i tak woła
+ * `ensureMemoryStructure()` i materializuje strukturę na dysku — to jest ZNANE i AKCEPTOWANE,
+ * nie naprawiane w tym pliku (naprawą byłaby zmiana `AgentMemory.listArchiveSessions`, poza
+ * zakresem tej diagnostyki).
  */
 
 import { buildPlan as buildConsolidationPlan } from './ConsolidationRun.js';
 
-import type { AgentMemory } from './AgentMemory.js';
+import type { AgentMemory, BrainNoteInfo } from './AgentMemory.js';
 
 /**
  * Skąd pochodzi wynik czystego odczytu `.state.json` (`StateManager.peek()`).
@@ -67,7 +77,15 @@ export interface ConsolidationStatus {
         threshold: number;
         overThreshold: boolean;
         uncoveredArchive: number;
+        /** Pliki `.md` liczone z DYSKU (listowanie `sessions/active/`, bez `.discarded/`). */
         activeFiles: number;
+        /**
+         * `.state.json`.`active_sessions.length` — liczone ze STANU, niezależnie od `activeFiles`.
+         * Diagnostyka rozjazdu: agent może mieć w stanie sesję, której pliku już nie ma na dysku
+         * (zombie), albo na odwrót. Rozjazd sam w sobie nie jest błędem tej funkcji — jest
+         * dokładnie tym, co ta para pól ma pokazać.
+         */
+        stateActive: number;
     };
     summaries: { uncoveredL1: number; uncoveredL2: number; batchSize: number };
     /** Ta sama decyzja co `SaveSessionWorkflow._shouldTriggerArchive` / `shouldTriggerConsolidation`. */
@@ -123,6 +141,30 @@ export function resolveConsolidationThresholds(
 }
 
 /**
+ * Próg dedupu podawany do `buildConsolidationPlan` — DOKŁADNIE ta sama formuła co produkcyjny
+ * `modules/chat/consolidationRunner.ts:startConsolidationRun` (plik tylko do odczytu): baza
+ * `settings.memoryV3BrainNotesThreshold || 20`, nadpisana przez `state.brain_notes_limit`, gdy
+ * ten jest ustawiony.
+ *
+ * CELOWO bez fallbacku na `archiveBrainNotesThreshold` — w odróżnieniu od
+ * `resolveConsolidationThresholds` (który ten fallback ma, bo liczy próg dla `wouldTrigger`/
+ * `brainNotes.limit`, gdzie "jedno liczydło" już obowiązuje). Te dwie funkcje CELOWO liczą różne
+ * rzeczy: `resolveConsolidationThresholds` to decyzja „czy odpalić konsolidację",
+ * `resolvePlanDedupThreshold` to metadana JEDNEGO kroku planu (`buildConsolidationPlan` jej dziś
+ * i tak nie używa do gatingu — krok `dedup` pojawia się od `brainNotesCount >= 2`, niezależnie od
+ * progu, patrz komentarz w `ConsolidationRun.ts`). Kopiowanie formuły 1:1 z produkcji zamiast
+ * delegacji do "jednego liczydła" jest tu świadome — inaczej diagnostyka pokazywałaby inny próg
+ * dedupu niż realnie policzyłby produkcyjny trigger.
+ */
+export function resolvePlanDedupThreshold(
+    state: ConsolidationStateLike | null | undefined,
+    settings: ConsolidationSettingsLike | null | undefined,
+): number {
+    const base = Number(settings?.memoryV3BrainNotesThreshold) || 20;
+    return Number(state?.brain_notes_limit) || base;
+}
+
+/**
  * Czy próg konsolidacji jest przebity — sesje `>=`, notatki `>` (dokładnie jak dotychczasowe
  * `_shouldTriggerArchive`). Jedno liczydło dla produkcyjnego triggera i diagnostyki CLI.
  */
@@ -137,9 +179,65 @@ export function shouldTriggerConsolidation(
 }
 
 /**
+ * Wycinek `AgentMemory`, jakiego potrzebuje czyste liczenie sesji aktywnych i notatek `brain/`
+ * — `Pick`, nie cała klasa, bo to jedyne dwa pola, które te dwie funkcje czytają.
+ */
+type MemoryFsView = Pick<AgentMemory, 'vault' | 'paths'>;
+
+/**
+ * Liczba plików sesji aktywnych — CZYSTY odczyt katalogu (`agentMemory.paths.sessionsActive`),
+ * BEZ wołania `AgentMemory.listActiveSessions()`. Ta metoda idzie przez `stateManager.read()`,
+ * który BOOTSTRAPUJE `.state.json` (zapisuje domyślny plik), gdy ten zniknął — niedopuszczalne
+ * dla czystej diagnostyki na rozgrzanej instancji (P3).
+ *
+ * Filtr odzwierciedla `AgentMemory.listActiveSessions()`: tylko `.md` BEZPOŚREDNIO w folderze —
+ * sesje odłożone przy draft/discard żyją w podfolderze `.discarded/` i nie są już aktywne. Brak
+ * folderu albo pad listowania → `0`, bez tworzenia czegokolwiek.
+ */
+async function countActiveSessionFiles(agentMemory: MemoryFsView): Promise<number> {
+    try {
+        const listed = await agentMemory.vault.adapter.list(agentMemory.paths.sessionsActive);
+        const prefix = `${agentMemory.paths.sessionsActive}/`;
+        let count = 0;
+        for (const filePath of listed?.files || []) {
+            if (!filePath.endsWith('.md')) continue;
+            const rest = filePath.startsWith(prefix) ? filePath.slice(prefix.length) : (filePath.split('/').pop() as string);
+            if (rest.includes('/')) continue;
+            count++;
+        }
+        return count;
+    } catch {
+        return 0;
+    }
+}
+
+/**
+ * Notatki `brain/` — TYLKO gdy folder już istnieje. `AgentMemory.listBrainNotes()` sam zakłada
+ * folder (`mkdir`), gdy go nie ma — normalne dla użycia produkcyjnego (agent, który dopiero
+ * zaczyna pisać notatki), niedopuszczalne dla diagnostyki na rozgrzanej instancji, która nie ma
+ * prawa materializować struktury agenta spod którego zniknęła (P3).
+ */
+async function listBrainNotesIfPresent(agentMemory: MemoryFsView & Pick<AgentMemory, 'listBrainNotes'>): Promise<BrainNoteInfo[]> {
+    const exists = await agentMemory.vault.adapter.exists(agentMemory.paths.brainNotes);
+    if (!exists) return [];
+    return agentMemory.listBrainNotes();
+}
+
+/**
  * Status konsolidacji jednego agenta — czyta przez ISTNIEJĄCE metody instancji (żadnego
- * bebechowego dostępu do plików). `stateManager.peek()` zamiast `stateManager.read()` — status
- * nie ma prawa zbootstrapować `.state.json` agenta, którego jeszcze nikt nie użył.
+ * bebechowego dostępu do plików), poza dwoma czystymi wyjątkami wyżej (`countActiveSessionFiles`/
+ * `listBrainNotesIfPresent`), które świadomie OMIJAJĄ metody instancji, żeby ominąć ich efekty
+ * uboczne. `stateManager.peek()` zamiast `stateManager.read()` — status nie ma prawa
+ * zbootstrapować `.state.json` agenta, którego jeszcze nikt nie użył.
+ *
+ * SEKWENCYJNIE, nie `Promise.all`: `listUncoveredArchiveSessions()` woła `ensureMemoryStructure()`
+ * (memoizowane per instancja, ale flaga `_structureEnsured` zapala się dopiero PO całym
+ * bootstrapie) — na zimnej instancji dwa wywołania, które obie trafiają w `ensureMemoryStructure`
+ * zanim któreś zdąży ustawić flagę, odpalają bootstrap DWA RAZY równolegle (zmierzone: podwójny
+ * `mkdir` na każdym z jedenastu folderów). Dziś tylko jedno z pięciu wywołań niżej dotyka
+ * `ensureMemoryStructure` (dlatego usunięcie `listActiveSessions()` już samo w sobie likwiduje
+ * wyścig), ale kolejność sekwencyjna zostaje jako świadoma ochrona na przyszłość, nie na
+ * dzisiejszy przypadek.
  *
  * Pad pojedynczego odczytu (np. `listBrainNotes` na uszkodzonym pliku) leci w górę jako wyjątek
  * — wołacz (CLI `memory-status`, agent-po-agencie) łapie go per agent, żeby jeden zepsuty agent
@@ -147,13 +245,12 @@ export function shouldTriggerConsolidation(
  */
 export async function getConsolidationStatus(agentMemory: AgentMemory): Promise<ConsolidationStatus> {
     const { state, source } = await agentMemory.stateManager.peek();
-    const [brainNotes, uncoveredArchive, activeSessions, uncoveredL1, uncoveredL2] = await Promise.all([
-        agentMemory.listBrainNotes(),
-        agentMemory.listUncoveredArchiveSessions(),
-        agentMemory.listActiveSessions(),
-        agentMemory.listUncoveredL1s(),
-        agentMemory.listUncoveredL2s(),
-    ]);
+
+    const brainNotes = await listBrainNotesIfPresent(agentMemory);
+    const uncoveredArchive = await agentMemory.listUncoveredArchiveSessions();
+    const activeFiles = await countActiveSessionFiles(agentMemory);
+    const uncoveredL1 = await agentMemory.listUncoveredL1s();
+    const uncoveredL2 = await agentMemory.listUncoveredL2s();
 
     const thresholds = resolveConsolidationThresholds(state, agentMemory.settings);
     const brainNotesCount = brainNotes.length;
@@ -163,7 +260,7 @@ export async function getConsolidationStatus(agentMemory: AgentMemory): Promise<
         archiveCount: uncoveredArchive.length,
         batchSize: thresholds.batchSize,
         brainNotesCount,
-        dedupThreshold: thresholds.brainNotesLimit,
+        dedupThreshold: resolvePlanDedupThreshold(state, agentMemory.settings),
         l1Count: uncoveredL1.length,
         l2Count: uncoveredL2.length,
     });
@@ -182,7 +279,8 @@ export async function getConsolidationStatus(agentMemory: AgentMemory): Promise<
             threshold: thresholds.sessionThreshold,
             overThreshold: archivedSinceLastConsolidation >= thresholds.sessionThreshold,
             uncoveredArchive: uncoveredArchive.length,
-            activeFiles: activeSessions.length,
+            activeFiles,
+            stateActive: state.active_sessions.length,
         },
         summaries: {
             uncoveredL1: uncoveredL1.length,

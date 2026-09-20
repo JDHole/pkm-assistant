@@ -123,8 +123,8 @@ export class StateManager {
      * Czysty odczyt BEZ bootstrapu — w odróżnieniu od `read()`, na potwierdzonym `'missing'`
      * NIE zakłada pliku (żaden `_writeRaw`). Dla diagnostyki (CLI `memory-status`), gdzie samo
      * odpytanie o stan nie może materializować `.state.json` na dysku agenta, którego nikt
-     * jeszcze nie użył. Poza tym idzie kolejką odczytu, bez blokowania na `_writeChain` — to
-     * czysty odczyt, nie mutacja, więc nie musi czekać w tej samej kolejce co zapisy.
+     * jeszcze nie użył. `peek()` NIE WCHODZI do żadnej kolejki (nie ma tu kolejki odczytu) i nie
+     * blokuje na `_writeChain` — to czysty odczyt, nie mutacja, więc nie musi czekać na zapisy.
      */
     async peek(): Promise<{ state: MemoryState; source: MemoryStateSource }> {
         if (await probeFile(this.vault.adapter, this.statePath) === 'missing') {

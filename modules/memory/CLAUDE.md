@@ -37,7 +37,7 @@ modules/memory/
 ├── MemoryAccessGuard.ts      # strict per-agent path guard dla brain/
 ├── collisionSuffix.ts       # findFreeCollisionPath() - jedna wspólna pętla "wolna nazwa przy kolizji", wołana z kilku miejsc w AgentMemory.ts. Wewnętrzny, nie w barrelu
 ├── SaveSessionWorkflow.ts    # /save session: propozycje notatek + archiwizacja aktywnej sesji
-├── consolidationStatus.ts    # status konsolidacji JEDNEGO agenta - czysty odczyt (zero zapisu/modelu/UI) dla diagnostyki (CLI `memory-status`); `resolveConsolidationThresholds`/`shouldTriggerConsolidation` to JEDNO liczydło progów, którego używa też `SaveSessionWorkflow._shouldTriggerArchive`
+├── consolidationStatus.ts    # status konsolidacji JEDNEGO agenta - czysty odczyt NA ROZGRZANEJ instancji (zero zapisu/modelu/UI), na ZIMNEJ instancji metody listujące `AgentMemory` i tak bootstrapują strukturę - dla diagnostyki (CLI `memory-status`); `resolveConsolidationThresholds`/`shouldTriggerConsolidation` to JEDNO liczydło progów, którego używa też `SaveSessionWorkflow._shouldTriggerArchive`; `resolvePlanDedupThreshold` liczy próg dedupu dla `plan` osobno, 1:1 z produkcyjnym `consolidationRunner.ts` (celowo INNA formuła niż "jedno liczydło" - patrz gotcha niżej)
 ├── ArchiveWorkflow.ts        # dedup brain/ + L1/L2/L3 user-reviewed consolidation
 ├── ConsolidationRun.ts       # stan przebiegu konsolidacji (plan kroków, statusy, retry, koszt) - czysty node
 ├── MemoryOpsCenter.ts        # rejestr JEDNEGO aktywnego przebiegu + subskrypcja dla UI
@@ -83,7 +83,7 @@ Import z zewnątrz tylko przez `modules/memory/index.js`.
 | `ArchiveWorkflow` | Automatyczna konsolidacja po progach: brain/ dedup, L1, L2, L3. Jeden tor: `runWithRun(consolidationRun)` (generuje propozycje wszystkich paczek, nic nie zapisuje) + `applyStepDecision()` (zapisuje po decyzji usera) + `generateGatedSteps()` (zdejmuje kłódkę z L2/L3 dopiero gdy L1 są rozstrzygnięte) - generacja oddzielona od zapisu. |
 | `parseNaTerazSections`, `naTerazSectionKey` | Pure helpery sekcji "Na teraz" brain.md, czytane przez UI panelu Pamięć, `MemorySaveTool` i `modules/chat/naTerazUpdate.ts` (normalizacja sekcji `BrainUpdate` w oknie review `/save session`). |
 | `ConsolidationRun`, `buildConsolidationPlan`, `STEP_STATUS`, `STEP_KIND`, `normalizeUsage` | Stan jednego przebiegu konsolidacji - plan paczek z liczników, maszyna stanów kroku. Zero UI, zero Obsidiana. |
-| `resolveConsolidationThresholds`, `shouldTriggerConsolidation`, `getConsolidationStatus` | Status konsolidacji jednego agenta - czysty odczyt (`consolidationStatus.ts`) dla diagnostyki (CLI `memory-status`). `getConsolidationStatus(agentMemory)` czyta przez metody instancji + `stateManager.peek()` (BEZ bootstrapu `.state.json`). |
+| `resolveConsolidationThresholds`, `shouldTriggerConsolidation`, `getConsolidationStatus` | Status konsolidacji jednego agenta - czysty odczyt NA ROZGRZANEJ instancji (`consolidationStatus.ts`) dla diagnostyki (CLI `memory-status`); na zimnej instancji nadal bootstrapuje strukturę (patrz gotcha "jedno liczydło" niżej). `getConsolidationStatus(agentMemory)` czyta przez metody instancji (poza dwoma czystymi wyjątkami: liczba sesji aktywnych i notatek `brain/` liczone bez metod instancji, żeby ominąć ich efekty uboczne) + `stateManager.peek()` (BEZ bootstrapu `.state.json`). |
 | `memoryOpsCenter` (singleton), `OPS_EVENT` | Rejestr jednego aktywnego przebiegu. `startRun/getActiveRun/finishRun/subscribe/requestOpenModal`. Drugi trigger przy aktywnym przebiegu NIE startuje drugiego - zwraca bieżący i prosi o modal. |
 | `stepLabel`, `stepDetail`, `stepStatusIcon`, `stepStatusLabel`, `stepDurationMs`, `isFallbackStep`, `formatDuration`, `formatUsageLine`, `statusBarLine`, `buildRunSummary`, `summaryToText`, `planToText` | Warstwa OPISOWA przebiegu (`consolidationLabels.ts`) - jedno źródło etykiet dla paska statusu i modalu przebiegu. Czyste funkcje, zero DOM. |
 | `MigrationV3` | Migracja v2 -> v3: najpierw `memory.v2.backup/`, potem notatki `brain/`. |
@@ -416,13 +416,25 @@ Flow:
   `memoryV3BrainNotesThreshold || archiveBrainNotesThreshold || 20`, `>`).
   `SaveSessionWorkflow._shouldTriggerArchive` DELEGUJE tutaj zamiast trzymać własną kopię -
   druga implementacja tej samej logiki (np. w CLI `memory-status`) rozjechałaby się przy
-  pierwszej zmianie jednego z dwóch miejsc. `getConsolidationStatus(agentMemory)` woła
-  `stateManager.peek()` (czysty odczyt, BEZ bootstrapu `.state.json` - w odróżnieniu od
-  `stateManager.read()`, którego wołają wszystkie metody listujące `AgentMemory` przez
-  `ensureMemoryStructure()`), więc samo odpytanie o status agenta, którego jeszcze nikt nie
-  użył, nie materializuje jego folderu pamięci - `peek()` w izolacji jest jedynym miejscem,
-  gdzie ten kontrakt da się w ogóle zaobserwować testem (`getConsolidationStatus` i tak
-  bootstrapuje strukturę przez inne, wołane obok metody listujące).
+  pierwszej zmianie jednego z dwóch miejsc. Osobno, `resolvePlanDedupThreshold` liczy próg
+  dedupu TYLKO dla `plan` (metadana jednego kroku, dziś niesterująca niczym) - formuła jest
+  CELOWO inna (bez fallbacku na `archiveBrainNotesThreshold`), bo kopiuje 1:1 produkcyjny
+  `modules/chat/consolidationRunner.ts:startConsolidationRun`, który tego fallbacku też nie ma;
+  dwie funkcje liczą dwa różne pytania, nie scalaj ich przy kolejnej zmianie.
+
+  Kontrakt zapisu, PRAWDZIWIE: `getConsolidationStatus(agentMemory)` woła `stateManager.peek()`
+  (czysty odczyt, BEZ bootstrapu `.state.json` - w odróżnieniu od `stateManager.read()`, którego
+  wołają wszystkie metody listujące `AgentMemory` przez `ensureMemoryStructure()`) i liczy sesje
+  aktywne / notatki `brain/` BEZ wołania `AgentMemory.listActiveSessions()`/bezwarunkowego
+  `listBrainNotes()` (te dwie metody instancji MAJĄ efekty uboczne - `listActiveSessions()`
+  bootstrapuje `.state.json` przez `stateManager.read()`, `listBrainNotes()` sam zakłada folder
+  `brain/`). Dzięki temu na ROZGRZANEJ instancji (taką trzyma `AgentManager.agentMemories` dla
+  każdego agenta, którego ktoś już użył) samo odpytanie o status jest czystym odczytem, nawet
+  gdy `.state.json`/`brain/` zniknęły spod niej PO starcie (`getConsolidationStatus na
+  ROZGRZANEJ instancji` w `consolidationStatus.test.ts`). Na ZIMNEJ instancji (agent, którego
+  jeszcze nikt nie użył) `getConsolidationStatus` i tak materializuje strukturę na dysku, bo
+  `listUncoveredArchiveSessions()` woła `ensureMemoryStructure()` - to jest ZNANA, zaakceptowana
+  granica tej diagnostyki, nie coś, co dałoby się naprawić samym `peek()`.
 - ⚠️ **User authority absolute.** Agent proponuje, user zatwierdza. `brain.md` i sesje nie są
   niszczone bez jawnego flow.
 - ⚠️ **Plik sesji jest źródłem prawdy.** L1/L2/L3 są pochodne. Nie kasuj niższego poziomu, zanim
@@ -648,8 +660,11 @@ Memory v3 critical path ma testy w:
 - `modules/memory/EmbeddingHelper.test.ts`
 - `modules/memory/workPrompts.test.ts`
 - `modules/memory/consolidationStatus.test.ts` - progi (`resolveConsolidationThresholds`,
-  granice), `shouldTriggerConsolidation`, `getConsolidationStatus` na realnej `AgentMemory`,
-  `StateManager.peek()` (brakujący plik NIE tworzy pliku, uszkodzony JSON -> `unreadable`)
+  granice), `resolvePlanDedupThreshold` (różnica względem "jednego liczydła"),
+  `shouldTriggerConsolidation`, `getConsolidationStatus` na realnej `AgentMemory` (w tym: zero
+  zapisu na rozgrzanej instancji z licznikiem operacji adaptera, brak podwójnego bootstrapu na
+  zimnej instancji, `sessions.stateActive` vs `activeFiles`), `StateManager.peek()` (brakujący
+  plik NIE tworzy pliku, uszkodzony JSON -> `unreadable`)
 
 ---
 
