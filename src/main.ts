@@ -119,7 +119,10 @@ import type {
   VaultAdapterLike,
   VaultGroup,
 } from "../core/index.js";
-import type { SelfTestDeps } from "../core/selftest.js";
+import type { SelfTestDeps, SelfTestReport } from "../core/selftest.js";
+// CLI Obsidiana (registerCliHandler, API od 1.12.2) - fala 1, tylko odczyt. `getConsolidationStatus`
+// idzie do CliDeps.consolidationStatus bez zmian (Jednostka A, modules/memory/).
+import { registerCliCommands } from "../modules/cli/index.js";
 
 // Silnik YAML wstrzyknięty NATYCHMIAST po imporcie - zanim jakikolwiek loader (agentów,
 // sub-agentów, skilli, artefaktów) zdąży wywołać `parseYaml`/`stringifyYaml` z barrela `core/`.
@@ -134,7 +137,7 @@ import {
   countDocs,
 } from "../modules/embedding/index.js";
 import type { EmbeddingProvider, EmbeddingProviderId, VaultLike } from "../modules/embedding/index.js";
-import { EmbeddingHelper } from "../modules/memory/index.js";
+import { EmbeddingHelper, getConsolidationStatus } from "../modules/memory/index.js";
 
 /** Kształt jednorazowej migracji `pkm.modelLibrary` (patrz `_migrateToModelLibrary`). */
 interface ModelLibraryEntry {
@@ -277,6 +280,29 @@ export default class PkmAssistantPlugin extends PluginBase {
     // nic nie znalazł.
     setLocale(await readUiLanguage(this.app?.vault?.adapter as unknown as VaultAdapterLike));
     this.registerCommands();
+    // CLI Obsidiana - fala 1, cztery komendy tylko-do-odczytu (status/selftest/agent-prompt/
+    // memory-status; patrz modules/cli/CLAUDE.md). Deps jako LENIWE gettery: `agentManager`/
+    // `vaultIndexer` bywają `undefined` przed końcem `initialize()` - `status` ma działać
+    // ZAWSZE, więc czyta cokolwiek jest w danej chwili, zamiast zamrażać wartość tutaj.
+    // Rejestracja NIE MOŻE wywrócić `onload()`: host bez `registerCliHandler` (Obsidian < 1.12.2)
+    // dostaje `skipped:'unsupported'` z samego `registerCliCommands` (patrz `modules/cli/register.ts`),
+    // a ten try/catch łapie już tylko naprawdę nieoczekiwaną awarię.
+    try {
+      const cliResult = registerCliCommands(this, {
+        pluginId: this.manifest.id,
+        version: () => this.manifest.version,
+        isReady: () => this._ready,
+        agentManager: () => this.agentManager,
+        indexStatus: () => this.vaultIndexer?.getStatus(),
+        selfTest: () => this._buildSelfTestReport(),
+        consolidationStatus: getConsolidationStatus,
+      });
+      log.debug('Plugin', cliResult.skipped
+        ? 'CLI: registerCliHandler niedostępny (Obsidian < 1.12.2) - zero komend'
+        : `CLI: ${cliResult.registered.length} komend zarejestrowanych${cliResult.failed.length ? `, ${cliResult.failed.length} padło (${cliResult.failed.map(f => f.id).join(', ')})` : ''}`);
+    } catch (e) {
+      log.warn('Plugin', 'Rejestracja komend CLI padła (plugin startuje dalej bez nich):', e);
+    }
     this.registerRibbonIcons();
     log.debug('Plugin', 'onload() zakończone — czekam na layoutReady → initialize()');
   }
@@ -1162,24 +1188,34 @@ export default class PkmAssistantPlugin extends PluginBase {
   }
 
   /**
+   * Składa raport self-testu, BEZ efektów ubocznych (zero zapisu pliku, zero Notice). Wydzielone
+   * z `run_self_test()` - drugi wołacz jest `pkm-assistant:selftest` (CLI, `modules/cli/`),
+   * który oddaje raport jako `data` bez kształtowania i bez żadnego z tych dwóch efektów.
+   */
+  async _buildSelfTestReport(): Promise<SelfTestReport> {
+    const { buildSelfTestReport } = await import('../core/selftest.js');
+    // TS-boundary: `SelfTestPlugin` (core/selftest) ma DWIE rozbieżności z prawdziwym pluginem:
+    // (1) `settings.pkmAssistant.modelLibrary: { main?: ModelEntry[] }` (lokalny) węższy niż
+    // prawdziwy `PkmAssistantSettings.modelLibrary: unknown` (core/runtime/contracts);
+    // (2) `agentManager.getMemoryForAgent?: (agent: AgentLike) => ...` (param `{name?: string}`)
+    // węższy niż prawdziwy `AgentManager.getMemoryForAgent(agent: Agent | string | null | undefined)`.
+    return buildSelfTestReport(this as unknown as Parameters<typeof buildSelfTestReport>[0], {
+      // TS-boundary: `countDocs` (modules/embedding) bierze `AnyOrama | null | undefined`;
+      // `SelfTestDeps.countDocs` (core, node-safe - nie zna `AnyOrama`) chce `(db: unknown)`.
+      countDocs: countDocs as unknown as SelfTestDeps['countDocs'],
+      isMobile: !!Platform?.isMobile,
+      fileLogActive: log.fileSinkActive,
+    });
+  }
+
+  /**
    * Run the "PKM Assistant: Self-test" diagnostic — READ-ONLY snapshot of plugin
    * health written to .pkm-assistant/logs/selftest-<stamp>.md (+ Notice summary).
    */
   async run_self_test() {
     try {
-      const { buildSelfTestReport, formatSelfTestReport } = await import('../core/selftest.js');
-      // TS-boundary: `SelfTestPlugin` (core/selftest) ma DWIE rozbieżności z prawdziwym pluginem:
-      // (1) `settings.pkmAssistant.modelLibrary: { main?: ModelEntry[] }` (lokalny) węższy niż
-      // prawdziwy `PkmAssistantSettings.modelLibrary: unknown` (core/runtime/contracts);
-      // (2) `agentManager.getMemoryForAgent?: (agent: AgentLike) => ...` (param `{name?: string}`)
-      // węższy niż prawdziwy `AgentManager.getMemoryForAgent(agent: Agent | string | null | undefined)`.
-      const report = await buildSelfTestReport(this as unknown as Parameters<typeof buildSelfTestReport>[0], {
-        // TS-boundary: `countDocs` (modules/embedding) bierze `AnyOrama | null | undefined`;
-        // `SelfTestDeps.countDocs` (core, node-safe - nie zna `AnyOrama`) chce `(db: unknown)`.
-        countDocs: countDocs as unknown as SelfTestDeps['countDocs'],
-        isMobile: !!Platform?.isMobile,
-        fileLogActive: log.fileSinkActive,
-      });
+      const { formatSelfTestReport } = await import('../core/selftest.js');
+      const report = await this._buildSelfTestReport();
       const md = formatSelfTestReport(report);
 
       const now = new Date();

@@ -1,6 +1,7 @@
 import { streamToComplete, STREAM_ERROR_CODES } from './streamHelper.js';
 import { resolveWorkPrompt } from '../../core/index.js';
 import { factoryWorkPrompt } from './workPrompts.js';
+import { shouldTriggerConsolidation } from './consolidationStatus.js';
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
 
@@ -765,20 +766,12 @@ export class SaveSessionWorkflow {
         return after !== before;
     }
 
+    // Jedno liczydło progów konsolidacji — deleguje do `shouldTriggerConsolidation`
+    // (`modules/memory/consolidationStatus.ts`), które CLI `memory-status` woła bez zapisu, żeby
+    // podać dokładnie tę samą decyzję co ten produkcyjny trigger. Zachowanie bez zmian: sesje
+    // `>=`, notatki `>`, `state.brain_notes_limit` ma pierwszeństwo przed ustawieniami globalnymi.
     private _shouldTriggerArchive(state: SaveStateLike | null | undefined, brainNotes: Array<unknown> | null | undefined): boolean {
-        // Memory v3 default thresholds:
-        //  - sessions threshold 10 so the dedup modal doesn't barge in every other /save session
-        //  - brain notes threshold 20 after the categorized brain.md index split
-        // Per-agent `state.brain_notes_limit` (auto-bumped on user reject) still takes precedence.
-        const sessionThreshold = this.settings.memoryV3SessionThreshold
-            || this.settings.archiveSessionThreshold
-            || 10;
-        const brainNotesThreshold = state?.brain_notes_limit
-            || this.settings.memoryV3BrainNotesThreshold
-            || this.settings.archiveBrainNotesThreshold
-            || 20;
-        return Number(state?.archived_since_last_consolidation || 0) >= sessionThreshold
-            || (brainNotes?.length || 0) > brainNotesThreshold;
+        return shouldTriggerConsolidation(state, brainNotes?.length || 0, this.settings);
     }
 
     private _messagesToText(messages: SessionMessageLike[] | null | undefined): string {
