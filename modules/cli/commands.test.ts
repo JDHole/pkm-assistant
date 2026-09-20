@@ -42,6 +42,35 @@ function markerOf(memory: AgentMemory): string {
     return (memory as unknown as { __fakeMarker: string }).__fakeMarker;
 }
 
+/**
+ * Fejkowa pamięć ze STEROWANYM `stat` pliku `brain.md` (P4) - kolejne wywołania zwracają kolejne
+ * wpisy z `stats` (pierwsze = "przed", drugie = "po"); ostatni wpis powtarza się, gdyby ktoś
+ * zawołał więcej razy niż podano.
+ */
+function fakeMemoryWithStat(stats: Array<{ mtime: number; size: number } | null>): AgentMemory {
+    let call = 0;
+    return {
+        paths: { brain: '.pkm-assistant/agents/jaskier/memory/brain.md' },
+        vault: {
+            adapter: {
+                stat: async () => {
+                    const value = stats[Math.min(call, stats.length - 1)];
+                    call++;
+                    return value;
+                },
+            },
+        },
+    } as unknown as AgentMemory;
+}
+
+/** Fejkowa pamięć, której `stat` RZUCA - gałąź "nie da się nawet spróbować" (P4). */
+function fakeMemoryWithThrowingStat(): AgentMemory {
+    return {
+        paths: { brain: '.pkm-assistant/agents/jaskier/memory/brain.md' },
+        vault: { adapter: { stat: async () => { throw new Error('stat padł'); } } },
+    } as unknown as AgentMemory;
+}
+
 interface AgentManagerFixture {
     names: string[];
     active?: string | null;
@@ -269,6 +298,124 @@ test('agent-prompt: nieznana sekcja -> section_not_found z lista dostepnych kluc
     t.is(response.error.code, 'section_not_found');
     t.true(response.error.message.includes('identity'));
     t.true(response.error.message.includes('rules'));
+});
+
+// ── P4: koperta agent-prompt - verified/effect ze stat brain.md przed/po ─────────────────
+
+test('agent-prompt: verified:true effect:unchanged, gdy stat brain.md IDENTYCZNY przed i po', async t => {
+    const memory = fakeMemoryWithStat([{ mtime: 100, size: 10 }, { mtime: 100, size: 10 }]);
+    const am = makeAgentManager({ names: ['Jaskier'], prompts: { Jaskier: PROMPT_FIXTURE }, memories: { Jaskier: memory } });
+    const deps = makeDeps({ agentManager: am });
+    const response = await run(deps, 'agent-prompt', { agent: 'Jaskier' });
+
+    t.true(response.ok);
+    t.true(response.verified);
+    t.is(response.effect, 'unchanged');
+});
+
+test('agent-prompt: verified:true effect:changed, gdy stat brain.md RÓŻNY przed i po (silnik dopisał/samonaprawił indeks)', async t => {
+    const memory = fakeMemoryWithStat([{ mtime: 100, size: 10 }, { mtime: 200, size: 12 }]);
+    const am = makeAgentManager({ names: ['Jaskier'], prompts: { Jaskier: PROMPT_FIXTURE }, memories: { Jaskier: memory } });
+    const deps = makeDeps({ agentManager: am });
+    const response = await run(deps, 'agent-prompt', { agent: 'Jaskier' });
+
+    t.true(response.ok);
+    t.true(response.verified);
+    t.is(response.effect, 'changed');
+});
+
+test('agent-prompt: verified:false effect:unknown, gdy stat brain.md rzuca (nie da się nawet spróbować)', async t => {
+    const memory = fakeMemoryWithThrowingStat();
+    const am = makeAgentManager({ names: ['Jaskier'], prompts: { Jaskier: PROMPT_FIXTURE }, memories: { Jaskier: memory } });
+    const deps = makeDeps({ agentManager: am });
+    const response = await run(deps, 'agent-prompt', { agent: 'Jaskier' });
+
+    t.true(response.ok);
+    t.false(response.verified);
+    t.is(response.effect, 'unknown');
+});
+
+// ── P5: flagi agent/section/format - trim, wielkość liter, brak wartości ─────────────────
+
+test('agent: trim() - spacje wokół imienia nie przeszkadzają w dopasowaniu', async t => {
+    const am = makeAgentManager({ names: ['Jaskier'], prompts: { Jaskier: PROMPT_FIXTURE } });
+    const deps = makeDeps({ agentManager: am });
+    const response = await run(deps, 'agent-prompt', { agent: '  Jaskier  ' });
+
+    t.true(response.ok);
+    t.is(response.data.agent, 'Jaskier');
+});
+
+test('memory-status: agent=all rozpoznawane bez względu na wielkość liter (ALL, All, otoczone spacjami)', async t => {
+    const memory = fakeMemory('jaskier');
+    const am = makeAgentManager({ names: ['Jaskier'], memories: { Jaskier: memory } });
+    const deps = makeDeps({ agentManager: am, consolidationByMarker: { jaskier: consolidationFixture('Jaskier') } });
+
+    for (const value of ['ALL', 'All', ' all ']) {
+        const response = await run(deps, 'memory-status', { agent: value });
+        t.true(response.ok, value);
+        t.deepEqual(response.data.agents, [consolidationFixture('Jaskier')], value);
+        t.deepEqual(response.data.errors, [], value);
+    }
+});
+
+test('agent: brak flagi -> bad_flag, NIE agent_not_found (agent-prompt i memory-status)', async t => {
+    const am = makeAgentManager({ names: ['Jaskier'] });
+    const deps = makeDeps({ agentManager: am });
+    for (const id of ['agent-prompt', 'memory-status']) {
+        const response = await run(deps, id, {});
+        t.false(response.ok, id);
+        t.is(response.error.code, 'bad_flag', id);
+        t.true(response.error.message.includes('agent'), id);
+    }
+});
+
+test('agent: pusty string po trim() -> bad_flag, NIE agent_not_found', async t => {
+    const am = makeAgentManager({ names: ['Jaskier'] });
+    const deps = makeDeps({ agentManager: am });
+    for (const id of ['agent-prompt', 'memory-status']) {
+        const response = await run(deps, id, { agent: '   ' });
+        t.false(response.ok, id);
+        t.is(response.error.code, 'bad_flag', id);
+    }
+});
+
+test('agent: literał "true" (flaga podana bez wartości) -> bad_flag, NIE agent_not_found', async t => {
+    const am = makeAgentManager({ names: ['Jaskier'] });
+    const deps = makeDeps({ agentManager: am });
+    for (const id of ['agent-prompt', 'memory-status']) {
+        const response = await run(deps, id, { agent: 'true' });
+        t.false(response.ok, id);
+        t.is(response.error.code, 'bad_flag', id);
+    }
+});
+
+test('format: bez wielkości liter i po trim() - "JSON"/" json " == "json"', async t => {
+    const am = makeAgentManager({ names: ['Jaskier'] });
+    const deps = makeDeps({ agentManager: am });
+    for (const value of ['JSON', ' json ', 'Json']) {
+        const response = await run(deps, 'status', { format: value });
+        t.true(response.ok, value);
+    }
+});
+
+test('section: trim() - spacje wokół klucza nie przeszkadzają w dopasowaniu', async t => {
+    const am = makeAgentManager({ names: ['Jaskier'], prompts: { Jaskier: PROMPT_FIXTURE } });
+    const deps = makeDeps({ agentManager: am });
+    const response = await run(deps, 'agent-prompt', { agent: 'Jaskier', section: '  rules  ' });
+
+    t.true(response.ok);
+    t.is(response.data.section.key, 'rules');
+});
+
+test('section: pusty string albo literał "true" -> bad_flag', async t => {
+    const am = makeAgentManager({ names: ['Jaskier'], prompts: { Jaskier: PROMPT_FIXTURE } });
+    const deps = makeDeps({ agentManager: am });
+    for (const value of ['', 'true']) {
+        const response = await run(deps, 'agent-prompt', { agent: 'Jaskier', section: value });
+        t.false(response.ok, JSON.stringify(value));
+        t.is(response.error.code, 'bad_flag', JSON.stringify(value));
+    }
 });
 
 // ── memory-status ───────────────────────────────────────────────────────────────────────

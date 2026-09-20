@@ -23,14 +23,23 @@ export type CliErrorCode =
     | 'section_not_found'
     | 'internal';
 
-/** Koperta odpowiedzi - dyskryminowana unia po `ok`, żeby zły stan (dane + błąd naraz) był niereprezentowalny. */
+/**
+ * Koperta odpowiedzi - dyskryminowana unia po `ok`, żeby zły stan (dane + błąd naraz) był
+ * niereprezentowalny. `verified` w gałęzi `ok:true` NIE jest literałem `true` (P4) - trzy z
+ * czterech komend (`status`/`selftest`/`memory-status` po naprawie P3) SĄ czyste z konstrukcji i
+ * dostają `verified:true` zawsze, ale `agent-prompt` idzie tą samą drogą co budowa promptu tury
+ * (`getMemoryContext()` -> `getBrain()` samonaprawia indeks `brain.md` i ZAPISUJE plik) - koperta
+ * mierzy to `stat`-em pliku przed/po i mówi PRAWDĘ (`verified:false, effect:'unknown'`, gdy nie
+ * dało się nawet sprawdzić), zamiast obiecywać czystość, której silnik nie gwarantuje.
+ */
 export type CliResponse<T> =
-    | { ok: true; command: string; verified: true; effect: CliEffect; data: T }
+    | { ok: true; command: string; verified: boolean; effect: CliEffect; data: T }
     | { ok: false; command: string; verified: false; effect: 'unchanged'; error: { code: CliErrorCode; message: string } };
 
-/** Buduje udaną odpowiedź. `effect` domyślnie `'unchanged'` - fala 1 nie ma innej opcji. */
-export function okResponse<T>(command: string, data: T, effect: CliEffect = 'unchanged'): CliResponse<T> {
-    return { ok: true, command, verified: true, effect, data };
+/** Buduje udaną odpowiedź. Domyślnie `effect:'unchanged'`/`verified:true` - trzy z czterech
+ *  komend fali 1 są czyste z konstrukcji; `agent-prompt` podaje własny, zmierzony `verified`/`effect`. */
+export function okResponse<T>(command: string, data: T, effect: CliEffect = 'unchanged', verified = true): CliResponse<T> {
+    return { ok: true, command, verified, effect, data };
 }
 
 /** Buduje odpowiedź błędu - zawsze `effect:'unchanged'` (błąd niczego nie zmienił). */

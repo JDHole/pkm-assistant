@@ -6,9 +6,16 @@ handler)`. Agent zewnętrzny (Claude Code i inni) woła `Obsidian.com pkm-assist
 klucz=wartosc` i dostaje JSON na stdout - to jest maszynowy interfejs do stanu pluginu, bez
 otwierania Obsidiana w przeglądarce ani klikania w UI.
 
-**Fala 1 = WYŁĄCZNIE odczyt.** Żadna z czterech komend nie zapisuje na dysk, nie woła modelu
-i nie zmienia aktywnego agenta. Kontrakt zostawia miejsce na komendy piszące później
-(`CliEffect` ma już `'changed'`/`'created'`), ale dziś ich nikt nie produkuje.
+**Fala 1 = WYŁĄCZNIE odczyt, precyzyjnie.** `status`/`selftest`/`memory-status` nie zapisują
+NIC w vaultcie (poza własnym logiem diagnostycznym pluginu, gdy user włączył zapis logu do
+pliku - to log pluginu, nie efekt komendy). `agent-prompt` idzie TĄ SAMĄ drogą co budowa
+promptu w każdej turze czatu (`getMemoryContext()` → `getBrain()`), a ten silnik potrafi
+samonaprawić indeks `brain.md` i ZAPISAĆ plik - to istniejące zachowanie silnika, którego ta
+fala świadomie nie zmienia. Zamiast udawać, że tego nie ma, koperta mierzy to `stat`-em pliku
+przed/po wywołaniu i raportuje uczciwie w polu `effect` (`unchanged`/`changed`/`unknown` - patrz
+„Kontrakt koperty" niżej). Żadna z czterech komend nie woła modelu ani nie zmienia aktywnego
+agenta. Kontrakt zostawia miejsce na komendy piszące później (`CliEffect` ma już
+`'changed'`/`'created'`), ale dziś ich nikt nie produkuje.
 
 ## Co tu jest
 
@@ -38,9 +45,16 @@ modules/cli/
 
 ```ts
 type CliResponse<T> =
-    | { ok: true; command: string; verified: true; effect: CliEffect; data: T }
+    | { ok: true; command: string; verified: boolean; effect: CliEffect; data: T }
     | { ok: false; command: string; verified: false; effect: 'unchanged'; error: { code: CliErrorCode; message: string } };
 ```
+
+`verified` w gałęzi `ok:true` NIE jest literałem `true` - `status`/`selftest`/`memory-status` są
+czyste z konstrukcji i dostają `verified:true` zawsze, ale `agent-prompt` mierzy `stat` pliku
+`brain.md` przed/po wywołaniu (patrz gotcha wyżej o samonaprawie indeksu) i podaje własny,
+zmierzony `verified`/`effect`: identyczny `stat` -> `verified:true, effect:'unchanged'`; różny
+-> `verified:true, effect:'changed'`; nie dało się nawet sprawdzić (agent bez pamięci, adapter
+bez `stat`, `stat()` rzucił) -> `verified:false, effect:'unknown'`.
 
 Wyjście na stdout to zawsze `JSON.stringify(response, null, 2)` - kod wyjścia procesu CLI bywa
 `0` nawet przy błędzie, więc wołający musi czytać `ok`/`error.code` z TREŚCI, nie z exit code.
@@ -66,13 +80,19 @@ Wspólne zasady wszystkich czterech: handler NIGDY nie rzuca (każdy wyjątek ->
 
 ### Rozwiązywanie imienia agenta (`agent=`)
 
-Kolejność: (1) dokładne dopasowanie, (2) dopasowanie bez wielkości liter, JEŚLI JEDNOZNACZNE.
-Brak dopasowania -> `agent_not_found`; wiele trafień w kroku 2 -> `agent_ambiguous`. Obie
-gałęzie wymieniają w `error.message` dostępne imiona (`AgentManager.getAgent(name)` jest
-case-sensitive, a `getPromptInspectorDataForAgent` dla nieznanego imienia oddaje CICHO pusty
-wynik - `getAgentManager.ts:736-740` - dlatego istnienie agenta sprawdzamy TU, zanim cokolwiek
-wołamy). Dla `memory-status` wartość `all` pomija resolver i bierze wszystkich agentów z
-`getAllAgents()`.
+Flaga `agent`: `trim()`; dla `memory-status` wartość `all` rozpoznawana BEZ WZGLĘDU na wielkość
+liter (`ALL`, `All`). Brak flagi, pusty string po `trim()` albo literał `'true'` (flaga podana
+BEZ WARTOŚCI w `CliData`) -> `bad_flag` z komunikatem, że `agent` wymaga wartości - NIE
+`agent_not_found` (pusty/brakujący string nigdy nie trafia do resolwera imienia). Flaga
+`section`: `trim()`; pusty string po `trim()` albo literał `'true'` -> `bad_flag`.
+
+Rozwiązywanie imienia (gdy flaga przeszła walidację wyżej): (1) dokładne dopasowanie,
+(2) dopasowanie bez wielkości liter, JEŚLI JEDNOZNACZNE. Brak dopasowania -> `agent_not_found`;
+wiele trafień w kroku 2 -> `agent_ambiguous`. Obie gałęzie wymieniają w `error.message` dostępne
+imiona (`AgentManager.getAgent(name)` jest case-sensitive, a `getPromptInspectorDataForAgent`
+dla nieznanego imienia oddaje CICHO pusty wynik - `modules/agents/AgentManager.ts:736-740` -
+dlatego istnienie agenta sprawdzamy TU, zanim cokolwiek wołamy). Dla `memory-status` wartość
+`all` pomija resolver i bierze wszystkich agentów z `getAllAgents()`.
 
 ## Gotchas
 
@@ -96,7 +116,10 @@ wołamy). Dla `memory-status` wartość `all` pomija resolver i bierze wszystkic
 - ⚠️ **Polskie znaki w argumentach CLI na Windows bywają kaleczone przez rurę.** Dopasowanie
   imienia agenta bez wielkości liter (`resolveAgentName` w `commands.ts`) jest więc praktyczną
   siatką bezpieczeństwa, nie tylko wygodą - `agent=jaskier` ma trafić w `Jaskier` nawet gdy
-  powłoka rozjedzie się z wielkością liter przy przekazywaniu argumentu.
+  powłoka rozjedzie się z wielkością liter przy przekazywaniu argumentu. **To NIE ratuje utraty
+  diakrytyku** - dopasowanie bez wielkości liter zmienia tylko `A`↔`a`, nie `Ż`↔`z`; agent
+  `Żmija` i przekazane `zmija` (rura zjadła ogonek i zmieniła wielkość litery) to dalej DWA różne
+  stringi (`Zmija` != `Żmija`) i skończy się to `agent_not_found`, nie cichym dopasowaniem.
 - ⚠️ **`loadedAt` w `StatusData` liczy się RAZ, przy rejestracji, nie przy każdym wywołaniu.**
   `buildCliCommands(deps)` zamraża `(deps.now?.() ?? new Date()).toISOString()` w domknięciu
   współdzielonym przez wszystkie cztery specyfikacje - to jest znacznik "kiedy ta instancja

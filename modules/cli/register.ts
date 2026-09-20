@@ -34,17 +34,23 @@ export interface RegisterCliCommandsResult {
  * (np. drugi reload w tej samej sesji Obsidiana) nie blokuje pozostałych trzech.
  */
 export function registerCliCommands(host: CliHost, deps: CliDeps): RegisterCliCommandsResult {
-    if (typeof host.registerCliHandler !== 'function') {
+    const handler = host.registerCliHandler;
+    if (typeof handler !== 'function') {
         return { registered: [], skipped: 'unsupported', failed: [] };
     }
 
-    const registerCliHandler = host.registerCliHandler;
     const registered: string[] = [];
     const failed: Array<{ id: string; message: string }> = [];
 
     for (const spec of buildCliCommands(deps)) {
         try {
-            registerCliHandler(spec.id, spec.description, spec.flags, spec.run);
+            // P1: WOŁANE NA HOŚCIE (`handler.call(host, ...)`), NIGDY jako gołą funkcję.
+            // Prawdziwa implementacja Obsidiana jest metodą prototypu, która czyta `this`
+            // (`this.app.cli...`, `this.manifest.name`, `this.register(...)`) - odpięta referencja
+            // (`const f = host.registerCliHandler; f(...)`) gubi `this` i rzuca TypeError na
+            // KAŻDEJ komendzie w prawdziwym Obsidianie (fejkowy host jako strzałka tego nie widzi,
+            // bo strzałki i tak nie mają własnego `this`).
+            handler.call(host, spec.id, spec.description, spec.flags, spec.run);
             registered.push(spec.id);
         } catch (e) {
             const message = e instanceof Error ? e.message : String(e);

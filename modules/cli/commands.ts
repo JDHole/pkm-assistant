@@ -15,7 +15,7 @@ import { okResponse, errorResponse, serializeCliResponse } from './response.js';
 import type { CliData, CliFlag, CliFlags } from 'obsidian';
 import type { AgentManager } from '../agents/index.js';
 import type { AgentMemory, ConsolidationStatus } from '../memory/index.js';
-import type { CliErrorCode, CliResponse } from './response.js';
+import type { CliEffect, CliErrorCode, CliResponse } from './response.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
 //  Kontrakty
@@ -154,10 +154,89 @@ function errorMessage(e: unknown): string {
     return String(e);
 }
 
-/** `format` jest jedyną flagą wspólną wszystkim czterem komendom - dozwolona wartość: `json` (domyślna). */
+/** `format` jest jedyną flagą wspólną wszystkim czterem komendom - dozwolona wartość: `json`
+ *  (domyślna), bez wielkości liter (`JSON` = `json`) i po `trim()`. */
 function validateFormat(params: CliData): CliErrorCode | null {
-    if (params.format !== undefined && params.format !== 'json') return 'bad_flag';
+    if (params.format === undefined) return null;
+    if (params.format.trim().toLowerCase() !== 'json') return 'bad_flag';
     return null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+//  Flagi `agent`/`section` - trim, `agent=all` bez wielkości liter, pusta/`'true'` -> bad_flag
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+type FlagParseResult<T> = { ok: true; value: T } | { ok: false; code: 'bad_flag'; message: string };
+
+/**
+ * Flaga `agent`: `trim()`, `all` rozpoznawane bez wielkości liter (`ALL`, `All`) - dotyczy tylko
+ * `memory-status`, `agent-prompt` po prostu ignoruje `isAll`. Brak flagi, pusty string po
+ * `trim()` albo literał `'true'` (flaga podana BEZ wartości w `CliData`) -> `bad_flag` z
+ * komunikatem, że `agent` wymaga wartości - NIE `agent_not_found` (pusty/brakujący string nigdy
+ * nie trafia do `resolveAgentName`, więc komunikat mówi o brakującej fladze, nie o nieznanym imieniu).
+ */
+function parseAgentFlag(params: CliData): FlagParseResult<{ value: string; isAll: boolean }> {
+    const raw = typeof params.agent === 'string' ? params.agent.trim() : '';
+    if (raw === '' || raw === 'true') {
+        return { ok: false, code: 'bad_flag', message: 'Flag "agent" requires a value (an agent name, or "all" for memory-status).' };
+    }
+    return { ok: true, value: { value: raw, isAll: raw.toLowerCase() === 'all' } };
+}
+
+/** Flaga `section` (opcjonalna): `trim()`; pusty string po `trim()` albo literał `'true'`
+ *  (flaga podana bez wartości) -> `bad_flag`. Brak flagi -> `value: undefined`, bez błędu. */
+function parseSectionFlag(params: CliData): FlagParseResult<string | undefined> {
+    if (params.section === undefined) return { ok: true, value: undefined };
+    const trimmed = params.section.trim();
+    if (trimmed === '' || trimmed === 'true') {
+        return { ok: false, code: 'bad_flag', message: 'Flag "section" requires a value (a section key).' };
+    }
+    return { ok: true, value: trimmed };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+//  P4: uczciwość koperty `agent-prompt` - `stat` pliku brain.md przed/po `getPromptInspectorDataForAgent`
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+/** Wycinek `AgentMemory`, jakiego potrzebuje `stat` pliku `brain.md` - `Pick`, nie cała klasa. */
+type BrainStatMemory = Pick<AgentMemory, 'vault' | 'paths'>;
+
+/** `stat()` zwraca `null`, gdy plik nie istnieje - to PRAWIDŁOWY, porównywalny wynik.
+ *  `undefined` znaczy co innego: nie dało się nawet SPRÓBOWAĆ (patrz `statBrainFile`). */
+type BrainFileStat = { mtime?: number; size?: number } | null;
+
+/**
+ * `stat` pliku `brain.md` agenta - `undefined`, gdy nie da się w ogóle spróbować (brak instancji
+ * pamięci, adapter bez `stat`, albo `stat()` rzucił). Odróżnione świadomie od `null` (wynik
+ * `stat()` na nieistniejącym pliku) - obie wartości muszą być rozróżnialne dla `brainStatVerdict`.
+ */
+async function statBrainFile(memory: BrainStatMemory | null): Promise<BrainFileStat | undefined> {
+    // `stat` wołane NA `memory.vault.adapter` (`obj.method(...)`), nigdy jako odpięta referencja -
+    // ten sam powód co P1 w `register.ts`: `@typescript-eslint/unbound-method` (i realny bug w
+    // prawdziwym Obsidianie) czają się na `const f = obj.method; f(...)`.
+    if (!memory || typeof memory.vault.adapter.stat !== 'function') return undefined;
+    try {
+        return (await memory.vault.adapter.stat(memory.paths.brain)) ?? null;
+    } catch {
+        return undefined;
+    }
+}
+
+function sameBrainStat(a: BrainFileStat, b: BrainFileStat): boolean {
+    if (a === null || b === null) return a === b;
+    return (a.mtime ?? null) === (b.mtime ?? null) && (a.size ?? null) === (b.size ?? null);
+}
+
+/**
+ * `verified`/`effect` koperty `agent-prompt` (P4): `stat` niedostępny przed ALBO po (adapter bez
+ * `stat`, agent bez pamięci, `stat()` rzucił) -> `verified:false, effect:'unknown'` - nie ma jak
+ * porównać, więc koperta nie ma prawa obiecywać `unchanged`. Identyczny `stat` przed i po ->
+ * `verified:true, effect:'unchanged'`; różny (albo plik pojawił się/zniknął) ->
+ * `verified:true, effect:'changed'`.
+ */
+function brainStatVerdict(before: BrainFileStat | undefined, after: BrainFileStat | undefined): { verified: boolean; effect: CliEffect } {
+    if (before === undefined || after === undefined) return { verified: false, effect: 'unknown' };
+    return sameBrainStat(before, after) ? { verified: true, effect: 'unchanged' } : { verified: true, effect: 'changed' };
 }
 
 /**
@@ -235,12 +314,24 @@ function buildStatusData(deps: CliDeps, loadedAt: string, commandIds: string[]):
 }
 
 async function runAgentPrompt(id: string, params: CliData, am: CliAgentManager): Promise<CliResponse<AgentPromptData>> {
+    const agentFlag = parseAgentFlag(params);
+    if (!agentFlag.ok) return errorResponse(id, agentFlag.code, agentFlag.message);
+
+    const sectionFlag = parseSectionFlag(params);
+    if (!sectionFlag.ok) return errorResponse(id, sectionFlag.code, sectionFlag.message);
+
     const names = am.getAllAgents().map(a => a.name);
-    const requested = typeof params.agent === 'string' ? params.agent : '';
-    const resolved = resolveAgentName(names, requested);
+    const resolved = resolveAgentName(names, agentFlag.value.value);
     if (!resolved.ok) return errorResponse(id, resolved.code, resolved.message);
 
+    // P4: `getPromptInspectorDataForAgent` idzie tą samą drogą co budowa promptu tury -
+    // `getMemoryContext()`/`getBrain()` może samonaprawić i ZAPISAĆ `brain.md`. `stat` przed/po
+    // mierzy, czy się to naprawdę zdarzyło, żeby koperta nie kłamała `unchanged` na wiarę.
+    const memory = am.getAgentMemory(resolved.name);
+    const before = await statBrainFile(memory);
     const inspected = await am.getPromptInspectorDataForAgent(resolved.name);
+    const after = await statBrainFile(memory);
+
     const data: AgentPromptData = {
         agent: resolved.name,
         totalTokens: inspected.breakdown.total,
@@ -254,8 +345,8 @@ async function runAgentPrompt(id: string, params: CliData, am: CliAgentManager):
         })),
     };
 
-    const sectionKey = typeof params.section === 'string' ? params.section : undefined;
-    if (sectionKey !== undefined) {
+    if (sectionFlag.value !== undefined) {
+        const sectionKey = sectionFlag.value;
         const found = inspected.sections.find(s => s.key === sectionKey);
         if (!found) {
             const keys = inspected.sections.map(s => s.key);
@@ -265,10 +356,14 @@ async function runAgentPrompt(id: string, params: CliData, am: CliAgentManager):
         data.section = { key: found.key, label: found.label, tokens: found.tokens, content: found.content };
     }
 
-    return okResponse(id, data);
+    const verdict = brainStatVerdict(before, after);
+    return okResponse(id, data, verdict.effect, verdict.verified);
 }
 
 async function runMemoryStatus(id: string, params: CliData, deps: CliDeps, am: CliAgentManager): Promise<CliResponse<MemoryStatusData>> {
+    const agentFlag = parseAgentFlag(params);
+    if (!agentFlag.ok) return errorResponse(id, agentFlag.code, agentFlag.message);
+
     const agents: ConsolidationStatus[] = [];
     const errors: MemoryStatusData['errors'] = [];
 
@@ -284,14 +379,13 @@ async function runMemoryStatus(id: string, params: CliData, deps: CliDeps, am: C
         }
     };
 
-    const requested = typeof params.agent === 'string' ? params.agent : '';
-    if (requested === 'all') {
+    if (agentFlag.value.isAll) {
         for (const agent of am.getAllAgents()) {
             await collect(agent.name, am.getAgentMemory(agent.name));
         }
     } else {
         const names = am.getAllAgents().map(a => a.name);
-        const resolved = resolveAgentName(names, requested);
+        const resolved = resolveAgentName(names, agentFlag.value.value);
         if (!resolved.ok) return errorResponse(id, resolved.code, resolved.message);
         await collect(resolved.name, am.getAgentMemory(resolved.name));
     }
