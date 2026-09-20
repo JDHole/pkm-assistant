@@ -53,6 +53,7 @@ All modular code lives in `modules/<name>/`. `src/` holds only two files: `src/m
 | `modules/agent-loop/` | **The core tool loop, no UI.** `runAgentLoop()`, `ArrayMessageStore`, canonical `parseToolCalls()` (handles several response shapes) + `splitConcatenatedToolCalls()` (anti-merging for model output) + `sanitizeToolTranscript()`. Consumers: sub-agents, chat, `tools/MCPClient` |
 | `modules/ui-components/` | Shared UI primitives: `ToolCallDisplay`, `ThinkingBlock`, `SubAgentBlock`, `AttachmentManager`, `MentionAutocomplete` |
 | `modules/web/` | Web access layer: `WebSearchProvider` (several providers), `urlRegistry` (URL provenance), search settings |
+| `modules/cli/` | CLI commands for `Plugin#registerCliHandler` (Obsidian 1.12.2+) - read-only wave 1: `status`/`selftest`/`agent-prompt`/`memory-status`, JSON on stdout for external agents |
 
 ## Commands and gates
 
