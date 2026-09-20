@@ -53,14 +53,6 @@ export {
     normalizeUsage,
 } from './ConsolidationRun.js';
 export { default as memoryOpsCenter, OPS_EVENT } from './MemoryOpsCenter.js';
-// Status konsolidacji jednego agenta - czysty odczyt (zero zapisu, zero modelu, zero UI) dla
-// diagnostyki (CLI `memory-status`). `resolveConsolidationThresholds`/`shouldTriggerConsolidation`
-// to JEDNO liczydło progów, którego `SaveSessionWorkflow._shouldTriggerArchive` też używa.
-export {
-    resolveConsolidationThresholds,
-    shouldTriggerConsolidation,
-    getConsolidationStatus,
-} from './consolidationStatus.js';
 // Warstwa OPISOWA przebiegu (etykiety/ikony/czas/koszt/podsumowanie). Czysta, bez DOM.
 // Dzielona przez pasek statusu (core/PKMEnv.js) i modal przebiegu (modules/shell) - patrz nagłówek
 // pliku: `core/` nie może importować z `modules/shell` (cykl przez barrel chatu), więc wspólnym
@@ -168,14 +160,6 @@ export type {
 
 /** Rejestr jednego aktywnego przebiegu (zdarzenia dla paska statusu i modalu). */
 export type { OpsEvent, OpsEventType, OpsListener, OpsRunLike } from './MemoryOpsCenter.js';
-
-/** Status konsolidacji jednego agenta (diagnostyka, CLI `memory-status`). */
-export type {
-    MemoryStateSource,
-    BrainNotesLimitSource,
-    ConsolidationThresholds,
-    ConsolidationStatus,
-} from './consolidationStatus.js';
 
 /**
  * Warstwa OPISOWA przebiegu. `ConsolidationStepLike`/`ConsolidationRunLike` to widoki
