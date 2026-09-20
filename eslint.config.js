@@ -55,6 +55,7 @@ export const MODULE_NAMES = [
   'agents',
   'artifacts',
   'chat',
+  'cli',
   'crystal-soul',
   'embedding',
   'komunikator',
