@@ -332,7 +332,12 @@ test('getConsolidationStatus na ROZGRZANEJ instancji: .state.json i brain/ znikn
     // Desync z dyskiem PO starcie (sync chmurowy, ręczne skasowanie, inny proces) - dokładnie
     // scenariusz zmierzony przez recenzenta.
     delete files[`${BASE}/.state.json`];
-    folders.delete(`${BASE}/brain`);
+    // Folder znika RAZEM z podfolderami (`brain/archive`, `brain/pending_rescue`) - na prawdziwym
+    // dysku nie da się skasować folderu, zostawiając jego dzieci; samo `folders.delete(brain)`
+    // budowało stan niemożliwy (listing `brain/` pełen podfolderów przy nieistniejącym `brain/`).
+    for (const folder of [...folders]) {
+        if (folder === `${BASE}/brain` || folder.startsWith(`${BASE}/brain/`)) folders.delete(folder);
+    }
     calls.length = 0;
 
     const status = await getConsolidationStatus(memory);
@@ -386,7 +391,38 @@ test('getConsolidationStatus na ZIMNEJ instancji: bootstrap struktury odpala si�
 
     const mkdirPaths = calls.filter(c => c.startsWith('mkdir:')).map(c => c.slice('mkdir:'.length));
     const uniqueMkdirPaths = new Set(mkdirPaths);
-    t.is(mkdirPaths.length, uniqueMkdirPaths.size, `każdy folder zakładany DOKŁADNIE raz, nie dwa razy równolegle: ${JSON.stringify(mkdirPaths)}`);
+    // Literał, nie samo "bez duplikatów": asercja na brak powtórzeń przechodzi też przy ZERZE mkdir.
+    t.is(mkdirPaths.length, 11, `bootstrap zimnej instancji zakłada 11 folderów: ${JSON.stringify(mkdirPaths)}`);
+    t.is(uniqueMkdirPaths.size, 11, `każdy folder zakładany DOKŁADNIE raz, nie dwa razy równolegle: ${JSON.stringify(mkdirPaths)}`);
+});
+
+test('getConsolidationStatus: exists() KŁAMIE false na folderze brain/ (dysk chmurowy) -> notatki i tak policzone, jak w produkcyjnym listBrainNotes()', async t => {
+    const { vault } = makeVault({
+        [`${BASE}/brain/user_a.md`]: note('A', 'user'),
+        [`${BASE}/brain/user_b.md`]: note('B', 'user'),
+    });
+    const memory = new AgentMemory(vault, 'Agent');
+    await memory.initialize();
+
+    const honestExists = vault.adapter.exists;
+    vault.adapter.exists = async (path: string) => (path === `${BASE}/brain` ? false : honestExists(path));
+
+    const status = await getConsolidationStatus(memory);
+
+    t.is(status.brainNotes.count, 2);
+});
+
+test('getConsolidationStatus: .state.json z "active_sessions": null (poprawny JSON, zepsuty kształt) -> stateActive=0, status nie rzuca', async t => {
+    const { vault, files } = makeVault();
+    const memory = new AgentMemory(vault, 'Agent');
+    await memory.initialize();
+    files[`${BASE}/.state.json`] = '{"active_sessions": null, "archived_since_last_consolidation": 3}';
+
+    const status = await getConsolidationStatus(memory);
+
+    t.is(status.state.source, 'file');
+    t.is(status.sessions.stateActive, 0);
+    t.is(status.sessions.archivedSinceLastConsolidation, 3);
 });
 
 // ── resolvePlanDedupThreshold — formuła produkcyjnego `consolidationRunner.startConsolidationRun`,

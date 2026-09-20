@@ -429,12 +429,17 @@ Flow:
   `listBrainNotes()` (te dwie metody instancji MAJĄ efekty uboczne - `listActiveSessions()`
   bootstrapuje `.state.json` przez `stateManager.read()`, `listBrainNotes()` sam zakłada folder
   `brain/`). Dzięki temu na ROZGRZANEJ instancji (taką trzyma `AgentManager.agentMemories` dla
-  każdego agenta, którego ktoś już użył) samo odpytanie o status jest czystym odczytem, nawet
+  KAŻDEGO załadowanego agenta - `AgentManager.initialize()` rozgrzewa pamięć wszystkich na
+  starcie pluginu, nie dopiero przy użyciu) samo odpytanie o status jest czystym odczytem, nawet
   gdy `.state.json`/`brain/` zniknęły spod niej PO starcie (`getConsolidationStatus na
-  ROZGRZANEJ instancji` w `consolidationStatus.test.ts`). Na ZIMNEJ instancji (agent, którego
-  jeszcze nikt nie użył) `getConsolidationStatus` i tak materializuje strukturę na dysku, bo
-  `listUncoveredArchiveSessions()` woła `ensureMemoryStructure()` - to jest ZNANA, zaakceptowana
-  granica tej diagnostyki, nie coś, co dałoby się naprawić samym `peek()`.
+  ROZGRZANEJ instancji` w `consolidationStatus.test.ts`). Na ZIMNEJ instancji (świeżo
+  skonstruowana `AgentMemory` spoza `agentMemories` - z CLI nieosiągalna) `getConsolidationStatus`
+  i tak materializuje strukturę na dysku, bo `listUncoveredArchiveSessions()` woła
+  `ensureMemoryStructure()` - to jest ZNANA, zaakceptowana granica tej diagnostyki, nie coś, co
+  dałoby się naprawić samym `peek()`. O obecności folderu `brain/` rozstrzyga LISTING, nie gołe
+  `exists()` (które kłamie `false` na dyskach chmurowych): skrót na `exists()` pokazywał
+  `count: 0` przy notatkach realnie leżących na dysku, czyli inną liczbę niż produkcyjne
+  `listBrainNotes()`.
 - ⚠️ **User authority absolute.** Agent proponuje, user zatwierdza. `brain.md` i sesje nie są
   niszczone bez jawnego flow.
 - ⚠️ **Plik sesji jest źródłem prawdy.** L1/L2/L3 są pochodne. Nie kasuj niższego poziomu, zanim

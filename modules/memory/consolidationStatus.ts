@@ -11,11 +11,13 @@
  * trzymać własną kopię tej samej logiki (patrz `SaveSessionWorkflow.ts`).
  *
  * **Kontrakt zapisu, PRAWDZIWIE (nie "zero zapisu" bez zastrzeżeń):** na ROZGRZANEJ instancji
- * (taką trzyma `AgentManager.agentMemories` dla każdego agenta, którego ktoś już użył)
+ * (taką trzyma `AgentManager.agentMemories` dla KAŻDEGO załadowanego agenta — `AgentManager.
+ * initialize()` rozgrzewa pamięć wszystkich na starcie pluginu, nie dopiero przy użyciu)
  * `getConsolidationStatus` jest czystym odczytem — zero write/mkdir, nawet gdy `.state.json`
  * albo `brain/` zniknęły spod instancji PO starcie (`peek()` zamiast `read()`, pominięty
  * `listActiveSessions()`, warunkowy `listBrainNotes()` — patrz niżej). Na ZIMNEJ instancji
- * (agent, którego jeszcze nikt nie użył) `listUncoveredArchiveSessions()` i tak woła
+ * (świeżo skonstruowana `AgentMemory` spoza `agentMemories` — z CLI nieosiągalna, bo komenda
+ * bierze instancje wyłącznie z tej mapy) `listUncoveredArchiveSessions()` i tak woła
  * `ensureMemoryStructure()` i materializuje strukturę na dysku — to jest ZNANE i AKCEPTOWANE,
  * nie naprawiane w tym pliku (naprawą byłaby zmiana `AgentMemory.listArchiveSessions`, poza
  * zakresem tej diagnostyki).
@@ -216,10 +218,29 @@ async function countActiveSessionFiles(agentMemory: MemoryFsView): Promise<numbe
  * folder (`mkdir`), gdy go nie ma — normalne dla użycia produkcyjnego (agent, który dopiero
  * zaczyna pisać notatki), niedopuszczalne dla diagnostyki na rozgrzanej instancji, która nie ma
  * prawa materializować struktury agenta spod którego zniknęła (P3).
+ *
+ * O obecności folderu rozstrzyga LISTING, nie gołe `exists()`: `exists()` potrafi kłamać `false`
+ * na dyskach sieciowych i chmurowych (gotcha „Odczyt, który PADŁ, nie jest »pusto«" w CLAUDE.md),
+ * a `probeFile` potwierdza brak odczytem TREŚCI, więc nadaje się do plików, nie do folderów.
+ * Skrót na samym `exists()` dawał `count: 0` przy notatkach realnie leżących na dysku, podczas gdy
+ * produkcyjne `listBrainNotes()` przy tym samym kłamstwie je widzi — czyli drugie liczydło.
+ * Folder uznajemy za nieobecny dopiero, gdy listing padł albo jest pusty ORAZ `exists()` mówi
+ * „nie ma"; w każdym innym przypadku liczy `listBrainNotes()` (jedno źródło filtrów: `archive/`,
+ * `pending_rescue/`, `status: archived`). Listing padł, a `exists()` mówi „jest" = folder
+ * nieczytelny — wyjątek leci w górę, jak w produkcyjnym (fail-closed) `listBrainNotes()`.
  */
 async function listBrainNotesIfPresent(agentMemory: MemoryFsView & Pick<AgentMemory, 'listBrainNotes'>): Promise<BrainNoteInfo[]> {
-    const exists = await agentMemory.vault.adapter.exists(agentMemory.paths.brainNotes);
-    if (!exists) return [];
+    const adapter = agentMemory.vault.adapter;
+    const folder = agentMemory.paths.brainNotes;
+    let entries = 0;
+    try {
+        const listed = await adapter.list(folder);
+        entries = (listed?.files?.length || 0) + (listed?.folders?.length || 0);
+    } catch (e) {
+        if (await adapter.exists(folder)) throw e;
+        return [];
+    }
+    if (entries === 0 && !(await adapter.exists(folder))) return [];
     return agentMemory.listBrainNotes();
 }
 
@@ -280,7 +301,9 @@ export async function getConsolidationStatus(agentMemory: AgentMemory): Promise<
             overThreshold: archivedSinceLastConsolidation >= thresholds.sessionThreshold,
             uncoveredArchive: uncoveredArchive.length,
             activeFiles,
-            stateActive: state.active_sessions.length,
+            // `|| []` jak w `AgentMemory.listActiveSessions()`: poprawny JSON o zepsutym kształcie
+            // (`"active_sessions": null` po konflikcie synchronizacji) nie ma prawa wywrócić statusu.
+            stateActive: (state.active_sessions || []).length,
         },
         summaries: {
             uncoveredL1: uncoveredL1.length,
