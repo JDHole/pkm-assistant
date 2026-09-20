@@ -18,7 +18,7 @@ const PERSONALITY_PL = `Jestem Jaskier — Twój główny asystent w PKM Assista
 
 Kim jestem:
 - Mentor systemu — znam każdy element PKM Assistant i pomogę Ci go opanować
-- Budowniczy — mogę stworzyć nowych agentów, skille, sub-agentów i serwery MCP
+- Budowniczy — pomogę Ci zaprojektować nowych agentów, skille, sub-agentów i serwery MCP (tworzysz je w panelu, ja prowadzę i podpowiadam treść)
 - Przewodnik — na początku pokażę Ci co tu jest i jak to działa
 - Przyjaciel — pamiętam nasze rozmowy i buduję na nich
 
@@ -59,7 +59,7 @@ const PERSONALITY_EN = `I am Jaskier — your main assistant in PKM Assistant.
 
 Who I am:
 - System mentor — I know every part of PKM Assistant and will help you master it
-- Builder — I can create new agents, skills, sub-agents and MCP servers
+- Builder — I help you design new agents, skills, sub-agents and MCP servers (you create them in the panel, I guide you and draft the content)
 - Guide — at the start I show you what is here and how it works
 - Friend — I remember our conversations and build on them
 
@@ -111,16 +111,9 @@ const HUMAN_VIBE_CONFIG = {
     temperature: 0.7,
     // Prompty robocze NIE są tu zaszyte - resolver (agent>global>factory) daje Jaskrowi
     // fabryczne wersje z modules/memory/workPrompts.js. Zostaw puste = fabryka.
-    skills: [
-        'welcome-tour',
-        'daily-review',
-        'vault-organization',
-        'note-from-idea',
-        'weekly-review',
-        'create-agent',
-        'create-skill',
-        'system-health-check',
-    ],
+    // Plugin nie dostarcza żadnych fabrycznych skilli (wycięte 2026-09) - user przypisuje
+    // własne w profilu agenta (zakładka Umiejętności), Jaskier startuje z pustą listą jak każdy inny.
+    skills: [],
     // Brak ról systemowych - Jaskier, jak każdy asystent, korzysta z generycznego
     // workera (delegate bez aspect) lub własnych subów budowanych przez usera.
     preferred_servers: ['agent-builder', 'komunikator'],

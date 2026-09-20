@@ -162,7 +162,8 @@ export class AgentManager {
             // E1: Load independent resources in parallel
             await Promise.all([
                 (async () => {
-                    await this.skillLoader.ensureStarterSkills();
+                    // Plugin nie dostarcza fabrycznych skilli - loadAllSkills() czyta tylko
+                    // to, co user sam ma na dysku (znosi brak folderu, patrz SkillLoader.loadAllSkills).
                     await this.skillLoader.loadAllSkills();
                     log.debug('AgentManager', `Skills: ${this.skillLoader.cache?.size || 0} załadowanych`);
                 })(),
