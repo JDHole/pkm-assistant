@@ -79,6 +79,22 @@ test('memory_summaries → search scope:memory folder wg level', t => {
         { query: 'x', scope: 'memory', where: { folder: 'summaries' } });
 });
 
+// Test-strażnik: KAŻDY wpis SEARCH_ALIASES musi nieść scope zgodny z własnym prefiksem nazwy
+// (vault_* → 'vault', memory_* → 'memory') - stara nazwa OBIECUJE ten zakres, więc dopisanie
+// nowego aliasu bez `scope` (albo z nazwą o innym prefiksie) ma się nie prześlizgnąć bez testu.
+test('SEARCH_ALIASES: KAŻDY wpis niesie scope zgodny z prefiksem własnej nazwy', t => {
+    for (const [name, fn] of Object.entries(SEARCH_ALIASES)) {
+        const result = fn({});
+        if (name.startsWith('vault_')) {
+            t.is(result.scope, 'vault', `alias "${name}" zaczyna się od "vault_", ale niesie scope "${String(result.scope)}"`);
+        } else if (name.startsWith('memory_')) {
+            t.is(result.scope, 'memory', `alias "${name}" zaczyna się od "memory_", ale niesie scope "${String(result.scope)}"`);
+        } else {
+            t.fail(`alias "${name}" ma nazwę bez rozpoznanego prefiksu (ani "vault_" ani "memory_") - dopisz mu regułę scope w tym teście`);
+        }
+    }
+});
+
 test('SEARCH_ALIASES pokrywa wszystkie 12 skasowanych narzędzi', t => {
     t.deepEqual(Object.keys(SEARCH_ALIASES).sort(), [
         'memory_filter_yaml', 'memory_grep', 'memory_links', 'memory_semantic',

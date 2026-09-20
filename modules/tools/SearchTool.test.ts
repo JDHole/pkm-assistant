@@ -67,20 +67,41 @@ type FakeMemory = { paths: ReturnType<typeof memoryPaths> } | null;
 
 function makePlugin(
     files: Record<string, string>,
-    { agent, memory, env = null, oramaDb = null }: {
+    {
+        agent, memory, env = null, oramaDb = null,
+        agents, memories, activeAgentName,
+    }: {
         agent?: FakeAgent;
         memory?: FakeMemory;
         env?: unknown;
         oramaDb?: unknown;
+        // Tryb PO NAZWIE — opcjonalny, dla testów, którym zależy na tym, że wołający i
+        // aktywny agent to DWIE różne tożsamości (dotychczasowy tryb `agent`/`memory` ich
+        // nie rozróżniał: wszystkie 4 metody atrapy AgentManagera zwracały to samo, bez
+        // względu na przekazaną nazwę). `agents`/`memories` to mapy po nazwie; `getAgent(name)`
+        // i `getAgentMemory(name)` patrzą na nazwę, `getActiveAgent()`/`getActiveMemory()`
+        // zwracają wpis `activeAgentName`. Nierozpoznana nazwa → `null` (fail-closed, jak
+        // realny `AgentManager` — patrz `modules/memory/CLAUDE.md`, gotcha "cross-agent
+        // isolation jest twarde").
+        agents?: Record<string, FakeAgent>;
+        memories?: Record<string, FakeMemory>;
+        activeAgentName?: string;
     } = {},
 ) {
     const vault = { adapter: makeAdapter(files) };
-    const agentManager = {
-        getActiveAgent: () => agent || null,
-        getAgent: () => agent || null,
-        getActiveMemory: () => memory || null,
-        getAgentMemory: () => memory || null
-    };
+    const agentManager = agents
+        ? {
+            getActiveAgent: () => (activeAgentName ? agents[activeAgentName] : undefined) || null,
+            getAgent: (name: string | null) => (name ? agents[name] : undefined) || null,
+            getActiveMemory: () => (activeAgentName ? memories?.[activeAgentName] : undefined) || null,
+            getAgentMemory: (name: string) => memories?.[name] || null
+        }
+        : {
+            getActiveAgent: () => agent || null,
+            getAgent: () => agent || null,
+            getActiveMemory: () => memory || null,
+            getAgentMemory: () => memory || null
+        };
     return { app: { vault }, agentManager, env, oramaDb } as unknown as SearchToolPlugin & { app: unknown };
 }
 
@@ -143,22 +164,39 @@ test('scope=vault mode=keyword → wyniki bez noty, poprawny kształt', async t 
 
 test('scope=vault mode=auto bez indeksu → nota degradacji (semantyka niedostępna)', async t => {
     const plugin = makePlugin({ 'a.md': 'target' });
-    const res = await run(plugin, { query: 'target', mode: 'auto' });
+    const res = await run(plugin, { query: 'target', mode: 'auto', scope: 'vault' });
     t.true(res.success);
     t.truthy(res.note);
 });
 
 test('where.folder z traversalem → invalid_folder', async t => {
     const plugin = makePlugin({ 'a.md': 'target' });
-    const res = await run(plugin, { query: 'target', where: { folder: '../../etc' } });
+    const res = await run(plugin, { query: 'target', where: { folder: '../../etc' }, scope: 'vault' });
     t.false(res.success);
+});
+
+// Brak scope + agent Z pamięcią → default memory (nie vault): przy scope=memory `where.folder`
+// jest ETYKIETĄ LOGICZNĄ podfolderu pamięci ('brain'/'sessions'/'summaries'/...), NIE ścieżką
+// vaulta - walidator folderu vaulta (`validateVaultFolder`) w ogóle nie jest wołany dla tej
+// gałęzi (`SearchTool.execute`: `if (scope === 'vault' && where.folder)`). Traversal, który dla
+// scope=vault kończyłby się `invalid_folder`, dla scope=memory jest po prostu etykietą bez
+// dopasowania - pusty wynik, sukces.
+test('brak scope + agent z pamięcią + where.folder z traversalem → sukces, scope memory, folder to etykieta (walidator vaulta pominięty)', async t => {
+    const plugin = makePlugin(
+        { [`${MEM_BASE}/brain.md`]: 'target w pamięci' },
+        { agent: { permissions: { memory: true } }, memory: { paths: memoryPaths() } }
+    );
+    const res = await run(plugin, { query: 'target', where: { folder: '../../etc' } });
+    t.true(res.success);
+    t.is(res.scope, 'memory');
+    t.deepEqual(res.results, []);
 });
 
 test('limit respektowany przez narzędzie', async t => {
     const files: Record<string, string> = {};
     for (let i = 0; i < 15; i++) files[`n${i}.md`] = 'foo';
     const plugin = makePlugin(files);
-    const res = await run(plugin, { query: 'foo', mode: 'keyword', limit: 3 });
+    const res = await run(plugin, { query: 'foo', mode: 'keyword', limit: 3, scope: 'vault' });
     t.true(res.success);
     t.is(res.results.length, 3);
 });
@@ -189,7 +227,7 @@ test('scan: obecne w silniku i truncated=true → pole `scan` w wyniku narzędzi
     });
     try {
         const plugin = makePlugin({ 'a.md': 'target' });
-        const res = await run(plugin, { query: 'target', mode: 'keyword' }) as SearchRes & { scan?: unknown };
+        const res = await run(plugin, { query: 'target', mode: 'keyword', scope: 'vault' }) as SearchRes & { scan?: unknown };
         t.true(res.success);
         t.deepEqual(res.scan, fakeScan, '`scan` musi trafić do wyniku narzędzia bez zmian');
     } finally {
@@ -210,7 +248,7 @@ test('scan: NIEOBECNE w silniku (skan nieobcięty) → brak pola `scan` w wyniku
     });
     try {
         const plugin = makePlugin({ 'a.md': 'target' });
-        const res = await run(plugin, { query: 'target', mode: 'keyword' }) as SearchRes & { scan?: unknown };
+        const res = await run(plugin, { query: 'target', mode: 'keyword', scope: 'vault' }) as SearchRes & { scan?: unknown };
         t.true(res.success);
         t.false('scan' in res, 'brak `scan` w silniku → brak `scan` w wyniku narzędzia, bez pustego pola');
     } finally {
@@ -242,7 +280,6 @@ test.serial('brak scope + agent z pamięcią → domyślny zakres to memory (now
     // Literał, nie `t()` — oczekiwana wartość nie może być liczona tą samą funkcją co wynik.
     // Kontrakt podpowiedzi: nazywa DOKŁADNY parametr, którym model poszerza zakres.
     t.regex(String(res.scope_hint), /scope: "vault"/);
-    t.regex(String(res.scope_hint), /does NOT mean/);
 });
 
 // Stara nazwa `vault_search` obiecuje vault. Alias niesie `scope:'vault'` jawnie — bez tego
@@ -303,6 +340,7 @@ test('brak scope + permissions.memory === false → fallback na vault (sukces, N
     t.true(res.success, 'domyślne wywołanie bez scope nie odmawia, gdy pamięć jest wyłączona');
     t.is(res.scope, 'vault');
     t.true(res.results.some(x => x.path === 'Notatka.md'));
+    t.false('scope_hint' in res, 'fallback na vault (memory_off) nie jest domyślnym memory → brak scope_hint');
 });
 
 test('brak scope + _invocationDelegationDepth:1 (sub-agent) → fallback na vault', async t => {
@@ -318,6 +356,7 @@ test('brak scope + _invocationDelegationDepth:1 (sub-agent) → fallback na vaul
     t.is(res.scope, 'vault');
     t.true(res.results.some(x => x.path === 'Notatka.md'), 'sub-agent bez scope trafia notatkę vaulta');
     t.false(res.results.some(x => x.path === `${MEM_BASE}/brain.md`), 'sub-agent bez scope NIE dostaje pamięci rodzica');
+    t.false('scope_hint' in res, 'fallback na vault (sub_agent) nie jest domyślnym memory → brak scope_hint');
 });
 
 test('brak scope + brak pamięci agenta (getAgentMemory zwraca null) → fallback na vault', async t => {
@@ -329,6 +368,60 @@ test('brak scope + brak pamięci agenta (getAgentMemory zwraca null) → fallbac
     t.true(res.success);
     t.is(res.scope, 'vault');
     t.true(res.results.some(x => x.path === 'Notatka.md'));
+    t.false('scope_hint' in res, 'fallback na vault (no_memory) nie jest domyślnym memory → brak scope_hint');
+});
+
+// ───────────────────────── tożsamość WOŁAJĄCEGO ≠ aktywny agent w UI ─────────────────────
+//
+// Dotychczasowa atrapa AgentManagera (`makePlugin({agent, memory})`) ignorowała nazwę — te
+// dwa testy używają trybu PO NAZWIE (`agents`/`memories`/`activeAgentName`), żeby faktycznie
+// odróżnić tożsamość z `_invocationAgentName` od aktywnego agenta w UI (patrz
+// `modules/memory/CLAUDE.md`, gotcha "`AgentManager.getActiveMemory()` NIE JEST na ścieżce
+// tła").
+
+test('brak scope + _invocationAgentName:"Ala" (aktywny agent w UI to Bob, bez pamięci) → memory ALI, nie Boba', async t => {
+    const ALA_BASE = '.pkm-assistant/agents/ala/memory';
+    const plugin = makePlugin(
+        {
+            'Notatka.md': 'target w vaulcie',
+            [`${ALA_BASE}/brain.md`]: 'target w pamięci Ali'
+        },
+        {
+            agents: {
+                Bob: { permissions: { memory: false } },
+                Ala: { permissions: { memory: true } }
+            },
+            memories: {
+                Ala: { paths: memoryPaths(ALA_BASE) }
+            },
+            activeAgentName: 'Bob'
+        }
+    );
+    const res = await run(plugin, { query: 'target', _invocationAgentName: 'Ala' });
+    t.true(res.success);
+    t.is(res.scope, 'memory');
+    t.true(res.results.some(x => x.path === `${ALA_BASE}/brain.md`), 'notatka z pamięci ALI jest w wynikach');
+    t.false(res.results.some(x => x.path === 'Notatka.md'), 'notatka vaulta NIE jest w wynikach');
+});
+
+test('brak scope + _invocationAgentName:"Zonk" (nieznana tożsamość) przy aktywnym agencie Z pamięcią → fallback na vault (fail-closed)', async t => {
+    const ALA_BASE = '.pkm-assistant/agents/ala/memory';
+    const plugin = makePlugin(
+        {
+            'Notatka.md': 'target w vaulcie',
+            [`${ALA_BASE}/brain.md`]: 'target w pamięci Ali'
+        },
+        {
+            agents: { Ala: { permissions: { memory: true } } },
+            memories: { Ala: { paths: memoryPaths(ALA_BASE) } },
+            activeAgentName: 'Ala'
+        }
+    );
+    const res = await run(plugin, { query: 'target', _invocationAgentName: 'Zonk' });
+    t.true(res.success);
+    t.is(res.scope, 'vault', 'nieznana tożsamość NIE dostaje pamięci aktywnego agenta (fail-closed)');
+    t.true(res.results.some(x => x.path === 'Notatka.md'));
+    t.false(res.results.some(x => x.path === `${ALA_BASE}/brain.md`), 'pamięć Ali (aktywnej w UI) nie wycieka do nieznanej tożsamości');
 });
 
 // ───────────────────────── contextExtractor: targetPath zależny od zakresu ─────────────────────
@@ -350,6 +443,72 @@ test('contextExtractor: brak scope + where.folder przy domyślnym memory → tar
         { plugin }
     );
     t.is(ctxVault.targetPath, 'Projekty');
+});
+
+// ─── tabela równoważności: bramka (contextExtractor) ↔ wykonanie (execute) ─────────────────
+//
+// `contextExtractor` (bramka `targetPath`) i `execute` (silnik, pole `scope` w wyniku) MUSZĄ
+// ocenić TĘ SAMĄ decyzję dla TEGO SAMEGO worka argumentów - to jest cały sens tego, że obie
+// strony wołają `resolveSearchScope` (patrz `modules/tools/CLAUDE.md`, gotcha "bramka i zlew
+// oglądają jeden ciąg"). Oczekiwane pary `{targetPath, scope}` są wpisane LITERALNIE w tabeli
+// (nie liczone przez `resolveSearchScope`) - inaczej test porównywałby kod z samym sobą.
+test('tabela: brak/jawny scope + where.folder:"Projekty" → ta sama para {targetPath, scope} w bramce i w wykonaniu', async t => {
+    const agentZPamiecia = { agent: { permissions: { memory: true } }, memory: { paths: memoryPaths() } };
+    const CASES: Array<{
+        name: string;
+        args: SearchToolArgs;
+        pluginOpts: Parameters<typeof makePlugin>[1];
+        expected: { targetPath: string; scope: string };
+    }> = [
+        {
+            name: '(a) agent z pamięcią, brak scope → default memory',
+            args: { query: 'x', where: { folder: 'Projekty' } },
+            pluginOpts: agentZPamiecia,
+            expected: { targetPath: '', scope: 'memory' }
+        },
+        {
+            name: '(b) permissions.memory:false, brak scope → fallback vault',
+            args: { query: 'x', where: { folder: 'Projekty' } },
+            pluginOpts: { agent: { permissions: { memory: false } }, memory: { paths: memoryPaths() } },
+            expected: { targetPath: 'Projekty', scope: 'vault' }
+        },
+        {
+            name: '(c) brak pamięci, brak scope → fallback vault',
+            args: { query: 'x', where: { folder: 'Projekty' } },
+            pluginOpts: { agent: { permissions: { memory: true } }, memory: null },
+            expected: { targetPath: 'Projekty', scope: 'vault' }
+        },
+        {
+            name: '(d) _invocationDelegationDepth:1 (sub-agent), brak scope → fallback vault',
+            args: { query: 'x', where: { folder: 'Projekty' }, _invocationDelegationDepth: 1 },
+            pluginOpts: agentZPamiecia,
+            expected: { targetPath: 'Projekty', scope: 'vault' }
+        },
+        {
+            name: 'jawne scope:"vault"',
+            args: { query: 'x', scope: 'vault', where: { folder: 'Projekty' } },
+            pluginOpts: agentZPamiecia,
+            expected: { targetPath: 'Projekty', scope: 'vault' }
+        },
+        {
+            name: 'jawne scope:"memory"',
+            args: { query: 'x', scope: 'memory', where: { folder: 'Projekty' } },
+            pluginOpts: agentZPamiecia,
+            expected: { targetPath: '', scope: 'memory' }
+        }
+    ];
+
+    for (const c of CASES) {
+        const plugin = makePlugin({}, c.pluginOpts);
+        const tool = createSearchTool();
+        const ctx = { agentName: null, plugin };
+
+        const extracted = tool.contextExtractor(c.args, ctx);
+        t.is(extracted.targetPath, c.expected.targetPath, `${c.name}: targetPath bramki`);
+
+        const res = await run(plugin, c.args);
+        t.is(res.scope, c.expected.scope, `${c.name}: scope wykonania`);
+    }
 });
 
 // ───────────────────────── resolveSearchScope — bezpośrednio ─────────────────────

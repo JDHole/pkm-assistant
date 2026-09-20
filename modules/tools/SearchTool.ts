@@ -188,6 +188,7 @@ export function createSearchTool() {
         execute: async (args: SearchToolArgs, _app: unknown, plugin: SearchToolPlugin) => {
             try {
                 const decision = resolveSearchScope(args, plugin);
+                log.debug('SearchTool', 'scope decision', decision);
                 const scope: SemanticScope = decision.scope;
                 const where: SearchWhere = (args?.where && typeof args.where === 'object' && !Array.isArray(args.where)) ? { ...args.where } : {};
                 const agentManager = plugin?.agentManager;
