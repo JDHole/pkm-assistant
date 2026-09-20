@@ -62,14 +62,18 @@ function cleanWhere(where: ToolArgs): ToolArgs {
  * Mapa: stara nazwa narzędzia → funkcja przekształcająca argumenty na wywołanie `search`.
  * Czyta oryginalne nazwy argumentów (pattern/filter/from/to/level) — działa niezależnie
  * od `MCPClient.normalizeArgsAliases` (który tylko DODAJE kanoniczne pola, nie usuwa).
+ *
+ * KAŻDY alias niesie `scope` JAWNIE (`vault_*` → 'vault', `memory_*` → 'memory'). Domyślny
+ * zakres `search` to pamięć agenta (`SearchTool.resolveSearchScope`), więc alias bez `scope`
+ * po cichu przeszukiwałby pamięć zamiast vaulta, który stara nazwa obiecuje.
  */
 export const SEARCH_ALIASES: Record<string, (a: ToolArgs) => ToolArgs> = {
-    vault_search: (a) => ({ query: a.query, ...(a.folder ? { where: { folder: a.folder } } : {}) }),
-    vault_grep: (a) => ({ query: a.pattern ?? a.query, mode: 'keyword', where: cleanWhere({ folder: a.folder, glob: a.glob }) }),
-    vault_semantic: (a) => ({ query: a.query, mode: 'semantic', where: cleanWhere({ folder: a.folder }) }),
-    vault_glob: (a) => ({ where: cleanWhere({ glob: a.pattern ?? a.glob }) }),
-    vault_filter_yaml: (a) => ({ where: cleanWhere({ yaml: a.filter, folder: a.folder }) }),
-    vault_links: (a) => ({ where: cleanWhere({ links_from: a.from, links_to: a.to }) }),
+    vault_search: (a) => ({ query: a.query, scope: 'vault', ...(a.folder ? { where: { folder: a.folder } } : {}) }),
+    vault_grep: (a) => ({ query: a.pattern ?? a.query, mode: 'keyword', scope: 'vault', where: cleanWhere({ folder: a.folder, glob: a.glob }) }),
+    vault_semantic: (a) => ({ query: a.query, mode: 'semantic', scope: 'vault', where: cleanWhere({ folder: a.folder }) }),
+    vault_glob: (a) => ({ scope: 'vault', where: cleanWhere({ glob: a.pattern ?? a.glob }) }),
+    vault_filter_yaml: (a) => ({ scope: 'vault', where: cleanWhere({ yaml: a.filter, folder: a.folder }) }),
+    vault_links: (a) => ({ scope: 'vault', where: cleanWhere({ links_from: a.from, links_to: a.to }) }),
     memory_filter_yaml: (a) => ({ scope: 'memory', where: cleanWhere({ yaml: a.filter }) }),
     memory_grep: (a) => ({ query: a.pattern ?? a.query, mode: 'keyword', scope: 'memory' }),
     memory_semantic: (a) => ({ query: a.query, mode: 'semantic', scope: 'memory' }),

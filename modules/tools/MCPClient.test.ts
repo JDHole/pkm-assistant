@@ -418,11 +418,20 @@ test('bez opcji znaczniki są USUWANE, nawet gdy model poda je sam', async t => 
 
     await client.executeToolCall({
         name: 'delegate',
-        arguments: { task: 'x', _invocationScopeFolders: ['/'], _invocationToolNames: ['write', 'delete'] },
+        arguments: {
+            task: 'x',
+            _invocationScopeFolders: ['/'],
+            _invocationToolNames: ['write', 'delete'],
+            // Ten sam wzorzec co _invocationScopeFolders/_invocationToolNames: model, który
+            // sam wstawi znacznik głębokości delegacji, ma go stracić - bez opcji
+            // `delegationDepth` klient NIE ma skąd wziąć zaufanej wartości.
+            _invocationDelegationDepth: 1,
+        },
     }, 'Tester');
 
     t.false('_invocationScopeFolders' in (seen[0] as Record<string, unknown>));
     t.false('_invocationToolNames' in (seen[0] as Record<string, unknown>));
+    t.false('_invocationDelegationDepth' in (seen[0] as Record<string, unknown>), 'model nie podstawi sobie głębokości delegacji bez opcji runtime');
 });
 
 // ─── `action` nie obniża ryzyka `write` poniżej skutku ────────────
