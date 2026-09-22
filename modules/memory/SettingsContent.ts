@@ -1,5 +1,6 @@
 import { t } from '../../core/i18n/index.js';
 import { setSvgLabel } from '../../modules/crystal-soul/index.js';
+import { CONSOLIDATION_DEFAULTS } from './consolidationStatus.js';
 // `import type` = ZERO emitu - sekcja dostaje `Setting` przez ctx (DI), nie importem wartości.
 import type { Setting as ObsidianSetting } from 'obsidian';
 
@@ -18,6 +19,16 @@ export interface MemoryPkmSlice {
     archiveRetentionMaxFiles?: number;
     sessionTimeoutMinutes?: number;
     idleConsolidationMinutes?: number;
+    /** Auto-konsolidacja opcjonalna, gałąź sesje/L1-L3 - domyślnie WYŁĄCZONA. */
+    memoryV3AutoConsolidateSessions?: boolean;
+    /** Auto-konsolidacja opcjonalna, gałąź notatek brain/ (dedup) - domyślnie WYŁĄCZONA. */
+    memoryV3AutoConsolidateBrain?: boolean;
+    /** Próg sesji zarchiwizowanych do konsolidacji (>= tego licznika). */
+    memoryV3SessionThreshold?: number;
+    /** Limit notatek brain/ do konsolidacji (> tego licznika). */
+    memoryV3BrainNotesThreshold?: number;
+    /** Rozmiar paczki L1 (ile sesji wchodzi w jedno streszczenie, i ile L1 w L2 itd.). */
+    memoryV3ArchiveBatchSize?: number;
 }
 
 /**
@@ -179,6 +190,82 @@ export function renderMemorySection(container: HTMLElement, ctx: MemorySettingsC
                 .onChange(async (value) => {
                     const val = parseInt(value);
                     pkm.idleConsolidationMinutes = Number.isFinite(val) && val >= 0 ? val : 20;
+                    await save();
+                });
+            text.inputEl.type = 'number';
+            text.inputEl.addClass('pkm-setting-input--w80');
+        });
+
+    // ── Konsolidacja pamięci (auto-konsolidacja opcjonalna, domyślnie OBA wyłączniki OFF) ──
+    // Ręczna konsolidacja (guzik „Podsumuj rozmowy" w profilu agenta) działa zawsze, niezależnie
+    // od tych dwóch wyłączników - `startConsolidationRun({source:'manual'})` nie czyta polityki.
+    new Setting(container).setName(t('settings.consolidation_title')).setHeading();
+
+    new Setting(container)
+        .setName(t('settings.consolidation_auto_sessions'))
+        .setDesc(t('settings.consolidation_auto_sessions_desc'))
+        .addToggle(toggle => toggle
+            .setValue(pkm.memoryV3AutoConsolidateSessions === true)
+            .onChange(async (value) => {
+                pkm.memoryV3AutoConsolidateSessions = value;
+                await save();
+            }));
+
+    new Setting(container)
+        .setName(t('settings.consolidation_auto_brain'))
+        .setDesc(t('settings.consolidation_auto_brain_desc'))
+        .addToggle(toggle => toggle
+            .setValue(pkm.memoryV3AutoConsolidateBrain === true)
+            .onChange(async (value) => {
+                pkm.memoryV3AutoConsolidateBrain = value;
+                await save();
+            }));
+
+    /** Liczba całkowita > 0, inaczej wraca do `fallback` (wartość z `CONSOLIDATION_DEFAULTS`). */
+    const positiveIntOr = (value: string, fallback: number): number => {
+        const val = parseInt(value, 10);
+        return Number.isFinite(val) && val > 0 ? val : fallback;
+    };
+
+    new Setting(container)
+        .setName(t('settings.consolidation_session_threshold'))
+        .setDesc(t('settings.consolidation_session_threshold_desc'))
+        .addText(text => {
+            text
+                .setPlaceholder(String(CONSOLIDATION_DEFAULTS.sessionThreshold))
+                .setValue(String(pkm.memoryV3SessionThreshold !== undefined ? pkm.memoryV3SessionThreshold : CONSOLIDATION_DEFAULTS.sessionThreshold))
+                .onChange(async (value) => {
+                    pkm.memoryV3SessionThreshold = positiveIntOr(value, CONSOLIDATION_DEFAULTS.sessionThreshold);
+                    await save();
+                });
+            text.inputEl.type = 'number';
+            text.inputEl.addClass('pkm-setting-input--w80');
+        });
+
+    new Setting(container)
+        .setName(t('settings.consolidation_brain_limit'))
+        .setDesc(t('settings.consolidation_brain_limit_desc'))
+        .addText(text => {
+            text
+                .setPlaceholder(String(CONSOLIDATION_DEFAULTS.brainNotesLimit))
+                .setValue(String(pkm.memoryV3BrainNotesThreshold !== undefined ? pkm.memoryV3BrainNotesThreshold : CONSOLIDATION_DEFAULTS.brainNotesLimit))
+                .onChange(async (value) => {
+                    pkm.memoryV3BrainNotesThreshold = positiveIntOr(value, CONSOLIDATION_DEFAULTS.brainNotesLimit);
+                    await save();
+                });
+            text.inputEl.type = 'number';
+            text.inputEl.addClass('pkm-setting-input--w80');
+        });
+
+    new Setting(container)
+        .setName(t('settings.consolidation_batch_size'))
+        .setDesc(t('settings.consolidation_batch_size_desc'))
+        .addText(text => {
+            text
+                .setPlaceholder(String(CONSOLIDATION_DEFAULTS.batchSize))
+                .setValue(String(pkm.memoryV3ArchiveBatchSize !== undefined ? pkm.memoryV3ArchiveBatchSize : CONSOLIDATION_DEFAULTS.batchSize))
+                .onChange(async (value) => {
+                    pkm.memoryV3ArchiveBatchSize = positiveIntOr(value, CONSOLIDATION_DEFAULTS.batchSize);
                     await save();
                 });
             text.inputEl.type = 'number';
