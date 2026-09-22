@@ -17,6 +17,12 @@ interface DiffModalOptions {
     oldContent: string;
     newContent: string;
     agentName: string;
+    /**
+     * Wołacz (`MCPClient`, krok 6b) mówi modalowi „ta sesja MA klucz (`origin.sessionPath`),
+     * pokaż checkbox «Nie pytaj więcej w tej sesji»". Brak pola (albo `false`) = checkbox się
+     * nie pokazuje — bez klucza sesji `SessionWriteConsent` nie ma czego zapamiętać.
+     */
+    rememberAvailable?: boolean;
 }
 
 type DiffModalResult = 'approve' | 'deny';
@@ -25,6 +31,13 @@ export class DiffModal extends Modal {
     declare opts: DiffModalOptions;
     declare result: DiffModalResult | null;
     declare resolvePromise: ((result: DiffModalResult) => void) | null;
+    /**
+     * Stan checkboxa „Nie pytaj więcej w tej sesji" w chwili rozstrzygnięcia modala.
+     * `waitForApproval()` ZOSTAJE `Promise<'approve'|'deny'>` (kontrakt haka testowego
+     * `diffModalFactory` w `MCPClient` się nie zmienia) — wołacz czyta to pole z INSTANCJI
+     * modala PO rozstrzygnięciu obietnicy, nie z jej wyniku. Zawsze `false` przy Odrzuć.
+     */
+    declare rememberForSession: boolean;
     /**
      * @param {App} app
      * @param {Object} opts
@@ -38,6 +51,7 @@ export class DiffModal extends Modal {
         this.opts = opts;
         this.result = null;
         this.resolvePromise = null;
+        this.rememberForSession = false;
     }
 
     onOpen() {
@@ -97,16 +111,35 @@ export class DiffModal extends Modal {
             this._renderDiff(diffBody, ops);
         }
 
+        // Checkbox „Nie pytaj więcej w tej sesji o zapisy do tego pliku" - TYLKO gdy wołacz
+        // podał `rememberAvailable:true` (czyli `origin.sessionPath` jest znany - bez klucza
+        // sesji `SessionWriteConsent` nie ma czego zapamiętać, patrz `MCPClient.ts` krok 6b).
+        let rememberCheckbox: HTMLInputElement | null = null;
+        if (this.opts.rememberAvailable) {
+            const rememberRow = contentEl.createDiv('diff-remember');
+            rememberCheckbox = rememberRow.createEl('input', { type: 'checkbox' });
+            rememberCheckbox.id = 'pkm-diff-remember-session';
+            const label = rememberRow.createEl('label', { text: t('modal.diff.remember_session') });
+            label.htmlFor = rememberCheckbox.id;
+        }
+
         // Buttons
         const buttons = contentEl.createDiv('diff-buttons');
 
         const denyBtn = buttons.createEl('button', { cls: 'mod-warning' });
         setSvgLabel(denyBtn, UiIcons.cross(14), t('modal.diff.deny'));
-        denyBtn.onclick = () => this._resolve('deny');
+        denyBtn.onclick = () => {
+            // Odrzucenie NIGDY nie pamięta zgody, niezależnie od stanu checkboxa.
+            this.rememberForSession = false;
+            this._resolve('deny');
+        };
 
         const approveBtn = buttons.createEl('button', { cls: 'mod-cta' });
         setSvgLabel(approveBtn, UiIcons.check(14), t('modal.diff.approve'));
-        approveBtn.onclick = () => this._resolve('approve');
+        approveBtn.onclick = () => {
+            this.rememberForSession = !!rememberCheckbox?.checked;
+            this._resolve('approve');
+        };
     }
 
     /**
