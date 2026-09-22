@@ -39,16 +39,35 @@ interface WriteToolApp {
 
 /**
  * `Vault.modify` → `Vault.process` (wytyczna Obsidiana: zapis atomowy zamiast read-then-write).
- * `process` bierze funkcję transformującą, ale nasz `finalContent` jest już policzony —
- * `() => finalContent` przenosi go przez tę samą bramkę bez zmiany kontraktu wołacza.
- * Fallback na `modify` dla hostów bez `process` (harness mock je ma; atrapy testowe bywają
- * węższe — patrz `AdminVaultTools.test.ts`, gdzie ścieżki ukryte i tak idą przez `adapter.write`).
+ *
+ * `finalContent` przyjmuje TERAZ też funkcję `(data: string) => string` - wołacz, który liczy
+ * nową treść na podstawie STAREJ (append/prepend/patch), MUSI ją policzyć wewnątrz tego
+ * callbacku, na `data` dostarczonym przez `vault.process` W CHWILI ZAPISU, nie na treści
+ * przeczytanej wcześniej. Inaczej N równoległych wywołań (`Promise.all` w
+ * `modules/agent-loop/AgentLoop.ts` wykonuje tool-calle jednej tury równolegle) czyta TEN SAM
+ * stary stan, każde liczy swoją zmianę z osobna, i wygrywa WYŁĄCZNIE to, które zapisze OSTATNIE -
+ * reszta ginie po cichu mimo `success:true` (lost update, bug zgłoszony w recenzji). Callback
+ * może rzucić (np. `old_text` nie znaleziony na ŚWIEŻEJ treści) - `vault.process` wtedy NIE
+ * zapisuje nic, a wyjątek leci dalej do `execute`'s `catch` jak każdy inny błąd walidacji.
+ * Zwykły string (replace, create) nie ma tego problemu - podanie gotowej wartości zostaje.
+ *
+ * Fallback na `modify` dla hostów BEZ `process` (harness mock je ma; atrapy testowe bywają
+ * węższe — patrz `AdminVaultTools.test.ts`, gdzie ścieżki ukryte i tak idą przez `adapter.write`)
+ * NIE JEST atomowy - `modify` nie daje dostępu do treści w chwili zapisu, więc callback dostaje
+ * treść sprzed wywołania (ta sama, stara semantyka co przed tą naprawą). Świadomie zaakceptowane:
+ * real Obsidian ma `process` od 1.1.0, `minAppVersion` tego pluginu to 1.11.0 - na KAŻDYM
+ * wspieranym hoście ta gałąź jest martwa, żyje tylko dla wąskich atrap testowych.
  */
-async function writeFileContent(vault: WriteToolApp['vault'], file: VaultFileLike, finalContent: string): Promise<void> {
+async function writeFileContent(
+    vault: WriteToolApp['vault'],
+    file: VaultFileLike,
+    finalContent: string | ((data: string) => string),
+): Promise<void> {
+    const fn = typeof finalContent === 'function' ? finalContent : () => finalContent;
     if (typeof vault.process === 'function') {
-        await vault.process(file, () => finalContent);
+        await vault.process(file, fn);
     } else {
-        await vault.modify(file, finalContent);
+        await vault.modify(file, fn(await vault.read(file)));
     }
 }
 
@@ -129,42 +148,43 @@ export function createWriteTool() {
                     }
 
                     const sensitiveCheck = warnIfSensitive(new_text);
-
-                    // Read existing file
                     const isHiddenPath = isHiddenVaultPath(path);
-                    let oldContent: string;
+
+                    // Znajdź old_text (musi być unikalny) i zbuduj nową treść z DANEJ `data` -
+                    // wspólna logika dla obu gałęzi niżej, więc reguła unikalności/"nie znaleziono"
+                    // nie rozjeżdża się między ścieżką ukrytą a indeksowaną.
+                    const applyPatch = (data: string): string => {
+                        const firstIndex = data.indexOf(old_text);
+                        if (firstIndex === -1) {
+                            throw new Error(t('mcp.write.old_text_not_found', { path }));
+                        }
+                        const secondIndex = data.indexOf(old_text, firstIndex + 1);
+                        if (secondIndex !== -1) {
+                            throw new Error(t('mcp.write.old_text_multiple', { path }));
+                        }
+                        return data.substring(0, firstIndex) + new_text + data.substring(firstIndex + old_text.length);
+                    };
+
                     if (isHiddenPath) {
+                        // ⚠️ Adapter NIE MA atomowego read-modify-write (`vault.process` istnieje
+                        // TYLKO dla plików indeksowanych) - ta gałąź zachowuje DAWNĄ (stale-read)
+                        // semantykę świadomie. Patrz `modules/tools/CLAUDE.md`, gotcha „WriteTool:
+                        // lost update".
                         if (!(await app.vault.adapter.exists(path))) {
                             throw new Error(t('mcp.write.file_not_found_patch', { path }));
                         }
-                        oldContent = await app.vault.adapter.read(path);
+                        const oldContent = await app.vault.adapter.read(path);
+                        await app.vault.adapter.write(path, applyPatch(oldContent));
                     } else {
                         const file = app.vault.getAbstractFileByPath(path);
                         if (!file || isFolderLike(file)) {
                             throw new Error(t('mcp.write.file_not_found_patch', { path }));
                         }
-                        oldContent = await app.vault.read(file);
-                    }
-
-                    // Find old_text — must be unique
-                    const firstIndex = oldContent.indexOf(old_text);
-                    if (firstIndex === -1) {
-                        throw new Error(t('mcp.write.old_text_not_found', { path }));
-                    }
-                    const secondIndex = oldContent.indexOf(old_text, firstIndex + 1);
-                    if (secondIndex !== -1) {
-                        throw new Error(t('mcp.write.old_text_multiple', { path }));
-                    }
-
-                    // Apply patch
-                    const finalContent = oldContent.substring(0, firstIndex) + new_text + oldContent.substring(firstIndex + old_text.length);
-
-                    // Write
-                    if (isHiddenPath) {
-                        await app.vault.adapter.write(path, finalContent);
-                    } else {
-                        const file = app.vault.getAbstractFileByPath(path);
-                        await writeFileContent(app.vault, file as VaultFileLike, finalContent);
+                        // `applyPatch` liczy się WEWNĄTRZ `vault.process`, na treści ŚWIEŻEJ w
+                        // chwili zapisu (patrz `writeFileContent`) - nie na treści przeczytanej
+                        // wcześniej. Rzut wewnątrz `applyPatch` NIGDY nie zapisuje - leci dalej
+                        // jako odrzucenie `writeFileContent`, złapane przez `catch` na dole `execute`.
+                        await writeFileContent(app.vault, file, applyPatch);
                     }
 
                     const res: WriteResult = { success: true, path, mode: 'patch', bytesWritten: new_text.length, patchApplied: true };
@@ -237,20 +257,21 @@ export function createWriteTool() {
                     }
                 }
 
-                // File exists, proceed with modify
-                const oldContent = await app.vault.read(file);
-
+                // File exists, proceed with modify.
                 if (mode === 'replace') {
-                    finalContent = content;
-                } else if (mode === 'append') {
-                    finalContent = oldContent + content;
-                } else if (mode === 'prepend') {
-                    finalContent = content + oldContent;
+                    // `replace` NIE zależy od treści istniejącej - nie ma tu czego zgubić,
+                    // gotowa wartość wołacza zostaje jak dotąd.
+                    await writeFileContent(app.vault, file, content);
+                } else if (mode === 'append' || mode === 'prepend') {
+                    // Liczone WEWNĄTRZ `vault.process`, na treści ŚWIEŻEJ w chwili zapisu (patrz
+                    // `writeFileContent`) - NIE na `oldContent` przeczytanym wcześniej. Bez tego N
+                    // równoległych append/prepend na TEN SAM plik (Promise.all w
+                    // `modules/agent-loop/AgentLoop.ts`) traci wszystkie poza OSTATNIM zapisem -
+                    // ten sam lost-update co patch, zgłoszony w recenzji.
+                    await writeFileContent(app.vault, file, (data: string) => (mode === 'append' ? data + content : content + data));
                 } else {
                     throw new Error(t('mcp.write.unknown_mode', { mode }));
                 }
-
-                await writeFileContent(app.vault, file, finalContent);
                 bytesWritten = content.length;
 
                 const res: WriteResult = { success: true, path: file.path, mode, bytesWritten };

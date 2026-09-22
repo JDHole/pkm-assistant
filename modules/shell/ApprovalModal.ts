@@ -110,6 +110,22 @@ export class ApprovalModal extends Modal {
         // Content preview - different per action type
         this._renderContentPreview(contentEl);
 
+        // Checkbox "Nie pytaj więcej w tej sesji o zapisy do tego pliku" - TYLKO dla akcji
+        // zapisu pliku (`vault.write` - jedyny actionType, którym MCPClient oznacza tool `write`
+        // i legacy `vault_write`, patrz ACTION_TYPE_MAP), i TYLKO gdy wołacz podał
+        // `rememberAvailable:true` (czyli `origin.sessionPath` jest znany - bez klucza sesji
+        // `SessionWriteConsent` nie ma czego zapamiętać). Patrz `core/security/SessionWriteConsent.ts`.
+        // Checkbox ZAGNIEŻDŻONY w <label>, BEZ `id`/`htmlFor` - z kilkoma otwartymi modalami
+        // naraz stały `id` kolidowałby między instancjami (klik w etykietę trafiałby zawsze w
+        // PIERWSZY modal w DOM-ie). Zagnieżdżenie aktywuje kontrolkę natywnie, bez `id`.
+        let rememberCheckbox: HTMLInputElement | null = null;
+        if (this.action.type === 'vault.write' && this.action.rememberAvailable === true) {
+            const rememberDiv = contentEl.createDiv('approval-remember');
+            const label = rememberDiv.createEl('label');
+            rememberCheckbox = label.createEl('input', { type: 'checkbox' });
+            label.appendText(' ' + t('approval.remember_session'));
+        }
+
         // Deny reason field (hidden by default)
         const denyReasonDiv = contentEl.createDiv({ cls: 'approval-deny-reason pkm-hidden' });
         denyReasonDiv.createEl('label', { text: t('approval.deny_reason') });
@@ -168,7 +184,14 @@ export class ApprovalModal extends Modal {
         });
         setSvg(approveBtn, UiIcons.check(14));
         approveBtn.appendText(t('approval.approve'));
-        approveBtn.onclick = () => this._resolve({ result: 'approve', reason: '' });
+        approveBtn.onclick = () => this._resolve({
+            result: 'approve',
+            reason: '',
+            // Zatwierdź I „Zawsze zezwalaj" (guzik niżej) niosą ten sygnał, gdy checkbox jest
+            // zaznaczony - obie to literalne „tak" na to konkretne pytanie. `deny`/`redirect`
+            // niżej świadomie NIE dokładają tego pola (patrz `ApprovalModalResult` w core).
+            rememberForSession: !!rememberCheckbox?.checked,
+        });
 
         // Always approve button. Dla narzędzia zewnętrznego serwera „zawsze"
         // dotyczy TEGO KONKRETNEGO narzędzia (reguła external.call::serverId__tool, nie hurt),
@@ -180,7 +203,16 @@ export class ApprovalModal extends Modal {
         setSvg(alwaysBtn, UiIcons.refresh(14));
         alwaysBtn.appendText(isExternalCall ? t('approval.always_this_tool') : t('approval.approve_session'));
         if (isExternalCall) alwaysBtn.title = t('approval.always_this_tool_desc');
-        alwaysBtn.onclick = () => this._resolve({ result: 'always', reason: '' });
+        alwaysBtn.onclick = () => this._resolve({
+            result: 'always',
+            reason: '',
+            // Checkbox zaznaczony + „Zawsze zezwalaj" niesie TĘ SAMĄ intencję co checkbox +
+            // Zatwierdź - user właśnie powiedział „nie pytaj więcej o TEN plik w tej sesji",
+            // niezależnie od tego, który guzik zamknął modal. Bez tego druga bramka (krok 6b,
+            // podgląd diffa) pytałaby zaraz potem o TEN SAM zapis, mimo że reguła "Zawsze
+            // zezwalaj" (core/security/ApprovalManager.ts) już go osobno pokrywa na stałe.
+            rememberForSession: !!rememberCheckbox?.checked,
+        });
 
         // Redirect button - third path: stop the action and tell the agent what to do
         // instead. First click reveals the instruction field, second click confirms.

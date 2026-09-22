@@ -1,6 +1,6 @@
 import { log } from '../../core/utils/Logger.js';
 // `toolResultStatus` = jedna reguła „co jest porażką narzędzia" (klient, czat, suby).
-import { AccessGuard, maskSensitiveData, normalizeAutonomy, sanitizePath, toolResultStatus, getAgentSafeName } from '../../core/index.js';
+import { AccessGuard, maskSensitiveData, normalizeAutonomy, sanitizePath, toolResultStatus, getAgentSafeName, SessionWriteConsent } from '../../core/index.js';
 import { t } from '../../core/i18n/index.js';
 // Kanoniczny parser tool_calls żyje w modules/agent-loop. MCPClient tylko deleguje.
 import { parseToolCalls as parseToolCallsCanonical } from '../agent-loop/index.js';
@@ -156,7 +156,7 @@ export interface MCPClientPlugin {
 }
 
 /** Wynik pytania o zgodę - luźniejszy odpowiednik `ApprovalResult` z core (patrz niżej). */
-type ApprovalResultLike = { result: string; reason?: string; instruction?: string };
+type ApprovalResultLike = { result: string; reason?: string; instruction?: string; rememberForSession?: boolean };
 
 /** Wywołanie narzędzia tak, jak przychodzi od modelu (parser zwraca ten kształt). */
 export interface ToolCall {
@@ -229,7 +229,11 @@ const DENIAL_TTL_MS = 15 * 60 * 1000;
 
 /** Opcje konstruktora (haki testowe / adaptery). */
 export interface MCPClientOptions {
-    diffModalFactory?: ((app: MCPClientApp, options: DiffApprovalOptions) => { waitForApproval(): Promise<unknown> }) | null;
+    diffModalFactory?: ((app: MCPClientApp, options: DiffApprovalOptions) => {
+        waitForApproval(): Promise<unknown>;
+        /** Patrz `DiffModal.rememberForSession` - klient czyta to pole z INSTANCJI po rozstrzygnięciu. */
+        rememberForSession?: boolean;
+    }) | null;
     /** Nadpisanie TTL pamięci odmów (ms). Domyślnie `DENIAL_TTL_MS`. */
     denialTtlMs?: number;
 }
@@ -241,6 +245,8 @@ export interface DiffApprovalOptions {
     newContent: string;
     /** Kontrakt `DiffModal` mówi `string`; runtime bywa bez agenta - stąd asercja u wołacza. */
     agentName: string;
+    /** Czy sesja ma klucz (`origin.sessionPath`) - steruje widocznością checkboxa „nie pytaj więcej". */
+    rememberAvailable?: boolean;
 }
 
 const ACTION_TYPE_MAP: Record<string, string> = {
@@ -328,6 +334,19 @@ export class MCPClient {
     declare _deniedActions: Map<string, Map<string, number>>;
     /** TTL pojedynczego wpisu w pamięci odmów (ms). */
     declare _denialTtlMs: number;
+    /**
+     * Zgoda „Nie pytaj więcej w tej sesji o zapisy do tego pliku" - PER PLIK, PER SESJA CZATU,
+     * wyłącznie RAM. Publiczne pole (czat mógłby kiedyś jawnie czyścić sesję), ale jedyny
+     * dzisiejszy wołacz jest ten plik (kroki 6/6b w `executeToolCall`). Ginie z przeładowaniem
+     * pluginu (nowa instancja `MCPClient`) - patrz `core/security/SessionWriteConsent.ts`.
+     */
+    readonly sessionWriteConsent = new SessionWriteConsent();
+    /**
+     * Kolejka „jedna decyzja o zgodzie naraz" per `${sessionKey}::${targetPath}` - patrz
+     * `_withConsentQueue`. Wewnętrzna (żaden wołacz spoza tego pliku), więc `declare` +
+     * inicjalizacja w konstruktorze, jak reszta pól tej klasy.
+     */
+    declare _consentQueues: Map<string, Promise<void>>;
 
     /**
      * @param app - Obsidian App instance.
@@ -345,6 +364,7 @@ export class MCPClient {
             : DENIAL_TTL_MS;
 
         this._deniedActions = new Map();
+        this._consentQueues = new Map();
     }
 
     // ─── Denial memory helpers ─────────────────────────────
@@ -397,6 +417,46 @@ export class MCPClient {
         }
     }
 
+    /**
+     * Szereguje `fn` per `queueKey` - kolejne wywołanie z TYM SAMYM kluczem czeka, aż
+     * poprzednie się ROZSTRZYGNIE (fulfil ALBO reject - kolejka porządkuje KOLEJNOŚĆ, nie
+     * wynik), i dopiero wtedy samo rusza. `queueKey === null` = zero szeregowania, `fn()` leci
+     * od razu (dziś: brak sesji albo narzędzie inne niż write/vault_write).
+     *
+     * PO CO: `Promise.all` w `modules/agent-loop/AgentLoop.ts` wykonuje tool-calle JEDNEJ
+     * tury RÓWNOLEGLE. Bez tej kolejki N równoległych zapisów na TĘ SAMĄ ścieżkę w TEJ SAMEJ
+     * sesji sprawdzałoby `sessionWriteConsent.has()` (rekontrola u wołacza, PRZED otwarciem
+     * modala) zanim PIERWSZE wywołanie w ogóle zdążyło zapytać - `executeToolCall` nie ma ani
+     * jednego `await` między start wywołania a tę bramkę, więc wszystkie N tool-calli dochodzi
+     * tam w TYM SAMYM ticku. Efekt bez kolejki: user dostaje N modali o TĘ SAMĄ decyzję zamiast
+     * jednego. Kolejka zamienia to w: pierwsze leci od razu i (być może) pyta, każde kolejne
+     * CZEKA, a po obudzeniu ma sprawdzić `has()` PONOWNIE (robi to wołacz, nie ta metoda) -
+     * jeśli poprzednie właśnie nadało zgodę, korzysta z niej zamiast pytać znowu.
+     *
+     * Odrzucenie `fn()` (deny, wyjątek narzędzia) NIE MA PRAWA zablokować następnego wołania w
+     * tej samej kolejce (deadlock po pierwszej odmowie) - `settleMarker` niżej rozwiązuje się
+     * ZAWSZE, niezależnie od wyniku `run`, więc kolejny `_withConsentQueue` na ten sam klucz
+     * rusza, gdy tylko POPRZEDNIE się skończy, obojętnie jak.
+     *
+     * @returns wynik `fn()`, albo rzuca dokładnie to, co rzuciło `fn()` - kolejka porządkuje
+     *   TYLKO kiedy `fn` rusza, nigdy co zwraca.
+     */
+    async _withConsentQueue<T>(queueKey: string | null, fn: () => Promise<T>): Promise<T> {
+        if (!queueKey) return fn();
+        const previous = this._consentQueues.get(queueKey) || Promise.resolve();
+        const run = previous.then(fn, fn);
+        const settleMarker: Promise<void> = run.then(() => undefined, () => undefined);
+        this._consentQueues.set(queueKey, settleMarker);
+        try {
+            return await run;
+        } finally {
+            // Sprzątanie: zdejmij wpis TYLKO jeśli nikt nowszy się jeszcze nie doczepił
+            // (porównanie po TOŻSAMOŚCI referencji) - mapa nie ma puchnąć przez cały cykl
+            // życia pluginu.
+            if (this._consentQueues.get(queueKey) === settleMarker) this._consentQueues.delete(queueKey);
+        }
+    }
+
     _getActionLabel(toolName: string): string {
         const key = `mcp.action_label.${toolName}`;
         const label = t(key);
@@ -441,16 +501,25 @@ export class MCPClient {
         );
     }
 
-    async _requestDiffApproval(options: DiffApprovalOptions): Promise<unknown> {
+    /**
+     * @returns `result` - kontrakt bez zmian (`'approve'|'deny'`, ewentualnie inny kształt haka
+     *   testowego). `rememberForSession` - stan checkboxa z INSTANCJI modala/fabryki, czytany
+     *   PO rozstrzygnięciu `waitForApproval()` (patrz `DiffModal.rememberForSession`).
+     */
+    async _requestDiffApproval(options: DiffApprovalOptions): Promise<{ result: unknown; rememberForSession: boolean }> {
         if (this.diffModalFactory) {
-            return this.diffModalFactory(this.app, options).waitForApproval();
+            const modal = this.diffModalFactory(this.app, options);
+            const result = await modal.waitForApproval();
+            return { result, rememberForSession: !!modal.rememberForSession };
         }
         const { DiffModal } = await import('../ui-components/index.js');
         // TS-boundary: DiffModal rozszerza Obsidian `Modal` i woła `super(app)` z prawdziwym
         // `App`; `MCPClientApp` to celowo zawężony widok TEGO SAMEGO runtime'owego obiektu
         // (tylko `vault`), zawężony na potrzeby tego klienta - stąd rzut na granicy zamiast
         // poszerzania kontraktu klienta o cały interfejs `App`.
-        return new DiffModal(this.app as App, options).waitForApproval();
+        const modal = new DiffModal(this.app as App, options);
+        const result = await modal.waitForApproval();
+        return { result, rememberForSession: modal.rememberForSession };
     }
 
     /**
@@ -835,112 +904,189 @@ export class MCPClient {
                 args,
             });
 
-            // 6. Handle approval if required
-            if (permResult.requiresApproval) {
-                // Check denial memory first - instant block without showing modal
-                if (invocationAgentName && this._isDenied(invocationAgentName, toolCall.name, targetPath)) {
-                    log.info('MCPClient', `Automatyczny blok (wcześniej odmówione): ${toolCall.name} → ${targetPath}`);
-                    throw new Error(
-                        `Użytkownik WCZEŚNIEJ odmówił ${this._getActionLabel(toolCall.name)} na "${targetPath}". ` +
-                        `NIE ponawiaj tej samej akcji. Zapytaj użytkownika czego potrzebuje lub zaproponuj inną ścieżkę.`
-                    );
+            // Zgoda sesyjna „Nie pytaj więcej w tej sesji o zapisy do tego pliku" - PER PLIK,
+            // PER SESJA CZATU, wyłącznie RAM (`core/security/SessionWriteConsent.ts`). Dotyczy
+            // WYŁĄCZNIE write/vault_write (nie delete, nie żadnego innego narzędzia). Klucz
+            // sesji jest `origin.sessionPath` - NIGDY `agentName`/`tabKey` (żaden z nich nie
+            // identyfikuje jednoznacznie rozmowy, patrz `ExecuteToolCallOptions.origin` wyżej i
+            // `modules/tools/CLAUDE.md`). Brak `origin.sessionPath` = zgoda sesyjna niedostępna:
+            // checkbox się nie pokazuje w modalach, nic nie jest pamiętane, zachowanie identyczne
+            // jak dziś.
+            const isWriteTool = toolCall.name === 'write' || toolCall.name === 'vault_write';
+            const sessionKey = (origin && typeof origin.sessionPath === 'string' && origin.sessionPath)
+                ? origin.sessionPath
+                : null;
+            // Klucz kolejki (`_withConsentQueue`) - TYLKO write z sesją znaną i celem. `null` =
+            // zero szeregowania (zachowanie identyczne jak dotąd dla delete/innych narzędzi i dla
+            // wywołań bez `origin.sessionPath`).
+            const consentQueueKey = (isWriteTool && !!args.path && sessionKey)
+                ? `${sessionKey}::${targetPath}`
+                : null;
+
+            // Pamięć ODMÓW - DWA odczyty, symetrycznie do rekontroli `has()` niżej. DECYZJA
+            // BEZPIECZEŃSTWA (fail-closed), świadomie ODMIENNA od pierwszej wersji tej kolejki:
+            // odmowa jednego z równoległych zapisów na tę samą ścieżkę w tej samej sesji MA
+            // blokować pozostałe w kolejce, bez ponownego pytania handlera. Tak jak nadana ZGODA
+            // (`has()`) obejmuje kolejne wywołania czekające za nią, tak samo ma działać ODMOWA -
+            // asymetria (zgoda "zaraża" kolejkę, odmowa nie) byłaby niespójna z resztą modelu i
+            // otwierałaby drogę do zbicia jednej decyzji usera na serię modali dla tego samego
+            // pliku, tylko przez rozbicie zapisu na N równoległych tool-calli w jednej turze.
+            //   1) Szybki odczyt TERAZ, PRZED kolejką - łapie odmowę zapisaną PRZED tym
+            //      wywołaniem (poprzednia tura, wcześniejszy sekwencyjny zapis) bez kosztu
+            //      wejścia do kolejki, gdy wynik i tak jest już przesądzony.
+            //   2) Świeży odczyt WEWNĄTRZ zamknięcia, tuż przed otwarciem modala (patrz niżej) -
+            //      łapie odmowę zapisaną przez POPRZEDNIE wywołanie w TEJ SAMEJ kolejce, podczas
+            //      gdy TO czekało - stąd nie może polegać na tej samej, raz przeczytanej wartości.
+            const alreadyDenied = !!invocationAgentName && this._isDenied(invocationAgentName, toolCall.name, targetPath);
+
+            // Cała decyzja o zgodzie (rekontrola + krok 6 + krok 6b) idzie przez kolejkę per
+            // `${sessionKey}::${targetPath}` (`_withConsentQueue`) - bez niej `Promise.all` w
+            // `agent-loop/AgentLoop.ts` (tool-calle JEDNEJ tury lecą RÓWNOLEGLE) pokazywałby N
+            // modali o TĘ SAMĄ decyzję zamiast jednego, bo `executeToolCall` nie ma ani jednego
+            // `await` między startem a tą bramką - wszystkie równoległe wywołania dochodzą tu w
+            // TYM SAMYM ticku i zobaczyłyby `has()` PRZED rozstrzygnięciem pierwszego modala.
+            const redirectResult = await this._withConsentQueue(consentQueueKey, async (): Promise<string | null> => {
+                // Rekontrola TUŻ PRZED otwarciem modala - poprzednie wywołanie w tej samej
+                // kolejce (ten sam plik + ta sama sesja) mogło właśnie nadać zgodę, kiedy TO
+                // wywołanie czekało w kolejce.
+                let sessionConsentGranted = isWriteTool && !!args.path && !!sessionKey
+                    && this.sessionWriteConsent.has(sessionKey, targetPath);
+                if (sessionConsentGranted) {
+                    log.info('MCPClient', `Zgoda sesyjna: pomijam pytanie o zapis do "${targetPath}"`);
                 }
 
-                log.info('MCPClient', `${toolCall.name} wymaga zatwierdzenia usera...`);
-                const approved = await this.plugin.approvalManager.requestApproval({
-                    type: actionType,
-                    toolName: toolCall.name,
-                    description: tool.description,
-                    targetPath: targetPath,
-                    agentName: invocationAgentName,
-                    operationMode: args.mode || null,
-                    preview: args.content ? `Długość treści: ${args.content.length} znaków` : null,
-                    contentPreview: args.content || null,
-                    ...approvalContext
-                });
-
-                // Trzecia ścieżka - przekieruj + kontekst. User zatrzymuje
-                // tę akcję i mówi, co zrobić zamiast niej. NIE wykonujemy narzędzia, NIE
-                // zapisujemy denial memory i NIE rzucamy - zwracamy NORMALNY wynik
-                // tool-calla (string) z instrukcją. Model dostaje go jako wynik i pętla
-                // agenta leci dalej.
-                if (approved.result === 'redirect') {
-                    log.info('MCPClient', `User PRZEKIEROWAŁ: ${toolCall.name} → ${approved.instruction}`);
-                    return t('mcp.redirect_result', { instruction: approved.instruction || '' });
-                }
-
-                if (approved.result === 'deny') {
-                    log.warn('MCPClient', `User ODMÓWIŁ zatwierdzenia: ${toolCall.name}`);
-                    if (invocationAgentName) this._recordDenial(invocationAgentName, toolCall.name, targetPath);
-                    const reasonPart = approved.reason ? ` Powód: "${approved.reason}".` : '';
-                    throw new Error(
-                        `Użytkownik odmówił ${this._getActionLabel(toolCall.name)} na "${targetPath}".${reasonPart} ` +
-                        `NIE ponawiaj tej akcji. Zapytaj użytkownika czego potrzebuje.`
-                    );
-                }
-                log.debug('MCPClient', `User ZATWIERDZIŁ: ${toolCall.name}`);
-            }
-
-            // 6b. Show diff for write create/replace/patch before touching the vault.
-            // Nazwa narzędzia to `write` (alias remapuje vault_write → write wcześniej;
-            // sprawdzamy obie na wypadek bezpośredniego wywołania po starej nazwie).
-            // W trybie `yolo` POMIJAMY diff modal - yolo = zero pytań. No-Go /
-            // pliki chronione / whitelista dalej blokują (są w checkPermission, nie tutaj).
-            const writeMode = args.mode || 'replace';
-            if (permResult.requiresApproval && autonomy !== 'yolo'
-                && (toolCall.name === 'write' || toolCall.name === 'vault_write')
-                && ['create', 'replace', 'patch'].includes(writeMode) && args.path) {
-                const existingFile = this.app.vault.getAbstractFileByPath(args.path);
-                try {
-                    let oldContent = '';
-                    if (existingFile) {
-                        oldContent = await this.app.vault.read(existingFile);
-                    } else if (isHiddenVaultPath(args.path) && await this.app.vault.adapter?.exists?.(args.path)) {
-                        oldContent = await this.app.vault.adapter!.read(args.path);
+                // 6. Handle approval if required
+                if (permResult.requiresApproval && !sessionConsentGranted) {
+                    // Rekontrola TUŻ PRZED otwarciem modala (patrz komentarz przy `alreadyDenied`
+                    // wyżej) - `alreadyDenied` sam nie wystarcza, bo mierzy stan SPRZED wejścia do
+                    // kolejki; poprzednie wywołanie W TEJ SAMEJ kolejce mogło właśnie zapisać
+                    // odmowę, podczas gdy TO czekało.
+                    if (alreadyDenied || (invocationAgentName && this._isDenied(invocationAgentName, toolCall.name, targetPath))) {
+                        log.info('MCPClient', `Automatyczny blok (wcześniej odmówione): ${toolCall.name} → ${targetPath}`);
+                        throw new Error(
+                            `Użytkownik WCZEŚNIEJ odmówił ${this._getActionLabel(toolCall.name)} na "${targetPath}". ` +
+                            `NIE ponawiaj tej samej akcji. Zapytaj użytkownika czego potrzebuje lub zaproponuj inną ścieżkę.`
+                        );
                     }
-                    // For patch: compute newContent from old_text/new_text.
-                    // Sprawdź unikalność old_text TAK SAMO jak WriteTool.execute
-                    // (firstIndex/secondIndex → old_text_multiple) - inaczej podgląd diffa pokazuje
-                    // userowi zmianę na PIERWSZYM dopasowaniu, user zatwierdza, a realny zapis w
-                    // kroku 7 odmawia jako niejednoznaczny (WriteTool.ts). Wieloznaczne dopasowanie
-                    // NIE dostaje tu diffa - ta sama sytuacja co „old_text nie znaleziony" (idx===-1):
-                    // newContent zostaje `undefined`, więc krok 6b nic nie pokazuje, a krok 7
-                    // (`tool.execute`) zwróci userowi prawdziwy, jednoznaczny błąd.
-                    let newContent: string | undefined;
-                    if (writeMode === 'patch' && args.old_text && typeof args.new_text === 'string') {
-                        const firstIndex = oldContent.indexOf(args.old_text);
-                        if (firstIndex !== -1) {
-                            const secondIndex = oldContent.indexOf(args.old_text, firstIndex + 1);
-                            if (secondIndex === -1) {
-                                newContent = oldContent.substring(0, firstIndex) + args.new_text + oldContent.substring(firstIndex + args.old_text.length);
+
+                    log.info('MCPClient', `${toolCall.name} wymaga zatwierdzenia usera...`);
+                    const approved = await this.plugin.approvalManager.requestApproval({
+                        type: actionType,
+                        toolName: toolCall.name,
+                        description: tool.description,
+                        targetPath: targetPath,
+                        agentName: invocationAgentName,
+                        operationMode: args.mode || null,
+                        preview: args.content ? `Długość treści: ${args.content.length} znaków` : null,
+                        contentPreview: args.content || null,
+                        // Checkbox „nie pytaj więcej w tej sesji" w ApprovalModal - TYLKO gdy sesja
+                        // ma klucz (bez niego SessionWriteConsent nie ma czego zapamiętać).
+                        rememberAvailable: isWriteTool && !!sessionKey,
+                        ...approvalContext
+                    });
+
+                    // Trzecia ścieżka - przekieruj + kontekst. User zatrzymuje
+                    // tę akcję i mówi, co zrobić zamiast niej. NIE wykonujemy narzędzia, NIE
+                    // zapisujemy denial memory i NIE rzucamy - zwracamy NORMALNY wynik
+                    // tool-calla (string) z instrukcją. Model dostaje go jako wynik i pętla
+                    // agenta leci dalej.
+                    if (approved.result === 'redirect') {
+                        log.info('MCPClient', `User PRZEKIEROWAŁ: ${toolCall.name} → ${approved.instruction}`);
+                        return t('mcp.redirect_result', { instruction: approved.instruction || '' });
+                    }
+
+                    if (approved.result === 'deny') {
+                        log.warn('MCPClient', `User ODMÓWIŁ zatwierdzenia: ${toolCall.name}`);
+                        if (invocationAgentName) this._recordDenial(invocationAgentName, toolCall.name, targetPath);
+                        const reasonPart = approved.reason ? ` Powód: "${approved.reason}".` : '';
+                        throw new Error(
+                            `Użytkownik odmówił ${this._getActionLabel(toolCall.name)} na "${targetPath}".${reasonPart} ` +
+                            `NIE ponawiaj tej akcji. Zapytaj użytkownika czego potrzebuje.`
+                        );
+                    }
+                    log.debug('MCPClient', `User ZATWIERDZIŁ: ${toolCall.name}`);
+
+                    // User zaznaczył checkbox „nie pytaj więcej w tej sesji" i zatwierdził -
+                    // zapamiętaj TERAZ, żeby krok 6b (zaraz niżej, W TYM SAMYM wywołaniu) i każdy
+                    // następny zapis do tego pliku w tej sesji nie pytały ponownie.
+                    if (isWriteTool && sessionKey && approved.rememberForSession) {
+                        this.sessionWriteConsent.grant(sessionKey, targetPath);
+                        sessionConsentGranted = true;
+                    }
+                }
+
+                // 6b. Show diff for write create/replace/patch before touching the vault.
+                // Nazwa narzędzia to `write` (alias remapuje vault_write → write wcześniej;
+                // sprawdzamy obie na wypadek bezpośredniego wywołania po starej nazwie).
+                // W trybie `yolo` POMIJAMY diff modal - yolo = zero pytań. No-Go /
+                // pliki chronione / whitelista dalej blokują (są w checkPermission, nie tutaj).
+                // Zgoda sesyjna (świeżo nadana w kroku 6 powyżej, ALBO zastana z wcześniejszego
+                // wywołania) pomija też TEN krok - inaczej ta sama tura pytałaby drugi raz o dokładnie
+                // ten zapis, na który user właśnie powiedział „nie pytaj więcej".
+                const writeMode = args.mode || 'replace';
+                if (permResult.requiresApproval && !sessionConsentGranted && autonomy !== 'yolo'
+                    && (toolCall.name === 'write' || toolCall.name === 'vault_write')
+                    && ['create', 'replace', 'patch'].includes(writeMode) && args.path) {
+                    const existingFile = this.app.vault.getAbstractFileByPath(args.path);
+                    try {
+                        let oldContent = '';
+                        if (existingFile) {
+                            oldContent = await this.app.vault.read(existingFile);
+                        } else if (isHiddenVaultPath(args.path) && await this.app.vault.adapter?.exists?.(args.path)) {
+                            oldContent = await this.app.vault.adapter!.read(args.path);
+                        }
+                        // For patch: compute newContent from old_text/new_text.
+                        // Sprawdź unikalność old_text TAK SAMO jak WriteTool.execute
+                        // (firstIndex/secondIndex → old_text_multiple) - inaczej podgląd diffa pokazuje
+                        // userowi zmianę na PIERWSZYM dopasowaniu, user zatwierdza, a realny zapis w
+                        // kroku 7 odmawia jako niejednoznaczny (WriteTool.ts). Wieloznaczne dopasowanie
+                        // NIE dostaje tu diffa - ta sama sytuacja co „old_text nie znaleziony" (idx===-1):
+                        // newContent zostaje `undefined`, więc krok 6b nic nie pokazuje, a krok 7
+                        // (`tool.execute`) zwróci userowi prawdziwy, jednoznaczny błąd.
+                        let newContent: string | undefined;
+                        if (writeMode === 'patch' && args.old_text && typeof args.new_text === 'string') {
+                            const firstIndex = oldContent.indexOf(args.old_text);
+                            if (firstIndex !== -1) {
+                                const secondIndex = oldContent.indexOf(args.old_text, firstIndex + 1);
+                                if (secondIndex === -1) {
+                                    newContent = oldContent.substring(0, firstIndex) + args.new_text + oldContent.substring(firstIndex + args.old_text.length);
+                                }
+                            }
+                        } else {
+                            newContent = args.content;
+                        }
+
+                        if (typeof newContent === 'string' && oldContent !== newContent) {
+                            const diffOutcome = await this._requestDiffApproval({
+                                path: args.path,
+                                oldContent,
+                                newContent,
+                                agentName: invocationAgentName as string,
+                                // Checkbox „nie pytaj więcej w tej sesji" w DiffModal - sam warunek co wyżej.
+                                rememberAvailable: isWriteTool && !!sessionKey,
+                            });
+                            if (diffOutcome.result === 'deny') {
+                                log.info('MCPClient', `User ODRZUCIŁ diff: ${args.path}`);
+                                if (invocationAgentName) this._recordDenial(invocationAgentName, toolCall.name, targetPath);
+                                throw new Error(
+                                    `Użytkownik odrzucił zmiany w "${args.path}". ` +
+                                    `Zapytaj co zmienić lub zaproponuj inną wersję.`
+                                );
+                            }
+                            if (sessionKey && diffOutcome.rememberForSession) {
+                                this.sessionWriteConsent.grant(sessionKey, targetPath);
                             }
                         }
-                    } else {
-                        newContent = args.content;
+                    } catch (e) {
+                        // Re-throw denial errors, ignore read errors (proceed with write)
+                        if ((e as ErrLike).message?.includes('odrzucił')) throw e;
+                        log.debug('MCPClient', `Diff read error (ignored): ${(e as ErrLike).message}`);
                     }
-
-                    if (typeof newContent === 'string' && oldContent !== newContent) {
-                        const diffResult = await this._requestDiffApproval({
-                            path: args.path,
-                            oldContent,
-                            newContent,
-                            agentName: invocationAgentName as string
-                        });
-                        if (diffResult === 'deny') {
-                            log.info('MCPClient', `User ODRZUCIŁ diff: ${args.path}`);
-                            if (invocationAgentName) this._recordDenial(invocationAgentName, toolCall.name, targetPath);
-                            throw new Error(
-                                `Użytkownik odrzucił zmiany w "${args.path}". ` +
-                                `Zapytaj co zmienić lub zaproponuj inną wersję.`
-                            );
-                        }
-                    }
-                } catch (e) {
-                    // Re-throw denial errors, ignore read errors (proceed with write)
-                    if ((e as ErrLike).message?.includes('odrzucił')) throw e;
-                    log.debug('MCPClient', `Diff read error (ignored): ${(e as ErrLike).message}`);
                 }
-            }
+
+                return null;
+            });
+            if (redirectResult !== null) return redirectResult;
 
             // 7. Execute tool (pass plugin as 3rd arg for tools that need it, e.g. memory_save)
             let result = await tool.execute(argsWithContext, this.app, this.plugin) as ToolExecutionResult;

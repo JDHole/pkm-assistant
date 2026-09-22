@@ -224,6 +224,156 @@ Bramka `.pkm-assistant/**` + No-Go + `sanitizePath` w prymitywach vaultowych dzi
 - ⚠️ **`t()` narzędzia (opis + parametry `inputSchema`) idzie przez fabrykę, nie przez stałą modułową** — jak we WSZYSTKICH pozostałych narzędziach (`ReadTool`, `WriteTool`, `WebSearchTool`…): wywołania `t('mcp.<tool>.desc')` / `t('mcp.<tool>.param.<name>')` siedzą W CIELE `create...Tool()`, bo `setLocale()` leci z `src/main.ts` PO imporcie modułów — stała modułowa policzona przy imporcie dostałaby domyślne `'en'`, zanim plugin w ogóle pozna język usera. ⚠️ Fabryka też liczy tekst RAZ (`src/main.ts`, `initialize()`, po `setLocale`): definicje narzędzi idące do MODELU zostają w języku startu do przeładowania pluginu - zmiana języka w Ustawieniach odświeża od razu tylko to, co liczy się przy renderze (katalog serwerów przez `resolveServerDescription`). `GenerateImageTool`/`AddTextToImageTool` miały dotąd opis i WSZYSTKIE opisy parametrów na sztywno (mieszanka polskiego bez ogonków i pełnego polskiego) — poprawka trzyma się dokładnie tej samej konwencji nazw kluczy co reszta modułu.
 - ⚠️ **Placeholder ścieżki w presetach zewnętrznych serwerów jest NEUTRALNYM tokenem technicznym, nie słowem w żadnym języku ludzkim.** `PRESET_PATH_PLACEHOLDER` (`mcpServerPresets.ts`) to `'<PATH>'` — polskie `'<ŚCIEŻKA>'` wstrzykiwane w argumenty presetu Filesystem wychodziłoby tak samo pod angielskim UI. Hint (`settings.mcp_preset_hint_filesystem`, en+pl) ma wskazywać na TEN SAM token co stała.
 
+### WriteTool: lost update na patch/append/prepend
+
+- ⚠️ **`patch`/`append`/`prepend` (ścieżki INDEKSOWANE, nie ukryte) liczą nową treść WEWNĄTRZ
+  callbacku `vault.process(file, (data) => ...)`, na `data` DOSTARCZONYM w chwili zapisu - NIGDY
+  na treści przeczytanej wcześniej.** Bug zgłoszony w recenzji: stara wersja czytała plik RAZ
+  (`await app.vault.read(file)`), liczyła `finalContent` z TEJ jednej migawki, i dopiero potem
+  wołała `vault.process(file, () => finalContent)` - callback IGNOROWAŁ świeże `data`, więc
+  `vault.process`'s obietnica „atomowego odczyt-zmiana-zapis" (wytyczna Obsidiana, `@since 1.1.0`)
+  była fikcją. Skutek: `Promise.all` w `modules/agent-loop/AgentLoop.ts` (tool-calle jednej tury
+  RÓWNOLEGLE) - trzy równoległe patche `A→a`/`B→b`/`C→c` na plik `"A\nB\nC"` wszystkie kończyły
+  się `success:true`, a w pliku zostawało `"A\nB\nc"` (tylko OSTATNI zapis, dwa pierwsze zgubione
+  po cichu). `writeFileContent` (helper prywatny) przyjmuje teraz `string | ((data: string) =>
+  string)` - `patch` i `append`/`prepend` podają FUNKCJĘ (wyszukanie `old_text`, sprawdzenie
+  unikalności i sklejenie nowej treści dzieje się w środku niej), `replace`/`create` nadal
+  podają gotowy string (nie zależą od treści istniejącej - nie ma tu czego zgubić).
+- ⚠️ **Callback, który rzuci (np. `old_text` nie znaleziony/wieloznaczny na ŚWIEŻEJ treści),
+  NIC nie zapisuje** - wyjątek leci przez odrzuconą obietnicę `vault.process(...)` prosto do
+  `execute`'s zewnętrznego `try/catch`, tym samym kanałem co każdy inny błąd walidacji. Dwa
+  równoległe patche na TEN SAM `old_text` (ta sama para atomów jak wyżej) - PIERWSZY (w kolejności
+  faktycznego zapisu, nie zlecenia) wygrywa, DRUGI dostaje `old_text_not_found` (bo jego `old_text`
+  już zniknął z treści po pierwszym zapisie), zamiast po cichu nadpisać czyjś patch albo wygrać
+  z nim "kto zapisze ostatni".
+- ⚠️ **Ścieżki UKRYTE (`.pkm-assistant/**`, adapter zamiast `vault.process`) NIE są tą naprawą
+  objęte - świadomie.** `DataAdapter` Obsidiana nie ma atomowego odpowiednika `process()` (same
+  `read`/`write`, bez transakcji), więc `patch`/`append`/`prepend` na ukrytych ścieżkach
+  ZACHOWUJĄ starą, stale-read semantykę (ten sam lost-update, po prostu nienaprawiony tu - naprawa
+  wymagałaby kolejki zapisu PER ŚCIEŻKA, ten sam wzorzec co `TodoFileStore` już ma, patrz gotcha
+  „Pamięć i skrzynka pocztowa" wyżej). Realny wpływ: `memory_save`/`memory_delete` i inne
+  wewnętrzne zapisy pluginu idą własnymi, dedykowanymi ścieżkami (nie przez `write`/WriteTool),
+  więc luka dotyczy WYŁĄCZNIE agenta świadomie wywołującego `write`/`vault_write` z `path`
+  wskazującym w `.pkm-assistant/`.
+- ⚠️ **`minAppVersion` tego pluginu to 1.11.0, `vault.process` istnieje od 1.1.0 - na KAŻDYM
+  wspieranym hoście `vault.process` JEST dostępny.** Fallback na `vault.modify` (brak `process`)
+  zostaje wyłącznie dla wąskich atrap testowych bez tej metody - i tam ATOMOWOŚCI NIE MA (callback
+  dostaje treść sprzed wywołania, nie w chwili zapisu), bo `modify` nie daje na to żadnego haka.
+  Testy: `modules/tools/WriteTool.test.ts` (3 równoległe patche na różne `old_text` - wszystkie
+  trzy zaaplikowane; 2 równoległe patche tego samego `old_text` - drugi dostaje błąd, nie
+  nadpisuje; 3 równoległe append + 2 równoległe prepend na tym samym pliku - wszystkie pięć
+  fragmentów obecne w końcowej treści).
+- ⚠️ **Ta naprawa stoi na atomowości PRAWDZIWEGO `vault.process` Obsidiana** (`obsidian.d.ts`:
+  „Atomically read, modify, and save the contents of the file") - **atrapa harnessu
+  (`pkm-assistant-harness`, `mock/app.ts:216-222`) NIE jest atomowa**: robi `await adapter.read(p)`,
+  potem `fn(content)`, potem `await adapter.write(p, next)`, z prawdziwym `await` między odczytem a
+  zapisem, więc dwa równoległe wywołania `process()` w atrapie MOGĄ się przeplatać i zgubić jedno z
+  nich - dokładnie ten sam lost-update, który ta naprawa miała wyeliminować. Harness więc TEJ
+  naprawy nie potwierdzi, nawet z `--live` (bieg poszedłby przez atomową-w-teorii, ale nie w
+  praktyce atrapę) - uatomowienie `mock/app.ts`'s `process` to osobna robota, w repo harnessu, nie
+  tutaj. Testy w tym pliku dowodzą poprawności na WŁASNEJ atrapie (`makeVaultApp`, bez `await`
+  między odczytem a zapisem wewnątrz `process` - patrz jej komentarz), nie przez harness.
+- ⚠️ **Podgląd diffa (krok 6b) przy RÓWNOLEGŁYCH zapisach na ten sam plik może rozjechać się z
+  realnym zapisem.** Diff pokazywany userowi liczy się na treści przeczytanej PRZED tym, jak
+  kolejka zgody (`_withConsentQueue`, patrz gotcha „Zgoda na zapis" niżej) cokolwiek serializuje -
+  a realny `applyPatch` liczy się PÓŹNIEJ, wewnątrz callbacku `vault.process`, na treści ŚWIEŻEJ w
+  chwili faktycznego zapisu. Między tymi dwoma momentami inny równoległy zapis do tego samego
+  pliku mógł już przejść. Znane ograniczenie: user widzi diff, klika „zatwierdź", a patch, którego
+  `old_text` w międzyczasie zniknął, i tak dostanie błąd (`old_text_not_found`) - pokazany podgląd
+  był już nieaktualny w chwili kliknięcia. Nie naprawione (wymagałoby przeniesienia liczenia diffa
+  za bramkę kolejki, zamiast przed nią).
+
+### Zgoda na zapis — dwie bramki + pamięć sesyjna
+
+- ⚠️ **Krok 6 i krok 6b w `executeToolCall` to DWIE NIEZALEŻNE bramki zgody.** Krok 6 (ogólny
+  approval, `this.plugin.approvalManager.requestApproval()` → `ApprovalModal` z `modules/shell`)
+  pyta o KAŻDĄ akcję, którą `PermissionSystem.requiresApproval` uzna za wymagającą zgody — w tym
+  `write` w trybach `append`/`prepend`, gdzie diff (krok 6b) nic by nie pokazał. Krok 6b
+  (`_requestDiffApproval()` → `DiffModal` z `modules/ui-components`) dokłada się TYLKO dla
+  `write`/`vault_write` w trybie `create`/`replace`/`patch`, i tylko gdy krok 6 uznał, że trzeba
+  pytać. Żadna z dwóch bramek nie wie nic o drugiej poza wspólnym `permResult.requiresApproval` —
+  stąd osobne warunki w kodzie, nie jeden przełącznik.
+- ⚠️ **`sessionWriteConsent` (`readonly` pole instancji, `core/security/SessionWriteConsent.ts`)
+  to TRZECIA pamięć zgody, obok dwóch istniejących** — trwałej `ApprovalManager.alwaysApproved`
+  (dysk, na zawsze, klucz agent+akcja+cel dosłowny) i efemerycznej pamięci ODMÓW
+  `MCPClient._deniedActions` (RAM, TTL 15 min, tylko odmowy). Zgoda sesyjna „Nie pytaj więcej w tej
+  sesji o zapisy do tego pliku" jest PER PLIK i PER SESJA CZATU, wyłącznie RAM, BEZ TTL — gaśnie
+  sama z nową sesją (nowy `origin.sessionPath`, np. po `handleNewSession` w czacie) i z
+  przeładowaniem pluginu (nowa instancja `MCPClient` = nowa instancja `sessionWriteConsent`).
+  Obejmuje WYŁĄCZNIE `write`/`vault_write` — `delete` i każde inne narzędzie pyta jak dotąd, zawsze.
+- ⚠️ **Klucz sesji jest `origin.sessionPath`, NIGDY `agentName` ani `tabKey`.** Żaden z tamtych
+  dwóch nie identyfikuje jednoznacznie ROZMOWY: `agentName` jest wspólny dla wszystkich zakładek
+  tego samego agenta, a `tabKey` bywa równy samej nazwie agenta (fallback w `chat_tabs.ts`). Brak
+  `origin.sessionPath` (np. wywołanie bez kontekstu czatu) = zgoda sesyjna NIEDOSTĘPNA: oba modale
+  dostają `rememberAvailable:false`, checkbox „nie pytaj więcej w tej sesji" się nie pokazuje, a
+  `SessionWriteConsent.grant()` z pustym kluczem jest jawnym no-opem (zwraca `false`).
+- ⚠️ **`origin.sessionPath` NIE JEST unikalny na zawsze — nazwa pliku sesji ma rozdzielczość
+  MINUTOWĄ** (`AgentMemory._generateActiveSessionFilename`), a po archiwizacji/odrzuceniu ta
+  ścieżka WRACA DO PULI (plik jest PRZENOSZONY do `sessions/archive/`/`.discarded/`, nie kasowany
+  z miejsca — `AgentMemory.archiveActiveSession`/dyskard). „Nowa rozmowa" + druga „nowa rozmowa"
+  TEGO SAMEGO agenta w tej samej minucie MOGĄ dostać dokładnie tę samą nazwę pliku — bez jawnego
+  sprzątania stara zgoda „wracałaby" razem z reużytą nazwą. **Obrona jest DWUWARSTWOWA, nie
+  jednowarstwowa**: unikalność nazwy (pierwsza linia, rzadko przebijana) NIE WYSTARCZA sama —
+  DWIE drogi kończą sesję jawnym wywołaniem `plugin.mcpClient?.sessionWriteConsent.clearSession(
+  staraŚcieżka)` PRZED wymianą tożsamości (druga linia, ten moduł jej NIE woła — wołacz jest po
+  stronie czatu, bo tylko on wie, KIEDY sesja się kończy):
+  `modules/chat/chat/chat_session.ts`'s `handleNewSession()` (guzik „Nowa rozmowa"/„X" zakładki)
+  i `modules/chat/slash-commands/save_session.ts`'s `applyPostArchiveAction()` (`/save session`,
+  wszystkie TRZY warianty - `archive`/`archive_new`/`archive_close` - kończą TĘ SAMĄ sesję, więc
+  wołanie jest JEDNO, na wejściu funkcji, przed rozgałęzieniem po `action`). Zamknięcie
+  POJEDYNCZEJ zakładki (`_closeActiveTab`) świadomie tego NIE robi — zapisuje sesję NA MIEJSCU i
+  nie przenosi pliku, więc ścieżka nie wraca do puli i nie ma czego czyścić. Testy:
+  `modules/chat/chat/chat_session.test.ts`,
+  `modules/chat/slash-commands/save_session.archiveNewConsent.test.ts`.
+- ⚠️ **Zgoda nadana w kroku 6 pomija krok 6b W TYM SAMYM wywołaniu.** `sessionConsentGranted` jest
+  zmienną MUTOWALNĄ w `executeToolCall` — jeśli user zaznaczy checkbox i zatwierdzi w kroku 6,
+  flaga idzie na `true` OD RAZU, więc warunek kroku 6b (`!sessionConsentGranted`) już jej nie pyta.
+  Bez tego jedna tura z zaznaczonym checkboxem w ogólnym approvalu i tak pokazywałaby zaraz potem
+  diff — user właśnie powiedział „nie pytaj więcej", a modal pytałby drugi raz o TEN SAM zapis.
+- ⚠️ **`rememberForSession` wraca `true` gdy checkbox jest zaznaczony i user kliknął Zatwierdź
+  ALBO „Zawsze zezwalaj"** — obie ścieżki niosą tę samą intencję („nie pytaj więcej o TEN plik w
+  tej sesji"), i działają NIEZALEŻNIE OD SIEBIE (trwała reguła „Zawsze zezwalaj" i efemeryczna
+  zgoda sesyjna to dwie osobne pamięci, nie jedna zamiast drugiej) — nigdy po Odrzuć, Przekieruj,
+  ani po cichej ścieżce `ApprovalManager.isAlwaysApproved` (ta w ogóle nie woła modala, więc pole
+  zostaje `undefined`). `DiffModal` (bez guzika „Zawsze zezwalaj" — tylko Zatwierdź/Odrzuć) trzyma
+  stan na PUBLICZNYM polu instancji (`rememberForSession`, czytanym z modala/fabryki PO
+  rozstrzygnięciu `waitForApproval()` — kontrakt `Promise<'approve'|'deny'>` się nie zmienił,
+  patrz `MCPClientOptions.diffModalFactory`), `ApprovalModal` (core→shell) dokłada je wprost do
+  `ApprovalModalResult` na OBU guzikach.
+- ⚠️ **Zgoda sesyjna działa TAKŻE w trybie autonomii `all` („pytaj o wszystko").** Świadome: user
+  jawnie zaznaczył checkbox dla TEGO KONKRETNEGO pliku - to ta sama, jednostkowa decyzja co
+  „Zawsze zezwalaj" (które też nie jest gaszone przez `all`), nie ogólne obniżenie progu pytań.
+  `all` nadal pyta o WSZYSTKO INNE - nowy plik, inne narzędzie, `delete` na tym samym pliku.
+- ⚠️ **Trzy równoległe zapisy JEDNEJ tury (`Promise.all` w `modules/agent-loop/AgentLoop.ts`) nie
+  mają prawa otworzyć trzech modali o JEDNĄ decyzję.** `executeToolCall` nie ma ani jednego
+  `await` między startem wywołania a bramką zgody sesyjnej, więc N równoległych zapisów na TĘ SAMĄ
+  ścieżkę w TEJ SAMEJ sesji dochodzi tam w TYM SAMYM ticku - bez dodatkowego mechanizmu
+  wszystkie sprawdziłyby `sessionWriteConsent.has()` PRZED rozstrzygnięciem pierwszego modala.
+  `MCPClient._withConsentQueue` (kolejka łańcuchów obietnic, klucz `${sessionKey}::${targetPath}`,
+  `null` = brak sesji/write → zero szeregowania) serializuje CAŁĄ decyzję (rekontrola + krok 6 +
+  krok 6b) per klucz: pierwsze wywołanie leci od razu, kolejne CZEKA aż poprzednie się rozstrzygnie
+  (fulfil ALBO reject — odmowa NIE MA PRAWA ZABLOKOWAĆ SAMĄ KOLEJKĘ, czyli zatrzymać przejście do
+  następnego oczekującego wywołania), a po obudzeniu sprawdza `has()` PONOWNIE - jeśli poprzednie
+  właśnie nadało zgodę, korzysta z niej. **Pamięć ODMÓW (`_isDenied`/`_recordDenial`, osobny
+  mechanizm bez pojęcia o sesji) jest czytana DWA razy, symetrycznie do `has()`.** DECYZJA
+  BEZPIECZEŃSTWA (fail-closed, runda 2 recenzji - świadomie ODMIENNA od pierwszej wersji tej
+  kolejki): odmowa jednego z równoległych zapisów na tę samą ścieżkę w tej samej sesji MA
+  blokować pozostałe czekające w kolejce, BEZ ponownego pytania handlera - tak jak nadana ZGODA
+  „zaraża" kolejkę pozytywnie, tak samo ODMOWA ma ją „zarazić" negatywnie; asymetria (zgoda
+  obejmuje kolejne wywołania, odmowa nie) byłaby niespójna z resztą modelu i dawałaby drogę do
+  rozbicia jednej odmowy usera na serię modali dla tego samego pliku, tylko przez rozbicie zapisu
+  na N równoległych tool-calli w jednej turze. Odczyt nr 1 (`alreadyDenied`, PRZED wejściem do
+  kolejki) łapie odmowę zapisaną PRZED tym wywołaniem (poprzednia tura, wcześniejszy sekwencyjny
+  zapis) bez kosztu wchodzenia do kolejki, gdy wynik jest już przesądzony; odczyt nr 2 (ŚWIEŻY,
+  WEWNĄTRZ zamknięcia, tuż przed otwarciem modala) łapie odmowę zapisaną przez POPRZEDNIE
+  wywołanie W TEJ SAMEJ kolejce, podczas gdy TO czekało - stąd nie może polegać na tej samej, raz
+  przeczytanej wartości co odczyt nr 1. Skutek: 3 równoległe zapisy do jednego pliku, pierwszy
+  odmówiony → drugi i trzeci dostają błąd „Użytkownik WCZEŚNIEJ odmówił" BEZ pytania handlera
+  (handler wołany DOKŁADNIE raz). Różne ścieżki/różne sesje = różne klucze = zero szeregowania
+  między nimi. Kolejka sprząta po sobie wpis mapy (`_consentQueues`) niezależnie od wyniku - nie
+  ma jak puchnąć przez cały cykl życia pluginu. Testy: `core/security/security_integration.test.ts`
+  (bloki `(l)`/`(m)`/`(n)`).
+
 ### Bezpieczne skróty, których świadomie NIE zrobiliśmy
 
 - ⚠️ **Nie cache'uj treści pliku przez granicę approvalu.** Próba cache'owania odczytanej treści (żeby narzędzie zapisu nie czytało pliku drugi raz po podglądzie diffa) została odrzucona: znacznik z cache'owaną treścią byłby ustawiany, ale nie zawsze kasowany, więc model mógłby sam podać podrobioną „starą treść" w trybach, które pomijają podgląd diffa (np. append, albo autonomia bez pytań) - narzędzie policzyłoby wtedy finalną treść na sfałszowanym punkcie odniesienia, zapisując dowolną treść modelu jako „zatwierdzoną przez usera" edycję. Do tego dochodzi wyścig: podgląd czeka na człowieka bez limitu czasu, więc nawet uczciwy cache mógłby się zestarzeć względem realnego stanu pliku. Jeśli temat wróci, rozwiązanie musi albo czytać RAZ tuż przed zapisem bez cache, albo weryfikować hash/mtime między podglądem a zapisem - nie ufać samej zgodności ścieżki.

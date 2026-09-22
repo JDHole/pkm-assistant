@@ -350,6 +350,10 @@ export const en: Record<string, string> = {
   'approval.confirm_deny': ' Confirm denial',
   'approval.approve': ' Approve',
   'approval.approve_session': ' Always allow (remembered)',
+  // Checkbox "don't ask again THIS SESSION" - PER FILE, RAM only (SessionWriteConsent),
+  // dies with the session and with a plugin reload. Different mechanism from "Always allow"
+  // above (that's a permanent on-disk rule). Shown only for file writes (vault.write).
+  'approval.remember_session': "Don't ask again this session about writes to this file",
   'approval.redirect': ' Redirect',
   'approval.confirm_redirect': ' Send instruction',
   'approval.redirect_label': 'What to do instead?',
@@ -2050,6 +2054,7 @@ export const en: Record<string, string> = {
   'modal.diff.approve': 'Approve change',
   'modal.diff.collapsed_lines': '⋯ {{count}} unchanged lines ⋯',
   'modal.diff.no_changes': 'No changes — the content is identical.',
+  'modal.diff.remember_session': "Don't ask again this session about writes to this file",
 
   // ── SessionCloseModal ──
   'modal.session_close.title': 'New chat',

@@ -351,6 +351,10 @@ export const pl: Record<string, string> = {
   'approval.confirm_deny': ' Potwierdź odmowę',
   'approval.approve': ' Zatwierdź',
   'approval.approve_session': ' Zawsze zezwalaj (zapamiętane)',
+  // Checkbox „nie pytaj więcej w TEJ SESJI" - PER PLIK, tylko RAM (SessionWriteConsent),
+  // gaśnie z końcem sesji i przeładowaniem pluginu. Inny mechanizm niż „Zawsze zezwalaj" wyżej
+  // (to trwała reguła na dysku). Pokazywany tylko dla zapisu do pliku (vault.write).
+  'approval.remember_session': 'Nie pytaj więcej w tej sesji o zapisy do tego pliku',
   'approval.redirect': ' Przekieruj',
   'approval.confirm_redirect': ' Wyślij instrukcję',
   'approval.redirect_label': 'Co zrobić zamiast tego?',
@@ -2056,6 +2060,7 @@ export const pl: Record<string, string> = {
   'modal.diff.approve': 'Zatwierdź zmianę',
   'modal.diff.collapsed_lines': '⋯ {{count}} niezmienionych linii ⋯',
   'modal.diff.no_changes': 'Brak zmian — treść jest identyczna.',
+  'modal.diff.remember_session': 'Nie pytaj więcej w tej sesji o zapisy do tego pliku',
 
   // ── SessionCloseModal ──
   'modal.session_close.title': 'Nowy chat',

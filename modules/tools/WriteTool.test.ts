@@ -122,3 +122,84 @@ test('create (plik nowy) NIE woła ani process ani modify — idzie przez vault.
     t.is(files['Notes/nowy.md'], 'świeża treść');
     t.deepEqual(calls, [], 'create to Vault.create, nie modify/process');
 });
+
+// ─── Lost update: patch/append/prepend liczą finalContent WEWNĄTRZ callbacku `vault.process`,
+// na ŚWIEŻEJ treści w chwili zapisu — nie na treści przeczytanej wcześniej. Bez tego N
+// równoległych patchy (Promise.all w `modules/agent-loop/AgentLoop.ts` wykonuje tool-calle jednej
+// tury równolegle) czyta TEN SAM stary stan, każdy liczy swoją zmianę z osobna, i wygrywa
+// WYŁĄCZNIE ten, który zapisze OSTATNI — reszta ginie po cichu mimo `success:true`. ───
+
+test('3 RÓWNOLEGŁE patche na RÓŻNE old_text (Promise.all) — wszystkie trzy zaaplikowane, żaden nie ginie', async t => {
+    const { app, files } = makeVaultApp({ 'Notes/a.md': 'A\nB\nC' });
+    const writeTool = createWriteTool();
+
+    const [r1, r2, r3] = await Promise.all([
+        writeTool.execute({ path: 'Notes/a.md', mode: 'patch', old_text: 'A', new_text: 'a' }, app, plugin) as Promise<ToolRes>,
+        writeTool.execute({ path: 'Notes/a.md', mode: 'patch', old_text: 'B', new_text: 'b' }, app, plugin) as Promise<ToolRes>,
+        writeTool.execute({ path: 'Notes/a.md', mode: 'patch', old_text: 'C', new_text: 'c' }, app, plugin) as Promise<ToolRes>,
+    ]);
+
+    t.true(r1.success, 'patch A->a ma się udać');
+    t.true(r2.success, 'patch B->b ma się udać');
+    t.true(r3.success, 'patch C->c ma się udać');
+    t.is(
+        files['Notes/a.md'],
+        'a\nb\nc',
+        'wszystkie trzy patche mają być zaaplikowane - lost update nadpisywałby dwa z nich, zostawiając np. "A\\nB\\nc"',
+    );
+});
+
+test('3 RÓWNOLEGŁE append + 2 RÓWNOLEGŁE prepend (Promise.all) na TYM SAMYM pliku — wszystkie pięć fragmentów obecne w końcowej treści, żaden nie ginie', async t => {
+    const { app, files } = makeVaultApp({ 'Notes/a.md': 'MID' });
+    const writeTool = createWriteTool();
+
+    const [r1, r2, r3, r4, r5] = await Promise.all([
+        writeTool.execute({ path: 'Notes/a.md', mode: 'append', content: '-A1' }, app, plugin) as Promise<ToolRes>,
+        writeTool.execute({ path: 'Notes/a.md', mode: 'append', content: '-A2' }, app, plugin) as Promise<ToolRes>,
+        writeTool.execute({ path: 'Notes/a.md', mode: 'append', content: '-A3' }, app, plugin) as Promise<ToolRes>,
+        writeTool.execute({ path: 'Notes/a.md', mode: 'prepend', content: 'P1-' }, app, plugin) as Promise<ToolRes>,
+        writeTool.execute({ path: 'Notes/a.md', mode: 'prepend', content: 'P2-' }, app, plugin) as Promise<ToolRes>,
+    ]);
+
+    for (const [i, r] of [r1, r2, r3, r4, r5].entries()) {
+        t.true(r.success, `wywołanie #${i + 1} ma się udać`);
+    }
+
+    const final = files['Notes/a.md'];
+    for (const fragment of ['MID', '-A1', '-A2', '-A3', 'P1-', 'P2-']) {
+        t.is(
+            final.split(fragment).length - 1,
+            1,
+            `fragment "${fragment}" ma wystąpić DOKŁADNIE RAZ w końcowej treści "${final}" - append/prepend na nieaktualnym odczycie gubiłby część fragmentów po cichu`,
+        );
+    }
+    t.is(
+        final.length,
+        'MID'.length + '-A1'.length + '-A2'.length + '-A3'.length + 'P1-'.length + 'P2-'.length,
+        'długość końcowej treści musi być sumą WSZYSTKICH pięciu operacji - krótsza długość zdradza lost update',
+    );
+});
+
+test('2 RÓWNOLEGŁE patche TEGO SAMEGO old_text — DRUGI dostaje błąd „nie znaleziono", nie nadpisuje pierwszego po cichu', async t => {
+    const { app, files } = makeVaultApp({ 'Notes/a.md': 'AAA-BBB-CCC' });
+    const writeTool = createWriteTool();
+
+    const [r1, r2] = await Promise.all([
+        writeTool.execute({ path: 'Notes/a.md', mode: 'patch', old_text: 'BBB', new_text: 'XXX' }, app, plugin) as Promise<ToolRes>,
+        writeTool.execute({ path: 'Notes/a.md', mode: 'patch', old_text: 'BBB', new_text: 'YYY' }, app, plugin) as Promise<ToolRes>,
+    ]);
+
+    const successes = [r1, r2].filter(r => r.success);
+    const failures = [r1, r2].filter(r => !r.success);
+    t.is(successes.length, 1, 'dokładnie JEDEN z dwóch patchy na ten sam old_text ma się udać');
+    t.is(failures.length, 1, 'drugi ma dostać błąd (old_text zniknął po pierwszym zapisie na ŚWIEŻEJ treści), nie cichą nadpisankę');
+    t.regex(
+        failures[0].error ?? '',
+        /nie znaleziono|not found/i,
+        'drugi patch ma dostać konkretnie błąd "nie znaleziono old_text", nie inny wyjątek',
+    );
+    t.true(
+        files['Notes/a.md'] === 'AAA-XXX-CCC' || files['Notes/a.md'] === 'AAA-YYY-CCC',
+        'plik ma treść DOKŁADNIE JEDNEGO z dwóch patchy, nigdy oba naraz ani żadnego',
+    );
+});

@@ -67,6 +67,12 @@ export interface ApprovalAction {
     preview?: string;
     /** Osobny cel reguły „zawsze" — dla narzędzi external prefiksowana nazwa narzędzia. */
     approvalTarget?: string;
+    /**
+     * Wołacz (dziś wyłącznie `MCPClient`, akcje `vault.write`) mówi modalowi „ta sesja MA
+     * klucz (`origin.sessionPath`), pokaż checkbox «Nie pytaj więcej w tej sesji»". Brak pola
+     * (albo `false`) = checkbox się nie pokazuje — bez klucza sesji nie ma czego pamiętać.
+     */
+    rememberAvailable?: boolean;
     /** Wołacze dokładają własne pola informacyjne dla modala (np. `toolName`, `args`). */
     [key: string]: unknown;
 }
@@ -76,6 +82,13 @@ export interface ApprovalModalResult {
     result?: string;
     reason?: string;
     instruction?: string;
+    /**
+     * User zaznaczył „Nie pytaj więcej w tej sesji o zapisy do tego pliku" I kliknął Zatwierdź.
+     * `true` TYLKO przy `result === 'approve'` z zaznaczonym checkboxem — nigdy przy `deny`,
+     * `always` (ma już WŁASNĄ, trwałą pamięć) ani przy cichej ścieżce `isAlwaysApproved`
+     * (ta w ogóle nie woła modala, więc pole zostaje `undefined`).
+     */
+    rememberForSession?: boolean;
 }
 
 /**
@@ -83,6 +96,17 @@ export interface ApprovalModalResult {
  * (`modalResult?.result || modalResult`), dlatego typ jest unią, a odczyty pól idą przez asercję.
  */
 export type ApprovalHandlerResult = ApprovalModalResult | string | null | undefined;
+
+/**
+ * Zawężenie `unknown` PRZED odczytem pola (reguła repo: `as` dopiero PO walidacji, nigdy na
+ * wiarę). `modalResult` bywa gołym stringiem (stary kształt handlera modala) - `typeof
+ * modalResult === 'object'` samo z siebie przepuszcza też `null` (kwirk JS), więc drugi warunek
+ * jest konieczny. Po obu warunkach TS zawęża `ApprovalHandlerResult` do `ApprovalModalResult`,
+ * więc `.rememberForSession` czyta się bez castu.
+ */
+function readRememberForSession(modalResult: ApprovalHandlerResult): boolean {
+    return typeof modalResult === 'object' && modalResult !== null && modalResult.rememberForSession === true;
+}
 
 /** Funkcja pokazująca modal zgody (wstrzykiwana z warstwy UI — core nie zna modala). */
 export type ApprovalHandler = (
@@ -95,6 +119,8 @@ export interface ApprovalResult {
     result: ApprovalOutcome;
     reason?: string;
     instruction?: string;
+    /** Patrz `ApprovalModalResult.rememberForSession` — przelot bez zmiany znaczenia. */
+    rememberForSession?: boolean;
 }
 
 /** Slice ustawień, w którym mieszkają trwałe reguły „zawsze zezwalaj". */
@@ -189,13 +215,28 @@ export class ApprovalManager {
         switch (resultKey) {
             case 'approve':
                 this.logApproval(action, 'approved');
-                return { result: 'approve', reason: '' };
+                return {
+                    result: 'approve',
+                    reason: '',
+                    rememberForSession: readRememberForSession(modalResult),
+                };
 
             case 'always':
                 // Zapisujemy regułę per approvalTarget (external = prefiksowana nazwa narzędzia).
                 this.addToAlwaysApproved(action.agentName, action.type, approvalTarget);
                 this.logApproval(action, 'always-approved');
-                return { result: 'approve', reason: '' };
+                // Checkbox zaznaczony + „Zawsze zezwalaj" niesie TĘ SAMĄ intencję co checkbox +
+                // Zatwierdź - user właśnie powiedział „nie pytaj więcej o TEN plik w tej sesji",
+                // niezależnie od tego, który guzik zamknął modal. Bez tego druga bramka (krok 6b,
+                // podgląd diffa) i tak pytałaby zaraz potem o TEN SAM zapis. Reguła „Zawsze
+                // zezwalaj" (trwała, `alwaysApproved` wyżej) i zgoda sesyjna (efemeryczna,
+                // `SessionWriteConsent` w `MCPClient`) to DWIE NIEZALEŻNE pamięci - ta druga
+                // wygasa z sesją, więc nadanie jej tutaj nie jest zbędnym duplikatem.
+                return {
+                    result: 'approve',
+                    reason: '',
+                    rememberForSession: readRememberForSession(modalResult),
+                };
 
             // Trzecia ścieżka — użytkownik zatrzymuje akcję i przekierowuje
             // agenta instrukcją. Przepuszczamy kształt {result:'redirect', instruction}.
