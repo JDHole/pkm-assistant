@@ -656,6 +656,14 @@ Testy: `chat/handleNewSessionTodoCleanup.test.ts`, `tools/.../TodoTool.test.ts` 
   każdym powrocie na nią. Nowa sesja powstaje leniwie, przy pierwszym kolejnym zdarzeniu, jak
   dla świeżej zakładki. Warianty `archive_new` (od razu nowa sesja) i `archive_close` (zamknij
   zakładkę) mają własną, jawną obsługę tych samych pól.
+- ⚠️ **`handleNewSession` gasi `SessionWriteConsent` dla ścieżki, która WŁAŚNIE się kończy** -
+  łapie `activeMemory.activeSessionPath` PRZED archive/discard/`startNewSession()` i woła
+  `plugin.mcpClient?.sessionWriteConsent.clearSession(tamtaŚcieżka)` tuż przed wymianą tożsamości.
+  Powód: nazwa pliku sesji ma rozdzielczość MINUTOWĄ i po archive/discard WRACA DO PULI - bez
+  tego czyszczenia druga „nowa rozmowa" tego samego agenta w tej samej minucie mogłaby dostać tę
+  samą nazwę i odziedziczyć cudzą zgodę „nie pytaj więcej". `_closeActiveTab` świadomie tego NIE
+  robi (nie przenosi pliku, więc ścieżka nie wraca do puli). Pełne uzasadnienie:
+  `modules/tools/CLAUDE.md`, gotcha "Zgoda na zapis".
 - ⚠️ **`_restoreActiveSession` MUSI przekazać `tool_call_id`/`tool_calls` jako TRZECI argument
   `RollingWindow.addMessage()`.** Bug (2026-08-09): po restarcie Obsidiana odtworzona sesja
   gubiła `tool_call_id` KAŻDEGO wyniku narzędzia sprzed restartu - `sanitizeToolTranscript`

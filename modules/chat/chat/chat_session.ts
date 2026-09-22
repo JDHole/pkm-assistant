@@ -349,6 +349,26 @@ export async function handleNewSession(this: ChatViewLike) {
     // tego samego agenta. Ubijamy jawnie, zanim wymienimy sesję.
     if (this.is_generating) this.stop_generation();
 
+    // Zgoda sesyjna „Nie pytaj więcej w tej sesji o zapisy do tego pliku"
+    // (`core/security/SessionWriteConsent.ts`, `modules/tools/MCPClient.ts`) jest kluczowana
+    // `origin.sessionPath` — NAZWA PLIKU aktywnej sesji ma rozdzielczość MINUTOWĄ
+    // (`AgentMemory._generateActiveSessionFilename`), a po archiwizacji/odrzuceniu (niżej) ta
+    // ścieżka WRACA DO PULI - plik jest PRZENOSZONY (`sessions/active/` → `sessions/archive/`
+    // albo `.discarded/`), nie kasowany z miejsca. „Nowa rozmowa" i zaraz po niej DRUGA „nowa
+    // rozmowa" TEGO SAMEGO agenta w tej samej minucie mogłyby dostać DOKŁADNIE tę samą nazwę
+    // pliku - bez jawnego czyszczenia tutaj stara zgoda „wracałaby" razem z reużytą nazwą.
+    // Unikalność nazwy jest więc PIERWSZĄ linią obrony (rzadko przebijaną), to czyszczenie -
+    // DRUGĄ, jawną. Ścieżkę łapiemy TERAZ, przed jakąkolwiek zmianą tożsamości sesji niżej
+    // (archive/discard/`startNewSession`), żeby czyścić TĘ, która faktycznie się kończy.
+    //
+    // Zamknięcie POJEDYNCZEJ zakładki (`_closeActiveTab`, `chat_tabs.ts`) świadomie NIE robi
+    // tego samego: zapisuje sesję na miejscu (`handleSaveSession`) i albo przełącza na inną
+    // zakładkę, albo (ostatnia zakładka) zakłada świeży `RollingWindow` w pamięci - w OBU
+    // przypadkach plik aktywnej sesji zostaje na swojej ścieżce w `sessions/active/`, NIE jest
+    // przenoszony. Ścieżka nie wraca więc do puli i nie ma kolizji do obrony przed - zamknięcie
+    // zakładki to schowanie rozmowy z oczu, nie zakończenie sesji.
+    const closingConsentSessionPath = this.plugin?.agentManager?.getActiveMemory()?.activeSessionPath || '';
+
     const msgCount = this.rollingWindow.messages.length;
     log.info('Chat', `handleNewSession: ${msgCount} wiadomości`);
 
@@ -398,6 +418,11 @@ export async function handleNewSession(this: ChatViewLike) {
         // createContextArtifact ani gałęzi „draft" - propozycje „Na teraz" w brain.md (żywe
         // w /save session) przejęły rolę „nie zostawiamy nic z tyłu" bez osobnego artefaktu
         // kontekstu sesji czy pliku szkicu.
+    }
+
+    // Sesja się KOŃCZY tutaj (cancel już zwrócił wyżej) - gaś jej zgodę PRZED wymianą tożsamości.
+    if (closingConsentSessionPath) {
+        this.plugin?.mcpClient?.sessionWriteConsent.clearSession(closingConsentSessionPath);
     }
 
     const agentMemory = this.plugin?.agentManager?.getActiveMemory();

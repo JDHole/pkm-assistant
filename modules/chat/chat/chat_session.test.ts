@@ -1,6 +1,7 @@
 import test from 'ava';
 import { RollingWindow } from './RollingWindow.js';
-import { _restoreActiveSession } from './chat_session.js';
+import { _restoreActiveSession, handleNewSession } from './chat_session.js';
+import { SessionWriteConsent } from '../../../core/index.js';
 
 /**
  * BUG C1 — restore po restarcie Obsidiana gubił `tool_call_id`/`tool_calls`.
@@ -99,4 +100,59 @@ test('_restoreActiveSession restauruje wiadomości bez tool_call_id jak dotąd (
     ]);
     t.is(rw.messages[0].tool_call_id, undefined);
     t.is(rw.messages[1].tool_calls, undefined);
+});
+
+// ─── handleNewSession kasuje zgodę sesyjną DLA STAREJ ścieżki (per-recenzja: nazwa pliku sesji
+// ma rozdzielczość minutową i po archiwizacji/odrzuceniu wraca do puli - bez czyszczenia stara
+// zgoda "wracałaby" razem z reużytą nazwą) ───
+
+function buildFakeThisForNewSession(activeSessionPath: string, sessionWriteConsent: SessionWriteConsent): TestDynamic {
+    const fakeAgentMemory = {
+        activeSessionPath,
+        startNewSession: async () => {},
+    };
+    return {
+        is_generating: false,
+        stop_generation: () => {},
+        rollingWindow: { messages: [] as unknown[] },
+        tokenTracker: { clear: () => {} },
+        plugin: {
+            agentManager: { getActiveMemory: () => fakeAgentMemory },
+            mcpClient: { sessionWriteConsent },
+        },
+        _createRollingWindow: () => new RollingWindow({ maxTokens: 100000, systemPrompt: 'sys' }),
+        render_messages: async () => {},
+        add_welcome_message: () => {},
+        updateTokenCounter: () => {},
+        _updateTokenPanel: () => {},
+        _resetTodoPanelState: () => {},
+    };
+}
+
+test('handleNewSession: kasuje zgodę sesyjną DLA STAREJ ścieżki, inna sesja zostaje', async t => {
+    const consent = new SessionWriteConsent();
+    consent.grant('sessions/active/Jaskier_2026-09-22_10-00.md', 'Notatki/a.md');
+    consent.grant('sessions/active/Inna_sesja.md', 'Notatki/b.md');
+
+    const fakeThis = buildFakeThisForNewSession('sessions/active/Jaskier_2026-09-22_10-00.md', consent);
+    await handleNewSession.call(fakeThis);
+
+    t.false(
+        consent.has('sessions/active/Jaskier_2026-09-22_10-00.md', 'Notatki/a.md'),
+        'zgoda dla sesji, która WŁAŚNIE się kończy, ma zniknąć - inaczej wróci razem z reużytą nazwą pliku (rozdzielczość minutowa)',
+    );
+    t.true(
+        consent.has('sessions/active/Inna_sesja.md', 'Notatki/b.md'),
+        'zgoda dla INNEJ sesji (inny plik) ma zostać nietknięta',
+    );
+});
+
+test('handleNewSession: brak aktywnej ścieżki sesji (świeża zakładka) - nic nie wybucha, konsola bez zgód nietknięta', async t => {
+    const consent = new SessionWriteConsent();
+    consent.grant('sessions/active/Inna_sesja.md', 'Notatki/b.md');
+
+    const fakeThis = buildFakeThisForNewSession('', consent);
+    await handleNewSession.call(fakeThis);
+
+    t.true(consent.has('sessions/active/Inna_sesja.md', 'Notatki/b.md'));
 });
