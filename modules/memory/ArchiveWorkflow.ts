@@ -2,6 +2,7 @@ import { ConsolidationSnapshot } from './ConsolidationSnapshot.js';
 import { makeMemoryNoteFilename } from './MemoryAccessGuard.js';
 import { streamToComplete, STREAM_ERROR_CODES } from './streamHelper.js';
 import { STEP_KIND, STEP_STATUS } from './ConsolidationRun.js';
+import { CONSOLIDATION_DEFAULTS } from './consolidationStatus.js';
 import { resolveWorkPrompt, probeFile } from '../../core/index.js';
 import { factoryWorkPrompt } from './workPrompts.js';
 import { getLimits } from '../../config/limits.js';
@@ -229,7 +230,7 @@ export class ArchiveWorkflow {
         this.agentMemory = agentMemory;
         this.settings = options.settings || {};
         this.snapshot = options.snapshot || new ConsolidationSnapshot(agentMemory);
-        this.batchSize = options.batchSize || this.settings.memoryV3ArchiveBatchSize || 5;
+        this.batchSize = options.batchSize || this.settings.memoryV3ArchiveBatchSize || CONSOLIDATION_DEFAULTS.batchSize;
         // Memory v3: LLM-driven dedup proposals (analog SaveSessionWorkflow). Without both fields
         // the workflow falls back to deterministic prefix-grouping (legacy).
         this.model = options.model || null;
@@ -390,6 +391,15 @@ export class ArchiveWorkflow {
 
         if (decision?.accepted === false) {
             run.skipStep(stepId, 'rejected_by_user');
+            // Wyciszenie: krok L1 odrzucony w całości zeruje licznik sesji (propozycja nie wraca
+            // przy KOLEJNYM zapisie), krok DEDUP odrzucony w całości podbija limit notatek —
+            // patrz docstring `onStepRejected`. Pad wyciszenia nie ma prawa cofnąć odrzucenia,
+            // które już zaszło na przebiegu — tylko log.
+            try {
+                await this.onStepRejected(step.kind);
+            } catch (e) {
+                log.warn('ArchiveWorkflow', `onStepRejected(${step.kind}) padło po odrzuceniu kroku ${stepId}: ${((e as ErrLike)?.message || e) as string}`);
+            }
             return { applied: false, skipped: true };
         }
 
@@ -1304,12 +1314,38 @@ ${String(body || '').trim()}
         // Read-modify-write przez kolejkę `.state.json` — patrz `_resetArchiveCounter`.
         let bumped = false;
         await this.agentMemory.stateManager.update((state) => {
-            const current = Number(state.brain_notes_limit || 20);
+            const current = Number(state.brain_notes_limit || CONSOLIDATION_DEFAULTS.brainNotesLimit);
             if (current >= 100) return;
             state.brain_notes_limit = Math.min(100, current + 10);
             bumped = true;
         });
         return bumped;
+    }
+
+    /**
+     * Wyciszenie po JAWNEJ decyzji usera „nie teraz" dla CAŁEGO kroku — odrzucenie w modalu
+     * (`applyStepDecision` z `decision.accepted === false`), guzik „Pomiń", albo zamknięcie
+     * modalu przebiegu z krokiem L1 wciąż `awaiting_review` (`RunController.onModalClosed`,
+     * `modules/chat/consolidationRunner.ts`). Świadomie NIE obejmuje automatycznych skipów z
+     * braku materiału (`not_enough_sessions`/`not_enough_l1`/`not_enough_l2`/`nothing_to_merge`)
+     * — to nie jest decyzja usera, tylko brak materiału; materiał sam dorośnie do progu.
+     *
+     * - `L1`: zeruje `archived_since_last_consolidation` (`_resetArchiveCounter`) — TEN SAM gest
+     *   co po zaakceptowanej paczce (`_writeLevel1`). Propozycja NIE wraca przy KOLEJNYM zapisie
+     *   sesji — dopiero po kolejnych `sessionThreshold` sesjach. Sesje zostają niepokryte
+     *   (`covered_by_l1` nietknięte) i wejdą do następnej propozycji.
+     * - `DEDUP`: auto-bump limitu notatek `brain/` (`_autoBumpBrainNoteLimit`) — ta sama ścieżka
+     *   +10 (cap 100) co dziś przy zaakceptowanym kroku z zerem realnych scaleń.
+     *
+     * Wołający decyduje, co się liczy jako „decyzja usera" — ta metoda tylko wykonuje wyciszenie
+     * dla podanego rodzaju kroku. Błąd generowania / abort przez awarię NIGDY tu nie trafia.
+     */
+    async onStepRejected(kind: string): Promise<void> {
+        if (kind === STEP_KIND.L1) {
+            await this._resetArchiveCounter();
+        } else if (kind === STEP_KIND.DEDUP) {
+            await this._autoBumpBrainNoteLimit();
+        }
     }
 
     _summaryName(level: string): string {

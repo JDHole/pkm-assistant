@@ -1,9 +1,11 @@
 import { streamToComplete, STREAM_ERROR_CODES } from './streamHelper.js';
 import { resolveWorkPrompt } from '../../core/index.js';
 import { factoryWorkPrompt } from './workPrompts.js';
-import { shouldTriggerConsolidation } from './consolidationStatus.js';
+import { planAutoConsolidation } from './consolidationStatus.js';
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
+
+import type { AutoConsolidationInclude } from './consolidationStatus.js';
 
 import type { StreamChatModelLike, StreamMessage, StreamToCompleteOptions } from './streamHelper.js';
 
@@ -189,18 +191,30 @@ export interface SaveSessionOutcome {
     brainChanged: boolean;
     archivedPath: string | null;
     shouldTriggerArchive?: boolean;
+    /**
+     * Które gałęzie planu konsolidacji wpuścić, gdy `shouldTriggerArchive` — polityka
+     * wyłączników auto-konsolidacji (`planAutoConsolidation`, `consolidationStatus.ts`).
+     * Obecne ZAWSZE (nie tylko przy `shouldTriggerArchive === true`) - `save_session.ts`
+     * przekazuje je do `startConsolidationRun({include})` wewnątrz bramki `if (shouldTriggerArchive)`,
+     * ale wołacz, który chce podejrzeć samą politykę bez odpalania przebiegu, ma je pod ręką.
+     */
+    consolidationInclude?: AutoConsolidationInclude;
     counters?: { archived_since_last_consolidation?: number; brain_notes: number };
     /** Pole POWSTAJE tylko przy niepustej liście —
      *  czysty przebieg zwrotki nie zasmieca się pustą tablicą. */
     noteFailures?: NoteFailure[];
 }
 
-/** Settings widziane przez workflow (progi konsolidacji + resolver promptów). */
+/** Settings widziane przez workflow (progi konsolidacji + wyłączniki auto + resolver promptów). */
 export interface SaveSettingsLike {
     memoryV3SessionThreshold?: number;
     archiveSessionThreshold?: number;
     memoryV3BrainNotesThreshold?: number;
     archiveBrainNotesThreshold?: number;
+    /** Wyłącznik auto-konsolidacji gałęzi sesje/L1-L3 — domyślnie WYŁĄCZONY. */
+    memoryV3AutoConsolidateSessions?: boolean;
+    /** Wyłącznik auto-konsolidacji gałęzi notatek brain/ (dedup) — domyślnie WYŁĄCZONY. */
+    memoryV3AutoConsolidateBrain?: boolean;
     promptDefaults?: Record<string, unknown>;
     pkmAssistant?: { promptDefaults?: Record<string, unknown> };
     [key: string]: unknown;
@@ -485,10 +499,11 @@ export class SaveSessionWorkflow {
         const archivedPath = sessionPath ? await this.agentMemory.archiveActiveSession(sessionPath) : null;
         const state = await this.agentMemory.stateManager.read();
         const brainNotes = await this.agentMemory.listBrainNotes();
-        const shouldTriggerArchive = this._shouldTriggerArchive(state, brainNotes);
+        const autoPlan = this._planAutoConsolidation(state, brainNotes);
 
-        // Archiwizacja nie jest wołana bezpośrednio stąd — próg konsolidacji odpala
-        // wołacz przez `consolidationRunner` na podstawie zwracanego `shouldTriggerArchive`.
+        // Archiwizacja nie jest wołana bezpośrednio stąd — próg konsolidacji (i wyłączniki auto-
+        // konsolidacji opcjonalnej) odpala wołacz przez `consolidationRunner` na podstawie
+        // zwracanych `shouldTriggerArchive`/`consolidationInclude`.
 
         return {
             cancelled: false,
@@ -496,7 +511,8 @@ export class SaveSessionWorkflow {
             notesCreated,
             brainChanged,
             archivedPath,
-            shouldTriggerArchive,
+            shouldTriggerArchive: autoPlan.trigger,
+            consolidationInclude: autoPlan.include,
             ...(noteFailures.length > 0 ? { noteFailures } : {}),
             counters: {
                 archived_since_last_consolidation: state.archived_since_last_consolidation,
@@ -766,12 +782,12 @@ export class SaveSessionWorkflow {
         return after !== before;
     }
 
-    // Jedno liczydło progów konsolidacji — deleguje do `shouldTriggerConsolidation`
-    // (`modules/memory/consolidationStatus.ts`), które CLI `memory-status` woła bez zapisu, żeby
-    // podać dokładnie tę samą decyzję co ten produkcyjny trigger. Zachowanie bez zmian: sesje
-    // `>=`, notatki `>`, `state.brain_notes_limit` ma pierwszeństwo przed ustawieniami globalnymi.
-    private _shouldTriggerArchive(state: SaveStateLike | null | undefined, brainNotes: Array<unknown> | null | undefined): boolean {
-        return shouldTriggerConsolidation(state, brainNotes?.length || 0, this.settings);
+    // Plan auto-triggera — deleguje do `planAutoConsolidation` (`modules/memory/consolidationStatus.ts`),
+    // które łączy progi (sesje `>=`, notatki `>`) z polityką DWÓCH wyłączników auto-konsolidacji
+    // (domyślnie oba WYŁĄCZONE — konsolidacja auto jest opcjonalna, werdykt właściciela). Ręczna
+    // konsolidacja (guzik w profilu agenta) nie przechodzi przez tę metodę w ogóle.
+    private _planAutoConsolidation(state: SaveStateLike | null | undefined, brainNotes: Array<unknown> | null | undefined) {
+        return planAutoConsolidation(state, brainNotes?.length || 0, this.settings);
     }
 
     private _messagesToText(messages: SessionMessageLike[] | null | undefined): string {

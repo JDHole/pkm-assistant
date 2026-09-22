@@ -77,6 +77,36 @@ test('pusty przebieg (nic nie przekracza progów) ma zero kroków', t => {
     t.is(run.getSteps().length, 0);
 });
 
+// ── buildPlan: `include` (auto-konsolidacja opcjonalna) ─────────────────────────
+
+test('include {dedup:false} przy 3 notatkach -> brak kroku DEDUP', t => {
+    const plan = buildPlan({ brainNotesCount: 3 }, { include: { sessions: true, dedup: false } });
+    t.false(plan.some(s => s.kind === STEP_KIND.DEDUP));
+});
+
+test('include {sessions:false} przy niepokrytych sesjach -> brak L1 (i przez to brak L2/L3)', t => {
+    const plan = buildPlan(
+        { archiveCount: 60, batchSize: 5, l1Count: 20, l2Count: 20 },
+        { include: { sessions: false, dedup: true } },
+    );
+    t.false(plan.some(s => s.kind === STEP_KIND.L1));
+    t.false(plan.some(s => s.kind === STEP_KIND.L2));
+    t.false(plan.some(s => s.kind === STEP_KIND.L3));
+});
+
+test('brak `include` -> jak dziś (obie gałęzie pełne)', t => {
+    const counts = { archiveCount: 60, batchSize: 5, brainNotesCount: 5, l2Count: 4 };
+    t.deepEqual(buildPlan(counts), buildPlan(counts, { include: { sessions: true, dedup: true } }));
+    t.true(buildPlan(counts).some(s => s.kind === STEP_KIND.DEDUP));
+    t.true(buildPlan(counts).some(s => s.kind === STEP_KIND.L1));
+});
+
+test('include {dedup:false, sessions:true} zostawia L1/L2/L3 nietknięte', t => {
+    const plan = buildPlan({ archiveCount: 60, batchSize: 5 }, { include: { sessions: true, dedup: false } });
+    t.true(plan.some(s => s.kind === STEP_KIND.L1));
+    t.true(plan.some(s => s.kind === STEP_KIND.L2));
+});
+
 // ── maszyna stanów ─────────────────────────────────────────────────────────────
 
 test('legalna ścieżka kroku: pending → running → awaiting_review → applying → done', t => {

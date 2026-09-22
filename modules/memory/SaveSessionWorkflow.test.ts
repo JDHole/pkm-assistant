@@ -159,6 +159,74 @@ test('SaveSessionWorkflow creates accepted brain note and archives active sessio
     t.false(result.cancelled);
 });
 
+// ── konsolidacja opcjonalna: `shouldTriggerArchive`/`consolidationInclude` (2.2.6) ──────────
+
+test('applyDecision: domyślne ustawienia (oba wyłączniki OFF) -> shouldTriggerArchive false MIMO przebitego progu sesji', async t => {
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const { vault, files } = makeVault({ [`${base}/.state.json`]: JSON.stringify({ archived_since_last_consolidation: 9 }) });
+    const memory = asMemory(new AgentMemory(vault, 'Jaskier'));
+    const path = await memory.appendToActiveSession({
+        type: 'user_message',
+        content: 'pamiętaj że Jan lubi krótkie raporty.',
+        timestamp: '2026-05-14T10:00:00.000Z'
+    });
+    // BEZ `settings` — to jest dokładnie to, co dostaje `/save session` na świeżej instalacji.
+    const workflow = new SaveSessionWorkflow(memory, {
+        modalFactory: ({ notes, brainUpdates }) => ({
+            prompt: async () => ({ action: 'archive', notes, brainUpdates })
+        })
+    });
+
+    const result = await workflow.run({ path });
+    const state = JSON.parse(files[`${base}/.state.json`]);
+
+    t.is(state.archived_since_last_consolidation, 10, 'próg sesji (>=10) realnie przebity przez ten zapis');
+    t.false(result.shouldTriggerArchive, 'auto-konsolidacja domyślnie WYŁĄCZONA — sam próg nie wystarcza');
+    t.deepEqual(result.consolidationInclude, { sessions: false, dedup: false });
+});
+
+test('applyDecision: memoryV3AutoConsolidateSessions:true + próg sesji przebity -> shouldTriggerArchive true, include {sessions:true, dedup:false}', async t => {
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const { vault } = makeVault({ [`${base}/.state.json`]: JSON.stringify({ archived_since_last_consolidation: 9 }) });
+    const memory = asMemory(new AgentMemory(vault, 'Jaskier'));
+    const path = await memory.appendToActiveSession({
+        type: 'user_message',
+        content: 'pamiętaj że Jan lubi krótkie raporty.',
+        timestamp: '2026-05-14T10:00:00.000Z'
+    });
+    const workflow = new SaveSessionWorkflow(memory, {
+        settings: { memoryV3AutoConsolidateSessions: true },
+        modalFactory: ({ notes, brainUpdates }) => ({
+            prompt: async () => ({ action: 'archive', notes, brainUpdates })
+        })
+    });
+
+    const result = await workflow.run({ path });
+
+    t.true(result.shouldTriggerArchive);
+    t.deepEqual(result.consolidationInclude, { sessions: true, dedup: false });
+});
+
+test('applyDecision: oba wyłączniki OFF i próg NIE przebity -> shouldTriggerArchive false, include oba false', async t => {
+    const { vault } = makeVault();
+    const memory = asMemory(new AgentMemory(vault, 'Jaskier'));
+    const path = await memory.appendToActiveSession({
+        type: 'user_message',
+        content: 'pamiętaj że Jan lubi krótkie raporty.',
+        timestamp: '2026-05-14T10:00:00.000Z'
+    });
+    const workflow = new SaveSessionWorkflow(memory, {
+        modalFactory: ({ notes, brainUpdates }) => ({
+            prompt: async () => ({ action: 'archive', notes, brainUpdates })
+        })
+    });
+
+    const result = await workflow.run({ path });
+
+    t.false(result.shouldTriggerArchive);
+    t.deepEqual(result.consolidationInclude, { sessions: false, dedup: false });
+});
+
 test('_createBrainNote dokłada kanoniczną stopkę Why/How (jak memory_save)', async t => {
     const { vault, files } = makeVault();
     const memory = asMemory(new AgentMemory(vault, 'Jaskier'));

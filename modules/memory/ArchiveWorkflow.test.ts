@@ -11,7 +11,7 @@
 import test from 'ava';
 import { AgentMemory } from './AgentMemory.js';
 import { ArchiveWorkflow } from './ArchiveWorkflow.js';
-import { ConsolidationRun, STEP_KIND } from './ConsolidationRun.js';
+import { ConsolidationRun, STEP_KIND, STEP_STATUS } from './ConsolidationRun.js';
 import { factoryWorkPrompt } from './workPrompts.js';
 import { makeMemoryNoteFilename } from './MemoryAccessGuard.js';
 import type { StreamChatModelLike, StreamHandlers, StreamMessage } from './streamHelper.js';
@@ -624,6 +624,73 @@ test('ArchiveWorkflow NIE podnosi progu notatek brain/, gdy user zaakceptuje sca
         const state = JSON.parse(stateRaw);
         t.not(state.brain_notes_limit, 30, 'próg NIE mógł skoczyć na wartość po bumpie po wykonanym scaleniu');
     }
+});
+
+// ── Wyciszenie po odrzuceniu CAŁEGO kroku (`onStepRejected`, konsolidacja opcjonalna) ──────
+
+test('applyStepDecision: odrzucenie CAŁEGO kroku L1 zeruje licznik sesji; sesje zostają niepokryte', async t => {
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const statePath = `${base}/.state.json`;
+    const initial: Record<string, string> = {
+        [statePath]: JSON.stringify({ archived_since_last_consolidation: 7 }),
+    };
+    for (let i = 1; i <= 5; i++) {
+        initial[`${base}/sessions/archive/session_${i}.md`] = session(`session_${i}.md`, `Sesja ${i}`);
+    }
+    const { vault, files } = makeVault(initial);
+    const memory = new AgentMemory(vault, 'Jaskier');
+    const workflow = new ArchiveWorkflow(memory, { batchSize: 5 });
+    const run = new ConsolidationRun({ counts: { archiveCount: 5, batchSize: 5 } });
+
+    await workflow.runWithRun(run);
+    const l1 = run.getStep('l1_batch_1')!;
+    t.is(l1.status, STEP_STATUS.AWAITING_REVIEW, 'jest propozycja do odrzucenia');
+
+    const outcome = await workflow.applyStepDecision(run, l1.id, { accepted: false });
+
+    t.true(outcome.skipped);
+    t.is(run.getStep('l1_batch_1')!.status, STEP_STATUS.SKIPPED);
+    const state = JSON.parse(files[statePath]);
+    t.is(state.archived_since_last_consolidation, 0, 'licznik zerowany jak po zaakceptowanej paczce');
+    for (let i = 1; i <= 5; i++) {
+        t.false(
+            files[`${base}/sessions/archive/session_${i}.md`].includes('covered_by_l1'),
+            `session_${i}.md nie ma prawa dostać stempla - żadna paczka nie została zapisana`
+        );
+    }
+});
+
+test('applyStepDecision: odrzucenie CAŁEGO kroku DEDUP podbija limit notatek brain/ (20 -> 30)', async t => {
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const { vault, files } = makeVault({
+        [`${base}/brain/user_jan_dev.md`]: brainNoteFile('Jan dev', 'user'),
+        [`${base}/brain/user_jan_writer.md`]: brainNoteFile('Jan writer', 'user'),
+    });
+    const memory = new AgentMemory(vault, 'Jaskier');
+    const workflow = new ArchiveWorkflow(memory); // bez LLM → heurystyka prefiksów proponuje scalenie
+    const run = new ConsolidationRun({ counts: { brainNotesCount: 2 } });
+
+    await workflow.runWithRun(run);
+    const dedup = run.getStep(STEP_KIND.DEDUP)!;
+    t.is((dedup.result!.merges || []).length, 1, 'jest co odrzucać');
+
+    // Odrzucenie CAŁEGO kroku (nie: każde scalenie odznaczone z osobna - to inny test wyżej).
+    const outcome = await workflow.applyStepDecision(run, dedup.id, { accepted: false });
+
+    t.true(outcome.skipped);
+    t.is(run.getStep(STEP_KIND.DEDUP)!.status, STEP_STATUS.SKIPPED);
+    const state = JSON.parse(files[`${base}/.state.json`]);
+    t.is(state.brain_notes_limit, 30, '20 default + 10 bump, ta sama ścieżka co przy zerze scaleń');
+});
+
+test('onStepRejected: rodzaj kroku spoza L1/DEDUP jest no-opem (L2/L3 nie mają wyciszenia)', async t => {
+    const { vault, files } = makeVault();
+    const memory = new AgentMemory(vault, 'Jaskier');
+    const workflow = new ArchiveWorkflow(memory);
+
+    await t.notThrowsAsync(() => workflow.onStepRejected(STEP_KIND.L2));
+    await t.notThrowsAsync(() => workflow.onStepRejected(STEP_KIND.L3));
+    t.false(Object.keys(files).some(p => p.endsWith('.state.json')), 'żaden .state.json nie powstał - brak I/O dla L2/L3');
 });
 
 // ── Memory v3 LLM-driven L1/L2/L3 synthesis ──
