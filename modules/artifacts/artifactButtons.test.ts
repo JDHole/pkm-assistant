@@ -98,3 +98,33 @@ test('raport w "w-trakcie" → brak approve/revise (brak accepted/remarks w typi
     t.is(btns.length, 1);
     t.is(btns[0].action, 'summon');
 });
+
+// ─── BLOKER (recenzja niezależna): ensureBuiltinTypes podmienia NIETKNIĘTY plik typu na język UI
+// przy KAŻDYM starcie - instancja stworzona w JEDNYM języku (status na dysku) i typ, który w
+// międzyczasie zaczął deklarować statusy w DRUGIM języku, muszą nadal dać approve/revise, w
+// JĘZYKU INSTANCJI (nie typu) - inaczej przełączenie UI pl->en osiera wszystkie istniejące
+// instancje PL na sam guzik "Przywołaj".
+
+test('instancja PL "do-akceptacji" pod TYPEM EN (statusy re-seedowane) → approve→zaakceptowany, revise→uwagi', t => {
+    const btns = computeArtifactButtons('do-akceptacji', EN_PLAN_STATUSY);
+    t.is(btns.length, 2);
+    t.is(btns.find(b => b.action === 'approve')!.statusTo, 'zaakceptowany');
+    t.is(btns.find(b => b.action === 'revise')!.statusTo, 'uwagi');
+});
+
+test('instancja EN "pending-approval" pod TYPEM PL (statusy re-seedowane) → approve→accepted, revise→remarks', t => {
+    const btns = computeArtifactButtons('pending-approval', PLAN_STATUSY);
+    t.is(btns.length, 2);
+    t.is(btns.find(b => b.action === 'approve')!.statusTo, 'accepted');
+    t.is(btns.find(b => b.action === 'revise')!.statusTo, 'remarks');
+});
+
+// ─── DROBNE: isClosedStatus musi domykać po OSTATNIM elemencie NIEZALEŻNIE od tego, czy rola
+// `closed` jest rozpoznana WCZEŚNIEJ w liście (closedStatusOf zwraca tylko JEDEN literał).
+
+test('isClosedStatus: typ ["open","zamkniety","archived"] - "archived" (ostatni) też domyka, mimo że "zamkniety" (środek) ma rozpoznaną rolę', t => {
+    const statusy = ['open', 'zamkniety', 'archived'];
+    t.true(isClosedStatus('archived', statusy), 'ostatni element domyka jak na main sprzed rejestru');
+    t.true(isClosedStatus('zamkniety', statusy), 'rola rozpoznana w środku listy domyka jak dotąd');
+    t.false(isClosedStatus('open', statusy));
+});

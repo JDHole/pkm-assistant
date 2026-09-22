@@ -15,6 +15,7 @@
  */
 import { parseArtifact, applyPatch, validateArtifactBodyText, isArtifactScalar, INVALID_VALUE_MSG, PROTECTED_FIELDS, ARTIFACT_CONTEXT_MAX_CHARS, formatYmd } from './artifactParser.js';
 import { isClosedStatus } from './artifactButtons.js';
+import { defaultStatusy } from './ArtifactTypeLoader.js';
 import { sanitizePath, stringifyYaml } from '../../core/index.js';
 import type { ArtifactFrontmatter, ArtifactPatchError, ArtifactPatchOp, ArtifactScalar, ThinArtifact } from './types.js';
 
@@ -173,7 +174,10 @@ export class ArtifactStore {
 
         const id = this._genId();
         const today = this._today();
-        const status = (type.statusy && type.statusy[0]) || 'szkic';
+        // Fallback `defaultStatusy()[0]` (język UI) zamiast polskiego `'szkic'` na sztywno -
+        // w praktyce nieosiągalne dla typu z biblioteki (ArtifactTypeLoader zawsze dosztukowuje
+        // statusy), ale broni się na wypadek atrapy/typu skonstruowanego inaczej w testach.
+        const status = (type.statusy && type.statusy[0]) || defaultStatusy()[0];
 
         // Frontmatter: baza + pola typu (kolejność jak w makiecie instancji).
         const fm: ArtifactFrontmatter = {
@@ -262,7 +266,7 @@ export class ArtifactStore {
         const type = this.typeLoader?.getType?.(typ);
         const id = this._genId();
         const today = this._today();
-        const resolvedStatus = status || (type && type.statusy && type.statusy[0]) || 'szkic';
+        const resolvedStatus = status || (type && type.statusy && type.statusy[0]) || defaultStatusy()[0];
         const resolvedUtworzono = utworzono || today;
         const resolvedZaktualizowano = zaktualizowano || today;
         const fm: ArtifactFrontmatter = {

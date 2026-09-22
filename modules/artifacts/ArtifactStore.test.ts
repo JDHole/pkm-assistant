@@ -2,6 +2,7 @@ import test from 'ava';
 import { ArtifactStore, DEFAULT_ARTIFACTS_FOLDER } from './ArtifactStore.js';
 import { parseArtifact } from './artifactParser.js';
 import { parseYaml, stringifyYaml } from '../../core/utils/yamlParser.js';
+import { setLocale } from '../../core/i18n/index.js';
 import type { ArtifactFrontmatter } from './types.js';
 
 // ── Stub typu `plan` (zamiast ładować z dysku — izolujemy store) ──
@@ -776,4 +777,20 @@ test('kolizja nazwy, która przez sufiks przekracza limit segmentu, rzuca czytel
     const err = await t.throwsAsync(() => store.create('plan', { tytul, agent }));
     t.is(err?.message, 'Nie udało się zbudować bezpiecznej ścieżki artefaktu',
         'funkcja ma rzucać ten sam, czytelny błąd co przy pierwszym niepowodzeniu sanityzacji — nie przepuszczać null dalej jako "string"');
+});
+
+// ── Fallback status gdy typ nie deklaruje `statusy` wcale (nie powinno się zdarzyć dla typu z
+// biblioteki - ArtifactTypeLoader zawsze dosztukowuje `defaultStatusy()` - ale broni się na
+// wypadek atrapy/typu skonstruowanego inaczej) idzie za JĘZYKIEM INTERFEJSU, nie na sztywno PL. ──
+
+test.serial('create(): typ bez statusy (pusta lista) → status startowy w JĘZYKU UI, nie "szkic" na sztywno pod EN', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+    const { app } = makeApp();
+    const EMPTY_TYPE = { name: 'goly', statusy: [], sprzatanie: 0, pola: {}, template: '## Treść\n' };
+    const store = new ArtifactStore({ app, typeLoader: { getType: (n: string) => (n === 'goly' ? EMPTY_TYPE : null) } as unknown as { getType(name: string): import('./types.js').ArtifactType | null } });
+
+    const res = await store.create('goly', { tytul: 'Test', agent: 'Jaskier' });
+
+    t.is(res.artifact?.status, 'draft', 'EN UI -> "draft", nie polskie "szkic"');
 });

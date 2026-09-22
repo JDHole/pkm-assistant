@@ -48,7 +48,12 @@ export interface ArtifactButton {
  * Czy status oznacza domknięcie artefaktu (brak przycisków). Prawda gdy: literał ma rolę
  * `closed` w KTÓRYMKOLWIEK z dwóch języków (niezależnie od tego, czy typ w ogóle go deklaruje -
  * `'zamkniety'`/`'closed'` domykają zawsze, jak dotąd), ALBO status pasuje do
- * `closedStatusOf(statusy)` (własna nazwa końcowa typu usera, fallback = ostatni w liście).
+ * `closedStatusOf(statusy)` (rola rozpoznana w liście, fallback = ostatni w liście), ALBO
+ * status jest dosłownie OSTATNIM elementem listy (zachowanie sprzed rejestru bilingwalnego -
+ * `closedStatusOf` zwraca TYLKO JEDEN literał, więc dla typu z trzema statusami, gdzie rola
+ * `closed` jest rozpoznana w ŚRODKU listy (np. `['open', 'zamkniety', 'archived']`), sam ostatni
+ * element `'archived'` przestałby się liczyć jako domknięty bez tego drugiego, niezależnego
+ * warunku).
  * @param {string} status
  * @param {string[]} statusy - lista statusów typu (ostatni = domknięcie, gdy brak roli rozpoznanej)
  * @returns {boolean}
@@ -56,7 +61,8 @@ export interface ArtifactButton {
 export function isClosedStatus(status: string, statusy: string[] = []): boolean {
     if (statusRole(status) === 'closed') return true;
     const list = Array.isArray(statusy) ? statusy : [];
-    return list.length > 0 && status === closedStatusOf(list);
+    if (list.length === 0) return false;
+    return status === closedStatusOf(list) || status === list[list.length - 1];
 }
 
 /**
@@ -70,14 +76,35 @@ export function computeArtifactButtons(status: string, statusy: string[] = []): 
 
     const list = Array.isArray(statusy) ? statusy : [];
     // Typ nieznany/osierocony (statusy=[]) — nie ograniczaj: jeśli sam status ma rolę
-    // `pending` (w KTÓRYMKOLWIEK języku), zaproponuj przejścia w TYM SAMYM języku co status,
-    // zamiast milczeć tylko dlatego, że nie ma listy do przeszukania.
+    // `pending` (w KTÓRYMKOLWIEK języku), zaproponuj przejścia zamiast milczeć tylko dlatego,
+    // że nie ma listy do przeszukania.
     const unrestricted = list.length === 0;
+    // „Czeka na decyzję" = albo pasuje do statusu wyliczonego z DZISIEJSZEJ listy typu, albo
+    // sam ma rozpoznaną rolę `pending` w KTÓRYMKOLWIEK języku - drugi warunek jest KLUCZOWY:
+    // `ensureBuiltinTypes` podmienia NIETKNIĘTY plik typu na język UI przy KAŻDYM starcie, więc
+    // istniejąca instancja `do-akceptacji` (PL) pod typem, który w międzyczasie stał się EN
+    // (`pendingStatusOf(list)` = `'pending-approval'`), inaczej przestawałaby być rozpoznana
+    // jako „czeka na decyzję" i dostawałaby tylko generyczne „Przywołaj agenta" (bug zgłoszony
+    // przez recenzję niezależną - probe [measured]).
+    const isPending = status === pendingStatusOf(list) || statusRole(status) === 'pending';
 
-    if (status === pendingStatusOf(list) || (unrestricted && statusRole(status) === 'pending')) {
-        const locale = unrestricted ? statusLocaleOf(status) : null;
-        const acceptedTarget = acceptedStatusOf(list) ?? (locale ? statusLiteral('accepted', locale) : null);
-        const remarksTarget = remarksStatusOf(list) ?? (locale ? statusLiteral('remarks', locale) : null);
+    if (isPending) {
+        const acceptedInList = acceptedStatusOf(list);
+        const remarksInList = remarksStatusOf(list);
+        // Język CELU przejścia idzie za językiem SAMEGO STATUSU (gdy rozpoznany), NIE za
+        // językiem, w którym typ AKURAT dziś deklaruje swoje statusy - instancja ma zostać
+        // wewnętrznie spójna w SWOIM języku, nawet gdy plik typu w międzyczasie zmienił język
+        // (patrz wyżej). `acceptedInList`/`remarksInList` decydują TYLKO o tym, CZY typ w ogóle
+        // chce tego kroku (którakolwiek rola w którymkolwiek języku) - nie o tym, w jakim
+        // języku ma być literał. Typ własny bez rozpoznanej roli dla statusu (`locale===null`,
+        // np. `'todo'`) trzyma się dosłownie tego, co deklaruje lista.
+        const locale = statusLocaleOf(status);
+        const acceptedTarget = (acceptedInList !== null || unrestricted)
+            ? (locale ? statusLiteral('accepted', locale) : acceptedInList)
+            : null;
+        const remarksTarget = (remarksInList !== null || unrestricted)
+            ? (locale ? statusLiteral('remarks', locale) : remarksInList)
+            : null;
         const buttons: ArtifactButton[] = [];
         if (acceptedTarget) {
             buttons.push({

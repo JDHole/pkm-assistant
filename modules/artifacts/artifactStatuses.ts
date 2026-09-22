@@ -20,6 +20,7 @@ export type ArtifactStatusRole = 'draft' | 'pending' | 'remarks' | 'accepted' | 
 export type ArtifactStatusLocale = 'pl' | 'en';
 
 const ROLES: readonly ArtifactStatusRole[] = ['draft', 'pending', 'remarks', 'accepted', 'closed', 'in_progress', 'ready'];
+const LOCALES: readonly ArtifactStatusLocale[] = ['pl', 'en'];
 
 /** Literały statusów wbudowanych typów, per rola i JĘZYK PLIKU. */
 export const ARTIFACT_STATUS_LITERALS: Readonly<Record<ArtifactStatusLocale, Readonly<Record<ArtifactStatusRole, string>>>> = {
@@ -45,7 +46,7 @@ export const ARTIFACT_STATUS_LITERALS: Readonly<Record<ArtifactStatusLocale, Rea
 
 /** Literał → `{role, locale}`, albo `null` gdy nierozpoznany (typ usera z własnym słownictwem). */
 function findStatusEntry(literal: string): { role: ArtifactStatusRole; locale: ArtifactStatusLocale } | null {
-    for (const locale of ['pl', 'en'] as ArtifactStatusLocale[]) {
+    for (const locale of LOCALES) {
         for (const role of ROLES) {
             if (ARTIFACT_STATUS_LITERALS[locale][role] === literal) return { role, locale };
         }
