@@ -23,6 +23,26 @@ test.serial('polski interfejs: te same adresy dostają polskie etykiety, bez krz
     t.is(sectionDisplayLabel('## Projekty i referencje'), 'Projekty i referencje');
 });
 
+// Agent z brain.md w EN (decyzja właściciela 19.09 - plik rodzi się w języku UI i zostaje w nim
+// na zawsze) niesie adresy EN ('## Current', ...) - okno review MUSI je rozpoznać tak samo jak
+// adresy PL i pokazać etykietę w BIEŻĄCYM języku interfejsu, niezależnie od języka pliku.
+test.serial('agent z brain.md w EN: adresy angielskie dostają etykietę w języku interfejsu (PL)', t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
+    t.is(sectionDisplayLabel('## Current'), 'Bieżące');
+    t.is(sectionDisplayLabel('## User'), 'User');
+    t.is(sectionDisplayLabel('## Preferences'), 'Preferencje');
+    t.is(sectionDisplayLabel('## Workflow'), 'Workflow');
+    t.is(sectionDisplayLabel('## Projects and references'), 'Projekty i referencje');
+});
+
+test.serial('agent z brain.md w EN pod angielskim interfejsem: etykieta angielska jak dotąd', t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+    t.is(sectionDisplayLabel('## Current'), 'Current');
+    t.is(sectionDisplayLabel('## Projects and references'), 'Projects and references');
+});
+
 test.serial('brak sekcji od modelu = etykieta sekcji bieżącej (tam realnie ląduje notatka)', t => {
     t.teardown(() => setLocale('en'));
     setLocale('en');
