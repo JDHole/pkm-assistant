@@ -224,6 +224,43 @@ Bramka `.pkm-assistant/**` + No-Go + `sanitizePath` w prymitywach vaultowych dzi
 - ⚠️ **`t()` narzędzia (opis + parametry `inputSchema`) idzie przez fabrykę, nie przez stałą modułową** — jak we WSZYSTKICH pozostałych narzędziach (`ReadTool`, `WriteTool`, `WebSearchTool`…): wywołania `t('mcp.<tool>.desc')` / `t('mcp.<tool>.param.<name>')` siedzą W CIELE `create...Tool()`, bo `setLocale()` leci z `src/main.ts` PO imporcie modułów — stała modułowa policzona przy imporcie dostałaby domyślne `'en'`, zanim plugin w ogóle pozna język usera. ⚠️ Fabryka też liczy tekst RAZ (`src/main.ts`, `initialize()`, po `setLocale`): definicje narzędzi idące do MODELU zostają w języku startu do przeładowania pluginu - zmiana języka w Ustawieniach odświeża od razu tylko to, co liczy się przy renderze (katalog serwerów przez `resolveServerDescription`). `GenerateImageTool`/`AddTextToImageTool` miały dotąd opis i WSZYSTKIE opisy parametrów na sztywno (mieszanka polskiego bez ogonków i pełnego polskiego) — poprawka trzyma się dokładnie tej samej konwencji nazw kluczy co reszta modułu.
 - ⚠️ **Placeholder ścieżki w presetach zewnętrznych serwerów jest NEUTRALNYM tokenem technicznym, nie słowem w żadnym języku ludzkim.** `PRESET_PATH_PLACEHOLDER` (`mcpServerPresets.ts`) to `'<PATH>'` — polskie `'<ŚCIEŻKA>'` wstrzykiwane w argumenty presetu Filesystem wychodziłoby tak samo pod angielskim UI. Hint (`settings.mcp_preset_hint_filesystem`, en+pl) ma wskazywać na TEN SAM token co stała.
 
+### Zgoda na zapis — dwie bramki + pamięć sesyjna
+
+- ⚠️ **Krok 6 i krok 6b w `executeToolCall` to DWIE NIEZALEŻNE bramki zgody.** Krok 6 (ogólny
+  approval, `this.plugin.approvalManager.requestApproval()` → `ApprovalModal` z `modules/shell`)
+  pyta o KAŻDĄ akcję, którą `PermissionSystem.requiresApproval` uzna za wymagającą zgody — w tym
+  `write` w trybach `append`/`prepend`, gdzie diff (krok 6b) nic by nie pokazał. Krok 6b
+  (`_requestDiffApproval()` → `DiffModal` z `modules/ui-components`) dokłada się TYLKO dla
+  `write`/`vault_write` w trybie `create`/`replace`/`patch`, i tylko gdy krok 6 uznał, że trzeba
+  pytać. Żadna z dwóch bramek nie wie nic o drugiej poza wspólnym `permResult.requiresApproval` —
+  stąd osobne warunki w kodzie, nie jeden przełącznik.
+- ⚠️ **`sessionWriteConsent` (`readonly` pole instancji, `core/security/SessionWriteConsent.ts`)
+  to TRZECIA pamięć zgody, obok dwóch istniejących** — trwałej `ApprovalManager.alwaysApproved`
+  (dysk, na zawsze, klucz agent+akcja+cel dosłowny) i efemerycznej pamięci ODMÓW
+  `MCPClient._deniedActions` (RAM, TTL 15 min, tylko odmowy). Zgoda sesyjna „Nie pytaj więcej w tej
+  sesji o zapisy do tego pliku" jest PER PLIK i PER SESJA CZATU, wyłącznie RAM, BEZ TTL — gaśnie
+  sama z nową sesją (nowy `origin.sessionPath`, np. po `handleNewSession` w czacie) i z
+  przeładowaniem pluginu (nowa instancja `MCPClient` = nowa instancja `sessionWriteConsent`).
+  Obejmuje WYŁĄCZNIE `write`/`vault_write` — `delete` i każde inne narzędzie pyta jak dotąd, zawsze.
+- ⚠️ **Klucz sesji jest `origin.sessionPath`, NIGDY `agentName` ani `tabKey`.** Żaden z tamtych
+  dwóch nie identyfikuje jednoznacznie ROZMOWY: `agentName` jest wspólny dla wszystkich zakładek
+  tego samego agenta, a `tabKey` bywa równy samej nazwie agenta (fallback w `chat_tabs.ts`). Brak
+  `origin.sessionPath` (np. wywołanie bez kontekstu czatu) = zgoda sesyjna NIEDOSTĘPNA: oba modale
+  dostają `rememberAvailable:false`, checkbox „nie pytaj więcej w tej sesji" się nie pokazuje, a
+  `SessionWriteConsent.grant()` z pustym kluczem jest jawnym no-opem (zwraca `false`).
+- ⚠️ **Zgoda nadana w kroku 6 pomija krok 6b W TYM SAMYM wywołaniu.** `sessionConsentGranted` jest
+  zmienną MUTOWALNĄ w `executeToolCall` — jeśli user zaznaczy checkbox i zatwierdzi w kroku 6,
+  flaga idzie na `true` OD RAZU, więc warunek kroku 6b (`!sessionConsentGranted`) już jej nie pyta.
+  Bez tego jedna tura z zaznaczonym checkboxem w ogólnym approvalu i tak pokazywałaby zaraz potem
+  diff — user właśnie powiedział „nie pytaj więcej", a modal pytałby drugi raz o TEN SAM zapis.
+- ⚠️ **`rememberForSession` wraca `true` WYŁĄCZNIE po literalnym Zatwierdź z zaznaczonym
+  checkboxem** — nigdy po Odrzuć, Przekieruj, „Zawsze zezwalaj" (ma już własną, trwałą pamięć) ani
+  po cichej ścieżce `ApprovalManager.isAlwaysApproved` (ta w ogóle nie woła modala, więc pole
+  zostaje `undefined`). `DiffModal` trzyma stan na PUBLICZNYM polu instancji (`rememberForSession`,
+  czytanym z modala/fabryki PO rozstrzygnięciu `waitForApproval()` — kontrakt
+  `Promise<'approve'|'deny'>` się nie zmienił, patrz `MCPClientOptions.diffModalFactory`),
+  `ApprovalModal` (core→shell) dokłada je wprost do `ApprovalModalResult`.
+
 ### Bezpieczne skróty, których świadomie NIE zrobiliśmy
 
 - ⚠️ **Nie cache'uj treści pliku przez granicę approvalu.** Próba cache'owania odczytanej treści (żeby narzędzie zapisu nie czytało pliku drugi raz po podglądzie diffa) została odrzucona: znacznik z cache'owaną treścią byłby ustawiany, ale nie zawsze kasowany, więc model mógłby sam podać podrobioną „starą treść" w trybach, które pomijają podgląd diffa (np. append, albo autonomia bez pytań) - narzędzie policzyłoby wtedy finalną treść na sfałszowanym punkcie odniesienia, zapisując dowolną treść modelu jako „zatwierdzoną przez usera" edycję. Do tego dochodzi wyścig: podgląd czeka na człowieka bez limitu czasu, więc nawet uczciwy cache mógłby się zestarzeć względem realnego stanu pliku. Jeśli temat wróci, rozwiązanie musi albo czytać RAZ tuż przed zapisem bez cache, albo weryfikować hash/mtime między podglądem a zapisem - nie ufać samej zgodności ścieżki.

@@ -54,6 +54,8 @@ Powód: AVA nie ma mocka `obsidian` (`"ava".require: []`), a testuje pliki produ
 - `AccessGuard` - sanityzacja ścieżek, No-Go zones, focusFolders, whitelist
 - `PermissionSystem`, `APPROVAL_DEFAULTS`
 - `ApprovalManager` - modal do zatwierdzania akcji, "always approve" rules
+- `SessionWriteConsent` - zgoda "Nie pytaj więcej w tej sesji o zapisy do tego pliku" (per plik,
+  per sesja czatu, wyłącznie RAM, bez TTL). Jedyny wołacz: `modules/tools/MCPClient.ts`
 - `SecretsStorage` - sejf na klucze API
 - `sanitizePath`, `isProtectedPath`, `VAULT_GITIGNORE_ENTRIES`
 - `maskSensitiveData`, `warnIfSensitive`
@@ -119,6 +121,8 @@ core/
 │   ├── vaultGroups.js          ← pure `expandFocusEntries({group} → foldery)`; `vaultGroups.test.js` obok
 │   ├── PermissionSystem.js     ← permissions model + `ACTION_PERMISSIONS` mapa + gate autonomii
 │   ├── ApprovalManager.js      ← approval flow (modal + always-approved + ścieżka "przekieruj")
+│   ├── SessionWriteConsent.js  ← zgoda "nie pytaj więcej w tej sesji" (per plik+sesja, RAM)
+│   ├── SessionWriteConsent.test.js
 │   ├── SecretsStorage.js       ← sejf na klucze API (`SECRET_FIELD_PATHS`)
 │   ├── SensitiveDataGuard.js   ← wykrywanie/maskowanie API keys
 │   ├── SensitiveDataGuard.test.js
@@ -353,6 +357,7 @@ Pełna swoboda to przecięcie trzech osi: narzędzie włączone + `admin_access`
 
 - `core/security/SensitiveDataGuard.test.js` - wykrywanie/maskowanie API keys (OpenAI/Anthropic/Google/etc.), w tym zaescapowany JSON, dwie warstwy zaescapowania, `Bearer <token bez znanego kształtu>`, idempotencja maski
 - `core/security/ApprovalManager.test.js` - reguła per narzędzie external, cel `*` od wołacza nie daje wieloznacznika (`vault.delete`, `agent.message`, gwiazdka wewnątrz celu), reguła zastana `akcja::*` działa jak dotąd ale ostrzega przy wczytaniu, ekran reguł ją kasuje, reguła dla konkretnego celu bez zmian
+- `core/security/SessionWriteConsent.test.js` - `grant`+`has` per plik i per sesja, izolacja między ścieżkami i między sesjami, `clearSession` kasuje TYLKO jedną sesję, pusty klucz sesji/ścieżka = `grant` zwraca `false` i nie zapisuje nic, `clear()` kasuje wszystko
 - `core/security/keySanitizer.test.js` - `sanitizePath` (`../`, `%2e%2e`, null byte, zero-width unicode, UNC, `*` odrzucone, `?`/`[`/`%` nadal legalne, ścieżki absolutne, idempotencja do punktu stałego z testem własnościowym na wielu wygenerowanych ciągach z deterministycznego LCG) i `isProtectedPath` (`.pkm-assistant/settings.json`, `settings.last-good.json`, kopie, logi, `.env`, `data.json`)
 - `core/security/path_canonical.test.js` - równoważność zapisu ścieżki + pełny łańcuch wołacz→bramka→zlew (`MCPClient` + `WriteTool` + `PermissionSystem`, bez mocka `obsidian`)
 - `core/security/path_canonical_image.test.js` - kanonizacja dla akcji `image.*` i to, że `AccessGuard` prostuje cel sam z siebie
