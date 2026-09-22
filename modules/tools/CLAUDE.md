@@ -248,18 +248,54 @@ Bramka `.pkm-assistant/**` + No-Go + `sanitizePath` w prymitywach vaultowych dzi
   `origin.sessionPath` (np. wywołanie bez kontekstu czatu) = zgoda sesyjna NIEDOSTĘPNA: oba modale
   dostają `rememberAvailable:false`, checkbox „nie pytaj więcej w tej sesji" się nie pokazuje, a
   `SessionWriteConsent.grant()` z pustym kluczem jest jawnym no-opem (zwraca `false`).
+- ⚠️ **`origin.sessionPath` NIE JEST unikalny na zawsze — nazwa pliku sesji ma rozdzielczość
+  MINUTOWĄ** (`AgentMemory._generateActiveSessionFilename`), a po archiwizacji/odrzuceniu ta
+  ścieżka WRACA DO PULI (plik jest PRZENOSZONY do `sessions/archive/`/`.discarded/`, nie kasowany
+  z miejsca — `AgentMemory.archiveActiveSession`/dyskard). „Nowa rozmowa" + druga „nowa rozmowa"
+  TEGO SAMEGO agenta w tej samej minucie MOGĄ dostać dokładnie tę samą nazwę pliku — bez jawnego
+  sprzątania stara zgoda „wracałaby" razem z reużytą nazwą. **Obrona jest DWUWARSTWOWA, nie
+  jednowarstwowa**: unikalność nazwy (pierwsza linia, rzadko przebijana) NIE WYSTARCZA sama —
+  `modules/chat/chat/chat_session.ts`'s `handleNewSession()` jawnie woła
+  `plugin.mcpClient?.sessionWriteConsent.clearSession(staraŚcieżka)` PRZED wymianą tożsamości
+  sesji (druga linia, ten moduł jej NIE woła — wołacz jest po stronie czatu, bo tylko on wie,
+  KIEDY sesja się kończy). Zamknięcie POJEDYNCZEJ zakładki (`_closeActiveTab`) świadomie tego NIE
+  robi — zapisuje sesję NA MIEJSCU i nie przenosi pliku, więc ścieżka nie wraca do puli i nie ma
+  czego czyścić. Test: `modules/chat/chat/chat_session.test.ts`.
 - ⚠️ **Zgoda nadana w kroku 6 pomija krok 6b W TYM SAMYM wywołaniu.** `sessionConsentGranted` jest
   zmienną MUTOWALNĄ w `executeToolCall` — jeśli user zaznaczy checkbox i zatwierdzi w kroku 6,
   flaga idzie na `true` OD RAZU, więc warunek kroku 6b (`!sessionConsentGranted`) już jej nie pyta.
   Bez tego jedna tura z zaznaczonym checkboxem w ogólnym approvalu i tak pokazywałaby zaraz potem
   diff — user właśnie powiedział „nie pytaj więcej", a modal pytałby drugi raz o TEN SAM zapis.
-- ⚠️ **`rememberForSession` wraca `true` WYŁĄCZNIE po literalnym Zatwierdź z zaznaczonym
-  checkboxem** — nigdy po Odrzuć, Przekieruj, „Zawsze zezwalaj" (ma już własną, trwałą pamięć) ani
-  po cichej ścieżce `ApprovalManager.isAlwaysApproved` (ta w ogóle nie woła modala, więc pole
-  zostaje `undefined`). `DiffModal` trzyma stan na PUBLICZNYM polu instancji (`rememberForSession`,
-  czytanym z modala/fabryki PO rozstrzygnięciu `waitForApproval()` — kontrakt
-  `Promise<'approve'|'deny'>` się nie zmienił, patrz `MCPClientOptions.diffModalFactory`),
-  `ApprovalModal` (core→shell) dokłada je wprost do `ApprovalModalResult`.
+- ⚠️ **`rememberForSession` wraca `true` gdy checkbox jest zaznaczony i user kliknął Zatwierdź
+  ALBO „Zawsze zezwalaj"** — obie ścieżki niosą tę samą intencję („nie pytaj więcej o TEN plik w
+  tej sesji"), i działają NIEZALEŻNIE OD SIEBIE (trwała reguła „Zawsze zezwalaj" i efemeryczna
+  zgoda sesyjna to dwie osobne pamięci, nie jedna zamiast drugiej) — nigdy po Odrzuć, Przekieruj,
+  ani po cichej ścieżce `ApprovalManager.isAlwaysApproved` (ta w ogóle nie woła modala, więc pole
+  zostaje `undefined`). `DiffModal` (bez guzika „Zawsze zezwalaj" — tylko Zatwierdź/Odrzuć) trzyma
+  stan na PUBLICZNYM polu instancji (`rememberForSession`, czytanym z modala/fabryki PO
+  rozstrzygnięciu `waitForApproval()` — kontrakt `Promise<'approve'|'deny'>` się nie zmienił,
+  patrz `MCPClientOptions.diffModalFactory`), `ApprovalModal` (core→shell) dokłada je wprost do
+  `ApprovalModalResult` na OBU guzikach.
+- ⚠️ **Zgoda sesyjna działa TAKŻE w trybie autonomii `all` („pytaj o wszystko").** Świadome: user
+  jawnie zaznaczył checkbox dla TEGO KONKRETNEGO pliku - to ta sama, jednostkowa decyzja co
+  „Zawsze zezwalaj" (które też nie jest gaszone przez `all`), nie ogólne obniżenie progu pytań.
+  `all` nadal pyta o WSZYSTKO INNE - nowy plik, inne narzędzie, `delete` na tym samym pliku.
+- ⚠️ **Trzy równoległe zapisy JEDNEJ tury (`Promise.all` w `modules/agent-loop/AgentLoop.ts`) nie
+  mają prawa otworzyć trzech modali o JEDNĄ decyzję.** `executeToolCall` nie ma ani jednego
+  `await` między startem wywołania a bramką zgody sesyjnej, więc N równoległych zapisów na TĘ SAMĄ
+  ścieżkę w TEJ SAMEJ sesji dochodzi tam w TYM SAMYM ticku - bez dodatkowego mechanizmu
+  wszystkie sprawdziłyby `sessionWriteConsent.has()` PRZED rozstrzygnięciem pierwszego modala.
+  `MCPClient._withConsentQueue` (kolejka łańcuchów obietnic, klucz `${sessionKey}::${targetPath}`,
+  `null` = brak sesji/write → zero szeregowania) serializuje CAŁĄ decyzję (rekontrola + krok 6 +
+  krok 6b) per klucz: pierwsze wywołanie leci od razu, kolejne CZEKA aż poprzednie się rozstrzygnie
+  (fulfil ALBO reject — odmowa NIE MA PRAWA zablokować następnego w kolejce), a po obudzeniu
+  sprawdza `has()` PONOWNIE - jeśli poprzednie właśnie nadało zgodę, korzysta z niej. **Pamięć
+  ODMÓW (`_isDenied`/`_recordDenial`, osobny mechanizm bez pojęcia o sesji) jest zmierzona PRZED
+  wejściem do kolejki, nie wewnątrz zamkniętej funkcji** - inaczej odmowa zapisana przez PIERWSZE
+  wywołanie w kolejce cicho blokowałaby DRUGIE i TRZECIE, które zostały zlecone RÓWNOLEGLE, zanim
+  jakikolwiek modal się rozstrzygnął (odmowa jednego nie ma prawa "rozciągnąć się" na inne,
+  niezależnie zlecone wywołania). Różne ścieżki/różne sesje = różne klucze = zero szeregowania
+  między nimi. Testy: `core/security/security_integration.test.ts` (bloki `(l)`/`(m)`/`(n)`).
 
 ### Bezpieczne skróty, których świadomie NIE zrobiliśmy
 
