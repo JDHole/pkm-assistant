@@ -114,13 +114,17 @@ export class DiffModal extends Modal {
         // Checkbox „Nie pytaj więcej w tej sesji o zapisy do tego pliku" - TYLKO gdy wołacz
         // podał `rememberAvailable:true` (czyli `origin.sessionPath` jest znany - bez klucza
         // sesji `SessionWriteConsent` nie ma czego zapamiętać, patrz `MCPClient.ts` krok 6b).
+        // Checkbox ZAGNIEŻDŻONY w <label>, BEZ `id`/`htmlFor` - z kilkoma otwartymi modalami
+        // naraz (np. dwie zakładki czatu z zapisem w tej samej turze) stały `id` kolidowałby
+        // między instancjami, a klik w etykietę trafiałby zawsze w PIERWSZY modal w DOM-ie,
+        // nigdy w swój własny. Zagnieżdżenie działa natywnie - przeglądarka aktywuje kontrolkę
+        // wewnątrz `<label>` niezależnie od `id`.
         let rememberCheckbox: HTMLInputElement | null = null;
         if (this.opts.rememberAvailable) {
             const rememberRow = contentEl.createDiv('diff-remember');
-            rememberCheckbox = rememberRow.createEl('input', { type: 'checkbox' });
-            rememberCheckbox.id = 'pkm-diff-remember-session';
-            const label = rememberRow.createEl('label', { text: t('modal.diff.remember_session') });
-            label.htmlFor = rememberCheckbox.id;
+            const label = rememberRow.createEl('label');
+            rememberCheckbox = label.createEl('input', { type: 'checkbox' });
+            label.appendText(' ' + t('modal.diff.remember_session'));
         }
 
         // Buttons
