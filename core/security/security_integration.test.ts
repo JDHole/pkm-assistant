@@ -828,15 +828,18 @@ function makeRealApprovalManagerHarness(handler: (action: ApprovalAction) => App
             }
             : null,
     };
+    let diffCalls = 0;
     const client = new MCPClient(
         app as unknown as ConstructorParameters<typeof MCPClient>[0],
         plugin as unknown as ConstructorParameters<typeof MCPClient>[1],
         toolRegistry as unknown as ConstructorParameters<typeof MCPClient>[2],
-        // Krok 6b auto-zatwierdza CICHO (bez rememberForSession) - te testy mierzą WYŁĄCZNIE
-        // czy krok 6 (prawdziwy `ApprovalManager.requestApproval`) przepuszcza `rememberForSession`.
-        { diffModalFactory: () => ({ waitForApproval: async () => 'approve' }) },
+        // Krok 6b auto-zatwierdza CICHO (bez rememberForSession) - większość testów tego
+        // harnessu mierzy WYŁĄCZNIE, czy krok 6 (prawdziwy `ApprovalManager.requestApproval`)
+        // przepuszcza `rememberForSession`. `diffCalls` policzone niezależnie - test „always bez
+        // checkboxa" mierzy właśnie to, czy krok 6b W OGÓLE pyta (brak zgody sesyjnej = pyta).
+        { diffModalFactory: () => { diffCalls++; return { waitForApproval: async () => 'approve' }; } },
     );
-    return { client, files, getHandlerCalls: () => handlerCalls };
+    return { client, files, approvalManager, getHandlerCalls: () => handlerCalls, getDiffCalls: () => diffCalls };
 }
 
 test('(i) prawdziwy ApprovalManager: approve+rememberForSession:true -> drugi zapis do TEJ SAMEJ ścieżki w TEJ SAMEJ sesji NIE pyta', async t => {
@@ -866,20 +869,45 @@ test('(j) prawdziwy ApprovalManager: deny+rememberForSession:true (błędliwy ha
     t.is(h.getHandlerCalls(), 2, 'ApprovalManager.requestApproval() dla "deny" nie ma prawa oddać rememberForSession jako sygnału zgody - drugi zapis pyta ZNOWU');
 });
 
-test('(k) prawdziwy ApprovalManager: "always"+rememberForSession:true -> zgoda sesyjna działa TAK SAMO jak przy "approve"', async t => {
+test('(k) prawdziwy ApprovalManager: "always"+rememberForSession:true -> zgoda sesyjna działa TAK SAMO jak przy "approve" ORAZ reguła trwała jest zapisana', async t => {
     // "Zawsze zezwalaj" zapisuje TAKŻE regułę trwałą (`ApprovalManager.alwaysApproved`) - ten
-    // test mierzy WYŁĄCZNIE, że zgoda SESYJNA (RAM, `SessionWriteConsent`) też została nadana,
-    // niezależnie od tamtej. Gdyby jej nie było, drugi zapis pytałby ZNOWU mimo action=='always'.
+    // test mierzy, że zgoda SESYJNA (RAM, `SessionWriteConsent`) też została nadana, NIEZALEŻNIE
+    // od tamtej - i że REGUŁA TRWAŁA naprawdę powstała (nie tylko efemeryczna zgoda sesyjna).
     const h = makeRealApprovalManagerHarness(() => ({ result: 'always', rememberForSession: true }));
 
     const r1 = await writeCall(h.client, 'a.md', 'v1', 'S1');
     t.true(r1.success);
     t.is(h.getHandlerCalls(), 1);
+    t.true(h.approvalManager.isAlwaysApproved('Jaskier', 'vault.write', 'a.md'), 'reguła "Zawsze zezwalaj" ma być zapisana na dysk NIEZALEŻNIE od zaznaczonego checkboxa');
 
     const r2 = await writeCall(h.client, 'a.md', 'v2', 'S1');
     t.true(r2.success);
     t.is(h.getHandlerCalls(), 1, 'zgoda sesyjna z gałęzi "always" pomija kolejne pytanie tak samo jak z "approve"');
     t.is(h.files['a.md'], 'v2');
+});
+
+test('(k2) prawdziwy ApprovalManager: "always" BEZ checkboxa -> reguła trwała ISTNIEJE, ale zgoda SESYJNA nie - krok 6b nadal pyta', async t => {
+    // Rozróżnienie dwóch NIEZALEŻNYCH pamięci (mutacje R8/R9 z recenzji): reguła trwała
+    // "Zawsze zezwalaj" (`ApprovalManager.alwaysApproved`, dysk) powstaje ZAWSZE po kliknięciu
+    // tego guzika, niezależnie od checkboxa - ale zgoda SESYJNA (`SessionWriteConsent`, RAM,
+    // per plik+sesja) powstaje TYLKO gdy `rememberForSession` faktycznie przyszło jako `true`.
+    const h = makeRealApprovalManagerHarness(() => ({ result: 'always' }));
+
+    const r1 = await writeCall(h.client, 'a.md', 'v1', 'S1');
+    t.true(r1.success);
+    t.is(h.getHandlerCalls(), 1);
+    t.is(h.getDiffCalls(), 1, 'pierwszy zapis (plik nie istnieje, mode create) - krok 6b pyta');
+    t.true(h.approvalManager.isAlwaysApproved('Jaskier', 'vault.write', 'a.md'), 'reguła "Zawsze zezwalaj" zapisuje się NIEZALEŻNIE od stanu checkboxa');
+
+    const r2 = await writeCall(h.client, 'a.md', 'v2', 'S1');
+    t.true(r2.success);
+    // Krok 6 pomija pytanie dzięki TRWAŁEJ regule (isAlwaysApproved), NIE dzięki zgodzie
+    // sesyjnej - handler realnie nie jest wołany drugi raz, ale to inny mechanizm.
+    t.is(h.getHandlerCalls(), 1, 'krok 6 pomija pytanie dzięki isAlwaysApproved (cicha ścieżka), nie dzięki zgodzie sesyjnej');
+    // Krok 6b NIE ma pojęcia o regule trwałej - patrzy WYŁĄCZNIE na SessionWriteConsent. Bez
+    // zaznaczonego checkboxa (rememberForSession nieobecne) zgoda sesyjna nie powstała, więc
+    // diff ma pytać ZNOWU.
+    t.is(h.getDiffCalls(), 2, 'krok 6b PYTA ZNOWU - bez zaznaczonego checkboxa zgoda sesyjna nie powstała');
 });
 
 // ─── Równoległe tool-calle JEDNEJ tury (Promise.all w agent-loop/AgentLoop.ts) - bez kolejki
