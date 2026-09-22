@@ -47,6 +47,7 @@ import {
     formatDuration,
     formatUsageLine,
     resolveConsolidationThresholds,
+    planAutoConsolidation,
     STEP_KIND,
     STEP_STATUS,
 } from '../memory/index.js';
@@ -266,6 +267,16 @@ class RunController {
     declare _failNotified: Set<string>;
     declare _loggedUsage: LoggedUsage;
     declare _llmOptions: GenerateOptions;
+    /**
+     * Modal jest zamknięty W TEJ CHWILI (bug recenzji #7 „okno zamknięte podczas generowania").
+     * `onModalClosed()` na razie próbuje wyciszyć od razu (krok L1 może już być
+     * `awaiting_review`), ale gdy krok wciąż `running`/`pending`, flaga zostaje uzbrojona i
+     * `advance()` (wołane na końcu KAŻDEJ mutacji — `generate`/`retry`/`applyDecision`/`skip`)
+     * sprawdza ją znowu za każdym razem, aż L1 naprawdę dojdzie do `awaiting_review` - wtedy
+     * wycisza RAZ i gasi flagę. Otwarcie okna (`onModalOpened`) rozbraja flagę - user, który
+     * wrócił i PATRZY na modal, ma normalną szansę zdecydować.
+     */
+    declare _windowClosed: boolean;
 
     constructor({ plugin, app, run, workflow, agentMemory, agentName, model, settings }: RunControllerOptions) {
         this.plugin = plugin;
@@ -279,6 +290,7 @@ class RunController {
         this._finished = false;
         this._fallbackNotified = new Set();
         this._failNotified = new Set();
+        this._windowClosed = false;
         /** Ile tokenów już poszło do CostLog — przebieg może się domknąć kilka razy (Ponów). */
         this._loggedUsage = { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
         this._llmOptions = {
@@ -352,7 +364,7 @@ class RunController {
             // Wyciszenie — ten sam gest co odrzucenie w modalu review (`applyDecision` niżej ->
             // `ArchiveWorkflow.applyStepDecision`), tyle że guzik „Pomiń" NIE przechodzi przez
             // `applyStepDecision` (nie ma decyzji do zapisania, tylko świadome odpuszczenie).
-            if (step) await this.workflow.onStepRejected(step.kind);
+            if (step) await this.workflow.onStepRejected(step.kind, this.run);
         } catch (e) {
             log.warn('ConsolidationRunner', `skip(${stepId}): ${(e as ErrLike)?.message || String(e)}`);
         }
@@ -370,11 +382,36 @@ class RunController {
      * `consolidationRunState.ts`) — bez tego haka zamknięcie okna w tym stanie NIC by nie
      * wyciszyło, poprawnie zgodnie z "normalna przerwa, user może wrócić", ale user, który
      * WCALE nie wraca, dostawałby to samo pytanie o konsolidację przy każdym kolejnym zapisie.
+     *
+     * **Bug recenzji #7 „okno zamknięte podczas generowania".** Gdy user zamyka okno, zanim L1
+     * w ogóle doszedł do `awaiting_review` (wciąż `running`/`pending`), sprawdzenie NIŻEJ jest
+     * puste — ale flaga `_windowClosed` zostaje uzbrojona, a `advance()` (wołane na końcu
+     * generacji w tle) sprawdzi ją ponownie, gdy krok naprawdę dojdzie do `awaiting_review`.
      */
     onModalClosed(): void {
+        this._windowClosed = true;
+        this._trySilenceClosedWindow();
+    }
+
+    /** Modal przebiegu się otworzył (klik w 🧠 albo świeży start) — user PATRZY, więc rozbrajamy
+     *  flagę „okno zamknięte" (patrz `onModalClosed`) i dajemy mu normalną szansę zdecydować. */
+    onModalOpened(): void {
+        this._windowClosed = false;
+    }
+
+    /**
+     * Wyciszenie odroczone do chwili, w której krok L1 NAPRAWDĘ dojdzie do `awaiting_review`,
+     * podczas gdy okno jest (wciąż) zamknięte. Woła się z `onModalClosed()` (na wypadek, gdy L1
+     * już czeka w tej chwili) i z końca `advance()` (na wypadek, gdy generacja dogoni PO
+     * zamknięciu okna). Gasi flagę po pierwszym trafieniu — wyciszenie ma się zdarzyć RAZ na
+     * zamknięcie, nie przy każdym kolejnym `advance()`.
+     */
+    private _trySilenceClosedWindow(): void {
+        if (!this._windowClosed) return;
         const l1Pending = this.run.getStepsByKind(STEP_KIND.L1).some(s => s.status === STEP_STATUS.AWAITING_REVIEW);
         if (!l1Pending) return;
-        this.workflow.onStepRejected(STEP_KIND.L1).catch((e: unknown) =>
+        this._windowClosed = false;
+        this.workflow.onStepRejected(STEP_KIND.L1, this.run).catch((e: unknown) =>
             log.warn('ConsolidationRunner', `onModalClosed silence padło: ${(e as ErrLike)?.message || String(e)}`));
     }
 
@@ -400,6 +437,10 @@ class RunController {
                 break;
             }
         }
+        // Bug recenzji #7: `advance()` jest ogonem KAŻDEJ mutacji (`generate`/`retry`/
+        // `applyDecision`/`skip`) — jedyne wspólne miejsce, gdzie L1 może właśnie dojść do
+        // `awaiting_review` PO tym, jak okno zostało zamknięte wcześniej (podczas `running`).
+        this._trySilenceClosedWindow();
         this.finishIfSettled();
     }
 
@@ -575,6 +616,17 @@ export async function startConsolidationRun({ plugin, app, agentMemory, agent, m
         listUncoveredSummaries(agentMemory, 'l2'),
     ]);
 
+    // Obrona w głąb (recenzja #5): `source:'auto'` bez jawnego `include` (wołacz zapomniał go
+    // przekazać, albo to bezpośrednie wywołanie z testu/skryptu) liczy politykę SAM zamiast
+    // cicho spaść na pełny plan — `planAutoConsolidation` to JEDNO liczydło z
+    // `SaveSessionWorkflow.applyDecision` (te same wyłączniki × te same progi, w tym AND
+    // z „due" po DECYZJI recenzji #2 — patrz `consolidationStatus.ts`), więc obie ścieżki dają
+    // identyczny wynik. `source:'manual'` bez `include` zostaje pełnym planem — guzik ręczny w
+    // profilu agenta NIE czyta wyłączników auto-konsolidacji.
+    const effectiveInclude = include ?? (source === 'auto'
+        ? planAutoConsolidation(state, brainNotes.length, settings).include
+        : undefined);
+
     const steps = buildConsolidationPlan({
         archiveCount: uncoveredSessions.length,
         batchSize,
@@ -582,7 +634,7 @@ export async function startConsolidationRun({ plugin, app, agentMemory, agent, m
         dedupThreshold,
         l1Count: l1s.length,
         l2Count: l2s.length,
-    }, { include });
+    }, { include: effectiveInclude });
 
     if (steps.length === 0) {
         // Automat MILCZY na pusty plan. Licznik

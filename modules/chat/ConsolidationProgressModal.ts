@@ -44,6 +44,8 @@ interface ProgressController {
     finishIfSettled?(): unknown;
     /** Wyciszenie konsolidacji opcjonalnej — patrz `RunController.onModalClosed` w `consolidationRunner.ts`. */
     onModalClosed?(): unknown;
+    /** User znów PATRZY na okno — rozbraja flagę „okno zamknięte" (bug recenzji #7). */
+    onModalOpened?(): unknown;
 }
 
 interface ProgressModalOptions {
@@ -126,6 +128,11 @@ export class ConsolidationProgressModal extends Modal {
     }
 
     onOpen() {
+        // User znów PATRZY - rozbraja flagę "okno zamknięte podczas generowania" (bug recenzji
+        // #7), żeby normalnie zdecydować, gdy L1 dojdzie do awaiting_review. Best-effort: pad
+        // tego haka nie może zablokować otwarcia okna.
+        try { this.controller?.onModalOpened?.(); } catch { /* best-effort */ }
+
         const { contentEl, modalEl } = this;
         contentEl.empty();
         contentEl.addClass('cs-consolidation-modal');

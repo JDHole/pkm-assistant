@@ -59,3 +59,31 @@ test('modal.save_session.notes_failed istnieje w pl.ts i en.ts (z {{count}} i {{
         t.regex(text, re, `Klucz modal.save_session.notes_failed brakuje albo nie ma {{count}}/{{names}} w ${label}.ts`);
     }
 });
+
+// ── konsolidacja opcjonalna: `include` MUSI dojechać do startConsolidationRun (recenzja #4b) ──
+//
+// Test mutacyjny po źródle (ten sam powód co reszta pliku - `save_session.ts` importuje
+// `obsidian`, AVA nie zaimportuje go wprost). Bez tej linii `SaveSessionWorkflow.applyDecision`
+// policzyłby politykę wyłączników poprawnie, ale `startConsolidationRun` dostałby PEŁNY plan
+// (brak `include` = zachowanie sprzed auto-konsolidacji opcjonalnej) - odrzucona propozycja
+// wracałaby przy KAŻDYM zapisie sesji, mimo że `SaveSessionWorkflow` mówi inaczej. Obserwowalny
+// efekt tej dokładnej mutacji ("save_session nie przekazuje include") jest sprawdzony osobno,
+// na poziomie planu, w `consolidationRunner.test.ts` ("plan ma L1, BRAK dedup mimo materiału").
+
+test('runSaveSessionFlow przekazuje include: result.consolidationInclude do startConsolidationRun', t => {
+    const od = source.indexOf('if (result.shouldTriggerArchive)');
+    t.true(od >= 0, 'Nie znaleziono bramki `if (result.shouldTriggerArchive)` — zmienił się kształt handlera.');
+
+    const startIdx = source.indexOf('startConsolidationRun({', od);
+    t.true(startIdx >= 0, 'Nie znaleziono wywołania `startConsolidationRun` wewnątrz bramki triggera.');
+
+    const blok = source.slice(startIdx, source.indexOf('view.resetInputArea?.();', startIdx));
+    t.true(blok.length > 0, 'Pusty blok wywołania startConsolidationRun — zmienił się kształt handlera.');
+
+    t.regex(
+        blok,
+        /include:\s*result\.consolidationInclude/,
+        '`startConsolidationRun` nie dostaje `include: result.consolidationInclude` — odrzucona propozycja mogłaby wrócić przy KAŻDYM kolejnym zapisie sesji, niezależnie od wyłączników auto-konsolidacji.',
+    );
+    t.true(blok.includes("source: 'auto'"), 'Wywołanie musi zostać oznaczone jako trigger automatyczny.');
+});

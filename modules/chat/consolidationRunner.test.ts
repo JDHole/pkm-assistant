@@ -679,6 +679,224 @@ test.serial('„Pomiń" na padniętej paczce L1 odblokowuje bramkę L2', async t
     t.is(run.getStep('l2').status, STEP_STATUS.AWAITING_REVIEW, 'świadome odpuszczenie zdjęło kłódkę');
 });
 
+// ── wyciszenie przez „Pomiń" (ta sama ścieżka co odrzucenie w modalu review) ────────
+
+test.serial('„Pomiń" na kroku L1 zeruje licznik sesji (ta sama ścieżka co applyStepDecision(accepted:false))', async t => {
+    const env = makeEnv({
+        files: {
+            ...archiveWith(2),
+            [`${BASE}/.state.json`]: JSON.stringify({ archived_since_last_consolidation: 7 }),
+        },
+        script: ['SILENT', 'SILENT'],
+        settings: { memoryV3ArchiveBatchSize: 2 },
+    });
+
+    const run = await env.start();
+    await waitStatus(run, 'l1_batch_1', STEP_STATUS.FAILED);
+
+    await controllerOf(run).skip('l1_batch_1');
+
+    t.is(run.getStep('l1_batch_1').status, STEP_STATUS.SKIPPED);
+    t.is(JSON.parse(env.files[`${BASE}/.state.json`]).archived_since_last_consolidation, 0);
+});
+
+test.serial('„Pomiń" na kroku DEDUP podbija limit notatek brain/ (ta sama ścieżka co applyStepDecision(accepted:false))', async t => {
+    const env = makeEnv({
+        files: {
+            [`${BASE}/brain/user_a.md`]: brainNoteFile('A', 'user'),
+            [`${BASE}/brain/user_b.md`]: brainNoteFile('B', 'user'),
+        },
+        script: ['SILENT', 'SILENT'],
+    });
+
+    const run = await env.start();
+    await waitStatus(run, 'dedup', STEP_STATUS.FAILED);
+
+    await controllerOf(run).skip('dedup');
+
+    t.is(run.getStep('dedup').status, STEP_STATUS.SKIPPED);
+    t.is(JSON.parse(env.files[`${BASE}/.state.json`]).brain_notes_limit, 30, '20 default + 10 bump');
+});
+
+// ── błąd generowania NIE jest decyzją usera - NIE wycisza ──────────────────────────
+
+test.serial('błąd generowania (L1 stall x2 -> failed) + zamknięcie okna -> licznik BEZ ZMIAN', async t => {
+    const env = makeEnv({
+        files: {
+            ...archiveWith(2),
+            [`${BASE}/.state.json`]: JSON.stringify({ archived_since_last_consolidation: 7 }),
+        },
+        script: ['SILENT', 'SILENT'],
+        settings: { memoryV3ArchiveBatchSize: 2 },
+    });
+
+    const run = await env.start();
+    await waitStatus(run, 'l1_batch_1', STEP_STATUS.FAILED);
+
+    controllerOf(run).onModalClosed();
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    t.is(run.getStep('l1_batch_1').status, STEP_STATUS.FAILED, 'krok zostaje failed - zamknięcie okna nic w nim nie zmienia');
+    t.is(JSON.parse(env.files[`${BASE}/.state.json`]).archived_since_last_consolidation, 7, 'pad generacji NIE jest decyzją usera - licznik nietknięty');
+});
+
+// ── przekazanie `include` do planu (skutek obserwowalny, nie tylko przekazanie referencji) ──
+
+test.serial('include {sessions:true, dedup:false} (symulacja: brain OFF, sesje ON) -> plan ma L1, BRAK dedup mimo materiału', async t => {
+    // Symuluje dokładnie to, co `save_session.ts` przekazuje do `startConsolidationRun`, gdy
+    // `SaveSessionWorkflow.applyDecision` -> `planAutoConsolidation` policzy politykę „sesje ON,
+    // brain OFF". Materiał na OBIE gałęzie jest obecny (2 notatki brain/ + 2 sesje archiwum) -
+    // gdyby `include` się nie przełożyło na plan, dedup wszedłby mimo wyłączonego wyłącznika.
+    const env = makeEnv({
+        files: {
+            ...archiveWith(2),
+            [`${BASE}/brain/user_a.md`]: brainNoteFile('A', 'user'),
+            [`${BASE}/brain/user_b.md`]: brainNoteFile('B', 'user'),
+        },
+        settings: { memoryV3ArchiveBatchSize: 2 },
+    });
+
+    const run = await env.start({ source: 'auto', include: { sessions: true, dedup: false } });
+
+    t.truthy(run);
+    t.false(run.getSteps().some(s => s.kind === 'dedup'), 'DEDUP nie ma prawa wejść do planu - include.dedup=false');
+    t.true(run.getSteps().some(s => s.kind === 'l1'), 'L1 wchodzi - include.sessions=true');
+});
+
+// ── obrona w głąb: `source:'auto'` bez jawnego `include` liczy politykę SAMA ────────
+
+test.serial('source:auto BEZ include, oba wyłączniki OFF w ustawieniach -> pusty plan mimo materiału (obrona w głąb)', async t => {
+    const env = makeEnv({
+        files: {
+            ...archiveWith(2),
+            [`${BASE}/brain/user_a.md`]: brainNoteFile('A', 'user'),
+            [`${BASE}/brain/user_b.md`]: brainNoteFile('B', 'user'),
+        },
+        settings: { memoryV3ArchiveBatchSize: 2 }, // brak memoryV3AutoConsolidate* -> oba OFF
+    });
+
+    const run = await env.start({ source: 'auto' }); // BEZ include - runner ma je policzyć sam
+
+    t.is(run, null as unknown as TestRun, 'polityka policzona wewnątrz runnera daje pusty plan, tak jak z SaveSessionWorkflow');
+});
+
+test.serial('source:auto BEZ include, memoryV3AutoConsolidateSessions:true w ustawieniach -> runner liczy include SAM (L1 wchodzi, dedup nie)', async t => {
+    const env = makeEnv({
+        files: {
+            ...archiveWith(2),
+            [`${BASE}/brain/user_a.md`]: brainNoteFile('A', 'user'),
+            [`${BASE}/brain/user_b.md`]: brainNoteFile('B', 'user'),
+            // Próg sesji (domyślnie 10) musi być PRZEBITY, żeby `planAutoConsolidation` uznał
+            // sesje za „due" - samo `memoryV3AutoConsolidateSessions:true` bez przebitego progu
+            // dałoby `includeSessions:false` (DECYZJA recenzji: wyłącznik ORAZ próg).
+            [`${BASE}/.state.json`]: JSON.stringify({ archived_since_last_consolidation: 10 }),
+        },
+        settings: { memoryV3ArchiveBatchSize: 2, memoryV3AutoConsolidateSessions: true },
+    });
+
+    const run = await env.start({ source: 'auto' });
+
+    t.truthy(run);
+    t.true(run.getSteps().some(s => s.kind === 'l1'), 'runner policzył politykę sam - sesje ON i due -> L1 wchodzi');
+    t.false(run.getSteps().some(s => s.kind === 'dedup'), 'brain OFF - dedup nie wchodzi mimo 2 notatek');
+});
+
+test.serial('source:manual BEZ include -> pełny plan (guzik ręczny NIE czyta wyłączników)', async t => {
+    const env = makeEnv({
+        files: {
+            ...archiveWith(2),
+            [`${BASE}/brain/user_a.md`]: brainNoteFile('A', 'user'),
+            [`${BASE}/brain/user_b.md`]: brainNoteFile('B', 'user'),
+        },
+        settings: { memoryV3ArchiveBatchSize: 2 }, // oba wyłączniki OFF - manual ma to zignorować
+    });
+
+    const run = await env.start({ source: 'manual' });
+
+    t.truthy(run);
+    t.true(run.getSteps().some(s => s.kind === 'l1'), 'manual = pełny plan niezależnie od wyłączników');
+    t.true(run.getSteps().some(s => s.kind === 'dedup'), 'manual = pełny plan niezależnie od wyłączników');
+});
+
+// ── podwójny reset (bug recenzji #6) ────────────────────────────────────────────────
+
+test.serial('podwójny reset: zamknięcie okna zeruje licznik, nowe sesje narastają, akceptacja TEJ SAMEJ paczki L1 NIE zeruje drugi raz', async t => {
+    const env = makeEnv({
+        files: {
+            ...archiveWith(2),
+            [`${BASE}/.state.json`]: JSON.stringify({ archived_since_last_consolidation: 10 }),
+        },
+        settings: { memoryV3ArchiveBatchSize: 2 },
+    });
+
+    const run = await env.start();
+    await waitStatus(run, 'l1_batch_1', STEP_STATUS.AWAITING_REVIEW);
+
+    // 1) Zamknięcie okna z L1 wciąż awaiting_review -> wyciszenie, licznik 10 -> 0.
+    controllerOf(run).onModalClosed();
+    await waitUntil(() => JSON.parse(env.files[`${BASE}/.state.json`]).archived_since_last_consolidation === 0,
+        'licznik zerowany po zamknięciu okna');
+
+    // 2) User zapisuje 3 NOWE sesje (spoza tej paczki) - licznik narasta niezależnie.
+    await env.memory.stateManager.markArchived('inna_sesja_1.md');
+    await env.memory.stateManager.markArchived('inna_sesja_2.md');
+    await env.memory.stateManager.markArchived('inna_sesja_3.md');
+    t.is(JSON.parse(env.files[`${BASE}/.state.json`]).archived_since_last_consolidation, 3);
+
+    // 3) User WRACA do TEGO SAMEGO przebiegu (żyje dalej w memoryOpsCenter) i mimo wszystko
+    //    akceptuje paczkę L1, którą przed chwilą "odrzucił" zamknięciem okna. Drugi reset
+    //    skasowałby te 3 nowe sesje - `run.meta.consolidationSilenced` ma temu zapobiec.
+    await controllerOf(run).applyDecision('l1_batch_1', { accepted: true });
+
+    t.is(run.getStep('l1_batch_1').status, STEP_STATUS.DONE);
+    t.is(JSON.parse(env.files[`${BASE}/.state.json`]).archived_since_last_consolidation, 3,
+        'akceptacja PO wyciszeniu tego samego przebiegu NIE zeruje licznika drugi raz - 3 nowe sesje przeżywają');
+});
+
+// ── okno zamknięte W TRAKCIE generowania (bug recenzji #7) ──────────────────────────
+
+test.serial('okno zamknięte podczas generowania L1 (status running) NIE wycisza od razu; wycisza dopiero gdy L1 dojdzie do awaiting_review', async t => {
+    const env = makeEnv({
+        files: {
+            ...archiveWith(2),
+            [`${BASE}/.state.json`]: JSON.stringify({ archived_since_last_consolidation: 7 }),
+        },
+        settings: { memoryV3ArchiveBatchSize: 2 },
+    });
+    // Bramka STEROWANA PRZEZ TEST zamiast zgadywanego opóźnienia (`setTimeout` z ustaloną
+    // liczbą ms albo zawisa za krótko, żeby złapać `running` przez polling, albo za długo i
+    // wpada w watchdog zwisu - `settings.limits.chat_stream_stall_timeout_ms` w tym środowisku
+    // to 30ms). Model wisi w `running` DOPÓKI test sam nie zwolni bramki - `waitStatus` poniżej
+    // złapie `running` deterministycznie (nic innego go stamtąd nie ruszy), a czas między
+    // złapaniem a zwolnieniem to czysty, synchroniczny JS (mikrosekundy) - bezpiecznie pod
+    // progiem zwisu.
+    let releaseModel: (() => void) | null = null;
+    const gate = new Promise<void>(resolve => { releaseModel = resolve; });
+    env.model.stream = (req, handlers) => {
+        env.model.calls.push(req);
+        void gate.then(() => handlers.done({
+            choices: [{ message: { content: 'Opóźnione streszczenie' } }],
+            usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }));
+    };
+
+    const run = await env.start();
+    await waitStatus(run, 'l1_batch_1', STEP_STATUS.RUNNING);
+
+    // Zamknięcie PODCZAS generowania - krok NIE jest jeszcze awaiting_review.
+    controllerOf(run).onModalClosed();
+    t.is(JSON.parse(env.files[`${BASE}/.state.json`]).archived_since_last_consolidation, 7,
+        'zamknięcie podczas running NIE wycisza natychmiast - nic jeszcze nie czeka na decyzję');
+
+    // Zwalniamy bramkę - generacja dogania, L1 dochodzi do awaiting_review PO tym, jak okno
+    // już było zamknięte. `advance()` (ogon `generate()`) ma wtedy wyciszyć sam, bez kolejnego
+    // kliknięcia usera.
+    releaseModel!();
+    await waitUntil(() => JSON.parse(env.files[`${BASE}/.state.json`]).archived_since_last_consolidation === 0,
+        'licznik zerowany, gdy L1 dogonił do awaiting_review przy oknie wciąż zamkniętym');
+    t.is(run.getStep('l1_batch_1').status, STEP_STATUS.AWAITING_REVIEW, 'krok sam w sobie zostaje nietknięty - wyciszenie NIE aplikuje decyzji');
+});
+
 // ── wyciszenie po zamknięciu okna (konsolidacja opcjonalna) ────────────────────────
 
 test.serial('onModalClosed: L1 wciąż `awaiting_review` przy zamknięciu okna liczy się jak odrzucenie (licznik → 0)', async t => {
@@ -716,13 +934,18 @@ test.serial('onModalClosed: krok L1 JUŻ rozstrzygnięty (done) → nic nie rusz
     await controllerOf(run).applyDecision('l1_batch_1', { accepted: true });
     t.is(run.getStep('l1_batch_1').status, STEP_STATUS.DONE);
 
-    // Zaakceptowana paczka już wyzerowała licznik przez `_writeLevel1` — sprawdzamy, że
-    // `onModalClosed` na w pełni rozstrzygniętym przebiegu jest no-opem, nie że coś się popsuje.
-    const before = JSON.parse(env.files[`${BASE}/.state.json`]).archived_since_last_consolidation;
-    t.is(before, 0);
+    // Zaakceptowana paczka już wyzerowała licznik przez `_writeLevel1` (0 przed I po - test
+    // recenzji #4a: to samo w sobie NIE dowodzi, że `onModalClosed` jest no-opem, bo padnięty
+    // hak, który po cichu nic by nie ruszył, też dałby 0->0). Podbijamy licznik RĘCZNIE na
+    // nie-zerową wartość (symulacja: user zdążył zapisać kolejne sesje PO akceptacji L1, w
+    // trakcie gdy modal wciąż wisiał otwarty) i sprawdzamy, że `onModalClosed` na w pełni
+    // rozstrzygniętym przebiegu GO NIE RUSZA - realna zmiana byłaby wykrywalna.
+    await env.memory.stateManager.update((state) => { state.archived_since_last_consolidation = 3; });
+    t.is(JSON.parse(env.files[`${BASE}/.state.json`]).archived_since_last_consolidation, 3);
+
     controllerOf(run).onModalClosed();
     await new Promise(resolve => setTimeout(resolve, 20));
-    t.is(JSON.parse(env.files[`${BASE}/.state.json`]).archived_since_last_consolidation, 0);
+    t.is(JSON.parse(env.files[`${BASE}/.state.json`]).archived_since_last_consolidation, 3, 'onModalClosed na rozstrzygniętym przebiegu jest no-opem - licznik zostaje NIETKNIĘTY');
 });
 
 // ── okno przebiegu ────────────────────────────────────────────────────────────────
