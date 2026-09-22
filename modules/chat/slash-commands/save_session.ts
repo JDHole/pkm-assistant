@@ -256,6 +256,11 @@ export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandCon
             // Trigger automatyczny (próg / idle-scheduler). Pusty plan = cisza, nie notice
             // po każdym zapisie sesji.
             source: 'auto',
+            // Konsolidacja opcjonalna: które gałęzie planu wpuścić — polityka DWÓCH wyłączników
+            // usera (`resolveAutoConsolidationPolicy`), policzona razem z `shouldTriggerArchive`
+            // w `SaveSessionWorkflow.applyDecision`. Ręczny guzik w profilu agenta NIE przechodzi
+            // przez to wywołanie — zostaje bez `include`, czyli pełny plan.
+            include: result.consolidationInclude,
         }).catch((e: unknown) => {
             log.error('SaveSession', `Start konsolidacji padł: ${(e as ErrLike)?.message || String(e)}`);
             new Notice(t('memory.consolidation.notice_error', { reason: (e as ErrLike)?.message || String(e) }), 6000);

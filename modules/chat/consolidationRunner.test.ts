@@ -347,6 +347,29 @@ test.serial('pusty plan z triggera RĘCZNEGO nadal odpowiada („nie ma czego ko
     t.is(env.kinds('nothing').length, 1, 'guzik usera musi dać odpowiedź');
 });
 
+test.serial('konsolidacja opcjonalna: `include` {sessions:false, dedup:false} (oba wyłączniki OFF) → ZERO przebiegu mimo materiału NAD progiem', async t => {
+    // Materiał na 1 paczkę L1 istnieje (archiveWith(2), batchSize:2) — bez `include` startowałby
+    // przebieg (patrz test „plan z liczników" niżej). To jest dokładnie to, co
+    // `SaveSessionWorkflow.applyDecision` -> `save_session.ts` przekaże, gdy oba wyłączniki
+    // auto-konsolidacji (`memoryV3AutoConsolidateSessions`/`Brain`) są domyślnie WYŁĄCZONE:
+    // `planAutoConsolidation` daje `include:{sessions:false, dedup:false}` i `trigger:false` — ale
+    // nawet gdyby coś wywołało `startConsolidationRun` mimo `trigger:false` (obrona w głąb), plan
+    // wychodzi PUSTY i nic się nie dzieje. Obserwowalny skutek, nie sam brak wywołania mocka:
+    // centrum zostaje wolne, zero modali, zero notice'ów (source: 'auto').
+    const env = makeEnv({
+        files: archiveWith(2),
+        settings: { memoryV3ArchiveBatchSize: 2 },
+    });
+
+    const run = await env.start({ source: 'auto', include: { sessions: false, dedup: false } });
+
+    t.is(run, null as unknown as TestRun);
+    t.is(memoryOpsCenter.getActiveRun(), null, 'centrum zostaje wolny — żaden przebieg nie wystartował');
+    t.is(modals.length, 0, 'zero okien');
+    t.is(env.notices.length, 0, 'automat milczy jak przy każdym innym pustym planie');
+    t.is(env.model.calls.length, 0, 'zero strzałów do modelu — nic nie wygenerowano');
+});
+
 test.serial('plan z liczników → przebieg w centrum + notice startowy + JEDNO okno', async t => {
     const env = makeEnv({
         files: archiveWith(2),
@@ -654,6 +677,52 @@ test.serial('„Pomiń" na padniętej paczce L1 odblokowuje bramkę L2', async t
 
     t.is(run.getStep('l1_batch_2').status, STEP_STATUS.SKIPPED);
     t.is(run.getStep('l2').status, STEP_STATUS.AWAITING_REVIEW, 'świadome odpuszczenie zdjęło kłódkę');
+});
+
+// ── wyciszenie po zamknięciu okna (konsolidacja opcjonalna) ────────────────────────
+
+test.serial('onModalClosed: L1 wciąż `awaiting_review` przy zamknięciu okna liczy się jak odrzucenie (licznik → 0)', async t => {
+    const env = makeEnv({
+        files: {
+            ...archiveWith(2),
+            [`${BASE}/.state.json`]: JSON.stringify({ archived_since_last_consolidation: 7 }),
+        },
+        settings: { memoryV3ArchiveBatchSize: 2 },
+    });
+
+    const run = await env.start();
+    await waitStatus(run, 'l1_batch_1', STEP_STATUS.AWAITING_REVIEW);
+
+    controllerOf(run).onModalClosed();
+    await waitUntil(() => JSON.parse(env.files[`${BASE}/.state.json`]).archived_since_last_consolidation === 0,
+        'licznik zerowany po zamknięciu okna z L1 niezdecydowanym');
+
+    // Sesje zostają niepokryte — krok jest dalej `awaiting_review`, nic nie zostało zapisane.
+    t.is(run.getStep('l1_batch_1').status, STEP_STATUS.AWAITING_REVIEW);
+    t.false(memoryOpsCenter.getActiveRun() === null, 'przebieg dalej żyje — user może wrócić klikiem w 🧠');
+});
+
+test.serial('onModalClosed: krok L1 JUŻ rozstrzygnięty (done) → nic nie rusza (brak L1 niezdecydowanego)', async t => {
+    const env = makeEnv({
+        files: {
+            ...archiveWith(2),
+            [`${BASE}/.state.json`]: JSON.stringify({ archived_since_last_consolidation: 7 }),
+        },
+        settings: { memoryV3ArchiveBatchSize: 2 },
+    });
+
+    const run = await env.start();
+    await waitStatus(run, 'l1_batch_1', STEP_STATUS.AWAITING_REVIEW);
+    await controllerOf(run).applyDecision('l1_batch_1', { accepted: true });
+    t.is(run.getStep('l1_batch_1').status, STEP_STATUS.DONE);
+
+    // Zaakceptowana paczka już wyzerowała licznik przez `_writeLevel1` — sprawdzamy, że
+    // `onModalClosed` na w pełni rozstrzygniętym przebiegu jest no-opem, nie że coś się popsuje.
+    const before = JSON.parse(env.files[`${BASE}/.state.json`]).archived_since_last_consolidation;
+    t.is(before, 0);
+    controllerOf(run).onModalClosed();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    t.is(JSON.parse(env.files[`${BASE}/.state.json`]).archived_since_last_consolidation, 0);
 });
 
 // ── okno przebiegu ────────────────────────────────────────────────────────────────

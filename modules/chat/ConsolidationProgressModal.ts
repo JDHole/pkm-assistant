@@ -42,6 +42,8 @@ interface ProgressController {
     skip?(stepId: string): unknown;
     getModelName?(): string | undefined;
     finishIfSettled?(): unknown;
+    /** Wyciszenie konsolidacji opcjonalnej — patrz `RunController.onModalClosed` w `consolidationRunner.ts`. */
+    onModalClosed?(): unknown;
 }
 
 interface ProgressModalOptions {
@@ -170,6 +172,9 @@ export class ConsolidationProgressModal extends Modal {
         // naturalny moment. Gdy przebieg jeszcze leci, NIC nie przerywamy.
         try { this.controller?.finishIfSettled?.(); } catch { /* best-effort */ }
         try { this._releaseIfStuck(); } catch { /* best-effort */ }
+        // Konsolidacja opcjonalna: L1 zostawiony `awaiting_review` przy zamknięciu okna liczy się
+        // jak odrzucenie - patrz `RunController.onModalClosed`. Fire-and-forget, best-effort.
+        try { this.controller?.onModalClosed?.(); } catch { /* best-effort */ }
         this._onClosed?.();
     }
 
