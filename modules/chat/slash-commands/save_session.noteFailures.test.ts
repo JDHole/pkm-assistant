@@ -59,3 +59,20 @@ test('modal.save_session.notes_failed istnieje w pl.ts i en.ts (z {{count}} i {{
         t.regex(text, re, `Klucz modal.save_session.notes_failed brakuje albo nie ma {{count}}/{{names}} w ${label}.ts`);
     }
 });
+
+// ── konsolidacja opcjonalna: `include` (recenzja #4b, doprecyzowane N4 recenzji rundy 3) ──
+//
+// Ten plik nie sprawdza już OKABLOWANIA `include: result.consolidationInclude` po źródle
+// (usunięty test „przekazuje include" przypinał tekst kodu - regex nad blokiem wywołania
+// `startConsolidationRun`, bez odpalenia realnej logiki). `startConsolidationRun` ma OBRONĘ
+// W GŁĄB: gdy `source:'auto'` przyjdzie BEZ jawnego `include` (np. dlatego, że ten handler
+// zapomniałby go przekazać), runner liczy politykę SAM przez `planAutoConsolidation` - ten sam
+// wynik co `SaveSessionWorkflow.applyDecision`. Skutek KOŃCOWY (brain OFF + sesje ON -> plan ma
+// L1, BRAK dedup mimo materiału na obie gałęzie) jest więc sprawdzony behawioralnie, bez zależności
+// od tego pliku, w `consolidationRunner.test.ts`:
+//  - `'include {sessions:true, dedup:false} (symulacja: brain OFF, sesje ON) -> plan ma L1, BRAK
+//     dedup mimo materiału'` (include przekazane jawnie - kształt, jaki realnie wysyła
+//     `save_session.ts`),
+//  - `'source:auto BEZ include, memoryV3AutoConsolidateSessions:true w ustawieniach -> runner
+//     liczy include SAM (L1 wchodzi, dedup nie)'` (obrona w głąb - dowodzi, że skutek końcowy
+//     zostaje poprawny NAWET gdyby ten handler przestał przekazywać `include`).

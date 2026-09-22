@@ -28,6 +28,9 @@
  * modal w stan, którego nikt nie przewidział.
  */
 
+import { CONSOLIDATION_DEFAULTS } from './consolidationStatus.js';
+import type { AutoConsolidationInclude } from './consolidationStatus.js';
+
 /** Statusy kroku. */
 export const STEP_STATUS = {
     PENDING: 'pending',
@@ -118,7 +121,7 @@ export interface ConsolidationStepApplied {
 /** Specyfikacja kroku (bez stanu runtime) - wynik `buildPlan` albo wejście z testu/UI. */
 export interface ConsolidationStepSpec {
     id: string;
-    kind: string;
+    kind: StepKind;
     status?: StepStatus;
     index?: number;
     total?: number;
@@ -128,7 +131,7 @@ export interface ConsolidationStepSpec {
 /** Krok przebiegu ze stanem runtime. */
 export interface ConsolidationStep {
     id: string;
-    kind: string;
+    kind: StepKind;
     status: StepStatus;
     index: number | null;
     total: number | null;
@@ -189,16 +192,41 @@ export interface BuildPlanCounts {
 }
 
 /**
+ * Które gałęzie planu budować - patrz `buildPlan`, parametr `include`. Kształt `{sessions,
+ * dedup}` jest DOKŁADNIE `AutoConsolidationInclude` z `consolidationStatus.ts` (jeden typ, dwa
+ * aliasy) - `planAutoConsolidation` produkuje ten sam kształt, który `buildPlan` konsumuje;
+ * druga, osobna deklaracja tego samego worka pól rozjechałaby się przy pierwszej zmianie.
+ */
+export type BuildPlanInclude = AutoConsolidationInclude;
+
+/** Opcje `buildPlan` poza liczbami wejściowymi. */
+export interface BuildPlanOptions {
+    /**
+     * Które gałęzie w ogóle budować. Domyślnie (brak pola albo cały `options`) OBIE `true` -
+     * zachowanie identyczne jak przed dodaniem auto-konsolidacji opcjonalnej. Auto-trigger po
+     * zapisie sesji (`consolidationRunner.startConsolidationRun`) podaje tu wynik
+     * `planAutoConsolidation(...).include` (`consolidationStatus.ts`); ręczna konsolidacja
+     * (guzik w profilu agenta) zostawia pole puste = pełny plan.
+     */
+    include?: BuildPlanInclude;
+}
+
+const FULL_INCLUDE: BuildPlanInclude = { sessions: true, dedup: true };
+
+/**
  * Buduje plan kroków z samych liczników - czysta funkcja, zero I/O.
  *
  * Reguły:
- * - `dedup` planowany, gdy w `brain/` są ≥ 2 notatki (poniżej `proposeDedup` i tak nic nie zwróci).
- *   `dedupThreshold` jest metadanymi kroku - o tym, CZY w ogóle startować przebieg, decyduje caller.
- * - `l1_batch_k` - po jednej paczce na każde pełne `batchSize` sesji w `sessions/archive`
- *   (60 sesji / 5 = 12 paczek; 3 sesje = 0 paczek).
- * - `l2` / `l3` planowane TYLKO wtedy, gdy hierarchia MOŻE się wydarzyć: L2 gdy istniejące L1
- *   plus nowe paczki dają ≥ batchSize, L3 analogicznie względem L2. Inaczej nie ma ich w planie
- *   w ogóle - user nie ma oglądać kroków, które i tak by się nie odpaliły.
+ * - `dedup` planowany, gdy `include.dedup` (domyślnie `true`) i w `brain/` są ≥ 2 notatki
+ *   (poniżej `proposeDedup` i tak nic nie zwróci). `dedupThreshold` jest metadanymi kroku - o tym,
+ *   CZY w ogóle startować przebieg, decyduje caller.
+ * - `l1_batch_k` - gdy `include.sessions` (domyślnie `true`), po jednej paczce na każde pełne
+ *   `batchSize` sesji w `sessions/archive` (60 sesji / 5 = 12 paczek; 3 sesje = 0 paczek).
+ *   `include.sessions === false` daje ZERO paczek L1 - i przez to (patrz niżej) też zero L2/L3,
+ *   bo obie gałęzie kaskadują z L1.
+ * - `l2` / `l3` planowane TYLKO wtedy, gdy `include.sessions` i hierarchia MOŻE się wydarzyć: L2
+ *   gdy istniejące L1 plus nowe paczki dają ≥ batchSize, L3 analogicznie względem L2. Inaczej nie
+ *   ma ich w planie w ogóle - user nie ma oglądać kroków, które i tak by się nie odpaliły.
  * - `l2`/`l3` startują jako `gated` (kłódka) - odblokowuje je dopiero rozstrzygnięcie L1.
  *
  * @param counts.archiveCount - plików w `sessions/archive`
@@ -207,20 +235,24 @@ export interface BuildPlanCounts {
  * @param counts.dedupThreshold - próg dedupu (metadane kroku)
  * @param counts.l1Count - istniejących plików L1
  * @param counts.l2Count - istniejących plików L2
+ * @param options.include - które gałęzie budować (patrz `BuildPlanOptions`)
  * @returns specyfikacje kroków (bez stanu runtime)
  */
-export function buildPlan({
-    archiveCount = 0,
-    batchSize = 5,
-    brainNotesCount = 0,
-    dedupThreshold = 20,
-    l1Count = 0,
-    l2Count = 0,
-}: BuildPlanCounts = {}): ConsolidationStepSpec[] {
-    const size = Math.max(1, Number(batchSize) || 5);
+export function buildPlan(
+    {
+        archiveCount = 0,
+        batchSize = CONSOLIDATION_DEFAULTS.batchSize,
+        brainNotesCount = 0,
+        dedupThreshold = CONSOLIDATION_DEFAULTS.brainNotesLimit,
+        l1Count = 0,
+        l2Count = 0,
+    }: BuildPlanCounts = {},
+    { include = FULL_INCLUDE }: BuildPlanOptions = {},
+): ConsolidationStepSpec[] {
+    const size = Math.max(1, Number(batchSize) || CONSOLIDATION_DEFAULTS.batchSize);
     const steps: ConsolidationStepSpec[] = [];
 
-    if (Number(brainNotesCount) >= 2) {
+    if (include.dedup && Number(brainNotesCount) >= 2) {
         steps.push({
             id: STEP_KIND.DEDUP,
             kind: STEP_KIND.DEDUP,
@@ -229,7 +261,9 @@ export function buildPlan({
         });
     }
 
-    const l1Batches = Math.max(0, Math.floor(Math.max(0, Number(archiveCount) || 0) / size));
+    const l1Batches = include.sessions
+        ? Math.max(0, Math.floor(Math.max(0, Number(archiveCount) || 0) / size))
+        : 0;
     for (let index = 1; index <= l1Batches; index++) {
         steps.push({
             id: `l1_batch_${index}`,
@@ -245,7 +279,7 @@ export function buildPlan({
         });
     }
 
-    const l2Possible = (Math.max(0, Number(l1Count) || 0) + l1Batches) >= size;
+    const l2Possible = include.sessions && (Math.max(0, Number(l1Count) || 0) + l1Batches) >= size;
     if (l2Possible) {
         steps.push({
             id: STEP_KIND.L2,
@@ -255,7 +289,7 @@ export function buildPlan({
         });
     }
 
-    const l3Possible = (Math.max(0, Number(l2Count) || 0) + (l2Possible ? 1 : 0)) >= size;
+    const l3Possible = include.sessions && (Math.max(0, Number(l2Count) || 0) + (l2Possible ? 1 : 0)) >= size;
     if (l3Possible) {
         steps.push({
             id: STEP_KIND.L3,
@@ -344,7 +378,7 @@ export class ConsolidationRun {
 
     getStep(stepId: string): ConsolidationStep | null { return this.steps.find(s => s.id === stepId) || null; }
 
-    getStepsByKind(kind: string): ConsolidationStep[] { return this.steps.filter(s => s.kind === kind); }
+    getStepsByKind(kind: StepKind): ConsolidationStep[] { return this.steps.filter(s => s.kind === kind); }
 
     /** Krok, który AKTUALNIE coś robi (do paska statusu). Null, gdy nic nie mieli. */
     getActiveStep(): ConsolidationStep | null {

@@ -2,6 +2,7 @@ import { ConsolidationSnapshot } from './ConsolidationSnapshot.js';
 import { makeMemoryNoteFilename } from './MemoryAccessGuard.js';
 import { streamToComplete, STREAM_ERROR_CODES } from './streamHelper.js';
 import { STEP_KIND, STEP_STATUS } from './ConsolidationRun.js';
+import { CONSOLIDATION_DEFAULTS, resolveConsolidationThresholds } from './consolidationStatus.js';
 import { resolveWorkPrompt, probeFile } from '../../core/index.js';
 import { factoryWorkPrompt } from './workPrompts.js';
 import { getLimits } from '../../config/limits.js';
@@ -13,6 +14,7 @@ import type {
     ConsolidationStep,
     ConsolidationStepApplied,
     ConsolidationStepResult,
+    StepKind,
 } from './ConsolidationRun.js';
 // Wynik stemplowania sesji po zapisie L1 jedzie do zwrotki kroku.
 import type { L1StampOutcome, L1StampSkip } from './AgentMemory.js';
@@ -229,7 +231,7 @@ export class ArchiveWorkflow {
         this.agentMemory = agentMemory;
         this.settings = options.settings || {};
         this.snapshot = options.snapshot || new ConsolidationSnapshot(agentMemory);
-        this.batchSize = options.batchSize || this.settings.memoryV3ArchiveBatchSize || 5;
+        this.batchSize = options.batchSize || this.settings.memoryV3ArchiveBatchSize || CONSOLIDATION_DEFAULTS.batchSize;
         // Memory v3: LLM-driven dedup proposals (analog SaveSessionWorkflow). Without both fields
         // the workflow falls back to deterministic prefix-grouping (legacy).
         this.model = options.model || null;
@@ -390,12 +392,25 @@ export class ArchiveWorkflow {
 
         if (decision?.accepted === false) {
             run.skipStep(stepId, 'rejected_by_user');
+            // Wyciszenie: krok L1 odrzucony w całości zeruje licznik sesji (propozycja nie wraca
+            // przy KOLEJNYM zapisie), krok DEDUP odrzucony w całości podbija limit notatek —
+            // patrz docstring `onStepRejected`. Pad wyciszenia nie ma prawa cofnąć odrzucenia,
+            // które już zaszło na przebiegu — tylko log.
+            try {
+                await this.onStepRejected(step.kind, run);
+            } catch (e) {
+                // Zawężenie przez `instanceof` (nie cast na wiarę `as string`, recenzja #10) -
+                // `e` niepochodzące z `Error` (rzucone np. `throw "string"`/obiekt) nie ma prawa
+                // udawać stringa; `String(e)` daje bezpieczną reprezentację zawsze.
+                const message = e instanceof Error ? e.message : String(e);
+                log.warn('ArchiveWorkflow', `onStepRejected(${step.kind}) padło po odrzuceniu kroku ${stepId}: ${message}`);
+            }
             return { applied: false, skipped: true };
         }
 
         run.beginApply(stepId, decision);
         try {
-            const result = await this._applyStep(step, decision);
+            const result = await this._applyStep(step, decision, run);
             run.completeStep(stepId, result);
             return { applied: true, result };
         } catch (error) {
@@ -448,12 +463,16 @@ export class ArchiveWorkflow {
                 await this._generateL3Step(run, step, l2s, options, outcome);
             }
         } else {
-            throw new Error(`ArchiveWorkflow.retryStep: nie wiem jak ponowić krok rodzaju "${step.kind}"`);
+            // Wyczerpujący switch (wzorzec z CLAUDE.md): po odsianiu DEDUP/L1/L2/L3 `step.kind`
+            // jest zawężone do `never` - `String(unreachable)` zamiast interpolacji `never`
+            // wprost w template literalu (`@typescript-eslint/restrict-template-expressions`).
+            const unreachable: never = step.kind;
+            throw new Error(`ArchiveWorkflow.retryStep: nie wiem jak ponowić krok rodzaju "${String(unreachable)}"`);
         }
         return outcome;
     }
 
-    private async _applyStep(step: ConsolidationStep, decision: StepDecision = {}): Promise<ConsolidationStepApplied> {
+    private async _applyStep(step: ConsolidationStep, decision: StepDecision = {}, run?: ConsolidationRun): Promise<ConsolidationStepApplied> {
         const proposal: ConsolidationStepResult = step.result || {};
         if (step.kind === STEP_KIND.DEDUP) {
             const merges = (decision?.merges || proposal.merges || []) as DedupMergeInput[];
@@ -467,11 +486,22 @@ export class ArchiveWorkflow {
             return { ...applied, autoBumpedBrainNoteLimit: autoBumped };
         }
         if (step.kind === STEP_KIND.L1) {
-            return this._writeLevel1({
-                name: proposal.name,
-                sessions: proposal.sessions || [],
-                body: decision?.body || proposal.body || '',
-            });
+            return this._writeLevel1(
+                {
+                    name: proposal.name,
+                    sessions: proposal.sessions || [],
+                    body: decision?.body || proposal.body || '',
+                },
+                {
+                    // Podwójny reset (bug recenzji #6): zamknięcie okna z tym L1 wciąż
+                    // `awaiting_review` już wyciszyło ten przebieg (`onStepRejected` ->
+                    // `run.meta.consolidationSilenced`) i wyzerowało licznik. Gdy user WRACA i
+                    // akceptuje TĘ SAMĄ paczkę, drugie zerowanie przez `_writeLevel1` skasowałoby
+                    // sesje zarchiwizowane w międzyczasie (licznik wraca do 0, mimo że narosły
+                    // nowe, jeszcze nieobjęte tym przebiegiem sesje).
+                    skipCounterReset: Boolean(run?.meta?.consolidationSilenced),
+                },
+            );
         }
         if (step.kind === STEP_KIND.L2) {
             return this._writeLevel2({
@@ -489,7 +519,11 @@ export class ArchiveWorkflow {
                 body: decision?.body || proposal.body || '',
             });
         }
-        throw new Error(`ArchiveWorkflow: nie wiem jak zaaplikować krok rodzaju "${step.kind}"`);
+        // Wyczerpujący switch (wzorzec z CLAUDE.md): po odsianiu DEDUP/L1/L2/L3 `step.kind`
+        // jest zawężone do `never` - `String(unreachable)` zamiast interpolacji `never`
+        // wprost w template literalu (`@typescript-eslint/restrict-template-expressions`).
+        const unreachable: never = step.kind;
+        throw new Error(`ArchiveWorkflow: nie wiem jak zaaplikować krok rodzaju "${String(unreachable)}"`);
     }
 
     // ── generatory pojedynczych kroków ────────────────────────────────────────────────────
@@ -1053,13 +1087,18 @@ ${String(body || '').trim()}
     // i zjadłoby się nawzajem.
 
     /**
+     * @param opts.skipCounterReset - `true` gdy TEN SAM przebieg już wyciszył się na tym L1
+     *   (`onStepRejected` po odrzuceniu/zamknięciu okna, patrz bug recenzji „podwójny reset" #6) —
+     *   licznik już jest 0 i mógł od tamtej pory narosnąć o sesje spoza tej paczki; drugie
+     *   zerowanie by je skasowało. Domyślnie `false` = zachowanie sprzed tej naprawy (reset przy
+     *   KAŻDEJ zaakceptowanej paczce, także wtedy, gdy woła się to bezpośrednio — testy, retry).
      * @returns faktyczna nazwa pliku (po odkolizjonowaniu) + `unstamped`, gdy któraś sesja
      *   NIE dostała stempla `covered_by_l1`. Paczka L1 jest wtedy zapisana,
      *   ale te sesje wrócą do następnej paczki — krok nie ma prawa meldować czystego sukcesu.
      */
     async _writeLevel1({ name, sessions = [], body = '' }: {
         name?: string; sessions?: string[]; body?: string;
-    }): Promise<{ created: number; name: string; unstamped?: L1StampSkip[] }> {
+    }, opts: { skipCounterReset?: boolean } = {}): Promise<{ created: number; name: string; unstamped?: L1StampSkip[] }> {
         const folder = this.agentMemory.paths.l1;
         const finalName = await this._uniqueSummaryName(folder, name || this._summaryName('L1'));
         const path = `${folder}/${finalName}`;
@@ -1076,7 +1115,7 @@ ${String(body || '').trim()}
             ].join('\n'));
         });
         const stamping = await this.agentMemory._cleanupAfterL1(sessions, finalName) as L1StampOutcome | undefined;
-        await this._resetArchiveCounter();
+        if (!opts.skipCounterReset) await this._resetArchiveCounter();
         const unstamped = stamping?.skipped || [];
         return { created: 1, name: finalName, ...(unstamped.length > 0 ? { unstamped } : {}) };
     }
@@ -1299,17 +1338,72 @@ ${String(body || '').trim()}
     }
 
     async _autoBumpBrainNoteLimit(): Promise<boolean> {
-        // Bump current limit by +10 (cap at 100) so users who reject merges don't get badgered
-        // every save. Scales relative to whatever the user already has.
-        // Read-modify-write przez kolejkę `.state.json` — patrz `_resetArchiveCounter`.
+        // Bump PO PROGU EFEKTYWNYM (`resolveConsolidationThresholds` - podłoga state × ustawienie
+        // globalne), NIE po gołym `state.brain_notes_limit` (bug recenzji #1). Bump gołego pola
+        // był no-opem, gdy ustawienie globalne już siedziało NAD state (kolejne odrzucenia nie
+        // ruszały efektywnego limitu, dopóki bump nie doszedł do +10 nad globalnym), i nigdy się
+        // nie odpalał, gdy globalne ustawienie było >= 90 (stary sztywny cap 100 - global <= 10,
+        // `Math.min(100, ...)` przycinał do samego globalnego). DECYZJA: limit rośnie BEZ GÓRNEJ
+        // GRANICY (+10 przy każdym odrzuceniu) - stary sztywny cap 100 (i jego następca, cap
+        // rosnący razem z bazą) jest skasowany, nie tylko podniesiony.
         let bumped = false;
         await this.agentMemory.stateManager.update((state) => {
-            const current = Number(state.brain_notes_limit || 20);
-            if (current >= 100) return;
-            state.brain_notes_limit = Math.min(100, current + 10);
+            const base = resolveConsolidationThresholds(state, this.settings).brainNotesLimit;
+            state.brain_notes_limit = base + 10;
             bumped = true;
         });
         return bumped;
+    }
+
+    /**
+     * Wyciszenie po JAWNEJ decyzji usera „nie teraz" dla CAŁEGO kroku — odrzucenie w modalu
+     * (`applyStepDecision` z `decision.accepted === false`), guzik „Pomiń", albo zamknięcie
+     * modalu przebiegu z krokiem L1 wciąż `awaiting_review` (`RunController.onModalClosed`,
+     * `modules/chat/consolidationRunner.ts`). Świadomie NIE obejmuje automatycznych skipów z
+     * braku materiału (`not_enough_sessions`/`not_enough_l1`/`not_enough_l2`/`nothing_to_merge`)
+     * — to nie jest decyzja usera, tylko brak materiału; materiał sam dorośnie do progu.
+     *
+     * - `L1`: zeruje `archived_since_last_consolidation` (`_resetArchiveCounter`) — TEN SAM gest
+     *   co po zaakceptowanej paczce (`_writeLevel1`). Propozycja NIE wraca przy KOLEJNYM zapisie
+     *   sesji — dopiero po kolejnych `sessionThreshold` sesjach. Sesje zostają niepokryte
+     *   (`covered_by_l1` nietknięte) i wejdą do następnej propozycji. Dodatkowo znaczy `run.meta`
+     *   jako już-wyciszony (`consolidationSilenced`) — bug recenzji #6 „podwójny reset": bez tego
+     *   znacznika, gdy user WRACA do TEGO SAMEGO przebiegu i mimo wszystko akceptuje tę samą
+     *   paczkę L1, `_writeLevel1` zerowałby licznik DRUGI RAZ i skasowałby sesje zarchiwizowane
+     *   w międzyczasie (spoza tej paczki).
+     * - `DEDUP`: auto-bump limitu notatek `brain/` (`_autoBumpBrainNoteLimit`) — ta sama ścieżka
+     *   +10 co dziś przy zaakceptowanym kroku z zerem realnych scaleń.
+     *
+     * Wołający decyduje, co się liczy jako „decyzja usera" — ta metoda tylko wykonuje wyciszenie
+     * dla podanego rodzaju kroku. Błąd generowania / abort przez awarię NIGDY tu nie trafia.
+     *
+     * `run` jest WYMAGANY - wszystkie trzy produkcyjne wołacze (`applyStepDecision` w tym pliku,
+     * `RunController.skip`/`_trySilenceClosedWindow` w `modules/chat/consolidationRunner.ts`) już
+     * go podają. Opcjonalność z pierwszej wersji naprawy „podwójny reset" (bug recenzji #6) była
+     * wyłącznie sztuczką do izolacji commitów (dopisanie flagi na `run.meta` w jednym commicie,
+     * zanim wołacze w `modules/chat` zdążyły ją przekazać) - oba commity już istnieją, więc
+     * sztuczka jest zbędna.
+     *
+     * **Wyciszenie chroni PRZED PONOWNYM ustawieniem, nie tylko przed drugim resetem licznika.**
+     * Bez tej bramki drugie wyciszenie w TYM SAMYM przebiegu (np. zamknięcie okna → +3 sesje →
+     * ponowne otwarcie z paska statusu i drugie zamknięcie; albo odrzucenie paczki b1 → +3 sesje
+     * → odrzucenie paczki b2) zerowałoby licznik PO RAZ DRUGI i kasowałoby te 3 sesje
+     * zarchiwizowane w międzyczasie, mimo że przebieg już raz się wyciszył.
+     */
+    async onStepRejected(kind: StepKind, run: ConsolidationRun): Promise<void> {
+        if (kind === STEP_KIND.L1) {
+            // Już wyciszony w TYM przebiegu — drugi reset skasowałby sesje zarchiwizowane od
+            // pierwszego wyciszenia (patrz docstring wyżej).
+            if (run.meta.consolidationSilenced) return;
+            await this._resetArchiveCounter();
+            // Znacznik "już wyciszony" na PRZEBIEGU (nie na kroku) — `_writeLevel1` go czyta,
+            // żeby nie zerować licznika DRUGI raz, jeśli user mimo wszystko wróci i zaakceptuje
+            // tę samą paczkę L1 (bug recenzji #6). `run.meta` jest wolnym workiem przebiegu -
+            // patrz `ConsolidationRun.ts`.
+            run.meta.consolidationSilenced = true;
+        } else if (kind === STEP_KIND.DEDUP) {
+            await this._autoBumpBrainNoteLimit();
+        }
     }
 
     _summaryName(level: string): string {

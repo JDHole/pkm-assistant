@@ -1,5 +1,6 @@
 import { t } from '../../core/i18n/index.js';
 import { setSvgLabel } from '../../modules/crystal-soul/index.js';
+import { CONSOLIDATION_DEFAULTS, resolveConsolidationThresholds } from './consolidationStatus.js';
 // `import type` = ZERO emitu - sekcja dostaje `Setting` przez ctx (DI), nie importem wartości.
 import type { Setting as ObsidianSetting } from 'obsidian';
 
@@ -18,6 +19,32 @@ export interface MemoryPkmSlice {
     archiveRetentionMaxFiles?: number;
     sessionTimeoutMinutes?: number;
     idleConsolidationMinutes?: number;
+    /** Auto-konsolidacja opcjonalna, gałąź sesje/L1-L3 - domyślnie WYŁĄCZONA. */
+    memoryV3AutoConsolidateSessions?: boolean;
+    /** Auto-konsolidacja opcjonalna, gałąź notatek brain/ (dedup) - domyślnie WYŁĄCZONA. */
+    memoryV3AutoConsolidateBrain?: boolean;
+    /** Próg sesji zarchiwizowanych do konsolidacji (>= tego licznika). */
+    memoryV3SessionThreshold?: number;
+    /** Limit notatek brain/ do konsolidacji (> tego licznika). */
+    memoryV3BrainNotesThreshold?: number;
+    /** Rozmiar paczki L1 (ile sesji wchodzi w jedno streszczenie, i ile L1 w L2 itd.). */
+    memoryV3ArchiveBatchSize?: number;
+    /**
+     * Nazwy SPRZED tego podbloku - `resolveConsolidationThresholds` (`consolidationStatus.ts`)
+     * nadal je czyta jako fallback, gdy `memoryV3X` nie jest ustawione. Pole tutaj TYLKO do
+     * odczytu efektywnej wartości w polu (recenzja #9 - pole nie ma kłamać, gdy user ma jeszcze
+     * starą nazwę) - `.onChange` zawsze zapisuje do `memoryV3X`, nigdy tutaj.
+     */
+    archiveSessionThreshold?: number;
+    /** Jak `archiveSessionThreshold` wyżej, dla limitu notatek brain/. */
+    archiveBrainNotesThreshold?: number;
+    /**
+     * Index signature - bez niej `resolveConsolidationThresholds(null, pkm)` (silnik, licząc
+     * wartość EFEKTYWNĄ pola - patrz `renderMemorySection` niżej) nie przyjmuje tego slice'a:
+     * `ConsolidationSettingsLike` (`consolidationStatus.ts`) ma tę samą index signature, jak
+     * każdy inny „worek ustawień" w tym repo (`ArchiveSettingsLike` w `ArchiveWorkflow.ts`).
+     */
+    [key: string]: unknown;
 }
 
 /**
@@ -179,6 +206,107 @@ export function renderMemorySection(container: HTMLElement, ctx: MemorySettingsC
                 .onChange(async (value) => {
                     const val = parseInt(value);
                     pkm.idleConsolidationMinutes = Number.isFinite(val) && val >= 0 ? val : 20;
+                    await save();
+                });
+            text.inputEl.type = 'number';
+            text.inputEl.addClass('pkm-setting-input--w80');
+        });
+
+    // ── Konsolidacja pamięci (auto-konsolidacja opcjonalna, domyślnie OBA wyłączniki OFF) ──
+    // Ręczna konsolidacja (guzik „Podsumuj rozmowy" w profilu agenta) działa zawsze, niezależnie
+    // od tych dwóch wyłączników - `startConsolidationRun({source:'manual'})` nie czyta polityki.
+    new Setting(container).setName(t('settings.consolidation_title')).setHeading();
+
+    new Setting(container)
+        .setName(t('settings.consolidation_auto_sessions'))
+        .setDesc(t('settings.consolidation_auto_sessions_desc'))
+        .addToggle(toggle => toggle
+            .setValue(pkm.memoryV3AutoConsolidateSessions === true)
+            .onChange(async (value) => {
+                pkm.memoryV3AutoConsolidateSessions = value;
+                await save();
+            }));
+
+    new Setting(container)
+        .setName(t('settings.consolidation_auto_brain'))
+        .setDesc(t('settings.consolidation_auto_brain_desc'))
+        .addToggle(toggle => toggle
+            .setValue(pkm.memoryV3AutoConsolidateBrain === true)
+            .onChange(async (value) => {
+                pkm.memoryV3AutoConsolidateBrain = value;
+                await save();
+            }));
+
+    /**
+     * Liczba całkowita > 0, inaczej wraca do `fallback` (wartość z `CONSOLIDATION_DEFAULTS`).
+     * Wejście przechodzi NAJPIERW przez `/^\d+$/` po `trim()`, dopiero potem przez `Number()`
+     * (naprawa N3(b) recenzji rundy 3 - ta sama bramka co `firstPositive` w `consolidationStatus.ts`,
+     * jedna reguła w UI i silniku): goły `Number(value)` bez tej bramki przyjmował też `"0x10"`
+     * (parsing hex - `Number("0x10") === 16`), więc user wpisujący coś, co WYGLĄDA jak liczba w
+     * niedziesiętnym zapisie, dostawałby cichą, zaskakującą wartość zamiast odrzucenia jak każde
+     * inne nieoczekiwane wejście. Koszt świadomy: notacja wykładnicza (`"1e3"`) też już nie
+     * przechodzi - pole liczbowe konsolidacji ma znaczyć zwykłą liczbę całkowitą, nie dowolny
+     * zapis, który `Number()` potrafi sparsować.
+     */
+    const positiveIntOr = (value: string, fallback: number): number => {
+        const trimmed = value.trim();
+        if (!/^\d+$/.test(trimmed)) return fallback;
+        const val = Number(trimmed);
+        return Number.isInteger(val) && val > 0 ? val : fallback;
+    };
+
+    // Wartość EFEKTYWNA do pokazania w polu (recenzja #9, doprecyzowana N5 recenzji rundy 3) -
+    // TA SAMA funkcja co silnik (`resolveConsolidationThresholds`), nie osobny łańcuch `??`:
+    // `??` traktuje tylko `null`/`undefined` jak brak wartości, więc `-5`/`0` z ręcznie
+    // uszkodzonego `data.json` przechodziłyby jako pokazana wartość, mimo że silnik i tak liczy
+    // dla nich domyślną (`firstPositive` odrzuca `<= 0`/`NaN`/zapis niedziesiętny). Bez `state`
+    // (Ustawienia są GLOBALNE, nie per-agent) - podłoga `state.brain_notes_limit` w silniku i tak
+    // wygrywa tylko, gdy jest WYŻSZA od ustawienia globalnego, więc pominięcie jej tutaj pokazuje
+    // dokładnie to, co widzi świeży agent bez własnego auto-bumpu.
+    const thresholds = resolveConsolidationThresholds(null, pkm);
+    const effectiveSessionThreshold = thresholds.sessionThreshold;
+    const effectiveBrainLimit = thresholds.brainNotesLimit;
+    const effectiveBatchSize = thresholds.batchSize;
+
+    new Setting(container)
+        .setName(t('settings.consolidation_session_threshold'))
+        .setDesc(t('settings.consolidation_session_threshold_desc'))
+        .addText(text => {
+            text
+                .setPlaceholder(String(CONSOLIDATION_DEFAULTS.sessionThreshold))
+                .setValue(String(effectiveSessionThreshold))
+                .onChange(async (value) => {
+                    pkm.memoryV3SessionThreshold = positiveIntOr(value, CONSOLIDATION_DEFAULTS.sessionThreshold);
+                    await save();
+                });
+            text.inputEl.type = 'number';
+            text.inputEl.addClass('pkm-setting-input--w80');
+        });
+
+    new Setting(container)
+        .setName(t('settings.consolidation_brain_limit'))
+        .setDesc(t('settings.consolidation_brain_limit_desc'))
+        .addText(text => {
+            text
+                .setPlaceholder(String(CONSOLIDATION_DEFAULTS.brainNotesLimit))
+                .setValue(String(effectiveBrainLimit))
+                .onChange(async (value) => {
+                    pkm.memoryV3BrainNotesThreshold = positiveIntOr(value, CONSOLIDATION_DEFAULTS.brainNotesLimit);
+                    await save();
+                });
+            text.inputEl.type = 'number';
+            text.inputEl.addClass('pkm-setting-input--w80');
+        });
+
+    new Setting(container)
+        .setName(t('settings.consolidation_batch_size'))
+        .setDesc(t('settings.consolidation_batch_size_desc'))
+        .addText(text => {
+            text
+                .setPlaceholder(String(CONSOLIDATION_DEFAULTS.batchSize))
+                .setValue(String(effectiveBatchSize))
+                .onChange(async (value) => {
+                    pkm.memoryV3ArchiveBatchSize = positiveIntOr(value, CONSOLIDATION_DEFAULTS.batchSize);
                     await save();
                 });
             text.inputEl.type = 'number';

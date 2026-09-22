@@ -52,6 +52,16 @@ export {
     // modules/chat/slash-commands/save_session.js (wpis kosztu).
     normalizeUsage,
 } from './ConsolidationRun.js';
+// Jedno liczydło progów konsolidacji (`consolidationStatus.ts`, sygnatury `resolveConsolidationThresholds`/
+// `shouldTriggerConsolidation` zamrożone dla harnessu - patrz gotcha w CLAUDE.md tego modułu).
+// `resolveConsolidationThresholds` ma konsumenta SPOZA modułu (`consolidationRunner.ts` w
+// modules/chat - liczy próg dedupu jednym liczydłem zamiast własnej formuły).
+// `planAutoConsolidation` też ma konsumenta w `modules/chat` od auto-konsolidacji opcjonalnej -
+// `consolidationRunner.startConsolidationRun` liczy nim `include` obronnie w głąb, gdy
+// `source:'auto'` przyjdzie bez jawnego `include` (ten sam wynik co `SaveSessionWorkflow`).
+// `CONSOLIDATION_DEFAULTS`/`resolveAutoConsolidationPolicy` NIE mają czytelnika SPOZA modułu
+// (sprawdzone grepem) - zostają wewnętrzne, deep-import w plikach memory, które ich potrzebują.
+export { resolveConsolidationThresholds, planAutoConsolidation } from './consolidationStatus.js';
 export { default as memoryOpsCenter, OPS_EVENT } from './MemoryOpsCenter.js';
 // Warstwa OPISOWA przebiegu (etykiety/ikony/czas/koszt/podsumowanie). Czysta, bez DOM.
 // Dzielona przez pasek statusu (core/PKMEnv.js) i modal przebiegu (modules/shell) - patrz nagłówek
@@ -156,6 +166,8 @@ export type {
     StepKind,
     StepUsage,
     BuildPlanCounts,
+    BuildPlanInclude,
+    BuildPlanOptions,
 } from './ConsolidationRun.js';
 
 /** Rejestr jednego aktywnego przebiegu (zdarzenia dla paska statusu i modalu). */

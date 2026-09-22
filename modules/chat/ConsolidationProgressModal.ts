@@ -42,6 +42,10 @@ interface ProgressController {
     skip?(stepId: string): unknown;
     getModelName?(): string | undefined;
     finishIfSettled?(): unknown;
+    /** Wyciszenie konsolidacji opcjonalnej — patrz `RunController.onModalClosed` w `consolidationRunner.ts`. */
+    onModalClosed?(): unknown;
+    /** User znów PATRZY na okno — rozbraja flagę „okno zamknięte" (bug recenzji #7). */
+    onModalOpened?(): unknown;
 }
 
 interface ProgressModalOptions {
@@ -124,6 +128,11 @@ export class ConsolidationProgressModal extends Modal {
     }
 
     onOpen() {
+        // User znów PATRZY - rozbraja flagę "okno zamknięte podczas generowania" (bug recenzji
+        // #7), żeby normalnie zdecydować, gdy L1 dojdzie do awaiting_review. Best-effort: pad
+        // tego haka nie może zablokować otwarcia okna.
+        try { this.controller?.onModalOpened?.(); } catch { /* best-effort */ }
+
         const { contentEl, modalEl } = this;
         contentEl.empty();
         contentEl.addClass('cs-consolidation-modal');
@@ -170,6 +179,9 @@ export class ConsolidationProgressModal extends Modal {
         // naturalny moment. Gdy przebieg jeszcze leci, NIC nie przerywamy.
         try { this.controller?.finishIfSettled?.(); } catch { /* best-effort */ }
         try { this._releaseIfStuck(); } catch { /* best-effort */ }
+        // Konsolidacja opcjonalna: L1 zostawiony `awaiting_review` przy zamknięciu okna liczy się
+        // jak odrzucenie - patrz `RunController.onModalClosed`. Fire-and-forget, best-effort.
+        try { this.controller?.onModalClosed?.(); } catch { /* best-effort */ }
         this._onClosed?.();
     }
 
