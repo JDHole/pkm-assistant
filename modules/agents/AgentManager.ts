@@ -14,7 +14,7 @@ import { MigrationModal } from './MigrationModal.js';
 import { runMigrationReview } from './migrationReviewFlow.js';
 import { SkillLoader, SkillTemplateStore } from '../../modules/skills/index.js';
 import type { SkillQuestion } from '../../modules/skills/index.js';
-import { ArtifactTypeLoader } from '../../modules/artifacts/index.js';
+import { ArtifactTypeLoader, isClosedStatus } from '../../modules/artifacts/index.js';
 import type { ThinArtifact } from '../../modules/artifacts/index.js';
 import { SubAgentLoader, SubAgentTemplateStore } from '../../modules/sub-agents/index.js';
 import { PlaybookManager } from '../../modules/onboarding/index.js';
@@ -550,14 +550,18 @@ export class AgentManager {
         // dla indeksu typów w prompcie; tu tylko udostępniane w kontekście.
         const artifactTypes = this.getArtifactTypesForAgent(agent);
 
-        // Artefakty agenta W TOKU (status ≠ zamkniety) - do indeksu w prompcie.
+        // Artefakty agenta W TOKU (nie domknięte) - do indeksu w prompcie. Domknięcie idzie
+        // przez `isClosedStatus` (statusy w OBU językach + fallback pozycyjny typu własnego,
+        // `modules/artifacts/artifactStatuses.ts`), NIE przez literał `'zamkniety'` na sztywno -
+        // artefakt typu EN (status `'closed'`) albo typu własnego (np. `'done'`) inaczej
+        // wchodziłby do indeksu "w toku" na zawsze, mimo że jest domknięty (recenzja niezależna).
         // Śledzenie po frontmatterze (metadataCache), synchronicznie; brak store'a/cache → pusto.
         let artifactList: unknown[] = [];
         try {
             const store = this.plugin?.artifactStore;
             if (store?.list) {
                 artifactList = store.list({ agent: agent.name })
-                    .filter((a) => a.status !== 'zamkniety');
+                    .filter((a) => !isClosedStatus(a.status, this.artifactTypeLoader.getType(a.typ)?.statusy));
             }
         } catch { /* store niegotowy / brak cache → pusta lista */ }
 
