@@ -1,6 +1,6 @@
 import { log } from '../../core/utils/Logger.js';
 // `toolResultStatus` = jedna reguła „co jest porażką narzędzia" (klient, czat, suby).
-import { AccessGuard, maskSensitiveData, normalizeAutonomy, sanitizePath, toolResultStatus, getAgentSafeName } from '../../core/index.js';
+import { AccessGuard, maskSensitiveData, normalizeAutonomy, sanitizePath, toolResultStatus, getAgentSafeName, SessionWriteConsent } from '../../core/index.js';
 import { t } from '../../core/i18n/index.js';
 // Kanoniczny parser tool_calls żyje w modules/agent-loop. MCPClient tylko deleguje.
 import { parseToolCalls as parseToolCallsCanonical } from '../agent-loop/index.js';
@@ -156,7 +156,7 @@ export interface MCPClientPlugin {
 }
 
 /** Wynik pytania o zgodę - luźniejszy odpowiednik `ApprovalResult` z core (patrz niżej). */
-type ApprovalResultLike = { result: string; reason?: string; instruction?: string };
+type ApprovalResultLike = { result: string; reason?: string; instruction?: string; rememberForSession?: boolean };
 
 /** Wywołanie narzędzia tak, jak przychodzi od modelu (parser zwraca ten kształt). */
 export interface ToolCall {
@@ -229,7 +229,11 @@ const DENIAL_TTL_MS = 15 * 60 * 1000;
 
 /** Opcje konstruktora (haki testowe / adaptery). */
 export interface MCPClientOptions {
-    diffModalFactory?: ((app: MCPClientApp, options: DiffApprovalOptions) => { waitForApproval(): Promise<unknown> }) | null;
+    diffModalFactory?: ((app: MCPClientApp, options: DiffApprovalOptions) => {
+        waitForApproval(): Promise<unknown>;
+        /** Patrz `DiffModal.rememberForSession` - klient czyta to pole z INSTANCJI po rozstrzygnięciu. */
+        rememberForSession?: boolean;
+    }) | null;
     /** Nadpisanie TTL pamięci odmów (ms). Domyślnie `DENIAL_TTL_MS`. */
     denialTtlMs?: number;
 }
@@ -241,6 +245,8 @@ export interface DiffApprovalOptions {
     newContent: string;
     /** Kontrakt `DiffModal` mówi `string`; runtime bywa bez agenta - stąd asercja u wołacza. */
     agentName: string;
+    /** Czy sesja ma klucz (`origin.sessionPath`) - steruje widocznością checkboxa „nie pytaj więcej". */
+    rememberAvailable?: boolean;
 }
 
 const ACTION_TYPE_MAP: Record<string, string> = {
@@ -328,6 +334,13 @@ export class MCPClient {
     declare _deniedActions: Map<string, Map<string, number>>;
     /** TTL pojedynczego wpisu w pamięci odmów (ms). */
     declare _denialTtlMs: number;
+    /**
+     * Zgoda „Nie pytaj więcej w tej sesji o zapisy do tego pliku" - PER PLIK, PER SESJA CZATU,
+     * wyłącznie RAM. Publiczne pole (czat mógłby kiedyś jawnie czyścić sesję), ale jedyny
+     * dzisiejszy wołacz jest ten plik (kroki 6/6b w `executeToolCall`). Ginie z przeładowaniem
+     * pluginu (nowa instancja `MCPClient`) - patrz `core/security/SessionWriteConsent.ts`.
+     */
+    readonly sessionWriteConsent = new SessionWriteConsent();
 
     /**
      * @param app - Obsidian App instance.
@@ -441,16 +454,25 @@ export class MCPClient {
         );
     }
 
-    async _requestDiffApproval(options: DiffApprovalOptions): Promise<unknown> {
+    /**
+     * @returns `result` - kontrakt bez zmian (`'approve'|'deny'`, ewentualnie inny kształt haka
+     *   testowego). `rememberForSession` - stan checkboxa z INSTANCJI modala/fabryki, czytany
+     *   PO rozstrzygnięciu `waitForApproval()` (patrz `DiffModal.rememberForSession`).
+     */
+    async _requestDiffApproval(options: DiffApprovalOptions): Promise<{ result: unknown; rememberForSession: boolean }> {
         if (this.diffModalFactory) {
-            return this.diffModalFactory(this.app, options).waitForApproval();
+            const modal = this.diffModalFactory(this.app, options);
+            const result = await modal.waitForApproval();
+            return { result, rememberForSession: !!modal.rememberForSession };
         }
         const { DiffModal } = await import('../ui-components/index.js');
         // TS-boundary: DiffModal rozszerza Obsidian `Modal` i woła `super(app)` z prawdziwym
         // `App`; `MCPClientApp` to celowo zawężony widok TEGO SAMEGO runtime'owego obiektu
         // (tylko `vault`), zawężony na potrzeby tego klienta - stąd rzut na granicy zamiast
         // poszerzania kontraktu klienta o cały interfejs `App`.
-        return new DiffModal(this.app as App, options).waitForApproval();
+        const modal = new DiffModal(this.app as App, options);
+        const result = await modal.waitForApproval();
+        return { result, rememberForSession: modal.rememberForSession };
     }
 
     /**
@@ -835,8 +857,30 @@ export class MCPClient {
                 args,
             });
 
+            // Zgoda sesyjna „Nie pytaj więcej w tej sesji o zapisy do tego pliku" - PER PLIK,
+            // PER SESJA CZATU, wyłącznie RAM (`core/security/SessionWriteConsent.ts`). Dotyczy
+            // WYŁĄCZNIE write/vault_write (nie delete, nie żadnego innego narzędzia). Klucz
+            // sesji jest `origin.sessionPath` - NIGDY `agentName`/`tabKey` (żaden z nich nie
+            // identyfikuje jednoznacznie rozmowy, patrz `ExecuteToolCallOptions.origin` wyżej i
+            // `modules/tools/CLAUDE.md`). Brak `origin.sessionPath` = zgoda sesyjna niedostępna:
+            // checkbox się nie pokazuje w modalach, nic nie jest pamiętane, zachowanie identyczne
+            // jak dziś.
+            const isWriteTool = toolCall.name === 'write' || toolCall.name === 'vault_write';
+            const sessionKey = (origin && typeof origin.sessionPath === 'string' && origin.sessionPath)
+                ? origin.sessionPath
+                : null;
+            // MUTOWALNA: krok 6 może ją podnieść W TRAKCIE TEGO SAMEGO wywołania (user właśnie
+            // zaznaczył checkbox i zatwierdził) - krok 6b niżej ma to od razu respektować, żeby ta
+            // sama tura nie pytała drugi raz o zapis, na który user właśnie powiedział „nie pytaj
+            // więcej" chwilę wcześniej w tym samym tool-callu.
+            let sessionConsentGranted = isWriteTool && !!args.path && !!sessionKey
+                && this.sessionWriteConsent.has(sessionKey, targetPath);
+            if (sessionConsentGranted) {
+                log.info('MCPClient', `Zgoda sesyjna: pomijam pytanie o zapis do "${targetPath}"`);
+            }
+
             // 6. Handle approval if required
-            if (permResult.requiresApproval) {
+            if (permResult.requiresApproval && !sessionConsentGranted) {
                 // Check denial memory first - instant block without showing modal
                 if (invocationAgentName && this._isDenied(invocationAgentName, toolCall.name, targetPath)) {
                     log.info('MCPClient', `Automatyczny blok (wcześniej odmówione): ${toolCall.name} → ${targetPath}`);
@@ -856,6 +900,9 @@ export class MCPClient {
                     operationMode: args.mode || null,
                     preview: args.content ? `Długość treści: ${args.content.length} znaków` : null,
                     contentPreview: args.content || null,
+                    // Checkbox „nie pytaj więcej w tej sesji" w ApprovalModal - TYLKO gdy sesja
+                    // ma klucz (bez niego SessionWriteConsent nie ma czego zapamiętać).
+                    rememberAvailable: isWriteTool && !!sessionKey,
                     ...approvalContext
                 });
 
@@ -879,6 +926,14 @@ export class MCPClient {
                     );
                 }
                 log.debug('MCPClient', `User ZATWIERDZIŁ: ${toolCall.name}`);
+
+                // User zaznaczył checkbox „nie pytaj więcej w tej sesji" i zatwierdził -
+                // zapamiętaj TERAZ, żeby krok 6b (zaraz niżej, W TYM SAMYM wywołaniu) i każdy
+                // następny zapis do tego pliku w tej sesji nie pytały ponownie.
+                if (isWriteTool && sessionKey && approved.rememberForSession) {
+                    this.sessionWriteConsent.grant(sessionKey, targetPath);
+                    sessionConsentGranted = true;
+                }
             }
 
             // 6b. Show diff for write create/replace/patch before touching the vault.
@@ -886,8 +941,11 @@ export class MCPClient {
             // sprawdzamy obie na wypadek bezpośredniego wywołania po starej nazwie).
             // W trybie `yolo` POMIJAMY diff modal - yolo = zero pytań. No-Go /
             // pliki chronione / whitelista dalej blokują (są w checkPermission, nie tutaj).
+            // Zgoda sesyjna (świeżo nadana w kroku 6 powyżej, ALBO zastana z wcześniejszego
+            // wywołania) pomija też TEN krok - inaczej ta sama tura pytałaby drugi raz o dokładnie
+            // ten zapis, na który user właśnie powiedział „nie pytaj więcej".
             const writeMode = args.mode || 'replace';
-            if (permResult.requiresApproval && autonomy !== 'yolo'
+            if (permResult.requiresApproval && !sessionConsentGranted && autonomy !== 'yolo'
                 && (toolCall.name === 'write' || toolCall.name === 'vault_write')
                 && ['create', 'replace', 'patch'].includes(writeMode) && args.path) {
                 const existingFile = this.app.vault.getAbstractFileByPath(args.path);
@@ -920,19 +978,24 @@ export class MCPClient {
                     }
 
                     if (typeof newContent === 'string' && oldContent !== newContent) {
-                        const diffResult = await this._requestDiffApproval({
+                        const diffOutcome = await this._requestDiffApproval({
                             path: args.path,
                             oldContent,
                             newContent,
-                            agentName: invocationAgentName as string
+                            agentName: invocationAgentName as string,
+                            // Checkbox „nie pytaj więcej w tej sesji" w DiffModal - sam warunek co wyżej.
+                            rememberAvailable: isWriteTool && !!sessionKey,
                         });
-                        if (diffResult === 'deny') {
+                        if (diffOutcome.result === 'deny') {
                             log.info('MCPClient', `User ODRZUCIŁ diff: ${args.path}`);
                             if (invocationAgentName) this._recordDenial(invocationAgentName, toolCall.name, targetPath);
                             throw new Error(
                                 `Użytkownik odrzucił zmiany w "${args.path}". ` +
                                 `Zapytaj co zmienić lub zaproponuj inną wersję.`
                             );
+                        }
+                        if (sessionKey && diffOutcome.rememberForSession) {
+                            this.sessionWriteConsent.grant(sessionKey, targetPath);
                         }
                     }
                 } catch (e) {
