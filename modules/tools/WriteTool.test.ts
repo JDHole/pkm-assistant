@@ -149,6 +149,37 @@ test('3 RÓWNOLEGŁE patche na RÓŻNE old_text (Promise.all) — wszystkie trzy
     );
 });
 
+test('3 RÓWNOLEGŁE append + 2 RÓWNOLEGŁE prepend (Promise.all) na TYM SAMYM pliku — wszystkie pięć fragmentów obecne w końcowej treści, żaden nie ginie', async t => {
+    const { app, files } = makeVaultApp({ 'Notes/a.md': 'MID' });
+    const writeTool = createWriteTool();
+
+    const [r1, r2, r3, r4, r5] = await Promise.all([
+        writeTool.execute({ path: 'Notes/a.md', mode: 'append', content: '-A1' }, app, plugin) as Promise<ToolRes>,
+        writeTool.execute({ path: 'Notes/a.md', mode: 'append', content: '-A2' }, app, plugin) as Promise<ToolRes>,
+        writeTool.execute({ path: 'Notes/a.md', mode: 'append', content: '-A3' }, app, plugin) as Promise<ToolRes>,
+        writeTool.execute({ path: 'Notes/a.md', mode: 'prepend', content: 'P1-' }, app, plugin) as Promise<ToolRes>,
+        writeTool.execute({ path: 'Notes/a.md', mode: 'prepend', content: 'P2-' }, app, plugin) as Promise<ToolRes>,
+    ]);
+
+    for (const [i, r] of [r1, r2, r3, r4, r5].entries()) {
+        t.true(r.success, `wywołanie #${i + 1} ma się udać`);
+    }
+
+    const final = files['Notes/a.md'];
+    for (const fragment of ['MID', '-A1', '-A2', '-A3', 'P1-', 'P2-']) {
+        t.is(
+            final.split(fragment).length - 1,
+            1,
+            `fragment "${fragment}" ma wystąpić DOKŁADNIE RAZ w końcowej treści "${final}" - append/prepend na nieaktualnym odczycie gubiłby część fragmentów po cichu`,
+        );
+    }
+    t.is(
+        final.length,
+        'MID'.length + '-A1'.length + '-A2'.length + '-A3'.length + 'P1-'.length + 'P2-'.length,
+        'długość końcowej treści musi być sumą WSZYSTKICH pięciu operacji - krótsza długość zdradza lost update',
+    );
+});
+
 test('2 RÓWNOLEGŁE patche TEGO SAMEGO old_text — DRUGI dostaje błąd „nie znaleziono", nie nadpisuje pierwszego po cichu', async t => {
     const { app, files } = makeVaultApp({ 'Notes/a.md': 'AAA-BBB-CCC' });
     const writeTool = createWriteTool();
