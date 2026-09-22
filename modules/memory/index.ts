@@ -41,6 +41,9 @@ export { SaveSessionWorkflow } from './SaveSessionWorkflow.js';
 export { ArchiveWorkflow } from './ArchiveWorkflow.js';
 // „Na teraz" short-term brain.md sections - pure helpery czytane przez UI/narzędzia.
 export { parseNaTerazSections, naTerazSectionKey } from './BrainIndex.js';
+// Nagłówki brain.md w OBU językach pliku (`modules/chat/saveSessionSectionLabel.ts` mapuje
+// dokładny adres z KTÓREGOKOLWIEK zestawu na etykietę w bieżącym języku interfejsu).
+export { sectionKeyOf } from './brainSections.js';
 // Puls pamięci: stan przebiegu konsolidacji + rejestr jednego aktywnego przebiegu.
 // Konsumenci: ArchiveWorkflow (silnik) oraz UI (modal przebiegu, pasek statusu, notice).
 export {

@@ -1,10 +1,12 @@
 import { makeMemoryNoteFilename } from './MemoryAccessGuard.js';
-import { buildBrainIndex, INDEX_SECTIONS } from './BrainIndex.js';
+import { buildBrainIndex, indexSectionHeadings } from './BrainIndex.js';
+import { BRAIN_SECTION_HEADINGS, resolveBrainLocale, uiBrainLocale } from './brainSections.js';
 // Adapterowy mkdir -p (dawna prywatna, rekurencyjna `ensureFolder` w tym pliku).
 // Deep-import świadomy - barrel core/index.js wciąga obsidian, a memory jest node-testowane.
 import { ensureAdapterFolder, probeFile } from '../../core/index.js';
 
 import type { BrainNoteMeta, ForeignSection } from './BrainIndex.js';
+import type { BrainLocale, BrainSectionKey } from './brainSections.js';
 
 /** Adapter FS vaulta w zakresie potrzebnym migracji (typowany STRUKTURALNIE - `AgentMemory` jest w `.js`). */
 export interface MigrationVaultAdapterLike {
@@ -80,20 +82,41 @@ export interface MigrationResult {
     deletedSections?: string[];
 }
 
+// `SECTION_TYPES`/`LIVE_SECTION_KEYS` z rejestru `brainSections.ts` w OBU językach - odkąd
+// nowy agent może dostać brain.md w PL albo EN, migrator ma znać oba zestawy tytułów, nie
+// tylko polski. `normalizedHeadingTitle` zdejmuje `## `, potem przepuszcza przez tę samą
+// `normalizeSectionName`, którą `buildPlan` woła na tytule sekcji.
+function normalizedHeadingTitle(heading: string): string {
+    return normalizeSectionName(heading.replace(/^##\s*/, ''));
+}
+
+/** Klucz sekcji indeksu (poza „current" - ma własną, osobną gałąź `LIVE_SECTION_KEYS` niżej) → typ notatki v2. */
+const SECTION_KEY_TO_LEGACY_NOTE_TYPE: Partial<Record<BrainSectionKey, string>> = {
+    user: 'user',
+    preferences: 'agent_rule',
+    workflow: 'skill_hint',
+    projects: 'reference',
+};
+
 const SECTION_TYPES = new Map<string, string>([
-    ['user', 'user'],
-    ['preferencje', 'agent_rule'],
+    ...(['pl', 'en'] as BrainLocale[]).flatMap(locale =>
+        (Object.entries(SECTION_KEY_TO_LEGACY_NOTE_TYPE) as [BrainSectionKey, string][])
+            .map(([key, type]): [string, string] => [normalizedHeadingTitle(BRAIN_SECTION_HEADINGS[locale][key]), type])
+    ),
+    // 'ustalenia' - synonim TYLKO historyczny (v1), nigdy nie był żywym nagłówkiem indeksu w
+    // żadnym z dwóch zestawów - zostaje wpisany ręcznie, rejestr go nie zna.
     ['ustalenia', 'project_context'],
-    // Te dwa nagłówki są emitowane przez
-    // `BrainIndex.INDEX_SECTIONS`. Gdyby mimo bramki `looksLikeV3Index` w run() sekcja o takim
-    // tytule i tak trafiła do buildPlan (np. stary v2 brain, który user ręcznie nazwał tak samo),
-    // ma być policzona jako notatki - NIE jako keepInBrain, bo verbatim sekcja pod nagłówkiem
-    // kolidującym z INDEX_SECTIONS zostałaby zjedzona przy najbliższym rebuildzie indeksu.
-    ['workflow', 'skill_hint'],
-    ['projekty i referencje', 'reference'],
 ]);
 
-const LIVE_SECTION_KEYS = new Set(['biezace', 'bieżące']);
+// „current"/„bieżące" ma OSOBNĄ gałąź w `buildPlan` (`LIVE_SECTION_KEYS`, nie `SECTION_TYPES`) -
+// te dwa nagłówki (w OBU językach) są emitowane przez `BrainIndex.indexSectionHeadings`. Gdyby
+// mimo bramki `looksLikeV3Index` w `run()` taka sekcja i tak trafiła do `buildPlan` (np. stary
+// v2 brain, który user ręcznie nazwał tak samo), ma być policzona jako notatki - NIE jako
+// `keepInBrain`, bo verbatim sekcja pod nagłówkiem kolidującym z indeksem zostałaby zjedzona
+// przy najbliższym rebuildzie.
+const LIVE_SECTION_KEYS = new Set(
+    (['pl', 'en'] as BrainLocale[]).map(locale => normalizedHeadingTitle(BRAIN_SECTION_HEADINGS[locale].current))
+);
 const ZOMBIE_SECTION_KEYS = new Set(['system', 'agora', 'vault-builder', 'vault builder', 'default rob']);
 
 // Sentinel (znak NUL na starcie stringa)
@@ -315,7 +338,12 @@ export class MigrationV3 {
             ? this.parseSections(originalBrain).filter(section => keep.has(section.title))
             : [];
 
-        const brain = formatNewBrain(this.memory.agentName, plan, createdNotes, kept);
+        // Legacy v2 brain nie ma nagłówków v3, więc zwykle nie rozstrzyga (`detectBrainLocale`
+        // -> null -> `uiBrainLocale()`) - WYJĄTEK to plik z sekcją „Bieżące"/„Ustalenia" (v2
+        // było zawsze polskie), gdzie ta sama nazwa jest jednocześnie sygnałem PL w rejestrze -
+        // migracja trafia wtedy naturalnie w PL, zgodnie z tym, do czego user był przyzwyczajony.
+        const locale = resolveBrainLocale(originalBrain || null, uiBrainLocale());
+        const brain = formatNewBrain(this.memory.agentName, plan, createdNotes, kept, locale);
         await this.memory.vault.adapter.write(this.memory.paths.brain, brain);
         await this.memory.stateManager.read();
 
@@ -380,11 +408,15 @@ export class MigrationV3 {
 
 // Sygnał A jest silny i wystarcza
 // sam (kanoniczny wikilink notatki brain/, ktory umie wyemitowac WYLACZNIE `buildBrainIndex`).
-// Sygnał B (samo „## Na teraz") jest za slaby sam w sobie - recznie dopisany naglowek w starym
-// v2 brainie dawal fałszywy pozytyw. Liczy sie tylko RAZEM z co najmniej dwoma naglowkami
-// `INDEX_SECTIONS` jako dokladnymi liniami (po trim) - realny v3 zawsze ma je wszystkie.
+// Sygnał B (samo „## Na teraz"/„## Right now") jest za slaby sam w sobie - recznie dopisany
+// naglowek w starym v2 brainie dawal fałszywy pozytyw. Liczy sie tylko RAZEM z co najmniej
+// dwoma naglowkami `indexSectionHeadings(locale)` jako dokladnymi liniami (po trim), TEGO
+// SAMEGO jezyka - realny v3 zawsze ma je wszystkie, w jednym zestawie.
 const V3_CANONICAL_WIKILINK_RE = /^\s*-\s*\[\[brain\/(user|agent_rule|skill_hint|project_context|reference)_[^\]\n]+\.md/m;
-const NA_TERAZ_HEADING_RE = /^##\s+na teraz\b/im;
+// Nagłówek „Na teraz"/„Right now" w KTÓRYMKOLWIEK języku - filename w signale A jest już
+// język-niezależny (typ notatki w nazwie pliku, nie nagłówek), ale ten drugi, słabszy sygnał
+// musi sam rozpoznać oba warianty odkąd nowy agent może dostać EN brain.md.
+const NA_TERAZ_HEADING_RE = /^##\s+(na teraz|right now)\b/im;
 
 /**
  * True, gdy treść wygląda jak JUŻ zmigrowany indeks v3.
@@ -393,8 +425,10 @@ const NA_TERAZ_HEADING_RE = /^##\s+na teraz\b/im;
  * migrację (zwykły `- [[brain/mapa_projektu]]` niekanoniczny wikilink, albo samotne ręczne
  * `## Na teraz` w starym v2 brainie), więc wymagana jest KORROBORACJA:
  *   - sygnał A (silny, wystarcza sam): kanoniczny wikilink notatki `brain/*.md`,
- *   - sygnał B (słaby, wymaga korroboracji): nagłówek „Na teraz" WYSTĘPUJE RAZEM z co
- *     najmniej dwoma nagłówkami z `INDEX_SECTIONS` (dokładna linia, po trim).
+ *   - sygnał B (słaby, wymaga korroboracji): nagłówek „Na teraz"/„Right now" WYSTĘPUJE RAZEM
+ *     z co najmniej dwoma nagłówkami indeksu (dokładna linia, po trim) TEGO SAMEGO JĘZYKA -
+ *     PL koroboruje tylko z PL, EN tylko z EN (plik prawdziwie v3 ma je wszystkie w jednym
+ *     zestawie; mieszanka języków w jednym pliku nie powinna istnieć).
  * Świadome ograniczenie zostaje: brain zbudowany WYŁĄCZNIE z gołego tekstu (żadna notatka,
  * żadna sekcja „Na teraz" nietknięta) jest nieodróżnialny od v2 - pozostaje `true`
  * (needsMigration), co jest bezpieczne, bo `buildPlan` poprawnie sparsuje jego sekcje.
@@ -404,11 +438,13 @@ function looksLikeV3Index(content: string): boolean {
     if (V3_CANONICAL_WIKILINK_RE.test(text)) return true;
     if (!NA_TERAZ_HEADING_RE.test(text)) return false;
     const lines = new Set(text.split(/\r?\n/).map(line => line.trim()));
-    let matches = 0;
-    for (const heading of INDEX_SECTIONS) {
-        if (lines.has(heading)) matches++;
-    }
-    return matches >= 2;
+    return (['pl', 'en'] as BrainLocale[]).some(locale => {
+        let matches = 0;
+        for (const heading of indexSectionHeadings(locale)) {
+            if (lines.has(heading)) matches++;
+        }
+        return matches >= 2;
+    });
 }
 
 /** Czy poza liniami nagłówków (`#`..`######`, w tym gołe `#` bez tekstu) i pustymi liniami zostaje jakakolwiek treść. */
@@ -593,7 +629,7 @@ function escapeFrontmatter(value: unknown): string {
 // `applyPlan`) wchodzą do `buildBrainIndex` jako `foreign` - dokładnie ten sam mechanizm, który
 // chroni ręcznie dopisane sekcje (`## AKTYWNY TEST`) przy zwykłym
 // rebuildzie indeksu. Końcowe puste linie ucięte, wzorem `parseForeignSections` w `BrainIndex.ts`.
-function formatNewBrain(agentName: string, plan: MigrationPlan, createdNotes: string[], keptSections: MigrationSection[] = []): string {
+function formatNewBrain(agentName: string, plan: MigrationPlan, createdNotes: string[], keptSections: MigrationSection[] = [], locale: BrainLocale): string {
     const createdNames = new Set(createdNotes.map(path => path.split('/').pop()));
     const notes: BrainNoteMeta[] = (plan.notes || [])
         .map(note => ({
@@ -608,7 +644,7 @@ function formatNewBrain(agentName: string, plan: MigrationPlan, createdNotes: st
         heading: `## ${section.title}`,
         lines: trimTrailingEmptyLines(section.lines),
     }));
-    return buildBrainIndex({ agentName, notes, foreign });
+    return buildBrainIndex({ agentName, notes, foreign, locale });
 }
 
 function trimTrailingEmptyLines(lines: string[]): string[] {

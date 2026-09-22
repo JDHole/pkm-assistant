@@ -4,7 +4,7 @@ import { SaveSessionWorkflow } from './SaveSessionWorkflow.js';
 import type { SaveAgentMemoryLike } from './SaveSessionWorkflow.js';
 import type { StreamChatModelLike, StreamHandlers, StreamMessage } from './streamHelper.js';
 // Alias — goły `t` jest wewnątrz każdego testu zajęty przez ExecutionContext AVA.
-import { t as tr } from '../../core/i18n/index.js';
+import { t as tr, setLocale } from '../../core/i18n/index.js';
 import { parseFrontmatter } from '../../core/utils/yamlParser.js';
 
 /**
@@ -75,7 +75,7 @@ test('SaveSessionWorkflow proposes a brain note from "pamietaj ze" session text'
 
     const notes = workflow.proposeNotes([
         { role: 'user', content: 'pamiętaj że Jan lubi krótkie raporty.' }
-    ]);
+    ], [], 'pl');
 
     t.is(notes.length, 1);
     t.like(notes[0], {
@@ -92,7 +92,7 @@ test('SaveSessionWorkflow routes agent_rule content to ## Preferencje', t => {
 
     const notes = workflow.proposeNotes([
         { role: 'user', content: 'pamiętaj że zawsze mów po polsku bez emoji.' }
-    ]);
+    ], [], 'pl');
 
     t.is(notes.length, 1);
     t.is(notes[0].type, 'agent_rule');
@@ -106,14 +106,51 @@ test('SaveSessionWorkflow routes project_context content to ## Bieżące', t => 
 
     const notes = workflow.proposeNotes([
         { role: 'user', content: 'pamiętaj że ten projekt to PKM Assistant plugin do Obsidiana.' }
-    ]);
+    ], [], 'pl');
 
     t.is(notes.length, 1);
     t.is(notes[0].type, 'project_context');
     t.is(notes[0].section, '## Bieżące');
 });
 
-test('SaveSessionWorkflow refreshes brain.md as an index instead of appending raw facts', async t => {
+// ─── Nagłówek propozycji idzie za JĘZYKIEM PLIKU brain.md agenta, nie za UI (decyzja 19.09) ───
+
+test('prepareProposals: sekcja notatki to ## Current, gdy istniejący brain.md agenta jest EN', async t => {
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const { vault } = makeVault({
+        [`${base}/brain.md`]: '# Jaskier brain\n\n## Current\n\n## User\n\n## Preferences\n\n## Workflow\n\n## Projects and references\n',
+    });
+    const memory = asMemory(new AgentMemory(vault, 'Jaskier'));
+    const workflow = new SaveSessionWorkflow(memory);
+
+    const prep = await workflow.prepareProposals({
+        path: 'x.md',
+        messages: [{ role: 'user', content: 'pamiętaj że ten projekt to PKM Assistant plugin do Obsidiana.' }],
+    });
+
+    t.is(prep.notes[0].section, '## Current', 'brainLocale wykryty z istniejącej treści, nie z domyślnego UI');
+});
+
+test('prepareProposals: sekcja notatki to ## Bieżące, gdy istniejący brain.md agenta jest PL', async t => {
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const { vault } = makeVault({
+        [`${base}/brain.md`]: '# Jaskier brain\n\n## Bieżące\n\n## User\n\n## Preferencje\n\n## Workflow\n\n## Projekty i referencje\n',
+    });
+    const memory = asMemory(new AgentMemory(vault, 'Jaskier'));
+    const workflow = new SaveSessionWorkflow(memory);
+
+    const prep = await workflow.prepareProposals({
+        path: 'x.md',
+        messages: [{ role: 'user', content: 'pamiętaj że ten projekt to PKM Assistant plugin do Obsidiana.' }],
+    });
+
+    t.is(prep.notes[0].section, '## Bieżące');
+});
+
+// Brak brain.md na dysku - rodzi się w JĘZYKU INTERFEJSU (jak nowy agent); test przypina PL.
+test.serial('SaveSessionWorkflow refreshes brain.md as an index instead of appending raw facts', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
     const { vault, files } = makeVault();
     const memory = asMemory(new AgentMemory(vault, 'Jaskier'));
     const workflow = new SaveSessionWorkflow(memory);

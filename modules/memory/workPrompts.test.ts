@@ -77,17 +77,56 @@ test('summary: dokładnie {{LEVEL}} w obu językach', t => {
     t.deepEqual(placeholders(factoryWorkPrompt('summary', 'en')), ['LEVEL']);
 });
 
-// ── ADRESY, które NIE tłumaczą się razem z prozą ───────────────────────────
+// ── ADRESY, które idą za JĘZYKIEM PLIKU brain.md - NIE za językiem prozy promptu ───────────
+//
+// Od decyzji właściciela 19.09: brain.md rodzi się w języku UI i zostaje w nim NA ZAWSZE, więc
+// nagłówki w treści promptu `save_session` muszą pokazywać model NAPRAWDĘ istniejące w PLIKU
+// TEGO agenta nagłówki - niezależnie od tego, w jakim języku jest sama proza instrukcji.
+// `factoryWorkPrompt(kind, locale, brainLocale)` rozdziela te dwa wymiary.
 
-test('nagłówki sekcji brain.md zostają polskie także w angielskim prompcie', t => {
-    // `BrainIndex.ts` (INDEX_SECTIONS) i `SaveSessionWorkflow.ts` (TYPE_TO_SECTION) mają te
-    // napisy wpisane na sztywno - to ADRESY w pliku usera, nie proza do przetłumaczenia.
-    const en = factoryWorkPrompt('save_session', 'en');
+test('EN proza + EN brainLocale -> nagłówki angielskie w treści promptu', t => {
+    const en = factoryWorkPrompt('save_session', 'en', 'en');
+    for (const heading of ['## Current', '## User', '## Preferences', '## Workflow', '## Projects and references']) {
+        t.true(en.includes(heading), `brak ${heading} w EN save_session/EN brainLocale`);
+    }
+    t.true(en.includes('„Right now: User"'));
+    t.true(en.includes('„Right now: Environment"'));
+    for (const plHeading of ['## Bieżące', '## Preferencje', '## Projekty i referencje', 'Na teraz: User', 'Na teraz: Środowisko']) {
+        t.false(en.includes(plHeading), `PL nagłówek ${plHeading} nie powinien wyciec do EN/EN`);
+    }
+});
+
+test('EN proza + PL brainLocale -> nagłówki polskie w treści promptu (plik TEGO agenta jest PL)', t => {
+    const en = factoryWorkPrompt('save_session', 'en', 'pl');
     for (const heading of ['## Bieżące', '## User', '## Preferencje', '## Workflow', '## Projekty i referencje']) {
-        t.true(en.includes(heading), `brak ${heading} w angielskim save_session`);
+        t.true(en.includes(heading), `brak ${heading} w EN save_session/PL brainLocale`);
     }
     t.true(en.includes('„Na teraz: User"'));
     t.true(en.includes('„Na teraz: Środowisko"'));
+    t.false(en.includes('## Current'), 'EN nagłówek nie powinien wyciec, gdy brainLocale to PL');
+});
+
+test('PL proza + PL brainLocale -> nagłówki polskie (dotychczasowe zachowanie)', t => {
+    const pl = factoryWorkPrompt('save_session', 'pl', 'pl');
+    for (const heading of ['## Bieżące', '## User', '## Preferencje', '## Workflow', '## Projekty i referencje']) {
+        t.true(pl.includes(heading), `brak ${heading} w PL save_session/PL brainLocale`);
+    }
+    t.true(pl.includes('„Na teraz: User"'));
+    t.true(pl.includes('„Na teraz: Środowisko"'));
+});
+
+test('strażnik: żaden fabryczny prompt save_session nie niesie już nagłówka na sztywno', t => {
+    // Kontrola przeciwna do testów wyżej: gdyby ktoś wrócił do wpisania nagłówka literałem
+    // zamiast placeholdera, ta sama proza z PRZECIWNYM brainLocale niosłaby OBA nagłówki
+    // naraz (stary literał + nowo podstawiony) - test wyżej by tego nie złapał, bo assercja
+    // tylko POTWIERDZA obecność oczekiwanego nagłówka, nie ZAPRZECZA drugiemu.
+    const plProzaEnBrain = factoryWorkPrompt('save_session', 'pl', 'en');
+    t.false(plProzaEnBrain.includes('## Bieżące'), 'PL proza nie powinna nieść PL nagłówka na sztywno, gdy brainLocale to EN');
+    t.true(plProzaEnBrain.includes('## Current'));
+
+    const enProzaPlBrain = factoryWorkPrompt('save_session', 'en', 'pl');
+    t.false(enProzaPlBrain.includes('## Current'), 'EN proza nie powinna nieść EN nagłówka na sztywno, gdy brainLocale to PL');
+    t.true(enProzaPlBrain.includes('## Bieżące'));
 });
 
 test('kontrakt JSON jest ten sam w obu językach', t => {
