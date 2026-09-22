@@ -110,6 +110,20 @@ export class ApprovalModal extends Modal {
         // Content preview - different per action type
         this._renderContentPreview(contentEl);
 
+        // Checkbox "Nie pytaj więcej w tej sesji o zapisy do tego pliku" - TYLKO dla akcji
+        // zapisu pliku (`vault.write` - jedyny actionType, którym MCPClient oznacza tool `write`
+        // i legacy `vault_write`, patrz ACTION_TYPE_MAP), i TYLKO gdy wołacz podał
+        // `rememberAvailable:true` (czyli `origin.sessionPath` jest znany - bez klucza sesji
+        // `SessionWriteConsent` nie ma czego zapamiętać). Patrz `core/security/SessionWriteConsent.ts`.
+        let rememberCheckbox: HTMLInputElement | null = null;
+        if (this.action.type === 'vault.write' && this.action.rememberAvailable === true) {
+            const rememberDiv = contentEl.createDiv('approval-remember');
+            rememberCheckbox = rememberDiv.createEl('input', { type: 'checkbox' });
+            rememberCheckbox.id = 'pkm-approval-remember-session';
+            const label = rememberDiv.createEl('label', { text: t('approval.remember_session') });
+            label.htmlFor = rememberCheckbox.id;
+        }
+
         // Deny reason field (hidden by default)
         const denyReasonDiv = contentEl.createDiv({ cls: 'approval-deny-reason pkm-hidden' });
         denyReasonDiv.createEl('label', { text: t('approval.deny_reason') });
@@ -168,7 +182,13 @@ export class ApprovalModal extends Modal {
         });
         setSvg(approveBtn, UiIcons.check(14));
         approveBtn.appendText(t('approval.approve'));
-        approveBtn.onclick = () => this._resolve({ result: 'approve', reason: '' });
+        approveBtn.onclick = () => this._resolve({
+            result: 'approve',
+            reason: '',
+            // Tylko literalny klik Zatwierdź niesie ten sygnał (patrz `ApprovalModalResult`
+            // w core) - `always`/`deny`/`redirect` niżej świadomie NIE dokładają tego pola.
+            rememberForSession: !!rememberCheckbox?.checked,
+        });
 
         // Always approve button. Dla narzędzia zewnętrznego serwera „zawsze"
         // dotyczy TEGO KONKRETNEGO narzędzia (reguła external.call::serverId__tool, nie hurt),
