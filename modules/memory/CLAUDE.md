@@ -37,7 +37,7 @@ modules/memory/
 ├── MemoryAccessGuard.ts      # strict per-agent path guard dla brain/
 ├── collisionSuffix.ts       # findFreeCollisionPath() - jedna wspólna pętla "wolna nazwa przy kolizji", wołana z kilku miejsc w AgentMemory.ts. Wewnętrzny, nie w barrelu
 ├── SaveSessionWorkflow.ts    # /save session: propozycje notatek + archiwizacja aktywnej sesji
-├── consolidationStatus.ts    # JEDNO liczydło progów konsolidacji - `resolveConsolidationThresholds`/`shouldTriggerConsolidation`, czyste funkcje bez I/O. Używane przez `SaveSessionWorkflow._shouldTriggerArchive` (wewnątrz modułu, nie w barrelu) i przez prywatną wtyczkę deweloperską właściciela w repo `pkm-assistant-harness` (import przy buildzie wprost z tego pliku - patrz gotcha niżej). Status konsolidacji dla CLI Obsidiana mieszka od 2026-09-20 poza tym repo
+├── consolidationStatus.ts    # JEDNO liczydło progów konsolidacji - `resolveConsolidationThresholds`/`shouldTriggerConsolidation` (sygnatury zamrożone, importuje je przy buildzie prywatna wtyczka deweloperska w repo `pkm-assistant-harness` - patrz gotcha niżej), plus (od auto-konsolidacji opcjonalnej, 2.2.6) `CONSOLIDATION_DEFAULTS`, `resolveAutoConsolidationPolicy`, `planAutoConsolidation` - polityka DWÓCH wyłączników usera i plan auto-triggera po zapisie sesji. Wołane przez `SaveSessionWorkflow.applyDecision` (wewnątrz modułu, deep-import) i przez `consolidationRunner.ts` w `modules/chat` (przez barrel - patrz Public API). Status konsolidacji dla CLI Obsidiana mieszka od 2026-09-20 poza tym repo
 ├── ArchiveWorkflow.ts        # dedup brain/ + L1/L2/L3 user-reviewed consolidation
 ├── ConsolidationRun.ts       # stan przebiegu konsolidacji (plan kroków, statusy, retry, koszt) - czysty node
 ├── MemoryOpsCenter.ts        # rejestr JEDNEGO aktywnego przebiegu + subskrypcja dla UI
@@ -82,7 +82,8 @@ Import z zewnątrz tylko przez `modules/memory/index.js`.
 | `SaveSessionWorkflow` | `/save session`: user-review, tworzenie notatek, archiwizacja sesji. |
 | `ArchiveWorkflow` | Automatyczna konsolidacja po progach: brain/ dedup, L1, L2, L3. Jeden tor: `runWithRun(consolidationRun)` (generuje propozycje wszystkich paczek, nic nie zapisuje) + `applyStepDecision()` (zapisuje po decyzji usera) + `generateGatedSteps()` (zdejmuje kłódkę z L2/L3 dopiero gdy L1 są rozstrzygnięte) - generacja oddzielona od zapisu. |
 | `parseNaTerazSections`, `naTerazSectionKey` | Pure helpery sekcji "Na teraz" brain.md, czytane przez UI panelu Pamięć, `MemorySaveTool` i `modules/chat/naTerazUpdate.ts` (normalizacja sekcji `BrainUpdate` w oknie review `/save session`). |
-| `ConsolidationRun`, `buildConsolidationPlan`, `STEP_STATUS`, `STEP_KIND`, `normalizeUsage` | Stan jednego przebiegu konsolidacji - plan paczek z liczników, maszyna stanów kroku. Zero UI, zero Obsidiana. |
+| `ConsolidationRun`, `buildConsolidationPlan`, `STEP_STATUS`, `STEP_KIND`, `normalizeUsage` | Stan jednego przebiegu konsolidacji - plan paczek z liczników, maszyna stanów kroku. Zero UI, zero Obsidiana. `buildConsolidationPlan(counts, {include})` - drugi parametr OPCJONALNY (`{sessions, dedup}`, domyślnie oba `true` = zachowanie sprzed konsolidacji opcjonalnej): `include.dedup:false` wycina krok DEDUP, `include.sessions:false` wycina L1 i przez to (kaskada) też L2/L3. |
+| `resolveConsolidationThresholds`, `CONSOLIDATION_DEFAULTS` | Progi konsolidacji (`consolidationStatus.ts`) - jedyne dwa eksporty tego pliku w barrelu, konsument to `consolidationRunner.ts` w `modules/chat` (liczy próg dedupu jednym liczydłem). `planAutoConsolidation`/`resolveAutoConsolidationPolicy` ZOSTAJĄ wewnątrz modułu (jedyny wołacz - `SaveSessionWorkflow`, deep-import) - patrz gotcha „Jedno liczydło progów konsolidacji". |
 | `memoryOpsCenter` (singleton), `OPS_EVENT` | Rejestr jednego aktywnego przebiegu. `startRun/getActiveRun/finishRun/subscribe/requestOpenModal`. Drugi trigger przy aktywnym przebiegu NIE startuje drugiego - zwraca bieżący i prosi o modal. |
 | `stepLabel`, `stepDetail`, `stepStatusIcon`, `stepStatusLabel`, `stepDurationMs`, `isFallbackStep`, `formatDuration`, `formatUsageLine`, `statusBarLine`, `buildRunSummary`, `summaryToText`, `planToText` | Warstwa OPISOWA przebiegu (`consolidationLabels.ts`) - jedno źródło etykiet dla paska statusu i modalu przebiegu. Czyste funkcje, zero DOM. |
 | `MigrationV3` | Migracja v2 -> v3: najpierw `memory.v2.backup/`, potem notatki `brain/`. |
@@ -343,10 +344,10 @@ WSZYSTKIE L1 są rozstrzygnięte (`failed` ≠ rozstrzygnięty - L2 czeka na "Po
 mniej niż `batchSize` plików L1 na dysku pomija L2 i L3. Fail jednej paczki nie zatrzymuje
 pozostałych.
 
-- dedup `brain/`: trigger po 20 notatkach, auto-bump +10 gdy user odrzuci merge,
-- L1: po 5 zarchiwizowanych sesjach; sesje zostają,
-- L2: po 5 L1; usuwa pokryte sesje z archive, L1 zostają,
-- L3: po 5 L2; usuwa pokryte L1, L2 zostają,
+- dedup `brain/`: trigger po `brainNotesLimit` (domyślnie 20, `CONSOLIDATION_DEFAULTS.brainNotesLimit`) notatkach, auto-bump +10 gdy user odrzuci merge,
+- L1: po `sessionThreshold` (domyślnie 10, `CONSOLIDATION_DEFAULTS.sessionThreshold`) zarchiwizowanych sesjach; sesje zostają,
+- L2: po `batchSize` (domyślnie 5) L1; usuwa pokryte sesje z archive, L1 zostają,
+- L3: po `batchSize` L2; usuwa pokryte L1, L2 zostają,
 - materiałem na L1 są TYLKO sesje bez stempla `covered_by_l1` (`listUncoveredArchiveSessions`),
 - materiałem na L2 są TYLKO pliki L1, których nie wymienia żadne L2 (`listUncoveredL1s`), a
   materiałem na L3 - TYLKO L2 niewymienione w żadnym L3 (`listUncoveredL2s`) - patrz gotcha
@@ -366,6 +367,56 @@ pozostałych.
   pamięci w jednym pliku byłaby własnym punktem awarii. `ConsolidationSnapshot.prune(keep=3)`
   (zostaje N najnowszych, sortowanie leksykalne = chronologiczne bo nazwa zaczyna się od ISO)
   sprząta jedynie kopie zostawione przez starszą wersję pluginu; wołane na starcie `runWithRun`.
+
+#### Auto-konsolidacja opcjonalna (2.2.6)
+
+Auto-trigger konsolidacji po `/save session` (`SaveSessionWorkflow.applyDecision` →
+`save_session.ts` → `startConsolidationRun({source:'auto'})`) jest OPCJONALNY na DWÓCH
+niezależnych wyłącznikach usera (Ustawienia → Pamięć i kontekst → „Konsolidacja pamięci"),
+**oba domyślnie WYŁĄCZONE**: `memoryV3AutoConsolidateSessions` (gałąź sesje/L1-L3) i
+`memoryV3AutoConsolidateBrain` (gałąź notatek brain/, dedup). Ręczna konsolidacja (guzik
+„Podsumuj rozmowy" w profilu agenta, `source:'manual'`) NIE czyta tej polityki - działa zawsze,
+pełny plan, jak przed tą zmianą.
+
+- `planAutoConsolidation(state, brainNotesCount, settings)` (`consolidationStatus.ts`) łączy
+  progi (`resolveConsolidationThresholds`) z polityką (`resolveAutoConsolidationPolicy`):
+  `trigger = (policy.sessions && sesje due) || (policy.brain && notatki due)`, `include =
+  {sessions: policy.sessions, dedup: policy.brain}` - `include` odzwierciedla WPROST politykę,
+  nie to, czy dana gałąź jest akurat „due" (gdy trigger zapada przez próg sesji, a gałąź brain
+  jest włączona, ale jeszcze nie przebiła progu, krok dedup i tak wchodzi jako propozycja -
+  jak dotąd, „dedup to zawsze tylko propozycja do przeglądu").
+- `SaveSessionWorkflow.applyDecision` zwraca `shouldTriggerArchive` (= `plan.trigger`) ORAZ
+  `consolidationInclude` (= `plan.include`), ZAWSZE (nie tylko przy `shouldTriggerArchive`).
+  `save_session.ts` przekazuje `include: result.consolidationInclude` do
+  `startConsolidationRun` w bramce `if (result.shouldTriggerArchive)`.
+  `buildConsolidationPlan(counts, {include})` (`ConsolidationRun.ts`) - drugi parametr
+  OPCJONALNY, brak = pełny plan (zachowanie ręcznej konsolidacji i sprzed tej zmiany).
+  `include.dedup:false` wycina krok DEDUP; `include.sessions:false` wycina L1 i przez kaskadę
+  (L2/L3 liczą się z L1) też L2/L3.
+- **Podłoga limitu notatek `brain/`, nie pierwszeństwo** (świadoma zmiana zachowania - patrz
+  gotcha „Jedno liczydło progów konsolidacji" niżej): `resolveConsolidationThresholds` liczy
+  efektywny `brainNotesLimit` jako `Math.max(state.brain_notes_limit, ustawienie globalne ||
+  CONSOLIDATION_DEFAULTS.brainNotesLimit)`, NIE „state ma zawsze pierwszeństwo" jak do 2.2.5.
+- **Wyciszenie propozycji po jawnej decyzji usera „nie teraz"** - `ArchiveWorkflow.onStepRejected(kind)`:
+  krok L1 odrzucony w całości zeruje `archived_since_last_consolidation` (`_resetArchiveCounter`,
+  TEN SAM gest co po zaakceptowanej paczce) - propozycja NIE wraca przy KOLEJNYM zapisie sesji,
+  dopiero po kolejnych `sessionThreshold` sesjach (sesje zostają niepokryte, `covered_by_l1`
+  nietknięte); krok DEDUP odrzucony w całości podbija limit notatek (`_autoBumpBrainNoteLimit`,
+  ta sama ścieżka +10/cap 100 co przy zaakceptowanym kroku z zerem realnych scaleń). Trzy haki
+  wołają `onStepRejected`, wszystkie w `modules/chat/consolidationRunner.ts` poza pierwszym:
+  `ArchiveWorkflow.applyStepDecision` (`decision.accepted === false`, modal review),
+  `RunController.skip(stepId)` (guzik „Pomiń"), `RunController.onModalClosed()` (krok L1
+  wciąż `awaiting_review`, gdy user zamyka okno przebiegu bez decyzji - `isRunStuck()` z
+  `consolidationRunState.ts` świadomie NIE łapie tego stanu, więc bez tego haka próg wracałby
+  przy KAŻDYM kolejnym zapisie, dopóki user nie wróci klikiem w 🧠). Automatyczne skipy z braku
+  materiału (`not_enough_sessions`/`not_enough_l1`/`not_enough_l2`/`nothing_to_merge`) NIE
+  wołają `onStepRejected` - to nie jest decyzja usera. Semantyka licznika sesji od 2.2.6:
+  „sesje zarchiwizowane od ostatniej ZAAKCEPTOWANEJ paczki L1 albo ostatniej ODRZUCONEJ
+  propozycji" (było: tylko od zaakceptowanej).
+- `CONSOLIDATION_DEFAULTS` (`consolidationStatus.ts`: `sessionThreshold:10`,
+  `brainNotesLimit:20`, `batchSize:5`, `autoSessions:false`, `autoBrain:false`) jest JEDNYM
+  źródłem tych literałów - silnik (`ArchiveWorkflow`, `ConsolidationRun`, `consolidationRunner`)
+  i UI (`SettingsContent.ts`) czytają stąd zamiast trzymać osobne kopie.
 
 ### Migracja
 
@@ -410,13 +461,22 @@ Flow:
 
 - ⚠️ **Jedno liczydło progów konsolidacji.** `resolveConsolidationThresholds`/
   `shouldTriggerConsolidation` (`consolidationStatus.ts`) to JEDYNE miejsce, które liczy próg
-  sesji (`memoryV3SessionThreshold || archiveSessionThreshold || 10`, `>=`) i limit notatek
-  `brain/` (`state.brain_notes_limit` ma pierwszeństwo nad ustawieniami globalnymi,
-  `memoryV3BrainNotesThreshold || archiveBrainNotesThreshold || 20`, `>`).
-  `SaveSessionWorkflow._shouldTriggerArchive` DELEGUJE tutaj zamiast trzymać własną kopię - druga
-  implementacja tej samej logiki rozjechałaby się przy pierwszej zmianie jednego z dwóch miejsc.
-  Zachowanie obu funkcji jest CELOWO niezmienione od czasu, gdy ten plik nosił więcej kodu - nie
-  refaktoruj formuł przy okazji.
+  sesji (`memoryV3SessionThreshold || archiveSessionThreshold || CONSOLIDATION_DEFAULTS.sessionThreshold`,
+  `>=`) i limit notatek `brain/` (`>`). `SaveSessionWorkflow.applyDecision` (przez
+  `planAutoConsolidation`) i `consolidationRunner.startConsolidationRun` (`modules/chat`, przez
+  barrel) DELEGUJĄ tutaj zamiast trzymać własną kopię - druga implementacja tej samej logiki
+  rozjechałaby się przy pierwszej zmianie jednego z dwóch miejsc.
+
+  ⚠️ **Limit notatek `brain/` liczy się od 2.2.6 jako PODŁOGA, nie pierwszeństwo** (świadoma
+  zmiana zachowania, patrz sekcja „Auto-konsolidacja opcjonalna" wyżej): efektywny
+  `brainNotesLimit = Math.max(state.brain_notes_limit, memoryV3BrainNotesThreshold ||
+  archiveBrainNotesThreshold || CONSOLIDATION_DEFAULTS.brainNotesLimit)` - do 2.2.5
+  `state.brain_notes_limit` wygrywał BEZWARUNKOWO, nawet gdy był NIŻSZY od ustawienia
+  globalnego. Powód zmiany: odkąd limit ma suwak w Ustawieniach, podniesienie GLOBALNEJ
+  wartości nie może być po cichu przykryte starą, niższą wartością zapisaną per agent (auto-bump
+  po odrzuceniu scalenia). Auto-bump per agent nadal tylko PODNOSI `state.brain_notes_limit` -
+  nigdy nie obniża efektywnego limitu poniżej tego, co user właśnie ustawił globalnie. Sygnatura
+  funkcji jest bez zmian (patrz akapit niżej) - zmienił się WYŁĄCZNIE algorytm w środku.
 
   Drugi konsument (poza `SaveSessionWorkflow` wewnątrz tego modułu) to prywatna wtyczka
   deweloperska właściciela w repo `pkm-assistant-harness` (katalog `companion/`) - importuje
@@ -652,8 +712,12 @@ Memory v3 critical path ma testy w:
 - `modules/memory/EmbeddingHelper.test.ts`
 - `modules/memory/workPrompts.test.ts`
 - `modules/memory/consolidationStatus.test.ts` - `resolveConsolidationThresholds` (fallbacki
-  ustawień, trzy źródła `limitSource`), `shouldTriggerConsolidation` (granice literalne: sesje
-  `>=`, notatki `>`)
+  ustawień, trzy źródła `limitSource`, podłoga limitu brain/), `shouldTriggerConsolidation`
+  (granice literalne: sesje `>=`, notatki `>`), `resolveAutoConsolidationPolicy`,
+  `planAutoConsolidation` (oba wyłączniki × oba progi)
+- `modules/memory/SettingsContent.consolidation.test.ts` - render behawioralny podbloku
+  „Konsolidacja pamięci" (dwa toggle + trzy pola liczbowe, wartości startowe, zapis do slice,
+  walidacja liczb) - `Setting` wstrzyknięty przez DI, NIE zależy od atrapy `obsidian` harnessu
 
 ---
 

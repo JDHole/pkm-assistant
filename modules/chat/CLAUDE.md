@@ -506,14 +506,16 @@ w `modules/tools/ConnectorsBackstageTab.ts`.
 
 ### Konsolidacja pamięci: jedna droga triggera
 
-`startConsolidationRun({plugin, app, agentMemory, agent, model, settings, source})` (
+`startConsolidationRun({plugin, app, agentMemory, agent, model, settings, source, include})` (
 `consolidationRunner.ts`) jest jedyną drogą uruchomienia konsolidacji - klej między silnikiem
 (`modules/memory`, `runWithRun`/`applyStepDecision`) i widokami (modal, pasek statusu, notice).
 Rejestruje przebieg w `memoryOpsCenter`, otwiera modal leniwym `import()` (statyczny import
 ciągnąłby `obsidian` do kontrolera, który musi być testowalny node'em -
 `consolidationRunner.test.ts` jest w całości `test.serial`, bo centrum operacji to singleton
 modułowy). `registerConsolidationModalOpener(app)` jest idempotentne dla tej samej instancji
-`app` - inna instancja (dev-reload) odpina starą subskrypcję i zakłada świeżą.
+`app` - inna instancja (dev-reload) odpina starą subskrypcję i zakłada świeżą. Próg dedupu i
+`batchSize` liczą się PRZEZ `resolveConsolidationThresholds(state, settings)` (`modules/memory`,
+przez barrel) - jedno liczydło zamiast osobnej formuły ad hoc w tym pliku.
 
 - `source: 'auto' | 'manual'` (default `'manual'`) rozróżnia trigger progowy
   (`/save session` i idle-scheduler -> `'auto'`) od guzika w profilu agenta (-> `'manual'`).
@@ -523,6 +525,15 @@ modułowy). `registerConsolidationModalOpener(app)` jest idempotentne dla tej sa
   głośny notice po każdym `/save session` byłby spamem.
   Guzik "Podsumuj rozmowy" w profilu agenta jest jedynym pozostałym wejściem manualnym -
   drugi, dublujący guzik został wycięty.
+- **`include?: {sessions, dedup}` (auto-konsolidacja opcjonalna, 2.2.6)** - które gałęzie planu
+  budować, przekazane 1:1 do `buildConsolidationPlan(counts, {include})`
+  (`modules/memory/ConsolidationRun.ts`). Brak (guzik ręczny, `source:'manual'`) = pełny plan,
+  zachowanie sprzed tej opcji. `/save session` (`save_session.ts`) podaje
+  `include: result.consolidationInclude` - policzone przez `SaveSessionWorkflow.applyDecision`
+  → `planAutoConsolidation` (`modules/memory/consolidationStatus.ts`) z DWÓCH wyłączników usera
+  w Ustawieniach, oba domyślnie WYŁĄCZONE. `include:{sessions:false, dedup:false}` (domyślna
+  instalacja) daje ZAWSZE pusty plan, niezależnie od liczników - `startConsolidationRun` milczy
+  jak przy każdym innym pustym planie (`source:'auto'`).
 - Plan liczy `archiveCount` z `listUncoveredArchiveSessions()` (sesje BEZ stempla
   `covered_by_l1`) - tym samym źródłem, z którego generator bierze materiał, więc plan nie
   obiecuje paczek, które generator potem odrzuci jako "za mało sesji".
@@ -532,6 +543,15 @@ modułowy). `registerConsolidationModalOpener(app)` jest idempotentne dla tej sa
 - "Anuluj" w fazie propozycji realnie anuluje: decyzja usera ściga się ze strzałem do modelu
   (`Promise.race`), przegrany strzał dostaje `AbortController.abort()`; pad/zwis nie spada po
   cichu na fallback regexowy - modal pokazuje przyczynę i guzik "Ponów analizę".
+- **Wyciszenie po jawnej decyzji usera „nie teraz" dla całego kroku** (auto-konsolidacja
+  opcjonalna) - `RunController.skip(stepId)` (guzik „Pomiń") i `RunController.onModalClosed()`
+  (krok L1 wciąż `awaiting_review`, gdy user zamyka okno przebiegu bez decyzji) wołają
+  `ArchiveWorkflow.onStepRejected(kind)` - ta sama funkcja, którą woła
+  `ArchiveWorkflow.applyStepDecision` przy `decision.accepted === false` z modalu review. L1 →
+  zeruje `archived_since_last_consolidation` (propozycja nie wraca przy KOLEJNYM zapisie sesji);
+  DEDUP → podbija limit notatek `brain/` (+10, cap 100). `ConsolidationProgressModal.onClose()`
+  woła `controller.onModalClosed?.()` fire-and-forget, best-effort, PO `_releaseIfStuck()` - patrz
+  `modules/memory/CLAUDE.md`, sekcja „Auto-konsolidacja opcjonalna", po pełne uzasadnienie.
 
 ### Dostarczenie wyniku sub-agenta zleconego w tle
 
