@@ -261,7 +261,27 @@ Bramka `.pkm-assistant/**` + No-Go + `sanitizePath` w prymitywach vaultowych dzi
   dostaje treść sprzed wywołania, nie w chwili zapisu), bo `modify` nie daje na to żadnego haka.
   Testy: `modules/tools/WriteTool.test.ts` (3 równoległe patche na różne `old_text` - wszystkie
   trzy zaaplikowane; 2 równoległe patche tego samego `old_text` - drugi dostaje błąd, nie
-  nadpisuje).
+  nadpisuje; 3 równoległe append + 2 równoległe prepend na tym samym pliku - wszystkie pięć
+  fragmentów obecne w końcowej treści).
+- ⚠️ **Ta naprawa stoi na atomowości PRAWDZIWEGO `vault.process` Obsidiana** (`obsidian.d.ts`:
+  „Atomically read, modify, and save the contents of the file") - **atrapa harnessu
+  (`pkm-assistant-harness`, `mock/app.ts:216-222`) NIE jest atomowa**: robi `await adapter.read(p)`,
+  potem `fn(content)`, potem `await adapter.write(p, next)`, z prawdziwym `await` między odczytem a
+  zapisem, więc dwa równoległe wywołania `process()` w atrapie MOGĄ się przeplatać i zgubić jedno z
+  nich - dokładnie ten sam lost-update, który ta naprawa miała wyeliminować. Harness więc TEJ
+  naprawy nie potwierdzi, nawet z `--live` (bieg poszedłby przez atomową-w-teorii, ale nie w
+  praktyce atrapę) - uatomowienie `mock/app.ts`'s `process` to osobna robota, w repo harnessu, nie
+  tutaj. Testy w tym pliku dowodzą poprawności na WŁASNEJ atrapie (`makeVaultApp`, bez `await`
+  między odczytem a zapisem wewnątrz `process` - patrz jej komentarz), nie przez harness.
+- ⚠️ **Podgląd diffa (krok 6b) przy RÓWNOLEGŁYCH zapisach na ten sam plik może rozjechać się z
+  realnym zapisem.** Diff pokazywany userowi liczy się na treści przeczytanej PRZED tym, jak
+  kolejka zgody (`_withConsentQueue`, patrz gotcha „Zgoda na zapis" niżej) cokolwiek serializuje -
+  a realny `applyPatch` liczy się PÓŹNIEJ, wewnątrz callbacku `vault.process`, na treści ŚWIEŻEJ w
+  chwili faktycznego zapisu. Między tymi dwoma momentami inny równoległy zapis do tego samego
+  pliku mógł już przejść. Znane ograniczenie: user widzi diff, klika „zatwierdź", a patch, którego
+  `old_text` w międzyczasie zniknął, i tak dostanie błąd (`old_text_not_found`) - pokazany podgląd
+  był już nieaktualny w chwili kliknięcia. Nie naprawione (wymagałoby przeniesienia liczenia diffa
+  za bramkę kolejki, zamiast przed nią).
 
 ### Zgoda na zapis — dwie bramki + pamięć sesyjna
 
