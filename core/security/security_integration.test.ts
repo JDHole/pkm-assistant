@@ -881,3 +881,67 @@ test('(k) prawdziwy ApprovalManager: "always"+rememberForSession:true -> zgoda s
     t.is(h.getHandlerCalls(), 1, 'zgoda sesyjna z gałęzi "always" pomija kolejne pytanie tak samo jak z "approve"');
     t.is(h.files['a.md'], 'v2');
 });
+
+// ─── Równoległe tool-calle JEDNEJ tury (Promise.all w agent-loop/AgentLoop.ts) - bez kolejki
+// per `${sessionKey}::${targetPath}` wszystkie sprawdzałyby `sessionWriteConsent.has()` PRZED
+// rozstrzygnięciem pierwszego modala, więc user dostawałby N modali o TĘ SAMĄ decyzję. ───
+
+test('(l) 3 RÓWNOLEGŁE zapisy (Promise.all) do TEJ SAMEJ ścieżki w TEJ SAMEJ sesji - handler pyta DOKŁADNIE RAZ, wszystkie trzy zapisy wykonane', async t => {
+    const h = makeWriteConsentHarness({ result: 'approve', rememberForSession: true }, true);
+
+    const [r1, r2, r3] = await Promise.all([
+        writeCall(h.client, 'a.md', 'v1', 'S1'),
+        writeCall(h.client, 'a.md', 'v2', 'S1'),
+        writeCall(h.client, 'a.md', 'v3', 'S1'),
+    ]);
+
+    t.true(r1.success, 'pierwszy zapis w kolejce wykonany');
+    t.true(r2.success, 'drugi zapis wykonany - skorzystał z kolejki, nie z osobnego pytania');
+    t.true(r3.success, 'trzeci zapis wykonany - skorzystał z kolejki, nie z osobnego pytania');
+    t.is(h.handlerCalls, 1, 'trzy równoległe zapisy na TĘ SAMĄ ścieżkę w TEJ SAMEJ sesji mają pytać RAZ, nie trzy razy - Promise.all w AgentLoop nie ma prawa otworzyć trzech modali o jedną decyzję');
+    t.true(h.diffCalls <= 1, 'krok 6b też pyta co najwyżej raz - zgoda z pierwszego wywołania w kolejce obejmuje kolejne');
+    t.true(['v1', 'v2', 'v3'].includes(h.files['a.md']), 'plik ma treść JEDNEGO z trzech zapisów - kolejność rozstrzygnięcia trzech równoległych obietnic nie jest tym, co ten test mierzy');
+});
+
+test('(m) 3 równoległe zapisy - PIERWSZY modal odmawia, POZOSTAŁE DWA i tak PYTAJĄ (odmowa nie rozciąga się z kolejki na inne równoległe wywołania)', async t => {
+    // Pamięć ODMÓW (`MCPClient._deniedActions`) jest zmierzona PRZED wejściem do kolejki
+    // (patrz komentarz przy `alreadyDenied` w `executeToolCall`) - WŁAŚNIE po to, żeby odmowa
+    // zapisana przez PIERWSZE wywołanie w kolejce nie zablokowała cicho DRUGIEGO i TRZECIEGO,
+    // które zostały zlecone RÓWNOLEGLE, zanim jakikolwiek modal się rozstrzygnął.
+    //
+    // `diffRememberForSession: false` jest CELOWE - `true` przetestowałoby coś innego: drugi
+    // zapis (pierwszy, który w ogóle dotrze do diffa - pierwszy padł w kroku 6, przed diffem)
+    // nadałby zgodę sesyjną w kroku 6b, a trzeci zapis skorzystałby z NIEJ, nie z WŁASNEGO
+    // pytania - poprawne zachowanie samo w sobie, ale nieodróżnialne w licznikach od błędu,
+    // który ten test ma złapać (odmowa pierwszego cicho blokująca pozostałe).
+    const h = makeWriteConsentHarness({ result: 'deny' }, false);
+
+    const [r1, r2, r3] = await Promise.all([
+        writeCall(h.client, 'a.md', 'v1', 'S1'),
+        writeCall(h.client, 'a.md', 'v2', 'S1'),
+        writeCall(h.client, 'a.md', 'v3', 'S1'),
+    ]);
+
+    t.true(r1.isError, 'pierwszy zapis w kolejce dostaje odmowę handlera');
+    t.true(r2.success, 'drugi zapis - WŁASNE pytanie, nie cichy blok przez pamięć odmów pierwszego');
+    t.true(r3.success, 'trzeci zapis - tak samo jak drugi');
+    t.is(h.handlerCalls, 3, 'każdy z trzech równoległych zapisów dostaje WŁASNE pytanie - odmowa jednego nie ma prawa po cichu zablokować pozostałych dwóch');
+});
+
+test('(n) 3 równoległe zapisy do RÓŻNYCH ścieżek w tej samej sesji - każda pyta NIEZALEŻNIE (różne klucze kolejki)', async t => {
+    const h = makeWriteConsentHarness({ result: 'approve' }, true);
+
+    const [r1, r2, r3] = await Promise.all([
+        writeCall(h.client, 'a.md', 'va', 'S1'),
+        writeCall(h.client, 'b.md', 'vb', 'S1'),
+        writeCall(h.client, 'c.md', 'vc', 'S1'),
+    ]);
+
+    t.true(r1.success);
+    t.true(r2.success);
+    t.true(r3.success);
+    t.is(h.handlerCalls, 3, 'trzy RÓŻNE pliki mają trzy NIEZALEŻNE klucze kolejki - każdy pyta osobno, żaden nie czeka na inny');
+    t.is(h.files['a.md'], 'va');
+    t.is(h.files['b.md'], 'vb');
+    t.is(h.files['c.md'], 'vc');
+});
