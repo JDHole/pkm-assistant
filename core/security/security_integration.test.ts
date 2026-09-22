@@ -901,19 +901,17 @@ test('(l) 3 RÓWNOLEGŁE zapisy (Promise.all) do TEJ SAMEJ ścieżki w TEJ SAMEJ
     t.is(h.handlerCalls, 1, 'trzy równoległe zapisy na TĘ SAMĄ ścieżkę w TEJ SAMEJ sesji mają pytać RAZ, nie trzy razy - Promise.all w AgentLoop nie ma prawa otworzyć trzech modali o jedną decyzję');
     t.true(h.diffCalls <= 1, 'krok 6b też pyta co najwyżej raz - zgoda z pierwszego wywołania w kolejce obejmuje kolejne');
     t.true(['v1', 'v2', 'v3'].includes(h.files['a.md']), 'plik ma treść JEDNEGO z trzech zapisów - kolejność rozstrzygnięcia trzech równoległych obietnic nie jest tym, co ten test mierzy');
+    t.is(h.client._consentQueues.size, 0, 'kolejka ma się sama posprzątać po tym, jak ostatnie oczekujące wywołanie się rozstrzygnie - mapa nie ma puchnąć przez cały cykl życia pluginu');
 });
 
-test('(m) 3 równoległe zapisy - PIERWSZY modal odmawia, POZOSTAŁE DWA i tak PYTAJĄ (odmowa nie rozciąga się z kolejki na inne równoległe wywołania)', async t => {
-    // Pamięć ODMÓW (`MCPClient._deniedActions`) jest zmierzona PRZED wejściem do kolejki
-    // (patrz komentarz przy `alreadyDenied` w `executeToolCall`) - WŁAŚNIE po to, żeby odmowa
-    // zapisana przez PIERWSZE wywołanie w kolejce nie zablokowała cicho DRUGIEGO i TRZECIEGO,
-    // które zostały zlecone RÓWNOLEGLE, zanim jakikolwiek modal się rozstrzygnął.
-    //
-    // `diffRememberForSession: false` jest CELOWE - `true` przetestowałoby coś innego: drugi
-    // zapis (pierwszy, który w ogóle dotrze do diffa - pierwszy padł w kroku 6, przed diffem)
-    // nadałby zgodę sesyjną w kroku 6b, a trzeci zapis skorzystałby z NIEJ, nie z WŁASNEGO
-    // pytania - poprawne zachowanie samo w sobie, ale nieodróżnialne w licznikach od błędu,
-    // który ten test ma złapać (odmowa pierwszego cicho blokująca pozostałe).
+test('(m) 3 równoległe zapisy - PIERWSZY modal odmawia, POZOSTAŁE DWA dostają błąd BEZ pytania (fail-closed: odmowa w kolejce blokuje jak zgoda ją odblokowuje)', async t => {
+    // DECYZJA BEZPIECZEŃSTWA (runda 2 recenzji, świadomie ODWRACAJĄCA wcześniejszą wersję tego
+    // testu): pamięć ODMÓW jest symetryczna do `has()` (SessionWriteConsent) - tak jak nadana
+    // ZGODA obejmuje kolejne wywołania czekające w tej samej kolejce, tak samo ma działać
+    // ODMOWA. `_isDenied` jest więc czytana DWA razy - raz PRZED wejściem do kolejki
+    // (`alreadyDenied`, szybka ścieżka dla odmów sprzed tego wywołania) i RAZ ŚWIEŻO wewnątrz
+    // zamknięcia, tuż przed otwarciem modala (łapie odmowę zapisaną przez POPRZEDNIE wywołanie w
+    // TEJ SAMEJ kolejce, podczas gdy TO czekało).
     const h = makeWriteConsentHarness({ result: 'deny' }, false);
 
     const [r1, r2, r3] = await Promise.all([
@@ -923,9 +921,12 @@ test('(m) 3 równoległe zapisy - PIERWSZY modal odmawia, POZOSTAŁE DWA i tak P
     ]);
 
     t.true(r1.isError, 'pierwszy zapis w kolejce dostaje odmowę handlera');
-    t.true(r2.success, 'drugi zapis - WŁASNE pytanie, nie cichy blok przez pamięć odmów pierwszego');
-    t.true(r3.success, 'trzeci zapis - tak samo jak drugi');
-    t.is(h.handlerCalls, 3, 'każdy z trzech równoległych zapisów dostaje WŁASNE pytanie - odmowa jednego nie ma prawa po cichu zablokować pozostałych dwóch');
+    t.true(r2.isError, 'drugi zapis - automatyczny blok przez pamięć odmów pierwszego, BEZ pytania handlera ponownie');
+    t.true(r3.isError, 'trzeci zapis - tak samo jak drugi');
+    t.regex(r2.error ?? '', /WCZEŚNIEJ odmówił/, 'drugi zapis dostaje komunikat automatycznego bloku, nie nową odmowę handlera');
+    t.regex(r3.error ?? '', /WCZEŚNIEJ odmówił/, 'trzeci zapis - tak samo jak drugi');
+    t.is(h.handlerCalls, 1, 'handler pytany DOKŁADNIE RAZ - odmowa pierwszego zapisu w kolejce blokuje pozostałe dwa bez ponownego pytania (fail-closed)');
+    t.is(h.client._consentQueues.size, 0, 'kolejka sprząta się sama nawet po odmowie - odrzucenie NIE MA PRAWA zablokować sprzątania wpisu mapy');
 });
 
 test('(n) 3 równoległe zapisy do RÓŻNYCH ścieżek w tej samej sesji - każda pyta NIEZALEŻNIE (różne klucze kolejki)', async t => {

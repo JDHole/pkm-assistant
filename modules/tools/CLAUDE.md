@@ -288,14 +288,27 @@ Bramka `.pkm-assistant/**` + No-Go + `sanitizePath` w prymitywach vaultowych dzi
   `MCPClient._withConsentQueue` (kolejka łańcuchów obietnic, klucz `${sessionKey}::${targetPath}`,
   `null` = brak sesji/write → zero szeregowania) serializuje CAŁĄ decyzję (rekontrola + krok 6 +
   krok 6b) per klucz: pierwsze wywołanie leci od razu, kolejne CZEKA aż poprzednie się rozstrzygnie
-  (fulfil ALBO reject — odmowa NIE MA PRAWA zablokować następnego w kolejce), a po obudzeniu
-  sprawdza `has()` PONOWNIE - jeśli poprzednie właśnie nadało zgodę, korzysta z niej. **Pamięć
-  ODMÓW (`_isDenied`/`_recordDenial`, osobny mechanizm bez pojęcia o sesji) jest zmierzona PRZED
-  wejściem do kolejki, nie wewnątrz zamkniętej funkcji** - inaczej odmowa zapisana przez PIERWSZE
-  wywołanie w kolejce cicho blokowałaby DRUGIE i TRZECIE, które zostały zlecone RÓWNOLEGLE, zanim
-  jakikolwiek modal się rozstrzygnął (odmowa jednego nie ma prawa "rozciągnąć się" na inne,
-  niezależnie zlecone wywołania). Różne ścieżki/różne sesje = różne klucze = zero szeregowania
-  między nimi. Testy: `core/security/security_integration.test.ts` (bloki `(l)`/`(m)`/`(n)`).
+  (fulfil ALBO reject — odmowa NIE MA PRAWA ZABLOKOWAĆ SAMĄ KOLEJKĘ, czyli zatrzymać przejście do
+  następnego oczekującego wywołania), a po obudzeniu sprawdza `has()` PONOWNIE - jeśli poprzednie
+  właśnie nadało zgodę, korzysta z niej. **Pamięć ODMÓW (`_isDenied`/`_recordDenial`, osobny
+  mechanizm bez pojęcia o sesji) jest czytana DWA razy, symetrycznie do `has()`.** DECYZJA
+  BEZPIECZEŃSTWA (fail-closed, runda 2 recenzji - świadomie ODMIENNA od pierwszej wersji tej
+  kolejki): odmowa jednego z równoległych zapisów na tę samą ścieżkę w tej samej sesji MA
+  blokować pozostałe czekające w kolejce, BEZ ponownego pytania handlera - tak jak nadana ZGODA
+  „zaraża" kolejkę pozytywnie, tak samo ODMOWA ma ją „zarazić" negatywnie; asymetria (zgoda
+  obejmuje kolejne wywołania, odmowa nie) byłaby niespójna z resztą modelu i dawałaby drogę do
+  rozbicia jednej odmowy usera na serię modali dla tego samego pliku, tylko przez rozbicie zapisu
+  na N równoległych tool-calli w jednej turze. Odczyt nr 1 (`alreadyDenied`, PRZED wejściem do
+  kolejki) łapie odmowę zapisaną PRZED tym wywołaniem (poprzednia tura, wcześniejszy sekwencyjny
+  zapis) bez kosztu wchodzenia do kolejki, gdy wynik jest już przesądzony; odczyt nr 2 (ŚWIEŻY,
+  WEWNĄTRZ zamknięcia, tuż przed otwarciem modala) łapie odmowę zapisaną przez POPRZEDNIE
+  wywołanie W TEJ SAMEJ kolejce, podczas gdy TO czekało - stąd nie może polegać na tej samej, raz
+  przeczytanej wartości co odczyt nr 1. Skutek: 3 równoległe zapisy do jednego pliku, pierwszy
+  odmówiony → drugi i trzeci dostają błąd „Użytkownik WCZEŚNIEJ odmówił" BEZ pytania handlera
+  (handler wołany DOKŁADNIE raz). Różne ścieżki/różne sesje = różne klucze = zero szeregowania
+  między nimi. Kolejka sprząta po sobie wpis mapy (`_consentQueues`) niezależnie od wyniku - nie
+  ma jak puchnąć przez cały cykl życia pluginu. Testy: `core/security/security_integration.test.ts`
+  (bloki `(l)`/`(m)`/`(n)`).
 
 ### Bezpieczne skróty, których świadomie NIE zrobiliśmy
 

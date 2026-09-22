@@ -923,19 +923,20 @@ export class MCPClient {
                 ? `${sessionKey}::${targetPath}`
                 : null;
 
-            // Pamięć ODMÓW sprawdzana TERAZ, PRZED kolejką - nie wewnątrz zamknięcia niżej.
-            // `Promise.all` w `agent-loop/AgentLoop.ts` wykonuje tool-calle JEDNEJ tury
-            // RÓWNOLEGLE: trzy niezależne zapisy do TEGO SAMEGO pliku wchodzą do kolejki w TYM
-            // SAMYM ticku, więc żaden z nich jeszcze nie wie o odmowie pozostałych. Gdyby ten
-            // odczyt siedział WEWNĄTRZ zamknięcia (a więc PO oczekiwaniu w kolejce), drugie i
-            // trzecie wywołanie zobaczyłyby odmowę zapisaną przez PIERWSZE w międzyczasie i
-            // odbiłyby się bez pytania handlera w ogóle - jedna odmowa cichcem „rozciągnęłaby
-            // się" na inne, RÓWNOLEGLE zlecone wywołania, które user jeszcze nie widział.
-            // Zdjęcie tego odczytu przed kolejkę nie zmienia zachowania dla wywołań
-            // SEKWENCYJNYCH (model, który dostał odmowę i próbuje ponownie PO fakcie, nadal
-            // trafia na już zapisaną odmowę - ta gałąź startuje dopiero, gdy poprzednie
-            // wywołanie już się skończyło) ani dla wywołań bez klucza kolejki (`_withConsentQueue`
-            // z `null` woła `fn()` od razu, bez opóźnienia - ten sam moment co dotąd).
+            // Pamięć ODMÓW - DWA odczyty, symetrycznie do rekontroli `has()` niżej. DECYZJA
+            // BEZPIECZEŃSTWA (fail-closed), świadomie ODMIENNA od pierwszej wersji tej kolejki:
+            // odmowa jednego z równoległych zapisów na tę samą ścieżkę w tej samej sesji MA
+            // blokować pozostałe w kolejce, bez ponownego pytania handlera. Tak jak nadana ZGODA
+            // (`has()`) obejmuje kolejne wywołania czekające za nią, tak samo ma działać ODMOWA -
+            // asymetria (zgoda "zaraża" kolejkę, odmowa nie) byłaby niespójna z resztą modelu i
+            // otwierałaby drogę do zbicia jednej decyzji usera na serię modali dla tego samego
+            // pliku, tylko przez rozbicie zapisu na N równoległych tool-calli w jednej turze.
+            //   1) Szybki odczyt TERAZ, PRZED kolejką - łapie odmowę zapisaną PRZED tym
+            //      wywołaniem (poprzednia tura, wcześniejszy sekwencyjny zapis) bez kosztu
+            //      wejścia do kolejki, gdy wynik i tak jest już przesądzony.
+            //   2) Świeży odczyt WEWNĄTRZ zamknięcia, tuż przed otwarciem modala (patrz niżej) -
+            //      łapie odmowę zapisaną przez POPRZEDNIE wywołanie w TEJ SAMEJ kolejce, podczas
+            //      gdy TO czekało - stąd nie może polegać na tej samej, raz przeczytanej wartości.
             const alreadyDenied = !!invocationAgentName && this._isDenied(invocationAgentName, toolCall.name, targetPath);
 
             // Cała decyzja o zgodzie (rekontrola + krok 6 + krok 6b) idzie przez kolejkę per
@@ -956,9 +957,11 @@ export class MCPClient {
 
                 // 6. Handle approval if required
                 if (permResult.requiresApproval && !sessionConsentGranted) {
-                    // Pamięć odmów zmierzona PRZED kolejką (patrz komentarz wyżej) - nie
-                    // odczytujemy jej drugi raz tutaj.
-                    if (alreadyDenied) {
+                    // Rekontrola TUŻ PRZED otwarciem modala (patrz komentarz przy `alreadyDenied`
+                    // wyżej) - `alreadyDenied` sam nie wystarcza, bo mierzy stan SPRZED wejścia do
+                    // kolejki; poprzednie wywołanie W TEJ SAMEJ kolejce mogło właśnie zapisać
+                    // odmowę, podczas gdy TO czekało.
+                    if (alreadyDenied || (invocationAgentName && this._isDenied(invocationAgentName, toolCall.name, targetPath))) {
                         log.info('MCPClient', `Automatyczny blok (wcześniej odmówione): ${toolCall.name} → ${targetPath}`);
                         throw new Error(
                             `Użytkownik WCZEŚNIEJ odmówił ${this._getActionLabel(toolCall.name)} na "${targetPath}". ` +
