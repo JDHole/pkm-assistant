@@ -57,6 +57,9 @@ export {
   classifyToolRisk,
 } from './security/autonomy.js';
 export { ApprovalManager } from './security/ApprovalManager.js';
+// Zgoda „Nie pytaj więcej w tej sesji o zapisy do tego pliku" — per plik, per sesja czatu,
+// wyłącznie RAM (patrz nagłówek pliku). Jedyny wołacz: `modules/tools/MCPClient.ts`.
+export { SessionWriteConsent } from './security/SessionWriteConsent.js';
 export { SecretsStorage } from './security/SecretsStorage.js';
 export {
   maskSensitiveData,

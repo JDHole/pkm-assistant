@@ -67,6 +67,12 @@ export interface ApprovalAction {
     preview?: string;
     /** Osobny cel reguły „zawsze" — dla narzędzi external prefiksowana nazwa narzędzia. */
     approvalTarget?: string;
+    /**
+     * Wołacz (dziś wyłącznie `MCPClient`, akcje `vault.write`) mówi modalowi „ta sesja MA
+     * klucz (`origin.sessionPath`), pokaż checkbox «Nie pytaj więcej w tej sesji»". Brak pola
+     * (albo `false`) = checkbox się nie pokazuje — bez klucza sesji nie ma czego pamiętać.
+     */
+    rememberAvailable?: boolean;
     /** Wołacze dokładają własne pola informacyjne dla modala (np. `toolName`, `args`). */
     [key: string]: unknown;
 }
@@ -76,6 +82,13 @@ export interface ApprovalModalResult {
     result?: string;
     reason?: string;
     instruction?: string;
+    /**
+     * User zaznaczył „Nie pytaj więcej w tej sesji o zapisy do tego pliku" I kliknął Zatwierdź.
+     * `true` TYLKO przy `result === 'approve'` z zaznaczonym checkboxem — nigdy przy `deny`,
+     * `always` (ma już WŁASNĄ, trwałą pamięć) ani przy cichej ścieżce `isAlwaysApproved`
+     * (ta w ogóle nie woła modala, więc pole zostaje `undefined`).
+     */
+    rememberForSession?: boolean;
 }
 
 /**
@@ -95,6 +108,8 @@ export interface ApprovalResult {
     result: ApprovalOutcome;
     reason?: string;
     instruction?: string;
+    /** Patrz `ApprovalModalResult.rememberForSession` — przelot bez zmiany znaczenia. */
+    rememberForSession?: boolean;
 }
 
 /** Slice ustawień, w którym mieszkają trwałe reguły „zawsze zezwalaj". */
@@ -189,7 +204,13 @@ export class ApprovalManager {
         switch (resultKey) {
             case 'approve':
                 this.logApproval(action, 'approved');
-                return { result: 'approve', reason: '' };
+                return {
+                    result: 'approve',
+                    reason: '',
+                    // Tylko literalny klik Zatwierdź niesie ten sygnał — `always` (branch niżej)
+                    // ma już własną, trwałą pamięć i świadomie NIE ustawia tego pola.
+                    rememberForSession: (modalResult as ApprovalModalResult | undefined)?.rememberForSession === true,
+                };
 
             case 'always':
                 // Zapisujemy regułę per approvalTarget (external = prefiksowana nazwa narzędzia).
