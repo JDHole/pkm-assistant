@@ -12,13 +12,22 @@
  * Dwa widoki (oba `type: table`):
  *  - „Wszystkie" — wszystko z folderu artefaktów, co ma frontmatter `pkm-artefakt`
  *    (czyli tylko instancje; `.base`, README i inne notatki usera są odfiltrowane).
- *  - „Otwarte"   — jak wyżej minus status `zamkniety`.
+ *  - „Otwarte"   — jak wyżej minus KAŻDY literał statusu domykającego. Plik `.base` jest
+ *    STATYCZNĄ konfiguracją (Bases nie umie wywołać `closedStatusOf` w locie), więc lista
+ *    literałów do wykluczenia jest liczona RAZ, przy generowaniu: oba literały roli `closed`
+ *    (`'zamkniety'` PL i `'closed'` EN, ZAWSZE, niezależnie od tego, czy akurat załadowany typ
+ *    ich używa) PLUS `closedStatusOf(type.statusy)` każdego typu przekazanego w `types`
+ *    (własna nazwa końcowa typu usera, gdy nie ma rozpoznanej roli w jego liście). Duplikaty
+ *    scalone (`Set`), każdy dostaje osobny warunek `!=` w tej samej klauzuli `and` (koniunkcja
+ *    warunków `!=` = wykluczenie sumy zbiorów).
  *
  * Filtr po `file.inFolder(...)` łapie także podfoldery per agent oraz `_archiwum`
  * (świadomie: archiwum artefaktów to nadal artefakty, a user może sobie dodać własny widok).
  */
 import { DEFAULT_ARTIFACTS_FOLDER } from './ArtifactStore.js';
 import { CLOSED_STATUS } from './artifactButtons.js';
+import { statusLiteral, closedStatusOf } from './artifactStatuses.js';
+import type { ArtifactType } from './types.js';
 
 /** Nazwa generowanego pliku (bez folderu). */
 export const ARTIFACTS_BASE_FILENAME = 'Artefakty.base';
@@ -67,16 +76,33 @@ export function buildArtifactsBasePath(folder?: string): string {
 }
 
 /**
+ * Literały statusu „domknięty" do wykluczenia w widoku „Otwarte": oba literały roli `closed`
+ * (zawsze) + `closedStatusOf` każdego typu przekazanego (deduplikowane, kolejność wstawienia).
+ */
+function closedStatusLiterals(types: ReadonlyArray<Pick<ArtifactType, 'statusy'>>): string[] {
+    const set = new Set<string>([CLOSED_STATUS, statusLiteral('closed', 'en')]);
+    for (const type of types) {
+        const closed = closedStatusOf(type?.statusy || []);
+        if (closed) set.add(closed);
+    }
+    return [...set];
+}
+
+/**
  * Zbuduj treść pliku `.base` z widokami artefaktów.
  *
  * @param {string} [folder] - folder artefaktów (`settings.pkmAssistant.artifactsFolder`)
+ * @param {Array} [types] - typy ZAŁADOWANE w bibliotece (`ArtifactTypeLoader.getAllTypes()`) -
+ *   ich `statusy` zasilają dodatkowe literały „domknięty" typów własnych usera. Pominięcie =
+ *   sam rejestr wbudowany (`'zamkniety'`/`'closed'`), bezpieczne dla wołacza bez typeLoadera pod ręką.
  * @returns {string} treść pliku `.base` (YAML)
  */
-export function buildArtifactsBaseContent(folder?: string): string {
+export function buildArtifactsBaseContent(folder?: string, types: ReadonlyArray<Pick<ArtifactType, 'statusy'>> = []): string {
     const root = normalizeFolder(folder);
     const inFolder = yamlSingleQuoted(`file.inFolder(${baseStringLiteral(root)})`);
     const isArtifact = yamlSingleQuoted('!note["pkm-artefakt"].isEmpty()');
-    const notClosed = yamlSingleQuoted(`note["status"] != ${baseStringLiteral(CLOSED_STATUS)}`);
+    const notClosedFilters = closedStatusLiterals(types)
+        .map(literal => yamlSingleQuoted(`note["status"] != ${baseStringLiteral(literal)}`));
 
     const order = ORDER.map((prop) => `      - ${prop}`).join('\n');
     const sort = ['    sort:', '      - property: zaktualizowano', '        direction: DESC'].join('\n');
@@ -98,7 +124,7 @@ export function buildArtifactsBaseContent(folder?: string): string {
         '    displayName: Notatka',
         'views:',
         view('Wszystkie', [inFolder, isArtifact]),
-        view('Otwarte', [inFolder, isArtifact, notClosed]),
+        view('Otwarte', [inFolder, isArtifact, ...notClosedFilters]),
         '',
     ].join('\n');
 }

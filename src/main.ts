@@ -1151,7 +1151,10 @@ export default class PkmAssistantPlugin extends PluginBase {
         if (this.app.vault.getAbstractFileByPath?.(acc)) continue;
         try { await this.app.vault.createFolder(acc); } catch { /* wyścig / już istnieje */ }
       }
-      await this.app.vault.create(path, buildArtifactsBaseContent(folder));
+      // Typy załadowane w bibliotece zasilają dodatkowe literały „domknięty" widoku „Otwarte"
+      // (typ własny usera może nazwać swój ostatni status inaczej niż `zamkniety`/`closed`).
+      const loadedTypes = this.agentManager?.artifactTypeLoader?.getAllTypes?.() || [];
+      await this.app.vault.create(path, buildArtifactsBaseContent(folder, loadedTypes));
       log.info('Plugin', `Widok Bases artefaktów wygenerowany: ${path}`);
       new Notice(t('artifact.base.created', { path }), 8000);
     } catch (e: unknown) {

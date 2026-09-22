@@ -1,9 +1,10 @@
 /**
  * artifactButtons.js — logika „status instancji → przyciski w notatce".
  *
- * Pure module (ZERO importów Obsidiana / i18n) → node-testowalne. Renderer (`artifactBlocks.js`)
- * bierze z tego listę akcji, a etykiety tłumaczy przez `t()` po `labelKey`. Rozdział celowy:
- * decyzja „co pokazać" jest deterministyczna i pokrywalna testem, „jak nazwać" żyje w i18n.
+ * Pure module (ZERO importów Obsidiana / i18n, poza `artifactStatuses.ts` - też pure) →
+ * node-testowalne. Renderer (`artifactBlocks.js`) bierze z tego listę akcji, a etykiety
+ * tłumaczy przez `t()` po `labelKey`. Rozdział celowy: decyzja „co pokazać" jest deterministyczna
+ * i pokrywalna testem, „jak nazwać" żyje w i18n.
  *
  * Kontrakt akcji:
  *  - `action`   — identyfikator kliknięcia ('approve' | 'revise' | 'summon').
@@ -12,14 +13,27 @@
  *  - `summonKey`— klucz i18n frazy „user zrobił X" wstrzykiwanej do wiadomości przywołania.
  *  - `icon`     — emoji przycisku.
  *
- * Mapa (dla typu `plan`, uogólniona na dowolny typ przez `statusy`):
- *  - status = ostatni w `statusy` (lub 'zamkniety') → BRAK przycisków (artefakt domknięty).
- *  - status = 'do-akceptacji' → [✅ Zatwierdź] (→ 'zaakceptowany') [💬 Odeślij z uwagami] (→ 'uwagi')
- *    (każdy przycisk tylko jeśli jego status docelowy istnieje w `statusy` typu).
+ * Mapa (dla typu `plan`, uogólniona na dowolny typ przez `statusy`, w OBU językach —
+ * `modules/artifacts/artifactStatuses.ts`):
+ *  - status = `closedStatusOf(statusy)` (LUB dowolny literał roli `closed` obu języków,
+ *    niezależnie od deklaracji typu) → BRAK przycisków (artefakt domknięty).
+ *  - status = `pendingStatusOf(statusy)` → [✅ Zatwierdź] (→ `acceptedStatusOf(statusy)`)
+ *    [💬 Odeślij z uwagami] (→ `remarksStatusOf(statusy)`) - każdy przycisk TYLKO jeśli jego
+ *    rola jest rozpoznana w `statusy` typu (własna nazwa usera dla accepted/remarks nie ma
+ *    fallbacku pozycyjnego, patrz `artifactStatuses.ts`).
  *  - każdy inny status niedomknięty → [📣 Przywołaj agenta] (bez zmiany statusu).
  */
+import {
+    statusRole,
+    statusLiteral,
+    statusLocaleOf,
+    pendingStatusOf,
+    closedStatusOf,
+    acceptedStatusOf,
+    remarksStatusOf,
+} from './artifactStatuses.js';
 
-/** Status uznawany za „domknięty" (bez akcji), niezależnie od deklaracji typu. */
+/** Status uznawany za „domknięty" w PL (zostaje jako stała wsteczna zgodność - wołaj `isClosedStatus`). */
 export const CLOSED_STATUS = 'zamkniety';
 
 export interface ArtifactButton {
@@ -31,15 +45,18 @@ export interface ArtifactButton {
 }
 
 /**
- * Czy status oznacza domknięcie artefaktu (brak przycisków).
+ * Czy status oznacza domknięcie artefaktu (brak przycisków). Prawda gdy: literał ma rolę
+ * `closed` w KTÓRYMKOLWIEK z dwóch języków (niezależnie od tego, czy typ w ogóle go deklaruje -
+ * `'zamkniety'`/`'closed'` domykają zawsze, jak dotąd), ALBO status pasuje do
+ * `closedStatusOf(statusy)` (własna nazwa końcowa typu usera, fallback = ostatni w liście).
  * @param {string} status
- * @param {string[]} statusy - lista statusów typu (ostatni = domknięcie)
+ * @param {string[]} statusy - lista statusów typu (ostatni = domknięcie, gdy brak roli rozpoznanej)
  * @returns {boolean}
  */
 export function isClosedStatus(status: string, statusy: string[] = []): boolean {
-    if (status === CLOSED_STATUS) return true;
+    if (statusRole(status) === 'closed') return true;
     const list = Array.isArray(statusy) ? statusy : [];
-    return list.length > 0 && status === list[list.length - 1];
+    return list.length > 0 && status === closedStatusOf(list);
 }
 
 /**
@@ -52,24 +69,29 @@ export function computeArtifactButtons(status: string, statusy: string[] = []): 
     if (isClosedStatus(status, statusy)) return [];
 
     const list = Array.isArray(statusy) ? statusy : [];
-    // Pusta lista statusów typu = nie ograniczaj (przepuść propozycje przejść).
-    const allows = (s: string) => list.length === 0 || list.includes(s);
+    // Typ nieznany/osierocony (statusy=[]) — nie ograniczaj: jeśli sam status ma rolę
+    // `pending` (w KTÓRYMKOLWIEK języku), zaproponuj przejścia w TYM SAMYM języku co status,
+    // zamiast milczeć tylko dlatego, że nie ma listy do przeszukania.
+    const unrestricted = list.length === 0;
 
-    if (status === 'do-akceptacji') {
+    if (status === pendingStatusOf(list) || (unrestricted && statusRole(status) === 'pending')) {
+        const locale = unrestricted ? statusLocaleOf(status) : null;
+        const acceptedTarget = acceptedStatusOf(list) ?? (locale ? statusLiteral('accepted', locale) : null);
+        const remarksTarget = remarksStatusOf(list) ?? (locale ? statusLiteral('remarks', locale) : null);
         const buttons: ArtifactButton[] = [];
-        if (allows('zaakceptowany')) {
+        if (acceptedTarget) {
             buttons.push({
                 action: 'approve',
-                statusTo: 'zaakceptowany',
+                statusTo: acceptedTarget,
                 labelKey: 'artifact.btn.approve',
                 summonKey: 'artifact.summon.action.approve',
                 icon: '✅',
             });
         }
-        if (allows('uwagi')) {
+        if (remarksTarget) {
             buttons.push({
                 action: 'revise',
-                statusTo: 'uwagi',
+                statusTo: remarksTarget,
                 labelKey: 'artifact.btn.revise',
                 summonKey: 'artifact.summon.action.revise',
                 icon: '💬',

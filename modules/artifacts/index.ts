@@ -6,11 +6,14 @@
  * Migrator (`migrate_json_to_notes.ts`) przenosi stare JSONy artefaktów na notatki.
  * Patrz CLAUDE.md.
  *
- * 18 symboli bez konsumenta spoza modułu nie jest eksportowanych z barrela (stałe
+ * Sporo symboli bez konsumenta spoza modułu nie jest eksportowanych z barrela (stałe
  * typów/statusów/ścieżek + `computeArtifactButtons`/`isClosedStatus`/`CLOSED_STATUS`/
- * `buildSummonMessage`/`parseArtifactBlockId`/`PROTECTED_FIELDS`/`ARTIFACT_CONTEXT_MAX_CHARS`).
- * Definicje ŻYJĄ w bebechach - używają ich `artifactBlocks`/`artifactSummon`/`ArtifactStore`
- * u siebie, a testy deep-importują pliki wprost.
+ * `buildSummonMessage`/`parseArtifactBlockId`/`PROTECTED_FIELDS`/`ARTIFACT_CONTEXT_MAX_CHARS`/
+ * cały `artifactStatuses.ts` - `statusRole`/`statusLiteral`/`statusLocaleOf`/`pendingStatusOf`/
+ * `closedStatusOf`/`acceptedStatusOf`/`remarksStatusOf`, rejestr statusów bilingwalnych PL/EN).
+ * Definicje ŻYJĄ w bebechach - używają ich `artifactBlocks`/`artifactSummon`/`ArtifactStore`/
+ * `artifactButtons`/`basesView`/`artifactStatusLabel`/`ArtifactTypeLoader` u siebie, a testy
+ * deep-importują pliki wprost.
  */
 
 // Silnik artefaktów żywych (pure). `TodoTool` z modules/tools bierze go przez TEN barrel.

@@ -348,6 +348,56 @@ test('archive moves closed artifacts older than the type retention window', asyn
     t.true(thin.path!.includes('_archiwum/'));
 });
 
+// ── archive() rozpoznaje „domknięty" przez rolę statusu, nie jeden literał PL ──
+// (modules/artifacts/artifactStatuses.ts) - typ EN i typ własny z inną nazwą końcową muszą
+// też zostać posprzątane, nie tylko instancje z dokładnym `status: zamkniety`.
+
+test('archive() sprząta instancję TYPU WŁASNEGO ze statusem "done" (rola closed = ostatni w liście)', async t => {
+    const nowRef = { value: new Date('2026-07-23') };
+    const { app } = makeApp();
+    const CUSTOM_TYPE = {
+        name: 'kanban',
+        statusy: ['todo', 'zaakceptowany', 'uwagi', 'done'],
+        sprzatanie: 10,
+        pola: {},
+        template: '## Treść\n\n## Uwagi usera\n',
+    };
+    const customLoader = { getType: (n: string) => (n === CUSTOM_TYPE.name ? CUSTOM_TYPE : null) };
+    const store = new ArtifactStore({ app, typeLoader: customLoader as unknown as { getType(name: string): import('./types.js').ArtifactType | null }, now: () => nowRef.value });
+
+    const { id } = await store.create('kanban', { tytul: 'Zadanie', agent: 'Jaskier' });
+    await store.update(id, [{ op: 'set_field', key: 'status', value: 'done' }]);
+    await store.app.fileManager.processFrontMatter((await store._findFileById(id))!, (fm: ArtifactFrontmatter) => { fm.zaktualizowano = '2026-07-01'; });
+
+    const moved = await store.archive();
+    t.is(moved, 1);
+    const thin = (await store.read(id))!;
+    t.true(thin.path!.includes('_archiwum/'));
+});
+
+test('archive() sprząta instancję TYPU EN ze statusem "closed"', async t => {
+    const nowRef = { value: new Date('2026-07-23') };
+    const { app } = makeApp();
+    const EN_TYPE = {
+        name: 'plan_en',
+        statusy: ['pending-approval', 'remarks', 'accepted', 'closed'],
+        sprzatanie: 5,
+        pola: {},
+        template: '## Goal\n\n## User notes\n',
+    };
+    const enLoader = { getType: (n: string) => (n === EN_TYPE.name ? EN_TYPE : null) };
+    const store = new ArtifactStore({ app, typeLoader: enLoader as unknown as { getType(name: string): import('./types.js').ArtifactType | null }, now: () => nowRef.value });
+
+    const { id } = await store.create('plan_en', { tytul: 'Plan', agent: 'Jaskier' });
+    await store.update(id, [{ op: 'set_field', key: 'status', value: 'closed' }]);
+    await store.app.fileManager.processFrontMatter((await store._findFileById(id))!, (fm: ArtifactFrontmatter) => { fm.zaktualizowano = '2026-07-01'; });
+
+    const moved = await store.archive();
+    t.is(moved, 1);
+    const thin = (await store.read(id))!;
+    t.true(thin.path!.includes('_archiwum/'));
+});
+
 // ── bramka i zlew rozstrzygają id na TĘ SAMĄ ścieżkę ──────
 // `pathById` (cel dla `contextExtractor`) i `_findFileById` (zapis) muszą się zgadzać: gdyby
 // jeden czytał nieświeży `_pathIndex` bez weryfikacji, a drugi skanował dysk, user przenoszący

@@ -60,3 +60,41 @@ test('isClosedStatus: zamkniety zawsze true, ostatni z listy true, środkowy fal
     t.true(isClosedStatus('gotowe', ['robocze', 'gotowe']));
     t.false(isClosedStatus('robocze', ['robocze', 'gotowe']));
 });
+
+// ─── Typ EN (decyzja właściciela 19.09: nowy artefakt EN dostaje statusy EN w pliku) ───
+
+const EN_PLAN_STATUSY = ['pending-approval', 'remarks', 'accepted', 'closed'];
+
+test('typ EN w "pending-approval" → guziki approve→accepted, revise→remarks', t => {
+    const btns = computeArtifactButtons('pending-approval', EN_PLAN_STATUSY);
+    t.is(btns.length, 2);
+    t.is(btns.find(b => b.action === 'approve')!.statusTo, 'accepted');
+    t.is(btns.find(b => b.action === 'revise')!.statusTo, 'remarks');
+});
+
+test('typ EN w "closed" → brak guzików', t => {
+    t.deepEqual(computeArtifactButtons('closed', EN_PLAN_STATUSY), []);
+});
+
+// ─── Typ własny usera (słownictwo spoza obu rejestrów) ───
+
+const CUSTOM_STATUSY = ['todo', 'zaakceptowany', 'uwagi', 'done'];
+
+test('własny typ w "todo" (rozpoznane zaakceptowany/uwagi w liście) → guziki approve/revise', t => {
+    const btns = computeArtifactButtons('todo', CUSTOM_STATUSY);
+    t.is(btns.length, 2);
+    t.is(btns.find(b => b.action === 'approve')!.statusTo, 'zaakceptowany');
+    t.is(btns.find(b => b.action === 'revise')!.statusTo, 'uwagi');
+});
+
+test('własny typ w "done" (rola closed = ostatni w liście, brak roli rozpoznanej) → brak guzików', t => {
+    t.deepEqual(computeArtifactButtons('done', CUSTOM_STATUSY), []);
+});
+
+// ─── Typ raport wbudowany (bez approval flow - brak roli accepted w typie) ───
+
+test('raport w "w-trakcie" → brak approve/revise (brak accepted/remarks w typie), tylko przywołanie', t => {
+    const btns = computeArtifactButtons('w-trakcie', ['w-trakcie', 'gotowy', 'zamkniety']);
+    t.is(btns.length, 1);
+    t.is(btns[0].action, 'summon');
+});
