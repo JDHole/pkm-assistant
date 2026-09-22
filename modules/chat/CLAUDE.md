@@ -530,8 +530,7 @@ przez barrel) - jedno liczydło zamiast osobnej formuły ad hoc w tym pliku.
   (`modules/memory/ConsolidationRun.ts`, typ `BuildPlanInclude` = alias `AutoConsolidationInclude`
   z `consolidationStatus.ts`, jeden kształt). Brak (guzik ręczny, `source:'manual'`) = pełny plan,
   zachowanie sprzed tej opcji. `/save session` (`save_session.ts`) podaje
-  `include: result.consolidationInclude` (strażnik mutacyjny po źródle:
-  `save_session.noteFailures.test.ts`) - policzone przez `SaveSessionWorkflow.applyDecision`
+  `include: result.consolidationInclude` - policzone przez `SaveSessionWorkflow.applyDecision`
   → `planAutoConsolidation` (`modules/memory/consolidationStatus.ts`) z DWÓCH wyłączników usera
   w Ustawieniach, oba domyślnie WYŁĄCZONE. `include:{sessions:false, dedup:false}` (domyślna
   instalacja) daje ZAWSZE pusty plan, niezależnie od liczników - `startConsolidationRun` milczy

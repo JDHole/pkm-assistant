@@ -897,6 +897,48 @@ test.serial('okno zamknięte podczas generowania L1 (status running) NIE wycisza
     t.is(run.getStep('l1_batch_1').status, STEP_STATUS.AWAITING_REVIEW, 'krok sam w sobie zostaje nietknięty - wyciszenie NIE aplikuje decyzji');
 });
 
+// N3(c) recenzji rundy 3: `onModalOpened()` musi realnie rozbroić `_windowClosed`, nie tylko
+// zostać wywołane - test zachowania (skutek: brak wyciszenia), nie sam fakt wywołania mocka.
+test.serial('onModalOpened PRZED awaiting_review rozbraja zamknięcie - L1 dochodzi do awaiting_review i NIE wycisza się', async t => {
+    const env = makeEnv({
+        files: {
+            ...archiveWith(2),
+            [`${BASE}/.state.json`]: JSON.stringify({ archived_since_last_consolidation: 7 }),
+        },
+        settings: { memoryV3ArchiveBatchSize: 2 },
+    });
+    // Ta sama bramka sterowana testem co w teście wyżej - L1 wisi w `running`, dopóki test sam
+    // nie zwolni generacji.
+    let releaseModel: (() => void) | null = null;
+    const gate = new Promise<void>(resolve => { releaseModel = resolve; });
+    env.model.stream = (req, handlers) => {
+        env.model.calls.push(req);
+        void gate.then(() => handlers.done({
+            choices: [{ message: { content: 'Opóźnione streszczenie' } }],
+            usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }));
+    };
+
+    const run = await env.start();
+    await waitStatus(run, 'l1_batch_1', STEP_STATUS.RUNNING);
+
+    // Zamknięcie PODCZAS generowania - uzbraja `_windowClosed` (bug recenzji #7).
+    controllerOf(run).onModalClosed();
+
+    // User WRACA i PATRZY na modal (klik w 🧠, otwarcie z paska statusu) ZANIM L1 zdążył dojść do
+    // awaiting_review - `onModalOpened()` ma rozbroić flagę, żeby dopiero co otwarte okno nie
+    // zostało wyciszone "pod userem" chwilę później.
+    controllerOf(run).onModalOpened();
+
+    // Generacja dogania - L1 dochodzi do awaiting_review PO tym, jak user już PATRZY na okno.
+    releaseModel!();
+    await waitStatus(run, 'l1_batch_1', STEP_STATUS.AWAITING_REVIEW);
+
+    t.is(JSON.parse(env.files[`${BASE}/.state.json`]).archived_since_last_consolidation, 7,
+        'onModalOpened rozbroił zamknięcie - L1 dochodzi do awaiting_review BEZ wyciszenia, licznik nietknięty');
+    t.falsy(run.meta.consolidationSilenced, 'przebieg NIE jest oznaczony jako wyciszony - user dostaje normalną szansę zdecydować');
+});
+
 // ── wyciszenie po zamknięciu okna (konsolidacja opcjonalna) ────────────────────────
 
 test.serial('onModalClosed: L1 wciąż `awaiting_review` przy zamknięciu okna liczy się jak odrzucenie (licznik → 0)', async t => {

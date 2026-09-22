@@ -60,30 +60,19 @@ test('modal.save_session.notes_failed istnieje w pl.ts i en.ts (z {{count}} i {{
     }
 });
 
-// ── konsolidacja opcjonalna: `include` MUSI dojechać do startConsolidationRun (recenzja #4b) ──
+// ── konsolidacja opcjonalna: `include` (recenzja #4b, doprecyzowane N4 recenzji rundy 3) ──
 //
-// Test mutacyjny po źródle (ten sam powód co reszta pliku - `save_session.ts` importuje
-// `obsidian`, AVA nie zaimportuje go wprost). Bez tej linii `SaveSessionWorkflow.applyDecision`
-// policzyłby politykę wyłączników poprawnie, ale `startConsolidationRun` dostałby PEŁNY plan
-// (brak `include` = zachowanie sprzed auto-konsolidacji opcjonalnej) - odrzucona propozycja
-// wracałaby przy KAŻDYM zapisie sesji, mimo że `SaveSessionWorkflow` mówi inaczej. Obserwowalny
-// efekt tej dokładnej mutacji ("save_session nie przekazuje include") jest sprawdzony osobno,
-// na poziomie planu, w `consolidationRunner.test.ts` ("plan ma L1, BRAK dedup mimo materiału").
-
-test('runSaveSessionFlow przekazuje include: result.consolidationInclude do startConsolidationRun', t => {
-    const od = source.indexOf('if (result.shouldTriggerArchive)');
-    t.true(od >= 0, 'Nie znaleziono bramki `if (result.shouldTriggerArchive)` — zmienił się kształt handlera.');
-
-    const startIdx = source.indexOf('startConsolidationRun({', od);
-    t.true(startIdx >= 0, 'Nie znaleziono wywołania `startConsolidationRun` wewnątrz bramki triggera.');
-
-    const blok = source.slice(startIdx, source.indexOf('view.resetInputArea?.();', startIdx));
-    t.true(blok.length > 0, 'Pusty blok wywołania startConsolidationRun — zmienił się kształt handlera.');
-
-    t.regex(
-        blok,
-        /include:\s*result\.consolidationInclude/,
-        '`startConsolidationRun` nie dostaje `include: result.consolidationInclude` — odrzucona propozycja mogłaby wrócić przy KAŻDYM kolejnym zapisie sesji, niezależnie od wyłączników auto-konsolidacji.',
-    );
-    t.true(blok.includes("source: 'auto'"), 'Wywołanie musi zostać oznaczone jako trigger automatyczny.');
-});
+// Ten plik nie sprawdza już OKABLOWANIA `include: result.consolidationInclude` po źródle
+// (usunięty test „przekazuje include" przypinał tekst kodu - regex nad blokiem wywołania
+// `startConsolidationRun`, bez odpalenia realnej logiki). `startConsolidationRun` ma OBRONĘ
+// W GŁĄB: gdy `source:'auto'` przyjdzie BEZ jawnego `include` (np. dlatego, że ten handler
+// zapomniałby go przekazać), runner liczy politykę SAM przez `planAutoConsolidation` - ten sam
+// wynik co `SaveSessionWorkflow.applyDecision`. Skutek KOŃCOWY (brain OFF + sesje ON -> plan ma
+// L1, BRAK dedup mimo materiału na obie gałęzie) jest więc sprawdzony behawioralnie, bez zależności
+// od tego pliku, w `consolidationRunner.test.ts`:
+//  - `'include {sessions:true, dedup:false} (symulacja: brain OFF, sesje ON) -> plan ma L1, BRAK
+//     dedup mimo materiału'` (include przekazane jawnie - kształt, jaki realnie wysyła
+//     `save_session.ts`),
+//  - `'source:auto BEZ include, memoryV3AutoConsolidateSessions:true w ustawieniach -> runner
+//     liczy include SAM (L1 wchodzi, dedup nie)'` (obrona w głąb - dowodzi, że skutek końcowy
+//     zostaje poprawny NAWET gdyby ten handler przestał przekazywać `include`).
