@@ -29,6 +29,15 @@ export interface MemoryPkmSlice {
     memoryV3BrainNotesThreshold?: number;
     /** Rozmiar paczki L1 (ile sesji wchodzi w jedno streszczenie, i ile L1 w L2 itd.). */
     memoryV3ArchiveBatchSize?: number;
+    /**
+     * Nazwy SPRZED tego podbloku - `resolveConsolidationThresholds` (`consolidationStatus.ts`)
+     * nadal je czyta jako fallback, gdy `memoryV3X` nie jest ustawione. Pole tutaj TYLKO do
+     * odczytu efektywnej wartości w polu (recenzja #9 - pole nie ma kłamać, gdy user ma jeszcze
+     * starą nazwę) - `.onChange` zawsze zapisuje do `memoryV3X`, nigdy tutaj.
+     */
+    archiveSessionThreshold?: number;
+    /** Jak `archiveSessionThreshold` wyżej, dla limitu notatek brain/. */
+    archiveBrainNotesThreshold?: number;
 }
 
 /**
@@ -221,11 +230,28 @@ export function renderMemorySection(container: HTMLElement, ctx: MemorySettingsC
                 await save();
             }));
 
-    /** Liczba całkowita > 0, inaczej wraca do `fallback` (wartość z `CONSOLIDATION_DEFAULTS`). */
+    /**
+     * Liczba całkowita > 0, inaczej wraca do `fallback` (wartość z `CONSOLIDATION_DEFAULTS`).
+     * `Number(value)` (NIE `parseInt`) + `Number.isInteger` - `parseInt` PRZYJMOWAŁ śmieciowe
+     * wejścia zamiast je odrzucać (bug recenzji #9): `"3.7"` dawało `3` (ucięcie ułamka), `"1e3"`
+     * dawało `1` (parseInt nie rozumie notacji wykładniczej, `Number` owszem - `1e3` = 1000,
+     * poprawnie), `"12abc"` dawało `12` (parseInt ignoruje śmieci NA KOŃCU). `Number("12abc")` to
+     * `NaN` - `Number.isInteger(NaN)` jest `false`, więc śmieciowe wejście spada na `fallback`
+     * zamiast po cichu przepuszczać obciętą wartość.
+     */
     const positiveIntOr = (value: string, fallback: number): number => {
-        const val = parseInt(value, 10);
-        return Number.isFinite(val) && val > 0 ? val : fallback;
+        const val = Number(value);
+        return Number.isInteger(val) && val > 0 ? val : fallback;
     };
+
+    // Wartość EFEKTYWNA do pokazania w polu (recenzja #9) - ta sama kolejność fallbacków co
+    // silnik (`resolveConsolidationThresholds`: memoryV3X > legacy archiveX > default), żeby
+    // pole NIE pokazywało domyślnej wartości, gdy user ma jeszcze starą nazwę ustawienia z czasów
+    // przed tym podblokiem, a silnik i tak już ją czyta. Zapis (`.onChange` niżej) zawsze idzie
+    // do `memoryV3X` - dotknięcie pola migruje cicho na nową nazwę.
+    const effectiveSessionThreshold = pkm.memoryV3SessionThreshold ?? pkm.archiveSessionThreshold ?? CONSOLIDATION_DEFAULTS.sessionThreshold;
+    const effectiveBrainLimit = pkm.memoryV3BrainNotesThreshold ?? pkm.archiveBrainNotesThreshold ?? CONSOLIDATION_DEFAULTS.brainNotesLimit;
+    const effectiveBatchSize = pkm.memoryV3ArchiveBatchSize ?? CONSOLIDATION_DEFAULTS.batchSize;
 
     new Setting(container)
         .setName(t('settings.consolidation_session_threshold'))
@@ -233,7 +259,7 @@ export function renderMemorySection(container: HTMLElement, ctx: MemorySettingsC
         .addText(text => {
             text
                 .setPlaceholder(String(CONSOLIDATION_DEFAULTS.sessionThreshold))
-                .setValue(String(pkm.memoryV3SessionThreshold !== undefined ? pkm.memoryV3SessionThreshold : CONSOLIDATION_DEFAULTS.sessionThreshold))
+                .setValue(String(effectiveSessionThreshold))
                 .onChange(async (value) => {
                     pkm.memoryV3SessionThreshold = positiveIntOr(value, CONSOLIDATION_DEFAULTS.sessionThreshold);
                     await save();
@@ -248,7 +274,7 @@ export function renderMemorySection(container: HTMLElement, ctx: MemorySettingsC
         .addText(text => {
             text
                 .setPlaceholder(String(CONSOLIDATION_DEFAULTS.brainNotesLimit))
-                .setValue(String(pkm.memoryV3BrainNotesThreshold !== undefined ? pkm.memoryV3BrainNotesThreshold : CONSOLIDATION_DEFAULTS.brainNotesLimit))
+                .setValue(String(effectiveBrainLimit))
                 .onChange(async (value) => {
                     pkm.memoryV3BrainNotesThreshold = positiveIntOr(value, CONSOLIDATION_DEFAULTS.brainNotesLimit);
                     await save();
@@ -263,7 +289,7 @@ export function renderMemorySection(container: HTMLElement, ctx: MemorySettingsC
         .addText(text => {
             text
                 .setPlaceholder(String(CONSOLIDATION_DEFAULTS.batchSize))
-                .setValue(String(pkm.memoryV3ArchiveBatchSize !== undefined ? pkm.memoryV3ArchiveBatchSize : CONSOLIDATION_DEFAULTS.batchSize))
+                .setValue(String(effectiveBatchSize))
                 .onChange(async (value) => {
                     pkm.memoryV3ArchiveBatchSize = positiveIntOr(value, CONSOLIDATION_DEFAULTS.batchSize);
                     await save();

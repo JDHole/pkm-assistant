@@ -7,15 +7,30 @@
  *  1. `SaveSessionWorkflow.applyDecision` (`modules/memory/SaveSessionWorkflow.ts`) — woła
  *     `planAutoConsolidation` (poniżej), które samo deleguje do `resolveConsolidationThresholds`
  *     zamiast trzymać własną kopię tej samej logiki progów.
- *  2. Prywatna wtyczka deweloperska właściciela w repo `pkm-assistant-harness`
- *     (katalog `companion/`) — importuje `resolveConsolidationThresholds`/`shouldTriggerConsolidation`
- *     PRZY BUILDZIE wprost z `@plugin/modules/memory/consolidationStatus.js`. To repo pluginu nie
- *     widzi tego konsumenta w swoich testach ani typecheku.
+ *  2. `modules/chat/consolidationRunner.ts` (przez barrel) — liczy próg dedupu/batchSize
+ *     `resolveConsolidationThresholds`, a `include` obronnie w głąb przez `planAutoConsolidation`.
+ *  3. Prywatna wtyczka deweloperska właściciela w repo `pkm-assistant-harness`
+ *     (katalog `companion/`, plik `memoryStatus.ts`) — importuje
+ *     `resolveConsolidationThresholds`/`shouldTriggerConsolidation` PRZY BUILDZIE wprost z
+ *     `@plugin/modules/memory/consolidationStatus.js`. To repo pluginu nie widzi tego konsumenta
+ *     w swoich testach ani typecheku.
  *
  * NAZWA TEGO PLIKU i sygnatury `resolveConsolidationThresholds`/`shouldTriggerConsolidation`
- * zostają BEZ ZMIAN bez poprawki w harnessie — zmiana = czerwony build harnessu i jego CI. Nowe
- * eksporty (`CONSOLIDATION_DEFAULTS`, `resolveAutoConsolidationPolicy`, `planAutoConsolidation`)
- * są ADDYTYWNE — harness ich nie zna i nie musi.
+ * zostają BEZ ZMIAN bez poprawki w harnessie — zmiana = czerwony build harnessu i jego CI.
+ *
+ * ⚠️ **Harness NIE JEST na bieżąco z auto-konsolidacją opcjonalną — jego diagnostyka dziś KŁAMIE.**
+ * `companion/memoryStatus.ts` liczy `wouldTrigger` przez `shouldTriggerConsolidation`, która z
+ * DEFINICJI ignoruje oba wyłączniki auto-konsolidacji (`memoryV3AutoConsolidateSessions`/`Brain`)
+ * — CLI hosta pokaże „konsolidacja by się odpaliła" nawet wtedy, gdy oba wyłączniki są WYŁĄCZONE
+ * (czyli w produkcji nic by się nie odpaliło). Do tego `companion`'s `resolvePlanDedupThreshold`
+ * to CELOWO osobna, starsza formuła (bez podłogi z tego pliku) — po tej naprawie rozjeżdża się
+ * jeszcze bardziej z tym, co realnie liczy plugin. Naprawa (przejście `memoryStatus.ts` na
+ * `planAutoConsolidation` + `resolveConsolidationThresholds` z tego pliku) należy do repo
+ * harnessu, PO zmergowaniu tej gałęzi do `main` — nie jest zrobiona tutaj, bo to repo nie ma
+ * prawa dotykać harnessu. Nowe eksporty tego pliku (`CONSOLIDATION_DEFAULTS`,
+ * `resolveAutoConsolidationPolicy`, `planAutoConsolidation`) są addytywne (nie psują istniejącego
+ * builda harnessu), ale dopóki `memoryStatus.ts` po nie nie sięgnie, jego `wouldTrigger` i
+ * `dedupThreshold` zostają nieaktualne.
  *
  * Status konsolidacji dla CLI Obsidiana (dawne `getConsolidationStatus`, `resolvePlanDedupThreshold`,
  * `StateManager.peek()` i cała reszta diagnostyki) mieszka OD 2026-09-20 poza tym repo — werdykt
@@ -51,9 +66,11 @@ export interface ConsolidationSettingsLike {
 
 /**
  * Jedno źródło domyślnych progów/wyłączników konsolidacji. Silnik (ten plik, `ConsolidationRun.ts`,
- * `ArchiveWorkflow.ts`, `consolidationRunner.ts`) i UI (`SettingsContent.ts`) czytają STĄD zamiast
- * trzymać osobne kopie tych samych literałów — `10`/`20`/`5` rozsiane po kodzie rozjeżdżały się przy
- * pierwszej zmianie jednego miejsca.
+ * `ArchiveWorkflow.ts`) i UI (`SettingsContent.ts`) czytają STĄD zamiast trzymać osobne kopie
+ * tych samych literałów — `10`/`20`/`5` rozsiane po kodzie rozjeżdżały się przy pierwszej
+ * zmianie jednego miejsca. `modules/chat/consolidationRunner.ts` NIE importuje tej stałej
+ * bezpośrednio (poza modułem, żadnego powodu) — dostaje te same domyślne przez
+ * `resolveConsolidationThresholds`/`planAutoConsolidation`, które ją czytają za niego.
  *
  * `autoSessions`/`autoBrain` domyślnie `false`: auto-konsolidacja (obie gałęzie) jest OPCJONALNA —
  * werdykt właściciela. Ręczna konsolidacja (guzik „Podsumuj rozmowy" w profilu agenta) działa
@@ -86,27 +103,37 @@ export interface ConsolidationThresholds {
  *    CONSOLIDATION_DEFAULTS.batchSize`, tu bez `options.batchSize`, bo ten tor nie odpala żadnego przebiegu),
  *  - limit notatek `brain/`: **PODŁOGA, nie pierwszeństwo** — `Math.max(state.brain_notes_limit,
  *    ustawienie globalne || CONSOLIDATION_DEFAULTS.brainNotesLimit)`. ⚠️ ŚWIADOMA ZMIANA ZACHOWANIA
- *    (do 2.2.6 `state.brain_notes_limit` miał BEZWARUNKOWE pierwszeństwo nad ustawieniami — patrz
+ *    (do 2.2.8 włącznie `state.brain_notes_limit` miał BEZWARUNKOWE pierwszeństwo nad ustawieniami — patrz
  *    `modules/memory/CLAUDE.md`, gotcha „Jedno liczydło progów konsolidacji"): odkąd limit ma
  *    suwak w Ustawieniach, podniesienie GLOBALNEGO limitu nie może być po cichu przykryte starą,
  *    niższą wartością zapisaną per agent (auto-bump po odrzuceniu przez usera). Auto-bump per agent
  *    nadal tylko PODNOSI `state.brain_notes_limit` — nigdy nie obniża efektywnego limitu poniżej
  *    tego, co user właśnie ustawił globalnie.
  *
- * `Number(x) || fallback` traktuje `0`, `NaN` i brak wartości identycznie jak oryginalne `||`
- * łańcuchy na surowych ustawieniach (zero progu = "nieustawione", nie "wyłączone") — świadoma
- * zgodność 1:1, nie nowa reguła.
+ * `firstPositive(...)` traktuje `0`, `NaN` I liczby UJEMNE identycznie jak brak wartości -
+ * "nieustawione", nie "wyłączone" (świadoma zgodność z oryginalnym `||` łańcuchem na `0`/`NaN`,
+ * plus naprawa recenzji #9: `Number(-5) || fallback` zwracało dosłownie `-5`, bo `-5` jest
+ * truthy w JS - próg `-5` z ręcznie edytowanego `data.json` znaczył „ZAWSZE due", zamiast
+ * spaść na domyślną wartość jak każde inne nieprawidłowe wejście).
  */
+function firstPositive(...values: unknown[]): number | null {
+    for (const value of values) {
+        const n = Number(value);
+        if (Number.isFinite(n) && n > 0) return n;
+    }
+    return null;
+}
+
 export function resolveConsolidationThresholds(
     state: ConsolidationStateLike | null | undefined,
     settings: ConsolidationSettingsLike | null | undefined,
 ): ConsolidationThresholds {
     const s = settings || {};
 
-    const sessionThreshold = Number(s.memoryV3SessionThreshold) || Number(s.archiveSessionThreshold) || CONSOLIDATION_DEFAULTS.sessionThreshold;
+    const sessionThreshold = firstPositive(s.memoryV3SessionThreshold, s.archiveSessionThreshold) ?? CONSOLIDATION_DEFAULTS.sessionThreshold;
 
-    const stateLimit = Number(state?.brain_notes_limit) || 0;
-    const settingsLimit = Number(s.memoryV3BrainNotesThreshold) || Number(s.archiveBrainNotesThreshold) || 0;
+    const stateLimit = firstPositive(state?.brain_notes_limit) ?? 0;
+    const settingsLimit = firstPositive(s.memoryV3BrainNotesThreshold, s.archiveBrainNotesThreshold) ?? 0;
     const globalLimit = settingsLimit || CONSOLIDATION_DEFAULTS.brainNotesLimit;
 
     let brainNotesLimit: number;
@@ -119,7 +146,7 @@ export function resolveConsolidationThresholds(
         brainNotesLimitSource = settingsLimit ? 'settings' : 'default';
     }
 
-    const batchSize = Number(s.memoryV3ArchiveBatchSize) || CONSOLIDATION_DEFAULTS.batchSize;
+    const batchSize = firstPositive(s.memoryV3ArchiveBatchSize) ?? CONSOLIDATION_DEFAULTS.batchSize;
 
     return { sessionThreshold, brainNotesLimit, brainNotesLimitSource, batchSize };
 }
@@ -143,9 +170,13 @@ export function resolveAutoConsolidationPolicy(
     settings: ConsolidationSettingsLike | null | undefined,
 ): AutoConsolidationPolicy {
     const s = settings || {};
+    // `?? CONSOLIDATION_DEFAULTS.autoX` (nie goły `=== true`) - te dwa pola stałej były martwe
+    // (recenzja #8): nikt ich nie czytał, mimo że CLAUDE.md obiecuje "JEDNO źródło" dla
+    // WSZYSTKICH pięciu pól. Wynik jest dziś identyczny (`autoSessions`/`autoBrain` = `false`),
+    // ale odkąd Kuba zmieni default w JEDNYM miejscu, ta funkcja go realnie usłyszy.
     return {
-        sessions: s.memoryV3AutoConsolidateSessions === true,
-        brain: s.memoryV3AutoConsolidateBrain === true,
+        sessions: (s.memoryV3AutoConsolidateSessions ?? CONSOLIDATION_DEFAULTS.autoSessions) === true,
+        brain: (s.memoryV3AutoConsolidateBrain ?? CONSOLIDATION_DEFAULTS.autoBrain) === true,
     };
 }
 
@@ -165,12 +196,17 @@ export interface AutoConsolidationPlan {
  * Plan auto-triggera konsolidacji po zapisie sesji — łączy politykę wyłączników
  * (`resolveAutoConsolidationPolicy`) z progami (`resolveConsolidationThresholds`).
  *
- * `include.dedup`/`include.sessions` odzwierciedlają WPROST politykę (nie to, czy dana gałąź akurat
- * jest „due"): gdy trigger zapada przez próg sesji, a gałąź notatek brain/ jest włączona, ale jeszcze
- * nie przebiła własnego limitu, krok dedup i tak wchodzi do planu jako propozycja — tak jak dotychczas
- * (krok dedup to zawsze tylko PROPOZYCJA do przeglądu, wchodzi gdy gałąź jest w ogóle włączona).
- * Wyłączona gałąź (`policy.sessions`/`policy.brain === false`) nigdy nie trafia do `include`,
- * niezależnie od tego, czy jej próg jest przebity.
+ * ⚠️ **`include.sessions`/`include.dedup` wymagają OBU warunków: wyłącznik WŁĄCZONY *I* próg
+ * PRZEBITY** (`policy.sessions && sessionsDue`, `policy.brain && brainDue`) — DECYZJA recenzji
+ * z 2026-09-22, zmiana względem pierwszej wersji tej funkcji (tam `include` odzwierciedlało samą
+ * politykę, niezależnie od „due"). Powód: przy OBU wyłącznikach włączonych i triggerze z gałęzi
+ * sesji, stara wersja i tak wpuszczała `dedup:true` do planu, choćby próg notatek brain/ wcale
+ * nie był przebity — user, który WŁAŚNIE odrzucił propozycję dedup (licznik/limit wyciszony),
+ * dostawał ją z powrotem przy najbliższym zapisie, gdy tylko próg SESJI się przebił. To łamało
+ * obietnicę UI „odrzucona propozycja nie wraca przy następnym zapisie". Teraz każda gałąź wchodzi
+ * do planu WYŁĄCZNIE wtedy, gdy sama jest i włączona, i due — `trigger` wynika z tych samych
+ * dwóch flag (`includeSessions || includeDedup`), więc nie ma już osobnej, rozjeżdżającej się
+ * definicji.
  */
 export function planAutoConsolidation(
     state: ConsolidationStateLike | null | undefined,
@@ -181,10 +217,11 @@ export function planAutoConsolidation(
     const { sessionThreshold, brainNotesLimit } = resolveConsolidationThresholds(state, settings);
     const sessionsDue = Number(state?.archived_since_last_consolidation || 0) >= sessionThreshold;
     const brainDue = (Number(brainNotesCount) || 0) > brainNotesLimit;
-    const trigger = (policy.sessions && sessionsDue) || (policy.brain && brainDue);
+    const includeSessions = policy.sessions && sessionsDue;
+    const includeDedup = policy.brain && brainDue;
     return {
-        trigger,
-        include: { sessions: policy.sessions, dedup: policy.brain },
+        trigger: includeSessions || includeDedup,
+        include: { sessions: includeSessions, dedup: includeDedup },
     };
 }
 

@@ -166,3 +166,48 @@ test('renderMemorySection: pola liczbowe pokazują wartość JUŻ zapisaną w sl
     t.is(findByName(settings, 'settings.consolidation_brain_limit').control!.getValue(), '99');
     t.is(findByName(settings, 'settings.consolidation_batch_size').control!.getValue(), '3');
 });
+
+// ── walidacja liczb: Number()+Number.isInteger, nie parseInt (bug recenzji #9) ─────────────
+
+test('renderMemorySection: „3.7" (ułamek) wraca do domyślnej - parseInt kiedyś cicho ucinał do 3', t => {
+    const { pkm, settings } = render();
+    void findByName(settings, 'settings.consolidation_session_threshold').control!.onChangeHandler?.('3.7');
+    t.is(pkm.memoryV3SessionThreshold, CONSOLIDATION_DEFAULTS.sessionThreshold, 'ułamek nie jest liczbą całkowitą - domyślna, NIE 3');
+});
+
+test('renderMemorySection: „1e3" (notacja wykładnicza) zapisuje się jako 1000 - parseInt kiedyś dawał 1', t => {
+    const { pkm, settings } = render();
+    void findByName(settings, 'settings.consolidation_session_threshold').control!.onChangeHandler?.('1e3');
+    t.is(pkm.memoryV3SessionThreshold, 1000, 'Number("1e3") === 1000, poprawnie - NIE 1');
+});
+
+test('renderMemorySection: „12abc" (śmieci na końcu) wraca do domyślnej - parseInt kiedyś dawał 12', t => {
+    const { pkm, settings } = render();
+    void findByName(settings, 'settings.consolidation_batch_size').control!.onChangeHandler?.('12abc');
+    t.is(pkm.memoryV3ArchiveBatchSize, CONSOLIDATION_DEFAULTS.batchSize, 'Number("12abc") jest NaN - domyślna, NIE 12');
+});
+
+// ── wartość EFEKTYWNA w polu: memoryV3X > legacy archiveX > default (bug recenzji #9) ──────
+
+test('renderMemorySection: bez memoryV3SessionThreshold, ale z legacy archiveSessionThreshold -> pole pokazuje wartość LEGACY, nie domyślną', t => {
+    const { settings } = render({ archiveSessionThreshold: 7 });
+    t.is(findByName(settings, 'settings.consolidation_session_threshold').control!.getValue(), '7',
+        'silnik (resolveConsolidationThresholds) już czyta archiveSessionThreshold jako fallback - pole ma pokazać TĘ wartość, nie 10');
+});
+
+test('renderMemorySection: memoryV3SessionThreshold I legacy archiveSessionThreshold naraz -> wygrywa memoryV3X (nowsza nazwa)', t => {
+    const { settings } = render({ memoryV3SessionThreshold: 15, archiveSessionThreshold: 7 });
+    t.is(findByName(settings, 'settings.consolidation_session_threshold').control!.getValue(), '15');
+});
+
+test('renderMemorySection: zapis ZAWSZE ląduje w memoryV3X, nawet gdy pole startowało z wartości legacy', t => {
+    const { pkm, settings } = render({ archiveSessionThreshold: 7 });
+    void findByName(settings, 'settings.consolidation_session_threshold').control!.onChangeHandler?.('20');
+    t.is(pkm.memoryV3SessionThreshold, 20, 'zapis migruje na nową nazwę');
+    t.is(pkm.archiveSessionThreshold, 7, 'stare pole zostaje nietknięte (nikt go już nie pisze, ale nie kasujemy cudzej wartości)');
+});
+
+test('renderMemorySection: bez memoryV3BrainNotesThreshold, ale z legacy archiveBrainNotesThreshold -> pole pokazuje wartość LEGACY', t => {
+    const { settings } = render({ archiveBrainNotesThreshold: 33 });
+    t.is(findByName(settings, 'settings.consolidation_brain_limit').control!.getValue(), '33');
+});

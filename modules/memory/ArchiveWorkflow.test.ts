@@ -14,6 +14,7 @@ import { ArchiveWorkflow } from './ArchiveWorkflow.js';
 import { ConsolidationRun, STEP_KIND, STEP_STATUS } from './ConsolidationRun.js';
 import { factoryWorkPrompt } from './workPrompts.js';
 import { makeMemoryNoteFilename } from './MemoryAccessGuard.js';
+import { planAutoConsolidation } from './consolidationStatus.js';
 import type { StreamChatModelLike, StreamHandlers, StreamMessage } from './streamHelper.js';
 
 function makeVault(initialFiles: Record<string, string> = {}, initialFolders: string[] = []) {
@@ -683,14 +684,86 @@ test('applyStepDecision: odrzucenie CAŁEGO kroku DEDUP podbija limit notatek br
     t.is(state.brain_notes_limit, 30, '20 default + 10 bump, ta sama ścieżka co przy zerze scaleń');
 });
 
-test('onStepRejected: rodzaj kroku spoza L1/DEDUP jest no-opem (L2/L3 nie mają wyciszenia)', async t => {
+// ── bug recenzji #1: bump musi liczyć się PO PROGU EFEKTYWNYM, nie po gołym state ──────────
+
+test('_autoBumpBrainNoteLimit: globalne ustawienie 50 (state puste) -> bump do 60, planAutoConsolidation przestaje triggerować na 55 notatkach', async t => {
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const { vault, files } = makeVault();
+    const memory = new AgentMemory(vault, 'Jaskier');
+    const settings = { memoryV3BrainNotesThreshold: 50, memoryV3AutoConsolidateBrain: true };
+    const workflow = new ArchiveWorkflow(memory, { settings });
+
+    // Przed naprawą: bump liczył `state.brain_notes_limit || 20` = 20, więc dawał 30 - dalej
+    // PONIŻEJ efektywnego progu 50 (podłoga state × ustawienie), więc próg 55 notatek nadal by
+    // triggerował. Po naprawie: baza = próg EFEKTYWNY (50, z ustawienia - state jest pusty),
+    // bump daje 60.
+    const bumped = await workflow._autoBumpBrainNoteLimit();
+    t.true(bumped);
+    const state = JSON.parse(files[`${base}/.state.json`]);
+    t.is(state.brain_notes_limit, 60, '50 (efektywny próg z ustawienia) + 10, NIE 20 (default) + 10');
+
+    const plan = planAutoConsolidation(state, 55, settings);
+    t.false(plan.trigger, 'limit efektywny po bumpie to 60 - 55 notatek już NIE przebija progu');
+});
+
+test('_autoBumpBrainNoteLimit: globalne ustawienie 150 -> bump do 160 (ponad stary sztywny cap 100)', async t => {
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const { vault, files } = makeVault();
+    const memory = new AgentMemory(vault, 'Jaskier');
+    const settings = { memoryV3BrainNotesThreshold: 150 };
+    const workflow = new ArchiveWorkflow(memory, { settings });
+
+    // Przed naprawą: `Math.min(100, 20 + 10)` = 30, i przy state.brain_notes_limit >= 100 bump
+    // w ogóle by się nie odpalał (`if (current >= 100) return;`) - ale `current` liczony z gołego
+    // state (0/brak) NIGDY nie osiągał 100 mimo globalnego progu 150, więc bump zamrażał się na
+    // 30, dalece PONIŻEJ efektywnego progu. Po naprawie cap rośnie razem z bazą.
+    const bumped = await workflow._autoBumpBrainNoteLimit();
+    t.true(bumped);
+    const state = JSON.parse(files[`${base}/.state.json`]);
+    t.is(state.brain_notes_limit, 160, '150 (efektywny próg z ustawienia) + 10, cap rośnie razem z bazą');
+});
+
+test('L2: błąd generowania (_failGeneration, odczyt pliku L1 rzuca) NIE woła wyciszenia - licznik i limit notatek bez zmian', async t => {
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const statePath = `${base}/.state.json`;
+    const initial: Record<string, string> = {
+        [statePath]: JSON.stringify({ archived_since_last_consolidation: 7, brain_notes_limit: 20 }),
+    };
+    for (let i = 1; i <= 5; i++) {
+        initial[`${base}/summaries/L1/l1_${i}.md`] = summary('L1', { sessions: [`session_${i}.md`] });
+    }
+    const { vault, files } = makeVault(initial);
+    const realRead = vault.adapter.read.bind(vault.adapter);
+    vault.adapter.read = async (path: string) => {
+        if (path.includes('/summaries/L1/l1_3')) throw new Error('dysk sieciowy padł');
+        return realRead(path);
+    };
+    const memory = new AgentMemory(vault, 'Jaskier');
+    const workflow = new ArchiveWorkflow(memory, { batchSize: 5 });
+    // archiveCount:0 -> zero paczek L1 w planie (`runWithRun` nic dla L1 nie generuje);
+    // l1Count:5 wystarcza, żeby L2 był w ogóle zaplanowany (gated).
+    const run = new ConsolidationRun({ counts: { archiveCount: 0, batchSize: 5, l1Count: 5 } });
+
+    await workflow.runWithRun(run); // dedup nie planowany (0 notatek brain/), L1 brak paczek
+    await workflow.generateGatedSteps(run);
+
+    t.is(run.getStep('l2')!.status, STEP_STATUS.FAILED, 'odczyt L1 rzucił - krok kończy jako failed przez _failGeneration');
+    const state = JSON.parse(files[statePath]);
+    t.is(state.archived_since_last_consolidation, 7, 'błąd generowania L2 NIE jest decyzją usera - licznik nietknięty');
+    t.is(state.brain_notes_limit, 20, 'limit notatek też bez zmian - _failGeneration nie woła onStepRejected');
+});
+
+test('onStepRejected: rodzaj kroku spoza L1/DEDUP jest no-opem (L2/L3 nie mają wyciszenia, zero I/O)', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
     const workflow = new ArchiveWorkflow(memory);
+    const run = new ConsolidationRun({ steps: [] });
 
-    await t.notThrowsAsync(() => workflow.onStepRejected(STEP_KIND.L2));
-    await t.notThrowsAsync(() => workflow.onStepRejected(STEP_KIND.L3));
+    await workflow.onStepRejected(STEP_KIND.L2, run);
+    await workflow.onStepRejected(STEP_KIND.L3, run);
+
     t.false(Object.keys(files).some(p => p.endsWith('.state.json')), 'żaden .state.json nie powstał - brak I/O dla L2/L3');
+    t.falsy(run.meta.consolidationSilenced, 'L2/L3 NIE ustawiają znacznika wyciszenia przebiegu - to wyłącznie gest L1');
 });
 
 // ── Memory v3 LLM-driven L1/L2/L3 synthesis ──

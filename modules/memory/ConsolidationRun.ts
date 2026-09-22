@@ -29,6 +29,7 @@
  */
 
 import { CONSOLIDATION_DEFAULTS } from './consolidationStatus.js';
+import type { AutoConsolidationInclude } from './consolidationStatus.js';
 
 /** Statusy kroku. */
 export const STEP_STATUS = {
@@ -120,7 +121,7 @@ export interface ConsolidationStepApplied {
 /** Specyfikacja kroku (bez stanu runtime) - wynik `buildPlan` albo wejście z testu/UI. */
 export interface ConsolidationStepSpec {
     id: string;
-    kind: string;
+    kind: StepKind;
     status?: StepStatus;
     index?: number;
     total?: number;
@@ -130,7 +131,7 @@ export interface ConsolidationStepSpec {
 /** Krok przebiegu ze stanem runtime. */
 export interface ConsolidationStep {
     id: string;
-    kind: string;
+    kind: StepKind;
     status: StepStatus;
     index: number | null;
     total: number | null;
@@ -190,21 +191,21 @@ export interface BuildPlanCounts {
     l2Count?: number;
 }
 
-/** Które gałęzie planu budować - patrz `buildPlan`, parametr `include`. */
-export interface BuildPlanInclude {
-    /** sesje/L1-L3 (krok(i) L1 + kaskada L2/L3 pod kłódką) */
-    sessions: boolean;
-    /** notatki brain/ (dedup) */
-    dedup: boolean;
-}
+/**
+ * Które gałęzie planu budować - patrz `buildPlan`, parametr `include`. Kształt `{sessions,
+ * dedup}` jest DOKŁADNIE `AutoConsolidationInclude` z `consolidationStatus.ts` (jeden typ, dwa
+ * aliasy) - `planAutoConsolidation` produkuje ten sam kształt, który `buildPlan` konsumuje;
+ * druga, osobna deklaracja tego samego worka pól rozjechałaby się przy pierwszej zmianie.
+ */
+export type BuildPlanInclude = AutoConsolidationInclude;
 
 /** Opcje `buildPlan` poza liczbami wejściowymi. */
 export interface BuildPlanOptions {
     /**
      * Które gałęzie w ogóle budować. Domyślnie (brak pola albo cały `options`) OBIE `true` -
      * zachowanie identyczne jak przed dodaniem auto-konsolidacji opcjonalnej. Auto-trigger po
-     * zapisie sesji (`consolidationRunner.startConsolidationRun`) podaje tu politykę wyłączników
-     * usera (`AutoConsolidationInclude` z `consolidationStatus.ts`); ręczna konsolidacja
+     * zapisie sesji (`consolidationRunner.startConsolidationRun`) podaje tu wynik
+     * `planAutoConsolidation(...).include` (`consolidationStatus.ts`); ręczna konsolidacja
      * (guzik w profilu agenta) zostawia pole puste = pełny plan.
      */
     include?: BuildPlanInclude;
@@ -377,7 +378,7 @@ export class ConsolidationRun {
 
     getStep(stepId: string): ConsolidationStep | null { return this.steps.find(s => s.id === stepId) || null; }
 
-    getStepsByKind(kind: string): ConsolidationStep[] { return this.steps.filter(s => s.kind === kind); }
+    getStepsByKind(kind: StepKind): ConsolidationStep[] { return this.steps.filter(s => s.kind === kind); }
 
     /** Krok, który AKTUALNIE coś robi (do paska statusu). Null, gdy nic nie mieli. */
     getActiveStep(): ConsolidationStep | null {

@@ -79,19 +79,25 @@ test('pusty przebieg (nic nie przekracza progów) ma zero kroków', t => {
 
 // ── buildPlan: `include` (auto-konsolidacja opcjonalna) ─────────────────────────
 
-test('include {dedup:false} przy 3 notatkach -> brak kroku DEDUP', t => {
-    const plan = buildPlan({ brainNotesCount: 3 }, { include: { sessions: true, dedup: false } });
-    t.false(plan.some(s => s.kind === STEP_KIND.DEDUP));
+test('include {dedup:false} przy 3 notatkach i materiale na L1 -> plan ma DOKŁADNIE [L1], brak DEDUP', t => {
+    // Asercja POZYTYWNA (recenzja #11) - `t.false(plan.some(kind===DEDUP))` przeszłoby też,
+    // gdyby `buildPlan` po prostu zwrócił `[]` dla WSZYSTKICH gałęzi (regresja niewykryta).
+    // `brainNotesCount:3` samo w sobie zaplanowałoby DEDUP, gdyby `include.dedup` nie działało.
+    const plan = buildPlan(
+        { archiveCount: 5, batchSize: 5, brainNotesCount: 3 },
+        { include: { sessions: true, dedup: false } },
+    );
+    t.deepEqual(plan.map(s => s.kind), [STEP_KIND.L1], 'DEDUP wycięty, L1 zostaje - plan NIE jest pusty');
 });
 
-test('include {sessions:false} przy niepokrytych sesjach -> brak L1 (i przez to brak L2/L3)', t => {
+test('include {sessions:false} przy niepokrytych sesjach i notatkach brain/ -> plan ma DOKŁADNIE [DEDUP], brak L1/L2/L3', t => {
+    // Materiał wystarczyłby na L1 + L2 + L3 (`archiveCount:60`, `l1Count:20`, `l2Count:20`), gdyby
+    // `include.sessions` nie działało - asercja pozytywna łapie regresję "plan zawsze pusty".
     const plan = buildPlan(
-        { archiveCount: 60, batchSize: 5, l1Count: 20, l2Count: 20 },
+        { archiveCount: 60, batchSize: 5, l1Count: 20, l2Count: 20, brainNotesCount: 3 },
         { include: { sessions: false, dedup: true } },
     );
-    t.false(plan.some(s => s.kind === STEP_KIND.L1));
-    t.false(plan.some(s => s.kind === STEP_KIND.L2));
-    t.false(plan.some(s => s.kind === STEP_KIND.L3));
+    t.deepEqual(plan.map(s => s.kind), [STEP_KIND.DEDUP], 'L1/L2/L3 wycięte, DEDUP zostaje - plan NIE jest pusty');
 });
 
 test('brak `include` -> jak dziś (obie gałęzie pełne)', t => {

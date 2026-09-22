@@ -54,7 +54,7 @@ test('resolveConsolidationThresholds: archiveSessionThreshold jako fallback sess
     t.is(result.sessionThreshold, 4);
 });
 
-// ── podłoga limitu brain/ (2.2.6): state NIE ma już bezwarunkowego pierwszeństwa ──────────
+// ── podłoga limitu brain/ (2.2.9): state NIE ma już bezwarunkowego pierwszeństwa ──────────
 
 test('resolveConsolidationThresholds: podłoga — state 30 + ustawienie 50 -> zwycięża WYŻSZE ustawienie (50)', t => {
     const result = resolveConsolidationThresholds(
@@ -74,12 +74,40 @@ test('resolveConsolidationThresholds: podłoga — state 30 + ustawienie 20 -> z
     t.is(result.brainNotesLimitSource, 'agent_state');
 });
 
+// ── bug recenzji #9: ujemne/NaN wartości z ustawień = "nieustawione", nie "zawsze due" ─────
+
+test('resolveConsolidationThresholds: sessionThreshold ujemny (-5) -> spada na domyślną (10), NIE zostaje -5', t => {
+    // Przed naprawą: `Number(-5) || default` zwracało dosłownie -5 (liczba ujemna jest truthy w
+    // JS) - `archived_since_last_consolidation >= -5` jest ZAWSZE prawdą, więc ręcznie
+    // uszkodzony `data.json` dawał "zawsze due" zamiast paść na wartość domyślną.
+    const result = resolveConsolidationThresholds(null, { memoryV3SessionThreshold: -5 });
+    t.is(result.sessionThreshold, 10);
+});
+
+test('resolveConsolidationThresholds: memoryV3BrainNotesThreshold ujemny/NaN -> spada na domyślny limit (20)', t => {
+    t.is(resolveConsolidationThresholds(null, { memoryV3BrainNotesThreshold: -5 }).brainNotesLimit, 20);
+    t.is(resolveConsolidationThresholds(null, { memoryV3BrainNotesThreshold: Number.NaN }).brainNotesLimit, 20);
+});
+
+test('resolveConsolidationThresholds: state.brain_notes_limit ujemny -> NIE wygrywa z dodatnim ustawieniem globalnym', t => {
+    const result = resolveConsolidationThresholds({ brain_notes_limit: -5 }, { memoryV3BrainNotesThreshold: 30 });
+    t.is(result.brainNotesLimit, 30);
+    t.is(result.brainNotesLimitSource, 'settings');
+});
+
+test('resolveConsolidationThresholds: memoryV3ArchiveBatchSize ujemny -> spada na domyślny (5)', t => {
+    t.is(resolveConsolidationThresholds(null, { memoryV3ArchiveBatchSize: -5 }).batchSize, 5);
+});
+
 test('resolveConsolidationThresholds: puste ustawienia -> CONSOLIDATION_DEFAULTS (10/20/5)', t => {
+    // Literalnie 10/20/5 (nie `CONSOLIDATION_DEFAULTS.x`) - test ma łapać PRZYPADKOWĄ zmianę
+    // samej stałej, nie tylko potwierdzać, że funkcja czyta to, co stała akurat mówi (recenzja #11:
+    // porównanie względem tej samej stałej jest samoodnoszące się i przechodzi nawet po regresji).
     t.deepEqual(resolveConsolidationThresholds(null, null), {
-        sessionThreshold: CONSOLIDATION_DEFAULTS.sessionThreshold,
-        brainNotesLimit: CONSOLIDATION_DEFAULTS.brainNotesLimit,
+        sessionThreshold: 10,
+        brainNotesLimit: 20,
         brainNotesLimitSource: 'default',
-        batchSize: CONSOLIDATION_DEFAULTS.batchSize,
+        batchSize: 5,
     });
     t.is(CONSOLIDATION_DEFAULTS.sessionThreshold, 10);
     t.is(CONSOLIDATION_DEFAULTS.brainNotesLimit, 20);
@@ -128,22 +156,38 @@ test('planAutoConsolidation: tylko brain ON + brain due -> trigger true, include
     t.deepEqual(plan.include, { sessions: false, dedup: true });
 });
 
-test('planAutoConsolidation: oba ON, tylko sesje due -> trigger true, include OBA true (dedup to propozycja, nie warunek)', t => {
+test('planAutoConsolidation: oba ON, tylko sesje due -> trigger true, include {sessions:true, dedup:false} (DECYZJA recenzji: dedup wymaga też „due")', t => {
     const plan = planAutoConsolidation(
         OVER_THRESHOLD_STATE, 0, // brain NIE jest due
         { memoryV3AutoConsolidateSessions: true, memoryV3AutoConsolidateBrain: true },
     );
     t.true(plan.trigger);
-    t.deepEqual(plan.include, { sessions: true, dedup: true });
+    t.deepEqual(plan.include, { sessions: true, dedup: false });
 });
 
-test('planAutoConsolidation: oba ON, NIC nie jest due -> trigger false, include nadal oba true', t => {
+test('planAutoConsolidation: oba ON, NIC nie jest due -> trigger false, include oba false', t => {
     const plan = planAutoConsolidation(
         { archived_since_last_consolidation: 0 }, 0,
         { memoryV3AutoConsolidateSessions: true, memoryV3AutoConsolidateBrain: true },
     );
     t.false(plan.trigger);
-    t.deepEqual(plan.include, { sessions: true, dedup: true });
+    t.deepEqual(plan.include, { sessions: false, dedup: false });
+});
+
+// ── regresja recenzji: odrzucone L1 NIE wraca na cudzym triggerze (brain) ──────────────────
+
+test('planAutoConsolidation: oba ON, L1 świeżo odrzucony (licznik 0) + brain due (25 notatek) -> include BEZ sesji', t => {
+    // Scenariusz z recenzji: user odrzucił propozycję L1 (licznik wyzerowany przez wyciszenie),
+    // ale próg notatek brain/ jest przebity (25 > 20 domyślne). Przed DECYZJĄ recenzji `include`
+    // odzwierciedlało samą politykę (`policy.sessions === true`), więc odrzucone L1 wracało do
+    // planu razem z dedup - łamiąc obietnicę „odrzucona propozycja nie wraca przy następnym
+    // zapisie". Teraz sesje wchodzą do `include` TYLKO gdy są też `due`.
+    const plan = planAutoConsolidation(
+        { archived_since_last_consolidation: 0 }, 25,
+        { memoryV3AutoConsolidateSessions: true, memoryV3AutoConsolidateBrain: true },
+    );
+    t.true(plan.trigger, 'brain jest due - automat i tak odpala się dla TEJ gałęzi');
+    t.deepEqual(plan.include, { sessions: false, dedup: true }, 'sesje NIE wracają - nie są due, mimo że wyłącznik jest ON');
 });
 
 // ── shouldTriggerConsolidation — granice: sesje `>=`, notatki `>`. ─────────────────────────

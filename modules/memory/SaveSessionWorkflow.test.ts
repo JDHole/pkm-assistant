@@ -159,7 +159,7 @@ test('SaveSessionWorkflow creates accepted brain note and archives active sessio
     t.false(result.cancelled);
 });
 
-// ── konsolidacja opcjonalna: `shouldTriggerArchive`/`consolidationInclude` (2.2.6) ──────────
+// ── konsolidacja opcjonalna: `shouldTriggerArchive`/`consolidationInclude` (2.2.9) ──────────
 
 test('applyDecision: domyślne ustawienia (oba wyłączniki OFF) -> shouldTriggerArchive false MIMO przebitego progu sesji', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
