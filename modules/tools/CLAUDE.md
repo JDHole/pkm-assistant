@@ -224,6 +224,45 @@ Bramka `.pkm-assistant/**` + No-Go + `sanitizePath` w prymitywach vaultowych dzi
 - ⚠️ **`t()` narzędzia (opis + parametry `inputSchema`) idzie przez fabrykę, nie przez stałą modułową** — jak we WSZYSTKICH pozostałych narzędziach (`ReadTool`, `WriteTool`, `WebSearchTool`…): wywołania `t('mcp.<tool>.desc')` / `t('mcp.<tool>.param.<name>')` siedzą W CIELE `create...Tool()`, bo `setLocale()` leci z `src/main.ts` PO imporcie modułów — stała modułowa policzona przy imporcie dostałaby domyślne `'en'`, zanim plugin w ogóle pozna język usera. ⚠️ Fabryka też liczy tekst RAZ (`src/main.ts`, `initialize()`, po `setLocale`): definicje narzędzi idące do MODELU zostają w języku startu do przeładowania pluginu - zmiana języka w Ustawieniach odświeża od razu tylko to, co liczy się przy renderze (katalog serwerów przez `resolveServerDescription`). `GenerateImageTool`/`AddTextToImageTool` miały dotąd opis i WSZYSTKIE opisy parametrów na sztywno (mieszanka polskiego bez ogonków i pełnego polskiego) — poprawka trzyma się dokładnie tej samej konwencji nazw kluczy co reszta modułu.
 - ⚠️ **Placeholder ścieżki w presetach zewnętrznych serwerów jest NEUTRALNYM tokenem technicznym, nie słowem w żadnym języku ludzkim.** `PRESET_PATH_PLACEHOLDER` (`mcpServerPresets.ts`) to `'<PATH>'` — polskie `'<ŚCIEŻKA>'` wstrzykiwane w argumenty presetu Filesystem wychodziłoby tak samo pod angielskim UI. Hint (`settings.mcp_preset_hint_filesystem`, en+pl) ma wskazywać na TEN SAM token co stała.
 
+### WriteTool: lost update na patch/append/prepend
+
+- ⚠️ **`patch`/`append`/`prepend` (ścieżki INDEKSOWANE, nie ukryte) liczą nową treść WEWNĄTRZ
+  callbacku `vault.process(file, (data) => ...)`, na `data` DOSTARCZONYM w chwili zapisu - NIGDY
+  na treści przeczytanej wcześniej.** Bug zgłoszony w recenzji: stara wersja czytała plik RAZ
+  (`await app.vault.read(file)`), liczyła `finalContent` z TEJ jednej migawki, i dopiero potem
+  wołała `vault.process(file, () => finalContent)` - callback IGNOROWAŁ świeże `data`, więc
+  `vault.process`'s obietnica „atomowego odczyt-zmiana-zapis" (wytyczna Obsidiana, `@since 1.1.0`)
+  była fikcją. Skutek: `Promise.all` w `modules/agent-loop/AgentLoop.ts` (tool-calle jednej tury
+  RÓWNOLEGLE) - trzy równoległe patche `A→a`/`B→b`/`C→c` na plik `"A\nB\nC"` wszystkie kończyły
+  się `success:true`, a w pliku zostawało `"A\nB\nc"` (tylko OSTATNI zapis, dwa pierwsze zgubione
+  po cichu). `writeFileContent` (helper prywatny) przyjmuje teraz `string | ((data: string) =>
+  string)` - `patch` i `append`/`prepend` podają FUNKCJĘ (wyszukanie `old_text`, sprawdzenie
+  unikalności i sklejenie nowej treści dzieje się w środku niej), `replace`/`create` nadal
+  podają gotowy string (nie zależą od treści istniejącej - nie ma tu czego zgubić).
+- ⚠️ **Callback, który rzuci (np. `old_text` nie znaleziony/wieloznaczny na ŚWIEŻEJ treści),
+  NIC nie zapisuje** - wyjątek leci przez odrzuconą obietnicę `vault.process(...)` prosto do
+  `execute`'s zewnętrznego `try/catch`, tym samym kanałem co każdy inny błąd walidacji. Dwa
+  równoległe patche na TEN SAM `old_text` (ta sama para atomów jak wyżej) - PIERWSZY (w kolejności
+  faktycznego zapisu, nie zlecenia) wygrywa, DRUGI dostaje `old_text_not_found` (bo jego `old_text`
+  już zniknął z treści po pierwszym zapisie), zamiast po cichu nadpisać czyjś patch albo wygrać
+  z nim "kto zapisze ostatni".
+- ⚠️ **Ścieżki UKRYTE (`.pkm-assistant/**`, adapter zamiast `vault.process`) NIE są tą naprawą
+  objęte - świadomie.** `DataAdapter` Obsidiana nie ma atomowego odpowiednika `process()` (same
+  `read`/`write`, bez transakcji), więc `patch`/`append`/`prepend` na ukrytych ścieżkach
+  ZACHOWUJĄ starą, stale-read semantykę (ten sam lost-update, po prostu nienaprawiony tu - naprawa
+  wymagałaby kolejki zapisu PER ŚCIEŻKA, ten sam wzorzec co `TodoFileStore` już ma, patrz gotcha
+  „Pamięć i skrzynka pocztowa" wyżej). Realny wpływ: `memory_save`/`memory_delete` i inne
+  wewnętrzne zapisy pluginu idą własnymi, dedykowanymi ścieżkami (nie przez `write`/WriteTool),
+  więc luka dotyczy WYŁĄCZNIE agenta świadomie wywołującego `write`/`vault_write` z `path`
+  wskazującym w `.pkm-assistant/`.
+- ⚠️ **`minAppVersion` tego pluginu to 1.11.0, `vault.process` istnieje od 1.1.0 - na KAŻDYM
+  wspieranym hoście `vault.process` JEST dostępny.** Fallback na `vault.modify` (brak `process`)
+  zostaje wyłącznie dla wąskich atrap testowych bez tej metody - i tam ATOMOWOŚCI NIE MA (callback
+  dostaje treść sprzed wywołania, nie w chwili zapisu), bo `modify` nie daje na to żadnego haka.
+  Testy: `modules/tools/WriteTool.test.ts` (3 równoległe patche na różne `old_text` - wszystkie
+  trzy zaaplikowane; 2 równoległe patche tego samego `old_text` - drugi dostaje błąd, nie
+  nadpisuje).
+
 ### Zgoda na zapis — dwie bramki + pamięć sesyjna
 
 - ⚠️ **Krok 6 i krok 6b w `executeToolCall` to DWIE NIEZALEŻNE bramki zgody.** Krok 6 (ogólny
@@ -255,12 +294,17 @@ Bramka `.pkm-assistant/**` + No-Go + `sanitizePath` w prymitywach vaultowych dzi
   TEGO SAMEGO agenta w tej samej minucie MOGĄ dostać dokładnie tę samą nazwę pliku — bez jawnego
   sprzątania stara zgoda „wracałaby" razem z reużytą nazwą. **Obrona jest DWUWARSTWOWA, nie
   jednowarstwowa**: unikalność nazwy (pierwsza linia, rzadko przebijana) NIE WYSTARCZA sama —
-  `modules/chat/chat/chat_session.ts`'s `handleNewSession()` jawnie woła
-  `plugin.mcpClient?.sessionWriteConsent.clearSession(staraŚcieżka)` PRZED wymianą tożsamości
-  sesji (druga linia, ten moduł jej NIE woła — wołacz jest po stronie czatu, bo tylko on wie,
-  KIEDY sesja się kończy). Zamknięcie POJEDYNCZEJ zakładki (`_closeActiveTab`) świadomie tego NIE
-  robi — zapisuje sesję NA MIEJSCU i nie przenosi pliku, więc ścieżka nie wraca do puli i nie ma
-  czego czyścić. Test: `modules/chat/chat/chat_session.test.ts`.
+  DWIE drogi kończą sesję jawnym wywołaniem `plugin.mcpClient?.sessionWriteConsent.clearSession(
+  staraŚcieżka)` PRZED wymianą tożsamości (druga linia, ten moduł jej NIE woła — wołacz jest po
+  stronie czatu, bo tylko on wie, KIEDY sesja się kończy):
+  `modules/chat/chat/chat_session.ts`'s `handleNewSession()` (guzik „Nowa rozmowa"/„X" zakładki)
+  i `modules/chat/slash-commands/save_session.ts`'s `applyPostArchiveAction()` (`/save session`,
+  wszystkie TRZY warianty - `archive`/`archive_new`/`archive_close` - kończą TĘ SAMĄ sesję, więc
+  wołanie jest JEDNO, na wejściu funkcji, przed rozgałęzieniem po `action`). Zamknięcie
+  POJEDYNCZEJ zakładki (`_closeActiveTab`) świadomie tego NIE robi — zapisuje sesję NA MIEJSCU i
+  nie przenosi pliku, więc ścieżka nie wraca do puli i nie ma czego czyścić. Testy:
+  `modules/chat/chat/chat_session.test.ts`,
+  `modules/chat/slash-commands/save_session.archiveNewConsent.test.ts`.
 - ⚠️ **Zgoda nadana w kroku 6 pomija krok 6b W TYM SAMYM wywołaniu.** `sessionConsentGranted` jest
   zmienną MUTOWALNĄ w `executeToolCall` — jeśli user zaznaczy checkbox i zatwierdzi w kroku 6,
   flaga idzie na `true` OD RAZU, więc warunek kroku 6b (`!sessionConsentGranted`) już jej nie pyta.
