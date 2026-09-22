@@ -86,6 +86,26 @@ test('naTerazKeyOf NIE łapie ręcznej sekcji usera bez dwukropka i rozpoznanego
     t.is(naTerazKeyOf(''), null);
 });
 
+// Recenzja niezależna (item 7): main (przed rejestrem bilingwalnym) rozpoznawał "Na teraz" przez
+// dopasowanie fuzzy niezależne od separatora i diakrytyków - separator myślnikiem/półpauzą i
+// "Środowisko" bez ogonków muszą nadal trafiać do sekcji ZARZĄDZANEJ, nie stawać się foreign.
+test('naTerazKeyOf rozpoznaje separator myślnikiem/pauzą/półpauzą, nie tylko dwukropek', t => {
+    t.is(naTerazKeyOf('## Na teraz — User'), 'user', 'em dash');
+    t.is(naTerazKeyOf('## Na teraz – Środowisko'), 'environment', 'en dash');
+    t.is(naTerazKeyOf('## Na teraz - User'), 'user', 'zwykły myślnik');
+    t.is(naTerazKeyOf('## Right now — User'), 'user', 'to samo po angielsku');
+});
+
+test('naTerazKeyOf rozpoznaje "Srodowisko" BEZ ogonków (stare/ręcznie edytowane pliki)', t => {
+    t.is(naTerazKeyOf('## Na teraz: Srodowisko'), 'environment');
+    t.is(naTerazKeyOf('## Na teraz Srodowisko'), 'environment', 'separator całkiem opcjonalny');
+});
+
+test('naTerazKeyOf: mimo poszerzenia, „## Na teraz coś tam" (dash + śmieć zamiast klucza) nadal wraca null', t => {
+    t.is(naTerazKeyOf('## Na teraz - coś zupełnie innego'), null);
+    t.is(naTerazKeyOf('## Right now - something else'), null);
+});
+
 test('isNaTerazHeading = naTerazKeyOf(line) !== null, w obu językach', t => {
     t.true(isNaTerazHeading('## Na teraz: User'));
     t.true(isNaTerazHeading('## Right now: Environment'));
@@ -120,6 +140,19 @@ test('detectBrainLocale: pierwszy napotkany nagłówek swoisty rozstrzyga (kolej
     // „## Preferences" (EN) występuje PRZED „## Bieżące" (PL) w tym (celowo sztucznym) pliku.
     const mixed = '# X brain\n\n## Preferences\n\n## Bieżące\n';
     t.is(detectBrainLocale(mixed), 'en', 'pierwszy napotkany nagłówek swoisty (EN) wygrywa');
+});
+
+test('detectBrainLocale: „## Preferencje" BEZ „## Bieżące" nadal rozstrzyga -> "pl" (regresja recenzji niezależnej)', t => {
+    const content = '# X brain\n\n## Preferencje\n\n## User\n';
+    t.is(detectBrainLocale(content), 'pl');
+});
+
+test('detectBrainLocale: „## Ustalenia" (historyczny nagłówek v1/v2, bez żadnego innego sygnału) -> "pl"', t => {
+    // Druga warstwa obrony obok hardkodowanego locale='pl' w MigrationV3 (patrz jego CLAUDE.md/
+    // komentarz) - plik v2 z SAMĄ sekcją "Ustalenia" (bez "Bieżące") nie ma inaczej żadnego
+    // nagłówka swoistego i detectBrainLocale zwróciłby null -> uiBrainLocale() (mogło być EN).
+    const content = '# X brain\n\n## User\n\n## Ustalenia\n- fakt\n';
+    t.is(detectBrainLocale(content), 'pl');
 });
 
 // ─── resolveBrainLocale / uiBrainLocale (most między locale pliku a UI) ───

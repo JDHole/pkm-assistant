@@ -28,6 +28,7 @@ export type NaTerazKey = 'user' | 'environment';
 
 const SECTION_KEYS: readonly BrainSectionKey[] = ['current', 'user', 'preferences', 'workflow', 'projects'];
 const NA_TERAZ_KEYS: readonly NaTerazKey[] = ['user', 'environment'];
+const BRAIN_LOCALES: readonly BrainLocale[] = ['pl', 'en'];
 
 /** Nagłówki H2 sekcji indeksu, per klucz i JĘZYK PLIKU. Adresy w pliku, nie proza. */
 export const BRAIN_SECTION_HEADINGS: Readonly<Record<BrainLocale, Readonly<Record<BrainSectionKey, string>>>> = {
@@ -87,16 +88,25 @@ export function sectionKeyOf(line: string | null | undefined): BrainSectionKey |
     return null;
 }
 
+// PL łagodniejszy niż EN - odzwierciedla ŁAGODNOŚĆ, jaką na main (przed rejestrem
+// bilingwalnym) miał `naTerazSectionKey` (dopasowanie fuzzy po słowie, niezależne od
+// separatora i diakrytyków): separator między "Na teraz" a słowem kluczowym jest OPCJONALNY
+// i dopuszcza dwukropek/myślnik/półpauzę/pauzę (`## Na teraz — User`), a "Środowisko" jest
+// rozpoznawane też BEZ ogonków (`## Na teraz: Srodowisko`) - realne stare pliki (recznie
+// edytowane, sprzed tego rejestru) miewały oba warianty. Kotwica `$` na końcu (po opcjonalnym
+// whitespace) zostaje w OBU językach - to WCIĄŻ nie łapie ręcznej sekcji usera typu
+// „## Na teraz coś tam" (bez rozpoznanego słowa kluczowego zaraz po separatorze).
 const NA_TERAZ_KEY_RE: Readonly<Record<BrainLocale, RegExp>> = {
-    pl: /^##\s+na teraz:\s*(user|środowisko)\b/i,
-    en: /^##\s+right now:\s*(user|environment)\b/i,
+    pl: /^##\s+na teraz\s*[:\-–—]?\s*(user|środowisko|srodowisko)\s*$/i,
+    en: /^##\s+right now\s*[:\-–—]?\s*(user|environment)\s*$/i,
 };
 
 /**
  * Nagłówek „Na teraz"/„Right now" w OBU językach → klucz, albo `null`. Regex wymaga
- * DWUKROPKA + rozpoznanego słowa klucza zaraz po nim - ręcznie dopisana sekcja usera typu
- * „## Na teraz coś tam" (bez dwukropka i klucza) NIE jest łapana: taka sekcja jest zwykłą
- * sekcją obcą (`BrainIndex.parseForeignSections`), nie zarządzaną zawartością „Na teraz".
+ * rozpoznanego słowa klucza zaraz po „Na teraz"/„Right now" (separator opcjonalny, patrz
+ * komentarz przy `NA_TERAZ_KEY_RE`) - ręcznie dopisana sekcja usera typu „## Na teraz coś tam"
+ * (bez rozpoznanego słowa klucza) NIE jest łapana: taka sekcja jest zwykłą sekcją obcą
+ * (`BrainIndex.parseForeignSections`), nie zarządzaną zawartością „Na teraz".
  */
 export function naTerazKeyOf(line: string | null | undefined): NaTerazKey | null {
     const trimmed = (line ?? '').trim();
@@ -112,7 +122,16 @@ export function isNaTerazHeading(line: string | null | undefined): boolean {
     return naTerazKeyOf(line) !== null;
 }
 
-/** PL/EN nagłówki SWOISTE dla danego języka (rozstrzygają `detectBrainLocale`) - `## User`/`## Workflow` są wspólne i celowo pominięte. */
+/**
+ * PL/EN nagłówki SWOISTE dla danego języka (rozstrzygają `detectBrainLocale`) - `## User`/
+ * `## Workflow` są wspólne i celowo pominięte. `## Ustalenia` dołączony do PL jako DRUGA
+ * warstwa obrony obok hardkodowanego `locale:'pl'` w `MigrationV3` (patrz tam) - to
+ * WYŁĄCZNIE historyczny nagłówek v1/v2 (nigdy nie był żywym nagłówkiem indeksu w żadnym z
+ * dwóch bilingwalnych zestawów), ale plik v2 zawierający SAMO `## Ustalenia` (bez `##
+ * Bieżące`/innego nagłówka swoistego) miałby inaczej `detectBrainLocale === null` i
+ * spadałby na `uiBrainLocale()` - migrując polską treść pod nagłówki EN, gdyby UI było
+ * akurat angielskie w chwili migracji.
+ */
 const LOCALE_SPECIFIC_HEADINGS: Readonly<Record<BrainLocale, ReadonlySet<string>>> = {
     pl: new Set([
         BRAIN_SECTION_HEADINGS.pl.current,
@@ -120,6 +139,7 @@ const LOCALE_SPECIFIC_HEADINGS: Readonly<Record<BrainLocale, ReadonlySet<string>
         BRAIN_SECTION_HEADINGS.pl.projects,
         NA_TERAZ_HEADINGS.pl.user,
         NA_TERAZ_HEADINGS.pl.environment,
+        '## Ustalenia',
     ]),
     en: new Set([
         BRAIN_SECTION_HEADINGS.en.current,
@@ -164,4 +184,4 @@ export function uiBrainLocale(): BrainLocale {
 
 // Eksport uporządkowanych list kluczy — wołane przez `BrainIndex.ts` (kolejność emisji sekcji)
 // i `MigrationV3.ts` (korroboracja `looksLikeV3Index`), żeby kolejność żyła w JEDNYM miejscu.
-export { SECTION_KEYS as BRAIN_SECTION_KEYS, NA_TERAZ_KEYS };
+export { SECTION_KEYS as BRAIN_SECTION_KEYS, NA_TERAZ_KEYS, BRAIN_LOCALES };

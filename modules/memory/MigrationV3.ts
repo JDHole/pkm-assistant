@@ -1,6 +1,6 @@
 import { makeMemoryNoteFilename } from './MemoryAccessGuard.js';
 import { buildBrainIndex, indexSectionHeadings } from './BrainIndex.js';
-import { BRAIN_SECTION_HEADINGS, resolveBrainLocale, uiBrainLocale } from './brainSections.js';
+import { BRAIN_SECTION_HEADINGS, BRAIN_LOCALES } from './brainSections.js';
 // Adapterowy mkdir -p (dawna prywatna, rekurencyjna `ensureFolder` w tym pliku).
 // Deep-import świadomy - barrel core/index.js wciąga obsidian, a memory jest node-testowane.
 import { ensureAdapterFolder, probeFile } from '../../core/index.js';
@@ -90,18 +90,21 @@ function normalizedHeadingTitle(heading: string): string {
     return normalizeSectionName(heading.replace(/^##\s*/, ''));
 }
 
-/** Klucz sekcji indeksu (poza „current" - ma własną, osobną gałąź `LIVE_SECTION_KEYS` niżej) → typ notatki v2. */
-const SECTION_KEY_TO_LEGACY_NOTE_TYPE: Partial<Record<BrainSectionKey, string>> = {
-    user: 'user',
-    preferences: 'agent_rule',
-    workflow: 'skill_hint',
-    projects: 'reference',
-};
+/**
+ * Klucz sekcji indeksu (poza „current" - ma własną, osobną gałąź `LIVE_SECTION_KEYS` niżej) →
+ * typ notatki v2. Tablica par typowana WPROST (nie `Object.entries(...) as [...]` na wiarę) -
+ * `BrainSectionKey` jest kluczem literalnym z rejestru, nie stringiem odgadniętym z obiektu.
+ */
+const LEGACY_NOTE_TYPE_BY_SECTION_KEY: ReadonlyArray<readonly [BrainSectionKey, string]> = [
+    ['user', 'user'],
+    ['preferences', 'agent_rule'],
+    ['workflow', 'skill_hint'],
+    ['projects', 'reference'],
+];
 
 const SECTION_TYPES = new Map<string, string>([
-    ...(['pl', 'en'] as BrainLocale[]).flatMap(locale =>
-        (Object.entries(SECTION_KEY_TO_LEGACY_NOTE_TYPE) as [BrainSectionKey, string][])
-            .map(([key, type]): [string, string] => [normalizedHeadingTitle(BRAIN_SECTION_HEADINGS[locale][key]), type])
+    ...BRAIN_LOCALES.flatMap(locale =>
+        LEGACY_NOTE_TYPE_BY_SECTION_KEY.map(([key, type]): [string, string] => [normalizedHeadingTitle(BRAIN_SECTION_HEADINGS[locale][key]), type])
     ),
     // 'ustalenia' - synonim TYLKO historyczny (v1), nigdy nie był żywym nagłówkiem indeksu w
     // żadnym z dwóch zestawów - zostaje wpisany ręcznie, rejestr go nie zna.
@@ -115,7 +118,7 @@ const SECTION_TYPES = new Map<string, string>([
 // `keepInBrain`, bo verbatim sekcja pod nagłówkiem kolidującym z indeksem zostałaby zjedzona
 // przy najbliższym rebuildzie.
 const LIVE_SECTION_KEYS = new Set(
-    (['pl', 'en'] as BrainLocale[]).map(locale => normalizedHeadingTitle(BRAIN_SECTION_HEADINGS[locale].current))
+    BRAIN_LOCALES.map(locale => normalizedHeadingTitle(BRAIN_SECTION_HEADINGS[locale].current))
 );
 const ZOMBIE_SECTION_KEYS = new Set(['system', 'agora', 'vault-builder', 'vault builder', 'default rob']);
 
@@ -338,11 +341,18 @@ export class MigrationV3 {
             ? this.parseSections(originalBrain).filter(section => keep.has(section.title))
             : [];
 
-        // Legacy v2 brain nie ma nagłówków v3, więc zwykle nie rozstrzyga (`detectBrainLocale`
-        // -> null -> `uiBrainLocale()`) - WYJĄTEK to plik z sekcją „Bieżące"/„Ustalenia" (v2
-        // było zawsze polskie), gdzie ta sama nazwa jest jednocześnie sygnałem PL w rejestrze -
-        // migracja trafia wtedy naturalnie w PL, zgodnie z tym, do czego user był przyzwyczajony.
-        const locale = resolveBrainLocale(originalBrain || null, uiBrainLocale());
+        // Migracja v2→v3 pisze ZAWSZE po polsku - HARDKODOWANE, NIE `uiBrainLocale()`. Legacy
+        // v2 brain istniał wyłącznie sprzed jakiegokolwiek dwujęzycznego UI, więc jego treść
+        // (a więc i notatki/nagłówki, które migracja z niej odtwarza) jest ZAWSZE polska,
+        // niezależnie od tego, w jakim języku user ma UI W CHWILI, gdy migrację odpala -
+        // poleganie na `resolveBrainLocale`/detekcji byłoby błędem dla pliku, który ma TYLKO
+        // nagłówek `## Ustalenia` (bez `## Bieżące` czy innego sygnału): `detectBrainLocale`
+        // zwróciłby `null` i migracja wypisałaby angielskie nagłówki nad polską treścią, gdyby
+        // user akurat miał UI po angielsku. `'## Ustalenia'` jest DODATKOWO dopisany do
+        // rejestru (`brainSections.ts`, `LOCALE_SPECIFIC_HEADINGS.pl`) jako druga, niezależna
+        // warstwa obrony - ale TA ścieżka (jedyny pisarz nowego `brain.md` z migracji) nie
+        // polega na detekcji wcale.
+        const locale = 'pl' as const;
         const brain = formatNewBrain(this.memory.agentName, plan, createdNotes, kept, locale);
         await this.memory.vault.adapter.write(this.memory.paths.brain, brain);
         await this.memory.stateManager.read();
@@ -438,7 +448,7 @@ function looksLikeV3Index(content: string): boolean {
     if (V3_CANONICAL_WIKILINK_RE.test(text)) return true;
     if (!NA_TERAZ_HEADING_RE.test(text)) return false;
     const lines = new Set(text.split(/\r?\n/).map(line => line.trim()));
-    return (['pl', 'en'] as BrainLocale[]).some(locale => {
+    return BRAIN_LOCALES.some(locale => {
         let matches = 0;
         for (const heading of indexSectionHeadings(locale)) {
             if (lines.has(heading)) matches++;

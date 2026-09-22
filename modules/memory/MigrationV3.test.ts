@@ -1,6 +1,7 @@
 import test from 'ava';
 import { AgentMemory } from './AgentMemory.js';
 import { MigrationV3 } from './MigrationV3.js';
+import { setLocale } from '../../core/i18n/index.js';
 import type { MigrationAgentMemoryLike } from './MigrationV3.js';
 
 /**
@@ -271,4 +272,59 @@ test('MigrationV3 interactive review: guzik "Awaryjny dump" niesie PELNA orygina
         'guzik fallback pomija automatyczny per-linie split - tylko jeden dump'
     );
     t.false(files[`${base}/brain.md`].includes('Jan lubi krotkie raporty'), 'brain.md jest nadpisany nowym indeksem, jak dotad (Accept/fallback obie migruja)');
+});
+
+// ── Migracja v2→v3 pisze ZAWSZE po polsku - HARDKODOWANE, niezależnie od UI (recenzja
+// niezależna, item 6): v2 brain istniał wyłącznie sprzed jakiegokolwiek dwujęzycznego UI. ──
+
+test.serial('migracja v2 z SAMĄ sekcją „Ustalenia" (bez „Bieżące") pod UI "en" -> wynik PO POLSKU, jak na main', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const brain = `# Jaskier brain
+
+## User
+- Jan lubi krotkie raporty.
+
+## Ustalenia
+- Projekt PKM Assistant ma release blocker Memory v3.
+`;
+    const { vault, files } = makeVault({ [`${base}/brain.md`]: brain });
+    const memory = asMemory(new AgentMemory(vault, 'Jaskier'));
+    const migration = new MigrationV3(memory, { now: () => '2026-05-15T00:00:00.000Z' });
+
+    const result = await migration.run({ interactive: false });
+    const newBrain = files[`${base}/brain.md`];
+
+    t.true(result.migrated === true);
+    t.true(newBrain.includes('## Bieżące'), 'nagłówek indeksu PO POLSKU mimo EN UI');
+    t.true(newBrain.includes('## Projekty i referencje'));
+    t.false(newBrain.includes('## Current'), 'zero angielskich nagłówków w migracji v2->v3');
+    t.false(newBrain.includes('## Projects and references'));
+});
+
+test('looksLikeV3Index: plik JUŻ w formacie v3 PO ANGIELSKU jest rozpoznany jako v3 (nie migrowany)', async t => {
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const enV3Brain = `# Jaskier brain
+
+## Current
+- [[brain/project_context_x.md]] — X
+
+## User
+
+## Preferences
+
+## Workflow
+
+## Projects and references
+`;
+    const { vault, files } = makeVault({ [`${base}/brain.md`]: enV3Brain });
+    const memory = asMemory(new AgentMemory(vault, 'Jaskier'));
+    const migration = new MigrationV3(memory);
+
+    t.false(await migration.needsMigration(), 'plik EN v3 nie powinien wyglądać jak v2 do migracji');
+    const result = await migration.run({ interactive: false });
+    t.true(result.skipped === true);
+    t.is(result.reason, 'already_v3_format');
+    t.is(files[`${base}/brain.md`], enV3Brain, 'plik EN v3 zostaje NIETKNIĘTY');
 });

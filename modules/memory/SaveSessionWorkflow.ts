@@ -337,8 +337,20 @@ export class SaveSessionWorkflow {
         // (brak pliku → `getBrain()` zakłada go w języku UI i `resolveBrainLocale` to wykryje
         // z powrotem, więc wynik jest identyczny). Ścieżka LLM liczy WŁASNE `brainLocale`
         // niezależnie w `proposeBrainUpdatesViaAgent` (potrzebuje go też do promptu).
-        const currentBrain = await this.agentMemory.getBrain();
-        const brainLocale = resolveBrainLocale(currentBrain, uiBrainLocale());
+        //
+        // `getBrain()` jest CELOWO fail-closed (rzuca na odczycie niepewnym - kontrakt
+        // AgentMemory, patrz jej CLAUDE.md) - poprawne dla operacji, które NADPISUJĄ plik, ale
+        // to nowe wywołanie (dodane wyłącznie po detekcję języka) nie istniało przed tą funkcją
+        // na ścieżce regexowej - bez try/catch pad odczytu (dysk sieciowy) przerywałby CAŁE
+        // `/save session` PRZED oknem review, którego user wcześniej i tak by dostał. Degradacja
+        // jest bezpieczna: to wybór JĘZYKA ETYKIETY nowych notatek, nie operacja na danych.
+        let brainLocale = uiBrainLocale();
+        try {
+            const currentBrain = await this.agentMemory.getBrain();
+            brainLocale = resolveBrainLocale(currentBrain, uiBrainLocale());
+        } catch (e) {
+            log.warn('SaveSessionWorkflow', `prepareProposals: nie mogę odczytać brain.md do detekcji języka, spadam na język interfejsu: ${(e as ErrLike)?.message ?? String(e)}`);
+        }
 
         const llmProposal = await this._tryProposeViaAgent(messages, options);
         const notes = llmProposal

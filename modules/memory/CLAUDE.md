@@ -650,8 +650,15 @@ Flow:
   `fillBrainSectionPlaceholders(text, brainLocale)` NAGŁÓWKAMI JĘZYKA PLIKU brain.md TEGO
   agenta - NIE językiem prozy promptu (EN proza + PL plik agenta = tekst po angielsku, ale
   mówiący modelowi o polskich nagłówkach, bo to one naprawdę są w tym pliku). `SaveSessionWorkflow`
-  liczy `brainLocale` raz w `prepareProposals` (`resolveBrainLocale(getBrain(), uiBrainLocale())`)
-  i przekazuje go dalej. Nadpisania promptu (agent/global) przechodzą przez
+  liczy `brainLocale` DWA RAZY, NIEZALEŻNIE - RAZ w `prepareProposals` (dla ścieżki regexowej i
+  poczekalni rescue, `getBrain()` opakowane w try/catch - pad odczytu spada na `uiBrainLocale()`,
+  patrz gotcha „Odczyt PRZED..." niżej) i DRUGI RAZ w `proposeBrainUpdatesViaAgent` (ścieżka LLM,
+  potrzebuje też surowej treści `current_brain` do payloadu promptu, nie tylko samego locale).
+  Świadomie NIE ujednolicone w jedno przeliczenie - `proposeBrainUpdatesViaAgent` jest metodą
+  PUBLICZNĄ, wołaną wprost w kilku testach z samym `messages`, a wątek błędów obu ścieżek (LLM
+  kontra regex) jest inny na tyle, że wspólny parametr wymusiłby przekazywanie fallbacku z
+  jednej strony na drugą. Koszt: jeden dodatkowy odczyt `brain.md` na strzał LLM - lekki plik,
+  raz na `/save session`, nie ścieżka gorąca. Nadpisania promptu (agent/global) przechodzą przez
   `fillBrainSectionPlaceholders` OSOBNO, PO `resolveWorkPrompt` - user, który we własnym
   override też wpisze te placeholdery, dostaje tę samą podmianę (idempotentne na tekście już
   podstawionym). W SAMYM PLIKU nagłówki oczywiście dalej zostają surowe w każdym języku
