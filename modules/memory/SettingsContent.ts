@@ -1,6 +1,6 @@
 import { t } from '../../core/i18n/index.js';
 import { setSvgLabel } from '../../modules/crystal-soul/index.js';
-import { CONSOLIDATION_DEFAULTS } from './consolidationStatus.js';
+import { CONSOLIDATION_DEFAULTS, resolveConsolidationThresholds } from './consolidationStatus.js';
 // `import type` = ZERO emitu - sekcja dostaje `Setting` przez ctx (DI), nie importem wartości.
 import type { Setting as ObsidianSetting } from 'obsidian';
 
@@ -38,6 +38,13 @@ export interface MemoryPkmSlice {
     archiveSessionThreshold?: number;
     /** Jak `archiveSessionThreshold` wyżej, dla limitu notatek brain/. */
     archiveBrainNotesThreshold?: number;
+    /**
+     * Index signature - bez niej `resolveConsolidationThresholds(null, pkm)` (silnik, licząc
+     * wartość EFEKTYWNĄ pola - patrz `renderMemorySection` niżej) nie przyjmuje tego slice'a:
+     * `ConsolidationSettingsLike` (`consolidationStatus.ts`) ma tę samą index signature, jak
+     * każdy inny „worek ustawień" w tym repo (`ArchiveSettingsLike` w `ArchiveWorkflow.ts`).
+     */
+    [key: string]: unknown;
 }
 
 /**
@@ -232,26 +239,34 @@ export function renderMemorySection(container: HTMLElement, ctx: MemorySettingsC
 
     /**
      * Liczba całkowita > 0, inaczej wraca do `fallback` (wartość z `CONSOLIDATION_DEFAULTS`).
-     * `Number(value)` (NIE `parseInt`) + `Number.isInteger` - `parseInt` PRZYJMOWAŁ śmieciowe
-     * wejścia zamiast je odrzucać (bug recenzji #9): `"3.7"` dawało `3` (ucięcie ułamka), `"1e3"`
-     * dawało `1` (parseInt nie rozumie notacji wykładniczej, `Number` owszem - `1e3` = 1000,
-     * poprawnie), `"12abc"` dawało `12` (parseInt ignoruje śmieci NA KOŃCU). `Number("12abc")` to
-     * `NaN` - `Number.isInteger(NaN)` jest `false`, więc śmieciowe wejście spada na `fallback`
-     * zamiast po cichu przepuszczać obciętą wartość.
+     * Wejście przechodzi NAJPIERW przez `/^\d+$/` po `trim()`, dopiero potem przez `Number()`
+     * (naprawa N3(b) recenzji rundy 3 - ta sama bramka co `firstPositive` w `consolidationStatus.ts`,
+     * jedna reguła w UI i silniku): goły `Number(value)` bez tej bramki przyjmował też `"0x10"`
+     * (parsing hex - `Number("0x10") === 16`), więc user wpisujący coś, co WYGLĄDA jak liczba w
+     * niedziesiętnym zapisie, dostawałby cichą, zaskakującą wartość zamiast odrzucenia jak każde
+     * inne nieoczekiwane wejście. Koszt świadomy: notacja wykładnicza (`"1e3"`) też już nie
+     * przechodzi - pole liczbowe konsolidacji ma znaczyć zwykłą liczbę całkowitą, nie dowolny
+     * zapis, który `Number()` potrafi sparsować.
      */
     const positiveIntOr = (value: string, fallback: number): number => {
-        const val = Number(value);
+        const trimmed = value.trim();
+        if (!/^\d+$/.test(trimmed)) return fallback;
+        const val = Number(trimmed);
         return Number.isInteger(val) && val > 0 ? val : fallback;
     };
 
-    // Wartość EFEKTYWNA do pokazania w polu (recenzja #9) - ta sama kolejność fallbacków co
-    // silnik (`resolveConsolidationThresholds`: memoryV3X > legacy archiveX > default), żeby
-    // pole NIE pokazywało domyślnej wartości, gdy user ma jeszcze starą nazwę ustawienia z czasów
-    // przed tym podblokiem, a silnik i tak już ją czyta. Zapis (`.onChange` niżej) zawsze idzie
-    // do `memoryV3X` - dotknięcie pola migruje cicho na nową nazwę.
-    const effectiveSessionThreshold = pkm.memoryV3SessionThreshold ?? pkm.archiveSessionThreshold ?? CONSOLIDATION_DEFAULTS.sessionThreshold;
-    const effectiveBrainLimit = pkm.memoryV3BrainNotesThreshold ?? pkm.archiveBrainNotesThreshold ?? CONSOLIDATION_DEFAULTS.brainNotesLimit;
-    const effectiveBatchSize = pkm.memoryV3ArchiveBatchSize ?? CONSOLIDATION_DEFAULTS.batchSize;
+    // Wartość EFEKTYWNA do pokazania w polu (recenzja #9, doprecyzowana N5 recenzji rundy 3) -
+    // TA SAMA funkcja co silnik (`resolveConsolidationThresholds`), nie osobny łańcuch `??`:
+    // `??` traktuje tylko `null`/`undefined` jak brak wartości, więc `-5`/`0` z ręcznie
+    // uszkodzonego `data.json` przechodziłyby jako pokazana wartość, mimo że silnik i tak liczy
+    // dla nich domyślną (`firstPositive` odrzuca `<= 0`/`NaN`/zapis niedziesiętny). Bez `state`
+    // (Ustawienia są GLOBALNE, nie per-agent) - podłoga `state.brain_notes_limit` w silniku i tak
+    // wygrywa tylko, gdy jest WYŻSZA od ustawienia globalnego, więc pominięcie jej tutaj pokazuje
+    // dokładnie to, co widzi świeży agent bez własnego auto-bumpu.
+    const thresholds = resolveConsolidationThresholds(null, pkm);
+    const effectiveSessionThreshold = thresholds.sessionThreshold;
+    const effectiveBrainLimit = thresholds.brainNotesLimit;
+    const effectiveBatchSize = thresholds.batchSize;
 
     new Setting(container)
         .setName(t('settings.consolidation_session_threshold'))

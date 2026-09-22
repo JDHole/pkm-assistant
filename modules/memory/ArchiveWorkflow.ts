@@ -463,7 +463,11 @@ export class ArchiveWorkflow {
                 await this._generateL3Step(run, step, l2s, options, outcome);
             }
         } else {
-            throw new Error(`ArchiveWorkflow.retryStep: nie wiem jak ponowić krok rodzaju "${step.kind}"`);
+            // Wyczerpujący switch (wzorzec z CLAUDE.md): po odsianiu DEDUP/L1/L2/L3 `step.kind`
+            // jest zawężone do `never` - `String(unreachable)` zamiast interpolacji `never`
+            // wprost w template literalu (`@typescript-eslint/restrict-template-expressions`).
+            const unreachable: never = step.kind;
+            throw new Error(`ArchiveWorkflow.retryStep: nie wiem jak ponowić krok rodzaju "${String(unreachable)}"`);
         }
         return outcome;
     }
@@ -515,7 +519,11 @@ export class ArchiveWorkflow {
                 body: decision?.body || proposal.body || '',
             });
         }
-        throw new Error(`ArchiveWorkflow: nie wiem jak zaaplikować krok rodzaju "${step.kind}"`);
+        // Wyczerpujący switch (wzorzec z CLAUDE.md): po odsianiu DEDUP/L1/L2/L3 `step.kind`
+        // jest zawężone do `never` - `String(unreachable)` zamiast interpolacji `never`
+        // wprost w template literalu (`@typescript-eslint/restrict-template-expressions`).
+        const unreachable: never = step.kind;
+        throw new Error(`ArchiveWorkflow: nie wiem jak zaaplikować krok rodzaju "${String(unreachable)}"`);
     }
 
     // ── generatory pojedynczych kroków ────────────────────────────────────────────────────
@@ -1335,15 +1343,13 @@ ${String(body || '').trim()}
         // był no-opem, gdy ustawienie globalne już siedziało NAD state (kolejne odrzucenia nie
         // ruszały efektywnego limitu, dopóki bump nie doszedł do +10 nad globalnym), i nigdy się
         // nie odpalał, gdy globalne ustawienie było >= 90 (stary sztywny cap 100 - global <= 10,
-        // `Math.min(100, ...)` przycinał do samego globalnego). Cap rośnie razem z bazą
-        // (`Math.max(100, baza + 10)`), więc wysoki globalny próg (np. 150) nadal może się
-        // podbijać ponad starą sztywną granicę 100 zamiast zamrozić się na niej.
+        // `Math.min(100, ...)` przycinał do samego globalnego). DECYZJA: limit rośnie BEZ GÓRNEJ
+        // GRANICY (+10 przy każdym odrzuceniu) - stary sztywny cap 100 (i jego następca, cap
+        // rosnący razem z bazą) jest skasowany, nie tylko podniesiony.
         let bumped = false;
         await this.agentMemory.stateManager.update((state) => {
             const base = resolveConsolidationThresholds(state, this.settings).brainNotesLimit;
-            const cap = Math.max(100, base + 10);
-            if (base >= cap) return; // fail-safe: przy tej formule nigdy prawdziwe, cap >= base+10
-            state.brain_notes_limit = Math.min(cap, base + 10);
+            state.brain_notes_limit = base + 10;
             bumped = true;
         });
         return bumped;
@@ -1371,19 +1377,30 @@ ${String(body || '').trim()}
      * Wołający decyduje, co się liczy jako „decyzja usera" — ta metoda tylko wykonuje wyciszenie
      * dla podanego rodzaju kroku. Błąd generowania / abort przez awarię NIGDY tu nie trafia.
      *
-     * `run` jest OPCJONALNY (drugi parametr, nie pierwszy) - wołacz sprzed naprawy „podwójny
-     * reset" (bug recenzji #6) wołał `onStepRejected(kind)` samym rodzajem kroku; ta kolejność
-     * zostaje kompatybilna (bez `run` metoda po prostu nie oznaczy przebiegu jako wyciszonego -
-     * `_writeLevel1` wtedy zeruje licznik bezwarunkowo, jak przed naprawą).
+     * `run` jest WYMAGANY - wszystkie trzy produkcyjne wołacze (`applyStepDecision` w tym pliku,
+     * `RunController.skip`/`_trySilenceClosedWindow` w `modules/chat/consolidationRunner.ts`) już
+     * go podają. Opcjonalność z pierwszej wersji naprawy „podwójny reset" (bug recenzji #6) była
+     * wyłącznie sztuczką do izolacji commitów (dopisanie flagi na `run.meta` w jednym commicie,
+     * zanim wołacze w `modules/chat` zdążyły ją przekazać) - oba commity już istnieją, więc
+     * sztuczka jest zbędna.
+     *
+     * **Wyciszenie chroni PRZED PONOWNYM ustawieniem, nie tylko przed drugim resetem licznika.**
+     * Bez tej bramki drugie wyciszenie w TYM SAMYM przebiegu (np. zamknięcie okna → +3 sesje →
+     * ponowne otwarcie z paska statusu i drugie zamknięcie; albo odrzucenie paczki b1 → +3 sesje
+     * → odrzucenie paczki b2) zerowałoby licznik PO RAZ DRUGI i kasowałoby te 3 sesje
+     * zarchiwizowane w międzyczasie, mimo że przebieg już raz się wyciszył.
      */
-    async onStepRejected(kind: StepKind, run?: ConsolidationRun | null): Promise<void> {
+    async onStepRejected(kind: StepKind, run: ConsolidationRun): Promise<void> {
         if (kind === STEP_KIND.L1) {
+            // Już wyciszony w TYM przebiegu — drugi reset skasowałby sesje zarchiwizowane od
+            // pierwszego wyciszenia (patrz docstring wyżej).
+            if (run.meta.consolidationSilenced) return;
             await this._resetArchiveCounter();
             // Znacznik "już wyciszony" na PRZEBIEGU (nie na kroku) — `_writeLevel1` go czyta,
             // żeby nie zerować licznika DRUGI raz, jeśli user mimo wszystko wróci i zaakceptuje
             // tę samą paczkę L1 (bug recenzji #6). `run.meta` jest wolnym workiem przebiegu -
             // patrz `ConsolidationRun.ts`.
-            if (run) run.meta.consolidationSilenced = true;
+            run.meta.consolidationSilenced = true;
         } else if (kind === STEP_KIND.DEDUP) {
             await this._autoBumpBrainNoteLimit();
         }

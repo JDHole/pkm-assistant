@@ -716,41 +716,48 @@ test('_autoBumpBrainNoteLimit: globalne ustawienie 150 -> bump do 160 (ponad sta
     // Przed naprawą: `Math.min(100, 20 + 10)` = 30, i przy state.brain_notes_limit >= 100 bump
     // w ogóle by się nie odpalał (`if (current >= 100) return;`) - ale `current` liczony z gołego
     // state (0/brak) NIGDY nie osiągał 100 mimo globalnego progu 150, więc bump zamrażał się na
-    // 30, dalece PONIŻEJ efektywnego progu. Po naprawie cap rośnie razem z bazą.
+    // 30, dalece PONIŻEJ efektywnego progu. Po naprawie (N6 recenzji rundy 3) limit rośnie BEZ
+    // GÓRNEJ GRANICY - stary sztywny cap 100 jest skasowany, nie tylko podniesiony.
     const bumped = await workflow._autoBumpBrainNoteLimit();
     t.true(bumped);
     const state = JSON.parse(files[`${base}/.state.json`]);
-    t.is(state.brain_notes_limit, 160, '150 (efektywny próg z ustawienia) + 10, cap rośnie razem z bazą');
+    t.is(state.brain_notes_limit, 160, '150 (efektywny próg z ustawienia) + 10, bez górnej granicy');
 });
 
-test('L2: błąd generowania (_failGeneration, odczyt pliku L1 rzuca) NIE woła wyciszenia - licznik i limit notatek bez zmian', async t => {
+// N3(a) recenzji rundy 3: wersja tego testu na kroku L2 była pusta z definicji - `_failGeneration`
+// nigdy nie woła `onStepRejected` dla ŻADNEGO rodzaju kroku, a L2 i tak nie ma gestu wyciszenia
+// (patrz `onStepRejected`), więc asercje "licznik/limit bez zmian" były prawdziwe niezależnie od
+// tego, czy implementacja była poprawna - mutacja `_failGeneration` (np. dopisanie warunkowego
+// wywołania `onStepRejected`) i tak by tu nie wyszła na jaw. L1 JEST rodzajem kroku z realnym
+// gestem wyciszenia (`_resetArchiveCounter` + `consolidationSilenced`), więc odpalenie
+// `_failGeneration` bezpośrednio na kroku L1 realnie sprawdza, że BŁĄD GENEROWANIA (nie decyzja
+// usera) nigdy nie ściąga tej ścieżki - dokładnie ta gałąź, którą stary test obiecywał pokryć.
+test('_failGeneration na kroku L1 (nie tylko L2/L3) NIE woła wyciszenia - licznik, limit notatek i flaga silenced bez zmian', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const statePath = `${base}/.state.json`;
-    const initial: Record<string, string> = {
+    const { vault, files } = makeVault({
         [statePath]: JSON.stringify({ archived_since_last_consolidation: 7, brain_notes_limit: 20 }),
-    };
-    for (let i = 1; i <= 5; i++) {
-        initial[`${base}/summaries/L1/l1_${i}.md`] = summary('L1', { sessions: [`session_${i}.md`] });
-    }
-    const { vault, files } = makeVault(initial);
-    const realRead = vault.adapter.read.bind(vault.adapter);
-    vault.adapter.read = async (path: string) => {
-        if (path.includes('/summaries/L1/l1_3')) throw new Error('dysk sieciowy padł');
-        return realRead(path);
-    };
+    });
     const memory = new AgentMemory(vault, 'Jaskier');
     const workflow = new ArchiveWorkflow(memory, { batchSize: 5 });
-    // archiveCount:0 -> zero paczek L1 w planie (`runWithRun` nic dla L1 nie generuje);
-    // l1Count:5 wystarcza, żeby L2 był w ogóle zaplanowany (gated).
-    const run = new ConsolidationRun({ counts: { archiveCount: 0, batchSize: 5, l1Count: 5 } });
+    const run = new ConsolidationRun({ counts: { archiveCount: 5, batchSize: 5 } });
+    const l1 = run.getStep('l1_batch_1')!;
+    run.startStep(l1.id); // `failStep` (wołane przez `_failGeneration`) wymaga running/applying/awaiting_review
 
-    await workflow.runWithRun(run); // dedup nie planowany (0 notatek brain/), L1 brak paczek
-    await workflow.generateGatedSteps(run);
+    const outcome = { generated: [] as string[], skipped: [] as string[], failed: [] as string[] };
+    // `_failGeneration` jest `private` - bezpośrednie odpalenie generycznego helpera z rodzajem
+    // kroku L1 (zamiast L2/L3, jedynych produkcyjnych wołaczy) jest jedynym sposobem sprawdzenia,
+    // że sama funkcja nigdy nie woła `onStepRejected`, niezależnie od `step.kind`.
+    (workflow as unknown as {
+        _failGeneration(run: ConsolidationRun, step: unknown, error: unknown, outcome: unknown): void;
+    })._failGeneration(run, l1, new Error('dysk sieciowy padł'), outcome);
 
-    t.is(run.getStep('l2')!.status, STEP_STATUS.FAILED, 'odczyt L1 rzucił - krok kończy jako failed przez _failGeneration');
+    t.is(run.getStep('l1_batch_1')!.status, STEP_STATUS.FAILED, '_failGeneration domyka krok jako failed, jak dla L2/L3');
+    t.deepEqual(outcome.failed, ['l1_batch_1']);
     const state = JSON.parse(files[statePath]);
-    t.is(state.archived_since_last_consolidation, 7, 'błąd generowania L2 NIE jest decyzją usera - licznik nietknięty');
-    t.is(state.brain_notes_limit, 20, 'limit notatek też bez zmian - _failGeneration nie woła onStepRejected');
+    t.is(state.archived_since_last_consolidation, 7, 'błąd generowania NIE jest decyzją usera - licznik nietknięty');
+    t.is(state.brain_notes_limit, 20, 'limit notatek bez zmian - _failGeneration nie woła onStepRejected, niezależnie od kind');
+    t.falsy(run.meta.consolidationSilenced, 'brak flagi wyciszenia - błąd generowania nie jest ścieżką "decyzja usera"');
 });
 
 test('onStepRejected: rodzaj kroku spoza L1/DEDUP jest no-opem (L2/L3 nie mają wyciszenia, zero I/O)', async t => {
@@ -764,6 +771,80 @@ test('onStepRejected: rodzaj kroku spoza L1/DEDUP jest no-opem (L2/L3 nie mają 
 
     t.false(Object.keys(files).some(p => p.endsWith('.state.json')), 'żaden .state.json nie powstał - brak I/O dla L2/L3');
     t.falsy(run.meta.consolidationSilenced, 'L2/L3 NIE ustawiają znacznika wyciszenia przebiegu - to wyłącznie gest L1');
+});
+
+// ── N2 recenzji rundy 3: podwójne wyciszenie w TYM SAMYM przebiegu nie zeruje licznika dwa razy ──
+
+test('onStepRejected(L1): drugie wyciszenie w TYM SAMYM przebiegu (np. dwa kolejne zamknięcia okna) NIE zeruje licznika drugi raz', async t => {
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const statePath = `${base}/.state.json`;
+    const { vault, files } = makeVault({
+        [statePath]: JSON.stringify({ archived_since_last_consolidation: 7 }),
+    });
+    const memory = new AgentMemory(vault, 'Jaskier');
+    const workflow = new ArchiveWorkflow(memory);
+    const run = new ConsolidationRun({ steps: [] });
+
+    // Pierwsze wyciszenie (np. pierwsze zamknięcie okna przebiegu z L1 wciąż awaiting_review) -
+    // zeruje licznik i znaczy przebieg jako wyciszony.
+    await workflow.onStepRejected(STEP_KIND.L1, run);
+    t.is(JSON.parse(files[statePath]).archived_since_last_consolidation, 0, 'pierwsze wyciszenie zeruje licznik');
+    t.true(run.meta.consolidationSilenced === true);
+
+    // +3 sesje zarchiwizowane W MIĘDZYCZASIE (spoza tej paczki) - symulacja realnego przyrostu
+    // licznika (`markArchived` z czatu) między pierwszym a drugim wyciszeniem tego przebiegu.
+    await memory.stateManager.update((state) => {
+        state.archived_since_last_consolidation = (state.archived_since_last_consolidation || 0) + 3;
+    });
+    t.is(JSON.parse(files[statePath]).archived_since_last_consolidation, 3);
+
+    // Drugie wyciszenie TEGO SAMEGO przebiegu (np. user otwiera przebieg z paska statusu i
+    // zamyka okno drugi raz) - bez bramki `consolidationSilenced` zerowałoby licznik DRUGI RAZ i
+    // skasowałoby te 3 sesje zarchiwizowane w międzyczasie.
+    await workflow.onStepRejected(STEP_KIND.L1, run);
+    t.is(
+        JSON.parse(files[statePath]).archived_since_last_consolidation, 3,
+        'drugie wyciszenie NIE zeruje licznika drugi raz - 3 sesje zostają',
+    );
+});
+
+test('applyStepDecision: odrzucenie DRUGIEJ paczki L1 (b2) w TYM SAMYM przebiegu, po +3 sesjach od odrzucenia pierwszej (b1), NIE zeruje licznika drugi raz', async t => {
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const statePath = `${base}/.state.json`;
+    const initial: Record<string, string> = {
+        [statePath]: JSON.stringify({ archived_since_last_consolidation: 10 }),
+    };
+    for (let i = 1; i <= 10; i++) {
+        initial[`${base}/sessions/archive/session_${i}.md`] = session(`session_${i}.md`, `Sesja ${i}`);
+    }
+    const { vault, files } = makeVault(initial);
+    const memory = new AgentMemory(vault, 'Jaskier');
+    const workflow = new ArchiveWorkflow(memory, { batchSize: 5 });
+    const run = new ConsolidationRun({ counts: { archiveCount: 10, batchSize: 5 } });
+
+    await workflow.runWithRun(run);
+    const b1 = run.getStep('l1_batch_1')!;
+    const b2 = run.getStep('l1_batch_2')!;
+    t.is(b1.status, STEP_STATUS.AWAITING_REVIEW, 'obie paczki mają propozycję do odrzucenia');
+    t.is(b2.status, STEP_STATUS.AWAITING_REVIEW);
+
+    // Odrzucenie b1 - pierwsze wyciszenie tego przebiegu, zeruje licznik.
+    await workflow.applyStepDecision(run, b1.id, { accepted: false });
+    t.is(JSON.parse(files[statePath]).archived_since_last_consolidation, 0, 'odrzucenie b1 zeruje licznik');
+
+    // +3 sesje zarchiwizowane W MIĘDZYCZASIE (spoza obu paczek tego przebiegu).
+    await memory.stateManager.update((state) => {
+        state.archived_since_last_consolidation = (state.archived_since_last_consolidation || 0) + 3;
+    });
+
+    // Odrzucenie b2 - drugie wyciszenie TEGO SAMEGO przebiegu; bez bramki `consolidationSilenced`
+    // zerowałoby licznik drugi raz i skasowałoby te 3 sesje.
+    await workflow.applyStepDecision(run, b2.id, { accepted: false });
+    t.is(run.getStep('l1_batch_2')!.status, STEP_STATUS.SKIPPED, 'b2 jest mimo to rozstrzygnięty jako skipped');
+    t.is(
+        JSON.parse(files[statePath]).archived_since_last_consolidation, 3,
+        'odrzucenie b2 NIE zeruje licznika drugi raz - 3 sesje zostają',
+    );
 });
 
 // ── Memory v3 LLM-driven L1/L2/L3 synthesis ──

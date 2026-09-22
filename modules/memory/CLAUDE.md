@@ -395,8 +395,11 @@ pełny plan, jak przed tą zmianą.
 - `SaveSessionWorkflow.applyDecision` zwraca `shouldTriggerArchive` (= `plan.trigger`) ORAZ
   `consolidationInclude` (= `plan.include`), ZAWSZE (nie tylko przy `shouldTriggerArchive`).
   `save_session.ts` przekazuje `include: result.consolidationInclude` do
-  `startConsolidationRun` w bramce `if (result.shouldTriggerArchive)` (strażnik mutacyjny po
-  źródle: `save_session.noteFailures.test.ts`).
+  `startConsolidationRun` w bramce `if (result.shouldTriggerArchive)`. Strażnikiem NIE jest już
+  test po źródle (usunięty N4 recenzji rundy 3 - przypinał tekst kodu regexem, bez odpalenia
+  realnej logiki) - skutek KOŃCOWY jest sprawdzony behawioralnie w
+  `modules/chat/consolidationRunner.test.ts`, w tym przez obronę w głąb niżej (runner liczy
+  `include` sam, gdyby ten handler przestał je przekazywać).
   `buildConsolidationPlan(counts, {include})` (`ConsolidationRun.ts`) - drugi parametr
   OPCJONALNY, brak = pełny plan (zachowanie ręcznej konsolidacji i sprzed tej zmiany).
   `include.dedup:false` wycina krok DEDUP; `include.sessions:false` wycina L1 i przez kaskadę
@@ -455,9 +458,11 @@ pełny plan, jak przed tą zmianą.
   `state.brain_notes_limit` (naprawiony bug: przy globalnym ustawieniu 50 i pustym state, stary
   kod liczył bazę z `state.brain_notes_limit || 20` = 20, więc bump dawał 30 - dalej PONIŻEJ
   efektywnego progu 50, próg nadal by triggerował; przy globalnym ustawieniu 150 bump w ogóle się
-  nie odpalał, bo `current >= 100` nigdy nie było prawdą przy pustym state). Cap rośnie razem z
-  bazą (`Math.max(100, baza + 10)`), więc wysoki globalny próg może się podbijać ponad starą
-  sztywną granicę 100.
+  nie odpalał, bo `current >= 100` nigdy nie było prawdą przy pustym state). Limit rośnie BEZ
+  GÓRNEJ GRANICY (+10 przy każdym odrzuceniu) - DECYZJA N6 recenzji rundy 3: stary sztywny cap
+  100 (i jego następca, cap rosnący razem z bazą, `Math.max(100, baza + 10)`) był martwy kod -
+  przy tej formule `base >= cap` nigdy nie było prawdą, więc cap nigdy realnie nie ograniczał -
+  usunięty zamiast utrzymywany.
 - `CONSOLIDATION_DEFAULTS` (`consolidationStatus.ts`: `sessionThreshold:10`,
   `brainNotesLimit:20`, `batchSize:5`, `autoSessions:false`, `autoBrain:false`) jest JEDNYM
   źródłem tych literałów - silnik (`ArchiveWorkflow`, `ConsolidationRun`) i UI

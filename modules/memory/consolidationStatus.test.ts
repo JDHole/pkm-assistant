@@ -99,6 +99,35 @@ test('resolveConsolidationThresholds: memoryV3ArchiveBatchSize ujemny -> spada n
     t.is(resolveConsolidationThresholds(null, { memoryV3ArchiveBatchSize: -5 }).batchSize, 5);
 });
 
+// N3(b) recenzji rundy 3: `firstPositive` na jawnym 0 i na zapisie "0x10" (`Number("0x10")`
+// parsuje hex jako 16) - oba mają spaść na domyślną, nie zostać przepuszczone jako próg.
+
+test('resolveConsolidationThresholds: sessionThreshold jawne 0 -> spada na domyślną (10), NIE zostaje 0', t => {
+    t.is(resolveConsolidationThresholds(null, { memoryV3SessionThreshold: 0 }).sessionThreshold, 10);
+});
+
+test('resolveConsolidationThresholds: memoryV3BrainNotesThreshold jawne 0 -> spada na domyślny limit (20)', t => {
+    t.is(resolveConsolidationThresholds(null, { memoryV3BrainNotesThreshold: 0 }).brainNotesLimit, 20);
+});
+
+test('resolveConsolidationThresholds: memoryV3ArchiveBatchSize jawne 0 -> spada na domyślny (5)', t => {
+    t.is(resolveConsolidationThresholds(null, { memoryV3ArchiveBatchSize: 0 }).batchSize, 5);
+});
+
+test('resolveConsolidationThresholds: sessionThreshold jako string "0x10" -> spada na domyślną (10), NIE 16', t => {
+    // Number("0x10") === 16 (parsing hex) - bez bramki /^\d+$/ string "0x10" z ręcznie
+    // edytowanego data.json przechodziłby jako prawidłowy próg 16.
+    t.is(resolveConsolidationThresholds(null, { memoryV3SessionThreshold: '0x10' }).sessionThreshold, 10);
+});
+
+test('resolveConsolidationThresholds: memoryV3BrainNotesThreshold jako string "0x10" -> spada na domyślny limit (20), NIE 16', t => {
+    t.is(resolveConsolidationThresholds(null, { memoryV3BrainNotesThreshold: '0x10' }).brainNotesLimit, 20);
+});
+
+test('resolveConsolidationThresholds: string liczbowy poprawny ("25") po trim nadal działa - bramka /^\\d+$/ nie psuje zwykłego wejścia', t => {
+    t.is(resolveConsolidationThresholds(null, { memoryV3SessionThreshold: ' 25 ' }).sessionThreshold, 25);
+});
+
 test('resolveConsolidationThresholds: puste ustawienia -> CONSOLIDATION_DEFAULTS (10/20/5)', t => {
     // Literalnie 10/20/5 (nie `CONSOLIDATION_DEFAULTS.x`) - test ma łapać PRZYPADKOWĄ zmianę
     // samej stałej, nie tylko potwierdzać, że funkcja czyta to, co stała akurat mówi (recenzja #11:

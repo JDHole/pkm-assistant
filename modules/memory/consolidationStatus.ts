@@ -115,9 +115,23 @@ export interface ConsolidationThresholds {
  * plus naprawa recenzji #9: `Number(-5) || fallback` zwracało dosłownie `-5`, bo `-5` jest
  * truthy w JS - próg `-5` z ręcznie edytowanego `data.json` znaczył „ZAWSZE due", zamiast
  * spaść na domyślną wartość jak każde inne nieprawidłowe wejście).
+ *
+ * ⚠️ **Wejście typu `string` przechodzi NAJPIERW przez `/^\d+$/` po `trim()`, dopiero potem
+ * przez `Number()`** (naprawa N3(b) recenzji rundy 3): goły `Number("0x10")` daje `16` (parsing
+ * hex), więc bez tej bramki string `"0x10"` z ręcznie edytowanego `data.json` przechodziłby jako
+ * prawidłowy próg 16, zamiast spaść na default jak każde inne nieoczekiwane wejście. Wartości
+ * typu `number` (typowy kształt z `.state.json`/ustawień) nie przechodzą przez regex - liczba
+ * jest liczbą, nie ma w niej do odrzucenia zapisu szesnastkowego, wykładniczego itd.
  */
 function firstPositive(...values: unknown[]): number | null {
     for (const value of values) {
+        if (typeof value === 'string') {
+            const trimmed = value.trim();
+            if (!/^\d+$/.test(trimmed)) continue;
+            const n = Number(trimmed);
+            if (Number.isFinite(n) && n > 0) return n;
+            continue;
+        }
         const n = Number(value);
         if (Number.isFinite(n) && n > 0) return n;
     }

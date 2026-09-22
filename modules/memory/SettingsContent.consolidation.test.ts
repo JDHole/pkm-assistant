@@ -175,10 +175,21 @@ test('renderMemorySection: „3.7" (ułamek) wraca do domyślnej - parseInt kied
     t.is(pkm.memoryV3SessionThreshold, CONSOLIDATION_DEFAULTS.sessionThreshold, 'ułamek nie jest liczbą całkowitą - domyślna, NIE 3');
 });
 
-test('renderMemorySection: „1e3" (notacja wykładnicza) zapisuje się jako 1000 - parseInt kiedyś dawał 1', t => {
+// N3(b) recenzji rundy 3: `positiveIntOr` przeszedł na `/^\d+$/` po trim, PRZED `Number()` (ta
+// sama bramka co `firstPositive` w `consolidationStatus.ts`) - zamyka lukę `Number("0x10") ===
+// 16` (parsing hex), kosztem notacji wykładniczej (`"1e3"`), która wcześniej była świadomie
+// akceptowana (recenzja #9) - teraz odrzucana tą samą bramką co hex, bo obie są "coś, co
+// `Number()` umie sparsować", nie zwykłym zapisem dziesiętnym.
+test('renderMemorySection: „1e3" (notacja wykładnicza) wraca do domyślnej - /^\\d+$/ odrzuca zapis niedziesiętny', t => {
     const { pkm, settings } = render();
     void findByName(settings, 'settings.consolidation_session_threshold').control!.onChangeHandler?.('1e3');
-    t.is(pkm.memoryV3SessionThreshold, 1000, 'Number("1e3") === 1000, poprawnie - NIE 1');
+    t.is(pkm.memoryV3SessionThreshold, CONSOLIDATION_DEFAULTS.sessionThreshold, '/^\\d+$/ nie dopuszcza "e" - domyślna, NIE 1000');
+});
+
+test('renderMemorySection: „0x10" (zapis szesnastkowy) wraca do domyślnej - Number("0x10") === 16 bez bramki regex', t => {
+    const { pkm, settings } = render();
+    void findByName(settings, 'settings.consolidation_batch_size').control!.onChangeHandler?.('0x10');
+    t.is(pkm.memoryV3ArchiveBatchSize, CONSOLIDATION_DEFAULTS.batchSize, '/^\\d+$/ nie dopuszcza "0x10" - domyślna, NIE 16');
 });
 
 test('renderMemorySection: „12abc" (śmieci na końcu) wraca do domyślnej - parseInt kiedyś dawał 12', t => {
@@ -210,4 +221,34 @@ test('renderMemorySection: zapis ZAWSZE ląduje w memoryV3X, nawet gdy pole star
 test('renderMemorySection: bez memoryV3BrainNotesThreshold, ale z legacy archiveBrainNotesThreshold -> pole pokazuje wartość LEGACY', t => {
     const { settings } = render({ archiveBrainNotesThreshold: 33 });
     t.is(findByName(settings, 'settings.consolidation_brain_limit').control!.getValue(), '33');
+});
+
+// ── N5 recenzji rundy 3: pole pokazuje wartość EFEKTYWNĄ (silnik), nie surową ze `stored` ─────
+//
+// Przed naprawą pola liczyły efektywną wartość osobnym łańcuchem `??`, który traktuje TYLKO
+// `null`/`undefined` jako "brak" - `-5`/`0` z ręcznie uszkodzonego `data.json` przechodziły więc
+// jako pokazana wartość (`-5`/`0`), mimo że silnik (`resolveConsolidationThresholds`/
+// `firstPositive`) i tak liczy dla nich domyślną (`10`/`20`/`5`). Pole kłamało o tym, co
+// realnie triggeruje konsolidację.
+
+test('renderMemorySection: -5 we WSZYSTKICH trzech polach w data.json -> UI pokazuje domyślne 10/20/5, nie -5', t => {
+    const { settings } = render({
+        memoryV3SessionThreshold: -5,
+        memoryV3BrainNotesThreshold: -5,
+        memoryV3ArchiveBatchSize: -5,
+    });
+    t.is(findByName(settings, 'settings.consolidation_session_threshold').control!.getValue(), String(CONSOLIDATION_DEFAULTS.sessionThreshold));
+    t.is(findByName(settings, 'settings.consolidation_brain_limit').control!.getValue(), String(CONSOLIDATION_DEFAULTS.brainNotesLimit));
+    t.is(findByName(settings, 'settings.consolidation_batch_size').control!.getValue(), String(CONSOLIDATION_DEFAULTS.batchSize));
+});
+
+test('renderMemorySection: 0 we WSZYSTKICH trzech polach w data.json -> UI pokazuje domyślne 10/20/5, nie 0', t => {
+    const { settings } = render({
+        memoryV3SessionThreshold: 0,
+        memoryV3BrainNotesThreshold: 0,
+        memoryV3ArchiveBatchSize: 0,
+    });
+    t.is(findByName(settings, 'settings.consolidation_session_threshold').control!.getValue(), String(CONSOLIDATION_DEFAULTS.sessionThreshold));
+    t.is(findByName(settings, 'settings.consolidation_brain_limit').control!.getValue(), String(CONSOLIDATION_DEFAULTS.brainNotesLimit));
+    t.is(findByName(settings, 'settings.consolidation_batch_size').control!.getValue(), String(CONSOLIDATION_DEFAULTS.batchSize));
 });
