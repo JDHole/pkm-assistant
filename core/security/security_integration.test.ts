@@ -6,6 +6,7 @@ import { validateVaultPath } from '../../modules/tools/vault_path_validator.js';
 import { PermissionSystem, PERMISSION_TYPES } from './PermissionSystem.js';
 import { isProtectedPath, sanitizePath } from './keySanitizer.js';
 import { log } from '../utils/Logger.js';
+import { ApprovalManager } from './ApprovalManager.js';
 import type { ApprovalAction, ApprovalModalResult } from './ApprovalManager.js';
 import type { DiffApprovalOptions } from '../../modules/tools/MCPClient.js';
 
@@ -625,7 +626,7 @@ function writeCall(client: MCPClient, path: string, content: string, sessionPath
         { name: 'write', arguments: { path, mode: 'create', content } } as unknown as Parameters<typeof client.executeToolCall>[0],
         'Jaskier',
         sessionPath ? { origin: { agentName: 'Jaskier', sessionPath } } : {},
-    ) as Promise<{ success?: boolean }>;
+    ) as Promise<{ success?: boolean } & ToolCallOutcome>;
 }
 
 function deleteCall(client: MCPClient, path: string, sessionPath?: string) {
@@ -633,7 +634,7 @@ function deleteCall(client: MCPClient, path: string, sessionPath?: string) {
         { name: 'delete', arguments: { path } } as unknown as Parameters<typeof client.executeToolCall>[0],
         'Jaskier',
         sessionPath ? { origin: { agentName: 'Jaskier', sessionPath } } : {},
-    ) as Promise<{ success?: boolean }>;
+    ) as Promise<{ success?: boolean } & ToolCallOutcome>;
 }
 
 test('(a) zgoda z kroku 6b: SAME plik + SAMA sesja nie pyta drugi raz; inny plik/inna sesja/delete PYTAJĄ', async t => {
@@ -716,4 +717,151 @@ test('(d) zgoda nadana w kroku 6 pomija krok 6b W TYM SAMYM wywołaniu (fabryka 
     t.is(h.handlerCalls, 1);
     t.is(h.diffCalls, 0);
     t.is(h.files['a.md'], 'v2');
+});
+
+// ─── Obrona w głąb: deny NIE MA PRAWA zapisać zgody sesyjnej, nawet gdy (błędliwa/złośliwa)
+// atrapa modala/diffa niesie `rememberForSession: true` razem z odmową. Kod jest już tak
+// zbudowany strukturalnie (grant stoi PO `if (deny) throw`, nigdy przed) - te testy to
+// mierzą, zamiast ufać czytaniu kodu na słowo. ───
+
+test('(g) krok 6: handler deny + rememberForSession:true (błędliwy handler) -> BRAK zgody, kolejny zapis pyta ZNOWU', async t => {
+    const h = makeWriteConsentHarness({ result: 'deny', rememberForSession: true }, true);
+
+    const r1 = await writeCall(h.client, 'a.md', 'v1', 'S1');
+    t.true(r1.isError, 'deny w kroku 6 ma się skończyć porażką narzędzia');
+    t.is(h.handlerCalls, 1);
+    t.is(h.diffCalls, 0, 'deny w kroku 6 nie dochodzi w ogóle do kroku 6b');
+
+    // Pamięć ODMÓW (`MCPClient._deniedActions`) jest OSOBNYM, wygasającym mechanizmem - bez
+    // czyszczenia zablokowałaby drugie pytanie PRZED wywołaniem handlera, mierząc coś innego niż
+    // to, co ten test sprawdza (czy `deny` zapisał zgodę sesyjną).
+    h.client.clearDenials();
+
+    const r2 = await writeCall(h.client, 'a.md', 'v2', 'S1');
+    t.true(r2.success, 'harness po pierwszym wywołaniu zawsze zatwierdza (patrz makeWriteConsentHarness) - drugie pytanie samo w sobie dowodzi braku zgody');
+    t.is(h.handlerCalls, 2, 'deny NIE MIAŁ PRAWA zapisać zgody sesyjnej mimo rememberForSession:true od handlera - drugi zapis pyta ZNOWU');
+});
+
+test('(h) krok 6b: diff deny + rememberForSession:true (błędliwa atrapa) -> BRAK zgody, kolejny zapis pyta ZNOWU', async t => {
+    const { app, files } = makeFakeApp({});
+    const agent = makeEditorAgent();
+    const permissionSystem = new PermissionSystem(app.vault, {});
+    let handlerCalls = 0;
+    let diffCalls = 0;
+    const plugin = {
+        permissionSystem,
+        approvalManager: {
+            async requestApproval(): Promise<ApprovalModalResult> {
+                handlerCalls++;
+                return { result: 'approve' }; // krok 6 zawsze przepuszcza bez remember - testujemy WYŁĄCZNIE krok 6b
+            },
+        },
+        agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+    };
+    const toolRegistry = {
+        getTool: (name: string) => name === 'write'
+            ? {
+                name,
+                description: name,
+                contextExtractor: (args: { path: string }) => ({ targetPath: args.path }),
+                async execute(args: { path: string; content?: string }) {
+                    files[args.path] = args.content ?? '';
+                    return { success: true };
+                },
+            }
+            : null,
+    };
+    const client = new MCPClient(
+        app as unknown as ConstructorParameters<typeof MCPClient>[0],
+        plugin as unknown as ConstructorParameters<typeof MCPClient>[1],
+        toolRegistry as unknown as ConstructorParameters<typeof MCPClient>[2],
+        {
+            // Atrapa ZAWSZE odmawia, niosąc (błędliwie/złośliwie) rememberForSession:true.
+            diffModalFactory: () => {
+                diffCalls++;
+                return { waitForApproval: async () => 'deny', rememberForSession: true };
+            },
+        },
+    );
+
+    const r1 = await writeCall(client, 'a.md', 'v1', 'S1');
+    t.true(r1.isError, 'deny na poziomie diffa ma się skończyć porażką narzędzia');
+    t.is(handlerCalls, 1);
+    t.is(diffCalls, 1);
+
+    client.clearDenials(); // izolacja od OSOBNEGO mechanizmu pamięci odmów - mierzymy TYLKO zgodę sesyjną
+
+    const r2 = await writeCall(client, 'a.md', 'v2', 'S1');
+    t.true(r2.isError, 'atrapa diffu zawsze odmawia — to samo musi się powtórzyć, jeśli zgoda NIE została zapisana');
+    t.is(diffCalls, 2, 'krok 6b zapytał ZNOWU — brak zgody sesyjnej po (błędliwym) deny+rememberForSession:true');
+});
+
+// ─── Przez PRAWDZIWY ApprovalManager (nie atrapę) - łapie mutację/regresję w samej klasie,
+// którą testy z fałszywym `plugin.approvalManager` (harnessy wyżej) nie widzą, bo hardcodują
+// wynik z pominięciem realnej logiki `requestApproval`/`isAlwaysApproved`. ───
+
+function makeRealApprovalManagerHarness(handler: (action: ApprovalAction) => ApprovalModalResult | Promise<ApprovalModalResult>) {
+    const { app, files } = makeFakeApp({});
+    const agent = makeEditorAgent();
+    const permissionSystem = new PermissionSystem(app.vault, {});
+    const approvalManager = new ApprovalManager({}, {});
+    let handlerCalls = 0;
+    approvalManager.setApprovalHandler(async (_app: unknown, action) => {
+        handlerCalls++;
+        return handler(action as ApprovalAction);
+    });
+    const plugin = {
+        permissionSystem,
+        approvalManager,
+        agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+    };
+    const toolRegistry = {
+        getTool: (name: string) => name === 'write'
+            ? {
+                name,
+                description: name,
+                contextExtractor: (args: { path: string }) => ({ targetPath: args.path }),
+                async execute(args: { path: string; content?: string }) {
+                    files[args.path] = args.content ?? '';
+                    return { success: true };
+                },
+            }
+            : null,
+    };
+    const client = new MCPClient(
+        app as unknown as ConstructorParameters<typeof MCPClient>[0],
+        plugin as unknown as ConstructorParameters<typeof MCPClient>[1],
+        toolRegistry as unknown as ConstructorParameters<typeof MCPClient>[2],
+        // Krok 6b auto-zatwierdza CICHO (bez rememberForSession) - te testy mierzą WYŁĄCZNIE
+        // czy krok 6 (prawdziwy `ApprovalManager.requestApproval`) przepuszcza `rememberForSession`.
+        { diffModalFactory: () => ({ waitForApproval: async () => 'approve' }) },
+    );
+    return { client, files, getHandlerCalls: () => handlerCalls };
+}
+
+test('(i) prawdziwy ApprovalManager: approve+rememberForSession:true -> drugi zapis do TEJ SAMEJ ścieżki w TEJ SAMEJ sesji NIE pyta', async t => {
+    const h = makeRealApprovalManagerHarness(() => ({ result: 'approve', rememberForSession: true }));
+
+    const r1 = await writeCall(h.client, 'a.md', 'v1', 'S1');
+    t.true(r1.success);
+    t.is(h.getHandlerCalls(), 1);
+
+    const r2 = await writeCall(h.client, 'a.md', 'v2', 'S1');
+    t.true(r2.success);
+    t.is(h.getHandlerCalls(), 1, 'prawdziwy ApprovalManager musi przelać rememberForSession do MCPClient - inaczej ten test czerwienieje');
+    t.is(h.files['a.md'], 'v2');
+});
+
+test('(j) prawdziwy ApprovalManager: deny+rememberForSession:true (błędliwy handler) -> BRAK zgody, następny zapis PYTA', async t => {
+    const h = makeRealApprovalManagerHarness(() => ({ result: 'deny', rememberForSession: true }));
+
+    const r1 = await writeCall(h.client, 'a.md', 'v1', 'S1');
+    t.true(r1.isError);
+    t.is(h.getHandlerCalls(), 1);
+
+    h.client.clearDenials(); // izolacja od pamięci ODMÓW - mierzymy TYLKO zgodę sesyjną
+
+    const r2 = await writeCall(h.client, 'a.md', 'v2', 'S1');
+    t.true(r2.isError, 'handler zawsze odmawia - drugie pytanie musi zakończyć się tą samą odmową');
+    t.is(h.getHandlerCalls(), 2, 'ApprovalManager.requestApproval() dla "deny" nie ma prawa oddać rememberForSession jako sygnału zgody - drugi zapis pyta ZNOWU');
 });

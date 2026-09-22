@@ -97,6 +97,17 @@ export interface ApprovalModalResult {
  */
 export type ApprovalHandlerResult = ApprovalModalResult | string | null | undefined;
 
+/**
+ * Zawężenie `unknown` PRZED odczytem pola (reguła repo: `as` dopiero PO walidacji, nigdy na
+ * wiarę). `modalResult` bywa gołym stringiem (stary kształt handlera modala) - `typeof
+ * modalResult === 'object'` samo z siebie przepuszcza też `null` (kwirk JS), więc drugi warunek
+ * jest konieczny. Po obu warunkach TS zawęża `ApprovalHandlerResult` do `ApprovalModalResult`,
+ * więc `.rememberForSession` czyta się bez castu.
+ */
+function readRememberForSession(modalResult: ApprovalHandlerResult): boolean {
+    return typeof modalResult === 'object' && modalResult !== null && modalResult.rememberForSession === true;
+}
+
 /** Funkcja pokazująca modal zgody (wstrzykiwana z warstwy UI — core nie zna modala). */
 export type ApprovalHandler = (
     app: unknown,
@@ -207,16 +218,25 @@ export class ApprovalManager {
                 return {
                     result: 'approve',
                     reason: '',
-                    // Tylko literalny klik Zatwierdź niesie ten sygnał — `always` (branch niżej)
-                    // ma już własną, trwałą pamięć i świadomie NIE ustawia tego pola.
-                    rememberForSession: (modalResult as ApprovalModalResult | undefined)?.rememberForSession === true,
+                    rememberForSession: readRememberForSession(modalResult),
                 };
 
             case 'always':
                 // Zapisujemy regułę per approvalTarget (external = prefiksowana nazwa narzędzia).
                 this.addToAlwaysApproved(action.agentName, action.type, approvalTarget);
                 this.logApproval(action, 'always-approved');
-                return { result: 'approve', reason: '' };
+                // Checkbox zaznaczony + „Zawsze zezwalaj" niesie TĘ SAMĄ intencję co checkbox +
+                // Zatwierdź - user właśnie powiedział „nie pytaj więcej o TEN plik w tej sesji",
+                // niezależnie od tego, który guzik zamknął modal. Bez tego druga bramka (krok 6b,
+                // podgląd diffa) i tak pytałaby zaraz potem o TEN SAM zapis. Reguła „Zawsze
+                // zezwalaj" (trwała, `alwaysApproved` wyżej) i zgoda sesyjna (efemeryczna,
+                // `SessionWriteConsent` w `MCPClient`) to DWIE NIEZALEŻNE pamięci - ta druga
+                // wygasa z sesją, więc nadanie jej tutaj nie jest zbędnym duplikatem.
+                return {
+                    result: 'approve',
+                    reason: '',
+                    rememberForSession: readRememberForSession(modalResult),
+                };
 
             // Trzecia ścieżka — użytkownik zatrzymuje akcję i przekierowuje
             // agenta instrukcją. Przepuszczamy kształt {result:'redirect', instruction}.
