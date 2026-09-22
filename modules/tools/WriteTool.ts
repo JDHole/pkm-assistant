@@ -184,7 +184,7 @@ export function createWriteTool() {
                         // chwili zapisu (patrz `writeFileContent`) - nie na treści przeczytanej
                         // wcześniej. Rzut wewnątrz `applyPatch` NIGDY nie zapisuje - leci dalej
                         // jako odrzucenie `writeFileContent`, złapane przez `catch` na dole `execute`.
-                        await writeFileContent(app.vault, file as VaultFileLike, applyPatch);
+                        await writeFileContent(app.vault, file, applyPatch);
                     }
 
                     const res: WriteResult = { success: true, path, mode: 'patch', bytesWritten: new_text.length, patchApplied: true };
