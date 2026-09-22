@@ -2,9 +2,11 @@
  * Checkbox „Nie pytaj więcej w tej sesji" w `ApprovalModal` (krok 6, `MCPClient.ts`).
  *
  * Renderowany TYLKO dla akcji `vault.write` I TYLKO gdy wołacz poda `rememberAvailable:true`.
- * `rememberForSession` w wyniku jest `true` WYŁĄCZNIE po literalnym kliknięciu Zatwierdź z
- * zaznaczonym checkboxem — nigdy po Odrzuć ani po „Zawsze zezwalaj" (ta ścieżka ma już własną,
- * trwałą pamięć w `ApprovalManager.alwaysApproved`).
+ * `rememberForSession` w wyniku jest `true` gdy checkbox jest zaznaczony i user kliknął
+ * Zatwierdź ALBO „Zawsze zezwalaj" (obie ścieżki niosą tę samą intencję: „nie pytaj więcej o
+ * TEN plik w tej sesji") — nigdy po Odrzuć ani po Przekieruj. „Zawsze zezwalaj" ma NIEZALEŻNIE
+ * OD TEGO własną, trwałą pamięć w `ApprovalManager.alwaysApproved` - obie pamięci działają
+ * razem, nie zamiast siebie.
  *
  * `Modal.open()` w atrapie `obsidian` (repo harnessu) jest no-opem — testy wołają `onOpen()`
  * wprost i biorą wynik z `waitForResponse()` (jedyne publiczne API klasy, `result`/`resolvePromise`
@@ -133,7 +135,7 @@ test('zaznaczony checkbox + Odrzuć → rememberForSession NIE jest true', async
     t.not(result.rememberForSession, true);
 });
 
-test('zaznaczony checkbox + „Zawsze zezwalaj" → rememberForSession NIE jest true (ma własną trwałą pamięć)', async t => {
+test('zaznaczony checkbox + „Zawsze zezwalaj" → rememberForSession true (ta sama intencja co Zatwierdź)', async t => {
     const { modal, resultPromise } = openModal(baseAction({ rememberAvailable: true }));
     findCheckbox(modal)!.checked = true;
 
@@ -143,5 +145,16 @@ test('zaznaczony checkbox + „Zawsze zezwalaj" → rememberForSession NIE jest 
 
     const result = await resultPromise;
     t.is(result.result, 'always');
-    t.not(result.rememberForSession, true);
+    t.is(result.rememberForSession, true);
+});
+
+test('checkbox NIEzaznaczony + „Zawsze zezwalaj" → rememberForSession false', async t => {
+    const { modal, resultPromise } = openModal(baseAction({ rememberAvailable: true }));
+
+    const alwaysBtn = findButtonByClass(modal, 'mod-muted');
+    alwaysBtn!.onclick!();
+
+    const result = await resultPromise;
+    t.is(result.result, 'always');
+    t.is(result.rememberForSession, false);
 });

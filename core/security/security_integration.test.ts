@@ -865,3 +865,19 @@ test('(j) prawdziwy ApprovalManager: deny+rememberForSession:true (błędliwy ha
     t.true(r2.isError, 'handler zawsze odmawia - drugie pytanie musi zakończyć się tą samą odmową');
     t.is(h.getHandlerCalls(), 2, 'ApprovalManager.requestApproval() dla "deny" nie ma prawa oddać rememberForSession jako sygnału zgody - drugi zapis pyta ZNOWU');
 });
+
+test('(k) prawdziwy ApprovalManager: "always"+rememberForSession:true -> zgoda sesyjna działa TAK SAMO jak przy "approve"', async t => {
+    // "Zawsze zezwalaj" zapisuje TAKŻE regułę trwałą (`ApprovalManager.alwaysApproved`) - ten
+    // test mierzy WYŁĄCZNIE, że zgoda SESYJNA (RAM, `SessionWriteConsent`) też została nadana,
+    // niezależnie od tamtej. Gdyby jej nie było, drugi zapis pytałby ZNOWU mimo action=='always'.
+    const h = makeRealApprovalManagerHarness(() => ({ result: 'always', rememberForSession: true }));
+
+    const r1 = await writeCall(h.client, 'a.md', 'v1', 'S1');
+    t.true(r1.success);
+    t.is(h.getHandlerCalls(), 1);
+
+    const r2 = await writeCall(h.client, 'a.md', 'v2', 'S1');
+    t.true(r2.success);
+    t.is(h.getHandlerCalls(), 1, 'zgoda sesyjna z gałęzi "always" pomija kolejne pytanie tak samo jak z "approve"');
+    t.is(h.files['a.md'], 'v2');
+});
