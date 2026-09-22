@@ -111,7 +111,7 @@ export { registerSettings } from './SettingsSection.js';
 // FUNKCJA, nie stałe (2.2.5): teksty mają wersję PL i EN, a `setLocale()` leci z `src/main.ts`
 // PO załadowaniu modułów - stała wybrana przy imporcie zamroziłaby jeden język. Wołaj
 // `factoryWorkPrompt(kind)` w momencie użycia.
-export { factoryWorkPrompt } from './workPrompts.js';
+export { factoryWorkPrompt, factoryWorkPromptRaw } from './workPrompts.js';
 export type { WorkPromptKind } from './workPrompts.js';
 
 // ── Typy publiczne ─────────────────────────────────────────────────────

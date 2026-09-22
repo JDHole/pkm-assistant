@@ -388,8 +388,28 @@ export function fillBrainSectionPlaceholders(text: string, brainLocale: BrainLoc
  * `setLocale()` leci dopiero z `src/main.ts`.
  */
 export function factoryWorkPrompt(kind: WorkPromptKind, locale: string = getLocale(), brainLocale: BrainLocale = uiBrainLocale()): string {
-    const raw = FACTORY_WORK_PROMPTS[kind][locale === 'pl' ? 'pl' : 'en'];
+    const raw = factoryWorkPromptRaw(kind, locale);
     return kind === 'save_session' ? fillBrainSectionPlaceholders(raw, brainLocale) : raw;
+}
+
+/**
+ * SUROWY tekst fabryczny (BEZ podstawienia placeholderów `{{sec_*}}`/`{{na_teraz_*}}` dla
+ * `save_session` - `archive`/`summary` ich nie mają, więc dla nich ten tekst jest identyczny z
+ * `factoryWorkPrompt(kind, locale)`) w podanym języku PROZY.
+ *
+ * Jedyny wołacz: Ustawienia → Prompt, guzik "Wstaw fabryczny" (`modules/shell/prompt_settings.ts`).
+ * Ten guzik pisze do GLOBALNEGO nadpisania (`promptDefaults.save_session_prompt`) - pola bez
+ * pojęcia, jaki `brainLocale` będzie miał KAŻDY agent, który je odziedziczy (per-agent > global >
+ * factory, `resolveWorkPrompt`). `factoryWorkPrompt('save_session')` (bez tej funkcji) podstawia
+ * WCZEŚNIE, nagłówkami `uiBrainLocale()` z CHWILI KLIKNIĘCIA - zapisany override zamroziłby ten
+ * jeden język na stałe, a agent z brain.md w drugim języku dostawałby cudze nagłówki aż do
+ * ręcznej naprawy. `resolveWorkPrompt` + `fillBrainSectionPlaceholders(text, brainLocale)`
+ * (`SaveSessionWorkflow.ts`) wypełniają placeholdery w miejscu UŻYCIA, nagłówkami WŁAŚCIWEGO
+ * agenta - override MUSI więc zostać surowy, tak samo jak fabryczny tekst byłby surowy, gdyby
+ * user nigdy override'u nie tknął.
+ */
+export function factoryWorkPromptRaw(kind: WorkPromptKind, locale: string = getLocale()): string {
+    return FACTORY_WORK_PROMPTS[kind][locale === 'pl' ? 'pl' : 'en'];
 }
 
 // DEFAULT_BRIEF_PROMPT WYCIĘTY stąd razem ze slotem w Settings→Prompt (modules/shell/

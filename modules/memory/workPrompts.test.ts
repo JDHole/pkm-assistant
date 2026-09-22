@@ -15,7 +15,7 @@
 import test from 'ava';
 import * as workPrompts from './workPrompts.js';
 import * as memoryBarrel from './index.js';
-import { factoryWorkPrompt } from './workPrompts.js';
+import { factoryWorkPrompt, factoryWorkPromptRaw, fillBrainSectionPlaceholders } from './workPrompts.js';
 import type { WorkPromptKind } from './workPrompts.js';
 import { resolveWorkPrompt } from '../../core/index.js';
 import { setLocale } from '../../core/i18n/index.js';
@@ -127,6 +127,41 @@ test('strażnik: żaden fabryczny prompt save_session nie niesie już nagłówka
     const enProzaPlBrain = factoryWorkPrompt('save_session', 'en', 'pl');
     t.false(enProzaPlBrain.includes('## Current'), 'EN proza nie powinna nieść EN nagłówka na sztywno, gdy brainLocale to PL');
     t.true(enProzaPlBrain.includes('## Bieżące'));
+});
+
+// ── `factoryWorkPromptRaw` - guzik "Wstaw fabryczny" w Ustawieniach → Prompt (recenzja
+// niezależna, punkt 8) pisze do GLOBALNEGO nadpisania dzielonego przez WSZYSTKICH agentów, więc
+// MUSI wstawiać placeholdery surowe - podstawienie nagłówkami WŁAŚCIWEGO agenta należy do
+// miejsca użycia (SaveSessionWorkflow, resolveWorkPrompt + fillBrainSectionPlaceholders), nie do
+// chwili kliknięcia guzika. `factoryWorkPrompt(kind, locale)` (bez `brainLocale`) podstawiał
+// wcześnie, nagłówkami `uiBrainLocale()` z chwili kliknięcia - override zamrażał ten jeden
+// język na stałe, agent z brain.md w drugim języku dostawał cudze nagłówki.
+
+test('factoryWorkPromptRaw(save_session) niesie SUROWE placeholdery {{sec_*}}/{{na_teraz_*}}, w obu językach prozy', t => {
+    const expectedTokens = ['sec_current', 'sec_user', 'sec_preferences', 'sec_workflow', 'sec_projects', 'na_teraz_user', 'na_teraz_environment'].sort();
+    for (const locale of ['pl', 'en']) {
+        const raw = factoryWorkPromptRaw('save_session', locale);
+        t.deepEqual(placeholders(raw), expectedTokens, `save_session/${locale}: brak surowych placeholderów - "Wstaw fabryczny" zamroziłby nagłówki jednego agenta na wszystkich`);
+    }
+});
+
+test('factoryWorkPromptRaw(save_session) + fillBrainSectionPlaceholders == factoryWorkPrompt(save_session, locale, brainLocale), dla każdej kombinacji', t => {
+    for (const locale of ['pl', 'en']) {
+        for (const brainLocale of ['pl', 'en'] as const) {
+            const raw = factoryWorkPromptRaw('save_session', locale);
+            const filledLater = fillBrainSectionPlaceholders(raw, brainLocale);
+            const substitutedEarly = factoryWorkPrompt('save_session', locale, brainLocale);
+            t.is(filledLater, substitutedEarly, `locale=${locale}/brainLocale=${brainLocale}: podstawienie surowego tekstu W MIEJSCU UŻYCIA musi dać dokładnie to, co dawał wcześniejszy factoryWorkPrompt`);
+        }
+    }
+});
+
+test('factoryWorkPromptRaw(archive|summary) jest identyczny z factoryWorkPrompt - brak placeholderów sekcji do podstawienia', t => {
+    for (const kind of ['archive', 'summary'] as WorkPromptKind[]) {
+        for (const locale of ['pl', 'en']) {
+            t.is(factoryWorkPromptRaw(kind, locale), factoryWorkPrompt(kind, locale), `${kind}/${locale}: archive/summary nie mają {{sec_*}}, więc raw i podstawiony mają być tym samym tekstem`);
+        }
+    }
 });
 
 test('kontrakt JSON jest ten sam w obu językach', t => {

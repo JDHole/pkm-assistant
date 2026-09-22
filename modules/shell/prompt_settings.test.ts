@@ -50,3 +50,26 @@ test('WORK_PROMPTS ma pięć żywych slotów (compression/save_session/archive/s
 test('prompt_settings.ts nie importuje już DEFAULT_BRIEF_PROMPT z modules/memory', t => {
     t.false(/DEFAULT_BRIEF_PROMPT/.test(source));
 });
+
+// Guzik "Wstaw fabryczny" dla save_session_prompt pisze do GLOBALNEGO nadpisania (dzielonego
+// przez wszystkich agentów) - MUSI wstawiać tekst SUROWY (`factoryWorkPromptRaw`, placeholdery
+// {{sec_*}}/{{na_teraz_*}} nietknięte), nie wcześnie podstawiony `factoryWorkPrompt` nagłówkami
+// języka UI z CHWILI KLIKNIĘCIA. Podstawienie nagłówkami WŁAŚCIWEGO agenta należy do miejsca
+// użycia (SaveSessionWorkflow) - inaczej agent z brain.md w drugim języku dostawałby cudze
+// nagłówki zamrożone na stałe w globalnym override. Zachowanie samej podmiany jest
+// przetestowane behawioralnie w `modules/memory/workPrompts.test.ts` (`factoryWorkPromptRaw`);
+// tu pilnujemy WYŁĄCZNIE okablowania - że guzik faktycznie woła TĘ funkcję (recenzja
+// niezależna, punkt 8).
+test('WORK_PROMPTS: save_session_prompt wstawia RAW (factoryWorkPromptRaw), nie wcześnie podstawiony factoryWorkPrompt', t => {
+    const arrayMatch = /const WORK_PROMPTS = \[([\s\S]*?)\];/.exec(source);
+    t.truthy(arrayMatch, 'WORK_PROMPTS array not found in prompt_settings.ts');
+    const body = arrayMatch![1];
+    const lineMatch = /\{\s*key:\s*'save_session_prompt'[\s\S]*?\}/.exec(body);
+    t.truthy(lineMatch, 'wpis save_session_prompt nie znaleziony w WORK_PROMPTS');
+    const entry = lineMatch![0];
+
+    t.regex(entry, /factoryWorkPromptRaw\('save_session'\)/, 'save_session_prompt ma wołać factoryWorkPromptRaw, nie wcześnie podstawiony factoryWorkPrompt');
+    t.notRegex(entry, /factoryWorkPrompt\('save_session'\)/, 'stare wołanie factoryWorkPrompt tu zamrażało nagłówki JEDNEGO agenta w GLOBALNYM nadpisaniu');
+
+    t.regex(source, /import\s*\{[^}]*factoryWorkPromptRaw[^}]*\}\s*from\s*'\.\.\/memory\/index\.js'/, 'factoryWorkPromptRaw musi wejść przez barrel modules/memory/index.js (złota zasada modułów)');
+});

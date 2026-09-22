@@ -93,6 +93,7 @@ Import z zewnątrz tylko przez `modules/memory/index.js`.
 | `RetrievalEngine` | Silnik narzędzia `search` - patrz sekcja "Odczyt pamięci" niżej. |
 | `CostLog`, `EmbeddingHelper` | Koszt operacji memory/sub-agent + helper wektoryzacji. |
 | `factoryWorkPrompt(kind, locale?, brainLocale?)` + typ `WorkPromptKind` | Fabryczne prompty robocze (`workPrompts.ts`), owned przez memory. FUNKCJA, nie stałe - patrz gotcha "prompty robocze idą za językiem interfejsu". `locale` wybiera PROZĘ (PL/EN), `brainLocale` (domyślnie `uiBrainLocale()`) wybiera, jakimi nagłówkami wypełnić placeholdery `{{sec_*}}`/`{{na_teraz_*}}` w tekście `save_session` - dwa NIEZALEŻNE wymiary. |
+| `factoryWorkPromptRaw(kind, locale?)` | Ten sam tekst fabryczny, BEZ podstawienia placeholderów `{{sec_*}}`/`{{na_teraz_*}}` (dla `archive`/`summary` identyczny z `factoryWorkPrompt`, bo ich nie mają). Jedyny wołacz: Ustawienia → Prompt, guzik „Wstaw fabryczny" (`modules/shell/prompt_settings.ts`) - pisze do GLOBALNEGO nadpisania dzielonego przez wszystkich agentów, więc MUSI zostawić placeholdery surowe; podstawienie nagłówkami WŁAŚCIWEGO agenta należy do miejsca użycia (`resolveWorkPrompt` + `fillBrainSectionPlaceholders`), nie do chwili kliknięcia guzika z językiem UI z tamtej chwili (recenzja niezależna, 2026-09-23). |
 | `registerSettings` | Rejestracja sekcji "Pamięć i kontekst" w Settings. |
 
 Sporo pomocniczych symboli (helpery listujące, `StateManager`, większość `BrainIndex`,
