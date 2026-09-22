@@ -10,6 +10,9 @@ import { log } from '../../../core/utils/Logger.js';
 import type { Agent } from '../../agents/index.js';
 import type { CrystalNoticeOptions } from '../../../core/index.js';
 import type { ResolverAgentLike, ResolverPluginLike } from '../../models/index.js';
+// Zgoda sesyjna (`sessionWriteConsent`, pole instancji `MCPClient`) - patrz
+// `applyPostArchiveAction`, druga droga zakończenia sesji obok `handleNewSession` (chat_session.ts).
+import type { MCPClient } from '../../tools/index.js';
 
 type ErrLike = { message?: string };
 
@@ -73,6 +76,7 @@ interface SaveSessionPlugin {
     settings?: { pkmAssistant?: PkmAssistantSettings };
     env?: NonNullable<ResolverPluginLike>['env'];
     showCrystalNotice?(message: string, options?: CrystalNoticeOptions): unknown;
+    mcpClient?: MCPClient;
 }
 
 interface SaveSessionCommandContext {
@@ -231,7 +235,7 @@ export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandCon
         return;
     }
 
-    await applyPostArchiveAction(view, agentMemory, result);
+    await applyPostArchiveAction(view, plugin, agentMemory, result, path);
     // `applyDecision` (modules/memory) nie przerywa się na padzie
     // jednej notatki — reszta pętli (rebuildBrainIndex, archiveActiveSession) dochodzi do końca,
     // a padnięte pozycje wracają w `result.noteFailures`. Bezwarunkowy Notice „gotowe" zamieniałby
@@ -334,7 +338,29 @@ function collectSessionArtifacts(_plugin: SaveSessionPlugin, _messages: SessionM
     return [];
 }
 
-async function applyPostArchiveAction(view: SaveSessionView, agentMemory: AgentMemoryLike, result: SaveSessionOutcome): Promise<void> {
+// `export` WYŁĄCZNIE dla testu w tym samym katalogu (`save_session.archiveNewConsent.test.ts`,
+// import względny - nie przez barrel modułu) - reszta pliku importuje ją bez `export`owania,
+// bo AVA teraz umie zaimportować cały ten plik (atrapa `obsidian` z harnessu, 2026-09-11).
+export async function applyPostArchiveAction(
+    view: SaveSessionView,
+    plugin: SaveSessionPlugin,
+    agentMemory: AgentMemoryLike,
+    result: SaveSessionOutcome,
+    closingSessionPath: string | null | undefined,
+): Promise<void> {
+    // Zgoda sesyjna „Nie pytaj więcej w tej sesji o zapisy do tego pliku"
+    // (`core/security/SessionWriteConsent.ts`) jest kluczowana `origin.sessionPath` - WSZYSTKIE
+    // TRZY warianty tej funkcji (`archive`/`archive_new`/`archive_close`) kończą TĘ sesję, więc
+    // gasimy jej zgodę TERAZ, PRZED jakąkolwiek zmianą tożsamości niżej. `closingSessionPath` jest
+    // złapany przez wołacza PRZED `workflow.applyDecision` (a więc przed `archiveActiveSession`,
+    // które dla akcji plain `archive` samo zeruje `agentMemory.activeSessionPath`) - odczyt TUTAJ,
+    // z `agentMemory.activeSessionPath`, byłby już czasem `null`. Druga droga zakończenia sesji
+    // obok `handleNewSession` (`modules/chat/chat/chat_session.ts`) - ten sam powód (rozdzielczość
+    // MINUTOWA nazwy pliku sesji, patrz `modules/tools/CLAUDE.md`, gotcha „Zgoda na zapis").
+    if (closingSessionPath) {
+        plugin.mcpClient?.sessionWriteConsent.clearSession(closingSessionPath);
+    }
+
     const action = result.action || 'archive';
     const activeTab = view.chatTabs?.find((tab: ChatTabLike) => tab.isActive);
 
