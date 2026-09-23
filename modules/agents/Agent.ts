@@ -98,7 +98,6 @@ export interface AgentConfig {
     sub_agents?: Array<string | AgentSubAgentAssignment>;
     models?: Record<string, unknown>;
     preferred_servers?: string[];
-    preferred_tools?: string[];
     mcp_servers?: unknown;
     isBuiltIn?: boolean;
     filePath?: string | null;
@@ -184,7 +183,6 @@ export class Agent implements ToolVisibilityAgent {
     declare _subAgents: AgentSubAgentAssignment[];
     declare models: Record<string, unknown>;
     declare preferredServers: string[];
-    declare preferredTools: string[];
     declare mcp_servers: string[];
     declare effective_mcp_servers: string[];
     declare isBuiltIn: boolean;
@@ -305,7 +303,11 @@ export class Agent implements ToolVisibilityAgent {
         // default_mode (Gadaj/Rób) nie jest już parsowane - tryby pracy usunięte.
         // Stare YAML-e z polem default_mode nie wybuchają, pole jest po prostu ignorowane.
         this.preferredServers = config.preferred_servers || []; // MCP servers to auto-connect on activation
-        this.preferredTools = config.preferred_tools || []; // Standalone MCP tools to auto-connect
+        // `preferred_tools` USUNIĘTE (pole-widmo, klaster narzędzi C1). `getActiveToolDefinitions`
+        // przyjmuje dziś tylko filtr serwerów - drugi argument (lista narzędzi) nigdy nie istniał
+        // po stronie ServerManager, więc whitelista i tak była no-opem (mcpActiveTools jest już
+        // podzbiorem systemTools). Stare YAML-e z `preferred_tools:` ładują się bez zmian -
+        // pole jest po prostu ignorowane, nie zapisywane z powrotem.
         // Server-level isolation: mcp_servers[] = whitelist of MCP servers visible to this agent.
         //   - undefined / missing field (nie-tablica) → security-first default
         //     ['vault','memory','core'].
@@ -551,7 +553,6 @@ export class Agent implements ToolVisibilityAgent {
         }
         if (Object.keys(this.models).length > 0) data.models = this.models;
         if (this.preferredServers?.length > 0) data.preferred_servers = this.preferredServers;
-        if (this.preferredTools?.length > 0) data.preferred_tools = this.preferredTools;
         if (Array.isArray(this.mcp_servers)) {
             data.mcp_servers = [...this.mcp_servers];
         }
@@ -600,7 +601,7 @@ export class Agent implements ToolVisibilityAgent {
             // Uczestnictwo w komunikatorze (default true).
             'komunikator_visible',
             'disabled_tools', 'sub_agents', 'artifact_types',
-            'models', 'preferred_servers', 'preferred_tools', 'prompt_overrides', 'agent_rules', 'created_at',
+            'models', 'preferred_servers', 'prompt_overrides', 'agent_rules', 'created_at',
             'mcp_servers',
             // Język odpowiedzi + domyślna autonomia per agent
             'language', 'default_autonomy',
@@ -632,8 +633,6 @@ export class Agent implements ToolVisibilityAgent {
                     this.models = Agent._normalizeModelOverrides(value as AgentConfig['models']);
                 } else if (key === 'preferred_servers') {
                     this.preferredServers = (value as AgentConfig['preferred_servers']) || [];
-                } else if (key === 'preferred_tools') {
-                    this.preferredTools = (value as AgentConfig['preferred_tools']) || [];
                 } else if (key === 'mcp_servers') {
                     // Whitelist of MCP servers.
                     // effective_mcp_servers = lustro mcp_servers (roleDefinition skasowane).

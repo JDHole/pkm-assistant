@@ -44,7 +44,6 @@ export interface ProfileFormData {
     artifact_types: string[];
     disabled_tools: string[];
     preferred_servers: string[];
-    preferred_tools: string[];
     mcp_servers: string[];
     sub_agents: AgentSubAgentAssignment[];
     sub_agent_enabled: boolean;
