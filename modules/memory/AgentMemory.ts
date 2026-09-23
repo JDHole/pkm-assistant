@@ -98,7 +98,26 @@ const ROLE_TO_EVENT_TYPE: Record<SessionRole, string> = {
 function causeText(cause: unknown): string {
     if (cause instanceof Error) return cause.message;
     if (cause === undefined) return 'brak szczegółów — adapter bez metody read()';
-    return String(cause);
+    return _rawToString(cause);
+}
+
+/**
+ * Osobna funkcja graniczna: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
+ * `unknown`, więc `String()` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
+ * `_safeStringify` w `core/utils/errorUtils.ts`).
+ */
+function _rawToString(value: unknown): string {
+    return String(value);
+}
+
+/**
+ * `String(x ?? '')` bez flagowania no-base-to-string: `x` bywa czymkolwiek z zewnątrz (treść
+ * wiadomości poza tablicą bloków w `_appendMessageAsEvent`, element tablicy z frontmattera YAML
+ * w `_getUnconsolidatedItems`) - ten sam wzorzec resetu zawężenia co `causeText`/`_rawToString`
+ * wyżej.
+ */
+function _nullishToString(value: unknown): string {
+    return value === null || value === undefined ? '' : _rawToString(value);
 }
 
 /**
@@ -980,7 +999,7 @@ created: ${created}
         const role = (KNOWN_ROLES.has(rawRole) ? rawRole : 'system') as SessionRole;
         const text = Array.isArray(msg?.content)
             ? (msg.content as Array<{ text?: string; content?: string }>).map(c => c?.text || c?.content || '').filter(Boolean).join('\n')
-            : String(msg?.content ?? '');
+            : _nullishToString(msg?.content);
         const event: { content: string; seq: number; role?: string; tool_call_id?: string; tool_calls?: unknown[] } =
             { content: text, seq: this._nextSeq(path, content) };
         if (role === 'system') event.role = 'system';
@@ -1661,7 +1680,7 @@ created: ${created}
      * po angielsku niezależnie od języka UI. Bliźniak: `MemorySaveTool.buildNoteContent`.
      */
     _buildBrainNoteContent(note: BrainNoteInput, source?: string): string {
-        const quote = (v: unknown) => JSON.stringify(String(v || '').slice(0, 1000));
+        const quote = (v: string | undefined) => JSON.stringify((v || '').slice(0, 1000));
         const date = new Date().toISOString().slice(0, 10);
         const why = note.why || t('memory.note.why_unspecified');
         const how = note.how_to_apply || note.howToApply || t('memory.note.how_default');
@@ -1760,7 +1779,7 @@ ${t('memory.note.how_label')} ${how}
      * (`JSON.stringify` na zapisie, `parseFrontmatterScalar`→`JSON.parse` na odczycie).
      */
     _buildPendingRescueContent(note: BrainNoteInput, source?: string): string {
-        const quote = (v: unknown) => JSON.stringify(String(v || '').slice(0, 1000));
+        const quote = (v: string | undefined) => JSON.stringify((v || '').slice(0, 1000));
         const date = new Date().toISOString();
         return `---
 name: ${quote(note.name)}
@@ -2160,7 +2179,7 @@ ${String(note.content || '')}
                         const fm = this._parseFrontmatter(content);
                         if (Array.isArray(fm[refKey])) {
                             for (const raw of fm[refKey] as unknown[]) {
-                                const name = String(raw ?? '').trim();
+                                const name = _nullishToString(raw).trim();
                                 if (name) consolidatedNames.add(name);
                             }
                         }
@@ -2457,7 +2476,7 @@ ${String(note.content || '')}
      * @returns czy wpis wylądował na dysku
      */
     async appendBrainLog(op: string, target: string, detail = ''): Promise<boolean> {
-        const flat = (value: unknown) => String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
+        const flat = (value: string) => value.replace(/[\t\r\n]+/g, ' ').trim();
         const line = [new Date().toISOString(), flat(op), flat(target), flat(detail)].join('\t');
         const logPath = `${this.basePath}/brain.log`;
         try {

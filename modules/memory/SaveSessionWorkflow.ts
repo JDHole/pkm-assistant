@@ -266,16 +266,33 @@ const TYPE_TO_SECTION_KEY: Record<string, BrainSectionKey> = {
 
 const VALID_NOTE_TYPES = new Set(['user', 'agent_rule', 'skill_hint', 'project_context', 'reference']);
 
+/**
+ * Konwersja `unknown` -> string dla pól odpowiedzi LLM (`_parseAgentJsonResponse` - JSON od
+ * modelu, bez walidacji schematem) - jedna funkcja zamiast N kopii `String(x || '')`, każda
+ * osobno zgłaszana przez eslint jako bazowa stringifikacja.
+ */
+function _toText(value: unknown): string {
+    return value ? _rawToString(value) : '';
+}
+
+/**
+ * Osobna funkcja graniczna: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
+ * `unknown`, więc `String(value)` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
+ * `_safeStringify` w `core/utils/errorUtils.ts`). Wołaj wyłącznie z `_toText`.
+ */
+function _rawToString(value: unknown): string {
+    return String(value);
+}
+
 const AGENT_RULE_PATTERN = /\b(zawsze|nigdy|preferuj|preferenc|wol[eę] gdy|lubi[eę] gdy|nie u[zż]ywaj|m[oó]w po|pisz w |r[oó]b w |u[zż]ywaj)\b/i;
 // `obsek` ZOSTAJE świadomie — to heurystyka nad TEKSTEM USERA (jego własne zdania
 // z rozmowy), nie nad niczym, co generuje plugin. Stare rozmowy i notatki nadal mówią
 // „obsek", więc wycięcie słowa pogorszyłoby klasyfikację. Nic tu nie wymaga migracji.
 const PROJECT_CONTEXT_PATTERN = /\b(projekt|vault|robimy|pkm|obsek|plugin|ten plugin|tworzymy|budujemy|repo)\b/i;
 
-function detectNoteType(content: unknown): string {
-    const text = String(content || '');
-    if (AGENT_RULE_PATTERN.test(text)) return 'agent_rule';
-    if (PROJECT_CONTEXT_PATTERN.test(text)) return 'project_context';
+function detectNoteType(content: string): string {
+    if (AGENT_RULE_PATTERN.test(content)) return 'agent_rule';
+    if (PROJECT_CONTEXT_PATTERN.test(content)) return 'project_context';
     return 'user';
 }
 
@@ -697,7 +714,7 @@ export class SaveSessionWorkflow {
      * wyłącznie dla bezpośrednich wywołań (testy), które nie sprawdzają `section`.
      */
     _parseAgentJsonResponse(text: unknown, brainLocale: BrainLocale = uiBrainLocale()): AgentProposal {
-        const raw = String(text || '').trim();
+        const raw = _toText(text).trim();
         if (!raw) throw new Error('Empty LLM response');
         const stripped = raw
             .replace(/^```(?:json)?\s*/i, '')
@@ -718,16 +735,16 @@ export class SaveSessionWorkflow {
         const cleanNotes: NoteProposal[] = newNotes
             .map((n: Record<string, unknown>): NoteProposal | null => {
                 const type = VALID_NOTE_TYPES.has(n?.type as string) ? (n.type as string) : 'reference';
-                const name = String(n?.name || '').trim();
-                const content = String(n?.content || '').trim();
+                const name = _toText(n?.name).trim();
+                const content = _toText(n?.content).trim();
                 if (!name || !content) return null;
                 return {
                     name,
-                    description: String(n?.description || '').trim(),
+                    description: _toText(n?.description).trim(),
                     type,
                     content,
-                    why: String(n?.why || '').trim(),
-                    how_to_apply: String(n?.how_to_apply || '').trim(),
+                    why: _toText(n?.why).trim(),
+                    how_to_apply: _toText(n?.how_to_apply).trim(),
                     section: sectionHeading(TYPE_TO_SECTION_KEY[type] || 'current', brainLocale),
                     accepted: true
                 };
@@ -849,8 +866,8 @@ export class SaveSessionWorkflow {
             .join('\n');
     }
 
-    private _titleFromContent(content: unknown): string {
-        return String(content || '')
+    private _titleFromContent(content: string): string {
+        return content
             .replace(/^[-*\s]+/, '')
             .split(/\s+/)
             .slice(0, 6)

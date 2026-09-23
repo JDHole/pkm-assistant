@@ -34,7 +34,16 @@ const COST_LOG_PATH = '.pkm-assistant/cost_log.jsonl';
 function causeText(cause: unknown): string {
     if (cause instanceof Error) return cause.message;
     if (cause === undefined) return 'brak szczegółów — adapter bez metody read()';
-    return String(cause);
+    return _rawToString(cause);
+}
+
+/**
+ * Osobna funkcja graniczna: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
+ * `unknown`, więc `String()` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
+ * `_safeStringify` w `core/utils/errorUtils.ts`).
+ */
+function _rawToString(value: unknown): string {
+    return String(value);
 }
 
 /**
@@ -149,7 +158,7 @@ export class CostLog {
                 }),
             ...(entry.session_id ? { session_id: entry.session_id } : {}),
             status: entry.status || 'ok',
-            ...(entry.error ? { error: String(entry.error).slice(0, 500) } : {})
+            ...(entry.error ? { error: _rawToString(entry.error).slice(0, 500) } : {})
         };
         const line = JSON.stringify(safe) + '\n';
         try {

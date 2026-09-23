@@ -639,8 +639,8 @@ ${note.content || ''}
 `;
 }
 
-function escapeFrontmatter(value: unknown): string {
-    return String(value || '').replace(/\r?\n/g, ' ').replace(/:/g, ' -');
+function escapeFrontmatter(value: string): string {
+    return value.replace(/\r?\n/g, ' ').replace(/:/g, ' -');
 }
 
 // `keptSections` (tytuły z `plan.keepInBrain`, body z
