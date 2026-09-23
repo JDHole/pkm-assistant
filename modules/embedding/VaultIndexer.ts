@@ -310,6 +310,14 @@ export class VaultIndexer {
     declare private _hooksRegistered: boolean;
     declare private _debounceTimer: NodeSafeTimer | null;
     declare private _persistTimer: NodeSafeTimer | null;
+    /**
+     * `dispose()` już przeszło (G6/round 2) - żaden `_scheduleFlush`/`_schedulePersist`/
+     * `_scheduleScanRetry` nie ma prawa uzbroić NOWEGO timera od tej chwili. Ogniwo persistu już
+     * W TOKU kończy się normalnie (nie przerywamy zapisu na dysku - to bezpieczne), ale flush/
+     * insert, który dokańcza się PO `dispose()` (np. embedding w locie przy unloadzie pluginu),
+     * nie może uzbroić kolejnego zapisu, bo plugin mógł już zniknąć spod adaptera vaulta.
+     */
+    declare private _disposed: boolean;
     /** Liczba KOLEJNYCH nieudanych flushów - steruje backoffem ponowienia. */
     declare private _flushFailures: number;
     /** Kiedy (wg `now()`) ma wystrzelić uzbrojone ponowienie po padzie - `null` = brak. */
@@ -399,6 +407,7 @@ export class VaultIndexer {
         this._hooksRegistered = false;
         this._debounceTimer = null;
         this._persistTimer = null;
+        this._disposed = false;
         this._flushFailures = 0;
         this._flushRetryAt = null;
         this._flushDelayMs = this.debounceMs;
@@ -514,6 +523,7 @@ export class VaultIndexer {
 
     /** Automatyczne ponowienie całego skanu po padzie. Odwoływane przez `dispose()`. */
     _scheduleScanRetry(): void {
+        if (this._disposed) return; // G6: unload już poszedł - nic nowego nie startuje
         if (this._scanRetryTimer) _nodeSafeClearTimeout(this._scanRetryTimer);
         this._scanFailures++;
         const delay = Math.min(this.scanRetryMs * Math.pow(2, this._scanFailures - 1), MAX_SCAN_RETRY_MS);
@@ -611,8 +621,14 @@ export class VaultIndexer {
         return this.getStatus();
     }
 
-    /** Wyczyść timery (wołane automatycznie przy unload przez plugin.register). */
+    /**
+     * Wyczyść timery (wołane automatycznie przy unload przez plugin.register). G6: uzbraja też
+     * `_disposed` - zapis W TOKU (jeśli jakiś trwa) kończy się normalnie, ale żaden `_scheduleFlush`/
+     * `_schedulePersist`/`_scheduleScanRetry` wywołany PO tej chwili (np. przez flush, który
+     * dokańcza embedding już PO unloadzie) nie uzbroi nowego timera.
+     */
     dispose(): void {
+        this._disposed = true;
         if (this._debounceTimer) { _nodeSafeClearTimeout(this._debounceTimer); this._debounceTimer = null; }
         if (this._persistTimer) { _nodeSafeClearTimeout(this._persistTimer); this._persistTimer = null; }
         if (this._scanRetryTimer) { _nodeSafeClearTimeout(this._scanRetryTimer); this._scanRetryTimer = null; }
@@ -680,6 +696,7 @@ export class VaultIndexer {
      * dokładnie to, przed czym backoff ma chronić.
      */
     _scheduleFlush(delayMs?: number): void {
+        if (this._disposed) return; // G6: unload już poszedł - nic nowego nie startuje
         let delay = delayMs ?? this.debounceMs;
         if (delayMs === undefined && this._flushRetryAt !== null) {
             const left = this._flushRetryAt - this.now();
@@ -806,14 +823,32 @@ export class VaultIndexer {
                     if (vectors[j] !== EMBED_SKIPPED) {
                         this._mtimes.set(batch[j].path, batch[j].mtime);
                         this._metaDirty = true;
+                        this._bumpGen();
                     }
                 }
             }
             await this._yield();
         }
 
+        // G3: `files.length > 0` a `_mtimes` jest PUSTA znaczy, że dosłownie KAŻDY plik skończył
+        // jako `EMBED_SKIPPED` (trwała awaria API na całej porcji, np. zły klucz/model po stronie
+        // usera) - to NIE jest "pusty indeks", to PADŁY skan bez ani jednego wyniku. Sprawdzane
+        // NIEZALEŻNIE od tego, czy `this.db` już powstał: dostawca, który DEKLARUJE `dims` z góry
+        // (`getDims()` zwraca stałą, np. 1024 dla OpenAI), zakłada pustą, ale prawidłową bazę
+        // WCZEŚNIEJ w pętli - `!this.db` sam w sobie nie jest tu wiarygodnym sygnałem "nic nie
+        // wyszło". (Odróżnij od legalnie pustego vaulta - `files.length === 0` - i od vaulta samych
+        // pustych notatek - te DOSTAJĄ mtime przez `_insertOne`'s gałąź pustego pliku, więc
+        // `_mtimes.size` tam nie jest zerowe.) Rzucamy zamiast cicho commitować pusty indeks:
+        // wołacz (`rebuild()`) ma już gotowy `catch`, który przywraca CAŁY poprzedni stan
+        // (db/mtimes/dims/rows/segments/pending) i NIGDY nie dochodzi do sprzątania starych
+        // segmentów - żywy indeks nie może zniknąć tylko dlatego, że dostawca akurat odrzucił
+        // WSZYSTKO. `initialize()` (pierwszy bieg, bez stanu do przywrócenia) traktuje to jak
+        // każdy inny pad skanu: status='error' + automatyczne ponowienie.
+        if (files.length > 0 && this._mtimes.size === 0) {
+            throw new Error(`pełny skan nie zaindeksował ani jednego pliku (${files.length} plików pominiętych trwale)`);
+        }
         if (!this.db) {
-            // pusty vault albo zero embeddingów — utwórz pusty indeks z deklarowanym/domyślnym dims
+            // pusty vault albo same puste notatki — utwórz pusty indeks z deklarowanym/domyślnym dims
             this.dims = dims || DEFAULT_VECTOR_DIM;
             this.db = await createEmbeddingDb(this._schema(this.dims));
         }
@@ -1301,6 +1336,12 @@ export class VaultIndexer {
         try {
             await this.vault.adapter.write(this._metaPath(), JSON.stringify(meta));
         } catch (e) {
+            // G4 (round 2): pad TEGO zapisu może być połowiczny (dysk pełny w połowie stringa) -
+            // na dysku może leżeć ucięty/nieprawidłowy JSON zamiast tekstu v1. Przywracamy v1
+            // best-effort (jak przy padzie weryfikacji niżej), żeby migracja mogła się powtórzyć
+            // od zera przy następnym starcie zamiast zastać śmieci obok nietkniętego pliku v1.
+            try { await this.vault.adapter.write(this._metaPath(), metaV1Text); }
+            catch (e2) { this.logger.warn('VaultIndexer', `przywrócenie meta v1 po nieudanym zapisie v2 padło: ${msg(e2)}`); }
             this._migrationFailed('meta_write', msg(e));
             return false;
         }
@@ -1459,11 +1500,19 @@ export class VaultIndexer {
      *
      * Migawka `_pending` (F1.3) - te same referencje `Float32Array` co w mapie live, nie kopie -
      * jest wzięta PRZED `await writeBinary`, więc flush w oknie zapisu może dołożyć NOWSZY
-     * wektor pod tą samą ścieżką bez obawy o wyścig: po sukcesie usuwamy z `_pending` TYLKO
-     * wpisy, których referencja wciąż wskazuje na wartość z migawki (`get(path) === vec`) - jeśli
-     * ktoś nadpisał ją nowszą w trakcie `await`, ten nowszy wpis ZOSTAJE i pójdzie w NASTĘPNYM
-     * persiście. `_rows` dostaje nowy wiersz TYLKO dla ścieżek, które nadal istnieją w `_mtimes`
-     * (nie zostały usunięte w tym samym oknie) - inaczej wiersz byłby martwy od chwili zapisu.
+     * wektor pod tą samą ścieżką bez obawy o wyścig.
+     *
+     * G1 (round 2): `_rows` dostaje wiersz TYLKO dla ścieżek, których referencja w `_pending`
+     * WCIĄŻ jest DOKŁADNIE TĄ z migawki (`get(path) === vec`) - to jest jedyny wiarygodny sygnał,
+     * że NIC nie tknęło tej ścieżki w oknie `await`. Samo `_mtimes.has(path)` (stara wersja) NIE
+     * WYSTARCZA: notatka wyczyszczona w oknie (`modify` z pustą treścią) zostawia mtime (nowy, ze
+     * stempla pustego pliku), ale kasuje wpis z `_pending`/`_rows` - `_mtimes.has()` dalej zwraca
+     * `true`, więc stary kod dopisywał ŚWIEŻY numer wiersza wskazujący na STARY, martwy wektor,
+     * który wracał w wynikach semantycznych na zawsze. Referencja z `_pending` odróżnia to
+     * poprawnie: usunięcie/wyczyszczenie kasuje wpis (`get(path)` daje `undefined ≠ vec`), upsert
+     * z nowszym wektorem podmienia referencję (`get(path)` daje NOWY obiekt `≠ vec`) - w OBU
+     * przypadkach wiersz zostaje martwy od razu (nie trafia do `_rows`) zamiast dostać zapis, na
+     * który nie zasługuje; jeśli w `_pending` jest nowszy wektor, dowiezie go NASTĘPNY persist.
      */
     private async _persistNewSegment(): Promise<boolean> {
         const snap = [...this._pending.entries()];
@@ -1478,8 +1527,10 @@ export class VaultIndexer {
         const segIdx = this._segments.length;
         this._segments.push({ file: name, rows: snap.length });
         snap.forEach(([path, vec], i) => {
-            if (this._mtimes.has(path)) this._rows.set(path, [segIdx, i]);
-            if (this._pending.get(path) === vec) this._pending.delete(path);
+            if (this._pending.get(path) !== vec) return; // coś zmieniło tę ścieżkę w oknie - wiersz martwy od razu
+            this._pending.delete(path);
+            this._rows.set(path, [segIdx, i]);
+            this._bumpGen();
         });
         this._nextSeq++;
         return true;
@@ -1493,19 +1544,26 @@ export class VaultIndexer {
      *
      * Migawki `_rows`/`_pending` (F1.5) wzięte PRZED pierwszym `await readBinary` - kompakcja
      * może trwać przez wiele odczytów segmentów, a w tym oknie flush/delete gdzie indziej dalej
-     * mutuje mapy LIVE. Po zapisie nowego segmentu bazowego: `newRows` budowane z pozycji w
-     * zakodowanym buforze (dokładnie to, co naprawdę leży w pliku), ale wpis trafia do `_rows`
-     * TYLKO gdy ścieżka nadal istnieje w AKTUALNYCH `_mtimes` (nie została usunięta w oknie
-     * odczytu/zapisu) - martwe dane zostają w pliku jako nieszkodliwy balast, po prostu bez
-     * referencji. Pending czyszczone jak w `_persistNewSegment` (referencja z migawki, nie
-     * cała mapa) - nowe wpisy dołożone w oknie kompakcji ZOSTAJĄ w `_pending` i pójdą do
-     * następnego segmentu delta.
+     * mutuje mapy LIVE. Każdy wpis w `liveEntries` niesie swoje POCHODZENIE (`'row'` - z segmentu
+     * na dysku, `'pending'` - jeszcze tylko w pamięci), bo G1 (round 2) wymaga OSOBNEGO testu
+     * "czy coś tknęło tę ścieżkę w oknie" per pochodzenie: dla `'row'` to `this._rows.get(path)
+     * === rowsSnap.get(path)` (WCIĄŻ ta sama referencja krotki `[segIdx, rowIdx]` co w migawce -
+     * ani usunięcie, ani żaden późniejszy zapis jej nie zastąpiły), dla `'pending'` to
+     * `this._pending.get(path) === pendingSnap.get(path)` (ten sam wzorzec co w
+     * `_persistNewSegment`). Samo `_mtimes.has(path)` (stara wersja) NIE WYSTARCZA z tego samego
+     * powodu co w `_persistNewSegment`: notatka wyczyszczona w oknie zostawia mtime, ale nie
+     * zostawia ani żywego wiersza, ani żywego pending - `_mtimes.has()` i tak zwraca `true` i
+     * dopisywałby wiersz wskazujący na WŁAŚNIE ZAKODOWANY, martwy wektor. Wpis, który nie
+     * przechodzi testu, zostaje w PLIKU jako nieszkodliwy balast (dane już zakodowane), po prostu
+     * bez referencji w `_rows` - żadna dodatkowa praca I/O. Pending czyszczone jak w
+     * `_persistNewSegment` (referencja z migawki, nie cała mapa) - nowe wpisy dołożone w oknie
+     * kompakcji (spoza migawki) ZOSTAJĄ w `_pending` i pójdą do następnego segmentu delta.
      */
     private async _persistCompact(): Promise<void> {
         const segCache = new Map<number, ReturnType<typeof decodeSegment>>();
         const rowsSnap = new Map(this._rows);
         const pendingSnap = new Map(this._pending);
-        const liveEntries: Array<[string, Float32Array]> = [];
+        const liveEntries: Array<[string, Float32Array, 'row' | 'pending']> = [];
         try {
             for (const [path, [segIdx, rowIdx]] of rowsSnap) {
                 if (pendingSnap.has(path)) continue; // pending wygrywa - świeższa wartość
@@ -1519,7 +1577,7 @@ export class VaultIndexer {
                 if (!decoded) throw new Error(`segment ${this._segments[segIdx]?.file ?? segIdx} uszkodzony`);
                 // Widok (subarray), bez dodatkowej kopii (F4.6) - `encodeSegment` niżej kopiuje
                 // wartości do bufora wyjściowego RAZ; podwójne kopiowanie byłoby zbędne.
-                liveEntries.push([path, decoded.at(rowIdx)]);
+                liveEntries.push([path, decoded.at(rowIdx), 'row']);
             }
         } catch (e) {
             this.logger.warn('VaultIndexer', `kompakcja przerwana (${msg(e)}) — zapis zwykły zamiast niej`);
@@ -1528,7 +1586,7 @@ export class VaultIndexer {
             await this._cleanupLegacyV1IfPresent();
             return;
         }
-        for (const [path, vec] of pendingSnap) liveEntries.push([path, vec]);
+        for (const [path, vec] of pendingSnap) liveEntries.push([path, vec, 'pending']);
         liveEntries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 
         const buf = encodeSegment(liveEntries.map(([, v]) => v), this.dims as number);
@@ -1542,8 +1600,13 @@ export class VaultIndexer {
         const oldSegments = this._segments;
         this._segments = [{ file: name, rows: liveEntries.length }];
         const newRows = new Map<string, RowRef>();
-        liveEntries.forEach(([path], i) => {
-            if (this._mtimes.has(path)) newRows.set(path, [0, i]);
+        liveEntries.forEach(([path, , kind], i) => {
+            const unchanged = kind === 'row'
+                ? this._rows.get(path) === rowsSnap.get(path)
+                : this._pending.get(path) === pendingSnap.get(path);
+            if (!unchanged) return; // coś tknęło tę ścieżkę w oknie kompakcji - wiersz martwy od razu
+            newRows.set(path, [0, i]);
+            this._bumpGen();
         });
         this._rows = newRows;
         this._nextSeq++;
@@ -1586,15 +1649,18 @@ export class VaultIndexer {
      * drugi zaczyna dopiero, gdy pierwszy (i jego `await`y) się skończy. `.catch(() => {})` jest
      * SIATKĄ ASEKURACYJNĄ - `_persistNowInner` i tak łapie każdy błąd I/O u siebie (warn +
      * bezpieczny powrót) i nie powinien nigdy rzucić, ale gdyby jednak rzucił, ma nie zerwać
-     * łańcucha dla WSZYSTKICH przyszłych wołających.
+     * łańcucha dla WSZYSTKICH przyszłych wołających - i tak trafia do logu (G5), zamiast ginąć po cichu.
      */
     async _persistNow(): Promise<void> {
-        const link = this._persistChain.then(() => this._persistNowInner()).catch(() => {});
+        const link = this._persistChain.then(() => this._persistNowInner()).catch((e: unknown) => {
+            this.logger.warn('VaultIndexer', 'persist error', e);
+        });
         this._persistChain = link;
         return link;
     }
 
     _schedulePersist(): void {
+        if (this._disposed) return; // G6: unload już poszedł - nic nowego nie startuje
         if (this._persistTimer) _nodeSafeClearTimeout(this._persistTimer);
         this._persistTimer = _nodeSafeSetTimeout(() => {
             this._persistTimer = null;
