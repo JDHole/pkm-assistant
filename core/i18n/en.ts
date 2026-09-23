@@ -110,6 +110,21 @@ export const en: Record<string, string> = {
   'tool.field.error': 'Error: ',
   'tool.field.result': 'Result: ',
 
+  // ── Tile (2.3.0, Czat bez ścian) - human-readable tool tile titles ──
+  // No ids, no raw tool name (except generic, where the name is the only information we have),
+  // no JSON in the header - see describeToolCall in modules/ui-components/ToolCallDisplay.ts.
+  'chat.tile.tool.read': 'Read: {{path}}',
+  'chat.tile.tool.search': 'Searched: {{query}}',
+  'chat.tile.tool.write': 'Wrote: {{path}}',
+  'chat.tile.tool.list': 'Listed: {{folder}}',
+  'chat.tile.tool.web_search': 'Searched the web: {{query}}',
+  'chat.tile.tool.web_read': 'Read page: {{url}}',
+  'chat.tile.tool.todo': 'Task list',
+  'chat.tile.tool.ask_user': 'Question for you',
+  'chat.tile.tool.generic': 'Used: {{name}}',
+  'chat.tile.tool.error_no_details': 'Tool reported an error without details',
+  'chat.tile.raw_args': 'Technical details',
+
   // ── Tytuły zakładek widoków (ItemView.displayText) ──
   // Nie powtarzają nazwy pluginu: Obsidian dokleja ją sam w palecie komend, a dwa widoki
   // pod tym samym napisem „PKM Assistant" dawały w palecie dwa identyczne wpisy.
