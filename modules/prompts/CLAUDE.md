@@ -78,6 +78,12 @@ D: KONTEKST (artifacts, current_date, memory, oczko) - dane, nie reguły
    Oczko (aktywna notatka) dokleja się już ogrodzone przez `modules/multimodal/active_note.ts`
 ```
 
+Poza `PromptBuilder.build()` do promptu tury dokleja się jeszcze jedna rzecz: marker `@@skill:` w tekście
+od człowieka (klik w slim barze albo TriggerPopup) każe `modules/chat/chat/chat_streaming.ts` wstrzyknąć PEŁNĄ treść
+`SKILL.md` do instrukcji tej jednej tury (`buildInlineTriggerInstruction`), bez limitu 8000 znaków, którym rządzi się
+indeks skilli w bloku C. To nie jest sekcja promptu systemowego budowana tutaj, tylko doczepka per tura; opis ścieżki
+UI i nudge todo: `modules/skills/CLAUDE.md`, sekcja „Odkrywanie i wywoływanie skilli przez model", pkt 4-5.
+
 Kolejność A→B→C→D nie jest dowolna: identity (A) i środowisko/uprawnienia (B) definiują
 kontekst zanim drzewo decyzyjne (C) opisze „kiedy". `_buildIdentity()` (blok A) NIE generuje
 daty - data żyje osobno w sekcji `current_date` (blok D), żeby A zostawał stabilny
