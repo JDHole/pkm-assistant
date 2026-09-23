@@ -192,7 +192,6 @@ export async function handleSave(ctx: ProfileCtx) {
             // Jedna oś narzędziowa (disabled_tools) zamiast enabled_tools.
             disabled_tools: formData.disabled_tools,
             preferred_servers: formData.preferred_servers,
-            preferred_tools: formData.preferred_tools,
             mcp_servers: formData.mcp_servers,
             sub_agents: formData.sub_agents,
             // `sub_agent_enabled` WYCIĘTY z payloadu: `Agent.allowedFields` nigdy go nie miało -
@@ -231,7 +230,6 @@ export async function handleSave(ctx: ProfileCtx) {
             skills: agent.skills,
             subAgents: agent._subAgents || [],
             preferredServers: agent.preferredServers || [],
-            preferredTools: agent.preferredTools || [],
             promptOverrides: agent.promptOverrides,
             agentRules: agent.agentRules || '',
             temperature: agent.temperature,
@@ -263,7 +261,6 @@ export async function handleSave(ctx: ProfileCtx) {
         if (JSON.stringify(updates.skills) !== JSON.stringify(before.skills)) details.push(t('profile.advanced.skills_label'));
         if (JSON.stringify(updates.sub_agents) !== JSON.stringify(before.subAgents)) details.push(t('profile.advanced.sub_agents_label'));
         if (JSON.stringify(updates.preferred_servers) !== JSON.stringify(before.preferredServers)) details.push(t('profile.advanced.mcp_servers'));
-        if (JSON.stringify(updates.preferred_tools) !== JSON.stringify(before.preferredTools)) details.push(t('profile.advanced.standalone_tools'));
         if (JSON.stringify(updates.prompt_overrides) !== JSON.stringify(before.promptOverrides)) details.push(t('profile.advanced.prompt_label'));
         if (updates.agent_rules !== before.agentRules) details.push(t('profile.advanced.rules_label'));
         if (updates.temperature !== before.temperature) details.push(t('profile.advanced.temperature_label'));

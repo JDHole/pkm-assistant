@@ -90,7 +90,6 @@ export function renderAgentProfileView(container: HTMLElement, plugin: AgentsPlu
         // Jedna oś narzędziowa (disabled_tools). enabled_tools skasowane.
         disabled_tools: [...(agent.disabled_tools || [])],
         preferred_servers: [...(agent.preferredServers || [])],
-        preferred_tools: [...(agent.preferredTools || [])],
         mcp_servers: Array.isArray(agent.mcp_servers) ? [...agent.mcp_servers] : ['vault', 'memory', 'core'],
         sub_agents: JSON.parse(JSON.stringify(agent._subAgents || [])) as AgentSubAgentAssignment[],
         sub_agent_enabled: agent.subAgentEnabled !== false,

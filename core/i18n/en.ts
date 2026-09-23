@@ -1081,7 +1081,6 @@ export const en: Record<string, string> = {
   'profile.advanced.skills_label': 'skills',
   'profile.advanced.sub_agents_label': 'sub-agents',
   'profile.advanced.mcp_servers': 'MCP servers',
-  'profile.advanced.standalone_tools': 'standalone tools',
   'profile.advanced.prompt_label': 'prompt',
   'profile.advanced.rules_label': 'rules',
   'profile.advanced.temperature_label': 'temperature',

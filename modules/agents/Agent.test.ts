@@ -78,6 +78,62 @@ test('update() nie przyjmuje playbook_overrides (pole spoza allowedFields)', t =
     t.is(agent.personality, 'spokojna', 'normalne pola dalej działają');
 });
 
+// `preferred_tools` skasowane (klaster narzędzi C1): `ServerManager.getActiveToolDefinitions`
+// nigdy nie przyjmowało drugiego argumentu (filtr narzędzi) - whitelista była no-opem, bo
+// `mcpActiveTools` jest już podzbiorem `systemTools`. Sąsiednie pole `preferred_servers`
+// (wybór SERWERÓW, nie narzędzi) zostaje żywe i bez zmian.
+
+test('stary YAML z preferred_tools ładuje się bez błędu - pole jest po prostu ignorowane', t => {
+    const legacy = {
+        name: 'Tola',
+        preferred_tools: ['a', 'b'],
+        mcp_servers: ['vault'],
+    };
+
+    t.true(validateAgentSchema(legacy).valid, 'walidacja schematu nie odrzuca nieznanego pola');
+
+    const agent = new Agent(legacy);
+    t.is(agent.name, 'Tola');
+    t.is(agent.preferredTools, undefined, 'pole nie jest już czytane');
+    t.deepEqual(agent.mcp_servers, ['vault'], 'sąsiednie pole kontraktu bez zmian');
+});
+
+test('serialize NIE wypisuje preferred_tools (ani z domyślnej, ani z podanej wartości)', t => {
+    const zWartoscia = new Agent({ name: 'A', preferred_tools: ['x'] }).serialize();
+    const bez = new Agent({ name: 'B' }).serialize();
+
+    t.false('preferred_tools' in zWartoscia);
+    t.false('preferred_tools' in bez);
+});
+
+test('update() nie przyjmuje preferred_tools (pole spoza allowedFields)', t => {
+    const agent = new Agent({ name: 'A' });
+    agent.update({ preferred_tools: ['x'], personality: 'spokojna' });
+
+    t.is(agent.preferredTools, undefined, 'martwe pole nie wraca tylnymi drzwiami');
+    t.is(agent.personality, 'spokojna', 'normalne pola dalej działają');
+});
+
+// `default_permissions.mcp` skasowane wcześniej (klaster C1) - przełącznik „Narzędzia MCP" nie
+// ma odpowiednika w PERMISSION_SWITCH_TOOLS (patrz permission_switches.test.ts), a
+// `_normalizePermissions` kopiuje TYLKO klucze z DEFAULT_PERMISSIONS (`memory`/`guidance_mode`).
+// Stary YAML z `default_permissions: {mcp: true}` musi się dalej wczytywać bez błędu.
+
+test('stary YAML z default_permissions.mcp ładuje się bez błędu - pole jest widmem', t => {
+    const legacy = {
+        name: 'Tola',
+        default_permissions: { mcp: true, memory: false },
+        mcp_servers: ['vault'],
+    };
+
+    t.true(validateAgentSchema(legacy).valid, 'walidacja schematu nie odrzuca nieznanego pola');
+
+    const agent = new Agent(legacy);
+    t.is(agent.name, 'Tola');
+    t.false('mcp' in agent.permissions, 'mcp nigdy nie wchodzi do znormalizowanych uprawnień');
+    t.is(agent.permissions.memory, false, 'sąsiednie ŻYWE pole (memory) dalej działa');
+});
+
 // Pole spoza znanego zestawu jest ODRZUCONE Z LOGIEM, nie po cichu.
 
 test('update() loguje ostrzeżenie dla pola spoza allowedFields (literówka widoczna, nie milcząca)', t => {

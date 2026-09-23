@@ -109,13 +109,13 @@ export interface ChatAgentManager extends AgentManager {
 /**
  * `ServerManager` w zakresie, jaki czyta czat.
  *
- * NIE `extends ServerManager`: czat woła `getActiveToolDefinitions(serwery, narzędzia)`
- * DWOMA argumentami, a menedżer przyjmuje dziś tylko pierwszy (drugi jest ignorowany —
- * znana, zastana rozbieżność; naprawa należy do `modules/tools`, nie do fali typowania).
+ * NIE `extends ServerManager`: czat woła tylko `getActiveToolDefinitions(serwery)` - drugi
+ * argument (filtr narzędzi, `preferred_tools`) skasowany razem z martwym polem agenta
+ * (klaster narzędzi C1, `modules/agents/CLAUDE.md`).
  */
 export interface ChatServerManager {
     getAllowedServerNamesForAgent?(agent: ServerVisibilityAgent | null): string[];
-    getActiveToolDefinitions(filterServers?: string[], preferredTools?: string[]): OpenAiToolDefinition[];
+    getActiveToolDefinitions(filterServers?: string[]): OpenAiToolDefinition[];
     syncBuiltInServersForAgent?(agent: ServerVisibilityAgent | null): void;
 }
 
