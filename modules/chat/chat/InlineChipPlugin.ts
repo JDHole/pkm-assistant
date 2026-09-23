@@ -62,12 +62,12 @@ export function buildInlineTriggerInstruction(
                 const skillName = resolved.name || marker.name;
                 lines.push(`- Skill "${skillName}": wykonaj przepis wklejony niżej (bez pytania).`);
                 recipeBlocks.push(
-                    `=== UŻYTKOWNIK URUCHOMIŁ SKILL "${skillName}" — wykonaj poniższy przepis (bez pytania): ===\n` +
+                    `=== UŻYTKOWNIK URUCHOMIŁ SKILL "${skillName}" - wykonaj poniższy przepis (bez pytania): ===\n` +
                     `${resolved.prompt}\n` +
                     `=== koniec przepisu "${skillName}" ===`
                 );
             } else {
-                lines.push(`- Skill "${marker.name}" nie znaleziony — pomiń albo znajdź go w indeksie skilli i wczytaj przepis przez read().`);
+                lines.push(`- Skill "${marker.name}" nie znaleziony - pomiń albo znajdź go w indeksie skilli i wczytaj przepis przez read().`);
             }
         } else if (marker.type === 'tool') {
             lines.push(`- Force tool: call "${marker.name}" before answering if its required arguments can be inferred from the user message.`);

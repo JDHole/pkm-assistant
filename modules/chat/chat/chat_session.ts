@@ -525,7 +525,7 @@ export async function handleLoadSession(this: ChatViewLike, path: string) {
                 new Notice(t('chat.session.loaded_compressed'), 4000);
             } else {
                 // Fallback: brak L1 jeszcze (sesja niezaczęta przez consolidateLevel1) — załaduj summary z pliku jeśli jest
-                const fallback = parsed.summary || `${parsed.messages.length} wiadomości — pełen kontekst niedostępny w skompresowanej formie.`;
+                const fallback = parsed.summary || `${parsed.messages.length} wiadomości - pełen kontekst niedostępny w skompresowanej formie.`;
                 await this.rollingWindow.addMessage('system', `Kontekst poprzedniej sesji:\n\n${fallback}`);
                 new Notice(t('chat.session.compressed_fallback'), 4000);
             }

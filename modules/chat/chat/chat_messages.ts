@@ -540,7 +540,7 @@ export function _renderTrimBlock(this: ChatViewLike, info: TrimInfo): void {
     const percent = this.rollingWindow.getUsagePercent();
     const headerP = textDiv.createEl('p');
     headerP.createEl('strong', { text: t('chat.msg.trim_phase1') });
-    headerP.appendText(` — ${t('chat.msg.trim_context_percent', { percent })}`);
+    headerP.appendText(` - ${t('chat.msg.trim_context_percent', { percent })}`);
 
     // Collapsed details
     const detailsDiv = textDiv.createDiv({ cls: 'cs-trim-details collapsed' });
