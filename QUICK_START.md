@@ -166,9 +166,10 @@ The agent has access to your vault through MCP tools:
 ### 5.3 @ Mentions (referencing notes)
 
 In the message input, type `@` - a dropdown will appear with notes and folders:
-- `@note_name` - inserts the note's content into the message context
-- `@folder:name/` - inserts content from files in the folder (max 5)
+- `@note_name` - attaches a reference to the note (path and size), not its content; the agent reads it with the `read` tool when it needs it, or delegates the reading to a sub-agent
+- `@folder:name/` - attaches a reference to the folder (path and note count); the agent lists and reads what it needs
 - Fuzzy search works (no need to type the full name)
+- To put the full text of a file into the message itself, use an attachment (section 5.4) - a chip with the name and size appears before you send
 
 ### 5.4 Attachments
 
