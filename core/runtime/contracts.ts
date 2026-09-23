@@ -266,7 +266,7 @@ export interface EmbeddingSettingsSlice {
     hosts?: Record<string, string>;
     /** Porcja doradcza per dostawca. Bez UI. */
     batchSize?: Record<string, number>;
-    /** Sufit czasu jednego żądania embeddingu. Bez UI. */
+    /** Sufit czasu jednego żądania embeddingu. Kontrolka w Ustawieniach → Modele → Embedding (w sekundach). */
     timeoutMs?: number;
     [key: string]: unknown;
 }

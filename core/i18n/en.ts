@@ -1141,6 +1141,8 @@ export const en: Record<string, string> = {
   'settings.embed_platform_none': 'Not configured',
   'settings.embed_model': 'Embedding model',
   'settings.embed_model_desc': 'Current: {{model}}',
+  'settings.embed_timeout': 'Request timeout',
+  'settings.embed_timeout_desc': 'Seconds per embedding request. Empty = default {{default}}s. Local models (Ollama, LM Studio) need more time on a cold start.',
   'settings.reindex': 'Re-index vault',
   'settings.reindex_desc': 'Clear old vectors and re-index vault with a new model.',
   'settings.reindex_btn': 'Re-index',

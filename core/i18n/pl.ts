@@ -1147,6 +1147,8 @@ export const pl: Record<string, string> = {
   'settings.embed_platform_none': 'Nie skonfigurowano',
   'settings.embed_model': 'Model embeddingu',
   'settings.embed_model_desc': 'Aktualny: {{model}}',
+  'settings.embed_timeout': 'Limit czasu żądania',
+  'settings.embed_timeout_desc': 'Sekundy na jedno żądanie embeddingu. Puste = domyślne {{default}} s. Lokalne modele (Ollama, LM Studio) przy zimnym starcie potrzebują więcej.',
   'settings.reindex': 'Re-indeksuj vault',
   'settings.reindex_desc': 'Wyczyść stare wektory i przeindeksuj vault nowym modelem.',
   'settings.reindex_btn': 'Re-indeksuj',
