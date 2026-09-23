@@ -535,6 +535,18 @@ export interface EmbedderFacade {
 export declare function createEmbedderFacade(registry: EmbeddingRegistry): EmbedderFacade;
 
 /**
+ * Powód nieudanej migracji v1→v2 - KOD (nie zdanie po polsku), tłumaczony przez
+ * `embedding.notice.migration_reason.<kod>`; `detail` niesie surowy komunikat błędu.
+ */
+export type MigrationFailReason =
+    | 'v1_unreadable'
+    | 'v1_malformed'
+    | 'dims_mismatch'
+    | 'segment_write'
+    | 'meta_write'
+    | 'verify_failed';
+
+/**
  * Wykryty rebuild (D6, format indeksu v2): model/wymiar wektora się zmienił, albo indeks
  * na dysku jest nieczytelny/niekompletny/nie dał się zmigrować z v1. Każdy przypadek
  * kończy się pełnym rebuildem i JEDNYM powiadomieniem UI - nigdy cichą korupcją.
@@ -543,7 +555,7 @@ export type IndexerNotice =
     | { kind: 'model_changed'; from: string | null; to: string }
     | { kind: 'dims_changed'; from: number; to: number }
     | { kind: 'index_corrupt' }
-    | { kind: 'migration_failed'; reason: string }
+    | { kind: 'migration_failed'; reason: MigrationFailReason; detail?: string }
     | { kind: 'migrated'; fromBytes: number; toBytes: number };
 
 /**

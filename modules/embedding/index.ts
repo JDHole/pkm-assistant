@@ -61,6 +61,7 @@ export type {
     IndexerStatus,
     IndexerStatusSnapshot,
     IndexerNotice,
+    MigrationFailReason,
     VaultEventType,
     FileMeta,
 } from './VaultIndexer.js';
