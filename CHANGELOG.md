@@ -5,6 +5,69 @@ All notable user-facing changes to PKM Assistant are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 2.2.9 - 2026-09-23
+
+Semantic index in a compact binary format, optional memory consolidation, session-scoped write
+approval, brain file and artifact statuses in the interface language.
+
+### Changed
+
+- **Semantic index v2.** The index is stored as a small meta file plus immutable Float32 segments
+  instead of one JSON dump rewritten on every edit. A save after an edit writes only the changed
+  notes; segments are compacted when they pile up. On a real 5,200-note vault the files shrink
+  from about 122 MB to about 22 MB and the save after an edit drops from over a second to a few
+  milliseconds. The old index migrates itself on first start; the old file is deleted only after
+  the new one has been written and read back.
+- **Automatic memory consolidation is off by default.** Two switches (sessions and summaries,
+  brain notes), threshold controls in Settings, and a declined proposal resets the counter.
+- **New brain files are born in the interface language** and parsers know both Polish and English
+  headings; artifact types created under English have English statuses.
+
+### Added
+
+- **Remember write approval for this session** checkbox in the approval and diff dialogs.
+- **Embedding request timeout** field in Settings → Models → Embedding.
+- Notices when the index is migrated, rebuilt after a model or vector-size change, or found
+  corrupt; the self-test reports the last such event.
+
+### Fixed
+
+- A change of the embedding vector size no longer makes the indexer retry forever; a wrong API
+  key or model name ends the scan with a visible error instead of rescanning the vault in a loop.
+- Concurrent writes to the same file from one model turn no longer overwrite each other.
+- A first scan that fails half-way no longer retries on a partially filled index.
+
+Downgrade warning: after the index migration, 2.2.8 or older rebuilds the index from scratch.
+
+## 2.2.8 - 2026-09-20
+
+Memory first, no bundled skills.
+
+### Changed
+
+- **`search` without a scope looks in the calling agent's memory**; user notes need an explicit
+  `scope: "vault"`. Sub-agents, agents without the memory permission and agents without memory
+  still default to the vault. A result from the default scope carries a `scope_hint`.
+- **No starter skills.** A fresh vault gets no skill files and the built-in agent starts with no
+  skills assigned; Backstage templates are unchanged.
+- Jaskier's persona and the chat welcome hint no longer promise things that are not there; the
+  quick start describes where a skill is actually created.
+
+## 2.2.7 - 2026-09-19
+
+Maintenance release: empty team for a new agent and interface-language leftovers.
+
+### Changed
+
+- **A new agent starts with an empty team.** The automatic "prep" sub-agent is gone.
+
+### Fixed
+
+- Built-in MCP server descriptions, the image tools, the save-session review window, artifact
+  statuses in the note block, agent profile and `@` picker, and memory note types in the
+  consolidation review follow the interface language.
+- "What's new" always ends with the author's note; the Filesystem preset shows a `<PATH>` placeholder.
+
 ## 2.2.6 - 2026-09-17
 
 Nine bug fixes from the post-release review, no new features.
