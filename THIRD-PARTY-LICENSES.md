@@ -17,16 +17,12 @@ nie importuje, więc tree-shaking ją usuwa. Zweryfikowano 2026-08-27.
 
 | Pakiet | Licencja | Skąd |
 |---|---|---|
+| [`@cfworker/json-schema`](https://www.npmjs.com/package/@cfworker/json-schema) | MIT | bezpośrednia zależność (`package.json`) - walidator `outputSchema`/`structuredContent` narzędzi MCP zewnętrznych, podmienia domyślny `AjvJsonSchemaValidator` SDK |
 | [`@modelcontextprotocol/sdk`](https://www.npmjs.com/package/@modelcontextprotocol/sdk) | MIT | bezpośrednia zależność (`package.json`) |
 | [`@orama/orama`](https://www.npmjs.com/package/@orama/orama) | Apache-2.0 | bezpośrednia zależność (`package.json`) |
-| [`ajv`](https://www.npmjs.com/package/ajv) | MIT | tranzytywna, przez SDK |
-| [`ajv-formats`](https://www.npmjs.com/package/ajv-formats) | MIT | tranzytywna, przez SDK |
 | [`cross-spawn`](https://www.npmjs.com/package/cross-spawn) | MIT | tranzytywna, przez SDK (klient stdio) |
 | [`eventsource-parser`](https://www.npmjs.com/package/eventsource-parser) | MIT | tranzytywna, przez SDK (klient HTTP/SSE) |
-| [`fast-deep-equal`](https://www.npmjs.com/package/fast-deep-equal) | MIT | tranzytywna, przez `ajv` |
-| [`fast-uri`](https://www.npmjs.com/package/fast-uri) | BSD-3-Clause | tranzytywna, przez `ajv` |
 | [`isexe`](https://www.npmjs.com/package/isexe) | ISC | tranzytywna, przez `which` |
-| [`json-schema-traverse`](https://www.npmjs.com/package/json-schema-traverse) | MIT | tranzytywna, przez `ajv` |
 | [`path-key`](https://www.npmjs.com/package/path-key) | MIT | tranzytywna, przez `cross-spawn` |
 | [`pkce-challenge`](https://www.npmjs.com/package/pkce-challenge) | MIT | tranzytywna, przez SDK (OAuth PKCE) |
 | [`shebang-command`](https://www.npmjs.com/package/shebang-command) | MIT | tranzytywna, przez `cross-spawn` |
@@ -39,22 +35,18 @@ nie importuje, więc tree-shaking ją usuwa. Zweryfikowano 2026-08-27.
 
 ## Licencja MIT
 
-Dotyczy: `@modelcontextprotocol/sdk`, `ajv`, `ajv-formats`, `cross-spawn`,
-`eventsource-parser`, `fast-deep-equal`, `json-schema-traverse`, `path-key`,
-`pkce-challenge`, `shebang-command`, `shebang-regex`, `zod`.
+Dotyczy: `@cfworker/json-schema`, `@modelcontextprotocol/sdk`, `cross-spawn`,
+`eventsource-parser`, `path-key`, `pkce-challenge`, `shebang-command`, `shebang-regex`, `zod`.
 
 Tekst licencji MIT jest identyczny dla wszystkich pakietów - jedyną zmienną częścią jest
 nota copyrightowa, więc jest wypisana raz per pakiet, a tekst licencji raz na końcu.
 
 ### Noty copyrightowe
 
+- **@cfworker/json-schema** - Copyright (c) 2020 Jeremy Danyow
 - **@modelcontextprotocol/sdk** - Copyright (c) 2024 Anthropic, PBC
-- **ajv** - Copyright (c) 2015-2017 Evgeny Poberezkin
-- **ajv-formats** - Copyright (c) 2020 Evgeny Poberezkin
 - **cross-spawn** - Copyright (c) 2018 Made With MOXY Lda \<hello@moxy.studio\>
 - **eventsource-parser** - Copyright (c) 2026 Espen Hovlandsdal \<espen@hovlandsdal.com\>
-- **fast-deep-equal** - Copyright (c) 2017 Evgeny Poberezkin
-- **json-schema-traverse** - Copyright (c) 2017 Evgeny Poberezkin
 - **path-key** - Copyright (c) Sindre Sorhus \<sindresorhus@gmail.com\> (sindresorhus.com)
 - **pkce-challenge** - Copyright (c) 2019
 - **shebang-command** - Copyright (c) Kevin Mårtensson \<kevinmartensson@gmail.com\> (github.com/kevva)
@@ -109,47 +101,6 @@ ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
 WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
 IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-```
-
----
-
-## Licencja BSD 3-Clause
-
-Dotyczy: `fast-uri`.
-
-### Nota copyrightowa
-
-```
-Copyright (c) 2011-2021, Gary Court until
-https://github.com/garycourt/uri-js/commit/a1acf730b4bba3f1097c9f52e7d9d3aba8cdcaae
-Copyright (c) 2021-present The Fastify team <https://github.com/fastify/fastify#team>
-All rights reserved.
-```
-
-### Tekst licencji
-
-```
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-    * The names of any contributors may not be used to endorse or promote
-      products derived from this software without specific prior written
-      permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDERS AND CONTRIBUTORS BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 ---
@@ -371,3 +322,17 @@ Copyright 2023 OramaSearch Inc
   produkcyjny `src/main.ts` importuje `parseYaml`/`stringifyYaml` z `'obsidian'` (już na liście
   `external` esbuilda), więc do `dist/main.js` nie trafia ani `js-yaml`, ani `yaml`. Ręczna
   weryfikacja: `grep -c "js-yaml" dist/main.js` = 0.
+- **2026-09-23:** `ajv`, `ajv-formats`, `fast-deep-equal`, `fast-uri` i `json-schema-traverse`
+  usunięte z listy; `@cfworker/json-schema` dodany. `modules/tools/ExternalMcpManager.ts` podaje
+  dziś `jsonSchemaValidator: new CfWorkerJsonSchemaValidator()` przy tworzeniu klienta SDK, a
+  `esbuild.js` (`ajvProviderShimPlugin()`) podmienia WEWNĘTRZNY moduł SDK
+  `validation/ajv-provider.js` na shim bez Ajv - bez tego aliasu SDK i tak statycznie importuje i
+  konstruuje `AjvJsonSchemaValidator` jako fallback, więc `ajv` (razem z `new Function`, patrz
+  `modules/tools/CLAUDE.md`) i tak trafiałby do bundla. Zweryfikowano ponownym przebiegiem tej samej
+  metody (`esbuild` z `metafile: true`, `bytesInOutput > 0`): `ajv`/`ajv-formats`/`fast-deep-equal`/
+  `fast-uri`/`json-schema-traverse` mają dziś 0 bajtów w bundlu, `@cfworker/json-schema` ma
+  50 591 B. Ręczna weryfikacja: `grep -c "new Function" dist/main.js` = 0,
+  `grep -o 'ajv-formats\|AjvJsonSchemaValidator\|require("ajv")' dist/main.js` = puste. Bundle
+  zmalał o ok. 121 KB mimo doszycia nowej zależności, bo `ajv`+`ajv-formats` były cięższe niż
+  `@cfworker/json-schema`. Strażnik builda (`assertNoAjvNewFunction()` w `esbuild.js`) wywala build,
+  gdyby ta lista kiedyś po cichu wróciła do zawierania Ajv.

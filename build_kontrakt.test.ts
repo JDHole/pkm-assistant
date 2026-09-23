@@ -40,6 +40,32 @@ test('esbuild.js ma literal external z obsidian i bez electron', t => {
     t.false(list.includes('electron'), 'electron zszedl z listy razem ze swoim jedynym konsumentem i nie wraca');
 });
 
+// ── Strażnik `new Function` (Ajv) w bundlu — esbuild.js musi go mieć, uruchomiony PRZED deployem ──
+
+test('esbuild.js ma strażnik zero-new-Function w bundlu, wołany przed kopiowaniem/deployem', t => {
+    t.true(
+        esbuildSource.includes('function assertNoAjvNewFunction'),
+        'esbuild.js nie ma funkcji strażnika assertNoAjvNewFunction - build mógłby po cichu wrócić do Ajv/new Function w bundlu bez żadnego błędu',
+    );
+    t.true(
+        esbuildSource.includes('ajvProviderShimPlugin'),
+        'esbuild.js nie ma aliasu ajvProviderShimPlugin - bez niego SDK i tak statycznie importuje i konstruuje AjvJsonSchemaValidator jako fallback, więc ajv trafia do bundla mimo opcji jsonSchemaValidator',
+    );
+
+    // Strażnik ma liczyć dosłowne "new Function" w tekście gotowego bundla.
+    t.regex(esbuildSource, /match\(\/new Function\/g\)/, 'strażnik ma szukać dosłownego "new Function" w bundlu (regex /new Function/g)');
+
+    // `onEnd` wywołuje strażnik PRZED copyStaticArtifacts/deployToVaults, w tej samej funkcji -
+    // rzucony wyjątek ma zablokować kopiowanie i deploy zepsutego builda, nie tylko go zalogować.
+    const onEndBlock = esbuildSource.split(/build\.onEnd\(result => \{/)[1]?.split(/\n\s*\}\);/)[0] ?? '';
+    t.true(onEndBlock.length > 0, 'nie znaleziono ciała build.onEnd(...) w esbuild.js - kształt strażnika się zmienił, popraw ten test');
+    const guardIdx = onEndBlock.indexOf('assertNoAjvNewFunction');
+    const copyIdx = onEndBlock.indexOf('copyStaticArtifacts');
+    const deployIdx = onEndBlock.indexOf('deployToVaults');
+    t.true(guardIdx >= 0 && copyIdx >= 0 && deployIdx >= 0, 'onEnd nie woła wszystkich trzech: strażnika, copyStaticArtifacts, deployToVaults');
+    t.true(guardIdx < copyIdx && guardIdx < deployIdx, 'strażnik new-Function musi być wołany PRZED copyStaticArtifacts i deployToVaults w onEnd - inaczej zepsuty build mógłby zdążyć się wdrożyć do vaultów zanim strażnik go złapie');
+});
+
 // ── Helpery importowane z rozszerzeniem .ts (jedyny wyjatek od reguly, ze specifiery importow koncza sie na .js) ─────────────────────
 
 test('esbuild.js i release.js importuja lokalne helpery z rozszerzeniem .ts', t => {

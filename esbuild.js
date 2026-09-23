@@ -115,6 +115,60 @@ const markdownImportPlugin = textImportPlugin({
     toModule: markdown => `export default ${JSON.stringify(markdown)};\n`,
 });
 
+/**
+ * Podmienia moduł `validation/ajv-provider.js` WEWNĄTRZ `@modelcontextprotocol/sdk` na shim bez
+ * Ajv (`esbuild.cfworkerValidatorShim.mjs`, obok tego pliku) — wycina jedyne `new Function` w
+ * bundlu (kompilator schematów Ajv, patrz `modules/tools/CLAUDE.md`).
+ *
+ * Samo podanie `jsonSchemaValidator: new CfWorkerJsonSchemaValidator()` w `new Client(...)`
+ * (`modules/tools/ExternalMcpManager.ts`) NIE WYSTARCZA — SDK statycznie importuje
+ * `AjvJsonSchemaValidator` i konstruuje ją jako fallback w konstruktorze
+ * (`options?.jsonSchemaValidator ?? new AjvJsonSchemaValidator()`), więc referencja zostaje
+ * osiągalna dla esbuild i `ajv` (razem z `new Function`) i tak ląduje w bundlu — patrz
+ * `assertNoAjvNewFunction()` niżej, strażnik dokładnie tego regresu.
+ *
+ * `onResolve` przechwytuje TYLKO import z wnętrza paczki SDK (`importer` leży w
+ * `node_modules/@modelcontextprotocol/sdk`) — gdyby plugin kiedyś zaimportował
+ * `ajv-provider.js` bezpośrednio (nie robi tego dziś), nie zostałby po cichu podmieniony.
+ */
+function ajvProviderShimPlugin() {
+    const target = /[\\/]validation[\\/]ajv-provider\.js$/;
+    const shim = path.join(ROOT, 'esbuild.cfworkerValidatorShim.mjs');
+    return {
+        name: 'ajv-provider-shim',
+        setup(build) {
+            build.onResolve({ filter: target }, args => {
+                if (!args.importer.includes(path.join('node_modules', '@modelcontextprotocol', 'sdk'))) return null;
+                return { path: shim };
+            });
+        },
+    };
+}
+
+/**
+ * STRAŻNIK: `dist/main.js` gotowy nie ma prawa zawierać `new Function` — Ajv (przez SDK MCP)
+ * kompiluje schematy JSON konstruując funkcje z tekstu, co scorecard katalogu Obsidiana wytyka.
+ * `ajvProviderShimPlugin()` wyżej wycina to dziś do zera, ale alias zależy od WEWNĘTRZNEJ ścieżki
+ * pliku SDK (`validation/ajv-provider.js`), nie części jego publicznego kontraktu
+ * (`package.json#exports`) — podbicie `@modelcontextprotocol/sdk` (nawet patch) może po cichu
+ * przenieść/przemianować ten plik, wyłączając alias BEZ ŻADNEGO błędu builda (regex po prostu nic
+ * by nie złapał, `ajv` po cichu wróciłby do bundla). Ten strażnik łapie taki regres od razu: liczy
+ * dosłowne wystąpienia `new Function` w gotowym bundlu i wywala build, gdy jest ich więcej niż 0.
+ */
+function assertNoAjvNewFunction(bundlePath) {
+    const src = fs.readFileSync(bundlePath, 'utf8');
+    const count = (src.match(/new Function/g) || []).length;
+    if (count > 0) {
+        throw new Error(
+            `STRAZNIK new-Function: dist/main.js zawiera ${count}x "new Function" (oczekiwano 0). ` +
+            'Pierwszy podejrzany: alias ajvProviderShimPlugin() w esbuild.js celuje w wewnetrzna sciezke ' +
+            '"validation/ajv-provider.js" wewnatrz @modelcontextprotocol/sdk - podbicie SDK moglo ja ' +
+            'przeniesc albo przemianowac, po cichu wylaczajac alias. Sprawdz strukture plikow w ' +
+            'node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ i dopasuj regex/sciezke aliasu.'
+        );
+    }
+}
+
 /** Kopiuje do `dist/` te dwa artefakty, których esbuild nie generuje sam. */
 function copyStaticArtifacts() {
     fs.mkdirSync(DIST_DIR, { recursive: true });
@@ -164,6 +218,11 @@ function deployToVaults(pluginId) {
 /**
  * Jedno miejsce, w którym kończy się KAŻDY przebieg — jednorazowy i każdy rebuild
  * watchera. Dzięki temu logika kopiowania i wdrożenia nie jest zdublowana.
+ *
+ * Strażnik `assertNoAjvNewFunction()` jedzie PIERWSZY, w tym samym `onEnd`, przed kopiowaniem
+ * i deployem: rzucony wyjątek przerywa dalsze linie tego callbacku (kopiowanie/deploy się NIE
+ * wykonują), a esbuild zamienia go w błąd builda — `ctx.rebuild()` w `main()` odrzuca obietnicę
+ * z tym błędem, więc jednorazowy build (i CI) kończy się kodem innym niż 0.
  */
 function finishBuildPlugin(pluginId) {
     return {
@@ -171,6 +230,7 @@ function finishBuildPlugin(pluginId) {
         setup(build) {
             build.onEnd(result => {
                 if (result.errors.length > 0) return;
+                assertNoAjvNewFunction(path.join(DIST_DIR, 'main.js'));
                 copyStaticArtifacts();
                 deployToVaults(pluginId);
             });
@@ -202,7 +262,7 @@ async function main() {
         // straznikow (core/deps_kontrakt, core/dead_code_zasieg, build_kontrakt) — nie sklejaj
         // jej ze zmiennych. `electron` NIE WRACA (zszedl ze swoim jedynym konsumentem).
         external: ['obsidian'],
-        plugins: [cssImportPlugin, markdownImportPlugin, finishBuildPlugin(manifest.id)],
+        plugins: [cssImportPlugin, markdownImportPlugin, ajvProviderShimPlugin(), finishBuildPlugin(manifest.id)],
     });
 
     if (watchMode) {
