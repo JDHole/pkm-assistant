@@ -891,9 +891,16 @@ export class ExternalMcpManager {
         }
         // Realna ścieżka — leniwy import SDK (poza AVA / poza mobile dla stdio).
         const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+        // CfWorkerJsonSchemaValidator zamiast domyślnego AjvJsonSchemaValidator — walidator
+        // outputSchema/structuredContent bez `new Function` (patrz gotcha w module's CLAUDE.md).
+        // Sama ta opcja nie wystarcza, żeby wyciąć Ajv z bundla — dopiero razem z aliasem builda
+        // w `esbuild.js` (`ajvProviderShimPlugin`), bo SDK i tak statycznie importuje
+        // `AjvJsonSchemaValidator` jako fallback. `@cfworker/json-schema` to peer dep SDK, tu
+        // zainstalowana jawnie jako zwykła zależność.
+        const { CfWorkerJsonSchemaValidator } = await import('@modelcontextprotocol/sdk/validation/cfworker');
         const client = new Client(
             { name: CLIENT_NAME, version: this._pluginVersion },
-            { capabilities: {} }
+            { capabilities: {}, jsonSchemaValidator: new CfWorkerJsonSchemaValidator() }
         );
         const transport = await this._createTransport(serverConfig);
         return { client, transport };
