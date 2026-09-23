@@ -727,7 +727,11 @@ export class Agent implements ToolVisibilityAgent {
                 if (f.group) {
                     return { group: String(f.group) };
                 }
-                return { path: f.path || String(f), access: f.access || 'readwrite' };
+                // Wpis bez `path` (i bez `group`, obsłużone wyżej) to zniekształcony YAML -
+                // dawniej `String(f)` dawało tu zawsze dosłowne "[object Object]" jako "ścieżkę"
+                // (żaden z typów wejścia nie ma własnego toString), więc pusty string zamiast
+                // tego jest jedyną sensowną wartością: i tak nie dopasuje żadnego realnego folderu.
+                return { path: f.path || '', access: f.access || 'readwrite' };
             });
         // Odfiltruj martwe wpisy `.pkm-assistant*` (pamięć/skille mają własne drzwi;
         // nie są przypisanymi folderami roboczymi vaulta). Grupy zostają nietknięte.
@@ -759,7 +763,10 @@ export class Agent implements ToolVisibilityAgent {
             .filter(a => a)
             .map(a => {
                 if (typeof a === 'string') return { name: a, role: 'researcher' };
-                const name = a.name || String(a);
+                // Wpis bez `name` (typ go wymaga, ale surowy YAML nie gwarantuje) dawniej
+                // dostawał dosłowne "[object Object]" jako nazwę - pusty string zamiast tego
+                // nie udaje sensownej tożsamości suba, ale nie zaśmieca UI/logów śmieciowym tekstem.
+                const name = a.name || '';
                 return {
                     name,
                     role: a.role || 'researcher',
@@ -783,7 +790,9 @@ export class Agent implements ToolVisibilityAgent {
             .map(s => {
                 if (typeof s === 'string') return { name: s };
                 return {
-                    name: s.name || String(s),
+                    // Jak wyżej przy sub-agentach: brak `name` dawniej dawał dosłowne
+                    // "[object Object]" zamiast pustej, jawnie nieprawidłowej nazwy skilla.
+                    name: s.name || '',
                     ...(s.overrides && Object.keys(s.overrides).length > 0 ? { overrides: s.overrides } : {})
                 };
             });
