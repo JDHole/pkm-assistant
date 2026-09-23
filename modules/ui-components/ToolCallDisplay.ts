@@ -402,6 +402,9 @@ interface ToolOutputPayload {
     od?: string;
     tresc?: string;
     items?: ToolTodoItem[];
+    done?: number;
+    total?: number;
+    finished?: boolean;
     action?: string;
     question?: string;
     [key: string]: unknown;
@@ -564,8 +567,28 @@ function formatToolOutput(toolName: string, output: unknown) {
             case 'todo':
             case 'chat_todo': {
                 if (data.items && Array.isArray(data.items)) {
-                    const list = data.items.map((item) => `${(item.done || item.checked) ? '  ✓' : '  ○'} ${item.text || item.content || ''}`).join('\n');
-                    return { summary: t('tool.out.tasks', { count: data.items.length }), detail: list };
+                    // Uwaga 2 (spec A2-fix): `TodoTool.finish()` oddaje liste PUSTA razem z
+                    // `finished:true` - licznik "0/0" nic nie mowi userowi o tym, co sie z lista
+                    // stalo (werdykt wlasciciela: "po kliknieciu powinno sie pokazywac, co sie z
+                    // nia stalo"). Ten przypadek dostaje wlasny, czytelny tekst zamiast "0/0" i
+                    // ZANIM policzy sie total/done na pustej tablicy.
+                    if (data.items.length === 0 && data.finished === true) {
+                        const finishedText = t('chat.tile.todo.finished');
+                        return { summary: finishedText, detail: finishedText };
+                    }
+                    // Naglowek = licznik "{done}/{total}" (+ tytul listy, jesli agent go podal) -
+                    // spec A2 "Czat bez scian": klik ma pokazac, co sie z lista stalo (werdykt
+                    // wlasciciela "Lista zadan jest tragiczna"), a CALA tresc idzie do details, nie
+                    // do naglowka. `done`/`total` licz z pol wyniku narzedzia (TodoTool.ts juz je
+                    // liczy z dysku), z zapasowym przeliczeniem z `items`, gdyby ktos wywolal to na
+                    // starszym ksztalcie danych bez tych pol.
+                    const total = typeof data.total === 'number' ? data.total : data.items.length;
+                    const done = typeof data.done === 'number' ? data.done : data.items.filter((item) => item.done || item.checked).length;
+                    const summary = data.title
+                        ? t('chat.tile.tool.todo_summary_titled', { done, total, title: data.title })
+                        : t('chat.tile.tool.todo_summary', { done, total });
+                    const list = data.items.map((item) => `${(item.done || item.checked) ? '✓' : '○'} ${item.text || item.content || ''}`).join('\n');
+                    return { summary, detail: list };
                 }
                 return { summary: data.action || t('tool.out.task_list'), detail: null };
             }
@@ -583,12 +606,26 @@ function formatToolOutput(toolName: string, output: unknown) {
             case 'idea_review':
                 return { summary: data.approved ? t('tool.out.idea_approved') : (data.action || t('tool.out.review')), detail: data.userComments || data.comments || null };
             case 'ask_user': {
+                // Spec A2 ("Czat bez scian"), sekcja 3 - werdykt wlasciciela "nie rozumiem co to
+                // pokazuje": naglowek pokazuje PYTANIE (summary, ucinane do 80 zn. przez Tile.ts,
+                // tytul kafelka to staly tekst "Pytanie do Ciebie" z `describeToolCall`), a details
+                // ZAWSZE niesie pytanie I odpowiedz razem, niezaleznie od dlugosci pytania (dawniej:
+                // detail tylko gdy pytanie > 100 znakow - usuniete). Kanon ksztaltu wyniku
+                // (`AskUserTool.ts`): sukces oddaje `{success:true, question, answer, auto}`,
+                // porazka (odmowa/timeout/brak UI w zakladce w tle) `{success:false, error,
+                // message, question}` BEZ pola `answer`.
                 const q = data.question || '';
+                if (data.success === false) {
+                    const reason = data.message || data.error || t('tool.out.msg_error');
+                    return {
+                        summary: q || reason,
+                        detail: q ? t('chat.tile.ask.body', { question: q, answer: reason }) : null,
+                    };
+                }
                 const a = data.answer || data.response || t('tool.out.answer');
-                const needsDetail = q.length > 100;
                 return {
-                    summary: a,
-                    detail: needsDetail ? `Pytanie: ${q}\nOdpowiedź: ${a}${data.auto ? ' (auto)' : ''}` : null
+                    summary: q,
+                    detail: t('chat.tile.ask.body', { question: q, answer: a }),
                 };
             }
             default: {
@@ -602,8 +639,15 @@ function formatToolOutput(toolName: string, output: unknown) {
         // normalizeMcpResult) lands here; without a cap it would put the WHOLE response into
         // the DOM node, even in the default compact-chip mode where the node is built eagerly
         // and then immediately hidden. Same cap as the read branch.
+        // B3 pkt 1 (spec A2-fix): `detail` used to stay `null` whenever `s` fit inside the
+        // 120-char summary cap, so a SHORT real error text (e.g. "Plik nie istnieje", an
+        // external tool's own message) never reached `_buildToolDetails` - the body fell back
+        // to the generic "no description" text even though there WAS a description, just a
+        // short one. `detail` is now populated whenever there is ANY text at all, regardless
+        // of length; `_buildToolDetails`'s error branch already prefers `detailText` over the
+        // summary, so a short catch-branch message now echoes correctly in the body too.
         const s = _fallbackToolText(output);
-        return { summary: _truncate(s, 120), detail: s.length > 120 ? _truncate(s, 2000) : null };
+        return { summary: _truncate(s, 120), detail: s ? _truncate(s, 2000) : null };
     }
 }
 
@@ -794,30 +838,88 @@ function _toTileStatus(rawStatus: string | undefined): TileStatus {
 }
 
 /**
- * Ciało kafelka: ZAWSZE zaczyna się od pełnego `fmt.summary` (B5 fix, recenzja A1-fix) - nagłówek
- * tnie summary do 80 znaków (`Tile.ts`), więc bez tego treść dłuższa niż 80 zn. (odpowiedź
- * `ask_user`, wynik nieznanego narzędzia z zewnętrznego serwera MCP...) ginęła bezpowrotnie:
- * `_buildToolDetails` dotąd czytało WYŁĄCZNIE `fmt.detail`, a `fmt.detail` bywa `null` właśnie w
- * przypadkach, gdzie CAŁA treść siedzi w `fmt.summary`. Po `fmt.summary` idzie `fmt.detail`, jeśli
- * jest. Błąd = komunikat błędu z pola `toolCall.error` (już zamaskowany u źródła) - bez zmian.
- * Błąd BEZ pola `toolCall.error` (np. `{success:false}`): nagłówek już pokazuje `fmt.summary` w
- * pełni (patrz `_buildToolTile`), więc ciało niesie tylko `fmt.detail`, a gdy nie ma nawet tego -
- * literalny tekst i18n `chat.tile.tool.error_no_details`, zamiast pustego, rozwiniętego ciała.
+ * Ujednolica pole na string, ZANIM cokolwiek je skleja (regula nadrzedna szczegolow kafelka,
+ * spec A2-fix - decyzja prowadzacego, zastepuje "details zawsze zaczynaja sie od summary"; B2
+ * fix: `TypeError` na nie-stringowym `fmt.detail`/`fmt.summary`, np. `kom_send` z `message`
+ * obiektem, `idea_review` z `comments` tablica, `todo` z polem-obiektem). String bez zmian;
+ * tablica -> `join('\n')`; obiekt -> `JSON.stringify` z sufitem (jak `_formatGenericOutput`);
+ * reszta (liczba, bool...) -> `String(x)`. Nigdy `[object Object]`, nigdy wyjatek.
+ */
+function _coerceToText(value: unknown, limit = 2000): string {
+    if (typeof value === 'string') return value;
+    if (value == null) return '';
+    if (Array.isArray(value)) return value.join('\n');
+    if (typeof value === 'object') return _truncate(JSON.stringify(value), limit);
+    // `_rawToString` (definiowana nizej w tym pliku dla `_fallbackToolText`) resetuje zawezenie
+    // TS z powrotem do golego `unknown` - `no-base-to-string` nie umie wywnioskowac, ze w tym
+    // miejscu `value` jest juz PRYMITYWEM (liczba/bool), nie obiektem.
+    return _rawToString(value);
+}
+
+/**
+ * Sklada cialo kafelka z JUZ ustringowionych `summaryText`/`detailText` (regula nadrzedna,
+ * spec A2-fix). `detailText` w calosci, gdy ZAWIERA `summaryText` (`.includes()`, nie
+ * `.startsWith()` - decyzja prowadzacego: B1 fix, `ask_user`'s detail ZAWSZE niesie pytanie w
+ * srodku szablonu "Pytanie: {q}\nOdpowiedz: {a}", wiec ten jeden generyczny check usuwa
+ * podwojne pytanie bez kodu specyficznego dla `ask_user`) albo gdy `summaryText` jest puste;
+ * inaczej oba, oddzielone pusta linia; gdy `detailText` puste: samo `summaryText`.
+ */
+function _composeTileBody(summaryText: string, detailText: string): string {
+    if (!detailText) return summaryText;
+    // Uciete summary ("..." albo "&" na koncu) porownujemy po rdzeniu, inaczej detail dublowalby tresc.
+    const core = summaryText.replace(/(\.\.\.|\u2026)$/u, '');
+    if (!summaryText || detailText.includes(core)) return detailText;
+    return `${summaryText}\n\n${detailText}`;
+}
+
+/**
+ * Ciało kafelka - sukces: `_composeTileBody(summaryText, detailText)` wyzej (regula nadrzedna).
+ * Ciało - błąd Z polem `toolCall.error` (już zamaskowany u źródła): komunikat wprost, bez zmian
+ * - Z WYJĄTKIEM `ask_user` (B1 fix, sciezka HISTORII): `chat_messages.ts` odtwarza nieudane
+ * `ask_user` z historii jako `error: tcOutput.error` (kod typu "ask_user.timeout") - dawniej ten
+ * surowy kod leciał wprost do usera. `toolCall.output` w tej gałęzi nadal niesie `question`
+ * (kanon `AskUserTool.ts`: porażka oddaje `{success:false, error, message, question}`), więc
+ * kafelek dostaje ten sam szablon "Pytanie/Odpowiedz" co żywa ścieżka, z kodem błędu zmapowanym
+ * przez i18n na tekst po ludzku (`ask_user.timeout` -> `chat.tile.ask.timeout`, inny kod ->
+ * `chat.tile.ask.failed`).
+ * Błąd BEZ pola `toolCall.error` (np. `{success:false}`): `detailText` w całości, jeśli jest;
+ * inaczej `summaryText` W CAŁOŚCI, ale TYLKO gdy DŁUŻSZE niż 80 znaków (nagłówek go i tak ucina,
+ * `Tile.ts`) - krótki, GENERYCZNY label bez realnej treści (np. "Send error" z `kom_send`, gdzie
+ * `data.message`/`data.error` są oba puste) zostaje przy `error_no_details` niżej. Krótka, ale
+ * REALNA treść (np. "Plik nie istnieje" z zewnętrznego narzędzia, złapana w
+ * `formatToolOutput`'s catch branch) trafia tu jako `detailText` już od źródła - ten branch
+ * populuje `detail` ZAWSZE, gdy jest jakikolwiek tekst (B3 pkt 1, spec A2-fix - patrz komentarz
+ * tam), więc próg 80 znaków dotyczy dziś WYŁĄCZNIE syntetycznych etykiet bez realnej treści.
  * Surowe argumenty wejścia (`formatToolInputDetail`) dokładane WYŁĄCZNIE gdy `includeRawArgs`
  * (pełna karta, nie chip kompaktowy) - jako sekcja „Szczegóły techniczne" w natywnym `<details>`,
  * domyślnie zwinięta niezależnie od stanu kafelka. Pusty wejściowy `input` (brak pola w ogóle) NIE
- * dostaje sekcji technicznej - `formatToolInputDetail`'s gałąź `default` zwraca `'{}'` dla pustego
- * obiektu, co bez tej bramki dawałoby pustą, ale "obecną" sekcję dla narzędzi bez argumentów.
+ * dostaje sekcji technicznej - `toolCall.input != null` jest bramką; `formatToolInputDetail`'s
+ * gałąź `default` zwraca `'{}'` dla PUSTEGO OBIEKTU (`input:{}`), co jest innym przypadkiem -
+ * `input:{}` DOSTAJE sekcję techniczną (niepusty argument, po prostu bez pól).
  */
 function _buildToolDetails(toolCall: ToolCallData, includeRawArgs: boolean): TileSpec['details'] {
     if (toolCall.error) {
+        if (toolCall.name === 'ask_user') {
+            const out = toolCall.output as { question?: unknown } | undefined;
+            const q = typeof out?.question === 'string' ? out.question : '';
+            if (q) {
+                const code = typeof toolCall.error === 'string' ? toolCall.error : '';
+                const reason = code === 'ask_user.timeout' ? t('chat.tile.ask.timeout') : t('chat.tile.ask.failed');
+                return t('chat.tile.ask.body', { question: q, answer: reason });
+            }
+        }
         return typeof toolCall.error === 'string' ? toolCall.error : JSON.stringify(toolCall.error);
     }
     const isError = toolCall.status === 'error';
     const fmt = toolCall.output ? formatToolOutput(toolCall.name, toolCall.output) : null;
-    let bodyText = isError
-        ? (fmt?.detail || '')
-        : (fmt?.summary || '') + (fmt?.detail ? `\n\n${fmt.detail}` : '');
+    const summaryText = _coerceToText(fmt?.summary);
+    const detailText = _coerceToText(fmt?.detail);
+    let bodyText: string;
+    if (isError) {
+        bodyText = detailText || (summaryText.length > 80 ? summaryText : '');
+    } else {
+        bodyText = _composeTileBody(summaryText, detailText);
+    }
     if (!bodyText && isError) {
         bodyText = t('chat.tile.tool.error_no_details');
     }
@@ -867,11 +969,19 @@ function _buildToolTile(toolCall: ToolCallData, opts: { includeRawArgs: boolean 
     // Błąd BEZ pola `toolCall.error` (np. `{success:false}`): nagłówek zostaje przy summary z
     // wyniku zamiast gasnąć do pustki (B5) - błąd Z polem `error` blankuje summary, bo jego
     // treść i tak trafia w całości do `_buildToolDetails` niżej.
-    const summary = (isError && toolCall.error)
+    const rawSummary = (isError && toolCall.error)
         ? undefined
         : (toolCall.output
             ? formatToolOutput(toolCall.name, toolCall.output).summary
             : (formatToolInputHint(toolCall.name, toolCall.input) || undefined));
+    // Porzadki po A1, punkt 3: kilka galezi `formatToolInputHint`/`formatToolOutput` oddaje pole
+    // wprost jako `data.xxx || ''` bez `typeof` (np. `search`'s `data.query || ''`) - narzedzie z
+    // zewnetrznego serwera MCP moze podac to pole jako obiekt (`{length:100}`), nie string. Bez
+    // tej bramki taki obiekt lecialby do `createTile`'s `summary`, a `Tile.ts`'s
+    // `truncatePreview`/`textContent` przypisanie zamienialoby go w doslowne `[object Object]` w
+    // naglowku. JEDNA linia typeof na wyjsciu `_buildToolTile` chroni WSZYSTKIE galezie naraz,
+    // zamiast utwardzac kazdy `switch` z osobna.
+    const summary = typeof rawSummary === 'string' ? rawSummary : undefined;
 
     const handle = createTile({
         role: 'agent-muted',
@@ -898,8 +1008,9 @@ export function createToolCallDisplay(toolCall: ToolCallData): HTMLElement {
 
 /**
  * Chip kompaktowy — TEN SAM kafelek co `createToolCallDisplay`, bez surowych argumentów wejścia
- * w ciele, opakowany w `span.cs-tool-chip-wrap` (zgodność wsteczna: `chat_messages.ts`'s render
- * historii i jego test szukają tej klasy na DZIECKU bąbla wiadomości).
+ * w ciele, opakowany w `span.cs-tool-chip-wrap` (zgodność wsteczna: TYLKO jego test,
+ * `render_messages.emptyAssistant.test.ts`, szuka tej klasy - `chat_messages.ts` sam jej nie
+ * czyta; poprawka nieścisłości, B3 pkt 4 spec A2-fix).
  * @param {Object} toolCall - {name, input, output, status, error?}
  * @returns {HTMLElement}
  */

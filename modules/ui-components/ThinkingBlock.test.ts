@@ -176,10 +176,28 @@ test.serial('finalizeThinkingBlock: po wywolaniu blok ma status ok, jest zwiniet
     });
 });
 
-test.serial('finalizeThinkingBlock na nieznanym elemencie (brak uchwytu w WeakMap): nie wybucha, no-op', t => {
+test.serial('finalizeThinkingBlock na nieznanym elemencie (brak uchwytu w WeakMap): is-streaming schodzi zawsze, ALE status/rozwiniecie zostaja nietkniete; null/undefined nie wybuchaja', t => {
     withFakeDocument(() => {
-        const foreignEl = makeFakeEl('div') as unknown as HTMLElement;
-        t.notThrows(() => finalizeThinkingBlock(foreignEl));
+        // B3 pkt5 (spec A2-fix): same `notThrows` nic nie sprawdzaly. Realna implementacja
+        // (`ThinkingBlock.ts`) NIE jest calkowitym no-opem na obcym elemencie: `classList.remove
+        // ('is-streaming')` leci BEZWARUNKOWO (sprzatanie kosmetycznej klasy, tanie i bezpieczne
+        // nawet bez uchwytu), a WYLACZNIE trojka `setStatus`/`setTitle`/`expand` jest gated przez
+        // `_tileHandles.get(block)` - element spoza WeakMap (nie powstal przez
+        // `createThinkingBlock`) NIE dostaje zamiany statusu ani zwiniecia, bo Tile'owy uchwyt do
+        // tego po prostu nie istnieje.
+        const foreignEl = makeFakeEl('div') as unknown as FakeAny;
+        foreignEl.classList.add('is-streaming', 'cs-tile--pending');
+        const body = makeFakeEl('div') as unknown as FakeAny;
+        body.className = 'cs-tile__body';
+        body.setAttribute('hidden', '');
+        foreignEl.appendChild(body);
+
+        finalizeThinkingBlock(foreignEl as unknown as HTMLElement);
+
+        t.false(foreignEl.classList.contains('is-streaming'), 'is-streaming schodzi zawsze, niezaleznie od WeakMap');
+        t.true(foreignEl.classList.contains('cs-tile--pending'), 'brak uchwytu w WeakMap - status pending zostaje (NIE zamieniony na ok)');
+        t.true(body.hasAttribute('hidden'), 'brak uchwytu w WeakMap - body zostaje ukryte (expand(false) sie nie wykonal)');
+
         t.notThrows(() => finalizeThinkingBlock(null));
         t.notThrows(() => finalizeThinkingBlock(undefined));
     });
