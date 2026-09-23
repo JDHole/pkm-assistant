@@ -29,8 +29,18 @@ export interface TemplateUseOutcome {
 export function templateUseErrorText(error: unknown): string {
     const message = (error as { message?: unknown } | null)?.message;
     if (typeof message === 'string' && message.trim()) return message;
-    const text = String(error ?? '');
+    const text = error === null || error === undefined ? '' : _rawToString(error);
     return text && text !== '[object Object]' ? text : 'unknown error';
+}
+
+/**
+ * Osobna funkcja graniczna: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
+ * `unknown`, więc `String()` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
+ * `_safeStringify` w `core/utils/errorUtils.ts`). Wynik `[object Object]` jest tu OCZEKIWANY
+ * dla obiektów bez `message` - dlatego wołacz go osobno odfiltrowuje na 'unknown error'.
+ */
+function _rawToString(value: unknown): string {
+    return String(value);
 }
 
 /**

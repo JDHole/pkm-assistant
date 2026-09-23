@@ -823,10 +823,21 @@ function _rawErrorMessage(error: unknown): string {
             try {
                 return JSON.stringify(candidate);
             } catch {
-                return String(candidate);
+                // Cykl w strukturze - JSON.stringify rzucił. Ostatnia deska ratunku: własny
+                // toString wartości.
+                return _rawToString(candidate);
             }
         }
     }
 
     return 'Unknown sub-agent error';
+}
+
+/**
+ * Osobna funkcja graniczna: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
+ * `unknown`, więc `String()` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
+ * `_safeStringify` w `core/utils/errorUtils.ts`).
+ */
+function _rawToString(value: unknown): string {
+    return String(value);
 }

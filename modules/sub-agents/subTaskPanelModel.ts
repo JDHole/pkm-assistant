@@ -48,6 +48,21 @@ function truncate(text: string, max: number): string {
     return value.length > max ? `${value.slice(0, max)}…` : value;
 }
 
+/**
+ * `parsed` w `detailFromArgs` bywa dowolnym prymitywem albo tablicą (surowe argumenty
+ * narzędzia, zły/nietypowy JSON - "lepszy krzywy konkret niż żaden"). Osobna funkcja graniczna
+ * dla `null`/`undefined`: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
+ * `unknown`, więc `String()` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
+ * `_safeStringify` w `core/utils/errorUtils.ts`).
+ */
+function _toDisplayText(value: unknown): string {
+    return value === null || value === undefined ? '' : _rawToString(value);
+}
+
+function _rawToString(value: unknown): string {
+    return String(value);
+}
+
 /** Co pokazać jako rezultat biegu: błąd wygrywa z tekstem wyniku (jest ważniejszy). */
 function resolveOutcome(task: SubTask): string {
     if (task.status === 'running') return '';
@@ -96,7 +111,7 @@ function detailFromArgs(rawArgs: unknown): string {
         try { parsed = JSON.parse(text); } catch { return truncate(text, MAX_STEP_DETAIL_CHARS); }
     }
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-        return truncate(String(parsed ?? ''), MAX_STEP_DETAIL_CHARS);
+        return truncate(_toDisplayText(parsed), MAX_STEP_DETAIL_CHARS);
     }
     const args = parsed as Record<string, unknown>;
     for (const key of DETAIL_ARG_KEYS) {
