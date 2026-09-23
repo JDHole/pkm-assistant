@@ -69,6 +69,21 @@ test('dwa odczyty default to ta sama instancja; zmiana ustawień ją unieważnia
     t.not(trzeci, pierwszy, 'zmiana dostawcy w ustawieniach unieważnia cache');
 });
 
+test('zmiana samego timeoutMs (dodatnia -> inna dodatnia) unieważnia cache modelu', t => {
+    const slice: EmbeddingSettingsSlice = { provider: 'ollama', models: {}, apiKeys: {}, timeoutMs: 10_000 };
+    const settings: SettingsWithEmbedding = { pkmAssistant: { embedding: slice } };
+    const registry = new EmbeddingRegistry(makeDeps(settings));
+
+    const pierwszy = registry.default;
+    t.truthy(pierwszy);
+    t.is(pierwszy?.timeoutMs, 10_000);
+
+    slice.timeoutMs = 20_000;
+    const drugi = registry.default;
+    t.not(drugi, pierwszy, 'zmiana timeoutMs w ustawieniach musi dać NOWĄ instancję modelu');
+    t.is(drugi?.timeoutMs, 20_000, 'nowa instancja niesie nowy sufit czasu');
+});
+
 test('default.embed() dowozi wektor przez wstrzyknięty http', async t => {
     const settings: SettingsWithEmbedding = {
         pkmAssistant: { embedding: { provider: 'openai', models: { openai: 'text-embedding-3-small' }, apiKeys: { openai: 'sk-test' } } },

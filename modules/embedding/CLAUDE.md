@@ -202,5 +202,5 @@ Brak wybranego dostawcy = `null`, koniec. Zero czytania zmiennych środowiskowyc
 ## Znane ograniczenia
 
 - `listModels()` jest w kontrakcie i pod testami, ale bez UI - dropdown modeli embeddingu w Ustawieniach jeszcze nie istnieje.
-- `pkmAssistant.embedding.timeoutMs`/`batchSize.<p>` są konfigurowalne, ale bez kontrolki w Ustawieniach - dziś zmienia się je tylko ręczną edycją pliku ustawień.
+- `pkmAssistant.embedding.batchSize.<p>` jest konfigurowalny, ale bez kontrolki w Ustawieniach - dziś zmienia się go tylko ręczną edycją pliku ustawień. `timeoutMs` MA kontrolkę: Ustawienia → Modele → Embedding → „Limit czasu żądania" (pole w sekundach, przelicznik ×1000 przy zapisie - `modules/models/embedTimeoutInput.ts`).
 - `dispose()` NIE flushuje zaplanowanego zapisu - tylko zdejmuje timery. Do `persistDebounceMs` (domyślnie 30 s) zmian tuż przed zamknięciem Obsidiana nie trafia na dysk przed unloadem; przy następnym starcie `_resync()` je po prostu re-embeduje, bo ich mtime nie zdążył się zapisać. To NIE jest utrata danych (treść notatek żyje w vaulcie, nie w indeksie) - tylko powtórzony embedding garstki plików.
