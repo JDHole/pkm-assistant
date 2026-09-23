@@ -36,7 +36,7 @@ test('komunikat respektuje locale usera (pl vs en to różny tekst)', t2 => {
   const [pl] = transform(imageOnlyMessage);
 
   t2.not(en.content, pl.content, 'zmiana locale ma zmienić tekst — inaczej to dalej zaszyty string');
-  t2.is(pl.content, 'Obraz pominięty — model nie obsługuje vision.');
+  t2.is(pl.content, 'Obraz pominięty - model nie obsługuje vision.');
 });
 
 /**
