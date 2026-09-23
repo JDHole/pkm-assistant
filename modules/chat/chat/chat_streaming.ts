@@ -30,6 +30,16 @@ import { getDateLocale, t } from '../../../core/i18n/index.js';
 import streamingManager, { shouldUseFreshModel } from './StreamingManager.js';
 import { _tabKey } from './chat_tabs.js';
 import { buildSubTaskNotificationText, matchTabForOrigin } from './subTaskNotification.js';
+// Wiadomości maszynowe (spec A3) - dren kolejki niżej renderuje bezpośrednio (bez
+// `append_message`), więc musi widzieć ten sam klasyfikator co historia/render na żywo
+// (`chat_messages.ts`), inaczej powiadomienie/przywołanie zakolejkowane w trakcie trwającej
+// tury wracałoby jako goły dymek usera z surowym JSON-em. Sam KAFELEK (`renderMachineTile`,
+// uwaga 5 spec A3-fix) jest TRZECIM plikiem w module, importowanym przez oba mixiny (ten i
+// `chat_messages.ts`) - ten plik już importuje `buildBackgroundReceiptText` STAMTĄD, więc import
+// w drugą stronę (z `chat_messages.ts`) tworzyłby cykl wartości między dwoma mixinami; trzeci
+// plik usuwa duplikat bez tego problemu.
+import { buildMachineView } from './machineMessage.js';
+import { renderMachineTile } from './machineTile.js';
 import { stripInlineTriggers, buildInlineTriggerInstruction, getInlineTriggerSummary } from './InlineChipPlugin.js';
 import { parseTriggersIfHuman, mayRunSlashCommand, registerUrlsIfHuman } from './messagePrivileges.js';
 import { queueChatMessage, readQueuedMessage, evaluateQueuedDrain, evaluateStopQueueCancel } from './queuedMessage.js';
@@ -1579,9 +1589,14 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
         // artefaktu i spółka wypełniają pole wpisywania z kodu). Oddajemy ZAPAMIĘTANĄ pieczątkę;
         // twarde `human` w tym miejscu nadawałoby przywileje człowieka tekstowi maszyny.
         registerUrlsIfHuman(queued.text, queued.meta, registerUrlsFromText);
+        // `...queued.meta` (nie tylko `origin`) - powiadomienie o wyniku suba / przywołanie
+        // artefaktu wysłane w trakcie trwającej tury trafiają do tej samej kolejki (spec A3);
+        // bez pełnej meta na wierzchu wiadomości okno traci `_subTaskNotification`/
+        // `_artifactSummon` i klasyfikator maszynowy (`machineMessage.ts`) musiałby zgadywać
+        // WYŁĄCZNIE po treści, nawet w TEJ SAMEJ sesji, zanim ktokolwiek ją zapisał na dysk.
         await rw.addMessage('user', injectedText, {
             timestamp: new Date().toLocaleTimeString(getDateLocale(), { hour: '2-digit', minute: '2-digit' }),
-            origin: queued.meta.origin,
+            ...queued.meta,
         });
         await this.appendToActiveSession?.({
             type: 'user_message',
@@ -1593,11 +1608,19 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
         // Render in UI (only on active tab)
         if (isActiveTab) {
             this._hideQueuedIndicator();
-            const userDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--user' });
-            const agentColor = SkinManager.getAgentColor(streamAgent || 'default');
-            userDiv.style.setProperty('--cs-agent-color-rgb', hexToRgbTriplet(agentColor));
-            const textDiv = userDiv.createDiv({ cls: 'cs-message__text' });
-            this._renderUserText(textDiv, injectedText);
+            // Spec A3: wiadomość zakolejkowana może być maszynowa (guzik przywołania artefaktu
+            // wypełnia pole wpisywania i woła `send_message` bez `injectedText`, więc trwająca
+            // tura ją kolejkuje zamiast wstrzykiwać od razu) - kafelek systemowy zamiast dymka.
+            const machineView = buildMachineView({ role: 'user', content: injectedText, ...queued.meta }, { t });
+            if (machineView) {
+                await renderMachineTile(this.messages_container, this.plugin, machineView);
+            } else {
+                const userDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--user' });
+                const agentColor = SkinManager.getAgentColor(streamAgent || 'default');
+                userDiv.style.setProperty('--cs-agent-color-rgb', hexToRgbTriplet(agentColor));
+                const textDiv = userDiv.createDiv({ cls: 'cs-message__text' });
+                this._renderUserText(textDiv, injectedText);
+            }
             this.scrollToBottom();
             this._agentHeaderShown = false; // Next agent message gets header
         }

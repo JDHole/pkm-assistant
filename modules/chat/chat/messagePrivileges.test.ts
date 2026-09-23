@@ -81,9 +81,13 @@ test('propozycja delegacji wysyła z origin: machine', t => {
     t.regex(src, /send_message\(\{\s*meta:\s*MACHINE_MESSAGE_META\s*\}\)/);
 });
 
-test('przywołanie agenta z artefaktu wysyła z origin: machine', t => {
+test('przywołanie agenta z artefaktu wysyła z origin: machine i znacznikiem _artifactSummon', t => {
     const src = read('../../artifacts/artifactSummon.ts');
-    t.regex(src, /send_message\?\.\(\{\s*meta:\s*MACHINE_MESSAGE_META\s*\}\)/);
+    // `_artifactSummon: true` (spec A3) - klasyfikator wiadomości maszynowych w czacie
+    // rozpoznaje tę wiadomość po tym znaczniku i renderuje ją jako kafelek systemowy.
+    // `machineMeta(...)` samo w sobie jest fail-closed (patrz `messageOrigin.ts`), więc
+    // origin zostaje maszynowe tak samo jak przy gołym `MACHINE_MESSAGE_META`.
+    t.regex(src, /send_message\?\.\(\{\s*meta:\s*machineMeta\(\{\s*_artifactSummon:\s*true\s*\}\)\s*\}\)/);
 });
 
 test('komentarz inline z notatki wysyła z origin: machine', t => {

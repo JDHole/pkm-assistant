@@ -17,6 +17,14 @@ import { registerUrlsFromText } from '../../web/index.js';
 import { registerUrlsIfHuman } from './messagePrivileges.js';
 // Historia liczy status narzędzia TĄ SAMĄ regułą co żywa tura (chat_streaming).
 import { resolveMessageOrigin, toolResultStatus } from '../../../core/index.js';
+// Wiadomości maszynowe (spec A3, "Czat bez ścian") - powiadomienie o wyniku suba z tła i
+// przywołanie agenta po interakcji z artefaktem docierają jako `role: 'user'` (treść dla MODELU
+// bez zmian), ale w widoku są kafelkiem systemowym zamiast dymka. Klasyfikator jest czysty (zero
+// `obsidian`), mieszka obok w tym samym module. Render (`renderMachineTile`, uwaga 5 spec A3-fix)
+// jest TRZECIM plikiem w module, importowanym przez oba mixiny (ten i `chat_streaming.ts`) - bez
+// tego byłaby to trzecia kopia tej samej logiki (patrz komentarz modułu `machineTile.ts`).
+import { buildMachineView } from './machineMessage.js';
+import { renderMachineTile } from './machineTile.js';
 // Uwaga 10 (spec A2-fix): pokwitowanie delegacji w tle odtworzone z historii sklada details
 // TĄ SAMĄ funkcją co żywa tura - jedno źródło prawdy dla kolejności linii (identyfikator
 // zawsze ostatni). Import wewnątrz `modules/chat/` (oba pliki to mixiny tego samego modułu,
@@ -100,17 +108,26 @@ export async function append_message(this: ChatViewLike, role: MessageRole, cont
         // Bez znacznika = maszyna (fail-closed), więc adres z treści artefaktu czy z wyniku suba
         // NIE odblokowuje `web_read`.
         registerUrlsIfHuman(uiText, meta, registerUrlsFromText);
-        const userDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--user' });
-        userDiv.style.setProperty('--cs-agent-color-rgb', agentRgb);
-        const textDiv = userDiv.createDiv({ cls: 'cs-message__text' });
-        if (Array.isArray(content)) {
-            this._renderMultimodalUserContent(textDiv, content, uiText);
+        // Powiadomienie o wyniku suba z tła / przywołanie agenta po interakcji z artefaktem
+        // (spec A3) - klasyfikacja przez meta (świeżo dopisana kilka linii wyżej na tej samej
+        // wiadomości). Zasada nadrzędna: treść dla MODELU zostaje identyczna, zmienia się
+        // WYŁĄCZNIE render w oknie czatu.
+        const machineView = buildMachineView({ role, content, ...(meta || {}) }, { t });
+        if (machineView) {
+            await renderMachineTile(this.messages_container, this.plugin, machineView);
         } else {
-            this._renderUserText(textDiv, uiText);
+            const userDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--user' });
+            userDiv.style.setProperty('--cs-agent-color-rgb', agentRgb);
+            const textDiv = userDiv.createDiv({ cls: 'cs-message__text' });
+            if (Array.isArray(content)) {
+                this._renderMultimodalUserContent(textDiv, content, uiText);
+            } else {
+                this._renderUserText(textDiv, uiText);
+            }
+            const metaEl = userDiv.createDiv({ cls: 'cs-message__meta' });
+            metaEl.createSpan({ text: timestamp });
+            this.addMessageActions(metaEl, uiText, 'user', idx);
         }
-        const metaEl = userDiv.createDiv({ cls: 'cs-message__meta' });
-        metaEl.createSpan({ text: timestamp });
-        this.addMessageActions(metaEl, uiText, 'user', idx);
         this._agentHeaderShown = false;
     } else {
         const agentDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--agent' });
@@ -150,23 +167,30 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
         const uiText = typeof msg.content === 'string' ? msg.content : this._contentBlocksToText(msg.content);
 
         if (msg.role === 'user') {
-            // ── USER MESSAGE — .cs-message--user ──
-            const userDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--user' });
-            userDiv.style.setProperty('--cs-agent-color-rgb', agentRgb);
-
-            // Text content
-            const textDiv = userDiv.createDiv({ cls: 'cs-message__text' });
-            if (Array.isArray(msg.content)) {
-                this._renderMultimodalUserContent(textDiv, msg.content, uiText);
+            // Wiadomość maszynowa (spec A3) - meta na żywo, albo (po restarcie Obsidiana, meta
+            // nie przeżywa zapisu sesji) klasyfikacja po treści wewnątrz `buildMachineView`.
+            const machineView = buildMachineView(msg, { t });
+            if (machineView) {
+                await renderMachineTile(this.messages_container, this.plugin, machineView);
             } else {
-                this._renderUserText(textDiv, uiText);
-            }
+                // -- USER MESSAGE - .cs-message--user --
+                const userDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--user' });
+                userDiv.style.setProperty('--cs-agent-color-rgb', agentRgb);
 
-            // Meta (hover: timestamp + actions)
-            const meta = userDiv.createDiv({ cls: 'cs-message__meta' });
-            const timestamp = msg.timestamp || '';
-            if (timestamp) meta.createSpan({ text: timestamp });
-            this.addMessageActions(meta, uiText, 'user', idx);
+                // Text content
+                const textDiv = userDiv.createDiv({ cls: 'cs-message__text' });
+                if (Array.isArray(msg.content)) {
+                    this._renderMultimodalUserContent(textDiv, msg.content, uiText);
+                } else {
+                    this._renderUserText(textDiv, uiText);
+                }
+
+                // Meta (hover: timestamp + actions)
+                const meta = userDiv.createDiv({ cls: 'cs-message__meta' });
+                const timestamp = msg.timestamp || '';
+                if (timestamp) meta.createSpan({ text: timestamp });
+                this.addMessageActions(meta, uiText, 'user', idx);
+            }
 
         } else if (msg.role === 'assistant') {
             const hasToolCalls = (msg.tool_calls?.length as number) > 0;
@@ -250,7 +274,17 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
                                 status: toolResultStatus(tcOutput),
                                 agentName: _hName,
                                 query: taskQuery,
-                                response: typeof tcOutput === 'string' ? tcOutput : (tcOutput?.result || ''),
+                                // Delegacja padnięta, odtworzona z historii: `result` jest puste,
+                                // ale `error` (np. `{success:false, error:"limit czasu"}`) niesie
+                                // realny powód - bez fallbacku na `error` kafelek pokazywał
+                                // generyczne "Sub-agent zgłosił błąd bez opisu" zamiast echa
+                                // własnego opisu, mimo że opis BYŁ w danych. Ten sam szablon
+                                // (`chat.streaming.error_prefix`), którym `_chatOnToolResults`
+                                // (`chat_streaming.ts`) buduje `response` dla ŻYWEJ, padniętej
+                                // delegacji - jedno źródło formatu dla obu ścieżek.
+                                response: typeof tcOutput === 'string'
+                                    ? tcOutput
+                                    : (tcOutput?.result || (tcOutput?.error ? t('chat.streaming.error_prefix', { message: tcOutput.error }) : '')),
                                 toolsUsed: (tcOutput as HistoryToolOutput)?.tools_used || [],
                                 toolCallDetails: (tcOutput as HistoryToolOutput)?.tool_call_details || [],
                                 duration: (tcOutput as HistoryToolOutput)?.duration_ms || 0,

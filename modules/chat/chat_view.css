@@ -1045,6 +1045,10 @@
 .cs-tile__actions { display: flex; gap: 6px; margin-top: 8px; }
 .cs-tile__action { font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid color-mix(in srgb, var(--cs-tile-color) 30%, transparent); background: transparent; color: var(--text-normal); cursor: pointer; }
 .cs-tile__action:hover { background: color-mix(in srgb, var(--cs-tile-color) 10%, transparent); }
+/* B2 fix (spec A3-fix): "nie da się ustalić celu" pokazuje przyczynę (tooltip) zamiast chować
+   przycisk - stan wizualny odróżnia go od klikalnego, bez znikania z layoutu. */
+.cs-tile__action:disabled { opacity: 0.5; cursor: not-allowed; }
+.cs-tile__action:disabled:hover { background: transparent; }
 /* Blok myśli w trakcie streamingu (ThinkingBlock.ts): ciało ma własny, niższy sufit, żeby
    rosnący ślad rozumowania nie przejął głównego scrolla czatu. */
 .cs-tile.is-streaming .cs-tile__body { max-height: 200px; overflow-y: auto; }

@@ -51,6 +51,8 @@ modules/chat/
     ├── compressionPrompt.js        # czysty re-export z `config/default_prompts.js` (tam mieszka `defaultCompressionPrompt()`) - lokalne drzwi dla wnętrza czatu
     ├── memoryCandidates.js         # parser bloku MEMORY_CANDIDATES z odpowiedzi Summarizera
     ├── subTaskNotification.js      # treść powiadomienia o wyniku suba z tła + matchTabForOrigin (pure, testowalny)
+    ├── machineMessage.js           # klasyfikator wiadomości maszynowych (spec A3) - classifyMachineMessage + buildMachineView; pure, zero obsidian, testowalny
+    ├── machineTile.js               # render współdzielony kafelka wiadomości maszynowej (renderMachineTile) - wołany przez chat_messages.js I chat_streaming.js; obsidian przechodnio przez barrel ui-components, testowalny w AVA z atrapą harnessu
     ├── subTaskStrip.js             # pasek biegów subów POD zakładkami czatu; obsidian-free DOM, model z modules/sub-agents
     ├── SlashCommandsRegistry.js    # rejestr komend `/`
     ├── ToolReactorRegistry.js      # plug-in reaktory na tool results
@@ -876,6 +878,97 @@ funkcję `.call(fakeThis, ...)` - dokładnie jak `render_messages` z `chat_messa
 `handleError.tile.test.ts` dla wzorca). Inne funkcje tego pliku (np. te dotykające
 `MarkdownRenderer.render` w trakcie renderu) mogą dalej wymagać strażnika po źródle - nie
 zakładaj automatycznie, że KAŻDA funkcja stąd jest testowalna bez sprawdzenia.
+
+### Wiadomości maszynowe jako kafelek systemowy (2.3.0, A3 "Czat bez ścian")
+
+Powiadomienie o wyniku suba z tła (`buildSubTaskNotificationText`, `subTaskNotification.ts`) i
+przywołanie agenta po interakcji z artefaktem (`buildSummonMessage`, `modules/artifacts/artifactSummon.ts`)
+docierają do rozmowy jako `role: 'user'` - werdykt właściciela: "wszystkie powiadomienia
+systemowe mają się różnić wyglądem od wiadomości usera, muszą być zwijalne, i nie mogą pokazywać
+żadnych technicznych kwestii". **Zasada nadrzędna: treść dla MODELU zostaje identyczna** (obie
+funkcje budujące treść - bez zmian, testy przechodzą bez zmian treści) - zmienia się WYŁĄCZNIE
+render w oknie czatu: zamiast dymka `.cs-message--user` doklejany jest kafelek `.cs-tile`
+(`role:'system'`) przez `createTile`.
+
+- **Klasyfikator** (`chat/machineMessage.ts`, czysty, zero `obsidian`): `classifyMachineMessage`
+  + `buildMachineView`. Kolejność **meta-first, treść-fallback**:
+  1. Meta na żywo - `addMessage()`/`RollingWindow.addMessage` rozlewa meta na wierzch wiadomości,
+     więc `msg._subTaskNotification === true` / `msg._artifactSummon === true` (ten drugi
+     znacznik dokłada `artifactSummon.ts` przez `machineMeta({_artifactSummon:true})`, ten sam
+     wzorzec co `_subTaskNotification` w `chat_streaming.ts`) rozstrzygają natychmiast. **Meta
+     wygrywa w OBIE strony (uwaga 1, spec A3-fix):** `msg.origin === 'human'` zapisany na żywo
+     (`HUMAN_MESSAGE_META`) zwraca `null` PRZED fallbackiem po treści, więc człowiek piszący
+     tekst, który przypadkiem zaczyna się od tego samego stałego prefiksu nagłówka co
+     powiadomienie maszynowe, dostaje zwykły dymek, nie kafelek systemowy.
+  2. Treść (fallback) - meta NIE przeżywa zapisu sesji na dysk (`chat_session.ts`'s
+     `_restoredMessageMeta` niesie dalej WYŁĄCZNIE `tool_call_id`/`tool_calls`), więc po
+     restarcie Obsidiana jedynym dowodem jest STAŁY fragment nagłówka treści, przed pierwszym
+     placeholderem - liczony Z i18n (obu języków), nie z zahardkodowanego literału, żeby zmiana
+     tekstu nagłówka w `pl.ts`/`en.ts` nie rozjechała się cicho z klasyfikatorem. Po restarcie
+     `origin` nie ma jak przeżyć, więc dla tej ścieżki ryzyko fałszywej klasyfikacji po treści
+     zostaje (znana, zaakceptowana granica - prawdopodobieństwo niskie).
+  Zwykła wiadomość usera (bez meta, bez znanego nagłówka) zawsze daje `null` - `classifyMachineMessage`
+  sprawdza `role === 'user'` jako pierwszy warunek.
+  ⚠️ **Status suba (`ok`/`error`, tytuł "padł"/"przerwany") czyta WYŁĄCZNIE linię stanu nagłówka**
+  (ta, którą `buildSubTaskNotificationText` buduje z `status` przez `meta`/`meta_with_time` -
+  `chat.subagent_notification.status_error`/`status_aborted`), NIGDY treść wyniku (B3 fix,
+  recenzja A3-fix: stare `.includes()` na CAŁEJ treści dawało fałszywy "padł w tle" i czerwony
+  kafelek dla sukcesu, którego wynik tylko CYTOWAŁ frazę błędu, opisując wcześniejszą, już
+  naprawioną awarię). `aborted` ma WŁASNY tytuł (`chat.tile.machine.subtask_aborted`), nie dzieli
+  "padł w tle" z `error` - oba nadal kolorują kafelek na czerwono.
+- **Trzy miejsca renderują, JEDNĄ implementacją** (`renderMachineTile`, `chat/machineTile.ts` -
+  trzeci plik w module, uwaga 5 spec A3-fix): `chat_messages.ts`'s `append_message` (żywa
+  wysyłka) i `render_messages` (historia), oraz `chat_streaming.ts`'s `_chatBeforeContinue` (dren
+  kolejki wiadomości - QUEUE INJECT renderuje bez przechodzenia przez `append_message`, więc musi
+  klasyfikować osobno przez `buildMachineView`). Do A3-fix każde z trzech miejsc miało WŁASNĄ
+  kopię tej logiki ("argument cyklu importu jest słaby - trzeci plik importowany przez oba
+  mixiny nie tworzy cyklu", recenzja A3); `machineTile.ts` jest importowany PRZEZ oba mixiny
+  (`chat_messages.ts` ORAZ `chat_streaming.ts`), więc `chat_messages.ts`'s istniejący import
+  `buildBackgroundReceiptText` z `chat_streaming.ts` (patrz sekcja "Kafelki Tile w streamie i w
+  historii" wyżej) nie tworzy z nim cyklu - `machineTile.ts` sam nie importuje ŻADNEGO z tych
+  dwóch mixinów. `machineTile.ts` sam nie importuje `obsidian`, ale ciągnie go przechodnio przez barrel `ui-components`; w AVA działa dzięki atrapie z preloadu harnessu (`machineMessage.ts` jest naprawdę czysty).
+  Dokładasz CZWARTE miejsce, które renderuje wiadomość `role:'user'` z pominięciem
+  `append_message`? Sprawdź klasyfikację tam też i wołaj `renderMachineTile` stamtąd - inaczej
+  wiadomość maszynowa wraca jako goły dymek z surowym JSON-em.
+- **Uwaga 7 (spec A3-fix): `...queued.meta` w `_chatBeforeContinue` (QUEUE INJECT) zostaje
+  celowo.** `rw.addMessage('user', injectedText, {timestamp, ...queued.meta})` rozlewa CAŁĄ
+  meta zapamiętaną przy kolejkowaniu (`chat/queuedMessage.ts`), nie tylko `origin` - powiadomienie
+  suba / przywołanie artefaktu wysłane W TRAKCIE trwającej tury trafiają do TEJ SAMEJ kolejki
+  (jeden slot, patrz "Kolejka wiadomości" wyżej), więc wiadomość zakolejkowana niesie
+  `_subTaskNotification`/`subTaskId`/`_artifactSummon` DOKŁADNIE tak samo jak ścieżka żywa
+  (`append_message`). Bez pełnej meta na wierzchu okno traciłoby te znaczniki, a
+  `machineMessage.ts` musiałby zgadywać kafelek WYŁĄCZNIE po treści - nawet w TEJ SAMEJ sesji,
+  zanim ktokolwiek zapisał ją na dysk (fallback po treści jest pomyślany jako ratunek PO
+  restarcie, nie jako droga główna). Tekst dla modelu bez zmian - dotyczy wyłącznie kształtu
+  wiadomości w OKNIE.
+- **Akcja "Otwórz" na kafelku przywołania artefaktu** (B2 + uwaga 4, spec A3-fix): ścieżka
+  notatki jest rozwiązywana PRZY RENDERZE, PRZED budową kafelka (`plugin.artifactStore.read(id)` -
+  `renderMachineTile` jest `async`, wołacze już są funkcjami `async`, więc `await` przed
+  `createTile` jest tani i deterministyczny - zero migotania przycisku). Sklep zna ścieżkę ->
+  przycisk aktywny, klik robi TYLKO `plugin.openNote(path)` (uwaga 4 - **żadnych** skutków
+  ubocznych `activateArtifactInChat`, którą stara wersja wołała: bez przypinania artefaktu jako
+  aktywnego, bez odsłaniania prawego panelu, bez przełączania widoku czatu - "Otwórz" ma
+  otworzyć notatkę, nic więcej). Sklep NIE zna ścieżki (JSON bez `id`, artefakt skasowany między
+  wysłaniem powiadomienia a renderem) -> przycisk zostaje WIDOCZNY, ale `disabled`, z tooltipem
+  i18n `chat.tile.machine.open_unavailable` (`Tile.ts`'s `TileAction.disabled`/`title`, dodane w
+  A3-fix - **poprawka nieścisłości**: wcześniejsza wersja tej notatki twierdziła, że `TileAction`
+  nie ma pola `disabled` i jedynym sposobem jest nie renderować przycisku wcale; to było
+  nieprawdziwe - `Tile.ts`'s `.cs-tile__actions` jest w `tile.el` od razu, więc wołacz mógł
+  ustawić `disabled` bez zmiany `Tile.ts` samego, co A3-fix właśnie zrobił).
+- **Details budowane z REALNEJ treści wiadomości**, nie odbudowywane z metadanych - dla
+  powiadomienia: wszystko OPRÓCZ pierwszego akapitu (nagłówek, staje się `title`) i OPRÓCZ
+  ostatniego akapitu (stopka-instrukcja dla modelu, `chat.subagent_notification.footer` - tekst
+  STAŁY bez placeholderów, więc `.endsWith()` jest dokładny w obu językach), OPRÓCZ powtórzonej
+  linii stanu na starcie (uwaga 8 - `summary` już ją pokazuje w nagłówku Tile), PLUS identyfikator
+  suba jako OSTATNIA linia (uwaga 2 - `chat.tile.sub.background_id`, ten sam klucz i18n co
+  pokwitowanie w tle, z meta `msg.subTaskId` albo z drugiej zmiennej nagłówka treści); dla
+  artefaktu: sekcje z bloku ```` ```json ```` sparsowane na "✓ tekst"/"○ tekst", BEZ samego bloku
+  JSON w widoku. Parsowanie JSON-a zawiedzie ALBO sekcje wypadną puste (uwaga 3, spec A3-fix) =
+  details składa się PO LUDZKU z tego, co da się ustalić - `"{tytuł}, {typ}, {status}"`, BEZ `id`
+  artefaktu i BEZ frazy akcji DLA MODELU (`"user: {akcja}"` z nagłówka - stary fallback zwracał
+  surowy nagłówek w całości, czyli obie te rzeczy user nie ma prawa zobaczyć); brak danych poza
+  tytułem -> details to sam tytuł. `id` artefaktu (gdy sklep go zna z samego JSON-a) zostaje
+  dostępny OSOBNO w `view.open.artifactId` - fallback details nigdy nie blokuje akcji "Otwórz".
 
 ---
 
