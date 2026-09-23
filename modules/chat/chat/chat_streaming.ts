@@ -972,11 +972,12 @@ export function _chatResolveTools(this: ChatViewLike, turn: ChatTurn, _applyEnab
         systemTools = (this.plugin.toolRegistry.getToolDefinitions() as ChatToolDefinition[])
             .filter((t: ChatToolDefinition) => mcpAllowedNames.has(t.function?.name || t.name));
 
-        // Layer 2: active user/custom MCP server tools + standalone. Odfiltruj wyłączone (disabled_tools).
+        // Layer 2: active user/custom MCP server tools. Odfiltruj wyłączone (disabled_tools).
+        // `preferred_tools` (druga, martwa oś) skasowane - ServerManager nigdy nie przyjmował
+        // filtra narzędzi, tylko filtr serwerów.
         const preferredServers = getAgentServerFilter(this.plugin.serverManager, agent);
-        const preferredTools = (agent?.preferredTools as string[] | undefined) || [];
         const disabledSet = new Set<string | undefined>(Array.isArray(agent.disabled_tools) ? agent.disabled_tools : []);
-        mcpActiveTools = (this.plugin.serverManager?.getActiveToolDefinitions(preferredServers, preferredTools) || [])
+        mcpActiveTools = (this.plugin.serverManager?.getActiveToolDefinitions(preferredServers) || [])
             .filter((t: ChatToolDefinition) => !disabledSet.has(t.function?.name || t.name));
         tools = dedupeToolDefinitions([...systemTools, ...mcpActiveTools]);
 
