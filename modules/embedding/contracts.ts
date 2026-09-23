@@ -593,6 +593,13 @@ export interface IndexerStatusSnapshot {
 // (stary plik zostaje nietknięty, dopóki nowy nie jest zapisany I odczytany z powrotem).
 // To jest osobny, ISTNIEJĄCY mechanizm - `IndexerNotice{kind:'migrated'|'migration_failed'}`
 // wyżej, opisany w `modules/embedding/CLAUDE.md`.
+//
+// Ta weryfikacja przez odczyt zwrotny jest WŁASNOŚCIĄ SAMEJ migracji (`_migrateV1`), nie
+// ogólnej ścieżki zapisu. Gdy migracja PADA i wołacz spada na zwykły pełny rebuild (`_fullScan`),
+// TEN rebuild kasuje stary plik v1 przez zwykłą, ogólną ścieżkę sprzątania balastu
+// (`_cleanupLegacyV1IfPresent`, wołana po KAŻDYM udanym zapisie meta, migracja czy nie) - DOPIERO
+// po udanym zapisie meta v2 TEGO rebuildu, ale BEZ osobnego odczytu zwrotnego (tamten already-
+// -successful zapis nie musi udowadniać się drugi raz).
 
 // ════════════════════════════════════════════════════════════════════════════
 // 11. Meldunek migracji modelu (plik zostaje bez zmian - tu dla kompletności drzwi)
