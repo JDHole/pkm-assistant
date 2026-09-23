@@ -14,7 +14,19 @@ import { truncatePreview } from './textPreview.js';
 export type TileRole = 'system' | 'agent' | 'agent-muted' | 'user';
 export type TileStatus = 'ok' | 'error' | 'pending';
 
-export interface TileAction { label: string; onClick: (ev: MouseEvent) => void; }
+export interface TileAction {
+    label: string;
+    onClick: (ev: MouseEvent) => void;
+    /** Gdy `true`: przycisk WIDOCZNY, ale `disabled` (atrybut `disabled` + property na
+     *  `HTMLButtonElement`) i BEZ listenera kliknięcia dopiętego w ogóle - "nie da się dziś
+     *  ustalić celu" pokazuje przyczynę (patrz `title`), zamiast chować przycisk (B2 fix,
+     *  recenzja A3-fix: kafelek wiadomości maszynowej z artefaktem bez znanej ścieżki notatki -
+     *  wcześniej jedynym sposobem było w ogóle nie renderować akcji). */
+    disabled?: boolean;
+    /** Tooltip (natywny atrybut `title`) - dziś używany razem z `disabled`, żeby wytłumaczyć
+     *  DLACZEGO przycisk jest wyłączony. */
+    title?: string;
+}
 
 export interface TileSpec {
     role: TileRole;
@@ -158,7 +170,16 @@ export function createTile(spec: TileSpec): TileHandle {
             btn.type = 'button';
             btn.className = 'cs-tile__action';
             btn.textContent = action.label;
-            btn.addEventListener('click', (ev: MouseEvent) => action.onClick(ev));
+            if (action.disabled) {
+                // Atrybut ORAZ property - atrapa DOM-u testów (`makeFakeEl`) nie ma natywnej
+                // semantyki `disabled`, więc listener jest po prostu NIE dopinany (fail-safe
+                // także tam, gdzie `disabled` nie blokuje realnie kliknięcia).
+                btn.disabled = true;
+                btn.setAttribute('disabled', '');
+            } else {
+                btn.addEventListener('click', (ev: MouseEvent) => action.onClick(ev));
+            }
+            if (action.title) btn.setAttribute('title', action.title);
             actionsEl.appendChild(btn);
         }
         body.appendChild(actionsEl);

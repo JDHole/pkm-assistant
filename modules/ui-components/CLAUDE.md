@@ -100,10 +100,27 @@ Decyzja prowadzącego (spec A2-fix), zastępuje "details zawsze zaczynają się 
 zwróconych przez `formatToolOutput`. Dwa kroki, oba czyste funkcje w `ToolCallDisplay.ts`:
 
 1. **`_coerceToText(value)`** - `summaryText`/`detailText` NAJPIERW przechodzą przez
-   `typeof === 'string'` (inaczej: tablica -> `join('\n')`, obiekt -> `JSON.stringify` z
-   sufitem, reszta -> `String(x)`). Nigdy `[object Object]`, nigdy wyjątek (B2 fix - regresja
-   zmierzona względem HEAD: `kom_send` z `message` obiektem, `idea_review` z `comments` tablicą,
-   `todo` z polem-obiektem rzucały `TypeError`/`appendChild` na obiekcie zamiast Node).
+   `typeof === 'string'` (inaczej: tablica -> KAŻDY element rekurencyjnie przez `_coerceToText`,
+   potem `join('\n')`; obiekt -> `_safeStringify` (niżej); reszta -> `String(x)`). Bez
+   `[object Object]` i bez wyjątku dla danych, które przyszły z JSON-a; poza zasięgiem zostają tablica
+   zawierająca samą siebie (RangeError) i obiekt z `toJSON` zwracającym `undefined` (`[object Object]`),
+   oba nieosiągalne z odpowiedzi narzędzia [measured, druga recenzja A3-fix] (B2 fix, A2-fix - regresja zmierzona względem HEAD: `kom_send`
+   z `message` obiektem, `idea_review` z `comments` tablicą, `todo` z polem-obiektem rzucały
+   `TypeError`/`appendChild` na obiekcie zamiast Node).
+   ⚠️ **B1 fix (recenzja A3-fix, 2026-09-24): pierwsza wersja obiecywała "nigdy wyjątek" i tego
+   nie dotrzymywała.** Gołe `value.join('\n')` na tablicy OBIEKTÓW wołało `String(obj)` na każdym
+   elemencie - czyli dosłownie `[object Object]` (realny wejście: `idea_review`/`plan_review`
+   `comments` jako tablica obiektów z zewnętrznego serwera MCP albo modelu - pole jest
+   zadeklarowane jako `string`, ale nic tego nie waliduje). Gołe `JSON.stringify(value)` na
+   obiekcie z cyklem rzucało `TypeError: Converting circular structure to JSON`, a na obiekcie z
+   BigIntem `TypeError: Do not know how to serialize a BigInt` - `JSON` nie zna tego typu.
+   Naprawa: tablica koercjuje KAŻDY element rekurencyjnie (element-obiekt trafia do
+   `_safeStringify`, nie do gołego `String()`); obiekt idzie przez `_safeStringify(value, limit)`
+   - `JSON.stringify` z replacerem (`bigint` -> `String(v)`, cykl wykryty `WeakSet` ->
+   `'[cykl]'`), całość w `try/catch` z fallbackiem na listę kluczy obiektu (drugi, wewnętrzny
+   `try/catch` na wypadek gdyby nawet `Object.keys` rzucił). Testy przez PUBLICZNE
+   `createCompactToolChip`, dokładnie wejścia z sondy recenzenta:
+   `ToolCallDisplay.coerce.test.ts`.
 2. **`_composeTileBody(summaryText, detailText)`** - `detailText` w całości, gdy ZAWIERA
    `summaryText` (`.includes()`, **nie** `.startsWith()` - `ask_user`'s `detailText` zawsze
    niesie pytanie WEWNĄTRZ szablonu "Pytanie: {q}\n...", więc ten jeden generyczny check usuwa

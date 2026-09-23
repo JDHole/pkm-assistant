@@ -227,6 +227,35 @@ test.serial('kafelek bez details/actions: brak aria-expanded, klik nic nie robi'
     });
 });
 
+test.serial('actions: disabled - przycisk widoczny z atrybutem disabled i title, klik nic nie wywoluje (B2, spec A3-fix)', t => {
+    withFakeDocument(() => {
+        let clicks = 0;
+        const handle = createTile(baseSpec({
+            actions: [{ label: 'Otworz', disabled: true, title: 'Notatka nieznana', onClick: () => { clicks++; } }],
+        }));
+        const el = handle.el as unknown as FakeEl;
+        const actionsEl = findByClass(el, 'cs-tile__actions')!;
+        const btn = actionsEl.children[0];
+        t.is(btn.textContent, 'Otworz', 'przycisk zostaje WIDOCZNY, nie znika');
+        t.true(btn.hasAttribute('disabled'));
+        t.is(btn.getAttribute('title'), 'Notatka nieznana');
+        btn.fire('click', { type: 'click' });
+        t.is(clicks, 0, 'listener kliknięcia nie jest w ogóle dopięty dla disabled action');
+    });
+});
+
+test.serial('actions: bez disabled - brak atrybutu disabled, klik dziala jak dotad', t => {
+    withFakeDocument(() => {
+        const handle = createTile(baseSpec({
+            actions: [{ label: 'Otworz', onClick: () => {} }],
+        }));
+        const el = handle.el as unknown as FakeEl;
+        const btn = findByClass(el, 'cs-tile__actions')!.children[0];
+        t.false(btn.hasAttribute('disabled'));
+        t.is(btn.getAttribute('title'), null);
+    });
+});
+
 test.serial('summary dluzsze niz 80 znakow jest przyciete (truncatePreview: 80 zn. + wielokropek)', t => {
     withFakeDocument(() => {
         const long = 'a'.repeat(100);

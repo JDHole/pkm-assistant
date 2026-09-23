@@ -838,21 +838,58 @@ function _toTileStatus(rawStatus: string | undefined): TileStatus {
 }
 
 /**
+ * `JSON.stringify` bezpieczny na wejściach, na których goły `JSON.stringify` rzuca (B1 fix,
+ * recenzja A3-fix - `_coerceToText` obiecywał "nigdy wyjątek", ale nie dotrzymywał tego na
+ * cyklu ani na BigIncie w obiekcie): replacer zamienia `bigint` na `String(v)` (JSON nie zna
+ * tego typu - rzuca `TypeError: Do not know how to serialize a BigInt` bez tego) i wykrywa
+ * cykl przez `WeakSet` (`'[cykl]'` zamiast `TypeError: Converting circular structure to
+ * JSON`). Całość w `try/catch` - gdyby coś inne w łańcuchu i tak rzuciło, fallback jest lista
+ * kluczy obiektu (a nie samego obiektu - `Object.keys` też może rzucić na egzotycznym Proxy,
+ * stąd DRUGI, wewnętrzny `try/catch`), nigdy pusty string na milczącym wyjątku. Wzór jak
+ * `_safeStringify` w `core/utils/errorUtils.ts` (ten sam kształt, tu dodatkowo replacer
+ * BigInt - errorUtils go nie potrzebuje, bo błędy API nie niosą BigIntów).
+ */
+function _safeStringify(value: unknown, limit: number): string {
+    const seen = new WeakSet<object>();
+    try {
+        const json = JSON.stringify(value, (_key, v: unknown) => {
+            if (typeof v === 'bigint') return String(v);
+            if (v && typeof v === 'object') {
+                if (seen.has(v)) return '[cykl]';
+                seen.add(v);
+            }
+            return v;
+        });
+        return _truncate(json ?? _rawToString(value), limit);
+    } catch {
+        try {
+            return _truncate(Object.keys(value as object).join(', '), limit);
+        } catch {
+            return '';
+        }
+    }
+}
+
+/**
  * Ujednolica pole na string, ZANIM cokolwiek je skleja (regula nadrzedna szczegolow kafelka,
  * spec A2-fix - decyzja prowadzacego, zastepuje "details zawsze zaczynaja sie od summary"; B2
  * fix: `TypeError` na nie-stringowym `fmt.detail`/`fmt.summary`, np. `kom_send` z `message`
  * obiektem, `idea_review` z `comments` tablica, `todo` z polem-obiektem). String bez zmian;
- * tablica -> `join('\n')`; obiekt -> `JSON.stringify` z sufitem (jak `_formatGenericOutput`);
- * reszta (liczba, bool...) -> `String(x)`. Nigdy `[object Object]`, nigdy wyjatek.
+ * `null`/`undefined` -> `''`; tablica -> KAŻDY element rekurencyjnie przez `_coerceToText`,
+ * `join('\n')` (B1 fix, recenzja A3-fix: dawne `value.join('\n')` gołe wołało `String(obj)` na
+ * elementach-obiektach, czyli dokładnie `[object Object]` - tablica obiektów, np. `idea_review`'s
+ * `comments: [{text:'...'}]` z zewnętrznego serwera MCP albo modelu, jest realna); obiekt ->
+ * `_safeStringify` (nigdy wyjątek, patrz wyżej); reszta (liczba, bool, bigint, symbol...) ->
+ * `String(x)`. Nigdy `[object Object]`, nigdy wyjątek.
  */
 function _coerceToText(value: unknown, limit = 2000): string {
     if (typeof value === 'string') return value;
     if (value == null) return '';
-    if (Array.isArray(value)) return value.join('\n');
-    if (typeof value === 'object') return _truncate(JSON.stringify(value), limit);
+    if (Array.isArray(value)) return value.map(v => _coerceToText(v, limit)).join('\n');
+    if (typeof value === 'object') return _safeStringify(value, limit);
     // `_rawToString` (definiowana nizej w tym pliku dla `_fallbackToolText`) resetuje zawezenie
     // TS z powrotem do golego `unknown` - `no-base-to-string` nie umie wywnioskowac, ze w tym
-    // miejscu `value` jest juz PRYMITYWEM (liczba/bool), nie obiektem.
+    // miejscu `value` jest juz PRYMITYWEM (liczba/bool/bigint/symbol), nie obiektem.
     return _rawToString(value);
 }
 
