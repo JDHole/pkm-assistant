@@ -49,11 +49,11 @@ export class KomunikatorCleanupModal extends Modal {
         contentEl.createEl('p', { text: t('communicator.cleanup.desc'), cls: 'setting-item-description' });
 
         const meta = contentEl.createDiv({ cls: 'komunikator-cleanup-meta' });
-        const row = (label: string, value: unknown) => {
+        const row = (label: string, value: string | undefined) => {
             if (!value) return;
             const line = meta.createDiv({ cls: 'komunikator-cleanup-meta__row' });
             line.createSpan({ cls: 'komunikator-cleanup-meta__label', text: label });
-            line.createSpan({ cls: 'komunikator-cleanup-meta__value', text: String(value) });
+            line.createSpan({ cls: 'komunikator-cleanup-meta__value', text: value });
         };
         row(t('communicator.cleanup.field_from'), this.message.from);
         row(t('communicator.cleanup.field_to'), this.message.to);
