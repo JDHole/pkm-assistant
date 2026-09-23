@@ -49,7 +49,7 @@ const COMPRESSION_PL = `Jesteś systemem kompresji kontekstu rozmowy AI asystent
 ROZMOWA DO SKOMPRESOWANIA:
 {{CONVERSATION}}
 
-STWÓRZ STRUKTURALNE PODSUMOWANIE w poniższym formacie. Każda sekcja jest opcjonalna — pomiń jeśli nie dotyczy.
+STWÓRZ STRUKTURALNE PODSUMOWANIE w poniższym formacie. Każda sekcja jest opcjonalna - pomiń jeśli nie dotyczy.
 
 ## 1. Cel rozmowy
 Co user chce osiągnąć? Główny temat/zadanie. (1-2 zdania)
@@ -77,19 +77,19 @@ Co jeszcze do zrobienia? Nierozwiązane kwestie? Następne kroki? (punkty, tylko
 {{EMERGENCY_SECTION}}
 ZASADY:
 - Po polsku
-- Maks ~800 słów (proporcjonalnie do ilości treści — krótka rozmowa = krótsze podsumowanie)
-- ZACHOWAJ konkretne nazwy plików, zmiennych, funkcji — agent ich potrzebuje
+- Maks ~800 słów (proporcjonalnie do ilości treści - krótka rozmowa = krótsze podsumowanie)
+- ZACHOWAJ konkretne nazwy plików, zmiennych, funkcji - agent ich potrzebuje
 - ZACHOWAJ treść wiadomości usera (agent musi wiedzieć co user powiedział)
-- Jeśli jest POPRZEDNIE PODSUMOWANIE — rozszerzaj je o nowe informacje, nie powtarzaj tego samego
+- Jeśli jest POPRZEDNIE PODSUMOWANIE - rozszerzaj je o nowe informacje, nie powtarzaj tego samego
 - Pomiń: pozdrowienia, small talk, powtórzenia, parametry tool calli (zachowaj WYNIK)
 
 ═══ PAMIĘĆ DŁUGOTERMINOWA (opcjonalnie) ═══
-Rozmowa zaraz zniknie z kontekstu. Jeśli pojawiło się w niej COŚ TRWAŁEGO wartego zapamiętania na przyszłość, dopisz na SAMYM KOŃCU odpowiedzi (po podsumowaniu) blok kandydatów. Bramka istotności — zapisuj TYLKO:
+Rozmowa zaraz zniknie z kontekstu. Jeśli pojawiło się w niej COŚ TRWAŁEGO wartego zapamiętania na przyszłość, dopisz na SAMYM KOŃCU odpowiedzi (po podsumowaniu) blok kandydatów. Bramka istotności - zapisuj TYLKO:
 - trwałe fakty/preferencje usera,
 - reguły współpracy,
 - korekty od usera ("nie tak, rób X"),
 - kontekst projektu wart >1 sesji.
-NIE zapisuj: jednorazowych detali tego zadania, rzeczy które już są w PAMIĘCI DŁUGOTERMINOWEJ powyżej (nie duplikuj), spekulacji. Zero kandydatów to normalne — nie wymyślaj na siłę. Maks 3.
+NIE zapisuj: jednorazowych detali tego zadania, rzeczy które już są w PAMIĘCI DŁUGOTERMINOWEJ powyżej (nie duplikuj), spekulacji. Zero kandydatów to normalne - nie wymyślaj na siłę. Maks 3.
 
 Format bloku (DOKŁADNIE tak, tylko jeśli masz kandydatów; pomiń całość jeśli zero):
 ${MEMORY_CANDIDATES_SENTINEL}
@@ -104,7 +104,7 @@ const COMPRESSION_EN = `You are a context-compression system for an AI assistant
 CONVERSATION TO COMPRESS:
 {{CONVERSATION}}
 
-CREATE A STRUCTURAL SUMMARY in the format below. Every section is optional — skip it if it does not apply.
+CREATE A STRUCTURAL SUMMARY in the format below. Every section is optional - skip it if it does not apply.
 
 ## 1. Goal of the conversation
 What does the user want to achieve? The main topic/task. (1-2 sentences)
@@ -132,19 +132,19 @@ What is still to be done? Unresolved questions? Next steps? (bullets, only if th
 {{EMERGENCY_SECTION}}
 RULES:
 - In English
-- Max ~800 words (proportional to the amount of content — a short conversation = a shorter summary)
-- KEEP concrete names of files, variables, functions — the agent needs them
+- Max ~800 words (proportional to the amount of content - a short conversation = a shorter summary)
+- KEEP concrete names of files, variables, functions - the agent needs them
 - KEEP the content of the user's messages (the agent has to know what the user said)
-- If there is a PREVIOUS SUMMARY — extend it with the new information, do not repeat the same things
+- If there is a PREVIOUS SUMMARY - extend it with the new information, do not repeat the same things
 - Skip: greetings, small talk, repetitions, tool-call parameters (keep the RESULT)
 
 ═══ LONG-TERM MEMORY (optional) ═══
-The conversation is about to disappear from the context. If anything DURABLE worth remembering for the future came up in it, append a block of candidates at the VERY END of your answer (after the summary). Relevance gate — save ONLY:
+The conversation is about to disappear from the context. If anything DURABLE worth remembering for the future came up in it, append a block of candidates at the VERY END of your answer (after the summary). Relevance gate - save ONLY:
 - durable facts/preferences of the user,
 - rules of cooperation,
 - corrections from the user ("no, do X instead"),
 - project context worth >1 session.
-Do NOT save: one-off details of this task, things already in the LONG-TERM MEMORY above (do not duplicate), speculation. Zero candidates is normal — do not force it. Max 3.
+Do NOT save: one-off details of this task, things already in the LONG-TERM MEMORY above (do not duplicate), speculation. Zero candidates is normal - do not force it. Max 3.
 
 Block format (EXACTLY like this, only if you have candidates; skip the whole thing if zero):
 ${MEMORY_CANDIDATES_SENTINEL}
