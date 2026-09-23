@@ -133,7 +133,7 @@ import {
   EmbeddingRegistry,
   countDocs,
 } from "../modules/embedding/index.js";
-import type { EmbeddingProvider, EmbeddingProviderId, VaultLike } from "../modules/embedding/index.js";
+import type { EmbeddingProvider, EmbeddingProviderId, VaultLike, IndexerNotice } from "../modules/embedding/index.js";
 import { EmbeddingHelper } from "../modules/memory/index.js";
 
 /** Kształt jednorazowej migracji `pkm.modelLibrary` (patrz `_migrateToModelLibrary`). */
@@ -145,6 +145,21 @@ interface ModelLibraryEntry {
 interface ModelLibraryMigration {
   main: ModelLibraryEntry[];
   minion: ModelLibraryEntry[];
+}
+
+/** Parametry interpolacji dla `embedding.notice.<kind>` (patrz `core/i18n/{pl,en}.ts`). */
+function indexerNoticeParams(n: IndexerNotice): Record<string, string> | undefined {
+  switch (n.kind) {
+    case 'migrated':
+      return { from: (n.fromBytes / (1024 * 1024)).toFixed(1), to: (n.toBytes / (1024 * 1024)).toFixed(1) };
+    case 'dims_changed':
+      return { from: String(n.from), to: String(n.to) };
+    case 'migration_failed':
+      return { reason: n.reason };
+    case 'model_changed':
+    case 'index_corrupt':
+      return undefined;
+  }
 }
 
 export default class PkmAssistantPlugin extends PluginBase {
@@ -682,6 +697,8 @@ export default class PkmAssistantPlugin extends PluginBase {
         artifactsExclude: () => (this.env?.settings?.pkmAssistant?.indexArtifacts
           ? null
           : (this.env?.settings?.pkmAssistant?.artifactsFolder || 'PKM Assistant/Artefakty')),
+        // Wykryty rebuild/migracja indeksu (D6/D5) - jedno powiadomienie usera na zdarzenie.
+        notify: (n: IndexerNotice) => new Notice(t(`embedding.notice.${n.kind}`, indexerNoticeParams(n)), 8000),
       });
       void this.vaultIndexer.initialize(); // no await
     } catch (e) {
