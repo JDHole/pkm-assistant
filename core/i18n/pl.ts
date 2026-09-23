@@ -125,6 +125,35 @@ export const pl: Record<string, string> = {
   'chat.tile.tool.error_no_details': 'Narzędzie zgłosiło błąd bez opisu',
   'chat.tile.raw_args': 'Szczegóły techniczne',
 
+  // ── Tile sub-agenta i bloku systemowego błędu (2.3.0, A2 "Czat bez ścian") ──
+  'chat.tile.sub.title': 'Sub-agent{{name}}',
+  'chat.tile.sub.pending': 'Sub-agent{{name}} pracuje',
+  'chat.tile.sub.background': 'Zlecono w tle: {{name}}',
+  'chat.tile.sub.background_summary': 'wynik wróci powiadomieniem',
+  'chat.tile.sub.background_id': 'Identyfikator: {{id}}',
+  'chat.tile.sub.task_label': 'Zadanie',
+  'chat.tile.sub.result_label': 'Wynik',
+  'chat.tile.sub.footer_used': 'Użył: {{tools}} ({{calls}})',
+  'chat.tile.sub.calls_one': '{{n}} wywołanie',
+  'chat.tile.sub.calls_few': '{{n}} wywołania',
+  'chat.tile.sub.calls_many': '{{n}} wywołań',
+  // `calls_other` istnieje wyłącznie dla parytetu kluczy pl/en (`core/i18n/parity.test.ts`) -
+  // polska gałąź `pluralCalls` (`SubAgentBlock.ts`) nigdy jej nie czyta, en ma tylko dwie formy.
+  'chat.tile.sub.calls_other': '{{n}} wywołań',
+  'chat.tile.sub.footer_tokens': '{{tokens}} tokenów',
+  'chat.tile.sub.duration_min': '{{min}} min {{sec}} s',
+  'chat.tile.sub.duration_sec': '{{sec}} s',
+  'chat.tile.sub.tokens_thousands': '{{value}} tys.',
+  'chat.tile.sub.error_no_details': 'Sub-agent zgłosił błąd bez opisu',
+  'chat.tile.tool.todo_summary': '{{done}}/{{total}}',
+  'chat.tile.tool.todo_summary_titled': '{{done}}/{{total}} - {{title}}',
+  'chat.tile.todo.finished': 'zamknięta',
+  'chat.tile.ask.body': 'Pytanie: {{question}}\nOdpowiedź: {{answer}}',
+  'chat.tile.ask.timeout': 'brak odpowiedzi w limicie czasu',
+  'chat.tile.ask.failed': 'pytanie nie doczekało się odpowiedzi',
+  'chat.tile.error.title': 'Błąd odpowiedzi',
+  'chat.tile.error.stall': 'Model przestał odpowiadać',
+
   // ── Tytuły zakładek widoków (ItemView.displayText) ──
   // Nie powtarzają nazwy pluginu: Obsidian dokleja ją sam w palecie komend, a dwa widoki
   // pod tym samym napisem „PKM Assistant" dawały w palecie dwa identyczne wpisy.
@@ -276,9 +305,7 @@ export const pl: Record<string, string> = {
   // Sufit łańcucha auto-tur po subach osiągnięty - wynik czeka w kolejce.
   'chat.streaming.auto_turn_chain_limit': 'Wynik pomocnika czeka na Twoją wiadomość - limit auto-tur z rzędu osiągnięty.',
   // Pokwitowanie delegacji w TLE (blok sub-agenta w czacie - user, nie model).
-  'chat.subagent_background_task': '{{name}} - zadanie {{task_id}}',
   'chat.subagent_background_queued': 'W kolejce: {{count}} - ruszą, gdy zwolni się miejsce.',
-  'chat.subagent_background_note': 'Pracuje w tle - wynik wróci osobnym powiadomieniem w tej rozmowie.',
   // Powiadomienie o WYNIKU suba z tła - wstrzykiwane w rozmowę, czyta je model I user.
   'chat.subagent_notification.header': '[POWIADOMIENIE SYSTEMU] Sub-agent {{name}} skończył zadanie {{task_id}}, które zleciłeś w tle.',
   'chat.subagent_notification.meta': 'Stan: {{status}}.',
@@ -343,12 +370,6 @@ export const pl: Record<string, string> = {
 
   // ── Sub-agent block ──
   'subagent.label': 'Sub-agent',
-  'subagent.expert': 'Sub-agent ekspert',
-  'subagent.minion_task': 'Zadanie sub-agenta',
-  'subagent.master_consult': 'Konsultacja z sub-agentem',
-  'subagent.query': 'Zapytanie: {{query}}',
-  'subagent.tools': 'Narzędzia: {{tools}}',
-  'subagent.tokens': 'Tokeny: {{input}} wejść / {{output}} wyjść',
 
   // ── Audio recorder ──
   'audio.recorded': 'Nagranie: {{size}} KB, {{seconds}}s',

@@ -125,6 +125,36 @@ export const en: Record<string, string> = {
   'chat.tile.tool.error_no_details': 'Tool reported an error without details',
   'chat.tile.raw_args': 'Technical details',
 
+  // ── Sub-agent tile and system error block (2.3.0, A2 "Chat without walls") ──
+  'chat.tile.sub.title': 'Sub-agent{{name}}',
+  'chat.tile.sub.pending': 'Sub-agent{{name}} is working',
+  'chat.tile.sub.background': 'Sent to background: {{name}}',
+  'chat.tile.sub.background_summary': 'result will arrive as a notification',
+  'chat.tile.sub.background_id': 'Id: {{id}}',
+  'chat.tile.sub.task_label': 'Task',
+  'chat.tile.sub.result_label': 'Result',
+  'chat.tile.sub.footer_used': 'Used: {{tools}} ({{calls}})',
+  'chat.tile.sub.calls_one': '{{n}} call',
+  'chat.tile.sub.calls_other': '{{n}} calls',
+  // `calls_few`/`calls_many` exist purely for pl/en key parity (`core/i18n/parity.test.ts`) -
+  // the English branch of `pluralCalls` (`SubAgentBlock.ts`) never reads them, pl needs three
+  // forms.
+  'chat.tile.sub.calls_few': '{{n}} calls',
+  'chat.tile.sub.calls_many': '{{n}} calls',
+  'chat.tile.sub.footer_tokens': '{{tokens}} tokens',
+  'chat.tile.sub.duration_min': '{{min}} min {{sec}} s',
+  'chat.tile.sub.duration_sec': '{{sec}} s',
+  'chat.tile.sub.tokens_thousands': '{{value}}k',
+  'chat.tile.sub.error_no_details': 'Sub-agent reported an error without details',
+  'chat.tile.tool.todo_summary': '{{done}}/{{total}}',
+  'chat.tile.tool.todo_summary_titled': '{{done}}/{{total}} - {{title}}',
+  'chat.tile.todo.finished': 'closed',
+  'chat.tile.ask.body': 'Question: {{question}}\nAnswer: {{answer}}',
+  'chat.tile.ask.timeout': 'no answer within the time limit',
+  'chat.tile.ask.failed': 'the question went unanswered',
+  'chat.tile.error.title': 'Response error',
+  'chat.tile.error.stall': 'Model stopped responding',
+
   // ── Tytuły zakładek widoków (ItemView.displayText) ──
   // Nie powtarzają nazwy pluginu: Obsidian dokleja ją sam w palecie komend, a dwa widoki
   // pod tym samym napisem „PKM Assistant" dawały w palecie dwa identyczne wpisy.
@@ -276,9 +306,7 @@ export const en: Record<string, string> = {
   // Auto-turn chain limit reached - the result is waiting in the queue.
   'chat.streaming.auto_turn_chain_limit': 'A helper\'s result is waiting for your message - the auto-turn chain limit was reached.',
   // Background delegation receipt (sub-agent block in chat - for the user, not the model).
-  'chat.subagent_background_task': '{{name}} - task {{task_id}}',
   'chat.subagent_background_queued': 'Queued: {{count}} - will start once a slot frees up.',
-  'chat.subagent_background_note': 'Working in the background - the result will arrive as a separate notification in this conversation.',
   // Notification with the RESULT of a background sub-agent - injected into the conversation,
   // read by both the model and the user.
   'chat.subagent_notification.header': '[SYSTEM NOTIFICATION] Sub-agent {{name}} finished task {{task_id}}, which you started in the background.',
@@ -342,12 +370,6 @@ export const en: Record<string, string> = {
 
   // ── Sub-agent block ──
   'subagent.label': 'Sub-agent',
-  'subagent.expert': 'Sub-agent expert',
-  'subagent.minion_task': 'Sub-agent task',
-  'subagent.master_consult': 'Sub-agent consultation',
-  'subagent.query': 'Query: {{query}}',
-  'subagent.tools': 'Tools: {{tools}}',
-  'subagent.tokens': 'Tokens: {{input}} in / {{output}} out',
 
   // ── Audio recorder ──
   'audio.recorded': 'Recording: {{size}} KB, {{seconds}}s',
