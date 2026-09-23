@@ -611,12 +611,15 @@ export function _drawConnectorLines(this: ChatViewLike): void {
         const crystal = firstMsg.querySelector('.cs-message__agent-crystal');
         if (!crystal) continue;
 
-        // Find last action row's icon in the group
+        // Find last action row's icon in the group. `.cs-action-row` (myślenie/narzędzie przed
+        // Tile, SubAgentBlock dziś) i `.cs-tile` (2.3.0: ThinkingBlock/ToolCallDisplay po
+        // przepięciu na Tile, patrz Tile.ts) współistnieją, więc łącznik musi widzieć oba.
         let lastIcon: Element | null = null;
         for (let i = group.length - 1; i >= 0; i--) {
-            const rows = group[i].querySelectorAll('.cs-action-row');
+            const rows = group[i].querySelectorAll('.cs-action-row, .cs-tile');
             if (rows.length) {
-                lastIcon = rows[rows.length - 1].querySelector('.cs-action-row__icon') || rows[rows.length - 1];
+                const lastRow = rows[rows.length - 1];
+                lastIcon = lastRow.querySelector('.cs-action-row__icon, .cs-tile__icon') || lastRow;
                 break;
             }
         }

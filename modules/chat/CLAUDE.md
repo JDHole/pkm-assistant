@@ -811,6 +811,30 @@ własność BIEGU SUBA.
 
 ---
 
+### Kafelki Tile w streamie i w historii (2.3.0, "Czat bez ścian")
+
+`ThinkingBlock`/`ToolCallDisplay` (`modules/ui-components/`) renderują się dziś jako kafelek
+`.cs-tile` przez `createTile` - patrz `modules/ui-components/CLAUDE.md`, sekcja "Tile", dla
+kształtu i decyzji projektowych. Dwa miejsca w TYM module dotyka to bezpośrednio:
+
+- **Finalizacja bloku myśli.** `chat_streaming.ts` woła `finalizeThinkingBlock(this._currentThinkingBlock)` w CZTERECH miejscach (koniec naturalny w `_finalizeTurn`, backstop przed
+  kontynuacją w `_chatBeforeContinue`, Stop w `stop_generation`, błąd w `handle_error`) zamiast
+  dawnego gołego `classList.remove('streaming')` - kolejność względem `this._currentThinkingBlock = null` i `_resetPaintTargets()` zostaje bez zmian (strażnik po źródle:
+  `chat/renderThrottle.test.ts`, test "bonus: handle_error zeruje blok myśli...").
+- **Aktualizacja chipa narzędzia w trakcie streamingu idzie PRZEZ PEŁNE PRZEBUDOWANIE**, tak jak
+  przed Tile: `_chatOnToolResults` (`chat_streaming.ts`) woła
+  `toolDisplay.replaceWith(createCompactToolChip({...nowyStatus}))` (albo
+  `createToolCallDisplay`, zależnie od `compactToolChips`) - `ToolCallDisplay.ts` świadomie NIE
+  trzyma `TileHandle` po zwróceniu elementu, więc nie ma tu mutacji w locie do zachowania.
+- **`_drawConnectorLines` (`chat_messages.ts`) szuka OBU rodzin DOM-u.** Łącznik (pionowa linia
+  od kryształu nagłówka do ostatniego rzędu akcji) czyta `.cs-action-row, .cs-tile` i
+  `.cs-action-row__icon, .cs-tile__icon` - `SubAgentBlock` (dziś jeszcze `.cs-action-row`) i
+  `ThinkingBlock`/`ToolCallDisplay` (dziś `.cs-tile`) mogą stać w JEDNEJ grupie kolejnych
+  wiadomości agenta. Dokładasz kolejny blok na Tile (A2/A3) → nic tu nie trzeba zmieniać, selektor
+  już łapie `.cs-tile`; dokładasz NOWĄ rodzinę DOM-u (żadną z tych dwóch) → dopisz ją tu też.
+
+---
+
 ## Powiązane
 
 - [`modules/memory/CLAUDE.md`](../memory/CLAUDE.md) - `AgentMemory` (przez agentManager),

@@ -21,6 +21,7 @@ import {
     createToolCallDisplay,
     createThinkingBlock,
     updateThinkingBlock,
+    finalizeThinkingBlock,
     createSubAgentBlock,
     createPendingSubAgentBlock,
 } from '../../ui-components/index.js';
@@ -1546,7 +1547,7 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
             this.current_message_bubble.classList.remove('streaming');
         }
         if (this._currentThinkingBlock) {
-            this._currentThinkingBlock.classList.remove('streaming');
+            finalizeThinkingBlock(this._currentThinkingBlock);
             this._currentThinkingBlock = null;
         }
         this._resetPaintTargets();
@@ -1680,7 +1681,7 @@ export async function _finalizeTurn(this: ChatViewLike, turn: ChatTurn, result: 
             this.current_message_bubble.classList.remove('streaming');
         }
         if (this._currentThinkingBlock) {
-            this._currentThinkingBlock.classList.remove('streaming');
+            finalizeThinkingBlock(this._currentThinkingBlock);
             this._currentThinkingBlock = null;
         }
         this._resetPaintTargets();
@@ -1787,7 +1788,7 @@ export function handle_error(this: ChatViewLike, error: unknown, agentName?: str
         // (`insertBefore` w `_paintStreamFrame` celuje w stary kontener). Zerujemy tak samo
         // jak `_finalizeTurn`, `_chatBeforeContinue` i `stop_generation`.
         if (this._currentThinkingBlock) {
-            this._currentThinkingBlock.classList.remove('streaming');
+            finalizeThinkingBlock(this._currentThinkingBlock);
             this._currentThinkingBlock = null;
         }
         this._resetPaintTargets();
@@ -1946,7 +1947,7 @@ export function stop_generation(this: ChatViewLike, agentName?: string, reason =
         this.current_message_bubble.classList.remove('streaming');
     }
     if (this._currentThinkingBlock) {
-        this._currentThinkingBlock.classList.remove('streaming');
+        finalizeThinkingBlock(this._currentThinkingBlock);
         this._currentThinkingBlock = null;
     }
     this._resetPaintTargets();

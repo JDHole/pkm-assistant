@@ -1015,6 +1015,45 @@
 .cs-message__text a { color: var(--link-color); }
 .cs-message__text a:hover { color: var(--link-color-hover); }
 
+/* TILE (2.3.0, Czat bez ścian) — komponent kafelka wspólny dla wszystkich rzędów akcji.
+   ThinkingBlock i ToolCallDisplay stoją na nim (A1); SubAgentBlock/todo/ask_user/bloki
+   systemowe zostają na dawnym .cs-action-row (A2/A3 przepną je osobno) — obie rodziny CSS
+   żyją naraz w tym pliku, świadomie. */
+.cs-tile { --cs-tile-color: rgb(var(--cs-agent-color-rgb, 120, 120, 120)); position: relative; margin: 8px 0; padding: 8px 12px 8px 14px; border-radius: 8px; font-size: 12px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--cs-tile-color) 6%, transparent), color-mix(in srgb, var(--cs-tile-color) 3%, transparent));
+  border: 1px solid color-mix(in srgb, var(--cs-tile-color) 20%, transparent); }
+.cs-tile::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--cs-tile-color); border-radius: 3px 0 0 3px; opacity: 0.6; }
+.cs-tile--system { --cs-tile-color: var(--color-red); }
+.cs-tile--user { --cs-tile-color: var(--cs-user-color, var(--interactive-accent)); }
+.cs-tile--agent-muted { background: color-mix(in srgb, var(--cs-tile-color) 3%, transparent); border-color: color-mix(in srgb, var(--cs-tile-color) 12%, transparent); }
+.cs-tile--agent-muted::before { opacity: 0.35; }
+.cs-tile--error { --cs-tile-color: var(--color-red); }
+.cs-tile__head { display: flex; align-items: center; gap: 8px; min-height: 20px; }
+.cs-tile.is-toggleable .cs-tile__head { cursor: pointer; }
+.cs-tile__icon { width: 16px; height: 16px; flex-shrink: 0; color: var(--cs-tile-color); display: inline-flex; }
+/* B4 fix (recenzja A1-fix): title i summary DZIELĄ się flexem zamiast title rosnąc bez
+   ograniczeń - dlugi tytul (zapytanie, URL, folder z describeToolCall) wypychal kropke statusu
+   poza widoczny obszar czatu. Title dostaje ellipsis i moze się skurczyc; meta/dot/icon nigdy. */
+.cs-tile__title { font-weight: 600; color: var(--text-normal); white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
+.cs-tile__summary { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+.cs-tile__meta { margin-left: auto; color: var(--text-faint); font-size: 11px; white-space: nowrap; flex-shrink: 0; }
+.cs-tile__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--cs-tile-color); flex-shrink: 0; margin-left: 6px; }
+.cs-tile--pending .cs-tile__dot { animation: csTilePulse 1.2s ease-in-out infinite; }
+.cs-tile__body { margin-top: 8px; padding: 8px 12px; background: rgba(0, 0, 0, 0.15); border-radius: 4px; color: var(--text-muted); font-size: 0.75rem; line-height: 1.5; white-space: pre-wrap; max-height: 400px; overflow: auto; }
+.cs-tile__actions { display: flex; gap: 6px; margin-top: 8px; }
+.cs-tile__action { font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid color-mix(in srgb, var(--cs-tile-color) 30%, transparent); background: transparent; color: var(--text-normal); cursor: pointer; }
+.cs-tile__action:hover { background: color-mix(in srgb, var(--cs-tile-color) 10%, transparent); }
+/* Blok myśli w trakcie streamingu (ThinkingBlock.ts): ciało ma własny, niższy sufit, żeby
+   rosnący ślad rozumowania nie przejął głównego scrolla czatu. */
+.cs-tile.is-streaming .cs-tile__body { max-height: 200px; overflow-y: auto; }
+/* Surowe argumenty wejścia — TYLKO w pełnej karcie (ToolCallDisplay.ts, compactToolChips===false),
+   natywny <details> domyślnie zwinięty niezależnie od stanu kafelka. */
+.cs-tile__pre { white-space: pre-wrap; word-break: break-word; }
+.cs-tile__raw-args { margin-top: 8px; font-size: 0.7rem; color: var(--text-faint); }
+.cs-tile__raw-args summary { cursor: pointer; }
+.cs-tile__raw-args pre { white-space: pre-wrap; word-break: break-word; margin: 4px 0 0 0; font-family: var(--font-monospace); }
+@keyframes csTilePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
 /* ─── EXPANDABLE ACTION ROWS (thinking, tool call, minion, master) ─── */
 .cs-action-row {
   cursor: pointer;
@@ -1122,11 +1161,6 @@
   font-family: var(--font-monospace);
   white-space: pre-wrap;
 }
-/* During streaming: cap expanded thinking so it doesn't hijack main scroll */
-.cs-action-row.streaming.open .cs-action-row__content {
-  max-height: 200px;
-  overflow-y: auto;
-}
 
 /* Tool call input/output — human-readable */
 .cs-action-row__input {
@@ -1143,35 +1177,6 @@
 }
 .cs-action-row__output--error {
   color: var(--text-error);
-}
-.cs-action-row__detail {
-  padding: 4px 0 8px 22px;
-  font-size: 0.66rem;
-  color: var(--text-faint);
-  font-family: var(--font-monospace);
-  white-space: pre-wrap;
-  line-height: 1.5;
-  border-top: 1px solid rgba(var(--cs-agent-color-rgb, 136,136,136), 0.1);
-  margin-top: 4px;
-  max-height: 300px;
-  overflow-y: auto;
-  word-break: break-word;
-}
-.cs-action-row__pre {
-  white-space: pre-wrap;
-  font-family: var(--font-monospace);
-  font-size: 0.66rem;
-  color: var(--text-muted);
-  margin-top: 4px;
-  padding: 4px 8px;
-  background: rgba(var(--cs-agent-color-rgb, 136,136,136), 0.04);
-  border-left: 2px solid rgba(var(--cs-agent-color-rgb, 136,136,136), 0.15);
-  border-radius: 2px;
-  word-break: break-word;
-}
-.cs-action-row__field-label {
-  color: var(--text-faint);
-  font-size: 0.66rem;
 }
 
 /* ─── CONNECTOR (crystal dot + vertical line between actions) ─── */
