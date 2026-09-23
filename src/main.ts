@@ -147,15 +147,22 @@ interface ModelLibraryMigration {
   minion: ModelLibraryEntry[];
 }
 
-/** Parametry interpolacji dla `embedding.notice.<kind>` (patrz `core/i18n/{pl,en}.ts`). */
+/**
+ * Parametry interpolacji dla `embedding.notice.<kind>` (patrz `core/i18n/{pl,en}.ts`).
+ * `migration_failed.reason` jest KODEM (`MigrationFailReason`), nie zdaniem po polsku - tłumaczy
+ * go osobny klucz `embedding.notice.migration_reason.<kod>`, a `detail` (surowy komunikat błędu)
+ * dokleja się po dwukropku, gdy jest.
+ */
 function indexerNoticeParams(n: IndexerNotice): Record<string, string> | undefined {
   switch (n.kind) {
     case 'migrated':
       return { from: (n.fromBytes / (1024 * 1024)).toFixed(1), to: (n.toBytes / (1024 * 1024)).toFixed(1) };
     case 'dims_changed':
       return { from: String(n.from), to: String(n.to) };
-    case 'migration_failed':
-      return { reason: n.reason };
+    case 'migration_failed': {
+      const reason = t(`embedding.notice.migration_reason.${n.reason}`);
+      return { reason: n.detail ? `${reason}: ${n.detail}` : reason };
+    }
     case 'model_changed':
     case 'index_corrupt':
       return undefined;
