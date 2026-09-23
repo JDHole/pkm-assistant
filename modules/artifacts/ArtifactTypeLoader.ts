@@ -10,8 +10,15 @@
  * dataviewjs). Agent nigdy nie pisze kodu do INSTANCJI (egzekwuje `artifactParser`), ale
  * SZABLON TYPU pisze user i może w nim osadzić dowolny kod.
  *
- * Klucze frontmattera PO POLSKU, raz na zawsze. Wartości statusów to semantyczne identyfikatory
- * (renderowanie przycisków zależy od statusu) - NIE tłumaczone.
+ * Klucze frontmattera PO POLSKU, raz na zawsze (`nazwa`/`opis`/`pola`/`statusy`/`sprzatanie`) -
+ * to jest semantyka silnika, nie proza. Wartości STATUSÓW natomiast (od decyzji właściciela
+ * 19.09) idą za językiem interfejsu W CHWILI SEEDOWANIA szablonu fabrycznego: nowy plik typu
+ * EN dostaje literały EN (`pending-approval`, `accepted`, ...), nowy plik PL dostaje literały PL
+ * (`do-akceptacji`, `zaakceptowany`, ...) - `modules/artifacts/artifactStatuses.ts` jest jedynym
+ * rejestrem obu zestawów. Silnik (`artifactButtons.ts`, `ArtifactStore.archive()`,
+ * `basesView.ts`) rozpoznaje OBA zestawy jednocześnie, więc typ usera może dalej mieszać
+ * dowolne własne literały - one nadal działają jak identyfikatory silnika, po prostu bez
+ * automatycznego rozpoznania roli (patrz `statusRole`/`pendingStatusOf`/`closedStatusOf`).
  *
  * TEKST DLA CZŁOWIEKA (opis typu, nagłówki sekcji, podpowiedzi w nawiasach) idzie za językiem
  * interfejsu: `builtinTypeContent(name)` wybiera wariant PL/EN, a nazwy sekcji trzyma
@@ -21,12 +28,21 @@
 import { parseFrontmatter } from '../../core/index.js';
 import { getLocale } from '../../core/i18n/index.js';
 import { log } from '../../core/utils/Logger.js';
+import { statusLiteral } from './artifactStatuses.js';
 import type { ArtifactScalar, ArtifactType, ArtifactTypeField } from './types.js';
 
 export const ARTIFACT_TYPES_PATH = '.pkm-assistant/artifacts/types';
 
-/** Domyślny zestaw statusów, gdy typ nie deklaruje własnych. */
-export const DEFAULT_STATUSY = ['szkic', 'zamkniety'];
+/**
+ * Domyślny zestaw statusów, gdy typ nie deklaruje własnych - w JĘZYKU INTERFEJSU (domyślnie
+ * bieżący). FUNKCJA, nie stała: `setLocale()` leci z `src/main.ts` PO załadowaniu modułów
+ * (ten sam powód co `factoryWorkPrompt` w `modules/memory/workPrompts.ts`) - stała policzona
+ * przy imporcie zamroziłaby jeden język dla każdego typu bez zadeklarowanych statusów.
+ */
+export function defaultStatusy(locale: string = getLocale()): string[] {
+    const loc = locale === 'pl' ? 'pl' : 'en';
+    return [statusLiteral('draft', loc), statusLiteral('closed', loc)];
+}
 
 /** Nazwa wbudowanego typu seedowanego przy starcie (sensowny default per agent). */
 export const BUILTIN_PLAN_TYPE_NAME = 'plan';
@@ -133,9 +149,12 @@ sprzatanie: 0
 `;
 
 /**
- * Angielskie bliźniaki trzech tekstów wyżej. Różnią się WYŁĄCZNIE tekstem dla człowieka:
- * klucze frontmattera (`nazwa`/`opis`/`pola`/`statusy`/`sprzatanie`), identyfikatory typów
- * i wartości statusów zostają te same w obu językach - to semantyka silnika, nie tłumaczenie.
+ * Angielskie bliźniaki trzech tekstów wyżej. Klucze frontmattera (`nazwa`/`opis`/`pola`/
+ * `statusy`/`sprzatanie`) i identyfikatory typów (`plan`/`notatka`/`raport`) zostają te same w
+ * obu językach - to semantyka silnika, nie tłumaczenie. Wartości STATUSÓW natomiast (od
+ * 19.09) SĄ tłumaczone - `modules/artifacts/artifactStatuses.ts` (`pending-approval`/`remarks`/
+ * `accepted`/`closed`/`in-progress`/`ready` zamiast `do-akceptacji`/`uwagi`/`zaakceptowany`/
+ * `zamkniety`/`w-trakcie`/`gotowy`) - silnik rozpoznaje oba zestawy jednocześnie.
  */
 export const PLAN_TYPE_CONTENT_EN = `---
 nazwa: plan
@@ -145,7 +164,7 @@ pola:
     opis: One sentence — why this plan exists
   termin:
     opis: Due date (optional)
-statusy: [do-akceptacji, uwagi, zaakceptowany, zamkniety]
+statusy: [pending-approval, remarks, accepted, closed]
 sprzatanie: 30
 ---
 
@@ -164,7 +183,7 @@ sprzatanie: 30
 export const NOTATKA_TYPE_CONTENT_EN = `---
 nazwa: notatka
 opis: A note or piece of text for approval — the agent writes, you review and approve
-statusy: [do-akceptacji, uwagi, zaakceptowany, zamkniety]
+statusy: [pending-approval, remarks, accepted, closed]
 sprzatanie: 30
 ---
 
@@ -183,7 +202,7 @@ pola:
     opis: The question / topic under research
   tryb:
     opis: Research source — web or vault
-statusy: [w-trakcie, gotowy, zamkniety]
+statusy: [in-progress, ready, closed]
 sprzatanie: 0
 ---
 
@@ -292,7 +311,7 @@ export class ArtifactTypeLoader {
 
         const statusy = Array.isArray(frontmatter.statusy) && frontmatter.statusy.length > 0
             ? frontmatter.statusy.map(String)
-            : [...DEFAULT_STATUSY];
+            : defaultStatusy();
 
         const sprzatanie = Number.isFinite(frontmatter.sprzatanie) ? Number(frontmatter.sprzatanie) : 0;
 

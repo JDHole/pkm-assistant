@@ -1,11 +1,13 @@
 import { streamToComplete, STREAM_ERROR_CODES } from './streamHelper.js';
 import { resolveWorkPrompt } from '../../core/index.js';
-import { factoryWorkPrompt } from './workPrompts.js';
+import { factoryWorkPrompt, fillBrainSectionPlaceholders } from './workPrompts.js';
 import { planAutoConsolidation } from './consolidationStatus.js';
+import { sectionHeading, resolveBrainLocale, uiBrainLocale } from './brainSections.js';
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
 
 import type { AutoConsolidationInclude } from './consolidationStatus.js';
+import type { BrainLocale, BrainSectionKey } from './brainSections.js';
 
 import type { StreamChatModelLike, StreamMessage, StreamToCompleteOptions } from './streamHelper.js';
 
@@ -247,12 +249,19 @@ export interface SaveSessionModalLike {
     prompt?: () => Promise<SaveSessionDecision | null | undefined>;
 }
 
-const TYPE_TO_SECTION: Record<string, string> = {
-    user: '## User',
-    agent_rule: '## Preferencje',
-    skill_hint: '## Workflow',
-    project_context: '## Bieżące',
-    reference: '## Projekty i referencje'
+// Klucz sekcji indeksu dla KAŻDY typ notatki proponowanej w `/save session` - nagłówek
+// dochodzi przez `sectionHeading(key, brainLocale)`, W JĘZYKU PLIKU brain.md TEGO agenta
+// (`resolveBrainLocale`, obliczone raz w `prepareProposals`), nie w bieżącym języku UI.
+// `project_context` → `'current'` jest WŁASNĄ semantyką tego workflow (podpowiedź „tu wyląduje
+// nowy projekt"), różną od `NOTE_TYPE_TO_SECTION_KEY` w `BrainIndex.ts` (tam `project_context`
+// bez rankingu recency trafia do `'projects'`) - `buildBrainIndex` i tak przelicza faktyczne
+// miejsce z metadanych notatek przy rebuildzie; to pole jest tylko etykietą w oknie review.
+const TYPE_TO_SECTION_KEY: Record<string, BrainSectionKey> = {
+    user: 'user',
+    agent_rule: 'preferences',
+    skill_hint: 'workflow',
+    project_context: 'current',
+    reference: 'projects',
 };
 
 const VALID_NOTE_TYPES = new Set(['user', 'agent_rule', 'skill_hint', 'project_context', 'reference']);
@@ -323,10 +332,30 @@ export class SaveSessionWorkflow {
         const sessionPath = activeSession.path || this.agentMemory.activeSessionPath;
         const messages = await this._resolveMessages(activeSession, sessionPath);
 
+        // Nagłówek KAŻDEJ propozycji tej rundy (regex, poczekalnia rescue) ma trafić w JĘZYK
+        // PLIKU brain.md TEGO agenta, nie w bieżący język interfejsu — odczyt raz, na starcie
+        // (brak pliku → `getBrain()` zakłada go w języku UI i `resolveBrainLocale` to wykryje
+        // z powrotem, więc wynik jest identyczny). Ścieżka LLM liczy WŁASNE `brainLocale`
+        // niezależnie w `proposeBrainUpdatesViaAgent` (potrzebuje go też do promptu).
+        //
+        // `getBrain()` jest CELOWO fail-closed (rzuca na odczycie niepewnym - kontrakt
+        // AgentMemory, patrz jej CLAUDE.md) - poprawne dla operacji, które NADPISUJĄ plik, ale
+        // to nowe wywołanie (dodane wyłącznie po detekcję języka) nie istniało przed tą funkcją
+        // na ścieżce regexowej - bez try/catch pad odczytu (dysk sieciowy) przerywałby CAŁE
+        // `/save session` PRZED oknem review, którego user wcześniej i tak by dostał. Degradacja
+        // jest bezpieczna: to wybór JĘZYKA ETYKIETY nowych notatek, nie operacja na danych.
+        let brainLocale = uiBrainLocale();
+        try {
+            const currentBrain = await this.agentMemory.getBrain();
+            brainLocale = resolveBrainLocale(currentBrain, uiBrainLocale());
+        } catch (e) {
+            log.warn('SaveSessionWorkflow', `prepareProposals: nie mogę odczytać brain.md do detekcji języka, spadam na język interfejsu: ${(e as ErrLike)?.message ?? String(e)}`);
+        }
+
         const llmProposal = await this._tryProposeViaAgent(messages, options);
         const notes = llmProposal
             ? llmProposal.new_notes
-            : this.proposeNotes(messages, activeSession.artifacts || []);
+            : this.proposeNotes(messages, activeSession.artifacts || [], brainLocale);
         // Memory v3 index contract: durable facts go into brain/*.md. brain.md is regenerated from
         // the note catalogue after accepted notes are created. `brainUpdates` carries
         // proposed „Na teraz" short-term updates (add/remove) — the modal renders them as a diff.
@@ -335,7 +364,7 @@ export class SaveSessionWorkflow {
         // Kandydaci memory_rescue czekający w poczekalni
         // dołączają do TEJ SAMEJ listy — user je widzi i decyduje w JEDNYM, już istniejącym
         // modalu, zamiast osobnego mechanizmu review.
-        const pendingNotes = await this._proposePendingRescue();
+        const pendingNotes = await this._proposePendingRescue(brainLocale);
 
         return {
             sessionPath,
@@ -366,7 +395,7 @@ export class SaveSessionWorkflow {
      * ale runtime niczego nie egzekwuje) rzucałby przy `p.filename.replace(...)` i ubijał cały
      * zapis sesji dla WSZYSTKICH notatek, nie tylko dla kandydatów z poczekalni.
      */
-    private async _proposePendingRescue(): Promise<NoteProposal[]> {
+    private async _proposePendingRescue(brainLocale: BrainLocale): Promise<NoteProposal[]> {
         if (!this.agentMemory.listPendingRescue) return [];
         try {
             const pending = await this.agentMemory.listPendingRescue();
@@ -380,7 +409,7 @@ export class SaveSessionWorkflow {
                     name: p.name || p.filename.replace(/\.md$/, ''),
                     description: prefixed,
                     type,
-                    section: TYPE_TO_SECTION[type] || '## Bieżące',
+                    section: sectionHeading(TYPE_TO_SECTION_KEY[type] || 'current', brainLocale),
                     content: p.content || '',
                     why: p.why || '',
                     how_to_apply: p.how_to_apply || '',
@@ -539,7 +568,13 @@ export class SaveSessionWorkflow {
         return this.applyDecision(activeSession, prep, decision);
     }
 
-    proposeNotes(messages: SessionMessageLike[] = [], artifacts: SessionArtifactLike[] = []): NoteProposal[] {
+    /**
+     * `brainLocale` jest WYMAGANE (świadomie bez domyślnej wartości - patrz `BuildBrainIndexInput.locale`
+     * w `BrainIndex.ts`, ten sam powód): wołacz produkcyjny (`prepareProposals`) zawsze zna
+     * język pliku brain.md agenta z wcześniejszego `getBrain()`, więc podanie go jest tanie, a
+     * cichy default ukryłby pomyłkę wołacza, który zapomniał go policzyć.
+     */
+    proposeNotes(messages: SessionMessageLike[] = [], artifacts: SessionArtifactLike[] = [], brainLocale: BrainLocale): NoteProposal[] {
         const text = this._messagesToText(messages);
         const proposals: NoteProposal[] = [];
         const rememberRegex = /pami[eę]taj(?:\s+prosz[eę])?(?:,)?\s+(?:że|ze)\s+([^\n.!?]+[.!?]?)/gi;
@@ -553,7 +588,7 @@ export class SaveSessionWorkflow {
                 name,
                 description: `Zapamietane z sesji: ${content.slice(0, 120)}`,
                 type,
-                section: TYPE_TO_SECTION[type] || '## Bieżące',
+                section: sectionHeading(TYPE_TO_SECTION_KEY[type] || 'current', brainLocale),
                 content,
                 accepted: true
             });
@@ -565,7 +600,7 @@ export class SaveSessionWorkflow {
                 name: artifact.title || 'Artefakt z sesji',
                 description: 'Kontekst z artefaktu utworzonego w sesji',
                 type: 'reference',
-                section: TYPE_TO_SECTION.reference,
+                section: sectionHeading('projects', brainLocale),
                 content: artifact.content || artifact.title,
                 accepted: true
             });
@@ -613,6 +648,9 @@ export class SaveSessionWorkflow {
         options: PrepareProposalsOptions = {},
     ): Promise<AgentProposal> {
         const currentBrain = await this.agentMemory.getBrain();
+        // Nagłówek promptu ma mówić modelowi o nagłówkach, które NAPRAWDĘ są w pliku tego
+        // agenta - patrz gotcha „język pliku ≠ język prozy" w `workPrompts.ts`.
+        const brainLocale = resolveBrainLocale(currentBrain, uiBrainLocale());
         const userPayload = {
             agent: this.agent?.name || this.agentMemory.agentName,
             message_count: messages.length,
@@ -624,7 +662,16 @@ export class SaveSessionWorkflow {
                     : (m.content || '')
             }))
         };
-        const savePrompt = resolveWorkPrompt(this.agent, 'save_session_prompt', this.settings, factoryWorkPrompt('save_session'));
+        const resolvedSavePrompt = resolveWorkPrompt(
+            this.agent,
+            'save_session_prompt',
+            this.settings,
+            factoryWorkPrompt('save_session', undefined, brainLocale),
+        );
+        // Nadpisanie usera (agent/global) może NIEŚĆ te same placeholdery - podstawiamy je tu,
+        // OSOBNO od `factoryWorkPrompt` (który już podstawił je dla ŚCIEŻKI fabrycznej), żeby
+        // nadpisanie dostało tę samą podmianę. Idempotentne na tekście fabrycznym (no-op).
+        const savePrompt = fillBrainSectionPlaceholders(resolvedSavePrompt, brainLocale);
         const llmMessages: StreamMessage[] = [
             { role: 'system', content: savePrompt },
             { role: 'user', content: JSON.stringify(userPayload) }
@@ -638,14 +685,18 @@ export class SaveSessionWorkflow {
         // Surowe `usage` z tego strzału jedzie dalej (kontrakt propozycji bez zmian, doszło
         // jedno pole). Bez niego jedyne wywołanie LLM w `/save session` było niewidzialne w koszcie
         // — `CostLog` znał tylko konsolidację.
-        return { ...this._parseAgentJsonResponse(text), usage: usage || null };
+        return { ...this._parseAgentJsonResponse(text, brainLocale), usage: usage || null };
     }
 
     /**
      * Strip optional ```json fences, parse, validate against the Memory v3 note contract.
      * Throws when the structure is malformed — caller catches and falls back to regex.
+     *
+     * `brainLocale` domyślnie `uiBrainLocale()` - realny wołacz produkcyjny
+     * (`proposeBrainUpdatesViaAgent`) zawsze podaje wykryte z `getBrain()`; default zostaje
+     * wyłącznie dla bezpośrednich wywołań (testy), które nie sprawdzają `section`.
      */
-    _parseAgentJsonResponse(text: unknown): AgentProposal {
+    _parseAgentJsonResponse(text: unknown, brainLocale: BrainLocale = uiBrainLocale()): AgentProposal {
         const raw = String(text || '').trim();
         if (!raw) throw new Error('Empty LLM response');
         const stripped = raw
@@ -677,7 +728,7 @@ export class SaveSessionWorkflow {
                     content,
                     why: String(n?.why || '').trim(),
                     how_to_apply: String(n?.how_to_apply || '').trim(),
-                    section: TYPE_TO_SECTION[type] || '## Bieżące',
+                    section: sectionHeading(TYPE_TO_SECTION_KEY[type] || 'current', brainLocale),
                     accepted: true
                 };
             })

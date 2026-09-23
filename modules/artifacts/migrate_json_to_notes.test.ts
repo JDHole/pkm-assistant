@@ -27,8 +27,9 @@ function makeAdapter(initial: Record<string, string> = {}) {
     };
 }
 
-// ── Mock store: nagrywa importInstance ──
-function makeStore() {
+// ── Mock store: nagrywa importInstance. `typesByName` (opcjonalny) imituje `store.typeLoader`
+// dla testów mapowania statusu na DZISIEJSZY język typu (patrz `mapStatus` w module). ──
+function makeStore(typesByName: Record<string, { statusy: string[] }> = {}) {
     const calls: Array<{ typ: string; tytul?: string; agent?: string; status?: string; utworzono?: string; zaktualizowano?: string; body: string }> = [];
     return {
         calls,
@@ -36,6 +37,9 @@ function makeStore() {
             importInstance: async (typ: string, opts: { tytul?: string; agent?: string; status?: string; utworzono?: string; zaktualizowano?: string; body: string }) => {
                 calls.push({ typ, ...opts });
                 return { id: `art-x${calls.length}`, path: `Artefakty/${opts.agent}/x${calls.length}.md` };
+            },
+            typeLoader: {
+                getType: (name: string) => typesByName[name] || null,
             },
         },
     };
@@ -96,6 +100,28 @@ test('approved plan → status zaakceptowany', async t => {
     const { store, calls } = makeStore();
     await migrateJsonArtifactsToNotes({ adapter, store, now: NOW });
     t.is(calls[0].status, 'zaakceptowany');
+});
+
+// `ensureBuiltinTypes` podmienia NIETKNIĘTY plik typu na język UI przy każdym starcie - jeśli
+// typ `plan` w bibliotece jest DZIŚ angielski (statusy EN), stary JSON (zawsze polski - migrator
+// przedwcześniejszy niż rejestr bilingwalny) ma dostać notatkę z literałem PASUJĄCYM do typu, nie
+// polskim `'do-akceptacji'`/`'zaakceptowany'` na sztywno wewnątrz pliku, który deklaruje EN.
+test('typ "plan" DZIŚ angielski w bibliotece → status niezaakceptowanego rekordu to "pending-approval", nie "do-akceptacji"', async t => {
+    const { adapter } = makeAdapter({
+        '.pkm-assistant/artifacts/p.json': jsonFile({ type: 'plan_review', title: 'X', data: { artifactType: 'plan_review', steps: [] } }),
+    });
+    const { store, calls } = makeStore({ plan: { statusy: ['pending-approval', 'remarks', 'accepted', 'closed'] } });
+    await migrateJsonArtifactsToNotes({ adapter, store, now: NOW });
+    t.is(calls[0].status, 'pending-approval');
+});
+
+test('typ "plan" DZIŚ angielski w bibliotece → rekord ZAAKCEPTOWANY dostaje "accepted", nie "zaakceptowany"', async t => {
+    const { adapter } = makeAdapter({
+        '.pkm-assistant/artifacts/p.json': jsonFile({ type: 'plan_review', title: 'X', data: { artifactType: 'plan_review', approved: true, steps: [] } }),
+    });
+    const { store, calls } = makeStore({ plan: { statusy: ['pending-approval', 'remarks', 'accepted', 'closed'] } });
+    await migrateJsonArtifactsToNotes({ adapter, store, now: NOW });
+    t.is(calls[0].status, 'accepted');
 });
 
 test('context-session → backup (nie migrowany), źródło przeniesione', async t => {

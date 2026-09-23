@@ -142,3 +142,15 @@ test('i18n: `chat.popover.create_files` opisuje FOLDERY, nie pliki', t => {
     // Klucz żyje w i18n dla tej kontroli i etykiet uprawnień - nie kasować.
     t.regex(pl['perm.create_files'], /plik/i);
 });
+
+// ── `prompt.dt.rule.mem_proactive` nazywa sekcję "Na teraz"/"Right now" WŁAŚCIWYM
+// nagłówkiem swojego języka (`modules/memory/brainSections.ts`, NA_TERAZ_HEADINGS) ────────
+// EN wersja mówiła modelowi „Na teraz" (nagłówek PLIKU PL) mimo domyślnego EN brain.md
+// niosącego „Right now" — recenzja niezależna, punkt 13.
+test('i18n: prompt.dt.rule.mem_proactive nazywa sekcję "Na teraz"/"Right now" po SWOJEMU, nie po sąsiedzku', t => {
+    t.true(pl['prompt.dt.rule.mem_proactive'].includes('„Na teraz"'), 'pl: musi nazwać sekcję PL nagłówkiem');
+    t.false(pl['prompt.dt.rule.mem_proactive'].includes('Right now'), 'pl: nie ma prawa przeciekać angielski nagłówek');
+
+    t.true(en['prompt.dt.rule.mem_proactive'].includes('Right now'), 'en: musi nazwać sekcję EN nagłówkiem ("Right now"), nie polskim "Na teraz"');
+    t.false(en['prompt.dt.rule.mem_proactive'].includes('Na teraz'), 'en: stary bug - EN proza wołała sekcję po polsku');
+});

@@ -2,6 +2,7 @@ import test from 'ava';
 import { ArtifactStore, DEFAULT_ARTIFACTS_FOLDER } from './ArtifactStore.js';
 import { parseArtifact } from './artifactParser.js';
 import { parseYaml, stringifyYaml } from '../../core/utils/yamlParser.js';
+import { setLocale } from '../../core/i18n/index.js';
 import type { ArtifactFrontmatter } from './types.js';
 
 // ── Stub typu `plan` (zamiast ładować z dysku — izolujemy store) ──
@@ -341,6 +342,56 @@ test('archive moves closed artifacts older than the type retention window', asyn
     // Zamknij i cofnij zaktualizowano o 40 dni (typ plan: sprzatanie 30).
     await store.update(id, [{ op: 'set_field', key: 'status', value: 'zamkniety' }]);
     await store.app.fileManager.processFrontMatter((await store._findFileById(id))!, (fm: ArtifactFrontmatter) => { fm.zaktualizowano = '2026-06-01'; });
+
+    const moved = await store.archive();
+    t.is(moved, 1);
+    const thin = (await store.read(id))!;
+    t.true(thin.path!.includes('_archiwum/'));
+});
+
+// ── archive() rozpoznaje „domknięty" przez rolę statusu, nie jeden literał PL ──
+// (modules/artifacts/artifactStatuses.ts) - typ EN i typ własny z inną nazwą końcową muszą
+// też zostać posprzątane, nie tylko instancje z dokładnym `status: zamkniety`.
+
+test('archive() sprząta instancję TYPU WŁASNEGO ze statusem "done" (rola closed = ostatni w liście)', async t => {
+    const nowRef = { value: new Date('2026-07-23') };
+    const { app } = makeApp();
+    const CUSTOM_TYPE = {
+        name: 'kanban',
+        statusy: ['todo', 'zaakceptowany', 'uwagi', 'done'],
+        sprzatanie: 10,
+        pola: {},
+        template: '## Treść\n\n## Uwagi usera\n',
+    };
+    const customLoader = { getType: (n: string) => (n === CUSTOM_TYPE.name ? CUSTOM_TYPE : null) };
+    const store = new ArtifactStore({ app, typeLoader: customLoader as unknown as { getType(name: string): import('./types.js').ArtifactType | null }, now: () => nowRef.value });
+
+    const { id } = await store.create('kanban', { tytul: 'Zadanie', agent: 'Jaskier' });
+    await store.update(id, [{ op: 'set_field', key: 'status', value: 'done' }]);
+    await store.app.fileManager.processFrontMatter((await store._findFileById(id))!, (fm: ArtifactFrontmatter) => { fm.zaktualizowano = '2026-07-01'; });
+
+    const moved = await store.archive();
+    t.is(moved, 1);
+    const thin = (await store.read(id))!;
+    t.true(thin.path!.includes('_archiwum/'));
+});
+
+test('archive() sprząta instancję TYPU EN ze statusem "closed"', async t => {
+    const nowRef = { value: new Date('2026-07-23') };
+    const { app } = makeApp();
+    const EN_TYPE = {
+        name: 'plan_en',
+        statusy: ['pending-approval', 'remarks', 'accepted', 'closed'],
+        sprzatanie: 5,
+        pola: {},
+        template: '## Goal\n\n## User notes\n',
+    };
+    const enLoader = { getType: (n: string) => (n === EN_TYPE.name ? EN_TYPE : null) };
+    const store = new ArtifactStore({ app, typeLoader: enLoader as unknown as { getType(name: string): import('./types.js').ArtifactType | null }, now: () => nowRef.value });
+
+    const { id } = await store.create('plan_en', { tytul: 'Plan', agent: 'Jaskier' });
+    await store.update(id, [{ op: 'set_field', key: 'status', value: 'closed' }]);
+    await store.app.fileManager.processFrontMatter((await store._findFileById(id))!, (fm: ArtifactFrontmatter) => { fm.zaktualizowano = '2026-07-01'; });
 
     const moved = await store.archive();
     t.is(moved, 1);
@@ -726,4 +777,20 @@ test('kolizja nazwy, która przez sufiks przekracza limit segmentu, rzuca czytel
     const err = await t.throwsAsync(() => store.create('plan', { tytul, agent }));
     t.is(err?.message, 'Nie udało się zbudować bezpiecznej ścieżki artefaktu',
         'funkcja ma rzucać ten sam, czytelny błąd co przy pierwszym niepowodzeniu sanityzacji — nie przepuszczać null dalej jako "string"');
+});
+
+// ── Fallback status gdy typ nie deklaruje `statusy` wcale (nie powinno się zdarzyć dla typu z
+// biblioteki - ArtifactTypeLoader zawsze dosztukowuje `defaultStatusy()` - ale broni się na
+// wypadek atrapy/typu skonstruowanego inaczej) idzie za JĘZYKIEM INTERFEJSU, nie na sztywno PL. ──
+
+test.serial('create(): typ bez statusy (pusta lista) → status startowy w JĘZYKU UI, nie "szkic" na sztywno pod EN', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+    const { app } = makeApp();
+    const EMPTY_TYPE = { name: 'goly', statusy: [], sprzatanie: 0, pola: {}, template: '## Treść\n' };
+    const store = new ArtifactStore({ app, typeLoader: { getType: (n: string) => (n === 'goly' ? EMPTY_TYPE : null) } as unknown as { getType(name: string): import('./types.js').ArtifactType | null } });
+
+    const res = await store.create('goly', { tytul: 'Test', agent: 'Jaskier' });
+
+    t.is(res.artifact?.status, 'draft', 'EN UI -> "draft", nie polskie "szkic"');
 });

@@ -60,3 +60,81 @@ test('isClosedStatus: zamkniety zawsze true, ostatni z listy true, środkowy fal
     t.true(isClosedStatus('gotowe', ['robocze', 'gotowe']));
     t.false(isClosedStatus('robocze', ['robocze', 'gotowe']));
 });
+
+// Mutacja M14 (dogrywka recenzji niezależnej): rola `closed` musi być rozpoznana w OBU
+// językach niezależnie od tego, co deklaruje lista statusów typu - nie tylko dla PL literału.
+// Bez tej pary testów mutant, który usunąłby GAŁĄŹ EN z `statusRole(status) === 'closed'`
+// (zostawiając rozpoznawanie wyłącznie PL literału `'zamkniety'`), przeszedłby WSZYSTKIE
+// istniejące testy powyżej - żaden z nich nie woła `isClosedStatus('closed', ...)`.
+test('isClosedStatus: rola closed rozpoznana w OBU językach, niezależnie od listy statusów typu (mutacja M14)', t => {
+    t.true(isClosedStatus('closed', []), 'literał EN musi domykać tak samo jak PL, nawet z pustą listą');
+    t.true(isClosedStatus('zamkniety', ['open', 'done']), 'literał PL musi domykać, mimo że lista typu w ogóle nie deklaruje "zamkniety"/"closed"');
+});
+
+// ─── Typ EN (decyzja właściciela 19.09: nowy artefakt EN dostaje statusy EN w pliku) ───
+
+const EN_PLAN_STATUSY = ['pending-approval', 'remarks', 'accepted', 'closed'];
+
+test('typ EN w "pending-approval" → guziki approve→accepted, revise→remarks', t => {
+    const btns = computeArtifactButtons('pending-approval', EN_PLAN_STATUSY);
+    t.is(btns.length, 2);
+    t.is(btns.find(b => b.action === 'approve')!.statusTo, 'accepted');
+    t.is(btns.find(b => b.action === 'revise')!.statusTo, 'remarks');
+});
+
+test('typ EN w "closed" → brak guzików', t => {
+    t.deepEqual(computeArtifactButtons('closed', EN_PLAN_STATUSY), []);
+});
+
+// ─── Typ własny usera (słownictwo spoza obu rejestrów) ───
+
+const CUSTOM_STATUSY = ['todo', 'zaakceptowany', 'uwagi', 'done'];
+
+test('własny typ w "todo" (rozpoznane zaakceptowany/uwagi w liście) → guziki approve/revise', t => {
+    const btns = computeArtifactButtons('todo', CUSTOM_STATUSY);
+    t.is(btns.length, 2);
+    t.is(btns.find(b => b.action === 'approve')!.statusTo, 'zaakceptowany');
+    t.is(btns.find(b => b.action === 'revise')!.statusTo, 'uwagi');
+});
+
+test('własny typ w "done" (rola closed = ostatni w liście, brak roli rozpoznanej) → brak guzików', t => {
+    t.deepEqual(computeArtifactButtons('done', CUSTOM_STATUSY), []);
+});
+
+// ─── Typ raport wbudowany (bez approval flow - brak roli accepted w typie) ───
+
+test('raport w "w-trakcie" → brak approve/revise (brak accepted/remarks w typie), tylko przywołanie', t => {
+    const btns = computeArtifactButtons('w-trakcie', ['w-trakcie', 'gotowy', 'zamkniety']);
+    t.is(btns.length, 1);
+    t.is(btns[0].action, 'summon');
+});
+
+// ─── BLOKER (recenzja niezależna): ensureBuiltinTypes podmienia NIETKNIĘTY plik typu na język UI
+// przy KAŻDYM starcie - instancja stworzona w JEDNYM języku (status na dysku) i typ, który w
+// międzyczasie zaczął deklarować statusy w DRUGIM języku, muszą nadal dać approve/revise, w
+// JĘZYKU INSTANCJI (nie typu) - inaczej przełączenie UI pl->en osiera wszystkie istniejące
+// instancje PL na sam guzik "Przywołaj".
+
+test('instancja PL "do-akceptacji" pod TYPEM EN (statusy re-seedowane) → approve→zaakceptowany, revise→uwagi', t => {
+    const btns = computeArtifactButtons('do-akceptacji', EN_PLAN_STATUSY);
+    t.is(btns.length, 2);
+    t.is(btns.find(b => b.action === 'approve')!.statusTo, 'zaakceptowany');
+    t.is(btns.find(b => b.action === 'revise')!.statusTo, 'uwagi');
+});
+
+test('instancja EN "pending-approval" pod TYPEM PL (statusy re-seedowane) → approve→accepted, revise→remarks', t => {
+    const btns = computeArtifactButtons('pending-approval', PLAN_STATUSY);
+    t.is(btns.length, 2);
+    t.is(btns.find(b => b.action === 'approve')!.statusTo, 'accepted');
+    t.is(btns.find(b => b.action === 'revise')!.statusTo, 'remarks');
+});
+
+// ─── DROBNE: isClosedStatus musi domykać po OSTATNIM elemencie NIEZALEŻNIE od tego, czy rola
+// `closed` jest rozpoznana WCZEŚNIEJ w liście (closedStatusOf zwraca tylko JEDEN literał).
+
+test('isClosedStatus: typ ["open","zamkniety","archived"] - "archived" (ostatni) też domyka, mimo że "zamkniety" (środek) ma rozpoznaną rolę', t => {
+    const statusy = ['open', 'zamkniety', 'archived'];
+    t.true(isClosedStatus('archived', statusy), 'ostatni element domyka jak na main sprzed rejestru');
+    t.true(isClosedStatus('zamkniety', statusy), 'rola rozpoznana w środku listy domyka jak dotąd');
+    t.false(isClosedStatus('open', statusy));
+});

@@ -13,6 +13,7 @@
  * `store.importInstance` (zachowanie treści usera, nie pisanie przez agenta).
  */
 import { formatYmd } from './artifactParser.js';
+import { pendingStatusOf, acceptedStatusOf } from './artifactStatuses.js';
 
 const ARTIFACTS_BASE = '.pkm-assistant/artifacts';
 const MIGRATED_MARKER = `${ARTIFACTS_BASE}/.migrated-v2`;
@@ -65,7 +66,17 @@ interface MigrationAdapter {
 
 interface MigrationDependencies {
     adapter: MigrationAdapter;
-    store: { importInstance(typ: string, opts: Record<string, unknown>): Promise<unknown> };
+    store: {
+        importInstance(typ: string, opts: Record<string, unknown>): Promise<unknown>;
+        /**
+         * Opcjonalny - `ArtifactStore` prawdziwy (`src/main.ts`) go ma, atrapy testowe mogą go
+         * pominąć. Woła się WYŁĄCZNIE po `statusy` docelowego typu, żeby `mapStatus` zmapowała
+         * stary rekord na literał w JĘZYKU, w którym typ DZIŚ deklaruje swoje statusy (mogły
+         * zmienić się od czasu powstania starego JSON-a - `ensureBuiltinTypes` podmienia
+         * nietknięty plik typu na język UI przy każdym starcie).
+         */
+        typeLoader?: { getType(name: string): { statusy?: string[] } | null } | null;
+    };
     now?: () => Date;
 }
 
@@ -83,12 +94,22 @@ function classify(record: LegacyArtifactRecord): string | null {
     return null;
 }
 
-/** Zmapuj stary status na status nowego typu (plan/notatka: do-akceptacji … zamkniety). */
-function mapStatus(record: LegacyArtifactRecord): string {
+/**
+ * Zmapuj stary status na status DZISIEJSZEGO typu docelowego (plan/notatka). `typeStatusy` to
+ * `statusy` typu TAKI, JAKI JEST TERAZ w bibliotece - `pendingStatusOf`/`acceptedStatusOf`
+ * (`artifactStatuses.ts`) rozpoznają rolę w KTÓRYMKOLWIEK języku, więc typ zaseedowany dziś po
+ * angielsku (`ensureBuiltinTypes` podmienia nietknięty plik na język UI przy każdym starcie)
+ * dostaje notatkę z literałem EN, nie polskim `'do-akceptacji'` na sztywno wewnątrz EN typu.
+ * Fallback na historyczny literał PL, gdy typ nie deklaruje rozpoznanej roli wcale (nie powinno
+ * się zdarzyć dla `plan`/`notatka` - `classify()` migruje tylko w te dwa typy).
+ */
+function mapStatus(record: LegacyArtifactRecord, typeStatusy: readonly string[] = []): string {
     const approved = record?.data?.approved === true
         || record?.data?.status === 'approved'
         || record?.status === 'approved';
-    return approved ? 'zaakceptowany' : 'do-akceptacji';
+    return approved
+        ? (acceptedStatusOf(typeStatusy) ?? 'zaakceptowany')
+        : (pendingStatusOf(typeStatusy) ?? 'do-akceptacji');
 }
 
 /** Kroki starego plan_review → linie checkboxów `- [ ] text ^kN`. */
@@ -200,10 +221,11 @@ export async function migrateJsonArtifactsToNotes({ adapter, store, now }: Parti
             }
 
             try {
+                const typeStatusy = store.typeLoader?.getType?.(typ)?.statusy || [];
                 await store.importInstance(typ, {
                     tytul: record.title || record.data?.title || 'Artefakt',
                     agent: record.createdBy || record.data?.createdBy || record.agentName || 'agent',
-                    status: mapStatus(record),
+                    status: mapStatus(record, typeStatusy),
                     body: buildBody(typ, record),
                     utworzono: dateOnly(record.createdAt),
                     zaktualizowano: dateOnly(record.updatedAt),

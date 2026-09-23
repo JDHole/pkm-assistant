@@ -30,6 +30,30 @@ test.serial('locale pl → persona Jaskra po polsku (bez zmian dla vaultów PL)'
     t.true(personality.includes('Komunikuję się naturalnie, po polsku'));
 });
 
+// Persona opisywała brain.md dosłownym wyliczeniem nagłówków SWOJEGO języka (PL: "## Bieżące",
+// EN: "current context, user, preferences, workflow, projects and references" - niemal 1:1 z
+// realnymi nagłówkami `brainSections.ts`). brain.md agenta rodzi się w języku UI z chwili
+// utworzenia i ZOSTAJE w nim na zawsze (modules/memory/CLAUDE.md, "Język brain.md") - user, który
+// PÓŹNIEJ przełączy UI, dostawałby personę opisującą nagłówki w INNYM języku niż te, które
+// naprawdę są w pliku Jaskra. Persona ma teraz opisywać sekcje TEMATYCZNIE, nie ich nazwami.
+// Recenzja niezależna, punkt 13.
+test.serial('persona NIE nazywa sekcji brain.md dosłownym nagłówkiem pliku (opis tematyczny, nie adres)', t => {
+    setLocale('pl');
+    t.teardown(() => setLocale('en'));
+    const pl = createJaskier().personality;
+    // Pozytyw: persona dalej WSPOMINA brain.md i opisuje go tematycznie (nowy, poprawny tekst
+    // naprawdę tam jest) - same negatywy nie odróżniłyby "naprawiono" od "usunięto całe zdanie".
+    t.true(pl.includes('brain.md to mój krótki indeks linków do brain/, pogrupowany tematycznie'), 'nowy opis tematyczny musi realnie istnieć w personie, nie tylko brakować starego');
+    t.false(pl.includes('## Bieżące'), 'stary bug: persona cytowała nagłówek jako markdown, mogła się rozjechać z realnym plikiem po zmianie języka UI');
+    t.false(/sekcjami:\s*Bieżące/.test(pl), 'stary bug: wyliczenie nagłówków 1:1 z rejestrem brainSections.ts');
+
+    setLocale('en');
+    const en = createJaskier().personality;
+    t.true(en.includes('brain.md is my short index of links into brain/, grouped thematically'), 'nowy opis tematyczny musi realnie istnieć w personie EN, nie tylko brakować starego');
+    t.false(en.includes('## Current'));
+    t.false(/grouped into sections \(current context/.test(en), 'stary bug: wyliczenie nagłówków 1:1 z rejestrem brainSections.ts');
+});
+
 test.serial('reszta konfiguracji nie zależy od języka', t => {
     setLocale('pl');
     t.teardown(() => setLocale('en'));

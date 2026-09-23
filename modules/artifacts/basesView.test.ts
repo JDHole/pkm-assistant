@@ -47,13 +47,32 @@ test('buildArtifactsBaseContent: oba widoki filtrują po frontmatterze pkm-artef
     }
 });
 
-test('buildArtifactsBaseContent: „Otwarte" dokłada filtr odcinający status zamkniety', t => {
+test('buildArtifactsBaseContent: „Otwarte" dokłada filtry odcinające OBA literały closed (PL+EN), zawsze', t => {
     const parsed = loadBase(buildArtifactsBaseContent('PKM Assistant/Artefakty'));
     const [wszystkie, otwarte] = parsed.views;
     t.is(wszystkie.filters.and.length, 2);
-    t.is(otwarte.filters.and.length, 3);
+    t.is(otwarte.filters.and.length, 4, 'folder + isArtifact + zamkniety + closed');
     t.false(wszystkie.filters.and.some((f: string) => f.includes('status')));
     t.true(otwarte.filters.and.includes('note["status"] != "zamkniety"'));
+    t.true(otwarte.filters.and.includes('note["status"] != "closed"'), 'literał EN wykluczony ZAWSZE, nawet bez typów przekazanych');
+});
+
+test('buildArtifactsBaseContent: typ własny z niestandardowym statusem domykającym (np. "done") dokłada TRZECI filtr', t => {
+    const parsed = loadBase(buildArtifactsBaseContent('PKM Assistant/Artefakty', [
+        { statusy: ['todo', 'zaakceptowany', 'uwagi', 'done'] },
+    ]));
+    const otwarte = parsed.views[1];
+    t.is(otwarte.filters.and.length, 5, 'folder + isArtifact + zamkniety + closed + done');
+    t.true(otwarte.filters.and.includes('note["status"] != "done"'));
+});
+
+test('buildArtifactsBaseContent: typy z DUPLIKOWANYM/rozpoznanym closedStatusOf nie dublują filtrów', t => {
+    const parsed = loadBase(buildArtifactsBaseContent('PKM Assistant/Artefakty', [
+        { statusy: ['do-akceptacji', 'uwagi', 'zaakceptowany', 'zamkniety'] }, // PL wbudowany - closedStatusOf = 'zamkniety', już w zbiorze
+        { statusy: ['pending-approval', 'remarks', 'accepted', 'closed'] },   // EN wbudowany - closedStatusOf = 'closed', już w zbiorze
+    ]));
+    const otwarte = parsed.views[1];
+    t.is(otwarte.filters.and.length, 4, 'żaden z dwóch typów nie dokłada NOWEGO literału ponad zamkniety/closed');
 });
 
 // ── escapowanie folderu ───────────────────────────────────────────────
@@ -130,6 +149,7 @@ views:
         - 'file.inFolder("PKM Assistant/Artefakty")'
         - '!note["pkm-artefakt"].isEmpty()'
         - 'note["status"] != "zamkniety"'
+        - 'note["status"] != "closed"'
     order:
       - file.name
       - typ

@@ -5,7 +5,7 @@ import { t } from '../../core/i18n/index.js';
 // accessors, so no heavy graph is pulled in beyond what the plugin already loads. Od 2.2.5 to
 // FUNKCJE, nie stałe - tekst fabryczny idzie za językiem interfejsu, a `factory: () => …` niżej
 // woła je dopiero przy renderze/kliknięciu, więc nic nie zamraża języka.
-import { factoryWorkPrompt } from '../memory/index.js';
+import { factoryWorkPrompt, factoryWorkPromptRaw } from '../memory/index.js';
 // Szkielet kompresji mieszka w `config/` (nie w barrelu czatu) - przecięta krawędź shell→chat.
 import { defaultCompressionPrompt } from '../../config/default_prompts.js';
 import { defaultSubAgentFramePrompt } from '../sub-agents/index.js';
@@ -30,7 +30,11 @@ import { setSvgLabel } from '../../modules/crystal-soul/index.js';
 // key → factory text + whether the prompt has a hard parser contract (warning shown).
 const WORK_PROMPTS = [
     { key: 'compression_prompt', factory: () => defaultCompressionPrompt(), warn: true },
-    { key: 'save_session_prompt', factory: () => factoryWorkPrompt('save_session'), warn: true },
+    // RAW (bez podstawienia {{sec_*}}/{{na_teraz_*}}) - to pole jest GLOBALNYM nadpisaniem,
+    // dzielonym przez wszystkich agentów; podstawienie należy do miejsca użycia
+    // (SaveSessionWorkflow), z brainLocale WŁAŚCIWEGO agenta, nie języka UI z chwili kliknięcia
+    // "Wstaw fabryczny" (patrz nagłówek `factoryWorkPromptRaw`, modules/memory/workPrompts.ts).
+    { key: 'save_session_prompt', factory: () => factoryWorkPromptRaw('save_session'), warn: true },
     { key: 'archive_prompt', factory: () => factoryWorkPrompt('archive'), warn: true },
     { key: 'summary_prompt', factory: () => factoryWorkPrompt('summary'), warn: true },
     { key: 'subagent_frame_prompt', factory: () => defaultSubAgentFramePrompt(), warn: true },

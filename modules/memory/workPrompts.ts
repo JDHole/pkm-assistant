@@ -21,15 +21,31 @@
  *    `merges`, `deletions`, `sources`, `target_*`, `merged_content`, `lessons_extracted`),
  *  - wartości `type` (`user` / `agent_rule` / `skill_hint` / `project_context` / `reference`),
  *  - token `{{LEVEL}}`,
- *  - nagłówki sekcji brain.md (`## Bieżące`, `## User`, `## Preferencje`, `## Workflow`,
- *    `## Projekty i referencje`, „Na teraz: User", „Na teraz: Środowisko") — te napisy są
- *    wpisane na sztywno w `BrainIndex.ts` / `SaveSessionWorkflow.ts` i NIE idą za językiem.
+ *  - placeholdery nagłówków sekcji brain.md (`{{sec_current}}`, `{{sec_user}}`,
+ *    `{{sec_preferences}}`, `{{sec_workflow}}`, `{{sec_projects}}`, `{{na_teraz_user}}`,
+ *    `{{na_teraz_environment}}`) w tekście `save_session` — wypełniane przez
+ *    `fillBrainSectionPlaceholders` NAGŁÓWKAMI JĘZYKA PLIKU brain.md, nie języka interfejsu
+ *    promptu (patrz gotcha niżej i `modules/memory/brainSections.ts`).
  * Overrides (global/agent) MUST keep the same output structure — Settings→Prompt warns about
  * this next to each field.
  * (Moved here from modules/agents/archetypes/savePrompts.js so the workflows own their defaults
  * without a memory→agents import cycle.)
+ *
+ * ⚠️ JĘZYK PLIKU brain.md ≠ język prozy promptu (od decyzji właściciela 19.09: brain.md rodzi
+ * się w języku UI i zostaje w nim NA ZAWSZE, niezależnie od tego, czy user PÓŹNIEJ przełączy
+ * UI). `factoryWorkPrompt('save_session', locale, brainLocale)` bierze DWA niezależne
+ * parametry: `locale` wybiera PL/EN prozę (jak dotąd), `brainLocale` wybiera, jakimi
+ * nagłówkami wypełnić placeholdery `{{sec_*}}`/`{{na_teraz_*}}` w tej prozie - user z EN UI i
+ * starym PL brain.md dostaje ANGIELSKI tekst instrukcji, który mówi modelowi o POLSKICH
+ * nagłówkach (bo to one naprawdę są w pliku tego agenta). `SaveSessionWorkflow` musi więc
+ * podać `brainLocale` wykryte z BIEŻĄCEJ treści `brain.md`, nie założone z `locale`.
+ * Nadpisania (agent/global) przechodzą przez `fillBrainSectionPlaceholders` OSOBNO, PO
+ * `resolveWorkPrompt` — użytkownik, który we własnym override też wpisze te placeholdery,
+ * dostaje tę samą podmianę.
  */
 import { getLocale } from '../../core/i18n/index.js';
+import { sectionHeading, naTerazHeading, uiBrainLocale } from './brainSections.js';
+import type { BrainLocale } from './brainSections.js';
 
 /** Który prompt roboczy pamięci. Nazwy 1:1 z kluczami `WORK_PROMPT_KEYS` bez sufiksu `_prompt`. */
 export type WorkPromptKind = 'save_session' | 'archive' | 'summary';
@@ -39,18 +55,18 @@ const SAVE_SESSION_PL = `Analizujesz transcript rozmowy i bieżący brain.md age
 ZASADY brain.md:
 - brain.md to spis treści do brain/, nie magazyn faktów.
 - Stałe sekcje indeksu:
-  - ## Bieżące — max 2-3 aktywne projekty/tematy, jako link do konkretnej notatki project_context + 1 krótkie zdanie opisu.
-  - ## User — linki do notatek z faktami o userze.
-  - ## Preferencje — linki do reguł/preferencji pracy.
-  - ## Workflow — linki do notatek "jak używać / jak robić".
-  - ## Projekty i referencje — linki do pozostałych kontekstów projektowych i referencji.
+  - {{sec_current}} — max 2-3 aktywne projekty/tematy, jako link do konkretnej notatki project_context + 1 krótkie zdanie opisu.
+  - {{sec_user}} — linki do notatek z faktami o userze.
+  - {{sec_preferences}} — linki do reguł/preferencji pracy.
+  - {{sec_workflow}} — linki do notatek "jak używać / jak robić".
+  - {{sec_projects}} — linki do pozostałych kontekstów projektowych i referencji.
 - NIE proponuj dopisywania faktów bezpośrednio do brain.md.
 - Jeśli bieżąca sesja dotyczy aktywnego projektu, zaproponuj notatkę typu project_context z opisem, który dobrze wygląda jako jedna linia indeksu.
 - Jeśli z sesji wynika trwała nauka, zaproponuj notatkę właściwego typu: user, agent_rule, skill_hint, project_context albo reference.
 - Pełna historia rozmowy idzie do sessions/ + L1/L2/L3 — NIE kopiuj jej do brain.md.
 
 SEKCJE „NA TERAZ" (pamięć krótkotrwała na początku brain.md):
-- brain.md ma dwie sekcje stanu bieżącego: „Na teraz: User" (nad czym user pracuje DZIŚ, jego bieżący stan) i „Na teraz: Środowisko" (aktualny stan projektu/vaulta/otoczenia).
+- brain.md ma dwie sekcje stanu bieżącego: „{{na_teraz_user}}" (nad czym user pracuje DZIŚ, jego bieżący stan) i „{{na_teraz_environment}}" (aktualny stan projektu/vaulta/otoczenia).
 - To KRÓTKIE, ZMIENNE zdania (bullety zwykłej treści, NIE linki, NIE trwałe fakty). Trwałe rzeczy dalej idą do new_notes — „na teraz" to tylko chwilowy stan.
 - Zaproponuj aktualizacje na bazie sesji: add[] = nowe bieżące zdania; remove[] = zdania które się ZDEZAKTUALIZOWAŁY (podaj tekst istniejącego wpisu z brain.md do usunięcia).
 - Jeśli nic się nie zmieniło w danej sekcji → zostaw puste tablice. Nie duplikuj tego, co już jest w „Na teraz".
@@ -94,19 +110,19 @@ const SAVE_SESSION_EN = `You are analysing a conversation transcript and the age
 
 brain.md RULES:
 - brain.md is a table of contents for brain/, not a store of facts.
-- Fixed index sections (the headings are Polish on disk — do not translate them):
-  - ## Bieżące — max 2-3 active projects/topics, as a link to a specific project_context note + 1 short sentence of description.
-  - ## User — links to notes with facts about the user.
-  - ## Preferencje — links to work rules/preferences.
-  - ## Workflow — links to "how to use / how to do" notes.
-  - ## Projekty i referencje — links to the remaining project contexts and references.
+- Fixed index sections (the headings match this agent's own brain.md file — do not translate them, they already are what the file needs):
+  - {{sec_current}} — max 2-3 active projects/topics, as a link to a specific project_context note + 1 short sentence of description.
+  - {{sec_user}} — links to notes with facts about the user.
+  - {{sec_preferences}} — links to work rules/preferences.
+  - {{sec_workflow}} — links to "how to use / how to do" notes.
+  - {{sec_projects}} — links to the remaining project contexts and references.
 - Do NOT propose appending facts directly to brain.md.
 - If the current session concerns an active project, propose a note of type project_context with a description that reads well as a single index line.
 - If the session yields a durable lesson, propose a note of the right type: user, agent_rule, skill_hint, project_context or reference.
 - The full conversation history goes to sessions/ + L1/L2/L3 — do NOT copy it into brain.md.
 
 THE "NA TERAZ" SECTIONS (short-term memory at the top of brain.md):
-- brain.md has two current-state sections: „Na teraz: User" (what the user is working on TODAY, their current state) and „Na teraz: Środowisko" (the current state of the project/vault/surroundings).
+- brain.md has two current-state sections: „{{na_teraz_user}}" (what the user is working on TODAY, their current state) and „{{na_teraz_environment}}" (the current state of the project/vault/surroundings).
 - These are SHORT, CHANGEABLE sentences (plain content bullets, NOT links, NOT durable facts). Durable things still go to new_notes — "na teraz" is only a momentary state.
 - Propose updates based on the session: add[] = new current sentences; remove[] = sentences that have GONE STALE (give the text of the existing brain.md entry to remove).
 - If nothing changed in a given section → leave the arrays empty. Do not duplicate what is already in „Na teraz".
@@ -120,7 +136,7 @@ REQUIRED OUTPUT (pure JSON, no markdown code fence):
       "description": "Rework of how facts are saved and indexed in brain.md and brain/.",
       "type": "project_context",
       "content": "The project is about changing Memory v3 so that brain.md is an index of categories and durable facts live in separate brain/*.md notes.",
-      "why": "This is an active session topic and belongs in ## Bieżące through the brain.md index.",
+      "why": "This is an active session topic and belongs in {{sec_current}} through the brain.md index.",
       "how_to_apply": "Load this note when the conversation comes back to Memory v3, /save session, archiving projects or the brain.md index."
     }
   ],
@@ -330,14 +346,69 @@ const FACTORY_WORK_PROMPTS: Record<WorkPromptKind, { pl: string; en: string }> =
     summary: { pl: SUMMARY_PL, en: SUMMARY_EN },
 };
 
+/** Placeholdery `save_session` → wartość w podanym języku PLIKU brain.md. */
+const SECTION_PLACEHOLDER_VALUE: Readonly<Record<string, (brainLocale: BrainLocale) => string>> = {
+    sec_current: brainLocale => sectionHeading('current', brainLocale),
+    sec_user: brainLocale => sectionHeading('user', brainLocale),
+    sec_preferences: brainLocale => sectionHeading('preferences', brainLocale),
+    sec_workflow: brainLocale => sectionHeading('workflow', brainLocale),
+    sec_projects: brainLocale => sectionHeading('projects', brainLocale),
+    // Prompt cytuje nazwę sekcji "Na teraz" wewnątrz zdania (`„{{na_teraz_user}}"`), nie jako
+    // adres pliku - bez `## ` z przodu, inaczej znak `#` wyglądałby jak literówka w prozie.
+    na_teraz_user: brainLocale => naTerazHeading('user', brainLocale).replace(/^##\s*/, ''),
+    na_teraz_environment: brainLocale => naTerazHeading('environment', brainLocale).replace(/^##\s*/, ''),
+};
+
+/**
+ * Wypełnij placeholdery `{{sec_*}}`/`{{na_teraz_*}}` w tekście promptu nagłówkami JĘZYKA
+ * PLIKU `brain.md` (`brainLocale`) - NIE języka prozy promptu. Bezpieczne na tekście bez
+ * placeholderów (no-op) i idempotentne (drugi przebieg nic już nie zmienia, bo podstawiona
+ * wartość nie zawiera `{{…}}`) - dzięki temu można ją wołać zarówno wewnątrz
+ * `factoryWorkPrompt` (fabryczny tekst), jak i OSOBNO na wyniku `resolveWorkPrompt` (żeby
+ * nadpisanie usera zawierające te same placeholdery też dostało realne nagłówki).
+ */
+export function fillBrainSectionPlaceholders(text: string, brainLocale: BrainLocale): string {
+    let result = text;
+    for (const [token, valueOf] of Object.entries(SECTION_PLACEHOLDER_VALUE)) {
+        result = result.split(`{{${token}}}`).join(valueOf(brainLocale));
+    }
+    return result;
+}
+
 /**
  * Fabryczny prompt roboczy w podanym języku (domyślnie: bieżący język interfejsu).
  * Nieznany kod języka = angielski, dokładnie jak `t()` w `core/i18n`.
  *
+ * `brainLocale` (domyślnie: `uiBrainLocale()`) wybiera, jakimi nagłówkami wypełnić
+ * placeholdery `{{sec_*}}`/`{{na_teraz_*}}` w tekście `save_session` - NIEZALEŻNIE od `locale`
+ * (który wybiera tylko PL/EN prozę). `archive`/`summary` nie mają tych placeholderów, więc
+ * `brainLocale` jest dla nich bez znaczenia.
+ *
  * ⚠️ Wołaj to W MOMENCIE UŻYCIA (resolver, render Ustawień), nie przy imporcie modułu —
  * `setLocale()` leci dopiero z `src/main.ts`.
  */
-export function factoryWorkPrompt(kind: WorkPromptKind, locale: string = getLocale()): string {
+export function factoryWorkPrompt(kind: WorkPromptKind, locale: string = getLocale(), brainLocale: BrainLocale = uiBrainLocale()): string {
+    const raw = factoryWorkPromptRaw(kind, locale);
+    return kind === 'save_session' ? fillBrainSectionPlaceholders(raw, brainLocale) : raw;
+}
+
+/**
+ * SUROWY tekst fabryczny (BEZ podstawienia placeholderów `{{sec_*}}`/`{{na_teraz_*}}` dla
+ * `save_session` - `archive`/`summary` ich nie mają, więc dla nich ten tekst jest identyczny z
+ * `factoryWorkPrompt(kind, locale)`) w podanym języku PROZY.
+ *
+ * Jedyny wołacz: Ustawienia → Prompt, guzik "Wstaw fabryczny" (`modules/shell/prompt_settings.ts`).
+ * Ten guzik pisze do GLOBALNEGO nadpisania (`promptDefaults.save_session_prompt`) - pola bez
+ * pojęcia, jaki `brainLocale` będzie miał KAŻDY agent, który je odziedziczy (per-agent > global >
+ * factory, `resolveWorkPrompt`). `factoryWorkPrompt('save_session')` (bez tej funkcji) podstawia
+ * WCZEŚNIE, nagłówkami `uiBrainLocale()` z CHWILI KLIKNIĘCIA - zapisany override zamroziłby ten
+ * jeden język na stałe, a agent z brain.md w drugim języku dostawałby cudze nagłówki aż do
+ * ręcznej naprawy. `resolveWorkPrompt` + `fillBrainSectionPlaceholders(text, brainLocale)`
+ * (`SaveSessionWorkflow.ts`) wypełniają placeholdery w miejscu UŻYCIA, nagłówkami WŁAŚCIWEGO
+ * agenta - override MUSI więc zostać surowy, tak samo jak fabryczny tekst byłby surowy, gdyby
+ * user nigdy override'u nie tknął.
+ */
+export function factoryWorkPromptRaw(kind: WorkPromptKind, locale: string = getLocale()): string {
     return FACTORY_WORK_PROMPTS[kind][locale === 'pl' ? 'pl' : 'en'];
 }
 

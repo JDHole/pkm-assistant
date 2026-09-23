@@ -33,7 +33,8 @@ link + jedno zdanie opisu. Agent nie dopisuje faktów bezpośrednio do `brain.md
 modules/memory/
 ├── index.ts                # publiczne drzwi (barrel) - jedyny legalny import z zewnątrz modułu
 ├── AgentMemory.ts           # struktura folderów, brain.md, sesje active/archive, summaries
-├── BrainIndex.ts            # buildBrainIndex(): kategoryzowany indeks brain.md z metadanych brain/*.md
+├── brainSections.ts         # rejestr nagłówków brain.md w OBU językach (PL/EN) - BrainLocale, sectionHeading/naTerazHeading (pisarz), sectionKeyOf/naTerazKeyOf/isNaTerazHeading (czytnik, rozpoznaje oba zestawy), detectBrainLocale/resolveBrainLocale/uiBrainLocale (język PLIKU vs język UI). Jedyne źródło prawdy dla BrainIndex.ts i MigrationV3.ts - zobacz sekcję "Język brain.md" niżej
+├── BrainIndex.ts            # buildBrainIndex(): kategoryzowany indeks brain.md z metadanych brain/*.md, w języku PLIKU (`locale` WYMAGANY - patrz brainSections.ts)
 ├── MemoryAccessGuard.ts      # strict per-agent path guard dla brain/
 ├── collisionSuffix.ts       # findFreeCollisionPath() - jedna wspólna pętla "wolna nazwa przy kolizji", wołana z kilku miejsc w AgentMemory.ts. Wewnętrzny, nie w barrelu
 ├── SaveSessionWorkflow.ts    # /save session: propozycje notatek + archiwizacja aktywnej sesji
@@ -82,6 +83,7 @@ Import z zewnątrz tylko przez `modules/memory/index.js`.
 | `SaveSessionWorkflow` | `/save session`: user-review, tworzenie notatek, archiwizacja sesji. |
 | `ArchiveWorkflow` | Automatyczna konsolidacja po progach: brain/ dedup, L1, L2, L3. Jeden tor: `runWithRun(consolidationRun)` (generuje propozycje wszystkich paczek, nic nie zapisuje) + `applyStepDecision()` (zapisuje po decyzji usera) + `generateGatedSteps()` (zdejmuje kłódkę z L2/L3 dopiero gdy L1 są rozstrzygnięte) - generacja oddzielona od zapisu. |
 | `parseNaTerazSections`, `naTerazSectionKey` | Pure helpery sekcji "Na teraz" brain.md, czytane przez UI panelu Pamięć, `MemorySaveTool` i `modules/chat/naTerazUpdate.ts` (normalizacja sekcji `BrainUpdate` w oknie review `/save session`). |
+| `sectionKeyOf` (z `brainSections.ts`) | Dokładne dopasowanie nagłówka indeksu w OBU językach → `BrainSectionKey`, albo `null`. Konsument spoza modułu: `modules/chat/saveSessionSectionLabel.ts` (etykieta sekcji w oknie review, w BIEŻĄCYM języku interfejsu, niezależnie od języka pliku). |
 | `ConsolidationRun`, `buildConsolidationPlan`, `STEP_STATUS`, `STEP_KIND`, `normalizeUsage` | Stan jednego przebiegu konsolidacji - plan paczek z liczników, maszyna stanów kroku. Zero UI, zero Obsidiana. `buildConsolidationPlan(counts, {include})` - drugi parametr OPCJONALNY (`{sessions, dedup}`, domyślnie oba `true` = zachowanie sprzed konsolidacji opcjonalnej): `include.dedup:false` wycina krok DEDUP, `include.sessions:false` wycina L1 i przez to (kaskada) też L2/L3. |
 | `resolveConsolidationThresholds`, `planAutoConsolidation` | Progi + plan auto-triggera konsolidacji (`consolidationStatus.ts`) - jedyne dwa eksporty tego pliku w barrelu. Konsument obu: `consolidationRunner.ts` w `modules/chat` (liczy próg dedupu jednym liczydłem; `planAutoConsolidation` też jako obrona w głąb, gdy `source:'auto'` przyjdzie bez `include`). `CONSOLIDATION_DEFAULTS`/`resolveAutoConsolidationPolicy` ZOSTAJĄ wewnątrz modułu (zero czytelnika spoza `modules/memory/`, sprawdzone grepem) - patrz gotcha „Jedno liczydło progów konsolidacji". |
 | `memoryOpsCenter` (singleton), `OPS_EVENT` | Rejestr jednego aktywnego przebiegu. `startRun/getActiveRun/finishRun/subscribe/requestOpenModal`. Drugi trigger przy aktywnym przebiegu NIE startuje drugiego - zwraca bieżący i prosi o modal. |
@@ -90,7 +92,8 @@ Import z zewnątrz tylko przez `modules/memory/index.js`.
 | `streamToComplete` | Stream -> complete z opcjonalnym `{onChunk, signal, watchdog}`. |
 | `RetrievalEngine` | Silnik narzędzia `search` - patrz sekcja "Odczyt pamięci" niżej. |
 | `CostLog`, `EmbeddingHelper` | Koszt operacji memory/sub-agent + helper wektoryzacji. |
-| `factoryWorkPrompt(kind, locale?)` + typ `WorkPromptKind` | Fabryczne prompty robocze (`workPrompts.ts`), owned przez memory. FUNKCJA, nie stałe - patrz gotcha "prompty robocze idą za językiem interfejsu". |
+| `factoryWorkPrompt(kind, locale?, brainLocale?)` + typ `WorkPromptKind` | Fabryczne prompty robocze (`workPrompts.ts`), owned przez memory. FUNKCJA, nie stałe - patrz gotcha "prompty robocze idą za językiem interfejsu". `locale` wybiera PROZĘ (PL/EN), `brainLocale` (domyślnie `uiBrainLocale()`) wybiera, jakimi nagłówkami wypełnić placeholdery `{{sec_*}}`/`{{na_teraz_*}}` w tekście `save_session` - dwa NIEZALEŻNE wymiary. |
+| `factoryWorkPromptRaw(kind, locale?)` | Ten sam tekst fabryczny, BEZ podstawienia placeholderów `{{sec_*}}`/`{{na_teraz_*}}` (dla `archive`/`summary` identyczny z `factoryWorkPrompt`, bo ich nie mają). Jedyny wołacz: Ustawienia → Prompt, guzik „Wstaw fabryczny" (`modules/shell/prompt_settings.ts`) - pisze do GLOBALNEGO nadpisania dzielonego przez wszystkich agentów, więc MUSI zostawić placeholdery surowe; podstawienie nagłówkami WŁAŚCIWEGO agenta należy do miejsca użycia (`resolveWorkPrompt` + `fillBrainSectionPlaceholders`), nie do chwili kliknięcia guzika z językiem UI z tamtej chwili (recenzja niezależna, 2026-09-23). |
 | `registerSettings` | Rejestracja sekcji "Pamięć i kontekst" w Settings. |
 
 Sporo pomocniczych symboli (helpery listujące, `StateManager`, większość `BrainIndex`,
@@ -157,19 +160,77 @@ archiwizację z review lekcji. Direct writes do `brain.md` nie istnieją jako dr
 zapis idzie wyłącznie przez `memory_save` / `/save session` / konsolidację / sekcje "Na teraz"
 (niżej).
 
+### Język brain.md - rodzi się w języku UI, zostaje w nim NA ZAWSZE
+
+**Decyzja właściciela (19.09):** `brain.md` NOWEGO agenta rodzi się w języku interfejsu (PL
+albo EN) i zostaje w nim do końca życia pliku - nawet gdy user PÓŹNIEJ przełączy język UI.
+Istniejących plików NIGDY nie migrujemy (żadnej podmiany nagłówków w istniejącej treści).
+Wariant "nagłówki za językiem UI na żywo" jest ODRZUCONY - user, który przełącza UI, nie budzi
+się z przepisanym plikiem.
+
+Jedyne źródło prawdy: `modules/memory/brainSections.ts` (`BrainLocale = 'pl' | 'en'`, NIE mylić
+z językiem interfejsu na żywo, `getLocale()`):
+
+- `BRAIN_SECTION_HEADINGS`/`NA_TERAZ_HEADINGS` - oba zestawy nagłówków (PL i EN) dla obu
+  rodzajów sekcji, per klucz (`BrainSectionKey`/`NaTerazKey`).
+- `sectionHeading(key, locale)`/`naTerazHeading(key, locale)` - PISARZ: nagłówek w podanym
+  języku PLIKU.
+- `sectionKeyOf(line)` - CZYTNIK: dokładne dopasowanie nagłówka indeksu w OBU językach na raz
+  → klucz kategorii, albo `null`. Sekcja o nagłówku z DOWOLNEGO z dwóch zestawów jest
+  "zarządzana" (nie foreign) - używają tego `parseForeignSections`/`parseManualIndexLines`/
+  `AgentMemory._brainHasManualContent`.
+- `naTerazKeyOf(line)`/`isNaTerazHeading(line)` - to samo dla sekcji "Na teraz"/"Right now".
+  Separator między "Na teraz"/"Right now" a słowem klucza jest OPCJONALNY (dwukropek/myślnik/
+  półpauza/pauza, albo w ogóle nic), a kotwica PO rozpoznanym słowie klucza jest LUŹNA (`\b`,
+  nie koniec linii) - dopuszcza dowolny ogon, np. "## Na teraz: User (Kuba)" nadal rozpoznaje
+  `user`. Ręcznie dopisana sekcja usera bez rozpoznanego słowa klucza zaraz PO separatorze
+  ("## Na teraz coś tam", "## Na teraz: Vault") NIE jest łapana, jest zwykłą sekcją obcą.
+- `detectBrainLocale(content)` - pierwszy napotkany nagłówek SWOISTY dla języka (np. `##
+  Bieżące`/`## Current`, `## Preferencje`/`## Preferences`) rozstrzyga; nagłówki WSPÓLNE
+  (`## User`, `## Workflow`) same nie rozstrzygają; brak sygnału → `null`.
+- `resolveBrainLocale(content, uiLocale)` = `detectBrainLocale(content) ?? uiLocale` - JEDYNE
+  miejsce, gdzie treść pliku decyduje o języku zapisu DLA NOWEGO/SAMONAPRAWIANEGO pliku.
+  Wołane przez `AgentMemory.getBrain()` (samonaprawa brakujących sekcji) i
+  `AgentMemory.rebuildBrainIndex()` (KAŻDY rebuild). **`MigrationV3` NIE woła tej funkcji** -
+  `applyPlan` liczy `detectBrainLocale(originalBrain) ?? 'pl'` WPROST (fallback `'pl'` na
+  sztywno, nie `uiBrainLocale()`): prawdziwy v2 istniał wyłącznie sprzed dwujęzycznego UI, więc
+  jego treść jest ZAWSZE polska niezależnie od bieżącego języka interfejsu w chwili migracji -
+  `resolveBrainLocale`'owy fallback na UI dałby angielskie nagłówki nad polską treścią, gdyby
+  user akurat miał UI po angielsku. Wykryty język ma i tak pierwszeństwo przed `'pl'` - inaczej
+  plik w KSZTAŁCIE v3, którego `looksLikeV3Index` nie rozpoznał (bez folderu `brain/`, bez
+  sekcji "Right now", bez linków `[[brain/...]]` - świeży klon/desync), trafiałby w tę samą
+  ścieżkę migracji i zostawał przepisany na polskie nagłówki mimo poprawnie rozpoznanej EN
+  treści (naprawione w dogrywce rundy 2 recenzji niezależnej).
+- `uiBrainLocale()` - `getLocale()` zwężone do `BrainLocale` (`'pl'` → `'pl'`, wszystko inne →
+  `'en'`), most między światem UI a światem pliku. Woła się go WYŁĄCZNIE jako fallback dla
+  nowego pliku albo treści nierozstrzygającej - nigdy jako pierwszeństwo nad wykrytym językiem
+  istniejącej treści.
+
+`BrainIndex.buildBrainIndex({..., locale})` ma `locale: BrainLocale` **WYMAGANY** (świadomie
+bez domyślnej wartości - jak `resolveWorkPrompt`/`factoryWorkPrompt`, żeby żaden wołacz nie
+dostał po cichu PL tam, gdzie miał na myśli EN) i emituje WYŁĄCZNIE nagłówki tego jednego
+języka. `indexSectionHeadings(locale)` zastępuje dawną stałą `INDEX_SECTIONS` (była PL-only) -
+lista nagłówków indeksu w kolejności emisji, dla podanego języka.
+
+**Plik mieszany (nie powinien powstać, ale gdyby)** - dwie sekcje tej samej kategorii w OBU
+językach naraz - `parseManualIndexLines` kluczuje ręczne linie po `BrainSectionKey`, NIE po
+literale nagłówka, więc obie sekcje scalają się pod JEDNYM kluczem i wychodzą jako JEDNA sekcja
+w wykrytym języku przy najbliższym rebuildzie.
+
 ### `brain.md` jako indeks
 
-`brain.md` zaczyna się od dwóch sekcji krótkoterminowych - `## Na teraz: User` (nad czym user
-pracuje teraz) i `## Na teraz: Środowisko` (bieżący stan projektu/vaulta), plain-text bullety
-zmiennego stanu, NIE linki i NIE trwałe fakty (stałe w `BrainIndex.ts`: `NA_TERAZ_SECTIONS`,
-`NA_TERAZ_MAX_ENTRIES=10` - twardy trim najstarszych + log). Pod nimi jest kategoryzowany
-indeks:
+`brain.md` zaczyna się od dwóch sekcji krótkoterminowych - `## Na teraz: User`/`## Right now:
+User` (nad czym user pracuje teraz) i `## Na teraz: Środowisko`/`## Right now: Environment`
+(bieżący stan projektu/vaulta), plain-text bullety zmiennego stanu, NIE linki i NIE trwałe
+fakty (`NA_TERAZ_MAX_ENTRIES=10` w `BrainIndex.ts` - twardy trim najstarszych + log). Pod nimi
+jest kategoryzowany indeks (nagłówki w tabeli niżej są ADRESY PL - plik EN niesie ich angielskie
+odpowiedniki, `brainSections.ts`, sekcja wyżej):
 
-- `## Bieżące` - kilka najnowszych aktywnych `project_context`,
-- `## User` - notatki `user`,
-- `## Preferencje` - notatki `agent_rule`,
-- `## Workflow` - notatki `skill_hint`,
-- `## Projekty i referencje` - starsze `project_context` + `reference`.
+- `## Bieżące` / `## Current` - kilka najnowszych aktywnych `project_context`,
+- `## User` - notatki `user` (nagłówek wspólny dla obu języków),
+- `## Preferencje` / `## Preferences` - notatki `agent_rule`,
+- `## Workflow` - notatki `skill_hint` (nagłówek wspólny dla obu języków),
+- `## Projekty i referencje` / `## Projects and references` - starsze `project_context` + `reference`.
 
 Każdy wpis ma format:
 
@@ -196,7 +257,8 @@ zachowana; sekcja dopisana na górze po pierwszej przebudowie wędruje na dół 
 przypadek: sesje Claude Code dopisują 3-5 bulletów ręcznie do `## Bieżące` (bieżący kontekst
 roboczy), a każdy `memory_save`/`/save session`/konsolidacja wywołuje `rebuildBrainIndex()` -
 bez tej naprawy wpisy ginęły przy pierwszym kolejnym zapisie. `parseManualIndexLines(before)`
-(`BrainIndex.ts`) wyciąga z KAŻDEJ sekcji zarządzanej (`INDEX_SECTIONS`) jej niepuste linie,
+(`BrainIndex.ts`) wyciąga z KAŻDEJ sekcji zarządzanej (dowolny z dwóch zestawów nagłówków,
+`sectionKeyOf` w `brainSections.ts`) jej niepuste linie,
 które NIE są linkiem do notatki (`- [[brain/…]]`, niezależnie od tego co po nim - taki link
 jest ZAWSZE regenerowany z metadanych notatek i traktowany jako wygenerowany, nie ręczny; stary
 link do usuniętej notatki więc dalej znika, to zamierzone). `buildBrainIndex({manual})` emituje
@@ -488,11 +550,13 @@ pełny plan, jak przed tą zmianą.
 
 `MigrationV3` wykrywa stare memory, gdy istnieje `brain.md`, nie istnieje folder `brain/` i
 treść nie wygląda na już zmigrowany indeks v3 (`looksLikeV3Index`: kanoniczny wikilink
-`- [[brain/<typ>_*.md` wystarcza sam; nagłówek "Na teraz" liczy się TYLKO razem z ≥2 nagłówkami
-`INDEX_SECTIONS` - pojedynczy słaby sygnał nie wygasza migracji). Brain w formacie v3 bez
-folderu `brain/` (świeży klon, desync) nie jest migrowany: `run()` robi backup, dosztukowuje
-strukturę (`ensureMemoryStructure` może dokleić brakujące nagłówki indeksu i domigrować płaski
-`sessions/`) i wraca `{skipped, reason:'already_v3_format', backupPath}`.
+`- [[brain/<typ>_*.md` wystarcza sam - filename typu w nazwie pliku jest język-niezależny, więc
+ten sygnał działa identycznie dla brain.md PL i EN; nagłówek "Na teraz"/"Right now" liczy się
+TYLKO razem z ≥2 nagłówkami `indexSectionHeadings(locale)` TEGO SAMEGO języka - pojedynczy
+słaby sygnał nie wygasza migracji, a PL nie koroboruje z EN). Brain w formacie v3 bez folderu
+`brain/` (świeży klon, desync) nie jest migrowany: `run()` robi backup, dosztukowuje strukturę
+(`ensureMemoryStructure` może dokleić brakujące nagłówki indeksu W JĘZYKU WYKRYTYM z istniejącej
+treści i domigrować płaski `sessions/`) i wraca `{skipped, reason:'already_v3_format', backupPath}`.
 
 Flow:
 
@@ -502,9 +566,12 @@ Flow:
    następnego bloku, znacznik ``` jest pomijany,
 3. `## User` -> `user_*.md`; `## Preferencje` -> `agent_rule_*.md`; `## Ustalenia` ->
    `project_context_*.md`; `## Bieżące` -> `project_context_*`; `## Workflow` -> `skill_hint_*`;
-   `## Projekty i referencje` -> `reference_*` (nagłówki kolidujące z `INDEX_SECTIONS` idą w
-   notatki, NIE w `keepInBrain` - sekcja verbatim pod takim nagłówkiem zostałaby wycięta przy
-   następnym `rebuildBrainIndex`),
+   `## Projekty i referencje` -> `reference_*` (nagłówki kolidujące z `indexSectionHeadings`
+   w KTÓRYMKOLWIEK z dwóch języków idą w notatki, NIE w `keepInBrain` - sekcja verbatim pod
+   takim nagłówkiem zostałaby wycięta przy następnym `rebuildBrainIndex`; realny v2 brain jest
+   zawsze PL, więc te sygnały łapią praktycznie wyłącznie polskie tytuły - `SECTION_TYPES`/
+   `LIVE_SECTION_KEYS` w `MigrationV3.ts` są mimo to zbudowane z rejestru w OBU językach,
+   plus historyczny synonim `ustalenia` spoza rejestru),
 4. sekcja NIEROZPOZNANA z treścią -> `keepInBrain` i przeżywa w nowym `brain.md` verbatim na
    końcu pliku; sekcja pusta (także rozpoznana pusta) -> `deletedSections`. Każda sekcja jest
    policzona w planie (notes / keepInBrain / deletedSections),
@@ -579,21 +646,40 @@ Flow:
     `getActiveMemory()` zostaje dla akcji usera na aktywnej zakładce (zapis ręczny, `/save
     session`, UI).
 - ⚠️ **Nowe user-facing stringi idą do `core/i18n/pl.ts` i `core/i18n/en.ts`.**
-- ⚠️ **Prompty robocze idą za JĘZYKIEM INTERFEJSU i liczą się LENIWIE.** Od 2.2.5 każdy
-  z trzech promptów (`save_session`/`archive`/`summary`) ma wersję PL i EN w `workPrompts.ts`,
-  a wołacz bierze je WYŁĄCZNIE przez `factoryWorkPrompt(kind)`. Stałe `DEFAULT_*_PROMPT` zostały
-  skasowane celowo: `setLocale()` leci z `src/main.ts` PO załadowaniu modułów, więc stała
-  wybrałaby język przy imporcie i zamroziła go na zawsze (domyślna wartość parametru `locale`
-  liczy się dopiero przy wywołaniu - dlatego funkcja jest bezpieczna).
-  **Co NIE tłumaczy się razem z prozą** (to ADRESY, wpisane na sztywno w `BrainIndex.ts` /
-  `SaveSessionWorkflow.ts` / parserach): nagłówki `## Bieżące`, `## User`, `## Preferencje`,
-  `## Workflow`, `## Projekty i referencje`, sekcje „Na teraz: User" / „Na teraz: Środowisko" (w PLIKU i w PROMPCIE zostają surowe; okno review
-  `/save session` pokazuje userowi etykietę w języku UI - `modules/chat/saveSessionSectionLabel.ts`),
-  klucze JSON (`brain_updates`, `new_notes`, `na_teraz.*`, `merges`, `deletions`, `target_*`,
-  `merged_content`, `lessons_extracted`), wartości `type` i token `{{LEVEL}}`. Nagłówki `##`
-  W WYNIKU promptu `summary` (Kluczowe tematy / Key topics …) nikt nie parsuje - te SIĘ
-  tłumaczą. Strażnicy: `workPrompts.test.ts` (parytet placeholderów z literalną listą per
-  prompt, polskie nagłówki w angielskim tekście, łańcuch resolvera w obu językach).
+- ⚠️ **Prompty robocze idą za JĘZYKIEM INTERFEJSU (proza) i liczą się LENIWIE; nagłówki brain.md
+  w treści `save_session` idą za JĘZYKIEM PLIKU (osobny wymiar).** Od 2.2.5 każdy z trzech
+  promptów (`save_session`/`archive`/`summary`) ma wersję PL i EN w `workPrompts.ts`, a wołacz
+  bierze je WYŁĄCZNIE przez `factoryWorkPrompt(kind, locale?, brainLocale?)`. Stałe
+  `DEFAULT_*_PROMPT` zostały skasowane celowo: `setLocale()` leci z `src/main.ts` PO załadowaniu
+  modułów, więc stała wybrałaby język przy imporcie i zamroziła go na zawsze (domyślna wartość
+  parametru liczy się dopiero przy wywołaniu - dlatego funkcja jest bezpieczna).
+  **Co NIE tłumaczy się razem z prozą, tylko ma WŁASNY wymiar językowy** (to ADRESY, nie proza):
+  nagłówki sekcji indeksu i sekcje "Na teraz"/"Right now" w tekście `save_session` są od 19.09
+  placeholderami (`{{sec_current}}`, `{{sec_user}}`, `{{sec_preferences}}`, `{{sec_workflow}}`,
+  `{{sec_projects}}`, `{{na_teraz_user}}`, `{{na_teraz_environment}}`), wypełnianymi przez
+  `fillBrainSectionPlaceholders(text, brainLocale)` NAGŁÓWKAMI JĘZYKA PLIKU brain.md TEGO
+  agenta - NIE językiem prozy promptu (EN proza + PL plik agenta = tekst po angielsku, ale
+  mówiący modelowi o polskich nagłówkach, bo to one naprawdę są w tym pliku). `SaveSessionWorkflow`
+  liczy `brainLocale` DWA RAZY, NIEZALEŻNIE - RAZ w `prepareProposals` (dla ścieżki regexowej i
+  poczekalni rescue, `getBrain()` opakowane w try/catch - pad odczytu spada na `uiBrainLocale()`,
+  patrz gotcha „Odczyt PRZED..." niżej) i DRUGI RAZ w `proposeBrainUpdatesViaAgent` (ścieżka LLM,
+  potrzebuje też surowej treści `current_brain` do payloadu promptu, nie tylko samego locale).
+  Świadomie NIE ujednolicone w jedno przeliczenie - `proposeBrainUpdatesViaAgent` jest metodą
+  PUBLICZNĄ, wołaną wprost w kilku testach z samym `messages`, a wątek błędów obu ścieżek (LLM
+  kontra regex) jest inny na tyle, że wspólny parametr wymusiłby przekazywanie fallbacku z
+  jednej strony na drugą. Koszt: jeden dodatkowy odczyt `brain.md` na strzał LLM - lekki plik,
+  raz na `/save session`, nie ścieżka gorąca. Nadpisania promptu (agent/global) przechodzą przez
+  `fillBrainSectionPlaceholders` OSOBNO, PO `resolveWorkPrompt` - user, który we własnym
+  override też wpisze te placeholdery, dostaje tę samą podmianę (idempotentne na tekście już
+  podstawionym). W SAMYM PLIKU nagłówki oczywiście dalej zostają surowe w każdym języku
+  interfejsu (okno review `/save session` pokazuje etykietę w języku UI -
+  `modules/chat/saveSessionSectionLabel.ts`). Klucze JSON (`brain_updates`, `new_notes`,
+  `na_teraz.*`, `merges`, `deletions`, `target_*`, `merged_content`, `lessons_extracted`),
+  wartości `type` i token `{{LEVEL}}` NIE tłumaczą się, bez zmian. Nagłówki `##` W WYNIKU
+  promptu `summary` (Kluczowe tematy / Key topics …) nikt nie parsuje - te SIĘ tłumaczą.
+  Strażnicy: `workPrompts.test.ts` (kontrakt placeholderów, EN proza + PL/EN brainLocale →
+  nagłówki właściwego pliku, strażnik "żaden fabryczny prompt nie niesie już nagłówka na
+  sztywno", łańcuch resolvera w obu językach).
 - ⚠️ **Stopka notatki `brain/` (`**Dlaczego:**` / `**Jak stosować:**` + zdania domyślne) idzie z
   i18n** (`memory.note.why_label` / `how_label` / `why_unspecified` / `how_default`). Kanoniczny
   pisarz to `AgentMemory._buildBrainNoteContent` / `MemorySaveTool.buildNoteContent` (oba muszą
@@ -784,11 +870,15 @@ Memory v3 critical path ma testy w:
 - `modules/memory/CostLog.test.ts`
 - `modules/memory/activeSessionFormat.test.ts` - round-trip pisarz/czytnik, plik MIESZANY, CRLF,
   legacy bez escapów
-- `modules/memory/BrainIndex.test.ts` - sekcje "Na teraz", sekcje obce
+- `modules/memory/brainSections.test.ts` - rejestr dwujęzyczny: `sectionKeyOf`/`naTerazKeyOf` na
+  wszystkich 10+4 nagłówkach, `detectBrainLocale`/`resolveBrainLocale`/`uiBrainLocale`
+- `modules/memory/BrainIndex.test.ts` - sekcje "Na teraz" (PL+EN), sekcje obce, plik mieszany
+  (dwie sekcje tej samej kategorii scalają się pod jednym kluczem)
 - `modules/memory/MemoryAccessGuard.test.ts`
 - `modules/memory/collisionSuffix.test.ts`
 - `modules/memory/EmbeddingHelper.test.ts`
-- `modules/memory/workPrompts.test.ts`
+- `modules/memory/workPrompts.test.ts` - w tym kontrakt `brainLocale` niezależny od `locale`
+  prozy i strażnik "żaden fabryczny prompt nie niesie nagłówka na sztywno"
 - `modules/memory/consolidationStatus.test.ts` - `resolveConsolidationThresholds` (fallbacki
   ustawień, trzy źródła `limitSource`, podłoga limitu brain/, wartości ujemne/`NaN` = brak),
   `shouldTriggerConsolidation` (granice literalne: sesje `>=`, notatki `>`),

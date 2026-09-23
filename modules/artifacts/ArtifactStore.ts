@@ -14,6 +14,8 @@
  * traversal (nie ruszamy centralnego vault_path_validator).
  */
 import { parseArtifact, applyPatch, validateArtifactBodyText, isArtifactScalar, INVALID_VALUE_MSG, PROTECTED_FIELDS, ARTIFACT_CONTEXT_MAX_CHARS, formatYmd } from './artifactParser.js';
+import { isClosedStatus } from './artifactButtons.js';
+import { defaultStatusy } from './ArtifactTypeLoader.js';
 import { sanitizePath, stringifyYaml } from '../../core/index.js';
 import type { ArtifactFrontmatter, ArtifactPatchError, ArtifactPatchOp, ArtifactScalar, ThinArtifact } from './types.js';
 
@@ -172,7 +174,10 @@ export class ArtifactStore {
 
         const id = this._genId();
         const today = this._today();
-        const status = (type.statusy && type.statusy[0]) || 'szkic';
+        // Fallback `defaultStatusy()[0]` (język UI) zamiast polskiego `'szkic'` na sztywno -
+        // w praktyce nieosiągalne dla typu z biblioteki (ArtifactTypeLoader zawsze dosztukowuje
+        // statusy), ale broni się na wypadek atrapy/typu skonstruowanego inaczej w testach.
+        const status = (type.statusy && type.statusy[0]) || defaultStatusy()[0];
 
         // Frontmatter: baza + pola typu (kolejność jak w makiecie instancji).
         const fm: ArtifactFrontmatter = {
@@ -261,7 +266,7 @@ export class ArtifactStore {
         const type = this.typeLoader?.getType?.(typ);
         const id = this._genId();
         const today = this._today();
-        const resolvedStatus = status || (type && type.statusy && type.statusy[0]) || 'szkic';
+        const resolvedStatus = status || (type && type.statusy && type.statusy[0]) || defaultStatusy()[0];
         const resolvedUtworzono = utworzono || today;
         const resolvedZaktualizowano = zaktualizowano || today;
         const fm: ArtifactFrontmatter = {
@@ -447,16 +452,23 @@ export class ArtifactStore {
     }
 
     /**
-     * Sprzątanie: instancje `status:zamkniety` starsze niż `sprzatanie` dni typu → do `_archiwum/`.
+     * Sprzątanie: instancje DOMKNIĘTE starsze niż `sprzatanie` dni typu → do `_archiwum/`.
      * Wołane przy starcie pluginu. Bezpieczne (brak typu / brak progu = pomijamy).
+     *
+     * „Domknięty" = `isClosedStatus(entry.status, type?.statusy)` (`artifactButtons.ts`) - PRAWDA
+     * gdy status ma rolę `closed` w KTÓRYMKOLWIEK z dwóch języków (`'zamkniety'`/`'closed'`,
+     * niezależnie od tego, czy typ w ogóle je deklaruje) ALBO pasuje do `closedStatusOf(type.statusy)`
+     * (własna nazwa końcowa typu usera). Iterujemy CAŁY rejestr (nie `list({status: 'zamkniety'})`
+     * jak dotąd) - jeden literał nie objąłby typów EN ani typów własnych z inną nazwą domknięcia.
      * @returns {Promise<number>} liczba zarchiwizowanych
      */
     async archive() {
         const root = this._artifactsRoot();
         const nowMs = this._now().getTime();
         let count = 0;
-        for (const entry of this.list({ status: 'zamkniety' })) {
+        for (const entry of this.list()) {
             const type = this.typeLoader?.getType?.(entry.typ);
+            if (!isClosedStatus(entry.status, type?.statusy)) continue;
             const days = type?.sprzatanie || 0;
             if (!days) continue;
             const closedMs = Date.parse(entry.zaktualizowano || entry.utworzono || '');

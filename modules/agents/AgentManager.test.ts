@@ -82,6 +82,28 @@ test('resolveSkillConfig i resolveSubAgentConfig wołają wspólny _applyPromptA
     t.regex(helperBody, inlineSeparatorRe);
 });
 
+// _buildBaseContext filtrował artefakty "w toku" hardkodowanym literałem PL `!== 'zamkniety'`.
+// `ensureBuiltinTypes` reseeduje NIETKNIĘTY plik typu do BIEŻĄCEGO języka UI przy każdym starcie
+// (modules/artifacts/CLAUDE.md, "Reguła nietknięty tekst fabryczny idzie za językiem") - agent
+// pracujący na typie EN ma w pliku status `'closed'`, nigdy `'zamkniety'`, więc jego domknięte
+// artefakty wisiałyby w indeksie "w toku" w prompcie NA ZAWSZE. To samo dla typu WŁASNEGO usera
+// z wymyślonym literałem (np. `'done'`). Naprawa woła `isClosedStatus` (oba języki + fallback
+// pozycyjny typu własnego, `modules/artifacts/artifactStatuses.ts`, przetestowany osobno w
+// `modules/artifacts/artifactButtons.test.ts`) zamiast porównania z literałem na sztywno.
+test('_buildBaseContext filtruje artefakty "w toku" przez isClosedStatus (oba języki + typ własny), nie literał PL na sztywno', t => {
+    const body = methodBodyOf(source, '_buildBaseContext');
+    t.true(body.length > 0, 'nie znalazłem _buildBaseContext w AgentManager.ts — zmieniła się sygnatura?');
+
+    t.regex(body, /!isClosedStatus\(a\.status,\s*this\.artifactTypeLoader\.getType\(a\.typ\)\?\.statusy\)/,
+        'filtr "w toku" musi wołać isClosedStatus ze statusami WŁASNEGO typu artefaktu (this.artifactTypeLoader.getType(a.typ)), nie zgadywać po jednym literale');
+
+    t.notRegex(body, /a\.status\s*!==\s*'zamkniety'/,
+        'stary hardkodowany literał PL — artefakt typu EN (status "closed") albo typu własnego (np. "done") nigdy by się nie domknął w indeksie promptu');
+
+    t.true(source.includes("from '../../modules/artifacts/index.js'") && /import\s*\{[^}]*isClosedStatus[^}]*\}\s*from\s*'\.\.\/\.\.\/modules\/artifacts\/index\.js'/.test(source),
+        'isClosedStatus musi wejść przez barrel modules/artifacts/index.js (złota zasada modułów), nie deep-import z artifactButtons.js');
+});
+
 // Kesz nagłówków skrzynki w KomunikatorManager widzi TYLKO mutacje przez metody managera.
 // Zapisy Z ZEWNĄTRZ (sesja Claude Code piszącą wprost na dysk przez kontrakt /agent, sync
 // Google Drive, obsidian-git pull) go omijają - bez nasłuchu zdarzeń vaulta kesz zamrażałby

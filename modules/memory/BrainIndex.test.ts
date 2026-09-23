@@ -7,18 +7,9 @@ import {
     applyNaTerazOps,
     naTerazSectionKey,
     isNaTerazHeading,
+    sectionKeyOf,
     NA_TERAZ_MAX_ENTRIES,
-    INDEX_SECTIONS,
-    NOTE_TYPE_TO_SECTION,
 } from './BrainIndex.js';
-
-// DLACZEGO: `buildBrainIndex` robi `sections.get(section)!` - sekcja spoza
-// INDEX_SECTIONS dałaby cichy TypeError. Ten test zamienia rozjazd stałych w czerwony test.
-test('spójność stałych: każda sekcja z NOTE_TYPE_TO_SECTION istnieje w INDEX_SECTIONS', t => {
-    for (const [type, section] of Object.entries(NOTE_TYPE_TO_SECTION)) {
-        t.true(INDEX_SECTIONS.includes(section), `typ "${type}" wskazuje nieistniejącą sekcję "${section}"`);
-    }
-});
 
 const noteMeta = (over = {}) => ({
     filename: 'user_jan.md',
@@ -36,6 +27,7 @@ test('buildBrainIndex emituje sekcje „Na teraz" NA GÓRZE, przed indeksem', t 
         agentName: 'Jaskier',
         notes: [noteMeta()],
         naTeraz: { user: ['Jan testuje panel'], environment: ['Vault w trakcie refaktoru'] },
+        locale: 'pl',
     });
     const userIdx = md.indexOf('## Na teraz: User');
     const envIdx = md.indexOf('## Na teraz: Środowisko');
@@ -49,15 +41,15 @@ test('buildBrainIndex emituje sekcje „Na teraz" NA GÓRZE, przed indeksem', t 
 });
 
 test('pusty naTeraz → BRAK nagłówków „Na teraz" (kompat starego brain.md)', t => {
-    const withEmpty = buildBrainIndex({ agentName: 'Jaskier', notes: [noteMeta()], naTeraz: { user: [], environment: [] } });
-    const noArg = buildBrainIndex({ agentName: 'Jaskier', notes: [noteMeta()] });
+    const withEmpty = buildBrainIndex({ agentName: 'Jaskier', notes: [noteMeta()], naTeraz: { user: [], environment: [] }, locale: 'pl' });
+    const noArg = buildBrainIndex({ agentName: 'Jaskier', notes: [noteMeta()], locale: 'pl' });
     t.false(withEmpty.includes('Na teraz'));
     t.is(withEmpty, noArg, 'brak naTeraz == pusty naTeraz — identyczny output');
 });
 
 test('parse(build(naTeraz)) round-trip zachowuje wpisy', t => {
     const naTeraz = { user: ['A', 'B'], environment: ['C'] };
-    const md = buildBrainIndex({ agentName: 'X', notes: [], naTeraz });
+    const md = buildBrainIndex({ agentName: 'X', notes: [], naTeraz, locale: 'pl' });
     const parsed = parseNaTerazSections(md);
     t.deepEqual(parsed, naTeraz);
 });
@@ -84,6 +76,37 @@ test('isNaTerazHeading / naTerazSectionKey mapują warianty', t => {
     t.is(naTerazSectionKey('environment'), 'environment');
     t.is(naTerazSectionKey('Środowisko'), 'environment');
     t.is(naTerazSectionKey('nonsense'), null);
+});
+
+// ─── Rejestr dwujęzyczny (BuildBrainIndexInput.locale WYMAGANE) ───
+
+test('buildBrainIndex z locale "en" emituje DOKŁADNIE nagłówki EN, żadnego PL', t => {
+    const md = buildBrainIndex({
+        agentName: 'Jaskier',
+        notes: [noteMeta()],
+        naTeraz: { user: ['Testing today'], environment: ['Refactor in progress'] },
+        locale: 'en',
+    });
+    for (const heading of ['## Current', '## User', '## Preferences', '## Workflow', '## Projects and references']) {
+        t.true(md.includes(heading), `brak ${heading} w EN indeksie`);
+    }
+    t.true(md.includes('## Right now: User'));
+    t.true(md.includes('## Right now: Environment'));
+    for (const plHeading of ['## Bieżące', '## Preferencje', '## Projekty i referencje', '## Na teraz: User', '## Na teraz: Środowisko']) {
+        t.false(md.includes(plHeading), `EN indeks nie powinien nieść ${plHeading}`);
+    }
+});
+
+test('sectionKeyOf rozpoznaje nagłówek indeksu w OBU językach', t => {
+    t.is(sectionKeyOf('## Bieżące'), 'current');
+    t.is(sectionKeyOf('## Current'), 'current');
+    t.is(sectionKeyOf('## User'), 'user');
+    t.is(sectionKeyOf('## Preferencje'), 'preferences');
+    t.is(sectionKeyOf('## Preferences'), 'preferences');
+    t.is(sectionKeyOf('## Workflow'), 'workflow');
+    t.is(sectionKeyOf('## Projekty i referencje'), 'projects');
+    t.is(sectionKeyOf('## Projects and references'), 'projects');
+    t.is(sectionKeyOf('## AKTYWNY TEST'), null);
 });
 
 // ─── applyNaTerazOps (add / update / delete / dedup / trim) ───
@@ -149,8 +172,23 @@ tekst
     t.deepEqual(foreign[1].lines, ['tekst']);
 });
 
+test('parseForeignSections traktuje nagłówki EN (Right now / Current) jako zarządzane, nie foreign', t => {
+    const md = `# X brain
+
+## Right now: User
+- current state
+
+## Current
+
+## AKTYWNY TEST
+- krok 1
+`;
+    const foreign = parseForeignSections(md);
+    t.deepEqual(foreign.map(s => s.heading), ['## AKTYWNY TEST'], 'nagłówki EN (Right now / Current) są zarządzane, nie trafiają do foreign');
+});
+
 test('parseForeignSections na czystym indeksie → pusta lista', t => {
-    const md = buildBrainIndex({ agentName: 'X', notes: [noteMeta()], naTeraz: { user: ['A'], environment: [] } });
+    const md = buildBrainIndex({ agentName: 'X', notes: [noteMeta()], naTeraz: { user: ['A'], environment: [] }, locale: 'pl' });
     t.deepEqual(parseForeignSections(md), []);
     t.deepEqual(parseForeignSections(''), []);
     t.deepEqual(parseForeignSections(null), []);
@@ -158,10 +196,10 @@ test('parseForeignSections na czystym indeksie → pusta lista', t => {
 
 test('buildBrainIndex emituje foreign NA KOŃCU, a round-trip jest stabilny', t => {
     const foreign = [{ heading: '## AKTYWNY TEST', lines: ['- krok 1', '- krok 2'] }];
-    const md = buildBrainIndex({ agentName: 'X', notes: [noteMeta()], foreign });
+    const md = buildBrainIndex({ agentName: 'X', notes: [noteMeta()], foreign, locale: 'pl' });
     t.true(md.indexOf('## AKTYWNY TEST') > md.indexOf('## Projekty i referencje'), 'foreign pod indeksem');
     t.true(md.includes('- krok 1'));
-    const md2 = buildBrainIndex({ agentName: 'X', notes: [noteMeta()], foreign: parseForeignSections(md) });
+    const md2 = buildBrainIndex({ agentName: 'X', notes: [noteMeta()], foreign: parseForeignSections(md), locale: 'pl' });
     t.is(md2, md, 'parse(build) → build daje identyczny plik');
 });
 
@@ -185,11 +223,44 @@ test('parseManualIndexLines wyciąga ręczne bullety z sekcji zarządzanych, ign
 ## Projekty i referencje
 `;
     const manual = parseManualIndexLines(md);
-    t.deepEqual(manual.get('## Bieżące'), ['- Jan testuje panel Ram', '- Sprint dogrywki walidatora w toku']);
-    t.deepEqual(manual.get('## Preferencje'), ['- Nie pytaj drugi raz o rozstrzygnięte']);
-    t.false(manual.has('## User'), 'brak ręcznych linii → brak wpisu dla tej sekcji');
-    t.false(manual.has('## Workflow'));
-    t.false(manual.has('## Projekty i referencje'));
+    t.deepEqual(manual.get('current'), ['- Jan testuje panel Ram', '- Sprint dogrywki walidatora w toku']);
+    t.deepEqual(manual.get('preferences'), ['- Nie pytaj drugi raz o rozstrzygnięte']);
+    t.false(manual.has('user'), 'brak ręcznych linii → brak wpisu dla tej sekcji');
+    t.false(manual.has('workflow'));
+    t.false(manual.has('projects'));
+});
+
+test('parseManualIndexLines rozpoznaje sekcje EN identycznie jak PL (klucz wspólny)', t => {
+    const md = `# X brain
+
+## Current
+- Jan is testing the Ram panel
+
+## Preferences
+- Do not ask twice about settled matters
+`;
+    const manual = parseManualIndexLines(md);
+    t.deepEqual(manual.get('current'), ['- Jan is testing the Ram panel']);
+    t.deepEqual(manual.get('preferences'), ['- Do not ask twice about settled matters']);
+});
+
+test('plik mieszany (PL + EN nagłówek tej samej kategorii) - obie sekcje scalają się pod jednym kluczem', t => {
+    const md = `# X brain
+
+## Bieżące
+- wpis polski
+
+## Current
+- english entry
+`;
+    const manual = parseManualIndexLines(md);
+    t.deepEqual(manual.get('current'), ['- wpis polski', '- english entry'], 'kolejność pliku, jeden klucz, jedna sekcja po rebuildzie');
+    // Rebuild w wykrytym języku (PL - pierwszy napotkany nagłówek swoisty) emituje JEDNĄ sekcję ## Bieżące.
+    const rebuilt = buildBrainIndex({ agentName: 'X', notes: [], manual, locale: 'pl' });
+    t.is((rebuilt.match(/^## Bieżące$/gm) || []).length, 1, 'dokładnie jedna sekcja ## Bieżące w wyniku');
+    t.false(rebuilt.includes('## Current'), 'druga (EN) sekcja tej samej kategorii nie przeżywa jako osobny nagłówek');
+    t.true(rebuilt.includes('- wpis polski'));
+    t.true(rebuilt.includes('- english entry'));
 });
 
 test('parseManualIndexLines na pustej/nieistniejącej treści → pusta mapa', t => {
@@ -203,8 +274,8 @@ test('buildBrainIndex emituje ręczne linie PRZED wygenerowanymi linkami, w oryg
         { filename: 'project_context_a.md', name: 'A', description: 'Projekt A', type: 'project_context', created: '2026-09-01' },
         { filename: 'project_context_b.md', name: 'B', description: 'Projekt B', type: 'project_context', created: '2026-09-02' },
     ];
-    const manual = new Map([['## Bieżące', ['- Jan testuje panel Ram', '- Sprint dogrywki walidatora w toku']]]);
-    const md = buildBrainIndex({ agentName: 'Jaskier', notes, manual });
+    const manual: Map<'current', string[]> = new Map([['current', ['- Jan testuje panel Ram', '- Sprint dogrywki walidatora w toku']]]);
+    const md = buildBrainIndex({ agentName: 'Jaskier', notes, manual, locale: 'pl' });
     const biezace = md.slice(md.indexOf('## Bieżące'), md.indexOf('## User'));
     t.is(
         biezace,
@@ -235,8 +306,8 @@ test('rebuild(rebuild) z ręcznymi liniami jest idempotentny bajtowo', t => {
 
 ## Projekty i referencje
 `;
-    const once = buildBrainIndex({ agentName: 'Jaskier', notes, manual: parseManualIndexLines(before) });
-    const twice = buildBrainIndex({ agentName: 'Jaskier', notes, manual: parseManualIndexLines(once) });
+    const once = buildBrainIndex({ agentName: 'Jaskier', notes, manual: parseManualIndexLines(before), locale: 'pl' });
+    const twice = buildBrainIndex({ agentName: 'Jaskier', notes, manual: parseManualIndexLines(once), locale: 'pl' });
     t.is(twice, once, 'druga przebudowa z tych samych notatek nie zmienia bajtu');
     t.true(once.includes('- Jan testuje panel Ram'));
     t.true(once.includes('- ręczna notatka usera'));
@@ -257,5 +328,5 @@ test('index-like linia dopisana ręcznie (np. do usuniętej notatki) jest wycina
 ## Projekty i referencje
 `;
     const manual = parseManualIndexLines(before);
-    t.false(manual.has('## Bieżące'), 'stary link jest index-like → nie ląduje w manualu, będzie regenerowany/zniknie');
+    t.false(manual.has('current'), 'stary link jest index-like → nie ląduje w manualu, będzie regenerowany/zniknie');
 });

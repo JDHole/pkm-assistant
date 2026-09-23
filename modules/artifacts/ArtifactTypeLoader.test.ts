@@ -2,7 +2,7 @@ import test from 'ava';
 import {
     ArtifactTypeLoader,
     ARTIFACT_TYPES_PATH,
-    DEFAULT_STATUSY,
+    defaultStatusy,
     PLAN_TYPE_CONTENT,
     NOTATKA_TYPE_CONTENT,
     RAPORT_TYPE_CONTENT,
@@ -166,11 +166,12 @@ test.serial('locale en + pusty vault → wbudowane typy po angielsku, bez polski
     t.true(raport.includes('## Findings'));
     t.true(raport.includes('## Blind spots'));
 
-    // Semantyka silnika (id typu, statusy, pola) jest wspólna dla obu języków.
+    // Semantyka silnika (id typu, klucze pól) jest wspólna dla obu języków - WARTOŚCI statusów
+    // natomiast (od 19.09) idą za językiem seedowania: EN dostaje literały EN, nie PL.
     await loader.loadAllTypes();
     const typ = loader.getType('plan')!;
     t.is(typ.name, 'plan');
-    t.deepEqual(typ.statusy, ['do-akceptacji', 'uwagi', 'zaakceptowany', 'zamkniety']);
+    t.deepEqual(typ.statusy, ['pending-approval', 'remarks', 'accepted', 'closed']);
     t.deepEqual(Object.keys(typ.pola), ['cel', 'termin']);
 });
 
@@ -267,14 +268,29 @@ test('validation: type missing nazwa or opis is skipped', async t => {
     t.truthy(loader.getType('good'));
 });
 
-test('defaults: statusy -> [szkic, zamkniety], sprzatanie -> 0 when unspecified', async t => {
+// `defaultStatusy()` jest leniwa (język interfejsu w chwili PARSOWANIA typu bez zadeklarowanych
+// statusów) - `test.serial` + `setLocale` przypina, który UI jest aktywny.
+test.serial('defaults: statusy -> [szkic, zamkniety] pod PL UI, sprzatanie -> 0 when unspecified', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
     const { vault } = makeVault(new Map([[typePath('notatka'), '---\nnazwa: notatka\nopis: goła notatka\n---\ntreść']]));
     const loader = new ArtifactTypeLoader(vault);
     await loader.loadAllTypes();
     const notatka = loader.getType('notatka')!;
-    t.deepEqual(notatka.statusy, DEFAULT_STATUSY);
+    t.deepEqual(notatka.statusy, defaultStatusy());
+    t.deepEqual(notatka.statusy, ['szkic', 'zamkniety']);
     t.is(notatka.sprzatanie, 0);
     t.deepEqual(notatka.pola, {});
+});
+
+test.serial('defaults: statusy -> [draft, closed] pod EN UI (nie [szkic, zamkniety])', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+    const { vault } = makeVault(new Map([[typePath('notatka'), '---\nnazwa: notatka\nopis: bare note\n---\ncontent']]));
+    const loader = new ArtifactTypeLoader(vault);
+    await loader.loadAllTypes();
+    const notatka = loader.getType('notatka')!;
+    t.deepEqual(notatka.statusy, ['draft', 'closed']);
 });
 
 test('getTypesForAgent: empty/missing -> only plan; explicit list -> mapped', async t => {

@@ -3,7 +3,7 @@ import { AgentMemory, parseBrainLog } from './AgentMemory.js';
 import { StateManager } from './StateManager.js';
 import { parseSessionFile } from './sessionParser.js';
 // Alias — goły `t` jest wewnątrz każdego testu zajęty przez ExecutionContext AVA.
-import { t as tr } from '../../core/i18n/index.js';
+import { t as tr, setLocale } from '../../core/i18n/index.js';
 
 // TS-any: `saveSession` przyjmuje `ChatMessageLike[]` (role/content), a testy poniżej podają
 // wiadomości `RollingMessage`-owate (z `tool_calls`/`tool_call_id`) - dokładnie to, co realnie
@@ -88,7 +88,12 @@ ${body}
 `;
 }
 
-test('AgentMemory.ensureMemoryStructure creates Memory v3 folders, state and brain template', async t => {
+// `ensureMemoryStructure`/`getBrain` na BRAKUJĄCYM pliku rodzą brain.md w JĘZYKU INTERFEJSU
+// (decyzja właściciela 19.09 - `modules/memory/brainSections.ts`) - `test.serial` + `setLocale`
+// przypina, który UI jest aktywny w chwili narodzin pliku (locale to stan globalny modułu i18n).
+test.serial('AgentMemory.ensureMemoryStructure creates Memory v3 folders, state and brain template (PL UI)', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
     const { vault, files, folders } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -104,6 +109,23 @@ test('AgentMemory.ensureMemoryStructure creates Memory v3 folders, state and bra
     t.true(files['.pkm-assistant/agents/jaskier/memory/brain.md'].includes('## Workflow'));
     t.true(files['.pkm-assistant/agents/jaskier/memory/brain.md'].includes('## Projekty i referencje'));
     t.true(files['.pkm-assistant/agents/jaskier/memory/brain.md'].includes('## Bieżące'));
+});
+
+test.serial('AgentMemory.ensureMemoryStructure: nowy agent pod EN UI dostaje brain.md w EN, nie w PL', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+    const { vault, files } = makeVault();
+    const memory = new AgentMemory(vault, 'Jaskier');
+
+    await memory.ensureMemoryStructure();
+
+    const brain = files['.pkm-assistant/agents/jaskier/memory/brain.md'];
+    t.true(brain.includes('## User'));
+    t.true(brain.includes('## Workflow'));
+    t.true(brain.includes('## Projects and references'));
+    t.true(brain.includes('## Current'));
+    t.false(brain.includes('## Bieżące'), 'brak PL nagłówka w nowym pliku pod EN UI');
+    t.false(brain.includes('## Projekty i referencje'), 'brak PL nagłówka w nowym pliku pod EN UI');
 });
 
 test('AgentMemory.ensureMemoryStructure migrates legacy root sessions to archive', async t => {
@@ -212,7 +234,11 @@ test('AgentMemory.listBrainNotes ignores brain/archive cemetery notes', async t 
     t.deepEqual(notes.map(n => n.filename), ['project_active.md']);
 });
 
-test('AgentMemory.rebuildBrainIndex writes categorized links and caps Bieżące at three projects', async t => {
+// Brak brain.md ISTNIEJĄCEGO na dysku (tylko notatki brain/*.md) - rebuild rodzi plik w
+// JĘZYKU INTERFEJSU (jak przy zupełnie nowym agencie), więc test przypina PL przez `setLocale`.
+test.serial('AgentMemory.rebuildBrainIndex writes categorized links and caps Bieżące at three projects', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
     const base = '.pkm-assistant/agents/jaskier/memory';
     const { vault, files } = makeVault({
         [`${base}/brain/project_one.md`]: note({ name: 'One', description: 'Projekt 1', type: 'project_context', created: '2026-05-21' }),
@@ -1460,7 +1486,10 @@ test('writeBrainNote NIE dusi trwałego błędu w nieskończonej pętli — drug
 
 const BRAIN = '.pkm-assistant/agents/jaskier/memory/brain.md';
 
-test('writeNaTeraz adds an entry to the „Na teraz: User" section', async t => {
+// Brak brain.md na dysku - rodzi się w JĘZYKU INTERFEJSU (jak nowy agent); test przypina PL.
+test.serial('writeNaTeraz adds an entry to the „Na teraz: User" section', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');
 
@@ -1468,6 +1497,19 @@ test('writeNaTeraz adds an entry to the „Na teraz: User" section', async t => 
 
     t.true(files[BRAIN].includes('## Na teraz: User'));
     t.true(files[BRAIN].includes('- Jan testuje dziś panel pamięci'));
+});
+
+test.serial('writeNaTeraz pod EN UI dokleja „## Right now: User", nie polski nagłówek', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+    const { vault, files } = makeVault();
+    const memory = new AgentMemory(vault, 'Jaskier');
+
+    await memory.writeNaTeraz([{ section: 'user', add: 'User is testing the memory panel today' }]);
+
+    t.true(files[BRAIN].includes('## Right now: User'));
+    t.true(files[BRAIN].includes('- User is testing the memory panel today'));
+    t.false(files[BRAIN].includes('## Na teraz'), 'brak PL nagłówka w nowym pliku pod EN UI');
 });
 
 test('rebuildBrainIndex PRESERVES „Na teraz" (nie ląduje w .bak)', async t => {
@@ -2060,6 +2102,30 @@ test('getBrain NIE nadpisuje brain.md, gdy exists() kłamie (false na żywym pli
     t.true(files[BRAIN].includes('ręczny fakt dopisany przez usera'), 'plik na dysku nietknięty');
     t.true(files[BRAIN].includes('## AKTYWNY TEST'), 'sekcja ręczna nie zniknęła pod świeżym indeksem');
     t.true(content.includes('## AKTYWNY TEST'), 'zwrotka to prawdziwa treść, nie świeży pusty indeks');
+});
+
+// Plik istniejący rozstrzyga JĘZYK samonaprawy - nie bieżący język interfejsu (kontrakt „rodzi
+// się i zostaje", `modules/memory/brainSections.ts`).
+test.serial('getBrain: samonaprawa PL pliku dokleja PL nagłówki, nie EN, nawet pod EN UI', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+    const brainBefore = `# Jaskier brain
+
+## Bieżące
+- projekt w toku
+
+## User
+`;
+    const { vault, files } = makeVault({ [BRAIN]: brainBefore });
+    const memory = new AgentMemory(vault, 'Jaskier');
+
+    const content = await memory.getBrain();
+
+    t.true(content.includes('## Preferencje'), 'brakująca sekcja dosztukowana w JĘZYKU PLIKU (PL), nie UI (EN)');
+    t.true(content.includes('## Workflow'));
+    t.true(content.includes('## Projekty i referencje'));
+    t.false(content.includes('## Preferences'), 'żaden nagłówek EN nie wszedł do pliku wykrytego jako PL');
+    t.true(files[BRAIN].includes('## Preferencje'), 'naprawa zapisana na dysk');
 });
 
 test('rebuildBrainIndex nie kasuje treści brain.md, gdy exists() kłamie (.bak działa)', async t => {

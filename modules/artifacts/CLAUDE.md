@@ -16,10 +16,11 @@ Wspólny silnik (parser/patcher), osobne interfejsy - wspólna mechanika, nie sk
 ```
 modules/artifacts/
 ├── artifactParser.ts         # PURE parser + patcher (parseArtifact/applyPatch) + `validateArtifactBodyText` - JEDYNA bramka treści agenta (code-fence/HTML/nagłówki) + protected keys
-├── ArtifactTypeLoader.ts     # biblioteka TYPÓW (.pkm-assistant/artifacts/types/*.md); seed plan + notatka + raport, PL/EN wg języka interfejsu (`builtinTypeContent`)
+├── ArtifactTypeLoader.ts     # biblioteka TYPÓW (.pkm-assistant/artifacts/types/*.md); seed plan + notatka + raport, PL/EN wg języka interfejsu (`builtinTypeContent`) - proza I statusy w pliku
 ├── artifactSections.ts       # PURE rejestr nazw sekcji PL/EN (`ARTIFACT_SECTION_NAMES`) + `artifactSection(key)` po języku
+├── artifactStatuses.ts       # PURE rejestr statusów PL/EN per rola (`statusRole`/`statusLiteral`/`pendingStatusOf`/`closedStatusOf`/`acceptedStatusOf`/`remarksStatusOf`) - jedyne źródło dla artifactButtons/ArtifactStore/basesView/artifactStatusLabel/ArtifactTypeLoader
 ├── ArtifactStore.ts          # CRUD instancji jako notatek vaulta (create/read/update/list/move/remove/archive/importInstance)
-├── artifactButtons.ts        # computeArtifactButtons (guziki wg statusu instancji + statusy typu)
+├── artifactButtons.ts        # computeArtifactButtons (guziki wg statusu instancji + statusy typu, oba języki przez artifactStatuses.ts)
 ├── artifactSummon.ts         # przywołanie agenta (buildSummonMessage + summonAgentForArtifact) + ciche przypięcie (activateArtifactInChat)
 ├── artifactBlocks.ts         # registerMarkdownCodeBlockProcessor('pkm-artefakt') - render guzików w notatce + `isBlockBoundToNote` (blok żyje tylko w swojej notatce)
 ├── artifactViewHelpers.ts    # PURE helpery UI (sort/picker/typy) dla panelu + slim bara
@@ -55,9 +56,52 @@ Typ = plik `.pkm-assistant/artifacts/types/<nazwa>.md`: frontmatter meta (`nazwa
 
 ### Język tekstów fabrycznych (2.2.5)
 
-Szablon typu wbudowanego ma DWA warianty: polski (`PLAN_TYPE_CONTENT` itd.) i angielski (`*_CONTENT_EN`). Różnią się **wyłącznie tekstem dla człowieka** - opisem typu, nagłówkami sekcji i podpowiedziami w nawiasach. Klucze frontmattera (`nazwa`/`opis`/`pola`/`statusy`/`sprzatanie`), identyfikatory typów (`plan`/`notatka`/`raport`) i wartości statusów (`do-akceptacji`, `zamkniety`, …) są **wspólne dla obu języków** - to semantyka silnika, nie tłumaczenie. Wybiera `builtinTypeContent(name, locale = getLocale())`; nazwy sekcji mieszkają w `artifactSections.ts`, bo ten sam napis wypisują też aliasy `plan_review`/`idea_review` (`modules/tools`) oraz drzewo decyzyjne i blok aktywnego artefaktu (`modules/prompts`) - rozjazd = ciche `not_found` przy patchu. Same teksty fabryczne rejestru NIE wołają (są statyczne), więc przed dryfem broni ich test `nagłówki tekstów fabrycznych zgadzają się z rejestrem sekcji` w `ArtifactTypeLoader.test.ts`.
+Szablon typu wbudowanego ma DWA warianty: polski (`PLAN_TYPE_CONTENT` itd.) i angielski (`*_CONTENT_EN`). Różnią się tekstem dla człowieka - opisem typu, nagłówkami sekcji i podpowiedziami w nawiasach - **oraz, od 19.09, WARTOŚCIAMI STATUSÓW** (patrz sekcja "Statusy w obu językach" niżej). Klucze frontmattera (`nazwa`/`opis`/`pola`/`statusy`/`sprzatanie`) i identyfikatory typów (`plan`/`notatka`/`raport`) zostają **wspólne dla obu języków** - to semantyka silnika, nie tłumaczenie. Wybiera `builtinTypeContent(name, locale = getLocale())`; nazwy sekcji mieszkają w `artifactSections.ts`, bo ten sam napis wypisują też aliasy `plan_review`/`idea_review` (`modules/tools`) oraz drzewo decyzyjne i blok aktywnego artefaktu (`modules/prompts`) - rozjazd = ciche `not_found` przy patchu. Same teksty fabryczne rejestru NIE wołają (są statyczne), więc przed dryfem broni ich test `nagłówki tekstów fabrycznych zgadzają się z rejestrem sekcji` w `ArtifactTypeLoader.test.ts`.
 
-**Reguła „nietknięty tekst fabryczny idzie za językiem":** `ensureBuiltinTypes` przy starcie (a) pisze plik, gdy go nie ma, (b) PODMIENIA plik, który jest co do znaku tekstem fabrycznym DRUGIEGO języka (porównanie po normalizacji CRLF→LF i obcięciu białych znaków na końcach linii/pliku), (c) w każdym innym przypadku zostawia plik w spokoju. Czyli: user, który nigdy nie ruszył szablonu, po przełączeniu języka dostaje szablon w nowym języku; user, który dopisał choćby jedną linię, nie traci nic.
+**Reguła „nietknięty tekst fabryczny idzie za językiem":** `ensureBuiltinTypes` przy starcie (a) pisze plik, gdy go nie ma, (b) PODMIENIA plik, który jest co do znaku tekstem fabrycznym DRUGIEGO języka (porównanie po normalizacji CRLF→LF i obcięciu białych znaków na końcach linii/pliku), (c) w każdym innym przypadku zostawia plik w spokoju. Czyli: user, który nigdy nie ruszył szablonu, po przełączeniu języka dostaje szablon w nowym języku (statusy w pliku włącznie); user, który dopisał choćby jedną linię, nie traci nic - żadna migracja statusów w istniejącej treści nigdy się nie dzieje.
+
+### Statusy w obu językach (19.09)
+
+**Decyzja właściciela:** nowy typ z fabrycznego szablonu EN dostaje statusy EN W PLIKU
+(`pending-approval`/`remarks`/`accepted`/`closed`, `in-progress`/`ready`), nie polskie literały
+wewnątrz angielskiego tekstu jak dotąd. Rejestr `modules/artifacts/artifactStatuses.ts` jest
+jedynym źródłem obu zestawów - 7 RÓL statusu (`draft`/`pending`/`remarks`/`accepted`/`closed`/
+`in_progress`/`ready`), każda z literałem PL i EN (`ARTIFACT_STATUS_LITERALS`). `statusRole(literal)`
+rozpoznaje literał w KTÓRYMKOLWIEK z dwóch języków; `statusLiteral(role, locale)` idzie w drugą
+stronę (pisarz).
+
+**Reguła pierwszy/ostatni dla typów WŁASNYCH (bez rozpoznanej roli):**
+- `pendingStatusOf(statusy)` = status z rolą `pending` w liście, a gdy brak - **PIERWSZY**
+  status listy (`statusy[0]`) - założenie: "pierwszy etap = czeka na decyzję".
+- `closedStatusOf(statusy)` = status z rolą `closed` w liście, a gdy brak - **OSTATNI** status
+  listy (`statusy[statusy.length-1]`) - założenie: "ostatni etap = domknięcie". Dodatkowo
+  literały `'zamkniety'`/`'closed'` domykają ZAWSZE, niezależnie od tego, czy typ je w ogóle
+  deklaruje (`isClosedStatus`, `artifactButtons.ts`) - zachowanie sprzed tej zmiany, zostaje.
+
+**`acceptedStatusOf`/`remarksStatusOf` NIE mają tego fallbacku pozycyjnego - własna nazwa usera
+dla "zaakceptowany"/"uwagi" NIE jest rozpoznawana**, bo (w przeciwieństwie do pierwszy/ostatni)
+nie ma jednoznacznej pozycji w liście, którą dałoby się zgadnąć - typ własny `['todo',
+'w recenzji', 'ok', 'gotowe']` nie ma sposobu odróżnić, który z dwóch środkowych stanów to
+"zaakceptowany" i który to "uwagi". Skutek: `computeArtifactButtons` dla takiego typu w statusie
+`pendingStatusOf` (tu: `'todo'`, fallback pozycyjny) pokazuje TYLKO te przyciski, których rola
+jest rozpoznana w liście - typ, który reużywa literałów PL/EN dla tych dwóch pozycji (np.
+`['todo', 'zaakceptowany', 'uwagi', 'done']`), dostaje oba guziki; typ z zupełnie własnym
+słownictwem dla obu (`['todo', 'w recenzji', 'ok', 'gotowe']`) nie dostaje żadnego - tylko
+generyczne "Przywołaj agenta".
+
+**Konsumenci rejestru** (wszyscy rozpoznają OBA zestawy jednocześnie, żaden nie ma własnej kopii
+literałów): `artifactButtons.computeArtifactButtons`/`isClosedStatus`, `ArtifactStore.archive()`
+(iteruje CAŁY rejestr, nie `list({status:'zamkniety'})` jak dotąd - jeden literał nie objąłby
+typów EN ani własnych), `basesView.buildArtifactsBaseContent` (widok "Otwarte" dostaje jeden
+filtr `!=` na KAŻDY literał `closed` obu języków PLUS `closedStatusOf` każdego typu w `types` -
+plik `.base` jest statyczną konfiguracją Bases, więc lista liczy się RAZ, przy generowaniu, nie
+w locie), `artifactStatusLabel` (etykieta dla oczu usera przez `statusRole` zamiast `switch` po
+literale PL - te same 7 kluczy i18n co dotąd, teraz adresowane przez rolę).
+
+`defaultStatusy(locale = getLocale())` (dawne `DEFAULT_STATUSY`, `ArtifactTypeLoader.ts`) -
+statusy `[draft, closed]` W JĘZYKU INTERFEJSU dla typu, którego plik nie deklaruje `statusy:` w
+ogóle. FUNKCJA, nie stała - ten sam powód co `factoryWorkPrompt` w `modules/memory/workPrompts.ts`
+(`setLocale()` leci z `src/main.ts` PO załadowaniu modułów).
 
 ## Kluczowe decyzje
 
@@ -66,7 +110,7 @@ Szablon typu wbudowanego ma DWA warianty: polski (`PLAN_TYPE_CONTENT` itd.) i an
 - **Agent NIGDY nie pisze nagłówków poziomu 1-2 w treści (`heading_forbidden`).** `set_section` i `add_item` odrzucają tekst z linią `# `/`## `, bo te poziomy tworzą sekcje: wpisane do TREŚCI robią drugi nagłówek o tej samej nazwie, a `findSection` zwraca PIERWSZE trafienie → oryginalna sekcja zostaje osierocona na zawsze (kolejne patche trafiają w podrobioną). **`###` i głębsze są DOZWOLONE** - model legalnie używa ich jako podtytułów wewnątrz sekcji. Bramka i zlew liczą nagłówki JEDNĄ funkcją `scanSectionHeadings` (patrz gotcha niżej); rozjazd tych dwóch stron = dziura.
 - **`create` raportuje wynik patcha tak samo jak `update`.** Zwraca `{created, id, path, applied, errors, artifact}` (`created:false` = odmowa bramki pól JESZCZE PRZED zapisem, pusty `id`) - początkowe `sekcje` idą przez `applyPatch` i jego `applied`/`errors` jadą do wołacza. Wcześniej `create` brał z patcha samo `.markdown`, więc `set_section` z nagłówkiem spoza szablonu typu wracał jako cichy `not_found`: narzędzie mówiło `ok:true`, a artefakt wychodził pustym szablonem. Bez sekcji → `applied: 0`, `errors: []`.
 - **Klucze frontmattera PO POLSKU:** `pkm-artefakt`/`typ`/`agent`/`status`/`utworzono`/`zaktualizowano` + pola typu. Klucze bazowe NIEZMIENIALNE (`protected_key`).
-- **Wartość `status` (`do-akceptacji`/`uwagi`/`zaakceptowany`/`zamkniety`/`w-trakcie`/`gotowy`/`szkic`) jest identyfikatorem silnika, nie tekstem UI.** W pliku, w prompcie dla modelu (`mcp.artifact_list.param.status`) i w KAŻDEJ logice/porównaniu (`artifactButtons.ts`, `ArtifactStore.archive`, `basesView.ts`) zostaje surowa, w każdym języku interfejsu — inaczej zapytania po statusie i przejścia między statusami by się rozjechały. Tam, gdzie status rysuje SAM PLUGIN dla oczu usera (blok `pkm-artefakt` w notatce, panel Artefakty profilu agenta, picker artefaktów pod `@` w czacie - `modules/chat/chat/chat_ui.ts`), etykietę w języku interfejsu daje `artifactStatusLabel(status)` (`artifactStatusLabel.ts`, w barrelu) — `switch` z literalnymi `t('artifact.status.*')`, nieznany status (typ usera) wraca dosłownie, pusty/null → `'—'`. Properties i Bases rysuje Obsidian wprost z surowego YAML — poza zasięgiem, świadomie nietłumaczone. **Nowy status wbudowanego typu = nowy `case` w `artifactStatusLabel` + nowy klucz `artifact.status.*` w OBU słownikach (`core/i18n/en.ts`/`pl.ts`)** — bez tego user dostanie surowy token zamiast etykiety.
+- **Wartość `status` jest identyfikatorem silnika, nie tekstem UI - ale od 19.09 ma DWA literały równoważne per rola (PL i EN), nie jeden.** Zestaw PL (`do-akceptacji`/`uwagi`/`zaakceptowany`/`zamkniety`/`w-trakcie`/`gotowy`/`szkic`) i zestaw EN (`pending-approval`/`remarks`/`accepted`/`closed`/`in-progress`/`ready`/`draft`) - rejestr `modules/artifacts/artifactStatuses.ts`, sekcja "Statusy w obu językach" wyżej. W pliku i w prompcie dla modelu (`mcp.artifact_list.param.status`) status zostaje surowy, w KTÓRYMKOLWIEK z dwóch zestawów - typ EN niesie EN, typ PL niesie PL, żadna migracja istniejącej treści się nie dzieje. KAŻDA logika/porównanie w silniku (`artifactButtons.ts`, `ArtifactStore.archive`, `basesView.ts`) rozpoznaje OBA zestawy jednocześnie przez `statusRole`/`pendingStatusOf`/`closedStatusOf` - inaczej zapytania po statusie i przejścia między statusami rozjechałyby się dla typu w drugim języku. Tam, gdzie status rysuje SAM PLUGIN dla oczu usera (blok `pkm-artefakt` w notatce, panel Artefakty profilu agenta, picker artefaktów pod `@` w czacie - `modules/chat/chat/chat_ui.ts`), etykietę w BIEŻĄCYM języku interfejsu daje `artifactStatusLabel(status)` (`artifactStatusLabel.ts`, w barrelu) — literał w KTÓRYMKOLWIEK z dwóch języków przez `statusRole` → jeden z 7 kluczy `t('artifact.status.*')`, nierozpoznany status (typ własny usera) wraca dosłownie, pusty/null → `'—'`. Properties i Bases rysuje Obsidian wprost z surowego YAML — poza zasięgiem, świadomie nietłumaczone. **Nowa rola statusu wbudowanego typu = nowa rola w `artifactStatuses.ts` (oba literały PL+EN) + nowy klucz `artifact.status.*` w OBU słownikach (`core/i18n/en.ts`/`pl.ts`) + nowy wpis `ROLE_LABEL_KEY` w `artifactStatusLabel.ts`** — bez tego user dostanie surowy token zamiast etykiety.
 - **Block-idy jako stabilne adresy:** checkboxy dostają `^k1` - patch po block-idzie, nie po kruchym indeksie.
 - **Todo default ON:** `todo` to wyjątek z grupy `artifacts` w `toolAxis` (`DEFAULT_ENABLED_EXCEPTIONS`) - pisze tylko do ukrytego `.pkm-assistant/`, nie do widocznego vaulta usera. `artifact_*` zostają OFF konserwatywnie.
 

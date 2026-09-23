@@ -29,16 +29,18 @@ import type { TranscriptMetadata, ParsedSessionFile } from './sessionParser.js';
 import type { MemoryNoteType } from './MemoryAccessGuard.js';
 import type { NaTerazOp, NaTerazSections } from './BrainIndex.js';
 import {
-    INDEX_SECTIONS,
+    indexSectionHeadings,
     buildBrainIndex,
     parseNaTerazSections,
     parseForeignSections,
     parseManualIndexLines,
     applyNaTerazOps,
     isNaTerazHeading,
+    sectionKeyOf,
     NA_TERAZ_MAX_ENTRIES,
     oneLineDescription,
 } from './BrainIndex.js';
+import { resolveBrainLocale, uiBrainLocale } from './brainSections.js';
 import { makeMemoryNoteFilename, isValidNoteType, getSafeAgentName } from './MemoryAccessGuard.js';
 import { findFreeCollisionPath } from './collisionSuffix.js';
 import { t } from '../../core/i18n/index.js';
@@ -1358,10 +1360,14 @@ created: ${created}
         // wyłącznie na POTWIERDZONYM „nie ma" — gołe `exists() === false` kłamie na dyskach
         // sieciowych, co kasowałoby pamięć agenta bez kopii `.bak`.
         if (await probeFile(this.vault.adapter, this.paths.brain) === 'missing') {
+            // Nowy plik rodzi się w języku interfejsu i zostaje w nim NA ZAWSZE (decyzja
+            // właściciela 19.09) - `resolveBrainLocale(null, ...)` nie ma treści do wykrycia,
+            // więc oddaje wprost `uiBrainLocale()`.
             const initialContent = buildBrainIndex({
                 agentName: this.agentName,
                 header: `# ${t('memory.brain_header', { name: this.agentName })}`,
-                notes: []
+                notes: [],
+                locale: resolveBrainLocale(null, uiBrainLocale()),
             });
             await this.vault.adapter.write(this.paths.brain, initialContent);
             return initialContent;
@@ -1379,8 +1385,11 @@ created: ${created}
         }
 
         // Gracefully add any missing index sections without overwriting existing content.
+        // Język pliku ISTNIEJĄCEGO wygrywa zawsze - samonaprawa dokleja nagłówki w JĘZYKU
+        // TEGO PLIKU, nigdy w bieżącym języku UI (plik PL pod EN UI zostaje PL).
+        const locale = resolveBrainLocale(content, uiBrainLocale());
         let changed = false;
-        for (const section of INDEX_SECTIONS) {
+        for (const section of indexSectionHeadings(locale)) {
             if (!content.includes(section)) {
                 content += `\n${section}\n\n`;
                 changed = true;
@@ -1493,13 +1502,18 @@ created: ${created}
             // `buildBrainIndex` z realnych notatek.
             const manual = parseManualIndexLines(before);
             const notes = await this.listBrainNotes();
+            // Język PLIKU wygrywa zawsze - istniejący plik PL pod EN UI zostaje PL po
+            // rebuildzie (kontrakt „rodzi się i zostaje", `brainSections.ts`). `before` puste
+            // (plik brakujący) = nic do wykrycia, więc `resolveBrainLocale` oddaje `uiBrainLocale()`.
+            const locale = resolveBrainLocale(before || null, uiBrainLocale());
             const content = buildBrainIndex({
                 agentName: this.agentName,
                 header: this._brainHeaderFromContent(before),
                 notes,
                 naTeraz,
                 foreign,
-                manual
+                manual,
+                locale,
             });
             if (content !== before) {
                 // Safety net: the rebuild still drops manual lines inside MANAGED sections
@@ -1537,7 +1551,7 @@ created: ${created}
             if (!trimmed) return false;
             if (trimmed.startsWith('## ')) {
                 zone = isNaTerazHeading(trimmed) ? 'na_teraz'
-                    : INDEX_SECTIONS.includes(trimmed) ? 'managed' : 'foreign';
+                    : sectionKeyOf(trimmed) !== null ? 'managed' : 'foreign';
                 return false;                                     // every H2 heading survives the rebuild
             }
             if (trimmed.startsWith('# ')) return false;           // brain header
@@ -2291,8 +2305,10 @@ ${String(note.content || '')}
             }
         }
 
-        // Ensure all required sections exist
-        for (const s of INDEX_SECTIONS) {
+        // Ensure all required sections exist. Legacy overflow-archiver path (`updateBrain`,
+        // poza zakresem języka pliku - patrz `modules/memory/CLAUDE.md`) - PL na sztywno,
+        // bajtowo tak samo jak przed rejestrem dwujęzycznym.
+        for (const s of indexSectionHeadings('pl')) {
             if (!sections.has(s)) {
                 sections.set(s, []);
             }
@@ -2315,8 +2331,9 @@ ${String(note.content || '')}
     _buildBrainFromSections(parsed: BrainSections): string {
         const parts = [parsed.header, ''];
 
-        // Maintain consistent section order
-        const sectionOrder = INDEX_SECTIONS;
+        // Maintain consistent section order. Legacy overflow-archiver path - PL na sztywno,
+        // patrz komentarz w `_parseBrainSections` powyżej.
+        const sectionOrder = indexSectionHeadings('pl');
         const orderedKeys = [
             ...sectionOrder.filter(s => parsed.sections.has(s)),
             ...[...parsed.sections.keys()].filter(s => !sectionOrder.includes(s))

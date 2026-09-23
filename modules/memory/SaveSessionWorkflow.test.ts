@@ -4,7 +4,7 @@ import { SaveSessionWorkflow } from './SaveSessionWorkflow.js';
 import type { SaveAgentMemoryLike } from './SaveSessionWorkflow.js';
 import type { StreamChatModelLike, StreamHandlers, StreamMessage } from './streamHelper.js';
 // Alias — goły `t` jest wewnątrz każdego testu zajęty przez ExecutionContext AVA.
-import { t as tr } from '../../core/i18n/index.js';
+import { t as tr, setLocale } from '../../core/i18n/index.js';
 import { parseFrontmatter } from '../../core/utils/yamlParser.js';
 
 /**
@@ -75,7 +75,7 @@ test('SaveSessionWorkflow proposes a brain note from "pamietaj ze" session text'
 
     const notes = workflow.proposeNotes([
         { role: 'user', content: 'pamiętaj że Jan lubi krótkie raporty.' }
-    ]);
+    ], [], 'pl');
 
     t.is(notes.length, 1);
     t.like(notes[0], {
@@ -92,7 +92,7 @@ test('SaveSessionWorkflow routes agent_rule content to ## Preferencje', t => {
 
     const notes = workflow.proposeNotes([
         { role: 'user', content: 'pamiętaj że zawsze mów po polsku bez emoji.' }
-    ]);
+    ], [], 'pl');
 
     t.is(notes.length, 1);
     t.is(notes[0].type, 'agent_rule');
@@ -106,14 +106,57 @@ test('SaveSessionWorkflow routes project_context content to ## Bieżące', t => 
 
     const notes = workflow.proposeNotes([
         { role: 'user', content: 'pamiętaj że ten projekt to PKM Assistant plugin do Obsidiana.' }
-    ]);
+    ], [], 'pl');
 
     t.is(notes.length, 1);
     t.is(notes[0].type, 'project_context');
     t.is(notes[0].section, '## Bieżące');
 });
 
-test('SaveSessionWorkflow refreshes brain.md as an index instead of appending raw facts', async t => {
+// ─── Nagłówek propozycji idzie za JĘZYKIEM PLIKU brain.md agenta, nie za UI (decyzja 19.09) ───
+
+// UI ustawione na PL, mimo że plik agenta jest EN - inaczej domyślne UI testowe ('en') i
+// wykrycie z pliku dawałyby PRZYPADKIEM tę samą odpowiedź, a test nie łapałby regresji, w
+// której `prepareProposals` po cichu spadłby na UI zamiast czytać treść pliku (recenzja
+// niezależna, item 14).
+test.serial('prepareProposals: sekcja notatki to ## Current, gdy istniejący brain.md agenta jest EN (mimo UI "pl")', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const { vault } = makeVault({
+        [`${base}/brain.md`]: '# Jaskier brain\n\n## Current\n\n## User\n\n## Preferences\n\n## Workflow\n\n## Projects and references\n',
+    });
+    const memory = asMemory(new AgentMemory(vault, 'Jaskier'));
+    const workflow = new SaveSessionWorkflow(memory);
+
+    const prep = await workflow.prepareProposals({
+        path: 'x.md',
+        messages: [{ role: 'user', content: 'pamiętaj że ten projekt to PKM Assistant plugin do Obsidiana.' }],
+    });
+
+    t.is(prep.notes[0].section, '## Current', 'brainLocale wykryty z istniejącej treści (EN), NIE z UI (PL)');
+});
+
+test('prepareProposals: sekcja notatki to ## Bieżące, gdy istniejący brain.md agenta jest PL', async t => {
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const { vault } = makeVault({
+        [`${base}/brain.md`]: '# Jaskier brain\n\n## Bieżące\n\n## User\n\n## Preferencje\n\n## Workflow\n\n## Projekty i referencje\n',
+    });
+    const memory = asMemory(new AgentMemory(vault, 'Jaskier'));
+    const workflow = new SaveSessionWorkflow(memory);
+
+    const prep = await workflow.prepareProposals({
+        path: 'x.md',
+        messages: [{ role: 'user', content: 'pamiętaj że ten projekt to PKM Assistant plugin do Obsidiana.' }],
+    });
+
+    t.is(prep.notes[0].section, '## Bieżące');
+});
+
+// Brak brain.md na dysku - rodzi się w JĘZYKU INTERFEJSU (jak nowy agent); test przypina PL.
+test.serial('SaveSessionWorkflow refreshes brain.md as an index instead of appending raw facts', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
     const { vault, files } = makeVault();
     const memory = asMemory(new AgentMemory(vault, 'Jaskier'));
     const workflow = new SaveSessionWorkflow(memory);
@@ -503,6 +546,59 @@ test('SaveSessionWorkflow uses LLM via factory save prompt when agent has none',
     t.true(capturedSystemPrompt!.includes('brain.md'), 'factory save-session prompt reached the model');
 });
 
+// ─── Recenzja niezależna, item 4: dwa zachowania, które DZIAŁAJĄ, ale nic ich nie pilnowało ───
+
+test.serial('proposeBrainUpdatesViaAgent: UI "en" + istniejący brain.md agenta PL -> prompt systemowy niesie "## Bieżące", NIE "## Current"', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const { vault } = makeVault({
+        [`${base}/brain.md`]: '# Jaskier brain\n\n## Bieżące\n\n## User\n\n## Preferencje\n\n## Workflow\n\n## Projekty i referencje\n',
+    });
+    const memory = asMemory(new AgentMemory(vault, 'Jaskier'));
+    let capturedSystemPrompt: string | null = null;
+    const captureModel: StreamChatModelLike = {
+        stream(req: { messages: StreamMessage[] }, handlers: StreamHandlers) {
+            capturedSystemPrompt = (req.messages?.find(m => m.role === 'system')?.content as string) || null;
+            setTimeout(() => handlers.done({ choices: [{ message: { content: JSON.stringify({ brain_updates: [], new_notes: [] }) } }] }), 0);
+        }
+    };
+    const workflow = new SaveSessionWorkflow(memory, { agent: { name: 'Jaskier' }, model: captureModel });
+
+    await workflow.proposeBrainUpdatesViaAgent([{ role: 'user', content: 'x' }]);
+
+    t.truthy(capturedSystemPrompt);
+    t.true(capturedSystemPrompt!.includes('## Bieżące'), 'nagłówek JĘZYKA PLIKU (PL), nie UI (EN)');
+    t.false(capturedSystemPrompt!.includes('## Current'), 'zero angielskich nagłówków wstrzykniętych do promptu tego agenta');
+});
+
+test.serial('nadpisanie promptu usera z {{sec_current}} dostaje podstawienie w języku PLIKU brain.md, nie UI', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const { vault } = makeVault({
+        [`${base}/brain.md`]: '# Jaskier brain\n\n## Bieżące\n\n## User\n\n## Preferencje\n\n## Workflow\n\n## Projekty i referencje\n',
+    });
+    const memory = asMemory(new AgentMemory(vault, 'Jaskier'));
+    let capturedSystemPrompt: string | null = null;
+    const captureModel: StreamChatModelLike = {
+        stream(req: { messages: StreamMessage[] }, handlers: StreamHandlers) {
+            capturedSystemPrompt = (req.messages?.find(m => m.role === 'system')?.content as string) || null;
+            setTimeout(() => handlers.done({ choices: [{ message: { content: JSON.stringify({ brain_updates: [], new_notes: [] }) } }] }), 0);
+        }
+    };
+    // Nadpisanie usera (Ustawienia -> Prompt) - tekst WŁASNY, z placeholderem, jak wstawiony
+    // przez "Wstaw fabryczny" (modules/shell/prompt_settings.ts).
+    const workflow = new SaveSessionWorkflow(memory, {
+        agent: { name: 'Jaskier', save_session_prompt: 'MÓJ WŁASNY PROMPT - notatki lądują w {{sec_current}}.' },
+        model: captureModel,
+    });
+
+    await workflow.proposeBrainUpdatesViaAgent([{ role: 'user', content: 'x' }]);
+
+    t.is(capturedSystemPrompt as string | null, 'MÓJ WŁASNY PROMPT - notatki lądują w ## Bieżące.', 'placeholder w nadpisaniu usera podstawiony w języku PLIKU (PL), nie UI (EN)');
+});
+
 test('SaveSessionWorkflow falls back to regex when LLM throws', async t => {
     const { vault } = makeVault();
     const memory = asMemory(new AgentMemory(vault, 'Jaskier'));
@@ -741,6 +837,27 @@ test('padnięte listPendingRescue nie wywala prepareProposals — po prostu brak
 
     const prep = await workflow.prepareProposals({ path: 'x.md', messages: [] });
     t.deepEqual(prep.notes, []);
+});
+
+// Recenzja niezależna, item 9: `getBrain()` w `prepareProposals` (dodany wyłącznie po detekcję
+// `brainLocale`) NIE istniał na ścieżce regexowej przed tą funkcją - bez try/catch pad odczytu
+// (dysk sieciowy) przerywałby CAŁE `/save session` PRZED oknem review.
+test.serial('padnięty getBrain() (detekcja brainLocale) NIE wywala prepareProposals — spada na język interfejsu', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('pl');
+    const { vault } = makeVault();
+    const memory = asMemory(new AgentMemory(vault, 'Jaskier'));
+    (memory as unknown as { getBrain: () => Promise<never> }).getBrain =
+        async () => { throw new Error('dysk sieciowy: odczyt niepewny'); };
+    const workflow = new SaveSessionWorkflow(memory);
+
+    const prep = await workflow.prepareProposals({
+        path: 'x.md',
+        messages: [{ role: 'user', content: 'pamiętaj że ten projekt to PKM Assistant plugin do Obsidiana.' }],
+    });
+
+    t.is(prep.notes.length, 1, 'regexowa propozycja mimo padniętego getBrain()');
+    t.is(prep.notes[0].section, '## Bieżące', 'fallback na język interfejsu (PL) - nie wybuch');
 });
 
 test('applyDecision accept notatki-pending tworzy notatkę w brain/ i kasuje kandydata', async t => {
