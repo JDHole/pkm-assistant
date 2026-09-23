@@ -51,6 +51,9 @@ What changed, in detail:
   profile and had no effect since the tool cluster rewrite; the same is true of the
   `default_permissions.mcp` permission switch. Existing agent files with either field keep
   loading unchanged.
+- **Smaller, safer bundle.** Checking a result an external MCP server sends back no longer builds
+  a piece of JavaScript from text at runtime; it uses a small library (MIT license) instead. The
+  bundled plugin is about 120 KB smaller as a result.
 
 Every change ships with tests that fail without it. The index migration was additionally
 replayed on a copy of a real 122 MB index: 5,200 vectors converted in under a second, zero
