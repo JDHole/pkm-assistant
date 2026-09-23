@@ -96,6 +96,10 @@ daty. Guard test: `PromptBuilder.cache.test.ts` pilnuje, żeby `new Date()` nie 
 - 1 info = 1 miejsce (zero duplikacji)
 - JSON tools mówią same za siebie (nie powtarzamy opisów narzędzi w drzewie)
 - Wszystko edytowalne: agent override > global override > factory default
+- Zero em dash/en dash w tekście fabrycznym - zwykły dywiz `-` wszędzie (prompt z myślnikami
+  uczy model ich używać). Strażnik dla i18n: `core/i18n/noDashes.test.ts` i
+  `config/default_prompts.test.ts`; treści drzewa decyzyjnego idą przez `pl.ts`/`en.ts`, więc
+  objęte są tym samym testem.
 
 ---
 

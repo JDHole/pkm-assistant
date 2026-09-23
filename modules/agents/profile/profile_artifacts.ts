@@ -74,7 +74,7 @@ function _renderInstanceRow(ctx: ProfileCtx, el: HTMLElement, store: ArtifactSto
 
     const info = row.createDiv({ cls: 'cs-artifact-manage-row__info' });
     info.createDiv({ cls: 'cs-shard__main-label cs-artifact-manage-row__title', text: entry.tytul || entry.id });
-    const meta = [entry.typ || '—', artifactStatusLabel(entry.status), entry.zaktualizowano || entry.utworzono || '—']
+    const meta = [entry.typ || '-', artifactStatusLabel(entry.status), entry.zaktualizowano || entry.utworzono || '-']
         .filter(Boolean).join(' · ');
     info.createDiv({ cls: 'cs-shard__sub-label', text: meta });
 

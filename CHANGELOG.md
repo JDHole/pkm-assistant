@@ -26,6 +26,9 @@ approval, brain file and artifact statuses in the interface language.
   server sends back now uses a small library (MIT license) instead of the previous one, which
   compiled a piece of JavaScript on the fly for every check. The bundled plugin is about 120 KB
   smaller as a result.
+- **Factory texts and prompts use plain hyphens instead of dashes.** Interface strings, prompt
+  skeletons, the built-in persona and other factory-written text no longer contain em or en
+  dashes.
 
 ### Added
 

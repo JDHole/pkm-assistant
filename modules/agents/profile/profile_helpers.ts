@@ -69,7 +69,7 @@ export function renderShard(container: HTMLElement, label: string, sublabel: str
             onChange(parseFloat((e.target as HTMLInputElement).value));
         });
     } else if (type === 'display') {
-        shard.createDiv({ cls: 'cs-shard__value cs-shard__value--has', text: String(value || '—') });
+        shard.createDiv({ cls: 'cs-shard__value cs-shard__value--has', text: String(value || '-') });
     }
 
     return shard;

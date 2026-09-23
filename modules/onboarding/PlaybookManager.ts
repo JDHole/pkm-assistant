@@ -236,7 +236,7 @@ ${t('starter.generic_vaultmap.auto_fill_hint')}
                     || vaultMapDescriptions[path.replace(/\/$/, '')]
                     || vaultMapDescriptions[path + '/']
                     || '';
-                const descPart = desc ? ` — ${desc}` : '';
+                const descPart = desc ? ` - ${desc}` : '';
                 lines.push(`- **${path}/** [${accessLabel}]${descPart}`);
             }
             sections.push(lines.join('\n'));

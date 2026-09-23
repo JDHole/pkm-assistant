@@ -784,7 +784,7 @@ function stripImageBase64ForTranscript(toolName: string, result: unknown): unkno
     const kb = Math.round((raw.base64.length * 3) / 4 / 1024);
     const copy: Record<string, unknown> = { ...(result as Record<string, unknown>) };
     delete copy.base64;
-    copy.image = `[image ~${kb} kB — zapisany w vaultcie, patrz path/note_path]`;
+    copy.image = `[image ~${kb} kB - zapisany w vaultcie, patrz path/note_path]`;
     return copy;
 }
 

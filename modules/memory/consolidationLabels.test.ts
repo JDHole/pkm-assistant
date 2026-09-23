@@ -59,9 +59,9 @@ const L1_STEPS = [
 
 test('stepLabel składa etykietę paczki z kind + index + total', t => {
     const run = makeRun(L1_STEPS);
-    t.is(stepLabel(run.getStep('l1_batch_2')), 'L1 — paczka 2/2');
+    t.is(stepLabel(run.getStep('l1_batch_2')), 'L1 - paczka 2/2');
     t.is(stepLabel(run.getStep('dedup')), 'Sprzątanie notatek brain/');
-    t.is(stepLabel(run.getStep('l2')), 'L2 — podsumowanie podsumowań');
+    t.is(stepLabel(run.getStep('l2')), 'L2 - podsumowanie podsumowań');
 });
 
 test('stepDetail pokazuje okno paczki L1 z meta.offset (1-indeksowane dla człowieka)', t => {
@@ -75,7 +75,7 @@ test('stepDetail tłumaczy stabilne skipReason z silnika', t => {
     run.skipStep('l1_batch_2', 'not_enough_sessions');
     t.is(stepDetail(run.getStep('l1_batch_2')), 'za mało sesji w archiwum na pełną paczkę');
     run.skipStep('dedup', 'nothing_to_merge');
-    t.is(stepDetail(run.getStep('dedup')), 'nie ma czego scalać — brain/ wygląda na czysty');
+    t.is(stepDetail(run.getStep('dedup')), 'nie ma czego scalać - brain/ wygląda na czysty');
 });
 
 test('zwis streamu ma własny, ludzki tekst zamiast surowego message', t => {
@@ -85,7 +85,7 @@ test('zwis streamu ma własny, ludzki tekst zamiast surowego message', t => {
     run.markStalled('l1_batch_1'); // 2× → failed
     const step = run.getStep('l1_batch_1');
     t.is(step.status, STEP_STATUS.FAILED);
-    t.is(stepErrorText(step), 'model zamilkł (stream zwisł) — spróbuj ponownie');
+    t.is(stepErrorText(step), 'model zamilkł (stream zwisł) - spróbuj ponownie');
     t.is(stepStatusIcon(step.status), '❌');
 });
 
@@ -119,7 +119,7 @@ test('statusBarLine pokazuje aktywny krok, potem przechodzi na „do przejrzenia
 
     run.startStep('l1_batch_1');
     const running = statusBarLine(run, run.getStep('l1_batch_1').startedAt! + 38_000)!;
-    t.true(running.startsWith('🧠 L1 — paczka 1/2'));
+    t.true(running.startsWith('🧠 L1 - paczka 1/2'));
     t.true(running.includes('(0/1)'));
     t.true(running.includes('38 s'));
 

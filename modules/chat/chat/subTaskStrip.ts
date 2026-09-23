@@ -152,7 +152,7 @@ function renderChip(chips: El, row: StripRow, ctx: SubTaskStripContext, isExpand
         + (row.waiting ? ' pkm-substrip__chip--waiting' : '');
     // Podpowiedź chipa niesie też skrót zadania — user widzi PO CO bieg, bez rozwijania.
     const hint = row.taskPreview
-        ? `${statusLabel(row)} — ${row.taskPreview.slice(0, 120)}${row.taskPreview.length > 120 ? '…' : ''}`
+        ? `${statusLabel(row)} - ${row.taskPreview.slice(0, 120)}${row.taskPreview.length > 120 ? '…' : ''}`
         : statusLabel(row);
     const chip = chips.createEl('button', {
         cls,

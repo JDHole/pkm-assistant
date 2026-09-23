@@ -62,7 +62,7 @@ export async function renderAdvancedTab(ctx: ProfileCtx, el: HTMLElement) {
         const models = getModelsForRole(pkmM, role);
         return [
             { value: '', label: t('profile.advanced.default_from_settings') },
-            ...models.map(m => ({ value: `${m.platform}/${m.model}`, label: `${platformNames[m.platform] || m.platform} — ${m.model}${m.isDefault ? ' ★' : ''}` }))
+            ...models.map(m => ({ value: `${m.platform}/${m.model}`, label: `${platformNames[m.platform] || m.platform} - ${m.model}${m.isDefault ? ' ★' : ''}` }))
         ];
     };
     // Tylko model GŁÓWNY - selecty subów (researcher/strateg) wywalone (model ustawiasz per
