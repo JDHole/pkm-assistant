@@ -179,19 +179,28 @@ z językiem interfejsu na żywo, `getLocale()`):
   → klucz kategorii, albo `null`. Sekcja o nagłówku z DOWOLNEGO z dwóch zestawów jest
   "zarządzana" (nie foreign) - używają tego `parseForeignSections`/`parseManualIndexLines`/
   `AgentMemory._brainHasManualContent`.
-- `naTerazKeyOf(line)`/`isNaTerazHeading(line)` - to samo dla sekcji "Na teraz"/"Right now",
-  regexem wymagającym DWUKROPKA + rozpoznanego słowa klucza zaraz po nim - ręcznie dopisana
-  sekcja usera typu "## Na teraz coś tam" (bez dwukropka i klucza) NIE jest łapana, jest zwykłą
-  sekcją obcą.
+- `naTerazKeyOf(line)`/`isNaTerazHeading(line)` - to samo dla sekcji "Na teraz"/"Right now".
+  Separator między "Na teraz"/"Right now" a słowem klucza jest OPCJONALNY (dwukropek/myślnik/
+  półpauza/pauza, albo w ogóle nic), a kotwica PO rozpoznanym słowie klucza jest LUŹNA (`\b`,
+  nie koniec linii) - dopuszcza dowolny ogon, np. "## Na teraz: User (Kuba)" nadal rozpoznaje
+  `user`. Ręcznie dopisana sekcja usera bez rozpoznanego słowa klucza zaraz PO separatorze
+  ("## Na teraz coś tam", "## Na teraz: Vault") NIE jest łapana, jest zwykłą sekcją obcą.
 - `detectBrainLocale(content)` - pierwszy napotkany nagłówek SWOISTY dla języka (np. `##
   Bieżące`/`## Current`, `## Preferencje`/`## Preferences`) rozstrzyga; nagłówki WSPÓLNE
   (`## User`, `## Workflow`) same nie rozstrzygają; brak sygnału → `null`.
 - `resolveBrainLocale(content, uiLocale)` = `detectBrainLocale(content) ?? uiLocale` - JEDYNE
-  miejsce, gdzie treść pliku decyduje o języku zapisu. Wołane przez `AgentMemory.getBrain()`
-  (samonaprawa brakujących sekcji), `AgentMemory.rebuildBrainIndex()` (KAŻDY rebuild) i
-  `MigrationV3` (nowy brain.md z migracji v2→v3 - v2 jest zawsze PL, więc realnie prawie zawsze
-  wykryje `'pl'` z sekcji "Bieżące"/"Ustalenia"; plik bez żadnego rozpoznawalnego nagłówka
-  spada na `uiBrainLocale()`).
+  miejsce, gdzie treść pliku decyduje o języku zapisu DLA NOWEGO/SAMONAPRAWIANEGO pliku.
+  Wołane przez `AgentMemory.getBrain()` (samonaprawa brakujących sekcji) i
+  `AgentMemory.rebuildBrainIndex()` (KAŻDY rebuild). **`MigrationV3` NIE woła tej funkcji** -
+  `applyPlan` liczy `detectBrainLocale(originalBrain) ?? 'pl'` WPROST (fallback `'pl'` na
+  sztywno, nie `uiBrainLocale()`): prawdziwy v2 istniał wyłącznie sprzed dwujęzycznego UI, więc
+  jego treść jest ZAWSZE polska niezależnie od bieżącego języka interfejsu w chwili migracji -
+  `resolveBrainLocale`'owy fallback na UI dałby angielskie nagłówki nad polską treścią, gdyby
+  user akurat miał UI po angielsku. Wykryty język ma i tak pierwszeństwo przed `'pl'` - inaczej
+  plik w KSZTAŁCIE v3, którego `looksLikeV3Index` nie rozpoznał (bez folderu `brain/`, bez
+  sekcji "Right now", bez linków `[[brain/...]]` - świeży klon/desync), trafiałby w tę samą
+  ścieżkę migracji i zostawał przepisany na polskie nagłówki mimo poprawnie rozpoznanej EN
+  treści (naprawione w dogrywce rundy 2 recenzji niezależnej).
 - `uiBrainLocale()` - `getLocale()` zwężone do `BrainLocale` (`'pl'` → `'pl'`, wszystko inne →
   `'en'`), most między światem UI a światem pliku. Woła się go WYŁĄCZNIE jako fallback dla
   nowego pliku albo treści nierozstrzygającej - nigdy jako pierwszeństwo nad wykrytym językiem
