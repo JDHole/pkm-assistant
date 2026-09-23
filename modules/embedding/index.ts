@@ -46,8 +46,6 @@ export type { AdaMigrationPorts } from './adaMigration.js';
 export type {
     SearchVectorTopKOptions,
     SearchTextOptions,
-    OramaWriter,
-    OramaReader,
 } from './orama_engine.js';
 
 export type {

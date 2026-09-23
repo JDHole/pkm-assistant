@@ -4,20 +4,16 @@ import {
     createEmbeddingDb,
     insertVector,
     insertVectorLean,
-    stripStoredVectors,
     insertBatch,
     removeVector,
     searchVectorTopK,
     searchText,
     serialize,
     deserialize,
-    persist,
-    restore,
     defaultVaultSchema,
     defaultMemorySchema,
     DEFAULT_VECTOR_DIM,
 } from './orama_engine.js';
-import type { OramaReader, OramaWriter } from './orama_engine.js';
 
 const tinySchema: AnySchema = {
     id: 'string',
@@ -109,32 +105,6 @@ test('serialize + deserialize round-trip preserves docs', async t => {
     t.is(result.hits[0].document.id, 'c');
 });
 
-test('persist + restore via writer/reader callbacks', async t => {
-    const { a, b } = fresh();
-    const db = await createEmbeddingDb(tinySchema);
-    await insertBatch(db, [a, b]);
-
-    const store = new Map<string, string>();
-    const writer: OramaWriter = async (path, json) => store.set(path, json);
-    const reader: OramaReader = async path => store.get(path) as string;
-
-    await persist(db, writer, '/orama/vault.json');
-    t.true(store.has('/orama/vault.json'));
-
-    const restored = await restore(reader, '/orama/vault.json', tinySchema);
-    const result = await searchVectorTopK(restored, [1, 0, 0], { k: 1, similarity: 0 });
-    t.is(result.hits[0].document.id, 'a');
-});
-
-test('persist throws when writer is not a function', async t => {
-    const db = await createEmbeddingDb(tinySchema);
-    await t.throwsAsync(() => persist(db, null as unknown as OramaWriter, '/x.json'), { message: /writer must be a function/ });
-});
-
-test('restore throws when reader is not a function', async t => {
-    await t.throwsAsync(() => restore(null as unknown as OramaReader, '/x.json', tinySchema), { message: /reader must be a function/ });
-});
-
 test('defaultVaultSchema has required Layer 1+2+3 fields', t => {
     t.is(typeof defaultVaultSchema.path, 'string');
     t.is(typeof defaultVaultSchema.body, 'string');
@@ -218,29 +188,13 @@ test('remove() po wyzerowaniu kopii nadal kasuje wektor z vectorIndexes', async 
     t.true(res.hits.length > 0, 'reszta indeksu wektorowego przeżyła kasację jednego dokumentu');
 });
 
-test('lean przeżywa round-trip przez dysk (persist → restore → search)', async t => {
+test('lean przeżywa round-trip przez serialize/deserialize (search)', async t => {
     const db = await createEmbeddingDb(bigSchema);
     const query = queryVector(5);
     for (const doc of synthetic(20)) await insertVectorLean(db, doc);
 
-    let saved = '';
-    await persist(db, (_p, json) => { saved = json; }, '/idx.json');
-    const back = await restore(() => saved, '/idx.json', bigSchema);
+    const raw = await serialize(db);
+    const back = await deserialize(raw, bigSchema);
     const res = await searchVectorTopK(back, query, { k: 1, similarity: 0 });
     t.is(res.hits[0].document.path, 'n/5.md');
-});
-
-test('stripStoredVectors odchudza indeks wczytany ze starego, grubego pliku', async t => {
-    const db = await createEmbeddingDb(bigSchema);
-    for (const doc of synthetic(15)) await insertVector(db, doc); // stara droga = z kopiami
-
-    t.is(stripStoredVectors(db), 15);
-    t.is(stripStoredVectors(db), 0, 'drugi przebieg nie ma już czego zdejmować (idempotencja)');
-    const raw = await serialize(db) as { docs: { docs: Record<string, { embedding: unknown }> } };
-    t.true(Object.values(raw.docs.docs).every(d => d.embedding === null));
-    t.is(stripStoredVectors(null), 0, 'brak db nie wywraca wołacza');
-
-    // Semantyka po odchudzeniu działa (wektory żyją w vectorIndexes).
-    const res = await searchVectorTopK(db, queryVector(7), { k: 1, similarity: 0 });
-    t.is(res.hits[0].document.path, 'n/7.md');
 });
