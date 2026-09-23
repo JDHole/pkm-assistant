@@ -645,6 +645,57 @@ test('nieudany rebuild przywraca db, mtimes, dims i _ready', async t => {
     indexer.dispose();
 });
 
+// G3 [DROBNE] (runda naprawcza 2): rebuild() z ZEROWYM wynikiem (dostawca odrzuca trwale KAŻDY
+// plik, np. zły klucz/model po zmianie ustawień) nie może commitować pustego indeksu i kasować
+// segmentów, na które STARA (wciąż nietknięta) meta na dysku dalej wskazuje. `_fullScan()` rzuca,
+// gdy `files.length > 0` a `_mtimes` zostaje pusta (KAŻDY plik trwale pominięty) - `rebuild()`'s
+// istniejący `catch` przywraca WTEDY cały poprzedni stan (patrz test wyżej) i kod sprzątania
+// starych segmentów (wewnątrz `try`, PO `_fullScan()`) nigdy nie zostaje osiągnięty.
+test('G3: rebuild() z zerowym wynikiem (wszystkie pliki trwale odrzucone) NIE kasuje starego indeksu', async t => {
+    const store: FakeStore = new Map();
+    const files = new Map<string, FakeFile>([
+        ['n0.md', { content: 't0', mtime: 100 }],
+        ['n1.md', { content: 't1', mtime: 100 }],
+    ]);
+    let reject = false;
+    const embedder: FakeEmbedder = {
+        _calls: { embedBatch: 0, texts: [] }, isReady: () => true, getModelKey: () => 'm', getDims: () => 3,
+        async embed() { return [1, 0, 0]; },
+        async embedBatch(texts: string[]) {
+            this._calls.embedBatch++; this._calls.texts.push(...texts);
+            if (reject) throw Object.assign(new Error('400 bad request'), { kind: 'api', httpStatus: 400 });
+            return texts.map((_, i) => [1, i, 0]);
+        },
+    };
+    const { indexer } = newIndexer({ files, store, embedder });
+    await indexer.initialize();
+    const metaBefore = readMetaV2(store);
+    const segBefore = new Map(metaBefore.segments.map(seg => [seg.file, new Uint8Array((store.get(`.pkm-assistant/index/${seg.file}`) as ArrayBuffer).slice(0))]));
+
+    reject = true; // dostawca zaczyna trwale odrzucać KAŻDY plik (np. zły klucz/model po zmianie ustawień)
+    const result = await indexer.rebuild();
+
+    t.is(result.status, 'error', 'rebuild z zerowym wynikiem musi zgłosić błąd, nie ready z pustym indeksem');
+    const metaAfter = readMetaV2(store);
+    t.deepEqual(metaAfter, metaBefore, 'meta na dysku NIETKNIĘTA - stary indeks zostaje jedynym źródłem prawdy');
+    for (const [file, bytesBefore] of segBefore) {
+        const bytesAfter = new Uint8Array(store.get(`.pkm-assistant/index/${file}`) as ArrayBuffer);
+        t.deepEqual(bytesAfter, bytesBefore, `segment ${file} NIETKNIĘTY - nie skasowany, nie nadpisany`);
+    }
+    t.is(countDocs(indexer.db), 2, 'stary indeks w RAM przywrócony w komplecie');
+
+    // Restart z dostawcą zdrowym: 0 embedów = stary indeks naprawdę odzyskany, nie odbudowany od zera.
+    reject = false; // dostawca "naprawiony" - restart NIE MOŻE mimo to re-embedować
+    const restartEmbedder: FakeEmbedder = { ...embedder, _calls: { embedBatch: 0, texts: [] } };
+    const c = newIndexer({ files, store, embedder: restartEmbedder });
+    await c.indexer.initialize();
+    t.is(restartEmbedder._calls.embedBatch, 0, 'restart odzyskuje stary indeks bez re-embedu');
+    t.is(c.indexer.getStatus().status, 'ready');
+    t.false(c.notices.some(n => n.kind === 'index_corrupt'));
+    indexer.dispose();
+    c.indexer.dispose();
+});
+
 // F4.10: bug zastany na main (poza zakresem oryginalnej recenzji, ten sam plik) - skan pada
 // W POŁOWIE porcji (nie przy pierwszej), a `initialize()` NIE zeruje `this.db` przed ponowieniem.
 // Drugi `_fullScan()` insertowałby do TEJ SAMEJ, częściowo zapełnionej bazy i dostawał "A document
@@ -893,12 +944,16 @@ test('F1/R2: kompakcja w toku + usunięcie D i zmiana C w oknie - meta bez D, C 
         ['d.md', { content: 'D0', mtime: 1 }],
     ]);
     let seq = 0;
+    // G2 (round 2): `lastVectorForText` niesie DOKŁADNIE ten wektor, który `embedBatch` zwrócił
+    // dla danego tekstu - pozwala porównać bajty na dysku z REALNYM ostatnim wynikiem embeddera
+    // (Math.fround) zamiast tylko sprawdzać kształt (4 skończone liczby), co przepuszczało M9.
+    const lastVectorForText = new Map<string, number[]>();
     const embedder: FakeEmbedder = {
         _calls: { embedBatch: 0, texts: [] }, isReady: () => true, getModelKey: () => 'm', getDims: () => 4,
-        async embed() { seq++; return [Math.sin(seq), Math.cos(seq), seq, 1]; },
+        async embed(text: string) { seq++; const v = [Math.sin(seq), Math.cos(seq), seq, 1]; lastVectorForText.set(text, v); return v; },
         async embedBatch(texts: string[]) {
             this._calls.embedBatch++; this._calls.texts.push(...texts);
-            return texts.map(() => { seq++; return [Math.sin(seq), Math.cos(seq), seq, 1]; });
+            return texts.map(t => { seq++; const v = [Math.sin(seq), Math.cos(seq), seq, 1]; lastVectorForText.set(t, v); return v; });
         },
     };
     const { indexer, vault } = newIndexer({ files, store, embedder });
@@ -956,13 +1011,13 @@ test('F1/R2: kompakcja w toku + usunięcie D i zmiana C w oknie - meta bez D, C 
     const refC = meta.rows['c.md'];
     const bufC = store.get(`.pkm-assistant/index/${meta.segments[refC[0]].file}`) as ArrayBuffer;
     const onDiskC = Array.from(decodeSegment(bufC, meta.dims)!.at(refC[1]));
-    const expectedC = (await embedder.embed('C_nowy'))!.map(Math.fround);
-    // `embed()` (na potrzeby tego testu) zwraca kolejny numer sekwencji, więc porównujemy
-    // KSZTAŁT (4 liczby, nie NaN) zamiast dokładnej wartości - `embed()` osobno inkrementuje
-    // `seq`, więc nie da się przewidzieć dokładnej liczby bez duplikowania stanu testu.
-    t.is(onDiskC.length, 4);
-    t.true(onDiskC.every(x => Number.isFinite(x)));
-    void expectedC;
+    // G2/M9: porównanie na BAJTACH z dysku wobec OSTATNIEGO wektora, który embedder faktycznie
+    // zwrócił dla 'C_nowy' (nie wobec kolejnego, świeżo policzonego wywołania `embed()`, które
+    // inkrementowałoby `seq` jeszcze raz i nie dałoby się przewidzieć) - `_persistCompact` z
+    // mutantem M9 (`_pending.clear()` gołe po kompakcji) gubi TEN WŁAŚNIE wektor bezpowrotnie, a
+    // stary wiersz C w nowym segmencie bazowym zostaje wskazywać na wektor sprzed zmiany.
+    const expectedC = lastVectorForText.get('C_nowy')!.map(Math.fround);
+    t.deepEqual(onDiskC, expectedC, 'wektor C na dysku = OSTATNI wektor embeddera dla C_nowy (nie stary, nie śmieci)');
 
     // Restart: zero błędów `index_corrupt`, dane kompletne dla żywych notatek.
     const restartFiles = new Map(files);
@@ -1069,6 +1124,330 @@ test('F1/R4: rebuild() + persisty z timera w trakcie skanu - stan po rebuildzie 
     t.is(c.notices.filter(n => n.kind === 'index_corrupt').length, 0);
     indexer.dispose();
     c.indexer.dispose();
+});
+
+// ═══════════════════ Runda naprawcza 2 (recenzja fixu F1): G1/G2/G6 ═══════════════════
+//
+// G1 [WAŻNE]: notatka WYCZYSZCZONA (treść pusta) W OKNIE persistu dostawała na dysk STARY wektor.
+// Warunek `_mtimes.has(path)` (round 1) przepuszczał ją: upsert z pustą treścią ZOSTAWIA mtime
+// (nowy, ze stempla pustej notatki), ale kasuje wpis z `_pending`/`_rows` - `_mtimes.has()` mimo
+// to dalej zwraca `true`. Naprawa: `_rows` dostaje wiersz TYLKO gdy referencja w `_pending`
+// (albo `_rows`, dla kompakcji) jest WCIĄŻ tą samą co w migawce - jedyny sygnał, że nic nie
+// tknęło tej ścieżki w oknie `await`.
+
+test('G1: notatka wyczyszczona W OKNIE zwykłego zapisu nie dostaje na dysk STAREGO wektora', async t => {
+    const store: FakeStore = new Map();
+    const { indexer, files, vault, embedder } = newIndexer({ files: baseFiles(), store });
+    await indexer.initialize();
+    const gate = armWriteGate(vault);
+
+    const oldVec = (await embedder.embed('Szybki samochód mknie po drodze'))!;
+    files.set('car.md', { content: 'Nowy samochód', mtime: 200 });
+    indexer._onVaultEvent('modify', { path: 'car.md' });
+    await indexer._flushQueue(); // car.md w _pending (wektor "Nowy samochód")
+
+    const p = indexer._persistNow(); // migawka _pending zawiera car.md - wejdzie w writeBinary i zawiśnie
+    await tick();
+
+    // W OKNIE: user CZYŚCI car.md (treść pusta) - upsert z pustą treścią stempluje NOWY mtime,
+    // ale kasuje wpis z _pending/_rows (D8: pusta notatka nie ma wiersza).
+    files.set('car.md', { content: '', mtime: 500 });
+    indexer._onVaultEvent('modify', { path: 'car.md' });
+    await indexer._flushQueue();
+
+    gate.open();
+    await p;
+    await indexer._persistNow(); // domyka to, co flush jeszcze zostawił (meta nie nadążyła w oknie)
+
+    const meta = readMetaV2(store);
+    t.falsy(meta.rows['car.md'], 'car.md wyczyszczona w oknie NIE MOŻE mieć wiersza (wskazywałby na STARY wektor "Nowy samochód")');
+    t.is(meta.mtimes['car.md'], 500, 'mtime jest nowy (stempel pustej notatki), ale bez wiersza - D8');
+
+    const res = await searchVectorTopK(indexer.db!, oldVec, { k: 1, similarity: 0 });
+    t.not(res.hits[0]?.document?.path, 'car.md', 'pusta notatka NIE MOŻE wracać w wynikach semantycznych ze STARĄ treścią');
+
+    const c = newIndexer({ files, store });
+    await c.indexer.initialize();
+    t.false(c.notices.some(n => n.kind === 'index_corrupt'));
+    t.is(countDocs(c.indexer.db), 2, 'car.md pusta - bez wektora; 2 pozostałe notatki zaindeksowane');
+    const res2 = await searchVectorTopK(c.indexer.db!, oldVec, { k: 1, similarity: 0 });
+    t.not(res2.hits[0]?.document?.path, 'car.md', 'restart: stary wektor car.md też nie wraca');
+    indexer.dispose();
+    c.indexer.dispose();
+});
+
+test('G1: notatka wyczyszczona W OKNIE kompakcji nie dostaje na dysk STAREGO wektora', async t => {
+    const store: FakeStore = new Map();
+    const files = new Map<string, FakeFile>([
+        ['a.md', { content: 'A0', mtime: 1 }],
+        ['b.md', { content: 'B0', mtime: 1 }],
+        ['c.md', { content: 'C0', mtime: 1 }],
+        ['d.md', { content: 'D0', mtime: 1 }],
+    ]);
+    let seq = 0;
+    const lastVectorForText = new Map<string, number[]>();
+    const embedder: FakeEmbedder = {
+        _calls: { embedBatch: 0, texts: [] }, isReady: () => true, getModelKey: () => 'm', getDims: () => 4,
+        async embed(text: string) {
+            if (!text.trim()) return null;
+            seq++; const v = [Math.sin(seq), Math.cos(seq), seq, 1]; lastVectorForText.set(text, v); return v;
+        },
+        async embedBatch(texts: string[]) {
+            this._calls.embedBatch++; this._calls.texts.push(...texts);
+            return texts.map(t => {
+                if (!t.trim()) return null; // notatka pusta (D8) - kontrakt embeddera: brak wektora
+                seq++; const v = [Math.sin(seq), Math.cos(seq), seq, 1]; lastVectorForText.set(t, v); return v;
+            });
+        },
+    };
+    const { indexer, vault } = newIndexer({ files, store, embedder });
+    await indexer.initialize();
+
+    // Dopchaj do progu kompakcji (jak w R2) zmieniając a.md, aż `planCompaction` zapali się na TYM
+    // konkretnym stanie - c.md/b.md/d.md zostają nietknięte, z wierszem z initial scanu.
+    let mt = 10;
+    for (let i = 0; i < 20; i++) {
+        const meta = readMetaV2(store);
+        const liveNow = new Set([...Object.keys(meta.rows), 'a.md']).size;
+        if (planCompaction({ segments: meta.segments, liveRows: liveNow })) break;
+        files.set('a.md', { content: `A${i}`, mtime: mt++ });
+        indexer._onVaultEvent('modify', { path: 'a.md' });
+        await indexer._flushQueue();
+        await indexer._persistNow();
+    }
+    files.set('a.md', { content: 'A_final', mtime: mt++ });
+    indexer._onVaultEvent('modify', { path: 'a.md' });
+    await indexer._flushQueue();
+    t.true(planCompaction({ segments: readMetaV2(store).segments, liveRows: 4 }), 'setup: następny persist MUSI pójść przez kompakcję');
+
+    const oldVecC = lastVectorForText.get('C0')!; // c.md nigdy nie była zmieniana - wciąż oryginalny wektor
+    const gate = armWriteGate(vault);
+    const compactP = indexer._persistNow(); // kompakcja: czyta segmenty z dysku, potem zawiesza się na writeBinary
+    await tick(); await tick(); await tick();
+
+    // W OKNIE kompakcji: c.md (żywa notatka Z ISTNIEJĄCYM wierszem od initial scanu) zostaje
+    // WYCZYSZCZONA.
+    files.set('c.md', { content: '', mtime: 999 });
+    indexer._onVaultEvent('modify', { path: 'c.md' });
+    await indexer._flushQueue();
+
+    gate.open();
+    await compactP;
+    await indexer._persistNow(); // domyka resztę, jeśli coś jeszcze czekało
+
+    const meta = readMetaV2(store);
+    t.falsy(meta.rows['c.md'], 'c.md wyczyszczona w oknie kompakcji NIE MOŻE mieć wiersza (wskazywałby na STARY wektor C0)');
+    t.is(meta.mtimes['c.md'], 999, 'mtime jest nowy (stempel pustej notatki), ale bez wiersza - D8');
+
+    const res = await searchVectorTopK(indexer.db!, oldVecC, { k: 1, similarity: 0 });
+    t.not(res.hits[0]?.document?.path, 'c.md', 'pusta notatka NIE MOŻE wracać w wynikach semantycznych ze STARĄ treścią');
+
+    const restartFiles = new Map(files);
+    // Restart z embedderem TEGO SAMEGO modelu (model_key='m', dims=4) - `newIndexer()` bez
+    // nadpisania `embedder` wraca do domyślnego (dims 3, inny model_key), co wymusiłoby
+    // `model_changed` i rebuild zamiast testować odzyskanie z dysku.
+    const restartEmbedder: FakeEmbedder = {
+        _calls: { embedBatch: 0, texts: [] }, isReady: () => true, getModelKey: () => 'm', getDims: () => 4,
+        async embed() { return null; },
+        async embedBatch(texts: string[]) { this._calls.embedBatch++; this._calls.texts.push(...texts); return texts.map(() => null); },
+    };
+    const { indexer: r, notices } = newIndexer({ files: restartFiles, store, embedder: restartEmbedder });
+    await r.initialize();
+    t.false(notices.some(n => n.kind === 'index_corrupt'));
+    const res2 = await searchVectorTopK(r.db!, oldVecC, { k: 1, similarity: 0 });
+    t.not(res2.hits[0]?.document?.path, 'c.md', 'restart: stary wektor c.md też nie wraca');
+    indexer.dispose();
+    r.dispose();
+});
+
+// G2/M12: notatka SKASOWANA (hook 'delete') W OKNIE persistu - DOKŁADNIE ta ścieżka, której
+// wektor jest w migawce `_pending` w chwili startu zapisu. Mutant M12 (recenzja) usuwa filtr i
+// wpisuje wiersz dla KAŻDEJ ścieżki z migawki bezwarunkowo - `rows[path]` bez `mtimes[path]`
+// (usunięcie kasuje oba) jest odrzucane przez `parseIndexMetaV2` jako `index_corrupt` na restarcie.
+test('G2: notatka usunięta W OKNIE persistu (ta sama ścieżka co w migawce _pending) nie dostaje wiersza (kills M12)', async t => {
+    const store: FakeStore = new Map();
+    const { indexer, files, vault } = newIndexer({ files: baseFiles(), store });
+    await indexer.initialize();
+    const gate = armWriteGate(vault);
+
+    files.set('car.md', { content: 'Nowy samochód', mtime: 200 });
+    indexer._onVaultEvent('modify', { path: 'car.md' });
+    await indexer._flushQueue(); // car.md w _pending
+
+    const p = indexer._persistNow(); // migawka _pending zawiera car.md - wejdzie w writeBinary i zawiśnie
+    await tick();
+
+    // W OKNIE: car.md skasowana (hook delete) - DOKŁADNIE ta ścieżka, która jest w migawce.
+    files.delete('car.md');
+    indexer._onVaultEvent('delete', { path: 'car.md' });
+    await indexer._flushQueue();
+
+    gate.open();
+    await p;
+
+    const meta = readMetaV2(store);
+    t.falsy(meta.rows['car.md'], 'car.md usunięta w oknie NIE MOŻE mieć wiersza mimo że jej wektor był w migawce persistu');
+    t.falsy(meta.mtimes['car.md'], 'car.md usunięta w oknie NIE MOŻE mieć mtime');
+
+    const c = newIndexer({ files, store });
+    await c.indexer.initialize();
+    t.is(c.indexer.getStatus().status, 'ready');
+    t.false(c.notices.some(n => n.kind === 'index_corrupt'), 'restart po usunięciu w oknie nie może być index_corrupt');
+    t.is(countDocs(c.indexer.db), 2, 'car.md nie wraca do indeksu po restarcie');
+    indexer.dispose();
+    c.indexer.dispose();
+});
+
+// G2/M13: `_metaDirty` musi wykryć mutację, która zaszła W OKNIE `await write(meta)` (licznik
+// generacji `_gen` się zmienił) - inaczej (mutant M13: `_writeMetaTracked` zawsze zeruje
+// `_metaDirty` po udanym zapisie, bez sprawdzania generacji) usunięcie z tego okna NIGDY nie
+// dogania kolejnego persistu, bo `_persistNowInner`'s bramka (`_pending.size===0 && !_metaDirty`)
+// zwraca się od razu.
+test('G2: _metaDirty po usunięciu notatki W OKNIE zapisu meta - drugi persist zapisuje meta ponownie (kills M13)', async t => {
+    const store: FakeStore = new Map();
+    const { indexer, files, vault } = newIndexer({ files: baseFiles(), store });
+    await indexer.initialize();
+
+    files.set('car.md', { content: 'Nowy samochód', mtime: 200 });
+    indexer._onVaultEvent('modify', { path: 'car.md' });
+    await indexer._flushQueue();
+
+    let gate: Promise<void> | null = null;
+    let release: () => void = () => {};
+    let metaWriteCalls = 0;
+    const metaPath = '.pkm-assistant/index/vault-index.meta.json';
+    const realWrite = vault.adapter.write.bind(vault.adapter);
+    vault.adapter.write = async (path: string, data: string) => {
+        if (path === metaPath) {
+            metaWriteCalls++;
+            if (gate) await gate;
+        }
+        return realWrite(path, data);
+    };
+    gate = new Promise(r => { release = () => { gate = null; r(); }; });
+
+    const p = indexer._persistNow(); // segment (car.md) zapisany bez przeszkód, wchodzi w write(meta) i zawiesza się
+    await tick(); await tick(); await tick();
+    t.is(metaWriteCalls, 1, 'setup: pierwszy zapis meta zdążył wystartować przed usunięciem');
+
+    // W OKNIE zapisu META: sky.md skasowana.
+    files.delete('sky.md');
+    indexer._onVaultEvent('delete', { path: 'sky.md' });
+    await indexer._flushQueue();
+
+    release();
+    await p;
+
+    t.true((indexer as unknown as { _metaDirty: boolean })._metaDirty, '_metaDirty musi zostać true - _gen zmienił się w oknie write(meta)');
+
+    await indexer._persistNow(); // drugi persist - MUSI napisać meta ponownie
+    t.is(metaWriteCalls, 2, 'drugi persist faktycznie zapisał meta ponownie - inaczej sky.md nigdy nie zniknie z dysku');
+
+    const meta = readMetaV2(store);
+    t.falsy(meta.rows['sky.md']);
+    t.falsy(meta.mtimes['sky.md']);
+
+    const c = newIndexer({ files, store });
+    await c.indexer.initialize();
+    t.false(c.notices.some(n => n.kind === 'index_corrupt'));
+    t.is(countDocs(c.indexer.db), 2);
+    indexer.dispose();
+    c.indexer.dispose();
+});
+
+// G2/M14: `rebuild()` wywołany PODCZAS trwającego persistu (stary model, 4D) MUSI poczekać na
+// `_persistChain` PRZED resetem stanu - inaczej (mutant M14: `_persistNow` trzyma łańcuch w
+// INNYM polu niż `_persistChain`, więc `rebuild()`'s `await this._persistChain` czeka na
+// zawsze-rozwiązaną obietnicę) rebuild zapisuje 8D pod nogami niedokończonego zapisu 4D.
+test('G2: rebuild() czeka na persist w toku PRZED resetem stanu - żadnego miksu 4D/8D (kills M14)', async t => {
+    const store: FakeStore = new Map();
+    const files = new Map<string, FakeFile>([
+        ['a.md', { content: 'A', mtime: 1 }],
+        ['b.md', { content: 'B', mtime: 1 }],
+    ]);
+    let dims = 4;
+    const embedder: FakeEmbedder = {
+        _calls: { embedBatch: 0, texts: [] }, isReady: () => true, getModelKey: () => 'm', getDims: () => dims,
+        async embed() { return Array.from({ length: dims }, (_, i) => i); },
+        async embedBatch(texts: string[]) {
+            this._calls.embedBatch++; this._calls.texts.push(...texts);
+            return texts.map(() => Array.from({ length: dims }, (_, i) => Math.random() + i));
+        },
+    };
+    const { indexer, vault } = newIndexer({ files, store, embedder });
+    await indexer.initialize();
+
+    files.set('a.md', { content: 'A2', mtime: 2 });
+    indexer._onVaultEvent('modify', { path: 'a.md' });
+    await indexer._flushQueue(); // a.md w _pending, wektor 4D
+
+    const gate = armWriteGate(vault);
+    const persistP = indexer._persistNow(); // wejdzie w writeBinary (4D) i zawiśnie na gate
+    await tick();
+
+    dims = 8; // "model się zmienił" - user kliknął Reindex z nowym modelem embeddingu
+    const rebuildP = indexer.rebuild(); // MUSI poczekać na persistP (await _persistChain) przed resetem
+
+    await tick(); await tick();
+    gate.open();
+    await persistP;
+    const rebuilt = await rebuildP;
+
+    t.is(rebuilt.status, 'ready');
+    const meta = readMetaV2(store);
+    t.is(meta.dims, 8, 'meta na dysku odzwierciedla NOWY wymiar po rebuildzie');
+    for (const seg of meta.segments) {
+        const buf = store.get(`.pkm-assistant/index/${seg.file}`) as ArrayBuffer;
+        const decoded = decodeSegment(buf, meta.dims);
+        t.truthy(decoded, `segment ${seg.file} musi być czytelny w 8D - żadnego miksu z niedokończonym zapisem 4D`);
+    }
+
+    const restartEmbedder: FakeEmbedder = {
+        _calls: { embedBatch: 0, texts: [] }, isReady: () => true, getModelKey: () => 'm', getDims: () => 8,
+        async embed() { return null; },
+        async embedBatch(texts: string[]) { this._calls.embedBatch++; this._calls.texts.push(...texts); return texts.map(() => null); },
+    };
+    const c = newIndexer({ files, store, embedder: restartEmbedder });
+    await c.indexer.initialize();
+    t.is(restartEmbedder._calls.embedBatch, 0, 'restart nie re-embeduje - indeks 8D kompletny i spójny na dysku');
+    t.is(c.indexer.getStatus().status, 'ready');
+    t.false(c.notices.some(n => n.kind === 'index_corrupt'), 'restart po rebuildzie w trakcie persistu nie może być index_corrupt');
+    t.is(countDocs(c.indexer.db), 2);
+    indexer.dispose();
+    c.indexer.dispose();
+});
+
+// G6: dispose() W TRAKCIE flusha (embedding trwa) nie może zostawić timer "zombie" - flush, który
+// kończy się PO dispose() (unload pluginu w trakcie embeddingu), nie ma prawa uzbroić nowego
+// zapisu na dysk.
+test('G6: dispose() w trakcie flusha - flush zakończony PO dispose nie uzbraja nowego zapisu', async t => {
+    const store: FakeStore = new Map();
+    const files = baseFiles();
+    const embedder = makeEmbedder();
+    const { indexer, vault } = newIndexer({ files, store, embedder, persistDebounceMs: 10 });
+    await indexer.initialize(); // skan startowy przez ZDROWY embedder - gate dokładamy DOPIERO teraz
+
+    let resolveEmbed!: () => void;
+    const gate = new Promise<void>(r => { resolveEmbed = r; });
+    const zdrowy = embedder.embedBatch.bind(embedder);
+    embedder.embedBatch = async (texts: string[]) => { await gate; return zdrowy(texts); };
+
+    let writeBinaryCalls = 0;
+    const realWriteBinary = vault.adapter.writeBinary.bind(vault.adapter);
+    vault.adapter.writeBinary = async (path: string, data: ArrayBuffer) => { writeBinaryCalls++; return realWriteBinary(path, data); };
+
+    files.set('car.md', { content: 'Nowy samochód', mtime: 200 });
+    indexer._onVaultEvent('modify', { path: 'car.md' });
+    const flushP = indexer._flushQueue(); // zawiśnie na embedBatch (gate)
+
+    indexer.dispose(); // "unload pluginu" w trakcie embeddingu
+    resolveEmbed();
+    await flushP; // flush kończy się PO dispose - insertuje car.md, woła _schedulePersist()
+
+    await new Promise(r => setTimeout(r, 50)); // dłużej niż persistDebounceMs (10 ms)
+    t.is(writeBinaryCalls, 0, 'zero zapisów segmentu po dispose(), mimo że flush zakończył się PO nim');
+    t.is((indexer as unknown as { _persistTimer: unknown })._persistTimer, null, 'żaden nowy timer zapisu nie mógł zostać uzbrojony po dispose()');
+    t.is((indexer as unknown as { _pending: Map<string, unknown> })._pending.size, 1, 'wektor car.md zostaje w pending - nic nie ginie, po prostu nie jest jeszcze na dysku');
 });
 
 // ═══════════════════ Format v2: segmenty + meta (SPEC B, sekcja 4) ═══════════════════
@@ -1408,6 +1787,56 @@ test('h2. weryfikacja migracji pada (odczyt ucięty): v1 NIETKNIĘTY, meta v1 pr
     // M5 (`_verifyMigration` zawsze `true`): status byłby 'ready' z notice 'migrated', nie
     // 'error' z 'migration_failed' - powyższe dwie asercje już to łapią, to kontrola dodatkowa.
     t.not(notice?.kind, 'migrated');
+});
+
+// G4 (runda naprawcza 2): pad ZAPISU meta v2 samego w sobie (nie tylko weryfikacji, jak w h2)
+// zostawiał śmieci na dysku zamiast tekstu v1 - `write()` może przerwać się W TRAKCIE (dysk pełny
+// w połowie stringa) i JEDNOCZEŚNIE rzucić, więc `catch` musi przywrócić v1 best-effort tak samo
+// jak pad weryfikacji. Dostawca zgaszony na CAŁY test (jak w h2): migracja sama go nie woła, ale
+// fallback `_fullScan()` uruchomiony PO padzie migracji owszem - MUSI paść, inaczej jego WŁASNY
+// udany persist nadpisałby meta jeszcze raz i zamaskował to, co ten test sprawdza (tekst v1
+// przywrócony przez SAM `_migrateV1`, nie przez późniejszy legalny zapis).
+test('G4: pad ZAPISU meta v2 w migracji (nie tylko weryfikacji) przywraca tekst v1 - migracja może się powtórzyć', async t => {
+    const dump = await buildV1Fixture();
+    const store: FakeStore = new Map();
+    const v1MetaText = JSON.stringify({
+        version: 1,
+        model_key: 'openai:text-embedding-3-small',
+        dims: 3,
+        updated_at: 1,
+        mtimes: { 'car.md': 100, 'notes/cat.md': 100, 'sky.md': 100 },
+    });
+    store.set('.pkm-assistant/index/vault-index.json', dump);
+    store.set('.pkm-assistant/index/vault-index.meta.json', v1MetaText);
+
+    const embedder: FakeEmbedder = {
+        _calls: { embedBatch: 0, texts: [] }, isReady: () => true, getModelKey: () => 'openai:text-embedding-3-small', getDims: () => null,
+        async embed() { return null; },
+        async embedBatch(texts: string[]) { this._calls.embedBatch++; this._calls.texts.push(...texts); throw new Error('dostawca zgaszony'); },
+    };
+    const { indexer, vault } = newIndexer({ files: baseFiles(), store, embedder });
+
+    let once = true;
+    const realWrite = vault.adapter.write.bind(vault.adapter);
+    vault.adapter.write = async (path: string, data: string) => {
+        if (once && path.endsWith('meta.json')) {
+            once = false;
+            await realWrite(path, '{"version":2,"mo'); // zapis PRZERWANY w połowie - śmieci na dysku
+            throw new Error('ENOSPC');
+        }
+        return realWrite(path, data);
+    };
+
+    await indexer.initialize();
+
+    const notice = indexer.getStatus().lastNotice;
+    t.is(notice?.kind, 'migration_failed');
+    if (notice?.kind === 'migration_failed') t.is(notice.reason, 'meta_write');
+    t.is(indexer.getStatus().status, 'error', 'fallback full scan po padzie migracji też pada - dostawca zgaszony');
+
+    t.true(store.has('.pkm-assistant/index/vault-index.json'), 'v1 zostaje - migracja nie doszła do potwierdzonego zapisu');
+    const metaOnDisk = readText(store, '.pkm-assistant/index/vault-index.meta.json');
+    t.is(metaOnDisk, v1MetaText, 'meta na dysku wraca DOKŁADNIE do tekstu v1 - nie zostają śmieci z przerwanego zapisu, migracja może się powtórzyć od zera');
 });
 
 // i. Dims zmienione na żywo (po ready): notify dims_changed, DOKŁADNIE jeden rebuild.
