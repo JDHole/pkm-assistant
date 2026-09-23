@@ -99,7 +99,11 @@ export function collect(decoder: StreamDecoder, chunks: string[]): OpenAiComplet
     const consume = (events: ReturnType<StreamDecoder['feed']>): void => {
         for (const ev of events) {
             if (ev.type === 'text') {
-                message.content = String(message.content ?? '') + ev.delta;
+                // `message.content` jest typu `OpenAiContent` (string|blocks[]|null), ale w tej
+                // atrapie zaczyna się jako `''` (emptyCompletion) i jedyny zapis jest tu - zawsze
+                // string w praktyce, więc zawężenie zamiast domyślnej stringifikacji tablicy.
+                const prevContent = typeof message.content === 'string' ? message.content : '';
+                message.content = prevContent + ev.delta;
             } else if (ev.type === 'reasoning') {
                 message.reasoning_content = (message.reasoning_content ?? '') + ev.delta;
             } else if (ev.type === 'tool_call') {
