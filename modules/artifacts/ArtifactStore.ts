@@ -494,7 +494,7 @@ export class ArtifactStore {
      * Czy ścieżka leży w folderze artefaktów. Jedno miejsce, bo tę samą granicę sprawdza
      * wyszukiwanie po id, listowanie i budowanie ścieżki nowej instancji.
      */
-    _isUnderRoot(path: unknown): boolean {
+    _isUnderRoot(path: string | null | undefined): boolean {
         return this._underRoot(path, this._artifactsRoot());
     }
 
@@ -504,9 +504,9 @@ export class ArtifactStore {
      * każdy plik zamiast raz na przelot mnoży narzut wielokrotnie przy dużym vaultcie (zmierzone:
      * 6,6× przy 5000 plikach).
      */
-    _underRoot(path: unknown, root: string): boolean {
+    _underRoot(path: string | null | undefined, root: string): boolean {
         if (!root) return false;
-        const norm = String(path ?? '').replace(/\\/g, '/');
+        const norm = (path ?? '').replace(/\\/g, '/');
         return norm.startsWith(root + '/');
     }
 
@@ -950,15 +950,14 @@ function buildNote(fm: ArtifactFrontmatter, body: string): string {
 }
 
 /** Oczyść segment ścieżki (nazwa pliku/folderu) ze znaków niedozwolonych w systemie plików. */
-function safeSegment(s: unknown): string {
-    return String(s || '')
+function safeSegment(s: string): string {
+    return s
         .replace(/[\\/:*?"<>|]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 }
 
 /** Przytnij tekst do limitu znaków z wielokropkiem. */
-function clip(text: unknown, max: number): string {
-    const s = String(text || '');
-    return s.length > max ? s.slice(0, max) + '…' : s;
+function clip(text: string, max: number): string {
+    return text.length > max ? text.slice(0, max) + '…' : text;
 }

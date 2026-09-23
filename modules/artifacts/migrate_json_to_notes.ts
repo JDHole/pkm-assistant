@@ -122,10 +122,11 @@ function stepsToCheckboxes(steps: unknown): string {
     for (const step of steps as unknown[]) {
         // TS-boundary: krok starego JSON-a plan_review - string albo obiekt, bez walidacji
         // schematem (dane historyczne, migrator jednorazowy, patrz LegacyStepRecord wyżej).
-        const text = typeof step === 'string' ? step : (step && ((step as LegacyStepRecord).action || (step as LegacyStepRecord).text || (step as LegacyStepRecord).label)) || '';
+        const rec = step && typeof step === 'object' ? (step as LegacyStepRecord) : null;
+        const text = typeof step === 'string' ? step : (rec?.action || rec?.text || rec?.label || '');
         if (!text) continue;
-        const checked = step && ((step as LegacyStepRecord).status === 'done' || (step as LegacyStepRecord).done === true);
-        lines.push(`- [${checked ? 'x' : ' '}] ${String(text).replace(/\s*\r?\n\s*/g, ' ').trim()} ^k${n}`);
+        const checked = rec?.status === 'done' || rec?.done === true;
+        lines.push(`- [${checked ? 'x' : ' '}] ${text.replace(/\s*\r?\n\s*/g, ' ').trim()} ^k${n}`);
         n++;
     }
     return lines.join('\n');

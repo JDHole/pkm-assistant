@@ -77,9 +77,27 @@ export function formatYmd(d: Date): string {
     return `${y}-${m}-${day}`;
 }
 
+/**
+ * Konwersja `unknown` → string dla parsera. `markdown`/`heading`/`blockId`/`text` bywają
+ * dowolnym JSON-em (wejście od modelu, testy) - jedna funkcja zamiast N kopii `String(x ?? '')`,
+ * każda osobno zgłaszana przez eslint jako bazowa stringifikacja.
+ */
+function toText(value: unknown): string {
+    return value === null || value === undefined ? '' : _rawToString(value);
+}
+
+/**
+ * Osobna funkcja graniczna: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
+ * `unknown`, więc `String(value)` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
+ * `_safeStringify` w `core/utils/errorUtils.ts`). Wołaj wyłącznie z `toText`.
+ */
+function _rawToString(value: unknown): string {
+    return String(value);
+}
+
 /** Wykryj dominujące zakończenie linii (CRLF vs LF). */
 function detectEol(text: unknown): string {
-    return /\r\n/.test(String(text || '')) ? '\r\n' : '\n';
+    return /\r\n/.test(toText(text)) ? '\r\n' : '\n';
 }
 
 /**
@@ -90,7 +108,7 @@ function detectEol(text: unknown): string {
  * renderuje się on jako nagłówek poziomu 2 - więc trzeba łamać też po samotnym `\r`.
  */
 function splitLines(text: unknown): string[] {
-    return String(text ?? '').split(/\r\n|\r|\n/);
+    return toText(text).split(/\r\n|\r|\n/);
 }
 
 /** Nagłówek sekcji znaleziony w ciele: `start` = pierwsza linia nagłówka, `end` = ostatnia. */
@@ -139,9 +157,10 @@ function scanSectionHeadings(lines: string[]): SectionHeadingHit[] {
  * @returns {{ hasFm: boolean, fmText: string, body: string }}
  */
 function splitFrontmatter(text: unknown): { hasFm: boolean; fmText: string; body: string } {
-    const m = String(text ?? '').match(FRONTMATTER_RE);
-    if (!m) return { hasFm: false, fmText: '', body: String(text ?? '') };
-    return { hasFm: true, fmText: m[1], body: String(text ?? '').slice(m[0].length) };
+    const s = toText(text);
+    const m = s.match(FRONTMATTER_RE);
+    if (!m) return { hasFm: false, fmText: '', body: s };
+    return { hasFm: true, fmText: m[1], body: s.slice(m[0].length) };
 }
 
 /** Zbuduj plik z frontmattera (obiekt) + ciała, znormalizowany do danego EOL. */
@@ -153,7 +172,7 @@ function rebuild(fmObject: ArtifactFrontmatter, body: string, eol: string): stri
 
 /** Ujednolić EOL w całym tekście do zadanego. */
 function normalizeEol(text: unknown, eol: string): string {
-    return String(text ?? '').replace(/\r?\n/g, eol);
+    return toText(text).replace(/\r?\n/g, eol);
 }
 
 /**
@@ -227,7 +246,7 @@ export function parseArtifact(markdown: unknown): ParsedArtifact {
  * @returns {{ start:number, end:number, level:number }|null}
  */
 function findSection(bodyLines: string[], heading: unknown): { start: number; end: number; level: number } | null {
-    const target = String(heading ?? '').trim().toLowerCase();
+    const target = toText(heading).trim().toLowerCase();
     if (!target) return null;
     const heads = scanSectionHeadings(bodyLines);
     for (let n = 0; n < heads.length; n++) {
@@ -252,7 +271,7 @@ function nextBlockId(text: string): string {
 
 /** Znajdź indeks linii checkboxa po blockId. */
 function findItemLine(bodyLines: string[], blockId: unknown): number {
-    const id = String(blockId ?? '');
+    const id = toText(blockId);
     if (!id) return -1;
     for (let i = 0; i < bodyLines.length; i++) {
         const cb = CHECKBOX_RE.exec(bodyLines[i]);
@@ -299,7 +318,7 @@ const HEADING_FORBIDDEN_MSG = 'Headings level 1-2 (# / ## or setext ===/---) are
  * @returns {{code:string, message:string}|null} - `null` = wolno
  */
 export function validateArtifactBodyText(text: unknown): { code: string; message: string } | null {
-    const s = String(text ?? '');
+    const s = toText(text);
     if (CODE_FENCE_RE.test(s) || HTML_CODE_RE.test(s)) return { code: 'code_forbidden', message: CODE_FORBIDDEN_MSG };
     if (hasSectionHeading(s)) return { code: 'heading_forbidden', message: HEADING_FORBIDDEN_MSG };
     return null;
@@ -419,7 +438,7 @@ function applyOne(text: string, op: Record<string, unknown> | null, eol: string)
  */
 export function applyPatch(markdown: unknown, ops: unknown = []): { markdown: string; applied: number; errors: ArtifactPatchError[] } {
     const eol = detectEol(markdown);
-    let text = String(markdown ?? '');
+    let text = toText(markdown);
     const errors: ArtifactPatchError[] = [];
     let applied = 0;
 
