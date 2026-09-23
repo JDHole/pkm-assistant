@@ -54,6 +54,7 @@ What changed, in detail:
 - **Smaller, safer bundle.** Checking a result an external MCP server sends back no longer builds
   a piece of JavaScript from text at runtime; it uses a small library (MIT license) instead. The
   bundled plugin is about 120 KB smaller as a result.
+- Factory texts and prompts use plain hyphens instead of dashes.
 
 Every change ships with tests that fail without it. The index migration was additionally
 replayed on a copy of a real 122 MB index: 5,200 vectors converted in under a second, zero
