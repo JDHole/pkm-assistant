@@ -33,6 +33,7 @@ export {
     DEFAULT_EMBED_MODELS,
     DEFAULT_EMBEDDING_SETTINGS,
     DEFAULT_VECTOR_DIM,
+    DEFAULT_EMBED_TIMEOUT_MS,
 } from './contracts.js';
 
 // Meldunek z migracji ada-002 → 3-small (composition root woła to przy starcie).
