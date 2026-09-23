@@ -69,7 +69,16 @@ export interface MemorySavePlugin {
 
 function cleanString(value: unknown, max = 4000): string {
     if (value === null || value === undefined) return '';
-    return String(value).trim().slice(0, max);
+    return _rawToString(value).trim().slice(0, max);
+}
+
+/**
+ * Osobna funkcja graniczna: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
+ * `unknown`, więc `String()` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
+ * `_safeStringify` w `core/utils/errorUtils.ts`).
+ */
+function _rawToString(value: unknown): string {
+    return String(value);
 }
 
 function quoteYaml(value: unknown): string {

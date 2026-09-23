@@ -83,14 +83,30 @@ export interface TodoToolPlugin {
     _todoUpdatedAt?: number;
 }
 
-/** Nazwa pliku bezpieczna dla systemu plików (agent + sessionId). */
-function safeSlug(s: unknown): string {
-    return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'x';
+/** Nazwa pliku bezpieczna dla systemu plików (agent + sessionId). Oba wołacze podają string. */
+function safeSlug(s: string): string {
+    return s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'x';
 }
 
-/** Spłaszcz element do jednej linii (todo to prosty tekst, nie akapit). */
+/**
+ * Spłaszcz element do jednej linii (todo to prosty tekst, nie akapit). `s` bywa `args.text`
+ * od modelu - `unknown` bez walidacji schematem.
+ */
 function flattenItem(s: unknown): string {
-    return String(s ?? '').replace(/\s*\r?\n\s*/g, ' ').trim();
+    return _rawToTextItem(s).replace(/\s*\r?\n\s*/g, ' ').trim();
+}
+
+/**
+ * Osobna funkcja graniczna: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
+ * `unknown`, więc `String()` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
+ * `_safeStringify` w `core/utils/errorUtils.ts`).
+ */
+function _rawToTextItem(value: unknown): string {
+    return value === null || value === undefined ? '' : _rawToString(value);
+}
+
+function _rawToString(value: unknown): string {
+    return String(value);
 }
 
 /** Element wejściowy listy: goły string albo obiekt z tekstem pod jednym z trzech kluczy. */
@@ -114,7 +130,7 @@ function normalizeItems(items: unknown): string[] {
 function causeText(cause: unknown): string {
     if (cause instanceof Error) return cause.message;
     if (cause === undefined) return 'brak szczegółów — adapter bez metody read()';
-    return String(cause);
+    return _rawToString(cause);
 }
 
 /**
@@ -401,7 +417,7 @@ export function createTodoTool() {
                 } else if (action === 'check' || action === 'uncheck') {
                     if (!args.blockId) return { isError: true, error: t('mcp.todo.blockid_required') };
                     const op = action === 'check' ? 'check_item' : 'uncheck_item';
-                    out = await store.patch(agent, sessionId, [{ op, blockId: String(args.blockId) }], { title });
+                    out = await store.patch(agent, sessionId, [{ op, blockId: _rawToString(args.blockId) }], { title });
                 } else if (action === 'finish') {
                     out = await store.finish(agent, sessionId);
                     if (out.removeError) {

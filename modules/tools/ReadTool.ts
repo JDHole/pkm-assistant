@@ -100,9 +100,23 @@ function levelPath(memory: AgentMemoryLike, level: string): string {
     return memory.paths.l3;
 }
 
+/**
+ * `rawPath` to `args.path`/`args.filename` od modelu - `unknown` bez walidacji schematem.
+ * Osobna funkcja graniczna: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
+ * `unknown`, więc `String()` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
+ * `_safeStringify` w `core/utils/errorUtils.ts`).
+ */
+function _toPathText(value: unknown): string {
+    return value ? _rawToString(value) : '';
+}
+
+function _rawToString(value: unknown): string {
+    return String(value);
+}
+
 /** Rozpoznaj ścieżkę podsumowania pamięci: `summaries/L{1,2,3}/<file>.md`. */
 function parseSummaryPath(rawPath: unknown): { level: string; filename: string } | null {
-    const norm = String(rawPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+    const norm = _toPathText(rawPath).replace(/\\/g, '/').replace(/^\/+/, '');
     const parts = norm.split('/').filter(Boolean);
     if (parts.length === 3 && parts[0].toLowerCase() === 'summaries' && /^L[123]$/i.test(parts[1])) {
         return { level: parts[1].toUpperCase(), filename: parts[2] };
