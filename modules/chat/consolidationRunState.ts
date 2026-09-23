@@ -113,6 +113,20 @@ export function resolveStepDraft(step: StepLike | null | undefined, { dedup = fa
             merges: normalizeMerges(source.merges ?? proposal.merges),
             deletions: normalizeDeletions(source.deletions ?? proposal.deletions),
         }
-        : { body: String(source.body ?? proposal.body ?? '') };
+        : { body: _draftBodyToString(source.body ?? proposal.body) };
     return step.draft;
+}
+
+/**
+ * `source.body`/`proposal.body` to `DraftSource.body?: unknown` - wynik kroku konsolidacji,
+ * bez walidacji schematem. Osobna funkcja graniczna: dopiero jej wywołanie resetuje zawężenie
+ * TS z powrotem do gołego `unknown`, więc `String()` tutaj nie zgłasza no-base-to-string (ten
+ * sam wzorzec co `_safeStringify` w `core/utils/errorUtils.ts`).
+ */
+function _draftBodyToString(value: unknown): string {
+    return value === null || value === undefined ? '' : _rawToString(value);
+}
+
+function _rawToString(value: unknown): string {
+    return String(value);
 }

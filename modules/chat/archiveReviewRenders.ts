@@ -157,7 +157,7 @@ export function renderSummaryReview(
     parent: HTMLElement,
     { sources = [], body = '', rows = 14, readOnly = false, onChange = null }: {
         sources?: string[];
-        body?: unknown;
+        body?: string;
         rows?: number;
         readOnly?: boolean;
         onChange?: ((value: string) => void) | null;
@@ -174,7 +174,7 @@ export function renderSummaryReview(
         }
     }
 
-    let current = String(body || '');
+    let current = body || '';
     const textarea = parent.createEl('textarea', { cls: 'cs-archive-modal__summary-body' });
     textarea.value = current;
     textarea.rows = rows;

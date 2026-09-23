@@ -22,7 +22,7 @@ export const CHAT_ERROR_TEXT_LIMIT = 800;
 function normalizeError(error: unknown): string {
     if (error === null || error === undefined) return '';
     if (typeof error === 'string') return error;
-    if (typeof error !== 'object') return String(error);
+    if (typeof error !== 'object') return _rawToString(error);
 
     const message = (error as { message?: unknown }).message;
     if (typeof message === 'string' && message.trim()) return message;
@@ -32,8 +32,17 @@ function normalizeError(error: unknown): string {
         // `{}` po serializacji Errora bez własnych pól to nie jest opis błędu.
         return json && json !== '{}' && json !== '""' ? json : '';
     } catch {
-        return String(error);
+        return _rawToString(error);
     }
+}
+
+/**
+ * Osobna funkcja graniczna: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
+ * `unknown`, więc `String()` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
+ * `_safeStringify` w `core/utils/errorUtils.ts`).
+ */
+function _rawToString(value: unknown): string {
+    return String(value);
 }
 
 /**

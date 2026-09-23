@@ -24,9 +24,23 @@ export type TodoPanelModel = {
     allDone: boolean;
 };
 
+/**
+ * `item.text` przychodzi z wyniku narzędzia `todo` (`unknown`, bez walidacji schematem).
+ * Osobna funkcja graniczna: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
+ * `unknown`, więc `String()` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
+ * `_safeStringify` w `core/utils/errorUtils.ts`).
+ */
+function _itemTextToString(value: unknown): string {
+    return value === null || value === undefined ? '' : _rawToString(value);
+}
+
+function _rawToString(value: unknown): string {
+    return String(value);
+}
+
 export function buildTodoPanelModel(state: TodoState | null | undefined): TodoPanelModel {
     const items: TodoItemInput[] = Array.isArray(state?.items) ? state.items : [];
-    const normalized = items.map(i => ({ text: String(i?.text ?? ''), checked: !!(i?.checked ?? i?.done) }));
+    const normalized = items.map(i => ({ text: _itemTextToString(i?.text), checked: !!(i?.checked ?? i?.done) }));
     const total = normalized.length;
     const done = normalized.filter(i => i.checked).length;
     // Panel znika, gdy lista zamknięta (`finished`) lub pusta — nic nie zaśmieca UI.
