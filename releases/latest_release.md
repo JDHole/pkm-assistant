@@ -47,6 +47,10 @@ What changed, in detail:
 - **Brain file and artifact statuses in the interface language.** New brain files are born in
   the interface language and stay in it; parsers know both Polish and English headings; artifact
   types created under English have English statuses, and the buttons work on old Polish files too.
+- **Removed the dead `preferred_tools` agent field.** It never had an editor in the agent
+  profile and had no effect since the tool cluster rewrite; the same is true of the
+  `default_permissions.mcp` permission switch. Existing agent files with either field keep
+  loading unchanged.
 
 Every change ships with tests that fail without it. The index migration was additionally
 replayed on a copy of a real 122 MB index: 5,200 vectors converted in under a second, zero

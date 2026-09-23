@@ -37,6 +37,14 @@ approval, brain file and artifact statuses in the interface language.
 - Concurrent writes to the same file from one model turn no longer overwrite each other.
 - A first scan that fails half-way no longer retries on a partially filled index.
 
+### Removed
+
+- **The dead `preferred_tools` agent field.** It had no effect since the tool cluster rewrite
+  (2.2.6) and no editor in the agent profile; it is no longer tracked or written to a profile
+  export. The `default_permissions.mcp` permission switch, dead for the same reason, was
+  already absent from the profile's permission toggles. Existing agent YAML files with either
+  field keep loading unchanged.
+
 Downgrade warning: after the index migration, 2.2.8 or older rebuilds the index from scratch.
 
 ## 2.2.8 - 2026-09-20
