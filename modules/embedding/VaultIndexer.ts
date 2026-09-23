@@ -279,6 +279,17 @@ function basename(path: string): string {
  */
 class DimsRebuildTriggered extends Error {}
 
+/**
+ * Sentinel: `_fullScan` rzuca to, gdy KAŻDY plik skończył jako `EMBED_SKIPPED` - trwała awaria
+ * dostawcy PER PLIK (np. zły klucz/model), nie usterka sieci przejściowa. `initialize()` rozpoznaje
+ * ten konkretny typ i NIE uzbraja `_scheduleScanRetry` (H1, runda naprawcza 3): młócenie tego
+ * samego złego żądania co `scanRetryMs` w nieskończoność nie naprawi złego klucza - user go
+ * poprawia i sam odpala Reindex albo restartuje plugin. `rebuild()` traktuje ten rzut jak KAŻDY
+ * inny pad skanu (własny `catch` przywraca poprzedni stan, patrz niżej) - ten typ nigdy nie
+ * wychodzi poza ten plik.
+ */
+class FullScanNoResultsError extends Error {}
+
 export class VaultIndexer {
     // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
     declare plugin: IndexerPluginLike | null;
@@ -515,6 +526,14 @@ export class VaultIndexer {
             this.status = 'error';
             this.lastError = (e as ErrLike)?.message || String(e);
             this.logger.error('VaultIndexer', 'initialize failed:', e);
+            if (e instanceof FullScanNoResultsError) {
+                // H1 (runda naprawcza 3): trwała awaria dostawcy PER PLIK (np. zły klucz/model) -
+                // to NIE jest usterka przejściowa, więc BEZ uzbrajania automatycznego ponowienia.
+                // Regresja sprzed tej naprawy: `_scheduleScanRetry()` młóciłoby to samo złe żądanie
+                // co `scanRetryMs` w nieskończoność (zmierzone: dziesiątki żądań w kilkaset ms, bez
+                // końca). User poprawia klucz/model i sam odpala Reindex albo restartuje plugin.
+                return;
+            }
             // Skan bez indeksu w garści (albo pad poza resyncem) - ponów sam, z backoffem.
             // Bez tego zimny start Ollamy dłuższy niż sufit czasu kończył się `error` NA STAŁE.
             this._scheduleScanRetry();
@@ -842,16 +861,29 @@ export class VaultIndexer {
         // wołacz (`rebuild()`) ma już gotowy `catch`, który przywraca CAŁY poprzedni stan
         // (db/mtimes/dims/rows/segments/pending) i NIGDY nie dochodzi do sprzątania starych
         // segmentów - żywy indeks nie może zniknąć tylko dlatego, że dostawca akurat odrzucił
-        // WSZYSTKO. `initialize()` (pierwszy bieg, bez stanu do przywrócenia) traktuje to jak
-        // każdy inny pad skanu: status='error' + automatyczne ponowienie.
+        // WSZYSTKO. `initialize()` (pierwszy bieg, bez stanu do przywrócenia) kończy status='error'
+        // BEZ automatycznego ponowienia (H1, runda naprawcza 3 - patrz `FullScanNoResultsError`) -
+        // to trwała awaria konfiguracji, nie coś, co minie samo po chwili.
         if (files.length > 0 && this._mtimes.size === 0) {
-            throw new Error(`pełny skan nie zaindeksował ani jednego pliku (${files.length} plików pominiętych trwale)`);
+            throw new FullScanNoResultsError(`pełny skan nie zaindeksował ani jednego pliku (${files.length} plików pominiętych trwale)`);
         }
         if (!this.db) {
             // pusty vault albo same puste notatki — utwórz pusty indeks z deklarowanym/domyślnym dims
             this.dims = dims || DEFAULT_VECTOR_DIM;
             this.db = await createEmbeddingDb(this._schema(this.dims));
         }
+        // H2 (runda naprawcza 3): meta MUSI odzwierciedlać wynik TEGO skanu, nawet gdy nic nie
+        // trafiło do `_pending`/`_rows` (vault bez notatek, albo wszystkie w NoGo) - inaczej
+        // `_persistNowInner` uznałby zapis za zbędny (`_pending` puste, nic "dirty") i zostawiłby na
+        // dysku STARĄ metę, wciąż wskazującą segmenty sprzed tego skanu. `rebuild()`'s kod
+        // sprzątający stare segmenty (patrz niżej, `if (!this._metaDirty)`) uznałby wtedy - błędnie -
+        // że zapis "się udał" (bo nigdy nie było go czym oflagować jako nieudany) i skasowałby
+        // segmenty, na które STARA meta na dysku dalej wskazuje: `vault-index.meta.json` sierotą
+        // wobec nieistniejących plików, `index_corrupt` przy KAŻDYM kolejnym starcie. Wymuszenie tu
+        // gwarantuje: albo świeża (możliwie pusta) meta trafia na dysk PRZED czyszczeniem starych
+        // segmentów w `rebuild()`, albo zapis pada i `_metaDirty` zostaje `true` - `rebuild()` wtedy
+        // NIE kasuje niczego (ten sam mechanizm, którym G3 chroni przypadek "wszystko odrzucone").
+        this._metaDirty = true;
         await this._persistNow();
     }
 
