@@ -61,6 +61,16 @@ test('isClosedStatus: zamkniety zawsze true, ostatni z listy true, środkowy fal
     t.false(isClosedStatus('robocze', ['robocze', 'gotowe']));
 });
 
+// Mutacja M14 (dogrywka recenzji niezależnej): rola `closed` musi być rozpoznana w OBU
+// językach niezależnie od tego, co deklaruje lista statusów typu - nie tylko dla PL literału.
+// Bez tej pary testów mutant, który usunąłby GAŁĄŹ EN z `statusRole(status) === 'closed'`
+// (zostawiając rozpoznawanie wyłącznie PL literału `'zamkniety'`), przeszedłby WSZYSTKIE
+// istniejące testy powyżej - żaden z nich nie woła `isClosedStatus('closed', ...)`.
+test('isClosedStatus: rola closed rozpoznana w OBU językach, niezależnie od listy statusów typu (mutacja M14)', t => {
+    t.true(isClosedStatus('closed', []), 'literał EN musi domykać tak samo jak PL, nawet z pustą listą');
+    t.true(isClosedStatus('zamkniety', ['open', 'done']), 'literał PL musi domykać, mimo że lista typu w ogóle nie deklaruje "zamkniety"/"closed"');
+});
+
 // ─── Typ EN (decyzja właściciela 19.09: nowy artefakt EN dostaje statusy EN w pliku) ───
 
 const EN_PLAN_STATUSY = ['pending-approval', 'remarks', 'accepted', 'closed'];

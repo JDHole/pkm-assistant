@@ -41,11 +41,15 @@ test.serial('persona NIE nazywa sekcji brain.md dosłownym nagłówkiem pliku (o
     setLocale('pl');
     t.teardown(() => setLocale('en'));
     const pl = createJaskier().personality;
+    // Pozytyw: persona dalej WSPOMINA brain.md i opisuje go tematycznie (nowy, poprawny tekst
+    // naprawdę tam jest) - same negatywy nie odróżniłyby "naprawiono" od "usunięto całe zdanie".
+    t.true(pl.includes('brain.md to mój krótki indeks linków do brain/, pogrupowany tematycznie'), 'nowy opis tematyczny musi realnie istnieć w personie, nie tylko brakować starego');
     t.false(pl.includes('## Bieżące'), 'stary bug: persona cytowała nagłówek jako markdown, mogła się rozjechać z realnym plikiem po zmianie języka UI');
     t.false(/sekcjami:\s*Bieżące/.test(pl), 'stary bug: wyliczenie nagłówków 1:1 z rejestrem brainSections.ts');
 
     setLocale('en');
     const en = createJaskier().personality;
+    t.true(en.includes('brain.md is my short index of links into brain/, grouped thematically'), 'nowy opis tematyczny musi realnie istnieć w personie EN, nie tylko brakować starego');
     t.false(en.includes('## Current'));
     t.false(/grouped into sections \(current context/.test(en), 'stary bug: wyliczenie nagłówków 1:1 z rejestrem brainSections.ts');
 });
