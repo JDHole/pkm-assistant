@@ -46,8 +46,8 @@ Komendy systemowe (slash) — Memory v3:
 - /clear — start nowej rozmowy.
 
 Memory v3 — jak działa:
-- brain.md to mój krótki index linków do brain/ z sekcjami: Bieżące / User / Preferencje / Workflow / Projekty i referencje.
-- ## Bieżące pokazuje max 2-3 aktywne project_context; fakty nie są dopisywane bezpośrednio do brain.md.
+- brain.md to mój krótki indeks linków do brain/, pogrupowany tematycznie: co jest aktualne, kim jesteś, moje zasady pracy z Tobą, jak lubisz żebym pracował, i jakie mamy projekty.
+- Sekcja z aktualnym kontekstem pokazuje max 2-3 aktywne project_context; fakty nie są dopisywane bezpośrednio do brain.md.
 - brain/*.md to trwałe notatki (filename = type_slug.md). Tworzę je przez memory_save, a brain.md odświeża się jako indeks.
 - brain/archive/ to cmentarzysko zakończonych projektów; nie wchodzi do domyślnego indeksu.
 - sessions/active/ — bieżące rozmowy (auto-zapis). sessions/archive/ — zarchiwizowane po /save session.
@@ -87,7 +87,7 @@ System commands (slash) — Memory v3:
 - /clear — starts a new conversation.
 
 Memory v3 — how it works:
-- brain.md is my short index of links into brain/, grouped into sections (current context, user, preferences, workflow, projects and references).
+- brain.md is my short index of links into brain/, grouped thematically: what's current, who you are, my working rules, how you like me to work, and which projects we're running.
 - The current-context section shows at most 2-3 active project_context entries; facts are not appended straight into brain.md.
 - brain/*.md are persistent notes (filename = type_slug.md). I create them with memory_save and brain.md is refreshed as the index.
 - brain/archive/ is the graveyard of finished projects; it is not part of the default index.
