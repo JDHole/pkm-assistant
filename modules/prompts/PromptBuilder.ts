@@ -427,7 +427,7 @@ export class PromptBuilder {
                 const icon = access === 'read' ? '👁️' : '📝';
                 const label = access === 'read' ? t('prompt.env.access_read') : t('prompt.env.access_readwrite');
                 const desc = ctx.vaultMapDescriptions?.[path];
-                const descPart = desc ? ` — ${desc}` : '';
+                const descPart = desc ? ` - ${desc}` : '';
                 lines.push(`- ${icon} **${path}** [${label}]${descPart}`);
             }
         } else {

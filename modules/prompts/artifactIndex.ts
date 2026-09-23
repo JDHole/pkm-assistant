@@ -68,7 +68,7 @@ export function buildArtifactIndex(types: unknown = [], artifacts: unknown = [],
             let shown = 0;
             for (const a of artList) {
                 const statusPart = a.status ? `, ${a.status}` : '';
-                const line = `  • ${a.tytul || a.id} (${a.id}) — ${a.typ || '?'}${statusPart}`;
+                const line = `  • ${a.tytul || a.id} (${a.id}) - ${a.typ || '?'}${statusPart}`;
                 // Zawsze pokaż co najmniej jeden (żeby lista nie była samym nagłówkiem).
                 if (shown > 0 && !fits(line)) break;
                 push(line);
