@@ -3,6 +3,8 @@ import { isLocalPlatform } from './modelResolver.js';
 import { setSvg, setSvgLabel } from '../../modules/crystal-soul/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { computeSemanticStatusText } from './semanticStatusText.js';
+import { parseEmbedTimeoutSeconds } from './embedTimeoutInput.js';
+import { DEFAULT_EMBED_TIMEOUT_MS } from '../embedding/index.js';
 // `import type` = ZERO emitu (esbuild i tsx wycinają go w całości). Same wartości
 // `Setting`/`Notice` przychodzą tu przez ctx (DI z `modules/shell/pkm_settings_tab`).
 import type { App, Notice as ObsidianNotice, Setting as ObsidianSetting } from 'obsidian';
@@ -17,6 +19,13 @@ type IconSet = Record<string, (size?: number) => string>;
 
 /** Ustawienia embeddingu (slice `settings.pkmAssistant.embedding`) - właściciel typu: `core`. */
 type EmbedModelSettings = EmbeddingSettingsSlice;
+
+/**
+ * Domyślny sufit czasu żądania embeddingu w SEKUNDACH, dla opisu pola i placeholdera - liczony
+ * z `DEFAULT_EMBED_TIMEOUT_MS` (`modules/embedding`, barrel), zero zduplikowanej stałej do
+ * ręcznej synchronizacji.
+ */
+const DEFAULT_EMBED_TIMEOUT_SECONDS = DEFAULT_EMBED_TIMEOUT_MS / 1000;
 
 /** Stan indeksera semantycznego (`plugin.vaultIndexer`). */
 type IndexerStatus = {
@@ -310,11 +319,45 @@ export async function renderModelsSection(container: HTMLElement, ctx: ModelsSec
                 text.inputEl.addClass('pkm-setting-input--w250');
             });
 
+        new Setting(container)
+            .setName(t('settings.embed_timeout'))
+            .setDesc(t('settings.embed_timeout_desc', { default: String(DEFAULT_EMBED_TIMEOUT_SECONDS) }))
+            .addText(text => {
+                const currentTimeoutMs = embedSettings.timeoutMs;
+                const currentSeconds = typeof currentTimeoutMs === 'number' && currentTimeoutMs > 0
+                    ? String(Math.round(currentTimeoutMs / 1000))
+                    : '';
+                text.inputEl.type = 'number';
+                text.inputEl.min = '1';
+                text
+                    .setPlaceholder(String(DEFAULT_EMBED_TIMEOUT_SECONDS))
+                    .setValue(currentSeconds)
+                    .onChange(async (value) => {
+                        const seconds = parseEmbedTimeoutSeconds(value);
+                        if (seconds === null) {
+                            if (env.settings.pkmAssistant.embedding) {
+                                delete env.settings.pkmAssistant.embedding.timeoutMs;
+                            }
+                        } else {
+                            if (!env.settings.pkmAssistant.embedding) {
+                                env.settings.pkmAssistant.embedding = {};
+                            }
+                            env.settings.pkmAssistant.embedding.timeoutMs = seconds * 1000;
+                        }
+                        await save();
+                        // Bez `owner.display()` - kontrolka nie przerysowuje całej sekcji przy
+                        // każdym wpisanym znaku (spec: knob wydajnościowy, nie przełącznik).
+                    });
+                text.inputEl.addClass('pkm-setting-input--w100');
+            });
+
         // ─── Status żywej semantyki (VaultIndexer → plugin.oramaDb) ───
         // `progress.total` liczy pliki PRZESKANOWANE, nie wektory faktycznie w indeksie - przy
         // padzie pierwszego skanu (indeks pusty, `_publish()` z zerowym db) status dalej mówił
-        // "Aktywne". Prawda o zawartości indeksu to `countDocs(plugin.oramaDb)`. Import dynamiczny
-        // - jak `migrateSCToOrama` niżej - `models` nie ma statycznej zależności od `embedding`.
+        // "Aktywne". Prawda o zawartości indeksu to `countDocs(plugin.oramaDb)`. Import DYNAMICZNY
+        // (w przeciwieństwie do stałej `DEFAULT_EMBED_TIMEOUT_MS` wyżej, płaskiego numeru bez
+        // efektów ubocznych) - `countDocs` woła w Oramę, a ta ścieżka renderuje się tylko, gdy
+        // user faktycznie otworzy sekcję „Modele", więc nie ma powodu ładować silnika wcześniej.
         const semStatus = plugin?.vaultIndexer?.getStatus?.();
         const { countDocs } = await import('../embedding/index.js');
         const semDocsCount = countDocs(plugin?.oramaDb as never);

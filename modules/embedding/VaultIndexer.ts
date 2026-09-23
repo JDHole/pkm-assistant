@@ -28,14 +28,23 @@
 import {
     createEmbeddingDb,
     insertVectorLean,
-    stripStoredVectors,
     removeVector,
-    persist,
-    restore,
     DEFAULT_VECTOR_DIM,
 } from './orama_engine.js';
 import type { AnyOrama, AnySchema } from '@orama/orama';
 import type { EmbeddingDoc } from './orama_engine.js';
+import {
+    encodeSegment,
+    decodeSegment,
+    parseIndexMetaV2,
+    parseIndexMetaV1,
+    planCompaction,
+    extractV1Vectors,
+    segmentFileName,
+    isSegmentFileName,
+    maxSegmentSeq,
+} from './indexStore.js';
+import type { SegmentRef, RowRef, IndexMetaV2, IndexMetaV1 } from './indexStore.js';
 
 // obsidianmd/prefer-window-timers: ten plik wstaje w gołym Node (testy AVA), gdzie `window`
 // nie istnieje — `window.setTimeout` byłby ReferenceError. Inline `eslint-disable` jest
@@ -59,7 +68,6 @@ function _nodeSafeClearTimeout(...args: Parameters<typeof clearTimeout>): void {
     fn(...args);
 }
 
-const INDEX_VERSION = 1;
 const DEFAULT_INDEX_DIR = '.pkm-assistant/index';
 const MAX_EMBED_CHARS = 6000;     // per-plik treść do embeddingu (świadomy trade-off, patrz docstring modułu)
 const DEFAULT_BATCH_SIZE = 16;    // porcja plików na jeden embedBatch
@@ -131,9 +139,16 @@ export interface VaultFileLike {
 export interface VaultAdapterLike {
     read(path: string): Promise<string>;
     write(path: string, data: string): Promise<void>;
+    /** Segmenty wektorów (format v2) są binarne — czytane/pisane osobno od meta (JSON). */
+    readBinary(path: string): Promise<ArrayBuffer>;
+    writeBinary(path: string, data: ArrayBuffer): Promise<void>;
     exists?(path: string): Promise<boolean>;
     mkdir?(path: string): Promise<void>;
     stat?(path: string): Promise<{ mtime?: number } | null>;
+    /** Kasowanie starego pliku v1 po udanej migracji + sierot segmentów. Best-effort. */
+    remove?(path: string): Promise<void>;
+    /** Listing katalogu indeksu — sprzątanie sierot po restore. Ścieżki PEŁNE względem roota vaulta. */
+    list?(path: string): Promise<{ files: string[]; folders: string[] }>;
 }
 
 /** Vault Obsidiana widziany przez indekser (podzbiór realnego API). */
@@ -174,12 +189,39 @@ export interface IndexerLogger {
 /** Stany indeksera — patrz nagłówek pliku. */
 export type IndexerStatus = 'idle' | 'disabled_mobile' | 'no_provider' | 'building' | 'ready' | 'error';
 
+/**
+ * Powód nieudanej migracji v1→v2 - KOD, nie zdanie po polsku (i18n tłumaczy go przez
+ * `embedding.notice.migration_reason.<kod>`, `detail` niesie surowy komunikat błędu
+ * dosklejany po dwukropku). Patrz `_migrationFailed`.
+ */
+export type MigrationFailReason =
+    | 'v1_unreadable'
+    | 'v1_malformed'
+    | 'dims_mismatch'
+    | 'segment_write'
+    | 'meta_write'
+    | 'verify_failed';
+
+/**
+ * Wykryty rebuild (D6): model/wymiar wektora się zmienił, albo indeks na dysku jest
+ * nieczytelny/niekompletny. Indekser NIGDY nie miesza starych i nowych wektorów po cichu -
+ * każdy z tych przypadków kończy się pełnym rebuildem i JEDNYM powiadomieniem UI.
+ */
+export type IndexerNotice =
+    | { kind: 'model_changed'; from: string | null; to: string }
+    | { kind: 'dims_changed'; from: number; to: number }
+    | { kind: 'index_corrupt' }
+    | { kind: 'migration_failed'; reason: MigrationFailReason; detail?: string }
+    | { kind: 'migrated'; fromBytes: number; toBytes: number };
+
 /** Publiczny snapshot stanu (Settings + noty degradacji). */
 export interface IndexerStatusSnapshot {
     status: IndexerStatus;
     progress: { indexed: number; total: number };
     modelKey: string | null;
     lastError: string | null;
+    /** Ostatnie zdarzenie wykrytego rebuildu/migracji, `null` = brak. */
+    lastNotice: IndexerNotice | null;
 }
 
 /** Metadane pliku brane do indeksu. */
@@ -188,27 +230,19 @@ export interface FileMeta {
     mtime: number;
 }
 
-/** Sidecar `vault-index.meta.json`. Nazwa pola na dysku, nie w kodzie — `model_key` zostaje
- *  (dane usera, spec §4); w kodzie snapshotu i wszędzie indziej to `modelKey`. */
-export interface IndexMeta {
-    version?: number;
-    model_key?: string | null;
-    dims?: number | null;
-    updated_at?: number;
-    mtimes?: Record<string, number>;
-}
-
 /** Zależności konstruktora — wszystko wstrzykiwane (testowalność). */
 export interface VaultIndexerDeps {
     /** ustawia plugin.oramaDb + plugin.registerEvent/register (cleanup) */
     plugin?: IndexerPluginLike | null;
-    /** Obsidian Vault: getMarkdownFiles(), getAbstractFileByPath(), cachedRead(), adapter{write,exists,mkdir,stat} (adapter tylko dla ukrytego pliku indeksu), on/offref */
+    /** Obsidian Vault: getMarkdownFiles(), getAbstractFileByPath(), cachedRead(), adapter{read,write,readBinary,writeBinary,exists,mkdir,stat,remove,list} (adapter tylko dla ukrytego pliku indeksu - format v2, patrz VaultAdapterLike), on/offref */
     vault: VaultLike;
     /** fasada: isReady(), embedBatch(texts), embed(text), getModelKey(), getDims() */
     embedder: EmbedderFacade;
     /** Platform.isMobile */
     isMobile?: boolean;
     logger?: IndexerLogger;
+    /** Powiadomienia UI o wykrytym rebuildzie/migracji (D7 - `src/main.ts` mapuje na `new Notice(...)`). */
+    notify?: (event: IndexerNotice) => void;
     /** lista user NoGo (funkcja zwracająca świeżą listę lub tablica) */
     noGoFolders?: (() => string[]) | string[];
     /** folder artefaktów do wykluczenia albo null (indeksuj) */
@@ -228,11 +262,33 @@ export interface VaultIndexerDeps {
 /** Minimalny kształt błędu w `catch` (err jest `unknown`). */
 type ErrLike = { message?: string };
 
+function msg(e: unknown): string {
+    return String((e as ErrLike)?.message || e);
+}
+
 function basename(path: string): string {
     const p = String(path || '').replace(/\\/g, '/');
     const last = p.split('/').pop() || p;
     return last.replace(/\.md$/i, '');
 }
+
+/**
+ * Sentinel wewnętrzny: rzucany z `_insertOne` gdy wymiar wektora zmienił się NA ŻYWO
+ * (indeks już `ready`/po restore), żeby przerwać bieżącą porcję bez ponowień - `rebuild()`
+ * jest już uzbrojony i tak zreembeduje wszystko od nowa (D6). Nigdy nie wychodzi poza ten plik.
+ */
+class DimsRebuildTriggered extends Error {}
+
+/**
+ * Sentinel: `_fullScan` rzuca to, gdy KAŻDY plik skończył jako `EMBED_SKIPPED` - trwała awaria
+ * dostawcy PER PLIK (np. zły klucz/model), nie usterka sieci przejściowa. `initialize()` rozpoznaje
+ * ten konkretny typ i NIE uzbraja `_scheduleScanRetry` (H1, runda naprawcza 3): młócenie tego
+ * samego złego żądania co `scanRetryMs` w nieskończoność nie naprawi złego klucza - user go
+ * poprawia i sam odpala Reindex albo restartuje plugin. `rebuild()` traktuje ten rzut jak KAŻDY
+ * inny pad skanu (własny `catch` przywraca poprzedni stan, patrz niżej) - ten typ nigdy nie
+ * wychodzi poza ten plik.
+ */
+class FullScanNoResultsError extends Error {}
 
 export class VaultIndexer {
     // `declare` = sama deklaracja typu, zero emitu (kontrakt kampanii TS §3).
@@ -265,6 +321,14 @@ export class VaultIndexer {
     declare private _hooksRegistered: boolean;
     declare private _debounceTimer: NodeSafeTimer | null;
     declare private _persistTimer: NodeSafeTimer | null;
+    /**
+     * `dispose()` już przeszło (G6/round 2) - żaden `_scheduleFlush`/`_schedulePersist`/
+     * `_scheduleScanRetry` nie ma prawa uzbroić NOWEGO timera od tej chwili. Ogniwo persistu już
+     * W TOKU kończy się normalnie (nie przerywamy zapisu na dysku - to bezpieczne), ale flush/
+     * insert, który dokańcza się PO `dispose()` (np. embedding w locie przy unloadzie pluginu),
+     * nie może uzbroić kolejnego zapisu, bo plugin mógł już zniknąć spod adaptera vaulta.
+     */
+    declare private _disposed: boolean;
     /** Liczba KOLEJNYCH nieudanych flushów - steruje backoffem ponowienia. */
     declare private _flushFailures: number;
     /** Kiedy (wg `now()`) ma wystrzelić uzbrojone ponowienie po padzie - `null` = brak. */
@@ -281,6 +345,45 @@ export class VaultIndexer {
     declare private _hardEx?: string[];
     /** Czy migawka `_hardEx` zna nazwę folderu konfiguracji. `false` = fail-closed w `_isExcluded`. */
     declare private _configDirKnown?: boolean;
+
+    // ─────────────────────────── Format v2 (segmenty + meta) ───────────────────────────
+    /** Segmenty znane z ostatniego udanego restore/persist (kolejność = `next_seq` rosnąco). */
+    declare private _segments: SegmentRef[];
+    /** path -> [segIdx, rowIdx], TYLKO dla ścieżek z wektorem (D8: puste notatki bez wpisu). */
+    declare private _rows: Map<string, RowRef>;
+    /** Następny numer sekwencji segmentu — rośnie monotonicznie, nawet po kompakcji. */
+    declare private _nextSeq: number;
+    /** Wektory zembedowane od ostatniego udanego zapisu; upsert nadpisuje wpis tej samej ścieżki. */
+    declare private _pending: Map<string, Float32Array>;
+    /** Coś w mtimes/rows się zmieniło (także usunięcia i puste pliki) — meta wymaga zapisu. */
+    declare private _metaDirty: boolean;
+    /** Ostatnie zdarzenie wykrytego rebuildu/migracji (D6) — część `getStatus()`. */
+    declare lastNotice: IndexerNotice | null;
+    /** Powiadomienie UI wstrzyknięte z `main.js` (`deps.notify`); brak = no-op. */
+    declare private _notifyFn?: (event: IndexerNotice) => void;
+    /** Zabezpieczenie przed rekurencją: rebuild po rozjeździe dims odpalany dokładnie raz. */
+    declare private _dimsRebuildPending: boolean;
+    /** Klucze `min-max` par (from,to) `dims_changed` już pokazanych UI w tej sesji (F4.2). */
+    declare private _notifiedDimsPairs: Set<string>;
+
+    // ─────────────────────────── Współbieżność persist (F1) ───────────────────────────
+    /**
+     * Łańcuch persistów — `_persistNow()` dokłada `_persistNowInner()` na jego koniec zamiast
+     * wołać go bezpośrednio, więc dwa równoległe `_persistNow()` (timer + koniec skanu/resyncu,
+     * rebuild wołany z flusha itd.) NIGDY nie wykonują `_persistNowInner` naraz - drugi czeka na
+     * pierwszy. Bez tego dwa równoległe persisty mogą dać dwa segmenty o TEJ SAMEJ nazwie
+     * (oba czytają `_nextSeq` przed inkrementacją drugiego) albo `_pending.clear()` jednego
+     * gubi wektory dołożone przez flush w oknie `await` drugiego.
+     */
+    declare private _persistChain: Promise<void>;
+    /**
+     * Licznik generacji — inkrementowany przy KAŻDEJ mutacji `_pending`/`_mtimes`/`_rows`
+     * (insert, usunięcie, stempel pustej notatki, reset przy skanie/rebuildzie/restore).
+     * `_writeMetaTracked` porównuje generację sprzed budowy meta z generacją PO udanym zapisie -
+     * różnica znaczy, że coś zmieniło stan w oknie `await write(meta)`, więc meta na dysku może
+     * nie nieść najświeższego stanu i `_metaDirty` MUSI zostać `true` (następny persist dogoni).
+     */
+    declare private _gen: number;
 
     constructor(deps: VaultIndexerDeps = {} as VaultIndexerDeps) {
         this.plugin = deps.plugin || null;
@@ -315,6 +418,7 @@ export class VaultIndexer {
         this._hooksRegistered = false;
         this._debounceTimer = null;
         this._persistTimer = null;
+        this._disposed = false;
         this._flushFailures = 0;
         this._flushRetryAt = null;
         this._flushDelayMs = this.debounceMs;
@@ -322,6 +426,40 @@ export class VaultIndexer {
         this.skipped = new Set();
         this._scanRetryTimer = null;
         this._scanFailures = 0;
+
+        this._segments = [];
+        this._rows = new Map();
+        this._nextSeq = 1;
+        this._pending = new Map();
+        this._metaDirty = false;
+        this.lastNotice = null;
+        this._notifyFn = deps.notify;
+        this._dimsRebuildPending = false;
+        this._notifiedDimsPairs = new Set();
+        this._persistChain = Promise.resolve();
+        this._gen = 0;
+    }
+
+    /** Mutacja `_pending`/`_mtimes`/`_rows` — patrz komentarz przy polu `_gen`. */
+    private _bumpGen(): void { this._gen++; }
+
+    /**
+     * Powiadamia UI (jeśli wstrzyknięte) i zapamiętuje jako `lastNotice`. `dims_changed`
+     * dostaje osobne traktowanie (F4.2): dostawca, który oscyluje między dwoma wymiarami,
+     * wywołuje rebuild za KAŻDYM razem (logika bez zmian), ale user widzi Notice tylko RAZ na
+     * sesję na daną (nieuporządkowaną) parę - inaczej flip-flop 4⇄8 zasypywałby go tym samym
+     * powiadomieniem w kółko. Log ostrzegawczy leci za każdym razem niezależnie od dedupe.
+     */
+    private _notify(n: IndexerNotice): void {
+        this.lastNotice = n;
+        if (n.kind === 'dims_changed') {
+            const key = `dims_changed:${Math.min(n.from, n.to)}-${Math.max(n.from, n.to)}`;
+            this.logger.warn('VaultIndexer', `wymiar wektora zmienił się (${n.from} → ${n.to})`);
+            if (this._notifiedDimsPairs.has(key)) return;
+            this._notifiedDimsPairs.add(key);
+        }
+        try { this._notifyFn?.(n); }
+        catch (e) { this.logger.warn('VaultIndexer', `notify handler rzucił: ${msg(e)}`); }
     }
 
     /** Publiczny snapshot stanu dla Settings + not degradacji. */
@@ -330,6 +468,7 @@ export class VaultIndexer {
             status: this.status,
             progress: { indexed: this.progress.indexed, total: this.progress.total },
             modelKey: this.modelKey,
+            lastNotice: this.lastNotice,
             lastError: this.lastError,
         };
     }
@@ -367,6 +506,17 @@ export class VaultIndexer {
                 this._publish();
             }
 
+            // `as IndexerStatus`: TS zawęża `this.status` do literału `'building'` z przypisania
+            // wyżej i nie wie, że `_resync()`/`rebuild()` wołane pod spodem mogły je zmienić -
+            // rzutowanie na deklarowaną unię jest tu poprawną odpowiedzią, nie castem na wiarę.
+            if ((this.status as IndexerStatus) === 'error') {
+                // F4.1: `_resync()` wykrył rozjazd dims i sam odpalił `rebuild()`, ale TEN rebuild
+                // padł (dostawca zgaszony w trakcie) - `rebuild()` już ustawił status/lastError i
+                // uzbroił ponowienie skanu. Nadpisanie tego na 'ready' niżej ukrywałoby awarię;
+                // stary (przywrócony przez `rebuild()`) indeks zostaje opublikowany i żywy, ale
+                // `_ready` NIE przechodzi na `true` - dokładnie jak przy padzie całego skanu.
+                return;
+            }
             this.status = 'ready';
             this._ready = true;
             this._scanFailures = 0;
@@ -376,6 +526,14 @@ export class VaultIndexer {
             this.status = 'error';
             this.lastError = (e as ErrLike)?.message || String(e);
             this.logger.error('VaultIndexer', 'initialize failed:', e);
+            if (e instanceof FullScanNoResultsError) {
+                // H1 (runda naprawcza 3): trwała awaria dostawcy PER PLIK (np. zły klucz/model) -
+                // to NIE jest usterka przejściowa, więc BEZ uzbrajania automatycznego ponowienia.
+                // Regresja sprzed tej naprawy: `_scheduleScanRetry()` młóciłoby to samo złe żądanie
+                // co `scanRetryMs` w nieskończoność (zmierzone: dziesiątki żądań w kilkaset ms, bez
+                // końca). User poprawia klucz/model i sam odpala Reindex albo restartuje plugin.
+                return;
+            }
             // Skan bez indeksu w garści (albo pad poza resyncem) - ponów sam, z backoffem.
             // Bez tego zimny start Ollamy dłuższy niż sufit czasu kończył się `error` NA STAŁE.
             this._scheduleScanRetry();
@@ -384,6 +542,7 @@ export class VaultIndexer {
 
     /** Automatyczne ponowienie całego skanu po padzie. Odwoływane przez `dispose()`. */
     _scheduleScanRetry(): void {
+        if (this._disposed) return; // G6: unload już poszedł - nic nowego nie startuje
         if (this._scanRetryTimer) _nodeSafeClearTimeout(this._scanRetryTimer);
         this._scanFailures++;
         const delay = Math.min(this.scanRetryMs * Math.pow(2, this._scanFailures - 1), MAX_SCAN_RETRY_MS);
@@ -409,17 +568,35 @@ export class VaultIndexer {
         if (this.isMobile) { this.status = 'disabled_mobile'; return this.getStatus(); }
         if (!this._embedderReady()) { this.status = 'no_provider'; return this.getStatus(); }
 
+        // Skasuj timer zaplanowanego zapisu i POCZEKAJ na persist w toku (jeśli jakiś trwa) -
+        // rebuild zaraz resetuje `_segments`/`_rows`/`_pending` pod nogami, a `_persistNowInner`
+        // w locie czyta te same pola (kompakcja w szczególności trzyma migawki między awaitami).
+        if (this._persistTimer) { _nodeSafeClearTimeout(this._persistTimer); this._persistTimer = null; }
+        await this._persistChain;
+
         // Gdyby `catch` przywracał SAM `db`, `_mtimes` zostawałyby puste,
         // `dims` z nieudanego skanu, a `_ready` na `false`, czyli przywrócony indeks byłby żywy
         // dla czytelników, ale martwy dla kolejki zmian. Zdejmujemy pełny snapshot.
+        // `_nextSeq` ŚWIADOMIE NIE wchodzi w tę migawkę (F2/D3) - segment, który rebuild zdążył
+        // zapisać przed padem, istnieje NAPRAWDĘ na dysku; cofnięcie licznika kazałoby kolejnemu
+        // udanemu zapisowi nadpisać ten sam numer inną treścią.
         const previousDb = this.db;
         const previousMtimes = this._mtimes;
         const previousDims = this.dims;
         const previousReady = this._ready;
+        const previousSegments = this._segments;
+        const previousRows = this._rows;
+        const previousPending = this._pending;
+        const previousMetaDirty = this._metaDirty;
+        // Lista segmentów SPRZED rebuildu — po udanym pierwszym zapisie meta poniżej stają się
+        // sierotami (D3: nowy rebuild pisze od zera pod NOWYMI numerami), sprzątamy je od razu
+        // zamiast czekać do następnego udanego restore.
+        const segmentsBeforeRebuild = this._segments.map(s => ({ ...s }));
         this._ready = false;
         this._queue.clear();
         this._mtimes = new Map();
         this.db = null;
+        this._bumpGen();
         try {
             this.modelKey = this._safeModelKey();
             this.status = 'building';
@@ -431,12 +608,31 @@ export class VaultIndexer {
             this._ready = true;
             await this._flushQueue();
             this.logger.info('VaultIndexer', `rebuild ready — ${this._mtimes.size} plików`);
+
+            // Best-effort, tylko gdy meta faktycznie odzwierciedla nowy stan (`!_metaDirty` =
+            // ostatni zapis meta się udał I nic nie mutowało `_pending`/`_mtimes`/`_rows` w oknie
+            // jego `await` - patrz `_writeMetaTracked`). Inaczej te segmenty zostają sierotami
+            // do najbliższego udanego restore (`_cleanupOrphanSegments`), zamiast ryzykować
+            // skasowanie czegoś, na co nowa meta jeszcze nie zdążyła przestać wskazywać.
+            if (!this._metaDirty) {
+                const stillKnown = new Set(this._segments.map(s => s.file));
+                for (const seg of segmentsBeforeRebuild) {
+                    if (stillKnown.has(seg.file)) continue;
+                    try { await this.vault.adapter.remove?.(this._segmentPath(seg.file)); }
+                    catch (e) { this.logger.warn('VaultIndexer', `sprzątanie starego segmentu ${seg.file} po rebuildzie padło: ${msg(e)}`); }
+                }
+            }
         } catch (e) {
             // Rebuild padł: przywróć CAŁY stan sprzed próby (db był opublikowany), zgłoś error.
             this.db = previousDb;
             this._mtimes = previousMtimes;
             this.dims = previousDims;
             this._ready = previousReady;
+            this._segments = previousSegments;
+            this._rows = previousRows;
+            this._pending = previousPending;
+            this._metaDirty = previousMetaDirty;
+            this._bumpGen();
             this.status = 'error';
             this.lastError = (e as ErrLike)?.message || String(e);
             this.logger.error('VaultIndexer', 'rebuild failed:', e);
@@ -444,8 +640,14 @@ export class VaultIndexer {
         return this.getStatus();
     }
 
-    /** Wyczyść timery (wołane automatycznie przy unload przez plugin.register). */
+    /**
+     * Wyczyść timery (wołane automatycznie przy unload przez plugin.register). G6: uzbraja też
+     * `_disposed` - zapis W TOKU (jeśli jakiś trwa) kończy się normalnie, ale żaden `_scheduleFlush`/
+     * `_schedulePersist`/`_scheduleScanRetry` wywołany PO tej chwili (np. przez flush, który
+     * dokańcza embedding już PO unloadzie) nie uzbroi nowego timera.
+     */
     dispose(): void {
+        this._disposed = true;
         if (this._debounceTimer) { _nodeSafeClearTimeout(this._debounceTimer); this._debounceTimer = null; }
         if (this._persistTimer) { _nodeSafeClearTimeout(this._persistTimer); this._persistTimer = null; }
         if (this._scanRetryTimer) { _nodeSafeClearTimeout(this._scanRetryTimer); this._scanRetryTimer = null; }
@@ -513,6 +715,7 @@ export class VaultIndexer {
      * dokładnie to, przed czym backoff ma chronić.
      */
     _scheduleFlush(delayMs?: number): void {
+        if (this._disposed) return; // G6: unload już poszedł - nic nowego nie startuje
         let delay = delayMs ?? this.debounceMs;
         if (delayMs === undefined && this._flushRetryAt !== null) {
             const left = this._flushRetryAt - this.now();
@@ -542,6 +745,7 @@ export class VaultIndexer {
         const entries = [...this._queue.entries()];
         this._queue.clear();
         let failed = false;
+        let dimsRebuild = false;
         try {
             const upserts: string[] = [];
             for (const [path, action] of entries) {
@@ -557,19 +761,30 @@ export class VaultIndexer {
             this.lastError = null;
             this._schedulePersist();
         } catch (e) {
-            // Embed API padło w trakcie kolejki. Porcja NIE dostała
-            // stempla mtime (patrz `_embedMetas`), więc wraca do kolejki i pójdzie ponownie.
-            // Bez tego `_queue.clear()` wyżej gubiłby te ścieżki bezpowrotnie: pliki znikałyby
-            // z indeksu (remove-then-insert) i nie wracały aż do pełnego reindeksu.
-            failed = true;
-            this._flushFailures++;
-            this.lastError = (e as ErrLike)?.message || String(e);
-            for (const [path, action] of entries) {
-                if (!this._queue.has(path)) this._queue.set(path, action);
+            if (e instanceof DimsRebuildTriggered) {
+                // Wymiar wektora zmienił się NA ŻYWO (D6) - `rebuild()` niżej zreembeduje
+                // wszystko od nowa, więc te wpisy NIE wracają do kolejki (to nie jest awaria).
+                dimsRebuild = true;
+            } else {
+                // Embed API padło w trakcie kolejki. Porcja NIE dostała
+                // stempla mtime (patrz `_embedMetas`), więc wraca do kolejki i pójdzie ponownie.
+                // Bez tego `_queue.clear()` wyżej gubiłby te ścieżki bezpowrotnie: pliki znikałyby
+                // z indeksu (remove-then-insert) i nie wracały aż do pełnego reindeksu.
+                failed = true;
+                this._flushFailures++;
+                this.lastError = msg(e);
+                for (const [path, action] of entries) {
+                    if (!this._queue.has(path)) this._queue.set(path, action);
+                }
+                this.logger.warn('VaultIndexer', `flush failed (${this._flushFailures}) — ${entries.length} zmian wraca do kolejki: ${this.lastError}`);
             }
-            this.logger.warn('VaultIndexer', `flush failed (${this._flushFailures}) — ${entries.length} zmian wraca do kolejki: ${this.lastError}`);
         } finally {
             this._processing = false;
+        }
+        if (dimsRebuild) {
+            await this.rebuild();
+            this._dimsRebuildPending = false;
+            return;
         }
         if (this._queue.size > 0) {
             // Pad → ponawiaj z rosnącym odstępem (nie młóć API co 2 s przy trwałej awarii).
@@ -583,6 +798,20 @@ export class VaultIndexer {
         const files = this._listVaultMarkdown();
         this.progress = { indexed: 0, total: files.length };
         this._mtimes = new Map();
+        // Ponowienie po padzie W POŁOWIE poprzedniego skanu (bug zastany na main, poza zakresem
+        // recenzji, naprawiony przy okazji - F4.10): `this.db` mógł zostać częściowo zapełniony
+        // przed rzutem (embed padł w środku porcji), a `initialize()`'s catch NIE zeruje `db`.
+        // Bez tego resetu drugi `_fullScan()` insertowałby do TEJ SAMEJ, częściowej bazy i dostawał
+        // "A document with id ... already exists" w nieskończoność zamiast policzyć wszystko od zera.
+        this.db = null;
+        // Pełny skan re-embeduje WSZYSTKO od zera — format v2 zaczyna też od zera:
+        // stare segmenty/wiersze/oczekujące wektory tego indeksera nie mają tu żadnej roli
+        // (sieroty na dysku sprząta najbliższy udany restore, D3).
+        this._segments = [];
+        this._rows = new Map();
+        this._pending = new Map();
+        this._metaDirty = false;
+        this._bumpGen();
         let dims = this._normalizeDims(this._safeDims());
 
         for (let i = 0; i < files.length; i += this.batchSize) {
@@ -603,22 +832,58 @@ export class VaultIndexer {
                 }
             }
             if (this.db) {
-                for (let j = 0; j < batch.length; j++) await this._insertOne(batch[j], vectors[j]);
+                // `mode: 'scan'` — rozjazd wymiaru WEWNĄTRZ tego samego skanu jest anomalią
+                // dostawcy, nie powodem do pełnego rebuildu (D6): plik jest po prostu pomijany.
+                for (let j = 0; j < batch.length; j++) await this._insertOne(batch[j], vectors[j], 'scan');
             } else {
                 // dims wciąż nieznane (cała porcja pusta) — zapamiętaj mtimes, pomiń insert.
                 // Pominięte pliki NIE dostają stempla: mają wrócić.
                 for (let j = 0; j < batch.length; j++) {
-                    if (vectors[j] !== EMBED_SKIPPED) this._mtimes.set(batch[j].path, batch[j].mtime);
+                    if (vectors[j] !== EMBED_SKIPPED) {
+                        this._mtimes.set(batch[j].path, batch[j].mtime);
+                        this._metaDirty = true;
+                        this._bumpGen();
+                    }
                 }
             }
             await this._yield();
         }
 
+        // G3: `files.length > 0` a `_mtimes` jest PUSTA znaczy, że dosłownie KAŻDY plik skończył
+        // jako `EMBED_SKIPPED` (trwała awaria API na całej porcji, np. zły klucz/model po stronie
+        // usera) - to NIE jest "pusty indeks", to PADŁY skan bez ani jednego wyniku. Sprawdzane
+        // NIEZALEŻNIE od tego, czy `this.db` już powstał: dostawca, który DEKLARUJE `dims` z góry
+        // (`getDims()` zwraca stałą, np. 1024 dla OpenAI), zakłada pustą, ale prawidłową bazę
+        // WCZEŚNIEJ w pętli - `!this.db` sam w sobie nie jest tu wiarygodnym sygnałem "nic nie
+        // wyszło". (Odróżnij od legalnie pustego vaulta - `files.length === 0` - i od vaulta samych
+        // pustych notatek - te DOSTAJĄ mtime przez `_insertOne`'s gałąź pustego pliku, więc
+        // `_mtimes.size` tam nie jest zerowe.) Rzucamy zamiast cicho commitować pusty indeks:
+        // wołacz (`rebuild()`) ma już gotowy `catch`, który przywraca CAŁY poprzedni stan
+        // (db/mtimes/dims/rows/segments/pending) i NIGDY nie dochodzi do sprzątania starych
+        // segmentów - żywy indeks nie może zniknąć tylko dlatego, że dostawca akurat odrzucił
+        // WSZYSTKO. `initialize()` (pierwszy bieg, bez stanu do przywrócenia) kończy status='error'
+        // BEZ automatycznego ponowienia (H1, runda naprawcza 3 - patrz `FullScanNoResultsError`) -
+        // to trwała awaria konfiguracji, nie coś, co minie samo po chwili.
+        if (files.length > 0 && this._mtimes.size === 0) {
+            throw new FullScanNoResultsError(`pełny skan nie zaindeksował ani jednego pliku (${files.length} plików pominiętych trwale)`);
+        }
         if (!this.db) {
-            // pusty vault albo zero embeddingów — utwórz pusty indeks z deklarowanym/domyślnym dims
+            // pusty vault albo same puste notatki — utwórz pusty indeks z deklarowanym/domyślnym dims
             this.dims = dims || DEFAULT_VECTOR_DIM;
             this.db = await createEmbeddingDb(this._schema(this.dims));
         }
+        // H2 (runda naprawcza 3): meta MUSI odzwierciedlać wynik TEGO skanu, nawet gdy nic nie
+        // trafiło do `_pending`/`_rows` (vault bez notatek, albo wszystkie w NoGo) - inaczej
+        // `_persistNowInner` uznałby zapis za zbędny (`_pending` puste, nic "dirty") i zostawiłby na
+        // dysku STARĄ metę, wciąż wskazującą segmenty sprzed tego skanu. `rebuild()`'s kod
+        // sprzątający stare segmenty (patrz niżej, `if (!this._metaDirty)`) uznałby wtedy - błędnie -
+        // że zapis "się udał" (bo nigdy nie było go czym oflagować jako nieudany) i skasowałby
+        // segmenty, na które STARA meta na dysku dalej wskazuje: `vault-index.meta.json` sierotą
+        // wobec nieistniejących plików, `index_corrupt` przy KAŻDYM kolejnym starcie. Wymuszenie tu
+        // gwarantuje: albo świeża (możliwie pusta) meta trafia na dysk PRZED czyszczeniem starych
+        // segmentów w `rebuild()`, albo zapis pada i `_metaDirty` zostaje `true` - `rebuild()` wtedy
+        // NIE kasuje niczego (ten sam mechanizm, którym G3 chroni przypadek "wszystko odrzucone").
+        this._metaDirty = true;
         await this._persistNow();
     }
 
@@ -644,17 +909,35 @@ export class VaultIndexer {
             try {
                 await this._indexMetas(toUpsert);
             } catch (e) {
-                // Pad odświeżania NIE MOŻE zabrać odzyskanego indeksu. Zmienione pliki
-                // wracają do kolejki i idą tym samym mechanizmem ponowień co flush; ich mtime
-                // nie został zestemplowany, więc przy następnym starcie i tak wrócą.
-                upserted = 0;
-                this._flushFailures++;
-                this.lastError = (e as ErrLike)?.message || String(e);
-                for (const f of toUpsert) {
-                    if (!this._queue.has(f.path)) this._queue.set(f.path, 'upsert');
+                if (e instanceof DimsRebuildTriggered) {
+                    // Wymiar wektora zmienił się od ostatniego bootu (D6) — pełny rebuild
+                    // zreembeduje wszystko od nowa, więc te pliki NIE wracają do kolejki.
+                    upserted = 0;
+                    this.logger.info('VaultIndexer', 'wymiar wektora zmienił się od ostatniego bootu — pełny rebuild');
+                    const rebuilt = await this.rebuild();
+                    this._dimsRebuildPending = false;
+                    if (rebuilt.status !== 'ready') {
+                        // F4.1: rebuild wywołany rozjazdem dims SAM padł (np. dostawca zgaszony
+                        // w trakcie). `rebuild()` już ustawił status='error'/lastError i przywrócił
+                        // poprzedni (stary, ale żywy) stan - `initialize()` sprawdza `this.status`
+                        // po powrocie z `_resync()` i NIE nadpisuje go na 'ready'. Tu tylko uzbrajamy
+                        // ponowienie całego skanu, dokładnie jak przy padzie skanu w ogóle.
+                        this._scheduleScanRetry();
+                        return;
+                    }
+                } else {
+                    // Pad odświeżania NIE MOŻE zabrać odzyskanego indeksu. Zmienione pliki
+                    // wracają do kolejki i idą tym samym mechanizmem ponowień co flush; ich mtime
+                    // nie został zestemplowany, więc przy następnym starcie i tak wrócą.
+                    upserted = 0;
+                    this._flushFailures++;
+                    this.lastError = msg(e);
+                    for (const f of toUpsert) {
+                        if (!this._queue.has(f.path)) this._queue.set(f.path, 'upsert');
+                    }
+                    this.logger.warn('VaultIndexer', `resync failed — ${toUpsert.length} plików do kolejki: ${this.lastError}`);
+                    this._scheduleFlush(this._flushRetryDelayMs(this._flushFailures));
                 }
-                this.logger.warn('VaultIndexer', `resync failed — ${toUpsert.length} plików do kolejki: ${this.lastError}`);
-                this._scheduleFlush(this._flushRetryDelayMs(this._flushFailures));
             }
         }
         if (upserted || toDelete.length) await this._persistNow();
@@ -675,7 +958,14 @@ export class VaultIndexer {
         }
     }
 
-    async _insertOne(meta: FileMeta, vec: EmbedSlot): Promise<void> {
+    /**
+     * @param mode `'scan'` (wewnątrz `_fullScan`, dims dopiero się ustala w TYM biegu — rozjazd
+     *   z już ustalonym `this.dims` to anomalia dostawcy, plik jest po prostu pomijany) albo
+     *   `'live'` (domyślny; `_indexMetas` z `_resync`/`_flushQueue` na indeksie, który już ma
+     *   ustalone `this.dims` z poprzedniej sesji — rozjazd tu znaczy, że model/wymiar zmienił
+     *   się NA ŻYWO, D6: notify + rzut `DimsRebuildTriggered`, wołacz uzbraja `rebuild()`).
+     */
+    async _insertOne(meta: FileMeta, vec: EmbedSlot, mode: 'scan' | 'live' = 'live'): Promise<void> {
         if (!this.db) return;
         if (vec === EMBED_SKIPPED) {
             // Plik trwale odrzucany przez API. BEZ stempla mtime - wróci przy następnym
@@ -683,16 +973,32 @@ export class VaultIndexer {
             return;
         }
         if (Array.isArray(vec) && vec.length) {
-            // insertVectorLean: wektor zostaje TYLKO w `index.vectorIndexes`.
+            if (this.dims != null && vec.length !== this.dims) {
+                if (mode === 'scan' || this._dimsRebuildPending) {
+                    this.logger.warn('VaultIndexer', `${meta.path}: wektor ${vec.length}D w skanie z ustalonym wymiarem ${this.dims}D — pomijam plik`);
+                    return;
+                }
+                this._dimsRebuildPending = true;
+                this._notify({ kind: 'dims_changed', from: this.dims, to: vec.length });
+                throw new DimsRebuildTriggered(`wymiar wektora zmienił się (${this.dims} → ${vec.length})`);
+            }
+            // insertVectorLean: wektor zostaje TYLKO w `index.vectorIndexes` (żywa Orama, D1).
             await insertVectorLean(this.db, this._makeDoc(meta, vec));
+            // Trwałość v2: wiersz oczekujący na najbliższy `_persistNow()` (D2/D3) — Orama
+            // sama w sobie nie jest tu źródłem prawdy o tym, co jest na dysku.
+            this._pending.set(meta.path, Float32Array.from(vec));
             this._mtimes.set(meta.path, meta.mtime);
+            this._metaDirty = true;
+            this._bumpGen();
             this.progress.indexed = this._mtimes.size;
         } else {
             // PUSTY PLIK (i tylko pusty): brak wektora dla treści, której nie ma. Awaria
             // providera nigdy tu nie dociera - kontrakt błędu wymaga, żeby `_embedMetas` RZUCAŁO
             // zamiast oddawać nulle, więc mtime nie jest stemplowany i porcja wraca do kolejki
-            // / kończy skan błędem.
+            // / kończy skan błędem. D8: stempel jest, wiersza (wektora) nie ma.
             this._mtimes.set(meta.path, meta.mtime);
+            this._metaDirty = true;
+            this._bumpGen();
         }
     }
 
@@ -700,7 +1006,15 @@ export class VaultIndexer {
         if (this.db) {
             try { await removeVector(this.db, path); } catch { /* not present */ }
         }
-        if (!keepMtime) this._mtimes.delete(path);
+        if (!keepMtime) {
+            if (this._mtimes.delete(path)) this._metaDirty = true;
+        }
+        // Wiersz (jeśli był) staje się martwy/zastąpiony - w obu przypadkach usunięcie z `_rows`
+        // jest poprawne: albo notatka naprawdę znika (usunięcie), albo za chwilę dostanie NOWY
+        // wpis z `_pending` przy najbliższym `_persistNow()` (upsert, `keepMtime=true`).
+        if (this._rows.delete(path)) this._metaDirty = true;
+        this._pending.delete(path);
+        this._bumpGen();
     }
 
     /** Czyta treść porcji plików (pierwsze `MAX_EMBED_CHARS` znaków każdego). */
@@ -829,68 +1143,560 @@ export class VaultIndexer {
         };
     }
 
-    // ─────────────────────────── Persystencja ───────────────────────────
+    // ─────────────────────────── Persystencja (format v2) ───────────────────────────
+    //
+    // Trwałość jest własnością `VaultIndexer`, nie Oramy (D2): na dysku nie ma nic pochodnego,
+    // BM25/docs-store/sorting są odtwarzane w pamięci z trójek (path, mtime, wektor). Segmenty
+    // są NIEZMIENNE (D3): zapis przyrostowy = nowy segment, meta jest PUNKTEM COMMITU — kolejność
+    // zapisu jest zawsze segment → meta, nigdy odwrotnie.
 
-    _dbPath(): string { return `${this.indexDir}/vault-index.json`; }
+    _legacyDbPath(): string { return `${this.indexDir}/vault-index.json`; }
     _metaPath(): string { return `${this.indexDir}/vault-index.meta.json`; }
+    _segmentPath(file: string): string { return `${this.indexDir}/${file}`; }
 
     async _tryRestore(): Promise<boolean> {
-        const [metaExists, dbExists] = await Promise.all([
-            this._exists(this._metaPath()),
-            this._exists(this._dbPath()),
-        ]);
-        if (!metaExists || !dbExists) return false;
+        if (!(await this._exists(this._metaPath()))) {
+            this._nextSeq = await this._resolveNextSeqOnFallback(null);
+            return false;
+        }
 
-        let meta: IndexMeta | undefined;
-        try { meta = JSON.parse(await this.vault.adapter.read(this._metaPath())) as IndexMeta; }
-        catch { return false; }
-        if (!meta || meta.version !== INDEX_VERSION) return false;
-        if (meta.model_key !== this.modelKey) {
-            this.logger.info('VaultIndexer', `model zmieniony (${meta.model_key} → ${this.modelKey}) — pełny rebuild`);
+        let metaText: string;
+        let raw: unknown;
+        try {
+            metaText = await this.vault.adapter.read(this._metaPath());
+            raw = JSON.parse(metaText);
+        } catch (e) {
+            // F4.4: meta nieczytelna (I/O albo JSON.parse) NIE jest cichym `false` - user musi
+            // wiedzieć, że indeks wraca do pełnego rebuildu.
+            this.logger.warn('VaultIndexer', `vault-index.meta.json nieczytelna: ${msg(e)} — pełny rebuild`);
+            this._notify({ kind: 'index_corrupt' });
+            this._nextSeq = await this._resolveNextSeqOnFallback(null);
+            return false;
+        }
+
+        const v2 = parseIndexMetaV2(raw);
+        if (v2) {
+            const ok = await this._restoreFromV2(v2);
+            // F2: restore v2 pada z RÓŻNYCH powodów (model/dims/segment uszkodzony) już PO tym,
+            // jak `next_seq` z meta jest znany - użyj go jako dolnej granicy zamiast zerować się
+            // do domyślnego `1` (co pozwoliłoby kolejnemu zapisowi NADPISAĆ segment, na który ta
+            // sama (nieużyta jeszcze) meta nadal formalnie mogłaby wskazywać).
+            if (!ok) this._nextSeq = await this._resolveNextSeqOnFallback(v2.next_seq);
+            return ok;
+        }
+
+        const v1 = parseIndexMetaV1(raw);
+        if (v1) {
+            const ok = await this._migrateV1(v1, metaText);
+            if (!ok) this._nextSeq = await this._resolveNextSeqOnFallback(null);
+            return ok;
+        }
+
+        this.logger.warn('VaultIndexer', 'vault-index.meta.json nieczytelna — pełny rebuild');
+        this._notify({ kind: 'index_corrupt' });
+        this._nextSeq = await this._resolveNextSeqOnFallback(null);
+        return false;
+    }
+
+    /**
+     * F2: ustala `_nextSeq` po nieudanym/częściowym restore tak, żeby ŻADEN kolejny zapis nie
+     * nadpisał segmentu, który realnie leży na dysku - nawet gdy meta jest nieczytelna/niespójna
+     * i jedynym śladem są nazwy plików (`adapter.list()`). `metaNextSeq` to `next_seq` z meta,
+     * jeśli udało się ją sparsować mimo że restore i tak padł (np. `model_changed`); `null` gdy
+     * meta nie istnieje/jest nieczytelna/to v1.
+     */
+    private async _resolveNextSeqOnFallback(metaNextSeq: number | null): Promise<number> {
+        let maxSeq = metaNextSeq !== null ? metaNextSeq - 1 : 0;
+        if (this.vault.adapter.list) {
+            try {
+                const listing = await this.vault.adapter.list(this.indexDir);
+                const fromDisk = maxSegmentSeq(listing.files || []);
+                if (fromDisk > maxSeq) maxSeq = fromDisk;
+            } catch { /* best effort — brak listingu nie może zablokować startu */ }
+        }
+        return maxSeq + 1;
+    }
+
+    /** Odtwarza `db`/`_mtimes`/`_rows`/`_segments`/`_nextSeq` z meta v2 + segmentów binarnych. */
+    private async _restoreFromV2(meta: IndexMetaV2): Promise<boolean> {
+        const wantedModelKey = this.modelKey || '';
+        if (meta.model_key !== wantedModelKey) {
+            this.logger.info('VaultIndexer', `model zmieniony (${meta.model_key} → ${wantedModelKey}) — pełny rebuild`);
+            this._notify({ kind: 'model_changed', from: meta.model_key || null, to: wantedModelKey });
             return false;
         }
         const dims = this._normalizeDims(meta.dims);
         if (!dims) return false;
 
-        try {
-            this.db = await restore((p) => this.vault.adapter.read(p), this._dbPath(), this._schema(dims));
-        } catch (e) {
-            this.logger.warn('VaultIndexer', `restore db failed: ${((e as ErrLike)?.message || e) as string}`);
-            return false;
+        const segCache = new Map<number, ReturnType<typeof decodeSegment>>();
+        for (let i = 0; i < meta.segments.length; i++) {
+            const seg = meta.segments[i];
+            let buf: ArrayBuffer;
+            try {
+                buf = await this.vault.adapter.readBinary(this._segmentPath(seg.file));
+            } catch (e) {
+                this.logger.warn('VaultIndexer', `odczyt segmentu ${seg.file} padł: ${msg(e)}`);
+                this._notify({ kind: 'index_corrupt' });
+                return false;
+            }
+            const decoded = decodeSegment(buf, dims);
+            if (!decoded || decoded.rows !== seg.rows) {
+                this.logger.warn('VaultIndexer', `segment ${seg.file} uszkodzony — pełny rebuild`);
+                this._notify({ kind: 'index_corrupt' });
+                return false;
+            }
+            segCache.set(i, decoded);
         }
+
+        const db = await createEmbeddingDb(this._schema(dims));
+        for (const [path, [segIdx, rowIdx]] of Object.entries(meta.rows)) {
+            const seg = segCache.get(segIdx);
+            const mtime = meta.mtimes[path];
+            if (!seg || mtime === undefined) {
+                // Nie powinno się zdarzyć po `parseIndexMetaV2` (spójność już zweryfikowana),
+                // ale segment mógł zniknąć MIĘDZY parsowaniem meta a odczytem z dysku.
+                this.logger.warn('VaultIndexer', `wiersz ${path} bez segmentu/mtime — pełny rebuild`);
+                this._notify({ kind: 'index_corrupt' });
+                return false;
+            }
+            await insertVectorLean(db, this._makeDoc({ path, mtime }, Array.from(seg.at(rowIdx))));
+        }
+
+        this.db = db;
         this.dims = dims;
-        // Plik zapisany starszą wersją pluginu niesie kopie wektorów
-        // w dokumentach. Zerujemy je od razu, żeby pierwszy zapis po restarcie nie utrwalił
-        // dubla; stary (gruby) plik wczytuje się bez zmian i chudnie przy najbliższym zapisie.
-        const stripped = stripStoredVectors(this.db);
-        if (stripped) this.logger.debug('VaultIndexer', `restore: zdjęto ${stripped} kopii wektorów z docs-store`);
-        this._mtimes = new Map(Object.entries(meta.mtimes || {}));
+        this._mtimes = new Map(Object.entries(meta.mtimes));
+        this._rows = new Map(Object.entries(meta.rows));
+        this._segments = meta.segments.map(s => ({ ...s }));
+        this._nextSeq = meta.next_seq;
+        this._pending = new Map();
+        this._metaDirty = false;
+        this._bumpGen();
+
+        await this._cleanupOrphanSegments();
         return true;
     }
 
-    async _persistNow(): Promise<void> {
-        if (!this.db) return;
+    /**
+     * Migracja v1 → v2 z pancerzem (D5): stary `vault-index.json` NIE jest kasowany, dopóki
+     * nowe pliki nie są zapisane I ODCZYTANE z powrotem z sukcesem. Każdy pad kończy się
+     * `notify('migration_failed')` i pełnym rebuildem — stary plik zostaje nietknięty.
+     *
+     * @param metaV1Text surowy tekst `vault-index.meta.json` PRZED migracją (F4.3) — jeśli
+     *   cokolwiek pada PO nadpisaniu meta v2 (dziś: weryfikacja odczytu), przywracamy go na
+     *   dysk best-effort, żeby migracja mogła się powtórzyć przy następnym starcie zamiast
+     *   zastać na dysku na wpół zapisaną meta v2 obok nietkniętego pliku v1.
+     */
+    private async _migrateV1(metaV1: IndexMetaV1, metaV1Text: string): Promise<boolean> {
+        const wantedModelKey = this.modelKey || '';
+        if (metaV1.model_key !== wantedModelKey) {
+            this.logger.info('VaultIndexer', `model zmieniony w v1 (${metaV1.model_key} → ${wantedModelKey}) — pełny rebuild`);
+            this._notify({ kind: 'model_changed', from: metaV1.model_key, to: wantedModelKey });
+            return false;
+        }
+        const dims = this._normalizeDims(metaV1.dims);
+        if (!dims) return false;
+
+        const v1Path = this._legacyDbPath();
+        if (!(await this._exists(v1Path))) return false;
+
+        let text: string;
+        let raw: unknown;
         try {
-            await this._ensureDir();
-            await persist(this.db, (p, json) => this.vault.adapter.write(p, json), this._dbPath());
-            const meta: IndexMeta = {
-                version: INDEX_VERSION,
-                model_key: this.modelKey,
-                dims: this.dims,
-                updated_at: this.now(),
-                mtimes: Object.fromEntries(this._mtimes),
-            };
+            text = await this.vault.adapter.read(v1Path);
+            raw = JSON.parse(text);
+        } catch (e) {
+            this._migrationFailed('v1_unreadable', msg(e));
+            return false;
+        }
+
+        const extracted = extractV1Vectors(raw);
+        if (!extracted) {
+            this._migrationFailed('v1_malformed');
+            return false;
+        }
+        if (extracted.dims !== dims) {
+            this._migrationFailed('dims_mismatch');
+            return false;
+        }
+
+        let db: AnyOrama;
+        try {
+            db = await createEmbeddingDb(this._schema(dims));
+            for (const doc of extracted.docs) {
+                await insertVectorLean(db, this._makeDoc({ path: doc.path, mtime: doc.mtime }, doc.vector));
+            }
+        } catch (e) {
+            this._migrationFailed('v1_malformed', msg(e));
+            return false;
+        }
+
+        const sorted = [...extracted.docs].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+        const buf = encodeSegment(sorted.map(d => Float32Array.from(d.vector)), dims);
+        // F2: retry po częściowo nieudanej migracji nie może reużyć numeru segmentu, który
+        // poprzednia próba zdążyła zapisać na dysk (orphan) - `_nextSeq` jest ustalane z
+        // dysku, nigdy z zaszytej stałej `1`.
+        this._nextSeq = await this._resolveNextSeqOnFallback(null);
+        const segName = segmentFileName(this._nextSeq);
+        const nextSeqAfter = this._nextSeq + 1;
+
+        await this._ensureDir();
+        try {
+            await this.vault.adapter.writeBinary(this._segmentPath(segName), buf);
+        } catch (e) {
+            this._migrationFailed('segment_write', msg(e));
+            return false;
+        }
+
+        const rows: Record<string, RowRef> = {};
+        sorted.forEach((d, i) => { rows[d.path] = [0, i]; });
+        // F4.3: dokument z wektorem, którego ścieżki NIE MA w mtimes v1 (niespójność sprzed tej
+        // naprawy - "duch" w dumpie Oramy bez odpowiednika w sidecarze), dostaje mtime z SAMEGO
+        // dokumentu zamiast zniknąć z `mtimes` - inaczej `rows` bez `mtimes` odrzuciłby tę samą
+        // meta jako `index_corrupt` przy najbliższym restarcie (parseIndexMetaV2, F2.4).
+        const mtimes: Record<string, number> = { ...metaV1.mtimes };
+        for (const d of sorted) if (!(d.path in mtimes)) mtimes[d.path] = d.mtime;
+        const meta: IndexMetaV2 = {
+            version: 2,
+            model_key: wantedModelKey,
+            dims,
+            updated_at: this.now(),
+            next_seq: nextSeqAfter,
+            segments: [{ file: segName, rows: sorted.length }],
+            mtimes,
+            rows,
+        };
+        try {
             await this.vault.adapter.write(this._metaPath(), JSON.stringify(meta));
         } catch (e) {
-            this.logger.warn('VaultIndexer', `persist failed: ${((e as ErrLike)?.message || e) as string}`);
+            // G4 (round 2): pad TEGO zapisu może być połowiczny (dysk pełny w połowie stringa) -
+            // na dysku może leżeć ucięty/nieprawidłowy JSON zamiast tekstu v1. Przywracamy v1
+            // best-effort (jak przy padzie weryfikacji niżej), żeby migracja mogła się powtórzyć
+            // od zera przy następnym starcie zamiast zastać śmieci obok nietkniętego pliku v1.
+            try { await this.vault.adapter.write(this._metaPath(), metaV1Text); }
+            catch (e2) { this.logger.warn('VaultIndexer', `przywrócenie meta v1 po nieudanym zapisie v2 padło: ${msg(e2)}`); }
+            this._migrationFailed('meta_write', msg(e));
+            return false;
+        }
+
+        if (!(await this._verifyMigration(segName, dims, sorted))) {
+            // Meta v2 jest już na dysku, ale nie przeszła odczytu zwrotnego - przywracamy tekst
+            // v1 (best effort), żeby migracja mogła się powtórzyć od zera przy następnym starcie
+            // zamiast zastać niespójną meta obok wciąż nietkniętego pliku v1.
+            try { await this.vault.adapter.write(this._metaPath(), metaV1Text); }
+            catch (e) { this.logger.warn('VaultIndexer', `przywrócenie meta v1 po nieudanej weryfikacji padło: ${msg(e)}`); }
+            this._migrationFailed('verify_failed');
+            return false;
+        }
+
+        // Sukces potwierdzony odczytem — dopiero teraz stary plik przestaje być potrzebny.
+        try { await this.vault.adapter.remove?.(v1Path); }
+        catch (e) { this.logger.warn('VaultIndexer', `usunięcie starego pliku v1 padło (migracja i tak udana): ${msg(e)}`); }
+
+        this.db = db;
+        this.dims = dims;
+        this._mtimes = new Map(Object.entries(meta.mtimes));
+        this._rows = new Map(Object.entries(rows));
+        this._segments = meta.segments.map(s => ({ ...s }));
+        this._nextSeq = meta.next_seq;
+        this._pending = new Map();
+        this._metaDirty = false;
+        this._bumpGen();
+
+        const toBytes = buf.byteLength + JSON.stringify(meta).length;
+        this._notify({ kind: 'migrated', fromBytes: text.length, toBytes });
+        this.logger.info('VaultIndexer', `migracja v1→v2: ${text.length} B → ${toBytes} B, ${sorted.length} wektorów`);
+        return true;
+    }
+
+    /** Krok 6 migracji: odczytaj z powrotem to, co właśnie zapisano, i porównaj z żywym stanem. */
+    private async _verifyMigration(
+        segName: string,
+        dims: number,
+        sorted: Array<{ path: string; mtime: number; vector: number[] }>,
+    ): Promise<boolean> {
+        let buf: ArrayBuffer;
+        try { buf = await this.vault.adapter.readBinary(this._segmentPath(segName)); }
+        catch { return false; }
+        const decoded = decodeSegment(buf, dims);
+        if (!decoded || decoded.rows !== sorted.length) return false;
+
+        const checkIdx = new Set([0, Math.floor(sorted.length / 2), sorted.length - 1].filter(i => i >= 0 && i < sorted.length));
+        for (const i of checkIdx) {
+            const row = decoded.at(i);
+            const expected = sorted[i].vector;
+            for (let d = 0; d < dims; d++) {
+                if (row[d] !== Math.fround(expected[d] ?? 0)) return false;
+            }
+        }
+
+        let rawMeta: unknown;
+        try { rawMeta = JSON.parse(await this.vault.adapter.read(this._metaPath())); }
+        catch { return false; }
+        const parsed = parseIndexMetaV2(rawMeta);
+        if (!parsed) return false;
+        return Object.keys(parsed.rows).length === sorted.length;
+    }
+
+    private _migrationFailed(reason: MigrationFailReason, detail?: string): void {
+        this.logger.warn('VaultIndexer', `migracja v1→v2 nieudana: ${reason}${detail ? ` (${detail})` : ''} — pełny rebuild`);
+        this._notify({ kind: 'migration_failed', reason, detail });
+    }
+
+    /** Segmenty na dysku spoza `_segments` znane (sierota po przerwanym persist, D3). */
+    private async _cleanupOrphanSegments(): Promise<void> {
+        if (!this.vault.adapter.list) return;
+        let listing: { files: string[]; folders: string[] };
+        try { listing = await this.vault.adapter.list(this.indexDir); }
+        catch { return; }
+        const known = new Set(this._segments.map(s => s.file));
+        for (const filePath of listing.files || []) {
+            const norm = String(filePath).replace(/\\/g, '/');
+            const base = norm.split('/').pop() || norm;
+            if (!isSegmentFileName(base) || known.has(base)) continue;
+            // F4.5: kasuj ZAWSZE `${indexDir}/${base}`, niezależnie od tego, czy `list()` oddał
+            // pełną ścieżkę czy gołą nazwę - `remove(norm)` z gołą nazwą próbowałby skasować
+            // plik w ROOCIE vaulta (błędna ścieżka), nie w katalogu indeksu.
+            const target = this._segmentPath(base);
+            try { await this.vault.adapter.remove?.(target); }
+            catch (e) { this.logger.warn('VaultIndexer', `sprzątanie sieroty ${target} padło: ${msg(e)}`); }
         }
     }
 
+    /** Balast po udanej migracji/rebuildzie — usuwany best-effort, nigdy blokująco. */
+    private async _cleanupLegacyV1IfPresent(): Promise<void> {
+        const path = this._legacyDbPath();
+        if (!(await this._exists(path))) return;
+        try { await this.vault.adapter.remove?.(path); }
+        catch (e) { this.logger.warn('VaultIndexer', `usunięcie starego pliku v1 padło: ${msg(e)}`); }
+    }
+
+    /**
+     * `mtimes`/`rows` POMIJAJĄ każdą ścieżkę aktualnie w `_pending` (F1.4): jej wektor NIE jest
+     * jeszcze na dysku (persist trwa gdzie indziej / dopiero się zaplanuje), więc meta pisana
+     * TERAZ nie może udawać, że go ma. Skutek pominięcia mtime jest ZAMIERZONY i bezpieczny:
+     * `_resync` po restarcie zobaczy `prev===undefined` dla tej ścieżki i po prostu ją
+     * re-embeduje - to tańsze niż ryzyko `rows` bez odpowiadającego `mtimes` (parseIndexMetaV2
+     * odrzuciłoby taką meta jako `index_corrupt`, F2.4).
+     */
+    _buildMetaV2(): IndexMetaV2 {
+        const mtimes: Record<string, number> = {};
+        for (const [path, mtime] of this._mtimes) {
+            if (this._pending.has(path)) continue;
+            mtimes[path] = mtime;
+        }
+        const rows: Record<string, RowRef> = {};
+        for (const [path, ref] of this._rows) {
+            if (this._pending.has(path)) continue;
+            rows[path] = ref;
+        }
+        return {
+            version: 2,
+            model_key: this.modelKey || '',
+            dims: this.dims as number,
+            updated_at: this.now(),
+            next_seq: this._nextSeq,
+            segments: this._segments.map(s => ({ ...s })),
+            mtimes,
+            rows,
+        };
+    }
+
+    private async _writeMeta(): Promise<boolean> {
+        try {
+            await this.vault.adapter.write(this._metaPath(), JSON.stringify(this._buildMetaV2()));
+            return true;
+        } catch (e) {
+            this.logger.warn('VaultIndexer', `zapis meta padł: ${msg(e)}`);
+            return false;
+        }
+    }
+
+    /**
+     * Zapis meta + decyzja o `_metaDirty` (F1.4): `_buildMetaV2()` czyta stan SYNCHRONICZNIE
+     * (przed pierwszym `await` w `_writeMeta`), więc generacja sprzed wywołania jest dokładnie
+     * generacją w chwili budowy JSON-a. Jeśli po `await write()` generacja się ZMIENIŁA (coś
+     * zmutowało `_pending`/`_mtimes`/`_rows` w tym oknie - równoległy flush, delete, kompakcja
+     * gdzie indziej) ALBO `_pending` nie jest puste, meta na dysku może nie nieść najświeższego
+     * stanu - `_metaDirty` MUSI zostać `true`, żeby następny persist dogonił różnicę.
+     */
+    private async _writeMetaTracked(): Promise<boolean> {
+        const genBefore = this._gen;
+        const ok = await this._writeMeta();
+        if (!ok) return false; // meta zostaje "dirty" (niezmieniona) - segment (jeśli był) jest sierotą do następnego udanego persist
+        this._metaDirty = !(this._gen === genBefore && this._pending.size === 0);
+        return true;
+    }
+
+    /**
+     * Ścieżka zwykła (bez kompakcji): jeden NOWY segment z wierszami oczekującymi + meta.
+     *
+     * Migawka `_pending` (F1.3) - te same referencje `Float32Array` co w mapie live, nie kopie -
+     * jest wzięta PRZED `await writeBinary`, więc flush w oknie zapisu może dołożyć NOWSZY
+     * wektor pod tą samą ścieżką bez obawy o wyścig.
+     *
+     * G1 (round 2): `_rows` dostaje wiersz TYLKO dla ścieżek, których referencja w `_pending`
+     * WCIĄŻ jest DOKŁADNIE TĄ z migawki (`get(path) === vec`) - to jest jedyny wiarygodny sygnał,
+     * że NIC nie tknęło tej ścieżki w oknie `await`. Samo `_mtimes.has(path)` (stara wersja) NIE
+     * WYSTARCZA: notatka wyczyszczona w oknie (`modify` z pustą treścią) zostawia mtime (nowy, ze
+     * stempla pustego pliku), ale kasuje wpis z `_pending`/`_rows` - `_mtimes.has()` dalej zwraca
+     * `true`, więc stary kod dopisywał ŚWIEŻY numer wiersza wskazujący na STARY, martwy wektor,
+     * który wracał w wynikach semantycznych na zawsze. Referencja z `_pending` odróżnia to
+     * poprawnie: usunięcie/wyczyszczenie kasuje wpis (`get(path)` daje `undefined ≠ vec`), upsert
+     * z nowszym wektorem podmienia referencję (`get(path)` daje NOWY obiekt `≠ vec`) - w OBU
+     * przypadkach wiersz zostaje martwy od razu (nie trafia do `_rows`) zamiast dostać zapis, na
+     * który nie zasługuje; jeśli w `_pending` jest nowszy wektor, dowiezie go NASTĘPNY persist.
+     */
+    private async _persistNewSegment(): Promise<boolean> {
+        const snap = [...this._pending.entries()];
+        const buf = encodeSegment(snap.map(([, v]) => v), this.dims as number);
+        const name = segmentFileName(this._nextSeq);
+        try {
+            await this.vault.adapter.writeBinary(this._segmentPath(name), buf);
+        } catch (e) {
+            this.logger.warn('VaultIndexer', `zapis segmentu ${name} padł: ${msg(e)}`);
+            return false; // stan (_pending/_nextSeq) NIETKNIĘTY - następna próba nadpisze ten sam częściowy plik
+        }
+        const segIdx = this._segments.length;
+        this._segments.push({ file: name, rows: snap.length });
+        snap.forEach(([path, vec], i) => {
+            if (this._pending.get(path) !== vec) return; // coś zmieniło tę ścieżkę w oknie - wiersz martwy od razu
+            this._pending.delete(path);
+            this._rows.set(path, [segIdx, i]);
+            this._bumpGen();
+        });
+        this._nextSeq++;
+        return true;
+    }
+
+    /**
+     * Kompakcja (D4): czyta segmenty z dysku (cache per segment na czas wywołania) + wiersze
+     * oczekujące, pisze JEDEN nowy segment bazowy, potem meta, potem kasuje stare - w tej
+     * kolejności. Segment uszkodzony przy odczycie przerywa kompakcję (warn) i spada na
+     * ścieżkę zwykłą zamiast gubić dane.
+     *
+     * Migawki `_rows`/`_pending` (F1.5) wzięte PRZED pierwszym `await readBinary` - kompakcja
+     * może trwać przez wiele odczytów segmentów, a w tym oknie flush/delete gdzie indziej dalej
+     * mutuje mapy LIVE. Każdy wpis w `liveEntries` niesie swoje POCHODZENIE (`'row'` - z segmentu
+     * na dysku, `'pending'` - jeszcze tylko w pamięci), bo G1 (round 2) wymaga OSOBNEGO testu
+     * "czy coś tknęło tę ścieżkę w oknie" per pochodzenie: dla `'row'` to `this._rows.get(path)
+     * === rowsSnap.get(path)` (WCIĄŻ ta sama referencja krotki `[segIdx, rowIdx]` co w migawce -
+     * ani usunięcie, ani żaden późniejszy zapis jej nie zastąpiły), dla `'pending'` to
+     * `this._pending.get(path) === pendingSnap.get(path)` (ten sam wzorzec co w
+     * `_persistNewSegment`). Samo `_mtimes.has(path)` (stara wersja) NIE WYSTARCZA z tego samego
+     * powodu co w `_persistNewSegment`: notatka wyczyszczona w oknie zostawia mtime, ale nie
+     * zostawia ani żywego wiersza, ani żywego pending - `_mtimes.has()` i tak zwraca `true` i
+     * dopisywałby wiersz wskazujący na WŁAŚNIE ZAKODOWANY, martwy wektor. Wpis, który nie
+     * przechodzi testu, zostaje w PLIKU jako nieszkodliwy balast (dane już zakodowane), po prostu
+     * bez referencji w `_rows` - żadna dodatkowa praca I/O. Pending czyszczone jak w
+     * `_persistNewSegment` (referencja z migawki, nie cała mapa) - nowe wpisy dołożone w oknie
+     * kompakcji (spoza migawki) ZOSTAJĄ w `_pending` i pójdą do następnego segmentu delta.
+     */
+    private async _persistCompact(): Promise<void> {
+        const segCache = new Map<number, ReturnType<typeof decodeSegment>>();
+        const rowsSnap = new Map(this._rows);
+        const pendingSnap = new Map(this._pending);
+        const liveEntries: Array<[string, Float32Array, 'row' | 'pending']> = [];
+        try {
+            for (const [path, [segIdx, rowIdx]] of rowsSnap) {
+                if (pendingSnap.has(path)) continue; // pending wygrywa - świeższa wartość
+                let decoded = segCache.get(segIdx);
+                if (decoded === undefined) {
+                    const seg = this._segments[segIdx];
+                    const buf = await this.vault.adapter.readBinary(this._segmentPath(seg.file));
+                    decoded = decodeSegment(buf, this.dims as number);
+                    segCache.set(segIdx, decoded);
+                }
+                if (!decoded) throw new Error(`segment ${this._segments[segIdx]?.file ?? segIdx} uszkodzony`);
+                // Widok (subarray), bez dodatkowej kopii (F4.6) - `encodeSegment` niżej kopiuje
+                // wartości do bufora wyjściowego RAZ; podwójne kopiowanie byłoby zbędne.
+                liveEntries.push([path, decoded.at(rowIdx), 'row']);
+            }
+        } catch (e) {
+            this.logger.warn('VaultIndexer', `kompakcja przerwana (${msg(e)}) — zapis zwykły zamiast niej`);
+            if (!(await this._persistNewSegment())) return;
+            await this._writeMetaTracked();
+            await this._cleanupLegacyV1IfPresent();
+            return;
+        }
+        for (const [path, vec] of pendingSnap) liveEntries.push([path, vec, 'pending']);
+        liveEntries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+
+        const buf = encodeSegment(liveEntries.map(([, v]) => v), this.dims as number);
+        const name = segmentFileName(this._nextSeq);
+        try {
+            await this.vault.adapter.writeBinary(this._segmentPath(name), buf);
+        } catch (e) {
+            this.logger.warn('VaultIndexer', `zapis skompaktowanego segmentu padł: ${msg(e)}`);
+            return;
+        }
+        const oldSegments = this._segments;
+        this._segments = [{ file: name, rows: liveEntries.length }];
+        const newRows = new Map<string, RowRef>();
+        liveEntries.forEach(([path, , kind], i) => {
+            const unchanged = kind === 'row'
+                ? this._rows.get(path) === rowsSnap.get(path)
+                : this._pending.get(path) === pendingSnap.get(path);
+            if (!unchanged) return; // coś tknęło tę ścieżkę w oknie kompakcji - wiersz martwy od razu
+            newRows.set(path, [0, i]);
+            this._bumpGen();
+        });
+        this._rows = newRows;
+        this._nextSeq++;
+        for (const [path, vec] of pendingSnap) {
+            if (this._pending.get(path) === vec) this._pending.delete(path);
+        }
+
+        if (!(await this._writeMetaTracked())) return; // orphan sprząta następny udany restore
+
+        for (const seg of oldSegments) {
+            try { await this.vault.adapter.remove?.(this._segmentPath(seg.file)); }
+            catch (e) { this.logger.warn('VaultIndexer', `usunięcie starego segmentu ${seg.file} padło: ${msg(e)}`); }
+        }
+        await this._cleanupLegacyV1IfPresent();
+    }
+
+    private async _persistNowInner(): Promise<void> {
+        if (this._pending.size === 0 && !this._metaDirty) return;
+        if (!this.db || this.dims == null) return;
+        await this._ensureDir();
+
+        const liveRowPaths = new Set([...this._rows.keys(), ...this._pending.keys()]);
+        const compact = planCompaction({ segments: this._segments, liveRows: liveRowPaths.size });
+        if (compact) {
+            await this._persistCompact();
+            return;
+        }
+
+        if (this._pending.size > 0) {
+            if (!(await this._persistNewSegment())) return; // stan nietknięty, retry przy następnym persist
+        }
+        if (!(await this._writeMetaTracked())) return; // segment (jeśli był) zostaje sierotą do następnego udanego persist
+        await this._cleanupLegacyV1IfPresent();
+    }
+
+    /**
+     * Punkt wejścia PUBLICZNY (F1.1) - dołącza `_persistNowInner()` na koniec łańcucha
+     * `_persistChain` zamiast wołać go bezpośrednio. Dwa równoległe `_persistNow()` (timer +
+     * koniec skanu/resyncu, rebuild wołany z flusha...) NIGDY nie wykonują ciała persystu naraz;
+     * drugi zaczyna dopiero, gdy pierwszy (i jego `await`y) się skończy. `.catch(() => {})` jest
+     * SIATKĄ ASEKURACYJNĄ - `_persistNowInner` i tak łapie każdy błąd I/O u siebie (warn +
+     * bezpieczny powrót) i nie powinien nigdy rzucić, ale gdyby jednak rzucił, ma nie zerwać
+     * łańcucha dla WSZYSTKICH przyszłych wołających - i tak trafia do logu (G5), zamiast ginąć po cichu.
+     */
+    async _persistNow(): Promise<void> {
+        const link = this._persistChain.then(() => this._persistNowInner()).catch((e: unknown) => {
+            this.logger.warn('VaultIndexer', 'persist error', e);
+        });
+        this._persistChain = link;
+        return link;
+    }
+
     _schedulePersist(): void {
+        if (this._disposed) return; // G6: unload już poszedł - nic nowego nie startuje
         if (this._persistTimer) _nodeSafeClearTimeout(this._persistTimer);
         this._persistTimer = _nodeSafeSetTimeout(() => {
             this._persistTimer = null;
-            this._persistNow().catch(e => this.logger.warn('VaultIndexer', `persist error: ${((e as ErrLike)?.message || e) as string}`));
+            this._persistNow().catch(e => this.logger.warn('VaultIndexer', `persist error: ${msg(e)}`));
         }, this.persistDebounceMs);
         this._persistTimer?.unref?.();
     }

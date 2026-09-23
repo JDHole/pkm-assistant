@@ -31,6 +31,7 @@ modules/models/
 ├── capabilities.ts              # isVisionModel - czy model umie w obraz
 ├── cache_utils.ts               # limity wyjścia + metadane cache promptu (logika WŁASNA)
 ├── semanticStatusText.ts        # status indeksu semantycznego jako czysta funkcja (bez obsidian)
+├── embedTimeoutInput.ts         # parseEmbedTimeoutSeconds - pole „Limit czasu żądania" embeddingu (sekundy → ms)
 ├── SettingsContent.ts           # render sekcji „Modele" w Ustawieniach
 ├── SettingsSection.ts           # rejestracja sekcji w rejestrze shella
 ├── testing/harness.ts           # atrapy testów modułu (NIE kod produkcyjny, AVA go nie odpala)

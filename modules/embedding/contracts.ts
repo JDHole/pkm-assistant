@@ -14,8 +14,10 @@
  *
  * Typy HTTP, logger i `EmbeddingSettingsSlice` są importowane z `core/index.js`
  * (transport żyje w `core/http/`, ustawienia w `core/runtime/contracts.ts`), nie deklarowane
- * tu strukturalnie. Migrator starego indeksu nie istnieje - z kontraktu nie ma sekcji
- * wykrywania katalogów v1.x, backupu ani czyszczenia.
+ * tu strukturalnie. Migrator BARDZO STAREGO indeksu (sprzed Oramy, katalogi v1.x) nie
+ * istnieje - patrz sekcja 10. Osobna sprawa: format PLIKU Oramy sam w sobie ma dziś dwie
+ * wersje (JSON-dump → segmenty binarne v2) i migrację między nimi - patrz `IndexerNotice`
+ * i `modules/embedding/CLAUDE.md`, sekcja „Format indeksu v2".
  */
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -533,6 +535,30 @@ export interface EmbedderFacade {
 export declare function createEmbedderFacade(registry: EmbeddingRegistry): EmbedderFacade;
 
 /**
+ * Powód nieudanej migracji v1→v2 - KOD (nie zdanie po polsku), tłumaczony przez
+ * `embedding.notice.migration_reason.<kod>`; `detail` niesie surowy komunikat błędu.
+ */
+export type MigrationFailReason =
+    | 'v1_unreadable'
+    | 'v1_malformed'
+    | 'dims_mismatch'
+    | 'segment_write'
+    | 'meta_write'
+    | 'verify_failed';
+
+/**
+ * Wykryty rebuild (D6, format indeksu v2): model/wymiar wektora się zmienił, albo indeks
+ * na dysku jest nieczytelny/niekompletny/nie dał się zmigrować z v1. Każdy przypadek
+ * kończy się pełnym rebuildem i JEDNYM powiadomieniem UI - nigdy cichą korupcją.
+ */
+export type IndexerNotice =
+    | { kind: 'model_changed'; from: string | null; to: string }
+    | { kind: 'dims_changed'; from: number; to: number }
+    | { kind: 'index_corrupt' }
+    | { kind: 'migration_failed'; reason: MigrationFailReason; detail?: string }
+    | { kind: 'migrated'; fromBytes: number; toBytes: number };
+
+/**
  * Publiczny snapshot stanu indeksera (`VaultIndexer.getStatus()`).
  * ⚠️ Pole SNAPSHOTU to `modelKey` (camelCase), ale pole w pliku `vault-index.meta.json`
  * na dysku zostaje `model_key` (to dane usera) - nie ujednolicaj bez migracji pliku.
@@ -544,19 +570,36 @@ export interface IndexerStatusSnapshot {
     progress: { indexed: number; total: number };
     modelKey: string | null;
     lastError: string | null;
+    /** Ostatnie zdarzenie wykrytego rebuildu/migracji, `null` = brak. */
+    lastNotice: IndexerNotice | null;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 10. Migracja starego indeksu - NIE ISTNIEJE
+// 10. Migracja BARDZO STAREGO indeksu (sprzed Oramy) - NIE ISTNIEJE
 // ════════════════════════════════════════════════════════════════════════════
 //
-// Ten klaster nie ma podsystemu migracji danych indeksu z wersji v1.x: nie ma migratora,
-// wykrywania katalogów starego indeksu, backupu, czyszczenia ani UI do tego w Ustawieniach.
+// Ten klaster nie ma podsystemu migracji danych indeksu z wersji v1.x SPRZED ORAMY: nie ma
+// migratora, wykrywania katalogów starego indeksu, backupu, czyszczenia ani UI do tego
+// w Ustawieniach.
 //
-// SKUTEK DLA USERA: jeśli w vaultcie zostały katalogi starego indeksu, zostają na dysku
-// nietknięte i nieodczytane. Plugin ich nie widzi; user kasuje je ręcznie.
+// SKUTEK DLA USERA: jeśli w vaultcie zostały katalogi tamtego, bardzo starego indeksu,
+// zostają na dysku nietknięte i nieodczytane. Plugin ich nie widzi; user kasuje je ręcznie.
 // ⚠️ To NIE dotyczy `adaMigration.ts` (podmiana modelu embeddingu - zostaje, sekcja 11
 // niżej) ani migratora USTAWIEŃ w `core/runtime/legacySettingsMigration.ts`.
+//
+// ⚠️ To TEŻ nie dotyczy migracji WEWNĄTRZ formatu Oramy: sidecar `vault-index.meta.json`
+// ma dziś dwie wersje (`version: 1` - JSON-dump Oramy; `version: 2` - segmenty binarne
+// Float32 + meta), a `VaultIndexer` migruje pierwszą do drugiej automatycznie, z pancerzem
+// (stary plik zostaje nietknięty, dopóki nowy nie jest zapisany I odczytany z powrotem).
+// To jest osobny, ISTNIEJĄCY mechanizm - `IndexerNotice{kind:'migrated'|'migration_failed'}`
+// wyżej, opisany w `modules/embedding/CLAUDE.md`.
+//
+// Ta weryfikacja przez odczyt zwrotny jest WŁASNOŚCIĄ SAMEJ migracji (`_migrateV1`), nie
+// ogólnej ścieżki zapisu. Gdy migracja PADA i wołacz spada na zwykły pełny rebuild (`_fullScan`),
+// TEN rebuild kasuje stary plik v1 przez zwykłą, ogólną ścieżkę sprzątania balastu
+// (`_cleanupLegacyV1IfPresent`, wołana po KAŻDYM udanym zapisie meta, migracja czy nie) - DOPIERO
+// po udanym zapisie meta v2 TEGO rebuildu, ale BEZ osobnego odczytu zwrotnego (tamten already-
+// -successful zapis nie musi udowadniać się drugi raz).
 
 // ════════════════════════════════════════════════════════════════════════════
 // 11. Meldunek migracji modelu (plik zostaje bez zmian - tu dla kompletności drzwi)

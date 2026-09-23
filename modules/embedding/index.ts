@@ -1,8 +1,10 @@
 /**
  * modules/embedding — public API (barrel).
  *
- * Ten moduł eksportuje rejestr + model + dostawcy embeddingów. Nie ma tu migratora starego
- * indeksu (v1.x → Orama) - taki podsystem nie istnieje w tym module.
+ * Ten moduł eksportuje rejestr + model + dostawcy embeddingów. Nie ma tu migratora BARDZO
+ * STAREGO indeksu (sprzed Oramy, v1.x) - taki podsystem nie istnieje w tym module. Migracja
+ * WEWNĄTRZ formatu Oramy (JSON-dump → segmenty binarne v2) istnieje i jest wewnętrzną sprawą
+ * `VaultIndexer` - patrz `IndexerNotice` i `CLAUDE.md`, sekcja „Format indeksu v2".
  *
  * **NIE wychodzi stąd:** typy HTTP (`HttpClient`, `HttpRequestSpec`, `HttpResponse`) - konsumenci
  * spoza modułu biorą je z `core/index.js`, żeby nie było dwóch dróg do jednego typu.
@@ -31,6 +33,7 @@ export {
     DEFAULT_EMBED_MODELS,
     DEFAULT_EMBEDDING_SETTINGS,
     DEFAULT_VECTOR_DIM,
+    DEFAULT_EMBED_TIMEOUT_MS,
 } from './contracts.js';
 
 // Meldunek z migracji ada-002 → 3-small (composition root woła to przy starcie).
@@ -46,8 +49,6 @@ export type { AdaMigrationPorts } from './adaMigration.js';
 export type {
     SearchVectorTopKOptions,
     SearchTextOptions,
-    OramaWriter,
-    OramaReader,
 } from './orama_engine.js';
 
 export type {
@@ -60,9 +61,10 @@ export type {
     IndexerLogger,
     IndexerStatus,
     IndexerStatusSnapshot,
+    IndexerNotice,
+    MigrationFailReason,
     VaultEventType,
     FileMeta,
-    IndexMeta,
 } from './VaultIndexer.js';
 
 export type {

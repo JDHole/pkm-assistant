@@ -102,31 +102,6 @@ export async function insertVectorLean(
     return id;
 }
 
-/**
- * Zeruje kopie wektorów w docs-store CAŁEGO indeksu.
- *
- * Wołane po `restore()`: plik indeksu zapisany starszą wersją pluginu niesie kopie wektorów
- * w dokumentach, więc bez tego pierwszy zapis po restarcie znowu utrwaliłby dubel. Stary
- * (gruby) plik nadal wczytuje się bez zmian — chudnie dopiero przy najbliższym zapisie.
- *
- * @returns liczba dokumentów, w których kopia realnie została wyzerowana
- */
-export function stripStoredVectors(
-    db: AnyOrama | null | undefined,
-    vectorProperty: string = DEFAULT_VECTOR_PROPERTY,
-): number {
-    if (!db) return 0;
-    let stripped = 0;
-    try {
-        const docs = db.documentsStore.getAll(db.data.docs) as Record<string, Record<string, unknown>>;
-        for (const key of Object.keys(docs || {})) {
-            const doc = docs[key];
-            if (doc && doc[vectorProperty] != null) { doc[vectorProperty] = null; stripped++; }
-        }
-    } catch { /* nietypowy kształt store'u — indeks działa dalej, tylko bez odchudzenia */ }
-    return stripped;
-}
-
 export async function insertBatch(db: AnyOrama, docs: EmbeddingDoc[]): Promise<string[]> {
     return insertMultiple(db, docs);
 }
@@ -190,26 +165,4 @@ export async function deserialize(rawData: RawData, schema: AnySchema = defaultV
     const db = create({ schema });
     load(db, rawData);
     return db;
-}
-
-/** Zapis indeksu na dysk: `writer(path, jsonString)`. Zwrotka jest ignorowana. */
-export type OramaWriter = (path: string, json: string) => unknown;
-/** Odczyt indeksu z dysku: `reader(path)` → JSON. */
-export type OramaReader = (path: string) => Promise<string> | string;
-
-export async function persist(db: AnyOrama, writer: OramaWriter, path: string): Promise<void> {
-    if (typeof writer !== 'function') {
-        throw new Error('persist: writer must be a function (path, jsonString) => Promise<void>');
-    }
-    const raw = save(db);
-    await writer(path, JSON.stringify(raw));
-}
-
-export async function restore(reader: OramaReader, path: string, schema: AnySchema = defaultVaultSchema): Promise<AnyOrama> {
-    if (typeof reader !== 'function') {
-        throw new Error('restore: reader must be a function (path) => Promise<string>');
-    }
-    const json = await reader(path);
-    const raw = JSON.parse(json) as RawData;
-    return deserialize(raw, schema);
 }
