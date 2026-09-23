@@ -1,50 +1,64 @@
-# PKM Assistant 2.2.8
+# PKM Assistant 2.2.9
 
-**Memory first, no bundled skills** - PKM Assistant 2.2.8
+**Smaller index, quieter memory, fewer questions** - PKM Assistant 2.2.9
 
-**In plain words.** Two changes in how agents behave out of the box. First, when an agent
-looks something up and nobody said where, it now checks its own memory first - what it has
-learned about you and what you agreed on together. Your notes are searched when the agent asks
-for them on purpose, and agents are now told to do exactly that whenever your question is about
-your notes. In live test chats with three different models every question about notes was
-still answered with a single search, the same as before. Second, the plugin no longer installs
-ready-made skills. We want skills to go through proper rounds of iteration and evaluation
-before we ship any, so for now the plugin ships none. Skills you already have stay exactly
-where they are.
+**In plain words.** Four things you will notice. First, the semantic index of your vault is no
+longer rewritten as one huge text file every time you edit a note. It is now kept as a small
+description plus compact binary pieces, and an edit adds only a tiny piece. On a vault with
+5,200 indexed notes the files on disk shrink from about 122 MB to about 22 MB, and the save after
+an edit drops from over a second of work that froze the interface to a few milliseconds. The
+switch happens by itself the first time the plugin starts: the old file is removed only after
+the new files have been written and read back, and a notice tells you when it is done. Second,
+automatic memory consolidation is off by default - the plugin no longer proposes to merge an
+agent's sessions or brain notes on every save unless you turn it on, and when you decline a
+proposal it stops asking until the next threshold. Third, when an agent asks to write to a
+file, you can tick "don't ask again for this file in this session" - the approval is remembered
+for that chat only. Fourth, a brand-new agent under an English interface gets an English brain
+file, with English section headings and English artifact statuses; existing Polish files keep
+working unchanged.
 
 What changed, in detail:
 
-- **`search` without a scope looks in the calling agent's memory.** User notes need an explicit
-  `scope: "vault"`. The tool description, the parameter description and the "one search" prompt
-  rule say so, with examples for both kinds of question. Three cases still default to the
-  vault: a call made by a sub-agent, an agent with the memory permission switched off, and an
-  agent that has no memory yet. A result from the default scope carries a `scope_hint` field
-  that tells the model how to widen the search, so an empty memory result is not mistaken for
-  "there is no such note". Legacy tool names (`vault_search`, `vault_grep` and the rest) keep
-  searching the vault.
-- **No starter skills.** A fresh vault gets no skill files, and the plugin no longer creates
-  the skills folder at startup - the first skill you save creates it. The built-in agent
-  Jaskier starts with no skills assigned. Backstage templates (the two Deep Research skills and
-  the researcher sub-agent) are unchanged.
-- **No promises about things that are not there.** Jaskier's persona says he helps you design
-  agents and skills while you create them in the panel, and the chat welcome hint no longer
-  points at a skill bar that only appears once an agent has skills.
-- The quick start guide describes where a skill is actually created: agent profile, Skills tab.
+- **Semantic index v2.** `vault-index.meta.json` (version 2) is the only source of truth: model
+  key, vector size, per-note timestamps and a row pointer per note. Vectors live in immutable
+  binary segments `vault-index.NNNNNN.vec` (Float32, little-endian, 16-byte header). A save after
+  edits writes one new segment with only the changed notes; when segments pile up (more than 8,
+  or half the rows are stale) they are compacted into one. Writes are serialised, so an edit
+  that lands while a save is in progress is never lost. The in-memory search engine and the
+  search results are unchanged.
+- **Migration with a safety net.** On first start the old `vault-index.json` is read, converted,
+  written as v2, read back and verified; only then is the old file deleted. If any step fails
+  the old file stays untouched, you get a notice with the reason, and the index is rebuilt from
+  your notes as before.
+- **Detected rebuilds instead of silent breakage.** If the embedding model starts returning
+  vectors of a different size, or you switch models, the plugin says so and rebuilds the index.
+  Previously a size change made the indexer retry forever. A wrong API key or model name now
+  ends the scan with a visible error instead of retrying the whole vault every few minutes.
+- **Embedding timeout in Settings.** The request timeout for embedding calls is a field in
+  Settings → Models → Embedding, in seconds; before it could only be changed by editing the
+  settings file.
+- **Optional consolidation.** Two switches in Settings (sessions and summaries, brain notes),
+  threshold controls with their effective values shown, and a declined proposal resets the
+  counter instead of coming back on the next save.
+- **Remember write approval for this session.** Checkbox in the approval and diff dialogs, kept
+  in memory per file and per chat, cleared on a new chat or when the session is archived.
+  Concurrent writes to the same file from one model turn are serialised and no longer overwrite
+  each other.
+- **Brain file and artifact statuses in the interface language.** New brain files are born in
+  the interface language and stay in it; parsers know both Polish and English headings; artifact
+  types created under English have English statuses, and the buttons work on old Polish files too.
 
-Both changes ship with tests that fail without them. The search change was additionally
-walked through in a live chat, reading the tool calls the models actually made.
+Every change ships with tests that fail without it. The index migration was additionally
+replayed on a copy of a real 122 MB index: 5,200 vectors converted in under a second, zero
+embedding calls, identical top results before and after.
 
-Known limits: the `scope_hint` safety net has only been exercised in automated tests, because
-every model we tried passed the scope on its own. Very small local models may still stop after
-an empty memory result - if your agent says it cannot find a note you know exists, ask it to
-search the vault. The vault map starter still lists `skills/` as the skill library although
-the folder now appears only with your first skill.
+Known limits: the index directory stays inside the vault (plugins may not write elsewhere), so a
+sync client will still upload the small segment files after each save. Closing Obsidian within
+30 seconds of an edit may leave that edit un-persisted; the next start re-embeds only that
+note. Reindex on a vault that has zero indexable notes produces an empty index, as before.
 
-Upgrading from 2.2.7: no migration, no changes to settings, and your skill files are not
-touched. If you never edited Jaskier's profile, his list of assigned skills is empty after the
-update - the eight starter files are still in your skill library and can be assigned again in
-his profile (Skills tab). If you wrote your own prompts or skills that tell an agent to
-"search" your notes, they kept working with the models we tested, but adding `scope: "vault"`
-to the instruction makes it certain. The downgrade warning from 2.2.6 still stands: **do not
-downgrade** below 2.2.6 with active chat sessions written by 2.2.6 or newer - archive or
-discard them first.
+Upgrading from 2.2.8: no settings change needed. The index migrates itself on first start and
+shows a notice; on a large vault expect that one start to take about a second longer.
+Downgrading to 2.2.8 or older after the migration means a full re-index, because the old build
+does not read the new format. The downgrade warning from 2.2.6 still stands for active chat
+sessions.
