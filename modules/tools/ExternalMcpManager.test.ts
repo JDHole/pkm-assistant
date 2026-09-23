@@ -839,3 +839,99 @@ test('klucze i18n użyte przez warstwę tłumaczenia istnieją w PL i EN', t => 
         t.not(tr(key, { cmd: 'npx' }), key, `brak tłumaczenia dla ${key} — user zobaczyłby nazwę klucza`);
     }
 });
+
+// ─── Walidacja outputSchema: realna ścieżka SDK z podmienionym walidatorem ────────────
+//
+// `_createClient` (bez `clientFactory`, patrz test „realna ścieżka SDK" wyżej) tworzy dziś
+// prawdziwy `Client` z `@modelcontextprotocol/sdk` z opcją
+// `jsonSchemaValidator: new CfWorkerJsonSchemaValidator()` (`@cfworker/json-schema`) zamiast
+// domyślnego `AjvJsonSchemaValidator` — patrz gotcha w `modules/tools/CLAUDE.md` i alias
+// `ajvProviderShimPlugin()` w `esbuild.js`. Fake `McpClientLike` używany w reszcie tego pliku
+// (przez `clientFactory`) NIE przechodzi przez SDK-ową walidację `outputSchema` wcale — testy
+// tego bloku dobierają się więc do PRAWDZIWEGO `Client` z `_createClient` i łączą go z
+// PRAWDZIWYM `Server` przez `InMemoryTransport.createLinkedPair()` (para transportów SDK do
+// testów w jednym procesie, bez sieci/procesu). Transport zwrócony przez `_createClient` (http,
+// nigdy niepodłączany) jest świadomie odrzucany — testuje się realnie skonstruowany `client`,
+// nie jego domyślny transport.
+
+/** Schemat z required + type + enum + format:'uri' — cztery różne powody odrzucenia naraz. */
+const PROBE_OUTPUT_SCHEMA = {
+    type: 'object',
+    required: ['status', 'level', 'url'],
+    properties: {
+        status: { type: 'string', enum: ['ok', 'error'] },
+        level: { type: 'integer' },
+        url: { type: 'string', format: 'uri' },
+    },
+} as const;
+
+/**
+ * Prawdziwy `Client` (skonstruowany dokładnie tak, jak produkcyjny `_createClient`) połączony
+ * z prawdziwym `Server` in-memory, którego jedyne narzędzie `probe_tool` deklaruje
+ * `PROBE_OUTPUT_SCHEMA` i zwraca `structuredContent` zależny od `arguments.mode`.
+ */
+async function connectRealValidatedProbe(respond: (mode: unknown) => Record<string, unknown>) {
+    const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
+    const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+    const { ListToolsRequestSchema, CallToolRequestSchema } = await import('@modelcontextprotocol/sdk/types.js');
+
+    const server = new Server({ name: 'probe-server', version: '0.0.0' }, { capabilities: { tools: {} } });
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({
+        tools: [{ name: 'probe_tool', description: 'probe', inputSchema: { type: 'object' }, outputSchema: PROBE_OUTPUT_SCHEMA }],
+    }));
+    server.setRequestHandler(CallToolRequestSchema, async (req: { params: { arguments?: Record<string, unknown> } }) => ({
+        structuredContent: respond(req.params.arguments?.mode),
+        content: [],
+    }));
+
+    const mgr = new ExternalMcpManager({ manifest: { version: '2.1.0' } }, { toolRegistry: new ToolRegistry(), isMobile: false });
+    // Transport http jest tu tylko efektem ubocznym `_createClient` — nigdy nie podłączany.
+    const { client } = await mgr._createClient({ id: 'probe', transport: 'http', url: 'https://example.invalid/mcp' });
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    await client.listTools(); // cache'uje walidator outputSchema (SDK: cacheToolMetadata)
+
+    return client;
+}
+
+test('outputSchema: poprawny structuredContent (required+type+enum+format:uri) przechodzi przez realny walidator SDK', async t => {
+    const client = await connectRealValidatedProbe(() => ({ status: 'ok', level: 1, url: 'https://example.com/x' }));
+
+    const result = await client.callTool({ name: 'probe_tool', arguments: { mode: 'valid' } });
+
+    t.deepEqual(result.structuredContent, { status: 'ok', level: 1, url: 'https://example.com/x' });
+});
+
+test('outputSchema: format:"uri" niepoprawny — realny walidator SDK odrzuca z komunikatem', async t => {
+    const client = await connectRealValidatedProbe(() => ({ status: 'ok', level: 1, url: 'nie jest to uri::' }));
+
+    const err = await t.throwsAsync(() => client.callTool({ name: 'probe_tool', arguments: { mode: 'bad_uri' } }));
+
+    t.true(String(err?.message).includes('does not match the tool'), `komunikat ma mówić o niezgodności ze schematem: ${err?.message}`);
+    t.true(String(err?.message).includes('uri'), `komunikat ma wskazywać na format uri: ${err?.message}`);
+});
+
+test('outputSchema: enum niepoprawny — realny walidator SDK odrzuca z komunikatem', async t => {
+    const client = await connectRealValidatedProbe(() => ({ status: 'WRONG', level: 1, url: 'https://example.com' }));
+
+    const err = await t.throwsAsync(() => client.callTool({ name: 'probe_tool', arguments: { mode: 'bad_enum' } }));
+
+    t.true(String(err?.message).includes('does not match the tool'), `komunikat: ${err?.message}`);
+});
+
+test('outputSchema: brakujące pole required — realny walidator SDK odrzuca z komunikatem', async t => {
+    const client = await connectRealValidatedProbe(() => ({ status: 'ok', level: 1 }));
+
+    const err = await t.throwsAsync(() => client.callTool({ name: 'probe_tool', arguments: { mode: 'missing_required' } }));
+
+    t.true(String(err?.message).includes('required'), `komunikat ma mówić o brakującym required: ${err?.message}`);
+});
+
+test('outputSchema: type niepoprawny (string zamiast integer) — realny walidator SDK odrzuca', async t => {
+    const client = await connectRealValidatedProbe(() => ({ status: 'ok', level: 'not-a-number', url: 'https://example.com' }));
+
+    const err = await t.throwsAsync(() => client.callTool({ name: 'probe_tool', arguments: { mode: 'bad_type' } }));
+
+    t.true(String(err?.message).includes('does not match the tool'), `komunikat: ${err?.message}`);
+});
