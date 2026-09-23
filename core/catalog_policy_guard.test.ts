@@ -10,7 +10,10 @@
  *
  * WZORCE: wyłączanie/włączanie pluginu przez rejestr Obsidiana, dynamiczne wykonywanie kodu
  * (`eval`, `new Function` — walidator zgłasza je jako „Dynamic Code Execution"; jedyne
- * wystąpienie w bundlu pochodzi z biblioteki Ajv wewnątrz MCP SDK, nie z naszych źródeł)
+ * wystąpienie w bundlu pochodziło z biblioteki Ajv wewnątrz MCP SDK, nie z naszych źródeł - od
+ * podmiany walidatora na `@cfworker/json-schema` (alias `ajvProviderShimPlugin()` w `esbuild.js`,
+ * patrz `modules/tools/CLAUDE.md`) `dist/main.js` ma dziś ZERO wystąpień, pilnowane strażnikiem
+ * builda `assertNoAjvNewFunction()`, nie tym testem - ten test i tak skanuje źródła, nie bundel)
  * oraz `globalThis` w ogóle (reguła `obsidianmd/no-global-this`; jedyny most do gołego Node,
  * `core/utils/hostWindow.ts`, pyta o okno przez `typeof window`, bez globalnego obiektu).
  *

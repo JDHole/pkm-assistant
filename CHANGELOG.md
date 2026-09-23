@@ -22,6 +22,10 @@ approval, brain file and artifact statuses in the interface language.
   brain notes), threshold controls in Settings, and a declined proposal resets the counter.
 - **New brain files are born in the interface language** and parsers know both Polish and English
   headings; artifact types created under English have English statuses.
+- **The plugin no longer builds code from text at runtime.** Checking a result an external MCP
+  server sends back now uses a small library (MIT license) instead of the previous one, which
+  compiled a piece of JavaScript on the fly for every check. The bundled plugin is about 120 KB
+  smaller as a result.
 
 ### Added
 
