@@ -1016,9 +1016,11 @@
 .cs-message__text a:hover { color: var(--link-color-hover); }
 
 /* TILE (2.3.0, Czat bez ścian) — komponent kafelka wspólny dla wszystkich rzędów akcji.
-   ThinkingBlock i ToolCallDisplay stoją na nim (A1); SubAgentBlock/todo/ask_user/bloki
-   systemowe zostają na dawnym .cs-action-row (A2/A3 przepną je osobno) — obie rodziny CSS
-   żyją naraz w tym pliku, świadomie. */
+   ThinkingBlock i ToolCallDisplay (w tym todo/ask_user, oba przez chip narzędzia) stoją na nim
+   od A1; SubAgentBlock (wynik/błąd/pokwitowanie w tle delegacji) i bloki systemowe błędu
+   streamu doszły w A2 - od A2 KAŻDY blok akcji w czacie stoi na .cs-tile, zero producenta
+   .cs-action-row w repo. CSS tej drugiej, dawnej rodziny (niżej w tym pliku) zostaje świadomie
+   NIEUSUNIĘTY - porządkowa robota poza zakresem A2, nie martwy kod przez przeoczenie. */
 .cs-tile { --cs-tile-color: rgb(var(--cs-agent-color-rgb, 120, 120, 120)); position: relative; margin: 8px 0; padding: 8px 12px 8px 14px; border-radius: 8px; font-size: 12px;
   background: linear-gradient(135deg, color-mix(in srgb, var(--cs-tile-color) 6%, transparent), color-mix(in srgb, var(--cs-tile-color) 3%, transparent));
   border: 1px solid color-mix(in srgb, var(--cs-tile-color) 20%, transparent); }

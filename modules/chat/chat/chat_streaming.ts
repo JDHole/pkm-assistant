@@ -24,6 +24,7 @@ import {
     finalizeThinkingBlock,
     createSubAgentBlock,
     createPendingSubAgentBlock,
+    createTile,
 } from '../../ui-components/index.js';
 import { getDateLocale, t } from '../../../core/i18n/index.js';
 import streamingManager, { shouldUseFreshModel } from './StreamingManager.js';
@@ -1211,6 +1212,14 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
         if (isActiveTab && toolDisplay) {
             if (error) {
                 if (isSubAgent) {
+                    // Blad transportu (np. wyjatek w trakcie executeToolCall, przed dotarciem do
+                    // wyniku sub-agenta) - bez `query`/`agentName` (w odroznieniu od gałęzi
+                    // `!result.success`/sukces nizej): ten wyjatek leci PRZED sparsowaniem
+                    // argumentow wywolania gdzie indziej w tym pliku, a dokladanie tu OSMEGO
+                    // wywolania `parseToolCallArgs` rozjezdzaloby sie z zablokowanym licznikiem
+                    // w `chatStreamingDedup.test.ts` (siedem call-site'ow, nazwane wprost) -
+                    // `SubAgentBlock.ts` renderuje wtedy sam akapit "Result" (komunikat bledu),
+                    // bez "Task".
                     toolDisplay.replaceWith(createSubAgentBlock({
                         type: toolCall.name,
                         status: 'error',
@@ -1233,19 +1242,20 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                 const startedList = Array.isArray(result.tasks)
                     ? result.tasks
                     : [{ task_id: result.task_id, name: result.name }];
-                const lines = startedList.map((task) => t('chat.subagent_background_task', {
-                    name: task?.name || _bgArgs.aspect || '?',
-                    task_id: task?.task_id || '?',
-                }));
-                if ((result.queued as number) > 0) lines.push(t('chat.subagent_background_queued', { count: result.queued }));
-                lines.push(t('chat.subagent_background_note'));
+                // Identyfikator zadania idzie WYŁĄCZNIE do details, jako ostatnia linia
+                // (spec A2, sekcja 1 - werdykt właściciela: nigdy w nagłówku). Nagłówek dostaje
+                // stały tekst "wynik wróci powiadomieniem" (`SubAgentBlock.ts`, `opts.pending`),
+                // więc `buildBackgroundReceiptText` (uwaga 5, spec A2-fix) sklada TYLKO linie pod
+                // skrótem zadania: ewentualne "W kolejce: N", potem identyfikator(y) - zawsze na
+                // samym końcu. Ta sama funkcja renderuje pokwitowanie odtworzone z HISTORII
+                // (`chat_messages.ts`, uwaga 10).
                 const bgBlock = createSubAgentBlock({
                     type: toolCall.name,
                     pending: true,
                     status: 'success',
                     agentName: startedList.length > 1 ? '' : (startedList[0]?.name || _bgArgs.aspect || ''),
                     query: _bgArgs.task || '',
-                    response: lines.join('\n'),
+                    response: buildBackgroundReceiptText(startedList, result.queued),
                 });
                 toolDisplay.replaceWith(bgBlock);
                 bgBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1747,6 +1757,48 @@ export async function _finalizeTurn(this: ChatViewLike, turn: ChatTurn, result: 
     }
 }
 
+/**
+ * Kafelek systemowy (czerwony, rozwinięty) dla błędu streamu / ciszy modelu (spec A2, sekcja 4 -
+ * werdykt właściciela: "może się wyświetlać tak samo jak demo 12" - ramka systemowa, zwijana).
+ * `role:'system'` + `status:'error'` daje kolor DARMO przez `Tile.ts` (`.cs-tile--system`/
+ * `.cs-tile--error` obie mapują na `--color-red`, jedna zmienna CSS koloruje ikonę i kropkę) -
+ * bez osobnej logiki koloru w tym pliku. `expanded` nieustawione = domyślnie rozwinięty dla
+ * `status:'error'` (kontrakt `Tile.ts`).
+ * Regula nadrzedna szczegolow kafelka (spec A2-fix): `details` TYLKO gdy `safeText` jest
+ * DLUZSZY niz to, co miesci naglowek (`Tile.ts`'s `truncatePreview`, 80 zn.) - inaczej bez
+ * details i bez `is-toggleable` (naglowek juz pokazuje CALY tekst, rozwijanie nie dodaloby
+ * niczego nowego).
+ * @param titleKey - `chat.tile.error.title` (błąd) albo `chat.tile.error.stall` (cisza modelu)
+ * @param safeText - już bezpieczny tekst (przez `safeErrorText`, limit bez zmian)
+ */
+function _buildStreamErrorTile(titleKey: string, safeText: string): HTMLElement {
+    const handle = createTile({
+        role: 'system',
+        status: 'error',
+        iconSvg: UiIcons.warning(14),
+        title: t(titleKey),
+        summary: safeText,
+        details: safeText.length > 80 ? safeText : undefined,
+    });
+    return handle.el;
+}
+
+/**
+ * Linie pokwitowania delegacji zleconej w tle (uwaga 5, spec A2-fix): ewentualne "W kolejce: N"
+ * (tylko gdy `queued > 0`), potem identyfikator KAZDEGO wystartowanego zadania, ZAWSZE jako
+ * OSTATNIE linie - `SubAgentBlock.ts`'s `_buildBackgroundDetails` dokleja ten tekst na koncu
+ * `details`, wiec kolejnosc tutaj decyduje o kolejnosci w kafelku (werdykt wlasciciela:
+ * identyfikator nigdy w naglowku, zawsze na samym koncu ciala). Czysta funkcja - ten sam kod
+ * skleja receipt na ZYWO (`_chatOnToolResults` nizej) i przy odtwarzaniu z HISTORII
+ * (`chat_messages.ts`, uwaga 10) - "ta sama funkcja co na zywo".
+ */
+export function buildBackgroundReceiptText(startedList: Array<{ task_id?: string; name?: string }>, queued?: number): string {
+    const lines: string[] = [];
+    if (queued && queued > 0) lines.push(t('chat.subagent_background_queued', { count: queued }));
+    lines.push(...startedList.map((task) => t('chat.tile.sub.background_id', { id: task?.task_id || '?' })));
+    return lines.join('\n');
+}
+
 export function handle_error(this: ChatViewLike, error: unknown, agentName?: string, turnId?: number, ownerTabKey?: string) {
     this.hideTypingIndicator();
     // Tekst błędu idzie do DOM-u czatu i do loga (który pisze też do pliku). Na sieciowym
@@ -1763,20 +1815,23 @@ export function handle_error(this: ChatViewLike, error: unknown, agentName?: str
     const isActiveTab = !agentName || currentTabAgent === agentName;
 
     if (isActiveTab) {
+        // Kafelek systemowy zamiast dymka agenta (spec A2, sekcja 4) - logika ownerTabKey/karta
+        // w tle/set_generating(false)/_cleanupAskUser NIŻEJ zostaje bez zmian, zmienia się TYLKO
+        // render. `current_message_container` (jeśli jest - tura miała już zaczęty strumień)
+        // dostaje kafelek W SOBIE zamiast martwego, pustego dymka obok; bez niego (błąd PRZED
+        // pierwszym chunkiem) kafelek idzie prosto do `messages_container`, tak jak dziś dymek.
         if (this.current_message_container) {
             // Wskazniki malowania powstaja i gasna RAZEM (`_resetPaintTargets`).
             this.current_message_text!.empty();
-            this.current_message_text!.createEl('p', {
-                text: t('chat.streaming.error_prefix', { message: safeText }),
-                cls: 'pkm-chat-error'
-            });
+            this.current_message_container.appendChild(_buildStreamErrorTile(
+                'chat.tile.error.title',
+                t('chat.streaming.error_prefix', { message: safeText })
+            ));
         } else {
-            const error_msg = this.messages_container.createDiv({
-                cls: 'cs-message cs-message--agent'
-            });
-            error_msg.style.setProperty('--cs-agent-color-rgb', this._getAgentRgb());
-            const textDiv = error_msg.createDiv({ cls: 'cs-message__text' });
-            textDiv.createEl('p', { text: t('chat.streaming.error_prefix', { message: safeText }), cls: 'pkm-chat-error' });
+            this.messages_container.appendChild(_buildStreamErrorTile(
+                'chat.tile.error.title',
+                t('chat.streaming.error_prefix', { message: safeText })
+            ));
         }
         // Ścieżka błędu MUSI zerować wskaźniki malowania DOKŁADNIE tak, jak ścieżka sukcesu
         // (`_finalizeTurn`) i Stop. Bez tego `handle_chunk` następnej tury widziałby niepusty
@@ -1874,9 +1929,10 @@ export function _onStreamStall(this: ChatViewLike, turn: ChatTurn, silentMs: num
 
     const msg = t('chat.streaming.stall_aborted', { seconds });
     if (isActiveTab) {
-        const errDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--agent' });
-        errDiv.style.setProperty('--cs-agent-color-rgb', this._getAgentRgb());
-        errDiv.createDiv({ cls: 'cs-message__text' }).createEl('p', { text: msg, cls: 'pkm-chat-error' });
+        // Kafelek systemowy zamiast dymka agenta (spec A2, sekcja 4) - ten sam wzorzec co
+        // `handle_error`. `msg` to już gotowy, bezpieczny tekst i18n (szablon, nie surowy błąd),
+        // więc idzie wprost jako `safeText`.
+        this.messages_container.appendChild(_buildStreamErrorTile('chat.tile.error.stall', msg));
         this.scrollToBottom();
     } else {
         const agentColor = SkinManager.getAgentColor(turn.agent || 'default');

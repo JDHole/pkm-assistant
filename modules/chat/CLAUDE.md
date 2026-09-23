@@ -813,25 +813,69 @@ własność BIEGU SUBA.
 
 ### Kafelki Tile w streamie i w historii (2.3.0, "Czat bez ścian")
 
-`ThinkingBlock`/`ToolCallDisplay` (`modules/ui-components/`) renderują się dziś jako kafelek
-`.cs-tile` przez `createTile` - patrz `modules/ui-components/CLAUDE.md`, sekcja "Tile", dla
-kształtu i decyzji projektowych. Dwa miejsca w TYM module dotyka to bezpośrednio:
+`ThinkingBlock`/`ToolCallDisplay`/`SubAgentBlock` (`modules/ui-components/`) i bloki systemowe
+błędu streamu (ten moduł) renderują się WSZYSTKIE jako kafelek `.cs-tile` przez `createTile` (A1
++ A2 komplet - zero DOM-u `.cs-action-row` produkowanego gdziekolwiek w repo od A2) - patrz
+`modules/ui-components/CLAUDE.md`, sekcja "Tile", dla kształtu i decyzji projektowych. Kilka
+miejsc w TYM module dotyka to bezpośrednio:
 
 - **Finalizacja bloku myśli.** `chat_streaming.ts` woła `finalizeThinkingBlock(this._currentThinkingBlock)` w CZTERECH miejscach (koniec naturalny w `_finalizeTurn`, backstop przed
   kontynuacją w `_chatBeforeContinue`, Stop w `stop_generation`, błąd w `handle_error`) zamiast
   dawnego gołego `classList.remove('streaming')` - kolejność względem `this._currentThinkingBlock = null` i `_resetPaintTargets()` zostaje bez zmian (strażnik po źródle:
   `chat/renderThrottle.test.ts`, test "bonus: handle_error zeruje blok myśli...").
-- **Aktualizacja chipa narzędzia w trakcie streamingu idzie PRZEZ PEŁNE PRZEBUDOWANIE**, tak jak
-  przed Tile: `_chatOnToolResults` (`chat_streaming.ts`) woła
+- **Aktualizacja chipa narzędzia I bloku sub-agenta w trakcie streamingu idzie PRZEZ PEŁNE
+  PRZEBUDOWANIE**, tak jak przed Tile: `_chatOnToolResults` (`chat_streaming.ts`) woła
   `toolDisplay.replaceWith(createCompactToolChip({...nowyStatus}))` (albo
-  `createToolCallDisplay`, zależnie od `compactToolChips`) - `ToolCallDisplay.ts` świadomie NIE
-  trzyma `TileHandle` po zwróceniu elementu, więc nie ma tu mutacji w locie do zachowania.
-- **`_drawConnectorLines` (`chat_messages.ts`) szuka OBU rodzin DOM-u.** Łącznik (pionowa linia
-  od kryształu nagłówka do ostatniego rzędu akcji) czyta `.cs-action-row, .cs-tile` i
-  `.cs-action-row__icon, .cs-tile__icon` - `SubAgentBlock` (dziś jeszcze `.cs-action-row`) i
-  `ThinkingBlock`/`ToolCallDisplay` (dziś `.cs-tile`) mogą stać w JEDNEJ grupie kolejnych
-  wiadomości agenta. Dokładasz kolejny blok na Tile (A2/A3) → nic tu nie trzeba zmieniać, selektor
-  już łapie `.cs-tile`; dokładasz NOWĄ rodzinę DOM-u (żadną z tych dwóch) → dopisz ją tu też.
+  `createToolCallDisplay`, zależnie od `compactToolChips`) dla narzędzi, i analogicznie
+  `toolDisplay.replaceWith(createSubAgentBlock({...}))` dla delegacji (cztery gałęzie: błąd
+  transportu, pokwitowanie w tle, sukces, `!result.success`) - ani `ToolCallDisplay.ts`, ani
+  `SubAgentBlock.ts` NIE trzymają `TileHandle` po zwróceniu elementu, więc nie ma tu mutacji w
+  locie do zachowania. Strażnik po źródle (okablowanie, nie zachowanie): `subAgentBlockStatus.test.ts`.
+- **Błąd streamu i cisza modelu (A2) renderują kafelek `system` zamiast dymka agenta.**
+  `handle_error`/`_onStreamStall` budują go przez lokalny `_buildStreamErrorTile(titleKey, safeText)`
+  (`role:'system'`, `status:'error'` - kolor DARMO przez `Tile.ts`, jedna zmienna CSS koloruje
+  ikonę i kropkę na czerwono, zero osobnej logiki koloru tutaj). `handle_error`: gdy
+  `current_message_container` istnieje (tura miała już zaczęty strumień) - kafelek ląduje W NIM,
+  po wyczyszczeniu `current_message_text` (żeby nie zostawić martwego, pustego dymka OBOK); bez
+  niego (błąd przed pierwszym chunkiem) - kafelek idzie prosto do `messages_container`, tak jak
+  dziś dymek. Logika `ownerTabKey`/karta w tle/`set_generating(false)`/`_cleanupAskUser`
+  NIETKNIĘTA - zmienił się TYLKO render. **Regula nadrzedna szczegolow kafelka (A2-fix):**
+  `_buildStreamErrorTile` daje `details` TYLKO gdy `safeText` jest DŁUŻSZY niż to, co mieści
+  nagłówek (`truncatePreview`, 80 zn.) - krótki błąd (typowy dla obu testowych fixture'ów w
+  `handleError.tile.test.ts`) zostaje bez `details`/`is-toggleable`, cała treść już widoczna w
+  nagłówku. Behawioralny test: `handleError.tile.test.ts` (patrz gotcha "`handle_error` DA SIĘ
+  zaimportować i wywołać w AVA" niżej), pokrywa oba warianty (krótki i długi tekst).
+- **Pokwitowanie delegacji zleconej w tle ma JEDNĄ funkcję receipt, żywą i historyczną.**
+  `buildBackgroundReceiptText(startedList, queued)` (eksport z `chat_streaming.ts`, uwaga 5
+  spec A2-fix) skleja linie details POD skrótem zadania: ewentualne "W kolejce: N" (tylko gdy
+  `queued > 0`), potem identyfikator KAŻDEGO wystartowanego zadania, ZAWSZE jako linie OSTATNIE
+  (werdykt właściciela: identyfikator nigdy w nagłówku). Wołana z DWÓCH miejsc: `_chatOnToolResults`
+  (żywa gałąź `result.started === true`) ORAZ `chat_messages.ts`'s `render_messages` (uwaga 10,
+  spec A2-fix - delegacja w tle odtworzona z HISTORII, `tcOutput.started === true`, dawniej
+  renderowała się jak zielony wynik z samym "Zadanie", bo ta gałąź w ogóle nie istniała). Test
+  czysty na samej funkcji: `chat/backgroundReceipt.test.ts`; okablowanie obu wołaczy:
+  `subAgentBlockStatus.test.ts` (2 wywołania `createSubAgentBlock` w `chat_messages.ts` - wynik
+  + pokwitowanie w tle, każde z własnym `status:`).
+- **`_drawConnectorLines` (`chat_messages.ts`) zostaje na PODWÓJNYM selektorze `.cs-action-row,
+  .cs-tile`, mimo że pierwsza rodzina nie ma już żadnego producenta.** Świadomie NIEUSUNIĘTY -
+  obrona, nie martwy kod: gdyby coś kiedyś znów wystawiło `.cs-action-row`, łącznik dalej by go
+  złapał. Dokładasz kolejny blok na Tile → nic tu nie trzeba zmieniać, selektor już łapie
+  `.cs-tile`; dokładasz NOWĄ rodzinę DOM-u (żadną z tych dwóch) → dopisz ją tu też.
+
+**⚠️ `handle_error` DA SIĘ zaimportować i wywołać w AVA** (zweryfikowane empirycznie przy A2, patrz
+`handleError.tile.test.ts`) - poprawka nieścisłości do gotchy "Pattern: prototype mixin" wyżej,
+która mówi o `chat_streaming.ts` jako CAŁOŚCI jako niemożliwym do zaimportowania w AVA. Ta gotcha
+zostaje prawdziwa dla ścieżek, które REALNIE dotykają `MarkdownRenderer`/`Notice` w trakcie
+wykonania (streaming markdown, powiadomienia) - `handle_error` żadnego z nich nie woła, więc
+atrapa `obsidian` z repo harnessu wystarcza, żeby zaimportować CAŁY moduł (import statyczny
+`MarkdownRenderer`/`Notice` na górze pliku sam w sobie nie wybucha) i wywołać tę jedną, gołą
+funkcję `.call(fakeThis, ...)` - dokładnie jak `render_messages` z `chat_messages.ts`. Atrapa
+`document` globalna z harnessu (`dom-shim.ts`) ma `classList` jako CAŁKOWITY no-op
+(`contains()` zawsze `false`) - do weryfikacji KLAS wyrenderowanego kafelka trzeba, jak w
+`modules/ui-components/*.test.ts`, podstawić WŁASNĄ, minimalną atrapę `document` (patrz
+`handleError.tile.test.ts` dla wzorca). Inne funkcje tego pliku (np. te dotykające
+`MarkdownRenderer.render` w trakcie renderu) mogą dalej wymagać strażnika po źródle - nie
+zakładaj automatycznie, że KAŻDA funkcja stąd jest testowalna bez sprawdzenia.
 
 ---
 

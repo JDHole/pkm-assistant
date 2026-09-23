@@ -17,6 +17,12 @@ import { registerUrlsFromText } from '../../web/index.js';
 import { registerUrlsIfHuman } from './messagePrivileges.js';
 // Historia liczy status narzędzia TĄ SAMĄ regułą co żywa tura (chat_streaming).
 import { resolveMessageOrigin, toolResultStatus } from '../../../core/index.js';
+// Uwaga 10 (spec A2-fix): pokwitowanie delegacji w tle odtworzone z historii sklada details
+// TĄ SAMĄ funkcją co żywa tura - jedno źródło prawdy dla kolejności linii (identyfikator
+// zawsze ostatni). Import wewnątrz `modules/chat/` (oba pliki to mixiny tego samego modułu,
+// żaden cykl - `chat_streaming.ts` nie importuje z `chat_messages.ts`), nie deep-import w
+// obcy moduł.
+import { buildBackgroundReceiptText } from './chat_streaming.js';
 // Receiver mixina = złożony `ChatView` (klasa + osiem deklaracji mixinów). Cykl typów
 // chat_view ↔ mixin jest legalny i znika w buildzie (`import type`).
 import type { ChatViewLike } from './chatViewShape.js';
@@ -39,6 +45,13 @@ interface HistoryToolOutput {
     tool_call_details?: SubAgentToolCallDetail[];
     duration_ms?: number;
     usage?: SubAgentUsage | null;
+    /** Delegacja zlecona w tle (uwaga 10, spec A2-fix) - kształt jak żywy `ChatToolResult`
+     *  (`chat_streaming.ts`), odtworzony z tekstu wyniku narzędzia zapisanego w sesji. */
+    started?: boolean;
+    task_id?: string;
+    name?: string;
+    tasks?: Array<{ task_id?: string; name?: string }>;
+    queued?: number;
 }
 
 /** Argumenty wywołania `delegate` odtworzone z historii. */
@@ -208,21 +221,42 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
                             : (tcArgs || {})) as DelegateArgs;
                         const taskQuery = _hArgs.task || '';
                         const _hName = _hArgs.aspect || '';
-                        const block = createSubAgentBlock({
-                            type: tcName,
-                            // Status z JEDNEJ reguły (jak makeDisplay kilka linii niżej), nie
-                            // z dopasowania stringa 'Błąd' w response — dopasowanie stringa
-                            // łapałoby tylko literał sklejany przez chat_streaming.ts, więc
-                            // padnięta delegacja odtworzona z historii świeciłaby na zielono.
-                            status: toolResultStatus(tcOutput),
-                            agentName: _hName,
-                            query: taskQuery,
-                            response: typeof tcOutput === 'string' ? tcOutput : (tcOutput?.result || ''),
-                            toolsUsed: (tcOutput as HistoryToolOutput)?.tools_used || [],
-                            toolCallDetails: (tcOutput as HistoryToolOutput)?.tool_call_details || [],
-                            duration: (tcOutput as HistoryToolOutput)?.duration_ms || 0,
-                            usage: (tcOutput as HistoryToolOutput)?.usage,
-                        });
+                        const historyOutput = (typeof tcOutput === 'object' && tcOutput) ? tcOutput : null;
+                        let block: HTMLElement;
+                        if (historyOutput && historyOutput.started === true) {
+                            // Uwaga 10 (spec A2-fix): delegacja zlecona w TLE, odtworzona z
+                            // historii, dawniej renderowala sie jak zielony wynik z samym
+                            // "Zadanie" (ta gałąź nie istniała - `historyOutput` bez `pending`
+                            // leciał wprost do gałęzi niżej). Ten sam pending-kafelek co na
+                            // żywo (`chat_streaming.ts`), ta sama funkcja receipt.
+                            const startedList = Array.isArray(historyOutput.tasks)
+                                ? historyOutput.tasks
+                                : [{ task_id: historyOutput.task_id, name: historyOutput.name }];
+                            block = createSubAgentBlock({
+                                type: tcName,
+                                pending: true,
+                                status: 'success',
+                                agentName: startedList.length > 1 ? '' : (startedList[0]?.name || _hName || ''),
+                                query: taskQuery,
+                                response: buildBackgroundReceiptText(startedList, historyOutput.queued),
+                            });
+                        } else {
+                            block = createSubAgentBlock({
+                                type: tcName,
+                                // Status z JEDNEJ reguły (jak makeDisplay kilka linii niżej), nie
+                                // z dopasowania stringa 'Błąd' w response - dopasowanie stringa
+                                // łapałoby tylko literał sklejany przez chat_streaming.ts, więc
+                                // padnięta delegacja odtworzona z historii świeciłaby na zielono.
+                                status: toolResultStatus(tcOutput),
+                                agentName: _hName,
+                                query: taskQuery,
+                                response: typeof tcOutput === 'string' ? tcOutput : (tcOutput?.result || ''),
+                                toolsUsed: (tcOutput as HistoryToolOutput)?.tools_used || [],
+                                toolCallDetails: (tcOutput as HistoryToolOutput)?.tool_call_details || [],
+                                duration: (tcOutput as HistoryToolOutput)?.duration_ms || 0,
+                                usage: (tcOutput as HistoryToolOutput)?.usage,
+                            });
+                        }
                         agentDiv.appendChild(block);
                     } else {
                         const makeDisplay = this.env?.settings?.pkmAssistant?.compactToolChips === false ? createToolCallDisplay : createCompactToolChip;
