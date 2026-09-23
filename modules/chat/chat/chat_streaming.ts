@@ -931,10 +931,11 @@ export function _ensureAgentMessageContainer(this: ChatViewLike, streamAgent: Ag
     this.current_message_container.style.setProperty('--cs-agent-color-rgb', hexToRgbTriplet(streamColor));
 
     if (!this._agentHeaderShown) {
+        // Dymki 2.3.0 ("Czat bez scian"): nazwa agenta znika z naglowka serii streamu -
+        // kryształ zostaje jedynym znacznikiem w rynnie po lewej (spec B).
         const head = this.current_message_container.createDiv({ cls: 'cs-message__agent-head' });
         const crystalEl = head.createDiv({ cls: 'cs-message__agent-crystal' });
         setSvg(crystalEl, SkinManager.getCrystal(streamAgent || agName, { size: 18, color: streamColor, glow: false }));
-        head.createSpan({ cls: 'cs-message__agent-name', text: agName });
         this._agentHeaderShown = true;
     }
 

@@ -792,8 +792,30 @@
 }
 
 /* ===== TRIM BUBBLE — Phase 1 as user-message-style bubble ===== */
+/* Dymki 2.3.0: blok obciecia kontekstu jest wyjatkiem od pelnej szerokosci/koloru usera
+   (ulubiony kafelek wlasciciela) - nadpisuje nowe tlo/marginesy z powrotem do stanu
+   sprzed zmiany (te same wartosci co baza .cs-message--user miala przed 2.3.0). */
 .cs-message--user.cs-trim-bubble {
   max-width: 80%;
+  width: auto;
+  align-self: flex-start;
+  margin-right: 0;
+  margin-left: 0;
+  background: rgba(var(--cs-agent-color-rgb, 150,130,100), 0.12);
+  border: 1px solid rgba(var(--cs-agent-color-rgb, 150,130,100), 0.30);
+  border-right: 1px solid rgba(var(--cs-agent-color-rgb, 150,130,100), 0.30);
+  border-left: 3px solid rgba(var(--cs-agent-color-rgb, 150,130,100), 0.75);
+  box-shadow: 0 0 12px rgba(var(--cs-agent-color-rgb, 150,130,100), 0.20),
+              inset 0 0 20px rgba(var(--cs-agent-color-rgb, 150,130,100), 0.06);
+}
+
+/* Blok obciecia kontekstu: notka krysztalu i gorny gradient zostaja w kolorze agenta (wyglad sprzed 2.3.0). */
+.cs-message--user.cs-trim-bubble::after {
+  background: rgba(var(--cs-agent-color-rgb, 150,130,100), 0.20);
+}
+
+.cs-message--user.cs-trim-bubble::before {
+  background: linear-gradient(90deg, rgba(var(--cs-agent-color-rgb, 150,130,100), 0.16), transparent 60%);
 }
 
 .cs-trim-details {
@@ -841,21 +863,27 @@
 /* ─── CS ROOT VARS → moved to src/styles.css ─── */
 
 /* ─── USER MESSAGE ─── */
+/* Dymki 2.3.0 ("Czat bez scian"): dymek usera rozciaga sie na cala szerokosc, tak jak
+   dymek agenta - jedynie kolor (--cs-user-color z Ustawien) i margines (rynna po
+   przeciwnej stronie) odrozniaja go od odpowiedzi agenta. */
 .cs-message--user {
-  max-width: 72%;
-  align-self: flex-start;
+  max-width: none;
+  width: auto;
+  align-self: stretch;
   padding: 5px 12px;
-  background: rgba(var(--cs-agent-color-rgb, 150,130,100), 0.12);
-  border: 1px solid rgba(var(--cs-agent-color-rgb, 150,130,100), 0.30);
-  border-left: 3px solid rgba(var(--cs-agent-color-rgb, 150,130,100), 0.75);
+  background: color-mix(in srgb, var(--cs-user-color, var(--interactive-accent)) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--cs-user-color, var(--interactive-accent)) 30%, transparent);
+  border-right: 3px solid var(--cs-user-color);
   border-radius: 2px;
   font-size: 0.76rem;
   line-height: 1.5;
   color: var(--text-normal);
   position: relative;
-  box-shadow: 0 0 12px rgba(var(--cs-agent-color-rgb, 150,130,100), 0.20),
-              inset 0 0 20px rgba(var(--cs-agent-color-rgb, 150,130,100), 0.06);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--cs-user-color, var(--interactive-accent)) 20%, transparent),
+              inset 0 0 20px color-mix(in srgb, var(--cs-user-color, var(--interactive-accent)) 6%, transparent);
   animation: cs-message-enter 0.25s ease-out;
+  margin-right: var(--cs-bubble-gutter);
+  margin-left: 0;
 }
 
 /* Crystal marker on left border */
@@ -867,7 +895,7 @@
   width: 5px;
   height: 6px;
   transform: translateY(-50%) rotate(20deg) skew(-10deg, 4deg);
-  background: rgba(var(--cs-agent-color-rgb, 150,130,100), 0.20);
+  background: color-mix(in srgb, var(--cs-user-color, var(--interactive-accent)) 20%, transparent);
 }
 
 /* Subtle gradient on top */
@@ -878,7 +906,7 @@
   left: 3px;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, rgba(var(--cs-agent-color-rgb, 150,130,100), 0.16), transparent 60%);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--cs-user-color, var(--interactive-accent)) 16%, transparent), transparent 60%);
 }
 
 /* User text content */
@@ -941,7 +969,10 @@
   align-items: center;
   gap: 8px;
   padding: 4px 0;
-  padding-left: 22px;
+  /* 2.3.0 (B): bez nazwy agenta naglowek zapadalby sie do 8px, a krysztal (position:absolute)
+     wchodzil na dymek wyzej; min-height trzyma dawna wysokosc wiersza (recenzja B, headless Chrome). */
+  min-height: 15px;
+  padding-left: var(--cs-bubble-gutter);
   font-size: 0.68rem;
   color: var(--text-muted);
   position: relative;
@@ -978,7 +1009,7 @@
 }
 
 .cs-message__text {
-  padding: 6px 0 6px 22px;
+  padding: 6px 0 6px var(--cs-bubble-gutter);
   font-size: 0.82rem;
   line-height: 1.65;
   color: var(--text-normal);
@@ -2379,6 +2410,13 @@
    ════════════════════════════════════════════════════════════ */
 
 .theme-light .cs-message--user {
+  border-color: color-mix(in srgb, var(--cs-user-color, var(--interactive-accent)) 15%, transparent);
+}
+
+/* Dymki 2.3.0: blok obciecia kontekstu (patrz "TRIM BUBBLE" wyzej) zachowuje dzisiejszy,
+   agent-kolorowy wyglad rowniez w jasnym motywie - specyficznosc 3 klas bije regule
+   powyzej (2 klasy), wiec nie dziedziczy jasnego wariantu koloru usera. */
+.theme-light .cs-message--user.cs-trim-bubble {
   border-color: rgba(var(--cs-agent-color-rgb, 150,130,100), 0.15);
 }
 

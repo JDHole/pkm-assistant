@@ -133,10 +133,11 @@ export async function append_message(this: ChatViewLike, role: MessageRole, cont
         const agentDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--agent' });
         agentDiv.style.setProperty('--cs-agent-color-rgb', agentRgb);
         if (!this._agentHeaderShown) {
+            // Dymki 2.3.0 ("Czat bez scian"): nazwa agenta znika z naglowka - kryształ
+            // zostaje jedynym znacznikiem serii w rynnie po lewej.
             const head = agentDiv.createDiv({ cls: 'cs-message__agent-head' });
             const crystalEl = head.createDiv({ cls: 'cs-message__agent-crystal' });
             setSvg(crystalEl, SkinManager.getCrystal(activeAgent || 'Agent', { size: 18, color: agentColor, glow: false }));
-            head.createSpan({ cls: 'cs-message__agent-name', text: activeAgent?.name || 'Agent' });
             this._agentHeaderShown = true;
         }
         const textDiv = agentDiv.createDiv({ cls: 'cs-message__text' });
@@ -207,12 +208,12 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
             const agentDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--agent' });
             agentDiv.style.setProperty('--cs-agent-color-rgb', agentRgb);
 
-            // Agent header (crystal + name) — only on first in a series
+            // Agent header (crystal only, spec B "Dymki 2.3.0" - nazwa agenta ukryta),
+            // only on first in a series
             if (prevRole !== 'assistant') {
                 const head = agentDiv.createDiv({ cls: 'cs-message__agent-head' });
                 const crystalEl = head.createDiv({ cls: 'cs-message__agent-crystal' });
                 setSvg(crystalEl, SkinManager.getCrystal(agent || agentName, { size: 16, color: agentColor, glow: false }));
-                head.createSpan({ cls: 'cs-message__agent-name', text: agentName });
             }
 
             // Reconstruct action rows from metadata (thinking, tool_calls)

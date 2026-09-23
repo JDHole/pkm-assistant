@@ -970,6 +970,56 @@ render w oknie czatu: zamiast dymka `.cs-message--user` doklejany jest kafelek `
   tytułem -> details to sam tytuł. `id` artefaktu (gdy sklep go zna z samego JSON-a) zostaje
   dostępny OSOBNO w `view.open.artifactId` - fallback details nigdy nie blokuje akcji "Otwórz".
 
+### Dymki 2.3.0 (B, "Czat bez ścian")
+
+Werdykt właściciela: dymek usera ma kolor usera z Ustawień (nie kolor agenta), rozciąga się na
+całą szerokość tak jak dymek agenta, a jedyne różnice zostają kolor i margines (rynna po
+przeciwnej stronie). Nazwa agenta znika z nagłówka - kryształ zostaje jedynym znacznikiem serii.
+
+- **Rynna jedną zmienną, po obu stronach.** `--cs-bubble-gutter` (`src/styles.css`, `.cs-root`,
+  `22px`) jest zmierzona z dzisiejszego wcięcia agenta (`.cs-message__agent-head`/
+  `.cs-message__text`, `padding-left`, `modules/chat/chat_view.css`) i używana identycznie po
+  obu stronach: wcięcie treści agenta od lewej (kryształ siedzi w tej rynnie) i
+  `margin-right` dymka usera od prawej (mirror). Wartość liczbowa nie zmieniła się względem
+  sprzed 2.3.0 - zmieniło się tylko to, że jest teraz jednym źródłem prawdy zamiast dwóch
+  osobnych literałów `22px`.
+- **Dymek usera używa `var(--cs-user-color, var(--interactive-accent))`**, nie
+  `--cs-agent-color-rgb` jak dawniej (`.cs-message--user`, `chat_view.css`): tło
+  `color-mix(... 12%, transparent)`, obramowanie 1px `color-mix(... 30%, transparent)`, pasek
+  po prawej 3px pełnym `var(--cs-user-color)` (lustro paska `.cs-tile::before`, który stoi po
+  LEWEJ tej samej szerokości). `max-width: none`/`width: auto`/`align-self: stretch` zastępują
+  dawne `max-width: 72%`/`align-self: flex-start` - dymek usera dziś zajmuje tyle samo miejsca
+  co dymek agenta, mniej rynny po przeciwnej stronie.
+  Poświata (`box-shadow`), notka kryształu (`::after`) i górny gradient (`::before`) dymka usera
+  też liczą kolor z `--cs-user-color` (recenzja B: zielony dymek z czerwoną poświatą agenta był
+  regresją wizualną); blok obcięcia kontekstu (`.cs-trim-bubble`) ma osobne reguły dla tych
+  trzech, które przywracają kolor agenta. Notka `::after` nadal siedzi przy LEWEJ krawędzi -
+  czy ma przejść na prawą, decyduje właściciel na demo. Nagłówek serii agenta ma
+  `min-height: 15px` - bez nazwy agenta zapadał się do 8px, a kryształ (`position: absolute`)
+  wchodził na dymek wyżej [measured, recenzja B w headless Chrome].
+- **Wyjątek: `.cs-message--user.cs-trim-bubble`** (blok obcięcia kontekstu, ulubiony kafelek
+  właściciela, `_renderTrimBlock` w `chat_messages.ts`) nadpisuje tło/obramowanie/marginesy z
+  powrotem do stanu sprzed 2.3.0 (agent-color-rgb, `align-self: flex-start`, `margin-right: 0`) -
+  specyficzność dwóch klas bije bazową regułę jednej klasy. `.theme-light` ma osobną, trzecio-
+  klasową restaurację (`border-color`) z tego samego powodu - bez niej jasny motyw nadpisywałby
+  kolor z powrotem na `--cs-user-color` (specyficzność dwóch klas, remis kolejnością w pliku).
+  `.cs-tile` (Tile, A1-A3) nie ma klasy `.cs-message--user` [measured, grep], więc nie koliduje.
+- **Nazwa agenta zniknęła z TRZECH producentów nagłówka** (jeden mixin, ten sam wzorzec x3):
+  `chat_messages.ts`'s `append_message` i `render_messages`, oraz `chat_streaming.ts`'s
+  `_ensureAgentMessageContainer` (nagłówek serii przy STREAMINGU, `_agentHeaderShown`). Kryształ
+  (`.cs-message__agent-crystal`) zostaje jedynym producentem w `.cs-message__agent-head`, tylko
+  przy PIERWSZEJ wiadomości serii (`prevRole !== 'assistant'` / `!this._agentHeaderShown` -
+  bez zmian, ta sama bramka sprzed 2.3.0). Reguła CSS `.cs-message__agent-name` zostaje w pliku
+  (martwa, zero producentów) - świadomie nieusunięta, ten sam wzór obrony co `.cs-action-row`
+  wyżej (sekcja "Kafelki Tile...").
+- Test behawioralny: `chat/render_messages.bubbles.test.ts` (atrapa DOM harnessu, liczy węzły
+  rekurencyjnie po `children` - atrapa nie ma `querySelectorAll`) - 1 wiadomość user + 2
+  assistant w serii = dokładnie 1 `.cs-message__agent-crystal`, 0 `.cs-message__agent-name`.
+  `_ensureAgentMessageContainer` (nagłówek serii przy streamingu) ma test w tym samym pliku:
+  dwa wywołania w serii dają 1 kryształ i 0 nazw - atrapa `obsidian` z harnessu wystarcza, żeby
+  zaimportować `chat_streaming.ts` i wywołać tę funkcję na sfabrykowanym `this` (jak
+  `handle_error`, patrz gotcha wyżej).
+
 ---
 
 ## Powiązane
