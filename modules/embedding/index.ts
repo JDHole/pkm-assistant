@@ -60,9 +60,9 @@ export type {
     IndexerLogger,
     IndexerStatus,
     IndexerStatusSnapshot,
+    IndexerNotice,
     VaultEventType,
     FileMeta,
-    IndexMeta,
 } from './VaultIndexer.js';
 
 export type {
