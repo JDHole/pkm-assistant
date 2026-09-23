@@ -9,6 +9,7 @@ import {
     extractV1Vectors,
     segmentFileName,
     isSegmentFileName,
+    maxSegmentSeq,
 } from './indexStore.js';
 import type { SegmentRef } from './indexStore.js';
 
@@ -89,6 +90,35 @@ test('decodeSegment odrzuca bufor krótszy niż nagłówek', t => {
     t.is(decodeSegment(new ArrayBuffer(8), 2), null);
 });
 
+// F4.7: `decodeSegment` nie może polegać na `instanceof ArrayBuffer` (inny realm w Electronie
+// oddałby fałszywy `index_corrupt`) i musi znormalizować widoki na NIEZEROWYM `byteOffset` -
+// `Float32Array` wymaga wyrównania do 4 bajtów, a wejściowy `Uint8Array` tego nie gwarantuje.
+test('decodeSegment: Uint8Array na niezerowym (i niewyrównanym) byteOffset dekoduje poprawnie', t => {
+    const dims = 3;
+    const rows = [Float32Array.from([1.5, -2.5, 3.5]), Float32Array.from([0.25, 0.5, 0.75])];
+    const buf = encodeSegment(rows, dims);
+
+    // Osadzamy segment w większym buforze z przesunięciem 1 bajta (celowo NIE wielokrotność 4) -
+    // symuluje widok zwrócony przez `readBinary` w innym realmie / na wyciętym kawałku.
+    const padded = new ArrayBuffer(buf.byteLength + 5);
+    const view = new Uint8Array(padded, 1, buf.byteLength);
+    view.set(new Uint8Array(buf));
+
+    const decoded = decodeSegment(view, dims);
+    t.truthy(decoded);
+    t.is(decoded!.rows, rows.length);
+    for (let i = 0; i < rows.length; i++) {
+        for (let d = 0; d < dims; d++) {
+            t.is(decoded!.at(i)[d], Math.fround(rows[i][d]));
+        }
+    }
+});
+
+test('decodeSegment: obiekt bez byteLength (nie ArrayBuffer ani widok) daje null, nie rzut', t => {
+    t.is(decodeSegment({} as unknown as ArrayBuffer, 4), null);
+    t.is(decodeSegment(null as unknown as ArrayBuffer, 4), null);
+});
+
 // ─────────────────────────── parseIndexMetaV2 ───────────────────────────
 
 function validMetaV2(): unknown {
@@ -129,6 +159,72 @@ test('parseIndexMetaV2 odrzuca literalne wejścia złego kształtu', t => {
     t.is(parseIndexMetaV2({ ...validMetaV2() as object, rows: { 'a.md': [5, 0] } }), null, 'segIdx poza zakresem');
     t.is(parseIndexMetaV2({ ...validMetaV2() as object, rows: { 'a.md': [0, 99] } }), null, 'rowIdx poza zakresem segmentu');
     t.is(parseIndexMetaV2({ ...validMetaV2() as object, rows: { 'a.md': [0] } }), null, 'rowRef złej długości');
+});
+
+// F2.4: pięć przypadków recenzenta (q7_malformed) - dowód, że nowe warunki spójności naprawdę
+// odrzucają, nie tylko istnieją w kodzie martwym.
+test('parseIndexMetaV2 (F2.4): next_seq <= max(seq z segments) jest odrzucane', t => {
+    const meta = {
+        ...validMetaV2() as object,
+        segments: [{ file: 'vault-index.000001.vec', rows: 2 }, { file: 'vault-index.000002.vec', rows: 1 }],
+        next_seq: 2, // == najwyższy istniejący numer (2), a powinien być WYŻSZY
+        rows: { 'a.md': [0, 0], 'b.md': [1, 0] },
+    };
+    t.is(parseIndexMetaV2(meta), null);
+    t.truthy(parseIndexMetaV2({ ...meta, next_seq: 3 }), 'next_seq=3 (wyżej niż 2) jest poprawne — kontrola');
+});
+
+test('parseIndexMetaV2 (F2.4): zdublowana nazwa segmentu jest odrzucana', t => {
+    const meta = {
+        ...validMetaV2() as object,
+        segments: [{ file: 'vault-index.000001.vec', rows: 2 }, { file: 'vault-index.000001.vec', rows: 1 }],
+    };
+    t.is(parseIndexMetaV2(meta), null);
+});
+
+test('parseIndexMetaV2 (F2.4): nazwa segmentu z traversal (`../`) jest odrzucana', t => {
+    const meta = {
+        ...validMetaV2() as object,
+        segments: [{ file: '../../Notatki/wazna.md', rows: 2 }, { file: 'vault-index.000002.vec', rows: 1 }],
+    };
+    t.is(parseIndexMetaV2(meta), null);
+    // Wariant złośliwy: basename PASUJE do wzorca, ale cała nazwa niesie separator ścieżki -
+    // dopasowanie MUSI być na całym stringu, nie na samym basename (inaczej `_segmentPath`
+    // złożyłaby ścieżkę wychodzącą poza katalog indeksu).
+    const sneaky = {
+        ...validMetaV2() as object,
+        segments: [{ file: '../../vault-index.000001.vec', rows: 2 }],
+        rows: { 'a.md': [0, 0] },
+        mtimes: { 'a.md': 100 },
+    };
+    t.is(parseIndexMetaV2(sneaky), null);
+});
+
+test('parseIndexMetaV2 (F2.4): dims nie będące dodatnią liczbą całkowitą jest odrzucane', t => {
+    t.is(parseIndexMetaV2({ ...validMetaV2() as object, dims: 4.5 }), null);
+    t.is(parseIndexMetaV2({ ...validMetaV2() as object, dims: 0 }), null);
+    t.is(parseIndexMetaV2({ ...validMetaV2() as object, dims: NaN }), null);
+});
+
+test('parseIndexMetaV2 (F2.4): rows[path] bez odpowiadającego mtimes[path] jest odrzucane', t => {
+    const meta = { ...validMetaV2() as object, mtimes: { 'b.md': 200 } }; // brakuje 'a.md', ale rows['a.md'] istnieje
+    t.is(parseIndexMetaV2(meta), null);
+});
+
+// ─────────────────────────── maxSegmentSeq (F2.1) ───────────────────────────
+
+test('maxSegmentSeq: puste wejście → 0', t => {
+    t.is(maxSegmentSeq([]), 0);
+});
+
+test('maxSegmentSeq: gołe nazwy i pełne ścieżki, zwraca NAJWYŻSZY numer', t => {
+    t.is(maxSegmentSeq(['vault-index.000001.vec', 'vault-index.000042.vec', 'vault-index.000007.vec']), 42);
+    t.is(maxSegmentSeq(['.pkm-assistant/index/vault-index.000003.vec', '.pkm-assistant/index/vault-index.000099.vec']), 99);
+});
+
+test('maxSegmentSeq: nazwy spoza wzorca (meta.json, obce pliki) są ignorowane', t => {
+    t.is(maxSegmentSeq(['vault-index.meta.json', 'notatka.txt', 'vault-index.json']), 0);
+    t.is(maxSegmentSeq(['vault-index.meta.json', 'vault-index.000005.vec', 'obcy.vec']), 5);
 });
 
 // ─────────────────────────── parseIndexMetaV1 ───────────────────────────

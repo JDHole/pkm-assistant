@@ -117,18 +117,33 @@ export function encodeSegment(rows: Float32Array[], dims: number): ArrayBuffer {
 /**
  * Dekoduje bufor segmentu. `null` przy: złym magic, format ≠ 2, dims ≠ `expectedDims`,
  * albo `byteLength` niezgodnym z zadeklarowaną liczbą wierszy.
+ *
+ * Przyjmuje `ArrayBuffer` ALBO dowolny widok na bajty (`ArrayBufferView` - `Uint8Array`,
+ * `DataView`...): `instanceof ArrayBuffer` kłamie między realmami (inny kontekst JS w
+ * Electronie potrafi oddać `ArrayBuffer` z INNEGO globala, dla którego `instanceof` jest
+ * `false` mimo poprawnych bajtów - fałszywy `index_corrupt`). Payload jest KOPIOWANY do
+ * świeżego, wyrównanego bufora - `Float32Array` wymaga `byteOffset` wielokrotności 4,
+ * a wejściowy widok (np. `Uint8Array` na niezerowym `byteOffset`) tego nie gwarantuje.
  */
-export function decodeSegment(buf: ArrayBuffer, expectedDims: number): DecodedSegment | null {
-    if (!(buf instanceof ArrayBuffer) || buf.byteLength < HEADER_BYTES) return null;
-    const view = new DataView(buf);
-    for (let i = 0; i < 4; i++) if (view.getUint8(i) !== MAGIC[i]) return null;
-    const format = view.getUint32(4, true);
+export function decodeSegment(buf: ArrayBuffer | ArrayBufferView, expectedDims: number): DecodedSegment | null {
+    if (!buf || typeof buf.byteLength !== 'number') return null;
+    const bytes = ArrayBuffer.isView(buf)
+        ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+        : new Uint8Array(buf);
+    if (bytes.byteLength < HEADER_BYTES) return null;
+    // DataView na `bytes` nie wymaga wyrównania (w przeciwieństwie do Float32Array) — bezpieczny
+    // niezależnie od `byteOffset` wejściowego widoku.
+    const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let i = 0; i < 4; i++) if (header.getUint8(i) !== MAGIC[i]) return null;
+    const format = header.getUint32(4, true);
     if (format !== SEGMENT_FORMAT) return null;
-    const dims = view.getUint32(8, true);
+    const dims = header.getUint32(8, true);
     if (dims !== expectedDims || dims <= 0) return null;
-    const rows = view.getUint32(12, true);
-    if (buf.byteLength !== HEADER_BYTES + rows * dims * 4) return null;
-    const floats = new Float32Array(buf, HEADER_BYTES);
+    const rows = header.getUint32(12, true);
+    if (bytes.byteLength !== HEADER_BYTES + rows * dims * 4) return null;
+    const payload = new Uint8Array(rows * dims * 4);
+    payload.set(bytes.subarray(HEADER_BYTES));
+    const floats = new Float32Array(payload.buffer);
     return {
         rows,
         at(i: number): Float32Array {
@@ -151,13 +166,32 @@ function isNonNegInt(v: unknown): v is number {
     return isFiniteNumber(v) && Number.isInteger(v) && v >= 0;
 }
 
+function isPositiveInt(v: unknown): v is number {
+    return isFiniteNumber(v) && Number.isInteger(v) && v > 0;
+}
+
+/**
+ * Numer sekwencji zaszyty w nazwie segmentu, albo `null` gdy nazwa nie pasuje do wzorca
+ * ŚCIŚLE (bez separatorów ścieżki - w meta `segments[].file` ma być gołą nazwą, nigdy
+ * ścieżką z `../`; `isSegmentFileName` (tolerancyjna na pełne ścieżki z `list()`) tu
+ * ŚWIADOMIE nie jest używana, bo dopasowywałaby się po samym basename i przepuściłaby
+ * traversal typu `../../vault-index.000001.vec`).
+ */
+function segmentSeqOf(file: string): number | null {
+    const m = SEGMENT_NAME_RE.exec(file);
+    return m ? parseInt(m[1], 10) : null;
+}
+
 function parseSegmentsField(v: unknown): SegmentRef[] | null {
     if (!Array.isArray(v)) return null;
     const out: SegmentRef[] = [];
+    const seen = new Set<string>();
     for (const item of v) {
         if (!isRecord(item)) return null;
         const { file, rows } = item;
-        if (typeof file !== 'string' || !file) return null;
+        if (typeof file !== 'string' || segmentSeqOf(file) === null) return null;
+        if (seen.has(file)) return null; // zdublowana nazwa segmentu
+        seen.add(file);
         if (!isNonNegInt(rows)) return null;
         out.push({ file, rows });
     }
@@ -189,26 +223,33 @@ function parseRowsField(v: unknown, segments: SegmentRef[]): Record<string, RowR
 
 /**
  * Parsuje meta v2 z `unknown` (odczyt z dysku). Waliduje kształt I spójność: każdy
- * `rows[path]` musi wskazywać istniejący segment i wiersz w jego granicach. Cokolwiek
- * nie gra → `null` (wołacz robi z tego pełny rebuild, nigdy cichą korupcję).
+ * `rows[path]` musi wskazywać istniejący segment i wiersz w jego granicach, mieć
+ * odpowiadający wpis w `mtimes`, a `next_seq` musi być WYŻSZY niż każdy numer zaszyty
+ * w nazwie istniejącego segmentu (D3 - numery segmentów nigdy nie są ponownie używane).
+ * Cokolwiek nie gra → `null` (wołacz robi z tego pełny rebuild, nigdy cichą korupcję).
  */
 export function parseIndexMetaV2(raw: unknown): IndexMetaV2 | null {
     if (!isRecord(raw)) return null;
     if (raw.version !== 2) return null;
     if (typeof raw.model_key !== 'string') return null;
-    if (!isFiniteNumber(raw.dims) || raw.dims <= 0) return null;
+    if (!isPositiveInt(raw.dims)) return null;
     if (!isFiniteNumber(raw.updated_at)) return null;
     if (!isNonNegInt(raw.next_seq)) return null;
     const segments = parseSegmentsField(raw.segments);
     if (!segments) return null;
+    const maxSegSeq = segments.reduce((m, s) => Math.max(m, segmentSeqOf(s.file) ?? 0), 0);
+    if (raw.next_seq <= maxSegSeq) return null;
     const mtimes = parseMtimesField(raw.mtimes);
     if (!mtimes) return null;
     const rows = parseRowsField(raw.rows, segments);
     if (!rows) return null;
+    for (const path of Object.keys(rows)) {
+        if (!(path in mtimes)) return null; // rows bez mtimes nigdy nie jest poprawne (D8)
+    }
     return {
         version: 2,
         model_key: raw.model_key,
-        dims: Math.floor(raw.dims),
+        dims: raw.dims,
         updated_at: raw.updated_at,
         next_seq: raw.next_seq,
         segments,
@@ -233,6 +274,26 @@ export function parseIndexMetaV1(raw: unknown): IndexMetaV1 | null {
         dims: isFiniteNumber(dimsRaw) ? dimsRaw : null,
         mtimes,
     };
+}
+
+/**
+ * Najwyższy numer sekwencji zaszyty w liście nazw plików (np. `adapter.list()` na katalogu
+ * indeksu) - `0` gdy żadna nie pasuje. Wejście może być gołą nazwą albo pełną ścieżką
+ * (dopasowanie po ostatnim segmencie ścieżki, tak jak `isSegmentFileName`) - w przeciwieństwie
+ * do `segmentSeqOf` (ścisłe, dla `segments[].file` w meta), tu tolerujemy oba kształty, bo to
+ * jedyne miejsce, gdzie źródłem prawdy o `_nextSeq` jest sam DYSK, nie meta (D3/F2 - numer
+ * segmentu nigdy nie jest ponownie użyty, nawet gdy meta jest nieczytelna/niespójna i jedynym
+ * śladem są nazwy plików).
+ */
+export function maxSegmentSeq(listedNames: string[]): number {
+    let max = 0;
+    for (const raw of listedNames) {
+        const norm = String(raw || '').replace(/\\/g, '/');
+        const base = norm.split('/').pop() || norm;
+        const seq = segmentSeqOf(base);
+        if (seq !== null && seq > max) max = seq;
+    }
+    return max;
 }
 
 // ─────────────────────────── Kompakcja ───────────────────────────
