@@ -146,6 +146,15 @@ export const en: Record<string, string> = {
   'chat.tile.sub.duration_sec': '{{sec}} s',
   'chat.tile.sub.tokens_thousands': '{{value}}k',
   'chat.tile.sub.error_no_details': 'Sub-agent reported an error without details',
+
+  // ── Machine message tile (2.3.0, A3 "Chat without walls") ──
+  'chat.tile.machine.subtask_title': 'Sub-agent {{name}} finished in the background',
+  'chat.tile.machine.subtask_title_error': 'Sub-agent {{name}} failed in the background',
+  'chat.tile.machine.subtask_aborted': 'Sub-agent {{name}} aborted in the background',
+  'chat.tile.machine.artifact_title': 'Artifact: {{tytul}}',
+  'chat.tile.machine.open': 'Open',
+  'chat.tile.machine.open_unavailable': 'Artifact note is not known',
+
   'chat.tile.tool.todo_summary': '{{done}}/{{total}}',
   'chat.tile.tool.todo_summary_titled': '{{done}}/{{total}} - {{title}}',
   'chat.tile.todo.finished': 'closed',

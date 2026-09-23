@@ -145,6 +145,15 @@ export const pl: Record<string, string> = {
   'chat.tile.sub.duration_sec': '{{sec}} s',
   'chat.tile.sub.tokens_thousands': '{{value}} tys.',
   'chat.tile.sub.error_no_details': 'Sub-agent zgłosił błąd bez opisu',
+
+  // ── Tile wiadomości maszynowej (2.3.0, A3 "Czat bez ścian") ──
+  'chat.tile.machine.subtask_title': 'Sub-agent {{name}} skończył w tle',
+  'chat.tile.machine.subtask_title_error': 'Sub-agent {{name}} padł w tle',
+  'chat.tile.machine.subtask_aborted': 'Sub-agent {{name}} przerwany w tle',
+  'chat.tile.machine.artifact_title': 'Artefakt: {{tytul}}',
+  'chat.tile.machine.open': 'Otwórz',
+  'chat.tile.machine.open_unavailable': 'Notatka artefaktu nie jest znana',
+
   'chat.tile.tool.todo_summary': '{{done}}/{{total}}',
   'chat.tile.tool.todo_summary_titled': '{{done}}/{{total}} - {{title}}',
   'chat.tile.todo.finished': 'zamknięta',
