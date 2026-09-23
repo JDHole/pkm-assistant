@@ -38,9 +38,19 @@ export function summarizeHttpRequest(params: unknown, meta: HttpLogMeta = {}): s
         : [];
 
     const parts = [`${method} ${url}`];
-    if (meta.status !== undefined && meta.status !== null) parts.push(`status: ${String(meta.status)}`);
+    if (meta.status !== undefined && meta.status !== null) parts.push(`status: ${_statusToString(meta.status)}`);
     if (typeof meta.durationMs === 'number') parts.push(`${meta.durationMs} ms`);
     // WYŁĄCZNIE nazwy nagłówków — wartości nigdy nie wchodzą do logu.
     if (headerNames.length) parts.push(`nagłówki: ${headerNames.join(', ')}`);
     return parts.join(' | ');
+}
+
+/**
+ * Status HTTP przychodzi z adaptera bez gwarancji typu (`unknown`) — zwykle liczba, czasem
+ * string. Osobna funkcja, bo dopiero jej granica wywołania resetuje zawężenie TS z powrotem
+ * do gołego `unknown`; wołanie `String()` bezpośrednio w `summarizeHttpRequest` po sprawdzeniu
+ * `!== undefined && !== null` zostawiłoby TS z typem, który da ostrzeżenie no-base-to-string.
+ */
+function _statusToString(status: unknown): string {
+    return String(status);
 }

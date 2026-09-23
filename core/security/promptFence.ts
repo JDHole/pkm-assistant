@@ -26,8 +26,8 @@ export const VAULT_CONTENT_TAG = 'vault_content';
  * w środku) na formę encji `&lt;…`, więc treść nie ma jak zamknąć ogrodzenia od środka.
  * Idempotentna: `&lt;/vault_content` nie ma już `<`, więc drugi przebieg go nie rusza.
  */
-export function escapeUntrusted(content: unknown): string {
-    return String(content ?? '')
+export function escapeUntrusted(content: string | null | undefined): string {
+    return (content ?? '')
         .replace(/<\s*\/\s*vault_content/gi, '&lt;/vault_content')
         .replace(/<\s*vault_content/gi, '&lt;vault_content');
 }
@@ -39,7 +39,7 @@ export function escapeUntrusted(content: unknown): string {
  * @param source  - skąd (np. `memory`, `active_note`, `artifacts`) — trafia do atrybutu `source`
  * @returns pusty string, gdy treść jest pusta (nie zaśmiecamy promptu pustym blokiem)
  */
-export function fenceUntrusted(content: unknown, source: string = 'vault'): string {
+export function fenceUntrusted(content: string | null | undefined, source: string = 'vault'): string {
     const body = escapeUntrusted(content);
     if (!body.trim()) return '';
     // `source` to klucz sekcji od nas, nie od usera — ale i tak przycinamy do bezpiecznego

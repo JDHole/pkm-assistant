@@ -253,7 +253,12 @@ export class AccessGuard {
             allowed: false,
             // Asercja, nie `?.`: dotarcie tutaj oznacza, że `_isInSubScope` zwróciło false,
             // a to jest możliwe WYŁĄCZNIE dla niepustej tablicy (patrz jej pierwsze dwie linie).
-            reason: t('security.sub_scope_denied', { path: targetPath, folders: (scopeFolders as ScopeFolders).join(', ') })
+            reason: t('security.sub_scope_denied', {
+                path: targetPath,
+                // Ta sama ekstrakcja co `_isInSubScope`: wpis bywa gołym stringiem albo
+                // `{path, access}` — goły `.join()` dałby tu `[object Object]` dla wpisów-obiektów.
+                folders: (scopeFolders as ScopeFolders).map(entry => (typeof entry === 'string' ? entry : (entry?.path ?? ''))).join(', '),
+            })
         };
     }
 
