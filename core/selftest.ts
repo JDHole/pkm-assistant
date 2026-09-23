@@ -219,7 +219,7 @@ function sectionSemantics(
     // Wykryty rebuild/migracja (D6/D5, format indeksu v2) — pokazany tylko gdy się zdarzył.
     if (status?.lastNotice != null) {
         try { details.last_notice = JSON.stringify(status.lastNotice); }
-        catch { details.last_notice = String(status.lastNotice); }
+        catch { details.last_notice = '(unserializable)'; }
     }
 
     if (!indexer) {
