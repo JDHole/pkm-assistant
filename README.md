@@ -108,7 +108,7 @@ Settings → Community plugins → Browse. Until then, use Option A (BRAT) or Op
 
 3. **Explore the sidebar** - Agents, Communicator (agent-to-agent mail, stored as plain Markdown in your vault - local only, nothing leaves your machine), Backstage (skill and sub-agent templates, connectors).
 
-4. **Start chatting** - Type anything. Use `@` to mention a note from your vault. Use the autonomy control (YOLO / Ask at the edge / Ask about everything) to decide when the agent checks with you before acting.
+4. **Start chatting** - Type anything. Use `@` to point the agent at a note or folder from your vault (it reads what it needs), or attach a file with the clip icon to put its full text into the message. Use the autonomy control (YOLO / Ask at the edge / Ask about everything) to decide when the agent checks with you before acting.
 
 ---
 
