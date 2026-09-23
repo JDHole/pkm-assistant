@@ -9,6 +9,7 @@ type FakeIndexerStatus = {
     progress?: { indexed?: number; total?: number };
     model_key?: string;
     lastError?: string;
+    lastNotice?: unknown;
 };
 
 type FakeModel = { platform?: string; model?: string; isDefault?: boolean };
@@ -170,6 +171,30 @@ test('no_provider status → semantics WARN', async (t) => {
         {}
     );
     t.is(findSection(report, 'semantics')!.status, 'warn');
+});
+
+test('lastNotice obecne → semantics pokazuje last_notice w details', async (t) => {
+    const report = await buildSelfTestReport(
+        makePlugin({
+            indexerStatus: {
+                status: 'ready',
+                progress: { indexed: 5, total: 5 },
+                lastNotice: { kind: 'dims_changed', from: 4, to: 8 },
+            },
+        }),
+        {}
+    );
+    const s = findSection(report, 'semantics')!;
+    t.is(s.details.last_notice, JSON.stringify({ kind: 'dims_changed', from: 4, to: 8 }));
+});
+
+test('lastNotice nieobecne (null) → semantics NIE pokazuje last_notice', async (t) => {
+    const report = await buildSelfTestReport(
+        makePlugin({ indexerStatus: { status: 'ready', progress: { indexed: 5, total: 5 }, lastNotice: null } }),
+        {}
+    );
+    const s = findSection(report, 'semantics')!;
+    t.false('last_notice' in s.details);
 });
 
 // ─────────────────────────── mcp tools + kill-switch ───────────────────────────

@@ -67,6 +67,8 @@ interface IndexerStatus {
     progress?: { indexed?: number; total?: number };
     modelKey?: string;
     lastError?: string;
+    /** Ostatnie zdarzenie wykrytego rebuildu/migracji (`IndexerNotice` w `modules/embedding`) — core nie zna unii, czyta ją jako `unknown`. */
+    lastNotice?: unknown;
 }
 
 /** Wpis biblioteki modeli (`settings.pkmAssistant.modelLibrary.main[]`). */
@@ -207,13 +209,18 @@ function sectionSemantics(
         try { docCount = deps.countDocs(plugin.oramaDb); } catch { docCount = null; }
     }
 
-    const details = {
+    const details: Record<string, string> = {
         indexer_status: status?.status || '(no indexer)',
         progress: status ? `${status.progress?.indexed ?? 0}/${status.progress?.total ?? 0}` : 'n/a',
         model_key: status?.modelKey || '(none)',
         oramaDb: hasOrama ? 'present' : 'absent',
         doc_count: docCount === null ? 'n/a' : String(docCount),
     };
+    // Wykryty rebuild/migracja (D6/D5, format indeksu v2) — pokazany tylko gdy się zdarzył.
+    if (status?.lastNotice != null) {
+        try { details.last_notice = JSON.stringify(status.lastNotice); }
+        catch { details.last_notice = String(status.lastNotice); }
+    }
 
     if (!indexer) {
         return sec('semantics', 'Semantics (vault index)', WARN, 'VaultIndexer not initialized — semantic search falls back to keyword.', details);
