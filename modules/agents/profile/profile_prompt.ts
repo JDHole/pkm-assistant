@@ -161,7 +161,7 @@ async function _renderPromptInspector(ctx: ProfileCtx, el: HTMLElement) {
                 // HiddenFileEditorModal wants the real obsidian App, whose workspace/vault
                 // members carry concrete class types AppLike's open shape doesn't structurally
                 // match in either direction.
-                new HiddenFileEditorModal(plugin.app as unknown as ConstructorParameters<typeof HiddenFileEditorModal>[0], '', `System Prompt — ${formData.name}`, fullText, { readOnly: true }).open();
+                new HiddenFileEditorModal(plugin.app as unknown as ConstructorParameters<typeof HiddenFileEditorModal>[0], '', `System Prompt - ${formData.name}`, fullText, { readOnly: true }).open();
             } catch (e: unknown) { new Notice(t('profile.prompt.error', { error: (e as Error).message })); }
         })();
     });
@@ -244,7 +244,7 @@ function _renderInspectorRow(ctx: ProfileCtx, parentEl: HTMLElement, section: Pr
     }
 
     const tokEl = rowEl.createSpan({
-        text: section.enabled ? `${section.tokens.toLocaleString()} tok` : '—',
+        text: section.enabled ? `${section.tokens.toLocaleString()} tok` : '-',
         cls: 'cs-prompt-row__tokens'
     });
 
@@ -258,7 +258,7 @@ function _renderInspectorRow(ctx: ProfileCtx, parentEl: HTMLElement, section: Pr
             if (!po.disabledSections.includes(section.key)) po.disabledSections.push(section.key);
             section.enabled = false;
             rowEl.classList.add('cs-prompt-row--disabled');
-            tokEl.textContent = '—';
+            tokEl.textContent = '-';
         } else {
             po.disabledSections = po.disabledSections.filter((k: string) => k !== section.key);
             section.enabled = true;

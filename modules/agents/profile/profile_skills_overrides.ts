@@ -51,7 +51,7 @@ export function showSkillOverrideForm(container: HTMLElement, baseSkill: SkillDa
         preqHeading.nameEl.appendText(t('profile.skills.default_answers'));
         for (const pq of baseSkill.preQuestions!) {
             new Setting(form)
-                .setName(`{{${pq.key}}} — ${pq.question}`)
+                .setName(`{{${pq.key}}} - ${pq.question}`)
                 .addText(text => {
                     text.setPlaceholder(pq.default || t('profile.skills.no_default'))
                         .setValue((ovr.pre_question_defaults?.[pq.key] as string | undefined) || '')

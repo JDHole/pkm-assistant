@@ -203,7 +203,7 @@ async function _renderBrainLogCard(el: HTMLElement, adapter: VaultAdapterLike, l
             const row = list.createDiv({ cls: 'cs-mem-item' });
             row.createSpan({ cls: 'cs-mem-item__date', text: _formatLogStamp(entry.ts) });
             row.createSpan({ cls: 'cs-badge cs-badge--auto', text: _brainLogOpLabel(entry.op) });
-            row.createSpan({ cls: 'cs-mem-item__size', text: entry.target || '—' });
+            row.createSpan({ cls: 'cs-mem-item__size', text: entry.target || '-' });
         }
     }
     head.addEventListener('click', () => { card.classList.toggle('open'); });
@@ -212,7 +212,7 @@ async function _renderBrainLogCard(el: HTMLElement, adapter: VaultAdapterLike, l
 /** Krótki lokalny stempel („2026-07-30 14:05"); nieparsowalny ISO wraca surowy. */
 function _formatLogStamp(iso: string) {
     const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return String(iso || '—');
+    if (Number.isNaN(d.getTime())) return String(iso || '-');
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}  ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
@@ -467,7 +467,7 @@ function _renderSessionsSection(ctx: ProfileCtx, parentEl: HTMLElement, adapter:
         }
 
         if (totalPages > 1) {
-            paginationEl.createSpan({ cls: 'cs-mem-pagination__info', text: `${start + 1}–${Math.min(start + PER_PAGE, filtered.length)} / ${filtered.length}` });
+            paginationEl.createSpan({ cls: 'cs-mem-pagination__info', text: `${start + 1}-${Math.min(start + PER_PAGE, filtered.length)} / ${filtered.length}` });
             const btnGroup = paginationEl.createDiv({ cls: 'cs-mem-pagination__btns' });
             const prevBtn = btnGroup.createEl('button', { cls: 'cs-mem-pagination__btn' });
             setSvg(prevBtn, UiIcons.chevronDown(10)); prevBtn.addClass('cs-mem-pagination__btn--prev');
