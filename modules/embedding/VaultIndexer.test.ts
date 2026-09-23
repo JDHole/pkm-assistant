@@ -165,14 +165,21 @@ function newIndexer(overrides: IndexerOverrides = {}) {
         isMobile: !!overrides.isMobile,
         noGoFolders: overrides.noGoFolders || [],
         artifactsExclude: overrides.artifactsExclude,
-        debounceMs: overrides.debounceMs ?? 5,
-        persistDebounceMs: overrides.persistDebounceMs ?? 5,
+        // H3 (runda naprawcza 3): DOMYŚLNIE ogromne timery - żaden test nie może zależeć od tego,
+        // że `_scheduleFlush`/`_schedulePersist`/`_scheduleScanRetry` wystrzeli SAM w tle. Pod wolną
+        // pętlą zdarzeń (CI pod obciążeniem - zmierzone `review/slow_yield.mjs`, `_yield` 8 ms) mały
+        // domyślny debounce potrafił wystrzelić W TRAKCIE przygotowania testu (między `_flushQueue()`
+        // a jawnym `_persistNow()` kroki dalej), dokładając nieprzewidziany zapis/kompakcję i myląc
+        // liczenie kroków w testach budujących stan krok po kroku. Test, który faktycznie testuje
+        // SAM timer, podaje krótką wartość JAWNIE (patrz np. test debounce/backoffu niżej).
+        debounceMs: overrides.debounceMs ?? 1_000_000_000,
+        persistDebounceMs: overrides.persistDebounceMs ?? 1_000_000_000,
         batchSize: overrides.batchSize,
         // Ponowienia porcji natychmiastowe (inaczej każdy test awarii czeka 2 s + 4 s),
         // a automatyczne ponowienie skanu tak dalekie, że nigdy nie wystrzeli w teście
         // (chyba że test jawnie poda krótszy `scanRetryMs`, żeby SAM je zaobserwować).
         embedRetryMs: 1,
-        scanRetryMs: overrides.scanRetryMs ?? 60_000,
+        scanRetryMs: overrides.scanRetryMs ?? 1_000_000_000,
         now: overrides.now ?? (() => 999),
         notify: (n: IndexerNotice) => notices.push(n),
     });
@@ -696,6 +703,53 @@ test('G3: rebuild() z zerowym wynikiem (wszystkie pliki trwale odrzucone) NIE ka
     c.indexer.dispose();
 });
 
+// H2 (runda naprawcza 3) [DROBNE]: rebuild() na vaulcie, który spadł do ZERA notatek (wszystkie
+// skasowane albo wszystkie w NoGo) - różni się od testu G3 wyżej: tam pliki wciąż ISTNIEJĄ, ale
+// dostawca je trwale odrzuca (_fullScan RZUCA, rebuild() przywraca stary stan i NIGDY nie dochodzi
+// do sprzątania segmentów). Tu `files.length === 0` - `_fullScan` NIE rzuca (legalnie pusty wynik),
+// więc dochodzi do zwykłej ścieżki sukcesu. Bez wymuszenia zapisu pustej mety PRZED sprzątaniem,
+// `_persistNowInner` uznałby zapis za zbędny (`_pending` puste, nic "dirty" od resetu w `_fullScan`)
+// i zostawił na dysku STARĄ metę z trzema wierszami - `rebuild()`'s kod czyszczący stare segmenty
+// (uzależniony tylko od `!this._metaDirty`) skasowałby mimo to pliki, na które ta stara meta dalej
+// wskazuje: `index_corrupt` przy KAŻDYM kolejnym starcie.
+test('H2: rebuild() na vaulcie, który spadł do ZERA notatek, pisze pustą metę PRZED skasowaniem starych segmentów', async t => {
+    const store: FakeStore = new Map();
+    const files = new Map<string, FakeFile>([
+        ['a.md', { content: 'A', mtime: 1 }],
+        ['b.md', { content: 'B', mtime: 1 }],
+        ['c.md', { content: 'C', mtime: 1 }],
+    ]);
+    const { indexer } = newIndexer({ files, store });
+    await indexer.initialize();
+    t.is(indexer.getStatus().status, 'ready');
+    const metaBefore = readMetaV2(store);
+    t.is(metaBefore.segments.length, 1, 'setup: indeks początkowy ma jeden segment z trzema wierszami');
+
+    files.clear(); // user skasował/przeniósł WSZYSTKIE notatki (albo wszystko trafiło do NoGo)
+    const result = await indexer.rebuild();
+
+    t.is(result.status, 'ready', 'zero notatek to legalny, pusty indeks - nie błąd');
+    const metaAfter = readMetaV2(store);
+    t.deepEqual(metaAfter.segments, [], 'meta na dysku odzwierciedla PUSTY wynik skanu');
+    t.deepEqual(metaAfter.rows, {});
+    t.deepEqual(metaAfter.mtimes, {});
+    for (const seg of metaBefore.segments) {
+        t.false(store.has(`.pkm-assistant/index/${seg.file}`), `stary segment ${seg.file} skasowany - meta go już nie wskazuje`);
+    }
+    t.is(countDocs(indexer.db), 0);
+
+    // Trzy kolejne restarty na tym samym (teraz pustym) store - zero index_corrupt za każdym razem.
+    for (let boot = 1; boot <= 3; boot++) {
+        const r = newIndexer({ files, store });
+        await r.indexer.initialize();
+        t.is(r.indexer.getStatus().status, 'ready', `restart ${boot}: status ready`);
+        t.is(countDocs(r.indexer.db), 0, `restart ${boot}: baza pusta, nie zawieszona na starych wektorach`);
+        t.false(r.notices.some(n => n.kind === 'index_corrupt'), `restart ${boot}: zero index_corrupt`);
+        r.indexer.dispose();
+    }
+    indexer.dispose();
+});
+
 // F4.10: bug zastany na main (poza zakresem oryginalnej recenzji, ten sam plik) - skan pada
 // W POŁOWIE porcji (nie przy pierwszej), a `initialize()` NIE zeruje `this.db` przed ponowieniem.
 // Drugi `_fullScan()` insertowałby do TEJ SAMEJ, częściowo zapełnionej bazy i dostawał "A document
@@ -717,18 +771,55 @@ test('F4.10: ponowienie skanu po padzie W POŁOWIE startuje od PUSTEJ bazy, nie 
             return t2.map((_, i) => [1, i]);
         },
     };
-    const { indexer } = newIndexer({ files, store, embedder, batchSize: 2, scanRetryMs: 5 });
+    const { indexer } = newIndexer({ files, store, embedder, batchSize: 2 });
     await indexer.initialize();
     t.is(indexer.getStatus().status, 'error', 'pierwszy skan pada w połowie porcji 2');
+    t.truthy(indexer['_scanRetryTimer'], 'ponowienie MUSI być uzbrojone (dowód zamiast czekania na realny timer, H3)');
 
-    // Ponowienie uzbrojone przez `_scheduleScanRetry` (scanRetryMs=5) - poczekaj aż wystrzeli
-    // i skończy (dostawca teraz zdrowy, `call` już przekroczyło padający zakres).
-    await new Promise(r => setTimeout(r, 200));
+    // H3: ponowienie WPROST zamiast czekania na realny `scanRetryMs` - dostawca teraz zdrowy
+    // (`call` już przekroczyło padający zakres), a to dokładnie to, co zrobiłby uzbrojony timer.
+    await indexer.initialize();
 
     const status = indexer.getStatus();
     t.is(status.status, 'ready', 'ponowienie musi się udać, nie utknąć w pętli duplikatów ID');
     t.is(indexer._mtimes.size, 6, 'WSZYSTKIE notatki, nie tylko te sprzed padu');
     t.is(countDocs(indexer.db), 6, 'baza po ponowieniu ma dokładnie 6 dokumentów, nie duplikaty ani niedobór');
+    indexer.dispose();
+});
+
+// H1 (runda naprawcza 3) [WAŻNE]: regresja po G3 - `_fullScan` rzuca, gdy WSZYSTKIE pliki zostały
+// pominięte trwale (np. zły klucz/model API), żeby `rebuild()` mógł przywrócić stan (G3). Skutek
+// uboczny SPRZED tej naprawy: `initialize()` łapał ten rzut jak zwykły pad skanu i uzbrajał
+// `_scheduleScanRetry` - co `scanRetryMs` próbowałby pełnego skanu od nowa, na zawsze (zły klucz
+// się sam nie naprawi). Naprawa: ten konkretny typ rzutu (`FullScanNoResultsError`) kończy
+// `initialize()` statusem `error` BEZ uzbrajania ponowienia - user poprawia klucz/model i sam
+// odpala Reindex/restart.
+test('H1: zły klucz/model (trwałe odrzucenie KAŻDEGO pliku) - initialize() kończy error BEZ automatycznego ponowienia', async t => {
+    const files = new Map<string, FakeFile>();
+    for (let i = 0; i < 10; i++) files.set(`n${i}.md`, { content: `tekst ${i}`, mtime: 1 });
+    const embedder: FakeEmbedder = {
+        _calls: { embedBatch: 0, texts: [] }, isReady: () => true, getModelKey: () => 'openai:x', getDims: () => 4,
+        async embed() { return null; },
+        async embedBatch(texts: string[]) {
+            this._calls.embedBatch++; this._calls.texts.push(...texts);
+            throw Object.assign(new Error('401 invalid api key'), { kind: 'api', httpStatus: 401 });
+        },
+    };
+    // scanRetryMs jawnie krótki - TEN test sprawdza właśnie brak ponowienia w realnym czasie.
+    const { indexer } = newIndexer({ files, embedder, batchSize: 16, scanRetryMs: 20 });
+    await indexer.initialize();
+
+    t.is(indexer.getStatus().status, 'error');
+    t.truthy(indexer.getStatus().lastError);
+    const callsAfterFirst = embedder._calls.embedBatch;
+    t.true(callsAfterFirst > 0, 'setup: skan faktycznie próbował embedować');
+    t.is(indexer['_scanRetryTimer'], null, 'BEZ automatycznego ponowienia - zły klucz się sam nie naprawi');
+
+    await new Promise(r => setTimeout(r, 3 * 20));
+
+    t.is(embedder._calls.embedBatch, callsAfterFirst, 'po 3×scanRetryMs ANI JEDNO nowe żądanie - regresja młóciłaby API bez końca');
+    t.is(indexer.getStatus().status, 'error');
+    t.is(indexer['_scanRetryTimer'], null);
     indexer.dispose();
 });
 
@@ -784,7 +875,9 @@ test('awaria w kolejce zmian zwraca porcję do kolejki (nic nie ginie)', async t
 });
 
 test('ponowienia po padzie mają rosnący odstęp (nie młócą API co debounce)', t => {
-    const { indexer } = newIndexer();
+    // H3: ten test liczy się WPROST na wartości `debounceMs` (matematyka backoffu), więc testuje
+    // sam timer - podaje go jawnie zamiast polegać na (teraz ogromnym) domyślnym.
+    const { indexer } = newIndexer({ debounceMs: 2000 });
     const d1 = indexer._flushRetryDelayMs(1);
     const d2 = indexer._flushRetryDelayMs(2);
     const d3 = indexer._flushRetryDelayMs(3);
@@ -880,6 +973,31 @@ function armWriteGate(vault: VaultLike): { open: () => void; rearm: () => void }
     return { open: () => release(), rearm };
 }
 
+/**
+ * Blokuje `embedBatch` PER WYWOŁANIE (nie jednym wspólnym gate jak `armWriteGate`) - test wie
+ * DOKŁADNIE, kiedy skan doszedł do kolejnej porcji (`nextCall()` rozwiązuje się w tym momencie,
+ * ZANIM `embedBatch` w ogóle zwróci wynik) i kontroluje osobno, kiedy każda z nich się kończy
+ * (`release()`). H3 (runda naprawcza 3): zastępuje realne opóźnienia (`setTimeout` 5/3/7 ms) w
+ * F1/R4 - bramka jest deterministyczna niezależnie od tego, jak wolna jest pętla zdarzeń w CI.
+ */
+function armEmbedGate(embedder: FakeEmbedder): { nextCall: () => Promise<void>; release: () => void } {
+    let notifyCalled: (() => void) | null = null;
+    let releaseCurrent: (() => void) | null = null;
+    const real = embedder.embedBatch.bind(embedder);
+    embedder.embedBatch = async (texts: string[]) => {
+        await new Promise<void>(resolve => {
+            releaseCurrent = resolve;
+            notifyCalled?.();
+            notifyCalled = null;
+        });
+        return real(texts);
+    };
+    return {
+        nextCall: () => new Promise<void>(resolve => { notifyCalled = resolve; }),
+        release: () => { const r = releaseCurrent; releaseCurrent = null; r?.(); },
+    };
+}
+
 // R1: persist w toku (writeBinary trwa) + flush notatki B DOKŁADA się do `_pending` w tym oknie.
 // Bug sprzed naprawy: `_persistNewSegment` brał migawkę `_pending`, a PO zapisie wołał gołe
 // `_pending.clear()` - to kasowało TEŻ B, mimo że segment na dysku B nie zawierał. B dostawał
@@ -929,6 +1047,57 @@ test('F1/R1: persist w toku + flush B w oknie await - B NIE ginie (migawka + cz�
     t.is(countDocs(c.indexer.db), 3);
     indexer.dispose();
     c.indexer.dispose();
+});
+
+// H4 (runda naprawcza 3): "crash" restart PO pierwszym persiście, BEZ drugiego - wariant F1/R1
+// wyżej, ale zatrzymany wcześniej. F1/R1 zawsze robi DRUGI persist (`await indexer._persistNow()`)
+// zanim sprawdzi metę - to gubi mutanta M11 (`_buildMetaV2` bez filtra `_pending`), bo po DRUGIM
+// (realnym) zapisie sky.md i tak dostaje poprawny wiersz, więc różnica z mutantem znika. Tu
+// sprawdzamy stan NATYCHMIAST po persiście A, symulując crash procesu ZANIM drugi persist zdążył
+// wystartować: notatka B, która weszła do `_pending` W OKNIE zapisu A (poza jego migawką), NIE MOŻE
+// dostać mtime bez odpowiadającego wiersza w meta na dysku - inaczej `_resync()` po restarcie
+// uznałby jej mtime za "aktualny" (zgadza się z plikiem) i NIGDY by jej nie zreembedował: cicha,
+// trwała dziura w indeksie (B ma stempel, ale nie ma wektora).
+test('H4: restart PO crashu (bez drugiego persistu) - notatka spóźniona w oknie zapisu wraca do kolejki, nie znika po cichu (kills M11)', async t => {
+    const store: FakeStore = new Map();
+    const { indexer, files, vault, embedder } = newIndexer({ files: baseFiles(), store });
+    await indexer.initialize();
+    const gate = armWriteGate(vault);
+
+    // A = car.md - flush go embeduje, ląduje w _pending, PIERWSZY wchodzi w persist.
+    files.set('car.md', { content: 'Nowy samochód A', mtime: 200 });
+    indexer._onVaultEvent('modify', { path: 'car.md' });
+    await indexer._flushQueue();
+
+    const persistA = indexer._persistNow(); // migawka _pending = {car.md} - wejdzie w writeBinary i zawiśnie
+    await tick();
+
+    // B = sky.md - zmieniony i sflushowany W OKNIE await persistu A (POZA jego migawką).
+    files.set('sky.md', { content: 'Inne niebo B', mtime: 201 });
+    indexer._onVaultEvent('modify', { path: 'sky.md' });
+    await indexer._flushQueue();
+
+    gate.open();
+    await persistA; // BEZ drugiego persistu - "crash" zaraz po tym
+
+    const meta = readMetaV2(store);
+    t.falsy(meta.mtimes['sky.md'], 'B nie ma mtime na dysku - jego wektor nigdy nie został zapisany (M11 wypisałby go tu)');
+    t.falsy(meta.rows['sky.md'], 'B nie ma wiersza na dysku');
+
+    // "Restart po crashu": nowy indekser na TYM SAMYM store, bez żadnego kolejnego zapisu ze
+    // starego egzemplarza (proces padł zaraz po persist A, zero clean shutdown).
+    indexer.dispose();
+    const { indexer: r, embedder: rEmbedder } = newIndexer({ files, store });
+    await r.initialize();
+
+    t.is(r.getStatus().status, 'ready');
+    t.deepEqual(rEmbedder._calls.texts, ['Inne niebo B'], 'restart MUSI zreembedować dokładnie B - jego mtime nie był na dysku (pod M11 embedder NIE dostałby tego wywołania)');
+    t.is(countDocs(r.db), 3, 'po restarcie komplet dokumentów - B nie zgubił się po cichu');
+
+    const qv = (await embedder.embed('Inne niebo B'))!;
+    const res = await searchVectorTopK(r.db!, qv, { k: 1, similarity: 0 });
+    t.is(res.hits[0].document.path, 'sky.md', 'top-1 dla wektora B to B');
+    r.dispose();
 });
 
 // R2: kompakcja w toku (czyta segmenty z dysku, potem pisze bazowy) + w oknie await: notatka D
@@ -1069,53 +1238,59 @@ test('F1/R3: dwa _persistNow() naraz - unikalne nazwy segmentów, meta spójna, 
     c.indexer.dispose();
 });
 
-// R4: rebuild() (Reindex) w trakcie, a "timer" persistu (debounce 30s po edycji SPRZED Reindex)
-// wystrzeliwuje w środku skanu - `rebuild()` musi POCZEKAĆ na persist w toku PRZED resetem stanu,
-// a wywołania `_persistNow()` z timera w trakcie skanu nie mogą korumpować świeżo resetowanych
-// `_segments`/`_rows`/`_pending`.
-test('F1/R4: rebuild() + persisty z timera w trakcie skanu - stan po rebuildzie kompletny i spójny', async t => {
+// R4: rebuild() (Reindex) w trakcie, a persist "z timera" (odpalany JAWNIE przez test, symulując
+// debounce 30s po edycji SPRZED Reindex) wystrzeliwuje w środku skanu - `rebuild()` musi POCZEKAĆ
+// na persist w toku PRZED resetem stanu, a wywołania `_persistNow()` w trakcie skanu nie mogą
+// korumpować świeżo resetowanych `_segments`/`_rows`/`_pending`.
+//
+// H3 (runda naprawcza 3): zero realnego czasu (`setTimeout` 5/3/7 ms ze starej wersji testu pod
+// wolną pętlą zdarzeń w CI dawał nieprzewidywalny przeplot) - `armEmbedGate` blokuje KAŻDĄ porcję
+// embeddingu z osobna, test jawnie decyduje, PO KTÓREJ porcji wystrzeliwuje "timerowy" `_persistNow()`.
+test('F1/R4: rebuild() + persisty jawne w trakcie skanu (bramki, nie realny czas) - stan po rebuildzie kompletny i spójny', async t => {
     const N = 10;
+    const BATCH_SIZE = 2;
     const files = new Map<string, FakeFile>();
     for (let i = 0; i < N; i++) files.set(`f${i}.md`, { content: `tekst ${i}`, mtime: 1 });
     const store: FakeStore = new Map();
     // Fabryka - tak indekser startowy, jak restart po teście, dzielą model_key/dims (inaczej
     // restart odrzuciłby restore jako `model_changed` i re-embed byłby OCZEKIWANY, nie bugiem).
+    let vecSeq = 0;
     const makeR4Embedder = (): FakeEmbedder => ({
         _calls: { embedBatch: 0, texts: [] }, isReady: () => true, getModelKey: () => 'm', getDims: () => 4,
         async embed() { return null; },
         async embedBatch(texts: string[]) {
             this._calls.embedBatch++; this._calls.texts.push(...texts);
-            await new Promise(r => setTimeout(r, 5)); // symuluje HTTP - daje oknu na realne przeplatanie
-            return texts.map(() => { const n = Math.random(); return [Math.sin(n), Math.cos(n), 3, 1]; });
+            return texts.map(() => { vecSeq++; return [Math.sin(vecSeq), Math.cos(vecSeq), 3, 1]; });
         },
     });
     const embedder = makeR4Embedder();
-    const { indexer, vault } = newIndexer({ files, store, embedder, batchSize: 2 });
+    const { indexer, vault } = newIndexer({ files, store, embedder, batchSize: BATCH_SIZE });
     await indexer.initialize();
 
-    // Zwolnij zapisy realnym, krótkim opóźnieniem (nie gate ręcznej blokady) - test odtwarza
-    // przeplot z timera bez ręcznego sterowania każdym krokiem (jak w R1-R3).
-    const realWriteBinary = vault.adapter.writeBinary.bind(vault.adapter);
-    vault.adapter.writeBinary = async (path: string, data: ArrayBuffer) => {
-        await new Promise(r => setTimeout(r, 3));
-        return realWriteBinary(path, data);
-    };
+    const embedGate = armEmbedGate(embedder);
+    const writeGate = armWriteGate(vault); // blokuje WSZYSTKIE zapisy, dopóki test nie zawoła open()
 
     const rebuildP = indexer.rebuild();
+    const batches = Math.ceil(N / BATCH_SIZE);
     const timerPersists: Promise<void>[] = [];
-    for (let i = 0; i < 4; i++) {
-        await new Promise(r => setTimeout(r, 7));
-        timerPersists.push(indexer._persistNow());
+    for (let i = 0; i < batches; i++) {
+        await embedGate.nextCall(); // skan doszedł do kolejnej porcji - czeka w bramce
+        embedGate.release();        // pozwól JEJ się zakończyć (insertOne dopisze wektory do _pending)
+        if (i < batches - 1) {
+            await tick(); // daj _insertOne dołożyć wektory tej porcji do _pending
+            timerPersists.push(indexer._persistNow()); // "timer" persistu w trakcie skanu
+        }
     }
+    writeGate.open(); // odblokuj WSZYSTKIE zapisy naraz - persisty w toku + finałowy z końca skanu
     await rebuildP;
     await Promise.all(timerPersists);
-    await indexer._persistNow(); // domyka wszystko, co timerowe persisty jeszcze zostawiły w _pending
+    await indexer._persistNow(); // domyka wszystko, co jawne persisty jeszcze zostawiły w _pending
 
     const meta = readMetaV2(store);
     const missing = [...files.keys()].filter(p => !(p in meta.rows));
     t.deepEqual(missing, [], 'KAŻDA notatka ma wiersz po rebuildzie - nic nie może zgubić się w przeplocie');
     const names = meta.segments.map(s => s.file);
-    t.is(new Set(names).size, names.length, 'zero zdublowanych nazw segmentów mimo timerów w trakcie skanu');
+    t.is(new Set(names).size, names.length, 'zero zdublowanych nazw segmentów mimo persistów w trakcie skanu');
 
     const c = newIndexer({ files, store, embedder: makeR4Embedder() });
     await c.indexer.initialize();
@@ -1424,7 +1599,7 @@ test('G6: dispose() w trakcie flusha - flush zakończony PO dispose nie uzbraja 
     const store: FakeStore = new Map();
     const files = baseFiles();
     const embedder = makeEmbedder();
-    const { indexer, vault } = newIndexer({ files, store, embedder, persistDebounceMs: 10 });
+    const { indexer, vault } = newIndexer({ files, store, embedder });
     await indexer.initialize(); // skan startowy przez ZDROWY embedder - gate dokładamy DOPIERO teraz
 
     let resolveEmbed!: () => void;
@@ -1444,7 +1619,9 @@ test('G6: dispose() w trakcie flusha - flush zakończony PO dispose nie uzbraja 
     resolveEmbed();
     await flushP; // flush kończy się PO dispose - insertuje car.md, woła _schedulePersist()
 
-    await new Promise(r => setTimeout(r, 50)); // dłużej niż persistDebounceMs (10 ms)
+    // H3: dowód zamiast czekania na realny czas - `_schedulePersist()` sprawdza `_disposed` i
+    // wraca NATYCHMIAST bez uzbrajania timera (patrz kod), więc `_persistTimer === null` od razu
+    // jest równoważnym, deterministycznym dowodem "żaden zapis nie został i nie zostanie uzbrojony".
     t.is(writeBinaryCalls, 0, 'zero zapisów segmentu po dispose(), mimo że flush zakończył się PO nim');
     t.is((indexer as unknown as { _persistTimer: unknown })._persistTimer, null, 'żaden nowy timer zapisu nie mógł zostać uzbrojony po dispose()');
     t.is((indexer as unknown as { _pending: Map<string, unknown> })._pending.size, 1, 'wektor car.md zostaje w pending - nic nie ginie, po prostu nie jest jeszcze na dysku');
@@ -1956,7 +2133,9 @@ test('F4.1: rozjazd dims w resync + rebuild, który SAM pada → status error, b
             throw Object.assign(new Error('ECONNREFUSED'), { kind: 'transport' }); // rebuild: dostawca zgaszony
         },
     };
-    const b = newIndexer({ files, store, embedder: e8, batchSize: 2, scanRetryMs: 5 });
+    // H3: scanRetryMs DOMYŚLNY (ogromny) - ten test sprawdza TYLKO że ponowienie zostało uzbrojone
+    // (asercja niżej), nie że ono faktycznie wystrzeli, więc nie musi go obserwować w realnym czasie.
+    const b = newIndexer({ files, store, embedder: e8, batchSize: 2 });
     await b.indexer.initialize();
 
     const status = b.indexer.getStatus();
