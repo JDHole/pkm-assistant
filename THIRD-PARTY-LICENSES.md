@@ -20,6 +20,7 @@ nie importuje, więc tree-shaking ją usuwa. Zweryfikowano 2026-08-27.
 | [`@cfworker/json-schema`](https://www.npmjs.com/package/@cfworker/json-schema) | MIT | bezpośrednia zależność (`package.json`) - walidator `outputSchema`/`structuredContent` narzędzi MCP zewnętrznych, podmienia domyślny `AjvJsonSchemaValidator` SDK |
 | [`@modelcontextprotocol/sdk`](https://www.npmjs.com/package/@modelcontextprotocol/sdk) | MIT | bezpośrednia zależność (`package.json`) |
 | [`@orama/orama`](https://www.npmjs.com/package/@orama/orama) | Apache-2.0 | bezpośrednia zależność (`package.json`) |
+| [`content-type`](https://www.npmjs.com/package/content-type) | MIT | tranzytywna, przez SDK (transport HTTP: parsowanie nagłówka Content-Type) |
 | [`cross-spawn`](https://www.npmjs.com/package/cross-spawn) | MIT | tranzytywna, przez SDK (klient stdio) |
 | [`eventsource-parser`](https://www.npmjs.com/package/eventsource-parser) | MIT | tranzytywna, przez SDK (klient HTTP/SSE) |
 | [`isexe`](https://www.npmjs.com/package/isexe) | ISC | tranzytywna, przez `which` |
@@ -35,7 +36,7 @@ nie importuje, więc tree-shaking ją usuwa. Zweryfikowano 2026-08-27.
 
 ## Licencja MIT
 
-Dotyczy: `@cfworker/json-schema`, `@modelcontextprotocol/sdk`, `cross-spawn`,
+Dotyczy: `@cfworker/json-schema`, `@modelcontextprotocol/sdk`, `content-type`, `cross-spawn`,
 `eventsource-parser`, `path-key`, `pkce-challenge`, `shebang-command`, `shebang-regex`, `zod`.
 
 Tekst licencji MIT jest identyczny dla wszystkich pakietów - jedyną zmienną częścią jest
@@ -45,6 +46,7 @@ nota copyrightowa, więc jest wypisana raz per pakiet, a tekst licencji raz na k
 
 - **@cfworker/json-schema** - Copyright (c) 2020 Jeremy Danyow
 - **@modelcontextprotocol/sdk** - Copyright (c) 2024 Anthropic, PBC
+- **content-type** - Copyright (c) 2015 Douglas Christopher Wilson
 - **cross-spawn** - Copyright (c) 2018 Made With MOXY Lda \<hello@moxy.studio\>
 - **eventsource-parser** - Copyright (c) 2026 Espen Hovlandsdal \<espen@hovlandsdal.com\>
 - **path-key** - Copyright (c) Sindre Sorhus \<sindresorhus@gmail.com\> (sindresorhus.com)
