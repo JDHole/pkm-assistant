@@ -93,19 +93,29 @@ export function sectionKeyOf(line: string | null | undefined): BrainSectionKey |
 // separatora i diakrytyków): separator między "Na teraz" a słowem kluczowym jest OPCJONALNY
 // i dopuszcza dwukropek/myślnik/półpauzę/pauzę (`## Na teraz — User`), a "Środowisko" jest
 // rozpoznawane też BEZ ogonków (`## Na teraz: Srodowisko`) - realne stare pliki (recznie
-// edytowane, sprzed tego rejestru) miewały oba warianty. Kotwica `$` na końcu (po opcjonalnym
-// whitespace) zostaje w OBU językach - to WCIĄŻ nie łapie ręcznej sekcji usera typu
-// „## Na teraz coś tam" (bez rozpoznanego słowa kluczowego zaraz po separatorze).
+// edytowane, sprzed tego rejestru) miewały oba warianty.
+//
+// KOTWICA LUŹNA (recenzja niezależna, dogrywka rundy 2, DECYZJA - jak na main): po rozpoznanym
+// słowie kluczowym stoi `\b` (granica słowa), NIE `\s*$`. Główna gałąź kodu dopisuje ogon po
+// nazwie osoby/projektu ręcznie (`## Na teraz: User (Kuba)`) - stara kotwica `$` odrzucała
+// TAKĄ linię w całości (zero dopasowania), więc realna, ręcznie rozszerzona sekcja usera
+// stawała się foreign zamiast zarządzanej. Luźna kotwica NIE rozpoznaje więcej fałszywych
+// pozytywów niż poprzednio: dopasowanie i tak wymaga, żeby zaraz PO separatorze stało DOKŁADNIE
+// jedno z rozpoznanych słów (`## Na teraz: Vault` - "Vault" nie jest tym słowem, więc CAŁY regex
+// nie dopasowuje, `null`, tak jak dotąd), ogon jest dopuszczony wyłącznie PO udanym dopasowaniu
+// słowa kluczowego. „## Na teraz coś tam" (bez rozpoznanego słowa kluczowego zaraz po
+// separatorze) nadal wraca `null` - jest zwykłą sekcją obcą, nie zarządzaną zawartością.
 const NA_TERAZ_KEY_RE: Readonly<Record<BrainLocale, RegExp>> = {
-    pl: /^##\s+na teraz\s*[:\-–—]?\s*(user|środowisko|srodowisko)\s*$/i,
-    en: /^##\s+right now\s*[:\-–—]?\s*(user|environment)\s*$/i,
+    pl: /^##\s+na teraz\s*[:\-–—]?\s*(user|środowisko|srodowisko)\b/i,
+    en: /^##\s+right now\s*[:\-–—]?\s*(user|environment)\b/i,
 };
 
 /**
  * Nagłówek „Na teraz"/„Right now" w OBU językach → klucz, albo `null`. Regex wymaga
- * rozpoznanego słowa klucza zaraz po „Na teraz"/„Right now" (separator opcjonalny, patrz
- * komentarz przy `NA_TERAZ_KEY_RE`) - ręcznie dopisana sekcja usera typu „## Na teraz coś tam"
- * (bez rozpoznanego słowa klucza) NIE jest łapana: taka sekcja jest zwykłą sekcją obcą
+ * rozpoznanego słowa klucza zaraz po „Na teraz"/„Right now" (separator opcjonalny, ogon PO
+ * słowie kluczowym dowolny - patrz komentarz przy `NA_TERAZ_KEY_RE`) - ręcznie dopisana sekcja
+ * usera typu „## Na teraz coś tam" albo „## Na teraz: Vault" (bez rozpoznanego słowa klucza
+ * zaraz po separatorze) NIE jest łapana: taka sekcja jest zwykłą sekcją obcą
  * (`BrainIndex.parseForeignSections`), nie zarządzaną zawartością „Na teraz".
  */
 export function naTerazKeyOf(line: string | null | undefined): NaTerazKey | null {

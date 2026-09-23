@@ -106,6 +106,21 @@ test('naTerazKeyOf: mimo poszerzenia, „## Na teraz coś tam" (dash + śmieć z
     t.is(naTerazKeyOf('## Right now - something else'), null);
 });
 
+// Kotwica LUŹNA (recenzja niezależna, dogrywka rundy 2, DECYZJA - jak na main): po rozpoznanym
+// słowie kluczowym może stać dowolny ogon (`\b`, nie `\s*$`) - realna, ręcznie rozszerzona
+// sekcja usera (dopisek imienia/projektu w nawiasie) ma zostać ZARZĄDZANA, nie foreign.
+test('naTerazKeyOf: ogon PO rozpoznanym słowie kluczowym jest dopuszczony (kotwica luźna jak na main)', t => {
+    t.is(naTerazKeyOf('## Na teraz: User (Kuba)'), 'user');
+    t.is(naTerazKeyOf('## Right now: User (me)'), 'user');
+});
+
+// Kontrola przeciwna: ogon zamiast klucza dalej NIE dopasowuje - luzowanie kotwicy nie zmienia
+// wymogu, że zaraz PO separatorze musi stać DOKŁADNIE jedno z rozpoznanych słów. „Vault" nie
+// jest tym słowem, więc cały regex nie dopasowuje wcale (nie: dopasowuje i ucina ogon).
+test('naTerazKeyOf: "## Na teraz: Vault" nadal null - "Vault" nie jest rozpoznanym słowem klucza', t => {
+    t.is(naTerazKeyOf('## Na teraz: Vault'), null);
+});
+
 test('isNaTerazHeading = naTerazKeyOf(line) !== null, w obu językach', t => {
     t.true(isNaTerazHeading('## Na teraz: User'));
     t.true(isNaTerazHeading('## Right now: Environment'));

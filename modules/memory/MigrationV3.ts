@@ -1,6 +1,6 @@
 import { makeMemoryNoteFilename } from './MemoryAccessGuard.js';
 import { buildBrainIndex, indexSectionHeadings } from './BrainIndex.js';
-import { BRAIN_SECTION_HEADINGS, BRAIN_LOCALES } from './brainSections.js';
+import { BRAIN_SECTION_HEADINGS, BRAIN_LOCALES, detectBrainLocale } from './brainSections.js';
 // Adapterowy mkdir -p (dawna prywatna, rekurencyjna `ensureFolder` w tym pliku).
 // Deep-import świadomy - barrel core/index.js wciąga obsidian, a memory jest node-testowane.
 import { ensureAdapterFolder, probeFile } from '../../core/index.js';
@@ -341,18 +341,26 @@ export class MigrationV3 {
             ? this.parseSections(originalBrain).filter(section => keep.has(section.title))
             : [];
 
-        // Migracja v2→v3 pisze ZAWSZE po polsku - HARDKODOWANE, NIE `uiBrainLocale()`. Legacy
-        // v2 brain istniał wyłącznie sprzed jakiegokolwiek dwujęzycznego UI, więc jego treść
-        // (a więc i notatki/nagłówki, które migracja z niej odtwarza) jest ZAWSZE polska,
-        // niezależnie od tego, w jakim języku user ma UI W CHWILI, gdy migrację odpala -
-        // poleganie na `resolveBrainLocale`/detekcji byłoby błędem dla pliku, który ma TYLKO
-        // nagłówek `## Ustalenia` (bez `## Bieżące` czy innego sygnału): `detectBrainLocale`
-        // zwróciłby `null` i migracja wypisałaby angielskie nagłówki nad polską treścią, gdyby
-        // user akurat miał UI po angielsku. `'## Ustalenia'` jest DODATKOWO dopisany do
-        // rejestru (`brainSections.ts`, `LOCALE_SPECIFIC_HEADINGS.pl`) jako druga, niezależna
-        // warstwa obrony - ale TA ścieżka (jedyny pisarz nowego `brain.md` z migracji) nie
-        // polega na detekcji wcale.
-        const locale = 'pl' as const;
+        // Migracja v2→v3 pisze PO POLSKU, ale WYKRYTY język istniejącej treści ma
+        // pierwszeństwo - NIGDY `uiBrainLocale()`, tylko `detectBrainLocale(originalBrain)`.
+        // Prawdziwy v2 istniał wyłącznie sprzed jakiegokolwiek dwujęzycznego UI, więc jego
+        // treść jest ZAWSZE polska - stąd `'pl'` jako FALLBACK, gdy detekcja nie rozstrzyga
+        // (np. plik ma TYLKO nagłówek `## Ustalenia`, bez `## Bieżące` czy innego sygnału -
+        // `'## Ustalenia'` jest w `LOCALE_SPECIFIC_HEADINGS.pl`, więc i tak wychodzi `'pl'`).
+        //
+        // Ale hardkodowane `'pl'` BEZ tego fallbacku łamało kontrakt dla pliku, który
+        // `looksLikeV3Index` (wyżej) NIE rozpoznał jako już-v3 - dokładnie przypadek opisany
+        // przy tej funkcji: brain w formacie v3 zbudowany WYŁĄCZNIE z gołych nagłówków
+        // indeksu (żadnej notatki - brak `[[brain/...]]`, żadnej sekcji „Na teraz"/„Right
+        // now" - np. świeży klon repo, gdzie git nie przenosi PUSTEGO folderu `brain/`) jest
+        // nieodróżnialny od v2 i trafia w TEN kod. Plik EN (`## Current`/`## Preferences`/
+        // `## Projects and references`) migrowany hardkodowanym `'pl'` wychodziłby PRZEPISANY
+        // na polskie nagłówki, mimo że `buildPlan`/`parseSections` poprawnie sparsowały jego
+        // sekcje jako TREŚĆ do zachowania - poprawny content pod złym językiem nagłówków.
+        // `detectBrainLocale` rozpoznaje ten sam plik jako EN (te same nagłówki, które
+        // zawiodły `looksLikeV3Index` po stronie „ile sygnałów naraz", wystarczają PO JEDNYM
+        // dla samej detekcji języka) i naprawia dokładnie tę ścieżkę.
+        const locale = detectBrainLocale(originalBrain) ?? 'pl';
         const brain = formatNewBrain(this.memory.agentName, plan, createdNotes, kept, locale);
         await this.memory.vault.adapter.write(this.memory.paths.brain, brain);
         await this.memory.stateManager.read();

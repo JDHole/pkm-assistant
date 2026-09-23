@@ -303,6 +303,51 @@ test.serial('migracja v2 z SAMĄ sekcją „Ustalenia" (bez „Bieżące") pod U
     t.false(newBrain.includes('## Projects and references'));
 });
 
+// BLOKER dogrywki rundy 2: `applyPlan` hardkodował `locale = 'pl'` bez fallbacku na detekcję.
+// Plik EN w KSZTAŁCIE v3, ale bez folderu `brain/` (git nie przenosi PUSTEGO folderu - świeży
+// klon repo/desync), bez sekcji „Right now" i bez linków `[[brain/...]]` jest NIEODRÓŻNIALNY od
+// v2 dla `looksLikeV3Index` (wymaga wikilinka ALBO nagłówka „Na teraz"/„Right now" - żadnego z
+// dwóch tu nie ma) - trafia więc w REALNĄ ścieżkę migracji (`buildPlan`+`applyPlan`), a stare,
+// hardkodowane `'pl'` przepisywałoby go na polskie nagłówki, mimo że `buildPlan` poprawnie
+// rozpoznaje jego sekcje jako angielskie nagłówki indeksu. Naprawa: `locale =
+// detectBrainLocale(originalBrain) ?? 'pl'` - wykryty EN ma pierwszeństwo, `'pl'` zostaje
+// WYŁĄCZNIE fallbackiem dla treści bez żadnego rozpoznawalnego sygnału (prawdziwy v2).
+test.serial('MigrationV3 applyPlan: EN v3-skeleton BEZ brain/ i BEZ "Right now" (nierozpoznany przez looksLikeV3Index) zostaje EN po migracji, mimo UI "en"', async t => {
+    t.teardown(() => setLocale('en'));
+    setLocale('en');
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const enSkeleton = `# Jaskier brain
+
+## Current
+
+## User
+
+## Preferences
+
+## Workflow
+
+## Projects and references
+`;
+    const { vault, files } = makeVault({ [`${base}/brain.md`]: enSkeleton });
+    const memory = asMemory(new AgentMemory(vault, 'Jaskier'));
+    const migration = new MigrationV3(memory, { now: () => '2026-05-15T00:00:00.000Z' });
+
+    // Kontrola: ten fixture NIE jest rozpoznawany jako już-v3 - realnie idzie w applyPlan,
+    // dokładnie ta ścieżka, którą naprawiamy (inaczej test nie łapałby regresji wcale).
+    t.true(await migration.needsMigration(), 'fixture ma trafić w REALNĄ migrację (buildPlan+applyPlan), nie w skip already_v3_format');
+
+    const result = await migration.run({ interactive: false });
+    const newBrain = files[`${base}/brain.md`];
+
+    t.true(result.migrated === true);
+    t.true(newBrain.includes('## Current'), 'nagłówek indeksu zostaje EN - wykryty z istniejącej treści, nie PL na sztywno');
+    t.true(newBrain.includes('## Preferences'));
+    t.true(newBrain.includes('## Projects and references'));
+    t.false(newBrain.includes('## Bieżące'), 'stary bug: hardkodowane locale=\'pl\' przepisywało EN plik na polskie nagłówki');
+    t.false(newBrain.includes('## Preferencje'));
+    t.false(newBrain.includes('## Projekty i referencje'));
+});
+
 test('looksLikeV3Index: plik JUŻ w formacie v3 PO ANGIELSKU jest rozpoznany jako v3 (nie migrowany)', async t => {
     const base = '.pkm-assistant/agents/jaskier/memory';
     const enV3Brain = `# Jaskier brain
