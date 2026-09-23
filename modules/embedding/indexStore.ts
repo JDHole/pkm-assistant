@@ -265,7 +265,7 @@ function parseV1VectorEntries(vectorsRaw: unknown, size: number): V1VectorEntry[
         const [iid, payload] = entry as unknown[];
         if (!isFiniteNumber(iid)) return null;
         if (!Array.isArray(payload) || payload.length !== 2) return null;
-        const vector = payload[1];
+        const vector: unknown = payload[1];
         if (!Array.isArray(vector) || vector.length !== size) return null;
         for (const n of vector) if (!isFiniteNumber(n)) return null;
         out.push({ iid, vector: vector as number[] });
