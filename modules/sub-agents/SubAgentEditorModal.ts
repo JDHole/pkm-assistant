@@ -130,7 +130,7 @@ export class SubAgentEditorModal extends Modal {
                 .addDropdown(dd => {
                     dd.addOption('', t('modal.sub_agent.model_default'));
                     for (const m of models) {
-                        dd.addOption(m.model, `${(platformNames as Record<string, string>)[m.platform] || m.platform} — ${m.model}${m.isDefault ? ' ★' : ''}`);
+                        dd.addOption(m.model, `${(platformNames as Record<string, string>)[m.platform] || m.platform} - ${m.model}${m.isDefault ? ' ★' : ''}`);
                     }
                     dd.setValue(formData.model || '');
                     dd.onChange(v => formData.model = (v || null) as string);
