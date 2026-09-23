@@ -13,6 +13,16 @@ import type { ApprovalAction, ApprovalModalResult } from '../../core/index.js';
 const EXTERNAL_ARGS_LIMIT = 1500;
 
 /**
+ * Ostatnia deska ratunku, gdy `JSON.stringify(externalArgs)` rzuca (cykl w strukturze) -
+ * woła własny `toString` wartości. Osobna funkcja graniczna: dopiero jej wywołanie resetuje
+ * zawężenie TS z powrotem do gołego `unknown`, więc `String()` tutaj nie zgłasza
+ * no-base-to-string (ten sam wzorzec co `_safeStringify` w `core/utils/errorUtils.ts`).
+ */
+function _rawToString(value: unknown): string {
+    return String(value);
+}
+
+/**
  * TS-boundary: `ApprovalAction` (core, kontrakt `ApprovalHandler`) trzyma tylko wspólny rdzeń
  * (type/targetPath/agentName/preview/approvalTarget) + indeks `[key: string]: unknown` dla pól
  * dokładanych przez poszczególnych wołaczy narzędzi (MCPClient i inni). Ten modal czyta
@@ -377,7 +387,9 @@ export class ApprovalModal extends Modal {
             try {
                 text = JSON.stringify(args, null, 2);
             } catch {
-                text = String(args);
+                // Cykl w strukturze - JSON.stringify rzucił. Ostatnia deska ratunku: własny
+                // toString wartości.
+                text = _rawToString(args);
             }
             if (text.length > EXTERNAL_ARGS_LIMIT) {
                 text = text.slice(0, EXTERNAL_ARGS_LIMIT) + '\n' + t('approval.preview.external_args_truncated');

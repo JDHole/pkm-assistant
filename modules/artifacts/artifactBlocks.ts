@@ -15,8 +15,8 @@ import { log } from '../../core/utils/Logger.js';
 import type { ArtifactType, ArtifactPatchOp, ArtifactPatchError, ThinArtifact } from './types.js';
 
 /** Wyłuskaj `id` z ciała bloku (`id: art-...` albo sam token w pierwszej linii). */
-export function parseArtifactBlockId(source: unknown = ''): string {
-    const text = String(source || '').trim();
+export function parseArtifactBlockId(source: string | null | undefined = ''): string {
+    const text = (source || '').trim();
     if (!text) return '';
     const m = text.match(/^id\s*:\s*(.+)$/mi);
     if (m) return m[1].trim().replace(/^["']|["']$/g, '');
@@ -24,8 +24,8 @@ export function parseArtifactBlockId(source: unknown = ''): string {
 }
 
 /** Ścieżka vaulta do porównania: jeden zapis (slashe w przód, bez `./` i wiodącego `/`). */
-function canonicalVaultPath(path: unknown): string {
-    return String(path ?? '')
+function canonicalVaultPath(path: string | null | undefined): string {
+    return (path ?? '')
         .replace(/\\/g, '/')
         .replace(/^\.\//, '')
         .replace(/^\/+/, '')
@@ -54,11 +54,11 @@ function canonicalVaultPath(path: unknown): string {
  * @returns {boolean}
  */
 export function isBlockBoundToNote(
-    id: unknown,
-    sourcePath: unknown,
+    id: string | null | undefined,
+    sourcePath: string | null | undefined,
     store: { pathById?: (id: string) => string | null } | null | undefined,
 ): boolean {
-    const artifactId = String(id ?? '').trim();
+    const artifactId = (id ?? '').trim();
     const here = canonicalVaultPath(sourcePath);
     if (!artifactId || !here || typeof store?.pathById !== 'function') return false;
     const owner = canonicalVaultPath(store.pathById(artifactId));

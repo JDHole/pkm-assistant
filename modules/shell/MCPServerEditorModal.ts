@@ -53,15 +53,15 @@ interface McpEditorForm {
 const BUILTIN_SERVER_NAMES = ['core', 'artifacts', 'vault', 'memory', 'web', 'multimodal', 'delegation', 'komunikator'];
 
 /** Parse a textarea into a trimmed, non-empty line array (args). */
-function parseLines(text: unknown): string[] {
-    return String(text || '')
+function parseLines(text: string): string[] {
+    return text
         .split('\n')
         .map(s => s.trim())
         .filter(Boolean);
 }
 
 /** Parse `KEY=value` lines into an object (env). First `=` splits; later `=` stay in value. */
-function parseKeyValueEq(text: unknown): Record<string, string> {
+function parseKeyValueEq(text: string): Record<string, string> {
     const out: Record<string, string> = {};
     for (const line of parseLines(text)) {
         const idx = line.indexOf('=');
@@ -72,7 +72,7 @@ function parseKeyValueEq(text: unknown): Record<string, string> {
 }
 
 /** Parse `Name: value` lines into an object (http headers). First `:` splits. */
-function parseKeyValueColon(text: unknown): Record<string, string> {
+function parseKeyValueColon(text: string): Record<string, string> {
     const out: Record<string, string> = {};
     for (const line of parseLines(text)) {
         const idx = line.indexOf(':');

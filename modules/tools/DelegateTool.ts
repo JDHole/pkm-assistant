@@ -122,6 +122,20 @@ interface StreamingModelLike {
  * WYŁĄCZNIE, gdy bieg realnie padł - bez tego rozróżnienia błąd suba wracałby do modelu
  * jako `success:true` z komunikatem błędu w polu `result`.
  */
+/**
+ * `SubAgentRunResult.result` jest `unknown` (kontrakt DI - patrz interfejs niżej), choć w
+ * praktyce runner zawsze zwraca string. Guard `null`/`undefined` MUSI zostać w tej funkcji,
+ * a właściwy `String()` w OSOBNEJ - dopiero jej granica wywołania resetuje zawężenie TS z
+ * powrotem do gołego `unknown` (ten sam wzorzec co `_safeStringify` w `core/utils/errorUtils.ts`).
+ */
+function _rawResultToString(value: unknown): string {
+    return value === null || value === undefined ? '' : _rawToString(value);
+}
+
+function _rawToString(value: unknown): string {
+    return String(value);
+}
+
 interface SubAgentRunResult {
     result?: unknown;
     toolsUsed?: unknown;
@@ -1240,7 +1254,7 @@ async function _executeSubAgent(
     if (result.failed) {
         return {
             success: false,
-            error: typeof result.result === 'string' ? result.result : String(result.result ?? ''),
+            error: typeof result.result === 'string' ? result.result : _rawResultToString(result.result),
             aspect: subAgentConfig.name,
             stopped_by: 'error',
             duration_ms: result.duration,

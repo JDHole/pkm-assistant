@@ -38,10 +38,9 @@ const DEFAULT_FLUSH_EVERY_N = 20;
  * @param text
  * @param maxLen
  */
-export function truncate(text: unknown, maxLen: number = DEFAULT_MAX_LEN): string {
-    const s = String(text ?? '');
-    if (maxLen > 0 && s.length > maxLen) return s.slice(0, maxLen) + '…';
-    return s;
+export function truncate(text: string, maxLen: number = DEFAULT_MAX_LEN): string {
+    if (maxLen > 0 && text.length > maxLen) return text.slice(0, maxLen) + '…';
+    return text;
 }
 
 /**
@@ -93,10 +92,26 @@ export function serializeArg(value: unknown, maxLen: number = DEFAULT_MAX_LEN): 
         return truncate(String(value), maxLen);
     }
     try {
-        return truncate(JSON.stringify(value), maxLen);
+        // `JSON.stringify` zwraca `undefined` (bez rzucania) dla funkcji/symboli —
+        // tak samo puste jak dotąd dawał `String(undefined ?? '')`.
+        return truncate(JSON.stringify(value) ?? '', maxLen);
     } catch {
-        return truncate(String(value), maxLen);
+        // Cykl w strukturze — JSON.stringify rzucił. Ostatnia deska ratunku: własny
+        // toString wartości (Date, klasa usera z toString, albo domyślny [object Object]).
+        return truncate(_fallbackToString(value), maxLen);
     }
+}
+
+/**
+ * Woła `String()` na wartości, której nic już nie da się powiedzieć poza tym, że
+ * nie jest stringiem/liczbą/boolem/bigintem/Error/null/undefined — a JSON za nią
+ * odmówił (cykl). Świadomie osobna funkcja: dopiero granica wywołania resetuje
+ * zawężenie TS z powrotem do gołego `unknown`, więc to jedyne miejsce w tym pliku,
+ * gdzie `String(x)` na niezawężonej wartości jest zamierzone, nie przez przeoczenie
+ * (ten sam wzorzec co `_safeStringify` w `core/utils/errorUtils.ts`).
+ */
+function _fallbackToString(value: unknown): string {
+    return String(value);
 }
 
 /** Wejście `formatLogLine` — wszystko opcjonalne, bo funkcja sama łata braki. */
@@ -104,7 +119,7 @@ export interface LogLineEntry {
     timestamp?: string;
     level?: string;
     tag?: string;
-    message?: unknown;
+    message?: string;
     args?: unknown[];
 }
 
@@ -122,7 +137,7 @@ export function formatLogLine(
     const lvl = String(level || 'info').toUpperCase();
     const tagStr = `[${tag || '?'}]`;
     const body = [
-        truncate(String(message ?? ''), maxLen),
+        truncate(message ?? '', maxLen),
         ...(Array.isArray(args) ? args : []).map((a) => serializeArg(a, maxLen)),
     ].filter((p) => p !== '').join(' ');
     return `[${ts}] [${lvl}] ${tagStr}${body ? ' ' + body : ''}`;

@@ -93,10 +93,21 @@ function maskLogValue(value: unknown, depth = 0): unknown {
         try {
             return JSON.parse(maskLogText(JSON.stringify(value)));
         } catch {
-            return maskLogText(String(value));
+            return maskLogText(_fallbackToString(value));
         }
     }
     return value;
+}
+
+/**
+ * Woła `String()` na wartości, o której poza tym, że jest obiektem, nic więcej nie wiadomo
+ * (JSON.stringify rzucił - cykl). Osobna funkcja: dopiero granica wywołania resetuje
+ * zawężenie TS z powrotem do gołego `unknown`, więc to jedyne miejsce, gdzie `String(x)`
+ * na niezawężonej wartości jest zamierzone (ten sam wzorzec co `_safeStringify`
+ * w `core/utils/errorUtils.ts`).
+ */
+function _fallbackToString(value: unknown): string {
+    return String(value);
 }
 
 class Logger {

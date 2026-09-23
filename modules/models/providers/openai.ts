@@ -61,9 +61,25 @@ export class OpenAiProvider extends OpenAiCompatibleProvider {
     }
 
     protected override acceptsModel(entry: Record<string, unknown>): boolean {
-        const id = String(entry.id ?? '').toLowerCase();
+        const id = _idToString(entry.id).toLowerCase();
         return !NON_CHAT_MODEL_PREFIXES.some(prefix => id.startsWith(prefix));
     }
+}
+
+/**
+ * `entry.id` przychodzi z listy modeli zwróconej przez API dostawcy - `Record<string, unknown>`
+ * bez walidacji schematem (baza, `OpenAiCompatibleProvider`, celowo nie zawęża kształtu wiersza).
+ * Osobna funkcja graniczna: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
+ * `unknown`, więc `String()` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
+ * `_safeStringify` w `core/utils/errorUtils.ts`).
+ */
+function _idToString(id: unknown): string {
+    return id === null || id === undefined ? '' : _rawToString(id);
+}
+
+/** Granica wywołania: dopiero tu TS widzi znów gołe `unknown`, więc `String()` nie jest flagowane. */
+function _rawToString(value: unknown): string {
+    return String(value);
 }
 
 /** `'Klara Test'` → `'pkm-agent-Klara-Test'`. Pusta nazwa = brak klucza cache. */

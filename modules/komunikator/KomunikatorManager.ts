@@ -998,7 +998,7 @@ function formatMessageDate(now: Date): string {
  * @returns {string}
  */
 export function buildMessageMarkdown(fm: MessageFrontmatter, body: string): string {
-    const quote = (v: unknown) => JSON.stringify(String(v ?? '').replace(/[\r\n]+/g, ' ').trim());
+    const quote = (v: string) => JSON.stringify(v.replace(/[\r\n]+/g, ' ').trim());
     return [
         '---',
         'type: kom-message',

@@ -260,7 +260,7 @@ function formatToolInput(toolName: string, input: unknown) {
                 return s.length > 80 ? s.slice(0, 77) + '...' : s;
             }
         }
-    } catch { return String(input || '').slice(0, 80); }
+    } catch { return _fallbackToolText(input).slice(0, 80); }
 }
 
 /**
@@ -351,7 +351,7 @@ function formatToolInputDetail(toolName: string, input: unknown) {
                 return parts.join('  |  ') || JSON.stringify(data).slice(0, 120);
             }
         }
-    } catch { return String(input || '').slice(0, 500); }
+    } catch { return _fallbackToolText(input).slice(0, 500); }
 }
 
 /**
@@ -594,7 +594,7 @@ function formatToolOutput(toolName: string, output: unknown) {
         // normalizeMcpResult) lands here; without a cap it would put the WHOLE response into
         // the DOM node, even in the default compact-chip mode where the node is built eagerly
         // and then immediately hidden. Same cap as the read branch.
-        const s = String(output || '');
+        const s = _fallbackToolText(output);
         return { summary: _truncate(s, 120), detail: s.length > 120 ? _truncate(s, 2000) : null };
     }
 }
@@ -673,6 +673,21 @@ function _formatGenericOutput(data: ToolOutputPayload) {
 /** Convert snake_case/camelCase key to friendly label */
 function _friendlyKey(key: string) {
     return key.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+}
+
+/**
+ * Ostatnia deska ratunku, gdy `input`/`output` narzędzia (JSON od modelu/UI, bez walidacji
+ * schematem) nie da się rozebrać w `try` - pokazujemy surowiec zamiast pustki. Osobna funkcja
+ * graniczna: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego `unknown`, więc
+ * `String()` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co `_safeStringify`
+ * w `core/utils/errorUtils.ts`).
+ */
+function _fallbackToolText(value: unknown): string {
+    return value ? _rawToString(value) : '';
+}
+
+function _rawToString(value: unknown): string {
+    return String(value);
 }
 
 /** Shorten path: keep last 2 segments */

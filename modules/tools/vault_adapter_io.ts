@@ -5,8 +5,8 @@
  * relative to the vault root — this is NOT a whole-computer filesystem bridge.
  */
 
-export function isHiddenVaultPath(path: unknown): boolean {
-    return String(path || '')
+export function isHiddenVaultPath(path: string | undefined): boolean {
+    return (path || '')
         .replace(/\\/g, '/')
         .split('/')
         .some(segment => segment.startsWith('.') && segment.length > 1);
@@ -63,13 +63,13 @@ interface AdapterListing {
  * identyczna jak przy pełnym przebiegu — cięcie nie zmienia, co trafia do wyniku, tylko ile
  * operacji na dysku po drodze się odbywa.
  */
-export async function listAdapterFolder(adapter: ListCapableAdapter, folderPath: unknown, {
+export async function listAdapterFolder(adapter: ListCapableAdapter, folderPath: string, {
     recursive = false,
     maxDepth = 12,
     maxScanned = 5000,
     maxFiles = Infinity,
 }: ListAdapterOptions = {}): Promise<AdapterListing> {
-    const root = folderPath === '/' ? '' : String(folderPath || '').replace(/\/+$/, '');
+    const root = folderPath === '/' ? '' : folderPath.replace(/\/+$/, '');
     const files: AdapterEntry[] = [];
     let scanned = 0;
 

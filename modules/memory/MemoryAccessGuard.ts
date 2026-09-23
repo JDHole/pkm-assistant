@@ -1,5 +1,15 @@
 import { getAgentSafeName } from '../../core/index.js';
 
+/**
+ * Osobna funkcja graniczna: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
+ * `unknown`, więc `String()` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
+ * `_safeStringify` w `core/utils/errorUtils.ts`). Wołaj wyłącznie po sprawdzeniu, że wartość
+ * jest truthy - `name`/`filename` bywają czymkolwiek z zewnątrz (model, YAML, dane migracji).
+ */
+function _rawToString(value: unknown): string {
+    return String(value);
+}
+
 /** Kanoniczne typy notatek `brain/` (Memory v3). */
 export type MemoryNoteType = 'user' | 'agent_rule' | 'skill_hint' | 'project_context' | 'reference';
 
@@ -36,7 +46,7 @@ export function isValidNoteType(type: unknown): type is MemoryNoteType {
 
 export function makeMemoryNoteFilename(type: unknown, name: unknown): string {
     const safeType = NOTE_TYPES.has(type as string) ? (type as MemoryNoteType) : 'reference';
-    let safeName = String(name || '')
+    let safeName = (name ? _rawToString(name) : '')
         .normalize('NFKD')
         .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase()
@@ -69,7 +79,7 @@ export class MemoryAccessGuard {
     }
 
     validateNoteFilename(filename: unknown, basePath: string): NoteFilenameDecision {
-        const raw = String(filename || '').trim();
+        const raw = (filename ? _rawToString(filename) : '').trim();
         if (!raw) {
             return this._deny(MEMORY_V3_ERROR_CODES.INVALID_PATH, 'filename is required');
         }

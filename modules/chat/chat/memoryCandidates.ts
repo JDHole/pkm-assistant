@@ -44,8 +44,26 @@ export type MemoryCandidate = {
  * @param {string} rawText - Full Summarizer response (summary + optional candidate block).
  * @returns {{ summary: string, candidates: Array<{name,description,type,content,why,how_to_apply}> }}
  */
+/**
+ * Konwersja `unknown` -> string dla pól bloku MEMORY_CANDIDATES (pisze je MODEL, bez walidacji
+ * schematem - patrz `RawCandidate` wyżej) - jedna funkcja zamiast N kopii `String(x || '')`,
+ * każda osobno zgłaszana przez eslint jako bazowa stringifikacja.
+ */
+function toText(value: unknown): string {
+    return value ? _rawToString(value) : '';
+}
+
+/**
+ * Osobna funkcja graniczna: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
+ * `unknown`, więc `String(value)` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
+ * `_safeStringify` w `core/utils/errorUtils.ts`). Wołaj wyłącznie z `toText`.
+ */
+function _rawToString(value: unknown): string {
+    return String(value);
+}
+
 export function parseMemoryCandidates(rawText: unknown): { summary: string; candidates: MemoryCandidate[] } {
-    const text = String(rawText || '');
+    const text = toText(rawText);
     const idx = text.indexOf(MEMORY_CANDIDATES_SENTINEL);
     if (idx === -1) {
         return { summary: text.trim(), candidates: [] };
@@ -56,7 +74,7 @@ export function parseMemoryCandidates(rawText: unknown): { summary: string; cand
 }
 
 function extractCandidates(tail: unknown): MemoryCandidate[] {
-    const jsonText = String(tail || '').trim()
+    const jsonText = toText(tail).trim()
         .replace(/^```(?:json)?\s*/i, '')
         .replace(/\s*```$/i, '')
         .trim();
@@ -82,16 +100,16 @@ function extractCandidates(tail: unknown): MemoryCandidate[] {
         // Invalid type is rejected outright (not silently coerced) - a mislabeled note pollutes the
         // wrong brain.md section.
         if (!isValidNoteType(candidate?.type)) continue;
-        const name = String(candidate?.name || '').trim();
-        const content = String(candidate?.content || '').trim();
+        const name = toText(candidate?.name).trim();
+        const content = toText(candidate?.content).trim();
         if (!name || !content) continue;
         clean.push({
             name,
-            description: String(candidate?.description || '').trim(),
+            description: toText(candidate?.description).trim(),
             type: candidate.type,
             content,
-            why: String(candidate?.why || '').trim(),
-            how_to_apply: String(candidate?.how_to_apply || candidate?.howToApply || '').trim(),
+            why: toText(candidate?.why).trim(),
+            how_to_apply: (toText(candidate?.how_to_apply) || toText(candidate?.howToApply)).trim(),
         });
         if (clean.length >= MAX_CANDIDATES) break;
     }

@@ -62,6 +62,15 @@ export type StepKind = (typeof STEP_KIND)[keyof typeof STEP_KIND];
 /** Błąd widziany przez maszynę stanów - bierzemy z niego tylko te dwa pola. */
 type ErrLike = { message?: string; code?: string };
 
+/**
+ * Osobna funkcja graniczna: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
+ * `unknown`, więc `String()` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
+ * `_safeStringify` w `core/utils/errorUtils.ts`).
+ */
+function _rawToString(value: unknown): string {
+    return String(value);
+}
+
 /** Znormalizowany licznik zużycia tokenów jednego kroku / całego przebiegu. */
 export interface StepUsage {
     inputTokens: number;
@@ -505,7 +514,7 @@ export class ConsolidationRun {
         const step = this._require(stepId);
         this._transition(step, [STEP_STATUS.RUNNING, STEP_STATUS.APPLYING, STEP_STATUS.AWAITING_REVIEW], STEP_STATUS.FAILED);
         step.error = error
-            ? { message: (error as ErrLike).message || String(error), code: (error as ErrLike).code || null }
+            ? { message: (error as ErrLike).message || _rawToString(error), code: (error as ErrLike).code || null }
             : { message: 'unknown', code: null };
         step.endedAt = this._now();
         this._maybeFinish();

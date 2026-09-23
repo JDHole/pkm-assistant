@@ -25,16 +25,16 @@ export class SlashCommandsRegistry {
         this.commands.set(command.name.toLowerCase(), command);
     }
 
-    get(name: unknown): SlashCommand | null {
-        return this.commands.get(String(name || '').toLowerCase()) || null;
+    get(name: string): SlashCommand | null {
+        return this.commands.get(name.toLowerCase()) || null;
     }
 
     list(): SlashCommand[] {
         return [...this.commands.values()];
     }
 
-    async execute(input: unknown, ctx: SlashCommandContext): Promise<boolean> {
-        const raw = String(input || '').trim();
+    async execute(input: string, ctx: SlashCommandContext): Promise<boolean> {
+        const raw = input.trim();
         const command = [...this.commands.values()]
             .sort((a, b) => b.name.length - a.name.length)
             .find(candidate => {

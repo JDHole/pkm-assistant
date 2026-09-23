@@ -61,8 +61,8 @@ function yamlSingleQuoted(expr: unknown): string {
  * @param {string} [folder]
  * @returns {string}
  */
-function normalizeFolder(folder: unknown): string {
-    const trimmed = String(folder ?? '').trim().replace(/^\/+|\/+$/g, '');
+function normalizeFolder(folder: string | undefined): string {
+    const trimmed = (folder ?? '').trim().replace(/^\/+|\/+$/g, '');
     return trimmed || DEFAULT_ARTIFACTS_FOLDER;
 }
 

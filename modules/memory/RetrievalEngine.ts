@@ -482,14 +482,14 @@ export class RetrievalEngine {
     }
 
     /** Rozwiąż link/nazwę notatki na ścieżkę vaulta (metadataCache.getFirstLinkpathDest). */
-    private _resolveLinkPath(ref: unknown): string | null {
-        const linkpath = String(ref || '').replace(/\.md$/i, '');
+    private _resolveLinkPath(ref: string | undefined): string | null {
+        const linkpath = (ref || '').replace(/\.md$/i, '');
         const dest = this.app?.metadataCache?.getFirstLinkpathDest?.(linkpath, '');
         return dest?.path || null;
     }
 
     /** Ścieżki, do których linkuje podana notatka (forward) - z resolvedLinks. */
-    private _resolvedForwardLinkPaths(ref: unknown): Set<string> {
+    private _resolvedForwardLinkPaths(ref: string | undefined): Set<string> {
         const out = new Set<string>();
         const srcPath = this._resolveLinkPath(ref);
         if (!srcPath) return out;
@@ -499,7 +499,7 @@ export class RetrievalEngine {
     }
 
     /** Ścieżki źródeł, które linkują DO podanej notatki (backlinks) - z resolvedLinks. */
-    private _resolvedBacklinkPaths(ref: unknown): Set<string> {
+    private _resolvedBacklinkPaths(ref: string | undefined): Set<string> {
         const out = new Set<string>();
         const targetPath = this._resolveLinkPath(ref);
         if (!targetPath) return out;
@@ -877,11 +877,17 @@ export class RetrievalEngine {
         return new RegExp(`^${escaped}$`).test(path);
     }
 
+    /**
+     * `fm.title` z frontmattera jest `unknown` (YAML usera - może nieść dowolny skalar).
+     * Wołane WYŁĄCZNIE z `_title` po odrzuceniu falsy/tablicy - reszta osobno w
+     * `_rawToString`, bo dopiero granica jej wywołania resetuje zawężenie TS z powrotem do
+     * gołego `unknown` (ten sam wzorzec co `_safeStringify` w `core/utils/errorUtils.ts`).
+     */
     private _title(content: string | null, name: string | undefined): string {
         const fm = this._parseFrontmatter(content || '');
         const title = fm.title;
-        if (title && !Array.isArray(title)) return String(title);
-        return String(name || '').replace(/\.md$/i, '');
+        if (title && !Array.isArray(title)) return _rawToString(title);
+        return (name || '').replace(/\.md$/i, '');
     }
 
     /** Excerpt: keyword hit → fragment wokół frazy; inaczej początek treści. */
@@ -932,4 +938,13 @@ export class RetrievalEngine {
         if (truncated) s = `${s}…`;
         return s;
     }
+}
+
+/**
+ * Osobna funkcja graniczna: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
+ * `unknown`, więc `String()` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
+ * `_safeStringify` w `core/utils/errorUtils.ts`).
+ */
+function _rawToString(value: unknown): string {
+    return String(value);
 }

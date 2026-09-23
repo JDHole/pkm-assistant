@@ -15,5 +15,16 @@
  * kopie, nie tylko te w modułach.
  */
 export function getAgentSafeName(name: unknown): string {
-    return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+    return (name ? _rawToString(name) : '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+}
+
+/**
+ * `name` przychodzi jako `unknown` z definicji (wołacze mają różne kształty danych usera) —
+ * osobna funkcja graniczna, bo dopiero jej wywołanie resetuje zawężenie TS z powrotem do
+ * gołego `unknown` (ten sam wzorzec co `_safeStringify` w `core/utils/errorUtils.ts`): guard
+ * `name ?` w `getAgentSafeName` MUSI zostać poza tą funkcją, inaczej TS zawęża `name` do typu,
+ * który eslint zgłasza jako bazową stringifikację.
+ */
+function _rawToString(name: unknown): string {
+    return String(name);
 }

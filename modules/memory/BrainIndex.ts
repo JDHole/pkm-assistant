@@ -67,15 +67,25 @@ export function indexSectionHeadings(locale: BrainLocale): readonly string[] {
 }
 
 /** Map a free-form section label/heading to the canonical key, or null when it is neither. */
-export function naTerazSectionKey(value: unknown): NaTerazKey | null {
-    const s = String(value || '').toLowerCase();
+export function naTerazSectionKey(value: string | null | undefined): NaTerazKey | null {
+    const s = (value || '').toLowerCase();
     if (/\buser\b|użytkownik|uzytkownik/.test(s)) return 'user';
     if (/środow|srodow|environ|vault|system|otoczenie/.test(s)) return 'environment';
     return null;
 }
 
+/**
+ * `cleanEntry` obsługuje TAKŻE dowolny kształt z `normalizeNaTeraz` (`clean(arr: unknown)`,
+ * poniżej) - stąd `unknown`, nie `string`. Guard `!value` MUSI zostać tutaj, a właściwy
+ * `String()` w OSOBNEJ funkcji granicznej - dopiero jej wywołanie resetuje zawężenie TS
+ * z powrotem do gołego `unknown` (ten sam wzorzec co `_safeStringify` w `core/utils/errorUtils.ts`).
+ */
 function cleanEntry(value: unknown): string {
-    return String(value || '').replace(/\s+/g, ' ').trim();
+    return (value ? _rawToString(value) : '').replace(/\s+/g, ' ').trim();
+}
+
+function _rawToString(value: unknown): string {
+    return String(value);
 }
 
 /**
@@ -348,8 +358,8 @@ function noteTimestamp(note: BrainNoteMeta | null | undefined): number {
  * z PRAWDZIWYMI znakami nowej linii - wstawiony niesklejony do promptu potrafi otworzyć własny
  * nagłówek/sekcję. Każdy emiter opisu do promptu MUSI przejść tędy.
  */
-export function oneLineDescription(value: unknown): string {
-    return String(value || '')
+export function oneLineDescription(value: string | undefined): string {
+    return (value || '')
         .replace(/\s+/g, ' ')
         .trim()
         .slice(0, 220);

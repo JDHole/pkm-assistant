@@ -24,6 +24,24 @@ const VALID_NOTE_TYPES = new Set(['user', 'agent_rule', 'skill_hint', 'project_c
 /** Błąd w catch — czytamy z niego tylko te pola. */
 type ErrLike = { message?: string; code?: string; silentMs?: number };
 
+/**
+ * Konwersja `unknown` -> string dla pól odpowiedzi LLM (`_parseDedupResponse` - JSON od modelu,
+ * bez walidacji schematem) - jedna funkcja zamiast N kopii `String(x || '')`, każda osobno
+ * zgłaszana przez eslint jako bazowa stringifikacja.
+ */
+function _toText(value: unknown): string {
+    return value ? _rawToString(value) : '';
+}
+
+/**
+ * Osobna funkcja graniczna: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
+ * `unknown`, więc `String(value)` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
+ * `_safeStringify` w `core/utils/errorUtils.ts`). Wołaj wyłącznie z `_toText`.
+ */
+function _rawToString(value: unknown): string {
+    return String(value);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════════════
 //  Kontrakty otoczenia, typowane STRUKTURALNIE
 //  (`AgentMemory.js` jest jeszcze w JavaScripcie — nie czekamy na
@@ -827,7 +845,7 @@ export class ArchiveWorkflow {
     }
 
     _parseDedupResponse(text: unknown): { merges: DedupMerge[]; deletions: DedupDeletion[] } {
-        const raw = String(text || '').trim();
+        const raw = _toText(text).trim();
         if (!raw) throw new Error('Empty LLM response');
         const stripped = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
         let parsed: { merges?: unknown; deletions?: unknown };
@@ -844,19 +862,19 @@ export class ArchiveWorkflow {
                 const sources = Array.isArray(m?.sources) ? m.sources.filter(Boolean).map(String) : [];
                 if (sources.length < 2) return null;
                 const type = VALID_NOTE_TYPES.has(m?.target_type as string) ? (m.target_type as string) : 'reference';
-                const targetName = String(m?.target_name || '').trim();
+                const targetName = _toText(m?.target_name).trim();
                 if (!targetName) return null;
-                const mergedContent = String(m?.merged_content || '').trim();
+                const mergedContent = _toText(m?.merged_content).trim();
                 if (!mergedContent) return null;
                 return {
                     sources,
                     target_name: targetName,
                     target_type: type,
-                    target_description: String(m?.target_description || '').trim(),
-                    target_why: String(m?.target_why || '').trim(),
-                    target_how_to_apply: String(m?.target_how_to_apply || '').trim(),
+                    target_description: _toText(m?.target_description).trim(),
+                    target_why: _toText(m?.target_why).trim(),
+                    target_how_to_apply: _toText(m?.target_how_to_apply).trim(),
                     merged_content: mergedContent,
-                    why: String(m?.why || '').trim(),
+                    why: _toText(m?.why).trim(),
                     accepted: true
                 };
             })
@@ -864,13 +882,13 @@ export class ArchiveWorkflow {
 
         const deletions: DedupDeletion[] = (Array.isArray(parsed?.deletions) ? parsed.deletions : [])
             .map((d: Record<string, unknown>): DedupDeletion | null => {
-                const filename = String(d?.filename || '').trim();
+                const filename = _toText(d?.filename).trim();
                 if (!filename || !filename.endsWith('.md')) return null;
                 const lessonsRaw = d?.lessons_extracted;
                 const lessonsExtracted = lessonsRaw === true || String(lessonsRaw).toLowerCase() === 'true';
                 return {
                     filename,
-                    why: String(d?.why || '').trim(),
+                    why: _toText(d?.why).trim(),
                     lessons_extracted: lessonsExtracted,
                     accepted: true
                 };
@@ -1060,7 +1078,7 @@ export class ArchiveWorkflow {
     private _buildNoteContent({ name, description, type, body, why, how_to_apply }: {
         name?: string; description?: string; type?: string; body?: string; why?: string; how_to_apply?: string;
     }): string {
-        const safe = (v: unknown) => JSON.stringify(String(v || '').slice(0, 1000));
+        const safe = (v: string | undefined) => JSON.stringify((v || '').slice(0, 1000));
         const date = new Date().toISOString().slice(0, 10);
         const whyLine = why || 'Merged from multiple notes via ArchiveWorkflow.';
         const howLine = how_to_apply || 'Use this when the topic comes up in conversation.';

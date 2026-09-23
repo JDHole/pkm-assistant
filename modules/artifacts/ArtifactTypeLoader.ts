@@ -248,6 +248,16 @@ function normalizeSeed(text: string): string {
     return text.replace(/\r\n/g, '\n').replace(/[ \t]+$/gm, '').trimEnd();
 }
 
+/**
+ * `frontmatter.nazwa`/`opis` to pola YAML bez walidacji typu w locie (`unknown`) - `_parseTypeFile`
+ * sprawdza tylko, że są truthy, więc TS dalej widzi je jako `unknown`. Osobna funkcja graniczna:
+ * dopiero jej wywołanie resetuje zawężenie TS, więc `String()` tutaj nie zgłasza
+ * no-base-to-string (ten sam wzorzec co `_safeStringify` w `core/utils/errorUtils.ts`).
+ */
+function _fieldToString(value: unknown): string {
+    return String(value);
+}
+
 interface ArtifactAdapter {
     exists(path: string): Promise<boolean>;
     list(path: string): Promise<{ files?: string[] } | null | undefined>;
@@ -315,17 +325,19 @@ export class ArtifactTypeLoader {
 
         const sprzatanie = Number.isFinite(frontmatter.sprzatanie) ? Number(frontmatter.sprzatanie) : 0;
 
+        const nazwa = _fieldToString(frontmatter.nazwa);
+        const opis = _fieldToString(frontmatter.opis);
         return {
-            name: String(frontmatter.nazwa),
+            name: nazwa,
             slug: filePath.split('/').pop()!.replace(/\.md$/i, ''),
-            opis: String(frontmatter.opis),
-            description: String(frontmatter.opis),
+            opis,
+            description: opis,
             pola: normalizeFields(frontmatter.pola),
             statusy,
             sprzatanie,
             template: content || '',
             path: filePath,
-            builtin: BUILTIN_TYPE_NAMES.includes(String(frontmatter.nazwa)),
+            builtin: BUILTIN_TYPE_NAMES.includes(nazwa),
         };
     }
 

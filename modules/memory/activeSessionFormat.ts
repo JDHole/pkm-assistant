@@ -213,16 +213,16 @@ const FIELD_END_LOOKAHEAD = `(?=\\n\\*\\*(?:${FIELD_LABELS_ALT}):\\*\\*[ \\t]*(?
  * formatu po stronie pisarza B (i tym samym odczytu starych plików).
  *
  */
-export function escapeActiveText(text: unknown): string {
-    return String(text ?? '').replace(/(^|\n)## /g, '$1\\## ');
+export function escapeActiveText(text: string): string {
+    return text.replace(/(^|\n)## /g, '$1\\## ');
 }
 
 /**
  * Odwrotność `escapeActiveText`. Na treści bez escapów to no-op (dlatego wolno ją
  * puszczać także na LEGACY blokach event-logu, które nigdy nie były escapowane).
  */
-export function unescapeActiveText(text: unknown): string {
-    return String(text ?? '').replace(/(^|\n)\\## /g, '$1## ');
+export function unescapeActiveText(text: string): string {
+    return text.replace(/(^|\n)\\## /g, '$1## ');
 }
 
 /**
@@ -233,7 +233,7 @@ export function unescapeActiveText(text: unknown): string {
  * wynik narzędzia zawierający linię `**result:**` UCINAŁ pole przy odczycie, bo lookahead
  * `extractEventField` brał ją za początek następnego pola.
  */
-export function escapeEventFieldText(text: unknown): string {
+export function escapeEventFieldText(text: string): string {
     return escapeActiveText(text).replace(FIELD_LABEL_LINE_RE, '$1\\$2');
 }
 
@@ -243,8 +243,8 @@ export function escapeEventFieldText(text: unknown): string {
  * pisarz robi (`## ` → etykiety), czytnik (etykiety → `## `).
  * Na treści bez escapów to no-op (legacy bloki), jak cała para.
  */
-export function unescapeEventFieldLabels(text: unknown): string {
-    return String(text ?? '').replace(ESCAPED_FIELD_LABEL_LINE_RE, '$1$2');
+export function unescapeEventFieldLabels(text: string): string {
+    return text.replace(ESCAPED_FIELD_LABEL_LINE_RE, '$1$2');
 }
 
 /**
@@ -304,8 +304,8 @@ export function formatSessionEvent(
  *
  * @param text - zawartość pliku sesji
  */
-export function maxSeq(text: unknown): number {
-    const body = String(text ?? '').replace(/\r\n/g, '\n');
+export function maxSeq(text: string | null | undefined): number {
+    const body = (text || '').replace(/\r\n/g, '\n');
     const re = /^\*\*seq:\*\*[ \t]*\n\s*(\d+)/gm;
     let max = 0;
     let match: RegExpExecArray | null;
@@ -349,7 +349,7 @@ export function maxSeq(text: unknown): number {
  *
  * @param text - zawartość pliku
  */
-export function parseActiveSession(text: unknown): ParsedActiveSession {
+export function parseActiveSession(text: string | null | undefined): ParsedActiveSession {
     const result: ParsedActiveSession = {
         messages: [],
         metadata: {},
@@ -358,7 +358,7 @@ export function parseActiveSession(text: unknown): ParsedActiveSession {
     if (!text) return result;
 
     // Normalizacja końców linii RAZ - dalej cały parser pracuje wyłącznie na `\n`.
-    let body = String(text).replace(/\r\n/g, '\n');
+    let body = text.replace(/\r\n/g, '\n');
     result.metadata = parseFrontmatter(body);
     body = body.replace(/^---\n[\s\S]*?\n---\n*/, '');
 
@@ -481,9 +481,9 @@ function eventTypeFromHeader(header: unknown): string {
  *
  * @returns treść pola albo ''
  */
-function extractEventField(body: unknown, field: string): string {
+function extractEventField(body: string, field: string): string {
     const pattern = new RegExp(`(?:^|\\n)\\*\\*${field}:\\*\\*\\n\\n([\\s\\S]*?)${FIELD_END_LOOKAHEAD}`);
-    const match = String(body || '').match(pattern);
+    const match = body.match(pattern);
     if (!match) return '';
     return unescapeEventFieldLabels(match[1]).trim();
 }
@@ -492,7 +492,7 @@ function extractEventField(body: unknown, field: string): string {
  * Numer zdarzenia z pola `**seq:**` bloku event-logu. `null` = brak numeracji
  * (blok legacy sprzed v2 albo pole w nieznanym kształcie).
  */
-function seqFromEvent(body: unknown): number | null {
+function seqFromEvent(body: string): number | null {
     const raw = extractEventField(body, 'seq');
     if (!/^\d+$/.test(raw)) return null;
     const value = Number(raw);
@@ -554,7 +554,7 @@ function parseSessionToolCalls(raw: string): SessionToolCall[] | null {
  * (transkrypt z `parsed.messages` + kasacja oryginału) także z dysku. Przy etykiecie `system`
  * było jeszcze gorzej - treść błędu wracała jako wiadomość SYSTEMOWA.
  */
-function roleFromEvent(type: string, body: unknown): SessionRole | null {
+function roleFromEvent(type: string, body: string): SessionRole | null {
     if (type === 'user_message') return 'user';
     if (type === 'agent_message') return 'assistant';
     if (type === 'tool_result' || type === 'mcp_call') return 'tool';
@@ -575,8 +575,8 @@ function roleFromEvent(type: string, body: unknown): SessionRole | null {
  *
  * @param content - File content
  */
-export function parseFrontmatter(content: unknown): SessionFrontmatter {
-    const match = String(content ?? '').match(/^---\n([\s\S]*?)\n---/);
+export function parseFrontmatter(content: string): SessionFrontmatter {
+    const match = content.match(/^---\n([\s\S]*?)\n---/);
     if (!match) return {};
     // `_lastKey` to pole ROBOCZE parsera (kotwica dla list `- item`), kasowane na końcu -
     // stąd osobny wariant typu, a nie zanieczyszczanie kontraktu `SessionFrontmatter`.
@@ -606,8 +606,8 @@ export function parseFrontmatter(content: unknown): SessionFrontmatter {
 /**
  * Skalar frontmattera: zdejmuje cudzysłowy, rozumie `true`/`false`/`null`.
  */
-function parseFrontmatterScalar(value: unknown): string | boolean | null {
-    const raw = String(value || '').trim();
+function parseFrontmatterScalar(value: string): string | boolean | null {
+    const raw = value.trim();
     if (!raw) return '';
     if (
         (raw.startsWith('"') && raw.endsWith('"')) ||
