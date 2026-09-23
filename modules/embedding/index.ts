@@ -1,8 +1,10 @@
 /**
  * modules/embedding — public API (barrel).
  *
- * Ten moduł eksportuje rejestr + model + dostawcy embeddingów. Nie ma tu migratora starego
- * indeksu (v1.x → Orama) - taki podsystem nie istnieje w tym module.
+ * Ten moduł eksportuje rejestr + model + dostawcy embeddingów. Nie ma tu migratora BARDZO
+ * STAREGO indeksu (sprzed Oramy, v1.x) - taki podsystem nie istnieje w tym module. Migracja
+ * WEWNĄTRZ formatu Oramy (JSON-dump → segmenty binarne v2) istnieje i jest wewnętrzną sprawą
+ * `VaultIndexer` - patrz `IndexerNotice` i `CLAUDE.md`, sekcja „Format indeksu v2".
  *
  * **NIE wychodzi stąd:** typy HTTP (`HttpClient`, `HttpRequestSpec`, `HttpResponse`) - konsumenci
  * spoza modułu biorą je z `core/index.js`, żeby nie było dwóch dróg do jednego typu.

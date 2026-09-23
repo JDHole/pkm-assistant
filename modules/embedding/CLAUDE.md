@@ -31,9 +31,11 @@ modules/embedding/
 │   ├── lm_studio.ts              # kształt OpenAI + natywny /api/v0/models (type==='embeddings')
 │   ├── gemini.ts                 # :batchEmbedContents, x-goog-api-key, retryDelay z ciała 429
 │   └── index.ts                  # instancje + EMBEDDING_PROVIDERS (mapa rejestru)
-├── orama_engine.ts              # Orama wrapper (insert/remove/search/persist)
+├── orama_engine.ts              # Orama wrapper (insert/remove/search) - silnik W PAMIĘCI, zero trwałości własnej
 ├── orama_engine.test.ts
-├── VaultIndexer.ts               # żywy indeks semantyczny vaulta → plugin.oramaDb
+├── indexStore.ts                 # Format indeksu v2: segmenty Float32 + meta, walidacja na granicy, kompakcja, czytnik dumpu v1 (funkcje czyste, zero I/O)
+├── indexStore.test.ts
+├── VaultIndexer.ts               # żywy indeks semantyczny vaulta → plugin.oramaDb; TRWAŁOŚĆ własna (format v2, patrz sekcja niżej)
 ├── VaultIndexer.test.ts
 ├── adaMigration.ts               # Meldunek migracji modelu ada-002 → 3-small
 ├── adaMigration.test.ts
@@ -105,7 +107,35 @@ Modele domyślne - JEDNO źródło (`DEFAULT_EMBED_MODELS`): OpenAI `text-embedd
 
 ## VaultIndexer - żywy indeks semantyczny
 
-Patrz nagłówek `VaultIndexer.ts` dla pełnego opisu statusów/skanu/hooków - kontrakt fasady (`EmbedderFacade`) i pole `IndexerStatusSnapshot.modelKey` (SNAPSHOT, nie pole na dysku: sidecar `vault-index.meta.json` dalej pisze `model_key`, bo to dane usera).
+Patrz nagłówek `VaultIndexer.ts` dla pełnego opisu statusów/skanu/hooków - kontrakt fasady (`EmbedderFacade`) i pole `IndexerStatusSnapshot.modelKey` (SNAPSHOT, nie pole na dysku: sidecar `vault-index.meta.json` dalej pisze `model_key`, bo to dane usera). `IndexerStatusSnapshot.lastNotice` niesie ostatnie zdarzenie wykrytego rebuildu/migracji (patrz sekcja niżej) - `null` gdy nic się nie zdarzyło.
+
+---
+
+## Format indeksu v2 (segmenty + meta)
+
+Orama zostaje silnikiem **wyłącznie w pamięci** - BM25, docs-store i sortowanie żyją tylko w RAM i są odtwarzane przy restore. **Trwałość jest własnością `VaultIndexer`, nie Oramy**: na dysku nie ma nic pochodnego, tylko wektory + minimalna meta.
+
+### Na dysku (`.pkm-assistant/index/`)
+
+- **`vault-index.meta.json`** - JEDYNE źródło prawdy o tym, co jest w indeksie: `model_key`, `dims`, `next_seq`, `segments[]` (`{file, rows}` per segment), `mtimes` (KAŻDA zaindeksowana notatka, także pusta) i `rows` (`path → [segIdx, rowIdx]`, TYLKO notatki z wektorem - pusta treść nie ma wiersza).
+- **`vault-index.<seq zero-padded 6>.vec`** - segment binarny little-endian: magic `"PKMV"` + `format=2` + `dims` + `rows` + `rows×dims` Float32. `next_seq` rośnie monotonicznie, nawet po kompakcji - żaden numer nie jest nigdy ponownie użyty.
+- Wszystko czytane z dysku wchodzi jako `unknown` i przechodzi przez `parseIndexMetaV2`/`parseIndexMetaV1`/`decodeSegment` (`indexStore.ts`) - kształt i spójność (każdy `rows[path]` wskazuje istniejący segment i wiersz w jego granicach) są zwalidowane PRZED użyciem. Cokolwiek nie gra → `null` → rebuild, nigdy cicha korupcja.
+
+### Protokół commitu
+
+Segmenty są **niezmienne, pisane raz, nigdy nadpisywane**. Zapis przyrostowy = nowy segment z wierszami zmienionych notatek. **Meta jest punktem commitu**: kolejność zapisu jest zawsze segment → meta. Pad zapisu segmentu zostawia stan w pamięci nietknięty (następny persist nadpisuje ten sam, częściowo zapisany plik). Pad zapisu meta zostawia segment jako sierotę - stara meta (jeszcze niezastąpiona) nadal wskazuje na swoje własne, kompletne segmenty, więc indeks czytany teraz jest spójny; sierota zostaje sprzątnięta przy najbliższym udanym restore (`adapter.list()` na katalogu indeksu, dopasowanie po nazwie pliku, `remove()` best-effort).
+
+**Kompakcja** (plik-w-plik) odpala się, gdy segmentów jest za dużo (> 8) albo martwych wierszy jest przynajmniej połowa żywych: czyta segmenty z dysku + wiersze oczekujące, pisze JEDEN nowy segment bazowy (posortowany po ścieżce), potem meta, potem kasuje stare pliki (best-effort). Segment uszkodzony w trakcie kompakcji przerywa ją (warn) i spada na zwykłą ścieżkę zapisu zamiast gubić dane.
+
+### Migracja v1 → v2, z pancerzem
+
+Stary sidecar (`{version:1, model_key, dims, mtimes}` + `vault-index.json` = dawny zrzut `Orama.save()`) jest migrowany automatycznie przy pierwszym restore po aktualizacji pluginu. **Stary plik NIE jest kasowany, dopóki nowe pliki nie są zapisane I ODCZYTANE z powrotem z sukcesem** (segment → meta → odczyt segmentu + porównanie próbki wektorów co do `Math.fround` → odczyt meta i porównanie liczby wierszy). Każdy pad na dowolnym z tych kroków = `IndexerNotice{kind:'migration_failed'}` + pełny rebuild; stary plik zostaje nietknięty do czasu, aż jakiś PÓŹNIEJSZY udany zapis v2 (choćby z rebuildu) go usunie jako balast.
+
+### Wykryty rebuild (nigdy cicha korupcja)
+
+Zmiana modelu embeddingów, zmiana wymiaru wektora, uszkodzona meta/segment albo nieudana migracja - każdy z tych przypadków kończy się `IndexerNotice` (`model_changed` / `dims_changed` / `index_corrupt` / `migration_failed` / `migrated`) i pełnym rebuildem, nigdy cichym pomieszaniem starych i nowych wektorów. `src/main.ts` mapuje powiadomienie na `Notice` z tekstem `embedding.notice.<kind>` (i18n PL/EN). Rozjazd wymiaru wektora ma DWIE różne konsekwencje zależnie od tego, GDZIE się zdarza:
+- **wewnątrz pełnego skanu** (`_fullScan`, pierwszy wektor dopiero ustala `dims`) - rozjazd późniejszego pliku to anomalia dostawcy w obrębie jednego biegu, nie powód do pętli: plik jest po prostu pominięty (jak `EMBED_SKIPPED`), skan leci dalej.
+- **na żywym indeksie** (`_resync`/`_flushQueue`, `dims` już ustalone z poprzedniej sesji) - rozjazd znaczy, że model faktycznie się zmienił: JEDNO powiadomienie, przerwanie bieżącej porcji bez ponowień, pełny `rebuild()` (nowa baza, `dims` z nowego wektora). Flaga wewnętrzna pilnuje, że taki rebuild odpala się dokładnie raz, nie w pętli.
 
 ---
 
@@ -133,7 +163,7 @@ Dla porcji 16 plików krótka zwrotka jest oczywistą awarią, ale dla JEDNEGO w
 
 ### 4. `dims` zostaje 1024 - nie podnoś go do natywnego wymiaru providera
 
-Patrz sekcja „Model" wyżej. `_tryRestore` w `VaultIndexer` odtwarza schemat z `meta.dims`; zmiana wymiaru przy tym samym `modelKey` cichcem psuje odczyt starego indeksu.
+Patrz sekcja „Model" wyżej. `_tryRestore` w `VaultIndexer` odtwarza schemat z `meta.dims`. Rozjazd wymiaru NIE jest sprawdzany przy restore (meta v2 jest już zwalidowana na granicy przez `parseIndexMetaV2`) - jest sprawdzany na ŚWIEŻYM wektorze, w miejscu, gdzie wchodzi do indeksu (`_insertOne`, wołane z pełnego skanu i z żywej kolejki zmian). Skutek rozjazdu zależy od tego, gdzie się zdarza - patrz sekcja „Format indeksu v2" niżej, akapit „Wykryty rebuild".
 
 ### 5. Boot NIE pisze - getter `default` jest czysty
 
@@ -157,9 +187,10 @@ Brak wybranego dostawcy = `null`, koniec. Zero czytania zmiennych środowiskowyc
 
 ## Testy
 
-- `orama_engine.test.ts` - silnik Oramy.
+- `orama_engine.test.ts` - silnik Oramy (insert/remove/search/serialize w pamięci).
+- `indexStore.test.ts` - roundtrip segmentu bajt w bajt, odrzuty dekodera/parserów, progi kompakcji, czytnik dumpu v1 na fixture z PRAWDZIWEJ Oramy.
 - `adaMigration.test.ts` - meldunek migracji modelu.
-- `VaultIndexer.test.ts` - skan/wykluczenia, semantic smoke, restore, resync, hooki, kontrakt błędu.
+- `VaultIndexer.test.ts` - skan/wykluczenia, semantic smoke, restore/resync v2, kompakcja, sieroty, migracja v1→v2 (sukces i pad), wykryty rebuild (dims/model), hooki, kontrakt błędu.
 - `EmbeddingModel.test.ts` - kontrakt `embed()`: retry 429, backoff, sufit czasu, przycinanie, N→N, brak klucza, maskowanie sekretów.
 - `EmbeddingRegistry.test.ts` - rozstrzyganie `default`, cache, `select()`, `providers()`, boot nie pisze.
 - `embedderFacade.test.ts` - most rejestr → `EmbedderFacade`.
@@ -172,3 +203,4 @@ Brak wybranego dostawcy = `null`, koniec. Zero czytania zmiennych środowiskowyc
 
 - `listModels()` jest w kontrakcie i pod testami, ale bez UI - dropdown modeli embeddingu w Ustawieniach jeszcze nie istnieje.
 - `pkmAssistant.embedding.timeoutMs`/`batchSize.<p>` są konfigurowalne, ale bez kontrolki w Ustawieniach - dziś zmienia się je tylko ręczną edycją pliku ustawień.
+- `dispose()` NIE flushuje zaplanowanego zapisu - tylko zdejmuje timery. Do `persistDebounceMs` (domyślnie 30 s) zmian tuż przed zamknięciem Obsidiana nie trafia na dysk przed unloadem; przy następnym starcie `_resync()` je po prostu re-embeduje, bo ich mtime nie zdążył się zapisać. To NIE jest utrata danych (treść notatek żyje w vaulcie, nie w indeksie) - tylko powtórzony embedding garstki plików.
