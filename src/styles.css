@@ -1190,30 +1190,8 @@ input.pkm-onboarding-key-input {
   margin-top: 16px;
 }
 
-/* -- modules/ui-components/ToolCallDisplay.js: kompaktowy chip narzedzia -- */
-.cs-tool-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 3px 4px 3px 0;
-  padding: 4px 8px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  background: var(--background-secondary);
-  color: var(--text-normal);
-  font-size: 12px;
-  cursor: pointer;
-  max-width: 100%;
-}
-.cs-tool-chip__icon {
-  display: inline-flex;
-  align-items: center;
-}
-.cs-tool-chip__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* -- modules/ui-components/ToolCallDisplay.js: wrapper kompatybilnosci dla kompaktowego chipa
+   (Tile 2.3.0 - wyglad/CSS samego kafelka: modules/chat/chat_view.css, sekcja TILE) -- */
 .cs-tool-chip-wrap {
   display: block;
 }
