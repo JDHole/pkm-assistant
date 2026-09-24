@@ -195,6 +195,27 @@ Zapis do `<nazwa>_overrides.yaml` jest **diffem** względem fabrycznej konfigura
 - ⚠️ **`profile_advanced.ts` nie wstaje w AVA wcale** - nie tylko przez `obsidian` (Setting/Notice, dziś stubowalne przez atrapę `pkm-assistant-harness`), ale transytywnie przez `profile_helpers.js` → `HiddenFileEditorModal.js` → `import ... with { type: 'css' }` na `HiddenFileEditorModal.css`; loader AVA/tsx nie zna atrybutów importu CSS i pada `ERR_UNKNOWN_FILE_EXTENSION` na starcie testu, zanim dojdzie do jakiegokolwiek `test()`. Logika, którą trzeba przetestować bez tego łańcucha, idzie do czystego pliku OBOK (wzór `modules/chat/`, patrz `modules/chat/CLAUDE.md` „Pattern: prototype mixin") - `agentExportYaml.ts` (`buildAgentExportYaml`, eksport profilu do schowka) jest pierwszym takim plikiem w tym module. Eksport agenta MUSI iść przez `stringifyYaml` (`core/index.js`, ten sam silnik, którym `AgentLoader` pisze pliki YAML) - dawny `as unknown as string` na `agent.serialize()` (obiekt) wynosił do schowka `[object Object]`, bo rzutowanie zdejmuje typ, nie serializuje wartość.
 - ⚠️ **Popover uprawnień musi zapisywać przez `agentManager.updateAgent`, nigdy bezpośrednio przez loader.** `AgentLoader.saveAgent` ma guard: dla wbudowanego agenta zapis idzie zawsze do `<nazwa>_overrides.yaml`, niezależnie od wołacza - pisanie wprost do `<nazwa>.yaml` dla wbudowanego agenta tworzy plik, który loader odfiltrowuje przy starcie (custom agent o nazwie wbudowanego), więc ustawienie znika po restarcie bez ostrzeżenia.
 - ⚠️ **Przełącznik „Narzędzia MCP" nie istnieje w presetach uprawnień.** Dostęp do serwera zewnętrznego to opt-in per serwer (`mcp_servers[]`, zakładka Umiejętności → Konektory) - jeden globalny boolean nie miałby czego włączać.
+- ⚠️ **`agent_delegate` (delegacja do INNEGO AGENTA, nie sub-agentów) jest UŚPIONE od 2.3.0**
+  (werdykt właściciela, spec E "Czat bez ścian": mechanizm "stary i niepotrzebny", wraca jako
+  inicjatywa 2.4+). Uśpienie żyje w `modules/tools/ToolRegistry.ts` (`DORMANT_TOOLS`, odcięte w
+  `filterByAgent` - WIDOCZNOŚĆ, czyli co model dostaje w definicjach narzędzi; świadomie NIE w
+  `checkToolAxis` - EGZEKUCJA, wywołanie po dokładnej nazwie zostaje możliwe bez zmian, żeby nie
+  wywrócić istniejących testów integracyjnych `AgentDelegateTool.test.ts`) - **nie tutaj**, w
+  `toolAxis.ts`: `BUILTIN_TOOL_GROUPS.delegation` dalej niesie `['delegate', 'agent_delegate']`
+  nietknięte, bo ta lista karmi migrację starych YAML-i (`computeDisabledToolsFromLegacy`) i
+  etykiety UI, nie decyduje o tym, co model DOSTAJE. Efekt: `agent.disabled_tools` starego
+  profilu może dalej NIE zawierać `agent_delegate` (agent "miał" delegację włączoną) - to
+  normalne i bez znaczenia, bo `ToolRegistry.filterByAgent` i tak odmawia niezależnie od tej
+  listy. `delegate` (sub-agenci, `modules/sub-agents/`) NIE jest uśpione - zero zmian. Kod
+  przycisku "Przejdź do agenta X" (`modules/chat/chat/chat_artifacts.ts`'s
+  `_renderDelegationButton`) i klucze i18n (`mcp.agent_delegate.*`, `tool.agent_delegate`,
+  `tools.label.agent_delegate`, `chat.tool_status.agent_delegate`) ZOSTAJĄ - `chat_streaming.ts`
+  ma tylko guard, który nie woła renderu guzika. Testy: `modules/tools/ToolRegistry.test.ts`
+  (oś: `agent_delegate` odmówione w `filterByAgent` dla KAŻDEGO agenta, `delegate` bez zmian,
+  `checkToolAxis` świadomie NIETKNIĘTE),
+  `modules/agents/Agent.test.ts` (stary profil z `agent_delegate` w konfiguracji ładuje się bez
+  błędu - Agent sam nic o uśpieniu nie wie), `modules/prompts/decisionTree.test.ts` (wyrenderowany
+  prompt nie zawiera literału `agent_delegate`, gdy narzędzie jest niedostępne).
 - ⚠️ **`preferred_tools` (pole agenta, whitelista NARZĘDZI dla external MCP) usunięte - było pole-widmo.** `ServerManager.getActiveToolDefinitions` nigdy nie przyjmował filtra narzędzi (tylko filtr serwerów) - whitelista była no-opem od klastra narzędzi C1, bo `mcpActiveTools` jest już podzbiorem `systemTools`. Stare YAML-e z `preferred_tools:` dalej się wczytują (pole ignorowane, nie zapisywane z powrotem przy `serialize()`). Nie mylić z `preferred_servers[]` (whitelista SERWERÓW do auto-connect) - to pole zostaje żywe i bez zmian.
 - ⚠️ **Indeks artefaktów „w toku" w prompcie (`_buildBaseContext`) domyka przez `isClosedStatus`, nie przez literał PL na sztywno.** `isClosedStatus(status, statusy)` (`modules/artifacts/artifactButtons.ts`, reeksportowany z barrela `modules/artifacts/index.js` WYŁĄCZNIE dla tego wołacza) rozpoznaje domknięcie w OBU językach (`'zamkniety'`/`'closed'`) plus fallback pozycyjny dla typu WŁASNEGO (ostatni status listy). Stare porównanie `a.status !== 'zamkniety'` zostawiałoby artefakty typu EN (status `'closed'`, bo `ensureBuiltinTypes` reseeduje NIETKNIĘTY plik typu do bieżącego języka UI przy starcie) i typu własnego (np. `'done'`) w indeksie "w toku" na zawsze, mimo że są domknięte.
 
