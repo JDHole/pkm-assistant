@@ -1,20 +1,75 @@
-import test from 'ava';
+import test, { ExecutionContext } from 'ava';
 import { render_messages } from './chat_messages.js';
 import { _ensureAgentMessageContainer } from './chat_streaming.js';
 
 /**
- * Spec B ("Czat bez scian 2026-09", dymki usera i agenta, 2.3.0): dymek agenta przestaje
- * renderowac `span.cs-message__agent-name` - krysztal (`.cs-message__agent-crystal`) zostaje
- * jedynym znacznikiem serii, w rynnie po lewej, tylko przy PIERWSZEJ wiadomosci serii.
+ * Kolumna dymkow (2.3.0, kolejna faza "Czat bez scian" - front B->kolumna): naglowek serii
+ * (`.cs-message__agent-head` + `.cs-message__agent-crystal`, jeden krysztal na CALA serie) znika
+ * calkowicie. Krysztal renderuje sie teraz CSS pseudo-elementem `::after`, sterowanym zmienna
+ * `--cs-agent-crystal` (data URL SVG, `chat/agentCrystal.ts`) ustawiona INLINE na KAZDYM
+ * kontenerze `.cs-message--agent` - kazda odpowiedz assistant (nawet druga z rzedu w tej samej
+ * serii) dostaje wlasny kontener z wlasna wartoscia zmiennej.
  *
- * Behawioralny test na realnej atrapie DOM harnessu (dom-shim.ts, wzor:
- * `render_messages.emptyAssistant.test.ts`) - liczy realne wezly drzewa (atrapa nie ma
- * `querySelectorAll`, wiec liczymy rekurencyjnie po `children`), nie sam fakt wywolania.
+ * Atrapa DOM harnessu (`dom-shim.ts`, generyczny `globalThis.createDiv()`) ma
+ * `style.setProperty`/`getPropertyValue` jako CELOWY no-op dla kazdej nazwy (`createStyleProxy`)
+ * - custom properties NIE przezywaja podrozy przez ten shim, wiec test buduje WLASNA, minimalna
+ * atrape elementu z prawdziwym `style` (wzor: `render_messages.delegateError.test.ts`), zeby dalo
+ * sie odczytac ustawiona wartosc.
  */
+type Listener = (ev: unknown) => void;
+
+type FakeEl = {
+    tagName: string;
+    children: FakeEl[];
+    classList: { add(...c: string[]): void; remove(...c: string[]): void; contains(c: string): boolean };
+    className: string;
+    textContent: string;
+    style: { setProperty(name: string, value: string): void; getPropertyValue(name: string): string };
+    listeners: Record<string, Listener[]>;
+    appendChild(child: FakeEl): FakeEl;
+    addEventListener(type: string, cb: Listener): void;
+    createDiv(opts?: { cls?: string | string[] }): FakeEl;
+    createSpan(opts?: { cls?: string | string[]; text?: string }): FakeEl;
+    createEl(tag: string, opts?: { cls?: string | string[]; text?: string }): FakeEl;
+    querySelectorAll(): FakeEl[];
+    empty(): FakeEl;
+};
+
+function makeFakeEl(tag = 'div'): FakeEl {
+    const classes = new Set<string>();
+    const styleProps = new Map<string, string>();
+    let text = '';
+    const el: FakeEl = {
+        tagName: tag,
+        style: {
+            setProperty(name, value) { styleProps.set(name, value); },
+            getPropertyValue(name) { return styleProps.get(name) || ''; },
+        },
+        children: [],
+        classList: {
+            add: (...c) => { c.forEach(x => classes.add(x)); },
+            remove: (...c) => { c.forEach(x => classes.delete(x)); },
+            contains: (c) => classes.has(c),
+        },
+        get className() { return [...classes].join(' '); },
+        set className(v: string) { classes.clear(); String(v).split(/\s+/).filter(Boolean).forEach(c => classes.add(c)); },
+        get textContent() { return text; },
+        set textContent(v: string) { text = v; el.children = []; },
+        appendChild(child) { el.children.push(child); return child; },
+        listeners: {},
+        addEventListener(type, cb) { (el.listeners[type] ||= []).push(cb); },
+        createDiv(opts) { const c = makeFakeEl('div'); if (opts?.cls) c.className = Array.isArray(opts.cls) ? opts.cls.join(' ') : opts.cls; el.appendChild(c); return c; },
+        createSpan(opts) { const c = makeFakeEl('span'); if (opts?.cls) c.className = Array.isArray(opts.cls) ? opts.cls.join(' ') : opts.cls; if (opts?.text != null) c.textContent = opts.text; el.appendChild(c); return c; },
+        createEl(tag2, opts) { const c = makeFakeEl(tag2); if (opts?.cls) c.className = Array.isArray(opts.cls) ? opts.cls.join(' ') : opts.cls; if (opts?.text != null) c.textContent = opts.text; el.appendChild(c); return c; },
+        querySelectorAll() { return []; },
+        empty() { el.children = []; return el; },
+    } as FakeEl;
+    return el;
+}
+
 type TestDynamic = any;
 
-function buildFakeThis(messages: TestDynamic[]): TestDynamic {
-    const container: TestDynamic = (globalThis as TestDynamic).createDiv();
+function buildFakeThis(container: FakeEl, messages: TestDynamic[]): TestDynamic {
     return {
         messages_container: container,
         rollingWindow: { messages },
@@ -28,25 +83,42 @@ function buildFakeThis(messages: TestDynamic[]): TestDynamic {
         _renderUserText: () => {},
         _renderCacheSavingsBadge: () => {},
         _contentBlocksToText: () => '',
-        _agentHeaderShown: false,
         updateTokenCounter: () => {},
-        _container: container,
     };
 }
 
-/** Liczy wezly o danej klasie w calym poddrzewie - atrapa DOM harnessu nie ma `querySelectorAll`. */
-function countByClass(el: TestDynamic, cls: string): number {
-    if (!el || !Array.isArray(el.children)) return 0;
-    let count = 0;
-    for (const child of el.children) {
-        if (child.className === cls) count += 1;
-        count += countByClass(child, cls);
-    }
+/** Liczy wezly o DOKLADNIE tej jednej klasie w calym poddrzewie (wezly starego naglowka mialy zawsze jedna klase). */
+function countByClass(el: FakeEl, cls: string): number {
+    let count = el.classList.contains(cls) ? 1 : 0;
+    for (const child of el.children) count += countByClass(child, cls);
     return count;
 }
 
-test('render_messages: 1 wiadomosc user + 2 assistant w serii - dokladnie 1 krysztal agenta, 0 nazw agenta', async t => {
-    const fakeThis = buildFakeThis([
+/** Zbiera w kolejnosci DOM wszystkie wezly niosace `cls` wsrod (ewentualnie) kilku klas naraz. */
+function collectByClass(el: FakeEl, cls: string, acc: FakeEl[] = []): FakeEl[] {
+    if (el.classList.contains(cls)) acc.push(el);
+    for (const child of el.children) collectByClass(child, cls, acc);
+    return acc;
+}
+
+/**
+ * Kontrola: pada, gdy `--cs-agent-crystal` nie jest ustawiane (wartosc pusta) ALBO gdy stary
+ * naglowek wraca (element mialby wtedy inny ksztalt, ale ta funkcja mierzy WYLACZNIE wartosc
+ * zmiennej - test kompletu sprawdza brak naglowka osobno, patrz `countByClass` wyzej).
+ */
+function assertHasCrystalVar(t: ExecutionContext, el: FakeEl, label: string): void {
+    const raw = el.style.getPropertyValue('--cs-agent-crystal');
+    t.true(raw.startsWith('url("data:image/svg+xml,'), `${label}: --cs-agent-crystal ma zaczynac sie od url("data:image/svg+xml,..., dostalem "${raw.slice(0, 50)}"`);
+    t.true(raw.includes('%3Csvg'), `${label}: zakodowana wartosc musi zawierac %3Csvg (encodeURIComponent('<svg'))`);
+    const match = /^url\("(.+)"\)$/.exec(raw);
+    t.truthy(match, `${label}: wartosc powinna miec ksztalt url("...")`);
+    const decoded = decodeURIComponent((match?.[1] || '').replace(/^data:image\/svg\+xml,/, ''));
+    t.true(decoded.includes('<svg'), `${label}: zdekodowana wartosc powinna zawierac "<svg", dostalem "${decoded.slice(0, 60)}"`);
+}
+
+test('render_messages: user + 2 assistant w serii - zero naglowkow, OBA kontenery agenta maja wlasny --cs-agent-crystal', async t => {
+    const container = makeFakeEl('div');
+    const fakeThis = buildFakeThis(container, [
         { role: 'user', content: 'czesc' },
         { role: 'assistant', content: 'Pierwsza odpowiedz.' },
         { role: 'assistant', content: 'Druga odpowiedz w tej samej serii.' },
@@ -54,14 +126,17 @@ test('render_messages: 1 wiadomosc user + 2 assistant w serii - dokladnie 1 krys
 
     await render_messages.call(fakeThis);
 
-    t.is(countByClass(fakeThis._container, 'cs-message__agent-crystal'), 1,
-        'krysztal pojawia sie raz - tylko przy pierwszej wiadomosci serii assistant, druga z rzedu go nie powtarza');
-    t.is(countByClass(fakeThis._container, 'cs-message__agent-name'), 0,
-        'nazwa agenta nie renderuje sie juz w naglowku dymka (spec B, "Dymki 2.3.0")');
+    t.is(countByClass(container, 'cs-message__agent-head'), 0, 'naglowek serii nie ma juz zadnego producenta');
+    t.is(countByClass(container, 'cs-message__agent-crystal'), 0, 'stary wezel krysztalu w naglowku znikl');
+
+    const agentContainers = collectByClass(container, 'cs-message--agent');
+    t.is(agentContainers.length, 2, 'kazda odpowiedz assistant dostaje WLASNY kontener - druga z rzedu juz nie znika w naglowku pierwszej');
+    agentContainers.forEach((el, i) => assertHasCrystalVar(t, el, `kontener agenta #${i + 1}`));
 });
 
-test('render_messages: dwie oddzielne serie assistant (przedzielone user) - 2 krysztaly, 0 nazw agenta', async t => {
-    const fakeThis = buildFakeThis([
+test('render_messages: dwie serie assistant przedzielone userem - OBA kontenery maja --cs-agent-crystal, zero naglowkow', async t => {
+    const container = makeFakeEl('div');
+    const fakeThis = buildFakeThis(container, [
         { role: 'user', content: 'pytanie 1' },
         { role: 'assistant', content: 'odpowiedz 1' },
         { role: 'user', content: 'pytanie 2' },
@@ -70,22 +145,28 @@ test('render_messages: dwie oddzielne serie assistant (przedzielone user) - 2 kr
 
     await render_messages.call(fakeThis);
 
-    t.is(countByClass(fakeThis._container, 'cs-message__agent-crystal'), 2,
-        'kazda nowa seria assistant (po wiadomosci usera) dostaje wlasny krysztal');
-    t.is(countByClass(fakeThis._container, 'cs-message__agent-name'), 0,
-        'zadna seria nie renderuje juz nazwy agenta');
+    t.is(countByClass(container, 'cs-message__agent-head'), 0, 'zadna seria nie renderuje juz naglowka');
+    t.is(countByClass(container, 'cs-message__agent-crystal'), 0, 'zaden stary wezel krysztalu nie zostal');
+
+    const agentContainers = collectByClass(container, 'cs-message--agent');
+    t.is(agentContainers.length, 2, 'kazda z dwoch serii ma jeden kontener assistant');
+    agentContainers.forEach((el, i) => assertHasCrystalVar(t, el, `kontener agenta #${i + 1}`));
 });
 
-test('streaming: _ensureAgentMessageContainer dwa razy w serii - 1 krysztal agenta, 0 nazw agenta', t => {
-    const fakeThis = buildFakeThis([]);
+test('streaming: _ensureAgentMessageContainer dwa razy w serii - OBA kontenery maja wlasny --cs-agent-crystal, zero naglowkow', t => {
+    const container = makeFakeEl('div');
+    const fakeThis = buildFakeThis(container, []);
     const agent = { name: 'Jaskier', color: '#fff' };
 
     _ensureAgentMessageContainer.call(fakeThis, agent as TestDynamic);
+    const first = fakeThis.current_message_container as FakeEl;
     fakeThis.current_message_container = null;
     _ensureAgentMessageContainer.call(fakeThis, agent as TestDynamic);
+    const second = fakeThis.current_message_container as FakeEl;
 
-    t.is(countByClass(fakeThis._container, 'cs-message__agent-crystal'), 1,
-        'naglowek serii przy streamingu rysuje krysztal raz (_agentHeaderShown), druga wiadomosc serii bez naglowka');
-    t.is(countByClass(fakeThis._container, 'cs-message__agent-name'), 0,
-        'streaming nie renderuje nazwy agenta (spec B), tak samo jak historia i append_message');
+    t.is(countByClass(container, 'cs-message__agent-head'), 0, 'streaming nie rysuje juz naglowka serii');
+    t.is(countByClass(container, 'cs-message__agent-crystal'), 0, 'streaming nie rysuje juz starego wezla krysztalu');
+    t.not(first, second, 'kazde wywolanie tworzy NOWY kontener (tak jak dzis)');
+    assertHasCrystalVar(t, first, 'pierwszy kontener streamu');
+    assertHasCrystalVar(t, second, 'drugi kontener streamu (ten sam agent, ta sama seria)');
 });

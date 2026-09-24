@@ -26,6 +26,9 @@ import { resolveMessageOrigin, toolResultStatus } from '../../../core/index.js';
 // tego byłaby to trzecia kopia tej samej logiki (patrz komentarz modułu `machineTile.ts`).
 import { buildMachineView } from './machineMessage.js';
 import { renderMachineTile } from './machineTile.js';
+// Krysztal agenta jako CSS var `--cs-agent-crystal` (2.3.0, kolumna dymkow) - jeden producent
+// dla append_message/render_messages TU i `_ensureAgentMessageContainer` w chat_streaming.ts.
+import { agentCrystalCssVar } from './agentCrystal.js';
 // Uwaga 10 (spec A2-fix): pokwitowanie delegacji w tle odtworzone z historii sklada details
 // TĄ SAMĄ funkcją co żywa tura - jedno źródło prawdy dla kolejności linii (identyfikator
 // zawsze ostatni). Import wewnątrz `modules/chat/` (oba pliki to mixiny tego samego modułu,
@@ -129,18 +132,13 @@ export async function append_message(this: ChatViewLike, role: MessageRole, cont
             metaEl.createSpan({ text: timestamp });
             this.addMessageActions(metaEl, uiText, 'user', idx);
         }
-        this._agentHeaderShown = false;
     } else {
+        // Kolumna dymkow (2.3.0, kolejna faza "Czat bez scian"): naglowek serii znikl calkiem -
+        // krysztal siedzi teraz przy KAZDYM elemencie agenta (kafelek/dymek tekstu), rysowany CSS
+        // pseudo-elementem `::after` sterowanym ta zmienna (patrz `chat_view.css`).
         const agentDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--agent' });
         agentDiv.style.setProperty('--cs-agent-color-rgb', agentRgb);
-        if (!this._agentHeaderShown) {
-            // Dymki 2.3.0 ("Czat bez scian"): nazwa agenta znika z naglowka - kryształ
-            // zostaje jedynym znacznikiem serii w rynnie po lewej.
-            const head = agentDiv.createDiv({ cls: 'cs-message__agent-head' });
-            const crystalEl = head.createDiv({ cls: 'cs-message__agent-crystal' });
-            setSvg(crystalEl, SkinManager.getCrystal(activeAgent || 'Agent', { size: 18, color: agentColor, glow: false }));
-            this._agentHeaderShown = true;
-        }
+        agentDiv.style.setProperty('--cs-agent-crystal', agentCrystalCssVar(activeAgent || 'Agent', agentColor));
         const textDiv = agentDiv.createDiv({ cls: 'cs-message__text' });
         await MarkdownRenderer.render(this.app, uiText, textDiv, '', this);
         const metaEl = agentDiv.createDiv({ cls: 'cs-message__meta' });
@@ -160,7 +158,6 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
     const agentRgb = hexToRgbTriplet(agentColor);
     const agentName = agent?.name || 'Agent';
 
-    let prevRole = null;
     for (let idx = 0; idx < this.rollingWindow.messages.length; idx++) {
         const msg = this.rollingWindow.messages[idx];
         // Skip tool messages (they were displayed inline with the tool call)
@@ -206,16 +203,11 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
             if (!uiText && !hasToolCalls && !msg.reasoning_content) continue;
 
             // ── AGENT MESSAGE — .cs-message--agent ──
+            // Kolumna dymkow (2.3.0): naglowek serii znikl - krysztal siedzi na KAZDYM elemencie
+            // agenta (kafelek/dymek tekstu) przez CSS `::after`, sterowany ta zmienna.
             const agentDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--agent' });
             agentDiv.style.setProperty('--cs-agent-color-rgb', agentRgb);
-
-            // Agent header (crystal only, spec B "Dymki 2.3.0" - nazwa agenta ukryta),
-            // only on first in a series
-            if (prevRole !== 'assistant') {
-                const head = agentDiv.createDiv({ cls: 'cs-message__agent-head' });
-                const crystalEl = head.createDiv({ cls: 'cs-message__agent-crystal' });
-                setSvg(crystalEl, SkinManager.getCrystal(agent || agentName, { size: 16, color: agentColor, glow: false }));
-            }
+            agentDiv.style.setProperty('--cs-agent-crystal', agentCrystalCssVar(agent || agentName, agentColor));
 
             // Reconstruct action rows from metadata (thinking, tool_calls)
             // Note: addMessage() spreads metadata into top-level, so tool_calls/reasoning_content are direct props
@@ -321,11 +313,8 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
             this._renderCacheSavingsBadge?.(meta, msg.cache);
             this.addMessageActions(meta, uiText, 'assistant', idx);
         }
-        prevRole = msg.role;
     }
 
-    // Track crystal header state for streaming continuation
-    this._agentHeaderShown = (prevRole === 'assistant');
     // Draw connector lines
     this._drawConnectorLines();
 }
@@ -662,8 +651,16 @@ export function _renderTrimBlock(this: ChatViewLike, info: TrimInfo): void {
 }
 
 /**
- * Draw a continuous vertical line from crystal header through all action rows.
+ * Draw a continuous vertical line connecting the crystal markers of consecutive agent elements.
  * Uses absolute positioning within messages_container so it spans across multiple agent divs.
+ *
+ * Kolumna dymkow (2.3.0, kolejna faza "Czat bez scian"): naglowek serii (jeden krysztal na CALA
+ * serie, w `.cs-message__agent-head`) znikl - krysztal siedzi teraz PRZY KAZDYM elemencie agenta
+ * (kafelek `.cs-tile--agent`/`.cs-tile--agent-muted`, dymek tekstu `.cs-message__text`), rysowany
+ * CSS pseudo-elementem `::after` (patrz `chat_view.css`). Lacznik dalej rysuje JEDNA pionowa
+ * linie na serie (ciag `.cs-message--agent` bez przerwy w DOM - grupowanie bez zmian), ale teraz
+ * od srodka krysztalu PIERWSZEGO elementu serii do srodka krysztalu OSTATNIEGO - nie od naglowka
+ * do ostatniej ikony kafelka (naglowek juz nie istnieje).
  */
 export function _drawConnectorLines(this: ChatViewLike): void {
     // Remove old lines
@@ -688,33 +685,40 @@ export function _drawConnectorLines(this: ChatViewLike): void {
     }
     if (current.length) groups.push(current);
 
-    // For each group, find first crystal and last action row icon, draw one line
     for (const group of groups) {
-        const firstMsg = group[0];
-        const crystal = firstMsg.querySelector('.cs-message__agent-crystal');
-        if (!crystal) continue;
-
-        // Find last action row's icon in the group. `.cs-action-row` (myślenie/narzędzie przed
-        // Tile, SubAgentBlock dziś) i `.cs-tile` (2.3.0: ThinkingBlock/ToolCallDisplay po
-        // przepięciu na Tile, patrz Tile.ts) współistnieją, więc łącznik musi widzieć oba.
-        let lastIcon: Element | null = null;
-        for (let i = group.length - 1; i >= 0; i--) {
-            const rows = group[i].querySelectorAll('.cs-action-row, .cs-tile');
-            if (rows.length) {
-                const lastRow = rows[rows.length - 1];
-                lastIcon = lastRow.querySelector('.cs-action-row__icon, .cs-tile__icon') || lastRow;
-                break;
+        // Elementy grupy w kolejnosci DOM: kazdy kafelek agenta (gdziekolwiek zagniezdzony - w
+        // `.cs-tool-chip-wrap` albo `.cs-tool-calls-wrapper` przy streamingu, selektor lapie je
+        // niezaleznie od opakowania) i kazdy dymek tekstu, BEZPOSREDNI dzieckiem kontenera agenta.
+        // Element bez wysokosci (pusty `.cs-message__text`, ukryty przez `:empty{display:none}`)
+        // pomijamy - nie ma gdzie narysowac krysztalu.
+        const elements: HTMLElement[] = [];
+        for (const msg of group) {
+            const tiles = msg.querySelectorAll('.cs-tile--agent, .cs-tile--agent-muted') as NodeListOf<HTMLElement>;
+            for (const tile of tiles) {
+                if (tile.offsetHeight === 0) continue;
+                elements.push(tile);
+            }
+            for (const child of Array.from(msg.children) as HTMLElement[]) {
+                if (!child.classList.contains('cs-message__text')) continue;
+                if (child.offsetHeight === 0) continue;
+                elements.push(child);
             }
         }
-        if (!lastIcon) continue;
+        // Jeden element w grupie (albo zero) = brak linii - nic do laczenia.
+        if (elements.length < 2) continue;
 
-        const crystalRect = crystal.getBoundingClientRect();
-        const lastRect = lastIcon.getBoundingClientRect();
+        const first = elements[0];
+        const last = elements[elements.length - 1];
+        const firstMsg = group[0];
+        const firstRect = firstMsg.getBoundingClientRect();
+        // x = lewa krawedz PIERWSZEGO kontenera agenta minus rynna (marginLeft realny, fallback
+        // 22 - ten sam `--cs-bubble-gutter` co `src/styles.css`) plus 9 (polowa 18px krysztalu).
+        const computedMarginLeft = parseFloat(getComputedStyle(firstMsg).marginLeft);
+        const gutter = Number.isFinite(computedMarginLeft) ? computedMarginLeft : 22;
+        const crystalCenterX = firstRect.left - gutter + 9 - containerRect.left;
 
-        // Dynamic horizontal position: center of crystal
-        const crystalCenterX = crystalRect.left + crystalRect.width / 2 - containerRect.left;
-        const top = crystalRect.bottom - containerRect.top + this.messages_container.scrollTop;
-        const bottom = lastRect.top + lastRect.height / 2 - containerRect.top + this.messages_container.scrollTop;
+        const top = _crystalCenterY(first) - containerRect.top + this.messages_container.scrollTop;
+        const bottom = _crystalCenterY(last) - containerRect.top + this.messages_container.scrollTop;
         const height = bottom - top;
         if (height <= 0) continue;
 
@@ -728,4 +732,15 @@ export function _drawConnectorLines(this: ChatViewLike): void {
         if (agentRgb) line.style.setProperty('--cs-agent-color-rgb', agentRgb);
         this.messages_container.appendChild(line);
     }
+}
+
+/**
+ * Y srodka krysztalu `::after` danego elementu, wzgledem viewportu (przed przeliczeniem na
+ * wspolrzedne messages_container). Dwa offsety zgodne z CSS (`chat_view.css`):
+ * kafelek = border 1 + top 9 + polowa 18 = 19; dymek tekstu = border-left 1 + top 7 + polowa 18 = 17.
+ */
+function _crystalCenterY(el: HTMLElement): number {
+    const rect = el.getBoundingClientRect();
+    const offset = el.classList.contains('cs-message__text') ? 17 : 19;
+    return rect.top + offset;
 }

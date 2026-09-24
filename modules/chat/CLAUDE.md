@@ -53,6 +53,7 @@ modules/chat/
     ├── subTaskNotification.js      # treść powiadomienia o wyniku suba z tła + matchTabForOrigin (pure, testowalny)
     ├── machineMessage.js           # klasyfikator wiadomości maszynowych (spec A3) - classifyMachineMessage + buildMachineView; pure, zero obsidian, testowalny
     ├── machineTile.js               # render współdzielony kafelka wiadomości maszynowej (renderMachineTile) - wołany przez chat_messages.js I chat_streaming.js; obsidian przechodnio przez barrel ui-components, testowalny w AVA z atrapą harnessu
+    ├── agentCrystal.js              # `agentCrystalCssVar(agent, color)` - wartość CSS `--cs-agent-crystal` (data URL SVG kryształu), jeden producent dla append_message/render_messages I `_ensureAgentMessageContainer` (kolumna dymków, 2.3.0); trzeci plik jak machineTile.js, żeby nie zamknąć cyklu między dwoma mixinami
     ├── subTaskStrip.js             # pasek biegów subów POD zakładkami czatu; obsidian-free DOM, model z modules/sub-agents
     ├── selectionMenu.js            # menu na zaznaczeniu tekstu (2.3.0, spec D) - Kopiuj / Dodaj jako kontekst / Cytuj; quoteText/insertAtCursor pure+testowalne, installSelectionMenu montuje nasłuchy na messages_container
     ├── SlashCommandsRegistry.js    # rejestr komend `/`
@@ -1001,19 +1002,24 @@ render w oknie czatu: zamiast dymka `.cs-message--user` doklejany jest kafelek `
   tytułem -> details to sam tytuł. `id` artefaktu (gdy sklep go zna z samego JSON-a) zostaje
   dostępny OSOBNO w `view.open.artifactId` - fallback details nigdy nie blokuje akcji "Otwórz".
 
-### Dymki 2.3.0 (B, "Czat bez ścian")
+### Dymki 2.3.0 (B, "Czat bez ścian") -> kolumna dymków
 
 Werdykt właściciela: dymek usera ma kolor usera z Ustawień (nie kolor agenta), rozciąga się na
 całą szerokość tak jak dymek agenta, a jedyne różnice zostają kolor i margines (rynna po
-przeciwnej stronie). Nazwa agenta znika z nagłówka - kryształ zostaje jedynym znacznikiem serii.
+przeciwnej stronie). Front B (poniżej) wprowadził to jako pierwsze - nazwa agenta zniknęła z
+nagłówka, kryształ na starcie zostawał jedynym znacznikiem CAŁEJ SERII, w nagłówku nad pierwszą
+wiadomością. Kolejna faza (ten sam spec, "kolumna") poszła dalej i usunęła nagłówek CAŁKOWICIE:
+odpowiedź agenta jest dziś kolumną OSOBNYCH boxów (kontener `.cs-message--agent` przezroczysty,
+bez tła/ramki/paddingu, tylko `margin-left: var(--cs-bubble-gutter)`), a kryształ siedzi PRZY
+KAŻDYM elemencie agenta - każdym kafelku narzędzia/myślenia/sub-agenta i każdym dymku tekstu -
+nie tylko raz na serię.
 
 - **Rynna jedną zmienną, po obu stronach.** `--cs-bubble-gutter` (`src/styles.css`, `.cs-root`,
-  `22px`) jest zmierzona z dzisiejszego wcięcia agenta (`.cs-message__agent-head`/
-  `.cs-message__text`, `padding-left`, `modules/chat/chat_view.css`) i używana identycznie po
-  obu stronach: wcięcie treści agenta od lewej (kryształ siedzi w tej rynnie) i
-  `margin-right` dymka usera od prawej (mirror). Wartość liczbowa nie zmieniła się względem
-  sprzed 2.3.0 - zmieniło się tylko to, że jest teraz jednym źródłem prawdy zamiast dwóch
-  osobnych literałów `22px`.
+  `22px`) jest zmierzona z dawnego wcięcia agenta i używana identycznie po obu stronach:
+  `margin-left` kontenera agenta (kryształ siedzi w tej rynnie, przez `::after` z ujemnym
+  `left`) i `margin-right` dymka usera od prawej (mirror). Wartość liczbowa nie zmieniła się
+  od frontu B - zmieniło się tylko to, CO ją używa (margines kontenera, nie `padding-left`
+  nieistniejącego już nagłówka).
 - **Dymek usera używa `var(--cs-user-color, var(--interactive-accent))`**, nie
   `--cs-agent-color-rgb` jak dawniej (`.cs-message--user`, `chat_view.css`): tło
   `color-mix(... 12%, transparent)`, obramowanie 1px `color-mix(... 30%, transparent)`, pasek
@@ -1024,10 +1030,7 @@ przeciwnej stronie). Nazwa agenta znika z nagłówka - kryształ zostaje jedynym
   Poświata (`box-shadow`), notka kryształu (`::after`) i górny gradient (`::before`) dymka usera
   też liczą kolor z `--cs-user-color` (recenzja B: zielony dymek z czerwoną poświatą agenta był
   regresją wizualną); blok obcięcia kontekstu (`.cs-trim-bubble`) ma osobne reguły dla tych
-  trzech, które przywracają kolor agenta. Notka `::after` nadal siedzi przy LEWEJ krawędzi -
-  czy ma przejść na prawą, decyduje właściciel na demo. Nagłówek serii agenta ma
-  `min-height: 15px` - bez nazwy agenta zapadał się do 8px, a kryształ (`position: absolute`)
-  wchodził na dymek wyżej [measured, recenzja B w headless Chrome].
+  trzech, które przywracają kolor agenta.
 - **Wyjątek: `.cs-message--user.cs-trim-bubble`** (blok obcięcia kontekstu, ulubiony kafelek
   właściciela, `_renderTrimBlock` w `chat_messages.ts`) nadpisuje tło/obramowanie/marginesy z
   powrotem do stanu sprzed 2.3.0 (agent-color-rgb, `align-self: flex-start`, `margin-right: 0`) -
@@ -1035,21 +1038,79 @@ przeciwnej stronie). Nazwa agenta znika z nagłówka - kryształ zostaje jedynym
   klasową restaurację (`border-color`) z tego samego powodu - bez niej jasny motyw nadpisywałby
   kolor z powrotem na `--cs-user-color` (specyficzność dwóch klas, remis kolejnością w pliku).
   `.cs-tile` (Tile, A1-A3) nie ma klasy `.cs-message--user` [measured, grep], więc nie koliduje.
-- **Nazwa agenta zniknęła z TRZECH producentów nagłówka** (jeden mixin, ten sam wzorzec x3):
-  `chat_messages.ts`'s `append_message` i `render_messages`, oraz `chat_streaming.ts`'s
-  `_ensureAgentMessageContainer` (nagłówek serii przy STREAMINGU, `_agentHeaderShown`). Kryształ
-  (`.cs-message__agent-crystal`) zostaje jedynym producentem w `.cs-message__agent-head`, tylko
-  przy PIERWSZEJ wiadomości serii (`prevRole !== 'assistant'` / `!this._agentHeaderShown` -
-  bez zmian, ta sama bramka sprzed 2.3.0). Reguła CSS `.cs-message__agent-name` zostaje w pliku
-  (martwa, zero producentów) - świadomie nieusunięta, ten sam wzór obrony co `.cs-action-row`
-  wyżej (sekcja "Kafelki Tile...").
-- Test behawioralny: `chat/render_messages.bubbles.test.ts` (atrapa DOM harnessu, liczy węzły
-  rekurencyjnie po `children` - atrapa nie ma `querySelectorAll`) - 1 wiadomość user + 2
-  assistant w serii = dokładnie 1 `.cs-message__agent-crystal`, 0 `.cs-message__agent-name`.
-  `_ensureAgentMessageContainer` (nagłówek serii przy streamingu) ma test w tym samym pliku:
-  dwa wywołania w serii dają 1 kryształ i 0 nazw - atrapa `obsidian` z harnessu wystarcza, żeby
-  zaimportować `chat_streaming.ts` i wywołać tę funkcję na sfabrykowanym `this` (jak
-  `handle_error`, patrz gotcha wyżej).
+- **Dymek odpowiedzi agenta (`.cs-message--agent > .cs-message__text`) ma DOKŁADNIE styl,
+  jaki miał `.cs-message--user.cs-trim-bubble`** (tło/obramowanie/`border-left`/`box-shadow`
+  identyczne, tylko kolor agenta zamiast usera), plus `position: relative; margin: 8px 0;
+  padding: 5px 12px` - nadpisuje bazowe `padding: 6px 0 6px var(--cs-bubble-gutter)` z
+  `.cs-message__text` (specyficzność dwóch klas bije jedną; NIE zmieniaj bazowej reguły, używa
+  jej też dymek usera), plus `::before` z górnym gradientem w kolorze agenta (lustro
+  `.cs-message--user::before`). Tekst pusty (`:empty`, streaming tworzy `.cs-message__text`
+  ZANIM chunki spłyną; tury z samymi tool callami) dostaje `display: none` - bez tego pusty
+  box zostawiałby widoczną ramkę/tło bez treści.
+- **Nagłówek serii ZNIKNĄŁ CAŁKOWICIE** (jeden mixin, ten sam wzorzec x3, usunięty z trzech
+  producentów): `chat_messages.ts`'s `append_message` i `render_messages`, oraz
+  `chat_streaming.ts`'s `_ensureAgentMessageContainer`. Zniknęło razem z nim całe pole stanu
+  `_agentHeaderShown` (`chatViewShape.ts` + wszystkie cztery miejsca, które je czytały/pisały) -
+  bez nagłówka to był martwy stan, nic już nie pyta "czy to pierwsza wiadomość serii". Reguły
+  CSS `.cs-message__agent-head`/`.cs-message__agent-crystal`/`.cs-message__agent-crystal svg`/
+  `.cs-message__agent-name` usunięte (zero producentów, sprawdzone grepem po `modules/`) -
+  inaczej niż `.cs-action-row` (sekcja "Kafelki Tile..." wyżej), TEN martwy CSS naprawdę
+  wyleciał, bo cała koncepcja nagłówka odeszła, nie tylko jeden markup wariant.
+- **Kryształ PRZY KAŻDYM elemencie agenta, przez CSS `::after`, bez zmian w producentach
+  kafelków.** Nowa zmienna `--cs-agent-crystal` (`url("data:image/svg+xml,<SVG>")`) jest
+  ustawiana INLINE na kontenerze `.cs-message--agent`, w TYCH SAMYCH trzech miejscach co
+  `--cs-agent-color-rgb` (`append_message`/`render_messages` w `chat_messages.ts`,
+  `_ensureAgentMessageContainer` w `chat_streaming.ts`), przez jedną małą funkcję pomocniczą,
+  `agentCrystalCssVar(agent, color)` w NOWYM czwartym pliku mixina, `chat/agentCrystal.ts`
+  (ten sam wzorzec co `machineTile.ts` - trzeci plik importowany przez OBA mixiny bez cyklu:
+  `chat_messages.ts` już importuje `buildBackgroundReceiptText` z `chat_streaming.ts`, więc
+  odwrotny import zamknąłby cykl; `agentCrystal.ts` nie importuje żadnego z dwóch mixinów).
+  CSS maluje kryształ pseudo-elementem `::after` na kafelkach (`.cs-tile--agent`,
+  `.cs-tile--agent-muted`) i na dymku tekstu (`.cs-message--agent > .cs-message__text`) -
+  `background: var(--cs-agent-crystal) center / contain no-repeat`, `18×18px`, `opacity: 0.8`.
+  Pozycja pionowa różni się (kafelek ma pełny `border: 1px`, dymek ma `border-left: 3px`):
+  `top: 9px` dla kafelka, `top: 7px` dla dymka - obie mierzone tak, żeby środek kryształu (x)
+  wypadał w tej samej pozycji: lewa krawędź kontenera wiadomości + 25px przy rynnie 22px,
+  identycznie dla kafelka i dymka. Kafelki systemowe (`.cs-tile--system`) i dymek usera NIE
+  dostają kryształu - selektor ich nie łapie.
+- **Łącznik (`_drawConnectorLines`, `chat_messages.ts`) kotwiczy dziś na PIERWSZYM i OSTATNIM
+  elemencie serii, nie na nagłówku i ostatniej ikonie.** Grupowanie serii (ciąg
+  `.cs-message--agent` bez przerwy w DOM) bez zmian. Elementy serii, W KOLEJNOŚCI DOM: każdy
+  `.cs-tile--agent`/`.cs-tile--agent-muted` (gdziekolwiek zagnieżdżony - `querySelectorAll`
+  łapie je niezależnie od opakowania, `.cs-tool-chip-wrap`/`.cs-tool-calls-wrapper` przy
+  streamingu) oraz każdy `.cs-message__text` BEZPOŚREDNI dzieckiem kontenera agenta; element
+  z `offsetHeight === 0` (pusty dymek, ukryty przez `:empty`) pomijany. Jeden element w serii
+  (albo zero) = brak linii. Linia idzie od środka kryształu PIERWSZEGO do środka kryształu
+  OSTATNIEGO elementu: x liczony RAZ z pierwszego kontenera agenta (`getBoundingClientRect().left`
+  minus realny `marginLeft` z `getComputedStyle`, fallback 22, plus 9 - połowa 18px kryształu);
+  y środka kryształu per element = `getBoundingClientRect().top` + 19 dla kafelka (border 1 +
+  top 9 + połowa 18) albo + 17 dla dymka tekstu (ten sam wzór, `top: 7px` w CSS). Kolor linii
+  dziedziczony z grupy bez zmian.
+- Test behawioralny: `chat/render_messages.bubbles.test.ts` - PRZEPISANY na nowy kontrakt (atrapa
+  DOM harnessu, `dom-shim.ts`, ma `style.setProperty`/`getPropertyValue` jako CELOWY no-op dla
+  custom properties - `createStyleProxy` - więc test buduje WŁASNĄ, minimalną atrapę elementu z
+  prawdziwym `style` Map-em, wzór `render_messages.delegateError.test.ts`). Sprawdza: (1) ZERO
+  węzłów `.cs-message__agent-head`/`.cs-message__agent-crystal` w całym drzewie, (2) KAŻDY
+  kontener `.cs-message--agent` (nie tylko pierwszy w serii) ma inline `--cs-agent-crystal`
+  zaczynające się od `url("data:image/svg+xml,`, zawierające zakodowany `%3Csvg` i dekodujące
+  się (`decodeURIComponent`) do stringa z `<svg`; (3) to samo dla dwóch wywołań
+  `_ensureAgentMessageContainer` pod rząd (streaming). `chatStreamingDedup.test.ts`'s dedup-guard
+  zmienił cel z `cs-message__agent-crystal` (usunięty string) na `--cs-agent-crystal` (ciało
+  `handle_chunk` nie ma prawa ustawiać tej zmiennej samo - jedyny producent to
+  `_ensureAgentMessageContainer`).
+
+### Gotcha: arkusz czatu wchodzi przez `adoptedStyleSheets`, bije `<style>` w `<head>`
+
+`chat_view.css` trafia do dokumentu przez `import chat_view_styles from '../chat_view.css' with
+{ type: 'css' }` (`chat_ui.ts`) + `adoptSheet(chat_view_styles)` (`modules/crystal-soul/`) -
+czyli `CSSStyleSheet` w `document.adoptedStyleSheets`, nie zwykły `<style>`/`<link>` w `<head>`.
+Przy RÓWNEJ specyficzności arkusz adoptowany bije arkusz z `<head>` (adopted stylesheets liczą
+się jako ostatnie w kaskadzie) - to odkryto empirycznie przy podglądzie na żywo tej jednostki:
+reguła w `<style>` o tej samej specyficzności, którą normalnie kolejność w pliku by wygrała,
+przegrywała z regułą stąd. Dopisujesz regułę, która ma konkurować z czymś wstrzykniętym przez
+Obsidian albo inny plugin jako `<style>`? Licz się z tym, że wygrywasz przy remisie
+specyficzności niezależnie od kolejności w pliku - podnieś specyficzność selektora, jeśli
+naprawdę potrzebujesz przegrać.
 
 ### Zaznaczanie i menu cytatu (2.3.0, spec D "Czat bez ścian")
 

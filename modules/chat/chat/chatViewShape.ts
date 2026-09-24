@@ -298,7 +298,6 @@ export interface ChatViewMixins extends
     current_message_text: HTMLElement | null;
     _currentThinkingBlock: HTMLElement | null;
     _lastPaintedContent: string | null;
-    _agentHeaderShown: boolean;
     _lastCompressionBlockEl: HTMLElement | null;
 
     // ── Kolejka wiadomości i tury w tle ──

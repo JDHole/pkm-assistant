@@ -967,46 +967,77 @@
 }
 
 /* ─── AGENT MESSAGE ─── */
+/* Kolumna dymkow (2.3.0, kolejna faza "Czat bez scian"): kontener agenta jest PRZEZROCZYSTY
+   (bez tla/ramki/paddingu) - odsunięty od lewej krawędzi rynna, tak jak dawniej naglowek serii.
+   Naglowek serii (`.cs-message__agent-head`/`.cs-message__agent-crystal`, jeden krysztal na cala
+   serie) znikl - krysztal siedzi teraz przy KAZDYM elemencie agenta (patrz nizej). */
 .cs-message--agent {
+  background: transparent;
   border: none;
   border-radius: 2px;
   position: relative;
   animation: cs-message-enter 0.25s ease-out;
+  margin-left: var(--cs-bubble-gutter);
+  margin-right: 0;
 }
 
-/* Agent header — crystal + name. ABOVE text. */
-.cs-message__agent-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-  /* 2.3.0 (B): bez nazwy agenta naglowek zapadalby sie do 8px, a krysztal (position:absolute)
-     wchodzil na dymek wyzej; min-height trzyma dawna wysokosc wiersza (recenzja B, headless Chrome). */
-  min-height: 15px;
-  padding-left: var(--cs-bubble-gutter);
-  font-size: 0.68rem;
-  color: var(--text-muted);
+/* Dymek odpowiedzi w kolorze agenta - dokladnie ten sam styl co dawniej
+   `.cs-message--user.cs-trim-bubble` (blok obciecia kontekstu), tylko kolor agenta zamiast usera. */
+.cs-message--agent > .cs-message__text {
+  background: rgba(var(--cs-agent-color-rgb, 150,130,100), 0.12);
+  border: 1px solid rgba(var(--cs-agent-color-rgb, 150,130,100), 0.30);
+  border-left: 3px solid rgba(var(--cs-agent-color-rgb, 150,130,100), 0.75);
+  border-radius: 2px;
+  box-shadow: 0 0 12px rgba(var(--cs-agent-color-rgb, 150,130,100), 0.20),
+              inset 0 0 20px rgba(var(--cs-agent-color-rgb, 150,130,100), 0.06);
   position: relative;
+  margin: 8px 0;
+  /* Nadpisuje bazowe `padding: 6px 0 6px var(--cs-bubble-gutter)` z `.cs-message__text` nizej
+     (specyficznosc dwoch klas bije jedna) - NIE zmieniaj bazowej reguly, uzywa jej tez dymek usera. */
+  padding: 5px 12px;
+}
+.cs-message--agent > .cs-message__text::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 3px;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(var(--cs-agent-color-rgb, 150,130,100), 0.16), transparent 60%);
+}
+/* Tekst jeszcze nie splynal (streaming) albo tura sama z tool callami - pusty dymek sie nie
+   rysuje wcale (atrapa DOM harnessu potwierdza `:empty` = bez zadnego wezla potomnego). */
+.cs-message--agent > .cs-message__text:empty {
+  display: none;
 }
 
-.cs-message__agent-crystal {
+/* Krysztal PRZY KAZDYM elemencie agenta (kafelek narzedzia/myslenia/sub-agenta ORAZ dymek
+   tekstu) - jedna zmienna CSS (`--cs-agent-crystal`, data URL SVG) ustawiona inline na
+   kontenerze `.cs-message--agent` w trzech producentach (patrz `chat/agentCrystal.ts`).
+   Kafelki systemowe/userowe (`.cs-tile--system`, dymek usera) NIE dostaja krysztalu - poza
+   zakresem tego selektora. */
+.cs-message--agent .cs-tile--agent::after,
+.cs-message--agent .cs-tile--agent-muted::after,
+.cs-message--agent > .cs-message__text::after {
+  content: '';
+  position: absolute;
   width: 18px;
   height: 18px;
+  background: var(--cs-agent-crystal) center / contain no-repeat;
   opacity: 0.8;
-  flex-shrink: 0;
-  position: absolute;
-  left: 0;
+  pointer-events: none;
   z-index: 2;
 }
-.cs-message__agent-crystal svg {
-  width: 100%;
-  height: 100%;
+/* Kafelek ma `border: 1px` pelnym obwodem - notka siedzi 1px dalej w rynnie niz dymek. */
+.cs-message--agent .cs-tile--agent::after,
+.cs-message--agent .cs-tile--agent-muted::after {
+  left: calc(-1 * var(--cs-bubble-gutter) - 1px);
+  top: 9px;
 }
-
-.cs-message__agent-name {
-  font-weight: 500;
-  color: var(--text-normal);
-  font-size: 0.79rem;
+/* Dymek tekstu ma `border-left: 3px` - notka siedzi 3px dalej w rynnie. */
+.cs-message--agent > .cs-message__text::after {
+  left: calc(-1 * var(--cs-bubble-gutter) - 3px);
+  top: 7px;
 }
 
 /* Connector line (drawn by JS) */
@@ -2487,6 +2518,11 @@ span.cs-note-link {
    agent-kolorowy wyglad rowniez w jasnym motywie - specyficznosc 3 klas bije regule
    powyzej (2 klasy), wiec nie dziedziczy jasnego wariantu koloru usera. */
 .theme-light .cs-message--user.cs-trim-bubble {
+  border-color: rgba(var(--cs-agent-color-rgb, 150,130,100), 0.15);
+}
+
+/* Kolumna dymkow (2.3.0): mirror tej samej reguly dla dymka odpowiedzi agenta. */
+.theme-light .cs-message--agent > .cs-message__text {
   border-color: rgba(var(--cs-agent-color-rgb, 150,130,100), 0.15);
 }
 

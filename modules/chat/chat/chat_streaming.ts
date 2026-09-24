@@ -10,7 +10,7 @@
  */
 
 import { MarkdownRenderer, Notice } from 'obsidian';
-import { SkinManager, hexToRgbTriplet, UiIcons, setSvg } from '../../crystal-soul/index.js';
+import { SkinManager, hexToRgbTriplet, UiIcons } from '../../crystal-soul/index.js';
 import { buildCacheMetadata, isLocalPlatform } from '../../models/index.js';
 import { log } from '../../../core/utils/Logger.js';
 // Status narzędzia i warunek linku „otwórz zapisany plik" liczy JEDNA czysta funkcja z core
@@ -42,6 +42,10 @@ import { buildSubTaskNotificationText, matchTabForOrigin } from './subTaskNotifi
 // plik usuwa duplikat bez tego problemu.
 import { buildMachineView } from './machineMessage.js';
 import { renderMachineTile } from './machineTile.js';
+// Krysztal agenta jako CSS var `--cs-agent-crystal` (2.3.0, kolumna dymkow) - ten sam trzeci
+// plik (zero cyklu) co `machineMessage.js`/`machineTile.js` wyzej, jeden producent dla
+// `_ensureAgentMessageContainer` TU i append_message/render_messages w `chat_messages.ts`.
+import { agentCrystalCssVar } from './agentCrystal.js';
 import { stripInlineTriggers, buildInlineTriggerInstruction, getInlineTriggerSummary } from './InlineChipPlugin.js';
 import { parseTriggersIfHuman, mayRunSlashCommand, registerUrlsIfHuman } from './messagePrivileges.js';
 import { queueChatMessage, readQueuedMessage, evaluateQueuedDrain, evaluateStopQueueCancel } from './queuedMessage.js';
@@ -563,7 +567,6 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         log.timing('Chat', `TOTAL send→loop (model: ${chat_model.modelKey || 'unknown'}, parallel: ${needsFreshModel})`, sendStart);
 
         // Start streaming - closured callbacks know which agent they belong to
-        this._agentHeaderShown = false;
         // Ostatnia treść namalowana przez handle_chunk (cykl życia jak current_message_container) -
         // czyta to _finalizeTurn, żeby wiedzieć czy finalna wersja różni się od tego, co widzi user.
         this._lastPaintedContent = null;
@@ -927,19 +930,14 @@ export function _ensureAgentMessageContainer(this: ChatViewLike, streamAgent: Ag
     const streamColor = SkinManager.getAgentColor(streamAgent || 'default');
     const agName = streamAgent?.name || 'Agent';
 
+    // Kolumna dymkow (2.3.0, kolejna faza "Czat bez scian"): naglowek serii znikl calkiem -
+    // krysztal siedzi teraz przy KAZDYM elemencie agenta (kafelek/dymek tekstu), rysowany CSS
+    // pseudo-elementem `::after` sterowanym ta zmienna (patrz `chat_view.css`).
     this.current_message_container = this.messages_container.createDiv({
         cls: 'cs-message cs-message--agent'
     });
     this.current_message_container.style.setProperty('--cs-agent-color-rgb', hexToRgbTriplet(streamColor));
-
-    if (!this._agentHeaderShown) {
-        // Dymki 2.3.0 ("Czat bez scian"): nazwa agenta znika z naglowka serii streamu -
-        // kryształ zostaje jedynym znacznikiem w rynnie po lewej (spec B).
-        const head = this.current_message_container.createDiv({ cls: 'cs-message__agent-head' });
-        const crystalEl = head.createDiv({ cls: 'cs-message__agent-crystal' });
-        setSvg(crystalEl, SkinManager.getCrystal(streamAgent || agName, { size: 18, color: streamColor, glow: false }));
-        this._agentHeaderShown = true;
-    }
+    this.current_message_container.style.setProperty('--cs-agent-crystal', agentCrystalCssVar(streamAgent || agName, streamColor));
 
     this.current_message_bubble = this.current_message_container.createDiv({ cls: 'cs-tool-calls-wrapper' });
     this.current_message_text = this.current_message_container.createDiv({ cls: 'cs-message__text' });
@@ -1623,7 +1621,6 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
                 this._renderUserText(textDiv, injectedText);
             }
             this.scrollToBottom();
-            this._agentHeaderShown = false; // Next agent message gets header
         }
     }
 }
