@@ -2502,7 +2502,7 @@ export const en: Record<string, string> = {
   // delegation (which sends a letter with the conversation context) included.
   'mcp.kom.tool_disabled': 'You do not have mail enabled (profile → Permissions → Communicator), so you cannot send a message to another agent - delegation included.',
   'mcp.kom.send_failed': 'Could not send the message.',
-  'mcp.kom_send.desc': 'Send a message to another agent inbox. This is MAIL, not a conversation: the recipient reads it at the start of their next session, not now.\n\nWHEN TO USE:\n- You are passing a result, a decision or a request to another agent "for later"\n- User says "tell X that...", "write to X"\n\nWHEN NOT TO USE:\n- The matter is urgent and needs another agent NOW → agent_delegate (hands off the conversation immediately)\n- You want to remember something for yourself → memory_save\n\nONE RECIPIENT PER CALL. Writing to several people → call the tool several times. You never delete mail - the user cleans the inbox.',
+  'mcp.kom_send.desc': 'Send a message to another agent inbox. This is MAIL, not a conversation: the recipient reads it at the start of their next session, not now.\n\nWHEN TO USE:\n- You are passing a result, a decision or a request to another agent "for later"\n- User says "tell X that...", "write to X"\n\nWHEN NOT TO USE:\n- You want to remember something for yourself → memory_save\n\nONE RECIPIENT PER CALL. Writing to several people → call the tool several times. You never delete mail - the user cleans the inbox.',
   'mcp.kom_send.param.to': 'Recipient agent name (exactly as on the agent list).',
   'mcp.kom_send.param.subject': 'Short subject - one sentence telling the recipient how important this is.',
   'mcp.kom_send.param.content': 'Full body. Make it self-contained - the recipient does not know your conversation.',
@@ -2913,7 +2913,7 @@ Report status → \`gotowy\`. Tell the user 2-3 sentences of essence + where the
   'prompt.dt.rule.file_mkdir': 'create_folder(path) - creates the folder + its parents. USE IT before write if the folder does not exist.',
   'prompt.dt.rule.comms_delegate': 'A topic outside your competence → agent_delegate (ALWAYS pass context_summary!).',
   'prompt.dt.rule.art_plan_todo': 'A complex task to agree on → artifact_create(typ:"plan"); the user comments/approves in the note, you come back and carry it out. Keep your own running progress in a todo.',
-  'prompt.dt.rule.kom_send': 'You want to pass something to another agent "for later" → kom_send(to, subject, content). This is mail, not a conversation - the recipient will read it during their next session. Handing the conversation over urgently NOW → agent_delegate.',
+  'prompt.dt.rule.kom_send': 'You want to pass something to another agent "for later" → kom_send(to, subject, content). This is mail, not a conversation - the recipient will read it during their next session.',
 
   // ─── Summarizer: the dynamic header of the compression skeleton ───
   // The skeleton (sections 1-8 + RULES + the candidates block) lives in

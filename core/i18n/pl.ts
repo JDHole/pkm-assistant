@@ -2509,7 +2509,7 @@ export const pl: Record<string, string> = {
   // także delegacji, która wysyła list z kontekstem rozmowy.
   'mcp.kom.tool_disabled': 'Nie masz włączonej poczty (profil → Uprawnienia → Komunikator), więc nie wyślesz wiadomości do innego agenta - także przez delegację.',
   'mcp.kom.send_failed': 'Nie udało się wysłać wiadomości.',
-  'mcp.kom_send.desc': 'Wyślij wiadomość do skrzynki innego agenta. To POCZTA, nie rozmowa: adresat przeczyta ją przy swojej następnej sesji, nie teraz.\n\nKIEDY UŻYWAĆ:\n- Przekazujesz innemu agentowi wynik pracy, ustalenie albo prośbę „na później"\n- User mówi „przekaż X, że...", „napisz do X"\n\nKIEDY NIE UŻYWAĆ:\n- Sprawa jest na TERAZ i wymaga innego agenta → agent_delegate (przekazuje rozmowę od razu)\n- Chcesz zapamiętać coś dla siebie → memory_save\n\nJEDEN ADRESAT NA WYWOŁANIE. Piszesz do kilku osób → wołaj narzędzie kilka razy. Wiadomości nie kasujesz - skrzynkę sprząta user.',
+  'mcp.kom_send.desc': 'Wyślij wiadomość do skrzynki innego agenta. To POCZTA, nie rozmowa: adresat przeczyta ją przy swojej następnej sesji, nie teraz.\n\nKIEDY UŻYWAĆ:\n- Przekazujesz innemu agentowi wynik pracy, ustalenie albo prośbę „na później"\n- User mówi „przekaż X, że...", „napisz do X"\n\nKIEDY NIE UŻYWAĆ:\n- Chcesz zapamiętać coś dla siebie → memory_save\n\nJEDEN ADRESAT NA WYWOŁANIE. Piszesz do kilku osób → wołaj narzędzie kilka razy. Wiadomości nie kasujesz - skrzynkę sprząta user.',
   'mcp.kom_send.param.to': 'Nazwa agenta-odbiorcy (dokładnie taka jak na liście agentów).',
   'mcp.kom_send.param.subject': 'Krótki temat - jedno zdanie, po którym adresat pozna wagę wiadomości.',
   'mcp.kom_send.param.content': 'Pełna treść. Pisz samodzielnie zrozumiale - odbiorca nie zna kontekstu Twojej rozmowy.',
@@ -2920,7 +2920,7 @@ Status raportu → \`gotowy\`. Powiedz userowi 2-3 zdania esencji + gdzie leży 
   'prompt.dt.rule.file_mkdir': 'create_folder(path) - tworzy folder + nadrzędne. UŻYWAJ przed write jeśli folder nie istnieje.',
   'prompt.dt.rule.comms_delegate': 'Temat poza kompetencjami → agent_delegate (ZAWSZE podaj context_summary!).',
   'prompt.dt.rule.art_plan_todo': 'Złożone zadanie do uzgodnienia → artifact_create(typ:"plan"); user komentuje/zatwierdza w notatce, wracasz i realizujesz. Bieżący postęp pracy dla siebie prowadź w todo.',
-  'prompt.dt.rule.kom_send': 'Chcesz coś przekazać innemu agentowi „na później" → kom_send(to, subject, content). To poczta, nie rozmowa - adresat przeczyta przy swojej następnej sesji. Pilne przekazanie rozmowy TERAZ → agent_delegate.',
+  'prompt.dt.rule.kom_send': 'Chcesz coś przekazać innemu agentowi „na później" → kom_send(to, subject, content). To poczta, nie rozmowa - adresat przeczyta przy swojej następnej sesji.',
 
   // ─── Summarizer: dynamiczna główka szkieletu kompresji ───
   // Szkielet (sekcje 1-8 + ZASADY + blok kandydatów) mieszka w `config/default_prompts.ts`;
