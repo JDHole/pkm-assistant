@@ -1913,10 +1913,13 @@ export function handle_error(this: ChatViewLike, error: unknown, agentName?: str
         if (this._currentThinkingBlock) {
             finalizeThinkingBlock(this._currentThinkingBlock);
             this._currentThinkingBlock = null;
-            // Zwinięcie synchroniczne zmienia wysokość - przerysuj łącznik (naprawa recenzji
-            // niezależnej, ten sam powód co w `_chatBeforeContinue`/`stop_generation`).
-            this._scheduleConnectorRedraw();
         }
+        // Przerysowanie łącznika na KOŃCU całej gałęzi aktywnej zakładki, nie tylko wewnątrz
+        // `if (this._currentThinkingBlock)` (naprawa recenzji niezależnej, dogrywka) - TA SAMA
+        // gałąź zawsze czyści `current_message_text` (dymek wraca do `:empty`, znika przez CSS)
+        // i wstawia kafelek błędu wyżej, więc geometria zmienia się ZAWSZE, nawet bez bloku
+        // myślenia w locie. Bez tego łącznik kończył się obok kafelka aż do następnej tury.
+        this._scheduleConnectorRedraw();
         this._resetPaintTargets();
         this.set_generating(false);
     } else {

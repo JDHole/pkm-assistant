@@ -117,6 +117,11 @@ function buildFakeThis(container: FakeEl): TestDynamic {
         _resetPaintTargets: () => {},
         set_generating: () => {},
         _cleanupAskUser: () => {},
+        // Wołane bezwarunkowo na końcu gałęzi aktywnej zakładki (naprawa recenzji niezależnej,
+        // dogrywka - przeniesione poza `if (_currentThinkingBlock)`, patrz
+        // `connectorRedraw.activity.test.ts` dla testu, który REALNIE liczy przerysowania przez
+        // prawdziwy scheduler; ten plik testuje tylko kształt kafelka, więc stub wystarcza).
+        _scheduleConnectorRedraw: () => {},
     };
 }
 

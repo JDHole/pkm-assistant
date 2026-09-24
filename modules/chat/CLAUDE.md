@@ -1238,7 +1238,7 @@ narzędzia, aż do końca tury.
 - **`_chatOnToolCallsParsed` (Faza 1, placeholdery kafelków narzędzi)** planuje przerysowanie
   RAZ na rundę (nie w pętli per `tool_call`), TYLKO na aktywnej zakładce (`isActiveTab`) - tura w
   tle nie rusza łącznika widoku, którego user i tak nie widzi.
-- ⚠️ **Cztery brakujące wyzwalacze (BLOKER + ważne, naprawa recenzji niezależnej commitu
+- ⚠️ **Cztery brakujące wyzwalacze (ważne, naprawa recenzji niezależnej commitu
   `caa7affa`) - zwinięcie bloku myślenia i podmiana kafelka zmieniają wysokość TEŻ poza
   streamingiem.** `finalizeThinkingBlock` (`ThinkingBlock.ts`) woła `expand(false)` - ciało kafelka
   myślenia znika SYNCHRONICZNIE, kafelki niżej podskakują. Poprzednia runda planowała przerysowanie
@@ -1251,6 +1251,15 @@ narzędzia, aż do końca tury.
   placeholder "w toku"; obrazek wygenerowany dokłada własny blok) ZMIENIA wysokość PO KAŻDYM
   wyniku w rundzie - przerysowanie na końcu funkcji (`if (isActiveTab) this._scheduleConnectorRedraw()`),
   raz na całą rundę, nie w pętli per wynik.
+- ⚠️ **`handle_error`: przerysowanie w za wąskim warunku (naprawa recenzji niezależnej, dogrywka).**
+  Runda opisana w punkcie wyżej wstawiła `_scheduleConnectorRedraw()` TYLKO wewnątrz
+  `if (this._currentThinkingBlock)` w `handle_error` - ta sama gałąź `isActiveTab` robi jednak
+  ZAWSZE też `current_message_text.empty()` (dymek wraca do `:empty`, znika przez CSS) i wstawia
+  kafelek błędu, niezależnie od tego, czy tura miała żywy blok myślenia w locie. Bez bloku
+  myślenia łącznik więc nadal kończył się obok nowego kafelka do następnej tury. Wywołanie
+  przeniesione na KONIEC całej gałęzi `if (isActiveTab)` (po zwinięciu bloku myślenia, przed
+  `_resetPaintTargets()`), bezwarunkowo - ten sam wzorzec co `stop_generation` (już dziś
+  bezwarunkowy w swojej gałęzi, patrz wyżej).
 - ⚠️ **Animacja wejścia (niskie, naprawa recenzji niezależnej commitu `caa7affa`).**
   `.cs-message--agent`/`.cs-ask-user` wjeżdżają animacją `cs-message-enter` (`translateY(6px) ->
   0`, `chat_view.css`) - nowy wyzwalacz (klik kafelka, pierwsza treść dymka…) strzela w PIERWSZEJ
@@ -1296,8 +1305,12 @@ JEDYNY element kolumny bez kryształu i bez bycia kotwicą łącznika - werdykt 
 rzecz od agenta" ma kryształ) go pomijał. O ZAGNIEŻDŻENIU `.cs-ask-user` W `.cs-message--agent`
 (kluczowe dla całej reszty tej notatki) decyduje `chat_streaming.ts`'s `_chatOnToolCallsParsed`
 (dokleja blok zwrócony przez `_renderAskUserBlock` do `toolCallsContainer` wewnątrz kontenera
-agenta) - **poprawka nieścisłości**: poprzednia wersja tej notatki i komentarz w
-`chat_popovers.ts` przypisywały tę decyzję jemu; `chat_popovers.ts`'s `_renderAskUserBlock`
+agenta) - **poprawka nieścisłości (dogrywka recenzji niezależnej)**: poprzednia wersja tej
+notatki przypisywała tę decyzję `chat_popovers.ts` - błędnie. Błędnie przypisujący komentarz
+siedział w `chat_view.css` (commit `caa7affa`, ówczesne linie ok. 1027-1029: "`.cs-ask-user`
+renderuje się ZAWSZE zagnieżdżony w `.cs-message--agent` (patrz `chat_popovers.ts`)"), NIE w
+samym `chat_popovers.ts` - `git grep caa7affa` na tym pliku daje ZERO trafień, plik nigdy nie
+był tym commitem dotknięty. `chat_popovers.ts`'s `_renderAskUserBlock`
 buduje WYŁĄCZNIE ODPIĘTY div, bez rodzica - o miejscu w drzewie nie wie nic. Naprawa jest czysto
 CSS (plus jedna linijka w `_drawConnectorLines`, patrz niżej), ZERO zmian w `chat_popovers.ts`
 (zmienna `--cs-agent-crystal` już jest ustawiona na kontenerze `.cs-message--agent` - custom
@@ -1309,8 +1322,15 @@ properties dziedziczą się w dół DOM-u automatycznie).
   ZOSTAJE; naprawa recenzji `caa7affa` ją usunęła zamiast zerować drugi raz - selektor kryształu
   (`.cs-message--agent .cs-ask-user::after`, DWIE klasy) jest bardziej specyficzny niż był stary
   (`.cs-ask-user::after`, JEDNA klasa) i WYGRYWAŁ go zawsze, bo `.cs-ask-user` renderuje się
-  ZAWSZE zagnieżdżony w `.cs-message--agent` - romb nigdy nie był faktycznie widoczny, więc to
-  był martwy kod, nie dekoracja do zachowania).
+  ZAWSZE zagnieżdżony w `.cs-message--agent`). **Poprawka nieścisłości (dogrywka recenzji
+  niezależnej):** poprzednia wersja tego zdania twierdziła, że romb "nigdy nie był faktycznie
+  widoczny, więc to był martwy kod, nie dekoracja do zachowania" - nieprawda. Do commitu
+  `caa7affa` `.cs-ask-user::after` miał TYLKO tę jedną, starą regułę (jedna klasa, nic jej nie
+  przebijało specyficznością) - romb BYŁ widoczny. `caa7affa` dopiero dołożył bardziej
+  specyficzny selektor kryształu na tym samym pseudo-elemencie - od tego commitu romb przestał
+  wygrywać kaskadę. To zmiana WYGLĄDU (romb zastąpiony kryształem agenta), nie martwy kod od
+  początku - sam kryształ był wtedy jeszcze niewidoczny z INNEGO powodu (BLOKER
+  `overflow: hidden`, patrz niżej), naprawionego dopiero commitem kończącym tę rundę recenzji.
 - ⚠️ **BLOKER (naprawa recenzji niezależnej commitu `caa7affa`): kryształ był CAŁKOWICIE
   przycięty.** `.cs-ask-user` ma bazowo `overflow: hidden` (powód nieudokumentowany w historii
   repo śledzonej tym repozytorium - poprzedza commit startowy `287301c`; [inferred z geometrii]:
@@ -1319,13 +1339,22 @@ properties dziedziczą się w dół DOM-u automatycznie).
   krawędzią; `::before`, gradient na górze, mieści się w całości w pudełku, więc nie potrzebował
   clippingu), a krysztal (`::after`, pozycja niżej) siedzi w UJEMNYM `left` POZA własnym
   pudełkiem `.cs-ask-user` - bez nadpisania `overflow` był więc przycięty do zera, niewidoczny.
-  Naprawa: `.cs-message--agent .cs-ask-user { overflow: visible; }` (`chat_view.css`) - nadpisanie
-  ścisłe w kontekście kolumny agenta (ta sama wygrana specyficzności jak wyżej), nie zmiana bazowej
-  reguły `.cs-ask-user` samej (`.cs-ask-user` poza kontekstem `.cs-message--agent` teoretycznie
-  nadal miałby `overflow: hidden` - dziś nieosiągalne w praktyce, bo blok renderuje się ZAWSZE
-  zagnieżdżony). Żadne dziecko `.cs-ask-user` (`__head`/`__options`/`__opt`/`__input` itd.) nie
-  polega na obcinaniu przez rodzica - każde ma własny, wewnętrzny układ bez przekroczenia
-  bazowego `border-radius: 2px`.
+  Naprawa: `.cs-message--agent .cs-ask-user { overflow: visible; overflow-wrap: anywhere; }`
+  (`chat_view.css`) - nadpisanie ścisłe w kontekście kolumny agenta (ta sama wygrana
+  specyficzności jak wyżej), nie zmiana bazowej reguły `.cs-ask-user` samej (`.cs-ask-user` poza
+  kontekstem `.cs-message--agent` teoretycznie nadal miałby `overflow: hidden` - dziś
+  nieosiągalne w praktyce, bo blok renderuje się ZAWSZE zagnieżdżony).
+  ⚠️ **Poprawka nieścisłości (dogrywka recenzji niezależnej):** poprzednia wersja tego akapitu
+  twierdziła, że "żadne dziecko `.cs-ask-user` nie polega na obcinaniu przez rodzica" - fałsz.
+  `overflow: hidden` do tej pory przycinał TEŻ długi tekst (`__question`/`__context`/`__answer`,
+  etykiety opcji) bez żadnego łamania - żaden element w tym łańcuchu nie miał
+  `overflow-wrap`/`word-break`, więc długa ścieżka albo URL w pytaniu wychodziłby za prawą
+  krawędź i dawał poziomy pasek na liście wiadomości. Stąd `overflow-wrap: anywhere` w TEJ SAMEJ
+  regule, obok `overflow: visible`. `.cs-ask-user__input` (`width:100%` + padding + border)
+  zostaje bezpieczny bez własnej poprawki, bo Obsidian ma globalnie
+  `* { box-sizing: border-box }` [measured na żywo 24.09 przez właściciela projektu] - reszta
+  dzieci (`__head`/`__options`/`__opt` itd.) ma własny, wewnętrzny układ bez przekraczania
+  bazowego `border-radius: 2px`, teraz też bez polegania na obcinaniu tekstu przez rodzica.
 - Pozycja: `.cs-ask-user` ma TEN SAM wzorzec obramowania co dymek tekstu (`border: 1px` bazowo,
   `border-left: 3px` nadpisujące tylko lewą krawędź) - ta sama korekta `left` co dymek
   (`calc(-1 * rynna - 3px)`). `top: 12px` (zamiast dymka `7px`) to hand-tuned wartość pod

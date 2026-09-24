@@ -1,6 +1,6 @@
 import test from 'ava';
 import { onMessagesContainerActivity, _scheduleConnectorRedraw } from './connectorActivity.js';
-import { _paintStreamFrame, _chatOnToolCallsParsed } from './chat_streaming.js';
+import { _paintStreamFrame, _chatOnToolCallsParsed, _chatBeforeContinue, _chatOnToolResults, handle_error, stop_generation } from './chat_streaming.js';
 
 /**
  * Recenzja niezalezna (3d3b5fdd, punkt 1, "wazne"): przed tym plikiem `_scheduleConnectorRedraw`
@@ -27,6 +27,14 @@ import { _paintStreamFrame, _chatOnToolCallsParsed } from './chat_streaming.js';
  *
  * Geometrie linii (pozycje x/y) weryfikuje wylacznie pomiar na zywo w Obsidianie - atrapa DOM nie
  * ma silnika layoutu (`getBoundingClientRect` zwraca zera), wiec nie da sie jej odtworzyc tutaj.
+ *
+ * WSZYSTKIE testy w tym pliku sa `test.serial` (naprawa recenzji niezaleznej, dogrywka): kazdy
+ * z nich woła `useQueuedRaf`, ktora podmienia GLOBALNE `requestAnimationFrame`/
+ * `cancelAnimationFrame` na wspolna atrape na czas swojego ciala - AVA domyslnie uruchamia testy
+ * JEDNEGO pliku wspolbieznie, wiec dwa testy z tej samej daty rownolegle podmienialyby ten sam
+ * globalny stan i nadpisywalyby sobie kolejke/oryginaly nawzajem. Dzis bezpieczne wylacznie
+ * dlatego, ze ciala testow sa synchroniczne (podmiana i przywrocenie mieszcza sie w jednym
+ * mikrozadaniu bez `await` pomiedzy) - `test.serial` usuwa zaleznosc od tego przypadku.
  */
 
 type TestDynamic = any;
@@ -95,7 +103,7 @@ function buildSchedulerFakeThis() {
     return { fakeThis, getDrawCount: () => drawCount };
 }
 
-test('onMessagesContainerActivity: klik na wezle wewnatrz .cs-tile__head planuje przerysowanie (przez PRAWDZIWY _scheduleConnectorRedraw -> _drawConnectorLines, po flush)', t => {
+test.serial('onMessagesContainerActivity: klik na wezle wewnatrz .cs-tile__head planuje przerysowanie (przez PRAWDZIWY _scheduleConnectorRedraw -> _drawConnectorLines, po flush)', t => {
     const { flush } = useQueuedRaf(t);
     const { fakeThis, getDrawCount } = buildSchedulerFakeThis();
     const head = {};
@@ -107,7 +115,7 @@ test('onMessagesContainerActivity: klik na wezle wewnatrz .cs-tile__head planuje
     t.is(getDrawCount(), 1, 'klik na naglowku kafelka powinien skutkowac wywolaniem _drawConnectorLines przez scheduler');
 });
 
-test('onMessagesContainerActivity: klik POZA .cs-tile__head nie planuje przerysowania; krok pozytywny w tej samej fixturze (klik NA naglowku) potem tak', t => {
+test.serial('onMessagesContainerActivity: klik POZA .cs-tile__head nie planuje przerysowania; krok pozytywny w tej samej fixturze (klik NA naglowku) potem tak', t => {
     const { flush } = useQueuedRaf(t);
     const { fakeThis, getDrawCount } = buildSchedulerFakeThis();
     const outsideTarget = { closest: () => null };
@@ -123,7 +131,7 @@ test('onMessagesContainerActivity: klik POZA .cs-tile__head nie planuje przeryso
     t.is(getDrawCount(), 1, 'krok pozytywny: ta sama fixtura, klik NA naglowku powinien jednak zaplanowac przerysowanie');
 });
 
-test('onMessagesContainerActivity: Enter/Spacja na .cs-tile__head planuja KAZDE swoje przerysowanie (osobne klatki), inny klawisz nie', t => {
+test.serial('onMessagesContainerActivity: Enter/Spacja na .cs-tile__head planuja KAZDE swoje przerysowanie (osobne klatki), inny klawisz nie', t => {
     const { flush } = useQueuedRaf(t);
     const { fakeThis, getDrawCount } = buildSchedulerFakeThis();
     const head = {};
@@ -146,7 +154,7 @@ test('onMessagesContainerActivity: Enter/Spacja na .cs-tile__head planuja KAZDE 
     t.is(getDrawCount(), 2, 'klawisz inny niz aktywujacy po dwoch udanych planowaniach nadal nie dopisuje trzeciego');
 });
 
-test('onMessagesContainerActivity: dwa planowania PRZED jednym flush koalescuja sie do JEDNEGO przerysowania', t => {
+test.serial('onMessagesContainerActivity: dwa planowania PRZED jednym flush koalescuja sie do JEDNEGO przerysowania', t => {
     const { flush } = useQueuedRaf(t);
     const { fakeThis, getDrawCount } = buildSchedulerFakeThis();
     const head = {};
@@ -159,7 +167,7 @@ test('onMessagesContainerActivity: dwa planowania PRZED jednym flush koalescuja 
     t.is(getDrawCount(), 1, 'dwa zdarzenia PRZED flushem to jedna klatka animacji - scheduler dlawi drugie planowanie (_connectorRedrawCancel juz niepusty), wiec wychodzi JEDNO przerysowanie');
 });
 
-test('onMessagesContainerActivity: zdarzenia inne niz click/keydown (np. scroll) nie planuja przerysowania; krok pozytywny w tej samej fixturze (klik NA naglowku) potem tak', t => {
+test.serial('onMessagesContainerActivity: zdarzenia inne niz click/keydown (np. scroll) nie planuja przerysowania; krok pozytywny w tej samej fixturze (klik NA naglowku) potem tak', t => {
     const { flush } = useQueuedRaf(t);
     const { fakeThis, getDrawCount } = buildSchedulerFakeThis();
     const anyTarget = { closest: () => ({}) };
@@ -175,7 +183,7 @@ test('onMessagesContainerActivity: zdarzenia inne niz click/keydown (np. scroll)
     t.is(getDrawCount(), 1, 'krok pozytywny: ta sama fixtura, klik NA naglowku powinien jednak zaplanowac przerysowanie');
 });
 
-test('onMessagesContainerActivity: animationend z celem W kontenerze agenta/ask_user planuje przerysowanie (koniec animacji wejscia cs-message-enter), z celem POZA nim nie', t => {
+test.serial('onMessagesContainerActivity: animationend z celem W kontenerze agenta/ask_user planuje przerysowanie (koniec animacji wejscia cs-message-enter), z celem POZA nim nie', t => {
     const { flush } = useQueuedRaf(t);
     const { fakeThis, getDrawCount } = buildSchedulerFakeThis();
 
@@ -226,7 +234,7 @@ function buildPaintFakeThis() {
     return { fakeThis, getDrawCount: () => drawCount };
 }
 
-test('_paintStreamFrame: PIERWSZA niepusta tresc (dymek traci :empty) planuje przerysowanie RAZ (po flush), kolejne rosnace klatki NIE dokladaja kolejnych', t => {
+test.serial('_paintStreamFrame: PIERWSZA niepusta tresc (dymek traci :empty) planuje przerysowanie RAZ (po flush), kolejne rosnace klatki NIE dokladaja kolejnych', t => {
     const { flush } = useQueuedRaf(t);
     const { fakeThis, getDrawCount } = buildPaintFakeThis();
 
@@ -240,7 +248,7 @@ test('_paintStreamFrame: PIERWSZA niepusta tresc (dymek traci :empty) planuje pr
     t.is(getDrawCount(), 1, 'rosnacy tekst W TEJ SAMEJ turze nie przesuwa srodka krysztalu (staly offset od gory dymka) - nie powinien hot-loopowac schedulera');
 });
 
-test('_paintStreamFrame: klatka z pustym text NIE planuje przerysowania (dymek zostaje :empty); krok pozytywny w tej samej fixturze (klatka z tekstem) potem tak', t => {
+test.serial('_paintStreamFrame: klatka z pustym text NIE planuje przerysowania (dymek zostaje :empty); krok pozytywny w tej samej fixturze (klatka z tekstem) potem tak', t => {
     const { flush } = useQueuedRaf(t);
     const { fakeThis, getDrawCount } = buildPaintFakeThis();
 
@@ -253,7 +261,7 @@ test('_paintStreamFrame: klatka z pustym text NIE planuje przerysowania (dymek z
     t.is(getDrawCount(), 1, 'krok pozytywny: ta sama fixtura, pierwsza klatka z niepustym tekstem powinna jednak zaplanowac przerysowanie');
 });
 
-test('_paintStreamFrame: WSTAWIENIE bloku myslenia (pierwsza klatka z reasoning) planuje przerysowanie RAZ (po flush), dopisywanie tresci nie doklada kolejnych', t => {
+test.serial('_paintStreamFrame: WSTAWIENIE bloku myslenia (pierwsza klatka z reasoning) planuje przerysowanie RAZ (po flush), dopisywanie tresci nie doklada kolejnych', t => {
     const { flush } = useQueuedRaf(t);
     const { fakeThis, getDrawCount } = buildPaintFakeThis();
 
@@ -287,7 +295,7 @@ function buildToolCallsFakeThis() {
     return { fakeThis, getDrawCount: () => drawCount };
 }
 
-test('_chatOnToolCallsParsed: nowy kafelek narzedzia (Faza 1, aktywna zakladka) planuje przerysowanie lacznika (po flush)', t => {
+test.serial('_chatOnToolCallsParsed: nowy kafelek narzedzia (Faza 1, aktywna zakladka) planuje przerysowanie lacznika (po flush)', t => {
     const { flush } = useQueuedRaf(t);
     const { fakeThis, getDrawCount } = buildToolCallsFakeThis();
     const turn: TestDynamic = { watchdog: null, agent: null, agentName: 'Test' };
@@ -300,7 +308,7 @@ test('_chatOnToolCallsParsed: nowy kafelek narzedzia (Faza 1, aktywna zakladka) 
     t.truthy(turn.toolCallsContainer, 'kontrola: kafelek faktycznie powinien wyladowac w kontenerze narzedzi');
 });
 
-test('_chatOnToolCallsParsed: zakladka w tle (nieaktywna) nie planuje przerysowania widoku, ktorego user nie widzi; krok pozytywny w tej samej fixturze (ta sama zakladka, teraz aktywna) potem tak', t => {
+test.serial('_chatOnToolCallsParsed: zakladka w tle (nieaktywna) nie planuje przerysowania widoku, ktorego user nie widzi; krok pozytywny w tej samej fixturze (ta sama zakladka, teraz aktywna) potem tak', t => {
     const { flush } = useQueuedRaf(t);
     const { fakeThis, getDrawCount } = buildToolCallsFakeThis();
     fakeThis._isTurnActiveTab = () => false;
@@ -317,4 +325,249 @@ test('_chatOnToolCallsParsed: zakladka w tle (nieaktywna) nie planuje przerysowa
     _chatOnToolCallsParsed.call(fakeThis, turn2, toolCalls2);
     flush();
     t.is(getDrawCount(), 1, 'krok pozytywny: ta sama fixtura, ta sama funkcja na AKTYWNEJ zakladce powinna jednak zaplanowac przerysowanie');
+});
+
+// ── chat_streaming.ts: wyzwalacze POZA streamingiem (dogrywka recenzji niezaleznej - karta
+// zada testow czterech konkretnych wyzwalaczy dopisanych w poprzedniej rundzie bez pokrycia:
+// _chatBeforeContinue/_chatOnToolResults/handle_error/stop_generation). Ta sama technika -
+// PRAWDZIWY _scheduleConnectorRedraw + _drawConnectorLines jako licznik, nigdy stub samego
+// wywolania schedulera. ──
+
+/** Minimalny `this`+`turn` dla `_chatBeforeContinue` na SCIEZCE bez zakolejkowanej wiadomosci,
+ *  bez kompresji i bez nudge'y delegacji/skilla (rw.messages puste, getCompressionNeeded:'none',
+ *  pendingEntries/agent puste, responseRecorded:true) - izoluje WYLACZNIE galaz "reset kontenera
+ *  przed kontynuacja petli", w ktorej siedzi wyzwalacz po zwinieciu bloku myslenia. */
+function buildBeforeContinueFakeThis() {
+    let drawCount = 0;
+    const fakeThis: TestDynamic = {
+        _isTurnActiveTab: () => true,
+        appendToActiveSession: async () => { /* no-op fake */ },
+        _renderThrottle: null,
+        current_message_bubble: null,
+        _currentThinkingBlock: null,
+        _resetPaintTargets() { /* no-op fake */ },
+        showTypingIndicator() { /* no-op fake */ },
+        _queuedMessage: null,
+        _connectorRedrawCancel: null,
+        _drawConnectorLines() { drawCount++; },
+    };
+    fakeThis._scheduleConnectorRedraw = function (this: TestDynamic) { return _scheduleConnectorRedraw.call(this); };
+    const turn: TestDynamic = {
+        watchdog: null,
+        rw: {
+            messages: [] as TestDynamic[],
+            getCompressionNeeded: () => 'none',
+        },
+        agentName: 'Test',
+        agent: null,
+        responseRecorded: true,
+        lastRoundToolResults: [] as TestDynamic[],
+        pendingEntries: [] as TestDynamic[],
+        skillActiveAt: null,
+    };
+    return { fakeThis, turn, getDrawCount: () => drawCount };
+}
+
+test.serial('_chatBeforeContinue: reset kontenera ZE zwinietym blokiem myslenia planuje przerysowanie (flush -> 1); bez bloku i bez innych zmian nie doklada kolejnego', async t => {
+    const { flush } = useQueuedRaf(t);
+    const { fakeThis, turn, getDrawCount } = buildBeforeContinueFakeThis();
+
+    fakeThis._currentThinkingBlock = { classList: { remove() { /* no-op fake */ } } };
+    await _chatBeforeContinue.call(fakeThis, turn, 0);
+    flush();
+    t.is(getDrawCount(), 1, 'zwiniecie bloku myslenia w galezi resetu kontenera powinno zaplanowac przerysowanie');
+    t.falsy(fakeThis._currentThinkingBlock, 'kontrola: blok myslenia powinien zostac wyzerowany po zwinieciu');
+
+    await _chatBeforeContinue.call(fakeThis, turn, 1);
+    flush();
+    t.is(getDrawCount(), 1, 'bez bloku myslenia w locie i bez innych zmian geometrii kolejne wejscie w reset nie powinno dokladac przerysowania');
+});
+
+/** Minimalny `this`+`turn` dla `_chatOnToolResults` z PUSTA lista wynikow - izoluje wylacznie
+ *  przerysowanie NA KONCU funkcji (podmiana kafelka w petli per-wynik jest poza zakresem tego
+ *  pliku - zero elementow w `results` omija cale cialo petli bez ryzyka niezamierzonych efektow). */
+function buildToolResultsFakeThis(isActiveTab: boolean) {
+    let drawCount = 0;
+    const fakeThis: TestDynamic = {
+        _isTurnActiveTab: () => isActiveTab,
+        _connectorRedrawCancel: null,
+        _drawConnectorLines() { drawCount++; },
+    };
+    fakeThis._scheduleConnectorRedraw = function (this: TestDynamic) { return _scheduleConnectorRedraw.call(this); };
+    return { fakeThis, getDrawCount: () => drawCount };
+}
+
+test.serial('_chatOnToolResults: koniec rundy planuje przerysowanie TYLKO na aktywnej zakladce', async t => {
+    const { flush } = useQueuedRaf(t);
+    const turn: TestDynamic = { agentName: 'Test', toolCallsContainer: null };
+    const results: TestDynamic[] = [];
+
+    const { fakeThis: activeThis, getDrawCount: activeCount } = buildToolResultsFakeThis(true);
+    await _chatOnToolResults.call(activeThis, turn, results, 0);
+    flush();
+    t.is(activeCount(), 1, 'koniec rundy na aktywnej zakladce powinien przerysowac lacznik');
+
+    const { fakeThis: bgThis, getDrawCount: bgCount } = buildToolResultsFakeThis(false);
+    await _chatOnToolResults.call(bgThis, turn, results, 0);
+    flush();
+    t.is(bgCount(), 0, 'runda w tle nie powinna ruszac lacznika widoku, ktorego user nie widzi');
+});
+
+// ── handle_error: fake `document` (ten sam wzorzec co handleError.tile.test.ts, zdublowany tu
+// bo `createTile` (`_buildStreamErrorTile`) potrzebuje dzialajacego document.createElement) -
+// TEN plik nie weryfikuje KLAS wyrenderowanego kafelka (to robi handleError.tile.test.ts), tylko
+// to, ze funkcja dochodzi do konca i planuje przerysowanie lacznika przez PRAWDZIWY scheduler. ──
+
+type FakeEl = {
+    tagName: string;
+    children: FakeEl[];
+    parent: FakeEl | null;
+    classList: { add(...c: string[]): void; remove(...c: string[]): void; toggle(c: string, force?: boolean): void; contains(c: string): boolean };
+    className: string;
+    textContent: string;
+    appendText(t: string): void;
+    empty(): void;
+    setAttribute(name: string, value: string): void;
+    getAttribute(name: string): string | null;
+    removeAttribute(name: string): void;
+    hasAttribute(name: string): boolean;
+    appendChild(child: FakeEl): FakeEl;
+    insertBefore(child: FakeEl, ref: FakeEl | null): FakeEl;
+    remove(): void;
+    addEventListener(type: string, cb: (...a: unknown[]) => void): void;
+};
+
+// Zdublowany wzor `handleError.tile.test.ts`'s `makeFakeEl` (dowod: `createTile` (`Tile.ts`)
+// potrzebuje wszystkich tych metod - `syncBodyVisibility` wola `removeAttribute`/`setAttribute`,
+// `setSummary` wola `.remove()` - proba minimalnej wersji bez nich rzucala tu realny wyjatek).
+function makeFakeEl(tag = 'div'): FakeEl {
+    const classes = new Set<string>();
+    const attrs = new Map<string, string>();
+    let text = '';
+    const el: FakeEl = {
+        tagName: tag,
+        children: [],
+        parent: null,
+        classList: {
+            add: (...c) => { c.forEach(x => classes.add(x)); },
+            remove: (...c) => { c.forEach(x => classes.delete(x)); },
+            toggle: (c, force) => { const next = force === undefined ? !classes.has(c) : force; if (next) classes.add(c); else classes.delete(c); },
+            contains: (c) => classes.has(c),
+        },
+        get className() { return [...classes].join(' '); },
+        set className(v: string) { classes.clear(); String(v).split(/\s+/).filter(Boolean).forEach(c => classes.add(c)); },
+        get textContent() { return text; },
+        set textContent(v: string) { text = v; el.children = []; },
+        appendText(t) { text += t; },
+        empty() { text = ''; el.children = []; },
+        setAttribute(name, value) { attrs.set(name, value); },
+        getAttribute(name) { return attrs.has(name) ? attrs.get(name)! : null; },
+        removeAttribute(name) { attrs.delete(name); },
+        hasAttribute(name) { return attrs.has(name); },
+        appendChild(child) { child.parent = el; el.children.push(child); return child; },
+        insertBefore(child, ref) {
+            child.parent = el;
+            const idx = ref ? el.children.indexOf(ref) : -1;
+            if (ref && idx >= 0) el.children.splice(idx, 0, child);
+            else el.children.push(child);
+            return child;
+        },
+        remove() { if (el.parent) el.parent.children = el.parent.children.filter(c => c !== el); },
+        addEventListener() { /* no-op fake */ },
+    } as FakeEl;
+    return el;
+}
+
+function withFakeDocument<T>(fn: () => T): T {
+    const prevDoc = (globalThis as Record<string, unknown>).document;
+    (globalThis as Record<string, unknown>).document = { createElement: (tag: string) => makeFakeEl(tag) };
+    try {
+        return fn();
+    } finally {
+        (globalThis as Record<string, unknown>).document = prevDoc;
+    }
+}
+
+/** Minimalny `this` dla `handle_error` na sciezce "aktywna zakladka, brak agentName" (wzor
+ *  `handleError.tile.test.ts`'s `buildFakeThis`) PLUS okablowanie PRAWDZIWEGO
+ *  `_scheduleConnectorRedraw`. */
+function buildHandleErrorFakeThis(container: FakeEl) {
+    let drawCount = 0;
+    const fakeThis: TestDynamic = {
+        messages_container: container,
+        current_message_container: null,
+        current_message_text: null,
+        _currentThinkingBlock: null,
+        chatTabs: [] as TestDynamic[],
+        _streamCtxMap: new Map(),
+        _agentStates: new Map(),
+        hideTypingIndicator() { /* no-op fake */ },
+        _resetPaintTargets() { /* no-op fake */ },
+        set_generating() { /* no-op fake */ },
+        _cleanupAskUser() { /* no-op fake */ },
+        _releaseStreamCtx() { /* no-op fake */ },
+        _connectorRedrawCancel: null,
+        _drawConnectorLines() { drawCount++; },
+    };
+    fakeThis._scheduleConnectorRedraw = function (this: TestDynamic) { return _scheduleConnectorRedraw.call(this); };
+    return { fakeThis, getDrawCount: () => drawCount };
+}
+
+test.serial('handle_error: aktywna zakladka planuje przerysowanie lacznika NAWET BEZ bloku myslenia w locie (naprawa recenzji niezaleznej, dogrywka pkt 3 - wywolanie przeniesione poza `if (_currentThinkingBlock)`); zakladka w tle nie', t => {
+    const { flush } = useQueuedRaf(t);
+    withFakeDocument(() => {
+        const { fakeThis, getDrawCount } = buildHandleErrorFakeThis(makeFakeEl('div'));
+        handle_error.call(fakeThis, new Error('siec padla'));
+        flush();
+        t.is(getDrawCount(), 1, 'blad na aktywnej zakladce czysci dymek i wstawia kafelek NAWET bez bloku myslenia w locie - lacznik powinien to zlapac');
+
+        const { fakeThis: bgThis, getDrawCount: bgCount } = buildHandleErrorFakeThis(makeFakeEl('div'));
+        bgThis.chatTabs = [{ isActive: true, agentName: 'Inny' }];
+        handle_error.call(bgThis, new Error('siec padla w tle'), 'TestAgent');
+        flush();
+        t.is(bgCount(), 0, 'blad w tle nie powinien ruszac lacznika widoku, ktorego user nie widzi');
+    });
+});
+
+/** Minimalny `this` dla `stop_generation` na sciezce "jawny agentName" (pomija lancuch
+ *  `this.plugin.agentManager.getActiveAgent()` na starcie) i "bez sCtx we `_streamCtxMap`"/"bez
+ *  zakolejkowanej wiadomosci" (najprostszy, "goly Stop" przypadek) - izoluje wylacznie zwiniecie
+ *  bloku myslenia i przerysowanie lacznika na koncu funkcji (galaz BEZWARUNKOWA - `stop_generation`
+ *  sama nie liczy `isActiveTab`, patrz CLAUDE.md tego modulu). */
+function buildStopGenerationFakeThis() {
+    let drawCount = 0;
+    const fakeThis: TestDynamic = {
+        _streamCtxMap: new Map(),
+        _preparingTurns: new Map(),
+        _drainSuppressed: false,
+        _clearQueuedDrainTimer() { /* no-op fake */ },
+        _queuedMessage: null,
+        _hideQueuedIndicator() { /* no-op fake */ },
+        env: {},
+        _releaseStreamCtx() { /* no-op fake */ },
+        _renderThrottle: null,
+        current_message_bubble: null,
+        _currentThinkingBlock: null,
+        _resetPaintTargets() { /* no-op fake */ },
+        hideTypingIndicator() { /* no-op fake */ },
+        set_generating() { /* no-op fake */ },
+        _connectorRedrawCancel: null,
+        _drawConnectorLines() { drawCount++; },
+    };
+    fakeThis._scheduleConnectorRedraw = function (this: TestDynamic) { return _scheduleConnectorRedraw.call(this); };
+    return { fakeThis, getDrawCount: () => drawCount };
+}
+
+test.serial('stop_generation: Stop ZE zwinietym blokiem myslenia planuje przerysowanie (flush -> 1); kolejny Stop bez bloku nie doklada kolejnego', t => {
+    const { flush } = useQueuedRaf(t);
+    const { fakeThis, getDrawCount } = buildStopGenerationFakeThis();
+
+    fakeThis._currentThinkingBlock = { classList: { remove() { /* no-op fake */ } } };
+    stop_generation.call(fakeThis, 'TestAgent');
+    flush();
+    t.is(getDrawCount(), 1, 'Stop ze zwinieciem bloku myslenia w locie powinien przerysowac lacznik');
+
+    stop_generation.call(fakeThis, 'TestAgent');
+    flush();
+    t.is(getDrawCount(), 1, 'kolejny Stop bez bloku myslenia w locie nie powinien dokladac kolejnego przerysowania');
 });

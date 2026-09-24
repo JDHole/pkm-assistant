@@ -219,13 +219,19 @@
   height: 1px;
   background: linear-gradient(90deg, rgba(var(--cs-agent-color-rgb, 150,130,100), 0.12), transparent 60%);
 }
-/* Stara romb-dekoracja `.cs-ask-user::after` (border+transform:rotate(45deg)) usunieta -
-   naprawa recenzji niezaleznej (BLOKER): selektor krysztalu nizej w tym pliku
-   (`.cs-message--agent .cs-ask-user::after`, DWIE klasy) jest bardziej specyficzny niz byl
-   ten tutaj (JEDNA klasa) i WYGRYWAL go zawsze (ask_user renderuje sie ZAWSZE zagniezdzony w
-   `.cs-message--agent`) - kazda wlasciwosc starej reguly miala odpowiednik w nowej o wyzszej
-   specyficznosci, wiec romb nigdy nie byl faktycznie widoczny. Martwy kod, nie dekoracja do
-   zachowania - usuniety zamiast zerowany drugi raz. */
+/* Stara romb-dekoracja `.cs-ask-user::after` (border+transform:rotate(45deg)) usunieta.
+   Poprawka niescislosci (dogrywka recenzji niezaleznej): poprzednia wersja tego komentarza
+   twierdzila, ze romb "nigdy nie byl faktycznie widoczny" - nieprawda. Do commitu `caa7affa`
+   ta regula byla JEDYNA na `.cs-ask-user::after` (jedna klasa, nic jej nie przebijalo
+   specyficznoscia) - romb BYL widoczny. `caa7affa` dopiero dolozyl bardziej specyficzny
+   selektor krysztalu nizej w tym pliku (`.cs-message--agent .cs-ask-user::after`, DWIE klasy) -
+   od tego commitu WYGRYWAL go zawsze (ask_user renderuje sie ZAWSZE zagniezdzony w
+   `.cs-message--agent`). To ZMIANA WYGLADU (romb zastapiony krysztalem agenta), nie martwy kod
+   od poczatku - kryształ sam byl wtedy jeszcze niewidoczny z INNEGO powodu (BLOKER
+   `overflow: hidden`, patrz komentarz przy `overflow: visible` nizej w tym pliku), naprawionego
+   dopiero commitem konczacym te runde recenzji. Stara regula usunieta TUTAJ zamiast zerowana
+   drugi raz - regula krysztalu nizej juz tez nie zeruje wlasnego `border`/`transform` (patrz
+   komentarz przy niej), bo bez starej reguly nie ma czego kasowac. */
 
 .cs-ask-user__head {
   display: flex;
@@ -1038,8 +1044,6 @@
   opacity: 0.8;
   pointer-events: none;
   z-index: 2;
-  border: none;
-  transform: none;
 }
 /* Trzy pozycje, jedna PO ELEMENCIE (grubosc jego wlasnego `border-left` zmienia TYLKO `left` -
    offset absolutny liczy sie od PADDING BOX rodzica, wiec grubszy border-left przesuwa padding
@@ -1074,11 +1078,20 @@
    pudelku, wiec nie potrzebowal clippingu]) - bez nadpisania krysztal byl CALKOWICIE przyciety
    (BLOKER, naprawa recenzji niezaleznej). Nadpisanie scisle w kontekscie kolumny agenta -
    `.cs-ask-user` renderuje sie ZAWSZE zagniezdzony w `.cs-message--agent` (patrz komentarz
-   wyzej), wiec ta wygrana jest stala, nie tylko czasami; zadne dziecko `.cs-ask-user`
-   (`__head`/`__options`/`__opt`/`__input` itd.) nie polega na obcinaniu przez rodzica - kazde
-   ma wlasny, wewnetrzny uklad bez przekroczenia bazowego `border-radius: 2px`. */
+   wyzej), wiec ta wygrana jest stala, nie tylko czasami.
+   `overflow: hidden` do tej pory przycinal TEZ dlugi tekst (`__question`/`__context`/`__answer`,
+   etykiety opcji) bez zadnego lamania - zaden element w tym lancuchu nie ma
+   `overflow-wrap`/`word-break` [grep], wiec dluga sciezka albo URL w pytaniu wychodzilby za
+   prawa krawedz i dawal poziomy pasek na liscie wiadomosci (naprawa recenzji niezaleznej,
+   dogrywka) - stad `overflow-wrap: anywhere` w TEJ SAMEJ regule, obok `overflow: visible`.
+   `.cs-ask-user__input` (`width:100%` + padding + border) zostaje bezpieczny bez wlasnej
+   poprawki, bo Obsidian ma globalnie `* { box-sizing: border-box }` [measured na zywo 24.09
+   przez wlasciciela projektu] - reszta dzieci (`__head`/`__options`/`__opt` itd.) ma wlasny,
+   wewnetrzny uklad bez przekroczenia bazowego `border-radius: 2px`, teraz tez bez polegania na
+   obcinaniu tekstu przez rodzica. */
 .cs-message--agent .cs-ask-user {
   overflow: visible;
+  overflow-wrap: anywhere;
 }
 
 /* Connector line (drawn by JS) */
