@@ -1,8 +1,10 @@
 /**
- * TriggerPopup - popup uruchamiany z keypress `/` lub `@` w textarea czatu.
- * Pokazuje 3 sekcje (Skille / Sub-Agenty / MCP servery) filtrowane po
+ * TriggerPopup - popup uruchamiany z keypress `/` w textarea czatu.
+ * Pokazuje 4 sekcje (Slash-komendy / Skille / Sub-Agenty / MCP servery) filtrowane po
  * tym co user dopisze po triggerze. Wybór wstawia marker
  * (`@@skill:foo`, `@sub-agent:foo`, `@@tool:foo`) do textarea.
+ * `@` NIE otwiera tego popupu - obsługuje go wyłącznie `MentionAutocomplete`
+ * (notatki i foldery, `modules/ui-components/MentionAutocomplete.ts`).
  *
  * Discovery flow: user widzi co ma do dyspozycji, klawiatura ↑↓ Enter Esc.
  * Intersection security trzymamy na poziomie wykonania (DelegateTool / SkillExecuteTool),
@@ -12,21 +14,23 @@
 import { makeInlineTriggerMarker, type InlineTriggerType } from './InlineChipPlugin.js';
 import type { ChatSkillConfig } from './chatViewShape.js';
 import type { SubAgentData } from '../../sub-agents/index.js';
+import type { ToolDefinition } from '../../tools/index.js';
 
-/** Tożsamość agenta w zakresie, jakiego dotyka popup (`@`-wzmianki, etykiety subów). */
+/** Tożsamość agenta w zakresie, jakiego dotyka popup (etykiety subów). */
 interface PopupAgentLike { name?: string }
 
-/** Narzędzie w zakresie, jakiego dotyka sekcja MCP: nazwa serwera pod jednym z czterech pól. */
-interface PopupToolLike {
-    name?: string;
-    description?: string;
-    serverName?: string;
-    server?: string;
-    serverId?: string;
-}
+/**
+ * Narzędzie w zakresie, jakiego dotyka sekcja MCP. Podzbiór kanonicznego `ToolDefinition`
+ * (`modules/tools/ToolRegistry.ts`, przez barrel) - tylko pola potrzebne do wykrycia serwera
+ * ZEWNĘTRZNEGO: `source === 'user'` jest jedynym dyskryminatorem (built-in narzędzia mają
+ * `source` puste/`'built-in'`, external MCP dostają `'user'` - `ExternalMcpManager._wrapTool`).
+ * `serverName` dla narzędzia zewnętrznego to `serverId` serwera (ten sam wzorzec co
+ * `ConnectorsBackstageTab.ts`'s `groupBuiltinTools`). Zero fallbacku na `tool.name`.
+ */
+type PopupToolLike = Pick<ToolDefinition, 'name' | 'description' | 'serverName' | 'source'>;
 
 /**
- * Plugin w zakresie, jaki czyta popup `/@`. Świadomie STRUKTURALNY, nie `ChatPlugin`:
+ * Plugin w zakresie, jaki czyta popup `/`. Świadomie STRUKTURALNY, nie `ChatPlugin`:
  * plik jest node-testowalny, a jego test podstawia własne, częściowe atrapy.
  */
 interface PopupPluginLike {
@@ -68,7 +72,6 @@ export class TriggerPopup {
     declare textarea: HTMLTextAreaElement;
     declare onSelect: ((item: TriggerItem, marker: string) => void) | null;
     declare slashCommands: SlashCommandItem[];
-    declare triggerChar: string | null;
     declare popupEl: HTMLDivElement | null;
     declare items: TriggerItem[];
     declare filteredItems: TriggerItem[];
@@ -82,7 +85,6 @@ export class TriggerPopup {
         this.textarea = textarea;
         this.onSelect = typeof opts.onSelect === 'function' ? opts.onSelect : null;
         this.slashCommands = Array.isArray(opts.slashCommands) ? opts.slashCommands : [];
-        this.triggerChar = null;
         this.popupEl = null;
         this.items = [];
         this.filteredItems = [];
@@ -91,12 +93,11 @@ export class TriggerPopup {
         this._docMouseHandler = null;
     }
 
-    open(triggerChar: string, anchorEl: HTMLElement = this.textarea): void {
+    open(anchorEl: HTMLElement = this.textarea): void {
         if (this.popupEl) this.close();
-        this.triggerChar = triggerChar || null;
         this.items = this.buildItems();
         this.filter = '';
-        this.selectedIndex = this._defaultSelectedIndex(triggerChar);
+        this.selectedIndex = 0;
         this._applyFilter();
         this._renderShell();
         this._renderItems();
@@ -164,19 +165,17 @@ export class TriggerPopup {
         const activeAgent = this.agent || agentManager?.getActiveAgent?.();
 
         // ── Slash commands (Memory v3: discoverable /save session, /memory, /compress, /clear) ──
-        // Only surface for `/` trigger so the `@` flow stays focused on sub-agents.
-        if (this.triggerChar !== '@') {
-            for (const cmd of this.slashCommands) {
-                if (!cmd?.name) continue;
-                items.push({
-                    type: 'slash',
-                    name: cmd.name,
-                    label: cmd.name,
-                    description: cmd.description || '',
-                    section: 'slash',
-                    isSystem: true,
-                });
-            }
+        // Jedyny trigger tego popupu jest `/`, więc slash-komendy są zawsze w zakresie.
+        for (const cmd of this.slashCommands) {
+            if (!cmd?.name) continue;
+            items.push({
+                type: 'slash',
+                name: cmd.name,
+                label: cmd.name,
+                description: cmd.description || '',
+                section: 'slash',
+                isSystem: true,
+            });
         }
 
         // ── Skille (agent.allowed_skills) ──
@@ -206,12 +205,15 @@ export class TriggerPopup {
             });
         }
 
-        // ── MCP servery (agent.allowed_servers przez registry.filterByAgent) ──
+        // ── MCP servery WYŁĄCZNIE zewnętrzne (agent.allowed_servers przez registry.filterByAgent).
+        // Dyskryminator `source === 'user'` (patrz PopupToolLike) - built-in narzędzia (source
+        // puste/'built-in') nigdy nie trafiają tutaj jako fałszywe "serwery". ──
         const registry = this.plugin?.toolRegistry;
         const visibleTools = registry?.filterByAgent?.(activeAgent) || registry?.getAllTools?.() || [];
         const seenServers = new Set<string>();
         for (const tool of visibleTools) {
-            const serverName = tool?.serverName || tool?.server || tool?.serverId || tool?.name;
+            if (tool?.source !== 'user') continue;
+            const serverName = tool?.serverName;
             if (!serverName || seenServers.has(serverName)) continue;
             seenServers.add(serverName);
             items.push({
@@ -228,14 +230,6 @@ export class TriggerPopup {
     }
 
     // ── Internal ────────────────────────────────────────────────────────
-
-    _defaultSelectedIndex(triggerChar: string): number {
-        if (triggerChar === '@') {
-            const idx = this.items.findIndex(it => it.section === 'sub-agents');
-            return idx >= 0 ? idx : 0;
-        }
-        return 0;
-    }
 
     _applyFilter(): void {
         const f = (this.filter || '').toLowerCase().trim();

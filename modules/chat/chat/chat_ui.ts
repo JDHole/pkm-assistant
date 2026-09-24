@@ -1392,16 +1392,16 @@ export function _handleTriggerKeyDown(this: ChatViewLike, e: KeyboardEvent) {
             return;
         }
     }
-    if (e.key !== '/' && e.key !== '@') return;
+    // `@` nie otwiera tego popupu - obsługuje go wyłącznie MentionAutocomplete (notatki/foldery).
+    if (e.key !== '/') return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const value = this.input_area.value || '';
     const cursor = this.input_area.selectionStart ?? value.length;
     const charBefore = cursor > 0 ? value.charAt(cursor - 1) : '';
     // Only open at start of line/value, or after whitespace — avoids triggering in URLs / mid-word
     if (cursor !== 0 && !/\s/.test(charBefore)) return;
-    const triggerChar = e.key;
-    const triggerPos = cursor; // pre-key cursor; after key is committed, char will be at this index
-    window.setTimeout(() => this._openTriggerPopup(triggerChar, triggerPos), 0);
+    const triggerPos = cursor; // pre-key cursor; after key is committed, `/` will be at this index
+    window.setTimeout(() => this._openTriggerPopup(triggerPos), 0);
 }
 
 export function _handleTriggerInput(this: ChatViewLike) {
@@ -1412,8 +1412,10 @@ export function _handleTriggerInput(this: ChatViewLike) {
         this._closeTriggerPopup();
         return;
     }
+    // Ten popup rozumie wyłącznie `/` - `@` na pozycji wyzwalacza (np. gdy user go tam wklei/wpisze)
+    // zamyka go zamiast filtrować, bo `@` prowadzi do MentionAutocomplete, nie tutaj.
     const triggerChar = value.charAt(this._triggerPos);
-    if (triggerChar !== '/' && triggerChar !== '@') {
+    if (triggerChar !== '/') {
         this._closeTriggerPopup();
         return;
     }
@@ -1429,7 +1431,7 @@ export function _handleTriggerInput(this: ChatViewLike) {
     this._triggerPopup.setFilter(filter);
 }
 
-export function _openTriggerPopup(this: ChatViewLike, triggerChar: string, triggerPos: number) {
+export function _openTriggerPopup(this: ChatViewLike, triggerPos: number) {
     this._closeTriggerPopup();
     const agent = this.plugin?.agentManager?.getActiveAgent?.();
     this._triggerPos = triggerPos;
@@ -1464,7 +1466,7 @@ export function _openTriggerPopup(this: ChatViewLike, triggerChar: string, trigg
             this.handleInputResize?.();
         }
     });
-    this._triggerPopup.open(triggerChar, this.input_area);
+    this._triggerPopup.open(this.input_area);
 }
 
 export function _closeTriggerPopup(this: ChatViewLike) {

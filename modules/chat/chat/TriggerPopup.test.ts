@@ -27,7 +27,7 @@ function makePlugin({ agentName = 'TestAgent', skills = [], assignments = [], al
     };
 }
 
-test('buildItems collects skills, visible custom sub-agents and mcp servers', t => {
+test('buildItems collects skills, visible custom sub-agents and ONLY external mcp servers (source:"user")', t => {
     const { plugin, agent } = makePlugin({
         agentName: 'Klara',
         skills: [
@@ -42,9 +42,15 @@ test('buildItems collects skills, visible custom sub-agents and mcp servers', t 
             { name: 'prep-memory', description: 'legacy system name', system: true },
             { name: 'prep', description: 'legacy standalone' },
         ],
+        // Rejestr MIESZANY: kilka wbudowanych narzędzi bez `source` (jak w prawdziwym
+        // ToolRegistry - built-in nie ustawia `source`), jedno wbudowane z `source:'built-in'`
+        // jawnie, i dwa narzędzia zewnętrznych serwerów MCP (`source:'user'`, wzór
+        // ExternalMcpManager._wrapTool: `serverName` = serverId serwera).
         tools: [
-            { name: 'vault_search', serverName: 'core', description: 'search' },
-            { name: 'demo_tool', serverName: 'demo-server' },
+            { name: 'read', description: 'wbudowany odczyt' },
+            { name: 'write', description: 'wbudowany zapis', source: 'built-in' },
+            { name: 'core-docs__search_docs', serverName: 'core-docs', source: 'user', description: '[Core Docs] search' },
+            { name: 'demo-server__ping', serverName: 'demo-server', source: 'user', description: '[Demo] ping' },
         ],
     });
     const popup = new TriggerPopup(plugin, agent, null as TestDynamic);
@@ -62,8 +68,9 @@ test('buildItems collects skills, visible custom sub-agents and mcp servers', t 
     // brak dekoracji isSystem/badge na itemach sub-agentów.
     t.true(items.filter(i => i.section === 'sub-agents').every((i: TestDynamic) => i.isSystem === undefined && i.badge === undefined));
 
-    const mcpServers = items.filter(i => i.section === 'mcp').map(i => i.name);
-    t.deepEqual(mcpServers.sort(), ['core', 'demo-server'], 'unique server names from filterByAgent');
+    const mcpItems = items.filter(i => i.section === 'mcp');
+    t.deepEqual(mcpItems.map(i => i.name).sort(), ['core-docs', 'demo-server'], 'sekcja mcp = DOKŁADNIE nazwy serwerów zewnętrznych (source:"user"), literalna lista');
+    t.false(mcpItems.some(i => i.name === 'read' || i.name === 'write'), 'żadne wbudowane narzędzie nie udaje serwera MCP');
 });
 
 test('buildItems surfaces no sub-agents when none match the agent prefix', t => {
@@ -122,22 +129,12 @@ test('setFilter resets selectedIndex to 0', t => {
     t.is(popup.selectedIndex, 0);
 });
 
-test('_defaultSelectedIndex jumps to sub-agents section when triggered with @', t => {
-    const { plugin, agent } = makePlugin({
-        skills: [{ name: 's1', slug: 's1', userInvocable: true }],
-        assignments: [{ name: 'testagent-sa1' }],
-        allSubs: [{ name: 'testagent-sa1', description: '' }],
-    });
-    const popup = new TriggerPopup(plugin, agent, null as TestDynamic);
-    popup.items = popup.buildItems();
-    const idx = popup._defaultSelectedIndex('@');
-    t.is(popup.items[idx].section, 'sub-agents');
+// `_defaultSelectedIndex` (i cała jego gałąź `@` - skok na sekcję sub-agentów) skasowane:
+// popup 2.3.1 otwiera WYŁĄCZNIE `/` (chat_ui.ts's `_handleTriggerKeyDown`/`_handleTriggerInput`
+// reagują tylko na ten znak), `@` obsługuje odtąd wyłącznie MentionAutocomplete. `open()` zawsze
+// startuje z `selectedIndex = 0` - test osobnej metody byłby pinowaniem stałej (CLAUDE.md).
 
-    const slashIdx = popup._defaultSelectedIndex('/');
-    t.is(slashIdx, 0, '/ defaults to first item (skills)');
-});
-
-test('buildItems surfaces slash commands for `/` trigger only', t => {
+test('buildItems zawsze surfacuje slash-komendy (jedyny trigger tego popupu to `/`)', t => {
     const { plugin, agent } = makePlugin();
     const popup = new TriggerPopup(plugin, agent, null as TestDynamic, {
         slashCommands: [
@@ -145,19 +142,8 @@ test('buildItems surfaces slash commands for `/` trigger only', t => {
             { name: '/clear', description: 'Start a new chat session.' }
         ]
     });
-    popup.triggerChar = '/';
     const slashItems = popup.buildItems().filter(it => it.section === 'slash');
     t.deepEqual(slashItems.map(it => it.name).sort(), ['/clear', '/save session']);
-});
-
-test('buildItems hides slash commands for `@` trigger', t => {
-    const { plugin, agent } = makePlugin();
-    const popup = new TriggerPopup(plugin, agent, null as TestDynamic, {
-        slashCommands: [{ name: '/save session', description: 'x' }]
-    });
-    popup.triggerChar = '@';
-    const slashItems = popup.buildItems().filter(it => it.section === 'slash');
-    t.is(slashItems.length, 0);
 });
 
 test('handleKeyDown returns false when popup is closed', t => {

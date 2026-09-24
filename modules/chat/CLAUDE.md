@@ -62,7 +62,7 @@ modules/chat/
     ├── TokenViewerWidget.js        # donut + pop-over Token Context Viewer
     ├── TokenViewerUtils.js         # helpery obliczeń dla Token Viewera
     ├── ToolTokenCache.js           # cache countTokens(JSON.stringify(tools)) per agent
-    └── TriggerPopup.js             # popup `/@` z sekcjami SUB / SKILLS / MCP
+    └── TriggerPopup.js             # popup WYŁĄCZNIE `/`, sekcje Slash / Skille / Sub-Agenty / MCP (zewnętrzne)
 ```
 
 CSS: `modules/chat/chat_view.css` (osobny plik styli).
@@ -92,6 +92,32 @@ Mixinów `chat_*` NIE eksportujemy - to wewnętrzna struktura (prototype mixin p
 Settings→Prompt bierze ją wprost stamtąd; lokalne drzwi `chat/compressionPrompt.js` zostają
 dla wnętrza modułu (Summarizer, turnOwner). Singleton `StreamingManager` i `RollingWindow`
 też nie wychodzą przez barrel - żyją i są używane wewnątrz `chat/`.
+
+---
+
+## Wyzwalacze pola czatu: `/` i `@` to DWA NIEZALEŻNE mechanizmy (2.3.1)
+
+Pole wpisywania miało kiedyś dwa popupy otwierające się razem po `@` (`TriggerPopup` i
+`MentionAutocomplete`) - naprawione, dziś każdy znak ma DOKŁADNIE jednego właściciela:
+
+- **`/`** → `TriggerPopup` (`chat/TriggerPopup.ts`, otwierany z `chat_ui.ts`'s
+  `_handleTriggerKeyDown`/`_handleTriggerInput`/`_openTriggerPopup`). Cztery sekcje: Slash-komendy
+  (`this.slashCommands`), Skille (`agent.allowed_skills`), Sub-agenty (custom suby usera dla
+  aktywnego agenta, `getVisibleSubAgentsForAgent`) i MCP - WYŁĄCZNIE serwery ZEWNĘTRZNE.
+  Dyskryminator MCP jest `tool.source === 'user'` (kanoniczne pole `ToolDefinition.source`,
+  `modules/tools/ToolRegistry.ts` - built-in narzędzia mają `source` puste/`'built-in'`, external
+  MCP dostaje `'user'` w `ExternalMcpManager._wrapTool`; ten sam dyskryminator, ten sam wzorzec co
+  `modules/tools/ConnectorsBackstageTab.ts`'s `groupBuiltinTools`). `serverName` narzędzia
+  zewnętrznego to `serverId` serwera - ZERO fallbacku na `tool.name` (przed naprawą fallback na
+  `tool.name` wypisywał każde WBUDOWANE narzędzie jako osobny fałszywy "serwer").
+- **`@`** → wyłącznie `MentionAutocomplete` (`modules/ui-components/MentionAutocomplete.ts`) -
+  notatki i foldery vaulta, własny nasłuch `input`, chip nad polem. `TriggerPopup` w ogóle nie
+  reaguje na `@`: `_handleTriggerKeyDown` otwiera się tylko dla `e.key === '/'`, a
+  `_handleTriggerInput` zamyka popup, jeśli znak na pozycji wyzwalacza przestał być `/`.
+- **Markery wstawiane przez `onSelect` bez zmian**: `@@skill:nazwa`, `@@tool:nazwa`,
+  `@sub-agent:nazwa` (`InlineChipPlugin.ts`'s `makeInlineTriggerMarker`) - `@` w tych markerach
+  jest częścią SKŁADNI markera wstawianego do tekstu, nie triggerem otwierającym popup; parser
+  markerów (`parseInlineTriggers`) i cała reszta pętli tury czytają je bez zmian.
 
 ---
 
