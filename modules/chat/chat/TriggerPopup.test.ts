@@ -42,13 +42,23 @@ test('buildItems collects skills, visible custom sub-agents and ONLY external mc
             { name: 'prep-memory', description: 'legacy system name', system: true },
             { name: 'prep', description: 'legacy standalone' },
         ],
-        // Rejestr MIESZANY: kilka wbudowanych narzędzi bez `source` (jak w prawdziwym
-        // ToolRegistry - built-in nie ustawia `source`), jedno wbudowane z `source:'built-in'`
-        // jawnie, i dwa narzędzia zewnętrznych serwerów MCP (`source:'user'`, wzór
-        // ExternalMcpManager._wrapTool: `serverName` = serverId serwera).
+        // Rejestr MIESZANY, odwzorowuje PRAWDZIWY ToolRegistry: kilka wbudowanych narzędzi bez
+        // `source` (built-in NIE ustawia `source` na tool object - zmierzone w
+        // `modules/tools/built-in-servers/artifacts/ArtifactCreateTool.ts:25`, `serverName:
+        // 'artifacts'` bez `source`), jedno wbudowane z `serverName:'komunikator'` + `source:
+        // 'built-in'` jawnie (`modules/tools/KomunikatorTools.ts:316`, `kom_send` - kontrakt typu
+        // `ToolDefinition.source` w `ToolRegistry.ts` dopuszcza `'built-in'` jako wartość
+        // literalną, więc fikstura pokrywa OBA warianty built-ina, nie tylko brak pola), i dwa
+        // narzędzia DWÓCH RÓŻNYCH zewnętrznych serwerów MCP (`source:'user'`, wzór
+        // `ExternalMcpManager._wrapTool`, linia ~700: `name` = `<serverId>__<toolName>`,
+        // `serverName` = `serverId` serwera). Bez filtra `source !== 'user'` w `buildItems`
+        // (regresja punktu 1) `read`/`write`/`artifact_create`/`kom_send` wpadłyby do sekcji mcp
+        // jako fałszywe serwery, bo mają `serverName`, tak samo jak prawdziwe external tools.
         tools: [
             { name: 'read', description: 'wbudowany odczyt' },
             { name: 'write', description: 'wbudowany zapis', source: 'built-in' },
+            { name: 'artifact_create', serverName: 'artifacts', description: 'tworzy artefakt' },
+            { name: 'kom_send', serverName: 'komunikator', source: 'built-in', description: 'wysyła wiadomość' },
             { name: 'core-docs__search_docs', serverName: 'core-docs', source: 'user', description: '[Core Docs] search' },
             { name: 'demo-server__ping', serverName: 'demo-server', source: 'user', description: '[Demo] ping' },
         ],
@@ -68,9 +78,40 @@ test('buildItems collects skills, visible custom sub-agents and ONLY external mc
     // brak dekoracji isSystem/badge na itemach sub-agentów.
     t.true(items.filter(i => i.section === 'sub-agents').every((i: TestDynamic) => i.isSystem === undefined && i.badge === undefined));
 
+    // Sekcja mcp = jeden wpis PER NARZĘDZIE serwera zewnętrznego (source:"user"), `name` = pełna
+    // nazwa z rejestru (`<serwer>__<narzędzie>`) - żadna pozycja nie jest samą nazwą serwera.
     const mcpItems = items.filter(i => i.section === 'mcp');
-    t.deepEqual(mcpItems.map(i => i.name).sort(), ['core-docs', 'demo-server'], 'sekcja mcp = DOKŁADNIE nazwy serwerów zewnętrznych (source:"user"), literalna lista');
-    t.false(mcpItems.some(i => i.name === 'read' || i.name === 'write'), 'żadne wbudowane narzędzie nie udaje serwera MCP');
+    t.deepEqual(
+        mcpItems.map(i => i.name).sort(),
+        ['core-docs__search_docs', 'demo-server__ping'],
+        'sekcja mcp = DOKŁADNIE pełne nazwy narzędzi serwerów zewnętrznych, literalna lista'
+    );
+    t.false(
+        mcpItems.some(i => ['read', 'write', 'artifact_create', 'kom_send', 'artifacts', 'komunikator', 'core-docs', 'demo-server'].includes(i.name)),
+        'żadne wbudowane narzędzie ani gołą nazwę serwera nie udaje pozycji sekcji mcp'
+    );
+    t.deepEqual(
+        mcpItems.map(i => i.label).sort(),
+        ['ping', 'search_docs'],
+        'label = czytelna część nazwy narzędzia PO `serverId__`'
+    );
+
+    // onSelect dla pozycji mcp wstawia marker z PEŁNĄ nazwą narzędzia (@@tool:<serwer>__<narzędzie>),
+    // nie z samą nazwą serwera - `_commit` nie potrzebuje realnego DOM (popup nigdy nie był
+    // otwarty przez `open()`, więc `close()` wewnątrz `_commit` jest no-opem na `popupEl===null`).
+    const onSelectCalls: Array<{ item: TestDynamic; marker: string }> = [];
+    const popupForSelect = new TriggerPopup(plugin, agent, null as TestDynamic, {
+        onSelect: (item, marker) => { onSelectCalls.push({ item, marker }); },
+    });
+    const demoServerItem = popupForSelect.buildItems().find(i => i.section === 'mcp' && i.name === 'demo-server__ping')!;
+    popupForSelect.filteredItems = [demoServerItem];
+    popupForSelect.selectedIndex = 0;
+    popupForSelect._commit(0);
+    t.deepEqual(
+        onSelectCalls.map(c => c.marker),
+        ['@@tool:demo-server__ping'],
+        'marker wstawiony przez onSelect niesie PEŁNĄ nazwę narzędzia, nie samą nazwę serwera'
+    );
 });
 
 test('buildItems surfaces no sub-agents when none match the agent prefix', t => {
@@ -130,7 +171,7 @@ test('setFilter resets selectedIndex to 0', t => {
 });
 
 // `_defaultSelectedIndex` (i cała jego gałąź `@` - skok na sekcję sub-agentów) skasowane:
-// popup 2.3.1 otwiera WYŁĄCZNIE `/` (chat_ui.ts's `_handleTriggerKeyDown`/`_handleTriggerInput`
+// popup 2.3.0 otwiera WYŁĄCZNIE `/` (chat_ui.ts's `_handleTriggerKeyDown`/`_handleTriggerInput`
 // reagują tylko na ten znak), `@` obsługuje odtąd wyłącznie MentionAutocomplete. `open()` zawsze
 // startuje z `selectedIndex = 0` - test osobnej metody byłby pinowaniem stałej (CLAUDE.md).
 

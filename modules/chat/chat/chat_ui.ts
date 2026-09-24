@@ -197,7 +197,8 @@ export async function renderView(this: ChatViewLike, container = this.container)
     // nad nią). Przełącza chip `📋 done/total` w dolnym rzędzie guzików.
     this._todoPanelBar = bottomPanel.createDiv({ cls: 'cs-todo-panel-bar' });
 
-    // Inline trigger popup on `/` and `@`
+    // Inline trigger popup - wyłącznie `/`. `@` obsługuje osobno MentionAutocomplete niżej
+    // (własny nasłuch `input`), ten popup na `@` w ogóle nie reaguje.
     this._triggerPopup = null;
     this._triggerPos = -1;
     this.input_area.addEventListener('keydown', (e: KeyboardEvent) => this._handleTriggerKeyDown(e));
@@ -1396,7 +1397,14 @@ export function _handleTriggerKeyDown(this: ChatViewLike, e: KeyboardEvent) {
     if (this._triggerPopup?.isOpen()) {
         if (this._triggerPopup.handleKeyDown(e)) {
             e.preventDefault();
-            e.stopPropagation();
+            // stopImmediatePropagation, NIE stopPropagation: ten sam element (`input_area`) ma
+            // DRUGI nasłuch `keydown` (`handle_input_keydown`, wpięty niżej w `renderView`), który
+            // na Enter woła `send_message`. `stopPropagation` zatrzymuje tylko bąbelkowanie do
+            // przodków, NIE inne nasłuchy na TYM SAMYM elemencie - Enter wybierający pozycję w
+            // popupie (np. slash-komendę) wysyłałby więc od razu wiadomość. Wzór:
+            // `modules/ui-components/MentionAutocomplete.ts`, `_handleKeyDown` (komentarz przy
+            // Enter/Tab).
+            e.stopImmediatePropagation();
             return;
         }
     }
@@ -1432,7 +1440,12 @@ export function _handleTriggerInput(this: ChatViewLike) {
         return;
     }
     const filter = value.slice(this._triggerPos + 1, cursor);
-    if (/\s/.test(filter)) {
+    // `/@` (user otworzył popup `/`, potem wpisał `@` jako pierwszy znak filtra): filtr zawiera
+    // `@`, więc MentionAutocomplete (własny, niezależny nasłuch `input` na tym samym polu) ma
+    // przejąć - bez tej bramki oba popupy stały otwarte naraz (TriggerPopup z pustą listą pod
+    // pozycją, której nie umie filtrować, MentionAutocomplete normalnie nad nim). Whitespace w
+    // filtrze zamyka z tego samego powodu co dotąd (koniec słowa po triggerze).
+    if (/\s/.test(filter) || filter.includes('@')) {
         this._closeTriggerPopup();
         return;
     }

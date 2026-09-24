@@ -55,6 +55,47 @@ function makeFakeThisForKeyDown(value: string, selectionStart: number) {
     return { fakeThis, openCalls };
 }
 
+test('_handleTriggerKeyDown: Enter skonsumowany przez popup NIE odpala drugiego nasłuchu klawiatury (stopImmediatePropagation, nie stopPropagation)', t => {
+    // Regresja sprzed tej naprawy: `_handleTriggerKeyDown` wołał `e.stopPropagation()`, który
+    // zatrzymuje TYLKO bąbelkowanie do przodków - nie inne nasłuchy `keydown` na TYM SAMYM
+    // elemencie. `chat_ui.ts`'s `renderView` wiesza na `input_area` DWA nasłuchy `keydown`: ten
+    // popupu (linia ~203, PIERWSZY) i `handle_input_keydown` (linia ~320, DRUGI - Enter bez Shift
+    // woła `send_message`). Prawdziwy `EventTarget` z Node (nie atrapa) odzwierciedla realną
+    // semantykę `stopImmediatePropagation` - drugi nasłuch na TYM SAMYM elemencie, zarejestrowany
+    // PO pierwszym, dostaje zdarzenie tylko gdy pierwszy go nie zatrzymał.
+    const handleTriggerKeyDown = makeHandleTriggerKeyDown();
+
+    function makeFakeThisForPropagation(popupConsumes: boolean) {
+        return {
+            _triggerPopup: { isOpen: () => true, handleKeyDown: () => popupConsumes },
+            input_area: { value: '', selectionStart: 0 },
+            _openTriggerPopup() { /* nieużywane w tym teście - popup już otwarty */ },
+        };
+    }
+
+    // Enter, popup otwarty i konsumuje klawisz (np. commit wyboru pozycji) -> drugi nasłuch NIE odpala.
+    const consumingTarget = new EventTarget();
+    let sendCallsConsumed = 0;
+    const consumingThis = makeFakeThisForPropagation(true);
+    consumingTarget.addEventListener('keydown', (e) => handleTriggerKeyDown.call(consumingThis, e as unknown as Record<string, unknown>));
+    consumingTarget.addEventListener('keydown', (e: any) => { if (e.key === 'Enter' && !e.shiftKey) sendCallsConsumed++; });
+    const enterEvent = new Event('keydown', { cancelable: true });
+    Object.assign(enterEvent, { key: 'Enter', shiftKey: false, ctrlKey: false, metaKey: false, altKey: false });
+    consumingTarget.dispatchEvent(enterEvent);
+    t.is(sendCallsConsumed, 0, 'popup skonsumował Enter (stopImmediatePropagation) - drugi nasłuch (send) nie odpalił się');
+
+    // Kontrola pozytywna: zwykła litera, popup NIE konsumuje (handleKeyDown zwraca false) -> drugi nasłuch odpala normalnie.
+    const passthroughTarget = new EventTarget();
+    let sendCallsPassthrough = 0;
+    const passthroughThis = makeFakeThisForPropagation(false);
+    passthroughTarget.addEventListener('keydown', (e) => handleTriggerKeyDown.call(passthroughThis, e as unknown as Record<string, unknown>));
+    passthroughTarget.addEventListener('keydown', (e: any) => { if (e.key === 'a') sendCallsPassthrough++; });
+    const letterEvent = new Event('keydown', { cancelable: true });
+    Object.assign(letterEvent, { key: 'a', shiftKey: false, ctrlKey: false, metaKey: false, altKey: false });
+    passthroughTarget.dispatchEvent(letterEvent);
+    t.is(sendCallsPassthrough, 1, 'popup nie skonsumował zwykłej litery - drugi nasłuch odpalił się jak dotąd');
+});
+
 test('_handleTriggerKeyDown: `/` na początku pola planuje otwarcie popupu, `@` w tej samej sytuacji nie otwiera nic', async t => {
     const handleTriggerKeyDown = makeHandleTriggerKeyDown();
 
@@ -112,4 +153,23 @@ test('_handleTriggerInput: popup otwarty + `@` na pozycji wyzwalacza → zamyka 
     handleTriggerInput.call(slashCase.fakeThis);
     t.deepEqual(slashCase.closeCalls, [], '`/` na pozycji wyzwalacza nie zamyka popupu');
     t.deepEqual(slashCase.setFilterCalls, ['foo'], '`/` dalej filtruje po tym, co user dopisał');
+});
+
+test('_handleTriggerInput: filtr zawierający `@` zamyka popup zamiast filtrować (`/@` - user wpisał `/`, potem `@`)', t => {
+    const handleTriggerInput = makeHandleTriggerInput();
+
+    // Pole "/@": trigger na pozycji 0 to `/` (popup poprawnie otwarty), ale FILTR (to, co user
+    // dopisał PO triggerze) to "@" - MentionAutocomplete ma własny, niezależny nasłuch `input` na
+    // TYM SAMYM polu i jego regex (`/@(folder:)?([^\s@]*)$/`) też złapie ten znak. Bez tej bramki
+    // oba popupy stały otwarte naraz (TriggerPopup z pustą, nieużyteczną listą pod filtrem "@").
+    const atInFilterCase = makeFakeThisForInput('/@', 2, 0);
+    handleTriggerInput.call(atInFilterCase.fakeThis);
+    t.deepEqual(atInFilterCase.closeCalls, [1], 'popup zamyka się, bo filtr zawiera `@` - MentionAutocomplete przejmuje pole');
+    t.deepEqual(atInFilterCase.setFilterCalls, [], 'setFilter nie jest wołany, gdy filtr zawiera `@`');
+
+    // Kontrola pozytywna: zwykły filtr bez `@` dalej filtruje jak dotąd.
+    const normalCase = makeFakeThisForInput('/sa', 3, 0);
+    handleTriggerInput.call(normalCase.fakeThis);
+    t.deepEqual(normalCase.closeCalls, [], '`/sa` bez `@` nie zamyka popupu');
+    t.deepEqual(normalCase.setFilterCalls, ['sa'], '`/sa` dalej filtruje jak dotąd');
 });

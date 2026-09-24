@@ -26,7 +26,7 @@ modules/chat/
 ├── slash-commands/                # definicje komend slash (save_session.js)
 └── chat/                          # mixiny (prototype) + helpery/rejestry
     ├── chat_streaming.js          # streaming tokenów + force-trigger injection + twardy backstop pętli
-    ├── chat_ui.js                 # render UI elementów + popup `/@`
+    ├── chat_ui.js                 # render UI elementów + popup `/`
     ├── chat_messages.js           # render messages, history + compact tool chips
     ├── chat_artifacts.js          # panel Artefaktów v2 + guzik delegacji
     ├── chat_model.js              # model selection, multimodal handling
@@ -95,25 +95,53 @@ też nie wychodzą przez barrel - żyją i są używane wewnątrz `chat/`.
 
 ---
 
-## Wyzwalacze pola czatu: `/` i `@` to DWA NIEZALEŻNE mechanizmy (2.3.1)
+## Wyzwalacze pola czatu: `/` i `@` to DWA NIEZALEŻNE mechanizmy (2.3.0)
 
 Pole wpisywania miało kiedyś dwa popupy otwierające się razem po `@` (`TriggerPopup` i
-`MentionAutocomplete`) - naprawione, dziś każdy znak ma DOKŁADNIE jednego właściciela:
+`MentionAutocomplete`) - naprawione, dziś każdy znak ma DOKŁADNIE jednego właściciela (wyjątek
+`/@` opisany niżej - tam TriggerPopup świadomie oddaje pole, zamiast dwóch popupów naraz):
 
 - **`/`** → `TriggerPopup` (`chat/TriggerPopup.ts`, otwierany z `chat_ui.ts`'s
   `_handleTriggerKeyDown`/`_handleTriggerInput`/`_openTriggerPopup`). Cztery sekcje: Slash-komendy
   (`this.slashCommands`), Skille (`agent.allowed_skills`), Sub-agenty (custom suby usera dla
-  aktywnego agenta, `getVisibleSubAgentsForAgent`) i MCP - WYŁĄCZNIE serwery ZEWNĘTRZNE.
+  aktywnego agenta, `getVisibleSubAgentsForAgent`) i MCP - WYŁĄCZNIE narzędzia serwerów
+  ZEWNĘTRZNYCH, JEDEN WPIS PER NARZĘDZIE (nie per serwer - naprawa 2.3.0, patrz niżej).
   Dyskryminator MCP jest `tool.source === 'user'` (kanoniczne pole `ToolDefinition.source`,
   `modules/tools/ToolRegistry.ts` - built-in narzędzia mają `source` puste/`'built-in'`, external
   MCP dostaje `'user'` w `ExternalMcpManager._wrapTool`; ten sam dyskryminator, ten sam wzorzec co
-  `modules/tools/ConnectorsBackstageTab.ts`'s `groupBuiltinTools`). `serverName` narzędzia
-  zewnętrznego to `serverId` serwera - ZERO fallbacku na `tool.name` (przed naprawą fallback na
-  `tool.name` wypisywał każde WBUDOWANE narzędzie jako osobny fałszywy "serwer").
+  `modules/tools/ConnectorsBackstageTab.ts`'s `groupBuiltinTools`).
 - **`@`** → wyłącznie `MentionAutocomplete` (`modules/ui-components/MentionAutocomplete.ts`) -
-  notatki i foldery vaulta, własny nasłuch `input`, chip nad polem. `TriggerPopup` w ogóle nie
-  reaguje na `@`: `_handleTriggerKeyDown` otwiera się tylko dla `e.key === '/'`, a
-  `_handleTriggerInput` zamyka popup, jeśli znak na pozycji wyzwalacza przestał być `/`.
+  notatki i foldery vaulta, własny nasłuch `input`, tag `@[Nazwa]` wstawiany w tekst pola plus chip
+  w pasku CHIPÓW POD polem (`_chipBar`, `chat_ui.ts` ok. 212 - powstaje po wierszu textarea, nie
+  jest to popup nad polem). `TriggerPopup` w ogóle nie reaguje na `@` jako WYZWALACZ:
+  `_handleTriggerKeyDown` otwiera się tylko dla `e.key === '/'`, a `_handleTriggerInput` zamyka
+  popup, jeśli znak na pozycji wyzwalacza przestał być `/`. **`/@`** (user otworzył popup `/`,
+  potem wpisał `@` jako pierwszy znak FILTRA - trigger sam zostaje `/`): `_handleTriggerInput`
+  zamyka TriggerPopup, gdy filtr zawiera `@`, zamiast filtrować pustką - bez tej bramki oba popupy
+  stały otwarte naraz (naprawa 2.3.0, niżej opisana razem z resztą).
+
+### Naprawy 2.3.0 (recenzja niezależna commitu 1bb2a846)
+
+- **Enter w otwartym popupie `/` nie wysyła już wiadomości.** `input_area` ma DWA nasłuchy
+  `keydown` (`_handleTriggerKeyDown` PIERWSZY, `handle_input_keydown` DRUGI - ten wysyła na Enter
+  bez Shift). Gdy popup skonsumuje klawisz, `_handleTriggerKeyDown` woła
+  `e.stopImmediatePropagation()`, NIE `e.stopPropagation()` - druga zatrzymuje tylko bąbelkowanie
+  do przodków, nie inne nasłuchy NA TYM SAMYM elemencie, więc Enter wybierający pozycję w popupie
+  (np. slash-komendę) wysyłał od razu wiadomość zamiast tylko wstawić marker. Wzór:
+  `modules/ui-components/MentionAutocomplete.ts`'s `_handleKeyDown` (ten sam problem, ta sama
+  naprawa, komentarz przy Enter/Tab).
+- **Sekcja MCP listuje NARZĘDZIA, nie serwery.** Wybór serwera dawniej wstawiał
+  `@@tool:<serverId>` - żadne narzędzie nie nazywa się samą nazwą serwera, więc marker wskazywał
+  narzędzie, którego rejestr nie zna, i model dostawał instrukcję wołania czegoś nieistniejącego.
+  `buildItems()` (`TriggerPopup.ts`) dziś dodaje jeden wpis PER NARZĘDZIE zewnętrznego serwera:
+  `name` = pełna nazwa z rejestru (`<serverId>__<tool>`, ta sama, którą marker `@@tool:<name>`
+  niesie do egzekucji), `label` = czytelna część PO `__` (kosmetyka listy), `description` =
+  opis narzędzia (dla external tools już niesie prefiks `[serverLabel] ...` z
+  `ExternalMcpManager._wrapTool`, więc serwer zostaje widoczny bez dublowania). Ten sam wzór co
+  picker narzędzi serwera w pasku bocznym (`chat_ui.ts`'s `_showMcpToolPicker` - wstawia PEŁNĄ
+  nazwę narzędzia jako marker, nigdy samą nazwę serwera). Filtr popupu (`_applyFilter`, szuka w
+  `name`+`label`) łapie wpisywanie i nazwy serwera (prefiks w `name`), i nazwy narzędzia bez
+  dodatkowej zmiany.
 - **Markery wstawiane przez `onSelect` bez zmian**: `@@skill:nazwa`, `@@tool:nazwa`,
   `@sub-agent:nazwa` (`InlineChipPlugin.ts`'s `makeInlineTriggerMarker`) - `@` w tych markerach
   jest częścią SKŁADNI markera wstawianego do tekstu, nie triggerem otwierającym popup; parser

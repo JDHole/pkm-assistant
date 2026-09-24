@@ -205,22 +205,36 @@ export class TriggerPopup {
             });
         }
 
-        // ── MCP servery WYŁĄCZNIE zewnętrzne (agent.allowed_servers przez registry.filterByAgent).
-        // Dyskryminator `source === 'user'` (patrz PopupToolLike) - built-in narzędzia (source
-        // puste/'built-in') nigdy nie trafiają tutaj jako fałszywe "serwery". ──
+        // ── Narzędzia serwerów MCP WYŁĄCZNIE zewnętrzne (agent.allowed_servers przez
+        // registry.filterByAgent) - JEDEN wpis PER NARZĘDZIE, nie per serwer. Dyskryminator
+        // `source === 'user'` (patrz PopupToolLike) - built-in narzędzia (source puste/'built-in')
+        // nigdy nie trafiają tutaj. `name` = pełna nazwa narzędzia w rejestrze (`<serverId>__
+        // <tool>`, `ExternalMcpManager._wrapTool`) - TA SAMA nazwa, którą wstawia marker
+        // `onSelect`/`_commit` (`@@tool:<name>`, `InlineChipPlugin.makeInlineTriggerMarker`) i
+        // którą woła egzekucja (`MCPClient`). Wcześniej sekcja wypisywała jeden wpis PER SERWER z
+        // `name = serverName` - marker `@@tool:<serverId>` wskazywał nieistniejące narzędzie
+        // (żadne narzędzie nie nazywa się samym `serverId`), model dostawał instrukcję wołania
+        // czegoś, czego rejestr nie zna. `label` = czytelna część nazwy PO `__` (sam picker
+        // serwera w pasku bocznym, `chat_ui.ts`'s `_showMcpToolPicker`, wstawia PEŁNĄ nazwę jako
+        // tekst i marker - wzór tu jest ten sam co do marker, `label` to wyłącznie kosmetyka listy).
+        // Serwer zostaje widoczny w opisie: `tool.description` dla narzędzi zewnętrznych ma już
+        // prefiks `[serverLabel] ...` z `_wrapTool`, `name` sam niesie `serverId__` jako prefiks -
+        // dzięki temu filtr popupu (`_applyFilter`, szuka w `name`+`label`) łapie wpisywanie i
+        // nazwy serwera, i nazwy narzędzia. ──
         const registry = this.plugin?.toolRegistry;
         const visibleTools = registry?.filterByAgent?.(activeAgent) || registry?.getAllTools?.() || [];
-        const seenServers = new Set<string>();
         for (const tool of visibleTools) {
             if (tool?.source !== 'user') continue;
             const serverName = tool?.serverName;
-            if (!serverName || seenServers.has(serverName)) continue;
-            seenServers.add(serverName);
+            const toolName = tool?.name;
+            if (!serverName || !toolName) continue;
+            const prefix = `${serverName}__`;
+            const label = toolName.startsWith(prefix) ? toolName.slice(prefix.length) : toolName;
             items.push({
                 type: 'tool',
-                name: serverName,
-                label: serverName,
-                description: tool?.description || 'MCP tool',
+                name: toolName,
+                label,
+                description: tool?.description || serverName,
                 section: 'mcp',
                 isSystem: false,
             });

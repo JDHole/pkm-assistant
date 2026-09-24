@@ -3473,7 +3473,7 @@ span.cs-note-link {
   font-size: 12px;
 }
 
-/* ── TriggerPopup.js: popup `/` i `@` (montowany w document.body) ── */
+/* ── TriggerPopup.js: popup `/` (montowany w document.body) ── */
 .pkm-trigger-popup {
   position: absolute;
   z-index: 9999;
