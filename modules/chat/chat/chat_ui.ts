@@ -9,7 +9,7 @@
 import { Notice, TFile } from 'obsidian';
 import { SkinManager, UiIcons, IconGenerator, setSvg, setSvgLabel, adoptSheet } from '../../crystal-soul/index.js';
 import { substituteVariables } from '../../skills/index.js';
-import { MentionAutocomplete, AttachmentManager } from '../../ui-components/index.js';
+import { MentionAutocomplete, AttachmentManager, setNoteOpener } from '../../ui-components/index.js';
 import type { MentionAutocompletePlugin, MentionChip } from '../../ui-components/index.js';
 import { getVisibleSubAgentsForAgent } from '../../sub-agents/index.js';
 import { summonAgentForArtifact, activateArtifactInChat, buildArtifactPickerItems, artifactStatusLabel } from '../../artifacts/index.js';
@@ -84,12 +84,38 @@ export async function runManualCompression(view: ChatViewLike): Promise<boolean>
     return true;
 }
 
+/**
+ * Otwiera notatke ZAWSZE w nowej karcie w glownym obszarze workspace'u - nigdy nie podmienia
+ * zawartosci panelu czatu (spec C, "Czat bez scian" 2.3.0, werdykt wlasciciela: klik w nazwe
+ * notatki ma otworzyc ja OSOBNO, "w osobnym glownym oknie"). `core/utils/obsidianNav.ts` ma
+ * rownowazna funkcje (`openNoteInMainTab`), ale TEN plik nie moze jej deep-importowac:
+ * `core/utils/*` poza `Logger.js` jest poza barrelem `core/index.ts` (kontrakt node-safe -
+ * `obsidianNav.ts` dotyka `Keymap` jako wartosci) i poza dozwolonymi wyjatkami ESLint-a
+ * (`compositionRootPatterns` w `eslint.config.js` obejmuje WYLACZNIE `src/main.ts`) - patrz
+ * `modules/ui-components/CLAUDE.md`, sekcja "Linki do notatek", po pelne uzasadnienie tej
+ * decyzji. Zwykly i Ctrl/Cmd-klik daja TEN SAM wynik (nowa karta) - spec chce tego dla obu, wiec
+ * nie ma po co duplikowac tutaj rozpoznawanie modyfikatorow `Keymap.isModEvent`.
+ */
+function _openNoteInMain(this: ChatViewLike, path: string, _ev: MouseEvent): void {
+    if (typeof path !== 'string' || !path.trim()) return;
+    void this.app.workspace.openLinkText(path, '', true).catch((e: unknown) => {
+        log.warn('Chat', `Nie udało się otworzyć notatki "${path}": ${(e as Error)?.message || String(e)}`);
+    });
+}
+
 // ── Main view render ────────────────────────────────────────────────
 
 export async function renderView(this: ChatViewLike, container = this.container) {
     // Adopt chat styles (CSSStyleSheet from import) przez `adoptSheet`, żeby demontaż pluginu
     // zdjął arkusz zamiast zostawiać go w dokumencie do restartu.
     adoptSheet(chat_view_styles);
+
+    // Rejestr openera notatek (modules/ui-components/noteLink.ts) - ui-components sam nie zna
+    // `app`, wiec KAZDY klik w nazwe notatki gdziekolwiek w czacie (odczyt/search/list/zapis/
+    // mencja/artefakt) przechodzi przez TEN callback. Sprzatania w `onClose` NIE ma - swiadomie:
+    // opener zalezy tylko od globalnego `app`, a dwa otwarte widoki czatu dziela jeden rejestr
+    // (`null` z jednego odbieralby klikalnosc drugiemu); kazdy `renderView` nadpisuje poprzedni.
+    setNoteOpener((path, ev) => _openNoteInMain.call(this, path, ev));
 
     container.empty();
     container.addClass('pkm-chat-view');

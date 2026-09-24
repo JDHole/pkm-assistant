@@ -10,7 +10,7 @@
  */
 
 import { MarkdownRenderer, Notice } from 'obsidian';
-import { SkinManager, hexToRgbTriplet, UiIcons, setSvg, setSvgLabel } from '../../crystal-soul/index.js';
+import { SkinManager, hexToRgbTriplet, UiIcons, setSvg } from '../../crystal-soul/index.js';
 import { buildCacheMetadata, isLocalPlatform } from '../../models/index.js';
 import { log } from '../../../core/utils/Logger.js';
 // Status narzędzia i warunek linku „otwórz zapisany plik" liczy JEDNA czysta funkcja z core
@@ -25,6 +25,7 @@ import {
     createSubAgentBlock,
     createPendingSubAgentBlock,
     createTile,
+    createNoteLink,
 } from '../../ui-components/index.js';
 import { getDateLocale, t } from '../../../core/i18n/index.js';
 import streamingManager, { shouldUseFreshModel } from './StreamingManager.js';
@@ -1431,16 +1432,13 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
             // Link wisi na POWODZENIU zapisu, nie na braku jednej flagi — `writePath` pochodzi
             // z argumentów wywołania, czyli z tego, co model CHCIAŁ zapisać.
             if (isActiveTab && shouldLinkWrittenFile(result, writePath) && toolCallsContainer) {
+                // Jeden mechanizm otwierania notatek w calym repo (spec C, "Czat bez scian"
+                // 2.3.0) - `createNoteLink` woła opener zarejestrowany przez `chat_ui.ts`'s
+                // `renderView` (nowa karta w glownym obszarze), zamiast wlasnego
+                // `openLinkText(writePath, '')` (biezaca karta - podmienialoby panel czatu).
                 const linkDiv = createDiv();
                 linkDiv.addClass('cs-vault-link');
-                const link = createEl('a');
-                setSvgLabel(link, UiIcons.file(14), writePath);
-                link.href = '#';
-                link.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    void this.app.workspace.openLinkText(writePath, '');
-                });
-                linkDiv.appendChild(link);
+                createNoteLink(linkDiv, writePath, writePath);
                 toolCallsContainer.appendChild(linkDiv);
             }
         }

@@ -30,7 +30,7 @@
  *    otwartych zakładkach) - żadnego z nich "Otwórz" nie potrzebuje, bo ścieżka jest już znana z
  *    rozwiązania przy renderze.
  */
-import { createTile } from '../../ui-components/index.js';
+import { createTile, openNoteWithRegistry } from '../../ui-components/index.js';
 import { UiIcons } from '../../crystal-soul/index.js';
 import { t } from '../../../core/i18n/index.js';
 import { log } from '../../../core/index.js';
@@ -71,7 +71,10 @@ export async function renderMachineTile(container: HTMLElement, plugin: ChatView
                 label,
                 // Uwaga 4: TYLKO `openNote` - żadnych skutków ubocznych `activateArtifactInChat`
                 // (bez przypinania artefaktu, bez odsłaniania panelu, bez przełączania widoku).
-                onClick: () => {
+                onClick: (ev: MouseEvent) => {
+                    // Jednostka C: ten sam opener co linki notatek (glowne okno, nowa karta); bez
+                    // zarejestrowanego openera fallback na plugin.openNote.
+                    if (openNoteWithRegistry(path, ev)) return;
                     void plugin.openNote(path).catch((e: unknown) => {
                         log.warn('Chat', `Nie udało się otworzyć artefaktu z kafelka: ${(e as Error)?.message || String(e)}`);
                     });

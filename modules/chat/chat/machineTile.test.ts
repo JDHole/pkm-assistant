@@ -12,6 +12,7 @@
  */
 import test from 'ava';
 import { renderMachineTile } from './machineTile.js';
+import { setNoteOpener } from '../../ui-components/index.js';
 import type { MachineView } from './machineMessage.js';
 
 type Listener = (ev: unknown) => void;
@@ -151,6 +152,27 @@ test.serial('renderMachineTile: artefakt znany sklepowi - przycisk aktywny, klik
         btn!.fire('click');
         await new Promise(r => setTimeout(r, 0));
         t.deepEqual(calls, ['openNote:Artefakty/Plan.md'], 'klik ma wywolac WYLACZNIE openNote - bez activateArtifactInChat/openChatView/getLeavesOfType');
+    });
+});
+
+test.serial('renderMachineTile: z zarejestrowanym openerem klik Otworz idzie przez opener (jak linki notatek), openNote nietkniete', async t => {
+    await withFakeDocument(async () => {
+        const opened: string[] = [];
+        setNoteOpener((path) => { opened.push(path); });
+        try {
+            const calls: string[] = [];
+            const container = makeFakeEl('div');
+            await renderMachineTile(container as unknown as HTMLElement, fakePlugin(calls, { path: 'Artefakty/Plan.md' }), baseView());
+            const btn = findByClass(container, 'cs-tile__action');
+            t.truthy(btn);
+            calls.length = 0;
+            btn!.fire('click');
+            await new Promise(r => setTimeout(r, 0));
+            t.deepEqual(opened, ['Artefakty/Plan.md'], 'opener dostaje dokladna sciezke notatki artefaktu');
+            t.deepEqual(calls, [], 'z openerem plugin.openNote nie jest wolane');
+        } finally {
+            setNoteOpener(null);
+        }
     });
 });
 

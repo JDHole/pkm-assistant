@@ -879,6 +879,23 @@ funkcję `.call(fakeThis, ...)` - dokładnie jak `render_messages` z `chat_messa
 `MarkdownRenderer.render` w trakcie renderu) mogą dalej wymagać strażnika po źródle - nie
 zakładaj automatycznie, że KAŻDA funkcja stąd jest testowalna bez sprawdzenia.
 
+### Notatki klikalne wszędzie (2.3.0, spec C "Czat bez ścian")
+
+Kafelek odczytu/wyszukiwania/listy (`ToolCallDisplay.ts`), link po zapisie
+(`chat_streaming.ts`, ok. linii 1433) i mencje `@[Nazwa]` w dymku usera (`chat_messages.ts`'s
+`_renderUserText`) otwierają notatki JEDNYM mechanizmem: `createNoteLink`
+(`modules/ui-components/noteLink.ts`) + rejestr openera. `chat_ui.ts`'s `renderView` rejestruje
+opener (`setNoteOpener`) na START renderu - `_openNoteInMain` otwiera ZAWSZE w nowej karcie w
+głównym obszarze przez `this.app.workspace.openLinkText(path, '', true)`, nigdy nie podmienia
+zawartości panelu czatu. **Sprzątanie (`setNoteOpener(null)`) NIE jest dziś wpięte w
+`onClose`** (`chat_view.ts`, poza write_paths jednostki C, która to dodała) - otwarty TODO,
+patrz `modules/ui-components/CLAUDE.md`, sekcja "Linki do notatek", dla pełnego uzasadnienia
+ryzyka i decyzji o tym, dlaczego ten plik nie deep-importuje `core/utils/obsidianNav.ts` mimo
+że ma tam równoważną funkcję (`openNoteInMainTab`). Mencje bez odpowiednika notatki w vaultcie
+(agent, osoba) zostają zwykłym, nieklikalnym tekstem badge'a - rozwiązanie idzie przez
+`this.app.metadataCache.getFirstLinkpathDest(name, '')`, wołane W WIDOKU (ma `app`), nie w
+`noteLink.ts` (nie zna `app`).
+
 ### Wiadomości maszynowe jako kafelek systemowy (2.3.0, A3 "Czat bez ścian")
 
 Powiadomienie o wyniku suba z tła (`buildSubTaskNotificationText`, `subTaskNotification.ts`) i

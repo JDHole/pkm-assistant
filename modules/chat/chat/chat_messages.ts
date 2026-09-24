@@ -11,6 +11,7 @@ import {
     createToolCallDisplay,
     createThinkingBlock,
     createSubAgentBlock,
+    createNoteLink,
 } from '../../ui-components/index.js';
 import { t, getDateLocale } from '../../../core/i18n/index.js';
 import { registerUrlsFromText } from '../../web/index.js';
@@ -332,6 +333,13 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
 /**
  * Render user text with inline @[Name] mention badges.
  * Falls back to plain text if no mentions found.
+ *
+ * Mencje klikalne (spec C, "Czat bez scian" 2.3.0): nazwa z `@[Nazwa]` jest rozwiazywana na
+ * sciezke notatki TUTAJ, w widoku - `this.app.metadataCache.getFirstLinkpathDest(name, '')` -
+ * bo TYLKO widok zna `app`; `createNoteLink` (`modules/ui-components/`) dostaje juz gotowa
+ * sciezke, jak wszedzie indziej w tym mechanizmie. Nazwa bez odpowiednika notatki w vaultcie
+ * (agent, osoba, cokolwiek nie-notatkowego) zostaje zwyklym, NIEklikalnym tekstem badge'a -
+ * stare zachowanie bez zmian.
  */
 export function _renderUserText(this: ChatViewLike, container: HTMLElement, text: string): void {
     if (!text.includes('@[')) {
@@ -343,8 +351,14 @@ export function _renderUserText(this: ChatViewLike, container: HTMLElement, text
     for (const part of parts) {
         const match = part.match(/^@\[(.+)\]$/);
         if (match) {
+            const name = match[1];
             const badge = p.createSpan({ cls: 'pkm-mention-badge' });
-            badge.textContent = `@ ${match[1]}`;
+            const dest = this.app?.metadataCache?.getFirstLinkpathDest?.(name, '') ?? null;
+            if (dest) {
+                createNoteLink(badge, dest.path, `@ ${name}`);
+            } else {
+                badge.textContent = `@ ${name}`;
+            }
         } else {
             p.appendText(part);
         }
