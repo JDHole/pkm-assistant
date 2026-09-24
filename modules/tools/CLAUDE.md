@@ -179,6 +179,23 @@ Bramka `.pkm-assistant/**` + No-Go + `sanitizePath` w prymitywach vaultowych dzi
 - ⚠️ **WIDOCZNOŚĆ i EGZEKUCJA to JEDNA funkcja - `ToolRegistry.checkToolAxis(agent, toolName)`.** `filterByAgent` to jej przelot po rejestrze (co model dostaje w definicjach narzędzi), a `MCPClient.executeToolCall` woła ją jako BRAMKĘ, zanim pobierze narzędzie z rejestru i zanim ruszy `checkPermission` - bez tego model, który zna nazwę wyłączonego narzędzia (stara sesja, cudzy transkrypt), mógłby je wywołać bez oporu. **Nie dokładaj drugiego miejsca liczenia tej reguły** - dwie kopie rozjadą się przy pierwszej zmianie. Trzy konsekwencje: (1) sprawdzenie idzie na nazwie KANONICZNEJ, czyli po `resolveToolAlias` - stara nazwa nie może być obejściem wyłączenia; (2) odmowa jest fail-closed i **nie pyta usera** - to nie ryzyko do zaakceptowania, tylko narzędzie, którego user agentowi nie dał; (3) dla serwerów zewnętrznych brak listy `mcp_servers` = brak opt-inu = odmowa. Sub-agenci chodzą pod tożsamością rodzica, więc dostają tę bramkę za darmo; ich własna whitelista (przecięcie rodzic∩sub) odbija wywołanie jeszcze wcześniej.
 - ⚠️ **Zewnętrzne serwery MCP = kod, który uruchamiasz u siebie.** stdio spawnuje proces z Twoimi prawami, http wysyła dane rozmów do zdalnej usługi. Żaden sandbox ich nie ogranicza. Instaluj tylko z zaufanych źródeł; `source:'user'` → RED wymusza pierwszy approval.
 - ⚠️ **Oś narzędziowa mierzy nazwę WYWOŁANEGO narzędzia, więc skutek trzeba bramkować tam, gdzie się dzieje.** `agent_delegate` (grupa `delegation`) i `kom_send` (grupa `komunikator`) robią to samo - zostawiają tekst modelu w cudzej skrzynce - więc agent z włączoną delegacją i wyłączoną pocztą mógł by inaczej ominąć wyłączenie. Bramka poczty jest w chokepoincie: `sendAgentMail` jako pierwszy warunek pyta `checkToolAxis(agent, 'kom_send')`, niezależnie skąd przyszło wywołanie. Druga połowa: akcja `agent_delegate` mapuje się na `agent.message`, nie na `delegate` - przełącznik zgody ma odpowiadać SKUTKOWI, nie nazwie narzędzia.
+- ⚠️ **`DORMANT_TOOLS` (`ToolRegistry.ts`, dziś: `{agent_delegate}`) odcina narzędzie WYŁĄCZNIE
+  w `filterByAgent` (widoczność), świadomie NIE w `checkToolAxis` (egzekucja).** Uśpienie
+  narzędzia (2.3.0, spec E "Czat bez ścian" - delegacja do INNEGO AGENTA "stara i niepotrzebna"
+  do inicjatywy 2.4+) jest decyzją PRODUKTOWĄ "nie oferujemy w menu", nie decyzją bezpieczeństwa
+  "agent nie ma prawa" - żaden profil (nowy ani stary, z narzędziem jawnie włączonym we własnej
+  liście) nie dostaje go w definicjach narzędzi wysyłanych modelowi, ale wywołanie PO DOKŁADNEJ
+  NAZWIE przez `MCPClient.executeToolCall` (stara sesja, kod, który zna nazwę) zostaje możliwe
+  bez zmian - to jedyne świadome odstępstwo od reguły "WIDOCZNOŚĆ i EGZEKUCJA to JEDNA funkcja"
+  wyżej, bo `AgentDelegateTool.test.ts` integracyjnie testuje TĘ ścieżkę (zgoda usera, dzielony
+  przełącznik z `kom_send`, maska sekretów w błędzie) i ma zostać zielone. `BUILTIN_TOOL_MAP`/
+  manifest `delegation.manifest.js`/`toolAxis.ts`'s `BUILTIN_TOOL_GROUPS` dalej niosą
+  `agent_delegate` bez zmian - tylko `filterByAgent` (czyli to, co realnie trafia do modelu w
+  definicjach narzędzi, patrz `chat_streaming.ts`'s `mcpAllowed`/`AgentManager.ts`'s
+  `availableToolNames`) mówi "nie". `delegate` (sub-agenci) nie jest w tym zbiorze - zero zmian.
+  Dopisujesz drugie uśpione narzędzie, które MA też blokować egzekucję? To już inny przypadek -
+  ten sam `Set` idzie wtedy też do `checkToolAxis`, ale sprawdź najpierw, czy coś (testy,
+  transkrypty) nie zależy od tego, że stare wywołanie po nazwie dalej działa.
 
 ### Ścieżki plików i cele operacji
 

@@ -98,6 +98,26 @@ const BUILTIN_TOOL_MAP: Record<string, string[]> = {
 
 const ALWAYS_AVAILABLE_SERVER = 'core';
 
+/**
+ * Narzędzia UŚPIONE (2.3.0, "Czat bez ścian" jednostka E - werdykt właściciela: mechanizm
+ * delegacji do innego agenta jako CAŁOŚĆ wraca dopiero jako inicjatywa 2.4+). Uśpienie, nie
+ * wywalka: kod narzędzia, manifest `delegation.manifest.js` i klucze i18n ZOSTAJĄ nietknięte -
+ * tylko WIDOCZNOŚĆ (`filterByAgent`, czyli to, co model dostaje w definicjach narzędzi) mówi
+ * "nie". Sprawdzane PRZED `agent.disabled_tools[]`, więc żaden agent (nowy ani stary,
+ * niezależnie od własnej listy wyłączonych narzędzi) nie dostaje `agent_delegate` w definicjach
+ * narzędzi wysyłanych modelowi. `delegate` (sub-agenci) NIE jest tu - działa bez zmian.
+ *
+ * ⚠️ Świadomie NIE w `checkToolAxis` (bramka egzekucji `MCPClient.executeToolCall` woła).
+ * Uśpienie tu jest decyzją PRODUKTOWĄ „nie oferujemy tego w menu", nie decyzją bezpieczeństwa
+ * „agent nie ma prawa" - istniejące ścieżki, które i tak znają dokładną nazwę narzędzia i wołają
+ * je przez `MCPClient.executeToolCall` (test integracyjny `AgentDelegateTool.test.ts`: zgoda
+ * usera, maska sekretów, dzielony przełącznik z `kom_send`) mają dalej działać bez zmian -
+ * dormant nie jest tu równoznaczne z "usunięte z egzekucji". Gdyby kiedyś trzeba było też
+ * zablokować wywołanie po nazwie, ten sam Set wchodzi do `checkToolAxis` - patrz komentarz przy
+ * `filterByAgent` niżej.
+ */
+const DORMANT_TOOLS = new Set<string>(['agent_delegate']);
+
 export class ToolRegistry {
     declare tools: Map<string, ToolDefinition>;
 
@@ -181,10 +201,16 @@ export class ToolRegistry {
      * metoda `checkToolAxis`, którą `MCPClient.executeToolCall` woła jako BRAMKĘ przed wykonaniem —
      * widoczność i egzekucja nie mogą się rozjechać, bo liczy je ten sam kod.
      *
+     * Wyjątek: `DORMANT_TOOLS` (2.3.0, dziś `agent_delegate`) jest odcinane TU, PRZED
+     * `checkToolAxis` - to jedyna świadoma różnica między widocznością a egzekucją w całym
+     * module, bo dormant jest decyzją "nie oferujemy w menu", nie decyzją bezpieczeństwa (patrz
+     * komentarz przy `DORMANT_TOOLS` wyżej).
+     *
      * @param agent - Agent profile (`disabled_tools[]`, `mcp_servers[]`).
      */
     filterByAgent(agent: ToolVisibilityAgent | null | undefined): ToolDefinition[] {
-        return this.getAllTools().filter(tool => this.checkToolAxis(agent, tool.name, tool).allowed);
+        return this.getAllTools().filter(tool =>
+            !DORMANT_TOOLS.has(tool.name) && this.checkToolAxis(agent, tool.name, tool).allowed);
     }
 
     /**
