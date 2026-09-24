@@ -101,9 +101,10 @@
   --cs-soul: rgba(var(--cs-fg-rgb), 0.04);
   --cs-soul-vis: rgba(var(--cs-fg-rgb), 0.08);
 
-  /* Dymki 2.3.0 ("Czat bez scian") - rynna kryształu agenta, zmierzona z dzisiejszych
-     .cs-message__agent-head / .cs-message__text (padding-left 22px), uzywana po obu
-     stronach: wciecie tresci agenta od lewej i margines dymka usera od prawej. */
+  /* Dymki 2.3.0 ("Czat bez scian") - rynna kryształu agenta. Wartosc 22px przetrwala z dawnego
+     naglowka serii (.cs-message__agent-head, usuniety w fazie "kolumna dymkow" - patrz
+     modules/chat/CLAUDE.md, sekcja "Dymki 2.3.0"), uzywana dzis jako margin-left kontenera
+     .cs-message--agent (modules/chat/chat_view.css) i mirror po prawej dla dymka usera. */
   --cs-bubble-gutter: 22px;
 }
 .theme-light .cs-root {
