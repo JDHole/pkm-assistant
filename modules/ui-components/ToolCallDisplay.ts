@@ -5,6 +5,9 @@ import { t } from '../../core/i18n/index.js';
 import type { UiIcon } from '../crystal-soul/index.js';
 import { createTile } from './Tile.js';
 import type { TileSpec, TileStatus } from './Tile.js';
+// Notatki klikalne wszedzie (spec C, 2.3.0, "Czat bez scian") - wewnatrz modulu pliki importuja
+// sie swobodnie (zlota zasada dotyczy TYLKO wejscia spoza modulu).
+import { createNoteLink, isVaultNotePath } from './noteLink.js';
 
 /** Karta wywołania narzędzia — kształt, który realnie czytają render-funkcje niżej. */
 interface ToolCallData {
@@ -934,6 +937,74 @@ function _composeTileBody(summaryText: string, detailText: string): string {
  * gałąź `default` zwraca `'{}'` dla PUSTEGO OBIEKTU (`input:{}`), co jest innym przypadkiem -
  * `input:{}` DOSTAJE sekcję techniczną (niepusty argument, po prostu bez pól).
  */
+/** `JSON.parse` bezpieczny (string albo juz-obiekt) do samego celu wyciagania sciezek notatek -
+ *  osobny, malutki parser zamiast reuzywania wnetrza `formatToolOutput` (ktora nie eksponuje
+ *  sparsowanych danych na zewnatrz), zeby nie ruszac jej dobrze przetestowanej sciezki. */
+function _parseOutputForLinks(output: unknown): Record<string, unknown> | null {
+    try {
+        const data = (typeof output === 'string' ? JSON.parse(output) : output) as Record<string, unknown>;
+        return data && typeof data === 'object' && !Array.isArray(data) ? data : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Sciezki notatek do pokazania jako klikalne linki NAD dotychczasowa trescia kafelka (spec C,
+ * "Czat bez scian" 2.3.0): `read`/`vault_read` (jeden plik - sciezka z wyniku, zapasowo z
+ * argumentow wejscia), `search`/`vault_search`/`memory_sessions`/`memory_summaries` (kazdy
+ * wynik z polem `path`), `list`/`vault_list` (pozycje bedace notatkami - foldery i pliki spoza
+ * `isVaultNotePath` zostaja WYLACZNIE tekstem w dotychczasowej liscie, bez linku). Blad narzedzia
+ * -> pusta tablica (wolacz nie dokleja sekcji linkow do komunikatu bledu).
+ */
+function _extractNoteLinkPaths(toolCall: ToolCallData): string[] {
+    if (toolCall.error) return [];
+    const data = _parseOutputForLinks(toolCall.output);
+    switch (toolCall.name) {
+        case 'read':
+        case 'vault_read': {
+            const outPath = data && typeof data.path === 'string' ? data.path : '';
+            const inp = toolCall.input as { path?: unknown } | undefined;
+            const inPath = typeof inp?.path === 'string' ? inp.path : '';
+            const path = outPath || inPath;
+            return path && isVaultNotePath(path) ? [path] : [];
+        }
+        case 'search':
+        case 'vault_search':
+        case 'memory_sessions':
+        case 'memory_summaries': {
+            const results = data && Array.isArray(data.results) ? (data.results as Array<{ path?: unknown }>) : [];
+            return results
+                .map(r => (typeof r?.path === 'string' ? r.path : ''))
+                .filter((p): p is string => !!p && isVaultNotePath(p));
+        }
+        case 'list':
+        case 'vault_list': {
+            const rawFiles = data ? (data.files ?? data.entries) : undefined;
+            const files = Array.isArray(rawFiles) ? (rawFiles as ToolFileEntry[]) : [];
+            return files
+                .map(f => (typeof f === 'string' ? f : (f?.path || f?.name || '')))
+                .filter((p): p is string => typeof p === 'string' && isVaultNotePath(p));
+        }
+        default:
+            return [];
+    }
+}
+
+/** Sekcja linkow notatek NAD dotychczasowa trescia kafelka - jedna linia na sciezke, przez
+ *  `createNoteLink` (jeden mechanizm otwierania w calym repo, spec C). */
+function _appendNoteLinksSection(body: HTMLElement, paths: string[]): void {
+    const wrap = _createDetachedEl('div');
+    wrap.className = 'cs-tile__note-links';
+    for (const path of paths) {
+        const line = _createDetachedEl('div');
+        line.className = 'cs-tile__note-link-line';
+        createNoteLink(line, path);
+        wrap.appendChild(line);
+    }
+    body.appendChild(wrap);
+}
+
 function _buildToolDetails(toolCall: ToolCallData, includeRawArgs: boolean): TileSpec['details'] {
     if (toolCall.error) {
         if (toolCall.name === 'ask_user') {
@@ -963,17 +1034,22 @@ function _buildToolDetails(toolCall: ToolCallData, includeRawArgs: boolean): Til
     const rawArgsText = (includeRawArgs && toolCall.input != null)
         ? (formatToolInputDetail(toolCall.name, toolCall.input) || '')
         : '';
+    const notePaths = isError ? [] : _extractNoteLinkPaths(toolCall);
 
-    if (!bodyText && !rawArgsText) return undefined;
-    if (!rawArgsText) return bodyText || undefined;
+    if (!bodyText && !rawArgsText && notePaths.length === 0) return undefined;
+    if (!rawArgsText && notePaths.length === 0) return bodyText || undefined;
 
     return (body: HTMLElement) => {
+        if (notePaths.length > 0) {
+            _appendNoteLinksSection(body, notePaths);
+        }
         if (bodyText) {
             const pre = _createDetachedEl('div');
             pre.className = 'cs-tile__pre';
             pre.textContent = bodyText;
             body.appendChild(pre);
         }
+        if (!rawArgsText) return;
         const rawBlock = _createDetachedEl('details');
         rawBlock.className = 'cs-tile__raw-args';
         const summaryEl = _createDetachedEl('summary');

@@ -13,7 +13,8 @@ modules/ui-components/
 ├── index.ts                 # jedyne drzwi publiczne (barrel)
 ├── CLAUDE.md                # ten plik
 ├── Tile.ts                  # `createTile` - komponent kafelka `.cs-tile`, wspólny fundament rzędów akcji (2.3.0, "Czat bez ścian"). Szczegóły: sekcja "Tile" niżej
-├── ToolCallDisplay.ts       # katalog TOOL_INFO (ikona + etykieta i18n per narzędzie) + `describeToolCall` (tytuł kafelka po ludzku) + pełny blok wywołania narzędzia + kompaktowy chip, oba przez `createTile`
+├── noteLink.ts              # `createNoteLink` + rejestr openera (`setNoteOpener`) + `isVaultNotePath` - notatki klikalne wszędzie (spec C, 2.3.0, "Czat bez ścian"). Szczegóły: sekcja "Linki do notatek" niżej
+├── ToolCallDisplay.ts       # katalog TOOL_INFO (ikona + etykieta i18n per narzędzie) + `describeToolCall` (tytuł kafelka po ludzku) + pełny blok wywołania narzędzia + kompaktowy chip, oba przez `createTile`; details odczytu/wyszukiwania/listy dokłada linki notatek przez `noteLink.ts`
 ├── AttachmentManager.ts     # załączniki w czacie: 📎 picker, drag & drop, wklejenie z schowka (obrazy → base64, tekst → kontekst, PDF → ekstrakcja)
 ├── MentionAutocomplete.ts   # dropdown `@` nad polem czatu: notatki i foldery vaulta, wynik jako chip nad inputem (nie tekst inline)
 ├── SubAgentBlock.ts         # kafelek wyniku/błędu/pokwitowania w tle sub-agenta, przez `createTile` (rola `agent`) - przepięte z `.cs-action-row` na Tile w A2 (2.3.0, "Czat bez ścian")
@@ -151,11 +152,69 @@ dostawała mylące `error_no_details` zamiast echa własnego opisu).
 
 ---
 
+## Linki do notatek (2.3.0, spec C "Czat bez ścian")
+
+Werdykt właściciela (dosłownie): "jak jest odczyt jakiejś notatki to musi być możliwość otwarcia
+jej w nowym oknie w Obsidianie (...) przy wyszukiwaniu i w ogóle w każdym momencie jak się
+gdziekolwiek pokazują notatki z vaulta to można kliknąć nazwę i otwiera się ona w osobnym
+głównym oknie". `noteLink.ts` daje trzy eksporty:
+
+- `isVaultNotePath(s)` - `.md`/`.canvas`/`.base`, bez protokołu, bez białych znaków na końcach.
+- `setNoteOpener(opener | null)` - rejestr MODUŁU (jeden opener aktywny naraz). `ui-components`
+  świadomie NIE zna `app`/`obsidian` (zasada wstępu tego modułu - same funkcje budujące DOM),
+  więc otwieranie realizuje WOŁACZ: widok czatu (`modules/chat/chat/chat_ui.ts`'s `renderView`)
+  rejestruje `(path, ev) => this.app.workspace.openLinkText(path, '', true)` (zawsze NOWA
+  karta w głównym obszarze - nigdy nie podmienia zawartości panelu czatu, z którego klik
+  wyszedł). Sprzątanie (`setNoteOpener(null)`) należy do `onClose` (`modules/chat/chat_view.ts`)
+  - **ten plik nie wszedł do write_paths jednostki C**, więc rejestr dziś NIE jest czyszczony
+    przy zamknięciu widoku. Ryzyko niskie: `renderView` nadpisuje rejestr przy każdym kolejnym
+    otwarciu/przełączeniu zakładki (jeden opener naraz, ostatni wygrywa), a zamknięcie JEDYNEGO
+    otwartego czatu zostawia dangling closure bez żadnego elementu DOM, który mógłby go
+    wywołać. Otwarty TODO: dopisać `setNoteOpener(null)` do `onClose` przy najbliższej okazji
+    edycji tego pliku.
+- `createNoteLink(parent, path, label?)` - `a.cs-note-link[data-path]` klikalny przez
+  zarejestrowany opener (klik woła `opener(path, ev)` z DOKŁADNĄ ścieżką, `preventDefault`);
+  BEZ openera - zwykły `span.cs-note-link[data-path]`, bez `href`, bez listenera (nieklikalny,
+  ten sam tekst). Tekst = `label` jeśli podany, inaczej nazwa pliku bez folderów i bez
+  rozszerzenia.
+
+**Dlaczego `core/utils/obsidianNav.ts` (który MA równoważną funkcję, `openNoteInMainTab`) nie
+jest tu wołany.** `core/utils/*` poza `core/utils/Logger.js` jest poza barrelem `core/index.ts`
+(kontrakt node-safe - `obsidianNav.ts` dotyka `Keymap` z `obsidian` jako WARTOŚCI) i poza
+dozwolonymi wyjątkami ESLint-a (`compositionRootPatterns` w `eslint.config.js` obejmuje
+WYŁĄCZNIE `src/main.ts` jako composition root) - `modules/chat/chat/chat_ui.ts` deep-importujący
+`core/utils/obsidianNav.js` byłby błędem `npm run lint` (`no-restricted-imports`). Widok czatu
+implementuje więc RÓWNOWAŻNĄ logikę lokalnie (`_openNoteInMain` w `chat_ui.ts`, wprost przez
+`this.app.workspace.openLinkText(path, '', true)`), świadomie BEZ rozpoznawania modyfikatorów
+klawiatury (`Keymap.isModEvent`) - spec chce tego samego wyniku (nowa karta) dla zwykłego i
+Ctrl/Cmd-klik, więc duplikowanie logiki `resolveTarget` z `obsidianNav.ts` nie dawałoby niczego.
+`core/utils/obsidianNav.ts`'s `openNoteInMainTab` zostaje jako reużywalny prymityw dla
+przyszłych wołaczy Z DOSTĘPEM do niego (np. `src/main.ts`/`PluginBase.ts`, poza scope tej
+jednostki), nie jest dziś wołany przez nic w repo poza własnym testem.
+
+**Miejsca podpięte (jednostka C):** kafelek odczytu/wyszukiwania/listy (`ToolCallDisplay.ts`'s
+`_buildToolDetails` - sekcja linków NAD dotychczasową treścią, jeden `createNoteLink` na
+ścieżkę; szczegóły w komentarzu `_extractNoteLinkPaths`), link po zapisie
+(`modules/chat/chat/chat_streaming.ts`, ok. linii 1433 - zastąpił własny `<a>`+`openLinkText`),
+mencje `@[Nazwa]` w dymku usera (`modules/chat/chat/chat_messages.ts`'s `_renderUserText` -
+nazwa rozwiązana na ścieżkę przez `this.app.metadataCache.getFirstLinkpathDest(name, '')` W
+WIDOKU, `createNoteLink` dostaje już gotową ścieżkę; nazwa bez odpowiednika notatki zostaje
+zwykłym, nieklikalnym tekstem badge'a).
+
+**Nie podpięte (poza write_paths tej jednostki):** przycisk "Otwórz" kafelka artefaktu
+(`modules/chat/chat/machineTile.ts`) woła dziś `plugin.openNote(path)` bezpośrednio (biegnie
+przez `core/utils/obsidianNav.ts`'s `openNote`, INNY mechanizm niż `createNoteLink`/opener) -
+`machineTile.ts` nie jest w write_paths jednostki C, więc ujednolicenie ("ten sam opener")
+zostaje jako TODO dla kolejnej jednostki.
+
+---
+
 ## Public API (`modules/ui-components/index.ts`)
 
 | Export | Rola |
 |---|---|
 | `createTile(spec)` | Komponent kafelka `.cs-tile` - fundament "Czat bez ścian" (2.3.0). Patrz sekcja "Tile" wyżej. |
+| `createNoteLink(parent, path, label?)` / `setNoteOpener(opener)` / `isVaultNotePath(s)` | Notatki klikalne wszędzie (spec C, 2.3.0). Patrz sekcja "Linki do notatek" wyżej. |
 | `TOOL_INFO` | Katalog `{ nazwa_narzędzia: { icon, label } }`. `label` jest **getterem** wołającym `t()` w momencie odczytu - dzięki temu respektuje aktualny język bez przebudowy katalogu. |
 | `getToolIcon(toolName)` | Ikona dla narzędzia; nieznane narzędzie dostaje fallback (nie wybucha). |
 | `describeToolCall(name, input)` | Tytuł kafelka narzędzia po ludzku (i18n `chat.tile.tool.*`, pl+en) - `read`/`search`/`write`/`list`/`web_search`/`web_read`/`todo`/`ask_user` mają własny szablon, reszta dostaje `chat.tile.tool.generic` (surowa nazwa narzędzia - jedyna dostępna informacja). Zero JSON-a, zero id w wyniku. **Totalna - nigdy nie rzuca** (B1 fix, recenzja A1-fix): pole złego typu od modelu (`path` jako tablica, `url` jako liczba, cały input jako string `"null"`) jest pomijane (`typeof === 'string'`), nie wywala tury/renderu historii. |

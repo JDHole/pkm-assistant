@@ -19,6 +19,10 @@ export {
 // czacie. ThinkingBlock i ToolCallDisplay stoja na nim (A1); A2/A3 doloza reszte.
 export { createTile } from './Tile.js';
 export type { TileSpec, TileHandle, TileRole, TileStatus, TileAction } from './Tile.js';
+// Notatki klikalne wszedzie (spec C, 2.3.0, "Czat bez scian") - rejestr openera + budowa linku.
+// `ui-components` nie zna `app`; wolacz (widok czatu) rejestruje opener przez `setNoteOpener`.
+export { createNoteLink, setNoteOpener, openNoteWithRegistry, isVaultNotePath } from './noteLink.js';
+export type { NoteOpener } from './noteLink.js';
 export { AttachmentManager } from './AttachmentManager.js';
 export { MentionAutocomplete } from './MentionAutocomplete.js';
 // Kształty, które moduł-właściciel narzuca wołaczom (czat składa z nich swoje dane):
