@@ -371,6 +371,9 @@ export interface ChatViewMixins extends
     _unsubscribeSkinEvents: (() => void) | null;
     handleGlobalKeydownBound: ((e: KeyboardEvent) => void) | null;
     handleBeforeUnloadBound: (() => void) | null;
+    /** Odpięcie menu na zaznaczeniu (`chat/selectionMenu.ts`) - `installSelectionMenu` zwraca
+     *  funkcję odpinającą, `renderView` ją tu chowa i woła PRZED każdym kolejnym montażem. */
+    _selectionMenuDetach: (() => void) | null;
 }
 
 /**

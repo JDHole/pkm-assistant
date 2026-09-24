@@ -16,6 +16,7 @@ import { summonAgentForArtifact, activateArtifactInChat, buildArtifactPickerItem
 import type { SummonPlugin } from '../../artifacts/index.js';
 import { buildTodoPanelModel, resolveBottomBarMode, DEFAULT_BOTTOM_BAR_MODE } from './todoPanel.js';
 import { renderSubTaskStrip } from './subTaskStrip.js';
+import { installSelectionMenu } from './selectionMenu.js';
 import { _tabKey } from './chat_tabs.js';
 import { insertInlineTriggerMarker } from './InlineChipPlugin.js';
 import { TriggerPopup } from './TriggerPopup.js';
@@ -140,6 +141,14 @@ export async function renderView(this: ChatViewLike, container = this.container)
     // Messages area (cs-root activates Crystal Soul CSS variables)
     this.messages_container = chatMain.createDiv({ cls: 'pkm-chat-messages cs-root' });
     void this.render_messages();
+
+    // Menu na zaznaczeniu (spec D, "Czat bez ścian" 2.3.0) - Kopiuj / Dodaj jako kontekst /
+    // Cytuj. Odepnij POPRZEDNI egzemplarz PRZED montażem nowego: `renderView` potrafi się
+    // powtórzyć w cyklu życia jednego widoku i `messages_container` powstaje na nowo za każdym
+    // razem, więc bez tego nasłuchy na `document` (klik poza / Escape) by się mnożyły. Pełne
+    // sprzątanie w `onClose` - patrz gotcha "Sprzątanie" w `selectionMenu.ts`.
+    this._selectionMenuDetach?.();
+    this._selectionMenuDetach = installSelectionMenu(this);
 
     // ── SLIM BAR (right side, 66px) ──
     this._slimBar = chatBody.createDiv({ cls: 'cs-skillbar cs-root' });

@@ -54,6 +54,7 @@ modules/chat/
     ├── machineMessage.js           # klasyfikator wiadomości maszynowych (spec A3) - classifyMachineMessage + buildMachineView; pure, zero obsidian, testowalny
     ├── machineTile.js               # render współdzielony kafelka wiadomości maszynowej (renderMachineTile) - wołany przez chat_messages.js I chat_streaming.js; obsidian przechodnio przez barrel ui-components, testowalny w AVA z atrapą harnessu
     ├── subTaskStrip.js             # pasek biegów subów POD zakładkami czatu; obsidian-free DOM, model z modules/sub-agents
+    ├── selectionMenu.js            # menu na zaznaczeniu tekstu (2.3.0, spec D) - Kopiuj / Dodaj jako kontekst / Cytuj; quoteText/insertAtCursor pure+testowalne, installSelectionMenu montuje nasłuchy na messages_container
     ├── SlashCommandsRegistry.js    # rejestr komend `/`
     ├── ToolReactorRegistry.js      # plug-in reaktory na tool results
     ├── TokenViewerWidget.js        # donut + pop-over Token Context Viewer
@@ -887,10 +888,10 @@ Kafelek odczytu/wyszukiwania/listy (`ToolCallDisplay.ts`), link po zapisie
 (`modules/ui-components/noteLink.ts`) + rejestr openera. `chat_ui.ts`'s `renderView` rejestruje
 opener (`setNoteOpener`) na START renderu - `_openNoteInMain` otwiera ZAWSZE w nowej karcie w
 głównym obszarze przez `this.app.workspace.openLinkText(path, '', true)`, nigdy nie podmienia
-zawartości panelu czatu. **Sprzątanie (`setNoteOpener(null)`) NIE jest dziś wpięte w
-`onClose`** (`chat_view.ts`, poza write_paths jednostki C, która to dodała) - otwarty TODO,
-patrz `modules/ui-components/CLAUDE.md`, sekcja "Linki do notatek", dla pełnego uzasadnienia
-ryzyka i decyzji o tym, dlaczego ten plik nie deep-importuje `core/utils/obsidianNav.ts` mimo
+zawartości panelu czatu. Sprzątania openera w `onClose` NIE ma - decyzja (recenzja C): jeden
+rejestr na plugin, opener zależy tylko od globalnego `app`, dwa widoki czatu dzielą slot;
+patrz `modules/ui-components/CLAUDE.md`, sekcja "Linki do notatek", dla uzasadnienia
+decyzji o tym, dlaczego ten plik nie deep-importuje `core/utils/obsidianNav.ts` mimo
 że ma tam równoważną funkcję (`openNoteInMainTab`). Mencje bez odpowiednika notatki w vaultcie
 (agent, osoba) zostają zwykłym, nieklikalnym tekstem badge'a - rozwiązanie idzie przez
 `this.app.metadataCache.getFirstLinkpathDest(name, '')`, wołane W WIDOKU (ma `app`), nie w
@@ -962,7 +963,8 @@ render w oknie czatu: zamiast dymka `.cs-message--user` doklejany jest kafelek `
   notatki jest rozwiązywana PRZY RENDERZE, PRZED budową kafelka (`plugin.artifactStore.read(id)` -
   `renderMachineTile` jest `async`, wołacze już są funkcjami `async`, więc `await` przed
   `createTile` jest tani i deterministyczny - zero migotania przycisku). Sklep zna ścieżkę ->
-  przycisk aktywny, klik robi TYLKO `plugin.openNote(path)` (uwaga 4 - **żadnych** skutków
+  przycisk aktywny, klik idzie przez wspólny opener notatek (`openNoteWithRegistry`, jednostka C,
+  fallback `plugin.openNote`) i nic więcej (uwaga 4 - **żadnych** skutków
   ubocznych `activateArtifactInChat`, którą stara wersja wołała: bez przypinania artefaktu jako
   aktywnego, bez odsłaniania prawego panelu, bez przełączania widoku czatu - "Otwórz" ma
   otworzyć notatkę, nic więcej). Sklep NIE zna ścieżki (JSON bez `id`, artefakt skasowany między
@@ -1036,6 +1038,55 @@ przeciwnej stronie). Nazwa agenta znika z nagłówka - kryształ zostaje jedynym
   dwa wywołania w serii dają 1 kryształ i 0 nazw - atrapa `obsidian` z harnessu wystarcza, żeby
   zaimportować `chat_streaming.ts` i wywołać tę funkcję na sfabrykowanym `this` (jak
   `handle_error`, patrz gotcha wyżej).
+
+### Zaznaczanie i menu cytatu (2.3.0, spec D "Czat bez ścian")
+
+Werdykt właściciela (dosłownie): "Nie mogę zaznaczyć tekstu i go np. skopiować, a jak już przy
+tym jesteśmy to możesz przy okazji zrobić 'dodaj jako kontekst': czyli dodaje się jako
+załącznik, a druga opcja to cytuj i kopiuje się to do chatu jako cytat."
+
+- **Diagnoza (zrobiona na żywo w Obsidianie właściciela, [measured]):** łańcuch przodków
+  `.cs-message__text` dziedziczył `user-select: none` od samego `body` (Obsidian ustawia to
+  domyślnie). Naprawa jest CSS, nie JS - `.cs-message__text`, `.cs-tile__body`, `.cs-ask-user`,
+  `.pkm-compression-text`, `.cs-trim-details` (`modules/chat/chat_view.css`) dostają
+  `user-select: text` / `-webkit-user-select: text`. Nagłówki (`.cs-tile__head`,
+  `.cs-message__meta`, kryształy/etykiety serii) zostają bez zmian - kryteria akceptacji
+  dotyczą wyłącznie TREŚCI, nie etykiet. Jedyny WŁASNY `user-select: none` w CSS czatu sprzed
+  tej zmiany siedzi na `.cs-action-row__head` (rodzina martwa od A2, patrz sekcja "Kafelki Tile
+  w streamie i w historii" wyżej) - nietknięty.
+- **Menu na zaznaczeniu** (`chat/selectionMenu.ts`, nowy plik): nasłuch `mouseup` i `keyup`
+  (Shift+strzałki) na `messages_container`; gdy `window.getSelection()` jest niepuste i
+  zakotwiczone wewnątrz `.cs-message__text` lub `.cs-tile__body` - pokazuje `div.cs-selection-menu`
+  (`position: absolute` w `messages_container`, nad ostatnim `range` przez
+  `getBoundingClientRect`) z trzema przyciskami: `chat.selection.copy` ("Kopiuj"),
+  `chat.selection.context` ("Dodaj jako kontekst"), `chat.selection.quote` ("Cytuj"). Menu
+  znika: klik poza (`document.mousedown`, capture), `Escape` (`document.keydown`), scroll
+  kontenera, albo po samej akcji (kopiuj/kontekst/cytuj sprzątają po sobie i czyszczą
+  `window.getSelection()`).
+  - **Kopiuj:** `navigator.clipboard.writeText(text)` + potwierdzenie `showCrystalNotice`
+    (`chat.selection.copied`, `type:'success'`, 2 s).
+  - **Dodaj jako kontekst:** `attachmentManager.addTextAttachment({ name: 'Cytat z czatu ' +
+    HH:MM + '.md', text })` - patrz `modules/ui-components/CLAUDE.md`.
+  - **Cytuj:** `quoteText(sel)` (pure - każda linia dostaje prefiks `> `, plus jedna pusta
+    linia na końcu) wstawiony przez `insertAtCursor(textarea, text)` (pure) w pozycji kursora
+    `input_area`, potem `handleInputResize()` + fokus na pole.
+  - Obie funkcje pure (`quoteText`/`insertAtCursor`) są testowane literalnie w
+    `chat/selectionMenu.test.ts`. `installSelectionMenu` (montaż nasłuchów, `window.getSelection`)
+    NIE ma testu DOM - atrapa harnessu (`test-support/dom-shim.ts`) nie implementuje
+    `window.getSelection`/`Selection` [measured, grep "getSelection" w repo harnessu - zero
+    trafień w `test-support/`], więc show/hide menu jest `skip: brak atrapy getSelection w
+    harnessie`.
+- **Montaż w `renderView`, odpięcie NIE jest dziś wpięte w `onClose`.** `chat_ui.ts`'s
+  `renderView` woła `this._selectionMenuDetach?.(); this._selectionMenuDetach =
+  installSelectionMenu(this);` - odpina POPRZEDNI egzemplarz przed montażem nowego (`renderView`
+  potrafi się powtórzyć w cyklu życia jednego widoku, patrz wołacze w `chat_view.ts`, a
+  `messages_container` powstaje na nowo za każdym razem - bez tego odpięcia nasłuchy na
+  `document` by się mnożyły przy każdym kolejnym renderze). Pole `_selectionMenuDetach`
+  (`(() => void) | null`) żyje w `ChatViewMixins` (`chat/chatViewShape.ts`). Odpięcie przy
+  ZAMKNIĘCIU widoku jest wpięte w `onClose` (`modules/chat/chat_view.ts`): bez tego każda
+  zamknięta instancja widoku zostawiałaby parę nasłuchów na `document` trzymającą cały widok
+  w pamięci (recenzja D). Po "Cytuj" zaznaczenie jest czyszczone PRZED fokusem pola - odwrotna
+  kolejność cofała kursor na pozycję 0 (recenzja D, zmierzone w Chromium).
 
 ---
 

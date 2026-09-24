@@ -23,7 +23,8 @@
  *    `chat.tile.machine.open_unavailable` (`Tile.ts`'s `TileAction.disabled`/`title`) - dawne
  *    zachowanie (przycisk całkiem nieobecny ALBO zawsze klikalny, mimo że klik kończył się
  *    Notice) było mylące: user nie miał jak odróżnić "nic tu nie ma" od "spróbuj kliknąć".
- *  - **uwaga 4** - klik robi TYLKO `plugin.openNote(path)`. Dawna wersja szła przez
+ *  - **uwaga 4** - klik idzie przez wspólny opener notatek (`openNoteWithRegistry`, jednostka C;
+ *    fallback `plugin.openNote(path)`, gdy rejestr pusty) i nic więcej. Dawna wersja szła przez
  *    `activateArtifactInChat`, która ma TRZY skutki uboczne poza otwarciem notatki
  *    (`openChatView`, rozwinięcie prawego panelu, przypięcie artefaktu jako aktywnego w
  *    pierwszym znalezionym widoku czatu - `leaves[0]`, może nie być tym klikniętym przy kilku

@@ -26,6 +26,7 @@ import {
     createPendingSubAgentBlock,
     createTile,
     createNoteLink,
+    isVaultNotePath,
 } from '../../ui-components/index.js';
 import { getDateLocale, t } from '../../../core/i18n/index.js';
 import streamingManager, { shouldUseFreshModel } from './StreamingManager.js';
@@ -1438,7 +1439,8 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                 // `openLinkText(writePath, '')` (biezaca karta - podmienialoby panel czatu).
                 const linkDiv = createDiv();
                 linkDiv.addClass('cs-vault-link');
-                createNoteLink(linkDiv, writePath, writePath);
+                if (isVaultNotePath(writePath)) createNoteLink(linkDiv, writePath, writePath);
+                else linkDiv.setText(writePath);
                 toolCallsContainer.appendChild(linkDiv);
             }
         }
