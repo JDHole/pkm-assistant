@@ -19,14 +19,9 @@
  * `chat_view.ts`), a `messages_container` jest tworzony na nowo za każdym razem, więc bez tego
  * nasłuchy na `document` (klik poza / Escape) zostawałyby wiszące, mnożąc się przy każdym
  * kolejnym renderze.
- * ⚠️ Odpięcie przy ZAMKNIĘCIU widoku (`onClose`) NIE jest dziś wpięte - `onClose` żyje w
- * `modules/chat/chat_view.ts`, poza write_paths jednostki D. Ten sam, już zaakceptowany wzorzec
- * jak `setNoteOpener(null)` (patrz `modules/ui-components/CLAUDE.md`, sekcja "Linki do notatek"):
- * ryzyko niskie, bo `renderView` odpina-i-montuje na nowo przy każdym otwarciu/przełączeniu, a
- * zamknięcie JEDYNEGO otwartego czatu zostawia dangling closure bez żadnego elementu DOM, który
- * mógłby wywołać jej nasłuchy na `document`. Dopisanie `this._selectionMenuDetach?.()` do
- * `onClose` (obok istniejącego `setNoteOpener(null)` TODO) jest gotowe do wpięcia przy
- * najbliższej edycji tego pliku.
+ * Odpięcie przy ZAMKNIĘCIU widoku jest wpięte w `onClose` (`modules/chat/chat_view.ts`):
+ * bez tego każda zamknięta instancja widoku zostawiałaby parę nasłuchów na `document`
+ * trzymającą cały widok w pamięci (recenzja D).
  */
 import { t } from '../../../core/i18n/index.js';
 import { log } from '../../../core/utils/Logger.js';

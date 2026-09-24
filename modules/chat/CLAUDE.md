@@ -683,6 +683,18 @@ patrz `modules/tools/CLAUDE.md`) z `sessionId` liczonym DOKŁADNIE jak `TodoTool
 (basename ścieżki sesji bez `.md`), best-effort (pad sprzątania nie blokuje odrzucenia sesji).
 Testy: `chat/handleNewSessionTodoCleanup.test.ts`, `tools/.../TodoTool.test.ts` (`retireTodoFile`).
 
+⚠️ **Wskaźnik zakolejkowanej wiadomości wisi POZA slotem input/todo (2.3.0, spec E "Czat bez
+ścian" - werdykt właściciela: "Nie widzę tego").** `_showQueuedIndicator`/`_hideQueuedIndicator`
+(`chat_streaming.ts`) montowały wskaźnik jako `input_area.parentElement.appendChild(...)`, czyli
+DO ŚRODKA `_inputRow` - gdy pasek jest w trybie `'todo'`, `_applyBottomBarMode` (wyżej) dokłada
+`_inputRow`-owi `is-hidden`, więc wskaźnik znikał razem z polem. Fix: `_showQueuedIndicator`
+wstawia wskaźnik do `_chipBar.parentElement` (`bottomPanel`, ten sam kontener co `_chipBar`
+sam - NIGDY nie dostaje `is-hidden` z `_applyBottomBarMode`), tuż PRZED `_chipBar`
+(`insertBefore`) - widoczny w OBU trybach slotu. `_hideQueuedIndicator` bez zmian semantyki
+(`.remove()` + zerowanie uchwytu). Test: `chat/todoPanel.test.ts` (real DOM przez fabrykowany
+`this`, z lokalną atrapą globalnego `createDiv`/`createSpan` - atrapa z preloadu harnessu NIE
+śledzi `parentElement`/kolejności `insertBefore`, patrz komentarz w teście).
+
 ### Cykl życia sesji w zakładce
 
 - **Zamknięcie zakładki czeka na zapis.** `_closeActiveTab` jest `async` i `await`-uje
@@ -1076,7 +1088,7 @@ załącznik, a druga opcja to cytuj i kopiuje się to do chatu jako cytat."
     `window.getSelection`/`Selection` [measured, grep "getSelection" w repo harnessu - zero
     trafień w `test-support/`], więc show/hide menu jest `skip: brak atrapy getSelection w
     harnessie`.
-- **Montaż w `renderView`, odpięcie NIE jest dziś wpięte w `onClose`.** `chat_ui.ts`'s
+- **Montaż w `renderView`, odpięcie w `onClose` (`chat_view.ts`).** `chat_ui.ts`'s
   `renderView` woła `this._selectionMenuDetach?.(); this._selectionMenuDetach =
   installSelectionMenu(this);` - odpina POPRZEDNI egzemplarz przed montażem nowego (`renderView`
   potrafi się powtórzyć w cyklu życia jednego widoku, patrz wołacze w `chat_view.ts`, a

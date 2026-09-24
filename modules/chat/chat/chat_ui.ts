@@ -1080,6 +1080,13 @@ export function showTypingIndicator(this: ChatViewLike, statusText?: string) {
     const crystalEl = this.typingIndicator.createDiv({ cls: 'cs-typing__crystal' });
     setSvg(crystalEl, SkinManager.getCrystal(activeAgent || 'default', { size: 20, color: agentColor, glow: true }));
 
+    // Trzy kropki pojawiające się po kolei (animacja CSS, zero timera JS - patrz
+    // @keyframes csTypingDots w chat_view.css). Kryształ nad nimi nadal pulsuje bez zmian.
+    const dotsEl = this.typingIndicator.createDiv({ cls: 'cs-typing__dots' });
+    dotsEl.createSpan({ cls: 'cs-typing__dot' });
+    dotsEl.createSpan({ cls: 'cs-typing__dot' });
+    dotsEl.createSpan({ cls: 'cs-typing__dot' });
+
     this.typingStatusEl = this.typingIndicator.createSpan({ cls: 'cs-typing__text', text: statusText });
 
     this.scrollToBottom();

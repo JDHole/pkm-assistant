@@ -1259,6 +1259,22 @@
   color: var(--text-faint);
   font-style: italic;
 }
+.cs-typing__dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.cs-typing__dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  animation: csTypingDots 1.4s ease-in-out infinite;
+  animation-fill-mode: backwards;
+}
+.cs-typing__dot:nth-child(1) { animation-delay: 0s; }
+.cs-typing__dot:nth-child(2) { animation-delay: 0.2s; }
+.cs-typing__dot:nth-child(3) { animation-delay: 0.4s; }
 
 /* ─── TOOL CALLS WRAPPER (inside agent block) ─── */
 .cs-tool-calls-wrapper {
@@ -1269,6 +1285,13 @@
 @keyframes cs-crystal-pulse {
   0%, 100% { opacity: 0.3; transform: scale(1); }
   50% { opacity: 0.7; transform: scale(1.15); }
+}
+
+/* Kropki wskaznika pisania: pojawiaja sie po kolei (delay 0/0,2s/0,4s na .cs-typing__dot),
+   potem gasna razem w spolnej fazie ciszy cyklu - zero timera JS, sama animacja CSS. */
+@keyframes csTypingDots {
+  0%, 60%, 100% { opacity: 0; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
 }
 
 /* Jak cs-crystal-pulse, ale zachowuje rotate/skew statycznego kryształu
