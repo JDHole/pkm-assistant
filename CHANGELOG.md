@@ -5,6 +5,38 @@ All notable user-facing changes to PKM Assistant are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 2.3.0 - 2026-09-24
+
+Chat without walls of text: one tile for every agent action, bubbles in the speaker's colour, an
+agent column with crystals, clickable notes everywhere, text selection with Copy / Add as
+context / Quote, and one popup per trigger.
+
+### Changed
+
+- **One tile for every action** (thinking, tool calls, sub-agent results, task list, past
+  questions, stream errors, background notifications, artifact cards): human title, status dot,
+  details on click, nothing technical in the header; failure is a red icon and a red dot.
+- **Bubbles.** Your message spans the full width in your colour from Settings; the agent's reply
+  is a bubble in the agent's colour with the crystal and without the name.
+- **Agent column with crystals.** The agent's crystal sits next to every tile and bubble, joined
+  by a connector line that is redrawn when tiles expand or collapse and while a reply streams.
+- **Clickable notes everywhere.** Note names in tiles, mentions, the note-saved line and the
+  artifact card open the note in a new main-area tab.
+- **Select, copy, quote.** Text in bubbles and tiles can be selected; a selection menu offers
+  Copy, Add as context and Quote.
+- **Triggers.** `/` opens commands, skills, sub-agents and the tools of external MCP servers;
+  `@` opens note suggestions only.
+- **Small things.** Typing-indicator dots appear in sequence; a queued message stays visible
+  with the task-list panel open; delegation to another agent is dormant.
+
+### Fixed
+
+- Enter inside the `/` popup picked an item and also sent the message.
+- The MCP section of the `/` popup listed the agent's built-in tools as if they were servers,
+  and picking a server inserted a marker for a tool that does not exist.
+- Typing `@` opened two popups at once.
+- Quote from the selection menu could leave the caret at the start of the input.
+
 ## 2.2.9 - 2026-09-23
 
 Semantic index in a compact binary format, optional memory consolidation, session-scoped write
