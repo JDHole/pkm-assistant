@@ -688,12 +688,13 @@ export function _drawConnectorLines(this: ChatViewLike): void {
     for (const group of groups) {
         // Elementy grupy w kolejnosci DOM: kazdy kafelek agenta (gdziekolwiek zagniezdzony - w
         // `.cs-tool-chip-wrap` albo `.cs-tool-calls-wrapper` przy streamingu, selektor lapie je
-        // niezaleznie od opakowania) i kazdy dymek tekstu, BEZPOSREDNI dzieckiem kontenera agenta.
-        // Element bez wysokosci (pusty `.cs-message__text`, ukryty przez `:empty{display:none}`)
-        // pomijamy - nie ma gdzie narysowac krysztalu.
+        // niezaleznie od opakowania), kazdy blok `.cs-ask-user` (ta sama zagniezdzona lokalizacja
+        // co kafelki - dostaje krysztal tak samo, patrz `chat_view.css`) i kazdy dymek tekstu,
+        // BEZPOSREDNI dzieckiem kontenera agenta. Element bez wysokosci (pusty `.cs-message__text`,
+        // ukryty przez `:empty{display:none}`) pomijamy - nie ma gdzie narysowac krysztalu.
         const elements: HTMLElement[] = [];
         for (const msg of group) {
-            const tiles = msg.querySelectorAll('.cs-tile--agent, .cs-tile--agent-muted') as NodeListOf<HTMLElement>;
+            const tiles = msg.querySelectorAll<HTMLElement>('.cs-tile--agent, .cs-tile--agent-muted, .cs-ask-user');
             for (const tile of tiles) {
                 if (tile.offsetHeight === 0) continue;
                 elements.push(tile);
@@ -736,11 +737,19 @@ export function _drawConnectorLines(this: ChatViewLike): void {
 
 /**
  * Y srodka krysztalu `::after` danego elementu, wzgledem viewportu (przed przeliczeniem na
- * wspolrzedne messages_container). Dwa offsety zgodne z CSS (`chat_view.css`):
- * kafelek = border 1 + top 9 + polowa 18 = 19; dymek tekstu = border-left 1 + top 7 + polowa 18 = 17.
+ * wspolrzedne messages_container). W PIONIE liczy sie zawsze border-TOP (border-left zmienia
+ * tylko `left`, patrz komentarz przy `left` w `_drawConnectorLines` wyzej) - kafelek, dymek
+ * tekstu i blok `.cs-ask-user` maja WSZYSTKIE border-top 1px (kafelek ma go dokola, dymek i
+ * ask_user go dostaja z bazowego `border: 1px`, `border-left: 3px` nadpisuje TYLKO lewa krawedz).
+ * Trzy offsety zgodne z CSS (`chat_view.css`):
+ * kafelek = border-top 1 + top 9 + polowa 18 = 19; dymek tekstu = border-top 1 + top 7 + polowa
+ * 18 = 17; blok ask_user = border-top 1 + top 12 + polowa 18 = 22 (top wiekszy niz dymka, bo
+ * ask_user ma wiekszy padding-top, 10px zamiast 5px).
  */
 function _crystalCenterY(el: HTMLElement): number {
     const rect = el.getBoundingClientRect();
-    const offset = el.classList.contains('cs-message__text') ? 17 : 19;
+    const offset = el.classList.contains('cs-message__text') ? 17
+        : el.classList.contains('cs-ask-user') ? 22
+        : 19;
     return rect.top + offset;
 }

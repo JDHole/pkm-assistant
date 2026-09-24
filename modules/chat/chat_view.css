@@ -1006,19 +1006,31 @@
   background: linear-gradient(90deg, rgba(var(--cs-agent-color-rgb, 150,130,100), 0.16), transparent 60%);
 }
 /* Tekst jeszcze nie splynal (streaming) albo tura sama z tool callami - pusty dymek sie nie
-   rysuje wcale (atrapa DOM harnessu potwierdza `:empty` = bez zadnego wezla potomnego). */
+   rysuje wcale. [measured na zywym Obsidianie 24.09]: `MarkdownRenderer.render(app, '', el)`
+   zostawia 0 wezlow potomnych, `:empty` pasuje, dymek dostaje `display:none`. Atrapa DOM
+   harnessu tego NIE potwierdza - nie ma silnika CSS, `matches()` jest tam celowym no-opem
+   zwracajacym `false` (patrz `dom-shim.ts`), wiec `:empty` w testach jednostkowych nie da sie
+   zweryfikowac; ten fakt jest zmierzony wylacznie na zywo. */
 .cs-message--agent > .cs-message__text:empty {
   display: none;
 }
 
-/* Krysztal PRZY KAZDYM elemencie agenta (kafelek narzedzia/myslenia/sub-agenta ORAZ dymek
-   tekstu) - jedna zmienna CSS (`--cs-agent-crystal`, data URL SVG) ustawiona inline na
-   kontenerze `.cs-message--agent` w trzech producentach (patrz `chat/agentCrystal.ts`).
-   Kafelki systemowe/userowe (`.cs-tile--system`, dymek usera) NIE dostaja krysztalu - poza
-   zakresem tego selektora. */
+/* Krysztal PRZY KAZDYM elemencie agenta (kafelek narzedzia/myslenia/sub-agenta, blok pytania
+   `.cs-ask-user` ORAZ dymek tekstu) - jedna zmienna CSS (`--cs-agent-crystal`, data URL SVG)
+   ustawiona inline na kontenerze `.cs-message--agent` w trzech producentach (patrz
+   `chat/agentCrystal.ts`). Kafelki systemowe/userowe (`.cs-tile--system`, dymek usera) NIE
+   dostaja krysztalu - poza zakresem tego selektora.
+   `.cs-ask-user::after` mial juz WLASNY, starszy wyglad (romb-dekoracja, patrz regula
+   `.cs-ask-user::after` wyzej w tym pliku) - selektor tutaj jest bardziej specyficzny (dwie
+   klasy: `.cs-message--agent .cs-ask-user`, kontra jedna: `.cs-ask-user`), wiec WYGRYWA i
+   nadpisuje kazda wlasciwosc, ktora tu ustawiamy (w tym `border`/`transform` zerowane ponizej,
+   zeby stary romb nie mieszal sie z obrazkiem krysztalu). `.cs-ask-user` renderuje sie ZAWSZE
+   zagniezdzony w `.cs-message--agent` (patrz `chat_popovers.ts`), wiec ta wygrana jest stala,
+   nie tylko czasami. */
 .cs-message--agent .cs-tile--agent::after,
 .cs-message--agent .cs-tile--agent-muted::after,
-.cs-message--agent > .cs-message__text::after {
+.cs-message--agent > .cs-message__text::after,
+.cs-message--agent .cs-ask-user::after {
   content: '';
   position: absolute;
   width: 18px;
@@ -1027,17 +1039,33 @@
   opacity: 0.8;
   pointer-events: none;
   z-index: 2;
+  border: none;
+  transform: none;
 }
-/* Kafelek ma `border: 1px` pelnym obwodem - notka siedzi 1px dalej w rynnie niz dymek. */
+/* Trzy pozycje, jedna PO ELEMENCIE (grubosc jego wlasnego `border-left` zmienia TYLKO `left` -
+   offset absolutny liczy sie od PADDING BOX rodzica, wiec grubszy border-left przesuwa padding
+   box i wymaga wiekszego ujemnego `left`, zeby wszystkie kryształy trafily w TEN SAM x: lewa
+   krawedz kontenera agenta minus rynna). Pionowe `top` (9 / 7 / 12) to NIEZALEZNE, osobno
+   dobrane wartosci wizualne (srodek krysztalu na wysokosci pierwszego wiersza kazdego bloku) -
+   NIE wynikaja z tej samej roznicy grubosci `border-left`, bo `border-left` nie ma zadnego
+   wplywu na pozycje pionowa (patrz tez `_crystalCenterY` w `chat_messages.ts`, ktora liczy
+   TYLKO `border-top`, ten sam 1px dla wszystkich trzech). */
+/* Kafelek ma `border: 1px` pelnym obwodem - notka siedzi 1px dalej w rynnie niz dymek/ask_user. */
 .cs-message--agent .cs-tile--agent::after,
 .cs-message--agent .cs-tile--agent-muted::after {
   left: calc(-1 * var(--cs-bubble-gutter) - 1px);
   top: 9px;
 }
-/* Dymek tekstu ma `border-left: 3px` - notka siedzi 3px dalej w rynnie. */
+/* Dymek tekstu i blok ask_user maja oba `border-left: 3px` (nadpisujacy bazowy `border: 1px`
+   TYLKO po lewej) - ta sama korekta `left` co kafelek plus 2px. `top` rozny miedzy nimi (7 / 12),
+   bo ask_user ma wiekszy padding-top (10px vs 5px dymka) - patrz `_crystalCenterY`. */
 .cs-message--agent > .cs-message__text::after {
   left: calc(-1 * var(--cs-bubble-gutter) - 3px);
   top: 7px;
+}
+.cs-message--agent .cs-ask-user::after {
+  left: calc(-1 * var(--cs-bubble-gutter) - 3px);
+  top: 12px;
 }
 
 /* Connector line (drawn by JS) */

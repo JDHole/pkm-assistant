@@ -17,6 +17,12 @@ import type { SummonPlugin } from '../../artifacts/index.js';
 import { buildTodoPanelModel, resolveBottomBarMode, DEFAULT_BOTTOM_BAR_MODE } from './todoPanel.js';
 import { renderSubTaskStrip } from './subTaskStrip.js';
 import { installSelectionMenu } from './selectionMenu.js';
+// Łącznik (scheduler + nasłuch rozwinięcia kafelka) - plik CELOWO poza `obsidian`/CSS-modułowym
+// importem tego pliku, żeby dało się go testować bezpośrednim importem (patrz nagłówek
+// `connectorActivity.ts`). Re-eksport utrzymuje je na `ChatView.prototype` (`Object.assign` w
+// `chat_view.ts` czyta WSZYSTKIE nazwane eksporty tego modułu, re-eksporty też).
+import { installMessagesContainerActivity } from './connectorActivity.js';
+export { _scheduleConnectorRedraw, _cancelConnectorRedraw, onMessagesContainerActivity, installMessagesContainerActivity } from './connectorActivity.js';
 import { _tabKey } from './chat_tabs.js';
 import { insertInlineTriggerMarker } from './InlineChipPlugin.js';
 import { TriggerPopup } from './TriggerPopup.js';
@@ -140,6 +146,14 @@ export async function renderView(this: ChatViewLike, container = this.container)
 
     // Messages area (cs-root activates Crystal Soul CSS variables)
     this.messages_container = chatMain.createDiv({ cls: 'pkm-chat-messages cs-root' });
+
+    // Nasłuch rozwinięcia/zwinięcia kafelka (`.cs-tile__head`) — przerysowuje łącznik po zmianie
+    // wysokości (patrz `onMessagesContainerActivity` niżej). Odepnij POPRZEDNI egzemplarz PRZED
+    // zamontowaniem nowego: `renderView` potrafi się powtórzyć, `messages_container` powstaje na
+    // nowo za każdym razem (ten sam wzorzec co `_selectionMenuDetach` niżej).
+    this._connectorActivityDetach?.();
+    this._connectorActivityDetach = installMessagesContainerActivity(this);
+
     void this.render_messages();
 
     // Menu na zaznaczeniu (spec D, "Czat bez ścian" 2.3.0) - Kopiuj / Dodaj jako kontekst /
@@ -1135,40 +1149,6 @@ export function scrollToBottom(this: ChatViewLike, smooth = true, opts: { drawCo
     if (opts.drawConnectors === false) return;
     // Redraw connector lines (position depends on layout) — skoalescowane do jednej klatki.
     this._scheduleConnectorRedraw();
-}
-
-/**
- * JEDNO przerysowanie łączników na klatkę, nie na wywołanie.
- *
- * `_drawConnectorLines` usuwa i wstawia węzły przeplatając to z odczytami geometrii (layout
- * thrashing), a jego koszt rośnie z liczbą wiadomości w oknie. Wołaczy jest kilku i potrafią
- * strzelać seriami (przewijanie, status narzędzia, malowanie strumienia) — dlatego zamiast
- * rysować od razu, planujemy jedno rysowanie na klatkę animacji.
- *
- * ⚠️ `requestAnimationFrame` NIE chodzi, gdy okno jest schowane — i dobrze: `getBoundingClientRect`
- * zwraca wtedy zera, więc rysowanie i tak dałoby śmieci. Zaległe rysowanie wykona się, gdy okno
- * wróci. Fallback na `setTimeout` dla środowisk bez rAF (harness/testy).
- */
-export function _scheduleConnectorRedraw(this: ChatViewLike) {
-    if (this._connectorRedrawCancel) return;
-    const run = () => {
-        this._connectorRedrawCancel = null;
-        this._drawConnectorLines();
-    };
-    if (typeof requestAnimationFrame === 'function') {
-        const handle = window.requestAnimationFrame(run);
-        this._connectorRedrawCancel = () => cancelAnimationFrame(handle);
-    } else {
-        const handle = window.setTimeout(run, 16);
-        this._connectorRedrawCancel = () => window.clearTimeout(handle);
-    }
-}
-
-/** Rozbraja zaplanowane przerysowanie łączników (zamknięcie widoku). */
-export function _cancelConnectorRedraw(this: ChatViewLike) {
-    if (!this._connectorRedrawCancel) return;
-    try { this._connectorRedrawCancel(); } catch { /* best-effort */ }
-    this._connectorRedrawCancel = null;
 }
 
 /**

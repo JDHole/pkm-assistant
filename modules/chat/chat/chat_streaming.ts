@@ -829,10 +829,24 @@ export function _paintStreamFrame(this: ChatViewLike, frame: StreamFrame) {
                 this._currentThinkingBlock,
                 this.current_message_bubble
             );
+            // Nowa kotwica łącznika (kafelek `.cs-tile--agent` dostaje kryształ, patrz
+            // `chat_view.css`) - zaplanuj przerysowanie ZAMIAST czekać do `_finalizeTurn`. Tylko
+            // przy WSTAWIENIU (raz na turę) - `updateThinkingBlock` w gałęzi else dopisuje samą
+            // treść, bez zmiany zbioru kotwic, więc NIE planuje kolejnego przerysowania (throttle
+            // malowania i tak woła tę funkcję dziesiątki razy na sekundę w trakcie streamu).
+            this._scheduleConnectorRedraw();
         } else {
             updateThinkingBlock(this._currentThinkingBlock, reasoningContent);
         }
     }
+
+    // Dymek tekstu traci `:empty` (CSS `display:none`) dopiero TERAZ, przy PIERWSZEJ niepustej
+    // treści - dopóki był pusty, `_drawConnectorLines` go pomijał jako kotwicę (zero wysokości).
+    // Zaplanuj przerysowanie WYŁĄCZNIE przy tym przejściu (pusty -> niepusty), nie przy każdej
+    // klatce: rosnący tekst W TEJ SAMEJ turze nie przesuwa środka kryształu (stały offset od
+    // GÓRY dymka, patrz `_crystalCenterY`), więc kolejne klatki NIE muszą przerysowywać - to
+    // właśnie dlatego `scrollToBottom` niżej dostaje `drawConnectors: false`.
+    const hadTextBefore = !!this._lastPaintedContent;
 
     // Update text (render as markdown)
     // `MarkdownRenderer.render` (nie `renderMarkdown`, deprecated). Wołane fire-and-forget bez
@@ -848,6 +862,9 @@ export function _paintStreamFrame(this: ChatViewLike, frame: StreamFrame) {
         this
     );
     this._lastPaintedContent = frame.text;
+    if (!hadTextBefore && frame.text) {
+        this._scheduleConnectorRedraw();
+    }
 
     // Scroll to bottom, BEZ przerysowania łączników - rosnący tekst ostatniej wiadomości nie
     // przesuwa ani kryształu, ani wierszy akcji, a przerysowanie ciągnęłoby skan całej listy
@@ -1133,6 +1150,10 @@ export function _chatOnToolCallsParsed(this: ChatViewLike, turn: ChatTurn, toolC
         return { toolCall, toolDisplay, isSubAgent };
     });
     turn.toolCallsContainer = toolCallsContainer;
+    // Nowe kotwice łącznika (kafelki/ask_user właśnie wstawione wyżej) - jeden raz na rundę
+    // narzędzi, nie w pętli per tool_call (planowanie się dławi samo, patrz
+    // `_scheduleConnectorRedraw`, ale wołanie go 1x tutaj zamiast N razy w pętli jest tańsze).
+    if (isActiveTab) this._scheduleConnectorRedraw();
     // brak return → pętla nie filtruje
 }
 

@@ -1,5 +1,5 @@
 import test, { ExecutionContext } from 'ava';
-import { render_messages } from './chat_messages.js';
+import { render_messages, append_message } from './chat_messages.js';
 import { _ensureAgentMessageContainer } from './chat_streaming.js';
 
 /**
@@ -69,11 +69,14 @@ function makeFakeEl(tag = 'div'): FakeEl {
 
 type TestDynamic = any;
 
-function buildFakeThis(container: FakeEl, messages: TestDynamic[]): TestDynamic {
+/** Agent domyślny fixture'ów niżej - `'#fff'` ląduje w SVG kryształu dosłownie, patrz `assertCrystalColor`. */
+const DEFAULT_AGENT = { name: 'Jaskier', color: '#fff' };
+
+function buildFakeThis(container: FakeEl, messages: TestDynamic[], agent: TestDynamic = DEFAULT_AGENT): TestDynamic {
     return {
         messages_container: container,
-        rollingWindow: { messages },
-        plugin: { agentManager: { getActiveAgent: () => ({ name: 'Jaskier', color: '#fff' }) } },
+        rollingWindow: { messages, addMessage: async () => {} },
+        plugin: { agentManager: { getActiveAgent: () => agent } },
         env: { settings: { pkmAssistant: {} } },
         app: {},
         _drawConnectorLines: () => {},
@@ -116,6 +119,20 @@ function assertHasCrystalVar(t: ExecutionContext, el: FakeEl, label: string): vo
     t.true(decoded.includes('<svg'), `${label}: zdekodowana wartosc powinna zawierac "<svg", dostalem "${decoded.slice(0, 60)}"`);
 }
 
+/**
+ * Dekoduje `--cs-agent-crystal` i sprawdza, CZYJ to krysztal - literalny `stroke="{hexColor}"`
+ * w SVG (`CrystalGenerator.generate` maluje kontur/linie kolorem agenta - `modules/crystal-soul/
+ * CrystalGenerator.ts`). `assertHasCrystalVar` wyzej sprawdza tylko KSZTALT wartosci (czy to w
+ * ogole jest url() ze svg w srodku) - mutacja, ktora podstawia STALY/ZLY kolor albo cudzego
+ * agenta (np. `agentCrystalCssVar('Inny', '#000000')`) przechodzi TEN test bez tej funkcji.
+ */
+function assertCrystalColor(t: ExecutionContext, el: FakeEl, hexColor: string, label: string): void {
+    const raw = el.style.getPropertyValue('--cs-agent-crystal');
+    const match = /^url\("(.+)"\)$/.exec(raw);
+    const decoded = decodeURIComponent((match?.[1] || '').replace(/^data:image\/svg\+xml,/, ''));
+    t.true(decoded.includes(`stroke="${hexColor}"`), `${label}: SVG krysztalu powinien niesc kolor agenta (stroke="${hexColor}"), dostalem "${decoded.slice(0, 160)}"`);
+}
+
 test('render_messages: user + 2 assistant w serii - zero naglowkow, OBA kontenery agenta maja wlasny --cs-agent-crystal', async t => {
     const container = makeFakeEl('div');
     const fakeThis = buildFakeThis(container, [
@@ -131,7 +148,10 @@ test('render_messages: user + 2 assistant w serii - zero naglowkow, OBA kontener
 
     const agentContainers = collectByClass(container, 'cs-message--agent');
     t.is(agentContainers.length, 2, 'kazda odpowiedz assistant dostaje WLASNY kontener - druga z rzedu juz nie znika w naglowku pierwszej');
-    agentContainers.forEach((el, i) => assertHasCrystalVar(t, el, `kontener agenta #${i + 1}`));
+    agentContainers.forEach((el, i) => {
+        assertHasCrystalVar(t, el, `kontener agenta #${i + 1}`);
+        assertCrystalColor(t, el, DEFAULT_AGENT.color, `kontener agenta #${i + 1}`);
+    });
 });
 
 test('render_messages: dwie serie assistant przedzielone userem - OBA kontenery maja --cs-agent-crystal, zero naglowkow', async t => {
@@ -150,7 +170,10 @@ test('render_messages: dwie serie assistant przedzielone userem - OBA kontenery 
 
     const agentContainers = collectByClass(container, 'cs-message--agent');
     t.is(agentContainers.length, 2, 'kazda z dwoch serii ma jeden kontener assistant');
-    agentContainers.forEach((el, i) => assertHasCrystalVar(t, el, `kontener agenta #${i + 1}`));
+    agentContainers.forEach((el, i) => {
+        assertHasCrystalVar(t, el, `kontener agenta #${i + 1}`);
+        assertCrystalColor(t, el, DEFAULT_AGENT.color, `kontener agenta #${i + 1}`);
+    });
 });
 
 test('streaming: _ensureAgentMessageContainer dwa razy w serii - OBA kontenery maja wlasny --cs-agent-crystal, zero naglowkow', t => {
@@ -169,4 +192,38 @@ test('streaming: _ensureAgentMessageContainer dwa razy w serii - OBA kontenery m
     t.not(first, second, 'kazde wywolanie tworzy NOWY kontener (tak jak dzis)');
     assertHasCrystalVar(t, first, 'pierwszy kontener streamu');
     assertHasCrystalVar(t, second, 'drugi kontener streamu (ten sam agent, ta sama seria)');
+    assertCrystalColor(t, first, agent.color, 'pierwszy kontener streamu');
+    assertCrystalColor(t, second, agent.color, 'drugi kontener streamu (ten sam agent, ta sama seria)');
+});
+
+test('streaming: _ensureAgentMessageContainer dla DWOCH ROZNYCH agentow - kazdy kontener niesie kolor SWOJEGO agenta, nie cudzy/staly', t => {
+    const container = makeFakeEl('div');
+    const fakeThis = buildFakeThis(container, []);
+    const agentA = { name: 'Jaskier', color: '#fff' };
+    const agentB = { name: 'Inny', color: '#123456' };
+
+    _ensureAgentMessageContainer.call(fakeThis, agentA as TestDynamic);
+    const forA = fakeThis.current_message_container as FakeEl;
+    fakeThis.current_message_container = null;
+    _ensureAgentMessageContainer.call(fakeThis, agentB as TestDynamic);
+    const forB = fakeThis.current_message_container as FakeEl;
+
+    // Asercja na TO, CZYJ to krysztal - gdyby producent trzymal/uzywal koloru z poprzedniego
+    // wywolania (bug: stara wartosc zamiast swiezej), ten test by to zlapal, a
+    // `assertHasCrystalVar` sam nie (sprawdza tylko ksztalt).
+    assertCrystalColor(t, forA, agentA.color, 'kontener agenta Jaskier');
+    assertCrystalColor(t, forB, agentB.color, 'kontener agenta Inny');
+});
+
+test('append_message: assistant tekst ustawia --cs-agent-crystal z KOLOREM agenta na nowym kontenerze (trzeci producent)', async t => {
+    const container = makeFakeEl('div');
+    const fakeThis = buildFakeThis(container, []);
+
+    await append_message.call(fakeThis, 'assistant', 'Nowa odpowiedz agenta.');
+
+    t.is(countByClass(container, 'cs-message__agent-head'), 0, 'append_message nie rysuje juz naglowka serii');
+    const agentContainers = collectByClass(container, 'cs-message--agent');
+    t.is(agentContainers.length, 1, 'append_message assistant tworzy jeden kontener agenta');
+    assertHasCrystalVar(t, agentContainers[0], 'kontener agenta append_message');
+    assertCrystalColor(t, agentContainers[0], DEFAULT_AGENT.color, 'kontener agenta append_message');
 });

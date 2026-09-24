@@ -54,6 +54,7 @@ modules/chat/
     ├── machineMessage.js           # klasyfikator wiadomości maszynowych (spec A3) - classifyMachineMessage + buildMachineView; pure, zero obsidian, testowalny
     ├── machineTile.js               # render współdzielony kafelka wiadomości maszynowej (renderMachineTile) - wołany przez chat_messages.js I chat_streaming.js; obsidian przechodnio przez barrel ui-components, testowalny w AVA z atrapą harnessu
     ├── agentCrystal.js              # `agentCrystalCssVar(agent, color)` - wartość CSS `--cs-agent-crystal` (data URL SVG kryształu), jeden producent dla append_message/render_messages I `_ensureAgentMessageContainer` (kolumna dymków, 2.3.0); trzeci plik jak machineTile.js, żeby nie zamknąć cyklu między dwoma mixinami
+    ├── connectorActivity.js         # `_scheduleConnectorRedraw`/`_cancelConnectorRedraw` (przeniesione z chat_ui.js) + `onMessagesContainerActivity`/`installMessagesContainerActivity` (nasłuch rozwinięcia kafelka → przerysowanie łącznika); czwarty plik mixina chat_ui.js, poza jego importem `chat_view.css` (moduł CSS, którego Node/AVA nie ładuje) - stąd testowalny bezpośrednim importem
     ├── subTaskStrip.js             # pasek biegów subów POD zakładkami czatu; obsidian-free DOM, model z modules/sub-agents
     ├── selectionMenu.js            # menu na zaznaczeniu tekstu (2.3.0, spec D) - Kopiuj / Dodaj jako kontekst / Cytuj; quoteText/insertAtCursor pure+testowalne, installSelectionMenu montuje nasłuchy na messages_container
     ├── SlashCommandsRegistry.js    # rejestr komend `/`
@@ -1050,7 +1051,10 @@ nie tylko raz na serię.
 - **Nagłówek serii ZNIKNĄŁ CAŁKOWICIE** (jeden mixin, ten sam wzorzec x3, usunięty z trzech
   producentów): `chat_messages.ts`'s `append_message` i `render_messages`, oraz
   `chat_streaming.ts`'s `_ensureAgentMessageContainer`. Zniknęło razem z nim całe pole stanu
-  `_agentHeaderShown` (`chatViewShape.ts` + wszystkie cztery miejsca, które je czytały/pisały) -
+  `_agentHeaderShown` (`chatViewShape.ts` + wszystkie pięć miejsc, które je czytały/pisały:
+  `append_message`, `render_messages`, `send_message`, `_ensureAgentMessageContainer`,
+  `_chatBeforeContinue` - poprawka nieścisłości, poprzednia wersja tej notatki liczyła cztery;
+  dowód: `git grep _agentHeaderShown 3d3b5fdd^`) -
   bez nagłówka to był martwy stan, nic już nie pyta "czy to pierwsza wiadomość serii". Reguły
   CSS `.cs-message__agent-head`/`.cs-message__agent-crystal`/`.cs-message__agent-crystal svg`/
   `.cs-message__agent-name` usunięte (zero producentów, sprawdzone grepem po `modules/`) -
@@ -1066,26 +1070,44 @@ nie tylko raz na serię.
   `chat_messages.ts` już importuje `buildBackgroundReceiptText` z `chat_streaming.ts`, więc
   odwrotny import zamknąłby cykl; `agentCrystal.ts` nie importuje żadnego z dwóch mixinów).
   CSS maluje kryształ pseudo-elementem `::after` na kafelkach (`.cs-tile--agent`,
-  `.cs-tile--agent-muted`) i na dymku tekstu (`.cs-message--agent > .cs-message__text`) -
+  `.cs-tile--agent-muted`), na bloku `.cs-ask-user` (naprawa recenzji niezależnej, patrz gotcha
+  "Kryształ przy `.cs-ask-user`" niżej) i na dymku tekstu (`.cs-message--agent > .cs-message__text`) -
   `background: var(--cs-agent-crystal) center / contain no-repeat`, `18×18px`, `opacity: 0.8`.
-  Pozycja pionowa różni się (kafelek ma pełny `border: 1px`, dymek ma `border-left: 3px`):
-  `top: 9px` dla kafelka, `top: 7px` dla dymka - obie mierzone tak, żeby środek kryształu (x)
-  wypadał w tej samej pozycji: lewa krawędź kontenera wiadomości + 25px przy rynnie 22px,
-  identycznie dla kafelka i dymka. Kafelki systemowe (`.cs-tile--system`) i dymek usera NIE
-  dostają kryształu - selektor ich nie łapie.
+  **Pozioma pozycja (`left`) kompensuje różnicę grubości obramowania**: `calc(-1 * rynna - 1px)`
+  dla kafelka (`border: 1px` dokoła) i `calc(-1 * rynna - 3px)` dla dymka/`.cs-ask-user`
+  (`border-left: 3px`, nadpisujący TYLKO lewą krawędź bazowego `border: 1px`) -
+  `position: absolute` liczy offset od PADDING BOX rodzica (nie od jego zewnętrznej krawędzi z
+  obramowaniem), więc grubszy `border-left` przesuwa padding box głębiej i wymaga większego
+  ujemnego `left`, żeby WSZYSTKIE trzy kryształy trafiły w TEN SAM x: lewa krawędź kontenera
+  agenta minus rynna (22px) [inferred z modelu pudełkowego CSS - offset absolutny liczy się od
+  padding edge, nie od border edge].
+  **Pionowa pozycja (`top: 9px` kafelek / `top: 7px` dymek / `top: 12px` `.cs-ask-user`) NIE
+  wynika z tej samej różnicy `border-left`** (poprawka nieścisłości - poprzednia wersja tej
+  notatki twierdziła, że różnica 9 vs 7 wynika z grubości obramowania; `border-left` zmienia
+  WYŁĄCZNIE `left`, nigdy pozycję pionową). W pionie liczy się `border-TOP`, ten sam 1px dla
+  wszystkich trzech elementów (kafelek ma go dokoła, dymek i `.cs-ask-user` dostają go z
+  bazowego `border: 1px`) - różnice `top` to osobno dobrane wartości wizualne (środek kryształu
+  na wysokości pierwszego wiersza KAŻDEGO bloku, różny padding-top: dymek 5px, `.cs-ask-user`
+  10px), nie wzór z grubości `border-left`. Kafelki systemowe (`.cs-tile--system`) i dymek usera
+  NIE dostają kryształu - selektor ich nie łapie.
 - **Łącznik (`_drawConnectorLines`, `chat_messages.ts`) kotwiczy dziś na PIERWSZYM i OSTATNIM
   elemencie serii, nie na nagłówku i ostatniej ikonie.** Grupowanie serii (ciąg
   `.cs-message--agent` bez przerwy w DOM) bez zmian. Elementy serii, W KOLEJNOŚCI DOM: każdy
-  `.cs-tile--agent`/`.cs-tile--agent-muted` (gdziekolwiek zagnieżdżony - `querySelectorAll`
-  łapie je niezależnie od opakowania, `.cs-tool-chip-wrap`/`.cs-tool-calls-wrapper` przy
-  streamingu) oraz każdy `.cs-message__text` BEZPOŚREDNI dzieckiem kontenera agenta; element
-  z `offsetHeight === 0` (pusty dymek, ukryty przez `:empty`) pomijany. Jeden element w serii
-  (albo zero) = brak linii. Linia idzie od środka kryształu PIERWSZEGO do środka kryształu
-  OSTATNIEGO elementu: x liczony RAZ z pierwszego kontenera agenta (`getBoundingClientRect().left`
-  minus realny `marginLeft` z `getComputedStyle`, fallback 22, plus 9 - połowa 18px kryształu);
-  y środka kryształu per element = `getBoundingClientRect().top` + 19 dla kafelka (border 1 +
-  top 9 + połowa 18) albo + 17 dla dymka tekstu (ten sam wzór, `top: 7px` w CSS). Kolor linii
-  dziedziczony z grupy bez zmian.
+  `.cs-tile--agent`/`.cs-tile--agent-muted`/`.cs-ask-user` (gdziekolwiek zagnieżdżony -
+  `querySelectorAll` łapie je niezależnie od opakowania, `.cs-tool-chip-wrap`/
+  `.cs-tool-calls-wrapper` przy streamingu) oraz każdy `.cs-message__text` BEZPOŚREDNI dzieckiem
+  kontenera agenta; element z `offsetHeight === 0` (pusty dymek, ukryty przez `:empty`) pomijany.
+  Jeden element w serii (albo zero) = brak linii. Linia idzie od środka kryształu PIERWSZEGO do
+  środka kryształu OSTATNIEGO elementu: x liczony RAZ z pierwszego kontenera agenta
+  (`getBoundingClientRect().left` minus realny `marginLeft` z `getComputedStyle`, fallback 22,
+  plus 9 - połowa 18px kryształu) - ten sam x wychodzi RÓWNY "lewa krawędź kontenera WIADOMOŚCI
+  (`messages_container`) + 25px" (padding kontenera wiadomości, 16px, plus połowa kryształu, 9px
+  - rynna KASUJE SIĘ algebraicznie w tej formule, bo wchodzi raz przy pozycji kontenera agenta
+  względem `messages_container` i raz jako odjęta wartość w samej formule JS, więc `25px` NIE
+  jest pochodną wartości rynny, mimo że rynna bierze udział w wyprowadzeniu); y środka kryształu
+  per element = `getBoundingClientRect().top` + 19 dla kafelka (border-top 1 + top 9 + połowa 18)
+  albo + 17 dla dymka tekstu (border-top 1 + top 7 + połowa 18, `top: 7px` w CSS) albo + 22 dla
+  `.cs-ask-user` (border-top 1 + top 12 + połowa 18). Kolor linii dziedziczony z grupy bez zmian.
 - Test behawioralny: `chat/render_messages.bubbles.test.ts` - PRZEPISANY na nowy kontrakt (atrapa
   DOM harnessu, `dom-shim.ts`, ma `style.setProperty`/`getPropertyValue` jako CELOWY no-op dla
   custom properties - `createStyleProxy` - więc test buduje WŁASNĄ, minimalną atrapę elementu z
@@ -1098,6 +1120,92 @@ nie tylko raz na serię.
   zmienił cel z `cs-message__agent-crystal` (usunięty string) na `--cs-agent-crystal` (ciało
   `handle_chunk` nie ma prawa ustawiać tej zmiennej samo - jedyny producent to
   `_ensureAgentMessageContainer`).
+  ⚠️ **Naprawa recenzji niezależnej (3d3b5fdd, punkt 2): powyższe (2)/(3) sprawdzały tylko KSZTAŁT
+  wartości, nie CZYJ to kryształ** - mutacja podstawiająca cudzego/stałego agenta
+  (`agentCrystalCssVar('Inny', '#000000')`) przechodziła bez zgrzytu. `assertCrystalColor`
+  (nowy helper w tym samym pliku) dekoduje SVG i sprawdza literalny `stroke="{hex agenta}"`
+  (`CrystalGenerator.generate` maluje nim kontur/linie) - dopisana do WSZYSTKICH istniejących
+  asercji kryształu plus dwa nowe przypadki: `_ensureAgentMessageContainer` wywołane dla DWÓCH
+  różnych agentów pod rząd (każdy kontener niesie kolor SWOJEGO, nie poprzedniego) i `append_message`
+  (TRZECI producent `--cs-agent-crystal`, dotąd bez własnego testu w tym pliku).
+
+### Gotcha: łącznik przerysowuje się po zmianie wysokości, nie tylko przy scrollu/finalizacji (naprawa recenzji niezależnej 3d3b5fdd)
+
+Recenzja punktu "Dymki 2.3.0" wyżej znalazła: `_scheduleConnectorRedraw` był wołany tylko przy
+scrollu (`scrollToBottom`) i finalizacji tury (`_finalizeTurn`) - rozwinięcie/zwinięcie kafelka
+(`.cs-tile__head`) zmienia wysokość SYNCHRONICZNIE w tym samym zdarzeniu, a łącznik zostawał ze
+starą geometrią (kończył się w połowie kafelka albo wystawał w dół); w streamingu linia nie
+dociągała do dymka, który właśnie przestał być `:empty`, ani po wstawieniu bloku myślenia/kafelka
+narzędzia, aż do końca tury.
+
+- **`chat/connectorActivity.ts` (NOWY, czwarty plik mixina `chat_ui.ts` - ten sam wzorzec co
+  `agentCrystal.ts`/`machineTile.ts`) trzyma `_scheduleConnectorRedraw`/`_cancelConnectorRedraw`
+  (przeniesione z `chat_ui.ts` bez zmiany zachowania) + dwie nowe funkcje.** Powód przeniesienia:
+  `chat_ui.ts` importuje `chat_view.css` jako moduł (`with { type: 'css' }`) - Node/AVA nie
+  potrafi tego załadować (`ERR_UNKNOWN_FILE_EXTENSION`), więc NIC importowanego wprost z
+  `chat_ui.ts` nie dawało się dotąd przetestować bezpośrednim importem (żaden test tego nie
+  robił). `chat_ui.ts` re-eksportuje całą czwórkę (`export { ... } from './connectorActivity.js'`)
+  - `Object.assign(ChatView.prototype, uiMethods)` w `chat_view.ts` czyta wszystkie nazwane
+  eksporty modułu, re-eksporty też, więc runtime się nie zmienił, zyskała testowalność.
+- **`onMessagesContainerActivity(view, ev)`** - decyzja JEDNEGO delegowanego nasłuchu (`click` +
+  `keydown`) na `messages_container`: zdarzenie z celem wewnątrz `.cs-tile__head` (klik albo
+  Enter/Spacja) planuje przerysowanie. Nasłuch kafelka (`Tile.ts`'s `expand()`) odpala się
+  PIERWSZY (bubbling), więc samo zaplanowanie PO fakcie wystarcza - `expand()` już zmienił
+  layout zanim ten handler dostanie zdarzenie.
+- **`installMessagesContainerActivity(view)`** montuje oba nasłuchy na `view.messages_container`
+  i zwraca funkcję odpinającą - wołane w `chat_ui.ts`'s `renderView`, TUŻ PO stworzeniu
+  `messages_container`, ten sam wzorzec sprzątania co `installSelectionMenu`/
+  `_selectionMenuDetach` (odepnij POPRZEDNI egzemplarz przed zamontowaniem nowego - `renderView`
+  potrafi się powtórzyć, `messages_container` powstaje na nowo za każdym razem; pole
+  `_connectorActivityDetach` w `ChatViewMixins`, odpięcie też w `onClose`).
+- **Streaming (`chat_streaming.ts`'s `_paintStreamFrame`): dwa NOWE, wąskie wyzwalacze**, oba
+  strzelają RAZ na turę (nie w gorącej pętli throttlowanych klatek, throttle i tak woła tę
+  funkcję dziesiątki razy na sekundę):
+  1. **Wstawienie NOWEGO bloku myślenia** (gałąź `if (!this._currentThinkingBlock)`) - nowa
+     kotwica łącznika, planuje przerysowanie od razu. `updateThinkingBlock` (gałąź istniejącego
+     bloku, dopisywanie treści) NIE planuje ponownie - zbiór kotwic się nie zmienia.
+  2. **Pierwsza niepusta treść dymka** (`!hadTextBefore && frame.text`, `hadTextBefore` liczone Z
+     `_lastPaintedContent` SPRZED nadpisania) - dymek traci `:empty` (`display:none`) dopiero
+     TERAZ, więc dopiero teraz staje się kotwicą. Rosnący tekst w KOLEJNYCH klatkach tej samej
+     tury NIE planuje ponownie - stały offset od GÓRY dymka (`_crystalCenterY`) się nie
+     przesuwa, dlatego `scrollToBottom` niżej i tak dostaje `drawConnectors: false`.
+- **`_chatOnToolCallsParsed` (Faza 1, placeholdery kafelków narzędzi)** planuje przerysowanie
+  RAZ na rundę (nie w pętli per `tool_call`), TYLKO na aktywnej zakładce (`isActiveTab`) - tura w
+  tle nie rusza łącznika widoku, którego user i tak nie widzi.
+- Test: `chat/connectorRedraw.activity.test.ts` (NOWY plik). `onMessagesContainerActivity` -
+  atrapa DOM harnessu (`dom-shim.ts`) ma `addEventListener`/`dispatchEvent`/`closest`/`matches`
+  jako CELOWE no-opy [measured, grep w repo harnessu], więc testy wołają funkcję-handler wprost
+  (`ev.target` = fake obiekt z WŁASNYM, działającym `closest()`), ale przez PRAWDZIWY
+  `_scheduleConnectorRedraw` (nie mock) z globalnym `requestAnimationFrame` podmienionym na
+  synchroniczny na czas testu - dowodzi całego łańcucha klik → planowanie → `_drawConnectorLines`
+  (stubowany licznikiem - jego WŁASNA geometria jest poza zakresem, weryfikuje ją wyłącznie pomiar
+  na żywo w Obsidianie). Testy `_paintStreamFrame`/`_chatOnToolCallsParsed` wołają PRAWDZIWE
+  funkcje produkcyjne z `chat_streaming.js` i stubują `_scheduleConnectorRedraw` licznikiem - cel
+  to WYŁĄCZNIE moment/liczba wywołań, nie treść samego przerysowania.
+
+### Gotcha: kryształ przy `.cs-ask-user` (naprawa recenzji niezależnej 3d3b5fdd)
+
+`.cs-ask-user` (blok pytania `ask_user`, `chat_popovers.ts`) siedział w `.cs-tool-calls-wrapper`
+kontenera agenta jako JEDYNY element kolumny bez kryształu i bez bycia kotwicą łącznika - werdykt
+właściciela ("każda rzecz od agenta" ma kryształ) go pomijał. Naprawa jest czysto CSS + jedna
+linijka w `_drawConnectorLines`, ZERO zmian w `chat_popovers.ts` (zmienna `--cs-agent-crystal`
+już jest ustawiona na kontenerze `.cs-message--agent` - custom properties dziedziczą się w dół
+DOM-u automatycznie).
+
+- `.cs-ask-user::after` MIAŁ już własny, starszy wygląd (romb-dekoracja: `border`, `transform:
+  rotate(45deg)`, `background` stałym kolorem) - selektor kryształu (`.cs-message--agent
+  .cs-ask-user::after`, DWIE klasy) jest bardziej specyficzny niż stary (`.cs-ask-user::after`,
+  JEDNA klasa) i WYGRYWA zawsze, bo `.cs-ask-user` renderuje się TYLKO zagnieżdżony w
+  `.cs-message--agent`. Nowa reguła zeruje `border`/`transform` obok ustawienia `background:
+  var(--cs-agent-crystal)...`, żeby stary romb nie mieszał się wizualnie z obrazkiem kryształu.
+- Pozycja: `.cs-ask-user` ma TEN SAM wzorzec obramowania co dymek tekstu (`border: 1px` bazowo,
+  `border-left: 3px` nadpisujące tylko lewą krawędź) - ta sama korekta `left` co dymek
+  (`calc(-1 * rynna - 3px)`). `top: 12px` (zamiast dymka `7px`) to hand-tuned wartość pod
+  większy padding-top bloku (10px vs 5px dymka) - `_crystalCenterY` liczy dla niego offset 22
+  (border-top 1 + top 12 + połowa 18).
+- `_drawConnectorLines`'s selektor kotwic rozszerzony o `.cs-ask-user` (obok
+  `.cs-tile--agent`/`.cs-tile--agent-muted`) - blok pytania jest dziś pełnoprawną kotwicą
+  łącznika, tak jak kafelek.
 
 ### Gotcha: arkusz czatu wchodzi przez `adoptedStyleSheets`, bije `<style>` w `<head>`
 
