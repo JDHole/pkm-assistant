@@ -139,11 +139,14 @@ export function installSelectionMenu(view: ChatViewLike): () => void {
     }
 
     function handleQuote(text: string): void {
+        // Kolejnosc jest istotna [measured w Obsidianie 24.09, log stosu na setterach kursora]:
+        // removeAllRanges() na polu, ktore MA fokus, cofa kursor na 0 (zaznaczenie z klawiatury
+        // przy aktywnym polu). Dlatego sprzatanie zaznaczenia idzie PRZED wstawieniem cytatu,
+        // a fokus na koncu - kursor zostaje za wstawionym cytatem niezaleznie od tego, czy pole
+        // mialo fokus (przy zaznaczeniu myszka w dymku pole go nie ma i tak).
+        afterAction();
         insertAtCursor(view.input_area, quoteText(text));
         view.handleInputResize?.();
-        // Recenzja D: removeAllRanges() PO focus() cofalo kursor na pozycje 0 (zmierzone w Chromium);
-        // sprzatanie zaznaczenia idzie przed fokusem, kursor zostaje za wstawionym cytatem.
-        afterAction();
         view.input_area?.focus();
     }
 

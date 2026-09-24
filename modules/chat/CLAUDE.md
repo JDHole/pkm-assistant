@@ -120,6 +120,13 @@ Pole wpisywania miało kiedyś dwa popupy otwierające się razem po `@` (`Trigg
   zamyka TriggerPopup, gdy filtr zawiera `@`, zamiast filtrować pustką - bez tej bramki oba popupy
   stały otwarte naraz (naprawa 2.3.0, niżej opisana razem z resztą).
 
+- **Składnia markerów wstawianych przez `onSelect`**: `@@skill:nazwa`, `@@tool:nazwa`,
+  `@sub-agent:nazwa` (`InlineChipPlugin.ts`'s `makeInlineTriggerMarker`) - `@` w tych markerach
+  jest częścią SKŁADNI markera wstawianego do tekstu, nie triggerem otwierającym popup; parser
+  markerów (`parseInlineTriggers`) i cała reszta pętli tury czytają je bez zmian. Jedna zmiana
+  TREŚCI od 2.3.0: dla sekcji MCP `nazwa` w `@@tool:nazwa` to pełna nazwa narzędzia
+  (`<serverId>__<tool>`), nie nazwa serwera (szczegóły w "Naprawy 2.3.0" niżej).
+
 ### Naprawy 2.3.0 (recenzja niezależna commitu 1bb2a846)
 
 - **Enter w otwartym popupie `/` nie wysyła już wiadomości.** `input_area` ma DWA nasłuchy
@@ -142,10 +149,6 @@ Pole wpisywania miało kiedyś dwa popupy otwierające się razem po `@` (`Trigg
   nazwę narzędzia jako marker, nigdy samą nazwę serwera). Filtr popupu (`_applyFilter`, szuka w
   `name`+`label`) łapie wpisywanie i nazwy serwera (prefiks w `name`), i nazwy narzędzia bez
   dodatkowej zmiany.
-- **Markery wstawiane przez `onSelect` bez zmian**: `@@skill:nazwa`, `@@tool:nazwa`,
-  `@sub-agent:nazwa` (`InlineChipPlugin.ts`'s `makeInlineTriggerMarker`) - `@` w tych markerach
-  jest częścią SKŁADNI markera wstawianego do tekstu, nie triggerem otwierającym popup; parser
-  markerów (`parseInlineTriggers`) i cała reszta pętli tury czytają je bez zmian.
 
 ---
 

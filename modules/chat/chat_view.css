@@ -230,8 +230,8 @@
    od poczatku - kryształ sam byl wtedy jeszcze niewidoczny z INNEGO powodu (BLOKER
    `overflow: hidden`, patrz komentarz przy `overflow: visible` nizej w tym pliku), naprawionego
    dopiero commitem konczacym te runde recenzji. Stara regula usunieta TUTAJ zamiast zerowana
-   drugi raz - regula krysztalu nizej juz tez nie zeruje wlasnego `border`/`transform` (patrz
-   komentarz przy niej), bo bez starej reguly nie ma czego kasowac. */
+   drugi raz - regula krysztalu nizej juz tez nie zeruje wlasnego `border`/`transform`, bo bez
+   starej reguly nie ma czego kasowac. */
 
 .cs-ask-user__head {
   display: flex;

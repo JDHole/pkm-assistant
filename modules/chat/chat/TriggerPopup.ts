@@ -1,6 +1,6 @@
 /**
  * TriggerPopup - popup uruchamiany z keypress `/` w textarea czatu.
- * Pokazuje 4 sekcje (Slash-komendy / Skille / Sub-Agenty / MCP servery) filtrowane po
+ * Pokazuje 4 sekcje (Slash-komendy / Skille / Sub-Agenty / Narzędzia MCP) filtrowane po
  * tym co user dopisze po triggerze. Wybór wstawia marker
  * (`@@skill:foo`, `@sub-agent:foo`, `@@tool:foo`) do textarea.
  * `@` NIE otwiera tego popupu - obsługuje go wyłącznie `MentionAutocomplete`
@@ -401,7 +401,7 @@ export class TriggerPopup {
         if (section === 'slash') return 'Slash commands';
         if (section === 'skills') return 'Skille';
         if (section === 'sub-agents') return 'Sub-agenty';
-        if (section === 'mcp') return 'MCP servery';
+        if (section === 'mcp') return 'Narzędzia MCP';
         return section;
     }
 

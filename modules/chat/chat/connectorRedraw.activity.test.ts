@@ -31,10 +31,10 @@ import { _paintStreamFrame, _chatOnToolCallsParsed, _chatBeforeContinue, _chatOn
  * WSZYSTKIE testy w tym pliku sa `test.serial` (naprawa recenzji niezaleznej, dogrywka): kazdy
  * z nich woła `useQueuedRaf`, ktora podmienia GLOBALNE `requestAnimationFrame`/
  * `cancelAnimationFrame` na wspolna atrape na czas swojego ciala - AVA domyslnie uruchamia testy
- * JEDNEGO pliku wspolbieznie, wiec dwa testy z tej samej daty rownolegle podmienialyby ten sam
- * globalny stan i nadpisywalyby sobie kolejke/oryginaly nawzajem. Dzis bezpieczne wylacznie
- * dlatego, ze ciala testow sa synchroniczne (podmiana i przywrocenie mieszcza sie w jednym
- * mikrozadaniu bez `await` pomiedzy) - `test.serial` usuwa zaleznosc od tego przypadku.
+ * JEDNEGO pliku wspolbieznie, wiec dwa testy z tego samego pliku rownolegle podmienialyby ten sam
+ * globalny stan i nadpisywalyby sobie kolejke/oryginaly nawzajem. Testy synchroniczne mieszcza
+ * podmiane i przywrocenie w jednym mikrozadaniu, ale testy czterech wyzwalaczy streamingu sa
+ * `async` z `await` w srodku - bez `test.serial` inny test wszedlby miedzy podmiane a przywrocenie.
  */
 
 type TestDynamic = any;
