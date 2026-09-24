@@ -1,72 +1,49 @@
-# PKM Assistant 2.2.9
+# PKM Assistant 2.3.0
 
-**Smaller index, quieter memory, fewer questions** - PKM Assistant 2.2.9
+**Chat without walls of text** - PKM Assistant 2.3.0
 
-**In plain words.** Four things you will notice. First, the semantic index of your vault is no
-longer rewritten as one huge text file every time you edit a note. It is now kept as a small
-description plus compact binary pieces, and an edit adds only a tiny piece. On a vault with
-5,200 indexed notes the files on disk shrink from about 122 MB to about 22 MB, and the save after
-an edit drops from over a second of work that froze the interface to a few milliseconds. The
-switch happens by itself the first time the plugin starts: the old file is removed only after
-the new files have been written and read back, and a notice tells you when it is done. Second,
-automatic memory consolidation is off by default - the plugin no longer proposes to merge an
-agent's sessions or brain notes on every save unless you turn it on, and when you decline a
-proposal it stops asking until the next threshold. Third, when an agent asks to write to a
-file, you can tick "don't ask again for this file in this session" - the approval is remembered
-for that chat only. Fourth, a brand-new agent under an English interface gets an English brain
-file, with English section headings and English artifact statuses; existing Polish files keep
-working unchanged.
+**In plain words.** The chat has a new face, built around one rule: no walls of text. Everything
+the agent does on the way to an answer - thinking, reading a note, searching, handing a task to
+a sub-agent, keeping a task list, asking you a question, running into an error - is now a small
+tile with a human title and a status dot, and the details open only when you click. Nothing
+technical sits in a tile header: no call ids, no raw tool names, no JSON. Three colours tell
+you who is speaking: system things are red, the agent's things are in the agent's colour, and
+your own messages are in your colour from Settings. The agent's replies sit in a column with
+the agent's crystal next to every tile and every bubble, joined by a thin line, so a long turn
+reads like a timeline instead of a pile. Any note the agent mentions is a link that opens in a
+new tab. You can finally select and copy text from any message, and a small menu on the
+selection offers Copy, Add as context and Quote. Typing `/` opens commands, skills, sub-agents
+and the tools of your MCP servers; typing `@` opens note suggestions only - one popup at a time,
+and Enter in the popup picks an item instead of sending the message. The typing indicator's
+dots light up one after another, a queued message stays visible while the task list is open,
+and the "hand over to another agent" button is retired for now.
 
 What changed, in detail:
 
-- **Semantic index v2.** `vault-index.meta.json` (version 2) is the only source of truth: model
-  key, vector size, per-note timestamps and a row pointer per note. Vectors live in immutable
-  binary segments `vault-index.NNNNNN.vec` (Float32, little-endian, 16-byte header). A save after
-  edits writes one new segment with only the changed notes; when segments pile up (more than 8,
-  or half the rows are stale) they are compacted into one. Writes are serialised, so an edit
-  that lands while a save is in progress is never lost. The in-memory search engine and the
-  search results are unchanged.
-- **Migration with a safety net.** On first start the old `vault-index.json` is read, converted,
-  written as v2, read back and verified; only then is the old file deleted. If any step fails
-  the old file stays untouched, you get a notice with the reason, and the index is rebuilt from
-  your notes as before.
-- **Detected rebuilds instead of silent breakage.** If the embedding model starts returning
-  vectors of a different size, or you switch models, the plugin says so and rebuilds the index.
-  Previously a size change made the indexer retry forever. A wrong API key or model name now
-  ends the scan with a visible error instead of retrying the whole vault every few minutes.
-- **Embedding timeout in Settings.** The request timeout for embedding calls is a field in
-  Settings → Models → Embedding, in seconds; before it could only be changed by editing the
-  settings file.
-- **Optional consolidation.** Two switches in Settings (sessions and summaries, brain notes),
-  threshold controls with their effective values shown, and a declined proposal resets the
-  counter instead of coming back on the next save.
-- **Remember write approval for this session.** Checkbox in the approval and diff dialogs, kept
-  in memory per file and per chat, cleared on a new chat or when the session is archived.
-  Concurrent writes to the same file from one model turn are serialised and no longer overwrite
-  each other.
-- **Brain file and artifact statuses in the interface language.** New brain files are born in
-  the interface language and stay in it; parsers know both Polish and English headings; artifact
-  types created under English have English statuses, and the buttons work on old Polish files too.
-- **Removed the dead `preferred_tools` agent field.** It never had an editor in the agent
-  profile and had no effect since the tool cluster rewrite; the same is true of the
-  `default_permissions.mcp` permission switch. Existing agent files with either field keep
-  loading unchanged.
-- **Smaller, safer bundle.** Checking a result an external MCP server sends back no longer builds
-  a piece of JavaScript from text at runtime; it uses a small library (MIT license) instead. The
-  bundled plugin is about 120 KB smaller as a result.
-- Factory texts and prompts use plain hyphens instead of dashes.
-
-Every change ships with tests that fail without it. The index migration was additionally
-replayed on a copy of a real 122 MB index: 5,200 vectors converted in under a second, zero
-embedding calls, identical top results before and after.
-
-Known limits: the index directory stays inside the vault (plugins may not write elsewhere), so a
-sync client will still upload the small segment files after each save. Closing Obsidian within
-30 seconds of an edit may leave that edit un-persisted; the next start re-embeds only that
-note. Reindex on a vault that has zero indexable notes produces an empty index, as before.
-
-Upgrading from 2.2.8: no settings change needed. The index migrates itself on first start and
-shows a notice; on a large vault expect that one start to take about a second longer.
-Downgrading to 2.2.8 or older after the migration means a full re-index, because the old build
-does not read the new format. The downgrade warning from 2.2.6 still stands for active chat
-sessions.
+- **One tile for every action.** Thinking, tool calls, sub-agent results, the task list, a
+  question from a past session, a stream error, a background sub-agent notification and an
+  artifact card all use the same tile: icon, human title, short summary, status dot, details on
+  click. Failure is one standard: a red icon on the left and a red dot on the right. Reads,
+  searches and the task list use a dimmed variant of the agent's colour.
+- **Bubbles.** Your message spans the full width in your colour from Settings (falls back to the
+  theme accent), with a gutter on the right that mirrors the agent's crystal gutter on the left.
+  The agent's reply is a bubble in the agent's colour; the agent's name is gone from the header,
+  the crystal stays. The context-trim block keeps its previous look.
+- **Agent column with crystals.** The agent's crystal is drawn next to every tile and every text
+  bubble (also next to a live question to you), and the connector line runs from the first
+  crystal to the last one in a series. The line is redrawn when a tile is expanded or collapsed,
+  when the first text of a reply arrives, when a thinking block folds after a tool round, and
+  when a tile is replaced by its result.
+- **Clickable notes everywhere.** Note names in read, search and list tiles, in the note-saved
+  line, in mentions and on the artifact card open the note in a new tab of the main area. Hidden
+  plugin paths are shown as plain text, not links.
+- **Select, copy, quote.** Text in bubbles and tiles can be selected. On a selection a menu
+  offers Copy, Add as context (a text attachment in the chip bar, kept in memory only) and Quote
+  (inserted into the input as a quote, with the caret placed after it).
+- **Triggers.** `/` opens the trigger popup: slash commands, skills, sub-agents and the tools of
+  external MCP servers, each tool with its full name so the marker points at a real tool. `@`
+  opens note and folder suggestions only. `/` followed by `@` hands the field over to the note
+  suggestions. Enter inside the popup picks the item; it no longer also sends the message.
+- **Small things.** Typing-indicator dots appear in sequence; a queued message is shown above the
+  chip bar even when the task-list panel takes the input slot; the delegation-to-another-agent
+  tool and its button are dormant (the code stays for a later release).
