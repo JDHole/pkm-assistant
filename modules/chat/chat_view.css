@@ -219,15 +219,13 @@
   height: 1px;
   background: linear-gradient(90deg, rgba(var(--cs-agent-color-rgb, 150,130,100), 0.12), transparent 60%);
 }
-.cs-ask-user::after {
-  content: '';
-  position: absolute;
-  left: -2px; top: 12px;
-  width: 5px; height: 5px;
-  transform: rotate(45deg);
-  border: 1px solid rgba(var(--cs-agent-color-rgb, 150,130,100), 0.3);
-  background: rgba(var(--cs-agent-color-rgb, 150,130,100), 0.08);
-}
+/* Stara romb-dekoracja `.cs-ask-user::after` (border+transform:rotate(45deg)) usunieta -
+   naprawa recenzji niezaleznej (BLOKER): selektor krysztalu nizej w tym pliku
+   (`.cs-message--agent .cs-ask-user::after`, DWIE klasy) jest bardziej specyficzny niz byl
+   ten tutaj (JEDNA klasa) i WYGRYWAL go zawsze (ask_user renderuje sie ZAWSZE zagniezdzony w
+   `.cs-message--agent`) - kazda wlasciwosc starej reguly miala odpowiednik w nowej o wyzszej
+   specyficznosci, wiec romb nigdy nie byl faktycznie widoczny. Martwy kod, nie dekoracja do
+   zachowania - usuniety zamiast zerowany drugi raz. */
 
 .cs-ask-user__head {
   display: flex;
@@ -1020,12 +1018,13 @@
    ustawiona inline na kontenerze `.cs-message--agent` w trzech producentach (patrz
    `chat/agentCrystal.ts`). Kafelki systemowe/userowe (`.cs-tile--system`, dymek usera) NIE
    dostaja krysztalu - poza zakresem tego selektora.
-   `.cs-ask-user::after` mial juz WLASNY, starszy wyglad (romb-dekoracja, patrz regula
-   `.cs-ask-user::after` wyzej w tym pliku) - selektor tutaj jest bardziej specyficzny (dwie
-   klasy: `.cs-message--agent .cs-ask-user`, kontra jedna: `.cs-ask-user`), wiec WYGRYWA i
-   nadpisuje kazda wlasciwosc, ktora tu ustawiamy (w tym `border`/`transform` zerowane ponizej,
-   zeby stary romb nie mieszal sie z obrazkiem krysztalu). `.cs-ask-user` renderuje sie ZAWSZE
-   zagniezdzony w `.cs-message--agent` (patrz `chat_popovers.ts`), wiec ta wygrana jest stala,
+   `.cs-ask-user::after` mial kiedys WLASNY, starszy wyglad (romb-dekoracja) - usuniety
+   (patrz komentarz przy starej regule wyzej w tym pliku), bo selektor tutaj jest bardziej
+   specyficzny (dwie klasy: `.cs-message--agent .cs-ask-user`, kontra jedna: `.cs-ask-user`)
+   i WYGRYWAL go zawsze - `.cs-ask-user` renderuje sie ZAWSZE zagniezdzony w `.cs-message--agent`
+   (o zagniezdzeniu decyduje `chat_streaming.ts`'s `_chatOnToolCallsParsed`, ktory dokleja blok
+   zwrocony przez `_renderAskUserBlock` do `toolCallsContainer` wewnatrz kontenera agenta - NIE
+   `chat_popovers.ts`, ktory buduje tylko ODPIETY div, bez rodzica), wiec ta wygrana byla stala,
    nie tylko czasami. */
 .cs-message--agent .cs-tile--agent::after,
 .cs-message--agent .cs-tile--agent-muted::after,
@@ -1066,6 +1065,20 @@
 .cs-message--agent .cs-ask-user::after {
   left: calc(-1 * var(--cs-bubble-gutter) - 3px);
   top: 12px;
+}
+/* Krysztal siedzi w ujemnym `left` POZA wlasnym pudelkiem `.cs-ask-user` - baza `.cs-ask-user`
+   ma `overflow: hidden` (regula na gorze tego pliku, powod nieudokumentowany w historii repo
+   [inferred z geometrii: jedyny inny bezposredni potomek na `position:absolute` byl stary
+   romb `::after` przy `left:-2px`, usuniety wyzej - `overflow:hidden` chowal jego 2px
+   wystajacy skrawek pod krawedzia; `::before`, gradient na gorze, miesci sie w calosci w
+   pudelku, wiec nie potrzebowal clippingu]) - bez nadpisania krysztal byl CALKOWICIE przyciety
+   (BLOKER, naprawa recenzji niezaleznej). Nadpisanie scisle w kontekscie kolumny agenta -
+   `.cs-ask-user` renderuje sie ZAWSZE zagniezdzony w `.cs-message--agent` (patrz komentarz
+   wyzej), wiec ta wygrana jest stala, nie tylko czasami; zadne dziecko `.cs-ask-user`
+   (`__head`/`__options`/`__opt`/`__input` itd.) nie polega na obcinaniu przez rodzica - kazde
+   ma wlasny, wewnetrzny uklad bez przekroczenia bazowego `border-radius: 2px`. */
+.cs-message--agent .cs-ask-user {
+  overflow: visible;
 }
 
 /* Connector line (drawn by JS) */

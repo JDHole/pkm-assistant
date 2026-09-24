@@ -1170,60 +1170,134 @@ narzędzia, aż do końca tury.
   `chat_ui.ts` importuje `chat_view.css` jako moduł (`with { type: 'css' }`) - Node/AVA nie
   potrafi tego załadować (`ERR_UNKNOWN_FILE_EXTENSION`), więc NIC importowanego wprost z
   `chat_ui.ts` nie dawało się dotąd przetestować bezpośrednim importem (żaden test tego nie
-  robił). `chat_ui.ts` re-eksportuje całą czwórkę (`export { ... } from './connectorActivity.js'`)
-  - `Object.assign(ChatView.prototype, uiMethods)` w `chat_view.ts` czyta wszystkie nazwane
-  eksporty modułu, re-eksporty też, więc runtime się nie zmienił, zyskała testowalność.
+  robił). ⚠️ **Poprawka (naprawa recenzji niezależnej commitu `caa7affa`): `chat_ui.ts`
+  re-eksportuje WYŁĄCZNIE `_scheduleConnectorRedraw`/`_cancelConnectorRedraw`** (te dwie UŻYWAJĄ
+  `this`, mają sens jako metody na `ChatView.prototype`) - `onMessagesContainerActivity`/
+  `installMessagesContainerActivity` biorą `view` jako jawny argument, nie `this`, więc re-eksport
+  całej czwórki (poprzednia wersja tej notatki) lądował dwiema martwymi "metodami" na
+  `ChatView.prototype` i w typie `ChatViewLike` (`UiMethods` w `chatViewShape.ts` = `typeof
+  uiMethods`, czyli WSZYSTKIE nazwane eksporty `chat_ui.ts`, re-eksporty też) - nikt nie wołał
+  `this.installMessagesContainerActivity(...)`. Instalacja w `renderView` woła
+  `installMessagesContainerActivity(this)` przez ZWYKŁY import z `connectorActivity.js`, nie przez
+  `this.`.
 - **`onMessagesContainerActivity(view, ev)`** - decyzja JEDNEGO delegowanego nasłuchu (`click` +
-  `keydown`) na `messages_container`: zdarzenie z celem wewnątrz `.cs-tile__head` (klik albo
-  Enter/Spacja) planuje przerysowanie. Nasłuch kafelka (`Tile.ts`'s `expand()`) odpala się
-  PIERWSZY (bubbling), więc samo zaplanowanie PO fakcie wystarcza - `expand()` już zmienił
-  layout zanim ten handler dostanie zdarzenie.
-- **`installMessagesContainerActivity(view)`** montuje oba nasłuchy na `view.messages_container`
+  `keydown` + `animationend`, trzeci typ dopisany w tej samej naprawie, patrz niżej) na
+  `messages_container`: zdarzenie z celem wewnątrz `.cs-tile__head` (klik albo Enter/Spacja)
+  planuje przerysowanie. Nasłuch kafelka (`Tile.ts`'s `expand()`) odpala się PIERWSZY (bubbling),
+  więc samo zaplanowanie PO fakcie wystarcza - `expand()` już zmienił layout zanim ten handler
+  dostanie zdarzenie.
+- **`installMessagesContainerActivity(view)`** montuje trzy nasłuchy na `view.messages_container`
   i zwraca funkcję odpinającą - wołane w `chat_ui.ts`'s `renderView`, TUŻ PO stworzeniu
   `messages_container`, ten sam wzorzec sprzątania co `installSelectionMenu`/
   `_selectionMenuDetach` (odepnij POPRZEDNI egzemplarz przed zamontowaniem nowego - `renderView`
   potrafi się powtórzyć, `messages_container` powstaje na nowo za każdym razem; pole
   `_connectorActivityDetach` w `ChatViewMixins`, odpięcie też w `onClose`).
 - **Streaming (`chat_streaming.ts`'s `_paintStreamFrame`): dwa NOWE, wąskie wyzwalacze**, oba
-  strzelają RAZ na turę (nie w gorącej pętli throttlowanych klatek, throttle i tak woła tę
-  funkcję dziesiątki razy na sekundę):
+  strzelają RAZ na RUNDĘ narzędzi (poprawka nieścisłości - poprzednia wersja tej notatki mówiła
+  "raz na turę"; `_chatBeforeContinue` zeruje `_currentThinkingBlock`/`_lastPaintedContent` przed
+  KAŻDĄ kolejną rundą tej samej tury, więc druga/trzecia runda z własnym blokiem myślenia albo
+  własną pierwszą treścią trafia tu ponownie jako "wstawienie"), nie w gorącej pętli
+  throttlowanych klatek (throttle i tak woła tę funkcję dziesiątki razy na sekundę):
   1. **Wstawienie NOWEGO bloku myślenia** (gałąź `if (!this._currentThinkingBlock)`) - nowa
      kotwica łącznika, planuje przerysowanie od razu. `updateThinkingBlock` (gałąź istniejącego
-     bloku, dopisywanie treści) NIE planuje ponownie - zbiór kotwic się nie zmienia.
+     bloku, dopisywanie treści W RAMACH jednej rundy) NIE planuje ponownie - zbiór kotwic się nie
+     zmienia.
   2. **Pierwsza niepusta treść dymka** (`!hadTextBefore && frame.text`, `hadTextBefore` liczone Z
      `_lastPaintedContent` SPRZED nadpisania) - dymek traci `:empty` (`display:none`) dopiero
      TERAZ, więc dopiero teraz staje się kotwicą. Rosnący tekst w KOLEJNYCH klatkach tej samej
-     tury NIE planuje ponownie - stały offset od GÓRY dymka (`_crystalCenterY`) się nie
+     rundy NIE planuje ponownie - stały offset od GÓRY dymka (`_crystalCenterY`) się nie
      przesuwa, dlatego `scrollToBottom` niżej i tak dostaje `drawConnectors: false`.
 - **`_chatOnToolCallsParsed` (Faza 1, placeholdery kafelków narzędzi)** planuje przerysowanie
   RAZ na rundę (nie w pętli per `tool_call`), TYLKO na aktywnej zakładce (`isActiveTab`) - tura w
   tle nie rusza łącznika widoku, którego user i tak nie widzi.
-- Test: `chat/connectorRedraw.activity.test.ts` (NOWY plik). `onMessagesContainerActivity` -
-  atrapa DOM harnessu (`dom-shim.ts`) ma `addEventListener`/`dispatchEvent`/`closest`/`matches`
-  jako CELOWE no-opy [measured, grep w repo harnessu], więc testy wołają funkcję-handler wprost
-  (`ev.target` = fake obiekt z WŁASNYM, działającym `closest()`), ale przez PRAWDZIWY
-  `_scheduleConnectorRedraw` (nie mock) z globalnym `requestAnimationFrame` podmienionym na
-  synchroniczny na czas testu - dowodzi całego łańcucha klik → planowanie → `_drawConnectorLines`
-  (stubowany licznikiem - jego WŁASNA geometria jest poza zakresem, weryfikuje ją wyłącznie pomiar
-  na żywo w Obsidianie). Testy `_paintStreamFrame`/`_chatOnToolCallsParsed` wołają PRAWDZIWE
-  funkcje produkcyjne z `chat_streaming.js` i stubują `_scheduleConnectorRedraw` licznikiem - cel
-  to WYŁĄCZNIE moment/liczba wywołań, nie treść samego przerysowania.
+- ⚠️ **Cztery brakujące wyzwalacze (BLOKER + ważne, naprawa recenzji niezależnej commitu
+  `caa7affa`) - zwinięcie bloku myślenia i podmiana kafelka zmieniają wysokość TEŻ poza
+  streamingiem.** `finalizeThinkingBlock` (`ThinkingBlock.ts`) woła `expand(false)` - ciało kafelka
+  myślenia znika SYNCHRONICZNIE, kafelki niżej podskakują. Poprzednia runda planowała przerysowanie
+  tylko w `_finalizeTurn` (koniec naturalny) - trzy INNE ścieżki, które też finalizują blok
+  myślenia, zostawały bez przerysowania: `_chatBeforeContinue` (reset kontenera przed kontynuacją
+  pętli, w środku rundy), `handle_error` (błąd streamu), `stop_generation` (ręczny Stop - ta
+  funkcja NIE liczy `isActiveTab` wcale, więc wywołanie jest tu bezwarunkowe, jak reszta kodu w
+  tej gałęzi). Czwarty brak: `_chatOnToolResults` - `toolDisplay.replaceWith(...)` (kafelek błędu
+  startuje ROZWINIĘTY, `Tile.ts`, `status:'error'`; bloki sub-agenta mają inną wysokość niż
+  placeholder "w toku"; obrazek wygenerowany dokłada własny blok) ZMIENIA wysokość PO KAŻDYM
+  wyniku w rundzie - przerysowanie na końcu funkcji (`if (isActiveTab) this._scheduleConnectorRedraw()`),
+  raz na całą rundę, nie w pętli per wynik.
+- ⚠️ **Animacja wejścia (niskie, naprawa recenzji niezależnej commitu `caa7affa`).**
+  `.cs-message--agent`/`.cs-ask-user` wjeżdżają animacją `cs-message-enter` (`translateY(6px) ->
+  0`, `chat_view.css`) - nowy wyzwalacz (klik kafelka, pierwsza treść dymka…) strzela w PIERWSZEJ
+  klatce animacji, gdy `getBoundingClientRect` liczy jeszcze transform w trakcie, nie pozycję
+  końcową, więc kotwica wychodziła do 6px za nisko aż do NASTĘPNEGO przerysowania.
+  `onMessagesContainerActivity` dostał trzeci typ zdarzenia, `animationend` (bąbelkuje z
+  elementu animowanego do `messages_container` z definicji CSS Animations) - cel wewnątrz
+  `.cs-message--agent` albo `.cs-ask-user` planuje przerysowanie.
+- Test: `chat/connectorRedraw.activity.test.ts`. `onMessagesContainerActivity` - atrapa DOM
+  harnessu (`dom-shim.ts`) ma `addEventListener`/`dispatchEvent`/`closest`/`matches` jako CELOWE
+  no-opy [measured, grep w repo harnessu], więc testy wołają funkcję-handler wprost (`ev.target` =
+  fake obiekt z WŁASNYM, działającym `closest()`), przez PRAWDZIWY `_scheduleConnectorRedraw` (nie
+  mock). ⚠️ **Poprawka (BLOKER-adjacent, naprawa recenzji niezależnej commitu `caa7affa`): mock
+  `requestAnimationFrame` musi mieć KOLEJKĘ i ręczny `flush()`, nie wołać callback synchronicznie
+  wewnątrz `requestAnimationFrame(cb)`.** Stary, synchroniczny mock (`useSyncRaf`) wołał `run()`
+  W ŚRODKU wywołania `window.requestAnimationFrame(run)` - `_scheduleConnectorRedraw` przypisuje
+  `this._connectorRedrawCancel` PO tym wywołaniu, więc z synchronicznym mockiem ta linia
+  NADPISYWAŁA z powrotem na niepustą wartość to, co `run()` przed chwilą wyzerował -
+  `_connectorRedrawCancel` zostawał trwale niepusty po PIERWSZYM udanym zaplanowaniu, więc każde
+  KOLEJNE planowanie w tym samym teście było dławione niezależnie od tego, czy kod pod testem
+  faktycznie działał (test rozpoznawania klawisza Spacja przechodził, nawet gdyby produkcyjny kod
+  Spacji w ogóle nie rozpoznawał - zweryfikowane [measured] tymczasowym sabotażem selektora klawisza
+  w trakcie tej naprawy). Atrapa z kolejką odzwierciedla PRAWDZIWY async rAF: `requestAnimationFrame`
+  tylko rejestruje callback, `flush()` odpala zakolejkowane na żądanie testu - kolejność w
+  `connectorActivity.ts` (przypisanie `_connectorRedrawCancel` PO wywołaniu rAF) NIE jest wyścigiem
+  w runtime, bo prawdziwy rAF jest zawsze asynchroniczny (wyścig istniał WYŁĄCZNIE w starym mocku
+  testowym). Grupa 2 (`_paintStreamFrame`/`_chatOnToolCallsParsed`) TĄ SAMĄ techniką - PRAWDZIWY
+  `_scheduleConnectorRedraw` + `_drawConnectorLines` jako licznik (poprzednia wersja stubowała
+  `_scheduleConnectorRedraw` samo wywołanie, co dowodziło tylko, że produkcyjny kod ZAWOŁAŁ
+  schedulera, nie że cokolwiek się przerysowało - regresja w samym schedulerze przeszłaby bez
+  zgrzytu). Testy negatywne dostały krok pozytywny w TEJ SAMEJ fixturze (klik poza nagłówkiem →
+  potem na nagłówku; pusta klatka → potem z tekstem; zakładka w tle → potem aktywna) - sam pusty
+  test negatywny przechodzi też wtedy, gdy funkcja pod testem nic nie robi (kontrola z `CLAUDE.md`
+  głównego repo, "Testy: zachowanie, nie implementacja"). Osobny test koalescencji: dwa planowania
+  PRZED jednym `flush()` → jedno przerysowanie.
+  Geometria linii (pozycje x/y) weryfikuje wyłącznie pomiar na żywo w Obsidianie - atrapa DOM nie
+  ma silnika layoutu (`getBoundingClientRect` zwraca zera).
 
-### Gotcha: kryształ przy `.cs-ask-user` (naprawa recenzji niezależnej 3d3b5fdd)
+### Gotcha: kryształ przy `.cs-ask-user` (naprawa recenzji niezależnej 3d3b5fdd, dokończona po recenzji `caa7affa`)
 
-`.cs-ask-user` (blok pytania `ask_user`, `chat_popovers.ts`) siedział w `.cs-tool-calls-wrapper`
-kontenera agenta jako JEDYNY element kolumny bez kryształu i bez bycia kotwicą łącznika - werdykt
-właściciela ("każda rzecz od agenta" ma kryształ) go pomijał. Naprawa jest czysto CSS + jedna
-linijka w `_drawConnectorLines`, ZERO zmian w `chat_popovers.ts` (zmienna `--cs-agent-crystal`
-już jest ustawiona na kontenerze `.cs-message--agent` - custom properties dziedziczą się w dół
-DOM-u automatycznie).
+`.cs-ask-user` (blok pytania `ask_user`) siedział w `.cs-tool-calls-wrapper` kontenera agenta jako
+JEDYNY element kolumny bez kryształu i bez bycia kotwicą łącznika - werdykt właściciela ("każda
+rzecz od agenta" ma kryształ) go pomijał. O ZAGNIEŻDŻENIU `.cs-ask-user` W `.cs-message--agent`
+(kluczowe dla całej reszty tej notatki) decyduje `chat_streaming.ts`'s `_chatOnToolCallsParsed`
+(dokleja blok zwrócony przez `_renderAskUserBlock` do `toolCallsContainer` wewnątrz kontenera
+agenta) - **poprawka nieścisłości**: poprzednia wersja tej notatki i komentarz w
+`chat_popovers.ts` przypisywały tę decyzję jemu; `chat_popovers.ts`'s `_renderAskUserBlock`
+buduje WYŁĄCZNIE ODPIĘTY div, bez rodzica - o miejscu w drzewie nie wie nic. Naprawa jest czysto
+CSS (plus jedna linijka w `_drawConnectorLines`, patrz niżej), ZERO zmian w `chat_popovers.ts`
+(zmienna `--cs-agent-crystal` już jest ustawiona na kontenerze `.cs-message--agent` - custom
+properties dziedziczą się w dół DOM-u automatycznie).
 
-- `.cs-ask-user::after` MIAŁ już własny, starszy wygląd (romb-dekoracja: `border`, `transform:
-  rotate(45deg)`, `background` stałym kolorem) - selektor kryształu (`.cs-message--agent
-  .cs-ask-user::after`, DWIE klasy) jest bardziej specyficzny niż stary (`.cs-ask-user::after`,
-  JEDNA klasa) i WYGRYWA zawsze, bo `.cs-ask-user` renderuje się TYLKO zagnieżdżony w
-  `.cs-message--agent`. Nowa reguła zeruje `border`/`transform` obok ustawienia `background:
-  var(--cs-agent-crystal)...`, żeby stary romb nie mieszał się wizualnie z obrazkiem kryształu.
+- `.cs-ask-user::after` MIAŁ kiedyś własny, starszy wygląd (romb-dekoracja: `border`, `transform:
+  rotate(45deg)`, `background` stałym kolorem) - USUNIĘTY (poprawka nieścisłości: poprzednia
+  wersja tej notatki mówiła "nowa reguła zeruje border/transform", czyli że stara reguła
+  ZOSTAJE; naprawa recenzji `caa7affa` ją usunęła zamiast zerować drugi raz - selektor kryształu
+  (`.cs-message--agent .cs-ask-user::after`, DWIE klasy) jest bardziej specyficzny niż był stary
+  (`.cs-ask-user::after`, JEDNA klasa) i WYGRYWAŁ go zawsze, bo `.cs-ask-user` renderuje się
+  ZAWSZE zagnieżdżony w `.cs-message--agent` - romb nigdy nie był faktycznie widoczny, więc to
+  był martwy kod, nie dekoracja do zachowania).
+- ⚠️ **BLOKER (naprawa recenzji niezależnej commitu `caa7affa`): kryształ był CAŁKOWICIE
+  przycięty.** `.cs-ask-user` ma bazowo `overflow: hidden` (powód nieudokumentowany w historii
+  repo śledzonej tym repozytorium - poprzedza commit startowy `287301c`; [inferred z geometrii]:
+  jedyny inny bezpośredni potomek na `position: absolute` był stary romb `::after` przy
+  `left: -2px`, usunięty wyżej - `overflow: hidden` chował jego 2px wystający skrawek pod
+  krawędzią; `::before`, gradient na górze, mieści się w całości w pudełku, więc nie potrzebował
+  clippingu), a krysztal (`::after`, pozycja niżej) siedzi w UJEMNYM `left` POZA własnym
+  pudełkiem `.cs-ask-user` - bez nadpisania `overflow` był więc przycięty do zera, niewidoczny.
+  Naprawa: `.cs-message--agent .cs-ask-user { overflow: visible; }` (`chat_view.css`) - nadpisanie
+  ścisłe w kontekście kolumny agenta (ta sama wygrana specyficzności jak wyżej), nie zmiana bazowej
+  reguły `.cs-ask-user` samej (`.cs-ask-user` poza kontekstem `.cs-message--agent` teoretycznie
+  nadal miałby `overflow: hidden` - dziś nieosiągalne w praktyce, bo blok renderuje się ZAWSZE
+  zagnieżdżony). Żadne dziecko `.cs-ask-user` (`__head`/`__options`/`__opt`/`__input` itd.) nie
+  polega na obcinaniu przez rodzica - każde ma własny, wewnętrzny układ bez przekroczenia
+  bazowego `border-radius: 2px`.
 - Pozycja: `.cs-ask-user` ma TEN SAM wzorzec obramowania co dymek tekstu (`border: 1px` bazowo,
   `border-left: 3px` nadpisujące tylko lewą krawędź) - ta sama korekta `left` co dymek
   (`calc(-1 * rynna - 3px)`). `top: 12px` (zamiast dymka `7px`) to hand-tuned wartość pod

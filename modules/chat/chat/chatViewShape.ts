@@ -373,9 +373,12 @@ export interface ChatViewMixins extends
     /** Odpięcie menu na zaznaczeniu (`chat/selectionMenu.ts`) - `installSelectionMenu` zwraca
      *  funkcję odpinającą, `renderView` ją tu chowa i woła PRZED każdym kolejnym montażem. */
     _selectionMenuDetach: (() => void) | null;
-    /** Odpięcie delegowanego nasłuchu rozwinięcia/zwinięcia kafelka (`connectorActivity.ts`'s
-     *  `installMessagesContainerActivity`, re-eksportowane przez `chat_ui.ts`) - ten sam wzorzec
-     *  co `_selectionMenuDetach` wyżej:
+    /** Odpięcie delegowanego nasłuchu rozwinięcia/zwinięcia kafelka, animacji wejścia i klawiszy
+     *  aktywujących (`connectorActivity.ts`'s `installMessagesContainerActivity`, wołane przez
+     *  `chat_ui.ts`'s `renderView` przez ZWYKŁY import - `installMessagesContainerActivity`/
+     *  `onMessagesContainerActivity` NIE są re-eksportowane z `chat_ui.ts` na `ChatView.prototype`,
+     *  bo nie używają `this`; re-eksportowane stąd są wyłącznie `_scheduleConnectorRedraw`/
+     *  `_cancelConnectorRedraw`) - ten sam wzorzec co `_selectionMenuDetach` wyżej:
      *  `renderView` odpina POPRZEDNI egzemplarz przed zamontowaniem nowego (`messages_container`
      *  powstaje na nowo za każdym renderem), `onClose` sprząta ostatni. */
     _connectorActivityDetach: (() => void) | null;

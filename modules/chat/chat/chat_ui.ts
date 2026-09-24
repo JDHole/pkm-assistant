@@ -19,10 +19,16 @@ import { renderSubTaskStrip } from './subTaskStrip.js';
 import { installSelectionMenu } from './selectionMenu.js';
 // Łącznik (scheduler + nasłuch rozwinięcia kafelka) - plik CELOWO poza `obsidian`/CSS-modułowym
 // importem tego pliku, żeby dało się go testować bezpośrednim importem (patrz nagłówek
-// `connectorActivity.ts`). Re-eksport utrzymuje je na `ChatView.prototype` (`Object.assign` w
-// `chat_view.ts` czyta WSZYSTKIE nazwane eksporty tego modułu, re-eksporty też).
+// `connectorActivity.ts`). Re-eksport WYŁĄCZNIE `_scheduleConnectorRedraw`/`_cancelConnectorRedraw`
+// (te dwie UŻYWAJĄ `this` - mają sens jako metody na `ChatView.prototype`, `Object.assign` w
+// `chat_view.ts` czyta WSZYSTKIE nazwane eksporty tego modułu, re-eksporty też, `UiMethods` w
+// `chatViewShape.ts` = `typeof uiMethods` więc każdy re-eksport tutaj wchodzi też do TYPU
+// `ChatViewLike`). `onMessagesContainerActivity`/`installMessagesContainerActivity` NIE używają
+// `this` (biorą `view` jako pierwszy, jawny argument) - lądowałyby na prototypie i w typie jako
+// martwe, niewołane przez nikogo `this.metoda(...)` (naprawa recenzji niezależnej); instalacja
+// woła je przez ZWYKŁY import niżej, w `renderView`.
 import { installMessagesContainerActivity } from './connectorActivity.js';
-export { _scheduleConnectorRedraw, _cancelConnectorRedraw, onMessagesContainerActivity, installMessagesContainerActivity } from './connectorActivity.js';
+export { _scheduleConnectorRedraw, _cancelConnectorRedraw } from './connectorActivity.js';
 import { _tabKey } from './chat_tabs.js';
 import { insertInlineTriggerMarker } from './InlineChipPlugin.js';
 import { TriggerPopup } from './TriggerPopup.js';
@@ -147,10 +153,12 @@ export async function renderView(this: ChatViewLike, container = this.container)
     // Messages area (cs-root activates Crystal Soul CSS variables)
     this.messages_container = chatMain.createDiv({ cls: 'pkm-chat-messages cs-root' });
 
-    // Nasłuch rozwinięcia/zwinięcia kafelka (`.cs-tile__head`) — przerysowuje łącznik po zmianie
-    // wysokości (patrz `onMessagesContainerActivity` niżej). Odepnij POPRZEDNI egzemplarz PRZED
-    // zamontowaniem nowego: `renderView` potrafi się powtórzyć, `messages_container` powstaje na
-    // nowo za każdym razem (ten sam wzorzec co `_selectionMenuDetach` niżej).
+    // Nasłuch rozwinięcia/zwinięcia kafelka, animacji wejścia i klawiszy aktywujących
+    // (`.cs-tile__head`/`.cs-message--agent`/`.cs-ask-user`) - przerysowuje łącznik po zmianie
+    // wysokości (patrz `onMessagesContainerActivity` w `connectorActivity.ts`). Odepnij
+    // POPRZEDNI egzemplarz PRZED zamontowaniem nowego: `renderView` potrafi się powtórzyć,
+    // `messages_container` powstaje na nowo za każdym razem (ten sam wzorzec co
+    // `_selectionMenuDetach` niżej).
     this._connectorActivityDetach?.();
     this._connectorActivityDetach = installMessagesContainerActivity(this);
 

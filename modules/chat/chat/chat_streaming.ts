@@ -831,9 +831,14 @@ export function _paintStreamFrame(this: ChatViewLike, frame: StreamFrame) {
             );
             // Nowa kotwica łącznika (kafelek `.cs-tile--agent` dostaje kryształ, patrz
             // `chat_view.css`) - zaplanuj przerysowanie ZAMIAST czekać do `_finalizeTurn`. Tylko
-            // przy WSTAWIENIU (raz na turę) - `updateThinkingBlock` w gałęzi else dopisuje samą
-            // treść, bez zmiany zbioru kotwic, więc NIE planuje kolejnego przerysowania (throttle
-            // malowania i tak woła tę funkcję dziesiątki razy na sekundę w trakcie streamu).
+            // przy WSTAWIENIU, i to raz na RUNDĘ narzędzi, nie raz na całą turę (poprawka
+            // nieścisłości z recenzji niezależnej) - `_chatBeforeContinue` zeruje
+            // `_currentThinkingBlock` (i `_lastPaintedContent` przez `_resetPaintTargets`) przed
+            // KAŻDĄ kolejną rundą tej samej tury, więc druga/trzecia runda z własnym blokiem
+            // myślenia trafia tu ponownie jako "wstawienie" - `updateThinkingBlock` w gałęzi else
+            // dopisuje samą treść W RAMACH jednej rundy, bez zmiany zbioru kotwic, więc NIE
+            // planuje kolejnego przerysowania (throttle malowania i tak woła tę funkcję
+            // dziesiątki razy na sekundę w trakcie streamu).
             this._scheduleConnectorRedraw();
         } else {
             updateThinkingBlock(this._currentThinkingBlock, reasoningContent);
@@ -1464,6 +1469,14 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
             }
         }
     }
+
+    // Podmiana kafelka (`toolDisplay.replaceWith(...)` powyżej, per wynik) ZMIENIA wysokość -
+    // kafelek błędu startuje rozwinięty (`Tile.ts`, `status:'error'`), bloki sub-agenta (wynik/
+    // błąd/pokwitowanie w tle) mają inną wysokość niż placeholder "w toku", obrazek wygenerowany
+    // dokłada własny blok. Raz na CAŁĄ rundę (po pętli, nie w jej środku - wywołań bywa kilka)
+    // i tylko na aktywnej zakładce, tak jak nowe kotwice w `_chatOnToolCallsParsed` wyżej
+    // (naprawa recenzji niezależnej - poprzednia runda pomijała ten wyzwalacz błędnie).
+    if (isActiveTab) this._scheduleConnectorRedraw();
 }
 
 /**
@@ -1589,6 +1602,11 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
         if (this._currentThinkingBlock) {
             finalizeThinkingBlock(this._currentThinkingBlock);
             this._currentThinkingBlock = null;
+            // Zwinięcie bloku myślenia (`finalizeThinkingBlock` woła `expand(false)`, `ThinkingBlock.ts`)
+            // zmienia wysokość SYNCHRONICZNIE - bez przerysowania łącznik zostawałby z geometrią
+            // sprzed zwinięcia do końca tury (naprawa recenzji niezależnej, ta sama przyczyna co
+            // `onMessagesContainerActivity`/rozwinięcie kafelka klikiem, patrz `connectorActivity.ts`).
+            this._scheduleConnectorRedraw();
         }
         this._resetPaintTargets();
 
@@ -1895,6 +1913,9 @@ export function handle_error(this: ChatViewLike, error: unknown, agentName?: str
         if (this._currentThinkingBlock) {
             finalizeThinkingBlock(this._currentThinkingBlock);
             this._currentThinkingBlock = null;
+            // Zwinięcie synchroniczne zmienia wysokość - przerysuj łącznik (naprawa recenzji
+            // niezależnej, ten sam powód co w `_chatBeforeContinue`/`stop_generation`).
+            this._scheduleConnectorRedraw();
         }
         this._resetPaintTargets();
         this.set_generating(false);
@@ -2055,6 +2076,11 @@ export function stop_generation(this: ChatViewLike, agentName?: string, reason =
     if (this._currentThinkingBlock) {
         finalizeThinkingBlock(this._currentThinkingBlock);
         this._currentThinkingBlock = null;
+        // Zwinięcie synchroniczne zmienia wysokość - przerysuj łącznik (naprawa recenzji
+        // niezależnej, ten sam powód co w `_chatBeforeContinue`/`handle_error`). Bez gałęzi
+        // `isActiveTab` - ta funkcja sama jej nie liczy, a otaczający kod (flush/classList/
+        // `_resetPaintTargets` niżej) jest tu już bezwarunkowy z tego samego powodu.
+        this._scheduleConnectorRedraw();
     }
     this._resetPaintTargets();
     this.hideTypingIndicator();
