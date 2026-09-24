@@ -9,13 +9,26 @@
 import { Notice, TFile } from 'obsidian';
 import { SkinManager, UiIcons, IconGenerator, setSvg, setSvgLabel, adoptSheet } from '../../crystal-soul/index.js';
 import { substituteVariables } from '../../skills/index.js';
-import { MentionAutocomplete, AttachmentManager } from '../../ui-components/index.js';
+import { MentionAutocomplete, AttachmentManager, setNoteOpener } from '../../ui-components/index.js';
 import type { MentionAutocompletePlugin, MentionChip } from '../../ui-components/index.js';
 import { getVisibleSubAgentsForAgent } from '../../sub-agents/index.js';
 import { summonAgentForArtifact, activateArtifactInChat, buildArtifactPickerItems, artifactStatusLabel } from '../../artifacts/index.js';
 import type { SummonPlugin } from '../../artifacts/index.js';
 import { buildTodoPanelModel, resolveBottomBarMode, DEFAULT_BOTTOM_BAR_MODE } from './todoPanel.js';
 import { renderSubTaskStrip } from './subTaskStrip.js';
+import { installSelectionMenu } from './selectionMenu.js';
+// Łącznik (scheduler + nasłuch rozwinięcia kafelka) - plik CELOWO poza `obsidian`/CSS-modułowym
+// importem tego pliku, żeby dało się go testować bezpośrednim importem (patrz nagłówek
+// `connectorActivity.ts`). Re-eksport WYŁĄCZNIE `_scheduleConnectorRedraw`/`_cancelConnectorRedraw`
+// (te dwie UŻYWAJĄ `this` - mają sens jako metody na `ChatView.prototype`, `Object.assign` w
+// `chat_view.ts` czyta WSZYSTKIE nazwane eksporty tego modułu, re-eksporty też, `UiMethods` w
+// `chatViewShape.ts` = `typeof uiMethods` więc każdy re-eksport tutaj wchodzi też do TYPU
+// `ChatViewLike`). `onMessagesContainerActivity`/`installMessagesContainerActivity` NIE używają
+// `this` (biorą `view` jako pierwszy, jawny argument) - lądowałyby na prototypie i w typie jako
+// martwe, niewołane przez nikogo `this.metoda(...)` (naprawa recenzji niezależnej); instalacja
+// woła je przez ZWYKŁY import niżej, w `renderView`.
+import { installMessagesContainerActivity } from './connectorActivity.js';
+export { _scheduleConnectorRedraw, _cancelConnectorRedraw } from './connectorActivity.js';
 import { _tabKey } from './chat_tabs.js';
 import { insertInlineTriggerMarker } from './InlineChipPlugin.js';
 import { TriggerPopup } from './TriggerPopup.js';
@@ -84,12 +97,38 @@ export async function runManualCompression(view: ChatViewLike): Promise<boolean>
     return true;
 }
 
+/**
+ * Otwiera notatke ZAWSZE w nowej karcie w glownym obszarze workspace'u - nigdy nie podmienia
+ * zawartosci panelu czatu (spec C, "Czat bez scian" 2.3.0, werdykt wlasciciela: klik w nazwe
+ * notatki ma otworzyc ja OSOBNO, "w osobnym glownym oknie"). `core/utils/obsidianNav.ts` ma
+ * rownowazna funkcje (`openNoteInMainTab`), ale TEN plik nie moze jej deep-importowac:
+ * `core/utils/*` poza `Logger.js` jest poza barrelem `core/index.ts` (kontrakt node-safe -
+ * `obsidianNav.ts` dotyka `Keymap` jako wartosci) i poza dozwolonymi wyjatkami ESLint-a
+ * (`compositionRootPatterns` w `eslint.config.js` obejmuje WYLACZNIE `src/main.ts`) - patrz
+ * `modules/ui-components/CLAUDE.md`, sekcja "Linki do notatek", po pelne uzasadnienie tej
+ * decyzji. Zwykly i Ctrl/Cmd-klik daja TEN SAM wynik (nowa karta) - spec chce tego dla obu, wiec
+ * nie ma po co duplikowac tutaj rozpoznawanie modyfikatorow `Keymap.isModEvent`.
+ */
+function _openNoteInMain(this: ChatViewLike, path: string, _ev: MouseEvent): void {
+    if (typeof path !== 'string' || !path.trim()) return;
+    void this.app.workspace.openLinkText(path, '', true).catch((e: unknown) => {
+        log.warn('Chat', `Nie udało się otworzyć notatki "${path}": ${(e as Error)?.message || String(e)}`);
+    });
+}
+
 // ── Main view render ────────────────────────────────────────────────
 
 export async function renderView(this: ChatViewLike, container = this.container) {
     // Adopt chat styles (CSSStyleSheet from import) przez `adoptSheet`, żeby demontaż pluginu
     // zdjął arkusz zamiast zostawiać go w dokumencie do restartu.
     adoptSheet(chat_view_styles);
+
+    // Rejestr openera notatek (modules/ui-components/noteLink.ts) - ui-components sam nie zna
+    // `app`, wiec KAZDY klik w nazwe notatki gdziekolwiek w czacie (odczyt/search/list/zapis/
+    // mencja/artefakt) przechodzi przez TEN callback. Sprzatania w `onClose` NIE ma - swiadomie:
+    // opener zalezy tylko od globalnego `app`, a dwa otwarte widoki czatu dziela jeden rejestr
+    // (`null` z jednego odbieralby klikalnosc drugiemu); kazdy `renderView` nadpisuje poprzedni.
+    setNoteOpener((path, ev) => _openNoteInMain.call(this, path, ev));
 
     container.empty();
     container.addClass('pkm-chat-view');
@@ -113,7 +152,25 @@ export async function renderView(this: ChatViewLike, container = this.container)
 
     // Messages area (cs-root activates Crystal Soul CSS variables)
     this.messages_container = chatMain.createDiv({ cls: 'pkm-chat-messages cs-root' });
+
+    // Nasłuch rozwinięcia/zwinięcia kafelka, animacji wejścia i klawiszy aktywujących
+    // (`.cs-tile__head`/`.cs-message--agent`/`.cs-ask-user`) - przerysowuje łącznik po zmianie
+    // wysokości (patrz `onMessagesContainerActivity` w `connectorActivity.ts`). Odepnij
+    // POPRZEDNI egzemplarz PRZED zamontowaniem nowego: `renderView` potrafi się powtórzyć,
+    // `messages_container` powstaje na nowo za każdym razem (ten sam wzorzec co
+    // `_selectionMenuDetach` niżej).
+    this._connectorActivityDetach?.();
+    this._connectorActivityDetach = installMessagesContainerActivity(this);
+
     void this.render_messages();
+
+    // Menu na zaznaczeniu (spec D, "Czat bez ścian" 2.3.0) - Kopiuj / Dodaj jako kontekst /
+    // Cytuj. Odepnij POPRZEDNI egzemplarz PRZED montażem nowego: `renderView` potrafi się
+    // powtórzyć w cyklu życia jednego widoku i `messages_container` powstaje na nowo za każdym
+    // razem, więc bez tego nasłuchy na `document` (klik poza / Escape) by się mnożyły. Pełne
+    // sprzątanie w `onClose` - patrz gotcha "Sprzątanie" w `selectionMenu.ts`.
+    this._selectionMenuDetach?.();
+    this._selectionMenuDetach = installSelectionMenu(this);
 
     // ── SLIM BAR (right side, 66px) ──
     this._slimBar = chatBody.createDiv({ cls: 'cs-skillbar cs-root' });
@@ -140,7 +197,8 @@ export async function renderView(this: ChatViewLike, container = this.container)
     // nad nią). Przełącza chip `📋 done/total` w dolnym rzędzie guzików.
     this._todoPanelBar = bottomPanel.createDiv({ cls: 'cs-todo-panel-bar' });
 
-    // Inline trigger popup on `/` and `@`
+    // Inline trigger popup - wyłącznie `/`. `@` obsługuje osobno MentionAutocomplete niżej
+    // (własny nasłuch `input`), ten popup na `@` w ogóle nie reaguje.
     this._triggerPopup = null;
     this._triggerPos = -1;
     this.input_area.addEventListener('keydown', (e: KeyboardEvent) => this._handleTriggerKeyDown(e));
@@ -1045,6 +1103,13 @@ export function showTypingIndicator(this: ChatViewLike, statusText?: string) {
     const crystalEl = this.typingIndicator.createDiv({ cls: 'cs-typing__crystal' });
     setSvg(crystalEl, SkinManager.getCrystal(activeAgent || 'default', { size: 20, color: agentColor, glow: true }));
 
+    // Trzy kropki pojawiające się po kolei (animacja CSS, zero timera JS - patrz
+    // @keyframes csTypingDots w chat_view.css). Kryształ nad nimi nadal pulsuje bez zmian.
+    const dotsEl = this.typingIndicator.createDiv({ cls: 'cs-typing__dots' });
+    dotsEl.createSpan({ cls: 'cs-typing__dot' });
+    dotsEl.createSpan({ cls: 'cs-typing__dot' });
+    dotsEl.createSpan({ cls: 'cs-typing__dot' });
+
     this.typingStatusEl = this.typingIndicator.createSpan({ cls: 'cs-typing__text', text: statusText });
 
     this.scrollToBottom();
@@ -1093,40 +1158,6 @@ export function scrollToBottom(this: ChatViewLike, smooth = true, opts: { drawCo
     if (opts.drawConnectors === false) return;
     // Redraw connector lines (position depends on layout) — skoalescowane do jednej klatki.
     this._scheduleConnectorRedraw();
-}
-
-/**
- * JEDNO przerysowanie łączników na klatkę, nie na wywołanie.
- *
- * `_drawConnectorLines` usuwa i wstawia węzły przeplatając to z odczytami geometrii (layout
- * thrashing), a jego koszt rośnie z liczbą wiadomości w oknie. Wołaczy jest kilku i potrafią
- * strzelać seriami (przewijanie, status narzędzia, malowanie strumienia) — dlatego zamiast
- * rysować od razu, planujemy jedno rysowanie na klatkę animacji.
- *
- * ⚠️ `requestAnimationFrame` NIE chodzi, gdy okno jest schowane — i dobrze: `getBoundingClientRect`
- * zwraca wtedy zera, więc rysowanie i tak dałoby śmieci. Zaległe rysowanie wykona się, gdy okno
- * wróci. Fallback na `setTimeout` dla środowisk bez rAF (harness/testy).
- */
-export function _scheduleConnectorRedraw(this: ChatViewLike) {
-    if (this._connectorRedrawCancel) return;
-    const run = () => {
-        this._connectorRedrawCancel = null;
-        this._drawConnectorLines();
-    };
-    if (typeof requestAnimationFrame === 'function') {
-        const handle = window.requestAnimationFrame(run);
-        this._connectorRedrawCancel = () => cancelAnimationFrame(handle);
-    } else {
-        const handle = window.setTimeout(run, 16);
-        this._connectorRedrawCancel = () => window.clearTimeout(handle);
-    }
-}
-
-/** Rozbraja zaplanowane przerysowanie łączników (zamknięcie widoku). */
-export function _cancelConnectorRedraw(this: ChatViewLike) {
-    if (!this._connectorRedrawCancel) return;
-    try { this._connectorRedrawCancel(); } catch { /* best-effort */ }
-    this._connectorRedrawCancel = null;
 }
 
 /**
@@ -1366,20 +1397,27 @@ export function _handleTriggerKeyDown(this: ChatViewLike, e: KeyboardEvent) {
     if (this._triggerPopup?.isOpen()) {
         if (this._triggerPopup.handleKeyDown(e)) {
             e.preventDefault();
-            e.stopPropagation();
+            // stopImmediatePropagation, NIE stopPropagation: ten sam element (`input_area`) ma
+            // DRUGI nasłuch `keydown` (`handle_input_keydown`, wpięty niżej w `renderView`), który
+            // na Enter woła `send_message`. `stopPropagation` zatrzymuje tylko bąbelkowanie do
+            // przodków, NIE inne nasłuchy na TYM SAMYM elemencie - Enter wybierający pozycję w
+            // popupie (np. slash-komendę) wysyłałby więc od razu wiadomość. Wzór:
+            // `modules/ui-components/MentionAutocomplete.ts`, `_handleKeyDown` (komentarz przy
+            // Enter/Tab).
+            e.stopImmediatePropagation();
             return;
         }
     }
-    if (e.key !== '/' && e.key !== '@') return;
+    // `@` nie otwiera tego popupu - obsługuje go wyłącznie MentionAutocomplete (notatki/foldery).
+    if (e.key !== '/') return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const value = this.input_area.value || '';
     const cursor = this.input_area.selectionStart ?? value.length;
     const charBefore = cursor > 0 ? value.charAt(cursor - 1) : '';
     // Only open at start of line/value, or after whitespace — avoids triggering in URLs / mid-word
     if (cursor !== 0 && !/\s/.test(charBefore)) return;
-    const triggerChar = e.key;
-    const triggerPos = cursor; // pre-key cursor; after key is committed, char will be at this index
-    window.setTimeout(() => this._openTriggerPopup(triggerChar, triggerPos), 0);
+    const triggerPos = cursor; // pre-key cursor; after key is committed, `/` will be at this index
+    window.setTimeout(() => this._openTriggerPopup(triggerPos), 0);
 }
 
 export function _handleTriggerInput(this: ChatViewLike) {
@@ -1390,8 +1428,10 @@ export function _handleTriggerInput(this: ChatViewLike) {
         this._closeTriggerPopup();
         return;
     }
+    // Ten popup rozumie wyłącznie `/` - `@` na pozycji wyzwalacza (np. gdy user go tam wklei/wpisze)
+    // zamyka go zamiast filtrować, bo `@` prowadzi do MentionAutocomplete, nie tutaj.
     const triggerChar = value.charAt(this._triggerPos);
-    if (triggerChar !== '/' && triggerChar !== '@') {
+    if (triggerChar !== '/') {
         this._closeTriggerPopup();
         return;
     }
@@ -1400,14 +1440,19 @@ export function _handleTriggerInput(this: ChatViewLike) {
         return;
     }
     const filter = value.slice(this._triggerPos + 1, cursor);
-    if (/\s/.test(filter)) {
+    // `/@` (user otworzył popup `/`, potem wpisał `@` jako pierwszy znak filtra): filtr zawiera
+    // `@`, więc MentionAutocomplete (własny, niezależny nasłuch `input` na tym samym polu) ma
+    // przejąć - bez tej bramki oba popupy stały otwarte naraz (TriggerPopup z pustą listą pod
+    // pozycją, której nie umie filtrować, MentionAutocomplete normalnie nad nim). Whitespace w
+    // filtrze zamyka z tego samego powodu co dotąd (koniec słowa po triggerze).
+    if (/\s/.test(filter) || filter.includes('@')) {
         this._closeTriggerPopup();
         return;
     }
     this._triggerPopup.setFilter(filter);
 }
 
-export function _openTriggerPopup(this: ChatViewLike, triggerChar: string, triggerPos: number) {
+export function _openTriggerPopup(this: ChatViewLike, triggerPos: number) {
     this._closeTriggerPopup();
     const agent = this.plugin?.agentManager?.getActiveAgent?.();
     this._triggerPos = triggerPos;
@@ -1442,7 +1487,7 @@ export function _openTriggerPopup(this: ChatViewLike, triggerChar: string, trigg
             this.handleInputResize?.();
         }
     });
-    this._triggerPopup.open(triggerChar, this.input_area);
+    this._triggerPopup.open(this.input_area);
 }
 
 export function _closeTriggerPopup(this: ChatViewLike) {

@@ -128,6 +128,41 @@ test('reguły poczty renderują się TYLKO gdy agent ma narzędzia komunikatora'
     t.false(withoutMail.extended.some(r => r.id === 'kom_send'));
 });
 
+// ── agent_delegate uśpione (2.3.0, "Czat bez ścian" jednostka E) ────────────────────────────
+// `comms_delegate` (tool: 'agent_delegate') nigdy się nie renderuje, bo `availableToolNames`
+// realnie liczone jest z `ToolRegistry.filterByAgent(agent)` (patrz `AgentManager.ts`,
+// `_buildBaseContext`), a ten już nie oferuje `agent_delegate` ŻADNEMU agentowi (ToolRegistry.ts,
+// `DORMANT_TOOLS`) - `splitDecisionTreeRules` gatuje regułę po `instr.tool`, więc brak narzędzia
+// w `available` wystarcza. Osobny problem: `kom_send` (tool DALEJ dostępne) miał w SWOIM
+// tekście literalną wzmiankę "→ agent_delegate" jako poradę - to trzeba było wyciąć z i18n.
+
+test('reguła comms_delegate (furtka) nie renderuje się, gdy agent_delegate nie jest dostępne (realny stan po uśpieniu)', t => {
+    const resolved = resolveDecisionTreeInstructions({}, {});
+    const available = new Set(['kom_send', 'kom_list', 'kom_read', 'delegate', 'read']); // BEZ agent_delegate
+    const { extended } = splitDecisionTreeRules(resolved, { available, hasSkills: false, extended: true });
+    t.false(extended.some(r => r.id === 'comms_delegate'));
+    t.true(extended.some(r => r.id === 'kom_send'), 'kom_send samo zostaje dostępne');
+});
+
+test.serial('wyrenderowany prompt (furtka ON, agent_delegate NIEDOSTĘPNE) nie zawiera literału agent_delegate, w obu językach', t => {
+    for (const locale of ['pl', 'en'] as const) {
+        setLocale(locale);
+        try {
+            const builder = new PromptBuilder();
+            builder.build({ ...AGENT } as never, {
+                ...CTX,
+                extendedPromptRules: true,
+                availableToolNames: ['kom_send', 'kom_list', 'kom_read', 'delegate', 'read', 'memory_save'],
+            } as never);
+            const tree = builder.getSections().find(s => s.key === 'decision_tree')!.content;
+            t.false(tree.includes('agent_delegate'),
+                `${locale}: drzewo (furtka ON, agent bez agent_delegate) nie może wspominać uśpionego narzędzia - offending text: ${tree}`);
+        } finally {
+            setLocale('en');
+        }
+    }
+});
+
 // ── nazwy sekcji artefaktu idą za językiem interfejsu ───────────────────
 
 /**

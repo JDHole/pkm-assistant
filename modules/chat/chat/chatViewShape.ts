@@ -298,7 +298,6 @@ export interface ChatViewMixins extends
     current_message_text: HTMLElement | null;
     _currentThinkingBlock: HTMLElement | null;
     _lastPaintedContent: string | null;
-    _agentHeaderShown: boolean;
     _lastCompressionBlockEl: HTMLElement | null;
 
     // ── Kolejka wiadomości i tury w tle ──
@@ -371,6 +370,18 @@ export interface ChatViewMixins extends
     _unsubscribeSkinEvents: (() => void) | null;
     handleGlobalKeydownBound: ((e: KeyboardEvent) => void) | null;
     handleBeforeUnloadBound: (() => void) | null;
+    /** Odpięcie menu na zaznaczeniu (`chat/selectionMenu.ts`) - `installSelectionMenu` zwraca
+     *  funkcję odpinającą, `renderView` ją tu chowa i woła PRZED każdym kolejnym montażem. */
+    _selectionMenuDetach: (() => void) | null;
+    /** Odpięcie delegowanego nasłuchu rozwinięcia/zwinięcia kafelka, animacji wejścia i klawiszy
+     *  aktywujących (`connectorActivity.ts`'s `installMessagesContainerActivity`, wołane przez
+     *  `chat_ui.ts`'s `renderView` przez ZWYKŁY import - `installMessagesContainerActivity`/
+     *  `onMessagesContainerActivity` NIE są re-eksportowane z `chat_ui.ts` na `ChatView.prototype`,
+     *  bo nie używają `this`; re-eksportowane stąd są wyłącznie `_scheduleConnectorRedraw`/
+     *  `_cancelConnectorRedraw`) - ten sam wzorzec co `_selectionMenuDetach` wyżej:
+     *  `renderView` odpina POPRZEDNI egzemplarz przed zamontowaniem nowego (`messages_container`
+     *  powstaje na nowo za każdym renderem), `onClose` sprząta ostatni. */
+    _connectorActivityDetach: (() => void) | null;
 }
 
 /**

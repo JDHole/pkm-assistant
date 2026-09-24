@@ -110,6 +110,59 @@ export const pl: Record<string, string> = {
   'tool.field.error': 'Błąd: ',
   'tool.field.result': 'Wynik: ',
 
+  // ── Tile (2.3.0, Czat bez ścian) - tytuły kafelków narzędzi po ludzku ──
+  // Zero id, zero surowej nazwy narzędzia (poza generic, gdzie nazwa to jedyna informacja) i
+  // zero JSON-a w nagłówku - patrz describeToolCall w modules/ui-components/ToolCallDisplay.ts.
+  'chat.tile.tool.read': 'Przeczytał: {{path}}',
+  'chat.tile.tool.search': 'Szukał: {{query}}',
+  'chat.tile.tool.write': 'Zapisał: {{path}}',
+  'chat.tile.tool.list': 'Przejrzał: {{folder}}',
+  'chat.tile.tool.web_search': 'Szukał w sieci: {{query}}',
+  'chat.tile.tool.web_read': 'Czytał stronę: {{url}}',
+  'chat.tile.tool.todo': 'Lista zadań',
+  'chat.tile.tool.ask_user': 'Pytanie do Ciebie',
+  'chat.tile.tool.generic': 'Użył: {{name}}',
+  'chat.tile.tool.error_no_details': 'Narzędzie zgłosiło błąd bez opisu',
+  'chat.tile.raw_args': 'Szczegóły techniczne',
+
+  // ── Tile sub-agenta i bloku systemowego błędu (2.3.0, A2 "Czat bez ścian") ──
+  'chat.tile.sub.title': 'Sub-agent{{name}}',
+  'chat.tile.sub.pending': 'Sub-agent{{name}} pracuje',
+  'chat.tile.sub.background': 'Zlecono w tle: {{name}}',
+  'chat.tile.sub.background_summary': 'wynik wróci powiadomieniem',
+  'chat.tile.sub.background_id': 'Identyfikator: {{id}}',
+  'chat.tile.sub.task_label': 'Zadanie',
+  'chat.tile.sub.result_label': 'Wynik',
+  'chat.tile.sub.footer_used': 'Użył: {{tools}} ({{calls}})',
+  'chat.tile.sub.calls_one': '{{n}} wywołanie',
+  'chat.tile.sub.calls_few': '{{n}} wywołania',
+  'chat.tile.sub.calls_many': '{{n}} wywołań',
+  // `calls_other` istnieje wyłącznie dla parytetu kluczy pl/en (`core/i18n/parity.test.ts`) -
+  // polska gałąź `pluralCalls` (`SubAgentBlock.ts`) nigdy jej nie czyta, en ma tylko dwie formy.
+  'chat.tile.sub.calls_other': '{{n}} wywołań',
+  'chat.tile.sub.footer_tokens': '{{tokens}} tokenów',
+  'chat.tile.sub.duration_min': '{{min}} min {{sec}} s',
+  'chat.tile.sub.duration_sec': '{{sec}} s',
+  'chat.tile.sub.tokens_thousands': '{{value}} tys.',
+  'chat.tile.sub.error_no_details': 'Sub-agent zgłosił błąd bez opisu',
+
+  // ── Tile wiadomości maszynowej (2.3.0, A3 "Czat bez ścian") ──
+  'chat.tile.machine.subtask_title': 'Sub-agent {{name}} skończył w tle',
+  'chat.tile.machine.subtask_title_error': 'Sub-agent {{name}} padł w tle',
+  'chat.tile.machine.subtask_aborted': 'Sub-agent {{name}} przerwany w tle',
+  'chat.tile.machine.artifact_title': 'Artefakt: {{tytul}}',
+  'chat.tile.machine.open': 'Otwórz',
+  'chat.tile.machine.open_unavailable': 'Notatka artefaktu nie jest znana',
+
+  'chat.tile.tool.todo_summary': '{{done}}/{{total}}',
+  'chat.tile.tool.todo_summary_titled': '{{done}}/{{total}} - {{title}}',
+  'chat.tile.todo.finished': 'zamknięta',
+  'chat.tile.ask.body': 'Pytanie: {{question}}\nOdpowiedź: {{answer}}',
+  'chat.tile.ask.timeout': 'brak odpowiedzi w limicie czasu',
+  'chat.tile.ask.failed': 'pytanie nie doczekało się odpowiedzi',
+  'chat.tile.error.title': 'Błąd odpowiedzi',
+  'chat.tile.error.stall': 'Model przestał odpowiadać',
+
   // ── Tytuły zakładek widoków (ItemView.displayText) ──
   // Nie powtarzają nazwy pluginu: Obsidian dokleja ją sam w palecie komend, a dwa widoki
   // pod tym samym napisem „PKM Assistant" dawały w palecie dwa identyczne wpisy.
@@ -261,9 +314,7 @@ export const pl: Record<string, string> = {
   // Sufit łańcucha auto-tur po subach osiągnięty - wynik czeka w kolejce.
   'chat.streaming.auto_turn_chain_limit': 'Wynik pomocnika czeka na Twoją wiadomość - limit auto-tur z rzędu osiągnięty.',
   // Pokwitowanie delegacji w TLE (blok sub-agenta w czacie - user, nie model).
-  'chat.subagent_background_task': '{{name}} - zadanie {{task_id}}',
   'chat.subagent_background_queued': 'W kolejce: {{count}} - ruszą, gdy zwolni się miejsce.',
-  'chat.subagent_background_note': 'Pracuje w tle - wynik wróci osobnym powiadomieniem w tej rozmowie.',
   // Powiadomienie o WYNIKU suba z tła - wstrzykiwane w rozmowę, czyta je model I user.
   'chat.subagent_notification.header': '[POWIADOMIENIE SYSTEMU] Sub-agent {{name}} skończył zadanie {{task_id}}, które zleciłeś w tle.',
   'chat.subagent_notification.meta': 'Stan: {{status}}.',
@@ -328,12 +379,6 @@ export const pl: Record<string, string> = {
 
   // ── Sub-agent block ──
   'subagent.label': 'Sub-agent',
-  'subagent.expert': 'Sub-agent ekspert',
-  'subagent.minion_task': 'Zadanie sub-agenta',
-  'subagent.master_consult': 'Konsultacja z sub-agentem',
-  'subagent.query': 'Zapytanie: {{query}}',
-  'subagent.tools': 'Narzędzia: {{tools}}',
-  'subagent.tokens': 'Tokeny: {{input}} wejść / {{output}} wyjść',
 
   // ── Audio recorder ──
   'audio.recorded': 'Nagranie: {{size}} KB, {{seconds}}s',
@@ -2187,6 +2232,12 @@ export const pl: Record<string, string> = {
   'attach.still_large': 'Obraz nadal {{size}} po optymalizacji - może być za duży dla API',
   'attach.optimize_failed': 'Optymalizacja obrazu nie powiodła się, używam oryginału',
 
+  // ── Menu na zaznaczeniu (2.3.0, "Czat bez ścian") ──
+  'chat.selection.copy': 'Kopiuj',
+  'chat.selection.context': 'Dodaj jako kontekst',
+  'chat.selection.quote': 'Cytuj',
+  'chat.selection.copied': 'Skopiowano',
+
   // ── MentionAutocomplete ──
   'mention.no_results': 'Brak wyników',
   'mention.type_name': 'Wpisz nazwę notatki...',
@@ -2458,7 +2509,7 @@ export const pl: Record<string, string> = {
   // także delegacji, która wysyła list z kontekstem rozmowy.
   'mcp.kom.tool_disabled': 'Nie masz włączonej poczty (profil → Uprawnienia → Komunikator), więc nie wyślesz wiadomości do innego agenta - także przez delegację.',
   'mcp.kom.send_failed': 'Nie udało się wysłać wiadomości.',
-  'mcp.kom_send.desc': 'Wyślij wiadomość do skrzynki innego agenta. To POCZTA, nie rozmowa: adresat przeczyta ją przy swojej następnej sesji, nie teraz.\n\nKIEDY UŻYWAĆ:\n- Przekazujesz innemu agentowi wynik pracy, ustalenie albo prośbę „na później"\n- User mówi „przekaż X, że...", „napisz do X"\n\nKIEDY NIE UŻYWAĆ:\n- Sprawa jest na TERAZ i wymaga innego agenta → agent_delegate (przekazuje rozmowę od razu)\n- Chcesz zapamiętać coś dla siebie → memory_save\n\nJEDEN ADRESAT NA WYWOŁANIE. Piszesz do kilku osób → wołaj narzędzie kilka razy. Wiadomości nie kasujesz - skrzynkę sprząta user.',
+  'mcp.kom_send.desc': 'Wyślij wiadomość do skrzynki innego agenta. To POCZTA, nie rozmowa: adresat przeczyta ją przy swojej następnej sesji, nie teraz.\n\nKIEDY UŻYWAĆ:\n- Przekazujesz innemu agentowi wynik pracy, ustalenie albo prośbę „na później"\n- User mówi „przekaż X, że...", „napisz do X"\n\nKIEDY NIE UŻYWAĆ:\n- Chcesz zapamiętać coś dla siebie → memory_save\n\nJEDEN ADRESAT NA WYWOŁANIE. Piszesz do kilku osób → wołaj narzędzie kilka razy. Wiadomości nie kasujesz - skrzynkę sprząta user.',
   'mcp.kom_send.param.to': 'Nazwa agenta-odbiorcy (dokładnie taka jak na liście agentów).',
   'mcp.kom_send.param.subject': 'Krótki temat - jedno zdanie, po którym adresat pozna wagę wiadomości.',
   'mcp.kom_send.param.content': 'Pełna treść. Pisz samodzielnie zrozumiale - odbiorca nie zna kontekstu Twojej rozmowy.',
@@ -2869,7 +2920,7 @@ Status raportu → \`gotowy\`. Powiedz userowi 2-3 zdania esencji + gdzie leży 
   'prompt.dt.rule.file_mkdir': 'create_folder(path) - tworzy folder + nadrzędne. UŻYWAJ przed write jeśli folder nie istnieje.',
   'prompt.dt.rule.comms_delegate': 'Temat poza kompetencjami → agent_delegate (ZAWSZE podaj context_summary!).',
   'prompt.dt.rule.art_plan_todo': 'Złożone zadanie do uzgodnienia → artifact_create(typ:"plan"); user komentuje/zatwierdza w notatce, wracasz i realizujesz. Bieżący postęp pracy dla siebie prowadź w todo.',
-  'prompt.dt.rule.kom_send': 'Chcesz coś przekazać innemu agentowi „na później" → kom_send(to, subject, content). To poczta, nie rozmowa - adresat przeczyta przy swojej następnej sesji. Pilne przekazanie rozmowy TERAZ → agent_delegate.',
+  'prompt.dt.rule.kom_send': 'Chcesz coś przekazać innemu agentowi „na później" → kom_send(to, subject, content). To poczta, nie rozmowa - adresat przeczyta przy swojej następnej sesji.',
 
   // ─── Summarizer: dynamiczna główka szkieletu kompresji ───
   // Szkielet (sekcje 1-8 + ZASADY + blok kandydatów) mieszka w `config/default_prompts.ts`;

@@ -147,6 +147,25 @@ test.serial('summonAgentForArtifact: odrzucenie send_message NIE ucieka jako unh
         'odrzucenie send_message MUSI być złapane wewnątrz summonAgentForArtifact — nie może wyciec jako unhandled rejection');
 });
 
+// ── spec A3: przywołanie niesie meta _artifactSummon (klasyfikator kafelka w czacie) ──
+test.serial('summonAgentForArtifact: wiadomość niesie meta._artifactSummon:true i origin:machine', async t => {
+    const { plugin, view } = makePlugin(thin());
+    const calls: Array<{ meta: unknown }> = [];
+    view.send_message = (opts: { meta: unknown }) => {
+        view.sent++;
+        calls.push(opts);
+    };
+
+    const ok = await summonAgentForArtifact(plugin, { id: 'art-20260723-a1b2', actionLabel: 'zatwierdził plan' });
+    t.true(ok);
+    await settle();
+
+    t.is(calls.length, 1, 'send_message wywołane raz - dopiero WYWOŁANE opts niosą realną meta');
+    const meta = calls[0].meta as { _artifactSummon?: unknown; origin?: unknown };
+    t.is(meta._artifactSummon, true, 'znacznik dla klasyfikatora machineMessage.ts');
+    t.is(meta.origin, 'machine', 'machineMeta() zawsze dokłada origin:machine, nie da się podmienić');
+});
+
 test('parseArtifactBlockId: „id: art-..." → id', t => {
     t.is(parseArtifactBlockId('id: art-20260723-a1b2'), 'art-20260723-a1b2');
     t.is(parseArtifactBlockId('  id:   art-9  \n'), 'art-9');

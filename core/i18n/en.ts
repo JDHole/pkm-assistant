@@ -110,6 +110,60 @@ export const en: Record<string, string> = {
   'tool.field.error': 'Error: ',
   'tool.field.result': 'Result: ',
 
+  // ── Tile (2.3.0, Czat bez ścian) - human-readable tool tile titles ──
+  // No ids, no raw tool name (except generic, where the name is the only information we have),
+  // no JSON in the header - see describeToolCall in modules/ui-components/ToolCallDisplay.ts.
+  'chat.tile.tool.read': 'Read: {{path}}',
+  'chat.tile.tool.search': 'Searched: {{query}}',
+  'chat.tile.tool.write': 'Wrote: {{path}}',
+  'chat.tile.tool.list': 'Listed: {{folder}}',
+  'chat.tile.tool.web_search': 'Searched the web: {{query}}',
+  'chat.tile.tool.web_read': 'Read page: {{url}}',
+  'chat.tile.tool.todo': 'Task list',
+  'chat.tile.tool.ask_user': 'Question for you',
+  'chat.tile.tool.generic': 'Used: {{name}}',
+  'chat.tile.tool.error_no_details': 'Tool reported an error without details',
+  'chat.tile.raw_args': 'Technical details',
+
+  // ── Sub-agent tile and system error block (2.3.0, A2 "Chat without walls") ──
+  'chat.tile.sub.title': 'Sub-agent{{name}}',
+  'chat.tile.sub.pending': 'Sub-agent{{name}} is working',
+  'chat.tile.sub.background': 'Sent to background: {{name}}',
+  'chat.tile.sub.background_summary': 'result will arrive as a notification',
+  'chat.tile.sub.background_id': 'Id: {{id}}',
+  'chat.tile.sub.task_label': 'Task',
+  'chat.tile.sub.result_label': 'Result',
+  'chat.tile.sub.footer_used': 'Used: {{tools}} ({{calls}})',
+  'chat.tile.sub.calls_one': '{{n}} call',
+  'chat.tile.sub.calls_other': '{{n}} calls',
+  // `calls_few`/`calls_many` exist purely for pl/en key parity (`core/i18n/parity.test.ts`) -
+  // the English branch of `pluralCalls` (`SubAgentBlock.ts`) never reads them, pl needs three
+  // forms.
+  'chat.tile.sub.calls_few': '{{n}} calls',
+  'chat.tile.sub.calls_many': '{{n}} calls',
+  'chat.tile.sub.footer_tokens': '{{tokens}} tokens',
+  'chat.tile.sub.duration_min': '{{min}} min {{sec}} s',
+  'chat.tile.sub.duration_sec': '{{sec}} s',
+  'chat.tile.sub.tokens_thousands': '{{value}}k',
+  'chat.tile.sub.error_no_details': 'Sub-agent reported an error without details',
+
+  // ── Machine message tile (2.3.0, A3 "Chat without walls") ──
+  'chat.tile.machine.subtask_title': 'Sub-agent {{name}} finished in the background',
+  'chat.tile.machine.subtask_title_error': 'Sub-agent {{name}} failed in the background',
+  'chat.tile.machine.subtask_aborted': 'Sub-agent {{name}} aborted in the background',
+  'chat.tile.machine.artifact_title': 'Artifact: {{tytul}}',
+  'chat.tile.machine.open': 'Open',
+  'chat.tile.machine.open_unavailable': 'Artifact note is not known',
+
+  'chat.tile.tool.todo_summary': '{{done}}/{{total}}',
+  'chat.tile.tool.todo_summary_titled': '{{done}}/{{total}} - {{title}}',
+  'chat.tile.todo.finished': 'closed',
+  'chat.tile.ask.body': 'Question: {{question}}\nAnswer: {{answer}}',
+  'chat.tile.ask.timeout': 'no answer within the time limit',
+  'chat.tile.ask.failed': 'the question went unanswered',
+  'chat.tile.error.title': 'Response error',
+  'chat.tile.error.stall': 'Model stopped responding',
+
   // ── Tytuły zakładek widoków (ItemView.displayText) ──
   // Nie powtarzają nazwy pluginu: Obsidian dokleja ją sam w palecie komend, a dwa widoki
   // pod tym samym napisem „PKM Assistant" dawały w palecie dwa identyczne wpisy.
@@ -261,9 +315,7 @@ export const en: Record<string, string> = {
   // Auto-turn chain limit reached - the result is waiting in the queue.
   'chat.streaming.auto_turn_chain_limit': 'A helper\'s result is waiting for your message - the auto-turn chain limit was reached.',
   // Background delegation receipt (sub-agent block in chat - for the user, not the model).
-  'chat.subagent_background_task': '{{name}} - task {{task_id}}',
   'chat.subagent_background_queued': 'Queued: {{count}} - will start once a slot frees up.',
-  'chat.subagent_background_note': 'Working in the background - the result will arrive as a separate notification in this conversation.',
   // Notification with the RESULT of a background sub-agent - injected into the conversation,
   // read by both the model and the user.
   'chat.subagent_notification.header': '[SYSTEM NOTIFICATION] Sub-agent {{name}} finished task {{task_id}}, which you started in the background.',
@@ -327,12 +379,6 @@ export const en: Record<string, string> = {
 
   // ── Sub-agent block ──
   'subagent.label': 'Sub-agent',
-  'subagent.expert': 'Sub-agent expert',
-  'subagent.minion_task': 'Sub-agent task',
-  'subagent.master_consult': 'Sub-agent consultation',
-  'subagent.query': 'Query: {{query}}',
-  'subagent.tools': 'Tools: {{tools}}',
-  'subagent.tokens': 'Tokens: {{input}} in / {{output}} out',
 
   // ── Audio recorder ──
   'audio.recorded': 'Recording: {{size}} KB, {{seconds}}s',
@@ -2181,6 +2227,12 @@ export const en: Record<string, string> = {
   'attach.still_large': 'Image still {{size}} after optimization - may be too large for API',
   'attach.optimize_failed': 'Image optimization failed, using original',
 
+  // ── Selection menu (2.3.0, "Chat without walls") ──
+  'chat.selection.copy': 'Copy',
+  'chat.selection.context': 'Add as context',
+  'chat.selection.quote': 'Quote',
+  'chat.selection.copied': 'Copied',
+
   // ── MentionAutocomplete ──
   'mention.no_results': 'No results',
   'mention.type_name': 'Type a note name...',
@@ -2450,7 +2502,7 @@ export const en: Record<string, string> = {
   // delegation (which sends a letter with the conversation context) included.
   'mcp.kom.tool_disabled': 'You do not have mail enabled (profile → Permissions → Communicator), so you cannot send a message to another agent - delegation included.',
   'mcp.kom.send_failed': 'Could not send the message.',
-  'mcp.kom_send.desc': 'Send a message to another agent inbox. This is MAIL, not a conversation: the recipient reads it at the start of their next session, not now.\n\nWHEN TO USE:\n- You are passing a result, a decision or a request to another agent "for later"\n- User says "tell X that...", "write to X"\n\nWHEN NOT TO USE:\n- The matter is urgent and needs another agent NOW → agent_delegate (hands off the conversation immediately)\n- You want to remember something for yourself → memory_save\n\nONE RECIPIENT PER CALL. Writing to several people → call the tool several times. You never delete mail - the user cleans the inbox.',
+  'mcp.kom_send.desc': 'Send a message to another agent inbox. This is MAIL, not a conversation: the recipient reads it at the start of their next session, not now.\n\nWHEN TO USE:\n- You are passing a result, a decision or a request to another agent "for later"\n- User says "tell X that...", "write to X"\n\nWHEN NOT TO USE:\n- You want to remember something for yourself → memory_save\n\nONE RECIPIENT PER CALL. Writing to several people → call the tool several times. You never delete mail - the user cleans the inbox.',
   'mcp.kom_send.param.to': 'Recipient agent name (exactly as on the agent list).',
   'mcp.kom_send.param.subject': 'Short subject - one sentence telling the recipient how important this is.',
   'mcp.kom_send.param.content': 'Full body. Make it self-contained - the recipient does not know your conversation.',
@@ -2861,7 +2913,7 @@ Report status → \`gotowy\`. Tell the user 2-3 sentences of essence + where the
   'prompt.dt.rule.file_mkdir': 'create_folder(path) - creates the folder + its parents. USE IT before write if the folder does not exist.',
   'prompt.dt.rule.comms_delegate': 'A topic outside your competence → agent_delegate (ALWAYS pass context_summary!).',
   'prompt.dt.rule.art_plan_todo': 'A complex task to agree on → artifact_create(typ:"plan"); the user comments/approves in the note, you come back and carry it out. Keep your own running progress in a todo.',
-  'prompt.dt.rule.kom_send': 'You want to pass something to another agent "for later" → kom_send(to, subject, content). This is mail, not a conversation - the recipient will read it during their next session. Handing the conversation over urgently NOW → agent_delegate.',
+  'prompt.dt.rule.kom_send': 'You want to pass something to another agent "for later" → kom_send(to, subject, content). This is mail, not a conversation - the recipient will read it during their next session.',
 
   // ─── Summarizer: the dynamic header of the compression skeleton ───
   // The skeleton (sections 1-8 + RULES + the candidates block) lives in

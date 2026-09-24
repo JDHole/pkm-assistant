@@ -320,3 +320,43 @@ test('bezpośrednie przypisanie this.model (bez update()) NIE jest traktowane ja
     const data = agent.serialize();
     t.false('model' in data, 'przypisanie z pominięciem update() nie ma prawa trafić do pliku');
 });
+
+// ── agent_delegate uśpione (2.3.0, "Czat bez ścian" jednostka E) - test tolerancji ──────────
+// Uśpienie (ToolRegistry.DORMANT_TOOLS) żyje jedną warstwą wyżej niż Agent - stary profil, który
+// jeszcze niesie `agent_delegate` (w `disabled_tools` v3 ALBO w starej osi mcp_servers/
+// enabled_tools migrowanej przez computeDisabledToolsFromLegacy), ma się wczytać bez rzutu
+// wyjątku. Agent sam nie wie nic o uśpieniu - to tylko dowód, że jego strona kontraktu (przyjęcie
+// dowolnej nazwy narzędzia w tablicy) nie została naruszona przez zmianę w innym module.
+
+test('stary YAML v3 z agent_delegate w disabled_tools ładuje się bez błędu - pole jest zwykłą nazwą narzędzia w tablicy', t => {
+    const legacy = {
+        name: 'Tola',
+        disabled_tools: ['agent_delegate', 'web_search'],
+    };
+    t.true(validateAgentSchema(legacy).valid, 'walidacja schematu nie odrzuca nazwy uśpionego narzędzia');
+
+    const agent = new Agent(legacy);
+    t.is(agent.name, 'Tola');
+    t.deepEqual(agent.disabled_tools.sort(), ['agent_delegate', 'web_search'], 'lista przechodzi bez zmian - Agent nie zna pojęcia "uśpione"');
+});
+
+test('stary YAML pre-C1 z delegacją WŁĄCZONĄ (mcp_servers zawiera "delegation", permissions.mcp:true) ładuje się bez błędu przez migrację', t => {
+    const legacy = {
+        name: 'Borys',
+        mcp_servers: ['vault', 'memory', 'delegation'],
+        // Stara oś `mcp` (LEGACY_DEFAULT_PERMISSIONS.mcp = false) gatuje delegate/agent_delegate
+        // NIEZALEŻNIE od whitelisty serwerów (toolAxis.ts's PERMISSION_TOOL_GATES) - bez jawnego
+        // `true` tutaj migracja i tak wyłączyłaby oba narzędzia grupy delegacji.
+        default_permissions: { mcp: true },
+    };
+    t.true(validateAgentSchema(legacy).valid);
+
+    const agent = new Agent(legacy);
+    t.is(agent.name, 'Borys');
+    t.true(Array.isArray(agent.disabled_tools), 'migracja (computeDisabledToolsFromLegacy) policzyła disabled_tools bez wyjątku');
+    // Stara whitelist z grupą "delegation" włączała OBA narzędzia tej grupy na osi agenta -
+    // uśpienie agent_delegate dzieje się osobno, w ToolRegistry, nie tutaj (patrz
+    // modules/tools/ToolRegistry.test.ts).
+    t.false(agent.disabled_tools.includes('delegate'), 'stara whitelist dalej włącza delegate na osi agenta');
+    t.false(agent.disabled_tools.includes('agent_delegate'), 'stara whitelist dalej włącza agent_delegate na osi agenta (uśpienie jest gdzie indziej)');
+});

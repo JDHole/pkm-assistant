@@ -2,7 +2,7 @@
  * Strażnik: kanoniczne narzędzie `search` musi mieć `case 'search'`
  * w KAŻDYM z trzech switchy formatujących wywołanie narzędzia w `ToolCallDisplay.ts`.
  *
- * Pułapka: gdyby `formatToolInput` i `formatToolOutput` miały tylko `case 'vault_search'`
+ * Pułapka: gdyby `formatToolInputHint` i `formatToolOutput` miały tylko `case 'vault_search'`
  * (legacy alias), `search` (nazwa, którą model dostaje w `inputSchema`, `SearchTool.ts:89`)
  * spadałby do gałęzi `default`: nagłówek pokazywałby surowy JSON zamiast samego zapytania,
  * a wynik traciłby ponumerowaną listę ścieżek na rzecz `results: N elementów`. Rozjazd między
@@ -10,7 +10,7 @@
  *
  * Testujemy PO ŹRÓDLE, nie przez wywołanie funkcji: `createToolCallDisplay`/
  * `createCompactToolChip` budują DOM przez rozszerzenia Obsidiana na `HTMLElement`
- * (`.createDiv`/`.createSpan`), których w gołym Node/AVA nie ma — a `formatToolInput`/
+ * (`.createDiv`/`.createSpan`), których w gołym Node/AVA nie ma - a `formatToolInputHint`/
  * `formatToolInputDetail`/`formatToolOutput` (funkcje, które faktycznie miały wadę) nie są
  * eksportowane. Regex pilnuje dokładnie tego, co się rozjechało: kolejności `case` wewnątrz
  * każdego switcha.
@@ -30,7 +30,7 @@ function functionBody(name: string): string {
     return to < 0 ? rest : rest.slice(0, to);
 }
 
-for (const fnName of ['formatToolInput', 'formatToolInputDetail', 'formatToolOutput']) {
+for (const fnName of ['formatToolInputHint', 'formatToolInputDetail', 'formatToolOutput']) {
     test(`${fnName}: case 'search' stoi obok case 'vault_search'`, t => {
         const body = functionBody(fnName);
         t.true(body.length > 0, `nie znalazłem ${fnName} w ToolCallDisplay.ts`);

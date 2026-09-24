@@ -90,6 +90,31 @@ export function openNote(app: AppLike, path: string, event?: unknown): Promise<v
     return openLink(app, path, resolveTarget(event));
 }
 
+/**
+ * Cel nawigacji, ktory NIGDY nie jest "biezaca karta" (spec C, "Czat bez scian" 2.3.0, werdykt
+ * wlasciciela: klik w nazwe notatki ma zawsze otworzyc OSOBNA karte w glownym obszarze, nigdy
+ * nie podmienic zawartosc panelu, z ktorego klik wyszedl - np. panel czatu). Modyfikator, ktory
+ * `resolveTarget` juz rozpoznaje jako split/window/srodkowy-klik, przechodzi bez zmian; jedyna
+ * roznica wzgledem `resolveTarget` jest gałąź `false` (brak modyfikatora - `openNote` zostawalby
+ * w biezacej karcie), ktora tutaj dostaje `'tab'`.
+ */
+function resolveMainTabTarget(event: unknown): Exclude<Target, false> {
+    const target = resolveTarget(event);
+    return target === false ? 'tab' : target;
+}
+
+/**
+ * Otwiera notatke ZAWSZE w nowej karcie w glownym obszarze roboczym (nigdy w biezacej karcie) -
+ * wariant `openNote` dla wolaczy, ktorych WLASNY widok jest sam kartą (np. panel czatu), gdzie
+ * domyslne zachowanie `openNote` (biezaca karta przy zwyklym kliku) podmienialoby ten widok
+ * zamiast otworzyc notatke osobno. `getLeaf('tab')`/`openLinkText(..., true)` tworzy karte w
+ * GLOWNYM splicie workspace'u, nie w bocznym panelu - to jest "osobne glowne okno" z werdyktu
+ * wlasciciela, przetlumaczone przez spec na "nowa karta w glownym obszarze".
+ */
+export function openNoteInMainTab(app: AppLike, path: string, event?: unknown): Promise<void> {
+    return openLink(app, path, resolveMainTabTarget(event));
+}
+
 /** Otwiera plik źródłowy notatki w trybie źródła. */
 export function openSource(app: AppLike, path: string): Promise<void> {
     return openLink(app, path, false, { state: { mode: 'source' } });

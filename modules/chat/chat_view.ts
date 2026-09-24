@@ -219,6 +219,15 @@ export class ChatView extends PluginItemView {
         this._unwireSubTaskStrip?.();
         this._unsubscribeSkinEvents?.();
         this._unsubscribeSkinEvents = null;
+        // Menu na zaznaczeniu (jednostka D) trzyma pare nasluchow na document - bez odpiecia
+        // zamkniety widok zostawalby w pamieci.
+        this._selectionMenuDetach?.();
+        this._selectionMenuDetach = null;
+        // Nasluch rozwiniecia/zwiniecia kafelka (przerysowanie lacznika) - ten sam powod co menu
+        // na zaznaczeniu wyzej: bez odpiecia zamkniety widok trzymalby nasluch na starym
+        // messages_container.
+        this._connectorActivityDetach?.();
+        this._connectorActivityDetach = null;
         if (this.handleGlobalKeydownBound) {
             document.removeEventListener('keydown', this.handleGlobalKeydownBound);
         }

@@ -21,15 +21,16 @@ function seedRegistry(registry: ToolRegistry) {
     registry.registerTool(makeTool('web_search'));  // web
     registry.registerTool(makeTool('generate_image')); // multimodal
     registry.registerTool(makeTool('delegate'));    // delegation
+    registry.registerTool(makeTool('agent_delegate')); // delegation, UŚPIONE (2.3.0) - patrz testy dedykowane niżej
     registry.registerTool(makeTool('chat_todo'));   // artifacts
     // User MCP server tool
     registry.registerTool(makeTool('my_user_tool', 'finance-tracker'));
 }
 
-test('filterByAgent: negatywna lista — brak disabled_tools = wszystkie built-in ON', t => {
+test('filterByAgent: negatywna lista - brak disabled_tools = wszystkie built-in ON', t => {
     const r = new ToolRegistry();
     seedRegistry(r);
-    // Agent bez user-serwerów (mcp_servers domyślne) — built-in wszystkie widoczne.
+    // Agent bez user-serwerów (mcp_servers domyślne) - built-in wszystkie widoczne.
     const agent = { name: 'Fresh', disabled_tools: [], mcp_servers: [] };
     const names = r.filterByAgent(agent).map(t => t.name).sort();
     t.deepEqual(names, ['ask_user', 'chat_todo', 'delegate', 'generate_image', 'memory_save', 'read', 'web_search', 'write']);
@@ -95,6 +96,42 @@ test('filterByAgent: effective_mcp_servers to lustro mcp_servers dla user-connec
     t.true(r.filterByAgent(agent).map(t => t.name).includes('my_user_tool'));
 });
 
+// ── agent_delegate uśpione (2.3.0, "Czat bez ścian" jednostka E) ────────────────────────────
+// Werdykt właściciela: mechanizm delegacji do INNEGO AGENTA (nie sub-agentów) jest uśpiony do
+// inicjatywy 2.4+. `delegate` (sub-agenci) zostaje bez zmian. Uśpienie działa PRZED
+// `agent.disabled_tools[]`, więc żaden agent - świeży ani stary, z narzędziem jawnie
+// WŁĄCZONYM w swojej konfiguracji - nie dostaje go w definicjach narzędzi.
+
+test('filterByAgent: agent_delegate NIE jest oferowane ŻADNEMU agentowi, delegate zostaje', t => {
+    const r = new ToolRegistry();
+    seedRegistry(r);
+    // Agent, który wprost NIE wyłączył agent_delegate (nie ma go w disabled_tools) - mimo to
+    // uśpienie ma pierwszeństwo nad negatywną listą agenta.
+    const agent = { name: 'Fresh', disabled_tools: [], mcp_servers: [] };
+    const names = r.filterByAgent(agent).map(t => t.name);
+    t.false(names.includes('agent_delegate'), 'agent_delegate ma być uśpione niezależnie od disabled_tools agenta');
+    t.true(names.includes('delegate'), 'delegate (sub-agenci) zostaje dostępne bez zmian');
+});
+
+test('filterByAgent: agent_delegate uśpione także dla null agenta (brak filtrowania po disabled_tools)', t => {
+    const r = new ToolRegistry();
+    seedRegistry(r);
+    t.false(r.filterByAgent(null).map(t => t.name).includes('agent_delegate'));
+});
+
+test('checkToolAxis: agent_delegate NIE jest odcięte tu (dormant to widoczność, nie egzekucja) - stare ścieżki wywołania po nazwie (approval, maska sekretów) zostają bez zmian', t => {
+    const r = new ToolRegistry();
+    seedRegistry(r);
+    const agent = { name: 'Igor', disabled_tools: [], mcp_servers: ['*'] };
+    // Świadomie: `checkToolAxis`/`isToolAllowedForAgent` (bramka egzekucji, MCPClient.executeToolCall)
+    // NIE zna DORMANT_TOOLS - uśpienie żyje wyłącznie w filterByAgent (widoczność, co model
+    // dostaje w definicjach narzędzi). Inaczej integracyjne testy istniejącej ścieżki wykonania
+    // agent_delegate (modules/tools/AgentDelegateTool.test.ts - zgoda usera, dzielony przełącznik
+    // z kom_send, maska sekretów) przestałyby cokolwiek sprawdzać.
+    t.true(r.checkToolAxis(agent, 'agent_delegate').allowed, 'egzekucja po dokładnej nazwie zostaje możliwa - dormant nie jest tu wywalką');
+    t.true(r.isToolAllowedForAgent(agent, 'delegate'), 'delegate nietknięte przez uśpienie');
+});
+
 test('getBuiltinServerForTool: maps tool to built-in server', t => {
     const r = new ToolRegistry();
     t.is(r.getBuiltinServerForTool('read'), 'vault');
@@ -118,7 +155,7 @@ test('getBuiltinServerMap: returns the full map with all expected servers', t =>
 
 test('registerTool: validates required fields', t => {
     const r = new ToolRegistry();
-    // Wejścia-śmieci (niepełne definicje) — dokładnie to, czego broni `registerTool`.
+    // Wejścia-śmieci (niepełne definicje) - dokładnie to, czego broni `registerTool`.
     t.throws(() => r.registerTool({} as unknown as ToolDefinition), { message: /Invalid tool definition/ });
     t.throws(() => r.registerTool({ name: 'x' } as unknown as ToolDefinition), { message: /Invalid tool definition/ });
 });
@@ -132,7 +169,10 @@ test('getToolDefinitions: returns OpenAI-format definitions', t => {
     const r = new ToolRegistry();
     seedRegistry(r);
     const defs = r.getToolDefinitions();
-    t.is(defs.length, 9);
+    // getToolDefinitions() nie filtruje po agencie (surowy rejestr) - agent_delegate jest tu
+    // WIDOCZNE mimo uśpienia (uśpienie działa WYŁĄCZNIE w filterByAgent, warstwa widoczności;
+    // checkToolAxis przepuszcza wywołanie po nazwie - patrz testy wyżej i CLAUDE.md modułu).
+    t.is(defs.length, 10);
     t.is(defs[0].type, 'function');
     t.truthy(defs[0].function.name);
     t.truthy(defs[0].function.parameters);

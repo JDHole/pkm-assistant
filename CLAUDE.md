@@ -41,7 +41,7 @@ All modular code lives in `modules/<name>/`. `src/` holds only two files: `src/m
 | `modules/sub-agents/` | `SubAgentLoader` + `Runner` (delegation) + system roles loaded via `loadSystemRoles()` + custom YAML scope (folders / frontmatter / sections / pinned_notes) + DelegateTool DI + parallel execution + per-task timeout |
 | `modules/tools/` | Agent tools: built-in (vault, artifacts, communication, media...) + external MCP client (stdio/HTTP) |
 | `modules/skills/` | Skill engine (recipes for agents) |
-| `modules/chat/` | `ChatView` + mixins + `InlineChipPlugin` + `StreamingManager` + `RollingWindow`/`Summarizer` + `TriggerPopup` (inline `/` and `@` triggers) |
+| `modules/chat/` | `ChatView` + mixins + `InlineChipPlugin` + `StreamingManager` + `RollingWindow`/`Summarizer` + `TriggerPopup` (inline `/` trigger; `@` = MentionAutocomplete) |
 | `modules/models/` | `ChatModel` + providers in `providers/` (many platforms: DeepSeek, Anthropic, OpenAI, Google, Groq, OpenRouter, Ollama, LM Studio, xAI...) + `registry.ts`; DI from `config/runtimeConfig.ts` |
 | `modules/artifacts/` | Plans and notes (user-facing, with an approval flow) - agent-internal todos live in `tools/` |
 | `modules/agents/` | `AgentManager`, `AgentProfile`, the built-in onboarding agent, agent personality model (Persona + Skills + Permissions + Team + Memory) |

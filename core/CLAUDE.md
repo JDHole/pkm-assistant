@@ -82,7 +82,7 @@ Powód: AVA nie ma mocka `obsidian` (`"ava".require: []`), a testuje pliki produ
 - `TokenTracker` - licznik tokenów per rola. Test obok pliku (`utils/TokenTracker.test.js`).
 - `arrayBufferToBase64`, `blobToBase64`
 - Transport HTTP (`core/http/`): `ObsidianHttpClient`, `FetchHttpClient`, `FetchStreamTransport`, `SseFrames`, `NdjsonFrames`, `STREAM_TRANSPORT_TIMEOUT_MS` - **w barrelu**, bo korzystają z niego DWA moduły (`models` i `embedding`), a moduł nie sięga po bebechy drugiego modułu. `ObsidianHttpClient` dostaje `requestUrl` KONSTRUKTOREM, więc cały ten transport wstaje w gołym Node (harness podstawia własny router).
-- ⛔ Nawigacja obsidianowa (`openNote`, `openSource` - `core/utils/obsidianNav.ts`) - **poza barrelem** (plik wciąga `obsidian`). Jedyny konsument, `src/main.ts`, deep-importuje ją jako composition root.
+- ⛔ Nawigacja obsidianowa (`openNote`, `openSource`, `openNoteInMainTab` - `core/utils/obsidianNav.ts`) - **poza barrelem** (plik wciąga `obsidian`). Jedyny konsument, `src/main.ts`, deep-importuje ją jako composition root.
 
 **Silnik ustawień + zdarzeń (własny, w całości):** `SettingsStore` (`core/runtime/SettingsStore.ts` - worek ustawień: `settings` przez proxy, `raw` bez proxy, `save()`, `scheduleSave()` z debounce, `onChange()`) + `EventEmitter` (`core/utils/EventEmitter.ts` - on/once/off/emit). Scalanie konfiguracji (`deepMergeMissing`, `cloneConfig`, `isPlainObject`) mieszka wewnątrz `core/runtime/configMerge.ts` i NIE wychodzi na barrel - konsument jest jeden (runtime).
 
@@ -138,7 +138,7 @@ core/
 │   ├── TokenTracker.js         ← licznik tokenów per rola; test obok
 │   ├── binaryUtils.js          ← arrayBufferToBase64 / blobToBase64
 │   ├── httpLogSummary.js       ← bezpieczna linia logu żądania (bez `request_params`); test obok
-│   ├── obsidianNav.js          ← openNote / openSource; ⛔ importuje `obsidian`, poza barrelem
+│   ├── obsidianNav.js          ← openNote / openSource / openNoteInMainTab; ⛔ importuje `obsidian`, poza barrelem
 │   ├── yamlParser.js           ← parseYaml/stringifyYaml/parseFrontmatter
 │   ├── slugify.js              ← filename-safe slug generator
 │   ├── tokenCounter.js         ← lekki estymator tokenów + kalibracja (bez zależności)

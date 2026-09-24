@@ -100,6 +100,16 @@
   --cs-border-vis: rgba(var(--cs-fg-rgb), 0.14);
   --cs-soul: rgba(var(--cs-fg-rgb), 0.04);
   --cs-soul-vis: rgba(var(--cs-fg-rgb), 0.08);
+
+  /* Dymki 2.3.0 ("Czat bez scian") - rynna kryształu agenta. Wartosc 22px przetrwala z dawnego
+     naglowka serii (.cs-message__agent-head, usuniety w fazie "kolumna dymkow" - patrz
+     modules/chat/CLAUDE.md, sekcja "Dymki 2.3.0"). Cztery uzycia w modules/chat/chat_view.css
+     (poprawka nieuwzglednionych - recenzja niezalezna): margin-left kontenera .cs-message--agent
+     i margin-right mirror dla dymka usera; left krysztalu (`::after` na kafelku/dymku/
+     .cs-ask-user, `calc(-1 * var(--cs-bubble-gutter) - Npx)`, pozycjonuje go W RYNNIE, poza
+     wlasnym pudelkiem elementu); bazowy padding-left `.cs-message__text` (wciecie tresci dymka
+     OD rynny, niezalezne od krysztalu). */
+  --cs-bubble-gutter: 22px;
 }
 .theme-light .cs-root {
   --cs-fg-rgb: 40, 40, 40;
@@ -1190,30 +1200,8 @@ input.pkm-onboarding-key-input {
   margin-top: 16px;
 }
 
-/* -- modules/ui-components/ToolCallDisplay.js: kompaktowy chip narzedzia -- */
-.cs-tool-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 3px 4px 3px 0;
-  padding: 4px 8px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  background: var(--background-secondary);
-  color: var(--text-normal);
-  font-size: 12px;
-  cursor: pointer;
-  max-width: 100%;
-}
-.cs-tool-chip__icon {
-  display: inline-flex;
-  align-items: center;
-}
-.cs-tool-chip__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* -- modules/ui-components/ToolCallDisplay.js: wrapper kompatybilnosci dla kompaktowego chipa
+   (Tile 2.3.0 - wyglad/CSS samego kafelka: modules/chat/chat_view.css, sekcja TILE) -- */
 .cs-tool-chip-wrap {
   display: block;
 }

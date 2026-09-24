@@ -64,7 +64,7 @@ test('handle_chunk deleguje budowę kontenera agenta do _ensureAgentMessageConta
 
     t.regex(body, /this\._ensureAgentMessageContainer\(streamAgent\)/, 'handle_chunk ma wołać wspólny helper zamiast budować kontener od zera');
     t.notRegex(body, /cs-tool-calls-wrapper/, 'ciało budowy kontenera (klasa cs-tool-calls-wrapper) nie powinno być powielone w handle_chunk');
-    t.notRegex(body, /cs-message__agent-crystal/, 'ciało budowy nagłówka agenta nie powinno być powielone w handle_chunk');
+    t.notRegex(body, /--cs-agent-crystal/, 'ustawianie zmiennej krysztalu (--cs-agent-crystal) nie powinno być powielone w handle_chunk - jedyny producent to _ensureAgentMessageContainer');
 });
 
 test('_ensureAgentMessageContainer nadal istnieje jako jedyne źródło prawdy o budowie kontenera', t => {

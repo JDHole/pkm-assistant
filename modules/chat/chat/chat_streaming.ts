@@ -1,7 +1,7 @@
 /**
  * @module chat_streaming
  * Streaming, tool-call handling and generation control methods extracted from ChatView.
- * All functions use `this` — they are mixed into ChatView.prototype via Object.assign.
+ * All functions use `this` - they are mixed into ChatView.prototype via Object.assign.
  *
  * Mechanika pętli narzędziowej żyje w modules/agent-loop (runAgentLoop). Ten plik jest TWARZĄ
  * tury czatu: przygotowanie tury (send_message),
@@ -10,7 +10,7 @@
  */
 
 import { MarkdownRenderer, Notice } from 'obsidian';
-import { SkinManager, hexToRgbTriplet, UiIcons, setSvg, setSvgLabel } from '../../crystal-soul/index.js';
+import { SkinManager, hexToRgbTriplet, UiIcons } from '../../crystal-soul/index.js';
 import { buildCacheMetadata, isLocalPlatform } from '../../models/index.js';
 import { log } from '../../../core/utils/Logger.js';
 // Status narzędzia i warunek linku „otwórz zapisany plik" liczy JEDNA czysta funkcja z core
@@ -21,13 +21,31 @@ import {
     createToolCallDisplay,
     createThinkingBlock,
     updateThinkingBlock,
+    finalizeThinkingBlock,
     createSubAgentBlock,
     createPendingSubAgentBlock,
+    createTile,
+    createNoteLink,
+    isVaultNotePath,
 } from '../../ui-components/index.js';
 import { getDateLocale, t } from '../../../core/i18n/index.js';
 import streamingManager, { shouldUseFreshModel } from './StreamingManager.js';
 import { _tabKey } from './chat_tabs.js';
 import { buildSubTaskNotificationText, matchTabForOrigin } from './subTaskNotification.js';
+// Wiadomości maszynowe (spec A3) - dren kolejki niżej renderuje bezpośrednio (bez
+// `append_message`), więc musi widzieć ten sam klasyfikator co historia/render na żywo
+// (`chat_messages.ts`), inaczej powiadomienie/przywołanie zakolejkowane w trakcie trwającej
+// tury wracałoby jako goły dymek usera z surowym JSON-em. Sam KAFELEK (`renderMachineTile`,
+// uwaga 5 spec A3-fix) jest TRZECIM plikiem w module, importowanym przez oba mixiny (ten i
+// `chat_messages.ts`) - ten plik już importuje `buildBackgroundReceiptText` STAMTĄD, więc import
+// w drugą stronę (z `chat_messages.ts`) tworzyłby cykl wartości między dwoma mixinami; trzeci
+// plik usuwa duplikat bez tego problemu.
+import { buildMachineView } from './machineMessage.js';
+import { renderMachineTile } from './machineTile.js';
+// Krysztal agenta jako CSS var `--cs-agent-crystal` (2.3.0, kolumna dymkow) - ten sam trzeci
+// plik (zero cyklu) co `machineMessage.js`/`machineTile.js` wyzej, jeden producent dla
+// `_ensureAgentMessageContainer` TU i append_message/render_messages w `chat_messages.ts`.
+import { agentCrystalCssVar } from './agentCrystal.js';
 import { stripInlineTriggers, buildInlineTriggerInstruction, getInlineTriggerSummary } from './InlineChipPlugin.js';
 import { parseTriggersIfHuman, mayRunSlashCommand, registerUrlsIfHuman } from './messagePrivileges.js';
 import { queueChatMessage, readQueuedMessage, evaluateQueuedDrain, evaluateStopQueueCancel } from './queuedMessage.js';
@@ -49,7 +67,7 @@ import type { ChatServerManager, ChatTab, ChatViewLike } from './chatViewShape.j
 
 /**
  * Definicja narzędzia w formacie OpenAI. Nazwa siedzi w `function.name`, ale część
- * dostawców (i stare wpisy rejestru) trzyma ją płasko w `name` — czat czyta OBIE.
+ * dostawców (i stare wpisy rejestru) trzyma ją płasko w `name` - czat czyta OBIE.
  */
 type ChatToolDefinition = OpenAiToolDefinition & { name?: string };
 import type { Agent } from '../../agents/index.js';
@@ -67,7 +85,7 @@ import type { TurnAbortHandle } from './turnAbort.js';
 
 /**
  * Opcje `send_message`. ⚠️ Funkcja bywa wpięta WPROST jako listener kliknięcia, więc
- * pierwszym argumentem potrafi być `MouseEvent` — dlatego oba pola są `unknown` i czytane
+ * pierwszym argumentem potrafi być `MouseEvent` - dlatego oba pola są `unknown` i czytane
  * z jawnym `typeof` / `resolveMessageOrigin`, nigdy jako „nasz obiekt".
  */
 interface SendMessageOptions {
@@ -127,7 +145,7 @@ interface StreamResponse {
 }
 
 /**
- * Kontekst TURY — zamknięcie `send_message`. Zastępuje dawny bogaty wpis `_streamCtxMap`;
+ * Kontekst TURY - zamknięcie `send_message`. Zastępuje dawny bogaty wpis `_streamCtxMap`;
  * wszystko, co tura trzyma na własność, żyje TUTAJ, nie na widoku (patrz CLAUDE.md modułu).
  */
 interface ChatTurn {
@@ -184,53 +202,53 @@ function getAgentServerFilter(serverManager: ChatServerManager | undefined, agen
 /**
  * `toolCall.arguments` bywa stringiem JSON zależnie od platformy. Musi być JEDNA kopia
  * wzorca „string → JSON.parse w try/catch, inaczej obiekt" dla wszystkich siedmiu call-site'ów
- * (`_subArgs`/`_bgArgs`/`_saArgs`/`_saErrArgs`/`_saArgs2`/`readArgs`/`writeArgs`) — siedem
+ * (`_subArgs`/`_bgArgs`/`_saArgs`/`_saErrArgs`/`_saArgs2`/`readArgs`/`writeArgs`) - siedem
  * osobnych kopii dawałoby okazję do pominięcia jednej przy przyszłej poprawce, po cichu
  * zwracając `{}`.
  */
 function parseToolCallArgs(toolCall: ParsedToolCall): ChatToolArgs {
-    // TS-boundary: argumenty wypisuje MODEL — string JSON (OpenAI) albo obiekt (Anthropic);
+    // TS-boundary: argumenty wypisuje MODEL - string JSON (OpenAI) albo obiekt (Anthropic);
     // czytamy z nich wyłącznie pola opisane w `ChatToolArgs`.
     return (typeof toolCall.arguments === 'string'
         ? (() => { try { return JSON.parse(toolCall.arguments) as ChatToolArgs; } catch { return {}; } })()
         : (toolCall.arguments || {})) as ChatToolArgs;
 }
 
-/** Licznik tur w procesie — tożsamość tury, żeby watchdog nie ubił cudzej tury po nazwie agenta. */
+/** Licznik tur w procesie - tożsamość tury, żeby watchdog nie ubił cudzej tury po nazwie agenta. */
 let _turnSeq = 0;
 
 /**
  * @param opts - `injectedText` = treść tury, która NIE pochodzi z pola wpisywania
- *   (powiadomienie o wyniku suba z tła). Wtedy `input_area` jest NIETYKANE — user może mieć
- *   tam własny szkic — a ścieżki „to pisał człowiek" (historia inputu, wzmianki `@`, załączniki,
+ *   (powiadomienie o wyniku suba z tła). Wtedy `input_area` jest NIETYKANE - user może mieć
+ *   tam własny szkic - a ścieżki „to pisał człowiek" (historia inputu, wzmianki `@`, załączniki,
  *   komendy `/`) są pominięte. `meta` ląduje na wiadomości w oknie kontekstu (znacznik
  *   pochodzenia). Kolejka `_queuedMessage` jest dla wstrzykniętej tury pomijana z innego
- *   powodu — wynik suba czeka w kolejce notifiera, nie zajmuje slotu usera.
+ *   powodu - wynik suba czeka w kolejce notifiera, nie zajmuje slotu usera.
  *
  *   ⚠️ `send_message` bywa wpięte jako listener kliknięcia, więc pierwszym argumentem potrafi
  *   być `MouseEvent`. Dlatego czytamy z `opts` wyłącznie `injectedText` (z jawnym
- *   `typeof === 'string'`) i `meta` — nigdy nie zakładamy, że to NASZ obiekt.
+ *   `typeof === 'string'`) i `meta` - nigdy nie zakładamy, że to NASZ obiekt.
  *
- *   `meta.origin` to PROWENIENCJA — kto napisał tekst. `'human'` nadają
+ *   `meta.origin` to PROWENIENCJA - kto napisał tekst. `'human'` nadają
  *   wyłącznie ścieżki z pola wpisywania (guzik Wyślij, Enter, kolejka); brak znacznika =
  *   maszyna (fail-closed). To OSOBNA oś od `injectedText`: ta mówi tylko „tekst NIE pochodzi
  *   z pola wpisywania" (mechanika inputu: historia, załączniki, czyszczenie pola). Wysyłki
  *   z kodu, które pole wpisywania WYPEŁNIAJĄ (guzik artefaktu, propozycja delegacji, komentarz
  *   inline), są `isInjected === false`, a mimo to maszynowe. Nie mylić też z `turnOrigin` niżej
- *   — tamto jest adresem zwrotnym delegacji w tle.
+ *   - tamto jest adresem zwrotnym delegacji w tle.
  */
 export async function send_message(this: ChatViewLike, opts: SendMessageOptions = {}) {
     const injectedText = typeof opts?.injectedText === 'string' ? opts.injectedText.trim() : '';
     const isInjected = injectedText.length > 0;
 
-    // Proweniencja liczona RAZ i doklejana do meta wiadomości — dalej pytamy już tylko o nią.
+    // Proweniencja liczona RAZ i doklejana do meta wiadomości - dalej pytamy już tylko o nią.
     const messageOrigin = resolveMessageOrigin(opts?.meta);
     const isHuman = messageOrigin === 'human';
     const rawMeta = opts?.meta && typeof opts.meta === 'object' ? opts.meta : {};
     const messageMeta = { ...rawMeta, origin: messageOrigin };
 
     const rawText = isInjected ? injectedText : this.input_area.value.trim();
-    // Markery `@@skill:` parsujemy TYLKO w tekście od człowieka — treść artefaktu, `context_summary`
+    // Markery `@@skill:` parsujemy TYLKO w tekście od człowieka - treść artefaktu, `context_summary`
     // z propozycji delegacji czy wynik suba to cudzy tekst, nie polecenie usera.
     const inlineTriggers = parseTriggersIfHuman(rawText, messageMeta);
     const text = inlineTriggers.length > 0 ? (stripInlineTriggers(rawText) || rawText) : rawText;
@@ -240,18 +258,18 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     if (this.is_generating) {
         if (isInjected) {
             // Dostawca wyniku sprawdza `is_generating` PRZED wstrzyknięciem, więc tu nie
-            // powinniśmy trafić. Jak jednak trafimy — wynik ZOSTAJE w kolejce notifiera
+            // powinniśmy trafić. Jak jednak trafimy - wynik ZOSTAJE w kolejce notifiera
             // (dostawca zwrócił `true` tylko wtedy, gdy tura naprawdę ruszyła), a slotu
             // usera nie wolno zająć powiadomieniem.
             this._subTaskTurnPending = false;
-            log.warn('Chat', 'Powiadomienie o subie trafiło na trwającą turę — pomijam wstrzyknięcie');
+            log.warn('Chat', 'Powiadomienie o subie trafiło na trwającą turę - pomijam wstrzyknięcie');
             return;
         }
         // Kolejka wozi PROWENIENCJĘ razem z tekstem. Slot NIE bierze się wyłącznie z pola
-        // wpisywania — ścieżki, które wypełniają pole z kodu (guzik artefaktu, propozycja
+        // wpisywania - ścieżki, które wypełniają pole z kodu (guzik artefaktu, propozycja
         // delegacji, komentarz inline), trafiają tu tak samo. Bez pieczątki dren nadawałby im
         // `human` i treść artefaktu wracałaby z przywilejami usera.
-        // Slot należy do ZAKŁADKI, nie do widoku — zapamiętujemy, kto był na wierzchu. Dren
+        // Slot należy do ZAKŁADKI, nie do widoku - zapamiętujemy, kto był na wierzchu. Dren
         // (`set_generating(false)`, wołane też przez `_switchTab`) porówna to z aktualną
         // zakładką i nie wystrzeli wiadomości pisanej do Jaskra w turę Borysa.
         this._queuedMessage = queueChatMessage(rawText, messageMeta, this._queueOwner());
@@ -262,7 +280,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     }
 
     // Tu NIE MA `this._abortedStream = null` („nowa wiadomość = świeży start"): przerwanie jako
-    // JEDNO pole widoku byłoby dziurą — kolejna wiadomość (auto-tura z wynikiem suba, albo drain
+    // JEDNO pole widoku byłoby dziurą - kolejna wiadomość (auto-tura z wynikiem suba, albo drain
     // przy przełączeniu zakładki) gasiłaby przerwanie tury, która WCIĄŻ biegnie w narzędziu,
     // i zatrzymana pętla wznawiałaby iteracje. Przerwanie jest stanem TURY (`turn.abort`, niżej):
     // nowa tura dostaje własny uchwyt i nie ma jak odkręcić przerwania starej. Tu nie ma już
@@ -275,8 +293,8 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     const activeAgentName = this.plugin?.agentManager?.getActiveAgent()?.name || '?';
     log.info('Chat', `[${activeAgentName}] send_message → "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`);
 
-    // After long inactivity — just save (session continues, no reset)
-    // Read from settings.pkmAssistant.* (every other pkm setting lives there) — wired to the
+    // After long inactivity - just save (session continues, no reset)
+    // Read from settings.pkmAssistant.* (every other pkm setting lives there) - wired to the
     // Settings → Pamięć control (default 30).
     const timeoutMs = (this.env?.settings?.pkmAssistant?.sessionTimeoutMinutes || 30) * 60 * 1000;
     if (this.lastMessageTimestamp && this.rollingWindow.messages.length > 0) {
@@ -288,7 +306,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     this.lastMessageTimestamp = Date.now();
 
     // Handle slash commands through registry.
-    // Komenda `/` to polecenie, więc wykonujemy ją WYŁĄCZNIE z tekstu człowieka — tekst
+    // Komenda `/` to polecenie, więc wykonujemy ją WYŁĄCZNIE z tekstu człowieka - tekst
     // maszynowy (wynik suba, treść artefaktu, `context_summary`) może zaczynać się od czegokolwiek.
     if (mayRunSlashCommand(messageMeta) && text.startsWith('/')) {
         if (await this.slashCommands?.execute(text, { view: this, plugin: this.plugin })) {
@@ -296,7 +314,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         }
     }
 
-    // Add to history (max 20) — historia to pamięć TEGO, co user wpisał (strzałka w górę).
+    // Add to history (max 20) - historia to pamięć TEGO, co user wpisał (strzałka w górę).
     if (!isInjected) {
         this.inputHistory.push(rawText);
         if (this.inputHistory.length > 20) {
@@ -310,7 +328,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         : await this._resolveMentions(text);
 
     // Capture attachments before clearing.
-    // ⚠️ Przy wstrzykniętej turze załączniki usera zostają NIETKNIĘTE — czekają na jego
+    // ⚠️ Przy wstrzykniętej turze załączniki usera zostają NIETKNIĘTE - czekają na jego
     // własną wiadomość. Podpięcie ich do powiadomienia zjadłoby mu spinacz bez pytania.
     const hasAttachments = !isInjected && this.attachmentManager?.hasAttachments();
     let attachmentResult = null;
@@ -332,12 +350,12 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         }
     }
 
-    // Clear input + attachments + mention chips — TYLKO gdy to user wysłał wiadomość.
+    // Clear input + attachments + mention chips - TYLKO gdy to user wysłał wiadomość.
     // Wstrzyknięta tura nie ma prawa skasować szkicu, który user właśnie pisze.
     if (!isInjected) {
         this.resetInputArea();
         // Szkic przechwycony przez kolejkę wiadomości (patrz `set_generating`) wraca dokładnie
-        // tutaj — jednorazowo, po wyczyszczeniu pola przez `resetInputArea`.
+        // tutaj - jednorazowo, po wyczyszczeniu pola przez `resetInputArea`.
         if (this._draftAfterSend) {
             this.input_area.value = this._draftAfterSend;
             this._draftAfterSend = null;
@@ -366,49 +384,49 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         timestamp: new Date().toISOString()
     });
 
-    // WŁAŚCICIEL TURY zamrożony DOKŁADNIE TU — razem z zapaleniem guzika Stop i PRZED pierwszym
+    // WŁAŚCICIEL TURY zamrożony DOKŁADNIE TU - razem z zapaleniem guzika Stop i PRZED pierwszym
     // awaitem przygotowania. Za chwilę wchodzimy w budowę promptu z pamięcią (okno „potrafi
     // trwać sekundy", patrz niżej przy `turnAbort`), a `_switchTab` nie jest w tym czasie
     // blokowany i przestawia `agentManager.activeAgent`, `this.rollingWindow`,
     // `this.tokenTracker`. Czytanie tych luster PO awaitach zamiast z zamrożonego `owner`
-    // pozwoliłoby rozmowie zaczętej u agenta A — z promptem z JEGO pamięci — skończyć jako
+    // pozwoliłoby rozmowie zaczętej u agenta A - z promptem z JEGO pamięci - skończyć jako
     // tura agenta B (jego model, jego uprawnienia narzędzi, jego plik sesji). Od tej linii
     // wszystko w `send_message` idzie z `owner`; `getActiveAgent()` / `this.rollingWindow` są
     // tu zakazane (pilnuje tego strażnik po źródle w `turnOwner.test.ts`).
     const owner = freezeTurnOwner(this);
-    // Klucz `_agentStates` liczony RAZ, TU — zaraz po zamrożeniu właściciela, przed KAŻDYM
-    // awaitem tej funkcji — i wożony dalej jako STRING (`turn.origin.tabKey`, `ownerTabKey`
+    // Klucz `_agentStates` liczony RAZ, TU - zaraz po zamrożeniu właściciela, przed KAŻDYM
+    // awaitem tej funkcji - i wożony dalej jako STRING (`turn.origin.tabKey`, `ownerTabKey`
     // w catchu). `_tabKey(turn.owner?.tab)` przeliczany LENIWIE przy sprzątaniu
     // (finalize/error/watchdog, czyli po długich awaitach albo minutach oczekiwania na model)
-    // czyta ŻYWE pole `tab.sessionPath` — a `/save session` → „Archiwizuj i nowa sesja"
+    // czyta ŻYWE pole `tab.sessionPath` - a `/save session` → „Archiwizuj i nowa sesja"
     // (`archive_new`) podmienia `activeTab.sessionPath` NA MIEJSCU, bez re-keyowania
     // `_agentStates`. Zamrożony klucz sprzed mutacji trafia we wpis, pod którym stan NAPRAWDĘ
-    // leży; przeliczony po fakcie — nie.
+    // leży; przeliczony po fakcie - nie.
     const ownerTabKey = _tabKey(owner.tab);
     // Prawdziwa wiadomość człowieka przerywa ŁAŃCUCH auto-tur PO SUBACH (`_deliverSubTaskResult`,
-    // niżej) dla TEGO agenta — inaczej sufit `max_consecutive_auto_turns` liczyłby też tury,
+    // niżej) dla TEGO agenta - inaczej sufit `max_consecutive_auto_turns` liczyłby też tury,
     // które user zaczął sam. `isHuman` to `resolveMessageOrigin(opts?.meta)` policzone na
     // starcie tej funkcji; klucz mapy = `owner.agentName`, ten sam co reszta bookkeepingu
     // per-agent w tym pliku (`_streamCtxMap` / `_agentStates` / `_preparingTurns`).
-    // `resetAutoTurnChain()` (zamiast gołego `.delete()`) — reset ma się czytać jako ZDARZENIE,
+    // `resetAutoTurnChain()` (zamiast gołego `.delete()`) - reset ma się czytać jako ZDARZENIE,
     // symetryczne do `evaluateAutoTurnChain()` w `_deliverSubTaskResult`, nie jako sprzątanie mapy.
     if (isHuman) this._autoTurnChainCounts?.set(owner.agentName, resetAutoTurnChain());
     // Przechwycone okno + tracker tury: store pętli i cała finalizacja operują na TYM oknie,
     // nawet jeśli user przełączy zakładkę.
-    // Konstruktor widoku zakłada oba pola i żadna ścieżka ich nie zeruje — zamrożenie je tylko kopiuje.
+    // Konstruktor widoku zakłada oba pola i żadna ścieżka ich nie zeruje - zamrożenie je tylko kopiuje.
     const rw = owner.rollingWindow!;
     const tt = owner.tokenTracker!;
 
     // Uchwyt przerwania powstaje RAZEM z zapaleniem guzika Stop, nie dopiero przy rejestracji
     // tury w `_streamCtxMap`. Między jednym a drugim jest budowa promptu z pamięcią (potrafi
-    // trwać sekundy) — w tym oknie user MOŻE kliknąć Stop, a mapa tur jeszcze nic o tej turze
+    // trwać sekundy) - w tym oknie user MOŻE kliknąć Stop, a mapa tur jeszcze nic o tej turze
     // nie wie. `_preparingTurns` to skrzynka kontaktowa na ten czas.
     const turnAbort = createTurnAbort();
     this._preparingTurns.set(owner.agentName, turnAbort);
 
     // Toggle UI state + show immediate visual feedback
     this.set_generating(true);
-    // Od tej chwili serializację przejmuje `is_generating` — bezpiecznik „tura powiadomienia
+    // Od tej chwili serializację przejmuje `is_generating` - bezpiecznik „tura powiadomienia
     // już rusza" (ustawiany przez dostawcę PRZED tym awaitem) nie jest już potrzebny.
     this._subTaskTurnPending = false;
     this.showTypingIndicator(t('chat.streaming.preparing'));
@@ -420,7 +438,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         const platform = this.env?.settings?.pkmAssistant?.chat?.platform || '';
         const isLocalModel = isLocalPlatform(platform);
         // Pass artifacts via context → PromptBuilder handles them in build().
-        // Nie ma sekcji trybu w promptcie — workMode nie istnieje.
+        // Nie ma sekcji trybu w promptcie - workMode nie istnieje.
         // Drugi argument = agent-WŁAŚCICIEL. Bez niego prompt składałby się z persony i pamięci
         // agenta, który akurat jest na wierzchu.
         const basePrompt = await agentManager.getActiveSystemPromptWithMemory({
@@ -431,7 +449,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         rw.setSystemPrompt(basePrompt);
         if (inlineTriggers.length > 0) {
             // Marker @@skill: nie woła skill_execute. Resolwujemy skill TU (async/plugin-zależne)
-            // z overridami per-agent — „doczepki nie giną" (prompt_append) — i wstrzykujemy
+            // z overridami per-agent - „doczepki nie giną" (prompt_append) - i wstrzykujemy
             // PEŁNY przepis do instrukcji tury. Nieznany skill → krótka nota.
             const resolvedSkills: Record<string, { name: string; prompt?: string }> = {};
             for (const m of inlineTriggers) {
@@ -446,7 +464,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         log.timing('Chat', `System prompt build (${basePrompt.length} znaków, local=${isLocalModel})`, t1);
     }
 
-    // Oczko: inject active note context (if enabled) — still dynamic per-message
+    // Oczko: inject active note context (if enabled) - still dynamic per-message
     const oczkoEnabled = this.env?.settings?.pkmAssistant?.enableOczko !== false;
     if (oczkoEnabled) {
         try {
@@ -458,7 +476,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
                     rw.setSystemPrompt(`${cp}\n\n${noteCtx.text}`);
                 }
                 // Image blocks → inject into last user message
-                // Always inject — adapter auto-strips for non-vision models
+                // Always inject - adapter auto-strips for non-vision models
                 if (noteCtx.images?.length > 0) {
                     const msgs = rw.messages;
                     const lastUserIdx = msgs.length - 1;
@@ -486,23 +504,23 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         }
     }
 
-    // Profil i nazwa właściciela — z zamrożenia sprzed budowy promptu, nie z lustra.
+    // Profil i nazwa właściciela - z zamrożenia sprzed budowy promptu, nie z lustra.
     const activeAgent = owner.agent;
     const streamAgentName = owner.agentName;
 
-    // === STREAMING CONTEXT (per-tab) — MINIMALNY wpis ===
+    // === STREAMING CONTEXT (per-tab) - MINIMALNY wpis ===
     // Mechanika tury żyje w zamknięciu `turn` niżej. _streamCtxMap trzyma tylko to, co czytają
     // INNE metody: handle_chunk (ctx.agent → nagłówek/kolor) oraz needsFreshModel (size > 1 =
     // współbieżny stream w tym ChatView).
     //
     // `turnId` = tożsamość TEJ tury. Mapa jest kluczowana nazwą agenta, więc porzucona tura
-    // (nowa sesja wystartowała następną) i tura żywa dzieliłyby wpis bez niego — watchdog
+    // (nowa sesja wystartowała następną) i tura żywa dzieliłyby wpis bez niego - watchdog
     // porzuconej tury strzelałby „po agencie" i ubijałby requesty tury ŻYWEJ. Strażnik
     // w _onStreamStall porównuje turnId zanim komukolwiek przerwie.
     const turnId = ++_turnSeq;
     // Uchwyt przerwania TEJ tury (`turnAbort`, założony wyżej razem z guzikiem Stop) wchodzi
-    // teraz do wpisu `_streamCtxMap` — stamtąd sięga po niego `stop_generation(agentName)`
-    // i zamknięcie widoku. Ten sam obiekt niesie `turn` (czyta go pętla i watchdog) — nie kopia.
+    // teraz do wpisu `_streamCtxMap` - stamtąd sięga po niego `stop_generation(agentName)`
+    // i zamknięcie widoku. Ten sam obiekt niesie `turn` (czyta go pętla i watchdog) - nie kopia.
     this._streamCtxMap.set(streamAgentName, {
         agentName: streamAgentName,
         agent: activeAgent,
@@ -511,7 +529,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         turnId,
         abort: turnAbort,
     });
-    // Tura ma już wpis w mapie — skrzynka kontaktowa na czas przygotowania nie jest potrzebna.
+    // Tura ma już wpis w mapie - skrzynka kontaktowa na czas przygotowania nie jest potrzebna.
     this._preparingTurns.delete(owner.agentName);
 
     // === SNAPSHOT for "Pokaż prompt" in Settings ===
@@ -527,7 +545,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     }
 
     try {
-        // Get or create chat model — fresh instance if another stream is already active.
+        // Get or create chat model - fresh instance if another stream is already active.
         // ChatModel.stream() is NOT concurrent-safe on the same instance.
         //
         // Sprawdzać trzeba plugin-globalnie przez StreamingManager, nie tylko po rozmiarze
@@ -535,7 +553,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         // i używałby shared cache → cross-tab race. Fresh instance gdy jakikolwiek inny stream
         // już leci albo gdy w obrębie tego ChatView jest współbieżność.
         // Sama decyzja („lokalna współbieżność ALBO jakikolwiek inny stream") mieszka w
-        // `StreamingManager.ts` — pliku bez `obsidian`, z testami obu stron.
+        // `StreamingManager.ts` - pliku bez `obsidian`, z testami obu stron.
         const needsFreshModel = shouldUseFreshModel(this._streamCtxMap.size, streamingManager.getActiveStreams().length);
         // Model rozwiązywany dla agenta-WŁAŚCICIELA. Bez `agent` `get_chat_model` czyta
         // `getActiveAgent()`, więc tura zaczęta u A jechałaby modelem (i kluczem) agenta B.
@@ -548,9 +566,8 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
 
         log.timing('Chat', `TOTAL send→loop (model: ${chat_model.modelKey || 'unknown'}, parallel: ${needsFreshModel})`, sendStart);
 
-        // Start streaming — closured callbacks know which agent they belong to
-        this._agentHeaderShown = false;
-        // Ostatnia treść namalowana przez handle_chunk (cykl życia jak current_message_container) —
+        // Start streaming - closured callbacks know which agent they belong to
+        // Ostatnia treść namalowana przez handle_chunk (cykl życia jak current_message_container) -
         // czyta to _finalizeTurn, żeby wiedzieć czy finalna wersja różni się od tego, co widzi user.
         this._lastPaintedContent = null;
         this.showTypingIndicator();
@@ -562,11 +579,11 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
 
         // ADRES ZWROTNY TURY: dokąd ma wrócić wynik suba odpalonego w tle.
         // Liczony RAZ na turę (nie per tool call), bo user może w trakcie przełączyć zakładkę
-        // albo agent może zacząć nową sesję — powiadomienie ma trafić tam, SKĄD wyszło zlecenie.
+        // albo agent może zacząć nową sesję - powiadomienie ma trafić tam, SKĄD wyszło zlecenie.
         // Sesja i zakładka MUSZĄ pochodzić z zamrożenia sprzed budowy promptu: czytanie ich
         // tutaj, czyli już po awaitach, po przełączeniu zakładki celowałoby w cudzą zakładkę.
         const turnSessionPath = owner.sessionPath;
-        // `ownerTabKey` — liczony RAZ, na samym starcie send_message, przed pierwszym awaitem
+        // `ownerTabKey` - liczony RAZ, na samym starcie send_message, przed pierwszym awaitem
         // (patrz komentarz przy jego deklaracji). Reużyty tu zamiast ponownego
         // `_tabKey(owner.tab)`, żeby nie było DWÓCH miejsc liczących ten sam klucz w jednej turze.
         const turnOrigin = {
@@ -592,7 +609,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
             // `this.currentAutonomy`, więc bez zamrożenia zlecenie wydane w `edge` kończyłoby w `yolo`.
             autonomy: owner.autonomy,
             hasUsedDelegate: false,
-            // Tura z markerem @@skill: startuje z aktywnym skillem (iteracja 0) — przepis
+            // Tura z markerem @@skill: startuje z aktywnym skillem (iteracja 0) - przepis
             // wstrzyknięty do promptu, więc nie ma tu wywołania narzędzia do wykrycia.
             skillActiveAt: inlineTriggers.some(m => m.type === 'skill') ? 0 : null,
             skillArtifactCreated: false,         // czy po skillu stworzono todo/plan
@@ -606,19 +623,19 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
             lastApiOutput: 0,
             lastCacheMeta: null,
             responseRecorded: false,             // czy onUsage już zapisał tę odpowiedź do TokenTracker
-            // Estymata wejścia PER TURA (_captureInputEstimate), nie per widok — inaczej dwie
+            // Estymata wejścia PER TURA (_captureInputEstimate), nie per widok - inaczej dwie
             // tury naraz w jednym ChatView dzieliłyby jedno pole `this._lastInputTokens`.
             lastInputTokens: 0,
             lastInputChars: 0,
         };
 
         // Watchdog martwego streamu: zdechnięty lokalny most/serwer potrafi trzymać
-        // połączenie bez ANI JEDNEGO chunka (log "[ChatAdapter] no chunk") — bez watchdoga tura
+        // połączenie bez ANI JEDNEGO chunka (log "[ChatAdapter] no chunk") - bez watchdoga tura
         // wisiała aż do ręcznego Stopa (twardy timeout XHR to dopiero 600 s). Zbrojony na start
         // każdego wywołania modelu (onIterationStart/onBackstop), karmiony chunkami, rozbrajany
-        // na tool calls i koniec pętli — czas pracy narzędzi się NIE liczy (osobne timeouty w
+        // na tool calls i koniec pętli - czas pracy narzędzi się NIE liczy (osobne timeouty w
         // modules/tools/). Platforma xai nie streamuje (PKMXaiAdapter woła chunk raz, po pełnym
-        // complete()) — cisza mid-flight jest tam normalna, watchdog wyłączony.
+        // complete()) - cisza mid-flight jest tam normalna, watchdog wyłączony.
         const stallTimeoutMs = turn.platform === 'xai'
             ? 0
             : getLimits(this.env?.settings).chat_stream_stall_timeout_ms;
@@ -629,7 +646,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         if (sCtx) sCtx.watchdog = turn.watchdog; // stop_generation / onClose rozbrajają przez ctx
 
         // Tracking multi-tab (StreamingManager).
-        // `WorkspaceLeaf.id` nie jest w `obsidian.d.ts`, ale jest w runtime — stąd węższy odczyt.
+        // `WorkspaceLeaf.id` nie jest w `obsidian.d.ts`, ale jest w runtime - stąd węższy odczyt.
         const streamId = `${(this.leaf as { id?: string })?.id || 'main'}::${streamAgentName}`;
         turn.streamId = streamId; // _onStreamStall wyrejestrowuje stream sam (finally może nie ruszyć)
         const modelId = chat_model?.modelKey || chat_model?.modelId || null;
@@ -645,7 +662,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         let toolIterIdx = 0;
         // Trace pętli → .pkm-assistant/logs/trace.log. Label chat/<agent>#<8 znaków id sesji>
         // (id sesji z basename activeSessionPath; brak sesji → sam label agenta).
-        // Ta sama ścieżka sesji, którą niesie `turn.origin` — liczona raz, wyżej.
+        // Ta sama ścieżka sesji, którą niesie `turn.origin` - liczona raz, wyżej.
         const _sessionId = turnSessionPath ? (turnSessionPath.split('/').pop() || '').replace(/\.md$/, '') : '';
         const _traceLabel = _sessionId
             ? `chat/${streamAgentName || '?'}#${_sessionId.slice(0, 8)}`
@@ -654,7 +671,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         let result;
         try {
             // `model`/`resolveTools` niżej: pętla opisuje model i narzędzia WŁASNYMI, węższymi
-            // kontraktami (`RunAgentLoopOptions`) — zawężenie stoi w miejscu przekazania.
+            // kontraktami (`RunAgentLoopOptions`) - zawężenie stoi w miejscu przekazania.
             result = await runAgentLoop({
                 model: chat_model as unknown as RunAgentLoopOptions['model'],
                 store: new RollingWindowMessageStore(rw),
@@ -672,13 +689,13 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
                         agent_delegate: getLimits(this.env?.settings).subagent_result_max_chars,
                     },
                     // Pas ostateczny per wywołanie modelu. Watchdog ciszy łapie brak chunków, ale
-                    // NIE łapie promisy ubitej z zewnątrz (xhr.abort nie emituje zdarzenia — await
+                    // NIE łapie promisy ubitej z zewnątrz (xhr.abort nie emituje zdarzenia - await
                     // wisiałby wiecznie). Kolejka bramki mostu się nie liczy (gate_admitted).
                     perCallTimeoutMs: getLimits(this.env?.settings).chat_model_call_timeout_ms,
                 },
                 // agentName → log pętli; `agent` → payload (adaptery czytają _req.agentName || _req.agent
                 // dla prompt_cache_key / x-grok-conv-id; pętla strippuje `agentName` z payloadu, więc
-                // klucz cache niesiemy przez `agent` — wartość identyczna).
+                // klucz cache niesiemy przez `agent` - wartość identyczna).
                 modelOptions: { thinking: thinkingFlag, agentName: streamAgentName, agent: streamAgentName },
                 hooks: {
                     onIterationStart: () => this._chatOnIterationStart(turn),
@@ -688,7 +705,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
                     onUsage: (usage) => this._chatOnUsage(turn, usage as Usage),
                     onBackstop: () => this._chatOnBackstop(turn),
                 },
-                // Chunki przerwanej tury nie mogą nic namalować — bramka stoi PRZED
+                // Chunki przerwanej tury nie mogą nic namalować - bramka stoi PRZED
                 // `handle_chunk`, bo wpis `_streamCtxMap` znika przy Stopie (a to on niesie
                 // uchwyt dla widoku).
                 callbacks: { chunk: (resp) => { if (turnAbort.isAborted()) return; turn.watchdog!.feed(); this.handle_chunk(resp as StreamResponse, streamAgentName); } },
@@ -707,22 +724,22 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         }
 
         if (result.stoppedBy === 'abort') {
-            // Przerwane przez usera — stop_generation zrobił już UI cleanup. Nie renderujemy finalnej odpowiedzi.
+            // Przerwane przez usera - stop_generation zrobił już UI cleanup. Nie renderujemy finalnej odpowiedzi.
             this._releaseStreamCtx(streamAgentName, turnId);
             log.info('Chat', `[${streamAgentName}] tura przerwana (abort)`);
         } else {
             await this._finalizeTurn(turn, result);
         }
     } catch (error) {
-        // Abort mid-stream (stopStream → XHR abort) potrafi rozjechać stream — traktuj flagę abort
+        // Abort mid-stream (stopStream → XHR abort) potrafi rozjechać stream - traktuj flagę abort
         // jako przerwanie (nie błąd), żeby nie renderować "Error:".
         if (turnAbort.isAborted()) {
             this._releaseStreamCtx(streamAgentName, turnId);
             log.info('Chat', `[${streamAgentName}] stream aborted (mid-request)`);
         } else {
-            // Log tury też przez maskę — Logger pisze do pliku w vaultcie.
+            // Log tury też przez maskę - Logger pisze do pliku w vaultcie.
             log.error('Chat', `[${streamAgentName}] send_message ERROR:`, safeErrorText(error));
-            // `ownerTabKey` (string, zamrożony przy starcie tury) — nie obiekt `owner.tab`, żeby
+            // `ownerTabKey` (string, zamrożony przy starcie tury) - nie obiekt `owner.tab`, żeby
             // `handle_error` nie musiał go sam przeliczać leniwie (patrz sygnatura niżej).
             this.handle_error(error, streamAgentName, turnId, ownerTabKey);
         }
@@ -744,7 +761,7 @@ export function handle_chunk(this: ChatViewLike, response: StreamResponse, agent
     this.hideTypingIndicator();
     if (!this.current_message_container) {
         // Budowa kontenera wiadomości agenta MUSI iść przez `_ensureAgentMessageContainer`
-        // (poniżej), nie mieć własnej kopii ciała — jedyna różnica jest w SKĄD bierze się agent
+        // (poniżej), nie mieć własnej kopii ciała - jedyna różnica jest w SKĄD bierze się agent
         // (tu: kontekst streamu, tam: parametr wołacza). Kontener bez tekstu poprzedzającego
         // (tool calls bez czatu) idzie tą samą drogą przez `_ensureAgentMessageContainer`.
         // Use captured agent, not getActiveAgent()
@@ -766,13 +783,13 @@ export function handle_chunk(this: ChatViewLike, response: StreamResponse, agent
         text: content,
         reasoning: showThinking ? reasoningContent : '',
         // Klatka wozi WŁAŚCICIELA. Timer uzbrojony ≤80 ms przed przełączeniem zakładki
-        // wystrzeliwałby już na cudzej bez tego znacznika — malowanie nie miałoby jak poznać,
+        // wystrzeliwałby już na cudzej bez tego znacznika - malowanie nie miałoby jak poznać,
         // że jego zakładka zeszła z wierzchu.
         owner: agentName || '',
     });
 }
 
-/** Okno koalescencji malowania strumienia (ms) — patrz `renderThrottle.ts`. */
+/** Okno koalescencji malowania strumienia (ms) - patrz `renderThrottle.ts`. */
 const STREAM_PAINT_INTERVAL_MS = 80;
 
 /** Throttle malowania TEGO widoku (leniwy, cykl życia jak `current_message_container`). */
@@ -788,17 +805,17 @@ export function _streamRenderThrottle(this: ChatViewLike): RenderThrottle {
 
 /**
  * Jedno malowanie strumienia: blok myśli → dymek tekstu → przewinięcie.
- * Kolejność DOM (thinking → tools → text) i treść są dokładnie te, co przed throttlem —
+ * Kolejność DOM (thinking → tools → text) i treść są dokładnie te, co przed throttlem -
  * zmienia się wyłącznie CZĘSTOTLIWOŚĆ wywołania.
  *
  * ⚠️ Cel malowania mógł zniknąć między zgłoszeniem klatki a jej wystrzałem (Stop, przełączenie
- * zakładki, `_resetPaintTargets` w przerwie na wyniki narzędzi) — wtedy nie malujemy nic.
+ * zakładki, `_resetPaintTargets` w przerwie na wyniki narzędzi) - wtedy nie malujemy nic.
  */
 export function _paintStreamFrame(this: ChatViewLike, frame: StreamFrame) {
     if (!this.current_message_container || !this.current_message_text) return;
-    // Sama niepustość wskaźników NIE wystarcza — po `_switchTab` celują one w węzły WYPIĘTE
-    // z DOM-u starej zakładki (tekst poszedłby w nicość), ale skutek uboczny malowania —
-    // `scrollToBottom` — przewinąłby NOWĄ zakładkę i skasował przywrócony `scrollTop`.
+    // Sama niepustość wskaźników NIE wystarcza - po `_switchTab` celują one w węzły WYPIĘTE
+    // z DOM-u starej zakładki (tekst poszedłby w nicość), ale skutek uboczny malowania -
+    // `scrollToBottom` - przewinąłby NOWĄ zakładkę i skasował przywrócony `scrollTop`.
     const activeTabAgent = this.chatTabs?.find((tab: ChatTab) => tab.isActive)?.agentName;
     if (!shouldPaintFrame(frame, activeTabAgent)) return;
 
@@ -812,14 +829,33 @@ export function _paintStreamFrame(this: ChatViewLike, frame: StreamFrame) {
                 this._currentThinkingBlock,
                 this.current_message_bubble
             );
+            // Nowa kotwica łącznika (kafelek `.cs-tile--agent` dostaje kryształ, patrz
+            // `chat_view.css`) - zaplanuj przerysowanie ZAMIAST czekać do `_finalizeTurn`. Tylko
+            // przy WSTAWIENIU, i to raz na RUNDĘ narzędzi, nie raz na całą turę (poprawka
+            // nieścisłości z recenzji niezależnej) - `_chatBeforeContinue` zeruje
+            // `_currentThinkingBlock` (i `_lastPaintedContent` przez `_resetPaintTargets`) przed
+            // KAŻDĄ kolejną rundą tej samej tury, więc druga/trzecia runda z własnym blokiem
+            // myślenia trafia tu ponownie jako "wstawienie" - `updateThinkingBlock` w gałęzi else
+            // dopisuje samą treść W RAMACH jednej rundy, bez zmiany zbioru kotwic, więc NIE
+            // planuje kolejnego przerysowania (throttle malowania i tak woła tę funkcję
+            // dziesiątki razy na sekundę w trakcie streamu).
+            this._scheduleConnectorRedraw();
         } else {
             updateThinkingBlock(this._currentThinkingBlock, reasoningContent);
         }
     }
 
+    // Dymek tekstu traci `:empty` (CSS `display:none`) dopiero TERAZ, przy PIERWSZEJ niepustej
+    // treści - dopóki był pusty, `_drawConnectorLines` go pomijał jako kotwicę (zero wysokości).
+    // Zaplanuj przerysowanie WYŁĄCZNIE przy tym przejściu (pusty -> niepusty), nie przy każdej
+    // klatce: rosnący tekst W TEJ SAMEJ turze nie przesuwa środka kryształu (stały offset od
+    // GÓRY dymka, patrz `_crystalCenterY`), więc kolejne klatki NIE muszą przerysowywać - to
+    // właśnie dlatego `scrollToBottom` niżej dostaje `drawConnectors: false`.
+    const hadTextBefore = !!this._lastPaintedContent;
+
     // Update text (render as markdown)
     // `MarkdownRenderer.render` (nie `renderMarkdown`, deprecated). Wołane fire-and-forget bez
-    // await, tak samo jak `renderMarkdown` (obie zwracają `Promise<void>`, obsidian.d.ts) —
+    // await, tak samo jak `renderMarkdown` (obie zwracają `Promise<void>`, obsidian.d.ts) -
     // `.render()` przyjmuje dodatkowo `app` jako pierwszy argument, reszta sygnatury bez zmian,
     // więc to nie wprowadza żadnego nowego ryzyka out-of-order.
     this.current_message_text.empty();
@@ -831,15 +867,18 @@ export function _paintStreamFrame(this: ChatViewLike, frame: StreamFrame) {
         this
     );
     this._lastPaintedContent = frame.text;
+    if (!hadTextBefore && frame.text) {
+        this._scheduleConnectorRedraw();
+    }
 
-    // Scroll to bottom, BEZ przerysowania łączników — rosnący tekst ostatniej wiadomości nie
+    // Scroll to bottom, BEZ przerysowania łączników - rosnący tekst ostatniej wiadomości nie
     // przesuwa ani kryształu, ani wierszy akcji, a przerysowanie ciągnęłoby skan całej listy
     // wiadomości z przeplotem odczytów layoutu.
     this.scrollToBottom(true, { drawConnectors: false });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HOOKI PĘTLI (runAgentLoop) — cała UI/side-effect logika dawnego handle_done.
+// HOOKI PĘTLI (runAgentLoop) - cała UI/side-effect logika dawnego handle_done.
 // Każdy dostaje `turn` (kontekst tury z zamknięcia send_message).
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -853,7 +892,7 @@ export function _isTurnActiveTab(this: ChatViewLike, turn: ChatTurn) {
  * JEDNO miejsce prawdy o wskaźnikach malowania.
  *
  * `handle_chunk` maluje do ISTNIEJĄCEGO `current_message_container`, więc każde wyjście z tury
- * musi je wyzerować — inaczej następna odpowiedź trafia do dymka poprzedniej wiadomości (albo,
+ * musi je wyzerować - inaczej następna odpowiedź trafia do dymka poprzedniej wiadomości (albo,
  * po przerysowaniu listy, do węzła wypiętego z DOM-u, czyli w nicość). Ścieżka sukcesu
  * (`_finalizeTurn`) i Stop robiły to od zawsze; ścieżka BŁĘDU wychodziła bez zerowania.
  *
@@ -866,7 +905,7 @@ export function _resetPaintTargets(this: ChatViewLike) {
     this.current_message_text = null;
     this._lastPaintedContent = null;
     // Throttle malowania trzyma WŁASNĄ pamięć ostatniej klatki i potrafi mieć uzbrojony timer.
-    // Zerujemy razem ze wskaźnikami — inaczej klatka poprzedniej tury
+    // Zerujemy razem ze wskaźnikami - inaczej klatka poprzedniej tury
     // wystrzeliłaby w nieistniejący już dymek. Ścieżki, które chcą ZACHOWAĆ ostatni fragment
     // (koniec tury, Stop, przerwa na wyniki narzędzi), wołają `flush()` PRZED tym helperem.
     this._renderThrottle?.reset();
@@ -877,7 +916,7 @@ export function _resetPaintTargets(this: ChatViewLike) {
  *
  * `_streamCtxMap` jest kluczowana NAZWĄ agenta, a pod jedną nazwą potrafią żyć dwie tury
  * (zakładka dodana ponownie z pickera, wyścig z przygotowaniem promptu). Bezwarunkowy
- * `delete` przy finalizacji STAREJ tury wyrzucał uchwyt przerwania ŻYWEJ — od tej chwili
+ * `delete` przy finalizacji STAREJ tury wyrzucał uchwyt przerwania ŻYWEJ - od tej chwili
  * Stop robił sam UI-cleanup, `abort()` nie leciało wcale, a pętla spokojnie wołała model
  * i wykonywała narzędzia. Guzik wyglądał na skuteczny i nie był.
  *
@@ -888,13 +927,13 @@ export function _releaseStreamCtx(this: ChatViewLike, agentName: string, turnId?
     const live = this._streamCtxMap.get(agentName);
     if (!live) return;
     if (typeof turnId === 'number' && typeof live.turnId === 'number' && live.turnId !== turnId) {
-        log.warn('Chat', `[${agentName}] tura #${turnId} domyka się, ale w mapie żyje #${live.turnId} — zostawiam jej uchwyt`);
+        log.warn('Chat', `[${agentName}] tura #${turnId} domyka się, ale w mapie żyje #${live.turnId} - zostawiam jej uchwyt`);
         return;
     }
     this._streamCtxMap.delete(agentName);
 }
 
-/** Kto jest na wierzchu — właściciel slotu kolejki i punkt odniesienia dla drenu. */
+/** Kto jest na wierzchu - właściciel slotu kolejki i punkt odniesienia dla drenu. */
 export function _queueOwner(this: ChatViewLike): QueueOwner {
     const tab = (this.chatTabs || []).find((t: ChatTab) => t.isActive);
     return { agentName: tab?.agentName || '', tabKey: tab ? _tabKey(tab) : '' };
@@ -908,23 +947,19 @@ export function _clearQueuedDrainTimer(this: ChatViewLike) {
     }
 }
 
-/** Tworzy kontener wiadomości agenta (gdy handle_chunk go nie stworzył — np. tool calls bez tekstu). */
+/** Tworzy kontener wiadomości agenta (gdy handle_chunk go nie stworzył - np. tool calls bez tekstu). */
 export function _ensureAgentMessageContainer(this: ChatViewLike, streamAgent: Agent | null | undefined) {
     const streamColor = SkinManager.getAgentColor(streamAgent || 'default');
     const agName = streamAgent?.name || 'Agent';
 
+    // Kolumna dymkow (2.3.0, kolejna faza "Czat bez scian"): naglowek serii znikl calkiem -
+    // krysztal siedzi teraz przy KAZDYM elemencie agenta (kafelek/dymek tekstu), rysowany CSS
+    // pseudo-elementem `::after` sterowanym ta zmienna (patrz `chat_view.css`).
     this.current_message_container = this.messages_container.createDiv({
         cls: 'cs-message cs-message--agent'
     });
     this.current_message_container.style.setProperty('--cs-agent-color-rgb', hexToRgbTriplet(streamColor));
-
-    if (!this._agentHeaderShown) {
-        const head = this.current_message_container.createDiv({ cls: 'cs-message__agent-head' });
-        const crystalEl = head.createDiv({ cls: 'cs-message__agent-crystal' });
-        setSvg(crystalEl, SkinManager.getCrystal(streamAgent || agName, { size: 18, color: streamColor, glow: false }));
-        head.createSpan({ cls: 'cs-message__agent-name', text: agName });
-        this._agentHeaderShown = true;
-    }
+    this.current_message_container.style.setProperty('--cs-agent-crystal', agentCrystalCssVar(streamAgent || agName, streamColor));
 
     this.current_message_bubble = this.current_message_container.createDiv({ cls: 'cs-tool-calls-wrapper' });
     this.current_message_text = this.current_message_container.createDiv({ cls: 'cs-message__text' });
@@ -951,7 +986,7 @@ export function _captureInputEstimate(this: ChatViewLike, turn: ChatTurn) {
 }
 
 /**
- * resolveTools — świeża whitelista narzędzi na start iteracji + aktualizacja rozbicia tokenów okna.
+ * resolveTools - świeża whitelista narzędzi na start iteracji + aktualizacja rozbicia tokenów okna.
  * @param {boolean} _applyEnabledFilter - IGNOROWANY: jedyna oś to `disabled_tools` przez
  *   filterByAgent. Param zostaje w kontrakcie hooka pętli.
  */
@@ -989,9 +1024,9 @@ export function _chatResolveTools(this: ChatViewLike, turn: ChatTurn, _applyEnab
     return tools;
 }
 
-/** onIterationStart — reset per-response stash + estymata wejścia (przed wywołaniem modelu). */
+/** onIterationStart - reset per-response stash + estymata wejścia (przed wywołaniem modelu). */
 export function _chatOnIterationStart(this: ChatViewLike, turn: ChatTurn) {
-    // Watchdog NIE może zbroić się tutaj — zbroi go `onGateAdmitted` pętli (wejście requestu
+    // Watchdog NIE może zbroić się tutaj - zbroi go `onGateAdmitted` pętli (wejście requestu
     // na slot bramki). Zbrojenie przed kolejką liczyłoby czekanie za subem jako ciszę modelu
     // i ubijałoby żywą turę usera.
     turn.responseRecorded = false;
@@ -1002,7 +1037,7 @@ export function _chatOnIterationStart(this: ChatViewLike, turn: ChatTurn) {
     this._captureInputEstimate(turn);
 }
 
-/** onBackstop — finalna iteracja bez narzędzi. Reset per-response stash (brak onIterationStart). */
+/** onBackstop - finalna iteracja bez narzędzi. Reset per-response stash (brak onIterationStart). */
 export function _chatOnBackstop(this: ChatViewLike, turn: ChatTurn) {
     // Finalne wywołanie też pilnowane, ale zbrojenie robi `onGateAdmitted` (jak wyżej).
     turn.responseRecorded = false;
@@ -1012,7 +1047,7 @@ export function _chatOnBackstop(this: ChatViewLike, turn: ChatTurn) {
     this._captureInputEstimate(turn);
 }
 
-/** onUsage — TokenTracker record (rola main) + cache badge z usage odpowiedzi. */
+/** onUsage - TokenTracker record (rola main) + cache badge z usage odpowiedzi. */
 export function _chatOnUsage(this: ChatViewLike, turn: ChatTurn, usage: Usage | null | undefined) {
     const isActiveTab = this._isTurnActiveTab(turn);
     const apiInput = usage?.prompt_tokens || 0;
@@ -1034,7 +1069,7 @@ export function _chatOnUsage(this: ChatViewLike, turn: ChatTurn, usage: Usage | 
     const outputTokens = apiOutput;
     if (inputTokens > 0 || outputTokens > 0) {
         // AUD-<risk-register>: gdy API nie oddało prompt_tokens, input jest ESTYMATĄ
-        // (turn.lastInputTokens z _captureInputEstimate) — oznacz ją, żeby Token Viewer
+        // (turn.lastInputTokens z _captureInputEstimate) - oznacz ją, żeby Token Viewer
         // pokazywał `~` zamiast twierdzić, że to pomiar z API.
         const estimated = apiInput === 0 && inputTokens > 0;
         turn.tt.record('main', inputTokens, outputTokens, { estimated });
@@ -1044,16 +1079,16 @@ export function _chatOnUsage(this: ChatViewLike, turn: ChatTurn, usage: Usage | 
 }
 
 /**
- * onToolCallsParsed (SYNC względem egzekucji) — Faza 1: placeholdery UI dla wszystkich tool_calls.
+ * onToolCallsParsed (SYNC względem egzekucji) - Faza 1: placeholdery UI dla wszystkich tool_calls.
  * ask_user WYMAGA tego przed egzekucją (placeholder tworzy plugin._askUserPromise, na który czeka
  * AskUserTool.execute). NIE filtruje (zwraca undefined).
  */
 export function _chatOnToolCallsParsed(this: ChatViewLike, turn: ChatTurn, toolCalls: ParsedToolCall[]) {
-    turn.watchdog?.disarm(); // model skończył mówić — narzędzia mogą trwać minuty, cisza legalna
+    turn.watchdog?.disarm(); // model skończył mówić - narzędzia mogą trwać minuty, cisza legalna
     const isActiveTab = this._isTurnActiveTab(turn);
     const streamAgent = turn.agent;
 
-    // Ensure container (CS agent message) — only if on active tab (tool calls bez poprzedzającego tekstu)
+    // Ensure container (CS agent message) - only if on active tab (tool calls bez poprzedzającego tekstu)
     if (isActiveTab && !this.current_message_container) {
         this._ensureAgentMessageContainer(streamAgent);
     }
@@ -1090,7 +1125,7 @@ export function _chatOnToolCallsParsed(this: ChatViewLike, turn: ChatTurn, toolC
         connect_to_server: t('chat.tool_status.connect_to_server'),
     };
 
-    // Faza 1: Create ALL pending UI blocks (sync) — only on active tab
+    // Faza 1: Create ALL pending UI blocks (sync) - only on active tab
     turn.pendingEntries = toolCalls.map(toolCall => {
         const isSubAgent = toolCall.name === 'delegate';
         const isAskUser = toolCall.name === 'ask_user';
@@ -1120,11 +1155,15 @@ export function _chatOnToolCallsParsed(this: ChatViewLike, turn: ChatTurn, toolC
         return { toolCall, toolDisplay, isSubAgent };
     });
     turn.toolCallsContainer = toolCallsContainer;
+    // Nowe kotwice łącznika (kafelki/ask_user właśnie wstawione wyżej) - jeden raz na rundę
+    // narzędzi, nie w pętli per tool_call (planowanie się dławi samo, patrz
+    // `_scheduleConnectorRedraw`, ale wołanie go 1x tutaj zamiast N razy w pętli jest tańsze).
+    if (isActiveTab) this._scheduleConnectorRedraw();
     // brak return → pętla nie filtruje
 }
 
 /**
- * executeToolCall — egzekucja jednego narzędzia (Faza 2). Zwraca wartość do zapisania w store
+ * executeToolCall - egzekucja jednego narzędzia (Faza 2). Zwraca wartość do zapisania w store
  * (string albo tablica multimodalna dla generate_image+vision). Surowy wynik + błąd stashuje w
  * turn.rawResults (id → {result, error}) dla onToolResults (UI + side effects).
  */
@@ -1136,9 +1175,9 @@ export async function _chatExecuteToolCall(this: ChatViewLike, turn: ChatTurn, t
         // nie tryb pracy.
         log.debug('Chat', `Wykonuję tool (parallel): ${toolCall.name}`, toolCall.arguments);
         // `origin` = adres zwrotny tury (policzony raz w send_message). MCPClient wstrzykuje go
-        // jako zaufany znacznik `_invocationOrigin`, a `delegate` przenosi do rejestru biegów —
+        // jako zaufany znacznik `_invocationOrigin`, a `delegate` przenosi do rejestru biegów -
         // dzięki temu wynik suba z tła wie, do której zakładki/sesji ma wrócić.
-        // TS-boundary: wynik narzędzia należy do SERWERA, który je wykonał — czat czyta z niego
+        // TS-boundary: wynik narzędzia należy do SERWERA, który je wykonał - czat czyta z niego
         // wyłącznie pola opisane w `ChatToolResult`, bez walidacji schematem (ta byłaby zmianą runtime).
         raw = await this.plugin.mcpClient!.executeToolCall(toolCall as ToolsToolCall, turn.agentName, { autonomy: turn.autonomy, origin: turn.origin }) as ChatToolResult;
     } catch (err) {
@@ -1152,7 +1191,7 @@ export async function _chatExecuteToolCall(this: ChatViewLike, turn: ChatTurn, t
     // generate_image + non-vision → JSON bez base64 (żeby nie wysadzić kontekstu);
     // reszta → JSON.stringify. Nie mutujemy `raw` (onToolResults renderuje z niego obraz).
     if (toolCall.name === 'generate_image' && raw?.base64) {
-        // Model WŁAŚCICIELA tury, nie globalnie aktywnego agenta — user mógł przełączyć
+        // Model WŁAŚCICIELA tury, nie globalnie aktywnego agenta - user mógł przełączyć
         // zakładkę, gdy ta tura generowała obraz w tle (tura ma własny `turn.agent`).
         if (this._isCurrentModelVision(turn.agent)) {
             const textPart = Object.assign({}, raw);
@@ -1170,7 +1209,7 @@ export async function _chatExecuteToolCall(this: ChatViewLike, turn: ChatTurn, t
 }
 
 /**
- * onToolResults (Faza 3, w kolejności tool_calls) — journal mcp_call, aktualizacja UI, token tracking
+ * onToolResults (Faza 3, w kolejności tool_calls) - journal mcp_call, aktualizacja UI, token tracking
  * sub-agentów, side effects (delegate/skill/artefakty/reactory/vault_write/kom). NIE zapisuje wiadomości
  * do store (robi to pętla) i NIE journaluje agent_message/tool_result (to beforeContinue).
  * @param {number} i - indeks iteracji (dla skillActiveAt).
@@ -1210,6 +1249,14 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
         if (isActiveTab && toolDisplay) {
             if (error) {
                 if (isSubAgent) {
+                    // Blad transportu (np. wyjatek w trakcie executeToolCall, przed dotarciem do
+                    // wyniku sub-agenta) - bez `query`/`agentName` (w odroznieniu od gałęzi
+                    // `!result.success`/sukces nizej): ten wyjatek leci PRZED sparsowaniem
+                    // argumentow wywolania gdzie indziej w tym pliku, a dokladanie tu OSMEGO
+                    // wywolania `parseToolCallArgs` rozjezdzaloby sie z zablokowanym licznikiem
+                    // w `chatStreamingDedup.test.ts` (siedem call-site'ow, nazwane wprost) -
+                    // `SubAgentBlock.ts` renderuje wtedy sam akapit "Result" (komunikat bledu),
+                    // bez "Task".
                     toolDisplay.replaceWith(createSubAgentBlock({
                         type: toolCall.name,
                         status: 'error',
@@ -1225,26 +1272,27 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                     }));
                 }
             } else if (isSubAgent && result?.started === true) {
-                // Delegacja W TLE. Nie ma wyniku do pokazania — jest pokwitowanie startu.
+                // Delegacja W TLE. Nie ma wyniku do pokazania - jest pokwitowanie startu.
                 // Bez tej gałęzi leciała gałąź „success" niżej i rysowała PUSTĄ ramkę
                 // (brak `result.result`, `tools_used`, `duration_ms`) z zielonym „gotowe".
                 const _bgArgs = parseToolCallArgs(toolCall);
                 const startedList = Array.isArray(result.tasks)
                     ? result.tasks
                     : [{ task_id: result.task_id, name: result.name }];
-                const lines = startedList.map((task) => t('chat.subagent_background_task', {
-                    name: task?.name || _bgArgs.aspect || '?',
-                    task_id: task?.task_id || '?',
-                }));
-                if ((result.queued as number) > 0) lines.push(t('chat.subagent_background_queued', { count: result.queued }));
-                lines.push(t('chat.subagent_background_note'));
+                // Identyfikator zadania idzie WYŁĄCZNIE do details, jako ostatnia linia
+                // (spec A2, sekcja 1 - werdykt właściciela: nigdy w nagłówku). Nagłówek dostaje
+                // stały tekst "wynik wróci powiadomieniem" (`SubAgentBlock.ts`, `opts.pending`),
+                // więc `buildBackgroundReceiptText` (uwaga 5, spec A2-fix) sklada TYLKO linie pod
+                // skrótem zadania: ewentualne "W kolejce: N", potem identyfikator(y) - zawsze na
+                // samym końcu. Ta sama funkcja renderuje pokwitowanie odtworzone z HISTORII
+                // (`chat_messages.ts`, uwaga 10).
                 const bgBlock = createSubAgentBlock({
                     type: toolCall.name,
                     pending: true,
                     status: 'success',
                     agentName: startedList.length > 1 ? '' : (startedList[0]?.name || _bgArgs.aspect || ''),
                     query: _bgArgs.task || '',
-                    response: lines.join('\n'),
+                    response: buildBackgroundReceiptText(startedList, result.queued),
                 });
                 toolDisplay.replaceWith(bgBlock);
                 bgBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1316,7 +1364,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
         }
 
         // --- Sub-agent token tracking (always, using captured tracker) ---
-        // Bieg w tle (`started`) NIE ma tu czego liczyć — zwrotka to pokwitowanie, więc
+        // Bieg w tle (`started`) NIE ma tu czego liczyć - zwrotka to pokwitowanie, więc
         // fallback estymaty policzyłby tokeny samego pokwitowania i wpisał je jako pracę suba
         // (śmieciowy słupek w Token Viewerze). Prawdziwe zużycie przyjdzie z wynikiem biegu.
         if (!error && isSubAgent && result?.success && result?.started !== true) {
@@ -1352,12 +1400,12 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
         // --- Side effects (always run, regardless of tab) ---
         if (toolCall.name === 'agent_delegate') {
             try {
-                // TS-boundary: wynik `agent_delegate` pisze narzędzie — czat czyta z niego tylko
+                // TS-boundary: wynik `agent_delegate` pisze narzędzie - czat czyta z niego tylko
                 // pola `DelegationProposal` (guzik „przekaż rozmowę agentowi X”).
                 const parsed = (typeof result === 'object' ? result : JSON.parse(JSON.stringify(result))) as DelegationProposal & { delegation?: boolean };
                 if (parsed.delegation === true) this._pendingDelegation = parsed;
             } catch (e) {
-                // `_pendingDelegation` to JEDYNE wejście do `_renderDelegationButton` — cichy
+                // `_pendingDelegation` to JEDYNE wejście do `_renderDelegationButton` - cichy
                 // `catch {}` tutaj sprawiałby, że guzik „przekaż rozmowę agentowi X" po prostu
                 // nie powstawałby, bez śladu ani w UI, ani w logu. Tekst przez maskę: w wyniku
                 // narzędzia potrafi siedzieć cudza treść.
@@ -1388,14 +1436,14 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
             toolCallsContainer,
             isActiveTab
         });
-        // Warunek MUSI objąć DZISIEJSZĄ nazwę `write` (nie tylko `vault_write`) — inaczej
+        // Warunek MUSI objąć DZISIEJSZĄ nazwę `write` (nie tylko `vault_write`) - inaczej
         // przeładowanie skilli po zapisie przepisu i link do zapisanego pliku byłyby martwe.
         // ⚠️ `toolCall.name` to nazwa, którą wypisał MODEL: alias vault_write→write remapuje
-        // LOKALNIE w `MCPClient.executeToolCall` (`toolCall = {...toolCall, name}` — rebind, nie
+        // LOKALNIE w `MCPClient.executeToolCall` (`toolCall = {...toolCall, name}` - rebind, nie
         // mutacja), a `results[].toolCall` z pętli niesie oryginał. Stara nazwa nadal tu dociera,
         // więc sprawdzamy obie.
         if (toolCall.name === 'write' || toolCall.name === 'vault_write') {
-            // `arguments` bywa stringiem JSON (zależnie od platformy) — jak przy `read` wyżej.
+            // `arguments` bywa stringiem JSON (zależnie od platformy) - jak przy `read` wyżej.
             const writeArgs = parseToolCallArgs(toolCall);
             const writePath = String(writeArgs.path || '');
             if (writePath.includes('/skills/')) {
@@ -1403,32 +1451,38 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                 if (isActiveTab) this.renderSkillButtons();
             }
             // NIE dodawaj analogicznych gałęzi dla `/minions/` czy `playbook.md`/`vault_map.md`:
-            //  - `agentManager.reloadMinions()` NIE ISTNIEJE w repo — rzucałaby TypeError.
+            //  - `agentManager.reloadMinions()` NIE ISTNIEJE w repo - rzucałaby TypeError.
             //    Sub-agenci mieszkają w `.pkm-assistant/sub-agents/` i nie mają hot-reloadu.
-            //  - `this._playbookDirty = true` byłaby flagą write-only — zero czytelników w repo.
-            // Link wisi na POWODZENIU zapisu, nie na braku jednej flagi — `writePath` pochodzi
+            //  - `this._playbookDirty = true` byłaby flagą write-only - zero czytelników w repo.
+            // Link wisi na POWODZENIU zapisu, nie na braku jednej flagi - `writePath` pochodzi
             // z argumentów wywołania, czyli z tego, co model CHCIAŁ zapisać.
             if (isActiveTab && shouldLinkWrittenFile(result, writePath) && toolCallsContainer) {
+                // Jeden mechanizm otwierania notatek w calym repo (spec C, "Czat bez scian"
+                // 2.3.0) - `createNoteLink` woła opener zarejestrowany przez `chat_ui.ts`'s
+                // `renderView` (nowa karta w glownym obszarze), zamiast wlasnego
+                // `openLinkText(writePath, '')` (biezaca karta - podmienialoby panel czatu).
                 const linkDiv = createDiv();
                 linkDiv.addClass('cs-vault-link');
-                const link = createEl('a');
-                setSvgLabel(link, UiIcons.file(14), writePath);
-                link.href = '#';
-                link.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    void this.app.workspace.openLinkText(writePath, '');
-                });
-                linkDiv.appendChild(link);
+                if (isVaultNotePath(writePath)) createNoteLink(linkDiv, writePath, writePath);
+                else linkDiv.setText(writePath);
                 toolCallsContainer.appendChild(linkDiv);
             }
         }
     }
+
+    // Podmiana kafelka (`toolDisplay.replaceWith(...)` powyżej, per wynik) ZMIENIA wysokość -
+    // kafelek błędu startuje rozwinięty (`Tile.ts`, `status:'error'`), bloki sub-agenta (wynik/
+    // błąd/pokwitowanie w tle) mają inną wysokość niż placeholder "w toku", obrazek wygenerowany
+    // dokłada własny blok. Raz na CAŁĄ rundę (po pętli, nie w jej środku - wywołań bywa kilka)
+    // i tylko na aktywnej zakładce, tak jak nowe kotwice w `_chatOnToolCallsParsed` wyżej
+    // (naprawa recenzji niezależnej - poprzednia runda pomijała ten wyzwalacz błędnie).
+    if (isActiveTab) this._scheduleConnectorRedraw();
 }
 
 /**
- * beforeContinue — po dopisaniu przez pętlę assistant+tool do store, przed kolejnym wywołaniem modelu.
+ * beforeContinue - po dopisaniu przez pętlę assistant+tool do store, przed kolejnym wywołaniem modelu.
  * Journal agent_message + tool_result (kolejność: mcp_call z onToolResults, potem tu agent_message,
- * potem tool_result — parytet z dawnym handle_done), token economy (nudges + mid-loop compression),
+ * potem tool_result - parytet z dawnym handle_done), token economy (nudges + mid-loop compression),
  * reset kontenera, wstrzyknięcie zakolejkowanej wiadomości.
  */
 export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i: number) {
@@ -1445,15 +1499,15 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
     }
     const assistantContent = (asstMsg && typeof asstMsg.content === 'string') ? asstMsg.content : '';
 
-    // Cache telemetry na wiadomości pośredniej (tool-call) — parytet z dawnym toolMsgMeta.cache.
+    // Cache telemetry na wiadomości pośredniej (tool-call) - parytet z dawnym toolMsgMeta.cache.
     // Historia (chat_messages) renderuje badge z msg.cache przy re-renderze, więc musi być zapisane.
     if (asstMsg && (turn.lastCacheMeta?.cached_tokens as number) > 0) {
         asstMsg.cache = turn.lastCacheMeta;
     }
 
-    // Token tracking dla tej odpowiedzi, jeśli onUsage nie zapisał (modele bez usage) — parytet
+    // Token tracking dla tej odpowiedzi, jeśli onUsage nie zapisał (modele bez usage) - parytet
     // z per-response record w dawnym handle_done. Ta gałąź to ZAWSZE fallback (input z estymaty
-    // kontekstu, output z countTokens lokalnie) — oznacz jako estimated, żeby Token Viewer nie
+    // kontekstu, output z countTokens lokalnie) - oznacz jako estimated, żeby Token Viewer nie
     // pokazywał tych liczb jako pomiaru z API.
     if (!turn.responseRecorded) {
         const inp = turn.lastInputTokens || 0;
@@ -1467,7 +1521,7 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
     const inputTokens = turn.lastApiInput > 0 ? turn.lastApiInput : (turn.lastInputTokens || 0);
     const outputTokens = turn.lastApiOutput > 0 ? turn.lastApiOutput : countTokens(assistantContent);
 
-    // `tool_calls` jedzie do event-logu TYLKO gdy runda faktycznie wołała narzędzia — bez tej
+    // `tool_calls` jedzie do event-logu TYLKO gdy runda faktycznie wołała narzędzia - bez tej
     // bramki `formatSessionEvent` pisałby `**tool_calls:** []` na KAŻDEJ odpowiedzi (tablica
     // pusta jest truthy). Round-trip po restarcie Obsidiana potrzebuje tego pola, żeby
     // `sanitizeToolTranscript` odzyskał dopasowanie assistant.tool_calls ↔ tool.tool_call_id
@@ -1501,7 +1555,7 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
 
     const hasDelegates = (turn.agent?.getActiveDelegates?.()?.length as number) > 0;
 
-    // Delegation nudge — agent has delegates, must delegate
+    // Delegation nudge - agent has delegates, must delegate
     if (hasDelegates && !turn.hasUsedDelegate && iterCount >= 2) {
         const nudgeLevel = iterCount >= 4 ? 'strong' : 'soft';
         const nudgeMsg = nudgeLevel === 'strong'
@@ -1520,13 +1574,13 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
         }
     }
 
-    // Opcja 4: Mid-loop compression — proactive, not just on hard limit
+    // Opcja 4: Mid-loop compression - proactive, not just on hard limit
     const compressionNeeded = rw.getCompressionNeeded();
     if (compressionNeeded !== 'none') {
         log.info('Chat', `Token Economy: mid-loop compression (${compressionNeeded}) po iteracji ${iterCount}`);
         if (isActiveTab) this.showTypingIndicator(t('chat.streaming.compressing_context'));
         if (compressionNeeded === 'summarize') {
-            // Sama ścieżka co end-of-turn (_finalizeTurn) — bez tego pierwsze przekroczenie
+            // Sama ścieżka co end-of-turn (_finalizeTurn) - bez tego pierwsze przekroczenie
             // progu 90% wypadające W ŚRODKU pętli (przed jakąkolwiek kompresją end-of-turn
             // w tym oknie) leciałoby z `rw.sessionPath === ''`, a Summarizer.getSummaryPrompt
             // gubiłby podpowiedź „📂 Pełna rozmowa zapisana w: …". Zdarzenia tury są już dopisane
@@ -1539,15 +1593,20 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
 
     // Reset current container before continuing
     if (isActiveTab) {
-        // Ostatnia zebrana klatka MUSI trafić na ekran, zanim zerujemy wskaźniki malowania —
+        // Ostatnia zebrana klatka MUSI trafić na ekran, zanim zerujemy wskaźniki malowania -
         // inaczej ogon tekstu sprzed wywołania narzędzia by zniknął.
         this._renderThrottle?.flush();
         if (this.current_message_bubble) {
             this.current_message_bubble.classList.remove('streaming');
         }
         if (this._currentThinkingBlock) {
-            this._currentThinkingBlock.classList.remove('streaming');
+            finalizeThinkingBlock(this._currentThinkingBlock);
             this._currentThinkingBlock = null;
+            // Zwinięcie bloku myślenia (`finalizeThinkingBlock` woła `expand(false)`, `ThinkingBlock.ts`)
+            // zmienia wysokość SYNCHRONICZNIE - bez przerysowania łącznik zostawałby z geometrią
+            // sprzed zwinięcia do końca tury (naprawa recenzji niezależnej, ta sama przyczyna co
+            // `onMessagesContainerActivity`/rozwinięcie kafelka klikiem, patrz `connectorActivity.ts`).
+            this._scheduleConnectorRedraw();
         }
         this._resetPaintTargets();
 
@@ -1562,15 +1621,20 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
         this._queuedMessage = null;
         log.info('Chat', `Injecting queued message into context (${queued.meta.origin}): "${injectedText.slice(0, 60)}..."`);
 
-        // Ta ścieżka omija `append_message`, więc rejestr adresów musi być zasilony tu osobno —
+        // Ta ścieżka omija `append_message`, więc rejestr adresów musi być zasilony tu osobno -
         // inaczej `web_read` odrzucałby link, który user sam wkleił i wpisał do pola.
-        // Proweniencja NIE jest tu jednoznaczna — do kolejki wpada też tekst maszynowy (guzik
+        // Proweniencja NIE jest tu jednoznaczna - do kolejki wpada też tekst maszynowy (guzik
         // artefaktu i spółka wypełniają pole wpisywania z kodu). Oddajemy ZAPAMIĘTANĄ pieczątkę;
         // twarde `human` w tym miejscu nadawałoby przywileje człowieka tekstowi maszyny.
         registerUrlsIfHuman(queued.text, queued.meta, registerUrlsFromText);
+        // `...queued.meta` (nie tylko `origin`) - powiadomienie o wyniku suba / przywołanie
+        // artefaktu wysłane w trakcie trwającej tury trafiają do tej samej kolejki (spec A3);
+        // bez pełnej meta na wierzchu wiadomości okno traci `_subTaskNotification`/
+        // `_artifactSummon` i klasyfikator maszynowy (`machineMessage.ts`) musiałby zgadywać
+        // WYŁĄCZNIE po treści, nawet w TEJ SAMEJ sesji, zanim ktokolwiek ją zapisał na dysk.
         await rw.addMessage('user', injectedText, {
             timestamp: new Date().toLocaleTimeString(getDateLocale(), { hour: '2-digit', minute: '2-digit' }),
-            origin: queued.meta.origin,
+            ...queued.meta,
         });
         await this.appendToActiveSession?.({
             type: 'user_message',
@@ -1582,19 +1646,26 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
         // Render in UI (only on active tab)
         if (isActiveTab) {
             this._hideQueuedIndicator();
-            const userDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--user' });
-            const agentColor = SkinManager.getAgentColor(streamAgent || 'default');
-            userDiv.style.setProperty('--cs-agent-color-rgb', hexToRgbTriplet(agentColor));
-            const textDiv = userDiv.createDiv({ cls: 'cs-message__text' });
-            this._renderUserText(textDiv, injectedText);
+            // Spec A3: wiadomość zakolejkowana może być maszynowa (guzik przywołania artefaktu
+            // wypełnia pole wpisywania i woła `send_message` bez `injectedText`, więc trwająca
+            // tura ją kolejkuje zamiast wstrzykiwać od razu) - kafelek systemowy zamiast dymka.
+            const machineView = buildMachineView({ role: 'user', content: injectedText, ...queued.meta }, { t });
+            if (machineView) {
+                await renderMachineTile(this.messages_container, this.plugin, machineView);
+            } else {
+                const userDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--user' });
+                const agentColor = SkinManager.getAgentColor(streamAgent || 'default');
+                userDiv.style.setProperty('--cs-agent-color-rgb', hexToRgbTriplet(agentColor));
+                const textDiv = userDiv.createDiv({ cls: 'cs-message__text' });
+                this._renderUserText(textDiv, injectedText);
+            }
             this.scrollToBottom();
-            this._agentHeaderShown = false; // Next agent message gets header
         }
     }
 }
 
 /**
- * _finalizeTurn — po zakończeniu pętli (natural / backstop). Odtwarza „no tool calls" branch dawnego
+ * _finalizeTurn - po zakończeniu pętli (natural / backstop). Odtwarza „no tool calls" branch dawnego
  * handle_done: crystal notice, zapis finalnej wiadomości + journal, timestamp/akcje, restore mode,
  * cleanup, dwufazowa kompresja end-of-turn.
  */
@@ -1612,7 +1683,7 @@ export async function _finalizeTurn(this: ChatViewLike, turn: ChatTurn, result: 
     if (isActiveTab) this._renderThrottle?.flush();
 
     // Token tracking dla finalnej odpowiedzi, jeśli onUsage nie zapisał (modele bez usage).
-    // Zawsze fallback (patrz komentarz w _chatBeforeContinue) — estimated: true.
+    // Zawsze fallback (patrz komentarz w _chatBeforeContinue) - estimated: true.
     if (!turn.responseRecorded) {
         const inp = turn.lastInputTokens || 0;
         const out = countTokens(content);
@@ -1650,12 +1721,12 @@ export async function _finalizeTurn(this: ChatViewLike, turn: ChatTurn, result: 
 
     // Dorysowujemy gdy final ≠ ostatnio namalowane: albo stream w ogóle nie miał chunków, albo
     // finalna treść przyszła dopiero w zwrotce `done` (rollback niedomkniętego <think>, strip
-    // halucynowanych tagów) — a `done` nie leci przez handlers.chunk, więc DOM został stary.
+    // halucynowanych tagów) - a `done` nie leci przez handlers.chunk, więc DOM został stary.
     if (isActiveTab && content && content !== this._lastPaintedContent) {
-        // _ensureAgentMessageContainer NIE jest idempotentny (zawsze tworzy nowy node) — tylko gdy brak.
+        // _ensureAgentMessageContainer NIE jest idempotentny (zawsze tworzy nowy node) - tylko gdy brak.
         if (!this.current_message_container) this._ensureAgentMessageContainer(streamAgent);
         this.current_message_text!.empty();
-        // `MarkdownRenderer.render` (nie `renderMarkdown`, deprecated) — patrz komentarz przy
+        // `MarkdownRenderer.render` (nie `renderMarkdown`, deprecated) - patrz komentarz przy
         // analogicznym wywołaniu w _paintStreamFrame wyżej.
         void MarkdownRenderer.render(this.app, content, this.current_message_text!, '', this);
         this._lastPaintedContent = content;
@@ -1669,7 +1740,15 @@ export async function _finalizeTurn(this: ChatViewLike, turn: ChatTurn, result: 
         this.addMessageActions(meta, content, 'assistant', idx);
 
         if (this._pendingDelegation) {
-            this._renderDelegationButton(this.current_message_container, this._pendingDelegation);
+            // Uśpione 2.3.0, wraca jako inicjatywa 2.4+ (werdykt właściciela: mechanizm
+            // przekazania rozmowy INNEMU AGENTOWI - nie sub-agentom, `delegate` zostaje bez
+            // zmian - jest "stary i niepotrzebny" do czasu przemyślenia). Guzik "Przejdź do
+            // agenta X" (`chat_artifacts.ts`'s `_renderDelegationButton`) i klucze i18n ZOSTAJĄ
+            // nietknięte - tylko to wywołanie jest zablokowane. `DORMANT_TOOLS` (`ToolRegistry`,
+            // `filterByAgent`) chowa `agent_delegate` przed modelem (warstwa widoczności, nie
+            // egzekucji - `checkToolAxis` przepuszcza wywołanie po nazwie), więc ten guard jest
+            // realną drugą warstwą: stary transkrypt albo wywołanie po nazwie nie narysuje przycisku.
+            // this._renderDelegationButton(this.current_message_container, this._pendingDelegation);
             this._pendingDelegation = null;
         }
     }
@@ -1680,25 +1759,25 @@ export async function _finalizeTurn(this: ChatViewLike, turn: ChatTurn, result: 
             this.current_message_bubble.classList.remove('streaming');
         }
         if (this._currentThinkingBlock) {
-            this._currentThinkingBlock.classList.remove('streaming');
+            finalizeThinkingBlock(this._currentThinkingBlock);
             this._currentThinkingBlock = null;
         }
         this._resetPaintTargets();
         this.set_generating(false);
         this.scrollToFinalMessage();
-        // Malowanie strumienia świadomie NIE rysuje łączników — tu, po dołożeniu wiersza meta
+        // Malowanie strumienia świadomie NIE rysuje łączników - tu, po dołożeniu wiersza meta
         // i akcji, przerysowujemy je raz, na koniec tury.
         this._scheduleConnectorRedraw();
     } else {
-        // Background tab finished — mark as not generating in saved state.
+        // Background tab finished - mark as not generating in saved state.
         // `_agentStates` jest kluczowana `_tabKey(tab)` (patrz `_switchTab` / `_restoreActiveSession`),
-        // NIE nazwą agenta — po restarcie z sesji na dysku klucz zakładki to ścieżka sesji, więc
+        // NIE nazwą agenta - po restarcie z sesji na dysku klucz zakładki to ścieżka sesji, więc
         // `.get(streamAgentName)` chybiałby i flaga `isGenerating` zostawałaby `true` na zawsze
         // (zakładka wisiałaby na „generuję").
-        // Klucz MUSI być z `turn.origin.tabKey` — ZAMROŻONY na starcie tury (`ownerTabKey` w
+        // Klucz MUSI być z `turn.origin.tabKey` - ZAMROŻONY na starcie tury (`ownerTabKey` w
         // `send_message`), nie `_tabKey(turn.owner?.tab)` przeliczony TU, godziny później:
         // `/save session` → „Archiwizuj i nowa sesja" podmienia `tab.sessionPath` NA MIEJSCU
-        // bez re-keyowania `_agentStates` — przeliczony klucz czytałby już nową wartość i
+        // bez re-keyowania `_agentStates` - przeliczony klucz czytałby już nową wartość i
         // chybiałby wpis zapisany pod starą.
         const savedState = this._agentStates.get(turn.origin?.tabKey ?? '');
         if (savedState) savedState.isGenerating = false;
@@ -1706,17 +1785,17 @@ export async function _finalizeTurn(this: ChatViewLike, turn: ChatTurn, result: 
         if (tab) tab._needsRefresh = true;
     }
 
-    // Clear streaming context for this agent — this stream is complete.
-    // Warunkowo, po `turnId` — pod tą samą nazwą agenta może już żyć NOWSZA tura, a skasowanie
+    // Clear streaming context for this agent - this stream is complete.
+    // Warunkowo, po `turnId` - pod tą samą nazwą agenta może już żyć NOWSZA tura, a skasowanie
     // jej wpisu odebrałoby Stopowi uchwyt przerwania.
     this._releaseStreamCtx(streamAgentName, turn.turnId);
 
     // DWUFAZOWA KOMPRESJA PO zakończeniu taska (jak Claude Code):
-    // Use captured `rw` — even if user switched tabs, compress the right conversation
+    // Use captured `rw` - even if user switched tabs, compress the right conversation
     const autoCompression = this.env?.settings?.pkmAssistant?.enableAutoSummarization !== false;
     const compressionNeeded = autoCompression ? rw.getCompressionNeeded() : 'none';
     if (compressionNeeded !== 'none') {
-        log.info('Chat', `Kompresja (${compressionNeeded}) — kontekst: ${rw.getCurrentTokenCount()} / ${rw.maxTokens} tokenów`);
+        log.info('Chat', `Kompresja (${compressionNeeded}) - kontekst: ${rw.getCurrentTokenCount()} / ${rw.maxTokens} tokenów`);
 
         if (compressionNeeded === 'summarize') {
             // Kompresja końca tury leci TAKŻE dla zakładki w tle, więc i zapis transkryptu,
@@ -1746,11 +1825,53 @@ export async function _finalizeTurn(this: ChatViewLike, turn: ChatTurn, result: 
     }
 }
 
+/**
+ * Kafelek systemowy (czerwony, rozwinięty) dla błędu streamu / ciszy modelu (spec A2, sekcja 4 -
+ * werdykt właściciela: "może się wyświetlać tak samo jak demo 12" - ramka systemowa, zwijana).
+ * `role:'system'` + `status:'error'` daje kolor DARMO przez `Tile.ts` (`.cs-tile--system`/
+ * `.cs-tile--error` obie mapują na `--color-red`, jedna zmienna CSS koloruje ikonę i kropkę) -
+ * bez osobnej logiki koloru w tym pliku. `expanded` nieustawione = domyślnie rozwinięty dla
+ * `status:'error'` (kontrakt `Tile.ts`).
+ * Regula nadrzedna szczegolow kafelka (spec A2-fix): `details` TYLKO gdy `safeText` jest
+ * DLUZSZY niz to, co miesci naglowek (`Tile.ts`'s `truncatePreview`, 80 zn.) - inaczej bez
+ * details i bez `is-toggleable` (naglowek juz pokazuje CALY tekst, rozwijanie nie dodaloby
+ * niczego nowego).
+ * @param titleKey - `chat.tile.error.title` (błąd) albo `chat.tile.error.stall` (cisza modelu)
+ * @param safeText - już bezpieczny tekst (przez `safeErrorText`, limit bez zmian)
+ */
+function _buildStreamErrorTile(titleKey: string, safeText: string): HTMLElement {
+    const handle = createTile({
+        role: 'system',
+        status: 'error',
+        iconSvg: UiIcons.warning(14),
+        title: t(titleKey),
+        summary: safeText,
+        details: safeText.length > 80 ? safeText : undefined,
+    });
+    return handle.el;
+}
+
+/**
+ * Linie pokwitowania delegacji zleconej w tle (uwaga 5, spec A2-fix): ewentualne "W kolejce: N"
+ * (tylko gdy `queued > 0`), potem identyfikator KAZDEGO wystartowanego zadania, ZAWSZE jako
+ * OSTATNIE linie - `SubAgentBlock.ts`'s `_buildBackgroundDetails` dokleja ten tekst na koncu
+ * `details`, wiec kolejnosc tutaj decyduje o kolejnosci w kafelku (werdykt wlasciciela:
+ * identyfikator nigdy w naglowku, zawsze na samym koncu ciala). Czysta funkcja - ten sam kod
+ * skleja receipt na ZYWO (`_chatOnToolResults` nizej) i przy odtwarzaniu z HISTORII
+ * (`chat_messages.ts`, uwaga 10) - "ta sama funkcja co na zywo".
+ */
+export function buildBackgroundReceiptText(startedList: Array<{ task_id?: string; name?: string }>, queued?: number): string {
+    const lines: string[] = [];
+    if (queued && queued > 0) lines.push(t('chat.subagent_background_queued', { count: queued }));
+    lines.push(...startedList.map((task) => t('chat.tile.sub.background_id', { id: task?.task_id || '?' })));
+    return lines.join('\n');
+}
+
 export function handle_error(this: ChatViewLike, error: unknown, agentName?: string, turnId?: number, ownerTabKey?: string) {
     this.hideTypingIndicator();
     // Tekst błędu idzie do DOM-u czatu i do loga (który pisze też do pliku). Na sieciowym
     // padzie strumienia `error.message` bywa zrzutem całego zdarzenia streamera razem z
-    // `source.headers.Authorization` — czyli SUROWYM kluczem API. Obrona w głąb: normalizacja
+    // `source.headers.Authorization` - czyli SUROWYM kluczem API. Obrona w głąb: normalizacja
     // → maska → sufit, niezależnie od tego, co robi źródło zdarzenia.
     const safeText = safeErrorText(error) || 'Unknown error occurred';
     log.error('Chat', 'Chat error:', safeErrorText(error));
@@ -1762,43 +1883,52 @@ export function handle_error(this: ChatViewLike, error: unknown, agentName?: str
     const isActiveTab = !agentName || currentTabAgent === agentName;
 
     if (isActiveTab) {
+        // Kafelek systemowy zamiast dymka agenta (spec A2, sekcja 4) - logika ownerTabKey/karta
+        // w tle/set_generating(false)/_cleanupAskUser NIŻEJ zostaje bez zmian, zmienia się TYLKO
+        // render. `current_message_container` (jeśli jest - tura miała już zaczęty strumień)
+        // dostaje kafelek W SOBIE zamiast martwego, pustego dymka obok; bez niego (błąd PRZED
+        // pierwszym chunkiem) kafelek idzie prosto do `messages_container`, tak jak dziś dymek.
         if (this.current_message_container) {
             // Wskazniki malowania powstaja i gasna RAZEM (`_resetPaintTargets`).
             this.current_message_text!.empty();
-            this.current_message_text!.createEl('p', {
-                text: t('chat.streaming.error_prefix', { message: safeText }),
-                cls: 'pkm-chat-error'
-            });
+            this.current_message_container.appendChild(_buildStreamErrorTile(
+                'chat.tile.error.title',
+                t('chat.streaming.error_prefix', { message: safeText })
+            ));
         } else {
-            const error_msg = this.messages_container.createDiv({
-                cls: 'cs-message cs-message--agent'
-            });
-            error_msg.style.setProperty('--cs-agent-color-rgb', this._getAgentRgb());
-            const textDiv = error_msg.createDiv({ cls: 'cs-message__text' });
-            textDiv.createEl('p', { text: t('chat.streaming.error_prefix', { message: safeText }), cls: 'pkm-chat-error' });
+            this.messages_container.appendChild(_buildStreamErrorTile(
+                'chat.tile.error.title',
+                t('chat.streaming.error_prefix', { message: safeText })
+            ));
         }
         // Ścieżka błędu MUSI zerować wskaźniki malowania DOKŁADNIE tak, jak ścieżka sukcesu
         // (`_finalizeTurn`) i Stop. Bez tego `handle_chunk` następnej tury widziałby niepusty
-        // `current_message_container` i malowałby odpowiedź do dymka poprzedniej wiadomości —
+        // `current_message_container` i malowałby odpowiedź do dymka poprzedniej wiadomości -
         // fizycznie NAD nowym pytaniem, bez nagłówka agenta; a po przerysowaniu listy
         // (przełączenie zakładki) do węzła wypiętego z drzewa, czyli w nicość.
-        // To obejmuje też `_currentThinkingBlock`, nie tylko wskaźniki malowania tekstu —
+        // To obejmuje też `_currentThinkingBlock`, nie tylko wskaźniki malowania tekstu -
         // inaczej blok myśli następnej tury wpadałby do dymka poprzedniej wiadomości
         // (`insertBefore` w `_paintStreamFrame` celuje w stary kontener). Zerujemy tak samo
         // jak `_finalizeTurn`, `_chatBeforeContinue` i `stop_generation`.
         if (this._currentThinkingBlock) {
-            this._currentThinkingBlock.classList.remove('streaming');
+            finalizeThinkingBlock(this._currentThinkingBlock);
             this._currentThinkingBlock = null;
         }
+        // Przerysowanie łącznika na KOŃCU całej gałęzi aktywnej zakładki, nie tylko wewnątrz
+        // `if (this._currentThinkingBlock)` (naprawa recenzji niezależnej, dogrywka) - TA SAMA
+        // gałąź zawsze czyści `current_message_text` (dymek wraca do `:empty`, znika przez CSS)
+        // i wstawia kafelek błędu wyżej, więc geometria zmienia się ZAWSZE, nawet bez bloku
+        // myślenia w locie. Bez tego łącznik kończył się obok kafelka aż do następnej tury.
+        this._scheduleConnectorRedraw();
         this._resetPaintTargets();
         this.set_generating(false);
     } else {
-        // Background tab errored — mark as not generating in saved state.
-        // Klucz `_agentStates` to `_tabKey(tab)`, nie nazwa agenta — `ownerTabKey` przychodzi
+        // Background tab errored - mark as not generating in saved state.
+        // Klucz `_agentStates` to `_tabKey(tab)`, nie nazwa agenta - `ownerTabKey` przychodzi
         // od wołacza (`ownerTabKey` policzony RAZ na starcie `send_message`, patrz jej catch),
         // bo `handle_error` sam nie ma dostępu do zamrożonego właściciela tury. Musi być STRING
         // zamrożony na starcie tury, nie obiekt `tab` przeliczany tu leniwie (ten sam powód co
-        // w `_finalizeTurn` — `archive_new` podmienia `tab.sessionPath` bez re-keyowania
+        // w `_finalizeTurn` - `archive_new` podmienia `tab.sessionPath` bez re-keyowania
         // `_agentStates`).
         const savedState = this._agentStates.get(ownerTabKey ?? '');
         if (savedState) savedState.isGenerating = false;
@@ -1809,23 +1939,23 @@ export function handle_error(this: ChatViewLike, error: unknown, agentName?: str
     // Resolve hanging ask_user promise to unblock tool execution
     this._cleanupAskUser();
 
-    // Always clear streaming context on error — ale wyłącznie wpis TEJ tury.
+    // Always clear streaming context on error - ale wyłącznie wpis TEJ tury.
     if (agentName) this._releaseStreamCtx(agentName, turnId);
 }
 
 /**
- * _onStreamStall — watchdog wystrzelił: model milczy (zero chunków) dłużej niż
+ * _onStreamStall - watchdog wystrzelił: model milczy (zero chunków) dłużej niż
  * `chat_stream_stall_timeout_ms`. Przerywa turę TĄ SAMĄ ścieżką co ręczny Stop
  * (stop_generation z agentem tury) + pisze uczciwy komunikat w czacie. Tura na
  * zakładce w tle dostaje cleanup stanu jak w handle_error + crystal notice.
  *
  * Wiszący XHR po abort NIE rozstrzyga promisy pętli (transport strumienia nie emituje
- * zdarzenia na abort), więc finally w send_message może nigdy nie ruszyć — dlatego
+ * zdarzenia na abort), więc finally w send_message może nigdy nie ruszyć - dlatego
  * stream jest wyrejestrowywany ze StreamingManagera tutaj.
  */
 export function _onStreamStall(this: ChatViewLike, turn: ChatTurn, silentMs: number) {
     const agentName = turn.agentName;
-    // Tura już zatrzymana (ręczny Stop) albo zakończona/wyczyszczona — watchdog milczy.
+    // Tura już zatrzymana (ręczny Stop) albo zakończona/wyczyszczona - watchdog milczy.
     // Pytamy o stan TEJ tury, nie o pole widoku (które po Stopie innej tury kłamałoby).
     if (turn.abort?.isAborted()) return;
     if (!this._streamCtxMap.has(agentName)) return;
@@ -1833,25 +1963,25 @@ export function _onStreamStall(this: ChatViewLike, turn: ChatTurn, silentMs: num
     // Mapa kontekstów jest kluczowana NAZWĄ agenta, więc watchdog PORZUCONEJ tury (user
     // wystartował nową sesję, stara wisiała w tle) widziałby wpis żywej tury tego samego
     // agenta i strzelałby do niej: stop_generation ubijałby świeży request wspólnej instancji
-    // modelu i rozbrajał CUDZY watchdog — żywa tura zostawałaby bez strażnika, z promisą,
+    // modelu i rozbrajał CUDZY watchdog - żywa tura zostawałaby bez strażnika, z promisą,
     // która nigdy się nie rozstrzygnie. Przeterminowany watchdog musi sprzątać wyłącznie po
     // sobie i NIE dotykać żywej tury.
     const liveCtx = this._streamCtxMap.get(agentName);
     if (typeof turn.turnId === 'number' && typeof liveCtx?.turnId === 'number' && liveCtx.turnId !== turn.turnId) {
-        log.warn('Chat', `[${agentName}] Watchdog porzuconej tury #${turn.turnId} (żywa: #${liveCtx.turnId}) — sprzątam bez strzelania`);
+        log.warn('Chat', `[${agentName}] Watchdog porzuconej tury #${turn.turnId} (żywa: #${liveCtx.turnId}) - sprzątam bez strzelania`);
         if (turn.streamId) streamingManager.stopStream(turn.streamId);
         return;
     }
 
     const seconds = Math.round(silentMs / 1000);
-    log.warn('Chat', `[${agentName}] Watchdog: model milczy od ${seconds}s — przerywam turę jak ręczny Stop`);
+    log.warn('Chat', `[${agentName}] Watchdog: model milczy od ${seconds}s - przerywam turę jak ręczny Stop`);
 
     const isActiveTab = this._isTurnActiveTab(turn);
     if (isActiveTab) {
         this.stop_generation(agentName);
     } else {
         // Tura w tle: przerwanie TEJ tury + przerwanie XHR właściwej instancji + cleanup stanu
-        // zakładki (wzór handle_error) — bez dotykania UI aktywnej zakładki.
+        // zakładki (wzór handle_error) - bez dotykania UI aktywnej zakładki.
         turn.abort?.abort('stall');
         // Parytet z ręcznym Stopem: po przerwaniu nie sięgamy sami po zaległe wyniki subów
         // (auto-tura poleciałaby w ten sam martwy serwer).
@@ -1859,9 +1989,9 @@ export function _onStreamStall(this: ChatViewLike, turn: ChatTurn, silentMs: num
         const bgModel = this._streamCtxMap.get(agentName)?.chatModel || this.env.chatModel;
         bgModel?.stopStream?.();
         this._releaseStreamCtx(agentName, turn.turnId);
-        // Klucz `_agentStates` to `_tabKey(tab)`, nie nazwa agenta — patrz uzasadnienie
+        // Klucz `_agentStates` to `_tabKey(tab)`, nie nazwa agenta - patrz uzasadnienie
         // w `_finalizeTurn`. `turn.origin.tabKey` (zamrożony na starcie tury), nie
-        // `_tabKey(turn.owner?.tab)` — watchdog strzela nawet PO KILKU MINUTACH ciszy modelu,
+        // `_tabKey(turn.owner?.tab)` - watchdog strzela nawet PO KILKU MINUTACH ciszy modelu,
         // czyli z największym oknem na to, żeby `/save session` → „Archiwizuj i nowa sesja"
         // zdążył podmienić `tab.sessionPath` pod nogami tej tury.
         const savedState = this._agentStates.get(turn.origin?.tabKey ?? '');
@@ -1873,9 +2003,10 @@ export function _onStreamStall(this: ChatViewLike, turn: ChatTurn, silentMs: num
 
     const msg = t('chat.streaming.stall_aborted', { seconds });
     if (isActiveTab) {
-        const errDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--agent' });
-        errDiv.style.setProperty('--cs-agent-color-rgb', this._getAgentRgb());
-        errDiv.createDiv({ cls: 'cs-message__text' }).createEl('p', { text: msg, cls: 'pkm-chat-error' });
+        // Kafelek systemowy zamiast dymka agenta (spec A2, sekcja 4) - ten sam wzorzec co
+        // `handle_error`. `msg` to już gotowy, bezpieczny tekst i18n (szablon, nie surowy błąd),
+        // więc idzie wprost jako `safeText`.
+        this.messages_container.appendChild(_buildStreamErrorTile('chat.tile.error.stall', msg));
         this.scrollToBottom();
     } else {
         const agentColor = SkinManager.getAgentColor(turn.agent || 'default');
@@ -1884,7 +2015,7 @@ export function _onStreamStall(this: ChatViewLike, turn: ChatTurn, silentMs: num
 }
 
 export function stop_generation(this: ChatViewLike, agentName?: string, reason = 'stop') {
-    // Przerwanie ZATRZASKUJEMY na uchwycie TEJ tury — pętla (`shouldAbort`) i bramka chunków
+    // Przerwanie ZATRZASKUJEMY na uchwycie TEJ tury - pętla (`shouldAbort`) i bramka chunków
     // czytają stan swojej tury, nie pole widoku. Nowa tura
     // dostaje własny uchwyt, więc kolejna wiadomość usera (ani auto-tura z wynikiem suba,
     // ani drain przy przełączeniu zakładki) nie ma jak odkręcić tego przerwania.
@@ -1892,27 +2023,27 @@ export function stop_generation(this: ChatViewLike, agentName?: string, reason =
     // przycisk Stop woła bez argumentu = aktywny agent (zachowanie bez zmian).
     // Pas zapasowy na wołaczy z UI: `stop_generation` bywa wpinane jako listener kliknięcia,
     // więc pierwszym argumentem potrafi być MouseEvent (wzór ostrzeżenia przy `send_message`).
-    // Nie-string traktujemy jak brak nazwy — czyli „tura aktywnego agenta".
+    // Nie-string traktujemy jak brak nazwy - czyli „tura aktywnego agenta".
     const requested = typeof agentName === 'string' ? agentName : '';
     const activeAgent = requested || this.plugin?.agentManager?.getActiveAgent()?.name || '';
     log.info('Chat', `Stop: aborting stream for agent "${activeAgent}" (${reason})`);
 
     const sCtx = this._streamCtxMap.get(activeAgent);
-    // Tura w locie ma uchwyt we wpisie mapy; tura w przygotowaniu (prompt się jeszcze buduje) —
+    // Tura w locie ma uchwyt we wpisie mapy; tura w przygotowaniu (prompt się jeszcze buduje) -
     // w `_preparingTurns`. Bez tej drugiej gałęzi Stop kliknięty w oknie przygotowania trafiałby
     // w próżnię i tura ruszyłaby mimo niego.
     (sCtx?.abort || this._preparingTurns?.get(activeAgent))?.abort(reason);
-    // Po Stopie nie sięgamy sami po zaległe wyniki subów (patrz `_deliverSubTaskResult`) — to
+    // Po Stopie nie sięgamy sami po zaległe wyniki subów (patrz `_deliverSubTaskResult`) - to
     // była rola dawnej flagi widoku, dziś osobny, jawny bezpiecznik na czas do następnej tury.
     this._drainSuppressed = true;
 
     // Stop musi kasować TEŻ zakolejkowaną wiadomość. Bez tego `set_generating(false)` na końcu
-    // tej funkcji planowałby jej wysyłkę na 100 ms po kliknięciu Stop — user przerywałby
+    // tej funkcji planowałby jej wysyłkę na 100 ms po kliknięciu Stop - user przerywałby
     // WSZYSTKO, a chwilę później ruszałaby pełna tura (przy autonomii `yolo` razem z zapisami
     // i delegacjami, na które nie miał jak się zgodzić). Tekst nie ginie: jeśli pole wpisywania
     // jest puste, wraca do niego, więc user widzi, co przerwał, i decyduje sam.
     // Decyzję („czy kasować slot" + „czy oddać tekst do pola") liczy czysta
-    // `evaluateStopQueueCancel` (`queuedMessage.ts`) — tutaj zostaje samo wykonanie.
+    // `evaluateStopQueueCancel` (`queuedMessage.ts`) - tutaj zostaje samo wykonanie.
     this._clearQueuedDrainTimer();
     const cancel = evaluateStopQueueCancel(this._queuedMessage, this.input_area?.value);
     if (cancel.clearSlot) {
@@ -1927,7 +2058,7 @@ export function stop_generation(this: ChatViewLike, agentName?: string, reason =
     // Watchdog tej tury nie może już wystrzelić po Stopie.
     sCtx?.watchdog?.disarm();
 
-    // Przerwij XHR WŁAŚCIWEJ instancji modelu — równoległa tura (needsFreshModel) używa
+    // Przerwij XHR WŁAŚCIWEJ instancji modelu - równoległa tura (needsFreshModel) używa
     // świeżej instancji, której env.chatModel nie zna.
     if (sCtx?.chatModel?.stopStream) {
         sCtx.chatModel.stopStream();
@@ -1935,10 +2066,10 @@ export function stop_generation(this: ChatViewLike, agentName?: string, reason =
         this.env.chatModel.stopStream();
     }
 
-    // Clean up streaming state (natychmiastowy feedback — pętla może jeszcze wisieć na przerwanym XHR;
+    // Clean up streaming state (natychmiastowy feedback - pętla może jeszcze wisieć na przerwanym XHR;
     // finalizacja jest pominięta bo shouldAbort → stoppedBy='abort' albo catch łapie flagę).
     this._releaseStreamCtx(activeAgent, sCtx?.turnId);
-    // Stop zatrzymuje strumień, ale NIE kasuje tego, co user już dostał — ostatnia zebrana
+    // Stop zatrzymuje strumień, ale NIE kasuje tego, co user już dostał - ostatnia zebrana
     // klatka jest domalowana przed wyzerowaniem wskaźników (żaden fragment odpowiedzi sprzed
     // kliknięcia nie ginie).
     this._renderThrottle?.flush();
@@ -1946,8 +2077,13 @@ export function stop_generation(this: ChatViewLike, agentName?: string, reason =
         this.current_message_bubble.classList.remove('streaming');
     }
     if (this._currentThinkingBlock) {
-        this._currentThinkingBlock.classList.remove('streaming');
+        finalizeThinkingBlock(this._currentThinkingBlock);
         this._currentThinkingBlock = null;
+        // Zwinięcie synchroniczne zmienia wysokość - przerysuj łącznik (naprawa recenzji
+        // niezależnej, ten sam powód co w `_chatBeforeContinue`/`handle_error`). Bez gałęzi
+        // `isActiveTab` - ta funkcja sama jej nie liczy, a otaczający kod (flush/classList/
+        // `_resetPaintTargets` niżej) jest tu już bezwarunkowy z tego samego powodu.
+        this._scheduleConnectorRedraw();
     }
     this._resetPaintTargets();
     this.hideTypingIndicator();
@@ -1956,23 +2092,23 @@ export function stop_generation(this: ChatViewLike, agentName?: string, reason =
 }
 
 /**
- * Zatrzymaj WSZYSTKO, co ten widok trzyma w locie — tury na zakładkach w tle też, plus suby
+ * Zatrzymaj WSZYSTKO, co ten widok trzyma w locie - tury na zakładkach w tle też, plus suby
  * zlecone z tych zakładek.
  *
  * Po co: warunkowanie zatrzymania generowania samym polem `is_generating` byłoby błędne, bo
  * przełączenie zakładki nadpisuje je stanem zakładki DOCELOWEJ. Tura agenta z zakładki w tle
- * przeżywałaby więc zamknięcie panelu — bez flagi przerwania, bez watchdoga — i leciałaby do
+ * przeżywałaby więc zamknięcie panelu - bez flagi przerwania, bez watchdoga - i leciałaby do
  * końca budżetu iteracji, wykonując narzędzia i dopisując odpowiedź do pliku sesji z
  * zamkniętego widoku.
  *
  * Zamykamy PO WŁAŚCICIELACH TUR: każdy wpis `_streamCtxMap` dostaje ten sam Stop co guzik.
- * Watchdogów NIE rozbrajamy wcześniej — robi to `stop_generation` dla tury, którą właśnie ubija.
+ * Watchdogów NIE rozbrajamy wcześniej - robi to `stop_generation` dla tury, którą właśnie ubija.
  *
  * @param reason - powód zapisywany na uchwycie tury (`'close'` z `onClose`)
  * @returns nazwy agentów, których tury zatrzymano
  */
 export function stop_all_turns(this: ChatViewLike, reason = 'close'): string[] {
-    // Kopia nazw PRZED pętlą — `stop_generation` kasuje wpisy z mapy w trakcie. Bierzemy też
+    // Kopia nazw PRZED pętlą - `stop_generation` kasuje wpisy z mapy w trakcie. Bierzemy też
     // tury W PRZYGOTOWANIU (prompt się buduje, wpisu w mapie jeszcze nie ma).
     const preparing = Array.from<string>(this._preparingTurns?.keys?.() || [])
         .map((agentName) => ({ agentName }));
@@ -1980,7 +2116,7 @@ export function stop_all_turns(this: ChatViewLike, reason = 'close'): string[] {
 
     // Zakolejkowana wiadomość nie ma dokąd polecieć: `set_generating(false)` wystrzeliłby ją
     // w zamykany widok (setTimeout 100 ms). Kasujemy PRZED zatrzymaniem tur.
-    // Sam pusty slot nie wystarcza — timer mógłby być JUŻ uzbrojony (tura skończyła się do
+    // Sam pusty slot nie wystarcza - timer mógłby być JUŻ uzbrojony (tura skończyła się do
     // 100 ms przed zamknięciem), a wtedy budziłby się w zamkniętym widoku i odpalał pełną
     // turę: model, narzędzia, zapis do pliku sesji. Rozbrajamy go jawnie.
     this._clearQueuedDrainTimer();
@@ -1995,7 +2131,7 @@ export function stop_all_turns(this: ChatViewLike, reason = 'close'): string[] {
         }
     }
 
-    // Suby zlecone z tego widoku — po adresie zwrotnym (origin), nie po tym, kto je wykonuje.
+    // Suby zlecone z tego widoku - po adresie zwrotnym (origin), nie po tym, kto je wykonuje.
     // `requestStop` to PROŚBA: bieg gaśnie przy najbliższym punkcie przerwania swojej pętli.
     const registry = this.plugin?.subTaskRegistry;
     if (registry?.list && registry.requestStop) {
@@ -2021,13 +2157,13 @@ export function stop_all_turns(this: ChatViewLike, reason = 'close'): string[] {
  *
  * ⚠️ Notifier trzyma JEDNEGO dostawcę. Przy dwóch otwartych widokach czatu wygrywa ten
  * otwarty jako ostatni, a jego zamknięcie odpina dostarczanie dla obu (`setDeliverer(null)`).
- * Wyniki nie giną — zostają w kolejce do następnego otwarcia czatu.
+ * Wyniki nie giną - zostają w kolejce do następnego otwarcia czatu.
  */
 export function _wireSubTaskDeliverer(this: ChatViewLike) {
     const notifier = this.plugin?.subTaskNotifier;
     if (!notifier?.setDeliverer) return;
     notifier.setDeliverer((task: SubTask) => this._deliverSubTaskResult(task));
-    // `setDeliverer` świadomie NIC nie dostarcza — moment wybiera wołacz. Teraz.
+    // `setDeliverer` świadomie NIC nie dostarcza - moment wybiera wołacz. Teraz.
     this._drainSubTasks();
 }
 
@@ -2044,9 +2180,9 @@ export function _drainSubTasks(this: ChatViewLike) {
  * Dostawca wyniku suba z tła. Kontrakt notifiera: `true` = skonsumowane (wypada z kolejki),
  * `false` = zostaw na później (ponowi `drain`).
  *
- * Bramki liczy czysta `evaluateSubTaskDelivery` (`subTaskDelivery.ts` — ma testy obu stron
+ * Bramki liczy czysta `evaluateSubTaskDelivery` (`subTaskDelivery.ts` - ma testy obu stron
  * każdej gałęzi). Tu zostaje tylko wykonanie werdyktu. Kolejność:
- *   1. brak zakładki adresata → `false` (agent nieotwarty — wynik czeka);
+ *   1. brak zakładki adresata → `false` (agent nieotwarty - wynik czeka);
  *   2. zakładka NIEAKTYWNA → `false` (auto-tura w tle byłaby robotą za plecami usera;
  *      dowiezie ją `drain` przy przełączeniu zakładki);
  *   3. trwa tura (własna albo już wstrzyknięta) → `false` (dowiezie `drain` po finalizacji);
@@ -2069,18 +2205,18 @@ export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
         const tab = matchTabForOrigin(this.chatTabs, origin, _tabKey);
 
         // Sufit ŁAŃCUCHA auto-tur po subach z rzędu. Bez tego agent w auto-turze może zlecić
-        // kolejnego suba, jego wynik znów odpala auto-turę — i tak w kółko (`max_delegation_depth`
+        // kolejnego suba, jego wynik znów odpala auto-turę - i tak w kółko (`max_delegation_depth`
         // NIE chroni: auto-tura to nowa tura agenta GŁÓWNEGO,
         // głębokość delegacji liczy się od zera). Licznik żyje per agent (ten sam klucz co
         // `_streamCtxMap`), zerowany w `send_message` prawdziwą wiadomością człowieka.
-        // Jedno wywołanie `getLimits` na doręczenie — czytany niżej też dla `subagent_result_max_chars`.
-        // Sam odczyt licznika NIE zakłada mapy (`?.get`) — mapa powstaje dopiero przy zapisie,
+        // Jedno wywołanie `getLimits` na doręczenie - czytany niżej też dla `subagent_result_max_chars`.
+        // Sam odczyt licznika NIE zakłada mapy (`?.get`) - mapa powstaje dopiero przy zapisie,
         // czyli tylko na ścieżce, która naprawdę startuje auto-turę.
         const limits = getLimits(this.env?.settings);
         const chain = evaluateAutoTurnChain(this._autoTurnChainCounts?.get(tab?.agentName as string) || 0, limits.max_consecutive_auto_turns);
 
         // KOMPLET bramek dostarczenia liczy czysta `evaluateSubTaskDelivery` (`subTaskDelivery.ts`)
-        // — zakładka → aktywność → trwająca tura → Stop → sufit łańcucha. Tutaj zostaje wyłącznie
+        // - zakładka → aktywność → trwająca tura → Stop → sufit łańcucha. Tutaj zostaje wyłącznie
         // wykonanie werdyktu, bo `chat_streaming.ts` wisi na `obsidian` i w AVA nie wstaje: gdyby
         // decyzje siedziały w tym pliku, pilnowałby ich wyłącznie regex po tekście źródła, który
         // nie odróżnia `if (x) return false;` od `if (x) { }`.
@@ -2088,7 +2224,7 @@ export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
         // a nie tylko w `set_generating`, bo to jedyne wspólne wąskie gardło dostarczania:
         // `SubTaskNotifier._onFinished` woła dostawcę WPROST na `task:finished`, a `_switchTab`
         // drenuje w kroku 11.
-        // Fail-soft na całej linii: KAŻDA odmowa zwraca `false`, więc wynik nie ginie — zostaje
+        // Fail-soft na całej linii: KAŻDA odmowa zwraca `false`, więc wynik nie ginie - zostaje
         // w kolejce notifiera do najbliższego `drain()` po następnej turze usera.
         const delivery = evaluateSubTaskDelivery({
             tab,
@@ -2099,32 +2235,32 @@ export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
         });
         if (!delivery.allowed) {
             if (delivery.reason === 'chain_limit') {
-                log.warn('Chat', `[${tab!.agentName}] limit łańcucha auto-tur po subach (${limits.max_consecutive_auto_turns}) osiągnięty — wynik ${task.id} zostaje w kolejce do tury usera`);
-                // Cisza wobec usera byłaby myląca — z jego perspektywy rozmowa po prostu przestała
+                log.warn('Chat', `[${tab!.agentName}] limit łańcucha auto-tur po subach (${limits.max_consecutive_auto_turns}) osiągnięty - wynik ${task.id} zostaje w kolejce do tury usera`);
+                // Cisza wobec usera byłaby myląca - z jego perspektywy rozmowa po prostu przestała
                 // reagować. Zdarzenie z definicji rzadkie (trzeba max_consecutive_auto_turns auto-tur
                 // z rzędu), więc jeden Notice na zaparkowanie nie spamuje (aktywność zakładki jest
-                // wcześniejszą bramką — user naprawdę na to patrzy).
+                // wcześniejszą bramką - user naprawdę na to patrzy).
                 new Notice(t('chat.streaming.auto_turn_chain_limit'), 8000);
             }
             return false;
         }
         if (!this._autoTurnChainCounts) this._autoTurnChainCounts = new Map();
-        // `evaluateSubTaskDelivery` odmawia bez zakładki — za bramką `tab` na pewno istnieje.
+        // `evaluateSubTaskDelivery` odmawia bez zakładki - za bramką `tab` na pewno istnieje.
         this._autoTurnChainCounts.set(tab!.agentName, chain.nextCount);
 
         const text = buildSubTaskNotificationText(task, {
-            // Wynik suba ma WŁASNY sufit (60k default, 0 = bez limitu) — wspólne 15k z
+            // Wynik suba ma WŁASNY sufit (60k default, 0 = bez limitu) - wspólne 15k z
             // surowymi zrzutami narzędzi ucinałoby deep-research w połowie.
             maxResultChars: limits.subagent_result_max_chars,
         });
 
         // Bezpiecznik ustawiany SYNCHRONICZNIE: `drain()` woła dostawcę w pętli, a `send_message`
-        // dochodzi do `set_generating(true)` dopiero po kilku awaitach — bez tej flagi drugi
+        // dochodzi do `set_generating(true)` dopiero po kilku awaitach - bez tej flagi drugi
         // czekający wynik wystartowałby RÓWNOLEGŁĄ turę na tej samej zakładce.
         this._subTaskTurnPending = true;
         log.info('Chat', `[${tab!.agentName}] wynik suba z tła → auto-tura (${task.id}, ${task.status})`);
         void Promise.resolve()
-            // Wynik suba to tekst MASZYNY — żadnych przywilejów człowieka (rejestr adresów,
+            // Wynik suba to tekst MASZYNY - żadnych przywilejów człowieka (rejestr adresów,
             // markery `@@skill:`, komendy `/`).
             .then(() => this.send_message({ injectedText: text, meta: machineMeta({ _subTaskNotification: true, subTaskId: task.id }) }))
             .catch((e: unknown) => log.warn('Chat', `Auto-tura po subie padła: ${(e as Error)?.message || String(e)}`))
@@ -2140,13 +2276,13 @@ export function set_generating(this: ChatViewLike, is_generating: boolean) {
     this.is_generating = is_generating;
 
     if (is_generating) {
-        // Nowa tura ruszyła — bezpiecznik „po Stopie nie drenujemy" wygasa. Nie może wygasać
-        // przy okazji zerowania `_abortedStream` w `send_message` — to gasiłoby też przerwanie
+        // Nowa tura ruszyła - bezpiecznik „po Stopie nie drenujemy" wygasa. Nie może wygasać
+        // przy okazji zerowania `_abortedStream` w `send_message` - to gasiłoby też przerwanie
         // wciąż biegnącej tury (patrz `turn.abort` wyżej).
         this._drainSuppressed = false;
         this.send_button.addClass('hidden');
         this.stop_button.removeClass('hidden');
-        // Input stays ENABLED — user can queue a message while agent works
+        // Input stays ENABLED - user can queue a message while agent works
         this.input_area.placeholder = t('chat.streaming.write_while_generating');
     } else {
         this.send_button.removeClass('hidden');
@@ -2180,7 +2316,7 @@ export function set_generating(this: ChatViewLike, is_generating: boolean) {
                 if (drain.action !== 'send') {
                     this._showQueuedIndicator(queued.text);
                     if (drain.action === 'wait_owner') {
-                        log.info('Chat', `Kolejka czeka na swoją zakładkę (${queued.owner?.agentName || '?'}) — dren wstrzymany`);
+                        log.info('Chat', `Kolejka czeka na swoją zakładkę (${queued.owner?.agentName || '?'}) - dren wstrzymany`);
                     }
                     return;
                 }
@@ -2190,7 +2326,7 @@ export function set_generating(this: ChatViewLike, is_generating: boolean) {
                 // Pole mogło NIE być puste - user zakolejkował wiadomość, a potem zaczął pisać
                 // kolejną. Podmiana na `queued` bez zabezpieczenia kasowałaby mu ten szkic bez
                 // śladu. Odkładamy go i oddajemy w `send_message` zaraz po
-                // `resetInputArea()` (tam, gdzie pole jest czyszczone — czyli PO awaitach
+                // `resetInputArea()` (tam, gdzie pole jest czyszczone - czyli PO awaitach
                 // send_message, więc restore „od ręki" tutaj i tak by nie przetrwał).
                 const draft = this.input_area.value;
                 if (draft.trim() && draft.trim() !== queued.text.trim()) this._draftAfterSend = draft;
@@ -2210,7 +2346,7 @@ export function set_generating(this: ChatViewLike, is_generating: boolean) {
             // ⚠️ NIE po przerwaniu (`_drainSuppressed`): ręczny Stop i watchdog też przechodzą
             // tędy, a „nacisnąłem Stop i po 100 ms samo zaczęło gadać" byłoby złamaniem
             // obietnicy tego guzika (przy watchdogu doszłaby jeszcze tura w martwy serwer).
-            // Wynik NIE ginie — czeka w kolejce do końca następnej tury albo do przełączenia
+            // Wynik NIE ginie - czeka w kolejce do końca następnej tury albo do przełączenia
             // zakładki; flagę czyści pierwsza wiadomość usera.
             window.setTimeout(() => this._drainSubTasks(), 100);
         }
@@ -2224,7 +2360,7 @@ export function _showQueuedIndicator(this: ChatViewLike, text: string) {
     this._hideQueuedIndicator();
     const indicator = createDiv();
     indicator.className = 'cs-queued-indicator';
-    // The i18n value is plain text with a {{text}} placeholder — the user's message
+    // The i18n value is plain text with a {{text}} placeholder - the user's message
     // must land in a text node, never in markup.
     const preview = text.length > 50 ? text.slice(0, 50) + '...' : text;
     indicator.createSpan({ cls: 'cs-queued-indicator__icon', text: '⏳' });
@@ -2233,8 +2369,13 @@ export function _showQueuedIndicator(this: ChatViewLike, text: string) {
         cls: 'cs-queued-indicator__text',
         text: t('chat.streaming.queued_indicator', { text: preview }),
     });
-    // Insert after input area
-    this.input_area.parentElement?.appendChild(indicator);
+    // Stałe miejsce, niezależne od trybu slotu paska dolnego (pole vs lista todo):
+    // bezpośrednio NAD paskiem chipów (_chipBar), w panelu inputu. `_chipBar` (i jego rodzic,
+    // `bottomPanel`) nigdy nie dostają `is-hidden` z `_applyBottomBarMode` - w przeciwieństwie
+    // do `_inputRow`/`_todoPanelBar`, których jeden jest zawsze schowany. Stare miejsce
+    // (`input_area.parentElement` = `_inputRow`) chowało wskaźnik razem z polem w trybie 'todo'
+    // (gotcha: modules/chat/CLAUDE.md, "Pasek dolny: input vs todo").
+    this._chipBar.parentElement?.insertBefore(indicator, this._chipBar);
     this._queuedIndicatorEl = indicator;
 }
 

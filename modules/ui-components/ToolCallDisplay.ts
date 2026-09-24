@@ -1,8 +1,13 @@
 
-import { UiIcons, setSvg } from '../crystal-soul/index.js';
+import { UiIcons } from '../crystal-soul/index.js';
 import { IconGenerator } from '../crystal-soul/index.js';
 import { t } from '../../core/i18n/index.js';
 import type { UiIcon } from '../crystal-soul/index.js';
+import { createTile } from './Tile.js';
+import type { TileSpec, TileStatus } from './Tile.js';
+// Notatki klikalne wszedzie (spec C, 2.3.0, "Czat bez scian") - wewnatrz modulu pliki importuja
+// sie swobodnie (zlota zasada dotyczy TYLKO wejscia spoza modulu).
+import { createNoteLink, isVaultNotePath } from './noteLink.js';
 
 /** Karta wywołania narzędzia — kształt, który realnie czytają render-funkcje niżej. */
 interface ToolCallData {
@@ -158,7 +163,7 @@ export function getToolIcon(toolName: string, color = 'currentColor', size = 14)
 }
 
 /**
- * Kształt payloadu `input` narzędzia — pola, które realnie czytają formatToolInput/-Detail
+ * Kształt payloadu `input` narzędzia - pola, które realnie czytają formatToolInputHint/-Detail
  * niżej. Narzędzia z zewnętrznych serwerów MCP mogą dosyłać dowolne inne pola (stąd sygnatura
  * indeksowa) — kod czyta je generycznie w gałęziach `default`.
  */
@@ -194,14 +199,20 @@ interface ToolInputPayload {
 }
 
 /**
- * Format tool input in a human-readable way — for header hint.
+ * Format tool input in a human-readable way - for header hint (pending state, before there is
+ * an output yet). NIGDY nie zwraca surowego JSON-a (B2 fix, recenzja A1-fix): nierozpoznane
+ * narzędzie (`generate_image`, `kom_list`, KAŻDE narzędzie z zewnętrznego serwera MCP) dawniej
+ * spadało do gałęzi `default`, która zwracała `JSON.stringify(data)` - nagłówek kafelka w
+ * stanie pending pokazywał wtedy dosłowny `{...}` przez cały czas wykonywania narzędzia.
+ * Nierozpoznane narzędzie dostaje teraz pustą podpowiedź - nagłówek stoi na samej ikonie i
+ * tytule, aż przyjdzie wynik.
  * @param {string} toolName
  * @param {*} input
  * @returns {string}
  */
-function formatToolInput(toolName: string, input: unknown) {
+function formatToolInputHint(toolName: string, input: unknown): string {
     try {
-        // TS-boundary: input narzędzia to JSON zbudowany przez wołający kod (model/UI) — bez
+        // TS-boundary: input narzędzia to JSON zbudowany przez wołający kod (model/UI) - bez
         // walidacji schematem, dokładnie jak w wersji `any` sprzed tej fali.
         const data = (typeof input === 'string' ? JSON.parse(input) : (input || {})) as ToolInputPayload;
         switch (toolName) {
@@ -255,24 +266,24 @@ function formatToolInput(toolName: string, input: unknown) {
                 return data.action || '';
             case 'ask_user':
                 return _truncate(data.question || '', 100);
-            default: {
-                const s = JSON.stringify(data);
-                return s.length > 80 ? s.slice(0, 77) + '...' : s;
-            }
+            default:
+                // Nierozpoznane narzędzie - brak wzorca po ludzku, a nagłówek NIGDY nie pokazuje
+                // surowego JSON-a (B2). Pusta podpowiedź, nie `JSON.stringify(data)`.
+                return '';
         }
-    } catch { return _fallbackToolText(input).slice(0, 80); }
+    } catch { return ''; }
 }
 
 /**
  * Format FULL tool input for expanded body view.
- * Shows all arguments in readable format (more detail than formatToolInput header).
+ * Shows all arguments in readable format (more detail than formatToolInputHint header).
  * @param {string} toolName
  * @param {*} input
  * @returns {string}
  */
 function formatToolInputDetail(toolName: string, input: unknown) {
     try {
-        // TS-boundary: jak w formatToolInput — JSON od wołającego, bez walidacji schematem.
+        // TS-boundary: jak w formatToolInputHint - JSON od wołającego, bez walidacji schematem.
         const data = (typeof input === 'string' ? JSON.parse(input) : (input || {})) as ToolInputPayload;
         switch (toolName) {
             case 'read':
@@ -394,6 +405,9 @@ interface ToolOutputPayload {
     od?: string;
     tresc?: string;
     items?: ToolTodoItem[];
+    done?: number;
+    total?: number;
+    finished?: boolean;
     action?: string;
     question?: string;
     [key: string]: unknown;
@@ -556,8 +570,28 @@ function formatToolOutput(toolName: string, output: unknown) {
             case 'todo':
             case 'chat_todo': {
                 if (data.items && Array.isArray(data.items)) {
-                    const list = data.items.map((item) => `${(item.done || item.checked) ? '  ✓' : '  ○'} ${item.text || item.content || ''}`).join('\n');
-                    return { summary: t('tool.out.tasks', { count: data.items.length }), detail: list };
+                    // Uwaga 2 (spec A2-fix): `TodoTool.finish()` oddaje liste PUSTA razem z
+                    // `finished:true` - licznik "0/0" nic nie mowi userowi o tym, co sie z lista
+                    // stalo (werdykt wlasciciela: "po kliknieciu powinno sie pokazywac, co sie z
+                    // nia stalo"). Ten przypadek dostaje wlasny, czytelny tekst zamiast "0/0" i
+                    // ZANIM policzy sie total/done na pustej tablicy.
+                    if (data.items.length === 0 && data.finished === true) {
+                        const finishedText = t('chat.tile.todo.finished');
+                        return { summary: finishedText, detail: finishedText };
+                    }
+                    // Naglowek = licznik "{done}/{total}" (+ tytul listy, jesli agent go podal) -
+                    // spec A2 "Czat bez scian": klik ma pokazac, co sie z lista stalo (werdykt
+                    // wlasciciela "Lista zadan jest tragiczna"), a CALA tresc idzie do details, nie
+                    // do naglowka. `done`/`total` licz z pol wyniku narzedzia (TodoTool.ts juz je
+                    // liczy z dysku), z zapasowym przeliczeniem z `items`, gdyby ktos wywolal to na
+                    // starszym ksztalcie danych bez tych pol.
+                    const total = typeof data.total === 'number' ? data.total : data.items.length;
+                    const done = typeof data.done === 'number' ? data.done : data.items.filter((item) => item.done || item.checked).length;
+                    const summary = data.title
+                        ? t('chat.tile.tool.todo_summary_titled', { done, total, title: data.title })
+                        : t('chat.tile.tool.todo_summary', { done, total });
+                    const list = data.items.map((item) => `${(item.done || item.checked) ? '✓' : '○'} ${item.text || item.content || ''}`).join('\n');
+                    return { summary, detail: list };
                 }
                 return { summary: data.action || t('tool.out.task_list'), detail: null };
             }
@@ -575,12 +609,26 @@ function formatToolOutput(toolName: string, output: unknown) {
             case 'idea_review':
                 return { summary: data.approved ? t('tool.out.idea_approved') : (data.action || t('tool.out.review')), detail: data.userComments || data.comments || null };
             case 'ask_user': {
+                // Spec A2 ("Czat bez scian"), sekcja 3 - werdykt wlasciciela "nie rozumiem co to
+                // pokazuje": naglowek pokazuje PYTANIE (summary, ucinane do 80 zn. przez Tile.ts,
+                // tytul kafelka to staly tekst "Pytanie do Ciebie" z `describeToolCall`), a details
+                // ZAWSZE niesie pytanie I odpowiedz razem, niezaleznie od dlugosci pytania (dawniej:
+                // detail tylko gdy pytanie > 100 znakow - usuniete). Kanon ksztaltu wyniku
+                // (`AskUserTool.ts`): sukces oddaje `{success:true, question, answer, auto}`,
+                // porazka (odmowa/timeout/brak UI w zakladce w tle) `{success:false, error,
+                // message, question}` BEZ pola `answer`.
                 const q = data.question || '';
+                if (data.success === false) {
+                    const reason = data.message || data.error || t('tool.out.msg_error');
+                    return {
+                        summary: q || reason,
+                        detail: q ? t('chat.tile.ask.body', { question: q, answer: reason }) : null,
+                    };
+                }
                 const a = data.answer || data.response || t('tool.out.answer');
-                const needsDetail = q.length > 100;
                 return {
-                    summary: a,
-                    detail: needsDetail ? `Pytanie: ${q}\nOdpowiedź: ${a}${data.auto ? ' (auto)' : ''}` : null
+                    summary: q,
+                    detail: t('chat.tile.ask.body', { question: q, answer: a }),
                 };
             }
             default: {
@@ -594,8 +642,15 @@ function formatToolOutput(toolName: string, output: unknown) {
         // normalizeMcpResult) lands here; without a cap it would put the WHOLE response into
         // the DOM node, even in the default compact-chip mode where the node is built eagerly
         // and then immediately hidden. Same cap as the read branch.
+        // B3 pkt 1 (spec A2-fix): `detail` used to stay `null` whenever `s` fit inside the
+        // 120-char summary cap, so a SHORT real error text (e.g. "Plik nie istnieje", an
+        // external tool's own message) never reached `_buildToolDetails` - the body fell back
+        // to the generic "no description" text even though there WAS a description, just a
+        // short one. `detail` is now populated whenever there is ANY text at all, regardless
+        // of length; `_buildToolDetails`'s error branch already prefers `detailText` over the
+        // summary, so a short catch-branch message now echoes correctly in the body too.
         const s = _fallbackToolText(output);
-        return { summary: _truncate(s, 120), detail: s.length > 120 ? _truncate(s, 2000) : null };
+        return { summary: _truncate(s, 120), detail: s ? _truncate(s, 2000) : null };
     }
 }
 
@@ -710,107 +765,372 @@ function _truncate(s: string | undefined, max: number) {
 // modules/prompts/CLAUDE.md.
 
 /**
- * Creates a Crystal Soul .cs-action-row for a tool call.
- * Expandable: header (icon + label + input hint + status + arrow) → body (input/output).
+ * Tytuł kafelka narzędzia PO LUDZKU — bez id wywołania, bez surowej nazwy narzędzia (poza
+ * gałęzią `default`, gdzie surowa nazwa jest jedyną informacją, jaką w ogóle mamy) i bez JSON-a.
+ * Teksty przez i18n (`chat.tile.tool.*`, pl+en, bez em/en dash) — `describeToolCall` sam tylko
+ * rozpoznaje narzędzie i wyciąga z inputu pojedyncze pole do interpolacji.
+ *
+ * Nazwy narzędzi tu użyte są PRAWDZIWYMI nazwami z `modules/tools/` (rejestr + `toolAliases.ts`):
+ * `read`/`vault_read`, `search`/`vault_search` (+ `memory_sessions`/`memory_summaries` - search-owe
+ * aliasy pamięci, ta sama grupa co w `formatToolInputHint` niżej), `write`/`vault_write`,
+ * `list`/`vault_list`, `web_search`, `web_read`, `todo`/`chat_todo`, `ask_user`. Nie ma w repo
+ * narzędzi `ls`/`list_files`/`memory_search` - nie wymyślamy nazw, których rejestr nie zna.
+ *
+ * TOTALNA funkcja (B1 fix, recenzja A1-fix): input narzędzia to JSON od modelu/UI bez walidacji
+ * schematem, więc pole może przyjść w dowolnym kształcie (`path` jako tablica, `url` jako liczba,
+ * cały input jako string `"null"` - `JSON.parse('null') === null`, więc `data` samo bywa `null`,
+ * nie tylko `{}`). Każde pole przechodzi przez `typeof === 'string'` (inaczej pomijane - tytuł
+ * wraca bez tej wartości, nigdy nie wybucha), a zewnętrzny `try/catch` jest pasem zapasowym: PRZED
+ * naprawą crashowała tu cała tura czatu (`AgentLoop.ts`, brak try) i render historii
+ * (`chat_messages.ts`, pętla bez try) na dokładnie takim wejściu.
+ * @param {string} name
+ * @param {*} input
+ * @returns {string}
+ */
+export function describeToolCall(name: string, input: unknown): string {
+    try {
+        let data: ToolInputPayload | null;
+        try {
+            data = (typeof input === 'string' ? JSON.parse(input) : (input || {})) as ToolInputPayload;
+        } catch {
+            data = {};
+        }
+        const path = typeof data?.path === 'string' ? data.path : undefined;
+        const query = typeof data?.query === 'string' ? data.query : undefined;
+        const folder = typeof data?.folder === 'string' ? data.folder : undefined;
+        const url = typeof data?.url === 'string' ? data.url : undefined;
+        switch (name) {
+            case 'read':
+            case 'vault_read':
+                return t('chat.tile.tool.read', { path: path ? _shortPath(path) : '' });
+            case 'search':
+            case 'vault_search':
+            case 'memory_sessions':
+            case 'memory_summaries':
+                return t('chat.tile.tool.search', { query: query || '' });
+            case 'write':
+            case 'vault_write':
+                return t('chat.tile.tool.write', { path: path ? _shortPath(path) : '' });
+            case 'list':
+            case 'vault_list':
+                return t('chat.tile.tool.list', { folder: path || folder || '/' });
+            case 'web_search':
+                return t('chat.tile.tool.web_search', { query: query || '' });
+            case 'web_read':
+                return t('chat.tile.tool.web_read', { url: url ? url.replace(/^https?:\/\//, '') : '' });
+            case 'todo':
+            case 'chat_todo':
+                return t('chat.tile.tool.todo');
+            case 'ask_user':
+                return t('chat.tile.tool.ask_user');
+            default:
+                return t('chat.tile.tool.generic', { name: getToolCallLabel(name) });
+        }
+    } catch {
+        return t('chat.tile.tool.generic', { name: getToolCallLabel(name) });
+    }
+}
+
+/** Dzisiejsze statusy wołaczy (`'pending'|'success'|'error'`, patrz `toolResultStatus` w `core/`)
+ *  na trójkę `TileStatus` Tile'a. Nierozpoznana/pusta wartość = `pending` (fail-soft, nigdy
+ *  nie wybucha na nieznanym stringu z zewnętrznego serwera MCP). */
+function _toTileStatus(rawStatus: string | undefined): TileStatus {
+    if (rawStatus === 'success' || rawStatus === 'ok') return 'ok';
+    if (rawStatus === 'error') return 'error';
+    return 'pending';
+}
+
+/**
+ * `JSON.stringify` bezpieczny na wejściach, na których goły `JSON.stringify` rzuca (B1 fix,
+ * recenzja A3-fix - `_coerceToText` obiecywał "nigdy wyjątek", ale nie dotrzymywał tego na
+ * cyklu ani na BigIncie w obiekcie): replacer zamienia `bigint` na `String(v)` (JSON nie zna
+ * tego typu - rzuca `TypeError: Do not know how to serialize a BigInt` bez tego) i wykrywa
+ * cykl przez `WeakSet` (`'[cykl]'` zamiast `TypeError: Converting circular structure to
+ * JSON`). Całość w `try/catch` - gdyby coś inne w łańcuchu i tak rzuciło, fallback jest lista
+ * kluczy obiektu (a nie samego obiektu - `Object.keys` też może rzucić na egzotycznym Proxy,
+ * stąd DRUGI, wewnętrzny `try/catch`), nigdy pusty string na milczącym wyjątku. Wzór jak
+ * `_safeStringify` w `core/utils/errorUtils.ts` (ten sam kształt, tu dodatkowo replacer
+ * BigInt - errorUtils go nie potrzebuje, bo błędy API nie niosą BigIntów).
+ */
+function _safeStringify(value: unknown, limit: number): string {
+    const seen = new WeakSet<object>();
+    try {
+        const json = JSON.stringify(value, (_key, v: unknown) => {
+            if (typeof v === 'bigint') return String(v);
+            if (v && typeof v === 'object') {
+                if (seen.has(v)) return '[cykl]';
+                seen.add(v);
+            }
+            return v;
+        });
+        return _truncate(json ?? _rawToString(value), limit);
+    } catch {
+        try {
+            return _truncate(Object.keys(value as object).join(', '), limit);
+        } catch {
+            return '';
+        }
+    }
+}
+
+/**
+ * Ujednolica pole na string, ZANIM cokolwiek je skleja (regula nadrzedna szczegolow kafelka,
+ * spec A2-fix - decyzja prowadzacego, zastepuje "details zawsze zaczynaja sie od summary"; B2
+ * fix: `TypeError` na nie-stringowym `fmt.detail`/`fmt.summary`, np. `kom_send` z `message`
+ * obiektem, `idea_review` z `comments` tablica, `todo` z polem-obiektem). String bez zmian;
+ * `null`/`undefined` -> `''`; tablica -> KAŻDY element rekurencyjnie przez `_coerceToText`,
+ * `join('\n')` (B1 fix, recenzja A3-fix: dawne `value.join('\n')` gołe wołało `String(obj)` na
+ * elementach-obiektach, czyli dokładnie `[object Object]` - tablica obiektów, np. `idea_review`'s
+ * `comments: [{text:'...'}]` z zewnętrznego serwera MCP albo modelu, jest realna); obiekt ->
+ * `_safeStringify` (nigdy wyjątek, patrz wyżej); reszta (liczba, bool, bigint, symbol...) ->
+ * `String(x)`. Nigdy `[object Object]`, nigdy wyjątek.
+ */
+function _coerceToText(value: unknown, limit = 2000): string {
+    if (typeof value === 'string') return value;
+    if (value == null) return '';
+    if (Array.isArray(value)) return value.map(v => _coerceToText(v, limit)).join('\n');
+    if (typeof value === 'object') return _safeStringify(value, limit);
+    // `_rawToString` (definiowana nizej w tym pliku dla `_fallbackToolText`) resetuje zawezenie
+    // TS z powrotem do golego `unknown` - `no-base-to-string` nie umie wywnioskowac, ze w tym
+    // miejscu `value` jest juz PRYMITYWEM (liczba/bool/bigint/symbol), nie obiektem.
+    return _rawToString(value);
+}
+
+/**
+ * Sklada cialo kafelka z JUZ ustringowionych `summaryText`/`detailText` (regula nadrzedna,
+ * spec A2-fix). `detailText` w calosci, gdy ZAWIERA `summaryText` (`.includes()`, nie
+ * `.startsWith()` - decyzja prowadzacego: B1 fix, `ask_user`'s detail ZAWSZE niesie pytanie w
+ * srodku szablonu "Pytanie: {q}\nOdpowiedz: {a}", wiec ten jeden generyczny check usuwa
+ * podwojne pytanie bez kodu specyficznego dla `ask_user`) albo gdy `summaryText` jest puste;
+ * inaczej oba, oddzielone pusta linia; gdy `detailText` puste: samo `summaryText`.
+ */
+function _composeTileBody(summaryText: string, detailText: string): string {
+    if (!detailText) return summaryText;
+    // Uciete summary ("..." albo "&" na koncu) porownujemy po rdzeniu, inaczej detail dublowalby tresc.
+    const core = summaryText.replace(/(\.\.\.|\u2026)$/u, '');
+    if (!summaryText || detailText.includes(core)) return detailText;
+    return `${summaryText}\n\n${detailText}`;
+}
+
+/**
+ * Ciało kafelka - sukces: `_composeTileBody(summaryText, detailText)` wyzej (regula nadrzedna).
+ * Ciało - błąd Z polem `toolCall.error` (już zamaskowany u źródła): komunikat wprost, bez zmian
+ * - Z WYJĄTKIEM `ask_user` (B1 fix, sciezka HISTORII): `chat_messages.ts` odtwarza nieudane
+ * `ask_user` z historii jako `error: tcOutput.error` (kod typu "ask_user.timeout") - dawniej ten
+ * surowy kod leciał wprost do usera. `toolCall.output` w tej gałęzi nadal niesie `question`
+ * (kanon `AskUserTool.ts`: porażka oddaje `{success:false, error, message, question}`), więc
+ * kafelek dostaje ten sam szablon "Pytanie/Odpowiedz" co żywa ścieżka, z kodem błędu zmapowanym
+ * przez i18n na tekst po ludzku (`ask_user.timeout` -> `chat.tile.ask.timeout`, inny kod ->
+ * `chat.tile.ask.failed`).
+ * Błąd BEZ pola `toolCall.error` (np. `{success:false}`): `detailText` w całości, jeśli jest;
+ * inaczej `summaryText` W CAŁOŚCI, ale TYLKO gdy DŁUŻSZE niż 80 znaków (nagłówek go i tak ucina,
+ * `Tile.ts`) - krótki, GENERYCZNY label bez realnej treści (np. "Send error" z `kom_send`, gdzie
+ * `data.message`/`data.error` są oba puste) zostaje przy `error_no_details` niżej. Krótka, ale
+ * REALNA treść (np. "Plik nie istnieje" z zewnętrznego narzędzia, złapana w
+ * `formatToolOutput`'s catch branch) trafia tu jako `detailText` już od źródła - ten branch
+ * populuje `detail` ZAWSZE, gdy jest jakikolwiek tekst (B3 pkt 1, spec A2-fix - patrz komentarz
+ * tam), więc próg 80 znaków dotyczy dziś WYŁĄCZNIE syntetycznych etykiet bez realnej treści.
+ * Surowe argumenty wejścia (`formatToolInputDetail`) dokładane WYŁĄCZNIE gdy `includeRawArgs`
+ * (pełna karta, nie chip kompaktowy) - jako sekcja „Szczegóły techniczne" w natywnym `<details>`,
+ * domyślnie zwinięta niezależnie od stanu kafelka. Pusty wejściowy `input` (brak pola w ogóle) NIE
+ * dostaje sekcji technicznej - `toolCall.input != null` jest bramką; `formatToolInputDetail`'s
+ * gałąź `default` zwraca `'{}'` dla PUSTEGO OBIEKTU (`input:{}`), co jest innym przypadkiem -
+ * `input:{}` DOSTAJE sekcję techniczną (niepusty argument, po prostu bez pól).
+ */
+/** `JSON.parse` bezpieczny (string albo juz-obiekt) do samego celu wyciagania sciezek notatek -
+ *  osobny, malutki parser zamiast reuzywania wnetrza `formatToolOutput` (ktora nie eksponuje
+ *  sparsowanych danych na zewnatrz), zeby nie ruszac jej dobrze przetestowanej sciezki. */
+function _parseOutputForLinks(output: unknown): Record<string, unknown> | null {
+    try {
+        const data = (typeof output === 'string' ? JSON.parse(output) : output) as Record<string, unknown>;
+        return data && typeof data === 'object' && !Array.isArray(data) ? data : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Sciezki notatek do pokazania jako klikalne linki NAD dotychczasowa trescia kafelka (spec C,
+ * "Czat bez scian" 2.3.0): `read`/`vault_read` (jeden plik - sciezka z wyniku, zapasowo z
+ * argumentow wejscia), `search`/`vault_search`/`memory_sessions`/`memory_summaries` (kazdy
+ * wynik z polem `path`), `list`/`vault_list` (pozycje bedace notatkami - foldery i pliki spoza
+ * `isVaultNotePath` zostaja WYLACZNIE tekstem w dotychczasowej liscie, bez linku). Blad narzedzia
+ * -> pusta tablica (wolacz nie dokleja sekcji linkow do komunikatu bledu).
+ */
+function _extractNoteLinkPaths(toolCall: ToolCallData): string[] {
+    if (toolCall.error) return [];
+    const data = _parseOutputForLinks(toolCall.output);
+    switch (toolCall.name) {
+        case 'read':
+        case 'vault_read': {
+            const outPath = data && typeof data.path === 'string' ? data.path : '';
+            const inp = toolCall.input as { path?: unknown } | undefined;
+            const inPath = typeof inp?.path === 'string' ? inp.path : '';
+            const path = outPath || inPath;
+            return path && isVaultNotePath(path) ? [path] : [];
+        }
+        case 'search':
+        case 'vault_search':
+        case 'memory_sessions':
+        case 'memory_summaries': {
+            const results = data && Array.isArray(data.results) ? (data.results as Array<{ path?: unknown }>) : [];
+            return results
+                .map(r => (typeof r?.path === 'string' ? r.path : ''))
+                .filter((p): p is string => !!p && isVaultNotePath(p));
+        }
+        case 'list':
+        case 'vault_list': {
+            const rawFiles = data ? (data.files ?? data.entries) : undefined;
+            const files = Array.isArray(rawFiles) ? (rawFiles as ToolFileEntry[]) : [];
+            return files
+                .map(f => (typeof f === 'string' ? f : (f?.path || f?.name || '')))
+                .filter((p): p is string => typeof p === 'string' && isVaultNotePath(p));
+        }
+        default:
+            return [];
+    }
+}
+
+/** Sekcja linkow notatek NAD dotychczasowa trescia kafelka - jedna linia na sciezke, przez
+ *  `createNoteLink` (jeden mechanizm otwierania w calym repo, spec C). */
+function _appendNoteLinksSection(body: HTMLElement, paths: string[]): void {
+    const wrap = _createDetachedEl('div');
+    wrap.className = 'cs-tile__note-links';
+    for (const path of paths) {
+        const line = _createDetachedEl('div');
+        line.className = 'cs-tile__note-link-line';
+        createNoteLink(line, path);
+        wrap.appendChild(line);
+    }
+    body.appendChild(wrap);
+}
+
+function _buildToolDetails(toolCall: ToolCallData, includeRawArgs: boolean): TileSpec['details'] {
+    if (toolCall.error) {
+        if (toolCall.name === 'ask_user') {
+            const out = toolCall.output as { question?: unknown } | undefined;
+            const q = typeof out?.question === 'string' ? out.question : '';
+            if (q) {
+                const code = typeof toolCall.error === 'string' ? toolCall.error : '';
+                const reason = code === 'ask_user.timeout' ? t('chat.tile.ask.timeout') : t('chat.tile.ask.failed');
+                return t('chat.tile.ask.body', { question: q, answer: reason });
+            }
+        }
+        return typeof toolCall.error === 'string' ? toolCall.error : JSON.stringify(toolCall.error);
+    }
+    const isError = toolCall.status === 'error';
+    const fmt = toolCall.output ? formatToolOutput(toolCall.name, toolCall.output) : null;
+    const summaryText = _coerceToText(fmt?.summary);
+    const detailText = _coerceToText(fmt?.detail);
+    let bodyText: string;
+    if (isError) {
+        bodyText = detailText || (summaryText.length > 80 ? summaryText : '');
+    } else {
+        bodyText = _composeTileBody(summaryText, detailText);
+    }
+    if (!bodyText && isError) {
+        bodyText = t('chat.tile.tool.error_no_details');
+    }
+    const rawArgsText = (includeRawArgs && toolCall.input != null)
+        ? (formatToolInputDetail(toolCall.name, toolCall.input) || '')
+        : '';
+    const notePaths = isError ? [] : _extractNoteLinkPaths(toolCall);
+
+    if (!bodyText && !rawArgsText && notePaths.length === 0) return undefined;
+    if (!rawArgsText && notePaths.length === 0) return bodyText || undefined;
+
+    return (body: HTMLElement) => {
+        if (notePaths.length > 0) {
+            _appendNoteLinksSection(body, notePaths);
+        }
+        if (bodyText) {
+            const pre = _createDetachedEl('div');
+            pre.className = 'cs-tile__pre';
+            pre.textContent = bodyText;
+            body.appendChild(pre);
+        }
+        if (!rawArgsText) return;
+        const rawBlock = _createDetachedEl('details');
+        rawBlock.className = 'cs-tile__raw-args';
+        const summaryEl = _createDetachedEl('summary');
+        summaryEl.textContent = t('chat.tile.raw_args');
+        rawBlock.appendChild(summaryEl);
+        const pre2 = _createDetachedEl('pre');
+        pre2.textContent = rawArgsText;
+        rawBlock.appendChild(pre2);
+        body.appendChild(rawBlock);
+    };
+}
+
+/**
+ * Kafelek `agent-muted` wspólny dla `createToolCallDisplay` i `createCompactToolChip` — jedyna
+ * różnica między pełną kartą i chipem kompaktowym jest `includeRawArgs` (patrz `_buildToolDetails`).
+ * Aktualizacje w trakcie streamingu (pending → ok/error) idą przez PEŁNE PRZEBUDOWANIE:
+ * `chat_streaming.ts` woła `toolDisplay.replaceWith(createCompactToolChip({...nowy status}))` —
+ * nie ma tu mutacji istniejącego `TileHandle` w locie, więc `createToolCallDisplay`/
+ * `createCompactToolChip` świadomie zwracają goły `HTMLElement`, nie `TileHandle` (wybór opisany
+ * w `CLAUDE.md` tego modułu, sekcja Tile).
+ */
+function _buildToolTile(toolCall: ToolCallData, opts: { includeRawArgs: boolean }): HTMLElement {
+    const isError = !!toolCall.error || toolCall.status === 'error';
+    const status: TileStatus = isError ? 'error' : _toTileStatus(toolCall.status);
+    // Skrót obok tytułu: wynik, gdy już jest (po ludzku, przez formatToolOutput); w trakcie
+    // wykonywania (jeszcze bez output) - hint wejścia (formatToolInputHint), żeby kafelek w
+    // stanie pending nie stał pusty. Zero surowych argumentów JSON w żadnej z dwóch gałęzi -
+    // naprawione (B2, recenzja A1-fix): `formatToolInputHint` dla nierozpoznanego narzędzia
+    // zwraca '', nigdy `JSON.stringify` jak dawny `formatToolInput`.
+    // Błąd BEZ pola `toolCall.error` (np. `{success:false}`): nagłówek zostaje przy summary z
+    // wyniku zamiast gasnąć do pustki (B5) - błąd Z polem `error` blankuje summary, bo jego
+    // treść i tak trafia w całości do `_buildToolDetails` niżej.
+    const rawSummary = (isError && toolCall.error)
+        ? undefined
+        : (toolCall.output
+            ? formatToolOutput(toolCall.name, toolCall.output).summary
+            : (formatToolInputHint(toolCall.name, toolCall.input) || undefined));
+    // Porzadki po A1, punkt 3: kilka galezi `formatToolInputHint`/`formatToolOutput` oddaje pole
+    // wprost jako `data.xxx || ''` bez `typeof` (np. `search`'s `data.query || ''`) - narzedzie z
+    // zewnetrznego serwera MCP moze podac to pole jako obiekt (`{length:100}`), nie string. Bez
+    // tej bramki taki obiekt lecialby do `createTile`'s `summary`, a `Tile.ts`'s
+    // `truncatePreview`/`textContent` przypisanie zamienialoby go w doslowne `[object Object]` w
+    // naglowku. JEDNA linia typeof na wyjsciu `_buildToolTile` chroni WSZYSTKIE galezie naraz,
+    // zamiast utwardzac kazdy `switch` z osobna.
+    const summary = typeof rawSummary === 'string' ? rawSummary : undefined;
+
+    const handle = createTile({
+        role: 'agent-muted',
+        status,
+        iconSvg: getToolIcon(toolCall.name),
+        title: describeToolCall(toolCall.name, toolCall.input),
+        summary: summary || undefined,
+        details: _buildToolDetails(toolCall, opts.includeRawArgs),
+    });
+    return handle.el;
+}
+
+/**
+ * Pełna karta wywołania narzędzia — kafelek `.cs-tile` przez `createTile` (rola `agent-muted`).
+ * Nagłówek: ikona + tytuł po ludzku (`describeToolCall`) + skrót wyniku + kropka statusu.
+ * Ciało (rozwijane): sformatowany wynik + (tylko tu, nie w chipie) surowe argumenty w
+ * zwiniętej sekcji „Szczegóły techniczne".
  * @param {Object} toolCall - {name, input, output, status, error?}
  * @returns {HTMLElement}
  */
-export function createToolCallDisplay(toolCall: ToolCallData) {
-    const row = _createDetachedEl('div');
-    row.className = 'cs-action-row';
-
-    const info = (TOOL_INFO as Record<string, ToolInfoEntry | undefined>)[toolCall.name] || { icon: null };
-    const label = getToolCallLabel(toolCall.name);
-    const status = toolCall.status || 'pending';
-
-    // ── HEAD ──
-    const head = row.createDiv({ cls: 'cs-action-row__head' });
-
-    // Icon
-    const iconEl = head.createDiv({ cls: 'cs-action-row__icon' });
-    setSvg(iconEl, info.icon ? info.icon() : getToolIcon(toolCall.name));
-
-    // Label with human-readable input hint
-    const inputHint = formatToolInput(toolCall.name, toolCall.input);
-    const labelText = inputHint ? `${label} — ${inputHint}` : label;
-    head.createSpan({ cls: 'cs-action-row__label', text: labelText });
-
-    // Status crystal marker
-    head.createDiv({ cls: `cs-action-row__status cs-action-row__status--${status === 'success' ? 'done' : status}` });
-
-    // Arrow
-    const arrow = head.createDiv({ cls: 'cs-action-row__arrow' });
-    setSvg(arrow, UiIcons.chevronDown(12));
-
-    // ── BODY ──
-    const body = row.createDiv({ cls: 'cs-action-row__body' });
-
-    // Input — full detail for expanded view
-    const inputFull = formatToolInputDetail(toolCall.name, toolCall.input);
-    if (inputFull) {
-        const inputDiv = body.createDiv({ cls: 'cs-action-row__input' });
-        inputDiv.createSpan({ cls: 'cs-action-row__field-label', text: t('tool.field.call') });
-        if (inputFull.includes('\n')) {
-            const pre = inputDiv.createDiv({ cls: 'cs-action-row__pre' });
-            pre.textContent = inputFull;
-        } else {
-            inputDiv.createSpan({ text: inputFull });
-        }
-    }
-
-    // Output — human-readable summary + full detail
-    if (toolCall.error) {
-        const errDiv = body.createDiv({ cls: 'cs-action-row__output cs-action-row__output--error' });
-        errDiv.createSpan({ cls: 'cs-action-row__field-label', text: t('tool.field.error') });
-        errDiv.createSpan({ text: typeof toolCall.error === 'string' ? toolCall.error : JSON.stringify(toolCall.error) });
-    } else if (toolCall.output) {
-        const fmt = formatToolOutput(toolCall.name, toolCall.output);
-        if (fmt.summary) {
-            const sumDiv = body.createDiv({ cls: 'cs-action-row__output' });
-            sumDiv.createSpan({ cls: 'cs-action-row__field-label', text: t('tool.field.result') });
-            sumDiv.createSpan({ text: fmt.summary });
-        }
-        if (fmt.detail) {
-            const detailDiv = body.createDiv({ cls: 'cs-action-row__detail' });
-            detailDiv.textContent = fmt.detail;
-        }
-    }
-
-    // Toggle logic
-    head.addEventListener('click', () => {
-        row.classList.toggle('open');
-    });
-
-    return row;
+export function createToolCallDisplay(toolCall: ToolCallData): HTMLElement {
+    return _buildToolTile(toolCall, { includeRawArgs: true });
 }
 
-export function createCompactToolChip(toolCall: ToolCallData) {
-    const chip = _createDetachedEl('button') as HTMLButtonElement;
-    chip.type = 'button';
-    chip.className = `cs-tool-chip cs-tool-chip--${toolCall.status || 'pending'}`;
-
-    const icon = _createDetachedEl('span');
-    icon.className = 'cs-tool-chip__icon';
-    setSvg(icon, getToolIcon(toolCall.name));
-    chip.appendChild(icon);
-
-    const label = _createDetachedEl('span');
-    label.className = 'cs-tool-chip__label';
-    const inputHint = formatToolInput(toolCall.name, toolCall.input);
-    const outputSummary = toolCall.output ? formatToolOutput(toolCall.name, toolCall.output).summary : '';
-    label.textContent = [getToolCallLabel(toolCall.name), inputHint || outputSummary].filter(Boolean).join(' - ');
-    chip.appendChild(label);
-
-    const detail = createToolCallDisplay(toolCall);
-    detail.classList.add('is-hidden');
-    chip.addEventListener('click', () => {
-        detail.classList.toggle('is-hidden');
-    });
-
+/**
+ * Chip kompaktowy — TEN SAM kafelek co `createToolCallDisplay`, bez surowych argumentów wejścia
+ * w ciele, opakowany w `span.cs-tool-chip-wrap` (zgodność wsteczna: TYLKO jego test,
+ * `render_messages.emptyAssistant.test.ts`, szuka tej klasy - `chat_messages.ts` sam jej nie
+ * czyta; poprawka nieścisłości, B3 pkt 4 spec A2-fix).
+ * @param {Object} toolCall - {name, input, output, status, error?}
+ * @returns {HTMLElement}
+ */
+export function createCompactToolChip(toolCall: ToolCallData): HTMLElement {
+    const tile = _buildToolTile(toolCall, { includeRawArgs: false });
     const wrap = _createDetachedEl('span');
     wrap.className = 'cs-tool-chip-wrap';
-    wrap.appendChild(chip);
-    wrap.appendChild(detail);
-    if (toolCall.status === 'error' || toolCall.error) detail.classList.remove('is-hidden');
+    wrap.appendChild(tile);
     return wrap;
 }

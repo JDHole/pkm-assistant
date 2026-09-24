@@ -53,9 +53,15 @@ test('chat_streaming.ts: gałąź transportowego błędu i gałąź !result.succ
     t.is(errorCalls.length, 2, 'dokładnie dwie gałęzie (błąd transportu + !result.success) mają być na sztywno "error"');
 });
 
-test('chat_messages.ts: odtwarzanie historii liczy status TĄ SAMĄ regułą co makeDisplay obok', t => {
+test('chat_messages.ts: 2 wywolania createSubAgentBlock - wynik liczy status jak makeDisplay obok, pokwitowanie w tle (uwaga 10) ma sztywne success', t => {
     const calls = callArgs(messages);
-    t.is(calls.length, 1, `spodziewałem się 1 wywołania createSubAgentBlock w chat_messages.ts, znalazłem ${calls.length}`);
-    t.regex(calls[0], /status:\s*toolResultStatus\(tcOutput\)/,
+    t.is(calls.length, 2, `spodziewałem się 2 wywołań createSubAgentBlock w chat_messages.ts (wynik + pokwitowanie w tle odtworzone z historii, uwaga 10 spec A2-fix), znalazłem ${calls.length}`);
+    const resultCall = calls.find(c => !/pending:\s*true/.test(c));
+    const pendingCall = calls.find(c => /pending:\s*true/.test(c));
+    t.truthy(resultCall, 'brak wywolania BEZ pending:true (galaz wyniku delegacji)');
+    t.truthy(pendingCall, 'brak wywolania Z pending:true (galaz pokwitowania w tle odtworzonego z historii)');
+    t.regex(resultCall!, /status:\s*toolResultStatus\(tcOutput\)/,
         'historia MUSI liczyć status z toolResultStatus(tcOutput) - dokładnie jak sąsiedni makeDisplay() dla narzędzi nie-subowych, inaczej status znów rozjeżdża się między historią a live-widokiem');
+    t.regex(pendingCall!, /status:\s*'success'/,
+        'pokwitowanie w tle ma sztywne status:\'success\' - ten sam wzorzec co żywa gałąź started:true w chat_streaming.ts (pokwitowanie nie jest ani sukcesem, ani porażką delegacji, kolor daje pending)');
 });

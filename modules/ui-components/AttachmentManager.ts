@@ -48,6 +48,18 @@ interface AttachmentManagerOptions {
     pasteTarget?: HTMLElement | null;
 }
 
+/** Wejście `addTextAttachment` - tylko tekst, bez `File`/`Blob` (patrz JSDoc metody). */
+interface AddTextAttachmentInput {
+    name: string;
+    text: string;
+}
+
+/** Wynik `addTextAttachment` - `message` niesie literalny komunikat i18n przy odmowie. */
+interface AddTextAttachmentResult {
+    added: boolean;
+    message?: string;
+}
+
 interface MessageContentTextBlock {
     type: 'text';
     text: string;
@@ -591,6 +603,44 @@ export class AttachmentManager {
      */
     hasAttachments(): boolean {
         return this.attachments.length > 0;
+    }
+
+    /**
+     * Dodaje załącznik tekstowy TĄ SAMĄ drogą co `_processFile` dla pliku tekstowego - sam
+     * limit sztuk (`MAX_ATTACHMENTS`), sam limit rozmiaru (`MAX_TEXT_SIZE`), ten sam chip w
+     * pasku (`att.type === 'text'` → ikona 📄). Bez `File`/`Blob` w sygnaturze celowo: wołacz
+     * (menu na zaznaczeniu czatu, `modules/chat/chat/selectionMenu.ts`) ma gotowy tekst
+     * zaznaczenia, nie plik z dysku, a testy AVA nie mają DOM-owego `File` do zbudowania.
+     *
+     * Rozmiar liczy się w BAJTACH (`TextEncoder`, tak jak `File.size` dla realnego pliku),
+     * nie w znakach - tekst spoza ASCII (polskie znaki, emoji) miałby inaczej zaniżony rozmiar
+     * względem tego, co faktycznie pójdzie do modelu.
+     *
+     * @returns `{added:true}` po sukcesie; `{added:false, message}` z literalnym komunikatem
+     *   i18n (ten sam klucz co `_processFile`) przy odmowie - wołacz może go pokazać userowi.
+     */
+    addTextAttachment({ name, text }: AddTextAttachmentInput): AddTextAttachmentResult {
+        if (this.attachments.length >= MAX_ATTACHMENTS) {
+            const message = t('attach.limit_reached', { max: MAX_ATTACHMENTS });
+            log.warn('Attachments', message);
+            return { added: false, message };
+        }
+        const size = new TextEncoder().encode(text).length;
+        if (size > MAX_TEXT_SIZE) {
+            const message = t('attach.file_too_large', { name, size: this._formatSize(size) });
+            log.warn('Attachments', message);
+            return { added: false, message };
+        }
+        this.attachments.push({
+            type: 'text',
+            name,
+            content: text,
+            mimeType: 'text/plain',
+            size,
+        });
+        this._renderChips();
+        this.onChange(this.attachments);
+        return { added: true };
     }
 
     /**

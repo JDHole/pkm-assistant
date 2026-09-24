@@ -26,7 +26,7 @@ modules/chat/
 ├── slash-commands/                # definicje komend slash (save_session.js)
 └── chat/                          # mixiny (prototype) + helpery/rejestry
     ├── chat_streaming.js          # streaming tokenów + force-trigger injection + twardy backstop pętli
-    ├── chat_ui.js                 # render UI elementów + popup `/@`
+    ├── chat_ui.js                 # render UI elementów + popup `/`
     ├── chat_messages.js           # render messages, history + compact tool chips
     ├── chat_artifacts.js          # panel Artefaktów v2 + guzik delegacji
     ├── chat_model.js              # model selection, multimodal handling
@@ -51,13 +51,18 @@ modules/chat/
     ├── compressionPrompt.js        # czysty re-export z `config/default_prompts.js` (tam mieszka `defaultCompressionPrompt()`) - lokalne drzwi dla wnętrza czatu
     ├── memoryCandidates.js         # parser bloku MEMORY_CANDIDATES z odpowiedzi Summarizera
     ├── subTaskNotification.js      # treść powiadomienia o wyniku suba z tła + matchTabForOrigin (pure, testowalny)
+    ├── machineMessage.js           # klasyfikator wiadomości maszynowych (spec A3) - classifyMachineMessage + buildMachineView; pure, zero obsidian, testowalny
+    ├── machineTile.js               # render współdzielony kafelka wiadomości maszynowej (renderMachineTile) - wołany przez chat_messages.js I chat_streaming.js; obsidian przechodnio przez barrel ui-components, testowalny w AVA z atrapą harnessu
+    ├── agentCrystal.js              # `agentCrystalCssVar(agent, color)` - wartość CSS `--cs-agent-crystal` (data URL SVG kryształu), jeden producent dla append_message/render_messages I `_ensureAgentMessageContainer` (kolumna dymków, 2.3.0); trzeci plik jak machineTile.js, żeby nie zamknąć cyklu między dwoma mixinami
+    ├── connectorActivity.js         # `_scheduleConnectorRedraw`/`_cancelConnectorRedraw` (przeniesione z chat_ui.js) + `onMessagesContainerActivity`/`installMessagesContainerActivity` (nasłuch rozwinięcia kafelka → przerysowanie łącznika); czwarty plik mixina chat_ui.js, poza jego importem `chat_view.css` (moduł CSS, którego Node/AVA nie ładuje) - stąd testowalny bezpośrednim importem
     ├── subTaskStrip.js             # pasek biegów subów POD zakładkami czatu; obsidian-free DOM, model z modules/sub-agents
+    ├── selectionMenu.js            # menu na zaznaczeniu tekstu (2.3.0, spec D) - Kopiuj / Dodaj jako kontekst / Cytuj; quoteText/insertAtCursor pure+testowalne, installSelectionMenu montuje nasłuchy na messages_container
     ├── SlashCommandsRegistry.js    # rejestr komend `/`
     ├── ToolReactorRegistry.js      # plug-in reaktory na tool results
     ├── TokenViewerWidget.js        # donut + pop-over Token Context Viewer
     ├── TokenViewerUtils.js         # helpery obliczeń dla Token Viewera
     ├── ToolTokenCache.js           # cache countTokens(JSON.stringify(tools)) per agent
-    └── TriggerPopup.js             # popup `/@` z sekcjami SUB / SKILLS / MCP
+    └── TriggerPopup.js             # popup WYŁĄCZNIE `/`, sekcje Slash / Skille / Sub-Agenty / MCP (zewnętrzne)
 ```
 
 CSS: `modules/chat/chat_view.css` (osobny plik styli).
@@ -87,6 +92,63 @@ Mixinów `chat_*` NIE eksportujemy - to wewnętrzna struktura (prototype mixin p
 Settings→Prompt bierze ją wprost stamtąd; lokalne drzwi `chat/compressionPrompt.js` zostają
 dla wnętrza modułu (Summarizer, turnOwner). Singleton `StreamingManager` i `RollingWindow`
 też nie wychodzą przez barrel - żyją i są używane wewnątrz `chat/`.
+
+---
+
+## Wyzwalacze pola czatu: `/` i `@` to DWA NIEZALEŻNE mechanizmy (2.3.0)
+
+Pole wpisywania miało kiedyś dwa popupy otwierające się razem po `@` (`TriggerPopup` i
+`MentionAutocomplete`) - naprawione, dziś każdy znak ma DOKŁADNIE jednego właściciela (wyjątek
+`/@` opisany niżej - tam TriggerPopup świadomie oddaje pole, zamiast dwóch popupów naraz):
+
+- **`/`** → `TriggerPopup` (`chat/TriggerPopup.ts`, otwierany z `chat_ui.ts`'s
+  `_handleTriggerKeyDown`/`_handleTriggerInput`/`_openTriggerPopup`). Cztery sekcje: Slash-komendy
+  (`this.slashCommands`), Skille (`agent.allowed_skills`), Sub-agenty (custom suby usera dla
+  aktywnego agenta, `getVisibleSubAgentsForAgent`) i MCP - WYŁĄCZNIE narzędzia serwerów
+  ZEWNĘTRZNYCH, JEDEN WPIS PER NARZĘDZIE (nie per serwer - naprawa 2.3.0, patrz niżej).
+  Dyskryminator MCP jest `tool.source === 'user'` (kanoniczne pole `ToolDefinition.source`,
+  `modules/tools/ToolRegistry.ts` - built-in narzędzia mają `source` puste/`'built-in'`, external
+  MCP dostaje `'user'` w `ExternalMcpManager._wrapTool`; ten sam dyskryminator, ten sam wzorzec co
+  `modules/tools/ConnectorsBackstageTab.ts`'s `groupBuiltinTools`).
+- **`@`** → wyłącznie `MentionAutocomplete` (`modules/ui-components/MentionAutocomplete.ts`) -
+  notatki i foldery vaulta, własny nasłuch `input`, tag `@[Nazwa]` wstawiany w tekst pola plus chip
+  w pasku CHIPÓW POD polem (`_chipBar`, `chat_ui.ts` ok. 212 - powstaje po wierszu textarea, nie
+  jest to popup nad polem). `TriggerPopup` w ogóle nie reaguje na `@` jako WYZWALACZ:
+  `_handleTriggerKeyDown` otwiera się tylko dla `e.key === '/'`, a `_handleTriggerInput` zamyka
+  popup, jeśli znak na pozycji wyzwalacza przestał być `/`. **`/@`** (user otworzył popup `/`,
+  potem wpisał `@` jako pierwszy znak FILTRA - trigger sam zostaje `/`): `_handleTriggerInput`
+  zamyka TriggerPopup, gdy filtr zawiera `@`, zamiast filtrować pustką - bez tej bramki oba popupy
+  stały otwarte naraz (naprawa 2.3.0, niżej opisana razem z resztą).
+
+- **Składnia markerów wstawianych przez `onSelect`**: `@@skill:nazwa`, `@@tool:nazwa`,
+  `@sub-agent:nazwa` (`InlineChipPlugin.ts`'s `makeInlineTriggerMarker`) - `@` w tych markerach
+  jest częścią SKŁADNI markera wstawianego do tekstu, nie triggerem otwierającym popup; parser
+  markerów (`parseInlineTriggers`) i cała reszta pętli tury czytają je bez zmian. Jedna zmiana
+  TREŚCI od 2.3.0: dla sekcji MCP `nazwa` w `@@tool:nazwa` to pełna nazwa narzędzia
+  (`<serverId>__<tool>`), nie nazwa serwera (szczegóły w "Naprawy 2.3.0" niżej).
+
+### Naprawy 2.3.0 (recenzja niezależna commitu 1bb2a846)
+
+- **Enter w otwartym popupie `/` nie wysyła już wiadomości.** `input_area` ma DWA nasłuchy
+  `keydown` (`_handleTriggerKeyDown` PIERWSZY, `handle_input_keydown` DRUGI - ten wysyła na Enter
+  bez Shift). Gdy popup skonsumuje klawisz, `_handleTriggerKeyDown` woła
+  `e.stopImmediatePropagation()`, NIE `e.stopPropagation()` - druga zatrzymuje tylko bąbelkowanie
+  do przodków, nie inne nasłuchy NA TYM SAMYM elemencie, więc Enter wybierający pozycję w popupie
+  (np. slash-komendę) wysyłał od razu wiadomość zamiast tylko wstawić marker. Wzór:
+  `modules/ui-components/MentionAutocomplete.ts`'s `_handleKeyDown` (ten sam problem, ta sama
+  naprawa, komentarz przy Enter/Tab).
+- **Sekcja MCP listuje NARZĘDZIA, nie serwery.** Wybór serwera dawniej wstawiał
+  `@@tool:<serverId>` - żadne narzędzie nie nazywa się samą nazwą serwera, więc marker wskazywał
+  narzędzie, którego rejestr nie zna, i model dostawał instrukcję wołania czegoś nieistniejącego.
+  `buildItems()` (`TriggerPopup.ts`) dziś dodaje jeden wpis PER NARZĘDZIE zewnętrznego serwera:
+  `name` = pełna nazwa z rejestru (`<serverId>__<tool>`, ta sama, którą marker `@@tool:<name>`
+  niesie do egzekucji), `label` = czytelna część PO `__` (kosmetyka listy), `description` =
+  opis narzędzia (dla external tools już niesie prefiks `[serverLabel] ...` z
+  `ExternalMcpManager._wrapTool`, więc serwer zostaje widoczny bez dublowania). Ten sam wzór co
+  picker narzędzi serwera w pasku bocznym (`chat_ui.ts`'s `_showMcpToolPicker` - wstawia PEŁNĄ
+  nazwę narzędzia jako marker, nigdy samą nazwę serwera). Filtr popupu (`_applyFilter`, szuka w
+  `name`+`label`) łapie wpisywanie i nazwy serwera (prefiks w `name`), i nazwy narzędzia bez
+  dodatkowej zmiany.
 
 ---
 
@@ -680,6 +742,18 @@ patrz `modules/tools/CLAUDE.md`) z `sessionId` liczonym DOKŁADNIE jak `TodoTool
 (basename ścieżki sesji bez `.md`), best-effort (pad sprzątania nie blokuje odrzucenia sesji).
 Testy: `chat/handleNewSessionTodoCleanup.test.ts`, `tools/.../TodoTool.test.ts` (`retireTodoFile`).
 
+⚠️ **Wskaźnik zakolejkowanej wiadomości wisi POZA slotem input/todo (2.3.0, spec E "Czat bez
+ścian" - werdykt właściciela: "Nie widzę tego").** `_showQueuedIndicator`/`_hideQueuedIndicator`
+(`chat_streaming.ts`) montowały wskaźnik jako `input_area.parentElement.appendChild(...)`, czyli
+DO ŚRODKA `_inputRow` - gdy pasek jest w trybie `'todo'`, `_applyBottomBarMode` (wyżej) dokłada
+`_inputRow`-owi `is-hidden`, więc wskaźnik znikał razem z polem. Fix: `_showQueuedIndicator`
+wstawia wskaźnik do `_chipBar.parentElement` (`bottomPanel`, ten sam kontener co `_chipBar`
+sam - NIGDY nie dostaje `is-hidden` z `_applyBottomBarMode`), tuż PRZED `_chipBar`
+(`insertBefore`) - widoczny w OBU trybach slotu. `_hideQueuedIndicator` bez zmian semantyki
+(`.remove()` + zerowanie uchwytu). Test: `chat/todoPanel.test.ts` (real DOM przez fabrykowany
+`this`, z lokalną atrapą globalnego `createDiv`/`createSpan` - atrapa z preloadu harnessu NIE
+śledzi `parentElement`/kolejności `insertBefore`, patrz komentarz w teście).
+
 ### Cykl życia sesji w zakładce
 
 - **Zamknięcie zakładki czeka na zapis.** `_closeActiveTab` jest `async` i `await`-uje
@@ -808,6 +882,552 @@ Harness end-to-end (`lib/runTurn.ts` w repo harnessu) składa produkcyjne kawał
 `ChatView` - nie pokrywa więc mechanizmów, które wymagają realnego widoku i wielu zakładek
 (np. zamrożenie właściciela tury czatu przy przełączeniu zakładki); pokrywa sąsiednią warstwę,
 własność BIEGU SUBA.
+
+---
+
+### Kafelki Tile w streamie i w historii (2.3.0, "Czat bez ścian")
+
+`ThinkingBlock`/`ToolCallDisplay`/`SubAgentBlock` (`modules/ui-components/`) i bloki systemowe
+błędu streamu (ten moduł) renderują się WSZYSTKIE jako kafelek `.cs-tile` przez `createTile` (A1
++ A2 komplet - zero DOM-u `.cs-action-row` produkowanego gdziekolwiek w repo od A2) - patrz
+`modules/ui-components/CLAUDE.md`, sekcja "Tile", dla kształtu i decyzji projektowych. Kilka
+miejsc w TYM module dotyka to bezpośrednio:
+
+- **Finalizacja bloku myśli.** `chat_streaming.ts` woła `finalizeThinkingBlock(this._currentThinkingBlock)` w CZTERECH miejscach (koniec naturalny w `_finalizeTurn`, backstop przed
+  kontynuacją w `_chatBeforeContinue`, Stop w `stop_generation`, błąd w `handle_error`) zamiast
+  dawnego gołego `classList.remove('streaming')` - kolejność względem `this._currentThinkingBlock = null` i `_resetPaintTargets()` zostaje bez zmian (strażnik po źródle:
+  `chat/renderThrottle.test.ts`, test "bonus: handle_error zeruje blok myśli...").
+- **Aktualizacja chipa narzędzia I bloku sub-agenta w trakcie streamingu idzie PRZEZ PEŁNE
+  PRZEBUDOWANIE**, tak jak przed Tile: `_chatOnToolResults` (`chat_streaming.ts`) woła
+  `toolDisplay.replaceWith(createCompactToolChip({...nowyStatus}))` (albo
+  `createToolCallDisplay`, zależnie od `compactToolChips`) dla narzędzi, i analogicznie
+  `toolDisplay.replaceWith(createSubAgentBlock({...}))` dla delegacji (cztery gałęzie: błąd
+  transportu, pokwitowanie w tle, sukces, `!result.success`) - ani `ToolCallDisplay.ts`, ani
+  `SubAgentBlock.ts` NIE trzymają `TileHandle` po zwróceniu elementu, więc nie ma tu mutacji w
+  locie do zachowania. Strażnik po źródle (okablowanie, nie zachowanie): `subAgentBlockStatus.test.ts`.
+- **Błąd streamu i cisza modelu (A2) renderują kafelek `system` zamiast dymka agenta.**
+  `handle_error`/`_onStreamStall` budują go przez lokalny `_buildStreamErrorTile(titleKey, safeText)`
+  (`role:'system'`, `status:'error'` - kolor DARMO przez `Tile.ts`, jedna zmienna CSS koloruje
+  ikonę i kropkę na czerwono, zero osobnej logiki koloru tutaj). `handle_error`: gdy
+  `current_message_container` istnieje (tura miała już zaczęty strumień) - kafelek ląduje W NIM,
+  po wyczyszczeniu `current_message_text` (żeby nie zostawić martwego, pustego dymka OBOK); bez
+  niego (błąd przed pierwszym chunkiem) - kafelek idzie prosto do `messages_container`, tak jak
+  dziś dymek. Logika `ownerTabKey`/karta w tle/`set_generating(false)`/`_cleanupAskUser`
+  NIETKNIĘTA - zmienił się TYLKO render. **Regula nadrzedna szczegolow kafelka (A2-fix):**
+  `_buildStreamErrorTile` daje `details` TYLKO gdy `safeText` jest DŁUŻSZY niż to, co mieści
+  nagłówek (`truncatePreview`, 80 zn.) - krótki błąd (typowy dla obu testowych fixture'ów w
+  `handleError.tile.test.ts`) zostaje bez `details`/`is-toggleable`, cała treść już widoczna w
+  nagłówku. Behawioralny test: `handleError.tile.test.ts` (patrz gotcha "`handle_error` DA SIĘ
+  zaimportować i wywołać w AVA" niżej), pokrywa oba warianty (krótki i długi tekst).
+- **Pokwitowanie delegacji zleconej w tle ma JEDNĄ funkcję receipt, żywą i historyczną.**
+  `buildBackgroundReceiptText(startedList, queued)` (eksport z `chat_streaming.ts`, uwaga 5
+  spec A2-fix) skleja linie details POD skrótem zadania: ewentualne "W kolejce: N" (tylko gdy
+  `queued > 0`), potem identyfikator KAŻDEGO wystartowanego zadania, ZAWSZE jako linie OSTATNIE
+  (werdykt właściciela: identyfikator nigdy w nagłówku). Wołana z DWÓCH miejsc: `_chatOnToolResults`
+  (żywa gałąź `result.started === true`) ORAZ `chat_messages.ts`'s `render_messages` (uwaga 10,
+  spec A2-fix - delegacja w tle odtworzona z HISTORII, `tcOutput.started === true`, dawniej
+  renderowała się jak zielony wynik z samym "Zadanie", bo ta gałąź w ogóle nie istniała). Test
+  czysty na samej funkcji: `chat/backgroundReceipt.test.ts`; okablowanie obu wołaczy:
+  `subAgentBlockStatus.test.ts` (2 wywołania `createSubAgentBlock` w `chat_messages.ts` - wynik
+  + pokwitowanie w tle, każde z własnym `status:`).
+- **`_drawConnectorLines` (`chat_messages.ts`) zostaje na PODWÓJNYM selektorze `.cs-action-row,
+  .cs-tile`, mimo że pierwsza rodzina nie ma już żadnego producenta.** Świadomie NIEUSUNIĘTY -
+  obrona, nie martwy kod: gdyby coś kiedyś znów wystawiło `.cs-action-row`, łącznik dalej by go
+  złapał. Dokładasz kolejny blok na Tile → nic tu nie trzeba zmieniać, selektor już łapie
+  `.cs-tile`; dokładasz NOWĄ rodzinę DOM-u (żadną z tych dwóch) → dopisz ją tu też.
+
+**⚠️ `handle_error` DA SIĘ zaimportować i wywołać w AVA** (zweryfikowane empirycznie przy A2, patrz
+`handleError.tile.test.ts`) - poprawka nieścisłości do gotchy "Pattern: prototype mixin" wyżej,
+która mówi o `chat_streaming.ts` jako CAŁOŚCI jako niemożliwym do zaimportowania w AVA. Ta gotcha
+zostaje prawdziwa dla ścieżek, które REALNIE dotykają `MarkdownRenderer`/`Notice` w trakcie
+wykonania (streaming markdown, powiadomienia) - `handle_error` żadnego z nich nie woła, więc
+atrapa `obsidian` z repo harnessu wystarcza, żeby zaimportować CAŁY moduł (import statyczny
+`MarkdownRenderer`/`Notice` na górze pliku sam w sobie nie wybucha) i wywołać tę jedną, gołą
+funkcję `.call(fakeThis, ...)` - dokładnie jak `render_messages` z `chat_messages.ts`. Atrapa
+`document` globalna z harnessu (`dom-shim.ts`) ma `classList` jako CAŁKOWITY no-op
+(`contains()` zawsze `false`) - do weryfikacji KLAS wyrenderowanego kafelka trzeba, jak w
+`modules/ui-components/*.test.ts`, podstawić WŁASNĄ, minimalną atrapę `document` (patrz
+`handleError.tile.test.ts` dla wzorca). Inne funkcje tego pliku (np. te dotykające
+`MarkdownRenderer.render` w trakcie renderu) mogą dalej wymagać strażnika po źródle - nie
+zakładaj automatycznie, że KAŻDA funkcja stąd jest testowalna bez sprawdzenia.
+
+### Notatki klikalne wszędzie (2.3.0, spec C "Czat bez ścian")
+
+Kafelek odczytu/wyszukiwania/listy (`ToolCallDisplay.ts`), link po zapisie
+(`chat_streaming.ts`, ok. linii 1433) i mencje `@[Nazwa]` w dymku usera (`chat_messages.ts`'s
+`_renderUserText`) otwierają notatki JEDNYM mechanizmem: `createNoteLink`
+(`modules/ui-components/noteLink.ts`) + rejestr openera. `chat_ui.ts`'s `renderView` rejestruje
+opener (`setNoteOpener`) na START renderu - `_openNoteInMain` otwiera ZAWSZE w nowej karcie w
+głównym obszarze przez `this.app.workspace.openLinkText(path, '', true)`, nigdy nie podmienia
+zawartości panelu czatu. Sprzątania openera w `onClose` NIE ma - decyzja (recenzja C): jeden
+rejestr na plugin, opener zależy tylko od globalnego `app`, dwa widoki czatu dzielą slot;
+patrz `modules/ui-components/CLAUDE.md`, sekcja "Linki do notatek", dla uzasadnienia
+decyzji o tym, dlaczego ten plik nie deep-importuje `core/utils/obsidianNav.ts` mimo
+że ma tam równoważną funkcję (`openNoteInMainTab`). Mencje bez odpowiednika notatki w vaultcie
+(agent, osoba) zostają zwykłym, nieklikalnym tekstem badge'a - rozwiązanie idzie przez
+`this.app.metadataCache.getFirstLinkpathDest(name, '')`, wołane W WIDOKU (ma `app`), nie w
+`noteLink.ts` (nie zna `app`).
+
+### Wiadomości maszynowe jako kafelek systemowy (2.3.0, A3 "Czat bez ścian")
+
+Powiadomienie o wyniku suba z tła (`buildSubTaskNotificationText`, `subTaskNotification.ts`) i
+przywołanie agenta po interakcji z artefaktem (`buildSummonMessage`, `modules/artifacts/artifactSummon.ts`)
+docierają do rozmowy jako `role: 'user'` - werdykt właściciela: "wszystkie powiadomienia
+systemowe mają się różnić wyglądem od wiadomości usera, muszą być zwijalne, i nie mogą pokazywać
+żadnych technicznych kwestii". **Zasada nadrzędna: treść dla MODELU zostaje identyczna** (obie
+funkcje budujące treść - bez zmian, testy przechodzą bez zmian treści) - zmienia się WYŁĄCZNIE
+render w oknie czatu: zamiast dymka `.cs-message--user` doklejany jest kafelek `.cs-tile`
+(`role:'system'`) przez `createTile`.
+
+- **Klasyfikator** (`chat/machineMessage.ts`, czysty, zero `obsidian`): `classifyMachineMessage`
+  + `buildMachineView`. Kolejność **meta-first, treść-fallback**:
+  1. Meta na żywo - `addMessage()`/`RollingWindow.addMessage` rozlewa meta na wierzch wiadomości,
+     więc `msg._subTaskNotification === true` / `msg._artifactSummon === true` (ten drugi
+     znacznik dokłada `artifactSummon.ts` przez `machineMeta({_artifactSummon:true})`, ten sam
+     wzorzec co `_subTaskNotification` w `chat_streaming.ts`) rozstrzygają natychmiast. **Meta
+     wygrywa w OBIE strony (uwaga 1, spec A3-fix):** `msg.origin === 'human'` zapisany na żywo
+     (`HUMAN_MESSAGE_META`) zwraca `null` PRZED fallbackiem po treści, więc człowiek piszący
+     tekst, który przypadkiem zaczyna się od tego samego stałego prefiksu nagłówka co
+     powiadomienie maszynowe, dostaje zwykły dymek, nie kafelek systemowy.
+  2. Treść (fallback) - meta NIE przeżywa zapisu sesji na dysk (`chat_session.ts`'s
+     `_restoredMessageMeta` niesie dalej WYŁĄCZNIE `tool_call_id`/`tool_calls`), więc po
+     restarcie Obsidiana jedynym dowodem jest STAŁY fragment nagłówka treści, przed pierwszym
+     placeholderem - liczony Z i18n (obu języków), nie z zahardkodowanego literału, żeby zmiana
+     tekstu nagłówka w `pl.ts`/`en.ts` nie rozjechała się cicho z klasyfikatorem. Po restarcie
+     `origin` nie ma jak przeżyć, więc dla tej ścieżki ryzyko fałszywej klasyfikacji po treści
+     zostaje (znana, zaakceptowana granica - prawdopodobieństwo niskie).
+  Zwykła wiadomość usera (bez meta, bez znanego nagłówka) zawsze daje `null` - `classifyMachineMessage`
+  sprawdza `role === 'user'` jako pierwszy warunek.
+  ⚠️ **Status suba (`ok`/`error`, tytuł "padł"/"przerwany") czyta WYŁĄCZNIE linię stanu nagłówka**
+  (ta, którą `buildSubTaskNotificationText` buduje z `status` przez `meta`/`meta_with_time` -
+  `chat.subagent_notification.status_error`/`status_aborted`), NIGDY treść wyniku (B3 fix,
+  recenzja A3-fix: stare `.includes()` na CAŁEJ treści dawało fałszywy "padł w tle" i czerwony
+  kafelek dla sukcesu, którego wynik tylko CYTOWAŁ frazę błędu, opisując wcześniejszą, już
+  naprawioną awarię). `aborted` ma WŁASNY tytuł (`chat.tile.machine.subtask_aborted`), nie dzieli
+  "padł w tle" z `error` - oba nadal kolorują kafelek na czerwono.
+- **Trzy miejsca renderują, JEDNĄ implementacją** (`renderMachineTile`, `chat/machineTile.ts` -
+  trzeci plik w module, uwaga 5 spec A3-fix): `chat_messages.ts`'s `append_message` (żywa
+  wysyłka) i `render_messages` (historia), oraz `chat_streaming.ts`'s `_chatBeforeContinue` (dren
+  kolejki wiadomości - QUEUE INJECT renderuje bez przechodzenia przez `append_message`, więc musi
+  klasyfikować osobno przez `buildMachineView`). Do A3-fix każde z trzech miejsc miało WŁASNĄ
+  kopię tej logiki ("argument cyklu importu jest słaby - trzeci plik importowany przez oba
+  mixiny nie tworzy cyklu", recenzja A3); `machineTile.ts` jest importowany PRZEZ oba mixiny
+  (`chat_messages.ts` ORAZ `chat_streaming.ts`), więc `chat_messages.ts`'s istniejący import
+  `buildBackgroundReceiptText` z `chat_streaming.ts` (patrz sekcja "Kafelki Tile w streamie i w
+  historii" wyżej) nie tworzy z nim cyklu - `machineTile.ts` sam nie importuje ŻADNEGO z tych
+  dwóch mixinów. `machineTile.ts` sam nie importuje `obsidian`, ale ciągnie go przechodnio przez barrel `ui-components`; w AVA działa dzięki atrapie z preloadu harnessu (`machineMessage.ts` jest naprawdę czysty).
+  Dokładasz CZWARTE miejsce, które renderuje wiadomość `role:'user'` z pominięciem
+  `append_message`? Sprawdź klasyfikację tam też i wołaj `renderMachineTile` stamtąd - inaczej
+  wiadomość maszynowa wraca jako goły dymek z surowym JSON-em.
+- **Uwaga 7 (spec A3-fix): `...queued.meta` w `_chatBeforeContinue` (QUEUE INJECT) zostaje
+  celowo.** `rw.addMessage('user', injectedText, {timestamp, ...queued.meta})` rozlewa CAŁĄ
+  meta zapamiętaną przy kolejkowaniu (`chat/queuedMessage.ts`), nie tylko `origin` - powiadomienie
+  suba / przywołanie artefaktu wysłane W TRAKCIE trwającej tury trafiają do TEJ SAMEJ kolejki
+  (jeden slot, patrz "Kolejka wiadomości" wyżej), więc wiadomość zakolejkowana niesie
+  `_subTaskNotification`/`subTaskId`/`_artifactSummon` DOKŁADNIE tak samo jak ścieżka żywa
+  (`append_message`). Bez pełnej meta na wierzchu okno traciłoby te znaczniki, a
+  `machineMessage.ts` musiałby zgadywać kafelek WYŁĄCZNIE po treści - nawet w TEJ SAMEJ sesji,
+  zanim ktokolwiek zapisał ją na dysk (fallback po treści jest pomyślany jako ratunek PO
+  restarcie, nie jako droga główna). Tekst dla modelu bez zmian - dotyczy wyłącznie kształtu
+  wiadomości w OKNIE.
+- **Akcja "Otwórz" na kafelku przywołania artefaktu** (B2 + uwaga 4, spec A3-fix): ścieżka
+  notatki jest rozwiązywana PRZY RENDERZE, PRZED budową kafelka (`plugin.artifactStore.read(id)` -
+  `renderMachineTile` jest `async`, wołacze już są funkcjami `async`, więc `await` przed
+  `createTile` jest tani i deterministyczny - zero migotania przycisku). Sklep zna ścieżkę ->
+  przycisk aktywny, klik idzie przez wspólny opener notatek (`openNoteWithRegistry`, jednostka C,
+  fallback `plugin.openNote`) i nic więcej (uwaga 4 - **żadnych** skutków
+  ubocznych `activateArtifactInChat`, którą stara wersja wołała: bez przypinania artefaktu jako
+  aktywnego, bez odsłaniania prawego panelu, bez przełączania widoku czatu - "Otwórz" ma
+  otworzyć notatkę, nic więcej). Sklep NIE zna ścieżki (JSON bez `id`, artefakt skasowany między
+  wysłaniem powiadomienia a renderem) -> przycisk zostaje WIDOCZNY, ale `disabled`, z tooltipem
+  i18n `chat.tile.machine.open_unavailable` (`Tile.ts`'s `TileAction.disabled`/`title`, dodane w
+  A3-fix - **poprawka nieścisłości**: wcześniejsza wersja tej notatki twierdziła, że `TileAction`
+  nie ma pola `disabled` i jedynym sposobem jest nie renderować przycisku wcale; to było
+  nieprawdziwe - `Tile.ts`'s `.cs-tile__actions` jest w `tile.el` od razu, więc wołacz mógł
+  ustawić `disabled` bez zmiany `Tile.ts` samego, co A3-fix właśnie zrobił).
+- **Details budowane z REALNEJ treści wiadomości**, nie odbudowywane z metadanych - dla
+  powiadomienia: wszystko OPRÓCZ pierwszego akapitu (nagłówek, staje się `title`) i OPRÓCZ
+  ostatniego akapitu (stopka-instrukcja dla modelu, `chat.subagent_notification.footer` - tekst
+  STAŁY bez placeholderów, więc `.endsWith()` jest dokładny w obu językach), OPRÓCZ powtórzonej
+  linii stanu na starcie (uwaga 8 - `summary` już ją pokazuje w nagłówku Tile), PLUS identyfikator
+  suba jako OSTATNIA linia (uwaga 2 - `chat.tile.sub.background_id`, ten sam klucz i18n co
+  pokwitowanie w tle, z meta `msg.subTaskId` albo z drugiej zmiennej nagłówka treści); dla
+  artefaktu: sekcje z bloku ```` ```json ```` sparsowane na "✓ tekst"/"○ tekst", BEZ samego bloku
+  JSON w widoku. Parsowanie JSON-a zawiedzie ALBO sekcje wypadną puste (uwaga 3, spec A3-fix) =
+  details składa się PO LUDZKU z tego, co da się ustalić - `"{tytuł}, {typ}, {status}"`, BEZ `id`
+  artefaktu i BEZ frazy akcji DLA MODELU (`"user: {akcja}"` z nagłówka - stary fallback zwracał
+  surowy nagłówek w całości, czyli obie te rzeczy user nie ma prawa zobaczyć); brak danych poza
+  tytułem -> details to sam tytuł. `id` artefaktu (gdy sklep go zna z samego JSON-a) zostaje
+  dostępny OSOBNO w `view.open.artifactId` - fallback details nigdy nie blokuje akcji "Otwórz".
+
+### Dymki 2.3.0 (B, "Czat bez ścian") -> kolumna dymków
+
+Werdykt właściciela: dymek usera ma kolor usera z Ustawień (nie kolor agenta), rozciąga się na
+całą szerokość tak jak dymek agenta, a jedyne różnice zostają kolor i margines (rynna po
+przeciwnej stronie). Front B (poniżej) wprowadził to jako pierwsze - nazwa agenta zniknęła z
+nagłówka, kryształ na starcie zostawał jedynym znacznikiem CAŁEJ SERII, w nagłówku nad pierwszą
+wiadomością. Kolejna faza (ten sam spec, "kolumna") poszła dalej i usunęła nagłówek CAŁKOWICIE:
+odpowiedź agenta jest dziś kolumną OSOBNYCH boxów (kontener `.cs-message--agent` przezroczysty,
+bez tła/ramki/paddingu, tylko `margin-left: var(--cs-bubble-gutter)`), a kryształ siedzi PRZY
+KAŻDYM elemencie agenta - każdym kafelku narzędzia/myślenia/sub-agenta i każdym dymku tekstu -
+nie tylko raz na serię.
+
+- **Rynna jedną zmienną, po obu stronach.** `--cs-bubble-gutter` (`src/styles.css`, `.cs-root`,
+  `22px`) jest zmierzona z dawnego wcięcia agenta i używana identycznie po obu stronach:
+  `margin-left` kontenera agenta (kryształ siedzi w tej rynnie, przez `::after` z ujemnym
+  `left`) i `margin-right` dymka usera od prawej (mirror). Wartość liczbowa nie zmieniła się
+  od frontu B - zmieniło się tylko to, CO ją używa (margines kontenera, nie `padding-left`
+  nieistniejącego już nagłówka).
+- **Dymek usera używa `var(--cs-user-color, var(--interactive-accent))`**, nie
+  `--cs-agent-color-rgb` jak dawniej (`.cs-message--user`, `chat_view.css`): tło
+  `color-mix(... 12%, transparent)`, obramowanie 1px `color-mix(... 30%, transparent)`, pasek
+  po prawej 3px pełnym `var(--cs-user-color)` (lustro paska `.cs-tile::before`, który stoi po
+  LEWEJ tej samej szerokości). `max-width: none`/`width: auto`/`align-self: stretch` zastępują
+  dawne `max-width: 72%`/`align-self: flex-start` - dymek usera dziś zajmuje tyle samo miejsca
+  co dymek agenta, mniej rynny po przeciwnej stronie.
+  Poświata (`box-shadow`), notka kryształu (`::after`) i górny gradient (`::before`) dymka usera
+  też liczą kolor z `--cs-user-color` (recenzja B: zielony dymek z czerwoną poświatą agenta był
+  regresją wizualną); blok obcięcia kontekstu (`.cs-trim-bubble`) ma osobne reguły dla tych
+  trzech, które przywracają kolor agenta.
+- **Wyjątek: `.cs-message--user.cs-trim-bubble`** (blok obcięcia kontekstu, ulubiony kafelek
+  właściciela, `_renderTrimBlock` w `chat_messages.ts`) nadpisuje tło/obramowanie/marginesy z
+  powrotem do stanu sprzed 2.3.0 (agent-color-rgb, `align-self: flex-start`, `margin-right: 0`) -
+  specyficzność dwóch klas bije bazową regułę jednej klasy. `.theme-light` ma osobną, trzecio-
+  klasową restaurację (`border-color`) z tego samego powodu - bez niej jasny motyw nadpisywałby
+  kolor z powrotem na `--cs-user-color` (specyficzność dwóch klas, remis kolejnością w pliku).
+  `.cs-tile` (Tile, A1-A3) nie ma klasy `.cs-message--user` [measured, grep], więc nie koliduje.
+- **Dymek odpowiedzi agenta (`.cs-message--agent > .cs-message__text`) ma DOKŁADNIE styl,
+  jaki miał `.cs-message--user.cs-trim-bubble`** (tło/obramowanie/`border-left`/`box-shadow`
+  identyczne, tylko kolor agenta zamiast usera), plus `position: relative; margin: 8px 0;
+  padding: 5px 12px` - nadpisuje bazowe `padding: 6px 0 6px var(--cs-bubble-gutter)` z
+  `.cs-message__text` (specyficzność dwóch klas bije jedną; NIE zmieniaj bazowej reguły, używa
+  jej też dymek usera), plus `::before` z górnym gradientem w kolorze agenta (lustro
+  `.cs-message--user::before`). Tekst pusty (`:empty`, streaming tworzy `.cs-message__text`
+  ZANIM chunki spłyną; tury z samymi tool callami) dostaje `display: none` - bez tego pusty
+  box zostawiałby widoczną ramkę/tło bez treści.
+- **Nagłówek serii ZNIKNĄŁ CAŁKOWICIE** (jeden mixin, ten sam wzorzec x3, usunięty z trzech
+  producentów): `chat_messages.ts`'s `append_message` i `render_messages`, oraz
+  `chat_streaming.ts`'s `_ensureAgentMessageContainer`. Zniknęło razem z nim całe pole stanu
+  `_agentHeaderShown` (`chatViewShape.ts` + wszystkie pięć miejsc, które je czytały/pisały:
+  `append_message`, `render_messages`, `send_message`, `_ensureAgentMessageContainer`,
+  `_chatBeforeContinue` - poprawka nieścisłości, poprzednia wersja tej notatki liczyła cztery;
+  dowód: `git grep _agentHeaderShown 3d3b5fdd^`) -
+  bez nagłówka to był martwy stan, nic już nie pyta "czy to pierwsza wiadomość serii". Reguły
+  CSS `.cs-message__agent-head`/`.cs-message__agent-crystal`/`.cs-message__agent-crystal svg`/
+  `.cs-message__agent-name` usunięte (zero producentów, sprawdzone grepem po `modules/`) -
+  inaczej niż `.cs-action-row` (sekcja "Kafelki Tile..." wyżej), TEN martwy CSS naprawdę
+  wyleciał, bo cała koncepcja nagłówka odeszła, nie tylko jeden markup wariant.
+- **Kryształ PRZY KAŻDYM elemencie agenta, przez CSS `::after`, bez zmian w producentach
+  kafelków.** Nowa zmienna `--cs-agent-crystal` (`url("data:image/svg+xml,<SVG>")`) jest
+  ustawiana INLINE na kontenerze `.cs-message--agent`, w TYCH SAMYCH trzech miejscach co
+  `--cs-agent-color-rgb` (`append_message`/`render_messages` w `chat_messages.ts`,
+  `_ensureAgentMessageContainer` w `chat_streaming.ts`), przez jedną małą funkcję pomocniczą,
+  `agentCrystalCssVar(agent, color)` w NOWYM czwartym pliku mixina, `chat/agentCrystal.ts`
+  (ten sam wzorzec co `machineTile.ts` - trzeci plik importowany przez OBA mixiny bez cyklu:
+  `chat_messages.ts` już importuje `buildBackgroundReceiptText` z `chat_streaming.ts`, więc
+  odwrotny import zamknąłby cykl; `agentCrystal.ts` nie importuje żadnego z dwóch mixinów).
+  CSS maluje kryształ pseudo-elementem `::after` na kafelkach (`.cs-tile--agent`,
+  `.cs-tile--agent-muted`), na bloku `.cs-ask-user` (naprawa recenzji niezależnej, patrz gotcha
+  "Kryształ przy `.cs-ask-user`" niżej) i na dymku tekstu (`.cs-message--agent > .cs-message__text`) -
+  `background: var(--cs-agent-crystal) center / contain no-repeat`, `18×18px`, `opacity: 0.8`.
+  **Pozioma pozycja (`left`) kompensuje różnicę grubości obramowania**: `calc(-1 * rynna - 1px)`
+  dla kafelka (`border: 1px` dokoła) i `calc(-1 * rynna - 3px)` dla dymka/`.cs-ask-user`
+  (`border-left: 3px`, nadpisujący TYLKO lewą krawędź bazowego `border: 1px`) -
+  `position: absolute` liczy offset od PADDING BOX rodzica (nie od jego zewnętrznej krawędzi z
+  obramowaniem), więc grubszy `border-left` przesuwa padding box głębiej i wymaga większego
+  ujemnego `left`, żeby WSZYSTKIE trzy kryształy trafiły w TEN SAM x: lewa krawędź kontenera
+  agenta minus rynna (22px) [inferred z modelu pudełkowego CSS - offset absolutny liczy się od
+  padding edge, nie od border edge].
+  **Pionowa pozycja (`top: 9px` kafelek / `top: 7px` dymek / `top: 12px` `.cs-ask-user`) NIE
+  wynika z tej samej różnicy `border-left`** (poprawka nieścisłości - poprzednia wersja tej
+  notatki twierdziła, że różnica 9 vs 7 wynika z grubości obramowania; `border-left` zmienia
+  WYŁĄCZNIE `left`, nigdy pozycję pionową). W pionie liczy się `border-TOP`, ten sam 1px dla
+  wszystkich trzech elementów (kafelek ma go dokoła, dymek i `.cs-ask-user` dostają go z
+  bazowego `border: 1px`) - różnice `top` to osobno dobrane wartości wizualne (środek kryształu
+  na wysokości pierwszego wiersza KAŻDEGO bloku, różny padding-top: dymek 5px, `.cs-ask-user`
+  10px), nie wzór z grubości `border-left`. Kafelki systemowe (`.cs-tile--system`) i dymek usera
+  NIE dostają kryształu - selektor ich nie łapie.
+- **Łącznik (`_drawConnectorLines`, `chat_messages.ts`) kotwiczy dziś na PIERWSZYM i OSTATNIM
+  elemencie serii, nie na nagłówku i ostatniej ikonie.** Grupowanie serii (ciąg
+  `.cs-message--agent` bez przerwy w DOM) bez zmian. Elementy serii, W KOLEJNOŚCI DOM: każdy
+  `.cs-tile--agent`/`.cs-tile--agent-muted`/`.cs-ask-user` (gdziekolwiek zagnieżdżony -
+  `querySelectorAll` łapie je niezależnie od opakowania, `.cs-tool-chip-wrap`/
+  `.cs-tool-calls-wrapper` przy streamingu) oraz każdy `.cs-message__text` BEZPOŚREDNI dzieckiem
+  kontenera agenta; element z `offsetHeight === 0` (pusty dymek, ukryty przez `:empty`) pomijany.
+  Jeden element w serii (albo zero) = brak linii. Linia idzie od środka kryształu PIERWSZEGO do
+  środka kryształu OSTATNIEGO elementu: x liczony RAZ z pierwszego kontenera agenta
+  (`getBoundingClientRect().left` minus realny `marginLeft` z `getComputedStyle`, fallback 22,
+  plus 9 - połowa 18px kryształu) - ten sam x wychodzi RÓWNY "lewa krawędź kontenera WIADOMOŚCI
+  (`messages_container`) + 25px" (padding kontenera wiadomości, 16px, plus połowa kryształu, 9px
+  - rynna KASUJE SIĘ algebraicznie w tej formule, bo wchodzi raz przy pozycji kontenera agenta
+  względem `messages_container` i raz jako odjęta wartość w samej formule JS, więc `25px` NIE
+  jest pochodną wartości rynny, mimo że rynna bierze udział w wyprowadzeniu); y środka kryształu
+  per element = `getBoundingClientRect().top` + 19 dla kafelka (border-top 1 + top 9 + połowa 18)
+  albo + 17 dla dymka tekstu (border-top 1 + top 7 + połowa 18, `top: 7px` w CSS) albo + 22 dla
+  `.cs-ask-user` (border-top 1 + top 12 + połowa 18). Kolor linii dziedziczony z grupy bez zmian.
+- Test behawioralny: `chat/render_messages.bubbles.test.ts` - PRZEPISANY na nowy kontrakt (atrapa
+  DOM harnessu, `dom-shim.ts`, ma `style.setProperty`/`getPropertyValue` jako CELOWY no-op dla
+  custom properties - `createStyleProxy` - więc test buduje WŁASNĄ, minimalną atrapę elementu z
+  prawdziwym `style` Map-em, wzór `render_messages.delegateError.test.ts`). Sprawdza: (1) ZERO
+  węzłów `.cs-message__agent-head`/`.cs-message__agent-crystal` w całym drzewie, (2) KAŻDY
+  kontener `.cs-message--agent` (nie tylko pierwszy w serii) ma inline `--cs-agent-crystal`
+  zaczynające się od `url("data:image/svg+xml,`, zawierające zakodowany `%3Csvg` i dekodujące
+  się (`decodeURIComponent`) do stringa z `<svg`; (3) to samo dla dwóch wywołań
+  `_ensureAgentMessageContainer` pod rząd (streaming). `chatStreamingDedup.test.ts`'s dedup-guard
+  zmienił cel z `cs-message__agent-crystal` (usunięty string) na `--cs-agent-crystal` (ciało
+  `handle_chunk` nie ma prawa ustawiać tej zmiennej samo - jedyny producent to
+  `_ensureAgentMessageContainer`).
+  ⚠️ **Naprawa recenzji niezależnej (3d3b5fdd, punkt 2): powyższe (2)/(3) sprawdzały tylko KSZTAŁT
+  wartości, nie CZYJ to kryształ** - mutacja podstawiająca cudzego/stałego agenta
+  (`agentCrystalCssVar('Inny', '#000000')`) przechodziła bez zgrzytu. `assertCrystalColor`
+  (nowy helper w tym samym pliku) dekoduje SVG i sprawdza literalny `stroke="{hex agenta}"`
+  (`CrystalGenerator.generate` maluje nim kontur/linie) - dopisana do WSZYSTKICH istniejących
+  asercji kryształu plus dwa nowe przypadki: `_ensureAgentMessageContainer` wywołane dla DWÓCH
+  różnych agentów pod rząd (każdy kontener niesie kolor SWOJEGO, nie poprzedniego) i `append_message`
+  (TRZECI producent `--cs-agent-crystal`, dotąd bez własnego testu w tym pliku).
+
+### Gotcha: łącznik przerysowuje się po zmianie wysokości, nie tylko przy scrollu/finalizacji (naprawa recenzji niezależnej 3d3b5fdd)
+
+Recenzja punktu "Dymki 2.3.0" wyżej znalazła: `_scheduleConnectorRedraw` był wołany tylko przy
+scrollu (`scrollToBottom`) i finalizacji tury (`_finalizeTurn`) - rozwinięcie/zwinięcie kafelka
+(`.cs-tile__head`) zmienia wysokość SYNCHRONICZNIE w tym samym zdarzeniu, a łącznik zostawał ze
+starą geometrią (kończył się w połowie kafelka albo wystawał w dół); w streamingu linia nie
+dociągała do dymka, który właśnie przestał być `:empty`, ani po wstawieniu bloku myślenia/kafelka
+narzędzia, aż do końca tury.
+
+- **`chat/connectorActivity.ts` (NOWY, czwarty plik mixina `chat_ui.ts` - ten sam wzorzec co
+  `agentCrystal.ts`/`machineTile.ts`) trzyma `_scheduleConnectorRedraw`/`_cancelConnectorRedraw`
+  (przeniesione z `chat_ui.ts` bez zmiany zachowania) + dwie nowe funkcje.** Powód przeniesienia:
+  `chat_ui.ts` importuje `chat_view.css` jako moduł (`with { type: 'css' }`) - Node/AVA nie
+  potrafi tego załadować (`ERR_UNKNOWN_FILE_EXTENSION`), więc NIC importowanego wprost z
+  `chat_ui.ts` nie dawało się dotąd przetestować bezpośrednim importem (żaden test tego nie
+  robił). ⚠️ **Poprawka (naprawa recenzji niezależnej commitu `caa7affa`): `chat_ui.ts`
+  re-eksportuje WYŁĄCZNIE `_scheduleConnectorRedraw`/`_cancelConnectorRedraw`** (te dwie UŻYWAJĄ
+  `this`, mają sens jako metody na `ChatView.prototype`) - `onMessagesContainerActivity`/
+  `installMessagesContainerActivity` biorą `view` jako jawny argument, nie `this`, więc re-eksport
+  całej czwórki (poprzednia wersja tej notatki) lądował dwiema martwymi "metodami" na
+  `ChatView.prototype` i w typie `ChatViewLike` (`UiMethods` w `chatViewShape.ts` = `typeof
+  uiMethods`, czyli WSZYSTKIE nazwane eksporty `chat_ui.ts`, re-eksporty też) - nikt nie wołał
+  `this.installMessagesContainerActivity(...)`. Instalacja w `renderView` woła
+  `installMessagesContainerActivity(this)` przez ZWYKŁY import z `connectorActivity.js`, nie przez
+  `this.`.
+- **`onMessagesContainerActivity(view, ev)`** - decyzja JEDNEGO delegowanego nasłuchu (`click` +
+  `keydown` + `animationend`, trzeci typ dopisany w tej samej naprawie, patrz niżej) na
+  `messages_container`: zdarzenie z celem wewnątrz `.cs-tile__head` (klik albo Enter/Spacja)
+  planuje przerysowanie. Nasłuch kafelka (`Tile.ts`'s `expand()`) odpala się PIERWSZY (bubbling),
+  więc samo zaplanowanie PO fakcie wystarcza - `expand()` już zmienił layout zanim ten handler
+  dostanie zdarzenie.
+- **`installMessagesContainerActivity(view)`** montuje trzy nasłuchy na `view.messages_container`
+  i zwraca funkcję odpinającą - wołane w `chat_ui.ts`'s `renderView`, TUŻ PO stworzeniu
+  `messages_container`, ten sam wzorzec sprzątania co `installSelectionMenu`/
+  `_selectionMenuDetach` (odepnij POPRZEDNI egzemplarz przed zamontowaniem nowego - `renderView`
+  potrafi się powtórzyć, `messages_container` powstaje na nowo za każdym razem; pole
+  `_connectorActivityDetach` w `ChatViewMixins`, odpięcie też w `onClose`).
+- **Streaming (`chat_streaming.ts`'s `_paintStreamFrame`): dwa NOWE, wąskie wyzwalacze**, oba
+  strzelają RAZ na RUNDĘ narzędzi (poprawka nieścisłości - poprzednia wersja tej notatki mówiła
+  "raz na turę"; `_chatBeforeContinue` zeruje `_currentThinkingBlock`/`_lastPaintedContent` przed
+  KAŻDĄ kolejną rundą tej samej tury, więc druga/trzecia runda z własnym blokiem myślenia albo
+  własną pierwszą treścią trafia tu ponownie jako "wstawienie"), nie w gorącej pętli
+  throttlowanych klatek (throttle i tak woła tę funkcję dziesiątki razy na sekundę):
+  1. **Wstawienie NOWEGO bloku myślenia** (gałąź `if (!this._currentThinkingBlock)`) - nowa
+     kotwica łącznika, planuje przerysowanie od razu. `updateThinkingBlock` (gałąź istniejącego
+     bloku, dopisywanie treści W RAMACH jednej rundy) NIE planuje ponownie - zbiór kotwic się nie
+     zmienia.
+  2. **Pierwsza niepusta treść dymka** (`!hadTextBefore && frame.text`, `hadTextBefore` liczone Z
+     `_lastPaintedContent` SPRZED nadpisania) - dymek traci `:empty` (`display:none`) dopiero
+     TERAZ, więc dopiero teraz staje się kotwicą. Rosnący tekst w KOLEJNYCH klatkach tej samej
+     rundy NIE planuje ponownie - stały offset od GÓRY dymka (`_crystalCenterY`) się nie
+     przesuwa, dlatego `scrollToBottom` niżej i tak dostaje `drawConnectors: false`.
+- **`_chatOnToolCallsParsed` (Faza 1, placeholdery kafelków narzędzi)** planuje przerysowanie
+  RAZ na rundę (nie w pętli per `tool_call`), TYLKO na aktywnej zakładce (`isActiveTab`) - tura w
+  tle nie rusza łącznika widoku, którego user i tak nie widzi.
+- ⚠️ **Cztery brakujące wyzwalacze (ważne, naprawa recenzji niezależnej commitu
+  `caa7affa`) - zwinięcie bloku myślenia i podmiana kafelka zmieniają wysokość TEŻ poza
+  streamingiem.** `finalizeThinkingBlock` (`ThinkingBlock.ts`) woła `expand(false)` - ciało kafelka
+  myślenia znika SYNCHRONICZNIE, kafelki niżej podskakują. Poprzednia runda planowała przerysowanie
+  tylko w `_finalizeTurn` (koniec naturalny) - trzy INNE ścieżki, które też finalizują blok
+  myślenia, zostawały bez przerysowania: `_chatBeforeContinue` (reset kontenera przed kontynuacją
+  pętli, w środku rundy), `handle_error` (błąd streamu), `stop_generation` (ręczny Stop - ta
+  funkcja NIE liczy `isActiveTab` wcale, więc wywołanie jest tu bezwarunkowe, jak reszta kodu w
+  tej gałęzi). Czwarty brak: `_chatOnToolResults` - `toolDisplay.replaceWith(...)` (kafelek błędu
+  startuje ROZWINIĘTY, `Tile.ts`, `status:'error'`; bloki sub-agenta mają inną wysokość niż
+  placeholder "w toku"; obrazek wygenerowany dokłada własny blok) ZMIENIA wysokość PO KAŻDYM
+  wyniku w rundzie - przerysowanie na końcu funkcji (`if (isActiveTab) this._scheduleConnectorRedraw()`),
+  raz na całą rundę, nie w pętli per wynik.
+- ⚠️ **`handle_error`: przerysowanie w za wąskim warunku (naprawa recenzji niezależnej, dogrywka).**
+  Runda opisana w punkcie wyżej wstawiła `_scheduleConnectorRedraw()` TYLKO wewnątrz
+  `if (this._currentThinkingBlock)` w `handle_error` - ta sama gałąź `isActiveTab` robi jednak
+  ZAWSZE też `current_message_text.empty()` (dymek wraca do `:empty`, znika przez CSS) i wstawia
+  kafelek błędu, niezależnie od tego, czy tura miała żywy blok myślenia w locie. Bez bloku
+  myślenia łącznik więc nadal kończył się obok nowego kafelka do następnej tury. Wywołanie
+  przeniesione na KONIEC całej gałęzi `if (isActiveTab)` (po zwinięciu bloku myślenia, przed
+  `_resetPaintTargets()`), bezwarunkowo - ten sam wzorzec co `stop_generation` (już dziś
+  bezwarunkowy w swojej gałęzi, patrz wyżej).
+- ⚠️ **Animacja wejścia (niskie, naprawa recenzji niezależnej commitu `caa7affa`).**
+  `.cs-message--agent`/`.cs-ask-user` wjeżdżają animacją `cs-message-enter` (`translateY(6px) ->
+  0`, `chat_view.css`) - nowy wyzwalacz (klik kafelka, pierwsza treść dymka…) strzela w PIERWSZEJ
+  klatce animacji, gdy `getBoundingClientRect` liczy jeszcze transform w trakcie, nie pozycję
+  końcową, więc kotwica wychodziła do 6px za nisko aż do NASTĘPNEGO przerysowania.
+  `onMessagesContainerActivity` dostał trzeci typ zdarzenia, `animationend` (bąbelkuje z
+  elementu animowanego do `messages_container` z definicji CSS Animations) - cel wewnątrz
+  `.cs-message--agent` albo `.cs-ask-user` planuje przerysowanie.
+- Test: `chat/connectorRedraw.activity.test.ts`. `onMessagesContainerActivity` - atrapa DOM
+  harnessu (`dom-shim.ts`) ma `addEventListener`/`dispatchEvent`/`closest`/`matches` jako CELOWE
+  no-opy [measured, grep w repo harnessu], więc testy wołają funkcję-handler wprost (`ev.target` =
+  fake obiekt z WŁASNYM, działającym `closest()`), przez PRAWDZIWY `_scheduleConnectorRedraw` (nie
+  mock). ⚠️ **Poprawka (BLOKER-adjacent, naprawa recenzji niezależnej commitu `caa7affa`): mock
+  `requestAnimationFrame` musi mieć KOLEJKĘ i ręczny `flush()`, nie wołać callback synchronicznie
+  wewnątrz `requestAnimationFrame(cb)`.** Stary, synchroniczny mock (`useSyncRaf`) wołał `run()`
+  W ŚRODKU wywołania `window.requestAnimationFrame(run)` - `_scheduleConnectorRedraw` przypisuje
+  `this._connectorRedrawCancel` PO tym wywołaniu, więc z synchronicznym mockiem ta linia
+  NADPISYWAŁA z powrotem na niepustą wartość to, co `run()` przed chwilą wyzerował -
+  `_connectorRedrawCancel` zostawał trwale niepusty po PIERWSZYM udanym zaplanowaniu, więc każde
+  KOLEJNE planowanie w tym samym teście było dławione niezależnie od tego, czy kod pod testem
+  faktycznie działał (test rozpoznawania klawisza Spacja przechodził, nawet gdyby produkcyjny kod
+  Spacji w ogóle nie rozpoznawał - zweryfikowane [measured] tymczasowym sabotażem selektora klawisza
+  w trakcie tej naprawy). Atrapa z kolejką odzwierciedla PRAWDZIWY async rAF: `requestAnimationFrame`
+  tylko rejestruje callback, `flush()` odpala zakolejkowane na żądanie testu - kolejność w
+  `connectorActivity.ts` (przypisanie `_connectorRedrawCancel` PO wywołaniu rAF) NIE jest wyścigiem
+  w runtime, bo prawdziwy rAF jest zawsze asynchroniczny (wyścig istniał WYŁĄCZNIE w starym mocku
+  testowym). Grupa 2 (`_paintStreamFrame`/`_chatOnToolCallsParsed`) TĄ SAMĄ techniką - PRAWDZIWY
+  `_scheduleConnectorRedraw` + `_drawConnectorLines` jako licznik (poprzednia wersja stubowała
+  `_scheduleConnectorRedraw` samo wywołanie, co dowodziło tylko, że produkcyjny kod ZAWOŁAŁ
+  schedulera, nie że cokolwiek się przerysowało - regresja w samym schedulerze przeszłaby bez
+  zgrzytu). Testy negatywne dostały krok pozytywny w TEJ SAMEJ fixturze (klik poza nagłówkiem →
+  potem na nagłówku; pusta klatka → potem z tekstem; zakładka w tle → potem aktywna) - sam pusty
+  test negatywny przechodzi też wtedy, gdy funkcja pod testem nic nie robi (kontrola z `CLAUDE.md`
+  głównego repo, "Testy: zachowanie, nie implementacja"). Osobny test koalescencji: dwa planowania
+  PRZED jednym `flush()` → jedno przerysowanie.
+  Geometria linii (pozycje x/y) weryfikuje wyłącznie pomiar na żywo w Obsidianie - atrapa DOM nie
+  ma silnika layoutu (`getBoundingClientRect` zwraca zera).
+
+### Gotcha: kryształ przy `.cs-ask-user` (naprawa recenzji niezależnej 3d3b5fdd, dokończona po recenzji `caa7affa`)
+
+`.cs-ask-user` (blok pytania `ask_user`) siedział w `.cs-tool-calls-wrapper` kontenera agenta jako
+JEDYNY element kolumny bez kryształu i bez bycia kotwicą łącznika - werdykt właściciela ("każda
+rzecz od agenta" ma kryształ) go pomijał. O ZAGNIEŻDŻENIU `.cs-ask-user` W `.cs-message--agent`
+(kluczowe dla całej reszty tej notatki) decyduje `chat_streaming.ts`'s `_chatOnToolCallsParsed`
+(dokleja blok zwrócony przez `_renderAskUserBlock` do `toolCallsContainer` wewnątrz kontenera
+agenta) - **poprawka nieścisłości (dogrywka recenzji niezależnej)**: poprzednia wersja tej
+notatki przypisywała tę decyzję `chat_popovers.ts` - błędnie. Błędnie przypisujący komentarz
+siedział w `chat_view.css` (commit `caa7affa`, ówczesne linie ok. 1027-1029: "`.cs-ask-user`
+renderuje się ZAWSZE zagnieżdżony w `.cs-message--agent` (patrz `chat_popovers.ts`)"), NIE w
+samym `chat_popovers.ts` - `git grep caa7affa` na tym pliku daje ZERO trafień, plik nigdy nie
+był tym commitem dotknięty. `chat_popovers.ts`'s `_renderAskUserBlock`
+buduje WYŁĄCZNIE ODPIĘTY div, bez rodzica - o miejscu w drzewie nie wie nic. Naprawa jest czysto
+CSS (plus jedna linijka w `_drawConnectorLines`, patrz niżej), ZERO zmian w `chat_popovers.ts`
+(zmienna `--cs-agent-crystal` już jest ustawiona na kontenerze `.cs-message--agent` - custom
+properties dziedziczą się w dół DOM-u automatycznie).
+
+- `.cs-ask-user::after` MIAŁ kiedyś własny, starszy wygląd (romb-dekoracja: `border`, `transform:
+  rotate(45deg)`, `background` stałym kolorem) - USUNIĘTY (poprawka nieścisłości: poprzednia
+  wersja tej notatki mówiła "nowa reguła zeruje border/transform", czyli że stara reguła
+  ZOSTAJE; naprawa recenzji `caa7affa` ją usunęła zamiast zerować drugi raz - selektor kryształu
+  (`.cs-message--agent .cs-ask-user::after`, DWIE klasy) jest bardziej specyficzny niż był stary
+  (`.cs-ask-user::after`, JEDNA klasa) i WYGRYWAŁ go zawsze, bo `.cs-ask-user` renderuje się
+  ZAWSZE zagnieżdżony w `.cs-message--agent`). **Poprawka nieścisłości (dogrywka recenzji
+  niezależnej):** poprzednia wersja tego zdania twierdziła, że romb "nigdy nie był faktycznie
+  widoczny, więc to był martwy kod, nie dekoracja do zachowania" - nieprawda. Do commitu
+  `caa7affa` `.cs-ask-user::after` miał TYLKO tę jedną, starą regułę (jedna klasa, nic jej nie
+  przebijało specyficznością) - romb BYŁ widoczny. `caa7affa` dopiero dołożył bardziej
+  specyficzny selektor kryształu na tym samym pseudo-elemencie - od tego commitu romb przestał
+  wygrywać kaskadę. To zmiana WYGLĄDU (romb zastąpiony kryształem agenta), nie martwy kod od
+  początku - sam kryształ był wtedy jeszcze niewidoczny z INNEGO powodu (BLOKER
+  `overflow: hidden`, patrz niżej), naprawionego dopiero commitem kończącym tę rundę recenzji.
+- ⚠️ **BLOKER (naprawa recenzji niezależnej commitu `caa7affa`): kryształ był CAŁKOWICIE
+  przycięty.** `.cs-ask-user` ma bazowo `overflow: hidden` (powód nieudokumentowany w historii
+  repo śledzonej tym repozytorium - poprzedza commit startowy `287301c`; [inferred z geometrii]:
+  jedyny inny bezpośredni potomek na `position: absolute` był stary romb `::after` przy
+  `left: -2px`, usunięty wyżej - `overflow: hidden` chował jego 2px wystający skrawek pod
+  krawędzią; `::before`, gradient na górze, mieści się w całości w pudełku, więc nie potrzebował
+  clippingu), a krysztal (`::after`, pozycja niżej) siedzi w UJEMNYM `left` POZA własnym
+  pudełkiem `.cs-ask-user` - bez nadpisania `overflow` był więc przycięty do zera, niewidoczny.
+  Naprawa: `.cs-message--agent .cs-ask-user { overflow: visible; overflow-wrap: anywhere; }`
+  (`chat_view.css`) - nadpisanie ścisłe w kontekście kolumny agenta (ta sama wygrana
+  specyficzności jak wyżej), nie zmiana bazowej reguły `.cs-ask-user` samej (`.cs-ask-user` poza
+  kontekstem `.cs-message--agent` teoretycznie nadal miałby `overflow: hidden` - dziś
+  nieosiągalne w praktyce, bo blok renderuje się ZAWSZE zagnieżdżony).
+  ⚠️ **Poprawka nieścisłości (dogrywka recenzji niezależnej):** poprzednia wersja tego akapitu
+  twierdziła, że "żadne dziecko `.cs-ask-user` nie polega na obcinaniu przez rodzica" - fałsz.
+  `overflow: hidden` do tej pory przycinał TEŻ długi tekst (`__question`/`__context`/`__answer`,
+  etykiety opcji) bez żadnego łamania - żaden element w tym łańcuchu nie miał
+  `overflow-wrap`/`word-break`, więc długa ścieżka albo URL w pytaniu wychodziłby za prawą
+  krawędź i dawał poziomy pasek na liście wiadomości. Stąd `overflow-wrap: anywhere` w TEJ SAMEJ
+  regule, obok `overflow: visible`. `.cs-ask-user__input` (`width:100%` + padding + border)
+  zostaje bezpieczny bez własnej poprawki, bo Obsidian ma globalnie
+  `* { box-sizing: border-box }` [measured na żywo 24.09 przez właściciela projektu] - reszta
+  dzieci (`__head`/`__options`/`__opt` itd.) ma własny, wewnętrzny układ bez przekraczania
+  bazowego `border-radius: 2px`, teraz też bez polegania na obcinaniu tekstu przez rodzica.
+- Pozycja: `.cs-ask-user` ma TEN SAM wzorzec obramowania co dymek tekstu (`border: 1px` bazowo,
+  `border-left: 3px` nadpisujące tylko lewą krawędź) - ta sama korekta `left` co dymek
+  (`calc(-1 * rynna - 3px)`). `top: 12px` (zamiast dymka `7px`) to hand-tuned wartość pod
+  większy padding-top bloku (10px vs 5px dymka) - `_crystalCenterY` liczy dla niego offset 22
+  (border-top 1 + top 12 + połowa 18).
+- `_drawConnectorLines`'s selektor kotwic rozszerzony o `.cs-ask-user` (obok
+  `.cs-tile--agent`/`.cs-tile--agent-muted`) - blok pytania jest dziś pełnoprawną kotwicą
+  łącznika, tak jak kafelek.
+
+### Gotcha: arkusz czatu wchodzi przez `adoptedStyleSheets`, bije `<style>` w `<head>`
+
+`chat_view.css` trafia do dokumentu przez `import chat_view_styles from '../chat_view.css' with
+{ type: 'css' }` (`chat_ui.ts`) + `adoptSheet(chat_view_styles)` (`modules/crystal-soul/`) -
+czyli `CSSStyleSheet` w `document.adoptedStyleSheets`, nie zwykły `<style>`/`<link>` w `<head>`.
+Przy RÓWNEJ specyficzności arkusz adoptowany bije arkusz z `<head>` (adopted stylesheets liczą
+się jako ostatnie w kaskadzie) - to odkryto empirycznie przy podglądzie na żywo tej jednostki:
+reguła w `<style>` o tej samej specyficzności, którą normalnie kolejność w pliku by wygrała,
+przegrywała z regułą stąd. Dopisujesz regułę, która ma konkurować z czymś wstrzykniętym przez
+Obsidian albo inny plugin jako `<style>`? Licz się z tym, że wygrywasz przy remisie
+specyficzności niezależnie od kolejności w pliku - podnieś specyficzność selektora, jeśli
+naprawdę potrzebujesz przegrać.
+
+### Zaznaczanie i menu cytatu (2.3.0, spec D "Czat bez ścian")
+
+Werdykt właściciela (dosłownie): "Nie mogę zaznaczyć tekstu i go np. skopiować, a jak już przy
+tym jesteśmy to możesz przy okazji zrobić 'dodaj jako kontekst': czyli dodaje się jako
+załącznik, a druga opcja to cytuj i kopiuje się to do chatu jako cytat."
+
+- **Diagnoza (zrobiona na żywo w Obsidianie właściciela, [measured]):** łańcuch przodków
+  `.cs-message__text` dziedziczył `user-select: none` od samego `body` (Obsidian ustawia to
+  domyślnie). Naprawa jest CSS, nie JS - `.cs-message__text`, `.cs-tile__body`, `.cs-ask-user`,
+  `.pkm-compression-text`, `.cs-trim-details` (`modules/chat/chat_view.css`) dostają
+  `user-select: text` / `-webkit-user-select: text`. Nagłówki (`.cs-tile__head`,
+  `.cs-message__meta`, kryształy/etykiety serii) zostają bez zmian - kryteria akceptacji
+  dotyczą wyłącznie TREŚCI, nie etykiet. Jedyny WŁASNY `user-select: none` w CSS czatu sprzed
+  tej zmiany siedzi na `.cs-action-row__head` (rodzina martwa od A2, patrz sekcja "Kafelki Tile
+  w streamie i w historii" wyżej) - nietknięty.
+- **Menu na zaznaczeniu** (`chat/selectionMenu.ts`, nowy plik): nasłuch `mouseup` i `keyup`
+  (Shift+strzałki) na `messages_container`; gdy `window.getSelection()` jest niepuste i
+  zakotwiczone wewnątrz `.cs-message__text` lub `.cs-tile__body` - pokazuje `div.cs-selection-menu`
+  (`position: absolute` w `messages_container`, nad ostatnim `range` przez
+  `getBoundingClientRect`) z trzema przyciskami: `chat.selection.copy` ("Kopiuj"),
+  `chat.selection.context` ("Dodaj jako kontekst"), `chat.selection.quote` ("Cytuj"). Menu
+  znika: klik poza (`document.mousedown`, capture), `Escape` (`document.keydown`), scroll
+  kontenera, albo po samej akcji (kopiuj/kontekst/cytuj sprzątają po sobie i czyszczą
+  `window.getSelection()`).
+  - **Kopiuj:** `navigator.clipboard.writeText(text)` + potwierdzenie `showCrystalNotice`
+    (`chat.selection.copied`, `type:'success'`, 2 s).
+  - **Dodaj jako kontekst:** `attachmentManager.addTextAttachment({ name: 'Cytat z czatu ' +
+    HH:MM + '.md', text })` - patrz `modules/ui-components/CLAUDE.md`.
+  - **Cytuj:** `quoteText(sel)` (pure - każda linia dostaje prefiks `> `, plus jedna pusta
+    linia na końcu) wstawiony przez `insertAtCursor(textarea, text)` (pure) w pozycji kursora
+    `input_area`, potem `handleInputResize()` + fokus na pole.
+  - Obie funkcje pure (`quoteText`/`insertAtCursor`) są testowane literalnie w
+    `chat/selectionMenu.test.ts`. `installSelectionMenu` (montaż nasłuchów, `window.getSelection`)
+    NIE ma testu DOM - atrapa harnessu (`test-support/dom-shim.ts`) nie implementuje
+    `window.getSelection`/`Selection` [measured, grep "getSelection" w repo harnessu - zero
+    trafień w `test-support/`], więc show/hide menu jest `skip: brak atrapy getSelection w
+    harnessie`.
+- **Montaż w `renderView`, odpięcie w `onClose` (`chat_view.ts`).** `chat_ui.ts`'s
+  `renderView` woła `this._selectionMenuDetach?.(); this._selectionMenuDetach =
+  installSelectionMenu(this);` - odpina POPRZEDNI egzemplarz przed montażem nowego (`renderView`
+  potrafi się powtórzyć w cyklu życia jednego widoku, patrz wołacze w `chat_view.ts`, a
+  `messages_container` powstaje na nowo za każdym razem - bez tego odpięcia nasłuchy na
+  `document` by się mnożyły przy każdym kolejnym renderze). Pole `_selectionMenuDetach`
+  (`(() => void) | null`) żyje w `ChatViewMixins` (`chat/chatViewShape.ts`). Odpięcie przy
+  ZAMKNIĘCIU widoku jest wpięte w `onClose` (`modules/chat/chat_view.ts`): bez tego każda
+  zamknięta instancja widoku zostawiałaby parę nasłuchów na `document` trzymającą cały widok
+  w pamięci (recenzja D). Po "Cytuj" zaznaczenie jest czyszczone PRZED fokusem pola - odwrotna
+  kolejność cofała kursor na pozycję 0 (recenzja D, zmierzone w Chromium).
 
 ---
 

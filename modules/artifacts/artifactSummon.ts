@@ -17,7 +17,7 @@ import { t } from '../../core/i18n/index.js';
 // CHAT_VIEW_TYPE - kanoniczna stała żyje w core/ (node-safe barrel), nie w
 // `modules/chat/index.js` (ten ciągnie `obsidian` przez ChatView/chat_streaming.js i złamałby
 // "BEZ importu obsidian" tego pliku - patrz `core/utils/viewTypes.ts`).
-import { MACHINE_MESSAGE_META, CHAT_VIEW_TYPE, log } from '../../core/index.js';
+import { machineMeta, CHAT_VIEW_TYPE, log } from '../../core/index.js';
 import type { ThinArtifact } from './types.js';
 
 /**
@@ -140,8 +140,12 @@ export async function summonAgentForArtifact(plugin: SummonPlugin, { id, actionL
                 // klucza API itp. wraca jako odrzucona promisa). `.catch` niżej zamyka tę drugą
                 // drogę - bez niej realny pad uciekał jako unhandled rejection zamiast ginąć cicho
                 // tak samo, jak throw synchroniczny.
+                // `_artifactSummon: true` - znacznik dla klasyfikatora wiadomości maszynowych
+                // (`modules/chat/chat/machineMessage.ts`, spec A3): renderuje tę wiadomość jako
+                // kafelek systemowy zamiast dymka usera, mimo że `role` zostaje `'user'` dla
+                // modelu (zasada nadrzędna A3 - treść dla modelu bez zmian).
                 try {
-                    const result = view.send_message?.({ meta: MACHINE_MESSAGE_META });
+                    const result = view.send_message?.({ meta: machineMeta({ _artifactSummon: true }) });
                     if (result && typeof result.then === 'function') {
                         result.catch((e: unknown) => {
                             log.warn('artifactSummon', 'send_message po przywołaniu agenta padł:', e);

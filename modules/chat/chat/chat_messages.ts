@@ -11,12 +11,30 @@ import {
     createToolCallDisplay,
     createThinkingBlock,
     createSubAgentBlock,
+    createNoteLink,
 } from '../../ui-components/index.js';
 import { t, getDateLocale } from '../../../core/i18n/index.js';
 import { registerUrlsFromText } from '../../web/index.js';
 import { registerUrlsIfHuman } from './messagePrivileges.js';
 // Historia liczy status narzędzia TĄ SAMĄ regułą co żywa tura (chat_streaming).
 import { resolveMessageOrigin, toolResultStatus } from '../../../core/index.js';
+// Wiadomości maszynowe (spec A3, "Czat bez ścian") - powiadomienie o wyniku suba z tła i
+// przywołanie agenta po interakcji z artefaktem docierają jako `role: 'user'` (treść dla MODELU
+// bez zmian), ale w widoku są kafelkiem systemowym zamiast dymka. Klasyfikator jest czysty (zero
+// `obsidian`), mieszka obok w tym samym module. Render (`renderMachineTile`, uwaga 5 spec A3-fix)
+// jest TRZECIM plikiem w module, importowanym przez oba mixiny (ten i `chat_streaming.ts`) - bez
+// tego byłaby to trzecia kopia tej samej logiki (patrz komentarz modułu `machineTile.ts`).
+import { buildMachineView } from './machineMessage.js';
+import { renderMachineTile } from './machineTile.js';
+// Krysztal agenta jako CSS var `--cs-agent-crystal` (2.3.0, kolumna dymkow) - jeden producent
+// dla append_message/render_messages TU i `_ensureAgentMessageContainer` w chat_streaming.ts.
+import { agentCrystalCssVar } from './agentCrystal.js';
+// Uwaga 10 (spec A2-fix): pokwitowanie delegacji w tle odtworzone z historii sklada details
+// TĄ SAMĄ funkcją co żywa tura - jedno źródło prawdy dla kolejności linii (identyfikator
+// zawsze ostatni). Import wewnątrz `modules/chat/` (oba pliki to mixiny tego samego modułu,
+// żaden cykl - `chat_streaming.ts` nie importuje z `chat_messages.ts`), nie deep-import w
+// obcy moduł.
+import { buildBackgroundReceiptText } from './chat_streaming.js';
 // Receiver mixina = złożony `ChatView` (klasa + osiem deklaracji mixinów). Cykl typów
 // chat_view ↔ mixin jest legalny i znika w buildzie (`import type`).
 import type { ChatViewLike } from './chatViewShape.js';
@@ -39,6 +57,13 @@ interface HistoryToolOutput {
     tool_call_details?: SubAgentToolCallDetail[];
     duration_ms?: number;
     usage?: SubAgentUsage | null;
+    /** Delegacja zlecona w tle (uwaga 10, spec A2-fix) - kształt jak żywy `ChatToolResult`
+     *  (`chat_streaming.ts`), odtworzony z tekstu wyniku narzędzia zapisanego w sesji. */
+    started?: boolean;
+    task_id?: string;
+    name?: string;
+    tasks?: Array<{ task_id?: string; name?: string }>;
+    queued?: number;
 }
 
 /** Argumenty wywołania `delegate` odtworzone z historii. */
@@ -87,28 +112,33 @@ export async function append_message(this: ChatViewLike, role: MessageRole, cont
         // Bez znacznika = maszyna (fail-closed), więc adres z treści artefaktu czy z wyniku suba
         // NIE odblokowuje `web_read`.
         registerUrlsIfHuman(uiText, meta, registerUrlsFromText);
-        const userDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--user' });
-        userDiv.style.setProperty('--cs-agent-color-rgb', agentRgb);
-        const textDiv = userDiv.createDiv({ cls: 'cs-message__text' });
-        if (Array.isArray(content)) {
-            this._renderMultimodalUserContent(textDiv, content, uiText);
+        // Powiadomienie o wyniku suba z tła / przywołanie agenta po interakcji z artefaktem
+        // (spec A3) - klasyfikacja przez meta (świeżo dopisana kilka linii wyżej na tej samej
+        // wiadomości). Zasada nadrzędna: treść dla MODELU zostaje identyczna, zmienia się
+        // WYŁĄCZNIE render w oknie czatu.
+        const machineView = buildMachineView({ role, content, ...(meta || {}) }, { t });
+        if (machineView) {
+            await renderMachineTile(this.messages_container, this.plugin, machineView);
         } else {
-            this._renderUserText(textDiv, uiText);
+            const userDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--user' });
+            userDiv.style.setProperty('--cs-agent-color-rgb', agentRgb);
+            const textDiv = userDiv.createDiv({ cls: 'cs-message__text' });
+            if (Array.isArray(content)) {
+                this._renderMultimodalUserContent(textDiv, content, uiText);
+            } else {
+                this._renderUserText(textDiv, uiText);
+            }
+            const metaEl = userDiv.createDiv({ cls: 'cs-message__meta' });
+            metaEl.createSpan({ text: timestamp });
+            this.addMessageActions(metaEl, uiText, 'user', idx);
         }
-        const metaEl = userDiv.createDiv({ cls: 'cs-message__meta' });
-        metaEl.createSpan({ text: timestamp });
-        this.addMessageActions(metaEl, uiText, 'user', idx);
-        this._agentHeaderShown = false;
     } else {
+        // Kolumna dymkow (2.3.0, kolejna faza "Czat bez scian"): naglowek serii znikl calkiem -
+        // krysztal siedzi teraz przy KAZDYM elemencie agenta (kafelek/dymek tekstu), rysowany CSS
+        // pseudo-elementem `::after` sterowanym ta zmienna (patrz `chat_view.css`).
         const agentDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--agent' });
         agentDiv.style.setProperty('--cs-agent-color-rgb', agentRgb);
-        if (!this._agentHeaderShown) {
-            const head = agentDiv.createDiv({ cls: 'cs-message__agent-head' });
-            const crystalEl = head.createDiv({ cls: 'cs-message__agent-crystal' });
-            setSvg(crystalEl, SkinManager.getCrystal(activeAgent || 'Agent', { size: 18, color: agentColor, glow: false }));
-            head.createSpan({ cls: 'cs-message__agent-name', text: activeAgent?.name || 'Agent' });
-            this._agentHeaderShown = true;
-        }
+        agentDiv.style.setProperty('--cs-agent-crystal', agentCrystalCssVar(activeAgent || 'Agent', agentColor));
         const textDiv = agentDiv.createDiv({ cls: 'cs-message__text' });
         await MarkdownRenderer.render(this.app, uiText, textDiv, '', this);
         const metaEl = agentDiv.createDiv({ cls: 'cs-message__meta' });
@@ -128,7 +158,6 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
     const agentRgb = hexToRgbTriplet(agentColor);
     const agentName = agent?.name || 'Agent';
 
-    let prevRole = null;
     for (let idx = 0; idx < this.rollingWindow.messages.length; idx++) {
         const msg = this.rollingWindow.messages[idx];
         // Skip tool messages (they were displayed inline with the tool call)
@@ -137,23 +166,30 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
         const uiText = typeof msg.content === 'string' ? msg.content : this._contentBlocksToText(msg.content);
 
         if (msg.role === 'user') {
-            // ── USER MESSAGE — .cs-message--user ──
-            const userDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--user' });
-            userDiv.style.setProperty('--cs-agent-color-rgb', agentRgb);
-
-            // Text content
-            const textDiv = userDiv.createDiv({ cls: 'cs-message__text' });
-            if (Array.isArray(msg.content)) {
-                this._renderMultimodalUserContent(textDiv, msg.content, uiText);
+            // Wiadomość maszynowa (spec A3) - meta na żywo, albo (po restarcie Obsidiana, meta
+            // nie przeżywa zapisu sesji) klasyfikacja po treści wewnątrz `buildMachineView`.
+            const machineView = buildMachineView(msg, { t });
+            if (machineView) {
+                await renderMachineTile(this.messages_container, this.plugin, machineView);
             } else {
-                this._renderUserText(textDiv, uiText);
-            }
+                // -- USER MESSAGE - .cs-message--user --
+                const userDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--user' });
+                userDiv.style.setProperty('--cs-agent-color-rgb', agentRgb);
 
-            // Meta (hover: timestamp + actions)
-            const meta = userDiv.createDiv({ cls: 'cs-message__meta' });
-            const timestamp = msg.timestamp || '';
-            if (timestamp) meta.createSpan({ text: timestamp });
-            this.addMessageActions(meta, uiText, 'user', idx);
+                // Text content
+                const textDiv = userDiv.createDiv({ cls: 'cs-message__text' });
+                if (Array.isArray(msg.content)) {
+                    this._renderMultimodalUserContent(textDiv, msg.content, uiText);
+                } else {
+                    this._renderUserText(textDiv, uiText);
+                }
+
+                // Meta (hover: timestamp + actions)
+                const meta = userDiv.createDiv({ cls: 'cs-message__meta' });
+                const timestamp = msg.timestamp || '';
+                if (timestamp) meta.createSpan({ text: timestamp });
+                this.addMessageActions(meta, uiText, 'user', idx);
+            }
 
         } else if (msg.role === 'assistant') {
             const hasToolCalls = (msg.tool_calls?.length as number) > 0;
@@ -167,16 +203,11 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
             if (!uiText && !hasToolCalls && !msg.reasoning_content) continue;
 
             // ── AGENT MESSAGE — .cs-message--agent ──
+            // Kolumna dymkow (2.3.0): naglowek serii znikl - krysztal siedzi na KAZDYM elemencie
+            // agenta (kafelek/dymek tekstu) przez CSS `::after`, sterowany ta zmienna.
             const agentDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--agent' });
             agentDiv.style.setProperty('--cs-agent-color-rgb', agentRgb);
-
-            // Agent header (crystal + name) — only on first in a series
-            if (prevRole !== 'assistant') {
-                const head = agentDiv.createDiv({ cls: 'cs-message__agent-head' });
-                const crystalEl = head.createDiv({ cls: 'cs-message__agent-crystal' });
-                setSvg(crystalEl, SkinManager.getCrystal(agent || agentName, { size: 16, color: agentColor, glow: false }));
-                head.createSpan({ cls: 'cs-message__agent-name', text: agentName });
-            }
+            agentDiv.style.setProperty('--cs-agent-crystal', agentCrystalCssVar(agent || agentName, agentColor));
 
             // Reconstruct action rows from metadata (thinking, tool_calls)
             // Note: addMessage() spreads metadata into top-level, so tool_calls/reasoning_content are direct props
@@ -208,21 +239,52 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
                             : (tcArgs || {})) as DelegateArgs;
                         const taskQuery = _hArgs.task || '';
                         const _hName = _hArgs.aspect || '';
-                        const block = createSubAgentBlock({
-                            type: tcName,
-                            // Status z JEDNEJ reguły (jak makeDisplay kilka linii niżej), nie
-                            // z dopasowania stringa 'Błąd' w response — dopasowanie stringa
-                            // łapałoby tylko literał sklejany przez chat_streaming.ts, więc
-                            // padnięta delegacja odtworzona z historii świeciłaby na zielono.
-                            status: toolResultStatus(tcOutput),
-                            agentName: _hName,
-                            query: taskQuery,
-                            response: typeof tcOutput === 'string' ? tcOutput : (tcOutput?.result || ''),
-                            toolsUsed: (tcOutput as HistoryToolOutput)?.tools_used || [],
-                            toolCallDetails: (tcOutput as HistoryToolOutput)?.tool_call_details || [],
-                            duration: (tcOutput as HistoryToolOutput)?.duration_ms || 0,
-                            usage: (tcOutput as HistoryToolOutput)?.usage,
-                        });
+                        const historyOutput = (typeof tcOutput === 'object' && tcOutput) ? tcOutput : null;
+                        let block: HTMLElement;
+                        if (historyOutput && historyOutput.started === true) {
+                            // Uwaga 10 (spec A2-fix): delegacja zlecona w TLE, odtworzona z
+                            // historii, dawniej renderowala sie jak zielony wynik z samym
+                            // "Zadanie" (ta gałąź nie istniała - `historyOutput` bez `pending`
+                            // leciał wprost do gałęzi niżej). Ten sam pending-kafelek co na
+                            // żywo (`chat_streaming.ts`), ta sama funkcja receipt.
+                            const startedList = Array.isArray(historyOutput.tasks)
+                                ? historyOutput.tasks
+                                : [{ task_id: historyOutput.task_id, name: historyOutput.name }];
+                            block = createSubAgentBlock({
+                                type: tcName,
+                                pending: true,
+                                status: 'success',
+                                agentName: startedList.length > 1 ? '' : (startedList[0]?.name || _hName || ''),
+                                query: taskQuery,
+                                response: buildBackgroundReceiptText(startedList, historyOutput.queued),
+                            });
+                        } else {
+                            block = createSubAgentBlock({
+                                type: tcName,
+                                // Status z JEDNEJ reguły (jak makeDisplay kilka linii niżej), nie
+                                // z dopasowania stringa 'Błąd' w response - dopasowanie stringa
+                                // łapałoby tylko literał sklejany przez chat_streaming.ts, więc
+                                // padnięta delegacja odtworzona z historii świeciłaby na zielono.
+                                status: toolResultStatus(tcOutput),
+                                agentName: _hName,
+                                query: taskQuery,
+                                // Delegacja padnięta, odtworzona z historii: `result` jest puste,
+                                // ale `error` (np. `{success:false, error:"limit czasu"}`) niesie
+                                // realny powód - bez fallbacku na `error` kafelek pokazywał
+                                // generyczne "Sub-agent zgłosił błąd bez opisu" zamiast echa
+                                // własnego opisu, mimo że opis BYŁ w danych. Ten sam szablon
+                                // (`chat.streaming.error_prefix`), którym `_chatOnToolResults`
+                                // (`chat_streaming.ts`) buduje `response` dla ŻYWEJ, padniętej
+                                // delegacji - jedno źródło formatu dla obu ścieżek.
+                                response: typeof tcOutput === 'string'
+                                    ? tcOutput
+                                    : (tcOutput?.result || (tcOutput?.error ? t('chat.streaming.error_prefix', { message: tcOutput.error }) : '')),
+                                toolsUsed: (tcOutput as HistoryToolOutput)?.tools_used || [],
+                                toolCallDetails: (tcOutput as HistoryToolOutput)?.tool_call_details || [],
+                                duration: (tcOutput as HistoryToolOutput)?.duration_ms || 0,
+                                usage: (tcOutput as HistoryToolOutput)?.usage,
+                            });
+                        }
                         agentDiv.appendChild(block);
                     } else {
                         const makeDisplay = this.env?.settings?.pkmAssistant?.compactToolChips === false ? createToolCallDisplay : createCompactToolChip;
@@ -251,11 +313,8 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
             this._renderCacheSavingsBadge?.(meta, msg.cache);
             this.addMessageActions(meta, uiText, 'assistant', idx);
         }
-        prevRole = msg.role;
     }
 
-    // Track crystal header state for streaming continuation
-    this._agentHeaderShown = (prevRole === 'assistant');
     // Draw connector lines
     this._drawConnectorLines();
 }
@@ -263,6 +322,13 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
 /**
  * Render user text with inline @[Name] mention badges.
  * Falls back to plain text if no mentions found.
+ *
+ * Mencje klikalne (spec C, "Czat bez scian" 2.3.0): nazwa z `@[Nazwa]` jest rozwiazywana na
+ * sciezke notatki TUTAJ, w widoku - `this.app.metadataCache.getFirstLinkpathDest(name, '')` -
+ * bo TYLKO widok zna `app`; `createNoteLink` (`modules/ui-components/`) dostaje juz gotowa
+ * sciezke, jak wszedzie indziej w tym mechanizmie. Nazwa bez odpowiednika notatki w vaultcie
+ * (agent, osoba, cokolwiek nie-notatkowego) zostaje zwyklym, NIEklikalnym tekstem badge'a -
+ * stare zachowanie bez zmian.
  */
 export function _renderUserText(this: ChatViewLike, container: HTMLElement, text: string): void {
     if (!text.includes('@[')) {
@@ -274,8 +340,14 @@ export function _renderUserText(this: ChatViewLike, container: HTMLElement, text
     for (const part of parts) {
         const match = part.match(/^@\[(.+)\]$/);
         if (match) {
+            const name = match[1];
             const badge = p.createSpan({ cls: 'pkm-mention-badge' });
-            badge.textContent = `@ ${match[1]}`;
+            const dest = this.app?.metadataCache?.getFirstLinkpathDest?.(name, '') ?? null;
+            if (dest) {
+                createNoteLink(badge, dest.path, `@ ${name}`);
+            } else {
+                badge.textContent = `@ ${name}`;
+            }
         } else {
             p.appendText(part);
         }
@@ -579,8 +651,16 @@ export function _renderTrimBlock(this: ChatViewLike, info: TrimInfo): void {
 }
 
 /**
- * Draw a continuous vertical line from crystal header through all action rows.
+ * Draw a continuous vertical line connecting the crystal markers of consecutive agent elements.
  * Uses absolute positioning within messages_container so it spans across multiple agent divs.
+ *
+ * Kolumna dymkow (2.3.0, kolejna faza "Czat bez scian"): naglowek serii (jeden krysztal na CALA
+ * serie, w `.cs-message__agent-head`) znikl - krysztal siedzi teraz PRZY KAZDYM elemencie agenta
+ * (kafelek `.cs-tile--agent`/`.cs-tile--agent-muted`, dymek tekstu `.cs-message__text`), rysowany
+ * CSS pseudo-elementem `::after` (patrz `chat_view.css`). Lacznik dalej rysuje JEDNA pionowa
+ * linie na serie (ciag `.cs-message--agent` bez przerwy w DOM - grupowanie bez zmian), ale teraz
+ * od srodka krysztalu PIERWSZEGO elementu serii do srodka krysztalu OSTATNIEGO - nie od naglowka
+ * do ostatniej ikony kafelka (naglowek juz nie istnieje).
  */
 export function _drawConnectorLines(this: ChatViewLike): void {
     // Remove old lines
@@ -605,30 +685,41 @@ export function _drawConnectorLines(this: ChatViewLike): void {
     }
     if (current.length) groups.push(current);
 
-    // For each group, find first crystal and last action row icon, draw one line
     for (const group of groups) {
-        const firstMsg = group[0];
-        const crystal = firstMsg.querySelector('.cs-message__agent-crystal');
-        if (!crystal) continue;
-
-        // Find last action row's icon in the group
-        let lastIcon: Element | null = null;
-        for (let i = group.length - 1; i >= 0; i--) {
-            const rows = group[i].querySelectorAll('.cs-action-row');
-            if (rows.length) {
-                lastIcon = rows[rows.length - 1].querySelector('.cs-action-row__icon') || rows[rows.length - 1];
-                break;
+        // Elementy grupy w kolejnosci DOM: kazdy kafelek agenta (gdziekolwiek zagniezdzony - w
+        // `.cs-tool-chip-wrap` albo `.cs-tool-calls-wrapper` przy streamingu, selektor lapie je
+        // niezaleznie od opakowania), kazdy blok `.cs-ask-user` (ta sama zagniezdzona lokalizacja
+        // co kafelki - dostaje krysztal tak samo, patrz `chat_view.css`) i kazdy dymek tekstu,
+        // BEZPOSREDNI dzieckiem kontenera agenta. Element bez wysokosci (pusty `.cs-message__text`,
+        // ukryty przez `:empty{display:none}`) pomijamy - nie ma gdzie narysowac krysztalu.
+        const elements: HTMLElement[] = [];
+        for (const msg of group) {
+            const tiles = msg.querySelectorAll<HTMLElement>('.cs-tile--agent, .cs-tile--agent-muted, .cs-ask-user');
+            for (const tile of tiles) {
+                if (tile.offsetHeight === 0) continue;
+                elements.push(tile);
+            }
+            for (const child of Array.from(msg.children) as HTMLElement[]) {
+                if (!child.classList.contains('cs-message__text')) continue;
+                if (child.offsetHeight === 0) continue;
+                elements.push(child);
             }
         }
-        if (!lastIcon) continue;
+        // Jeden element w grupie (albo zero) = brak linii - nic do laczenia.
+        if (elements.length < 2) continue;
 
-        const crystalRect = crystal.getBoundingClientRect();
-        const lastRect = lastIcon.getBoundingClientRect();
+        const first = elements[0];
+        const last = elements[elements.length - 1];
+        const firstMsg = group[0];
+        const firstRect = firstMsg.getBoundingClientRect();
+        // x = lewa krawedz PIERWSZEGO kontenera agenta minus rynna (marginLeft realny, fallback
+        // 22 - ten sam `--cs-bubble-gutter` co `src/styles.css`) plus 9 (polowa 18px krysztalu).
+        const computedMarginLeft = parseFloat(getComputedStyle(firstMsg).marginLeft);
+        const gutter = Number.isFinite(computedMarginLeft) ? computedMarginLeft : 22;
+        const crystalCenterX = firstRect.left - gutter + 9 - containerRect.left;
 
-        // Dynamic horizontal position: center of crystal
-        const crystalCenterX = crystalRect.left + crystalRect.width / 2 - containerRect.left;
-        const top = crystalRect.bottom - containerRect.top + this.messages_container.scrollTop;
-        const bottom = lastRect.top + lastRect.height / 2 - containerRect.top + this.messages_container.scrollTop;
+        const top = _crystalCenterY(first) - containerRect.top + this.messages_container.scrollTop;
+        const bottom = _crystalCenterY(last) - containerRect.top + this.messages_container.scrollTop;
         const height = bottom - top;
         if (height <= 0) continue;
 
@@ -642,4 +733,23 @@ export function _drawConnectorLines(this: ChatViewLike): void {
         if (agentRgb) line.style.setProperty('--cs-agent-color-rgb', agentRgb);
         this.messages_container.appendChild(line);
     }
+}
+
+/**
+ * Y srodka krysztalu `::after` danego elementu, wzgledem viewportu (przed przeliczeniem na
+ * wspolrzedne messages_container). W PIONIE liczy sie zawsze border-TOP (border-left zmienia
+ * tylko `left`, patrz komentarz przy `left` w `_drawConnectorLines` wyzej) - kafelek, dymek
+ * tekstu i blok `.cs-ask-user` maja WSZYSTKIE border-top 1px (kafelek ma go dokola, dymek i
+ * ask_user go dostaja z bazowego `border: 1px`, `border-left: 3px` nadpisuje TYLKO lewa krawedz).
+ * Trzy offsety zgodne z CSS (`chat_view.css`):
+ * kafelek = border-top 1 + top 9 + polowa 18 = 19; dymek tekstu = border-top 1 + top 7 + polowa
+ * 18 = 17; blok ask_user = border-top 1 + top 12 + polowa 18 = 22 (top wiekszy niz dymka, bo
+ * ask_user ma wiekszy padding-top, 10px zamiast 5px).
+ */
+function _crystalCenterY(el: HTMLElement): number {
+    const rect = el.getBoundingClientRect();
+    const offset = el.classList.contains('cs-message__text') ? 17
+        : el.classList.contains('cs-ask-user') ? 22
+        : 19;
+    return rect.top + offset;
 }

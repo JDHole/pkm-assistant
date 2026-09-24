@@ -13,7 +13,16 @@ export {
     getToolIcon,
     createToolCallDisplay,
     createCompactToolChip,
+    describeToolCall,
 } from './ToolCallDisplay.js';
+// Tile (2.3.0, Czat bez scian) - komponent kafelka wspolny dla wszystkich rzedow akcji w
+// czacie. ThinkingBlock i ToolCallDisplay stoja na nim (A1); A2/A3 doloza reszte.
+export { createTile } from './Tile.js';
+export type { TileSpec, TileHandle, TileRole, TileStatus, TileAction } from './Tile.js';
+// Notatki klikalne wszedzie (spec C, 2.3.0, "Czat bez scian") - rejestr openera + budowa linku.
+// `ui-components` nie zna `app`; wolacz (widok czatu) rejestruje opener przez `setNoteOpener`.
+export { createNoteLink, setNoteOpener, openNoteWithRegistry, isVaultNotePath } from './noteLink.js';
+export type { NoteOpener } from './noteLink.js';
 export { AttachmentManager } from './AttachmentManager.js';
 export { MentionAutocomplete } from './MentionAutocomplete.js';
 // Kształty, które moduł-właściciel narzuca wołaczom (czat składa z nich swoje dane):
@@ -21,7 +30,7 @@ export { MentionAutocomplete } from './MentionAutocomplete.js';
 export type { MentionChip, MentionAutocompletePlugin } from './MentionAutocomplete.js';
 export { createSubAgentBlock, createPendingSubAgentBlock } from './SubAgentBlock.js';
 export type { SubAgentToolCallDetail, SubAgentUsage } from './SubAgentBlock.js';
-export { createThinkingBlock, updateThinkingBlock } from './ThinkingBlock.js';
+export { createThinkingBlock, updateThinkingBlock, finalizeThinkingBlock } from './ThinkingBlock.js';
 // Bazowa klasa widoków. Dziedziczą z niej
 // `ChatView` (modules/chat) i `ReleaseNotesView` (modules/shell) — czyli ≥2 moduły, więc
 // jej dom jest tutaj. Shell trzyma re-export kompatybilnościowy.
