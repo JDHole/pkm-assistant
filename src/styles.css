@@ -103,8 +103,12 @@
 
   /* Dymki 2.3.0 ("Czat bez scian") - rynna kryształu agenta. Wartosc 22px przetrwala z dawnego
      naglowka serii (.cs-message__agent-head, usuniety w fazie "kolumna dymkow" - patrz
-     modules/chat/CLAUDE.md, sekcja "Dymki 2.3.0"), uzywana dzis jako margin-left kontenera
-     .cs-message--agent (modules/chat/chat_view.css) i mirror po prawej dla dymka usera. */
+     modules/chat/CLAUDE.md, sekcja "Dymki 2.3.0"). Cztery uzycia w modules/chat/chat_view.css
+     (poprawka nieuwzglednionych - recenzja niezalezna): margin-left kontenera .cs-message--agent
+     i margin-right mirror dla dymka usera; left krysztalu (`::after` na kafelku/dymku/
+     .cs-ask-user, `calc(-1 * var(--cs-bubble-gutter) - Npx)`, pozycjonuje go W RYNNIE, poza
+     wlasnym pudelkiem elementu); bazowy padding-left `.cs-message__text` (wciecie tresci dymka
+     OD rynny, niezalezne od krysztalu). */
   --cs-bubble-gutter: 22px;
 }
 .theme-light .cs-root {
