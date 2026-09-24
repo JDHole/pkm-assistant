@@ -2227,6 +2227,12 @@ export const en: Record<string, string> = {
   'attach.still_large': 'Image still {{size}} after optimization - may be too large for API',
   'attach.optimize_failed': 'Image optimization failed, using original',
 
+  // ── Selection menu (2.3.0, "Chat without walls") ──
+  'chat.selection.copy': 'Copy',
+  'chat.selection.context': 'Add as context',
+  'chat.selection.quote': 'Quote',
+  'chat.selection.copied': 'Copied',
+
   // ── MentionAutocomplete ──
   'mention.no_results': 'No results',
   'mention.type_name': 'Type a note name...',

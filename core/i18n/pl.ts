@@ -2232,6 +2232,12 @@ export const pl: Record<string, string> = {
   'attach.still_large': 'Obraz nadal {{size}} po optymalizacji - może być za duży dla API',
   'attach.optimize_failed': 'Optymalizacja obrazu nie powiodła się, używam oryginału',
 
+  // ── Menu na zaznaczeniu (2.3.0, "Czat bez ścian") ──
+  'chat.selection.copy': 'Kopiuj',
+  'chat.selection.context': 'Dodaj jako kontekst',
+  'chat.selection.quote': 'Cytuj',
+  'chat.selection.copied': 'Skopiowano',
+
   // ── MentionAutocomplete ──
   'mention.no_results': 'Brak wyników',
   'mention.type_name': 'Wpisz nazwę notatki...',
