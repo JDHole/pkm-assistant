@@ -119,7 +119,7 @@ Wszystkie pola opcjonalne. Domyślny `max_tool_result_length: 15000` jeśli nie 
 
 ### Hyperfocused per-akcja (kierunek dalszy)
 
-Baza jest gotowa: user buduje N hyperfocused per agent. Convention: `<role>-<context>-<action>` (np. `prep-x-post-finder`, `strateg-li-brief-creator`). Klikalne w chacie identycznie jak skille (slim bar + popup `/@` + sidebar tab Triggery).
+Baza jest gotowa: user buduje N hyperfocused per agent. Convention: `<role>-<context>-<action>` (np. `prep-x-post-finder`, `strateg-li-brief-creator`). Klikalne w chacie identycznie jak skille (slim bar + popup `/` + sidebar tab Triggery; `@` to wylacznie MentionAutocomplete z notatkami).
 
 ### Model suba
 
