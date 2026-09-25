@@ -629,3 +629,38 @@ test('numeracja slotów narzędzi jest własna i gęsta, a indeks spoza zakresu 
 
   t.deepEqual(smiecie.map(ev => ev.index), [0, 0, 0, 0], 'indeks poza zakresem / ujemny / ułamkowy adresuje blok zerowy, więc liczba slotów nigdy nie przekracza sufitu');
 });
+
+// ── payload `type:"error"` z kluczem NIESTANDARDOWYM w treści ────────────
+//
+// `handleEvent`'s gałąź `case 'error'` normalizuje `event.error ?? event` przez
+// `normalizeError`, potem `secureAnthropicError` (redakcja PO WARTOŚCI + maska WZORCEM,
+// ten sam wzorzec co w `OpenAiCompatibleProvider`). Klucz bez znanego prefiksu (albo za
+// krótki fragment znanego prefiksu, jak tu) nie łapie się na wzorzec `maskSensitiveData`
+// sam z siebie — redakcja PO WARTOŚCI klucza użytego w żądaniu (`ctx.apiKey`) jest tym, co
+// daje dokładnie `[REDACTED]` w wyniku.
+
+test('payload type:"error" (Anthropic) z kluczem NIESTANDARDOWYM w treści — klucz NIE ma prawa wyjść w error.message', t => {
+  const ctx = makeCtx({ modelId: 'claude-sonnet-4-20250514', apiKey: 'sk-live-ABCDEFGH1234' });
+
+  const events = collectEvents(anthropicProvider.createStreamDecoder(REQ, ctx), [
+    'data: {"type":"error","error":{"message":"bad key: sk-live-ABCDEFGH1234"}}',
+  ]);
+
+  const errorEvent = events.find((e): e is Extract<StreamEvent, { type: 'error' }> => e.type === 'error');
+  t.truthy(errorEvent, 'dekoder Anthropica musi wypuścić zdarzenie error dla payloadu type:"error"');
+  t.false(errorEvent!.error.message.includes('ABCDEFGH1234'), errorEvent!.error.message);
+  t.is(errorEvent!.error.message, 'bad key: [REDACTED]');
+});
+
+test('payload type:"error" (Anthropic) — redakcja działa mimo końcowej nowej linii w ctx.apiKey (trim przed porównaniem)', t => {
+  const ctx = makeCtx({ modelId: 'claude-sonnet-4-20250514', apiKey: 'sk-live-ABCDEFGH1234\n' });
+
+  const events = collectEvents(anthropicProvider.createStreamDecoder(REQ, ctx), [
+    'data: {"type":"error","error":{"message":"bad key: sk-live-ABCDEFGH1234"}}',
+  ]);
+
+  const errorEvent = events.find((e): e is Extract<StreamEvent, { type: 'error' }> => e.type === 'error');
+  t.truthy(errorEvent, 'dekoder Anthropica musi wypuścić zdarzenie error dla payloadu type:"error"');
+  t.is(errorEvent!.error.message, 'bad key: [REDACTED]',
+    'klucz z końcową nową linią w kontekście musi zredagować treść błędu bez niej');
+});

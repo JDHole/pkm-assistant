@@ -1,6 +1,6 @@
 import test from 'ava';
 import { openaiProvider } from './openai.js';
-import { collect, makeCtx } from '../testing/harness.js';
+import { collect, collectEvents, makeCtx } from '../testing/harness.js';
 import type { ChatRequest, ProviderContext, StreamEvent } from '../contracts.js';
 
 /**
@@ -94,4 +94,42 @@ test('ramka trwale niesparsowalna ląduje w koszu, ale nie kończy strumienia', 
         ['dalej'],
         'kolejna ramka po śmieciu ma dojść w całości',
     );
+});
+
+// ── payload.error z kluczem NIESTANDARDOWYM w treści ────────────
+//
+// `consumePayload` normalizuje `payload.error` przez `normalizeError`, potem `secureProviderError`
+// (redakcja PO WARTOŚCI + maska WZORCEM, w tej kolejności). `maskSensitiveData` (wzorzec
+// kształtu) sam nie łapie klucza bez znanego prefiksu (np. `sk-` za krótki, żeby dopasować się
+// do wzorca OpenAI — `{20,}` znaków); nazwa pola `key:` przed sekretem JEST wrażliwa
+// (`SENSITIVE_KEY_RE`), więc maska po nazwie pola by go też znalazła — ale dałaby maskowanie
+// CZĘŚCIOWE (`sk-l***1234`), nie pełne `[REDACTED]`. Redakcja PO WARTOŚCI klucza użytego w
+// żądaniu (`ctx.apiKey`) jest jedyną warstwą, która daje dokładnie ten wynik.
+
+test('payload.error z kluczem NIESTANDARDOWYM w treści — klucz NIE ma prawa wyjść w error.message', t => {
+    const ctx = makeCtx({ modelId: 'gpt-4o', apiKey: 'sk-live-ABCDEFGH1234' });
+    const decoder = openaiProvider.createStreamDecoder(REQ, ctx);
+
+    const events = collectEvents(decoder, [
+        'data: {"error":{"message":"bad key: sk-live-ABCDEFGH1234"}}\n',
+    ]);
+
+    const errorEvent = events.find((e): e is Extract<StreamEvent, { type: 'error' }> => e.type === 'error');
+    t.truthy(errorEvent, 'dekoder musi wypuścić zdarzenie error dla payloadu z polem error');
+    t.false(errorEvent!.error.message.includes('ABCDEFGH1234'), errorEvent!.error.message);
+    t.is(errorEvent!.error.message, 'bad key: [REDACTED]');
+});
+
+test('payload.error z kluczem — redakcja działa mimo końcowej nowej linii w ctx.apiKey (trim przed porównaniem)', t => {
+    const ctx = makeCtx({ modelId: 'gpt-4o', apiKey: 'sk-live-ABCDEFGH1234\n' });
+    const decoder = openaiProvider.createStreamDecoder(REQ, ctx);
+
+    const events = collectEvents(decoder, [
+        'data: {"error":{"message":"bad key: sk-live-ABCDEFGH1234"}}\n',
+    ]);
+
+    const errorEvent = events.find((e): e is Extract<StreamEvent, { type: 'error' }> => e.type === 'error');
+    t.truthy(errorEvent, 'dekoder musi wypuścić zdarzenie error dla payloadu z polem error');
+    t.is(errorEvent!.error.message, 'bad key: [REDACTED]',
+        'klucz z końcową nową linią w kontekście musi zredagować treść błędu bez niej');
 });

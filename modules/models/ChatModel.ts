@@ -23,7 +23,7 @@
  * zmianie modelu to szum na ekranie usera.
  */
 import { log } from '../../core/utils/Logger.js';
-import { hostWindow, maskSensitiveData, normalizeError, STREAM_TRANSPORT_TIMEOUT_MS } from '../../core/index.js';
+import { hostWindow, maskSensitiveData, normalizeError, redactSecretsDeep, redactSecretValues, STREAM_TRANSPORT_TIMEOUT_MS } from '../../core/index.js';
 import { t } from '../../core/i18n/index.js';
 import { STREAM_MAX_RETRIES, STREAM_RETRY_BASE_DELAY_MS, TOOL_CALL_MAX_INDEX } from './contracts.js';
 import { ModelRequestError } from './ModelRequestError.js';
@@ -209,16 +209,39 @@ function bodilessStreamError(status: number): NormalizedError {
     return normalizeError(reason, status > 0 ? status : null);
 }
 
-/** Ciało błędu od dostawcy → jeden kształt. Nieparsowalne ciało nie może rzucić. */
-function errorFromBody(body: string, status: number): NormalizedError {
+/**
+ * Ciało błędu od dostawcy → jeden kształt. Nieparsowalne ciało nie może rzucić.
+ *
+ * Gałąź JSON redaguje PRZED normalizacją: `normalizeError` tnie `message` do
+ * `MAX_ERROR_MESSAGE_LENGTH` znaków, a klucz siedzący dokładnie na granicy cięcia wyszedłby
+ * przecięty na pół, gdyby redakcja czekała na gotowy `NormalizedError` (`redactSecretValues`
+ * dopasowuje CAŁY sekret, więc połówki by nie złapała). `redactSecretsDeep` idzie więc po
+ * SUROWYM sparsowanym obiekcie jako pierwsza warstwa; `redactSecretValues` po nim jest
+ * idempotentna (sekret już zniknął) i zostaje jako obrona w głąb dla pól, do których
+ * `normalizeError` sięga poza `message`.
+ *
+ * Dwie warstwy sekretu na WYJŚCIU, niezależnie od tego, którą gałąź (JSON / nieparsowalny
+ * tekst) ciało wzięło, w TEJ kolejności: najpierw redakcja PO WARTOŚCI (klucz NAPRAWDĘ użyty
+ * w tym żądaniu, `secrets`), potem maska WZORCEM (`maskSensitiveData` - kształt znanego klucza
+ * albo nazwa pola, na tekście, w którym sekret już jest `[REDACTED]`). `_maskValue`
+ * (`core/security/SensitiveDataGuard.ts`) zostawia token `[REDACTED]` bez zmian, więc ta
+ * kolejność nie zjada go drugi raz.
+ */
+function errorFromBody(body: string, status: number, secrets: readonly string[]): NormalizedError {
     const raw = typeof body === 'string' ? body.trim() : '';
     if (!raw) return bodilessStreamError(status);
     try {
-        return normalizeError(JSON.parse(raw), status > 0 ? status : null);
+        const parsed = normalizeError(redactSecretsDeep(JSON.parse(raw), secrets), status > 0 ? status : null);
+        const redacted = redactSecretValues(parsed, secrets);
+        return { ...redacted, message: maskSensitiveData(redacted.message) };
     } catch {
         // Ciało, którego nie da się wyparsować, bywa stroną błędu proxy - a te potrafią
-        // odbić NASZE nagłówki. Zdanie dostawcy przechodzi bez zmian, kształt sekretu nie.
-        return normalizeError(maskSensitiveData(raw.slice(0, 500)), status > 0 ? status : null);
+        // odbić NASZE nagłówki. Redakcja idzie na PEŁNYM, nieuciętym ciele - klucz siedzący
+        // na granicy cięcia (znak 500) nie ma prawa wyjść nawet połówką, gdyby ucięcie
+        // najpierw rozerwało go na dwie części.
+        const redactedRaw = redactSecretValues({ message: raw, code: 'UNKNOWN', http_status: null }, secrets).message;
+        const masked = maskSensitiveData(redactedRaw.slice(0, 500));
+        return normalizeError(masked, status > 0 ? status : null);
     }
 }
 
@@ -764,7 +787,7 @@ export class ChatModel {
             throw new ModelRequestError(toConsumerError(e, 'Model nie odpowiedział (brak połączenia).'));
         }
 
-        if (response.status >= 400) throw new ModelRequestError(errorFromBody(response.text, response.status));
+        if (response.status >= 400) throw new ModelRequestError(errorFromBody(response.text, response.status, this._requestSecrets()));
 
         let body: unknown;
         try {
@@ -826,6 +849,17 @@ export class ChatModel {
     private _failTurn(handlers: StreamHandlers, settleErr: (err: unknown) => void, err: NormalizedError): void {
         this._callHandler(() => handlers.error?.(err));
         settleErr(err);
+    }
+
+    /**
+     * Sekrety znane TEJ instancji (klucz użyty w żądaniu) - redakcja po wartości w
+     * `errorFromBody`. `.trim()` na wyjściu, bo nagłówek żądania idzie po trim (`buildHeaders`
+     * w dostawcach) - klucz z końcową nową linią w ustawieniach nie ma prawa przestać się
+     * redagować tylko dlatego, że w treści błędu wraca już bez tego ogona.
+     */
+    private _requestSecrets(): readonly string[] {
+        const key = this._ctx.apiKey?.trim();
+        return key ? [key] : [];
     }
 
     /**
@@ -920,11 +954,11 @@ export class ChatModel {
         const { status, headers, body } = race.result;
 
         if (status === 429) {
-            return { kind: 'retry', error: errorFromBody(body, 429), delayMs: retryAfterMs(headers) };
+            return { kind: 'retry', error: errorFromBody(body, 429, this._requestSecrets()), delayMs: retryAfterMs(headers) };
         }
 
         if (status !== 200) {
-            const err = body && body.trim() ? errorFromBody(body, status) : bodilessStreamError(status);
+            const err = body && body.trim() ? errorFromBody(body, status, this._requestSecrets()) : bodilessStreamError(status);
             this._failTurn(handlers, settleErr, err);
             return { kind: 'settled' };
         }

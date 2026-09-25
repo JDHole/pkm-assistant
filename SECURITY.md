@@ -13,7 +13,11 @@ Klucze API mieszkają w ustawieniach pluginu: **`.pkm-assistant/settings.json`**
   `.pkm-assistant/settings.last-good.json`, `.pkm-assistant/backups/`,
   `.pkm-assistant/logs/`, a także `data.json` i `.env`
 - `main.js` dopisuje te ścieżki do `.gitignore` vaulta przy starcie (klucze nie trafią do
-  repo usera). Lista wpisów: `VAULT_GITIGNORE_ENTRIES` w `core/security/keySanitizer.ts`
+  repo usera). Lista wpisów: `VAULT_GITIGNORE_ENTRIES` w `core/security/keySanitizer.ts`.
+  Porównanie „wpis już jest" liczy się po CAŁYCH liniach (nie po podciągu - istniejący wpis
+  `.pkm-assistant/settings.json.example` nie maskuje reguły dla `.pkm-assistant/settings.json`);
+  vault bez `.gitignore` = plugin go nie zakłada od siebie (`core/PluginBase.ts`,
+  `addToGitignore`/`ensureGitignoreEntries`)
 - ⚠️ **Pliki sesji pamięci agenta są WYJĄTKIEM od `.gitignore`** - to pamięć agentów
   podróżująca między urządzeniami przez repo vaulta. Ryzyko sekretu (treść błędu przy padniętym
   strumieniu) jest zdejmowane **u źródła**: każdy zapis pliku sesji idzie przez

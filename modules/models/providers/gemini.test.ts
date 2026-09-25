@@ -231,6 +231,36 @@ test('gemini/response: payload z polem `error` oddaje znormalizowany błąd zami
   t.is(out.error!.code, 'UNKNOWN', 'payload Gemini nie niesie kodu — normalizeError ma dać jawny fallback, nie undefined');
 });
 
+// ── payload.error z kluczem NIESTANDARDOWYM w treści ────────────
+//
+// `parseCompletion`/`feed` normalizują `payload.error` przez `secureGeminiError` (redakcja PO
+// WARTOŚCI + maska WZORCEM, ten sam wzorzec co w `OpenAiCompatibleProvider`/`anthropic.ts`).
+// Klucz bez znanego prefiksu nie łapie się na wzorzec `maskSensitiveData` sam z siebie -
+// redakcja PO WARTOŚCI klucza użytego w żądaniu (`ctx.apiKey`) jest tym, co daje dokładnie
+// `[REDACTED]` w wyniku.
+
+test('gemini/response: payload.error z kluczem NIESTANDARDOWYM w treści — klucz NIE ma prawa wyjść w error.message', t => {
+  const ctx = makeCtx({ modelId: 'gemini-2.5-pro', apiKey: 'sk-live-ABCDEFGH1234' });
+  const out = geminiProvider.parseCompletion({ error: { message: 'bad key: sk-live-ABCDEFGH1234' } }, REQ, ctx) as unknown as {
+    error?: { message: string };
+  };
+
+  t.truthy(out.error, 'gałąź błędu ma dojść jako {error:...}');
+  t.false(out.error!.message.includes('ABCDEFGH1234'), out.error!.message);
+  t.is(out.error!.message, 'bad key: [REDACTED]');
+});
+
+test('gemini/response: payload.error — redakcja działa mimo końcowej nowej linii w ctx.apiKey (trim przed porównaniem)', t => {
+  const ctx = makeCtx({ modelId: 'gemini-2.5-pro', apiKey: 'sk-live-ABCDEFGH1234\n' });
+  const out = geminiProvider.parseCompletion({ error: { message: 'bad key: sk-live-ABCDEFGH1234' } }, REQ, ctx) as unknown as {
+    error?: { message: string };
+  };
+
+  t.truthy(out.error, 'gałąź błędu ma dojść jako {error:...}');
+  t.is(out.error!.message, 'bad key: [REDACTED]',
+    'klucz z końcową nową linią w kontekście musi zredagować treść błędu bez niej');
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Strumień - jedyny dostawca w repo, który parsuje TABLICĘ JSON zamiast liniowych ramek SSE.
 // ─────────────────────────────────────────────────────────────────────────────

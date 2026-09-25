@@ -19,7 +19,7 @@
  * `/api/messages-streaming`, `/docs/build-with-claude/prompt-caching`,
  * `/docs/build-with-claude/extended-thinking`, `/api/models-list`, `/api/versioning`.
  */
-import { normalizeError } from '../../../core/index.js';
+import { maskSensitiveData, normalizeError, redactSecretsDeep, redactSecretValues } from '../../../core/index.js';
 import { MODEL_MAX_TOKENS_DEFAULTS } from '../cache_utils.js';
 import { TOOL_CALL_MAX_INDEX } from '../contracts.js';
 import type {
@@ -31,6 +31,7 @@ import type {
     HttpClient,
     HttpRequestSpec,
     ModelInfo,
+    NormalizedError,
     OpenAiCompletion,
     OpenAiContentBlock,
     OpenAiRequestMessage,
@@ -40,6 +41,23 @@ import type {
     StreamEvent,
     UsageLike,
 } from '../contracts.js';
+
+/**
+ * `event.error`/`raw.error` odbity przez dostawcę → jeden bezpieczny kształt, ten sam wzorzec
+ * trzech warstw co `secureProviderError` w `OpenAiCompatibleProvider.ts`: redakcja PO WARTOŚCI
+ * klucza z TEGO żądania (`ctx.apiKey`, po `.trim()`) na SUROWEJ wartości PRZED `normalizeError`
+ * (inaczej cięcie długości `message` mogłoby rozerwać sekret na granicy), potem
+ * `redactSecretValues` jako obrona w głąb (idempotentna), potem maska WZORCEM na tym, co
+ * zostało. `_maskValue` (`core/security/SensitiveDataGuard.ts`) zostawia token `[REDACTED]`
+ * nietknięty, więc kolejność jest bezpieczna.
+ */
+function secureAnthropicError(rawError: unknown, apiKey?: string): NormalizedError {
+    const key = apiKey?.trim();
+    const secrets = key ? [key] : [];
+    const err = normalizeError(redactSecretsDeep(rawError, secrets));
+    const redacted = redactSecretValues(err, secrets);
+    return { ...redacted, message: maskSensitiveData(redacted.message) };
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Stałe protokołu (FAKT-API - nie nasze do zmiany)
@@ -543,6 +561,12 @@ class AnthropicStreamDecoder implements StreamDecoder {
     private stopReason: string | undefined;
     /** Ile ramek poszło do kosza jako nieczytelne - `ChatModel` z tego robi ostrzeżenie. */
     private dropped = 0;
+    /** Klucz TEGO żądania - warstwa redakcji po wartości w `handleEvent`. */
+    private readonly apiKey: string | undefined;
+
+    constructor(apiKey?: string) {
+        this.apiKey = apiKey;
+    }
 
     get droppedFrames(): number {
         return this.dropped;
@@ -654,7 +678,7 @@ class AnthropicStreamDecoder implements StreamDecoder {
                 events.push({ type: 'done', finishReason: canonicalFinishReason(this.stopReason) });
                 return;
             case 'error':
-                events.push({ type: 'error', error: normalizeError(event.error ?? event) });
+                events.push({ type: 'error', error: secureAnthropicError(event.error ?? event, this.apiKey) });
                 return;
             default:
                 // `ping` i wszystko, czego jeszcze nie znamy - cisza, strumień jedzie dalej.
@@ -926,7 +950,7 @@ export class AnthropicProvider implements ChatProvider {
 
         if (!raw) return completion;
         if (raw.error) {
-            completion.error = normalizeError(raw.error);
+            completion.error = secureAnthropicError(raw.error, ctx.apiKey);
             return completion;
         }
 
@@ -945,8 +969,8 @@ export class AnthropicProvider implements ChatProvider {
     }
 
     /** Świeży dekoder na JEDNĄ turę - stan bloków i liczników nie przechodzi między turami. */
-    createStreamDecoder(_req: ChatRequest, _ctx: ProviderContext): StreamDecoder {
-        return new AnthropicStreamDecoder();
+    createStreamDecoder(_req: ChatRequest, ctx: ProviderContext): StreamDecoder {
+        return new AnthropicStreamDecoder(ctx.apiKey);
     }
 }
 

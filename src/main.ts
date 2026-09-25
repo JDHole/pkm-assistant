@@ -510,10 +510,13 @@ export default class PkmAssistantPlugin extends PluginBase {
     await this.env?.whenLoaded();
 
     // Klucze API żyją w .pkm-assistant/settings.json - te wpisy NIGDY nie mogą trafić
-    // do repo vaulta usera (idempotentne; addToGitignore dopisuje tylko brakujące).
+    // do repo vaulta usera (idempotentne; ensureGitignoreEntries dopisuje wpisy sekwencyjnie,
+    // jeden po drugim z await, porównując całe linie pliku i logując błąd per wpis - patrz
+    // PluginBase.ensureGitignoreEntries).
     // Lista wpisów żyje w core/security/keySanitizer.ts, żeby dało się ją objąć testem bez
-    // Obsidiana. Obejmuje logi pluginu i pliki sesji pamięci agentów.
-    for (const entry of VAULT_GITIGNORE_ENTRIES) void this.addToGitignore(entry);
+    // Obsidiana. Obejmuje ustawienia, ich kopię zapasową, folder backupów i logi pluginu -
+    // pliki sesji pamięci agentów są od tego świadomym wyjątkiem (SECURITY.md).
+    await this.ensureGitignoreEntries(VAULT_GITIGNORE_ENTRIES);
     log.timing('Plugin', 'runtime loaded', initStart);
 
     // Re-check debug mode after env is loaded (settings now available)
@@ -1241,22 +1244,5 @@ export default class PkmAssistantPlugin extends PluginBase {
   // `resolveApp` (core/utils/obsidianNav.ts:34-39), który przyjmuje też `{ app: AppLike }`.
   // Naprawa = sygnatura `openNote` w core (poza zakresem tej fali - composition root jej nie zmienia).
   async openNote(target_path: string, event: unknown = null) { await openNote(this as unknown as AppLike, target_path, event); }
-
-  /**
-   * TODO: wynieść do `core/utils/` jako wspólne narzędzie.
-   *
-   * NIE oznaczaj tej metody `@deprecated` — tag znaczy „nie używaj tego", a metoda jest ŻYWA
-   * i wołana z `initialize()` dla `VAULT_GITIGNORE_ENTRIES`. `@deprecated` tu zgłaszałby lint
-   * jako użycie przestarzałego API na jedynym, całkowicie poprawnym wołaczu. Zamiar (wynieść
-   * do utili) zostaje jako zwykły TODO.
-   */
-  async addToGitignore(ignore: string, message: string | null = null) {
-    if(!(await this.app.vault.adapter.exists(".gitignore"))) return;
-    let gitignore_file = await this.app.vault.adapter.read(".gitignore");
-    if (gitignore_file.indexOf(ignore) < 0) {
-      await this.app.vault.adapter.append(".gitignore", `\n\n${message ? "# " + message + "\n" : ""}${ignore}`);
-      log.debug('Main', "Added to .gitignore: " + ignore);
-    }
-  }
 
 }

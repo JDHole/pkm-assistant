@@ -156,6 +156,26 @@ test.serial('awaria transportu wychodzi ZNORMALIZOWANA i zamaskowana (nie surowy
     t.true(message.includes('fetch failed'), `powód ma zostać czytelny dla usera: ${message}`);
 });
 
+// ── Ciało błędu Z KLUCZEM NIESTANDARDOWYM odbitym przez dostawcę/proxy ───
+//
+// Klucz użyty w TYM żądaniu (`SECRET`, patrz `make()`) nie ma znanego prefiksu (`sk-`/`gsk_`/…),
+// więc maska po wzorcu (`maskSensitiveData`) sama go nie złapie — jedyna warstwa, która może,
+// to redakcja PO WARTOŚCI klucza z kontekstu żądania (`this._ctx.apiKey`, `errorFromBody`).
+
+test.serial('ciało błędu Z KLUCZEM (odbitym przez dostawcę/proxy w JSON-ie) — klucz NIE wychodzi w komunikacie', async t => {
+    const { model, transport } = make(openaiProvider, 'gpt-4o');
+    const promise = model.stream(REQ, {});
+    for (let i = 0; i < 50 && transport.opens === 0; i++) await new Promise(res => setImmediate(res));
+    transport.fail(401, JSON.stringify({ error: { message: `Incorrect API key provided: ${SECRET}` } }));
+
+    let rejection: unknown = null;
+    try { await promise; } catch (e) { rejection = e; }
+
+    const message = String((rejection as NormalizedError)?.message ?? '');
+    t.false(message.includes(SECRET), `klucz użyty w żądaniu, odbity przez dostawcę w treści błędu, musi zostać zredagowany: ${message}`);
+    t.is(message, 'Incorrect API key provided: [REDACTED]');
+});
+
 test.serial('nieczytelne ciało błędu (strona proxy) dociera jako zdanie — bez sekretu i bez pustki', async t => {
     const { model, transport } = make(openaiProvider, 'gpt-4o');
     const promise = model.stream(REQ, {});
@@ -171,4 +191,82 @@ test.serial('nieczytelne ciało błędu (strona proxy) dociera jako zdanie — b
     t.true(message.includes('Bad Gateway'), `treść strony błędu ma dojść do usera: ${message}`);
     t.false(message.includes(SECRET), `odbity nagłówek nie ma prawa wyjść jawnie: ${message}`);
     t.is((rejection as NormalizedError)?.http_status, 502, 'status zostaje — diagnostyka ma działać');
+});
+
+test.serial('ciało nieczytelne z kluczem NA GRANICY ucięcia 500 znaków — klucz nie wychodzi nawet połówką', async t => {
+    const { model, transport } = make(openaiProvider, 'gpt-4o');
+    const promise = model.stream(REQ, {});
+    for (let i = 0; i < 50 && transport.opens === 0; i++) await new Promise(res => setImmediate(res));
+    // 490 znaków wypełniacza + klucz (27 znaków) siedzi dokładnie w oknie 490-516 — `slice(0,
+    // 500)` przecięłoby go w połowie, gdyby redakcja PO WARTOŚCI nie poszła najpierw na CAŁYM,
+    // nieuciętym ciele.
+    const padding = 'X'.repeat(490);
+    transport.fail(502, `${padding}${SECRET} — strona błędu proxy`);
+
+    let rejection: unknown = null;
+    try { await promise; } catch (e) { rejection = e; }
+
+    const message = String((rejection as NormalizedError)?.message ?? '');
+    const head = SECRET.slice(0, 8);
+    const tail = SECRET.slice(-8);
+    t.false(message.includes(head), `głowa klucza nie ma prawa wyjść nawet ucięta na granicy 500 znaków: ${message}`);
+    t.false(message.includes(tail), `ogon klucza nie ma prawa wyjść nawet ucięty na granicy 500 znaków: ${message}`);
+    // Asercje pozytywne - test kontrolny: przy pustym `message` albo null-owym odrzuceniu
+    // powyższe dwa `t.false` przeszłyby fałszywie zielono (pusty string nie zawiera niczego).
+    t.true(message.startsWith(padding), `komunikat ma zaczynać się od wypełniacza sprzed klucza: ${message}`);
+    t.true(message.includes('[REDACTED'), `token redakcji ma zostać widoczny: ${message}`);
+});
+
+// ── Ciało JSON z kluczem NA GRANICY ucięcia 4000 znaków (`normalizeError`) ───
+//
+// `errorFromBody` redaguje SUROWY obiekt (`redactSecretsDeep`) PRZED `normalizeError` - klucz
+// znika z tekstu, ZANIM `normalizeError` przytnie go do limitu długości. Cięcie przed redakcją
+// rozrywałoby klucz siedzący na granicy i połowa wychodziłaby w komunikacie.
+
+test.serial('ciało JSON z kluczem na granicy ucięcia 4000 znaków — żadne okno klucza nie wychodzi', async t => {
+    const { model, transport } = make(openaiProvider, 'gpt-4o');
+    const promise = model.stream(REQ, {});
+    for (let i = 0; i < 50 && transport.opens === 0; i++) await new Promise(res => setImmediate(res));
+    // 3995 znaków wypełniacza + klucz (26 znaków) siedzi w oknie 3995-4021 — dokładnie na
+    // granicy `MAX_ERROR_MESSAGE_LENGTH` (4000). Redakcja musi zdążyć PRZED cięciem.
+    const padding = 'Y'.repeat(3995);
+    transport.fail(400, JSON.stringify({ error: { message: `${padding}${SECRET} tail` } }));
+
+    let rejection: unknown = null;
+    try { await promise; } catch (e) { rejection = e; }
+
+    const message = String((rejection as NormalizedError)?.message ?? '');
+    for (let i = 0; i <= SECRET.length - 5; i++) {
+        const window = SECRET.slice(i, i + 5);
+        t.false(message.includes(window), `okno klucza "${window}" nie ma prawa wyjść w żadnym miejscu: ${message}`);
+    }
+    // Asercja pozytywna - test kontrolny: pusty/null-owy komunikat przeszłyby powyższe `t.false`
+    // fałszywie zielono. Token redakcji bywa PRZYCIĘTY razem z resztą (leży na tej samej
+    // granicy 4000 znaków, którą właśnie testujemy) - liczy się, że tekst SPRZED klucza dotarł.
+    t.true(message.startsWith(padding.slice(0, 100)), `komunikat ma zaczynać się od wypełniacza sprzed klucza: ${message}`);
+});
+
+test.serial('klucz z końcową nową linią w ustawieniach redaguje treść błędu bez tej linii (trim przed porównaniem)', async t => {
+    const transport = new ScriptedTransport();
+    const model = new ChatModel({
+        provider: openaiProvider,
+        ctx: makeCtx({ modelId: 'gpt-4o', apiKey: `${SECRET}\n` }),
+        http: new CapturingHttpClient(),
+        transport,
+        gate: { acquireSlot },
+        settings: makeSettings({ chat: { platform: openaiProvider.info.id } }),
+    });
+    const promise = model.stream(REQ, {});
+    for (let i = 0; i < 50 && transport.opens === 0; i++) await new Promise(res => setImmediate(res));
+    // Nagłówek żądania idzie po `.trim()` (`buildHeaders`), więc treść błędu odbita przez
+    // dostawcę/proxy niesie klucz BEZ tej końcowej nowej linii — porównanie po wartości musi
+    // widzieć ten sam ciąg co nagłówek, nie surowe ustawienie z `\n` na końcu.
+    transport.fail(401, JSON.stringify({ error: { message: `Incorrect API key provided: ${SECRET}` } }));
+
+    let rejection: unknown = null;
+    try { await promise; } catch (e) { rejection = e; }
+
+    const message = String((rejection as NormalizedError)?.message ?? '');
+    t.false(message.includes(SECRET), `klucz z końcową nową linią w ustawieniach musi zredagować treść błędu bez niej: ${message}`);
+    t.is(message, 'Incorrect API key provided: [REDACTED]');
 });

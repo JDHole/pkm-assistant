@@ -363,6 +363,26 @@ export abstract class PluginBase extends Plugin {
         }
     }
 
+    /**
+     * Dopisuje CAŁĄ listę wpisów, jeden po drugim, `await`-em - nie równolegle. Dwa wywołania
+     * `addToGitignore` na tym samym pliku bez sekwencji czytałyby tę samą starą treść i drugi
+     * zapis nadpisywałby pierwszy (adapter bez `append`, ścieżka odczytaj-zmień-zapisz).
+     * Drugi `try`/`catch` tutaj (obok tego wewnątrz `addToGitignore`) jest obroną WYŁĄCZNIE
+     * przed podklasą, która nadpisze `addToGitignore` i rzuci - bazowa implementacja wyżej
+     * sama łapie odczyt i zapis (dysk zajęty, uprawnienia) i nigdy nie rzuca, więc bez override
+     * ten catch nigdy się nie odpala. Zawiedzie podklasa → bez tej warstwy jeden zły wpis
+     * zatrzymałby pętlę przed końcem listy.
+     */
+    async ensureGitignoreEntries(entries: readonly string[]): Promise<void> {
+        for (const entry of entries) {
+            try {
+                await this.addToGitignore(entry);
+            } catch (e) {
+                log.warn(SCOPE, `Nie udało się przetworzyć wpisu .gitignore "${entry}"`, e);
+            }
+        }
+    }
+
     /** Otwarcie notatki z obsługą modyfikatorów. */
     openNote(path: string, event?: unknown): Promise<void> {
         return openNoteInWorkspace(this.app as never, path, event);

@@ -177,6 +177,26 @@ test('migracja folderu pluginu idzie PRZED pierwszym loadData()', t => {
         'po zmianie id pluginu KAŻDY user dostałby powitanie „nowy użytkownik" i modal wydania');
 });
 
+// ── Jedna wersja logiki `.gitignore` ────────────────────────
+//
+// `PluginBase.addToGitignore` porównuje wpisy po CAŁYCH liniach (nie po podciągu), a
+// `ensureGitignoreEntries` je woła sekwencyjnie z `await`, logując błąd per wpis. `main.ts`
+// ma korzystać wyłącznie z tej jednej implementacji, nie trzymać własnej kopii.
+
+test('main.ts nie ma WŁASNEJ definicji/wywołania addToGitignore — zostaje jedna wersja w PluginBase', t => {
+    const code = stripComments(source);
+    t.notRegex(code, /addToGitignore/,
+        'main.ts nadal definiuje albo bezpośrednio woła addToGitignore — ma zostać wyłącznie ensureGitignoreEntries, ' +
+        'inaczej druga implementacja w main.ts może rozjechać się z tą w PluginBase');
+});
+
+test('initialize(): VAULT_GITIGNORE_ENTRIES idą przez ensureGitignoreEntries z `await`, nie przez pętlę fire-and-forget', t => {
+    const initialize = methodBody(source, 'initialize');
+    t.true(initialize.length > 0, 'nie znalazłem initialize() w src/main.ts');
+    t.regex(initialize, /await\s+this\.ensureGitignoreEntries\(\s*VAULT_GITIGNORE_ENTRIES\s*\)/,
+        'wpisy .gitignore muszą iść sekwencyjnie z await, żeby błąd pojedynczego wpisu zostawał widoczny i zalogowany');
+});
+
 test('onunload: kolejność kroków (notices → env.dispose → sink logu na końcu)', t => {
     const onunload = methodBody(source, 'onunload');
     const notices = onunload.indexOf('this.notices?.unload()');

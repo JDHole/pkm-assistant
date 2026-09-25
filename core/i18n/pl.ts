@@ -2260,6 +2260,9 @@ export const pl: Record<string, string> = {
   // Oś narzędziowa agenta jako bramka WYKONANIA.
   'perm.tool_disabled': 'Narzędzie „{{tool}}" jest wyłączone dla tego agenta (Uprawnienia)',
   'perm.server_not_opted_in': 'Serwer MCP „{{server}}" nie jest przypięty do tego agenta',
+  // Tożsamość agenta jako bramka - fail-closed, bez podmiany na aktywnego.
+  'perm.agent_missing': 'agent {{agent}} nie istnieje albo został usunięty w trakcie tury',
+  'perm.no_agent': 'brak agenta, który mógłby odpowiadać za tę akcję',
   'perm.create_files': 'Tworzenie plików',
 
   // ── WebSearchProvider ──

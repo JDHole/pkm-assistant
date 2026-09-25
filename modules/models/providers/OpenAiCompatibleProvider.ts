@@ -15,7 +15,7 @@
  * `decorateBody`, `decorateHeaders`, `acceptsModel`), a nie do kopiowania całej klasy.
  */
 import { t } from '../../../core/i18n/index.js';
-import { normalizeError } from '../../../core/index.js';
+import { maskSensitiveData, normalizeError, redactSecretsDeep, redactSecretValues } from '../../../core/index.js';
 import { isVisionModel } from '../capabilities.js';
 import { resolveMaxOutputTokens } from '../cache_utils.js';
 import { ReasoningTagFilter } from '../ReasoningTagFilter.js';
@@ -27,6 +27,7 @@ import type {
     HttpClient,
     HttpRequestSpec,
     ModelInfo,
+    NormalizedError,
     OpenAiCompletion,
     OpenAiCompletionChoice,
     OpenAiContent,
@@ -38,6 +39,26 @@ import type {
     StreamDecoder,
     StreamEvent,
 } from '../contracts.js';
+
+/**
+ * `payload.error`/`raw.error` odbity przez dostawcę → jeden bezpieczny kształt, trzy warstwy w
+ * TEJ kolejności. Najpierw redakcja PO WARTOŚCI klucza użytego W TYM żądaniu (`ctx.apiKey`, po
+ * `.trim()` - nagłówek żądania idzie po trim, więc porównanie ma widzieć ten sam ciąg) na
+ * SUROWEJ wartości, PRZED `normalizeError` - inaczej cięcie `message` do limitu długości
+ * mogłoby przeciąć sekret dokładnie na granicy i zostawić połówkę. Potem `normalizeError`
+ * sprowadza to do kształtu kanonicznego, `redactSecretValues` powtarza redakcję jako obronę
+ * w głąb (idempotentna - sekret już zniknął), a na końcu maska WZORCEM na tym, co zostało -
+ * łapie inne, nieznane sekrety, których redakcja po wartości nie mogła znać. Kolejność jest
+ * bezpieczna: `_maskValue` (`core/security/SensitiveDataGuard.ts`) zostawia token `[REDACTED]`
+ * bez zmian, więc maska nie zjada tego, co redakcja już zamieniła.
+ */
+function secureProviderError(rawError: unknown, apiKey?: string): NormalizedError {
+    const key = apiKey?.trim();
+    const secrets = key ? [key] : [];
+    const err = normalizeError(redactSecretsDeep(rawError, secrets));
+    const redacted = redactSecretValues(err, secrets);
+    return { ...redacted, message: maskSensitiveData(redacted.message) };
+}
 
 /** Ładunek ramki oznaczającej koniec strumienia (po zdjęciu prefiksu `data:`). */
 const DONE_PAYLOAD = '[DONE]';
@@ -148,7 +169,7 @@ export abstract class OpenAiCompatibleProvider implements ChatProvider {
     }
 
     /** Odpowiedź bez strumienia → kształt kanoniczny. */
-    parseCompletion(body: unknown, _req: ChatRequest, _ctx: ProviderContext): OpenAiCompletion {
+    parseCompletion(body: unknown, _req: ChatRequest, ctx: ProviderContext): OpenAiCompletion {
         const raw = isRecord(body) ? body : {};
         const out: OpenAiCompletion = {
             choices: [],
@@ -158,7 +179,7 @@ export abstract class OpenAiCompatibleProvider implements ChatProvider {
         if (typeof raw.object === 'string') out.object = raw.object;
         if (typeof raw.created === 'number') out.created = raw.created;
         if (typeof raw.model === 'string') out.model = raw.model;
-        if (raw.error !== undefined && raw.error !== null) out.error = normalizeError(raw.error);
+        if (raw.error !== undefined && raw.error !== null) out.error = secureProviderError(raw.error, ctx.apiKey);
 
         const choices = Array.isArray(raw.choices) ? raw.choices : [];
         if (choices.length === 0) {
@@ -172,8 +193,8 @@ export abstract class OpenAiCompatibleProvider implements ChatProvider {
     }
 
     /** Świeży dekoder na JEDNĄ turę — stan znaczników myślenia jest per tura. */
-    createStreamDecoder(_req: ChatRequest, _ctx: ProviderContext): StreamDecoder {
-        return new OpenAiShapeDecoder(this.parsesThinkTags);
+    createStreamDecoder(_req: ChatRequest, ctx: ProviderContext): StreamDecoder {
+        return new OpenAiShapeDecoder(this.parsesThinkTags, ctx.apiKey);
     }
 
     // ── Wnętrze ──────────────────────────────────────────────────────────────
@@ -341,9 +362,12 @@ class OpenAiShapeDecoder implements StreamDecoder {
     /** Ile ramek poszło do kosza jako nieczytelne - `ChatModel` z tego robi ostrzeżenie. */
     private dropped = 0;
     private readonly filter: ReasoningTagFilter | null;
+    /** Klucz TEGO żądania - warstwa redakcji po wartości w `consumePayload`. */
+    private readonly apiKey: string | undefined;
 
-    constructor(parseThinkTags: boolean) {
+    constructor(parseThinkTags: boolean, apiKey?: string) {
         this.filter = parseThinkTags ? new ReasoningTagFilter() : null;
+        this.apiKey = apiKey;
     }
 
     /** Seam obserwacyjny — istnieje tylko na dostawcach z filtrem znaczników. */
@@ -428,7 +452,7 @@ class OpenAiShapeDecoder implements StreamDecoder {
         if (!isRecord(payload)) return;
 
         if (payload.error !== undefined && payload.error !== null) {
-            events.push({ type: 'error', error: normalizeError(payload.error) });
+            events.push({ type: 'error', error: secureProviderError(payload.error, this.apiKey) });
             return;
         }
 
