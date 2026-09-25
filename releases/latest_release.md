@@ -1,49 +1,39 @@
-# PKM Assistant 2.3.0
+# PKM Assistant 2.3.1
 
-**Chat without walls of text** - PKM Assistant 2.3.0
+**Honest failures and tighter keys** - PKM Assistant 2.3.1
 
-**In plain words.** The chat has a new face, built around one rule: no walls of text. Everything
-the agent does on the way to an answer - thinking, reading a note, searching, handing a task to
-a sub-agent, keeping a task list, asking you a question, running into an error - is now a small
-tile with a human title and a status dot, and the details open only when you click. Nothing
-technical sits in a tile header: no call ids, no raw tool names, no JSON. Three colours tell
-you who is speaking: system things are red, the agent's things are in the agent's colour, and
-your own messages are in your colour from Settings. The agent's replies sit in a column with
-the agent's crystal next to every tile and every bubble, joined by a thin line, so a long turn
-reads like a timeline instead of a pile. Any note the agent mentions is a link that opens in a
-new tab. You can finally select and copy text from any message, and a small menu on the
-selection offers Copy, Add as context and Quote. Typing `/` opens commands, skills, sub-agents
-and the tools of your MCP servers; typing `@` opens note suggestions only - one popup at a time,
-and Enter in the popup picks an item instead of sending the message. The typing indicator's
-dots light up one after another, a queued message stays visible while the task list is open,
-and the "hand over to another agent" button is retired for now.
+**In plain words.** This release fixes ten things found by two audits of the plugin after 2.3.0.
+Seven are about the chat telling you the truth when something goes wrong: a failed summary no
+longer says "summarized", a file that is too big or of an unsupported type now shows a notice
+instead of silently not attaching, a failed copy to the clipboard says so, the session save
+window shows a human sentence instead of a raw error, and three small leaks are closed (the `/`
+popup, the `@` suggestions and the note opener no longer outlive a closed chat tab). Three are
+about safety: an API key echoed back by a model provider in an error message is now redacted
+before that text can reach any model or session file, a tool call whose agent was deleted
+mid-turn is refused instead of silently running as the active agent, and the `.gitignore`
+protection for your settings file compares whole lines, so an existing `settings.json.example`
+entry no longer fools it. Nothing changes in how you use the plugin.
 
 What changed, in detail:
 
-- **One tile for every action.** Thinking, tool calls, sub-agent results, the task list, a
-  question from a past session, a stream error, a background sub-agent notification and an
-  artifact card all use the same tile: icon, human title, short summary, status dot, details on
-  click. Failure is one standard: a red icon on the left and a red dot on the right. Reads,
-  searches and the task list use a dimmed variant of the agent's colour.
-- **Bubbles.** Your message spans the full width in your colour from Settings (falls back to the
-  theme accent), with a gutter on the right that mirrors the agent's crystal gutter on the left.
-  The agent's reply is a bubble in the agent's colour; the agent's name is gone from the header,
-  the crystal stays. The context-trim block keeps its previous look.
-- **Agent column with crystals.** The agent's crystal is drawn next to every tile and every text
-  bubble (also next to a live question to you), and the connector line runs from the first
-  crystal to the last one in a series. The line is redrawn when a tile is expanded or collapsed,
-  when the first text of a reply arrives, when a thinking block folds after a tool round, and
-  when a tile is replaced by its result.
-- **Clickable notes everywhere.** Note names in read, search and list tiles, in the note-saved
-  line, in mentions and on the artifact card open the note in a new tab of the main area. Hidden
-  plugin paths are shown as plain text, not links.
-- **Select, copy, quote.** Text in bubbles and tiles can be selected. On a selection a menu
-  offers Copy, Add as context (a text attachment in the chip bar, kept in memory only) and Quote
-  (inserted into the input as a quote, with the caret placed after it).
-- **Triggers.** `/` opens the trigger popup: slash commands, skills, sub-agents and the tools of
-  external MCP servers, each tool with its full name so the marker points at a real tool. `@`
-  opens note and folder suggestions only. `/` followed by `@` hands the field over to the note
-  suggestions. Enter inside the popup picks the item; it no longer also sends the message.
-- **Small things.** Typing-indicator dots appear in sequence; a queued message is shown above the
-  chip bar even when the task-list panel takes the input slot; the delegation-to-another-agent
-  tool and its button are dormant (the code stays for a later release).
+- **Summaries.** When the model fails to produce a summary, manual compression and the token
+  viewer presets report the failure instead of success; the conversation is left as it was after
+  the cheap trimming phase.
+- **Attachments.** Too many files, an image over 10 MB, a text file over 100 KB or an unsupported
+  type each produce a notice with the reason. Processing continues with the remaining files.
+- **Selection menu.** A refused clipboard write shows an error notice. Copy still clears the
+  selection immediately.
+- **Session save.** The analysis failure message is one of three sentences (interrupted, model did
+  not respond in time, other error); the raw error stays in the log.
+- **Chat lifecycle.** Closing a tab or re-rendering the view closes the `/` trigger popup and its
+  pending timer, destroys the previous `@` autocomplete before creating a new one, and the note
+  opener registry keeps only a reference to the app, not to the view.
+- **API keys in error messages.** Provider error bodies and stream error events (OpenAI-compatible,
+  Anthropic, Gemini) are masked by pattern and redacted by the exact key used in the request,
+  including URL-encoded and `Bearer` forms, before the text becomes a normalized error.
+- **Agent identity for tools.** A tool call that names an agent which no longer exists is refused
+  with a clear permission error; a call with no agent at all is refused too. Approval windows are
+  signed with the name of the agent whose permissions were checked.
+- **`.gitignore` entries.** The vault `.gitignore` is matched line by line and the entries are
+  written one after another, with a warning for any entry that fails; a vault without
+  `.gitignore` is left alone.
