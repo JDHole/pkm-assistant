@@ -243,7 +243,12 @@ export interface DiffApprovalOptions {
     path: string;
     oldContent: string;
     newContent: string;
-    /** Kontrakt `DiffModal` mówi `string`; runtime bywa bez agenta - stąd asercja u wołacza. */
+    /**
+     * Kontrakt `DiffModal` mówi `string`. Wołacz dociera tu WYŁĄCZNIE z realnym obiektem
+     * agenta w ręku - `executeToolCall` odmawia fail-closed, zanim dojdzie do tego kroku,
+     * gdy nie ma agenta - więc `agent.name ?? invocationAgentName ?? ''` jest bezpiecznym
+     * odczytem, nie `as` na wiarę.
+     */
     agentName: string;
     /** Czy sesja ma klucz (`origin.sessionPath`) - steruje widocznością checkboxa „nie pytaj więcej". */
     rememberAvailable?: boolean;
@@ -768,6 +773,14 @@ export class MCPClient {
                     args = mapped.arguments;
                 }
             }
+            // Brak nazwy = brak zadeklarowanego właściciela tury - jedyny przypadek, w którym
+            // wolno sięgnąć po aktywnego agenta zamiast odmówić. To NIE jest podmiana cudzej
+            // tożsamości (nikt jej nie podał, więc nie ma czego podmieniać) - w odróżnieniu od
+            // gałęzi niżej (`agent`), gdzie nazwa PODANA explicité, a nietrafiona, ma dostać
+            // odmowę fail-closed, nie fallback. Ścieżka jest DEFENSYWNA: produkcyjni wołacze
+            // deklarują właściciela tury (`chat_streaming.ts` podaje `turn.agentName`,
+            // `SubAgentRunner.ts` strażuje `agentName` przed samym wywołaniem), ale gałąź musi
+            // istnieć dla każdego wywołania, które tego nie robi.
             const invocationAgentName = agentName || this.plugin.agentManager?.getActiveAgent?.()?.name || null;
             const argsWithContext: ToolCallArgs = (args && typeof args === 'object' && !Array.isArray(args))
                 ? { ...args, _invocationAgentName: invocationAgentName }
@@ -811,11 +824,35 @@ export class MCPClient {
             // 2. Get Agent object from AgentManager (not just the name!)
             //    Agent jest potrzebny PRZED rejestrem - oś narzędziowa to bramka wykonania,
             //    a nie filtr UI, więc musi zapaść zanim cokolwiek pobierzemy i wykonamy.
-            const agent = this.plugin.agentManager?.getAgent(invocationAgentName)
-                || this.plugin.agentManager?.getActiveAgent();
-            if (!agent) {
-                log.warn('MCPClient', `Agent nie znaleziony: ${invocationAgentName}, pomijam sprawdzenie uprawnień`);
+            //
+            //    FAIL-CLOSED, bez podmiany tożsamości: nazwa PODANA (`invocationAgentName`
+            //    niepusty), której `getAgent` nie rozwiąże - agent usunięty w trakcie tury, stara
+            //    sesja po zmianie nazwy, literówka w wywołaniu spoza czatu - kończy się odmową,
+            //    NIGDY cichym przejściem na aktywnego agenta. Podmiana na aktywnego byłaby
+            //    wykonaniem akcji pod tożsamością, której wywołanie nie podało - dokładnie to,
+            //    czego bramki uprawnień niżej mają pilnować. Jedyna droga do `getActiveAgent()`
+            //    jest w gałęzi „brak nazwy" (patrz komentarz przy `invocationAgentName` wyżej).
+            let agent: PermissionedAgent | null | undefined;
+            if (invocationAgentName) {
+                agent = this.plugin.agentManager?.getAgent(invocationAgentName);
+                if (!agent) {
+                    log.warn('MCPClient', `Agent nie znaleziony: ${invocationAgentName} - odmowa fail-closed, bez podmiany na aktywnego`);
+                    throw new Error(`Permission denied: ${t('perm.agent_missing', { agent: invocationAgentName })}`);
+                }
+            } else {
+                agent = this.plugin.agentManager?.getActiveAgent();
             }
+            if (!agent) {
+                log.warn('MCPClient', 'Brak jakiegokolwiek agenta (ani wskazanego, ani aktywnego) - odmowa fail-closed');
+                throw new Error(`Permission denied: ${t('perm.no_agent')}`);
+            }
+            // Okna zgody (approval + diff) mają być podpisane na OBIEKCIE agenta, na którym
+            // policzono bramki wyżej - nigdy na surowej `invocationAgentName` (mogła w ogóle nie
+            // istnieć i zostać odrzucona wyżej, albo być inna niż ta, na której faktycznie
+            // rozstrzygnęła się gałąź "brak nazwy → aktywny agent"). `agent.name` jest w typie
+            // opcjonalny (`GuardedAgent.name?`), stąd fallback zamiast `as string` na wiarę -
+            // w praktyce agent zarejestrowany w `agentManager` ma zawsze nazwę.
+            const approvalAgentName = agent.name ?? invocationAgentName;
 
             // 3. OŚ NARZĘDZIOWA AGENTA JAKO BRAMKA.
             //    Ta sama reguła, którą `ToolRegistry.filterByAgent` liczy przy budowie listy
@@ -826,7 +863,7 @@ export class MCPClient {
             //    (`vault_write` → `write`) byłaby obejściem wyłączenia.
             //    Odmowa jest fail-closed i NIE pyta usera: to nie jest ryzyko do zaakceptowania,
             //    tylko narzędzie, którego user agentowi nie dał.
-            if (agent && typeof this.toolRegistry.checkToolAxis === 'function') {
+            if (typeof this.toolRegistry.checkToolAxis === 'function') {
                 const axis = this.toolRegistry.checkToolAxis(agent, toolCall.name);
                 if (!axis.allowed) {
                     const reason = axis.reason === 'server_not_opted_in'
@@ -843,7 +880,8 @@ export class MCPClient {
                 throw new Error(`Tool not found: ${toolCall.name}`);
             }
 
-            // 5. Check permissions (only if we have an agent)
+            // 5. Check permissions (agent jest już zagwarantowany krokiem 2 - jedyny wyjątek to
+            //    narzędzia pamięci, które mają WŁASNĄ bramkę, patrz `isMemoryTool` niżej).
             let actionType = ACTION_TYPE_MAP[toolCall.name] || 'unknown';
             // Narzędzia zewnętrznych serwerów MCP (ExternalMcpManager) → akcja `external.call`.
             // Bez tego actionType zostałby 'unknown' → checkPermission zrobiłby fail-closed deny.
@@ -882,8 +920,12 @@ export class MCPClient {
 
             log.debug('MCPClient', `${toolCall.name} permission check: ${actionType} → ${targetPath || '(brak ścieżki)'}`);
 
+            // `permResult` zostaje na domyślnym `{allowed:true, requiresApproval:false}` WYŁĄCZNIE
+            // dla narzędzi pamięci (własna bramka wewnątrz narzędzia, patrz komentarz wyżej).
+            // Istnienie agenta samo w sobie nie trzeba tu sprawdzać jeszcze raz: krok 2 wyżej
+            // rzuca fail-closed, zanim kod w ogóle dotrze do tej linii, gdyby agenta zabrakło.
             let permResult: LocalPermissionResult = { allowed: true, requiresApproval: false };
-            if (agent && !isMemoryTool) {
+            if (!isMemoryTool) {
                 // `scopeFolders` to DODATKOWY warunek (koniunkcja) - wszystkie reguły
                 // rodzica (No-Go, protected, focusFolders, admin, .pkm-assistant) działają bez zmian.
                 permResult = this.plugin.permissionSystem.checkPermission(agent, actionType, targetPath, { autonomy, scopeFolders });
@@ -975,7 +1017,7 @@ export class MCPClient {
                         toolName: toolCall.name,
                         description: tool.description,
                         targetPath: targetPath,
-                        agentName: invocationAgentName,
+                        agentName: approvalAgentName,
                         operationMode: args.mode || null,
                         preview: args.content ? `Długość treści: ${args.content.length} znaków` : null,
                         contentPreview: args.content || null,
@@ -1061,7 +1103,7 @@ export class MCPClient {
                                 path: args.path,
                                 oldContent,
                                 newContent,
-                                agentName: invocationAgentName as string,
+                                agentName: approvalAgentName ?? '',
                                 // Checkbox „nie pytaj więcej w tej sesji" w DiffModal - sam warunek co wyżej.
                                 rememberAvailable: isWriteTool && !!sessionKey,
                             });
