@@ -2255,6 +2255,9 @@ export const en: Record<string, string> = {
   // The agent's tool axis is an EXECUTION gate.
   'perm.tool_disabled': 'Tool "{{tool}}" is disabled for this agent (Permissions)',
   'perm.server_not_opted_in': 'MCP server "{{server}}" is not attached to this agent',
+  // Agent identity as a gate - fail-closed, no swap to the active agent.
+  'perm.agent_missing': 'agent {{agent}} does not exist or was removed during the turn',
+  'perm.no_agent': 'no agent to own this action',
   'perm.create_files': 'Create files',
 
   // ── WebSearchProvider ──

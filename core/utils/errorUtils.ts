@@ -97,3 +97,95 @@ export function normalizeError(error: unknown, http_status: number | null = null
   const details = (error as ErrLike).error || (error as ErrLike).details || error;
   return { message, code, details, http_status: http_status || (error as ErrLike).http_status || (error as ErrLike).status || null };
 }
+
+/** Sekrety krótsze niż to nie są redagowane — zbyt duże ryzyko fałszywych trafień na zwykły tekst. */
+export const MIN_SECRET_LENGTH_FOR_REDACTION = 8;
+
+/** Zamiennik, jakim `redactSecretValues` podstawia znaleziony sekret. */
+const REDACTED = '[REDACTED]';
+
+function _redactString(text: string, variants: readonly string[]): string {
+  let out = text;
+  for (const variant of variants) out = out.split(variant).join(REDACTED);
+  return out;
+}
+
+/** Placeholder dla referencja odwiedzoną drugi raz — obiekt/tablica, które wskazują same na siebie. */
+const CYCLE = '[cycle]';
+
+/**
+ * Redakcja w głąb dowolnej wartości. `seen` łapie cykle (obiekt/tablica, do której prowadzi
+ * odwołanie z jej własnego wnętrza) — bez tego rekurencja po takiej strukturze nigdy by się
+ * nie skończyła. Domyślny, świeży `WeakSet` na wywołanie z zewnątrz; rekurencja podaje dalej
+ * TEN SAM zestaw, żeby odwiedzone węzły były pamiętane w całym przebiegu, nie per gałąź.
+ */
+function _redactDeep(value: unknown, variants: readonly string[], seen: WeakSet<object> = new WeakSet()): unknown {
+  if (typeof value === 'string') return _redactString(value, variants);
+  if (value && typeof value === 'object') {
+    if (seen.has(value)) return CYCLE;
+    seen.add(value);
+    if (Array.isArray(value)) return value.map(item => _redactDeep(item, variants, seen));
+    const out: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) out[key] = _redactDeep(val, variants, seen);
+    return out;
+  }
+  return value;
+}
+
+/** Warianty formy sekretu do podstawienia — dzielone przez {@link redactSecretValues} i {@link redactSecretsDeep}. */
+function _secretVariants(secrets: readonly string[]): string[] {
+  const valid = (secrets ?? []).filter((s): s is string => typeof s === 'string' && s.length >= MIN_SECRET_LENGTH_FOR_REDACTION);
+  if (valid.length === 0) return [];
+  // Trzy formy na sekret: opakowana `Bearer <sekret>` (redagowana W CAŁOŚCI, żeby nie zostawić
+  // "Bearer [REDACTED]" - "Bearer" samo w sobie nic nie zdradza, ale spójność z resztą tekstu
+  // jest czytelniejsza jako jeden token), zakodowana `encodeURIComponent(sekret)` (klucz odbity
+  // w query stringu adresu) i sam sekret. Od najdłuższej do najkrótszej - dłuższa (opakowująca)
+  // forma musi zostać podstawiona PIERWSZA, inaczej krótsza zjada część tekstu i zostawia ogon.
+  return Array.from(new Set(
+    valid.flatMap(s => [`Bearer ${s}`, encodeURIComponent(s), s])
+  )).sort((a, b) => b.length - a.length);
+}
+
+/**
+ * Redakcja PO DOSŁOWNEJ WARTOŚCI sekretu — druga, niezależna warstwa obok maski `core/security/
+ * SensitiveDataGuard.ts` (która maskuje po KSZTAŁCIE/nazwie pola). Klucz API NIESTANDARDOWY (bez
+ * znanego prefiksu jak `sk-`/`gsk_`, albo krótszy niż próg wzorca) nie łapie się na maskę
+ * kształtu — jeśli dostawca albo proxy odbije go w treści błędu, jedyna warstwa, która go
+ * jeszcze złapie, to porównanie z wartością klucza NAPRAWDĘ użytego w żądaniu.
+ *
+ * Plik jest CZYSTY (zero importów) — funkcja nie sięga po `maskSensitiveData`, tylko robi
+ * dosłowne podstawienie tekstu.
+ *
+ * @param err - Znormalizowany błąd (wynik {@link normalizeError}).
+ * @param secrets - Sekrety do zredagowania (np. `[ctx.apiKey]`). Puste/krótkie wartości pomijane.
+ */
+export function redactSecretValues(err: NormalizedError, secrets: readonly string[]): NormalizedError {
+  const variants = _secretVariants(secrets);
+  if (variants.length === 0) return err;
+
+  const out: NormalizedError = { ...err, message: _redactString(err.message, variants) };
+  if ('details' in err) out.details = _redactDeep(err.details, variants);
+  return out;
+}
+
+/**
+ * Redakcja PO DOSŁOWNEJ WARTOŚCI sekretu na DOWOLNEJ wartości, PRZED normalizacją.
+ *
+ * `normalizeError` tnie `message` do {@link MAX_ERROR_MESSAGE_LENGTH} ZANIM cokolwiek zdąży
+ * zredagować sekret — klucz, który siedzi dokładnie na granicy cięcia, wychodziłby przecięty
+ * na pół, a `redactSecretValues` (dopasowanie CAŁEGO sekretu) już by go nie znalazł. Ten
+ * wariant redaguje wołacz, który ma SUROWĄ wartość (ciało JSON po `JSON.parse`, `payload.error`
+ * dostawcy) sprzed normalizacji — sekret znika, zanim jakiekolwiek cięcie długości go dotknie.
+ *
+ * Sama logika co {@link redactSecretValues} (te same warianty formy, ta sama ochrona cykli),
+ * ale bez założenia, że wejście ma kształt {@link NormalizedError} — stąd `unknown` na wejściu
+ * i wyjściu.
+ *
+ * @param value - Dowolna wartość: surowy obiekt błędu, string, cokolwiek odda `JSON.parse`.
+ * @param secrets - Sekrety do zredagowania — patrz {@link redactSecretValues}.
+ */
+export function redactSecretsDeep(value: unknown, secrets: readonly string[]): unknown {
+  const variants = _secretVariants(secrets);
+  if (variants.length === 0) return value;
+  return _redactDeep(value, variants);
+}
