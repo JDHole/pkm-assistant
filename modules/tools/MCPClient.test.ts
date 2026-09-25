@@ -902,3 +902,141 @@ test('ukryta ścieżka z separatorem `\\` jest rozpoznana - diff czyta PRAWDZIWY
     t.is(diffCalls.length, 1, 'ukryta ścieżka z `\\` musi trafić w gałąź adaptera i pokazać diff');
     t.is(diffCalls[0].oldContent, 'stara treść z .pkm-assistant', 'oldContent ma pochodzić z REALNEGO odczytu adaptera, nie z pustego stringa');
 });
+
+// ─── Tożsamość agenta jest fail-closed, nie podmieniana na aktywnego ───
+//
+// Nazwa podana explicité (`invocationAgentName`), która nie rozwiązuje się w realnego agenta,
+// dostaje odmowę fail-closed — BEZ podmiany na aktywnego agenta. Brak nazwy (brak właściciela
+// tury) wolno rozwiązać przez `getActiveAgent()`, ale wciąż fail-closed, gdy i to zawiedzie —
+// zero ścieżki, na której `permResult` zostaje `{allowed:true}` bez sprawdzenia.
+
+test('invocationAgentName wskazuje na agenta, którego nie ma — ODMOWA fail-closed, bez podmiany na aktywnego', async t => {
+    const handlerCalls: unknown[] = [];
+    const checkPermissionCalls: Array<{ agentName?: string }> = [];
+    const bob = { name: 'Bob', permissions: { guidance_mode: true } };
+    const client = new MCPClient(asApp(null), asPlugin({
+        agentManager: {
+            // "ghost" nie istnieje (np. usunięty w trakcie tury) — Bob jest AKTYWNYM agentem,
+            // ale NIE jest tym, pod czyją nazwą wywołanie faktycznie przyszło.
+            getAgent: (name: string) => (name === 'ghost' ? undefined : bob),
+            getActiveAgent: () => bob,
+        },
+        permissionSystem: {
+            checkPermission: (agent: { name: string }) => {
+                checkPermissionCalls.push({ agentName: agent?.name });
+                return { allowed: true, requiresApproval: false };
+            },
+            requiresApproval: () => false,
+        },
+    }), asRegistry({
+        getTool: (name: string) => ({
+            name,
+            description: name,
+            execute: async (args: ToolCallArgs) => { handlerCalls.push(args); return { success: true }; },
+        }),
+    }));
+
+    const result = await client.executeToolCall(
+        { name: 'delete', arguments: { path: 'Notatki/a.md' } }, 'ghost') as { isError?: boolean; error?: string };
+
+    t.true(result.isError, 'agent "ghost" nie istnieje — wywołanie ma zostać odmówione, nie wykonane pod cudzą tożsamością');
+    t.true(String(result.error).includes('Permission denied'), result.error);
+    t.is(handlerCalls.length, 0, 'narzędzie NIE MA prawa wykonać się pod podmienioną tożsamością');
+    t.false(checkPermissionCalls.some(c => c.agentName === 'Bob'),
+        'bramka uprawnień nie ma prawa liczyć się na aktywnym agencie zamiast na odmowie dla "ghost"');
+});
+
+test('brak jakiegokolwiek agenta (getAgent i getActiveAgent → undefined) na narzędziu zewnętrznym — ODMOWA fail-closed', async t => {
+    const handlerCalls: unknown[] = [];
+    const approvalCalls: unknown[] = [];
+    const client = new MCPClient(asApp(null), asPlugin({
+        agentManager: { getAgent: () => undefined, getActiveAgent: () => undefined },
+        externalMcpManager: {
+            isExternalTool: () => true,
+            getToolActionType: () => 'external.call',
+        },
+        permissionSystem: {
+            checkPermission: () => ({ allowed: true, requiresApproval: false }),
+            requiresApproval: () => false,
+        },
+        approvalManager: {
+            requestApproval: async (req: Record<string, unknown>) => { approvalCalls.push(req); return { result: 'approve' }; },
+        },
+    }), asRegistry({
+        getTool: (name: string) => ({
+            name,
+            description: name,
+            source: 'user',
+            serverName: 'zewnetrzny-serwer',
+            execute: async (args: ToolCallArgs) => { handlerCalls.push(args); return { success: true }; },
+        }),
+    }));
+
+    const result = await client.executeToolCall(
+        { name: 'zewnetrzny-serwer__narzedzie', arguments: {} }, null) as { isError?: boolean; error?: string };
+
+    t.true(result.isError, 'bez ŻADNEGO agenta narzędzie zewnętrzne nie ma prawa się wykonać');
+    t.true(String(result.error).includes('Permission denied'), result.error);
+    t.is(handlerCalls.length, 0, 'handler narzędzia NIE MA prawa zostać wywołany bez właściciela akcji');
+    t.is(approvalCalls.length, 0, 'bez agenta nie ma komu pokazać modala zgody — fail-closed idzie PRZED approvalem, nie PRZEZ niego');
+});
+
+test('brak nazwy wywołania (brak właściciela tury) — requestApproval dostaje agentName aktywnego agenta, nie pustkę', async t => {
+    const asked: Array<Record<string, unknown>> = [];
+    const bob = { name: 'Bob', permissions: { guidance_mode: true } };
+    const client = new MCPClient(asApp(null), asPlugin({
+        agentManager: {
+            // Wywołanie NIE podaje nazwy (parametr `agentName` poniżej to `null`) - brak
+            // zadeklarowanego właściciela tury. `getAgent` tu odzwierciedla produkcję: agent
+            // aktywny jest też zwykłym, zarejestrowanym agentem, więc odnajdywalny PO SWOJEJ
+            // nazwie. Approval ma podpisać się nazwą OBIEKTU, na którym faktycznie liczono
+            // bramki (`Bob`) - nie surowym, pustym parametrem wywołania.
+            getAgent: (name: string) => (name === bob.name ? bob : undefined),
+            getActiveAgent: () => bob,
+        },
+        permissionSystem: {
+            checkPermission: () => ({ allowed: true, requiresApproval: true }),
+            requiresApproval: () => true,
+        },
+        approvalManager: {
+            requestApproval: async (req: Record<string, unknown>) => { asked.push(req); return { result: 'approve' }; },
+        },
+    }), asRegistry({
+        getTool: (name: string) => ({ name, description: name, execute: async () => ({ success: true }) }),
+    }));
+
+    await client.executeToolCall({ name: 'delete', arguments: { path: 'Notatki/a.md' } }, null);
+
+    t.is(asked.length, 1, 'agent aktywny istnieje i wymaga approvalu — modal MUSI zostać zapytany');
+    t.is(asked[0].agentName, bob.name,
+        'approval ma być podpisany na obiekcie agenta, na którym liczono bramki (aktywny agent), nie na pustej nazwie wywołania');
+});
+
+test('nazwa wywołania podana i zgodna z agentem (dopasowanym przez getAgent) — requestApproval dostaje agentName == agent.name', async t => {
+    const asked: Array<Record<string, unknown>> = [];
+    const agent = { name: 'Jaskier', permissions: { guidance_mode: true } };
+    const client = new MCPClient(asApp(null), asPlugin({
+        agentManager: {
+            // Produkcja szuka przez `Map.get(name)` — dokładne dopasowanie, bez normalizacji
+            // wielkości liter. Nazwa wywołania jest więc identyczna z `agent.name`; bramki
+            // (i approval) mają liczyć się na OBIEKCIE zwróconym stąd, nie na tym stringu.
+            getAgent: (name: string) => (name === agent.name ? agent : undefined),
+            getActiveAgent: () => agent,
+        },
+        permissionSystem: {
+            checkPermission: () => ({ allowed: true, requiresApproval: true }),
+            requiresApproval: () => true,
+        },
+        approvalManager: {
+            requestApproval: async (req: Record<string, unknown>) => { asked.push(req); return { result: 'approve' }; },
+        },
+    }), asRegistry({
+        getTool: (name: string) => ({ name, description: name, execute: async () => ({ success: true }) }),
+    }));
+
+    await client.executeToolCall({ name: 'delete', arguments: { path: 'Notatki/a.md' } }, agent.name);
+
+    t.is(asked.length, 1, 'agent istnieje i wymaga approvalu — modal MUSI zostać zapytany');
+    t.is(asked[0].agentName, agent.name,
+        'approval ma być podpisany na obiekcie agenta, na którym liczono bramki, nie na surowej nazwie z wywołania');
+});
