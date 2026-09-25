@@ -349,6 +349,7 @@ export interface ChatViewMixins extends
     _toolsPopover: HTMLElement | null;
     _permPopover: HTMLElement | null;
     _triggerPopup: TriggerPopup | null;
+    _triggerOpenTimer: number | null;
     _triggerPos: number;
 
     // ── Współpracownicy UI ──

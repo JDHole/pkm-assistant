@@ -122,15 +122,16 @@ export function installSelectionMenu(view: ChatViewLike): () => void {
     }
 
     function handleCopy(text: string): void {
+        afterAction();
         void navigator.clipboard.writeText(text).then(
             () => {
                 view.plugin?.showCrystalNotice?.(t('chat.selection.copied'), { type: 'success', timeout: 2000 });
             },
             (e: unknown) => {
                 log.warn('Chat', `Selection copy failed: ${(e as Error)?.message || String(e)}`);
+                view.plugin?.showCrystalNotice?.(t('chat.selection.copy_failed'), { type: 'error', timeout: 4000 });
             },
         );
-        afterAction();
     }
 
     function handleAddContext(text: string): void {

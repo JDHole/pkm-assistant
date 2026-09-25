@@ -15,6 +15,7 @@
 import test from 'ava';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
+import { scheduleTriggerPopupOpen } from './triggerPopupLifecycle.js';
 
 const uiSource = readFileSync(fileURLToPath(new URL('./chat_ui.ts', import.meta.url)), 'utf8');
 
@@ -38,17 +39,16 @@ function extractBody(source: string, signatureNeedle: string): string {
 const keyDownBody = extractBody(uiSource, 'export function _handleTriggerKeyDown(this: ChatViewLike, e: KeyboardEvent) {');
 
 function makeHandleTriggerKeyDown() {
-    // `window.setTimeout` jest jedyną zależnością globalną ciała - wstrzykujemy prawdziwy
-    // `setTimeout` pod nazwą `window`, żeby zachowanie (planowanie na tick) było realne, nie
-    // atrapą syntetyczną.
-    const factory = new Function('window', `return function(e) {${keyDownBody}};`);
-    return factory({ setTimeout }) as (this: unknown, e: Record<string, unknown>) => void;
+    // Ciało woła helper cyklu życia popupu, który używa globalnego `window` z harnessu.
+    const factory = new Function('scheduleTriggerPopupOpen', `return function(e) {${keyDownBody}};`);
+    return factory(scheduleTriggerPopupOpen) as (this: unknown, e: Record<string, unknown>) => void;
 }
 
 function makeFakeThisForKeyDown(value: string, selectionStart: number) {
     const openCalls: unknown[][] = [];
     const fakeThis = {
         _triggerPopup: null as { isOpen(): boolean; handleKeyDown(e: unknown): boolean } | null,
+        _triggerOpenTimer: null as number | null,
         input_area: { value, selectionStart },
         _openTriggerPopup(...args: unknown[]) { openCalls.push(args); },
     };

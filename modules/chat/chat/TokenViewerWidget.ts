@@ -380,10 +380,14 @@ export class TokenViewerWidget {
             bodyKey: bodyKeys[preset] || bodyKeys.medium,
             onConfirm: async () => {
                 try {
-                    await this.runCompressionPreset(preset);
+                    const result = await this.runCompressionPreset(preset);
                     this.view.updateTokenCounter?.();
                     this.update(true);
-                    new Notice(t('chat.token_viewer.compression_done'));
+                    if (result && typeof result === 'object' && 'summaryFailed' in result && result.summaryFailed) {
+                        new Notice(t('chat.summarize_failed'));
+                    } else {
+                        new Notice(t('chat.token_viewer.compression_done'));
+                    }
                 } catch (error) {
                     new Notice(t('chat.token_viewer.compression_failed'));
                     log.error('TokenViewer', 'compression failed:', error);

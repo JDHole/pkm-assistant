@@ -1808,7 +1808,7 @@ export async function _finalizeTurn(this: ChatViewLike, turn: ChatTurn, result: 
 
         const compResult = await rw.performTwoPhaseCompression(false);
 
-        if (compResult.trimmed > 0 && !compResult.summarized) {
+        if (compResult.trimmed > 0 && compResult.phase === 1) {
             log.info('Chat', `Faza 1 wystarczyła: skrócono ${compResult.trimmed} wyników, bez API call`);
         }
 

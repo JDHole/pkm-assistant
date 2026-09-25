@@ -220,7 +220,7 @@ export class SaveSessionModal extends Modal {
             this._loadingTimerEl = null; // stary sekundnik odszedł razem z poprzednim renderem
             wrap.createDiv({
                 cls: 'cs-save-session__error',
-                text: t('modal.save_session.analyzing_failed', { reason: this._loadingError }),
+                text: this._loadingError,
             });
         } else {
             // Sekundnik zamiast obietnicy - kaskada potrafi trwać minuty.
