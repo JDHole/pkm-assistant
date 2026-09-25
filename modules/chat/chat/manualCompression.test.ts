@@ -44,7 +44,7 @@ test('guzik 🗜️ i komenda /compress wołają WSPÓLNY runManualCompression, 
     t.is(slashMatches.length, 0, 'SlashCommandsRegistry.ts nie powinien już wołać performTwoPhaseCompression bezpośrednio');
 });
 
-test('runManualCompression: zachowanie — za mało wiadomości / summarized / trimmed / nic (test bezpośredni ciała funkcji)', async t => {
+test('runManualCompression: zachowanie — za mało wiadomości / summarized / trimmed / nic / summaryFailed (test bezpośredni ciała funkcji)', async t => {
     const start = uiSource.indexOf('export async function runManualCompression(');
     t.true(start > 0, 'nie znalazłem definicji runManualCompression');
     const braceStart = uiSource.indexOf('{', uiSource.indexOf(')', start));
@@ -62,7 +62,7 @@ test('runManualCompression: zachowanie — za mało wiadomości / summarized / t
     const tStub = (key: string, params?: unknown) => params ? `${key}:${JSON.stringify(params)}` : key;
     const factory = new Function('Notice', 't', `return async function(view) {${body}};`);
     const bound = factory(NoticeStub, tStub) as
-        (view: { rollingWindow: { messages: unknown[]; summarizationCount: number; performTwoPhaseCompression: (b: boolean) => Promise<{ summarized: boolean; trimmed: number }> }; updateTokenCounter: () => void; _updateTokenPanel: () => void }) => Promise<boolean>;
+        (view: { rollingWindow: { messages: unknown[]; summarizationCount: number; performTwoPhaseCompression: (b: boolean) => Promise<{ summarized: boolean; summaryFailed?: boolean; trimmed: number }> }; updateTokenCounter: () => void; _updateTokenPanel: () => void }) => Promise<boolean>;
 
     // Case 1: za mało wiadomości.
     notices.length = 0;
@@ -125,4 +125,18 @@ test('runManualCompression: zachowanie — za mało wiadomości / summarized / t
     };
     await bound(viewNothing);
     t.deepEqual(notices.map(n => n.key), ['chat.nothing_to_summarize']);
+
+    // Case 5: failed summary reports the failure and never reports compression success.
+    notices.length = 0;
+    const viewFailed = {
+        rollingWindow: {
+            messages: [1, 2, 3, 4, 5],
+            summarizationCount: 0,
+            performTwoPhaseCompression: async () => ({ summarized: false, summaryFailed: true, trimmed: 2 }),
+        },
+        updateTokenCounter: () => {},
+        _updateTokenPanel: () => {},
+    };
+    await bound(viewFailed);
+    t.deepEqual(notices.map(n => n.key), ['chat.summarize_failed']);
 });
