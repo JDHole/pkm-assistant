@@ -22,13 +22,47 @@ import type { PluginApi } from '../../core/index.js';
 
 setLocale('pl');
 
-function makeManager(): AttachmentManager {
+function makeManager(onReject?: (message: string) => void): AttachmentManager {
     const container = createDiv();
     // `plugin` nie jest czytane nigdzie w ciele klasy poza przypisaniem w konstruktorze -
     // pusty obiekt rzutowany przez `unknown` wystarcza, bez duplikowania kontraktu `PluginApi`.
     const plugin = {} as unknown as PluginApi;
-    return new AttachmentManager(container, plugin, {});
+    return new AttachmentManager(container, plugin, { onReject });
 }
+
+test('odrzucenie zbyt dużego pliku tekstowego przekazuje komunikat do onReject', async t2 => {
+    const rejected: string[] = [];
+    const mgr = makeManager(message => rejected.push(message));
+    const file = new File(['x'.repeat(100 * 1024 + 1)], 'duzy.txt', { type: 'text/plain' });
+
+    await mgr._processFileList([file]);
+
+    t2.deepEqual(rejected, [t('attach.file_too_large', { name: file.name, size: '100.0 KB' })]);
+    t2.is(mgr.attachments.length, 0);
+});
+
+test('odrzucenie nieobsługiwanego typu przekazuje komunikat do onReject', async t2 => {
+    const rejected: string[] = [];
+    const mgr = makeManager(message => rejected.push(message));
+    const file = new File(['data'], 'plik.bin', { type: 'application/octet-stream' });
+
+    await mgr._processFileList([file]);
+
+    t2.deepEqual(rejected, [t('attach.unsupported_type', { name: file.name, ext: 'bin', mime: file.type })]);
+    t2.is(mgr.attachments.length, 0);
+});
+
+test('osiągnięty limit przekazuje jedną odmowę i przerywa przetwarzanie', async t2 => {
+    const rejected: string[] = [];
+    const mgr = makeManager(message => rejected.push(message));
+    for (let i = 0; i < 10; i++) mgr.addTextAttachment({ name: `n${i}.md`, text: 'tekst' });
+    const file = new File(['text'], 'za-duzo.txt', { type: 'text/plain' });
+
+    await mgr._processFileList([file]);
+
+    t2.deepEqual(rejected, [t('attach.limit_reached', { max: 10 })]);
+    t2.is(mgr.attachments.length, 10);
+});
 
 test('addTextAttachment: dodaje 1 załącznik o podanej nazwie i treści', t2 => {
     const mgr = makeManager();

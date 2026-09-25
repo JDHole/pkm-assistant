@@ -10,7 +10,7 @@ import { Notice, TFile } from 'obsidian';
 import { SkinManager, UiIcons, IconGenerator, setSvg, setSvgLabel, adoptSheet } from '../../crystal-soul/index.js';
 import { substituteVariables } from '../../skills/index.js';
 import { MentionAutocomplete, AttachmentManager, setNoteOpener } from '../../ui-components/index.js';
-import type { MentionAutocompletePlugin, MentionChip } from '../../ui-components/index.js';
+import type { MentionAutocompletePlugin, MentionChip, NoteOpener } from '../../ui-components/index.js';
 import { getVisibleSubAgentsForAgent } from '../../sub-agents/index.js';
 import { summonAgentForArtifact, activateArtifactInChat, buildArtifactPickerItems, artifactStatusLabel } from '../../artifacts/index.js';
 import type { SummonPlugin } from '../../artifacts/index.js';
@@ -28,6 +28,8 @@ import { installSelectionMenu } from './selectionMenu.js';
 // martwe, niewołane przez nikogo `this.metoda(...)` (naprawa recenzji niezależnej); instalacja
 // woła je przez ZWYKŁY import niżej, w `renderView`.
 import { installMessagesContainerActivity } from './connectorActivity.js';
+import { scheduleTriggerPopupOpen, closeTriggerPopup } from './triggerPopupLifecycle.js';
+import { replaceMentionAutocomplete } from './inputLifecycle.js';
 export { _scheduleConnectorRedraw, _cancelConnectorRedraw } from './connectorActivity.js';
 import { _tabKey } from './chat_tabs.js';
 import { insertInlineTriggerMarker } from './InlineChipPlugin.js';
@@ -87,7 +89,9 @@ export async function runManualCompression(view: ChatViewLike): Promise<boolean>
     const result = await view.rollingWindow.performTwoPhaseCompression(false);
     view.updateTokenCounter();
     view._updateTokenPanel();
-    if (result.summarized) {
+    if (result.summaryFailed) {
+        new Notice(t('chat.summarize_failed'));
+    } else if (result.summarized) {
         new Notice(t('chat.summarize_result', { count: view.rollingWindow.summarizationCount, trimmed: result.trimmed }));
     } else if (result.trimmed > 0) {
         new Notice(t('chat.trim_result', { trimmed: result.trimmed }));
@@ -109,11 +113,13 @@ export async function runManualCompression(view: ChatViewLike): Promise<boolean>
  * decyzji. Zwykly i Ctrl/Cmd-klik daja TEN SAM wynik (nowa karta) - spec chce tego dla obu, wiec
  * nie ma po co duplikowac tutaj rozpoznawanie modyfikatorow `Keymap.isModEvent`.
  */
-function _openNoteInMain(this: ChatViewLike, path: string, _ev: MouseEvent): void {
-    if (typeof path !== 'string' || !path.trim()) return;
-    void this.app.workspace.openLinkText(path, '', true).catch((e: unknown) => {
-        log.warn('Chat', `Nie udało się otworzyć notatki "${path}": ${(e as Error)?.message || String(e)}`);
-    });
+function makeNoteOpener(app: ChatViewLike['app']): NoteOpener {
+    return (path: string) => {
+        if (typeof path !== 'string' || !path.trim()) return;
+        void app.workspace.openLinkText(path, '', true).catch((e: unknown) => {
+            log.warn('Chat', `Nie udało się otworzyć notatki "${path}": ${(e as Error)?.message || String(e)}`);
+        });
+    };
 }
 
 // ── Main view render ────────────────────────────────────────────────
@@ -126,9 +132,9 @@ export async function renderView(this: ChatViewLike, container = this.container)
     // Rejestr openera notatek (modules/ui-components/noteLink.ts) - ui-components sam nie zna
     // `app`, wiec KAZDY klik w nazwe notatki gdziekolwiek w czacie (odczyt/search/list/zapis/
     // mencja/artefakt) przechodzi przez TEN callback. Sprzatania w `onClose` NIE ma - swiadomie:
-    // opener zalezy tylko od globalnego `app`, a dwa otwarte widoki czatu dziela jeden rejestr
+    // callback jest tworzony poza widokiem i zamyka tylko `app`; dwa otwarte widoki czatu dziela jeden rejestr
     // (`null` z jednego odbieralby klikalnosc drugiemu); kazdy `renderView` nadpisuje poprzedni.
-    setNoteOpener((path, ev) => _openNoteInMain.call(this, path, ev));
+    setNoteOpener(makeNoteOpener(this.app));
 
     container.empty();
     container.addClass('pkm-chat-view');
@@ -199,7 +205,7 @@ export async function renderView(this: ChatViewLike, container = this.container)
 
     // Inline trigger popup - wyłącznie `/`. `@` obsługuje osobno MentionAutocomplete niżej
     // (własny nasłuch `input`), ten popup na `@` w ogóle nie reaguje.
-    this._triggerPopup = null;
+    closeTriggerPopup(this);
     this._triggerPos = -1;
     this.input_area.addEventListener('keydown', (e: KeyboardEvent) => this._handleTriggerKeyDown(e));
     this.input_area.addEventListener('input', () => this._handleTriggerInput());
@@ -293,6 +299,7 @@ export async function renderView(this: ChatViewLike, container = this.container)
         onChange: () => this.handleInputResize(),
         dropZone: this.messages_container,
         pasteTarget: this.input_area,
+        onReject: (message: string) => new Notice(message),
     });
     // Wire attach button click
     attachBtnWrapper.addEventListener('click', () => {
@@ -307,14 +314,14 @@ export async function renderView(this: ChatViewLike, container = this.container)
     // TS-boundary: luka core - `PluginApi.app` to node-safe `AppLike`, a `MentionAutocomplete`
     // żąda prawdziwego `App` Obsidiana (woła `app.vault.*`, czego `AppLike` nie modeluje).
     // Runtime podaje ten sam, jeden obiekt pluginu; rozjazd jest wyłącznie w kontrakcie core.
-    this.mentionAutocomplete = new MentionAutocomplete(this.input_area, this.plugin as unknown as MentionAutocompletePlugin, {
+    replaceMentionAutocomplete(this, () => new MentionAutocomplete(this.input_area, this.plugin as unknown as MentionAutocompletePlugin, {
         onChange: (mentions: MentionChip[]) => {
             this.attachmentManager!.setMentionChips(mentions, (index: number) => {
                 this.mentionAutocomplete!.removeMention(index);
             });
             this.handleInputResize();
         },
-    });
+    }));
 
     // Event listeners
     this.input_area.addEventListener('input', this.handleInputResize.bind(this));
@@ -1417,7 +1424,7 @@ export function _handleTriggerKeyDown(this: ChatViewLike, e: KeyboardEvent) {
     // Only open at start of line/value, or after whitespace — avoids triggering in URLs / mid-word
     if (cursor !== 0 && !/\s/.test(charBefore)) return;
     const triggerPos = cursor; // pre-key cursor; after key is committed, `/` will be at this index
-    window.setTimeout(() => this._openTriggerPopup(triggerPos), 0);
+    scheduleTriggerPopupOpen(this, () => this._openTriggerPopup(triggerPos));
 }
 
 export function _handleTriggerInput(this: ChatViewLike) {
@@ -1491,10 +1498,7 @@ export function _openTriggerPopup(this: ChatViewLike, triggerPos: number) {
 }
 
 export function _closeTriggerPopup(this: ChatViewLike) {
-    if (this._triggerPopup) {
-        this._triggerPopup.close();
-        this._triggerPopup = null;
-    }
+    closeTriggerPopup(this);
     this._triggerPos = -1;
 }
 

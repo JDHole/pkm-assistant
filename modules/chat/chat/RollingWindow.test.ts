@@ -179,6 +179,48 @@ test('summary without candidate block does not call onMemoryCandidates', async t
     t.is(rw.conversationSummary, 'Plain summary, nothing durable.');
 });
 
+test('phase 2 reports failed summarization and preserves the conversation', async t => {
+    const rw = new RollingWindow({
+        maxTokens: 100,
+        triggerThreshold: 0.5,
+        summarizer: { triggerThreshold: 0.5, summarize: async () => null },
+    });
+    rw.messages = [
+        { role: 'user', content: 'A long question '.repeat(80) },
+        { role: 'assistant', content: 'A long answer '.repeat(80) },
+    ];
+    rw.conversationSummary = 'Existing summary';
+    const messagesBefore = structuredClone(rw.messages);
+    const countBefore = rw.summarizationCount;
+
+    const result = await rw.performTwoPhaseCompression(false);
+
+    t.is(result.phase, 2);
+    t.is(result.summarized, false);
+    t.is(result.summaryFailed, true);
+    t.is(rw.summarizationCount, countBefore);
+    t.is(rw.conversationSummary, 'Existing summary');
+    t.deepEqual(rw.messages, messagesBefore);
+});
+
+test('phase 2 reports successful summarization', async t => {
+    const rw = new RollingWindow({
+        maxTokens: 100,
+        triggerThreshold: 0.5,
+        summarizer: { triggerThreshold: 0.5, summarize: async () => 'Fresh summary' },
+    });
+    rw.messages = [
+        { role: 'user', content: 'A long question '.repeat(80) },
+        { role: 'assistant', content: 'A long answer '.repeat(80) },
+    ];
+
+    const result = await rw.performTwoPhaseCompression(false);
+
+    t.is(result.summarized, true);
+    t.is(result.summaryFailed, false);
+    t.is(rw.conversationSummary, 'Fresh summary');
+});
+
 test('addMessage warns on orphan tool but still appends (sanitize handles it)', async t => {
     const rw = new RollingWindow({ maxTokens: 1000 });
     const warns: string[] = [];

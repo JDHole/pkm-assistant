@@ -500,10 +500,10 @@ export class RollingWindow {
      * Faza 2: Pełna sumaryzacja (DROGIE — API call) — tylko jeśli Faza 1 nie wystarczyła
      *
      * @param {boolean} isEmergency - Czy to awaryjna kompresja (hard limit)
-     * @returns {Promise<{phase: number, trimmed: number, summarized: boolean}>}
+     * @returns {Promise<{phase: number, trimmed: number, summarized: boolean, summaryFailed: boolean}>}
      */
-    async performTwoPhaseCompression(isEmergency = false): Promise<{ phase: number; trimmed: number; trimDetails: TrimDetail[]; savedChars: number; summarized: boolean }> {
-        const result: { phase: number; trimmed: number; trimDetails: TrimDetail[]; savedChars: number; summarized: boolean } = { phase: 0, trimmed: 0, trimDetails: [], savedChars: 0, summarized: false };
+    async performTwoPhaseCompression(isEmergency = false): Promise<{ phase: number; trimmed: number; trimDetails: TrimDetail[]; savedChars: number; summarized: boolean; summaryFailed: boolean }> {
+        const result: { phase: number; trimmed: number; trimDetails: TrimDetail[]; savedChars: number; summarized: boolean; summaryFailed: boolean } = { phase: 0, trimmed: 0, trimDetails: [], savedChars: 0, summarized: false, summaryFailed: false };
         const tokensBefore = this.getCurrentTokenCount();
 
         // === FAZA 1: Trim tool results (darmowe) ===
@@ -545,20 +545,19 @@ export class RollingWindow {
         if (this._ensureSummarizer()) {
             result.phase = 2;
             log.debug('RollingWindow', `Faza 1 nie wystarczyła (${tokensAfterTrim} >= ${Math.round(summaryThreshold)}) — uruchamiam Fazę 2`);
-            await this.performSummarization(isEmergency);
-            result.summarized = true;
+            result.summarized = await this.performSummarization(isEmergency);
+            result.summaryFailed = !result.summarized;
         }
 
         return result;
     }
 
     /**
-     * Wykonuje progressive summarization (Faza 2).
-     * Nowe streszczenie = stare streszczenie + nowe wiadomości.
-     * W trybie emergency: zbiera kontekst aktywnego taska (todos, plan) i przekazuje do Summarizera.
-     * @param {boolean} isEmergency - Czy to awaryjna sumaryzacja (hard limit)
+     * Progressive summarization for phase 2.
+     * @param {boolean} isEmergency - Whether this is emergency compression (hard limit).
+     * @returns {Promise<boolean>} true when a summary was created and applied.
      */
-    async performSummarization(isEmergency = false): Promise<void> {
+    async performSummarization(isEmergency = false): Promise<boolean> {
         try {
             // Zbierz kontekst aktywnego zadania (tylko przy emergency)
             let activeTaskContext = '';
@@ -622,11 +621,14 @@ export class RollingWindow {
                         log.warn('RollingWindow', 'onMemoryCandidates threw:', cbErr);
                     }
                 }
+                return true;
             } else {
                 log.warn('RollingWindow', 'Summarizer returned null — summarization skipped');
+                return false;
             }
         } catch (e) {
             log.error('RollingWindow', 'Summarization failed:', e);
+            return false;
         }
     }
 

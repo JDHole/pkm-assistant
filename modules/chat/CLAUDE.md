@@ -55,6 +55,8 @@ modules/chat/
     ├── machineTile.js               # render współdzielony kafelka wiadomości maszynowej (renderMachineTile) - wołany przez chat_messages.js I chat_streaming.js; obsidian przechodnio przez barrel ui-components, testowalny w AVA z atrapą harnessu
     ├── agentCrystal.js              # `agentCrystalCssVar(agent, color)` - wartość CSS `--cs-agent-crystal` (data URL SVG kryształu), jeden producent dla append_message/render_messages I `_ensureAgentMessageContainer` (kolumna dymków, 2.3.0); trzeci plik jak machineTile.js, żeby nie zamknąć cyklu między dwoma mixinami
     ├── connectorActivity.js         # `_scheduleConnectorRedraw`/`_cancelConnectorRedraw` (przeniesione z chat_ui.js) + `onMessagesContainerActivity`/`installMessagesContainerActivity` (nasłuch rozwinięcia kafelka → przerysowanie łącznika); czwarty plik mixina chat_ui.js, poza jego importem `chat_view.css` (moduł CSS, którego Node/AVA nie ładuje) - stąd testowalny bezpośrednim importem
+    ├── triggerPopupLifecycle.ts     # Otwieranie i zamykanie popupu `/` wraz z timerem; czysty helper bez CSS/Obsidiana, testowany osobno
+    ├── inputLifecycle.ts            # Wymiana MentionAutocomplete przy re-renderze; helper bez CSS, testowany osobno
     ├── subTaskStrip.js             # pasek biegów subów POD zakładkami czatu; obsidian-free DOM, model z modules/sub-agents
     ├── selectionMenu.js            # menu na zaznaczeniu tekstu (2.3.0, spec D) - Kopiuj / Dodaj jako kontekst / Cytuj; quoteText/insertAtCursor pure+testowalne, installSelectionMenu montuje nasłuchy na messages_container
     ├── SlashCommandsRegistry.js    # rejestr komend `/`
@@ -613,7 +615,8 @@ przez barrel) - jedno liczydło zamiast osobnej formuły ad hoc w tym pliku.
   zaraz po udanej analizie, niezależnie od tego, czy user zaakceptuje notatki.
 - "Anuluj" w fazie propozycji realnie anuluje: decyzja usera ściga się ze strzałem do modelu
   (`Promise.race`), przegrany strzał dostaje `AbortController.abort()`; pad/zwis nie spada po
-  cichu na fallback regexowy - modal pokazuje przyczynę i guzik "Ponów analizę".
+  cichu na fallback regexowy - modal pokazuje kategorię błędu (przerwanie, timeout albo inny
+  błąd), bez surowej przyczyny; szczegóły zostają w logu.
 - **Wyciszenie po jawnej decyzji usera „nie teraz" dla całego kroku** (auto-konsolidacja
   opcjonalna) - `RunController.skip(stepId)` (guzik „Pomiń") i `RunController.onModalClosed()`
   (krok L1 wciąż `awaiting_review`, gdy user zamyka okno przebiegu bez decyzji) wołają
@@ -957,8 +960,9 @@ Kafelek odczytu/wyszukiwania/listy (`ToolCallDisplay.ts`), link po zapisie
 (`chat_streaming.ts`, ok. linii 1433) i mencje `@[Nazwa]` w dymku usera (`chat_messages.ts`'s
 `_renderUserText`) otwierają notatki JEDNYM mechanizmem: `createNoteLink`
 (`modules/ui-components/noteLink.ts`) + rejestr openera. `chat_ui.ts`'s `renderView` rejestruje
-opener (`setNoteOpener`) na START renderu - `_openNoteInMain` otwiera ZAWSZE w nowej karcie w
-głównym obszarze przez `this.app.workspace.openLinkText(path, '', true)`, nigdy nie podmienia
+opener (`setNoteOpener`) na START renderu - fabryka na poziomie modułu tworzy callback
+otwierający ZAWSZE w nowej karcie w głównym obszarze przez `app.workspace.openLinkText(path, '', true)`;
+callback zamyka tylko `app`, nigdy widok, i nie podmienia
 zawartości panelu czatu. Sprzątania openera w `onClose` NIE ma - decyzja (recenzja C): jeden
 rejestr na plugin, opener zależy tylko od globalnego `app`, dwa widoki czatu dzielą slot;
 patrz `modules/ui-components/CLAUDE.md`, sekcja "Linki do notatek", dla uzasadnienia
@@ -1404,19 +1408,17 @@ załącznik, a druga opcja to cytuj i kopiuje się to do chatu jako cytat."
   znika: klik poza (`document.mousedown`, capture), `Escape` (`document.keydown`), scroll
   kontenera, albo po samej akcji (kopiuj/kontekst/cytuj sprzątają po sobie i czyszczą
   `window.getSelection()`).
-  - **Kopiuj:** `navigator.clipboard.writeText(text)` + potwierdzenie `showCrystalNotice`
-    (`chat.selection.copied`, `type:'success'`, 2 s).
+  - **Kopiuj:** sprząta menu i zaznaczenie od razu, następnie `navigator.clipboard.writeText(text)`;
+    potwierdza sukces przez `showCrystalNotice` (`chat.selection.copied`, `type:'success'`, 2 s),
+    a odmowę przez `chat.selection.copy_failed` (`type:'error'`, 4 s).
   - **Dodaj jako kontekst:** `attachmentManager.addTextAttachment({ name: 'Cytat z czatu ' +
     HH:MM + '.md', text })` - patrz `modules/ui-components/CLAUDE.md`.
   - **Cytuj:** `quoteText(sel)` (pure - każda linia dostaje prefiks `> `, plus jedna pusta
-    linia na końcu) wstawiony przez `insertAtCursor(textarea, text)` (pure) w pozycji kursora
-    `input_area`, potem `handleInputResize()` + fokus na pole.
-  - Obie funkcje pure (`quoteText`/`insertAtCursor`) są testowane literalnie w
-    `chat/selectionMenu.test.ts`. `installSelectionMenu` (montaż nasłuchów, `window.getSelection`)
-    NIE ma testu DOM - atrapa harnessu (`test-support/dom-shim.ts`) nie implementuje
-    `window.getSelection`/`Selection` [measured, grep "getSelection" w repo harnessu - zero
-    trafień w `test-support/`], więc show/hide menu jest `skip: brak atrapy getSelection w
-    harnessie`.
+    linia na końcu). `afterAction()` najpierw czyści menu i zaznaczenie, potem
+    `insertAtCursor(textarea, text)` (pure) wstawia cytat w `input_area`, a `handleInputResize()`
+    i fokus przenoszą kursor na koniec; czyszczenie po wstawieniu cofało kursor na pozycję 0.
+  - `quoteText`/`insertAtCursor` oraz `installSelectionMenu` są testowane w
+    `chat/selectionMenu.test.ts` na lokalnej atrapie elementów i zaznaczenia.
 - **Montaż w `renderView`, odpięcie w `onClose` (`chat_view.ts`).** `chat_ui.ts`'s
   `renderView` woła `this._selectionMenuDetach?.(); this._selectionMenuDetach =
   installSelectionMenu(this);` - odpina POPRZEDNI egzemplarz przed montażem nowego (`renderView`
@@ -1426,8 +1428,9 @@ załącznik, a druga opcja to cytuj i kopiuje się to do chatu jako cytat."
   (`(() => void) | null`) żyje w `ChatViewMixins` (`chat/chatViewShape.ts`). Odpięcie przy
   ZAMKNIĘCIU widoku jest wpięte w `onClose` (`modules/chat/chat_view.ts`): bez tego każda
   zamknięta instancja widoku zostawiałaby parę nasłuchów na `document` trzymającą cały widok
-  w pamięci (recenzja D). Po "Cytuj" zaznaczenie jest czyszczone PRZED fokusem pola - odwrotna
-  kolejność cofała kursor na pozycję 0 (recenzja D, zmierzone w Chromium).
+  w pamięci. `chatViewClose.test.ts` wywołuje ciało `onClose` ze źródła i sprawdza realny helper
+  zamykający popup. Wymiana MentionAutocomplete jest pokryta zachowaniem helpera
+  `inputLifecycle.ts`, bo `renderView` buduje cały widok i importuje CSS.
 
 ---
 

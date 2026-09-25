@@ -223,6 +223,8 @@ export class ChatView extends PluginItemView {
         // zamkniety widok zostawalby w pamieci.
         this._selectionMenuDetach?.();
         this._selectionMenuDetach = null;
+        // Popup / i jego oczekujacy timer nie moga przezyc zamkniecia widoku.
+        this._closeTriggerPopup?.();
         // Nasluch rozwiniecia/zwiniecia kafelka (przerysowanie lacznika) - ten sam powod co menu
         // na zaznaczeniu wyzej: bez odpiecia zamkniety widok trzymalby nasluch na starym
         // messages_container.

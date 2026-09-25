@@ -16,6 +16,18 @@ import type { MCPClient } from '../../tools/index.js';
 
 type ErrLike = { message?: string };
 
+export function describeAnalysisFailure(error: unknown): string {
+    const fields = error && typeof error === 'object' ? error as { code?: unknown; name?: unknown; message?: unknown } : {};
+    if (fields.code === 'stream_stalled') return t('modal.save_session.analysis_timeout');
+    if (fields.code === 'aborted') return t('modal.save_session.analysis_aborted');
+    const name = typeof fields.name === 'string' ? fields.name : '';
+    const message = typeof fields.message === 'string' ? fields.message : String(error);
+    const normalized = message.toLowerCase();
+    if (name === 'AbortError' || normalized.includes('abort')) return t('modal.save_session.analysis_aborted');
+    if (normalized.includes('timeout') || normalized.includes('timed out')) return t('modal.save_session.analysis_timeout');
+    return t('modal.save_session.analysis_failed_generic');
+}
+
 type WorkflowAgentMemory = ConstructorParameters<typeof SaveSessionWorkflow>[0];
 type SaveSessionDecision = Awaited<ReturnType<SaveSessionModal['prompt']>>;
 type ConsolidationAgentMemory = NonNullable<Parameters<typeof startConsolidationRun>[0]['agentMemory']>;
@@ -279,7 +291,8 @@ export async function runSaveSessionFlow({ view, plugin }: SaveSessionCommandCon
  * Bez tego klik „Anuluj" zamykałby tylko okno, a strzał do modelu leciałby dalej w tle i po
  * minucie kończyłby się w próżni. Decyzja usera ściga się ze strzałem, a przegrany strzał
  * dostaje `abort()` tą samą drogą, co Stop w czacie. Pad/zwis nie spada po cichu na regexy —
- * modal pokazuje przyczynę i guzik „Ponów analizę".
+ * modal pokazuje kategorię błędu (przerwanie, timeout albo inny błąd), bez surowej przyczyny;
+ * szczegóły zostają w logu.
  *
  * @returns {Promise<{cancelled: boolean, prep?: Object}>}
  */
@@ -308,7 +321,7 @@ async function prepareWithCancel({ workflow, activeSession, modal, decisionPromi
 
         // Pad albo zwis: zostajemy w oknie, user decyduje — „Ponów analizę" albo „Anuluj".
         log.warn('SaveSession', `Analiza sesji padła: ${(outcome.error as ErrLike)?.message || String(outcome.error)}`);
-        const retry = modal.awaitRetry((outcome.error as ErrLike)?.message || String(outcome.error));
+        const retry = modal.awaitRetry(describeAnalysisFailure(outcome.error));
         const next = await Promise.race([cancelled, retry.then(() => ({ type: 'retry' as const }))]);
         if (next.type === 'cancelled') return { cancelled: true };
     }
