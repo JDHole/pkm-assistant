@@ -19,7 +19,7 @@
  * Nagłówek klucza: `x-goog-api-key`. Budżet myślenia:
  * `generationConfig.thinkingConfig.thinkingBudget`.
  */
-import { normalizeError } from '../../../core/index.js';
+import { maskSensitiveData, normalizeError, redactSecretsDeep, redactSecretValues } from '../../../core/index.js';
 import { GEMINI_DEFAULT_THINKING_BUDGET } from '../contracts.js';
 import type {
     ChatProvider,
@@ -29,6 +29,7 @@ import type {
     HttpClient,
     HttpRequestSpec,
     ModelInfo,
+    NormalizedError,
     OpenAiCompletion,
     OpenAiCompletionChoice,
     OpenAiContent,
@@ -40,6 +41,23 @@ import type {
     StreamEvent,
     UsageLike,
 } from '../contracts.js';
+
+/**
+ * `payload.error` odbity przez dostawcę → jeden bezpieczny kształt, ten sam wzorzec trzech
+ * warstw co `secureProviderError` w `OpenAiCompatibleProvider.ts`: redakcja PO WARTOŚCI klucza
+ * z TEGO żądania (`ctx.apiKey`, po `.trim()`) na SUROWEJ wartości PRZED `normalizeError`
+ * (inaczej cięcie długości `message` mogłoby rozerwać sekret na granicy), potem
+ * `redactSecretValues` jako obrona w głąb (idempotentna), potem maska WZORCEM na tym, co
+ * zostało. `_maskValue` (`core/security/SensitiveDataGuard.ts`) zostawia token `[REDACTED]`
+ * nietknięty, więc kolejność jest bezpieczna.
+ */
+function secureGeminiError(rawError: unknown, apiKey?: string): NormalizedError {
+    const key = apiKey?.trim();
+    const secrets = key ? [key] : [];
+    const err = normalizeError(redactSecretsDeep(rawError, secrets));
+    const redacted = redactSecretValues(err, secrets);
+    return { ...redacted, message: maskSensitiveData(redacted.message) };
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Stałe protokołu
@@ -432,6 +450,12 @@ function mergeArgs(target: Json, incoming: Json | undefined): void {
 class GeminiStreamDecoder implements StreamDecoder {
     private readonly scanner = new JsonObjectScanner();
     private readonly calls: Array<AssembledCall | undefined> = [];
+    /** Klucz TEGO żądania - warstwa redakcji po wartości w `feed()`. */
+    private readonly apiKey: string | undefined;
+
+    constructor(apiKey?: string) {
+        this.apiKey = apiKey;
+    }
 
     get droppedFrames(): number {
         return this.scanner.dropped;
@@ -443,7 +467,7 @@ class GeminiStreamDecoder implements StreamDecoder {
 
         for (const payload of payloads) {
             if (payload.error !== undefined && payload.error !== null) {
-                events.push({ type: 'error', error: normalizeError(payload.error) });
+                events.push({ type: 'error', error: secureGeminiError(payload.error, this.apiKey) });
                 continue;
             }
 
@@ -625,14 +649,14 @@ export class GeminiProvider implements ChatProvider {
     }
 
     /** Odpowiedź `generateContent` → kształt kanoniczny. Nie rzuca na żadnym realnym payloadzie. */
-    parseCompletion(body: unknown, _req: ChatRequest, _ctx: ProviderContext): OpenAiCompletion {
+    parseCompletion(body: unknown, _req: ChatRequest, ctx: ProviderContext): OpenAiCompletion {
         const payload = asObject(body) ?? {};
         const usage = toUsage(payload.usageMetadata);
 
         // Payload z polem `error` (zły klucz, wyczerpany limit) oddaje błąd, zamiast wywracać
         // się na nieistniejącym kandydacie.
         if (payload.error !== undefined && payload.error !== null) {
-            return { choices: [emptyChoice(null)], usage, error: normalizeError(payload.error) };
+            return { choices: [emptyChoice(null)], usage, error: secureGeminiError(payload.error, ctx.apiKey) };
         }
 
         const candidate = asObject(asArray(payload.candidates)[0]);
@@ -653,8 +677,8 @@ export class GeminiProvider implements ChatProvider {
         return { choices: [{ index: 0, message, finish_reason: finishReason }], usage };
     }
 
-    createStreamDecoder(_req: ChatRequest, _ctx: ProviderContext): StreamDecoder {
-        return new GeminiStreamDecoder();
+    createStreamDecoder(_req: ChatRequest, ctx: ProviderContext): StreamDecoder {
+        return new GeminiStreamDecoder(ctx.apiKey);
     }
 
     /** Adres bazowy: nadpisanie z kontekstu (harness, proxy) albo publiczne API. */

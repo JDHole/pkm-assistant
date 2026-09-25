@@ -209,6 +209,22 @@ transportu. Buduj własny krótki komunikat (`Stream error (HTTP 503)` / `(no re
 i zachowaj `http_status`. Klucz API nie może pojawić się w `handlers.error`, w odrzuceniu
 promisy ani w logu; słowo `bearer` też nie.
 
+**Klucz odbity W CIELE odpowiedzi (nie w naszym żądaniu) potrzebuje osobnej warstwy.**
+`ChatModel.errorFromBody` i `payload.error`/`event.error` w dostawcach (`OpenAiCompatibleProvider`,
+`anthropic.ts`, `gemini.ts`) dostają ciało błędu jako SUROWY obiekt - klucz NIESTANDARDOWY (bez
+znanego prefiksu `maskSensitiveData`), który dostawca albo proxy odbije w treści błędu,
+przeszedłby jawnie, gdyby trafił prosto do `normalizeError`. `redactSecretsDeep(raw, [ctx.apiKey])`
+(`core/utils/errorUtils.ts`, eksport z barrela) redaguje ten SUROWY obiekt PO DOSŁOWNEJ WARTOŚCI
+klucza użytego w TYM żądaniu - PRZED `normalizeError`, nie po nim: `normalizeError` tnie `message`
+do `MAX_ERROR_MESSAGE_LENGTH` (4000 znaków), a klucz siedzący dokładnie na granicy cięcia
+wyszedłby przecięty na pół, gdyby redakcja czekała na gotowy `NormalizedError`. Dopiero na
+WYNIKU `normalizeError(redactSecretsDeep(raw, secrets))` providerzy stosują `redactSecretValues`
+jako obronę w głąb (idempotentna - sekret już zniknął), potem `maskSensitiveData` na tym, co
+zostało - `_maskValue` (`core/security/SensitiveDataGuard.ts`) zostawia bez zmian wartość, która
+JEST dokładnie tokenem `[REDACTED]` (dopasowanie dokładne, nie podciąg), więc ta trzecia warstwa
+nie zjada tego, co zamieniły poprzednie dwie. Szczegóły i pełne uzasadnienie - `core/CLAUDE.md`
+gotcha 4e. `ollama.ts` nie ma tej warstwy - `needsApiKey:false`, żaden klucz nie idzie w żądaniu.
+
 ### 🔴 7b. `_completeOnce()` rzuca `ModelRequestError`, nie goły obiekt
 
 Walidator katalogu (`@typescript-eslint/only-throw-error`) nie akceptuje `throw` na gołym
