@@ -44,9 +44,12 @@ interface AttachmentMentionChip {
 
 interface AttachmentManagerOptions {
     onChange?: (attachments: Attachment[]) => void;
+    onReject?: (message: string) => void;
     dropZone?: HTMLElement;
     pasteTarget?: HTMLElement | null;
 }
+
+type FileIntake = { kind: 'added' } | { kind: 'rejected'; message: string };
 
 /** Wejście `addTextAttachment` - tylko tekst, bez `File`/`Blob` (patrz JSDoc metody). */
 interface AddTextAttachmentInput {
@@ -117,6 +120,7 @@ export class AttachmentManager {
     declare container: HTMLElement;
     declare plugin: PluginApi;
     declare onChange: (attachments: Attachment[]) => void;
+    declare onReject: (message: string) => void;
     declare dropZone: HTMLElement;
     declare pasteTarget: HTMLElement | null;
     declare attachments: Attachment[];
@@ -142,6 +146,7 @@ export class AttachmentManager {
         this.container = container;
         this.plugin = plugin;
         this.onChange = options.onChange || (() => {});
+        this.onReject = options.onReject || (() => {});
         this.dropZone = options.dropZone || container;
         this.pasteTarget = options.pasteTarget || null;
 
@@ -411,24 +416,30 @@ export class AttachmentManager {
     // ═══════════════════════════════════════════
 
     async _processFileList(files: FileList | File[]): Promise<void> {
+        const rejections: string[] = [];
         for (const file of files) {
             if (this.attachments.length >= MAX_ATTACHMENTS) {
-                log.warn('Attachments', t('attach.limit_reached', { max: MAX_ATTACHMENTS }));
+                const message = t('attach.limit_reached', { max: MAX_ATTACHMENTS });
+                log.warn('Attachments', message);
+                rejections.push(message);
                 break;
             }
 
             try {
-                await this._processFile(file);
+                const result = await this._processFile(file);
+                if (result.kind === 'rejected') rejections.push(result.message);
             } catch (err) {
                 log.error('Attachments', `Error processing ${file.name}:`, err);
+                rejections.push(t('attach.processing_failed', { name: file.name }));
             }
         }
 
         this._renderChips();
         this.onChange(this.attachments);
+        for (const message of rejections) this.onReject(message);
     }
 
-    async _processFile(file: File): Promise<void> {
+    async _processFile(file: File): Promise<FileIntake> {
         const ext = (file.name.split('.').pop() || '').toLowerCase();
         const name = file.name;
         const mime = (file.type || '').toLowerCase();
@@ -441,7 +452,7 @@ export class AttachmentManager {
         if (isImage) {
             if (file.size > MAX_IMAGE_SIZE) {
                 log.warn('Attachments', t('attach.image_too_large', { name, size: this._formatSize(file.size) }));
-                return;
+                return { kind: 'rejected', message: t('attach.image_too_large', { name, size: this._formatSize(file.size) }) };
             }
             // Optimize large images (>1MB) before encoding — resize to max 1568px, compress as JPEG
             const optimized = await this._optimizeImage(file);
@@ -454,6 +465,7 @@ export class AttachmentManager {
                 mimeType,
                 size: optimized.file.size,
             });
+            return { kind: 'added' };
         } else if (isPdf) {
             const text = await this._extractPdfText(file);
             this.attachments.push({
@@ -463,10 +475,11 @@ export class AttachmentManager {
                 mimeType: 'application/pdf',
                 size: file.size,
             });
+            return { kind: 'added' };
         } else if (isText) {
             if (file.size > MAX_TEXT_SIZE) {
                 log.warn('Attachments', t('attach.file_too_large', { name, size: this._formatSize(file.size) }));
-                return;
+                return { kind: 'rejected', message: t('attach.file_too_large', { name, size: this._formatSize(file.size) }) };
             }
             const text = await file.text();
             this.attachments.push({
@@ -476,8 +489,11 @@ export class AttachmentManager {
                 mimeType: mime || 'text/plain',
                 size: file.size,
             });
+            return { kind: 'added' };
         } else {
-            log.warn('Attachments', t('attach.unsupported_type', { name, ext, mime }));
+            const message = t('attach.unsupported_type', { name, ext, mime });
+            log.warn('Attachments', message);
+            return { kind: 'rejected', message };
         }
     }
 

@@ -130,12 +130,7 @@ export class MentionAutocomplete {
         this._foldersCache = null;
         this._vaultCacheRefs = [];
         this._invalidateVaultCache = () => {
-            // `renderView()` in chat_ui.ts builds a NEW
-            // MentionAutocomplete on every skin change without calling `destroy()` on the old
-            // one (that lifecycle belongs to modules/chat, out of scope here) — the old
-            // instance's textarea gets detached from the live DOM, but its vault listeners
-            // and cache kept living forever. Self-heal instead: once OUR textarea is no longer
-            // connected to the document, the first vault event we see tears US down.
+            // The view calls `destroy()` on re-render; this self-heal remains a fallback.
             if (this.textarea && this.textarea.isConnected === false) {
                 this.destroy();
                 return;

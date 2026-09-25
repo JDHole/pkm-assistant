@@ -7,7 +7,10 @@
  * `ui-components` nie zna `app`/`obsidian` (zlota zasada tego modulu - patrz CLAUDE.md, "same
  * funkcje budujace DOM + klasy sterujace widgetem"), wiec otwieranie realizuje WOLACZ przez
  * rejestr openera: widok czatu ustawia go w `renderView` (`setNoteOpener`); jeden opener na
- * plugin, kazdy kolejny render nadpisuje poprzedni. Opener zalezy wylacznie od globalnego `app`
+ * plugin, kazdy kolejny render nadpisuje poprzedni. Fabryka openera jest ZDEFINIOWANA poza
+ * `renderView` (wolana z niego), wiec jej callback nie dzieli kontekstu ze strzalkami widoku
+ * i trzyma tylko `app`, nie widok.
+ * Opener zalezy wylacznie od globalnego `app`
  * (`workspace.openLinkText`), wiec zamkniecie widoku go nie uniewaznia i NIE ma sprzatania w
  * `onClose` - swiadomie: dwa otwarte widoki czatu dziela jeden rejestr, a `null` z jednego z nich
  * odbieralby klikalnosc drugiemu (recenzja C). Bez
