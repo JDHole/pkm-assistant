@@ -407,6 +407,69 @@ test('addToGitignore: adapter bez `append` dostaje SKLEJONĄ treść przez `writ
         'ścieżka bez `append` musi dopisać do ISTNIEJĄCEJ treści, nie zgubić jej');
 });
 
+// ═════════════════════════════════════════════════════════════════════════════
+// `ensureGitignoreEntries` — jedna wersja logiki `.gitignore` (porównanie po CAŁYCH
+// liniach, nie po podciągu), wołana SEKWENCYJNIE (await), błąd jednego wpisu nie
+// blokuje reszty listy.
+// ═════════════════════════════════════════════════════════════════════════════
+
+test('ensureGitignoreEntries: porównanie po CAŁEJ linii — ".../settings.json.example" NIE maskuje ".../settings.json"', async t => {
+    // Podciąg `.pkm-assistant/settings.json` jest zawarty w istniejącej linii
+    // `.pkm-assistant/settings.json.example` — porównanie MUSI działać na całych liniach,
+    // inaczej ten wpis uznałby regułę dla realnego sekretu za "już jest" i nigdy by jej
+    // nie dopisał.
+    const adapterInfo = makeGitignoreAdapter('.pkm-assistant/settings.json.example\n');
+    const plugin = await makeBarePlugin({ app: { vault: { adapter: adapterInfo.adapter } } });
+
+    await plugin.ensureGitignoreEntries(['.pkm-assistant/settings.json']);
+
+    t.deepEqual(adapterInfo.appended, ['.pkm-assistant/settings.json\n'],
+        'podciąg istniejącej linii nie ma prawa udawać całą linię — realny sekret zostałby bez wpisu w .gitignore');
+});
+
+test('ensureGitignoreEntries: `addToGitignore` rzucający dla jednego wpisu NIE blokuje pozostałych i metoda nie rzuca', async t => {
+    // `addToGitignore` sam łapie swoje błędy odczytu/zapisu (patrz test „no-op bez pliku"
+    // wyżej — brak pliku to błąd odczytu, który metoda łyka bez rzutu), więc żeby dowieść
+    // WŁASNEGO `try`/`catch` w `ensureGitignoreEntries` (obrona przed podklasą, która nadpisze
+    // `addToGitignore` i rzuci), trzeba nadpisać samą metodę na instancji — atrapa adaptera by
+    // tego nie dowiodła.
+    const plugin = await makeBarePlugin();
+    const przetworzone: string[] = [];
+    let wywolania = 0;
+    plugin.addToGitignore = async (entry: string) => {
+        wywolania += 1;
+        if (wywolania === 1) throw new Error('dysk zajęty');
+        przetworzone.push(entry);
+    };
+
+    await t.notThrowsAsync(
+        plugin.ensureGitignoreEntries(['.pkm-assistant/zly-wpis/', '.pkm-assistant/logs/']),
+        'jeden zły wpis nie ma prawa wywrócić całej listy'
+    );
+
+    t.deepEqual(przetworzone, ['.pkm-assistant/logs/'], 'drugi wpis musiał zostać przetworzony mimo błędu na pierwszym');
+    t.is(wywolania, 2, 'oba wpisy MUSIAŁY zostać próbowane — błąd pierwszego nie ma prawa przerwać pętli');
+});
+
+test('ensureGitignoreEntries: wpisy dopisywane SEKWENCYJNIE (await), nie równolegle — inaczej gubią się nawzajem na jednym pliku', async t => {
+    // Adapter BEZ `append` wymusza gałąź `write` (odczytaj-zmień-zapisz). Bez prawdziwego
+    // `await` między kolejnymi wpisami (fire-and-forget) DWA wywołania czytają TĘ SAMĄ starą
+    // treść, zanim którekolwiek zdąży zapisać — drugi zapis nadpisuje pierwszy i jeden wpis
+    // znika bez śladu i bez błędu.
+    let content = 'node_modules\n';
+    const written: string[] = [];
+    const adapter = {
+        read: async () => content,
+        write: async (_path: string, data: string) => { written.push(data); content = data; },
+    };
+    const plugin = await makeBarePlugin({ app: { vault: { adapter } } });
+
+    await plugin.ensureGitignoreEntries(['.pkm-assistant/a/', '.pkm-assistant/b/']);
+
+    t.true(content.includes('.pkm-assistant/a/'), `wpis "a" zgubiony przy nie-sekwencyjnym zapisie: ${content}`);
+    t.true(content.includes('.pkm-assistant/b/'), `wpis "b" zgubiony przy nie-sekwencyjnym zapisie: ${content}`);
+});
+
 test('openChatView: bez otwartego czatu bierze PRAWY liść i ustawia go aktywnym', async t => {
     const pytaniaOTyp: string[] = [];
     const splity: boolean[] = [];

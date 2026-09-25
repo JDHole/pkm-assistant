@@ -252,12 +252,17 @@ test.serial('zbiór WIDOCZNYCH narzędzi == zbiór WYKONYWALNYCH', t2 => {
     }
 });
 
-test.serial('bez agenta klient nie wywraca się na osi (zachowanie jak dotąd)', async t2 => {
+// Bez agenta odpowiadającego za akcję (`getAgent`/`getActiveAgent` obie zwracają `null`)
+// `write` dostaje ODMOWĘ fail-closed, zanim `execute` w ogóle zostanie wywołane - zero
+// strażników (No-Go, protected, whitelista) nie ma jak przyłożyć się do wywołania, którego
+// nikt nie podpisuje.
+test.serial('bez agenta write dostaje ODMOWĘ fail-closed, nie przechodzi po cichu', async t2 => {
     const { client, touched } = makeChain(null);
     const out = await client.executeToolCall(
         { name: 'write', arguments: { path: 'Notes/a.md', content: 'X', mode: 'create' } },
         null,
     ) as ToolCallOutcome;
-    t2.falsy(out.isError, `bez agenta write miał przejść, a dostał: ${out.error}`);
-    t2.is(touched.create, 1);
+    t2.true(out.isError, `bez agenta write miał zostać odmówiony, a dostał: ${JSON.stringify(out)}`);
+    t2.true(String(out.error).includes('Permission denied'), out.error);
+    t2.is(touched.create, 0, 'narzędzie NIE MA prawa dotknąć vaulta bez agenta odpowiadającego za akcję');
 });
