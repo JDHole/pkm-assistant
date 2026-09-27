@@ -17,11 +17,14 @@ import type { SemanticNotePlugin, SemanticScope } from './semanticNote.js';
 import { validateVaultFolder, invocationHasAdminAccess, getInvocationAgentName } from './vault_path_validator.js';
 import type { AgentIdentityLike } from './vault_path_validator.js';
 import { log } from '../../core/utils/Logger.js';
+import { runTextSearch } from './TextSearch.js';
+import type { BuiltinToolExecutionContext } from './ToolRegistry.js';
 
 /** Filtry kandydatów (`where`) wg `inputSchema`.
  * `export` zdjęty — homonim z `modules/memory/RetrievalEngine.ts:120`
  * (ten sam identyfikator, inny kształt); zero konsumentów tej lokalnej definicji poza plikiem. */
 interface SearchWhere {
+    path?: string;
     folder?: string;
     glob?: string;
     yaml?: Record<string, unknown>;
@@ -163,6 +166,7 @@ export function createSearchTool() {
                     type: 'object',
                     description: t('mcp.search.param.where'),
                     properties: {
+                        path: { type: 'string', description: t('mcp.search.param.where.path') },
                         folder: { type: 'string', description: t('mcp.search.param.where.folder') },
                         glob: { type: 'string', description: t('mcp.search.param.where.glob') },
                         yaml: { type: 'object', description: t('mcp.search.param.where.yaml') },
@@ -170,7 +174,7 @@ export function createSearchTool() {
                         links_from: { type: 'string', description: t('mcp.search.param.where.links_from') }
                     }
                 },
-                mode: { type: 'string', enum: ['auto', 'keyword', 'semantic'], description: t('mcp.search.param.mode') },
+                mode: { type: 'string', enum: ['auto', 'keyword', 'semantic', 'text'], description: t('mcp.search.param.mode') },
                 limit: { type: 'number', description: t('mcp.search.param.limit') }
             }
         },
@@ -181,12 +185,18 @@ export function createSearchTool() {
         // (`_extractToolContext` woła `contextExtractor` na `argsWithContext`), więc
         // `_invocationDelegationDepth`/`_invocationAgentName` w worku są zaufane.
         contextExtractor: (args: SearchToolArgs, ctx: { plugin?: SearchToolPlugin | null }) => ({
-            targetPath: resolveSearchScope(args, ctx?.plugin).scope === 'memory'
+            targetPath: args?.mode === 'text' && args?.scope === 'vault'
+                ? ((args.where as SearchWhere)?.path || (args.where as SearchWhere)?.folder || '')
+                : resolveSearchScope(args, ctx?.plugin).scope === 'memory'
                 ? ''
                 : ((args?.where as SearchWhere)?.folder || '')
         }),
-        execute: async (args: SearchToolArgs, _app: unknown, plugin: SearchToolPlugin) => {
+        execute: async (args: SearchToolArgs, _app: unknown, plugin: SearchToolPlugin, context?: BuiltinToolExecutionContext) => {
             try {
+                if (args?.mode === 'text') {
+                    if (args.scope !== 'vault') return { success: false, code: 'invalid_args', isError: true };
+                    return await runTextSearch(args, plugin?.app?.vault, context);
+                }
                 const decision = resolveSearchScope(args, plugin);
                 log.debug('SearchTool', 'scope decision', decision);
                 const scope: SemanticScope = decision.scope;

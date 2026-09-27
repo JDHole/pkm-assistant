@@ -110,14 +110,22 @@ export function resolveSearchAlias(name: string, args: ToolArgs = {}): ToolAlias
  * Renamey vault_* są argumentowo 1:1 (przepuszczamy args). memory_* dostają scope:'memory'
  * i (dla summary) budują ścieżkę pamięci `summaries/<level>/<filename>`.
  */
+function readPaging(args: ToolArgs): ToolArgs {
+    const paging: ToolArgs = {};
+    for (const key of ['offset', 'limit', 'source_version']) {
+        if (Object.prototype.hasOwnProperty.call(args, key)) paging[key] = args[key];
+    }
+    return paging;
+}
+
 export const PRIMITIVE_ALIASES: Record<string, (a: ToolArgs) => ToolAliasResult> = {
     vault_read: (a) => ({ name: 'read', arguments: { ...a } }),
     vault_list: (a) => ({ name: 'list', arguments: { ...a } }),
     vault_write: (a) => ({ name: 'write', arguments: { ...a } }),
     vault_delete: (a) => ({ name: 'delete', arguments: { ...a } }),
     vault_create_folder: (a) => ({ name: 'create_folder', arguments: { ...a } }),
-    memory_read: (a) => ({ name: 'read', arguments: cleanWhere({ path: a.filename ?? a.path, scope: 'memory' }) }),
-    memory_read_summary: (a) => ({ name: 'read', arguments: { path: `summaries/${a.level as string}/${a.filename as string}`, scope: 'memory' } }),
+    memory_read: (a) => ({ name: 'read', arguments: { path: a.filename ?? a.path, scope: 'memory', ...readPaging(a) } }),
+    memory_read_summary: (a) => ({ name: 'read', arguments: { path: `summaries/${a.level as string}/${a.filename as string}`, scope: 'memory', ...readPaging(a) } }),
     memory_list_summaries: (a) => ({
         name: 'list',
         arguments: cleanWhere({

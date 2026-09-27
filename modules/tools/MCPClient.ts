@@ -14,6 +14,7 @@ import { makeMemoryNoteFilename } from '../memory/index.js';
 // Jeden filtr znaczników `_invocation*` dla wysyłki i dla podglądu w approvalu.
 import { ExternalMcpManager } from './ExternalMcpManager.js';
 import type { PermissionDecision, PermissionedAgent, ScopeFolders } from '../../core/index.js';
+import type { BuiltinToolExecutionContext } from './ToolRegistry.js';
 import type { ModelResponse, ParsedToolCall } from '../agent-loop/index.js';
 import type { App } from 'obsidian';
 
@@ -94,7 +95,7 @@ export interface MCPToolRegistryLike {
 export interface ClientTool {
     name: string;
     description: string;
-    execute(args: Record<string, unknown>, app?: unknown, plugin?: unknown): Promise<unknown>;
+    execute(args: Record<string, unknown>, app?: unknown, plugin?: unknown, context?: BuiltinToolExecutionContext): Promise<unknown>;
     serverName?: string;
     source?: string;
     contextExtractor?: (
@@ -115,7 +116,7 @@ interface ToolContext {
     /** Ścieżki nie da się sprowadzić do formy kanonicznej → odmowa fail-closed, bez pytania usera. */
     invalidPath?: boolean;
     /** Pole argumentów, z którego wzięto ścieżkę - wołacz podmienia w nim wartość na kanoniczną. */
-    canonicalPathField?: 'path' | 'folder' | 'file' | 'targetPath' | 'output_path';
+    canonicalPathField?: 'path' | 'folder' | 'file' | 'targetPath' | 'output_path' | 'where.path' | 'where.folder';
 }
 
 /** Plugin widziany przez klienta - same bramki bezpieczeństwa i rejestry, nic więcej. */
@@ -186,6 +187,10 @@ export interface ExecuteToolCallOptions {
      * który go zlecił, a nie względem agenta głównego. Brak = pole usuwane.
      */
     callerToolNames?: string[] | null;
+    /** Trusted cap from AgentLoop, selected using the original model-visible tool name. */
+    resultBudgetChars?: number;
+    /** Abort predicate for the specific chat/sub-agent turn. Never read from model args. */
+    shouldAbort?: () => boolean;
 }
 
 /**
@@ -206,6 +211,43 @@ interface ToolExecutionResult {
     total?: number;
     totalCount?: number;
     alias_note?: string;
+}
+
+function _isRecord(value: unknown): value is Record<string, unknown> {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** U2/U3 marker: only source-page/text envelopes and their documented error codes are budgeted. */
+function _isBudgetedReadTextResult(toolName: string, args: ToolCallArgs, result: unknown): boolean {
+    const record = _isRecord(result) ? result : null;
+    const isReadCall = toolName === 'read';
+    const isTextSearchCall = toolName === 'search' && args.mode === 'text' && args.scope === 'vault';
+    if (!isReadCall && !isTextSearchCall) return false;
+    if (result === 'B') return true;
+    if (record?.success === false && typeof record.code === 'string') {
+        const readCodes = ['budget_too_small', 'file_changed', 'file_missing', 'access_denied', 'invalid_offset', 'invalid_version', 'invalid_args', 'read_error'];
+        const textCodes = ['budget_too_small', 'file_missing', 'access_denied', 'read_error', 'unsupported_type', 'invalid_args'];
+        return isReadCall ? readCodes.includes(record.code) : textCodes.includes(record.code);
+    }
+    if (record?.success !== true) return false;
+    const isReadPage = isReadCall
+        && (record.scope === 'vault' || record.scope === 'memory')
+        && typeof record.path === 'string'
+        && typeof record.source_version === 'string'
+        && typeof record.source_length === 'number'
+        && typeof record.offset === 'number'
+        && typeof record.effective_limit === 'number'
+        && (typeof record.next_offset === 'number' || record.next_offset === null)
+        && typeof record.has_more === 'boolean'
+        && typeof record.truncated === 'boolean'
+        && typeof record.metadata_in_content === 'boolean'
+        && typeof record.content === 'string';
+    const isTextSearch = isTextSearchCall
+        && record.scope === 'vault'
+        && record.mode_used === 'text'
+        && Array.isArray(record.results)
+        && _isRecord(record.scan);
+    return isReadPage || isTextSearch;
 }
 
 /**
@@ -552,14 +594,24 @@ export class MCPClient {
         // zapisało dokładnie tam, gdzie pozwoliła bramka).
         const field = (['path', 'folder', 'file', 'targetPath', 'output_path'] as const)
             .find(key => typeof args?.[key] === 'string' && args[key] === raw);
-        if (!field) return ctx;
+        const nestedWhere = args.mode === 'text' && _isRecord(args.where) ? args.where : null;
+        const nestedField = (['path', 'folder'] as const).find(key => typeof nestedWhere?.[key] === 'string' && nestedWhere[key] === raw);
+        if (!field && !nestedField) return ctx;
+
+        if (nestedField) {
+            const rawValue = nestedWhere?.[nestedField] as string;
+            if (/^[\\/]/.test(rawValue) || /^[A-Za-z]:/.test(rawValue) || /[\0]/.test(rawValue)
+                || rawValue.split(/[\\/]/).some(segment => segment === '..' || segment.startsWith('.'))) {
+                return { ...ctx, invalidPath: true };
+            }
+        }
 
         const canonical = sanitizePath(raw);
         if (!canonical) {
             log.warn('MCPClient', `Ścieżka nie do uratowania (odmowa fail-closed): ${raw}`);
             return { ...ctx, invalidPath: true };
         }
-        return { ...ctx, targetPath: canonical, canonicalPathField: field };
+        return { ...ctx, targetPath: canonical, canonicalPathField: field || (nestedField ? `where.${nestedField}` as const : undefined) };
     }
 
     /**
@@ -901,14 +953,27 @@ export class MCPClient {
             // Ścieżki nie do uratowania (traversal, absolutna, null byte,
             // zero-width unicode) odbijają się TUTAJ - bez pytania usera i bez wołania narzędzia.
             if (invalidPath) {
+                if (toolCall.name === 'search' && args.mode === 'text' && args.scope === 'vault') {
+                    const invalid = { success: false, code: 'invalid_args', isError: true };
+                    const invalidBudget = typeof opts.resultBudgetChars === 'number' && opts.resultBudgetChars > 0
+                        ? Math.min(opts.resultBudgetChars, 12000) : 12000;
+                    return JSON.stringify(invalid).length <= invalidBudget ? invalid : 'B';
+                }
                 throw new Error('Permission denied: Invalid path');
             }
             // Narzędzie ma dostać DOKŁADNIE ten ciąg, który oceniła bramka.
             // Podmiana idzie do OBU worków, bo `argsWithContext` (to on trafia do `execute`)
             // powstał wyżej jako kopia `args`.
             if (canonicalPathField) {
-                args[canonicalPathField] = targetPath;
-                argsWithContext[canonicalPathField] = targetPath;
+                if (canonicalPathField.startsWith('where.')) {
+                    const key = canonicalPathField.slice(6);
+                    const where = _isRecord(args.where) ? { ...args.where, [key]: targetPath } : { [key]: targetPath };
+                    args.where = where;
+                    argsWithContext.where = where;
+                } else {
+                    args[canonicalPathField] = targetPath;
+                    argsWithContext[canonicalPathField] = targetPath;
+                }
             }
 
             // memory write tools operate on agent's own .pkm-assistant/ files - bypass AccessGuard
@@ -932,6 +997,14 @@ export class MCPClient {
 
                 if (!permResult.allowed) {
                     log.warn('MCPClient', `Permission DENIED: ${permResult.reason}`);
+                    const boundedDenied = (toolCall.name === 'search' && args.mode === 'text' && args.scope === 'vault')
+                        || (toolCall.name === 'read' && (typeof args.offset === 'number' || typeof args.source_version === 'string'));
+                    if (boundedDenied) {
+                        const denied = { success: false, code: 'access_denied', isError: true };
+                        const denialBudget = typeof opts.resultBudgetChars === 'number' && opts.resultBudgetChars > 0
+                            ? Math.min(opts.resultBudgetChars, 12000) : 12000;
+                        return JSON.stringify(denied).length <= denialBudget ? denied : 'B';
+                    }
                     throw new Error(`Permission denied: ${permResult.reason}`);
                 }
             }
@@ -1130,8 +1203,66 @@ export class MCPClient {
             });
             if (redirectResult !== null) return redirectResult;
 
-            // 7. Execute tool (pass plugin as 3rd arg for tools that need it, e.g. memory_save)
-            let result = await tool.execute(argsWithContext, this.app, this.plugin) as ToolExecutionResult;
+            // 7. Execute tool; only built-ins receive the trusted 4th runtime context argument.
+            const requestedResultBudgetChars = typeof opts.resultBudgetChars === 'number'
+                && Number.isFinite(opts.resultBudgetChars) && opts.resultBudgetChars > 0
+                ? opts.resultBudgetChars
+                : 0;
+            const effectiveResultBudgetChars = requestedResultBudgetChars > 0
+                ? Math.min(requestedResultBudgetChars, 12000)
+                : 12000;
+            const shouldAbort = typeof opts.shouldAbort === 'function' ? opts.shouldAbort : () => false;
+            const serializeFinalResult = (candidate: unknown): string => {
+                let finalCandidate = candidate;
+                if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+                    const decorated = { ...(candidate as Record<string, unknown>) };
+                    const isListVault = toolCall.name === 'list' && decorated.scope !== 'memory';
+                    const isSearchVault = toolCall.name === 'search' && decorated.scope !== 'memory';
+                    if (agent && (isListVault || isSearchVault)) {
+                        const filterOpts = { scopeFolders };
+                        if (decorated.success && Array.isArray(decorated.files)) {
+                            const filteredFiles = AccessGuard.filterResults(agent, decorated.files, undefined, filterOpts);
+                            decorated.files = filteredFiles;
+                            decorated.count = filteredFiles.length;
+                            decorated.totalCount = filteredFiles.length;
+                        }
+                        if (decorated.success && Array.isArray(decorated.results)) {
+                            const filteredResults = AccessGuard.filterResults(agent, decorated.results, undefined, filterOpts);
+                            decorated.results = filteredResults;
+                            decorated.count = filteredResults.length;
+                            decorated.total = filteredResults.length;
+                        }
+                    }
+                    if (aliasNote) decorated.alias_note = aliasNote;
+                    if (decorated.isError !== true && toolResultStatus(decorated) === 'error') decorated.isError = true;
+                    finalCandidate = decorated;
+                }
+                if (finalCandidate === 'B' && _isBudgetedReadTextResult(toolCall.name, args, finalCandidate)) return 'B';
+                return JSON.stringify(finalCandidate) ?? '';
+            };
+            const builtInContext: BuiltinToolExecutionContext = {
+                resultBudgetChars: requestedResultBudgetChars,
+                effectiveResultBudgetChars,
+                shouldAbort,
+                authorizeFileRead: (canonicalPath) => {
+                    if (typeof canonicalPath !== 'string' || canonicalPath.length === 0) {
+                        return { allowed: false, reason: 'Invalid path' };
+                    }
+                    return this.plugin.permissionSystem.checkPermission(
+                        agent,
+                        'vault.read',
+                        canonicalPath,
+                        { autonomy, scopeFolders },
+                    );
+                },
+                serializeFinalResult,
+            };
+            let result = await tool.execute(
+                argsWithContext,
+                this.app,
+                this.plugin,
+                tool.source === 'built-in' ? builtInContext : undefined,
+            ) as ToolExecutionResult;
 
             // 7b/7c. Modale review (IdeaReviewModal → _planStore) i ArtifactProgressModal
             // (polling chat_todo) SKASOWANE. Artefakty żywe mają approval w notatce (guziki B1) i live-widok
@@ -1186,6 +1317,17 @@ export class MCPClient {
             if (result && typeof result === 'object' && !Array.isArray(result)
                 && result.isError !== true && toolResultStatus(result) === 'error') {
                 result.isError = true;
+            }
+
+            // Guard only future structurally marked full-read pages/text-search results.
+            // Legacy read/search results and every unrelated tool retain their current behavior.
+            if (tool.source === 'built-in'
+                && _isBudgetedReadTextResult(toolCall.name, args, result)
+                && ((result as unknown) === 'B' ? 1 : serializeFinalResult(result).length) > effectiveResultBudgetChars) {
+                const budgetError = { success: false, code: 'budget_too_small', isError: true };
+                const serializedError = JSON.stringify(budgetError);
+                if (serializedError.length <= effectiveResultBudgetChars) return budgetError;
+                return 'B';
             }
 
             log.tool(toolCall.name, args, result);

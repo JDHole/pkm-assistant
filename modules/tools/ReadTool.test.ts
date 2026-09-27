@@ -30,7 +30,7 @@ function makeVaultApp(files: Record<string, string>, folders: string[] = []): Re
             async cachedRead(file) { return files[file.path]; },
             adapter: {
                 async read(p: string) {
-                    if (!Object.prototype.hasOwnProperty.call(files, p)) throw new Error(`ENOENT ${p}`);
+                    if (!Object.prototype.hasOwnProperty.call(files, p)) throw Object.assign(new Error(`ENOENT ${p}`), { code: 'ENOENT' });
                     return files[p];
                 }
             }
@@ -39,6 +39,15 @@ function makeVaultApp(files: Record<string, string>, folders: string[] = []): Re
 }
 
 const runVault = (app: ReadToolApp, args: ReadToolArgs) => createReadTool().execute(args, app, {}) as Promise<ReadRes>;
+const readContext = (cap = 12000, decorate: (result: unknown) => unknown = result => result) => ({
+    resultBudgetChars: cap,
+    effectiveResultBudgetChars: cap,
+    shouldAbort: () => false,
+    authorizeFileRead: () => ({ allowed: true }),
+    serializeFinalResult: (result: unknown) => JSON.stringify(decorate(result)),
+});
+const runVaultWith = (app: ReadToolApp, args: ReadToolArgs, cap = 12000, decorate?: (result: unknown) => unknown) =>
+    createReadTool().execute(args, app, {}, readContext(cap, decorate)) as Promise<Record<string, unknown>>;
 
 test('scope=vault: czyta plik przez cachedRead (API-first)', async t => {
     const app = makeVaultApp({ 'Notes/a.md': 'zawartość pliku' });
@@ -46,6 +55,178 @@ test('scope=vault: czyta plik przez cachedRead (API-first)', async t => {
     t.true(res.success);
     t.is(res.content, 'zawartość pliku');
     t.is(res.path, 'Notes/a.md');
+});
+
+test('długi odczyt domyślny stronicuje się, a strony odtwarzają dokładny plik', async t => {
+    const source = `${'nagłówek \"quoted\"\t\r\n'.repeat(2200)}KONIEC-POLE-55K`;
+    const app = makeVaultApp({ 'Notes/long.md': source });
+    const read = createReadTool();
+    let page = await read.execute({ path: 'Notes/long.md' }, app, {}, readContext()) as Record<string, unknown>;
+    t.true(page.success as boolean);
+    t.true(page.has_more as boolean);
+    t.true(JSON.stringify(page).length <= 12000);
+    const chunks = [page.content as string];
+    let calls = 1;
+    while (page.next_offset !== null && calls < 30) {
+        page = await read.execute({
+            path: page.path,
+            offset: page.next_offset,
+            source_version: page.source_version,
+        }, app, {}, readContext()) as Record<string, unknown>;
+        t.true(page.success as boolean);
+        t.true(JSON.stringify(page).length <= 12000);
+        chunks.push(page.content as string);
+        calls++;
+    }
+    t.true(calls < 30, 'page continuation must terminate');
+    t.is(chunks.join(''), source);
+    t.is((page.next_offset as unknown), null);
+    t.is(page.source_length, source.length);
+    t.is(page.metadata_in_content, false);
+});
+
+test('explicit pages clamp limits and account for MCP decorations and JSON escaping', async t => {
+    const source = `${'"\\\n\t'.repeat(6000)}end`;
+    const app = makeVaultApp({ 'escape.md': source });
+    const decorate = (result: unknown) => ({ ...(result as Record<string, unknown>), alias_note: 'vault_read → read', isError: false });
+    let page = await runVaultWith(app, { path: 'escape.md', offset: 0, limit: 10000 }, 600, decorate);
+    t.true(page.success as boolean);
+    t.true((page.effective_limit as number) > 0 && (page.effective_limit as number) <= 8192,
+        'requested source limit is capped at 8192 before JSON budget fitting');
+    t.true(JSON.stringify(decorate(page)).length <= 600);
+    const originalVersion = page.source_version;
+    page = await runVaultWith(app, {
+        path: 'escape.md', offset: page.next_offset as number, limit: 10000,
+        source_version: originalVersion,
+    }, 600, decorate);
+    t.true(page.success as boolean);
+    t.true(JSON.stringify(decorate(page)).length <= 600);
+});
+
+test('continuation rejects changed source and offsets inside surrogate pairs', async t => {
+    const files = { 'changed.md': `${'a'.repeat(5000)}😀tail` };
+    const app = makeVaultApp(files);
+    const first = await runVaultWith(app, { path: 'changed.md', offset: 0, limit: 2 }, 600);
+    t.true(first.success as boolean);
+    t.is(first.content, 'aa');
+    files['changed.md'] += '!';
+    const stale = await runVaultWith(app, {
+        path: 'changed.md', offset: first.next_offset as number,
+        source_version: first.source_version,
+    }, 600);
+    t.is(stale.code, 'file_changed');
+    t.is(stale.restart_offset, 0);
+
+    const shrinking = { 'shortened.md': 'abcdefghijklmnopqrstuvwxyz' };
+    const shrinkingApp = makeVaultApp(shrinking);
+    const beforeShrink = await runVaultWith(shrinkingApp, { path: 'shortened.md', offset: 0, limit: 8 }, 600);
+    t.is(beforeShrink.next_offset, 8);
+    shrinking['shortened.md'] = 'abc';
+    const afterShrink = await runVaultWith(shrinkingApp, {
+        path: 'shortened.md', offset: beforeShrink.next_offset, source_version: beforeShrink.source_version,
+    }, 600);
+    t.deepEqual(afterShrink, { success: false, code: 'file_changed', isError: true, restart_offset: 0 });
+
+    const unicodeChanged = { 'changed-unicode.md': 'ab😀z' };
+    const unicodeChangedApp = makeVaultApp(unicodeChanged);
+    const beforeUnicodeChange = await runVaultWith(unicodeChangedApp, { path: 'changed-unicode.md', offset: 0, limit: 2 }, 600);
+    t.is(beforeUnicodeChange.next_offset, 2);
+    unicodeChanged['changed-unicode.md'] = 'x😀z';
+    const afterUnicodeChange = await runVaultWith(unicodeChangedApp, {
+        path: 'changed-unicode.md', offset: beforeUnicodeChange.next_offset,
+        source_version: beforeUnicodeChange.source_version,
+    }, 600);
+    t.deepEqual(afterUnicodeChange, { success: false, code: 'file_changed', isError: true, restart_offset: 0 });
+
+    const unicode = makeVaultApp({ 'unicode.md': 'x😀y' });
+    const unicodeStart = await runVaultWith(unicode, { path: 'unicode.md', offset: 0, limit: 2 }, 600);
+    const split = await runVaultWith(unicode, {
+        path: 'unicode.md', offset: 2, limit: 1, source_version: unicodeStart.source_version,
+    });
+    t.is(split.code, 'invalid_offset');
+    const firstUnicodePage = await runVaultWith(unicode, { path: 'unicode.md', offset: 0, limit: 2 });
+    t.is(firstUnicodePage.content, 'x');
+    const noProgress = await runVaultWith(unicode, {
+        path: 'unicode.md', offset: firstUnicodePage.next_offset as number,
+        limit: 1, source_version: firstUnicodePage.source_version,
+    });
+    t.is(noProgress.code, 'budget_too_small');
+});
+
+test('source versions bind the canonical scope and path; missing or denied pages return bounded codes', async t => {
+    const app = makeVaultApp({ 'a.md': 'same content', 'b.md': 'same content' });
+    const a = await runVaultWith(app, { path: 'a.md', offset: 0, limit: 2 });
+    const b = await runVaultWith(app, { path: 'b.md', offset: 0, limit: 2 });
+    t.not(a.source_version, b.source_version, 'identical content at another canonical path must have another version');
+
+    const missing = await runVaultWith(app, {
+        path: 'missing.md', offset: 2, source_version: a.source_version,
+    });
+    t.deepEqual(missing, { success: false, code: 'file_missing', isError: true });
+    const denied = await runVaultWith(app, {
+        path: '.pkm-assistant/agents/jaskier/memory/brain.md', offset: 2,
+        source_version: a.source_version,
+    });
+    t.deepEqual(denied, { success: false, code: 'access_denied', isError: true });
+    const invalidVersion = await runVaultWith(app, {
+        path: 'a.md', offset: 2, source_version: 'sha256:not-a-hash',
+    });
+    t.deepEqual(invalidVersion, { success: false, code: 'invalid_version', isError: true });
+});
+
+test('small runtime budget fails before reading and emits a bounded no-progress token', async t => {
+    let reads = 0;
+    const app = makeVaultApp({ 'tiny.md': 'secret' });
+    app.vault.cachedRead = async file => { reads++; return `secret:${file.path}`; };
+    const result = await createReadTool().execute(
+        { path: 'tiny.md' }, app, {}, readContext(1),
+    );
+    t.is(result, 'B');
+    t.is(reads, 0, 'an envelope that cannot fit must fail before source I/O');
+});
+
+test('runtime vault authorization is rechecked before each page I/O', async t => {
+    const source = 'secret '.repeat(2000);
+    const app = makeVaultApp({ 'scope.md': source });
+    let reads = 0;
+    app.vault.cachedRead = async () => { reads++; return source; };
+    let allowed = false;
+    const context = {
+        ...readContext(600),
+        authorizeFileRead: () => ({ allowed }),
+    };
+    const read = createReadTool();
+    const denied = await read.execute({ path: 'scope.md' }, app, {}, context) as Record<string, unknown>;
+    t.deepEqual(denied, { success: false, code: 'access_denied', isError: true });
+    t.is(reads, 0);
+
+    allowed = true;
+    const first = await read.execute({ path: 'scope.md' }, app, {}, context) as Record<string, unknown>;
+    t.true(first.success as boolean);
+    t.true(first.has_more as boolean);
+    t.is(reads, 1);
+
+    allowed = false;
+    const next = await read.execute({
+        path: 'scope.md', offset: first.next_offset, source_version: first.source_version,
+    }, app, {}, context) as Record<string, unknown>;
+    t.deepEqual(next, { success: false, code: 'access_denied', isError: true });
+    t.is(reads, 1, 'a revoked permission must stop before reading the next page');
+});
+
+test('memory continuation uses logical path and keeps frontmatter inside page content', async t => {
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const source = `---\nname: Kuba\n${'detail: x\n'.repeat(1200)}---\n${'notatka '.repeat(1000)}`;
+    const { vault } = makeVault({ [`${base}/brain/user_kuba.md`]: source });
+    const memory = new AgentMemory(vault, 'Jaskier');
+    const result = await createReadTool().execute(
+        { path: 'user_kuba.md', scope: 'memory' }, {} as ReadToolApp, memPlugin(memory), readContext(600),
+    ) as Record<string, unknown>;
+    t.true(result.success as boolean);
+    t.is(result.path, 'user_kuba.md');
+    t.is(result.metadata_in_content, true);
+    t.false(Object.prototype.hasOwnProperty.call(result, 'frontmatter'));
+    t.true((result.content as string).startsWith('---\nname: Kuba'));
 });
 
 test('scope=vault: brak pliku w indeksie → fallback adaptera (pliki niezaindeksowane)', async t => {
@@ -232,4 +413,18 @@ test('scope=memory z nieznaną tożsamością NIE czyta pamięci aktywnego agent
 
     t.false(res.success, 'brak pamięci dla nazwanej tożsamości = odmowa, nie cudzy katalog');
     t.false(JSON.stringify(res).includes('TAJNE-JASKRA'));
+});
+
+
+test('paged read classifies an indexed source disappearing and adapter access errors', async t => {
+    const app = makeVaultApp({ 'a.md': 'abcdefgh' });
+    const first = await runVaultWith(app, { path: 'a.md', offset: 0, limit: 2 }, 600);
+    app.vault.cachedRead = async () => { throw Object.assign(new Error('raw source failure'), { code: 'ENOENT' }); };
+    const missing = await runVaultWith(app, { path: 'a.md', offset: first.next_offset, source_version: first.source_version }, 600);
+    t.deepEqual(missing, { success: false, code: 'file_missing', isError: true });
+    app.vault.getAbstractFileByPath = () => null;
+    app.vault.adapter.read = async () => { throw Object.assign(new Error('raw private path'), { code: 'EACCES' }); };
+    t.deepEqual(await runVaultWith(app, { path: 'a.md', offset: 0 }, 600), { success: false, code: 'access_denied', isError: true });
+    app.vault.adapter.read = async () => { throw new Error('Authorization: Bearer SECRET_VALUE_123456'); };
+    t.deepEqual(await runVaultWith(app, { path: 'a.md', offset: 0 }, 600), { success: false, code: 'read_error', isError: true });
 });

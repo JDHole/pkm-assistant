@@ -135,6 +135,21 @@ test('memory_read_summary → read{path:summaries/<level>/<file>, scope:memory}'
         { path: 'summaries/L1/l1_a.md', scope: 'memory' });
 });
 
+test('memory read aliases retain present pagination values for canonical validation', t => {
+    for (const name of ['memory_read', 'memory_read_summary']) {
+        const pathArgs = name === 'memory_read'
+            ? { filename: 'user_x.md' }
+            : { level: 'L1', filename: 'l1_a.md' };
+        const valid = resolveToolAlias(name, { ...pathArgs, offset: 17, limit: 9, source_version: `sha256:${'a'.repeat(64)}` })!;
+        t.deepEqual([valid.arguments.offset, valid.arguments.limit, valid.arguments.source_version], [17, 9, `sha256:${'a'.repeat(64)}`]);
+        const malformed = resolveToolAlias(name, { ...pathArgs, offset: null, limit: '', source_version: undefined })!;
+        t.true(Object.prototype.hasOwnProperty.call(malformed.arguments, 'offset'));
+        t.true(Object.prototype.hasOwnProperty.call(malformed.arguments, 'limit'));
+        t.true(Object.prototype.hasOwnProperty.call(malformed.arguments, 'source_version'));
+        t.deepEqual([malformed.arguments.offset, malformed.arguments.limit, malformed.arguments.source_version], [null, '', undefined]);
+    }
+});
+
 test('memory_list_summaries → list{folder:summaries[/level], scope:memory}', t => {
     t.deepEqual(resolveToolAlias('memory_list_summaries', { level: 'L2' })!.arguments, { folder: 'summaries/L2', scope: 'memory' });
     t.deepEqual(resolveToolAlias('memory_list_summaries', { level: 'all' })!.arguments, { folder: 'summaries', scope: 'memory' });

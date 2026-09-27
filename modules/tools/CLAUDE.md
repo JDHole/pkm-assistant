@@ -80,7 +80,42 @@ modules/tools/
 
 **Fabryki narzędzi (21):** `createDelegateTool`, `createAgentDelegateTool`, `createReadTool`, `createListTool`, `createWriteTool`, `createDeleteTool`, `createCreateFolderTool`, `createSearchTool`, `createMemorySaveTool`, `createMemoryDeleteTool`, `createArtifactCreateTool`, `createArtifactReadTool`, `createArtifactUpdateTool`, `createArtifactListTool`, `createTodoTool`, `createWebSearchTool`, `createWebReadTool`, `createAskUserTool`, `createKomunikatorTools`, `createGenerateImageTool`, `createAddTextToImageTool`.
 
-Realny `app` dociera do narzędzia jako 2. argument `execute(args, app, plugin)` (kontrakt w `ToolRegistry.ts`) - fabryki go nie potrzebują w sygnaturze i większość go nie bierze. Wyjątki, które realnie czytają `app` we własnej sygnaturze: `createDelegateTool`, `createCreateFolderTool`.
+Realny `app` dociera do narzędzia jako 2. argument `execute(args, app, plugin)` (kontrakt w `ToolRegistry.ts`) - fabryki go nie potrzebują w sygnaturze i większość go nie bierze. Built-in może dodatkowo dostać czwarty, zaufany `BuiltinToolExecutionContext`; wrappery MCP użytkownika go nie dostają. Wyjątki, które realnie czytają `app` we własnej sygnaturze: `createDelegateTool`, `createCreateFolderTool`.
+
+`BuiltinToolExecutionContext` ma pola: `resultBudgetChars` (cap AgentLoop dla oryginalnej
+nazwy, 0 = bez limitu pętli), `effectiveResultBudgetChars` (min(dodatni cap, 12000), a przy
+capie 0 dokładnie 12000), `shouldAbort`, `authorizeFileRead(canonicalPath)` oraz
+`serializeFinalResult(result)`. Callback autoryzacji zamyka tę samą tożsamość agenta,
+autonomię i `scopeFolders`, a sprawdza pełne `PermissionSystem.checkPermission(agent,
+'vault.read', canonicalPath, {autonomy, scopeFolders})`. Serializer odtwarza końcowe aliasowe
+`alias_note`, post-filter `count`/`total` i `isError` przed pomiarem JSON. Nie czytaj tych
+wartości z argumentów modelu.
+
+MCP robi końcowy check długości tylko dla strukturalnej strony `read` (`scope`, `path`,
+`source_version`, `source_length`, `offset`, `effective_limit`, `next_offset`, `has_more`,
+`truncated`, `metadata_in_content`, `content`) lub wyniku `search` z `mode_used:'text'`,
+`scope:'vault'`, `results` i `scan`. Legacy wyniki i inne narzędzia nie podlegają temu
+post-checkowi. Dla błędów read/text rozpoznawane są kody kontraktu `file_changed`, `file_missing`,
+`access_denied`, `invalid_offset`, `invalid_version`, `invalid_args`, `read_error` i
+`unsupported_type`. Przekroczenie zwraca `{success:false, code:'budget_too_small', isError:true}`
+bez opcjonalnego `alias_note`, jeśli pełny JSON mieści się w limicie; inaczej surowy token `B`.
+Czat i sub-agent zachowują
+`B` bez cudzysłowu, a sub-agent zachowuje strukturalne błędy read/text bez prefiksu tłumaczenia.
+
+`read` zachowuje stary wynik dla krótkiego pliku. Długi odczyt domyślnie oddaje stronę
+`{scope,path,source_version,source_length,offset,effective_limit,next_offset,has_more,truncated,metadata_in_content,content}`.
+Następną stronę pobiera się tym samym `path`, `offset:next_offset` i `source_version`.
+Offset i długość liczą jednostki UTF-16; granica strony nie rozcina pary zastępczej.
+Wersja SHA-256 wiąże zakres, kanoniczną tożsamość źródła i pełną treść, więc zmiana
+źródła wymaga startu od zera. Wersję sprawdzamy przed walidacją offsetu wobec bieżącej
+treści: nawet gdy plik skrócono albo zmieniono granicę pary zastępczej, kontynuacja
+ze starą wersją zwraca `file_changed` i `restart_offset:0`. Aliasy `memory_read` i
+`memory_read_summary` przekazują `offset`, `limit`, `source_version` bez usuwania
+obecnych, choć błędnych wartości; waliduje je kanoniczne `read`. Pamięć zwraca logiczną ścieżkę, a frontmatter pozostaje
+w `content`; krótki wynik pamięci zachowuje pole metadanych legacy. Każda strona
+vaulta ponownie sprawdza `authorizeFileRead` na kanonicznej ścieżce przed odczytem.
+Gdy kontekst runtime istnieje, lecz bramka nie zezwala, odczyt kończy się
+`access_denied` bez I/O. Obecny adapter nadal czyta cały plik przed wydzieleniem strony.
 
 **Settings + Zaplecze:** `registerSettings`, `registerBackstage`.
 
@@ -158,7 +193,8 @@ Bramka `.pkm-assistant/**` + No-Go + `sanitizePath` w prymitywach vaultowych dzi
 - **Zero sandboxa custom-JS.** `new Function()` + shadowed globals jako granica bezpieczeństwa nigdy nie był szczelny (prototype-chain escape) - zastąpiony prawdziwym klientem MCP + kontraktem `source:'user'` → RED.
 - **`sanitizePath` w każdym prymitywie vaultowym**, który dotyka path - blokuje `../`, URL-decoded traversal, null bytes, zero-width unicode.
 - **`SensitiveDataGuard`** - maskuje API keys w logach + w wynikach (gdyby narzędzie zwróciło je przez błąd).
-- **Jedno narzędzie `search`** zastępuje osobne narzędzia retrieval per typ zapytania (keyword/semantic/filter/links/glob) - kontrakt `{query?, scope?('vault'|'memory'), where?{folder,glob,yaml,links_to,links_from}, mode?('auto'|'keyword'|'semantic'), limit?}`, silnik `RetrievalEngine.runSearch()` (modules/memory), hybryda keyword+semantic przez RRF. **Domyślny zakres (brak `scope`) to PAMIĘĆ wołającego agenta, nie vault** - notatki usera wymagają jawnego `scope:"vault"`. Szczegóły reguły i wyjątków (sub-agent, pamięć wyłączona/nieistniejąca) - gotcha "Domyślny zakres `search`" niżej.
+- **Jedno narzędzie `search`** zastępuje osobne narzędzia retrieval per typ zapytania (keyword/semantic/filter/links/glob) - kontrakt `{query?, scope?('vault'|'memory'), where?{folder,glob,path,yaml,links_to,links_from}, mode?('auto'|'keyword'|'semantic'|'text'), limit?}`, silnik `RetrievalEngine.runSearch()` (modules/memory), hybryda keyword+semantic przez RRF. **Domyślny zakres (brak `scope`) to PAMIĘĆ wołającego agenta, nie vault** - notatki usera wymagają jawnego `scope:"vault"`. Szczegóły reguły i wyjątków (sub-agent, pamięć wyłączona/nieistniejąca) - gotcha "Domyślny zakres `search`" niżej.
+- **`mode:"text"`** jest odrębnym, jawnym skanem literalnym tylko dla `scope:"vault"`, z exact `where.path` albo parą `where.folder` + `where.glob`. Czyta wyłącznie `.js`, `.json`, `.md`, autoryzuje każdy kanoniczny plik przez zaufany runtime callback przed treścią i raportuje `complete`/`partial`/`aborted` oraz liczniki `scan`. Po otrzymaniu listy od adaptera dotyka i sortuje najwyżej pozostałe wpisy z limitu 2000; sprawdza Stop podczas ich pobierania i przetwarzania. Gdy lista ma pominięte wpisy, raportuje `candidate_limit` i `partial`; sortowanie dotyczy wybranego podzbioru. Stop zachowuje status `aborted` nawet gdy dopasowanie do budżetu JSON usuwa wcześniejsze trafienia. Listing i pojedynczy odczyt adaptera mogą nadal zwrócić pełne dane; limity dotyczą przetwarzania i wyniku, nie twardego I/O.
 - **Prymitywy plikowe bez prefiksów, ze scope w parametrze** (wzór `search`): `read`/`list` mają `scope: 'vault'|'memory'`; `write`/`delete`/`create_folder` są vault-only. API-first: `read` → `getAbstractFileByPath`+`cachedRead`, `list` → `TFolder.children`/`getFiles`, `write` → `vault.process`/`vault.create` (fallback `modify` dla hostów bez `Vault.process`), `delete` → `vault.trash`/`vault.delete`. `.pkm-assistant/` (pamięć, dotfoldery) zostaje na adapterze - Vault API tego nie widzi.
 - **Skille bez własnych narzędzi.** Odkrywalność = indeks w system promptcie (nazwa + opis + ścieżka), pełny przepis SKILL.md czytany przez `read` (wyjątek izolacji `allowSkillsRead` w `vault_path_validator`, TYLKO odczyt - zapis/kasowanie/create_folder dalej blokowane).
 - **Model kontroli = autonomia, nie tryby pracy.** `MCPClient.executeToolCall` przyjmuje `opts.autonomy` (`yolo`/`edge`/`all`), który decyduje TYLKO o pytaniach (approval modal, diff). `yolo` = zero pytań, ale **NIE omija** No-Go / protected paths / whitelisty / uprawnień agenta - te są sprawdzane wcześniej, w `checkPermission`, przed bramką approvalu.
@@ -412,3 +448,5 @@ Bramka `.pkm-assistant/**` + No-Go + `sanitizePath` w prymitywach vaultowych dzi
 - `modules/komunikator/CLAUDE.md` - mechanika skrzynki, którą woła `KomunikatorTools`
 - `modules/web/CLAUDE.md` - silnik wyszukiwania/czytania stron pod `web_search`/`web_read`
 - `modules/multimodal/CLAUDE.md` - adaptery generowania obrazu/STT pod narzędziami multimodalnymi
+
+Paginated read I/O failures use bounded codes without raw exception text: `ENOENT` becomes `file_missing`, `EACCES`/`EPERM` becomes `access_denied`, and other failures become `read_error`. This also covers stale Obsidian index entries whose `cachedRead` fails. Legacy unpaged errors retain their existing shape.

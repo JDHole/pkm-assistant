@@ -94,7 +94,7 @@ export { registerBackstage } from './BackstageTab.js';
 // ══════════════════════════════════════════════════════════════════════════
 
 // Kanoniczny kształt narzędzia (właścicielem typu jest ToolRegistry — patrz CLAUDE.md).
-export type { ToolDefinition, ToolVisibilityAgent } from './ToolRegistry.js';
+export type { ToolDefinition, ToolVisibilityAgent, BuiltinToolExecutionContext } from './ToolRegistry.js';
 
 // Klient MCP: kontrakty trzech argumentów konstruktora + kształt wywołania narzędzia.
 export type {
