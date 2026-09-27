@@ -6,7 +6,7 @@
  * z czatem. SubAgentRunner buduje store/tools/limity/egzekutor i mapuje wynik.
  */
 import { runAgentLoop, ArrayMessageStore } from '../agent-loop/index.js';
-import type { RunAgentLoopOptions } from '../agent-loop/index.js';
+import type { RunAgentLoopOptions, ToolExecutionContext } from '../agent-loop/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
 import { getLimits } from '../../config/limits.js';
@@ -19,6 +19,7 @@ import { defaultSubAgentFramePrompt } from './framePrompt.js';
 // Jednolity domyślny zestaw narzędzi workera (brak podziału research/strateg).
 import { DEPRECATED_TOOL_RENAMES, DEFAULT_SUB_AGENT_TOOLS } from './SubAgentLoader.js';
 import type { SubAgentData } from './types.js';
+import type { BuiltinToolExecutionContext } from '../tools/index.js';
 // Bieg suba jest BYTEM w rejestrze (`plugin.subTaskRegistry`).
 // Sam rejestr przychodzi z pluginu (DI), stąd tylko typ - runner go nie tworzy.
 import type { SubTask, SubTaskOrigin, SubTaskRegistry, SubTaskTrace } from './SubTaskRegistry.js';
@@ -33,7 +34,7 @@ interface RunnerToolDefinition {
     name: string;
     description: string;
     inputSchema: unknown;
-    execute: (args: unknown, app: AppLike, plugin: RunnerPlugin) => Promise<unknown>;
+    execute: (args: unknown, app: AppLike, plugin: RunnerPlugin, context?: BuiltinToolExecutionContext) => Promise<unknown>;
 }
 
 /** Rejestr narzędzi w zakresie, jakiego używa runner (`modules/tools/ToolRegistry.ts`,
@@ -55,6 +56,8 @@ interface RunnerMcpClient {
             delegationDepth?: number;
             scopeFolders?: string[] | null;
             callerToolNames?: string[];
+            resultBudgetChars?: number;
+            shouldAbort?: () => boolean;
         },
     ): Promise<unknown>;
 }
@@ -396,11 +399,11 @@ export class SubAgentRunner {
                 resolveTools: () => tools,
                 // Numer wywołania łapiemy PRZY STARCIE (kolejność tablicy pętli),
                 // a nie przy zakończeniu - wywołania jednego batcha rozstrzygają się równolegle.
-                executeToolCall: (toolCall) => {
+                executeToolCall: (toolCall, runtimeContext) => {
                     const seq = toolCallSeq++;
                     return this._executeTool(toolCall as ToolCall, agent.name, allowedToolNames,
                         { delegationDepth, scopeFolders: scopeFolders as string[], autonomy },
-                        () => { failedToolCalls.add(seq); });
+                        () => { failedToolCalls.add(seq); }, runtimeContext);
                 },
                 ...(steerHooks ? { hooks: steerHooks } : {}),
                 // Delegate po SWOIM timeoucie ubija bieg suba, żeby sub nie wisiał w tle bez końca
@@ -668,7 +671,14 @@ export class SubAgentRunner {
      *   Obcinanie do max_tool_result_length przejęła pętla (runAgentLoop limits.maxToolResultLength);
      *   ten egzekutor już NIE truncuje — zwraca surowy string.
      */
-    async _executeTool(toolCall: ToolCall, agentName: string, allowedToolNames: Set<string> | null = null, execOptions: Pick<RunOptions, 'delegationDepth' | 'scopeFolders' | 'autonomy'> = {}, onFailure?: () => void) {
+    async _executeTool(
+        toolCall: ToolCall,
+        agentName: string,
+        allowedToolNames: Set<string> | null = null,
+        execOptions: Pick<RunOptions, 'delegationDepth' | 'scopeFolders' | 'autonomy'> = {},
+        onFailure?: () => void,
+        runtimeContext: ToolExecutionContext = { resultBudgetChars: 0, shouldAbort: () => false },
+    ) {
         log.debug('SubAgent', `_executeTool: ${toolCall.name} (agent: ${agentName || 'brak'})`);
 
         // Fail-closed: never execute a tool outside the sub-agent's intersection whitelist,
@@ -692,8 +702,10 @@ export class SubAgentRunner {
             // vision (sub nie renderuje obrazów inline - base64 nie ma tu żadnego konsumenta).
             const sanitized = stripImageBase64ForTranscript(toolCall.name, result);
             const text = typeof sanitized === 'string' ? sanitized : JSON.stringify(sanitized);
-            if (toolResultStatus(sanitized) !== 'error') return text;
+            const boundedError = _isBoundedReadTextError(toolCall, sanitized);
+            if (toolResultStatus(sanitized) !== 'error' && !(boundedError && sanitized === 'B')) return text;
             onFailure?.();
+            if (boundedError) return _maskedBoundedError(sanitized, text, runtimeContext.resultBudgetChars);
             // Komunikat błędu jadący do transkryptu suba idzie przez maskę - tak samo,
             // jak ten z `catch` niżej.
             return t('subagent.tool_error', { name: toolCall.name, error: maskSensitiveData(text) });
@@ -713,6 +725,8 @@ export class SubAgentRunner {
                     // klienta narzędzi (MCPClient wstrzykuje je dalej: do args / checkPermission).
                     delegationDepth: execOptions.delegationDepth,
                     scopeFolders: execOptions.scopeFolders,
+                    resultBudgetChars: runtimeContext.resultBudgetChars,
+                    shouldAbort: runtimeContext.shouldAbort,
                     // Whitelista TEGO suba jedzie dalej jako znacznik,
                     // żeby `delegate` policzył narzędzia wnuka względem niego, nie względem
                     // agenta głównego. Lista jest już przecięciem rodzic∩sub (patrz `runTask`).
@@ -748,10 +762,32 @@ export class SubAgentRunner {
             }
             // Ta ścieżka omija MCPClient, więc sama musi dołożyć znacznik głębokości -
             // inaczej `delegate` wołany tędy startowałby zawsze od zera (rekurencja bez kagańca).
-            if ((execOptions.delegationDepth as number) > 0 && args && typeof args === 'object' && !Array.isArray(args)) {
-                args = { ...args, _invocationDelegationDepth: execOptions.delegationDepth };
+            if (args && typeof args === 'object' && !Array.isArray(args)) {
+                const trustedArgs: Record<string, unknown> = { ...(args as Record<string, unknown>), _invocationAgentName: agentName };
+                // The fallback has no MCP identity/scope context. Remove every runtime marker
+                // the model could have forged, then re-add only values owned by this runner.
+                delete trustedArgs._invocationOrigin;
+                delete trustedArgs._invocationAutonomy;
+                delete trustedArgs._invocationScopeFolders;
+                delete trustedArgs._invocationToolNames;
+                delete trustedArgs._invocationDelegationDepth;
+                if ((execOptions.delegationDepth as number) > 0) {
+                    trustedArgs._invocationDelegationDepth = execOptions.delegationDepth;
+                }
+                if (execOptions.autonomy) trustedArgs._invocationAutonomy = execOptions.autonomy;
+                if (allowedToolNames) trustedArgs._invocationToolNames = [...allowedToolNames];
+                args = trustedArgs;
             }
-            const result = await tool.execute(args, this.app, this.plugin);
+            const requestedBudget = runtimeContext.resultBudgetChars > 0 ? runtimeContext.resultBudgetChars : 0;
+            const result = await tool.execute(args, this.app, this.plugin, {
+                resultBudgetChars: requestedBudget,
+                effectiveResultBudgetChars: requestedBudget > 0 ? Math.min(requestedBudget, 12000) : 12000,
+                shouldAbort: runtimeContext.shouldAbort,
+                // Direct fallback has no full PermissionSystem invocation context. New file reads
+                // must fail closed here instead of treating this runner path as an authorization.
+                authorizeFileRead: () => ({ allowed: false, reason: 'Permission context unavailable' }),
+                serializeFinalResult: (candidate) => JSON.stringify(candidate) ?? '',
+            });
             return asTranscript(result);
         } catch (error) {
             onFailure?.();
@@ -762,6 +798,52 @@ export class SubAgentRunner {
             });
         }
     }
+}
+
+/** Preserve secret masking without breaking the bounded JSON error protocol. */
+function _maskedBoundedError(result: unknown, text: string, requestedBudget: number): string {
+    if (result === 'B') return 'B';
+    const budget = requestedBudget > 0 ? Math.min(requestedBudget, 12000) : 12000;
+    let masked = maskSensitiveData(text);
+    try {
+        JSON.parse(masked);
+    } catch {
+        // The caller already checked the error code against the read/text allowlist.
+        // Redaction can cut a JSON escape; do not copy arbitrary error fields back in.
+        const error = result as Record<string, unknown>;
+        masked = JSON.stringify({
+            success: false,
+            code: error.code,
+            ...(Number.isSafeInteger(error.restart_offset) && (error.restart_offset as number) >= 0
+                ? { restart_offset: error.restart_offset } : {}),
+            isError: true,
+        });
+    }
+    if (masked.length <= budget) return masked;
+    const compact = JSON.stringify({ success: false, code: 'budget_too_small', isError: true });
+    return compact.length <= budget ? compact : 'B';
+}
+
+function _isBoundedReadTextError(toolCall: ToolCall, result: unknown): boolean {
+    const name = toolCall.name;
+    let args: unknown = toolCall.arguments;
+    if (typeof args === 'string') {
+        try { args = JSON.parse(args) as unknown; } catch { args = null; }
+    }
+    const record = result && typeof result === 'object' && !Array.isArray(result)
+        ? result as Record<string, unknown>
+        : null;
+    const isRead = ['read', 'vault_read', 'memory_read', 'memory_read_summary'].includes(name);
+    const isTextSearch = (name === 'search' || name === 'vault_grep')
+        && !!args && typeof args === 'object' && !Array.isArray(args)
+        && (args as Record<string, unknown>).mode === 'text'
+        && (args as Record<string, unknown>).scope === 'vault';
+    if (!isRead && !isTextSearch) return false;
+    if (result === 'B') return true;
+    if (record?.success !== false || typeof record.code !== 'string') return false;
+    const readCodes = new Set(['read_error', 'budget_too_small', 'file_changed', 'file_missing', 'access_denied', 'invalid_offset', 'invalid_version', 'invalid_args']);
+    const textCodes = new Set(['budget_too_small', 'file_missing', 'access_denied', 'read_error', 'unsupported_type', 'invalid_args']);
+    return isRead ? readCodes.has(record.code) : textCodes.has(record.code);
 }
 
 /**

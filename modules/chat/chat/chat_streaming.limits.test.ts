@@ -2,11 +2,8 @@
  * chat_streaming.limits — strażnik OKABLOWANIA tury czatu: sufit wyniku suba ORAZ zatrzask
  * Stopu wchodzący do pętli.
  *
- * Dlaczego test po ŹRÓDLE, a nie po zachowaniu: `chat_streaming.ts` wisi na `obsidian`
- * (import runtime'u wtyczki), więc AVA nie zaimportuje tego modułu - to samo ograniczenie,
- * które opisuje komentarz w pliku produkcyjnym. Konwencja repo na taki przypadek już istnieje:
- * `modules/prompts/PromptBuilder.cache.test.ts` czyta własne źródło przez `fs.readFileSync`
- * i asertuje na treści. Ten plik idzie dokładnie tym wzorem.
+ * Source guards here cover the broad turn setup; runtime-context forwarding is exercised through
+ * the real exported chat executor and MCPClient in MCPClient.test.ts.
  *
  * Czego pilnuje: wynik sub-agenta jest DELIVERABLE, nie zrzutem narzędzia - `delegate`
  * i `agent_delegate` dostają w pętli głównej własny sufit `subagent_result_max_chars` (60k)
@@ -19,6 +16,8 @@
  */
 import test from 'ava';
 import fs from 'node:fs';
+import { MCPClient } from '../../tools/index.js';
+import { _chatExecuteToolCall } from './chat_streaming.js';
 
 const source = fs.readFileSync(new URL('./chat_streaming.ts', import.meta.url), 'utf8');
 
@@ -194,4 +193,74 @@ test('watchdog ciszy streamu czatu dostaje chat_stream_stall_timeout_ms', t => {
         /\btimeoutMs:\s*stallTimeoutMs,/,
         'Wyliczony `stallTimeoutMs` przestał trafiać do `new StreamWatchdog({...})` - watchdog ciszy przestaje reagować na limit z ustawień (uzbraja się, ale z martwym/domyślnym czasem).',
     );
+});
+
+test('chat executor forwards trusted budget/abort to MCP and preserves its bounded result', async t => {
+    const page = {
+        success: true,
+        scope: 'vault',
+        path: 'Notes/a.md',
+        source_version: `sha256:${'a'.repeat(64)}`,
+        source_length: 2000,
+        offset: 0,
+        effective_limit: 600,
+        next_offset: 600,
+        has_more: true,
+        truncated: true,
+        metadata_in_content: false,
+        content: 'x'.repeat(2000),
+    };
+    let received: unknown;
+    const agent = { name: 'Tester', permissions: { guidance_mode: true, read_notes: true, mcp: true } };
+    const plugin = {
+        agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+        permissionSystem: { checkPermission: () => ({ allowed: true, requiresApproval: false }), requiresApproval: () => false },
+    };
+    const tool = {
+        name: 'read', source: 'built-in', description: 'read', inputSchema: { type: 'object' },
+        execute: async (_args: unknown, _app: unknown, _plugin: unknown, context: unknown) => { received = context; return page; },
+    };
+    const client = new MCPClient({} as never, plugin as never, {
+        getTool: (name: string) => name === 'read' ? tool : null,
+        getToolDefinitions: () => [],
+    } as never);
+    const turn = { agentName: 'Tester', autonomy: 'edge', origin: null, rawResults: new Map() };
+    const view = { plugin: { mcpClient: client } } as never;
+    const shouldAbort = () => false;
+
+    const result = await _chatExecuteToolCall.call(view, turn as never,
+        { id: 'read-1', name: 'read', arguments: { path: 'Notes/a.md' } } as never,
+        { resultBudgetChars: 600, shouldAbort });
+
+    t.is((received as { resultBudgetChars: number }).resultBudgetChars, 600);
+    t.is((received as { shouldAbort: () => boolean }).shouldAbort, shouldAbort);
+    t.deepEqual(JSON.parse(String(result)), { success: false, code: 'budget_too_small', isError: true });
+});
+
+test('real chat executor propagates abort into bounded text search and keeps an explicit transcript', async t => {
+    const { createSearchTool } = await import('../../tools/SearchTool.js');
+    let reads = 0;
+    const app = { vault: { adapter: {
+        list: async (folder: string) => ({ files: [`${folder}/a.md`, `${folder}/b.md`], folders: [] }),
+        stat: async () => ({ size: 6 }),
+        read: async () => { reads++; return 'needle'; },
+    } } };
+    const agent = { name: 'Tester', permissions: { guidance_mode: true, read_notes: true, mcp: true } };
+    const plugin = {
+        app, agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+        permissionSystem: { checkPermission: () => ({ allowed: true, requiresApproval: false }), requiresApproval: () => false },
+    };
+    const tool = { ...createSearchTool(), source: 'built-in' };
+    const client = new MCPClient(app as never, plugin as never, { getTool: (name: string) => name === 'search' ? tool : null, getToolDefinitions: () => [] } as never);
+    const turn = { agentName: 'Tester', autonomy: 'edge', origin: null, rawResults: new Map() };
+    const view = { plugin: { mcpClient: client } } as never;
+    const shouldAbort = () => reads >= 1;
+    const result = await _chatExecuteToolCall.call(view, turn as never,
+        { id: 'search-1', name: 'search', arguments: { query: 'needle', mode: 'text', scope: 'vault', where: { folder: 'Notes', glob: '**/*.md' } } } as never,
+        { resultBudgetChars: 600, shouldAbort });
+    const parsed = JSON.parse(String(result)) as { status: string; scan: { read: number; truncated: boolean; reasons: string[] } };
+    t.is(parsed.status, 'aborted');
+    t.is(parsed.scan.read, 1);
+    t.true(parsed.scan.truncated);
+    t.deepEqual(parsed.scan.reasons, ['aborted']);
 });

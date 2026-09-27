@@ -328,6 +328,19 @@ Odlew per agent = `<agent-slug>-researcher` (standardowe `instantiate`). Przepis
   sub odpalony w trybie `all` dokańczałby bieg w `yolo`, gdyby user przeskoczył na inną zakładkę
   w trakcie. Zwierciadło zostaje fallbackiem dla wołaczy, którzy trybu nie przekazują. Autonomia
   nie nadaje uprawnień - sub-agent i tak jest ograniczony przecięciem whitelisty rodzic∩sub.
+- ⚠️ **Budżet i Stop narzędzia są kontekstem runtime.** `runAgentLoop` przekazuje do callbacku
+  `executeToolCall` drugi argument `ToolExecutionContext` `{resultBudgetChars, shouldAbort}`;
+  cap jest wyliczony dla pierwotnej nazwy narzędzia. `_executeTool` przenosi oba pola do
+  `MCPClient`, który przekazuje built-inom czwarty argument `BuiltinToolExecutionContext`.
+  Ten zawiera `resultBudgetChars`, `effectiveResultBudgetChars` (sufit read/text 12000),
+  `shouldAbort`, `authorizeFileRead(canonicalPath)` i `serializeFinalResult(result)`. Runtime
+  nigdy nie bierze limitu ani tożsamości z argumentów modelu. Przy błędzie bounded read/text
+  runner maskuje sekrety i zachowuje JSON oraz limit. Maska uszkadzająca znak ucieczki
+  powoduje zwrot bezpiecznego kodu z opcjonalnym `restart_offset`; za mały budżet daje
+  `budget_too_small` albo `B`. Zwykłe błędy nadal dostają `subagent.tool_error`.
+  `read` sprawdza `authorizeFileRead` na każdej stronie przed I/O. Bez `MCPClient`
+  bezpośredni fallback runnera nie ma pełnego kontekstu uprawnień i przekazuje
+  callback odmawiający, więc odczyt vaulta kończy się `access_denied`.
 - ⚠️ **`ChatModel.stream()` NIE concurrent-safe** - sub-agenci muszą skipować cache. Patrz
   `SubAgentRunner._executeTool` przez MCPClient + `modules/models/modelResolver.js` skipCache logic.
 - ⚠️ **`max_tokens` musi być explicit** w `streamToCompleteWithTools` options - inaczej

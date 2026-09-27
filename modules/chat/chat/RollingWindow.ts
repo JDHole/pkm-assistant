@@ -37,6 +37,74 @@ function estimateImageTokens(url: string): number {
     return Math.min(Math.ceil(url.length / 4 / 1.2), IMAGE_TOKEN_CEILING);
 }
 
+const READ_CONTINUATION_MARKER = '[read continuation] ';
+type ReadContinuation = {
+    scope: 'vault' | 'memory';
+    path: string;
+    source_version: string;
+    source_length: number;
+    offset: number;
+    effective_limit: number;
+    next_offset: number;
+    has_more: true;
+    truncated: true;
+};
+
+function parseReadContinuation(text: string): ReadContinuation | null {
+    let markerAt = -1;
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(text);
+    } catch {
+        // After a prior trim, only accept a standalone final continuation line. Parsing the
+        // original JSON first prevents file content containing the marker from being trusted.
+        const marker = new RegExp(`(?:^|\\r?\\n)\\[read continuation\\] ([^\\r\\n]+)$`).exec(text);
+        if (!marker) return null;
+        markerAt = marker.index;
+        try { parsed = JSON.parse(marker[1]); } catch { return null; }
+    }
+    try {
+        if (!parsed || typeof parsed !== 'object') return null;
+        const record = parsed as Record<string, unknown>;
+        const continuation = markerAt >= 0
+            ? record
+            : (record.success === true && record.has_more === true ? record : null);
+        if (!continuation
+            || (continuation.scope !== 'vault' && continuation.scope !== 'memory')
+            || typeof continuation.path !== 'string'
+            || typeof continuation.source_version !== 'string'
+            || !/^sha256:[a-f0-9]{64}$/.test(continuation.source_version)
+            || !Number.isInteger(continuation.source_length)
+            || (continuation.source_length as number) < 0
+            || !Number.isInteger(continuation.offset)
+            || (continuation.offset as number) < 0
+            || !Number.isInteger(continuation.effective_limit)
+            || (continuation.effective_limit as number) < 1
+            || !Number.isInteger(continuation.next_offset)
+            || (continuation.next_offset as number) <= (continuation.offset as number)
+            || (continuation.next_offset as number) > (continuation.source_length as number)
+            || continuation.has_more !== true || continuation.truncated !== true) return null;
+        return {
+            scope: continuation.scope,
+            path: continuation.path,
+            source_version: continuation.source_version,
+            source_length: continuation.source_length as number,
+            offset: continuation.offset as number,
+            effective_limit: continuation.effective_limit as number,
+            next_offset: continuation.next_offset as number,
+            has_more: true,
+            truncated: true,
+        };
+    } catch {
+        return null;
+    }
+}
+
+function readContinuationSuffix(content: string): string {
+    const continuation = parseReadContinuation(content);
+    return continuation ? `\n${READ_CONTINUATION_MARKER}${JSON.stringify(continuation)}` : '';
+}
+
 /**
  * STATYSTYKI TEKSTU zamiast samego tekstu.
  *
@@ -412,8 +480,17 @@ export class RollingWindow {
             // Znajdź nazwę narzędzia z powiązanego assistant message
             const toolName = this._findToolNameForResult(i, msg.tool_call_id);
 
-            const preview = this._contentToTokenText(msg.content).slice(0, 150);
-            msg.content = t('memory.trimmed_result', { preview, original: originalSize });
+            const rawContent = this._contentToTokenText(msg.content);
+            const preview = rawContent.slice(0, 150);
+            const continuation = readContinuationSuffix(rawContent);
+            let replacement = `${t('memory.trimmed_result', { preview, original: originalSize })}${continuation}`;
+            if (continuation && replacement.length > originalSize) {
+                // A long logical path can make the continuation larger than the usual
+                // preview. Keep the standalone metadata line without growing the result.
+                replacement = continuation.slice(1);
+                if (replacement.length > originalSize) replacement = rawContent;
+            }
+            msg.content = replacement;
             savedChars += originalSize - msg.content.length;
             details.push({ toolName, originalSize });
         }
@@ -460,7 +537,14 @@ export class RollingWindow {
             const msg = this.messages[i];
             // Patrz `trimOldToolResults` - `.length` na content-array liczy BLOKI, nie znaki/bajty.
             if (msg.role === 'tool' && msg.content && this._contentSize(msg.content) > 50) {
-                msg.content = t('memory.trimmed_aggressive');
+                const rawContent = this._contentToTokenText(msg.content);
+                const continuation = readContinuationSuffix(rawContent);
+                let replacement = `${t('memory.trimmed_aggressive')}${continuation}`;
+                if (continuation && replacement.length > rawContent.length) {
+                    replacement = continuation.slice(1);
+                    if (replacement.length > rawContent.length) replacement = rawContent;
+                }
+                msg.content = replacement;
                 trimmed++;
             }
         }

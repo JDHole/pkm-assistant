@@ -434,6 +434,276 @@ test('bez opcji znaczniki są USUWANE, nawet gdy model poda je sam', async t => 
     t.false('_invocationDelegationDepth' in (seen[0] as Record<string, unknown>), 'model nie podstawi sobie głębokości delegacji bez opcji runtime');
 });
 
+function _makeBudgetClient(
+    name: string,
+    result: unknown,
+    seenContexts: Array<import('./ToolRegistry.js').BuiltinToolExecutionContext | undefined>,
+    permissionCalls: Array<{ agent: unknown; action: string; path?: string | null; opts?: unknown }>,
+) {
+    const agent = { name: 'Tester', permissions: { guidance_mode: true, read_notes: true, mcp: true } };
+    return new MCPClient(asApp(null), asPlugin({
+        agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+        permissionSystem: {
+            checkPermission: (who: unknown, action: string, path?: string | null, opts?: unknown) => {
+                permissionCalls.push({ agent: who, action, path, opts });
+                return { allowed: true, requiresApproval: false };
+            },
+            requiresApproval: () => false,
+        },
+    }), asRegistry({
+        getTool: (toolName: string) => toolName === name ? {
+            name: toolName,
+            source: 'built-in',
+            description: toolName,
+            execute: async (_args: unknown, _app: unknown, _plugin: unknown, context: import('./ToolRegistry.js').BuiltinToolExecutionContext | undefined) => {
+                seenContexts.push(context);
+                return JSON.parse(JSON.stringify(result)) as unknown;
+            },
+        } : null,
+    }));
+}
+
+const _structuralReadPage = (content: string) => ({
+    success: true,
+    scope: 'vault',
+    path: 'Notes/a.md',
+    source_version: `sha256:${'a'.repeat(64)}`,
+    source_length: content.length,
+    offset: 0,
+    effective_limit: 600,
+    next_offset: content.length,
+    has_more: true,
+    truncated: true,
+    metadata_in_content: false,
+    content,
+});
+
+test('trusted built-in context carries the original alias cap, turn abort, and full file authorization', async t => {
+    const contexts: Array<import('./ToolRegistry.js').BuiltinToolExecutionContext | undefined> = [];
+    const calls: Array<{ agent: unknown; action: string; path?: string | null; opts?: unknown }> = [];
+    const page = _structuralReadPage('x'.repeat(2000));
+    const client = _makeBudgetClient('read', page, contexts, calls);
+    const abortTurn = () => false;
+    const result = await client.executeToolCall({
+        name: 'vault_read',
+        arguments: { path: 'Notes/a.md', resultBudgetChars: 1, shouldAbort: true, _invocationAgentName: 'Other' },
+    }, 'Tester', { autonomy: 'all', scopeFolders: ['Notes'], resultBudgetChars: 600, shouldAbort: abortTurn });
+
+    const context = contexts[0];
+    t.is(context?.resultBudgetChars, 600);
+    t.is(context?.effectiveResultBudgetChars, 600);
+    t.is(context?.shouldAbort, abortTurn);
+    t.true((context?.serializeFinalResult(page) ?? '').includes('alias_note'));
+    t.true((context?.serializeFinalResult(page).length ?? 0) > 2000, 'measurement includes final MCP decorations');
+    t.deepEqual(context?.authorizeFileRead('Notes/a.md'), { allowed: true, requiresApproval: false });
+    t.is(calls.at(-1)?.agent, calls[0]?.agent, 'the per-file check uses the same agent object as invocation authorization');
+    t.is(calls.at(-1)?.action, 'vault.read');
+    t.is(calls.at(-1)?.path, 'Notes/a.md');
+    t.deepEqual(calls.at(-1)?.opts, { autonomy: 'all', scopeFolders: ['Notes'] });
+    t.deepEqual(result, { success: false, code: 'budget_too_small', isError: true });
+    t.true(JSON.stringify(result).length <= 600);
+});
+
+test('real MCP memory read aliases reconstruct every page within the final alias budget', async t => {
+    const { createReadTool } = await import('./ReadTool.js');
+    const base = '.pkm-assistant/agents/jaskier/memory';
+    const source = `---\nname: Kuba\n---\n${'ważna 😀 linia\n'.repeat(230)}`;
+    const note = `${base}/brain/user_kuba.md`, summary = `${base}/summaries/L1/l1_kuba.md`;
+    const files: Record<string, string> = { [note]: source, [summary]: source };
+    const memory = {
+        agentName: 'Jaskier', basePath: base,
+        paths: { l1: `${base}/summaries/L1`, l2: `${base}/summaries/L2`, l3: `${base}/summaries/L3` },
+        vault: { adapter: {
+            exists: async (path: string) => Object.prototype.hasOwnProperty.call(files, path),
+            read: async (path: string) => files[path] ?? '',
+        } },
+        ensureMemoryStructure: async () => undefined,
+    };
+    const agent = { name: 'Jaskier', permissions: { memory: true } };
+    const tool = { ...createReadTool(), source: 'built-in' };
+    const client = new MCPClient(asApp({}), asPlugin({
+        agentManager: { getAgent: () => agent, getActiveAgent: () => agent, getAgentMemory: () => memory, getActiveMemory: () => memory },
+        permissionSystem: { checkPermission: () => ({ allowed: true, requiresApproval: false }), requiresApproval: () => false },
+    }), asRegistry({ getTool: (name: string) => name === 'read' ? tool : null }));
+
+    for (const [alias, initial, logicalPath] of [
+        ['memory_read', { filename: 'user_kuba.md' }, 'user_kuba.md'],
+        ['memory_read_summary', { level: 'L1', filename: 'l1_kuba.md' }, 'summaries/L1/l1_kuba.md'],
+    ] as const) {
+        let offset = 0, version: string | undefined, assembled = '', pages = 0;
+        while (pages < 30) {
+            const args = { ...initial, offset, limit: 8192, ...(version ? { source_version: version } : {}) };
+            const page = await client.executeToolCall({ name: alias, arguments: args }, 'Jaskier', { resultBudgetChars: 600 }) as Record<string, unknown>;
+            t.is(page.success, true, JSON.stringify(page));
+            t.true(JSON.stringify(page).length <= 600);
+            t.is(page.path, logicalPath);
+            t.is(page.source_length, source.length);
+            t.is(page.metadata_in_content, true);
+            t.is(typeof page.alias_note, 'string');
+            t.is(page.offset, offset);
+            assembled += page.content as string;
+            pages++;
+            if (page.next_offset === null) {
+                t.is(page.has_more, false);
+                break;
+            }
+            t.true((page.next_offset as number) > offset);
+            offset = page.next_offset as number;
+            version = page.source_version as string;
+        }
+        t.true(pages < 30, 'continuation must terminate');
+        t.is(assembled, source);
+    }
+});
+
+test('final-result serializer includes search post-filter count/total adjustments', async t => {
+    const contexts: Array<import('./ToolRegistry.js').BuiltinToolExecutionContext | undefined> = [];
+    const calls: Array<{ agent: unknown; action: string; path?: string | null; opts?: unknown }> = [];
+    const searchResult = {
+        success: true, query: 'x', scope: 'vault', mode_used: 'text', status: 'complete',
+        results: [], count: 99, total: 99,
+        scan: { candidates: 0, inspected: 0, read: 0, skipped_access: 0, skipped_too_large: 0, read_errors: 0, truncated: false, reasons: [] },
+    };
+    const client = _makeBudgetClient('search', searchResult, contexts, calls);
+
+    const result = await client.executeToolCall({ name: 'search', arguments: { query: 'x', mode: 'text', scope: 'vault' } }, 'Tester', { resultBudgetChars: 15000 });
+    const measured = JSON.parse(contexts[0]!.serializeFinalResult(searchResult)) as { count: number; total: number };
+
+    t.is(measured.count, 0);
+    t.is(measured.total, 0);
+    t.is((result as { count: number }).count, measured.count);
+    t.is((result as { total: number }).total, measured.total);
+});
+
+test('real MCP + PermissionSystem denies initial text-search scope before adapter I/O and hides path', async t => {
+    const { PermissionSystem } = await import('../../core/index.js');
+    const { createSearchTool } = await import('./SearchTool.js');
+    const reads: string[] = [], lists: string[] = [];
+    const agent = { name: 'Tester', permissions: { guidance_mode: true, read_notes: true } };
+    const tool = { ...createSearchTool(), source: 'built-in' };
+    const client = new MCPClient(asApp({ vault: { adapter: {
+        list: async (path: string) => { lists.push(path); return { files: ['Notes/private.md'], folders: [] }; },
+        read: async (path: string) => { reads.push(path); return 'needle'; },
+        exists: async () => true,
+        stat: async () => ({ size: 6 }),
+    } } }), asPlugin({
+        agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+        permissionSystem: new PermissionSystem({}, {}),
+    }), asRegistry({ getTool: (name: string) => name === 'search' ? tool : null }));
+
+    const result = await client.executeToolCall({ name: 'search', arguments: {
+        query: 'needle', mode: 'text', scope: 'vault', where: { folder: 'Notes', glob: '**/*.md' },
+    } }, 'Tester', { scopeFolders: ['Allowed'], resultBudgetChars: 600 });
+    t.deepEqual(result, { success: false, code: 'access_denied', isError: true });
+    t.deepEqual(lists, []);
+    t.deepEqual(reads, []);
+    t.false(JSON.stringify(result).includes('Notes'));
+});
+
+test('real MCP rejects raw traversal before search and tiny cap returns B', async t => {
+    const { PermissionSystem } = await import('../../core/index.js');
+    const { createSearchTool } = await import('./SearchTool.js');
+    const reads: string[] = [];
+    const agent = { name: 'Tester', permissions: { guidance_mode: true, read_notes: true } };
+    const tool = { ...createSearchTool(), source: 'built-in' };
+    const client = new MCPClient(asApp({ vault: { adapter: {
+        list: async () => ({ files: [], folders: [] }), read: async (path: string) => { reads.push(path); return ''; },
+    } } }), asPlugin({
+        agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+        permissionSystem: new PermissionSystem({}, {}),
+    }), asRegistry({ getTool: (name: string) => name === 'search' ? tool : null }));
+    const invalid = await client.executeToolCall({ name: 'search', arguments: {
+        query: 'x', mode: 'text', scope: 'vault', where: { path: '../secret.md' },
+    } }, 'Tester', { resultBudgetChars: 600 });
+    t.deepEqual(invalid, { success: false, code: 'invalid_args', isError: true });
+    const tiny = await client.executeToolCall({ name: 'search', arguments: {
+        query: 'x', mode: 'text', scope: 'vault', where: { path: 'Notes/a.md' },
+    } }, 'Tester', { resultBudgetChars: 1 });
+    t.is(tiny, 'B');
+    t.deepEqual(reads, []);
+});
+
+test('real per-candidate PermissionSystem No-Go runs before adapter.read and hides denied path', async t => {
+    const { AccessGuard, PermissionSystem } = await import('../../core/index.js');
+    const { createSearchTool } = await import('./SearchTool.js');
+    const previousNoGo = AccessGuard._noGoFolders;
+    AccessGuard._noGoFolders = ['notes/private'];
+    try {
+        const reads: string[] = [];
+        const checkedPaths: Array<{ path?: string | null; allowed: boolean }> = [];
+        const app = { vault: { adapter: {
+            list: async (folder: string) => folder === 'Notes'
+                ? { files: ['Notes/ok.md'], folders: ['Notes/private'] }
+                : { files: ['Notes/private/secret.md'], folders: [] },
+            stat: async () => ({ size: 6 }),
+            read: async (path: string) => { reads.push(path); return 'needle'; },
+        } } };
+        const agent = { name: 'Tester', permissions: { guidance_mode: true, read_notes: true, mcp: true } };
+        const tool = { ...createSearchTool(), source: 'built-in' };
+        const permissionSystem = new PermissionSystem({}, {});
+        const realCheck = permissionSystem.checkPermission.bind(permissionSystem);
+        permissionSystem.checkPermission = ((who: never, action: string, path?: string | null, options?: never) => {
+            const result = realCheck(who, action, path, options);
+            checkedPaths.push({ path, allowed: result.allowed });
+            return result;
+        }) as typeof permissionSystem.checkPermission;
+        const client = new MCPClient(asApp(app), asPlugin({ app, agentManager: { getAgent: () => agent, getActiveAgent: () => agent }, permissionSystem }), asRegistry({ getTool: (name: string) => name === 'search' ? tool : null }));
+        const result = await client.executeToolCall({ name: 'search', arguments: {
+            query: 'needle', mode: 'text', scope: 'vault', where: { folder: 'Notes', glob: '**/*.md' },
+        } }, 'Tester', { resultBudgetChars: 600 });
+        const value = result as { status: string; results: Array<{ path: string }>; scan: { skipped_access: number; reasons: string[] } };
+        t.true(AccessGuard._isNoGo('Notes/private/secret.md'));
+        t.true(checkedPaths.some(entry => entry.path === 'Notes/private/secret.md' && !entry.allowed), JSON.stringify(checkedPaths));
+        t.deepEqual(reads, ['Notes/ok.md']);
+        t.false(JSON.stringify(result).includes('Notes/private/secret.md'));
+        t.is(value.status, 'partial');
+        t.is(value.scan.skipped_access, 1);
+        t.deepEqual(value.scan.reasons, ['access_skipped']);
+    } finally { AccessGuard._noGoFolders = previousNoGo; }
+});
+
+test('structural read postcheck uses a short token below the measured JSON error length', async t => {
+    const contexts: Array<import('./ToolRegistry.js').BuiltinToolExecutionContext | undefined> = [];
+    const calls: Array<{ agent: unknown; action: string; path?: string | null; opts?: unknown }> = [];
+    const client = _makeBudgetClient('read', _structuralReadPage('x'.repeat(2000)), contexts, calls);
+
+    const result = await client.executeToolCall({ name: 'vault_read', arguments: { path: 'Notes/a.md' } }, 'Tester', { resultBudgetChars: 46 });
+
+    t.is(result as unknown, 'B');
+});
+
+test('caps 1 and 15000 keep the fixed minimum token and 12000 ceiling semantics', async t => {
+    const contexts: Array<import('./ToolRegistry.js').BuiltinToolExecutionContext | undefined> = [];
+    const calls: Array<{ agent: unknown; action: string; path?: string | null; opts?: unknown }> = [];
+    const page = _structuralReadPage('short');
+    page.next_offset = 5;
+    page.has_more = false;
+    page.truncated = false;
+    const client = _makeBudgetClient('read', page, contexts, calls);
+
+    const minimum = await client.executeToolCall({ name: 'read', arguments: { path: 'Notes/a.md' } }, 'Tester', { resultBudgetChars: 1 });
+    t.is(minimum, 'B');
+    const wide = await client.executeToolCall({ name: 'read', arguments: { path: 'Notes/a.md' } }, 'Tester', { resultBudgetChars: 15000 });
+    t.is(contexts[1]?.resultBudgetChars, 15000);
+    t.is(contexts[1]?.effectiveResultBudgetChars, 12000);
+    t.deepEqual(wide, page);
+});
+
+test('cap 0 still applies the fixed ceiling to structural reads, while unrelated search modes keep legacy results', async t => {
+    const contexts: Array<import('./ToolRegistry.js').BuiltinToolExecutionContext | undefined> = [];
+    const calls: Array<{ agent: unknown; action: string; path?: string | null; opts?: unknown }> = [];
+    const readClient = _makeBudgetClient('read', _structuralReadPage('x'.repeat(13000)), contexts, calls);
+
+    const bounded = await readClient.executeToolCall({ name: 'read', arguments: { path: 'Notes/a.md' } }, 'Tester', { resultBudgetChars: 0 });
+    t.deepEqual(bounded, { success: false, code: 'budget_too_small', isError: true });
+    t.is(contexts[0]?.resultBudgetChars, 0);
+    t.is(contexts[0]?.effectiveResultBudgetChars, 12000);
+
+    const legacyClient = _makeBudgetClient('search', { success: true, scope: 'vault', mode_used: 'auto', results: [], padding: 'x'.repeat(13000) }, contexts, calls);
+    const legacy = await legacyClient.executeToolCall({ name: 'search', arguments: { query: 'x', mode: 'auto', scope: 'vault' } }, 'Tester', { resultBudgetChars: 46 });
+    t.is((legacy as { padding: string }).padding.length, 13000);
+});
+
 // ─── `action` nie obniża ryzyka `write` poniżej skutku ────────────
 //
 // `write {path, content, action:'create'}` BEZ pola `mode`: naiwna klasyfikacja po `action`

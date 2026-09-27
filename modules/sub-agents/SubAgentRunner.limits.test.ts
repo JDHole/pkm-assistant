@@ -26,6 +26,7 @@
 import test from 'ava';
 import { SubAgentRunner as RuntimeSubAgentRunner } from './SubAgentRunner.js';
 import { DEFAULT_LIMITS } from '../../config/limits.js';
+import { MCPClient } from '../tools/index.js';
 
 type TestRunner = { runTask(...args: unknown[]): Promise<{ result: string }> };
 const SubAgentRunner = RuntimeSubAgentRunner as unknown as new (options: unknown) => TestRunner;
@@ -215,4 +216,178 @@ test('kontrakt: sub z WŁASNYM max_tool_result_length=0 („bez limitu") — del
         dorobek,
         'max_tool_result_length=0 w configu suba to świadome „bez limitu" — Math.max(0, 60000) by je zepsuł (0 przegrywa z deliverable default), więc delegate dostałby sufit 60k mimo że sub go jawnie wyłączył.',
     );
+});
+
+test('sub-agent forwards trusted context through the real MCPClient and keeps bounded JSON errors intact', async t => {
+    const agent = { name: 'Jaskier', permissions: { guidance_mode: true, read_notes: true, mcp: true } };
+    let received: unknown;
+    const readTool = {
+        name: 'read', description: 'read', source: 'built-in', inputSchema: { type: 'object' },
+        execute: async (_args: unknown, _app: unknown, _plugin: unknown, context: unknown) => {
+            received = context;
+            return { success: false, code: 'file_changed', restart_offset: 0 };
+        },
+    };
+    const mcpRegistry = {
+        getTool: (name: string) => name === 'read' ? readTool : null,
+        getToolDefinitions: () => [],
+    };
+    const mcpPlugin = {
+        agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+        permissionSystem: { checkPermission: () => ({ allowed: true, requiresApproval: false }), requiresApproval: () => false },
+    };
+    const mcp = new MCPClient({} as never, mcpPlugin as never, mcpRegistry as never);
+    const plugin = { ...mcpPlugin, mcpClient: mcp };
+    const runner = new SubAgentRunner({
+        toolRegistry: { filterByAgent: () => [readTool], getTool: (name: string) => name === 'read' ? readTool : null },
+        app: {},
+        plugin,
+    });
+    const model = {
+        calls: [] as Payload[],
+        stream(payload: Payload, handlers: Handlers) {
+            this.calls.push(payload);
+            const result = this.calls.length === 1
+                ? { choices: [{ message: { role: 'assistant', content: '', tool_calls: [
+                    { id: 'r1', function: { name: 'read', arguments: JSON.stringify({ path: 'Notes/a.md', resultBudgetChars: 1, _invocationAgentName: 'Other' }) } },
+                ] } }] }
+                : tekstowa('gotowe');
+            Promise.resolve().then(() => handlers.done(result));
+        },
+    };
+    const shouldAbort = () => false;
+
+    await runner.runTask('Przeczytaj plik.', { name: 'Jaskier' }, {
+        name: 'worker', role: 'worker', tools: ['read'], max_iterations: 3, max_tool_result_length: 600,
+    }, model as never, { modelTimeout: 5000, shouldAbort });
+
+    t.is((received as { resultBudgetChars: number }).resultBudgetChars, 600);
+    t.is((received as { shouldAbort: () => boolean }).shouldAbort, shouldAbort);
+    const transcript = wynikNarzedziaZTranskryptu(model);
+    t.deepEqual(JSON.parse(transcript), { success: false, code: 'file_changed', restart_offset: 0, isError: true });
+    t.false(transcript.startsWith('Błąd narzędzia'));
+});
+
+test('real sub-agent transcript preserves text-search abort state under the runtime cap', async t => {
+    const { createSearchTool } = await import('../tools/SearchTool.js');
+    let reads = 0;
+    const app = { vault: { adapter: {
+        list: async (folder: string) => ({ files: [`${folder}/a.js`, `${folder}/b.js`], folders: [] }),
+        stat: async () => ({ size: 6 }),
+        read: async () => { reads++; return 'needle'; },
+    } } };
+    const agent = { name: 'Jaskier', permissions: { guidance_mode: true, read_notes: true, mcp: true } };
+    const tool = { ...createSearchTool(), source: 'built-in' };
+    const registry = {
+        getTool: (name: string) => name === 'search' ? tool : null,
+        getToolDefinitions: () => [], filterByAgent: () => [tool],
+    };
+    const plugin = {
+        app, agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+        permissionSystem: { checkPermission: () => ({ allowed: true, requiresApproval: false }), requiresApproval: () => false },
+    };
+    const mcp = new MCPClient(app as never, plugin as never, registry as never);
+    const runner = new SubAgentRunner({ toolRegistry: registry, app, plugin: { ...plugin, mcpClient: mcp } });
+    const callTool = (runner as unknown as { _executeTool: (...args: unknown[]) => Promise<string> })._executeTool;
+    const transcript = await callTool.call(runner, {
+        name: 'search', arguments: { query: 'needle', mode: 'text', scope: 'vault', where: { folder: 'Notes', glob: '**/*.js' } },
+    }, 'Jaskier', new Set(['search']), {}, undefined, { resultBudgetChars: 600, shouldAbort: () => reads >= 1 });
+    const parsed = JSON.parse(transcript) as { status: string; scan: { read: number; truncated: boolean } };
+    t.is(parsed.status, 'aborted');
+    t.is(parsed.scan.read, 1);
+    t.true(parsed.scan.truncated);
+    t.true(transcript.length <= 600);
+});
+
+test('direct fallback overwrites forged invocation identity and removes unsupported runtime markers', async t => {
+    let seen: Record<string, unknown> | undefined;
+    const runner = new SubAgentRunner({
+        toolRegistry: {
+            getTool: () => ({
+                name: 'read', description: 'read', inputSchema: {},
+                execute: async (args: unknown) => { seen = args as Record<string, unknown>; return 'ok'; },
+            }),
+        },
+        app: {},
+        plugin: {},
+    });
+    const call = (runner as unknown as { _executeTool: (...args: unknown[]) => Promise<string> })._executeTool;
+
+    const result = await call.call(runner, {
+        name: 'read',
+        arguments: {
+            path: 'Notes/a.md',
+            keep: 'yes',
+            _invocationAgentName: 'Other',
+            _invocationOrigin: { agentName: 'Other' },
+            _invocationAutonomy: 'yolo',
+            _invocationScopeFolders: ['.'],
+            _invocationToolNames: ['write'],
+            _invocationDelegationDepth: -1,
+        },
+    }, 'Jaskier', new Set(['read']), { autonomy: 'edge' });
+
+    t.is(result, 'ok');
+    t.is(seen?._invocationAgentName, 'Jaskier');
+    t.is(seen?._invocationAutonomy, 'edge');
+    t.is(seen?._invocationToolNames instanceof Array, true);
+    t.deepEqual(seen?._invocationToolNames, ['read']);
+    t.false('_invocationOrigin' in (seen ?? {}));
+    t.false('_invocationScopeFolders' in (seen ?? {}));
+    t.false('_invocationDelegationDepth' in (seen ?? {}));
+    t.is(seen?.keep, 'yes');
+});
+
+/** Real MCP -> runner transcript, including the final result cap. */
+async function boundedErrorTranscript(error: Record<string, unknown>, cap = 600, name = 'read') {
+    const agent = { name: 'Jaskier', permissions: { guidance_mode: true, read_notes: true, mcp: true } };
+    const tool = { name, description: 'fixture', source: 'built-in', inputSchema: { type: 'object' }, execute: async () => error };
+    const registry = { getTool: () => tool, getToolDefinitions: () => [] };
+    const plugin = {
+        agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+        permissionSystem: { checkPermission: () => ({ allowed: true, requiresApproval: false }), requiresApproval: () => false },
+    };
+    const mcp = new MCPClient({} as never, plugin as never, registry as never);
+    const runner = new RuntimeSubAgentRunner({ toolRegistry: registry, app: {}, plugin: { ...plugin, mcpClient: mcp } });
+    return runner._executeTool({ name, arguments: name === 'search'
+        ? { scope: 'vault', mode: 'text', query: 'test', where: { path: 'Notes/a.md' } }
+        : { path: 'Notes/a.md' } }, 'Jaskier', new Set([name]), {}, undefined,
+    { resultBudgetChars: cap, shouldAbort: () => false });
+}
+
+for (const name of ['read', 'search']) {
+    test(`${name} bounded errors mask secrets and preserve JSON`, async t => {
+        const text = await boundedErrorTranscript({ success: false, code: 'file_missing', error: 'Authorization: Bearer SECRETVALUE123456' }, 600, name);
+        const result = JSON.parse(text) as Record<string, unknown>;
+        t.is(result.code, 'file_missing');
+        t.is(result.isError, true);
+        t.false(text.includes('SECRETVALUE123456'));
+        t.true(text.includes('***'));
+        t.true(text.length <= 600);
+    });
+}
+
+test('read redaction that breaks an escape returns safe code and restart metadata', async t => {
+    const text = await boundedErrorTranscript({ success: false, code: 'file_changed', restart_offset: 0, error: 'Authorization: Bearer AAA\\BBBB' });
+    t.deepEqual(JSON.parse(text), { success: false, code: 'file_changed', restart_offset: 0, isError: true });
+});
+
+for (const cap of [1, 46, 600, 0]) {
+    test(`bounded error redaction respects runtime cap ${cap}`, async t => {
+        const text = await boundedErrorTranscript({ success: false, code: 'file_missing', error: 'Authorization: Bearer SECRETVALUE123456' }, cap);
+        t.true(text.length <= (cap || 12000));
+        if (cap < 58 && cap > 0) t.is(text, 'B');
+        else {
+            const result = JSON.parse(text) as Record<string, unknown>;
+            t.is(result.code, 'file_missing');
+            t.false(text.includes('SECRETVALUE123456'));
+        }
+    });
+}
+
+test('unrelated tool errors retain legacy masked transcript handling', async t => {
+    const text = await boundedErrorTranscript({ success: false, code: 'file_missing', error: 'Authorization: Bearer SECRETVALUE123456' }, 600, 'legacy_fixture');
+    t.false(text.startsWith('{'));
+    t.false(text.includes('SECRETVALUE123456'));
+    t.true(text.includes('***'));
 });

@@ -30,17 +30,31 @@ export interface ToolDefinition {
     /** JSON Schema for the tool's input. */
     inputSchema: Record<string, unknown>;
     /**
-     * Async function to execute the tool. Narzędzia built-in mają sygnaturę
-     * `execute(args, app, plugin)` (tak woła je MCPClient); wrappery external MCP biorą tylko
-     * `args`. Parametry 2-3 są tu opcjonalne, żeby OBJĄĆ obie arności — implementacja może
+     * Async function to execute the tool. Narzędzia built-in mogą przyjąć czwarty,
+     * zaufany `BuiltinToolExecutionContext`; wrappery external MCP biorą tylko `args`.
+     * Parametry 2-4 są tu opcjonalne, żeby OBJĄĆ wszystkie arności — implementacja może
      * deklarować je jako wymagane i konkretne (biwariancja metod), wołacz 1-argumentowy przejdzie.
      */
-    execute(args: Record<string, unknown>, app?: unknown, plugin?: unknown): Promise<unknown>;
+    execute(args: Record<string, unknown>, app?: unknown, plugin?: unknown, context?: BuiltinToolExecutionContext): Promise<unknown>;
     /** Logical server this tool belongs to (for filterByAgent). */
     serverName?: string;
     /** 'built-in' | 'user' — narzędzia external MCP dostają 'user' (→ RED w classifyToolRisk). */
     source?: string;
     [extra: string]: unknown;
+}
+
+/** Trusted runtime context supplied only to built-in tool implementations. */
+export interface BuiltinToolExecutionContext {
+    /** Cap chosen by AgentLoop for the original tool name; 0 means no loop cap. */
+    resultBudgetChars: number;
+    /** Effective read/text envelope cap after the fixed 12000-character ceiling. */
+    effectiveResultBudgetChars: number;
+    /** Predicate bound to the current chat/sub-agent turn. */
+    shouldAbort: () => boolean;
+    /** Re-checks a canonical vault path with the current agent, autonomy, and scope. */
+    authorizeFileRead: (canonicalPath: string) => { allowed: boolean; reason?: string };
+    /** Serializes with MCP alias/error decorations applied exactly as for the final result. */
+    serializeFinalResult: (result: unknown) => string;
 }
 
 /**
