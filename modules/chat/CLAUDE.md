@@ -517,8 +517,20 @@ zaczepienia w tej pętli. `RollingWindowMessageStore.ts` adaptuje kontrakt `Mess
 przez suby. **Autonomia to polityka UI "czy pytać", nie własność agenta** - nie ma per-agent
 override. Zmiana autonomii NIE wstrzykuje wiadomości do rozmowy - model o niej nie wie.
 Przekazanie: `turn.autonomy` -> `_chatExecuteToolCall` -> `mcpClient.executeToolCall(toolCall,
-agent, {autonomy})`; suby dziedziczą przez `SubAgentRunner._executeTool`. Narzędzia dostępne
+agent, {autonomy, resultBudgetChars, shouldAbort})`; cap wybiera `runAgentLoop` z oryginalnej
+nazwy narzędzia. `MCPClient` udostępnia built-inom czwarty argument `BuiltinToolExecutionContext`
+z `effectiveResultBudgetChars`, `serializeFinalResult`, `authorizeFileRead` i predykatem Stopu.
+`_chatExecuteToolCall` zachowuje surowy token budżetowy `B` bez JSON-owego cytowania. Suby
+dziedziczą kontekst przez `SubAgentRunner._executeTool`. Narzędzia dostępne
 agentowi zależą wyłącznie od whitelisty serwerów agenta (`filterByAgent`), nie od trybu.
+Przy stronicowanym `read` `RollingWindow` zachowuje w skracanym wyniku
+`scope`, `path`, `source_version`, `source_length`, `offset`,
+`effective_limit`, `next_offset`, `has_more` i `truncated`. Dotyczy
+skracania zwykłego, agresywnego i ponownego agresywnego, aby następna
+iteracja mogła wznowić odczyt. Marker w samej treści pliku nie jest
+interpretowany jako metadane kontynuacji. Przy długiej ścieżce kompresja
+pomija podgląd treści, gdy dołożenie go powiększyłoby już ograniczoną
+zwrotkę; sam marker kontynuacji pozostaje.
 
 ### Popover uprawnień (tarcza)
 

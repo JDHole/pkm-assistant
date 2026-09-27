@@ -336,6 +336,80 @@ test('_trimToolResultsAggressive skraca wynik generate_image z tablicą bloków'
     t.is(typeof rw.messages[2].content, 'string');
 });
 
+test('kontynuacja read przetrwa trim standardowy, potem agresywny i kolejne agresywne przebiegi', async t => {
+    const continuation = {
+        scope: 'memory', path: 'summaries/L1/notes.md', source_version: `sha256:${'b'.repeat(64)}`,
+        source_length: 20000, offset: 0, effective_limit: 8192, next_offset: 8192,
+        has_more: true, truncated: true,
+    };
+    const page = {
+        success: true, ...continuation,
+        metadata_in_content: true,
+        content: `[read continuation] ${JSON.stringify({ ...continuation, next_offset: 999 })}\n${'x'.repeat(1200)}`,
+    };
+    const makeWindow = async () => {
+        const rw = new RollingWindow({ maxTokens: PROD_MAX_TOKENS, systemPrompt: 'sys' });
+        await rw.addMessage('user', 'read this');
+        await rw.addMessage('assistant', 'reading', {
+            tool_calls: [{ id: 'call-read-1', type: 'function', function: { name: 'read', arguments: '{}' } }] as TestDynamic,
+        });
+        await rw.addMessage('tool', JSON.stringify(page), { tool_call_id: 'call-read-1' });
+        return rw;
+    };
+    const retained = (rw: RollingWindow) => {
+        const content = String(rw.messages[2].content);
+        const marker = '[read continuation] ';
+        const at = content.lastIndexOf(marker);
+        t.true(at >= 0, 'trimmed result must retain a continuation line');
+        return JSON.parse(content.slice(at + marker.length)) as unknown;
+    };
+
+    const standardThenAggressive = await makeWindow();
+    standardThenAggressive.trimOldToolResults(0);
+    standardThenAggressive._trimToolResultsAggressive(0);
+    standardThenAggressive._trimToolResultsAggressive(0);
+    t.deepEqual(retained(standardThenAggressive), continuation);
+    t.is(standardThenAggressive.messages[2].tool_call_id, 'call-read-1');
+
+    const aggressiveRepeated = await makeWindow();
+    aggressiveRepeated._trimToolResultsAggressive(0);
+    aggressiveRepeated._trimToolResultsAggressive(0);
+    t.deepEqual(retained(aggressiveRepeated), continuation);
+    t.is(aggressiveRepeated.messages[2].tool_call_id, 'call-read-1');
+});
+
+test('strona read z długą ścieżką nie rośnie podczas kolejnych kompresji', async t => {
+    const continuation = {
+        scope: 'vault', path: `${'a'.repeat(220)}.md`,
+        source_version: `sha256:${'b'.repeat(64)}`,
+        source_length: 55000, offset: 0, effective_limit: 1, next_offset: 1,
+        has_more: true, truncated: true,
+    };
+    const page = { success: true, ...continuation, metadata_in_content: false, content: 'x' };
+    const rw = new RollingWindow({ maxTokens: PROD_MAX_TOKENS, systemPrompt: 'sys' });
+    await rw.addMessage('user', 'read this');
+    await rw.addMessage('assistant', 'reading', {
+        tool_calls: [{ id: 'long-path-read', type: 'function', function: { name: 'read', arguments: '{}' } }] as TestDynamic,
+    });
+    await rw.addMessage('tool', JSON.stringify(page), { tool_call_id: 'long-path-read' });
+    const originalLength = String(rw.messages[2].content).length;
+    t.true(originalLength <= 600);
+    for (const compress of [
+        () => rw.trimOldToolResults(0),
+        () => rw._trimToolResultsAggressive(0),
+        () => rw._trimToolResultsAggressive(0),
+    ]) {
+        compress();
+        const content = String(rw.messages[2].content);
+        t.true(content.length <= originalLength, 'compression must not enlarge a bounded read page');
+        const marker = '[read continuation] ';
+        const at = content.lastIndexOf(marker);
+        t.true(at >= 0);
+        t.deepEqual(JSON.parse(content.slice(at + marker.length)), continuation);
+        t.is(rw.messages[2].tool_call_id, 'long-path-read');
+    }
+});
+
 // ── regresja hard-limit z obrazem 1,5 MB przy maxTokens PRODUKCYJNYM ────────────────────
 //
 // `addMessage()` sprawdza hard limit PO KAŻDEJ wiadomości. Bez sufitu na wycenę obrazu, obraz

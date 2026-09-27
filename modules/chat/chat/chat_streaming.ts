@@ -74,7 +74,7 @@ import type { Agent } from '../../agents/index.js';
 import type { AutonomyMode, StreamWatchdog as StreamWatchdogType, TokenTracker } from '../../../core/index.js';
 import type { CacheMetadata, ChatModel } from '../../models/index.js';
 import type { OpenAiToolDefinition, ServerVisibilityAgent, ToolDefinition } from '../../tools/index.js';
-import type { LoopMessage, ParsedToolCall, RunAgentLoopOptions, RunAgentLoopResult, ToolResultEntry, Usage } from '../../agent-loop/index.js';
+import type { LoopMessage, ParsedToolCall, RunAgentLoopOptions, RunAgentLoopResult, ToolExecutionContext, ToolResultEntry, Usage } from '../../agent-loop/index.js';
 import type { ToolCall as ToolsToolCall } from '../../tools/index.js';
 import type { SubAgentToolCallDetail } from '../../ui-components/index.js';
 import type { SubTask, SubTaskOrigin } from '../../sub-agents/index.js';
@@ -676,7 +676,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
                 model: chat_model as unknown as RunAgentLoopOptions['model'],
                 store: new RollingWindowMessageStore(rw),
                 resolveTools: () => this._chatResolveTools(turn, toolIterIdx++ > 0) as ReturnType<NonNullable<RunAgentLoopOptions['resolveTools']>>,
-                executeToolCall: (toolCall) => this._chatExecuteToolCall(turn, toolCall),
+                executeToolCall: (toolCall, context) => this._chatExecuteToolCall(turn, toolCall, context),
                 trace,
                 limits: {
                     // maxIterations liczone RAZ na turę, nie per kontynuację.
@@ -1167,7 +1167,12 @@ export function _chatOnToolCallsParsed(this: ChatViewLike, turn: ChatTurn, toolC
  * (string albo tablica multimodalna dla generate_image+vision). Surowy wynik + błąd stashuje w
  * turn.rawResults (id → {result, error}) dla onToolResults (UI + side effects).
  */
-export async function _chatExecuteToolCall(this: ChatViewLike, turn: ChatTurn, toolCall: ParsedToolCall) {
+export async function _chatExecuteToolCall(
+    this: ChatViewLike,
+    turn: ChatTurn,
+    toolCall: ParsedToolCall,
+    context: ToolExecutionContext = { resultBudgetChars: 0, shouldAbort: () => false },
+) {
     let raw: ChatToolResult | undefined;
     let error: Error | null = null;
     try {
@@ -1179,7 +1184,12 @@ export async function _chatExecuteToolCall(this: ChatViewLike, turn: ChatTurn, t
         // dzięki temu wynik suba z tła wie, do której zakładki/sesji ma wrócić.
         // TS-boundary: wynik narzędzia należy do SERWERA, który je wykonał - czat czyta z niego
         // wyłącznie pola opisane w `ChatToolResult`, bez walidacji schematem (ta byłaby zmianą runtime).
-        raw = await this.plugin.mcpClient!.executeToolCall(toolCall as ToolsToolCall, turn.agentName, { autonomy: turn.autonomy, origin: turn.origin }) as ChatToolResult;
+        raw = await this.plugin.mcpClient!.executeToolCall(toolCall as ToolsToolCall, turn.agentName, {
+            autonomy: turn.autonomy,
+            origin: turn.origin,
+            resultBudgetChars: context.resultBudgetChars,
+            shouldAbort: context.shouldAbort,
+        }) as ChatToolResult;
     } catch (err) {
         raw = { isError: true, error: (err as Error).message };
         error = err as Error;
@@ -1205,7 +1215,8 @@ export async function _chatExecuteToolCall(this: ChatViewLike, turn: ChatTurn, t
         delete copy.base64;
         return JSON.stringify(copy);
     }
-    return JSON.stringify(raw);
+    // The one-character budget sentinel must stay a token, not become the three-character JSON string `"B"`.
+    return (raw as unknown) === 'B' ? 'B' : JSON.stringify(raw);
 }
 
 /**
