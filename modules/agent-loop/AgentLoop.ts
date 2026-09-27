@@ -97,6 +97,14 @@ export interface ToolResultEntry {
     error?: string | true;
 }
 
+/** Trusted runtime details for one tool invocation. Never derived from model arguments. */
+export interface ToolExecutionContext {
+    /** Effective cap selected for the original tool name; 0 means the loop has no cap. */
+    resultBudgetChars: number;
+    /** Abort predicate bound to the current turn. */
+    shouldAbort: () => boolean;
+}
+
 /**
  * Hooki pętli - WSZYSTKIE opcjonalne i wszystkie awaitowane (sync albo async).
  * Pętla je TYLKO woła; polityk nie implementuje.
@@ -148,7 +156,7 @@ export interface RunAgentLoopOptions {
     store: MessageStoreLike;
     resolveTools?: () => ToolDefinition[] | null | undefined;
     /** Zwraca cokolwiek (sync albo Promise) - `unknown` pokrywa oba przypadki. */
-    executeToolCall: (toolCall: ParsedToolCall) => unknown;
+    executeToolCall: (toolCall: ParsedToolCall, context: ToolExecutionContext) => unknown;
     limits?: AgentLoopLimits;
     modelOptions?: AgentLoopModelOptions;
     hooks?: AgentLoopHooks;
@@ -533,7 +541,13 @@ export async function runAgentLoop({
             const toolName = tc.name || tc.function?.name;
             const toolArgs = tc.arguments ?? tc.function?.arguments;
             try {
-                const raw = await executeToolCall({ id: tc.id, name: toolName, arguments: toolArgs });
+                const resultBudgetChars = (toolName && perToolResultCaps && toolName in perToolResultCaps)
+                    ? perToolResultCaps[toolName]
+                    : maxToolResultLength;
+                const raw = await executeToolCall(
+                    { id: tc.id, name: toolName, arguments: toolArgs },
+                    { resultBudgetChars, shouldAbort: abort },
+                );
                 // Zawartość multimodalna (tablica bloków content, np. generate_image z obrazem dla
                 // modelu vision) przechodzi BEZ zmian - nie stringifikujemy jej ani nie obcinamy
                 // (obcinanie dotyczy tylko tekstu). Czat zwraca taką tablicę dla generate_image
@@ -544,10 +558,7 @@ export async function runAgentLoop({
                 } else {
                     resultStr = typeof raw === 'string' ? raw : JSON.stringify(raw);
                     // Per-tool override sufitu (`??`, bo 0 = świadome „bez limitu").
-                    const cap = (toolName && perToolResultCaps && toolName in perToolResultCaps)
-                        ? perToolResultCaps[toolName]
-                        : maxToolResultLength;
-                    resultStr = _truncateResult(resultStr, cap);
+                    resultStr = _truncateResult(resultStr, resultBudgetChars);
                 }
                 let parsedArgs = toolArgs;
                 try { if (typeof toolArgs === 'string') parsedArgs = JSON.parse(toolArgs); } catch { /* args nie-JSON - zostaw surowe */ }

@@ -35,6 +35,7 @@ Razem kilkadziesiąt testów w 5 plikach `*.test.ts`.
 | `ArrayMessageStore` | Domyślna implementacja `MessageStore` (tablica w pamięci). Sub-agenci jej używają. |
 | `parseToolCalls(response, opts)` | Parser `tool_calls` z odpowiedzi modelu → płaskie `{id, name, arguments}`. 3 kształty: Anthropic content-blocks, root `tool_calls`, `choices[0].message.tool_calls`. Odsklejanie DeepSeek robi w środku. |
 | `sanitizeToolTranscript(messages, opts)` | Pure sanitizer: usuwa osierocone `tool` messages i puste `tool_calls` przed wysyłką do API. |
+| `ToolExecutionContext` | Drugi, zaufany argument `executeToolCall`: cap dla oryginalnej nazwy i predykat abortu bieżącej tury. |
 
 `splitConcatenatedToolCalls` świadomie **nie jest** w barrelu - to szczegół implementacyjny `parseToolCalls` (anty-sklejanie DeepSeek: `"vault_readvault_read"` → 2 wywołania, `'{}{}'` → 2 argumenty), zero konsumentów spoza modułu. Funkcja żyje w `toolCallParser.ts`, jej testy deep-importują plik wprost.
 
@@ -45,9 +46,10 @@ runAgentLoop({
   model,            // { stream(payload, {chunk, done, error}) } - ChatModel; promisyfikowany wewnątrz
   store,            // MessageStore
   resolveTools,     // () => toolDefs[] - wołane NA START KAŻDEJ iteracji (świeża whitelista)
-  executeToolCall,  // async (toolCall) => any - egzekutor; approval/permission żyje TU, nie w pętli
+  executeToolCall,  // async (toolCall, context) => any - egzekutor; approval/permission żyje TU, nie w pętli
   limits,           // { maxIterations, minIterations=0, perCallTimeoutMs=0, maxToolResultLength=0,
-                    //   stallTimeoutMs=0, salvageMaxChars=0 } - 0 = wyłączone
+                    //   stallTimeoutMs=0, salvageMaxChars=0,
+                    //   maxToolResultLengthPerTool } - 0 = wyłączone
                     //   (stall = watchdog ciszy per call, chunk/gate przezbrajają budzik;
                     //   salvage = skrót dorobku narzędzi doklejany do zaślepki backstopu)
   modelOptions,     // { thinking, maxTokens, agentName, ...reszta } - dokładane do payloadu (agentName tylko do logów)
@@ -58,6 +60,12 @@ runAgentLoop({
   log,              // opcjonalny logger zgodny z `core/utils/Logger.js`
 })
 ```
+
+Drugi argument egzekutora to publiczny `ToolExecutionContext`: `{ resultBudgetChars,
+shouldAbort }`. `resultBudgetChars` jest wyliczany dla ORYGINALNEJ nazwy wywołania z mapy
+`maxToolResultLengthPerTool`, a następnie ze wspólnego limitu; zero oznacza brak limitu pętli.
+Predykat `shouldAbort` jest przypięty do bieżącej tury. Oba pola są runtime-only i nigdy nie
+pochodzą z argumentów modelu. Czat i sub-agent przekazują je do MCP.
 
 ### `MessageStore` - kontrakt
 
@@ -103,7 +111,7 @@ Wszystkie opcjonalne. To punkty zaczepienia dla przyszłych polityk PreToolUse/P
 ### Wynik narzędzia: string vs tablica multimodalna
 
 `executeToolCall` może zwrócić:
-- **string** - zapisany jako `content` wiadomości `tool`, obcinany do `maxToolResultLength`.
+- **string** - zapisany jako `content` wiadomości `tool`, obcinany do limitu efektywnego dla oryginalnej nazwy narzędzia.
 - **inny typ** (obiekt) - `JSON.stringify` + obcinanie.
 - **tablicę** (bloki content OpenAI, np. `[{type:'text'},{type:'image_url'}]`) - przechodzi BEZ stringifikacji i BEZ obcinania. Czat zwraca taką tablicę dla `generate_image`+model vision, żeby model „widział" wygenerowany obraz w kolejnej iteracji. Sub-agenci nigdy nie zwracają tablicy - dla nich zachowanie bez zmian.
 

@@ -1041,3 +1041,27 @@ test('maxToolResultLengthPerTool — delegate dostaje większy sufit, reszta wsp
     t.true(String(toolMsgs[1].content).startsWith('D'.repeat(100)));
     t.true(String(toolMsgs[1].content).length < 500);
 });
+
+test('trusted execution context uses original tool name cap and turn abort, ignoring model fields', async (t) => {
+    const abortTurn = () => false;
+    let seen: { resultBudgetChars: number; shouldAbort: () => boolean } | undefined;
+    const model = makeModel([
+        assistantToolCall('vault_read', { path: 'Notes/a.md', resultBudgetChars: 1, shouldAbort: true }, 'read-1'),
+        assistantText('done'),
+    ]);
+
+    await runAgentLoop({
+        model,
+        store: new ArrayMessageStore([{ role: 'user', content: 'read it' }]),
+        resolveTools: () => [toolDef('vault_read')],
+        executeToolCall: async (_toolCall, context) => {
+            seen = context;
+            return { success: true };
+        },
+        shouldAbort: abortTurn,
+        limits: { maxIterations: 3, maxToolResultLength: 15000, maxToolResultLengthPerTool: { vault_read: 46 } },
+    });
+
+    t.is(seen?.resultBudgetChars, 46, 'the original-name override reaches the executor unchanged');
+    t.is(seen?.shouldAbort, abortTurn, 'the executor receives the current turn abort predicate');
+});
