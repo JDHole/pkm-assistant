@@ -1298,7 +1298,7 @@ test('subagent_stall_timeout_ms z ustawień budzi pętlę z ciszy (nie czeka do 
         'komunikat musi pochodzić z watchdogu ciszy pętli, nie z innego źródła błędu');
 });
 
-test('subagent_salvage_max_chars z ustawień trafia do zaślepki backstopu (dorobek, nie goła zaślepka)', async t => {
+test('błąd syntezy zachowuje literalny dorobek w partial i pozostaje failed/error', async t => {
     const dorobek = 'TAJNY_DOROBEK_XYZ_' + 'x'.repeat(200);
     const runner = new SubAgentRunner({
         toolRegistry: { getTool: (name: string) => ({ name, description: 'atrapa', inputSchema: {}, execute: async () => dorobek }) },
@@ -1309,11 +1309,13 @@ test('subagent_salvage_max_chars z ustawień trafia do zaślepki backstopu (doro
     const result = await runner.runTask(
         'zadanie', { name: 'Tester' }, { name: 'worker', tools: ['read'], max_iterations: 1 },
         fakeToolThenFailingBackstopModel('read'), { modelTimeout: 500 },
-    ) as { result: string; stoppedBy?: string };
+    ) as { result: string; stoppedBy?: string; failed?: true; partial?: { text: string }; stopReason?: unknown };
 
-    t.is(result.stoppedBy, 'backstop', 'finalna synteza padła — bieg schodzi jako backstop, nie error');
-    t.true(result.result.includes(dorobek),
-        'subagent_salvage_max_chars musi dotrzeć do pętli — bez przelotu zaślepka jest GOŁA (bez dorobku narzędzi)');
+    t.is(result.stoppedBy, 'error');
+    t.true(result.failed);
+    t.true(result.partial?.text.includes(dorobek));
+    t.deepEqual(result.stopReason, { kind: 'model-error', stage: 'synthesis' });
+    t.true(result.result.includes('synteza finalna padła'));
 });
 
 // `options.modelTimeout` musi dotrzeć do `perCallTimeoutMs` (linia 213) — test

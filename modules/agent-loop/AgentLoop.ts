@@ -17,7 +17,7 @@
  */
 import { log as defaultLog } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
-import { countTokensSimple } from '../../core/index.js';
+import { countTokensSimple, maskSensitiveData, redactSecretsDeep, toolResultStatus } from '../../core/index.js';
 import { DEFAULT_LIMITS } from '../../config/limits.js';
 import { parseToolCalls } from './toolCallParser.js';
 import type { ModelResponse, ParsedToolCall, ProviderUsage } from './toolCallParser.js';
@@ -73,6 +73,9 @@ interface LoopModelLike {
     stopStream?(): void;
     modelKey?: string;
     modelId?: string;
+    providerId?: string;
+    streamMode?: string;
+    streaming?: boolean;
 }
 
 /** Zagregowane zużycie tokenów zwracane przez pętlę (`_estimated` = fallback bez danych z API). */
@@ -80,6 +83,145 @@ export interface Usage {
     prompt_tokens: number;
     completion_tokens: number;
     _estimated?: boolean;
+}
+
+
+/** Honest reason for a completed, interrupted or failed loop. */
+export type AgentLoopStopReason =
+    | { kind: 'natural' }
+    | { kind: 'iteration-limit' }
+    | { kind: 'synthesis-budget'; budgetMs: number }
+    | { kind: 'manual-stop' | 'task-timeout' | 'superseded' }
+    | { kind: 'silence' | 'model-timeout' | 'transport-error' | 'model-error' | 'hook-error'; stage: 'work' | 'synthesis' };
+
+export interface AgentLoopToolOutcome {
+    invocation: number;
+    id?: string;
+    name: string;
+    outcome: 'returned' | 'error' | 'unknown';
+    effect: 'unverified';
+    resultPreview: string;
+}
+
+export interface AgentLoopPartialSnapshot {
+    kind: 'agent-loop-partial';
+    revision: number;
+    stopReason: AgentLoopStopReason;
+    synthesis: 'pending' | 'skipped' | 'completed' | 'budget-expired' | 'failed';
+    toolsUsed: readonly string[];
+    toolOutcomes: readonly AgentLoopToolOutcome[];
+    toolCallDetails: readonly { name?: string; resultPreview: string; error?: boolean }[];
+    usage: Readonly<Usage>;
+    iterations: number;
+    lastText: string;
+    text: string;
+}
+
+class LoopTimerError extends Error {
+    constructor(readonly kind: 'silence' | 'model-timeout' | 'synthesis-budget', readonly budgetMs: number) {
+        super(kind === 'silence'
+            ? t('agentLoop.model_stall', { seconds: Math.round(budgetMs / 1000) })
+            : kind === 'model-timeout'
+                ? t('agentLoop.model_timeout', { seconds: Math.round(budgetMs / 1000) })
+                : t('agentLoop.synthesis_budget'));
+    }
+}
+class LoopAbortError extends Error {}
+
+const PARTIAL_MAX_CHARS = 12000;
+
+/** Exclude payload/arguments/hidden reasoning and binary, then mask before clipping. */
+function partialPreview(value: unknown, secrets: readonly string[] = []): string {
+    const seen = new WeakSet<object>();
+    const clean = (input: unknown, depth: number): unknown => {
+        if (typeof input === 'string') {
+            return input.replace(/data:[^\s"']+/gi, '[binary]')
+                .replace(/\b[A-Za-z0-9+/]{120,}={0,2}\b/g, '[binary]')
+                .replace(/<(?:think|reasoning)\b[^>]*>[\s\S]*?<\/(?:think|reasoning)>/gi, '[reasoning omitted]');
+        }
+        if (!input || typeof input !== 'object') return input;
+        if (depth > 8 || seen.has(input)) return '[omitted]';
+        seen.add(input);
+        if (Array.isArray(input)) {
+            return input.filter((item: unknown) => {
+                if (!item || typeof item !== 'object' || !('type' in item)) return true;
+                return item.type === 'text';
+            }).map(item => clean(item, depth + 1));
+        }
+        if (input instanceof ArrayBuffer || ArrayBuffer.isView(input)) return '[binary]';
+        const out: Record<string, unknown> = {};
+        for (const [key, item] of Object.entries(input)) {
+            if (/^(?:args|arguments|raw|payload|request|headers|reasoning(?:_content)?|thinking|binary|base64|bytes|data|image(?:_url)?|audio)$/i.test(key)) continue;
+            out[key] = clean(item, depth + 1);
+        }
+        return out;
+    };
+    try {
+        let source = value;
+        if (typeof source === 'string') {
+            try { source = JSON.parse(source); } catch { /* ordinary text */ }
+        }
+        const safe = clean(source, 0);
+        const text = typeof safe === 'string' ? safe : JSON.stringify(safe) ?? '';
+        return maskSensitiveData(String(redactSecretsDeep(text, secrets)));
+    } catch { return '[preview unavailable]'; }
+}
+
+const partialReasonText = {
+    natural: () => t('agentLoop.reason_natural'),
+    'iteration-limit': () => t('agentLoop.reason_iteration-limit'),
+    'synthesis-budget': () => t('agentLoop.reason_synthesis-budget'),
+    'manual-stop': () => t('agentLoop.reason_manual-stop'),
+    'task-timeout': () => t('agentLoop.reason_task-timeout'),
+    superseded: () => t('agentLoop.reason_superseded'),
+    silence: () => t('agentLoop.reason_silence'),
+    'model-timeout': () => t('agentLoop.reason_model-timeout'),
+    'transport-error': () => t('agentLoop.reason_transport-error'),
+    'model-error': () => t('agentLoop.reason_model-error'),
+    'hook-error': () => t('agentLoop.reason_hook-error'),
+} satisfies Record<AgentLoopStopReason['kind'], () => string>;
+
+const partialSynthesisText = {
+    pending: () => t('agentLoop.synthesis_pending'),
+    skipped: () => t('agentLoop.synthesis_skipped'),
+    completed: () => t('agentLoop.synthesis_completed'),
+    'budget-expired': () => t('agentLoop.synthesis_budget-expired'),
+    failed: () => t('agentLoop.synthesis_failed'),
+} satisfies Record<AgentLoopPartialSnapshot['synthesis'], () => string>;
+
+const partialOutcomeText = {
+    returned: () => t('agentLoop.outcome_returned'),
+    error: () => t('agentLoop.outcome_error'),
+    unknown: () => t('agentLoop.outcome_unknown'),
+} satisfies Record<AgentLoopToolOutcome['outcome'], () => string>;
+
+/** Deterministic receipt: a returned tool value never verifies a mutation. */
+export function formatAgentLoopPartial(snapshot: AgentLoopPartialSnapshot): string {
+    const lines = [
+        t('agentLoop.partial_header'),
+        t('agentLoop.partial_state', {
+            reason: partialReasonText[snapshot.stopReason.kind](),
+            synthesis: partialSynthesisText[snapshot.synthesis](),
+        }),
+        t('agentLoop.partial_unverified'),
+    ];
+    if (snapshot.lastText) lines.push(partialPreview(snapshot.lastText));
+    for (const outcome of snapshot.toolOutcomes) {
+        lines.push('### ' + partialPreview(outcome.name) + ' - ' + partialOutcomeText[outcome.outcome]());
+        if (outcome.resultPreview) lines.push(partialPreview(outcome.resultPreview));
+    }
+    return lines.join('\n').slice(0, PARTIAL_MAX_CHARS);
+}
+
+function copyPartial(snapshot: AgentLoopPartialSnapshot): AgentLoopPartialSnapshot {
+    return Object.freeze({
+        ...snapshot,
+        stopReason: Object.freeze({ ...snapshot.stopReason }),
+        toolsUsed: Object.freeze([...snapshot.toolsUsed]),
+        toolOutcomes: Object.freeze(snapshot.toolOutcomes.map(item => Object.freeze({ ...item }))),
+        toolCallDetails: Object.freeze(snapshot.toolCallDetails.map(item => Object.freeze({ ...item }))),
+        usage: Object.freeze({ ...snapshot.usage }),
+    });
 }
 
 /** Wpis w `toolCallDetails` wyniku pętli (podgląd dla UI/logów). */
@@ -135,6 +277,8 @@ interface AgentLoopLimits {
     /** Sufit skrótu dorobku narzędzi doklejanego do zaślepki backstopu, gdy finalna
      *  synteza nie powstała (model padł / cisza). 0/brak = goła zaślepka. */
     salvageMaxChars?: number;
+    /** Total optional synthesis budget including queue wait; 0 skips the request. */
+    synthesisTimeoutMs?: number;
     /** Sufit wyniku PER NARZĘDZIE - nadpisuje `maxToolResultLength`
      *  dla wymienionych nazw (0 = bez limitu dla tego narzędzia). Czat daje `delegate`
      *  większą porcję: wynik suba to deliverable po minutach roboty, nie surowy zrzut -
@@ -160,7 +304,12 @@ export interface RunAgentLoopOptions {
     limits?: AgentLoopLimits;
     modelOptions?: AgentLoopModelOptions;
     hooks?: AgentLoopHooks;
-    callbacks?: { chunk?: (resp: unknown) => void };
+    callbacks?: { chunk?: (resp: unknown) => void; partial?: (snapshot: AgentLoopPartialSnapshot) => void };
+    /** Frozen turn/task signal enables prompt observation while a tool is held. */
+    abortSignal?: AbortSignal;
+    abortReason?: () => 'manual-stop' | 'task-timeout' | 'superseded' | AgentLoopStopReason;
+    /** Known secret values to redact before partial clipping. */
+    knownSecrets?: readonly string[];
     /**
      * Predykat „ta tura jest przerwana". Pętla pyta go w SIEDMIU punktach - pełna lista
      * i uzasadnienie: `modules/agent-loop/CLAUDE.md` gotcha 9.
@@ -198,10 +347,9 @@ export interface RunAgentLoopResult {
     usage: Usage;
     iterations: number;
     stoppedBy: 'natural' | 'backstop' | 'abort';
+    stopReason?: AgentLoopStopReason;
+    partial?: AgentLoopPartialSnapshot;
 }
-
-/** Minimalny widok błędu narzędzia - `catch` w strict daje `unknown`. */
-type ErrLike = { message?: string } | null | undefined;
 
 /** Wynik JEDNEJ egzekucji narzędzia wewnątrz `Promise.all` (kształt wspólny dla sukcesu i błędu). */
 type ExecResult = {
@@ -247,6 +395,9 @@ export async function runAgentLoop({
     hooks = {},
     callbacks = {},
     shouldAbort,
+    abortSignal,
+    abortReason,
+    knownSecrets = [],
     onGateAdmitted,
     trace,
     log
@@ -261,10 +412,13 @@ export async function runAgentLoop({
     const maxToolResultLength = limits.maxToolResultLength || 0;
     const stallTimeoutMs = limits.stallTimeoutMs || 0;
     const salvageMaxChars = limits.salvageMaxChars || 0;
+    const synthesisTimeoutMs = limits.synthesisTimeoutMs ?? DEFAULT_LIMITS.model_synthesis_timeout_ms;
     const perToolResultCaps = limits.maxToolResultLengthPerTool || null;
 
     const chunkCb = typeof callbacks.chunk === 'function' ? callbacks.chunk : () => {};
-    const abort = typeof shouldAbort === 'function' ? shouldAbort : () => false;
+    const abort = abortSignal
+        ? () => abortLatched || (shouldAbort?.() ?? false)
+        : shouldAbort ?? (() => false);
 
     // modelOptions → payload. agentName wyjmujemy (to metadana do logów, nie pole API).
     const { maxTokens, thinking, agentName, ...restPayload } = modelOptions;
@@ -275,6 +429,101 @@ export async function runAgentLoop({
     let iterations = 0;
     let lastText = '';
     let currentToolDefs: ToolDefinition[] = [];
+
+    const ledger: { outcome: AgentLoopToolOutcome; detail?: ToolCallDetail }[] = [];
+    let terminal = false;
+    let abortLatched = abortSignal?.aborted === true;
+    let latchedReason: AgentLoopStopReason | undefined;
+    let stage: 'work' | 'synthesis' = 'work';
+    let failureKind: 'model-error' | 'hook-error' = 'hook-error';
+    let synthesis: AgentLoopPartialSnapshot['synthesis'] = 'skipped';
+    let latestPartial: AgentLoopPartialSnapshot | undefined;
+    let partialSignature = '';
+    let cancelStream: (() => void) | undefined;
+    let wakeAbort!: () => void;
+    const abortWake = new Promise<void>(resolve => { wakeAbort = resolve; });
+    const getAbortReason = (error?: unknown): AgentLoopStopReason => {
+        if (latchedReason) return latchedReason;
+        let reason: AgentLoopStopReason = { kind: 'manual-stop' };
+        try {
+            const supplied = abortReason?.();
+            if (supplied) reason = typeof supplied === 'string' ? { kind: supplied } : { ...supplied };
+        } catch { /* observer cannot replace original cause */ }
+        if (error && typeof error === 'object' && '_superseded' in error && error._superseded === true) reason = { kind: 'superseded' };
+        return (latchedReason = reason);
+    };
+    const publishPartial = (stopReason: AgentLoopStopReason): AgentLoopPartialSnapshot => {
+        // Text + duplicated previews together share one budget. Identity/status stay intact.
+        let remaining = 8000;
+        const clip = (text: string, cap = remaining): string => {
+            const result = text.slice(0, Math.min(cap, remaining));
+            remaining -= result.length;
+            return result;
+        };
+        const outcomes = ledger.map(({ outcome }) => ({
+            ...outcome,
+            name: partialPreview(outcome.name, knownSecrets).slice(0, 128),
+            ...(outcome.id === undefined ? {} : { id: partialPreview(outcome.id, knownSecrets).slice(0, 128) }),
+            resultPreview: clip(outcome.resultPreview, 2000),
+        }));
+        const last = clip(partialPreview(lastText, knownSecrets), 2000);
+        const details = outcomes.filter((_outcome, i) => ledger[i].detail !== undefined).map(outcome => ({
+            name: outcome.name, resultPreview: clip(outcome.resultPreview),
+            ...(outcome.outcome !== 'returned' ? { error: true } : {}),
+        }));
+        const snapshot: AgentLoopPartialSnapshot = {
+            kind: 'agent-loop-partial', revision: 0, stopReason: { ...stopReason }, synthesis,
+            toolsUsed: outcomes.map(item => item.name), toolOutcomes: outcomes, toolCallDetails: details,
+            usage: { ...totalUsage }, iterations, lastText: last, text: '',
+        };
+        snapshot.text = formatAgentLoopPartial(snapshot).slice(0, PARTIAL_MAX_CHARS - (8000 - remaining));
+        const signature = JSON.stringify(snapshot);
+        if (signature === partialSignature && latestPartial) return copyPartial(latestPartial);
+        partialSignature = signature;
+        snapshot.revision = (latestPartial?.revision ?? 0) + 1;
+        latestPartial = copyPartial(snapshot);
+        try {
+            const observed: unknown = callbacks.partial?.(copyPartial(latestPartial));
+            if (observed && (typeof observed === 'object' || typeof observed === 'function') && 'then' in observed) {
+                void Promise.resolve(observed).catch(() => {});
+            }
+        } catch { /* partial observers never obscure work/model/hook errors */ }
+        return copyPartial(latestPartial);
+    };
+    const onAbort = () => {
+        if (terminal || abortLatched) return;
+        abortLatched = true;
+        synthesis = 'skipped';
+        // Stop the owned request before a reentrant observer can start another one.
+        cancelStream?.();
+        wakeAbort();
+        publishPartial(getAbortReason());
+    };
+    const raceAbort = async <T>(work: T | PromiseLike<T>): Promise<T> => {
+        const pending = Promise.resolve(work);
+        if (abortLatched) { void pending.catch(() => {}); throw new LoopAbortError(); }
+        if (!abortSignal) return await pending;
+        return await Promise.race([pending, abortWake.then(() => { throw new LoopAbortError(); })]);
+    };
+    const callHook = async <T>(invoke: () => T | PromiseLike<T>): Promise<T> => {
+        failureKind = 'hook-error';
+        const value = await invoke();
+        return value;
+    };
+    const classifyFailure = (error: unknown): AgentLoopStopReason => {
+        if (error instanceof LoopTimerError && error.kind !== 'synthesis-budget') return { kind: error.kind, stage };
+        if (failureKind === 'hook-error') return { kind: 'hook-error', stage };
+        if (error && typeof error === 'object' && 'code' in error
+            && ['ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'NETWORK_ERROR', 'TRANSPORT_ERROR'].includes(String(error.code))) {
+            return { kind: 'transport-error', stage };
+        }
+        return { kind: 'model-error', stage };
+    };
+    const close = () => {
+        terminal = true;
+        abortSignal?.removeEventListener('abort', onAbort);
+    };
+
 
     /**
      * `.catch()` na promisie zwróconej przez `model.stream()` dostaje `reason: any` (standardowa
@@ -290,7 +539,7 @@ export async function runAgentLoop({
     const toRejectableError = (reason: unknown): Error => {
         if (reason instanceof Error) return reason;
         const hasMessage = reason && typeof reason === 'object' && typeof (reason as { message?: unknown }).message === 'string';
-        const err = new Error(hasMessage ? (reason as { message: string }).message : String(reason));
+        const err = new Error(hasMessage ? (reason as { message: string }).message : String(reason), { cause: reason });
         if (reason && typeof reason === 'object') Object.assign(err, reason);
         return err;
     };
@@ -301,95 +550,79 @@ export async function runAgentLoop({
     const _traceModel = model?.modelKey || model?.modelId;
     trace?.('loop.start', { max_iter: maxIterations, ...(_traceModel ? { model: _traceModel } : {}) });
 
-    // ── Promisyfikacja stream + opcjonalne budziki: per-call (absolutny) + ciszy ──
-    const _streamCall = (payload: Record<string, unknown>): Promise<ModelResponse> => {
-        // Przezbrojenie budzików (przypisywane niżej, gdy budzik w ogóle jest uzbrojony) -
-        // deklaracje PRZED wywołaniem streamu, bo handlery mogą odpalić synchronicznie (model bez
-        // bramki woła gate_admitted od ręki).
-        let rearmPerCallTimer: (() => void) | null = null;
-        let rearmStallTimer: (() => void) | null = null;
-        const streamPromise = new Promise<ModelResponse>((resolve, reject) => {
-            // Produkcyjny adapter (chat_adapter_base.stream) jest `async` i przy błędzie
-            // robi DWIE rzeczy: woła handlers.error ORAZ odrzuca zwracaną promisę. Bez
-            // właściciela tej promisy odrzucenie = ERR_UNHANDLED_REJECTION i śmierć procesu.
-            // Drugi reject po ścieżce callbackowej to no-op, więc nic się nie gryzie.
-            Promise.resolve(model.stream(payload, {
-                chunk: (resp) => {
-                    // KAŻDY chunk to dowód życia - watchdog ciszy liczy od nowa.
-                    rearmStallTimer?.();
-                    chunkCb(resp);
-                },
-                done: (resp) => resolve(resp),
-                error: (err) => reject(err),
-                gate_admitted: () => {
-                    rearmPerCallTimer?.();
-                    rearmStallTimer?.();
-                    // Sygnał leci dalej do wołacza (budżet delegacji startuje od
-                    // pierwszej admisji). Fire-and-forget - cudzy błąd nie wywraca streamu.
-                    try { onGateAdmitted?.(); }
-                    // Błąd oddajemy loggerowi ARGUMENTEM, nie w szablonie - `unknown`
-                    // w template literal to błąd `lint:obsidian`.
-                    catch (e) { logger.warn?.('AgentLoop', 'onGateAdmitted rzucił (ignorowane):', e); }
-                }
-            })).catch((err: unknown) => reject(toRejectableError(err)));
-        });
-        const racers: Promise<ModelResponse>[] = [streamPromise];
-        // Wspólne sprzątanie budzików po rozstrzygniętym wyścigu (wzór DelegateTool._withTimeout) -
-        // bez clearTimeout timery trzymałyby proces przy życiu do końca odliczania,
-        // a spóźniony sygnał (gate/chunk) nie może uzbroić NOWEGO budzika po sprzątaniu
-        // (stopStream ubiłby CUDZY, kolejny request).
-        let settled = false;
-        let perCallTimer: ReturnType<typeof setTimeout> | null = null;
-        let stallTimer: ReturnType<typeof setTimeout> | null = null;
-        if (perCallTimeoutMs > 0) {
-            // Timeout MUSI ubić request, nie tylko porzucić promisa. Promise.race bez abortu
-            // zostawiałby na lokalnym moście (proxy zgodne z LM Studio) zombie-joby, które
-            // mieliłyby dalej i zapychały jednowątkową kolejkę - kolejne wywołania (także
-            // głównego czatu) wisiałyby na martwym moście.
-            racers.push(new Promise<ModelResponse>((_, reject) => {
-                const arm = () => {
-                    if (settled) return;
-                    if (perCallTimer !== null) _nodeSafeClearTimeout(perCallTimer);
-                    perCallTimer = _nodeSafeSetTimeout(() => {
-                        try { model.stopStream?.(); } catch { /* abort nie może przykryć timeoutu */ }
-                        trace?.('model.timeout', { timeout_ms: perCallTimeoutMs });
-                        reject(new Error(t('agentLoop.model_timeout', { seconds: Math.round(perCallTimeoutMs / 1000) })));
-                    }, perCallTimeoutMs);
-                };
-                arm();
-                // Budzik liczony od WYSŁANIA requestu karałby suby za czekanie w kolejce
-                // bramki platform lokalnych (limit 1) - przy delegacji wielozadaniowej
-                // kolejka rosłaby ponad budżet, taski umierałyby seryjnie. gate_admitted
-                // przezbraja budzik: faza kolejki i faza streamu dostają PO pełnym
-                // budżecie perCallTimeoutMs.
-                rearmPerCallTimer = arm;
-            }));
-        }
-        if (stallTimeoutMs > 0) {
-            // Zegar ścienny bez uwzględnienia chunków nie odróżnia trupa od myśliciela -
-            // ubiłby suby piszące finalną syntezę na wolnym moście dokładnie w chwili roboty.
-            // Ten budzik strzela wyłącznie po PEŁNEJ ciszy modelu (zero chunków przez
-            // stallTimeoutMs): most w trybie „request przyjęty, zero bajtów" pada szybko,
-            // a model streamujący choćby podsumowania rozumowania żyje dalej.
-            racers.push(new Promise<ModelResponse>((_, reject) => {
-                const arm = () => {
-                    if (settled) return;
-                    if (stallTimer !== null) _nodeSafeClearTimeout(stallTimer);
-                    stallTimer = _nodeSafeSetTimeout(() => {
-                        try { model.stopStream?.(); } catch { /* abort nie może przykryć stalla */ }
-                        trace?.('model.stall', { stall_ms: stallTimeoutMs });
-                        reject(new Error(t('agentLoop.model_stall', { seconds: Math.round(stallTimeoutMs / 1000) })));
-                    }, stallTimeoutMs);
-                };
-                arm();
-                rearmStallTimer = arm;
-            }));
-        }
-        if (racers.length === 1) return streamPromise;
-        return Promise.race(racers).finally(() => {
-            settled = true;
-            if (perCallTimer !== null) _nodeSafeClearTimeout(perCallTimer);
-            if (stallTimer !== null) _nodeSafeClearTimeout(stallTimer);
+
+    // One request-local terminal guard owns all callbacks and timers, including no-timer calls.
+    const _streamCall = (payload: Record<string, unknown>, synthesisBudgetMs = 0): Promise<ModelResponse> => {
+        failureKind = 'model-error';
+        return new Promise<ModelResponse>((resolve, reject) => {
+            let settled = false;
+            let perCallTimer: ReturnType<typeof setTimeout> | undefined;
+            let stallTimer: ReturnType<typeof setTimeout> | undefined;
+            let synthesisTimer: ReturnType<typeof setTimeout> | undefined;
+            const finish = () => {
+                if (settled) return false;
+                settled = true;
+                if (perCallTimer !== undefined) _nodeSafeClearTimeout(perCallTimer);
+                if (stallTimer !== undefined) _nodeSafeClearTimeout(stallTimer);
+                if (synthesisTimer !== undefined) _nodeSafeClearTimeout(synthesisTimer);
+                if (cancelStream === cancel) cancelStream = undefined;
+                return true;
+            };
+            const fail = (error: Error) => { if (finish()) reject(error); };
+            const stop = () => { try { model.stopStream?.(); } catch { /* preserve accepted cause */ } };
+            const cancel = () => {
+                if (!settled) { fail(new LoopAbortError()); stop(); }
+            };
+            cancelStream = cancel;
+            const expire = (kind: LoopTimerError['kind'], budgetMs: number) => {
+                if (!finish()) return;
+                // Settlement and timer cleanup precede stop's possibly synchronous abort callback.
+                reject(new LoopTimerError(kind, budgetMs));
+                stop();
+                trace?.(kind === 'silence' ? 'model.stall' : kind === 'model-timeout' ? 'model.timeout' : 'synthesis.timeout',
+                    { budget_ms: budgetMs });
+            };
+            const armPerCall = () => {
+                if (settled || perCallTimeoutMs <= 0) return;
+                if (perCallTimer !== undefined) _nodeSafeClearTimeout(perCallTimer);
+                perCallTimer = _nodeSafeSetTimeout(() => expire('model-timeout', perCallTimeoutMs), perCallTimeoutMs);
+            };
+            // Complete/emulated providers cannot expose semantic progress until completion.
+            const observeSilence = model.streamMode !== 'complete' && model.streaming !== false && model.providerId !== 'xai';
+            const armStall = () => {
+                if (settled || stallTimeoutMs <= 0 || !observeSilence) return;
+                if (stallTimer !== undefined) _nodeSafeClearTimeout(stallTimer);
+                stallTimer = _nodeSafeSetTimeout(() => expire('silence', stallTimeoutMs), stallTimeoutMs);
+            };
+            if (abortLatched) { cancel(); return; }
+            armPerCall(); armStall();
+            if (synthesisBudgetMs > 0) {
+                synthesisTimer = _nodeSafeSetTimeout(() => expire('synthesis-budget', synthesisBudgetMs), synthesisBudgetMs);
+            }
+            try {
+                const opened = model.stream(payload, {
+                    chunk: resp => {
+                        if (settled || terminal || abortLatched) return;
+                        armStall();
+                        if (resp && typeof resp === 'object') {
+                            const text = _extractText(resp as ModelResponse);
+                            if (text) lastText = text;
+                        }
+                        chunkCb(resp);
+                    },
+                    done: resp => { if (finish()) resolve(resp); },
+                    error: err => { if (!settled) fail(err); },
+                    gate_admitted: () => {
+                        if (settled || terminal || abortLatched) return;
+                        armPerCall(); armStall();
+                        try { onGateAdmitted?.(); }
+                        catch (e) { logger.warn?.('AgentLoop', 'onGateAdmitted failed (ignored):', e); }
+                    },
+                });
+                void Promise.resolve(opened).catch((err: unknown) => {
+                    if (!settled) fail(toRejectableError(err));
+                });
+            } catch (err) { if (!settled) fail(toRejectableError(err)); }
         });
     };
 
@@ -407,12 +640,26 @@ export async function runAgentLoop({
         return payload;
     };
 
-    const finalize = (text: string, stoppedBy: RunAgentLoopResult['stoppedBy']): RunAgentLoopResult => {
+
+    const finalize = (
+        text: string, stoppedBy: RunAgentLoopResult['stoppedBy'],
+        stopReason: AgentLoopStopReason = stoppedBy === 'abort' ? getAbortReason() : { kind: 'natural' },
+    ): RunAgentLoopResult => {
         _fillEstimatedUsage(totalUsage, store.getMessagesForAPI(), currentToolDefs, text || '');
-        trace?.('loop.end', { stop: stoppedBy, iters: iterations, total_ms: Date.now() - _loopStart });
+        if (stoppedBy === 'abort') { synthesis = 'skipped'; publishPartial(stopReason); }
+        close();
+        trace?.('loop.end', { stop: stoppedBy, iters: iterations, total_ms: Date.now() - _loopStart,
+            ...(stoppedBy === 'backstop' && synthesis !== 'completed' ? { fallback: 1 } : {}) });
         logger.groupEnd?.();
-        return { finalText: text || '', toolsUsed, toolCallDetails, usage: totalUsage, iterations, stoppedBy };
+        return {
+            finalText: text || '', toolsUsed: [...toolsUsed],
+            toolCallDetails: toolCallDetails.map(detail => ({ ...detail })),
+            usage: { ...totalUsage }, iterations, stoppedBy, stopReason: { ...stopReason },
+            ...(latestPartial ? { partial: copyPartial(latestPartial) } : {}),
+        };
     };
+    abortSignal?.addEventListener('abort', onAbort, { once: true });
+    if (abortLatched) wakeAbort();
 
     // KORPUS ITERACJI POD STRAŻNIKIEM: `try` obejmuje hooki, `resolveTools` i `store`, nie
     // tylko wywołanie modelu. Rzut z dowolnego z nich (np. chatowy `onToolResults` zaczyna od
@@ -434,7 +681,8 @@ export async function runAgentLoop({
             return finalize(lastText, 'abort');
         }
 
-        await hooks.onIterationStart?.(i);
+        await callHook(() => hooks.onIterationStart?.(i));
+        if (abort()) return finalize(lastText, 'abort');
 
         // Świeża whitelista narzędzi na start każdej iteracji.
         currentToolDefs = (typeof resolveTools === 'function' ? resolveTools() : []) || [];
@@ -458,9 +706,9 @@ export async function runAgentLoop({
             // Rozpoznajemy dwa dowody: flagę wołacza (`shouldAbort`) ORAZ znacznik na błędzie
             // - pierwszy bywa niedostępny (czat ustawia go dopiero na swojej ścieżce), drugi
             // jest zawsze.
-            if (abort() || (err as { _aborted?: boolean } | null)?._aborted === true) {
+            if (!(err instanceof LoopTimerError) && (err instanceof LoopAbortError || abort() || (err as { _aborted?: boolean } | null)?._aborted === true)) {
                 logger.debug?.('AgentLoop', `Iteracja ${i + 1}: stream przerwany z zewnątrz — kończę jako abort`);
-                return finalize(lastText, 'abort');
+                return finalize(lastText, 'abort', getAbortReason(err));
             }
             // `loop.end stop=error` emituje JEDEN strażnik - catch całej trasy głównej.
             // Tu tylko oddajemy błąd w górę, żeby nie było dwóch linii domknięcia.
@@ -471,7 +719,7 @@ export async function runAgentLoop({
         if (response?.usage) {
             totalUsage.prompt_tokens += response.usage.prompt_tokens || 0;
             totalUsage.completion_tokens += response.usage.completion_tokens || 0;
-            await hooks.onUsage?.(response.usage, i);
+            await callHook(() => hooks.onUsage?.(response.usage!, i));
             trace?.('model.done', { i, in: response.usage.prompt_tokens || 0, out: response.usage.completion_tokens || 0 });
         } else {
             trace?.('model.done', { i, usage: 'none' });
@@ -495,7 +743,7 @@ export async function runAgentLoop({
                 logger.debug?.('AgentLoop', `Iteracja ${i + 1}: brak tool calls, minIterations=${minIterations} — wymuszam kontynuację`);
                 store.appendAssistant(content || null, reasoning !== undefined ? { reasoning_content: reasoning } : {});
                 store.appendUser(t('agentLoop.min_iterations_nudge'));
-                await hooks.beforeContinue?.(i);
+                await callHook(() => hooks.beforeContinue?.(i));
                 continue;
             }
             logger.debug?.('AgentLoop', `Iteracja ${i + 1}: brak tool calls, zwracam tekst (${content.length} zn.)`);
@@ -504,7 +752,8 @@ export async function runAgentLoop({
 
         // Hook PRZED egzekucją (ask_user: placeholdery UI). Zwrócona tablica → filtracja.
         let effective = parsed;
-        const hookResult = await hooks.onToolCallsParsed?.(parsed, i);
+        const hookResult = await callHook(() => hooks.onToolCallsParsed?.(parsed, i));
+        if (abort()) return finalize(content || lastText, 'abort');
         if (Array.isArray(hookResult)) {
             effective = hookResult;
             // Trace: hook coś odfiltrował (dziś ask_user czatu) → nazwy usuniętych.
@@ -530,51 +779,75 @@ export async function runAgentLoop({
             // Kontrakt wyniku mówi `toolsUsed: string[]`; dostawca teoretycznie może nie podać
             // nazwy w ogóle - runtime wpycha wtedy `undefined` jak dotąd (asercja nic nie zmienia).
             const tName = tc.name || tc.function?.name;
-            toolsUsed.push(tName as string);
+            // Tool identities enter the ledger when execution starts below.
             // Trace PER TOOL przed egzekucją; args = surowe arguments (TraceLog przytnie do 200).
             trace?.('tool.pre', { i, tool: tName, args: tc.arguments ?? tc.function?.arguments });
         }
 
-        // Egzekucja równolegle (Promise.all zachowuje kolejność).
+
+        // Invocation identity is assigned at start; record raw outcome before any store/hook.
         const _batchStart = Date.now();
-        const results = await Promise.all(effective.map(async (tc): Promise<ExecResult> => {
+        const settledResults: ExecResult[] = [];
+        let batchInterrupted = false;
+        const batch = Promise.all(effective.map(async (tc): Promise<ExecResult> => {
             const toolName = tc.name || tc.function?.name;
             const toolArgs = tc.arguments ?? tc.function?.arguments;
+            if (abortLatched) return { toolCall: tc, toolName, parsedArgs: toolArgs, result: '', error: false };
+            const entry: typeof ledger[number] = { outcome: {
+                invocation: ledger.length + 1, ...(tc.id ? { id: tc.id } : {}), name: toolName || '?',
+                outcome: 'unknown', effect: 'unverified', resultPreview: '',
+            } };
+            ledger.push(entry);
+            toolsUsed.push(toolName as string);
+            let parsedArgs = toolArgs;
+            try { if (typeof toolArgs === 'string') parsedArgs = JSON.parse(toolArgs); } catch { /* preserve args */ }
+            const record = (result: ExecResult, raw: unknown, outcome: AgentLoopToolOutcome['outcome']) => {
+                if (terminal || abortLatched) return result;
+                entry.outcome.outcome = outcome;
+                entry.outcome.resultPreview = partialPreview(raw, knownSecrets).slice(0, PARTIAL_MAX_CHARS);
+                entry.detail = { name: toolName, args: parsedArgs, resultPreview: entry.outcome.resultPreview.slice(0, 500),
+                    ...(outcome !== 'returned' ? { error: true } : {}) };
+                toolCallDetails.length = 0;
+                for (const item of ledger) if (item.detail) toolCallDetails.push({ ...item.detail });
+                settledResults.push(result);
+                return result;
+            };
             try {
                 const resultBudgetChars = (toolName && perToolResultCaps && toolName in perToolResultCaps)
-                    ? perToolResultCaps[toolName]
-                    : maxToolResultLength;
+                    ? perToolResultCaps[toolName] : maxToolResultLength;
                 const raw = await executeToolCall(
-                    { id: tc.id, name: toolName, arguments: toolArgs },
-                    { resultBudgetChars, shouldAbort: abort },
+                    { id: tc.id, name: toolName, arguments: toolArgs }, { resultBudgetChars, shouldAbort: abort },
                 );
-                // Zawartość multimodalna (tablica bloków content, np. generate_image z obrazem dla
-                // modelu vision) przechodzi BEZ zmian - nie stringifikujemy jej ani nie obcinamy
-                // (obcinanie dotyczy tylko tekstu). Czat zwraca taką tablicę dla generate_image
-                // +vision, żeby model „widział" wygenerowany obraz w kolejnej iteracji.
-                let resultStr: string | unknown[];
-                if (Array.isArray(raw)) {
-                    resultStr = raw;
-                } else {
-                    resultStr = typeof raw === 'string' ? raw : JSON.stringify(raw);
-                    // Per-tool override sufitu (`??`, bo 0 = świadome „bez limitu").
-                    resultStr = _truncateResult(resultStr, resultBudgetChars);
+                // Raw status/preview are captured before stringification (which itself can fail).
+                if (!terminal && !abortLatched) {
+                    entry.outcome.outcome = toolResultStatus(raw) === 'error' ? 'error' : 'returned';
+                    entry.outcome.resultPreview = partialPreview(raw, knownSecrets).slice(0, PARTIAL_MAX_CHARS);
+                    entry.detail = { name: toolName, args: parsedArgs, resultPreview: entry.outcome.resultPreview.slice(0, 500),
+                        ...(entry.outcome.outcome === 'error' ? { error: true } : {}) };
+                    toolCallDetails.length = 0;
+                    for (const item of ledger) if (item.detail) toolCallDetails.push({ ...item.detail });
                 }
-                let parsedArgs = toolArgs;
-                try { if (typeof toolArgs === 'string') parsedArgs = JSON.parse(toolArgs); } catch { /* args nie-JSON - zostaw surowe */ }
-                return { toolCall: tc, toolName, parsedArgs, result: resultStr, error: false };
+                const result = Array.isArray(raw) ? raw : _truncateResult(typeof raw === 'string' ? raw : JSON.stringify(raw) ?? '', resultBudgetChars);
+                const error = toolResultStatus(raw) === 'error';
+                return record({ toolCall: tc, toolName, parsedArgs, result, error }, raw, error ? 'error' : 'returned');
             } catch (toolError) {
-                logger.warn?.('AgentLoop', `Tool ${toolName} ERROR: ${((toolError as ErrLike)?.message || toolError) as string}`);
-                return {
-                    toolCall: tc,
-                    toolName,
-                    parsedArgs: toolArgs,
-                    result: `Error: ${((toolError as ErrLike)?.message || toolError) as string}`,
-                    error: true,
-                    errorMsg: (toolError as ErrLike)?.message
-                };
+                if (entry.detail && !terminal && !abortLatched) throw toolError;
+                const message = toolError instanceof Error ? toolError.message : String(toolError);
+                const uncertain = toolError && typeof toolError === 'object'
+                    && (('code' in toolError && ['TOOL_TIMEOUT', 'TIMEOUT', 'ETIMEDOUT'].includes(String(toolError.code)))
+                        || ('name' in toolError && toolError.name === 'TimeoutError')
+                        || ('_aborted' in toolError && toolError._aborted === true));
+                return record({ toolCall: tc, toolName, parsedArgs, result: 'Error: ' + message, error: true, errorMsg: message },
+                    'Error: ' + message, uncertain ? 'unknown' : 'error');
             }
         }));
+        let results: ExecResult[];
+        try { results = await raceAbort(batch); }
+        catch (error) {
+            if (!(error instanceof LoopAbortError)) throw error;
+            batchInterrupted = true;
+            results = settledResults.sort((a, b) => effective.indexOf(a.toolCall) - effective.indexOf(b.toolCall));
+        }
         const _batchMs = Date.now() - _batchStart;
 
         // Trace PER TOOL po Promise.all. chars = długość result; dla tablic multimodalnych
@@ -592,7 +865,7 @@ export async function runAgentLoop({
 
         // Rekonstrukcja tool_calls do store z PRZEFILTROWANYCH wywołań (id+name).
         // Wzór chat_streaming.js:886-901 - bez tego orphan tool_result → API 400.
-        const apiToolCalls = effective
+        const apiToolCalls = (batchInterrupted ? effective.filter(tc => results.some(r => r.toolCall === tc)) : effective)
             .filter((tc) => tc.id && (tc.name || tc.function?.name))
             .map((tc) => {
                 const rawArgs = tc.arguments ?? tc.function?.arguments;
@@ -617,7 +890,7 @@ export async function runAgentLoop({
         // inaczej wyjątek hooka (np. zapis dziennika sesji na dysku) gubiłby i wywołanie, i
         // wynik, mimo że narzędzie zdążyło już zrobić swoje w vaultcie - model przy następnej
         // turze tego by nie widział i mógłby zapis powtórzyć.
-        if (!orphaned) {
+        if (!orphaned && apiToolCalls.length > 0) {
             store.appendAssistant(content || null, {
                 tool_calls: apiToolCalls,
                 ...(reasoning !== undefined ? { reasoning_content: reasoning } : {})
@@ -628,20 +901,14 @@ export async function runAgentLoop({
             }
         }
 
-        // Hook PO egzekucji (kolejność = kolejność tool_calls).
-        await hooks.onToolResults?.(
-            results.map((r) => ({ toolCall: r.toolCall, result: r.result, ...(r.error ? { error: r.errorMsg || true } : {}) })),
-            i
-        );
 
-        for (const r of results) {
-            toolCallDetails.push({
-                name: r.toolName,
-                args: r.parsedArgs,
-                resultPreview: String(r.result).slice(0, 500),
-                ...(r.error && { error: true })
-            });
+        // Account observed settlements only. Held unresolved calls never become invented results.
+        if (results.length > 0) {
+            await callHook(() => hooks.onToolResults?.(
+                results.map(r => ({ toolCall: r.toolCall, result: r.result, ...(r.error ? { error: r.errorMsg || true } : {}) })), i,
+            ));
         }
+        if (batchInterrupted) return finalize(content || lastText, 'abort');
 
         if (orphaned) {
             logger.error?.('AgentLoop', `ORPHAN GUARD: 0 poprawnych tool_calls, a ${results.length} wyników — kończę turę czysto`);
@@ -660,7 +927,7 @@ export async function runAgentLoop({
             return finalize(content || lastText, 'abort');
         }
 
-        await hooks.beforeContinue?.(i);
+        await callHook(() => hooks.beforeContinue?.(i));
     }
 
     // ── Backstop: wyczerpano maxIterations → finalne zapytanie BEZ narzędzi ──
@@ -674,11 +941,18 @@ export async function runAgentLoop({
         return finalize(lastText, 'abort');
     }
     logger.warn?.('AgentLoop', `Max iteracji (${maxIterations}) osiągnięty! Tools used: ${toolsUsed.join(', ')}`);
-    await hooks.onBackstop?.();
+    stage = 'synthesis';
+    synthesis = synthesisTimeoutMs === 0 ? 'skipped' : 'pending';
+    publishPartial({ kind: 'iteration-limit' });
+    await callHook(() => hooks.onBackstop?.());
+    if (abort()) return finalize(lastText, 'abort');
     trace?.('backstop', { after: maxIterations });
+
     } catch (err) {
-        // Jedyny punkt, w którym trasa główna (iteracje + wejście w backstop) domyka trace
-        // przy awarii. `stoppedBy:'error'` pętla nie zna - błąd leci w górę.
+        if (err instanceof LoopAbortError) return finalize(lastText, 'abort', getAbortReason(err));
+        synthesis = 'failed';
+        publishPartial(classifyFailure(err));
+        close();
         trace?.('loop.end', { stop: 'error', iters: iterations, total_ms: Date.now() - _loopStart });
         logger.groupEnd?.();
         throw err;
@@ -694,73 +968,44 @@ export async function runAgentLoop({
         // przy abercie: przerwana/domknięta tura nie zostawia po sobie wiadomości, której
         // user nie zamawiał.
         apiMessages.push({ role: 'user', content: t('agentLoop.backstop_hardstop') });
-        const finalResponse = await _streamCall(_buildPayload(apiMessages, null)); // brak pola tools
 
-        // Druga strona: Stop mógł paść, gdy finalny strzał JUŻ WRACAŁ.
-        if (abort()) {
-            logger.debug?.('AgentLoop', 'Backstop: abort po finalnym zapytaniu — kończę jako abort');
-            return finalize(lastText, 'abort');
+        if (synthesisTimeoutMs === 0) {
+            synthesis = 'skipped';
+            const partial = publishPartial({ kind: 'iteration-limit' });
+            return finalize(partial.text, 'backstop', { kind: 'iteration-limit' });
         }
+        const finalResponse = await _streamCall(_buildPayload(apiMessages, null), synthesisTimeoutMs);
 
+        if (abort()) return finalize(lastText, 'abort');
         if (finalResponse?.usage) {
             totalUsage.prompt_tokens += finalResponse.usage.prompt_tokens || 0;
             totalUsage.completion_tokens += finalResponse.usage.completion_tokens || 0;
-            await hooks.onUsage?.(finalResponse.usage, iterations);
+            await callHook(() => hooks.onUsage?.(finalResponse.usage!, iterations));
             trace?.('model.done', { i: iterations, in: finalResponse.usage.prompt_tokens || 0, out: finalResponse.usage.completion_tokens || 0 });
-        } else {
-            trace?.('model.done', { i: iterations, usage: 'none' });
-        }
-
-        let finalText = _extractText(finalResponse);
-        finalText = _stripHallucinatedToolTags(finalText); // tanie modele halucynują tagi XML/DSML/invoke
-
+        } else trace?.('model.done', { i: iterations, usage: 'none' });
+        const finalText = _stripHallucinatedToolTags(_extractText(finalResponse));
+        if (finalText) lastText = finalText;
+        synthesis = finalText ? 'completed' : 'skipped';
         _fillEstimatedUsage(totalUsage, store.getMessagesForAPI(), currentToolDefs, finalText);
-        // Backstop omija finalize() - emituj loop.end tutaj (stop=backstop).
-        // `fallback=1` odróżnia backstop, który oddał ZAŚLEPKĘ (model nie dał tekstu), od
-        // backstopu z realnym podsumowaniem. Bez tego pola oba zejścia zostawiałyby w trace
-        // identyczną linię `stop=backstop iters=N`, nie dałoby się ich policzyć. Pole
-        // dokładamy TYLKO przy zaślepce, więc linia „udanego" backstopu nie zmienia się o bajt.
-        trace?.('loop.end', {
-            stop: 'backstop',
-            iters: iterations,
-            total_ms: Date.now() - _loopStart,
-            ...(finalText ? {} : { fallback: 1 }),
-        });
-        logger.groupEnd?.();
-        return {
-            // Zaślepka niesie skrót dorobku narzędzi (salvage) - patrz _fallbackWithSalvage.
-            finalText: finalText || _fallbackWithSalvage(store, salvageMaxChars),
-            toolsUsed,
-            toolCallDetails,
-            usage: totalUsage,
-            iterations,
-            stoppedBy: 'backstop'
-        };
+        publishPartial({ kind: 'iteration-limit' });
+        return finalize(finalText || _fallbackWithSalvage(store, salvageMaxChars), 'backstop', { kind: 'iteration-limit' });
     } catch (err) {
-        // Stop w trakcie FINALNEGO strzału to PRZERWANIE, nie awaria backstopu. Bramka przed
-        // backstopem sama tego nie pokrywa - ten `catch`, inaczej niż `catch` pętli głównej,
-        // musi też pytać o abort: `stopStream` odrzuca promisę znacznikiem `_aborted`, więc
-        // bez tego sprawdzenia tura schodziłaby jako `backstop`, czyli u wołacza gałęzią
-        // FINALIZACJI - zaślepka z salvage lądowałaby w oknie kontekstu i w pliku sesji,
-        // TokenTracker liczyłby odpowiedź, a przy przekroczonym progu ruszałaby jeszcze
-        // kompresja. Po Stopie. Dwa dowody jak wyżej.
-        if (abort() || (err as { _aborted?: boolean } | null)?._aborted === true) {
-            logger.debug?.('AgentLoop', 'Backstop: finalny strzał przerwany z zewnątrz — kończę jako abort');
-            return finalize(lastText, 'abort');
+        if (err instanceof LoopTimerError && err.kind === 'synthesis-budget') {
+            synthesis = 'budget-expired';
+            const reason: AgentLoopStopReason = { kind: 'synthesis-budget', budgetMs: err.budgetMs };
+            const partial = publishPartial(reason);
+            return finalize(partial.text, 'backstop', reason);
         }
-        logger.warn?.('AgentLoop', `Backstop final call błąd: ${((err as ErrLike)?.message || err) as string}`);
-        _fillEstimatedUsage(totalUsage, store.getMessagesForAPI(), currentToolDefs, '');
-        // Ta gałąź ZAWSZE oddaje zaślepkę (finalny strzał padł), więc zawsze `fallback=1`.
-        trace?.('loop.end', { stop: 'backstop', iters: iterations, total_ms: Date.now() - _loopStart, fallback: 1 });
+        if (err instanceof LoopAbortError || (!(err instanceof LoopTimerError)
+            && (abort() || (err as { _aborted?: boolean } | null)?._aborted === true))) {
+            return finalize(lastText, 'abort', getAbortReason(err));
+        }
+        synthesis = 'failed';
+        publishPartial(classifyFailure(err));
+        close();
+        trace?.('loop.end', { stop: 'error', iters: iterations, total_ms: Date.now() - _loopStart });
         logger.groupEnd?.();
-        return {
-            finalText: _fallbackWithSalvage(store, salvageMaxChars),
-            toolsUsed,
-            toolCallDetails,
-            usage: totalUsage,
-            iterations,
-            stoppedBy: 'backstop'
-        };
+        throw err;
     }
 }
 

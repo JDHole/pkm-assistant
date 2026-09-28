@@ -902,3 +902,6 @@ Memory v3 critical path ma testy w:
 - `modules/agent-loop/CLAUDE.md` - `toolTranscriptSanitizer`
 - `modules/tools/CLAUDE.md` - `SearchTool`, `MemorySaveTool`, `MemoryDeleteTool`, prymitywy
   `read`/`list`
+
+
+U3: `appendSessionEvent(path,event): Promise<string>` writes only an explicit file under this memory owner active-sessions root. It shares the existing per-path queue and event format, reads the target even with warm caches, and rejects missing/unreadable targets without creation, redirection or changing activeSessionPath.

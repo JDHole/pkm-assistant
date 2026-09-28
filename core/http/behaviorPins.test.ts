@@ -25,8 +25,14 @@ type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => void;
 
 async function withServer(handler: Handler, fn: (url: string) => Promise<void>): Promise<void> {
     const server = http.createServer(handler);
-    await new Promise<void>(res => server.listen(0, '127.0.0.1', res));
-    const port = (server.address() as { port: number }).port;
+    // Windows can allocate 4045, which fetch rejects as an unsafe port before I/O.
+    let port = 4045;
+    for (let attempt = 0; attempt < 5 && port === 4045; attempt++) {
+        await new Promise<void>(res => server.listen(0, '127.0.0.1', res));
+        port = (server.address() as { port: number }).port;
+        if (port === 4045) await new Promise<void>(res => server.close(() => res()));
+    }
+    if (port === 4045) throw new Error('Could not allocate a fetch-compatible test port');
     try {
         await fn(`http://127.0.0.1:${port}/v1/stream`);
     } finally {

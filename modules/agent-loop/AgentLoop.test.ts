@@ -841,13 +841,13 @@ test('trace odróżnia backstop z wynikiem od backstopu z zaślepką', async (t)
     const runUntilBackstop = async (finalCallFails: boolean) => {
         const traced: TraceEvent[] = [];
         const model = {
-            stream(payload: Payload, { done, error }: StreamHandlers) {
+            stream(payload: Payload, { done }: StreamHandlers) {
                 if (payload.tools) {
                     Promise.resolve().then(() => done(assistantToolCall('loop_tool', {}, 'c1')));
                     return;
                 }
                 // payload bez `tools` = finalny strzał backstopu
-                if (finalCallFails) Promise.resolve().then(() => error(new Error('Model timeout')));
+                if (finalCallFails) Promise.resolve().then(() => done(assistantText('')));
                 else Promise.resolve().then(() => done(assistantText('PODSUMOWANIE')));
             }
         };
@@ -983,21 +983,23 @@ test('salvage — zaślepka backstopu niesie skrót dorobku narzędzi (pusty fin
     t.true(res.finalText.includes('WYNIK: 26 notatek o smoke testach'));
 });
 
-test('salvage — backstop PADŁ (błąd modelu) → catch też oddaje skrót dorobku', async (t) => {
+
+test('backstop provider failure rejects with original cause and retains literal tool outcome', async t => {
+    const cause = new Error('most zwisł');
     const model = makeModel((_payload: Payload, i: number) => {
         if (i === 0) return assistantToolCall('read', { path: 'a.md' }, 'c1');
-        throw new Error('most zwisł'); // finalny strzał backstopu pada
+        throw cause;
     });
-    const store = new ArrayMessageStore([{ role: 'user', content: 'go' }]);
-    const res = await runAgentLoop({
-        model,
-        store,
-        resolveTools: () => [toolDef('read')],
-        executeToolCall: async () => 'TREŚĆ NOTATKI A',
-        limits: { maxIterations: 1, salvageMaxChars: 5000 }
-    });
-    t.is(res.stoppedBy, 'backstop');
-    t.true(res.finalText.includes('TREŚĆ NOTATKI A'), res.finalText);
+    const partials: import('./AgentLoop.js').AgentLoopPartialSnapshot[] = [];
+    const error = await t.throwsAsync(runAgentLoop({
+        model, store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        resolveTools: () => [toolDef('read')], executeToolCall: async () => 'TREŚĆ NOTATKI A',
+        limits: { maxIterations: 1, salvageMaxChars: 5000 },
+        callbacks: { partial: snapshot => partials.push(snapshot) },
+    }));
+    t.is(error, cause);
+    t.is(partials.at(-1)?.synthesis, 'failed');
+    t.is(partials.at(-1)?.toolOutcomes[0].resultPreview, 'TREŚĆ NOTATKI A');
 });
 
 test('salvage wyłączony (0/brak) — zaślepka zostaje gołą zaślepką', async (t) => {

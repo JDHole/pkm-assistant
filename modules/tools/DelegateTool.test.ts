@@ -116,7 +116,7 @@ test('timeout zadania ubija suba: stopStream modelu zawołany, runner dostał sh
         stream() { /* nigdy nie wraca */ }
         stopStream() { streamStopped++; }
     }
-    type AbortRunnerOptions = RunnerOptions & { modelTimeout?: number; shouldAbort?: () => boolean };
+    type AbortRunnerOptions = RunnerOptions & { modelTimeout?: number; shouldAbort?: () => boolean; abortSignal?: AbortSignal; abortReason?: () => string };
     const captured: { options?: AbortRunnerOptions } = {};
     const activeAgent = { name: 'Jaskier', activeSubAgents: [] };
     const plugin = {
@@ -149,6 +149,8 @@ test('timeout zadania ubija suba: stopStream modelu zawołany, runner dostał sh
     t.is(streamStopped, 1, 'timeout delegacji zawołał stopStream modelu suba');
     t.is(captured.options!.modelTimeout, 30, 'budżet modelu suba = budżet zadania');
     t.true(captured.options!.shouldAbort!(), 'po timeoucie flaga abortu pętli suba jest podniesiona');
+    t.true(captured.options!.abortSignal?.aborted);
+    t.is(captured.options!.abortReason?.(), 'task-timeout');
 });
 
 test('resolveDelegate without aspect returns generic worker marker', t => {
@@ -1469,10 +1471,11 @@ test('bieg z failed:true wraca do modelu jako success:false + stopped_by "error"
         makeRunner: () => ({
             runTask: async () => ({
                 result: 'Błąd sub-agenta pkm-sub: Model timeout',
-                toolsUsed: [],
-                toolCallDetails: [],
+                toolsUsed: ['create_folder'],
+                toolCallDetails: [{ name: 'create_folder', resultPreview: 'created Notes/U3' }],
                 duration: 1234,
-                usage: null,
+                usage: { prompt_tokens: 7, completion_tokens: 3 },
+                stopReason: { kind: 'model-error', stage: 'synthesis' } as const,
                 stoppedBy: 'error',
                 failed: true as const,
             }),
@@ -1480,12 +1483,16 @@ test('bieg z failed:true wraca do modelu jako success:false + stopped_by "error"
     });
 
     const out = await tool.execute({ task: 'zrób raport', timeout_ms: 500, background: false }, {}, pluginDlaZejscia()) as
-        { success?: boolean; error?: string; stopped_by?: string; duration_ms?: number; result?: unknown };
+        { success?: boolean; error?: string; stopped_by?: string; duration_ms?: number; result?: unknown; tools_used?: string[]; tool_call_details?: unknown[]; usage?: unknown; stop_reason?: unknown };
 
     t.false(out.success, 'błąd suba NIE MOŻE udawać sukcesu');
     t.is(out.stopped_by, 'error');
     t.true((out.error || '').includes('Model timeout'));
     t.is(out.duration_ms, 1234);
+    t.deepEqual(out.tools_used, ['create_folder']);
+    t.deepEqual(out.tool_call_details, [{ name: 'create_folder', resultPreview: 'created Notes/U3' }]);
+    t.deepEqual(out.usage, { prompt_tokens: 7, completion_tokens: 3 });
+    t.deepEqual(out.stop_reason, { kind: 'model-error', stage: 'synthesis' });
     t.is(out.result, undefined, 'gałąź błędu nie udaje, że jest wynik');
 });
 

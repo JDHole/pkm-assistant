@@ -254,3 +254,23 @@ test.serial('append_message: przywołanie artefaktu na żywo (_artifactSummon) r
         t.false(details!.textContent.includes('{'), 'zaden fragment JSON-a nie ma prawa trafic do DOM-u');
     });
 });
+
+for (const sample of [
+    { name: 'live metadata', text: 'Utworzono folder TEST-U3. Efekt niezweryfikowany.', meta: { _loopPartial: true } },
+    { name: 'restored system receipt', text: 'Częściowy wynik tej tury\n\nUtworzono folder TEST-U3. Efekt niezweryfikowany.', meta: {} },
+]) {
+    test.serial('render_messages: loop partial survives history render - ' + sample.name, async t => {
+        await withFakeDocument(async () => {
+            const container = makeFakeEl('div');
+            const view = buildFakeThis(container, [{ role: 'system', content: sample.text, ...sample.meta }]);
+            await render_messages.call(view);
+            t.is(container.children.length, 1, 'exactly one visible receipt');
+            const tile = findByClass(container, 'cs-tile--system');
+            t.true(Boolean(tile), 'partial is a system tile');
+            const head = tile && findByClass(tile, 'cs-tile__head');
+            (head?.listeners.click || []).forEach(cb => cb({}));
+            const details = tile && findByClass(tile, 'cs-tile__details');
+            t.is(details?.textContent, sample.text);
+        });
+    });
+}

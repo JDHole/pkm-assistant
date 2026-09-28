@@ -58,6 +58,8 @@ import { getLimits } from '../../../config/limits.js';
 import { runAgentLoop } from '../../agent-loop/index.js';
 import { RollingWindowMessageStore } from './RollingWindowMessageStore.js';
 import { createTurnAbort, collectTurnsToStop, collectSubTaskIdsForOwners } from './turnAbort.js';
+import { ChatTurnPartialState } from './turnPartial.js';
+import type { ActiveSessionEventInput } from '../../memory/index.js';
 import { freezeTurnOwner } from './turnOwner.js';
 import { evaluateAutoTurnChain, resetAutoTurnChain } from './autoTurnChain.js';
 import { RenderThrottle, shouldPaintFrame } from './renderThrottle.js';
@@ -154,6 +156,7 @@ interface ChatTurn {
     owner: FrozenTurnOwner;
     turnId: number;
     abort: TurnAbortHandle;
+    partial?: ChatTurnPartialState;
     origin: SubTaskOrigin;
     rw: RollingWindow;
     tt: TokenTracker;
@@ -177,6 +180,14 @@ interface ChatTurn {
     lastInputChars: number;
     watchdog?: StreamWatchdogType;
     streamId?: string;
+}
+
+async function appendTurnSessionEvent(turn: ChatTurn, event: ActiveSessionEventInput): Promise<void> {
+    const memory = turn.owner.memory;
+    const path = turn.origin.sessionPath;
+    if (!memory || !path) return;
+    try { await memory.appendSessionEvent(path, event); }
+    catch { log.warn('Chat', 'Frozen turn session event could not be persisted'); }
 }
 
 function dedupeToolDefinitions(definitions: ChatToolDefinition[]) {
@@ -423,6 +434,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     // nie wie. `_preparingTurns` to skrzynka kontaktowa na ten czas.
     const turnAbort = createTurnAbort();
     this._preparingTurns.set(owner.agentName, turnAbort);
+    const turnSessionPath = owner.sessionPath || (owner.memory ? await owner.memory.startActiveSession(owner.agentName).catch(() => '') : '');
 
     // Toggle UI state + show immediate visual feedback
     this.set_generating(true);
@@ -582,7 +594,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         // albo agent może zacząć nową sesję - powiadomienie ma trafić tam, SKĄD wyszło zlecenie.
         // Sesja i zakładka MUSZĄ pochodzić z zamrożenia sprzed budowy promptu: czytanie ich
         // tutaj, czyli już po awaitach, po przełączeniu zakładki celowałoby w cudzą zakładkę.
-        const turnSessionPath = owner.sessionPath;
+
         // `ownerTabKey` - liczony RAZ, na samym starcie send_message, przed pierwszym awaitem
         // (patrz komentarz przy jego deklaracji). Reużyty tu zamiast ponownego
         // `_tabKey(owner.tab)`, żeby nie było DWÓCH miejsc liczących ten sam klucz w jednej turze.
@@ -643,6 +655,21 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
             timeoutMs: stallTimeoutMs,
             onStall: (silentMs) => this._onStreamStall(turn, silentMs),
         });
+        let partialTile: HTMLElement | undefined;
+        turn.partial = new ChatTurnPartialState({
+            agentName: streamAgentName, ownerTabKey, sessionPath: turnSessionPath, turnId, rw, memory: owner.memory,
+            onChange: (receipt) => {
+                const live = this._streamCtxMap.get(streamAgentName);
+                if (live && live.turnId !== turnId) return;
+                if (_tabKey(this.chatTabs.find(tab => tab.isActive)) !== ownerTabKey) return;
+                const view = buildMachineView(receipt, { t });
+                if (!view) return;
+                partialTile ??= this.messages_container.createDiv({ cls: 'cs-message cs-message--system' });
+                partialTile.empty();
+                void renderMachineTile(partialTile, this.plugin, view);
+            },
+        });
+        if (sCtx) sCtx.partial = turn.partial;
         if (sCtx) sCtx.watchdog = turn.watchdog; // stop_generation / onClose rozbrajają przez ctx
 
         // Tracking multi-tab (StreamingManager).
@@ -692,6 +719,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
                     // NIE łapie promisy ubitej z zewnątrz (xhr.abort nie emituje zdarzenia - await
                     // wisiałby wiecznie). Kolejka bramki mostu się nie liczy (gate_admitted).
                     perCallTimeoutMs: getLimits(this.env?.settings).chat_model_call_timeout_ms,
+                    synthesisTimeoutMs: getLimits(this.env?.settings).model_synthesis_timeout_ms,
                 },
                 // agentName → log pętli; `agent` → payload (adaptery czytają _req.agentName || _req.agent
                 // dla prompt_cache_key / x-grok-conv-id; pętla strippuje `agentName` z payloadu, więc
@@ -708,21 +736,33 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
                 // Chunki przerwanej tury nie mogą nic namalować - bramka stoi PRZED
                 // `handle_chunk`, bo wpis `_streamCtxMap` znika przy Stopie (a to on niesie
                 // uchwyt dla widoku).
-                callbacks: { chunk: (resp) => { if (turnAbort.isAborted()) return; turn.watchdog!.feed(); this.handle_chunk(resp as StreamResponse, streamAgentName); } },
+                callbacks: { chunk: (resp) => { if (turnAbort.isAborted()) return;
+                    if (this._streamCtxMap.get(streamAgentName)?.turnId !== turnId) return;
+                    turn.watchdog!.feed();
+                    if (this._isTurnActiveTab(turn)) this.handle_chunk(resp as StreamResponse, streamAgentName);
+                }, partial: (snapshot) => turn.partial!.publish(snapshot) },
+                knownSecrets: Object.values(this.env?.settings?.pkmAssistant?.chat?.apiKeys || {}).filter((v): v is string => typeof v === 'string' && v.length > 0),
+                abortSignal: turnAbort.signal,
+                abortReason: () => turnAbort.reason() === 'stall'
+                    ? { kind: 'silence', stage: turn.partial?.latest?.synthesis === 'pending' ? 'synthesis' : 'work' }
+                    : turnAbort.reason() === 'superseded' ? 'superseded' : 'manual-stop',
                 // Watchdog ciszy MUSI zbroić się dopiero, gdy request WEJDZIE na slot bramki
                 // mostu, nie w onIterationStart: czekanie w kolejce za długą syntezą suba nie
                 // jest ciszą modelu, a zbrojenie wcześniej ubijałoby turę usera po długim
                 // staniu w kolejce. Chmura emituje gate_admitted natychmiast (kontrakt
                 // ChatModel), więc tam nic się nie zmienia; pas ostateczny na „sygnał nigdy nie
                 // przyszedł" to perCallTimeoutMs wyżej.
-                onGateAdmitted: () => turn.watchdog?.arm(),
+                onGateAdmitted: () => { if (!turnAbort.isAborted() && this._streamCtxMap.get(streamAgentName)?.turnId === turnId) turn.watchdog?.arm(); },
                 shouldAbort: () => turnAbort.isAborted(),
             });
         } finally {
             turn.watchdog.disarm();
-            streamingManager.stopStream(streamId);
+            const live = this._streamCtxMap.get(streamAgentName);
+            if (!live || live.turnId === turnId) streamingManager.stopStream(streamId);
         }
 
+        await turn.partial.persisted();
+        if (this._streamCtxMap.get(streamAgentName)?.turnId !== turnId) return;
         if (result.stoppedBy === 'abort') {
             // Przerwane przez usera - stop_generation zrobił już UI cleanup. Nie renderujemy finalnej odpowiedzi.
             this._releaseStreamCtx(streamAgentName, turnId);
@@ -884,8 +924,10 @@ export function _paintStreamFrame(this: ChatViewLike, frame: StreamFrame) {
 
 /** Czy tura dzieje się na aktualnie aktywnej zakładce (może się zmienić w trakcie streamu). */
 export function _isTurnActiveTab(this: ChatViewLike, turn: ChatTurn) {
-    const currentTabAgent = this.chatTabs.find((t: ChatTab) => t.isActive)?.agentName;
-    return currentTabAgent === turn.agentName;
+    const live = this._streamCtxMap.get(turn.agentName);
+    if (typeof turn.turnId === 'number' && live?.turnId !== turn.turnId) return false;
+    const tab = this.chatTabs.find((tab: ChatTab) => tab.isActive);
+    return turn.origin?.tabKey ? _tabKey(tab) === turn.origin.tabKey : tab?.agentName === turn.agentName;
 }
 
 /**
@@ -1247,7 +1289,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
         const result = stash.result;
         const error = stash.error;
 
-        await this.appendToActiveSession?.({
+        await appendTurnSessionEvent(turn, {
             type: error ? 'mcp_error' : 'mcp_call',
             agentName,
             tool: toolCall.name,
@@ -1537,7 +1579,7 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
     // pusta jest truthy). Round-trip po restarcie Obsidiana potrzebuje tego pola, żeby
     // `sanitizeToolTranscript` odzyskał dopasowanie assistant.tool_calls ↔ tool.tool_call_id
     // (patrz `modules/memory/activeSessionFormat.ts`, `ACTIVE_SESSION_FORMAT_VERSION` v3).
-    await this.appendToActiveSession?.({
+    await appendTurnSessionEvent(turn, {
         type: 'agent_message',
         agentName,
         content: assistantContent,
@@ -1547,7 +1589,7 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
         timestamp: new Date().toISOString()
     });
     for (const tr of (turn.lastRoundToolResults || [])) {
-        await this.appendToActiveSession?.({
+        await appendTurnSessionEvent(turn, {
             type: 'tool_result',
             agentName,
             // `tr.id` to `tool_call_id` (patrz `turn.lastRoundToolResults` w `_chatOnToolResults`:
@@ -1647,7 +1689,7 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
             timestamp: new Date().toLocaleTimeString(getDateLocale(), { hour: '2-digit', minute: '2-digit' }),
             ...queued.meta,
         });
-        await this.appendToActiveSession?.({
+        await appendTurnSessionEvent(turn, {
             type: 'user_message',
             agentName,
             content: injectedText,
@@ -1681,6 +1723,7 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
  * cleanup, dwufazowa kompresja end-of-turn.
  */
 export async function _finalizeTurn(this: ChatViewLike, turn: ChatTurn, result: RunAgentLoopResult) {
+    if (this._streamCtxMap.get(turn.agentName)?.turnId !== turn.turnId) return;
     const isActiveTab = this._isTurnActiveTab(turn);
     const rw = turn.rw;
     const streamAgent = turn.agent;
@@ -1720,7 +1763,7 @@ export async function _finalizeTurn(this: ChatViewLike, turn: ChatTurn, result: 
     const timestamp = new Date().toLocaleTimeString(getDateLocale(), { hour: '2-digit', minute: '2-digit' });
     const idx = rw.messages.length; // Will be the index after adding
     await rw.addMessage('assistant', content, { timestamp, ...((cacheMeta?.cached_tokens as number) > 0 ? { cache: cacheMeta } : {}) });
-    await this.appendToActiveSession?.({
+    await appendTurnSessionEvent(turn, {
         type: 'agent_message',
         agentName: streamAgentName,
         content,
@@ -1728,12 +1771,13 @@ export async function _finalizeTurn(this: ChatViewLike, turn: ChatTurn, result: 
         tokens: { input: inputTokens, output: outputTokens },
         timestamp: new Date().toISOString()
     });
-    if (isActiveTab) this.updateTokenCounter();
+    if (this._streamCtxMap.get(streamAgentName)?.turnId !== turn.turnId) return;
+    if (this._isTurnActiveTab(turn)) this.updateTokenCounter();
 
     // Dorysowujemy gdy final ≠ ostatnio namalowane: albo stream w ogóle nie miał chunków, albo
     // finalna treść przyszła dopiero w zwrotce `done` (rollback niedomkniętego <think>, strip
     // halucynowanych tagów) - a `done` nie leci przez handlers.chunk, więc DOM został stary.
-    if (isActiveTab && content && content !== this._lastPaintedContent) {
+    if (this._isTurnActiveTab(turn) && content && content !== this._lastPaintedContent) {
         // _ensureAgentMessageContainer NIE jest idempotentny (zawsze tworzy nowy node) - tylko gdy brak.
         if (!this.current_message_container) this._ensureAgentMessageContainer(streamAgent);
         this.current_message_text!.empty();
@@ -1744,7 +1788,7 @@ export async function _finalizeTurn(this: ChatViewLike, turn: ChatTurn, result: 
     }
 
     // Add timestamp and actions to the streamed message (only if on active tab)
-    if (isActiveTab && this.current_message_container) {
+    if (this._isTurnActiveTab(turn) && this.current_message_container) {
         const meta = this.current_message_container.createDiv({ cls: 'cs-message__meta' });
         meta.createSpan({ text: timestamp });
         this._renderCacheSavingsBadge(meta, cacheMeta);
@@ -1765,7 +1809,7 @@ export async function _finalizeTurn(this: ChatViewLike, turn: ChatTurn, result: 
     }
 
     // Finalize streaming state
-    if (isActiveTab) {
+    if (this._isTurnActiveTab(turn)) {
         if (this.current_message_bubble) {
             this.current_message_bubble.classList.remove('streaming');
         }
@@ -1823,14 +1867,14 @@ export async function _finalizeTurn(this: ChatViewLike, turn: ChatTurn, result: 
             log.info('Chat', `Faza 1 wystarczyła: skrócono ${compResult.trimmed} wyników, bez API call`);
         }
 
-        if (isActiveTab) {
+        if (this._isTurnActiveTab(turn)) {
             this.updateTokenCounter();
             this._updateTokenPanel();
         }
     }
 
     // If stream finished on a background tab, mark the tab for refresh
-    if (!isActiveTab && streamAgentName) {
+    if (!this._isTurnActiveTab(turn) && streamAgentName) {
         const tab = this.chatTabs.find((t: ChatTab) => t.agentName === streamAgentName);
         if (tab) tab._needsRefresh = true;
     }
@@ -1879,7 +1923,7 @@ export function buildBackgroundReceiptText(startedList: Array<{ task_id?: string
 }
 
 export function handle_error(this: ChatViewLike, error: unknown, agentName?: string, turnId?: number, ownerTabKey?: string) {
-    this.hideTypingIndicator();
+    if (agentName && typeof turnId === 'number' && this._streamCtxMap.get(agentName)?.turnId !== turnId) return;
     // Tekst błędu idzie do DOM-u czatu i do loga (który pisze też do pliku). Na sieciowym
     // padzie strumienia `error.message` bywa zrzutem całego zdarzenia streamera razem z
     // `source.headers.Authorization` - czyli SUROWYM kluczem API. Obrona w głąb: normalizacja
@@ -1890,8 +1934,9 @@ export function handle_error(this: ChatViewLike, error: unknown, agentName?: str
     // Determine which tab this error belongs to
     const ctx = agentName ? this._streamCtxMap.get(agentName) : null;
     const streamAgentName = agentName || ctx?.agentName || '';
-    const currentTabAgent = this.chatTabs.find((t: ChatTab) => t.isActive)?.agentName;
-    const isActiveTab = !agentName || currentTabAgent === agentName;
+    const activeTab = this.chatTabs.find((tab: ChatTab) => tab.isActive);
+    const isActiveTab = !agentName || (ownerTabKey ? _tabKey(activeTab) === ownerTabKey : activeTab?.agentName === agentName);
+    if (isActiveTab) this.hideTypingIndicator();
 
     if (isActiveTab) {
         // Kafelek systemowy zamiast dymka agenta (spec A2, sekcja 4) - logika ownerTabKey/karta
@@ -1948,7 +1993,7 @@ export function handle_error(this: ChatViewLike, error: unknown, agentName?: str
     }
 
     // Resolve hanging ask_user promise to unblock tool execution
-    this._cleanupAskUser();
+    if (isActiveTab) this._cleanupAskUser();
 
     // Always clear streaming context on error - ale wyłącznie wpis TEJ tury.
     if (agentName) this._releaseStreamCtx(agentName, turnId);
@@ -1980,7 +2025,6 @@ export function _onStreamStall(this: ChatViewLike, turn: ChatTurn, silentMs: num
     const liveCtx = this._streamCtxMap.get(agentName);
     if (typeof turn.turnId === 'number' && typeof liveCtx?.turnId === 'number' && liveCtx.turnId !== turn.turnId) {
         log.warn('Chat', `[${agentName}] Watchdog porzuconej tury #${turn.turnId} (żywa: #${liveCtx.turnId}) - sprzątam bez strzelania`);
-        if (turn.streamId) streamingManager.stopStream(turn.streamId);
         return;
     }
 
@@ -1989,7 +2033,7 @@ export function _onStreamStall(this: ChatViewLike, turn: ChatTurn, silentMs: num
 
     const isActiveTab = this._isTurnActiveTab(turn);
     if (isActiveTab) {
-        this.stop_generation(agentName);
+        this.stop_generation(agentName, 'stall');
     } else {
         // Tura w tle: przerwanie TEJ tury + przerwanie XHR właściwej instancji + cleanup stanu
         // zakładki (wzór handle_error) - bez dotykania UI aktywnej zakładki.
@@ -1998,7 +2042,7 @@ export function _onStreamStall(this: ChatViewLike, turn: ChatTurn, silentMs: num
         // (auto-tura poleciałaby w ten sam martwy serwer).
         this._drainSuppressed = true;
         const bgModel = this._streamCtxMap.get(agentName)?.chatModel || this.env.chatModel;
-        bgModel?.stopStream?.();
+        if (!turn.abort?.signal) bgModel?.stopStream?.();
         this._releaseStreamCtx(agentName, turn.turnId);
         // Klucz `_agentStates` to `_tabKey(tab)`, nie nazwa agenta - patrz uzasadnienie
         // w `_finalizeTurn`. `turn.origin.tabKey` (zamrożony na starcie tury), nie
@@ -2071,7 +2115,9 @@ export function stop_generation(this: ChatViewLike, agentName?: string, reason =
 
     // Przerwij XHR WŁAŚCIWEJ instancji modelu - równoległa tura (needsFreshModel) używa
     // świeżej instancji, której env.chatModel nie zna.
-    if (sCtx?.chatModel?.stopStream) {
+    if (sCtx?.abort?.signal) {
+        // Native signal lets the loop cancel its own request exactly once.
+    } else if (sCtx?.chatModel?.stopStream) {
         sCtx.chatModel.stopStream();
     } else if (this.env.chatModel?.stopStream) {
         this.env.chatModel.stopStream();
@@ -2259,7 +2305,8 @@ export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
         // `evaluateSubTaskDelivery` odmawia bez zakładki - za bramką `tab` na pewno istnieje.
         this._autoTurnChainCounts.set(tab!.agentName, chain.nextCount);
 
-        const text = buildSubTaskNotificationText(task, {
+        const deliveryTask = task.error && task.partial ? { ...task, error: task.error + '\n\n' + task.partial.text } : task;
+        const text = buildSubTaskNotificationText(deliveryTask, {
             // Wynik suba ma WŁASNY sufit (60k default, 0 = bez limitu) - wspólne 15k z
             // surowymi zrzutami narzędzi ucinałoby deep-research w połowie.
             maxResultChars: limits.subagent_result_max_chars,

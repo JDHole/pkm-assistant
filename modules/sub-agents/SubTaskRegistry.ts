@@ -33,6 +33,8 @@
  * `beforeContinue` pętli, czyli między wywołaniami modelu). Rejestr nie interpretuje
  * treści i nie doręcza jej sam; jest skrzynką, nie listonoszem.
  */
+import type { AgentLoopPartialSnapshot, AgentLoopStopReason } from '../agent-loop/index.js';
+import { maskSensitiveData } from '../../core/index.js';
 import { EventEmitter } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
 
@@ -61,6 +63,7 @@ export interface SubTaskResult {
     durationMs: number;
     usage: unknown;
     stoppedBy?: 'natural' | 'backstop' | 'abort';
+    stopReason?: AgentLoopStopReason;
 }
 
 /**
@@ -86,6 +89,8 @@ export interface SubTask {
     steps: SubTaskStep[];
     budget: SubTaskBudget;
     result?: SubTaskResult;
+    partial?: AgentLoopPartialSnapshot;
+    partialStorageError?: boolean;
     error?: string;
     /** Bieg odpalony W TLE (tura wołającego NIE czeka na wynik). */
     background?: boolean;
@@ -299,9 +304,26 @@ export class SubTaskRegistry {
     }
 
     /** Domyka bieg wynikiem. `stoppedBy: 'abort'` → status `aborted`, reszta → `done`. */
+    publishPartial(task: SubTask, snapshot: AgentLoopPartialSnapshot): void {
+        if (task.status !== 'running' || snapshot.revision <= (task.partial?.revision ?? 0)) return;
+        const mask = (value: string) => {
+            const safe = maskSensitiveData(value).replace(/\b(https?:\/\/)[^\s/@"\\]+@/gi, '$1[REDACTED]@');
+            return this._mask ? this._mask(safe) : safe;
+        };
+        task.partial = Object.freeze({
+            ...snapshot, stopReason: Object.freeze({ ...snapshot.stopReason }),
+            toolsUsed: Object.freeze(snapshot.toolsUsed.map(mask)),
+            toolOutcomes: Object.freeze(snapshot.toolOutcomes.map(o => Object.freeze({ ...o, name: mask(o.name), ...(o.id ? { id: mask(o.id) } : {}), resultPreview: mask(o.resultPreview) }))),
+            toolCallDetails: Object.freeze(snapshot.toolCallDetails.map(d => Object.freeze({ ...d, ...(d.name ? { name: mask(d.name) } : {}), resultPreview: mask(d.resultPreview) }))),
+            usage: Object.freeze({ ...snapshot.usage }), lastText: mask(snapshot.lastText), text: mask(snapshot.text),
+        });
+        this.events.emit('task:partial', task);
+    }
+
     finish(task: SubTask, result: SubTaskResult): void {
         try {
             if (!task) return;
+            if (task.status !== 'running') return;
             task.result = result;
             task.status = result?.stoppedBy === 'abort' ? 'aborted' : 'done';
             task.endedAt = Date.now();
@@ -316,6 +338,7 @@ export class SubTaskRegistry {
     fail(task: SubTask, error: string): void {
         try {
             if (!task) return;
+            if (task.status !== 'running') return;
             const message = typeof error === 'string' ? error : String(error);
             task.status = 'error';
             task.error = this._mask ? this._mask(message) : message;

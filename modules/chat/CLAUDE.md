@@ -1459,3 +1459,6 @@ załącznik, a druga opcja to cytuj i kopiuje się to do chatu jako cytat."
   `SubTaskNotifier`, `postMessage`/`requestStop`
 - [`modules/tools/CLAUDE.md`](../tools/CLAUDE.md) - `DelegateTool`, `max_parallel_delegations`,
   timeouty narzędzi
+
+
+U3: `ChatTurnPartialState` synchronously adds one system receipt to the frozen owner RollingWindow, updates it by revision and observes queued `appendSessionEvent` persistence to the captured path. Native turn AbortSignal preserves the first cause; turnId and frozen tab key protect newer turns from late callbacks. The machine classifier recognizes `loop_partial` from metadata or its localized system header; history renderer wiring is pending parent integration.

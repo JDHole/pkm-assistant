@@ -24,6 +24,9 @@ export const DEFAULT_LIMITS = {
   // z domyślnym budżetem researcher-a (8). Twarda granica — model nie może jej ignorować.
   chat_max_iterations: 8,
 
+  // Optional final synthesis only, including queue time. 0 skips synthesis.
+  model_synthesis_timeout_ms: 30000,
+
   // Ile rund tool-callingu ma sub-agent (generyczny worker) w runAgentLoop (agent-loop).
   // Jeden worker dla wszystkich subów — brak osobnego limitu strategist.
   // 25, bo realna robota potrafi zjeść 12 iteracji i zostać zmuszona do backstopu w połowie
@@ -177,6 +180,7 @@ export type LimitSpec = { min: number; ceiling: number; integer: boolean };
  * Eksportowane, żeby Settings UI mogło pokazać podpowiedzi (min/max) bez duplikacji.
  */
 export const LIMIT_SPECS: Record<LimitKey, LimitSpec> = {
+  model_synthesis_timeout_ms:         { min: 0, ceiling: 600000, integer: true },
   chat_max_iterations:                { min: 1,    ceiling: 50,     integer: true },
   // Sufit 100 — sub ma pracować aż skończy; strażnikami są watchdog ciszy i zegar zadania,
   // iteracje to tylko kaganiec na runaway-pętlę.

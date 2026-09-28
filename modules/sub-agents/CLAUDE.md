@@ -466,3 +466,6 @@ Najważniejsze:
 ## Powiązane
 
 - `modules/agent-loop/CLAUDE.md` - stamtąd przychodzi `runAgentLoop` (wspólna pętla tool-callingu z czatem; `streamToCompleteWithTools` w `modules/memory` zostało usunięte tym samym zadaniem)
+
+
+U3: `SubTask.partial` and `publishPartial` expose a copied, masked snapshot via `task:partial` without completing the task. Runner failure retains actual tools, details, usage and partial; partial and terminal journaling use captured origin memory/path. Storage failure is explicit on the task, while notifier delivery still starts only at the terminal event.

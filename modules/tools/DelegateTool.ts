@@ -17,6 +17,7 @@ import type { ModelRole, ResolverPluginLike } from '../../modules/models/index.j
 import { t } from '../../core/i18n/index.js';
 // Reguła przecięcia zakresów mieszka tam, gdzie reszta reguł ścieżek.
 // `maskSensitiveData` to ta sama granica maskowania, co w `SubAgentRunner`.
+import type { AgentLoopPartialSnapshot, AgentLoopStopReason, RunAgentLoopOptions } from '../agent-loop/index.js';
 import { AccessGuard, maskSensitiveData } from '../../core/index.js';
 import type { ScopeFolders } from '../../core/index.js';
 import { getLimits, DEFAULT_LIMITS } from '../../config/limits.js';
@@ -144,6 +145,8 @@ interface SubAgentRunResult {
     usage?: unknown;
     stoppedBy?: string;
     failed?: true;
+    partial?: AgentLoopPartialSnapshot;
+    stopReason?: AgentLoopStopReason;
 }
 
 /** Runner sub-agentów w zakresie, jakiego używa to narzędzie. */
@@ -160,6 +163,8 @@ interface SubAgentRunnerLike {
             modelTimeout?: number;
             /** Flaga abortu z kontrolki `_withTimeout` — pętla suba staje między iteracjami. */
             shouldAbort?: () => boolean;
+            abortSignal?: AbortSignal;
+            abortReason?: () => 'manual-stop' | 'task-timeout' | 'superseded';
             /** „Sub wszedł na slot bramki" - tym uzbraja się budzik zadania. */
             onGateAdmitted?: () => void;
             /** Adres zwrotny zlecenia (1:1 do rejestru biegów). */
@@ -421,6 +426,10 @@ function _makeSalvageMapper(salvageCap: number): SalvageMapper {
             ...(partial ? { partial_result: partial } : {}),
             ...(Array.isArray(r.tools_used) && (r.tools_used as unknown[]).length > 0 ? { tools_used: r.tools_used } : {}),
             ...(typeof r.duration_ms === 'number' ? { duration_ms: r.duration_ms } : {}),
+            ...(r.stop_reason ? { stop_reason: r.stop_reason } : {}),
+            ...(r.partial ? { partial: r.partial } : {}),
+            ...(Array.isArray(r.tool_call_details) ? { tool_call_details: r.tool_call_details } : {}),
+            ...(r.usage ? { usage: r.usage } : {}),
         };
     };
 }
@@ -522,8 +531,7 @@ export function stopAllDelegations(reason = 'unload'): number {
     let stopped = 0;
     for (const ctl of [..._liveAborts]) {
         try {
-            ctl.aborted = true;
-            ctl.stop?.();
+            abortSub(ctl, 'manual-stop');
             stopped++;
         } catch (e) {
             log.warn('DelegateTool', `stopAllDelegations(${reason}): kontrolka rzuciła — lecę dalej:`, e);
@@ -790,7 +798,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                         const effectiveTaskTimeout = Number.isFinite(taskTimeout) && taskTimeout > 0
                             ? taskTimeout
                             : tasksDefaultTimeoutMs;
-                        const abortCtl: SubAbortControl = { aborted: false, stop: null };
+                        const abortCtl = createSubAbortControl();
                         // Bieg ma właściciela OD RAZU - rejestr pozna go dopiero w `onTaskCreated`.
                         const forgetAbort = _trackAbort(abortCtl);
                         // Budżet TEGO zadania rusza dopiero, gdy sub wjedzie na slot bramki.
@@ -819,8 +827,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                 },
                             },
                         ), taskDef.timeout_ms, tasksDefaultTimeoutMs, () => {
-                            abortCtl.aborted = true;
-                            abortCtl.stop?.();
+                            abortSub(abortCtl, 'task-timeout');
                         }, _makeFinalGrace(plugin, graceMs, () => taskId), gateArm, salvageMapper)
                             .finally(() => { forgetAbort(); gate.open(); });
                     });
@@ -872,14 +879,13 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 const effectiveSingleTimeout = Number.isFinite(singleTimeout) && singleTimeout > 0
                     ? singleTimeout
                     : defaultTimeoutMs;
-                const abortCtl: SubAbortControl = { aborted: false, stop: null };
+                const abortCtl = createSubAbortControl();
                 // Bieg ma właściciela OD RAZU - rejestr pozna go dopiero w `onTaskCreated`.
                 const forgetAbort = _trackAbort(abortCtl);
                 // Jak w trybie wielozadaniowym - zegar budżetu startuje od pierwszej admisji.
                 const gateArm = _makeGateArm();
                 const onTimeout = () => {
-                    abortCtl.aborted = true;
-                    abortCtl.stop?.();
+                    abortSub(abortCtl, 'task-timeout');
                 };
 
                 if (background) {
@@ -1042,8 +1048,7 @@ function _makeFinalGrace(
 function _attachStop(plugin: DelegatePlugin, task: SubTask, abortCtl: SubAbortControl): void {
     try {
         plugin?.subTaskRegistry?.attachAbort?.(task.id, () => {
-            abortCtl.aborted = true;
-            abortCtl.stop?.();
+            abortSub(abortCtl, 'manual-stop');
         });
     } catch (e) {
         log.warn('DelegateTool', `attachAbort padł dla ${task?.id} (Stop z panelu niedostępny):`, e);
@@ -1098,7 +1103,23 @@ function _resolveDelegate(aspect: string | undefined, delegates: DelegateEntry[]
  *  streamu modelu), runner czyta `aborted` jako shouldAbort pętli. Bez tego timeout
  *  delegacji porzucałby suba żywcem — sub mieliłby dalej, trzymając slot bramki
  *  platform lokalnych i blokując główny czat. */
-export type SubAbortControl = { aborted: boolean; stop: (() => void) | null };
+export type SubAbortControl = {
+    aborted: boolean; stop: (() => void) | null;
+    controller?: AbortController;
+    reason?: 'manual-stop' | 'task-timeout' | 'superseded';
+};
+
+function createSubAbortControl(): SubAbortControl {
+    return { aborted: false, stop: null, controller: new AbortController() };
+}
+
+function abortSub(ctl: SubAbortControl, reason: 'manual-stop' | 'task-timeout' | 'superseded'): void {
+    if (ctl.aborted) return;
+    ctl.aborted = true;
+    ctl.reason = reason;
+    ctl.controller?.abort(reason);
+    ctl.stop?.();
+}
 
 type SubRunControl = {
     abortCtl?: SubAbortControl;
@@ -1182,12 +1203,20 @@ async function _executeSubAgent(
 
     // Uzbrojenie kontrolki abortu: od tej chwili timeout delegacji umie ubić stream modelu
     // tego suba (twardy xhr.abort + zwolnienie biletu bramki przez stopStream).
-    if (runControl.abortCtl) {
-        runControl.abortCtl.stop = () => {
-            try { (finalModel as { stopStream?: () => void }).stopStream?.(); }
-            catch { /* abort nie może wywrócić timeoutu */ }
-        };
-    }
+    const ownedModel = Object.create(finalModel) as RunAgentLoopOptions['model'];
+    const sourceModel = finalModel as RunAgentLoopOptions['model'];
+    let requestStopped = false;
+    ownedModel.stream = (...streamArgs: Parameters<RunAgentLoopOptions['model']['stream']>) => {
+        requestStopped = false;
+        return sourceModel.stream(...streamArgs);
+    };
+    ownedModel.stopStream = () => {
+        if (requestStopped) return;
+        requestStopped = true;
+        try { sourceModel.stopStream?.(); }
+        catch { /* cancelling one request must not break task timeout */ }
+    };
+    if (runControl.abortCtl) runControl.abortCtl.stop = () => ownedModel.stopStream?.();
 
     // Build task prompt with context — jednolity cap dla WSZYSTKICH subów (bez tego researcher
     // biegłby bez capu — dziura tokenowa).
@@ -1222,11 +1251,12 @@ async function _executeSubAgent(
         return { success: false, error: t('mcp.delegate.scope_disjoint', { name: subAgentConfig.name }) };
     }
 
-    const result = await subAgentRunner.runTask(
+    let result: SubAgentRunResult;
+    try { result = await subAgentRunner.runTask(
         taskPrompt,
         activeAgent,
         subAgentConfig,
-        finalModel,
+        ownedModel,
         {
             delegationDepth,
             scopeFolders,
@@ -1235,7 +1265,11 @@ async function _executeSubAgent(
             // Budżet modelu suba = budżet ZADANIA (spójne budziki). Bez tego per-call timer
             // brał globalny delegation_timeout_ms, który bywa dużo dłuższy niż timeout taska.
             ...(runControl.modelTimeout ? { modelTimeout: runControl.modelTimeout } : {}),
-            ...(runControl.abortCtl ? { shouldAbort: () => runControl.abortCtl!.aborted } : {}),
+            ...(runControl.abortCtl ? {
+                shouldAbort: () => runControl.abortCtl!.aborted,
+                abortSignal: runControl.abortCtl.controller?.signal,
+                abortReason: () => runControl.abortCtl!.reason || 'manual-stop',
+            } : {}),
             // Budżet zadania ma liczyć czas ROBOTY, nie czekania w kolejce bramki.
             ...(runControl.onGateAdmitted ? { onGateAdmitted: runControl.onGateAdmitted } : {}),
             // Przelot do rejestru biegów — runner ich nie interpretuje, my też nie.
@@ -1245,7 +1279,7 @@ async function _executeSubAgent(
             ...(runControl.background !== undefined ? { background: runControl.background } : {}),
             ...(runControl.onTaskCreated ? { onTaskCreated: runControl.onTaskCreated } : {}),
         }
-    );
+    ); } finally { if (runControl.abortCtl) runControl.abortCtl.stop = null; }
 
     // ── Uczciwość niepowodzenia ──
     // Runner oznacza flagą `failed` wyłącznie bieg, który padł na wyjątku — bez tego rozróżnienia
@@ -1257,6 +1291,11 @@ async function _executeSubAgent(
             error: typeof result.result === 'string' ? result.result : _rawResultToString(result.result),
             aspect: subAgentConfig.name,
             stopped_by: 'error',
+            ...(result.stopReason ? { stop_reason: result.stopReason } : {}),
+            ...(result.partial ? { partial: result.partial } : {}),
+            tools_used: result.toolsUsed || [],
+            tool_call_details: result.toolCallDetails || [],
+            usage: result.usage || null,
             duration_ms: result.duration,
         };
     }
@@ -1272,6 +1311,8 @@ async function _executeSubAgent(
         // się iteracje (wynik może być niepełny albo być zaślepką), `abort` = ubity w locie.
         // Stary runner bez tego pola → `undefined` (fail-soft).
         ...(result.stoppedBy ? { stopped_by: result.stoppedBy } : {}),
+        ...(result.stopReason ? { stop_reason: result.stopReason } : {}),
+        ...(result.partial ? { partial: result.partial } : {}),
         tools_used: result.toolsUsed,
         tool_call_details: result.toolCallDetails || [],
         duration_ms: result.duration,

@@ -23,6 +23,7 @@
 // zostają publiczne.
 export interface TurnAbortHandle {
     /** Czy ta tura została przerwana (Stop / watchdog / zamknięcie widoku). */
+    readonly signal: AbortSignal;
     isAborted(): boolean;
     /** Powód pierwszego przerwania (`'stop'`, `'stall'`, `'close'`, …) albo `null`. */
     reason(): string | null;
@@ -31,15 +32,18 @@ export interface TurnAbortHandle {
 }
 
 export function createTurnAbort(): TurnAbortHandle {
+    const controller = new AbortController();
     let aborted = false;
     let why: string | null = null;
     return {
+        signal: controller.signal,
         isAborted: () => aborted,
         reason: () => why,
         abort(reason = 'stop') {
             if (aborted) return false;
             aborted = true;
             why = reason || 'stop';
+            controller.abort(why);
             return true;
         },
     };

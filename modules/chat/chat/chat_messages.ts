@@ -163,6 +163,14 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
         // Skip tool messages (they were displayed inline with the tool call)
         if (msg.role === 'tool') continue;
 
+        if (msg.role === 'system') {
+            const partialView = buildMachineView(msg, { t });
+            if (partialView?.kind === 'loop_partial') {
+                await renderMachineTile(this.messages_container, this.plugin, partialView);
+            }
+            continue;
+        }
+
         const uiText = typeof msg.content === 'string' ? msg.content : this._contentBlocksToText(msg.content);
 
         if (msg.role === 'user') {

@@ -65,7 +65,7 @@ function _rawToString(value: unknown): string {
 
 /** Co pokazać jako rezultat biegu: błąd wygrywa z tekstem wyniku (jest ważniejszy). */
 function resolveOutcome(task: SubTask): string {
-    if (task.status === 'running') return '';
+    if (task.status === 'running') return truncate(task.partial?.text || '', MAX_STRIP_OUTCOME_CHARS);
     if (task.error) return truncate(task.error, MAX_STRIP_OUTCOME_CHARS);
     const text = task.result?.text;
     return typeof text === 'string' ? truncate(text.trim(), MAX_STRIP_OUTCOME_CHARS) : '';
@@ -155,6 +155,8 @@ export interface StripRow {
     lastStep: StripStep | null;
     /** Skrót wyniku albo błędu (≤400 znaków). Pusty dla biegów w toku. */
     outcome: string;
+    partialStorageError?: boolean;
+    synthesis?: 'pending' | 'skipped' | 'completed' | 'budget-expired' | 'failed';
     /** Ostatnie ≤20 kroków, od najstarszego — do rozwinięcia wiersza. */
     recentSteps: StripStep[];
     /** Skrót zadania zleconego przez maina (≤300 znaków; '' gdy bieg go nie niesie). */
@@ -232,6 +234,8 @@ function toStripRow(task: SubTask, now: number, waiting: boolean): StripRow {
         toolCallCount: steps.filter(s => s.type === TOOL_STEP_TYPE).length,
         lastStep: last ? toStripStep(last) : null,
         outcome: resolveOutcome(task),
+        ...(task.partial ? { synthesis: task.partial.synthesis } : {}),
+        ...(task.partialStorageError ? { partialStorageError: true } : {}),
         recentSteps: steps.slice(-MAX_RECENT_STEPS).map(toStripStep),
         taskPreview: typeof task.taskPreview === 'string' ? truncate(task.taskPreview, MAX_STRIP_TASK_CHARS) : '',
     };
