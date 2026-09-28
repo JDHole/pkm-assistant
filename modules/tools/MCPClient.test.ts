@@ -577,10 +577,12 @@ test('final-result serializer includes search post-filter count/total adjustment
 
 test('real MCP + PermissionSystem denies initial text-search scope before adapter I/O and hides path', async t => {
     const { PermissionSystem } = await import('../../core/index.js');
+    const { ToolRegistry } = await import('./ToolRegistry.js');
     const { createSearchTool } = await import('./SearchTool.js');
     const reads: string[] = [], lists: string[] = [];
     const agent = { name: 'Tester', permissions: { guidance_mode: true, read_notes: true } };
-    const tool = { ...createSearchTool(), source: 'built-in' };
+    const registry = new ToolRegistry();
+    registry.registerTool(createSearchTool());
     const client = new MCPClient(asApp({ vault: { adapter: {
         list: async (path: string) => { lists.push(path); return { files: ['Notes/private.md'], folders: [] }; },
         read: async (path: string) => { reads.push(path); return 'needle'; },
@@ -589,7 +591,7 @@ test('real MCP + PermissionSystem denies initial text-search scope before adapte
     } } }), asPlugin({
         agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
         permissionSystem: new PermissionSystem({}, {}),
-    }), asRegistry({ getTool: (name: string) => name === 'search' ? tool : null }));
+    }), registry);
 
     const result = await client.executeToolCall({ name: 'search', arguments: {
         query: 'needle', mode: 'text', scope: 'vault', where: { folder: 'Notes', glob: '**/*.md' },
@@ -598,6 +600,124 @@ test('real MCP + PermissionSystem denies initial text-search scope before adapte
     t.deepEqual(lists, []);
     t.deepEqual(reads, []);
     t.false(JSON.stringify(result).includes('Notes'));
+});
+
+test('raw ToolRegistry registration gives native text search trusted per-file authorization', async t => {
+    const { ToolRegistry } = await import('./ToolRegistry.js');
+    const { createSearchTool } = await import('./SearchTool.js');
+    const files = {
+        'Notes/smoke.js': 'const first = "needle";\nconst second = 2;\n',
+        'Notes/smoke.json': '{\n  "value": "needle"\n}\n',
+    };
+    const reads: string[] = [];
+    const agent = { name: 'Tester', permissions: { guidance_mode: true, read_notes: true, mcp: true } };
+    const app = { vault: { adapter: {
+        read: async (path: string) => { reads.push(path); return files[path as keyof typeof files] ?? ''; },
+        stat: async (path: string) => ({ size: files[path as keyof typeof files]?.length ?? 0 }),
+        exists: async (path: string) => path in files,
+    } } };
+    const plugin = {
+        app,
+        agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+        permissionSystem: {
+            checkPermission: () => ({ allowed: true, requiresApproval: false }),
+            requiresApproval: () => false,
+        },
+    };
+    const registry = new ToolRegistry();
+    registry.registerTool(createSearchTool());
+    const client = new MCPClient(asApp(app), asPlugin(plugin), registry);
+
+    for (const [path, line, excerpt] of [
+        ['Notes/smoke.js', 1, 'const first = "needle";'],
+        ['Notes/smoke.json', 2, '  "value": "needle"'],
+    ] as const) {
+        const result = await client.executeToolCall({ name: 'search', arguments: {
+            query: 'needle', mode: 'text', scope: 'vault', where: { path },
+        } }, 'Tester') as { success: boolean; results: Array<{ path: string; line: number; excerpt: string }> };
+        t.deepEqual(result, {
+            success: true,
+            query: 'needle',
+            scope: 'vault',
+            mode_used: 'text',
+            status: 'complete',
+            results: [{ path, offset: files[path].indexOf('needle'), line, column: excerpt.indexOf('needle'), excerpt: files[path].slice(0, 160) }],
+            count: 1,
+            total: 1,
+            scan: { candidates: 1, inspected: 1, read: 1, skipped_access: 0, skipped_too_large: 0, read_errors: 0, truncated: false, reasons: [] },
+        });
+    }
+    t.deepEqual(reads, ['Notes/smoke.js', 'Notes/smoke.json']);
+});
+
+test('raw ToolRegistry registration gives native read its result budget', async t => {
+    const { ToolRegistry } = await import('./ToolRegistry.js');
+    const { createReadTool } = await import('./ReadTool.js');
+    const content = 'line\n'.repeat(2000);
+    const agent = { name: 'Tester', permissions: { guidance_mode: true, read_notes: true, mcp: true } };
+    const app = { vault: {
+        adapter: { read: async () => content, stat: async () => ({ size: content.length }) },
+        getAbstractFileByPath: (path: string) => ({ path }),
+        cachedRead: async () => content,
+    } };
+    const plugin = {
+        app,
+        agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+        permissionSystem: {
+            checkPermission: () => ({ allowed: true, requiresApproval: false }),
+            requiresApproval: () => false,
+        },
+    };
+    const registry = new ToolRegistry();
+    registry.registerTool(createReadTool());
+    const client = new MCPClient(asApp(app), asPlugin(plugin), registry);
+
+    const result = await client.executeToolCall({ name: 'read', arguments: { path: 'Notes/a.md', offset: 0 } }, 'Tester', { resultBudgetChars: 600 }) as Record<string, unknown>;
+    t.true(JSON.stringify(result).length <= 600, JSON.stringify(result).length.toString());
+    t.true((result.content as string).length < content.length);
+});
+
+test('raw ToolRegistry read denied by scopeFolders never reaches file I/O', async t => {
+    const { PermissionSystem } = await import('../../core/index.js');
+    const { ToolRegistry } = await import('./ToolRegistry.js');
+    const { createReadTool } = await import('./ReadTool.js');
+    const reads: string[] = [];
+    const agent = { name: 'Tester', permissions: { guidance_mode: true, read_notes: true } };
+    const app = { vault: {
+        adapter: { read: async (path: string) => { reads.push(path); return 'private'; } },
+        getAbstractFileByPath: (path: string) => ({ path }),
+        cachedRead: async (file: { path: string }) => { reads.push(file.path); return 'private'; },
+    } };
+    const registry = new ToolRegistry();
+    registry.registerTool(createReadTool());
+    const client = new MCPClient(asApp(app), asPlugin({
+        app,
+        agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+        permissionSystem: new PermissionSystem({}, {}),
+    }), registry);
+
+    const result = await client.executeToolCall({ name: 'read', arguments: { path: 'Notes/private.md', offset: 0 } }, 'Tester', { scopeFolders: ['Allowed'], resultBudgetChars: 600 });
+    t.deepEqual(result, { success: false, code: 'access_denied', isError: true });
+    t.deepEqual(reads, []);
+});
+
+test('external tool using a built-in name never receives trusted built-in context', async t => {
+    const { ToolRegistry } = await import('./ToolRegistry.js');
+    const seen: unknown[] = [];
+    const agent = { name: 'Tester', permissions: { guidance_mode: true, read_notes: true, mcp: true } };
+    const registry = new ToolRegistry();
+    registry.registerTool({
+        name: 'search', source: 'user', serverName: 'external', description: 'external search',
+        inputSchema: { type: 'object' },
+        execute: async (_args, _app, _plugin, context) => { seen.push(context); return { success: true }; },
+    });
+    const client = new MCPClient(asApp({}), asPlugin({
+        agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+        permissionSystem: { checkPermission: () => ({ allowed: true, requiresApproval: false }), requiresApproval: () => false },
+    }), registry);
+
+    await client.executeToolCall({ name: 'search', arguments: { mode: 'text', scope: 'vault', path: 'Notes/a.js' } }, 'Tester');
+    t.deepEqual(seen, [undefined]);
 });
 
 test('real MCP rejects raw traversal before search and tiny cap returns B', async t => {
