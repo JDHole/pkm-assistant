@@ -14,7 +14,7 @@ import test from 'ava';
 
 import { FetchStreamTransport } from './FetchStreamTransport.js';
 import { STREAM_TRANSPORT_TIMEOUT_MS } from './contracts.js';
-import type { HttpRequestSpec, StreamSink } from './contracts.js';
+import type { HttpRequestSpec, HttpStreamActivity, StreamSink } from './contracts.js';
 
 type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => void;
 
@@ -186,5 +186,55 @@ test('Stop zgłoszony SAMYM zdarzeniem `abort` kończy strumień kodem `aborted`
         const blad = await t.throwsAsync(promise, undefined, 'Stop nie odrzucił obietnicy');
         t.is(kod(blad), 'aborted',
             'samo zdarzenie `abort` wystarczy za Stop — inaczej przerwanie przebiera się za awarię sieci');
+    });
+});
+
+for (const eventOnly of [false, true]) {
+    test('U1 final repair - raw activity observer Stop suppresses current chunk (' + (eventOnly ? 'event only' : 'controller') + ')', async t => {
+        await withServer((_req, res) => {
+            res.writeHead(200, { 'content-type': 'text/event-stream' });
+            res.write('literal-raw-chunk');
+        }, async url => {
+            const controller = new AbortController();
+            const eventSignal = atrapaSygnalu();
+            const signal = eventOnly ? eventSignal.jako() : controller.signal;
+            const activities: HttpStreamActivity[] = [];
+            const forwarded: string[] = [];
+            const error = await t.throwsAsync(new FetchStreamTransport().open(spec(url), {
+                onActivity(activity) {
+                    activities.push(activity);
+                    if (activity.kind === 'chunk') {
+                        if (eventOnly) eventSignal.odpalZdarzenie();
+                        else controller.abort();
+                    }
+                },
+                onChunk(text) { forwarded.push(text); },
+            }, signal));
+            t.is(kod(error), 'aborted');
+            t.deepEqual(forwarded, []);
+            t.deepEqual(activities.map(activity => activity.kind), ['response', 'chunk', 'end']);
+            const end = activities.at(-1);
+            if (end?.kind !== 'end') return t.fail('missing end observation');
+            t.deepEqual({ status: end.status, outcome: end.outcome, chunkCount: end.chunkCount, byteCount: end.byteCount },
+                { status: 200, outcome: 'aborted', chunkCount: 1, byteCount: 17 });
+            if (eventOnly) t.false(eventSignal.aborted);
+        });
+    });
+}
+
+test('U1 final repair - throwing raw activity observer remains isolated', async t => {
+    await withServer((_req, res) => {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.end('literal-raw-chunk');
+    }, async url => {
+        const forwarded: string[] = [];
+        const result = await new FetchStreamTransport().open(spec(url), {
+            onActivity() { throw new Error('observer failure'); },
+            onChunk(text) { forwarded.push(text); },
+        }, new AbortController().signal);
+        t.is(result.status, 200);
+        t.is(result.body, '');
+        t.is(result.headers['content-type'], 'text/event-stream');
+        t.deepEqual(forwarded, ['literal-raw-chunk']);
     });
 });

@@ -46,6 +46,7 @@ import type {
     StreamTransport,
     StreamOpenResult,
     StreamSink,
+    HttpStreamActivity,
     FrameParser,
     StreamFrame,
     NormalizedError,
@@ -68,6 +69,7 @@ export type {
     StreamTransport,
     StreamOpenResult,
     StreamSink,
+    HttpStreamActivity,
     FrameParser,
     StreamFrame,
     NormalizedError,
@@ -314,6 +316,8 @@ export interface ChatRequest {
  */
 export interface StreamAbortError extends Error {
     _aborted: true;
+    /** New work on the same model instance replaced this request. */
+    _superseded?: true;
 }
 
 /**
@@ -597,6 +601,17 @@ export interface StreamHandlers {
      * zjada budżetu streamu. Nazwa pola zostaje `gate_admitted` (kontrakt konsumentów).
      */
     gate_admitted?: () => void;
+    /** Payload-free lifecycle telemetry. No prompt, headers, arguments, or frame text. */
+    activity?: (event: ModelStreamActivity) => void;
+}
+
+/** Fixed, payload-free facts about one model request. */
+export interface ModelStreamActivity {
+    event: 'queued' | 'admitted' | 'transport' | 'content' | 'reasoning' | 'tool' | 'completed' | 'cancelled' | 'failed';
+    requestId: string;
+    attempt: number;
+    elapsedMs: number;
+    counts: Readonly<{ transportChunks: number; transportBytes: number; contentChars: number; reasoningChars: number; toolEvents: number }>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

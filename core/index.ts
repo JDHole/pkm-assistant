@@ -309,6 +309,8 @@ export type {
   StreamTransport,
   StreamOpenResult,
   StreamSink,
+  StreamTransportActivity,
+  HttpStreamActivity,
   FrameParser,
   StreamFrame,
 } from './http/contracts.js';

@@ -36,6 +36,7 @@ import type {
     HttpClient,
     HttpRequestSpec,
     ModelInfo,
+    ModelStreamActivity,
     ModelSettingsBag,
     NormalizedError,
     OpenAiCompletion,
@@ -57,9 +58,6 @@ const LOG_SCOPE = 'ChatModel';
 const GATE_LIMIT_MIN = 1;
 const GATE_LIMIT_MAX = 10;
 
-/** Ile znaków porcji trafia do logu przy nieparsowalnej ramce - po masce sekretów. */
-const CHUNK_LOG_HEAD_CHARS = 200;
-
 /** Jak skończyła się JEDNA próba otwarcia strumienia. */
 type AttemptOutcome =
     | { kind: 'settled' }
@@ -69,6 +67,34 @@ type AttemptOutcome =
 type TurnEnd =
     | { kind: 'done' }
     | { kind: 'error'; error: NormalizedError };
+
+interface RequestOwner {
+    readonly epoch: number;
+    readonly requestId: string;
+    readonly startedAt: number;
+    settled: boolean;
+    admitted: boolean;
+    cancelled: false | 'stop' | 'superseded';
+    releaseScheduled: boolean;
+    ticket: GateTicket | null;
+    controller: AbortController | null;
+    retryWake?: () => void;
+    reject?: (err: unknown) => void;
+    cancelPromise: Promise<void>;
+    cancelResolve: () => void;
+    counts: { transportChunks: number; transportBytes: number; contentChars: number; reasoningChars: number; toolEvents: number };
+    status: number | null;
+    transportOutcome: 'complete' | 'aborted' | 'timeout' | 'error' | null;
+    attempt: number;
+    activity?: (event: ModelStreamActivity['event']) => void;
+    activityEvents: Set<ModelStreamActivity['event']>;
+    parseWarningEmitted: boolean;
+    terminalActivity: 'completed' | 'cancelled' | 'failed' | null;
+}
+
+function newRequestId(): string {
+    return hostWindow.crypto?.randomUUID?.() ?? `pkm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
 
 /** Pusty, ale poprawny snapshot. `usage` jest PUSTYM obiektem - sygnał „estymuj" dla pętli. */
 function emptyCompletion(): OpenAiCompletion {
@@ -262,8 +288,8 @@ function errorFromBody(body: string, status: number, secrets: readonly string[])
 function isSettledError(e: unknown): boolean {
     if (!e || typeof e !== 'object') return false;
     if (e instanceof ModelRequestError) return true;
-    const bag = e as { _aborted?: boolean; _queueCancelled?: boolean; message?: unknown };
-    if (bag._aborted === true || bag._queueCancelled === true) return true;
+    const bag = e as { _aborted?: boolean; _superseded?: boolean; _queueCancelled?: boolean; message?: unknown };
+    if (bag._aborted === true || bag._superseded === true || bag._queueCancelled === true) return true;
     return !(e instanceof Error) && typeof bag.message === 'string';
 }
 
@@ -315,17 +341,13 @@ export class ChatModel {
      * obserwowane przez testy jako dowód, że stream faktycznie zajął slot - stąd nazwa
      * z podkreśleniem, mimo że w produkcji nikt go nie czyta.
      */
-    private _gateTicket: GateTicket | null = null;
+    /** Legacy test seam, now a view of the active request's owned ticket. */
+    get _gateTicket(): GateTicket | null {
+        return this._activeOwner?.admitted ? this._activeOwner.ticket : null;
+    }
 
     /**
-     * Bilet wzięty, ale jeszcze NIEWPUSZCZONY. Osobne pole od {@link _gateTicket}, bo Stop
-     * potrzebuje uchwytu do biletu stojącego w kolejce (`cancel()`), a `_gateTicket` ma
-     * znaczyć „ten model TRZYMA slot" i nic więcej.
-     */
-    private _pendingTicket: GateTicket | null = null;
-
-    /**
-     * Bilet toru BEZ strumienia. Osobne pole od {@link _gateTicket} i {@link _pendingTicket},
+     * Bilet toru BEZ strumienia. Osobne pole od biletu właściciela streamu,
      * bo `complete()` bywa wołane na instancji, na której AKURAT BIEGNIE tura strumienia
      * (`ChatModel` nie jest concurrent-safe, ale nikt tego wołaczom nie zabrania).
      * Wcześniej `complete()` zerowało `_gateTicket` biegnącej tury - a ta zwalnia slot
@@ -335,13 +357,8 @@ export class ChatModel {
      */
     private _completeTicket: GateTicket | null = null;
 
-    private _abortController: AbortController | null = null;
-    /** JEDNORAZOWY uchwyt odrzucenia bieżącej tury - instalowany DOPIERO po wejściu na slot. */
-    private _rejectTurn: ((err: unknown) => void) | null = null;
-    private _turnSettled = true;
-    private _admitted = false;
-    private _cancelled = false;
-    private _gateReleaseScheduled = false;
+    private _activeOwner: RequestOwner | null = null;
+    private _epoch = 0;
 
     constructor(deps: ChatModelDeps) {
         if (!deps || typeof deps !== 'object') {
@@ -389,39 +406,62 @@ export class ChatModel {
             rejectOuter = reject;
         });
 
-        // Instancja nie obsługuje dwóch tur naraz (stan tury żyje na polach). Gdy mimo to
-        // ktoś odpali drugą, poprzednia MUSI dostać rozstrzygnięcie - inaczej jej `await`
-        // nie wróciłby już nigdy. Lepszy jasny błąd niż wieczne wiszenie.
-        this._supersedeRunningTurn();
+        const previousOwner = this._activeOwner;
 
-        // Stan tury zeruje się TU, a nie w `finally` poprzedniej - instancja bywa użyta
-        // ponownie, a `stopStream()` po zakończonej turze nadal ma prawo przerwać transport.
-        this._turnSettled = false;
-        this._admitted = false;
-        this._cancelled = false;
-        this._gateReleaseScheduled = false;
-        this._rejectTurn = null;
-        this._retryWake = undefined;
-        this._abortController = null;
+        let cancelResolve!: () => void;
+        const cancelPromise = new Promise<void>(resolve => { cancelResolve = resolve; });
+        const owner: RequestOwner = {
+            epoch: ++this._epoch,
+            requestId: newRequestId(),
+            startedAt: Date.now(),
+            settled: false,
+            admitted: false,
+            cancelled: false,
+            releaseScheduled: false,
+            ticket: null,
+            controller: null,
+            cancelPromise,
+            cancelResolve,
+            counts: { transportChunks: 0, transportBytes: 0, contentChars: 0, reasoningChars: 0, toolEvents: 0 },
+            status: null,
+            transportOutcome: null,
+            attempt: 0,
+            activityEvents: new Set(),
+            parseWarningEmitted: false,
+            terminalActivity: null,
+        };
+        owner.activity = event => this._activity(handlers, owner, event);
 
         // Slot bramki zwalniamy PRZED rozstrzygnięciem promisy: konsument, który obudzi się
         // na `await`, ma zastać kolejkę już rozliczoną (a nie zwolnioną mikrozadanie później).
         const settleOk = (value: OpenAiCompletion): void => {
-            if (this._turnSettled) return;
-            this._turnSettled = true;
-            this._rejectTurn = null;
-            this.state = 'idle';
-            this._releaseGateSlot();
+            if (owner.settled) return;
+            owner.settled = true;
+            owner.reject = undefined;
+            if (this._activeOwner === owner) this.state = 'idle';
+            this._releaseOwner(owner);
+            this._activity(handlers, owner, 'completed');
             resolveOuter(value);
         };
         const settleErr = (err: unknown): void => {
-            if (this._turnSettled) return;
-            this._turnSettled = true;
-            this._rejectTurn = null;
-            this.state = 'idle';
-            this._releaseGateSlot();
+            if (owner.settled) return;
+            owner.settled = true;
+            owner.reject = undefined;
+            if (this._activeOwner === owner) this.state = 'idle';
+            this._releaseOwner(owner);
+            owner.activity?.(owner.cancelled ? 'cancelled' : 'failed');
             rejectOuter(err);
         };
+
+        // Instalujemy nowego właściciela PRZED callbackami anulowania poprzedniej tury.
+        // Callback może wejść w stream() ponownie: ta późniejsza tura ma wtedy przerwać
+        // także tego właściciela, zanim zdąży wziąć bilet albo otworzyć sieć.
+        owner.reject = settleErr;
+        this._activeOwner = owner;
+        this.state = 'idle';
+        this._retryWake = undefined;
+        this._supersedeRunningTurn(previousOwner);
+        if (owner.settled || owner.cancelled) return turn;
 
         // Bilet bierzemy SYNCHRONICZNIE: `stopStream()` wywołany w tej samej turze pętli
         // zdarzeń musi mieć co anulować (bilet stojący w kolejce). Wybuch bramki (albo
@@ -436,10 +476,10 @@ export class ChatModel {
             settleErr(err);
             return turn;
         }
-        this._pendingTicket = ticket;
-        this._gateTicket = null;
+        owner.ticket = ticket;
+        this._activity(handlers, owner, 'queued');
 
-        void this._runTurn(req, handlers, ticket, settleOk, settleErr);
+        void this._runTurn(owner, req, handlers, ticket, settleOk, settleErr);
         return turn;
     }
 
@@ -482,36 +522,39 @@ export class ChatModel {
      * idzie łańcuchem mikrozadań - synchroniczny budzik pętli ma dalej wygrywać swój wyścig.
      */
     stopStream(): void {
-        this._cancelled = true;
+        // Tor complete() jest niezależny: może czekać, gdy nie istnieje żadna tura streamu.
+        // cancel() nie rusza już przyjętego biletu - takie HTTP rozliczy się samo.
+        if (this._completeTicket) {
+            try { this._completeTicket.cancel(); } catch { /* bilet mógł już zejść */ }
+        }
+        const owner = this._activeOwner;
+        if (!owner) return;
+        owner.cancelled ||= 'stop';
+        owner.cancelResolve();
 
         // 1. Okno backoffu - obudź, żeby pętla ponowień zobaczyła anulowanie.
-        const wake = this._retryWake;
+        const wake = owner.retryWake;
+        owner.retryWake = undefined;
         this._retryWake = undefined;
         if (wake) {
             try { wake(); } catch { /* budzik nie ma prawa wywrócić Stopu */ }
         }
 
         // 2. Bilet: trzymający slot zwalniamy z cooldownem, czekający w kolejce anulujemy.
-        if (this._gateTicket) {
-            this._releaseGateSlot();
-        } else if (this._pendingTicket) {
-            try { this._pendingTicket.cancel(); } catch { /* bilet mógł już zejść */ }
-        }
-
-        // 2b. Tor bez strumienia ma własny bilet. `cancel()` rusza WYŁĄCZNIE bilet czekający
-        //     w kolejce (kontrakt bramki), więc żądanie już biegnące dokończy i zwolni slot
-        //     samo - Stop nie zabiera slotu spod wywołania, które wciąż leci po sieci.
-        if (this._completeTicket) {
-            try { this._completeTicket.cancel(); } catch { /* bilet mógł już zejść */ }
+        if (owner.admitted) {
+            this._releaseOwner(owner);
+        } else if (owner.ticket) {
+            try { owner.ticket.cancel(); } catch { /* bilet mógł już zejść */ }
         }
 
         // 3. Przerwanie transportu jest BEZWARUNKOWE - także przy powtórnym Stopie.
-        this._signalAbort();
+        this._signalAbort(owner);
 
-        // 4. Uchwyt odrzucenia - jednorazowy. Pusty przy bilecie z kolejki: tamtą ścieżkę
-        //    rozstrzyga sam `stream()` błędem „anulowany w kolejce".
-        const reject = this._rejectTurn;
-        this._rejectTurn = null;
+        // 4. Wynik admission rozróżni anulowanie w kolejce od już zajętego slotu.
+        // Bez biletu (reentrant Stop przy supersesji) odrzucamy bez czekania na admission.
+        const reject = owner.admitted || !owner.ticket ? owner.reject : undefined;
+        this._activityForActive(owner, 'cancelled');
+        owner.reject = undefined;
         if (!reject) return;
         const err = this._abortError();
         void Promise.resolve().then(() => { reject(err); });
@@ -584,9 +627,13 @@ export class ChatModel {
     }
 
     /** Odrzucenie po Stopie użytkownika - instancja `Error` ze znacznikiem `_aborted`. */
-    private _abortError(): StreamAbortError {
-        const err = new Error(this._text('model.stream_aborted')) as StreamAbortError;
+    private _abortError(superseded = false): StreamAbortError {
+        const message = superseded
+            ? 'Poprzednia tura tego modelu została przerwana przez nowe żądanie na tej samej instancji.'
+            : this._text('model.stream_aborted');
+        const err = new Error(message) as StreamAbortError;
         err._aborted = true;
+        if (superseded) err._superseded = true;
         return err;
     }
 
@@ -597,8 +644,8 @@ export class ChatModel {
         return err;
     }
 
-    private _signalAbort(): void {
-        const controller = this._abortController;
+    private _signalAbort(owner: RequestOwner | null = this._activeOwner): void {
+        const controller = owner?.controller;
         if (!controller) return;
         if (controller.signal.aborted) {
             // Powtórny Stop: sygnał jest już zgaszony, ale przerwanie transportu ma być
@@ -614,14 +661,52 @@ export class ChatModel {
      * Bilet, który nigdy nie wjechał na slot, nie ma czego zwalniać - jego drogą jest
      * `cancel()`, nie `release()`.
      */
-    private _releaseGateSlot(): void {
-        const ticket = this._gateTicket;
-        if (!ticket || !this._admitted || this._gateReleaseScheduled) return;
-        this._gateReleaseScheduled = true;
+    private _releaseOwner(owner: RequestOwner): void {
+        const ticket = owner.ticket;
+        if (!ticket || !owner.admitted || owner.releaseScheduled) return;
+        owner.releaseScheduled = true;
         const cls = this._class();
         cls.scheduleGateRelease(() => {
-            try { ticket.release(); } catch { /* release jest idempotentne, ale bramka bywa podmieniona */ }
+            try { ticket.release(); } catch { /* release jest idempotentne */ }
         }, cls.GATE_RELEASE_COOLDOWN_MS);
+    }
+
+    private _activity(handlers: StreamHandlers, owner: RequestOwner, event: ModelStreamActivity['event']): void {
+        if (owner.terminalActivity) return;
+        if (event === 'completed' || event === 'cancelled' || event === 'failed') {
+            // Stop, settlement i finally mogą zbiec się dla tego samego requestu.
+            owner.terminalActivity = event;
+        } else if (owner.cancelled || owner.settled || this._activeOwner !== owner) {
+            return;
+        }
+        if (event === 'transport' || event === 'content' || event === 'reasoning' || event === 'tool') {
+            if (owner.activityEvents.has(event)) return;
+            owner.activityEvents.add(event);
+        }
+        try {
+            log.debug(LOG_SCOPE, 'stream.activity', {
+                event,
+                requestId: owner.requestId,
+                attempt: owner.attempt,
+                elapsedMs: Math.max(0, Date.now() - owner.startedAt),
+                provider: this.providerId,
+                completionMode: this._provider.info?.streamMode ?? 'unknown',
+                status: owner.status,
+                outcome: owner.transportOutcome,
+                counts: { ...owner.counts },
+            });
+            handlers.activity?.({
+                event,
+                requestId: owner.requestId,
+                attempt: owner.attempt,
+                elapsedMs: Math.max(0, Date.now() - owner.startedAt),
+                counts: { ...owner.counts },
+            });
+        } catch { /* telemetry cannot affect request settlement */ }
+    }
+
+    private _activityForActive(owner: RequestOwner, event: ModelStreamActivity['event']): void {
+        owner.activity?.(event);
     }
 
     /**
@@ -637,33 +722,34 @@ export class ChatModel {
      *
      * Ścieżka jest bliźniacza do Stopu: ubijamy turę Z ZEWNĄTRZ, więc rozstrzygamy PROMISĘ,
      * a `handlers.error` starej tury zostawiamy w spokoju (tak samo jak `stopStream()`).
-     * Odrzucenie leci SYNCHRONICZNIE - mikrozadanie rozstrzygnęłoby starą turę już po tym,
-     * jak `stream()` zainstaluje stan nowej, i zabrałoby jej slot bramki.
+     * Odrzucenie leci SYNCHRONICZNIE i jest związane wyłącznie ze starym właścicielem;
+     * spóźniony wynik admission odda jego bilet w finally.
      */
-    private _supersedeRunningTurn(): void {
-        if (this._turnSettled) return;
+    private _supersedeRunningTurn(owner: RequestOwner | null): void {
+        if (!owner || owner.settled) return;
 
-        const reject = this._rejectTurn;
-        this._rejectTurn = null;
-        this._retryWake = undefined;
-
-        this._signalAbort();
-        if (this._gateTicket) {
-            this._releaseGateSlot();
-        } else if (this._pendingTicket) {
-            try { this._pendingTicket.cancel(); } catch { /* bilet mógł już zejść */ }
-        }
-        this._pendingTicket = null;
-
-        if (!reject) {
-            // Tura stała jeszcze w kolejce bramki: uchwytu odrzucenia nie było, więc
-            // rozstrzygnie się sama - anulowanym biletem.
-            return;
+        const reject = owner.reject;
+        owner.cancelled ||= 'superseded';
+        owner.cancelResolve();
+        owner.activity?.('cancelled');
+        const wake = owner.retryWake;
+        owner.retryWake = undefined;
+        if (wake) {
+            try { wake(); } catch { /* budzik nie ma prawa wywrócić supersesji */ }
         }
 
-        const err = normalizeError('Poprzednia tura tego modelu została przerwana przez nowe żądanie na tej samej instancji.');
+        this._signalAbort(owner);
+        if (owner.admitted) {
+            this._releaseOwner(owner);
+        } else if (owner.ticket) {
+            try { owner.ticket.cancel(); } catch { /* bilet mógł już zejść */ }
+        }
+
+        if (!reject) return;
+
+        const err = this._abortError(owner.cancelled === 'superseded');
         log.debug(LOG_SCOPE, 'poprzednia tura przykryta nowym żądaniem', { provider: this.providerId });
-        // `reject` to `settleErr` STAREJ tury - sam ustawia `_turnSettled` i zdejmuje stan.
+        // Reject jest związany ze starym ownerem i nie może rozliczyć nowszej tury.
         reject(err);
     }
 
@@ -675,15 +761,16 @@ export class ChatModel {
         }
     }
 
-    /** `handlers.done` bywa asynchroniczne i MUSI zostać awaitowane przed resolve. */
-    private async _callDone(handlers: StreamHandlers, response: OpenAiCompletion): Promise<void> {
-        if (!handlers.done) return;
-        try { await handlers.done(response); } catch (e) {
+    /** Sukces awaituje done; Stop/supersesja odwiązuje ownera od trzymanego callbacku. */
+    private async _callDone(owner: RequestOwner, handlers: StreamHandlers, response: OpenAiCompletion): Promise<void> {
+        if (!handlers.done || owner.settled || owner.cancelled) return;
+        try { await Promise.race([handlers.done(response), owner.cancelPromise]); } catch (e) {
             log.debug(LOG_SCOPE, 'handlers.done rzucił — odpowiedź i tak wraca', String((e as Error)?.message ?? e));
         }
     }
 
     private async _runTurn(
+        owner: RequestOwner,
         req: ChatRequest,
         handlers: StreamHandlers,
         ticket: GateTicket,
@@ -692,42 +779,45 @@ export class ChatModel {
     ): Promise<void> {
         try {
             const admitted = await ticket.admitted;
+            // Bramka mogła zająć slot synchronicznie, przed Stopem i wznowieniem await.
+            // Faktyczny wynik zapisujemy także dla już rozliczonego ownera: finally musi
+            // oddać jego własny bilet, nigdy bilet nowszej tury.
+            owner.admitted = admitted;
+            if (owner.settled) return;
             if (!admitted) {
-                const err = this._gateCancelledError();
-                this._callHandler(() => handlers.error?.(err));
+                const err = owner.cancelled === 'superseded' ? this._abortError(true) : this._gateCancelledError();
+                if (owner.cancelled !== 'superseded') this._callHandler(() => handlers.error?.(err));
                 settleErr(err);
                 return;
             }
-
-            this._admitted = true;
-            this._gateTicket = ticket;
-            this.state = 'streaming';
-            // Uchwyt odrzucenia instalujemy DOPIERO tutaj: bilet z kolejki rozstrzyga się
-            // sam, a podwójne odrzucenie byłoby błędem cichym i trudnym do złapania.
-            this._rejectTurn = settleErr;
-
-            if (this._cancelled) {
-                const err = this._abortError();
-                this._rejectTurn = null;
-                this._callHandler(() => handlers.error?.(err));
-                settleErr(err);
+            if (owner.cancelled) {
+                settleErr(this._abortError(owner.cancelled === 'superseded'));
                 return;
             }
 
+            if (this._activeOwner === owner) this.state = 'streaming';
+            owner.reject = settleErr;
             this._callHandler(() => handlers.gate_admitted?.());
+            if (owner.settled || owner.cancelled) return;
+            this._activity(handlers, owner, 'admitted');
+            if (owner.settled || owner.cancelled) return;
 
             const info = this._provider.info;
             if (info?.streamMode === 'complete' || info?.streaming === false) {
-                await this._emulateStream(req, handlers, settleOk, settleErr);
+                await Promise.race([
+                    this._emulateStream(owner, req, handlers, settleOk, settleErr),
+                    owner.cancelPromise,
+                ]);
             } else {
-                await this._streamWithRetries(req, handlers, settleOk, settleErr);
+                await this._streamWithRetries(owner, req, handlers, settleOk, settleErr);
             }
         } catch (e) {
+            if (owner.settled || owner.cancelled) return;
             const err = toConsumerError(e);
             this._callHandler(() => handlers.error?.(err));
             settleErr(err);
         } finally {
-            this._releaseGateSlot();
+            this._releaseOwner(owner);
         }
     }
 
@@ -736,21 +826,25 @@ export class ChatModel {
      * bez strumienia, cała treść jako jeden chunk, potem AWAITOWANE `done` i resolve.
      */
     private async _emulateStream(
+        owner: RequestOwner,
         req: ChatRequest,
         handlers: StreamHandlers,
         settleOk: (value: OpenAiCompletion) => void,
         settleErr: (err: unknown) => void,
     ): Promise<void> {
+        if (owner.settled || owner.cancelled) return;
         let response: OpenAiCompletion;
         try {
             response = await this._completeOnce(req);
         } catch (e) {
+            if (owner.settled || owner.cancelled) return;
             const err = toConsumerError(e);
             this._callHandler(() => handlers.error?.(err));
             settleErr(err);
             return;
         }
 
+        if (owner.settled || owner.cancelled) return;
         if (response.error) {
             const err = response.error;
             this._callHandler(() => handlers.error?.(err));
@@ -758,8 +852,23 @@ export class ChatModel {
             return;
         }
 
+        const message = response.choices[0]?.message;
+        if (message) {
+            owner.counts.contentChars = typeof message.content === 'string' ? message.content.length
+                : Array.isArray(message.content) ? message.content.reduce((sum, block) => sum + (typeof block.text === 'string' ? block.text.length : 0), 0) : 0;
+            owner.counts.reasoningChars = message.reasoning_content?.length ?? 0;
+            owner.counts.toolEvents = message.tool_calls?.length ?? 0;
+        }
+        if (owner.counts.contentChars) this._activityForActive(owner, 'content');
+        if (owner.settled || owner.cancelled) return;
+        if (owner.counts.reasoningChars) this._activityForActive(owner, 'reasoning');
+        if (owner.settled || owner.cancelled) return;
+        if (owner.counts.toolEvents) this._activityForActive(owner, 'tool');
+        if (owner.settled || owner.cancelled) return;
         this._callHandler(() => handlers.chunk?.(response));
-        await this._callDone(handlers, response);
+        if (owner.settled || owner.cancelled) return;
+        await this._callDone(owner, handlers, response);
+        if (owner.settled || owner.cancelled) return;
         settleOk(response);
     }
 
@@ -809,16 +918,18 @@ export class ChatModel {
      * Po wyczerpaniu sufitu tura ODRZUCA się błędem 429, a nie leci kolejne żądanie.
      */
     private async _streamWithRetries(
+        owner: RequestOwner,
         req: ChatRequest,
         handlers: StreamHandlers,
         settleOk: (value: OpenAiCompletion) => void,
         settleErr: (err: unknown) => void,
     ): Promise<void> {
         for (let attempt = 0; attempt <= STREAM_MAX_RETRIES; attempt++) {
-            if (this._cancelled || this._turnSettled) return;
+            if (owner.cancelled || owner.settled) return;
 
-            const outcome = await this._streamAttempt(req, handlers, settleOk, settleErr);
-            if (outcome.kind === 'settled') return;
+            owner.attempt = attempt;
+            const outcome = await this._streamAttempt(owner, req, handlers, settleOk, settleErr);
+            if (owner.cancelled || owner.settled || outcome.kind === 'settled') return;
 
             if (attempt === STREAM_MAX_RETRIES) {
                 this._failTurn(handlers, settleErr, outcome.error);
@@ -826,22 +937,24 @@ export class ChatModel {
             }
 
             const backoff = STREAM_RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
-            await this._waitBeforeRetry(outcome.delayMs ?? backoff);
-            if (this._cancelled || this._turnSettled) return;
+            await this._waitBeforeRetry(owner, outcome.delayMs ?? backoff);
+            if (owner.cancelled || owner.settled) return;
         }
     }
 
     /** Okno backoffu z hakiem budzenia - po Stopie NIE leci kolejne, płatne żądanie. */
-    private _waitBeforeRetry(ms: number): Promise<void> {
+    private _waitBeforeRetry(owner: RequestOwner, ms: number): Promise<void> {
         return new Promise<void>(resolve => {
             let fired = false;
             const wake = (): void => {
                 if (fired) return;
                 fired = true;
-                this._retryWake = undefined;
+                owner.retryWake = undefined;
+                if (this._activeOwner === owner) this._retryWake = undefined;
                 resolve();
             };
-            this._retryWake = wake;
+            owner.retryWake = wake;
+            if (this._activeOwner === owner) this._retryWake = wake;
             this._class().scheduleRetry(wake, ms);
         });
     }
@@ -870,6 +983,7 @@ export class ChatModel {
      * po kolei.
      */
     private async _streamAttempt(
+        owner: RequestOwner,
         req: ChatRequest,
         handlers: StreamHandlers,
         settleOk: (value: OpenAiCompletion) => void,
@@ -877,6 +991,8 @@ export class ChatModel {
     ): Promise<AttemptOutcome> {
         const decoder = this._provider.createStreamDecoder(req, this._ctx);
         const snapshot = emptyCompletion();
+        const controller = new AbortController();
+        owner.controller = controller;
 
         let decided = false;
         let settleEnd!: (end: TurnEnd) => void;
@@ -888,8 +1004,31 @@ export class ChatModel {
         };
 
         const sink: StreamSink = {
+            onActivity: activity => {
+                if (owner.settled || owner.cancelled) return;
+                if (activity.kind === 'chunk') {
+                    owner.counts.transportChunks += 1;
+                    owner.counts.transportBytes += activity.byteLength;
+                } else if (activity.kind === 'response') {
+                    owner.status = activity.status;
+                } else {
+                    owner.status = activity.status;
+                    owner.transportOutcome = activity.outcome;
+                    log.debug(LOG_SCOPE, 'stream.transport_end', {
+                        requestId: owner.requestId,
+                        attempt: owner.attempt,
+                        provider: this.providerId,
+                        status: activity.status,
+                        outcome: activity.outcome,
+                        chunkCount: activity.chunkCount,
+                        byteCount: activity.byteCount,
+                        elapsedMs: activity.elapsedMs,
+                    });
+                }
+                if (activity.kind === 'chunk') this._activityForActive(owner, 'transport');
+            },
             onChunk: (text: string): void => {
-                if (decided || this._turnSettled) return;
+                if (decided || owner.settled || owner.cancelled) return;
                 const droppedBefore = decoder.droppedFrames ?? 0;
                 let events: StreamEvent[] = [];
                 let threw = false;
@@ -904,27 +1043,38 @@ export class ChatModel {
                 // że ramka jeszcze nie dojechała ALBO nie niosła nic widocznego - u OpenAI
                 // to pierwsza (`delta:{role}`) i przedostatnia (`finish_reason`) ramka tury,
                 // więc dawna heurystyka robiła 2 fałszywe alarmy na turę w logu usera.
-                if (threw || (decoder.droppedFrames ?? 0) > droppedBefore) {
+                if ((threw || (decoder.droppedFrames ?? 0) > droppedBefore) && !owner.parseWarningEmitted) {
+                    owner.parseWarningEmitted = true;
                     log.warn(LOG_SCOPE, 'stream.chunk_parse_failed', {
                         provider: this.providerId,
-                        head: maskSensitiveData(text.slice(0, CHUNK_LOG_HEAD_CHARS)),
+                        requestId: owner.requestId,
+                        frameCount: owner.counts.transportChunks,
+                        byteCount: owner.counts.transportBytes,
                     });
                 }
 
                 if (events.length === 0) return;
 
                 const { end, visible } = applyEvents(snapshot, events);
-                if (visible && (!end || end.kind === 'done')) this._callHandler(() => handlers.chunk?.(snapshot));
-                if (end) decide(end);
+                this._observeSemanticEvents(owner, events, visible && (!end || end.kind === 'done'));
+                if (owner.settled || owner.cancelled) return;
+                if (visible && (!end || end.kind === 'done')) {
+                    this._callHandler(() => handlers.chunk?.(snapshot));
+                    if (owner.settled || owner.cancelled) return;
+                }
+                if (end) {
+                    decide(end);
+                    try { controller.abort(); } catch { /* terminal reader cleanup is best effort */ }
+                }
             },
         };
-
-        const controller = new AbortController();
-        this._abortController = controller;
 
         const spec: HttpRequestSpec = {
             ...this._provider.buildRequest(req, this._ctx, true),
         };
+        if (this._provider.info?.local) {
+            spec.headers = { ...spec.headers, 'X-PKM-Request-ID': owner.requestId };
+        }
         if (spec.timeoutMs === undefined) spec.timeoutMs = STREAM_TRANSPORT_TIMEOUT_MS;
 
         const opened = this._transport.open(spec, sink, controller.signal).then(
@@ -937,15 +1087,18 @@ export class ChatModel {
         const race = await Promise.race([
             ended.then(end => ({ kind: 'end' as const, end })),
             opened,
+            owner.cancelPromise.then(() => ({ kind: 'cancel' as const })),
         ]);
 
+        if (owner.settled || owner.cancelled || race.kind === 'cancel') return { kind: 'settled' };
+
         if (race.kind === 'end') {
-            await this._finishTurn(decoder, snapshot, race.end, handlers, settleOk, settleErr);
+            await this._finishTurn(owner, decoder, snapshot, race.end, handlers, settleOk, settleErr);
             return { kind: 'settled' };
         }
 
         if (race.kind === 'openError') {
-            if (this._turnSettled || this._cancelled) return { kind: 'settled' };
+            if (owner.settled || owner.cancelled) return { kind: 'settled' };
             const err = toConsumerError(race.error);
             this._failTurn(handlers, settleErr, err);
             return { kind: 'settled' };
@@ -968,14 +1121,39 @@ export class ChatModel {
         await new Promise<void>(resolve => { hostWindow.setTimeout(resolve, 0); });
 
         if (decided) {
-            await this._finishTurn(decoder, snapshot, await ended, handlers, settleOk, settleErr);
+            await this._finishTurn(owner, decoder, snapshot, await ended, handlers, settleOk, settleErr);
             return { kind: 'settled' };
         }
-        if (this._turnSettled) return { kind: 'settled' };
+        if (owner.settled || owner.cancelled) return { kind: 'settled' };
 
         decided = true;
-        await this._closeWithoutSentinel(decoder, snapshot, handlers, settleOk, settleErr);
+        await this._closeWithoutSentinel(owner, decoder, snapshot, handlers, settleOk, settleErr);
         return { kind: 'settled' };
+    }
+
+    /** Counts feed and finish deltas once; each semantic observer may cancel this owner. */
+    private _observeSemanticEvents(owner: RequestOwner, events: StreamEvent[], notify: boolean): void {
+        let hasContent = false;
+        let hasReasoning = false;
+        let hasTool = false;
+        for (const event of events) {
+            if (event.type === 'text') {
+                owner.counts.contentChars += event.delta.length;
+                hasContent = true;
+            } else if (event.type === 'reasoning') {
+                owner.counts.reasoningChars += event.delta.length;
+                hasReasoning = true;
+            } else if (event.type === 'tool_call') {
+                owner.counts.toolEvents++;
+                hasTool = true;
+            }
+        }
+        if (!notify) return;
+        if (hasContent) this._activityForActive(owner, 'content');
+        if (owner.settled || owner.cancelled) return;
+        if (hasReasoning) this._activityForActive(owner, 'reasoning');
+        if (owner.settled || owner.cancelled) return;
+        if (hasTool) this._activityForActive(owner, 'tool');
     }
 
     /** Zdarzenia domykające dekodera - rezerwa parsera myślenia nie ma prawa rzucić. */
@@ -993,15 +1171,18 @@ export class ChatModel {
      * Kopia jest obowiązkowa - `finish()` nie może zmutować obiektu, który poszedł już
      * do `handlers.chunk`.
      */
-    private _sealSnapshot(decoder: { finish(): StreamEvent[] }, snapshot: OpenAiCompletion): OpenAiCompletion {
+    private _sealSnapshot(owner: RequestOwner, decoder: { finish(): StreamEvent[] }, snapshot: OpenAiCompletion): OpenAiCompletion {
         const final = cloneCompletion(snapshot);
-        applyEvents(final, this._finishDecoder(decoder));
+        const events = this._finishDecoder(decoder);
+        const { end, visible } = applyEvents(final, events);
+        this._observeSemanticEvents(owner, events, visible && (!end || end.kind === 'done'));
         // Rollback niedomkniętego `<think>` kasuje myślenie, a nie zeruje go pustym stringiem.
         if (final.choices[0].message.reasoning_content === '') delete final.choices[0].message.reasoning_content;
         return final;
     }
 
     private async _finishTurn(
+        owner: RequestOwner,
         decoder: { finish(): StreamEvent[] },
         snapshot: OpenAiCompletion,
         end: TurnEnd,
@@ -1009,13 +1190,16 @@ export class ChatModel {
         settleOk: (value: OpenAiCompletion) => void,
         settleErr: (err: unknown) => void,
     ): Promise<void> {
+        if (owner.settled || owner.cancelled) return;
         if (end.kind === 'error') {
             this._finishDecoder(decoder);
             this._failTurn(handlers, settleErr, end.error);
             return;
         }
-        const final = this._sealSnapshot(decoder, snapshot);
-        await this._callDone(handlers, final);
+        const final = this._sealSnapshot(owner, decoder, snapshot);
+        if (owner.settled || owner.cancelled) return;
+        await this._callDone(owner, handlers, final);
+        if (owner.settled || owner.cancelled) return;
         settleOk(final);
     }
 
@@ -1027,13 +1211,16 @@ export class ChatModel {
      * odrzucenie ZDANIEM, żeby user zobaczył powód, a nie pustą bańkę.
      */
     private async _closeWithoutSentinel(
+        owner: RequestOwner,
         decoder: { finish(): StreamEvent[] },
         snapshot: OpenAiCompletion,
         handlers: StreamHandlers,
         settleOk: (value: OpenAiCompletion) => void,
         settleErr: (err: unknown) => void,
     ): Promise<void> {
-        const final = this._sealSnapshot(decoder, snapshot);
+        if (owner.settled || owner.cancelled) return;
+        const final = this._sealSnapshot(owner, decoder, snapshot);
+        if (owner.settled || owner.cancelled) return;
         const message = final.choices[0].message;
         const content = typeof message.content === 'string' ? message.content : '';
         const hasToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
@@ -1050,7 +1237,8 @@ export class ChatModel {
             return;
         }
 
-        await this._callDone(handlers, final);
+        await this._callDone(owner, handlers, final);
+        if (owner.settled || owner.cancelled) return;
         settleOk(final);
     }
 }

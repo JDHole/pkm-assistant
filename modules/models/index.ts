@@ -70,6 +70,7 @@ export type {
   OpenAiResponseTransformedMessage,
   OpenAiToolCall,
   StreamHandlers,
+  ModelStreamActivity,
   UsageLike,
   CacheMetadata,
   VisionModelLike,
