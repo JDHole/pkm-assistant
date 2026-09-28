@@ -149,6 +149,13 @@ export class ToolRegistry {
             throw new Error(`Invalid tool definition for ${tool.name || 'unknown tool'}`);
         }
 
+        // The composition root registers built-in factory results directly, without a source
+        // field. Restore that trusted marker only for names in the built-in map. External MCP
+        // always supplies source:'user', which must win even when a server spoofs a built-in name.
+        if (tool.source === undefined && this.getBuiltinServerForTool(tool.name) !== null) {
+            tool.source = 'built-in';
+        }
+
         if (this.tools.has(tool.name)) {
             log.warn('ToolRegistry', `Tool ${tool.name} is already registered. Overwriting.`);
         }

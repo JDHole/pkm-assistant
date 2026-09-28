@@ -160,6 +160,22 @@ test('registerTool: validates required fields', t => {
     t.throws(() => r.registerTool({ name: 'x' } as unknown as ToolDefinition), { message: /Invalid tool definition/ });
 });
 
+test('registerTool: fills native built-in source but keeps external spoof names and unknown tools untrusted', t => {
+    const r = new ToolRegistry();
+    const native = makeTool('search') as ToolDefinition;
+    const external = { ...makeTool('search', 'external-search'), source: 'user' } as ToolDefinition;
+    const unknown = makeTool('custom_tool') as ToolDefinition;
+
+    r.registerTool(native);
+    const registeredNative = r.getTool('search');
+    r.registerTool(external);
+    r.registerTool(unknown);
+
+    t.is(registeredNative?.source, 'built-in', 'raw native registration receives the trusted marker');
+    t.is(r.getTool('search')?.source, 'user', 'external source wins when it spoofs a built-in name');
+    t.is(unknown.source, undefined, 'unknown tools do not receive built-in trust by default');
+});
+
 test('getTool: returns null for unknown tool', t => {
     const r = new ToolRegistry();
     t.is(r.getTool('nonexistent'), null);

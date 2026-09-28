@@ -190,6 +190,7 @@ Bramka `.pkm-assistant/**` + No-Go + `sanitizePath` w prymitywach vaultowych dzi
 ## Kluczowe decyzje
 
 - **Built-in vs external MCP servers** - built-in kompilowane w bundlu; zewnętrzne przez `ExternalMcpManager` (prawdziwy protokół MCP, stdio/HTTP). Identyczny shape rejestracji w `ToolRegistry` (`{name, description, inputSchema, serverName, source, execute}`).
+- **Trusted runtime context** - built-in factory tools registered without `source` get `source:'built-in'` only when their exact name exists in `BUILTIN_TOOL_MAP`; explicit `source:'user'` wins even for a spoofed built-in name, and unknown tools remain untrusted. `MCPClient` supplies authorization and result-budget context only to those built-in entries.
 - **Zero sandboxa custom-JS.** `new Function()` + shadowed globals jako granica bezpieczeństwa nigdy nie był szczelny (prototype-chain escape) - zastąpiony prawdziwym klientem MCP + kontraktem `source:'user'` → RED.
 - **`sanitizePath` w każdym prymitywie vaultowym**, który dotyka path - blokuje `../`, URL-decoded traversal, null bytes, zero-width unicode.
 - **`SensitiveDataGuard`** - maskuje API keys w logach + w wynikach (gdyby narzędzie zwróciło je przez błąd).
