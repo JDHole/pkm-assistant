@@ -130,6 +130,24 @@ class LoopAbortError extends Error {}
 
 const PARTIAL_MAX_CHARS = 12000;
 
+/** Bezpieczny konkret dla panelu i trace, bez surowych argumentów ani treści zadania. */
+function toolTraceDetail(rawArgs: unknown): string {
+    let args: unknown = rawArgs;
+    if (typeof args === 'string') {
+        try { args = JSON.parse(args); } catch { return ''; }
+    }
+    if (!args || typeof args !== 'object' || Array.isArray(args)) return '';
+    const fields = args as Record<string, unknown>;
+    for (const key of ['path', 'query', 'folder', 'url', 'filename', 'name'] as const) {
+        const value = fields[key];
+        if (typeof value !== 'string') continue;
+        const text = value.trim();
+        if (!text || /^data:/i.test(text)) continue;
+        return maskSensitiveData(text).replace(/\s+/g, ' ').slice(0, 80);
+    }
+    return '';
+}
+
 /** Exclude payload/arguments/hidden reasoning and binary, then mask before clipping. */
 function partialPreview(value: unknown, secrets: readonly string[] = []): string {
     const seen = new WeakSet<object>();
@@ -780,8 +798,11 @@ export async function runAgentLoop({
             // nazwy w ogóle - runtime wpycha wtedy `undefined` jak dotąd (asercja nic nie zmienia).
             const tName = tc.name || tc.function?.name;
             // Tool identities enter the ledger when execution starts below.
-            // Trace PER TOOL przed egzekucją, bez treści argumentów modelu.
-            trace?.('tool.pre', { i, tool: tName });
+            // Trace PER TOOL przed egzekucją, tylko bezpieczny konkret z wybranych kluczy.
+            if (trace) {
+                const detail = toolTraceDetail(tc.arguments ?? tc.function?.arguments);
+                trace('tool.pre', { i, tool: tName, ...(detail ? { detail } : {}) });
+            }
         }
 
 

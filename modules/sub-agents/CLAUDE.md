@@ -229,6 +229,8 @@ Odlew per agent = `<agent-slug>-researcher` (standardowe `instantiate`). Przepis
   - **Maskowanie NA WEJŚCIU:** `step()` przepuszcza stringowe wartości pól przez wstrzykniętą
     maskę (`maskSensitiveData` w produkcji), więc każdy konsument dostaje dane już bezpieczne.
     `fail()` maskuje też treść błędu (API lubi zwrócić w niej klucz).
+  - **Konkret `tool.pre` pochodzi z `fields.detail`.** Pętla wybiera dozwolone pole, pomija
+    wartości `data:`, maskuje i tnie do 80 znaków przed emisją. Panel nie czyta surowych `args`.
   - **Sufity pamięci:** `maxStepsPerTask` 500 (kroki ponad limit NIE lądują w tablicy, ale
     zdarzenie leci dalej → plik ma pełny ślad) i `maxDone` 50 (najstarsze ZAKOŃCZONE biegi
     wypadają z mapy; biegi `running` nie są usuwane nigdy). `dispose()` na `onunload`.

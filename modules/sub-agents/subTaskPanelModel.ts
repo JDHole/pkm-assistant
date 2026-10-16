@@ -48,21 +48,6 @@ function truncate(text: string, max: number): string {
     return value.length > max ? `${value.slice(0, max)}…` : value;
 }
 
-/**
- * `parsed` w `detailFromArgs` bywa dowolnym prymitywem albo tablicą (surowe argumenty
- * narzędzia, zły/nietypowy JSON - "lepszy krzywy konkret niż żaden"). Osobna funkcja graniczna
- * dla `null`/`undefined`: dopiero jej wywołanie resetuje zawężenie TS z powrotem do gołego
- * `unknown`, więc `String()` tutaj nie zgłasza no-base-to-string (ten sam wzorzec co
- * `_safeStringify` w `core/utils/errorUtils.ts`).
- */
-function _toDisplayText(value: unknown): string {
-    return value === null || value === undefined ? '' : _rawToString(value);
-}
-
-function _rawToString(value: unknown): string {
-    return String(value);
-}
-
 /** Co pokazać jako rezultat biegu: błąd wygrywa z tekstem wyniku (jest ważniejszy). */
 function resolveOutcome(task: SubTask): string {
     if (task.status === 'running') return truncate(task.partial?.text || '', MAX_STRIP_OUTCOME_CHARS);
@@ -93,37 +78,6 @@ export interface StripStep {
 const MAX_STEP_DETAIL_CHARS = 80;
 /** Sufit skrótu zadania w rozwinięciu (rejestr i tak tnie do 300 — to drugi pas). */
 const MAX_STRIP_TASK_CHARS = 300;
-
-/** Klucze argumentów niosące najwięcej konkretu — pierwszy trafiony wygrywa. */
-const DETAIL_ARG_KEYS = ['path', 'query', 'folder', 'url', 'filename', 'task', 'name'] as const;
-
-/**
- * Wyciąga jednolinijkowy konkret z argumentów narzędzia (`tool.pre`). Args przychodzą
- * z pętli jako SUROWE `tc.arguments` — najczęściej string JSON, czasem obiekt. Zły JSON
- * nie jest błędem: pokazujemy przycięty surowiec (lepszy krzywy konkret niż żaden).
- */
-function detailFromArgs(rawArgs: unknown): string {
-    if (rawArgs == null) return '';
-    let parsed: unknown = rawArgs;
-    if (typeof rawArgs === 'string') {
-        const text = rawArgs.trim();
-        if (!text) return '';
-        try { parsed = JSON.parse(text); } catch { return truncate(text, MAX_STEP_DETAIL_CHARS); }
-    }
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-        return truncate(_toDisplayText(parsed), MAX_STEP_DETAIL_CHARS);
-    }
-    const args = parsed as Record<string, unknown>;
-    for (const key of DETAIL_ARG_KEYS) {
-        const value = args[key];
-        if (typeof value === 'string' && value.trim()) return truncate(value.trim(), MAX_STEP_DETAIL_CHARS);
-    }
-    // Bez znanego klucza: pierwszy stringowy argument (konkret > nazwa klucza).
-    for (const value of Object.values(args)) {
-        if (typeof value === 'string' && value.trim()) return truncate(value.trim(), MAX_STEP_DETAIL_CHARS);
-    }
-    return '';
-}
 
 /** Konkret dla `tool.post`: błąd wygrywa, potem rozmiar wyniku (chars/blocks z trace). */
 function detailFromPost(fields: Record<string, unknown>): string {
@@ -211,9 +165,9 @@ function toStripStep(step: SubTaskStep): StripStep {
     const tool = fields.tool;
     const out: StripStep = { at: step.at, type: step.type };
     if (typeof tool === 'string' && tool) out.tool = tool;
-    // Konkret kroku — args dla zapowiedzi narzędzia, rozmiar/błąd dla wyniku.
+    // Pętla dostarcza już wybrany i zamaskowany konkret zapowiedzi narzędzia.
     const detail = step.type === 'tool.pre'
-        ? detailFromArgs(fields.args)
+        ? (typeof fields.detail === 'string' ? fields.detail.slice(0, MAX_STEP_DETAIL_CHARS) : '')
         : (step.type === 'tool.post' ? detailFromPost(fields) : '');
     if (detail) out.detail = detail;
     return out;

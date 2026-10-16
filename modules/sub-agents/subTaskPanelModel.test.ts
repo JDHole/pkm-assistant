@@ -8,6 +8,8 @@
 import test from 'ava';
 import { buildStripModel, formatDuration } from './subTaskPanelModel.js';
 import { SubTaskRegistry } from './SubTaskRegistry.js';
+import { runAgentLoop, ArrayMessageStore } from '../agent-loop/index.js';
+import { TraceLog, maskSensitiveData } from '../../core/index.js';
 import type { SubTask } from './SubTaskRegistry.js';
 
 const TERAZ = 1_000_000;
@@ -212,15 +214,15 @@ test('sesja: bieg bez adresu sesji zachowuje się jak dotąd (tabKey → agent)'
 
 // ─── konkret kroku + zadanie od maina ───
 
-test('szyba: tool.pre niesie konkret z argumentów (path > inne klucze), tool.post rozmiar wyniku', t => {
+test('szyba: tool.pre czyta detail, tool.post rozmiar wyniku', t => {
     const rows = buildStripModel({
         now: TERAZ, tabKey: 'tab-a', agentName: 'Klara',
         tasks: [zTabu('bieg', 'tab-a', {
             status: 'running',
             steps: [
-                { at: TERAZ - 5_000, type: 'tool.pre', fields: { tool: 'read', args: '{"scope":"vault","path":"Notatki/plan.md"}' } },
+                { at: TERAZ - 5_000, type: 'tool.pre', fields: { tool: 'read', detail: 'Notatki/plan.md' } },
                 { at: TERAZ - 4_900, type: 'tool.post', fields: { tool: 'read', status: 'ok', chars: 4222 } },
-                { at: TERAZ - 4_000, type: 'tool.pre', fields: { tool: 'search', args: { query: 'smoke tandemowy', limit: 30 } } },
+                { at: TERAZ - 4_000, type: 'tool.pre', fields: { tool: 'search', detail: 'smoke tandemowy' } },
                 { at: TERAZ - 3_900, type: 'tool.post', fields: { tool: 'search', status: 'error' } },
                 { at: TERAZ - 3_000, type: 'model.done', fields: { i: 2 } },
             ],
@@ -234,21 +236,77 @@ test('szyba: tool.pre niesie konkret z argumentów (path > inne klucze), tool.po
     t.is(steps[4].detail, undefined, 'kroki bez narzędzia nie dostają konkretu');
 });
 
-test('szyba: konkret kroku przycięty do 80 znaków; zły JSON = przycięty surowiec', t => {
+test('szyba: konkret kroku ma do 80 znaków; panel nie wraca do surowych argumentów', t => {
     const dluga = 'A'.repeat(200);
     const rows = buildStripModel({
         now: TERAZ, tabKey: 'tab-a', agentName: 'Klara',
         tasks: [zTabu('bieg', 'tab-a', {
             status: 'running',
             steps: [
-                { at: TERAZ - 2_000, type: 'tool.pre', fields: { tool: 'read', args: `{"path":"${dluga}"}` } },
+                { at: TERAZ - 2_000, type: 'tool.pre', fields: { tool: 'read', detail: dluga } },
                 { at: TERAZ - 1_000, type: 'tool.pre', fields: { tool: 'search', args: '{krzywy json' } },
             ],
         })],
     });
     const steps = rows[0].recentSteps;
-    t.is(steps[0].detail!.length, 81); // 80 + wielokropek
-    t.is(steps[1].detail, '{krzywy json');
+    t.is(steps[0].detail, 'A'.repeat(80));
+    t.is(steps[1].detail, undefined);
+});
+
+test('szyba: pętla przekazuje ścieżkę, zapytanie i zwykły URL przez rejestr, bez task i obrazu w trace', async t => {
+    const url = 'https://example.com/Notatki/projekty/planowanie/raport.md';
+    const longUrl = `${url}?${'a'.repeat(40)}`;
+    const prompt = 'JAWNA_TREŚĆ_ZADANIA';
+    const image = 'data:image/png;base64,QUJD';
+    const calls = [
+        { name: 'read', arguments: JSON.stringify({ path: 'Notatki/plan.md', content: prompt }) },
+        { name: 'search', arguments: { query: 'smoke tandemowy', prompt } },
+        { name: 'web', arguments: { url } },
+        { name: 'web', arguments: { url: longUrl } },
+        { name: 'delegate', arguments: { task: prompt, image } },
+    ];
+    const lines: string[] = [];
+    const traceLog = new TraceLog({
+        sink: { write: (_level, _tag, message) => { lines.push(message); } },
+        mask: maskSensitiveData
+    });
+    const reg = new SubTaskRegistry({ traceLog, mask: maskSensitiveData });
+    const bieg = reg.create({ id: 'sub/pkm-sub#detail', agentName: 'Klara' });
+    let response = 0;
+    await runAgentLoop({
+        model: {
+            stream(_payload, { done }) {
+                const first = response++ === 0;
+                Promise.resolve().then(() => done(first
+                    ? { tool_calls: calls.map((call, i) => ({ id: `c${i}`, ...call })) }
+                    : { choices: [{ message: { content: 'done' } }] }));
+            }
+        },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        resolveTools: () => ['read', 'search', 'web', 'delegate'].map(name => ({ name })),
+        executeToolCall: async () => 'result',
+        limits: { maxIterations: 3 },
+        trace: reg.traceFor(bieg)
+    });
+    const row = buildStripModel({ tasks: reg.list(), agentName: 'Klara', now: TERAZ })[0];
+    t.deepEqual(row.recentSteps.filter(step => step.type === 'tool.pre').map(step => step.detail), [
+        'Notatki/plan.md', 'smoke tandemowy', url,
+        'https://example.com/Notatki/projekty/planowanie/raport.md?aaaaaaaaaaaaaaaaaaaaaa', undefined
+    ]);
+    t.deepEqual(bieg.steps.filter(step => step.type === 'tool.pre').map(step => step.fields), [
+        { i: 0, tool: 'read', detail: 'Notatki/plan.md' },
+        { i: 0, tool: 'search', detail: 'smoke tandemowy' },
+        { i: 0, tool: 'web', detail: url },
+        { i: 0, tool: 'web', detail: 'https://example.com/Notatki/projekty/planowanie/raport.md?aaaaaaaaaaaaaaaaaaaaaa' },
+        { i: 0, tool: 'delegate' }
+    ]);
+    t.is(lines.find(line => line.includes('tool=read')), `${bieg.id} | tool.pre | i=0 tool=read detail=Notatki/plan.md`);
+    for (const text of [JSON.stringify(bieg.steps), lines.join('\n')]) {
+        t.false(text.includes(prompt));
+        t.false(text.includes(image));
+        t.false(text.includes('data:'));
+    }
+    reg.dispose();
 });
 
 test('szyba: taskPreview przechodzi do wiersza (z drugim pasem cięcia), brak = pusty string', t => {

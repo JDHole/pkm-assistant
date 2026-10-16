@@ -44,7 +44,7 @@ Heartbeat is transport activity, not semantic progress. No chunk absence is a mo
 
 ## Trace and acceptance
 
-Trace uses existing fire-and-forget sink: loop.start/end, model.done/timeout/stall, synthesis.timeout, tool.pre/post/blocked and backstop. tool.pre carries iteration and tool name, never model-supplied arguments. One terminal loop.end; stop:error is trace-only. fallback:1 is empty successful synthesis or planned skipped/budget-expired partial, never caught provider failure.
+Trace uses existing fire-and-forget sink: loop.start/end, model.done/timeout/stall, synthesis.timeout, tool.pre/post/blocked and backstop. tool.pre carries iteration, tool name and optional detail, never raw model-supplied arguments. Detail selects the first nonempty string from path/query/folder/url/filename/name, skips trimmed data: values (case-insensitive), applies core.maskSensitiveData, normalizes whitespace to one line and clips to 80 characters. No task/other-field fallback or base64 heuristics. One terminal loop.end; stop:error is trace-only. fallback:1 is empty successful synthesis or planned skipped/budget-expired partial, never caught provider failure.
 
 AgentLoop.partial.test.ts: held tool, literal results, settlement order, preserved causes, copies, masking/bounds and fail-soft observers. AgentLoop.synthesis.test.ts: publication ordering, held hooks, total budget/queue/zero, Stop causes, late callbacks, reentrancy, actual xAI and heartbeat/deadline distinction. AgentLoop.test.ts preserves existing parsing, usage, minIterations, result budgets and empty-synthesis salvage. AgentLoop.abort.test.ts tests old predicate/tagged abort policy. AgentLoop.streamRejection.test.ts observes adapter rejections. Parser/sanitizer tests remain adjacent.
 
