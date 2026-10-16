@@ -1,5 +1,7 @@
 import test from 'ava';
 import { SubTaskRegistry } from './SubTaskRegistry.js';
+import { runAgentLoop, ArrayMessageStore } from '../agent-loop/index.js';
+import { TraceLog, maskSensitiveData } from '../../core/index.js';
 import type { SubTask, SubTaskStep } from './SubTaskRegistry.js';
 
 /** Atrapa `TraceLog`: zapamiętuje etykiety podane do `scope()` i każdy zapis. */
@@ -77,6 +79,41 @@ test('traceFor daje funkcję o kształcie scope() — pętla nie wie, że pisze 
     trace('loop.end', { stop: 'natural' });
 
     t.deepEqual(task.steps.map(s => s.type), ['loop.start', 'loop.end']);
+});
+
+test('traceFor z pętli nie przekazuje treści argumentów do kroku ani pliku', async t => {
+    const prompt = 'JAWNA_TRESC_SUBA_526';
+    const image = 'data:image/png;base64,QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=';
+    const lines: string[] = [];
+    const traceLog = new TraceLog({
+        sink: { write: (_level, _tag, message) => { lines.push(message); } },
+        mask: maskSensitiveData
+    });
+    const reg = new SubTaskRegistry({ traceLog, mask: maskSensitiveData });
+    const task = newTask(reg);
+    let response = 0;
+
+    await runAgentLoop({
+        model: {
+            stream(_payload, { done }) {
+                const first = response++ === 0;
+                Promise.resolve().then(() => done(first
+                    ? { choices: [{ message: { role: 'assistant', content: '', tool_calls: [
+                        { id: 'c1', function: { name: 'delegate', arguments: JSON.stringify({ task: prompt, image }) } }
+                    ] } }] }
+                    : { choices: [{ message: { role: 'assistant', content: 'done' } }] }));
+            }
+        },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        resolveTools: () => [{ type: 'function', function: { name: 'delegate', parameters: {} } }],
+        executeToolCall: async () => 'result',
+        limits: { maxIterations: 3 },
+        trace: reg.traceFor(task)
+    });
+
+    const pre = task.steps.find(step => step.type === 'tool.pre');
+    t.deepEqual(pre?.fields, { i: 0, tool: 'delegate' });
+    t.is(lines.find(line => line.includes(' | tool.pre | ')), `${task.id} | tool.pre | i=0 tool=delegate`);
 });
 
 test('cap kroków tnie RAM, ale zdarzenia (a więc i plik trace) lecą dalej', t => {

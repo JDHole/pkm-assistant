@@ -780,8 +780,8 @@ export async function runAgentLoop({
             // nazwy w ogóle - runtime wpycha wtedy `undefined` jak dotąd (asercja nic nie zmienia).
             const tName = tc.name || tc.function?.name;
             // Tool identities enter the ledger when execution starts below.
-            // Trace PER TOOL przed egzekucją; args = surowe arguments (TraceLog przytnie do 200).
-            trace?.('tool.pre', { i, tool: tName, args: tc.arguments ?? tc.function?.arguments });
+            // Trace PER TOOL przed egzekucją, bez treści argumentów modelu.
+            trace?.('tool.pre', { i, tool: tName });
         }
 
 

@@ -1,6 +1,6 @@
 import test from 'ava';
-import { runAgentLoop } from './AgentLoop.js';
-import { ArrayMessageStore } from './MessageStore.js';
+import { runAgentLoop, ArrayMessageStore } from './index.js';
+import { TraceLog, maskSensitiveData } from '../../core/index.js';
 import type { ModelResponse, ParsedToolCall, ProviderUsage } from './toolCallParser.js';
 import type { LoopMessage } from './MessageStore.js';
 import type { ToolResultEntry } from './AgentLoop.js';
@@ -680,6 +680,38 @@ test('wynik narzędzia jako tablica (multimodal) trafia do store BEZ stringifika
 });
 
 // ─── Trace ───
+
+test('trace: tool.pre nie zapisuje treści promptu ani danych obrazu', async (t) => {
+    const prompt = 'JAWNA_TRESC_PROMPTU_526';
+    const image = 'data:image/png;base64,QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=';
+    const lines: string[] = [];
+    const trace = new TraceLog({
+        sink: { write: (_level, _tag, message) => { lines.push(message); } },
+        mask: maskSensitiveData
+    }).scope('chat/test');
+    const model = makeModel([
+        assistantToolCall('delegate', { task: prompt, image }, 'c1'),
+        assistantText('done')
+    ]);
+
+    await runAgentLoop({
+        model,
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        resolveTools: () => [toolDef('delegate')],
+        executeToolCall: async () => 'result',
+        limits: { maxIterations: 3 },
+        trace
+    });
+
+    const pre = lines.find((line) => line.includes(' | tool.pre | '));
+    t.truthy(pre, 'tool.pre musi trafić do sinka');
+    if (!pre) return;
+    t.deepEqual(
+        [pre.includes(prompt), pre.includes(image)],
+        [false, false],
+        'treść promptu i dane obrazu nie mogą trafić do trace'
+    );
+});
 
 test('trace: 1 narzędzie → sekwencja loop.start, model.done, tool.pre, tool.post, model.done, loop.end (natural)', async (t) => {
     const traced: TraceEvent[] = [];
