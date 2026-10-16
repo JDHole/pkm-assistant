@@ -17,6 +17,7 @@ export const pl: Record<string, string> = {
   "agentLoop.synthesis_budget": "Opcjonalne podsumowanie końcowe wykorzystało swój czas",
   "agentLoop.reason_natural": "zakończenie",
   "agentLoop.reason_iteration-limit": "limit iteracji",
+  "agentLoop.reason_tool-uncertain": "niepewny skutek narzędzia; sprawdź stan przed ponowieniem",
   "agentLoop.reason_synthesis-budget": "limit czasu podsumowania",
   "agentLoop.reason_manual-stop": "ręczny Stop",
   "agentLoop.reason_task-timeout": "limit czasu zadania",

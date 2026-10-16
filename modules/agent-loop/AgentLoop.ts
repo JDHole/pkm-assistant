@@ -90,6 +90,7 @@ export interface Usage {
 export type AgentLoopStopReason =
     | { kind: 'natural' }
     | { kind: 'iteration-limit' }
+    | { kind: 'tool-uncertain' }
     | { kind: 'synthesis-budget'; budgetMs: number }
     | { kind: 'manual-stop' | 'task-timeout' | 'superseded' }
     | { kind: 'silence' | 'model-timeout' | 'transport-error' | 'model-error' | 'hook-error'; stage: 'work' | 'synthesis' };
@@ -188,6 +189,7 @@ function partialPreview(value: unknown, secrets: readonly string[] = []): string
 const partialReasonText = {
     natural: () => t('agentLoop.reason_natural'),
     'iteration-limit': () => t('agentLoop.reason_iteration-limit'),
+    'tool-uncertain': () => t('agentLoop.reason_tool-uncertain'),
     'synthesis-budget': () => t('agentLoop.reason_synthesis-budget'),
     'manual-stop': () => t('agentLoop.reason_manual-stop'),
     'task-timeout': () => t('agentLoop.reason_task-timeout'),
@@ -931,11 +933,6 @@ export async function runAgentLoop({
         }
         if (batchInterrupted) return finalize(content || lastText, 'abort');
 
-        if (orphaned) {
-            logger.error?.('AgentLoop', `ORPHAN GUARD: 0 poprawnych tool_calls, a ${results.length} wyników — kończę turę czysto`);
-            return finalize(content, 'natural');
-        }
-
         // shouldAbort MUSI być pytany PRZED kontynuacją tury, nie dopiero na starcie
         // NASTĘPNEJ iteracji - inaczej po Stopie kliknietym w trakcie narzędzia leciałby
         // jeszcze cały `beforeContinue`: u czatu nudges, wstrzyknięcie kolejki i - gdy
@@ -946,6 +943,20 @@ export async function runAgentLoop({
         if (abort()) {
             logger.debug?.('AgentLoop', `Iteracja ${i + 1}: abort po narzędziach — nie kontynuuję tury`);
             return finalize(content || lastText, 'abort');
+        }
+
+        // A timed-out tool may have committed its effect. Settle the whole parallel batch and
+        // account for its results above, then end this turn before another model/tool cycle.
+        if (ledger.some(({ outcome }) => outcome.outcome === 'unknown')) {
+            const reason: AgentLoopStopReason = { kind: 'tool-uncertain' };
+            synthesis = 'skipped';
+            const partial = publishPartial(reason);
+            return finalize(partial.text, 'backstop', reason);
+        }
+
+        if (orphaned) {
+            logger.error?.('AgentLoop', `ORPHAN GUARD: 0 poprawnych tool_calls, a ${results.length} wyników — kończę turę czysto`);
+            return finalize(content, 'natural');
         }
 
         await callHook(() => hooks.beforeContinue?.(i));

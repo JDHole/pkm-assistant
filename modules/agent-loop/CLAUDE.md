@@ -10,7 +10,7 @@ Barrel values: runAgentLoop, formatAgentLoopPartial, ArrayMessageStore, parseToo
 
 RunAgentLoopResult retains finalText, toolsUsed, toolCallDetails, usage, iterations and stoppedBy:natural|backstop|abort. Additive stopReason/partial remain optional for old typed consumers; every new result populates stopReason. Errors reject; no stoppedBy:error.
 
-Stop reasons: natural, iteration-limit, synthesis-budget with budgetMs, manual-stop/task-timeout/superseded, or silence/model-timeout/transport-error/model-error/hook-error with work|synthesis stage. Typed local timer errors establish deadline/silence causes, never translated strings. Unknown provider failures are model-error. Error identities remain intact; legacy promise-only non-Error reasons retain fields and original cause in an Error wrapper.
+Stop reasons: natural, iteration-limit, tool-uncertain, synthesis-budget with budgetMs, manual-stop/task-timeout/superseded, or silence/model-timeout/transport-error/model-error/hook-error with work|synthesis stage. Typed local timer errors establish deadline/silence causes, never translated strings. Unknown provider failures are model-error. Error identities remain intact; legacy promise-only non-Error reasons retain fields and original cause in an Error wrapper.
 
 ## Hook and transcript contracts
 
@@ -20,7 +20,7 @@ resolveTools runs every iteration. Sanitize transcripts before all model calls; 
 
 Strings/objects are stringified and clipped to the original tool's resultBudgetChars; multimodal arrays remain intact in model transcripts. ToolExecutionContext supplies trusted resultBudgetChars/shouldAbort from runtime, never model arguments. Per-tool zero means no result cap.
 
-Record raw outcomes at each settlement before store/hooks/stringification, ordered by monotonically assigned invocation at start. core.toolResultStatus classifies success:false, isError:true and nonempty error. Ordinary tool errors retain existing continuation policy. Typed tool timeout/abort is unknown, other throws are error. A returned value never proves a mutation: all effects are unverified.
+Record raw outcomes at each settlement before store/hooks/stringification, ordered by monotonically assigned invocation at start. core.toolResultStatus classifies success:false, isError:true and nonempty error. Ordinary tool errors retain existing continuation policy. Typed tool timeout/abort is unknown, other throws are error. A returned value never proves a mutation: all effects are unverified. After all already-started parallel calls settle, valid results enter the transcript and observed results enter hooks. Any unknown outcome then ends the turn with stoppedBy:backstop, stopReason:tool-uncertain and a partial receipt requesting state verification, including calls without an id that would otherwise hit the orphan guard. No subsequent model call, tool batch, beforeContinue hook or optional synthesis runs in that turn.
 
 ## Partial and abort contract
 

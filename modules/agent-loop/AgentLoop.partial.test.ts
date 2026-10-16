@@ -1,7 +1,6 @@
 import test from 'ava';
-import { runAgentLoop } from './index.js';
+import { ArrayMessageStore, runAgentLoop } from './index.js';
 import type { AgentLoopPartialSnapshot, ModelResponse, RunAgentLoopOptions } from './index.js';
-import { ArrayMessageStore } from './MessageStore.js';
 
 type Handlers = Parameters<RunAgentLoopOptions['model']['stream']>[1];
 const toolResponse = (names: string[]): ModelResponse => ({
@@ -142,15 +141,14 @@ test('parallel settlement order, Stop and accounting failure retain settled peer
     } finally { held.resolve('cleanup'); await rejected; }
 });
 
-test('structured failure and thrown timeout are honest without changing ordinary continue policy', async t => {
+test('structured failure and thrown timeout retain parallel outcomes before stopping', async t => {
     const snapshots: AgentLoopPartialSnapshot[] = [];
     const timeout = Object.assign(new Error('tool deadline'), { code: 'TOOL_TIMEOUT' });
-    const cause = new Error('provider after tools');
     let calls = 0;
-    const running = runAgentLoop({
+    const result = await runAgentLoop({
         model: { stream(_p, h) {
             if (++calls === 1) h.done(toolResponse(['write', 'external', 'other', 'thrower', 'timeout']));
-            else h.error(cause);
+            else throw new Error('model called after uncertain tool outcome');
         } },
         store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
         executeToolCall: tc => {
@@ -162,13 +160,76 @@ test('structured failure and thrown timeout are honest without changing ordinary
         },
         callbacks: { partial: s => snapshots.push(s) },
     });
-    t.is(await t.throwsAsync(running), cause);
     t.deepEqual(snapshots[0].toolOutcomes.map(o => [o.name, o.outcome, o.effect]), [
         ['write', 'error', 'unverified'], ['external', 'error', 'unverified'],
         ['other', 'error', 'unverified'], ['thrower', 'error', 'unverified'], ['timeout', 'unknown', 'unverified'],
     ]);
-    t.deepEqual(snapshots[0].stopReason, { kind: 'model-error', stage: 'work' });
-    t.is(calls, 2, 'ordinary tool errors allow the existing next-model policy');
+    t.deepEqual(snapshots[0].stopReason, { kind: 'tool-uncertain' });
+    t.deepEqual(result.stopReason, { kind: 'tool-uncertain' });
+    t.is(calls, 1);
+});
+
+test('uncertain write timeout blocks a repeated mutation before state verification', async t => {
+    const appendArgs = JSON.stringify({ path: 'Notes/log.md', content: 'line\n' });
+    const timeout = Object.assign(new Error('tool deadline after committed write'), { code: 'ETIMEDOUT' });
+    const store = new ArrayMessageStore([{ role: 'user', content: 'Append one line to Notes/log.md' }]);
+    let modelCalls = 0;
+    let writeCalls = 0;
+    let stateReads = 0;
+    let fileContent = '';
+
+    const result = await runAgentLoop({
+        model: { stream(_payload, handlers) {
+            modelCalls++;
+            handlers.done({ choices: [{ message: { content: '', tool_calls: [{
+                id: 'call_' + modelCalls,
+                function: { name: 'append_to_file', arguments: appendArgs },
+            }] } }] });
+        } },
+        store,
+        resolveTools: () => [{ name: 'append_to_file' }, { name: 'read_file' }],
+        executeToolCall: tc => {
+            if (tc.name === 'read_file') { stateReads++; return fileContent; }
+            if (tc.name !== 'append_to_file' || tc.arguments !== appendArgs) throw new Error('unexpected tool call');
+            writeCalls++;
+            fileContent += 'line\n';
+            if (writeCalls === 1) throw timeout;
+            return 'appended';
+        },
+        limits: { maxIterations: 2, synthesisTimeoutMs: 0 },
+    });
+
+    t.is(result.partial?.toolOutcomes[0].outcome, 'unknown');
+    t.is(stateReads, 0);
+    t.is(writeCalls, 1);
+    t.is(fileContent, 'line\n');
+});
+
+test('uncertain orphaned tool call requires state verification', async t => {
+    const timeout = Object.assign(new Error('write may have committed'), { code: 'ETIMEDOUT' });
+    let modelCalls = 0;
+    let writeCalls = 0;
+    const result = await runAgentLoop({
+        model: { stream(_payload, handlers) {
+            modelCalls++;
+            handlers.done({ tool_calls: [{ function: { name: 'append_to_file', arguments: '{}' } }] });
+        } },
+        store: new ArrayMessageStore([{ role: 'user', content: 'Append once' }]),
+        executeToolCall: () => { writeCalls++; throw timeout; },
+        limits: { maxIterations: 2, synthesisTimeoutMs: 0 },
+    });
+
+    t.is(writeCalls, 1);
+    t.is(modelCalls, 1);
+    t.is(result.stoppedBy, 'backstop');
+    t.deepEqual(result.stopReason, { kind: 'tool-uncertain' });
+    if (!result.partial) return t.fail('missing partial report');
+    t.deepEqual(result.partial.stopReason, { kind: 'tool-uncertain' });
+    t.deepEqual(result.partial.toolOutcomes.map(o => [o.id, o.name, o.outcome]), [
+        [undefined, 'append_to_file', 'unknown'],
+    ]);
+    t.is(result.finalText, result.partial.text);
+    t.regex(result.finalText, /verify state|sprawdź stan/);
 });
 
 test('snapshot masks known secrets before clipping, omits payloads and keeps identities after preview budget', async t => {

@@ -17,6 +17,7 @@ export const en: Record<string, string> = {
   "agentLoop.synthesis_budget": "Optional final synthesis reached its time budget",
   "agentLoop.reason_natural": "completed",
   "agentLoop.reason_iteration-limit": "iteration limit",
+  "agentLoop.reason_tool-uncertain": "tool effect uncertain; verify state before retrying",
   "agentLoop.reason_synthesis-budget": "summary time budget",
   "agentLoop.reason_manual-stop": "manual Stop",
   "agentLoop.reason_task-timeout": "task deadline",
