@@ -15,9 +15,12 @@ test('świeży uchwyt nie jest przerwany, abort() zatrzaskuje flagę i powód', 
     const a = createTurnAbort();
     t.false(a.isAborted());
     t.is(a.reason(), null);
+    t.false(a.signal.aborted);
     t.true(a.abort('stop'), 'pierwsze przerwanie zwraca true');
     t.true(a.isAborted());
     t.is(a.reason(), 'stop');
+    t.true(a.signal.aborted);
+    t.is(a.signal.reason, 'stop');
 });
 
 test('abort() jest idempotentny — powód pierwszego przerwania zostaje', (t) => {
@@ -25,6 +28,7 @@ test('abort() jest idempotentny — powód pierwszego przerwania zostaje', (t) =
     a.abort('stop');
     t.false(a.abort('close'), 'drugie przerwanie zwraca false (nic nowego się nie stało)');
     t.is(a.reason(), 'stop');
+    t.is(a.signal.reason, 'stop');
 });
 
 test('nowa tura NIE gasi przerwania tury poprzedniej', (t) => {

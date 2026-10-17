@@ -1,6 +1,6 @@
 import test from 'ava';
-import { runAgentLoop } from './AgentLoop.js';
-import { ArrayMessageStore } from './MessageStore.js';
+import { runAgentLoop, ArrayMessageStore } from './index.js';
+import { TraceLog, maskSensitiveData } from '../../core/index.js';
 import type { ModelResponse, ParsedToolCall, ProviderUsage } from './toolCallParser.js';
 import type { LoopMessage } from './MessageStore.js';
 import type { ToolResultEntry } from './AgentLoop.js';
@@ -681,6 +681,81 @@ test('wynik narzędzia jako tablica (multimodal) trafia do store BEZ stringifika
 
 // ─── Trace ───
 
+test('trace: tool.pre wybiera tylko dozwolony konkret, maskuje i tnie do 80 znaków', async (t) => {
+    const cases: { args: unknown; detail?: string }[] = [
+        { args: { name: 'n', filename: 'f', url: 'u', folder: 'd', query: 'q', path: 'p' }, detail: 'p' },
+        { args: { name: 'n', filename: 'f', url: 'u', folder: 'd', query: 'q' }, detail: 'q' },
+        { args: { name: 'n', filename: 'f', url: 'u', folder: 'd' }, detail: 'd' },
+        { args: { name: 'n', filename: 'f', url: 'u' }, detail: 'u' },
+        { args: { name: 'n', filename: 'f' }, detail: 'f' },
+        { args: { name: 'n', task: 'PROMPT', content: 'TREŚĆ' }, detail: 'n' },
+        { args: { query: '  notatki\n  projektu\t ' }, detail: 'notatki projektu' },
+        { args: { path: 'A'.repeat(100) }, detail: 'A'.repeat(80) },
+        { args: { query: 'password="mySuperSecret123"' }, detail: 'password="mySu***t123"' },
+        { args: { query: `${'A'.repeat(60)} password="mySuperSecret123" ${'B'.repeat(100)}` }, detail: `${'A'.repeat(60)} password="mySu***t1` },
+        { args: { query: 'QUJD' }, detail: 'QUJD' },
+        { args: { path: '  ', query: 'zapytanie' }, detail: 'zapytanie' },
+        { args: { path: { task: 'PROMPT' }, query: 'zapytanie' }, detail: 'zapytanie' },
+        { args: { path: ' DATA:image/png;base64,QUJD ', query: 'zapytanie' }, detail: 'zapytanie' },
+        { args: { task: 'PROMPT', image: 'data:image/png;base64,QUJD', content: 'TREŚĆ' } },
+        { args: '{krzywy json PROMPT' },
+        { args: '"PROMPT"' },
+        { args: ['PROMPT'] },
+        { args: null },
+    ];
+    for (const key of ['path', 'query', 'folder', 'url', 'filename', 'name']) {
+        cases.push({ args: { [key]: ' \tDaTa:image/png;base64,QUJD', task: 'PROMPT' } });
+    }
+    for (const { args, detail } of cases) {
+        const traced: TraceEvent[] = [];
+        await runAgentLoop({
+            model: makeModel([
+                { tool_calls: [{ id: 'c1', name: 'read', arguments: args }] },
+                assistantText('done')
+            ]),
+            store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+            resolveTools: () => [toolDef('read')],
+            executeToolCall: async () => 'result',
+            limits: { maxIterations: 3 },
+            trace: (type, fields) => traced.push({ type, fields })
+        });
+        t.deepEqual(traced.find(event => event.type === 'tool.pre')?.fields,
+            { i: 0, tool: 'read', ...(detail ? { detail } : {}) });
+    }
+});
+
+test('trace: tool.pre nie zapisuje treści promptu ani danych obrazu', async (t) => {
+    const prompt = 'JAWNA_TRESC_PROMPTU_526';
+    const image = 'data:image/png;base64,QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=';
+    const lines: string[] = [];
+    const trace = new TraceLog({
+        sink: { write: (_level, _tag, message) => { lines.push(message); } },
+        mask: maskSensitiveData
+    }).scope('chat/test');
+    const model = makeModel([
+        assistantToolCall('delegate', { task: prompt, image }, 'c1'),
+        assistantText('done')
+    ]);
+
+    await runAgentLoop({
+        model,
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        resolveTools: () => [toolDef('delegate')],
+        executeToolCall: async () => 'result',
+        limits: { maxIterations: 3 },
+        trace
+    });
+
+    const pre = lines.find((line) => line.includes(' | tool.pre | '));
+    t.truthy(pre, 'tool.pre musi trafić do sinka');
+    if (!pre) return;
+    t.deepEqual(
+        [pre.includes(prompt), pre.includes(image)],
+        [false, false],
+        'treść promptu i dane obrazu nie mogą trafić do trace'
+    );
+});
+
 test('trace: 1 narzędzie → sekwencja loop.start, model.done, tool.pre, tool.post, model.done, loop.end (natural)', async (t) => {
     const traced: TraceEvent[] = [];
     const trace = (type: string, fields: Record<string, unknown>) => traced.push({ type, fields });
@@ -841,13 +916,13 @@ test('trace odróżnia backstop z wynikiem od backstopu z zaślepką', async (t)
     const runUntilBackstop = async (finalCallFails: boolean) => {
         const traced: TraceEvent[] = [];
         const model = {
-            stream(payload: Payload, { done, error }: StreamHandlers) {
+            stream(payload: Payload, { done }: StreamHandlers) {
                 if (payload.tools) {
                     Promise.resolve().then(() => done(assistantToolCall('loop_tool', {}, 'c1')));
                     return;
                 }
                 // payload bez `tools` = finalny strzał backstopu
-                if (finalCallFails) Promise.resolve().then(() => error(new Error('Model timeout')));
+                if (finalCallFails) Promise.resolve().then(() => done(assistantText('')));
                 else Promise.resolve().then(() => done(assistantText('PODSUMOWANIE')));
             }
         };
@@ -983,21 +1058,23 @@ test('salvage — zaślepka backstopu niesie skrót dorobku narzędzi (pusty fin
     t.true(res.finalText.includes('WYNIK: 26 notatek o smoke testach'));
 });
 
-test('salvage — backstop PADŁ (błąd modelu) → catch też oddaje skrót dorobku', async (t) => {
+
+test('backstop provider failure rejects with original cause and retains literal tool outcome', async t => {
+    const cause = new Error('most zwisł');
     const model = makeModel((_payload: Payload, i: number) => {
         if (i === 0) return assistantToolCall('read', { path: 'a.md' }, 'c1');
-        throw new Error('most zwisł'); // finalny strzał backstopu pada
+        throw cause;
     });
-    const store = new ArrayMessageStore([{ role: 'user', content: 'go' }]);
-    const res = await runAgentLoop({
-        model,
-        store,
-        resolveTools: () => [toolDef('read')],
-        executeToolCall: async () => 'TREŚĆ NOTATKI A',
-        limits: { maxIterations: 1, salvageMaxChars: 5000 }
-    });
-    t.is(res.stoppedBy, 'backstop');
-    t.true(res.finalText.includes('TREŚĆ NOTATKI A'), res.finalText);
+    const partials: import('./AgentLoop.js').AgentLoopPartialSnapshot[] = [];
+    const error = await t.throwsAsync(runAgentLoop({
+        model, store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        resolveTools: () => [toolDef('read')], executeToolCall: async () => 'TREŚĆ NOTATKI A',
+        limits: { maxIterations: 1, salvageMaxChars: 5000 },
+        callbacks: { partial: snapshot => partials.push(snapshot) },
+    }));
+    t.is(error, cause);
+    t.is(partials.at(-1)?.synthesis, 'failed');
+    t.is(partials.at(-1)?.toolOutcomes[0].resultPreview, 'TREŚĆ NOTATKI A');
 });
 
 test('salvage wyłączony (0/brak) — zaślepka zostaje gołą zaślepką', async (t) => {

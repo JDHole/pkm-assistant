@@ -323,3 +323,14 @@ test('getLimits does not mutate DEFAULT_LIMITS', t => {
     getLimits({ pkmAssistant: { limits: { chat_max_iterations: 3 } } });
     t.deepEqual(DEFAULT_LIMITS, before);
 });
+
+test('optional synthesis override validates skip, custom budget, invalid fallback and ceiling', t => {
+    const read = (value: unknown) => getLimits({ pkmAssistant: { limits: { model_synthesis_timeout_ms: value } } }).model_synthesis_timeout_ms;
+    t.is(read(0), 0);
+    t.is(read('1750'), 1750);
+    t.is(read(1500.9), 1500);
+    t.is(read(-1), 30000);
+    t.is(read('invalid'), 30000);
+    t.is(read(900000), 600000);
+    t.is(getLimits().model_synthesis_timeout_ms, 30000);
+});

@@ -451,3 +451,6 @@ Bramka `.pkm-assistant/**` + No-Go + `sanitizePath` w prymitywach vaultowych dzi
 - `modules/multimodal/CLAUDE.md` - adaptery generowania obrazu/STT pod narzędziami multimodalnymi
 
 Paginated read I/O failures use bounded codes without raw exception text: `ENOENT` becomes `file_missing`, `EACCES`/`EPERM` becomes `access_denied`, and other failures become `read_error`. This also covers stale Obsidian index entries whose `cachedRead` fails. Legacy unpaged errors retain their existing shape.
+
+
+U3: each delegation owns an AbortController with a first-cause latch (`manual-stop` or `task-timeout`). The per-request stop guard prevents duplicate cancellation; final settlement clears the stop closure and existing timeout finalization cancels stale grace. Both result branches retain partial/stop_reason/tools_used/tool_call_details/usage.

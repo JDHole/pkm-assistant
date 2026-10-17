@@ -879,6 +879,25 @@ created: ${created}
      * @param event - `{type, content|result|prompt, tool, args, ...}`
      * @returns ścieżka pliku (kształt zwrotki bez zmian)
      */
+    /** Append to an existing frozen owner session. Never repairs or redirects the target. */
+    async appendSessionEvent(path: string, event: ActiveSessionEventInput = {}): Promise<string> {
+        const root = this.paths.sessionsActive + '/';
+        if (!path.startsWith(root) || !path.endsWith('.md') || path.slice(root.length).includes('/')
+            || path.includes('\\') || path.split('/').some(part => part === '..' || part === '.')) {
+            throw new Error('appendSessionEvent: target is outside the owning active sessions');
+        }
+        return this._enqueuePathWrite(path, async () => {
+            // Frozen receipts always read first, including warm cache and native append.
+            const probe = await readIfExists(this.vault.adapter, path);
+            if (probe.state !== 'content') throw new Error('appendSessionEvent: frozen session missing or unreadable');
+            const seq = this._nextSeq(path, probe.content);
+            const body = formatSessionEvent(event.type || 'event', { ...event, seq }, event.timestamp || new Date().toISOString());
+            await this._appendSessionFile(path, probe.content.endsWith('\n') ? body : '\n' + body);
+            this._sessionEndsWithNewline.set(path, true);
+            return path;
+        });
+    }
+
     async appendToActiveSession(event: ActiveSessionEventInput = {}): Promise<string> {
         let path = await this.startActiveSession(event.agentName || this.agentName);
         const timestamp: string = event.timestamp || new Date().toISOString();

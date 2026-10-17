@@ -26,7 +26,7 @@
 import { t } from '../../../core/i18n/index.js';
 import { artifactStatusLabel } from '../../artifacts/index.js';
 
-export type MachineKind = 'subtask_notification' | 'artifact_summon' | null;
+export type MachineKind = 'subtask_notification' | 'artifact_summon' | 'loop_partial' | null;
 
 export interface MachineViewOpen {
     label: string;
@@ -115,7 +115,9 @@ function startsWithAny(text: string, prefixes: string[]): boolean {
  * Zwykła wiadomość usera (bez meta, bez znanego nagłówka) zawsze daje `null`.
  */
 export function classifyMachineMessage(msg: MachineMessageLike | null | undefined): MachineKind {
-    if (!msg || msg.role !== 'user') return null;
+    if (!msg) return null;
+    if (msg.role === 'system' && (msg._loopPartial === true || LOCALES.some(locale => typeof msg.content === 'string' && msg.content.startsWith(t('chat.streaming.partial_header', undefined, locale))))) return 'loop_partial';
+    if (msg.role !== 'user') return null;
     if (msg._subTaskNotification === true) return 'subtask_notification';
     if (msg._artifactSummon === true) return 'artifact_summon';
     // Uwaga 1 (spec A3-fix): meta ma pierwszeństwo w OBIE strony - `origin:'human'` zapisany na
@@ -306,6 +308,14 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
     if (!kind) return null;
     const text = typeof msg?.content === 'string' ? msg.content : '';
 
+    if (kind === 'loop_partial') {
+        return {
+            kind, title: ctx.t('chat.streaming.partial_header'),
+            summary: msg?._loopPartialStorageError === true ? ctx.t('chat.streaming.partial_storage_error')
+                : msg?._loopPartialSynthesis === 'pending' ? ctx.t('chat.streaming.partial_pending') : ctx.t('agentLoop.partial_unverified'),
+            details: text, status: msg?._loopPartialStorageError === true ? 'error' : 'ok',
+        };
+    }
     if (kind === 'subtask_notification') {
         const name = extractFirstVar(text, SUBTASK_HEADER_KEY, ['name', 'task_id']) || '?';
         const { afterHeader, details } = subtaskDetails(text);

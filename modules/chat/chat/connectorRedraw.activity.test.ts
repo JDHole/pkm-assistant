@@ -359,6 +359,8 @@ function buildBeforeContinueFakeThis() {
             getCompressionNeeded: () => 'none',
         },
         agentName: 'Test',
+        owner: { memory: null },
+        origin: { sessionPath: '' },
         agent: null,
         responseRecorded: true,
         lastRoundToolResults: [] as TestDynamic[],

@@ -95,11 +95,12 @@ w gołym Node.
 
 ## Gotchas (CZYTAJ ZANIM COKOLWIEK ZMIENISZ)
 
-### 🔴 1. `ChatModel.stream()` NIE jest concurrent-safe
+### 🔴 1. `ChatModel.stream()` obsługuje jednego właściciela na instancję
 
-Stan tury (bilet bramki, uchwyt odrzucenia, dekoder) żyje NA INSTANCJI. Dwa równoległe
-`stream()` na jednej instancji to wyścig. Mitygacja: `modelResolver` pomija cache dla ról
-sub (`skipCache = (effectiveRole !== 'main') || isSubWorker || callerSkipCache`).
+Każde wywołanie ma własny stan tury (bilet bramki, uchwyt odrzucenia, kontroler, budzik retry,
+dekoder i epokę). Drugie równoległe `stream()` na tej samej instancji jawnie przerywa pierwsze;
+spóźnione callbacki i cleanup starego requestu nie mogą dotknąć nowego biletu ani jego streamu.
+`modelResolver` nadal pomija cache dla ról sub (`skipCache = (effectiveRole !== 'main') || isSubWorker || callerSkipCache`).
 
 ⚠️ **Rola `main` też potrafi się zderzyć** - dwa taby tego samego agenta albo tura +
 konsolidacja pamięci w tle. Dlatego `createModelForRole` ma PIĄTY parametr `callerSkipCache`:
@@ -112,11 +113,11 @@ Instancja nie jest concurrent-safe (gotcha 1), ale nikt wołaczom nie zabrania o
 zerowało wtedy `_gateTicket` biegnącej tury - a tura zwalnia slot WŁAŚNIE przez to pole, więc
 na platformie lokalnej (pojemność 1) slot zostawał zajęty na zawsze i kolejka stawała.
 
-Dziś tor bez strumienia rozlicza się polem `_completeTicket` i lokalną zmienną „wjechał", nie
-rusza ani `_gateTicket`, ani `_admitted`, ani `_gateReleaseScheduled`. `stopStream()` anuluje
-też ten bilet, ale `cancel()` z kontraktu bramki rusza WYŁĄCZNIE bilet czekający w kolejce -
-żądanie już lecące po sieci dokończy i zwolni slot samo. Strażnik: `ChatModel.concurrent.test.ts`
-(„complete() nie zabiera biletu biegnącej turze strumienia").
+Dziś tor bez strumienia rozlicza się polem `_completeTicket` i lokalną zmienną „wjechał",
+nie rusza właściciela tury `stream()`. `stopStream()` anuluje też ten bilet, także gdy nie
+uruchomiono żadnego streamu. `cancel()` z kontraktu bramki rusza WYŁĄCZNIE bilet czekający
+w kolejce - żądanie już lecące po sieci dokończy i zwolni slot samo. Strażnicy:
+`ChatModel.concurrent.test.ts` i `ChatModel.lifecycle.test.ts`.
 
 ### 🔴 1c. Host z ogonem `/v1` nie może dać `/v1/v1/...`
 
@@ -178,6 +179,28 @@ Nowy dostawca ze WŁASNYM koszem (`catch` przy `JSON.parse`, pominięta linia) m
 podbijać, inaczej jego zepsute ramki znikną po cichu. Strażnicy: dwa testy „008/052"
 w `ChatModel.streamExits.test.ts` - jeden pilnuje, że śmieć zostawia log, drugi, że poprawna
 ramka bez zdarzeń go NIE zostawia.
+
+### 🔴 4c. Własność requestu, korelacja i aktywność
+
+`StreamHandlers.activity` podaje wyłącznie stałe nazwy zdarzeń, wygenerowany request ID, numer
+próby, czas i zbiorcze liczniki bajtów/porcji/znaków. Pierwsza obserwacja transportu nie ma jeszcze
+liczników semantycznych, więc komentarz SSE nie udaje postępu treści. Ostrzeżenie parsera nie
+zawiera fragmentu ramki. `X-PKM-Request-ID` trafia tylko do nagłówka platformy lokalnej;
+nigdy do body ani nagłówków dostawcy chmurowego. Sentinel i błąd semantyczny przerywają własny
+reader. Stop i supersesja budzą wewnętrzny wyścig także wtedy, gdy transport ignoruje abort.
+Stary request od supersesji odrzuca się z markerem `_superseded === true`. Strażnik:
+`ChatModel.httpBoundary.test.ts`.
+
+Bilet może zająć realny slot jeszcze przed wznowieniem `await admitted`. Wynik admission
+zapisujemy również po Stopie/supersesji, żeby zwolnić dokładnie ten bilet. Nowy właściciel
+jest instalowany przed obserwacją anulowania starego: także ten callback może uruchomić
+kolejny stream. Po każdym callbacku konsumenta ponownie sprawdzamy anulowanie przed siecią,
+następną obserwacją lub `done`. Sukces nadal awaituje `done`; Stop/supersesja przerywa to
+oczekiwanie bez czekania na callback ani transport ignorujący abort. Żądanie emituje dokładnie
+jedno zdarzenie końcowe (`completed`, `cancelled` albo `failed`). Emulacja xAI liczy semantykę
+pełnej odpowiedzi; liczniki surowego transportu pozostają zerowe, bo ten tor ich nie obserwuje.
+Zdarzenia z `decoder.finish()` również powiększają liczniki semantyczne i emitują pierwszą obserwację przed `done`, także przy EOF LM Studio z rezerwą filtra myślenia. Stop lub supersesja w tej obserwacji blokuje dalsze callbacki starego requestu; sentinel, który już wypchnął rezerwę, nie zlicza jej ponownie.
+Strażnik tych wyścigów: `ChatModel.lifecycle.test.ts` i `ChatModel.httpBoundary.test.ts`.
 
 ### 🔴 5. Sentinele rozpoznaje się STRUKTURALNIE, nie podciągiem
 
@@ -309,6 +332,7 @@ dochodzą też żadne nowe klucze i18n.
 | Plik | Co pilnuje |
 |---|---|
 | `ChatModel.streamExits.test.ts` | Trzy wyjścia streamu, błąd w paśmie, zepsuta porcja, sufit 429, twardy timeout |
+| `ChatModel.lifecycle.test.ts` | Reentrant Stop/supersesja, natychmiastowy admission, held done, kolejka i pojedyncza telemetria końcowa |
 | `ChatModel.stopStream.test.ts` | Semantyka Stopu (`_aborted`, idempotencja, slot bramki, kolejka) |
 | `ChatModel.concurrent.test.ts` | Bramka lokalna, cooldown zwolnienia slotu (seam czasu, zero pomiarów zegara) |
 | `ChatModel.retry.test.ts` | Backoff wykładniczy + `Retry-After` (seam `scheduleRetry`) |

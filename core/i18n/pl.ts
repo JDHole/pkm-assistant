@@ -4,6 +4,38 @@
  * {{param}} for interpolation.
  */
 export const pl: Record<string, string> = {
+  "chat.streaming.partial_header": "Częściowy wynik tej tury",
+  "chat.streaming.partial_pending": "Dorobek jest dostępny. Trwa opcjonalne podsumowanie; skutki narzędzi nie zostały zweryfikowane.",
+  "chat.streaming.partial_storage_error": "Dorobek pozostaje w rozmowie. Nie udało się zapisać go do sesji właściciela.",
+  "chat.substrip.synthesis_pending": "Dorobek jest dostępny, trwa podsumowanie",
+  "subagent.partial_header": "Częściowy wynik suba {{name}}",
+  "settings.limits_synthesis_timeout": "Opcjonalne podsumowanie końcowe (sekundy)",
+  "settings.limits_synthesis_timeout_desc": "Łączny czas opcjonalnego podsumowania końcowego, także w kolejce. Wyniki narzędzi są publikowane wcześniej. 0 pomija podsumowanie. Ten limit nie diagnozuje stanu modelu ani połączenia.",
+  "agentLoop.partial_header": "Częściowy wynik pracy",
+  "agentLoop.partial_state": "Powód: {{reason}}. Podsumowanie końcowe: {{synthesis}}.",
+  "agentLoop.partial_unverified": "Poniżej zapisano odpowiedzi narzędzi. Ich skutki nie zostały zweryfikowane.",
+  "agentLoop.synthesis_budget": "Opcjonalne podsumowanie końcowe wykorzystało swój czas",
+  "agentLoop.reason_natural": "zakończenie",
+  "agentLoop.reason_iteration-limit": "limit iteracji",
+  "agentLoop.reason_tool-uncertain": "niepewny skutek narzędzia; sprawdź stan przed ponowieniem",
+  "agentLoop.reason_synthesis-budget": "limit czasu podsumowania",
+  "agentLoop.reason_manual-stop": "ręczny Stop",
+  "agentLoop.reason_task-timeout": "limit czasu zadania",
+  "agentLoop.reason_superseded": "zastąpienie kolejną turą",
+  "agentLoop.reason_silence": "ustawiony limit ciszy semantycznej",
+  "agentLoop.reason_model-timeout": "ustawiony limit czasu żądania modelu",
+  "agentLoop.reason_transport-error": "zgłoszony błąd transportu",
+  "agentLoop.reason_model-error": "zgłoszony błąd modelu",
+  "agentLoop.reason_hook-error": "błąd przetwarzania",
+  "agentLoop.synthesis_pending": "w toku",
+  "agentLoop.synthesis_skipped": "pominięte",
+  "agentLoop.synthesis_completed": "gotowe",
+  "agentLoop.synthesis_budget-expired": "wyczerpano czas",
+  "agentLoop.synthesis_failed": "nieudane",
+  "agentLoop.outcome_returned": "otrzymano odpowiedź",
+  "agentLoop.outcome_error": "zgłoszono błąd",
+  "agentLoop.outcome_unknown": "wynik nieznany",
+
 
   // ── Tool labels (ToolCallDisplay TOOL_INFO) ──
   // read/list niosą parametr scope (vault|memory):

@@ -4,6 +4,38 @@
  * {{param}} for interpolation.
  */
 export const en: Record<string, string> = {
+  "chat.streaming.partial_header": "Partial work from this turn",
+  "chat.streaming.partial_pending": "Work is available. The optional summary is pending; tool effects have not been verified.",
+  "chat.streaming.partial_storage_error": "Work remains in the conversation. It could not be saved to its owning session.",
+  "chat.substrip.synthesis_pending": "Work is available, summary pending",
+  "subagent.partial_header": "Partial work from sub-agent {{name}}",
+  "settings.limits_synthesis_timeout": "Optional final synthesis (seconds)",
+  "settings.limits_synthesis_timeout_desc": "Total time for the optional final summary, including queue wait. Tool outcomes are published first. 0 skips this summary. This limit does not diagnose model or connection health.",
+  "agentLoop.partial_header": "Partial work",
+  "agentLoop.partial_state": "Reason: {{reason}}. Final summary: {{synthesis}}.",
+  "agentLoop.partial_unverified": "Tool responses are recorded below. Their effects have not been verified.",
+  "agentLoop.synthesis_budget": "Optional final synthesis reached its time budget",
+  "agentLoop.reason_natural": "completed",
+  "agentLoop.reason_iteration-limit": "iteration limit",
+  "agentLoop.reason_tool-uncertain": "tool effect uncertain; verify state before retrying",
+  "agentLoop.reason_synthesis-budget": "summary time budget",
+  "agentLoop.reason_manual-stop": "manual Stop",
+  "agentLoop.reason_task-timeout": "task deadline",
+  "agentLoop.reason_superseded": "replaced by another turn",
+  "agentLoop.reason_silence": "configured semantic silence limit",
+  "agentLoop.reason_model-timeout": "configured model request deadline",
+  "agentLoop.reason_transport-error": "reported transport error",
+  "agentLoop.reason_model-error": "reported model error",
+  "agentLoop.reason_hook-error": "processing error",
+  "agentLoop.synthesis_pending": "pending",
+  "agentLoop.synthesis_skipped": "skipped",
+  "agentLoop.synthesis_completed": "completed",
+  "agentLoop.synthesis_budget-expired": "time budget expired",
+  "agentLoop.synthesis_failed": "failed",
+  "agentLoop.outcome_returned": "returned response",
+  "agentLoop.outcome_error": "reported error",
+  "agentLoop.outcome_unknown": "outcome unknown",
+
 
   // ── Tool labels (ToolCallDisplay TOOL_INFO) ──
   // read/list carry a scope param (vault|memory):

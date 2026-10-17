@@ -6,7 +6,7 @@
  * z czatem. SubAgentRunner buduje store/tools/limity/egzekutor i mapuje wynik.
  */
 import { runAgentLoop, ArrayMessageStore } from '../agent-loop/index.js';
-import type { RunAgentLoopOptions, ToolExecutionContext } from '../agent-loop/index.js';
+import type { RunAgentLoopOptions, ToolExecutionContext, AgentLoopPartialSnapshot, AgentLoopStopReason } from '../agent-loop/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
 import { getLimits } from '../../config/limits.js';
@@ -23,6 +23,7 @@ import type { BuiltinToolExecutionContext } from '../tools/index.js';
 // Bieg suba jest BYTEM w rejestrze (`plugin.subTaskRegistry`).
 // Sam rejestr przychodzi z pluginu (DI), stąd tylko typ - runner go nie tworzy.
 import type { SubTask, SubTaskOrigin, SubTaskRegistry, SubTaskTrace } from './SubTaskRegistry.js';
+import type { ActiveSessionEventInput } from '../memory/index.js';
 import type { ChatModel } from '../models/index.js';
 
 type AgentLike = { name: string };
@@ -65,6 +66,7 @@ interface RunnerMcpClient {
 /** Pamięć agenta w zakresie, jakiego dotyka runner (`modules/memory`, poza zakresem) —
  * dziennik biegu dopisuje się do aktywnej sesji WŁAŚCICIELA biegu. */
 interface RunnerAgentMemory {
+    appendSessionEvent?(path: string, event: ActiveSessionEventInput): Promise<string>;
     appendToActiveSession?(event: Record<string, unknown>): Promise<void>;
 }
 
@@ -97,6 +99,8 @@ type RunOptions = {
     autonomy?: string | null;
     modelTimeout?: number;
     shouldAbort?: () => boolean;
+    abortSignal?: AbortSignal;
+    abortReason?: () => 'manual-stop' | 'task-timeout' | 'superseded';
     /**
      * Sygnał „sub dostał slot bramki" - runner przekazuje go pętli 1:1
      * (`RunAgentLoopOptions.onGateAdmitted`) i sam go nie interpretuje. Czyta go
@@ -137,6 +141,8 @@ export type SubRunResult = {
     stoppedBy: SubRunStoppedBy;
     /** Tylko przy realnym niepowodzeniu biegu (wyjątek). Brak pola = bieg doszedł do końca. */
     failed?: true;
+    partial?: AgentLoopPartialSnapshot;
+    stopReason?: AgentLoopStopReason;
 };
 
 type ToolCall = { name: string; arguments: unknown };
@@ -252,6 +258,12 @@ export class SubAgentRunner {
         // Deklaracja PRZED `try`, bo domknięcie biegu robi też gałąź `catch` (fail).
         const registry: SubTaskRegistry | null = this.plugin?.subTaskRegistry || null;
         let subTask: SubTask | undefined;
+        let lastPartial: AgentLoopPartialSnapshot | undefined;
+        let partialPersistence: Promise<void> = Promise.resolve();
+        const origin = options.origin ? { ...options.origin } : undefined;
+        const memory = origin?.agentName ? this.plugin?.agentManager?.getAgentMemory?.(origin.agentName) : null;
+        const chat = this.plugin?.env?.settings?.pkmAssistant?.chat as { apiKeys?: Record<string, unknown> } | undefined;
+        const knownSecrets = Object.values(chat?.apiKeys || {}).filter((v): v is string => typeof v === 'string' && v.length > 0);
 
         try {
             // Limity z config/limits.js - JEDNO źródło prawdy. Per sub-agent config
@@ -277,6 +289,7 @@ export class SubAgentRunner {
                 // finalnej syntezy. Zegar ścienny wyżej zostaje awaryjnym sufitem.
                 stallTimeoutMs: limits.subagent_stall_timeout_ms,
                 salvageMaxChars: limits.subagent_salvage_max_chars,
+                synthesisTimeoutMs: limits.model_synthesis_timeout_ms,
                 // Ten sam sufit obowiązuje też W PĘTLI SUBA: wynik zagnieżdżonej delegacji
                 // (sub deleguje głębiej, max_delegation_depth > 1) to DELIVERABLE, nie zrzut
                 // narzędzia - dokładnie ten sam wyjątek co w turze czatu (chat_streaming.ts),
@@ -412,11 +425,35 @@ export class SubAgentRunner {
                 ...(options.shouldAbort ? { shouldAbort: options.shouldAbort } : {}),
                 // Przelot sygnału bramki do wołacza (DelegateTool uzbraja nim budzik zadania).
                 ...(options.onGateAdmitted ? { onGateAdmitted: options.onGateAdmitted } : {}),
+                ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+                ...(options.abortReason ? { abortReason: options.abortReason } : {}),
+                knownSecrets,
+                callbacks: { partial: (snapshot) => {
+                    snapshot = JSON.parse(maskSensitiveData(JSON.stringify(snapshot)).replace(/\b(https?:\/\/)[^\s/@"\\]+@/gi, '$1[REDACTED]@')) as AgentLoopPartialSnapshot;
+                    lastPartial = snapshot;
+                    if (subTask) _safeRegistry(() => registry?.publishPartial?.(subTask as SubTask, snapshot));
+                    if (origin) {
+                        partialPersistence = partialPersistence.then(async () => {
+                            if (!memory?.appendSessionEvent || !origin.sessionPath) throw new Error('missing frozen owner');
+                            await memory.appendSessionEvent(origin.sessionPath, {
+                                type: 'agent_loop_partial', role: 'system', agentName: origin.agentName,
+                                content: t('subagent.partial_header', { name: config.name }) + '\n\n' + snapshot.text,
+                                result: { owner: origin, run: subTask?.id || label, revision: snapshot.revision, snapshot },
+                            });
+                        }).catch(() => {
+                            if (subTask) {
+                                subTask.partialStorageError = true;
+                                _safeRegistry(() => registry?.events.emit('task:partial', subTask));
+                            }
+                        });
+                    }
+                } },
                 trace: loopTrace,
                 limits: loopLimits,
                 modelOptions: { maxTokens: 16384, agentName: agent.name },
             });
 
+            await partialPersistence;
             log.info(logTag, `Task DONE: ${response.toolsUsed?.length || 0} tools, ${(response.finalText || '').length} znaków (stop: ${response.stoppedBy})`);
             log.timing(logTag, 'Task', startTime);
             log.groupEnd();
@@ -426,7 +463,7 @@ export class SubAgentRunner {
                 prompt: taskPrompt,
                 result: response.finalText || '',
                 duration_ms: Date.now() - startTime
-            });
+            }, origin, memory);
             // Domknięcie bytu wynikiem (status z `stoppedBy`: abort → aborted, reszta → done).
             if (subTask) {
                 _safeRegistry(() => registry?.finish?.(subTask as SubTask, {
@@ -435,6 +472,7 @@ export class SubAgentRunner {
                     durationMs: Date.now() - startTime,
                     usage: response.usage || null,
                     stoppedBy: response.stoppedBy,
+                    stopReason: response.stopReason,
                 }));
             }
             return {
@@ -448,10 +486,13 @@ export class SubAgentRunner {
                 // zadanie domknął, od suba, któremu skończyły się iteracje i oddał
                 // zaślepkę backstopu.
                 stoppedBy: response.stoppedBy,
+                partial: lastPartial,
+                stopReason: response.stopReason,
             };
         } catch (error) {
-            const safeErrorMsg = _extractSafeErrorMessage(error);
-            log.error(logTag, 'Task FAIL:', error, '| extracted:', safeErrorMsg);
+            const safeErrorMsg = knownSecrets.reduce((text, secret) => text.split(secret).join('[REDACTED]'), _extractSafeErrorMessage(error));
+            log.error(logTag, 'Task FAIL:', safeErrorMsg);
+            await partialPersistence;
             log.groupEnd();
             // TEN SAM kształt bloku co przy udanym biegu (`subagent_call`) - te same pola
             // nagłówka, status niesie treść `result`. Bez typu `subagent_error` znanego
@@ -464,20 +505,22 @@ export class SubAgentRunner {
                 prompt: taskPrompt,
                 result: t('subagent.error', { name: config.name, error: safeErrorMsg }),
                 duration_ms: Date.now() - startTime
-            });
+            }, origin, memory);
             // Bieg mógł się nie założyć (błąd przed `create`) - wtedy nie ma czego domykać.
             if (subTask) _safeRegistry(() => registry?.fail?.(subTask as SubTask, safeErrorMsg));
             return {
                 result: t('subagent.error', { name: config.name, error: safeErrorMsg }),
-                toolsUsed: [],
-                toolCallDetails: [],
+                toolsUsed: [...(lastPartial?.toolsUsed || [])],
+                toolCallDetails: [...(lastPartial?.toolCallDetails || [])],
                 duration: Date.now() - startTime,
-                usage: null,
+                usage: lastPartial?.usage || null,
                 // JEDYNE miejsce, w którym `failed` się pojawia. `DelegateTool` czyta tę
                 // flagę i oddaje modelowi uczciwe `success:false` zamiast sukcesu z tekstem
                 // błędu w środku - bez flagi agent zlecający referowałby błąd jako wynik.
                 stoppedBy: 'error',
                 failed: true,
+                partial: lastPartial,
+                stopReason: lastPartial?.stopReason,
             };
         }
     }
@@ -494,8 +537,13 @@ export class SubAgentRunner {
      * Fail-closed: agent bez wpisu w `agentMemories` (pad inicjalizacji, skasowany w trakcie biegu)
      * NIE dostaje podstawionej cudzej pamięci - po prostu nie zapisujemy dziennika.
      */
-    async _appendMemoryEvent(agentName: string, event: Record<string, unknown>): Promise<void> {
+    async _appendMemoryEvent(agentName: string, event: Record<string, unknown>, origin?: SubTaskOrigin, frozenMemory?: RunnerAgentMemory | null): Promise<void> {
         try {
+            if (origin) {
+                if (!frozenMemory?.appendSessionEvent || !origin.sessionPath) return;
+                await frozenMemory.appendSessionEvent(origin.sessionPath, { ...event, agentName: origin.agentName, timestamp: new Date().toISOString() });
+                return;
+            }
             const memory = agentName
                 ? this.plugin?.agentManager?.getAgentMemory?.(agentName)
                 : null;

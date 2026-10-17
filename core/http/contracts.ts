@@ -75,7 +75,25 @@ export interface StreamOpenResult {
 export interface StreamSink {
     /** Porcja TEKSTU zdekodowanego z bajtów; granice ramek NIE są gwarantowane. */
     onChunk(text: string): void;
+    /** Optional payload-free observation of response status, raw bytes, and terminal state. */
+    onActivity?(activity: StreamTransportActivity): void;
 }
+
+/** Transport observation deliberately excludes byte values, headers, and frame contents. */
+export type HttpStreamActivity =
+    | { kind: 'response'; status: number; elapsedMs: number }
+    | { kind: 'chunk'; chunkIndex: number; byteLength: number; elapsedMs: number }
+    | {
+        kind: 'end';
+        status: number | null;
+        outcome: 'complete' | 'aborted' | 'timeout' | 'error';
+        chunkCount: number;
+        byteCount: number;
+        elapsedMs: number;
+    };
+
+/** Backward-compatible internal name for the transport observer callback. */
+export type StreamTransportActivity = HttpStreamActivity;
 
 /**
  * Transport strumienia: `fetch` + `ReadableStream` + `TextDecoder` + `AbortController`.

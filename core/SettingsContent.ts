@@ -340,7 +340,9 @@ export function renderLimitsSection(container: HTMLElement, ctx: SettingsSection
         { key: 'delegation_timeout_ms',              nameKey: 'settings.limits_delegation_timeout', descKey: 'settings.limits_delegation_timeout_desc', scale: 1000 },
         // Watchdog ciszy suba (chunk streamu przezbraja budzik; 0 = wyłączony).
         { key: 'subagent_stall_timeout_ms',          nameKey: 'settings.limits_sub_stall',          descKey: 'settings.limits_sub_stall_desc',          scale: 1000 },
-        // Grace-okno na finalne podsumowanie suba (timeout w trakcie backstopu odracza abort).
+        // Optional final synthesis, including queue wait. 0 skips it.
+        { key: 'model_synthesis_timeout_ms', nameKey: 'settings.limits_synthesis_timeout', descKey: 'settings.limits_synthesis_timeout_desc', scale: 1000 },
+        // Grace window is a separate consumer policy.
         { key: 'subagent_final_grace_ms',            nameKey: 'settings.limits_final_grace',        descKey: 'settings.limits_final_grace_desc',        scale: 1000 },
         // Ratowanie dorobku: skrót wyników narzędzi przy padzie syntezy (0 = wyłączone).
         { key: 'subagent_salvage_max_chars',         nameKey: 'settings.limits_sub_salvage',        descKey: 'settings.limits_sub_salvage_desc',        scale: 1 },

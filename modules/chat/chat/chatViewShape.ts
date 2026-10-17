@@ -49,6 +49,7 @@ import type { RollingWindow } from './RollingWindow.js';
 import type { TriggerPopup } from './TriggerPopup.js';
 import type { TokenViewerWidget } from './TokenViewerWidget.js';
 import type { QueuedChatMessage } from './queuedMessage.js';
+import type { ChatTurnPartialState } from './turnPartial.js';
 import type { TurnAbortHandle } from './turnAbort.js';
 import type { PermissionSystemLike } from './vaultReadGate.js';
 import type { DelegationProposal } from './chat_artifacts.js';
@@ -239,6 +240,7 @@ export interface ChatStreamContext {
     tokenTracker: TokenTracker;
     turnId: number;
     abort: TurnAbortHandle;
+    partial?: ChatTurnPartialState;
     chatModel?: ChatModel | null;
     watchdog?: StreamWatchdog;
 }

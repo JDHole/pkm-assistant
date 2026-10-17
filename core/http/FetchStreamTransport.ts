@@ -3,6 +3,7 @@
  * Twardy timeout, zwrotka `{status, headers, body}`, zero ponowień (politykę prowadzi wołacz).
  */
 import type {
+    HttpStreamActivity,
     HttpRequestSpec,
     StreamOpenResult,
     StreamSink,
@@ -28,6 +29,11 @@ function mapaNaglowkow(naglowki: Headers): Record<string, string> {
 
 /** Powód, dla którego czytanie się skończyło przed czasem. */
 type PowodPrzerwania = 'stop' | 'limit';
+type WynikStrumienia = Extract<HttpStreamActivity, { kind: 'end' }>['outcome'];
+
+function obserwuj(sink: StreamSink, activity: HttpStreamActivity): void {
+    try { sink.onActivity?.(activity); } catch { /* observation never owns the stream */ }
+}
 
 /**
  * Znacznik wewnętrzny: czytanie stanęło, bo ktoś przerwał. Nigdy nie wychodzi na zewnątrz —
@@ -90,9 +96,21 @@ export class FetchStreamTransport implements StreamTransport {
      * Transport nie zna pojęcia ramki: nie skleja porcji i nie tnie ich po `\n\n`.
      */
     async open(spec: HttpRequestSpec, sink: StreamSink, signal: AbortSignal): Promise<StreamOpenResult> {
+        const startedAt = Date.now();
         const opis = { url: spec.url, method: spec.method, headers: spec.headers };
+        let status: number | null = null;
+        let outcome: WynikStrumienia = 'complete';
+        let chunkCount = 0;
+        let byteCount = 0;
+        const noteChunk = (bytes: number): void => {
+            chunkCount++;
+            byteCount += bytes;
+            obserwuj(sink, { kind: 'chunk', chunkIndex: chunkCount, byteLength: bytes, elapsedMs: Date.now() - startedAt });
+        };
         if (signal.aborted) {
             // Stop zdążył przed żądaniem — nie płacimy za połączenie, którego nikt nie chce.
+            outcome = 'aborted';
+            obserwuj(sink, { kind: 'end', status: null, outcome, chunkCount, byteCount, elapsedMs: Date.now() - startedAt });
             throw bladTransportu('Strumień przerwany przed wysłaniem', opis, KOD_PRZERWANE);
         }
 
@@ -115,6 +133,8 @@ export class FetchStreamTransport implements StreamTransport {
                 body: spec.body,
                 signal: kontroler.signal,
             });
+            status = odp.status;
+            obserwuj(sink, { kind: 'response', status, elapsedMs: Date.now() - startedAt });
             const naglowki = mapaNaglowkow(odp.headers);
 
             if (odp.status !== 200) {
@@ -127,26 +147,40 @@ export class FetchStreamTransport implements StreamTransport {
                     kontroler.abort();
                     return '';
                 });
+                const byteLength = new TextEncoder().encode(cialo).byteLength;
+                if (byteLength > 0) noteChunk(byteLength);
                 return { status: odp.status, headers: naglowki, body: cialo };
             }
 
-            await this.czytaj(odp, sink, signal, () => powod);
+            await this.czytaj(odp, sink, signal, () => powod, noteChunk);
             return { status: 200, headers: naglowki, body: '' };
         } catch (przyczyna) {
             if (przyczyna instanceof BladOdbiornika) {
                 // Nie nasz błąd — nasze jest tylko zamknięcie połączenia, żeby bajty przestały
                 // płynąć do odbiornika, który już się na nich wywrócił.
                 kontroler.abort();
+                outcome = 'error';
                 throw przyczyna.wlasciwy;
             }
             if (powod === 'limit') {
+                outcome = 'timeout';
                 throw bladTransportu('Strumień przekroczył limit czasu', opis, KOD_LIMIT_CZASU);
             }
             if (powod === 'stop' || signal.aborted) {
+                outcome = 'aborted';
                 throw bladTransportu('Strumień przerwany', opis, KOD_PRZERWANE);
             }
+            outcome = 'error';
             throw bladTransportu('Strumień nie doszedł do skutku', opis, KOD_TRANSPORT, przyczyna);
         } finally {
+            obserwuj(sink, {
+                kind: 'end',
+                status,
+                outcome,
+                chunkCount,
+                byteCount,
+                elapsedMs: Date.now() - startedAt,
+            });
             hostWindow.clearTimeout(zegar);
             signal.removeEventListener('abort', naStop);
         }
@@ -164,12 +198,18 @@ export class FetchStreamTransport implements StreamTransport {
         sink: StreamSink,
         signal: AbortSignal,
         powod: () => PowodPrzerwania | null,
+        noteChunk: (byteLength: number) => void,
     ): Promise<void> {
         const cialo = odp.body;
         if (!cialo) {
             // Środowisko bez strumieniowego ciała (albo odpowiedź pusta) — oddajemy całość naraz.
             const tekst = await odp.text();
-            if (tekst) this.oddaj(sink, tekst);
+            if (powod() !== null || signal.aborted) throw new PrzerwaneCzytanie();
+            if (tekst) {
+                noteChunk(new TextEncoder().encode(tekst).byteLength);
+                if (powod() !== null || signal.aborted) throw new PrzerwaneCzytanie();
+                this.oddaj(sink, tekst);
+            }
             return;
         }
 
@@ -181,6 +221,8 @@ export class FetchStreamTransport implements StreamTransport {
             // Stopem, nie ma prawa dojść do odbiornika.
             if (powod() !== null || signal.aborted) throw new PrzerwaneCzytanie();
             if (done) break;
+            noteChunk(value.byteLength);
+            if (powod() !== null || signal.aborted) throw new PrzerwaneCzytanie();
             const tekst = dekoder.decode(value, { stream: true });
             if (tekst) this.oddaj(sink, tekst);
         }
