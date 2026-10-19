@@ -69,7 +69,7 @@ modules/tools/
 **30 eksportów RUNTIME, wszystkie wypisane z nazwy** - `index.ts` nie używa `export *`: gwiazdka wynosiłaby na zewnątrz wszystko dany plik eksportuje, w tym rzeczy, które nigdy nie miały być publiczne. Dopisujesz narzędzie → dopisujesz fabrykę TUTAJ; bez tego `src/main.ts` jej nie zobaczy, a build wywali się na nieistniejącym eksporcie.
 
 **Runtime + registry:**
-- `ServerManager` - runtime built-in serwerów
+- `ServerManager` - runtime built-in serwerów; widoczność wyznacza `mcp_servers[]` (`*` = wszystkie, lista = wskazane + `core`), bez dawnej bramki `permissions.mcp`
 - `ExternalMcpManager` - klient external MCP (stdio/HTTP)
 - `ToolRegistry` (+ `filterByAgent(agent)` + `getBuiltinServerForTool(name)` + `getBuiltinServerMap()`)
 - `MCPClient` (+ static `MCPClient.normalizeArgsAliases(args, toolName)`)

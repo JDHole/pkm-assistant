@@ -31,8 +31,6 @@ export interface ServerVisibilityAgent {
     name?: string;
     mcp_servers?: unknown;
     effective_mcp_servers?: unknown;
-    permissions?: { mcp?: boolean } | null;
-    default_permissions?: { mcp?: boolean } | null;
 }
 
 /** Plugin widziany przez managera: wersja manifestu + rejestr narzędzi. */
@@ -100,9 +98,6 @@ export class ServerManager {
     getAllowedServerNamesForAgent(agent: ServerVisibilityAgent | null | undefined): string[] {
         const allServers = this.serverLoader.getAllServers() || [];
         if (!agent) return allServers.map(s => s.name);
-
-        const permissions = agent.permissions || agent.default_permissions;
-        if (permissions?.mcp === false) return ['core'];
 
         const mcpServers = this._getAgentMcpServers(agent);
         if (!Array.isArray(mcpServers)) return allServers.map(s => s.name);

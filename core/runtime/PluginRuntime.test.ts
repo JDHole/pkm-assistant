@@ -117,7 +117,7 @@ test('boot nie robi NIC, dopóki layout nie stoi', async t => {
     const runtime = new PluginRuntime(host, makeConfig());
 
     const booting = runtime.boot();
-    await new Promise(r => setTimeout(r, 20));
+    await Promise.resolve();
 
     t.deepEqual(spy.reads, [], 'boot ruszył przed layoutReady');
     t.not(runtime.state, 'loaded');
@@ -157,29 +157,37 @@ test('dispose emituje "unloading" i przechodzi w "disposed"', async t => {
     t.is(runtime.settingsStore.pendingSaveTimer, null, 'zaplanowany zapis przeżył demontaż');
 });
 
-test('whenLoaded: gotowy runtime → resolve bez timera', async t => {
+test.serial('whenLoaded: gotowy runtime → resolve bez timera', async t => {
     const runtime = new PluginRuntime(makeHost(), makeConfig());
     await runtime.boot();
 
-    const start = Date.now();
-    const wynik = await runtime.whenLoaded();
+    const wyniki: PluginRuntime[] = [];
+    const opoznienia = await zPodmienionymZegarem(async () => {
+        const czekanie = runtime.whenLoaded().then(wynik => { wyniki.push(wynik); });
+        await Promise.resolve();
+        await Promise.resolve();
+        t.deepEqual(wyniki, [runtime], 'gotowy runtime nie rozwiązał czekania przed tickiem zegara');
+        await czekanie;
+    }, false);
 
-    t.is(wynik, runtime);
-    t.true(Date.now() - start < 60, 'ścieżka „już gotowe" kosztowała tick siatki zamiast 0 ms');
+    t.is(wyniki[0], runtime);
+    t.deepEqual(opoznienia, [], 'ścieżka „już gotowe" zaplanowała timeout lub interval');
 });
 
-test('whenLoaded: rozwiązuje się na zdarzenie, nie na tick', async t => {
+test.serial('whenLoaded: rozwiązuje się na zdarzenie, nie na tick', async t => {
     let release: (() => void) | null = null;
     const runtime = new PluginRuntime(makeHost({ onLayoutReady: (cb) => { release = cb; } }), makeConfig());
-    const czekanie = runtime.whenLoaded();
-    void runtime.boot();
-
-    await new Promise(r => setTimeout(r, 20));
-    const emittedAt = Date.now();
-    release!();
-
-    await czekanie;
-    t.true(Date.now() - emittedAt < 50, 'rozwiązanie przyszło z siatki, nie ze zdarzenia');
+    let resolved = false;
+    const opoznienia = await zPodmienionymZegarem(async () => {
+        const czekanie = runtime.whenLoaded().then(() => { resolved = true; });
+        void runtime.boot();
+        await Promise.resolve();
+        t.false(resolved, 'runtime rozwiązał czekanie przed gotowością layoutu');
+        release!();
+        await czekanie;
+    }, false);
+    t.true(resolved);
+    t.deepEqual(opoznienia, [], 'gotowość została odłożona na timeout lub interval');
 });
 
 // ── reguła bezpieczeństwa ─────────────────────────────────────────────
@@ -194,9 +202,9 @@ test('whenLoaded po dispose NIGDY się nie rozwiązuje', async t => {
     await runtime.dispose();
     void runtime.whenLoaded().then(() => { poRozwiazane = true; });
     await runtime.reload();
-    await new Promise(r => setTimeout(r, 60));
+    await Promise.resolve();
 
-    t.false(przedRozwiazane || poRozwiazane === false && przedRozwiazane,
+    t.false(przedRozwiazane,
         'obietnica wzięta przed dispose rozwiązała się po demontażu — zombie-inicjalizacja');
     t.false(poRozwiazane, 'obietnica wzięta PO dispose rozwiązała się — runtime jest „disposed" na stałe');
 });
@@ -444,23 +452,29 @@ function makeLog(): LogSpy {
 type Zegar = typeof globalThis.setTimeout;
 
 /**
- * Podmienia globalny `setTimeout` na atrapę: zapisuje ŻĄDANE opóźnienia i odpala
- * wywołanie zwrotne od razu (mikrozadanie). Dzięki temu test widzi ILE razy i NA ILE
- * runtime chciał usnąć, nie płacąc za to sekundami. Testy tego używające są `serial`,
- * bo zegar jest globalny.
+ * Rejestruje żądane opóźnienia `setTimeout` i `setInterval`. Timeouty mogą wykonać
+ * callback w mikrozadaniu, jeśli test synchronizacji musi przesunąć sztuczny zegar.
+ * Testy gotowości zostawiają oba rodzaje timerów bez ticku. Używające tej atrapy
+ * testy są `serial`, bo zegar jest globalny.
  */
-async function zPodmienionymZegarem(fn: () => Promise<unknown>): Promise<number[]> {
+async function zPodmienionymZegarem(fn: () => Promise<unknown>, uruchomTimeouty = true): Promise<number[]> {
     const opoznienia: number[] = [];
     const oryginalny: Zegar = globalThis.setTimeout;
+    const oryginalnyInterval = globalThis.setInterval;
     globalThis.setTimeout = ((cb: () => void, ms?: number) => {
         opoznienia.push(Number(ms));
-        queueMicrotask(cb);
+        if (uruchomTimeouty) queueMicrotask(cb);
         return 0 as unknown as ReturnType<Zegar>;
     }) as unknown as Zegar;
+    globalThis.setInterval = ((_cb: () => void, ms?: number) => {
+        opoznienia.push(Number(ms));
+        return 0 as unknown as ReturnType<typeof setInterval>;
+    }) as typeof setInterval;
     try {
         await fn();
     } finally {
         globalThis.setTimeout = oryginalny;
+        globalThis.setInterval = oryginalnyInterval;
     }
     return opoznienia;
 }

@@ -9,7 +9,8 @@
  */
 import test from 'ava';
 import { Agent } from './Agent.js';
-import { validateAgentSchema } from '../../core/utils/yamlParser.js';
+import { AgentLoader } from './AgentLoader.js';
+import { parseYaml, validateAgentSchema } from '../../core/utils/yamlParser.js';
 
 test('stary YAML z can_message ładuje się bez błędu - pole jest po prostu ignorowane', t => {
     const legacy = {
@@ -78,40 +79,103 @@ test('update() nie przyjmuje playbook_overrides (pole spoza allowedFields)', t =
     t.is(agent.personality, 'spokojna', 'normalne pola dalej działają');
 });
 
-// `preferred_tools` skasowane (klaster narzędzi C1): `ServerManager.getActiveToolDefinitions`
-// nigdy nie przyjmowało drugiego argumentu (filtr narzędzi) - whitelista była no-opem, bo
-// `mcpActiveTools` jest już podzbiorem `systemTools`. Sąsiednie pole `preferred_servers`
-// (wybór SERWERÓW, nie narzędzi) zostaje żywe i bez zmian.
+test('stary YAML z preferred_tools zachowuje pozostałe pola profilu po wczytaniu i zapisie', t => {
+    const parsed = parseYaml([
+        'name: Tola',
+        'preferred_tools: [dawne_narzedzie]',
+        'personality: Spokojna i konkretna.',
+        'language: pl',
+        'preferred_servers: [web]',
+        'mcp_servers: [vault]',
+        'disabled_tools: []',
+        'default_permissions:',
+        '  memory: false',
+    ].join('\n')) as Record<string, unknown>;
 
-test('stary YAML z preferred_tools ładuje się bez błędu - pole jest po prostu ignorowane', t => {
-    const legacy = {
+    t.deepEqual(validateAgentSchema(parsed), { valid: true, errors: [] });
+
+    const agent = new Agent(parsed as never);
+    t.deepEqual(agent.serialize(), {
         name: 'Tola',
-        preferred_tools: ['a', 'b'],
+        access_policy_version: 2,
+        personality: 'Spokojna i konkretna.',
+        language: 'pl',
+        disabled_tools: [],
+        preferred_servers: ['web'],
         mcp_servers: ['vault'],
+        default_permissions: { memory: false },
+    });
+});
+
+test.serial('stary YAML z preferred_tools nie zgłasza ostrzeżenia przy wczytaniu nadpisań agenta', async t => {
+    const path = '.pkm-assistant/agents/jaskier_overrides.yaml';
+    const yaml = [
+        'name: Jaskier',
+        'preferred_tools: [dawne_narzedzie]',
+        'personality: Własna osobowość.',
+        'language: pl',
+        'preferred_servers: [web]',
+        'mcp_servers: [vault]',
+    ].join('\n');
+    const vault = {
+        adapter: {
+            async exists(file: string) { return file === path; },
+            async read(file: string) { return file === path ? yaml : ''; },
+            async write() { /* migracja formatu nadpisań */ },
+        },
     };
+    const warnings: unknown[][] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    let agent: Agent;
+    try {
+        [agent] = await new AgentLoader(vault as never).loadBuiltInAgents();
+    } finally {
+        console.warn = originalWarn;
+    }
 
-    t.true(validateAgentSchema(legacy).valid, 'walidacja schematu nie odrzuca nieznanego pola');
-
-    const agent = new Agent(legacy);
-    t.is(agent.name, 'Tola');
-    t.is(agent.preferredTools, undefined, 'pole nie jest już czytane');
-    t.deepEqual(agent.mcp_servers, ['vault'], 'sąsiednie pole kontraktu bez zmian');
+    t.deepEqual(warnings, []);
+    t.deepEqual({
+        name: agent!.name,
+        personality: agent!.personality,
+        language: agent!.language,
+        preferred_servers: agent!.preferredServers,
+        mcp_servers: agent!.mcp_servers,
+    }, {
+        name: 'Jaskier',
+        personality: 'Własna osobowość.',
+        language: 'pl',
+        preferred_servers: ['web'],
+        mcp_servers: ['vault'],
+    });
 });
 
-test('serialize NIE wypisuje preferred_tools (ani z domyślnej, ani z podanej wartości)', t => {
-    const zWartoscia = new Agent({ name: 'A', preferred_tools: ['x'] }).serialize();
-    const bez = new Agent({ name: 'B' }).serialize();
+test.serial('wczytanie nadpisań agenta ostrzega o literówce w polu uprawnień', async t => {
+    const path = '.pkm-assistant/agents/jaskier_overrides.yaml';
+    const vault = {
+        adapter: {
+            async exists(file: string) { return file === path; },
+            async read(file: string) {
+                return file === path
+                    ? 'name: Jaskier\ndefualt_permissions:\n  memory: false\npersonality: Własna osobowość.'
+                    : '';
+            },
+            async write() { /* migracja formatu nadpisań */ },
+        },
+    };
+    const warnings: unknown[][] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    let agent: Agent;
+    try {
+        [agent] = await new AgentLoader(vault as never).loadBuiltInAgents();
+    } finally {
+        console.warn = originalWarn;
+    }
 
-    t.false('preferred_tools' in zWartoscia);
-    t.false('preferred_tools' in bez);
-});
-
-test('update() nie przyjmuje preferred_tools (pole spoza allowedFields)', t => {
-    const agent = new Agent({ name: 'A' });
-    agent.update({ preferred_tools: ['x'], personality: 'spokojna' });
-
-    t.is(agent.preferredTools, undefined, 'martwe pole nie wraca tylnymi drzwiami');
-    t.is(agent.personality, 'spokojna', 'normalne pola dalej działają');
+    t.is(agent!.personality, 'Własna osobowość.');
+    t.is(agent!.permissions.memory, true);
+    t.true(warnings.some(args => args.some(arg => typeof arg === 'string' && arg.includes('defualt_permissions'))));
 });
 
 // `default_permissions.mcp` skasowane wcześniej (klaster C1) - przełącznik „Narzędzia MCP" nie
