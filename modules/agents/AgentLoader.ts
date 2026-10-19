@@ -105,6 +105,13 @@ function diffAgentConfig(current: Record<string, unknown>, baseline: Record<stri
 const ALWAYS_WRITTEN_META_FIELDS = ['access_policy_version'] as const;
 
 /**
+ * Pola usunięte z silnika, które stare `<nazwa>_overrides.yaml` mogą jeszcze nieść.
+ * `preferred_tools` (decyzja właściciela 2026-10-19) nie miało edytora w UI i niczego nie
+ * filtrowało. Pomijamy je przy wczytywaniu nadpisań, zanim trafią do `Agent.update()`.
+ */
+const DROPPED_OVERRIDE_KEYS = ['preferred_tools'] as const;
+
+/**
  * Rejestr fabryk baseline per built-in, kluczowany `agent.name`.
  * `saveBuiltInOverrides` hardcodowało `createJaskier()` jako baseline dla KAŻDEGO
  * `agent.isBuiltIn`, co jest bezpieczne tylko dopóki Jaskier jest jedynym built-inem
@@ -342,6 +349,9 @@ export class AgentLoader {
             const content = await this.vault.adapter.read(overridePath);
             const data = parseYaml(content) as LegacyAgentConfig;
             if (!data) return;
+            // Usunięte pola nie trafiają do update(), żeby jego ostrzeżenie o nieznanych
+            // kluczach dalej dotyczyło tylko pól, których silnik naprawdę nie zna.
+            for (const key of DROPPED_OVERRIDE_KEYS) delete data[key];
             const migration = this._migrateLegacyAgentFormat(data);
             if (migration.changed) {
                 await this.vault.adapter.write(overridePath, stringifyYaml(data));

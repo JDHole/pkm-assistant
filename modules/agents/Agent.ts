@@ -303,11 +303,6 @@ export class Agent implements ToolVisibilityAgent {
         // default_mode (Gadaj/Rób) nie jest już parsowane - tryby pracy usunięte.
         // Stare YAML-e z polem default_mode nie wybuchają, pole jest po prostu ignorowane.
         this.preferredServers = config.preferred_servers || []; // MCP servers to auto-connect on activation
-        // `preferred_tools` USUNIĘTE (pole-widmo, klaster narzędzi C1). `getActiveToolDefinitions`
-        // przyjmuje dziś tylko filtr serwerów - drugi argument (lista narzędzi) nigdy nie istniał
-        // po stronie ServerManager, więc whitelista i tak była no-opem (mcpActiveTools jest już
-        // podzbiorem systemTools). Stare YAML-e z `preferred_tools:` ładują się bez zmian -
-        // pole jest po prostu ignorowane, nie zapisywane z powrotem.
         // Server-level isolation: mcp_servers[] = whitelist of MCP servers visible to this agent.
         //   - undefined / missing field (nie-tablica) → security-first default
         //     ['vault','memory','core'].
