@@ -1,35 +1,35 @@
-# PKM Assistant 2.3.2
+# PKM Assistant 2.3.3
 
-**Reads to the end, turns that never hang** - PKM Assistant 2.3.2
+**Current Claude models, honest tool descriptions** - PKM Assistant 2.3.3
 
-**In plain words.** Agents can now read a long note or file all the way to the end instead of
-stopping after the first part, and they can search code and data files for exact text. When a
-model goes quiet, runs out of tool rounds or fails to write its summary, the turn now ends within
-seconds with an honest note of what was done, instead of waiting for many minutes and then
-showing nothing. Sub-agents working in the background no longer interfere with your chat: stopping
-one sub-agent no longer cuts off the chat or another sub-agent, and a sub-agent that finished
-correctly is no longer shown in error red. Nothing changes in how you set up or use the plugin.
+**In plain words.** If you talk to Claude through the Anthropic provider, the newest models work
+again: Claude Opus 4.7 and later, Sonnet 5 and 5.5, Haiku 5.5 and Fable used to answer every
+message with an error, because the plugin sent them settings they no longer accept. The default
+Anthropic model is now Claude Sonnet 5.5; if you picked a model yourself, it stays as it is. Agents
+also get a truthful picture of their own tools: the built-in instructions no longer tell them they
+cannot search, that they may call only three tools per turn, or that inline comments carry a marker
+the plugin never sends, and the tool descriptions now say what the tools really do.
 
 What changed, in detail:
 
-- **Reading long files.** `read` returns long documents page by page with the position of the next
-  page, and the agent continues from there; the page is tied to the exact version of the file, so a
-  file that changed in the meantime is read again from the start. Sub-agents read the same way.
-- **Literal text search.** `search` with `mode: "text"` scans `.js`, `.json` and `.md` files in a
-  folder (with a pattern) or one exact file, checks access for every file and says whether the scan
-  was complete, partial or stopped. Files the agent may read are no longer refused by mistake.
-- **Turns that end honestly.** Silence from the model, the tool-round limit, an exhausted summary
-  budget or Stop end the turn with a partial result: which tools ran, what they returned and why the
-  turn stopped (both causes when the tool rounds ran out and then the summary budget did too). A
-  tool result whose effect is uncertain ends the turn instead of repeating the action.
-- **Readable partial results.** The "tool responses are recorded below" line appears only when there
-  are tool results; JSON results are shown with line breaks and a visible clipping mark.
-- **Background sub-agents.** A sub-agent whose role has no model of its own gets its own instance of
-  the main model instead of borrowing the chat's, so Stop or a timeout of one sub-agent stops only
-  that sub-agent. A successful background sub-agent tile uses the success colour.
-- **Memory.** A summary or consolidation stream that goes silent is reported as stalled, never as a
-  success.
-- **Cleanups.** Two settings fields that never did anything (`preferred_tools`, `permissions.mcp`)
-  are gone; older agent profiles that still contain them load as before.
-- **Releases.** Every release is checked against a fixed version of the test harness, and a
-  published release can no longer have its files replaced: a fix always ships as a new version.
+- **Anthropic on current Claude models.** Each request uses the thinking setting its Claude family
+  accepts. Older models keep the thinking budget and the temperature. Claude 4.6 uses adaptive
+  thinking. Claude 4.7 and newer use adaptive thinking with a readable summary and never receive a
+  temperature; the temperature setting now says that these models ignore it. Models from other
+  vendors behind an Anthropic-compatible address get exactly the same request as before.
+- **Defaults.** The default Anthropic model is `claude-sonnet-5-5` instead of the deprecated
+  `claude-sonnet-4-20250514`, and the Anthropic output fallback is 16,384 tokens.
+- **Truthful instructions.** The delegation guide no longer claims the agent has no `search`,
+  `list` or `web_search`; the rules no longer invent a three-call limit; the inline comment rule
+  uses the marker the plugin actually sends, in English and Polish; folder restrictions are
+  described as missing access instead of a vault that does not exist.
+- **Truthful tool descriptions.** `read`, `list`, `search`, `write`, `create_folder`, `ask_user`,
+  `memory_save`, `memory_delete`, `delegate`, `delete`, `web_search` and `add_text_to_image` now
+  describe their real behaviour: what memory reading covers, the 100-entry list limit, keyword
+  search matching the whole phrase, the protected folders, that `write` creates missing folders for a new file,
+  what an empty answer form sends, how memory notes are matched, the immediate reply of a background
+  sub-agent, the trash default and the real default file names.
+- **Memory.** A "right now" note no longer has to carry the fields of a permanent note, and the
+  session summary prompt no longer asks for a field that was always ignored.
+- **Delegation reminder.** An agent with sub-agents is reminded to delegate at most once per turn
+  instead of after every tool round.
