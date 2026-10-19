@@ -69,14 +69,24 @@ Everything the agent sends to the model - system prompt, memory, tools, skills -
 
 ## Installation
 
-### Option A: BRAT (recommended)
+### Option A: Community plugins (recommended)
+
+1. Open Settings → Community plugins (turn off Restricted mode if it is on)
+2. Click **Browse** and search for **PKM Assistant**
+3. Click **Install**, then **Enable**
+
+Obsidian keeps the plugin up to date from its community catalogue.
+
+### Option B: BRAT
 
 1. Install [BRAT](https://github.com/TfTHacker/obsidian42-brat) from Obsidian Community Plugins
 2. In BRAT settings, click **Add Beta Plugin**
 3. Enter: `https://github.com/JDHole/pkm-assistant`
 4. Enable **PKM Assistant** in Settings → Community Plugins
 
-### Option B: Manual (ZIP)
+BRAT installs releases straight from GitHub. Use it only if you prefer that over the catalogue.
+
+### Option C: Manual (ZIP)
 
 1. Download the latest release from [Releases](https://github.com/JDHole/pkm-assistant/releases)
 2. Extract `main.js`, `manifest.json`, and `styles.css` into:
@@ -85,12 +95,6 @@ Everything the agent sends to the model - system prompt, memory, tools, skills -
    ```
 3. Restart Obsidian
 4. Enable **PKM Assistant** in Settings → Community Plugins
-
-### Option C: Community plugins (after approval)
-
-The plugin is not in Obsidian's community catalogue yet - submission is planned.
-If it is accepted, you will be able to install it straight from
-Settings → Community plugins → Browse. Until then, use Option A (BRAT) or Option B (ZIP).
 
 ### Requirements
 
