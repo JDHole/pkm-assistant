@@ -304,6 +304,56 @@ test('known literal secret crossing clipping boundary is redacted before clippin
     t.is(result.partial?.toolOutcomes[0].resultPreview, prefix + '[REDACTED]');
 });
 
+test('known multiline secret in JSON is redacted before serialization', async t => {
+    const secret = 'first line\nsecond line';
+    const result = await runAgentLoop({
+        model: { stream(_p, h) { h.done(toolResponse(['read'])); } },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        knownSecrets: [secret], executeToolCall: () => ({ content: secret }),
+        limits: { maxIterations: 1, synthesisTimeoutMs: 0 },
+    });
+
+    if (!result.partial) return t.fail('missing partial receipt');
+    t.is(result.toolCallDetails[0].resultPreview, '{"content":"[REDACTED]"}');
+    t.is(result.partial.toolOutcomes[0].resultPreview, '{"content":"[REDACTED]"}');
+    t.is(result.partial.text, 'Partial work\nReason: iteration limit. Final summary: skipped.\nTool responses are recorded below. Their effects have not been verified.\nwork started\n### read - returned response\n{\n  "content": "[REDACTED]"\n}');
+    t.is(result.finalText, result.partial.text);
+});
+
+test('known secret in a JSON key is absent from every public partial preview', async t => {
+    const secret = 'private-marker-123';
+    const result = await runAgentLoop({
+        model: { stream(_payload, handlers) { handlers.done(toolResponse(['read'])); } },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        knownSecrets: [secret], executeToolCall: () => ({ [secret]: 'visible value' }),
+        limits: { maxIterations: 1, synthesisTimeoutMs: 0 },
+    });
+
+    if (!result.partial) return t.fail('missing partial receipt');
+    t.is(result.toolCallDetails[0].resultPreview, '{"[REDACTED]":"visible value"}');
+    t.is(result.partial.toolOutcomes[0].resultPreview, '{"[REDACTED]":"visible value"}');
+    t.is(result.partial.text, 'Partial work\nReason: iteration limit. Final summary: skipped.\nTool responses are recorded below. Their effects have not been verified.\nwork started\n### read - returned response\n{\n  "[REDACTED]": "visible value"\n}');
+    t.is(result.finalText, result.partial.text);
+});
+
+test('known numeric secret in JSON is redacted in previews and final receipt', async t => {
+    const secret = '123456789';
+    const result = await runAgentLoop({
+        model: { stream(_payload, handlers) { handlers.done(toolResponse(['read'])); } },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        knownSecrets: [secret], executeToolCall: () => ({ count: 2, account: 123456789 }),
+        limits: { maxIterations: 1, synthesisTimeoutMs: 0 },
+    });
+
+    if (!result.partial) return t.fail('missing partial receipt');
+    const compact = '{"count":2,"account":"[REDACTED]"}';
+    t.is(result.toolCallDetails[0].resultPreview, compact);
+    t.is(result.partial.toolOutcomes[0].resultPreview, compact);
+    t.is(result.partial.text, 'Partial work\nReason: iteration limit. Final summary: skipped.\nTool responses are recorded below. Their effects have not been verified.\nwork started\n### read - returned response\n{\n  "count": 2,\n  "account": "[REDACTED]"\n}');
+    t.is(result.finalText, result.partial.text);
+    t.false(JSON.stringify(result).includes(secret));
+});
+
 test('native consumer supplies a structured silence cause without losing its stage', async t => {
     const controller = new AbortController(); let stops = 0;
     const running = runAgentLoop({
@@ -346,6 +396,21 @@ test('iteration limit followed by synthesis budget reports both causes', async t
     t.is(result.finalText, 'Partial work\nReason: iteration limit, then summary time budget. Final summary: time budget expired.\nTool responses are recorded below. Their effects have not been verified.\nwork started\n### read - returned response\nfound Notes/one.md');
 });
 
+test('JSON tool result keeps compact previews while partial receipt is readable', async t => {
+    const compact = '{"success":true,"provider":"search","mode_used":"semantic","content":"first line\\nsecond line"}';
+    const result = await runAgentLoop({
+        model: { stream(_payload, handlers) { handlers.done(toolResponse(['search'])); } },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        executeToolCall: () => compact,
+        limits: { maxIterations: 1, synthesisTimeoutMs: 0 },
+    });
+
+    if (!result.partial) return t.fail('missing partial receipt');
+    t.is(result.toolCallDetails[0].resultPreview, compact);
+    t.is(result.partial.toolOutcomes[0].resultPreview, compact);
+    t.is(result.partial.text, 'Partial work\nReason: iteration limit. Final summary: skipped.\nTool responses are recorded below. Their effects have not been verified.\nwork started\n### search - returned response\n{\n  "success": true,\n  "provider": "search",\n  "mode_used": "semantic",\n  "content": "first line\nsecond line"\n}');
+});
+
 test('JSON tool receipt keeps fields and shows real line breaks', async t => {
     const result = await runAgentLoop({
         model: { stream(_payload, handlers) { handlers.done(toolResponse(['read'])); } },
@@ -373,6 +438,23 @@ test('four long JSON results retain every tool status in the partial text', asyn
     ]);
     t.true(result.finalText.includes('"content": "fourth\n'));
     t.true(result.partial?.toolOutcomes.every(outcome => outcome.resultPreview.endsWith('…')));
+});
+
+test('nested JSON formatting keeps all tool statuses within the receipt budget', async t => {
+    const names = ['first', 'second', 'third', 'fourth'];
+    const result = await runAgentLoop({
+        model: { stream(_payload, handlers) { handlers.done(toolResponse(names)); } },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        executeToolCall: () => ({ a: { b: { c: { d: { e: { f: Array(200).fill(0) } } } } } }),
+        limits: { maxIterations: 1, synthesisTimeoutMs: 0 },
+    });
+
+    if (!result.partial) return t.fail('missing partial receipt');
+    const headings = names.map(name => `### ${name} - returned response`);
+    t.deepEqual(result.partial.text.match(/^### .* - returned response$/gm), headings);
+    t.deepEqual(result.finalText.match(/^### .* - returned response$/gm), headings);
+    t.true(result.partial.text.length <= 12000);
+    t.is(result.finalText, result.partial.text);
 });
 
 test('final partial text clipping is visibly marked', async t => {

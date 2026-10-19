@@ -158,6 +158,11 @@ function toolTraceDetail(rawArgs: unknown): string {
 function partialPreview(value: unknown, secrets: readonly string[] = []): string {
     const seen = new WeakSet<object>();
     const clean = (input: unknown, depth: number): unknown => {
+        if (typeof input === 'number') {
+            const raw = String(input);
+            const redacted = redactSecretsDeep(raw, secrets);
+            return redacted === raw ? input : redacted;
+        }
         if (typeof input === 'string') {
             return input.replace(/data:[^\s"']+/gi, '[binary]')
                 .replace(/\b[A-Za-z0-9+/]{120,}={0,2}\b/g, '[binary]')
@@ -176,7 +181,7 @@ function partialPreview(value: unknown, secrets: readonly string[] = []): string
         const out: Record<string, unknown> = {};
         for (const [key, item] of Object.entries(input)) {
             if (/^(?:args|arguments|raw|payload|request|headers|reasoning(?:_content)?|thinking|binary|base64|bytes|data|image(?:_url)?|audio)$/i.test(key)) continue;
-            out[key] = clean(item, depth + 1);
+            out[String(redactSecretsDeep(key, secrets))] = clean(item, depth + 1);
         }
         return out;
     };
@@ -185,8 +190,42 @@ function partialPreview(value: unknown, secrets: readonly string[] = []): string
         if (typeof source === 'string') {
             try { source = JSON.parse(source); } catch { /* ordinary text */ }
         }
-        const safe = clean(source, 0);
-        const text = typeof safe === 'string' ? safe : (JSON.stringify(safe, null, 2) ?? '').replace(
+        const safe = redactSecretsDeep(clean(source, 0), secrets);
+        const text = typeof safe === 'string' ? safe : JSON.stringify(safe) ?? '';
+        return maskSensitiveData(String(redactSecretsDeep(text, secrets)));
+    } catch { return '[preview unavailable]'; }
+}
+
+function readablePartialPreview(value: string): string {
+    const safe = partialPreview(value);
+    let parsed: unknown;
+    try { parsed = JSON.parse(safe); } catch {
+        if ((!safe.startsWith('{') && !safe.startsWith('[')) || !safe.endsWith('…')) return safe;
+        let indent = 0;
+        let quoted = false;
+        let escaped = false;
+        let readable = '';
+        for (const char of safe) {
+            if (quoted) {
+                if (escaped) {
+                    readable += char === 'n' ? '\n' : '\\' + char;
+                    escaped = false;
+                } else if (char === '\\') escaped = true;
+                else {
+                    readable += char;
+                    if (char === '"') quoted = false;
+                }
+            } else if (char === '"') { quoted = true; readable += char; }
+            else if (char === '{' || char === '[') { readable += char + '\n' + '  '.repeat(++indent); }
+            else if (char === '}' || char === ']') { readable += '\n' + '  '.repeat(indent = Math.max(0, indent - 1)) + char; }
+            else if (char === ',') { readable += ',\n' + '  '.repeat(indent); }
+            else if (char === ':') readable += ': ';
+            else readable += char;
+        }
+        return readable;
+    }
+    if (!parsed || typeof parsed !== 'object') return safe;
+    return (JSON.stringify(parsed, null, 2) ?? '').replace(
             /"(?:\\.|[^"\\])*"/g,
             token => {
                 const value: unknown = JSON.parse(token);
@@ -194,8 +233,6 @@ function partialPreview(value: unknown, secrets: readonly string[] = []): string
                 return '"' + Array.from(value, char => char === '\n' ? '\n' : JSON.stringify(char).slice(1, -1)).join('') + '"';
             },
         );
-        return maskSensitiveData(String(redactSecretsDeep(text, secrets)));
-    } catch { return '[preview unavailable]'; }
 }
 
 const partialReasonText = {
@@ -228,7 +265,7 @@ const partialOutcomeText = {
 } satisfies Record<AgentLoopToolOutcome['outcome'], () => string>;
 
 /** Deterministic receipt: a returned tool value never verifies a mutation. */
-export function formatAgentLoopPartial(snapshot: AgentLoopPartialSnapshot): string {
+function formatPartialText(snapshot: AgentLoopPartialSnapshot, maxChars: number): string {
     const lines = [
         t('agentLoop.partial_header'),
         t('agentLoop.partial_state', {
@@ -237,12 +274,32 @@ export function formatAgentLoopPartial(snapshot: AgentLoopPartialSnapshot): stri
         }),
     ];
     if (snapshot.toolOutcomes.some(outcome => outcome.resultPreview)) lines.push(t('agentLoop.partial_unverified'));
-    if (snapshot.lastText) lines.push(partialPreview(snapshot.lastText));
-    for (const outcome of snapshot.toolOutcomes) {
-        lines.push('### ' + partialPreview(outcome.name) + ' - ' + partialOutcomeText[outcome.outcome]());
-        if (outcome.resultPreview) lines.push(partialPreview(outcome.resultPreview));
+    const headings = snapshot.toolOutcomes.map(outcome =>
+        '### ' + partialPreview(outcome.name) + ' - ' + partialOutcomeText[outcome.outcome]());
+    const previewCount = snapshot.toolOutcomes.filter(outcome => outcome.resultPreview).length;
+    if (snapshot.lastText) {
+        const reservedForHeadings = [...lines, ...headings].join('\n').length + previewCount;
+        const last = clipPartialText(partialPreview(snapshot.lastText), Math.max(0, maxChars - reservedForHeadings - 1));
+        if (last) lines.push(last);
     }
-    return clipPartialText(lines.join('\n'), PARTIAL_MAX_CHARS);
+    const reserved = [...lines, ...headings].join('\n').length + previewCount;
+    let previewSpace = Math.max(0, maxChars - reserved);
+    let previewsLeft = previewCount;
+    for (const [index, outcome] of snapshot.toolOutcomes.entries()) {
+        lines.push(headings[index]);
+        if (outcome.resultPreview) {
+            const readable = readablePartialPreview(outcome.resultPreview);
+            const preview = clipPartialText(readable, Math.floor(previewSpace / previewsLeft));
+            if (preview) lines.push(preview);
+            previewSpace -= preview.length;
+            previewsLeft--;
+        }
+    }
+    return clipPartialText(lines.join('\n'), maxChars);
+}
+
+export function formatAgentLoopPartial(snapshot: AgentLoopPartialSnapshot): string {
+    return formatPartialText(snapshot, PARTIAL_MAX_CHARS);
 }
 
 function copyPartial(snapshot: AgentLoopPartialSnapshot): AgentLoopPartialSnapshot {
@@ -511,7 +568,7 @@ export async function runAgentLoop({
             toolsUsed: outcomes.map(item => item.name), toolOutcomes: outcomes, toolCallDetails: details,
             usage: { ...totalUsage }, iterations, lastText: last, text: '',
         };
-        snapshot.text = clipPartialText(formatAgentLoopPartial(snapshot), PARTIAL_MAX_CHARS - (8000 - remaining));
+        snapshot.text = formatPartialText(snapshot, PARTIAL_MAX_CHARS - (8000 - remaining));
         const signature = JSON.stringify(snapshot);
         if (signature === partialSignature && latestPartial) return copyPartial(latestPartial);
         partialSignature = signature;
