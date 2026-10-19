@@ -106,7 +106,7 @@ Co skrypt (`release.js`, helpery w `utils/releaseNotes.ts`, `utils/releasePrep.t
 
 Na końcu skrypt wypisuje na konsoli krótką listę dalszych kroków: commit notatek na gałęzi wydania (kandydat, Krok 3b), a na `main` sprawdzenie czystego `git status`, `git tag`, push i gdzie patrzeć (Kroki 6-7).
 
-## Krok 6 - commit, tag, push (ręcznie, na `main`)
+## Krok 6 - tag i push (ręcznie, na `main`; notatki są już zacommitowane na gałęzi wydania)
 
 `release.js` NIE tworzy taga i NIE dotyka GitHuba - to w całości ręczne. Notatki są zwykle zacommitowane już na gałęzi wydania (Krok 3b), więc po Kroku 5 `git status` jest czysty i commit notatek odpada. Gdy jednak Krok 5 coś zmienił, kandydat nie był tym, co idzie pod tag - wróć do Kroku 3b z nowym SHA zamiast commitować na `main`. Przy czystym `git status`:
 
@@ -121,11 +121,11 @@ git push origin main && git push origin <wersja>
 **Wypchniętego taga nie przesuwamy, a opublikowanego wydania nie podmieniamy.** Regułę trzyma jeden skrypt, `.github/scripts/release-state.mjs` (testy: `release_state.test.ts`), wołany na starcie workflow i tuż przed publikacją:
 
 - opublikowane wydanie z kompletem `main.js`, `manifest.json`, `styles.css` (dodatkowe pliki nie zmieniają oceny) - odmowa: użytkownicy i katalog mogli je pobrać, a atestacja opisuje dokładnie te bajty; poprawka idzie w kolejnym numerze patch;
-- wymagany plik wgrany do połowy albo pusty - odmowa; nic nie jest nadpisywane, uszkodzony plik usuwa człowiek na stronie wydania i uruchamia bieg ponownie;
-- przerwana publikacja (brakuje części plików, obecne są całe) - ponowny bieg dogrywa tylko brakujące;
+- wymagany plik wgrany do połowy, pusty albo z innego buildu (suma sha256 inna niż w `dist/` tego biegu) - odmowa; nic nie jest nadpisywane, taki plik usuwa człowiek na stronie wydania i uruchamia bieg ponownie;
+- przerwana publikacja (brakuje części plików, obecne są całe i z tego buildu) - ponowny bieg dogrywa tylko brakujące, pod id tego wydania;
 - błąd odczytu stanu z GitHuba inny niż "nie ma takiego wydania" - odmowa, bo bez znajomości stanu niczego nie publikujemy.
 
-Wydań roboczych (draft) skrypt nie widzi i ich nie dotyka - GitHub zwraca po tagu tylko wydania opublikowane.
+Wydań roboczych (draft) skrypt nie widzi i ich nie dotyka - GitHub zwraca po tagu tylko wydania opublikowane. Po publikacji ten sam skrypt (`--po-publikacji --porownaj dist`) sprawdza, że opublikowane wydanie ma komplet trzech plików identycznych z tym buildem, czyli z tym, co opisuje atestacja; inaczej bieg jest czerwony.
 
 ## Krok 7 - zweryfikuj wydanie
 

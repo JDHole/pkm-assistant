@@ -151,7 +151,8 @@ test('wydanie bierze harness z przypietego commita i nie nadpisuje opublikowanyc
     t.regex(release, /repository:\s*JDHole\/pkm-assistant-harness\s*\n\s*ref:\s*\$\{\{\s*steps\.harness\.outputs\.sha\s*\}\}\s*\n/, 'checkout harnessu w release.yml nie bierze przypietego SHA');
     t.false(release.includes('--clobber'), 'release.yml nadpisuje pliki opublikowanego wydania');
     t.is([...release.matchAll(/node \.github\/scripts\/release-state\.mjs "\$TAG"(?! --po-publikacji)/g)].length, 2, 'stan wydania nie jest sprawdzany na starcie i przed publikacja jednym skryptem');
-    t.true(release.includes('node .github/scripts/release-state.mjs "$TAG" --po-publikacji'), 'workflow nie sprawdza kompletu plikow po publikacji');
+    t.true(release.includes('node .github/scripts/release-state.mjs "$TAG" --po-publikacji --porownaj dist'), 'workflow nie sprawdza po publikacji, ze wydanie ma komplet plikow z tego buildu');
+    t.true(release.includes('node .github/scripts/release-state.mjs "$TAG" --porownaj dist)'), 'przed dograniem plikow workflow nie porownuje wgranych plikow z tym buildem');
     t.false(/gh release upload/.test(release), 'dogrywanie plikow idzie po tagu (moze trafic w draft) zamiast pod id wydania');
     t.true(read('RELEASE_PROCESS.md').includes('.github/harness-sha'), 'RELEASE_PROCESS.md nie mowi, jak przypiac harness');
 });

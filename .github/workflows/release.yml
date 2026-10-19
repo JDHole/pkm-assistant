@@ -138,8 +138,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Stan liczony od nowa tuż przed publikacją (bramki trwały kilkanaście minut). Komplet,
-          # uszkodzone pliki albo błąd odczytu kończą krok tutaj - skrypt wychodzi kodem 1.
-          if ! stan="$(node .github/scripts/release-state.mjs "$TAG")"; then
+          # uszkodzone pliki, plik z innego buildu (inna suma sha256 niż dist/) albo błąd odczytu
+          # kończą krok tutaj - skrypt wychodzi kodem 1.
+          if ! stan="$(node .github/scripts/release-state.mjs "$TAG" --porownaj dist)"; then
             echo "$stan"
             exit 1
           fi
@@ -167,5 +168,6 @@ jobs:
               exit 1
               ;;
           esac
-          # Dowód publikacji: opublikowane wydanie ma teraz komplet wgranych, niepustych plików.
-          node .github/scripts/release-state.mjs "$TAG" --po-publikacji
+          # Dowód publikacji: opublikowane wydanie ma teraz komplet wgranych, niepustych plików,
+          # identycznych (sha256) z tym buildem - czyli z tym, co opisuje atestacja.
+          node .github/scripts/release-state.mjs "$TAG" --po-publikacji --porownaj dist
