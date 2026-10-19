@@ -191,6 +191,8 @@ reader. Stop i supersesja budzą wewnętrzny wyścig także wtedy, gdy transport
 Stary request od supersesji odrzuca się z markerem `_superseded === true`. Strażnik:
 `ChatModel.httpBoundary.test.ts`.
 
+Pole `outcome` opisuje zakończenie jako `completed`, `aborted` lub `error`, ale nie rozróżnia przyczyn zewnętrznego przerwania, takich jak cisza i timeout zadania.
+
 Bilet może zająć realny slot jeszcze przed wznowieniem `await admitted`. Wynik admission
 zapisujemy również po Stopie/supersesji, żeby zwolnić dokładnie ten bilet. Nowy właściciel
 jest instalowany przed obserwacją anulowania starego: także ten callback może uruchomić
