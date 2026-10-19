@@ -68,6 +68,8 @@ test('synthesis total budget expires despite semantic chunks and beats synchrono
             stream(_p, h) {
                 if (++calls === 1) { h.done(tools); return; }
                 held = h;
+                // Pierwsza porcja od razu: przed końcem budżetu zawsze jest co najmniej jedna.
+                h.chunk(resultText('synthesis is working'));
                 interval = setInterval(() => h.chunk(resultText('synthesis is working')), 4);
             },
             stopStream() {
@@ -77,7 +79,9 @@ test('synthesis total budget expires despite semantic chunks and beats synchrono
             },
         },
         store: store(), executeToolCall: () => 'folder completed response',
-        limits: { maxIterations: 1, synthesisTimeoutMs: 35, perCallTimeoutMs: 200, stallTimeoutMs: 25 },
+        // Strażnik ciszy dłuższy niż budżet: pod obciążeniem porcje z setInterval przychodzą
+        // z opóźnieniem i przy 25 ms cisza wygrywała z budżetem 35 ms (test badał budżet, nie ciszę).
+        limits: { maxIterations: 1, synthesisTimeoutMs: 35, perCallTimeoutMs: 200, stallTimeoutMs: 1000 },
         callbacks: { partial: s => snapshots.push(s) },
     });
     t.is(result.stoppedBy, 'backstop');
