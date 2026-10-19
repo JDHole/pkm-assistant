@@ -76,7 +76,7 @@ const _cache = new Map<string, ChatModel>();
  * w CLAUDE.md.)
  */
 export const DEFAULT_MODELS: Readonly<Record<string, string>> = {
-    anthropic: 'claude-sonnet-4-20250514',
+    anthropic: 'claude-sonnet-5-5',
     openai: 'gpt-4o',
     gemini: 'gemini-1.5-pro',
     groq: 'llama-3.3-70b-versatile',

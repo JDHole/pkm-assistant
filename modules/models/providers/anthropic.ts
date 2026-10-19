@@ -106,7 +106,7 @@ const ANTHROPIC_INFO: ChatProviderInfo = {
     label: 'Anthropic',
     local: false,
     needsApiKey: true,
-    defaultModel: 'claude-sonnet-4-20250514',
+    defaultModel: 'claude-sonnet-5-5',
     defaultEndpoint: `${DEFAULT_BASE_URL}${MESSAGES_PATH}`,
     modelsEndpoint: `${DEFAULT_BASE_URL}${MODELS_PATH}`,
     apiKeyHeader: 'x-api-key',
@@ -152,7 +152,10 @@ interface RequestBody {
     tools?: SentTool[];
     tool_choice?: { type: string; name?: string };
     temperature?: number;
-    thinking?: { type: 'enabled'; budget_tokens: number };
+    thinking?:
+        | { type: 'enabled'; budget_tokens: number }
+        | { type: 'adaptive' }
+        | { type: 'adaptive'; display: 'summarized' };
     stream?: boolean;
 }
 
@@ -215,9 +218,30 @@ function headersFor(ctx: ProviderContext): Record<string, string> {
     return headers;
 }
 
-/** Nagłówki tury rozmowy - te same plus beta myślenia przeplecionego. */
-function messagesHeaders(ctx: ProviderContext): Record<string, string> {
-    return { ...headersFor(ctx), 'anthropic-beta': INTERLEAVED_THINKING_BETA };
+type ClaudeFamily = 'legacy' | 'adaptive46' | 'adaptive';
+
+/** Klasyfikuje identyfikator modelu; ośmiocyfrowy sufiks po 4 oznacza datę wydania. */
+function claudeFamily(modelId: string): ClaudeFamily {
+    const model = modelId.toLowerCase().replace(/^(?:anthropic[./])/, '');
+    if (/^claude-3(?:-|$)/.test(model)) return 'legacy';
+
+    const match = /^claude-(?:opus|sonnet|haiku|fable|mythos)(?:-(\d+)(?:-(\d+))?)?(?:[-./:]|$)/.exec(model);
+    if (!match) return 'legacy';
+    if (match[1] === undefined) return 'adaptive';
+
+    const major = Number(match[1]);
+    const minorPart = match[2];
+    const minor = minorPart === undefined || /^\d{8}$/.test(minorPart) ? 0 : Number(minorPart);
+    if (major < 4 || (major === 4 && minor < 6)) return 'legacy';
+    if (major === 4 && minor === 6) return 'adaptive46';
+    return 'adaptive';
+}
+
+/** Nagłówki tury rozmowy; interleaved-thinking jest potrzebne tylko trybowi legacy. */
+function messagesHeaders(ctx: ProviderContext, family: ClaudeFamily): Record<string, string> {
+    const headers = headersFor(ctx);
+    if (family === 'legacy') headers['anthropic-beta'] = INTERLEAVED_THINKING_BETA;
+    return headers;
 }
 
 /** Messages API WYMAGA `max_tokens` - brak pola to 400 od dostawcy. */
@@ -904,9 +928,11 @@ export class AnthropicProvider implements ChatProvider {
     buildRequest(req: ChatRequest, ctx: ProviderContext, stream: boolean): HttpRequestSpec {
         const maxTokens = resolveMaxTokens(req, ctx);
         const transcript = splitTranscript(req.messages ?? []);
+        const model = req.model ?? ctx.modelId;
+        const family = claudeFamily(model);
 
         const body: RequestBody = {
-            model: req.model ?? ctx.modelId,
+            model,
             max_tokens: maxTokens,
             messages: transcript.messages,
         };
@@ -917,11 +943,17 @@ export class AnthropicProvider implements ChatProvider {
         const toolChoice = mapToolChoice(req.tool_choice);
         if (toolChoice) body.tool_choice = toolChoice;
 
-        const budget = resolveThinkingBudget(req.thinking, maxTokens);
-        if (budget !== null) {
-            body.thinking = { type: 'enabled', budget_tokens: budget };
-            // Przy włączonym myśleniu API przyjmuje wyłącznie domyślną temperaturę.
-        } else {
+        const thinkingEnabled = req.thinking !== undefined && req.thinking !== false;
+        if (thinkingEnabled && family === 'adaptive') {
+            body.thinking = { type: 'adaptive', display: 'summarized' };
+        } else if (thinkingEnabled && family === 'adaptive46') {
+            body.thinking = { type: 'adaptive' };
+        } else if (family === 'legacy') {
+            const budget = resolveThinkingBudget(req.thinking, maxTokens);
+            if (budget !== null) body.thinking = { type: 'enabled', budget_tokens: budget };
+        }
+
+        if (family !== 'adaptive' && (!thinkingEnabled || family === 'legacy' && body.thinking === undefined)) {
             const temperature = asCount(req.temperature ?? ctx.temperature);
             if (temperature !== null) body.temperature = temperature;
         }
@@ -932,7 +964,7 @@ export class AnthropicProvider implements ChatProvider {
         return {
             url: endpointFor(ctx, MESSAGES_PATH, ANTHROPIC_INFO.defaultEndpoint),
             method: 'POST',
-            headers: messagesHeaders(ctx),
+            headers: messagesHeaders(ctx, family),
             body: JSON.stringify(body),
         };
     }

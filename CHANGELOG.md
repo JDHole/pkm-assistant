@@ -5,6 +5,13 @@ All notable user-facing changes to PKM Assistant are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- Anthropic requests now use the thinking and temperature fields supported by each Claude model family, and the default Anthropic model is Claude Sonnet 5.5.
+- The default Anthropic output limit is 16,384 tokens, including adaptive thinking.
+
 ## 2.3.2 - 2026-10-19
 
 Reads to the end, turns that never hang: agents read long files completely and search code and

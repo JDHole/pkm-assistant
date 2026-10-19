@@ -4,6 +4,7 @@ import { setSvg, setSvgLabel } from '../../modules/crystal-soul/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { computeSemanticStatusText } from './semanticStatusText.js';
 import { parseEmbedTimeoutSeconds } from './embedTimeoutInput.js';
+import { MODEL_MAX_TOKENS_DEFAULTS } from './cache_utils.js';
 import { DEFAULT_EMBED_TIMEOUT_MS } from '../embedding/index.js';
 // `import type` = ZERO emitu (esbuild i tsx wycinają go w całości). Same wartości
 // `Setting`/`Notice` przychodzą tu przez ctx (DI z `modules/shell/pkm_settings_tab`).
@@ -228,7 +229,7 @@ export async function renderModelsSection(container: HTMLElement, ctx: ModelsSec
 
         pkm.maxTokens = pkm.maxTokens || {};
         const tokenDefaults: Array<[string, number]> = [
-            ['anthropic', 8192],
+            ['anthropic', MODEL_MAX_TOKENS_DEFAULTS.anthropic],
             ['openai', 16384],
             ['xai', 8192],
             ['ollama', 4096],
