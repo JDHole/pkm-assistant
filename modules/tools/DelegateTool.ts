@@ -1180,8 +1180,9 @@ async function _executeSubAgent(
     // custom sub z takim polem w YAML) jedzie modelem rodzica (`sub_worker`), reszta — dawnym
     // slotem sub-agentów (`researcher`→minion). config.model z YAML wygrywa w obu przypadkach.
     const model: StreamingModelLike | null = createModelForRole(plugin, _resolveModelRole(subAgentConfig), activeAgent, subAgentConfig);
-    const fallbackModel = plugin.env?.chatModel?.stream ? plugin.env.chatModel : null;
-    const finalModel = (model?.stream ? model : fallbackModel);
+    // Brak modelu roli suba: użyj konfiguracji main, ale z osobną instancją dla tego biegu.
+    // Wspólny env.chatModel należy do czatu, więc Stop suba nie może do niego trafić.
+    const finalModel = model?.stream ? model : createModelForRole(plugin, 'main', activeAgent, null, true);
 
     if (!finalModel?.stream) {
         return { success: false, error: t('mcp.delegate.no_model') };
@@ -1190,11 +1191,7 @@ async function _executeSubAgent(
     // Sub NIGDY nie wyprzedza głównego czatu w kolejce bramki platformy lokalnej
     // (`ChatModel.stream` czyta `_gatePriority`, brak = 1 = main). Delegacja
     // domyślnie leci w tle, więc sub i czat realnie biją się o jeden slot mostu.
-    // ⚠️ Tylko na ŚWIEŻEJ instancji per rola. `fallbackModel` to WSPÓŁDZIELONY
-    // `env.chatModel` — zbicie mu priorytetu zdegradowałoby główny czat na stałe.
-    if (finalModel === model) {
-        (finalModel as { _gatePriority?: number })._gatePriority = 0;
-    }
+    (finalModel as { _gatePriority?: number })._gatePriority = 0;
 
     const subAgentRunner = plugin.toolRegistry ? makeRunner(plugin) : null;
     if (!subAgentRunner) {

@@ -1255,6 +1255,128 @@ test.serial('Stop działa też dla biegu BLOKUJĄCEGO (background:false)', async
     registry.dispose();
 });
 
+test.serial('delegate: fallback researchera izoluje równoległe zadania oraz Stop od strumienia czatu', async t => {
+    __test__._resetBackground();
+    const registry = new SubTaskRegistry();
+    t.teardown(() => registry.dispose());
+    let releaseFirst!: () => void;
+    const firstMayFinish = new Promise<void>(resolve => { releaseFirst = resolve; });
+
+    // Jedna instancja zachowuje się jak ChatModel: nowy stream wypiera poprzedni,
+    // a stopStream zatrzymuje aktualnego właściciela instancji.
+    class ExclusiveModel {
+        static instances: ExclusiveModel[] = [];
+        private current: { prompt: string; resolve: (text: string) => void; reject: (error: Error) => void } | null = null;
+
+        constructor(_opts: unknown) { ExclusiveModel.instances.push(this); }
+
+        stream(prompt: string): Promise<string> {
+            this.current?.reject(new Error('strumień wyparty'));
+            return new Promise<string>((resolve, reject) => {
+                this.current = { prompt, resolve, reject };
+            });
+        }
+
+        stopStream(): void {
+            const current = this.current;
+            this.current = null;
+            current?.reject(new Error('strumień zatrzymany'));
+        }
+
+        complete(prompt: string, text: string): void {
+            if (this.current?.prompt !== prompt) return;
+            const current = this.current;
+            this.current = null;
+            current.resolve(text);
+        }
+    }
+
+    const chatModel = new ExclusiveModel({});
+    const chatResult = chatModel.stream('czat').then(
+        text => ({ text }),
+        (error: Error) => ({ text: error.message }),
+    );
+    const activeAgent = { name: 'Jaskier', activeSubAgents: [] };
+    const plugin = {
+        currentAutonomy: 'edge',
+        toolRegistry: {},
+        subTaskRegistry: registry,
+        agentManager: { getActiveAgent: () => activeAgent },
+        env: {
+            chatModel,
+            config: chatConfig(ExclusiveModel as unknown as LegacyModelClass),
+            settings: {
+                pkmAssistant: {
+                    chat: { platform: 'ollama', hosts: { ollama: 'http://localhost:11434' } },
+                    modelLibrary: {
+                        main: [{ platform: 'ollama', model: 'model-glowny', isDefault: true }],
+                        minion: [],
+                    },
+                    minionModel: '',
+                },
+            },
+        },
+    } as unknown as DelegatePlugin;
+    const tool = createDelegateTool({}, {
+        makeRunner: () => ({
+            runTask: async (prompt: string, _agent: unknown, config: SubAgentConfigLike,
+                model: ExclusiveModel, options: TloRunnerOptions) => {
+                const task = registry.create({ id: `sub/${prompt}`, name: config.name });
+                options.onTaskCreated?.(task);
+                try {
+                    const text = await model.stream(prompt);
+                    registry.finish(task, { text, toolsUsed: [], durationMs: 1, usage: null, stoppedBy: 'natural' });
+                    return { result: text, toolsUsed: [], toolCallDetails: [], duration: 1, usage: null };
+                } catch (error) {
+                    // Po supersesji byt pozostaje widoczny do chwili kliknięcia Stop.
+                    if (prompt === 'pierwszy') await firstMayFinish;
+                    const stopped = options.shouldAbort?.() ?? false;
+                    if (stopped) registry.finish(task, {
+                        text: 'przerwane', toolsUsed: [], durationMs: 1, usage: null, stoppedBy: 'abort',
+                    });
+                    else registry.fail(task, (error as Error).message);
+                    return {
+                        result: (error as Error).message, toolsUsed: [], toolCallDetails: [], duration: 1,
+                        usage: null, stoppedBy: stopped ? 'abort' as const : 'error' as const,
+                        ...(stopped ? {} : { failed: true as const }),
+                    };
+                }
+            },
+        }),
+    });
+
+    const started = await tool.execute({ tasks: [
+        { task: 'pierwszy', aspect: 'explorer' },
+        { task: 'drugi', aspect: 'explorer' },
+    ] }, {}, plugin) as TloRes;
+    const first = registry.getTask('sub/pierwszy');
+    const second = registry.getTask('sub/drugi');
+    const stopped = registry.requestStop('sub/pierwszy');
+    releaseFirst();
+    for (const model of ExclusiveModel.instances) {
+        model.complete('drugi', 'wynik drugiego');
+        model.complete('czat', 'odpowiedź czatu');
+    }
+    const deadline = Date.now() + 500;
+    while ((first?.status === 'running' || second?.status === 'running') && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 5));
+    }
+
+    t.true(started.started, 'oba zadania ruszyły przez publiczne delegate');
+    t.true(stopped, 'Stop pierwszego zadania działa przez publiczny rejestr');
+    t.deepEqual({
+        firstStatus: first?.status,
+        secondStatus: second?.status,
+        secondText: second?.result?.text,
+        chat: await chatResult,
+    }, {
+        firstStatus: 'aborted',
+        secondStatus: 'done',
+        secondText: 'wynik drugiego',
+        chat: { text: 'odpowiedź czatu' },
+    });
+});
+
 // ─── Gotchas pokryte tu na PRAWDZIWEJ pętli, nie atrapie ────────────────────────────
 // Stop może wisieć na „zatrzymywanie…" w nieskończoność, jeśli pętla suba stoi na
 // `await model.stream()`, a abort adaptera nie rozstrzyga tej promisy — bieg kończyłby się
@@ -1434,13 +1556,22 @@ test.serial('brak attachAbort w rejestrze nie psuje delegacji (fail-soft)', asyn
 // samą ścieżką wracałaby goła zaślepka, nadal jako `success: true`.
 // Zwrotka delegacji niesie `stopped_by`.
 function pluginDlaZejscia() {
+    class FakeModel { stream() {} }
     return {
         agentManager: {
             getActiveAgent: () => ({ name: 'Tester', activeSubAgents: [] }),
             resolveSubAgentConfig: () => null,
         },
         toolRegistry: {},
-        env: { chatModel: { stream: () => { /* atrapa: obecność .stream wystarcza */ } } },
+        env: {
+            config: chatConfig(FakeModel as unknown as LegacyModelClass),
+            settings: {
+                pkmAssistant: {
+                    chat: { platform: 'ollama' },
+                    modelLibrary: { main: [{ platform: 'ollama', model: 'model-glowny', isDefault: true }] },
+                },
+            },
+        },
     } as unknown as DelegatePlugin;
 }
 
