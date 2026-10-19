@@ -44,7 +44,7 @@ export type CacheMetadata = {
 };
 
 export const MODEL_MAX_TOKENS_DEFAULTS = {
-    anthropic: 8192,
+    anthropic: 16384,
     openai: 16384,
     xai: 8192,
     ollama: 4096,

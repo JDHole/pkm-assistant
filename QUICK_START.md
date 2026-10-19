@@ -1,6 +1,6 @@
 # PKM Assistant - Quick Start Guide
 
-> **For beta testers - version 2.2.2**
+> **For beta testers**
 > Installation time: ~5 minutes. Configuration time: ~10 minutes.
 
 > **NOTE:** This project is 100% vibe-coded by a non-coder (JDHole) with Claude Opus 4.6 via Claude Code (VS Code). Bugs or suboptimal solutions may occur. Report them to the author!
@@ -90,7 +90,7 @@ Why: Zero cost, privacy, works offline. Requires RAM (min. 8GB for small models)
 2. Add credits ($5+)
 3. Copy your API key
 4. Settings → PKM Assistant → Klucze API (API Keys) → find the "Anthropic (Claude)" row and paste your key there
-5. Model: `claude-sonnet-4-20250514` (good price/quality ratio)
+5. Model: `claude-sonnet-5-5` (good price/quality ratio)
 
 ### Option D: OpenAI, Gemini, Groq, OpenRouter, LM Studio, xAI
 

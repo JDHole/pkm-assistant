@@ -4,6 +4,7 @@ import { isVisionModel } from './capabilities.js';
 test('isVisionModel detects known multimodal model families', t => {
   t.true(isVisionModel({ modelKey: 'gpt-4o' }));
   t.true(isVisionModel({ modelKey: 'claude-sonnet-4-20250514' }));
+  t.true(isVisionModel({ modelKey: 'claude-sonnet-5-5' }));
   t.true(isVisionModel({ modelKey: 'gemini-1.5-pro' }));
 });
 

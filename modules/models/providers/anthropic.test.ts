@@ -362,7 +362,7 @@ test('thinking: true daje blok thinking z budżetem MNIEJSZYM niż max_tokens', 
   const body = JSON.parse(
     anthropicProvider.buildRequest(
       { messages: [{ role: 'user', content: 'pomyśl' }], thinking: true },
-      makeCtx({ modelId: 'claude-sonnet-4-20250514', apiKey: 'sk-ant-test', maxOutputTokens: MODEL_MAX_TOKENS_DEFAULTS.anthropic }),
+      makeCtx({ modelId: 'claude-haiku-4-5', apiKey: 'sk-ant-test', maxOutputTokens: MODEL_MAX_TOKENS_DEFAULTS.anthropic }),
       false,
     ).body ?? '{}',
   ) as ParsedBody;
@@ -392,7 +392,7 @@ type F10Body = {
   model?: string;
   max_tokens?: number;
   temperature?: number;
-  thinking?: { type?: string; budget_tokens?: number };
+  thinking?: { type?: string; budget_tokens?: number; display?: string };
   tool_choice?: { type?: string; name?: string };
   system?: unknown[];
   tools?: unknown[];
@@ -461,31 +461,32 @@ test('listModels() przy statusie innym niż 200 oddaje PUSTĄ listę i nie czyta
 // ── budowa żądania ───────────────────────────────────────────────────────────
 
 test('max_tokens — jawne 0 i wartość ujemna NIE są budżetem, kontekstowa jedynka już tak', t => {
-  const zKontekstem = makeCtx({ modelId: 'claude-sonnet-4-20250514', maxOutputTokens: 5000 });
+  const zKontekstem = makeCtx({ modelId: 'claude-haiku-4-5', maxOutputTokens: 5000 });
 
   t.is(bodyWith({ messages: HEJ, max_tokens: 0 }, zKontekstem).max_tokens, 5000, 'zero z żądania spada na kontekst, nie jedzie jako limit');
   t.is(bodyWith({ messages: HEJ, max_tokens: -3 }, zKontekstem).max_tokens, 5000);
   t.is(bodyWith({ messages: HEJ, max_tokens: 4096.7 }, zKontekstem).max_tokens, 4096, 'ułamek przycięty w dół');
-  t.is(bodyWith({ messages: HEJ }, makeCtx({ modelId: 'claude-sonnet-4-20250514', maxOutputTokens: 1 })).max_tokens, 1, 'każdy DODATNI limit z kontekstu jedzie wprost');
+  t.is(bodyWith({ messages: HEJ }, makeCtx({ modelId: 'claude-haiku-4-5', maxOutputTokens: 1 })).max_tokens, 1, 'każdy DODATNI limit z kontekstu jedzie wprost');
   t.is(
-    bodyWith({ messages: HEJ }, makeCtx({ modelId: 'claude-sonnet-4-20250514', maxOutputTokens: 0 })).max_tokens,
+    bodyWith({ messages: HEJ }, makeCtx({ modelId: 'claude-haiku-4-5', maxOutputTokens: 0 })).max_tokens,
     MODEL_MAX_TOKENS_DEFAULTS.anthropic,
     'dopiero brak sensownego limitu spada na domyślny',
   );
 });
 
 test('myślenie na granicy 1024 — DOKŁADNIE na minimum jeszcze się nie włącza', t => {
-  t.is(bodyWith({ messages: HEJ, thinking: true, max_tokens: 1024 }, CTX).thinking, undefined, 'budżet musi być MNIEJSZY niż max_tokens, więc przy równym minimum myślenia nie ma');
+  const legacy = makeCtx({ modelId: 'claude-haiku-4-5', apiKey: 'k' });
+  t.is(bodyWith({ messages: HEJ, thinking: true, max_tokens: 1024 }, legacy).thinking, undefined, 'budżet musi być MNIEJSZY niż max_tokens, więc przy równym minimum myślenia nie ma');
 
-  const owlos = bodyWith({ messages: HEJ, thinking: true, max_tokens: 1025 }, CTX);
+  const owlos = bodyWith({ messages: HEJ, thinking: true, max_tokens: 1025 }, legacy);
   t.is(owlos.thinking?.type, 'enabled');
   t.is(owlos.thinking?.budget_tokens, 1024, 'jeden token nad minimum: budżet = minimum API, czyli max_tokens - 1');
 
-  t.is(bodyWith({ messages: HEJ, thinking: 999999, max_tokens: 8192 }, CTX).thinking?.budget_tokens, 8191, 'żądany budżet przycięty do max_tokens - 1');
+  t.is(bodyWith({ messages: HEJ, thinking: 999999, max_tokens: 8192 }, legacy).thinking?.budget_tokens, 8191, 'żądany budżet przycięty do max_tokens - 1');
 });
 
 test('temperature 0 z żądania NIE spada na wartość z kontekstu', t => {
-  const ctx = makeCtx({ modelId: 'claude-sonnet-4-20250514', apiKey: 'k', temperature: 0.7 });
+  const ctx = makeCtx({ modelId: 'claude-haiku-4-5', apiKey: 'k', temperature: 0.7 });
 
   t.is(bodyWith({ messages: HEJ, temperature: 0 }, ctx).temperature, 0, 'zero to WYBRANA temperatura, nie brak wyboru');
   t.is(bodyWith({ messages: HEJ }, ctx).temperature, 0.7);
@@ -496,6 +497,143 @@ test('model z żądania jedzie DOSŁOWNIE; dopiero brak pola spada na kontekst',
   t.is(bodyWith({ messages: HEJ, model: 'claude-opus-4-1' }, CTX).model, 'claude-opus-4-1');
   t.is(bodyWith({ messages: HEJ }, CTX).model, 'claude-sonnet-4-20250514');
   t.is(bodyWith({ messages: HEJ, model: '' }, CTX).model, '', 'pusty string to PODANA wartość, nie brak pola — fallback jest nullish, nie falsy');
+});
+
+test('rodziny modeli determinują thinking i nagłówki na publicznym buildRequest', t => {
+  const przypadki = [
+    ['claude-sonnet-4-20250514', 'legacy'],
+    ['claude-haiku-4-5', 'legacy'],
+    ['claude-opus-4-5', 'legacy'],
+    ['claude-3-5-sonnet-20241022', 'legacy'],
+    ['claude-opus-4-6', 'adaptive46'],
+    ['claude-sonnet-4-6', 'adaptive46'],
+    ['claude-opus-4-7', 'adaptive'],
+    ['claude-sonnet-5', 'adaptive'],
+    ['claude-sonnet-5-5', 'adaptive'],
+    ['claude-opus-5-5', 'adaptive'],
+    ['claude-fable-5-1', 'adaptive'],
+    ['anthropic.claude-opus-5-5', 'adaptive'],
+  ] as const;
+
+  for (const [model, family] of przypadki) {
+    const ctx = makeCtx({ modelId: model, apiKey: 'k', temperature: 0.7 });
+    const spec = anthropicProvider.buildRequest({ messages: HEJ, thinking: true, max_tokens: 8192 }, ctx, false);
+    const body = JSON.parse(spec.body ?? '{}') as F10Body;
+    t.is(body.model, model, `${model}: body musi istnieć i zawierać model`);
+    t.is(body.max_tokens, 8192, `${model}: body zawiera limit`);
+    if (family === 'legacy') {
+      t.is(body.thinking?.type, 'enabled', `${model}: legacy thinking`);
+      t.is(body.thinking?.budget_tokens, 4096, `${model}: legacy budget`);
+      t.is(spec.headers['anthropic-beta'], 'interleaved-thinking-2025-05-14', `${model}: legacy beta`);
+    } else if (family === 'adaptive46') {
+      t.deepEqual(body.thinking, { type: 'adaptive' }, `${model}: adaptive 4.6 shape`);
+      t.is(body.temperature, undefined);
+      t.false('anthropic-beta' in spec.headers);
+    } else {
+      t.deepEqual(body.thinking, { type: 'adaptive', display: 'summarized' }, `${model}: adaptive shape`);
+      t.is(body.temperature, undefined);
+      t.false('anthropic-beta' in spec.headers);
+    }
+  }
+
+  const fablePath = anthropicProvider.buildRequest(
+    { messages: HEJ, thinking: true, max_tokens: 4096 },
+    makeCtx({ modelId: 'anthropic/claude-opus-5-5', apiKey: 'k' }),
+    false,
+  );
+  t.deepEqual((JSON.parse(fablePath.body ?? '{}') as F10Body).thinking, { type: 'adaptive', display: 'summarized' });
+
+  const kimi = anthropicProvider.buildRequest(
+    { messages: HEJ, max_tokens: 4096 },
+    makeCtx({ modelId: 'kimi-k2', apiKey: 'k', temperature: 0.7 }),
+    false,
+  );
+  t.deepEqual(JSON.parse(kimi.body ?? '{}'), {
+    model: 'kimi-k2', max_tokens: 4096, messages: [{ role: 'user', content: 'hej' }], temperature: 0.7,
+  });
+  t.deepEqual(kimi.headers, {
+    'content-type': 'application/json',
+    'anthropic-version': '2023-06-01',
+    'anthropic-dangerous-direct-browser-access': 'true',
+    'x-api-key': 'k',
+    'anthropic-beta': 'interleaved-thinking-2025-05-14',
+  });
+  const kimiThinking = anthropicProvider.buildRequest({ messages: HEJ, thinking: true, max_tokens: 4096 }, makeCtx({ modelId: 'kimi-k2', apiKey: 'k' }), false);
+  t.deepEqual((JSON.parse(kimiThinking.body ?? '{}') as F10Body).thinking, { type: 'enabled', budget_tokens: 2048 });
+  t.deepEqual(kimiThinking.headers, kimi.headers);
+});
+
+test('model spoza Claude zachowuje granice budżetu i temperaturę 0', t => {
+  const ctx = makeCtx({ modelId: 'kimi-k2', apiKey: 'k', temperature: 0.7 });
+  const minimum = anthropicProvider.buildRequest({ messages: HEJ, thinking: true, max_tokens: 1024 }, ctx, false);
+  t.deepEqual(JSON.parse(minimum.body ?? '{}'), {
+    model: 'kimi-k2', max_tokens: 1024, messages: [{ role: 'user', content: 'hej' }], temperature: 0.7,
+  });
+
+  const aboveMinimum = anthropicProvider.buildRequest({ messages: HEJ, thinking: true, max_tokens: 1025 }, ctx, false);
+  t.deepEqual(JSON.parse(aboveMinimum.body ?? '{}'), {
+    model: 'kimi-k2', max_tokens: 1025, messages: [{ role: 'user', content: 'hej' }],
+    thinking: { type: 'enabled', budget_tokens: 1024 },
+  });
+
+  const zero = anthropicProvider.buildRequest({ messages: HEJ, temperature: 0, max_tokens: 4096 }, ctx, false);
+  t.deepEqual(JSON.parse(zero.body ?? '{}'), {
+    model: 'kimi-k2', max_tokens: 4096, messages: [{ role: 'user', content: 'hej' }], temperature: 0,
+  });
+  t.deepEqual(minimum.headers, zero.headers);
+  t.deepEqual(aboveMinimum.headers, zero.headers);
+  t.deepEqual(zero.headers, {
+    'content-type': 'application/json',
+    'anthropic-version': '2023-06-01',
+    'anthropic-dangerous-direct-browser-access': 'true',
+    'x-api-key': 'k',
+    'anthropic-beta': 'interleaved-thinking-2025-05-14',
+  });
+});
+
+test('req.model wybiera rodzinę faktycznie wysyłaną niezależnie od modelu kontekstu', t => {
+  const ctxLegacy = makeCtx({ modelId: 'claude-haiku-4-5', apiKey: 'k', temperature: 0.7 });
+  const ctxAdaptive = makeCtx({ modelId: 'claude-sonnet-5-5', apiKey: 'k', temperature: 0.7 });
+  const adaptive = anthropicProvider.buildRequest({ messages: HEJ, model: 'claude-sonnet-5-5', thinking: true, max_tokens: 8192 }, ctxLegacy, false);
+  const legacy = anthropicProvider.buildRequest({ messages: HEJ, model: 'claude-haiku-4-5', thinking: true, max_tokens: 8192 }, ctxAdaptive, false);
+
+  t.deepEqual((JSON.parse(adaptive.body ?? '{}') as F10Body).thinking, { type: 'adaptive', display: 'summarized' });
+  t.false('anthropic-beta' in adaptive.headers);
+  t.deepEqual((JSON.parse(legacy.body ?? '{}') as F10Body).thinking, { type: 'enabled', budget_tokens: 4096 });
+  t.is(legacy.headers['anthropic-beta'], 'interleaved-thinking-2025-05-14');
+});
+
+test('Claude Sonnet 5.5 pomija temperaturę z żądania i kontekstu', t => {
+  const ctx = makeCtx({ modelId: 'claude-sonnet-5-5', apiKey: 'k', temperature: 0.7 });
+  const on = anthropicProvider.buildRequest({ messages: HEJ, thinking: true, max_tokens: 8192 }, ctx, false);
+  const off = anthropicProvider.buildRequest({ messages: HEJ, thinking: false, temperature: 0.7 }, ctx, false);
+
+  const onBody = JSON.parse(on.body ?? '{}') as F10Body;
+  t.deepEqual(onBody.thinking, { type: 'adaptive', display: 'summarized' });
+  t.is(onBody.model, 'claude-sonnet-5-5');
+  t.is(onBody.max_tokens, 8192);
+  t.is(onBody.temperature, undefined);
+  t.is(onBody.thinking?.budget_tokens, undefined);
+  t.false('anthropic-beta' in on.headers);
+
+  const offBody = JSON.parse(off.body ?? '{}') as F10Body;
+  t.is(offBody.thinking, undefined);
+  t.is(offBody.temperature, undefined);
+  t.false('anthropic-beta' in off.headers);
+});
+
+test('Claude 4.6 używa adaptive bez display i dopuszcza temperaturę bez thinking', t => {
+  const ctx = makeCtx({ modelId: 'claude-sonnet-4-6', apiKey: 'k', temperature: 0.7 });
+  const on = anthropicProvider.buildRequest({ messages: HEJ, thinking: true }, ctx, false);
+  const off = anthropicProvider.buildRequest({ messages: HEJ, thinking: false }, ctx, false);
+
+  const onBody = JSON.parse(on.body ?? '{}') as F10Body;
+  t.deepEqual(onBody.thinking, { type: 'adaptive' });
+  t.is(onBody.temperature, undefined);
+  t.false('anthropic-beta' in on.headers);
+  const offBody = JSON.parse(off.body ?? '{}') as F10Body;
+  t.is(offBody.thinking, undefined);
+  t.is(offBody.temperature, 0.7);
 });
 
 test('tool_choice — cztery kształty kanoniczne na słownik Anthropica', t => {

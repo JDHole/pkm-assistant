@@ -78,7 +78,7 @@ export const PROVIDER_INFO: Readonly<Record<ProviderId, ChatProviderInfo>> = {
         label: 'Anthropic',
         local: false,
         needsApiKey: true,
-        defaultModel: 'claude-sonnet-4-20250514',
+        defaultModel: 'claude-sonnet-5-5',
         defaultEndpoint: 'https://api.anthropic.com/v1/messages',
         modelsEndpoint: 'https://api.anthropic.com/v1/models',
         apiKeyHeader: 'x-api-key',

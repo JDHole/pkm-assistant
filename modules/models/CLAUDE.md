@@ -95,6 +95,17 @@ w gołym Node.
 
 ## Gotchas (CZYTAJ ZANIM COKOLWIEK ZMIENISZ)
 
+### Anthropic thinking i temperatura zależą od rodziny Claude
+
+Żądania dla Claude starszych niż 4.6 oraz modeli zgodnych z Anthropic, które nie są Claude,
+zachowują `thinking: {type: 'enabled', budget_tokens}` i nagłówek beta
+`interleaved-thinking-2025-05-14`; temperatura jest wysyłana, gdy budżet thinking nie został
+włączony. Claude 4.6 używa `thinking: {type: 'adaptive'}` bez budżetu i bez temperatury, a bez
+thinking dopuszcza temperaturę. Claude 4.7 i nowsze używają przy thinking
+`{type: 'adaptive', display: 'summarized'}`; zawsze pomijają temperaturę, a bez thinking
+pomijają pole thinking. Tryby adaptive nie potrzebują nagłówka beta. Plugin odbiera bloki
+thinking w odpowiedziach, ale nie odsyła ich dalej wraz z podpisem.
+
 ### 🔴 1. `ChatModel.stream()` obsługuje jednego właściciela na instancję
 
 Każde wywołanie ma własny stan tury (bilet bramki, uchwyt odrzucenia, kontroler, budzik retry,
