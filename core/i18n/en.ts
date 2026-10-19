@@ -1206,7 +1206,7 @@ export const en: Record<string, string> = {
   'settings.notice_select_platform': 'Select a platform and enter a model name',
   'settings.notice_model_exists': 'This model is already on the list',
   'settings.temperature': 'Temperature',
-  'settings.temperature_desc': '0 = precise, 1 = creative',
+  'settings.temperature_desc': '0 = precise, 1 = creative. Claude models from 4.7 onward ignore this setting.',
   'settings.max_tokens': 'Max response tokens',
   'settings.max_tokens_desc': 'Maximum length of a single AI response',
   'settings.max_tokens_platform_desc': 'Advanced: default response limit for this platform.',
