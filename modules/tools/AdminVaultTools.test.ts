@@ -128,3 +128,17 @@ test('A1 zwykły agent nie zapisze w .pkm-assistant; admin nadal nie przejdzie t
     }), vaultApp, plugin(true)) as ToolRes;
     t.false(traversal.success);
 });
+
+test('B06 write: administrator może zapisać chroniony plik .env', async t => {
+    const app = makeApp();
+    const vaultApp = app as unknown as ToolApp;
+    const args = ctx({ path: '.env', mode: 'create', content: 'test=value' });
+
+    const denied = await createWriteTool().execute(args, vaultApp, plugin(false)) as ToolRes;
+    t.false(denied.success);
+    t.false(Object.hasOwn(app.files, '.env'));
+
+    const written = await createWriteTool().execute(args, vaultApp, plugin(true)) as ToolRes;
+    t.true(written.success);
+    t.is(app.files['.env'], 'test=value');
+});

@@ -184,7 +184,7 @@ export function createMemorySaveTool() {
                     description: t('mcp.memory_save.param.remove')
                 }
             },
-            required: ['name', 'description', 'type', 'content']
+            required: []
         },
         execute: async (args: MemorySaveArgs, _app: unknown, plugin: MemorySavePlugin | null | undefined) => {
             try {
