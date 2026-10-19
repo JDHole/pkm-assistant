@@ -152,8 +152,14 @@ jobs:
               ;;
             partial\ *)
               # Przerwana publikacja: dogrywamy tylko brakujące pliki, istniejących nie ruszamy.
-              for f in ${stan#partial }; do
-                gh release upload "$TAG" "dist/$f"
+              # Upload idzie pod id sprawdzonego wydania, nie po tagu - wyszukiwanie po tagu
+              # mogłoby trafić w wydanie robocze (draft) o tej samej nazwie.
+              set -- ${stan#partial }
+              id="$1"
+              shift
+              for f in "$@"; do
+                gh api --method POST "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$id/assets?name=$f" \
+                  -H "Content-Type: application/octet-stream" --input "dist/$f" > /dev/null
               done
               ;;
             *)
@@ -161,3 +167,5 @@ jobs:
               exit 1
               ;;
           esac
+          # Dowód publikacji: opublikowane wydanie ma teraz komplet wgranych, niepustych plików.
+          node .github/scripts/release-state.mjs "$TAG" --po-publikacji

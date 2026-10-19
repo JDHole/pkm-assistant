@@ -104,15 +104,14 @@ Co skrypt (`release.js`, helpery w `utils/releaseNotes.ts`, `utils/releasePrep.t
 4. **`releases/latest_release.md`.** Generuje sformatowaną wersję not (nagłówek + zwinięte starsze patch'e) pod widok w samym pluginie (`ReleaseNotesView` - ekran "co nowego" po starcie).
 5. **Rebuild kontrolny.** Odpala build jeszcze raz - `node esbuild.js` wprost przez bieżącego Node'a (to samo, co `npm run build`) - świeży lokalny `dist/` dokładnie pod potwierdzoną wersję. Błąd builda przerywa skrypt PRZED commitem i tagiem - to jedyny cel tego kroku dzisiaj, bo `dist/` z tego przebiegu nigdy nie trafia na wydanie (asset builduje osobno, na czystym Linuksie, workflow z kroku 6).
 
-Na końcu skrypt wypisuje na konsoli krótką listę kroków 6-7 (commit notatek, `git tag`, push, gdzie patrzeć) - to jest ten sam tekst, co niżej.
+Na końcu skrypt wypisuje na konsoli krótką listę dalszych kroków: commit notatek na gałęzi wydania (kandydat, Krok 3b), a na `main` sprawdzenie czystego `git status`, `git tag`, push i gdzie patrzeć (Kroki 6-7).
 
 ## Krok 6 - commit, tag, push (ręcznie, na `main`)
 
-`release.js` NIE tworzy taga i NIE dotyka GitHuba - to w całości ręczne, dokładnie te cztery komendy:
+`release.js` NIE tworzy taga i NIE dotyka GitHuba - to w całości ręczne. Notatki są zwykle zacommitowane już na gałęzi wydania (Krok 3b), więc po Kroku 5 `git status` jest czysty i commit notatek odpada. Gdy jednak Krok 5 coś zmienił, kandydat nie był tym, co idzie pod tag - wróć do Kroku 3b z nowym SHA zamiast commitować na `main`. Przy czystym `git status`:
 
 ```bash
-git add releases/<wersja>.md releases/latest_release.md
-git commit -m "docs(release): notatki <wersja>"
+git status --short releases/
 git tag <wersja>
 git push origin main && git push origin <wersja>
 ```
