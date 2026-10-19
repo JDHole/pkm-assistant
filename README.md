@@ -2,7 +2,7 @@
 
 **Build your own AI agents inside Obsidian - with full transparency and control over every part of the prompt.**
 
-[![Version](https://img.shields.io/badge/version-2.3.2-blue)]() [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-green)](LICENSE) [![Tests](https://img.shields.io/badge/tests-4464%20PASS-brightgreen)]() [![CI](https://github.com/JDHole/pkm-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/JDHole/pkm-assistant/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-2.3.3-blue)]() [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-green)](LICENSE) [![Tests](https://img.shields.io/badge/tests-4475%20PASS-brightgreen)]() [![CI](https://github.com/JDHole/pkm-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/JDHole/pkm-assistant/actions/workflows/ci.yml)
 
 ![An agent creates a plan as a living note with approve and send-back buttons](assets/pkm-chat.png)
 
@@ -236,7 +236,7 @@ cd PKM-Assistant
 npm install
 npm run build        # Production build → main.js
 npm run dev          # Watch mode for development
-npm test             # Run 4464 unit tests (AVA)
+npm test             # Run 4475 unit tests (AVA)
 npm run typecheck    # tsc --noEmit (TypeScript strict)
 ```
 
@@ -264,7 +264,7 @@ The production bundle is a single `main.js` of roughly 2.1 MB; the plugin boots 
 | Language | TypeScript, strict mode (100% of the source) |
 | Platform | Obsidian Plugin API (Electron/Node.js) |
 | Bundler | esbuild (single `main.js`, ~2.1 MB) |
-| Tests | AVA (4464 unit tests) + an offline harness that boots the real plugin in Node |
+| Tests | AVA (4475 unit tests) + an offline harness that boots the real plugin in Node |
 | AI Protocol | MCP (Model Context Protocol) |
 | Design | Crystal Soul v2 (SVG + CSS variables, 62 colors) |
 | Embeddings | Ollama + snowflake-arctic-embed2 (local, 1024 dims) |
