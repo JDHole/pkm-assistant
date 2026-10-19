@@ -140,13 +140,16 @@ function printNextSteps(version, pluginNotesPath) {
     // na Windows, a `git add` woli forward slash niezależnie od platformy, na której się go wklei).
     const notesPath = path.relative(ROOT, pluginNotesPath).split(path.sep).join('/');
     say('');
-    say('[release] gotowe. Recznie, w tej kolejnosci:');
+    say('[release] gotowe. Recznie, w tej kolejnosci (RELEASE_PROCESS.md, Krok 3b i 6):');
+    say(`  Na galezi release/${version} (kandydat):`);
     say(`  1. git add releases/${version}.md ${notesPath}`);
-    say(`  2. git commit -m "docs(release): notatki ${version}"`);
-    say(`  3. git tag ${version}          (BEZ litery "v" — musi byc rowny manifest.json.version)`);
-    say('  4. git push origin main && git push origin ' + version);
-    say('  5. Patrz zakladke Actions → workflow „Release" (bramki, build, atestacja, publikacja)');
-    say(`  6. Po zielonym biegu: strona wydania ${version} ma DOKLADNIE 3 assety`);
+    say(`  2. git commit -m "docs(release): notatki ${version}"  - ten commit buduje kandydata do smoke`);
+    say('  Na main po merge (ten sam skrypt odtwarza notatki bajt w bajt):');
+    say('  3. git status --short releases/   - ma byc pusty; zmiany = nowy kandydat, nie commit na main');
+    say(`  4. git tag ${version}          (BEZ litery "v" — musi byc rowny manifest.json.version)`);
+    say('  5. git push origin main && git push origin ' + version);
+    say('  6. Patrz zakladke Actions → workflow „Release" (bramki, build, atestacja, publikacja)');
+    say(`  7. Po zielonym biegu: strona wydania ${version} ma DOKLADNIE 3 assety`);
     say('     (main.js, manifest.json, styles.css) + atestacje provenance');
 }
 
