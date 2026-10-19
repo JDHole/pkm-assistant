@@ -1,39 +1,35 @@
-# PKM Assistant 2.3.1
+# PKM Assistant 2.3.2
 
-**Honest failures and tighter keys** - PKM Assistant 2.3.1
+**Reads to the end, turns that never hang** - PKM Assistant 2.3.2
 
-**In plain words.** This release fixes ten things found by two audits of the plugin after 2.3.0.
-Seven are about the chat telling you the truth when something goes wrong: a failed summary no
-longer says "summarized", a file that is too big or of an unsupported type now shows a notice
-instead of silently not attaching, a failed copy to the clipboard says so, the session save
-window shows a human sentence instead of a raw error, and three small leaks are closed (the `/`
-popup, the `@` suggestions and the note opener no longer outlive a closed chat tab). Three are
-about safety: an API key echoed back by a model provider in an error message is now redacted
-before that text can reach any model or session file, a tool call whose agent was deleted
-mid-turn is refused instead of silently running as the active agent, and the `.gitignore`
-protection for your settings file compares whole lines, so an existing `settings.json.example`
-entry no longer fools it. Nothing changes in how you use the plugin.
+**In plain words.** Agents can now read a long note or file all the way to the end instead of
+stopping after the first part, and they can search code and data files for exact text. When a
+model goes quiet, runs out of tool rounds or fails to write its summary, the turn now ends within
+seconds with an honest note of what was done, instead of waiting for many minutes and then
+showing nothing. Sub-agents working in the background no longer interfere with your chat: stopping
+one sub-agent no longer cuts off the chat or another sub-agent, and a sub-agent that finished
+correctly is no longer shown in error red. Nothing changes in how you set up or use the plugin.
 
 What changed, in detail:
 
-- **Summaries.** When the model fails to produce a summary, manual compression and the token
-  viewer presets report the failure instead of success; the conversation is left as it was after
-  the cheap trimming phase.
-- **Attachments.** Too many files, an image over 10 MB, a text file over 100 KB or an unsupported
-  type each produce a notice with the reason. Processing continues with the remaining files.
-- **Selection menu.** A refused clipboard write shows an error notice. Copy still clears the
-  selection immediately.
-- **Session save.** The analysis failure message is one of three sentences (interrupted, model did
-  not respond in time, other error); the raw error stays in the log.
-- **Chat lifecycle.** Closing a tab or re-rendering the view closes the `/` trigger popup and its
-  pending timer, destroys the previous `@` autocomplete before creating a new one, and the note
-  opener registry keeps only a reference to the app, not to the view.
-- **API keys in error messages.** Provider error bodies and stream error events (OpenAI-compatible,
-  Anthropic, Gemini) are masked by pattern and redacted by the exact key used in the request,
-  including URL-encoded and `Bearer` forms, before the text becomes a normalized error.
-- **Agent identity for tools.** A tool call that names an agent which no longer exists is refused
-  with a clear permission error; a call with no agent at all is refused too. Approval windows are
-  signed with the name of the agent whose permissions were checked.
-- **`.gitignore` entries.** The vault `.gitignore` is matched line by line and the entries are
-  written one after another, with a warning for any entry that fails; a vault without
-  `.gitignore` is left alone.
+- **Reading long files.** `read` returns long documents page by page with the position of the next
+  page, and the agent continues from there; the page is tied to the exact version of the file, so a
+  file that changed in the meantime is read again from the start. Sub-agents read the same way.
+- **Literal text search.** `search` with `mode: "text"` scans `.js`, `.json` and `.md` files in a
+  folder (with a pattern) or one exact file, checks access for every file and says whether the scan
+  was complete, partial or stopped. Files the agent may read are no longer refused by mistake.
+- **Turns that end honestly.** Silence from the model, the tool-round limit, an exhausted summary
+  budget or Stop end the turn with a partial result: which tools ran, what they returned and why the
+  turn stopped (both causes when the tool rounds ran out and then the summary budget did too). A
+  tool result whose effect is uncertain ends the turn instead of repeating the action.
+- **Readable partial results.** The "tool responses are recorded below" line appears only when there
+  are tool results; JSON results are shown with line breaks and a visible clipping mark.
+- **Background sub-agents.** A sub-agent whose role has no model of its own gets its own instance of
+  the main model instead of borrowing the chat's, so Stop or a timeout of one sub-agent stops only
+  that sub-agent. A successful background sub-agent tile uses the success colour.
+- **Memory.** A summary or consolidation stream that goes silent is reported as stalled, never as a
+  success.
+- **Cleanups.** Two settings fields that never did anything (`preferred_tools`, `permissions.mcp`)
+  are gone; older agent profiles that still contain them load as before.
+- **Releases.** Every release is checked against a fixed version of the test harness, and a
+  published release can no longer have its files replaced: a fix always ships as a new version.

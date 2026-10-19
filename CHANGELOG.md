@@ -5,6 +5,32 @@ All notable user-facing changes to PKM Assistant are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## 2.3.2 - 2026-10-19
+
+Reads to the end, turns that never hang: agents read long files completely and search code and
+data files for exact text, and a stalled or interrupted turn ends within seconds with an honest
+partial result.
+
+### Added
+
+- `read` returns long documents page by page (`next_offset`, `has_more`), tied to the file version, so the agent can continue to the end; sub-agents read the same way.
+- `search` with `mode: "text"` scans `.js`, `.json` and `.md` files in a folder with a pattern or one exact file, checks access per file and reports a complete, partial or stopped scan.
+- A turn stopped by model silence, the tool-round limit, the summary budget or Stop ends with a partial result naming the tools that ran, their results and the reason; a tool result with an uncertain effect ends the turn instead of repeating the action.
+
+### Changed
+
+- The partial result shows the tool-response note only when there are tool results, names both causes when the tool rounds and then the summary budget ran out, and shows JSON results with line breaks and a clipping mark.
+- A successful background sub-agent tile uses the success colour instead of error red.
+- The stream end diagnostic logs a natural end as completed, a Stop or supersession as aborted and a transport failure as error.
+- Releases are checked against a pinned harness commit, and a published release's files can no longer be replaced.
+
+### Fixed
+
+- A sub-agent whose role has no model of its own gets its own instance of the main model, so Stop or a timeout of one sub-agent no longer stops the chat or another sub-agent.
+- A memory summary or consolidation stream that goes silent is reported as stalled, never as a success.
+- Files the agent may read are no longer refused by the literal text search.
+- Removed the `preferred_tools` and `permissions.mcp` settings fields, which never had an effect; older agent profiles that contain them still load.
+
 ## 2.3.1 - 2026-09-25
 
 Honest failures and tighter keys: the chat reports what failed instead of claiming success, and
