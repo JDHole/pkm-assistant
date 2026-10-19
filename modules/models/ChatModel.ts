@@ -995,6 +995,7 @@ export class ChatModel {
         owner.controller = controller;
 
         let decided = false;
+        let streamEnd: TurnEnd | null = null;
         let settleEnd!: (end: TurnEnd) => void;
         const ended = new Promise<TurnEnd>(resolve => { settleEnd = resolve; });
         const decide = (end: TurnEnd): void => {
@@ -1005,7 +1006,7 @@ export class ChatModel {
 
         const sink: StreamSink = {
             onActivity: activity => {
-                if (owner.settled || owner.cancelled) return;
+                if ((owner.settled || owner.cancelled) && activity.kind !== 'end') return;
                 if (activity.kind === 'chunk') {
                     owner.counts.transportChunks += 1;
                     owner.counts.transportBytes += activity.byteLength;
@@ -1014,12 +1015,20 @@ export class ChatModel {
                 } else {
                     owner.status = activity.status;
                     owner.transportOutcome = activity.outcome;
+                    let outcome: 'completed' | 'aborted' | 'error';
+                    if (owner.cancelled && owner.terminalActivity !== 'completed') outcome = 'aborted';
+                    else if (streamEnd?.kind === 'done') outcome = 'completed';
+                    else if (streamEnd?.kind === 'error') outcome = 'error';
+                    else if (activity.outcome === 'aborted') outcome = 'aborted';
+                    // Transport reports `complete` even when reading an HTTP error body fails.
+                    else if (activity.outcome === 'error' || activity.outcome === 'timeout' || activity.status !== 200) outcome = 'error';
+                    else outcome = 'completed';
                     log.debug(LOG_SCOPE, 'stream.transport_end', {
                         requestId: owner.requestId,
                         attempt: owner.attempt,
                         provider: this.providerId,
                         status: activity.status,
-                        outcome: activity.outcome,
+                        outcome,
                         chunkCount: activity.chunkCount,
                         byteCount: activity.byteCount,
                         elapsedMs: activity.elapsedMs,
@@ -1063,6 +1072,7 @@ export class ChatModel {
                     if (owner.settled || owner.cancelled) return;
                 }
                 if (end) {
+                    streamEnd = end;
                     decide(end);
                     try { controller.abort(); } catch { /* terminal reader cleanup is best effort */ }
                 }

@@ -12,6 +12,78 @@ import type { ChatRequest, ChatProviderInfo, ModelStreamActivity } from './contr
 
 const REQ: ChatRequest = { messages: [{ role: 'user', content: 'PROMPT_SENTINEL_U1' }] };
 
+test.serial('stream.transport_end outcome distinguishes natural completion, Stop, and transport error', async t => {
+    gateTest.reset();
+    const sockets = new Set<import('node:net').Socket>();
+    const requestIds = new Map<string, string>();
+    const diagnostics: unknown[][] = [];
+    const logger = log as unknown as { debug: (...args: unknown[]) => void };
+    const oldDebug = logger.debug;
+    logger.debug = (...args) => { diagnostics.push(args); };
+    const server = createServer((req, res) => {
+        sockets.add(req.socket);
+        const path = req.url ?? '';
+        requestIds.set(path, String(req.headers['x-pkm-request-id'] ?? ''));
+        if (path === '/stop') {
+            res.writeHead(200, { 'content-type': 'text/event-stream' });
+            res.flushHeaders();
+            return;
+        }
+        if (path === '/error') {
+            req.socket.destroy();
+            return;
+        }
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.end('data: {"choices":[{"delta":{"content":"done"}}]}\n\ndata: [DONE]\n\n');
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address() as AddressInfo;
+    const makeModelFor = (route: string) => new ChatModel({
+        provider: new LocalOpenAiProvider(),
+        ctx: makeCtx({ modelId: 'fixture', endpoint: `http://127.0.0.1:${address.port}${route}` }),
+        http: new CapturingHttpClient(),
+        transport: new FetchStreamTransport(),
+        gate: { acquireSlot },
+        settings: makeSettings({ chat: { platform: 'lm_studio' }, limits: { local_platform_max_concurrent: 1 } }),
+    });
+    const transportEnds = () => diagnostics.flatMap(args => {
+        if (args[1] !== 'stream.transport_end' || typeof args[2] !== 'object' || args[2] === null) return [];
+        return [args[2] as { requestId?: string; outcome?: string }];
+    });
+    try {
+        const completed = makeModelFor('/complete');
+        await completed.stream(REQ);
+        const completedRequestId = requestIds.get('/complete');
+        t.truthy(completedRequestId);
+        t.is(transportEnds().find(entry => entry.requestId === completedRequestId)?.outcome, 'completed');
+
+        const stopping = makeModelFor('/stop');
+        const stopped = stopping.stream(REQ).then(() => null, error => error as Error);
+        const stopRequestId = await new Promise<string>(resolve => {
+            const interval = setInterval(() => {
+                const requestId = requestIds.get('/stop');
+                if (requestId) {
+                    clearInterval(interval);
+                    resolve(requestId);
+                }
+            }, 1);
+        });
+        stopping.stopStream();
+        await stopped;
+        t.is(transportEnds().find(entry => entry.requestId === stopRequestId)?.outcome, 'aborted');
+
+        const errored = makeModelFor('/error');
+        await errored.stream(REQ).then(() => t.fail('transport error should reject'), () => undefined);
+        const errorRequestId = requestIds.get('/error');
+        t.truthy(errorRequestId);
+        t.is(transportEnds().find(entry => entry.requestId === errorRequestId)?.outcome, 'error');
+    } finally {
+        for (const socket of sockets) socket.destroy();
+        await new Promise<void>(resolve => server.close(() => resolve()));
+        logger.debug = oldDebug;
+    }
+});
+
 class LocalOpenAiProvider extends OpenAiProvider {
     override get info(): ChatProviderInfo {
         return { ...super.info, id: 'lm_studio', label: 'Local OpenAI compatible', local: true };
