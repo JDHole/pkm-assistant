@@ -17,7 +17,7 @@
  *
  * CONTRACT: workflows parse the shape these produce, and the shape MUST be identical in both
  * languages. Nietykalne w tłumaczeniu (to ADRESY, nie proza):
- *  - klucze JSON (`brain_updates`, `new_notes`, `na_teraz.user/environment.add/remove`,
+ *  - klucze JSON (`new_notes`, `na_teraz.user/environment.add/remove`,
  *    `merges`, `deletions`, `sources`, `target_*`, `merged_content`, `lessons_extracted`),
  *  - wartości `type` (`user` / `agent_rule` / `skill_hint` / `project_context` / `reference`),
  *  - token `{{LEVEL}}`,
@@ -73,7 +73,6 @@ SEKCJE „NA TERAZ" (pamięć krótkotrwała na początku brain.md):
 
 WYMAGANY OUTPUT (czysty JSON, bez markdown code-fence):
 {
-  "brain_updates": [],
   "new_notes": [
     {
       "name": "memory_v3_index_rework",
@@ -91,7 +90,6 @@ WYMAGANY OUTPUT (czysty JSON, bez markdown code-fence):
 }
 
 Pola wymagane:
-- ZAWSZE zwracaj "brain_updates": [].
 - new_notes[].type ∈ { "user", "agent_rule", "skill_hint", "project_context", "reference" }.
 - new_notes[].description ma być jedną, konkretną linią do indeksu brain.md.
 - "na_teraz" jest opcjonalne — pomiń albo zwróć puste tablice, jeśli stan bieżący się nie zmienił.
@@ -103,7 +101,7 @@ ZASADY DECYZYJNE:
 - Instrukcja jak coś robić / workflow / lesson learned → type "skill_hint".
 - Aktywny lub trwały kontekst projektu → type "project_context".
 - Cytat, źródło, luźna referencja → type "reference".
-- Jeśli brak materiału do zmian → zwróć { "brain_updates": [], "new_notes": [] }.
+- Jeśli brak materiału do zmian → zwróć { "new_notes": [] }.
 - NIE wymyślaj. Bazuj WYŁĄCZNIE na treści transcriptu i bieżącym brain.md.`;
 
 const SAVE_SESSION_EN = `You are analysing a conversation transcript and the agent's current brain.md. Your task: propose new/important notes for brain/*.md. brain.md NO LONGER stores facts — the workflow rebuilds it automatically as a categorised index of links to files.
@@ -129,7 +127,6 @@ THE "NA TERAZ" SECTIONS (short-term memory at the top of brain.md):
 
 REQUIRED OUTPUT (pure JSON, no markdown code fence):
 {
-  "brain_updates": [],
   "new_notes": [
     {
       "name": "memory_v3_index_rework",
@@ -147,7 +144,6 @@ REQUIRED OUTPUT (pure JSON, no markdown code fence):
 }
 
 Required fields:
-- ALWAYS return "brain_updates": [].
 - new_notes[].type ∈ { "user", "agent_rule", "skill_hint", "project_context", "reference" }.
 - new_notes[].description must be one concrete line for the brain.md index.
 - "na_teraz" is optional — omit it or return empty arrays if the current state has not changed.
@@ -159,7 +155,7 @@ DECISION RULES:
 - An instruction how to do something / a workflow / a lesson learned → type "skill_hint".
 - Active or durable project context → type "project_context".
 - A quote, a source, a loose reference → type "reference".
-- If there is no material for changes → return { "brain_updates": [], "new_notes": [] }.
+- If there is no material for changes → return { "new_notes": [] }.
 - Do NOT make things up. Base this SOLELY on the transcript and the current brain.md.`;
 
 const ARCHIVE_PL = `Analizujesz listę WSZYSTKICH notatek w brain/ aktualnego agenta. Twoje zadanie: zaproponować scalenia (merges) podobnych notatek + ewentualne usunięcia stale notatek.

@@ -56,6 +56,15 @@ test('factoryWorkPrompt oddaje trzy żywe prompty w obu językach', t => {
     t.is(factoryWorkPrompt('archive', 'de'), factoryWorkPrompt('archive', 'en'));
 });
 
+test('save_session requests only fields consumed by the memory workflow', t => {
+    for (const locale of ['pl', 'en']) {
+        const prompt = factoryWorkPrompt('save_session', locale);
+        t.false(prompt.includes('brain_updates'));
+        t.true(prompt.includes('new_notes'));
+        t.true(prompt.includes('na_teraz'));
+    }
+});
+
 // ── kontrakt placeholderów: {{...}} identyczne w obu językach ──────────────
 //
 // Wołacz podstawia dane po nazwie tokenu (`ArchiveWorkflow._summaryFromFiles` robi
@@ -167,7 +176,7 @@ test('factoryWorkPromptRaw(archive|summary) jest identyczny z factoryWorkPrompt 
 test('kontrakt JSON jest ten sam w obu językach', t => {
     for (const locale of ['pl', 'en']) {
         const save = factoryWorkPrompt('save_session', locale);
-        for (const key of ['"brain_updates"', '"new_notes"', '"na_teraz"', 'how_to_apply']) {
+        for (const key of ['"new_notes"', '"na_teraz"', 'how_to_apply']) {
             t.true(save.includes(key), `save_session/${locale}: brak ${key}`);
         }
         const archive = factoryWorkPrompt('archive', locale);

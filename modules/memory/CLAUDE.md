@@ -678,7 +678,7 @@ Flow:
   override też wpisze te placeholdery, dostaje tę samą podmianę (idempotentne na tekście już
   podstawionym). W SAMYM PLIKU nagłówki oczywiście dalej zostają surowe w każdym języku
   interfejsu (okno review `/save session` pokazuje etykietę w języku UI -
-  `modules/chat/saveSessionSectionLabel.ts`). Klucze JSON (`brain_updates`, `new_notes`,
+  `modules/chat/saveSessionSectionLabel.ts`). Klucze JSON (`new_notes`,
   `na_teraz.*`, `merges`, `deletions`, `target_*`, `merged_content`, `lessons_extracted`),
   wartości `type` i token `{{LEVEL}}` NIE tłumaczą się, bez zmian. Nagłówki `##` W WYNIKU
   promptu `summary` (Kluczowe tematy / Key topics …) nikt nie parsuje - te SIĘ tłumaczą.
