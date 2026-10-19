@@ -47,7 +47,8 @@ komponent kafelka zamiast osobnej struktury DOM per typ bloku. DOM: `div.cs-tile
 `.cs-tile__body` (leniwie renderowane `.cs-tile__details` + `.cs-tile__actions`?). Pełny kształt
 `TileSpec`/`TileHandle` i klasy DOM - patrz JSDoc w `Tile.ts`, jest tam jedyne źródło prawdy.
 
-- **Kolor przez rolę** (`TileRole`): `system`/`error` → czerwony (`--color-red`), `user` →
+- **Kolor przez rolę i status** (`TileRole`/`TileStatus`): `system` → czerwony (`--color-red`),
+  ale `system` ze statusem `ok` → zielony (`--color-green`); `error` → czerwony. `user` →
   kolor usera, `agent`/`agent-muted` → kolor agenta (`--cs-agent-color-rgb`, `agent-muted` ma
   wygaszoną (3%/12%) wersję tła/obwódki - to jest kolor "przymglony" dla list/wyszukiwań/odczytów
   z briefu właściciela). Jedna zmienna CSS `--cs-tile-color` przełącza cały kafelek.

@@ -81,7 +81,7 @@ test('synthesis total budget expires despite semantic chunks and beats synchrono
         callbacks: { partial: s => snapshots.push(s) },
     });
     t.is(result.stoppedBy, 'backstop');
-    t.deepEqual(result.stopReason, { kind: 'synthesis-budget', budgetMs: 35 });
+    t.deepEqual(result.stopReason, { kind: 'synthesis-budget', budgetMs: 35, after: 'iteration-limit' });
     t.is(result.partial?.synthesis, 'budget-expired');
     t.is(snapshots[0].toolOutcomes[0].resultPreview, 'folder completed response');
     t.is(stopped, 1);
@@ -103,7 +103,7 @@ test('synthesis queue admission cannot extend total budget; zero skips optional 
         }, store: store(), executeToolCall: () => 'queue result',
         limits: { maxIterations: 1, synthesisTimeoutMs: 25, perCallTimeoutMs: 100 },
     });
-    t.deepEqual(queued.stopReason, { kind: 'synthesis-budget', budgetMs: 25 });
+    t.deepEqual(queued.stopReason, { kind: 'synthesis-budget', budgetMs: 25, after: 'iteration-limit' });
     t.deepEqual([calls, stops], [2, 1]);
     calls = 0;
     const skipped = await runAgentLoop({

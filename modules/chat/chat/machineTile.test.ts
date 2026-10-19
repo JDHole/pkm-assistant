@@ -11,9 +11,14 @@
  * ratuje to atrapa z preloadu harnessu; własna atrapa `document` jest identyczna z `Tile.test.ts`.
  */
 import test from 'ava';
+import { readFileSync } from 'node:fs';
 import { renderMachineTile } from './machineTile.js';
+import { buildMachineView } from './machineMessage.js';
+import { buildSubTaskNotificationText } from './subTaskNotification.js';
+import { t as translate } from '../../../core/i18n/index.js';
 import { setNoteOpener } from '../../ui-components/index.js';
 import type { MachineView } from './machineMessage.js';
+import type { SubTask } from '../../sub-agents/index.js';
 
 type Listener = (ev: unknown) => void;
 
@@ -211,5 +216,50 @@ test.serial('renderMachineTile: kafelek ma klase .cs-tile--system i poprawny sta
         const tile = findByClass(container, 'cs-tile--system');
         t.truthy(tile);
         t.true(tile!.classList.contains('cs-tile--error'));
+    });
+});
+
+// Odczyt zwycięskiej deklaracji z rzeczywistego arkusza dla klas zwróconych przez renderer.
+// W teście Node nie ma silnika CSS, więc uwzględniamy kolejność i specyficzność prostych
+// selektorów klas, które ustawiają zmienną koloru kafelka.
+function tileColor(tile: FakeEl): string | null {
+    const css = readFileSync(new URL('../chat_view.css', import.meta.url), 'utf8');
+    let winner: { specificity: number; order: number; value: string } | null = null;
+    const rules = /([^{}]+)\{([^{}]*)\}/g;
+    for (const [order, match] of [...css.matchAll(rules)].entries()) {
+        const value = match[2].match(/(?:^|;)\s*--cs-tile-color:\s*([^;]+);/);
+        if (!value) continue;
+        for (const selector of match[1].split(',')) {
+            const simple = selector.trim();
+            if (!/^(?:\.[\w-]+)+$/.test(simple)) continue;
+            const classes = [...simple.matchAll(/\.([\w-]+)/g)].map(m => m[1]);
+            if (!classes.every(cls => tile.classList.contains(cls))) continue;
+            if (!winner || classes.length > winner.specificity || (classes.length === winner.specificity && order > winner.order)) {
+                winner = { specificity: classes.length, order, value: value[1].trim() };
+            }
+        }
+    }
+    return winner?.value ?? null;
+}
+
+test.serial('renderMachineTile: sukces subagenta nie jest czerwony, blad i przerwanie sa czerwone', async t => {
+    await withFakeDocument(async () => {
+        for (const status of ['done', 'error', 'aborted'] as const) {
+            const task = {
+                id: 'sub/pkm-explorer#1', name: 'pkm-explorer', agentName: 'Kuba', status,
+                createdAt: 1000, endedAt: 2000, steps: [], budget: {}, background: true,
+                result: status === 'done' ? { text: 'Dokument przeczytany.', toolsUsed: [], durationMs: 1000, usage: null } : undefined,
+                error: status === 'error' ? 'Blad odczytu' : undefined,
+            } as SubTask;
+            const content = buildSubTaskNotificationText(task);
+            const view = buildMachineView({ role: 'user', content, _subTaskNotification: true }, { t: translate });
+            t.truthy(view);
+            const container = makeFakeEl();
+            await renderMachineTile(container as unknown as HTMLElement, fakePlugin([], null), view!);
+            const tile = findByClass(container, 'cs-tile--system');
+            t.truthy(tile);
+            t.true(tile!.classList.contains(status === 'done' ? 'cs-tile--ok' : 'cs-tile--error'));
+            t.is(tileColor(tile!), status === 'done' ? 'var(--color-green)' : 'var(--color-red)', status);
+        }
     });
 });

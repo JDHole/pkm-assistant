@@ -1,5 +1,5 @@
 import test from 'ava';
-import { ArrayMessageStore, runAgentLoop } from './index.js';
+import { ArrayMessageStore, formatAgentLoopPartial, runAgentLoop } from './index.js';
 import type { AgentLoopPartialSnapshot, ModelResponse, RunAgentLoopOptions } from './index.js';
 
 type Handlers = Parameters<RunAgentLoopOptions['model']['stream']>[1];
@@ -255,10 +255,13 @@ test('snapshot masks known secrets before clipping, omits payloads and keeps ide
     });
     const snapshot = result.partial!;
     t.is(snapshot.toolOutcomes.length, 20);
-    t.deepEqual(snapshot.toolOutcomes.at(-1), {
-        invocation: 20, id: 'call_20', name: 'tool_19', outcome: 'returned', effect: 'unverified', resultPreview: '',
-    });
+    const lastOutcome = snapshot.toolOutcomes.at(-1)!;
+    t.deepEqual([lastOutcome.invocation, lastOutcome.id, lastOutcome.name, lastOutcome.outcome, lastOutcome.effect],
+        [20, 'call_20', 'tool_19', 'returned', 'unverified']);
+    t.regex(lastOutcome.resultPreview, /readable readable/);
+    t.true(lastOutcome.resultPreview.endsWith('…'));
     t.regex(snapshot.toolOutcomes[0].resultPreview, /readable readable/);
+    t.true(snapshot.toolOutcomes[0].resultPreview.endsWith('…'));
     t.is(snapshot.revision, 1, 'same skipped snapshot is idempotent');
     t.is(snapshots.length, 1);
     const visible = JSON.stringify(snapshot);
@@ -301,6 +304,56 @@ test('known literal secret crossing clipping boundary is redacted before clippin
     t.is(result.partial?.toolOutcomes[0].resultPreview, prefix + '[REDACTED]');
 });
 
+test('known multiline secret in JSON is redacted before serialization', async t => {
+    const secret = 'first line\nsecond line';
+    const result = await runAgentLoop({
+        model: { stream(_p, h) { h.done(toolResponse(['read'])); } },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        knownSecrets: [secret], executeToolCall: () => ({ content: secret }),
+        limits: { maxIterations: 1, synthesisTimeoutMs: 0 },
+    });
+
+    if (!result.partial) return t.fail('missing partial receipt');
+    t.is(result.toolCallDetails[0].resultPreview, '{"content":"[REDACTED]"}');
+    t.is(result.partial.toolOutcomes[0].resultPreview, '{"content":"[REDACTED]"}');
+    t.is(result.partial.text, 'Partial work\nReason: iteration limit. Final summary: skipped.\nTool responses are recorded below. Their effects have not been verified.\nwork started\n### read - returned response\n{\n  "content": "[REDACTED]"\n}');
+    t.is(result.finalText, result.partial.text);
+});
+
+test('known secret in a JSON key is absent from every public partial preview', async t => {
+    const secret = 'private-marker-123';
+    const result = await runAgentLoop({
+        model: { stream(_payload, handlers) { handlers.done(toolResponse(['read'])); } },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        knownSecrets: [secret], executeToolCall: () => ({ [secret]: 'visible value' }),
+        limits: { maxIterations: 1, synthesisTimeoutMs: 0 },
+    });
+
+    if (!result.partial) return t.fail('missing partial receipt');
+    t.is(result.toolCallDetails[0].resultPreview, '{"[REDACTED]":"visible value"}');
+    t.is(result.partial.toolOutcomes[0].resultPreview, '{"[REDACTED]":"visible value"}');
+    t.is(result.partial.text, 'Partial work\nReason: iteration limit. Final summary: skipped.\nTool responses are recorded below. Their effects have not been verified.\nwork started\n### read - returned response\n{\n  "[REDACTED]": "visible value"\n}');
+    t.is(result.finalText, result.partial.text);
+});
+
+test('known numeric secret in JSON is redacted in previews and final receipt', async t => {
+    const secret = '123456789';
+    const result = await runAgentLoop({
+        model: { stream(_payload, handlers) { handlers.done(toolResponse(['read'])); } },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        knownSecrets: [secret], executeToolCall: () => ({ count: 2, account: 123456789 }),
+        limits: { maxIterations: 1, synthesisTimeoutMs: 0 },
+    });
+
+    if (!result.partial) return t.fail('missing partial receipt');
+    const compact = '{"count":2,"account":"[REDACTED]"}';
+    t.is(result.toolCallDetails[0].resultPreview, compact);
+    t.is(result.partial.toolOutcomes[0].resultPreview, compact);
+    t.is(result.partial.text, 'Partial work\nReason: iteration limit. Final summary: skipped.\nTool responses are recorded below. Their effects have not been verified.\nwork started\n### read - returned response\n{\n  "count": 2,\n  "account": "[REDACTED]"\n}');
+    t.is(result.finalText, result.partial.text);
+    t.false(JSON.stringify(result).includes(secret));
+});
+
 test('native consumer supplies a structured silence cause without losing its stage', async t => {
     const controller = new AbortController(); let stops = 0;
     const running = runAgentLoop({
@@ -312,4 +365,110 @@ test('native consumer supplies a structured silence cause without losing its sta
     const result = await running;
     t.deepEqual(result.stopReason, { kind: 'silence', stage: 'work' });
     t.is(stops, 1);
+});
+
+test('Stop without tool calls has no empty tool receipt', async t => {
+    const controller = new AbortController();
+    const entered = deferred<void>();
+    const running = runAgentLoop({
+        model: { stream() { entered.resolve(); } },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        executeToolCall: () => 'unused',
+        abortSignal: controller.signal,
+    });
+    await entered.promise;
+    controller.abort();
+    const result = await running;
+    t.is(result.partial?.text, 'Partial work\nReason: manual Stop. Final summary: skipped.');
+});
+
+test('iteration limit followed by synthesis budget reports both causes', async t => {
+    let calls = 0;
+    const result = await runAgentLoop({
+        model: { stream(_payload, handlers) {
+            if (++calls === 1) handlers.done(toolResponse(['read']));
+        } },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        executeToolCall: () => 'found Notes/one.md',
+        limits: { maxIterations: 1, synthesisTimeoutMs: 15 },
+    });
+    t.deepEqual(result.stopReason, { kind: 'synthesis-budget', budgetMs: 15, after: 'iteration-limit' });
+    t.is(result.finalText, 'Partial work\nReason: iteration limit, then summary time budget. Final summary: time budget expired.\nTool responses are recorded below. Their effects have not been verified.\nwork started\n### read - returned response\nfound Notes/one.md');
+});
+
+test('JSON tool result keeps compact previews while partial receipt is readable', async t => {
+    const compact = '{"success":true,"provider":"search","mode_used":"semantic","content":"first line\\nsecond line"}';
+    const result = await runAgentLoop({
+        model: { stream(_payload, handlers) { handlers.done(toolResponse(['search'])); } },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        executeToolCall: () => compact,
+        limits: { maxIterations: 1, synthesisTimeoutMs: 0 },
+    });
+
+    if (!result.partial) return t.fail('missing partial receipt');
+    t.is(result.toolCallDetails[0].resultPreview, compact);
+    t.is(result.partial.toolOutcomes[0].resultPreview, compact);
+    t.is(result.partial.text, 'Partial work\nReason: iteration limit. Final summary: skipped.\nTool responses are recorded below. Their effects have not been verified.\nwork started\n### search - returned response\n{\n  "success": true,\n  "provider": "search",\n  "mode_used": "semantic",\n  "content": "first line\nsecond line"\n}');
+});
+
+test('JSON tool receipt keeps fields and shows real line breaks', async t => {
+    const result = await runAgentLoop({
+        model: { stream(_payload, handlers) { handlers.done(toolResponse(['read'])); } },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        executeToolCall: () => JSON.stringify({ success: true, scope: 'vault', content: 'first line\nsecond line', literal: 'backslash\\ntext' }),
+        limits: { maxIterations: 1, synthesisTimeoutMs: 0 },
+    });
+    t.is(result.finalText, 'Partial work\nReason: iteration limit. Final summary: skipped.\nTool responses are recorded below. Their effects have not been verified.\nwork started\n### read - returned response\n{\n  "success": true,\n  "scope": "vault",\n  "content": "first line\nsecond line",\n  "literal": "backslash\\\\ntext"\n}');
+});
+
+test('four long JSON results retain every tool status in the partial text', async t => {
+    const names = ['first', 'second', 'third', 'fourth'];
+    const result = await runAgentLoop({
+        model: { stream(_payload, handlers) { handlers.done(toolResponse(names)); } },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        executeToolCall: tc => JSON.stringify({ success: true, scope: 'vault', content: tc.name + '\n' + 'long line '.repeat(500) }),
+        limits: { maxIterations: 1, synthesisTimeoutMs: 0 },
+    });
+    t.deepEqual(result.partial?.toolOutcomes.map(o => o.name + ': ' + o.outcome), [
+        'first: returned', 'second: returned', 'third: returned', 'fourth: returned',
+    ]);
+    t.deepEqual(result.finalText.match(/^### .* - returned response$/gm), [
+        '### first - returned response', '### second - returned response',
+        '### third - returned response', '### fourth - returned response',
+    ]);
+    t.true(result.finalText.includes('"content": "fourth\n'));
+    t.true(result.partial?.toolOutcomes.every(outcome => outcome.resultPreview.endsWith('…')));
+});
+
+test('nested JSON formatting keeps all tool statuses within the receipt budget', async t => {
+    const names = ['first', 'second', 'third', 'fourth'];
+    const result = await runAgentLoop({
+        model: { stream(_payload, handlers) { handlers.done(toolResponse(names)); } },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        executeToolCall: () => ({ a: { b: { c: { d: { e: { f: Array(200).fill(0) } } } } } }),
+        limits: { maxIterations: 1, synthesisTimeoutMs: 0 },
+    });
+
+    if (!result.partial) return t.fail('missing partial receipt');
+    const headings = names.map(name => `### ${name} - returned response`);
+    t.deepEqual(result.partial.text.match(/^### .* - returned response$/gm), headings);
+    t.deepEqual(result.finalText.match(/^### .* - returned response$/gm), headings);
+    t.true(result.partial.text.length <= 12000);
+    t.is(result.finalText, result.partial.text);
+});
+
+test('final partial text clipping is visibly marked', async t => {
+    const result = await runAgentLoop({
+        model: { stream(_payload, handlers) { handlers.done(toolResponse(['read'])); } },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        executeToolCall: () => 'saved', limits: { maxIterations: 1, synthesisTimeoutMs: 0 },
+    });
+    if (!result.partial) return t.fail('missing partial receipt');
+    const text = formatAgentLoopPartial({
+        ...result.partial,
+        toolOutcomes: [{ ...result.partial.toolOutcomes[0], resultPreview: 'long line '.repeat(2000) }],
+    });
+    t.is(text.length, 12000);
+    t.true(text.endsWith('…'));
+    t.true(text.includes('### read - returned response'));
 });

@@ -38,13 +38,15 @@ export class ChatTurnPartialState {
         if (snapshot.revision <= (this.latest?.revision ?? 0)) return;
         snapshot = JSON.parse(maskSensitiveData(JSON.stringify(snapshot)).replace(/\b(https?:\/\/)[^\s/@"\\]+@/gi, '$1[REDACTED]@')) as AgentLoopPartialSnapshot;
         this.latest = snapshot;
-        const content = maskSensitiveData(t('chat.streaming.partial_header') + '\n\n' + snapshot.text).slice(0, 12000);
+        const fullContent = maskSensitiveData(t('chat.streaming.partial_header') + '\n\n' + snapshot.text);
+        const content = fullContent.length > 12000 ? fullContent.slice(0, 11999) + '…' : fullContent;
         if (!this.receipt) {
             this.receipt = { role: 'system', content, _loopPartial: true };
             // No awaited addMessage/compression/model request in a partial observer.
             this.owner.rw.messages.push(this.receipt);
         }
-        Object.assign(this.receipt, { content, _loopPartialRevision: snapshot.revision, _loopPartialSynthesis: snapshot.synthesis });
+        Object.assign(this.receipt, { content, _loopPartialRevision: snapshot.revision, _loopPartialSynthesis: snapshot.synthesis,
+            _loopPartialHasToolResults: snapshot.toolOutcomes.some(outcome => outcome.resultPreview.length > 0) });
         this.owner.onChange?.(this.receipt);
         const event: ActiveSessionEventInput = {
             type: 'agent_loop_partial', role: 'system', agentName: this.agentName, content,
