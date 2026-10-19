@@ -1159,6 +1159,7 @@
   border: 1px solid color-mix(in srgb, var(--cs-tile-color) 20%, transparent); }
 .cs-tile::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--cs-tile-color); border-radius: 3px 0 0 3px; opacity: 0.6; }
 .cs-tile--system { --cs-tile-color: var(--color-red); }
+.cs-tile--system.cs-tile--ok { --cs-tile-color: var(--color-green); }
 .cs-tile--user { --cs-tile-color: var(--cs-user-color, var(--interactive-accent)); }
 .cs-tile--agent-muted { background: color-mix(in srgb, var(--cs-tile-color) 3%, transparent); border-color: color-mix(in srgb, var(--cs-tile-color) 12%, transparent); }
 .cs-tile--agent-muted::before { opacity: 0.35; }
