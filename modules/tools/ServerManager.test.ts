@@ -1,6 +1,7 @@
 import test from 'ava';
 import { ServerManager } from './ServerManager.js';
 import { ToolRegistry } from './ToolRegistry.js';
+import { Agent } from '../agents/Agent.js';
 import type { LoadedServerConfig } from './ServerLoader.js';
 
 function makeTool(name: string) {
@@ -97,7 +98,6 @@ test('connectBuiltInServersForAgent auto-connects whitelist built-ins plus core'
     const result = manager.connectBuiltInServersForAgent({
         name: 'Jaskier',
         mcp_servers: ['web'],
-        permissions: { mcp: true },
     });
 
     t.deepEqual(result.errors, []);
@@ -105,16 +105,34 @@ test('connectBuiltInServersForAgent auto-connects whitelist built-ins plus core'
     t.deepEqual(manager.getActiveServerNames().sort(), ['core', 'web']);
 });
 
-test('getAllowedServerNamesForAgent respects wildcard and disabled MCP', t => {
+test('getAllowedServerNamesForAgent respects wildcard and server list despite legacy MCP flag', t => {
     const { manager } = makeManager();
     seedBuiltinServers(manager);
+    manager.serverLoader.cache.set('vault', {
+        name: 'vault',
+        source: 'built-in',
+        removable: false,
+        description: 'Vault',
+        icon: 'folder',
+        tools: ['read'],
+        paths: [],
+        knowledge: '',
+    } as unknown as LoadedServerConfig);
 
     t.deepEqual(
-        manager.getAllowedServerNamesForAgent({ name: 'Jaskier', mcp_servers: ['*'], permissions: { mcp: true } }).sort(),
-        ['core', 'web']
+        manager.getAllowedServerNamesForAgent({ name: 'Jaskier', mcp_servers: ['*'] }).sort(),
+        ['core', 'vault', 'web']
     );
-    t.deepEqual(
-        manager.getAllowedServerNamesForAgent({ name: 'Quiet', mcp_servers: ['web'], permissions: { mcp: false } }),
-        ['core']
-    );
+    const profile = { name: 'Quiet', mcp_servers: ['web'], disabled_tools: [] };
+    t.deepEqual(manager.getAllowedServerNamesForAgent(profile), ['core', 'web']);
+
+    // Dawny kształt wejścia publicznego API nadal ma respektować mcp_servers.
+    const legacyVisibility = { ...profile, permissions: { mcp: false } };
+    t.deepEqual(manager.getAllowedServerNamesForAgent(legacyVisibility), ['core', 'web']);
+
+    // Agent z YAML-a usuwa wycofany klucz podczas normalizacji.
+    const agent = new Agent({ ...profile, default_permissions: { mcp: false } });
+    const baseline = new Agent(profile);
+    t.deepEqual(manager.getAllowedServerNamesForAgent(agent), ['core', 'web']);
+    t.deepEqual(manager.getAllowedServerNamesForAgent(agent), manager.getAllowedServerNamesForAgent(baseline));
 });
