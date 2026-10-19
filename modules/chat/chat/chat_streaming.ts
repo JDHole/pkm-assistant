@@ -165,6 +165,7 @@ interface ChatTurn {
     platform: string;
     autonomy: AutonomyMode | undefined;
     hasUsedDelegate: boolean;
+    delegateNudgeAdded?: boolean;
     skillActiveAt: number | null;
     skillArtifactCreated: boolean;
     cacheTelemetryEnabled: boolean;
@@ -1607,12 +1608,13 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
     const hasDelegates = (turn.agent?.getActiveDelegates?.()?.length as number) > 0;
 
     // Delegation nudge - agent has delegates, must delegate
-    if (hasDelegates && !turn.hasUsedDelegate && iterCount >= 2) {
+    if (hasDelegates && !turn.hasUsedDelegate && !turn.delegateNudgeAdded && iterCount >= 2) {
         const nudgeLevel = iterCount >= 4 ? 'strong' : 'soft';
         const nudgeMsg = nudgeLevel === 'strong'
             ? t('chat.streaming.delegation_nudge_strong', { count: iterCount })
             : t('chat.streaming.delegation_nudge_soft', { count: iterCount });
         await rw.addMessage('user', nudgeMsg);
+        turn.delegateNudgeAdded = true;
         log.info('Chat', `Delegation nudge (${nudgeLevel}) po ${iterCount} iteracjach`);
     }
 

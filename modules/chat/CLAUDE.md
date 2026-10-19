@@ -501,6 +501,10 @@ BEZ narzędzi (`tools: undefined`) - model nie ma jak wywołać narzędzia, wię
 tekstem i tura kończy się czysto (backstop jest twardy, nie tylko tekstową sugestią "przestań
 wołać narzędzia").
 
+Przypomnienie o delegacji jest wiadomością user dodawaną najwyżej raz na turę: od drugiej
+iteracji, jeśli agent ma dostępne delegaty i jeszcze żadnego nie użył. Rola wiadomości pozostaje
+`user`.
+
 Mechanika iteracji, backstop, sanityzacja transkryptu i obcinanie wyników narzędzi żyją w
 `modules/agent-loop` (`runAgentLoop`) - `chat_streaming.ts` jest TWARZĄ tury: przygotowanie
 (`send_message`), rendering (`handle_chunk`), placeholdery/UI narzędzi (hooki) i finalizacja
