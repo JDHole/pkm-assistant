@@ -132,6 +132,30 @@ test('memory_save creates a new brain note and refreshes brain.md index', async 
     t.true(files[brainPath].includes('Jan wants direct, concrete feedback'));
 });
 
+test('memory_save ephemeral accepts only shared fields while durable mode validates its required fields', async t => {
+    const brainPath = '.pkm-assistant/agents/jaskier/memory/brain.md';
+    const { vault, files } = makeVault({ [brainPath]: brain() });
+    const memory = new AgentMemory(vault, 'Jaskier');
+    const tool = createMemorySaveTool();
+
+    t.deepEqual(tool.inputSchema.required, [], 'no schema-required fields are exclusive to durable notes');
+
+    const ephemeral = await tool.execute({ ephemeral: true, content: 'Testing a current task' }, null, makePlugin(memory)) as MemRes;
+    t.true(ephemeral.success);
+    t.true(ephemeral.ephemeral);
+    t.true(files[brainPath].includes('Testing a current task'));
+
+    const durableMissingFields = await tool.execute({ content: 'Incomplete durable note' }, null, makePlugin(memory)) as MemRes;
+    t.false(durableMissingFields.success);
+    t.is(durableMissingFields.code, 'validation_error');
+    t.truthy(durableMissingFields.error);
+    t.is(Object.keys(files).filter(path => path.includes('/memory/brain/')).length, 0);
+
+    const durable = await tool.execute(noteArgs(), null, makePlugin(memory)) as MemRes;
+    t.true(durable.success);
+    t.true(Object.prototype.hasOwnProperty.call(files, durable.path || ''));
+});
+
 test('memory_save refuses to overwrite an existing brain note', async t => {
     const notePath = '.pkm-assistant/agents/jaskier/memory/brain/user_jan_direct_feedback.md';
     const { vault, files } = makeVault({
