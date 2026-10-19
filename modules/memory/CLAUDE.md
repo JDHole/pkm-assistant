@@ -592,6 +592,11 @@ Flow:
 
 ## Gotchas
 
+- ⚠️ **Zwis rozstrzyga strzał przed zatrzymaniem modelu.** `streamToComplete` odrzuca
+  obietnicę z kodem `stream_stalled` przed wywołaniem `stopStream()`, ponieważ adapter
+  może synchronicznie zgłosić `done` podczas zatrzymywania. Odwrócenie kolejności
+  zamieniłoby zwis w udaną propozycję i ominęło pojedyncze auto-ponowienie kroku.
+
 - ⚠️ **Jedno liczydło progów konsolidacji.** `resolveConsolidationThresholds`/
   `shouldTriggerConsolidation` (`consolidationStatus.ts`) to JEDYNE miejsce, które liczy próg
   sesji (`memoryV3SessionThreshold || archiveSessionThreshold || CONSOLIDATION_DEFAULTS.sessionThreshold`,

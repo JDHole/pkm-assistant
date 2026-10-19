@@ -127,7 +127,7 @@ function contentOf(response: StreamResponse | null | undefined): string {
  * Call a ChatModel in non-streaming mode.
  *
  * `options.onChunk` - wyjątki z callbacku są łykane. `options.watchdog` - po ciszy:
- * `onStall` (jeśli podany) → stop streamu → reject z `code: 'stream_stalled'`
+ * `onStall` (jeśli podany) → reject z `code: 'stream_stalled'` → stop streamu
  * i polem `silentMs`.
  *
  * @returns Response text + token usage
@@ -186,12 +186,14 @@ export function streamToComplete(
                     if (settled) return;
                     log.warn('StreamHelper', `Stream stalled — ${silentMs}ms bez chunka, przerywam`);
                     try { watchdogOpts.onStall?.(silentMs); } catch { /* callback UI nie może wywalić streamu */ }
-                    stopModelStream(chatModel);
                     settleErr(makeStreamError(
                         STREAM_ERROR_CODES.STALLED,
                         `Stream stalled: ${silentMs}ms without a chunk`,
                         { silentMs }
                     ));
+                    // stopStream() może synchronicznie wywołać done/error. Zwis musi
+                    // rozstrzygnąć strzał przed takim spóźnionym callbackiem adaptera.
+                    stopModelStream(chatModel);
                 },
             });
         }

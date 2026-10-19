@@ -114,13 +114,13 @@ function scriptedModel(script: Array<string | Error> = []): ScriptedModel {
             model.calls.push(req);
             if (action === 'SILENT') return;
             if (action instanceof Error) {
-                setTimeout(() => handlers.error(action), 0);
+                handlers.error(action);
                 return;
             }
-            setTimeout(() => handlers.done({
+            handlers.done({
                 choices: [{ message: { content: action } }],
                 usage: { prompt_tokens: 100, completion_tokens: 20 },
-            }), 0);
+            });
         },
     };
     return model;
@@ -136,6 +136,32 @@ function makeWorkflow(vault: MemoryVaultLike, options: Record<string, unknown> =
 }
 
 const l1FilesIn = (files: Record<string, string>): string[] => Object.keys(files).filter(p => p.includes('/summaries/L1/') && p.endsWith('.md'));
+
+/** Wymusza tick watchdoga bez czekania 20 ms; pozostałe timery działają normalnie. */
+async function withInstantStallTimer<T>(fn: () => Promise<T>): Promise<T> {
+    const originalSet = globalThis.setTimeout;
+    const originalClear = globalThis.clearTimeout;
+    const known = new Set<unknown>();
+    const active = new Set<unknown>();
+    globalThis.setTimeout = ((callback: () => void, ms?: number) => {
+        if (ms !== 20) return originalSet(callback, ms);
+        const handle = {};
+        known.add(handle);
+        active.add(handle);
+        queueMicrotask(() => { if (active.delete(handle)) callback(); });
+        return handle as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+    globalThis.clearTimeout = ((handle: ReturnType<typeof setTimeout>) => {
+        if (known.has(handle)) active.delete(handle);
+        else originalClear(handle);
+    }) as typeof clearTimeout;
+    try {
+        return await fn();
+    } finally {
+        globalThis.setTimeout = originalSet;
+        globalThis.clearTimeout = originalClear;
+    }
+}
 
 // ── pętla paczek: 60 sesji = 12 paczek w JEDNYM przebiegu ─────────────────────────
 
@@ -388,17 +414,30 @@ test('generateGatedSteps bez kroków bramkowanych jest bezpieczne', async t => {
 
 // ── zwis streamu: retry 1×, potem failed — reszta przebiegu leci dalej ────────────
 
-test('zwis → auto-ponów 1× → failed; kolejne paczki mielą się dalej', async t => {
+test.serial('gotowa odpowiedź modelu nie staje się zwisem po opóźnieniu kolejki timerów', async t => {
+    const { vault } = makeVault(archiveWith(5));
+    const model = scriptedModel(['Gotowe']);
+    const { workflow } = makeWorkflow(vault, { model });
+    const run = new ConsolidationRun({ counts: { archiveCount: 5, batchSize: 5 } });
+
+    await withInstantStallTimer(() => workflow.runWithRun(run, { stallTimeoutMs: 20 }));
+
+    t.is(run.getStep('l1_batch_1')!.status, STEP_STATUS.AWAITING_REVIEW);
+    t.is(run.getStep('l1_batch_1')!.result!.body, 'Gotowe');
+    t.is(model.calls.length, 1, 'gotowa odpowiedź nie wymaga ponowienia');
+});
+
+test.serial('zwis → auto-ponów 1× → failed; kolejne paczki mielą się dalej', async t => {
     const { vault } = makeVault(archiveWith(15));
     const model = scriptedModel(['SILENT', 'SILENT', 'Streszczenie 2', 'Streszczenie 3']);
     const { workflow } = makeWorkflow(vault, { model });
     const run = new ConsolidationRun({ counts: { archiveCount: 15, batchSize: 5 } });
     const stalls: Array<{ willRetry: boolean }> = [];
 
-    const outcome = await workflow.runWithRun(run, {
+    const outcome = await withInstantStallTimer(() => workflow.runWithRun(run, {
         stallTimeoutMs: 20,
         onStall: (info) => stalls.push(info),
-    });
+    }));
 
     t.is(run.getStep('l1_batch_1')!.status, STEP_STATUS.FAILED);
     t.is(run.getStep('l1_batch_1')!.error!.code, 'stream_stalled');
@@ -411,10 +450,39 @@ test('zwis → auto-ponów 1× → failed; kolejne paczki mielą się dalej', as
     t.is(run.getStep('l1_batch_3')!.status, STEP_STATUS.AWAITING_REVIEW);
     t.deepEqual(outcome.failed, ['l1_batch_1']);
     t.deepEqual(outcome.generated, ['l1_batch_2', 'l1_batch_3']);
+    t.is(model.calls.length, 4, 'dokładnie dwa strzały na padniętą paczkę i po jednym na kolejne');
     t.is(model.stopped, 2, 'każdy zwis przerywa stream');
 });
 
-test('„Ponów" padniętej paczki L1 trzyma ZAMROŻONE okno — nie kradnie sesji innej paczki', async t => {
+test.serial('zwis pozostaje błędem, gdy stopStream synchronicznie zgłasza done', async t => {
+    const { vault } = makeVault(archiveWith(5));
+    let handlers: StreamHandlers | null = null;
+    let calls = 0;
+    let stops = 0;
+    const model: StreamChatModelLike = {
+        stream(_req, nextHandlers) {
+            calls++;
+            handlers = nextHandlers;
+        },
+        stopStream() {
+            stops++;
+            handlers?.done({ choices: [{ message: { content: 'Odpowiedź po zatrzymaniu' } }] });
+        },
+    };
+    const { workflow } = makeWorkflow(vault, { model });
+    const run = new ConsolidationRun({ counts: { archiveCount: 5, batchSize: 5 } });
+
+    const outcome = await withInstantStallTimer(() => workflow.runWithRun(run, { stallTimeoutMs: 20 }));
+
+    t.is(run.getStep('l1_batch_1')!.status, STEP_STATUS.FAILED);
+    t.is(run.getStep('l1_batch_1')!.error!.code, 'stream_stalled');
+    t.is(run.getStep('l1_batch_1')!.retryCount, 1);
+    t.deepEqual(outcome.failed, ['l1_batch_1']);
+    t.is(calls, 2);
+    t.is(stops, 2);
+});
+
+test.serial('„Ponów" padniętej paczki L1 trzyma ZAMROŻONE okno — nie kradnie sesji innej paczki', async t => {
     // Lista niepokrytych sesji KURCZY SIĘ po zaakceptowaniu paczki (stemple covered_by_l1) -
     // retry liczący okno od nowa slice'em brałby wtedy sesje paczki 3: duplikat L1 na tych
     // samych źródłach + 5 sesji wypadałoby z przebiegu.
@@ -424,7 +492,7 @@ test('„Ponów" padniętej paczki L1 trzyma ZAMROŻONE okno — nie kradnie ses
     const { workflow } = makeWorkflow(vault, { model });
     const run = new ConsolidationRun({ counts: { archiveCount: 15, batchSize: 5 } });
 
-    await workflow.runWithRun(run, { stallTimeoutMs: 20 });
+    await withInstantStallTimer(() => workflow.runWithRun(run, { stallTimeoutMs: 20 }));
     t.is(run.getStep('l1_batch_2')!.status, STEP_STATUS.FAILED);
     t.deepEqual(run.getStep('l1_batch_2')!.meta.sessions, [
         'session_006.md', 'session_007.md', 'session_008.md', 'session_009.md', 'session_010.md'
@@ -434,7 +502,7 @@ test('„Ponów" padniętej paczki L1 trzyma ZAMROŻONE okno — nie kradnie ses
     await workflow.applyStepDecision(run, 'l1_batch_1', { accepted: true });
 
     // „Ponów" paczki 2: okno MUSI zostać 006-010 (a nie 011-015 z przesuniętego slice'a).
-    await workflow.retryStep(run, 'l1_batch_2', { stallTimeoutMs: 20 });
+    await withInstantStallTimer(() => workflow.retryStep(run, 'l1_batch_2', { stallTimeoutMs: 20 }));
 
     t.is(run.getStep('l1_batch_2')!.status, STEP_STATUS.AWAITING_REVIEW);
     t.deepEqual(run.getStep('l1_batch_2')!.result!.sessions, [
@@ -442,25 +510,25 @@ test('„Ponów" padniętej paczki L1 trzyma ZAMROŻONE okno — nie kradnie ses
     ]);
 });
 
-test('zamrożone okno: gdy sesja z okna zniknęła z dysku, retry pomija paczkę zamiast dobierać cudze', async t => {
+test.serial('zamrożone okno: gdy sesja z okna zniknęła z dysku, retry pomija paczkę zamiast dobierać cudze', async t => {
     const { vault, files } = makeVault(archiveWith(15));
     const model = scriptedModel(['P1', 'SILENT', 'SILENT', 'P3']);
     const { workflow } = makeWorkflow(vault, { model });
     const run = new ConsolidationRun({ counts: { archiveCount: 15, batchSize: 5 } });
 
-    await workflow.runWithRun(run, { stallTimeoutMs: 20 });
+    await withInstantStallTimer(() => workflow.runWithRun(run, { stallTimeoutMs: 20 }));
     t.is(run.getStep('l1_batch_2')!.status, STEP_STATUS.FAILED);
 
     // User ręcznie skasował sesję z zamrożonego okna paczki 2.
     delete files[`${BASE}/sessions/archive/session_008.md`];
 
-    await workflow.retryStep(run, 'l1_batch_2', { stallTimeoutMs: 20 });
+    await withInstantStallTimer(() => workflow.retryStep(run, 'l1_batch_2', { stallTimeoutMs: 20 }));
 
     t.is(run.getStep('l1_batch_2')!.status, STEP_STATUS.SKIPPED);
     t.is(run.getStep('l1_batch_2')!.meta.skipReason, 'not_enough_sessions');
 });
 
-test('krok failed przez zwis blokuje bramkę L2 do decyzji usera', async t => {
+test.serial('krok failed przez zwis blokuje bramkę L2 do decyzji usera', async t => {
     // 30 sesji = 6 paczek. Pierwsza pada na zwisie, pozostałe 5 daje komplet plików L1,
     // więc L2 jest osiągalny — bramka stoi WYŁĄCZNIE na nierozstrzygniętym failu.
     const { vault } = makeVault(archiveWith(30));
@@ -468,7 +536,7 @@ test('krok failed przez zwis blokuje bramkę L2 do decyzji usera', async t => {
     const { workflow } = makeWorkflow(vault, { model });
     const run = new ConsolidationRun({ counts: { archiveCount: 30, batchSize: 5 } });
 
-    await workflow.runWithRun(run, { stallTimeoutMs: 20 });
+    await withInstantStallTimer(() => workflow.runWithRun(run, { stallTimeoutMs: 20 }));
     t.is(run.getStep('l1_batch_1')!.status, STEP_STATUS.FAILED);
     for (const id of ['l1_batch_2', 'l1_batch_3', 'l1_batch_4', 'l1_batch_5', 'l1_batch_6']) {
         await workflow.applyStepDecision(run, id, { accepted: true });
@@ -482,17 +550,17 @@ test('krok failed przez zwis blokuje bramkę L2 do decyzji usera', async t => {
     t.deepEqual(gate.generated, ['l2']);
 });
 
-test('retryStep („Ponów" w UI) ponawia generację padniętego kroku z tym samym oknem paczki', async t => {
+test.serial('retryStep („Ponów" w UI) ponawia generację padniętego kroku z tym samym oknem paczki', async t => {
     const { vault } = makeVault(archiveWith(10));
     // Paczka 1: dwa zwisy → failed. Paczka 2: OK. Potem ręczny retry paczki 1 → OK.
     const model = scriptedModel(['SILENT', 'SILENT', 'Paczka 2', 'Paczka 1 za drugim podejściem']);
     const { workflow } = makeWorkflow(vault, { model });
     const run = new ConsolidationRun({ counts: { archiveCount: 10, batchSize: 5 } });
 
-    await workflow.runWithRun(run, { stallTimeoutMs: 20 });
+    await withInstantStallTimer(() => workflow.runWithRun(run, { stallTimeoutMs: 20 }));
     t.is(run.getStep('l1_batch_1')!.status, STEP_STATUS.FAILED);
 
-    const outcome = await workflow.retryStep(run, 'l1_batch_1', { stallTimeoutMs: 20 });
+    const outcome = await withInstantStallTimer(() => workflow.retryStep(run, 'l1_batch_1', { stallTimeoutMs: 20 }));
 
     t.deepEqual(outcome.generated, ['l1_batch_1']);
     const step = run.getStep('l1_batch_1')!;
@@ -546,13 +614,13 @@ test('usage z każdego strzału ląduje w kroku i sumuje się w przebiegu', asyn
     t.deepEqual(run.totalUsage(), { inputTokens: 300, outputTokens: 60, cachedTokens: 0, calls: 3 });
 });
 
-test('ponowiony strzał dokłada swój koszt (retry nie jest darmowy)', async t => {
+test.serial('ponowiony strzał dokłada swój koszt (retry nie jest darmowy)', async t => {
     const { vault } = makeVault(archiveWith(5));
     // Pierwszy strzał zwis (bez usage), drugi się udaje.
     const { workflow } = makeWorkflow(vault, { model: scriptedModel(['SILENT', 'Streszczenie']) });
     const run = new ConsolidationRun({ counts: { archiveCount: 5, batchSize: 5 } });
 
-    await workflow.runWithRun(run, { stallTimeoutMs: 20 });
+    await withInstantStallTimer(() => workflow.runWithRun(run, { stallTimeoutMs: 20 }));
 
     t.is(run.getStep('l1_batch_1')!.status, STEP_STATUS.AWAITING_REVIEW);
     t.is(run.getStep('l1_batch_1')!.retryCount, 1);
@@ -802,7 +870,7 @@ test('przedpobrana lista (archiveSessions) zastępuje listowanie archiwum przy g
     t.is(run.getStep('l1_batch_2')!.status, STEP_STATUS.AWAITING_REVIEW, 'obie paczki z jednej listy');
 });
 
-test('przedpobrana lista jest JEDNORAZOWA — retry po decyzji usera czyta świeży dysk', async t => {
+test.serial('przedpobrana lista jest JEDNORAZOWA — retry po decyzji usera czyta świeży dysk', async t => {
     // Gdyby lista żyła całe życie workflow, „Ponów" walidowałby zamrożone okno o stan archiwum
     // z przed decyzji usera (stemple covered_by_l1, ręczne kasowanie plików).
     const { vault } = makeVault(archiveWith(10));
@@ -816,11 +884,11 @@ test('przedpobrana lista jest JEDNORAZOWA — retry po decyzji usera czyta świe
     });
     const run = new ConsolidationRun({ counts: { archiveCount: 10, batchSize: 5 } });
 
-    await workflow.runWithRun(run, { stallTimeoutMs: 20 });
+    await withInstantStallTimer(() => workflow.runWithRun(run, { stallTimeoutMs: 20 }));
     t.is(spy.calls, 0, 'start przebiegu jedzie z przedpobranej listy');
     t.is(run.getStep('l1_batch_2')!.status, STEP_STATUS.FAILED);
 
-    await workflow.retryStep(run, 'l1_batch_2', { stallTimeoutMs: 20 });
+    await withInstantStallTimer(() => workflow.retryStep(run, 'l1_batch_2', { stallTimeoutMs: 20 }));
 
     t.is(spy.calls, 1, 'retry pyta dysk o aktualny stan archiwum');
     t.is(run.getStep('l1_batch_2')!.status, STEP_STATUS.AWAITING_REVIEW);
