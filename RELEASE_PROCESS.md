@@ -23,8 +23,10 @@ Na maszynie releasującej przydaje się jeszcze `gh` CLI (GitHub CLI) - nie do w
 ```bash
 git checkout main
 git pull origin main
-git checkout -b refactor/v2.2-release-<wersja>
+git checkout -b release/<wersja>
 ```
+
+Gałąź wydania jest krótka: zbiera tylko bump wersji, przypięcie harnessu i notatki. `main` nie dostaje numeru przyszłej wersji na początku pracy - bump trafia tuż przed tagiem.
 
 ## Krok 2 - bump wersji
 
@@ -37,6 +39,16 @@ git checkout -b refactor/v2.2-release-<wersja>
 ⚠️ **Pułapka:** ten auto-zapis `manifest.json` przez `npm run build` zostawia zmianę w working tree. Zanim zrobisz commit release prep, sprawdź `git status` - `manifest.json` MUSI wejść do tego samego commita, inaczej `release.js` odbije się o guard niezgodności wersji.
 
 Commituj bump (i przebudowany `manifest.json`) na branchu roboczym.
+
+## Krok 2b - przypnij harness
+
+Workflow wydania bierze harness z commita zapisanego w `.github/harness-sha` (jedna linia, pełny 40-znakowy SHA), nie z ruchomego `main` repo harnessu. Dzięki temu ten sam tag zawsze przechodzi te same scenariusze, a podsumowanie biegu "Release" mówi, które. Zwykłe CI (`ci.yml`) zostaje na `main` harnessu.
+
+Wpisz tam SHA harnessu, na którym przeszły bramki z Kroku 3 (klon obok, zsynchronizowany z GitHubem - commit musi być wypchnięty, bo Actions pobiera go z GitHuba):
+
+```bash
+git -C ../pkm-assistant-harness rev-parse HEAD > .github/harness-sha
+```
 
 ## Krok 3 - bramki, wszystkie zielone
 
@@ -60,12 +72,21 @@ npm run scenarios
 
 > Jeśli masz `DESTINATION_VAULTS` ustawione w swoim `.env` (auto-deploy pluginu do vaulta po buildzie, patrz `esbuild.js`), `npm run build` w tym kroku (i drugi raz wewnątrz `release.js` w kroku 5) wdroży bieżący build do tych vaultów jak przy zwykłej pracy deweloperskiej - to nie jest coś specjalnego dla release'u, ale warto wiedzieć, że się dzieje. Deploy wymaga też `DESTINATION_CONFIG_DIR` (nazwa folderu konfiguracji Obsidiana w tych vaultach) - bez niej build wypisuje jedno ostrzeżenie i pomija deploy, sam build przechodzi.
 
+## Krok 3b - kandydat wydania i smoke
+
+Kandydat to konkretny commit gałęzi `release/<wersja>` po zielonych bramkach - zapisz jego SHA. Zbudowany z niego `dist/` instaluje się w vaulcie testowym (przez `DESTINATION_VAULTS` albo ręcznie trzy pliki do folderu pluginu). Smoke na kandydacie, zanim cokolwiek dostanie tag:
+
+- aktualizacja z poprzedniej wersji zachowuje dane: agenci, pamięć, ustawienia i sesje są na miejscu;
+- plugin startuje bez błędu, a zmienione w tym wydaniu ścieżki przechodzą ręcznie w Obsidianie.
+
+Poprawka po smoke to nowy commit na tej samej gałęzi i ponowne bramki - kandydatem staje się nowy SHA.
+
 ## Krok 4 - merge do main
 
 ```bash
-git push origin refactor/v2.2-release-<wersja>
+git push origin release/<wersja>
 git checkout main
-git merge --no-ff refactor/v2.2-release-<wersja>
+git merge --no-ff release/<wersja>
 git push origin main
 ```
 
@@ -98,6 +119,8 @@ git push origin main && git push origin <wersja>
 
 `<wersja>` to gołe semver **BEZ litery `v`** (np. `2.2.0`) - patrz Krok 5.2. Push taga jest momentem, który uruchamia publikację: `.github/workflows/release.yml` reaguje na wzorzec tagów `[0-9]+.[0-9]+.[0-9]+` (bez `v`) i od tego momentu wszystko dzieje się w Actions, nie na lokalnej maszynie.
 
+**Wypchniętego taga nie przesuwamy, a opublikowanego wydania nie podmieniamy.** Workflow odmawia już na starcie, gdy wydanie o tym tagu ma komplet trzech plików - użytkownicy i katalog mogli je pobrać, a atestacja opisuje dokładnie te bajty. Poprawka opublikowanego wydania idzie w kolejnym numerze patch. Wyjątek to przerwana publikacja (wydanie bez kompletu plików): ponowny bieg dogrywa tylko brakujące pliki i niczego nie nadpisuje.
+
 ## Krok 7 - zweryfikuj wydanie
 
 1. **Zakładka Actions → workflow "Release".** Bieg startuje w kilka sekund po pushu taga. Robi PONOWNIE wszystkie bramki z Kroku 3 (na czystym `checkout`, nie na working tree), potem build, potem atestację, potem wydanie. Czerwony krok = wydanie NIE powstało (albo powstało bez atestacji) - czytaj log kroku, który obleciał.
@@ -106,6 +129,12 @@ git push origin main && git push origin <wersja>
    gh attestation verify dist/main.js --repo JDHole/pkm-assistant
    ```
 3. **Strona wydania.** Tag jest **BEZ prefiksu `v`, znak w znak równy `manifest.json.version`** (czyli `2.2.0`, nie `v2.2.0`), `body` to treść `releases/<wersja>.md`, a assety to **DOKŁADNIE trzy pliki**: `main.js`, `manifest.json`, `styles.css`. Żadnego zipa, żadnego `THIRD-PARTY-LICENSES.md` - katalog społeczności pobiera właśnie te trzy pliki osobno i wytyka wszystko ponadto.
+4. **Harness biegu.** Podsumowanie biegu "Release" ma linię `Harness: JDHole/pkm-assistant-harness@<sha>` - to ma być SHA z `.github/harness-sha` (Krok 2b).
+5. **Katalog widzi nową wersję.** Katalog liczy pobrania osobno dla każdej wersji w `community-plugin-stats.json` repo `obsidianmd/obsidian-releases`. Gdy pod `pkm-assistant` pojawi się klucz nowej wersji, katalog ją wykrył i użytkownicy dostają aktualizację:
+   ```bash
+   curl -s https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugin-stats.json | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d)['pkm-assistant']))"
+   ```
+   Plik odświeża się raz na dobę (commit "Update plugin stats" ok. 00:25 UTC), więc klucz nowej wersji pojawia się najpóźniej następnego dnia; pole `updated` pokazuje czas publikacji ostatniej wykrytej wersji. Brak klucza zaraz po publikacji nie jest jeszcze błędem, brak po dwóch dobach już tak.
 
 ## Krok 8 - zgłoszenie do katalogu społeczności
 

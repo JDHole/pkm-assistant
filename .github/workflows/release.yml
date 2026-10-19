@@ -58,6 +58,24 @@ jobs:
             console.log('Wersja ' + tag + ' spójna (minAppVersion ' + manifest.minAppVersion + ')');
           "
 
+      # Opublikowane wydanie jest NIEZMIENNE: użytkownicy i katalog mogli już pobrać jego pliki,
+      # a atestacja opisuje dokładnie te bajty. Poprawka idzie w kolejnym numerze patch, tag
+      # zostaje na miejscu. Sprawdzamy to PRZED bramkami, żeby nie palić biegu na pewną odmowę.
+      # Wydanie bez kompletu trzech plików (przerwana publikacja) przepuszczamy - ostatni krok
+      # dogrywa tylko brakujące pliki, nigdy nie nadpisuje istniejących.
+      - name: opublikowane wydanie jest niezmienne
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            have="$(gh release view "$TAG" --json assets --jq '.assets[].name' | sort | tr '\n' ' ')"
+            if [ "$have" = "main.js manifest.json styles.css " ]; then
+              echo "::error::Wydanie $TAG jest już opublikowane w komplecie i jest niezmienne. Poprawka idzie w nowym numerze patch; nie przesuwaj taga."
+              exit 1
+            fi
+            echo "Wydanie $TAG istnieje bez kompletu plików ($have) - po bramkach dogram brakujące."
+          fi
+
       # Harness „Szklane Pudło" — prawdziwy plugin bootowany w Node bez Obsidiana. Mieszka
       # w OSOBNYM repo (https://github.com/JDHole/pkm-assistant-harness): walidator
       # katalogu Obsidiana lintuje CAŁE repo pluginu, a narzędzie testowe nie jest częścią
@@ -67,11 +85,25 @@ jobs:
       # szuka checkoutu pod `.harness-ci`, a atrapa `obsidian.ts` importuje `yaml` z node_modules
       # TEGO checkoutu (bez `npm ci` niżej `npm test` pada na `Cannot find package 'yaml'`).
       # Wydanie 2.2.3 (pierwsza próba) obleciało dokładnie na tym: harness klonowany dopiero po bramkach.
+      # Wydanie bierze harness z PRZYPIĘTEGO commita (.github/harness-sha), nie z ruchomego main:
+      # ten sam tag zawsze przechodzi te same scenariusze, a podsumowanie biegu mówi, które.
+      # Zwykłe CI (ci.yml) zostaje na main harnessu - tam chcemy najnowszych scenariuszy.
+      - name: harness — przypięty commit
+        id: harness
+        run: |
+          sha="$(tr -d '[:space:]' < .github/harness-sha)"
+          if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::.github/harness-sha musi zawierać pełny SHA commita harnessu (40 znaków hex), jest: '$sha'"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Harness: JDHole/pkm-assistant-harness@$sha" >> "$GITHUB_STEP_SUMMARY"
+
       - name: harness — checkout osobnego repo
         uses: actions/checkout@v4
         with:
           repository: JDHole/pkm-assistant-harness
-          ref: main
+          ref: ${{ steps.harness.outputs.sha }}
           path: .harness-ci
 
       - name: harness — zależności
@@ -114,8 +146,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Wydanie $TAG istnieje — podmieniam assety."
-            gh release upload "$TAG" dist/main.js dist/manifest.json dist/styles.css --clobber
+            # Tu trafia tylko wydanie bez kompletu (komplet odbił krok "opublikowane wydanie jest
+            # niezmienne"). Dogrywamy brakujące pliki, istniejących nie ruszamy.
+            have=" $(gh release view "$TAG" --json assets --jq '.assets[].name' | tr '\n' ' ')"
+            for f in main.js manifest.json styles.css; do
+              case "$have" in
+                *" $f "*) echo "$f już jest - zostaje bez zmian." ;;
+                *) gh release upload "$TAG" "dist/$f" ;;
+              esac
+            done
           else
             gh release create "$TAG" dist/main.js dist/manifest.json dist/styles.css \
               --title "$TAG" \

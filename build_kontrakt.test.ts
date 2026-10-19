@@ -141,6 +141,18 @@ test('CI klonuje repo harnessu i puszcza jego bramki na tym checkoutcie', t => {
     t.true(read('RELEASE_PROCESS.md').includes(HARNESS_REPO), 'RELEASE_PROCESS.md nie mowi, skad wziac harness');
 });
 
+// ── Wydanie: przypiety harness i niezmienne opublikowane pliki ───────────────────────
+
+test('wydanie bierze harness z przypietego commita i nie nadpisuje opublikowanych plikow', t => {
+    const release = read('.github/workflows/release.yml');
+    const sha = read('.github/harness-sha').trim();
+    t.regex(sha, /^[0-9a-f]{40}$/, '.github/harness-sha nie jest pelnym SHA commita harnessu');
+    t.true(release.includes('.github/harness-sha'), 'release.yml nie czyta przypietego SHA harnessu');
+    t.false(/repository:\s*JDHole\/pkm-assistant-harness\s*\n\s*ref:\s*main\b/.test(release), 'release.yml dalej bierze harness z ruchomego main');
+    t.false(release.includes('--clobber'), 'release.yml nadpisuje pliki opublikowanego wydania');
+    t.true(read('RELEASE_PROCESS.md').includes('.github/harness-sha'), 'RELEASE_PROCESS.md nie mowi, jak przypiac harness');
+});
+
 // ── Zero zakazanego słownictwa w skryptach builda/release'u ──────────────────────────────────
 
 /**
