@@ -5,7 +5,11 @@ All notable user-facing changes to PKM Assistant are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 2.3.3 - 2026-10-19
+
+Current Claude models, honest tool descriptions: the Anthropic provider works with Claude Opus 4.7
+and later, Sonnet 5 and 5.5, Haiku 5.5 and Fable again, and the built-in instructions and tool
+descriptions tell agents what their tools really do.
 
 ### Changed
 
