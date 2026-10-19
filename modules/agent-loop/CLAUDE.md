@@ -10,7 +10,7 @@ Barrel values: runAgentLoop, formatAgentLoopPartial, ArrayMessageStore, parseToo
 
 RunAgentLoopResult retains finalText, toolsUsed, toolCallDetails, usage, iterations and stoppedBy:natural|backstop|abort. Additive stopReason/partial remain optional for old typed consumers; every new result populates stopReason. Errors reject; no stoppedBy:error.
 
-Stop reasons: natural, iteration-limit, tool-uncertain, synthesis-budget with budgetMs, manual-stop/task-timeout/superseded, or silence/model-timeout/transport-error/model-error/hook-error with work|synthesis stage. Typed local timer errors establish deadline/silence causes, never translated strings. Unknown provider failures are model-error. Error identities remain intact; legacy promise-only non-Error reasons retain fields and original cause in an Error wrapper.
+Stop reasons: natural, iteration-limit, tool-uncertain, synthesis-budget with budgetMs and after:iteration-limit, manual-stop/task-timeout/superseded, or silence/model-timeout/transport-error/model-error/hook-error with work|synthesis stage. The synthesis-budget receipt names both exhausted limits. Typed local timer errors establish deadline/silence causes, never translated strings. Unknown provider failures are model-error. Error identities remain intact; legacy promise-only non-Error reasons retain fields and original cause in an Error wrapper.
 
 ## Hook and transcript contracts
 
@@ -26,7 +26,7 @@ Record raw outcomes at each settlement before store/hooks/stringification, order
 
 callbacks.partial receives synchronous publication before awaited onBackstop and optional synthesis, at every abort exit and before error rethrows. It is never awaited; thrown observers and returned rejected promises cannot replace the real cause. Identical snapshots retain revision and are not republished. Callback/return values are separate frozen copies of names, outcomes, argument-free details, usage, iteration count and last visible text.
 
-All displayed text/previews together share 12000 characters. Invocation identity/status survive exhausted preview space. Exclude args, raw payload, binary/base64 and hidden reasoning. Optional knownSecrets supplies actual known secret values to core.redactSecretsDeep, then maskSensitiveData, before clipping. Pattern masking is a fallback; arbitrary unknown plain strings cannot be identified as secrets. The loop never reads private model credentials.
+All displayed text/previews together share 12000 characters. Preview space is divided across invocations so every tool keeps its identity and status in the partial text, even when several JSON results are long. Final text clipping also ends in an ellipsis. Exclude args, raw payload, binary/base64 and hidden reasoning. Optional knownSecrets supplies actual known secret values to core.redactSecretsDeep, then maskSensitiveData, before clipping. Pattern masking is a fallback; arbitrary unknown plain strings cannot be identified as secrets. The loop never reads private model credentials. The tool-response disclaimer appears only when a result preview is retained; JSON previews are indented with real line breaks inside string values, and clipped previews end in an ellipsis.
 
 shouldAbort must read this turn's latched state, never shared view state reset by the next turn. Existing callers retain boundary checks. Optional abortSignal enables immediate held-tool/model observation; U3 supplies a signal frozen to the owner and abortReason:manual-stop|task-timeout|superseded.
 
@@ -48,7 +48,7 @@ Trace uses existing fire-and-forget sink: loop.start/end, model.done/timeout/sta
 
 AgentLoop.partial.test.ts: held tool, literal results, settlement order, preserved causes, copies, masking/bounds and fail-soft observers. AgentLoop.synthesis.test.ts: publication ordering, held hooks, total budget/queue/zero, Stop causes, late callbacks, reentrancy, actual xAI and heartbeat/deadline distinction. AgentLoop.test.ts preserves existing parsing, usage, minIterations, result budgets and empty-synthesis salvage. AgentLoop.abort.test.ts tests old predicate/tagged abort policy. AgentLoop.streamRejection.test.ts observes adapter rejections. Parser/sanitizer tests remain adjacent.
 
-Gates: focused/full npm test, typecheck, lint, lint:obsidian. This U2 unit does not build/deploy/commit or edit consumers.
+Gates: focused/full npm test, typecheck, lint, lint:obsidian.
 
 
 U3 consumer compatibility: `abortReason` additionally accepts an existing `AgentLoopStopReason` object so chat watchdog silence preserves the actual work/synthesis stage. The first observed reason is copied and latched.

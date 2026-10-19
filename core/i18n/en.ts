@@ -19,6 +19,7 @@ export const en: Record<string, string> = {
   "agentLoop.reason_iteration-limit": "iteration limit",
   "agentLoop.reason_tool-uncertain": "tool effect uncertain; verify state before retrying",
   "agentLoop.reason_synthesis-budget": "summary time budget",
+  "agentLoop.reason_iteration-then-synthesis-budget": "iteration limit, then summary time budget",
   "agentLoop.reason_manual-stop": "manual Stop",
   "agentLoop.reason_task-timeout": "task deadline",
   "agentLoop.reason_superseded": "replaced by another turn",

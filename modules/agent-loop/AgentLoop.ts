@@ -91,7 +91,7 @@ export type AgentLoopStopReason =
     | { kind: 'natural' }
     | { kind: 'iteration-limit' }
     | { kind: 'tool-uncertain' }
-    | { kind: 'synthesis-budget'; budgetMs: number }
+    | { kind: 'synthesis-budget'; budgetMs: number; after: 'iteration-limit' }
     | { kind: 'manual-stop' | 'task-timeout' | 'superseded' }
     | { kind: 'silence' | 'model-timeout' | 'transport-error' | 'model-error' | 'hook-error'; stage: 'work' | 'synthesis' };
 
@@ -130,6 +130,11 @@ class LoopTimerError extends Error {
 class LoopAbortError extends Error {}
 
 const PARTIAL_MAX_CHARS = 12000;
+
+function clipPartialText(value: string, limit: number): string {
+    if (value.length <= limit) return value;
+    return limit > 0 ? value.slice(0, limit - 1) + '…' : '';
+}
 
 /** Bezpieczny konkret dla panelu i trace, bez surowych argumentów ani treści zadania. */
 function toolTraceDetail(rawArgs: unknown): string {
@@ -181,7 +186,14 @@ function partialPreview(value: unknown, secrets: readonly string[] = []): string
             try { source = JSON.parse(source); } catch { /* ordinary text */ }
         }
         const safe = clean(source, 0);
-        const text = typeof safe === 'string' ? safe : JSON.stringify(safe) ?? '';
+        const text = typeof safe === 'string' ? safe : (JSON.stringify(safe, null, 2) ?? '').replace(
+            /"(?:\\.|[^"\\])*"/g,
+            token => {
+                const value: unknown = JSON.parse(token);
+                if (typeof value !== 'string' || !value.includes('\n')) return token;
+                return '"' + Array.from(value, char => char === '\n' ? '\n' : JSON.stringify(char).slice(1, -1)).join('') + '"';
+            },
+        );
         return maskSensitiveData(String(redactSecretsDeep(text, secrets)));
     } catch { return '[preview unavailable]'; }
 }
@@ -190,7 +202,7 @@ const partialReasonText = {
     natural: () => t('agentLoop.reason_natural'),
     'iteration-limit': () => t('agentLoop.reason_iteration-limit'),
     'tool-uncertain': () => t('agentLoop.reason_tool-uncertain'),
-    'synthesis-budget': () => t('agentLoop.reason_synthesis-budget'),
+    'synthesis-budget': () => t('agentLoop.reason_iteration-then-synthesis-budget'),
     'manual-stop': () => t('agentLoop.reason_manual-stop'),
     'task-timeout': () => t('agentLoop.reason_task-timeout'),
     superseded: () => t('agentLoop.reason_superseded'),
@@ -223,14 +235,14 @@ export function formatAgentLoopPartial(snapshot: AgentLoopPartialSnapshot): stri
             reason: partialReasonText[snapshot.stopReason.kind](),
             synthesis: partialSynthesisText[snapshot.synthesis](),
         }),
-        t('agentLoop.partial_unverified'),
     ];
+    if (snapshot.toolOutcomes.some(outcome => outcome.resultPreview)) lines.push(t('agentLoop.partial_unverified'));
     if (snapshot.lastText) lines.push(partialPreview(snapshot.lastText));
     for (const outcome of snapshot.toolOutcomes) {
         lines.push('### ' + partialPreview(outcome.name) + ' - ' + partialOutcomeText[outcome.outcome]());
         if (outcome.resultPreview) lines.push(partialPreview(outcome.resultPreview));
     }
-    return lines.join('\n').slice(0, PARTIAL_MAX_CHARS);
+    return clipPartialText(lines.join('\n'), PARTIAL_MAX_CHARS);
 }
 
 function copyPartial(snapshot: AgentLoopPartialSnapshot): AgentLoopPartialSnapshot {
@@ -476,15 +488,18 @@ export async function runAgentLoop({
         // Text + duplicated previews together share one budget. Identity/status stay intact.
         let remaining = 8000;
         const clip = (text: string, cap = remaining): string => {
-            const result = text.slice(0, Math.min(cap, remaining));
+            const length = Math.min(cap, remaining);
+            const result = clipPartialText(text, length);
             remaining -= result.length;
             return result;
         };
+        // Share preview space across invocations, leaving room for every status in the receipt.
+        const perResult = Math.floor(2000 / Math.max(1, ledger.length));
         const outcomes = ledger.map(({ outcome }) => ({
             ...outcome,
             name: partialPreview(outcome.name, knownSecrets).slice(0, 128),
             ...(outcome.id === undefined ? {} : { id: partialPreview(outcome.id, knownSecrets).slice(0, 128) }),
-            resultPreview: clip(outcome.resultPreview, 2000),
+            resultPreview: clip(outcome.resultPreview, perResult),
         }));
         const last = clip(partialPreview(lastText, knownSecrets), 2000);
         const details = outcomes.filter((_outcome, i) => ledger[i].detail !== undefined).map(outcome => ({
@@ -496,7 +511,7 @@ export async function runAgentLoop({
             toolsUsed: outcomes.map(item => item.name), toolOutcomes: outcomes, toolCallDetails: details,
             usage: { ...totalUsage }, iterations, lastText: last, text: '',
         };
-        snapshot.text = formatAgentLoopPartial(snapshot).slice(0, PARTIAL_MAX_CHARS - (8000 - remaining));
+        snapshot.text = clipPartialText(formatAgentLoopPartial(snapshot), PARTIAL_MAX_CHARS - (8000 - remaining));
         const signature = JSON.stringify(snapshot);
         if (signature === partialSignature && latestPartial) return copyPartial(latestPartial);
         partialSignature = signature;
@@ -1024,7 +1039,7 @@ export async function runAgentLoop({
     } catch (err) {
         if (err instanceof LoopTimerError && err.kind === 'synthesis-budget') {
             synthesis = 'budget-expired';
-            const reason: AgentLoopStopReason = { kind: 'synthesis-budget', budgetMs: err.budgetMs };
+            const reason: AgentLoopStopReason = { kind: 'synthesis-budget', budgetMs: err.budgetMs, after: 'iteration-limit' };
             const partial = publishPartial(reason);
             return finalize(partial.text, 'backstop', reason);
         }

@@ -19,6 +19,7 @@ export const pl: Record<string, string> = {
   "agentLoop.reason_iteration-limit": "limit iteracji",
   "agentLoop.reason_tool-uncertain": "niepewny skutek narzędzia; sprawdź stan przed ponowieniem",
   "agentLoop.reason_synthesis-budget": "limit czasu podsumowania",
+  "agentLoop.reason_iteration-then-synthesis-budget": "limit rund narzędzi, potem limit czasu podsumowania",
   "agentLoop.reason_manual-stop": "ręczny Stop",
   "agentLoop.reason_task-timeout": "limit czasu zadania",
   "agentLoop.reason_superseded": "zastąpienie kolejną turą",
