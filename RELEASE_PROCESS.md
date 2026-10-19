@@ -74,7 +74,7 @@ npm run scenarios
 
 ## Krok 3b - kandydat wydania i smoke
 
-Kandydat to konkretny commit gałęzi `release/<wersja>` po zielonych bramkach - zapisz jego SHA. Zbudowany z niego `dist/` instaluje się w vaulcie testowym (przez `DESTINATION_VAULTS` albo ręcznie trzy pliki do folderu pluginu). Smoke na kandydacie, zanim cokolwiek dostanie tag:
+Kandydat to konkretny commit gałęzi `release/<wersja>` po zielonych bramkach - zapisz jego SHA. Kandydat musi już zawierać wygenerowany `releases/latest_release.md`: ten plik jest wbudowywany w bundle (widok "Co nowego", `modules/shell/ReleaseNotesView.ts`), więc build bez niego nie byłby tym, co dostaną użytkownicy. Dlatego przed buildem kandydata odpal `npm run release` (Krok 5) NA GAŁĘZI wydania i zacommituj oba pliki notatek; po merge do `main` Krok 5 odtwarza je bajt w bajt i `git status` zostaje czysty. Zbudowany z kandydata `dist/` instaluje się w vaulcie testowym (przez `DESTINATION_VAULTS` albo ręcznie trzy pliki do folderu pluginu). Smoke na kandydacie, zanim cokolwiek dostanie tag:
 
 - aktualizacja z poprzedniej wersji zachowuje dane: agenci, pamięć, ustawienia i sesje są na miejscu;
 - plugin startuje bez błędu, a zmienione w tym wydaniu ścieżki przechodzą ręcznie w Obsidianie.
@@ -119,7 +119,14 @@ git push origin main && git push origin <wersja>
 
 `<wersja>` to gołe semver **BEZ litery `v`** (np. `2.2.0`) - patrz Krok 5.2. Push taga jest momentem, który uruchamia publikację: `.github/workflows/release.yml` reaguje na wzorzec tagów `[0-9]+.[0-9]+.[0-9]+` (bez `v`) i od tego momentu wszystko dzieje się w Actions, nie na lokalnej maszynie.
 
-**Wypchniętego taga nie przesuwamy, a opublikowanego wydania nie podmieniamy.** Workflow odmawia już na starcie, gdy wydanie o tym tagu ma komplet trzech plików - użytkownicy i katalog mogli je pobrać, a atestacja opisuje dokładnie te bajty. Poprawka opublikowanego wydania idzie w kolejnym numerze patch. Wyjątek to przerwana publikacja (wydanie bez kompletu plików): ponowny bieg dogrywa tylko brakujące pliki i niczego nie nadpisuje.
+**Wypchniętego taga nie przesuwamy, a opublikowanego wydania nie podmieniamy.** Regułę trzyma jeden skrypt, `.github/scripts/release-state.mjs` (testy: `release_state.test.ts`), wołany na starcie workflow i tuż przed publikacją:
+
+- opublikowane wydanie z kompletem `main.js`, `manifest.json`, `styles.css` (dodatkowe pliki nie zmieniają oceny) - odmowa: użytkownicy i katalog mogli je pobrać, a atestacja opisuje dokładnie te bajty; poprawka idzie w kolejnym numerze patch;
+- wymagany plik wgrany do połowy albo pusty - odmowa; nic nie jest nadpisywane, uszkodzony plik usuwa człowiek na stronie wydania i uruchamia bieg ponownie;
+- przerwana publikacja (brakuje części plików, obecne są całe) - ponowny bieg dogrywa tylko brakujące;
+- błąd odczytu stanu z GitHuba inny niż "nie ma takiego wydania" - odmowa, bo bez znajomości stanu niczego nie publikujemy.
+
+Wydań roboczych (draft) skrypt nie widzi i ich nie dotyka - GitHub zwraca po tagu tylko wydania opublikowane.
 
 ## Krok 7 - zweryfikuj wydanie
 

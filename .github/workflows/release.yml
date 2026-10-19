@@ -38,6 +38,16 @@ jobs:
           node-version: 22
           cache: npm
 
+      # Opublikowane wydanie jest NIEZMIENNE: użytkownicy i katalog mogli już pobrać jego pliki,
+      # a atestacja opisuje dokładnie te bajty. Poprawka idzie w kolejnym numerze patch, tag
+      # zostaje na miejscu. Sprawdzamy to NA STARCIE, żeby nie palić biegu na pewną odmowę.
+      # Regułę trzyma jeden skrypt (komplet / przerwana publikacja / uszkodzone pliki / błąd
+      # odczytu = odmowa) - ten sam woła krok publikacji na końcu.
+      - name: opublikowane wydanie jest niezmienne
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/release-state.mjs "$TAG"
+
       - run: npm ci --no-audit --no-fund
 
       - name: tag == package.json == manifest.json, wpis w versions.json
@@ -57,24 +67,6 @@ jobs:
             if (problems.length) { console.error(problems.join('\n')); process.exit(1); }
             console.log('Wersja ' + tag + ' spójna (minAppVersion ' + manifest.minAppVersion + ')');
           "
-
-      # Opublikowane wydanie jest NIEZMIENNE: użytkownicy i katalog mogli już pobrać jego pliki,
-      # a atestacja opisuje dokładnie te bajty. Poprawka idzie w kolejnym numerze patch, tag
-      # zostaje na miejscu. Sprawdzamy to PRZED bramkami, żeby nie palić biegu na pewną odmowę.
-      # Wydanie bez kompletu trzech plików (przerwana publikacja) przepuszczamy - ostatni krok
-      # dogrywa tylko brakujące pliki, nigdy nie nadpisuje istniejących.
-      - name: opublikowane wydanie jest niezmienne
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            have="$(gh release view "$TAG" --json assets --jq '.assets[].name' | sort | tr '\n' ' ')"
-            if [ "$have" = "main.js manifest.json styles.css " ]; then
-              echo "::error::Wydanie $TAG jest już opublikowane w komplecie i jest niezmienne. Poprawka idzie w nowym numerze patch; nie przesuwaj taga."
-              exit 1
-            fi
-            echo "Wydanie $TAG istnieje bez kompletu plików ($have) - po bramkach dogram brakujące."
-          fi
 
       # Harness „Szklane Pudło" — prawdziwy plugin bootowany w Node bez Obsidiana. Mieszka
       # w OSOBNYM repo (https://github.com/JDHole/pkm-assistant-harness): walidator
@@ -145,19 +137,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            # Tu trafia tylko wydanie bez kompletu (komplet odbił krok "opublikowane wydanie jest
-            # niezmienne"). Dogrywamy brakujące pliki, istniejących nie ruszamy.
-            have=" $(gh release view "$TAG" --json assets --jq '.assets[].name' | tr '\n' ' ')"
-            for f in main.js manifest.json styles.css; do
-              case "$have" in
-                *" $f "*) echo "$f już jest - zostaje bez zmian." ;;
-                *) gh release upload "$TAG" "dist/$f" ;;
-              esac
-            done
-          else
-            gh release create "$TAG" dist/main.js dist/manifest.json dist/styles.css \
-              --title "$TAG" \
-              --notes-file "releases/$TAG.md" \
-              --verify-tag
+          # Stan liczony od nowa tuż przed publikacją (bramki trwały kilkanaście minut). Komplet,
+          # uszkodzone pliki albo błąd odczytu kończą krok tutaj - skrypt wychodzi kodem 1.
+          if ! stan="$(node .github/scripts/release-state.mjs "$TAG")"; then
+            echo "$stan"
+            exit 1
           fi
+          case "$stan" in
+            absent)
+              gh release create "$TAG" dist/main.js dist/manifest.json dist/styles.css \
+                --title "$TAG" \
+                --notes-file "releases/$TAG.md" \
+                --verify-tag
+              ;;
+            partial\ *)
+              # Przerwana publikacja: dogrywamy tylko brakujące pliki, istniejących nie ruszamy.
+              for f in ${stan#partial }; do
+                gh release upload "$TAG" "dist/$f"
+              done
+              ;;
+            *)
+              echo "::error::Nieoczekiwany stan wydania: '$stan'"
+              exit 1
+              ;;
+          esac

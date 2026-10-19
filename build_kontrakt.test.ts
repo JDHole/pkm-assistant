@@ -148,8 +148,9 @@ test('wydanie bierze harness z przypietego commita i nie nadpisuje opublikowanyc
     const sha = read('.github/harness-sha').trim();
     t.regex(sha, /^[0-9a-f]{40}$/, '.github/harness-sha nie jest pelnym SHA commita harnessu');
     t.true(release.includes('.github/harness-sha'), 'release.yml nie czyta przypietego SHA harnessu');
-    t.false(/repository:\s*JDHole\/pkm-assistant-harness\s*\n\s*ref:\s*main\b/.test(release), 'release.yml dalej bierze harness z ruchomego main');
+    t.regex(release, /repository:\s*JDHole\/pkm-assistant-harness\s*\n\s*ref:\s*\$\{\{\s*steps\.harness\.outputs\.sha\s*\}\}\s*\n/, 'checkout harnessu w release.yml nie bierze przypietego SHA');
     t.false(release.includes('--clobber'), 'release.yml nadpisuje pliki opublikowanego wydania');
+    t.is(release.split('node .github/scripts/release-state.mjs "$TAG"').length - 1, 2, 'stan wydania nie jest sprawdzany na starcie i przed publikacja jednym skryptem');
     t.true(read('RELEASE_PROCESS.md').includes('.github/harness-sha'), 'RELEASE_PROCESS.md nie mowi, jak przypiac harness');
 });
 
