@@ -145,7 +145,7 @@ function printNextSteps(version, pluginNotesPath) {
     say(`  1. git add releases/${version}.md ${notesPath}`);
     say(`  2. git commit -m "docs(release): notatki ${version}"  - ten commit buduje kandydata do smoke`);
     say('  Na main po merge (ten sam skrypt odtwarza notatki bajt w bajt):');
-    say('  3. git status --short releases/   - ma byc pusty; zmiany = nowy kandydat, nie commit na main');
+    say('  3. git diff --stat releases/      - ma byc pusty (git status moze pokazac sam koniec linii); zmiana tresci = nowy kandydat');
     say(`  4. git tag ${version}          (BEZ litery "v" — musi byc rowny manifest.json.version)`);
     say('  5. git push origin main && git push origin ' + version);
     say('  6. Patrz zakladke Actions → workflow „Release" (bramki, build, atestacja, publikacja)');
