@@ -5,6 +5,14 @@ All notable user-facing changes to PKM Assistant are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+
+- Corrected built-in tool descriptions and prompts to match current access, search, memory, delegation, and file operation behavior in English and Polish.
+- A chat turn with available delegates now receives at most one delegation reminder.
+- The save-session prompt no longer requests the unused `brain_updates` field.
+
 ## 2.3.2 - 2026-10-19
 
 Reads to the end, turns that never hang: agents read long files completely and search code and
