@@ -3,6 +3,7 @@ import { ChatTurnPartialState } from './turnPartial.js';
 import { RollingWindow } from './RollingWindow.js';
 import { classifyMachineMessage, buildMachineView } from './machineMessage.js';
 import { t as tr } from '../../../core/i18n/index.js';
+import { ArrayMessageStore, runAgentLoop } from '../../agent-loop/index.js';
 import type { AgentLoopPartialSnapshot } from '../../agent-loop/index.js';
 import type { ActiveSessionEventInput } from '../../memory/index.js';
 
@@ -45,4 +46,47 @@ test('storage rejection is observed and retains a visible owner receipt', async 
     t.true(String(rw.messages[0].content).includes(tr('chat.streaming.partial_storage_error')));
     t.is(buildMachineView(rw.messages[0], { t: tr })?.status, 'error');
     t.is(changed, 2);
+});
+
+test('Stop without tools leaves the live and restored partial tile without a tool summary', async t => {
+    const controller = new AbortController();
+    let started!: () => void;
+    const entered = new Promise<void>(resolve => { started = resolve; });
+    const running = runAgentLoop({
+        model: { stream() { started(); } },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        executeToolCall: () => 'unused', abortSignal: controller.signal,
+    });
+    await entered;
+    controller.abort();
+    const result = await running;
+    if (!result.partial) return t.fail('missing partial receipt');
+    const rw = new RollingWindow();
+    const state = new ChatTurnPartialState({ agentName: 'Owner', ownerTabKey: 'tab-a', sessionPath: 'a.md', turnId: 1, rw,
+        memory: { async appendSessionEvent() { return 'a.md'; } } });
+    state.publish(result.partial);
+    await state.persisted();
+    t.is(buildMachineView(rw.messages[0], { t: tr })?.summary, '');
+    t.is(buildMachineView({ role: 'system', content: rw.messages[0].content }, { t: tr })?.summary, '');
+    t.is(buildMachineView({ role: 'system', content: String(rw.messages[0].content)
+        + '\nPoniżej zapisano odpowiedzi narzędzi. Ich skutki nie zostały zweryfikowane.\n### Notes\ntext' }, { t: tr })?.summary, '');
+});
+
+test('retained tool result keeps the live and restored partial tile summary', async t => {
+    const result = await runAgentLoop({
+        model: { stream(_payload, handlers) { handlers.done({ choices: [{ message: { content: '', tool_calls: [{
+            id: 'call_1', function: { name: 'read', arguments: '{}' },
+        }] } }] }); } },
+        store: new ArrayMessageStore([{ role: 'user', content: 'go' }]),
+        executeToolCall: () => 'found Notes/one.md', limits: { maxIterations: 1, synthesisTimeoutMs: 0 },
+    });
+    if (!result.partial) return t.fail('missing partial receipt');
+    const rw = new RollingWindow();
+    const state = new ChatTurnPartialState({ agentName: 'Owner', ownerTabKey: 'tab-a', sessionPath: 'a.md', turnId: 2, rw,
+        memory: { async appendSessionEvent() { return 'a.md'; } } });
+    state.publish(result.partial);
+    await state.persisted();
+    t.is(buildMachineView(rw.messages[0], { t: tr })?.summary, tr('agentLoop.partial_unverified'));
+    t.is(buildMachineView({ role: 'system', content: rw.messages[0].content }, { t: tr })?.summary,
+        tr('agentLoop.partial_unverified'));
 });

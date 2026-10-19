@@ -298,6 +298,22 @@ function artifactSectionLines(text: string): { lines: string | null; artifactId:
     };
 }
 
+/** Live metadata can disappear from session history; the retained receipt headings survive. */
+function partialHasToolResults(msg: MachineMessageLike | null | undefined, text: string): boolean {
+    if (typeof msg?._loopPartialHasToolResults === 'boolean') return msg._loopPartialHasToolResults;
+    if (!LOCALES.some(locale => text.includes(t('agentLoop.partial_unverified', undefined, locale)))) return false;
+    const statuses = LOCALES.flatMap(locale => [
+        t('agentLoop.outcome_returned', undefined, locale),
+        t('agentLoop.outcome_error', undefined, locale),
+        t('agentLoop.outcome_unknown', undefined, locale),
+    ]);
+    return text.split('\n### ').slice(1).some(block => {
+        const newline = block.indexOf('\n');
+        return newline >= 0 && statuses.some(status => block.slice(0, newline).endsWith(' - ' + status))
+            && block.slice(newline + 1).trim().length > 0;
+    });
+}
+
 /**
  * Buduje widok kafelka dla wiadomości maszynowej. `null` gdy `msg` nie klasyfikuje się w ogóle
  * (wołający powinien sprawdzić `classifyMachineMessage` pierwej, ale funkcja jest bezpieczna
@@ -312,7 +328,8 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
         return {
             kind, title: ctx.t('chat.streaming.partial_header'),
             summary: msg?._loopPartialStorageError === true ? ctx.t('chat.streaming.partial_storage_error')
-                : msg?._loopPartialSynthesis === 'pending' ? ctx.t('chat.streaming.partial_pending') : ctx.t('agentLoop.partial_unverified'),
+                : msg?._loopPartialSynthesis === 'pending' ? ctx.t('chat.streaming.partial_pending')
+                    : partialHasToolResults(msg, text) ? ctx.t('agentLoop.partial_unverified') : '',
             details: text, status: msg?._loopPartialStorageError === true ? 'error' : 'ok',
         };
     }
