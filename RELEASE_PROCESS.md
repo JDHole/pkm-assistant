@@ -79,7 +79,7 @@ Kandydat to konkretny commit gałęzi `release/<wersja>` po zielonych bramkach -
 - aktualizacja z poprzedniej wersji zachowuje dane: agenci, pamięć, ustawienia i sesje są na miejscu;
 - plugin startuje bez błędu, a zmienione w tym wydaniu ścieżki przechodzą ręcznie w Obsidianie.
 
-Poprawka po smoke to nowy commit na tej samej gałęzi i ponowne bramki - kandydatem staje się nowy SHA.
+Poprawka po smoke to nowy commit na tej samej gałęzi i ponowne bramki - kandydatem staje się nowy SHA. Między kandydatem a tagiem `main` nie może się ruszyć: scalenie gałęzi wydania ma wnieść dokładnie przetestowane drzewo. Jeśli na `main` w tym czasie coś weszło, przenieś gałąź wydania na aktualny `main` i zrób nowego kandydata.
 
 ## Krok 4 - merge do main
 
@@ -118,7 +118,7 @@ git push origin main && git push origin <wersja>
 
 `<wersja>` to gołe semver **BEZ litery `v`** (np. `2.2.0`) - patrz Krok 5.2. Push taga jest momentem, który uruchamia publikację: `.github/workflows/release.yml` reaguje na wzorzec tagów `[0-9]+.[0-9]+.[0-9]+` (bez `v`) i od tego momentu wszystko dzieje się w Actions, nie na lokalnej maszynie.
 
-**Wypchniętego taga nie przesuwamy, a opublikowanego wydania nie podmieniamy.** Regułę trzyma jeden skrypt, `.github/scripts/release-state.mjs` (testy: `release_state.test.ts`), wołany na starcie workflow i tuż przed publikacją:
+**Wypchniętego taga nie przesuwamy, a opublikowanego wydania nie podmieniamy.** Regułę trzyma jeden skrypt, `.github/scripts/release-state.mjs` (testy: `release_state.test.ts`), wołany na starcie workflow (zanim ruszą bramki) i tuż przed publikacją. Porównanie sum sha256 z buildem (`--porownaj dist`) działa dopiero przed publikacją i po niej, bo na starcie `dist/` jeszcze nie istnieje:
 
 - opublikowane wydanie z kompletem `main.js`, `manifest.json`, `styles.css` (dodatkowe pliki nie zmieniają oceny) - odmowa: użytkownicy i katalog mogli je pobrać, a atestacja opisuje dokładnie te bajty; poprawka idzie w kolejnym numerze patch;
 - wymagany plik wgrany do połowy, pusty albo z innego buildu (suma sha256 inna niż w `dist/` tego biegu) - odmowa; nic nie jest nadpisywane, taki plik usuwa człowiek na stronie wydania i uruchamia bieg ponownie;
