@@ -5,6 +5,24 @@ import { runAgentLoop, ArrayMessageStore } from '../agent-loop/index.js';
 import { TraceLog, maskSensitiveData } from '../../core/index.js';
 import type { SubTask, SubTaskStep } from './SubTaskRegistry.js';
 
+test('postMessage zapisuje podgląd zmaskowany i ucięty, a limit biegów jest dostępny publicznie', t => {
+    const reg = new SubTaskRegistry({ maxThreadRuns: 7, mask: fakeMask });
+    const owner = { agentName: 'Tester', sessionPath: 'active.md', sessionEpoch: 'epoch-msg' };
+    const configured = reg.createThread({ threadId: 'thread-config', name: 'worker', owner, origin: owner, config: { limits: { subagent_thread_max_runs: 3 } } });
+    const fallback = reg.createThread({ threadId: 'thread-default', name: 'worker', owner, origin: owner, config: {} });
+    const run = reg.create({ id: 'run-message', name: 'worker', agentName: owner.agentName, threadId: configured.threadId });
+    const messageText = `Wiadomość sk-Secret123 ${'x'.repeat(220)}`;
+
+    t.true(reg.postMessage(run.id, messageText));
+    const message = run.steps.find(step => step.type === 'user.message');
+    const maskedText = `Wiadomość sk-*** ${'x'.repeat(220)}`;
+    t.is(message?.fields.chars, maskedText.length);
+    t.is(message?.fields.preview, maskedText.slice(0, 200));
+    t.is(reg.getThreadMaxRuns(configured.threadId), 3);
+    t.is(reg.getThreadMaxRuns(fallback.threadId), 7);
+    reg.dispose();
+});
+
 /** Atrapa `TraceLog`: zapamiętuje etykiety podane do `scope()` i każdy zapis. */
 function makeFakeTraceLog() {
     const scopeLabels: string[] = [];
@@ -638,7 +656,7 @@ test('postMessage wrzuca wiadomość do biegu running, takeMessages ją ZDEJMUJE
     t.deepEqual(reg.takeMessages(task.id), [], 'kolejka opróżniona — drugi odbiór nic nie daje');
 });
 
-test('postMessage zapisuje krok user.message z samą DŁUGOŚCIĄ (treść jest w transkrypcie)', t => {
+test('postMessage zapisuje krok user.message z długością i zamaskowanym podglądem', t => {
     const reg = new SubTaskRegistry();
     const kroki: SubTaskStep[] = [];
     reg.events.on('task:step', (p: unknown) => kroki.push((p as { step: SubTaskStep }).step));
@@ -648,7 +666,7 @@ test('postMessage zapisuje krok user.message z samą DŁUGOŚCIĄ (treść jest 
 
     t.is(kroki.length, 1);
     t.is(kroki[0].type, 'user.message');
-    t.deepEqual(kroki[0].fields, { chars: 'zmień kierunek'.length });
+    t.deepEqual(kroki[0].fields, { chars: 'zmień kierunek'.length, preview: 'zmień kierunek' });
 });
 
 test('wiadomość do biegu ZAKOŃCZONEGO albo nieznanego = false', t => {

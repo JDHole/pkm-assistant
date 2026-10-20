@@ -1,244 +1,248 @@
-/**
- * subTaskPanelModel — co pasek biegów subów ma NARYSOWAĆ.
- *
- * Biegi należą do AGENTA i SESJI, nie do globalnego sidebara — podgląd żyje w oknie czatu,
- * jako `buildStripModel` (płaska lista dla JEDNEJ zakładki).
- *
- * PO CO OSOBNY PLIK: rejestr (`SubTaskRegistry`) trzyma byty w kolejności powstania i nic
- * nie wie o kolejności prezentacji ani licznikach; widok (`modules/chat/chat/subTaskStrip.ts`)
- * ma robić DOM i tylko DOM. Cała arytmetyka — filtr zakładki, kolejność, czas trwania,
- * liczba wywołań narzędzi, skróty — siedzi tutaj, bo to jedyna część, którą da się
- * przetestować bez Obsidiana.
- *
- * ZASADY:
- *   - Plik CZYSTY: zero `obsidian`, zero DOM, zero i18n (etykiety dobiera widok).
- *   - Zero mutacji wejścia — czytamy karty rejestru, nie dotykamy ich.
- *   - `now` wstrzykiwane, bo bieg w toku ma czas trwania liczony do TERAZ (testy podają
- *     własny zegar zamiast czekać).
- *   - Treści są już zmaskowane przez rejestr (`step()`/`fail()`), więc tutaj tylko tniemy.
- */
-import type { SubTask, SubTaskStatus, SubTaskStep } from './SubTaskRegistry.js';
+/** Czysty model paska czatu. Wiersz wątku niesie uporządkowaną oś biegów, a bieg bez wątku ma własny wiersz. */
+import type { SubTask, SubTaskStep, SubThread, SubThreadEffect } from './SubTaskRegistry.js';
 
-/** Ile ostatnich kroków pokazuje rozwinięty wiersz. */
-const MAX_RECENT_STEPS = 20;
-/** Typ kroku, po którym poznajemy wywołanie narzędzia (zliczamy WYNIKI, nie zapowiedzi). */
-const TOOL_STEP_TYPE = 'tool.post';
-/** Sufit skrótu wyniku/błędu. Pasek ma JEDEN rozwinięty szczegół — pełna treść i tak wraca do rozmowy. */
-const MAX_STRIP_OUTCOME_CHARS = 400;
-/** Ile ZAKOŃCZONYCH biegów pokazuje pasek. Starsze są w trace.log, nie na oczach usera. */
-const MAX_STRIP_FINISHED = 10;
+export type StripState =
+    | { kind: 'queued'; position: number }
+    | { kind: 'running' }
+    | { kind: 'stopping' }
+    | { kind: 'idle' }
+    | { kind: 'done' }
+    | { kind: 'partial'; reason: 'incomplete' | 'limit' | 'timeout' | 'user-stop' | 'lead-stop' | 'system-stop' | 'error' | 'uncertain' }
+    | { kind: 'empty' }
+    | { kind: 'delivery' }
+    | { kind: 'closed' };
 
-/**
- * Czas trwania po ludzku: sekundy do minuty, potem minuty (+ reszta sekund).
- * Godzin świadomie NIE ma — sub, który biegnie ponad godzinę, i tak jest awarią,
- * a „93 min" czyta się wtedy lepiej niż „1 h 33 min".
- */
-export function formatDuration(ms: number): string {
-    const value = Number(ms);
-    if (!Number.isFinite(value) || value <= 0) return '0 s';
-    const totalSec = Math.floor(value / 1000);
-    if (totalSec < 60) return `${totalSec} s`;
-    const min = Math.floor(totalSec / 60);
-    const sec = totalSec % 60;
-    return sec === 0 ? `${min} min` : `${min} min ${sec} s`;
-}
-
-function truncate(text: string, max: number): string {
-    const value = String(text ?? '');
-    return value.length > max ? `${value.slice(0, max)}…` : value;
-}
-
-/** Co pokazać jako rezultat biegu: błąd wygrywa z tekstem wyniku (jest ważniejszy). */
-function resolveOutcome(task: SubTask): string {
-    if (task.status === 'running') return truncate(task.partial?.text || '', MAX_STRIP_OUTCOME_CHARS);
-    if (task.error) return truncate(task.error, MAX_STRIP_OUTCOME_CHARS);
-    const text = task.result?.text;
-    return typeof text === 'string' ? truncate(text.trim(), MAX_STRIP_OUTCOME_CHARS) : '';
-}
-
-/**
- * Krok w pasku. Świadomie BEZ skrótu wszystkich pól zdarzenia — pasek ma odpowiedzieć
- * na trzy pytania („co robi", „czego używa", „na czym KONKRETNIE") — a nie wyświetlić
- * log. Pełny ślad jest w `.pkm-assistant/logs/trace.log`.
- */
 export interface StripStep {
     at: number;
     type: string;
-    /** Nazwa narzędzia, jeśli krok jej dotyczy (`tool.pre` / `tool.post`). */
     tool?: string;
-    /**
-     * Konkret kroku — dla `tool.pre` najistotniejszy argument
-     * (ścieżka / zapytanie / folder / URL), dla `tool.post` rozmiar wyniku albo błąd.
-     * Bez tego widać tylko, że sub wykonuje narzędzia, ale nie co dokładnie czyta.
-     */
     detail?: string;
+    readOnly?: boolean;
 }
 
-/** Sufit konkretu kroku — jedna linijka w pasku, nie dump argumentów. */
-const MAX_STEP_DETAIL_CHARS = 80;
-/** Sufit skrótu zadania w rozwinięciu (rejestr i tak tnie do 300 — to drugi pas). */
-const MAX_STRIP_TASK_CHARS = 300;
-
-/** Konkret dla `tool.post`: błąd wygrywa, potem rozmiar wyniku (chars/blocks z trace). */
-function detailFromPost(fields: Record<string, unknown>): string {
-    if (fields.status === 'error') return 'error';
-    const chars = Number(fields.chars);
-    if (Number.isFinite(chars) && chars > 0) return `${chars} zn.`;
-    const blocks = Number(fields.blocks);
-    if (Number.isFinite(blocks) && blocks > 0) return `${blocks} blk`;
-    return '';
+export interface StripEffect {
+    tool: string;
+    action: string;
+    targets: Array<{ path?: string; id?: string }>;
+    outcome: string;
+    check: 'matches' | 'mismatch' | 'not-checked';
+    expectedCheck?: 'exists' | 'absent' | 'none';
 }
 
-/** Jeden bieg w pasku — policzony do końca, widok tylko wypisuje. */
+export interface StripRun {
+    id: string;
+    number: number;
+    available: boolean;
+    state: StripState;
+    status?: SubTask['status'];
+    taskPreview: string;
+    steps: StripStep[];
+    outcome: string;
+    endReason?: string;
+    durationMs: number;
+    tokenInput: number;
+    tokenOutput: number;
+    toolCallCount: number;
+    effects: StripEffect[];
+    missingTargets: string[];
+}
+
 export interface StripRow {
     id: string;
     name: string;
-    status: SubTaskStatus;
-    /** Poproszono o Stop, bieg jeszcze nie stanął (guzik → „zatrzymywanie…"). */
-    stopRequested: boolean;
-    /**
-     * Bieg SKOŃCZONY, ale jego wynik siedzi jeszcze w kolejce notifiera. Dla usera to
-     * osobny stan („zaraz wpadnie do rozmowy"), którego samo `status: done` nie oddaje.
-     */
-    waiting: boolean;
-    /** `endedAt || now` − `createdAt`. Nigdy ujemny. */
+    state: StripState;
+    threadId?: string;
+    reusable: boolean;
+    runs: StripRun[];
+    runNumber: number;
+    runLimit: number | null;
     durationMs: number;
-    stepCount: number;
-    /** Ile razy sub dostał wynik narzędzia (kroki `tool.post`). */
-    toolCallCount: number;
-    lastStep: StripStep | null;
-    /** Skrót wyniku albo błędu (≤400 znaków). Pusty dla biegów w toku. */
-    outcome: string;
-    partialStorageError?: boolean;
-    synthesis?: 'pending' | 'skipped' | 'completed' | 'budget-expired' | 'failed';
-    /** Ostatnie ≤20 kroków, od najstarszego — do rozwinięcia wiersza. */
-    recentSteps: StripStep[];
-    /** Skrót zadania zleconego przez maina (≤300 znaków; '' gdy bieg go nie niesie). */
     taskPreview: string;
+    outcome: string;
 }
 
 export interface BuildStripModelInput {
-    /** `registry.list()` — wszystkie znane biegi (filtr robimy tutaj). */
     tasks?: SubTask[] | null;
-    /** `notifier.pending()` — wyniki z tła czekające na dostarczenie do czatu. */
     pending?: SubTask[] | null;
-    /** Tożsamość AKTYWNEJ zakładki czatu (`chat_tabs._tabKey`). */
+    threads?: SubThread[] | null;
     tabKey?: string | null;
-    /** Agent tej zakładki — używany, gdy bieg nie niesie adresu zakładki. */
     agentName?: string | null;
-    /** Ścieżka AKTYWNEJ sesji agenta — twardy wyróżnik „per sesja" (patrz belongsToTab). */
     sessionPath?: string | null;
-    /** Zegar (wstrzykiwany dla testów). */
+    sessionEpoch?: string | null;
     now?: number;
+    getThreadRunLimit?: (threadId: string) => number;
 }
 
-/**
- * Czy ten bieg należy do TEJ zakładki czatu.
- *
- * Pierwszeństwo ma `origin.tabKey` — adres zwrotny wystawiony przez czat przy zleceniu.
- * Bieg, który go nie ma (zlecenie spoza czatu, stara karta w pamięci, delegacja
- * bez originu), przypisujemy po AGENCIE: lepiej pokazać go na jednej zakładce tego agenta
- * niż zgubić zupełnie. Gdy nie znamy ani klucza zakładki, ani agenta — nie zgadujemy.
- */
+const MAX_STEPS = 20;
+const MAX_CHARS = 400;
+const MAX_TASK = 300;
+
+export function formatDuration(ms: number): string {
+    if (!Number.isFinite(ms) || ms <= 0) return '0 s';
+    const sec = Math.floor(ms / 1000);
+    if (sec < 60) return `${sec} s`;
+    const min = Math.floor(sec / 60);
+    return sec % 60 ? `${min} min ${sec % 60} s` : `${min} min`;
+}
+
 function belongsToTab(task: SubTask, tabKey: string, agentName: string, sessionPath: string): boolean {
-    // Twardy wyróżnik SESJI: klucz zakładki potrafi sprowadzić się do samej nazwy agenta
-    // (świeża zakładka przed pierwszą wiadomością nie ma jeszcze sesji), więc bez tego
-    // wyróżnika stara i nowa sesja tego samego agenta byłyby nierozróżnialne — chipy
-    // zakończonych biegów zostawałyby po archiwizacji. Adres sesji ze zlecenia rozstrzyga:
-    // bieg z CUDZEJ/starej sesji pokazujemy wyłącznie, gdy wciąż BIEGNIE (sierota — user
-    // musi mieć jak go zobaczyć i ubić Stopem).
-    const originSession = task.origin?.sessionPath || '';
-    if (originSession) {
-        if (sessionPath && originSession === sessionPath) return true;
-        if (task.status !== 'running') return false;
-        const orphanOwner = task.origin?.agentName || task.agentName || '';
-        return Boolean(agentName) && orphanOwner === agentName;
+    if (!agentName || (task.origin?.agentName || task.agentName) !== agentName) return false;
+    const taskSession = task.origin?.sessionPath || '';
+    if (taskSession) {
+        if (sessionPath && taskSession === sessionPath) return true;
+        return task.status === 'running';
     }
-    const originTab = task.origin?.tabKey;
-    if (originTab && tabKey) return originTab === tabKey;
-    const owner = task.origin?.agentName || task.agentName || '';
-    return Boolean(agentName) && owner === agentName;
+    if (task.origin?.tabKey && tabKey) return task.origin.tabKey === tabKey;
+    return true;
 }
 
-function toStripStep(step: SubTaskStep): StripStep {
+function stepView(step: SubTaskStep): StripStep {
     const fields = step.fields || {};
-    const tool = fields.tool;
     const out: StripStep = { at: step.at, type: step.type };
-    if (typeof tool === 'string' && tool) out.tool = tool;
-    // Pętla dostarcza już wybrany i zamaskowany konkret zapowiedzi narzędzia.
-    const detail = step.type === 'tool.pre'
-        ? (typeof fields.detail === 'string' ? fields.detail.slice(0, MAX_STEP_DETAIL_CHARS) : '')
-        : (step.type === 'tool.post' ? detailFromPost(fields) : '');
-    if (detail) out.detail = detail;
+    if (typeof fields.tool === 'string') out.tool = fields.tool;
+    if (step.type === 'tool.pre' && typeof fields.detail === 'string') out.detail = fields.detail.slice(0, 80);
+    if (step.type === 'tool.post') {
+        if (fields.status === 'error') out.detail = 'error';
+        else if (typeof fields.chars === 'number') out.detail = `${fields.chars} zn.`;
+    }
+    if (step.type === 'user.message') {
+        out.readOnly = true;
+        if (typeof fields.preview === 'string') out.detail = fields.preview.slice(0, 200);
+    }
     return out;
 }
 
-function toStripRow(task: SubTask, now: number, waiting: boolean): StripRow {
-    const steps = Array.isArray(task.steps) ? task.steps : [];
-    const ended = typeof task.endedAt === 'number' ? task.endedAt : now;
-    const last = steps.length > 0 ? steps[steps.length - 1] : null;
+function runView(task: SubTask | undefined, id: string, number: number, now: number, effects: SubThreadEffect[] = []): StripRun {
+    if (!task) return { id, number, available: false, state: { kind: 'empty' }, taskPreview: '', steps: [], outcome: '', durationMs: 0, tokenInput: 0, tokenOutput: 0, toolCallCount: 0, effects: [], missingTargets: [] };
+    const steps = (task.steps || []).slice(-MAX_STEPS).map(stepView);
+    const result = task.result;
+    const usage = result?.usage as { prompt_tokens?: number; completion_tokens?: number; input_tokens?: number; output_tokens?: number } | null | undefined;
+    const partialUsage = task.partial?.usage as { prompt_tokens?: number; completion_tokens?: number; input_tokens?: number; output_tokens?: number } | undefined;
+    const modelSteps = (task.steps || []).filter(step => step.type === 'model.done');
+    const stepTokens = (field: 'in' | 'out') => modelSteps.reduce((total, step) => {
+        const value = step.fields?.[field];
+        return total + (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+    }, 0);
+    const tokenInput = Number(usage?.prompt_tokens ?? usage?.input_tokens ?? partialUsage?.prompt_tokens ?? partialUsage?.input_tokens ?? stepTokens('in')) || 0;
+    const tokenOutput = Number(usage?.completion_tokens ?? usage?.output_tokens ?? partialUsage?.completion_tokens ?? partialUsage?.output_tokens ?? stepTokens('out')) || 0;
+    const partialOutcome = task.outcome?.completeness === 'partial';
+    const material = partialOutcome
+        ? result?.handoff?.trim() || task.partial?.text?.trim() || (task.status === 'error' ? '' : result?.text?.trim()) || ''
+        : result?.text || result?.handoff || task.partial?.text || '';
+    const rawOutcome = partialOutcome ? material || task.error || '' : task.status === 'error' && task.error ? task.error : material;
+    const outcome = rawOutcome.length > MAX_CHARS ? `${rawOutcome.slice(0, MAX_CHARS)}…` : rawOutcome;
+    const endReason = partialOutcome && material && task.error ? task.error : undefined;
+    const selectedEffects = task.outcome?.effects.map(effect => {
+        const recorded = effects.find(candidate => candidate.tool === effect.tool && candidate.action === effect.action
+            && candidate.check === effect.check && JSON.stringify(candidate.targets) === JSON.stringify(effect.targets));
+        return effectView({ ...effect, ...(recorded?.expectedCheck ? { expectedCheck: recorded.expectedCheck } : {}) });
+    }) ?? [];
+    const missingTargets = selectedEffects.flatMap(effect => effect.check === 'mismatch' && effect.expectedCheck === 'exists'
+        ? effect.targets.map(target => target.path || target.id || '').filter(Boolean) : []);
     return {
-        id: task.id,
-        name: task.name || task.id,
-        status: task.status,
-        stopRequested: task.stopRequested === true,
-        waiting,
-        durationMs: Math.max(0, ended - task.createdAt),
-        stepCount: steps.length,
-        toolCallCount: steps.filter(s => s.type === TOOL_STEP_TYPE).length,
-        lastStep: last ? toStripStep(last) : null,
-        outcome: resolveOutcome(task),
-        ...(task.partial ? { synthesis: task.partial.synthesis } : {}),
-        ...(task.partialStorageError ? { partialStorageError: true } : {}),
-        recentSteps: steps.slice(-MAX_RECENT_STEPS).map(toStripStep),
-        taskPreview: typeof task.taskPreview === 'string' ? truncate(task.taskPreview, MAX_STRIP_TASK_CHARS) : '',
+        id, number, available: true, state: runState(task), status: task.status,
+        taskPreview: (task.taskPreview || '').slice(0, MAX_TASK), steps, outcome,
+        ...(endReason ? { endReason } : {}),
+        durationMs: Math.max(0, (task.endedAt ?? now) - task.createdAt),
+        tokenInput, tokenOutput,
+        toolCallCount: (task.steps || []).filter(step => step.type === 'tool.post').length,
+        effects: selectedEffects, missingTargets,
     };
 }
 
-/**
- * Model paska biegów dla JEDNEJ zakładki czatu (biegi subów
- * należą do agenta i sesji, nie do globalnego sidebara).
- *
- * PŁASKA lista, bo pasek nie ma sekcji — ma kolejność, która odpowiada uwadze usera:
- *   1. **w biegu**, od NAJSTARSZEGO (ten wisi najdłużej i to jego user szuka, gdy chce ubić),
- *   2. **wynik czeka na czat**, w kolejności DOSTARCZANIA (tak, jak czat je weźmie),
- *   3. **zakończone**, od najświeższego, **sufit 10** — pasek to podgląd, nie archiwum.
- *
- * Bieg czekający w kolejce jest tylko w grupie 2 (żadnych duplikatów).
- */
-export function buildStripModel({
-    tasks,
-    pending,
-    tabKey = '',
-    agentName = '',
-    sessionPath = '',
-    now = Date.now(),
-}: BuildStripModelInput = {}): StripRow[] {
-    const key = typeof tabKey === 'string' ? tabKey : '';
-    const agent = typeof agentName === 'string' ? agentName : '';
-    const session = typeof sessionPath === 'string' ? sessionPath : '';
-    const mine = (Array.isArray(tasks) ? tasks : []).filter(task => task && belongsToTab(task, key, agent, session));
-    const queue = (Array.isArray(pending) ? pending : []).filter(task => task && belongsToTab(task, key, agent, session));
+function effectView(effect: SubThreadEffect): StripEffect {
+    return { tool: effect.tool, action: effect.action, targets: effect.targets.map(target => ({ ...target })), outcome: effect.outcome, check: effect.check, ...(effect.expectedCheck ? { expectedCheck: effect.expectedCheck } : {}) };
+}
 
-    const waitingIds = new Set<string>();
-    const waiting: StripRow[] = [];
-    for (const task of queue) {
-        // Bieg w toku nie ma prawa czekać na dostarczenie; jeden id liczymy raz.
-        if (!task.id || task.status === 'running' || waitingIds.has(task.id)) continue;
-        waitingIds.add(task.id);
-        waiting.push(toStripRow(task, now, true));
+function runState(task: SubTask | undefined): StripState {
+    if (!task) return { kind: 'empty' };
+    if (task.status === 'running') return task.stopRequested ? { kind: 'stopping' } : { kind: 'running' };
+    const outcome = task.outcome;
+    if (!outcome) return task.status === 'error' ? { kind: 'partial', reason: 'error' } : { kind: 'empty' };
+    if (outcome.completeness === 'empty') return { kind: 'empty' };
+    if (outcome.completeness === 'unconfirmed') return { kind: 'done' };
+    switch (outcome.end.kind) {
+        case 'finished': return { kind: 'partial', reason: 'incomplete' };
+        case 'limit': return { kind: 'partial', reason: 'limit' };
+        case 'uncertain': return { kind: 'partial', reason: 'uncertain' };
+        case 'stopped':
+            switch (outcome.end.by) {
+                case 'user': return { kind: 'partial', reason: 'user-stop' };
+                case 'lead': return { kind: 'partial', reason: 'lead-stop' };
+                case 'system': return { kind: 'partial', reason: 'system-stop' };
+                default: return assertNever(outcome.end.by);
+            }
+        case 'timeout': return { kind: 'partial', reason: 'timeout' };
+        case 'failed': return { kind: 'partial', reason: 'error' };
+        default: return assertNever(outcome.end);
     }
+}
 
-    const running = mine
-        .filter(task => task.status === 'running')
-        .sort((a, b) => a.createdAt - b.createdAt)
-        .map(task => toStripRow(task, now, false));
+function assertNever(value: never): never { throw new Error(`Nieobsługiwany stan: ${String(value)}`); }
 
-    const finished = mine
-        .filter(task => task.status !== 'running' && !waitingIds.has(task.id))
-        .sort((a, b) => (b.endedAt || b.createdAt) - (a.endedAt || a.createdAt))
-        .slice(0, MAX_STRIP_FINISHED)
-        .map(task => toStripRow(task, now, false));
+export function buildStripModel({ tasks, pending, threads, tabKey = '', agentName = '', sessionPath = '', sessionEpoch = '', now = Date.now(), getThreadRunLimit }: BuildStripModelInput = {}): StripRow[] {
+    const activeTab = typeof tabKey === 'string' ? tabKey : '';
+    const activeAgent = typeof agentName === 'string' ? agentName : '';
+    const activeSession = typeof sessionPath === 'string' ? sessionPath : '';
+    const activeEpoch = typeof sessionEpoch === 'string' ? sessionEpoch : '';
+    const allTasks = Array.isArray(tasks) ? tasks : [];
+    const pendingTasks = Array.isArray(pending) ? pending : [];
+    const taskById = new Map([...pendingTasks, ...allTasks].map(task => [task.id, task]));
+    const pendingIds = new Set(pendingTasks.map(task => task.id));
+    const visibleThreads = (Array.isArray(threads) ? threads : []).filter(thread =>
+        thread.owner.agentName === activeAgent && (thread.owner.sessionPath || '') === activeSession && (thread.owner.sessionEpoch || '') === activeEpoch);
+    const queued = visibleThreads.filter(thread => thread.phase === 'queued');
+    const queuePosition = new Map(queued.map((thread, index) => [thread.threadId, index + 1]));
+    const threadRunIds = new Set<string>();
+    const rows: StripRow[] = visibleThreads.map(thread => {
+        const runs = thread.runIds.map((id, index) => {
+            threadRunIds.add(id);
+            return runView(taskById.get(id), id, index + 1, now, thread.effects);
+        });
+        const activeRun = [...thread.runIds].reverse().map(id => taskById.get(id)).find(task => task?.status === 'running');
+        const lastRun = thread.runIds.length ? taskById.get(thread.runIds[thread.runIds.length - 1]) : undefined;
+        let state: StripState;
+        if (thread.phase === 'queued') state = { kind: 'queued', position: queuePosition.get(thread.threadId) || 1 };
+        else if (pendingIds.has(lastRun?.id || '')) state = { kind: 'delivery' };
+        else if (thread.phase === 'closed') state = { kind: 'closed' };
+        else if (thread.phase === 'running') state = runState(activeRun);
+        else if (thread.phase === 'idle' && thread.reusable) {
+            const lastState = runState(lastRun);
+            state = lastState.kind === 'partial' || lastState.kind === 'empty' ? lastState : { kind: 'idle' };
+        }
+        else state = runState(lastRun);
+        const runNumber = thread.runIds.length;
+        const maxRuns = getThreadRunLimit?.(thread.threadId);
+        return {
+            id: thread.threadId, threadId: thread.threadId, name: thread.name, state, reusable: thread.reusable,
+            runs, runNumber, runLimit: Number.isFinite(maxRuns) && Number(maxRuns) > 0 ? Number(maxRuns) : null,
+            durationMs: runs[runs.length - 1]?.durationMs || 0,
+            taskPreview: runs[runs.length - 1]?.taskPreview || '',
+            outcome: runs[runs.length - 1]?.outcome || '',
+        };
+    });
 
-    return [...running, ...waiting, ...finished];
+    const standalone = allTasks.filter(task => !threadRunIds.has(task.id)
+        && (!task.threadId || task.status === 'running')
+        && belongsToTab(task, activeTab, activeAgent, activeSession));
+    const seenDelivery = new Set<string>();
+    const deliveryTasks = pendingTasks.filter(task => {
+        if (task.threadId || threadRunIds.has(task.id) || !belongsToTab(task, activeTab, activeAgent, activeSession) || seenDelivery.has(task.id)) return false;
+        seenDelivery.add(task.id);
+        return true;
+    });
+    const delivered = new Set(deliveryTasks.map(task => task.id));
+    const runningStandalone = standalone.filter(task => task.status === 'running').sort((a, b) => a.createdAt - b.createdAt);
+    const waitingStandalone = deliveryTasks;
+    const waitingSet = new Set(waitingStandalone.map(task => task.id));
+    const finishedStandalone = standalone.filter(task => task.status !== 'running' && !waitingSet.has(task.id))
+        .sort((a, b) => (b.endedAt || b.createdAt) - (a.endedAt || a.createdAt)).slice(0, 10);
+    const orderedStandalone = [...runningStandalone, ...waitingStandalone, ...finishedStandalone];
+    for (const task of orderedStandalone) {
+        const run = runView(task, task.id, 1, now);
+        const state = delivered.has(task.id) ? { kind: 'delivery' as const } : runState(task);
+        rows.push({ id: task.id, name: task.name || task.id, state, reusable: false, runs: [run], runNumber: 1, runLimit: null,
+            durationMs: run.durationMs, taskPreview: run.taskPreview, outcome: run.outcome });
+    }
+    return rows;
 }
