@@ -1477,6 +1477,9 @@ załącznik, a druga opcja to cytuj i kopiuje się to do chatu jako cytat."
 
 ### Sub-agent outcome w czacie
 
+- `chat/subAgentCallView.ts` rozstrzyga czysto, czy placeholder, wynik i historia używają bloku sub-agenta czy chipa. `delegate` pozostaje blokiem; `sub_agent` blokuje tylko akcję `task` z pokwitowaniem `started` albo z `outcome`, a odmowa bez tych pól zostaje chipem.
+- `chat_streaming.ts` i `chat_messages.ts` współdzielą tę decyzję. `sub_agent task` używa tego samego buildera opcji co `delegate`; pokwitowanie w tle zachowuje `task_id` jako ostatnią linię szczegółów. Pozostałe akcje korzystają ze statusu `toolResultStatus`.
+
 - `buildSubTaskNotificationText` (`chat/subTaskNotification.ts`) używa `outcome.end` i `outcome.completeness` do stałej linii stanu. `unconfirmed` pokazuje wynik i informację o braku sprawdzenia wobec zlecenia, `partial` pokazuje zakaz raportowania jako wykonanego, dorobek z `partial.text` (fallback: `result.text`) i efekty, a `empty` podaje powód końca. Bieg bez `outcome` zachowuje dawną treść. Wszystkie nowe komunikaty mają klucze `chat.subagent_notification.*` w `core/i18n/pl.ts` i `en.ts`.
 - Wynik blokującego `delegate` składa `buildDelegateBlockOptions` (`chat/delegateBlockView.ts`), używany przez `chat_streaming` i `chat_messages`. Błąd z `partial_result` zachowuje narzędzia, szczegóły, zużycie i rzeczywisty czas. Nazwa suba może pochodzić z `result.aspect`, a tekstowe zwrotki starszych sesji zachowują odpowiedź.
 - `matchTabForOrigin` sprawdza kolejno `tabKey`, `sessionPath`, a następnie pierwszą zakładkę agenta tylko dla zleceń bez ścieżki sesji. Dostawca przekazuje `ChatTab.sessionPath` obok `_tabKey`.

@@ -30,6 +30,7 @@ import {
 } from '../../ui-components/index.js';
 import { getDateLocale, t } from '../../../core/i18n/index.js';
 import { buildDelegateBlockOptions } from './delegateBlockView.js';
+import { subAgentCallView } from './subAgentCallView.js';
 import streamingManager, { shouldUseFreshModel } from './StreamingManager.js';
 import { _tabKey } from './chat_tabs.js';
 import { buildSubTaskNotificationText, matchTabForOrigin } from './subTaskNotification.js';
@@ -109,6 +110,7 @@ interface ChatToolResult {
     started?: boolean;
     task_id?: string;
     name?: string;
+    sub_id?: string;
     tasks?: Array<{ task_id?: string; name?: string }>;
     queued?: number;
     result?: string;
@@ -131,6 +133,8 @@ interface ChatToolResult {
 interface ChatToolArgs {
     task?: string;
     aspect?: string;
+    sub_id?: string;
+    action?: unknown;
     path?: string;
     [key: string]: unknown;
 }
@@ -139,7 +143,7 @@ interface ChatToolArgs {
 interface PendingToolEntry {
     toolCall: ParsedToolCall;
     toolDisplay: HTMLElement | null;
-    isSubAgent: boolean;
+    args: ChatToolArgs;
 }
 
 /** Zakumulowana odpowiedź modelu, w zakresie, jaki maluje `handle_chunk`. */
@@ -215,9 +219,9 @@ function getAgentServerFilter(serverManager: ChatServerManager | undefined, agen
 
 /**
  * `toolCall.arguments` bywa stringiem JSON zależnie od platformy. Musi być JEDNA kopia
- * wzorca „string → JSON.parse w try/catch, inaczej obiekt" dla wszystkich siedmiu call-site'ów
- * (`_subArgs`/`_bgArgs`/`_saArgs`/`_saErrArgs`/`_saArgs2`/`readArgs`/`writeArgs`) - siedem
- * osobnych kopii dawałoby okazję do pominięcia jednej przy przyszłej poprawce, po cichu
+ * wzorca „string → JSON.parse w try/catch, inaczej obiekt" dla czterech call-site'ów
+ * (parsowanie placeholdera i wyniku współdzieli argumenty; osobne są odczyty vault_read i vault_write).
+ * Cztery osobne kopie dawałyby okazję do pominięcia jednej przy przyszłej poprawce, po cichu
  * zwracając `{}`.
  */
 function parseToolCallArgs(toolCall: ParsedToolCall): ChatToolArgs {
@@ -1178,6 +1182,7 @@ export function _chatOnToolCallsParsed(this: ChatViewLike, turn: ChatTurn, toolC
         // Brak `skill_list`/`skill_execute` tutaj: oba narzędzia nie istnieją w modules/tools,
         // i żaden alias nie mapuje na nie żywego narzędzia.
         delegate: t('chat.tool_status.delegate'),
+        sub_agent: t('chat.tool_status.sub_agent'),
         todo: t('chat.tool_status.todo'),
         generate_image: t('chat.tool_status.generate_image'),
         web_search: t('chat.tool_status.web_search'),
@@ -1190,7 +1195,8 @@ export function _chatOnToolCallsParsed(this: ChatViewLike, turn: ChatTurn, toolC
 
     // Faza 1: Create ALL pending UI blocks (sync) - only on active tab
     turn.pendingEntries = toolCalls.map(toolCall => {
-        const isSubAgent = toolCall.name === 'delegate';
+        const args = parseToolCallArgs(toolCall);
+        const isSubAgent = subAgentCallView(toolCall.name || '', args, undefined, 'pending') === 'block';
         const isAskUser = toolCall.name === 'ask_user';
         let toolDisplay = null;
         if (isActiveTab && toolCallsContainer) {
@@ -1199,8 +1205,7 @@ export function _chatOnToolCallsParsed(this: ChatViewLike, turn: ChatTurn, toolC
                 toolDisplay = this._renderAskUserBlock(toolCall, toolCallsContainer);
             } else if (isSubAgent) {
                 this.hideTypingIndicator();
-                const _subArgs = parseToolCallArgs(toolCall);
-                const _subName = _subArgs.aspect || '';
+                const _subName = args.aspect || args.sub_id || '';
                 toolDisplay = createPendingSubAgentBlock(toolCall.name as string, _subName);
             } else {
                 const statusMsg = (TOOL_STATUS as Record<string, string>)[toolCall.name as string] || `${toolCall.name}...`;
@@ -1215,7 +1220,7 @@ export function _chatOnToolCallsParsed(this: ChatViewLike, turn: ChatTurn, toolC
             toolCallsContainer.appendChild(toolDisplay);
             if (isSubAgent || isAskUser) toolDisplay.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
-        return { toolCall, toolDisplay, isSubAgent };
+        return { toolCall, toolDisplay, args };
     });
     turn.toolCallsContainer = toolCallsContainer;
     // Nowe kotwice łącznika (kafelki/ask_user właśnie wstawione wyżej) - jeden raz na rundę
@@ -1306,10 +1311,14 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
         const toolCall = r.toolCall as ParsedToolCall & { name: string };
         const pending = turn.pendingEntries?.[ti] || {};
         const toolDisplay = pending.toolDisplay;
-        const isSubAgent = pending.isSubAgent ?? (toolCall.name === 'delegate');
+        const toolArgs = pending.args || parseToolCallArgs(toolCall);
         const stash = turn.rawResults.get(toolCall.id) || { result: undefined, error: null };
         const result = stash.result;
         const error = stash.error;
+        const isPendingSubAgent = subAgentCallView(toolCall.name, toolArgs, undefined, 'pending') === 'block';
+        const isSubAgent = error
+            ? isPendingSubAgent
+            : subAgentCallView(toolCall.name, toolArgs, result, 'result') === 'block';
 
         await appendTurnSessionEvent(turn, {
             type: error ? 'mcp_error' : 'mcp_call',
@@ -1326,10 +1335,8 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                 if (isSubAgent) {
                     // Blad transportu (np. wyjatek w trakcie executeToolCall, przed dotarciem do
                     // wyniku sub-agenta) - bez `query`/`agentName` (w odroznieniu od gałęzi
-                    // `!result.success`/sukces nizej): ten wyjatek leci PRZED sparsowaniem
-                    // argumentow wywolania gdzie indziej w tym pliku, a dokladanie tu OSMEGO
-                    // wywolania `parseToolCallArgs` rozjezdzaloby sie z zablokowanym licznikiem
-                    // w `chatStreamingDedup.test.ts` (siedem call-site'ow, nazwane wprost) -
+                    // `!result.success`/sukces niżej): wyjątek używa wcześniej sparsowanych argumentów,
+                    // więc obsługa transportu nie dokłada kolejnego parsowania.
                     // `SubAgentBlock.ts` renderuje wtedy sam akapit "Result" (komunikat bledu),
                     // bez "Task".
                     toolDisplay.replaceWith(createSubAgentBlock({
@@ -1350,7 +1357,6 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                 // Delegacja W TLE. Nie ma wyniku do pokazania - jest pokwitowanie startu.
                 // Bez tej gałęzi leciała gałąź „success" niżej i rysowała PUSTĄ ramkę
                 // (brak `result.result`, `tools_used`, `duration_ms`) z zielonym „gotowe".
-                const _bgArgs = parseToolCallArgs(toolCall);
                 const startedList = Array.isArray(result.tasks)
                     ? result.tasks
                     : [{ task_id: result.task_id, name: result.name }];
@@ -1365,24 +1371,22 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                     type: toolCall.name,
                     pending: true,
                     status: 'success',
-                    agentName: startedList.length > 1 ? '' : (startedList[0]?.name || _bgArgs.aspect || ''),
-                    query: _bgArgs.task || '',
+                    agentName: startedList.length > 1 ? '' : (startedList[0]?.name || result.name || (toolCall.name === 'sub_agent' ? result.sub_id : toolArgs.aspect || result.sub_id) || ''),
+                    query: toolArgs.task || '',
                     response: buildBackgroundReceiptText(startedList, result.queued),
                 });
                 toolDisplay.replaceWith(bgBlock);
                 bgBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } else if (isSubAgent && (result?.success === true || result?.success === false)) {
-                const _saArgs = parseToolCallArgs(toolCall);
-                const fullBlock = createDelegateBlock(buildDelegateBlockOptions(result, { type: toolCall.name, agentName: _saArgs.aspect || result.aspect || '', query: _saArgs.task || '' }));
+                const fullBlock = createDelegateBlock(buildDelegateBlockOptions(result, { type: toolCall.name, agentName: result.aspect || (toolCall.name === 'sub_agent' ? result.sub_id : toolArgs.aspect || result.sub_id) || '', query: toolArgs.task || '' }));
                 toolDisplay.replaceWith(fullBlock);
                 fullBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } else if (isSubAgent && !result?.success) {
-                const _saErrArgs = parseToolCallArgs(toolCall);
                 const errorBlock = createSubAgentBlock({
                     type: toolCall.name,
                     status: 'error',
-                    agentName: _saErrArgs.aspect || '',
-                    query: _saErrArgs.task || '',
+                    agentName: toolArgs.aspect || toolArgs.sub_id || result?.sub_id || '',
+                    query: toolArgs.task || '',
                     response: t('chat.streaming.error_prefix', { message: result?.error || t('chat.subagent_notification.unknown_error') }),
                     duration: 0,
                 });
@@ -1439,8 +1443,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
             // Oficjalny estymator getTokenCount, nie ad-hoc znaki/4; wpis oznaczony estimated.
             let estimated = false;
             if (subInput === 0) {
-                const _saArgs2 = parseToolCallArgs(toolCall);
-                let estText = _saArgs2.task || '';
+                let estText = toolArgs.task || '';
                 // `DelegateTool` zawsze zwraca `tool_call_details` w snake_case.
                 const tcd = result.tool_call_details;
                 if (tcd?.length) {

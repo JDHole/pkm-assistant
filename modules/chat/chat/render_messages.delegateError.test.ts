@@ -112,6 +112,10 @@ function findByClass(root: FakeEl, cls: string): FakeEl | null {
     return null;
 }
 
+function deepText(root: FakeEl): string {
+    return root.textContent + root.children.map(deepText).join('');
+}
+
 // Async-aware (`render_messages`/`append_message` są `async function` z `await` PRZED pierwszym
 // `document.createElement` - `renderMachineTile` (`machineTile.ts`) dla `append_message` odpala
 // dopiero PO `await this.rollingWindow.addMessage(...)`, i sama jest `async` - rozwiązuje ścieżkę
@@ -343,3 +347,43 @@ for (const sample of [
         });
     });
 }
+
+test.serial('render_messages: sub_agent task, pokwitowanie, list i odmowa maja wlasciwe bloki i chipy', async t => {
+    await withFakeDocument(async () => {
+        const render = async (output: unknown, args: Record<string, unknown>) => {
+            const container = makeFakeEl();
+            await render_messages.call(buildFakeThis(container, [
+                { role: 'assistant', content: '', tool_calls: [{ id: 'sub-call', function: { name: 'sub_agent', arguments: JSON.stringify(args) } }] },
+                { role: 'tool', tool_call_id: 'sub-call', content: JSON.stringify(output) },
+            ]));
+            return container;
+        };
+        const partialContainer = await render({ success: false, aspect: 'literal-sub', outcome: { end: 'limit' }, error: 'limit', partial_result: 'dorobek' }, { action: 'task', task: 'zadanie' });
+        const partial = findByClass(partialContainer, 'cs-tile--agent');
+        t.truthy(partial);
+        t.true(partial!.classList.contains('cs-tile--error'));
+        t.true(findByClass(partial!, 'cs-tile__title')?.textContent.includes('literal-sub') ?? false);
+
+        const receiptContainer = await render({ started: true, success: true, task_id: 'sub/id#7', sub_id: 'sub/worker' }, { action: 'task', task: 'zadanie' });
+        const receipt = findByClass(receiptContainer, 'cs-tile--agent');
+        t.truthy(receipt);
+        t.is(findByClass(receipt!, 'cs-tile__title')?.textContent, 'Sent to background: sub/worker');
+        const receiptDetails = findByClass(receipt!, 'cs-tile__details');
+        t.truthy(receiptDetails);
+        const receiptHead = findByClass(receipt!, 'cs-tile__head');
+        (receiptHead?.listeners.click || []).forEach(cb => cb({}));
+        t.true(deepText(receiptDetails!).trimEnd().endsWith('sub/id#7'));
+
+        const fallbackContainer = await render({ success: true, outcome: { end: 'done' }, sub_id: 'sub/fallback', result: 'gotowe' }, { action: 'task', task: 'zadanie', aspect: 'wrong-args-name' });
+        const fallback = findByClass(fallbackContainer, 'cs-tile--agent');
+        t.truthy(fallback);
+        t.is(findByClass(fallback!, 'cs-tile__title')?.textContent, 'Sub-agent sub/fallback');
+
+        const listContainer = await render({ success: true, threads: [] }, { action: 'list' });
+        t.truthy(findByClass(listContainer, 'cs-tile--ok'));
+
+        const deniedContainer = await render({ success: false, error: 'odmowa' }, { action: 'task' });
+        t.truthy(findByClass(deniedContainer, 'cs-tile--error'));
+        t.falsy(findByClass(deniedContainer, 'cs-tile--agent'));
+    });
+});
