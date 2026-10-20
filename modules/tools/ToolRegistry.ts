@@ -100,7 +100,7 @@ const BUILTIN_TOOL_MAP: Record<string, string[]> = {
     multimodal: ['generate_image', 'add_text_to_image'],
     // `agent_message` OUT — poczta ma własny serwer `komunikator`.
     delegation: [
-        'delegate', 'agent_delegate'
+        'delegate', 'sub_agent', 'agent_delegate'
     ],
     // Serwer `skills` nie istnieje: skill_list/skill_execute skasowane.
     // Odkrywalność skilli = indeks w prompcie, przepis czytany przez `read`.

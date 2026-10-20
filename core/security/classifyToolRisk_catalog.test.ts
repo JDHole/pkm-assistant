@@ -51,6 +51,7 @@ const EXPECTED: Record<string, ToolRiskLevel> = {
     add_text_to_image: TOOL_RISK_LEVELS.YELLOW,
     // delegation
     delegate: TOOL_RISK_LEVELS.YELLOW,
+    sub_agent: TOOL_RISK_LEVELS.RED, // brak operationMode jest fail-closed
     agent_delegate: TOOL_RISK_LEVELS.YELLOW,
     // komunikator
     kom_send: TOOL_RISK_LEVELS.YELLOW,
@@ -105,6 +106,12 @@ test('todo: get/list/read=GREEN (dowolna wielkość liter); każda inna akcja (i
     for (const mode of ['add', 'check', 'uncheck', 'finish', undefined]) {
         t.is(classifyToolRisk({ toolName: 'todo', operationMode: mode }), TOOL_RISK_LEVELS.YELLOW, `mode=${mode}`);
     }
+});
+
+test('sub_agent: task/message=YELLOW, stop/close/list=GREEN, brak lub akcja nieznana=RED', t => {
+    for (const mode of ['task', 'message']) t.is(classifyToolRisk({ toolName: 'sub_agent', operationMode: mode }), TOOL_RISK_LEVELS.YELLOW);
+    for (const mode of ['stop', 'close', 'list']) t.is(classifyToolRisk({ toolName: 'sub_agent', operationMode: mode }), TOOL_RISK_LEVELS.GREEN);
+    for (const mode of [undefined, 'unknown']) t.is(classifyToolRisk({ toolName: 'sub_agent', operationMode: mode }), TOOL_RISK_LEVELS.RED);
 });
 
 // ─── Aliasy wsteczne `vault_*` — poza dzisiejszym BUILTIN_TOOL_MAP (narzędzia straciły

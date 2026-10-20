@@ -337,6 +337,7 @@ const ACTION_TYPE_MAP: Record<string, string> = {
     'memory_links': 'vault.read',
     'memory_semantic': 'vault.read',
     'delegate': 'delegate',
+    'sub_agent': 'delegate',
     // `agent_message` nie jest realnym prymitywem - wpis zostaje jako fail-safe dla starych historii
     // sesji / promptów, żeby wywołanie po nieistniejącej nazwie nie wpadło w 'unknown'.
     'agent_message': 'agent.message',
@@ -544,7 +545,9 @@ export class MCPClient {
                 // narzędzie wyprowadza skutek (brak = `replace`, czyli nadpisanie = RED).
                 // `action` jest tu już przeniesione na `mode` przez `normalizeArgsAliases`;
                 // ten warunek to druga warstwa dla wołaczy, którzy normalizację ominęli.
-                operationMode: (toolName === 'write' || toolName === 'vault_write')
+                operationMode: toolName === 'sub_agent'
+                    ? (args?.action || null)
+                    : (toolName === 'write' || toolName === 'vault_write')
                     ? (args?.mode || null)
                     : (args?.mode || args?.action || null),
                 isExternalTool,
@@ -841,6 +844,9 @@ export class MCPClient {
             const argsWithContext: ToolCallArgs = (args && typeof args === 'object' && !Array.isArray(args))
                 ? { ...args, _invocationAgentName: invocationAgentName }
                 : { _invocationAgentName: invocationAgentName };
+            delete argsWithContext._invocationThreadId;
+            delete argsWithContext._invocationThreadAccepted;
+            delete argsWithContext._invocationBackground;
             // Ten sam wzorzec co `_invocationAgentName` - zaufany znacznik od runtime'u,
             // nie od modelu. Poza delegacją pole jest USUWANE (model mógłby podać ujemną
             // wartość i wyzerować licznik głębi u dziecka), w delegacji zawsze nadpisywane.

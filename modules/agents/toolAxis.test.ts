@@ -81,6 +81,12 @@ test('migracja: mcp:false degraduje delegację, ale nie vault (short-circuit onl
     t.false(disabled.includes('read'), 'vault dalej dostępny mimo mcp:false');
 });
 
+test('migracja: mcp:false wyłącza wszystkie trzy narzędzia delegacji', t => {
+    const disabled = computeDisabledToolsFromLegacy({ mcp_servers: ['delegation'], default_permissions: { mcp: false } });
+    t.deepEqual(disabled.filter(name => ['delegate', 'agent_delegate', 'sub_agent'].includes(name)),
+        ['delegate', 'sub_agent', 'agent_delegate']);
+});
+
 // ─── Default nowego agenta ───
 
 test('defaultDisabledTools: 5 grup wyłączonych (web/multimodal/delegation/artifacts/komunikator) minus wyjątki', t => {

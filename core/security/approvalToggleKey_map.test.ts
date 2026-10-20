@@ -10,7 +10,7 @@
 import test from 'ava';
 import { PermissionSystem, APPROVAL_DEFAULTS } from './PermissionSystem.js';
 
-// Pinowana mapa katalogu (core/security/PermissionSystem.ts:432-464, 15 wpisów).
+// Pinowana mapa katalogu (core/security/PermissionSystem.ts, 16 wpisów).
 // Uwaga: mapa w PermissionSystem to LOKALNA stała funkcji — ten pin wykrywa
 // ZMIANĘ i USUNIĘCIE wpisu, ale nie wykryje wpisu DODANEGO (nie ma jak policzyć źródła).
 const EXPECTED_TOGGLE_KEYS: Record<string, string> = {
@@ -24,6 +24,7 @@ const EXPECTED_TOGGLE_KEYS: Record<string, string> = {
     generate_image: 'generate_image',
     add_text_to_image: 'generate_image', // alias pod lupą tego testu
     delegate: 'delegate',
+    sub_agent: 'delegate',
     kom_send: 'kom_send',
     agent_delegate: 'kom_send', // dzieli przełącznik z pocztą, NIE z 'delegate'
     artifact_create: 'artifact_create',
@@ -31,11 +32,21 @@ const EXPECTED_TOGGLE_KEYS: Record<string, string> = {
     todo: 'todo',
 };
 
-test('_getApprovalToggleKey: pinowana mapa katalogu (15 wpisów; zmiana/usunięcie łapane, dodanie nie)', t => {
+test('_getApprovalToggleKey: pinowana mapa katalogu (16 wpisów; zmiana/usunięcie łapane, dodanie nie)', t => {
     const ps = new PermissionSystem(null, {});
     for (const [toolName, expectedKey] of Object.entries(EXPECTED_TOGGLE_KEYS)) {
         t.is(ps._getApprovalToggleKey(toolName), expectedKey, `"${toolName}" -> "${expectedKey}"`);
     }
+});
+
+test('sub_agent uses the shared delegate approval switch for task and message', t => {
+    const ps = new PermissionSystem(null, {});
+    t.is(ps._getApprovalToggleKey('sub_agent'), 'delegate');
+    t.false(ps.requiresApproval('delegate', '', 'sub_agent', { approvalToggles: { delegate: false } }, 'edge', { operationMode: 'task' }));
+    t.true(ps.requiresApproval('delegate', '', 'sub_agent', { approvalToggles: { delegate: true } }, 'edge', { operationMode: 'message' }));
+    t.false(ps.requiresApproval('delegate', '', 'sub_agent', { approvalToggles: { delegate: true } }, 'edge', { operationMode: 'stop' }));
+    t.true(ps.requiresApproval('delegate', '', 'sub_agent', {}, 'all', { operationMode: 'list' }));
+    t.false(ps.requiresApproval('delegate', '', 'sub_agent', {}, 'yolo', { operationMode: 'task' }));
 });
 
 test('_getApprovalToggleKey: nieznane narzędzie i null → null (brak własnego przełącznika)', t => {

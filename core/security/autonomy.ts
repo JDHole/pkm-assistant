@@ -151,6 +151,12 @@ export function classifyToolRisk({
     // skutku i ma podlegać temu samemu przełącznikowi.
     if (tool === 'kom_send' || tool === 'agent_delegate') return TOOL_RISK_LEVELS.YELLOW;
 
+    if (tool === 'sub_agent') {
+        if (operationMode === 'task' || operationMode === 'message') return TOOL_RISK_LEVELS.YELLOW;
+        if (['stop', 'close', 'list'].includes(String(operationMode || '').toLowerCase())) return TOOL_RISK_LEVELS.GREEN;
+        return TOOL_RISK_LEVELS.RED;
+    }
+
     const redTools = new Set([
         'delete', 'vault_delete', 'memory_delete',
         // `agent_message`/`connect_to_server` już nie istnieją — wpisy zostają fail-closed

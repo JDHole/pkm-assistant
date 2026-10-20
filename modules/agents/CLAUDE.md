@@ -2,7 +2,7 @@
 
 **Infrastruktura agentów.** `AgentManager` (CRUD per agent, profil, przełączanie aktywnego agenta), `AgentLoader` (ładowanie z vault + wbudowanego agenta), `AgentProfileView` (panel profilu, 8 zakładek), `toolAxis.ts` (jedna oś narzędziowa `disabled_tools`).
 
-**Agent = Persona (osobowość) + Umiejętności (skille + konektory) + Uprawnienia + Ekipa (suby) + Pamięć.** Sterowanie wbudowanymi narzędziami idzie przez negatywną oś `disabled_tools`, nie przez `enabled_tools`/`permissions`; `mcp_servers[]` jest dodatkowym opt-inem wyłącznie dla serwerów userowych.
+**Agent = Persona (osobowość) + Umiejętności (skille + konektory) + Uprawnienia + Ekipa (suby) + Pamięć.** Sterowanie wbudowanymi narzędziami idzie przez negatywną oś `disabled_tools`, nie przez `enabled_tools`/`permissions`; `mcp_servers[]` jest dodatkowym opt-inem wyłącznie dla serwerów userowych. Grupa `delegation` obejmuje `delegate`, `sub_agent` i `agent_delegate`, więc jej wyłączenie ukrywa i blokuje sterowanie wątkami subów.
 
 **W kodzie pluginu jest tylko jeden wbudowany agent: Jaskier** (systemowy agent onboardingowy, `archetypes/HumanVibe.ts` / `createJaskier`). Pozostali agenci to agenci użytkownika (własne pliki YAML) i żyją poza kodem pluginu. Plugin daje im runtime + UI do produkcji.
 
@@ -201,12 +201,13 @@ Zapis do `<nazwa>_overrides.yaml` jest **diffem** względem fabrycznej konfigura
   `filterByAgent` - WIDOCZNOŚĆ, czyli co model dostaje w definicjach narzędzi; świadomie NIE w
   `checkToolAxis` - EGZEKUCJA, wywołanie po dokładnej nazwie zostaje możliwe bez zmian, żeby nie
   wywrócić istniejących testów integracyjnych `AgentDelegateTool.test.ts`) - **nie tutaj**, w
-  `toolAxis.ts`: `BUILTIN_TOOL_GROUPS.delegation` dalej niesie `['delegate', 'agent_delegate']`
-  nietknięte, bo ta lista karmi migrację starych YAML-i (`computeDisabledToolsFromLegacy`) i
+  `toolAxis.ts`: `BUILTIN_TOOL_GROUPS.delegation` niesie `['delegate', 'sub_agent', 'agent_delegate']`,
+  bo ta lista karmi migrację starych YAML-i (`computeDisabledToolsFromLegacy`) i
   etykiety UI, nie decyduje o tym, co model DOSTAJE. Efekt: `agent.disabled_tools` starego
   profilu może dalej NIE zawierać `agent_delegate` (agent "miał" delegację włączoną) - to
   normalne i bez znaczenia, bo `ToolRegistry.filterByAgent` i tak odmawia niezależnie od tej
-  listy. `delegate` (sub-agenci, `modules/sub-agents/`) NIE jest uśpione - zero zmian. Kod
+  listy. `delegate` (sub-agenci, `modules/sub-agents/`) NIE jest uśpione - zero zmian.
+  Przy migracji legacy `mcp:false` wyłącza wszystkie trzy narzędzia delegacji. Kod
   przycisku "Przejdź do agenta X" (`modules/chat/chat/chat_artifacts.ts`'s
   `_renderDelegationButton`) i klucze i18n (`mcp.agent_delegate.*`, `tool.agent_delegate`,
   `tools.label.agent_delegate`, `chat.tool_status.agent_delegate`) ZOSTAJĄ - `chat_streaming.ts`

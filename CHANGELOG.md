@@ -21,6 +21,9 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Sub-agent runs now record their classified outcome, tool effects, and checked target state in the run result and registry.
 - The tools module exposes effect descriptions and target checks for built-in and external MCP tool calls.
 - Background sub-agent notifications now report their classified outcome, completeness, and checked effects.
+- The lead can message, continue, stop, close, and list owned sub-agent threads with `sub_agent`.
+- Delegate responses expose reusable thread IDs and preserve them in background acknowledgements.
+- Sub-agent thread actions use the delegate permission and approval toggle, with action-specific risk levels.
 - Blocking delegate results now use the same result block in live chat and restored history, including partial work and actual duration.
 - Background sub-agent results now match chat tabs by session path before falling back to an agent tab.
 - Closing a chat tab or chat view now marks sub-agent stops as system initiated.
@@ -35,6 +38,13 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Continued sub-agent tasks keep the thread's original model when defaults change and refuse a removed model before starting a run.
+- Continued worker tasks keep an agent's explicit main model when that model is absent from the library.
+- Legacy `mcp:false` migration now disables `sub_agent` with the other delegation tools.
+- Delegate ignores model supplied background overrides, preserving the parallel run limit.
+- Delegate ignores model supplied continuation fields, so only `sub_agent` can resume an owned thread after the user stops it.
+- Sub-agent message approval follows `action` even when an extra `mode` field is supplied.
+- Blocking delegate task lists now include reusable `sub_id` values and continuation notes on incomplete results.
 - Failed assignment after creating a sub-agent template copy now triggers best-effort cleanup and reports the error; cleanup failures are logged.
 
 ## 2.3.3 - 2026-10-19
