@@ -310,10 +310,12 @@ Odlew per agent = `<agent-slug>-researcher` (standardowe `instantiate`). Przepis
   modelowi `{success:false}` - patrz `modules/tools/CLAUDE.md`.
   - **`'error'` powstaje w runnerze, nie w pętli.** `runAgentLoop` przy wyjątku po prostu rzuca
     dalej i nie zna takiej wartości; runner ją nadaje w `catch`.
-  - **Backstop nie jest błędem.** Sub, któremu skończyły się iteracje, wraca jako `success:true`
-    + `stopped_by:'backstop'` - jego wynik może być niepełny albo być zaślepką, ale bieg się
-    odbył. Rozróżnienie „zaślepka czy dorobek" widać w trace pętli (`loop.end … fallback=1`,
-    patrz `modules/agent-loop/CLAUDE.md`).
+  - **Backstop nie jest wyjątkiem, ale nie jest też sukcesem.** Sub, któremu skończyły się
+    iteracje, ma `stoppedBy:'backstop'` i `outcome.end.kind:'limit'`, więc `completeness` nigdy
+    nie jest `unconfirmed`. `DelegateTool` oddaje wtedy `success:false` z `partial_result`
+    (dorobek zachowany), a nie sukces (reguła 6.1, `modules/tools/CLAUDE.md`). Rozróżnienie
+    „zaślepka czy dorobek" widać w `outcome.hasAnswer`/`hasMaterial` i w trace pętli
+    (`loop.end … fallback=1`, patrz `modules/agent-loop/CLAUDE.md`).
 - ⚠️ **`postMessage` to DORĘCZENIE PRZY NAJBLIŻSZEJ ITERACJI, nie przerwanie.**
   `registry.postMessage(id, tekst)` wrzuca polecenie do kolejki biegu; runner zdejmuje je hakiem
   `beforeContinue` (JEDYNY hook, jaki suby podpinają do pętli) i dopisuje do transkryptu jako
