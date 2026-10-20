@@ -231,6 +231,27 @@ test('buildMachineView: status:"aborted" - status error, tytul WLASNY "przerwany
     t.false(view!.title.includes('padł'), 'aborted nie dzieli tytulu z error (uwaga 10, spec A3-fix)');
 });
 
+test('buildMachineView: partial i empty outcome są błędem także po odtworzeniu tekstu', t => {
+    for (const completeness of ['partial', 'empty'] as const) {
+        const task = makeTask({ outcome: { end: { kind: 'timeout' }, completeness, hasAnswer: false, hasMaterial: completeness === 'partial', effects: [] } as any });
+        const text = buildSubTaskNotificationText(task);
+        const view = buildMachineView({ role: 'user', content: text }, { t: translate });
+        t.is(view?.status, 'error');
+    }
+});
+
+test('buildMachineView: angielska etykieta partial po odtworzeniu daje błąd', t => {
+    const status = `${translate('chat.subagent_notification.end_timeout', undefined, 'en')} · ${translate('chat.subagent_notification.completeness_partial', undefined, 'en')}`;
+    const text = [
+        translate('chat.subagent_notification.header', { name: 'pkm-sub', task_id: 'sub/pkm-sub#3' }, 'en'),
+        translate('chat.subagent_notification.meta_with_time', { status, seconds: '3.0' }, 'en'),
+        translate('chat.subagent_notification.partial', undefined, 'en'),
+        'SAVED WORK',
+        translate('chat.subagent_notification.footer', undefined, 'en'),
+    ].join('\n\n');
+    t.is(buildMachineView({ role: 'user', content: text }, { t: translate })?.status, 'error');
+});
+
 // ── Uwaga 2 (spec A3-fix): identyfikator suba jako OSTATNIA linia details ───────────────────
 
 test('buildMachineView: identyfikator suba jest OSTATNIA linia details (fallback po treści)', t => {

@@ -1,5 +1,5 @@
 import test from 'ava';
-import { setLocale } from '../../../core/i18n/index.js';
+import { setLocale, t as tr } from '../../../core/i18n/index.js';
 import { buildSubTaskNotificationText, matchTabForOrigin } from './subTaskNotification.js';
 import type { SubTask } from '../../sub-agents/index.js';
 
@@ -165,4 +165,89 @@ test('śmieciowy maxResultChars spada na default subagent_result_max_chars (60k)
     const text = buildSubTaskNotificationText(makeTask({ result: { text: dlugi, toolsUsed: [], durationMs: 1000, usage: null } }), { maxResultChars: Number.NaN });
     t.false(text.includes(dlugi));
     t.true(text.includes('W'.repeat(60_000)));
+});
+
+test('outcome unconfirmed dodaje etykiety, czas, wynik i notę o weryfikacji', t => {
+    const outcome = { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true, effects: [] } as const;
+    const text = buildSubTaskNotificationText(makeTask({ outcome: outcome as any }));
+    t.is(text, [
+        tr('chat.subagent_notification.header', { name: 'pkm-sub', task_id: 'sub/pkm-sub#3' }),
+        tr('chat.subagent_notification.meta_with_time', { status: `${tr('chat.subagent_notification.end_finished')} · ${tr('chat.subagent_notification.completeness_unconfirmed')}`, seconds: '3.0' }),
+        'Znalazłem trzy notatki.',
+        tr('chat.subagent_notification.unconfirmed'),
+        tr('chat.subagent_notification.footer'),
+    ].join('\n\n'));
+});
+
+test('outcome wyświetla każdy powód końca i nadawcę zatrzymania przez tłumaczenia', t => {
+    const cases = [
+        [{ kind: 'finished' }, 'end_finished'],
+        [{ kind: 'limit', reason: 'iteration-limit' }, 'end_iteration_limit'],
+        [{ kind: 'limit', reason: 'synthesis-budget' }, 'end_synthesis_budget'],
+        [{ kind: 'uncertain' }, 'end_uncertain'],
+        [{ kind: 'stopped', by: 'user' }, 'end_stopped_user'],
+        [{ kind: 'stopped', by: 'lead' }, 'end_stopped_lead'],
+        [{ kind: 'stopped', by: 'system' }, 'end_stopped_system'],
+        [{ kind: 'timeout' }, 'end_timeout'],
+        [{ kind: 'failed', stage: 'work' }, 'end_failed_work'],
+        [{ kind: 'failed', stage: 'synthesis' }, 'end_failed_synthesis'],
+    ] as const;
+    for (const [end, key] of cases) {
+        const text = buildSubTaskNotificationText(makeTask({
+            outcome: { end, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } as any,
+        }));
+        t.true(text.includes(`${tr(`chat.subagent_notification.${key as string}`)} · ${tr('chat.subagent_notification.completeness_empty')}`), key);
+    }
+});
+
+test('outcome partial raportuje zakaz, przycięty dorobek i cztery stany efektów', t => {
+    const effects = ['matches', 'mismatch', 'not-checked', 'unknown'].map((check) => ({ tool: 'write', action: 'create', targets: [{ path: 'notatka.md' }], outcome: check === 'unknown' ? 'unknown' : 'returned', check }));
+    const text = buildSubTaskNotificationText(makeTask({ outcome: { end: { kind: 'limit', reason: 'iteration-limit' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects } as any, partial: { text: 'z'.repeat(30), lastText: '' } as any }), { maxResultChars: 10 });
+    t.is(text, [
+        tr('chat.subagent_notification.header', { name: 'pkm-sub', task_id: 'sub/pkm-sub#3' }),
+        tr('chat.subagent_notification.meta_with_time', { status: `${tr('chat.subagent_notification.end_iteration_limit')} · ${tr('chat.subagent_notification.completeness_partial')}`, seconds: '3.0' }),
+        tr('chat.subagent_notification.partial'),
+        `${'z'.repeat(10)}\n${tr('chat.subagent_notification.truncated', { chars: 10 })}`,
+        ...['matches', 'mismatch', 'not_checked', 'unknown'].map(check => tr('chat.subagent_notification.effect', { tool: 'write', target: 'notatka.md', check: tr(`chat.subagent_notification.check_${check}` as never) })),
+        tr('chat.subagent_notification.footer'),
+    ].join('\n\n'));
+});
+
+test('outcome partial używa zachowanego text nawet gdy lastText jest pusty', t => {
+    const outcome = { end: { kind: 'limit', reason: 'iteration-limit' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] } as any;
+    const text = buildSubTaskNotificationText(makeTask({ outcome, result: undefined, partial: { text: 'DOROBEK ZE SNAPSHOTU', lastText: '' } as any }));
+    t.true(text.includes('DOROBEK ZE SNAPSHOTU'));
+    t.false(text.includes(tr('chat.subagent_notification.empty_result')));
+});
+
+test('outcome partial spada na result.text, gdy snapshot nie ma dorobku', t => {
+    const outcome = { end: { kind: 'timeout' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] } as any;
+    const text = buildSubTaskNotificationText(makeTask({ outcome, partial: { text: '', lastText: 'IGNORUJ' } as any, result: { text: 'DOROBEK Z WYNIKU', toolsUsed: [], durationMs: 3000, usage: null } }));
+    t.true(text.includes('DOROBEK Z WYNIKU'));
+    t.false(text.includes('IGNORUJ'));
+});
+
+test('outcome empty wyjaśnia brak wyniku, a starszy bieg zachowuje dokładną treść', t => {
+    const legacy = buildSubTaskNotificationText(makeTask());
+    const empty = buildSubTaskNotificationText(makeTask({ outcome: { end: { kind: 'timeout' }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } as any }));
+    t.is(empty, [
+        tr('chat.subagent_notification.header', { name: 'pkm-sub', task_id: 'sub/pkm-sub#3' }),
+        tr('chat.subagent_notification.meta_with_time', { status: `${tr('chat.subagent_notification.end_timeout')} · ${tr('chat.subagent_notification.completeness_empty')}`, seconds: '3.0' }),
+        tr('chat.subagent_notification.empty', { reason: tr('chat.subagent_notification.end_timeout') }),
+        tr('chat.subagent_notification.footer'),
+    ].join('\n\n'));
+    t.is(legacy, [
+        tr('chat.subagent_notification.header', { name: 'pkm-sub', task_id: 'sub/pkm-sub#3' }),
+        tr('chat.subagent_notification.meta_with_time', { status: tr('chat.subagent_notification.status_done'), seconds: '3.0' }),
+        'Znalazłem trzy notatki.',
+        tr('chat.subagent_notification.footer'),
+    ].join('\n\n'));
+});
+
+test('matchTabForOrigin dopasowuje sesję i nie spada na inną sesję agenta', t => {
+    const tabs = [{ agentName: 'Jaskier', sessionPath: '/a', sessionId: 'first' }, { agentName: 'Jaskier', sessionPath: '/b', sessionId: 'second' }];
+    t.is(matchTabForOrigin(tabs, { agentName: 'Jaskier', tabKey: 'first', sessionPath: '/b' }, tabKeyFn)?.sessionId, 'first');
+    t.is(matchTabForOrigin(tabs, { agentName: 'Jaskier', sessionPath: '/b' }, tabKeyFn)?.sessionId, 'second');
+    t.is(matchTabForOrigin(tabs, { agentName: 'Jaskier', sessionPath: '/missing' }, tabKeyFn), null);
+    t.is(matchTabForOrigin(tabs, { agentName: 'Jaskier' }, tabKeyFn)?.sessionId, 'first');
 });

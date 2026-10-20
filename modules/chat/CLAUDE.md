@@ -681,7 +681,10 @@ suba kończy się długo po zamknięciu tury. Czat jest nadawcą adresu zwrotneg
   subach dla tego agenta nie osiągnął sufitu (`max_consecutive_auto_turns`, `config/limits.ts`).
   Każdy warunek niespełniony = `false`, wynik zostaje w kolejce notifiera i wraca przy
   najbliższym `drain()` (koniec tury / przełączenie zakładki / otwarcie czatu). Zakładkę
-  wskazuje pure `matchTabForOrigin` (`tabKey` -> fallback po agencie -> `null`).
+  wskazuje pure `matchTabForOrigin`: najpierw dokładny `tabKey`, potem zakładka z tą samą
+  `sessionPath`. Fallback do pierwszej zakładki agenta działa tylko bez `origin.sessionPath`;
+  jeśli zlecenie ma ścieżkę sesji i tej sesji nie ma w zakładkach, funkcja zwraca `null`,
+  a wynik zostaje w kolejce.
 - **Pierwszeństwo ma user.** W `set_generating(false)` najpierw leci istniejąca kolejka
   wiadomości usera, a dren wyniku suba odpala się TYLKO, gdy kolejki nie było. Po Stopie/
   watchdogu drenu nie ma - wynik czeka do końca następnej tury albo do przełączenia zakładki.
@@ -1447,6 +1450,15 @@ załącznik, a druga opcja to cytuj i kopiuje się to do chatu jako cytat."
   w pamięci. `chatViewClose.test.ts` wywołuje ciało `onClose` ze źródła i sprawdza realny helper
   zamykający popup. Wymiana MentionAutocomplete jest pokryta zachowaniem helpera
   `inputLifecycle.ts`, bo `renderView` buduje cały widok i importuje CSS.
+
+---
+
+### Sub-agent outcome w czacie
+
+- `buildSubTaskNotificationText` (`chat/subTaskNotification.ts`) używa `outcome.end` i `outcome.completeness` do stałej linii stanu. `unconfirmed` pokazuje wynik i informację o braku sprawdzenia wobec zlecenia, `partial` pokazuje zakaz raportowania jako wykonanego, dorobek z `partial.text` (fallback: `result.text`) i efekty, a `empty` podaje powód końca. Bieg bez `outcome` zachowuje dawną treść. Wszystkie nowe komunikaty mają klucze `chat.subagent_notification.*` w `core/i18n/pl.ts` i `en.ts`.
+- Wynik blokującego `delegate` składa `buildDelegateBlockOptions` (`chat/delegateBlockView.ts`), używany przez `chat_streaming` i `chat_messages`. Błąd z `partial_result` zachowuje narzędzia, szczegóły, zużycie i rzeczywisty czas. Nazwa suba może pochodzić z `result.aspect`, a tekstowe zwrotki starszych sesji zachowują odpowiedź.
+- `matchTabForOrigin` sprawdza kolejno `tabKey`, `sessionPath`, a następnie pierwszą zakładkę agenta tylko dla zleceń bez ścieżki sesji. Dostawca przekazuje `ChatTab.sessionPath` obok `_tabKey`.
+- Stop przy zamknięciu zakładki i widoku czatu podaje `requestStop(id, 'system')`. Przycisk Stop w pasku zachowuje domyślnego nadawcę `user`.
 
 ---
 

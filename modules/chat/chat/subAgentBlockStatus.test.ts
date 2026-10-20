@@ -1,67 +1,87 @@
-/**
- * Czyta `chat_streaming.ts` / `chat_messages.ts` PO ŹRÓDLE, bo oba importują `obsidian`
- * i AVA ich nie uniesie (wzór `stopSemantics.test.ts`).
- *
- * Realna logika (status z jawnego pola, nie z dopasowania stringa) jest przetestowana
- * behawioralnie w `modules/ui-components/SubAgentBlock.test.ts`. Ten strażnik pilnuje
- * wołaczy: że WSZYSTKIE wywołania `createSubAgentBlock(...)` w module czatu faktycznie
- * podają `status:`, a nie tylko `response:` - inaczej `SubAgentBlock` domyślnie pokazuje
- * „gotowe" (fail-open kosmetyczne, świadomy default modułu ui-components), i regresja
- * wróciłaby po cichu, mimo że sama funkcja w ui-components jest poprawna.
- */
 import test from 'ava';
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
+import { _chatOnToolResults } from './chat_streaming.js';
+import { createSubAgentBlock } from '../../ui-components/index.js';
+import { buildDelegateBlockOptions } from './delegateBlockView.js';
 
-const readSource = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
+type FakeEl = {
+    className: string;
+    textContent: string;
+    children: FakeEl[];
+    classList: { add(...names: string[]): void; remove(...names: string[]): void; toggle(name: string, force?: boolean): void; contains(name: string): boolean };
+    appendChild(child: FakeEl): FakeEl;
+    empty(): void;
+    appendText(value: string): void;
+    setAttribute(name: string, value: string): void;
+    removeAttribute(name: string): void;
+    addEventListener(name: string, listener: unknown): void;
+    scrollIntoView(): void;
+};
 
-/** Wszystkie wywołania `createSubAgentBlock({ ... })` w pliku — treść nawiasu klamrowego argumentu. */
-function callArgs(src: string): string[] {
-    const out: string[] = [];
-    const re = /createSubAgentBlock\(\{/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(src))) {
-        let depth = 1;
-        let i = m.index + m[0].length;
-        const start = i;
-        while (depth > 0 && i < src.length) {
-            if (src[i] === '{') depth++;
-            else if (src[i] === '}') depth--;
-            i++;
-        }
-        out.push(src.slice(start, i - 1));
-    }
-    return out;
+function fakeElement(): FakeEl {
+    const names = new Set<string>();
+    let content = '';
+    const el: FakeEl = {
+        children: [],
+        classList: {
+            add: (...values) => { values.forEach(value => names.add(value)); },
+            remove: (...values) => { values.forEach(value => names.delete(value)); },
+            toggle: (value, force) => { const next = force ?? !names.has(value); if (next) names.add(value); else names.delete(value); },
+            contains: value => names.has(value),
+        },
+        get className() { return [...names].join(' '); },
+        set className(value: string) { names.clear(); value.split(/\s+/).filter(Boolean).forEach(name => names.add(name)); },
+        get textContent() { return content; },
+        set textContent(value: string) { content = value; el.children = []; },
+        appendChild(child) { el.children.push(child); return child; },
+        empty() { content = ''; el.children = []; },
+        appendText(value) { content += value; },
+        setAttribute() {}, removeAttribute() {}, addEventListener() {}, scrollIntoView() {},
+    };
+    return el;
 }
 
-const streaming = readSource('./chat_streaming.ts');
-const messages = readSource('./chat_messages.ts');
+function snapshot(el: FakeEl): unknown {
+    return { className: el.className, text: el.textContent, children: el.children.map(snapshot) };
+}
 
-test('chat_streaming.ts: każde z 4 wywołań createSubAgentBlock podaje status:', t => {
-    const calls = callArgs(streaming);
-    t.is(calls.length, 4, `spodziewałem się 4 wywołań createSubAgentBlock w chat_streaming.ts, znalazłem ${calls.length} - zmieniła się liczba gałęzi?`);
-    calls.forEach((call, idx) => {
-        t.regex(call, /status:\s*(?:'error'|'success'|toolResultStatus\()/,
-            `wywołanie #${idx + 1} nie podaje status: - SubAgentBlock wróci do domyślnego „gotowe"\n${call.slice(0, 200)}`);
-    });
+async function renderLive(result: unknown, error: Error | null = null): Promise<FakeEl> {
+    const previous = (globalThis as Record<string, unknown>).document;
+    (globalThis as Record<string, unknown>).document = { createElement: () => fakeElement() };
+    try {
+        let block: FakeEl | null = null;
+        const toolCall = { id: 'call_1', name: 'delegate', arguments: JSON.stringify({ task: 'zapisz' }) };
+        const turn = {
+            agentName: 'Jaskier', toolCallsContainer: null,
+            owner: { memory: null }, origin: { sessionPath: '' },
+            rawResults: new Map([['call_1', { result, error }]]),
+            pendingEntries: [{ isSubAgent: true, toolDisplay: { replaceWith: (el: FakeEl) => { block = el; } } }],
+        };
+        const view = { _isTurnActiveTab: () => true, _scheduleConnectorRedraw: () => {}, toolReactors: { run: async () => {} } };
+        await _chatOnToolResults.call(view as never, turn as never, [{ toolCall, result }] as never, 0);
+        if (!block) throw new Error('Brak kafelka delegate');
+        return block;
+    } finally {
+        (globalThis as Record<string, unknown>).document = previous;
+    }
+}
+
+test.serial('wynik delegate na żywo odpowiada wspólnym opcjom kafelka', async t => {
+    const result = { success: false, error: 'Limit czasu', aspect: 'pkm-sub', partial_result: 'DOROBEK', tools_used: ['write'], tool_call_details: [{ name: 'write' }], usage: { prompt_tokens: 4, completion_tokens: 2 }, duration_ms: 12345 };
+    const actual = await renderLive(result);
+    const previous = (globalThis as Record<string, unknown>).document;
+    (globalThis as Record<string, unknown>).document = { createElement: () => fakeElement() };
+    try {
+        const expected = createSubAgentBlock(buildDelegateBlockOptions(result, { type: 'delegate', query: 'zapisz' })) as unknown as FakeEl;
+        t.deepEqual(snapshot(actual), snapshot(expected));
+        t.true(actual.classList.contains('cs-tile--error'));
+    } finally {
+        (globalThis as Record<string, unknown>).document = previous;
+    }
 });
 
-test('chat_streaming.ts: gałąź transportowego błędu i gałąź !result.success mają status:"error"', t => {
-    // Dwie gałęzie strukturalnie ZAWSZE oznaczają porażkę (błąd transportu / result.success===false)
-    // - literał, nie toolResultStatus(), bo `result` bywa tu undefined/kształtem spoza konwencji.
-    const errorCalls = callArgs(streaming).filter(c => /status:\s*'error'/.test(c));
-    t.is(errorCalls.length, 2, 'dokładnie dwie gałęzie (błąd transportu + !result.success) mają być na sztywno "error"');
-});
-
-test('chat_messages.ts: 2 wywolania createSubAgentBlock - wynik liczy status jak makeDisplay obok, pokwitowanie w tle (uwaga 10) ma sztywne success', t => {
-    const calls = callArgs(messages);
-    t.is(calls.length, 2, `spodziewałem się 2 wywołań createSubAgentBlock w chat_messages.ts (wynik + pokwitowanie w tle odtworzone z historii, uwaga 10 spec A2-fix), znalazłem ${calls.length}`);
-    const resultCall = calls.find(c => !/pending:\s*true/.test(c));
-    const pendingCall = calls.find(c => /pending:\s*true/.test(c));
-    t.truthy(resultCall, 'brak wywolania BEZ pending:true (galaz wyniku delegacji)');
-    t.truthy(pendingCall, 'brak wywolania Z pending:true (galaz pokwitowania w tle odtworzonego z historii)');
-    t.regex(resultCall!, /status:\s*toolResultStatus\(tcOutput\)/,
-        'historia MUSI liczyć status z toolResultStatus(tcOutput) - dokładnie jak sąsiedni makeDisplay() dla narzędzi nie-subowych, inaczej status znów rozjeżdża się między historią a live-widokiem');
-    t.regex(pendingCall!, /status:\s*'success'/,
-        'pokwitowanie w tle ma sztywne status:\'success\' - ten sam wzorzec co żywa gałąź started:true w chat_streaming.ts (pokwitowanie nie jest ani sukcesem, ani porażką delegacji, kolor daje pending)');
+test.serial('transportowy błąd i pokwitowanie w tle zachowują osobne statusy', async t => {
+    const transport = await renderLive(undefined, new Error('sieć'));
+    const started = await renderLive({ success: true, started: true, task_id: 'sub/a#1', name: 'pkm-sub' });
+    t.true(transport.classList.contains('cs-tile--error'));
+    t.true(started.classList.contains('cs-tile--pending'));
 });

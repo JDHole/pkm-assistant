@@ -29,6 +29,7 @@ import {
     isVaultNotePath,
 } from '../../ui-components/index.js';
 import { getDateLocale, t } from '../../../core/i18n/index.js';
+import { buildDelegateBlockOptions } from './delegateBlockView.js';
 import streamingManager, { shouldUseFreshModel } from './StreamingManager.js';
 import { _tabKey } from './chat_tabs.js';
 import { buildSubTaskNotificationText, matchTabForOrigin } from './subTaskNotification.js';
@@ -1266,7 +1267,7 @@ export async function _chatExecuteToolCall(
  * do store (robi to pętla) i NIE journaluje agent_message/tool_result (to beforeContinue).
  * @param {number} i - indeks iteracji (dla skillActiveAt).
  */
-export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, results: ToolResultEntry[], i: number) {
+export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, results: ToolResultEntry[], i: number, createDelegateBlock: typeof createSubAgentBlock = createSubAgentBlock) {
     const isActiveTab = this._isTurnActiveTab(turn);
     const toolCallsContainer = turn.toolCallsContainer;
     const agentName = turn.agentName;
@@ -1348,20 +1349,9 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                 });
                 toolDisplay.replaceWith(bgBlock);
                 bgBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            } else if (isSubAgent && result?.success) {
+            } else if (isSubAgent && (result?.success === true || result?.success === false)) {
                 const _saArgs = parseToolCallArgs(toolCall);
-                const fullBlock = createSubAgentBlock({
-                    type: toolCall.name,
-                    status: toolResultStatus(result),
-                    aspectType: result.aspect_type || 'researcher',
-                    agentName: _saArgs.aspect || result.aspect || '',
-                    query: _saArgs.task || '',
-                    response: typeof result.result === 'string' ? result.result : '',
-                    toolsUsed: result.tools_used || [],
-                    toolCallDetails: result.tool_call_details || [],
-                    duration: result.duration_ms || 0,
-                    usage: result.usage,
-                });
+                const fullBlock = createDelegateBlock(buildDelegateBlockOptions(result, { type: toolCall.name, agentName: _saArgs.aspect || result.aspect || '', query: _saArgs.task || '' }));
                 toolDisplay.replaceWith(fullBlock);
                 fullBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } else if (isSubAgent && !result?.success) {
@@ -2197,7 +2187,7 @@ export function stop_all_turns(this: ChatViewLike, reason = 'close'): string[] {
             const ids = collectSubTaskIdsForOwners(registry.list(), { tabKeys, agentNames: names });
             for (const id of ids) {
                 log.info('Chat', `Zamknięcie czatu → zatrzymuję bieg suba ${id}`);
-                registry.requestStop(id);
+                registry.requestStop(id, 'system');
             }
         } catch (e) {
             log.warn('Chat', `Zatrzymanie subów przy zamknięciu padło: ${(e as Error)?.message || String(e)}`);
@@ -2259,7 +2249,7 @@ export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
             // Bez adresu zwrotnego (zlecenie spoza czatu) zostaje właściciel biegu.
             agentName: task.origin?.agentName || task.agentName,
         };
-        const tab = matchTabForOrigin(this.chatTabs, origin, _tabKey);
+        const tab = matchTabForOrigin(this.chatTabs, origin, _tabKey, (item) => item.sessionPath);
 
         // Sufit ŁAŃCUCHA auto-tur po subach z rzędu. Bez tego agent w auto-turze może zlecić
         // kolejnego suba, jego wynik znów odpala auto-turę - i tak w kółko (`max_delegation_depth`
