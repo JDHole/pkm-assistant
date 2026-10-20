@@ -11,7 +11,7 @@ import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
 import { getLimits } from '../../config/limits.js';
 // „Co jest porażką narzędzia" liczy ta sama funkcja, co status chipa w czacie.
-import { resolveWorkPrompt, maskSensitiveData, toolResultStatus } from '../../core/index.js';
+import { resolveWorkPrompt, maskSensitiveData, sanitizePath, toolResultStatus } from '../../core/index.js';
 import type { PluginApi, AppLike, WorkPromptSettings } from '../../core/index.js';
 import { defaultSubAgentFramePrompt } from './framePrompt.js';
 // Rozpoznaje stare nazwy retrieval przy budowie whitelisty (fail-safe, gdyby
@@ -19,12 +19,15 @@ import { defaultSubAgentFramePrompt } from './framePrompt.js';
 // Jednolity domyślny zestaw narzędzi workera (brak podziału research/strateg).
 import { DEPRECATED_TOOL_RENAMES, DEFAULT_SUB_AGENT_TOOLS } from './SubAgentLoader.js';
 import type { SubAgentData } from './types.js';
-import type { BuiltinToolExecutionContext } from '../tools/index.js';
+import { describeToolEffect, checkEffectTargets } from '../tools/index.js';
+import type { BuiltinToolExecutionContext, ToolEffect, EffectTargetIo } from '../tools/index.js';
 // Bieg suba jest BYTEM w rejestrze (`plugin.subTaskRegistry`).
 // Sam rejestr przychodzi z pluginu (DI), stąd tylko typ - runner go nie tworzy.
 import type { SubTask, SubTaskOrigin, SubTaskRegistry, SubTaskTrace } from './SubTaskRegistry.js';
 import type { ActiveSessionEventInput } from '../memory/index.js';
 import type { ChatModel } from '../models/index.js';
+import { classifyRunEnd } from './runOutcome.js';
+import type { RunEffect, RunOutcome } from './runOutcome.js';
 
 type AgentLike = { name: string };
 
@@ -59,6 +62,7 @@ interface RunnerMcpClient {
             callerToolNames?: string[];
             resultBudgetChars?: number;
             shouldAbort?: () => boolean;
+            onExecutionStart?: () => void;
         },
     ): Promise<unknown>;
 }
@@ -66,6 +70,7 @@ interface RunnerMcpClient {
 /** Pamięć agenta w zakresie, jakiego dotyka runner (`modules/memory`, poza zakresem) —
  * dziennik biegu dopisuje się do aktywnej sesji WŁAŚCICIELA biegu. */
 interface RunnerAgentMemory {
+    paths?: { brainNotes?: string };
     appendSessionEvent?(path: string, event: ActiveSessionEventInput): Promise<string>;
     appendToActiveSession?(event: Record<string, unknown>): Promise<void>;
 }
@@ -143,6 +148,7 @@ export type SubRunResult = {
     failed?: true;
     partial?: AgentLoopPartialSnapshot;
     stopReason?: AgentLoopStopReason;
+    outcome: RunOutcome;
 };
 
 type ToolCall = { name: string; arguments: unknown };
@@ -203,6 +209,7 @@ export class SubAgentRunner {
     declare app: AppLike;
     declare plugin: RunnerPlugin;
     declare mcpClient: RunnerMcpClient | null;
+    declare effectTargetIo: EffectTargetIo;
     /**
      * @param {Object} options
      * @param {Object} options.toolRegistry - ToolRegistry instance
@@ -215,11 +222,16 @@ export class SubAgentRunner {
     // dostaje więc parametry `unknown` i zawęża je do tego, czego SAM realnie potrzebuje
     // (`getTool` na registry, pełny `PluginApi` na plugin). W praktyce to zawsze te same,
     // realne obiekty `ToolRegistry`/`App`/plugin.
-    constructor({ toolRegistry, app, plugin }: { toolRegistry: unknown; app: unknown; plugin: unknown }) {
+    constructor({ toolRegistry, app, plugin, effectTargetIo }: { toolRegistry: unknown; app: unknown; plugin: unknown; effectTargetIo?: EffectTargetIo }) {
         this.toolRegistry = toolRegistry as RunnerToolRegistry;
         this.app = app as AppLike;
         this.plugin = plugin as RunnerPlugin;
         this.mcpClient = (plugin as RunnerPlugin)?.mcpClient || null;
+        const adapter = (app as { vault?: { adapter?: { exists?: (path: string) => Promise<boolean> } } })?.vault?.adapter;
+        this.effectTargetIo = effectTargetIo ?? { exists: async (path) => {
+            if (!adapter?.exists) throw new Error('Vault adapter unavailable');
+            return adapter.exists(path);
+        } };
     }
 
     /**
@@ -260,6 +272,87 @@ export class SubAgentRunner {
         let subTask: SubTask | undefined;
         let lastPartial: AgentLoopPartialSnapshot | undefined;
         let partialPersistence: Promise<void> = Promise.resolve();
+        const effects: RunEffect[] = [];
+        const descriptions = new Map<RunEffect, ToolEffect>();
+        const callEffects = new Map<number, RunEffect>();
+        let effectsClosed = false;
+        let successfulToolResults = 0;
+        const beginEffect = (seq: number, name: string, args: unknown) => {
+            if (effectsClosed) return;
+            const described = describeToolEffect(name, args);
+            if (!described) return;
+            const entry: RunEffect = { tool: described.tool, action: described.action,
+                targets: described.targets.map(target => ({ ...target })), outcome: 'pending', check: 'not-checked' };
+            effects.push(entry);
+            descriptions.set(entry, described);
+            callEffects.set(seq, entry);
+        };
+        const completeEffect = (seq: number, name: string, args: unknown, result: unknown, failed: boolean) => {
+            if (effectsClosed) return;
+            if (!failed) successfulToolResults++;
+            const entry = callEffects.get(seq);
+            if (!entry) return;
+            // Narzędzia vaulta zwracają ścieżkę po normalizacji. Jest to cel wykonania,
+            // podczas gdy argument modelu może nadal zawierać np. kodowanie %XX.
+            const actualPath = !failed && result !== null && typeof result === 'object' && !Array.isArray(result)
+                ? (result as { path?: unknown }).path : undefined;
+            const describedArgs = typeof actualPath === 'string' && actualPath.length > 0
+                && (name === 'write' || name === 'delete' || name === 'create_folder')
+                && args !== null && typeof args === 'object' && !Array.isArray(args)
+                ? { ...args, path: actualPath } : args;
+            const described = describeToolEffect(name, describedArgs, result);
+            if (described) {
+                entry.tool = described.tool;
+                entry.action = described.action;
+                entry.targets = described.targets.map(target => ({ ...target }));
+                descriptions.set(entry, described);
+            }
+            entry.outcome = failed ? 'error' : 'returned';
+        };
+        const failEffect = (seq: number) => {
+            if (effectsClosed) return;
+            const entry = callEffects.get(seq);
+            if (entry) entry.outcome = 'error';
+        };
+        const closeEffects = (reason?: AgentLoopStopReason) => {
+            effectsClosed = true;
+            for (const entry of effects) {
+                if (entry.outcome === 'pending') {
+                    entry.outcome = 'unknown';
+                    if (reason) entry.cause = reason.kind;
+                }
+            }
+        };
+        const finalizeEffects = async () => {
+            const counts = { matches: 0, mismatch: 0, 'not-checked': 0, unknown: 0 };
+            for (const entry of effects) {
+                if (entry.outcome === 'unknown') counts.unknown++;
+                if (entry.outcome === 'returned' || entry.outcome === 'unknown') {
+                    const described = descriptions.get(entry);
+                    if (described) {
+                        const targets = described.targets.map(target => ({ ...target }));
+                        let checkable = true;
+                        for (const target of targets) {
+                            // Bez zwróconej ścieżki nie sprawdzamy surowego celu, który
+                            // narzędzie vaulta mogło znormalizować przed wykonaniem.
+                            if ((target.kind === 'vault-file' || target.kind === 'vault-folder')
+                                && target.path && sanitizePath(target.path) !== target.path) checkable = false;
+                            if (target.kind !== 'memory-file' || !target.path) continue;
+                            if (target.path.startsWith('.pkm-assistant/')) continue;
+                            let brainNotes: string | undefined;
+                            try { brainNotes = this.plugin?.agentManager?.getAgentMemory?.(agent.name)?.paths?.brainNotes; }
+                            catch { /* Niepewna ścieżka pamięci nie blokuje biegu. */ }
+                            if (brainNotes && !target.path.includes('/')) target.path = `${brainNotes}/${target.path}`;
+                            else checkable = false;
+                        }
+                        entry.check = checkable ? await checkEffectTargets({ ...described, targets }, this.effectTargetIo) : 'not-checked';
+                    }
+                }
+                counts[entry.check]++;
+            }
+            if (subTask) _safeRegistry(() => registry?.step?.(subTask as SubTask, 'effects.checked', counts));
+            return effects.map(entry => ({ ...entry, targets: entry.targets.map(target => ({ ...target })) }));
+        };
         const origin = options.origin ? { ...options.origin } : undefined;
         const memory = origin?.agentName ? this.plugin?.agentManager?.getAgentMemory?.(origin.agentName) : null;
         const chat = this.plugin?.env?.settings?.pkmAssistant?.chat as { apiKeys?: Record<string, unknown> } | undefined;
@@ -416,7 +509,10 @@ export class SubAgentRunner {
                     const seq = toolCallSeq++;
                     return this._executeTool(toolCall as ToolCall, agent.name, allowedToolNames,
                         { delegationDepth, scopeFolders: scopeFolders as string[], autonomy },
-                        () => { failedToolCalls.add(seq); }, runtimeContext);
+                        () => { failedToolCalls.add(seq); }, runtimeContext,
+                        { start: (args) => beginEffect(seq, toolCall.name ?? '', args),
+                            complete: (args, result, failed) => completeEffect(seq, toolCall.name ?? '', args, result, failed),
+                            fail: () => failEffect(seq) });
                 },
                 ...(steerHooks ? { hooks: steerHooks } : {}),
                 // Delegate po SWOIM timeoucie ubija bieg suba, żeby sub nie wisiał w tle bez końca
@@ -429,6 +525,9 @@ export class SubAgentRunner {
                 ...(options.abortReason ? { abortReason: options.abortReason } : {}),
                 knownSecrets,
                 callbacks: { partial: (snapshot) => {
+                    // AgentLoop publikuje partial po zakończeniu wywołań narzędzi.
+                    // Odbiorca zdarzenia może rozstrzygnąć wiszące narzędzie synchronicznie.
+                    closeEffects(snapshot.stopReason);
                     snapshot = JSON.parse(maskSensitiveData(JSON.stringify(snapshot)).replace(/\b(https?:\/\/)[^\s/@"\\]+@/gi, '$1[REDACTED]@')) as AgentLoopPartialSnapshot;
                     lastPartial = snapshot;
                     if (subTask) _safeRegistry(() => registry?.publishPartial?.(subTask as SubTask, snapshot));
@@ -453,7 +552,10 @@ export class SubAgentRunner {
                 modelOptions: { maxTokens: 16384, agentName: agent.name },
             });
 
+            closeEffects(response.stopReason);
             await partialPersistence;
+            const finalEffects = await finalizeEffects();
+            const outcome = classifyRunEnd({ stoppedBy: response.stoppedBy, stopReason: response.stopReason, finalText: response.finalText, partial: lastPartial, stoppedByActor: subTask?.stopRequestedBy, effects: finalEffects, successfulToolResults });
             log.info(logTag, `Task DONE: ${response.toolsUsed?.length || 0} tools, ${(response.finalText || '').length} znaków (stop: ${response.stoppedBy})`);
             log.timing(logTag, 'Task', startTime);
             log.groupEnd();
@@ -473,6 +575,7 @@ export class SubAgentRunner {
                     usage: response.usage || null,
                     stoppedBy: response.stoppedBy,
                     stopReason: response.stopReason,
+                    outcome,
                 }));
             }
             return {
@@ -488,11 +591,15 @@ export class SubAgentRunner {
                 stoppedBy: response.stoppedBy,
                 partial: lastPartial,
                 stopReason: response.stopReason,
+                outcome,
             };
         } catch (error) {
+            closeEffects(lastPartial?.stopReason);
             const safeErrorMsg = knownSecrets.reduce((text, secret) => text.split(secret).join('[REDACTED]'), _extractSafeErrorMessage(error));
             log.error(logTag, 'Task FAIL:', safeErrorMsg);
             await partialPersistence;
+            const finalEffects = await finalizeEffects();
+            const outcome = classifyRunEnd({ stoppedBy: 'error', failed: true, stopReason: lastPartial?.stopReason, finalText: '', partial: lastPartial, stoppedByActor: subTask?.stopRequestedBy, effects: finalEffects, successfulToolResults });
             log.groupEnd();
             // TEN SAM kształt bloku co przy udanym biegu (`subagent_call`) - te same pola
             // nagłówka, status niesie treść `result`. Bez typu `subagent_error` znanego
@@ -507,7 +614,7 @@ export class SubAgentRunner {
                 duration_ms: Date.now() - startTime
             }, origin, memory);
             // Bieg mógł się nie założyć (błąd przed `create`) - wtedy nie ma czego domykać.
-            if (subTask) _safeRegistry(() => registry?.fail?.(subTask as SubTask, safeErrorMsg));
+            if (subTask) _safeRegistry(() => registry?.fail?.(subTask as SubTask, safeErrorMsg, outcome));
             return {
                 result: t('subagent.error', { name: config.name, error: safeErrorMsg }),
                 toolsUsed: [...(lastPartial?.toolsUsed || [])],
@@ -521,6 +628,7 @@ export class SubAgentRunner {
                 failed: true,
                 partial: lastPartial,
                 stopReason: lastPartial?.stopReason,
+                outcome,
             };
         }
     }
@@ -726,6 +834,7 @@ export class SubAgentRunner {
         execOptions: Pick<RunOptions, 'delegationDepth' | 'scopeFolders' | 'autonomy'> = {},
         onFailure?: () => void,
         runtimeContext: ToolExecutionContext = { resultBudgetChars: 0, shouldAbort: () => false },
+        effectHooks?: { start(args: unknown): void; complete(args: unknown, result: unknown, failed: boolean): void; fail(): void },
     ) {
         log.debug('SubAgent', `_executeTool: ${toolCall.name} (agent: ${agentName || 'brak'})`);
 
@@ -760,6 +869,10 @@ export class SubAgentRunner {
         };
 
         try {
+            let describedArgs: unknown = toolCall.arguments;
+            if (typeof describedArgs === 'string') {
+                try { describedArgs = JSON.parse(describedArgs); } catch { /* MCPClient validates arguments. */ }
+            }
             // Route through MCPClient for permission + whitelist enforcement.
             // sub-agent dziedziczy tryb PYTAŃ po turze, która go zleciła.
             // Wartość jest ZAMROŻONA w `execOptions.autonomy` (podaje ją
@@ -775,11 +888,15 @@ export class SubAgentRunner {
                     scopeFolders: execOptions.scopeFolders,
                     resultBudgetChars: runtimeContext.resultBudgetChars,
                     shouldAbort: runtimeContext.shouldAbort,
+                    onExecutionStart: () => effectHooks?.start(describedArgs),
                     // Whitelista TEGO suba jedzie dalej jako znacznik,
                     // żeby `delegate` policzył narzędzia wnuka względem niego, nie względem
                     // agenta głównego. Lista jest już przecięciem rodzic∩sub (patrz `runTask`).
                     ...(allowedToolNames ? { callerToolNames: [...allowedToolNames] } : {}),
                 });
+                const sanitized = stripImageBase64ForTranscript(toolCall.name, result);
+                effectHooks?.complete(describedArgs, result,
+                    toolResultStatus(sanitized) === 'error' || (_isBoundedReadTextError(toolCall, sanitized) && sanitized === 'B'));
                 return asTranscript(result);
             }
 
@@ -827,6 +944,7 @@ export class SubAgentRunner {
                 args = trustedArgs;
             }
             const requestedBudget = runtimeContext.resultBudgetChars > 0 ? runtimeContext.resultBudgetChars : 0;
+            effectHooks?.start(args);
             const result = await tool.execute(args, this.app, this.plugin, {
                 resultBudgetChars: requestedBudget,
                 effectiveResultBudgetChars: requestedBudget > 0 ? Math.min(requestedBudget, 12000) : 12000,
@@ -836,8 +954,12 @@ export class SubAgentRunner {
                 authorizeFileRead: () => ({ allowed: false, reason: 'Permission context unavailable' }),
                 serializeFinalResult: (candidate) => JSON.stringify(candidate) ?? '',
             });
+            const sanitized = stripImageBase64ForTranscript(toolCall.name, result);
+            effectHooks?.complete(args, result,
+                toolResultStatus(sanitized) === 'error' || (_isBoundedReadTextError(toolCall, sanitized) && sanitized === 'B'));
             return asTranscript(result);
         } catch (error) {
+            effectHooks?.fail();
             onFailure?.();
             // Błąd narzędzia wraca do transkryptu suba - też przez maskę.
             return t('subagent.tool_error', {

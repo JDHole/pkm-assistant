@@ -37,6 +37,7 @@ import type { AgentLoopPartialSnapshot, AgentLoopStopReason } from '../agent-loo
 import { maskSensitiveData } from '../../core/index.js';
 import { EventEmitter } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
+import type { RunOutcome, StopBy } from './runOutcome.js';
 
 /** Stan biegu suba. `aborted` = ubity z zewnątrz (timeout delegacji), `error` = wyjątek. */
 export type SubTaskStatus = 'running' | 'done' | 'error' | 'aborted';
@@ -64,6 +65,7 @@ export interface SubTaskResult {
     usage: unknown;
     stoppedBy?: 'natural' | 'backstop' | 'abort';
     stopReason?: AgentLoopStopReason;
+    outcome?: RunOutcome;
 }
 
 /**
@@ -89,6 +91,8 @@ export interface SubTask {
     steps: SubTaskStep[];
     budget: SubTaskBudget;
     result?: SubTaskResult;
+    outcome?: RunOutcome;
+    stopRequestedBy?: StopBy;
     partial?: AgentLoopPartialSnapshot;
     partialStorageError?: boolean;
     error?: string;
@@ -325,6 +329,7 @@ export class SubTaskRegistry {
             if (!task) return;
             if (task.status !== 'running') return;
             task.result = result;
+            task.outcome = result.outcome;
             task.status = result?.stoppedBy === 'abort' ? 'aborted' : 'done';
             task.endedAt = Date.now();
             this.events.emit('task:finished', task);
@@ -335,12 +340,13 @@ export class SubTaskRegistry {
     }
 
     /** Domyka bieg błędem. Tekst błędu maskujemy — API zwraca w nim czasem klucz. */
-    fail(task: SubTask, error: string): void {
+    fail(task: SubTask, error: string, outcome?: RunOutcome): void {
         try {
             if (!task) return;
             if (task.status !== 'running') return;
             const message = typeof error === 'string' ? error : String(error);
             task.status = 'error';
+            if (outcome) task.outcome = outcome;
             task.error = this._mask ? this._mask(message) : message;
             task.endedAt = Date.now();
             this.events.emit('task:finished', task);
@@ -380,15 +386,16 @@ export class SubTaskRegistry {
      * lądują od razu (panel może pokazać „zatrzymywanie…"), ale status zmieni się dopiero,
      * gdy pętla suba naprawdę stanie i domknie byt przez `finish`/`fail`.
      */
-    requestStop(id: string): boolean {
+    requestStop(id: string, by: StopBy = 'user'): boolean {
         try {
             const task = this._tasks.get(id);
             const stop = this._aborts.get(id);
             if (!task || !stop || task.status !== 'running') return false;
             task.stopRequested = true;
+            task.stopRequestedBy ??= by;
             // Ślad idzie tą samą drogą co reszta kroków — także do trace.log. Harness liczy
             // KONKRETNE typy zdarzeń, więc dodatkowy typ go nie rusza.
-            this.step(task, 'stop.requested', { by: 'panel' });
+            this.step(task, 'stop.requested', { by: task.stopRequestedBy });
             try {
                 stop();
             } catch (e) {
@@ -427,9 +434,10 @@ export class SubTaskRegistry {
                 try {
                     if (task && task.status === 'running' && !task.stopRequested) {
                         task.stopRequested = true;
+                        task.stopRequestedBy ??= 'system';
                         // Ślad tą samą drogą co `requestStop` — trace.log jeszcze żyje (zamykamy
                         // go po rejestrze), więc w logu zostaje dowód, że bieg dostał sygnał.
-                        this.step(task, 'stop.requested', { by: reason });
+                        this.step(task, 'stop.requested', { by: task.stopRequestedBy, reason });
                     }
                     stop();
                     stopped++;
