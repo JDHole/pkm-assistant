@@ -1147,6 +1147,116 @@ test('AgentMemory.saveSession: `created` od wolacza wygrywa z „teraz" na NOWYM
     t.truthy(meta.updated, '`updated` to moment zapisu');
 });
 
+test('nowe aktywne sesje i zapis saveSession dostają różne epoki, a odczyt starej sesji niczego nie zapisuje', async t => {
+    const { vault, files, touched } = makeVault();
+    const memory = new AgentMemory(vault, 'Jaskier');
+    const firstPath = await memory.startActiveSession('Jaskier');
+    const first = await memory.loadActiveSession(firstPath);
+    t.regex(String(first.metadata.epoch), /^[0-9a-f]{32}$/);
+
+    await memory.startNewSession();
+    const secondPath = await memory.startActiveSession('Jaskier');
+    const second = await memory.loadActiveSession(secondPath);
+    t.regex(String(second.metadata.epoch), /^[0-9a-f]{32}$/);
+    t.not(first.metadata.epoch, second.metadata.epoch);
+
+    await memory.startNewSession();
+    const savePath = await memory.saveSession([{ role: 'user', content: 'Pytanie' }]);
+    const saved = await memory.loadActiveSession(savePath);
+    t.regex(String(saved.metadata.epoch), /^[0-9a-f]{32}$/);
+    t.not(second.metadata.epoch, saved.metadata.epoch);
+
+    const legacyPath = `${memory.paths.sessionsActive}/legacy.md`;
+    const legacy = '---\ntype: active_session\nagent: Jaskier\n---\n\n# Stara\n';
+    files[legacyPath] = legacy;
+    memory.setActiveSessionIdentity('sessions/active/current.md', 'dddddddddddddddddddddddddddddddd');
+    const writesBefore = touched.write.length;
+    t.is((await memory.loadActiveSession(legacyPath)).metadata.epoch, null);
+    t.is(files[legacyPath], legacy);
+    t.is(touched.write.length, writesBefore);
+    t.is(memory.activeSessionPath, 'sessions/active/current.md');
+    t.is(memory.sessionEpoch, 'dddddddddddddddddddddddddddddddd');
+});
+
+test('saveSession nie przypisuje epoki nowego pliku do pamięci przełączonej na inną sesję', async t => {
+    const { vault } = makeVault();
+    const memory = new AgentMemory(vault, 'Jaskier');
+    let releaseRead!: () => void;
+    let signalRead!: () => void;
+    const readHeld = new Promise<void>(resolve => { releaseRead = resolve; });
+    const readEntered = new Promise<void>(resolve => { signalRead = resolve; });
+    const originalRead = vault.adapter.read.bind(vault.adapter);
+    vault.adapter.read = async (path: string) => {
+        if (path.startsWith(`${memory.paths.sessionsActive}/`) && path.endsWith('.md')
+            && memory.activeSessionPath === path) {
+            signalRead();
+            await readHeld;
+        }
+        return originalRead(path);
+    };
+
+    const save = memory.saveSession([{ role: 'user', content: 'Sesja A' }]);
+    await readEntered;
+    const newPath = memory.activeSessionPath;
+    if (!newPath) throw new Error('saveSession nie ustawił ścieżki przed odczytem');
+    memory.setActiveSessionIdentity('sessions/active/B.md', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    releaseRead();
+    const savedPath = await save;
+
+    t.is(savedPath, newPath);
+    t.is(memory.activeSessionPath, 'sessions/active/B.md');
+    t.is(memory.sessionEpoch, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+});
+
+test('saveSession nie nadpisuje nowszej epoki po ponownym użyciu tej samej ścieżki', async t => {
+    const { vault } = makeVault();
+    const memory = new AgentMemory(vault, 'Jaskier');
+    let releaseRead!: () => void;
+    let signalRead!: () => void;
+    const readHeld = new Promise<void>(resolve => { releaseRead = resolve; });
+    const readEntered = new Promise<void>(resolve => { signalRead = resolve; });
+    const originalRead = vault.adapter.read.bind(vault.adapter);
+    vault.adapter.read = async (path: string) => {
+        if (path.startsWith(`${memory.paths.sessionsActive}/`) && path.endsWith('.md')
+            && memory.activeSessionPath === path) {
+            signalRead();
+            await readHeld;
+        }
+        return originalRead(path);
+    };
+
+    const save = memory.saveSession([{ role: 'user', content: 'Sesja A' }]);
+    await readEntered;
+    const reusedPath = memory.activeSessionPath;
+    if (!reusedPath) throw new Error('saveSession nie ustawił ścieżki przed odczytem');
+    memory.setActiveSessionIdentity('sessions/active/B.md', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    memory.setActiveSessionIdentity(reusedPath, 'cccccccccccccccccccccccccccccccc');
+    releaseRead();
+    t.is(await save, reusedPath);
+    t.is(memory.activeSessionPath, reusedPath);
+    t.is(memory.sessionEpoch, 'cccccccccccccccccccccccccccccccc');
+});
+
+test('samonaprawa odtwarza plik aktywnej sesji z nową epoką', async t => {
+    const { vault, files } = makeVault();
+    const memory = new AgentMemory(vault, 'Jaskier');
+    const oldPath = await memory.startActiveSession('Jaskier');
+    const oldEpoch = (await memory.loadActiveSession(oldPath)).metadata.epoch;
+    delete files[oldPath];
+
+    let repairedPath = '';
+    for (let index = 0; index < 20; index++) {
+        repairedPath = await memory.appendToActiveSession({ type: 'user_message', content: `wpis ${index}` });
+    }
+
+    const parsed = await memory.loadActiveSession(repairedPath);
+    t.regex(String(parsed.metadata.epoch), /^[0-9a-f]{32}$/);
+    t.not(parsed.metadata.epoch, oldEpoch);
+    t.is(parsed.messages.length, 20);
+    t.is(parsed.messages[0]?.content, 'wpis 0');
+    t.is(parsed.messages[19]?.content, 'wpis 19');
+});
+
 test('AgentMemory.discardActiveSession moves the file to .discarded/ and drops it from state', async t => {
     const { vault, files } = makeVault();
     const memory = new AgentMemory(vault, 'Jaskier');

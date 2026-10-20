@@ -339,7 +339,10 @@ export class AgentMemory {
      * `archiveActiveSession` go przeniósł i wyzerował pole u SIEBIE) — dlatego `startActiveSession`
      * NIE MOŻE ufać samemu faktowi „pole niepuste", tylko ciepłemu cache pisarza tej instancji.
      */
-    declare activeSessionPath: string | null;
+    private _activeSessionPath: string | null;
+    /** Epoka potwierdzona dla bieżącej ścieżki; fail-closed przy samym przypisaniu ścieżki. */
+    sessionEpoch: string | null;
+    private _sessionIdentityRevision: number;
     declare _writeQueues: Map<string, Promise<void>>;
     declare _sessionSeqCache: Map<string, number>;
     declare _sessionSavedCounts: Map<string, number>;
@@ -371,7 +374,9 @@ export class AgentMemory {
         this.basePath = `.pkm-assistant/agents/${this.safeName}/memory`;
 
         // Track active session to prevent duplicate files
-        this.activeSessionPath = null;
+        this._activeSessionPath = null;
+        this.sessionEpoch = null;
+        this._sessionIdentityRevision = 0;
 
         // Per-path write serialization. Parallel sub-agents (DelegateTool
         // Promise.all + SubAgentRunner) append to the SAME parent session file. Without
@@ -426,6 +431,22 @@ export class AgentMemory {
         this.stateManager = new StateManager(this.vault, this.paths.state);
     }
 
+    get activeSessionPath(): string | null { return this._activeSessionPath; }
+    set activeSessionPath(path: string | null) {
+        if (path !== this._activeSessionPath) {
+            this.sessionEpoch = null;
+            this._sessionIdentityRevision++;
+        }
+        this._activeSessionPath = path;
+    }
+
+    /** Wiąż ścieżkę z epoką odczytaną z pliku. Wywołanie jest synchroniczne. */
+    setActiveSessionIdentity(path: string | null, epoch: string | null): void {
+        this._activeSessionPath = path;
+        this.sessionEpoch = epoch;
+        this._sessionIdentityRevision++;
+    }
+
     /**
      * Restore persisted activeSessionPath from disk (call on plugin init).
      * Returns the path if restored, null otherwise.
@@ -441,7 +462,8 @@ export class AgentMemory {
             for (const name of candidates) {
                 const path = name.includes('/') ? name : `${this.paths.sessionsActive}/${name}`;
                 if (await this.vault.adapter.exists(path)) {
-                    this.activeSessionPath = path;
+                    const parsed = await this.loadActiveSession(path);
+                    this.setActiveSessionIdentity(path, typeof parsed.metadata.epoch === 'string' ? parsed.metadata.epoch : null);
                     await this._persistActiveSession();
                     return path;
                 }
@@ -456,7 +478,8 @@ export class AgentMemory {
             if (data?.path) {
                 const fileExists = await this.vault.adapter.exists(data.path);
                 if (fileExists) {
-                    this.activeSessionPath = data.path;
+                    const parsed = await this.loadActiveSession(data.path);
+                    this.setActiveSessionIdentity(data.path, typeof parsed.metadata.epoch === 'string' ? parsed.metadata.epoch : null);
                     return data.path;
                 }
             }
@@ -730,8 +753,9 @@ export class AgentMemory {
         );
 
         const created = new Date().toISOString();
-        await this._writeSessionFile(path, this._activeSessionHeader(agentName, created));
-        this.activeSessionPath = path;
+        const epoch = this._newSessionEpoch();
+        await this._writeSessionFile(path, this._activeSessionHeader(agentName, created, epoch));
+        this.setActiveSessionIdentity(path, epoch);
         await this.stateManager.addActiveSession(path.split('/').pop() as string);
         await this._persistActiveSession();
         return path;
@@ -743,11 +767,18 @@ export class AgentMemory {
      * skasowaniu dostaje TĘ SAMĄ postać co świeży, więc `archiveActiveSession`/restore go
      * rozpoznają tak samo, zamiast dostać goły blok zdarzenia bez `type: active_session`.
      */
-    _activeSessionHeader(agentName: string, created: string): string {
+    _newSessionEpoch(): string {
+        const bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    }
+
+    _activeSessionHeader(agentName: string, created: string, epoch = this._newSessionEpoch()): string {
         return `---
 type: active_session
 agent: ${agentName}
 created: ${created}
+epoch: ${epoch}
 ---
 
 # ${agentName} session ${created}
@@ -1248,6 +1279,7 @@ created: ${created}
             )).path;
             this.activeSessionPath = path;
         }
+        const identityRevision = this._sessionIdentityRevision;
 
         const now = new Date().toISOString();
         await this._enqueuePathWrite(path, async () => {
@@ -1273,10 +1305,13 @@ created: ${created}
             const tail = list.length > base ? list.slice(base) : [];
 
             let content = existing;
+            let createdEpoch: string | null = null;
             if (!existing) {
                 // Nowy plik: frontmatter + nagłówek jak w `startActiveSession`, a wiadomości
                 // od razu jako EVENTY.
                 const created = (metadata.created || now) as string;
+                const epoch = this._newSessionEpoch();
+                createdEpoch = epoch;
                 const header = formatToMarkdown([], {
                     // sessionType ∈ { 'active' | 'archived' }.
                     // 'active' = sesja w pracy (default), 'archived' = zamknięta przez modal.
@@ -1288,6 +1323,7 @@ created: ${created}
                     created,
                     updated: now,
                     messageCount: tail.length,
+                    epoch,
                 });
                 content = `${header}\n\n# ${this.agentName} session ${created}\n\n`;
             }
@@ -1308,12 +1344,22 @@ created: ${created}
             // pozycji listy pokryliśmy (`base` może być wyżej po niewidocznych blokach).
             content = this._setFrontmatterField(content, 'messageCount', known + tail.length);
             if (content !== existing) await this._writeSessionFile(path, content);
+            if (createdEpoch && this.activeSessionPath === path && this._sessionIdentityRevision === identityRevision) {
+                this.sessionEpoch = createdEpoch;
+            }
         });
 
         // Persist active session path so it survives Obsidian restart.
         // Rejestracja w `.state.json` idzie tu, PO udanym zapisie w kolejce wyżej — ten sam
         // krok, który `startActiveSession()` robi zaraz po swoim zapisie.
         if (isNewFile) {
+            if (this.activeSessionPath === path && this._sessionIdentityRevision === identityRevision && !this.sessionEpoch) {
+                const content = await this.vault.adapter.read(path);
+                const epoch = this._parseFrontmatter(content).epoch;
+                if (this.activeSessionPath === path && this._sessionIdentityRevision === identityRevision) {
+                    this.sessionEpoch = typeof epoch === 'string' ? epoch : null;
+                }
+            }
             await this.stateManager.addActiveSession(path.split('/').pop() as string);
             await this._persistActiveSession();
         }

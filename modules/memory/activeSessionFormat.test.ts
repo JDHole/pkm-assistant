@@ -130,6 +130,23 @@ test('kontrakt: event bez pola treści (mcp call z pustym wynikiem) nie zaśmiec
     ]);
 });
 
+test('epoch w frontmatter nie zmienia odczytu bloków, a stary plik ma epoch null', t => {
+    const withEpoch = buildEventLog([
+        { type: 'user_message', content: 'Pytanie' },
+        { type: 'agent_message', content: 'Odpowiedź' },
+        { type: 'subagent_error', content: 'Błąd suba' },
+    ], { head: FRONTMATTER.replace('created:', 'epoch: 0123456789abcdef0123456789abcdef\ncreated:') });
+    const parsed = parseActiveSession(withEpoch);
+    t.is(parsed.metadata.epoch, '0123456789abcdef0123456789abcdef');
+    t.deepEqual(parsed.messages, [
+        { role: 'user', content: 'Pytanie', seq: 1 },
+        { role: 'assistant', content: 'Odpowiedź', seq: 2 },
+        { role: 'assistant', content: 'Błąd suba', seq: 3 },
+    ]);
+    t.is(parseActiveSession(FRONTMATTER).metadata.epoch, null);
+    t.is(parseActiveSession(FRONTMATTER.replace('agent: Jaskier', 'agent: Jaskier\nepoch: xyz')).metadata.epoch, null);
+});
+
 test('kontrakt: event z jawną rolą (`**role:**`) i nieznanym typem trafia do wiadomości', t => {
     const known = buildEventLog([{ type: 'note', content: 'systemowa notka', role: 'system' }]);
     t.deepEqual(parseActiveSession(known).messages, [
