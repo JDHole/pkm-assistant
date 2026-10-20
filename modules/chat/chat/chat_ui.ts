@@ -734,17 +734,13 @@ export function _renderSubTaskStrip(this: ChatViewLike) {
         // zleceniu — dzięki temu porównanie „ta sama sesja?" jest symetryczne (inaczej chipy
         // przeżywałyby archiwizację).
         sessionPath: this.plugin?.agentManager?.getActiveMemory?.()?.activeSessionPath || '',
+        sessionEpoch: tab?.sessionEpoch || '',
         expandedId: this._subStripExpandedId || null,
         onToggle: (id: string | null) => {
             this._subStripExpandedId = id;
             this._renderSubTaskStrip();
         },
     });
-    const expanded = this._subStripExpandedId ? this.plugin.subTaskRegistry?.getTask(this._subStripExpandedId) : null;
-    if (expanded?.partialStorageError || (expanded?.status === 'running' && expanded.partial?.synthesis === 'pending')) {
-        const status = host.querySelector('.pkm-substrip__detail-status');
-        if (status) status.textContent = expanded.partialStorageError ? t('chat.streaming.partial_storage_error') : t('chat.substrip.synthesis_pending');
-    }
     if (count === 0) this._subStripExpandedId = null;
 }
 
@@ -764,7 +760,7 @@ export function _wireSubTaskStrip(this: ChatViewLike) {
             this._renderSubTaskStrip();
         }, 250);
     };
-    for (const event of ['task:created', 'task:step', 'task:partial', 'task:finished']) {
+    for (const event of ['task:created', 'task:step', 'task:partial', 'task:finished', 'thread:created', 'thread:idle', 'thread:closed']) {
         const off = events.on(event, onChange);
         if (typeof off === 'function') this._subStripUnsubs.push(off);
     }

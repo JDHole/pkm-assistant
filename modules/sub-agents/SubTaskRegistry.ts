@@ -272,6 +272,11 @@ export class SubTaskRegistry {
     closeAll(): void { for (const t of this._threads.values()) this.closeThread(t.threadId); }
     listThreads(owner: SubThreadOwner): SubThread[] { return [...this._threads.values()].filter(t => t.owner.agentName === owner.agentName && t.owner.sessionPath === owner.sessionPath && t.owner.sessionEpoch === owner.sessionEpoch); }
     getThread(threadId: string): SubThread | undefined { return this._threads.get(threadId); }
+    getThreadMaxRuns(threadId: string): number {
+        const thread = this._threads.get(threadId);
+        const configured = Number((thread?.config.limits as Record<string, unknown> | undefined)?.subagent_thread_max_runs);
+        return Number.isFinite(configured) && configured > 0 ? configured : this._threadLimits.runs;
+    }
     private _closeThreadData(thread: SubThread): void { thread.phase = 'closed'; thread.reusable = false; thread.closeAfterRun = false; thread.transcript = []; thread.effects = []; thread.lastActiveAt = Date.now(); this.events.emit('thread:closed', thread); }
     private _pruneIdleThreads(): void {
         const now = Date.now(); const idle = [...this._threads.values()].filter(t => t.phase === 'idle');
@@ -573,13 +578,15 @@ export class SubTaskRegistry {
             // Sufit: odmawiamy zamiast wypychać najstarsze — cicha utrata polecenia
             // sterującego byłaby gorsza od uczciwego „nie zmieściło się".
             if (queue.length >= this._maxMessagesPerTask) return false;
-            const message = this._mask ? this._mask(raw) : raw;
-            queue.push(message);
+            const safe = maskSensitiveData(raw);
+            const maskedMessage = this._mask ? this._mask(safe) : safe;
+            const preview = maskedMessage.slice(0, 200);
+            queue.push(maskedMessage);
             this._messages.set(id, queue);
             // Ślad idzie tą samą drogą co reszta kroków (także do trace.log) — NOWY TYP
-            // zdarzenia, nie zmiana formatu linii. Do śladu wchodzi sama DŁUGOŚĆ:
-            // treść polecenia jest już w transkrypcie suba, w logu nie musi być drugi raz.
-            this.step(task, 'user.message', { chars: message.length });
+            // zdarzenia, nie zmiana formatu linii. Do śladu wchodzi długość oraz
+            // krótki, zamaskowany podgląd; pełna treść zostaje w transkrypcie suba.
+            this.step(task, 'user.message', { chars: maskedMessage.length, preview });
             return true;
         } catch (e) {
             log.warn('SubTaskRegistry', 'postMessage() padł:', e);

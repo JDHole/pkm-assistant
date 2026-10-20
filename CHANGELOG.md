@@ -34,6 +34,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Approval prompts for delegation now show the sub-agent and task, with a bounded task preview.
 - Approval prompts for sub-agent tasks and messages now show the target sub-agent and submitted text.
 - Chat now renders blocking `sub_agent` tasks as sub-agent result tiles and other thread actions as status-aware tool chips.
+- The sub-agent strip groups thread runs, shows thread states and run details, and supports stopping an individual run.
+- The sub-agent strip now shows a two-line chip and a vertical card for every run in an expanded thread, with collapsible steps for completed runs.
+- Failed sub-agent runs now show saved partial work separately from the failure reason in the chat strip.
+- The sub-agent strip no longer attributes a previous run's effects and missing targets to a newly started run.
 
 ### Changed
 

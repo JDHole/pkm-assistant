@@ -7,10 +7,13 @@
  */
 import test from 'ava';
 import { buildStripModel, formatDuration } from './subTaskPanelModel.js';
+import type { StripState } from './subTaskPanelModel.js';
 import { SubTaskRegistry } from './SubTaskRegistry.js';
+import { SubTaskNotifier } from './SubTaskNotifier.js';
 import { runAgentLoop, ArrayMessageStore } from '../agent-loop/index.js';
 import { TraceLog, maskSensitiveData } from '../../core/index.js';
 import type { SubTask } from './SubTaskRegistry.js';
+import { t as tr } from '../../core/i18n/index.js';
 
 const TERAZ = 1_000_000;
 
@@ -85,8 +88,8 @@ test('pasek: kolejność = w biegu (od najstarszego) → czeka na czat → zako�
     t.deepEqual(rows.map(r => r.id), [
         'biegnie-stary', 'biegnie-mlody', 'czeka', 'konczony-swiezy', 'konczony-stary',
     ]);
-    t.true(rows.find(r => r.id === 'czeka')!.waiting, 'wiersz z kolejki jest oznaczony');
-    t.false(rows.find(r => r.id === 'konczony-swiezy')!.waiting);
+    t.is(rows.find(r => r.id === 'czeka')!.state.kind, 'delivery', 'wiersz z kolejki jest oznaczony');
+    t.is(rows.find(r => r.id === 'konczony-swiezy')!.state.kind, 'empty');
 });
 
 test('pasek: bieg czekający na dostarczenie nie dubluje się w zakończonych', t => {
@@ -120,12 +123,11 @@ test('pasek: wiersz niesie liczniki, ostatni krok z narzędziem i okno ≤20 kro
 
     const row = buildStripModel({ now: TERAZ, tabKey: 'tab-a', agentName: 'Klara', tasks: reg.list() })[0];
 
-    t.is(row.stepCount, 15);
-    t.is(row.toolCallCount, 2, 'liczymy WYNIKI narzędzi, nie zapowiedzi');
-    t.is(row.lastStep?.type, 'tool.post');
-    t.is(row.lastStep?.tool, 'search');
-    t.is(row.recentSteps.length, 15);
-    t.is(row.recentSteps.filter(s => s.tool).length, 3, 'krok bez narzędzia nie dostaje pola `tool`');
+    t.is(row.runs[0].steps.length, 15);
+    t.is(row.runs[0].toolCallCount, 2, 'liczymy WYNIKI narzędzi, nie zapowiedzi');
+    t.is(row.runs[0].steps.at(-1)?.type, 'tool.post');
+    t.is(row.runs[0].steps.at(-1)?.tool, 'search');
+    t.is(row.runs[0].steps.filter(s => s.tool).length, 3, 'krok bez narzędzia nie dostaje pola `tool`');
     t.is(row.outcome, '', 'bieg w toku nie ma jeszcze wyniku');
 });
 
@@ -149,7 +151,7 @@ test('pasek: stopRequested i czas trwania biegu w toku liczony do TERAZ', t => {
     });
 
     t.is(rows[0].durationMs, 6_000);
-    t.true(rows[0].stopRequested);
+    t.is(rows[0].state.kind, 'stopping');
 });
 
 test('pasek: brak wejścia / śmieci nie wywracają modelu', t => {
@@ -228,7 +230,7 @@ test('szyba: tool.pre czyta detail, tool.post rozmiar wyniku', t => {
             ],
         })],
     });
-    const steps = rows[0].recentSteps;
+    const steps = rows[0].runs[0].steps;
     t.is(steps[0].detail, 'Notatki/plan.md');
     t.is(steps[1].detail, '4222 zn.');
     t.is(steps[2].detail, 'smoke tandemowy');
@@ -248,7 +250,7 @@ test('szyba: konkret kroku ma do 80 znaków; panel nie wraca do surowych argumen
             ],
         })],
     });
-    const steps = rows[0].recentSteps;
+    const steps = rows[0].runs[0].steps;
     t.is(steps[0].detail, 'A'.repeat(80));
     t.is(steps[1].detail, undefined);
 });
@@ -289,7 +291,7 @@ test('szyba: pętla przekazuje ścieżkę, zapytanie i zwykły URL przez rejestr
         trace: reg.traceFor(bieg)
     });
     const row = buildStripModel({ tasks: reg.list(), agentName: 'Klara', now: TERAZ })[0];
-    t.deepEqual(row.recentSteps.filter(step => step.type === 'tool.pre').map(step => step.detail), [
+    t.deepEqual(row.runs[0].steps.filter(step => step.type === 'tool.pre').map(step => step.detail), [
         'Notatki/plan.md', 'smoke tandemowy', url,
         'https://example.com/Notatki/projekty/planowanie/raport.md?aaaaaaaaaaaaaaaaaaaaaa', undefined
     ]);
@@ -331,4 +333,315 @@ test('szyba: rejestr tnie taskPreview do 300 znaków i maskuje sekrety', t => {
     t.true(created.taskPreview!.includes('sk-***'));
     t.false(created.taskPreview!.includes('sk-tajny-klucz'));
     registry.dispose?.();
+});
+
+test('wątki queued dostają pozycję w kolejności rejestru i filtrują pełnego właściciela', t => {
+    const reg = new SubTaskRegistry();
+    const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: 'epoch-q' };
+    reg.createThread({ threadId: 'q1', name: 'worker-1', owner, origin: owner, config: {}, phase: 'queued' });
+    reg.createThread({ threadId: 'q2', name: 'worker-2', owner, origin: owner, config: {}, phase: 'queued' });
+    reg.createThread({ threadId: 'other', name: 'other', owner: { ...owner, sessionEpoch: 'epoch-other' }, origin: owner, config: {}, phase: 'queued' });
+    const rows = buildStripModel({ threads: reg.listThreads(owner), tasks: reg.list(), agentName: owner.agentName, sessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch });
+    t.deepEqual(rows.map(row => row.state), [{ kind: 'queued', position: 1 }, { kind: 'queued', position: 2 }]);
+    t.is(tr('chat.substrip.queue_position', { position: '1' }, 'pl'), '1. w kolejce');
+    t.is(tr('chat.substrip.queue_position', { position: '2' }, 'en'), '2 in queue');
+    reg.dispose();
+});
+
+test('wątek z dwoma biegami ma jeden wiersz i zachowuje oś runIds oraz limit z rejestru', t => {
+    const reg = new SubTaskRegistry();
+    const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: 'epoch-runs' };
+    const thread = reg.createThread({ threadId: 'thread-runs', name: 'worker', owner, origin: owner, config: { limits: { subagent_thread_max_runs: 5 } } });
+    const first = reg.create({ id: 'run-a', name: 'worker', agentName: owner.agentName, threadId: thread.threadId });
+    reg.finish(first, { text: 'gotowe', toolsUsed: [], durationMs: 1, usage: null, outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true, effects: [] } });
+    reg.beginRun(thread.threadId, owner);
+    reg.create({ id: 'run-b', name: 'worker', agentName: owner.agentName, threadId: thread.threadId });
+    const rows = buildStripModel({ threads: reg.listThreads(owner), tasks: reg.list(), agentName: owner.agentName, sessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch, getThreadRunLimit: id => reg.getThreadMaxRuns(id) });
+    t.is(rows.length, 1);
+    t.deepEqual(rows[0].runs.map(run => run.id), ['run-a', 'run-b']);
+    t.is(tr('chat.substrip.run_number', { number: '2', total: String(rows[0].runLimit) }, 'pl'), 'bieg 2 z 5');
+    t.is(rows[0].state.kind, 'running');
+    reg.dispose();
+});
+
+test('stan wyniku nie zależy od słów w treści, a wiadomość agenta jest tylko do odczytu', t => {
+    const reg = new SubTaskRegistry();
+    const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: 'epoch-state' };
+    const thread = reg.createThread({ threadId: 'thread-state', name: 'worker', owner, origin: owner, config: {} });
+    const task = reg.create({ id: 'run-state', name: 'worker', agentName: owner.agentName, threadId: thread.threadId });
+    reg.postMessage(task.id, 'Sprawdź plan');
+    reg.finish(task, { text: 'wystąpił błąd, ale gotowe', toolsUsed: [], durationMs: 1, usage: null, outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true, effects: [] } });
+    reg.endRun(thread.threadId, { successful: true, answer: 'wystąpił błąd, ale gotowe' });
+    const row = buildStripModel({ threads: reg.listThreads(owner), tasks: reg.list(), agentName: owner.agentName, sessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch })[0];
+    t.deepEqual(row.state, { kind: 'idle' });
+    t.is(row.runs[0].steps[0].type, 'user.message');
+    t.is(row.runs[0].steps[0].readOnly, true);
+    t.is(row.runs[0].steps[0].detail, 'Sprawdź plan');
+    reg.dispose();
+});
+
+test('rejestr wyprowadza wszystkie stany paska z phase, stopRequested, outcome i notifiera', t => {
+    const reg = new SubTaskRegistry();
+    const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: 'epoch-states' };
+    const thread = (id: string, phase: 'queued' | 'running' | 'idle' | 'closed' = 'running') => reg.createThread({ threadId: id, name: id, owner, origin: owner, config: {}, phase });
+    const makeThreadRun = (threadId: string, id: string) => reg.create({ id, name: threadId, agentName: owner.agentName, origin: owner, threadId });
+    const result = (end: NonNullable<SubTask['outcome']>['end'], completeness: NonNullable<SubTask['outcome']>['completeness'] = 'partial') => ({
+        end, completeness, hasAnswer: false, hasMaterial: completeness !== 'empty', effects: [],
+    });
+
+    thread('queued-state', 'queued');
+    const runningThread = thread('running-state');
+    makeThreadRun(runningThread.threadId, 'running-run');
+    const stoppingThread = thread('stopping-state');
+    const stoppingRun = makeThreadRun(stoppingThread.threadId, 'stopping-run');
+    reg.attachAbort(stoppingRun.id, () => {});
+    reg.requestStop(stoppingRun.id, 'user');
+    const idleThread = thread('idle-state');
+    const idleRun = makeThreadRun(idleThread.threadId, 'idle-run');
+    reg.finish(idleRun, { text: 'answer', toolsUsed: [], durationMs: 1, usage: null, outcome: result({ kind: 'finished' }, 'unconfirmed') });
+    reg.endRun(idleThread.threadId, { successful: true, answer: 'answer' });
+    const closedThread = thread('closed-state', 'queued');
+    reg.closeThread(closedThread.threadId);
+
+    const makeFinished = (id: string, outcome: NonNullable<SubTask['outcome']>, text = 'material') => {
+        const task = reg.create({ id, name: id, agentName: owner.agentName, origin: owner });
+        reg.finish(task, { text, toolsUsed: [], durationMs: 1, usage: null, outcome });
+        return task;
+    };
+    makeFinished('done-state', result({ kind: 'finished' }, 'unconfirmed'), 'done');
+    const delivery = makeFinished('delivery-state', result({ kind: 'finished' }, 'unconfirmed'), 'delivery');
+    makeFinished('incomplete-state', result({ kind: 'finished' }));
+    makeFinished('limit-state', result({ kind: 'limit', reason: 'iteration-limit' }));
+    makeFinished('uncertain-state', result({ kind: 'uncertain' }));
+    makeFinished('user-stop-state', result({ kind: 'stopped', by: 'user' }));
+    makeFinished('lead-stop-state', result({ kind: 'stopped', by: 'lead' }));
+    makeFinished('system-stop-state', result({ kind: 'stopped', by: 'system' }));
+    makeFinished('timeout-state', result({ kind: 'timeout' }));
+    makeFinished('error-state', result({ kind: 'failed', stage: 'work' }));
+    const empty = makeFinished('empty-state', result({ kind: 'failed', stage: 'work' }, 'empty'), '');
+
+    const input = { tasks: reg.list(), threads: reg.listThreads(owner), pending: [delivery], agentName: owner.agentName, sessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch };
+    const rows = buildStripModel(input);
+    const byName = new Map(rows.map(row => [row.name, row]));
+    const cases: Array<[string, StripState['kind'], string, string]> = [
+        ['queued-state', 'queued', 'czeka na miejsce', 'waiting for a slot'],
+        ['running-state', 'running', 'pracuje', 'working'],
+        ['stopping-state', 'stopping', 'zatrzymuje się', 'stopping'],
+        ['idle-state', 'idle', 'czeka na kolejne zadanie', 'waiting for another task'],
+        ['done-state', 'done', 'skończył sam · wynik niesprawdzony', 'finished on its own · result unchecked'],
+        ['delivery-state', 'delivery', 'czeka na doręczenie', 'waiting for delivery'],
+        ['incomplete-state', 'partial', 'wynik częściowy', 'partial result'],
+        ['limit-state', 'partial', 'skończył mu się budżet kroków · częściowy', 'step budget reached · partial'],
+        ['uncertain-state', 'partial', 'stanął na niepewnym zapisie · częściowy', 'stopped at an uncertain write · partial'],
+        ['user-stop-state', 'partial', 'zatrzymany przez Ciebie · częściowy', 'stopped by you · partial'],
+        ['lead-stop-state', 'partial', 'zatrzymany przez agenta · częściowy', 'stopped by agent · partial'],
+        ['system-stop-state', 'partial', 'zatrzymany przez system · częściowy', 'stopped by system · partial'],
+        ['timeout-state', 'partial', 'przekroczył czas · częściowy', 'timed out · partial'],
+        ['error-state', 'partial', 'awaria · częściowy', 'failed · partial'],
+        ['empty-state', 'empty', 'pusty wynik', 'empty result'],
+        ['closed-state', 'closed', 'zamknięty', 'closed'],
+    ];
+    t.is(rows.find(row => row.id === empty.id)?.state.kind, 'empty');
+    for (const [name, kind, pl, en] of cases) {
+        const row = byName.get(name);
+        t.is(row?.state.kind, kind, `${name}: literal kind`);
+        const key = row?.state.kind === 'partial'
+            ? `chat.substrip.state_partial_${row.state.reason === 'user-stop' ? 'user' : row.state.reason === 'lead-stop' ? 'lead' : row.state.reason === 'system-stop' ? 'system' : row.state.reason}`
+            : `chat.substrip.state_${row?.state.kind}`;
+        t.is(tr(key, undefined, 'pl'), pl, `${name}: literal PL label`);
+        t.is(tr(key, undefined, 'en'), en, `${name}: literal EN label`);
+    }
+    reg.dispose();
+});
+
+test('częściowy wynik pozostaje widoczny po przejściu wątku do idle', t => {
+    const reg = new SubTaskRegistry();
+    const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: 'epoch-partial' };
+    reg.createThread({ threadId: 'partial-thread', name: 'worker', owner, origin: owner, config: {} });
+    const run = reg.create({ id: 'partial-run', name: 'worker', agentName: owner.agentName, origin: owner, threadId: 'partial-thread' });
+    reg.finish(run, { text: 'Zachowany dorobek', toolsUsed: [], durationMs: 1, usage: null,
+        outcome: { end: { kind: 'limit', reason: 'iteration-limit' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] } });
+    reg.endRun('partial-thread', { successful: true });
+    const row = buildStripModel({ tasks: reg.list(), threads: reg.listThreads(owner), ...owner })[0];
+    t.deepEqual(row.state, { kind: 'partial', reason: 'limit' });
+    t.deepEqual(row.runs[0].state, { kind: 'partial', reason: 'limit' });
+    reg.dispose();
+});
+
+test('biegnący osierocony bieg starej sesji pozostaje widoczny', t => {
+    const reg = new SubTaskRegistry();
+    const old = { agentName: 'Klara', sessionPath: 'old.md', sessionEpoch: 'old' };
+    const current = { agentName: 'Klara', sessionPath: 'new.md', sessionEpoch: 'new' };
+    reg.createThread({ threadId: 'old-thread', name: 'old-worker', owner: old, origin: old, config: {} });
+    reg.create({ id: 'old-run', name: 'old-worker', agentName: old.agentName, origin: old, threadId: 'old-thread' });
+    reg.createThread({ threadId: 'new-thread', name: 'new-worker', owner: current, origin: current, config: {} });
+    const rows = buildStripModel({ tasks: reg.list(), threads: reg.listThreads(current), ...current });
+    t.deepEqual(rows.map(row => row.id), ['new-thread', 'old-run']);
+    t.deepEqual(rows[1].state, { kind: 'running' });
+    reg.dispose();
+});
+
+test('liczniki i efekty korzystają z pełnych danych rejestru', t => {
+    const reg = new SubTaskRegistry();
+    const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: 'epoch-effects' };
+    reg.createThread({ threadId: 'effects-thread', name: 'worker', owner, origin: owner, config: {} });
+    const run = reg.create({ id: 'effects-run', name: 'worker', agentName: owner.agentName, origin: owner, threadId: 'effects-thread' });
+    for (let i = 0; i < 15; i++) {
+        reg.step(run, 'tool.pre', { tool: 'read', detail: `plik-${i}.md` });
+        reg.step(run, 'tool.post', { tool: 'read', chars: 10 });
+    }
+    reg.step(run, 'model.done', { tokens: 99 });
+    const effects = [
+        { tool: 'write', action: 'create', targets: [{ kind: 'vault-file' as const, path: 'ok.md' }], outcome: 'returned' as const, check: 'matches' as const },
+        { tool: 'write', action: 'create', targets: [{ kind: 'vault-file' as const, path: 'brak.md' }], outcome: 'returned' as const, check: 'mismatch' as const },
+        { tool: 'delete', action: 'delete', targets: [{ kind: 'vault-file' as const, path: 'do-usuniecia.md' }], outcome: 'returned' as const, check: 'mismatch' as const },
+        { tool: 'write', action: 'create', targets: [{ kind: 'vault-file' as const, path: 'bez-kontroli.md' }], outcome: 'returned' as const, check: 'not-checked' as const },
+    ];
+    reg.finish(run, { text: 'dorobek', toolsUsed: ['read'], durationMs: 1,
+        usage: { prompt_tokens: 123, completion_tokens: 45 },
+        outcome: { end: { kind: 'finished' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects } });
+    reg.endRun('effects-thread', { successful: true, effects: [
+        { ...effects[0], expectedCheck: 'exists' },
+        { ...effects[1], expectedCheck: 'exists' },
+        { ...effects[2], expectedCheck: 'absent' },
+        { ...effects[3], expectedCheck: 'exists' },
+    ] });
+    const row = buildStripModel({ tasks: reg.list(), threads: reg.listThreads(owner), ...owner })[0];
+    t.is(row.runs[0].toolCallCount, 15);
+    t.is(row.runs[0].steps.length, 20);
+    t.is(row.runs[0].tokenInput, 123);
+    t.is(row.runs[0].tokenOutput, 45);
+    t.deepEqual(row.runs[0].effects.map(effect => effect.check), ['matches', 'mismatch', 'mismatch', 'not-checked']);
+    t.deepEqual(row.runs[0].missingTargets, ['brak.md']);
+    reg.dispose();
+});
+
+test('biegnący bieg obcego agenta z tą samą ścieżką sesji nie trafia do paska', t => {
+    const reg = new SubTaskRegistry();
+    const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: 'epoch-klara' };
+    const other = { agentName: 'Tola', sessionPath: 'active.md', sessionEpoch: 'epoch-tola' };
+    reg.createThread({ threadId: 'tola-thread', name: 'tola', owner: other, origin: other, config: {} });
+    reg.create({ id: 'tola-run', name: 'tola', agentName: other.agentName, origin: other, threadId: 'tola-thread' });
+    const rows = buildStripModel({ tasks: reg.list(), threads: reg.listThreads(owner), ...owner });
+    t.deepEqual(rows.map(row => row.id), []);
+    reg.dispose();
+});
+
+test('wynik oczekujący w notifierze pozostaje dostępny po retencji rejestru', t => {
+    const reg = new SubTaskRegistry({ maxDone: 1 });
+    const notifier = new SubTaskNotifier({ registry: reg });
+    const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: 'epoch-retention' };
+    for (const [threadId, runId, answer] of [
+        ['first-thread', 'first-run', 'Pierwszy wynik'],
+        ['second-thread', 'second-run', 'Drugi wynik'],
+    ]) {
+        reg.createThread({ threadId, name: threadId, owner, origin: owner, config: {} });
+        const run = reg.create({ id: runId, name: threadId, agentName: owner.agentName, origin: owner, threadId, background: true });
+        reg.finish(run, { text: answer, toolsUsed: [], durationMs: 1, usage: null,
+            outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true, effects: [] } });
+    }
+    t.deepEqual(reg.list().map(run => run.id), ['second-run']);
+    t.deepEqual(notifier.pending().map(run => run.id), ['first-run', 'second-run']);
+    const rows = buildStripModel({ tasks: reg.list(), pending: notifier.pending(), threads: reg.listThreads(owner), ...owner });
+    const first = rows.find(row => row.id === 'first-thread');
+    t.is(first?.state.kind, 'delivery');
+    t.is(first?.runs[0].available, true);
+    t.is(first?.runs[0].outcome, 'Pierwszy wynik');
+    t.is(rows.filter(row => row.id === 'first-thread').length, 1);
+    notifier.dispose();
+    reg.dispose();
+});
+
+test('biegnący bieg pokazuje tokeny zapisane w kroku model.done', t => {
+    const reg = new SubTaskRegistry();
+    const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: 'epoch-tokens' };
+    reg.createThread({ threadId: 'tokens-thread', name: 'worker', owner, origin: owner, config: {} });
+    const run = reg.create({ id: 'tokens-run', name: 'worker', agentName: owner.agentName, origin: owner, threadId: 'tokens-thread' });
+    reg.step(run, 'model.done', { i: 0, in: 123, out: 45 });
+    const row = buildStripModel({ tasks: reg.list(), threads: reg.listThreads(owner), ...owner })[0];
+    t.is(row.runs[0].tokenInput, 123);
+    t.is(row.runs[0].tokenOutput, 45);
+    reg.dispose();
+});
+
+test('nowy bieg nie dziedziczy efektów ani brakujących celów poprzedniego biegu', t => {
+    const reg = new SubTaskRegistry();
+    const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: 'epoch-effects' };
+    const thread = reg.createThread({ threadId: 'effects-thread', name: 'worker', owner, origin: owner, config: {} });
+    const first = reg.create({ id: 'first-run', name: 'worker', agentName: owner.agentName, threadId: thread.threadId });
+    const effect = { tool: 'write', action: 'create', targets: [{ kind: 'vault-file' as const, path: 'brak.md' }],
+        outcome: 'returned' as const, check: 'mismatch' as const };
+    reg.finish(first, { text: 'pierwszy wynik', toolsUsed: ['write'], durationMs: 1, usage: null,
+        outcome: { end: { kind: 'finished' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [effect] } });
+    reg.endRun(thread.threadId, { successful: true, effects: [{ ...effect, expectedCheck: 'exists' }] });
+    t.true(reg.beginRun(thread.threadId, owner));
+    reg.create({ id: 'second-run', name: 'worker', agentName: owner.agentName, threadId: thread.threadId });
+
+    const row = buildStripModel({ tasks: reg.list(), threads: reg.listThreads(owner), ...owner })[0];
+    t.deepEqual(row.runs.map(run => run.id), ['first-run', 'second-run']);
+    t.deepEqual(row.runs[0].effects.map(item => item.targets[0].path), ['brak.md']);
+    t.deepEqual(row.runs[0].missingTargets, ['brak.md']);
+    t.deepEqual(row.runs[1].steps, []);
+    t.deepEqual(row.runs[1].effects, []);
+    t.deepEqual(row.runs[1].missingTargets, []);
+    t.deepEqual(row.runs[1].state, { kind: 'running' });
+    reg.dispose();
+});
+
+test('awaria po zachowaniu dorobku pokazuje handoff osobno od powodu końca', t => {
+    const reg = new SubTaskRegistry();
+    const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: 'epoch-failure' };
+    const thread = reg.createThread({ threadId: 'failure-thread', name: 'worker', owner, origin: owner, config: {} });
+    const run = reg.create({ id: 'failure-run', name: 'worker', agentName: owner.agentName, origin: owner, threadId: thread.threadId });
+    const outcome = { end: { kind: 'failed' as const, stage: 'work' as const }, completeness: 'partial' as const,
+        hasAnswer: false, hasMaterial: true, effects: [] };
+    reg.endRun(thread.threadId, { successful: false });
+    reg.fail(run, 'Awaria modelu', outcome, { text: '', toolsUsed: [], durationMs: 1, usage: null, outcome,
+        handoff: 'Zachowany dorobek: odczytano Plan.md i ustalono trzy kroki' });
+
+    const row = buildStripModel({ tasks: reg.list(), threads: reg.listThreads(owner), ...owner })[0];
+    t.deepEqual(row.runs[0].state, { kind: 'partial', reason: 'error' });
+    t.is(row.runs[0].outcome, 'Zachowany dorobek: odczytano Plan.md i ustalono trzy kroki');
+    t.is(row.runs[0].endReason, 'Awaria modelu');
+    reg.dispose();
+});
+
+test('częściowy bieg używa handoff, a bez niego zachowanego partial.text', t => {
+    const reg = new SubTaskRegistry();
+    const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: 'epoch-partial' };
+    for (const [threadId, handoff, expected] of [
+        ['with-handoff', 'Dorobek z przekazania', 'Dorobek z przekazania'],
+        ['without-handoff', '', 'Dorobek z migawki'],
+    ]) {
+        const thread = reg.createThread({ threadId, name: 'worker', owner, origin: owner, config: {} });
+        const run = reg.create({ id: `${threadId}-run`, name: 'worker', agentName: owner.agentName, origin: owner, threadId: thread.threadId });
+        reg.publishPartial(run, { kind: 'agent-loop-partial', revision: 1, stopReason: { kind: 'iteration-limit' },
+            synthesis: 'skipped', toolsUsed: [], toolOutcomes: [], toolCallDetails: [],
+            usage: { prompt_tokens: 0, completion_tokens: 0 }, iterations: 1, lastText: '', text: 'Dorobek z migawki' });
+        reg.finish(run, { text: 'Tekst wyniku', toolsUsed: [], durationMs: 1, usage: null,
+            outcome: { end: { kind: 'limit', reason: 'iteration-limit' }, completeness: 'partial', hasAnswer: false,
+                hasMaterial: true, effects: [] }, handoff });
+        const row = buildStripModel({ tasks: reg.list(), threads: reg.listThreads(owner), ...owner })
+            .find(candidate => candidate.id === threadId)!;
+        t.is(row.runs[0].outcome, expected);
+        t.is(row.runs[0].endReason, undefined);
+    }
+    reg.dispose();
+});
+
+test('pasek: bieg w podsumowaniu i pad zapisu dorobku niosą notkę biegu, zwykły bieg jej nie ma', t => {
+    const rows = buildStripModel({
+        now: TERAZ,
+        tabKey: 'tab-a',
+        agentName: 'Klara',
+        tasks: [
+            zTabu('synteza', 'tab-a', { status: 'running', partial: { synthesis: 'pending' } as SubTask['partial'] }),
+            zTabu('zapis', 'tab-a', { endedAt: TERAZ - 1_000, partialStorageError: true }),
+            zTabu('zwykly', 'tab-a', { endedAt: TERAZ - 2_000 }),
+        ],
+    });
+    const note = (id: string) => rows.find(r => r.id === id)?.runs[0]?.note;
+    t.is(note('synteza'), 'synthesis-pending');
+    t.is(note('zapis'), 'storage-error');
+    t.is(note('zwykly'), undefined);
 });

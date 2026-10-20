@@ -304,10 +304,16 @@ Odlew per agent = `<agent-slug>-researcher` (standardowe `instantiate`). Przepis
   globalnego sidebara. Pasek bierze `plugin.subTaskRegistry.list()` + `plugin.subTaskNotifier.pending()`
   i oddaje je czystemu `buildStripModel`. Wszystko, co da się policzyć źle po cichu (bieg z
   cudzej zakładki, duplikat wiersza, licznik z sufitu `maxStepsPerTask`), siedzi w modelu i ma
-  testy AVA; sam widok jest głupi, więc testów nie ma. ⚠️ **`subTaskPanelModel.ts` NIE MOŻE
+  testy AVA modelu oraz renderu w `modules/chat/chat/subTaskStrip.test.ts`; widok robi DOM. ⚠️ **`subTaskPanelModel.ts` NIE MOŻE
   zacząć importować `obsidian` ani i18n** - idzie do barrela zwykłym re-eksportem, a barrel modułu
   musi zostać obsidian-free (wiszą na nim testy AVA `DelegateTool`/`TriggerPopup` i sam moduł
   chat). Etykiety dobiera widok.
+- `buildStripModel` grupuje biegi według `SubThread.runIds` i filtruje wątki po pełnym właścicielu: agent, ścieżka sesji i epoka. Biegnący bieg z wątku starej sesji pozostaje widoczny jako osobny wiersz. `StripRow.state` jest unią z `kind`; zawiera kolejkę z numerem miejsca, fazę wątku, `stopRequested`, outcome ostatniego biegu albo oczekiwanie notifiera. Częściowy wynik ostatniego biegu pozostaje oznaczony na chipie także po przejściu wątku do `idle`. Każdy bieg ma własny stan w osi, a zamknięty wątek zachowuje oś biegów.
+- Samodzielny i osierocony bieg musi należeć do aktywnego agenta także wtedy, gdy jego `origin.sessionPath` pasuje do sesji. Wynik nadal oczekujący w notifierze uzupełnia dane biegu po retencji rejestru; ten sam bieg pozostaje jednym wierszem wątku. Liczniki tokenów biegu w toku czytają sumę zapisanych pól `in` i `out` z kroków `model.done`, gdy wynik biegu nie ma jeszcze `usage`.
+- Limit `bieg N z M` pochodzi z `SubTaskRegistry.getThreadMaxRuns()`, który czyta zamrożony config albo domyślny limit rejestru. `postMessage` zachowuje w kroku `user.message` liczbę znaków i zmaskowany podgląd do 200 znaków.
+- Szczegóły wiersza obejmują maksymalnie 20 ostatnich kroków, liczniki biegu liczone z pełnych zachowanych danych rejestru, efekty z wynikiem sprawdzenia oraz potwierdzone cele, które miały istnieć, lecz ich stan jest niezgodny z oczekiwaniem. Sprawdzenie efektu jest kojarzone z biegiem po narzędziu, akcji, stanie i celu; przy identycznych efektach w kilku biegach rejestr nie przechowuje osobnego identyfikatora sprawdzenia. Brak treści kroku lub treści odpowiedzi pośredniej nie jest uzupełniany przez model.
+- Efekty w szczegółach pochodzą wyłącznie z `outcome` wybranego biegu. Zbiorcze `SubThread.effects` może uzupełnić stan sprawdzenia jego efektu, lecz bieg bez `outcome` pokazuje pustą listę efektów i brakujących celów, nawet gdy wątek pamięta dorobek wcześniejszego biegu.
+- Przy częściowym końcu `StripRun.outcome` pokazuje najpierw `result.handoff`, potem `partial.text`, a dopiero dla biegu bez awarii `result.text`. Jeśli istnieje dorobek i błąd, `StripRun.endReason` niesie błąd osobno. Bez dorobku pozostaje sam komunikat błędu.
 - ⚠️ **`runTask` mówi, JAK sub zszedł - i czy w ogóle dojechał.** Zwrotka niesie `stoppedBy`
   (`natural` = model domknął sam, `backstop` = skończyły się iteracje, `abort` = ubity z
   zewnątrz, `error` = wyjątek) oraz `failed: true` **wyłącznie** w gałęzi `catch`. Tekst błędu

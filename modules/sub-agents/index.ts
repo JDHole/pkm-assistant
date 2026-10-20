@@ -30,7 +30,7 @@ export { SubTaskNotifier } from './SubTaskNotifier.js';
 // barrel zostaje czysty. Widok sidebara `renderSubTaskRunsView` + `buildPanelModel` OUT:
 // biegi należą do agenta i sesji, nie do globalnego panelu.
 export { buildStripModel, formatDuration } from './subTaskPanelModel.js';
-export type { StripRow, StripStep, BuildStripModelInput } from './subTaskPanelModel.js';
+export type { StripRow, StripStep, StripRun, StripEffect, StripState, BuildStripModelInput } from './subTaskPanelModel.js';
 export { registerBackstage } from './BackstageTab.js';
 // Magazyn szablonów sub-agentów (Zaplecze) — forma odlewnicza, nie żywy byt.
 export { SubAgentTemplateStore } from './SubAgentTemplateStore.js';

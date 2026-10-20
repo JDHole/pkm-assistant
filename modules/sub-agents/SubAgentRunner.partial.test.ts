@@ -39,7 +39,7 @@ test('partial stays visible while synthesis is held and failure retains real wor
     t.is(task.status, 'running');
     t.is(task.endedAt, undefined);
     t.deepEqual(delivered, []);
-    const row = buildStripModel({ tasks: [task], tabKey: 'tab-a', agentName: 'Owner A' })[0];
+    const row = buildStripModel({ tasks: [task], threads: registry.listThreads({ agentName: 'Owner A' }), tabKey: 'tab-a', agentName: 'Owner A' })[0];
     t.true(row.outcome.includes('created Notes/U3; effects unverified'));
     synthesis.error(cause);
     const result = await run;

@@ -738,19 +738,26 @@ do okna czatu, z którego user je zlecił.
 - `chat_ui.render_view` montuje kontener zaraz po pasku zakładek, nad ciałem wiadomości.
   Render: `chat/subTaskStrip.ts` (obsidian-free DOM), model: `buildStripModel` z barrela
   `modules/sub-agents`.
-- Chipy (kryształ statusu z pulsem dla biegnących, nazwa, czas trwania) dla biegów TEJ
+- Chipy (kryształ, obok dwuwierszowa kolumna z nazwą nad stanem, czas trwania) dla biegów TEJ
   zakładki. Klik rozwija jeden szczegół: status po ludzku, liczniki kroków/narzędzi, ostatnie
   kroki, skrót wyniku/błędu, dla biegu w toku guzik Stop (`registry.requestStop`). Nie ma pola
   "wiadomość do suba" - komunikacja z subem należy do agenta.
 - Filtr per zakładka: bieg z `origin.tabKey` trafia do swojej zakładki, bieg bez adresu (spoza
   czatu) - do zakładki tego samego agenta. Pusty model = zero wysokości.
-- Live: subskrypcja `plugin.subTaskRegistry.events` z debounce ~250 ms, wpięcie w `onOpen`
+- Live: subskrypcja `task:*` i `thread:created` / `thread:idle` / `thread:closed` z debounce 250 ms, wpięcie w `onOpen`
   obok dostawcy wyników, odpięcie w `onClose`. `_switchTab` przerysowuje pasek i zwija
   szczegół (biegi są per zakładka).
-- ⚠️ **Stan rozwinięcia musi żyć poza DOM-em** (pole na `ChatView`, nie klasa CSS) - pasek
+- ⚠️ **Stan rozwinięcia musi żyć poza DOM-em** (`ChatView` trzyma otwarty wiersz, a `WeakMap`
+  renderera trzyma rozwinięte kroki poszczególnych kart) - pasek
   przerysowuje się na każdym kroku suba, więc szczegół trzymany tylko w DOM-ie znikałby co
   kilka sekund. Rozwinięcie biegu, który wypadł z listy, jest gaszone; pole tekstowe czatu i
   jego focus NIE są dotykane przez przerysowanie paska.
+
+Szczegół pokazuje pionową oś `runIds`: każdy bieg ma jednocześnie własną kartę z nagłówkiem „Bieg N · zlecenie” i stanem. Karta zakończona pokazuje podsumowanie, wynik i efekty; przycisk „Rozwiń kroki” odsłania jej zapisane kroki. Karta biegu w toku ma kroki otwarte i własny Stop. Nie ma wyboru jednego biegu ani podmiany treści wszystkich kart. Krok `user.message` wyświetla zamaskowany podgląd z etykietą „wiadomość od agenta” i „tylko do odczytu”. Braki są renderowane wyłącznie dla efektu z `expectedCheck: 'exists'` i wynikiem `mismatch`; mismatch celu usuwania ma osobną etykietę „stan niezgodny”. Stan chipa wynika z `phase`, `stopRequested`, outcome i kolejki notifiera, nigdy z tekstu odpowiedzi. Częściowy wynik ostatniego biegu pozostaje w chipie po przejściu wątku do `idle`.
+- Efekty i braki każdej karty pochodzą z `outcome` jej biegu; bieg bez wyniku nie przejmuje dorobku wcześniejszych biegów wątku.
+- Przy częściowym wyniku zachowany dorobek jest pod „Co powstało”, a powód awarii w nagłówku karty. Gdy nie ma dorobku, pasek pokazuje sam błąd.
+- Stany mają osobne klasy obrysu. Pusty pasek jest ukryty, chipy przewijają się poziomo, a szczegół ma ograniczoną wysokość. Przy odświeżeniu zachowujemy focus aktywnego chipa lub przycisku rozwijania kroków; nie fokusujemy pola czatu. Escape zwija szczegół także z przycisku Stop i przywraca focus chipa, Enter i Spacja używają natywnej aktywacji przycisku.
+- Stop biegu wywołuje `requestStop(id, 'user')`. Stop wątku `queued` zamyka wątek przez `closeThread(threadId)`, bo bieg nie został jeszcze utworzony. Doręczenie notifiera nie tworzy drugiego wiersza.
 
 ### Pasek dolny: input vs todo, zachowanie szkicu
 
