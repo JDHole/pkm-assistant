@@ -65,6 +65,13 @@ const SUBTASK_FOOTER_KEY = 'chat.subagent_notification.footer';
 // patrz `subtaskOutcome` niżej.
 const SUBTASK_STATUS_ERROR_KEY = 'chat.subagent_notification.status_error';
 const SUBTASK_STATUS_ABORTED_KEY = 'chat.subagent_notification.status_aborted';
+const SUBTASK_META_KEY = 'chat.subagent_notification.meta';
+const SUBTASK_META_WITH_TIME_KEY = 'chat.subagent_notification.meta_with_time';
+const SUBTASK_COMPLETENESS_KEYS = {
+    unconfirmed: 'chat.subagent_notification.completeness_unconfirmed',
+    partial: 'chat.subagent_notification.completeness_partial',
+    empty: 'chat.subagent_notification.completeness_empty',
+} as const;
 // Identyfikator suba jako ostatnia linia details (uwaga 2, spec A3-fix) - reużywa i18n suba w
 // tle (`SubAgentBlock.ts`'s `buildBackgroundReceiptText`), ten sam kształt "Identyfikator: {id}".
 const SUBTASK_ID_LINE_KEY = 'chat.tile.sub.background_id';
@@ -193,14 +200,24 @@ function extractSecondVar(text: string, key: string, varNames: [string, string])
  * kafelek. Porównanie tu jest z etykietami `status_error`/`status_aborted` (i18n, obie wersje
  * językowe) na SAMEJ linii stanu - treść wyniku nigdy nie jest oglądana.
  */
-function subtaskOutcome(statusLine: string): 'error' | 'aborted' | 'done' {
+function subtaskOutcome(statusLine: string, meta?: unknown): 'error' | 'aborted' | 'done' {
+    if (meta === 'unconfirmed' || meta === 'partial' || meta === 'empty') return meta === 'unconfirmed' ? 'done' : 'error';
+    // Wartość `{{status}}` wyciągamy z szablonu słownika (obie wersje językowe, z czasem i bez),
+    // a nie regexem z wpisanymi słowami: zmiana tekstu linii stanu nie może zgubić klasyfikacji.
+    const statusText = extractFirstVar(statusLine, SUBTASK_META_WITH_TIME_KEY, ['status', 'seconds'])
+        ?? extractFirstVar(statusLine, SUBTASK_META_KEY, ['status'])
+        ?? statusLine;
+    const labels = statusText.split(' · ').map((label) => label.trim());
+    for (const value of ['partial', 'empty'] as const) {
+        for (const locale of LOCALES) if (labels.includes(t(SUBTASK_COMPLETENESS_KEYS[value], undefined, locale))) return 'error';
+    }
     for (const locale of LOCALES) {
         const errorLabel = t(SUBTASK_STATUS_ERROR_KEY, undefined, locale);
-        if (errorLabel && statusLine.includes(errorLabel)) return 'error';
+        if (errorLabel && labels.includes(errorLabel)) return 'error';
     }
     for (const locale of LOCALES) {
         const abortedLabel = t(SUBTASK_STATUS_ABORTED_KEY, undefined, locale);
-        if (abortedLabel && statusLine.includes(abortedLabel)) return 'aborted';
+        if (abortedLabel && labels.includes(abortedLabel)) return 'aborted';
     }
     return 'done';
 }
@@ -337,7 +354,7 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
         const name = extractFirstVar(text, SUBTASK_HEADER_KEY, ['name', 'task_id']) || '?';
         const { afterHeader, details } = subtaskDetails(text);
         const statusLine = firstParagraph(afterHeader);
-        const outcome = subtaskOutcome(statusLine);
+        const outcome = subtaskOutcome(statusLine, msg?.completeness ?? (msg?.outcome as { completeness?: unknown } | undefined)?.completeness);
         // B3 fix: tytuł "padł"/"przerwany" wyłącznie z linii stanu (`outcome`), nigdy z treści
         // wyniku. Uwaga 10 (kosmetyka, spec A3-fix): `aborted` dostaje WŁASNY tytuł zamiast
         // dzielić "padł w tle" z `error` - oba nadal kolorują kafelek na czerwono (status_error

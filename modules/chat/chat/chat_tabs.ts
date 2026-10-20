@@ -274,7 +274,7 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
         });
         for (const id of ids) {
             log.info('Chat', `Zamknięcie zakładki → zatrzymuję bieg suba ${id}`);
-            registry.requestStop(id);
+            registry.requestStop(id, 'system');
         }
     } catch (e) {
         log.warn('Chat', `Zatrzymanie subów zamykanej zakładki padło: ${(e as Error)?.message || String(e)}`);

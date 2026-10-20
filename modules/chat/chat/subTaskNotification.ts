@@ -22,6 +22,7 @@ import type { SubTask, SubTaskOrigin } from '../../sub-agents/index.js';
 /** Zakladka w zakresie, jakiego dotyka dopasowanie adresu zwrotnego. */
 interface TabLike {
     agentName?: string;
+    sessionPath?: string;
 }
 
 interface SubTaskNotificationOptions {
@@ -37,6 +38,41 @@ function statusLabel(status: string | undefined): string {
         case 'error': return t('chat.subagent_notification.status_error');
         case 'aborted': return t('chat.subagent_notification.status_aborted');
         default: return String(status || '?');
+    }
+}
+
+// Klucze dosłowne (nie składane z szablonu), żeby strażnik parytetu i18n je widział.
+const STOPPED_BY_KEY = {
+    user: 'chat.subagent_notification.end_stopped_user',
+    lead: 'chat.subagent_notification.end_stopped_lead',
+    system: 'chat.subagent_notification.end_stopped_system',
+} as const;
+const COMPLETENESS_KEY = {
+    unconfirmed: 'chat.subagent_notification.completeness_unconfirmed',
+    partial: 'chat.subagent_notification.completeness_partial',
+    empty: 'chat.subagent_notification.completeness_empty',
+} as const;
+const CHECK_KEY = {
+    matches: 'chat.subagent_notification.check_matches',
+    mismatch: 'chat.subagent_notification.check_mismatch',
+    not_checked: 'chat.subagent_notification.check_not_checked',
+    unknown: 'chat.subagent_notification.check_unknown',
+} as const;
+
+function outcomeEndLabel(outcome: NonNullable<SubTask['outcome']>): string {
+    const end = outcome.end;
+    switch (end.kind) {
+        case 'finished': return t('chat.subagent_notification.end_finished');
+        case 'limit': return t(end.reason === 'iteration-limit' ? 'chat.subagent_notification.end_iteration_limit' : 'chat.subagent_notification.end_synthesis_budget');
+        case 'uncertain': return t('chat.subagent_notification.end_uncertain');
+        case 'stopped': return t(STOPPED_BY_KEY[end.by]);
+        case 'timeout': return t('chat.subagent_notification.end_timeout');
+        case 'failed': return t(end.stage === 'work' ? 'chat.subagent_notification.end_failed_work' : 'chat.subagent_notification.end_failed_synthesis');
+        default: {
+            const exhaustive: never = end;
+            void exhaustive;
+            return '?';
+        }
     }
 }
 
@@ -76,11 +112,31 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
     }));
 
     const seconds = durationSeconds(task);
+    const outcome = task?.outcome;
+    const lineStatus = outcome
+        ? `${outcomeEndLabel(outcome)} · ${t(COMPLETENESS_KEY[outcome.completeness])}`
+        : statusLabel(task?.status);
     parts.push(seconds !== null
-        ? t('chat.subagent_notification.meta_with_time', { status: statusLabel(task?.status), seconds })
-        : t('chat.subagent_notification.meta', { status: statusLabel(task?.status) }));
+        ? t('chat.subagent_notification.meta_with_time', { status: lineStatus, seconds })
+        : t('chat.subagent_notification.meta', { status: lineStatus }));
 
-    if (task?.status === 'done') {
+    if (outcome?.completeness === 'unconfirmed') {
+        const raw = typeof task?.result?.text === 'string' ? task.result.text.trim() : '';
+        if (raw) parts.push(raw.length > maxResultChars && maxResultChars > 0 ? `${raw.slice(0, maxResultChars)}\n${t('chat.subagent_notification.truncated', { chars: maxResultChars })}` : raw);
+        else parts.push(t('chat.subagent_notification.empty_result'));
+        parts.push(t('chat.subagent_notification.unconfirmed'));
+    } else if (outcome?.completeness === 'partial') {
+        parts.push(t('chat.subagent_notification.partial'));
+        const raw = (typeof task?.partial?.text === 'string' && task.partial.text.trim()) || (typeof task?.result?.text === 'string' ? task.result.text.trim() : '');
+        parts.push(raw ? (maxResultChars > 0 && raw.length > maxResultChars ? `${raw.slice(0, maxResultChars)}\n${t('chat.subagent_notification.truncated', { chars: maxResultChars })}` : raw) : t('chat.subagent_notification.empty_result'));
+        for (const effect of outcome.effects || []) {
+            const check = effect.outcome === 'unknown' || effect.outcome === 'pending' ? 'unknown' : effect.check === 'matches' ? 'matches' : effect.check === 'mismatch' ? 'mismatch' : 'not_checked';
+            const targets = effect.targets?.map((target) => target.path || target.id || '').filter(Boolean).join(', ') || effect.action || '';
+            parts.push(t('chat.subagent_notification.effect', { tool: effect.tool, target: targets, check: t(CHECK_KEY[check]) }));
+        }
+    } else if (outcome?.completeness === 'empty') {
+        parts.push(t('chat.subagent_notification.empty', { reason: outcomeEndLabel(outcome) }));
+    } else if (!outcome && task?.status === 'done') {
         const raw = typeof task?.result?.text === 'string' ? task.result.text.trim() : '';
         if (!raw) {
             parts.push(t('chat.subagent_notification.empty_result'));
@@ -91,7 +147,7 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
         } else {
             parts.push(raw);
         }
-    } else {
+    } else if (!outcome) {
         const err = typeof task?.error === 'string' && task.error.trim()
             ? task.error.trim()
             : t('chat.subagent_notification.unknown_error');
@@ -105,11 +161,10 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
 /**
  * Do której zakładki należy wracający wynik.
  *
- * 1. `origin.tabKey` — dokładny adres zwrotny zapisany przy zleceniu (najpewniejszy).
- * 2. Fallback po agencie: pierwsza zakładka tego agenta. Ratuje sytuację, w której zakładka
- *    dostała po drodze inny klucz (np. sesja zapisana pod nową ścieżką) albo zlecenie przyszło
- *    bez `tabKey` (delegacja spoza czatu).
- * 3. Nic nie pasuje → `null`; wołacz zostawia wynik w kolejce notifiera na później.
+ * 1. `origin.tabKey`: dokładny adres zwrotny zapisany przy zleceniu.
+ * 2. `origin.sessionPath`: zakładka tej sesji i agenta.
+ * 3. Bez `sessionPath`: pierwsza zakładka agenta.
+ * 4. Nic nie pasuje: `null`; wynik zostaje w kolejce notifiera.
  *
  * `tabKeyFn` jest wstrzykiwane (a nie importowane), żeby ten plik został czysty — liczy ją
  * `chat_tabs._tabKey`, jedno źródło prawdy o tożsamości zakładki.
@@ -118,6 +173,7 @@ export function matchTabForOrigin<T extends TabLike>(
     tabs: T[] | null | undefined,
     origin: SubTaskOrigin | null | undefined,
     tabKeyFn: (tab: T) => string,
+    sessionPathFn: (tab: T) => string | undefined = (tab) => tab.sessionPath,
 ): T | null {
     if (!Array.isArray(tabs) || tabs.length === 0) return null;
 
@@ -127,6 +183,9 @@ export function matchTabForOrigin<T extends TabLike>(
         if (byKey) return byKey;
     }
 
+    if (origin?.sessionPath) {
+        return tabs.find((tab) => tab?.agentName === origin.agentName && sessionPathFn(tab) === origin.sessionPath) || null;
+    }
     const agentName = origin?.agentName;
     if (agentName) {
         const byAgent = tabs.find((tab) => tab?.agentName === agentName);

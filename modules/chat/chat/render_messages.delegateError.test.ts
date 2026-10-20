@@ -22,6 +22,8 @@
  */
 import test from 'ava';
 import { render_messages, append_message } from './chat_messages.js';
+import { _chatOnToolResults } from './chat_streaming.js';
+import { createSubAgentBlock } from '../../ui-components/index.js';
 // `translate` (nie `t`) - AVA nazywa swój argument asercji `t`, więc import pod tą samą nazwą
 // cieniowałby się wewnątrz callbacku testu.
 import { t as translate } from '../../../core/i18n/index.js';
@@ -49,6 +51,7 @@ type FakeEl = {
     createSpan(opts?: { cls?: string | string[]; text?: string }): FakeEl;
     createEl(tag: string, opts?: { cls?: string | string[]; text?: string }): FakeEl;
     querySelectorAll(): FakeEl[];
+    scrollIntoView(): void;
     style: { setProperty(name: string, value: string): void; getPropertyValue(name: string): string };
 };
 
@@ -95,6 +98,7 @@ function makeFakeEl(tag = 'div'): FakeEl {
         createSpan(opts) { const c = makeFakeEl('span'); if (opts?.cls) c.className = Array.isArray(opts.cls) ? opts.cls.join(' ') : opts.cls; if (opts?.text != null) c.textContent = opts.text; el.appendChild(c); return c; },
         createEl(tag2, opts) { const c = makeFakeEl(tag2); if (opts?.cls) c.className = Array.isArray(opts.cls) ? opts.cls.join(' ') : opts.cls; if (opts?.text != null) c.textContent = opts.text; el.appendChild(c); return c; },
         querySelectorAll() { return []; },
+        scrollIntoView() {},
     } as FakeEl;
     return el;
 }
@@ -176,6 +180,71 @@ test.serial('render_messages: delegate padniety {success:false, error:"limit cza
         const errorNoDetailsEn = translate('chat.tile.sub.error_no_details', undefined, 'en');
         t.false(details!.textContent.includes(errorNoDetailsPl), 'nie generyczny komunikat PL "bez opisu" - opis BYL w danych');
         t.false(details!.textContent.includes(errorNoDetailsEn), 'nie generyczny komunikat EN "without details" - opis BYL w danych');
+    });
+});
+
+test.serial('render_messages i wynik na żywo przekazują te same pełne opcje kafelka', async t => {
+    await withFakeDocument(async () => {
+        const output = { success: false, error: 'Limit czasu', aspect: 'pkm-sub', partial_result: 'DOROBEK', tools_used: ['write'], tool_call_details: [{ name: 'write', args: { path: 'a.md' } }], usage: { prompt_tokens: 4, completion_tokens: 2 }, duration_ms: 12345 };
+        const container = makeFakeEl();
+        const messages = [
+            { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', function: { name: 'delegate', arguments: JSON.stringify({ task: 'zapisz' }) } }] },
+            { role: 'tool', tool_call_id: 'call_1', content: JSON.stringify(output) },
+        ];
+        let historyOptions: Parameters<typeof createSubAgentBlock>[0] | undefined;
+        await render_messages.call(buildFakeThis(container, messages), options => {
+            historyOptions = options;
+            return createSubAgentBlock(options);
+        });
+        const actual = findByClass(container, 'cs-tile--agent');
+        const capture: { live?: FakeEl; options?: Parameters<typeof createSubAgentBlock>[0] } = {};
+        const toolCall = { id: 'call_1', name: 'delegate', arguments: JSON.stringify({ task: 'zapisz' }) };
+        const turn = {
+            agentName: 'Jaskier', toolCallsContainer: null,
+            owner: { memory: null }, origin: { sessionPath: '' },
+            rawResults: new Map([['call_1', { result: output, error: null }]]),
+            pendingEntries: [{ isSubAgent: true, toolDisplay: { replaceWith: (el: FakeEl) => { capture.live = el; } } }],
+        };
+        await _chatOnToolResults.call({ _isTurnActiveTab: () => true, _scheduleConnectorRedraw: () => {}, toolReactors: { run: async () => {} } } as never, turn as never, [{ toolCall, result: output }] as never, 0, options => {
+            capture.options = options;
+            return createSubAgentBlock(options);
+        });
+        const live = capture.live;
+        const expectedOptions = {
+            type: 'delegate', status: 'error', agentName: 'pkm-sub', query: 'zapisz',
+            response: `${translate('chat.streaming.error_prefix', { message: 'Limit czasu' })}\n\n${translate('chat.subagent_notification.partial_heading')}\nDOROBEK`,
+            toolsUsed: ['write'], toolCallDetails: [{ name: 'write', args: { path: 'a.md' } }],
+            usage: { prompt_tokens: 4, completion_tokens: 2 }, duration: 12345,
+        };
+        t.deepEqual(historyOptions, expectedOptions);
+        t.deepEqual(capture.options, expectedOptions);
+        t.deepEqual(historyOptions, capture.options);
+        t.truthy(actual);
+        t.truthy(live);
+        t.true(actual?.classList.contains('cs-tile--error') ?? false);
+        t.true(live?.classList.contains('cs-tile--error') ?? false);
+        const actualDetails = actual && findByClass(actual, 'cs-tile__details');
+        const liveDetails = live && findByClass(live, 'cs-tile__details');
+        t.is(actualDetails?.textContent, liveDetails?.textContent);
+        t.true(actualDetails?.textContent.includes('DOROBEK') ?? false);
+        t.true(actualDetails?.textContent.includes('Limit czasu') ?? false);
+        const title = actual && findByClass(actual, 'cs-tile__title');
+        t.true(title?.textContent.includes('pkm-sub') ?? false);
+    });
+});
+
+test.serial('render_messages: tekstowy wynik starszego delegate zachowuje odpowiedź', async t => {
+    await withFakeDocument(async () => {
+        const container = makeFakeEl();
+        await render_messages.call(buildFakeThis(container, [
+            { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', function: { name: 'delegate', arguments: JSON.stringify({ task: 'zadanie' }) } }] },
+            { role: 'tool', tool_call_id: 'call_1', content: 'STARA ODPOWIEDŹ' },
+        ]));
+        const tile = findByClass(container, 'cs-tile--agent');
+        const head = tile && findByClass(tile, 'cs-tile__head');
+        (head?.listeners.click || []).forEach(cb => cb({}));
+        const details = tile && findByClass(tile, 'cs-tile__details');
+        t.true(details?.textContent.includes('STARA ODPOWIEDŹ') ?? false);
     });
 });
 

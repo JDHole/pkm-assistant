@@ -11,6 +11,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 - Sub-agent runs now record their classified outcome, tool effects, and checked target state in the run result and registry.
 - The tools module exposes effect descriptions and target checks for built-in and external MCP tool calls.
+- Background sub-agent notifications now report their classified outcome, completeness, and checked effects.
+- Blocking delegate results now use the same result block in live chat and restored history, including partial work and actual duration.
+- Background sub-agent results now match chat tabs by session path before falling back to an agent tab.
+- Closing a chat tab or chat view now marks sub-agent stops as system initiated.
 - `MCPClient.executeToolCall` supports an execution-start callback after its permission and approval gates.
 
 ### Changed

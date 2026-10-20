@@ -14,6 +14,7 @@ import {
     createNoteLink,
 } from '../../ui-components/index.js';
 import { t, getDateLocale } from '../../../core/i18n/index.js';
+import { buildDelegateBlockOptions } from './delegateBlockView.js';
 import { registerUrlsFromText } from '../../web/index.js';
 import { registerUrlsIfHuman } from './messagePrivileges.js';
 // Historia liczy status narzędzia TĄ SAMĄ regułą co żywa tura (chat_streaming).
@@ -151,7 +152,7 @@ export async function append_message(this: ChatViewLike, role: MessageRole, cont
     this.scrollToBottom();
 }
 
-export async function render_messages(this: ChatViewLike): Promise<void> {
+export async function render_messages(this: ChatViewLike, createDelegateBlock: typeof createSubAgentBlock = createSubAgentBlock): Promise<void> {
     this.messages_container.empty();
     const agent = this.plugin?.agentManager?.getActiveAgent();
     const agentColor = SkinManager.getAgentColor(agent || 'default');
@@ -267,31 +268,7 @@ export async function render_messages(this: ChatViewLike): Promise<void> {
                                 response: buildBackgroundReceiptText(startedList, historyOutput.queued),
                             });
                         } else {
-                            block = createSubAgentBlock({
-                                type: tcName,
-                                // Status z JEDNEJ reguły (jak makeDisplay kilka linii niżej), nie
-                                // z dopasowania stringa 'Błąd' w response - dopasowanie stringa
-                                // łapałoby tylko literał sklejany przez chat_streaming.ts, więc
-                                // padnięta delegacja odtworzona z historii świeciłaby na zielono.
-                                status: toolResultStatus(tcOutput),
-                                agentName: _hName,
-                                query: taskQuery,
-                                // Delegacja padnięta, odtworzona z historii: `result` jest puste,
-                                // ale `error` (np. `{success:false, error:"limit czasu"}`) niesie
-                                // realny powód - bez fallbacku na `error` kafelek pokazywał
-                                // generyczne "Sub-agent zgłosił błąd bez opisu" zamiast echa
-                                // własnego opisu, mimo że opis BYŁ w danych. Ten sam szablon
-                                // (`chat.streaming.error_prefix`), którym `_chatOnToolResults`
-                                // (`chat_streaming.ts`) buduje `response` dla ŻYWEJ, padniętej
-                                // delegacji - jedno źródło formatu dla obu ścieżek.
-                                response: typeof tcOutput === 'string'
-                                    ? tcOutput
-                                    : (tcOutput?.result || (tcOutput?.error ? t('chat.streaming.error_prefix', { message: tcOutput.error }) : '')),
-                                toolsUsed: (tcOutput as HistoryToolOutput)?.tools_used || [],
-                                toolCallDetails: (tcOutput as HistoryToolOutput)?.tool_call_details || [],
-                                duration: (tcOutput as HistoryToolOutput)?.duration_ms || 0,
-                                usage: (tcOutput as HistoryToolOutput)?.usage,
-                            });
+                            block = createDelegateBlock(buildDelegateBlockOptions(tcOutput || {}, { type: tcName, agentName: _hName, query: taskQuery }));
                         }
                         agentDiv.appendChild(block);
                     } else {
