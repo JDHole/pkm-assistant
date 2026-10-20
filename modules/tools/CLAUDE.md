@@ -21,7 +21,7 @@ modules/tools/
 ├── SettingsContent.ts      # Web Search / Image Gen / STT / MCP Servers settings
 ├── SettingsSection.ts      # rejestracja sekcji Settings
 ├── BackstageTab.ts / ConnectorsBackstageTab.ts  # zakładka Zaplecza „Konektory" (informacyjna)
-├── DelegateTool.ts         # delegacja do sub-agentów (worker generyczny / custom / explorer)
+├── DelegateTool.ts         # delegacja do sub-agentów oraz sterowanie ich wątkami
 ├── AgentDelegateTool.ts    # delegacja jako wiadomość do innego AGENTA (nie suba)
 │
 ├── Prymitywy plikowe:
@@ -42,7 +42,7 @@ modules/tools/
 │   ├── memory.manifest.ts              # memory_save/memory_delete - odczyt scope=memory bramkowany uprawnieniem
 │   ├── web.manifest.ts                 # web_search/web_read
 │   ├── multimodal.manifest.ts          # generate_image/add_text_to_image
-│   ├── delegation.manifest.ts          # delegate/agent_delegate
+│   ├── delegation.manifest.ts          # delegate/sub_agent/agent_delegate
 │   ├── artifacts.manifest.ts           # artifact_create/read/update/list + todo
 │   ├── komunikator.manifest.ts         # kom_send/kom_list/kom_read
 │   ├── artifacts/                      # ArtifactCreate/Read/Update/ListTool.ts + TodoTool.ts + index.ts
@@ -110,7 +110,7 @@ powód wynika z `outcome.end`. Naturalny koniec bez odpowiedzi ma własny tekst
 
 **Presety + import external MCP:** `MCP_SERVER_PRESETS`, `getMcpServerPreset` - gotowe serwery zaszyte w kodzie, konsumuje `modules/shell/MCPServerEditorModal`.
 
-**Fabryki narzędzi (21):** `createDelegateTool`, `createAgentDelegateTool`, `createReadTool`, `createListTool`, `createWriteTool`, `createDeleteTool`, `createCreateFolderTool`, `createSearchTool`, `createMemorySaveTool`, `createMemoryDeleteTool`, `createArtifactCreateTool`, `createArtifactReadTool`, `createArtifactUpdateTool`, `createArtifactListTool`, `createTodoTool`, `createWebSearchTool`, `createWebReadTool`, `createAskUserTool`, `createKomunikatorTools`, `createGenerateImageTool`, `createAddTextToImageTool`.
+**Fabryki narzędzi (22):** `createDelegateTool`, `createSubAgentTool`, `createAgentDelegateTool`, `createReadTool`, `createListTool`, `createWriteTool`, `createDeleteTool`, `createCreateFolderTool`, `createSearchTool`, `createMemorySaveTool`, `createMemoryDeleteTool`, `createArtifactCreateTool`, `createArtifactReadTool`, `createArtifactUpdateTool`, `createArtifactListTool`, `createTodoTool`, `createWebSearchTool`, `createWebReadTool`, `createAskUserTool`, `createKomunikatorTools`, `createGenerateImageTool`, `createAddTextToImageTool`.
 
 Realny `app` dociera do narzędzia jako 2. argument `execute(args, app, plugin)` (kontrakt w `ToolRegistry.ts`) - fabryki go nie potrzebują w sygnaturze i większość go nie bierze. Built-in może dodatkowo dostać czwarty, zaufany `BuiltinToolExecutionContext`; wrappery MCP użytkownika go nie dostają. Wyjątki, które realnie czytają `app` we własnej sygnaturze: `createDelegateTool`, `createCreateFolderTool`.
 
@@ -527,3 +527,16 @@ Paginated read I/O failures use bounded codes without raw exception text: `ENOEN
 
 
 U3: each delegation owns an AbortController with a first-cause latch (`manual-stop` or `task-timeout`). The per-request stop guard prevents duplicate cancellation; final settlement clears the stop closure and existing timeout finalization cancels stale grace. Both result branches retain partial/stop_reason/tools_used/tool_call_details/usage.
+
+## Wątki sub-agentów przez `sub_agent`
+
+`createSubAgentTool` jest rejestrowane obok `createDelegateTool` i używa serwera `delegation`. Parametr `action` wybiera `message`, `task`, `stop`, `close` albo `list`. Właściciel nie jest argumentem narzędzia: każda operacja bierze `agentName`, `sessionPath` i `sessionEpoch` z zaufanego `_invocationOrigin`, wymaga kompletu i porównuje go z właścicielem wątku. Wątek bez pełnego klucza nie jest dostępny przez to narzędzie.
+
+`task` przechodzi wyłącznie w wątku `idle` i `reusable`, a bieg startuje przez wspólną ścieżkę `delegate`, z jej pulą, licznikiem, timeoutem, bramką modelu i uchwytem Stopu. `userStop` pozwala na kolejny bieg wyłącznie w turze zaufanego rodzaju `user`; flaga jest zdejmowana po przyjęciu biegu przez rejestr. Gdy wątek nie jest reusable, model dostaje wskazówkę, aby utworzyć nowego suba przez `delegate`.
+
+Kolejny bieg używa `modelId` i `providerId` zapisanych w konfiguracji wątku. Zmiana modelu domyślnego nie zmienia suba ani jego rozmowy. Model wpisany jawnie w konfiguracji suba lub rozwiązywany z ustawień agenta nie wymaga wpisu w bibliotece. Gdy model wybrany z biblioteki zostanie z niej usunięty albo dostawca jest niedostępny, narzędzie odmawia przed startem biegu, zamyka wątek i kieruje prowadzącego do `delegate`.
+
+Identyfikator kontynuacji i wybór trybu tła trafiają z `sub_agent` do `delegate` jako wewnętrzny uchwyt modułu. `delegate` ignoruje pola `_invocationThreadId`, `_invocationThreadAccepted` i `_invocationBackground` w argumentach, a `MCPClient` usuwa je przed wykonaniem. Dzięki temu model nie może wznowić wątku zatrzymanego przez usera ani ominąć limitu biegów w tle. Przy klasyfikacji ryzyka `sub_agent` używa `action` także wtedy, gdy model poda dodatkowe `mode`.
+
+Odpowiedź `delegate` niesie `sub_id`, gdy wątek po biegu nadaje się do ponownego użycia. Potwierdzenie biegu w tle niesie identyfikator nowego wątku. Zgoda dla `task` i `message` korzysta z przełącznika `delegate`; kontekst zawiera `sub_id`, akcję i pełną treść w `approvalContext`, a `targetPath` pozostaje pusty. Akcje `stop`, `close` i `list` są GREEN w trybie edge.
+W trybie blokującym każdy element listy `tasks` osobno dostaje `sub_id` po sprawdzeniu, czy jego wątek pozostał reusable. Nieudany element z `sub_id` dostaje notkę o kolejnym zadaniu przez `sub_agent`.

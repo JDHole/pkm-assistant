@@ -1,6 +1,8 @@
 import test from 'ava';
 import { MCPClient } from './MCPClient.js';
 import type { MCPClientApp, MCPClientPlugin, MCPToolRegistryLike, ToolCallArgs } from './MCPClient.js';
+import { createSubAgentTool } from './DelegateTool.js';
+import { SubTaskRegistry } from '../sub-agents/index.js';
 import type { PermissionedAgent } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
 
@@ -92,6 +94,7 @@ test('executeToolCall: maps built-in tools to known action types', async t => {
         artifact_read: 'artifact.read',
         artifact_update: 'artifact.update',
         artifact_list: 'artifact.read',
+        sub_agent: 'delegate',
     };
     const checkedActions: string[] = [];
     const client = new MCPClient(asApp(null), asPlugin({
@@ -121,6 +124,105 @@ test('executeToolCall: maps built-in tools to known action types', async t => {
     }
 
     t.false(checkedActions.includes('unknown'));
+});
+
+test('executeToolCall sub_agent injects trusted owner and passes approval context with an empty target', async t => {
+    const owner = { agentName: 'Mira', sessionPath: 'sessions/active.md', sessionEpoch: 'epoch-live' };
+    let executed: Record<string, unknown> | undefined;
+    let approval: Record<string, unknown> | undefined;
+    let target = 'unset';
+    let operationMode: unknown;
+    const client = new MCPClient(asApp(null), asPlugin({
+        agentManager: { getAgent: () => ({ name: 'Mira' }), getActiveAgent: () => ({ name: 'Mira' }) },
+        permissionSystem: {
+            checkPermission: (_agent: unknown, action: string, targetPath: string) => { t.is(action, 'delegate'); target = targetPath; return { allowed: true, requiresApproval: false }; },
+            requiresApproval: (_action: string, _path: string, _tool: string, _agent: unknown, _autonomy: unknown, risk: { operationMode?: string }) => { operationMode = risk.operationMode; return true; },
+        },
+        approvalManager: { requestApproval: async (request: Record<string, unknown>) => { approval = request; return { result: 'approve' }; } },
+    }), asRegistry({ getTool: () => ({
+        name: 'sub_agent', description: 'sub_agent',
+        contextExtractor: (args: Record<string, unknown>) => ({ targetPath: '', approvalContext: { subAgentId: args.sub_id, subAgentAction: args.action, subAgentText: args.task } }),
+        execute: async (args: Record<string, unknown>) => { executed = args; return { success: true }; },
+    }) }));
+    const result = await client.executeToolCall({ name: 'sub_agent', arguments: { action: 'task', sub_id: 'sub-4', task: 'Full private task text', _invocationOrigin: { agentName: 'Spoof', sessionPath: 'wrong', sessionEpoch: 'fake' } } }, 'Mira', { origin: owner, turnKind: 'user' });
+    t.deepEqual(result, { success: true });
+    t.is(target, '');
+    t.is(operationMode, 'task');
+    t.deepEqual(approval && { subAgentId: approval.subAgentId, subAgentAction: approval.subAgentAction, subAgentText: approval.subAgentText }, {
+        subAgentId: 'sub-4', subAgentAction: 'task', subAgentText: 'Full private task text',
+    });
+    t.deepEqual(executed?._invocationOrigin, owner);
+    t.is(executed?._invocationTurnKind, 'user');
+});
+
+test('executeToolCall lists only the trusted owner threads from the real sub-task registry', async t => {
+    const owner = { agentName: 'Mira', sessionPath: 'sessions/active.md', sessionEpoch: 'epoch-live' };
+    const registry = new SubTaskRegistry();
+    const own = registry.createThread({ threadId: 'owned-thread', name: 'Worker', owner, origin: owner, config: {}, phase: 'idle' });
+    const otherOwner = { ...owner, sessionEpoch: 'epoch-other' };
+    registry.createThread({ threadId: 'other-thread', name: 'Other', owner: otherOwner, origin: otherOwner, config: {}, phase: 'idle' });
+    const run = registry.create({ id: 'owned-run', name: own.name, agentName: owner.agentName, threadId: own.threadId, origin: owner });
+    run.outcome = { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true, effects: [] };
+    registry.endRun(own.threadId, { successful: true });
+
+    const tool = createSubAgentTool({});
+    const client = new MCPClient(asApp(null), asPlugin({
+        agentManager: { getAgent: () => ({ name: owner.agentName }), getActiveAgent: () => ({ name: owner.agentName }) },
+        permissionSystem: { checkPermission: () => ({ allowed: true, requiresApproval: false }), requiresApproval: () => false },
+        subTaskRegistry: registry,
+    }), asRegistry({ getTool: () => tool }));
+
+    const result = await client.executeToolCall({ name: 'sub_agent', arguments: {
+        action: 'list', _invocationOrigin: otherOwner,
+    } }, owner.agentName, { origin: owner, turnKind: 'user' }) as {
+        success: boolean;
+        threads: Array<{ sub_id: string; name: string; phase: string; runs: number; outcome: unknown }>;
+    };
+    t.deepEqual(result, { success: true, threads: [{
+        sub_id: 'owned-thread', name: 'Worker', phase: 'idle', runs: 1,
+        outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed' },
+    }] });
+    registry.dispose();
+});
+
+test('executeToolCall removes model supplied continuation controls from delegate', async t => {
+    let executed: Record<string, unknown> | undefined;
+    const agent = { name: 'Mira' };
+    const client = new MCPClient(asApp(null), asPlugin({
+        agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+        permissionSystem: { checkPermission: () => ({ allowed: true, requiresApproval: false }), requiresApproval: () => false },
+    }), asRegistry({ getTool: () => ({ name: 'delegate', description: 'delegate', execute: async (args: Record<string, unknown>) => { executed = args; return { success: true }; } }) }));
+    const result = await client.executeToolCall({ name: 'delegate', arguments: {
+        task: 'Continue stopped thread', _invocationThreadId: 'stopped-thread',
+        _invocationThreadAccepted: 'spoof', _invocationBackground: false,
+    } }, 'Mira') as Record<string, unknown>;
+    t.is(result.success, true);
+    t.false(Object.hasOwn(executed!, '_invocationThreadId'));
+    t.false(Object.hasOwn(executed!, '_invocationThreadAccepted'));
+    t.false(Object.hasOwn(executed!, '_invocationBackground'));
+});
+
+test('sub_agent message action controls risk even with a model supplied mode list', async t => {
+    const operations: unknown[] = [];
+    let approvals = 0;
+    let executions = 0;
+    const agent = { name: 'Mira' };
+    const client = new MCPClient(asApp(null), asPlugin({
+        agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+        permissionSystem: {
+            checkPermission: () => ({ allowed: true, requiresApproval: false }),
+            requiresApproval: (_action: unknown, _path: unknown, _tool: unknown, _agent: unknown, _autonomy: unknown, risk: { operationMode?: string }) => {
+                operations.push(risk.operationMode);
+                return risk.operationMode === 'message';
+            },
+        },
+        approvalManager: { requestApproval: async () => { approvals++; return { result: 'approve' }; } },
+    }), asRegistry({ getTool: () => ({ name: 'sub_agent', description: 'sub_agent', execute: async () => { executions++; return { success: true }; } }) }));
+    const result = await client.executeToolCall({ name: 'sub_agent', arguments: { action: 'message', mode: 'list', sub_id: 'sub-1', text: 'Change course' } }, 'Mira') as Record<string, unknown>;
+    t.is(result.success, true);
+    t.deepEqual(operations, ['message']);
+    t.is(approvals, 1);
+    t.is(executions, 1);
 });
 
 // ─── Przycinanie wyników search/list whitelistą agenta (MCPClient post-filter) ───

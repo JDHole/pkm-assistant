@@ -1,6 +1,8 @@
 import test from 'ava';
 import { createDelegateTool, __test__ } from './DelegateTool.js';
 import type { DelegatePlugin, SubAgentConfigLike } from './DelegateTool.js';
+import { MCPClient } from './MCPClient.js';
+import type { MCPClientApp, MCPClientPlugin, MCPToolRegistryLike } from './MCPClient.js';
 import { SubTaskRegistry } from '../../modules/sub-agents/index.js';
 import type { RunOutcome, SubTask, SubTaskOrigin } from '../../modules/sub-agents/index.js';
 // Dwa testy niżej jadą na PRAWDZIWEJ pętli — atrapa nie dotknęłaby mechanizmu,
@@ -901,7 +903,7 @@ type TloRes = {
     error?: string;
     aspect?: string;
     result?: unknown;
-    tasks?: Array<{ task_id: string; name: string }>;
+    tasks?: Array<{ task_id: string; name: string; sub_id?: string }>;
     queued?: number;
     rejected?: Array<{ task?: string; aspect?: string; error?: string }>;
     results?: Array<{ success?: boolean; error?: string }>;
@@ -1078,6 +1080,40 @@ test.serial('szerokość: zadania biegnące W TLE liczą się do limitu następn
 
     await new Promise(r => setTimeout(r, 300));
     t.is(__test__._backgroundCount(), 0, 'licznik zwalnia się po zakończeniu biegów');
+});
+
+test.serial('MCPClient nie pozwala modelowi ominąć puli przez _invocationBackground', async t => {
+    __test__._resetBackground();
+    const log = nowyLog();
+    const { plugin, makeRunner } = pluginZTlem(log, {
+        opoznienieMs: 150,
+        limits: { max_parallel_delegations: 1 },
+    });
+    const tool = createDelegateTool({}, { makeRunner });
+    const runtime = {
+        ...plugin,
+        permissionSystem: {
+            checkPermission: () => ({ allowed: true, requiresApproval: false }),
+            requiresApproval: () => false,
+        },
+    };
+    const registry = { getTool: () => tool, getToolDefinitions: () => [] };
+    const client = new MCPClient({} as MCPClientApp, runtime as unknown as MCPClientPlugin,
+        registry as unknown as MCPToolRegistryLike);
+
+    const first = await client.executeToolCall({ name: 'delegate', arguments: { task: 'Pierwszy bieg' } }, 'Jaskier') as Record<string, unknown>;
+    t.is(first.started, true);
+    t.is(__test__._backgroundCount(), 1);
+
+    const second = await client.executeToolCall({ name: 'delegate', arguments: {
+        task: 'Drugi bieg', _invocationBackground: false,
+    } }, 'Jaskier') as Record<string, unknown>;
+    t.is(second.success, false);
+    t.true(String(second.error).includes('(2, limit 1)'));
+    t.is(log.prompts.length, 1);
+
+    await new Promise(resolve => setTimeout(resolve, 200));
+    t.is(__test__._backgroundCount(), 0);
 });
 
 test.serial('timeout w tle: tura ma started, a sub i tak zostaje UBITY (abort + stopStream)', async t => {
@@ -1959,6 +1995,17 @@ test('_withTimeout z mapperem — ubity bieg oddaje dorobek jako partial_result'
     t.is(res.aspect, 'pkm-explorer');
 });
 
+test('salvage mapper preserves sub_id and gives the reusable-thread note only when present', t => {
+    const mapper = __test__._makeSalvageMapper(12000);
+    const outcome: RunOutcome = { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true, effects: [] };
+    const reusable = mapper({ success: true, result: 'saved work', outcome, sub_id: 'thread-9' }, 100)!;
+    t.is(reusable.sub_id, 'thread-9');
+    t.is(reusable.note, tr('mcp.sub_agent.task_note'));
+    const oneShot = mapper({ success: true, result: 'saved work', outcome }, 100)!;
+    t.false(Object.hasOwn(oneShot, 'sub_id'));
+    t.is(oneShot.note, tr('mcp.delegate.outcome_note'));
+});
+
 test('mapper NIE przykrywa realnego błędu biegu (success:false zostaje bez zmian)', async t => {
     const mapper = __test__._makeSalvageMapper(12000);
     const run = new Promise((resolve) => setTimeout(() => resolve({
@@ -2277,4 +2324,104 @@ test('powód końca idzie za stopReason pętli, gdy runner go poda', async t => 
         .execute({ task: 'x', background: false }, {}, pluginDlaZejscia()) as Record<string, unknown>;
     t.is(out.error, tr('mcp.delegate.outcome_error', { reason: tr('agentLoop.reason_manual-stop') }));
     t.is(out.partial_result, 'dorobek');
+});
+
+test.serial('delegate blocking response includes sub_id only when the resulting thread is reusable', async t => {
+    for (const reusable of [true, false]) {
+        __test__._resetBackground();
+        const registry = new SubTaskRegistry();
+        const log = nowyLog();
+        const { plugin } = pluginZTlem(log, { registry, limits: { max_delegation_depth: 3 } });
+        const tool = createDelegateTool({}, { makeRunner: () => ({
+            runTask: async (_task: string, agent: unknown, config: SubAgentConfigLike, _model: unknown, options: TloRunnerOptions) => {
+                const threadId = 'delegate-thread';
+                const owner = { agentName: options.origin!.agentName, sessionPath: options.origin!.sessionPath, sessionEpoch: options.origin!.sessionEpoch };
+                registry.createThread({ threadId, name: config.name, owner, origin: options.origin!, config: {}, phase: 'running' });
+                const task = registry.create({ id: 'delegate-run', name: config.name, agentName: (agent as { name: string }).name, threadId, origin: options.origin });
+                options.onTaskCreated?.(task);
+                const outcome: RunOutcome = reusable
+                    ? { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true, effects: [] }
+                    : { end: { kind: 'failed', stage: 'work' }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] };
+                registry.endRun(threadId, { successful: reusable });
+                return { result: 'done', outcome, toolsUsed: [], toolCallDetails: [], duration: 1 };
+            },
+        }) });
+        const origin: SubTaskOrigin = reusable
+            ? { agentName: 'Jaskier', sessionPath: 'sessions/a.md', sessionEpoch: 'epoch-a' }
+            : { agentName: 'Jaskier' };
+        const result = await tool.execute({ task: 'Do work', _invocationOrigin: origin, _invocationDelegationDepth: 1 }, {}, plugin) as Record<string, unknown>;
+        if (reusable) {
+            t.is(result.success, true);
+            t.is(result.sub_id, 'delegate-thread');
+        } else {
+            t.is(result.success, false);
+            t.false(Object.hasOwn(result, 'sub_id'));
+        }
+        registry.dispose();
+    }
+});
+
+test.serial('delegate background acknowledgements include each created sub_id', async t => {
+    __test__._resetBackground();
+    const registry = new SubTaskRegistry();
+    const rows: string[] = [];
+    const { plugin } = pluginZTlem(nowyLog(), { registry });
+    const tool = createDelegateTool({}, { makeRunner: () => ({
+        runTask: async (_task: string, _agent: unknown, config: SubAgentConfigLike, _model: unknown, options: TloRunnerOptions) => {
+            const n = rows.length + 1;
+            const task = Object.assign(fakeSubTask(`run-${n}`, config.name), { threadId: `thread-${n}` });
+            rows.push(task.id);
+            options.onTaskCreated?.(task);
+            await new Promise(resolve => setTimeout(resolve, 10));
+            return { result: 'done', toolsUsed: [], toolCallDetails: [], duration: 1 };
+        },
+    }) });
+    const single = await tool.execute({ task: 'One task' }, {}, plugin) as TloRes & { sub_id?: string };
+    t.is(single.sub_id, 'thread-1');
+    const many = await tool.execute({ tasks: [{ task: 'First' }, { task: 'Second' }] }, {}, plugin) as TloRes;
+    t.deepEqual(many.tasks?.map(task => task.sub_id), ['thread-2', 'thread-3']);
+    registry.dispose();
+});
+
+test.serial('delegate blocking tasks attach sub_id and a continuation note to reusable results', async t => {
+    __test__._resetBackground();
+    const registry = new SubTaskRegistry();
+    const { plugin } = pluginZTlem(nowyLog(), { registry, limits: { max_delegation_depth: 3 } });
+    let sequence = 0;
+    const tool = createDelegateTool({}, { makeRunner: () => ({
+        runTask: async (_prompt: string, _agent: unknown, config: SubAgentConfigLike, _model: unknown, options: TloRunnerOptions) => {
+            const n = ++sequence;
+            const threadId = `list-thread-${n}`;
+            const owner = { agentName: options.origin!.agentName, sessionPath: options.origin!.sessionPath, sessionEpoch: options.origin!.sessionEpoch };
+            registry.createThread({ threadId, name: config.name, owner, origin: options.origin!, config: {}, phase: 'running' });
+            const run = registry.create({ id: `list-run-${n}`, name: config.name, agentName: owner.agentName, threadId, origin: options.origin });
+            options.onTaskCreated?.(run);
+            registry.endRun(threadId, { successful: true });
+            return { result: n === 1 ? 'done' : 'partial work', outcome: n === 1 ? finishedOutcome : partialOutcome,
+                toolsUsed: [], toolCallDetails: [], duration: 1 };
+        },
+    }) });
+    const result = await tool.execute({ tasks: [{ task: 'First' }, { task: 'Second' }],
+        _invocationOrigin: { agentName: 'Jaskier', sessionPath: 'sessions/list.md', sessionEpoch: 'epoch-list' },
+        _invocationDelegationDepth: 1 }, {}, plugin) as { results: Array<Record<string, unknown>> };
+    t.deepEqual(result.results.map(row => ({ success: row.success, sub_id: row.sub_id, note: row.note })), [
+        { success: true, sub_id: 'list-thread-1', note: undefined },
+        { success: false, sub_id: 'list-thread-2', note: tr('mcp.sub_agent.task_note') },
+    ]);
+    registry.dispose();
+});
+
+test('delegate ignores a model supplied continuation id', async t => {
+    const { plugin } = pluginZTlem(nowyLog(), { registry: new SubTaskRegistry(), limits: { max_delegation_depth: 3 } });
+    let seenThreadId: string | undefined;
+    const tool = createDelegateTool({}, { makeRunner: () => ({ runTask: async (_prompt: string, _agent: unknown, _config: unknown, _model: unknown, options: TloRunnerOptions & { threadId?: string }) => {
+        seenThreadId = options.threadId;
+        return { result: 'new run', outcome: finishedOutcome, toolsUsed: [], toolCallDetails: [], duration: 1 };
+    } }) });
+    const result = await tool.execute({ task: 'Bypass user Stop', _invocationThreadId: 'stopped-thread',
+        _invocationThreadAccepted: () => t.fail('model callback must never run'),
+        _invocationOrigin: { agentName: 'Jaskier', sessionPath: 'sessions/a.md', sessionEpoch: 'epoch-a' },
+        _invocationDelegationDepth: 1 }, {}, plugin) as Record<string, unknown>;
+    t.is(result.success, true);
+    t.is(seenThreadId, undefined);
 });
