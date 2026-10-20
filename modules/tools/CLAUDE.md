@@ -67,6 +67,36 @@ modules/tools/
 
 ## Public API (`index.ts`)
 
+### DelegateTool: wynik biegu i listy tasks
+
+Pojedyncze zadanie z `outcome` ma `success: true` wyłącznie przy
+`outcome.completeness === 'unconfirmed'`. Pozostałe końce zwracają `success: false`,
+krótki `error` opisujący koniec, opcjonalny `partial_result` z tekstu biegu albo
+skrótu `tool_call_details` w tym samym limicie co salvage timeoutu, `outcome`
+z polami `end`, `completeness`, `hasAnswer`, `hasMaterial`, osobną listę `effects`
+i `note` mówiące, że dorobek jest zachowany i nie wolno raportować zadania
+jako wykonanego. Zachowane są też pola `aspect`, `stopped_by`, `stop_reason`,
+`partial`, `tools_used`, `tool_call_details`, `usage` i `duration_ms`.
+Sukces zawiera dodatkowo `outcome` i `effects`; ścieżka błędu runnera zachowuje
+dotychczasowe pola oraz dołącza te dwa pola, jeśli runner je poda.
+Gdy budzik otrzyma wynik biegu z `outcome`, zachowuje `partial_result`,
+`outcome`, `effects` i `note`, a `error` wskazuje timeout.
+
+Wynik runnera bez `outcome` jawnie przechodzi starą ścieżką odpowiedzi, by atrapy
+i starszy kształt zachowały zgodność. Lista `tasks` po oczekiwaniu na pulę ma
+`success: true` tylko przy sukcesie każdego elementu i zawsze zwraca wszystkie
+`results` oraz `counts: { finished, partial, failed }`. `partial` liczy elementy
+z `success: false`, które mają `partial_result` albo `outcome.completeness ===
+'partial'`; pozostałe nieudane elementy są `failed`. Pusta lista wyników nie jest
+sukcesem (`success: false`). Natychmiastowe potwierdzenie startu w tle (`started: true`)
+zachowuje dotychczasowy kształt.
+
+`error` przy `success: false` to zdanie `mcp.delegate.outcome_error` z powodem po ludzku:
+gdy runner poda `stopReason`, powód bierze te same teksty co pętla (`agentLoop.reason_*`,
+mapa `STOP_REASON_TEXT_KEY` w `DelegateTool.ts` na dosłownych kluczach); bez `stopReason`
+powód wynika z `outcome.end`. Naturalny koniec bez odpowiedzi ma własny tekst
+`mcp.delegate.reason_no_answer`. Nigdy nie wstawiamy surowego kodu ani tekstu modelu.
+
 **33 eksporty RUNTIME, wszystkie wypisane z nazwy** - `index.ts` nie używa `export *`: gwiazdka wynosiłaby na zewnątrz wszystko dany plik eksportuje, w tym rzeczy, które nigdy nie miały być publiczne. Dopisujesz narzędzie → dopisujesz fabrykę TUTAJ; bez tego `src/main.ts` jej nie zobaczy, a build wywali się na nieistniejącym eksporcie.
 
 **Runtime + registry:**
