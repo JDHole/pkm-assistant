@@ -265,6 +265,8 @@ zostaje jako TODO dla kolejnej jednostki.
 
 ## Gotchas
 
+- `ToolCallDisplay.ts` ma wpis `sub_agent` z ikoną robota. Nagłówek i skrót wejścia pokazują akcję oraz `sub_id`, nigdy treść `task` ani `text`.
+
 - ⚠️ **`ToolCallDisplay.ts` jest blisko monolitu** - próg czytelności jeszcze nie przekroczony, ale plik rośnie z każdym nowym narzędziem (katalog `TOOL_INFO` = jeden wpis per narzędzie). Zanim dorzucisz kolejną porcję, rozważ wyniesienie katalogu do osobnego pliku (`toolCatalog.ts`) - sam render bloku jest wtedy krótki.
 - ⚠️ **`TOOL_INFO[x].label` to getter, nie string.** Nie cache'uj go do zmiennej przy starcie ani nie serializuj katalogu - po zmianie języka odczytana wcześniej wartość zostanie stara. Czytaj przy renderze.
 - ⚠️ **Nieznane narzędzie musi się rysować.** `getToolIcon` ma fallback, bo agent może wywołać narzędzie z userowego serwera MCP, którego nie ma w katalogu. Nie dodawaj tu twardego throw. `getToolCallLabel` zwraca surową nazwę narzędzia, gdy w i18n nie ma klucza `tool.<name>` - inaczej czat renderowałby dosłowne `tool.serwer__tool` dla narzędzi z zewnętrznych serwerów MCP.
