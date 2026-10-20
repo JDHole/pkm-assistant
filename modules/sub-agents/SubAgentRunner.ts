@@ -9,7 +9,7 @@ import { runAgentLoop, ArrayMessageStore } from '../agent-loop/index.js';
 import type { RunAgentLoopOptions, ToolExecutionContext, AgentLoopPartialSnapshot, AgentLoopStopReason } from '../agent-loop/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
-import { getLimits } from '../../config/limits.js';
+import { getLimits, sanitizeLimit } from '../../config/limits.js';
 // „Co jest porażką narzędzia" liczy ta sama funkcja, co status chipa w czacie.
 import { resolveWorkPrompt, maskSensitiveData, sanitizePath, toolResultStatus } from '../../core/index.js';
 import type { PluginApi, AppLike, WorkPromptSettings } from '../../core/index.js';
@@ -149,6 +149,7 @@ export type SubRunResult = {
     partial?: AgentLoopPartialSnapshot;
     stopReason?: AgentLoopStopReason;
     outcome: RunOutcome;
+    handoff?: string;
 };
 
 type ToolCall = { name: string; arguments: unknown };
@@ -202,6 +203,51 @@ function _safeRegistry<T>(fn: () => T): T | undefined {
  */
 function _deliverableResultCap(subCommonCap: number, deliverableDefault: number): number {
     return (subCommonCap === 0 || deliverableDefault === 0) ? 0 : Math.max(subCommonCap, deliverableDefault);
+}
+
+function _canDelegateAtDepth(depth: number, maximum: number): boolean { return depth < maximum; }
+
+function _effectiveSubLimits(config: SubAgentData, limits: Record<string, number>) {
+    return {
+        maxIterations: sanitizeLimit('subagent_max_iterations_worker', config.max_iterations, limits.subagent_max_iterations_worker),
+        maxToolResultLength: sanitizeLimit('max_tool_result_length', config.max_tool_result_length, limits.max_tool_result_length),
+    };
+}
+
+function _maskHandoffText(value: string, knownSecrets: readonly string[]): string {
+    const withoutKnownSecrets = knownSecrets.reduce((text, secret) => text.split(secret).join('[REDACTED]'), value);
+    return maskSensitiveData(withoutKnownSecrets);
+}
+
+function _buildHandoff(outcome: RunOutcome, partial: AgentLoopPartialSnapshot | undefined, details: readonly unknown[], cap: number, knownSecrets: readonly string[]): string {
+    const sections: string[] = [];
+    const append = (label: string, value: string) => {
+        const used = sections.join('\n\n').length;
+        const remaining = cap - used - (sections.length ? 2 : 0);
+        if (remaining <= 0 || cap <= 0) return;
+        sections.push(`${t(label)}\n${_maskHandoffText(value, knownSecrets)}`.slice(0, remaining));
+    };
+    const effectsText = outcome.effects.map(effect => {
+        const targets = effect.targets.map(target => `${target.kind}${target.path ? `: ${target.path}` : ''}`).join(', ');
+        return `${effect.tool} | ${targets || effect.action} | ${effect.outcome} | ${effect.check}`;
+    }).join('\n');
+    if (effectsText) append('subagent.handoff.effects', effectsText);
+    if (partial?.lastText?.trim()) append('subagent.handoff.last_text', partial.lastText.trim());
+    const resultsText = [...details].reverse().map(item => {
+        const row = item as { name?: unknown; args?: unknown; resultPreview?: unknown };
+        let target = '';
+        if (row.args && typeof row.args === 'object' && !Array.isArray(row.args)) {
+            const args = row.args as Record<string, unknown>;
+            target = typeof args.path === 'string' ? args.path : JSON.stringify(args);
+        } else if (typeof row.args === 'string') target = row.args;
+        const name = typeof row.name === 'string' ? row.name : 'tool';
+        const preview = typeof row.resultPreview === 'string' ? row.resultPreview : '';
+        const maskedTarget = _maskHandoffText(target, knownSecrets);
+        const targetPreview = maskedTarget.length > 200 ? `${maskedTarget.slice(0, 197)}...` : maskedTarget;
+        return `${name} | ${targetPreview} | ${preview}`;
+    }).join('\n');
+    if (resultsText) append('subagent.handoff.results', resultsText);
+    return sections.join('\n\n').slice(0, Math.max(0, cap));
 }
 
 export class SubAgentRunner {
@@ -277,6 +323,7 @@ export class SubAgentRunner {
         const callEffects = new Map<number, RunEffect>();
         let effectsClosed = false;
         let successfulToolResults = 0;
+        const observedToolDetails: Array<{ name: string; args: unknown; resultPreview: string }> = [];
         const beginEffect = (seq: number, name: string, args: unknown) => {
             if (effectsClosed) return;
             const described = describeToolEffect(name, args);
@@ -362,7 +409,8 @@ export class SubAgentRunner {
             // Limity z config/limits.js - JEDNO źródło prawdy. Per sub-agent config
             // nadal wygrywa; getLimits() daje aktualne kanoniczne defaulty (patrz limits.ts).
             const limits = getLimits(this.plugin?.env?.settings);
-            const maxResultLen = config.max_tool_result_length ?? limits.max_tool_result_length;
+            const effectiveLimits = _effectiveSubLimits(config, limits);
+            const maxResultLen = effectiveLimits.maxToolResultLength;
             // Sufit delegate/agent_delegate nie może być NIŻSZY niż
             // sufit tego suba (patrz komentarz przy `_deliverableResultCap`).
             const deliverableResultCap = _deliverableResultCap(maxResultLen, limits.subagent_result_max_chars);
@@ -374,7 +422,7 @@ export class SubAgentRunner {
             // Czytelnicy trace dopasowują etykietę PREFIKSOWO (patrz `scenarios/_asserts.ts` w repo harnessu).
             const label = `sub/${config.name || config.role || 'sub'}#${(++_subCallSeq).toString(36)}`;
             const loopLimits = {
-                maxIterations: config.max_iterations || limits.subagent_max_iterations_worker,
+                maxIterations: effectiveLimits.maxIterations,
                 minIterations: config.min_iterations || 1,
                 perCallTimeoutMs: options.modelTimeout || config.model_timeout || limits.delegation_timeout_ms,
                 maxToolResultLength: maxResultLen,
@@ -456,11 +504,14 @@ export class SubAgentRunner {
                 }
                 : trace;
 
-            const systemPrompt = await this._buildTaskPrompt(agent, config);
+            const systemPrompt = await this._buildTaskPrompt(agent, config, delegationDepth);
 
             // Resolve tools: config.tools → role defaults
             const toolNames = this._resolveToolNames(config);
-            const tools = this._getTools(toolNames, agent, options.callerToolNames);
+            const visibleToolNames = _canDelegateAtDepth(delegationDepth, limits.max_delegation_depth)
+                ? toolNames
+                : toolNames.filter((name) => name !== 'delegate' && name !== 'agent_delegate');
+            const tools = this._getTools(visibleToolNames, agent, options.callerToolNames);
             // Fail-closed whitelist: the sub-agent may ONLY execute tools that
             // survived the parent∩sub intersection in _getTools. _executeTool enforces this
             // so the direct-execution fallback cannot run a tool outside the whitelist.
@@ -505,14 +556,22 @@ export class SubAgentRunner {
                 resolveTools: () => tools,
                 // Numer wywołania łapiemy PRZY STARCIE (kolejność tablicy pętli),
                 // a nie przy zakończeniu - wywołania jednego batcha rozstrzygają się równolegle.
-                executeToolCall: (toolCall, runtimeContext) => {
+                executeToolCall: async (toolCall, runtimeContext) => {
                     const seq = toolCallSeq++;
-                    return this._executeTool(toolCall as ToolCall, agent.name, allowedToolNames,
+                    let args: unknown = toolCall.arguments;
+                    if (typeof args === 'string') {
+                        try { args = JSON.parse(args); } catch { /* Zachowaj skrót surowych argumentów. */ }
+                    }
+                    const detail = { name: toolCall.name ?? '', args, resultPreview: '' };
+                    observedToolDetails[seq] = detail;
+                    const result = await this._executeTool(toolCall as ToolCall, agent.name, allowedToolNames,
                         { delegationDepth, scopeFolders: scopeFolders as string[], autonomy },
                         () => { failedToolCalls.add(seq); }, runtimeContext,
                         { start: (args) => beginEffect(seq, toolCall.name ?? '', args),
                             complete: (args, result, failed) => completeEffect(seq, toolCall.name ?? '', args, result, failed),
                             fail: () => failEffect(seq) });
+                    detail.resultPreview = _maskHandoffText(result, knownSecrets).slice(0, 500);
+                    return result;
                 },
                 ...(steerHooks ? { hooks: steerHooks } : {}),
                 // Delegate po SWOIM timeoucie ubija bieg suba, żeby sub nie wisiał w tle bez końca
@@ -556,6 +615,9 @@ export class SubAgentRunner {
             await partialPersistence;
             const finalEffects = await finalizeEffects();
             const outcome = classifyRunEnd({ stoppedBy: response.stoppedBy, stopReason: response.stopReason, finalText: response.finalText, partial: lastPartial, stoppedByActor: subTask?.stopRequestedBy, effects: finalEffects, successfulToolResults });
+            const handoff = outcome.completeness !== 'unconfirmed'
+                ? _buildHandoff(outcome, lastPartial, response.toolCallDetails || [], limits.subagent_salvage_max_chars, knownSecrets)
+                : undefined;
             log.info(logTag, `Task DONE: ${response.toolsUsed?.length || 0} tools, ${(response.finalText || '').length} znaków (stop: ${response.stoppedBy})`);
             log.timing(logTag, 'Task', startTime);
             log.groupEnd();
@@ -576,6 +638,7 @@ export class SubAgentRunner {
                     stoppedBy: response.stoppedBy,
                     stopReason: response.stopReason,
                     outcome,
+                    ...(handoff ? { handoff } : {}),
                 }));
             }
             return {
@@ -592,6 +655,7 @@ export class SubAgentRunner {
                 partial: lastPartial,
                 stopReason: response.stopReason,
                 outcome,
+                ...(handoff ? { handoff } : {}),
             };
         } catch (error) {
             closeEffects(lastPartial?.stopReason);
@@ -600,6 +664,9 @@ export class SubAgentRunner {
             await partialPersistence;
             const finalEffects = await finalizeEffects();
             const outcome = classifyRunEnd({ stoppedBy: 'error', failed: true, stopReason: lastPartial?.stopReason, finalText: '', partial: lastPartial, stoppedByActor: subTask?.stopRequestedBy, effects: finalEffects, successfulToolResults });
+            const handoff = outcome.completeness !== 'unconfirmed'
+                ? _buildHandoff(outcome, lastPartial, observedToolDetails, getLimits(this.plugin?.env?.settings).subagent_salvage_max_chars, knownSecrets)
+                : undefined;
             log.groupEnd();
             // TEN SAM kształt bloku co przy udanym biegu (`subagent_call`) - te same pola
             // nagłówka, status niesie treść `result`. Bez typu `subagent_error` znanego
@@ -614,7 +681,13 @@ export class SubAgentRunner {
                 duration_ms: Date.now() - startTime
             }, origin, memory);
             // Bieg mógł się nie założyć (błąd przed `create`) - wtedy nie ma czego domykać.
-            if (subTask) _safeRegistry(() => registry?.fail?.(subTask as SubTask, safeErrorMsg, outcome));
+            if (subTask) {
+                const failedTask = subTask;
+                _safeRegistry(() => registry?.fail?.(failedTask, safeErrorMsg, outcome, {
+                    text: '', toolsUsed: [...(lastPartial?.toolsUsed || [])], durationMs: Date.now() - startTime,
+                    usage: lastPartial?.usage || null, outcome, ...(handoff ? { handoff } : {}),
+                }));
+            }
             return {
                 result: t('subagent.error', { name: config.name, error: safeErrorMsg }),
                 toolsUsed: [...(lastPartial?.toolsUsed || [])],
@@ -629,6 +702,7 @@ export class SubAgentRunner {
                 partial: lastPartial,
                 stopReason: lastPartial?.stopReason,
                 outcome,
+                ...(handoff ? { handoff } : {}),
             };
         }
     }
@@ -693,7 +767,7 @@ export class SubAgentRunner {
      * konfigurowalna: instrukcja jest karmą dla modelu, nie wynikiem narzędzia.
      * Rola nie steruje treścią promptu.
      */
-    async _buildTaskPrompt(agent: AgentLike, config: SubAgentData): Promise<string> {
+    async _buildTaskPrompt(agent: AgentLike, config: SubAgentData, delegationDepth = 0): Promise<string> {
         // Limity czytamy RAZ - ten sam obiekt karmi cap instrukcji i blok BUDŻET niżej,
         // więc prompt nie może obiecać modelowi czegoś innego, niż realnie dostał.
         const limits = getLimits(this.plugin?.env?.settings);
@@ -742,13 +816,15 @@ export class SubAgentRunner {
         // wyjątek delegate/agent_delegate. To zdanie i `loopLimits` w
         // `runTask` MUSZĄ liczyć tą samą funkcją (`_deliverableResultCap`) - inaczej prompt
         // zacznie obiecywać subowi inny sufit niż ten, który realnie egzekwuje pętla.
-        const maxIter = config.max_iterations || limits.subagent_max_iterations_worker;
-        const maxLen = config.max_tool_result_length ?? limits.max_tool_result_length;
+        const effectiveLimits = _effectiveSubLimits(config, limits);
+        const maxIter = effectiveLimits.maxIterations;
+        const maxLen = effectiveLimits.maxToolResultLength;
         const delegateCap = _deliverableResultCap(maxLen, limits.subagent_result_max_chars);
+        const mayDelegate = _canDelegateAtDepth(delegationDepth, limits.max_delegation_depth);
         const budgetValue = (chars: number | null | undefined) => chars
             ? t('subagent.frame.budget_chars', { count: chars })
             : t('subagent.frame.budget_unlimited');
-        const budgetBlock = `${t('subagent.frame.budget_header')}\n${t('subagent.frame.budget_iterations', { count: maxIter })}\n${t('subagent.frame.budget_tool_result', { value: budgetValue(maxLen) })}\n${t('subagent.frame.budget_delegate', { value: budgetValue(delegateCap) })}\n`;
+        const budgetBlock = `${t('subagent.frame.budget_header')}\n${t('subagent.frame.budget_iterations', { count: maxIter })}\n${t('subagent.frame.budget_tool_result', { value: budgetValue(maxLen) })}\n${mayDelegate ? t('subagent.frame.budget_delegate', { value: budgetValue(delegateCap) }) : t('subagent.frame.no_further_delegation')}\n`;
 
         // Function replacers avoid `$`-sequence interpretation from injected content.
         return frame

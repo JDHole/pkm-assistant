@@ -36,8 +36,10 @@ function makeFixtureRuntime(source: string) {
 
 for (const cap of [15000, 600]) {
     test(`SubAgentRunner.runTask reconstructs every page at cap ${cap}`, async t => {
-        t.true(SOURCE.length >= 55000);
-        const { runner, file } = makeFixtureRuntime(SOURCE);
+        // At cap 600 the shared iteration ceiling is 100, so keep this
+        // fixture long enough to page but short enough to finish within it.
+        const source = cap === 600 ? `${'content-0123456789abcdef\r\n'.repeat(600)}${TERMINAL_FIELD}` : SOURCE;
+        const { runner, file } = makeFixtureRuntime(source);
         const pages: ReadPage[] = [];
         const resultLengths: number[] = [];
         const linkedIds: string[] = [];
@@ -86,7 +88,7 @@ for (const cap of [15000, 600]) {
                 }
                 callbacks.done({ choices: [{ message: {
                     role: 'assistant',
-                    content: pages.map(item => item.content).join('') === SOURCE
+                    content: pages.map(item => item.content).join('') === source
                         ? `READ_COMPLETE ${TERMINAL_FIELD}` : 'READ_FAILED',
                 } }] });
             },
@@ -99,8 +101,8 @@ for (const cap of [15000, 600]) {
         t.deepEqual(failures, []);
         t.is(outcome.stoppedBy, 'natural');
         t.is(outcome.result, `READ_COMPLETE ${TERMINAL_FIELD}`);
-        t.true(pages.length > 1 && pages.length < 500);
-        t.is(pages.map(page => page.content).join(''), SOURCE);
+        t.true(pages.length > 1 && pages.length < 100);
+        t.is(pages.map(page => page.content).join(''), source);
         t.true(resultLengths.every(length => length <= Math.min(cap, 12000)));
         t.deepEqual(linkedIds, pages.map((_, index) => `sub-read-${index}`));
         let offset = 0;
@@ -108,7 +110,7 @@ for (const cap of [15000, 600]) {
         for (const [index, page] of pages.entries()) {
             t.is(page.path, file.path);
             t.is(page.source_version, version);
-            t.is(page.source_length, SOURCE.length);
+            t.is(page.source_length, source.length);
             t.is(page.offset, offset);
             t.is(page.next_offset, index === pages.length - 1 ? null : offset + page.content.length);
             t.is(page.has_more, index !== pages.length - 1);
@@ -116,6 +118,6 @@ for (const cap of [15000, 600]) {
             t.true(page.effective_limit >= page.content.length);
             offset += page.content.length;
         }
-        t.is(offset, SOURCE.length);
+        t.is(offset, source.length);
     });
 }

@@ -9,6 +9,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sub-agents hide delegation tools and receive a self-execution instruction at the configured depth limit.
+- Sub-agent YAML iteration and tool-result limits are clamped to `LIMIT_SPECS` ceilings.
+- Partial sub-agent runs preserve an ordered, masked handoff with effects, the last response, and recent tool results.
+- Sub-agent handoff masks configured API keys before shortening tool previews, including runs that end with a synthesis error.
 - Sub-agent runs now record their classified outcome, tool effects, and checked target state in the run result and registry.
 - The tools module exposes effect descriptions and target checks for built-in and external MCP tool calls.
 - Background sub-agent notifications now report their classified outcome, completeness, and checked effects.

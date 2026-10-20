@@ -66,6 +66,7 @@ export interface SubTaskResult {
     stoppedBy?: 'natural' | 'backstop' | 'abort';
     stopReason?: AgentLoopStopReason;
     outcome?: RunOutcome;
+    handoff?: string;
 }
 
 /**
@@ -340,7 +341,7 @@ export class SubTaskRegistry {
     }
 
     /** Domyka bieg błędem. Tekst błędu maskujemy — API zwraca w nim czasem klucz. */
-    fail(task: SubTask, error: string, outcome?: RunOutcome): void {
+    fail(task: SubTask, error: string, outcome?: RunOutcome, result?: SubTaskResult): void {
         try {
             if (!task) return;
             if (task.status !== 'running') return;
@@ -348,6 +349,7 @@ export class SubTaskRegistry {
             task.status = 'error';
             if (outcome) task.outcome = outcome;
             task.error = this._mask ? this._mask(message) : message;
+            if (result) task.result = result;
             task.endedAt = Date.now();
             this.events.emit('task:finished', task);
             this._evictOldDone();
