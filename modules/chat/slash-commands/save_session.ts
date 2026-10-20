@@ -35,6 +35,8 @@ type ConsolidationAgentMemory = NonNullable<Parameters<typeof startConsolidation
 type AgentMemoryLike = WorkflowAgentMemory & {
     agentName: string;
     activeSessionPath?: string | null;
+    sessionEpoch?: string | null;
+    setActiveSessionIdentity?(path: string | null, epoch: string | null): void;
     vault: WorkflowAgentMemory['vault'] & {
         adapter: WorkflowAgentMemory['vault']['adapter'] & {
             read(path: string): Promise<string>;
@@ -50,6 +52,7 @@ interface ChatTabLike {
     sessionId?: string;
     sessionName?: string;
     sessionLabel?: string;
+    sessionEpoch?: string | null;
     agentName?: string;
 }
 
@@ -383,7 +386,8 @@ export async function applyPostArchiveAction(
     const activeTab = view.chatTabs?.find((tab: ChatTabLike) => tab.isActive);
 
     if (action === 'archive_new') {
-        agentMemory.activeSessionPath = null;
+        agentMemory.setActiveSessionIdentity?.(null, null);
+        if (!agentMemory.setActiveSessionIdentity) agentMemory.activeSessionPath = null;
         await agentMemory._persistActiveSession?.();
         const newPath = await agentMemory.startActiveSession(agentMemory.agentName);
         if (activeTab) {
@@ -391,6 +395,7 @@ export async function applyPostArchiveAction(
             activeTab.sessionId = newPath;
             activeTab.sessionName = newPath.split('/').pop();
             activeTab.sessionLabel = `${agentMemory.agentName} · nowa sesja`;
+            activeTab.sessionEpoch = agentMemory.sessionEpoch ?? null;
         }
         resetVisibleChat(view);
         return;
@@ -417,6 +422,7 @@ export async function applyPostArchiveAction(
     // (`chat_tabs._tabKey`) spada z powrotem na `agentName`.
     if (activeTab) {
         activeTab.sessionPath = null;
+        activeTab.sessionEpoch = null;
         activeTab.sessionId = undefined;
         activeTab.sessionName = undefined;
         activeTab.sessionLabel = undefined;

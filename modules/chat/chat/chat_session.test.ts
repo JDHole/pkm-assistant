@@ -25,13 +25,22 @@ import { SessionCloseModal } from '../SessionCloseModal.js';
 // `_restoreActiveSession`, nie cały kontrakt widoku.
 type TestDynamic = any;
 
-function buildFakeThis(parsedMessages: TestDynamic[]): TestDynamic {
+function buildFakeThis(parsedMessages: TestDynamic[], sessions?: TestDynamic[]): TestDynamic {
     const fakeAgent = { name: 'Jaskier' };
     const fakeSession = { path: 'sessions/active/Jaskier_2026-08-09.md', name: 'Jaskier_2026-08-09.md', mtime: 1 };
+    const sessionList = sessions || [fakeSession];
+    let identity: { path: string | null; epoch: string | null } = { path: null, epoch: null };
     const fakeAgentMemory = {
-        listActiveSessions: async () => [fakeSession],
-        loadActiveSession: async () => ({ messages: parsedMessages, metadata: {}, summary: null }),
-        activeSessionPath: null as string | null,
+        listActiveSessions: async () => sessionList,
+        loadActiveSession: async (session: TestDynamic) => ({
+            messages: parsedMessages,
+            metadata: session.epoch ? { epoch: session.epoch } : {},
+            summary: null,
+        }),
+        get activeSessionPath() { return identity.path; },
+        get sessionEpoch() { return identity.epoch; },
+        setActiveSessionIdentity: (path: string | null, epoch: string | null) => { identity = { path, epoch }; },
+        get identity() { return identity; },
         _persistActiveSession: async () => {},
     };
     const fakeAgentManager = {
@@ -83,6 +92,24 @@ test('BUG C1: _restoreActiveSession forwards tool_call_id/tool_calls into Rollin
         api.some(m => m.role === 'tool' && m.tool_call_id === 'call_abc123'),
         'wynik narzędzia sprzed restartu przeżył sanityzację transkryptu po restore',
     );
+});
+
+test('_restoreActiveSession wiąże epoki zakładek i pamięci z aktywną sesją', async t => {
+    const sessions = [
+        { path: 'sessions/active/older.md', name: 'older.md', mtime: 1, epoch: '11111111111111111111111111111111' },
+        { path: 'sessions/active/newer.md', name: 'newer.md', mtime: 2, epoch: '22222222222222222222222222222222' },
+    ];
+    const fakeThis = buildFakeThis([{ role: 'user', content: 'cześć', seq: 1 }], sessions);
+    await _restoreActiveSession.call(fakeThis);
+
+    t.deepEqual(fakeThis.chatTabs.map((tab: TestDynamic) => tab.sessionEpoch), [
+        '22222222222222222222222222222222',
+        '11111111111111111111111111111111',
+    ]);
+    t.deepEqual(fakeThis.plugin.agentManager.getActiveMemory().identity, {
+        path: 'sessions/active/newer.md',
+        epoch: '22222222222222222222222222222222',
+    });
 });
 
 test('_restoreActiveSession restauruje wiadomości bez tool_call_id jak dotąd (brak regresji)', async t => {

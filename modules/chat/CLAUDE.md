@@ -256,6 +256,17 @@ WŁAŚCIWEGO agenta/zakładki, nie do tego, co akurat widać na ekranie.
   widoku "kto jest teraz aktywny" - prompt, resolucja skilli z markerów, Oczko, model
   (`get_chat_model({agent})`), autonomia i adres zwrotny delegacji w tle idą z `owner`, nie z
   `getActiveAgent()`.
+- `FrozenTurnOwner.sessionEpoch` i `turn.origin.sessionEpoch` są zamrażane synchronicznie
+  razem ze ścieżką sesji. `turn.origin` zawiera też `agentName`, `tabKey` i `sessionPath`.
+  Gdy plik sesji powstaje po zamrożeniu, czat dołącza epokę tylko po potwierdzeniu zgodnej
+  ścieżki w `AgentMemory`; w pozostałych przypadkach zostaje `null`. `turnKind` jest liczony
+  raz z `meta.origin`: `human` daje `user`, każda inna wartość daje `machine`, i trafia do
+  każdego wywołania `MCPClient` tej tury.
+  Pierwszy zapis wiadomości może utworzyć plik jeszcze przed `freezeTurnOwner`. Wtedy czat
+  przenosi potwierdzoną parę ścieżki i epoki z pamięci na świeżą zakładkę, jeśli jej
+  tożsamość nie zmieniła się w czasie przygotowania tury. Gdy `sessionId` jest pusty po
+  „Nowa sesja”, przed przypięciem ścieżki dostaje zamrożony `tabKey`, aby `_tabKey` nie
+  zmienił się podczas tury i finalizacja nadal rozpoznała aktywną zakładkę.
 - **Klucz tożsamości zakładki (`tabKey`) liczy się RAZ**, zaraz po `freezeTurnOwner`, i jedzie
   dalej jako `turn.origin.tabKey` (dla kroków z dostępem do `turn`) albo jako goły string do
   callbacków bez dostępu do `turn` (np. `handle_error`). Przeliczanie klucza PÓŹNIEJ, z żywego
@@ -311,6 +322,10 @@ WŁAŚCIWEGO agenta/zakładki, nie do tego, co akurat widać na ekranie.
   `get_chat_model()` bez agenta, czyli na aktywnego agenta w UI.
 
 ### Proweniencja wiadomości: `meta.origin`, nie rola dymka
+
+Wynik biegu z `sessionEpoch` trafia najpierw do zakładki o `tabKey` z tą samą ścieżką i
+epoką, potem do dowolnej zakładki z tą samą parą. Bez dopasowania pozostaje w kolejce.
+Starsze biegi bez epoki zachowują dotychczasowe dopasowanie.
 
 Rola dymka (`'user'`) nie oznacza, że tekst napisał człowiek - guziki i auto-tury też
 wypełniają pole wpisywania i wołają `send_message()`. Trzy mechanizmy w turze traktują tekst
