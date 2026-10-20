@@ -31,6 +31,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Ending a chat session closes its sub-agent threads, with running threads closing after their run ends.
 - Plugin unload closes all sub-agent threads after requesting that active runs stop.
 - Background sub-agent results tell the model which reusable sub ID can receive a follow-up task.
+- Approval prompts for delegation now show the sub-agent and task, with a bounded task preview.
+- Approval prompts for sub-agent tasks and messages now show the target sub-agent and submitted text.
 
 ### Changed
 
