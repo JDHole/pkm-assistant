@@ -15,6 +15,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Delegate reports success only for runs with `unconfirmed` completeness; incomplete runs preserve partial work, and task lists include completion counts.
 - Sub-agent template editing can rename the display name without changing its slug or folder. Both success messages show the saved name, and the editor selects the `sub_worker` model slot for workers, validates iteration limits, and groups advanced settings separately.
 - Sub-agent scope guidance now explains that folders are a hard boundary while frontmatter, sections, and pinned notes do not block access.
 - Template deletion confirms that existing agent copies remain active and lists copies identified by their `from_template` metadata.

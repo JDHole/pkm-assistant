@@ -2,11 +2,12 @@ import test from 'ava';
 import { createDelegateTool, __test__ } from './DelegateTool.js';
 import type { DelegatePlugin, SubAgentConfigLike } from './DelegateTool.js';
 import { SubTaskRegistry } from '../../modules/sub-agents/index.js';
-import type { SubTask, SubTaskOrigin } from '../../modules/sub-agents/index.js';
+import type { RunOutcome, SubTask, SubTaskOrigin } from '../../modules/sub-agents/index.js';
 // Dwa testy niżej jadą na PRAWDZIWEJ pętli — atrapa nie dotknęłaby mechanizmu,
 // który trzeba pokryć (zejście przez abort w środku wywołania modelu).
 import { runAgentLoop, ArrayMessageStore } from '../../modules/agent-loop/index.js';
 import { log } from '../../core/utils/Logger.js';
+import { t as tr } from '../../core/i18n/index.js';
 import { __test__ as modelsTest } from '../models/index.js';
 
 /** Wynik `delegate` czytany w asercjach — pola typowane POD UŻYCIE w tym pliku. */
@@ -673,8 +674,9 @@ test('górny timeout_ms jest defaultem dla zadań bez własnego', async t => {
     const started = Date.now();
     const res = await tool.execute({ timeout_ms: 60, tasks: [{ task: 'a' }, { task: 'b' }], background: false }, {}, plugin as unknown as DelegatePlugin) as DelegateRes;
 
-    t.true(res.success, 'wywołanie się kończy — nie zwiesza się na domyślnych 120 s');
+    t.false(res.success, 'lista z timeoutami nie jest sukcesem');
     t.is(res.results.length, 2);
+    t.deepEqual((res as unknown as { counts: unknown }).counts, { finished: 0, partial: 0, failed: 2 });
     t.true(res.results.every(r => r.success === false && r.error.includes('60ms')),
         'każde zadanie dostało górny limit jako swój');
     t.true(Date.now() - started < 5000, 'czekaliśmy sekundy, nie minuty');
@@ -1627,6 +1629,17 @@ test('bieg z failed:true wraca do modelu jako success:false + stopped_by "error"
     t.is(out.result, undefined, 'gałąź błędu nie udaje, że jest wynik');
 });
 
+test('błąd runnera z outcome oddaje osobne effects', async t => {
+    const failedOutcome = { end: { kind: 'failed', stage: 'work' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [testEffect] } as unknown as RunOutcome;
+    const out = await outcomeTool({ result: 'Błąd biegu', toolsUsed: ['write'], toolCallDetails: [], duration: 3, usage: null, failed: true, outcome: failedOutcome })
+        .execute({ task: 'x', background: false }, {}, pluginDlaZejscia()) as Record<string, unknown>;
+    t.deepEqual(out, {
+        success: false, error: 'Błąd biegu', aspect: 'pkm-sub', stopped_by: 'error',
+        tools_used: ['write'], tool_call_details: [], usage: null, duration_ms: 3,
+        outcome: { end: { kind: 'failed', stage: 'work' }, completeness: 'partial', hasAnswer: false, hasMaterial: true }, effects: [testEffect],
+    });
+});
+
 test('multi-task — element z błędem jest success:false, sąsiad z sukcesem nietknięty', async t => {
     __test__._resetBackground();
     let n = 0;
@@ -1644,7 +1657,8 @@ test('multi-task — element z błędem jest success:false, sąsiad z sukcesem n
         pluginDlaZejscia(),
     ) as { success?: boolean; results: Array<{ success?: boolean; stopped_by?: string; error?: string }> };
 
-    t.true(out.success, 'całe wywołanie przechodzi — o losie zadań mówią elementy');
+    t.false(out.success, 'cała lista nie jest sukcesem, gdy element się nie powiódł');
+    t.deepEqual((out as unknown as { counts: unknown }).counts, { finished: 1, partial: 0, failed: 1 });
     t.true(out.results[0].success);
     t.is(out.results[0].stopped_by, 'natural');
     t.false(out.results[1].success);
@@ -1663,6 +1677,99 @@ test('runner bez stoppedBy (starszy kształt wyniku) nie wstawia pustego stopped
 
     t.true(out.success as boolean);
     t.false('stopped_by' in out);
+});
+
+test('lista dwóch sukcesów niesie liczniki zbiorcze', async t => {
+    let n = 0;
+    const tool = createDelegateTool({}, { makeRunner: () => ({ runTask: async () => ({
+        result: `ok${++n}`, toolsUsed: [], toolCallDetails: [], duration: 1, usage: null, outcome: finishedOutcome,
+    }) }) });
+    const out = await tool.execute({ tasks: [{ task: 'a' }, { task: 'b' }], background: false }, {}, pluginDlaZejscia()) as Record<string, unknown>;
+    t.deepEqual(out, { success: true, counts: { finished: 2, partial: 0, failed: 0 }, results: [
+        { success: true, result: 'ok1', aspect: 'pkm-sub', aspect_type: 'researcher', aspect_explicit: false, tools_used: [], tool_call_details: [], duration_ms: 1, usage: null, outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true }, effects: [] },
+        { success: true, result: 'ok2', aspect: 'pkm-sub', aspect_type: 'researcher', aspect_explicit: false, tools_used: [], tool_call_details: [], duration_ms: 1, usage: null, outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true }, effects: [] },
+    ] });
+});
+
+test('lista sukcesu i limitu z dorobkiem liczy partial', async t => {
+    let n = 0;
+    const tool = createDelegateTool({}, { makeRunner: () => ({ runTask: async () => ++n === 1
+        ? { result: 'OK', toolsUsed: [], toolCallDetails: [], duration: 1, usage: null, outcome: finishedOutcome }
+        : { result: 'dorobek', toolsUsed: [], toolCallDetails: [], duration: 2, usage: null, outcome: partialOutcome },
+    }) });
+    const out = await tool.execute({ tasks: [{ task: 'a' }, { task: 'b' }], background: false }, {}, pluginDlaZejscia()) as Record<string, unknown>;
+    t.deepEqual(out, { success: false, counts: { finished: 1, partial: 1, failed: 0 }, results: [
+        { success: true, result: 'OK', aspect: 'pkm-sub', aspect_type: 'researcher', aspect_explicit: false, tools_used: [], tool_call_details: [], duration_ms: 1, usage: null, outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true }, effects: [] },
+        { success: false, error: tr('mcp.delegate.outcome_error', { reason: tr('agentLoop.reason_iteration-limit') }), partial_result: 'dorobek', outcome: { end: { kind: 'limit', reason: 'iteration-limit' }, completeness: 'partial', hasAnswer: false, hasMaterial: true }, effects: [testEffect], note: tr('mcp.delegate.outcome_note'), aspect: 'pkm-sub', tools_used: [], tool_call_details: [], duration_ms: 2, usage: null },
+    ] });
+});
+
+const testEffect = { tool: 'write', action: 'create', targets: [], outcome: 'returned', check: 'not-checked' } as const;
+const finishedOutcome = { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true, effects: [] } as RunOutcome;
+const partialOutcome = { end: { kind: 'limit', reason: 'iteration-limit' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [testEffect] } as unknown as RunOutcome;
+const emptyOutcome = { end: { kind: 'timeout' }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } as RunOutcome;
+function outcomeTool(result: Record<string, unknown>) {
+    return createDelegateTool({}, { makeRunner: () => ({ runTask: async () => result }) });
+}
+
+test('wynik unconfirmed jest sukcesem i zwraca outcome oraz effects', async t => {
+    const out = await outcomeTool({ result: 'Gotowe', toolsUsed: [], toolCallDetails: [], duration: 5, usage: null, stoppedBy: 'natural', outcome: finishedOutcome })
+        .execute({ task: 'x', background: false }, {}, pluginDlaZejscia()) as Record<string, unknown>;
+    t.deepEqual(out, {
+        success: true, result: 'Gotowe', aspect: 'pkm-sub', aspect_type: 'researcher', aspect_explicit: false,
+        stopped_by: 'natural', tools_used: [], tool_call_details: [], duration_ms: 5, usage: null,
+        outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true }, effects: [],
+    });
+});
+
+test('limit z dorobkiem jest wynikiem częściowym', async t => {
+    const out = await outcomeTool({ result: 'ODPOWIEDŹ MODELU NIE JEST BŁĘDEM', toolsUsed: ['write'], toolCallDetails: [], duration: 7, usage: null, stoppedBy: 'backstop', outcome: partialOutcome })
+        .execute({ task: 'x', background: false }, {}, pluginDlaZejscia()) as Record<string, unknown>;
+    t.deepEqual(out, {
+        success: false, error: tr('mcp.delegate.outcome_error', { reason: tr('agentLoop.reason_iteration-limit') }),
+        partial_result: 'ODPOWIEDŹ MODELU NIE JEST BŁĘDEM', outcome: { end: { kind: 'limit', reason: 'iteration-limit' }, completeness: 'partial', hasAnswer: false, hasMaterial: true }, effects: [testEffect],
+        note: tr('mcp.delegate.outcome_note'), aspect: 'pkm-sub', stopped_by: 'backstop',
+        tools_used: ['write'], tool_call_details: [], duration_ms: 7, usage: null,
+    });
+});
+
+test('wynik empty nie ma partial_result', async t => {
+    const out = await outcomeTool({ result: '', toolsUsed: [], toolCallDetails: [], duration: 2, usage: null, stoppedBy: 'abort', outcome: emptyOutcome })
+        .execute({ task: 'x', background: false }, {}, pluginDlaZejscia()) as Record<string, unknown>;
+    t.deepEqual(out, {
+        success: false, error: tr('mcp.delegate.outcome_error', { reason: tr('agentLoop.reason_task-timeout') }),
+        outcome: { end: { kind: 'timeout' }, completeness: 'empty', hasAnswer: false, hasMaterial: false }, effects: [], note: tr('mcp.delegate.outcome_note'), aspect: 'pkm-sub', stopped_by: 'abort',
+        tools_used: [], tool_call_details: [], duration_ms: 2, usage: null,
+    });
+});
+
+test('runner bez outcome zachowuje pełny stary kształt', async t => {
+    const out = await outcomeTool({ result: 'ok', toolsUsed: [], toolCallDetails: [], duration: 1, usage: null })
+        .execute({ task: 'x', background: false }, {}, pluginDlaZejscia()) as Record<string, unknown>;
+    t.deepEqual(out, {
+        success: true, result: 'ok', aspect: 'pkm-sub', aspect_type: 'researcher', aspect_explicit: false,
+        tools_used: [], tool_call_details: [], duration_ms: 1, usage: null,
+    });
+});
+
+test.serial('tło bez bytu czeka na przyjęte zadania i liczy wynik częściowy', async t => {
+    __test__._resetBackground();
+    let n = 0;
+    const seenBackground: Array<boolean | undefined> = [];
+    const plugin = { ...pluginDlaZejscia(), subTaskRegistry: {} } as DelegatePlugin;
+    const tool = createDelegateTool({}, { makeRunner: () => ({ runTask: async (_task, _agent, _config, _model, options) => {
+        seenBackground.push(options.background);
+        return ++n === 1
+            ? { result: 'OK', toolsUsed: [], toolCallDetails: [], duration: 1, usage: null, outcome: finishedOutcome }
+            : { result: 'dorobek', toolsUsed: [], toolCallDetails: [], duration: 2, usage: null, outcome: partialOutcome };
+    },
+    }) });
+    const out = await tool.execute({ tasks: [{ task: 'a' }, { task: 'b' }] }, {}, plugin) as Record<string, unknown>;
+    t.deepEqual(out, { success: false, counts: { finished: 1, partial: 1, failed: 0 }, results: [
+        { success: true, result: 'OK', aspect: 'pkm-sub', aspect_type: 'researcher', aspect_explicit: false, tools_used: [], tool_call_details: [], duration_ms: 1, usage: null, outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true }, effects: [] },
+        { success: false, error: tr('mcp.delegate.outcome_error', { reason: tr('agentLoop.reason_iteration-limit') }), partial_result: 'dorobek', outcome: { end: { kind: 'limit', reason: 'iteration-limit' }, completeness: 'partial', hasAnswer: false, hasMaterial: true }, effects: [testEffect], note: tr('mcp.delegate.outcome_note'), aspect: 'pkm-sub', tools_used: [], tool_call_details: [], duration_ms: 2, usage: null },
+    ] });
+    t.deepEqual(seenBackground, [true, true]);
 });
 
 // ─── Grace-okno na finalne podsumowanie suba ───────────────────────────
@@ -1845,6 +1952,38 @@ test('mapper NIE przykrywa realnego błędu biegu (success:false zostaje bez zmi
     const res = await __test__._withTimeout(run, 10, 10, null, null, null, mapper) as Record<string, unknown>;
     t.false(res.success as boolean);
     t.is(res.error, 'runner init failed');
+});
+
+test('timeout mapuje nową odpowiedź częściową success:false i zachowuje outcome oraz dorobek', async t => {
+    const mapper = __test__._makeSalvageMapper(12000);
+    const run = new Promise(resolve => setTimeout(() => resolve({
+        success: false, error: tr('mcp.delegate.outcome_error', { reason: tr('agentLoop.reason_iteration-limit') }),
+        partial_result: 'dorobek już złożony', outcome: partialOutcome, effects: [testEffect],
+        note: 'Dorobek, jeśli istnieje, jest zachowany w partial_result; nie raportuj zadania jako wykonanego.', stopped_by: 'backstop',
+        tool_call_details: [], tools_used: ['write'], duration_ms: 15,
+    }), 30));
+    const res = await __test__._withTimeout(run, 10, 10, null, null, null, mapper) as Record<string, unknown>;
+    t.deepEqual(res, {
+        success: false, error: 'Sub-agent timeout after 10ms', stopped_by: 'timeout',
+        partial_result: 'dorobek już złożony', outcome: { end: { kind: 'limit', reason: 'iteration-limit' }, completeness: 'partial', hasAnswer: false, hasMaterial: true }, effects: [testEffect],
+        note: 'Dorobek, jeśli istnieje, jest zachowany w partial_result; nie raportuj zadania jako wykonanego.',
+        tools_used: ['write'], duration_ms: 15, tool_call_details: [],
+    });
+});
+
+test('timeout biegu przez publiczne API zachowuje outcome i partial_result', async t => {
+    const tool = createDelegateTool({}, { makeRunner: () => ({ runTask: async () => {
+        await new Promise(resolve => setTimeout(resolve, 35));
+        return { result: 'ZACHOWANY DOROBEK', toolsUsed: ['write'], toolCallDetails: [], duration: 35, usage: null, stoppedBy: 'backstop', outcome: partialOutcome };
+    } }) });
+    const out = await tool.execute({ task: 'x', timeout_ms: 10, background: false }, {}, pluginDlaZejscia()) as Record<string, unknown>;
+    t.deepEqual(out, {
+        success: false, error: 'Sub-agent timeout after 10ms', stopped_by: 'timeout',
+        aspect: 'pkm-sub',
+        partial_result: 'ZACHOWANY DOROBEK', outcome: { end: { kind: 'limit', reason: 'iteration-limit' }, completeness: 'partial', hasAnswer: false, hasMaterial: true }, effects: [testEffect],
+        note: tr('mcp.delegate.outcome_note'),
+        tools_used: ['write'], duration_ms: 35, tool_call_details: [],
+    });
 });
 
 test('bieg bez tekstu — partial_result budowany z tool_call_details', async t => {
@@ -2048,6 +2187,7 @@ test.serial('same odmowy = success:false (nic nie ruszyło)', async t => {
     t.false(res.success, 'zero zleconych zadań to nie jest sukces');
     t.falsy(res.started);
     t.is(res.rejected?.length, 2);
+    t.deepEqual((res as unknown as { counts: unknown }).counts, { finished: 0, partial: 0, failed: 2 });
     t.deepEqual(log.prompts, [], 'żaden sub nie ruszył');
 });
 
@@ -2091,4 +2231,20 @@ test('catch w delegate nie oddaje modelowi surowego komunikatu z sekretem', asyn
 
     t.false(res.success);
     t.false(String(res.error).includes(SECRET), `klucz jawny w zwrotce: ${res.error}`);
+});
+
+test('naturalny koniec bez odpowiedzi podaje ludzki powód, nie kod', async t => {
+    const noAnswer = { end: { kind: 'finished' }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } as RunOutcome;
+    const out = await outcomeTool({ result: '', toolsUsed: [], toolCallDetails: [], duration: 3, usage: null, stoppedBy: 'natural', stopReason: { kind: 'natural' }, outcome: noAnswer })
+        .execute({ task: 'x', background: false }, {}, pluginDlaZejscia()) as Record<string, unknown>;
+    t.is(out.success, false);
+    t.is(out.error, tr('mcp.delegate.outcome_error', { reason: tr('mcp.delegate.reason_no_answer') }));
+    t.false('partial_result' in out);
+});
+
+test('powód końca idzie za stopReason pętli, gdy runner go poda', async t => {
+    const out = await outcomeTool({ result: 'dorobek', toolsUsed: [], toolCallDetails: [], duration: 2, usage: null, stoppedBy: 'abort', stopReason: { kind: 'manual-stop' }, outcome: { end: { kind: 'stopped', by: 'user' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] } as RunOutcome })
+        .execute({ task: 'x', background: false }, {}, pluginDlaZejscia()) as Record<string, unknown>;
+    t.is(out.error, tr('mcp.delegate.outcome_error', { reason: tr('agentLoop.reason_manual-stop') }));
+    t.is(out.partial_result, 'dorobek');
 });

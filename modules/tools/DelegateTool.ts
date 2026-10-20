@@ -12,6 +12,7 @@
  */
 import { SubAgentRunner, DEFAULT_SUB_AGENT_TOOLS, PKM_SUB_NAME } from '../../modules/sub-agents/index.js';
 import type { SubTask, SubTaskOrigin } from '../../modules/sub-agents/index.js';
+import type { RunOutcome } from '../../modules/sub-agents/index.js';
 import { createModelForRole } from '../../modules/models/index.js';
 import type { ModelRole, ResolverPluginLike } from '../../modules/models/index.js';
 import { t } from '../../core/i18n/index.js';
@@ -147,6 +148,7 @@ interface SubAgentRunResult {
     failed?: true;
     partial?: AgentLoopPartialSnapshot;
     stopReason?: AgentLoopStopReason;
+    outcome?: RunOutcome;
 }
 
 /** Runner sub-agentów w zakresie, jakiego używa to narzędzie. */
@@ -406,24 +408,29 @@ type SalvageMapper = (value: unknown, waitedMs: number) => Record<string, unknow
  * wielu explorerów) traci częściowy wynik i wraca do modelu jako goły
  * „Sub-agent timeout after 165000ms", mimo że sub zdążył wykonać większość roboty.
  *
- * Ubity bieg wraca z `_executeSubAgent` jako `success:true, stopped_by:'abort'` z częściowym
- * wynikiem - mapper przemapowuje go na UCZCIWY timeout (`success:false`), ale z polem
+ * Ubity bieg z wynikiem jest mapowany na timeout (`success:false`) z polem
  * `partial_result` (tekst biegu albo skrót z `tool_call_details`). Prawdziwy błąd biegu
- * (`success:false`) zostaje nietknięty - timeout nie przykrywa lepszej diagnozy.
+ * (`stopped_by:'error'`) zostaje nietknięty, żeby timeout nie przykrył diagnozy.
  */
 function _makeSalvageMapper(salvageCap: number): SalvageMapper {
     return (value, waitedMs) => {
         if (!value || typeof value !== 'object') return null;
         const r = value as Record<string, unknown>;
-        if (r.success === false) return null; // goła zwrotka budzika albo realny błąd — bez zmian
+        if (r.success === false && (!r.outcome || r.stopped_by === 'error')) return null;
         const text = typeof r.result === 'string' ? r.result.trim() : '';
-        const partial = (text || _digestFromToolDetails(r.tool_call_details, salvageCap)).slice(0, salvageCap);
+        const priorPartial = typeof r.partial_result === 'string' ? r.partial_result.trim() : '';
+        const partial = (priorPartial || text || _digestFromToolDetails(r.tool_call_details, salvageCap)).slice(0, salvageCap);
         return {
             success: false,
             error: `Sub-agent timeout after ${waitedMs}ms`,
             stopped_by: 'timeout',
             ...(typeof r.aspect === 'string' ? { aspect: r.aspect } : {}),
             ...(partial ? { partial_result: partial } : {}),
+            ...(r.outcome ? {
+                outcome: _outcomeFields(r.outcome as RunOutcome),
+                effects: Array.isArray(r.effects) ? r.effects : (r.outcome as RunOutcome).effects,
+                note: typeof r.note === 'string' ? r.note : t('mcp.delegate.outcome_note'),
+            } : {}),
             ...(Array.isArray(r.tools_used) && (r.tools_used as unknown[]).length > 0 ? { tools_used: r.tools_used } : {}),
             ...(typeof r.duration_ms === 'number' ? { duration_ms: r.duration_ms } : {}),
             ...(r.stop_reason ? { stop_reason: r.stop_reason } : {}),
@@ -818,6 +825,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                 autonomy: turnAutonomy,
                                 callerScopeFolders,
                                 callerToolNames,
+                                salvageCap: limits.subagent_salvage_max_chars,
                                 background,
                                 onTaskCreated: (task: SubTask) => {
                                     taskId = task.id;
@@ -847,8 +855,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                             // Żaden byt nie powstał (wysypany rejestr / same odmowy) — nie ma czego
                             // meldować modelowi, więc uczciwiej dokończyć po staremu.
                             return {
-                                success: acceptedCount > 0,
-                                results: await pool,
+                                ..._aggregateResults(await pool),
                                 ...(rejectedTasks.length > 0 ? { rejected: rejectedTasks } : {}),
                             };
                         }
@@ -864,7 +871,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     }
 
                     const results = await _runWithConcurrency(taskThunks, taskConcurrency);
-                    return { success: true, results };
+                    return _aggregateResults(results);
                 }
 
                 // ── Single-task mode ──
@@ -908,7 +915,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     const run = _withTimeout(
                         _executeSubAgent(args, resolved, activeAgent, agentManager, plugin, makeRunner, childDepth,
                             {
-                                abortCtl, onGateAdmitted: gateArm.signal,
+                                abortCtl, salvageCap: limits.subagent_salvage_max_chars, onGateAdmitted: gateArm.signal,
                                 modelTimeout: effectiveSingleTimeout, origin, autonomy: turnAutonomy,
                                 callerScopeFolders, callerToolNames, background: true,
                                 onTaskCreated: (task: SubTask) => {
@@ -950,7 +957,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 return await _withTimeout(
                     _executeSubAgent(args, resolved, activeAgent, agentManager, plugin, makeRunner, childDepth,
                         {
-                            abortCtl, onGateAdmitted: gateArm.signal,
+                            abortCtl, salvageCap: limits.subagent_salvage_max_chars, onGateAdmitted: gateArm.signal,
                             modelTimeout: effectiveSingleTimeout, origin, autonomy: turnAutonomy,
                             callerScopeFolders, callerToolNames, background,
                             onTaskCreated: (task: SubTask) => {
@@ -1122,6 +1129,7 @@ function abortSub(ctl: SubAbortControl, reason: 'manual-stop' | 'task-timeout' |
 }
 
 type SubRunControl = {
+    salvageCap?: number;
     abortCtl?: SubAbortControl;
     /** Sygnał pierwszego wjazdu na slot bramki — przelot do `runTask`, bez interpretacji. */
     onGateAdmitted?: () => void;
@@ -1294,6 +1302,37 @@ async function _executeSubAgent(
             tool_call_details: result.toolCallDetails || [],
             usage: result.usage || null,
             duration_ms: result.duration,
+            ...(result.outcome ? { outcome: _outcomeFields(result.outcome), effects: result.outcome.effects } : {}),
+        };
+    }
+
+    // Starszy kształt bez outcome zachowuje odpowiedź historyczną.
+    if (result.outcome) {
+        const outcome = result.outcome;
+        const details = result.toolCallDetails || [];
+        const resultText = _rawResultToString(result.result);
+        const cap = runControl.salvageCap ?? DEFAULT_LIMITS.subagent_salvage_max_chars;
+        const partialText = (resultText.trim() || _digestFromToolDetails(details, cap)).slice(0, cap);
+        const common = {
+            aspect: subAgentConfig.name,
+            ...(result.stoppedBy ? { stopped_by: result.stoppedBy } : {}),
+            ...(result.stopReason ? { stop_reason: result.stopReason } : {}),
+            ...(result.partial ? { partial: result.partial } : {}),
+            tools_used: result.toolsUsed || [], tool_call_details: details,
+            usage: result.usage || null, duration_ms: result.duration,
+            outcome: _outcomeFields(outcome), effects: outcome.effects,
+        };
+        if (outcome.completeness !== 'unconfirmed') {
+            return {
+                success: false,
+                error: t('mcp.delegate.outcome_error', { reason: _outcomeReason(outcome, result.stopReason) }),
+                ...(partialText ? { partial_result: partialText } : {}),
+                note: t('mcp.delegate.outcome_note'), ...common,
+            };
+        }
+        return {
+            success: true, result: result.result, ...common,
+            aspect_type: subAgentConfig.role || 'researcher', aspect_explicit: args.aspect_explicit === true,
         };
     }
 
@@ -1315,6 +1354,63 @@ async function _executeSubAgent(
         duration_ms: result.duration,
         usage: result.usage || null,
     };
+}
+
+// Powód końca po ludzku: te same teksty, którymi pętla opisuje stopReason (klucze dosłowne,
+// żeby strażnik parytetu i18n je widział). `natural` bez odpowiedzi ma własny tekst.
+const STOP_REASON_TEXT_KEY = {
+    natural: 'mcp.delegate.reason_no_answer',
+    'iteration-limit': 'agentLoop.reason_iteration-limit',
+    'tool-uncertain': 'agentLoop.reason_tool-uncertain',
+    'synthesis-budget': 'agentLoop.reason_iteration-then-synthesis-budget',
+    'manual-stop': 'agentLoop.reason_manual-stop',
+    'task-timeout': 'agentLoop.reason_task-timeout',
+    superseded: 'agentLoop.reason_superseded',
+    silence: 'agentLoop.reason_silence',
+    'model-timeout': 'agentLoop.reason_model-timeout',
+    'transport-error': 'agentLoop.reason_transport-error',
+    'model-error': 'agentLoop.reason_model-error',
+    'hook-error': 'agentLoop.reason_hook-error',
+} satisfies Record<AgentLoopStopReason['kind'], string>;
+
+function _outcomeReason(outcome: RunOutcome, stopReason?: AgentLoopStopReason): string {
+    if (stopReason) return t(STOP_REASON_TEXT_KEY[stopReason.kind]);
+    // Starsze wyniki bez stopReason: powód z samego outcome.end.
+    const end = outcome.end;
+    switch (end.kind) {
+        case 'finished': return t('mcp.delegate.reason_no_answer');
+        case 'limit': return t(STOP_REASON_TEXT_KEY[end.reason]);
+        case 'uncertain': return t('agentLoop.reason_tool-uncertain');
+        case 'stopped': return t('agentLoop.reason_manual-stop');
+        case 'timeout': return t('agentLoop.reason_task-timeout');
+        case 'failed': return t('agentLoop.reason_hook-error');
+        default: {
+            const exhaustive: never = end;
+            void exhaustive;
+            return t('mcp.delegate.reason_no_answer');
+        }
+    }
+}
+
+function _outcomeFields(outcome: RunOutcome): Pick<RunOutcome, 'end' | 'completeness' | 'hasAnswer' | 'hasMaterial'> {
+    return {
+        end: outcome.end,
+        completeness: outcome.completeness,
+        hasAnswer: outcome.hasAnswer,
+        hasMaterial: outcome.hasMaterial,
+    };
+}
+
+function _aggregateResults(results: unknown[]) {
+    const counts = { finished: 0, partial: 0, failed: 0 };
+    for (const value of results) {
+        const result = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+        if (result.success === true) counts.finished++;
+        else if (typeof result.partial_result === 'string' || (result.outcome as RunOutcome | undefined)?.completeness === 'partial') counts.partial++;
+        else counts.failed++;
+    }
+    // Pusta lista (np. wszystkie zadania odrzucone) nie jest sukcesem.
+    return { success: results.length > 0 && counts.finished === results.length, counts, results };
 }
 
 /**
