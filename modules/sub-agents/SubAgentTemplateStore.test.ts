@@ -1,8 +1,11 @@
 import test from 'ava';
 import { SubAgentTemplateStore as RuntimeSubAgentTemplateStore } from './SubAgentTemplateStore.js';
 import { SubAgentLoader as RuntimeSubAgentLoader } from './SubAgentLoader.js';
+import { editorModelOptions, modelListRoleForEditorRole, templateSaveNotice } from './editorDecisions.js';
+import { getModelsForRole } from '../models/index.js';
+import { t as translate } from '../../core/i18n/index.js';
 
-type TestTemplate = Record<string, unknown> & { version: number; tools: string[]; prompt: string };
+type TestTemplate = Record<string, unknown> & { version: number; tools: string[]; prompt: string; role: string; model: string };
 type TestStore = {
     createFromData(data: unknown): Promise<Record<string, unknown>>;
     save(slug: string, data: unknown): Promise<Record<string, unknown>>;
@@ -65,6 +68,58 @@ test('save podbija wersję szablonu suba', async t => {
     t.is(res.version, 2);
     t.true(vault.files[`${BASE}/zwiadowca/SUB_AGENT.yaml`].includes('version: 2'));
     t.deepEqual(store.get('zwiadowca').tools, ['search', 'list']);
+});
+
+test('zmiana nazwy zachowuje slug i folder także po ponownym wczytaniu', async t => {
+    const vault = makeVault();
+    const store = new SubAgentTemplateStore(vault);
+    await store.createFromData({ name: 'Zwiadowca', description: 'v1' });
+
+    const result = await store.save('zwiadowca', { name: 'Badacz źródeł', description: 'v2' });
+    const reloaded = new SubAgentTemplateStore(vault);
+    await reloaded.loadAll();
+
+    t.is(result.name, 'Badacz źródeł');
+    t.is(reloaded.get('zwiadowca').name, 'Badacz źródeł');
+    t.is(reloaded.get('zwiadowca').slug, 'zwiadowca');
+    t.is(reloaded.get('zwiadowca').folderPath, `${BASE}/zwiadowca`);
+    t.true(vault.files[`${BASE}/zwiadowca/SUB_AGENT.yaml`].includes('name: Badacz źródeł'));
+});
+
+test('oba komunikaty sukcesu pokazują nazwę faktycznie zapisaną przez magazyn', async t => {
+    const vault = makeVault();
+    const store = new SubAgentTemplateStore(vault);
+    await store.createFromData({ name: 'Zwiadowca', description: 'v1' });
+
+    const created = await store.createFromData({ name: 'Zwiadowca', description: 'druga kopia' });
+    const edited = await store.save('zwiadowca', { name: 'Nowa nazwa', description: 'v2' });
+    const createdNotice = templateSaveNotice({ name: created.name as string });
+    const editedNotice = templateSaveNotice({ name: edited.name as string, version: edited.version as number });
+
+    t.is(store.get(created.slug as string).name, created.name);
+    t.is(store.get('zwiadowca').name, edited.name);
+    t.is(translate(createdNotice.messageKey, createdNotice.params, 'pl'), 'Szablon suba "Zwiadowca 2" zapisany w Zapleczu.');
+    t.is(translate(editedNotice.messageKey, editedNotice.params, 'pl'), 'Szablon suba "Nowa nazwa" zapisany (v2).');
+    t.is(translate(createdNotice.messageKey, createdNotice.params, 'en'), 'Sub-agent template "Zwiadowca 2" saved to Backstage.');
+    t.is(translate(editedNotice.messageKey, editedNotice.params, 'en'), 'Sub-agent template "Nowa nazwa" saved (v2).');
+});
+
+test('zapis samego opisu zachowuje model spoza aktualnej biblioteki', async t => {
+    const vault = makeVault();
+    const store = new SubAgentTemplateStore(vault);
+    await store.createFromData({ name: 'Badacz', description: 'przed edycją', role: 'researcher', model: 'legacy-model' });
+    const existing = store.get('badacz');
+    const settings = { modelLibrary: { minion: [{ platform: 'openai', model: 'new-model' }] } };
+    const options = editorModelOptions(getModelsForRole(settings, modelListRoleForEditorRole(existing.role)), existing.model);
+    const selected = options.find(option => option.model === existing.model)?.model;
+
+    await store.save('badacz', { ...existing, description: 'po edycji', model: selected });
+    const reloaded = new SubAgentTemplateStore(vault);
+    await reloaded.loadAll();
+
+    t.is(reloaded.get('badacz').description, 'po edycji');
+    t.is(reloaded.get('badacz').model, 'legacy-model');
+    t.true(vault.files[`${BASE}/badacz/SUB_AGENT.yaml`].includes('model: legacy-model'));
 });
 
 test('loadAll czyta szablony i pomija YAML bez name/description', async t => {

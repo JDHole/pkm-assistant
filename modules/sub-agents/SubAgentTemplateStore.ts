@@ -171,9 +171,9 @@ export class SubAgentTemplateStore {
      * Zapisz EDYCJĘ szablonu — podbija `version` o 1.
      * @param {string} slug
      * @param {Object} data
-     * @returns {Promise<{success: boolean, slug?: string, version?: number, error?: string}>}
+     * @returns {Promise<{success: boolean, slug?: string, name?: string, version?: number, error?: string}>}
      */
-    async save(slug: string, data: SubAgentInput): Promise<{ success: boolean; slug?: string; version?: number; error?: string }> {
+    async save(slug: string, data: SubAgentInput): Promise<{ success: boolean; slug?: string; name?: string; version?: number; error?: string }> {
         if (!data?.name?.trim() || !data?.description?.trim()) {
             return { success: false, error: 'missing_fields' };
         }
@@ -181,12 +181,14 @@ export class SubAgentTemplateStore {
         if (!existing) return this.createFromData(data);
 
         const version = (Number(existing.version) || 1) + 1;
-        await this._write(existing.slug, { ...data, name: existing.name, version });
-        return { success: true, slug: existing.slug, version };
+        const name = data.name.trim();
+        await this._write(existing.slug, { ...data, name, version });
+        return { success: true, slug: existing.slug, name, version };
     }
 
     /**
-     * Skasuj szablon (YAML + KNOWLEDGE.md + folder). Kopie u agentów zostają (kopia, nie link).
+     * Skasuj pliki szablonu i wpis z cache. Próba usunięcia folderu jest best-effort;
+     * folder z dodatkowymi plikami może pozostać. Kopie u agentów zostają (kopia, nie link).
      * @param {string} slug
      * @returns {Promise<boolean>}
      */

@@ -171,6 +171,8 @@ export interface ToolCall {
 
 /** Dodatkowe opcje wykonania (autonomia czatu + kaganiec delegacji + adres zwrotny). */
 export interface ExecuteToolCallOptions {
+    /** Called once immediately before the permitted tool execution begins. */
+    onExecutionStart?: () => void;
     autonomy?: string | null;
     delegationDepth?: number;
     scopeFolders?: ScopeFolders | null;
@@ -1257,6 +1259,13 @@ export class MCPClient {
                 },
                 serializeFinalResult,
             };
+            if (opts.onExecutionStart) {
+                try {
+                    opts.onExecutionStart();
+                } catch (error) {
+                    log.error('MCPClient', `onExecutionStart callback failed for ${toolCall.name}:`, error);
+                }
+            }
             let result = await tool.execute(
                 argsWithContext,
                 this.app,

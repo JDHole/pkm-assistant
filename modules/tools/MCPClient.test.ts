@@ -2,6 +2,7 @@ import test from 'ava';
 import { MCPClient } from './MCPClient.js';
 import type { MCPClientApp, MCPClientPlugin, MCPToolRegistryLike, ToolCallArgs } from './MCPClient.js';
 import type { PermissionedAgent } from '../../core/index.js';
+import { log } from '../../core/utils/Logger.js';
 
 /** Ksztalt wyniku, na ktory patrza testy post-filtra whitelisty (krok 7 w kliencie). */
 interface SearchToolResult {
@@ -1369,6 +1370,155 @@ test('brak jakiegokolwiek agenta (getAgent i getActiveAgent → undefined) na na
     t.true(String(result.error).includes('Permission denied'), result.error);
     t.is(handlerCalls.length, 0, 'handler narzędzia NIE MA prawa zostać wywołany bez właściciela akcji');
     t.is(approvalCalls.length, 0, 'bez agenta nie ma komu pokazać modala zgody — fail-closed idzie PRZED approvalem, nie PRZEZ niego');
+});
+
+test.serial('executeToolCall logs onExecutionStart errors and still executes once', async t => {
+    const order: string[] = [];
+    const logged: Array<{ module: string; message: string; error: unknown }> = [];
+    const originalError = log.error;
+    const agent = { name: 'Tester', permissions: { guidance_mode: true } };
+    const client = new MCPClient(asApp(null), asPlugin({
+        agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+        permissionSystem: {
+            checkPermission: () => { order.push('permission'); return { allowed: true, requiresApproval: false }; },
+            requiresApproval: () => false,
+        },
+    }), asRegistry({
+        getTool: (name: string) => ({
+            name,
+            description: name,
+            execute: async () => { order.push('execute'); return { success: true }; },
+        }),
+    }));
+
+    let result: { success?: boolean };
+    log.error = (module, message, error) => { logged.push({ module, message, error }); };
+    try {
+        result = await client.executeToolCall({ name: 'read', arguments: {} }, 'Tester', {
+            onExecutionStart: () => { order.push('start'); throw new Error('callback failed'); },
+        }) as { success?: boolean };
+    } finally {
+        log.error = originalError;
+    }
+
+    t.deepEqual(order, ['permission', 'start', 'execute']);
+    t.true(result.success);
+    t.is(logged.length, 1);
+    t.is(logged[0].module, 'MCPClient');
+    t.true(logged[0].message.includes('onExecutionStart'));
+    t.is((logged[0].error as Error).message, 'callback failed');
+});
+
+test('executeToolCall calls onExecutionStart after queued approval and diff', async t => {
+    const events: string[] = [];
+    const deferred = <T>() => {
+        let resolve!: (value: T) => void;
+        const promise = new Promise<T>(r => { resolve = r; });
+        return { promise, resolve };
+    };
+    const firstApprovalEntered = deferred<void>();
+    const firstApproval = deferred<{ result: string }>();
+    const firstDiffEntered = deferred<void>();
+    const firstDiff = deferred<string>();
+    let approvalCount = 0;
+    let diffCount = 0;
+    const agent = { name: 'Tester', permissions: { guidance_mode: true } };
+    const client = new MCPClient(asApp({ vault: {
+        getAbstractFileByPath: () => ({ path: 'Notatki/x.md' }),
+        read: async () => 'old',
+    } }), asPlugin({
+        agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+        permissionSystem: {
+            checkPermission: () => { events.push('permission'); return { allowed: true, requiresApproval: true }; },
+            requiresApproval: () => true,
+        },
+        approvalManager: { requestApproval: async () => {
+            approvalCount++;
+            events.push(`approval-${approvalCount}`);
+            if (approvalCount === 1) {
+                firstApprovalEntered.resolve();
+                return firstApproval.promise;
+            }
+            return { result: 'approve' };
+        } },
+    }), asRegistry({
+        getTool: (name: string) => ({
+            name, description: name,
+            execute: async () => { events.push('execute'); return { success: true }; },
+        }),
+    }), {
+        diffModalFactory: () => ({ waitForApproval: async () => {
+            diffCount++;
+            events.push(`diff-${diffCount}`);
+            if (diffCount === 1) {
+                firstDiffEntered.resolve();
+                return firstDiff.promise;
+            }
+            return 'approve';
+        } }),
+    });
+    const call = { name: 'write', arguments: { path: 'Notatki/x.md', mode: 'replace', content: 'new' } };
+    const opts = { origin: { agentName: 'Tester', sessionPath: 'sessions/s1.md' }, onExecutionStart: () => { events.push('start'); } };
+    const first = client.executeToolCall(call, 'Tester', opts);
+    const second = client.executeToolCall(call, 'Tester', opts);
+
+    await firstApprovalEntered.promise;
+    t.is(approvalCount, 1);
+    t.is(diffCount, 0);
+    t.false(events.includes('start'));
+    t.false(events.includes('execute'));
+
+    firstApproval.resolve({ result: 'approve' });
+    await firstDiffEntered.promise;
+    t.is(approvalCount, 1, 'second call stays in consent queue while first diff is pending');
+    t.false(events.includes('start'));
+    t.false(events.includes('execute'));
+
+    firstDiff.resolve('approve');
+    const results = await Promise.all([first, second]) as Array<{ success?: boolean }>;
+    t.deepEqual(results.map(result => result.success), [true, true]);
+    t.is(approvalCount, 2);
+    t.is(diffCount, 2);
+    t.is(events.filter(event => event === 'start').length, 2);
+    t.is(events.filter(event => event === 'execute').length, 2);
+    t.true(events.indexOf('permission') < events.indexOf('approval-1'));
+    t.true(events.indexOf('approval-1') < events.indexOf('diff-1'));
+    t.true(events.indexOf('diff-1') < events.indexOf('start'));
+    t.true(events.indexOf('diff-1') < events.indexOf('approval-2'));
+    t.true(events.indexOf('approval-2') < events.indexOf('diff-2'));
+    t.true(events.indexOf('diff-2') < events.lastIndexOf('start'));
+    t.true(events.indexOf('start') < events.indexOf('execute'));
+    t.true(events.lastIndexOf('start') < events.lastIndexOf('execute'));
+});
+
+test('executeToolCall does not call onExecutionStart on permission or approval denial', async t => {
+    const agent = { name: 'Tester', permissions: { guidance_mode: true } };
+    let startCalls = 0;
+    let executeCalls = 0;
+    const makeClient = (permissionAllowed: boolean, approvalResult = 'deny') => new MCPClient(asApp(null), asPlugin({
+        agentManager: { getAgent: () => agent, getActiveAgent: () => agent },
+        permissionSystem: {
+            checkPermission: () => ({ allowed: permissionAllowed, requiresApproval: true, reason: 'blocked' }),
+            requiresApproval: () => true,
+        },
+        approvalManager: { requestApproval: async () => ({ result: approvalResult }) },
+    }), asRegistry({
+        getTool: (name: string) => ({
+            name,
+            description: name,
+            execute: async () => { executeCalls++; return { success: true }; },
+        }),
+    }));
+
+    await makeClient(false).executeToolCall({ name: 'delete', arguments: { path: 'a.md' } }, 'Tester', {
+        onExecutionStart: () => { startCalls++; },
+    });
+    await makeClient(true).executeToolCall({ name: 'delete', arguments: { path: 'a.md' } }, 'Tester', {
+        onExecutionStart: () => { startCalls++; },
+    });
+
+    t.is(startCalls, 0);
+    t.is(executeCalls, 0);
 });
 
 test('brak nazwy wywołania (brak właściciela tury) — requestApproval dostaje agentName aktywnego agenta, nie pustkę', async t => {

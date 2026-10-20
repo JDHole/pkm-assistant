@@ -736,6 +736,8 @@ export const en: Record<string, string> = {
   'backstage.search_skill_template': 'Search template...',
   'backstage.search_sub_template': 'Search sub-agent template...',
   'backstage.confirm_delete_template': 'Delete template "{{name}}"? Copies already cast on agents stay untouched.',
+  'backstage.confirm_delete_sub_template': 'Delete template "{{name}}"? Copies on agents will remain and keep working. Recognized copies: {{copies}}',
+  'backstage.no_template_copies': 'No copy names were recognized.',
   'backstage.use_at_agent': 'Use at agent…',
   'backstage.use_at_agent_none': 'No agents.',
   'backstage.template_used': 'Cast "{{name}}" on agent {{agent}}.',
@@ -2045,6 +2047,10 @@ export const en: Record<string, string> = {
   'modal.sub_agent.model_label': 'Model (optional)',
   'modal.sub_agent.model_desc': 'Empty = default from model library',
   'modal.sub_agent.model_default': '- Default -',
+  'modal.sub_agent.role_label': 'Role',
+  'modal.sub_agent.role_researcher': 'Researcher',
+  'modal.sub_agent.role_worker': 'Worker',
+  'modal.sub_agent.max_iter_invalid': 'Enter a whole number from {{min}} to {{max}}.',
   'modal.sub_agent.max_iter_label': 'Max iterations',
   'modal.sub_agent.max_iter_desc': 'Maximum number of tool-calling rounds',
   'modal.sub_agent.min_iter_label': 'Min iterations',
@@ -2072,7 +2078,12 @@ export const en: Record<string, string> = {
 
   // ── SubAgentEditorModal: sekcja „Scope" ──
   'subagent.editor.folders_name': 'Folders',
-  'subagent.editor.folders_desc': 'One vault folder per line. Empty = no folder restriction.',
+  'subagent.editor.folders_desc': 'One vault folder per line. This is a hard boundary; the sub-agent cannot leave it. Empty = no folder restriction.',
+  'subagent.editor.advanced': 'Advanced',
+  'subagent.editor.scope_header': 'Scope',
+  'subagent.editor.hints_header': 'Guidance for the sub-agent',
+  'subagent.editor.hints_desc': 'Frontmatter, sections, and pinned notes are guidance and do not block access.',
+  'subagent.editor.frontmatter_name': 'Frontmatter (preview only)',
   'subagent.editor.sections_name': 'Sections',
   // Przykład TREŚCI, którą user ma w swoich notatkach (nie etykieta UI) - stąd wielka litera.
   'subagent.editor.sections_example': '## Ideas',

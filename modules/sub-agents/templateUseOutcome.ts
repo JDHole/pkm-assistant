@@ -20,6 +20,42 @@ export interface TemplateUseOutcome {
     params: { error: string };
     /** Surowy rzut - do `log.error`, nie do usera. */
     error: unknown;
+    /** Błąd kompensacyjnego kasowania kopii - do zalogowania osobno. */
+    cleanupError?: unknown;
+}
+
+export interface TemplateUseOperations {
+    instantiate: () => Promise<{ success: boolean; name?: string; error?: string }>;
+    assign: (copyName: string) => Promise<unknown>;
+    deleteSubAgent: (copyName: string) => Promise<boolean>;
+}
+
+/** Wykonuje oba zapisy i usuwa kopię, gdy zapis przypisania zawiedzie. */
+export async function useTemplateWithCompensation(operations: TemplateUseOperations): Promise<TemplateUseOutcome> {
+    let copyName: string | undefined;
+    try {
+        const created = await operations.instantiate();
+        if (!created.success || !created.name) throw new Error(created.error || 'template_not_created');
+        copyName = created.name;
+        await operations.assign(copyName);
+        return { ok: true, messageKey: null, params: { error: '' }, error: null };
+    } catch (error) {
+        let cleanupError: unknown;
+        if (copyName) {
+            try {
+                if (!await operations.deleteSubAgent(copyName)) cleanupError = 'delete_failed';
+            } catch (cleanupFailure) {
+                cleanupError = cleanupFailure;
+            }
+        }
+        return {
+            ok: false,
+            messageKey: 'backstage.template_use_failed',
+            params: { error: templateUseErrorText(error) },
+            error,
+            ...(cleanupError === undefined ? {} : { cleanupError }),
+        };
+    }
 }
 
 /**

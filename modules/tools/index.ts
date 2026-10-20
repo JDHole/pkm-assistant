@@ -29,6 +29,8 @@ export { MCP_SERVER_PRESETS, getMcpServerPreset } from './mcpServerPresets.js';
 // ToolLoader nie istnieje — ładował wabiki (fasadowe narzędzia bez pokrycia); nie przywracaj go.
 export { ToolRegistry } from './ToolRegistry.js';
 export { MCPClient } from './MCPClient.js';
+export { describeToolEffect, checkEffectTargets } from './toolEffects.js';
+export type { EffectCheck, EffectTarget, EffectTargetIo, EffectTargetKind, ToolEffect } from './toolEffects.js';
 
 // ── Delegacja (sub-agent + agent). `agent_message` nie istnieje — pocztę robi `kom_send`.
 export { createDelegateTool } from './DelegateTool.js';

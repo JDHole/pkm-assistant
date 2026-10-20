@@ -6,8 +6,7 @@
  * Test czystej decyzji - zero DOM, zero obsidian.
  */
 import test from 'ava';
-import { guardTemplateUse, templateUseErrorText } from './templateUseOutcome.js';
-import { pl } from '../../core/i18n/pl.js';
+import { guardTemplateUse, templateUseErrorText, useTemplateWithCompensation } from './templateUseOutcome.js';
 
 test('operacja doszła do końca - brak komunikatu porażki', async t => {
     const out = await guardTemplateUse(async () => 'ok');
@@ -34,9 +33,40 @@ test('rzut bez `message` (string, obiekt, null) też daje zdanie', async t => {
     t.is(templateUseErrorText({ message: '   ' }), 'unknown error', 'pusty message to nie jest zdanie');
 });
 
-test('klucz komunikatu istnieje w słowniku i niesie {{error}}', t => {
-    const wzor = (pl as Record<string, string>)['backstage.template_use_failed'];
+test('błąd przypisania usuwa kopię pod nazwą zwróconą przez instantiate', async t => {
+    const deleted: string[] = [];
+    const out = await useTemplateWithCompensation({
+        instantiate: async () => ({ success: true, name: 'klara-zwiadowca-2' }),
+        assign: async () => { throw new Error('save failed'); },
+        deleteSubAgent: async name => { deleted.push(name); return true; },
+    });
 
-    t.truthy(wzor, 'brak klucza backstage.template_use_failed w pl.ts');
-    t.true(wzor.includes('{{error}}'), 'komunikat nie pokazuje powodu');
+    t.deepEqual(deleted, ['klara-zwiadowca-2']);
+    t.false(out.ok);
+    t.is(out.messageKey, 'backstage.template_use_failed');
+    t.is(out.params.error, 'save failed');
+});
+
+test('nieudane sprzątanie jest udostępnione do logowania, a błąd przypisania zostaje', async t => {
+    const boom = new Error('save failed');
+    const out = await useTemplateWithCompensation({
+        instantiate: async () => ({ success: true, name: 'klara-zwiadowca' }),
+        assign: async () => { throw boom; },
+        deleteSubAgent: async () => false,
+    });
+
+    t.is(out.messageKey, 'backstage.template_use_failed');
+    t.is(out.error, boom);
+    t.is(out.cleanupError, 'delete_failed');
+});
+
+test('rzut sprzątania jest udostępniony do logowania', async t => {
+    const cleanupBoom = new Error('delete failed');
+    const out = await useTemplateWithCompensation({
+        instantiate: async () => ({ success: true, name: 'klara-zwiadowca' }),
+        assign: async () => { throw new Error('save failed'); },
+        deleteSubAgent: async () => { throw cleanupBoom; },
+    });
+
+    t.is(out.cleanupError, cleanupBoom);
 });

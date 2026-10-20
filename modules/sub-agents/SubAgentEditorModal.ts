@@ -6,15 +6,16 @@
 import { Modal, Setting, Notice } from 'obsidian';
 import type { App } from 'obsidian';
 import { TOOL_INFO, confirmModal } from '../ui-components/index.js';
-import { UiIcons, setSvg, setSvgLabel } from '../crystal-soul/index.js';
+import { UiIcons, setSvgLabel } from '../crystal-soul/index.js';
 import { getModelsForRole } from '../models/index.js';
 import type { PkmModelSettings } from '../models/index.js';
 import { t } from '../../core/i18n/index.js';
-import { DEFAULT_LIMITS, LIMIT_SPECS } from '../../config/limits.js';
+import { DEFAULT_LIMITS } from '../../config/limits.js';
 import { log } from '../../core/utils/Logger.js';
-import { resolveDeleteOutcome } from './deleteOutcome.js';
+import { resolveDeleteOutcome, templateCopyNames, templateDeleteConfirmation } from './deleteOutcome.js';
 import type { SubAgentData, SubAgentInput, SubAgentsPlugin } from './types.js';
 import type { SubAgentTemplateRecord } from './SubAgentTemplateStore.js';
+import { EDITOR_DEFAULT_MIN_ITERATIONS, EDITOR_DEFAULT_TOOLS, editorModelOptions, initialAdvancedOpen, maxIterationsBounds, modelListRoleForEditorRole, templateSaveNotice, validateMaxIterations } from './editorDecisions.js';
 
 
 export class SubAgentEditorModal extends Modal {
@@ -26,6 +27,7 @@ export class SubAgentEditorModal extends Modal {
     declare isTemplate: boolean;
     declare offerTemplateCopy: boolean;
     declare _alsoTemplate: boolean;
+    declare _maxIterationsRaw: string;
     /**
      * @param {Object} app - Obsidian App
      * @param {Object} plugin - Plugin instance
@@ -39,7 +41,7 @@ export class SubAgentEditorModal extends Modal {
     constructor(app: App, plugin: SubAgentsPlugin, existing: SubAgentData | SubAgentTemplateRecord | null = null, onSave: ((data?: SubAgentInput) => void) | null = null, options: { template?: boolean; alsoTemplate?: boolean } = {}) {
         super(app);
         this.plugin = plugin;
-        this.role = 'researcher';
+        this.role = existing?.role || 'researcher';
         this.existing = existing;
         this.onSave = onSave;
         this.isEditMode = !!existing;
@@ -72,13 +74,13 @@ export class SubAgentEditorModal extends Modal {
             });
         }
 
-        const defaultTools = ['search', 'read', 'list'];
+        const defaultTools = [...EDITOR_DEFAULT_TOOLS];
 
         // Form data
         const formData = {
             name: this.existing?.name || '',
             description: this.existing?.description || '',
-            role: this.role,
+            role: this.existing?.role || this.role,
             model: this.existing?.model || '',
             tools: [...(this.existing?.tools || defaultTools)],
             scope: {
@@ -88,11 +90,13 @@ export class SubAgentEditorModal extends Modal {
                 pinned_notes: [...(this.existing?.scope?.pinned_notes || [])],
             },
             max_iterations: this.existing?.max_iterations ?? DEFAULT_LIMITS.subagent_max_iterations_worker,
-            min_iterations: this.existing?.min_iterations ?? 1,
+            min_iterations: this.existing?.min_iterations ?? EDITOR_DEFAULT_MIN_ITERATIONS,
             max_tool_result_length: this.existing?.max_tool_result_length ?? DEFAULT_LIMITS.max_tool_result_length,
             enabled: this.existing?.enabled !== false,
             prompt: this.existing?.prompt || ''
         };
+        let refreshModelOptions: ((role: string) => void) | null = null;
+        let saveButton: HTMLButtonElement | null = null;
 
         // --- Name ---
         new Setting(contentEl)
@@ -102,7 +106,7 @@ export class SubAgentEditorModal extends Modal {
                 text.setPlaceholder(t('modal.sub_agent.name_placeholder'))
                     .setValue(formData.name)
                     .onChange(v => formData.name = v.trim());
-                if (this.isEditMode) text.inputEl.disabled = true;
+                if (this.isEditMode && !this.isTemplate) text.inputEl.disabled = true;
             });
 
         // --- Description ---
@@ -115,47 +119,102 @@ export class SubAgentEditorModal extends Modal {
                     .onChange(v => formData.description = v.trim());
             });
 
+        new Setting(contentEl)
+            .setName(t('modal.sub_agent.role_label'))
+            .addDropdown(dd => {
+                dd.addOption('researcher', t('modal.sub_agent.role_researcher'));
+                dd.addOption('worker', t('modal.sub_agent.role_worker'));
+                if (formData.role !== 'researcher' && formData.role !== 'worker') {
+                    dd.addOption(formData.role, formData.role);
+                }
+                dd.setValue(formData.role);
+                dd.onChange(value => {
+                    formData.role = value;
+                    refreshModelOptions?.(value);
+                });
+            });
+
         // --- Model override ---
         {
             // TS-boundary: `PkmAssistantSettings.modelLibrary` jest `unknown` w kontrakcie core
             // (core/ nie zna kształtu biblioteki modeli); `modules/models` jest właścicielem
             // realnego kształtu (`PkmModelSettings`) i to on czyta to pole w `getModelsForRole`.
             const pkmM = (this.plugin?.env?.settings?.pkmAssistant || {}) as PkmModelSettings;
-            const models = getModelsForRole(pkmM, 'researcher');
             const platformNames = { anthropic: 'Anthropic', openai: 'OpenAI', open_router: 'OpenRouter', ollama: 'Ollama', gemini: 'Gemini', groq: 'Groq', deepseek: 'DeepSeek', lm_studio: 'LM Studio' };
+            let modelSelect: HTMLSelectElement | null = null;
+            const populateModels = (select: HTMLSelectElement, role: string, preserveMissing = false) => {
+                const selected = formData.model;
+                select.replaceChildren(new Option(t('modal.sub_agent.model_default'), ''));
+                const available = getModelsForRole(pkmM, modelListRoleForEditorRole(role));
+                const options = editorModelOptions(available, preserveMissing ? selected : '');
+                for (const model of options) {
+                    const label = model.platform
+                        ? `${(platformNames as Record<string, string>)[model.platform] || model.platform} - ${model.model}${model.isDefault ? ' ★' : ''}`
+                        : model.model;
+                    const option = new Option(label, model.model);
+                    select.add(option);
+                }
+                formData.model = options.some(option => option.model === selected) ? selected : '';
+                select.value = formData.model;
+            };
+            refreshModelOptions = role => {
+                if (modelSelect) populateModels(modelSelect, role);
+            };
 
             new Setting(contentEl)
                 .setName(t('modal.sub_agent.model_label'))
                 .setDesc(t('modal.sub_agent.model_desc'))
                 .addDropdown(dd => {
-                    dd.addOption('', t('modal.sub_agent.model_default'));
-                    for (const m of models) {
-                        dd.addOption(m.model, `${(platformNames as Record<string, string>)[m.platform] || m.platform} - ${m.model}${m.isDefault ? ' ★' : ''}`);
-                    }
+                    modelSelect = dd.selectEl;
+                    populateModels(dd.selectEl, formData.role, true);
                     dd.setValue(formData.model || '');
                     dd.onChange(v => formData.model = (v || null) as string);
                 });
         }
 
+        const advanced = contentEl.createEl('details');
+        advanced.open = initialAdvancedOpen(this.existing ? {
+            tools: formData.tools,
+            scope: formData.scope,
+            max_iterations: formData.max_iterations,
+            min_iterations: formData.min_iterations,
+            max_tool_result_length: formData.max_tool_result_length,
+            enabled: formData.enabled,
+        } : null);
+        advanced.createEl('summary', { text: t('subagent.editor.advanced') });
+
+        const advancedContent = advanced.createDiv();
+        let maxIterationsError: HTMLElement | null = null;
+        const initialMaxIterations = validateMaxIterations(String(formData.max_iterations));
+        let maxIterationsValid = initialMaxIterations.ok;
+        this._maxIterationsRaw = String(formData.max_iterations);
+
         // --- Iterations ---
-        // Min/max widełek pola biorą się z LIMIT_SPECS (config/limits.ts),
-        // nie z lokalnego literału — inaczej pole renderuje się z wartością (default 25)
-        // przekraczającą własny deklarowany sufit ('10'), a spinner po cichu tnie ją do 10.
         {
-            const maxIterSpec = LIMIT_SPECS.subagent_max_iterations_worker;
-            new Setting(contentEl)
+            new Setting(advancedContent)
                 .setName(t('modal.sub_agent.max_iter_label'))
                 .setDesc(t('modal.sub_agent.max_iter_desc'))
                 .addText(text => {
                     text.inputEl.type = 'number';
-                    text.inputEl.min = String(maxIterSpec.min);
-                    text.inputEl.max = String(maxIterSpec.ceiling);
+                    // Widełki z LIMIT_SPECS (przez editorDecisions), nie z lokalnego literału.
+                    const bounds = maxIterationsBounds();
+                    text.inputEl.min = String(bounds.min);
+                    text.inputEl.max = String(bounds.max);
                     text.setValue(String(formData.max_iterations))
-                        .onChange(v => formData.max_iterations = parseInt(v) || DEFAULT_LIMITS.subagent_max_iterations_worker);
+                        .onChange(value => {
+                            this._maxIterationsRaw = value;
+                            const result = validateMaxIterations(value);
+                            maxIterationsValid = result.ok;
+                            if (result.ok) formData.max_iterations = result.value;
+                            if (maxIterationsError) maxIterationsError.setText(result.ok ? '' : t(result.errorKey, result.params));
+                            if (saveButton) saveButton.disabled = !result.ok;
+                        });
+                    maxIterationsError = text.inputEl.parentElement?.createEl('p', { cls: 'setting-item-description pkm-validation-error' }) || null;
+                    if (!initialMaxIterations.ok && maxIterationsError) maxIterationsError.setText(t(initialMaxIterations.errorKey, initialMaxIterations.params));
                 });
         }
 
-        new Setting(contentEl)
+        new Setting(advancedContent)
             .setName(t('modal.sub_agent.min_iter_label'))
             .setDesc(t('modal.sub_agent.min_iter_desc'))
             .addText(text => {
@@ -168,7 +227,7 @@ export class SubAgentEditorModal extends Modal {
 
         // --- Max tool result length ---
         {
-            new Setting(contentEl)
+            new Setting(advancedContent)
                 .setName(t('modal.sub_agent.tool_result_label'))
                 .setDesc(t('modal.sub_agent.tool_result_desc'))
                 .addText(text => {
@@ -182,17 +241,17 @@ export class SubAgentEditorModal extends Modal {
         }
 
         // --- Enabled toggle ---
-        new Setting(contentEl)
+        new Setting(advancedContent)
             .setName(t('modal.sub_agent.active_label'))
             .addToggle(toggle => {
                 toggle.setValue(formData.enabled).onChange(v => formData.enabled = v);
             });
 
         // --- Tools ---
-        const toolsHeader = contentEl.createEl('h4');
+        const toolsHeader = advancedContent.createEl('h4');
         setSvgLabel(toolsHeader, UiIcons.wrench(18), t('modal.sub_agent.tools_header'));
         toolsHeader.addClass('pkm-editor-section-head');
-        const toolsContainer = contentEl.createDiv({ cls: 'editor-tools-grid' });
+        const toolsContainer = advancedContent.createDiv({ cls: 'editor-tools-grid' });
 
         const activeAgent = this.plugin?.agentManager?.getActiveAgent?.();
         const visibleToolNames = this.plugin?.toolRegistry?.filterByAgent
@@ -218,15 +277,14 @@ export class SubAgentEditorModal extends Modal {
         }
 
         // --- Scope ---
-        const scopeHeader = contentEl.createEl('h4');
-        setSvg(scopeHeader, UiIcons.folder(18));
-        scopeHeader.appendText(' Scope');
+        const scopeHeader = advancedContent.createEl('h4');
+        setSvgLabel(scopeHeader, UiIcons.folder(18), t('subagent.editor.scope_header'));
         scopeHeader.addClass('pkm-editor-section-head');
 
         const scopeToText = (arr: string[]) => (arr || []).join('\n');
         const textToScope = (value: string) => value.split('\n').map((v) => v.trim()).filter(Boolean);
 
-        new Setting(contentEl)
+        new Setting(advancedContent)
             .setName(t('subagent.editor.folders_name'))
             .setDesc(t('subagent.editor.folders_desc'))
             .addTextArea(text => {
@@ -235,7 +293,16 @@ export class SubAgentEditorModal extends Modal {
                 text.inputEl.rows = 3;
             });
 
-        new Setting(contentEl)
+        const hintsHeader = advancedContent.createEl('h4', { text: t('subagent.editor.hints_header') });
+        hintsHeader.addClass('pkm-editor-section-head');
+        advancedContent.createEl('p', { text: t('subagent.editor.hints_desc'), cls: 'setting-item-description' });
+        if (Object.keys(formData.scope.frontmatter).length > 0) {
+            new Setting(advancedContent)
+                .setName(t('subagent.editor.frontmatter_name'))
+                .setDesc(JSON.stringify(formData.scope.frontmatter));
+        }
+
+        new Setting(advancedContent)
             .setName(t('subagent.editor.sections_name'))
             // Przykład nagłówka jest osobnym kluczem (TREŚĆ notatki usera, nie etykieta UI),
             // wstrzykiwanym przez `{{example}}` - ten sam wzorzec co w SkillEditorModal.ts.
@@ -246,7 +313,7 @@ export class SubAgentEditorModal extends Modal {
                 text.inputEl.rows = 2;
             });
 
-        new Setting(contentEl)
+        new Setting(advancedContent)
             .setName(t('subagent.editor.pinned_notes_name'))
             .setDesc(t('subagent.editor.pinned_notes_desc'))
             .addTextArea(text => {
@@ -280,10 +347,12 @@ export class SubAgentEditorModal extends Modal {
         const actions = contentEl.createDiv({ cls: 'editor-modal-actions' });
 
         const saveBtn = actions.createEl('button', { cls: 'mod-cta' });
+        saveButton = saveBtn;
         setSvgLabel(saveBtn,
             this.isEditMode ? UiIcons.save(16) : UiIcons.sparkle(16),
             this.isEditMode ? t('modal.sub_agent.save_changes') : t('modal.sub_agent.create'));
         saveBtn.addClass('pkm-editor-btn-icon');
+        saveBtn.disabled = !maxIterationsValid;
         saveBtn.addEventListener('click', () => { void this._handleSave(formData); });
 
         if (this.isEditMode) {
@@ -294,6 +363,12 @@ export class SubAgentEditorModal extends Modal {
     }
 
     async _handleSave(formData: SubAgentInput) {
+        const maxIterations = validateMaxIterations(this._maxIterationsRaw ?? String(formData.max_iterations ?? ''));
+        if (!maxIterations.ok) {
+            new Notice(t(maxIterations.errorKey, maxIterations.params));
+            return;
+        }
+        formData.max_iterations = maxIterations.value;
         if (!formData.name.trim()) {
             new Notice(t('modal.sub_agent.name_required'));
             return;
@@ -318,13 +393,12 @@ export class SubAgentEditorModal extends Modal {
                 const result: { success: boolean; slug?: string; name?: string; version?: number; renamed?: boolean; error?: string } = this.isEditMode
                     ? await store.save(this.existing!.slug!, formData)
                     : await store.createFromData(formData);
-                if (!result?.success) {
+                if (!result?.success || !result.name) {
                     new Notice(t('modal.sub_agent.save_error', { error: result?.error || '?' }));
                     return;
                 }
-                new Notice(result.version
-                    ? t('modal.sub_agent.template_saved_bumped', { name: formData.name, version: result.version })
-                    : t('modal.sub_agent.template_saved', { name: result.name || formData.name }));
+                const notice = templateSaveNotice({ name: result.name, version: result.version });
+                new Notice(t(notice.messageKey, notice.params));
                 if (this.onSave) this.onSave();
                 this.close();
                 return;
@@ -359,9 +433,15 @@ export class SubAgentEditorModal extends Modal {
         if (!this.existing?.name) return;
 
         const entityName = 'sub-agent';
+        const copyNames = this.isTemplate
+            ? templateCopyNames(this.existing.name, this.plugin.agentManager?.subAgentLoader?.getAllSubAgents?.() || [])
+            : [];
+        const templateConfirmation = templateDeleteConfirmation(this.existing.name, copyNames, t('backstage.no_template_copies'));
         const okToDelete = await confirmModal(this.app, {
             title: t('generic.delete'),
-            message: t('modal.sub_agent.confirm_delete', { entity: entityName, name: this.existing.name }),
+            message: this.isTemplate
+                ? t(templateConfirmation.messageKey, templateConfirmation)
+                : t('modal.sub_agent.confirm_delete', { entity: entityName, name: this.existing.name }),
             destructive: true,
         });
         if (!okToDelete) return;
