@@ -131,7 +131,8 @@ const ACTION_PERMISSIONS: Record<string, string | undefined> = {
     // Pobranie strony to osobna akcja od wyszukiwania (osobna zgoda, osobny opis w modalu).
     // Typ uprawnienia zostaje wspólny - nie bramkuje.
     'web.read': PERMISSION_TYPES.WEB_SEARCH,
-    'delegate': PERMISSION_TYPES.MCP
+    'delegate': PERMISSION_TYPES.MCP,
+    'sub_agent': PERMISSION_TYPES.MCP
 };
 
 /**
@@ -408,6 +409,7 @@ export class PermissionSystem {
             'generate_image': 'generate_image',
             'add_text_to_image': 'generate_image',
             'delegate': 'delegate',
+            'sub_agent': 'delegate',
             // Poczta agenta (YELLOW z własnym przełącznikiem w profilu → Uprawnienia).
             'kom_send': 'kom_send',
             // Delegacja jedzie pod przełącznikiem POCZTY, nie delegacji. Przełącznik ma

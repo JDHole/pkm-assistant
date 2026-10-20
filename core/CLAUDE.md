@@ -337,6 +337,8 @@ Start jest lekki: żadnego stałego opóźnienia startowego, żadnego ślepego s
 
 **`create_folder` wymaga poziomu write.** AccessGuard wylicza poziom z `ACTION_PERMISSIONS` (wewnętrzna mapa `PermissionSystem.ts`).
 
+**`sub_agent` używa akcji `delegate` w `ACTION_PERMISSIONS` i wspólnego przełącznika zgody `delegate`.** Ryzyko zależy od `action`: `task` i `message` są YELLOW, a `stop`, `close` i `list` GREEN. `MCPClient` przekazuje akcję jako `operationMode` i trzyma treść oraz `sub_id` w `approvalContext`, przy pustym `targetPath`.
+
 Pełna swoboda to przecięcie trzech osi: narzędzie włączone + `admin_access` + autonomia `yolo`. Żadna z nich sama nie zastępuje pozostałych.
 
 ### 9. Scope sub-agenta tnie też WYNIKI, nie tylko dostęp

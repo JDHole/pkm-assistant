@@ -107,6 +107,12 @@ test('todo: get/list/read=GREEN (dowolna wielkość liter); każda inna akcja (i
     }
 });
 
+test('sub_agent: task/message=YELLOW, stop/close/list=GREEN, brak lub akcja nieznana=RED', t => {
+    for (const mode of ['task', 'message']) t.is(classifyToolRisk({ toolName: 'sub_agent', operationMode: mode }), TOOL_RISK_LEVELS.YELLOW);
+    for (const mode of ['stop', 'close', 'list']) t.is(classifyToolRisk({ toolName: 'sub_agent', operationMode: mode }), TOOL_RISK_LEVELS.GREEN);
+    for (const mode of [undefined, 'unknown']) t.is(classifyToolRisk({ toolName: 'sub_agent', operationMode: mode }), TOOL_RISK_LEVELS.RED);
+});
+
 // ─── Aliasy wsteczne `vault_*` — poza dzisiejszym BUILTIN_TOOL_MAP (narzędzia straciły
 // prefiks), ale WCIĄŻ żywe w classifyToolRisk dla starych configów sub-agentów / przełączników
 // approvalu zapisanych przed rename'em. Osobna sekcja, bo kompletność wyżej liczy się
