@@ -41,11 +41,14 @@ test('ephemeral memory_save points to logical brain.md without checking it', t =
     });
 });
 
-test('memory_delete uses args path or result path and expects absence', t => {
-    t.deepEqual(describeToolEffect('memory_delete', {}, { path: 'brain/notes/gone.md' }), {
-        tool: 'memory_delete', action: 'delete', targets: [{ kind: 'memory-file', path: 'brain/notes/gone.md' }], check: 'absent'
-    });
-    t.deepEqual(describeToolEffect('memory_delete', { path: 'brain/notes/gone.md' }), {
+test('memory_delete uses only the returned path', t => {
+    for (const args of [{ fact: 'gone' }, { fact: 'gone', path: 'wrong.md' }, { fact: 'gone', filename: 'wrong.md' }]) {
+        t.deepEqual(describeToolEffect('memory_delete', args), {
+            tool: 'memory_delete', action: 'delete', targets: [], check: 'none'
+        });
+    }
+    t.deepEqual(describeToolEffect('memory_delete', { fact: 'gone', path: 'wrong.md', filename: 'wrong.md' },
+        { path: 'brain/notes/gone.md' }), {
         tool: 'memory_delete', action: 'delete', targets: [{ kind: 'memory-file', path: 'brain/notes/gone.md' }], check: 'absent'
     });
 });

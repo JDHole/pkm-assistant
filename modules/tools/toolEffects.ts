@@ -71,8 +71,9 @@ export function describeToolEffect(toolName: string, args: unknown, result?: unk
                 ? [{ kind: 'memory-file', path: stringField(output.path) }]
                 : [], 'exists');
         case 'memory_delete': {
-            const targetPath = path ?? stringField(canonicalArgs.filename) ?? stringField(output.path);
-            return effect(tool, 'delete', targetPath ? [{ kind: 'memory-file', path: targetPath }] : [], 'absent');
+            const targetPath = stringField(output.path);
+            return effect(tool, 'delete', targetPath ? [{ kind: 'memory-file', path: targetPath }] : [],
+                targetPath ? 'absent' : 'none');
         }
         case 'artifact_create':
             return stringField(output.path)
