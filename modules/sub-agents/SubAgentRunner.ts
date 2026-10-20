@@ -10,6 +10,7 @@ import type { RunAgentLoopOptions, ToolExecutionContext, AgentLoopPartialSnapsho
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
 import { getLimits, sanitizeLimit } from '../../config/limits.js';
+import { countTokens } from '../../core/index.js';
 // „Co jest porażką narzędzia" liczy ta sama funkcja, co status chipa w czacie.
 import { resolveWorkPrompt, maskSensitiveData, sanitizePath, toolResultStatus } from '../../core/index.js';
 import type { PluginApi, AppLike, WorkPromptSettings } from '../../core/index.js';
@@ -30,6 +31,8 @@ import { classifyRunEnd } from './runOutcome.js';
 import type { RunEffect, RunOutcome } from './runOutcome.js';
 
 type AgentLike = { name: string };
+
+const SUB_AGENT_MAX_OUTPUT_TOKENS = 16384;
 
 /** Narzędzie tak, jak oddaje je `ToolRegistry.getTool`/`filterByAgent` — pełny kształt
  * (execute/inputSchema itd.) mieszka w `modules/tools`, poza zakresem tej fali; runner
@@ -122,6 +125,7 @@ type RunOptions = {
      * biegu, który dopiero się zaczyna. Bez rejestru NIE jest wołany.
      */
     onTaskCreated?: (task: SubTask) => void;
+    threadId?: string;
 };
 /**
  * Jak sub ZSZEDŁ z biegu. Trzy pierwsze wartości przychodzą wprost z `runAgentLoop`
@@ -280,6 +284,25 @@ export class SubAgentRunner {
         } };
     }
 
+    private async _checkEffect(described: ToolEffect, agentName: string): Promise<RunEffect['check']> {
+        if (described.check === 'none') return 'not-checked';
+        const targets = described.targets.map(target => ({ ...target }));
+        for (const target of targets) {
+            // Bez zwróconej ścieżki nie sprawdzamy surowego celu, który
+            // narzędzie vaulta mogło znormalizować przed wykonaniem.
+            if ((target.kind === 'vault-file' || target.kind === 'vault-folder')
+                && target.path && sanitizePath(target.path) !== target.path) return 'not-checked';
+            if (target.kind !== 'memory-file' || !target.path) continue;
+            if (target.path.startsWith('.pkm-assistant/')) continue;
+            let brainNotes: string | undefined;
+            try { brainNotes = this.plugin?.agentManager?.getAgentMemory?.(agentName)?.paths?.brainNotes; }
+            catch { /* Niepewna ścieżka pamięci nie blokuje biegu. */ }
+            if (brainNotes && !target.path.includes('/')) target.path = `${brainNotes}/${target.path}`;
+            else if (!target.path.includes('/')) return 'not-checked';
+        }
+        return checkEffectTargets({ ...described, targets }, this.effectTargetIo);
+    }
+
     /**
      * Run a sub-agent task.
      * @param {string} taskPrompt - Task description from the agent
@@ -297,6 +320,30 @@ export class SubAgentRunner {
      */
     async runTask(taskPrompt: string, agent: AgentLike, config: SubAgentData, model: ChatModel, options: RunOptions = {}): Promise<SubRunResult> {
         const startTime = Date.now();
+        const registry: SubTaskRegistry | null = this.plugin?.subTaskRegistry || null;
+        let thread = options.threadId ? registry?.getThread?.(options.threadId) : undefined;
+        if (options.threadId) {
+            const owner = options.origin;
+            if (!thread || !owner || !registry?.beginRun?.(options.threadId, { agentName: owner.agentName, sessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch })) {
+                const outcome = classifyRunEnd({ stoppedBy: 'error', failed: true, finalText: '' });
+                return { result: t('subagent.thread_refused'), toolsUsed: [], toolCallDetails: [], duration: Date.now() - startTime, usage: null, stoppedBy: 'error', failed: true, outcome };
+            }
+            const frozen = thread.config;
+            if (frozen.modelId !== model.modelId || frozen.providerId !== model.providerId) {
+                registry?.endRun?.(thread.threadId, { successful: false });
+                const outcome = classifyRunEnd({ stoppedBy: 'error', failed: true, finalText: '' });
+                return { result: t('subagent.thread_refused'), toolsUsed: [], toolCallDetails: [], duration: Date.now() - startTime, usage: null, stoppedBy: 'error', failed: true, outcome };
+            }
+            try {
+                config = structuredClone(frozen.subConfig as SubAgentData);
+                options = { ...options, ...(frozen.options as Partial<RunOptions>), threadId: options.threadId };
+            } catch (error) {
+                log.warn('SubAgent', `Wątek ${thread.threadId} ma nieprawidłową konfigurację: ${String(error)}`);
+                registry?.endRun?.(thread.threadId, { successful: false });
+                const outcome = classifyRunEnd({ stoppedBy: 'error', failed: true, finalText: '' });
+                return { result: t('subagent.thread_refused'), toolsUsed: [], toolCallDetails: [], duration: Date.now() - startTime, usage: null, stoppedBy: 'error', failed: true, outcome };
+            }
+        }
         // Kaganiec delegacji + bariera scope - przenoszone przez cały bieg suba.
         const delegationDepth = Number(options.delegationDepth) || 0;
         const scopeFolders = Array.isArray(options.scopeFolders) && options.scopeFolders.length > 0
@@ -314,8 +361,8 @@ export class SubAgentRunner {
         log.debug(logTag, `Zadanie: "${taskPrompt.slice(0, 200)}..."`);
 
         // Deklaracja PRZED `try`, bo domknięcie biegu robi też gałąź `catch` (fail).
-        const registry: SubTaskRegistry | null = this.plugin?.subTaskRegistry || null;
         let subTask: SubTask | undefined;
+        let conversationStore: ArrayMessageStore | undefined;
         let lastPartial: AgentLoopPartialSnapshot | undefined;
         let partialPersistence: Promise<void> = Promise.resolve();
         const effects: RunEffect[] = [];
@@ -376,24 +423,7 @@ export class SubAgentRunner {
                 if (entry.outcome === 'unknown') counts.unknown++;
                 if (entry.outcome === 'returned' || entry.outcome === 'unknown') {
                     const described = descriptions.get(entry);
-                    if (described) {
-                        const targets = described.targets.map(target => ({ ...target }));
-                        let checkable = true;
-                        for (const target of targets) {
-                            // Bez zwróconej ścieżki nie sprawdzamy surowego celu, który
-                            // narzędzie vaulta mogło znormalizować przed wykonaniem.
-                            if ((target.kind === 'vault-file' || target.kind === 'vault-folder')
-                                && target.path && sanitizePath(target.path) !== target.path) checkable = false;
-                            if (target.kind !== 'memory-file' || !target.path) continue;
-                            if (target.path.startsWith('.pkm-assistant/')) continue;
-                            let brainNotes: string | undefined;
-                            try { brainNotes = this.plugin?.agentManager?.getAgentMemory?.(agent.name)?.paths?.brainNotes; }
-                            catch { /* Niepewna ścieżka pamięci nie blokuje biegu. */ }
-                            if (brainNotes && !target.path.includes('/')) target.path = `${brainNotes}/${target.path}`;
-                            else checkable = false;
-                        }
-                        entry.check = checkable ? await checkEffectTargets({ ...described, targets }, this.effectTargetIo) : 'not-checked';
-                    }
+                    if (described) entry.check = await this._checkEffect(described, agent.name);
                 }
                 counts[entry.check]++;
             }
@@ -408,7 +438,9 @@ export class SubAgentRunner {
         try {
             // Limity z config/limits.js - JEDNO źródło prawdy. Per sub-agent config
             // nadal wygrywa; getLimits() daje aktualne kanoniczne defaulty (patrz limits.ts).
-            const limits = getLimits(this.plugin?.env?.settings);
+            const limits = thread
+                ? thread.config.limits as ReturnType<typeof getLimits>
+                : getLimits(this.plugin?.env?.settings);
             const effectiveLimits = _effectiveSubLimits(config, limits);
             const maxResultLen = effectiveLimits.maxToolResultLength;
             // Sufit delegate/agent_delegate nie może być NIŻSZY niż
@@ -452,6 +484,12 @@ export class SubAgentRunner {
             // Byt zakładamy NA SAMYM POCZĄTKU - przed budową promptu i przed pierwszym
             // `await`. Delegacja w tle oddaje modelowi `task_id`, więc identyfikator musi
             // istnieć, zanim cokolwiek długiego się zacznie (budowa promptu sięga do dysku).
+            const threadId = thread?.threadId ?? (registry ? label : undefined);
+            if (registry && !thread) {
+                const owner = { agentName: origin?.agentName || agent.name, sessionPath: origin?.sessionPath, sessionEpoch: origin?.sessionEpoch };
+                const frozenConfig = { subConfig: structuredClone(config), options: { delegationDepth, scopeFolders: scopeFolders ? [...scopeFolders] : undefined, callerToolNames: options.callerToolNames ? [...options.callerToolNames] : undefined, modelTimeout: options.modelTimeout, autonomy }, toolNames: this._resolveToolNames(config), limits: { ...limits }, model: config.model || null, modelId: model.modelId, providerId: model.providerId };
+                thread = _safeRegistry(() => registry.createThread?.({ threadId: label, name: config.name || config.role || 'sub', owner, origin: origin ?? { agentName: owner.agentName }, config: frozenConfig }));
+            }
             subTask = registry
                 ? _safeRegistry(() => registry.create?.({
                     id: label,
@@ -467,6 +505,7 @@ export class SubAgentRunner {
                     // Panel pokazuje, PO CO bieg wystartował. Skrót zadania,
                     // nie pełny prompt — sufit i maska siedzą w rejestrze.
                     taskPreview: taskPrompt,
+                    ...(threadId ? { threadId } : {}),
                 }))
                 : undefined;
             // „Byt istnieje" - hak dla wołacza (DelegateTool), pod tym samym bezpiecznikiem
@@ -504,10 +543,9 @@ export class SubAgentRunner {
                 }
                 : trace;
 
-            const systemPrompt = await this._buildTaskPrompt(agent, config, delegationDepth);
-
             // Resolve tools: config.tools → role defaults
-            const toolNames = this._resolveToolNames(config);
+            const frozenTools = thread?.config.toolNames;
+            const toolNames = Array.isArray(frozenTools) ? frozenTools as string[] : this._resolveToolNames(config);
             const visibleToolNames = _canDelegateAtDepth(delegationDepth, limits.max_delegation_depth)
                 ? toolNames
                 : toolNames.filter((name) => name !== 'delegate' && name !== 'agent_delegate');
@@ -517,17 +555,47 @@ export class SubAgentRunner {
             // so the direct-execution fallback cannot run a tool outside the whitelist.
             const allowedToolNames = new Set<string>(tools.map((td) => td.function.name));
 
-            const messages: Array<{ role: 'system' | 'user'; content: string }> = [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: taskPrompt }
-            ];
+            const systemPrompt = await this._buildTaskPrompt(agent, config, delegationDepth, limits);
+
+            const nextTask = options.threadId ? t('subagent.thread_next_task', { task: taskPrompt }) : taskPrompt;
+            if (options.threadId && thread) {
+                for (const effect of thread.effects) {
+                    if (effect.outcome === 'returned' || effect.outcome === 'unknown') {
+                        if (effect.expectedCheck) effect.check = await this._checkEffect({ ...effect, check: effect.expectedCheck }, agent.name);
+                    }
+                }
+            }
+            const effectsNote = thread?.effects.map(effect => {
+                const target = effect.targets.map(x => x.path || x.kind).join(', ');
+                if (effect.outcome === 'unknown') return t('subagent.thread_effect_unknown', { tool: effect.tool });
+                if (effect.check === 'matches') return t(effect.action === 'delete' ? 'subagent.thread_effect_deleted' : 'subagent.thread_effect_saved', { target });
+                if (effect.check === 'mismatch') return t(effect.action === 'delete' ? 'subagent.thread_effect_present' : 'subagent.thread_effect_missing', { target });
+                return t('subagent.thread_effect_unchecked', { target });
+            }).join('\n') ?? '';
+            const transcript = thread?.transcript.map(m => structuredClone(m)) ?? [];
+            const messages = [{ role: 'system' as const, content: systemPrompt }, ...transcript, { role: 'user' as const, content: `${nextTask}${options.threadId && effectsNote ? `\n${effectsNote}` : ''}` }];
+
+            if (thread && !options.threadId) thread.config.toolNames = tools.map(tool => tool.function.name);
+            if (thread && options.threadId) {
+                const budget = Number((thread.config.limits as Record<string, unknown> | undefined)?.subagent_thread_context_tokens) || getLimits(this.plugin?.env?.settings).subagent_thread_context_tokens;
+                const serialized = JSON.stringify(messages);
+                const answerMargin = SUB_AGENT_MAX_OUTPUT_TOKENS;
+                if (countTokens(serialized) + answerMargin > budget) {
+                    const refusal = t('subagent.thread_refused');
+                    const refusedOutcome = classifyRunEnd({ stoppedBy: 'error', failed: true });
+                    _safeRegistry(() => registry?.endRun?.(thread!.threadId, { successful: false }));
+                    if (subTask) _safeRegistry(() => registry?.fail?.(subTask as SubTask, refusal, refusedOutcome));
+                    return { result: refusal, toolsUsed: [], toolCallDetails: [], duration: Date.now() - startTime, usage: null, stoppedBy: 'error', failed: true, outcome: refusedOutcome };
+                }
+            }
 
             // Wspólna pętla (runAgentLoop). Store = ArrayMessageStore (system+user).
             // resolveTools = zamrożona lista jak dotąd. Obcinanie wyniku narzędzia przejmuje
             // pętla (limits.maxToolResultLength) - _executeTool już nie truncuje.
             const store = new ArrayMessageStore(messages);
+            conversationStore = store;
             // JEDYNY hak, jaki suby podpinają do pętli. `beforeContinue` leci przed KAŻDYM
-            // kolejnym wywołaniem modelu, więc wiadomość wrzucona przez usera do rejestru
+            // kolejnym wywołaniem modelu, więc wiadomość wrzucona przez agenta zlecającego do rejestru
             // (panel biegów → `postMessage`) wchodzi do transkryptu suba dokładnie tam, gdzie
             // model ją przeczyta - jak nudge, a nie jak przerwanie w połowie zdania.
             // Bez rejestru (testy jednostkowe, stary bootstrap) hak NIE JEST podpinany.
@@ -608,13 +676,14 @@ export class SubAgentRunner {
                 } },
                 trace: loopTrace,
                 limits: loopLimits,
-                modelOptions: { maxTokens: 16384, agentName: agent.name },
+                modelOptions: { maxTokens: SUB_AGENT_MAX_OUTPUT_TOKENS, agentName: agent.name },
             });
 
             closeEffects(response.stopReason);
             await partialPersistence;
             const finalEffects = await finalizeEffects();
             const outcome = classifyRunEnd({ stoppedBy: response.stoppedBy, stopReason: response.stopReason, finalText: response.finalText, partial: lastPartial, stoppedByActor: subTask?.stopRequestedBy, effects: finalEffects, successfulToolResults });
+            if (outcome.hasAnswer) store.appendAssistant(response.finalText);
             const handoff = outcome.completeness !== 'unconfirmed'
                 ? _buildHandoff(outcome, lastPartial, response.toolCallDetails || [], limits.subagent_salvage_max_chars, knownSecrets)
                 : undefined;
@@ -629,6 +698,7 @@ export class SubAgentRunner {
                 duration_ms: Date.now() - startTime
             }, origin, memory);
             // Domknięcie bytu wynikiem (status z `stoppedBy`: abort → aborted, reszta → done).
+            if (thread) _safeRegistry(() => registry?.endRun?.(thread!.threadId, { successful: true, transcript: store.messages, answer: outcome.hasAnswer ? response.finalText : undefined, effects: finalEffects.map((effect, index) => ({ ...effect, expectedCheck: descriptions.get(effects[index])?.check })), userStop: subTask?.stopRequestedBy === 'user' }));
             if (subTask) {
                 _safeRegistry(() => registry?.finish?.(subTask as SubTask, {
                     text: response.finalText || '',
@@ -681,6 +751,7 @@ export class SubAgentRunner {
                 duration_ms: Date.now() - startTime
             }, origin, memory);
             // Bieg mógł się nie założyć (błąd przed `create`) - wtedy nie ma czego domykać.
+            if (thread) _safeRegistry(() => registry?.endRun?.(thread!.threadId, { successful: false, transcript: conversationStore?.messages, userStop: subTask?.stopRequestedBy === 'user' }));
             if (subTask) {
                 const failedTask = subTask;
                 _safeRegistry(() => registry?.fail?.(failedTask, safeErrorMsg, outcome, {
@@ -767,10 +838,10 @@ export class SubAgentRunner {
      * konfigurowalna: instrukcja jest karmą dla modelu, nie wynikiem narzędzia.
      * Rola nie steruje treścią promptu.
      */
-    async _buildTaskPrompt(agent: AgentLike, config: SubAgentData, delegationDepth = 0): Promise<string> {
+    async _buildTaskPrompt(agent: AgentLike, config: SubAgentData, delegationDepth = 0, frozenLimits?: ReturnType<typeof getLimits>): Promise<string> {
         // Limity czytamy RAZ - ten sam obiekt karmi cap instrukcji i blok BUDŻET niżej,
         // więc prompt nie może obiecać modelowi czegoś innego, niż realnie dostał.
-        const limits = getLimits(this.plugin?.env?.settings);
+        const limits = frozenLimits ?? getLimits(this.plugin?.env?.settings);
         // Cap instrukcji custom suba to budżet
         // `subagent_prompt_max_chars` (default 24000), zmienialny w Ustawieniach → Limity.
         const configPromptCap = limits.subagent_prompt_max_chars;

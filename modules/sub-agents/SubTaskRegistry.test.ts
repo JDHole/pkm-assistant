@@ -52,6 +52,127 @@ test('create zakłada byt w stanie running i ogłasza task:created', t => {
     t.deepEqual(reg.list(), [task]);
 });
 
+test('wątki: właściciel, wyłączność beginRun, zamknięcie i czyszczenie rozmowy', t => {
+    const reg = new SubTaskRegistry();
+    const owner = { agentName: 'Tester', sessionPath: 'active.md', sessionEpoch: 'epoch-1' };
+    const thread = reg.createThread({ threadId: 'thread-1', name: 'pkm-sub', owner, origin: owner, config: { tools: ['read'] } });
+    const task = reg.create({ id: 'sub/test#1', name: 'pkm-sub', agentName: 'Tester', threadId: thread.threadId });
+    t.is(task.threadId, 'thread-1');
+    t.is(thread.phase, 'running');
+    reg.endRun('thread-1', { successful: true, transcript: [{ role: 'assistant', content: 'gotowe' }] });
+    t.is(thread.phase, 'idle');
+    t.is(thread.reusable, true);
+    t.true(reg.beginRun('thread-1', owner));
+    t.is(thread.phase, 'running');
+    t.false(reg.beginRun('thread-1', owner));
+    t.false(reg.beginRun('thread-1', { agentName: 'Tester', sessionPath: 'active.md' }));
+    t.false(reg.beginRun('thread-1', { ...owner, sessionEpoch: 'epoch-2' }));
+    reg.endRun('thread-1', { successful: true });
+    t.true(reg.beginRun('thread-1', owner));
+    reg.closeSessionThreads(owner.agentName, owner.sessionPath);
+    t.is(thread.closeAfterRun, true);
+    reg.endRun('thread-1', { successful: true });
+    t.is(thread.phase, 'closed');
+    t.deepEqual(thread.transcript, []);
+    t.false(reg.beginRun('thread-1', owner));
+});
+
+test('piąty bieg jest dozwolony, próba szóstego nie jest reusable', t => {
+    const reg = new SubTaskRegistry();
+    const owner = { agentName: 'Tester', sessionPath: 'active.md', sessionEpoch: 'epoch-cap' };
+    const thread = reg.createThread({ threadId: 'thread-cap', name: 'worker', owner, origin: owner, config: {} });
+    for (let run = 1; run <= 5; run++) {
+        if (run > 1) t.true(reg.beginRun(thread.threadId, owner));
+        reg.create({ id: `run-${run}`, name: 'worker', agentName: owner.agentName, threadId: thread.threadId });
+        reg.endRun(thread.threadId, { successful: true, transcript: [{ role: 'assistant', content: `run ${run}` }] });
+        if (run < 5) t.is(thread.phase, 'idle');
+    }
+    t.is(thread.runIds.length, 5);
+    t.is(thread.phase, 'closed');
+    t.false(thread.reusable);
+    t.deepEqual(thread.transcript, []);
+});
+
+test('closeAll zamyka idle i zamyka running po endRun', t => {
+    const reg = new SubTaskRegistry();
+    const owner = { agentName: 'Tester', sessionPath: 'active.md', sessionEpoch: 'epoch-all' };
+    const idle = reg.createThread({ threadId: 'idle', name: 'worker', owner, origin: owner, config: {} });
+    reg.create({ id: 'idle-run', agentName: owner.agentName, threadId: idle.threadId });
+    reg.endRun(idle.threadId, { successful: true, transcript: [{ role: 'assistant', content: 'history' }] });
+    const running = reg.createThread({ threadId: 'running', name: 'worker', owner, origin: owner, config: {} });
+    reg.create({ id: 'running-run', agentName: owner.agentName, threadId: running.threadId });
+
+    reg.closeAll();
+    t.is(idle.phase, 'closed');
+    t.deepEqual(idle.transcript, []);
+    t.true(running.closeAfterRun);
+    t.is(running.phase, 'running');
+    reg.endRun(running.threadId, { successful: true, transcript: [{ role: 'assistant', content: 'discarded' }] });
+    t.is(running.phase, 'closed');
+    t.deepEqual(running.transcript, []);
+});
+
+test('sprzątanie zamyka przeterminowane idle i najstarsze ponad limit sesji', t => {
+    const reg = new SubTaskRegistry({ threadIdleMs: 1000, maxIdleThreadsPerSession: 2 });
+    const owner = { agentName: 'Tester', sessionPath: 'active.md', sessionEpoch: 'epoch-prune' };
+    const makeIdle = (threadId: string) => {
+        const thread = reg.createThread({ threadId, name: 'worker', owner, origin: owner, config: {} });
+        reg.create({ id: `${threadId}-run`, agentName: owner.agentName, threadId });
+        reg.endRun(threadId, { successful: true, transcript: [{ role: 'assistant', content: threadId }] });
+        return thread;
+    };
+    const expired = makeIdle('expired');
+    expired.lastActiveAt = Date.now() - 2000;
+    reg.createThread({ threadId: 'trigger', name: 'worker', owner, origin: owner, config: {} });
+    t.is(expired.phase, 'closed');
+    reg.closeThread('trigger');
+    const first = makeIdle('first'); first.lastActiveAt = Date.now() - 30;
+    const second = makeIdle('second'); second.lastActiveAt = Date.now() - 20;
+    const third = makeIdle('third'); third.lastActiveAt = Date.now() - 10;
+    reg.endRun('third', { successful: true });
+    t.is(first.phase, 'closed');
+    t.is(second.phase, 'idle');
+    t.is(third.phase, 'idle');
+});
+
+test('beginRun odmawia wznowienia wątku po upływie limitu bez wcześniejszego sprzątania', t => {
+    const reg = new SubTaskRegistry({ threadIdleMs: 1000 });
+    const owner = { agentName: 'Tester', sessionPath: 'active.md', sessionEpoch: 'epoch-expired' };
+    const thread = reg.createThread({ threadId: 'expired-on-resume', name: 'worker', owner, origin: owner, config: {} });
+    reg.create({ id: 'expired-run', agentName: owner.agentName, threadId: thread.threadId });
+    reg.endRun(thread.threadId, { successful: true, transcript: [{ role: 'assistant', content: 'history' }] });
+    thread.lastActiveAt = Date.now() - 2000;
+
+    t.false(reg.beginRun(thread.threadId, owner));
+    t.is(thread.phase, 'closed');
+    t.deepEqual(thread.transcript, []);
+});
+
+test('wątek bez ścieżki lub epoki w origin jest jednorazowy', t => {
+    const reg = new SubTaskRegistry();
+    const owner = { agentName: 'Tester', sessionPath: 'active.md', sessionEpoch: 'epoch-origin' };
+    const thread = reg.createThread({ threadId: 'missing-origin-key', name: 'worker', owner, origin: { agentName: owner.agentName }, config: {} });
+    reg.create({ id: 'missing-origin-run', agentName: owner.agentName, threadId: thread.threadId });
+    reg.endRun(thread.threadId, { successful: true });
+
+    t.is(thread.phase, 'closed');
+    t.false(thread.reusable);
+});
+
+test('zdarzenia wątku trafiają na szynę i do trace.log', t => {
+    const trace: string[] = [];
+    const reg = new SubTaskRegistry({ traceLog: { scope: () => type => trace.push(type) } });
+    const events: string[] = [];
+    for (const event of ['thread:created', 'thread:idle', 'thread:closed']) reg.events.on(event, () => events.push(event));
+    const owner = { agentName: 'Tester', sessionPath: 'active.md', sessionEpoch: 'epoch-events' };
+    const thread = reg.createThread({ threadId: 'events', name: 'worker', owner, origin: owner, config: {} });
+    reg.create({ id: 'events-run', agentName: owner.agentName, threadId: thread.threadId });
+    reg.endRun(thread.threadId, { successful: true, transcript: [] });
+    reg.closeThread(thread.threadId);
+    t.deepEqual(events, ['thread:created', 'thread:idle', 'thread:closed']);
+    t.deepEqual(trace, ['thread.created', 'thread.idle', 'thread.closed']);
+});
+
 // --- step: maskowanie + zdarzenie ---
 
 test('step maskuje stringowe pola i ogłasza task:step', t => {

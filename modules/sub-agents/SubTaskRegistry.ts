@@ -38,6 +38,7 @@ import { maskSensitiveData } from '../../core/index.js';
 import { EventEmitter } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
 import type { RunOutcome, StopBy } from './runOutcome.js';
+import type { LoopMessage } from '../agent-loop/index.js';
 
 /** Stan biegu suba. `aborted` = ubity z zewnątrz (timeout delegacji), `error` = wyjątek. */
 export type SubTaskStatus = 'running' | 'done' | 'error' | 'aborted';
@@ -78,7 +79,17 @@ export interface SubTaskResult {
 export interface SubTaskOrigin {
     agentName: string;
     sessionPath?: string;
+    sessionEpoch?: string;
     tabKey?: string;
+}
+
+export interface SubThreadOwner { agentName: string; sessionPath?: string; sessionEpoch?: string }
+export type SubThreadEffect = RunOutcome['effects'][number] & { expectedCheck?: 'exists' | 'absent' | 'none' };
+export interface SubThread {
+    threadId: string; name: string; owner: SubThreadOwner; origin: SubTaskOrigin;
+    phase: 'queued' | 'running' | 'idle' | 'closed'; reusable: boolean; runIds: string[];
+    transcript: LoopMessage[]; config: Record<string, unknown>; userStop: boolean;
+    lastActiveAt: number; closeAfterRun: boolean; effects: SubThreadEffect[];
 }
 
 /** Bieg sub-agenta jako byt. `id` = etykieta trace (`sub/<nazwa>#<seq>`), unikalna w procesie. */
@@ -107,6 +118,7 @@ export interface SubTask {
      * PO CO ten bieg w ogóle wystartował, nie tylko co klika.
      */
     taskPreview?: string;
+    threadId?: string;
     /**
      * Ktoś (panel) poprosił o zatrzymanie tego biegu. To ZNACZNIK PROŚBY, nie status —
      * bieg gaśnie dopiero, gdy pętla suba dojedzie do najbliższego punktu przerwania i
@@ -135,6 +147,10 @@ export interface SubTaskRegistryOptions {
     maxStepsPerTask?: number;
     /** Sufit kolejki wiadomości do jednego biegu (patrz `postMessage`). */
     maxMessagesPerTask?: number;
+    maxThreadRuns?: number;
+    maxThreadTranscriptChars?: number;
+    threadIdleMs?: number;
+    maxIdleThreadsPerSession?: number;
 }
 
 /** Ile ZAKOŃCZONYCH biegów trzymamy w pamięci (starsze wypadają). */
@@ -149,12 +165,15 @@ const DEFAULT_MAX_STEPS_PER_TASK = 500;
  * cicha utrata polecenia jest gorsza niż odmowa.
  */
 const DEFAULT_MAX_MESSAGES_PER_TASK = 10;
+/** Wątek trzyma tylko najnowsze fakty o efektach, niezależnie od retencji SubTask. */
+const MAX_THREAD_EFFECTS = 100;
 
 export class SubTaskRegistry {
     // `declare` = sama deklaracja typu, zero emitu.
     /** Szyna zdarzeń: `task:created` (task), `task:step` ({task, step}), `task:finished` (task). */
     declare events: EventEmitter;
     declare private _tasks: Map<string, SubTask>;
+    declare private _threads: Map<string, SubThread>;
     declare private _traceLog: SubTaskTraceLogLike | null;
     /** Cache funkcji `scope` per id taska — jedna na bieg, kasowana przy `task:finished`. */
     declare private _traceScopes: Map<string, SubTaskTrace>;
@@ -165,7 +184,7 @@ export class SubTaskRegistry {
      */
     declare private _aborts: Map<string, () => void>;
     /**
-     * Kolejka wiadomości od usera do KONKRETNEGO biegu (side-channel sterowania).
+     * Kolejka wiadomości od agenta zlecającego do KONKRETNEGO biegu (side-channel sterowania).
      * Rejestr nie wie, co się z nimi stanie — zdejmuje je runner w haku `beforeContinue`
      * i dopisuje do transkryptu suba. Wpis żyje dokładnie tyle co bieg.
      */
@@ -174,6 +193,7 @@ export class SubTaskRegistry {
     declare private _maxDone: number;
     declare private _maxStepsPerTask: number;
     declare private _maxMessagesPerTask: number;
+    declare private _threadLimits: { runs: number; chars: number; idleMs: number; perSession: number };
 
     constructor({
         traceLog = null,
@@ -181,9 +201,12 @@ export class SubTaskRegistry {
         maxDone = DEFAULT_MAX_DONE,
         maxStepsPerTask = DEFAULT_MAX_STEPS_PER_TASK,
         maxMessagesPerTask = DEFAULT_MAX_MESSAGES_PER_TASK,
+        maxThreadRuns = 5, maxThreadTranscriptChars = 200000, threadIdleMs = 1800000, maxIdleThreadsPerSession = 3,
     }: SubTaskRegistryOptions = {}) {
         this.events = new EventEmitter();
         this._tasks = new Map();
+        this._threads = new Map();
+        this._threadLimits = { runs: maxThreadRuns, chars: maxThreadTranscriptChars, idleMs: threadIdleMs, perSession: maxIdleThreadsPerSession };
         this._traceScopes = new Map();
         this._aborts = new Map();
         this._messages = new Map();
@@ -194,6 +217,75 @@ export class SubTaskRegistry {
         this._maxMessagesPerTask = Number(maxMessagesPerTask) > 0 ? Number(maxMessagesPerTask) : DEFAULT_MAX_MESSAGES_PER_TASK;
         this._subscribeHousekeeping();
         if (this._traceLog) this._subscribeTraceConsumer();
+        if (this._traceLog) this.events.on('thread:created', (x: unknown) => this._traceThread(x, 'thread.created'));
+        if (this._traceLog) this.events.on('thread:idle', (x: unknown) => this._traceThread(x, 'thread.idle'));
+        if (this._traceLog) this.events.on('thread:closed', (x: unknown) => this._traceThread(x, 'thread.closed'));
+    }
+
+    private _traceThread(value: unknown, type: string): void {
+        const thread = value as SubThread | undefined;
+        if (thread?.threadId) this._traceLog?.scope?.(thread.threadId)?.(type, { threadId: thread.threadId, phase: thread.phase });
+    }
+
+    createThread(input: { threadId: string; name: string; owner: SubThreadOwner; origin: SubTaskOrigin; config: Record<string, unknown>; phase?: SubThread['phase'] }): SubThread {
+        const now = Date.now();
+        const thread: SubThread = { ...input, owner: { ...input.owner }, origin: { ...input.origin }, config: structuredClone(input.config), phase: input.phase ?? 'running', reusable: false, runIds: [], transcript: [], userStop: false, lastActiveAt: now, closeAfterRun: false, effects: [] };
+        this._threads.set(thread.threadId, thread);
+        this.events.emit('thread:created', thread);
+        this._pruneIdleThreads();
+        return thread;
+    }
+
+    beginRun(threadId: string, owner: SubThreadOwner): boolean {
+        const thread = this._threads.get(threadId);
+        if (thread?.phase === 'idle') {
+            const idleMs = Number((thread.config.limits as Record<string, unknown> | undefined)?.subagent_thread_idle_ms) || this._threadLimits.idleMs;
+            if (Date.now() - thread.lastActiveAt >= idleMs) this._closeThreadData(thread);
+        }
+        if (!thread || thread.phase !== 'idle' || !owner?.agentName || !owner.sessionPath || !owner.sessionEpoch
+            || !thread.owner.agentName || !thread.owner.sessionPath || !thread.owner.sessionEpoch
+            || thread.owner.agentName !== owner.agentName || thread.owner.sessionPath !== owner.sessionPath || thread.owner.sessionEpoch !== owner.sessionEpoch || !thread.reusable) return false;
+        thread.phase = 'running'; thread.lastActiveAt = Date.now(); return true;
+    }
+
+    endRun(threadId: string, input: { successful: boolean; transcript?: LoopMessage[]; effects?: SubThreadEffect[]; answer?: string; userStop?: boolean } ): void {
+        const thread = this._threads.get(threadId); if (!thread || thread.phase !== 'running') return;
+        const transcript = (input.transcript ?? thread.transcript).filter(m => m.role !== 'system').map(m => structuredClone(m));
+        if (input.answer && !transcript.some(m => m.role === 'assistant' && m.content === input.answer)) transcript.push({ role: 'assistant', content: input.answer });
+        thread.transcript = transcript;
+        if (input.effects?.length) {
+            thread.effects = [...thread.effects, ...input.effects.map(e => structuredClone(e))].slice(-MAX_THREAD_EFFECTS);
+        }
+        thread.userStop ||= Boolean(input.userStop);
+        thread.lastActiveAt = Date.now();
+        const threadLimits = thread.config.limits as Record<string, unknown> | undefined;
+        const maxRuns = Number(threadLimits?.subagent_thread_max_runs) || this._threadLimits.runs;
+        const maxChars = Number(threadLimits?.subagent_thread_transcript_max_chars) || this._threadLimits.chars;
+        thread.reusable = Boolean(input.successful && thread.origin.sessionPath && thread.origin.sessionEpoch && thread.runIds.length < maxRuns && JSON.stringify(transcript).length <= maxChars && !thread.closeAfterRun);
+        if (thread.reusable) { thread.phase = 'idle'; this.events.emit('thread:idle', thread); }
+        else this._closeThreadData(thread);
+        this._pruneIdleThreads();
+    }
+
+    closeThread(threadId: string): boolean { const t = this._threads.get(threadId); if (!t || t.phase === 'closed') return false; if (t.phase === 'running') t.closeAfterRun = true; else this._closeThreadData(t); return true; }
+    closeSessionThreads(agentName: string, sessionPath: string): number { let n = 0; for (const t of this._threads.values()) if (t.owner.agentName === agentName && t.owner.sessionPath === sessionPath && this.closeThread(t.threadId)) n++; return n; }
+    closeAll(): void { for (const t of this._threads.values()) this.closeThread(t.threadId); }
+    listThreads(owner: SubThreadOwner): SubThread[] { return [...this._threads.values()].filter(t => t.owner.agentName === owner.agentName && t.owner.sessionPath === owner.sessionPath && t.owner.sessionEpoch === owner.sessionEpoch); }
+    getThread(threadId: string): SubThread | undefined { return this._threads.get(threadId); }
+    private _closeThreadData(thread: SubThread): void { thread.phase = 'closed'; thread.reusable = false; thread.closeAfterRun = false; thread.transcript = []; thread.effects = []; thread.lastActiveAt = Date.now(); this.events.emit('thread:closed', thread); }
+    private _pruneIdleThreads(): void {
+        const now = Date.now(); const idle = [...this._threads.values()].filter(t => t.phase === 'idle');
+        for (const t of idle) {
+            const idleMs = Number((t.config.limits as Record<string, unknown> | undefined)?.subagent_thread_idle_ms) || this._threadLimits.idleMs;
+            if (now - t.lastActiveAt >= idleMs) this._closeThreadData(t);
+        }
+        const groups = new Map<string, SubThread[]>();
+        for (const t of this._threads.values()) if (t.phase === 'idle' && t.owner.sessionPath) { const k = `${t.owner.agentName}\u0000${t.owner.sessionPath}\u0000${t.owner.sessionEpoch ?? ''}`; groups.set(k, [...(groups.get(k) ?? []), t]); }
+        for (const rows of groups.values()) {
+            rows.sort((a,b) => a.lastActiveAt-b.lastActiveAt);
+            const maxIdle = Math.min(...rows.map(t => Number((t.config.limits as Record<string, unknown> | undefined)?.subagent_thread_max_idle_per_session) || this._threadLimits.perSession));
+            while (rows.length > maxIdle) this._closeThreadData(rows.shift()!);
+        }
     }
 
     /**
@@ -255,7 +347,7 @@ export class SubTaskRegistry {
      * @param background - bieg w tle (wołający nie czeka). Rejestr tylko przechowuje flagę.
      * @param origin - adres zwrotny zlecenia. Rejestr go NIE interpretuje (patrz `SubTaskOrigin`).
      */
-    create({ id, name, agentName, budget, background, origin, taskPreview }: {
+    create({ id, name, agentName, budget, background, origin, taskPreview, threadId }: {
         id: string;
         name?: string;
         agentName?: string;
@@ -263,6 +355,7 @@ export class SubTaskRegistry {
         background?: boolean;
         origin?: SubTaskOrigin;
         taskPreview?: string;
+        threadId?: string;
     }): SubTask {
         const task: SubTask = {
             id,
@@ -276,6 +369,7 @@ export class SubTaskRegistry {
         // Pola opcjonalne dokładamy tylko gdy podane — kształt bytu bez delegacji w tle
         // zostaje bit w bit ten sam (konsumenci sprawdzają obecność pola).
         if (background !== undefined) task.background = background;
+        if (threadId) { task.threadId = threadId; this._threads.get(threadId)?.runIds.push(id); }
         if (origin) task.origin = { ...origin };
         // Skrót zadania przechodzi przez tę samą maskę co kroki (zadanie potrafi
         // nieść sekret z kontekstu rodzica) i ma twardy sufit — to podgląd, nie transkrypt.
@@ -395,6 +489,7 @@ export class SubTaskRegistry {
             if (!task || !stop || task.status !== 'running') return false;
             task.stopRequested = true;
             task.stopRequestedBy ??= by;
+            if (by === 'user' && task.threadId) { const thread = this._threads.get(task.threadId); if (thread) thread.userStop = true; }
             // Ślad idzie tą samą drogą co reszta kroków — także do trace.log. Harness liczy
             // KONKRETNE typy zdarzeń, więc dodatkowy typ go nie rusza.
             this.step(task, 'stop.requested', { by: task.stopRequestedBy });
@@ -455,7 +550,7 @@ export class SubTaskRegistry {
     }
 
     /**
-     * Wrzuć wiadomość od usera do biegu, który TRWA (side-channel sterowania).
+     * Wrzuć wiadomość od agenta zlecającego do biegu, który TRWA (side-channel sterowania).
      *
      * Zwraca `true` tylko wtedy, gdy wiadomość ma dokąd pójść: bieg istnieje, ma status
      * `running` i kolejka nie jest pełna. Sam rejestr jej NIE DORĘCZA — leży w kolejce,
@@ -573,6 +668,7 @@ export class SubTaskRegistry {
         try {
             this.events.removeAllListeners();
             this._tasks.clear();
+            this._threads.clear();
             this._traceScopes.clear();
             this._aborts.clear();
             this._messages.clear();

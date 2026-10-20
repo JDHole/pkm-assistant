@@ -46,6 +46,7 @@ export type {
     SubTaskBudget,
     SubTaskResult,
     SubTaskOrigin,
+    SubThread, SubThreadOwner,
 } from './SubTaskRegistry.js';
 export type { SubTaskDeliverer } from './SubTaskNotifier.js';
 
