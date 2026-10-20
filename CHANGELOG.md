@@ -5,6 +5,14 @@ All notable user-facing changes to PKM Assistant are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- The tools module exposes effect descriptions and target checks for built-in and external MCP tool calls.
+- `MCPClient.executeToolCall` supports an execution-start callback after its permission and approval gates.
+
+
 ## 2.3.3 - 2026-10-19
 
 Current Claude models, honest tool descriptions: the Anthropic provider works with Claude Opus 4.7

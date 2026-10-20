@@ -17,6 +17,7 @@ modules/tools/
 ├── ExternalMcpManager.ts   # prawdziwy klient MCP (stdio/HTTP przez SDK); external tools → source:'user' RED
 ├── ToolRegistry.ts         # registry + filterByAgent() + checkToolAxis() + BUILTIN_TOOL_MAP
 ├── MCPClient.ts            # egzekucja wywołań narzędzi: kanonizacja, bramki, approval, normalizeArgsAliases
+├── toolEffects.ts          # czysty opis skutków narzędzi i weryfikator celów przez wstrzyknięte I/O
 ├── SettingsContent.ts      # Web Search / Image Gen / STT / MCP Servers settings
 ├── SettingsSection.ts      # rejestracja sekcji Settings
 ├── BackstageTab.ts / ConnectorsBackstageTab.ts  # zakładka Zaplecza „Konektory" (informacyjna)
@@ -66,7 +67,7 @@ modules/tools/
 
 ## Public API (`index.ts`)
 
-**30 eksportów RUNTIME, wszystkie wypisane z nazwy** - `index.ts` nie używa `export *`: gwiazdka wynosiłaby na zewnątrz wszystko dany plik eksportuje, w tym rzeczy, które nigdy nie miały być publiczne. Dopisujesz narzędzie → dopisujesz fabrykę TUTAJ; bez tego `src/main.ts` jej nie zobaczy, a build wywali się na nieistniejącym eksporcie.
+**33 eksporty RUNTIME, wszystkie wypisane z nazwy** - `index.ts` nie używa `export *`: gwiazdka wynosiłaby na zewnątrz wszystko dany plik eksportuje, w tym rzeczy, które nigdy nie miały być publiczne. Dopisujesz narzędzie → dopisujesz fabrykę TUTAJ; bez tego `src/main.ts` jej nie zobaczy, a build wywali się na nieistniejącym eksporcie.
 
 **Runtime + registry:**
 - `ServerManager` - runtime built-in serwerów; widoczność wyznacza `mcp_servers[]` (`*` = wszystkie, lista = wskazane + `core`), bez dawnej bramki `permissions.mcp`
@@ -118,6 +119,42 @@ Gdy kontekst runtime istnieje, lecz bramka nie zezwala, odczyt kończy się
 `access_denied` bez I/O. Obecny adapter nadal czyta cały plik przed wydzieleniem strony.
 
 **Settings + Zaplecze:** `registerSettings`, `registerBackstage`.
+
+### Opis skutków narzędzi
+
+`describeToolEffect(toolName, args, result?)` opisuje oczekiwany stan po wykonaniu wywołania;
+nie wykonuje I/O. Zwraca `null` dla narzędzi bez bezpośredniego skutku (tylko do odczytu oraz
+`delegate`, którego własne wywołanie nie ma celu do sprawdzenia) i dla `todo` z akcją `list`
+albo inną nieobsługiwaną akcją. Obecny `SubAgentRunner` nie zbiera wpisów o efektach wywołań
+narzędzi suba; podłączenie tego API do runnera należy do osobnej jednostki.
+Nazwy aliasów przechodzą przez `resolveToolAlias`, więc aliasy opisują ten
+sam efekt co nazwy kanoniczne. ⚠️ Każda nazwa spoza tej listy i spoza tabeli efektów (narzędzia
+zewnętrznych serwerów MCP `<serverId>__<toolName>`, nowe wbudowane narzędzie bez wpisu) dostaje
+efekt `unknown` bez celów i `check: 'none'`, nigdy `null`: `null` znaczy "brak skutku", a tego dla
+nieznanego narzędzia nie wiemy. To odpowiada wierszowi kontraktu „narzędzia zewnętrznych
+serwerów MCP: brak celu, not-checked”, ponieważ `check: 'none'` daje w `checkEffectTargets`
+wynik `not-checked`. Dokładasz wbudowane narzędzie? Dopisz je tutaj albo do listy bez
+skutku. Wynik opisuje stan celu, nie dowodzi, że dane wywołanie wykonało zapis.
+
+Typ `ToolEffect` ma pola `tool`, `action`, `targets` i `check`. Cele są typu
+`vault-file`, `vault-folder`, `memory-file`, `message` albo `todo-list`; sprawdzenie to
+`exists`, `absent` lub `none`. Dla `memory_save` z `ephemeral: true` celem jest logiczne
+`memory-file` o ścieżce `brain.md` i `check: 'none'`: to plik indeksu konkretnego agenta,
+ale jego pełna ścieżka nie jest dostępna w argumentach wywołania.
+Dla `todo` akcje `create`, `check`, `uncheck`, `add` i `finish` opisują listę zadań
+sesji z `check: 'none'`. Dla `artifact_update` ścieżka do sprawdzenia pochodzi z
+`result.artifact.path`; sam `id` bez tej ścieżki pozostaje z `check: 'none'`.
+
+`checkEffectTargets(effect, io)` zwraca `not-checked` bez I/O, gdy `check: 'none'`,
+lista celów jest pusta albo choć jeden cel nie ma niepustej ścieżki. W pozostałych
+przypadkach wywołuje `io.exists(path, kind)` kolejno dla celów. `matches` oznacza,
+że wszystkie cele mają oczekiwany stan; `mismatch` oznacza pierwszą wykrytą
+niezgodność i kończy dalsze sprawdzanie. Wyjątek I/O daje `not-checked`, także
+jeśli wcześniejsze cele zostały już sprawdzone.
+
+`ExecuteToolCallOptions.onExecutionStart` jest wywoływany raz po bramkach, zgodzie,
+diffie i kolejce zgody, tuż przed `tool.execute`. Odmowa nie uruchamia callbacku;
+wyjątek callbacku jest logowany i nie przerywa wykonania narzędzia.
 
 **Cykl życia:** `stopAllDelegations(reason)` - wołane z `PluginBase.onunload` (patrz Gotchas).
 
