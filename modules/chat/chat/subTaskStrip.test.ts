@@ -345,3 +345,23 @@ test('subTaskStrip: awaria pokazuje zachowany dorobek pod Co powstało i powód 
     registry.dispose();
     setLocale('en');
 });
+
+test('subTaskStrip: rozwinięty bieg pokazuje notkę o podsumowaniu w toku i o padzie zapisu dorobku', t => {
+    setLocale('pl');
+    const registry = new SubTaskRegistry();
+    const running = registry.create({ id: 'run-synteza', name: 'pkm-sub', agentName: owner.agentName, origin: owner, taskPreview: 'Zbierz notatki' });
+    running.partial = { synthesis: 'pending' } as typeof running.partial;
+    const stored = registry.create({ id: 'run-zapis', name: 'pkm-sub', agentName: owner.agentName, origin: owner, taskPreview: 'Zapisz plan' });
+    registry.finish(stored, { text: 'Plan', toolsUsed: [], durationMs: 5, usage: null });
+    stored.partialStorageError = true;
+    const render = (expandedId: string) => {
+        const host = new MockEl();
+        renderSubTaskStrip(host as any, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, expandedId, onToggle() {} });
+        return textTree(host);
+    };
+    t.true(render('run-synteza').includes(trPl['chat.substrip.synthesis_pending']));
+    t.false(render('run-synteza').includes(trPl['chat.streaming.partial_storage_error']));
+    t.true(render('run-zapis').includes(trPl['chat.streaming.partial_storage_error']));
+    registry.dispose();
+    setLocale('en');
+});
