@@ -81,6 +81,7 @@ Sukces zawiera dodatkowo `outcome` i `effects`; ścieżka błędu runnera zachow
 dotychczasowe pola oraz dołącza te dwa pola, jeśli runner je poda.
 Gdy budzik otrzyma wynik biegu z `outcome`, zachowuje `partial_result`,
 `outcome`, `effects` i `note`, a `error` wskazuje timeout.
+Jeśli runner poda `handoff`, `partial_result` używa go przed tekstem biegu i skrótem `tool_call_details`, także przy mapowaniu timeoutu.
 
 Wynik runnera bez `outcome` jawnie przechodzi starą ścieżką odpowiedzi, by atrapy
 i starszy kształt zachowały zgodność. Lista `tasks` po oczekiwaniu na pulę ma

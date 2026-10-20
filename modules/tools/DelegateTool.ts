@@ -149,6 +149,7 @@ interface SubAgentRunResult {
     partial?: AgentLoopPartialSnapshot;
     stopReason?: AgentLoopStopReason;
     outcome?: RunOutcome;
+    handoff?: string;
 }
 
 /** Runner sub-agentów w zakresie, jakiego używa to narzędzie. */
@@ -419,7 +420,8 @@ function _makeSalvageMapper(salvageCap: number): SalvageMapper {
         if (r.success === false && (!r.outcome || r.stopped_by === 'error')) return null;
         const text = typeof r.result === 'string' ? r.result.trim() : '';
         const priorPartial = typeof r.partial_result === 'string' ? r.partial_result.trim() : '';
-        const partial = (priorPartial || text || _digestFromToolDetails(r.tool_call_details, salvageCap)).slice(0, salvageCap);
+        const handoff = typeof r.handoff === 'string' ? r.handoff.trim() : '';
+        const partial = (handoff || priorPartial || text || _digestFromToolDetails(r.tool_call_details, salvageCap)).slice(0, salvageCap);
         return {
             success: false,
             error: `Sub-agent timeout after ${waitedMs}ms`,
@@ -1298,6 +1300,7 @@ async function _executeSubAgent(
             stopped_by: 'error',
             ...(result.stopReason ? { stop_reason: result.stopReason } : {}),
             ...(result.partial ? { partial: result.partial } : {}),
+            ...(result.handoff ? { partial_result: result.handoff } : {}),
             tools_used: result.toolsUsed || [],
             tool_call_details: result.toolCallDetails || [],
             usage: result.usage || null,
@@ -1312,7 +1315,7 @@ async function _executeSubAgent(
         const details = result.toolCallDetails || [];
         const resultText = _rawResultToString(result.result);
         const cap = runControl.salvageCap ?? DEFAULT_LIMITS.subagent_salvage_max_chars;
-        const partialText = (resultText.trim() || _digestFromToolDetails(details, cap)).slice(0, cap);
+        const partialText = (result.handoff?.trim() || resultText.trim() || _digestFromToolDetails(details, cap)).slice(0, cap);
         const common = {
             aspect: subAgentConfig.name,
             ...(result.stoppedBy ? { stopped_by: result.stoppedBy } : {}),

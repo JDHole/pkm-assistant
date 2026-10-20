@@ -557,6 +557,21 @@ test('depth: sub-agent (depth 1) NIE deleguje dalej przy limicie 1', async t => 
     t.is(runs.length, 0, 'ZERO odpalonych subów');
 });
 
+test('delegate partial_result prefers handoff and falls back to run text or tool digest', async t => {
+    const outcome = { end: { kind: 'limit', reason: 'iteration-limit' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] } as RunOutcome;
+    const { plugin } = pluginForGuards([]);
+    const execute = async (result: Record<string, unknown>) => {
+        const tool = createDelegateTool({}, { makeRunner: () => ({ runTask: async () => result }) as never });
+        return await tool.execute({ task: 'work', timeout_ms: 200, background: false }, {}, plugin as unknown as DelegatePlugin) as unknown as Record<string, unknown>;
+    };
+    const preferred = await execute({ result: 'runner text', handoff: 'ordered handoff', toolsUsed: [], toolCallDetails: [], duration: 1, usage: null, outcome });
+    t.is(preferred.partial_result, 'ordered handoff');
+    const fallbackText = await execute({ result: 'runner text', toolsUsed: [], toolCallDetails: [], duration: 1, usage: null, outcome });
+    t.is(fallbackText.partial_result, 'runner text');
+    const fallbackDigest = await execute({ result: '', toolsUsed: [], toolCallDetails: [{ name: 'read', resultPreview: 'preview' }], duration: 1, usage: null, outcome });
+    t.is(fallbackDigest.partial_result, '### read ""\npreview');
+});
+
 test('depth: z głębokości 0 sub startuje, a runner dostaje delegationDepth 1', async t => {
     const runs: RunRow[] = [];
     const { plugin, makeRunner } = pluginForGuards(runs);
@@ -1984,6 +1999,21 @@ test('timeout biegu przez publiczne API zachowuje outcome i partial_result', asy
         note: tr('mcp.delegate.outcome_note'),
         tools_used: ['write'], duration_ms: 35, tool_call_details: [],
     });
+});
+
+test('timeout biegu przez publiczne API wybiera handoff przed tekstem', async t => {
+    const tool = createDelegateTool({}, { makeRunner: () => ({ runTask: async () => {
+        await new Promise(resolve => setTimeout(resolve, 35));
+        return { result: 'runner text', handoff: 'ordered handoff', toolsUsed: ['read'],
+            toolCallDetails: [{ name: 'read', resultPreview: 'preview' }], duration: 35,
+            usage: null, stoppedBy: 'backstop', outcome: partialOutcome };
+    } }) });
+    const out = await tool.execute({ task: 'x', timeout_ms: 10, background: false }, {}, pluginDlaZejscia()) as Record<string, unknown>;
+    t.is(out.success, false);
+    t.is(out.stopped_by, 'timeout');
+    t.is(out.partial_result, 'ordered handoff');
+    t.deepEqual(out.outcome, { end: { kind: 'limit', reason: 'iteration-limit' },
+        completeness: 'partial', hasAnswer: false, hasMaterial: true });
 });
 
 test('bieg bez tekstu — partial_result budowany z tool_call_details', async t => {
