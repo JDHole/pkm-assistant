@@ -189,3 +189,7 @@ Widok wiesza swoje odpięcia na `nav._currentCleanup` (np. Komunikator: `agentMa
 - `modules/chat` - nie importuje z shella; shell renderuje sidebar, z którego chat się otwiera
 - `modules/agents` - sidebar renderuje agent grid + `AgentProfileView` (panel wielozakładkowy), modale `AgentDelete` (guard wbudowanego agenta) / `Presentation`
 - `modules/crystal-soul` - sidebar i settings używają `UiIcons` / `CrystalGenerator` / `pickColor` / palety kolorów
+
+### Okno zgody dla delegacji
+
+Dla `delegate` opis zgody pokazuje aspekt sub-agenta albo ogólnego workera oraz zadanie skrócone do 80 znaków. Podgląd zawiera treść zadania do 500 znaków. Dla `sub_agent` akcje task i message wskazują sub-agenta i pokazują treść do 500 znaków. Pozostałe akcje mają ogólny opis z nazwą akcji.

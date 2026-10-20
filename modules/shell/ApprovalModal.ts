@@ -44,6 +44,11 @@ interface ApprovalActionDetails extends ApprovalAction {
     externalServer?: string;
     externalArgs?: unknown;
     imagePrompt?: string;
+    delegateTask?: string;
+    delegateAspect?: string;
+    subAgentId?: string;
+    subAgentAction?: string;
+    subAgentText?: string;
 }
 
 export class ApprovalModal extends Modal {
@@ -323,8 +328,29 @@ export class ApprovalModal extends Modal {
             }
             default:
                 // Group B tools
-                if (a.toolName === 'delegate')
-                    return t('approval.desc.delegate', { name, task: a.targetPath || t('approval.fallback.task') });
+                if (a.toolName === 'delegate') {
+                    const task = typeof a.delegateTask === 'string' ? a.delegateTask : '';
+                    if (!task) return t('approval.desc.delegate', { name, task: a.targetPath || t('approval.fallback.task') });
+                    const shortTask = task.length > 80 ? task.slice(0, 80) + '...' : task;
+                    const aspect = typeof a.delegateAspect === 'string' ? a.delegateAspect : '';
+                    if (aspect) return t('approval.desc.delegate_aspect', { name, aspect, task: shortTask });
+                    return t('approval.desc.delegate_worker', {
+                        name, worker: t('approval.fallback.worker'), task: shortTask,
+                    });
+                }
+                if (a.toolName === 'sub_agent') {
+                    const action = typeof a.subAgentAction === 'string' && a.subAgentAction
+                        ? a.subAgentAction : a.toolName;
+                    const subAgentId = typeof a.subAgentId === 'string' && a.subAgentId
+                        ? a.subAgentId : t('approval.fallback.sub_agent');
+                    if (action === 'task' && typeof a.subAgentId === 'string' && a.subAgentId) {
+                        return t('approval.desc.sub_agent_task', { name, subAgentId });
+                    }
+                    if (action === 'message' && typeof a.subAgentId === 'string' && a.subAgentId) {
+                        return t('approval.desc.sub_agent_message', { name, subAgentId });
+                    }
+                    return t('approval.desc.sub_agent_other', { name, action });
+                }
                 if (a.toolName === 'connect_to_server')
                     return t('approval.desc.connect_to_server', { name, server: a.serverName || a.targetPath || t('approval.fallback.server') });
                 if (a.toolName === 'skill_execute')
@@ -400,10 +426,29 @@ export class ApprovalModal extends Modal {
 
     _renderContentPreview(contentEl: HTMLElement): void {
         const a = this.action;
+        const delegateTask = typeof a.delegateTask === 'string' ? a.delegateTask : null;
+        const subAgentText = typeof a.subAgentText === 'string' ? a.subAgentText : null;
 
         if (a.type === 'external.call') {
             // Zewnętrzny serwer MCP - zamiast ogólnego preview pokazujemy pełne argumenty.
             this._renderExternalArgs(contentEl);
+        } else if (a.toolName === 'delegate' && delegateTask !== null) {
+            const previewSection = contentEl.createDiv('approval-preview');
+            previewSection.createEl('h4', { text: t('approval.preview.delegate_task') });
+            const truncated = delegateTask.length > 500
+                ? delegateTask.slice(0, 500) + '\n' + t('approval.preview.truncated')
+                : delegateTask;
+            previewSection.createEl('pre', { cls: 'approval-content-preview' }).createEl('code', { text: truncated });
+        } else if (a.toolName === 'sub_agent' && (a.subAgentAction === 'task' || a.subAgentAction === 'message') && subAgentText !== null) {
+            const previewSection = contentEl.createDiv('approval-preview');
+            const label = a.subAgentAction === 'task'
+                ? t('approval.preview.sub_agent_task')
+                : t('approval.preview.message_content');
+            previewSection.createEl('h4', { text: label });
+            const truncated = subAgentText.length > 500
+                ? subAgentText.slice(0, 500) + '\n' + t('approval.preview.truncated')
+                : subAgentText;
+            previewSection.createEl('pre', { cls: 'approval-content-preview' }).createEl('code', { text: truncated });
         } else if (a.type === 'agent.message' && a.messageContent) {
             // Message preview
             const previewSection = contentEl.createDiv('approval-preview');
