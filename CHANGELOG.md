@@ -33,6 +33,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Background sub-agent results tell the model which reusable sub ID can receive a follow-up task.
 - Approval prompts for delegation now show the sub-agent and task, with a bounded task preview.
 - Approval prompts for sub-agent tasks and messages now show the target sub-agent and submitted text.
+- Chat now renders blocking `sub_agent` tasks as sub-agent result tiles and other thread actions as status-aware tool chips.
 
 ### Changed
 

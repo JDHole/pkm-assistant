@@ -108,6 +108,7 @@ export const TOOL_INFO = {
     skill_list:      _toolEntry(() => UiIcons.zap(14), 'skill_list'),
     skill_execute:   _toolEntry(() => UiIcons.zap(14), 'skill_execute'),
     delegate:        _toolEntry(() => UiIcons.robot(14), 'delegate'),
+    sub_agent:       _toolEntry(() => UiIcons.robot(14), 'sub_agent'),
     connect_to_server: _toolEntry(() => UiIcons.zap(14), 'connect_to_server'),
     // Backward compat
     minion_task:     _toolEntry(() => UiIcons.robot(14), 'minion_task'),
@@ -178,6 +179,8 @@ interface ToolInputPayload {
     description?: string;
     server?: string;
     skill_name?: string;
+    action?: string;
+    sub_id?: string;
     name?: string;
     to?: string;
     to_agent?: string;
@@ -185,7 +188,6 @@ interface ToolInputPayload {
     agent?: string;
     id?: string;
     fact?: string;
-    action?: string;
     question?: string;
     content?: string;
     limit?: number;
@@ -241,6 +243,8 @@ function formatToolInputHint(toolName: string, input: unknown): string {
                 return data.path || '';
             case 'delegate':
                 return _truncate(data.task || data.description || '', 80);
+            case 'sub_agent':
+                return t('tool.in.sub_agent', { action: data.action || '?', sub_id: data.sub_id || '' });
             case 'connect_to_server':
                 return data.server || t('tool.in.catalog');
             case 'minion_task':
@@ -330,6 +334,8 @@ function formatToolInputDetail(toolName: string, input: unknown) {
             }
             case 'delegate':
                 return data.task || data.description || '';
+            case 'sub_agent':
+                return t('tool.in.sub_agent', { action: data.action || '?', sub_id: data.sub_id || '' });
             case 'connect_to_server':
                 return data.server || t('tool.in.server_catalog');
             case 'minion_task':
@@ -823,6 +829,11 @@ export function describeToolCall(name: string, input: unknown): string {
                 return t('chat.tile.tool.todo');
             case 'ask_user':
                 return t('chat.tile.tool.ask_user');
+            case 'sub_agent': {
+                const action = typeof data.action === 'string' ? data.action : '?';
+                const subId = typeof data.sub_id === 'string' ? data.sub_id : '';
+                return t('tool.in.sub_agent', { action, sub_id: subId });
+            }
             default:
                 return t('chat.tile.tool.generic', { name: getToolCallLabel(name) });
         }

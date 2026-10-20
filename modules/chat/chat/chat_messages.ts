@@ -15,6 +15,7 @@ import {
 } from '../../ui-components/index.js';
 import { t, getDateLocale } from '../../../core/i18n/index.js';
 import { buildDelegateBlockOptions } from './delegateBlockView.js';
+import { subAgentCallView } from './subAgentCallView.js';
 import { registerUrlsFromText } from '../../web/index.js';
 import { registerUrlsIfHuman } from './messagePrivileges.js';
 // Historia liczy status narzędzia TĄ SAMĄ regułą co żywa tura (chat_streaming).
@@ -52,6 +53,7 @@ type MessageContent = string | ContentBlock[];
  * nie tutaj (dawne `unknown[]`/`unknown` nie przechodziły do jego wymaganych pól).
  */
 interface HistoryToolOutput {
+    [key: string]: unknown;
     result?: string;
     error?: string;
     tools_used?: string[];
@@ -63,6 +65,8 @@ interface HistoryToolOutput {
     started?: boolean;
     task_id?: string;
     name?: string;
+    aspect?: string;
+    sub_id?: string;
     tasks?: Array<{ task_id?: string; name?: string }>;
     queued?: number;
 }
@@ -71,6 +75,7 @@ interface HistoryToolOutput {
 interface DelegateArgs {
     task?: string;
     aspect?: string;
+    action?: string;
 }
 interface TrimInfo {
     trimmed: number;
@@ -239,16 +244,16 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                             break;
                         }
                     }
-                    const isSubAgent = tcName === 'delegate';
+                    const _hArgs = (typeof tcArgs === 'string'
+                        ? (() => { try { return JSON.parse(tcArgs) as DelegateArgs; } catch { return {}; } })()
+                        : (tcArgs || {})) as DelegateArgs;
+                    const historyOutput = (typeof tcOutput === 'object' && tcOutput) ? tcOutput : null;
+                    const isSubAgent = subAgentCallView(tcName, _hArgs, historyOutput, 'result') === 'block';
                     if (isSubAgent) {
-                        // TS-boundary: argumenty wywołania `delegate` odtworzone z historii —
-                        // string JSON albo już sparsowany obiekt, zależnie od dostawcy.
-                        const _hArgs = (typeof tcArgs === 'string'
-                            ? (() => { try { return JSON.parse(tcArgs) as DelegateArgs; } catch { return {}; } })()
-                            : (tcArgs || {})) as DelegateArgs;
                         const taskQuery = _hArgs.task || '';
-                        const _hName = _hArgs.aspect || '';
-                        const historyOutput = (typeof tcOutput === 'object' && tcOutput) ? tcOutput : null;
+                        const _hName = tcName === 'sub_agent'
+                            ? historyOutput?.name || historyOutput?.aspect || historyOutput?.sub_id || ''
+                            : historyOutput?.name || historyOutput?.aspect || _hArgs.aspect || historyOutput?.sub_id || '';
                         let block: HTMLElement;
                         if (historyOutput && historyOutput.started === true) {
                             // Uwaga 10 (spec A2-fix): delegacja zlecona w TLE, odtworzona z
@@ -263,7 +268,7 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                                 type: tcName,
                                 pending: true,
                                 status: 'success',
-                                agentName: startedList.length > 1 ? '' : (startedList[0]?.name || _hName || ''),
+                                agentName: startedList.length > 1 ? '' : (startedList[0]?.name || _hName),
                                 query: taskQuery,
                                 response: buildBackgroundReceiptText(startedList, historyOutput.queued),
                             });
