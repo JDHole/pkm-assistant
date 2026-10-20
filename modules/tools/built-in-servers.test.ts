@@ -93,7 +93,7 @@ test('komunikator manifest has the three mail primitives (no Project Hub)', t =>
 
 test('delegation manifest no longer carries agent_message', t => {
     const delegation = getBuiltinManifest('delegation')!;
-    t.deepEqual(delegation.tools, ['delegate', 'agent_delegate']);
+    t.deepEqual(delegation.tools, ['delegate', 'sub_agent', 'agent_delegate']);
 });
 
 test('resolveBuiltinManifests: komunikatorEnabled=false drops the komunikator server (kill-switch)', t => {

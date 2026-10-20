@@ -35,7 +35,7 @@ export const BUILTIN_TOOL_GROUPS: Record<string, string[]> = {
     web: ['web_search', 'web_read'],
     multimodal: ['generate_image', 'add_text_to_image'],
     // `agent_message` OUT z delegacji - pocztę obsługuje grupa `komunikator`.
-    delegation: ['delegate', 'agent_delegate'],
+    delegation: ['delegate', 'sub_agent', 'agent_delegate'],
     artifacts: ['artifact_create', 'artifact_read', 'artifact_update', 'artifact_list', 'todo'],
     // Trzy prymitywy poczty zamiast 13 narzędzi Project Huba.
     komunikator: ['kom_send', 'kom_list', 'kom_read'],
@@ -110,6 +110,7 @@ const PERMISSION_TOOL_GATES: Record<string, string> = {
     web_read: 'web_search',
     // delegacja (dawne action 'delegate' → PERMISSION mcp)
     delegate: 'mcp',
+    sub_agent: 'mcp',
     agent_delegate: 'mcp',
     // generowanie obrazu (dawne EDIT_NOTES). `agent_message` skreślony stąd - `permissionAllowsTool`
     // jest wołane WYŁĄCZNIE dla narzędzi z `BUILTIN_TOOL_GROUPS` (pętla w

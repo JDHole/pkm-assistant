@@ -51,6 +51,7 @@ const EXPECTED: Record<string, ToolRiskLevel> = {
     add_text_to_image: TOOL_RISK_LEVELS.YELLOW,
     // delegation
     delegate: TOOL_RISK_LEVELS.YELLOW,
+    sub_agent: TOOL_RISK_LEVELS.RED, // brak operationMode jest fail-closed
     agent_delegate: TOOL_RISK_LEVELS.YELLOW,
     // komunikator
     kom_send: TOOL_RISK_LEVELS.YELLOW,

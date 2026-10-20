@@ -143,6 +143,15 @@ test('getBuiltinServerForTool: maps tool to built-in server', t => {
     t.is(r.getBuiltinServerForTool('nonexistent_tool'), null);
 });
 
+test('delegation group disables sub_agent visibility and execution', t => {
+    const registry = new ToolRegistry();
+    registry.registerTool(makeTool('sub_agent'));
+    const agent = { name: 'Mira', disabled_tools: ['sub_agent'], mcp_servers: [] };
+    t.false(registry.filterByAgent(agent).some(tool => tool.name === 'sub_agent'));
+    t.false(registry.checkToolAxis(agent, 'sub_agent').allowed);
+    t.is(registry.getBuiltinServerForTool('sub_agent'), 'delegation');
+});
+
 test('getBuiltinServerMap: returns the full map with all expected servers', t => {
     const r = new ToolRegistry();
     const map = r.getBuiltinServerMap();
