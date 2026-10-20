@@ -36,9 +36,10 @@ import type { ActiveSessionEventInput, ActiveSessionInfo } from '../../memory/in
  */
 interface RestoredSession {
     agentName: string;
-    session: { path: string; name?: string; label?: string; mtime?: number };
+    session: { path: string; name?: string; label?: string; mtime?: number; epoch?: string | null };
     rollingWindow: RollingWindow;
     tokenTracker: TokenTracker;
+    sessionEpoch: string | null;
 }
 
 /**
@@ -227,9 +228,10 @@ export async function _restoreActiveSession(this: ChatViewLike) {
 
                 restored.push({
                     agentName,
-                    session,
+                    session: { ...session, epoch: typeof parsed.metadata.epoch === 'string' ? parsed.metadata.epoch : null },
                     rollingWindow,
-                    tokenTracker: new TokenTracker()
+                    tokenTracker: new TokenTracker(),
+                    sessionEpoch: typeof parsed.metadata.epoch === 'string' ? parsed.metadata.epoch : null,
                 });
             }
         }
@@ -259,7 +261,8 @@ export async function _restoreActiveSession(this: ChatViewLike) {
                     label: activeAgentName
                 },
                 rollingWindow,
-                tokenTracker: new TokenTracker()
+                tokenTracker: new TokenTracker(),
+                sessionEpoch: typeof parsed.metadata.epoch === 'string' ? parsed.metadata.epoch : null,
             });
         }
 
@@ -276,6 +279,7 @@ export async function _restoreActiveSession(this: ChatViewLike) {
             sessionPath: item.session.path,
             sessionName: item.session.name,
             sessionLabel: item.session.label,
+            sessionEpoch: item.sessionEpoch,
             isActive: index === 0
         }));
         this._agentStates.clear();
@@ -293,14 +297,18 @@ export async function _restoreActiveSession(this: ChatViewLike) {
                 isGenerating: false
             });
             const memory = agentManager.getAgentMemory?.(item.agentName);
-            if (memory && item.session.path) memory.activeSessionPath = item.session.path;
+            if (memory && item.session.path) {
+                memory.setActiveSessionIdentity?.(item.session.path, item.sessionEpoch);
+                if (!memory.setActiveSessionIdentity) memory.activeSessionPath = item.session.path;
+            }
         });
 
         const active = restored[0];
         agentManager.switchAgent?.(active.agentName);
         const activeMemory = agentManager.getAgentMemory?.(active.agentName);
         if (activeMemory && active.session.path) {
-            activeMemory.activeSessionPath = active.session.path;
+            activeMemory.setActiveSessionIdentity?.(active.session.path, active.sessionEpoch);
+            if (!activeMemory.setActiveSessionIdentity) activeMemory.activeSessionPath = active.session.path;
             await activeMemory._persistActiveSession?.();
         }
         this.rollingWindow = active.rollingWindow;
@@ -428,6 +436,21 @@ export async function handleNewSession(this: ChatViewLike) {
     const agentMemory = this.plugin?.agentManager?.getActiveMemory();
     if (agentMemory) {
         await agentMemory.startNewSession();
+    }
+
+    const activeTab = this.chatTabs?.find((tab) => tab.isActive);
+    if (activeTab) {
+        const previousKey = _tabKey(activeTab);
+        activeTab.sessionPath = undefined;
+        activeTab.sessionEpoch = null;
+        activeTab.sessionId = undefined;
+        activeTab.sessionName = undefined;
+        activeTab.sessionLabel = undefined;
+        const state = this._agentStates?.get(previousKey);
+        if (state && this._agentStates) {
+            this._agentStates.delete(previousKey);
+            this._agentStates.set(_tabKey(activeTab), state);
+        }
     }
 
     this.rollingWindow = this._createRollingWindow();

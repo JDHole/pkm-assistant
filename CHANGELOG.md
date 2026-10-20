@@ -9,6 +9,9 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Active chat sessions now store a validated random epoch in their frontmatter without migrating older files.
+- Chat turns now carry the session epoch and a trusted user or machine turn kind to tool execution.
+- Background sub-agent results with a session epoch return only to a tab with the same session path and epoch.
 - Sub-agent threads can continue within the same session, with frozen permissions, bounded transcripts, and lifecycle events.
 - Sub-agent thread limits (runs per thread, transcript size, idle time, idle threads per session, context token budget) are configurable.
 - Sub-agents hide delegation tools and receive a self-execution instruction at the configured depth limit.

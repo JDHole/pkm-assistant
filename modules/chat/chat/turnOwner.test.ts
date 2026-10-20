@@ -10,6 +10,9 @@ import {
     freezeTurnOwner,
     isOwnerTabActive,
 } from './turnOwner.js';
+import { _switchTab } from './chat_tabs.js';
+import { AgentMemory } from '../../memory/index.js';
+import { RollingWindow } from './RollingWindow.js';
 
 // TS-any: atrapy runtime'u (AgentManager/AgentMemory/ChatView).
 type Runtime = any;
@@ -104,6 +107,38 @@ test('resolveOwnerMemory: znana nazwa NIE spada na getActiveMemory', t => {
     // Agent bez wpisu w agentMemories → odmowa, a nie cudzy katalog.
     t.is(resolveOwnerMemory(manager, 'Nieznany'), null);
     t.is(resolveOwnerMemory(manager, null)?.agentName, 'B', 'brak nazwy = stare zachowanie');
+});
+
+test('freezeTurnOwner po rzeczywistym przełączeniu zakładki bierze epokę nowej sesji', async t => {
+    const memory = new AgentMemory({ adapter: { write: async () => {} } } as never, 'A');
+    memory.setActiveSessionIdentity('sessions/old.md', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    const agent = { name: 'A' };
+    const tabs: Array<{ agentName: string; sessionId: string; sessionPath: string; sessionEpoch: string | null; isActive: boolean }> = [
+        { agentName: 'A', sessionId: 'old', sessionPath: 'sessions/old.md', sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', isActive: true },
+        { agentName: 'A', sessionId: 'new', sessionPath: 'sessions/new.md', sessionEpoch: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', isActive: false },
+        { agentName: 'A', sessionId: 'legacy', sessionPath: 'sessions/legacy.md', sessionEpoch: null, isActive: false },
+    ];
+    const view: Runtime = {
+        plugin: { agentManager: {
+            getActiveAgent: () => agent, getAgentMemory: () => memory, switchAgent: () => {},
+        } },
+        chatTabs: tabs, _agentStates: new Map(), rollingWindow: new RollingWindow(), tokenTracker: {},
+        currentAutonomy: 'edge', is_generating: false,
+        _getDefaultAutonomy: () => 'edge', _createRollingWindow: () => new RollingWindow(),
+        set_generating: () => {}, _updateAutonomyButton: () => {}, updatePermissionsBadge: () => {},
+        renderSkillButtons: () => {}, updateTokenCounter: () => {}, _updateTokenPanel: () => {},
+        _getAgentRgb: () => '0, 0, 0', render_messages: async () => {}, add_welcome_message: () => {},
+    };
+    t.is(freezeTurnOwner(view).sessionEpoch, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    await _switchTab.call(view, 'new');
+    t.is(freezeTurnOwner(view).sessionPath, 'sessions/new.md');
+    t.is(freezeTurnOwner(view).sessionEpoch, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    t.is(memory.sessionEpoch, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+
+    await _switchTab.call(view, 'legacy');
+    t.is(freezeTurnOwner(view).sessionPath, 'sessions/legacy.md');
+    t.is(freezeTurnOwner(view).sessionEpoch, null);
+    t.is(memory.sessionEpoch, null);
 });
 
 test('resolveOwnerAgent: znana nazwa NIE spada na getActiveAgent', t => {

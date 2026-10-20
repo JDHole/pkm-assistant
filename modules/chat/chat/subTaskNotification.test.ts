@@ -126,6 +126,19 @@ test('tabKey z originu wygrywa — trafia w konkretną zakładkę, nie w pierwsz
     t.is(hit?.sessionId, 'sesja-B');
 });
 
+test('epoka wymaga zgodności także przy tabKey i wybiera zakładkę tej samej sesji', t => {
+    const tabs = [
+        { agentName: 'Jaskier', sessionId: 'wrong-epoch', sessionPath: 'active/x.md', sessionEpoch: 'bbbb' },
+        { agentName: 'Jaskier', sessionId: 'right-epoch', sessionPath: 'active/x.md', sessionEpoch: 'aaaa' },
+    ];
+    const origin = { agentName: 'Jaskier', sessionPath: 'active/x.md', sessionEpoch: 'aaaa', tabKey: 'wrong-epoch' };
+    const hit = matchTabForOrigin(tabs, origin, tabKeyFn, tab => tab.sessionPath, tab => tab.sessionEpoch);
+    t.is(hit?.sessionId, 'right-epoch');
+    const staleOnly = [tabs[0]!];
+    t.is(matchTabForOrigin(staleOnly, origin, tabKeyFn, tab => tab.sessionPath, tab => tab.sessionEpoch), null);
+    t.is(matchTabForOrigin(tabs, { ...origin, sessionPath: undefined }, tabKeyFn, tab => tab.sessionPath, tab => tab.sessionEpoch), null);
+});
+
 test('nieznany tabKey → fallback na pierwszą zakładkę tego agenta', t => {
     const tabs = [
         { agentName: 'Borys', sessionId: 'sesja-D' },

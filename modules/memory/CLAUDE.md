@@ -343,6 +343,17 @@ produkcji plik po pierwszym autozapisie bywał mieszanką obu), `KNOWN_ROLES`, `
 escape/unescape stąd - jedno źródło pary regexów, kierunek `sessionParser -> activeSessionFormat`,
 bez cyklu.
 
+Nowy plik `sessions/active/` zapisuje `epoch` jako 32 znaki hex z 16 losowych bajtów
+`crypto.getRandomValues`. `parseFrontmatter` i `parseActiveSession` zwracają ją jako
+tekst po dokładnej walidacji; brakująca lub nieprawidłowa wartość daje `null`. Odczyt starych
+plików bez `epoch` nie dopisuje pola ani nie migruje treści. `AgentMemory.sessionEpoch` jest
+zsynchronizowane z `activeSessionPath`; bezpośrednia zmiana ścieżki zeruje epokę, a
+`setActiveSessionIdentity(path, epoch)` wiąże ścieżkę z wartością potwierdzoną z pliku.
+Tworzenie przez `startActiveSession`, samonaprawa i osobna droga `saveSession` zapisują epokę.
+Jeśli `saveSession` czeka na odczyt lub zapis, późniejsza zmiana tożsamości pamięci
+blokuje przypisanie epoki zapisywanego pliku do innej sesji, także przy ponownym użyciu
+tej samej ścieżki.
+
 **Format v3 (2026-09): pola `**tool_call_id:**`/`**tool_calls:**` - round-trip narzędzi
 przez restart Obsidiana.** Bug: po restarcie pluginu odtworzona sesja gubiła
 `tool_call_id` KAŻDEGO wyniku narzędzia (log `sanitizeToolTranscript`:

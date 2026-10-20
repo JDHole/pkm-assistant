@@ -600,6 +600,8 @@ export function parseFrontmatter(content: string): SessionFrontmatter {
         }
     }
     delete result._lastKey;
+    const epoch = result.epoch;
+    result.epoch = typeof epoch === 'string' && /^[0-9a-f]{32}$/.test(epoch) ? epoch : null;
     return result;
 }
 

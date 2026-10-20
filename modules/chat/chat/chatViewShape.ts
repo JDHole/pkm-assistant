@@ -211,6 +211,7 @@ export interface ChatTab {
     isActive: boolean;
     sessionId?: string;
     sessionPath?: string;
+    sessionEpoch?: string | null;
     sessionName?: string;
     sessionLabel?: string;
     /** Tura skończyła się, gdy zakładka była w tle — przerysuj po powrocie. */

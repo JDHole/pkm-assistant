@@ -251,6 +251,8 @@ export interface FrozenTurnOwner {
     memory: OwnerMemoryLike;
     /** Ścieżka aktywnej sesji właściciela w chwili startu tury (adres zwrotny + label trace). */
     sessionPath: string;
+    /** Epoka potwierdzona synchronicznie dla tej ścieżki. */
+    sessionEpoch: string | null;
     /** Zakładka, z której wyszła tura (adres zwrotny delegacji w tle). */
     tab: OwnerTabLike | null;
     /** Autonomia tej zakładki — polityka „czy pytać" dla egzekutora narzędzi. */
@@ -285,6 +287,7 @@ export function freezeTurnOwner(view: FreezeViewLike): FrozenTurnOwner {
         tokenTracker: view?.tokenTracker ?? null,
         memory,
         sessionPath: memory?.activeSessionPath || '',
+        sessionEpoch: memory?.sessionEpoch ?? null,
         tab: tabs.find((tab) => tab?.isActive) || null,
         autonomy: view?.currentAutonomy,
         artifactId: view?.currentArtifactId ?? null,

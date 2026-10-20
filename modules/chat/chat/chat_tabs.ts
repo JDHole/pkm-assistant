@@ -134,8 +134,11 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
     if (agentManager) {
         agentManager.switchAgent(agentName);
         const memory = agentManager.getAgentMemory?.(agentName);
+        if (memory) {
+            memory.setActiveSessionIdentity?.(targetTab.sessionPath || null, targetTab.sessionEpoch ?? null);
+            if (!memory.setActiveSessionIdentity) memory.activeSessionPath = targetTab.sessionPath || null;
+        }
         if (memory && targetTab.sessionPath) {
-            memory.activeSessionPath = targetTab.sessionPath;
             await memory._persistActiveSession?.();
         }
     }

@@ -181,7 +181,9 @@ export interface ExecuteToolCallOptions {
      * podaje go wołacz (faza B: czat), a tu jest tylko wstrzykiwany do args jako
      * `_invocationOrigin`, tym samym wzorem co `_invocationAgentName`.
      */
-    origin?: { agentName: string; sessionPath?: string; tabKey?: string } | null;
+    origin?: { agentName: string; sessionPath?: string; sessionEpoch?: string | null; tabKey?: string } | null;
+    /** Zaufany rodzaj bieżącej tury. */
+    turnKind?: 'user' | 'machine';
     /**
      * Whitelista narzędzi WOŁAJĄCEGO (dla biegu suba - jego
      * przecięcie rodzic∩sub). Klient jej nie interpretuje: wstrzykuje ją do args jako
@@ -859,6 +861,11 @@ export class MCPClient {
             // zawsze w tle, więc `plugin.currentAutonomy` zmienia się pod nim przy każdym
             // przełączeniu zakładki. Zawsze NADPISYWANE (model nie podniesie sobie uprawnień).
             argsWithContext._invocationAutonomy = autonomy;
+            if (opts.turnKind === 'user' || opts.turnKind === 'machine') {
+                argsWithContext._invocationTurnKind = opts.turnKind;
+            } else {
+                delete argsWithContext._invocationTurnKind;
+            }
             // Zakres folderów i whitelista narzędzi WOŁAJĄCEGO -
             // ten sam wzorzec zaufanego znacznika. Czyta je `delegate`, żeby dziecko dostało
             // PRZECIĘCIE (nigdy szerzej niż ma sub zlecający). Brak = pole USUWANE, bo model

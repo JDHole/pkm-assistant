@@ -17,12 +17,14 @@ import { t } from '../../../core/i18n/index.js';
 import { DEFAULT_LIMITS } from '../../../config/limits.js';
 import type { SubTask, SubTaskOrigin } from '../../sub-agents/index.js';
 
+
 /** Minimalny kształt zakładki, jakiego potrzebuje dopasowanie (czat ma na niej więcej pól). */
 // Nie eksportowany - brak referencji spoza tego pliku (tu i na obu typach niżej).
 /** Zakladka w zakresie, jakiego dotyka dopasowanie adresu zwrotnego. */
 interface TabLike {
     agentName?: string;
     sessionPath?: string;
+    sessionEpoch?: string | null;
 }
 
 interface SubTaskNotificationOptions {
@@ -174,16 +176,26 @@ export function matchTabForOrigin<T extends TabLike>(
     origin: SubTaskOrigin | null | undefined,
     tabKeyFn: (tab: T) => string,
     sessionPathFn: (tab: T) => string | undefined = (tab) => tab.sessionPath,
+    sessionEpochFn: (tab: T) => string | null | undefined = (tab) => tab.sessionEpoch,
 ): T | null {
     if (!Array.isArray(tabs) || tabs.length === 0) return null;
 
     const tabKey = origin?.tabKey;
+    const originEpoch = origin?.sessionEpoch;
+    const hasOriginEpoch = originEpoch !== null && originEpoch !== undefined;
+    const matchesSession = (tab: T) => tab?.agentName === origin?.agentName
+        && sessionPathFn(tab) === origin?.sessionPath
+        && (!hasOriginEpoch || sessionEpochFn(tab) === originEpoch);
     if (tabKey) {
         const byKey = tabs.find((tab) => tabKeyFn(tab) === tabKey);
-        if (byKey) return byKey;
+        if (byKey && (!hasOriginEpoch || matchesSession(byKey))) return byKey;
     }
 
+    // Epoka jest identyfikatorem sesji tylko razem ze ścieżką; brak drugiego składnika
+    // oznacza nieznany adres zwrotny, więc wynik pozostaje w kolejce.
+    if (hasOriginEpoch && !origin?.sessionPath) return null;
     if (origin?.sessionPath) {
+        if (hasOriginEpoch) return tabs.find(matchesSession) || null;
         return tabs.find((tab) => tab?.agentName === origin.agentName && sessionPathFn(tab) === origin.sessionPath) || null;
     }
     const agentName = origin?.agentName;

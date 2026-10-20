@@ -96,12 +96,12 @@ test('execute routes to client.callTool with un-prefixed name, per-call timeout,
     await mgr.connect({ id: 'blender', name: 'Blender', transport: 'stdio', command: 'x' });
 
     const tool = registry.getTool('blender__render');
-    const result = await tool!.execute({ code: 'print(1)', _invocationAgentName: 'Jaskier' });
+    const result = await tool!.execute({ code: 'print(1)', _invocationAgentName: 'Jaskier', _invocationTurnKind: 'user' });
 
     t.is(calls.callTool.length, 1);
     const call = calls.callTool[0];
     t.is(call.params.name, 'render', 'tool name un-prefixed on the wire');
-    t.deepEqual(call.params.arguments, { code: 'print(1)' }, '_invocationAgentName stripped, not leaked to external server');
+    t.deepEqual(call.params.arguments, { code: 'print(1)' }, '_invocationTurnKind and other internal fields are stripped before external MCP');
     t.is(call.opts!.timeout, 60000, 'resolveTimeoutMs default (60s)');
     // execute normalizuje wynik do czystego tekstu (model nie dostaje surowego content[]).
     t.is(result, 'done');
@@ -443,6 +443,7 @@ test('_stripInternal wycina WSZYSTKIE znaczniki _invocation* i nie rusza reszty'
         code: 'print(1)',
         _invocationAgentName: 'Jaskier',
         _invocationDelegationDepth: 2,
+        _invocationTurnKind: 'user',
         _invocationFutureMarker: 'whatever',
         nested: { _invocationAgentName: 'keep — filtr jest płytki z założenia' },
         _underscoreButNotInvocation: 'zostaje',

@@ -159,6 +159,7 @@ interface ChatTurn {
     abort: TurnAbortHandle;
     partial?: ChatTurnPartialState;
     origin: SubTaskOrigin;
+    turnKind: 'user' | 'machine';
     rw: RollingWindow;
     tt: TokenTracker;
     chatModel: ChatModel;
@@ -257,6 +258,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     // Proweniencja liczona RAZ i doklejana do meta wiadomości - dalej pytamy już tylko o nią.
     const messageOrigin = resolveMessageOrigin(opts?.meta);
     const isHuman = messageOrigin === 'human';
+    const turnKind = messageOrigin === 'human' ? 'user' : 'machine';
     const rawMeta = opts?.meta && typeof opts.meta === 'object' ? opts.meta : {};
     const messageMeta = { ...rawMeta, origin: messageOrigin };
 
@@ -436,7 +438,23 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     // nie wie. `_preparingTurns` to skrzynka kontaktowa na ten czas.
     const turnAbort = createTurnAbort();
     this._preparingTurns.set(owner.agentName, turnAbort);
+    const ownerTabSessionPath = owner.tab?.sessionPath;
+    const ownerTabSessionEpoch = owner.tab?.sessionEpoch ?? null;
     const turnSessionPath = owner.sessionPath || (owner.memory ? await owner.memory.startActiveSession(owner.agentName).catch(() => '') : '');
+    const turnSessionEpoch = owner.sessionPath === turnSessionPath
+        ? owner.sessionEpoch
+        : (owner.memory?.activeSessionPath === turnSessionPath ? owner.memory.sessionEpoch ?? null : null);
+    if (turnSessionPath && owner.tab && owner.memory?.activeSessionPath === turnSessionPath
+        && (owner.memory.sessionEpoch ?? null) === turnSessionEpoch
+        && owner.tab.sessionPath === ownerTabSessionPath
+        && (owner.tab.sessionEpoch ?? null) === ownerTabSessionEpoch
+        && _tabKey(owner.tab) === ownerTabKey) {
+        // Po Nowej sesji klucz stanu to agentName, a sessionId jest pusty.
+        // Zachowaj ten klucz, zanim sessionPath zmieni wynik _tabKey w trakcie tury.
+        if (!owner.tab.sessionId) owner.tab.sessionId = ownerTabKey;
+        owner.tab.sessionPath = turnSessionPath;
+        owner.tab.sessionEpoch = turnSessionEpoch;
+    }
 
     // Toggle UI state + show immediate visual feedback
     this.set_generating(true);
@@ -603,6 +621,8 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         const turnOrigin = {
             agentName: streamAgentName,
             ...(turnSessionPath ? { sessionPath: turnSessionPath } : {}),
+            // Nieznana epoka = brak pola (jak w `SubTaskOrigin`), nigdy `null`.
+            ...(turnSessionEpoch ? { sessionEpoch: turnSessionEpoch } : {}),
             ...(ownerTabKey ? { tabKey: ownerTabKey } : {}),
         };
 
@@ -614,6 +634,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
             turnId,                      // tożsamość tury (patrz _streamCtxMap wyżej)
             abort: turnAbort,            // przerwanie TEJ tury (zatrzask, patrz turnAbort.ts)
             origin: turnOrigin,          // adres zwrotny dla delegacji w tle
+            turnKind,
             rw,
             tt,
             chatModel: chat_model,
@@ -1229,6 +1250,7 @@ export async function _chatExecuteToolCall(
         raw = await this.plugin.mcpClient!.executeToolCall(toolCall as ToolsToolCall, turn.agentName, {
             autonomy: turn.autonomy,
             origin: turn.origin,
+            turnKind: turn.turnKind,
             resultBudgetChars: context.resultBudgetChars,
             shouldAbort: context.shouldAbort,
         }) as ChatToolResult;
@@ -2249,7 +2271,7 @@ export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
             // Bez adresu zwrotnego (zlecenie spoza czatu) zostaje właściciel biegu.
             agentName: task.origin?.agentName || task.agentName,
         };
-        const tab = matchTabForOrigin(this.chatTabs, origin, _tabKey, (item) => item.sessionPath);
+        const tab = matchTabForOrigin(this.chatTabs, origin, _tabKey, (item) => item.sessionPath, (item) => item.sessionEpoch);
 
         // Sufit ŁAŃCUCHA auto-tur po subach z rzędu. Bez tego agent w auto-turze może zlecić
         // kolejnego suba, jego wynik znów odpala auto-turę - i tak w kółko (`max_delegation_depth`
