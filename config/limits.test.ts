@@ -334,3 +334,16 @@ test('optional synthesis override validates skip, custom budget, invalid fallbac
     t.is(read(900000), 600000);
     t.is(getLimits().model_synthesis_timeout_ms, 30000);
 });
+
+test('thread limits have explicit defaults and bounded overrides', t => {
+  t.is(DEFAULT_LIMITS.subagent_thread_max_runs, 5);
+  t.is(DEFAULT_LIMITS.subagent_thread_transcript_max_chars, 200000);
+  t.is(DEFAULT_LIMITS.subagent_thread_idle_ms, 1800000);
+  t.is(DEFAULT_LIMITS.subagent_thread_max_idle_per_session, 3);
+  t.is(DEFAULT_LIMITS.subagent_thread_context_tokens, 128000);
+  t.deepEqual(LIMIT_SPECS.subagent_thread_max_runs, { min: 1, ceiling: 20, integer: true });
+  t.deepEqual(LIMIT_SPECS.subagent_thread_transcript_max_chars, { min: 1000, ceiling: 1000000, integer: true });
+  t.deepEqual(LIMIT_SPECS.subagent_thread_idle_ms, { min: 60000, ceiling: 86400000, integer: true });
+  t.deepEqual(LIMIT_SPECS.subagent_thread_max_idle_per_session, { min: 1, ceiling: 20, integer: true });
+  t.deepEqual(LIMIT_SPECS.subagent_thread_context_tokens, { min: 4096, ceiling: 1000000, integer: true });
+});

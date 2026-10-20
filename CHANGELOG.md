@@ -9,6 +9,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sub-agent threads can continue within the same session, with frozen permissions, bounded transcripts, and lifecycle events.
+- Sub-agent thread limits (runs per thread, transcript size, idle time, idle threads per session, context token budget) are configurable.
 - Sub-agents hide delegation tools and receive a self-execution instruction at the configured depth limit.
 - Sub-agent YAML iteration and tool-result limits are clamped to `LIMIT_SPECS` ceilings.
 - Partial sub-agent runs preserve an ordered, masked handoff with effects, the last response, and recent tool results.

@@ -56,7 +56,8 @@ modules/sub-agents/
 |---|---|
 | `SubAgentLoader` | Klasa - skanowanie `.pkm-assistant/sub-agents/`, parse YAML + KNOWLEDGE.md, cache, save/delete, ensureStarter |
 | `SubAgentRunner` | Klasa - wykonanie sub-agent (`runTask()`), ujednolicony system prompt builder (`framePrompt.js`, NIE zależy od roli - patrz „Model delegacji" niżej), tool-calling loop przez `runAgentLoop` (`modules/agent-loop`, wspólna pętla z czatem) |
-| `SubTaskRegistry` | Księga biegów subów + szyna zdarzeń (`task:created` / `task:step` / `task:finished`). Stawia go composition root (`plugin.subTaskRegistry`), konsumują trace.log i pasek biegów w czacie. Pure - zero `obsidian`, zero I/O. Dodatkowo skrzynka kontaktowa do biegu - `attachAbort(id, fn)` / `requestStop(id, by?)`. Ta sama skrzynka przyjmuje WIADOMOŚCI - `postMessage(id, text)` / `takeMessages(id)`. |
+| `SubTaskRegistry` | Księga biegów subów + szyna zdarzeń (`task:*`, `thread:*`). API wątków: `createThread`, synchroniczne `beginRun`, `endRun`, `closeThread`, `closeSessionThreads`, `closeAll`, `listThreads`. Pure - zero `obsidian`, zero I/O. Skrzynka biegu: `attachAbort` / `requestStop` oraz `postMessage` / `takeMessages`. |
+| `SubThread`, `SubThreadOwner` (typy) | Czysty byt rozmowy suba i wymagany klucz właściciela przy kontynuacji. |
 | `SubRunResult`, `SubRunStoppedBy` (typy) | Kształt zwrotki `runTask` - zgodnościowe `stoppedBy` (`natural`/`backstop`/`abort`/`error`) i `failed?: true` oraz nowe `outcome`. Czyta je `DelegateTool`. |
 | `buildStripModel`, `formatDuration` (+ typy `StripRow`/`StripStep`/`BuildStripModelInput`) | Czysta arytmetyka **paska biegów w oknie czatu**: filtr per zakładka, kolejność, liczniki, skróty. Konsumentem jest `modules/chat` (`chat/subTaskStrip.ts`), stąd eksport; plik zostaje pure, więc barrel dalej jest obsidian-free. |
 | `SubTaskNotifier` | Skrzynka wyników subów odpalonych W TLE. Siedzi na `task:finished`, bierze WYŁĄCZNIE taski z `background === true`, trzyma je w kolejce (sufit 200, najstarsze wypadają) aż dostawca je skonsumuje. API: `setDeliverer(fn\|null)` (`true` = skonsumowane; `false`/wyjątek = zostaje), `drain()`, `pending()`, `pendingFor(agentName)`, `dispose()`. Stawia go composition root jako `plugin.subTaskNotifier`; dostawcę wstrzykuje czat. Pure - nigdy nie rzuca. **Dostawcą jest `ChatView`** - patrz gotcha niżej. |
@@ -474,6 +475,36 @@ Odlew per agent = `<agent-slug>-researcher` (standardowe `instantiate`). Przepis
   w `asTranscript`, nie osobna kopia w `GenerateImageTool.ts` (jedno miejsce decyzji).
 
 ---
+
+## Wątki sub-agentów
+
+`SubTask` nadal opisuje pojedynczy bieg. `SubThread` z rejestru przechowuje właściciela
+(`agentName`, `sessionPath`, `sessionEpoch`), konfigurację, rozmowę, efekty, listę biegów
+i fazę `queued`, `running`, `idle` albo `closed`. Klucz właściciela musi być kompletny
+i zgodny przy `beginRun`, który rezerwuje wątek synchronicznie. Wątki bez ścieżki lub epoki
+sesji są jednorazowe. Wyjątek runnera, limit pięciu biegów, limit rozmowy 200000 znaków,
+zamknięcie albo sprzątanie wyłącza ponowne użycie. Zamknięcie zwalnia rozmowę i zapis efektów.
+
+Każdy kolejny bieg dostaje świeży prompt systemowy z konfiguracji pierwszego biegu,
+zachowaną głęboką kopię rozmowy oraz wiadomość z ramką agenta zlecającego. Zestaw narzędzi,
+zakres i limity pozostają zamrożone, także liczby zapisane w nowym prompcie systemowym.
+Tożsamość modelu obejmuje `providerId` i `modelId`; zmiana platformy odmawia kontynuacji.
+Wątek zachowuje do 100 najnowszych efektów ze wszystkich biegów i ponownie sprawdza ich cele
+według zapisanego `ToolEffect.check` oraz tej samej ścieżki sprawdzania co po biegu.
+Efekty z `check: none`, w tym ulotny `memory_save`, pozostają niesprawdzone bez I/O.
+Potwierdzone usunięcie jest opisane jako usunięcie, a stan nieznany każe sprawdzić cel przed
+powtórzeniem. Przed kontynuacją `countTokens` szacuje całą serializowaną wiadomość, w tym
+`tool_calls` i `reasoning_content`. `modules/models/cache_utils.ts` zna limity odpowiedzi, ale
+nie okna kontekstu modeli, więc limit zastępczy wynosi 128000 tokenów z marginesem 16384 tokenów
+na odpowiedź.
+
+Idle wątki są sprzątane przy `createThread` i `endRun`, bez timerów: po 30 minutach
+bez aktywności oraz ponad trzy wątki w sesji, od najstarszego. Rejestr emituje
+`thread:created`, `thread:idle` i `thread:closed`, które zapisują `thread.created`,
+`thread.idle` i `thread.closed` do trace.
+
+Skrzynka `postMessage` dostarcza wiadomość w ramce od agenta zlecającego przez hak
+`beforeContinue`, między wywołaniami modelu.
 
 ## TODO
 

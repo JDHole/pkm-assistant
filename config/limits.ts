@@ -65,6 +65,13 @@ export const DEFAULT_LIMITS = {
   // w pętli maina (per-tool override w AgentLoop). 0 = bez limitu.
   subagent_result_max_chars: 60000,
 
+  subagent_thread_max_runs: 5,
+  subagent_thread_transcript_max_chars: 200000,
+  subagent_thread_idle_ms: 1800000,
+  subagent_thread_max_idle_per_session: 3,
+  // Zastępnik: modules/models/cache_utils.ts zna limity odpowiedzi, nie okna kontekstu modeli.
+  subagent_thread_context_tokens: 128000,
+
   // GRACE-OKNO na finalne podsumowanie suba (ms). `delegation_timeout_ms` obejmuje CAŁY
   // bieg, więc budzik potrafił strzelić dokładnie wtedy, gdy sub pisał już finalne
   // podsumowanie (backstop) — zadanie zjadało pełny budżet na narzędzia i oddawało zaślepkę
@@ -202,6 +209,11 @@ export const LIMIT_SPECS: Record<LimitKey, LimitSpec> = {
   // 0 legalny (= wynik suba bez limitu). Sufit jak wyżej — deliverable też
   // karmi okno kontekstu maina, tylko domyślna porcja jest 4× większa niż zrzut narzędzia.
   subagent_result_max_chars:          { min: 0,    ceiling: 200000, integer: true },
+  subagent_thread_max_runs:           { min: 1, ceiling: 20, integer: true },
+  subagent_thread_transcript_max_chars:{ min: 1000, ceiling: 1000000, integer: true },
+  subagent_thread_idle_ms:            { min: 60000, ceiling: 86400000, integer: true },
+  subagent_thread_max_idle_per_session:{ min: 1, ceiling: 20, integer: true },
+  subagent_thread_context_tokens:      { min: 4096, ceiling: 1000000, integer: true },
   // 0 jest legalny (= bez limitu). Sufit chroni przed absurdalnie dużym oknem kontekstu.
   max_tool_result_length:             { min: 0,    ceiling: 200000, integer: true },
   // Min 1000 = instrukcji suba nie da się ściąć do zera (sub bez metody to nie sub).
