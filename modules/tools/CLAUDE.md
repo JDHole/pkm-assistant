@@ -125,8 +125,7 @@ Gdy kontekst runtime istnieje, lecz bramka nie zezwala, odczyt kończy się
 `describeToolEffect(toolName, args, result?)` opisuje oczekiwany stan po wykonaniu wywołania;
 nie wykonuje I/O. Zwraca `null` dla narzędzi bez bezpośredniego skutku (tylko do odczytu oraz
 `delegate`, którego własne wywołanie nie ma celu do sprawdzenia) i dla `todo` z akcją `list`
-albo inną nieobsługiwaną akcją. Obecny `SubAgentRunner` nie zbiera wpisów o efektach wywołań
-narzędzi suba; podłączenie tego API do runnera należy do osobnej jednostki.
+albo inną nieobsługiwaną akcją. Wpisy efektów suba zbiera `SubAgentRunner` (opis w `modules/sub-agents/CLAUDE.md`).
 Nazwy aliasów przechodzą przez `resolveToolAlias`, więc aliasy opisują ten
 sam efekt co nazwy kanoniczne. ⚠️ Każda nazwa spoza tej listy i spoza tabeli efektów (narzędzia
 zewnętrznych serwerów MCP `<serverId>__<toolName>`, nowe wbudowane narzędzie bez wpisu) dostaje
@@ -141,6 +140,8 @@ Typ `ToolEffect` ma pola `tool`, `action`, `targets` i `check`. Cele są typu
 `exists`, `absent` lub `none`. Dla `memory_save` z `ephemeral: true` celem jest logiczne
 `memory-file` o ścieżce `brain.md` i `check: 'none'`: to plik indeksu konkretnego agenta,
 ale jego pełna ścieżka nie jest dostępna w argumentach wywołania.
+Dla `memory_delete` cel pochodzi wyłącznie z `result.path`, bo narzędzie przyjmuje tylko `fact`
+i samo wybiera notatkę. Przed zwrotem wyniku cele są puste, a `check: 'none'`.
 Dla `todo` akcje `create`, `check`, `uncheck`, `add` i `finish` opisują listę zadań
 sesji z `check: 'none'`. Dla `artifact_update` ścieżka do sprawdzenia pochodzi z
 `result.artifact.path`; sam `id` bez tej ścieżki pozostaje z `check: 'none'`.

@@ -9,6 +9,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sub-agent runs now record their classified outcome, tool effects, and checked target state in the run result and registry.
 - The tools module exposes effect descriptions and target checks for built-in and external MCP tool calls.
 - `MCPClient.executeToolCall` supports an execution-start callback after its permission and approval gates.
 

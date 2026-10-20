@@ -68,3 +68,6 @@ export async function loadSubAgentEditorModal() {
     const mod = await import('./SubAgentEditorModal.js');
     return mod.SubAgentEditorModal;
 }
+
+export { classifyRunEnd } from './runOutcome.js';
+export type { StopBy, RunEnd, RunEffect, RunOutcome, ClassifyRunEndInput } from './runOutcome.js';

@@ -1,5 +1,6 @@
 import test from 'ava';
 import { SubTaskRegistry } from './SubTaskRegistry.js';
+import { classifyRunEnd } from './index.js';
 import { runAgentLoop, ArrayMessageStore } from '../agent-loop/index.js';
 import { TraceLog, maskSensitiveData } from '../../core/index.js';
 import type { SubTask, SubTaskStep } from './SubTaskRegistry.js';
@@ -336,8 +337,31 @@ test('requestStop woła podpięty uchwyt, znaczy byt i zostawia ślad', t => {
     t.is(task.status, 'running', 'status zmienia dopiero domknięcie biegu, nie prośba');
     const slad = task.steps.filter(s => s.type === 'stop.requested');
     t.is(slad.length, 1);
-    t.is(slad[0].fields.by, 'panel');
+    t.is(slad[0].fields.by, 'user');
+    t.is(task.stopRequestedBy, 'user');
     t.true(writes.some(w => w.type === 'stop.requested'), 'ślad poszedł też do trace');
+});
+
+test('requestStop od prowadzącego zachowuje nadawcę i pierwszy nadawca wygrywa', t => {
+    const reg = new SubTaskRegistry();
+    const task = newTask(reg);
+    reg.attachAbort(task.id, () => {});
+    t.true(reg.requestStop(task.id, 'lead'));
+    t.true(reg.requestStop(task.id));
+    reg.stopAll('unload');
+    t.is(task.stopRequestedBy, 'lead');
+    t.deepEqual(task.steps.filter(step => step.type === 'stop.requested').map(step => step.fields.by), ['lead', 'lead']);
+    t.deepEqual(classifyRunEnd({ stopReason: { kind: 'manual-stop' }, stoppedByActor: task.stopRequestedBy }).end, { kind: 'stopped', by: 'lead' });
+});
+
+test('stopAll zapisuje system na biegu i w śladzie', t => {
+    const reg = new SubTaskRegistry();
+    const task = newTask(reg);
+    reg.attachAbort(task.id, () => {});
+    t.is(reg.stopAll('unload'), 1);
+    t.is(task.stopRequestedBy, 'system');
+    t.deepEqual(task.steps.find(step => step.type === 'stop.requested')?.fields, { by: 'system', reason: 'unload' });
+    t.deepEqual(classifyRunEnd({ stopReason: { kind: 'manual-stop' }, stoppedByActor: task.stopRequestedBy }).end, { kind: 'stopped', by: 'system' });
 });
 
 test('requestStop bez podpiętego uchwytu zwraca false i nic nie znaczy', t => {
@@ -426,7 +450,7 @@ test('Z7: stopAll woła uchwyt KAŻDEGO żywego biegu, a rzucający uchwyt nie b
     t.is(dostarczone, 1, 'liczymy uchwyty, które NIE rzuciły (b)');
     t.true(a.stopRequested);
     t.true(b.stopRequested);
-    t.true(writes.some(w => w.type === 'stop.requested' && w.fields.by === 'unload'), 'ślad z powodem poszedł do trace');
+    t.true(writes.some(w => w.type === 'stop.requested' && w.fields.by === 'system' && w.fields.reason === 'unload'), 'ślad z powodem poszedł do trace');
     t.notThrows(() => reg.dispose(), 'dispose po stopAll zostaje best-effort');
 });
 
