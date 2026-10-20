@@ -92,6 +92,7 @@ interface SaveSessionPlugin {
     env?: NonNullable<ResolverPluginLike>['env'];
     showCrystalNotice?(message: string, options?: CrystalNoticeOptions): unknown;
     mcpClient?: MCPClient;
+    subTaskRegistry?: { closeSessionThreads?(agentName: string, sessionPath: string): unknown };
 }
 
 interface SaveSessionCommandContext {
@@ -380,6 +381,7 @@ export async function applyPostArchiveAction(
     // MINUTOWA nazwy pliku sesji, patrz `modules/tools/CLAUDE.md`, gotcha „Zgoda na zapis").
     if (closingSessionPath) {
         plugin.mcpClient?.sessionWriteConsent.clearSession(closingSessionPath);
+        plugin.subTaskRegistry?.closeSessionThreads?.(agentMemory.agentName, closingSessionPath);
     }
 
     const action = result.action || 'archive';
