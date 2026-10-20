@@ -45,6 +45,8 @@ export interface StripRun {
     toolCallCount: number;
     effects: StripEffect[];
     missingTargets: string[];
+    /** Stan przejściowy biegu, którego nie ma w outcome: trwa podsumowanie albo zapis dorobku do sesji padł. Tekst dobiera widok. */
+    note?: 'synthesis-pending' | 'storage-error';
 }
 
 export interface StripRow {
@@ -147,6 +149,8 @@ function runView(task: SubTask | undefined, id: string, number: number, now: num
         tokenInput, tokenOutput,
         toolCallCount: (task.steps || []).filter(step => step.type === 'tool.post').length,
         effects: selectedEffects, missingTargets,
+        ...(task.partialStorageError ? { note: 'storage-error' as const }
+            : task.status === 'running' && task.partial?.synthesis === 'pending' ? { note: 'synthesis-pending' as const } : {}),
     };
 }
 

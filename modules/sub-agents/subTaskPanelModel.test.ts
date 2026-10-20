@@ -628,3 +628,20 @@ test('częściowy bieg używa handoff, a bez niego zachowanego partial.text', t 
     }
     reg.dispose();
 });
+
+test('pasek: bieg w podsumowaniu i pad zapisu dorobku niosą notkę biegu, zwykły bieg jej nie ma', t => {
+    const rows = buildStripModel({
+        now: TERAZ,
+        tabKey: 'tab-a',
+        agentName: 'Klara',
+        tasks: [
+            zTabu('synteza', 'tab-a', { status: 'running', partial: { synthesis: 'pending' } as SubTask['partial'] }),
+            zTabu('zapis', 'tab-a', { endedAt: TERAZ - 1_000, partialStorageError: true }),
+            zTabu('zwykly', 'tab-a', { endedAt: TERAZ - 2_000 }),
+        ],
+    });
+    const note = (id: string) => rows.find(r => r.id === id)?.runs[0]?.note;
+    t.is(note('synteza'), 'synthesis-pending');
+    t.is(note('zapis'), 'storage-error');
+    t.is(note('zwykly'), undefined);
+});
