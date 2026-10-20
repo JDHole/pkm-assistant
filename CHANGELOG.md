@@ -12,6 +12,15 @@ adheres to [Semantic Versioning](https://semver.org/).
 - The tools module exposes effect descriptions and target checks for built-in and external MCP tool calls.
 - `MCPClient.executeToolCall` supports an execution-start callback after its permission and approval gates.
 
+### Changed
+
+- Sub-agent template editing can rename the display name without changing its slug or folder. Both success messages show the saved name, and the editor selects the `sub_worker` model slot for workers, validates iteration limits, and groups advanced settings separately.
+- Sub-agent scope guidance now explains that folders are a hard boundary while frontmatter, sections, and pinned notes do not block access.
+- Template deletion confirms that existing agent copies remain active and lists copies identified by their `from_template` metadata.
+
+### Fixed
+
+- Failed assignment after creating a sub-agent template copy now triggers best-effort cleanup and reports the error; cleanup failures are logged.
 
 ## 2.3.3 - 2026-10-19
 

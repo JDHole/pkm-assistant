@@ -29,6 +29,7 @@ modules/sub-agents/
 ├── BackstageTab.js             # register tab + lazy-load renderSubAgentsTab
 ├── SubAgentsBackstageTab.js    # render Sub-Agents tab w Backstage sidebar
 ├── SubAgentDetailView.js       # render single sub-agent detail view
+├── editorDecisions.ts          # pure decisions for template editor roles, validation, and advanced section
 ├── deleteOutcome.ts            # resolveDeleteOutcome: co zameldować po
 │                                #   próbie skasowania suba/szablonu; woła SubAgentEditorModal + SubAgentsBackstageTab
 └── templateUseOutcome.ts       # guardTemplateUse: co zameldować po
@@ -94,7 +95,7 @@ modules/sub-agents/
 
 **Brak ról systemowych.** Plugin NIE wnosi żadnych wbudowanych subów. Są dwa sposoby delegacji:
 
-1. **Generyczny worker** - `delegate(task:"...")` bez `aspect`. `DelegateTool.buildGenericWorkerConfig()` tworzy syntetyczny config `{ name:'worker', tools: DEFAULT_SUB_AGENT_TOOLS }` (bez `config.prompt`, bez roli). Działa **nawet gdy agent nie ma żadnych subów**. Model = slot sub-agentów.
+1. **Generyczny worker** - `delegate(task:"...")` bez `aspect`. `DelegateTool.buildGenericWorkerConfig()` tworzy syntetyczny config `{ name: PKM_SUB_NAME /* 'pkm-sub' */, tools: DEFAULT_SUB_AGENT_TOOLS }` (bez `config.prompt`, bez roli). Działa **nawet gdy agent nie ma żadnych subów**. Model = slot sub-agentów.
 2. **Custom sub usera** - `delegate(task:"...", aspect:"<nazwa>")`. Rozpoznawany po nazwie (exact → fuzzy po nazwie; **brak fallbacku po roli**). Widoczny tylko dla swojego agenta (prefiks `<agent-slug>-`).
 
 Stary YAML agenta z przypisaniem nieistniejącej roli systemowej (np. dawne `prep-memory`) sprawia, że `delegate` zwraca czysty błąd „konfiguracja sub-agenta X nie znaleziona" - te nazwy nie istnieją jako suby. Nowy agent (od wersji po 2.2.6) startuje bez żadnych subów - zero auto-tworzenia na dysku. Suby `<slug>-prep`, które istnieją u userów z wcześniejszych wersji, to pozostałość po wyciętym automacie i działają dalej jak każdy custom sub - nikt ich nie kasuje ani nie migruje.
@@ -141,8 +142,11 @@ Same wbudowane aspekty (`pkm-explorer` / `pkm-worker`) żyją w `modules/tools/D
 
 Magazyn: `SubAgentTemplateStore.js` (`.pkm-assistant/templates/sub-agents/<slug>/SUB_AGENT.yaml` + opcjonalny `KNOWLEDGE.md` + `version: N`). API jak w skillach. Owner = `AgentManager.subAgentTemplateStore`.
 
-- **`PKM_SUB_NAME = 'pkm-sub'`** (`SubAgentLoader.js`, eksport w barrelu). Syntetyczny worker `delegate` BEZ `aspect` nazywa się `pkm-sub`. Byt istnieje tylko w kodzie (nie na dysku), więc jest niezniszczalny bez żadnego mechanizmu ochrony. Zero twardych porównań `=== 'worker'` w produkcji (tylko asercje testów).
-- **Kopia, nie link:** `instantiate(slug, agentName, {subAgentLoader})` odlewa kopię pod nazwą `<agent-slug>-<slug szablonu>` (konwencja widoczności `getVisibleSubAgentsForAgent`), kolizja → sufiks `-2`. Kopia niesie `from_template: "<nazwa> vN"`; wersja szablonu NIE wchodzi do żywego YAML-a. `SubAgentLoader` czyta i zapisuje `from_template` (pole przelotowe).
+- **`PKM_SUB_NAME = 'pkm-sub'`** (`SubAgentLoader.js`, eksport w barrelu). Syntetyczny worker `delegate` BEZ `aspect` nazywa się `pkm-sub`. Byt istnieje tylko w kodzie (nie na dysku), więc jest niezniszczalny bez żadnego mechanizmu ochrony. Syntetycznego suba identyfikuje się po nazwie `PKM_SUB_NAME`, nie przez porównanie z rolą `worker`; porównanie `role === 'worker'` jest poprawne przy wyborze listy modeli w edytorze.
+- **Kopia, nie link:** `instantiate(slug, agentName, {subAgentLoader})` odlewa kopię pod nazwą `<agent-slug>-<slug szablonu>` (konwencja widoczności `getVisibleSubAgentsForAgent`), kolizja → sufiks `-2`. Kopia niesie `from_template: "<nazwa> vN"`; osobne pole `version` nie wchodzi do żywego YAML-a. `SubAgentLoader` czyta i zapisuje `from_template` (pole przelotowe).
+- **Edycja szablonu:** zmienia wyświetlaną `name` w YAML i cache, a slug oraz folder pozostają stałe. Komunikat sukcesu używa nazwy zwróconej przez zapis.
+- **Formularz:** dla roli `worker` lista modeli pochodzi ze slotu `sub_worker`; pozostałe role używają slotu `researcher`. Zmiana roli aktualizuje listę. Przy otwarciu zachowany jest model spoza obecnej biblioteki, aby sama edycja opisu go nie usuwała. `max_iterations` przyjmuje tylko liczbę całkowitą w widełkach `LIMIT_SPECS.subagent_max_iterations_worker` (dziś 1..100); widełki pola, walidacja i komunikat biorą je z jednego miejsca (`editorDecisions.maxIterationsBounds`), a błąd pokazuje się przy polu i blokuje zapis. Domyślne narzędzia nowego suba w edytorze (`EDITOR_DEFAULT_TOOLS`: `search`, `read`, `list`) to co innego niż `DEFAULT_SUB_AGENT_TOOLS` workera `delegate`; decyzja o rozwinięciu „Zaawansowanych” porównuje z tą pierwszą listą i z `DEFAULT_LIMITS`. Narzędzia, zakres, limity i przełącznik aktywności są w sekcji „Zaawansowane”; sekcja otwiera się dla istniejących niestandardowych wartości, w tym wyłączonego szablonu. Foldery są twardą granicą, natomiast frontmatter, sekcje i przypięte notatki są tylko wskazówkami i nie blokują dostępu.
+- **Kasowanie szablonu:** potwierdzenie mówi, że odlane kopie pozostają i działają dalej. Nazwy rozpoznaje po pełnym zapisie `from_template` jako `<nazwa> vN`, dzięki czemu szablon `Raport` nie przejmuje kopii szablonu `Raport v2`. Po zmianie nazwy starsze kopie mogą być nierozpoznawalne. Potwierdzenie subów używa własnego klucza i18n, aby wspólny tekst skilli nie dostał placeholdera `copies`.
 - **Globalny sub:** `settings.pkmAssistant.globalSubTemplate` (slug szablonu albo `null`). To konfiguracja, której `DelegateTool` używa dla delegacji BEZ `aspect`, **dla wszystkich agentów**. `null` = fabryczny `pkm-sub` (zawsze dostępny jako odwrót). Wybór klika się na kartach zakładki „Szablony subów"; zawsze dokładnie jeden globalny. **Fail-soft:** brakujący / niekompletny / nieparsowalny szablon → `pkm-sub` + `log.warn`, delegacja nigdy nie pada przez złą decyzję usera.
 - **Przecięcie narzędzi rodzic∩sub (`SubAgentRunner._getTools`) NIETKNIĘTE** - granica bezpieczeństwa zostaje bez zmian, także dla workera z szablonu.
 - **Rama suba wspólna dla wszystkich:** `resolveWorkPrompt(agent, 'subagent_frame_prompt', …)`, łańcuch agent > global > factory. Szablon NIE ma własnego pola ramy - rama edytowalna wyłącznie w Ustawieniach → Prompt.
@@ -414,19 +418,21 @@ Odlew per agent = `<agent-slug>-researcher` (standardowe `instantiate`). Przepis
   wstrzykiwałby subowi SKASOWANĄ metodę (a szablon niósłby metodę z poprzedniej wersji). Próg
   jest ten sam co przy odczycie - `prompt.trim()`, bo `_loadSubAgentFromFolder` i cache i tak
   trymują.
-- ⚠️ **`deleteSubAgent`/`store.delete` zwracają `false` i TĘ wartość trzeba przeczytać.** Decyzja
+- ⚠️ **`deleteSubAgent`/`store.delete` mogą zwrócić `false` i TĘ wartość trzeba przeczytać.** Decyzja
   o komunikacie mieszka w czystym `deleteOutcome.ts` (`resolveDeleteOutcome`): tylko `true`
   znaczy „Usunięto", cokolwiek innego (w tym `undefined` z opcjonalnego łańcucha) to
-  `modal.sub_agent.delete_failed` - modal zostaje otwarty, kafel Zaplecza nie znika. `rmdir` jest
-  NIEREKURENCYJNE, więc jeden dodatkowy plik w folderze suba wystarczy, żeby kasowanie padło.
-- ⚠️ **Handler kafla Zaplecza NIE MOŻE zniknąć po cichu.** `renderUseAtAgentButton`
-  (`ui-components/backstage_helpers.ts`) woła `onPick(agent.name)` i PORZUCA zwróconą obietnicę,
-  a `useTemplateAtAgent` robi dwa zapisy pod rząd (`store.instantiate` → kopia suba na dysku,
-  `agentManager.updateAgent` → przypisanie). Rzut z drugiego zostawia półstan: kopia
-  `<agent>-<szablon>` w `.pkm-assistant/sub-agents/` bez wpisu w `sub_agents`, zero `Notice`,
-  zero `nav.refresh()` - a ponowne kliknięcie odlewa DRUGĄ kopię z sufiksem `-2`. Bezpiecznik:
-  czysty `templateUseOutcome.ts` (`guardTemplateUse`) - ten sam wzór co `deleteOutcome.ts`, zero
-  DOM/obsidian/i18n, oddaje klucz `backstage.template_use_failed` + surowy rzut do `log.error`.
+  `modal.sub_agent.delete_failed` - modal zostaje otwarty, kafel Zaplecza nie znika. Dla żywego
+  suba `deleteSubAgent` zwraca `false`, gdy nierekurencyjne `rmdir` nie usunie folderu z dodatkowym
+  plikiem. `SubAgentTemplateStore.delete` ignoruje błąd `rmdir`: po usunięciu plików szablonu
+  zwraca `true` i usuwa wpis z cache, nawet jeśli folder z dodatkowym plikiem pozostał na dysku.
+  Gdy usunięcie któregoś pliku szablonu (`SUB_AGENT.yaml`, `KNOWLEDGE.md`) rzuci, zwraca `false`,
+  a wpis zostaje w cache.
+- ⚠️ **Handler kafla Zaplecza przechwytuje odrzuconą obietnicę.** `renderUseAtAgentButton`
+  (`ui-components/backstage_helpers.ts`) porzuca obietnicę z `onPick(agent.name)`, więc handler
+  owija operację przez `guardTemplateUse`. Czyste `useTemplateWithCompensation` wykonuje odlew i
+  przypisanie; jeśli przypisanie rzuci, próbuje usunąć kopię pod dokładną nazwą zwróconą przez
+  `instantiate`. Nieudane sprzątanie trafia osobno do `log.error`, a użytkownik dostaje klucz
+  `backstage.template_use_failed`.
   ⚠️ Pas bezpieczeństwa w SAMYM `renderUseAtAgentButton` (`Promise.resolve(onPick(...)).catch(...)`)
   **nie jest dołożony** - to plik innego modułu, więc każdy nowy handler kafla musi sam się
   owinąć.
@@ -459,7 +465,7 @@ Odlew per agent = `<agent-slug>-researcher` (standardowe `instantiate`). Przepis
 
 Najważniejsze:
 - 🟠 4 role rdzeniowe systemowe (`prep-memory`, `prep-whitelist`, `strateg-planer`, `strateg-sumarizer`)
-- 🟠 YAML schema custom sub-agentów - whitelist tools (już jest) + whitelist scope (foldery + frontmatter + sekcje + pinned notes)
+- 🟠 YAML schema custom sub-agentów - doprecyzować schemat zakresu: foldery wyznaczają twardą granicę dostępu; frontmatter, sekcje i przypięte notatki pozostają wskazówkami bez egzekwowania
 - 🟠 Parallel execution w `DelegateTool` - `args.tasks` już jest, doszlifować (per-task instance vs singleton)
 - 🟠 Hyperfocused per-akcja + klikalność w chacie
 

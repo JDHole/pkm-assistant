@@ -4,8 +4,8 @@
  * a sub zostaje w cache i na liście.
  */
 import test from 'ava';
-import { resolveDeleteOutcome } from './deleteOutcome.js';
-import { pl } from '../../core/i18n/pl.js';
+import { resolveDeleteOutcome, templateCopyNames, templateDeleteConfirmation } from './deleteOutcome.js';
+import { t as translate } from '../../core/i18n/index.js';
 
 test('kasowanie potwierdzone (true) - komunikat o usunięciu', t => {
     const out = resolveDeleteOutcome(true, 'jaskier-prep');
@@ -29,11 +29,48 @@ test('brak potwierdzenia (undefined z opcjonalnego łańcucha) też jest porażk
     t.false(resolveDeleteOutcome('true', 'x').ok, 'tylko boolean true liczy się jako potwierdzenie');
 });
 
-test('oba klucze komunikatów istnieją w słowniku i niosą {{name}}', t => {
-    for (const deleted of [true, false]) {
-        const out = resolveDeleteOutcome(deleted, 'jaskier-prep');
-        const wzor = (pl as Record<string, string>)[out.messageKey];
-        t.truthy(wzor, `brak klucza ${out.messageKey} w pl.ts`);
-        t.true(wzor.includes('{{name}}'), `${out.messageKey} nie pokazuje nazwy`);
+test('potwierdzenie kasowania wymienia rozpoznane kopie i obsługuje brak nazw', t => {
+    const copies = templateCopyNames('Zwiadowca', [
+        { name: 'klara-zwiadowca', from_template: 'Zwiadowca v2' },
+        { name: 'ola-zwiadowca', from_template: 'Zwiadowca v1' },
+        { name: 'inna-kopia', from_template: 'Inny szablon v1' },
+    ]);
+    const withCopies = templateDeleteConfirmation('Zwiadowca', copies, 'Brak kopii');
+    const withoutCopies = templateDeleteConfirmation('Brak', templateCopyNames('Brak', []), 'Brak kopii');
+
+    t.deepEqual(copies, ['klara-zwiadowca', 'ola-zwiadowca']);
+    t.true(withCopies.copies.includes('klara-zwiadowca'));
+    t.true(withCopies.copies.includes('ola-zwiadowca'));
+    t.is(withoutCopies.copies, 'Brak kopii');
+    t.is(withCopies.messageKey, 'backstage.confirm_delete_sub_template');
+    for (const locale of ['pl', 'en']) {
+        const message = translate(withCopies.messageKey, withCopies, locale);
+        t.true(message.includes('klara-zwiadowca'));
+        t.true(message.includes('ola-zwiadowca'));
+        t.false(message.includes('{{copies}}'));
+        const withoutMessage = translate(withoutCopies.messageKey, withoutCopies, locale);
+        t.true(withoutMessage.includes('Brak kopii'));
+        t.false(withoutMessage.includes('{{copies}}'));
+    }
+});
+
+test('dopasowanie from_template nie miesza podobnych nazw szablonów', t => {
+    const copies = templateCopyNames('Raport', [
+        { name: 'wlasciwy', from_template: 'Raport v2' },
+        { name: 'cudzy', from_template: 'Raport v2 v1' },
+        { name: 'bledny', from_template: 'Raport v2 extra' },
+    ]);
+    t.deepEqual(copies, ['wlasciwy']);
+    t.deepEqual(templateCopyNames('Raport (PL)', [
+        { name: 'specjalny', from_template: 'Raport (PL) v3' },
+        { name: 'cudzy', from_template: 'Raport PL v3' },
+    ]), ['specjalny']);
+});
+
+test('wspólne potwierdzenie usuwania skilla nie ma brakującego placeholdera', t => {
+    for (const locale of ['pl', 'en']) {
+        const message = translate('backstage.confirm_delete_template', { name: 'Raport' }, locale);
+        t.true(message.includes('Raport'));
+        t.false(message.includes('{{copies}}'));
     }
 });

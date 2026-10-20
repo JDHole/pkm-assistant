@@ -29,8 +29,8 @@ import {
     confirmModal,
 } from '../ui-components/index.js';
 import { DEFAULT_SUB_AGENT_TOOLS, PKM_SUB_NAME } from './SubAgentLoader.js';
-import { resolveDeleteOutcome } from './deleteOutcome.js';
-import { guardTemplateUse } from './templateUseOutcome.js';
+import { resolveDeleteOutcome, templateCopyNames, templateDeleteConfirmation } from './deleteOutcome.js';
+import { guardTemplateUse, useTemplateWithCompensation } from './templateUseOutcome.js';
 // Decyzje stanu ("Użyj u agenta" + reset globalnego suba po kasacji)
 // żyją w czystym pliku obok deleteOutcome.js/templateUseOutcome.js.
 import { computeSubAgentsAfterTemplateUse, computeGlobalSubAfterTemplateDelete } from './templateAssignmentOutcome.js';
@@ -232,9 +232,11 @@ function renderTemplateCard(list: HTMLElement, tpl: SubAgentTemplateRecord, { pl
         label: t('generic.delete'),
         danger: true,
         onClick: async () => {
+            const copies = templateCopyNames(tpl.name, plugin.agentManager?.subAgentLoader?.getAllSubAgents?.() || []);
+            const confirmation = templateDeleteConfirmation(tpl.name, copies, t('backstage.no_template_copies'));
             const okToDelete = await confirmModal(plugin.app as never, {
                 title: t('generic.delete'),
-                message: t('backstage.confirm_delete_template', { name: tpl.name }),
+                message: t(confirmation.messageKey, confirmation),
                 destructive: true,
             });
             if (!okToDelete) return;
@@ -286,29 +288,36 @@ async function useTemplateAtAgent(tpl: SubAgentTemplateRecord, agentName: string
     // `agentManager!`: `agent` doszedł z `agentManager?.getAgent?.(...)` — skoro jest prawdziwy
     // (guard wyżej), `agentManager` musiało być zdefiniowane (optional chaining inaczej dałoby
     // undefined).
-    const result = await store.instantiate(tpl.slug, agentName, { subAgentLoader: agentManager!.subAgentLoader });
-    if (!result?.success) {
-        new Notice(t('backstage.template_use_failed', { error: result?.error || '?' }));
+    let createdName: string | null = null;
+    let createdRenamed = false;
+    const outcome = await useTemplateWithCompensation({
+        instantiate: async () => {
+            const result = await store.instantiate(tpl.slug, agentName, { subAgentLoader: agentManager!.subAgentLoader });
+            createdName = result.name || null;
+            createdRenamed = result.renamed === true;
+            return result;
+        },
+        assign: async copyName => {
+            if (createdRenamed) new Notice(t('backstage.template_slug_taken', { name: copyName }));
+            const existingNames = agent.getAllSubAgentNames?.() || [];
+            // `as AgentSubAgentAssignment[]`: TS 5.4 nie zwęża `.filter(Boolean)`.
+            const existingAssignments = (existingNames
+                .map((name) => agent.getSubAgentAssignment?.(name))
+                .filter(Boolean) as AgentSubAgentAssignment[])
+                .map((assignment) => ({ ...assignment }));
+            const decision = computeSubAgentsAfterTemplateUse(existingAssignments, copyName);
+            if (decision.changed) await agentManager!.updateAgent(agentName, { sub_agents: decision.subAgents });
+        },
+        deleteSubAgent: copyName => agentManager!.subAgentLoader!.deleteSubAgent(copyName),
+    });
+    if (!outcome.ok) {
+        log.error('SubAgentsBackstageTab', `useTemplateAtAgent(${tpl.slug} → ${agentName}) padło:`, outcome.error);
+        if (outcome.cleanupError !== undefined) {
+            log.error('SubAgentsBackstageTab', `Sprzątanie kopii po błędzie przypisania (${createdName}) nie powiodło się:`, outcome.cleanupError);
+        }
+        new Notice(t(outcome.messageKey!, outcome.params));
         return;
     }
-    if (result.renamed) {
-        new Notice(t('backstage.template_slug_taken', { name: result.name }));
-    }
-
-    const existingNames = agent.getAllSubAgentNames?.() || [];
-    // `as AgentSubAgentAssignment[]`: TS 5.4 nie zwęża `.filter(Boolean)` — cast na wyniku,
-    // nie zmieniony warunek ani nowy statement (zero-kosztowy, zero różnicy w emitowanym JS).
-    const existingAssignments = (existingNames
-        .map((name) => agent.getSubAgentAssignment?.(name))
-        .filter(Boolean) as AgentSubAgentAssignment[])
-        .map((s) => ({ ...s }));
-    // Decyzja (idempotencja + „pierwszy sub = domyślny") żyje w czystej
-    // funkcji z testami — widok zostaje z wywołaniem i zapisem.
-    const decision = computeSubAgentsAfterTemplateUse(existingAssignments, result.name!);
-    if (decision.changed) {
-        await agentManager!.updateAgent(agentName, { sub_agents: decision.subAgents });
-    }
-
-    new Notice(t('backstage.template_used', { name: result.name, agent: agentName }));
+    new Notice(t('backstage.template_used', { name: createdName, agent: agentName }));
     nav.refresh();
 }
