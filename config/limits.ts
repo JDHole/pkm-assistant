@@ -243,7 +243,7 @@ export const LIMIT_SPECS: Record<LimitKey, LimitSpec> = {
  * @param rawValue - surowa wartość z settings (dowolny typ)
  * @param fallback - default do którego spadamy przy śmieciu
  */
-function sanitizeLimit(key: string, rawValue: unknown, fallback: number): number {
+export function sanitizeLimit(key: string, rawValue: unknown, fallback: number): number {
   const spec = LIMIT_SPECS[key as LimitKey];
   if (!spec) return fallback;
   // Only real numbers or numeric strings ("9" from a text input) are acceptable.
