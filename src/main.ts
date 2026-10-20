@@ -64,6 +64,7 @@ import {
   // Skille bez narzędzi: odkrywalność = indeks w prompcie, przepis przez read()
   // Sub-agent + agent communication
   createDelegateTool,
+  createSubAgentTool,
   // Przerwanie biegów delegacji przy demontażu (patrz onunload)
   stopAllDelegations,
   createAgentDelegateTool,
@@ -761,6 +762,7 @@ export default class PkmAssistantPlugin extends PluginBase {
       // brain_update: direct brain.md writes wyłączone; runtime pisze przez memory_save / /save session.
       // skill_list/skill_execute: skille odkrywane indeksem w prompcie, przepis przez read().
       this.toolRegistry.registerTool(createDelegateTool(this.app));
+      this.toolRegistry.registerTool(createSubAgentTool(this.app));
       // agent_delegate stays: it works without the communicator (context ping is optional/null-safe).
       this.toolRegistry.registerTool(createAgentDelegateTool());
       // Poczta (kom_send/kom_list/kom_read) zależy od KomunikatorManagera - tylko przy fladze ON.
