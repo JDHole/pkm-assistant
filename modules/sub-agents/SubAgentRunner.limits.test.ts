@@ -27,6 +27,8 @@ import test from 'ava';
 import { SubAgentRunner as RuntimeSubAgentRunner } from './SubAgentRunner.js';
 import { DEFAULT_LIMITS } from '../../config/limits.js';
 import { MCPClient } from '../tools/index.js';
+import { SubTaskRegistry } from './SubTaskRegistry.js';
+import { t as tr } from '../../core/i18n/index.js';
 
 type TestRunner = { runTask(...args: unknown[]): Promise<{ result: string }> };
 const SubAgentRunner = RuntimeSubAgentRunner as unknown as new (options: unknown) => TestRunner;
@@ -390,4 +392,58 @@ test('unrelated tool errors retain legacy masked transcript handling', async t =
     t.false(text.startsWith('{'));
     t.false(text.includes('SECRETVALUE123456'));
     t.true(text.includes('***'));
+});
+
+test('runTask clamps YAML iteration and result ceilings consistently in loop and prompt', async t => {
+    const registry = new SubTaskRegistry();
+    let calls = 0;
+    let prompt = '';
+    const tool = { name: 'read', description: 'read', inputSchema: {}, execute: async () => 'x' };
+    const model = { stream(payload: Payload, handlers: Handlers) {
+        calls++;
+        prompt = String(payload.messages?.[0]?.content ?? prompt);
+        handlers.done(zWywolaniem('read'));
+    } };
+    const runner = new SubAgentRunner({ toolRegistry: { filterByAgent: () => [tool], getTool: (name: string) => name === 'read' ? tool : null }, app: {}, plugin: { subTaskRegistry: registry } });
+    await runner.runTask('task', { name: 'Owner' }, { name: 'worker', tools: ['read'], max_iterations: 500, max_tool_result_length: 999999 } as never, model, { modelTimeout: 10000 } as never);
+    t.is(calls, 101);
+    t.is(registry.list()[0].budget.maxIterations, 100);
+    t.is(registry.list()[0].budget.maxToolResultLength, 200000);
+    t.true(prompt.includes(tr('subagent.frame.budget_iterations', { count: 100 })));
+    t.true(prompt.includes(tr('subagent.frame.budget_tool_result', { value: tr('subagent.frame.budget_chars', { count: 200000 }) })));
+    registry.dispose();
+});
+
+test('runTask keeps zero tool-result length and defaults zero or missing iterations and fields', async t => {
+    const registry = new SubTaskRegistry();
+    const prompts: string[] = [];
+    const model = { stream(payload: Payload, handlers: Handlers) {
+        prompts.push(String(payload.messages?.[0]?.content ?? ''));
+        handlers.done(tekstowa('done'));
+    } };
+    const runner = new SubAgentRunner({ toolRegistry: { filterByAgent: () => [], getTool: () => null }, app: {}, plugin: { subTaskRegistry: registry } });
+    await runner.runTask('zero', { name: 'Owner' }, { name: 'worker', tools: [], max_iterations: 0, max_tool_result_length: 0 } as never, model, { modelTimeout: 10000 } as never);
+    t.is(registry.list()[0].budget.maxIterations, 25);
+    t.is(registry.list()[0].budget.maxToolResultLength, 0);
+    t.true(prompts[0].includes(tr('subagent.frame.budget_iterations', { count: 25 })));
+    t.true(prompts[0].includes(tr('subagent.frame.budget_tool_result', { value: tr('subagent.frame.budget_unlimited') })));
+    await runner.runTask('missing', { name: 'Owner' }, { name: 'worker', tools: [] } as never, model, { modelTimeout: 10000 } as never);
+    t.is(registry.list()[1].budget.maxIterations, 25);
+    t.is(registry.list()[1].budget.maxToolResultLength, 15000);
+    t.true(prompts[1].includes(tr('subagent.frame.budget_iterations', { count: 25 })));
+    t.true(prompts[1].includes(tr('subagent.frame.budget_tool_result', { value: tr('subagent.frame.budget_chars', { count: 15000 }) })));
+    registry.dispose();
+});
+
+test('runTask preserves in-range YAML limits', async t => {
+    const registry = new SubTaskRegistry();
+    let prompt = '';
+    const model = { stream(payload: Payload, handlers: Handlers) { prompt = String(payload.messages?.[0]?.content ?? ''); handlers.done(tekstowa('done')); } };
+    const runner = new SubAgentRunner({ toolRegistry: { filterByAgent: () => [], getTool: () => null }, app: {}, plugin: { subTaskRegistry: registry } });
+    await runner.runTask('task', { name: 'Owner' }, { name: 'worker', tools: [], max_iterations: 7, max_tool_result_length: 23000 } as never, model, { modelTimeout: 10000 } as never);
+    t.is(registry.list()[0].budget.maxIterations, 7);
+    t.is(registry.list()[0].budget.maxToolResultLength, 23000);
+    t.true(prompt.includes(tr('subagent.frame.budget_iterations', { count: 7 })));
+    t.true(prompt.includes(tr('subagent.frame.budget_tool_result', { value: tr('subagent.frame.budget_chars', { count: 23000 }) })));
+    registry.dispose();
 });

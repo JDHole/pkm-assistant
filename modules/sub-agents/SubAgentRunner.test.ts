@@ -381,6 +381,24 @@ test('N równoległych workerów z jednego delegate dostaje RÓŻNE etykiety', a
     for (const label of labels) t.true(label.startsWith('sub/pkm-sub#'));
 });
 
+test('runTask hides delegate at the depth limit and keeps it below the limit', async t => {
+    const names = ['delegate', 'agent_delegate'];
+    const tools = names.map(name => ({ name, description: name, inputSchema: {}, execute: async () => 'unused' }));
+    const registry = { filterByAgent: () => tools, getTool: (name: string) => tools.find(tool => tool.name === name) || null };
+    const observed: Array<{ names: string[]; prompt: string }> = [];
+    const model = { stream(payload: { tools?: Array<{ function: { name: string } }>; messages?: Array<{ content: string }> }, cb: { done(v: unknown): void }) {
+        observed.push({ names: (payload.tools || []).map(tool => tool.function.name), prompt: payload.messages?.[0]?.content || '' });
+        cb.done({ choices: [{ message: { role: 'assistant', content: 'done' } }] });
+    } };
+    const runner = new SubAgentRunner({ toolRegistry: registry, app: {}, plugin: {} });
+    const deeperRunner = new SubAgentRunner({ toolRegistry: registry, app: {}, plugin: { env: { settings: { pkmAssistant: { limits: { max_delegation_depth: 2 } } } } } });
+    await runner.runTask('task', { name: 'Owner' }, { name: 'worker', tools: names }, model, { delegationDepth: 1, modelTimeout: 5 });
+    await deeperRunner.runTask('task', { name: 'Owner' }, { name: 'worker', tools: names }, model, { delegationDepth: 1, modelTimeout: 5 });
+    t.deepEqual(observed[0].names, []);
+    t.true(observed[0].prompt.includes(tr('subagent.frame.no_further_delegation')));
+    t.deepEqual(observed[1].names, ['delegate', 'agent_delegate']);
+});
+
 test('filtr prefiksowy po nazwie suba nie łapie cudzych nazw (kontrakt harnessa)', async t => {
     const labels: string[] = [];
     const runner = makeTracingRunner(labels);
