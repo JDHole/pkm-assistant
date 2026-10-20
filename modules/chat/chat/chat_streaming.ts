@@ -2318,10 +2318,16 @@ export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
         this._autoTurnChainCounts.set(tab!.agentName, chain.nextCount);
 
         const deliveryTask = task.error && task.partial ? { ...task, error: task.error + '\n\n' + task.partial.text } : task;
+        const reusableThread = deliveryTask.threadId
+            ? this.plugin?.subTaskRegistry?.getThread?.(deliveryTask.threadId)
+            : undefined;
         const text = buildSubTaskNotificationText(deliveryTask, {
             // Wynik suba ma WŁASNY sufit (60k default, 0 = bez limitu) - wspólne 15k z
             // surowymi zrzutami narzędzi ucinałoby deep-research w połowie.
             maxResultChars: limits.subagent_result_max_chars,
+            ...(reusableThread?.phase === 'idle' && reusableThread.reusable === true
+                ? { subId: deliveryTask.threadId }
+                : {}),
         });
 
         // Bezpiecznik ustawiany SYNCHRONICZNIE: `drain()` woła dostawcę w pętli, a `send_message`

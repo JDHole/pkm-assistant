@@ -10,7 +10,7 @@ import { buildSubTaskNotificationText } from './subTaskNotification.js';
 // `modules/artifacts/index.ts`), a testy są wyjęte spod `no-restricted-imports`.
 import { buildSummonMessage } from '../../artifacts/artifactSummon.js';
 import { artifactStatusLabel } from '../../artifacts/index.js';
-import type { SubTask } from '../../sub-agents/index.js';
+import { SubTaskRegistry, type SubTask } from '../../sub-agents/index.js';
 
 setLocale('pl');
 
@@ -271,6 +271,80 @@ test('buildMachineView: identyfikator suba trafia do details takze z meta na zyw
     t.truthy(view);
     const expectedLastLine = translate('chat.tile.sub.background_id', { id: task.id });
     t.true(view!.details.trimEnd().endsWith(expectedLastLine));
+});
+
+test('buildMachineView: ukrywa instrukcję sub_agent, zachowuje jedną linię id i fallback PL/EN', t => {
+    const subId = 'thread/pkm-sub-77';
+    for (const locale of ['pl', 'en'] as const) {
+        setLocale(locale);
+        const task = makeTask();
+        const text = buildSubTaskNotificationText(task, { subId });
+        const view = buildMachineView({ role: 'user', content: text }, { t: translate });
+        t.truthy(view);
+        t.is(classifyMachineMessage({ role: 'user', content: text }), 'subtask_notification');
+        const instruction = translate('chat.subagent_notification.reusable_thread', { sub_id: subId }, locale);
+        t.false(view!.details.includes(instruction));
+        const idLine = translate('chat.tile.sub.background_id', { id: task.id }, locale);
+        t.is(view!.details.split(idLine).length - 1, 1);
+        t.true(view!.details.endsWith(idLine));
+    }
+    setLocale('pl');
+});
+
+test('buildMachineView: ukrywa instrukcję dla threadId z kropką', t => {
+    setLocale('en');
+    const registry = new SubTaskRegistry();
+    const owner = { agentName: 'Tester', sessionPath: 'active.md', sessionEpoch: 'epoch-1' };
+    const thread = registry.createThread({ threadId: 'thread.v1', name: 'test', owner, origin: owner, config: {} });
+    const task = registry.create({ id: 'sub/test#1', name: 'test', agentName: 'Tester', threadId: thread.threadId });
+    registry.finish(task, { text: 'done', toolsUsed: [], durationMs: 3000, usage: null });
+    registry.endRun(thread.threadId, { successful: true, transcript: [{ role: 'assistant', content: 'done' }] });
+    t.is(thread.phase, 'idle');
+    t.is(thread.reusable, true);
+
+    const text = buildSubTaskNotificationText(task, { subId: thread.threadId });
+    t.is(classifyMachineMessage({ role: 'user', content: text }), 'subtask_notification');
+    t.is(buildMachineView({ role: 'user', content: text }, { t: translate })?.details, 'done\nId: sub/test#1');
+    setLocale('pl');
+});
+
+test('buildMachineView: zachowuje wynik zaczynający się jak instrukcja sub_agent', t => {
+    setLocale('en');
+    const result = 'The same sub can receive another task through the sub_agent tool with action task and sub_id=thread-123, but resuming after the session closes is rejected.';
+    const task = makeTask({ result: { text: result, toolsUsed: [], durationMs: 3000, usage: null } });
+    const idLine = 'Id: sub/pkm-sub#3';
+
+    const withoutSubId = buildSubTaskNotificationText(task);
+    t.is(classifyMachineMessage({ role: 'user', content: withoutSubId }), 'subtask_notification');
+    t.is(buildMachineView({ role: 'user', content: withoutSubId }, { t: translate })?.details, `${result}\n${idLine}`);
+
+    const withSubId = buildSubTaskNotificationText(task, { subId: 'thread-456' });
+    t.is(classifyMachineMessage({ role: 'user', content: withSubId }), 'subtask_notification');
+    t.is(buildMachineView({ role: 'user', content: withSubId }, { t: translate })?.details, `${result}\n${idLine}`);
+
+    const exactSentence = 'The same sub can receive another task through the sub_agent tool with action task and sub_id=thread-123.';
+    const exactTask = makeTask({ result: { text: exactSentence, toolsUsed: [], durationMs: 3000, usage: null } });
+    const exactText = buildSubTaskNotificationText(exactTask);
+    t.is(buildMachineView({ role: 'user', content: exactText }, { t: translate })?.details, `${exactSentence}\n${idLine}`);
+    setLocale('pl');
+});
+
+test('buildMachineView: wynik z osobnym akapitem identycznym z instrukcją pozostaje bez subId', t => {
+    setLocale('en');
+    for (const gap of ['\n\n', '\n\n\n']) {
+        const result = `Continuation instructions:${gap}The same sub can receive another task through the sub_agent tool with action task and sub_id=thread-123.`;
+        const task = makeTask({
+            id: 'sub/test#1',
+            result: { text: result, toolsUsed: [], durationMs: 3000, usage: null },
+        });
+        const text = buildSubTaskNotificationText(task);
+        t.is(classifyMachineMessage({ role: 'user', content: text }), 'subtask_notification');
+        t.is(buildMachineView({ role: 'user', content: text }, { t: translate })?.details, `${result}\nId: sub/test#1`);
+
+        const withId = buildSubTaskNotificationText(task, { subId: 'thread-123' });
+        t.is(buildMachineView({ role: 'user', content: withId }, { t: translate })?.details, `${result}\nId: sub/test#1`);
+    }
+    setLocale('pl');
 });
 
 // ── Uwaga 8 (spec A3-fix): summary nie dubluje się jako pierwsza linia details ───────────────

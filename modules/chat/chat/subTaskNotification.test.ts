@@ -34,6 +34,26 @@ test('powiadomienie niesie nazwę suba, id zadania, treść wyniku i stopkę-ins
     t.true(text.includes('Podejmij wątek'), 'stopka każe modelowi kontynuować');
 });
 
+test('instrukcja sub_agent jest tylko przy subId i stoi przed stopką', t => {
+    for (const locale of ['pl', 'en'] as const) {
+        setLocale(locale);
+        const task = makeTask();
+        const expectedSentence = tr('chat.subagent_notification.reusable_thread', { sub_id: task.threadId || 'sub/pkm-sub' }, locale);
+        const withId = buildSubTaskNotificationText(task, { subId: task.threadId || 'sub/pkm-sub' });
+        const withoutId = buildSubTaskNotificationText(task);
+        const expectedBase = [
+            tr('chat.subagent_notification.header', { name: 'pkm-sub', task_id: task.id }, locale),
+            tr('chat.subagent_notification.meta_with_time', { status: tr('chat.subagent_notification.status_done', undefined, locale), seconds: '3.0' }, locale),
+            'Znalazłem trzy notatki.',
+        ];
+        t.is(withId, `${expectedBase.join('\n\n')}\n\n${expectedSentence}\n\n\n${tr('chat.subagent_notification.footer', undefined, locale)}`);
+        t.is(withoutId, [...expectedBase, tr('chat.subagent_notification.footer', undefined, locale)].join('\n\n'));
+        t.true(withId.indexOf(expectedSentence) < withId.indexOf(tr('chat.subagent_notification.footer', undefined, locale)));
+        t.false(withoutId.includes(tr('chat.subagent_notification.reusable_thread', { sub_id: '' }, locale)));
+    }
+    setLocale('pl');
+});
+
 test('czas pracy liczony z durationMs (sekundy, jedno miejsce po przecinku)', t => {
     const text = buildSubTaskNotificationText(makeTask({
         result: { text: 'ok', toolsUsed: [], durationMs: 12340, usage: null },

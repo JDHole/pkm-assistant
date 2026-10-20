@@ -31,6 +31,8 @@ interface SubTaskNotificationOptions {
     /** Sufit długości treści wyniku. `0` = bez limitu. Default:
      *  `subagent_result_max_chars` z config/limits (wynik suba to deliverable, nie zrzut). */
     maxResultChars?: number;
+    /** Id reusable thread, exposed to the model for the next sub_agent task call. */
+    subId?: string;
 }
 
 /** Ludzka nazwa stanu biegu — `t()` wołane leniwie, żeby respektować bieżący język. */
@@ -156,8 +158,12 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
         parts.push(t('chat.subagent_notification.failed', { error: err }));
     }
 
-    parts.push(t('chat.subagent_notification.footer'));
-    return parts.join('\n\n');
+    const body = parts.join('\n\n');
+    const instruction = options.subId
+        ? `\n\n${t('chat.subagent_notification.reusable_thread', { sub_id: options.subId })}`
+        : '';
+    const footerSeparator = options.subId ? '\n\n\n' : '\n\n';
+    return `${body}${instruction}${footerSeparator}${t('chat.subagent_notification.footer')}`;
 }
 
 /**
