@@ -375,7 +375,12 @@ export async function handleNewSession(this: ChatViewLike) {
     // przypadkach plik aktywnej sesji zostaje na swojej ścieżce w `sessions/active/`, NIE jest
     // przenoszony. Ścieżka nie wraca więc do puli i nie ma kolizji do obrony przed - zamknięcie
     // zakładki to schowanie rozmowy z oczu, nie zakończenie sesji.
-    const closingConsentSessionPath = this.plugin?.agentManager?.getActiveMemory()?.activeSessionPath || '';
+    const closingSessionMemory = this.plugin?.agentManager?.getActiveMemory();
+    const closingSessionTab = this.chatTabs?.find((tab) => tab.isActive);
+    const closingSessionAgentName = closingSessionMemory?.agentName
+        || closingSessionTab?.agentName
+        || '';
+    const closingConsentSessionPath = closingSessionMemory?.activeSessionPath || '';
 
     const msgCount = this.rollingWindow.messages.length;
     log.info('Chat', `handleNewSession: ${msgCount} wiadomości`);
@@ -395,12 +400,12 @@ export async function handleNewSession(this: ChatViewLike) {
 
         if (choice === 'cancel') return;
 
-        const agentMemoryForOpts = this.plugin?.agentManager?.getActiveMemory();
+        const agentMemoryForOpts = closingSessionMemory;
 
         // Biegi subów należą do SESJI - zamknięcie (archive/discard) wymiata jej zakończone
         // biegi z rejestru, żeby chipy nie przeżywały do nowej rozmowy (inaczej klucz zakładki
         // nie odróżnia starej sesji od nowej). `running` zostają.
-        const closingSessionPath = agentMemoryForOpts?.activeSessionPath || '';
+        const closingSessionPath = closingConsentSessionPath;
         if (closingSessionPath) {
             this.plugin?.subTaskRegistry?.pruneSession?.(closingSessionPath);
             this._renderSubTaskStrip?.();
@@ -431,9 +436,10 @@ export async function handleNewSession(this: ChatViewLike) {
     // Sesja się KOŃCZY tutaj (cancel już zwrócił wyżej) - gaś jej zgodę PRZED wymianą tożsamości.
     if (closingConsentSessionPath) {
         this.plugin?.mcpClient?.sessionWriteConsent.clearSession(closingConsentSessionPath);
+        this.plugin?.subTaskRegistry?.closeSessionThreads?.(closingSessionAgentName, closingConsentSessionPath);
     }
 
-    const agentMemory = this.plugin?.agentManager?.getActiveMemory();
+    const agentMemory = closingSessionMemory;
     if (agentMemory) {
         await agentMemory.startNewSession();
     }

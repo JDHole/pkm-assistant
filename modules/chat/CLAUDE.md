@@ -710,7 +710,12 @@ suba kończy się długo po zamknięciu tury. Czat jest nadawcą adresu zwrotneg
   restart Obsidiana. Treść składa `chat/subTaskNotification.ts`
   (`buildSubTaskNotificationText`): nagłówek, stan po ludzku + czas, wynik przycięty do
   `subagent_result_max_chars` (default 60000, `0` = bez limitu) ALBO błąd, stopka każąca modelowi
-  podjąć wątek.
+  podjąć wątek. Gdy `task.threadId` wskazuje w chwili dostarczenia wątek `idle` i `reusable`,
+  treść przed stopką niesie instrukcję użycia tego `sub_id` w `sub_agent` z akcją `task`.
+  `machineMessage.ts` usuwa instrukcję z kafelka usera, zachowując osobną linię identyfikatora;
+  rozpoznaje ją po trzech znakach nowej linii przed stopką (bez instrukcji są dwa),
+  więc identyczne zdanie w wyniku suba pozostaje widoczne.
+  Nagłówek nadal wystarcza do klasyfikacji po treści po restarcie i zmianie języka.
 - ⚠️ **Kolejka `pending` notifiera żyje w RAM** (`modules/sub-agents/SubTaskNotifier.js`) - nie
   przeżywa restartu Obsidiana. Zamknięcie czatu jest bezpieczne (wyniki czekają do ponownego
   otwarcia); restart aplikacji gubi niedostarczone wyniki (i same biegi - suby nie są
@@ -809,18 +814,20 @@ sam - NIGDY nie dostaje `is-hidden` z `_applyBottomBarMode`), tuż PRZED `_chipB
   każdym powrocie na nią. Nowa sesja powstaje leniwie, przy pierwszym kolejnym zdarzeniu, jak
   dla świeżej zakładki. Warianty `archive_new` (od razu nowa sesja) i `archive_close` (zamknij
   zakładkę) mają własną, jawną obsługę tych samych pól.
-- ⚠️ **DWIE drogi kończą sesję i OBIE gasi `SessionWriteConsent` dla ścieżki, która WŁAŚNIE się
-  kończy** - `handleNewSession` (ten plik) łapie `activeMemory.activeSessionPath` PRZED
-  archive/discard/`startNewSession()` i woła
-  `plugin.mcpClient?.sessionWriteConsent.clearSession(tamtaŚcieżka)` tuż przed wymianą tożsamości;
+- ⚠️ **DWIE drogi kończą sesję i obie sprzątają zgodę oraz wątki tej sesji** -
+  `handleNewSession` (ten plik) łapie nazwę agenta i `activeMemory.activeSessionPath` PRZED
+  archive/discard/`startNewSession()` i tuż przed wymianą tożsamości woła
+  `sessionWriteConsent.clearSession(path)` oraz `subTaskRegistry.closeSessionThreads(agentName, path)`;
   `modules/chat/slash-commands/save_session.ts`'s `applyPostArchiveAction()` (`/save session`)
-  robi TO SAMO dla WSZYSTKICH trzech wariantów (`archive`/`archive_new`/`archive_close`) - jedno
-  wołanie na wejściu funkcji, ze ścieżką złapaną PRZED `workflow.applyDecision()` (czyli przed
-  `archiveActiveSession`, które dla plain `archive` samo zeruje `activeSessionPath` - odczyt PO
-  fakcie dawałby już `null`). Powód obu: nazwa pliku sesji ma rozdzielczość MINUTOWĄ i po
+  robi to samo dla WSZYSTKICH trzech wariantów (`archive`/`archive_new`/`archive_close`) - jedno
+  wołanie na wejściu funkcji, z `agentMemory.agentName` i ścieżką złapaną PRZED
+  `workflow.applyDecision()` (czyli przed `archiveActiveSession`, które dla plain `archive` samo
+  zeruje `activeSessionPath` - odczyt PO fakcie dawałby już `null`). Powód obu: nazwa pliku sesji
+  ma rozdzielczość MINUTOWĄ i po
   archive/discard WRACA DO PULI - bez czyszczenia druga „nowa rozmowa" tego samego agenta w tej
   samej minucie mogłaby dostać tę samą nazwę i odziedziczyć cudzą zgodę „nie pytaj więcej".
-  `_closeActiveTab` świadomie tego NIE robi (nie przenosi pliku, więc ścieżka nie wraca do puli).
+  Wątek biegnący dostaje zamknięcie po `endRun`. `_closeActiveTab` świadomie nie zamyka wątków
+  ani zgody (nie przenosi pliku, więc ścieżka nie wraca do puli).
   Pełne uzasadnienie: `modules/tools/CLAUDE.md`, gotcha "Zgoda na zapis". Testy:
   `chat/chat_session.test.ts`, `slash-commands/save_session.archiveNewConsent.test.ts`.
 - ⚠️ **`_restoreActiveSession` MUSI przekazać `tool_call_id`/`tool_calls` jako TRZECI argument

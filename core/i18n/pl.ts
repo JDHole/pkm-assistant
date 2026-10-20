@@ -382,6 +382,7 @@ export const pl: Record<string, string> = {
   'chat.subagent_notification.truncated': '[…wynik przycięty do {{chars}} znaków]',
   'chat.subagent_notification.failed': 'Zadanie się nie udało: {{error}}',
   'chat.subagent_notification.unknown_error': 'nieznany błąd',
+  'chat.subagent_notification.reusable_thread': 'Ten sam sub może dostać kolejne zadanie przez narzędzie sub_agent z akcją task i sub_id={{sub_id}}.',
   'chat.subagent_notification.footer': 'Podejmij wątek - wykorzystaj ten wynik do dokończenia zadania. Jeśli zlecałeś więcej zadań, ich wyniki przyjdą osobno; nie zgaduj ich treści.',
   'chat.tool_status.vault_search': 'Szukam w vaultcie...',
   'chat.tool_status.vault_read': 'Czytam notatkę...',

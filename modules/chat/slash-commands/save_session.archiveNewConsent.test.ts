@@ -23,6 +23,67 @@ import { SessionWriteConsent } from '../../../core/index.js';
 import { SaveSessionWorkflow } from '../../memory/index.js';
 import type { SaveSessionOutcome, SaveSessionPrep } from '../../memory/index.js';
 import { SaveSessionModal } from '../SaveSessionModal.js';
+import { SubTaskRegistry } from '../../sub-agents/index.js';
+
+function addIdleThread(registry: SubTaskRegistry, threadId: string, agentName: string, sessionPath: string) {
+    const owner = { agentName, sessionPath, sessionEpoch: `${threadId}-epoch` };
+    const thread = registry.createThread({ threadId, name: 'worker', owner, origin: owner, config: {} });
+    registry.create({ id: `${threadId}-run`, name: 'worker', agentName, threadId });
+    registry.endRun(threadId, { successful: true, transcript: [{ role: 'assistant', content: 'done' }] });
+    return thread;
+}
+
+test('applyPostArchiveAction archive/archive_new/archive_close zamyka tylko wątki sesji', async t => {
+    for (const action of ['archive', 'archive_new', 'archive_close'] as const) {
+        const registry = new SubTaskRegistry();
+        const closing = addIdleThread(registry, `closing-${action}`, 'Jaskier', 'sessions/active/closing.md');
+        const otherSession = addIdleThread(registry, `other-${action}`, 'Jaskier', 'sessions/active/other.md');
+        const otherAgent = addIdleThread(registry, `agent-${action}`, 'Borys', 'sessions/active/closing.md');
+        const agentMemory = {
+            agentName: 'Jaskier',
+            activeSessionPath: 'sessions/active/closing.md' as string | null,
+            setActiveSessionIdentity: () => {},
+            _persistActiveSession: async () => {},
+            startActiveSession: async () => 'sessions/active/new.md',
+        };
+        const view = {
+            chatTabs: [{ isActive: true, sessionPath: 'sessions/active/closing.md' }],
+            _createRollingWindow: () => ({ messages: [] }),
+            render_messages: () => {}, add_welcome_message: () => {}, updateTokenCounter: () => {}, _updateTokenPanel: () => {},
+            _renderTabBar: () => {},
+        };
+        const plugin = { subTaskRegistry: registry };
+        await applyPostArchiveAction(
+            view as never,
+            plugin as never,
+            agentMemory as never,
+            { action, cancelled: false } as never,
+            'sessions/active/closing.md',
+        );
+        t.is(closing.phase, 'closed', `${action}: wątek kończonej sesji zamknięty`);
+        t.is(otherSession.phase, 'idle', `${action}: wątek innej sesji tego agenta pozostaje idle`);
+        t.is(otherAgent.phase, 'idle', `${action}: wątek innego agenta pozostaje idle`);
+    }
+});
+
+test('applyPostArchiveAction zamyka biegnący wątek po endRun i toleruje brak rejestru', async t => {
+    const registry = new SubTaskRegistry();
+    const owner = { agentName: 'Jaskier', sessionPath: 'sessions/active/running.md', sessionEpoch: 'running-epoch' };
+    const running = registry.createThread({ threadId: 'running-save', name: 'worker', owner, origin: owner, config: {} });
+    registry.create({ id: 'running-save-run', name: 'worker', agentName: owner.agentName, threadId: running.threadId });
+    const agentMemory = { agentName: owner.agentName, activeSessionPath: owner.sessionPath };
+    await applyPostArchiveAction({} as never, { subTaskRegistry: registry } as never, agentMemory as never,
+        { action: 'archive' } as never, owner.sessionPath);
+    t.true(running.closeAfterRun);
+    registry.endRun(running.threadId, { successful: true });
+    t.is(running.phase, 'closed');
+    await applyPostArchiveAction({} as never, {} as never, agentMemory as never,
+        { action: 'archive' } as never, owner.sessionPath);
+    t.is(running.phase, 'closed');
+    await applyPostArchiveAction({} as never, { subTaskRegistry: {} } as never, agentMemory as never,
+        { action: 'archive' } as never, owner.sessionPath);
+    t.is(running.phase, 'closed');
+});
 
 test('applyPostArchiveAction: archive_new kasuje zgodę sesyjną dla STAREJ ścieżki, inna sesja zostaje nietknięta', async t => {
     const consent = new SessionWriteConsent();

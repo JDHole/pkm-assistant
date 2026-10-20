@@ -60,6 +60,7 @@ export interface MachineMessageLike {
 const SUBTASK_HEADER_KEY = 'chat.subagent_notification.header';
 const ARTIFACT_HEADER_KEY = 'artifact.summon.header';
 const SUBTASK_FOOTER_KEY = 'chat.subagent_notification.footer';
+const SUBTASK_REUSABLE_THREAD_KEY = 'chat.subagent_notification.reusable_thread';
 // B3 fix (recenzja A3-fix): stan suba jest wyliczany z ETYKIET linii stanu
 // (`status_error`/`status_aborted`), NIGDY z frazy "Zadanie się nie udało: " w treści wyniku -
 // patrz `subtaskOutcome` niżej.
@@ -250,12 +251,28 @@ function subtaskDetails(text: string): { afterHeader: string; details: string } 
     const firstSplit = text.indexOf('\n\n');
     const afterHeader = firstSplit >= 0 ? text.slice(firstSplit + 2) : text;
     let details = afterHeader;
+    let hasReusableInstruction = false;
     for (const locale of LOCALES) {
         const footer = t(SUBTASK_FOOTER_KEY, undefined, locale);
         if (footer && details.endsWith(footer)) {
-            details = details.slice(0, details.length - footer.length).replace(/\n\n$/, '');
+            details = details.slice(0, details.length - footer.length);
+            hasReusableInstruction = details.endsWith('\n\n\n');
+            details = details.replace(/\n\n\n?$/, '');
             break;
         }
+    }
+    // Tylko wygenerowana instrukcja ma trzy znaki nowej linii PRZED stopką.
+    // Wynik bez sub_id zawsze ma tam dwa, nawet gdy sam cytuje dokładnie tę instrukcję.
+    if (hasReusableInstruction) {
+        const lastSplit = details.lastIndexOf('\n\n');
+        const lastParagraph = details.slice(lastSplit + 2);
+        const isReusableInstruction = LOCALES.some(locale => {
+            const [prefix, suffix] = templateSegments(SUBTASK_REUSABLE_THREAD_KEY, locale, ['sub_id']);
+            if (!prefix || !suffix || !lastParagraph.startsWith(prefix) || !lastParagraph.endsWith(suffix)) return false;
+            const subId = lastParagraph.slice(prefix.length, -suffix.length);
+            return subId.length > 0;
+        });
+        if (lastSplit >= 0 && isReusableInstruction) details = details.slice(0, lastSplit);
     }
     return { afterHeader, details: details.trim() };
 }

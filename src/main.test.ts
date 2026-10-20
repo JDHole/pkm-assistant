@@ -209,6 +209,20 @@ test('onunload: kolejność kroków (notices → env.dispose → sink logu na ko
         'sink logu zamykamy NA SAMYM KOŃCU — kroki wyżej jeszcze logują, a bufor czeka na debounce');
 });
 
+test('onunload: stopAll zamyka wątki przed odpięciem konsumentów rejestru', t => {
+    const onunload = methodBody(source, 'onunload');
+    const stop = onunload.indexOf("this.subTaskRegistry?.stopAll?.('unload')");
+    const close = onunload.indexOf('this.subTaskRegistry?.closeAll?.()');
+    const notifier = onunload.indexOf('this.subTaskNotifier?.dispose?.()');
+    const registry = onunload.indexOf('this.subTaskRegistry?.dispose?.()');
+
+    t.true(stop >= 0 && close >= 0 && notifier >= 0 && registry >= 0, 'brakuje kroku unload rejestru subów');
+    t.true(close > stop, 'wątki zamykamy po zgłoszeniu Stopu biegom');
+    t.true(close < notifier && close < registry, 'rejestr zamykamy przed odpięciem jego konsumentów');
+    t.regex(onunload, /try\s*\{\s*this\.subTaskRegistry\?\.closeAll\?\.\(\)\s*;?\s*\}\s*catch\s*\(e\)\s*\{\s*log\.warn\(/,
+        'closeAll musi być fail-soft i logować pad do Loggera');
+});
+
 /**
  * Sedno od strony USERA: gdy w ustawieniach stoi `language: 'pl'`, do `addCommand`
  * ma pójść POLSKA nazwa. W gołym Node nie zaimportujemy `src/main.ts` (ciągnie `obsidian`),

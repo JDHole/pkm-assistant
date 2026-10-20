@@ -28,6 +28,9 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Background sub-agent results now match chat tabs by session path before falling back to an agent tab.
 - Closing a chat tab or chat view now marks sub-agent stops as system initiated.
 - `MCPClient.executeToolCall` supports an execution-start callback after its permission and approval gates.
+- Ending a chat session closes its sub-agent threads, with running threads closing after their run ends.
+- Plugin unload closes all sub-agent threads after requesting that active runs stop.
+- Background sub-agent results tell the model which reusable sub ID can receive a follow-up task.
 
 ### Changed
 

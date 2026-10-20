@@ -3,6 +3,7 @@ import { RollingWindow } from './RollingWindow.js';
 import { _restoreActiveSession, handleNewSession } from './chat_session.js';
 import { SessionWriteConsent } from '../../../core/index.js';
 import { SessionCloseModal } from '../SessionCloseModal.js';
+import { SubTaskRegistry } from '../../sub-agents/index.js';
 
 /**
  * BUG C1 — restore po restarcie Obsidiana gubił `tool_call_id`/`tool_calls`.
@@ -236,6 +237,56 @@ function buildFakeThisForModalBranch(activeSessionPath: string, sessionWriteCons
     };
 }
 
+function addIdleThread(registry: SubTaskRegistry, threadId: string, agentName: string, sessionPath: string) {
+    const owner = { agentName, sessionPath, sessionEpoch: `${threadId}-epoch` };
+    const thread = registry.createThread({ threadId, name: 'worker', owner, origin: owner, config: {} });
+    registry.create({ id: `${threadId}-run`, name: 'worker', agentName, threadId });
+    registry.endRun(threadId, { successful: true, transcript: [{ role: 'assistant', content: 'done' }] });
+    return thread;
+}
+
+test.serial('handleNewSession archive/discard zamyka tylko wątki tej sesji', async t => {
+    for (const choice of ['archive', 'discard'] as const) {
+        const registry = new SubTaskRegistry();
+        const closing = addIdleThread(registry, `closing-${choice}`, 'Jaskier', 'active/closing.md');
+        const otherSession = addIdleThread(registry, `other-${choice}`, 'Jaskier', 'active/other.md');
+        const otherAgent = addIdleThread(registry, `agent-${choice}`, 'Borys', 'active/closing.md');
+        const consent = new SessionWriteConsent();
+        const fakeThis = buildFakeThisForModalBranch('active/closing.md', consent);
+        const tab = { agentName: 'Jaskier', isActive: true, sessionPath: 'active/closing.md' };
+        fakeThis.chatTabs = [tab];
+        fakeThis.plugin.agentManager.getActiveAgent = () => ({ name: tab.agentName });
+        fakeThis.handleSaveSession = async () => { tab.agentName = 'Borys'; };
+        fakeThis.plugin.subTaskRegistry = registry;
+        const originalPrompt = SessionCloseModal.prototype.prompt;
+        SessionCloseModal.prototype.prompt = async function () { return { choice }; };
+        try {
+            await handleNewSession.call(fakeThis);
+        } finally {
+            SessionCloseModal.prototype.prompt = originalPrompt;
+        }
+        t.is(closing.phase, 'closed', `${choice}: wątek kończonej sesji zamknięty`);
+        t.is(otherSession.phase, 'idle', `${choice}: wątek innej sesji tego agenta pozostaje idle`);
+        t.is(otherAgent.phase, 'idle', `${choice}: wątek innego agenta pozostaje idle`);
+    }
+});
+
+test('handleNewSession zamyka biegnący wątek po endRun', async t => {
+    const registry = new SubTaskRegistry();
+    const owner = { agentName: 'Jaskier', sessionPath: 'active/running.md', sessionEpoch: 'run-epoch' };
+    const running = registry.createThread({ threadId: 'running-session', name: 'worker', owner, origin: owner, config: {} });
+    registry.create({ id: 'running-session-task', name: 'worker', agentName: owner.agentName, threadId: running.threadId });
+    const fakeThis = buildFakeThisForNewSession(owner.sessionPath, new SessionWriteConsent());
+    fakeThis.chatTabs = [{ agentName: owner.agentName, isActive: true, sessionPath: owner.sessionPath }];
+    fakeThis.plugin.subTaskRegistry = registry;
+
+    await handleNewSession.call(fakeThis);
+    t.is(running.phase, 'running');
+    t.true(running.closeAfterRun);
+    registry.endRun(running.threadId, { successful: true });
+    t.is(running.phase, 'closed');
+});
+
 test.serial('handleNewSession: ANULOWANIE w SessionCloseModal - zgoda dla BIEŻĄCEJ ścieżki ZOSTAJE', async t => {
     const consent = new SessionWriteConsent();
     consent.grant('sessions/active/Jaskier_biezaca.md', 'Notatki/a.md');
@@ -244,7 +295,14 @@ test.serial('handleNewSession: ANULOWANIE w SessionCloseModal - zgoda dla BIEŻ�
     SessionCloseModal.prototype.prompt = async function () { return { choice: 'cancel' }; };
     try {
         const fakeThis = buildFakeThisForModalBranch('sessions/active/Jaskier_biezaca.md', consent);
+        const thread = addIdleThread(
+            fakeThis.plugin.subTaskRegistry = new SubTaskRegistry(),
+            'cancelled-session-thread',
+            'Jaskier',
+            'sessions/active/Jaskier_biezaca.md',
+        );
         await handleNewSession.call(fakeThis);
+        t.is(thread.phase, 'idle', 'anulowanie zostawia wątek aktywnej sesji otwarty');
     } finally {
         SessionCloseModal.prototype.prompt = originalPrompt;
     }

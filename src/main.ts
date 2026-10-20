@@ -435,6 +435,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     // odpięci. `stopAll` tylko WOŁA uchwyty (abort streamu + flaga pętli) - nie czekamy na
     // zejście biegów, bo Obsidian nie czeka na obietnice z `onunload`.
     this.subTaskRegistry?.stopAll?.('unload');
+    try { this.subTaskRegistry?.closeAll?.(); } catch (e) { log.warn('Main', 'subTaskRegistry.closeAll padł (demontaż leci dalej):', e); }
     // Druga siatka: bieg, który nie zdążył założyć bytu w rejestrze (config/model/prompt
     // budują się przed `onTaskCreated`), nie ma w nim uchwytu - jego kontrolka abortu żyje
     // po stronie narzędzia delegacji. Tam też trzeba sięgnąć, zanim znikną kanały.

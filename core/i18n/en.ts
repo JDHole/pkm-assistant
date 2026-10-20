@@ -384,6 +384,7 @@ export const en: Record<string, string> = {
   'chat.subagent_notification.truncated': '[…result truncated to {{chars}} characters]',
   'chat.subagent_notification.failed': 'The task failed: {{error}}',
   'chat.subagent_notification.unknown_error': 'unknown error',
+  'chat.subagent_notification.reusable_thread': 'The same sub can receive another task through the sub_agent tool with action task and sub_id={{sub_id}}.',
   'chat.subagent_notification.footer': 'Pick the thread back up - use this result to finish the job. If you started more tasks, their results will arrive separately; do not guess their content.',
   'chat.tool_status.vault_search': 'Searching vault...',
   'chat.tool_status.vault_read': 'Reading note...',
