@@ -62,6 +62,7 @@ export const en: Record<string, string> = {
   'tool.skill_list': 'Skill list',
   'tool.skill_execute': 'Execute skill',
   'tool.delegate': 'Sub-agent',
+  'tool.sub_agent': 'Sub-agent',
   'tool.connect_to_server': 'MCP Server',
   'tool.minion_task': 'Sub-agent task',
   'tool.master_task': 'Sub-agent consultation',
@@ -127,6 +128,7 @@ export const en: Record<string, string> = {
 
   // ── Tool input formatting ──
   'tool.in.path': 'Path: {{path}}  |  Mode: {{mode}}',
+  'tool.in.sub_agent': 'Action: {{action}} | sub_id: {{sub_id}}',
   'tool.in.content': 'Content:\n{{content}}',
   'tool.in.recursive': '  (recursively)',
   'tool.in.folder': 'Folder: {{path}}',
@@ -397,6 +399,7 @@ export const en: Record<string, string> = {
   'chat.tool_status.memory_summaries': 'Searching summaries...',
   'chat.tool_status.memory_delete': 'Deleting from memory...',
   'chat.tool_status.delegate': 'Starting sub-agent...',
+  'chat.tool_status.sub_agent': 'Running sub-agent action...',
   'chat.tool_status.todo': 'Updating task list...',
   'chat.tool_status.generate_image': 'Generating image...',
   'chat.tool_status.vault_create_folder': 'Creating folder...',
