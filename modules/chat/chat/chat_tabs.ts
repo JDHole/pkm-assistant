@@ -269,7 +269,16 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
     // Suby zlecone Z TEJ zakładki — po adresie zwrotnym (`origin`), jak w `stop_all_turns`.
     // `requestStop` to PROŚBA: bieg gaśnie przy najbliższym punkcie przerwania swojej pętli.
     const registry = this.plugin?.subTaskRegistry;
-    if (!registry?.list || !registry.requestStop) return;
+    if (!registry) return;
+    try {
+        registry.closeQueuedForOwners?.({
+            tabKeys: [tabKey],
+            agentNames: agentName ? [agentName] : [],
+        }, 'system');
+    } catch (e) {
+        log.warn('Chat', `Zamknięcie kolejki subów zamykanej zakładki padło: ${(e as Error)?.message || String(e)}`);
+    }
+    if (!registry.list || !registry.requestStop) return;
     try {
         const ids = collectSubTaskIdsForOwners(registry.list(), {
             tabKeys: [tabKey],

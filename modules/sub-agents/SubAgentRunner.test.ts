@@ -366,7 +366,7 @@ test('etykieta trace suba niesie identyfikator wywołania (sub/<nazwa>#<id>)', a
     await runner.runTask('zadanie', { name: 'Tester' }, { name: 'pkm-sub', tools: [] }, fakeDoneModel(), { modelTimeout: 5 });
 
     t.is(labels.length, 1);
-    t.regex(labels[0], /^sub\/pkm-sub#[a-z0-9]+$/, `etykieta bez identyfikatora wywołania: ${labels[0]}`);
+    t.regex(labels[0], /^sub\/pkm-sub#[a-f0-9]{8}-[a-z0-9]+$/, `etykieta bez identyfikatora wywołania: ${labels[0]}`);
 });
 
 test('N równoległych workerów z jednego delegate dostaje RÓŻNE etykiety', async t => {
@@ -450,7 +450,7 @@ test('runTask zakłada w rejestrze byt o id = etykieta trace i karmi go krokami 
     await runner.runTask('zadanie', { name: 'Tester' }, { name: 'pkm-sub', tools: [] }, fakeDoneModel(), { modelTimeout: 5 });
 
     t.is(created.length, 1);
-    t.regex(created[0].id, /^sub\/pkm-sub#[a-z0-9]+$/, 'id taska = dzisiejsza etykieta trace');
+    t.regex(created[0].id, /^sub\/pkm-sub#[a-f0-9]{8}-[a-z0-9]+$/, 'id taska = dzisiejsza etykieta trace');
     t.is(created[0].name, 'pkm-sub');
     t.is(created[0].agentName, 'Tester');
     // Wartość bierze się z `config/limits.js`, nie z liczby wpisanej w test — intencja
@@ -523,7 +523,7 @@ test('bez rejestru runner pisze trace jak dotąd (fallback ścieżki bez rejestr
     await runner.runTask('zadanie', { name: 'Tester' }, { name: 'pkm-sub', tools: [] }, fakeDoneModel(), { modelTimeout: 5 });
 
     t.is(labels.length, 1);
-    t.regex(labels[0], /^sub\/pkm-sub#[a-z0-9]+$/);
+    t.regex(labels[0], /^sub\/pkm-sub#[a-f0-9]{8}-[a-z0-9]+$/);
     t.true(events.includes('loop.start') && events.includes('loop.end'), 'trace dostaje kroki wprost z pętli');
 });
 
@@ -553,8 +553,8 @@ test('sub bez nazwy spada na rolę, a bez roli na „sub" — nadal z numerem wy
     await runner.runTask('a', { name: 'Tester' }, { role: 'researcher', tools: [] }, fakeDoneModel(), { modelTimeout: 5 });
     await runner.runTask('b', { name: 'Tester' }, { tools: [] }, fakeDoneModel(), { modelTimeout: 5 });
 
-    t.regex(labels[0], /^sub\/researcher#[a-z0-9]+$/);
-    t.regex(labels[1], /^sub\/sub#[a-z0-9]+$/);
+    t.regex(labels[0], /^sub\/researcher#[a-f0-9]{8}-[a-z0-9]+$/);
+    t.regex(labels[1], /^sub\/sub#[a-f0-9]{8}-[a-z0-9]+$/);
 });
 
 // --- byt zakładany PRZED startem modelu + hak onTaskCreated ---

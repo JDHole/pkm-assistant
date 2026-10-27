@@ -252,11 +252,11 @@ test.serial('stopAllDelegations dosięga biegu, który nie zdążył założyć 
  *
  * `_trackAbort` (i tym samym `_liveAborts`, siatka wyżej) rejestruje kontrolkę abortu
  * DOPIERO wewnątrz thunka, czyli dopiero gdy robotnik puli (`_runWithConcurrency`) po niego
- * sięgnie. Bramka lokalnej platformy (`_streamGateLimit() === 1`) tnie szerokość puli do
- * JEDNEGO robotnika, więc paczka 3 zadań zostawia 2 z nich w kolejce (`queued: 2`), dla
- * `_liveAborts` niewidzialne. Bez tego pokrycia `stopAllDelegations('unload')` widzi tylko
- * pierwsze zadanie; gdy ono się kończy, robotnik sięga po KOLEJNY thunk i odpala pełny
- * bieg suba (budowa modelu, prompt z dysku, `runTask`) na już zdemontowanym pluginie.
+ * sięgnie. Wątki czekających zadań są już w rejestrze, ale `stopAll()` zatrzymuje biegi,
+ * a nie rezerwacje. Bramka lokalnej platformy (`_streamGateLimit() === 1`) tnie pulę do
+ * JEDNEGO robotnika, więc paczka 3 zadań zostawia 2 z nich w kolejce (`queued: 2`), bez
+ * kontrolki w `_liveAborts`. Bez guardu `_moduleUnloaded` robotnik po zakończeniu pierwszego
+ * zadania sięgnąłby po KOLEJNY thunk i odpalił pełny bieg suba na zdemontowanym pluginie.
  */
 test.serial('stopAllDelegations ubija KOLEJKĘ multi-task w tle - zero startów po demontażu', async t => {
     __test__._resetBackground();
@@ -310,21 +310,28 @@ test.serial('stopAllDelegations ubija KOLEJKĘ multi-task w tle - zero startów 
 
     const res = await tool.execute(
         { tasks: [{ task: 'a' }, { task: 'b' }, { task: 'c' }] }, {}, plugin) as TloRes & { tasks?: Array<{ task_id: string }>; queued?: number };
+    const reserved = registry.listThreads({ agentName: 'Jaskier' });
 
     t.true(res.started, 'warunek wstępny: pierwsza fala poszła w tło');
+    t.is(reserved.length, 3, 'każdy przyjęty element ma już wątek w rejestrze');
+    t.deepEqual(reserved.map(thread => thread.phase), ['queued', 'queued', 'queued'], 'atrapa runnera pozostawia jawne rezerwacje w puli');
     t.is(res.tasks?.length, 1, 'bramka lokalna = 1 → pierwsza fala to JEDNO zadanie');
     t.is(res.queued, 2, 'warunek wstępny: dwa zadania czekają w kolejce puli');
     t.is(starts, 1, 'warunek wstępny: tylko pierwsze zadanie wystartowało');
 
-    // ── to samo, co robi `PKMPlugin.onunload`: rejestr NIE zna zakolejkowanych zadań ──
-    t.is(registry.stopAll('unload'), 1, 'rejestr zna tylko bieg już wystartowany — to jest ta dziura');
-    t.is(stopAllDelegations('unload'), 1, 'to samo widzi _liveAborts — 2 zakolejkowane zadania mu niewidzialne');
+    // ── `stopAll()` kończy biegi, a thunk guard domyka oczekujące rezerwacje przy unload ──
+    t.is(registry.stopAll('unload'), 1, '`stopAll` zatrzymuje tylko task pierwszego biegu');
+    t.is(stopAllDelegations('unload'), 1, '_liveAborts zawiera tylko aktualnie pracujące zadanie');
 
     // Zwolnij zadanie 1 — robotnik puli sięgnie po KOLEJNY thunk (zadanie 2).
     letFirstFinish();
     await czekaj(() => __test__._backgroundCount() === 0);
 
     t.is(starts, 1, 'SEDNO: zero nowych startów suba po demontażu — kolejka NIE rusza dalej');
+    t.deepEqual(reserved.map(thread => thread.phase), ['closed', 'closed', 'closed']);
+    t.deepEqual(reserved.slice(1).map(thread => registry.getTask(thread.threadId)?.outcome?.end), [
+        { kind: 'stopped', by: 'system' }, { kind: 'stopped', by: 'system' },
+    ]);
 
     __test__._resetModuleUnloaded();
 });

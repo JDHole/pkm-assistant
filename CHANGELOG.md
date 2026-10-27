@@ -8,6 +8,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 ## Unreleased
 
 ### Added
+- U9: queued sub-agent tasks are visible and can be stopped before their run starts.
+- S4b: sub-agent result frames use shared outcome labels, identify empty results, preserve work beside errors, and keep unstructured history text as text; interrupted background runs are identified after restart.
 
 - Active chat sessions now store a validated random epoch in their frontmatter without migrating older files.
 - Chat turns now carry the session epoch and a trusted user or machine turn kind to tool execution.

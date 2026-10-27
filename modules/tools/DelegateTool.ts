@@ -10,7 +10,7 @@
  * 3. Route to SubAgentRunner with role-appropriate config
  * 4. Return results
  */
-import { SubAgentRunner, DEFAULT_SUB_AGENT_TOOLS, PKM_SUB_NAME } from '../../modules/sub-agents/index.js';
+import { SubAgentRunner, DEFAULT_SUB_AGENT_TOOLS, PKM_SUB_NAME, allocateSubTaskId } from '../../modules/sub-agents/index.js';
 import type { SubTask, SubTaskOrigin } from '../../modules/sub-agents/index.js';
 import type { RunOutcome } from '../../modules/sub-agents/index.js';
 import { createModelForRole } from '../../modules/models/index.js';
@@ -185,6 +185,7 @@ interface SubAgentRunnerLike {
             /** „Byt już istnieje" - stąd bierzemy `task_id` dla zwrotki w trybie tła. */
             onTaskCreated?: (task: SubTask) => void;
             threadId?: string;
+            queuedThreadId?: string;
             /** Tryb pytań tury zlecającej, zamrożony na cały bieg. */
             autonomy?: string | null;
             /** Whitelista narzędzi wołającego suba (trzeci składnik przecięcia). */
@@ -222,7 +223,10 @@ export type DelegatePlugin = NonNullable<ResolverPluginLike> & {
         listThreads?: (owner: import('../sub-agents/index.js').SubThreadOwner) => import('../sub-agents/index.js').SubThread[];
         postMessage?: (id: string, message: string) => boolean;
         requestStop?: (id: string, by: 'lead') => boolean;
-        closeThread?: (id: string) => boolean;
+        closeThread?: (id: string, by?: 'user' | 'lead' | 'system') => boolean;
+        createThread?: (input: { threadId: string; name: string; owner: import('../sub-agents/index.js').SubThreadOwner; origin: SubTaskOrigin; config: Record<string, unknown>; phase: 'queued' }) => import('../sub-agents/index.js').SubThread;
+        finishQueuedStop?: (id: string, input: { background?: boolean; taskPreview?: string }) => SubTask | undefined;
+        finishQueuedFailure?: (id: string, input: { error: string; background?: boolean; taskPreview?: string }) => SubTask | undefined;
     } | null;
     env?: {
         settings?: {
@@ -805,6 +809,47 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                         }
                         return { ok: true, resolved };
                     });
+                    const runOrigin: SubTaskOrigin = origin ?? { agentName: activeAgent.name || '' };
+
+                    // Lista tasks rezerwuje wątki w kolejności przyjęcia, zanim pula ruszy.
+                    // Rezerwacja zawiera tylko tożsamość i adres zwrotny. Runner oblicza model,
+                    // limity i narzędzia dopiero wtedy, gdy zadanie dostanie slot.
+                    const queuedThreads: Array<import('../sub-agents/index.js').SubThread | null> = args.tasks.map(() => null);
+                    const registry = plugin?.subTaskRegistry;
+                    if (registry?.createThread) {
+                        for (let i = 0; i < args.tasks.length; i++) {
+                            if (!precheck[i].ok) continue;
+                            const resolved = (precheck[i] as { ok: true; resolved: ResolvedDelegate }).resolved;
+                            const name = _queuedThreadName(resolved, plugin);
+                            const threadId = allocateSubTaskId(name);
+                            const owner = {
+                                agentName: runOrigin.agentName,
+                                ...(origin?.sessionPath ? { sessionPath: origin.sessionPath } : {}),
+                                ...(origin?.sessionEpoch ? { sessionEpoch: origin.sessionEpoch } : {}),
+                            };
+                            try {
+                                queuedThreads[i] = registry.createThread({
+                                    threadId,
+                                    name,
+                                    owner,
+                                    origin: runOrigin,
+                                    config: {},
+                                    phase: 'queued',
+                                });
+                            } catch (error) {
+                                log.warn('DelegateTool', `Nie udało się zarezerwować wątku dla zadania ${i + 1}:`, error);
+                                // Nie uruchamiamy zadania bez rezerwacji. Pozostałe pozycje
+                                // zachowują swoje ID i miejsce w kompletnym pokwitowaniu.
+                                const message = maskSensitiveData(String((error as Error)?.message ?? error));
+                                precheck[i] = { ok: false, result: { success: false, error: message } };
+                                rejectedTasks.push({ task: args.tasks[i].task!, aspect: args.tasks[i].aspect, error: message });
+                                // Rejestr mógł zapisać wątek przed rzuceniem wyjątku.
+                                if (registry.getThread?.(threadId)?.phase === 'queued') {
+                                    registry.finishQueuedFailure?.(threadId, { error: message, background, taskPreview: args.tasks[i].task });
+                                }
+                            }
+                        }
+                    }
                     const acceptedCount = args.tasks.length - rejectedTasks.length;
 
                     const taskThunks = args.tasks.map((taskDef, i) => (): Promise<unknown> => {
@@ -822,9 +867,44 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                         // nigdy by się nie otworzyła. Ścieżka tła czeka na te bramki
                         // (`acceptedGates...opened`), więc `execute()` wisiałby w nieskończoność
                         // zamiast wrócić.
+                        const reservation = queuedThreads[i];
+                        const finishClosedReservation = (): Record<string, unknown> | null => {
+                            if (!reservation) return null;
+                            const current = registry?.getThread?.(reservation.threadId);
+                            if (current?.phase !== 'closed') return null;
+                            const task = registry?.finishQueuedStop?.(reservation.threadId, {
+                                background,
+                                taskPreview: taskDef.task,
+                            });
+                            const by = task?.outcome?.end.kind === 'stopped'
+                                ? task.outcome.end.by
+                                : current.closedBy ?? 'user';
+                            const outcome: RunOutcome = {
+                                end: { kind: 'stopped', by }, completeness: 'empty',
+                                hasAnswer: false, hasMaterial: false, effects: [],
+                            };
+                            return {
+                                success: false,
+                                error: t('mcp.delegate.outcome_error', { reason: _outcomeReason(outcome) }),
+                                stopped_by: 'abort',
+                                aspect: reservation.name,
+                                tools_used: [], tool_call_details: [], usage: null,
+                                outcome: _outcomeFields(outcome), effects: [],
+                                note: t('mcp.delegate.outcome_note'),
+                            };
+                        };
                         if (_moduleUnloaded) {
+                            if (reservation && registry?.getThread?.(reservation.threadId)?.phase !== 'closed') {
+                                registry?.closeThread?.(reservation.threadId, 'system');
+                            }
+                            const stopped = finishClosedReservation();
                             gate.open();
-                            return Promise.resolve({ success: false, error: t('mcp.delegate.plugin_unloaded') });
+                            return Promise.resolve(stopped ?? { success: false, error: t('mcp.delegate.plugin_unloaded') });
+                        }
+                        const closedAtEntry = finishClosedReservation();
+                        if (closedAtEntry) {
+                            gate.open();
+                            return Promise.resolve(closedAtEntry);
                         }
                         const resolvedDef = checked.resolved;
                         // Kontrolka abortu: timeout zadania ubija bieg suba (stream + pętla),
@@ -850,12 +930,13 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                 abortCtl,
                                 onGateAdmitted: gateArm.signal,
                                 modelTimeout: effectiveTaskTimeout,
-                                origin,
+                                origin: reservation ? runOrigin : origin,
                                 autonomy: turnAutonomy,
                                 callerScopeFolders,
                                 callerToolNames,
                                 salvageCap: limits.subagent_salvage_max_chars,
                                 background,
+                                ...(reservation ? { queuedThreadId: reservation.threadId } : {}),
                                 onTaskCreated: (task: SubTask) => {
                                     taskId = task.id;
                                     completedTaskIds[i] = task.id;
@@ -867,7 +948,31 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                         ), taskDef.timeout_ms, tasksDefaultTimeoutMs, () => {
                             abortSub(abortCtl, 'task-timeout');
                         }, _makeFinalGrace(plugin, graceMs, () => taskId), gateArm, salvageMapper)
-                            .finally(() => { forgetAbort(); gate.open(); });
+                            .then(result => {
+                                if (reservation && registry?.getThread?.(reservation.threadId)?.phase === 'queued') {
+                                    if (result.success === false) {
+                                        const error = typeof result.error === 'string' && result.error.trim()
+                                            ? result.error
+                                            : t('mcp.delegate.runner_init_failed');
+                                        registry.finishQueuedFailure?.(reservation.threadId, { error, background, taskPreview: taskDef.task });
+                                    } else {
+                                        registry.closeThread?.(reservation.threadId, 'system');
+                                        registry.finishQueuedStop?.(reservation.threadId, { background, taskPreview: taskDef.task });
+                                    }
+                                }
+                                return result;
+                            }, error => {
+                                if (reservation && registry?.getThread?.(reservation.threadId)?.phase === 'queued') {
+                                    const message = maskSensitiveData(String((error as Error)?.message ?? error));
+                                    registry.finishQueuedFailure?.(reservation.threadId, { error: message, background, taskPreview: taskDef.task });
+                                    return { success: false, error: message };
+                                }
+                                throw error;
+                            })
+                            .finally(() => {
+                                forgetAbort();
+                                gate.open();
+                            });
                     });
 
                     if (background) {
@@ -889,11 +994,20 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                 ...(rejectedTasks.length > 0 ? { rejected: rejectedTasks } : {}),
                             };
                         }
-                        const queued = acceptedCount - startedTasks.length;
+                        const registeredTasks = queuedThreads.flatMap((thread, i) => thread && precheck[i].ok
+                            ? [{ task_id: thread.threadId, name: thread.name, sub_id: thread.threadId,
+                                queued: registry?.getThread?.(thread.threadId)?.phase === 'queued' }]
+                            : []);
+                        const runnerUsedReservations = registeredTasks.length === acceptedCount && startedTasks.length > 0
+                            && startedTasks.every(started => queuedThreads.some(thread => thread?.threadId === started.sub_id));
+                        const receiptTasks = runnerUsedReservations ? registeredTasks : startedTasks;
+                        const queued = runnerUsedReservations
+                            ? registeredTasks.filter(task => task.queued).length
+                            : Math.max(0, acceptedCount - startedTasks.length);
                         return {
                             success: true,
                             started: true,
-                            tasks: [...startedTasks],
+                            tasks: [...receiptTasks],
                             ...(queued > 0 ? { queued } : {}),
                             ...(rejectedTasks.length > 0 ? { rejected: rejectedTasks } : {}),
                             note: t('subagent.background_started_many', { count: acceptedCount }),
@@ -1079,7 +1193,7 @@ export function createSubAgentTool(app: object, deps: DelegateToolDeps = {}) {
             }
             if (action === 'close') {
                 if (thread.phase !== 'idle' && thread.phase !== 'queued') return { success: false, error: t('mcp.sub_agent.close_state') };
-                if (!registry?.closeThread?.(id)) return { success: false, error: t('mcp.sub_agent.close_failed') };
+                if (!registry?.closeThread?.(id, 'lead')) return { success: false, error: t('mcp.sub_agent.close_failed') };
                 return { success: true, message: t('mcp.sub_agent.closed', { sub_id: id }) };
             }
             if (action === 'task') {
@@ -1234,6 +1348,14 @@ function _resolveDelegate(aspect: string | undefined, delegates: DelegateEntry[]
     return { delegate: selected };
 }
 
+/** Nazwa widoczna w rejestrze przed zbudowaniem pełnej konfiguracji biegu. */
+function _queuedThreadName(resolved: ResolvedDelegate, plugin: DelegatePlugin | null | undefined): string {
+    if (resolved.generic) return resolveGenericWorkerConfig(plugin).name;
+    if (resolved.builtin) return resolved.builtin === 'worker' ? PKM_WORKER_NAME : PKM_EXPLORER_NAME;
+    if (resolved.delegate) return resolved.delegate.name;
+    return PKM_SUB_NAME;
+}
+
 /**
  * Execute task via SubAgentRunner (unified path).
  * @param resolved - { delegate } (custom sub po nazwie) lub { generic: true } (worker).
@@ -1279,6 +1401,7 @@ type SubRunControl = {
     /** Whitelista narzędzi suba zlecającego — dziecko dostanie z nią przecięcie. */
     callerToolNames?: string[] | null;
     threadId?: string;
+    queuedThreadId?: string;
 };
 
 /**
@@ -1302,6 +1425,28 @@ async function _executeSubAgent(
     delegationDepth = 1,
     runControl: SubRunControl = {},
 ): Promise<Record<string, unknown>> {
+    // Zamknięcie mogło nadejść po wejściu do thunka, ale przed przygotowaniem modelu.
+    // Zapisujemy zwykły zakończony bieg i wracamy tą samą ścieżką outcome co runner.
+    if (runControl.queuedThreadId) {
+        const queued = plugin.subTaskRegistry?.getThread?.(runControl.queuedThreadId);
+        if (queued?.phase === 'closed') {
+            const task = plugin.subTaskRegistry?.finishQueuedStop?.(runControl.queuedThreadId, {
+                background: runControl.background,
+                taskPreview: args.task,
+            });
+            const outcome: RunOutcome = {
+                end: { kind: 'stopped', by: task?.outcome?.end.kind === 'stopped' ? task.outcome.end.by : queued.closedBy ?? 'user' },
+                completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [],
+            };
+            const name = _queuedThreadName(resolved, plugin);
+            return {
+                success: false,
+                error: t('mcp.delegate.outcome_error', { reason: _outcomeReason(outcome) }),
+                stopped_by: 'abort', aspect: name, tools_used: [], tool_call_details: [], usage: null,
+                outcome: _outcomeFields(outcome), effects: [], note: t('mcp.delegate.outcome_note'),
+            };
+        }
+    }
     // Generyczny worker (syntetyczny config) albo custom sub usera po nazwie.
     // Gdy user wyznaczył globalny szablon suba — worker bierze jego config (fail-soft).
     let subAgentConfig: SubAgentConfigLike | null | undefined;
@@ -1346,7 +1491,7 @@ async function _executeSubAgent(
         }
         const modelAvailable = listedOrPinned || Boolean(pinnedAgentModel);
         if (!frozenProviderId || !frozenModelId || !providers || !Object.hasOwn(providers, frozenProviderId) || !modelAvailable) {
-            plugin.subTaskRegistry?.closeThread?.(existingThread.threadId);
+            if (existingThread) plugin.subTaskRegistry?.closeThread?.(existingThread.threadId);
             return { success: false, error: t('mcp.sub_agent.model_unavailable') };
         }
     }
@@ -1458,6 +1603,7 @@ async function _executeSubAgent(
             ...(runControl.background !== undefined ? { background: runControl.background } : {}),
             ...(runControl.onTaskCreated ? { onTaskCreated: runControl.onTaskCreated } : {}),
             ...(runControl.threadId ? { threadId: runControl.threadId } : {}),
+            ...(runControl.queuedThreadId ? { queuedThreadId: runControl.queuedThreadId } : {}),
         }
     ); } finally { if (runControl.abortCtl) runControl.abortCtl.stop = null; }
 

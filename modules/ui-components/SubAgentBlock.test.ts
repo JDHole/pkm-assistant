@@ -17,6 +17,7 @@
  */
 import test from 'ava';
 import { createSubAgentBlock, createPendingSubAgentBlock, pluralCalls } from './SubAgentBlock.js';
+import type { SubAgentResultView } from './SubAgentBlock.js';
 
 type FakeEl = {
     tagName: string;
@@ -33,6 +34,8 @@ type FakeEl = {
     removeAttribute(name: string): void;
     hasAttribute(name: string): boolean;
     appendChild(child: FakeEl): FakeEl;
+    createDiv(opts?: { cls?: string }): FakeEl;
+    createSpan(opts?: { cls?: string }): FakeEl;
     insertBefore(child: FakeEl, ref: FakeEl | null): FakeEl;
     addEventListener(ev: string, cb: (ev: unknown) => void): void;
     fire(ev: string, data?: unknown): void;
@@ -66,6 +69,8 @@ function makeFakeEl(tag = 'div'): FakeEl {
         removeAttribute(name) { attrs.delete(name); },
         hasAttribute(name) { return attrs.has(name); },
         appendChild(child) { child.parent = el; el.children.push(child); return child; },
+        createDiv(opts) { const child = makeFakeEl('div'); if (opts?.cls) child.className = opts.cls; return el.appendChild(child); },
+        createSpan(opts) { const child = makeFakeEl('span'); if (opts?.cls) child.className = opts.cls; return el.appendChild(child); },
         insertBefore(child, ref) {
             child.parent = el;
             const idx = ref ? el.children.indexOf(ref) : -1;
@@ -98,6 +103,46 @@ function withFakeDocument<T>(fn: () => T): T {
         (globalThis as Record<string, unknown>).document = prevDoc;
     }
 }
+
+function allText(el: FakeEl): string { return el.textContent + el.children.map(allText).join(''); }
+
+test.serial('resultView shows badge, separate material and error, ordered sections, effects and notes; starts collapsed and toggles by keyboard', t => {
+    withFakeDocument(() => {
+        const view: SubAgentResultView = {
+            title: 'worker finished', summary: 'Partial work', badge: 'partial', status: 'error',
+            material: 'Created plan.md', error: 'write failed', missingTargets: ['tasks.md'],
+            effects: [{ tool: 'write', target: 'plan.md', statusLabel: 'state matches' }], notes: ['Continue with same sub.'],
+        };
+        const row = createSubAgentBlock({ type: 'delegate', resultView: view, role: 'system' }) as unknown as FakeEl;
+        t.true(row.classList.contains('cs-tile--system'));
+        t.false(row.classList.contains('is-expanded'));
+        const badge = findByClass(row, 'cs-tile__badge');
+        t.is(badge?.textContent, 'partial');
+        const head = findByClass(row, 'cs-tile__head')!;
+        t.is(head.getAttribute('aria-expanded'), 'false');
+        head.fire('keydown', { key: 'Enter', preventDefault() {} });
+        t.is(head.getAttribute('aria-expanded'), 'true');
+        const details = findByClass(row, 'cs-tile__details')!;
+        t.is(allText(details), 'CREATEDCreated plan.mdResponse errorwrite failedMISSINGtasks.mdEFFECTSwriteplan.mdstate matchesContinue with same sub.');
+        t.true(!!findByClass(details, 'cs-subresult__error'));
+        t.true(!!findByClass(details, 'cs-subresult__effect'));
+        t.true(!!findByClass(details, 'cs-subresult__note'));
+    });
+});
+
+test.serial('resultView omits empty sections; legacy remains available', t => {
+    withFakeDocument(() => {
+        const row = createSubAgentBlock({ type: 'delegate', resultView: {
+            title: 'Done', status: 'ok', missingTargets: [], effects: [], notes: [],
+        } }) as unknown as FakeEl;
+        findByClass(row, 'cs-tile__head')!.fire('click');
+        const details = findByClass(row, 'cs-tile__details')!;
+        t.is(details.children.length, 0);
+        const legacy = createSubAgentBlock({ type: 'delegate', status: 'success', response: 'Legacy result' }) as unknown as FakeEl;
+        findByClass(legacy, 'cs-tile__head')!.fire('click');
+        t.true(allText(legacy).includes('Legacy result'));
+    });
+});
 
 test.serial('wynik: naglowek (tytul/skrot/meta) nie zawiera nazw narzedzi ani liczb tokenow', t => {
     withFakeDocument(() => {
@@ -240,6 +285,16 @@ test.serial('createPendingSubAgentBlock: status pending, bez details (nie jest j
 
         const title = findByClass(row, 'cs-tile__title')!;
         t.is(title.textContent, 'Sub-agent czytelnik is working');
+    });
+});
+
+test.serial('każda ramka wyniku ma wspólną klasę układu, niezależnie od roli', t => {
+    withFakeDocument(() => {
+        const resultView = { title: 'wynik', status: 'error' as const, missingTargets: [], effects: [], notes: [] };
+        for (const role of ['agent', 'system'] as const) {
+            const row = createSubAgentBlock({ type: 'delegate', status: 'error', role, resultView }) as unknown as FakeEl;
+            t.true(row.classList.contains('cs-tile--subresult'));
+        }
     });
 });
 

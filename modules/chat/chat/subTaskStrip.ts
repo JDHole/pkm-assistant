@@ -1,7 +1,7 @@
 /** Render paska wątku i biegów w czacie. Komunikacja do suba pozostaje wyłącznie po stronie agenta. */
 import { t } from '../../../core/i18n/index.js';
 import { SkinManager, setSvg } from '../../crystal-soul/index.js';
-import { buildStripModel, formatDuration } from '../../sub-agents/index.js';
+import { buildStripModel, formatDuration, getStripStateLabelParts } from '../../sub-agents/index.js';
 import type { StripRow, StripRun, StripState, StripStep, SubTask, SubThread } from '../../sub-agents/index.js';
 
 interface ElOpts { cls?: string; text?: string; attr?: Record<string, string> }
@@ -16,7 +16,7 @@ interface RegistryLike {
     listThreads?(owner: { agentName: string; sessionPath?: string; sessionEpoch?: string }): SubThread[];
     getThreadMaxRuns?(threadId: string): number;
     requestStop?(id: string, by: 'user'): boolean;
-    closeThread?(threadId: string): boolean;
+    stopThread?(threadId: string): boolean;
 }
 interface NotifierLike { pending?(): SubTask[] }
 interface PluginLike { subTaskRegistry?: RegistryLike | null; subTaskNotifier?: NotifierLike | null }
@@ -48,29 +48,8 @@ function stateClass(state: StripState): string {
 }
 
 function stateLabel(state: StripState): string {
-    switch (state.kind) {
-        case 'queued': return t('chat.substrip.state_queued');
-        case 'running': return t('chat.substrip.state_running');
-        case 'stopping': return t('chat.substrip.state_stopping');
-        case 'idle': return t('chat.substrip.state_idle');
-        case 'done': return t('chat.substrip.state_done');
-        case 'partial':
-            switch (state.reason) {
-                case 'incomplete': return t('chat.substrip.state_partial_incomplete');
-                case 'limit': return t('chat.substrip.state_partial_limit');
-                case 'timeout': return t('chat.substrip.state_partial_timeout');
-                case 'user-stop': return t('chat.substrip.state_partial_user');
-                case 'lead-stop': return t('chat.substrip.state_partial_lead');
-                case 'system-stop': return t('chat.substrip.state_partial_system');
-                case 'error': return t('chat.substrip.state_partial_error');
-                case 'uncertain': return t('chat.substrip.state_partial_uncertain');
-                default: return assertNever(state.reason);
-            }
-        case 'empty': return t('chat.substrip.state_empty');
-        case 'delivery': return t('chat.substrip.state_delivery');
-        case 'closed': return t('chat.substrip.state_closed');
-        default: return assertNever(state);
-    }
+    const parts = getStripStateLabelParts(state);
+    return parts.completeness ? `${t(parts.end)} · ${t(parts.completeness)}` : t(parts.end);
 }
 
 function assertNever(value: never): never { throw new Error(`Nieobsługiwany stan: ${String(value)}`); }
@@ -250,8 +229,8 @@ function renderStopButton(parent: El, registry: RegistryLike | null | undefined,
     button.disabled = stopping;
     button.addEventListener('click', event => {
         event.stopPropagation();
-        const stopped = row.state.kind === 'queued'
-            ? safeCall(() => registry?.closeThread?.(row.threadId || row.id), false)
+        const stopped = row.threadId
+            ? safeCall(() => registry?.stopThread?.(row.threadId!), false)
             : safeCall(() => registry?.requestStop?.(row.runs[row.runs.length - 1]?.id || row.id, 'user'), false);
         if (stopped) { button.textContent = t('chat.substrip.stopping'); button.disabled = true; }
     });

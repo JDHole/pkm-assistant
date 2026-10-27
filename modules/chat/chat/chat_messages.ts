@@ -26,7 +26,7 @@ import { resolveMessageOrigin, toolResultStatus } from '../../../core/index.js';
 // `obsidian`), mieszka obok w tym samym module. Render (`renderMachineTile`, uwaga 5 spec A3-fix)
 // jest TRZECIM plikiem w module, importowanym przez oba mixiny (ten i `chat_streaming.ts`) - bez
 // tego byłaby to trzecia kopia tej samej logiki (patrz komentarz modułu `machineTile.ts`).
-import { buildMachineView } from './machineMessage.js';
+import { buildMachineView, getSubTaskNotificationTaskId } from './machineMessage.js';
 import { renderMachineTile } from './machineTile.js';
 // Krysztal agenta jako CSS var `--cs-agent-crystal` (2.3.0, kolumna dymkow) - jeden producent
 // dla append_message/render_messages TU i `_ensureAgentMessageContainer` w chat_streaming.ts.
@@ -67,7 +67,7 @@ interface HistoryToolOutput {
     name?: string;
     aspect?: string;
     sub_id?: string;
-    tasks?: Array<{ task_id?: string; name?: string }>;
+    tasks?: Array<{ task_id?: string; sub_id?: string; name?: string; queued?: boolean }>;
     queued?: number;
 }
 
@@ -159,6 +159,13 @@ export async function append_message(this: ChatViewLike, role: MessageRole, cont
 
 export async function render_messages(this: ChatViewLike, createDelegateBlock: typeof createSubAgentBlock = createSubAgentBlock): Promise<void> {
     this.messages_container.empty();
+    const notificationTaskIdsAfter = new Map<number, Set<string>>();
+    const laterNotificationIds = new Set<string>();
+    for (let i = this.rollingWindow.messages.length - 1; i >= 0; i--) {
+        notificationTaskIdsAfter.set(i, new Set(laterNotificationIds));
+        const id = getSubTaskNotificationTaskId(this.rollingWindow.messages[i]);
+        if (id) laterNotificationIds.add(id);
+    }
     const agent = this.plugin?.agentManager?.getActiveAgent();
     const agentColor = SkinManager.getAgentColor(agent || 'default');
     const agentRgb = hexToRgbTriplet(agentColor);
@@ -166,11 +173,12 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
 
     for (let idx = 0; idx < this.rollingWindow.messages.length; idx++) {
         const msg = this.rollingWindow.messages[idx];
+        const notificationTaskIds = notificationTaskIdsAfter.get(idx) || new Set<string>();
         // Skip tool messages (they were displayed inline with the tool call)
         if (msg.role === 'tool') continue;
 
         if (msg.role === 'system') {
-            const partialView = buildMachineView(msg, { t });
+            const partialView = buildMachineView(msg, { t, getTask: id => this.plugin?.subTaskRegistry?.getTask?.(id), getThread: id => this.plugin?.subTaskRegistry?.getThread?.(id) });
             if (partialView?.kind === 'loop_partial') {
                 await renderMachineTile(this.messages_container, this.plugin, partialView);
             }
@@ -182,7 +190,7 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
         if (msg.role === 'user') {
             // Wiadomość maszynowa (spec A3) - meta na żywo, albo (po restarcie Obsidiana, meta
             // nie przeżywa zapisu sesji) klasyfikacja po treści wewnątrz `buildMachineView`.
-            const machineView = buildMachineView(msg, { t });
+            const machineView = buildMachineView(msg, { t, getTask: id => this.plugin?.subTaskRegistry?.getTask?.(id), getThread: id => this.plugin?.subTaskRegistry?.getThread?.(id) });
             if (machineView) {
                 await renderMachineTile(this.messages_container, this.plugin, machineView);
             } else {
@@ -264,14 +272,60 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                             const startedList = Array.isArray(historyOutput.tasks)
                                 ? historyOutput.tasks
                                 : [{ task_id: historyOutput.task_id, name: historyOutput.name }];
-                            block = createSubAgentBlock({
-                                type: tcName,
-                                pending: true,
-                                status: 'success',
-                                agentName: startedList.length > 1 ? '' : (startedList[0]?.name || _hName),
-                                query: taskQuery,
-                                response: buildBackgroundReceiptText(startedList, historyOutput.queued),
+                            const receiptBlocks = startedList.flatMap(item => {
+                                const taskId = typeof item?.task_id === 'string' ? item.task_id : '';
+                                if (taskId && notificationTaskIds.has(taskId)) return [];
+                                const task = taskId ? this.plugin?.subTaskRegistry?.getTask?.(taskId) : undefined;
+                                const threadId = typeof task?.threadId === 'string' ? task.threadId
+                                    : typeof item?.sub_id === 'string' ? item.sub_id
+                                        : typeof historyOutput.sub_id === 'string' ? historyOutput.sub_id : '';
+                                const thread = threadId ? this.plugin?.subTaskRegistry?.getThread?.(threadId) : undefined;
+                                const known = !!task || !!thread;
+                                const name = item?.name || _hName || '';
+                                if (!known) {
+                                    const resultView = {
+                                        title: t('chat.subresult.restart', { name: name || t('subagent.label') }),
+                                        status: 'error' as const,
+                                        missingTargets: [], effects: [], notes: [],
+                                    };
+                                    return [createSubAgentBlock({ type: tcName, agentName: name, query: taskQuery, status: 'error', resultView })];
+                                }
+                                if (!task && (thread?.phase === 'idle' || thread?.phase === 'closed')) {
+                                    const resultView = {
+                                        title: t('chat.subresult.unavailable', { name: name || t('subagent.label') }),
+                                        status: 'error' as const,
+                                        missingTargets: [], effects: [], notes: [],
+                                    };
+                                    return [createSubAgentBlock({ type: tcName, agentName: name, query: taskQuery, status: 'error', resultView })];
+                                }
+                                const isActive = task ? task.status === 'running'
+                                    : thread?.phase === 'queued' || thread?.phase === 'running';
+                                if (!isActive) {
+                                    const outcome = task?.outcome;
+                                    const failed = task?.status === 'error' || outcome?.end?.kind === 'stopped' || outcome?.end?.kind === 'failed';
+                                    const resultThread = thread?.phase === 'idle' && thread.reusable && threadId
+                                        ? { kind: 'reusable' as const, sub_id: threadId }
+                                        : { kind: 'unknown' as const };
+                                    return [createDelegateBlock(buildDelegateBlockOptions({
+                                        success: !failed,
+                                        error: task?.error || (failed ? t('mcp.delegate.outcome_note') : undefined),
+                                        result: task?.result ? { text: task.result.text, handoff: task.result.handoff } : '',
+                                        partial: task?.partial ? { text: task.partial.text } : undefined,
+                                        outcome,
+                                        effects: thread?.effects,
+                                        thread: resultThread,
+                                    }, { type: tcName, agentName: name, query: taskQuery }))];
+                                }
+                                return [createSubAgentBlock({ type: tcName, pending: true, status: 'success', agentName: name,
+                                    query: taskQuery, response: buildBackgroundReceiptText([item], item?.queued ? 1 : startedList.length === 1 ? historyOutput.queued : undefined) })];
                             });
+                            if (receiptBlocks.length) {
+                                for (const receipt of receiptBlocks) agentDiv.appendChild(receipt);
+                                continue;
+                            }
+                            if (startedList.length > 0 && startedList.every(item => typeof item?.task_id === 'string' && notificationTaskIds.has(item.task_id))) continue;
+                            block = createSubAgentBlock({ type: tcName, pending: true, status: 'success', agentName: _hName,
+                                query: taskQuery, response: buildBackgroundReceiptText(startedList, historyOutput.queued) });
                         } else {
                             block = createDelegateBlock(buildDelegateBlockOptions(tcOutput || {}, { type: tcName, agentName: _hName, query: taskQuery }));
                         }

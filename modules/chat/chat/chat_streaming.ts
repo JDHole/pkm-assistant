@@ -689,7 +689,10 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
                 const live = this._streamCtxMap.get(streamAgentName);
                 if (live && live.turnId !== turnId) return;
                 if (_tabKey(this.chatTabs.find(tab => tab.isActive)) !== ownerTabKey) return;
-                const view = buildMachineView(receipt, { t });
+                const view = buildMachineView(receipt, { t,
+                    getTask: id => this.plugin?.subTaskRegistry?.getTask?.(id),
+                    getThread: id => this.plugin?.subTaskRegistry?.getThread?.(id),
+                });
                 if (!view) return;
                 partialTile ??= this.messages_container.createDiv({ cls: 'cs-message cs-message--system' });
                 partialTile.empty();
@@ -1717,7 +1720,10 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
             // Spec A3: wiadomość zakolejkowana może być maszynowa (guzik przywołania artefaktu
             // wypełnia pole wpisywania i woła `send_message` bez `injectedText`, więc trwająca
             // tura ją kolejkuje zamiast wstrzykiwać od razu) - kafelek systemowy zamiast dymka.
-            const machineView = buildMachineView({ role: 'user', content: injectedText, ...queued.meta }, { t });
+            const machineView = buildMachineView({ role: 'user', content: injectedText, ...queued.meta }, { t,
+                getTask: id => this.plugin?.subTaskRegistry?.getTask?.(id),
+                getThread: id => this.plugin?.subTaskRegistry?.getThread?.(id),
+            });
             if (machineView) {
                 await renderMachineTile(this.messages_container, this.plugin, machineView);
             } else {
@@ -2098,6 +2104,24 @@ export function stop_generation(this: ChatViewLike, agentName?: string, reason =
     const activeAgent = requested || this.plugin?.agentManager?.getActiveAgent()?.name || '';
     log.info('Chat', `Stop: aborting stream for agent "${activeAgent}" (${reason})`);
 
+    // Ręczny przycisk Stop nie może pozwolić, by zadanie czekające z aktywnej zakładki
+    // wystartowało po zwolnieniu miejsca w puli. Watchdogi i pozostałe automatyczne Stopy
+    // nie zamykają kolejek innych tur.
+    if (reason === 'stop') {
+        const registry = this.plugin?.subTaskRegistry;
+        if (registry?.closeQueuedForOwners) {
+            const activeTab = (this.chatTabs || []).find((tab: ChatTab) => tab.isActive && tab.agentName === activeAgent);
+            try {
+                registry.closeQueuedForOwners({
+                    tabKeys: activeTab ? [_tabKey(activeTab)] : [],
+                    agentNames: activeAgent ? [activeAgent] : [],
+                }, 'user');
+            } catch (e) {
+                log.warn('Chat', `Zamknięcie kolejki subów przy Stopie padło: ${(e as Error)?.message || String(e)}`);
+            }
+        }
+    }
+
     const sCtx = this._streamCtxMap.get(activeAgent);
     // Tura w locie ma uchwyt we wpisie mapy; tura w przygotowaniu (prompt się jeszcze buduje) -
     // w `_preparingTurns`. Bez tej drugiej gałęzi Stop kliknięty w oknie przygotowania trafiałby
@@ -2185,6 +2209,11 @@ export function stop_all_turns(this: ChatViewLike, reason = 'close'): string[] {
     const preparing = Array.from<string>(this._preparingTurns?.keys?.() || [])
         .map((agentName) => ({ agentName }));
     const names = collectTurnsToStop([...(this._streamCtxMap?.values?.() || []), ...preparing]);
+    // Zbieramy tożsamości przed stop_generation i czyszczeniem stanów. Zakładka może mieć samą
+    // kolejkę, bez aktywnej tury ani wpisu w _streamCtxMap.
+    const tabs = this.chatTabs || [];
+    const tabKeys = tabs.map((tab: ChatTab) => _tabKey(tab)).filter(Boolean);
+    const agentNames = [...new Set([...names, ...tabs.map((tab: ChatTab) => tab.agentName).filter(Boolean)])];
 
     // Zakolejkowana wiadomość nie ma dokąd polecieć: `set_generating(false)` wystrzeliłby ją
     // w zamykany widok (setTimeout 100 ms). Kasujemy PRZED zatrzymaniem tur.
@@ -2208,14 +2237,20 @@ export function stop_all_turns(this: ChatViewLike, reason = 'close'): string[] {
     const registry = this.plugin?.subTaskRegistry;
     if (registry?.list && registry.requestStop) {
         try {
-            const tabKeys = (this.chatTabs || []).map((tab: ChatTab) => _tabKey(tab));
-            const ids = collectSubTaskIdsForOwners(registry.list(), { tabKeys, agentNames: names });
+            const ids = collectSubTaskIdsForOwners(registry.list(), { tabKeys, agentNames });
             for (const id of ids) {
                 log.info('Chat', `Zamknięcie czatu → zatrzymuję bieg suba ${id}`);
                 registry.requestStop(id, 'system');
             }
         } catch (e) {
             log.warn('Chat', `Zatrzymanie subów przy zamknięciu padło: ${(e as Error)?.message || String(e)}`);
+        }
+    }
+    if (registry?.closeQueuedForOwners) {
+        try {
+            registry.closeQueuedForOwners({ tabKeys, agentNames }, reason === 'stop' ? 'user' : 'system');
+        } catch (e) {
+            log.warn('Chat', `Zamknięcie kolejki subów przy zamknięciu padło: ${(e as Error)?.message || String(e)}`);
         }
     }
 
@@ -2321,8 +2356,11 @@ export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
         this._autoTurnChainCounts.set(tab!.agentName, chain.nextCount);
 
         const deliveryTask = task.error && task.partial ? { ...task, error: task.error + '\n\n' + task.partial.text } : task;
-        const reusableThread = deliveryTask.threadId
-            ? this.plugin?.subTaskRegistry?.getThread?.(deliveryTask.threadId)
+        const reusableThread = task.threadId
+            ? this.plugin?.subTaskRegistry?.getThread?.(task.threadId)
+            : undefined;
+        const reusableSubId = reusableThread?.phase === 'idle' && reusableThread.reusable === true
+            ? task.threadId
             : undefined;
         const text = buildSubTaskNotificationText(deliveryTask, {
             // Wynik suba ma WŁASNY sufit (60k default, 0 = bez limitu) - wspólne 15k z
@@ -2333,6 +2371,32 @@ export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
                 : {}),
         });
 
+        // Tylko renderer dostaje strukturę wyniku. Tekst wejściowy modelu powyżej pozostaje
+        // dokładnie taki sam. Dowodem wielokrotnego wątku jest ten sam subId, dla którego
+        // generator dołączył instrukcję reusable_thread.
+        const outcome = task.outcome || task.result?.outcome;
+        const effects = (outcome?.effects || []).map((effect) => {
+            const recorded = reusableThread?.effects.find(candidate => candidate.tool === effect.tool
+                && candidate.action === effect.action && candidate.check === effect.check
+                && JSON.stringify(candidate.targets) === JSON.stringify(effect.targets));
+            return { ...effect, ...(recorded?.expectedCheck ? { expectedCheck: recorded.expectedCheck } : {}) };
+        });
+        const thread = reusableSubId
+            ? { kind: 'reusable' as const, sub_id: reusableSubId }
+            : !deliveryTask.threadId && deliveryTask.background === true
+                ? { kind: 'single' as const }
+                : { kind: 'unknown' as const };
+        const subTaskResult = {
+            outcome,
+            result: task.result
+                ? { text: task.result.text, handoff: task.result.handoff }
+                : undefined,
+            partial: task.partial,
+            error: task.error,
+            effects,
+            thread,
+        };
+
         // Bezpiecznik ustawiany SYNCHRONICZNIE: `drain()` woła dostawcę w pętli, a `send_message`
         // dochodzi do `set_generating(true)` dopiero po kilku awaitach - bez tej flagi drugi
         // czekający wynik wystartowałby RÓWNOLEGŁĄ turę na tej samej zakładce.
@@ -2341,7 +2405,7 @@ export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
         void Promise.resolve()
             // Wynik suba to tekst MASZYNY - żadnych przywilejów człowieka (rejestr adresów,
             // markery `@@skill:`, komendy `/`).
-            .then(() => this.send_message({ injectedText: text, meta: machineMeta({ _subTaskNotification: true, subTaskId: task.id }) }))
+            .then(() => this.send_message({ injectedText: text, meta: machineMeta({ _subTaskNotification: true, subTaskId: task.id, _subTaskResult: subTaskResult }) }))
             .catch((e: unknown) => log.warn('Chat', `Auto-tura po subie padła: ${(e as Error)?.message || String(e)}`))
             .finally(() => { this._subTaskTurnPending = false; });
         return true;

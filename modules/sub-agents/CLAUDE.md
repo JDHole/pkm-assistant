@@ -512,6 +512,43 @@ bez aktywności oraz ponad trzy wątki w sesji, od najstarszego. Rejestr emituje
 Skrzynka `postMessage` dostarcza wiadomość w ramce od agenta zlecającego przez hak
 `beforeContinue`, między wywołaniami modelu.
 
+### Rezerwacja z kolejki
+
+Zadanie z listy `tasks` dostaje `SubThread` w fazie `queued` przed wejściem do puli.
+Runner dostaje `queuedThreadId` i przejmuje rezerwację przez synchroniczne
+`beginQueuedRun(threadId, owner, frozenConfig)`. Przejście do `running` sprawdza
+właściciela i fazę bez `await`; runner używa tego samego identyfikatora jako id biegu
+i nie tworzy drugiego wątku. Konfiguracja pełna, w tym limity i model, jest kopiowana
+przy starcie. `beginRun` pozostaje osobną operacją kontynuacji wątku `idle` i nadal
+wymaga kompletnego klucza sesji oraz epoki.
+
+`allocateSubTaskId(name)` z publicznego barrela przydziela identyfikatory w formacie
+`sub/<nazwa>#<znacznik>-<licznik-base36>`. Wątek zamknięty przed startem nie wywołuje modelu.
+`finishQueuedStop(threadId, { background, taskPreview })` dopisuje syntetyczny bieg do
+`thread.runIds` przed emisją `task:created` i `task:finished`, z wynikiem stopped/empty,
+więc pasek zachowuje oś wątku, a zwykły notifier dostarcza wynik.
+Jeśli rezerwacja nie wystartuje z powodu błędu konfiguracji/modelu/runnera, `finishQueuedFailure`
+zapisuje zamiast tego syntetyczny bieg error z zachowanym komunikatem błędu i również wiąże go
+z `thread.runIds`; tylko jawne zatrzymanie i unload używają `finishQueuedStop`.
+`closeThread(threadId)` domyślnie zapisuje `closedBy: 'user'`; jawne `by` zachowuje
+pierwszego nadawcę zamknięcia queued. `closeSessionThreads` i `closeAll` używają
+`system`. `closeQueuedForOwners({ tabKeys, agentNames }, by)` zamyka wyłącznie queued:
+jeśli origin ma `tabKey`, dopasowuje tylko zakładkę; `agentName` jest fallbackiem
+wyłącznie dla origin bez `tabKey`. Wątki idle zostają bez zmian.
+
+Przy osiągniętej głębokości runner ukrywa `delegate`, `agent_delegate` i `sub_agent`
+w definicjach narzędzi. Backendowa bramka delegacji nadal obowiązuje.
+
+### Model wyniku współdzielony z czatem
+
+Barrel eksportuje `getStripStateLabelParts` oraz `buildSubTaskResultModel` z
+`subTaskPanelModel.ts`, a także typy modelu wyniku. Model wyniku dostaje
+`SubTaskResultThread`: `{ kind: 'reusable'; sub_id: string }` dla wątku wielokrotnego
+albo wariant bez `sub_id`. Czat używa `thread.kind` i `sub_id` do wspólnej etykiety
+stanu, sekcji efektów i informacji o kontynuacji. Logika etykiet i sekcji pozostaje
+w jednym czystym modelu, współdzielonym z paskiem.
+Naturalny koniec `finished` o kompletności `empty` dostaje etykietę „pusty wynik”.
+
 ## TODO
 
 Najważniejsze:
@@ -528,3 +565,11 @@ Najważniejsze:
 
 
 U3: `SubTask.partial` and `publishPartial` expose a copied, masked snapshot via `task:partial` without completing the task. Runner failure retains actual tools, details, usage and partial; partial and terminal journaling use captured origin memory/path. Storage failure is explicit on the task, while notifier delivery still starts only at the terminal event.
+
+## Identyfikatory biegów i wątków
+
+Identyfikator biegu i wątku ma postać `sub/<nazwa>#<znacznik>-<licznik>`: znacznik to 8 znaków szesnastkowych losowanych przy załadowaniu modułu, licznik rośnie w danym uruchomieniu. Osiem znaków wystarcza do rozróżnienia uruchomień, a krótkie ID ułatwia modelowi przepisanie `sub_id` do narzędzia. Dawny format bez znacznika nie jest generowany w nowym uruchomieniu i niezakończone pokwitowanie jest pokazywane jako przerwane przez restart.
+
+## Stop z paska
+
+`SubTaskRegistry.stopThread(threadId)` synchronicznie sprawdza bieżącą fazę wątku: zamyka rezerwację `queued` jako user albo wysyła `requestStop` jako user do aktualnego biegu `running`. Dla pozostałych faz zwraca `false`.

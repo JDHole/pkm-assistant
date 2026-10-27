@@ -14,8 +14,17 @@ import { runAgentLoop, ArrayMessageStore } from '../agent-loop/index.js';
 import { TraceLog, maskSensitiveData } from '../../core/index.js';
 import type { SubTask } from './SubTaskRegistry.js';
 import { t as tr } from '../../core/i18n/index.js';
+import { buildSubTaskResultModel, getStripStateLabelParts } from './index.js';
 
 const TERAZ = 1_000_000;
+
+test('naturalne zakończenie bez materiału ma tytuł pusty wynik', t => {
+    const model = buildSubTaskResultModel({
+        outcome: { end: { kind: 'finished' }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] },
+        thread: { kind: 'single' },
+    });
+    t.is(tr(model.endLabelKey, undefined, 'pl'), 'pusty wynik');
+});
 
 /** Karta biegu w kształcie, jaki naprawdę wychodzi z rejestru (bez uruchamiania runnera). */
 function task(over: Partial<SubTask> & { id: string }): SubTask {
@@ -445,11 +454,10 @@ test('rejestr wyprowadza wszystkie stany paska z phase, stopRequested, outcome i
     for (const [name, kind, pl, en] of cases) {
         const row = byName.get(name);
         t.is(row?.state.kind, kind, `${name}: literal kind`);
-        const key = row?.state.kind === 'partial'
-            ? `chat.substrip.state_partial_${row.state.reason === 'user-stop' ? 'user' : row.state.reason === 'lead-stop' ? 'lead' : row.state.reason === 'system-stop' ? 'system' : row.state.reason}`
-            : `chat.substrip.state_${row?.state.kind}`;
-        t.is(tr(key, undefined, 'pl'), pl, `${name}: literal PL label`);
-        t.is(tr(key, undefined, 'en'), en, `${name}: literal EN label`);
+        const parts = getStripStateLabelParts(row!.state);
+        const label = (locale: 'pl' | 'en') => [tr(parts.end, undefined, locale), parts.completeness ? tr(parts.completeness, undefined, locale) : ''].filter(Boolean).join(' · ');
+        t.is(label('pl'), pl, `${name}: literal PL label`);
+        t.is(label('en'), en, `${name}: literal EN label`);
     }
     reg.dispose();
 });
@@ -644,4 +652,138 @@ test('pasek: bieg w podsumowaniu i pad zapisu dorobku niosą notkę biegu, zwyk�
     t.is(note('synteza'), 'synthesis-pending');
     t.is(note('zapis'), 'storage-error');
     t.is(note('zwykly'), undefined);
+});
+
+test('publiczny model wyniku klasyfikuje stan, etykiety i jawny dowód wielokrotnego wątku', t => {
+    const outcome = { end: { kind: 'limit', reason: 'iteration-limit' } as const, completeness: 'partial' as const,
+        hasAnswer: false, hasMaterial: true, effects: [] };
+    const model = buildSubTaskResultModel({ outcome, text: 'Wynik', thread: { kind: 'reusable', sub_id: 'sub/worker#1' } });
+
+    t.deepEqual(model.state, { kind: 'partial', reason: 'limit' });
+    t.deepEqual(getStripStateLabelParts(model.state), { end: 'chat.substrip.state_partial_limit', completeness: 'chat.substrip.completeness_partial' });
+    t.deepEqual(model.end, { kind: 'limit', reason: 'iteration-limit' });
+    t.is(model.material, 'Wynik');
+    t.is(model.thread.kind, 'reusable');
+    if (model.thread.kind === 'reusable') t.is(model.thread.sub_id, 'sub/worker#1');
+});
+
+test('model i pasek wybierają tekst przed handoff poza wynikiem częściowym', t => {
+    for (const completeness of [undefined, 'unconfirmed', 'empty', 'partial'] as const) {
+        const outcome = completeness === undefined ? undefined : {
+            end: { kind: 'finished' } as const, completeness, hasAnswer: true, hasMaterial: true, effects: [],
+        };
+        const result = { text: 'Tekst wyniku', handoff: 'Dorobek z przekazania', toolsUsed: [], durationMs: 1, usage: null };
+        const expected = completeness === 'partial' ? 'Dorobek z przekazania' : 'Tekst wyniku';
+        const model = buildSubTaskResultModel({ ...result, outcome, thread: { kind: 'single' } });
+        const rows = buildStripModel({ agentName: 'Klara', tabKey: 'tab-a', now: TERAZ,
+            tasks: [zTabu('wynik', 'tab-a', { result, outcome })] });
+
+        t.is(model.material, expected);
+        t.is(rows[0].runs[0].outcome, expected);
+    }
+});
+
+test('pasek zachowuje legacy wybór: tekst przed handoff poza partial, błąd przed result.text przy partial error', t => {
+    const partialError = {
+        end: { kind: 'failed' as const, stage: 'work' as const }, completeness: 'partial' as const,
+        hasAnswer: false, hasMaterial: true, effects: [],
+    };
+    const rows = buildStripModel({ agentName: 'Klara', tabKey: 'tab-a', now: TERAZ, tasks: [
+        zTabu('non-partial', 'tab-a', { result: { text: 'Legacy text', handoff: 'Legacy handoff', toolsUsed: [], durationMs: 1, usage: null } }),
+        zTabu('partial-error', 'tab-a', { status: 'error', error: 'Legacy error', outcome: partialError,
+            result: { text: 'Result text only', toolsUsed: [], durationMs: 1, usage: null } }),
+    ] });
+
+    t.is(rows.find(row => row.id === 'non-partial')?.runs[0].outcome, 'Legacy text');
+    t.is(rows.find(row => row.id === 'partial-error')?.runs[0].outcome, 'Legacy error');
+    t.is(rows.find(row => row.id === 'partial-error')?.runs[0].endReason, undefined);
+
+    // The shared chat model continues to expose material even when the strip's
+    // legacy failure presentation intentionally shows only the error.
+    const shared = buildSubTaskResultModel({ outcome: partialError, text: 'Result text only', thread: { kind: 'single' } });
+    t.is(shared.material, 'Result text only');
+});
+
+test('publiczny model wyniku zachowuje dorobek przy awarii i osobno zwraca błąd', t => {
+    const model = buildSubTaskResultModel({
+        outcome: { end: { kind: 'failed', stage: 'work' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] },
+        text: 'Zwykły wynik', handoff: 'Zachowany handoff', error: 'Awaria modelu', thread: { kind: 'single' },
+    });
+
+    t.is(model.material, 'Zachowany handoff');
+    t.is(model.error, 'Awaria modelu');
+    t.deepEqual(model.thread, { kind: 'single' });
+    t.is(model.userStopped, false);
+});
+
+test('publiczny model wyniku raportuje stany efektów i braki tylko dla oczekiwanego istnienia', t => {
+    const model = buildSubTaskResultModel({
+        outcome: { end: { kind: 'stopped', by: 'user' }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [
+            { tool: 'write', action: 'create', targets: [{ kind: 'vault-file', path: 'brak.md' }], outcome: 'returned', check: 'mismatch' },
+            { tool: 'write', action: 'create', targets: [{ kind: 'vault-file', path: 'ok.md' }], outcome: 'returned', check: 'matches' },
+            { tool: 'read', action: 'read', targets: [{ kind: 'vault-file', path: 'unknown.md' }], outcome: 'unknown', check: 'not-checked' },
+            { tool: 'delete', action: 'delete', targets: [{ kind: 'vault-file', path: 'still-here.md' }], outcome: 'returned', check: 'mismatch' },
+        ] },
+        effects: [{ tool: 'write', action: 'create', targets: [{ kind: 'vault-file', path: 'brak.md' }], outcome: 'returned', check: 'mismatch', expectedCheck: 'exists' },
+            { tool: 'write', action: 'create', targets: [{ kind: 'vault-file', path: 'ok.md' }], outcome: 'returned', check: 'matches', expectedCheck: 'exists' },
+            { tool: 'read', action: 'read', targets: [{ kind: 'vault-file', path: 'unknown.md' }], outcome: 'unknown', check: 'not-checked', expectedCheck: 'exists' },
+            { tool: 'delete', action: 'delete', targets: [{ kind: 'vault-file', path: 'still-here.md' }], outcome: 'returned', check: 'mismatch', expectedCheck: 'absent' }],
+        thread: { kind: 'unknown' },
+    });
+
+    t.deepEqual(model.effects.map(effect => effect.state), ['missing', 'matches', 'unchecked', 'mismatch']);
+    t.deepEqual(model.missingTargets, ['brak.md']);
+    t.deepEqual(model.end, { kind: 'stopped', by: 'user' });
+    t.is(model.userStopped, true);
+    t.deepEqual(model.thread, { kind: 'unknown' });
+});
+
+test('publiczny model wyniku mapuje każdy rodzaj końca i zachowuje przyczynę pustego Stopu', t => {
+    const base = { completeness: 'partial' as const, hasAnswer: false, hasMaterial: false, effects: [] };
+    const cases = [
+        [{ kind: 'finished' } as const, 'chat.substrip.state_partial_incomplete'],
+        [{ kind: 'limit', reason: 'iteration-limit' } as const, 'chat.substrip.state_partial_limit'],
+        [{ kind: 'uncertain' } as const, 'chat.substrip.state_partial_uncertain'],
+        [{ kind: 'stopped', by: 'user' } as const, 'chat.substrip.state_partial_user'],
+        [{ kind: 'stopped', by: 'lead' } as const, 'chat.substrip.state_partial_lead'],
+        [{ kind: 'stopped', by: 'system' } as const, 'chat.substrip.state_partial_system'],
+        [{ kind: 'timeout' } as const, 'chat.substrip.state_partial_timeout'],
+        [{ kind: 'failed', stage: 'work' } as const, 'chat.substrip.state_partial_error'],
+    ] as const;
+    for (const [end, expectedKey] of cases) {
+        const model = buildSubTaskResultModel({ outcome: { ...base, end }, thread: { kind: 'single' } });
+        t.is(model.endLabelKey, expectedKey);
+    }
+    const finished = buildSubTaskResultModel({ outcome: { ...base, end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true }, thread: { kind: 'single' } });
+    t.is(finished.endLabelKey, 'chat.substrip.state_done');
+    t.is(finished.completenessLabelKey, 'chat.subresult.completeness.unconfirmed');
+
+    const emptyStop = buildSubTaskResultModel({ outcome: { ...base, end: { kind: 'stopped', by: 'user' }, completeness: 'empty' }, thread: { kind: 'single' } });
+    t.is(emptyStop.endLabelKey, 'chat.substrip.state_partial_user');
+    t.is(emptyStop.completenessLabelKey, 'chat.subagent_notification.completeness_empty');
+    t.deepEqual(emptyStop.state, { kind: 'empty' });
+    t.is(emptyStop.userStopped, true);
+});
+
+test('publiczny model zachowuje przyczynę pustego błędu, timeoutu i limitu', t => {
+    const cases = [
+        [{ kind: 'failed', stage: 'work' } as const, 'chat.substrip.state_partial_error'],
+        [{ kind: 'timeout' } as const, 'chat.substrip.state_partial_timeout'],
+        [{ kind: 'limit', reason: 'iteration-limit' } as const, 'chat.substrip.state_partial_limit'],
+    ] as const;
+    for (const [end, endLabelKey] of cases) {
+        const model = buildSubTaskResultModel({ outcome: { end, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] }, thread: { kind: 'single' } });
+        t.is(model.endLabelKey, endLabelKey);
+        t.is(model.completenessLabelKey, 'chat.subagent_notification.completeness_empty');
+        t.deepEqual(model.state, { kind: 'empty' });
+    }
+});
+
+test('publiczny model nie wyprowadza kontynuacji z samego biegu ani task_id', t => {
+    for (const thread of [{ kind: 'single' } as const, { kind: 'unknown' } as const]) {
+        const model = buildSubTaskResultModel({ text: 'Wynik', thread, outcome: null });
+        t.deepEqual(model.thread, thread);
+        t.false('sub_id' in model.thread);
+    }
+    t.throws(() => buildSubTaskResultModel({ thread: { kind: 'reusable', sub_id: '  ' } }), { message: 'Reusable sub-agent thread requires a non-empty sub_id' });
 });

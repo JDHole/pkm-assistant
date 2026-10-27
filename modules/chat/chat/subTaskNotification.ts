@@ -140,6 +140,9 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
         }
     } else if (outcome?.completeness === 'empty') {
         parts.push(t('chat.subagent_notification.empty', { reason: outcomeEndLabel(outcome) }));
+        if (outcome.end.kind === 'failed' && typeof task.error === 'string' && task.error.trim()) {
+            parts.push(t('chat.subagent_notification.failed', { error: task.error.trim() }));
+        }
     } else if (!outcome && task?.status === 'done') {
         const raw = typeof task?.result?.text === 'string' ? task.result.text.trim() : '';
         if (!raw) {

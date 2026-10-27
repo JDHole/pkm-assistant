@@ -89,7 +89,7 @@ export interface SubThread {
     threadId: string; name: string; owner: SubThreadOwner; origin: SubTaskOrigin;
     phase: 'queued' | 'running' | 'idle' | 'closed'; reusable: boolean; runIds: string[];
     transcript: LoopMessage[]; config: Record<string, unknown>; userStop: boolean;
-    lastActiveAt: number; closeAfterRun: boolean; effects: SubThreadEffect[];
+    lastActiveAt: number; closeAfterRun: boolean; effects: SubThreadEffect[]; closedBy?: StopBy;
 }
 
 /** Bieg sub-agenta jako byt. `id` = etykieta trace (`sub/<nazwa>#<seq>`), unikalna w procesie. */
@@ -248,6 +248,16 @@ export class SubTaskRegistry {
         thread.phase = 'running'; thread.lastActiveAt = Date.now(); return true;
     }
 
+    beginQueuedRun(threadId: string, owner: SubThreadOwner, frozenConfig: Record<string, unknown>): boolean {
+        const thread = this._threads.get(threadId);
+        if (!thread || thread.phase !== 'queued' || !owner?.agentName || thread.owner.agentName !== owner.agentName
+            || thread.owner.sessionPath !== owner.sessionPath || thread.owner.sessionEpoch !== owner.sessionEpoch) return false;
+        thread.config = structuredClone(frozenConfig);
+        thread.phase = 'running';
+        thread.lastActiveAt = Date.now();
+        return true;
+    }
+
     endRun(threadId: string, input: { successful: boolean; transcript?: LoopMessage[]; effects?: SubThreadEffect[]; answer?: string; userStop?: boolean } ): void {
         const thread = this._threads.get(threadId); if (!thread || thread.phase !== 'running') return;
         const transcript = (input.transcript ?? thread.transcript).filter(m => m.role !== 'system').map(m => structuredClone(m));
@@ -267,9 +277,67 @@ export class SubTaskRegistry {
         this._pruneIdleThreads();
     }
 
-    closeThread(threadId: string): boolean { const t = this._threads.get(threadId); if (!t || t.phase === 'closed') return false; if (t.phase === 'running') t.closeAfterRun = true; else this._closeThreadData(t); return true; }
-    closeSessionThreads(agentName: string, sessionPath: string): number { let n = 0; for (const t of this._threads.values()) if (t.owner.agentName === agentName && t.owner.sessionPath === sessionPath && this.closeThread(t.threadId)) n++; return n; }
-    closeAll(): void { for (const t of this._threads.values()) this.closeThread(t.threadId); }
+    closeThread(threadId: string, by: StopBy = 'user'): boolean { const t = this._threads.get(threadId); if (!t || t.phase === 'closed') return false; if (t.phase === 'running') t.closeAfterRun = true; else { if (t.phase === 'queued') t.closedBy ??= by; this._closeThreadData(t); } return true; }
+    /** Stop from the strip resolves the current thread phase at click time. */
+    stopThread(threadId: string): boolean {
+        const thread = this._threads.get(threadId);
+        if (!thread) return false;
+        if (thread.phase === 'queued') return this.closeThread(threadId, 'user');
+        if (thread.phase === 'running') {
+            const runId = thread.runIds[thread.runIds.length - 1];
+            return runId ? this.requestStop(runId, 'user') : false;
+        }
+        return false;
+    }
+    closeSessionThreads(agentName: string, sessionPath: string): number { let n = 0; for (const t of this._threads.values()) if (t.owner.agentName === agentName && t.owner.sessionPath === sessionPath && this.closeThread(t.threadId, 'system')) n++; return n; }
+    closeAll(): void { for (const t of this._threads.values()) this.closeThread(t.threadId, 'system'); }
+    closeQueuedForOwners(input: { tabKeys: string[]; agentNames: string[] }, by: StopBy): number {
+        const tabKeys = new Set(input.tabKeys.filter(Boolean));
+        const agentNames = new Set(input.agentNames.filter(Boolean));
+        let count = 0;
+        for (const thread of this._threads.values()) {
+            if (thread.phase !== 'queued') continue;
+            const origin = thread.origin;
+            const matches = origin.tabKey ? tabKeys.has(origin.tabKey) : agentNames.has(origin.agentName);
+            if (matches && this.closeThread(thread.threadId, by)) count++;
+        }
+        return count;
+    }
+    finishQueuedStop(threadId: string, input: { background?: boolean; taskPreview?: string }): SubTask | undefined {
+        const thread = this._threads.get(threadId);
+        if (!thread || thread.phase !== 'closed' || !thread.closedBy || this._tasks.has(threadId)) return undefined;
+        const task: SubTask = { id: threadId, name: thread.name, agentName: thread.owner.agentName, status: 'done', createdAt: Date.now(), endedAt: Date.now(), steps: [], budget: {}, threadId,
+            origin: { ...thread.origin }, outcome: { end: { kind: 'stopped', by: thread.closedBy }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } };
+        if (input.background !== undefined) task.background = input.background;
+        if (typeof input.taskPreview === 'string' && input.taskPreview.trim()) task.taskPreview = this._mask ? this._mask(input.taskPreview.trim().slice(0, 300)) : input.taskPreview.trim().slice(0, 300);
+        this._tasks.set(task.id, task);
+        // Synthetic completion is the queued thread's first run; link it so
+        // the chat strip can render the stopped result inside that thread.
+        thread.runIds.push(task.id);
+        this.events.emit('task:created', task);
+        this.events.emit('task:finished', task);
+        this._evictOldDone();
+        return task;
+    }
+    finishQueuedFailure(threadId: string, input: { error: string; background?: boolean; taskPreview?: string }): SubTask | undefined {
+        const thread = this._threads.get(threadId);
+        if (!thread || thread.phase !== 'queued' || this._tasks.has(threadId)) return undefined;
+        const error = this._mask ? this._mask(maskSensitiveData(input.error)) : maskSensitiveData(input.error);
+        thread.closedBy = 'system';
+        this._closeThreadData(thread);
+        const now = Date.now();
+        const task: SubTask = { id: threadId, name: thread.name, agentName: thread.owner.agentName, status: 'error', createdAt: now, endedAt: now, steps: [], budget: {}, threadId,
+            origin: { ...thread.origin }, error,
+            outcome: { end: { kind: 'failed', stage: 'work' }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } };
+        if (input.background !== undefined) task.background = input.background;
+        if (typeof input.taskPreview === 'string' && input.taskPreview.trim()) task.taskPreview = this._mask ? this._mask(maskSensitiveData(input.taskPreview.trim().slice(0, 300))) : maskSensitiveData(input.taskPreview.trim().slice(0, 300));
+        this._tasks.set(task.id, task);
+        thread.runIds.push(task.id);
+        this.events.emit('task:created', task);
+        this.events.emit('task:finished', task);
+        this._evictOldDone();
+        return task;
+    }
     listThreads(owner: SubThreadOwner): SubThread[] { return [...this._threads.values()].filter(t => t.owner.agentName === owner.agentName && t.owner.sessionPath === owner.sessionPath && t.owner.sessionEpoch === owner.sessionEpoch); }
     getThread(threadId: string): SubThread | undefined { return this._threads.get(threadId); }
     getThreadMaxRuns(threadId: string): number {

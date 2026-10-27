@@ -29,6 +29,7 @@ import type { ActiveSessionEventInput } from '../memory/index.js';
 import type { ChatModel } from '../models/index.js';
 import { classifyRunEnd } from './runOutcome.js';
 import type { RunEffect, RunOutcome } from './runOutcome.js';
+import { allocateSubTaskId } from './subTaskId.js';
 
 type AgentLike = { name: string };
 
@@ -126,6 +127,7 @@ type RunOptions = {
      */
     onTaskCreated?: (task: SubTask) => void;
     threadId?: string;
+    queuedThreadId?: string;
 };
 /**
  * Jak sub ZSZEDŁ z biegu. Trzy pierwsze wartości przychodzą wprost z `runAgentLoop`
@@ -167,8 +169,6 @@ type ErrLike = { message?: unknown; error?: unknown; details?: { message?: unkno
  * Dlaczego licznik, a nie czas jak w pętli głównej (`harness/Tester#15-41-51`): równoległe suby
  * startują w tej samej sekundzie, więc stempel czasu by ich nie rozróżnił.
  */
-let _subCallSeq = 0;
-
 /**
  * Bezpiecznik księgowości: wołanie rejestru SubTask NIE MOŻE zmienić wyniku `runTask`
  * ani wywrócić biegu suba. Sam rejestr jest fail-soft w środku - to drugi pas, na wypadek
@@ -321,7 +321,24 @@ export class SubAgentRunner {
     async runTask(taskPrompt: string, agent: AgentLike, config: SubAgentData, model: ChatModel, options: RunOptions = {}): Promise<SubRunResult> {
         const startTime = Date.now();
         const registry: SubTaskRegistry | null = this.plugin?.subTaskRegistry || null;
-        let thread = options.threadId ? registry?.getThread?.(options.threadId) : undefined;
+        if (options.queuedThreadId && registry) {
+            const queued = registry.getThread(options.queuedThreadId);
+            if (queued?.phase === 'closed') {
+                const task = registry.finishQueuedStop(options.queuedThreadId, { background: options.background, taskPreview: taskPrompt });
+                const by = task?.outcome?.end.kind === 'stopped' ? task.outcome.end.by : queued.closedBy ?? 'user';
+                const outcome: RunOutcome = { end: { kind: 'stopped', by }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] };
+                return { result: '', toolsUsed: [], toolCallDetails: [], duration: Date.now() - startTime, usage: null, stoppedBy: 'abort', outcome };
+            }
+            const owner = options.origin;
+            const queuedLimits = getLimits(this.plugin?.env?.settings);
+            const frozenConfig = { subConfig: structuredClone(config), options: { delegationDepth: Number(options.delegationDepth) || 0, scopeFolders: options.scopeFolders ? [...options.scopeFolders] : undefined, callerToolNames: options.callerToolNames ? [...options.callerToolNames] : undefined, modelTimeout: options.modelTimeout, autonomy: options.autonomy }, toolNames: this._resolveToolNames(config), limits: { ...queuedLimits }, model: config.model || null, modelId: model.modelId, providerId: model.providerId };
+            if (!queued || !owner || !registry.beginQueuedRun(options.queuedThreadId, { agentName: owner.agentName, sessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch }, frozenConfig)) {
+                const outcome = classifyRunEnd({ stoppedBy: 'error', failed: true, finalText: '' });
+                return { result: t('subagent.thread_refused'), toolsUsed: [], toolCallDetails: [], duration: Date.now() - startTime, usage: null, stoppedBy: 'error', failed: true, outcome };
+            }
+        }
+        let thread = options.threadId ? registry?.getThread?.(options.threadId)
+            : options.queuedThreadId ? registry?.getThread?.(options.queuedThreadId) : undefined;
         if (options.threadId) {
             const owner = options.origin;
             if (!thread || !owner || !registry?.beginRun?.(options.threadId, { agentName: owner.agentName, sessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch })) {
@@ -452,7 +469,7 @@ export class SubAgentRunner {
             // (`chat/<agent>#<id sesji>`, `harness/<agent>#<runId>`). Bez numeru N równoległych
             // workerów z jednego `delegate` pisało pod wspólną etykietą i nie dało się ich rozdzielić.
             // Czytelnicy trace dopasowują etykietę PREFIKSOWO (patrz `scenarios/_asserts.ts` w repo harnessu).
-            const label = `sub/${config.name || config.role || 'sub'}#${(++_subCallSeq).toString(36)}`;
+            const label = options.queuedThreadId ?? allocateSubTaskId(config.name || config.role || 'sub');
             const loopLimits = {
                 maxIterations: effectiveLimits.maxIterations,
                 minIterations: config.min_iterations || 1,
@@ -548,7 +565,7 @@ export class SubAgentRunner {
             const toolNames = Array.isArray(frozenTools) ? frozenTools as string[] : this._resolveToolNames(config);
             const visibleToolNames = _canDelegateAtDepth(delegationDepth, limits.max_delegation_depth)
                 ? toolNames
-                : toolNames.filter((name) => name !== 'delegate' && name !== 'agent_delegate');
+                : toolNames.filter((name) => name !== 'delegate' && name !== 'agent_delegate' && name !== 'sub_agent');
             const tools = this._getTools(visibleToolNames, agent, options.callerToolNames);
             // Fail-closed whitelist: the sub-agent may ONLY execute tools that
             // survived the parent∩sub intersection in _getTools. _executeTool enforces this
