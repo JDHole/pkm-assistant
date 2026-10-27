@@ -911,7 +911,7 @@ epoch: ${epoch}
      * @returns ścieżka pliku (kształt zwrotki bez zmian)
      */
     /** Append to an existing frozen owner session. Never repairs or redirects the target. */
-    async appendSessionEvent(path: string, event: ActiveSessionEventInput = {}): Promise<string> {
+    async appendSessionEvent(path: string, event: ActiveSessionEventInput = {}, expectedEpoch?: string | null): Promise<string> {
         const root = this.paths.sessionsActive + '/';
         if (!path.startsWith(root) || !path.endsWith('.md') || path.slice(root.length).includes('/')
             || path.includes('\\') || path.split('/').some(part => part === '..' || part === '.')) {
@@ -921,6 +921,10 @@ epoch: ${epoch}
             // Frozen receipts always read first, including warm cache and native append.
             const probe = await readIfExists(this.vault.adapter, path);
             if (probe.state !== 'content') throw new Error('appendSessionEvent: frozen session missing or unreadable');
+            if (expectedEpoch !== undefined && (this._parseFrontmatter(probe.content).epoch ?? null) !== expectedEpoch) {
+                log.warn('AgentMemory', 'appendSessionEvent: frozen session epoch mismatch');
+                throw new Error('appendSessionEvent: frozen session epoch mismatch');
+            }
             const seq = this._nextSeq(path, probe.content);
             const body = formatSessionEvent(event.type || 'event', { ...event, seq }, event.timestamp || new Date().toISOString());
             await this._appendSessionFile(path, probe.content.endsWith('\n') ? body : '\n' + body);
