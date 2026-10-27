@@ -3159,5 +3159,4 @@ Report status → \`gotowy\`. Tell the user 2-3 sentences of essence + where the
   'chat.subresult.user_stopped_next': 'It will not restart on its own. It will continue only if you ask.',
   'chat.subresult.restart': '{{name}} did not finish: Obsidian closed while it was working. The sub-agent will not return on its own.',
   'chat.subresult.unavailable': 'The result from {{name}} is unavailable.',
-  'subagent.stopped_before_start': '{{name}} stopped before it started.',
 };
