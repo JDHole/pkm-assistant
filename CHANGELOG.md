@@ -7,6 +7,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+- Sub-agent strip shows live steps and counts for larger groups, tool chips use readable action labels, and template deletion names the template.
 ### Added
 - U9: queued sub-agent tasks are visible and can be stopped before their run starts.
 - S4b: sub-agent result frames use shared outcome labels, identify empty results, preserve work beside errors, and keep unstructured history text as text; interrupted background runs are identified after restart.

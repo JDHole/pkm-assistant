@@ -5,7 +5,9 @@
  */
 import test from 'ava';
 import { resolveDeleteOutcome, templateCopyNames, templateDeleteConfirmation } from './deleteOutcome.js';
-import { t as translate } from '../../core/i18n/index.js';
+import { getLocale, setLocale, t as tr } from '../../core/i18n/index.js';
+import { ConfirmModal } from '../ui-components/index.js';
+import { SubAgentEditorModal } from './SubAgentEditorModal.js';
 
 test('kasowanie potwierdzone (true) - komunikat o usunięciu', t => {
     const out = resolveDeleteOutcome(true, 'jaskier-prep');
@@ -44,13 +46,43 @@ test('potwierdzenie kasowania wymienia rozpoznane kopie i obsługuje brak nazw',
     t.is(withoutCopies.copies, 'Brak kopii');
     t.is(withCopies.messageKey, 'backstage.confirm_delete_sub_template');
     for (const locale of ['pl', 'en']) {
-        const message = translate(withCopies.messageKey, withCopies, locale);
+        const message = tr(withCopies.messageKey, withCopies, locale);
         t.true(message.includes('klara-zwiadowca'));
         t.true(message.includes('ola-zwiadowca'));
         t.false(message.includes('{{copies}}'));
-        const withoutMessage = translate(withoutCopies.messageKey, withoutCopies, locale);
+        const withoutMessage = tr(withoutCopies.messageKey, withoutCopies, locale);
         t.true(withoutMessage.includes('Brak kopii'));
         t.false(withoutMessage.includes('{{copies}}'));
+    }
+});
+
+test('tytuł potwierdzenia zawiera nazwę szablonu w obu językach', t => {
+    const confirmation = templateDeleteConfirmation('researcher', [], 'brak');
+    t.is(tr('backstage.delete_template_title', confirmation, 'pl'), 'Usunąć szablon researcher?');
+    t.is(tr('backstage.delete_template_title', confirmation, 'en'), 'Delete template researcher?');
+});
+
+test.serial('edytor przekazuje nazwę szablonu do modala kasowania', async t => {
+    const originalOpen = ConfirmModal.prototype.open;
+    const previousLocale = getLocale();
+    const options: Array<{ title: string; destructive?: boolean }> = [];
+    ConfirmModal.prototype.open = function () {
+        options.push(this.opts);
+        this.resolve(false);
+    };
+    try {
+        for (const locale of ['pl', 'en']) {
+            setLocale(locale);
+            const editor = new SubAgentEditorModal({} as never, {} as never, { name: 'researcher' } as never, null, { template: true });
+            await editor._handleDelete();
+        }
+        t.deepEqual(options.map(({ title, destructive }) => ({ title, destructive })), [
+            { title: 'Usunąć szablon researcher?', destructive: true },
+            { title: 'Delete template researcher?', destructive: true },
+        ]);
+    } finally {
+        ConfirmModal.prototype.open = originalOpen;
+        setLocale(previousLocale);
     }
 });
 
@@ -69,7 +101,7 @@ test('dopasowanie from_template nie miesza podobnych nazw szablonów', t => {
 
 test('wspólne potwierdzenie usuwania skilla nie ma brakującego placeholdera', t => {
     for (const locale of ['pl', 'en']) {
-        const message = translate('backstage.confirm_delete_template', { name: 'Raport' }, locale);
+        const message = tr('backstage.confirm_delete_template', { name: 'Raport' }, locale);
         t.true(message.includes('Raport'));
         t.false(message.includes('{{copies}}'));
     }

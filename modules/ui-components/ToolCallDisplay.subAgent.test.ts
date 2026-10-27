@@ -1,5 +1,5 @@
 import test from 'ava';
-import { TOOL_INFO, createCompactToolChip, describeToolCall } from './ToolCallDisplay.js';
+import { TOOL_INFO, createCompactToolChip, describeToolCall, subAgentNameFromId } from './ToolCallDisplay.js';
 import { t as tr } from '../../core/i18n/index.js';
 
 type FakeEl = {
@@ -54,14 +54,14 @@ function renderChip(input: object, output?: object, status: 'pending' | 'success
     return createCompactToolChip({ name: 'sub_agent', input, output, status }) as unknown as FakeEl;
 }
 
-test('TOOL_INFO sub_agent shows action and ID without task or message content', t => {
-    const input = { action: 'message', sub_id: 'thread-9', task: 'SECRET TASK', text: 'SECRET MESSAGE' };
+test('TOOL_INFO sub_agent shows human action and name without task or message content', t => {
+    const input = { action: 'message', sub_id: 'sub/researcher#deadbeef-9', task: 'SECRET TASK', text: 'SECRET MESSAGE' };
     const description = describeToolCall('sub_agent', input);
     t.is(TOOL_INFO.sub_agent.label, tr('tool.sub_agent'));
     t.truthy(TOOL_INFO.sub_agent.icon());
-    t.is(description, tr('tool.in.sub_agent', { action: 'message', sub_id: 'thread-9' }));
-    t.true(description.includes('message'));
-    t.true(description.includes('thread-9'));
+    t.is(description, `${tr('tool.sub_action.message')}: researcher`);
+    t.is(subAgentNameFromId(input.sub_id), 'researcher');
+    t.is(subAgentNameFromId('thread-9'), '');
     t.false(description.includes('SECRET TASK'));
     t.false(description.includes('SECRET MESSAGE'));
 });
@@ -71,12 +71,19 @@ test('tool status translation has Polish and English values', t => {
     t.is(tr('chat.tool_status.sub_agent', undefined, 'en'), 'Running sub-agent action...');
 });
 
+test('akcje sub_agent mają czytelne etykiety, także nieznana akcja', t => {
+    const cases = [['task', 'Next task: researcher'], ['message', 'Message: researcher'], ['stop', 'Stop: researcher'], ['close', 'Close: researcher'], ['list', 'Sub-agent list: researcher'], ['unknown', 'Sub-agent action: researcher']] as const;
+    for (const [action, expected] of cases) t.is(describeToolCall('sub_agent', { action, sub_id: 'sub/researcher#deadbeef-1' }), expected);
+    t.is(describeToolCall('sub_agent', { action: '__proto__', sub_id: 'invalid' }), 'Sub-agent action');
+    t.is(tr('tool.sub_action.unknown', undefined, 'pl'), 'Akcja suba');
+});
+
 test.serial('chip sub_agent pokazuje akcję i sub_id w toku oraz po wyniku', t => {
     const previous = (globalThis as Record<string, unknown>).document;
     (globalThis as Record<string, unknown>).document = { createElement: () => fakeElement() };
     try {
-        const input = { action: 'message', sub_id: 'thread-9', task: 'SECRET TASK', text: 'SECRET MESSAGE' };
-        const expectedTitle = tr('tool.in.sub_agent', { action: 'message', sub_id: 'thread-9' });
+        const input = { action: 'message', sub_id: 'sub/researcher#deadbeef-9', task: 'SECRET TASK', text: 'SECRET MESSAGE' };
+        const expectedTitle = `${tr('tool.sub_action.message')}: researcher`;
         for (const chip of [
             renderChip(input),
             renderChip(input, { success: true, message: 'Przyjęto' }, 'success'),
@@ -84,8 +91,8 @@ test.serial('chip sub_agent pokazuje akcję i sub_id w toku oraz po wyniku', t =
             const title = findByClass(chip, 'cs-tile__title');
             const head = findByClass(chip, 'cs-tile__head');
             t.is(title?.textContent, expectedTitle);
-            t.true(deepText(head!).includes('message'));
-            t.true(deepText(head!).includes('thread-9'));
+            t.true(deepText(head!).includes('researcher'));
+            t.false(deepText(head!).includes('sub/researcher#deadbeef-9'));
             t.false(deepText(head!).includes('SECRET TASK'));
             t.false(deepText(head!).includes('SECRET MESSAGE'));
         }
@@ -94,8 +101,16 @@ test.serial('chip sub_agent pokazuje akcję i sub_id w toku oraz po wyniku', t =
 
         const denied = renderChip({ action: 'task', sub_id: 'thread-9', task: 'SECRET TASK' }, { success: false, error: 'odmowa' }, 'error');
         t.truthy(findByClass(denied, 'cs-tile--error'));
-        t.is(findByClass(denied, 'cs-tile__title')?.textContent, tr('tool.in.sub_agent', { action: 'task', sub_id: 'thread-9' }));
+        t.is(findByClass(denied, 'cs-tile__title')?.textContent, tr('tool.sub_action.task'));
         t.false(deepText(findByClass(denied, 'cs-tile__head')!).includes('SECRET TASK'));
+        for (const [id, expected] of [
+            ['sub/klara-research#2#deadbeef-1', 'Message: klara-research#2'],
+            ['sub/Żółć badacz-północ#deadbeef-z', 'Message: Żółć badacz-północ'],
+            ['', 'Message'],
+            ['sub/researcher#1', 'Message'],
+        ] as const) {
+            t.is(findByClass(renderChip({ action: 'message', sub_id: id }), 'cs-tile__title')?.textContent, expected);
+        }
     } finally {
         (globalThis as Record<string, unknown>).document = previous;
     }

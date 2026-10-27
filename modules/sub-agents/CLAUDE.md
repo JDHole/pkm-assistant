@@ -1,5 +1,7 @@
 # modules/sub-agents/
 
+Model paska `summarizeStripRows` zlicza widoczne wiersze: pracujące i zatrzymujące się, oczekujące w kolejce oraz wszystkie wiersze.
+
 > Fizyczne źródła modułu mają rozszerzenie `.ts`. Zapisy `.js` poniżej to specyfikatory
 > importów, które celowo zostają `.js`.
 

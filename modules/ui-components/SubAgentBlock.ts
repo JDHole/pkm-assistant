@@ -1,4 +1,4 @@
-import { t, getDateLocale, getLocale } from '../../core/i18n/index.js';
+import { t, getDateLocale, getLocale, pluralCategory } from '../../core/i18n/index.js';
 import { UiIcons } from '../crystal-soul/index.js';
 import type { ToolResultStatus } from '../../core/index.js';
 import { createTile } from './Tile.js';
@@ -129,18 +129,8 @@ function formatTokensHuman(n: number): string {
  * funkcja zostala czysta i testowalna tabelarycznie bez `setLocale()` w tescie.
  */
 export function pluralCalls(n: number, locale: string): string {
-    if (locale === 'pl') {
-        const mod10 = n % 10;
-        const mod100 = n % 100;
-        const key = n === 1
-            ? 'chat.tile.sub.calls_one'
-            : (mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14))
-                ? 'chat.tile.sub.calls_few'
-                : 'chat.tile.sub.calls_many';
-        return t(key, { n }, 'pl');
-    }
-    const key = n === 1 ? 'chat.tile.sub.calls_one' : 'chat.tile.sub.calls_other';
-    return t(key, { n }, 'en');
+    const keys = { one: 'chat.tile.sub.calls_one', few: 'chat.tile.sub.calls_few', many: 'chat.tile.sub.calls_many', other: 'chat.tile.sub.calls_other' };
+    return t(keys[pluralCategory(n, locale)], { n }, locale);
 }
 
 /**

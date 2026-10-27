@@ -2,7 +2,7 @@ import test from 'ava';
 import { renderSubTaskStrip } from './subTaskStrip.js';
 import { SubTaskRegistry } from '../../sub-agents/index.js';
 import { pl as trPl } from '../../../core/i18n/pl.js';
-import { setLocale } from '../../../core/i18n/index.js';
+import { pluralCategory, setLocale, t as tr } from '../../../core/i18n/index.js';
 import { createDelegateTool } from '../../tools/index.js';
 import { __test__ as modelsTest } from '../../models/index.js';
 
@@ -76,6 +76,64 @@ test('subTaskStrip: pusty model nie tworzy dzieci', t => {
     const count = renderSubTaskStrip(host as any, { plugin: { subTaskRegistry: { list: () => [] } }, tabKey: 'Klara', agentName: 'Klara', onToggle() {} });
     t.is(count, 0);
     t.is(host.children.length, 0);
+});
+
+test('subTaskStrip: podsumowanie liczy widoczne wiersze i odmienia liczby', t => {
+    setLocale('pl');
+    const registry = new SubTaskRegistry();
+    const host = new MockEl();
+    for (let i = 0; i < 3; i++) registry.create({ id: `working-${i}`, name: 'worker', agentName: owner.agentName, origin: owner });
+    for (let i = 0; i < 2; i++) registry.createThread({ threadId: `queued-${i}`, name: 'worker', owner, origin: owner, config: {}, phase: 'queued' });
+    const render = () => renderSubTaskStrip(host as any, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, onToggle() {} });
+    render();
+    let summary = all(host).find(node => node.classList.contains('pkm-substrip__summary'))!;
+    t.deepEqual(summary.children.map(node => node.textContent), ['3 pracują, 2 czekają', '5 zadań']);
+    for (let i = 2; i < 11; i++) registry.createThread({ threadId: `queued-${i}`, name: 'worker', owner, origin: owner, config: {}, phase: 'queued' });
+    render();
+    summary = all(host).find(node => node.classList.contains('pkm-substrip__summary'))!;
+    t.deepEqual(summary.children.map(node => node.textContent), ['3 pracują, 11 czeka', '14 zadań']);
+    setLocale('en');
+    render();
+    summary = all(host).find(node => node.classList.contains('pkm-substrip__summary'))!;
+    t.deepEqual(summary.children.map(node => node.textContent), ['3 working, 11 waiting', '14 tasks']);
+    registry.dispose();
+});
+
+test('subTaskStrip: mniej niż pięć wierszy nie pokazuje podsumowania', t => {
+    const registry = new SubTaskRegistry();
+    for (let i = 0; i < 3; i++) registry.create({ id: `short-${i}`, name: 'worker', agentName: owner.agentName, origin: owner });
+    const host = new MockEl();
+    t.is(renderSubTaskStrip(host as any, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, onToggle() {} }), 3);
+    t.is(all(host).filter(node => node.classList.contains('pkm-substrip__summary')).length, 0);
+    registry.dispose();
+});
+
+test('subTaskStrip: formy licznika przy liczbach pojedynczych i nastu', t => {
+    const keys = {
+        one: ['chat.substrip.count_running_one', 'chat.substrip.count_queued_one', 'chat.substrip.count_total_one'],
+        few: ['chat.substrip.count_running_few', 'chat.substrip.count_queued_few', 'chat.substrip.count_total_few'],
+        many: ['chat.substrip.count_running_many', 'chat.substrip.count_queued_many', 'chat.substrip.count_total_many'],
+        other: ['chat.substrip.count_running_other', 'chat.substrip.count_queued_other', 'chat.substrip.count_total_other'],
+    } as const;
+    const cases = [
+        [0, '0 pracuje', '0 czeka', '0 zadań', '0 working', '0 waiting', '0 tasks'],
+        [1, '1 pracuje', '1 czeka', '1 zadanie', '1 working', '1 waiting', '1 task'],
+        [2, '2 pracują', '2 czekają', '2 zadania', '2 working', '2 waiting', '2 tasks'],
+        [4, '4 pracują', '4 czekają', '4 zadania', '4 working', '4 waiting', '4 tasks'],
+        [5, '5 pracuje', '5 czeka', '5 zadań', '5 working', '5 waiting', '5 tasks'],
+        [12, '12 pracuje', '12 czeka', '12 zadań', '12 working', '12 waiting', '12 tasks'],
+        [14, '14 pracuje', '14 czeka', '14 zadań', '14 working', '14 waiting', '14 tasks'],
+        [21, '21 pracuje', '21 czeka', '21 zadań', '21 working', '21 waiting', '21 tasks'],
+        [22, '22 pracują', '22 czekają', '22 zadania', '22 working', '22 waiting', '22 tasks'],
+        [24, '24 pracują', '24 czekają', '24 zadania', '24 working', '24 waiting', '24 tasks'],
+        [25, '25 pracuje', '25 czeka', '25 zadań', '25 working', '25 waiting', '25 tasks'],
+    ] as const;
+    for (const [count, ...expected] of cases) {
+        for (const [locale, offset] of [['pl', 0], ['en', 3]] as const) {
+            const actual = keys[pluralCategory(count, locale)].map(key => tr(key, { count }, locale));
+            t.deepEqual(actual, expected.slice(offset, offset + 3), `${locale}: ${count}`);
+        }
+    }
 });
 
 test('subTaskStrip: chip ma kryształ oraz dwuwierszową kolumnę nazwa, stan', t => {
@@ -263,6 +321,7 @@ test('subTaskStrip: pionowa oś pokazuje obie karty, a rozwinięcie kroków trwa
     t.deepEqual(cards.map(card => card.dataset.substripRunId), ['axis-one', 'axis-two']);
     t.true(cards[0].classList.values.has('pkm-substrip__run-card--collapsed'));
     t.true(cards[1].classList.values.has('pkm-substrip__run-card--expanded'));
+    t.is(all(cards[1]).find(node => node.classList.values.has('pkm-substrip__section-title') && node.textContent === tr('chat.substrip.heading_steps_live'))?.textContent, 'KROKI NA ŻYWO');
     t.true(textTree(cards[0]).includes('Bieg 1 · Pierwsze zlecenie'));
     t.true(textTree(cards[1]).includes('Bieg 2 · Drugie zlecenie'));
     t.true(textTree(cards[0]).includes('wynik częściowy'));
@@ -280,6 +339,7 @@ test('subTaskStrip: pionowa oś pokazuje obie karty, a rozwinięcie kroków trwa
     t.is(expandSteps.textContent, 'Rozwiń kroki');
     t.is(expandSteps.attributes['aria-expanded'], 'false');
     expandSteps.dispatch('click');
+    t.is(all(cards[0]).find(node => node.textContent === tr('chat.substrip.heading_steps'))?.textContent, 'KROKI');
     t.true(textTree(host).includes('pierwszy.md'));
     t.is(expandSteps.attributes['aria-expanded'], 'true');
     t.true(textTree(host).includes('nie znaleziono'));

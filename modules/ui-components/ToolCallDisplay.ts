@@ -9,6 +9,19 @@ import type { TileSpec, TileStatus } from './Tile.js';
 // sie swobodnie (zlota zasada dotyczy TYLKO wejscia spoza modulu).
 import { createNoteLink, isVaultNotePath } from './noteLink.js';
 
+export function subAgentNameFromId(id: string): string {
+    const match = /^sub\/(.+)#[a-f0-9]{8}-[a-z0-9]+$/.exec(id);
+    return match?.[1] ?? '';
+}
+
+function subAgentLabel(action: string | undefined, id: string | undefined): string {
+    const keys: Record<string, string> = { task: 'tool.sub_action.task', message: 'tool.sub_action.message', stop: 'tool.sub_action.stop', close: 'tool.sub_action.close', list: 'tool.sub_action.list' };
+    const key = action && Object.hasOwn(keys, action) ? keys[action] : 'tool.sub_action.unknown';
+    const label = t(key);
+    const name = subAgentNameFromId(id ?? '');
+    return name ? `${label}: ${name}` : label;
+}
+
 /** Karta wywołania narzędzia — kształt, który realnie czytają render-funkcje niżej. */
 interface ToolCallData {
     name: string;
@@ -244,7 +257,7 @@ function formatToolInputHint(toolName: string, input: unknown): string {
             case 'delegate':
                 return _truncate(data.task || data.description || '', 80);
             case 'sub_agent':
-                return t('tool.in.sub_agent', { action: data.action || '?', sub_id: data.sub_id || '' });
+                return subAgentLabel(data.action, data.sub_id);
             case 'connect_to_server':
                 return data.server || t('tool.in.catalog');
             case 'minion_task':
@@ -335,7 +348,7 @@ function formatToolInputDetail(toolName: string, input: unknown) {
             case 'delegate':
                 return data.task || data.description || '';
             case 'sub_agent':
-                return t('tool.in.sub_agent', { action: data.action || '?', sub_id: data.sub_id || '' });
+                return subAgentLabel(data.action, data.sub_id);
             case 'connect_to_server':
                 return data.server || t('tool.in.server_catalog');
             case 'minion_task':
@@ -830,9 +843,9 @@ export function describeToolCall(name: string, input: unknown): string {
             case 'ask_user':
                 return t('chat.tile.tool.ask_user');
             case 'sub_agent': {
-                const action = typeof data.action === 'string' ? data.action : '?';
+                const action = typeof data.action === 'string' ? data.action : undefined;
                 const subId = typeof data.sub_id === 'string' ? data.sub_id : '';
-                return t('tool.in.sub_agent', { action, sub_id: subId });
+                return subAgentLabel(action, subId);
             }
             default:
                 return t('chat.tile.tool.generic', { name: getToolCallLabel(name) });

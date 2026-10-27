@@ -1,5 +1,7 @@
 # modules/chat/
 
+Pasek subów pokazuje podsumowanie od pięciu widocznych wierszy, a kroki pracującego lub zatrzymującego się biegu mają nagłówek na żywo.
+
 **Interfejs czatu.** Główny widok pluginu - okno czatu w sidebarze Obsidiana. `ChatView` jest
 koordynatorem, logika jest rozsiana po submodułach zaimplementowanych jako mixiny na
 `ChatView.prototype`.

@@ -438,7 +438,7 @@ export class SubAgentEditorModal extends Modal {
             : [];
         const templateConfirmation = templateDeleteConfirmation(this.existing.name, copyNames, t('backstage.no_template_copies'));
         const okToDelete = await confirmModal(this.app, {
-            title: t('generic.delete'),
+            title: this.isTemplate ? t('backstage.delete_template_title', { name: this.existing.name }) : t('generic.delete'),
             message: this.isTemplate
                 ? t(templateConfirmation.messageKey, templateConfirmation)
                 : t('modal.sub_agent.confirm_delete', { entity: entityName, name: this.existing.name }),

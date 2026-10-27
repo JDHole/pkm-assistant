@@ -30,7 +30,7 @@ export { SubTaskNotifier } from './SubTaskNotifier.js';
 // `modules/chat`, więc eksport jest niezbędny — plik pozostaje pure (zero obsidian/DOM/i18n),
 // barrel zostaje czysty. Widok sidebara `renderSubTaskRunsView` + `buildPanelModel` OUT:
 // biegi należą do agenta i sesji, nie do globalnego panelu.
-export { buildStripModel, formatDuration, getStripStateLabelParts, buildSubTaskResultModel } from './subTaskPanelModel.js';
+export { buildStripModel, formatDuration, getStripStateLabelParts, buildSubTaskResultModel, summarizeStripRows } from './subTaskPanelModel.js';
 export type { StripRow, StripStep, StripRun, StripEffect, StripState, BuildStripModelInput,
     BuildSubTaskResultModelInput, SubTaskResultModel, SubTaskResultThread, SubTaskResultEffect, SubTaskResultEffectState } from './subTaskPanelModel.js';
 export { registerBackstage } from './BackstageTab.js';

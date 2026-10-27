@@ -90,6 +90,15 @@ export interface StripRow {
     outcome: string;
 }
 
+/** Counts exactly the rows presented by the strip. */
+export function summarizeStripRows(rows: readonly StripRow[]): { running: number; queued: number; total: number } {
+    return {
+        running: rows.filter(row => row.state.kind === 'running' || row.state.kind === 'stopping').length,
+        queued: rows.filter(row => row.state.kind === 'queued').length,
+        total: rows.length,
+    };
+}
+
 export interface BuildStripModelInput {
     tasks?: SubTask[] | null;
     pending?: SubTask[] | null;

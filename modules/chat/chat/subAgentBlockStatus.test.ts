@@ -2,6 +2,7 @@ import test from 'ava';
 import { _chatOnToolCallsParsed, _chatOnToolResults } from './chat_streaming.js';
 import { createSubAgentBlock } from '../../ui-components/index.js';
 import { buildDelegateBlockOptions } from './delegateBlockView.js';
+import { t as tr } from '../../../core/i18n/index.js';
 
 type FakeEl = {
     className: string;
@@ -119,7 +120,8 @@ test.serial('sub_agent task, pokwitowanie, list i odmowa renderują właściwy s
 
     const listed = await renderLive({ success: true, threads: [] }, null, 'sub_agent', { action: 'list' });
     t.true(hasClass(listed, 'cs-tile--ok'));
-    t.is(findByClass(listed, 'cs-tile__title')?.textContent, 'Action: list | sub_id: ');
+    t.is(findByClass(listed, 'cs-tile__title')?.textContent, 'Sub-agent list');
+    t.is(tr('tool.sub_action.list', undefined, 'en'), 'Sub-agent list');
 
     const denied = await renderLive({ success: false, error: 'odmowa' }, null, 'sub_agent', { action: 'task', task: 'zadanie' });
     t.true(hasClass(denied, 'cs-tile--error'));
