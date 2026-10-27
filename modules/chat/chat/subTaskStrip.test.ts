@@ -1,6 +1,8 @@
 import test from 'ava';
+import { register } from 'node:module';
 import { renderSubTaskStrip } from './subTaskStrip.js';
-import { SubTaskRegistry } from '../../sub-agents/index.js';
+import { SubTaskRegistry, buildStripModel } from '../../sub-agents/index.js';
+import { DEFAULT_LIMITS } from '../../../config/limits.js';
 import { pl as trPl } from '../../../core/i18n/pl.js';
 import { pluralCategory, setLocale, t as tr } from '../../../core/i18n/index.js';
 import { createDelegateTool } from '../../tools/index.js';
@@ -70,6 +72,212 @@ function textTree(node: MockEl): string { return [node.textContent, ...node.chil
 function all(node: MockEl): MockEl[] { return [node, ...node.children.flatMap(all)]; }
 
 const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: 'epoch-1' };
+
+test.serial('mixin UI: zdarzenie i 250 ms zachowują szkic, fokus, scroll i rozwinięcie', async t => {
+    // Node nie ładuje modułu CSS. Hak zastępuje tylko arkusz, nie kod UI.
+    const hook = `export async function load(url, context, next) {
+        if (url.endsWith('.css')) return { format: 'module', shortCircuit: true, source: 'export default {}' };
+        return next(url, context);
+    }`;
+    register(`data:text/javascript,${encodeURIComponent(hook)}`);
+    const ui = await import('./chat_ui.js');
+    const registry = new SubTaskRegistry();
+    const host = new MockEl();
+    const input = Object.assign(new MockEl(), { value: 'Szkic wiadomości', selectionStart: 2, selectionEnd: 8 });
+    input.ownerDocument = host.ownerDocument;
+    input.focus();
+    const messages = { scrollTop: 120 };
+    let timer: (() => void) | null = null;
+    let delay = 0;
+    const oldWindow = globalThis.window;
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+        setTimeout(fn: () => void, ms: number) { timer = fn; delay = ms; return 1; },
+        clearTimeout() { timer = null; },
+    } });
+    const view = {
+        _subStripContainer: host, _subStripExpandedId: null as string | null, _subStripUnsubs: [] as Array<() => void>, _subStripTimer: null,
+        chatTabs: [{ agentName: owner.agentName, sessionEpoch: owner.sessionEpoch, sessionId: 'tab-a', isActive: true }],
+        plugin: { subTaskRegistry: registry, agentManager: { getActiveMemory: () => ({ activeSessionPath: owner.sessionPath }) } },
+        input_area: input, messages_container: messages,
+        _renderSubTaskStrip() { ui._renderSubTaskStrip.call(view as never); },
+    };
+    t.teardown(() => { ui._unwireSubTaskStrip.call(view as never); registry.dispose(); Object.defineProperty(globalThis, 'window', { configurable: true, value: oldWindow }); });
+    const run = registry.create({ id: 'timer-run', name: 'worker', agentName: owner.agentName, origin: { ...owner, tabKey: 'tab-a' } });
+    ui._wireSubTaskStrip.call(view as never);
+    view._renderSubTaskStrip();
+    host.querySelector<MockEl>('[data-substrip-id="timer-run"]')!.dispatch('click');
+    registry.step(run, 'tool.pre', { tool: 'read', detail: 'plan.md' });
+    t.is(delay, 250);
+    t.is(typeof timer, 'function');
+    (timer as unknown as () => void)();
+    t.is(host.querySelector<MockEl>('[data-substrip-id="timer-run"]')!.attributes['aria-expanded'], 'true');
+    t.true(textTree(host).includes('plan.md'));
+    t.is(input.value, 'Szkic wiadomości');
+    t.is(input.selectionStart, 2);
+    t.is(input.selectionEnd, 8);
+    t.is(host.ownerDocument.activeElement, input);
+    t.is(messages.scrollTop, 120);
+    host.querySelector<MockEl>('[data-substrip-id="timer-run"]')!.dispatch('click');
+    registry.step(run, 'tool.pre', { tool: 'read', detail: 'kolejny.md' });
+    (timer as unknown as () => void)();
+    t.is(host.querySelector<MockEl>('[data-substrip-id="timer-run"]')!.attributes['aria-expanded'], 'false');
+});
+
+test('integracja paska: kolejka przelicza pozycje po starcie i Stopie', t => {
+    const registry = new SubTaskRegistry();
+    t.teardown(() => registry.dispose());
+    const host = new MockEl();
+    for (const id of ['q1', 'q2', 'q3']) registry.createThread({ threadId: id, name: id, owner, origin: owner, config: {}, phase: 'queued' });
+    const render = (expandedId: string | null = null) => renderSubTaskStrip(host as any, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, expandedId, onToggle() {} });
+    const positions = () => buildStripModel({ tasks: registry.list(), threads: registry.listThreads(owner), ...owner })
+        .filter(row => row.state.kind === 'queued').map(row => `${row.id}:${row.state.kind === 'queued' ? row.state.position : ''}`);
+    const labels = () => all(host).filter(node => node.classList.contains('pkm-substrip__queue')).map(node => node.textContent);
+    render();
+    t.deepEqual(positions(), ['q1:1', 'q2:2', 'q3:3']);
+    t.deepEqual(labels(), [tr('chat.substrip.queue_position', { position: '1' }), tr('chat.substrip.queue_position', { position: '2' }), tr('chat.substrip.queue_position', { position: '3' })]);
+    t.true(registry.beginQueuedRun('q1', owner, {}));
+    registry.create({ id: 'run-q1', name: 'q1', agentName: owner.agentName, threadId: 'q1' });
+    render('q2');
+    t.deepEqual(positions(), ['q2:1', 'q3:2']);
+    t.deepEqual(labels(), [tr('chat.substrip.queue_position', { position: '1' }), tr('chat.substrip.queue_position', { position: '2' })]);
+    all(host).find(node => node.classList.contains('pkm-substrip__stop'))!.dispatch('click');
+    render();
+    t.is(registry.getThread('q2')?.phase, 'closed');
+    t.deepEqual(positions(), ['q3:1']);
+    t.deepEqual(labels(), [tr('chat.substrip.queue_position', { position: '1' })]);
+    t.deepEqual(host.querySelectorAll('[data-substrip-id]').map(node => node.dataset.substripId), ['q1', 'q2', 'q3']);
+});
+
+test('integracja paska: postęp i kolejność trzech wątków po zmianie fazy', t => {
+    const registry = new SubTaskRegistry();
+    t.teardown(() => registry.dispose());
+    const host = new MockEl();
+    for (const id of ['alpha', 'beta']) {
+        registry.createThread({ threadId: id, name: id, owner, origin: owner, config: {} });
+        registry.create({ id: `${id}-run`, name: id, agentName: owner.agentName, threadId: id });
+    }
+    registry.step(registry.getTask('alpha-run')!, 'tool.pre', { tool: 'read', detail: 'alpha.md' });
+    registry.step(registry.getTask('beta-run')!, 'tool.pre', { tool: 'read', detail: 'beta.md' });
+    registry.step(registry.getTask('beta-run')!, 'tool.pre', { tool: 'read', detail: 'drugi.md' });
+    registry.createThread({ threadId: 'gamma', name: 'gamma', owner, origin: owner, config: {}, phase: 'queued' });
+    const render = (id?: string) => renderSubTaskStrip(host as any, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, expandedId: id, onToggle() {} });
+    const ids = () => host.querySelectorAll('[data-substrip-id]').map(node => node.dataset.substripId);
+    const state = () => all(host).filter(node => node.classList.contains('pkm-substrip__state')).map(node => node.textContent);
+    render('alpha');
+    t.deepEqual(ids(), ['alpha', 'beta', 'gamma']);
+    t.deepEqual(state(), [tr('chat.substrip.state_running'), tr('chat.substrip.state_running'), tr('chat.substrip.state_queued')]);
+    t.true(textTree(host).includes('alpha.md'));
+    t.true(textTree(host).includes(tr('chat.substrip.heading_steps_live')));
+    render('beta');
+    t.true(textTree(host).includes('beta.md'));
+    t.true(textTree(host).includes('drugi.md'));
+    registry.finish(registry.getTask('alpha-run')!, { text: 'wynik alpha', toolsUsed: [], durationMs: 1, usage: null, outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true, effects: [] } });
+    registry.endRun('alpha', { successful: true });
+    render();
+    t.deepEqual(ids(), ['alpha', 'beta', 'gamma']);
+    t.deepEqual(state(), [tr('chat.substrip.state_idle'), tr('chat.substrip.state_running'), tr('chat.substrip.state_queued')]);
+});
+
+test('integracja paska: przełączenie właściciela A B A filtruje chipy', t => {
+    const registry = new SubTaskRegistry();
+    t.teardown(() => registry.dispose());
+    const host = new MockEl();
+    const other = { agentName: 'Jan', sessionPath: 'jan.md', sessionEpoch: 'epoch-2' };
+    registry.createThread({ threadId: 'a1', name: 'a1', owner, origin: owner, config: {}, phase: 'queued' });
+    registry.createThread({ threadId: 'a2', name: 'a2', owner, origin: owner, config: {}, phase: 'queued' });
+    registry.createThread({ threadId: 'b1', name: 'b1', owner: other, origin: other, config: {}, phase: 'queued' });
+    const show = (active: typeof owner) => {
+        renderSubTaskStrip(host as any, { plugin: { subTaskRegistry: registry }, tabKey: active.agentName, ...active, onToggle() {} });
+        return host.querySelectorAll('[data-substrip-id]').map(node => node.dataset.substripId);
+    };
+    t.deepEqual(show(owner), ['a1', 'a2']);
+    t.deepEqual(show(other), ['b1']);
+    t.deepEqual(show(owner), ['a1', 'a2']);
+});
+
+test('integracja paska: klik zachowuje rozwinięcie i zwinięcie po zmianach rejestru', t => {
+    const registry = new SubTaskRegistry();
+    t.teardown(() => registry.dispose());
+    registry.createThread({ threadId: 'open', name: 'worker', owner, origin: owner, config: {} });
+    const run = registry.create({ id: 'open-run', name: 'worker', agentName: owner.agentName, threadId: 'open' });
+    const host = new MockEl();
+    let expanded: string | null = null;
+    const render = () => renderSubTaskStrip(host as any, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, expandedId: expanded, onToggle(id) { expanded = id; render(); } });
+    const chip = () => host.querySelector<MockEl>('[data-substrip-id="open"]')!;
+    render();
+    chip().dispatch('click');
+    t.is(chip().attributes['aria-expanded'], 'true');
+    registry.step(run, 'tool.pre', { tool: 'read', detail: 'plik.md' });
+    registry.endRun('open', { successful: true });
+    render();
+    t.is(chip().attributes['aria-expanded'], 'true');
+    chip().dispatch('click');
+    t.is(chip().attributes['aria-expanded'], 'false');
+    registry.closeThread('open');
+    render();
+    t.is(chip().attributes['aria-expanded'], 'false');
+});
+
+test('retencja: 50 ostatnich biegów i wszystkie bieżące, 10 ostatnich na pasku', t => {
+    const registry = new SubTaskRegistry();
+    t.teardown(() => registry.dispose());
+    for (let i = 0; i < 52; i++) {
+        const task = registry.create({ id: `done-${i}`, name: 'worker', agentName: owner.agentName, origin: owner });
+        registry.finish(task, { text: 'wynik', toolsUsed: [], durationMs: 1, usage: null });
+        task.endedAt = i + 1;
+    }
+    registry.create({ id: 'live-a', name: 'worker', agentName: owner.agentName, origin: owner });
+    registry.create({ id: 'live-b', name: 'worker', agentName: owner.agentName, origin: owner });
+    t.deepEqual(registry.list().map(task => task.id), ['done-2', 'done-3', 'done-4', 'done-5', 'done-6', 'done-7', 'done-8', 'done-9', 'done-10', 'done-11', 'done-12', 'done-13', 'done-14', 'done-15', 'done-16', 'done-17', 'done-18', 'done-19', 'done-20', 'done-21', 'done-22', 'done-23', 'done-24', 'done-25', 'done-26', 'done-27', 'done-28', 'done-29', 'done-30', 'done-31', 'done-32', 'done-33', 'done-34', 'done-35', 'done-36', 'done-37', 'done-38', 'done-39', 'done-40', 'done-41', 'done-42', 'done-43', 'done-44', 'done-45', 'done-46', 'done-47', 'done-48', 'done-49', 'done-50', 'done-51', 'live-a', 'live-b']);
+    const host = new MockEl();
+    renderSubTaskStrip(host as any, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, onToggle() {} });
+    t.deepEqual(host.querySelectorAll('[data-substrip-id]').map(node => node.dataset.substripId), ['live-a', 'live-b', 'done-51', 'done-50', 'done-49', 'done-48', 'done-47', 'done-46', 'done-45', 'done-44', 'done-43', 'done-42']);
+});
+
+test('retencja paska: z 11 zakończonych samodzielnych widać 10 najnowszych', t => {
+    setLocale('en');
+    const registry = new SubTaskRegistry();
+    t.teardown(() => registry.dispose());
+    for (let i = 0; i < 11; i++) {
+        const task = registry.create({ id: `single-${i}`, name: 'worker', agentName: owner.agentName, origin: owner });
+        registry.finish(task, { text: 'wynik', toolsUsed: [], durationMs: 1, usage: null });
+        task.endedAt = i + 1;
+    }
+    const host = new MockEl();
+    renderSubTaskStrip(host as any, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, onToggle() {} });
+    t.deepEqual(host.querySelectorAll('[data-substrip-id]').map(node => node.dataset.substripId), ['single-10', 'single-9', 'single-8', 'single-7', 'single-6', 'single-5', 'single-4', 'single-3', 'single-2', 'single-1']);
+    t.deepEqual(all(host).find(node => node.classList.contains('pkm-substrip__summary'))!.children.map(node => node.textContent), [
+        `${tr('chat.substrip.count_running_other', { count: 0 })}, ${tr('chat.substrip.count_queued_other', { count: 0 })}`,
+        tr('chat.substrip.count_total_other', { count: 10 }),
+    ]);
+});
+
+test.serial('retencja: limity idle i liczby biegów z konfiguracji', t => {
+    const originalNow = Date.now;
+    let now = 1000;
+    Date.now = () => now;
+    const registry = new SubTaskRegistry();
+    t.teardown(() => { Date.now = originalNow; registry.dispose(); });
+    const limits = { subagent_thread_idle_ms: DEFAULT_LIMITS.subagent_thread_idle_ms, subagent_thread_max_idle_per_session: DEFAULT_LIMITS.subagent_thread_max_idle_per_session, subagent_thread_max_runs: DEFAULT_LIMITS.subagent_thread_max_runs };
+    for (const id of ['idle-1', 'idle-2', 'idle-3', 'idle-4']) {
+        registry.createThread({ threadId: id, name: id, owner, origin: owner, config: { limits } });
+        registry.create({ id: `${id}-run`, name: id, agentName: owner.agentName, threadId: id });
+        registry.endRun(id, { successful: true });
+        now++;
+    }
+    t.deepEqual(['idle-1', 'idle-2', 'idle-3', 'idle-4'].map(id => [registry.getThread(id)?.phase, registry.getThread(id)?.runIds.length]), [['closed', 1], ['idle', 1], ['idle', 1], ['idle', 1]]);
+    now += limits.subagent_thread_idle_ms;
+    registry.createThread({ threadId: 'trigger', name: 'trigger', owner, origin: owner, config: {} });
+    t.deepEqual(['idle-1', 'idle-2', 'idle-3', 'idle-4'].map(id => [registry.getThread(id)?.phase, registry.getThread(id)?.runIds.length]), [['closed', 1], ['closed', 1], ['closed', 1], ['closed', 1]]);
+    registry.createThread({ threadId: 'runs', name: 'runs', owner, origin: owner, config: { limits } });
+    for (let i = 0; i < limits.subagent_thread_max_runs; i++) {
+        if (i) t.true(registry.beginRun('runs', owner));
+        registry.create({ id: `runs-${i}`, name: 'runs', agentName: owner.agentName, threadId: 'runs' });
+        registry.endRun('runs', { successful: true });
+    }
+    t.is(registry.getThread('runs')?.phase, 'closed');
+    t.is(registry.getThread('runs')?.runIds.length, limits.subagent_thread_max_runs);
+});
 
 test('subTaskStrip: pusty model nie tworzy dzieci', t => {
     const host = new MockEl();
