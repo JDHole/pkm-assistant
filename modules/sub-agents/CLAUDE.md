@@ -562,9 +562,7 @@ Naturalny koniec `finished` o kompletności `empty` dostaje etykietę „pusty w
 ## TODO
 
 Najważniejsze:
-- 🟠 4 role rdzeniowe systemowe (`prep-memory`, `prep-whitelist`, `strateg-planer`, `strateg-sumarizer`)
 - 🟠 YAML schema custom sub-agentów - doprecyzować schemat zakresu: foldery wyznaczają twardą granicę dostępu; frontmatter, sekcje i przypięte notatki pozostają wskazówkami bez egzekwowania
-- 🟠 Parallel execution w `DelegateTool` - `args.tasks` już jest, doszlifować.
 - 🟠 Hyperfocused per-akcja + klikalność w chacie
 
 ---
