@@ -1,7 +1,7 @@
 /** Render paska wątku i biegów w czacie. Komunikacja do suba pozostaje wyłącznie po stronie agenta. */
-import { t } from '../../../core/i18n/index.js';
+import { t, pluralCategory } from '../../../core/i18n/index.js';
 import { SkinManager, setSvg } from '../../crystal-soul/index.js';
-import { buildStripModel, formatDuration, getStripStateLabelParts } from '../../sub-agents/index.js';
+import { buildStripModel, formatDuration, getStripStateLabelParts, summarizeStripRows } from '../../sub-agents/index.js';
 import type { StripRow, StripRun, StripState, StripStep, SubTask, SubThread } from '../../sub-agents/index.js';
 
 interface ElOpts { cls?: string; text?: string; attr?: Record<string, string> }
@@ -31,6 +31,11 @@ interface SubTaskStripContext {
 }
 
 const expandedRunSteps = new WeakMap<El, Set<string>>();
+const countKeys = {
+    running: { one: 'chat.substrip.count_running_one', few: 'chat.substrip.count_running_few', many: 'chat.substrip.count_running_many', other: 'chat.substrip.count_running_other' },
+    queued: { one: 'chat.substrip.count_queued_one', few: 'chat.substrip.count_queued_few', many: 'chat.substrip.count_queued_many', other: 'chat.substrip.count_queued_other' },
+    total: { one: 'chat.substrip.count_total_one', few: 'chat.substrip.count_total_few', many: 'chat.substrip.count_total_many', other: 'chat.substrip.count_total_other' },
+};
 
 function stateClass(state: StripState): string {
     switch (state.kind) {
@@ -77,6 +82,12 @@ export function renderSubTaskStrip(host: El, ctx: SubTaskStripContext): number {
         }) : [];
     host.classList.toggle('pkm-substrip--empty', rows.length === 0);
     if (!rows.length) return 0;
+    if (rows.length >= 5) {
+        const counts = summarizeStripRows(rows);
+        const summary = host.createDiv({ cls: 'pkm-substrip__summary' });
+        summary.createEl('strong', { text: `${t(countKeys.running[pluralCategory(counts.running)], { count: counts.running })}, ${t(countKeys.queued[pluralCategory(counts.queued)], { count: counts.queued })}` });
+        summary.createSpan({ text: t(countKeys.total[pluralCategory(counts.total)], { count: counts.total }) });
+    }
     const expanded = rows.find(row => row.id === ctx.expandedId) || null;
     const chips = host.createDiv({ cls: 'pkm-substrip__chips' });
     for (const row of rows) renderChip(chips, row, ctx, expanded?.id === row.id);
@@ -181,7 +192,7 @@ function renderRunCard(axis: El, run: StripRun, row: StripRow, registry: Registr
 }
 
 function renderRunSteps(slot: El, run: StripRun): void {
-    section(slot, 'chat.substrip.heading_steps', 'KROKI');
+    section(slot, run.state.kind === 'running' || run.state.kind === 'stopping' ? 'chat.substrip.heading_steps_live' : 'chat.substrip.heading_steps', 'KROKI');
     const steps = slot.createDiv({ cls: 'pkm-substrip__steps' });
     for (const step of run.steps) renderStep(steps, step);
 }

@@ -3593,6 +3593,13 @@ span.cs-note-link {
 /* Brak biegów = zero wysokości; czat wygląda dokładnie jak przed tą zmianą. */
 .pkm-substrip--empty { display: none; }
 
+.pkm-substrip__summary {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--text-muted);
+}
+
 .pkm-substrip__chips {
   display: flex;
   align-items: center;
