@@ -36,7 +36,11 @@ function makeVault(files: Record<string, string> = {}) {
             write: async (path: string, content: string) => { files[path] = content; },
             mkdir: async (path: string) => { folders.add(path); },
             remove: async (path: string) => { delete files[path]; },
-            rmdir: async (path: string) => { folders.delete(path); },
+            rmdir: async (path: string, recursive: boolean) => {
+                if (!recursive) throw Object.assign(new Error('is a directory'), { code: 'ERR_FS_EISDIR' });
+                for (const file of Object.keys(files)) if (file.startsWith(`${path}/`)) delete files[file];
+                for (const folder of folders) if (folder === path || folder.startsWith(`${path}/`)) folders.delete(folder);
+            },
             list: async (path: string) => ({
                 folders: Array.from(folders).filter(folder => {
                     const rest = folder.slice(path.length + 1);
@@ -261,6 +265,29 @@ test('deleteSubAgent kasuje YAML/KNOWLEDGE/folder z dysku i z cache (sukces)', a
     t.falsy(files[KLARA_PREP_KNOWLEDGE], 'KNOWLEDGE musi zniknąć z dysku');
     t.false(await vault.adapter.exists(KLARA_PREP_FOLDER), 'folder suba musi zniknąć z dysku');
     t.falsy(loader.getSubAgent('klara-prep'), 'cache też czyszczony');
+});
+
+test('deleteSubAgent zachowuje dodatkowy plik i usuwa suba z cache', async t => {
+    const files: Record<string, string> = {};
+    const vault = makeVault(files);
+    const loader = new SubAgentLoader(vault) as unknown as SaveableLoader;
+    await loader.saveSubAgent({ name: 'klara-prep', description: 'zwiad', prompt: 'METODA' });
+    files[`${KLARA_PREP_FOLDER}/notatki.md`] = 'Moje notatki';
+
+    t.true(await loader.deleteSubAgent('klara-prep'));
+    t.true(loader.getSubAgent('klara-prep') === null);
+    t.is(files[`${KLARA_PREP_FOLDER}/notatki.md`], 'Moje notatki');
+    t.true(await vault.adapter.exists(KLARA_PREP_FOLDER));
+});
+
+test('deleteSubAgent zwraca false gdy usunięcie pustego folderu zawiedzie', async t => {
+    const vault = makeVault();
+    const loader = new SubAgentLoader(vault) as unknown as SaveableLoader;
+    await loader.saveSubAgent({ name: 'klara-prep', description: 'zwiad', prompt: 'METODA' });
+    vault.adapter.rmdir = async () => { throw new Error('folder zablokowany'); };
+    t.false(await loader.deleteSubAgent('klara-prep'));
+    t.truthy(loader.getSubAgent('klara-prep'));
+    t.true(await vault.adapter.exists(KLARA_PREP_FOLDER));
 });
 
 test('deleteSubAgent — porażka I/O (remove rzuca) zwraca false, cache i plik NIETKNIĘTE', async t => {

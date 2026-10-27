@@ -50,7 +50,7 @@ export type SkillInput = Partial<Omit<SkillData, 'name' | 'description'>> & {
 
 export type VaultAdapterLike = {
     exists: (path: string) => Promise<boolean>;
-    list: (path: string) => Promise<{ folders?: string[] } | null | undefined>;
+    list: (path: string) => Promise<{ folders?: string[]; files?: string[] } | null | undefined>;
     read: (path: string) => Promise<string>;
     write: (path: string, content: string) => Promise<void>;
     mkdir: (path: string) => Promise<void>;

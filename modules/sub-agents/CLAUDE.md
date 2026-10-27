@@ -446,9 +446,10 @@ Odlew per agent = `<agent-slug>-researcher` (standardowe `instantiate`). Przepis
   o komunikacie mieszka w czystym `deleteOutcome.ts` (`resolveDeleteOutcome`): tylko `true`
   znaczy „Usunięto", cokolwiek innego (w tym `undefined` z opcjonalnego łańcucha) to
   `modal.sub_agent.delete_failed` - modal zostaje otwarty, kafel Zaplecza nie znika. Dla żywego
-  suba `deleteSubAgent` zwraca `false`, gdy nierekurencyjne `rmdir` nie usunie folderu z dodatkowym
-  plikiem. `SubAgentTemplateStore.delete` ignoruje błąd `rmdir`: po usunięciu plików szablonu
-  zwraca `true` i usuwa wpis z cache, nawet jeśli folder z dodatkowym plikiem pozostał na dysku.
+  suba `deleteSubAgent` usuwa pusty folder, a dodatkowe pliki zachowuje i wymienia w ostrzeżeniu;
+  w obu przypadkach usuwa wpis z cache i zwraca `true`. Błąd sprzątania pustego folderu daje
+  `false`. `SubAgentTemplateStore.delete` ignoruje błędy sprzątania folderu: po usunięciu plików
+  szablonu zwraca `true` i usuwa wpis z cache, a dodatkowe pliki pozostają na dysku.
   Gdy usunięcie któregoś pliku szablonu (`SUB_AGENT.yaml`, `KNOWLEDGE.md`) rzuci, zwraca `false`,
   a wpis zostaje w cache.
 - ⚠️ **Handler kafla Zaplecza przechwytuje odrzuconą obietnicę.** `renderUseAtAgentButton`

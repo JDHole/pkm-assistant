@@ -448,8 +448,8 @@ export class SubAgentEditorModal extends Modal {
 
         try {
             // Meldunek idzie ze STANU PO operacji. `delete`/`deleteSubAgent`
-            // łapią wyjątek adaptera i zwracają `false` (folder suba z dodatkowym plikiem =
-            // nierekurencyjny `rmdir` pada) - wtedy modal ZOSTAJE otwarty, a user widzi powód,
+            // łapią wyjątek adaptera i zwracają `false` - wtedy modal ZOSTAJE otwarty,
+            // a user widzi powód,
             // zamiast „Usunięto" nad pozycją, która dalej jest na liście.
             if (this.isTemplate) {
                 const outcome = resolveDeleteOutcome(

@@ -2,9 +2,9 @@
  * deleteOutcome - co zameldować po próbie skasowania suba/szablonu.
  *
  * `SubAgentLoader.deleteSubAgent` i `SubAgentTemplateStore.delete` zwracają `false`, gdy
- * adapter rzuci przy usuwaniu plików. Dla żywego suba także nieudane, nierekurencyjne `rmdir`
- * daje `false` (np. gdy folder zawiera dodatkowy plik). Magazyn szablonów ignoruje błąd
- * `rmdir` i po usunięciu plików szablonu zwraca `true`, nawet gdy folder pozostał.
+ * adapter rzuci przy usuwaniu plików. Dla żywego suba błąd sprzątania pustego folderu
+ * daje `false`. Magazyn szablonów ignoruje błąd sprzątania folderu i po usunięciu
+ * plików szablonu zwraca `true`, nawet gdy folder pozostał.
  * Wołacze MUSZĄ czytać wynik: bez tego przy `false` user dostaje „Usunięto: X", choć wpis
  * pozostał w cache i na liście.
  *
