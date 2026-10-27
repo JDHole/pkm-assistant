@@ -38,6 +38,12 @@ export function getDateLocale(): string {
   return currentLocale === 'pl' ? 'pl-PL' : 'en-US';
 }
 
+/** Cardinal plural category shared by UI labels. */
+export function pluralCategory(n: number, locale = getLocale()): 'one' | 'few' | 'many' | 'other' {
+  const category = new Intl.PluralRules(locale === 'pl' ? 'pl' : 'en').select(n);
+  return category === 'one' || category === 'few' || category === 'many' ? category : 'other';
+}
+
 /**
  * Translate a key. Supports simple {{param}} interpolation.
  * Falls back: (forced or current) locale → English → key itself.

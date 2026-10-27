@@ -1,5 +1,7 @@
 # core/
 
+`core/i18n` udostępnia `pluralCategory` do wyboru form liczby mnogiej PL i EN.
+
 **Fundament pluginu.** Wszystko co KAŻDY moduł potrzebuje żeby w ogóle wystartować: klasa pluginu, runtime, tryby pracy, security, i18n, utilities.
 
 Jak moduł = pojedyncza funkcjonalność (memory, chat, mcp…), to `core/` jest podłogą na której te moduły stoją. Nie ma tu żadnej "feature" - sama infrastruktura.

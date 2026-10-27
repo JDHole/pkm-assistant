@@ -10,6 +10,11 @@ const RESULT_KEYS = [
     'chat.subresult.user_stopped_material', 'chat.subresult.user_stopped_next', 'chat.subresult.restart',
     'chat.subresult.unavailable',
     'subagent.stopped_before_start',
+    'backstage.delete_template_title', 'chat.substrip.heading_steps_live',
+    'tool.sub_action.task', 'tool.sub_action.message', 'tool.sub_action.stop', 'tool.sub_action.close', 'tool.sub_action.list', 'tool.sub_action.unknown',
+    'chat.substrip.count_running_one', 'chat.substrip.count_running_few', 'chat.substrip.count_running_many', 'chat.substrip.count_running_other',
+    'chat.substrip.count_queued_one', 'chat.substrip.count_queued_few', 'chat.substrip.count_queued_many', 'chat.substrip.count_queued_other',
+    'chat.substrip.count_total_one', 'chat.substrip.count_total_few', 'chat.substrip.count_total_many', 'chat.substrip.count_total_other',
 ] as const;
 
 test('subresult: etykiety końca, kompletności i ramki mają parytet PL/EN', t => {
