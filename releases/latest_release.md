@@ -1,35 +1,31 @@
-# PKM Assistant 2.3.3
+# PKM Assistant 2.4.0
 
-**Current Claude models, honest tool descriptions** - PKM Assistant 2.3.3
+**Sub-agents you can follow and continue** - PKM Assistant 2.4.0
 
-**In plain words.** If you talk to Claude through the Anthropic provider, the newest models work
-again: Claude Opus 4.7 and later, Sonnet 5 and 5.5, Haiku 5.5 and Fable used to answer every
-message with an error, because the plugin sent them settings they no longer accept. The default
-Anthropic model is now Claude Sonnet 5.5; if you picked a model yourself, it stays as it is. Agents
-also get a truthful picture of their own tools: the built-in instructions no longer tell them they
-cannot search, that they may call only three tools per turn, or that inline comments carry a marker
-the plugin never sends, and the tool descriptions now say what the tools really do.
+**In plain words.** You can now follow sub-agents in the chat as they work: the sub-agent strip
+shows queued tasks, live steps and elapsed time. You can stop one sub-agent at a time, even before
+it starts. Its result shows whether the work is complete or partial and why it ended, while keeping
+any work already done. The same sub-agent can continue a task in a later run. This release also
+fixes deleting sub-agents and templates on Obsidian 1.14.5, and gives newly saved sub-agents their
+default tools without requiring a reload.
 
 What changed, in detail:
 
-- **Anthropic on current Claude models.** Each request uses the thinking setting its Claude family
-  accepts. Older models keep the thinking budget and the temperature. Claude 4.6 uses adaptive
-  thinking. Claude 4.7 and newer use adaptive thinking with a readable summary and never receive a
-  temperature; the temperature setting now says that these models ignore it. Models from other
-  vendors behind an Anthropic-compatible address get exactly the same request as before.
-- **Defaults.** The default Anthropic model is `claude-sonnet-5-5` instead of the deprecated
-  `claude-sonnet-4-20250514`, and the Anthropic output fallback is 16,384 tokens.
-- **Truthful instructions.** The delegation guide no longer claims the agent has no `search`,
-  `list` or `web_search`; the rules no longer invent a three-call limit; the inline comment rule
-  uses the marker the plugin actually sends, in English and Polish; folder restrictions are
-  described as missing access instead of a vault that does not exist.
-- **Truthful tool descriptions.** `read`, `list`, `search`, `write`, `create_folder`, `ask_user`,
-  `memory_save`, `memory_delete`, `delegate`, `delete`, `web_search` and `add_text_to_image` now
-  describe their real behaviour: what memory reading covers, the 100-entry list limit, keyword
-  search matching the whole phrase, the protected folders, that `write` creates missing folders for a new file,
-  what an empty answer form sends, how memory notes are matched, the immediate reply of a background
-  sub-agent, the trash default and the real default file names.
-- **Memory.** A "right now" note no longer has to carry the fields of a permanent note, and the
-  session summary prompt no longer asks for a field that was always ignored.
-- **Delegation reminder.** An agent with sub-agents is reminded to delegate at most once per turn
-  instead of after every tool round.
+- **Progress and control.** The sub-agent strip groups runs by thread, shows their states, live
+  steps, counts and duration, and lets you stop an individual run, including one waiting in the
+  queue. Completed runs have collapsible steps and tool actions have readable labels.
+- **Honest results.** Result cards show the end reason and completeness, identify empty results,
+  and keep partial work separate from errors. Background notifications include effects and use
+  the handoff for partial results. Interrupted background runs are identified after a restart.
+- **Continue the work.** A sub-agent can receive a follow-up task in the same session, keeping
+  its original model and permissions. A result stopped by you waits for a later user turn, and
+  continuation respects the latest stop.
+- **Approvals and boundaries.** Delegation approvals show the sub-agent and task, with secrets
+  masked in previews. A timed-out run cannot start a tool write after waiting for approval, and
+  sub-agents at the delegation depth limit work without delegation tools.
+- **Templates and tools.** Newly saved sub-agents receive default tools immediately. Deleting
+  custom sub-agents, their templates and skill templates works on Obsidian 1.14.5. Template
+  editing supports changing the display name, and deletion explains which existing copies remain.
+- **Background work.** Results return to the matching chat session, and rendering their cards
+  preserves your reading position. Closing a chat or ending a session handles its sub-agent runs
+  and threads more clearly.
