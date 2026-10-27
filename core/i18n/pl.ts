@@ -128,7 +128,6 @@ export const pl: Record<string, string> = {
 
   // ── Tool input formatting ──
   'tool.in.path': 'Ścieżka: {{path}}  |  Tryb: {{mode}}',
-  'tool.in.sub_agent': 'Akcja: {{action}} | sub_id: {{sub_id}}',
   'tool.sub_action.task': 'Kolejne zadanie',
   'tool.sub_action.message': 'Wiadomość',
   'tool.sub_action.stop': 'Zatrzymanie',
