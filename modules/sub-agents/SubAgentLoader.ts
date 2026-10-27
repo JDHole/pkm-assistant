@@ -110,8 +110,8 @@ function normalizeScope(scope: unknown): ScopeData | null {
 }
 
 // Jednolite defaulty dla WSZYSTKICH subów (rola = etykieta, nie steruje).
-function defaultSubAgentTools() {
-    return [...DEFAULT_SUB_AGENT_TOOLS];
+export function normalizeToolList(tools: string[] | null | undefined, fallback: readonly string[]): string[] {
+    return [...(tools || fallback)];
 }
 
 function defaultMaxIterations() {
@@ -248,7 +248,7 @@ export class SubAgentLoader {
             description: config.description,
             role: config.role || null,
             model: config.model || null,
-            tools: config.tools || defaultSubAgentTools(),
+            tools: normalizeToolList(config.tools, DEFAULT_SUB_AGENT_TOOLS),
             scope: normalizeScope(config.scope),
             scope_type: config.scope_type || 'custom',
             max_iterations: config.max_iterations || defaultMaxIterations(),
@@ -317,7 +317,8 @@ export class SubAgentLoader {
             role,
         };
         if (data.model) yamlConfig.model = data.model;
-        if ((data.tools?.length as number) > 0) yamlConfig.tools = data.tools;
+        if (data.tools !== undefined) yamlConfig.tools = normalizeToolList(data.tools, DEFAULT_SUB_AGENT_TOOLS);
+        migrateDeprecatedTools(yamlConfig);
         const scope = normalizeScope(data.scope);
         if (scope) yamlConfig.scope = scope;
         yamlConfig.max_iterations = data.max_iterations || defaultMaxIterations();
@@ -355,7 +356,7 @@ export class SubAgentLoader {
             description: data.description,
             role,
             model: data.model || null,
-            tools: data.tools || [],
+            tools: normalizeToolList(yamlConfig.tools, DEFAULT_SUB_AGENT_TOOLS),
             scope,
             scope_type: data.scope_type || 'custom',
             max_iterations: yamlConfig.max_iterations,
