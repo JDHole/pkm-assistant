@@ -17,6 +17,7 @@ export {
     PKM_SUB_NAME,
 } from './SubAgentLoader.js';
 export { SubAgentRunner } from './SubAgentRunner.js';
+export { allocateSubTaskId } from './subTaskId.js';
 // Kształt zwrotki runnera (sposób zejścia + flaga niepowodzenia) — czyta go `DelegateTool`.
 export type { SubRunResult, SubRunStoppedBy } from './SubAgentRunner.js';
 // Rejestr biegów subów + szyna zdarzeń. Pure (obsidian-free) —
@@ -29,8 +30,9 @@ export { SubTaskNotifier } from './SubTaskNotifier.js';
 // `modules/chat`, więc eksport jest niezbędny — plik pozostaje pure (zero obsidian/DOM/i18n),
 // barrel zostaje czysty. Widok sidebara `renderSubTaskRunsView` + `buildPanelModel` OUT:
 // biegi należą do agenta i sesji, nie do globalnego panelu.
-export { buildStripModel, formatDuration } from './subTaskPanelModel.js';
-export type { StripRow, StripStep, StripRun, StripEffect, StripState, BuildStripModelInput } from './subTaskPanelModel.js';
+export { buildStripModel, formatDuration, getStripStateLabelParts, buildSubTaskResultModel } from './subTaskPanelModel.js';
+export type { StripRow, StripStep, StripRun, StripEffect, StripState, BuildStripModelInput,
+    BuildSubTaskResultModelInput, SubTaskResultModel, SubTaskResultThread, SubTaskResultEffect, SubTaskResultEffectState } from './subTaskPanelModel.js';
 export { registerBackstage } from './BackstageTab.js';
 // Magazyn szablonów sub-agentów (Zaplecze) — forma odlewnicza, nie żywy byt.
 export { SubAgentTemplateStore } from './SubAgentTemplateStore.js';

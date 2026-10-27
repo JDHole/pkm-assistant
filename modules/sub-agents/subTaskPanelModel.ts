@@ -1,5 +1,6 @@
 /** Czysty model paska czatu. Wiersz wątku niesie uporządkowaną oś biegów, a bieg bez wątku ma własny wiersz. */
 import type { SubTask, SubTaskStep, SubThread, SubThreadEffect } from './SubTaskRegistry.js';
+import type { RunEnd, RunOutcome } from './runOutcome.js';
 
 export type StripState =
     | { kind: 'queued'; position: number }
@@ -27,6 +28,32 @@ export interface StripEffect {
     outcome: string;
     check: 'matches' | 'mismatch' | 'not-checked';
     expectedCheck?: 'exists' | 'absent' | 'none';
+}
+
+export type SubTaskResultThread = { kind: 'reusable'; sub_id: string } | { kind: 'single' } | { kind: 'unknown' };
+export type SubTaskResultEffectState = 'matches' | 'missing' | 'mismatch' | 'unchecked';
+export interface SubTaskResultEffect extends StripEffect { state: SubTaskResultEffectState }
+export interface BuildSubTaskResultModelInput {
+    outcome?: RunOutcome | null;
+    text?: string | null;
+    handoff?: string | null;
+    partialResult?: string | null;
+    partialText?: string | null;
+    error?: string | null;
+    effects?: Array<{ tool: string; action: string; targets: Array<{ path?: string; id?: string; kind?: string }>; outcome: string; check: StripEffect['check']; expectedCheck?: StripEffect['expectedCheck'] }> | null;
+    thread: SubTaskResultThread;
+}
+export interface SubTaskResultModel {
+    state: StripState;
+    end?: RunEnd;
+    endLabelKey: string;
+    completenessLabelKey?: string;
+    material: string;
+    error: string;
+    effects: SubTaskResultEffect[];
+    missingTargets: string[];
+    userStopped: boolean;
+    thread: SubTaskResultThread;
 }
 
 export interface StripRun {
@@ -114,6 +141,100 @@ function stepView(step: SubTaskStep): StripStep {
     return out;
 }
 
+/**
+ * Ordered i18n keys for a strip state. The reason comes first and completeness second,
+ * so result frames and the strip use the same source of wording.
+ */
+export function getStripStateLabelParts(state: StripState): { end: string; completeness?: string } {
+    switch (state.kind) {
+        case 'queued': return { end: 'chat.substrip.state_queued' };
+        case 'running': return { end: 'chat.substrip.state_running' };
+        case 'stopping': return { end: 'chat.substrip.state_stopping' };
+        case 'idle': return { end: 'chat.substrip.state_idle' };
+        case 'done': return { end: 'chat.substrip.state_done', completeness: 'chat.substrip.completeness_unconfirmed' };
+        case 'partial': return state.reason === 'incomplete'
+            ? { end: 'chat.substrip.state_partial_incomplete' }
+            : {
+                end: `chat.substrip.state_partial_${state.reason === 'user-stop' ? 'user' : state.reason === 'lead-stop' ? 'lead' : state.reason === 'system-stop' ? 'system' : state.reason}`,
+                completeness: 'chat.substrip.completeness_partial',
+            };
+        case 'empty': return { end: 'chat.substrip.state_empty' };
+        case 'delivery': return { end: 'chat.substrip.state_delivery' };
+        case 'closed': return { end: 'chat.substrip.state_closed' };
+        default: return assertNever(state);
+    }
+}
+
+function resultState(outcome: RunOutcome | null | undefined): StripState {
+    if (!outcome) return { kind: 'empty' };
+    if (outcome.completeness === 'empty') return { kind: 'empty' };
+    if (outcome.completeness === 'unconfirmed') return { kind: 'done' };
+    switch (outcome.end.kind) {
+        case 'finished': return { kind: 'partial', reason: 'incomplete' };
+        case 'limit': return { kind: 'partial', reason: 'limit' };
+        case 'uncertain': return { kind: 'partial', reason: 'uncertain' };
+        case 'stopped': return { kind: 'partial', reason: outcome.end.by === 'user' ? 'user-stop' : outcome.end.by === 'lead' ? 'lead-stop' : 'system-stop' };
+        case 'timeout': return { kind: 'partial', reason: 'timeout' };
+        case 'failed': return { kind: 'partial', reason: 'error' };
+        default: return assertNever(outcome.end);
+    }
+}
+
+function resultEndState(outcome: RunOutcome | null | undefined): StripState {
+    if (!outcome) return { kind: 'empty' };
+    switch (outcome.end.kind) {
+        case 'finished': return outcome.completeness === 'empty' ? { kind: 'empty' }
+            : outcome.completeness === 'unconfirmed' ? { kind: 'done' } : { kind: 'partial', reason: 'incomplete' };
+        case 'limit': return { kind: 'partial', reason: 'limit' };
+        case 'uncertain': return { kind: 'partial', reason: 'uncertain' };
+        case 'stopped': return { kind: 'partial', reason: outcome.end.by === 'user' ? 'user-stop' : outcome.end.by === 'lead' ? 'lead-stop' : 'system-stop' };
+        case 'timeout': return { kind: 'partial', reason: 'timeout' };
+        case 'failed': return { kind: 'partial', reason: 'error' };
+        default: return assertNever(outcome.end);
+    }
+}
+
+/** Pure shared outcome classification and material/effect selection for all result views. */
+export function buildSubTaskResultModel(input: BuildSubTaskResultModelInput): SubTaskResultModel {
+    if (input.thread.kind === 'reusable' && !input.thread.sub_id.trim()) throw new Error('Reusable sub-agent thread requires a non-empty sub_id');
+    const outcome = input.outcome ?? undefined;
+    const state = resultState(outcome);
+    const effectList = outcome?.effects.map(effect => {
+        const recorded = input.effects?.find(candidate => candidate.tool === effect.tool && candidate.action === effect.action
+            && candidate.check === effect.check && JSON.stringify(candidate.targets) === JSON.stringify(effect.targets));
+        const expectedCheck = recorded?.expectedCheck;
+        const targets = effect.targets.map(target => ({ path: target.path, id: target.id }));
+        const view: StripEffect = { tool: effect.tool, action: effect.action, targets, outcome: effect.outcome, check: effect.check,
+            ...(expectedCheck ? { expectedCheck } : {}) };
+        const effectState: SubTaskResultEffectState = effect.check === 'matches' ? 'matches'
+            : effect.check === 'not-checked' ? 'unchecked'
+                : expectedCheck === 'exists' ? 'missing' : 'mismatch';
+        return { ...view, state: effectState };
+    }) ?? [];
+    const materialCandidates = outcome?.completeness === 'partial'
+        ? [input.handoff, input.partialResult, input.partialText, input.text]
+        : [input.text, input.handoff, input.partialResult, input.partialText];
+    const material = materialCandidates
+        .find(value => typeof value === 'string' && value.trim().length > 0)?.trim() ?? '';
+    const missingTargets = effectList.flatMap(effect => effect.check === 'mismatch' && effect.expectedCheck === 'exists'
+        ? effect.targets.map(target => target.path || target.id || '').filter(Boolean) : []);
+    const endLabelKey = getStripStateLabelParts(resultEndState(outcome)).end;
+    return {
+        state,
+        ...(outcome ? { end: outcome.end } : {}),
+        endLabelKey,
+        ...(outcome?.completeness ? { completenessLabelKey: outcome.completeness === 'empty'
+            ? 'chat.subagent_notification.completeness_empty'
+            : `chat.subresult.completeness.${outcome.completeness}` } : {}),
+        material,
+        error: input.error?.trim() ?? '',
+        effects: effectList,
+        missingTargets,
+        userStopped: outcome?.end.kind === 'stopped' && outcome.end.by === 'user',
+        thread: input.thread,
+    };
+}
+
 function runView(task: SubTask | undefined, id: string, number: number, now: number, effects: SubThreadEffect[] = []): StripRun {
     if (!task) return { id, number, available: false, state: { kind: 'empty' }, taskPreview: '', steps: [], outcome: '', durationMs: 0, tokenInput: 0, tokenOutput: 0, toolCallCount: 0, effects: [], missingTargets: [] };
     const steps = (task.steps || []).slice(-MAX_STEPS).map(stepView);
@@ -127,59 +248,37 @@ function runView(task: SubTask | undefined, id: string, number: number, now: num
     }, 0);
     const tokenInput = Number(usage?.prompt_tokens ?? usage?.input_tokens ?? partialUsage?.prompt_tokens ?? partialUsage?.input_tokens ?? stepTokens('in')) || 0;
     const tokenOutput = Number(usage?.completion_tokens ?? usage?.output_tokens ?? partialUsage?.completion_tokens ?? partialUsage?.output_tokens ?? stepTokens('out')) || 0;
+    const shared = buildSubTaskResultModel({ outcome: task.outcome, text: result?.text, handoff: result?.handoff,
+        partialText: task.partial?.text, error: task.error, effects, thread: { kind: 'unknown' } });
+    // Keep the strip's historic selection rules independent from the shared result
+    // model: the latter is also consumed by chat and may expose more result material.
     const partialOutcome = task.outcome?.completeness === 'partial';
-    const material = partialOutcome
+    const stripMaterial = partialOutcome
         ? result?.handoff?.trim() || task.partial?.text?.trim() || (task.status === 'error' ? '' : result?.text?.trim()) || ''
         : result?.text || result?.handoff || task.partial?.text || '';
-    const rawOutcome = partialOutcome ? material || task.error || '' : task.status === 'error' && task.error ? task.error : material;
+    const rawOutcome = partialOutcome
+        ? stripMaterial || task.error || ''
+        : task.status === 'error' && task.error ? task.error : stripMaterial;
     const outcome = rawOutcome.length > MAX_CHARS ? `${rawOutcome.slice(0, MAX_CHARS)}…` : rawOutcome;
-    const endReason = partialOutcome && material && task.error ? task.error : undefined;
-    const selectedEffects = task.outcome?.effects.map(effect => {
-        const recorded = effects.find(candidate => candidate.tool === effect.tool && candidate.action === effect.action
-            && candidate.check === effect.check && JSON.stringify(candidate.targets) === JSON.stringify(effect.targets));
-        return effectView({ ...effect, ...(recorded?.expectedCheck ? { expectedCheck: recorded.expectedCheck } : {}) });
-    }) ?? [];
-    const missingTargets = selectedEffects.flatMap(effect => effect.check === 'mismatch' && effect.expectedCheck === 'exists'
-        ? effect.targets.map(target => target.path || target.id || '').filter(Boolean) : []);
+    const endReason = partialOutcome && stripMaterial && task.error ? task.error : undefined;
     return {
-        id, number, available: true, state: runState(task), status: task.status,
+        id, number, available: true, state: runState(task, shared.state), status: task.status,
         taskPreview: (task.taskPreview || '').slice(0, MAX_TASK), steps, outcome,
         ...(endReason ? { endReason } : {}),
         durationMs: Math.max(0, (task.endedAt ?? now) - task.createdAt),
         tokenInput, tokenOutput,
         toolCallCount: (task.steps || []).filter(step => step.type === 'tool.post').length,
-        effects: selectedEffects, missingTargets,
+        effects: shared.effects, missingTargets: shared.missingTargets,
         ...(task.partialStorageError ? { note: 'storage-error' as const }
             : task.status === 'running' && task.partial?.synthesis === 'pending' ? { note: 'synthesis-pending' as const } : {}),
     };
 }
 
-function effectView(effect: SubThreadEffect): StripEffect {
-    return { tool: effect.tool, action: effect.action, targets: effect.targets.map(target => ({ ...target })), outcome: effect.outcome, check: effect.check, ...(effect.expectedCheck ? { expectedCheck: effect.expectedCheck } : {}) };
-}
-
-function runState(task: SubTask | undefined): StripState {
+function runState(task: SubTask | undefined, classified = resultState(task?.outcome)): StripState {
     if (!task) return { kind: 'empty' };
     if (task.status === 'running') return task.stopRequested ? { kind: 'stopping' } : { kind: 'running' };
-    const outcome = task.outcome;
-    if (!outcome) return task.status === 'error' ? { kind: 'partial', reason: 'error' } : { kind: 'empty' };
-    if (outcome.completeness === 'empty') return { kind: 'empty' };
-    if (outcome.completeness === 'unconfirmed') return { kind: 'done' };
-    switch (outcome.end.kind) {
-        case 'finished': return { kind: 'partial', reason: 'incomplete' };
-        case 'limit': return { kind: 'partial', reason: 'limit' };
-        case 'uncertain': return { kind: 'partial', reason: 'uncertain' };
-        case 'stopped':
-            switch (outcome.end.by) {
-                case 'user': return { kind: 'partial', reason: 'user-stop' };
-                case 'lead': return { kind: 'partial', reason: 'lead-stop' };
-                case 'system': return { kind: 'partial', reason: 'system-stop' };
-                default: return assertNever(outcome.end.by);
-            }
-        case 'timeout': return { kind: 'partial', reason: 'timeout' };
-        case 'failed': return { kind: 'partial', reason: 'error' };
-        default: return assertNever(outcome.end);
-    }
+    if (!task.outcome) return task.status === 'error' ? { kind: 'partial', reason: 'error' } : { kind: 'empty' };
+    return classified;
 }
 
 function assertNever(value: never): never { throw new Error(`Nieobsługiwany stan: ${String(value)}`); }
