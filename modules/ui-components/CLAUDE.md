@@ -276,3 +276,12 @@ zostaje jako TODO dla kolejnej jednostki.
 - ⚠️ **`MentionAutocomplete` i `AttachmentManager` trzymają nasłuchy na DOM** - czat woła `destroy()` / `clear()` przy zamknięciu zakładki. Jak wpinasz je w nowe miejsce, zadbaj o sprzątanie, inaczej zostają wiszące listenery per otwarta zakładka.
 - ⚠️ **Wynik `@` to chip nad inputem, nie tekst w textarei.** Świadome: ścieżki ze spacjami rozwalały wariant inline.
 - ⚠️ **Testy DOM modali (`extends Modal`) DZIAŁAJĄ w AVA** dzięki atrapie `obsidian` z repo harnessu (`test-support/register-obsidian-for-ava.mjs` w tym repo tylko ją lokalizuje) - `Modal.open()` w tej atrapie jest jednak NO-OPEM, więc test woła `onOpen()` wprost (tak jak realny Obsidian robi to za kulisami `open()`). Guziki dostają napis przez `setSvgLabel` → `el.appendText(...)` (rozszerzenie DOM Obsidiana), którego atrapa DOM-u (`dom-shim.ts`) NIE implementuje - nieznana metoda jest łańcuchowalnym no-opem, więc `textContent` guzika zostaje pusty. Odróżniaj guziki po klasie CSS (`mod-cta`/`mod-warning`/`mod-muted`), nie po tekście - patrz `DiffModal.test.ts`.
+
+
+## Ramka wyniku sub-agenta (resultView)
+
+`SubAgentResultView` jest gotowym opisem do renderowania. Wołacz przekazuje `title`, opcjonalne `summary` i `badge`, `status`, materiał, błąd, brakujące cele, efekty i osobne `notes`. Komponent nie interpretuje outcome, wątku ani treści; notes renderuje jako tekst, a decyzja o ich treści należy do adaptera. `role` przyjmuje `agent` albo `system` i domyślnie ma wartość `agent`.
+
+Gdy `resultView` jest podany, `createSubAgentBlock` tworzy zwinięty kafelek także dla błędu. Nagłówek pokazuje tytuł i badge. Szczegóły renderują osobno sekcje CO POWSTAŁO, błąd, CZEGO BRAKUJE (tylko gdy lista nie jest pusta) i EFEKTY (narzędzie, cel, etykieta stanu), a następnie notatki. Puste sekcje nie powstają. Tekst trafia przez `textContent`. Bez `resultView` obowiązuje dotychczasowe renderowanie wyniku i pokwitowania w tle.
+
+`TileSpec.badge` dodaje opcjonalną etykietę `.cs-tile__badge` do nagłówka; pozostali konsumenci `createTile` nie muszą jej ustawiać. Wszystkie kafelki z `resultView` dostają root class `.cs-tile--subresult`, niezależnie od roli `agent` lub `system`; arkusz `modules/chat/chat_view.css` używa jej do zawijania tytułu i badge w wąskim panelu. Klasy `.cs-subresult`, `.cs-subresult__section`, `.cs-subresult__effect`, `.cs-subresult__error` i `.cs-subresult__note` są zaczepami strukturalnymi.

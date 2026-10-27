@@ -39,6 +39,8 @@ export interface TileSpec {
     summary?: string;
     /** Mały tekst po prawej, przed kropką (czas, licznik). */
     meta?: string;
+    /** Widoczna etykieta stanu przy tytule. */
+    badge?: string;
     /** Szczegóły renderowane LENIWIE przy pierwszym rozwinięciu, raz. */
     details?: string | HTMLElement | ((body: HTMLElement) => void);
     /** Domyślnie false. Gdy status === 'error' i pole nieustawione: true. */
@@ -137,6 +139,12 @@ export function createTile(spec: TileSpec): TileHandle {
         metaEl.className = 'cs-tile__meta';
         metaEl.textContent = spec.meta;
         head.appendChild(metaEl);
+    }
+    if (spec.badge) {
+        const badgeEl = _createDetachedEl('span');
+        badgeEl.className = 'cs-tile__badge';
+        badgeEl.textContent = spec.badge;
+        head.appendChild(badgeEl);
     }
     head.appendChild(dot);
 

@@ -33,6 +33,18 @@ export interface SubAgentUsage {
 }
 
 /** Kontrakt `createSubAgentBlock` - kształt, który realnie czyta render niżej. */
+export interface SubAgentResultView {
+    title: string;
+    summary?: string;
+    badge?: string;
+    status: 'ok' | 'error';
+    material?: string;
+    error?: string;
+    missingTargets: string[];
+    effects: Array<{ tool: string; target: string; statusLabel: string }>;
+    notes: string[];
+}
+
 interface SubAgentBlockOptions {
     type: string;
     aspectType?: string;
@@ -46,6 +58,45 @@ interface SubAgentBlockOptions {
     summary?: string;
     pending?: boolean;
     status?: ToolResultStatus;
+    role?: 'agent' | 'system';
+    resultView?: SubAgentResultView;
+}
+
+function appendResultView(body: HTMLElement, view: SubAgentResultView): void {
+    body.classList.add('cs-subresult');
+    const section = (heading: string, content: (el: HTMLElement) => void): void => {
+        const group = body.createDiv({ cls: 'cs-subresult__section' });
+        const title = group.createDiv();
+        title.textContent = heading;
+        content(group);
+    };
+    if (view.material) section(t('chat.subresult.heading_created'), el => {
+        const text = el.createDiv();
+        text.textContent = view.material!;
+    });
+    if (view.error) section(t('chat.tile.error.title'), el => {
+        const text = el.createDiv({ cls: 'cs-subresult__error' });
+        text.textContent = view.error!;
+    });
+    if (view.missingTargets.length) section(t('chat.subresult.heading_missing'), el => {
+        for (const target of view.missingTargets) {
+            const line = el.createDiv();
+            line.textContent = target;
+        }
+    });
+    if (view.effects.length) section(t('chat.subresult.heading_effects'), el => {
+        for (const effect of view.effects) {
+            const line = el.createDiv({ cls: 'cs-subresult__effect' });
+            for (const value of [effect.tool, effect.target, effect.statusLabel]) {
+                const part = line.createSpan();
+                part.textContent = value;
+            }
+        }
+    });
+    for (const note of view.notes) {
+        const line = body.createDiv({ cls: 'cs-subresult__note' });
+        line.textContent = note;
+    }
 }
 
 /** "12 s" / "2 min 5 s" - czas po ludzku, zaokrąglony do pełnych sekund. Ten sam wzorzec
@@ -189,14 +240,19 @@ export function createSubAgentBlock(opts: SubAgentBlockOptions): HTMLElement {
     // dawna w tym module) - `response` tam niesie informację o STARCIE, nie wynik, więc traktuj
     // `status` (zawsze 'success' z wołacza w tej gałęzi) jako nieistotny dla koloru kafelka.
     const isBackground = opts.pending === true;
-    const isError = !isBackground && opts.status === 'error';
+    const resultView = opts.resultView;
+    const isError = !isBackground && (resultView?.status === 'error' || opts.status === 'error');
     const status: TileStatus = isBackground ? 'pending' : (isError ? 'error' : 'ok');
 
     let title: string;
     let summary: string | undefined;
     let details: TileSpec['details'];
 
-    if (isBackground) {
+    if (resultView) {
+        title = resultView.title;
+        summary = resultView.summary;
+        details = (body) => appendResultView(body, resultView);
+    } else if (isBackground) {
         title = t('chat.tile.sub.background', { name: name || t('subagent.label') });
         summary = t('chat.tile.sub.background_summary');
         details = _buildBackgroundDetails(opts);
@@ -211,17 +267,20 @@ export function createSubAgentBlock(opts: SubAgentBlockOptions): HTMLElement {
     }
 
     const handle = createTile({
-        role: 'agent',
+        role: opts.role || 'agent',
         status,
         iconSvg: cfg.iconFn(),
         title,
         summary,
+        badge: resultView?.badge,
+        expanded: resultView ? false : undefined,
         // Meta = czas po ludzku, TYLKO gdy jest i TYLKO dla wyniku (nie dla pokwitowania w tle,
         // które nie ma jeszcze żadnego czasu trwania do pokazania) - nic więcej w nagłówku,
         // tokeny NIGDY w nagłówku (werdykt właściciela).
         meta: (!isBackground && opts.duration) ? formatDurationHuman(opts.duration) : undefined,
         details,
     });
+    if (resultView) handle.el.classList.add('cs-tile--subresult');
     return handle.el;
 }
 

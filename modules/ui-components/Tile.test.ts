@@ -122,6 +122,15 @@ test.serial('role wybiera klase cs-tile--{role}', t => {
     });
 });
 
+test.serial('createTile renderuje opcjonalny badge w nagłówku jako tekst', t => {
+    withFakeDocument(() => {
+        const handle = createTile(baseSpec({ badge: '<partial>' }));
+        const badge = findByClass(handle.el as unknown as FakeEl, 'cs-tile__badge');
+        t.is(badge?.textContent, '<partial>');
+        t.false(handle.isExpanded());
+    });
+});
+
 test.serial('status wybiera klase cs-tile--{status}', t => {
     withFakeDocument(() => {
         for (const status of ['ok', 'error', 'pending'] as const) {

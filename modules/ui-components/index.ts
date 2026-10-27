@@ -29,7 +29,7 @@ export { MentionAutocomplete } from './MentionAutocomplete.js';
 // chip mencji + powierzchnia pluginu, jakiej żąda autouzupełnianie, i wpisy bloku subagenta.
 export type { MentionChip, MentionAutocompletePlugin } from './MentionAutocomplete.js';
 export { createSubAgentBlock, createPendingSubAgentBlock } from './SubAgentBlock.js';
-export type { SubAgentToolCallDetail, SubAgentUsage } from './SubAgentBlock.js';
+export type { SubAgentToolCallDetail, SubAgentUsage, SubAgentResultView } from './SubAgentBlock.js';
 export { createThinkingBlock, updateThinkingBlock, finalizeThinkingBlock } from './ThinkingBlock.js';
 // Bazowa klasa widoków. Dziedziczą z niej
 // `ChatView` (modules/chat) i `ReleaseNotesView` (modules/shell) — czyli ≥2 moduły, więc
