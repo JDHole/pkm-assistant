@@ -15,6 +15,7 @@
  */
 import { parseYaml, stringifyYaml, slugify, removeFolderIfEmpty } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
+import { normalizeToolList } from './SubAgentLoader.js';
 import type { SubAgentData, SubAgentInput, SubAgentYaml, SubAgentYamlRaw, VaultLike } from './types.js';
 // Pola BEZ `?`: obie konstrukcje (`_loadFromFolder`/`_write`, niżej) ZAWSZE dają im konkretną
 // wartość (default przez `||`/`??`, nigdy `undefined`) — kształt jest więc zgodny z `SubAgentData`
@@ -137,7 +138,7 @@ export class SubAgentTemplateStore {
             description: config.description,
             role: config.role || null,
             model: config.model || null,
-            tools: Array.isArray(config.tools) ? [...config.tools] : [],
+            tools: normalizeToolList(Array.isArray(config.tools) ? config.tools : undefined, []),
             scope: config.scope || null,
             max_iterations: config.max_iterations || null,
             min_iterations: config.min_iterations || null,
@@ -236,7 +237,7 @@ export class SubAgentTemplateStore {
             description: tpl.description,
             role: tpl.role || 'researcher',
             model: tpl.model || null,
-            tools: [...(tpl.tools || [])],
+            ...(tpl.tools.length ? { tools: normalizeToolList(tpl.tools, []) } : {}),
             scope: tpl.scope || null,
             enabled: tpl.enabled !== false,
             prompt: tpl.prompt || '',
@@ -265,7 +266,7 @@ export class SubAgentTemplateStore {
             role: data.role || 'researcher',
         };
         if (data.model) yamlConfig.model = data.model;
-        if ((data.tools?.length as number) > 0) yamlConfig.tools = [...data.tools!];
+        if (data.tools !== undefined) yamlConfig.tools = normalizeToolList(data.tools, []);
         if (data.scope) yamlConfig.scope = data.scope;
         if (data.max_iterations) yamlConfig.max_iterations = data.max_iterations;
         if (data.min_iterations) yamlConfig.min_iterations = data.min_iterations;
@@ -291,7 +292,7 @@ export class SubAgentTemplateStore {
         this.cache.set(slug, {
             ...(yamlConfig as SubAgentYaml & { enabled: boolean; version: number }),
             slug,
-            tools: yamlConfig.tools || [],
+            tools: normalizeToolList(yamlConfig.tools, []),
             scope: yamlConfig.scope || null,
             max_iterations: yamlConfig.max_iterations || null,
             min_iterations: yamlConfig.min_iterations || null,

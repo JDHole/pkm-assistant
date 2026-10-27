@@ -160,6 +160,39 @@ test('loadAll czyta szablony i pomija YAML bez name/description', async t => {
     t.is(store.get('ok').prompt, 'Metoda.');
 });
 
+test('template read preserves missing, empty and alias lists', async t => {
+    const vault = makeVault({
+        [`${BASE}/missing/SUB_AGENT.yaml`]: 'name: Missing\ndescription: test\n',
+        [`${BASE}/empty/SUB_AGENT.yaml`]: 'name: Empty\ndescription: test\ntools: []\n',
+        [`${BASE}/aliases/SUB_AGENT.yaml`]: 'name: Aliases\ndescription: test\ntools: [vault_grep, vault_search, vault_read]\n',
+    }, [BASE, `${BASE}/missing`, `${BASE}/empty`, `${BASE}/aliases`]);
+    const store = new SubAgentTemplateStore(vault);
+    await store.loadAll();
+    t.deepEqual(store.get('missing').tools, []);
+    t.deepEqual(store.get('empty').tools, []);
+    t.deepEqual(store.get('aliases').tools, ['vault_grep', 'vault_search', 'vault_read']);
+});
+
+test('template copies preserve their effective tools immediately and after reload', async t => {
+    const vault = makeVault();
+    const store = new RuntimeSubAgentTemplateStore(vault);
+    const loader = new RuntimeSubAgentLoader(vault);
+    await store.createFromData({ name: 'Empty', description: 'test' });
+    await store.createFromData({ name: 'Read', description: 'test', tools: ['read'] });
+    await store.instantiate('empty', 'parent', { subAgentLoader: loader });
+    await store.instantiate('read', 'parent', { subAgentLoader: loader });
+    const check = () => {
+        t.deepEqual(loader.getSubAgent('parent-empty')?.tools, ['search', 'list', 'read', 'web_search', 'web_read']);
+        t.deepEqual(loader.getSubAgent('parent-read')?.tools, ['read']);
+    };
+    check();
+    await loader.reloadSubAgents();
+    check();
+    await store.loadAll();
+    t.deepEqual(store.get('empty')?.tools, []);
+    t.deepEqual(store.get('read')?.tools, ['read']);
+});
+
 test('instantiate tworzy suba <agent>-<slug> ze śladem from_template', async t => {
     const vault = makeVault();
     const store = new SubAgentTemplateStore(vault);
