@@ -5,7 +5,11 @@ All notable user-facing changes to PKM Assistant are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 2.4.0 - 2026-10-27
+
+Sub-agents you can follow and continue: see their progress, stop individual runs, and return to
+partial work in a later run.
+
 - Fix newly saved sub-agents without a tool list receiving no tools until reload.
 - Fix deletion of custom sub-agents and their templates and skill templates on Obsidian 1.14.5.
 - Settle background receipts by run ID when result tiles are rendered, preserving reading position.
