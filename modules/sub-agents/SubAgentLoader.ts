@@ -4,7 +4,7 @@
  * Each sub-agent is a folder with SUB_AGENT.yaml + optional KNOWLEDGE.md.
  * Replaces MinionLoader + MasterLoader (unified).
  */
-import { parseYaml, stringifyYaml, slugify } from '../../core/index.js';
+import { parseYaml, stringifyYaml, slugify, removeFolderIfEmpty } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { DEFAULT_LIMITS } from '../../config/limits.js';
 import type { ScopeData, SubAgentData, SubAgentInput, SubAgentYaml, SubAgentYamlRaw, VaultLike } from './types.js';
@@ -392,7 +392,10 @@ export class SubAgentLoader {
                         await this.vault.adapter.remove(filePath);
                     }
                 }
-                await this.vault.adapter.rmdir(folderPath, false);
+                const result = await removeFolderIfEmpty(this.vault.adapter, folderPath);
+                if (result.kind === 'not-empty') {
+                    log.warn('SubAgentLoader', 'Folder contains remaining entries:', result.remaining);
+                }
             }
             this.cache.delete(name);
             return true;

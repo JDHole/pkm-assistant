@@ -29,7 +29,11 @@ function makeVault(files: Record<string, string> = {}, folders: string[] = []) {
             write: async (path: string, value: string) => { files[path] = value; },
             remove: async (path: string) => { delete files[path]; },
             mkdir: async (path: string) => { folderSet.add(path); },
-            rmdir: async (path: string) => { folderSet.delete(path); },
+            rmdir: async (path: string, recursive: boolean) => {
+                if (!recursive) throw Object.assign(new Error('is a directory'), { code: 'ERR_FS_EISDIR' });
+                for (const file of Object.keys(files)) if (file.startsWith(`${path}/`)) delete files[file];
+                for (const folder of folderSet) if (folder === path || folder.startsWith(`${path}/`)) folderSet.delete(folder);
+            },
             list: async (path: string) => ({
                 folders: [...folderSet].filter(f => f.startsWith(`${path}/`) && !f.slice(path.length + 1).includes('/')),
                 files: Object.keys(files).filter(f => f.startsWith(`${path}/`)),
@@ -39,6 +43,25 @@ function makeVault(files: Record<string, string> = {}, folders: string[] = []) {
 }
 
 const BASE = '.pkm-assistant/templates/sub-agents';
+
+test('delete usuwa pusty folder szablonu suba', async t => {
+    const vault = makeVault();
+    const store = new SubAgentTemplateStore(vault);
+    await store.createFromData({ name: 'Plan', description: 'x', prompt: 'y' });
+    t.true(await store.delete('plan'));
+    t.false(await vault.adapter.exists(`${BASE}/plan`));
+    t.is(store.count(), 0);
+});
+
+test('delete szablonu suba zachowuje dodatkowy plik', async t => {
+    const vault = makeVault();
+    const store = new SubAgentTemplateStore(vault);
+    await store.createFromData({ name: 'Plan', description: 'x', prompt: 'y' });
+    vault.files[`${BASE}/plan/notatki.md`] = 'Moje notatki';
+    t.true(await store.delete('plan'));
+    t.is(vault.files[`${BASE}/plan/notatki.md`], 'Moje notatki');
+    t.is(store.count(), 0);
+});
 
 test('createFromData zapisuje szablon suba w version 1 (+ KNOWLEDGE.md)', async t => {
     const vault = makeVault();

@@ -13,7 +13,7 @@
  *
  * Pure względem `obsidian` (tylko `vault.adapter`) — testowalny w AVA.
  */
-import { parseYaml, stringifyYaml, slugify } from '../../core/index.js';
+import { parseYaml, stringifyYaml, slugify, removeFolderIfEmpty } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
 import type { SubAgentData, SubAgentInput, SubAgentYaml, SubAgentYamlRaw, VaultLike } from './types.js';
 // Pola BEZ `?`: obie konstrukcje (`_loadFromFolder`/`_write`, niżej) ZAWSZE dają im konkretną
@@ -201,7 +201,7 @@ export class SubAgentTemplateStore {
                 const filePath = `${folderPath}/${fileName}`;
                 if (await this.vault.adapter.exists(filePath)) await this.vault.adapter.remove(filePath);
             }
-            try { await this.vault.adapter.rmdir(folderPath, false); } catch { /* ok */ }
+            try { await removeFolderIfEmpty(this.vault.adapter, folderPath); } catch { /* cleanup is best effort */ }
             this.cache.delete(tpl.slug);
             return true;
         } catch (e) {
