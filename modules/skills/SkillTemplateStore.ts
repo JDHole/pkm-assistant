@@ -14,7 +14,7 @@
  * Pure względem `obsidian` (tylko `vault.adapter`) — dzięki temu testowalny w AVA.
  * UI (Notice o kolizji slugu) obsługuje wołający: `instantiate()` zwraca `renamed: true`.
  */
-import { slugify } from '../../core/index.js';
+import { slugify, removeFolderIfEmpty } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { parseSkillMarkdown, serializeSkillFile } from './skillFrontmatter.js';
 import type { SkillData, SkillInput, VaultLike } from './types.js';
@@ -154,7 +154,7 @@ export class SkillTemplateStore {
         try {
             const filePath = `${folderPath}/SKILL.md`;
             if (await this.vault.adapter.exists(filePath)) await this.vault.adapter.remove(filePath);
-            try { await this.vault.adapter.rmdir(folderPath, false); } catch { /* folder może mieć dodatki */ }
+            try { await removeFolderIfEmpty(this.vault.adapter, folderPath); } catch { /* cleanup is best effort */ }
             this.cache.delete(tpl.slug);
             return true;
         } catch (e) {
