@@ -70,6 +70,29 @@ test('create zakłada byt w stanie running i ogłasza task:created', t => {
     t.deepEqual(reg.list(), [task]);
 });
 
+test('beginRun ponownie sprawdza kolejność tury po rzeczywistym Stopie', t => {
+    const reg = new SubTaskRegistry() as SubTaskRegistry & {
+        issueTurnStartSequence(): number;
+        beginRun(id: string, owner: { agentName: string; sessionPath: string; sessionEpoch: string }, turn: { turnKind: 'user'; turnStartedSeq: number }): boolean;
+    };
+    const owner = { agentName: 'Tester', sessionPath: 'active.md', sessionEpoch: 'epoch-1' };
+    const old = reg.issueTurnStartSequence();
+    const thread = reg.createThread({ threadId: 'thread-stop', name: 'worker', owner, origin: owner, config: {} });
+    const run = reg.create({ id: 'previous-run', agentName: owner.agentName, threadId: thread.threadId });
+    reg.attachAbort(run.id, () => undefined);
+    t.true(reg.requestStop(run.id, 'user'));
+    reg.endRun(thread.threadId, { successful: true });
+    t.false(reg.beginRun(thread.threadId, owner, { turnKind: 'user', turnStartedSeq: old }));
+    t.is(thread.phase, 'idle');
+    t.true(thread.userStop);
+    t.deepEqual(thread.runIds, ['previous-run']);
+    const newer = reg.issueTurnStartSequence();
+    t.true(reg.beginRun(thread.threadId, owner, { turnKind: 'user', turnStartedSeq: newer }));
+    t.is(thread.phase, 'running');
+    t.false(thread.userStop);
+    t.is(Number(thread.lastUserStopSeq), 2);
+});
+
 test('wątki: właściciel, wyłączność beginRun, zamknięcie i czyszczenie rozmowy', t => {
     const reg = new SubTaskRegistry();
     const owner = { agentName: 'Tester', sessionPath: 'active.md', sessionEpoch: 'epoch-1' };

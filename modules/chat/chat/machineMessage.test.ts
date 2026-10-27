@@ -118,7 +118,7 @@ test('buildMachineView: strukturalny wynik używa wspólnej ramki, a reusable wy
     const task = makeTask({ outcome: { end: { kind: 'failed', stage: 'work' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] },
         error: 'AWARIA', result: { text: 'DOROBEK', handoff: 'DOROBEK', toolsUsed: [], durationMs: 1, usage: null } });
     const text = buildSubTaskNotificationText(task, { subId: 'sub/pkm-sub#3' });
-    const view = buildMachineView({ role: 'user', content: text }, { t: tr });
+    const view = buildMachineView({ role: 'user', content: text }, { t: tr, getThread: id => id === 'sub/pkm-sub#3' ? { phase: 'idle', reusable: true } : undefined });
     t.truthy(view?.subAgentResult);
     t.is(view!.subAgentResult!.material, 'DOROBEK');
     t.is(view!.subAgentResult!.error, undefined);

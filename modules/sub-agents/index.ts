@@ -22,7 +22,7 @@ export { allocateSubTaskId } from './subTaskId.js';
 export type { SubRunResult, SubRunStoppedBy } from './SubAgentRunner.js';
 // Rejestr biegów subów + szyna zdarzeń. Pure (obsidian-free) —
 // stawia go composition root (`src/main.js`) jako `plugin.subTaskRegistry`.
-export { SubTaskRegistry } from './SubTaskRegistry.js';
+export { SubTaskRegistry, isRuntimeSequence, canContinueAfterUserStop } from './SubTaskRegistry.js';
 // Skrzynka wyników subów odpalonych w tle (delegacja w tle). Też pure — composition root
 // stawia ją jako `plugin.subTaskNotifier`, a dostawcę (czat) wstrzykuje osobna warstwa.
 export { SubTaskNotifier } from './SubTaskNotifier.js';
@@ -48,9 +48,9 @@ export type {
     SubTaskBudget,
     SubTaskResult,
     SubTaskOrigin,
-    SubThread, SubThreadOwner,
+    SubThread, SubThreadOwner, RuntimeSequence,
 } from './SubTaskRegistry.js';
-export type { SubTaskDeliverer } from './SubTaskNotifier.js';
+export type { SubTaskDeliverer, SubTaskClaim } from './SubTaskNotifier.js';
 
 // SubAgentDetailView.js statically imports `obsidian` (MarkdownRenderer). Lazy-load it
 // via dynamic import so this barrel stays obsidian-free — it is imported by TriggerPopup /

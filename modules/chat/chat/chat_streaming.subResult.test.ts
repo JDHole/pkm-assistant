@@ -81,7 +81,7 @@ test('powiadomienie dostarcza osobne dane ramki i zachowuje tekst dla modelu', a
         '[POWIADOMIENIE SYSTEMU] Sub-agent researcher skończył zadanie run-7, które zleciłeś w tle.\n\n'
         + 'Stan: skończył mu się budżet podsumowania · wynik częściowy. Czas pracy: 1.0 s.\n\n'
         + 'Sub nie dokończył zadania. Nie wolno go raportować jako wykonanego.\n\n'
-        + 'zachowany fragment\n\nEfekt: write, cel notes/result.md, sprawdzenie: zgodny.\n\n'
+        + 'dalszy kierunek\n\nEfekt: write, cel notes/result.md, sprawdzenie: zgodny.\n\n'
         + 'Ten sam sub może dostać kolejne zadanie przez narzędzie sub_agent z akcją task i sub_id=sub-agent-7.\n\n\n'
         + 'Podejmij wątek - wykorzystaj ten wynik do dokończenia zadania. Jeśli zlecałeś więcej zadań, ich wyniki przyjdą osobno; nie zgaduj ich treści.');
     t.deepEqual(sent[0]?.meta._subTaskResult, {
@@ -152,7 +152,7 @@ test('_chatOnToolResults zachowuje task_id i queued w pokwitowaniu listy', async
     const originalDocument = globalThis.document;
     (globalThis as unknown as { document: unknown }).document = { createElement: () => fakeEl() };
     const receipts: HTMLElement[] = [];
-    const toolDisplay = { replaceWith(value: HTMLElement) { receipts.push(value); } };
+    const toolDisplay = { replaceWith(...values: HTMLElement[]) { receipts.push(...values); } };
     const tasks = [
         { task_id: 'sub/run-1', name: 'researcher', sub_id: 'thread-1' },
         { task_id: 'sub/run-2', name: 'writer', sub_id: 'thread-2' },
@@ -171,10 +171,10 @@ test('_chatOnToolResults zachowuje task_id i queued w pokwitowaniu listy', async
         await _chatOnToolResults.call(view as never, turn as never,
             [{ toolCall: call, result: 'accepted' }] as never, 0);
 
+        t.deepEqual(receipts.map(row => row.getAttribute('data-subtask-receipt-id')), ['sub/run-1', 'sub/run-2']);
         const row = receipts[0] as unknown as FakeEl;
         findByClass(row, 'cs-tile__head')?.fire('click');
-        const details = findByClass(row, 'cs-tile__details');
-        t.is(allText(details!), 'Zadanie: dwa zadania\n\nW kolejce: 1 - ruszą, gdy zwolni się miejsce.\nIdentyfikator: sub/run-1\nIdentyfikator: sub/run-2');
+        t.true(allText(findByClass(row, 'cs-tile__details')!).includes('sub/run-1'));
     } finally {
         (globalThis as unknown as { document: Document }).document = originalDocument;
     }

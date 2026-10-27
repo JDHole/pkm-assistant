@@ -10,8 +10,9 @@
  * bez problemu.
  */
 import test from 'ava';
-import { setLocale } from '../../../core/i18n/index.js';
+import { setLocale, t as tr } from '../../../core/i18n/index.js';
 import { buildBackgroundReceiptText } from './chat_streaming.js';
+import { getSubTaskNotificationTaskId } from './machineMessage.js';
 
 // Plik cały w locale 'pl' (dopasowanie do literalnego "Identyfikator:" ze spec-a2fix.md, uwaga
 // 5) - `setLocale` mutuje globalny stan modułu i18n, więc jeden przełącznik na cały plik
@@ -57,4 +58,12 @@ test('zadanie bez task_id dostaje placeholder "?", nie pusty string ani wyjątek
         buildBackgroundReceiptText([{}], undefined),
         'Identyfikator: ?',
     );
+});
+
+test('pokwitowanie i identyfikator powiadomienia korzystają z ID biegu', t => {
+    const header = tr('chat.subagent_notification.header', { name: 'badacz', task_id: 'run-text' });
+    t.is(buildBackgroundReceiptText([{ task_id: 'run-a' }]), tr('chat.tile.sub.background_id', { id: 'run-a' }));
+    t.is(getSubTaskNotificationTaskId({ role: 'user', content: header, _subTaskNotification: true, subTaskId: 'run-meta' }), 'run-meta');
+    t.is(getSubTaskNotificationTaskId({ role: 'user', content: header, subTaskId: '' }), 'run-text');
+    t.is(getSubTaskNotificationTaskId({ role: 'user', content: header, origin: 'human', subTaskId: 'run-meta' }), null);
 });

@@ -144,6 +144,102 @@ test('drain: wynik dorzucony W TRAKCIE dostarczania nie wyprzedza tego, co czeka
     t.deepEqual(notifier.pending().map(x => x.id), ['#stary', '#nowy'], 'FIFO całości zachowane');
 });
 
+test('claim jest wyłączny, release zachowuje wynik, a ack go usuwa', t => {
+    const registry = makeRegistry();
+    const notifier = new SubTaskNotifier({ registry });
+    registry.finish(makeTask({ id: 'run-a' }));
+
+    const firstView = notifier.claimPending(task => task.id === 'run-a');
+    const secondView = notifier.claimPending(task => task.id === 'run-a');
+    t.deepEqual(firstView.map(claim => claim.task.id), ['run-a']);
+    t.deepEqual(secondView, []);
+    t.deepEqual(notifier.pending().map(task => task.id), ['run-a']);
+
+    firstView[0]!.release();
+    t.deepEqual(notifier.pending().map(task => task.id), ['run-a']);
+    const nextClaim = notifier.claimPending(task => task.id === 'run-a');
+    t.deepEqual(nextClaim.map(claim => claim.task.id), ['run-a']);
+    nextClaim[0]!.ack();
+    t.deepEqual(notifier.pending().map(task => task.id), []);
+});
+
+test('claim i ack podczas drain nie są cofane ani ponownie dostarczane', t => {
+    const registry = makeRegistry();
+    const notifier = new SubTaskNotifier({ registry });
+    registry.finish(makeTask({ id: 'run-a' }));
+    registry.finish(makeTask({ id: 'run-b' }));
+    const delivered: string[] = [];
+    let claimed: string[] = [];
+    notifier.setDeliverer(task => {
+        delivered.push(task.id);
+        if (task.id === 'run-a') {
+            const claims = notifier.claimPending(candidate => candidate.id === 'run-b');
+            claimed = claims.map(claim => claim.task.id);
+            claims[0]?.ack();
+        }
+        return false;
+    });
+
+    notifier.drain();
+
+    t.deepEqual(claimed, ['run-b']);
+    t.deepEqual(delivered, ['run-a']);
+    t.deepEqual(notifier.pending().map(task => task.id), ['run-a']);
+});
+
+test('nowy wynik podczas drain zostaje za wcześniejszymi wynikami FIFO', t => {
+    const registry = makeRegistry();
+    const notifier = new SubTaskNotifier({ registry });
+    registry.finish(makeTask({ id: 'run-a' }));
+    registry.finish(makeTask({ id: 'run-b' }));
+    notifier.setDeliverer(task => {
+        if (task.id === 'run-a') registry.finish(makeTask({ id: 'run-c' }));
+        return false;
+    });
+
+    notifier.drain();
+
+    t.deepEqual(notifier.pending().map(task => task.id), ['run-a', 'run-b', 'run-c']);
+});
+
+test('dispose unieważnia stare uchwyty claim', t => {
+    const registry = makeRegistry();
+    const notifier = new SubTaskNotifier({ registry });
+    registry.finish(makeTask({ id: 'run-a' }));
+    registry.finish(makeTask({ id: 'run-b' }));
+    const claims = notifier.claimPending(() => true);
+    t.deepEqual(claims.map(claim => claim.task.id), ['run-a', 'run-b']);
+
+    notifier.dispose();
+    claims[0]!.release();
+    claims[1]!.ack();
+
+    t.deepEqual(notifier.pending().map(task => task.id), []);
+    t.deepEqual(notifier.claimPending(() => true), []);
+});
+
+test('release przy przepełnieniu przez aktywne claimy zachowuje pozycję wyniku', t => {
+    const registry = makeRegistry();
+    const notifier = new SubTaskNotifier({ registry, maxPending: 2 });
+    registry.finish(makeTask({ id: 'run-a' }));
+    registry.finish(makeTask({ id: 'run-b' }));
+    const claims = notifier.claimPending(() => true);
+    let pendingAfterRelease: string[] = [];
+    notifier.setDeliverer(task => {
+        if (task.id === 'run-c') {
+            claims[0]!.release();
+            pendingAfterRelease = notifier.pending().map(item => item.id);
+        }
+        return true;
+    });
+
+    registry.finish(makeTask({ id: 'run-c' }));
+
+    t.deepEqual(pendingAfterRelease, ['run-a', 'run-b', 'run-c']);
+    t.deepEqual(notifier.pending().map(task => task.id), ['run-a', 'run-b']);
+    t.deepEqual(notifier.claimPending(task => task.id === 'run-a').map(claim => claim.task.id), ['run-a']);
+});
+
 test('dispose odpina subskrypcję i czyści kolejkę', t => {
     const registry = makeRegistry();
     const notifier = new SubTaskNotifier({ registry });

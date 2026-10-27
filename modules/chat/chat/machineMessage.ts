@@ -171,6 +171,7 @@ export function classifyMachineMessage(msg: MachineMessageLike | null | undefine
 
 export function getSubTaskNotificationTaskId(msg: MachineMessageLike | null | undefined): string | null {
     if (classifyMachineMessage(msg) !== 'subtask_notification') return null;
+    if (typeof msg?.subTaskId === 'string' && msg.subTaskId.trim()) return msg.subTaskId;
     const text = typeof msg?.content === 'string' ? msg.content : '';
     const id = extractSecondVar(text, SUBTASK_HEADER_KEY, ['name', 'task_id']);
     return id?.trim() || null;
@@ -439,6 +440,13 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
         const storedPartial = structural?.partial && typeof structural.partial === 'object' ? structural.partial as { text?: unknown } : null;
         const storedThread = isResultThread(structural?.thread) ? structural.thread : { kind: 'unknown' as const };
         const reusableInstruction = extractReusableSubId(text);
+        const availableThread = (thread: SubTaskResultThread): SubTaskResultThread => {
+            if (thread.kind !== 'reusable') return thread;
+            const current = ctx.getThread?.(thread.sub_id);
+            if (current && typeof current === 'object' && 'phase' in current && 'reusable' in current
+                && current.phase === 'idle' && current.reusable === true) return thread;
+            return { kind: 'unknown' };
+        };
         const subAgentResult = structuredOutcome ? buildSubAgentResultView({
             name: typeof structural?.name === 'string' ? structural.name : name,
             outcome: structuredOutcome,
@@ -448,8 +456,8 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
             partialText: typeof structural?.partialText === 'string' ? structural.partialText : typeof storedPartial?.text === 'string' ? storedPartial.text : undefined,
             error: typeof structural?.error === 'string' ? structural.error : undefined,
             effects: Array.isArray(structural?.effects) ? structural.effects as BuildSubAgentResultViewInput['effects'] : undefined,
-            thread: storedThread,
-        }, ctx.t) : buildParsedNotificationResult(text, name, reusableInstruction, ctx.t);
+            thread: availableThread(storedThread),
+        }, ctx.t) : buildParsedNotificationResult(text, name, availableThread(reusableInstruction ? { kind: 'reusable', sub_id: reusableInstruction } : { kind: 'unknown' }), ctx.t);
         return {
             kind,
             title,
@@ -501,7 +509,7 @@ function extractReusableSubId(text: string): string | null {
     return null;
 }
 
-function buildParsedNotificationResult(text: string, name: string, subId: string | null, translate: typeof t): SubAgentResultView | undefined {
+function buildParsedNotificationResult(text: string, name: string, thread: SubTaskResultThread, translate: typeof t): SubAgentResultView | undefined {
     const { afterHeader, details: userDetails } = subtaskDetails(text);
     const statusLine = firstParagraph(afterHeader);
     const matchEnd = (keys: string[]): string | undefined => keys.find(key => LOCALES.some(locale => statusLine.includes(translate(key, undefined, locale))));
@@ -531,7 +539,15 @@ function buildParsedNotificationResult(text: string, name: string, subId: string
     // Po restarcie brak strukturalnego _subTaskResult. Zachowujemy więc body jako tekst
     // i odtwarzamy wyłącznie stan z jego dedykowanej linii systemowej. Treść może cytować
     // przykłady błędów lub efektów, więc nie klasyfikujemy akapitów jako dane.
-    const material = body.split('\n\n').map(part => part.trim()).filter(part => part && !boilerplate.includes(part)).join('\n\n').trim();
+    const material = completionValue === 'empty' ? '' : body.split('\n\n').map(part => part.trim()).filter(part => part && !boilerplate.includes(part)).join('\n\n').trim();
+    let error: string | undefined;
+    if (completionValue === 'empty' && end.kind === 'failed') {
+        for (const locale of LOCALES) {
+            const [prefix, suffix] = templateSegments('chat.subagent_notification.failed', locale, ['error']);
+            const paragraph = body.split('\n\n').find(part => part.startsWith(prefix) && part.endsWith(suffix));
+            if (paragraph) { error = paragraph.slice(prefix.length, suffix ? -suffix.length : undefined).trim(); break; }
+        }
+    }
     return buildSubAgentResultView({ name, outcome: { end, completeness: completionValue, hasAnswer: completionValue === 'unconfirmed', hasMaterial: !!material, effects: [] },
-        text: material, thread: subId ? { kind: 'reusable', sub_id: subId } : { kind: 'unknown' } }, translate);
+        text: material, error, thread }, translate);
 }

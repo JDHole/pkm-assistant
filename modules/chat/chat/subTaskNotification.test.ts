@@ -2,6 +2,71 @@ import test from 'ava';
 import { setLocale, t as tr } from '../../../core/i18n/index.js';
 import { buildSubTaskNotificationText, matchTabForOrigin } from './subTaskNotification.js';
 import type { SubTask } from '../../sub-agents/index.js';
+import { SubAgentRunner, SubTaskRegistry, SubTaskNotifier } from '../../sub-agents/index.js';
+import { _deliverSubTaskResult } from './chat_streaming.js';
+
+test.serial('C2: runner przekazuje handoff do prowadzącego po błędzie syntezy', async t => {
+    const registry = new SubTaskRegistry();
+    const notifier = new SubTaskNotifier({ registry });
+    t.teardown(() => { notifier.dispose(); registry.dispose(); });
+    let injectedText = '';
+    const origin = { agentName: 'Owner', tabKey: 'tab-a' };
+    const view = { chatTabs: [{ agentName: 'Owner', sessionId: 'tab-a', isActive: true }], _autoTurnChainCounts: new Map(), _subTaskTurnPending: false, is_generating: false, _drainSuppressed: false,
+        env: { settings: { pkmAssistant: { limits: {} } } }, plugin: { subTaskRegistry: registry },
+        send_message: (opts: { injectedText: string }) => { injectedText = opts.injectedText; } };
+    notifier.setDeliverer(task => _deliverSubTaskResult.call(view as never, task));
+    const read = { name: 'read', description: 'read', inputSchema: {}, execute: async () => 'treść '.repeat(1200) };
+    const search = { name: 'search', description: 'search', inputSchema: {}, execute: async () => 'najnowszy wynik' };
+    const tools = [read, search];
+    const runner = new SubAgentRunner({ app: {}, plugin: { subTaskRegistry: registry }, toolRegistry: { filterByAgent: () => tools, getTool: (name: string) => tools.find(tool => tool.name === name) ?? null } });
+    let calls = 0;
+    const model = { stream(_payload: unknown, handlers: { done(value: unknown): void; error(error: Error): void }) {
+        if (++calls === 1) handlers.done({ choices: [{ message: { role: 'assistant', content: '', tool_calls: [
+            { id: 'r', type: 'function', function: { name: 'read', arguments: '{"path":"Notes/ważna.md"}' } },
+            { id: 's', type: 'function', function: { name: 'search', arguments: '{"query":"hasło"}' } },
+        ] } }] });
+        else handlers.error(new Error('synteza padła'));
+    } };
+    const result = await runner.runTask('przeczytaj', { name: 'Owner' }, { name: 'worker', tools: ['read', 'search'], max_iterations: 1 } as never, model as never, { background: true, origin, modelTimeout: 10000 });
+    await Promise.resolve();
+    t.is(result.outcome.completeness, 'partial');
+    const searchLine = 'search | {"query":"hasło"} | najnowszy wynik';
+    const readLine = 'read | Notes/ważna.md |';
+    t.true(injectedText.includes(searchLine));
+    t.true(injectedText.includes(readLine));
+    t.true(injectedText.indexOf(searchLine) < injectedText.indexOf(readLine));
+});
+
+test.serial('C2: pusty wynik przekazuje nieznany efekt przerwanego zapisu', async t => {
+    const registry = new SubTaskRegistry();
+    const notifier = new SubTaskNotifier({ registry });
+    t.teardown(() => { notifier.dispose(); registry.dispose(); });
+    let injectedText = '';
+    const origin = { agentName: 'Owner', tabKey: 'tab-a' };
+    const view = { chatTabs: [{ agentName: 'Owner', sessionId: 'tab-a', isActive: true }], _autoTurnChainCounts: new Map(), _subTaskTurnPending: false, is_generating: false, _drainSuppressed: false,
+        env: { settings: { pkmAssistant: { limits: {} } } }, plugin: { subTaskRegistry: registry }, send_message: (opts: { injectedText: string }) => { injectedText = opts.injectedText; } };
+    notifier.setDeliverer(task => _deliverSubTaskResult.call(view as never, task));
+    let started!: () => void;
+    const startedPromise = new Promise<void>(resolve => { started = resolve; });
+    const tool = { name: 'write', description: 'write', inputSchema: {}, execute: () => { started(); return new Promise<unknown>(() => {}); } };
+    const runner = new SubAgentRunner({ app: { vault: { adapter: { exists: async () => false } } }, plugin: { subTaskRegistry: registry,
+        mcpClient: { async executeToolCall(_call: unknown, _agent: string, opts: { onExecutionStart?: () => void }) { opts.onExecutionStart?.(); return tool.execute(); } } },
+        toolRegistry: { filterByAgent: () => [tool], getTool: () => tool } });
+    const model = { stream(_payload: unknown, handlers: { done(value: unknown): void }) { handlers.done({ choices: [{ message: { role: 'assistant', content: '', tool_calls: [
+        { id: 'w', type: 'function', function: { name: 'write', arguments: '{"path":"Notes/a.md","content":"x","mode":"replace"}' } },
+    ] } }] }); } };
+    const controller = new AbortController();
+    let taskId = '';
+    const run = runner.runTask('zapisz', { name: 'Owner' }, { name: 'worker', tools: ['write'] } as never, model as never,
+        { background: true, origin, abortSignal: controller.signal, abortReason: () => 'manual-stop', onTaskCreated(task) { taskId = task.id; registry.attachAbort(task.id, () => controller.abort()); } });
+    await startedPromise;
+    registry.requestStop(taskId, 'lead');
+    const result = await run;
+    await Promise.resolve();
+    t.is(result.outcome.completeness, 'empty');
+    t.is(result.outcome.effects[0]?.outcome, 'unknown');
+    t.true(injectedText.includes(tr('chat.subagent_notification.effect', { tool: 'write', target: 'Notes/a.md', check: tr('chat.subagent_notification.check_unknown') })));
+});
 
 // Domyślny locale w i18n to 'en'. Asercje niżej celują w PL, więc ustawiamy język jawnie —
 // AVA odpala każdy plik testowy w osobnym procesie, więc nie wycieka to do innych testów.

@@ -10,8 +10,8 @@
  * 3. Route to SubAgentRunner with role-appropriate config
  * 4. Return results
  */
-import { SubAgentRunner, DEFAULT_SUB_AGENT_TOOLS, PKM_SUB_NAME, allocateSubTaskId } from '../../modules/sub-agents/index.js';
-import type { SubTask, SubTaskOrigin } from '../../modules/sub-agents/index.js';
+import { SubAgentRunner, DEFAULT_SUB_AGENT_TOOLS, PKM_SUB_NAME, allocateSubTaskId, canContinueAfterUserStop, isRuntimeSequence } from '../../modules/sub-agents/index.js';
+import type { RuntimeSequence, SubTask, SubTaskOrigin } from '../../modules/sub-agents/index.js';
 import type { RunOutcome } from '../../modules/sub-agents/index.js';
 import { createModelForRole } from '../../modules/models/index.js';
 import type { ModelRole, ResolverPluginLike } from '../../modules/models/index.js';
@@ -49,13 +49,14 @@ interface DelegateToolArgs extends DelegateTaskDef {
     /** Whitelista narzędzi suba ZLECAJĄCEGO - zaufany znacznik. */
     _invocationToolNames?: unknown;
     _invocationTurnKind?: unknown;
+    _invocationTurnStartedSeq?: unknown;
     _invocationThreadId?: unknown;
     _invocationThreadAccepted?: unknown;
     [extra: string]: unknown;
 }
 
 // Continuation is an in-process capability passed only by sub_agent.
-const _continuations = new WeakMap<object, { threadId: string; background?: boolean; onAccepted: () => void }>();
+const _continuations = new WeakMap<object, { threadId: string; background?: boolean; turnKind?: 'user' | 'machine'; turnStartedSeq?: RuntimeSequence }>();
 
 /**
  * Config sub-agenta widziany przez to narzędzie: część z YAML usera
@@ -185,6 +186,8 @@ interface SubAgentRunnerLike {
             /** „Byt już istnieje" - stąd bierzemy `task_id` dla zwrotki w trybie tła. */
             onTaskCreated?: (task: SubTask) => void;
             threadId?: string;
+            turnKind?: 'user' | 'machine';
+            turnStartedSeq?: RuntimeSequence;
             queuedThreadId?: string;
             /** Tryb pytań tury zlecającej, zamrożony na cały bieg. */
             autonomy?: string | null;
@@ -1062,10 +1065,9 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                 abortCtl, salvageCap: limits.subagent_salvage_max_chars, onGateAdmitted: gateArm.signal,
                                 modelTimeout: effectiveSingleTimeout, origin, autonomy: turnAutonomy,
                                 callerScopeFolders, callerToolNames, background: true,
-                                ...(continuation ? { threadId: continuation.threadId } : {}),
+                                ...(continuation ? { threadId: continuation.threadId, turnKind: continuation.turnKind, turnStartedSeq: continuation.turnStartedSeq } : {}),
                                 onTaskCreated: (task: SubTask) => {
                                     bgTaskId = task.id;
-                                    continuation?.onAccepted();
                                     _attachStop(plugin, task, abortCtl);
                                     announce(task);
                                 },
@@ -1107,10 +1109,9 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                             abortCtl, salvageCap: limits.subagent_salvage_max_chars, onGateAdmitted: gateArm.signal,
                             modelTimeout: effectiveSingleTimeout, origin, autonomy: turnAutonomy,
                             callerScopeFolders, callerToolNames, background,
-                            ...(continuation ? { threadId: continuation.threadId } : {}),
+                            ...(continuation ? { threadId: continuation.threadId, turnKind: continuation.turnKind, turnStartedSeq: continuation.turnStartedSeq } : {}),
                             onTaskCreated: (task: SubTask) => {
                                 blockingTaskId = task.id;
-                                continuation?.onAccepted();
                                 _attachStop(plugin, task, abortCtl);
                             },
                         }),
@@ -1200,7 +1201,7 @@ export function createSubAgentTool(app: object, deps: DelegateToolDeps = {}) {
                 if (thread.phase === 'running' || thread.phase === 'queued') return { success: false, error: t('mcp.sub_agent.task_state') };
                 if (!thread.reusable) return { success: false, error: t('mcp.sub_agent.task_not_reusable') };
                 if (thread.phase !== 'idle') return { success: false, error: t('mcp.sub_agent.task_state') };
-                if (thread.userStop && raw._invocationTurnKind !== 'user') return { success: false, error: t('mcp.sub_agent.user_stopped') };
+                if (!canContinueAfterUserStop(thread, raw._invocationTurnKind, raw._invocationTurnStartedSeq)) return { success: false, error: t('mcp.sub_agent.user_stopped') };
                 if (typeof raw.task !== 'string' || !raw.task.trim()) return { success: false, error: t('mcp.sub_agent.empty_task') };
                 const args: Record<string, unknown> = {
                     task: raw.task,
@@ -1213,7 +1214,8 @@ export function createSubAgentTool(app: object, deps: DelegateToolDeps = {}) {
                 };
                 _continuations.set(args, { threadId: id,
                     background: typeof raw.background === 'boolean' ? raw.background : undefined,
-                    onAccepted: () => { thread.userStop = false; } });
+                    turnKind: raw._invocationTurnKind === 'user' || raw._invocationTurnKind === 'machine' ? raw._invocationTurnKind : undefined,
+                    turnStartedSeq: isRuntimeSequence(raw._invocationTurnStartedSeq) ? raw._invocationTurnStartedSeq : undefined });
                 const result = await delegate.execute(args, _app, plugin);
                 if (result && typeof result === 'object' && (result as Record<string, unknown>).error === t('mcp.sub_agent.model_unavailable')) return result;
                 if (result && typeof result === 'object' && thread.reusable) {
@@ -1401,6 +1403,8 @@ type SubRunControl = {
     /** Whitelista narzędzi suba zlecającego — dziecko dostanie z nią przecięcie. */
     callerToolNames?: string[] | null;
     threadId?: string;
+    turnKind?: 'user' | 'machine';
+    turnStartedSeq?: RuntimeSequence;
     queuedThreadId?: string;
 };
 
@@ -1603,6 +1607,8 @@ async function _executeSubAgent(
             ...(runControl.background !== undefined ? { background: runControl.background } : {}),
             ...(runControl.onTaskCreated ? { onTaskCreated: runControl.onTaskCreated } : {}),
             ...(runControl.threadId ? { threadId: runControl.threadId } : {}),
+            turnKind: runControl.turnKind,
+            turnStartedSeq: runControl.turnStartedSeq,
             ...(runControl.queuedThreadId ? { queuedThreadId: runControl.queuedThreadId } : {}),
         }
     ); } finally { if (runControl.abortCtl) runControl.abortCtl.stop = null; }

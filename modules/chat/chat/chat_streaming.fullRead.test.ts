@@ -1,6 +1,9 @@
 import test from 'ava';
 import { ArrayMessageStore, runAgentLoop } from '../../agent-loop/index.js';
-import { MCPClient, createReadTool } from '../../tools/index.js';
+import { MCPClient, createReadTool, createSubAgentTool } from '../../tools/index.js';
+import { SubTaskRegistry } from '../../sub-agents/index.js';
+import { __test__ as modelTest } from '../../models/index.js';
+import { t as tr } from '../../../core/i18n/index.js';
 import { _chatExecuteToolCall, _finalizeTurn, _isTurnActiveTab, _releaseStreamCtx, send_message } from './chat_streaming.js';
 import { handleNewSession } from './chat_session.js';
 import { _tabKey } from './chat_tabs.js';
@@ -192,6 +195,89 @@ for (const [name, meta, expectedKind] of [
         }
     });
 }
+
+test.serial('A2: turn started before Stop cannot resume sub after mention resolution', async t => {
+    const path = 'sessions/active/Jaskier.md';
+    const epoch = '0123456789abcdef0123456789abcdef';
+    const owner = { agentName: 'Jaskier', sessionPath: path, sessionEpoch: epoch };
+    const registry = new SubTaskRegistry();
+    const thread = registry.createThread({ threadId: 'sub-id', name: 'Worker', owner, origin: owner, phase: 'running',
+        config: { subConfig: { name: 'Worker', description: 'Worker', tools: [], role: 'researcher' },
+            options: { delegationDepth: 1 }, limits: {}, modelId: 'worker-model', providerId: 'ollama' } });
+    const previous = registry.create({ id: 'previous-run', name: 'Worker', agentName: owner.agentName, threadId: thread.threadId, origin: owner });
+    registry.attachAbort(previous.id, () => undefined);
+    let release!: () => void;
+    let entered!: () => void;
+    const paused = new Promise<void>(resolve => { release = resolve; });
+    const atMentions = new Promise<void>(resolve => { entered = resolve; });
+    let mentionCalls = 0;
+    const results: Array<Record<string, unknown>> = [];
+    const tab = { agentName: owner.agentName, sessionId: path, sessionPath: path, sessionEpoch: epoch, isActive: true };
+    const memory = { activeSessionPath: path, sessionEpoch: epoch };
+    const agent = { name: owner.agentName, activeSubAgents: [] };
+    let modelCalls = 0;
+    const model = { modelKey: 'fixture', stream(_payload: unknown, handlers: { done(response: unknown): void }) {
+        modelCalls++;
+        handlers.done({ choices: [{ message: modelCalls % 2 === 1
+            ? { role: 'assistant', content: '', tool_calls: [{ id: `call-${modelCalls}`, type: 'function', function: { name: 'sub_agent', arguments: JSON.stringify({ action: 'task', sub_id: 'sub-id', task: 'Continue' }) } }] }
+            : { role: 'assistant', content: 'Done' } }] });
+    } };
+    const rw = new RollingWindow();
+    const provider = { info: { id: 'ollama' } };
+    modelTest.setChatModelFactory(() => ({ modelId: 'worker-model', providerId: 'ollama', stream() {} }) as never);
+    const tool = createSubAgentTool({}, { makeRunner: () => ({
+        runTask: async (_task: string, _agent: unknown, _config: unknown, _model: unknown, options: {
+            threadId?: string; origin?: import('../../sub-agents/index.js').SubTaskOrigin; turnKind?: 'user' | 'machine'; turnStartedSeq?: number;
+            onTaskCreated?: (task: import('../../sub-agents/index.js').SubTask) => void;
+        }) => {
+            if (!registry.beginRun(options.threadId!, options.origin!, { turnKind: options.turnKind, turnStartedSeq: options.turnStartedSeq })) return { failed: true, result: 'refused' } as never;
+            const task = registry.create({ id: 'next-run', name: 'Worker', agentName: owner.agentName, threadId: thread.threadId, origin: owner });
+            options.onTaskCreated?.(task);
+            registry.endRun(thread.threadId, { successful: true });
+            return { result: 'done', outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true, effects: [] }, toolsUsed: [], toolCallDetails: [], duration: 1 } as never;
+        },
+    }) });
+    const plugin = {
+        subTaskRegistry: registry, toolRegistry: {}, currentAutonomy: 'yolo',
+        agentManager: { getActiveAgent: () => agent, getAgentMemory: () => memory, getActiveSystemPromptWithMemory: async () => 'system' },
+        env: { config: { chat: { providers: { ollama: provider }, http: {}, transport: {} } }, settings: { pkmAssistant: { chat: { platform: 'ollama', hosts: { ollama: 'http://localhost:11434' } }, modelLibrary: { minion: [{ platform: 'ollama', model: 'worker-model', isDefault: true }] } } } },
+        mcpClient: { async executeToolCall(call: { arguments: string | Record<string, unknown> }, _agent: string, options: { origin?: typeof owner; turnKind?: string; turnStartedSeq?: number }) {
+            const args = typeof call.arguments === 'string' ? JSON.parse(call.arguments) as Record<string, unknown> : call.arguments;
+            const result = await tool.execute({ ...args, _invocationOrigin: options.origin, _invocationTurnKind: options.turnKind, _invocationTurnStartedSeq: options.turnStartedSeq }, {}, plugin as never) as Record<string, unknown>;
+            results.push(result);
+            return result;
+        } },
+    };
+    const view = {
+        leaf: { id: 'a2-turn-start' }, input_area: { value: 'Kontynuuj' }, inputHistory: [], rollingWindow: rw,
+        tokenTracker: { record() {} }, chatTabs: [tab], _streamCtxMap: new Map(), _preparingTurns: new Map(), _agentStates: new Map(), plugin,
+        env: { settings: { pkmAssistant: { enableOczko: false, limits: { chat_max_iterations: 3, chat_stream_stall_timeout_ms: 0 } } } },
+        is_generating: false, set_generating(value: boolean) { this.is_generating = value; }, showTypingIndicator() {}, resetInputArea() { this.input_area.value = ''; },
+        async _resolveMentions(text: string) { if (++mentionCalls === 1) { entered(); await paused; } return { displayText: text, contextText: '' }; },
+        async append_message(role: 'user', content: string) { rw.addMessage(role, content); }, async appendToActiveSession() {},
+        get_chat_model: () => model, _chatResolveTools: () => [{ type: 'function', function: { name: 'sub_agent', parameters: {} } }],
+        _chatExecuteToolCall, _chatOnIterationStart() {}, _chatOnToolCallsParsed() {}, _chatOnToolResults() {}, _chatBeforeContinue() {}, _chatOnUsage() {}, _chatOnBackstop() {},
+        _isTurnActiveTab: () => false, _finalizeTurn() { this.is_generating = false; }, handle_error(error: unknown) { throw error; },
+    };
+    try {
+        const first = send_message.call(view as never, { meta: { origin: 'human' } });
+        await atMentions;
+        t.true(registry.requestStop(previous.id, 'user'));
+        registry.endRun(thread.threadId, { successful: true });
+        release();
+        await first;
+        t.deepEqual(results[0], { success: false, error: tr('mcp.sub_agent.user_stopped') });
+        t.deepEqual(thread.runIds, ['previous-run']);
+        view.input_area.value = 'Nowa wiadomość';
+        await send_message.call(view as never, { meta: { origin: 'human' } });
+        t.is(results[1].success, true);
+        t.deepEqual(thread.runIds, ['previous-run', 'next-run']);
+    } finally {
+        release();
+        streamingManager.stopStream('a2-turn-start::Jaskier');
+        modelTest.reset();
+    }
+});
 
 test.serial('first response after New Session renders and clears generating state', async t => {
     const path = 'sessions/active/Jaskier.md';

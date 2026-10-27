@@ -58,11 +58,11 @@ modules/sub-agents/
 |---|---|
 | `SubAgentLoader` | Klasa - skanowanie `.pkm-assistant/sub-agents/`, parse YAML + KNOWLEDGE.md, cache, save/delete, ensureStarter |
 | `SubAgentRunner` | Klasa - wykonanie sub-agent (`runTask()`), ujednolicony system prompt builder (`framePrompt.js`, NIE zależy od roli - patrz „Model delegacji" niżej), tool-calling loop przez `runAgentLoop` (`modules/agent-loop`, wspólna pętla z czatem) |
-| `SubTaskRegistry` | Księga biegów subów + szyna zdarzeń (`task:*`, `thread:*`). API wątków: `createThread`, synchroniczne `beginRun`, `endRun`, `closeThread`, `closeSessionThreads`, `closeAll`, `listThreads`. Pure - zero `obsidian`, zero I/O. Skrzynka biegu: `attachAbort` / `requestStop` oraz `postMessage` / `takeMessages`. |
+| `SubTaskRegistry` | Księga biegów subów + szyna zdarzeń (`task:*`, `thread:*`). `issueTurnStartSequence()` wydaje znacznik startu tury ze wspólnego licznika runtime. API wątków: `createThread`, synchroniczne `beginRun` z kontekstem rodzaju i znacznika bieżącej tury, `endRun`, `closeThread`, `closeSessionThreads`, `closeAll`, `listThreads`. Pure - zero `obsidian`, zero I/O. Skrzynka biegu: `attachAbort` / `requestStop` oraz `postMessage` / `takeMessages`. |
 | `SubThread`, `SubThreadOwner` (typy) | Czysty byt rozmowy suba i wymagany klucz właściciela przy kontynuacji. |
 | `SubRunResult`, `SubRunStoppedBy` (typy) | Kształt zwrotki `runTask` - zgodnościowe `stoppedBy` (`natural`/`backstop`/`abort`/`error`) i `failed?: true` oraz nowe `outcome`. Czyta je `DelegateTool`. |
 | `buildStripModel`, `formatDuration` (+ typy `StripRow`/`StripStep`/`BuildStripModelInput`) | Czysta arytmetyka **paska biegów w oknie czatu**: filtr per zakładka, kolejność, liczniki, skróty. Konsumentem jest `modules/chat` (`chat/subTaskStrip.ts`), stąd eksport; plik zostaje pure, więc barrel dalej jest obsidian-free. |
-| `SubTaskNotifier` | Skrzynka wyników subów odpalonych W TLE. Siedzi na `task:finished`, bierze WYŁĄCZNIE taski z `background === true`, trzyma je w kolejce (sufit 200, najstarsze wypadają) aż dostawca je skonsumuje. API: `setDeliverer(fn\|null)` (`true` = skonsumowane; `false`/wyjątek = zostaje), `drain()`, `pending()`, `pendingFor(agentName)`, `dispose()`. Stawia go composition root jako `plugin.subTaskNotifier`; dostawcę wstrzykuje czat. Pure - nigdy nie rzuca. **Dostawcą jest `ChatView`** - patrz gotcha niżej. |
+| `SubTaskNotifier` | Skrzynka wyników subów odpalonych W TLE. Siedzi na `task:finished`, bierze WYŁĄCZNIE taski z `background === true`, trzyma je w kolejce (sufit 200, najstarsze niezajęte wypadają) aż dostawca je skonsumuje. API: `setDeliverer(fn\|null)` (`true` = skonsumowane; `false`/wyjątek = zostaje), `drain()`, `pending()`, `pendingFor(agentName)`, `claimPending(predicate)`, `dispose()`. Claim wyłącznie zajmuje wynik: `ack()` usuwa wpis, `release()` pozostawia go w kolejce; `pending()` pokazuje go do potwierdzenia, a `dispose()` unieważnia uchwyty. Stawia go composition root jako `plugin.subTaskNotifier`; dostawcę wstrzykuje czat. Pure - nigdy nie rzuca. **Dostawcą jest `ChatView`** - patrz gotcha niżej. |
 | `SubTask`, `SubTaskStatus`, `SubTaskStep`, `SubTaskBudget`, `SubTaskResult`, `SubTaskOrigin`, `SubTaskDeliverer` (typy) | Kształt bytu biegu suba + adres zwrotny zlecenia + kontrakt dostawcy, dla konsumentów zdarzeń. |
 | `getVisibleSubAgentsForAgent` | Filtr: **tylko** custom suby z prefiksem `<agent-slug>-` (brak ról systemowych; legacy standalone bez prefiksu ukryty) |
 | `DEFAULT_SUB_AGENT_TOOLS` | Jednolity domyślny zestaw workera: `search/list/read/web_search/web_read` (`connect_to_server` wyłączony). Przecięcie z rodzicem robi `_getTools`. |
@@ -224,7 +224,7 @@ Odlew per agent = `<agent-slug>-researcher` (standardowe `instantiate`). Przepis
   KOLEJNOŚCI wywołań - jeden `tool.post` na wywołanie, bez dubli i bez zawyżania licznika), więc
   gałąź błędu w `subTaskPanelModel.detailFromPost` nie jest martwa. **Kontrakt „egzekutor NIE
   rzuca" zostaje** - sygnał idzie obok tekstu, nie zamiast niego.
-- ⚠️ **Etykieta trace suba: `sub/<nazwa|rola|sub>#<nr wywołania>`.** Numer to licznik wywołań w
+- ⚠️ **Etykieta trace suba: `sub/<nazwa|rola|sub>#<znacznik 8 hex>-<licznik>`.** Licznik wywołań w
   procesie (base36), bo `delegate` z listą `tasks` odpala N workerów RÓWNOLEGLE - bez niego
   wszystkie pisałyby pod wspólną etykietą i przebiegów nie dałoby się rozdzielić. Konwencja jak
   w pętli głównej (`chat/<agent>#<id sesji>`); czas by nie wystarczył, bo równoległe suby startują
@@ -299,8 +299,8 @@ Odlew per agent = `<agent-slug>-researcher` (standardowe `instantiate`). Przepis
 - ⚠️ **UI wysyłania wiadomości do biegnącego suba nie istnieje.** Komunikacja z biegnącym subem
   należy do AGENTA, nie do usera - user może bieg wyłącznie PRZERWAĆ (Stop). **Sam kanał ZOSTAJE
   i jest świadomie utrzymywany, nie jest martwym kodem:** `registry.postMessage` / `takeMessages`
-  + hook `beforeContinue` w `SubAgentRunner` + ich testy czekają na przyszłe narzędzie agentowe
-  (agent pisze do własnego suba).
+  + hook `beforeContinue` w `SubAgentRunner` obsługują wiadomości agenta: `sub_agent message`
+  sprawdza właściciela i fazę wątku, po czym wywołuje `postMessage` dla bieżącego biegu.
 - ⚠️ **Widok czyta rejestr, nie odwrotnie - i mieszka w CZACIE.** Biegi pokazuje pasek pod
   zakładkami czatu (`modules/chat/chat/subTaskStrip.ts`), bo należą do agenta i sesji, nie do
   globalnego sidebara. Pasek bierze `plugin.subTaskRegistry.list()` + `plugin.subTaskNotifier.pending()`
@@ -316,6 +316,7 @@ Odlew per agent = `<agent-slug>-researcher` (standardowe `instantiate`). Przepis
 - Szczegóły wiersza obejmują maksymalnie 20 ostatnich kroków, liczniki biegu liczone z pełnych zachowanych danych rejestru, efekty z wynikiem sprawdzenia oraz potwierdzone cele, które miały istnieć, lecz ich stan jest niezgodny z oczekiwaniem. Sprawdzenie efektu jest kojarzone z biegiem po narzędziu, akcji, stanie i celu; przy identycznych efektach w kilku biegach rejestr nie przechowuje osobnego identyfikatora sprawdzenia. Brak treści kroku lub treści odpowiedzi pośredniej nie jest uzupełniany przez model.
 - Efekty w szczegółach pochodzą wyłącznie z `outcome` wybranego biegu. Zbiorcze `SubThread.effects` może uzupełnić stan sprawdzenia jego efektu, lecz bieg bez `outcome` pokazuje pustą listę efektów i brakujących celów, nawet gdy wątek pamięta dorobek wcześniejszego biegu.
 - Przy częściowym końcu `StripRun.outcome` pokazuje najpierw `result.handoff`, potem `partial.text`, a dopiero dla biegu bez awarii `result.text`. Jeśli istnieje dorobek i błąd, `StripRun.endReason` niesie błąd osobno. Bez dorobku pozostaje sam komunikat błędu.
+- Model przekazuje karcie biegu osobno klucze etykiet przyczyny końca i kompletności.
 - ⚠️ **`runTask` mówi, JAK sub zszedł - i czy w ogóle dojechał.** Zwrotka niesie `stoppedBy`
   (`natural` = model domknął sam, `backstop` = skończyły się iteracje, `abort` = ubity z
   zewnątrz, `error` = wyjątek) oraz `failed: true` **wyłącznie** w gałęzi `catch`. Tekst błędu
@@ -493,6 +494,9 @@ i zgodny przy `beginRun`, który rezerwuje wątek synchronicznie. Wątki bez śc
 sesji są jednorazowe. Wyjątek runnera, limit pięciu biegów, limit rozmowy 200000 znaków,
 zamknięcie albo sprzątanie wyłącza ponowne użycie. Zamknięcie zwalnia rozmowę i zapis efektów.
 
+Stop użytkownika zapisuje kolejność na biegu i wątku; `beginRun` atomowo wymaga odpowiednio
+nowszej tury, a historyczny próg pozostaje po zdjęciu `userStop`.
+
 Każdy kolejny bieg dostaje świeży prompt systemowy z konfiguracji pierwszego biegu,
 zachowaną głęboką kopię rozmowy oraz wiadomość z ramką agenta zlecającego. Zestaw narzędzi,
 zakres i limity pozostają zamrożone, także liczby zapisane w nowym prompcie systemowym.
@@ -510,6 +514,7 @@ Idle wątki są sprzątane przy `createThread` i `endRun`, bez timerów: po 30 m
 bez aktywności oraz ponad trzy wątki w sesji, od najstarszego. Rejestr emituje
 `thread:created`, `thread:idle` i `thread:closed`, które zapisują `thread.created`,
 `thread.idle` i `thread.closed` do trace.
+Retencja usuwa zamknięty wątek wraz z konfiguracją, gdy usunięto jego ostatni przechowywany bieg, także gdy zamknięcie nastąpiło po wyparciu tego biegu. Zamknięta rezerwacja kolejki czeka na `finishQueuedStop`. `pruneSession` usuwa też zamknięte wątki tej sesji.
 
 Skrzynka `postMessage` dostarcza wiadomość w ramce od agenta zlecającego przez hak
 `beforeContinue`, między wywołaniami modelu.
@@ -575,3 +580,4 @@ Identyfikator biegu i wątku ma postać `sub/<nazwa>#<znacznik>-<licznik>`: znac
 ## Stop z paska
 
 `SubTaskRegistry.stopThread(threadId)` synchronicznie sprawdza bieżącą fazę wątku: zamyka rezerwację `queued` jako user albo wysyła `requestStop` jako user do aktualnego biegu `running`. Dla pozostałych faz zwraca `false`.
+Stop użytkownika zapisuje znacznik kolejności na wątku i biegu przed przerwaniem pracy; dla rezerwacji znacznik przechodzi do jej syntetycznego biegu. Kontynuację przyjmuje atomowo `beginRun` według progu ostatniego Stopu, który pozostaje także po zdjęciu `userStop`.

@@ -1,6 +1,6 @@
 import { log } from '../../core/utils/Logger.js';
 // `toolResultStatus` = jedna reguła „co jest porażką narzędzia" (klient, czat, suby).
-import { AccessGuard, maskSensitiveData, normalizeAutonomy, sanitizePath, toolResultStatus, getAgentSafeName, SessionWriteConsent } from '../../core/index.js';
+import { AccessGuard, maskSensitiveData, normalizeAutonomy, sanitizePath, toolResultStatus, getAgentSafeName, SessionWriteConsent, configuredChatSecrets } from '../../core/index.js';
 import { t } from '../../core/i18n/index.js';
 // Kanoniczny parser tool_calls żyje w modules/agent-loop. MCPClient tylko deleguje.
 import { parseToolCalls as parseToolCallsCanonical } from '../agent-loop/index.js';
@@ -13,6 +13,8 @@ import { isHiddenVaultPath } from './vault_adapter_io.js';
 import { makeMemoryNoteFilename } from '../memory/index.js';
 // Jeden filtr znaczników `_invocation*` dla wysyłki i dla podglądu w approvalu.
 import { ExternalMcpManager } from './ExternalMcpManager.js';
+import { isRuntimeSequence } from '../sub-agents/index.js';
+import type { RuntimeSequence } from '../sub-agents/index.js';
 import type { PermissionDecision, PermissionedAgent, ScopeFolders } from '../../core/index.js';
 import type { BuiltinToolExecutionContext } from './ToolRegistry.js';
 import type { ModelResponse, ParsedToolCall } from '../agent-loop/index.js';
@@ -121,6 +123,7 @@ interface ToolContext {
 
 /** Plugin widziany przez klienta - same bramki bezpieczeństwa i rejestry, nic więcej. */
 export interface MCPClientPlugin {
+    env?: { settings?: { pkmAssistant?: { chat?: { apiKeys?: Record<string, unknown> } } } };
     permissionSystem: {
         checkPermission(
             agent: PermissionedAgent,
@@ -184,6 +187,7 @@ export interface ExecuteToolCallOptions {
     origin?: { agentName: string; sessionPath?: string; sessionEpoch?: string | null; tabKey?: string } | null;
     /** Zaufany rodzaj bieżącej tury. */
     turnKind?: 'user' | 'machine';
+    turnStartedSeq?: RuntimeSequence;
     /**
      * Whitelista narzędzi WOŁAJĄCEGO (dla biegu suba - jego
      * przecięcie rodzic∩sub). Klient jej nie interpretuje: wstrzykuje ją do args jako
@@ -872,6 +876,8 @@ export class MCPClient {
             } else {
                 delete argsWithContext._invocationTurnKind;
             }
+            if (isRuntimeSequence(opts.turnStartedSeq)) argsWithContext._invocationTurnStartedSeq = opts.turnStartedSeq;
+            else delete argsWithContext._invocationTurnStartedSeq;
             // Zakres folderów i whitelista narzędzi WOŁAJĄCEGO -
             // ten sam wzorzec zaufanego znacznika. Czyta je `delegate`, żeby dziecko dostało
             // PRZECIĘCIE (nigdy szerzej niż ma sub zlecający). Brak = pole USUWANE, bo model
@@ -1112,7 +1118,15 @@ export class MCPClient {
                         // Checkbox „nie pytaj więcej w tej sesji" w ApprovalModal - TYLKO gdy sesja
                         // ma klucz (bez niego SessionWriteConsent nie ma czego zapamiętać).
                         rememberAvailable: isWriteTool && !!sessionKey,
-                        ...approvalContext
+                        ...((toolCall.name === 'delegate' || toolCall.name === 'sub_agent') ? (() => {
+                            const secrets = configuredChatSecrets(this.plugin.env?.settings?.pkmAssistant?.chat);
+                            const display = { ...approvalContext };
+                            for (const key of ['delegateTask', 'subAgentText']) {
+                                const value = display[key];
+                                if (typeof value === 'string') display[key] = secrets.reduce((text, secret) => text.split(secret).join('[REDACTED]'), value);
+                            }
+                            return display;
+                        })() : approvalContext)
                     });
 
                     // Trzecia ścieżka - przekieruj + kontekst. User zatrzymuje
@@ -1272,6 +1286,7 @@ export class MCPClient {
                 },
                 serializeFinalResult,
             };
+            if (shouldAbort()) return { success: false, error: t('chat.substrip.status_aborted') };
             if (opts.onExecutionStart) {
                 try {
                     opts.onExecutionStart();
@@ -1279,6 +1294,7 @@ export class MCPClient {
                     log.error('MCPClient', `onExecutionStart callback failed for ${toolCall.name}:`, error);
                 }
             }
+            if (shouldAbort()) return { success: false, error: t('chat.substrip.status_aborted') };
             let result = await tool.execute(
                 argsWithContext,
                 this.app,

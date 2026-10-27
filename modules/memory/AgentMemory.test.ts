@@ -4,6 +4,43 @@ import { StateManager } from './StateManager.js';
 import { parseSessionFile } from './sessionParser.js';
 // Alias — goły `t` jest wewnątrz każdego testu zajęty przez ExecutionContext AVA.
 import { t as tr, setLocale } from '../../core/i18n/index.js';
+import { SubAgentRunner } from '../sub-agents/index.js';
+
+test('spóźniony wynik suba nie zmienia nowej sesji pod tą samą ścieżką', async t => {
+    const { vault, files } = makeVault();
+    const memory = new AgentMemory(vault, 'Jaskier');
+    const path = '.pkm-assistant/agents/jaskier/memory/sessions/active/test.md';
+    files[path] = '---\ntype: active_session\nepoch: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n---\n';
+    let started!: () => void;
+    const entered = new Promise<void>(resolve => { started = resolve; });
+    let finish!: (response: unknown) => void;
+    const model = { stream(_payload: unknown, handlers: { done(response: unknown): void }) { finish = handlers.done; started(); } };
+    const runner = new SubAgentRunner({ app: { vault }, plugin: { agentManager: { getAgentMemory: () => memory } }, toolRegistry: { filterByAgent: () => [] } });
+    const running = runner.runTask('stare zadanie', { name: 'Jaskier' }, { name: 'worker', role: 'worker', tools: [] } as never, model as never,
+        { origin: { agentName: 'Jaskier', sessionPath: path, sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' } });
+    await entered;
+    const newSession = '---\ntype: active_session\nepoch: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n---\n';
+    await vault.adapter.remove(path);
+    await vault.adapter.write(path, newSession);
+    finish({ choices: [{ message: { role: 'assistant', content: 'stary wynik' } }] });
+    const result = await running;
+    t.is(result.result, 'stary wynik');
+    t.is(files[path], newSession);
+});
+
+test('zamrożony zapis nie trafia do nowej epoki tej samej ścieżki', async t => {
+    const { vault, files } = makeVault();
+    const memory = new AgentMemory(vault, 'Jaskier');
+    const path = '.pkm-assistant/agents/jaskier/memory/sessions/active/test.md';
+    const header = '---\ntype: active_session\nepoch: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n---\n';
+    files[path] = header;
+    await t.throwsAsync(() => memory.appendSessionEvent(path, { type: 'event', content: 'stary wynik' }, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'));
+    t.is(files[path], header);
+    await t.throwsAsync(() => memory.appendSessionEvent(path, { type: 'agent_loop_partial', content: 'stary częściowy wynik' }, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'));
+    t.is(files[path], header);
+    await memory.appendSessionEvent(path, { type: 'agent_loop_partial', content: 'częściowy wynik', timestamp: '2026-10-27T10:00:00.000Z' }, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    t.is(files[path], header + '## 2026-10-27T10:00:00.000Z — agent loop partial\n\n**content:**\n\nczęściowy wynik\n\n**seq:**\n\n1\n\n');
+});
 
 // TS-any: `saveSession` przyjmuje `ChatMessageLike[]` (role/content), a testy poniżej podają
 // wiadomości `RollingMessage`-owate (z `tool_calls`/`tool_call_id`) - dokładnie to, co realnie

@@ -449,6 +449,18 @@ test('executeToolCall: rodzaj tury jest zaufany i model nie może go podrobić',
     t.false('_invocationTurnKind' in seen[1]!);
 });
 
+test('executeToolCall: znacznik startu pochodzi wyłącznie z runtime', async t => {
+    const seen: ToolCallArgs[] = [];
+    const client = _makeArgsSpyClient(seen);
+    const call = { name: 'delegate', arguments: { task: 'x', _invocationTurnStartedSeq: 999 } };
+    await client.executeToolCall(call, 'Jaskier', { turnStartedSeq: 3 } as never);
+    await client.executeToolCall(call, 'Jaskier');
+    await client.executeToolCall(call, 'Jaskier', { turnStartedSeq: 0 } as never);
+    t.is(seen[0]!._invocationTurnStartedSeq, 3);
+    t.false(Object.prototype.hasOwnProperty.call(seen[1], '_invocationTurnStartedSeq'));
+    t.false(Object.prototype.hasOwnProperty.call(seen[2], '_invocationTurnStartedSeq'));
+});
+
 test('executeToolCall: origin bez agentName jest ignorowany (fail-closed)', async t => {
     const seen: ToolCallArgs[] = [];
     const client = _makeArgsSpyClient(seen);
@@ -1637,6 +1649,12 @@ test('executeToolCall does not call onExecutionStart on permission or approval d
 
     t.is(startCalls, 0);
     t.is(executeCalls, 0);
+    const allowed = await makeClient(true, 'approve').executeToolCall({ name: 'delete', arguments: { path: 'a.md' } }, 'Tester', {
+        onExecutionStart: () => { startCalls++; },
+    });
+    t.deepEqual(allowed, { success: true });
+    t.is(startCalls, 1);
+    t.is(executeCalls, 1);
 });
 
 test('brak nazwy wywołania (brak właściciela tury) — requestApproval dostaje agentName aktywnego agenta, nie pustkę', async t => {

@@ -73,6 +73,109 @@ function all(node: MockEl): MockEl[] { return [node, ...node.children.flatMap(al
 
 const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: 'epoch-1' };
 
+test('karta pustego biegu pokazuje przyczynę i brak wyniku', t => {
+    setLocale('pl');
+    const ends = [
+        [{ kind: 'stopped', by: 'user' }, 'zatrzymany przez Ciebie'],
+        [{ kind: 'stopped', by: 'lead' }, 'zatrzymany przez agenta'],
+        [{ kind: 'stopped', by: 'system' }, 'zatrzymany przez system'],
+        [{ kind: 'limit', reason: 'iteration-limit' }, 'skończył mu się budżet kroków'],
+        [{ kind: 'timeout' }, 'przekroczył czas'],
+    ] as const;
+    for (const [end, label] of ends) {
+        const registry = new SubTaskRegistry();
+        const run = registry.create({ id: label, name: 'worker', agentName: owner.agentName, origin: owner });
+        registry.finish(run, { text: '', toolsUsed: [], durationMs: 1, usage: null,
+            outcome: { end, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } });
+        const host = new MockEl();
+        renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, expandedId: label, onToggle() {} });
+        const state = all(host).find(node => node.classList.contains('pkm-substrip__run-state'));
+        t.true(state?.textContent.includes(label), state?.textContent);
+        t.true(state?.textContent.includes('brak wyniku'), state?.textContent);
+        registry.dispose();
+    }
+    const registry = new SubTaskRegistry();
+    registry.createThread({ threadId: 'queued-stop', name: 'worker', owner, origin: owner, config: {}, phase: 'queued' });
+    registry.stopThread('queued-stop');
+    registry.finishQueuedStop('queued-stop', { background: true });
+    const host = new MockEl();
+    renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, expandedId: 'queued-stop', onToggle() {} });
+    const state = all(host).find(node => node.classList.contains('pkm-substrip__run-state'));
+    t.is(state?.textContent, 'zatrzymany przez Ciebie · brak wyniku');
+    registry.dispose();
+});
+
+test.serial('retencja 60 delegacji zachowuje 50 wierszy i trzy wątki idle', async t => {
+    const registry = new SubTaskRegistry({ maxDone: 50 });
+    const { SubTaskNotifier } = await import('../../sub-agents/index.js');
+    const notifier = new SubTaskNotifier({ registry });
+    const delivered: string[] = [];
+    notifier.setDeliverer(task => { delivered.push(task.id); return true; });
+    t.teardown(() => { notifier.dispose(); registry.dispose(); });
+    class Model {
+        modelId = 'worker-model'; providerId = 'ollama';
+        stream(_payload: unknown, handlers: { done(value: unknown): void }) { handlers.done({ choices: [{ message: { role: 'assistant', content: 'gotowe' } }] }); }
+    }
+    modelsTest.setChatModelFactory(() => new Model() as never);
+    const providers = Object.fromEntries(['openai', 'ollama', 'lm_studio', 'anthropic', 'gemini', 'groq', 'deepseek', 'open_router', 'xai'].map(id => [id, { info: { id } }]));
+    const plugin = {
+        subTaskRegistry: registry, toolRegistry: { filterByAgent: () => [], getTool: () => undefined },
+        agentManager: { getActiveAgent: () => ({ name: 'Klara', activeSubAgents: [] }) },
+        env: { config: { chat: { providers, http: { send: async () => ({ status: 200, headers: {}, text: '', json: () => ({}) }) }, transport: { open: async () => ({ status: 200, headers: {}, body: '' }) } } },
+            settings: { pkmAssistant: { chat: { platform: 'ollama', hosts: { ollama: 'http://localhost:11434' } }, modelLibrary: { minion: [{ platform: 'ollama', model: 'worker-model', isDefault: true }] } } } },
+    };
+    const tool = createDelegateTool({});
+    for (let i = 0; i < 60; i++) {
+        const receipt = await tool.execute({ task: `zadanie ${i}`, aspect: 'worker', _invocationOrigin: owner }, {}, plugin as never) as { sub_id: string };
+        const deadline = Date.now() + 3000;
+        while (registry.getThread(receipt.sub_id)?.phase === 'running' && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 1));
+        t.is(registry.getThread(receipt.sub_id)?.phase, 'idle');
+    }
+    const threads = registry.listThreads(owner);
+    const host = new MockEl();
+    const count = renderSubTaskStrip(host as never, { plugin, tabKey: 'Klara', ...owner, onToggle() {} });
+    t.is(delivered.length, 60);
+    t.is(threads.length, 50);
+    t.is(count, 50);
+    t.deepEqual(threads.slice(-3).map(thread => thread.phase), ['idle', 'idle', 'idle']);
+    registry.closeSessionThreads(owner.agentName, owner.sessionPath);
+    registry.pruneSession(owner.sessionPath);
+    t.deepEqual(registry.listThreads(owner), []);
+});
+
+test('zamknięcie po wyparciu biegu usuwa wątek i wiersz, zachowując aktywne i kolejkę', t => {
+    const registry = new SubTaskRegistry({ maxDone: 50 });
+    t.teardown(() => registry.dispose());
+    const other = { ...owner, sessionPath: 'other.md' };
+    registry.createThread({ threadId: 'old', name: 'worker', owner, origin: owner, config: { marker: 'old' }, phase: 'running' });
+    const old = registry.create({ id: 'old-run', name: 'worker', agentName: owner.agentName, threadId: 'old', origin: owner });
+    registry.finish(old, { text: 'old', toolsUsed: [], durationMs: 1, usage: null });
+    registry.endRun('old', { successful: true });
+    t.is(registry.getThread('old')?.phase, 'idle');
+    for (let i = 0; i < 51; i++) {
+        const run = registry.create({ id: `new-${i}`, name: 'worker', agentName: other.agentName, origin: other });
+        registry.finish(run, { text: 'new', toolsUsed: [], durationMs: 1, usage: null });
+    }
+    t.is(registry.getTask('old-run'), undefined);
+    registry.createThread({ threadId: 'running', name: 'worker', owner, origin: owner, config: {}, phase: 'running' });
+    registry.createThread({ threadId: 'idle', name: 'worker', owner, origin: owner, config: {}, phase: 'running' });
+    registry.endRun('idle', { successful: true });
+    registry.createThread({ threadId: 'queued', name: 'worker', owner, origin: owner, config: {}, phase: 'queued' });
+    registry.closeThread('queued');
+    let oldVisibleAtClose = true;
+    registry.events.on('thread:closed', () => { oldVisibleAtClose = Boolean(registry.getThread('old')); });
+    t.true(registry.closeThread('old'));
+    t.is(registry.getThread('old'), undefined);
+    t.false(oldVisibleAtClose);
+    t.is(registry.getThread('running')?.phase, 'running');
+    t.is(registry.getThread('idle')?.phase, 'idle');
+    t.is(registry.getThread('queued')?.phase, 'closed');
+    const host = new MockEl();
+    renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, onToggle() {} });
+    t.false(all(host).some(node => node.dataset.substripId === 'old'));
+    t.is(registry.finishQueuedStop('queued', {})?.id, 'queued');
+});
+
 test.serial('mixin UI: zdarzenie i 250 ms zachowują szkic, fokus, scroll i rozwinięcie', async t => {
     // Node nie ładuje modułu CSS. Hak zastępuje tylko arkusz, nie kod UI.
     const hook = `export async function load(url, context, next) {

@@ -35,6 +35,7 @@ type SubTaskDeliveryReason =
     | 'turn_in_flight'
     /** po Stopie / watchdogu czat nie startuje tury sam */
     | 'stopped'
+    | 'user_stopped'
     /** sufit łańcucha auto-tur po subach */
     | 'chain_limit'
     | 'ok';
@@ -53,6 +54,7 @@ interface SubTaskDeliveryInput {
     subTaskTurnPending?: boolean;
     /** `this._drainSuppressed` — user kliknął Stop (albo strzelił watchdog) */
     drainSuppressed?: boolean;
+    userStopped?: boolean;
     /** `evaluateAutoTurnChain(...).allowed` — sufit łańcucha auto-tur */
     chainAllowed?: boolean;
 }
@@ -81,6 +83,7 @@ export function evaluateSubTaskDelivery(input: SubTaskDeliveryInput): SubTaskDel
     if (!tab.isActive) return { allowed: false, reason: 'tab_inactive' };
     if (input.isGenerating || input.subTaskTurnPending) return { allowed: false, reason: 'turn_in_flight' };
     if (input.drainSuppressed) return { allowed: false, reason: 'stopped' };
+    if (input.userStopped) return { allowed: false, reason: 'user_stopped' };
     if (input.chainAllowed === false) return { allowed: false, reason: 'chain_limit' };
     return { allowed: true, reason: 'ok' };
 }
