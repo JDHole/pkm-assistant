@@ -131,13 +131,8 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
         parts.push(t('chat.subagent_notification.unconfirmed'));
     } else if (outcome?.completeness === 'partial') {
         parts.push(t('chat.subagent_notification.partial'));
-        const raw = (typeof task?.partial?.text === 'string' && task.partial.text.trim()) || (typeof task?.result?.text === 'string' ? task.result.text.trim() : '');
+        const raw = (typeof task?.result?.handoff === 'string' && task.result.handoff.trim()) || (typeof task?.partial?.text === 'string' && task.partial.text.trim()) || (typeof task?.result?.text === 'string' ? task.result.text.trim() : '');
         parts.push(raw ? (maxResultChars > 0 && raw.length > maxResultChars ? `${raw.slice(0, maxResultChars)}\n${t('chat.subagent_notification.truncated', { chars: maxResultChars })}` : raw) : t('chat.subagent_notification.empty_result'));
-        for (const effect of outcome.effects || []) {
-            const check = effect.outcome === 'unknown' || effect.outcome === 'pending' ? 'unknown' : effect.check === 'matches' ? 'matches' : effect.check === 'mismatch' ? 'mismatch' : 'not_checked';
-            const targets = effect.targets?.map((target) => target.path || target.id || '').filter(Boolean).join(', ') || effect.action || '';
-            parts.push(t('chat.subagent_notification.effect', { tool: effect.tool, target: targets, check: t(CHECK_KEY[check]) }));
-        }
     } else if (outcome?.completeness === 'empty') {
         parts.push(t('chat.subagent_notification.empty', { reason: outcomeEndLabel(outcome) }));
         if (outcome.end.kind === 'failed' && typeof task.error === 'string' && task.error.trim()) {
@@ -159,6 +154,14 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
             ? task.error.trim()
             : t('chat.subagent_notification.unknown_error');
         parts.push(t('chat.subagent_notification.failed', { error: err }));
+    }
+
+    if (outcome?.completeness === 'partial' || outcome?.completeness === 'empty') {
+        for (const effect of outcome.effects) {
+            const check = effect.outcome === 'unknown' || effect.outcome === 'pending' ? 'unknown' : effect.check === 'matches' ? 'matches' : effect.check === 'mismatch' ? 'mismatch' : 'not_checked';
+            const targets = effect.targets?.map((target) => target.path || target.id || '').filter(Boolean).join(', ') || effect.action || '';
+            parts.push(t('chat.subagent_notification.effect', { tool: effect.tool, target: targets, check: t(CHECK_KEY[check]) }));
+        }
     }
 
     const body = parts.join('\n\n');

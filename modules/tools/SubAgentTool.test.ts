@@ -1,4 +1,4 @@
-﻿import test from 'ava';
+import test from 'ava';
 import { createDelegateTool, createSubAgentTool } from './DelegateTool.js';
 import { SubTaskRegistry } from '../sub-agents/index.js';
 import { t as tr } from '../../core/i18n/index.js';
@@ -87,10 +87,10 @@ function seedIdleThread(registry: SubTaskRegistry, userStop = false) {
 
 function acceptedRunner(registry: SubTaskRegistry) {
     return {
-        runTask: async (_task: string, _agent: unknown, _config: unknown, _model: unknown, options: { threadId?: string; origin?: { agentName: string; sessionPath?: string; sessionEpoch?: string }; onTaskCreated?: (task: import('../sub-agents/index.js').SubTask) => void }) => {
+        runTask: async (_task: string, _agent: unknown, _config: unknown, _model: unknown, options: { threadId?: string; origin?: { agentName: string; sessionPath?: string; sessionEpoch?: string }; turnKind?: 'user' | 'machine'; turnStartedSeq?: number; onTaskCreated?: (task: import('../sub-agents/index.js').SubTask) => void }) => {
             const threadId = options.threadId!;
             const owner = options.origin!;
-            if (!registry.beginRun(threadId, owner)) return { result: tr('subagent.thread_refused'), failed: true as const } as never;
+            if (!(registry as SequenceRegistry).beginRun(threadId, owner, { turnKind: options.turnKind, turnStartedSeq: options.turnStartedSeq })) return { result: tr('subagent.thread_refused'), failed: true as const } as never;
             const task = registry.create({ id: 'next-run', name: 'Worker', agentName: owner.agentName, threadId, origin: options.origin });
             registry.attachAbort(task.id, () => undefined);
             options.onTaskCreated?.(task);
@@ -101,15 +101,127 @@ function acceptedRunner(registry: SubTaskRegistry) {
     };
 }
 
+// The admission context belongs to this attempt, never to the frozen thread config.
+type TurnAdmission = { turnKind?: 'user' | 'machine'; turnStartedSeq?: number };
+type SequenceRegistry = SubTaskRegistry & {
+    issueTurnStartSequence(): number;
+    beginRun(id: string, owner: { agentName: string; sessionPath?: string; sessionEpoch?: string }, turn: TurnAdmission): boolean;
+};
+
+function stoppedThread(registry: SequenceRegistry) {
+    const owner = { agentName: 'Mira', sessionPath: 'sessions/one.md', sessionEpoch: 'epoch-1' };
+    const thread = registry.createThread({
+        threadId: 'sub-id-task', name: 'Worker', owner, origin: { ...owner, tabKey: 'tab-1' }, phase: 'running',
+        config: { subConfig: { name: 'Worker', description: 'Worker', tools: [], role: 'researcher' } as SubAgentConfigLike,
+            options: { delegationDepth: 1 }, limits: {}, modelId: 'worker-model', providerId: 'ollama' },
+    });
+    const previous = registry.create({ id: 'previous-run', name: 'Worker', agentName: owner.agentName, threadId: thread.threadId, origin: owner });
+    registry.attachAbort(previous.id, () => undefined);
+    return { owner, thread, previous };
+}
+
+function sequenceRunner(registry: SequenceRegistry, id: string, beforeAdmission: () => Promise<void> = async () => undefined) {
+    return { runTask: async (_task: string, _agent: unknown, _config: unknown, _model: unknown, options: {
+        threadId?: string; origin?: { agentName: string; sessionPath?: string; sessionEpoch?: string };
+        turnKind?: 'user' | 'machine'; turnStartedSeq?: number;
+        onTaskCreated?: (task: import('../sub-agents/index.js').SubTask) => void;
+    }) => {
+        await beforeAdmission();
+        const owner = options.origin!;
+        if (!registry.beginRun(options.threadId!, owner, { turnKind: options.turnKind, turnStartedSeq: options.turnStartedSeq })) {
+            return { result: tr('subagent.thread_refused'), failed: true as const } as never;
+        }
+        const task = registry.create({ id, name: 'Worker', agentName: owner.agentName, threadId: options.threadId!, origin: owner });
+        registry.attachAbort(id, () => undefined);
+        options.onTaskCreated?.(task);
+        return { result: 'done', outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true, effects: [] }, toolsUsed: [], toolCallDetails: [], duration: 1 } as never;
+    } };
+}
+
+test.serial('A2: old user turn is refused after a real Stop; newer user turn resumes', async t => {
+    const registry = new SubTaskRegistry() as SequenceRegistry;
+    const old = registry.issueTurnStartSequence();
+    const { owner, thread, previous } = stoppedThread(registry);
+    t.is(Number(old), 1);
+    t.true(registry.requestStop(previous.id, 'user'));
+    registry.endRun(thread.threadId, { successful: true });
+    const tool = createSubAgentTool({}, { makeRunner: () => sequenceRunner(registry, 'next-run') });
+    const call = (seq: number) => tool.execute({ action: 'task', sub_id: thread.threadId, task: 'Continue', _invocationOrigin: owner, _invocationTurnKind: 'user', _invocationTurnStartedSeq: seq }, {}, makePlugin(registry));
+    const result = await call(old);
+    t.deepEqual(result, { success: false, error: tr('mcp.sub_agent.user_stopped') });
+    t.deepEqual(thread.runIds, ['previous-run']);
+    t.is(thread.phase, 'idle');
+    t.is(thread.userStop, true);
+    t.is(Number(thread.lastUserStopSeq), 2);
+    const nextSeq = registry.issueTurnStartSequence();
+    t.is(Number(nextSeq), 3);
+    const next = await call(nextSeq) as Record<string, unknown>;
+    t.deepEqual({ success: next.success, started: next.started, sub_id: next.sub_id }, { success: true, started: true, sub_id: 'sub-id-task' });
+    t.deepEqual(thread.runIds, ['previous-run', 'next-run']);
+    t.is(thread.userStop, false);
+    t.is(Number(thread.lastUserStopSeq), 2);
+});
+
+test.serial('A2: old user turn remains refused after a newer turn resumed the thread', async t => {
+    const registry = new SubTaskRegistry() as SequenceRegistry;
+    const old = registry.issueTurnStartSequence();
+    const { owner, thread, previous } = stoppedThread(registry);
+    t.true(registry.requestStop(previous.id, 'user'));
+    registry.endRun(thread.threadId, { successful: true });
+    let id = 'next-run';
+    const tool = createSubAgentTool({}, { makeRunner: () => sequenceRunner(registry, id) });
+    const call = (seq: number) => tool.execute({ action: 'task', sub_id: thread.threadId, task: 'Continue', _invocationOrigin: owner, _invocationTurnKind: 'user', _invocationTurnStartedSeq: seq }, {}, makePlugin(registry));
+    const next = await call(registry.issueTurnStartSequence()) as Record<string, unknown>;
+    t.is(next.success, true);
+    registry.endRun(thread.threadId, { successful: true });
+    t.deepEqual(await call(old), { success: false, error: tr('mcp.sub_agent.user_stopped') });
+    t.deepEqual(thread.runIds, ['previous-run', 'next-run']);
+    id = 'third-run';
+    const third = await call(registry.issueTurnStartSequence()) as Record<string, unknown>;
+    t.is(third.success, true);
+    t.deepEqual(thread.runIds, ['previous-run', 'next-run', 'third-run']);
+});
+
+test.serial('A2: Stop between precheck and beginRun rejects the older attempt atomically', async t => {
+    const registry = new SubTaskRegistry() as SequenceRegistry;
+    const old = registry.issueTurnStartSequence();
+    const { owner, thread } = stoppedThread(registry);
+    registry.endRun(thread.threadId, { successful: true });
+    let release!: () => void;
+    let entered!: () => void;
+    const paused = new Promise<void>(resolve => { release = resolve; });
+    const atGate = new Promise<void>(resolve => { entered = resolve; });
+    let calls = 0;
+    const tool = createSubAgentTool({}, { makeRunner: () => ++calls === 1
+        ? sequenceRunner(registry, 'old-run', async () => { entered(); await paused; })
+        : sequenceRunner(registry, 'newer-run') });
+    const call = (seq: number) => tool.execute({ action: 'task', sub_id: thread.threadId, task: 'Continue', _invocationOrigin: owner, _invocationTurnKind: 'user', _invocationTurnStartedSeq: seq }, {}, makePlugin(registry));
+    const first = call(old);
+    await atGate;
+    const newer = await call(registry.issueTurnStartSequence()) as Record<string, unknown>;
+    t.is(newer.success, true);
+    t.true(registry.requestStop('newer-run', 'user'));
+    registry.endRun(thread.threadId, { successful: true });
+    release();
+    const result = await first as Record<string, unknown>;
+    t.is(result.success, false);
+    t.is(thread.phase, 'idle');
+    t.is(thread.userStop, true);
+    t.deepEqual(thread.runIds, ['previous-run', 'newer-run']);
+});
+
 test('task after user Stop requires a user turn and clears userStop only after registry admission', async (t) => {
-    const registry = new SubTaskRegistry();
-    const { owner, thread } = seedIdleThread(registry, true);
+    const registry = new SubTaskRegistry() as SequenceRegistry;
+    const { owner, thread, previous } = stoppedThread(registry);
+    t.true(registry.requestStop(previous.id, 'user'));
+    registry.endRun(thread.threadId, { successful: true });
+    const seq = registry.issueTurnStartSequence();
     const plugin = makePlugin(registry);
     const tool = createSubAgentTool({}, { makeRunner: () => acceptedRunner(registry) });
-    const machine = await tool.execute({ action: 'task', sub_id: thread.threadId, task: 'Continue the analysis', _invocationOrigin: owner, _invocationTurnKind: 'machine' }, {}, plugin);
+    const machine = await tool.execute({ action: 'task', sub_id: thread.threadId, task: 'Continue the analysis', _invocationOrigin: owner, _invocationTurnKind: 'machine', _invocationTurnStartedSeq: seq }, {}, plugin);
     t.deepEqual(machine, { success: false, error: tr('mcp.sub_agent.user_stopped') });
     t.true(thread.userStop);
-    const result = await tool.execute({ action: 'task', sub_id: thread.threadId, task: 'Continue the analysis', _invocationOrigin: owner, _invocationTurnKind: 'user' }, {}, plugin) as Record<string, unknown>;
+    const result = await tool.execute({ action: 'task', sub_id: thread.threadId, task: 'Continue the analysis', _invocationOrigin: owner, _invocationTurnKind: 'user', _invocationTurnStartedSeq: seq }, {}, plugin) as Record<string, unknown>;
     t.is(result.success, true);
     t.is(result.started, true);
     t.is(result.sub_id, thread.threadId);
@@ -214,16 +326,19 @@ test('user Stop blocks machine and unmarked turns, and failed admission preserve
     t.true(registry.requestStop(run.id, 'user'));
     registry.endRun(thread.threadId, { successful: true });
     const plugin = makePlugin(registry);
+    let reachedRunner = false;
     const tool = createSubAgentTool({}, { makeRunner: () => ({ runTask: async (_task: string, _agent: unknown, _config: unknown, _model: unknown, options: { threadId?: string; origin?: import('../sub-agents/index.js').SubTaskOrigin }) => {
+        reachedRunner = true;
         t.false(registry.beginRun(options.threadId!, { ...options.origin!, sessionEpoch: 'wrong' }));
         return { result: tr('subagent.thread_refused'), failed: true as const } as never;
     } }) });
     const call = (turnKind?: string) => tool.execute({ action: 'task', sub_id: thread.threadId, task: 'Continue', _invocationOrigin: owner,
-        ...(turnKind ? { _invocationTurnKind: turnKind } : {}), background: false }, {}, plugin);
+        ...(turnKind ? { _invocationTurnKind: turnKind } : {}), _invocationTurnStartedSeq: registry.issueTurnStartSequence(), background: false }, {}, plugin);
     t.deepEqual(await call('machine'), { success: false, error: tr('mcp.sub_agent.user_stopped') });
     t.deepEqual(await call(), { success: false, error: tr('mcp.sub_agent.user_stopped') });
     t.true(thread.userStop);
     const refused = await call('user') as Record<string, unknown>;
+    t.true(reachedRunner);
     t.is(refused.success, false);
     t.true(thread.userStop);
     t.is(thread.phase, 'idle');

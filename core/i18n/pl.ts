@@ -3165,5 +3165,4 @@ Status raportu → \`gotowy\`. Powiedz userowi 2-3 zdania esencji + gdzie leży 
   'chat.subresult.user_stopped_next': 'Nie ruszy sam. Dokończy tylko, gdy poprosisz.',
   'chat.subresult.restart': '{{name}} nie dokończył: Obsidian zamknięto w trakcie pracy. Sub nie wróci sam.',
   'chat.subresult.unavailable': 'Wynik {{name}} jest niedostępny.',
-  'subagent.stopped_before_start': '{{name}} zatrzymany, zanim ruszył.',
 };

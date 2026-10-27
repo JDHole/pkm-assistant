@@ -11,7 +11,9 @@ export interface BuildSubAgentResultViewInput extends Omit<BuildSubTaskResultMod
 }
 
 export function buildSubAgentResultView(input: BuildSubAgentResultViewInput, translate: typeof t = t): SubAgentResultView {
-    const model = buildSubTaskResultModel(input);
+    const model = buildSubTaskResultModel(input.outcome?.completeness === 'empty'
+        ? { ...input, text: undefined, handoff: undefined, partialResult: undefined, partialText: undefined }
+        : input);
     const name = input.name.trim() || translate('subagent.label');
     const title = `${name} ${translate(model.endLabelKey)}`;
     const badge = model.completenessLabelKey ? translate(model.completenessLabelKey) : undefined;

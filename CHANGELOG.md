@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
+- Settle background receipts by run ID when result tiles are rendered, preserving reading position.
+- User-stopped sub-agent results wait for a later user turn, and thread continuation respects the latest stop.
 
 - Sub-agent strip shows live steps and counts for larger groups, tool chips use readable action labels, and template deletion names the template.
 ### Added
@@ -23,7 +25,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Sub-agent handoff masks configured API keys before shortening tool previews, including runs that end with a synthesis error.
 - Sub-agent runs now record their classified outcome, tool effects, and checked target state in the run result and registry.
 - The tools module exposes effect descriptions and target checks for built-in and external MCP tool calls.
-- Background sub-agent notifications now report their classified outcome, completeness, and checked effects.
+- Background sub-agent notifications report outcome and completeness, prefer the handoff to the snapshot for partial results, and include effects even when the result is empty.
+- Delegation approval masks secrets before shortening the task description and preview.
+- Completed run cards show the end reason and completeness, including for empty runs.
+- Restored frames no longer present an empty-result message as work or offer continuation of a missing thread.
+- A sub-agent tool write no longer starts after the run times out while waiting for approval.
+- Closed sub-agent threads are removed when their retained runs are evicted or their session is cleaned up.
 - The lead can message, continue, stop, close, and list owned sub-agent threads with `sub_agent`.
 - Delegate responses expose reusable thread IDs and preserve them in background acknowledgements.
 - Sub-agent thread actions use the delegate permission and approval toggle, with action-specific risk levels.

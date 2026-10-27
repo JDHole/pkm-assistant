@@ -26,6 +26,19 @@ import type { SubTask } from './SubTaskRegistry.js';
 /** Dostawca wyniku. `true` = skonsumowane (wypada z kolejki); `false`/wyjątek = zostaje. */
 export type SubTaskDeliverer = (task: SubTask) => boolean;
 
+/** Wyłączne, tymczasowe pobranie wyniku; uchwyt można rozliczyć tylko raz. */
+export interface SubTaskClaim {
+    task: SubTask;
+    ack(): void;
+    release(): void;
+}
+
+interface PendingEntry {
+    task: SubTask;
+    claimed: boolean;
+    delivering: boolean;
+}
+
 /** Minimalny widok rejestru, jakiego notifier używa (duck-typing — testy podstawiają atrapę). */
 export interface SubTaskNotifierRegistryLike {
     events?: {
@@ -45,7 +58,7 @@ const MAX_PENDING = 200;
 
 export class SubTaskNotifier {
     // `declare` = sama deklaracja typu, zero emitu.
-    declare private _pending: SubTask[];
+    declare private _pending: PendingEntry[];
     declare private _deliverer: SubTaskDeliverer | null;
     declare private _maxPending: number;
     declare private _unsubscribe: (() => void) | null;
@@ -77,32 +90,42 @@ export class SubTaskNotifier {
         try {
             const task = payload as SubTask | undefined;
             if (!task?.id || task.background !== true) return;
-            if (this._tryDeliver(task)) return;
-            this._enqueue(task);
+            const entry: PendingEntry = { task, claimed: false, delivering: false };
+            this._pending.push(entry);
+            this._tryDeliver(entry);
+            this._trimPending();
         } catch (e) {
             log.warn('SubTaskNotifier', 'obsługa task:finished padła (ignorowane):', e);
         }
     }
 
     /** Jedno miejsce, w którym wołamy dostawcę. Wyjątek = „nie skonsumowano". */
-    private _tryDeliver(task: SubTask): boolean {
+    private _tryDeliver(entry: PendingEntry): void {
         const deliver = this._deliverer;
-        if (!deliver) return false;
+        if (!deliver || entry.claimed || entry.delivering || !this._pending.includes(entry)) return;
+        entry.delivering = true;
         try {
-            return deliver(task) === true;
+            if (deliver(entry.task) === true) this._remove(entry);
         } catch (e) {
-            log.warn('SubTaskNotifier', `dostawca odbił wynik ${task.id} (zostaje w kolejce):`, e);
-            return false;
+            log.warn('SubTaskNotifier', `dostawca odbił wynik ${entry.task.id} (zostaje w kolejce):`, e);
+        } finally {
+            entry.delivering = false;
         }
     }
 
-    /** Dopisz do kolejki z sufitem — nadmiar wypada od NAJSTARSZEGO, głośno. */
-    private _enqueue(task: SubTask): void {
-        this._pending.push(task);
+    private _remove(entry: PendingEntry): void {
+        const index = this._pending.indexOf(entry);
+        if (index !== -1) this._pending.splice(index, 1);
+    }
+
+    /** Nadmiar wypada od najstarszego wolnego wpisu, nigdy z aktywnym uchwytem. */
+    private _trimPending(): void {
         while (this._pending.length > this._maxPending) {
-            const dropped = this._pending.shift();
+            const index = this._pending.findIndex(entry => !entry.claimed && !entry.delivering);
+            if (index === -1) break;
+            const [dropped] = this._pending.splice(index, 1);
             log.warn('SubTaskNotifier',
-                `kolejka powiadomień pełna (${this._maxPending}) — gubię najstarszy wynik ${dropped?.id || '(?)'}`);
+                `kolejka powiadomień pełna (${this._maxPending}) — gubię najstarszy wynik ${dropped?.task.id || '(?)'}`);
         }
     }
 
@@ -116,21 +139,40 @@ export class SubTaskNotifier {
 
     /** Ponów próbę dla wszystkiego, co czeka — w kolejności FIFO. Nieskonsumowane zostaje. */
     drain(): void {
-        if (this._pending.length === 0) return;
-        const queue = this._pending;
-        this._pending = [];
-        const left: SubTask[] = [];
-        for (const task of queue) {
-            if (!this._tryDeliver(task)) left.push(task);
+        for (const entry of [...this._pending]) this._tryDeliver(entry);
+        this._trimPending();
+    }
+
+    /** Zajmij pasujące wolne wyniki synchronicznie, bez usuwania ich z kolejki. */
+    claimPending(predicate: (task: SubTask) => boolean): SubTaskClaim[] {
+        const claims: SubTaskClaim[] = [];
+        for (const entry of [...this._pending]) {
+            if (entry.claimed || entry.delivering || !this._pending.includes(entry)) continue;
+            let matches: boolean;
+            try {
+                matches = predicate(entry.task);
+            } catch (e) {
+                log.warn('SubTaskNotifier', 'filtr claim padł (ignorowane):', e);
+                continue;
+            }
+            if (!matches || entry.claimed || entry.delivering || !this._pending.includes(entry)) continue;
+            entry.claimed = true;
+            let active = true;
+            const finish = (ack: boolean): void => {
+                if (!active) return;
+                active = false;
+                if (!this._pending.includes(entry)) return;
+                entry.claimed = false;
+                if (ack) this._remove(entry);
+            };
+            claims.push({ task: entry.task, ack: () => finish(true), release: () => finish(false) });
         }
-        // Nowe wyniki mogły dojść W TRAKCIE dostarczania (dostawca bywa reentrantny) —
-        // nieskonsumowane wracają NA POCZĄTEK, żeby FIFO całości zostało zachowane.
-        this._pending = left.concat(this._pending);
+        return claims;
     }
 
     /** Wszystko, co czeka na dostarczenie (kopia — kolejka jest prywatna). */
     pending(): SubTask[] {
-        return [...this._pending];
+        return this._pending.map(entry => entry.task);
     }
 
     /**
@@ -139,7 +181,7 @@ export class SubTaskNotifier {
      * (właściciel biegu; w praktyce ten sam agent).
      */
     pendingFor(agentName: string): SubTask[] {
-        return this._pending.filter((task) => (task.origin?.agentName || task.agentName) === agentName);
+        return this.pending().filter((task) => (task.origin?.agentName || task.agentName) === agentName);
     }
 
     /** Sprzątanie przy `onunload` pluginu — odpina subskrypcję i puszcza kolejkę. */

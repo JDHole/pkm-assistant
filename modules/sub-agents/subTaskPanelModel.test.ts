@@ -26,6 +26,40 @@ test('naturalne zakończenie bez materiału ma tytuł pusty wynik', t => {
     t.is(tr(model.endLabelKey, undefined, 'pl'), 'pusty wynik');
 });
 
+test('karta pustego biegu zachowuje przyczynę i kompletność', t => {
+    const entry = task({ id: 'stopped', agentName: 'Klara', outcome: { end: { kind: 'stopped', by: 'user' }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } });
+    const run = buildStripModel({ agentName: 'Klara', tasks: [entry] })[0].runs[0];
+    t.is(run.endLabelKey, 'chat.substrip.state_partial_user');
+    t.is(run.completenessLabelKey, 'chat.subagent_notification.completeness_empty');
+    t.is(run.outcome, '');
+});
+
+test('puste biegi zachowują wszystkie przyczyny oraz stop kolejki', t => {
+    const ends = [
+        [{ kind: 'stopped', by: 'user' }, 'zatrzymany przez Ciebie'],
+        [{ kind: 'stopped', by: 'lead' }, 'zatrzymany przez agenta'],
+        [{ kind: 'stopped', by: 'system' }, 'zatrzymany przez system'],
+        [{ kind: 'limit', reason: 'iteration-limit' }, 'skończył mu się budżet kroków'],
+        [{ kind: 'timeout' }, 'przekroczył czas'],
+    ] as const;
+    for (const [end, label] of ends) {
+        const entry = task({ id: label, agentName: 'Klara', outcome: { end, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } });
+        const run = buildStripModel({ agentName: 'Klara', tasks: [entry] })[0].runs[0];
+        t.is(tr(run.endLabelKey!, undefined, 'pl'), label);
+        t.is(tr(run.completenessLabelKey!, undefined, 'pl'), 'brak wyniku');
+        t.deepEqual(run.state, { kind: 'empty' });
+        t.is(run.outcome, '');
+    }
+    const registry = new SubTaskRegistry();
+    registry.createThread({ threadId: 'sub/worker#queued', name: 'worker', owner: { agentName: 'Klara' }, origin: { agentName: 'Klara' }, config: {}, phase: 'queued' });
+    registry.closeThread('sub/worker#queued', 'lead');
+    registry.finishQueuedStop('sub/worker#queued', { taskPreview: 'zadanie' });
+    const run = buildStripModel({ agentName: 'Klara', tasks: registry.list(), threads: [registry.getThread('sub/worker#queued')!] })[0].runs[0];
+    t.is(tr(run.endLabelKey!, undefined, 'pl'), 'zatrzymany przez agenta');
+    t.is(tr(run.completenessLabelKey!, undefined, 'pl'), 'brak wyniku');
+    t.is(run.outcome, '');
+});
+
 /** Karta biegu w kształcie, jaki naprawdę wychodzi z rejestru (bez uruchamiania runnera). */
 function task(over: Partial<SubTask> & { id: string }): SubTask {
     return {

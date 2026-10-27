@@ -317,6 +317,7 @@ Bramka `.pkm-assistant/**` + No-Go + `sanitizePath` w prymitywach vaultowych dzi
 - ⚠️ **Dziecko delegacji dostaje PRZECIĘCIE, nie własny config.** `MCPClient` wstrzykuje do argumentów zaufane znaczniki: zakres folderów wołającego, jego whitelistę narzędzi, głębokość delegacji, tryb autonomii - podawane przez runtime, a POZA delegacją usuwane. `delegate` liczy z nich przecięcie z configiem odpalanego suba: zakres jako część wspólna (rozłączne = odmowa), narzędzia jako iloczyn whitelisty rodzica i suba. Bez tego wnuk delegacji startowałby z zakresem policzonym wyłącznie z własnego (pustego) configu, czyli z pełnym zasięgiem agenta głównego. **Dokładasz cokolwiek, co dziecko dziedziczy - przekaż to znacznikiem, nie odczytem globalnego stanu pluginu.**
 - ⚠️ **`_invocationAutonomy` to zamrożony tryb pytań TURY.** `MCPClient` wstrzykuje do args znormalizowaną autonomię przy każdym wywołaniu; `delegate` ją czyta i zamraża w biegu suba, bo bieg z czatu leci w tle i przeżywa przełączenie zakładki. Nie czytaj globalnego stanu autonomii pluginu w kodzie, który wykonuje się po zakończeniu tury - może już mówić o innej turze.
 - ⚠️ **`_invocationTurnKind` jest zaufanym rodzajem tury.** `MCPClient` ustawia go z opcji runtime `turnKind` (`user` albo `machine`), nadpisując argument modelu. Bez poprawnej opcji pole jest usuwane. Wspólny filtr `_invocation*` usuwa znacznik z podglądu zgody i argumentów przekazywanych do zewnętrznego serwera MCP.
+- ⚠️ **`_invocationTurnStartedSeq` pochodzi wyłącznie z opcji runtime.** Argument modelu jest nadpisywany poprawnym znacznikiem startu tury albo usuwany, gdy opcja jest nieobecna lub niepoprawna.
 - ⚠️ **Zaufane znaczniki `_invocation*` - bramka ogląda worek PO nadpisaniu, execute PRZED.** `contextExtractor` bierze tożsamość z kontekstu runtime'u, NIGDY z worka argumentów - worek może co najwyżej nieść tę samą wartość, więc nie ma czego z niego brać (inaczej model mógłby sam podać cudzą tożsamość i bramka policzyłaby cel dla jednej ścieżki, a zapis poszedłby pod drugą). `execute` MOŻE czytać `_invocation*` z argumentów, bo tam worek jest już nadpisany przez runtime. Cel policzony przez bramkę i ścieżka zapisu mają być tym samym ciągiem.
 
 ### Pamięć i skrzynka pocztowa
@@ -474,6 +475,7 @@ Bramka `.pkm-assistant/**` + No-Go + `sanitizePath` w prymitywach vaultowych dzi
   jawnie zaznaczył checkbox dla TEGO KONKRETNEGO pliku - to ta sama, jednostkowa decyzja co
   „Zawsze zezwalaj" (które też nie jest gaszone przez `all`), nie ogólne obniżenie progu pytań.
   `all` nadal pyta o WSZYSTKO INNE - nowy plik, inne narzędzie, `delete` na tym samym pliku.
+- Po oczekiwaniu na zgodę i diff `MCPClient` sprawdza `shouldAbort` przed rozpoczęciem wykonania narzędzia i ponownie po callbacku startu.
 - ⚠️ **Trzy równoległe zapisy JEDNEJ tury (`Promise.all` w `modules/agent-loop/AgentLoop.ts`) nie
   mają prawa otworzyć trzech modali o JEDNĄ decyzję.** `executeToolCall` nie ma ani jednego
   `await` między startem wywołania a bramką zgody sesyjnej, więc N równoległych zapisów na TĘ SAMĄ
@@ -534,7 +536,7 @@ U3: each delegation owns an AbortController with a first-cause latch (`manual-st
 
 `createSubAgentTool` jest rejestrowane obok `createDelegateTool` i używa serwera `delegation`. Parametr `action` wybiera `message`, `task`, `stop`, `close` albo `list`. Właściciel nie jest argumentem narzędzia: każda operacja bierze `agentName`, `sessionPath` i `sessionEpoch` z zaufanego `_invocationOrigin`, wymaga kompletu i porównuje go z właścicielem wątku. Wątek bez pełnego klucza nie jest dostępny przez to narzędzie.
 
-`task` przechodzi wyłącznie w wątku `idle` i `reusable`, a bieg startuje przez wspólną ścieżkę `delegate`, z jej pulą, licznikiem, timeoutem, bramką modelu i uchwytem Stopu. `userStop` pozwala na kolejny bieg wyłącznie w turze zaufanego rodzaju `user`; flaga jest zdejmowana po przyjęciu biegu przez rejestr. Gdy wątek nie jest reusable, model dostaje wskazówkę, aby utworzyć nowego suba przez `delegate`.
+`task` przechodzi wyłącznie w wątku `idle` i `reusable`, a bieg startuje przez wspólną ścieżkę `delegate`, z jej pulą, licznikiem, timeoutem, bramką modelu i uchwytem Stopu. Po Stopie kontynuację przyjmuje dopiero tura użytkownika rozpoczęta później niż Stop; kontrola jest ponawiana przy atomowym przyjęciu biegu przez rejestr. Flaga `userStop` jest wtedy zdejmowana, ale próg ostatniego Stopu pozostaje. Gdy wątek nie jest reusable, model dostaje wskazówkę, aby utworzyć nowego suba przez `delegate`.
 
 Kolejny bieg używa `modelId` i `providerId` zapisanych w konfiguracji wątku. Zmiana modelu domyślnego nie zmienia suba ani jego rozmowy. Model wpisany jawnie w konfiguracji suba lub rozwiązywany z ustawień agenta nie wymaga wpisu w bibliotece. Gdy model wybrany z biblioteki zostanie z niej usunięty albo dostawca jest niedostępny, narzędzie odmawia przed startem biegu, zamyka wątek i kieruje prowadzącego do `delegate`.
 

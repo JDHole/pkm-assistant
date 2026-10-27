@@ -349,6 +349,7 @@ tekst po dokładnej walidacji; brakująca lub nieprawidłowa wartość daje `nul
 plików bez `epoch` nie dopisuje pola ani nie migruje treści. `AgentMemory.sessionEpoch` jest
 zsynchronizowane z `activeSessionPath`; bezpośrednia zmiana ścieżki zeruje epokę, a
 `setActiveSessionIdentity(path, epoch)` wiąże ścieżkę z wartością potwierdzoną z pliku.
+`appendSessionEvent` wewnątrz kolejki zapisu odczytuje nagłówek pliku i porównuje go z przekazaną oczekiwaną epoką; niezgodność przerywa zapis.
 Tworzenie przez `startActiveSession`, samonaprawa i osobna droga `saveSession` zapisują epokę.
 Jeśli `saveSession` czeka na odczyt lub zapis, późniejsza zmiana tożsamości pamięci
 blokuje przypisanie epoki zapisywanego pliku do innej sesji, także przy ponownym użyciu

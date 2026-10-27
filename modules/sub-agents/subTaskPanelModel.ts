@@ -62,6 +62,8 @@ export interface StripRun {
     available: boolean;
     state: StripState;
     status?: SubTask['status'];
+    endLabelKey?: string;
+    completenessLabelKey?: string;
     taskPreview: string;
     steps: StripStep[];
     outcome: string;
@@ -272,6 +274,7 @@ function runView(task: SubTask | undefined, id: string, number: number, now: num
     const endReason = partialOutcome && stripMaterial && task.error ? task.error : undefined;
     return {
         id, number, available: true, state: runState(task, shared.state), status: task.status,
+        ...(task.outcome ? { endLabelKey: shared.endLabelKey, completenessLabelKey: shared.completenessLabelKey } : {}),
         taskPreview: (task.taskPreview || '').slice(0, MAX_TASK), steps, outcome,
         ...(endReason ? { endReason } : {}),
         durationMs: Math.max(0, (task.endedAt ?? now) - task.createdAt),

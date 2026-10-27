@@ -1,6 +1,44 @@
 import test from 'ava';
 import { SubAgentRunner, SubTaskRegistry } from './index.js';
-import { createMemoryDeleteTool } from '../tools/index.js';
+import { createMemoryDeleteTool, createWriteTool, MCPClient } from '../tools/index.js';
+
+test('timeout podczas zgody nie pozwala na późny zapis', async t => {
+    let content = 'pierwotna treść';
+    const file = { path: 'Notes/a.md', extension: 'md' };
+    const vault = { adapter: { exists: async () => true, read: async () => content, write: async (_path: string, value: string) => { content = value; } },
+        getAbstractFileByPath: () => file, read: async () => content, modify: async (_file: unknown, value: string) => { content = value; } };
+    const registry = new SubTaskRegistry();
+    const controller = new AbortController();
+    let entered!: () => void;
+    const approvalEntered = new Promise<void>(resolve => { entered = resolve; });
+    let release!: (value: { result: string }) => void;
+    const approval = new Promise<{ result: string }>(resolve => { release = resolve; });
+    let completed!: () => void;
+    const callCompleted = new Promise<void>(resolve => { completed = resolve; });
+    const tool = { ...createWriteTool(), source: 'built-in' };
+    const toolRegistry = { getTool: () => tool, filterByAgent: () => [tool] };
+    const owner = { name: 'Owner', permissions: { guidance_mode: true } };
+    const plugin = { subTaskRegistry: registry, agentManager: { getAgent: () => owner, getActiveAgent: () => owner },
+        permissionSystem: { checkPermission: () => ({ allowed: true, requiresApproval: true }), requiresApproval: () => true },
+        approvalManager: { requestApproval: async () => { entered(); return approval; } } };
+    const client = new MCPClient({ vault } as never, plugin as never, toolRegistry as never);
+    const runner = new SubAgentRunner({ app: { vault } as never, plugin: { ...plugin, mcpClient: { executeToolCall: async (...args: Parameters<typeof client.executeToolCall>) => {
+        try { return await client.executeToolCall(...args); } finally { completed(); }
+    } } } as never, toolRegistry: toolRegistry as never });
+    let finished = 0;
+    registry.events.on('task:finished', () => { finished++; });
+    const run = runner.runTask('write', owner, config, modelFor([call('a', 'write', { path, content: 'nowa treść', mode: 'append' } as { path: string; content: string })]) as never,
+        { abortSignal: controller.signal, abortReason: () => 'task-timeout' });
+    await approvalEntered;
+    controller.abort();
+    const result = await run;
+    release({ result: 'approve' });
+    await callCompleted;
+    t.is(content, 'pierwotna treść');
+    t.deepEqual(result.outcome.end, { kind: 'timeout' });
+    t.deepEqual(result.outcome.effects, []);
+    t.is(finished, 1);
+});
 
 const path = 'Notes/a.md';
 const call = (id: string, name = 'write', args = { path, content: 'secret' }) => ({

@@ -15,7 +15,7 @@ import { buildCacheMetadata, isLocalPlatform } from '../../models/index.js';
 import { log } from '../../../core/utils/Logger.js';
 // Status narzędzia i warunek linku „otwórz zapisany plik" liczy JEDNA czysta funkcja z core
 // (tę samą czyta MCPClient przy normalizacji i runner subów).
-import { countTokens, getTokenCount, calibrate, StreamWatchdog, resolveMessageOrigin, machineMeta, toolResultStatus, shouldLinkWrittenFile } from '../../../core/index.js';
+import { countTokens, getTokenCount, calibrate, StreamWatchdog, resolveMessageOrigin, toolResultStatus, shouldLinkWrittenFile } from '../../../core/index.js';
 import {
     createCompactToolChip,
     createToolCallDisplay,
@@ -33,7 +33,8 @@ import { buildDelegateBlockOptions } from './delegateBlockView.js';
 import { subAgentCallView } from './subAgentCallView.js';
 import streamingManager, { shouldUseFreshModel } from './StreamingManager.js';
 import { _tabKey } from './chat_tabs.js';
-import { buildSubTaskNotificationText, matchTabForOrigin } from './subTaskNotification.js';
+import { matchTabForOrigin } from './subTaskNotification.js';
+import { buildSubTaskResultDelivery } from './subTaskResultDelivery.js';
 // Wiadomości maszynowe (spec A3) - dren kolejki niżej renderuje bezpośrednio (bez
 // `append_message`), więc musi widzieć ten sam klasyfikator co historia/render na żywo
 // (`chat_messages.ts`), inaczej powiadomienie/przywołanie zakolejkowane w trakcie trwającej
@@ -42,8 +43,10 @@ import { buildSubTaskNotificationText, matchTabForOrigin } from './subTaskNotifi
 // `chat_messages.ts`) - ten plik już importuje `buildBackgroundReceiptText` STAMTĄD, więc import
 // w drugą stronę (z `chat_messages.ts`) tworzyłby cykl wartości między dwoma mixinami; trzeci
 // plik usuwa duplikat bez tego problemu.
-import { buildMachineView } from './machineMessage.js';
+import { buildMachineView, getSubTaskNotificationTaskId } from './machineMessage.js';
 import { renderMachineTile } from './machineTile.js';
+import { buildBackgroundReceiptText, renderNotificationWithReceipt } from './backgroundReceipt.js';
+export { buildBackgroundReceiptText } from './backgroundReceipt.js';
 // Krysztal agenta jako CSS var `--cs-agent-crystal` (2.3.0, kolumna dymkow) - ten sam trzeci
 // plik (zero cyklu) co `machineMessage.js`/`machineTile.js` wyzej, jeden producent dla
 // `_ensureAgentMessageContainer` TU i append_message/render_messages w `chat_messages.ts`.
@@ -81,7 +84,7 @@ import type { OpenAiToolDefinition, ServerVisibilityAgent, ToolDefinition } from
 import type { LoopMessage, ParsedToolCall, RunAgentLoopOptions, RunAgentLoopResult, ToolExecutionContext, ToolResultEntry, Usage } from '../../agent-loop/index.js';
 import type { ToolCall as ToolsToolCall } from '../../tools/index.js';
 import type { SubAgentToolCallDetail } from '../../ui-components/index.js';
-import type { SubTask, SubTaskOrigin } from '../../sub-agents/index.js';
+import type { RuntimeSequence, SubTask, SubTaskOrigin } from '../../sub-agents/index.js';
 import type { ContentBlock, RollingWindow } from './RollingWindow.js';
 import type { FrozenTurnOwner } from './turnOwner.js';
 import type { DelegationProposal } from './chat_artifacts.js';
@@ -111,7 +114,7 @@ interface ChatToolResult {
     task_id?: string;
     name?: string;
     sub_id?: string;
-    tasks?: Array<{ task_id?: string; name?: string }>;
+    tasks?: Array<{ task_id?: string; name?: string; sub_id?: string; queued?: boolean }>;
     queued?: number;
     result?: string;
     aspect?: string;
@@ -164,6 +167,7 @@ interface ChatTurn {
     partial?: ChatTurnPartialState;
     origin: SubTaskOrigin;
     turnKind: 'user' | 'machine';
+    turnStartedSeq?: RuntimeSequence;
     rw: RollingWindow;
     tt: TokenTracker;
     chatModel: ChatModel;
@@ -193,7 +197,7 @@ async function appendTurnSessionEvent(turn: ChatTurn, event: ActiveSessionEventI
     const memory = turn.owner.memory;
     const path = turn.origin.sessionPath;
     if (!memory || !path) return;
-    try { await memory.appendSessionEvent(path, event); }
+    try { await memory.appendSessionEvent(path, event, turn.origin.sessionEpoch ?? null); }
     catch { log.warn('Chat', 'Frozen turn session event could not be persisted'); }
 }
 
@@ -297,6 +301,8 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         log.info('Chat', `Wiadomość zakolejkowana (${messageOrigin}): "${text.slice(0, 60)}..."`);
         return;
     }
+
+    const turnStartedSeq = this.plugin?.subTaskRegistry?.issueTurnStartSequence();
 
     // Tu NIE MA `this._abortedStream = null` („nowa wiadomość = świeży start"): przerwanie jako
     // JEDNO pole widoku byłoby dziurą - kolejna wiadomość (auto-tura z wynikiem suba, albo drain
@@ -639,6 +645,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
             abort: turnAbort,            // przerwanie TEJ tury (zatrzask, patrz turnAbort.ts)
             origin: turnOrigin,          // adres zwrotny dla delegacji w tle
             turnKind,
+            turnStartedSeq,
             rw,
             tt,
             chatModel: chat_model,
@@ -727,6 +734,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         const trace = this.plugin?.traceLog?.scope?.(_traceLabel);
         let result;
         try {
+            await _consumeUserStoppedSubTasks.call(this, turn);
             // `model`/`resolveTools` niżej: pętla opisuje model i narzędzia WŁASNYMI, węższymi
             // kontraktami (`RunAgentLoopOptions`) - zawężenie stoi w miejscu przekazania.
             result = await runAgentLoop({
@@ -958,6 +966,67 @@ export function _isTurnActiveTab(this: ChatViewLike, turn: ChatTurn) {
     if (typeof turn.turnId === 'number' && live?.turnId !== turn.turnId) return false;
     const tab = this.chatTabs.find((tab: ChatTab) => tab.isActive);
     return turn.origin?.tabKey ? _tabKey(tab) === turn.origin.tabKey : tab?.agentName === turn.agentName;
+}
+
+/** Consume only results ready at the start of this user turn, into its frozen window. */
+async function _consumeUserStoppedSubTasks(this: ChatViewLike, turn: ChatTurn): Promise<void> {
+    if (turn.turnKind !== 'user' || turn.turnStartedSeq === undefined) return;
+    const notifier = this.plugin?.subTaskNotifier;
+    if (!notifier?.claimPending) return;
+    const frozenTab = {
+        agentName: turn.agentName,
+        sessionPath: turn.origin.sessionPath,
+        sessionEpoch: turn.origin.sessionEpoch,
+        sessionId: turn.origin.tabKey,
+        isActive: true,
+    };
+    const claims = notifier.claimPending(task => {
+        if (task.userStopSeq === undefined || task.userStopSeq >= turn.turnStartedSeq!) return false;
+        const origin = { ...task.origin, agentName: task.origin?.agentName || task.agentName };
+        // Do not let a reused tab key bypass the frozen session identity.
+        if (origin.agentName !== turn.agentName || origin.sessionPath !== turn.origin.sessionPath
+            || origin.sessionEpoch !== turn.origin.sessionEpoch) return false;
+        return matchTabForOrigin([frozenTab], origin, _tabKey) !== null;
+    });
+    const hasResult = (id: string) => turn.rw.messages.some(message => message.subTaskId === id);
+    const markRefresh = () => {
+        const tab = turn.owner.tab;
+        if (tab && this.chatTabs.includes(tab) && _tabKey(tab) === turn.origin.tabKey
+            && tab.sessionPath === turn.origin.sessionPath && (tab.sessionEpoch ?? undefined) === turn.origin.sessionEpoch) {
+            tab._needsRefresh = true;
+        }
+    };
+    for (const claim of claims) {
+        const task = claim.task;
+        try {
+            if (hasResult(task.id)) { claim.ack(); continue; }
+            const { text, meta } = buildSubTaskResultDelivery(task, this.plugin?.subTaskRegistry,
+                getLimits(this.env?.settings).subagent_result_max_chars);
+            await turn.rw.addMessage('user', text, meta);
+            await appendTurnSessionEvent(turn, {
+                type: 'user_message', agentName: turn.agentName, content: text, timestamp: new Date().toISOString(),
+            });
+            const tab = turn.owner.tab;
+            const isOwnerActive = () => this._isTurnActiveTab(turn) && tab?.isActive === true
+                && tab.sessionPath === turn.origin.sessionPath && (tab.sessionEpoch ?? undefined) === turn.origin.sessionEpoch;
+            if (isOwnerActive()) {
+                const view = buildMachineView({ role: 'user', content: text, ...meta }, { t,
+                    getTask: id => this.plugin?.subTaskRegistry?.getTask?.(id),
+                    getThread: id => this.plugin?.subTaskRegistry?.getThread?.(id),
+                });
+                if (view) {
+                    if (!await renderNotificationWithReceipt(this.messages_container, this.plugin, view, task.id,
+                        () => this._scheduleConnectorRedraw?.(), isOwnerActive)) markRefresh();
+                } else markRefresh();
+            } else markRefresh();
+            claim.ack();
+        } catch (e) {
+            // addMessage may have appended before failing; never append the same result twice.
+            if (hasResult(task.id)) { markRefresh(); claim.ack(); }
+            else claim.release();
+            log.warn('Chat', `Odbiór wyniku suba ${task.id} padł: ${(e as Error)?.message || String(e)}`);
+        }
+    }
 }
 
 /**
@@ -1259,6 +1328,7 @@ export async function _chatExecuteToolCall(
             autonomy: turn.autonomy,
             origin: turn.origin,
             turnKind: turn.turnKind,
+            turnStartedSeq: turn.turnStartedSeq,
             resultBudgetChars: context.resultBudgetChars,
             shouldAbort: context.shouldAbort,
         }) as ChatToolResult;
@@ -1370,16 +1440,20 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                 // skrótem zadania: ewentualne "W kolejce: N", potem identyfikator(y) - zawsze na
                 // samym końcu. Ta sama funkcja renderuje pokwitowanie odtworzone z HISTORII
                 // (`chat_messages.ts`, uwaga 10).
-                const bgBlock = createSubAgentBlock({
+                const blocks = startedList.filter(item => typeof item.task_id === 'string' && item.task_id.length > 0).map(item => {
+                    const bgBlock = createSubAgentBlock({
                     type: toolCall.name,
                     pending: true,
                     status: 'success',
-                    agentName: startedList.length > 1 ? '' : (startedList[0]?.name || result.name || (toolCall.name === 'sub_agent' ? result.sub_id : toolArgs.aspect || result.sub_id) || ''),
+                    agentName: item.name || result.name || (toolCall.name === 'sub_agent' ? result.sub_id : toolArgs.aspect || result.sub_id) || '',
                     query: toolArgs.task || '',
-                    response: buildBackgroundReceiptText(startedList, result.queued),
+                    response: buildBackgroundReceiptText([item], item.queued ? 1 : startedList.length === 1 ? result.queued : undefined),
                 });
-                toolDisplay.replaceWith(bgBlock);
-                bgBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    bgBlock.setAttribute('data-subtask-receipt-id', item.task_id!);
+                    return bgBlock;
+                });
+                toolDisplay.replaceWith(...blocks);
+                blocks.at(-1)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } else if (isSubAgent && (result?.success === true || result?.success === false)) {
                 const fullBlock = createDelegateBlock(buildDelegateBlockOptions(result, { type: toolCall.name, agentName: result.aspect || (toolCall.name === 'sub_agent' ? result.sub_id : toolArgs.aspect || result.sub_id) || '', query: toolArgs.task || '' }));
                 toolDisplay.replaceWith(fullBlock);
@@ -1725,7 +1799,10 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
                 getThread: id => this.plugin?.subTaskRegistry?.getThread?.(id),
             });
             if (machineView) {
-                await renderMachineTile(this.messages_container, this.plugin, machineView);
+                const id = getSubTaskNotificationTaskId({ role: 'user', content: injectedText, ...queued.meta });
+                if (id) await renderNotificationWithReceipt(this.messages_container, this.plugin, machineView, id,
+                    () => this._scheduleConnectorRedraw?.(), () => this._isTurnActiveTab(turn));
+                else await renderMachineTile(this.messages_container, this.plugin, machineView);
             } else {
                 const userDiv = this.messages_container.createDiv({ cls: 'cs-message cs-message--user' });
                 const agentColor = SkinManager.getAgentColor(streamAgent || 'default');
@@ -1733,7 +1810,7 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
                 const textDiv = userDiv.createDiv({ cls: 'cs-message__text' });
                 this._renderUserText(textDiv, injectedText);
             }
-            this.scrollToBottom();
+            if (!machineView || !getSubTaskNotificationTaskId({ role: 'user', content: injectedText, ...queued.meta })) this.scrollToBottom();
         }
     }
 }
@@ -1936,13 +2013,6 @@ function _buildStreamErrorTile(titleKey: string, safeText: string): HTMLElement 
  * skleja receipt na ZYWO (`_chatOnToolResults` nizej) i przy odtwarzaniu z HISTORII
  * (`chat_messages.ts`, uwaga 10) - "ta sama funkcja co na zywo".
  */
-export function buildBackgroundReceiptText(startedList: Array<{ task_id?: string; name?: string }>, queued?: number): string {
-    const lines: string[] = [];
-    if (queued && queued > 0) lines.push(t('chat.subagent_background_queued', { count: queued }));
-    lines.push(...startedList.map((task) => t('chat.tile.sub.background_id', { id: task?.task_id || '?' })));
-    return lines.join('\n');
-}
-
 export function handle_error(this: ChatViewLike, error: unknown, agentName?: string, turnId?: number, ownerTabKey?: string) {
     if (agentName && typeof turnId === 'number' && this._streamCtxMap.get(agentName)?.turnId !== turnId) return;
     // Tekst błędu idzie do DOM-u czatu i do loga (który pisze też do pliku). Na sieciowym
@@ -2240,7 +2310,7 @@ export function stop_all_turns(this: ChatViewLike, reason = 'close'): string[] {
             const ids = collectSubTaskIdsForOwners(registry.list(), { tabKeys, agentNames });
             for (const id of ids) {
                 log.info('Chat', `Zamknięcie czatu → zatrzymuję bieg suba ${id}`);
-                registry.requestStop(id, 'system');
+                registry.requestStop(id, reason === 'stop' ? 'user' : 'system');
             }
         } catch (e) {
             log.warn('Chat', `Zatrzymanie subów przy zamknięciu padło: ${(e as Error)?.message || String(e)}`);
@@ -2338,6 +2408,7 @@ export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
             isGenerating: this.is_generating,
             subTaskTurnPending: this._subTaskTurnPending,
             drainSuppressed: this._drainSuppressed,
+            userStopped: task.userStopSeq !== undefined,
             chainAllowed: chain.allowed,
         });
         if (!delivery.allowed) {
@@ -2355,47 +2426,7 @@ export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
         // `evaluateSubTaskDelivery` odmawia bez zakładki - za bramką `tab` na pewno istnieje.
         this._autoTurnChainCounts.set(tab!.agentName, chain.nextCount);
 
-        const deliveryTask = task.error && task.partial ? { ...task, error: task.error + '\n\n' + task.partial.text } : task;
-        const reusableThread = task.threadId
-            ? this.plugin?.subTaskRegistry?.getThread?.(task.threadId)
-            : undefined;
-        const reusableSubId = reusableThread?.phase === 'idle' && reusableThread.reusable === true
-            ? task.threadId
-            : undefined;
-        const text = buildSubTaskNotificationText(deliveryTask, {
-            // Wynik suba ma WŁASNY sufit (60k default, 0 = bez limitu) - wspólne 15k z
-            // surowymi zrzutami narzędzi ucinałoby deep-research w połowie.
-            maxResultChars: limits.subagent_result_max_chars,
-            ...(reusableThread?.phase === 'idle' && reusableThread.reusable === true
-                ? { subId: deliveryTask.threadId }
-                : {}),
-        });
-
-        // Tylko renderer dostaje strukturę wyniku. Tekst wejściowy modelu powyżej pozostaje
-        // dokładnie taki sam. Dowodem wielokrotnego wątku jest ten sam subId, dla którego
-        // generator dołączył instrukcję reusable_thread.
-        const outcome = task.outcome || task.result?.outcome;
-        const effects = (outcome?.effects || []).map((effect) => {
-            const recorded = reusableThread?.effects.find(candidate => candidate.tool === effect.tool
-                && candidate.action === effect.action && candidate.check === effect.check
-                && JSON.stringify(candidate.targets) === JSON.stringify(effect.targets));
-            return { ...effect, ...(recorded?.expectedCheck ? { expectedCheck: recorded.expectedCheck } : {}) };
-        });
-        const thread = reusableSubId
-            ? { kind: 'reusable' as const, sub_id: reusableSubId }
-            : !deliveryTask.threadId && deliveryTask.background === true
-                ? { kind: 'single' as const }
-                : { kind: 'unknown' as const };
-        const subTaskResult = {
-            outcome,
-            result: task.result
-                ? { text: task.result.text, handoff: task.result.handoff }
-                : undefined,
-            partial: task.partial,
-            error: task.error,
-            effects,
-            thread,
-        };
+        const { text, meta } = buildSubTaskResultDelivery(task, this.plugin?.subTaskRegistry, limits.subagent_result_max_chars);
 
         // Bezpiecznik ustawiany SYNCHRONICZNIE: `drain()` woła dostawcę w pętli, a `send_message`
         // dochodzi do `set_generating(true)` dopiero po kilku awaitach - bez tej flagi drugi
@@ -2405,7 +2436,7 @@ export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
         void Promise.resolve()
             // Wynik suba to tekst MASZYNY - żadnych przywilejów człowieka (rejestr adresów,
             // markery `@@skill:`, komendy `/`).
-            .then(() => this.send_message({ injectedText: text, meta: machineMeta({ _subTaskNotification: true, subTaskId: task.id, _subTaskResult: subTaskResult }) }))
+            .then(() => this.send_message({ injectedText: text, meta }))
             .catch((e: unknown) => log.warn('Chat', `Auto-tura po subie padła: ${(e as Error)?.message || String(e)}`))
             .finally(() => { this._subTaskTurnPending = false; });
         return true;

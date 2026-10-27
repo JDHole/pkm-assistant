@@ -9,7 +9,6 @@ const RESULT_KEYS = [
     'chat.subresult.effect_mismatch', 'chat.subresult.effect_unchecked', 'chat.subresult.continue_same_thread',
     'chat.subresult.user_stopped_material', 'chat.subresult.user_stopped_next', 'chat.subresult.restart',
     'chat.subresult.unavailable',
-    'subagent.stopped_before_start',
     'backstage.delete_template_title', 'chat.substrip.heading_steps_live',
     'tool.sub_action.task', 'tool.sub_action.message', 'tool.sub_action.stop', 'tool.sub_action.close', 'tool.sub_action.list', 'tool.sub_action.unknown',
     'chat.substrip.count_running_one', 'chat.substrip.count_running_few', 'chat.substrip.count_running_many', 'chat.substrip.count_running_other',
@@ -25,5 +24,4 @@ test('subresult: etykiety końca, kompletności i ramki mają parytet PL/EN', t 
         t.not(en[key], key);
     }
     t.is(pl['chat.subresult.restart'], '{{name}} nie dokończył: Obsidian zamknięto w trakcie pracy. Sub nie wróci sam.');
-    t.is(pl['subagent.stopped_before_start'], '{{name}} zatrzymany, zanim ruszył.');
 });

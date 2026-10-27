@@ -84,11 +84,23 @@ export interface SubTaskOrigin {
 }
 
 export interface SubThreadOwner { agentName: string; sessionPath?: string; sessionEpoch?: string }
+declare const runtimeSequenceBrand: unique symbol;
+export type RuntimeSequence = number & { readonly [runtimeSequenceBrand]: true };
+export function isRuntimeSequence(value: unknown): value is RuntimeSequence {
+    return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+export function canContinueAfterUserStop(thread: SubThread, turnKind: unknown, turnStartedSeq: unknown): boolean {
+    if (!thread.userStop && thread.lastUserStopSeq === undefined) return true;
+    return thread.lastUserStopSeq !== undefined && isRuntimeSequence(turnStartedSeq)
+        && turnStartedSeq > thread.lastUserStopSeq && (turnKind === 'user' || turnKind === 'machine')
+        && (!thread.userStop || turnKind === 'user');
+}
 export type SubThreadEffect = RunOutcome['effects'][number] & { expectedCheck?: 'exists' | 'absent' | 'none' };
 export interface SubThread {
     threadId: string; name: string; owner: SubThreadOwner; origin: SubTaskOrigin;
     phase: 'queued' | 'running' | 'idle' | 'closed'; reusable: boolean; runIds: string[];
     transcript: LoopMessage[]; config: Record<string, unknown>; userStop: boolean;
+    lastUserStopSeq?: RuntimeSequence;
     lastActiveAt: number; closeAfterRun: boolean; effects: SubThreadEffect[]; closedBy?: StopBy;
 }
 
@@ -105,6 +117,7 @@ export interface SubTask {
     result?: SubTaskResult;
     outcome?: RunOutcome;
     stopRequestedBy?: StopBy;
+    userStopSeq?: RuntimeSequence;
     partial?: AgentLoopPartialSnapshot;
     partialStorageError?: boolean;
     error?: string;
@@ -169,6 +182,12 @@ const DEFAULT_MAX_MESSAGES_PER_TASK = 10;
 const MAX_THREAD_EFFECTS = 100;
 
 export class SubTaskRegistry {
+    private _runtimeSequence = 0;
+    private _nextSequence(): RuntimeSequence {
+        if (this._runtimeSequence >= Number.MAX_SAFE_INTEGER) throw new Error('Runtime sequence exhausted');
+        return ++this._runtimeSequence as RuntimeSequence;
+    }
+    issueTurnStartSequence(): RuntimeSequence { return this._nextSequence(); }
     // `declare` = sama deklaracja typu, zero emitu.
     /** Szyna zdarzeń: `task:created` (task), `task:step` ({task, step}), `task:finished` (task). */
     declare events: EventEmitter;
@@ -236,7 +255,7 @@ export class SubTaskRegistry {
         return thread;
     }
 
-    beginRun(threadId: string, owner: SubThreadOwner): boolean {
+    beginRun(threadId: string, owner: SubThreadOwner, turn?: { turnKind?: unknown; turnStartedSeq?: unknown }): boolean {
         const thread = this._threads.get(threadId);
         if (thread?.phase === 'idle') {
             const idleMs = Number((thread.config.limits as Record<string, unknown> | undefined)?.subagent_thread_idle_ms) || this._threadLimits.idleMs;
@@ -245,7 +264,8 @@ export class SubTaskRegistry {
         if (!thread || thread.phase !== 'idle' || !owner?.agentName || !owner.sessionPath || !owner.sessionEpoch
             || !thread.owner.agentName || !thread.owner.sessionPath || !thread.owner.sessionEpoch
             || thread.owner.agentName !== owner.agentName || thread.owner.sessionPath !== owner.sessionPath || thread.owner.sessionEpoch !== owner.sessionEpoch || !thread.reusable) return false;
-        thread.phase = 'running'; thread.lastActiveAt = Date.now(); return true;
+        if (!canContinueAfterUserStop(thread, turn?.turnKind, turn?.turnStartedSeq)) return false;
+        thread.phase = 'running'; thread.userStop = false; thread.lastActiveAt = Date.now(); return true;
     }
 
     beginQueuedRun(threadId: string, owner: SubThreadOwner, frozenConfig: Record<string, unknown>): boolean {
@@ -267,6 +287,7 @@ export class SubTaskRegistry {
             thread.effects = [...thread.effects, ...input.effects.map(e => structuredClone(e))].slice(-MAX_THREAD_EFFECTS);
         }
         thread.userStop ||= Boolean(input.userStop);
+        if (input.userStop && thread.lastUserStopSeq === undefined) thread.lastUserStopSeq = this._nextSequence();
         thread.lastActiveAt = Date.now();
         const threadLimits = thread.config.limits as Record<string, unknown> | undefined;
         const maxRuns = Number(threadLimits?.subagent_thread_max_runs) || this._threadLimits.runs;
@@ -277,7 +298,7 @@ export class SubTaskRegistry {
         this._pruneIdleThreads();
     }
 
-    closeThread(threadId: string, by: StopBy = 'user'): boolean { const t = this._threads.get(threadId); if (!t || t.phase === 'closed') return false; if (t.phase === 'running') t.closeAfterRun = true; else { if (t.phase === 'queued') t.closedBy ??= by; this._closeThreadData(t); } return true; }
+    closeThread(threadId: string, by: StopBy = 'user'): boolean { const t = this._threads.get(threadId); if (!t || t.phase === 'closed') return false; if (t.phase === 'running') t.closeAfterRun = true; else { if (t.phase === 'queued') { t.closedBy ??= by; if (by === 'user') { t.userStop = true; t.lastUserStopSeq = this._nextSequence(); } } this._closeThreadData(t); } return true; }
     /** Stop from the strip resolves the current thread phase at click time. */
     stopThread(threadId: string): boolean {
         const thread = this._threads.get(threadId);
@@ -308,6 +329,7 @@ export class SubTaskRegistry {
         if (!thread || thread.phase !== 'closed' || !thread.closedBy || this._tasks.has(threadId)) return undefined;
         const task: SubTask = { id: threadId, name: thread.name, agentName: thread.owner.agentName, status: 'done', createdAt: Date.now(), endedAt: Date.now(), steps: [], budget: {}, threadId,
             origin: { ...thread.origin }, outcome: { end: { kind: 'stopped', by: thread.closedBy }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } };
+        if (thread.lastUserStopSeq !== undefined) task.userStopSeq = thread.lastUserStopSeq;
         if (input.background !== undefined) task.background = input.background;
         if (typeof input.taskPreview === 'string' && input.taskPreview.trim()) task.taskPreview = this._mask ? this._mask(input.taskPreview.trim().slice(0, 300)) : input.taskPreview.trim().slice(0, 300);
         this._tasks.set(task.id, task);
@@ -345,7 +367,12 @@ export class SubTaskRegistry {
         const configured = Number((thread?.config.limits as Record<string, unknown> | undefined)?.subagent_thread_max_runs);
         return Number.isFinite(configured) && configured > 0 ? configured : this._threadLimits.runs;
     }
-    private _closeThreadData(thread: SubThread): void { thread.phase = 'closed'; thread.reusable = false; thread.closeAfterRun = false; thread.transcript = []; thread.effects = []; thread.lastActiveAt = Date.now(); this.events.emit('thread:closed', thread); }
+    private _closeThreadData(thread: SubThread): void {
+        const queued = thread.phase === 'queued';
+        thread.phase = 'closed'; thread.reusable = false; thread.closeAfterRun = false; thread.transcript = []; thread.effects = []; thread.lastActiveAt = Date.now();
+        if (!queued && thread.runIds.length > 0 && !thread.runIds.some(id => this._tasks.has(id))) this._threads.delete(thread.threadId);
+        this.events.emit('thread:closed', thread);
+    }
     private _pruneIdleThreads(): void {
         const now = Date.now(); const idle = [...this._threads.values()].filter(t => t.phase === 'idle');
         for (const t of idle) {
@@ -562,7 +589,12 @@ export class SubTaskRegistry {
             if (!task || !stop || task.status !== 'running') return false;
             task.stopRequested = true;
             task.stopRequestedBy ??= by;
-            if (by === 'user' && task.threadId) { const thread = this._threads.get(task.threadId); if (thread) thread.userStop = true; }
+            if (by === 'user') {
+                const seq = this._nextSequence();
+                task.userStopSeq = seq;
+                const thread = task.threadId ? this._threads.get(task.threadId) : undefined;
+                if (thread) { thread.userStop = true; thread.lastUserStopSeq = seq; }
+            }
             // Ślad idzie tą samą drogą co reszta kroków — także do trace.log. Harness liczy
             // KONKRETNE typy zdarzeń, więc dodatkowy typ go nie rusza.
             this.step(task, 'stop.requested', { by: task.stopRequestedBy });
@@ -701,6 +733,9 @@ export class SubTaskRegistry {
                 this._messages?.delete?.(id);
                 removed++;
             }
+            for (const [id, thread] of this._threads) {
+                if (thread.owner.sessionPath === sessionPath && thread.phase === 'closed') this._threads.delete(id);
+            }
             return removed;
         } catch (e) {
             log.warn('SubTaskRegistry', 'pruneSession() padł (nieszkodliwie):', e);
@@ -728,6 +763,8 @@ export class SubTaskRegistry {
             this._traceScopes.delete(id);
             this._aborts.delete(id);
             this._messages.delete(id);
+            const thread = task.threadId ? this._threads.get(task.threadId) : undefined;
+            if (thread?.phase === 'closed' && !thread.runIds.some(runId => this._tasks.has(runId))) this._threads.delete(thread.threadId);
             toDrop--;
         }
     }

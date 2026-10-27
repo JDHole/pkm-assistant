@@ -157,7 +157,10 @@ function renderRunCard(axis: El, run: StripRun, row: StripRow, registry: Registr
     const card = axis.createDiv({ cls: `pkm-substrip__run-card pkm-substrip__run-card--${showSteps ? 'expanded' : 'collapsed'}`, attr: { 'data-substrip-run-id': run.id } });
     const header = card.createDiv({ cls: 'pkm-substrip__run-head' });
     header.createEl('strong', { cls: 'pkm-substrip__run-title', text: t('chat.substrip.run_title', { number: String(run.number), title: run.taskPreview || row.name }) });
-    header.createSpan({ cls: 'pkm-substrip__run-state', text: run.available ? stateLabel(run.state) : t('chat.substrip.run_unavailable', { number: String(run.number) }) });
+    const label = !run.available ? t('chat.substrip.run_unavailable', { number: String(run.number) })
+        : !live && run.endLabelKey ? [t(run.endLabelKey), ...(run.completenessLabelKey ? [t(run.completenessLabelKey)] : [])].join(' · ')
+            : stateLabel(run.state);
+    header.createSpan({ cls: 'pkm-substrip__run-state', text: label });
     if (live && (row.state.kind === 'running' || row.state.kind === 'stopping')) renderStopButton(header, registry, row);
     if (run.endReason) card.createDiv({ cls: 'pkm-substrip__end-reason', text: run.endReason });
     if (run.note) card.createDiv({ cls: 'pkm-substrip__end-reason', text: t(run.note === 'storage-error' ? 'chat.streaming.partial_storage_error' : 'chat.substrip.synthesis_pending') });

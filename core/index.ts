@@ -127,6 +127,7 @@ export { LogFileSink } from './utils/LogFileSink.js';
 export { resolveWorkPrompt, WORK_PROMPT_KEYS } from './utils/workPromptResolver.js';
 // Normalizacja błędów API modeli (1 kopia zamiast 5 w modules/models).
 export { normalizeError, MAX_ERROR_MESSAGE_LENGTH, SECRET_BEARING_FIELDS, redactSecretValues, redactSecretsDeep } from './utils/errorUtils.js';
+export { configuredChatSecrets } from './security/knownSecrets.js';
 // JEDNA reguła „co jest porażką narzędzia" (czytają ją tools, chat
 // i sub-agents - stąd `core/`, nie barrel narzędzi).
 export { toolResultStatus, shouldLinkWrittenFile } from './utils/toolResultStatus.js';

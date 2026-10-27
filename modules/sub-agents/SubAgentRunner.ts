@@ -12,7 +12,7 @@ import { t } from '../../core/i18n/index.js';
 import { getLimits, sanitizeLimit } from '../../config/limits.js';
 import { countTokens } from '../../core/index.js';
 // „Co jest porażką narzędzia" liczy ta sama funkcja, co status chipa w czacie.
-import { resolveWorkPrompt, maskSensitiveData, sanitizePath, toolResultStatus } from '../../core/index.js';
+import { resolveWorkPrompt, maskSensitiveData, sanitizePath, toolResultStatus, configuredChatSecrets } from '../../core/index.js';
 import type { PluginApi, AppLike, WorkPromptSettings } from '../../core/index.js';
 import { defaultSubAgentFramePrompt } from './framePrompt.js';
 // Rozpoznaje stare nazwy retrieval przy budowie whitelisty (fail-safe, gdyby
@@ -75,7 +75,7 @@ interface RunnerMcpClient {
  * dziennik biegu dopisuje się do aktywnej sesji WŁAŚCICIELA biegu. */
 interface RunnerAgentMemory {
     paths?: { brainNotes?: string };
-    appendSessionEvent?(path: string, event: ActiveSessionEventInput): Promise<string>;
+    appendSessionEvent?(path: string, event: ActiveSessionEventInput, expectedEpoch?: string | null): Promise<string>;
     appendToActiveSession?(event: Record<string, unknown>): Promise<void>;
 }
 
@@ -90,6 +90,8 @@ interface RunnerPlugin extends PluginApi {
 }
 
 type RunOptions = {
+    turnKind?: 'user' | 'machine';
+    turnStartedSeq?: import('./SubTaskRegistry.js').RuntimeSequence;
     delegationDepth?: number;
     scopeFolders?: string[];
     /**
@@ -341,7 +343,7 @@ export class SubAgentRunner {
             : options.queuedThreadId ? registry?.getThread?.(options.queuedThreadId) : undefined;
         if (options.threadId) {
             const owner = options.origin;
-            if (!thread || !owner || !registry?.beginRun?.(options.threadId, { agentName: owner.agentName, sessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch })) {
+            if (!thread || !owner || !registry?.beginRun?.(options.threadId, { agentName: owner.agentName, sessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch }, { turnKind: options.turnKind, turnStartedSeq: options.turnStartedSeq })) {
                 const outcome = classifyRunEnd({ stoppedBy: 'error', failed: true, finalText: '' });
                 return { result: t('subagent.thread_refused'), toolsUsed: [], toolCallDetails: [], duration: Date.now() - startTime, usage: null, stoppedBy: 'error', failed: true, outcome };
             }
@@ -450,7 +452,7 @@ export class SubAgentRunner {
         const origin = options.origin ? { ...options.origin } : undefined;
         const memory = origin?.agentName ? this.plugin?.agentManager?.getAgentMemory?.(origin.agentName) : null;
         const chat = this.plugin?.env?.settings?.pkmAssistant?.chat as { apiKeys?: Record<string, unknown> } | undefined;
-        const knownSecrets = Object.values(chat?.apiKeys || {}).filter((v): v is string => typeof v === 'string' && v.length > 0);
+        const knownSecrets = configuredChatSecrets(chat);
 
         try {
             // Limity z config/limits.js - JEDNO źródło prawdy. Per sub-agent config
@@ -682,7 +684,7 @@ export class SubAgentRunner {
                                 type: 'agent_loop_partial', role: 'system', agentName: origin.agentName,
                                 content: t('subagent.partial_header', { name: config.name }) + '\n\n' + snapshot.text,
                                 result: { owner: origin, run: subTask?.id || label, revision: snapshot.revision, snapshot },
-                            });
+                            }, origin.sessionEpoch ?? null);
                         }).catch(() => {
                             if (subTask) {
                                 subTask.partialStorageError = true;
@@ -811,7 +813,7 @@ export class SubAgentRunner {
         try {
             if (origin) {
                 if (!frozenMemory?.appendSessionEvent || !origin.sessionPath) return;
-                await frozenMemory.appendSessionEvent(origin.sessionPath, { ...event, agentName: origin.agentName, timestamp: new Date().toISOString() });
+                await frozenMemory.appendSessionEvent(origin.sessionPath, { ...event, agentName: origin.agentName, timestamp: new Date().toISOString() }, origin.sessionEpoch ?? null);
                 return;
             }
             const memory = agentName
