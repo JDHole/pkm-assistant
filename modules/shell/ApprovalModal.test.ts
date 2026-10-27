@@ -18,6 +18,7 @@ import { ApprovalModal } from './ApprovalModal.js';
 import type { ApprovalAction } from '../../core/index.js';
 import { pl as tr } from '../../core/i18n/pl.js';
 import { getLocale, setLocale } from '../../core/i18n/index.js';
+import { MCPClient, createDelegateTool, createSubAgentTool } from '../tools/index.js';
 const plTranslations: Record<string, string> = tr;
 
 type MockNode = {
@@ -204,6 +205,75 @@ test('delegate pokazuje aspekt, skrót zadania i pełny podgląd', t => {
     }));
     t.is(previewHeading(modal), 'Pełne zadanie delegacji:');
     t.is(preview(modal), task);
+});
+
+test('delegate maskuje sekret przed skróceniem opisu', t => {
+    const task = 'a'.repeat(70) + ' sk-abcdefghijklmnopqrstuvwxyz123456';
+    const { modal } = openModal(baseAction({ type: 'delegate', toolName: 'delegate', targetPath: '', delegateAspect: 'worker', delegateTask: task }));
+    t.is(description(modal), `Jaskier chce delegować zadanie do sub-agenta worker: "${'a'.repeat(70)} sk-a***34..."`);
+    t.is(preview(modal), `${'a'.repeat(70)} sk-a***3456`);
+});
+
+for (const action of ['task', 'message'] as const) {
+    test(`sub_agent ${action} maskuje klucz przecinający granicę podglądu`, t => {
+        const text = 'a'.repeat(494) + ' sk-abcdefghijklmnopqrstuvwxyz123456';
+        const { modal } = openModal(baseAction({ type: 'delegate', toolName: 'sub_agent', targetPath: '', subAgentId: 'research-2', subAgentAction: action, subAgentText: text }));
+        t.is(preview(modal), `${'a'.repeat(494)} sk-a*\n... (skrócono)`);
+    });
+}
+
+test('podgląd maskuje nagłówek Authorization', t => {
+    const { modal } = openModal(baseAction({ type: 'delegate', toolName: 'sub_agent', targetPath: '', subAgentId: 'research-2', subAgentAction: 'message', subAgentText: 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz' }));
+    t.is(preview(modal), 'Authorization: Bearer abcd***wxyz');
+});
+
+test('MCP prowadzi tekst delegacji do zamaskowanego okna zgody', async t => {
+    const owner = { name: 'Jaskier', permissions: { guidance_mode: true } };
+    const captures: Array<{ description: string | undefined; preview: string | undefined }> = [];
+    const plugin = {
+        agentManager: { getAgent: () => owner, getActiveAgent: () => owner },
+        permissionSystem: { checkPermission: () => ({ allowed: true, requiresApproval: true }), requiresApproval: () => true },
+        approvalManager: { requestApproval: async (action: ApprovalAction) => {
+            const { modal } = openModal(action);
+            captures.push({ description: description(modal), preview: preview(modal) });
+            return { result: 'deny' };
+        } },
+    };
+    const delegate = createDelegateTool({});
+    const sub = createSubAgentTool({});
+    const makeClient = () => new MCPClient({} as never, plugin as never, { getTool: (name: string) => name === 'delegate' ? delegate : sub } as never);
+    const text = 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz';
+    await makeClient().executeToolCall({ name: 'delegate', arguments: { task: text, aspect: 'worker' } }, 'Jaskier');
+    await makeClient().executeToolCall({ name: 'sub_agent', arguments: { action: 'task', sub_id: 'research-2', task: text } }, 'Jaskier');
+    await makeClient().executeToolCall({ name: 'sub_agent', arguments: { action: 'message', sub_id: 'research-2', text } }, 'Jaskier');
+    t.deepEqual(captures, [
+        { description: 'Jaskier chce delegować zadanie do sub-agenta worker: "Authorization: Bearer abcd***wxyz"', preview: 'Authorization: Bearer abcd***wxyz' },
+        { description: 'Jaskier chce dać subowi research-2 kolejne zadanie.', preview: 'Authorization: Bearer abcd***wxyz' },
+        { description: 'Jaskier chce wysłać subowi research-2 wiadomość.', preview: 'Authorization: Bearer abcd***wxyz' },
+    ]);
+});
+
+test('MCP ukrywa znany sekret w oknie, ale przekazuje oryginalne zadanie', async t => {
+    const secret = 'opaque-provider-credential-12345';
+    const task = `Zbadaj ${secret} teraz`;
+    const owner = { name: 'Jaskier', permissions: { guidance_mode: true } };
+    let received: unknown;
+    const delegate = { ...createDelegateTool({}), execute: async (args: { task?: unknown }) => { received = args.task; return 'ok'; } };
+    const plugin = {
+        env: { settings: { pkmAssistant: { chat: { apiKeys: { provider: secret } } } } },
+        agentManager: { getAgent: () => owner, getActiveAgent: () => owner },
+        permissionSystem: { checkPermission: () => ({ allowed: true, requiresApproval: true }), requiresApproval: () => true },
+        approvalManager: { requestApproval: async (action: ApprovalAction) => {
+            const { modal, resultPromise } = openModal(action);
+            t.is(description(modal), 'Jaskier chce delegować zadanie do sub-agenta worker: "Zbadaj [REDACTED] teraz"');
+            t.is(preview(modal), 'Zbadaj [REDACTED] teraz');
+            findButtonByClass(modal, 'mod-cta')!.onclick!();
+            return resultPromise;
+        } },
+    };
+    const client = new MCPClient({} as never, plugin as never, { getTool: () => delegate } as never);
+    await client.executeToolCall({ name: 'delegate', arguments: { task, aspect: 'worker' } }, 'Jaskier');
+    t.is(received, task);
 });
 
 test('delegate bez aspektu pokazuje workera i skrót zadania', t => {

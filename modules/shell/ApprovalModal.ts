@@ -8,6 +8,7 @@ import type { App } from 'obsidian';
 import { UiIcons, setSvg } from '../../modules/crystal-soul/index.js';
 import { t } from '../../core/i18n/index.js';
 import type { ApprovalAction, ApprovalModalResult } from '../../core/index.js';
+import { maskSensitiveData } from '../../core/index.js';
 
 /** Sufit długości JSON-a argumentów w modalu (dłuższe tniemy z dopiskiem). */
 const EXTERNAL_ARGS_LIMIT = 1500;
@@ -329,7 +330,7 @@ export class ApprovalModal extends Modal {
             default:
                 // Group B tools
                 if (a.toolName === 'delegate') {
-                    const task = typeof a.delegateTask === 'string' ? a.delegateTask : '';
+                    const task = typeof a.delegateTask === 'string' ? maskSensitiveData(a.delegateTask) : '';
                     if (!task) return t('approval.desc.delegate', { name, task: a.targetPath || t('approval.fallback.task') });
                     const shortTask = task.length > 80 ? task.slice(0, 80) + '...' : task;
                     const aspect = typeof a.delegateAspect === 'string' ? a.delegateAspect : '';
@@ -426,8 +427,8 @@ export class ApprovalModal extends Modal {
 
     _renderContentPreview(contentEl: HTMLElement): void {
         const a = this.action;
-        const delegateTask = typeof a.delegateTask === 'string' ? a.delegateTask : null;
-        const subAgentText = typeof a.subAgentText === 'string' ? a.subAgentText : null;
+        const delegateTask = typeof a.delegateTask === 'string' ? maskSensitiveData(a.delegateTask) : null;
+        const subAgentText = typeof a.subAgentText === 'string' ? maskSensitiveData(a.subAgentText) : null;
 
         if (a.type === 'external.call') {
             // Zewnętrzny serwer MCP - zamiast ogólnego preview pokazujemy pełne argumenty.
