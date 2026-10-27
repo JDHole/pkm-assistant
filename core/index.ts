@@ -319,3 +319,5 @@ export type {
 export type { SettingsSectionCtx } from './SettingsContent.js';
 export { hostWindow } from './utils/hostWindow.js';
 export type { HostTimer } from './utils/hostWindow.js';
+export { removeFolderIfEmpty } from './utils/removeFolderIfEmpty.js';
+export type { RemoveFolderResult } from './utils/removeFolderIfEmpty.js';

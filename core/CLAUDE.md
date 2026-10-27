@@ -76,6 +76,7 @@ Powód: AVA nie ma mocka `obsidian` (`"ava".require: []`), a testuje pliki produ
 - `redactSecretsDeep` - sama redakcja co `redactSecretValues`, ale na DOWOLNEJ wartości (`unknown`) i PRZED normalizacją - dla wołacza, który ma surowy obiekt błędu sprzed `normalizeError`. Ochrona przed cyklami (`WeakSet`). Pure, ten sam plik. Gotcha 4e.
 - `toolResultStatus`, `shouldLinkWrittenFile` - jedna reguła "co jest porażką narzędzia", czytana przez tools, chat i sub-agents
 - `ensureAdapterFolder` - adapterowy `mkdir -p` po segmentach ścieżki. Pure, duck-typuje adapter `{exists, mkdir}` (brak metod = no-op). Wariant **app-aware** (Vault API dla zwykłych ścieżek, adapter dla dot-folderów) zostaje osobno w `modules/tools/vault_binary_io.js`.
+- `removeFolderIfEmpty` - sprawdza listing plików i folderów, zachowuje niepusty folder i zwraca `missing`, `not-empty` z listą ścieżek albo `removed`. Obsidian 1.14.5 odrzuca nierekurencyjne `rmdir` nawet dla pustego folderu, więc po sprawdzeniu pustego listingu używa `rmdir(path, true)`; rekurencja jest bezpieczna tylko po tym sprawdzeniu.
 - `probeFile` - "czy plik jest?" w trzech stanach (`'exists'|'missing'|'unknown'`), bo `exists()` kłamie na dyskach sieciowych (gotcha "boot nie pisze ustawień" niżej)
 - `readIfExists` - odczyt-najpierw WŁASNEGO pliku przed dopisaniem nowego wpisu; siostrzana wada `probeFile`
 - `migrateOldPluginFolder` - migrator plikowy, czysty/node-safe
