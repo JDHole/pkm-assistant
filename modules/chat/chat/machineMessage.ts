@@ -25,6 +25,10 @@
  */
 import { t } from '../../../core/i18n/index.js';
 import { artifactStatusLabel } from '../../artifacts/index.js';
+import { buildSubAgentResultView } from './subAgentResultView.js';
+import type { BuildSubAgentResultViewInput } from './subAgentResultView.js';
+import type { RunOutcome, SubTaskResultThread } from '../../sub-agents/index.js';
+import type { SubAgentResultView } from '../../ui-components/index.js';
 
 export type MachineKind = 'subtask_notification' | 'artifact_summon' | 'loop_partial' | null;
 
@@ -45,6 +49,7 @@ export interface MachineView {
     open?: MachineViewOpen;
     /** Steruje kolorem/domyślnym rozwinięciem kafelka (`createTile`'s `status`). */
     status: 'ok' | 'error';
+    subAgentResult?: SubAgentResultView;
 }
 
 /** Kształt wiadomości, jaki realnie czyta klasyfikator - `RollingMessage` z `chat/RollingWindow.ts`
@@ -79,6 +84,27 @@ const SUBTASK_ID_LINE_KEY = 'chat.tile.sub.background_id';
 const LOCALES: readonly ('pl' | 'en')[] = ['pl', 'en'];
 
 const SENTINEL_PREFIX = '\u0000MSG_VAR_';
+
+function isResultThread(value: unknown): value is SubTaskResultThread {
+    if (!value || typeof value !== 'object') return false;
+    const thread = value as Record<string, unknown>;
+    return thread.kind === 'single' || thread.kind === 'unknown'
+        || (thread.kind === 'reusable' && typeof thread.sub_id === 'string' && thread.sub_id.trim().length > 0);
+}
+
+function isStoredOutcome(value: unknown): value is RunOutcome {
+    if (!value || typeof value !== 'object') return false;
+    const outcome = value as Record<string, unknown>;
+    const end = outcome.end;
+    if (!end || typeof end !== 'object' || !Array.isArray(outcome.effects)
+        || !['unconfirmed', 'partial', 'empty'].includes(String(outcome.completeness))) return false;
+    const kind = (end as Record<string, unknown>).kind;
+    if (!['finished', 'limit', 'uncertain', 'stopped', 'timeout', 'failed'].includes(String(kind))) return false;
+    if (kind === 'stopped' && !['user', 'lead', 'system'].includes(String((end as Record<string, unknown>).by))) return false;
+    if (kind === 'failed' && !['work', 'synthesis'].includes(String((end as Record<string, unknown>).stage))) return false;
+    if (kind === 'limit' && !['iteration-limit', 'synthesis-budget'].includes(String((end as Record<string, unknown>).reason))) return false;
+    return typeof outcome.hasAnswer === 'boolean' && typeof outcome.hasMaterial === 'boolean';
+}
 
 /**
  * Renderuje `key` z `varNames` podmienionymi na znaczniki niekolidujące z realną treścią i tnie
@@ -141,6 +167,13 @@ export function classifyMachineMessage(msg: MachineMessageLike | null | undefine
     if (startsWithAny(text, SUBTASK_HEADER_PREFIXES)) return 'subtask_notification';
     if (startsWithAny(text, ARTIFACT_HEADER_PREFIXES)) return 'artifact_summon';
     return null;
+}
+
+export function getSubTaskNotificationTaskId(msg: MachineMessageLike | null | undefined): string | null {
+    if (classifyMachineMessage(msg) !== 'subtask_notification') return null;
+    const text = typeof msg?.content === 'string' ? msg.content : '';
+    const id = extractSecondVar(text, SUBTASK_HEADER_KEY, ['name', 'task_id']);
+    return id?.trim() || null;
 }
 
 /** Wyciąga wartość PIERWSZEJ zmiennej nagłówka (np. `name`/`tytul`) z realnej treści, próbując
@@ -353,7 +386,7 @@ function partialHasToolResults(msg: MachineMessageLike | null | undefined, text:
  * (wołający powinien sprawdzić `classifyMachineMessage` pierwej, ale funkcja jest bezpieczna
  * wywołana samodzielnie - nie zakłada, że ktoś już to zrobił).
  */
-export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx: { t: typeof t }): MachineView | null {
+export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx: { t: typeof t; getTask?: (taskId: string) => unknown; getThread?: (threadId: string) => unknown }): MachineView | null {
     const kind = classifyMachineMessage(msg);
     if (!kind) return null;
     const text = typeof msg?.content === 'string' ? msg.content : '';
@@ -394,12 +427,36 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
         const finalDetails = subTaskId
             ? [dedupedDetails, ctx.t(SUBTASK_ID_LINE_KEY, { id: subTaskId })].filter(Boolean).join('\n')
             : dedupedDetails;
+        const saved = msg?._subTaskResult;
+        const structural = saved && typeof saved === 'object' ? saved as {
+            name?: unknown; outcome?: unknown; result?: unknown; text?: unknown; handoff?: unknown;
+            partial?: unknown; partialResult?: unknown; partialText?: unknown; error?: unknown; effects?: unknown;
+            thread?: unknown;
+        } : null;
+        const structuredOutcome = isStoredOutcome(structural?.outcome) ? structural.outcome : undefined;
+        const storedResult = typeof structural?.result === 'string' ? structural.result
+            : structural?.result && typeof structural.result === 'object' ? structural.result as { text?: unknown; handoff?: unknown } : null;
+        const storedPartial = structural?.partial && typeof structural.partial === 'object' ? structural.partial as { text?: unknown } : null;
+        const storedThread = isResultThread(structural?.thread) ? structural.thread : { kind: 'unknown' as const };
+        const reusableInstruction = extractReusableSubId(text);
+        const subAgentResult = structuredOutcome ? buildSubAgentResultView({
+            name: typeof structural?.name === 'string' ? structural.name : name,
+            outcome: structuredOutcome,
+            text: typeof structural?.text === 'string' ? structural.text : typeof storedResult === 'string' ? storedResult : typeof storedResult?.text === 'string' ? storedResult.text : undefined,
+            handoff: typeof structural?.handoff === 'string' ? structural.handoff : storedResult && typeof storedResult === 'object' && typeof storedResult.handoff === 'string' ? storedResult.handoff : undefined,
+            partialResult: typeof structural?.partialResult === 'string' ? structural.partialResult : undefined,
+            partialText: typeof structural?.partialText === 'string' ? structural.partialText : typeof storedPartial?.text === 'string' ? storedPartial.text : undefined,
+            error: typeof structural?.error === 'string' ? structural.error : undefined,
+            effects: Array.isArray(structural?.effects) ? structural.effects as BuildSubAgentResultViewInput['effects'] : undefined,
+            thread: storedThread,
+        }, ctx.t) : buildParsedNotificationResult(text, name, reusableInstruction, ctx.t);
         return {
             kind,
             title,
             summary: statusLine,
             details: finalDetails,
             status: outcome === 'done' ? 'ok' : 'error',
+            ...(subAgentResult ? { subAgentResult } : {}),
         };
     }
 
@@ -424,4 +481,57 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
         open,
         status: 'ok',
     };
+}
+
+function extractReusableSubId(text: string): string | null {
+    const firstSplit = text.indexOf('\n\n');
+    let details = firstSplit >= 0 ? text.slice(firstSplit + 2) : text;
+    const footer = LOCALES.map(locale => t(SUBTASK_FOOTER_KEY, undefined, locale)).find(value => value && details.endsWith(value));
+    if (!footer) return null;
+    details = details.slice(0, -footer.length);
+    if (!details.endsWith('\n\n\n')) return null;
+    const withoutSeparator = details.slice(0, -3);
+    const lastParagraph = withoutSeparator.slice(withoutSeparator.lastIndexOf('\n\n') + 2);
+    for (const locale of LOCALES) {
+        const [prefix, suffix] = templateSegments(SUBTASK_REUSABLE_THREAD_KEY, locale, ['sub_id']);
+        if (!prefix || !suffix || !lastParagraph.startsWith(prefix) || !lastParagraph.endsWith(suffix)) continue;
+        const id = lastParagraph.slice(prefix.length, -suffix.length).trim();
+        if (id) return id;
+    }
+    return null;
+}
+
+function buildParsedNotificationResult(text: string, name: string, subId: string | null, translate: typeof t): SubAgentResultView | undefined {
+    const { afterHeader, details: userDetails } = subtaskDetails(text);
+    const statusLine = firstParagraph(afterHeader);
+    const matchEnd = (keys: string[]): string | undefined => keys.find(key => LOCALES.some(locale => statusLine.includes(translate(key, undefined, locale))));
+    const completeness = matchEnd(['chat.subagent_notification.completeness_unconfirmed', 'chat.subagent_notification.completeness_partial', 'chat.subagent_notification.completeness_empty']);
+    const completionValue = completeness?.endsWith('unconfirmed') ? 'unconfirmed' : completeness?.endsWith('partial') ? 'partial' : 'empty';
+    const endKinds = [
+        ['chat.subagent_notification.end_finished', { kind: 'finished' }],
+        ['chat.subagent_notification.end_iteration_limit', { kind: 'limit', reason: 'iteration-limit' }],
+        ['chat.subagent_notification.end_synthesis_budget', { kind: 'limit', reason: 'synthesis-budget' }],
+        ['chat.subagent_notification.end_uncertain', { kind: 'uncertain' }],
+        ['chat.subagent_notification.end_stopped_user', { kind: 'stopped', by: 'user' }],
+        ['chat.subagent_notification.end_stopped_lead', { kind: 'stopped', by: 'lead' }],
+        ['chat.subagent_notification.end_stopped_system', { kind: 'stopped', by: 'system' }],
+        ['chat.subagent_notification.end_timeout', { kind: 'timeout' }],
+        ['chat.subagent_notification.end_failed_work', { kind: 'failed', stage: 'work' }],
+        ['chat.subagent_notification.end_failed_synthesis', { kind: 'failed', stage: 'synthesis' }],
+    ] as const;
+    const end = endKinds.find(([key]) => LOCALES.some(locale => statusLine.includes(translate(key, undefined, locale))))?.[1];
+    if (!end || !completeness) return undefined;
+    const body = userDetails.slice(userDetails.indexOf('\n\n') + 2).trim();
+    const emptyText = LOCALES.map(locale => translate('chat.subagent_notification.empty_result', undefined, locale));
+    const boilerplate = [
+        ...LOCALES.flatMap(locale => ['chat.subagent_notification.partial', 'chat.subagent_notification.partial_heading'].map(key => translate(key, undefined, locale))),
+        ...LOCALES.map(locale => translate('chat.subagent_notification.unconfirmed', undefined, locale)),
+        ...emptyText,
+    ];
+    // Po restarcie brak strukturalnego _subTaskResult. Zachowujemy więc body jako tekst
+    // i odtwarzamy wyłącznie stan z jego dedykowanej linii systemowej. Treść może cytować
+    // przykłady błędów lub efektów, więc nie klasyfikujemy akapitów jako dane.
+    const material = body.split('\n\n').map(part => part.trim()).filter(part => part && !boilerplate.includes(part)).join('\n\n').trim();
+    return buildSubAgentResultView({ name, outcome: { end, completeness: completionValue, hasAnswer: completionValue === 'unconfirmed', hasMaterial: !!material, effects: [] },
+        text: material, thread: subId ? { kind: 'reusable', sub_id: subId } : { kind: 'unknown' } }, translate);
 }

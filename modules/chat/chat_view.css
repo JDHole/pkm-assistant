@@ -3320,6 +3320,19 @@ span.cs-note-link {
   opacity: 1;
 }
 
+/* Ramka wyniku sub-agenta pozostaje czytelna w wąskim panelu i obu motywach Obsidiana. */
+.cs-tile--subresult .cs-tile__head { flex-wrap: wrap; align-items: flex-start; }
+.cs-tile--subresult .cs-tile__title { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; flex: 1 1 160px; }
+.cs-tile--subresult .cs-tile__badge { flex: 0 0 auto; }
+.cs-subresult { display: flex; flex-direction: column; gap: 10px; min-width: 0; color: var(--text-normal); }
+.cs-subresult__section { min-width: 0; overflow-wrap: anywhere; }
+.cs-subresult__section > div:first-child { margin-bottom: 3px; color: var(--text-muted); font-size: 0.72em; font-weight: 700; letter-spacing: 0.04em; }
+.cs-subresult__effect { display: flex; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+.cs-subresult__effect span { overflow-wrap: anywhere; }
+.cs-subresult__effect span:last-child { color: var(--text-muted); }
+.cs-subresult__error { color: var(--text-error); overflow-wrap: anywhere; }
+.cs-subresult__note { color: var(--text-muted); font-size: 0.9em; overflow-wrap: anywhere; }
+
 /* ===== E2.9 FAZA C (C2): picker artefaktów w segmencie slim bara ===== */
 .pkm-artifact-pick-row {
   display: flex;

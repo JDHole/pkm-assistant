@@ -391,12 +391,16 @@ turn.abort.isAborted()`.
   aktywny agent).
 - **`stop_all_turns(reason)`** zatrzymuje KAŻDĄ turę z `_streamCtxMap` (kopia nazw przed
   iteracją, bo `stop_generation` kasuje wpisy w trakcie), kasuje `_queuedMessage` i prosi
-  `subTaskRegistry.requestStop` o zatrzymanie subów zleconych z zakładek tego widoku
-  (dopasowanie po `origin.tabKey`, fallback po `origin.agentName`; biegi bez `origin` - zlecone
-  spoza czatu - zostają nietknięte). `onClose` woła to PRZED rozbrojeniem watchdogów.
-  Zamknięcie JEDNEJ zakładki (`_closeActiveTab`) robi to samo w zakresie tej zakładki, tylko
-  gdy ma turę w locie - Stop na cichej zakładce podniósłby `_drainSuppressed` i wyczyściłby
-  stan streamingu niepotrzebnie.
+  `subTaskRegistry.requestStop` o zatrzymanie biegnących subów z zakładek tego widoku.
+  Dodatkowo `closeQueuedForOwners` zamyka ich wątki `queued`. Właściciele, w tym zakładki
+  z samą kolejką, są zbierani przed czyszczeniem stanów. Dopasowanie używa `origin.tabKey`,
+  a `origin.agentName` tylko przy braku `tabKey`. Dla reason `stop` zamknięcie ma nadawcę
+  `user`; zamknięcie widoku i pozostałe powody używają `system`. Biegi bez `origin`, zlecone
+  spoza czatu, zostają nietknięte. `onClose` woła to PRZED rozbrojeniem watchdogów.
+  Zamknięcie JEDNEJ zakładki (`_closeActiveTab`) zamyka jej queued z nadawcą `system`
+  przed usunięciem tożsamości zakładki, także gdy nie ma tury w locie. Rzeczywisty przycisk Stop
+  woła `stop_generation` i zamyka queued aktywnej zakładki z nadawcą `user`. Watchdog nie
+  zamyka kolejek innych tur.
 - **Bramka "po Stopie/watchdogu nie startujemy tury sami"** żyje jako `_drainSuppressed` -
   podnosi ją Stop i watchdog ciszy, gasi start następnej tury. Sprawdzana przez WSZYSTKIE
   mechanizmy, które domykają turę "po fakcie" (z timera, z powiadomienia, z `finally`): dren
@@ -1484,12 +1488,23 @@ załącznik, a druga opcja to cytuj i kopiuje się to do chatu jako cytat."
 
 ### Sub-agent outcome w czacie
 
+- Czysty model wyniku z `modules/sub-agents` jest wspólnym źródłem klasyfikacji końca, kompletności i efektów dla paska oraz ramek wyniku. Ramki używają jego wyboru dorobku, a pasek zachowuje osobne reguły legacy. Adapter widoku przekazuje `thread` jawnie: `reusable` z niepustym `sub_id` tylko wtedy, gdy ma dowód wielokrotnego wątku; `single` dla pojedynczej delegacji; `unknown`, gdy historia nie zawiera dowodu. Nie wolno wyprowadzać wielokrotności z `task_id`, `threadId`, outcome ani samego istnienia wątku.
+- `getStripStateLabelParts` zwraca klucz przyczyny i opcjonalny osobny klucz kompletności. `buildSubTaskResultModel` klasyfikuje outcome, wybiera pełny materiał i efekty oraz zwraca błąd oddzielnie. Pasek przycina wynik do podglądu dopiero po użyciu wspólnego modelu; wiersz nadal pokazuje te same stany i sekcje.
+
 - `chat/subAgentCallView.ts` rozstrzyga czysto, czy placeholder, wynik i historia używają bloku sub-agenta czy chipa. `delegate` pozostaje blokiem; `sub_agent` blokuje tylko akcję `task` z pokwitowaniem `started` albo z `outcome`, a odmowa bez tych pól zostaje chipem.
 - `chat_streaming.ts` i `chat_messages.ts` współdzielą tę decyzję. `sub_agent task` używa tego samego buildera opcji co `delegate`; pokwitowanie w tle zachowuje `task_id` jako ostatnią linię szczegółów. Pozostałe akcje korzystają ze statusu `toolResultStatus`.
 
 - `buildSubTaskNotificationText` (`chat/subTaskNotification.ts`) używa `outcome.end` i `outcome.completeness` do stałej linii stanu. `unconfirmed` pokazuje wynik i informację o braku sprawdzenia wobec zlecenia, `partial` pokazuje zakaz raportowania jako wykonanego, dorobek z `partial.text` (fallback: `result.text`) i efekty, a `empty` podaje powód końca. Bieg bez `outcome` zachowuje dawną treść. Wszystkie nowe komunikaty mają klucze `chat.subagent_notification.*` w `core/i18n/pl.ts` i `en.ts`.
 - Wynik blokującego `delegate` składa `buildDelegateBlockOptions` (`chat/delegateBlockView.ts`), używany przez `chat_streaming` i `chat_messages`. Błąd z `partial_result` zachowuje narzędzia, szczegóły, zużycie i rzeczywisty czas. Nazwa suba może pochodzić z `result.aspect`, a tekstowe zwrotki starszych sesji zachowują odpowiedź.
 - `matchTabForOrigin` sprawdza kolejno `tabKey`, `sessionPath`, a następnie pierwszą zakładkę agenta tylko dla zleceń bez ścieżki sesji. Dostawca przekazuje `ChatTab.sessionPath` obok `_tabKey`.
+
+### Ramki wyniku S4b
+
+- `chat/subAgentResultView.ts` jest jedynym adapterem do ramki wyniku dla `delegate`, `sub_agent task` i powiadomienia w tle. Przekazuje jawne `thread`: `reusable` wymaga niepustego `sub_id`, `single` jest jawne, a brak dowodu to `unknown`. `task_id`, `threadId` ani cytowana instrukcja nie dowodzą możliwości kontynuacji. Etykiety oraz sekcje pochodzą z `buildSubTaskResultModel` w barrelu `sub-agents`.
+- Blok delegacji przenosi outcome, efekty, handoff, `partial_result` i `partial.text` do adaptera. Lista `outcome.effects` ma pierwszeństwo przed zbiorczymi efektami wątku, które dostarczają dopasowane metadane `expectedCheck`. Osobna lista jest fallbackiem, gdy outcome nie ma własnej listy, jak w wyniku blokującego delegate. Starszy wynik bez `outcome` zachowuje dotychczasowy render. Wynik i błąd mają osobne sekcje.
+- Powiadomienie w tle przekazuje `_subTaskResult` w meta wyłącznie dla renderera, budowane z oryginalnego taska: osobno `outcome`, `result` (tekst i handoff), `partial`, `error`, efekty z `expectedCheck` oraz jawny `thread`. Dzięki temu tekst błędu złożony z partial na wejściu modelu nie dubluje dorobku w ramce. `reusable` i `sub_id` są ustawiane tylko wtedy, gdy powiadomienie zawiera instrukcję `reusable_thread`; brak dowodu nie jest wyprowadzany z `task_id` ani `threadId`. Meta pozostaje przy wiadomości także po włożeniu do kolejki czatu. Tekst dla modelu z `buildSubTaskNotificationText` przy pustym wyniku `failed` zawiera konkretną przyczynę błędu. Po odtworzeniu historii odtwarzamy z nagłówka i linii stanu wyłącznie zakończenie oraz kompletność. Body pozostaje tekstem: cytowana fraza błędu nie staje się błędem, a akapit podobny do efektu nie staje się faktem. Systemowe zdania o niepełnym lub niesprawdzonym wyniku są pomijane jako materiał. Instrukcja `reusable_thread` jest dowodem tylko w końcowej pozycji przed stopką i z zabezpieczeniem trzech znaków nowej linii. Cytat w materiale nie daje tej informacji.
+- `render_messages` porównuje identyfikatory pokwitowań `started` z późniejszymi prawidłowymi powiadomieniami. Powiadomienie usuwa duplikat pokwitowania; jeśli task istnieje, o stanie „w toku” decyduje jego status, więc zakończony bieg pozostaje zakończony także podczas kolejnego biegu wątku. Bez taska faza wątku `queued` albo `running` oznacza stan „w toku”; brak obu oznacza zakończoną ramkę o restarcie. Zakończony wątek bez zachowanego taska pokazuje niedostępność wyniku, nie zielony sukces. Historia pokazuje tylko zapisany materiał i fakty, bez dopowiadania handoff, braków ani efektów, których nie zapisano.
+- Wąski panel zawija nagłówek i ścieżki, a sekcje opierają kolory na zmiennych Obsidiana.
 - Stop przy zamknięciu zakładki i widoku czatu podaje `requestStop(id, 'system')`. Przycisk Stop w pasku zachowuje domyślnego nadawcę `user`.
 
 ---

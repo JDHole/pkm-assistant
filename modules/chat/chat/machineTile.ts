@@ -31,7 +31,7 @@
  *    otwartych zakładkach) - żadnego z nich "Otwórz" nie potrzebuje, bo ścieżka jest już znana z
  *    rozwiązania przy renderze.
  */
-import { createTile, openNoteWithRegistry } from '../../ui-components/index.js';
+import { createSubAgentBlock, createTile, openNoteWithRegistry } from '../../ui-components/index.js';
 import { UiIcons } from '../../crystal-soul/index.js';
 import { t } from '../../../core/i18n/index.js';
 import { log } from '../../../core/index.js';
@@ -63,6 +63,10 @@ async function _resolveArtifactPath(plugin: ChatViewLike['plugin'], artifactId: 
  * dotąd.
  */
 export async function renderMachineTile(container: HTMLElement, plugin: ChatViewLike['plugin'], view: MachineView): Promise<void> {
+    if (view.subAgentResult) {
+        container.appendChild(createSubAgentBlock({ type: 'delegate', role: 'system', status: view.subAgentResult.status === 'error' ? 'error' : 'success', resultView: view.subAgentResult }));
+        return;
+    }
     let action: { label: string; onClick: (ev: MouseEvent) => void; disabled?: boolean; title?: string } | undefined;
     if (view.open) {
         const { label, artifactId } = view.open;

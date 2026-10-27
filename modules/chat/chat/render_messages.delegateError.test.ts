@@ -140,7 +140,9 @@ function buildFakeThis(container: FakeEl, messages: TestDynamic[]): TestDynamic 
     return {
         messages_container: container,
         rollingWindow: { messages },
-        plugin: { agentManager: { getActiveAgent: () => ({ name: 'Jaskier', color: '#fff' }) } },
+        plugin: { agentManager: { getActiveAgent: () => ({ name: 'Jaskier', color: '#fff' }) },
+            subTaskRegistry: { getTask: (id: string) => id === 'sub/id#7' ? { threadId: 'sub/worker', status: 'running' } : undefined,
+                getThread: (id: string) => id === 'sub/worker' ? { phase: 'running' } : undefined } },
         env: { settings: { pkmAssistant: {} } },
         app: {},
         _drawConnectorLines: () => {},

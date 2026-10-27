@@ -37,6 +37,8 @@ type FakeEl = {
     removeAttribute(name: string): void;
     hasAttribute(name: string): boolean;
     appendChild(child: FakeEl): FakeEl;
+    createDiv(opts?: { cls?: string }): FakeEl;
+    createSpan(opts?: { cls?: string }): FakeEl;
     insertBefore(child: FakeEl, ref: FakeEl | null): FakeEl;
     remove(): void;
     addEventListener(type: string, cb: Listener): void;
@@ -68,6 +70,8 @@ function makeFakeEl(tag = 'div'): FakeEl {
         removeAttribute(name) { attrs.delete(name); },
         hasAttribute(name) { return attrs.has(name); },
         appendChild(child) { child.parent = el; el.children.push(child); return child; },
+        createDiv(opts) { const child = makeFakeEl('div'); if (opts?.cls) child.className = opts.cls; return el.appendChild(child); },
+        createSpan(opts) { const child = makeFakeEl('span'); if (opts?.cls) child.className = opts.cls; return el.appendChild(child); },
         insertBefore(child, ref) {
             child.parent = el;
             const idx = ref ? el.children.indexOf(ref) : -1;
@@ -91,6 +95,8 @@ function findByClass(root: FakeEl, cls: string): FakeEl | null {
     }
     return null;
 }
+
+function deepText(root: FakeEl): string { return root.textContent + root.children.map(deepText).join(''); }
 
 async function withFakeDocument<T>(fn: () => Promise<T>): Promise<T> {
     const prevDoc = (globalThis as Record<string, unknown>).document;
@@ -261,5 +267,24 @@ test.serial('renderMachineTile: sukces subagenta nie jest czerwony, blad i przer
             t.true(tile!.classList.contains(status === 'done' ? 'cs-tile--ok' : 'cs-tile--error'));
             t.is(tileColor(tile!), status === 'done' ? 'var(--color-green)' : 'var(--color-red)', status);
         }
+    });
+});
+
+test.serial('renderMachineTile: ramka wyniku suba używa SubAgentBlock z rolą systemową', async t => {
+    await withFakeDocument(async () => {
+        const container = makeFakeEl('div');
+        const view = baseView({ kind: 'subtask_notification', subAgentResult: {
+            title: 'badacz skończył sam', badge: 'wynik niesprawdzony', status: 'ok', material: 'DOROBEK',
+            missingTargets: [], effects: [], notes: [],
+        } });
+        await renderMachineTile(container as unknown as HTMLElement, fakePlugin([], null), view);
+        const tile = findByClass(container, 'cs-tile--system');
+        t.truthy(tile);
+        t.is(findByClass(tile!, 'cs-tile__title')?.textContent, 'badacz skończył sam');
+        t.is(findByClass(tile!, 'cs-tile__badge')?.textContent, 'wynik niesprawdzony');
+        findByClass(tile!, 'cs-tile__head')!.fire('click');
+        const result = findByClass(tile!, 'cs-subresult');
+        t.truthy(result);
+        t.true(deepText(result!).includes('DOROBEK'));
     });
 });

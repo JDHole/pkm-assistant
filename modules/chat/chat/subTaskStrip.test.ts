@@ -3,6 +3,8 @@ import { renderSubTaskStrip } from './subTaskStrip.js';
 import { SubTaskRegistry } from '../../sub-agents/index.js';
 import { pl as trPl } from '../../../core/i18n/pl.js';
 import { setLocale } from '../../../core/i18n/index.js';
+import { createDelegateTool } from '../../tools/index.js';
+import { __test__ as modelsTest } from '../../models/index.js';
 
 class MockClassList {
     values = new Set<string>();
@@ -133,6 +135,74 @@ test('subTaskStrip: Stop dla wątku queued zamyka go bez próby zatrzymania niei
     t.is(registry.getThread(thread.threadId)?.phase, 'closed');
     t.deepEqual(requestCalls, []);
     registry.dispose();
+});
+
+test.serial('subTaskStrip: stary Stop kolejki zatrzymuje rozpoczęty bieg i odrzuca późne narzędzie', async t => {
+    const registry = new SubTaskRegistry();
+    t.teardown(() => registry.dispose());
+    const requests: Array<{ done(value: unknown): void }> = [];
+    let aborts = 0;
+    let toolCalls = 0;
+    class Model {
+        modelId = 'worker-model'; providerId = 'ollama';
+        _streamGateLimit() { return 1; }
+        stream(_payload: unknown, handlers: { done(value: unknown): void }) { requests.push(handlers); }
+        stopStream() { aborts++; }
+    }
+    modelsTest.setChatModelFactory(() => new Model() as never);
+    const providers = Object.fromEntries(['openai', 'ollama', 'lm_studio', 'anthropic', 'gemini', 'groq', 'deepseek', 'open_router', 'xai'].map(id => [id, { info: { id } }]));
+    const plugin = {
+        subTaskRegistry: registry,
+        toolRegistry: { filterByAgent: () => [{ name: 'read' }], getTool: () => ({ name: 'read', description: 'read', inputSchema: {}, execute: async () => { toolCalls++; return 'wynik'; } }) },
+        agentManager: { getActiveAgent: () => ({ name: 'Klara', activeSubAgents: [] }) },
+        env: { config: { chat: { providers, http: { send: async () => ({ status: 200, headers: {}, text: '', json: () => ({}) }) }, transport: { open: async () => ({ status: 200, headers: {}, body: '' }) } } },
+            settings: { pkmAssistant: { chat: { platform: 'ollama', hosts: { ollama: 'http://localhost:11434' } }, modelLibrary: { minion: [{ platform: 'ollama', model: 'worker-model', isDefault: true }] }, limits: { max_parallel_delegations: 5 } } } },
+    };
+    const receipt = await createDelegateTool({}).execute({ tasks: [{ task: 'pierwsze', aspect: 'worker' }, { task: 'drugie', aspect: 'worker' }], _invocationOrigin: owner }, {}, plugin as never) as { tasks: Array<{ sub_id: string }> };
+    t.is(receipt.tasks.length, 2);
+    const secondId = receipt.tasks[1].sub_id;
+    t.is(registry.getThread(secondId)?.phase, 'queued');
+    const host = new MockEl();
+    renderSubTaskStrip(host as never, { plugin, tabKey: 'Klara', ...owner, expandedId: secondId, onToggle() {} });
+    const stop = all(host).find(node => node.classList.values.has('pkm-substrip__stop'))!;
+    requests[0].done({ choices: [{ message: { content: 'gotowe' } }] });
+    const wait = async (predicate: () => boolean) => { const deadline = Date.now() + 3000; while (!predicate() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5)); };
+    await wait(() => requests.length === 2);
+    t.is(registry.getThread(secondId)?.phase, 'running');
+    t.deepEqual(registry.getThread(secondId)?.config.toolNames, ['read']);
+    stop.dispatch('click');
+    const abortsAfterClick = aborts;
+    requests[1].done({ choices: [{ message: { role: 'assistant', content: '', tool_calls: [{ id: 'late', function: { name: 'read', arguments: '{}' } }] } }] });
+    await wait(() => registry.getTask(secondId)?.status !== 'running');
+    if (registry.getTask(secondId)?.status === 'running') {
+        registry.requestStop(secondId, 'user');
+        if (requests[2]) requests[2].done({ choices: [{ message: { content: 'koniec' } }] });
+        await wait(() => registry.getTask(secondId)?.status !== 'running');
+    }
+    t.is(abortsAfterClick, 1);
+    t.deepEqual(registry.getTask(secondId)?.outcome?.end, { kind: 'stopped', by: 'user' });
+    t.is(toolCalls, 0);
+});
+
+test('subTaskStrip: zamknięcie queued przed startem pokazuje syntetyczny pusty bieg w tym samym wątku', t => {
+    setLocale('pl');
+    const registry = new SubTaskRegistry();
+    const thread = registry.createThread({ threadId: 'closed-before-start', name: 'worker', owner, origin: owner, config: {}, phase: 'queued' });
+    registry.closeThread(thread.threadId, 'user');
+    registry.finishQueuedStop(thread.threadId, { background: true, taskPreview: 'Drugie zadanie' });
+
+    const host = new MockEl();
+    const count = renderSubTaskStrip(host as any, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner,
+        expandedId: thread.threadId, onToggle() {} });
+    const cards = all(host).filter(node => node.classList.values.has('pkm-substrip__run-card'));
+
+    t.is(count, 1);
+    t.true(all(host).some(node => node.classList.values.has('pkm-substrip__chip--closed')));
+    t.is(cards.length, 1);
+    t.true(textTree(cards[0]).includes('Drugie zadanie'));
+    t.true(all(cards[0]).some(node => node.classList.values.has('pkm-substrip__run-state')));
+    registry.dispose();
+    setLocale('en');
 });
 
 test('subTaskStrip: klawiatura rozwija i Escape zwija, aria-expanded jest literalne', t => {
