@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
+- Fix deletion of custom sub-agents and their templates and skill templates on Obsidian 1.14.5.
 - Settle background receipts by run ID when result tiles are rendered, preserving reading position.
 - User-stopped sub-agent results wait for a later user turn, and thread continuation respects the latest stop.
 
