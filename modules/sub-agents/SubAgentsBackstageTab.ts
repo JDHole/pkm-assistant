@@ -235,7 +235,7 @@ function renderTemplateCard(list: HTMLElement, tpl: SubAgentTemplateRecord, { pl
             const copies = templateCopyNames(tpl.name, plugin.agentManager?.subAgentLoader?.getAllSubAgents?.() || []);
             const confirmation = templateDeleteConfirmation(tpl.name, copies, t('backstage.no_template_copies'));
             const okToDelete = await confirmModal(plugin.app as never, {
-                title: t('generic.delete'),
+                title: t('backstage.delete_template_title', { name: tpl.name }),
                 message: t(confirmation.messageKey, confirmation),
                 destructive: true,
             });
