@@ -33,6 +33,16 @@ const FRONTMATTER = [
     '',
 ].join('\n');
 
+test('odtworzony partial przekazuje modelowi pytanie i rozstrzygnięcie', t => {
+    const event = formatSessionEvent('agent_loop_partial', { role: 'system', content: 'DOROBEK', question: { text: 'Jaki zakres?', resolution: { kind: 'cancelled', by: 'lead', reason: 'stop' } } }, '2026-10-28T00:00:00Z');
+    const message = parseActiveSession(FRONTMATTER + event).messages[0];
+    t.true(message.content.includes('DOROBEK'));
+    t.true(message.content.includes('Jaki zakres?'));
+    t.true(message.content.includes('cancelled'));
+    t.true(message.content.includes('lead'));
+    t.true(message.content.includes('stop'));
+});
+
 /** Zdarzenie w zapisie testowym: pola eventu (`EVENT_FIELDS`) + typ + stempel. */
 interface TestEvent {
     type: string;

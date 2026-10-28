@@ -1,5 +1,7 @@
 # modules/memory/
 
+Zdarzenie `agent_loop_partial` zapisuje opcjonalne `question`; przy odczycie jego treść i rozstrzygnięcie są dodawane jako oznaczona część wiadomości dla modelu. Dorobek snapshotu pozostaje osobny.
+
 **Pamięć agenta w Memory v3: per-agent, plikowa, jawna dla usera i niedestrukcyjna.**
 
 Każdy agent ma osobny folder:

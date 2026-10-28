@@ -417,7 +417,8 @@ export function parseActiveSession(text: string | null | undefined): ParsedActiv
                 // (kontrakt: `t.deepEqual` na `{role, content, seq}` gdzie indziej w tym pliku).
                 result.messages.push({
                     role: eventRole,
-                    content: unescapeActiveText(contentValue.trim()),
+                    content: unescapeActiveText(contentValue.trim()) + (question && eventTypeFromHeader(rawHeader) === 'agent_loop_partial'
+                        ? `\n\n[Sub-agent question]\n${question.text}\n[Resolution]\n${JSON.stringify(question.resolution)}` : ''),
                     seq: seqFromEvent(rawBody),
                     ...(toolCallIdRaw ? { toolCallId: toolCallIdRaw } : {}),
                     ...(toolCalls ? { toolCalls } : {}),
