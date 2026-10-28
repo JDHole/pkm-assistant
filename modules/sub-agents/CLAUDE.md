@@ -57,7 +57,9 @@ modules/sub-agents/
 
 Protokół pytań rodzica jest częścią `SubTaskRegistry`: `openParentQuestion(taskId, text)` zwraca pytanie i Promise rozstrzygnięcia albo odmowę; `answerParentQuestion(taskId, questionId, owner, text)`, `getQuestionState`, `isQuestionOpen`, `promoteToBackground` i `registerUserWait(owner, cancel)` obsługują odpowiedź, stan i pauzę. Funkcja zwolnienia kanału użytkownika jest idempotentna; `dispose` anuluje otwarte kanały. Zegar pytania mierzy monotonicznie 300000 ms, pauzuje tylko dla pełnego właściciela i nie resetuje pozostałego czasu. Stop, koniec biegu i unload zamykają oczekiwanie przed powiadomieniem obserwatorów. `SubTask.questionState` jest opcjonalne dla starszych danych, a model paska normalizuje brak do `none`.
 
-`SubTaskNotifier` udostępnia dodatkowo `setNoticeDeliverer`, `pendingNotices` i `claimNotices` dla unii `SubTaskNotice` (pytanie albo wynik). Zamknięcie pytania usuwa także zajęty wpis, więc późne `ack` lub `release` nie przywróci go. Starsze metody pozostają adapterami samych wyników. Typy protokołu i zegara są eksportowane przez barrel; runner deklaruje opcjonalne hooki, ale nie wykonuje jeszcze narzędzia pytania.
+`SubTaskNotifier` udostępnia dodatkowo `setNoticeDeliverer`, `pendingNotices` i `claimNotices` dla unii `SubTaskNotice` (pytanie albo wynik). Zamknięcie pytania usuwa także zajęty wpis, więc późne `ack` lub `release` nie przywróci go. Starsze metody pozostają adapterami samych wyników. Typy protokołu i zegara są eksportowane przez barrel.
+
+Runner dodaje lokalne `ask_parent` każdemu subowi, również przy pustej konfiguracji narzędzi, i odmawia `ask_user`. Odpowiedź trafia do tego samego transkryptu. Brak odpowiedzi lub anulowanie przerywa pętlę bez syntezy; partial, wynik i handoff zachowują treść pytania i rozstrzygnięcie. Hooki `onActivity` i `onQuestion` informują o otwarciu i zamknięciu. `cancelParentQuestion` zamyka oczekiwanie przy zewnętrznym abort przed publikacją partial. Pauza budżetu delegacji i przekazanie hooków przez `DelegateTool` należą do osobnego zadania.
 
 **Publiczne drzwi modułu:** klasy runtime + helpery widoczności/migracji.
 

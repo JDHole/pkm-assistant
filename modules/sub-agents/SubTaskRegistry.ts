@@ -40,7 +40,7 @@ import { log } from '../../core/utils/Logger.js';
 import type { RunOutcome, StopBy } from './runOutcome.js';
 import type { LoopMessage } from '../agent-loop/index.js';
 import { ParentQuestions } from './ParentQuestions.js';
-import type { Owner, QuestionId, QuestionState, ParentQuestionClock, OpenParentQuestionResult, AnswerResult } from './ParentQuestions.js';
+import type { Owner, QuestionId, QuestionState, QuestionResolution, ParentQuestionClock, OpenParentQuestionResult, AnswerResult } from './ParentQuestions.js';
 
 /** Stan biegu suba. `aborted` = ubity z zewnątrz (timeout delegacji), `error` = wyjątek. */
 export type SubTaskStatus = 'running' | 'done' | 'error' | 'aborted';
@@ -70,6 +70,7 @@ export interface SubTaskResult {
     stopReason?: AgentLoopStopReason;
     outcome?: RunOutcome;
     handoff?: string;
+    question?: { text: string; resolution: QuestionResolution };
 }
 
 /**
@@ -196,6 +197,10 @@ export class SubTaskRegistry {
     openParentQuestion(taskId: string, text: string): OpenParentQuestionResult {
         const task = this._tasks.get(taskId);
         return task ? this._questions.open(task, text) : { kind: 'rejected', reason: 'unavailable' };
+    }
+    cancelParentQuestion(taskId: string): void {
+        const task = this._tasks.get(taskId);
+        if (task) this._questions.close(task, { kind: 'cancelled', by: task.stopRequestedBy ?? 'system', reason: 'run-ended' });
     }
     answerParentQuestion(taskId: string, id: QuestionId, owner: Owner, text: string): AnswerResult {
         return this._questions.answer(this._tasks.get(taskId), id, owner, text);

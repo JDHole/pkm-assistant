@@ -27,7 +27,7 @@ test('runTask przejmuje queued na tym samym id i zamraża konfigurację przy sta
     t.is(taskIds[0], threadId);
     t.is(registry.getThread(threadId)?.runIds[0], threadId);
     t.is(registry.getThread(threadId)?.phase, 'closed');
-    t.deepEqual(payloadTools, ['read']);
+    t.deepEqual(payloadTools, ['read', 'ask_parent']);
     t.deepEqual(registry.getThread(threadId)?.config.toolNames, ['read']);
 });
 
@@ -60,5 +60,5 @@ test('narzędzia suba na limicie głębokości ukrywają sub_agent', async t => 
     } } as unknown as ChatModel;
     const runner = new SubAgentRunner({ toolRegistry: { getTool: (name: string) => tools.find(tool => tool.name === name) ?? null, filterByAgent: () => tools }, app: {}, plugin: { subTaskRegistry: registry } });
     await runner.runTask('zadanie', { name: owner.agentName }, { ...config, tools: names }, model, { origin: owner, delegationDepth: 1 });
-    t.deepEqual(visible, ['read']);
+    t.deepEqual(visible, ['read', 'ask_parent']);
 });

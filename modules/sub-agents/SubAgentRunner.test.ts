@@ -394,9 +394,9 @@ test('runTask hides delegate at the depth limit and keeps it below the limit', a
     const deeperRunner = new SubAgentRunner({ toolRegistry: registry, app: {}, plugin: { env: { settings: { pkmAssistant: { limits: { max_delegation_depth: 2 } } } } } });
     await runner.runTask('task', { name: 'Owner' }, { name: 'worker', tools: names }, model, { delegationDepth: 1, modelTimeout: 5 });
     await deeperRunner.runTask('task', { name: 'Owner' }, { name: 'worker', tools: names }, model, { delegationDepth: 1, modelTimeout: 5 });
-    t.deepEqual(observed[0].names, []);
+    t.deepEqual(observed[0].names, ['ask_parent']);
     t.true(observed[0].prompt.includes(tr('subagent.frame.no_further_delegation')));
-    t.deepEqual(observed[1].names, ['delegate', 'agent_delegate']);
+    t.deepEqual(observed[1].names, ['delegate', 'agent_delegate', 'ask_parent']);
 });
 
 test('filtr prefiksowy po nazwie suba nie łapie cudzych nazw (kontrakt harnessa)', async t => {
@@ -1023,10 +1023,10 @@ test('_getTools przecina też whitelistę WOŁAJĄCEGO suba', t => {
     }) as unknown as { _getTools(names: string[], parent: unknown, caller?: string[] | null): Array<{ function: { name: string } }> };
 
     const bezWolajacego = runner._getTools(['read', 'list', 'write'], { name: 'Tester' });
-    t.deepEqual(bezWolajacego.map(td => td.function.name), ['read', 'list', 'write']);
+    t.deepEqual(bezWolajacego.map(td => td.function.name), ['read', 'list', 'write', 'ask_parent']);
 
     const zWolajacym = runner._getTools(['read', 'list', 'write'], { name: 'Tester' }, ['read']);
-    t.deepEqual(zWolajacym.map(td => td.function.name), ['read'], 'wnuk nie dostaje nic ponad rodzica-suba');
+    t.deepEqual(zWolajacym.map(td => td.function.name), ['read', 'ask_parent'], 'wnuk dostaje narzędzie pytania poza whitelistą');
 });
 
 test('_executeTool podaje klientowi whitelistę suba jako callerToolNames', async t => {

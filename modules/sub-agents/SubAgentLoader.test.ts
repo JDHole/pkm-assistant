@@ -76,10 +76,10 @@ test('saved sub without tools gives the runner the same parent-filtered tools be
         await runner.runTask('task', { name: 'parent' }, config, model);
     };
     await run();
-    t.deepEqual(received[0], ['search', 'list', 'read', 'web_search']);
+    t.deepEqual(received[0], ['search', 'list', 'read', 'web_search', 'ask_parent']);
     await loader.reloadSubAgents();
     await run();
-    t.deepEqual(received[1], ['search', 'list', 'read', 'web_search']);
+    t.deepEqual(received[1], ['search', 'list', 'read', 'web_search', 'ask_parent']);
 });
 
 // Brak ról systemowych — plugin nie ma żadnych wbudowanych subów.

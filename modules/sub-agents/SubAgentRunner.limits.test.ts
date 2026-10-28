@@ -264,7 +264,7 @@ test('sub-agent forwards trusted context through the real MCPClient and keeps bo
     }, model as never, { modelTimeout: 5000, shouldAbort });
 
     t.is((received as { resultBudgetChars: number }).resultBudgetChars, 600);
-    t.is((received as { shouldAbort: () => boolean }).shouldAbort, shouldAbort);
+    t.false((received as { shouldAbort: () => boolean }).shouldAbort());
     const transcript = wynikNarzedziaZTranskryptu(model);
     t.deepEqual(JSON.parse(transcript), { success: false, code: 'file_changed', restart_offset: 0, isError: true });
     t.false(transcript.startsWith('Błąd narzędzia'));
