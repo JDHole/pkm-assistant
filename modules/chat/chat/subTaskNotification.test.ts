@@ -1,4 +1,5 @@
 import test from 'ava';
+import { QuestionTestClock } from '../../sub-agents/test-support/questionTestClock.js';
 import { setLocale, t as tr } from '../../../core/i18n/index.js';
 import { buildSubTaskNotificationText, matchTabForOrigin } from './subTaskNotification.js';
 import type { SubTask } from '../../sub-agents/index.js';
@@ -348,4 +349,47 @@ test('matchTabForOrigin dopasowuje sesję i nie spada na inną sesję agenta', t
     t.is(matchTabForOrigin(tabs, { agentName: 'Jaskier', sessionPath: '/b' }, tabKeyFn)?.sessionId, 'second');
     t.is(matchTabForOrigin(tabs, { agentName: 'Jaskier', sessionPath: '/missing' }, tabKeyFn), null);
     t.is(matchTabForOrigin(tabs, { agentName: 'Jaskier' }, tabKeyFn)?.sessionId, 'first');
+});
+
+
+test.serial('brak odpowiedzi i pytanie trafiają do modelu przy pustym i długim dorobku', t => {
+    setLocale('pl');
+    for (const completeness of ['empty', 'partial'] as const) {
+        const task = makeTask({ outcome: { end: { kind: 'timeout' }, completeness, hasAnswer: false, hasMaterial: completeness === 'partial', effects: [] }, result: { text: 'Dorobek '.repeat(100), toolsUsed: [], durationMs: 1, usage: null, question: { text: 'Który katalog wybrać?', resolution: { kind: 'no-answer' } } } });
+        const text = buildSubTaskNotificationText(task, { maxResultChars: 12 });
+        t.true(text.includes('Brak odpowiedzi: czas na odpowiedź upłynął.'));
+        t.true(text.includes('Otwarte pytanie: Który katalog wybrać?'));
+    }
+});
+
+
+test.serial('prawdziwe wygaśnięcie ask_parent przekazuje pytanie bez dorobku i po długim dorobku', async t => {
+    setLocale('pl');
+    for (const withRead of [false, true]) {
+        const clock = new QuestionTestClock();
+        const registry = new SubTaskRegistry({ questionClock: clock });
+        const read = { name: 'read', description: 'read', inputSchema: {}, execute: async () => 'materiał '.repeat(500) };
+        const runner = new SubAgentRunner({ app: {}, plugin: { subTaskRegistry: registry }, toolRegistry: { filterByAgent: () => withRead ? [read] : [], getTool: () => withRead ? read : null } });
+        let ready!: () => void;
+        const waiting = new Promise<void>(resolve => { ready = resolve; });
+        let calls = 0;
+        const model = { stream(_payload: unknown, cb: { done(value: unknown): void }) {
+            calls++;
+            const call = withRead && calls === 1
+                ? { id: 'r', type: 'function', function: { name: 'read', arguments: '{}' } }
+                : { id: 'q', type: 'function', function: { name: 'ask_parent', arguments: '{"text":"Który katalog wybrać?"}' } };
+            cb.done({ choices: [{ message: { role: 'assistant', content: '', tool_calls: [call] } }] });
+        } };
+        const run = runner.runTask('Zadanie', { name: 'Lead' }, { name: 'Badacz', tools: withRead ? ['read'] : [] } as never, model as never,
+            { origin: { agentName: 'Lead', sessionPath: 's', sessionEpoch: 'e' }, onActivity: activity => { if (activity.kind === 'waiting') ready(); } });
+        await waiting;
+        const task = registry.list()[0];
+        clock.advance(300000);
+        await run;
+        const text = buildSubTaskNotificationText(task, { maxResultChars: 12 });
+        t.is(task.outcome?.completeness, withRead ? 'partial' : 'empty');
+        t.true(text.includes('Brak odpowiedzi: czas na odpowiedź upłynął.'));
+        t.true(text.includes('Otwarte pytanie: Który katalog wybrać?'));
+        registry.dispose();
+    }
 });

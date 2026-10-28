@@ -180,9 +180,10 @@ type RestoredMessage = Awaited<ReturnType<AgentMemory['loadActiveSession']>>['me
  * (`ActiveSessionMessage.toolCallId`/`toolCalls` są opcjonalne — brak w pliku legacy/v1/v2).
  */
 function _restoredMessageMeta(msg: RestoredMessage) {
-    const meta: { tool_call_id?: string; tool_calls?: NonNullable<RestoredMessage['toolCalls']> } = {};
+    const meta: { tool_call_id?: string; tool_calls?: NonNullable<RestoredMessage['toolCalls']>; _subTaskResult?: { question: NonNullable<RestoredMessage['question']> } } = {};
     if (msg.toolCallId) meta.tool_call_id = msg.toolCallId;
     if (msg.toolCalls) meta.tool_calls = msg.toolCalls;
+    if (msg.question) meta._subTaskResult = { question: msg.question };
     return meta;
 }
 

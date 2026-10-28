@@ -4,6 +4,7 @@ import { _restoreActiveSession, handleNewSession } from './chat_session.js';
 import { SessionWriteConsent } from '../../../core/index.js';
 import { SessionCloseModal } from '../SessionCloseModal.js';
 import { SubTaskRegistry } from '../../sub-agents/index.js';
+import { formatSessionEvent, parseActiveSession } from '../../memory/activeSessionFormat.js';
 
 /**
  * BUG C1 — restore po restarcie Obsidiana gubił `tool_call_id`/`tool_calls`.
@@ -335,4 +336,22 @@ test.serial('handleNewSession: gałąź ARCHIVE - zgoda dla ZAKOŃCZONEJ sesji z
         consent.has('sessions/active/Inna_sesja.md', 'Notatki/b.md'),
         'zgoda dla INNEJ sesji ma zostać nietknięta',
     );
+});
+
+
+test('_restoreActiveSession zachowuje terminalne pytanie i treść bez rejestru zadań', async t => {
+    const file = formatSessionEvent('user_message', {
+        content: 'Dorobek: dwa pliki', seq: 1,
+        question: { text: 'Jaki zakres?', resolution: { kind: 'no-answer' } },
+    }, '2026-10-28T12:00:00.000Z') + formatSessionEvent('user_message', {
+        content: 'Inny wynik', seq: 2,
+    }, '2026-10-28T12:00:01.000Z');
+    const fakeThis = buildFakeThis(parseActiveSession(file).messages);
+    fakeThis.plugin.subTaskRegistry = new SubTaskRegistry();
+    await _restoreActiveSession.call(fakeThis);
+    t.deepEqual(fakeThis.rollingWindow.messages.map((m: TestDynamic) => ({ content: m.content, question: m._subTaskResult?.question })), [
+        { content: 'Dorobek: dwa pliki', question: { text: 'Jaki zakres?', resolution: { kind: 'no-answer' } } },
+        { content: 'Inny wynik', question: undefined },
+    ]);
+    t.deepEqual(fakeThis.plugin.subTaskRegistry.list(), []);
 });

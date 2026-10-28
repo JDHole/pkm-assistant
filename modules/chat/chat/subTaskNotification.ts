@@ -156,6 +156,14 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
         parts.push(t('chat.subagent_notification.failed', { error: err }));
     }
 
+    const question = task.result?.question;
+    if (question && question.resolution.kind !== 'answered') {
+        const reason = question.resolution.kind === 'no-answer'
+            ? t('chat.subagent_notification.question_no_answer')
+            : t('chat.subagent_notification.question_cancelled');
+        parts.push(t('chat.subagent_notification.question', { reason, question: question.text }));
+    }
+
     if (outcome?.completeness === 'partial' || outcome?.completeness === 'empty') {
         for (const effect of outcome.effects) {
             const check = effect.outcome === 'unknown' || effect.outcome === 'pending' ? 'unknown' : effect.check === 'matches' ? 'matches' : effect.check === 'mismatch' ? 'mismatch' : 'not_checked';

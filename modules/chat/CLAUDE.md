@@ -1544,9 +1544,17 @@ U3: `ChatTurnPartialState` synchronously adds one system receipt to the frozen o
 Partial tiles carry `_loopPartialHasToolResults` while live. After history restoration drops metadata, `buildMachineView` checks localized tool receipt headings and their retained previews in the content. A Stop without tool results has an empty tile summary, even if an older receipt still contains the former unconditional disclaimer.
 # Pytania subów w tle
 
-Pasek odświeża się także po zdarzeniu `question:clock`, więc zmiana pauzy nie czeka na kolejną klatkę. Render historii i `append_message` pobierają dane pytania z dostępnego zadania w rejestrze, a kafelek bezpośredniego wyniku narzędzia ze zwrotki zawierającej `question`. Kolejka renderowana w `_chatBeforeContinue` oraz odtworzenie bez zadania w rejestrze nie mają tych danych.
+Pasek odświeża się także po zdarzeniu `question:clock`, więc zmiana pauzy nie czeka na kolejną klatkę. Render historii i `append_message` korzystają z danych zadania w rejestrze lub zapisanego terminalnego pytania, a kafelek bezpośredniego wyniku narzędzia ze zwrotki zawierającej `question`.
 
 Notifier przekazuje czatowi także pytania. Auto-tura wymaga aktywnej sesji właściciela,
 wolnego czatu i przejścia tych samych bramek co wynik. Claim jest potwierdzany po
 synchronicznym dopisaniu wiadomości do okna, a pytanie przed dopisaniem jest ponownie
 sprawdzane w rejestrze. Metadane niosą identyfikator pytania i właściciela.
+Przyjęcie rejestruje uchwyt przerwania przed oczekiwaniem na render i zapis; zamknięcie
+widoku zatrzaskuje go, a przerwana tura nie uruchamia modelu. Uchwyt przygotowania jest
+adresowany zamrożonym kluczem zakładki, więc dwie sesje tego samego agenta nie nadpisują
+swoich uchwytów; zamknięcie widoku zatrzymuje wszystkie przygotowania. Rezerwacja blokuje zwykłą
+wiadomość tylko w sesji właściciela podczas przygotowania; po przekazaniu do stanu tury
+nie blokuje innych sesji.
+
+Powiadomienie o pytaniu suba jest osobnym kafelkiem: klasyfikator rozpoznaje także zapisany tekst PL/EN, pokazuje nazwę, zadanie z rejestru (albo jego identyfikator) i pytanie. Wynik niesie terminalne `question` w metadanych i w zdarzeniu sesji zarówno w auto-turze, jak w wyniku pobranym w trakcie tury. Po odczycie historii pytanie pozostaje dostępne także przy pustym rejestrze. Powód i tekst pytania są osobną sekcją powiadomienia dla modelu, poza limitem dorobku.

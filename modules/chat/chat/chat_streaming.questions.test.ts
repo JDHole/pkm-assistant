@@ -1,7 +1,12 @@
 import test from 'ava';
 import { SubTaskNotifier, SubTaskRegistry } from '../../sub-agents/index.js';
 import { QuestionTestClock } from '../../sub-agents/test-support/questionTestClock.js';
-import { _deliverSubTaskQuestion, send_message } from './chat_streaming.js';
+import { _chatExecuteToolCall, _deliverSubTaskQuestion, send_message, stop_all_turns } from './chat_streaming.js';
+import { append_message } from './chat_messages.js';
+import { RollingWindow } from './RollingWindow.js';
+import streamingManager from './StreamingManager.js';
+import { buildSubTaskResultDelivery } from './subTaskResultDelivery.js';
+import { formatSessionEvent, parseActiveSession } from '../../memory/activeSessionFormat.js';
 
 function fixture() {
     const clock = new QuestionTestClock();
@@ -154,4 +159,122 @@ test('wiadomość użytkownika nie odpowiada subowi', async t => {
     await send_message.call(f.view as never);
     t.deepEqual({ question: f.registry.getQuestionState('r1').kind, childAborted: Boolean(f.task.stopRequested), childAnswer: answer },
         { question: 'waiting', childAborted: false, childAnswer: null });
+});
+
+test('błąd renderowania po dopisaniu pytania nie dostarcza go drugi raz', async t => {
+    const f = fixture();
+    t.teardown(() => { f.notifier.dispose(); f.registry.dispose(); });
+    const window = new RollingWindow();
+    Object.assign(f.view, {
+        rollingWindow: window,
+        _preparingTurns: new Map(),
+        append_message: (role: string, content: string, display: string | undefined, meta: unknown) =>
+            append_message.call(f.view as never, role as never, content, display, meta as never),
+        updateTokenCounter: () => { throw new Error('błąd renderowania'); },
+        send_message: (opts: unknown) => send_message.call(f.view as never, opts as never),
+    });
+    f.registry.openParentQuestion('r1', 'Jaki zakres?');
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    f.notifier.drain();
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    t.is(window.messages.filter(message => message.questionId).length, 1);
+    t.is(f.notifier.pendingNotices().length, 0);
+    t.is(f.view._subTaskTurnPending, false);
+});
+
+function concurrentFixture() {
+    const f = fixture();
+    const a = new RollingWindow();
+    const b = new RollingWindow();
+    const tabB = { agentName: 'Jaskier', sessionPath: 'b.md', sessionEpoch: 'e2', sessionId: 'tab-b', isActive: false };
+    const memory = { activeSessionPath: 's.md', sessionEpoch: 'e1', appendSessionEvent: async () => {} };
+    let release!: () => void;
+    let entered!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    const saving = new Promise<void>(resolve => { entered = resolve; });
+    const events: Array<{ path: string; event: unknown }> = [];
+    memory.appendSessionEvent = async (path?: string, event?: unknown) => {
+        events.push({ path: path || '', event });
+        if (path === 's.md') { entered(); await waiting; }
+    };
+    let modelCalls = 0;
+    const toolOwners: unknown[] = [];
+    const model = { modelKey: 'fixture', stream(_payload: unknown, handlers: { done(response: unknown): void }) {
+        modelCalls++;
+        handlers.done({ choices: [{ message: modelCalls === 1
+            ? { role: 'assistant', content: '', tool_calls: [{ id: 'b1', type: 'function', function: { name: 'list', arguments: '{}' } }] }
+            : { role: 'assistant', content: 'Gotowe' } }] });
+    } };
+    const view = Object.assign(f.view, {
+        leaf: { id: 'question-concurrent' }, chatTabs: [f.tab, tabB], rollingWindow: a,
+        input_area: { value: '' }, inputHistory: [] as string[], tokenTracker: { record() {} },
+        _preparingTurns: new Map(), _streamCtxMap: new Map(), _agentStates: new Map(),
+        _questionAutoTurn: { kind: 'idle' } as { kind: string },
+        plugin: { ...f.view.plugin, agentManager: { getActiveAgent: () => ({ name: 'Jaskier' }),
+            getAgentMemory: () => memory, getActiveSystemPromptWithMemory: async () => 'system' },
+            mcpClient: { async executeToolCall(_call: unknown, _agent: string, options: { origin: unknown }) { toolOwners.push(options.origin); return { success: true }; } } },
+        env: { settings: { pkmAssistant: { enableOczko: false, limits: { chat_stream_stall_timeout_ms: 0 } } } },
+        append_message(role: 'user', content: string, _display: unknown, meta: object) { return this.rollingWindow.addMessage(role, content, meta); },
+        async appendToActiveSession(event: unknown) { events.push({ path: memory.activeSessionPath, event }); },
+        async _resolveMentions(text: string) { return { displayText: text, contextText: '' }; },
+        resetInputArea() { this.input_area.value = ''; }, set_generating(value: boolean) { f.view.is_generating = value; },
+        showTypingIndicator() {}, _clearQueuedDrainTimer() {}, stop_generation() {},
+        get_chat_model: () => model, _chatResolveTools: () => [{ type: 'function', function: { name: 'list', parameters: {} } }],
+        _chatExecuteToolCall, _chatOnIterationStart() {}, _chatOnToolCallsParsed() {}, _chatOnToolResults() {},
+        _chatBeforeContinue() {}, _chatOnUsage() {}, _chatOnBackstop() {}, _isTurnActiveTab: () => false,
+        _finalizeTurn() {}, handle_error(error: unknown) { throw error; },
+        send_message(opts: unknown) { return send_message.call(this as never, opts as never); },
+    });
+    return { ...f, view, a, b, tabB, memory, saving, release, events, toolOwners, modelCalls: () => modelCalls };
+}
+
+test.serial('zamknięcie podczas zapisu przyjętego pytania nie uruchamia modelu', async t => {
+    const f = concurrentFixture();
+    t.teardown(() => { f.release(); f.notifier.dispose(); f.registry.dispose(); streamingManager.stopStream('question-concurrent::Jaskier'); });
+    f.registry.openParentQuestion('r1', 'Jaki zakres?');
+    await f.saving;
+    t.is(f.a.messages.filter(message => message.questionId).length, 1);
+    stop_all_turns.call(f.view as never);
+    f.release();
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+    t.deepEqual({ modelCalls: f.modelCalls(), toolCalls: f.toolOwners.length, preparing: f.view._preparingTurns.size,
+        reservation: f.view._questionAutoTurn, pending: f.view._subTaskTurnPending },
+    { modelCalls: 0, toolCalls: 0, preparing: 0, reservation: { kind: 'idle' }, pending: false });
+});
+
+test.serial('druga sesja tego samego agenta działa, gdy zapis pytania pierwszej czeka', async t => {
+    const f = concurrentFixture();
+    t.teardown(() => { f.release(); f.notifier.dispose(); f.registry.dispose(); streamingManager.stopStream('question-concurrent::Jaskier'); });
+    f.registry.openParentQuestion('r1', 'Jaki zakres?');
+    await f.saving;
+    f.tab.isActive = false;
+    f.tabB.isActive = true;
+    f.memory.activeSessionPath = 'b.md';
+    f.memory.sessionEpoch = 'e2';
+    f.view.rollingWindow = f.b;
+    f.view.input_area.value = 'Wiadomość do B';
+    await send_message.call(f.view as never, { meta: { origin: 'human' } });
+    t.deepEqual({ calls: f.modelCalls(), toolOwners: f.toolOwners, b: f.b.messages[0]?.content,
+        paths: f.events.map(item => item.path), preparing: [...f.view._preparingTurns.keys()] },
+    { calls: 2, toolOwners: [{ agentName: 'Jaskier', sessionPath: 'b.md', sessionEpoch: 'e2', tabKey: 'tab-b' }],
+        b: 'Wiadomość do B', paths: ['s.md', 'b.md'], preparing: ['tab'] });
+    stop_all_turns.call(f.view as never);
+    f.release();
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+    t.is(f.view._preparingTurns.size, 0);
+});
+
+test.serial('wynik z tła zapisuje terminalne pytanie czytelne bez rejestru', async t => {
+    const f = concurrentFixture();
+    t.teardown(() => { f.release(); f.notifier.dispose(); f.registry.dispose(); streamingManager.stopStream('question-concurrent::Jaskier'); });
+    f.task.result = { text: 'Dorobek', toolsUsed: [], durationMs: 1, usage: null,
+        question: { text: 'Jaki zakres?', resolution: { kind: 'no-answer' } } };
+    const delivery = buildSubTaskResultDelivery(f.task, f.registry, 60000);
+    await send_message.call(f.view as never, { injectedText: delivery.text, meta: delivery.meta });
+    const event = f.events[0].event as Record<string, unknown>;
+    const file = formatSessionEvent('user_message', event, '2026-10-28T12:00:00.000Z');
+    const emptyRegistry = new SubTaskRegistry();
+    t.teardown(() => emptyRegistry.dispose());
+    t.deepEqual({ question: parseActiveSession(file).messages[0]?.question, tasks: emptyRegistry.list() },
+        { question: { text: 'Jaki zakres?', resolution: { kind: 'no-answer' } }, tasks: [] });
 });

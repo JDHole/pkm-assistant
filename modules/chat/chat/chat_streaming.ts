@@ -104,6 +104,12 @@ interface SendMessageOptions {
     questionDelivery?: { question: ParentQuestion; token: object; claim: SubTaskNoticeClaim; window: RollingWindow; tab: ChatTab; owner: FrozenTurnOwner };
 }
 
+function savedResultQuestion(meta: unknown): unknown {
+    if (!meta || typeof meta !== 'object' || !('_subTaskResult' in meta)) return undefined;
+    const result = meta._subTaskResult;
+    return result && typeof result === 'object' && 'question' in result ? result.question : undefined;
+}
+
 /**
  * Wynik wywołania narzędzia w zakresie, jaki czyta czat (render bloku, token tracking,
  * side-effecty). Kształt należy do SERWERA narzędzia, więc wszystko jest opcjonalne,
@@ -282,13 +288,14 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     const inlineTriggers = parseTriggersIfHuman(rawText, messageMeta);
     const text = inlineTriggers.length > 0 ? (stripInlineTriggers(rawText) || rawText) : rawText;
     if (!text) return;
-    if (isHuman && this._questionAutoTurn?.kind === 'reserved' && !this._questionAutoTurn.accepted) {
+    const reservationOwner = this._questionAutoTurn?.kind === 'reserved' && isQuestionOwnerCurrent(this, this._questionAutoTurn);
+    if (isHuman && reservationOwner && this._questionAutoTurn?.kind === 'reserved' && !this._questionAutoTurn.accepted) {
         this._questionAutoTurn = { kind: 'idle' };
         this._subTaskTurnPending = false;
     }
 
     // ── MESSAGE QUEUE: if generating, queue message for after completion ──
-    if (this.is_generating || (isHuman && this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.accepted)) {
+    if (this.is_generating || (isHuman && reservationOwner && this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.accepted)) {
         if (isInjected) {
             // Dostawca wyniku sprawdza `is_generating` PRZED wstrzyknięciem, więc tu nie
             // powinniśmy trafić. Jak jednak trafimy - wynik ZOSTAJE w kolejce notifiera
@@ -418,6 +425,8 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         }
     }
     let savedUserContent;
+    const turnAbort = createTurnAbort();
+    const questionTabKey = questionDelivery ? _tabKey(questionDelivery.tab) : '';
     if (hasAttachments && attachmentResult) {
         // Attachments present: content may be array (multimodal) or string
         // Display: user's text with @[Name] badges (no mention metadata)
@@ -432,22 +441,44 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
             if (this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.token === questionDelivery.token) {
                 this._questionAutoTurn.accepted = true;
             }
+            this._preparingTurns.set(questionTabKey, turnAbort);
             if (!this._autoTurnChainCounts) this._autoTurnChainCounts = new Map();
             const agentName = questionDelivery.question.owner.agentName;
             const count = this._autoTurnChainCounts.get(agentName) || 0;
             this._autoTurnChainCounts.set(agentName, evaluateAutoTurnChain(count, getLimits(this.env?.settings).max_consecutive_auto_turns).nextCount);
         }
-        await appended;
+        try {
+            await appended;
+        } catch (error) {
+            if (questionDelivery && this._preparingTurns.get(questionTabKey) === turnAbort) {
+                this._preparingTurns.delete(questionTabKey);
+            }
+            throw error;
+        }
         savedUserContent = apiContent;
     }
     const userEvent: ActiveSessionEventInput = {
         type: 'user_message',
         agentName: activeAgentName,
         content: savedUserContent,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        ...(savedResultQuestion(messageMeta) ? { question: savedResultQuestion(messageMeta) } : {}),
     };
     if (questionDelivery) {
-        await questionDelivery.owner.memory?.appendSessionEvent(questionDelivery.owner.sessionPath, userEvent, questionDelivery.owner.sessionEpoch);
+        try {
+            await questionDelivery.owner.memory?.appendSessionEvent(questionDelivery.owner.sessionPath, userEvent, questionDelivery.owner.sessionEpoch);
+        } catch (error) {
+            if (this._preparingTurns.get(questionTabKey) === turnAbort) {
+                this._preparingTurns.delete(questionTabKey);
+            }
+            throw error;
+        }
+        if (turnAbort.isAborted()) {
+            if (this._preparingTurns.get(questionTabKey) === turnAbort) {
+                this._preparingTurns.delete(questionTabKey);
+            }
+            return;
+        }
     } else {
         await this.appendToActiveSession?.(userEvent);
     }
@@ -472,6 +503,10 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     // `_agentStates`. Zamrożony klucz sprzed mutacji trafia we wpis, pod którym stan NAPRAWDĘ
     // leży; przeliczony po fakcie - nie.
     const ownerTabKey = _tabKey(owner.tab);
+    if (questionDelivery && ownerTabKey !== questionTabKey) {
+        if (this._preparingTurns.get(questionTabKey) === turnAbort) this._preparingTurns.delete(questionTabKey);
+        return;
+    }
     // Prawdziwa wiadomość człowieka przerywa ŁAŃCUCH auto-tur PO SUBACH (`_deliverSubTaskResult`,
     // niżej) dla TEGO agenta - inaczej sufit `max_consecutive_auto_turns` liczyłby też tury,
     // które user zaczął sam. `isHuman` to `resolveMessageOrigin(opts?.meta)` policzone na
@@ -490,8 +525,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     // tury w `_streamCtxMap`. Między jednym a drugim jest budowa promptu z pamięcią (potrafi
     // trwać sekundy) - w tym oknie user MOŻE kliknąć Stop, a mapa tur jeszcze nic o tej turze
     // nie wie. `_preparingTurns` to skrzynka kontaktowa na ten czas.
-    const turnAbort = createTurnAbort();
-    this._preparingTurns.set(owner.agentName, turnAbort);
+    this._preparingTurns.set(ownerTabKey, turnAbort);
     const ownerTabSessionPath = owner.tab?.sessionPath;
     const ownerTabSessionEpoch = owner.tab?.sessionEpoch ?? null;
     const turnSessionPath = owner.sessionPath || (owner.memory ? await owner.memory.startActiveSession(owner.agentName).catch(() => '') : '');
@@ -511,11 +545,19 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     }
 
     // Toggle UI state + show immediate visual feedback
-    this.set_generating(true);
+    if (!questionDelivery || owner.tab?.isActive) {
+        this.set_generating(true);
+        this.showTypingIndicator(t('chat.streaming.preparing'));
+    } else {
+        const state = this._agentStates.get(ownerTabKey ?? '');
+        if (state) state.isGenerating = true;
+    }
     // Od tej chwili serializację przejmuje `is_generating` - bezpiecznik „tura powiadomienia
     // już rusza" (ustawiany przez dostawcę PRZED tym awaitem) nie jest już potrzebny.
     this._subTaskTurnPending = false;
-    this.showTypingIndicator(t('chat.streaming.preparing'));
+    if (questionDelivery && this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.token === questionDelivery.token) {
+        this._questionAutoTurn = { kind: 'idle' };
+    }
 
     // Get system prompt for the TURN OWNER (includes memory: brain + active context)
     const agentManager = this.plugin?.agentManager;
@@ -603,6 +645,10 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     // (nowa sesja wystartowała następną) i tura żywa dzieliłyby wpis bez niego - watchdog
     // porzuconej tury strzelałby „po agencie" i ubijałby requesty tury ŻYWEJ. Strażnik
     // w _onStreamStall porównuje turnId zanim komukolwiek przerwie.
+    if (turnAbort.isAborted()) {
+        if (this._preparingTurns.get(ownerTabKey) === turnAbort) this._preparingTurns.delete(ownerTabKey);
+        return;
+    }
     const turnId = ++_turnSeq;
     // Uchwyt przerwania TEJ tury (`turnAbort`, założony wyżej razem z guzikiem Stop) wchodzi
     // teraz do wpisu `_streamCtxMap` - stamtąd sięga po niego `stop_generation(agentName)`
@@ -616,7 +662,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         abort: turnAbort,
     });
     // Tura ma już wpis w mapie - skrzynka kontaktowa na czas przygotowania nie jest potrzebna.
-    this._preparingTurns.delete(owner.agentName);
+    if (this._preparingTurns.get(ownerTabKey) === turnAbort) this._preparingTurns.delete(ownerTabKey);
 
     // === SNAPSHOT for "Pokaż prompt" in Settings ===
     if (this.plugin) {
@@ -656,7 +702,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         // Ostatnia treść namalowana przez handle_chunk (cykl życia jak current_message_container) -
         // czyta to _finalizeTurn, żeby wiedzieć czy finalna wersja różni się od tego, co widzi user.
         this._lastPaintedContent = null;
-        this.showTypingIndicator();
+        if (!questionDelivery || owner.tab?.isActive) this.showTypingIndicator();
 
         // Extended thinking: universal flag for all providers that support it.
         // Liczony RAZ na turę, nie per kontynuację.
@@ -1050,6 +1096,7 @@ async function _consumeUserStoppedSubTasks(this: ChatViewLike, turn: ChatTurn): 
             await turn.rw.addMessage('user', text, meta);
             await appendTurnSessionEvent(turn, {
                 type: 'user_message', agentName: turn.agentName, content: text, timestamp: new Date().toISOString(),
+                ...(savedResultQuestion(meta) ? { question: savedResultQuestion(meta) } : {}),
             });
             const tab = turn.owner.tab;
             const isOwnerActive = () => this._isTurnActiveTab(turn) && tab?.isActive === true
@@ -2280,7 +2327,9 @@ export function stop_generation(this: ChatViewLike, agentName?: string, reason =
     // Tura w locie ma uchwyt we wpisie mapy; tura w przygotowaniu (prompt się jeszcze buduje) -
     // w `_preparingTurns`. Bez tej drugiej gałęzi Stop kliknięty w oknie przygotowania trafiałby
     // w próżnię i tura ruszyłaby mimo niego.
-    (sCtx?.abort || this._preparingTurns?.get(activeAgent))?.abort(reason);
+    const activeTab = (this.chatTabs || []).find((tab: ChatTab) => tab.isActive && tab.agentName === activeAgent);
+    this._preparingTurns?.get(_tabKey(activeTab))?.abort(reason);
+    sCtx?.abort?.abort(reason);
     // Po Stopie nie sięgamy sami po zaległe wyniki subów (patrz `_deliverSubTaskResult`) - to
     // była rola dawnej flagi widoku, dziś osobny, jawny bezpiecznik na czas do następnej tury.
     this._drainSuppressed = true;
@@ -2360,8 +2409,10 @@ export function stop_generation(this: ChatViewLike, agentName?: string, reason =
 export function stop_all_turns(this: ChatViewLike, reason = 'close'): string[] {
     // Kopia nazw PRZED pętlą - `stop_generation` kasuje wpisy z mapy w trakcie. Bierzemy też
     // tury W PRZYGOTOWANIU (prompt się buduje, wpisu w mapie jeszcze nie ma).
-    const preparing = Array.from<string>(this._preparingTurns?.keys?.() || [])
-        .map((agentName) => ({ agentName }));
+    for (const abort of this._preparingTurns?.values?.() || []) abort.abort(reason);
+    const preparing = (this.chatTabs || [])
+        .filter((tab: ChatTab) => this._preparingTurns?.has(_tabKey(tab)))
+        .map((tab: ChatTab) => ({ agentName: tab.agentName }));
     const names = collectTurnsToStop([...(this._streamCtxMap?.values?.() || []), ...preparing]);
     // Zbieramy tożsamości przed stop_generation i czyszczeniem stanów. Zakładka może mieć samą
     // kolejkę, bez aktywnej tury ani wpisu w _streamCtxMap.
@@ -2431,7 +2482,7 @@ export function _wireSubTaskDeliverer(this: ChatViewLike) {
     this._drainSubTasks();
 }
 
-function isQuestionOwnerCurrent(view: ChatViewLike, question: ParentQuestion): boolean {
+function isQuestionOwnerCurrent(view: ChatViewLike, question: Pick<ParentQuestion, 'owner'>): boolean {
     const owner = freezeTurnOwner(view);
     return owner.agentName === question.owner.agentName && owner.sessionPath === question.owner.sessionPath
         && owner.sessionEpoch === question.owner.sessionEpoch;
@@ -2444,7 +2495,7 @@ export function _deliverSubTaskQuestion(this: ChatViewLike, question: ParentQues
     const tab = matchTabForOrigin(this.chatTabs, question.owner, _tabKey);
     const limits = getLimits(this.env?.settings);
     const chain = evaluateAutoTurnChain(this._autoTurnChainCounts?.get(question.owner.agentName) || 0, limits.max_consecutive_auto_turns);
-    if (!notifier || !task?.background || !registry?.isQuestionOpen(question.taskId, question.id)
+    if (!notifier || this._questionAutoTurn?.kind === 'reserved' || !task?.background || !registry?.isQuestionOpen(question.taskId, question.id)
         || !evaluateSubTaskDelivery({ tab, isGenerating: this.is_generating,
             subTaskTurnPending: this._subTaskTurnPending, drainSuppressed: this._drainSuppressed,
             userStopped: task.userStopSeq !== undefined, chainAllowed: chain.allowed }).allowed

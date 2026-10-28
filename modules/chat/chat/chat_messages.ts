@@ -133,7 +133,7 @@ export async function append_message(this: ChatViewLike, role: MessageRole, cont
         // (spec A3) - klasyfikacja przez meta (świeżo dopisana kilka linii wyżej na tej samej
         // wiadomości). Zasada nadrzędna: treść dla MODELU zostaje identyczna, zmienia się
         // WYŁĄCZNIE render w oknie czatu.
-        const machineView = buildMachineView({ role, content, ...(meta || {}) }, { t, getThread: id => this.plugin?.subTaskRegistry?.getThread?.(id) });
+        const machineView = buildMachineView({ role, content, ...(meta || {}) }, { t, getTask: id => this.plugin?.subTaskRegistry?.getTask?.(id), getThread: id => this.plugin?.subTaskRegistry?.getThread?.(id) });
         if (machineView) {
             const id = getSubTaskNotificationTaskId({ role, content, ...(meta || {}) });
             if (id) {

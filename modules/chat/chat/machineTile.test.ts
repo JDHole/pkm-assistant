@@ -15,7 +15,9 @@ import { readFileSync } from 'node:fs';
 import { renderMachineTile } from './machineTile.js';
 import { buildMachineView } from './machineMessage.js';
 import { buildSubTaskNotificationText } from './subTaskNotification.js';
-import { t as translate } from '../../../core/i18n/index.js';
+import { buildSubTaskQuestionDelivery } from './subTaskQuestionDelivery.js';
+import { buildSubTaskResultDelivery } from './subTaskResultDelivery.js';
+import { setLocale, t as translate } from '../../../core/i18n/index.js';
 import { setNoteOpener } from '../../ui-components/index.js';
 import type { MachineView } from './machineMessage.js';
 import type { SubTask } from '../../sub-agents/index.js';
@@ -286,5 +288,45 @@ test.serial('renderMachineTile: ramka wyniku suba używa SubAgentBlock z rolą s
         const result = findByClass(tile!, 'cs-subresult');
         t.truthy(result);
         t.true(deepText(result!).includes('DOROBEK'));
+    });
+});
+
+
+test.serial('pytanie suba przechodzi przez delivery, klasyfikator i render w PL i EN', async t => {
+    await withFakeDocument(async () => {
+        for (const [locale, title] of [['pl', 'Pytanie sub-agenta Badacz'], ['en', 'Question from sub-agent Badacz']] as const) {
+            setLocale(locale);
+            const delivery = buildSubTaskQuestionDelivery({ id: 'q1', taskId: 'task1', subId: 'sub1', name: 'Badacz', text: 'Który katalog wybrać?', owner: { agentName: 'Lead', sessionPath: 'a', sessionEpoch: 'b' }, askedAt: 1 } as never);
+            for (const meta of [delivery.meta, {}]) {
+                const view = buildMachineView({ role: 'user', content: delivery.text, ...meta }, { t: translate, getTask: () => ({ taskPreview: 'Sprawdź notatki' }) });
+                t.is(view?.kind, 'subtask_question');
+                const container = makeFakeEl();
+                await renderMachineTile(container as unknown as HTMLElement, fakePlugin([], null), view!);
+                findByClass(container, 'cs-tile__head')?.fire('click');
+                const rendered = deepText(container);
+                t.true(rendered.includes(title));
+                t.true(rendered.includes('Sprawdź notatki'));
+                t.true(rendered.includes('Który katalog wybrać?'));
+                t.false(rendered.includes('skończył w tle'));
+                t.false(rendered.includes('finished in the background'));
+            }
+        }
+        setLocale('en');
+    });
+});
+
+test.serial('wynik z question renderuje brak odpowiedzi bez rejestru', async t => {
+    await withFakeDocument(async () => {
+        setLocale('pl');
+        const task = { id: 'task1', name: 'Badacz', agentName: 'Lead', status: 'done', background: true, createdAt: 1, steps: [], budget: {}, outcome: { end: { kind: 'timeout' }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] }, result: { text: '', toolsUsed: [], durationMs: 1, usage: null, question: { text: 'Który katalog?', resolution: { kind: 'no-answer' } } } } as SubTask;
+        const delivery = buildSubTaskResultDelivery(task, undefined, 10);
+        const view = buildMachineView({ role: 'user', content: delivery.text, ...delivery.meta }, { t: translate });
+        const container = makeFakeEl();
+        await renderMachineTile(container as unknown as HTMLElement, fakePlugin([], null), view!);
+        findByClass(container, 'cs-tile__head')?.fire('click');
+        const rendered = deepText(container);
+        t.true(rendered.includes('brak odpowiedzi'));
+        t.true(rendered.includes('Otwarte pytanie: Który katalog?'));
+        setLocale('en');
     });
 });

@@ -24,13 +24,14 @@
  *      zmiana tekstu nagłówka w `pl.ts`/`en.ts` nie rozjechała się cicho z klasyfikatorem.
  */
 import { t } from '../../../core/i18n/index.js';
+import { buildSubTaskResultModel } from '../../sub-agents/index.js';
 import { artifactStatusLabel } from '../../artifacts/index.js';
 import { buildSubAgentResultView } from './subAgentResultView.js';
 import type { BuildSubAgentResultViewInput } from './subAgentResultView.js';
 import type { RunOutcome, SubTaskResultThread } from '../../sub-agents/index.js';
 import type { SubAgentResultView } from '../../ui-components/index.js';
 
-export type MachineKind = 'subtask_notification' | 'artifact_summon' | 'loop_partial' | null;
+export type MachineKind = 'subtask_notification' | 'subtask_question' | 'artifact_summon' | 'loop_partial' | null;
 
 export interface MachineViewOpen {
     label: string;
@@ -63,6 +64,7 @@ export interface MachineMessageLike {
 }
 
 const SUBTASK_HEADER_KEY = 'chat.subagent_notification.header';
+const QUESTION_KEY = 'chat.subagent_question.notification';
 const ARTIFACT_HEADER_KEY = 'artifact.summon.header';
 const SUBTASK_FOOTER_KEY = 'chat.subagent_notification.footer';
 const SUBTASK_REUSABLE_THREAD_KEY = 'chat.subagent_notification.reusable_thread';
@@ -164,6 +166,7 @@ export function classifyMachineMessage(msg: MachineMessageLike | null | undefine
 
     const text = typeof msg.content === 'string' ? msg.content : '';
     if (!text) return null;
+    if (parseQuestion(text)) return 'subtask_question';
     if (startsWithAny(text, SUBTASK_HEADER_PREFIXES)) return 'subtask_notification';
     if (startsWithAny(text, ARTIFACT_HEADER_PREFIXES)) return 'artifact_summon';
     return null;
@@ -175,6 +178,24 @@ export function getSubTaskNotificationTaskId(msg: MachineMessageLike | null | un
     const text = typeof msg?.content === 'string' ? msg.content : '';
     const id = extractSecondVar(text, SUBTASK_HEADER_KEY, ['name', 'task_id']);
     return id?.trim() || null;
+}
+
+function parseQuestion(text: string): { name: string; taskId: string; question: string } | null {
+    for (const locale of LOCALES) {
+        const segments = templateSegments(QUESTION_KEY, locale, ['name', 'task_id', 'text', 'sub_id', 'question_id']);
+        if (segments.length !== 6 || !text.startsWith(segments[0])) continue;
+        let rest = text.slice(segments[0].length);
+        const values: string[] = [];
+        for (let i = 1; i < segments.length; i++) {
+            const boundary = segments[i];
+            const end = boundary ? rest.indexOf(boundary) : rest.length;
+            if (end < 0) break;
+            values.push(rest.slice(0, end));
+            rest = rest.slice(end + boundary.length);
+        }
+        if (values.length === 5 && !rest) return { name: values[0], taskId: values[1], question: values[2] };
+    }
+    return null;
 }
 
 /** Wyciąga wartość PIERWSZEJ zmiennej nagłówka (np. `name`/`tytul`) z realnej treści, próbując
@@ -401,6 +422,14 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
             details: text, status: msg?._loopPartialStorageError === true ? 'error' : 'ok',
         };
     }
+    if (kind === 'subtask_question') {
+        const question = parseQuestion(text);
+        if (!question) return null;
+        const task = ctx.getTask?.(question.taskId);
+        const preview = task && typeof task === 'object' && 'taskPreview' in task && typeof task.taskPreview === 'string' ? task.taskPreview : question.taskId;
+        return { kind, title: ctx.t('chat.tile.machine.question_title', { name: question.name }),
+            summary: preview, details: question.question, status: 'ok' };
+    }
     if (kind === 'subtask_notification') {
         const name = extractFirstVar(text, SUBTASK_HEADER_KEY, ['name', 'task_id']) || '?';
         const { afterHeader, details } = subtaskDetails(text);
@@ -432,7 +461,7 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
         const structural = saved && typeof saved === 'object' ? saved as {
             name?: unknown; outcome?: unknown; result?: unknown; text?: unknown; handoff?: unknown;
             partial?: unknown; partialResult?: unknown; partialText?: unknown; error?: unknown; effects?: unknown;
-            thread?: unknown;
+            thread?: unknown; question?: unknown;
         } : null;
         const structuredOutcome = isStoredOutcome(structural?.outcome) ? structural.outcome : undefined;
         const storedResult = typeof structural?.result === 'string' ? structural.result
@@ -458,6 +487,13 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
             effects: Array.isArray(structural?.effects) ? structural.effects as BuildSubAgentResultViewInput['effects'] : undefined,
             thread: availableThread(storedThread),
         }, ctx.t) : buildParsedNotificationResult(text, name, availableThread(reusableInstruction ? { kind: 'reusable', sub_id: reusableInstruction } : { kind: 'unknown' }), ctx.t);
+        if (subAgentResult && structural?.question) {
+            const question = buildSubTaskResultModel({ question: structural.question, thread: { kind: 'unknown' } });
+            if (question.openQuestion !== undefined) {
+                subAgentResult.openQuestion = question.openQuestion;
+                subAgentResult.title = `${name} ${ctx.t(question.endLabelKey)}`;
+            }
+        }
         return {
             kind,
             title,
