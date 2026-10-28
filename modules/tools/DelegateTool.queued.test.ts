@@ -157,7 +157,7 @@ test.serial('wynik runnera po wygaśnięciu pytania zachowuje pytanie w rejestrz
     await waitUntil(() => requests.length === 2);
     requests[1].question();
     const result = await pending as { question?: unknown };
-    t.deepEqual(result.question, { text: 'Jaki zakres?', resolution: { kind: 'no-answer' } });
+    t.deepEqual(result.question, { text: 'Jaki zakres?', resolution: { kind: 'no-answer' }, note: 'The sub-agent received no answer to the question: Jaki zakres?' });
     const task = registry.list().find(item => item.result?.question?.resolution.kind === 'no-answer');
     t.deepEqual(task?.result?.question, result.question);
 });
