@@ -124,6 +124,7 @@ function liveRule(def: DecisionTreeRuleDef, tier: 'core' | 'extended'): Decision
 const CORE_RULE_DEFS: DecisionTreeRuleDef[] = [
     { id: 'deleg_escalation', group: 'delegacja', tool: null },
     { id: 'deleg_core', group: 'delegacja', tool: 'delegate' },
+    { id: 'deleg_question', group: 'delegacja', tool: 'sub_agent' },
     // Świat artefaktów żywych. `art_todo_default` gate'owany na `todo`, które
     // dochodzi dopiero w fazie D - do tego czasu reguła się NIE renderuje (świadome).
     { id: 'art_todo_default', group: 'artefakty', tool: 'todo' },
