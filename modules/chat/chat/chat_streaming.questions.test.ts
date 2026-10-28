@@ -3,6 +3,7 @@ import { SubTaskNotifier, SubTaskRegistry } from '../../sub-agents/index.js';
 import { QuestionTestClock } from '../../sub-agents/test-support/questionTestClock.js';
 import { _chatExecuteToolCall, _deliverSubTaskQuestion, send_message, stop_all_turns } from './chat_streaming.js';
 import { append_message } from './chat_messages.js';
+import { _closeActiveTab } from './chat_tabs.js';
 import { RollingWindow } from './RollingWindow.js';
 import streamingManager from './StreamingManager.js';
 import { buildSubTaskResultDelivery } from './subTaskResultDelivery.js';
@@ -262,6 +263,31 @@ test.serial('druga sesja tego samego agenta działa, gdy zapis pytania pierwszej
     f.release();
     for (let i = 0; i < 30; i++) await Promise.resolve();
     t.is(f.view._preparingTurns.size, 0);
+});
+
+test.serial('zamknięcie przygotowywanej zakładki nie przerywa drugiej sesji agenta', async t => {
+    const f = concurrentFixture();
+    t.teardown(() => { f.release(); f.notifier.dispose(); f.registry.dispose(); streamingManager.stopStream('question-concurrent::Jaskier'); });
+    f.registry.openParentQuestion('r1', 'Jaki zakres?');
+    await f.saving;
+    Object.assign(f.view, {
+        handleSaveSession: async () => {},
+        _switchTab: async () => {
+            f.tabB.isActive = true;
+            f.memory.activeSessionPath = 'b.md';
+            f.memory.sessionEpoch = 'e2';
+            f.view.rollingWindow = f.b;
+            f.view.is_generating = false;
+        },
+    });
+    await _closeActiveTab.call(f.view as never);
+    f.release();
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+    t.is(f.modelCalls(), 0);
+    f.view.input_area.value = 'Wiadomość do B';
+    await send_message.call(f.view as never, { meta: { origin: 'human' } });
+    t.deepEqual({ calls: f.modelCalls(), message: f.b.messages[0]?.content, owners: f.toolOwners },
+        { calls: 2, message: 'Wiadomość do B', owners: [{ agentName: 'Jaskier', sessionPath: 'b.md', sessionEpoch: 'e2', tabKey: 'tab-b' }] });
 });
 
 test.serial('wynik z tła zapisuje terminalne pytanie czytelne bez rejestru', async t => {

@@ -255,9 +255,10 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
     const agentName = tab?.agentName;
     // Tylko gdy ta zakładka NAPRAWDĘ coś trzyma — `stop_generation` czyści stan streamingu
     // i podnosi `_drainSuppressed`, więc na cichej zakładce byłoby to szkodliwe.
-    const wLocie = !!agentName && !!(
-        this._streamCtxMap?.has?.(agentName) || this._preparingTurns?.has?.(agentName)
-    );
+    const preparing = this._preparingTurns?.get(tabKey);
+    preparing?.abort('close_tab');
+    const stream = agentName ? this._streamCtxMap?.get(agentName) : undefined;
+    const wLocie = !!stream && stream.rollingWindow === this.rollingWindow;
     if (wLocie) {
         try {
             this.stop_generation(agentName, 'close_tab');

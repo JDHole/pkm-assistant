@@ -1557,4 +1557,8 @@ swoich uchwytów; zamknięcie widoku zatrzymuje wszystkie przygotowania. Rezerwa
 wiadomość tylko w sesji właściciela podczas przygotowania; po przekazaniu do stanu tury
 nie blokuje innych sesji.
 
+Przy zamknięciu zakładki uchwyt jej przygotowania jest przerywany po kluczu zakładki.
+Kontekst aktywnego strumienia nadal jest jednak kluczowany nazwą agenta: dwie równoległe
+tury tego samego agenta mogą nadpisać swój kontekst. Ta ścieżka wymaga dalszej poprawki.
+
 Powiadomienie o pytaniu suba jest osobnym kafelkiem: klasyfikator rozpoznaje także zapisany tekst PL/EN, pokazuje nazwę, zadanie z rejestru (albo jego identyfikator) i pytanie. Wynik niesie terminalne `question` w metadanych i w zdarzeniu sesji zarówno w auto-turze, jak w wyniku pobranym w trakcie tury. Po odczycie historii pytanie pozostaje dostępne także przy pustym rejestrze. Powód i tekst pytania są osobną sekcją powiadomienia dla modelu, poza limitem dorobku.
