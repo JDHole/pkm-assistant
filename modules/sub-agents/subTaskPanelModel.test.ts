@@ -16,6 +16,14 @@ import type { SubTask } from './SubTaskRegistry.js';
 import { t as tr } from '../../core/i18n/index.js';
 import { buildSubTaskResultModel, getStripStateLabelParts } from './index.js';
 
+test('wynik zachowuje rozstrzygnięcie i treść pytania bez odpowiedzi', t => {
+    const model = buildSubTaskResultModel({ question: { text: 'Jaki zakres?', resolution: { kind: 'no-answer' } }, thread: { kind: 'single' } });
+    t.deepEqual([model.questionResolution, model.openQuestion, model.endLabelKey], ['no-answer', 'Jaki zakres?', 'chat.substrip.question_no_answer_partial']);
+    const cancelled = buildSubTaskResultModel({ question: { text: 'Jaki zakres?', resolution: { kind: 'cancelled', by: 'user', reason: 'stop' } }, thread: { kind: 'single' } });
+    t.is(cancelled.questionResolution, 'cancelled');
+    t.is(cancelled.openQuestion, undefined);
+});
+
 const TERAZ = 1_000_000;
 
 test('naturalne zakończenie bez materiału ma tytuł pusty wynik', t => {

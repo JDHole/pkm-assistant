@@ -88,6 +88,7 @@ export class ParentQuestions {
             const state = this.check(entry.task);
             if (state.kind !== 'waiting' || ownerKey(state.question.owner) !== key || state.clock.kind !== 'ticking') continue;
             this.clear(entry); entry.task.questionState = { ...state, clock: { kind: 'paused', remainingMs: state.clock.remainingMs } };
+            this.emit('question:clock', state.question);
         }
         let active = true;
         return () => {
@@ -98,6 +99,7 @@ export class ParentQuestions {
                 if (state?.kind !== 'waiting' || ownerKey(state.question.owner) !== key || state.clock.kind !== 'paused') continue;
                 entry.task.questionState = { ...state, clock: { kind: 'ticking', remainingMs: state.clock.remainingMs, since: this.clock.now() } };
                 this.arm(entry, state.clock.remainingMs);
+                this.emit('question:clock', state.question);
             }
         };
     }

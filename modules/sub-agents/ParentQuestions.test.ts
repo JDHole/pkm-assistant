@@ -48,6 +48,18 @@ test('ask_user właściciela zachowuje resztę czasu', t => {
     const state = registry.getQuestionState('r1');
     t.deepEqual(state.kind === 'waiting' ? { kind: state.clock.kind, remainingMs: state.clock.remainingMs } : state, { kind: 'ticking', remainingMs: 200000 }); registry.dispose();
 });
+test('zmiana zegara emituje zdarzenie po pauzie i po wznowieniu', t => {
+    const { registry, create } = fixture(); create(); open(registry);
+    const seen: string[] = [];
+    registry.events.on('question:clock', () => {
+        const state = registry.getQuestionState('r1');
+        seen.push(state.kind === 'waiting' ? state.clock.kind : state.kind);
+    });
+    const first = registry.registerUserWait(owner, () => {});
+    const second = registry.registerUserWait(owner, () => {});
+    first(); second(); second();
+    t.deepEqual(seen, ['paused', 'ticking']); registry.dispose();
+});
 test('inna sesja nie zatrzymuje zegara', async t => {
     const results: string[] = [];
     for (const other of [{ ...owner, agentName: 'Inny' }, { ...owner, sessionPath: 'inne.md' }, { ...owner, sessionEpoch: 'e2' }]) {

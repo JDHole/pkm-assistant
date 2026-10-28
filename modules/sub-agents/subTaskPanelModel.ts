@@ -41,6 +41,8 @@ export interface BuildSubTaskResultModelInput {
     partialResult?: string | null;
     partialText?: string | null;
     error?: string | null;
+    question?: unknown;
+    questionState?: QuestionState;
     effects?: Array<{ tool: string; action: string; targets: Array<{ path?: string; id?: string; kind?: string }>; outcome: string; check: StripEffect['check']; expectedCheck?: StripEffect['expectedCheck'] }> | null;
     thread: SubTaskResultThread;
 }
@@ -54,6 +56,8 @@ export interface SubTaskResultModel {
     effects: SubTaskResultEffect[];
     missingTargets: string[];
     userStopped: boolean;
+    openQuestion?: string;
+    questionResolution?: 'no-answer' | 'cancelled';
     thread: SubTaskResultThread;
 }
 
@@ -232,7 +236,12 @@ export function buildSubTaskResultModel(input: BuildSubTaskResultModelInput): Su
         .find(value => typeof value === 'string' && value.trim().length > 0)?.trim() ?? '';
     const missingTargets = effectList.flatMap(effect => effect.check === 'mismatch' && effect.expectedCheck === 'exists'
         ? effect.targets.map(target => target.path || target.id || '').filter(Boolean) : []);
-    const endLabelKey = getStripStateLabelParts(resultEndState(outcome)).end;
+    const stateQuestion = input.questionState?.kind === 'closed'
+        ? { text: input.questionState.question.text, resolution: input.questionState.resolution } : undefined;
+    const rawQuestion = stateQuestion ?? input.question;
+    const question = rawQuestion && typeof rawQuestion === 'object' ? rawQuestion as { text?: unknown; resolution?: { kind?: unknown } } : undefined;
+    const questionResolution = question?.resolution?.kind === 'no-answer' || question?.resolution?.kind === 'cancelled' ? question.resolution.kind : undefined;
+    const endLabelKey = questionResolution === 'no-answer' ? 'chat.substrip.question_no_answer_partial' : getStripStateLabelParts(resultEndState(outcome)).end;
     return {
         state,
         ...(outcome ? { end: outcome.end } : {}),
@@ -245,6 +254,8 @@ export function buildSubTaskResultModel(input: BuildSubTaskResultModelInput): Su
         effects: effectList,
         missingTargets,
         userStopped: outcome?.end.kind === 'stopped' && outcome.end.by === 'user',
+        ...(questionResolution ? { questionResolution } : {}),
+        ...(questionResolution === 'no-answer' && typeof question?.text === 'string' ? { openQuestion: question.text } : {}),
         thread: input.thread,
     };
 }
