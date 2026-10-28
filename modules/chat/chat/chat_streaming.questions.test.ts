@@ -1,9 +1,9 @@
 import test from 'ava';
 import { SubTaskNotifier, SubTaskRegistry } from '../../sub-agents/index.js';
 import { QuestionTestClock } from '../../sub-agents/test-support/questionTestClock.js';
-import { _chatExecuteToolCall, _deliverSubTaskQuestion, send_message, stop_all_turns, stop_generation, _releaseStreamCtx } from './chat_streaming.js';
+import { _chatExecuteToolCall, _deliverSubTaskQuestion, send_message, stop_all_turns, stop_generation, _releaseStreamCtx, _queueOwner, _clearQueuedDrainTimer, set_generating, _finalizeTurn } from './chat_streaming.js';
 import { append_message } from './chat_messages.js';
-import { _closeActiveTab } from './chat_tabs.js';
+import { _closeActiveTab, _switchTab } from './chat_tabs.js';
 import { RollingWindow } from './RollingWindow.js';
 import streamingManager from './StreamingManager.js';
 import { buildSubTaskResultDelivery } from './subTaskResultDelivery.js';
@@ -271,6 +271,80 @@ test.serial('zamknięcie ostatniej zakładki podczas budowy promptu pozwala od r
     f.view.input_area.value = 'Nowa';
     await send_message.call(f.view as never, { meta: { origin: 'human' } });
     t.deepEqual({ calls, answer, generating: f.view.is_generating }, { calls: 1, answer: 'Odpowiedź', generating: false });
+});
+
+test.serial('zamknięcie przygotowywanej B zachowuje i wysyła kolejkę generującej A', async t => {
+    const f = concurrentFixture();
+    let finishA!: () => void;
+    let modelEntered!: () => void;
+    let resumeB!: () => void;
+    let promptEntered!: () => void;
+    let queuedFinished!: () => void;
+    const atModel = new Promise<void>(resolve => { modelEntered = resolve; });
+    const atPrompt = new Promise<void>(resolve => { promptEntered = resolve; });
+    const queuedDone = new Promise<void>(resolve => { queuedFinished = resolve; });
+    const promptWait = new Promise<void>(resolve => { resumeB = resolve; });
+    const payloads: unknown[] = [];
+    const model = { modelKey: 'queue-owner', stream(payload: unknown, handlers: { done(response: unknown): void }) {
+        payloads.push(payload);
+        const done = () => handlers.done({ choices: [{ message: { role: 'assistant', content: 'Odpowiedź' } }] });
+        if (payloads.length === 1) { finishA = done; modelEntered(); } else done();
+    } };
+    const oldWindow = globalThis.window;
+    const oldDocument = globalThis.document;
+    Object.assign(globalThis, { window: globalThis, document: { hasFocus: () => true } });
+    Object.assign(f.view, {
+        send_button: { addClass() {}, removeClass() {} }, stop_button: { addClass() {}, removeClass() {} },
+        _queueOwner, _clearQueuedDrainTimer, set_generating, _finalizeTurn, _releaseStreamCtx,
+        _isTurnActiveTab: (turn: { owner: { tab: unknown } }) => turn.owner.tab === f.view.chatTabs.find(tab => tab.isActive),
+        _resetPaintTargets() {}, scrollToFinalMessage() {}, _scheduleConnectorRedraw() {},
+        _ensureAgentMessageContainer() {}, current_message_text: { empty() {} },
+        _updateAutonomyButton() {}, updatePermissionsBadge() {}, renderSkillButtons() {},
+        updateTokenCounter() {}, _updateTokenPanel() {}, _getAgentRgb: () => '',
+        _getDefaultAutonomy: () => 'supervised', _createRollingWindow: () => f.b, render_messages() {}, add_welcome_message() {},
+        _showQueuedIndicator() {}, _drainSubTasks() {}, handleInputResize() {}, handleSaveSession: async () => {},
+        _switchTab, get_chat_model: () => model, _chatResolveTools: () => [],
+    });
+    Object.assign(f.view.plugin, { showCrystalNotice() {} });
+    Object.assign(f.view.input_area, { focus() {} });
+    f.view.send_message = async opts => { await send_message.call(f.view as never, opts as never); queuedFinished(); };
+    Object.assign(f.view.plugin.agentManager, { switchAgent() {} });
+    f.view.plugin.agentManager.getActiveSystemPromptWithMemory = async () => {
+        if (f.tabB.isActive) { promptEntered(); await promptWait; }
+        return 'system';
+    };
+    let firstFinished = false;
+    t.teardown(async () => {
+        resumeB();
+        f.release();
+        if (!firstFinished) finishA?.();
+        await first;
+        f.notifier.dispose(); f.registry.dispose();
+        streamingManager.stopStream('question-concurrent::Jaskier');
+        Object.assign(globalThis, { window: oldWindow, document: oldDocument });
+    });
+    f.view.input_area.value = 'Pierwsza A';
+    const first = send_message.call(f.view as never, { meta: { origin: 'human' } });
+    await atModel;
+    f.view.input_area.value = 'Kolejna A';
+    await send_message.call(f.view as never, { meta: { origin: 'human' } });
+    await _switchTab.call(f.view as never, 'tab-b');
+    f.view.input_area.value = 'Pierwsza B';
+    const second = send_message.call(f.view as never, { meta: { origin: 'human' } });
+    await atPrompt;
+    f.view.input_area.value = 'Szkic B';
+    await _closeActiveTab.call(f.view as never);
+    t.is((f.view as unknown as { _queuedMessage: { text: string } | null })._queuedMessage?.text, 'Kolejna A');
+    t.is(f.view.input_area.value, 'Szkic B');
+    resumeB();
+    await second;
+    f.release();
+    finishA();
+    firstFinished = true;
+    await first;
+    await queuedDone;
+    t.deepEqual(f.a.messages.filter(message => message.role === 'user').map(message => message.content), ['Pierwsza A', 'Kolejna A']);
+    t.is(payloads.length, 2);
 });
 
 test.serial('zamknięcie podczas zapisu przyjętego pytania nie uruchamia modelu', async t => {
