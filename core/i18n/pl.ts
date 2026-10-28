@@ -372,6 +372,7 @@ export const pl: Record<string, string> = {
   'chat.subagent_background_queued': 'W kolejce: {{count}} - ruszą, gdy zwolni się miejsce.',
   // Powiadomienie o WYNIKU suba z tła - wstrzykiwane w rozmowę, czyta je model I user.
   'chat.subagent_notification.header': '[POWIADOMIENIE SYSTEMU] Sub-agent {{name}} skończył zadanie {{task_id}}, które zleciłeś w tle.',
+  'chat.subagent_question.notification': '[POWIADOMIENIE SYSTEMU] Sub-agent {{name}} pyta w zadaniu {{task_id}}: {{text}}\n\nOdpowiedz przez sub_agent message, podając sub_id={{sub_id}} i question_id={{question_id}}.',
   'chat.subagent_notification.meta': 'Stan: {{status}}.',
   'chat.subagent_notification.meta_with_time': 'Stan: {{status}}. Czas pracy: {{seconds}} s.',
   'chat.subagent_notification.status_done': 'zakończone',

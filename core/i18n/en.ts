@@ -374,6 +374,7 @@ export const en: Record<string, string> = {
   // Notification with the RESULT of a background sub-agent - injected into the conversation,
   // read by both the model and the user.
   'chat.subagent_notification.header': '[SYSTEM NOTIFICATION] Sub-agent {{name}} finished task {{task_id}}, which you started in the background.',
+  'chat.subagent_question.notification': '[SYSTEM NOTIFICATION] Sub-agent {{name}} asks about task {{task_id}}: {{text}}\n\nReply using sub_agent message with sub_id={{sub_id}} and question_id={{question_id}}.',
   'chat.subagent_notification.meta': 'State: {{status}}.',
   'chat.subagent_notification.meta_with_time': 'State: {{status}}. Working time: {{seconds}} s.',
   'chat.subagent_notification.status_done': 'finished',
