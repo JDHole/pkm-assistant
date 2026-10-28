@@ -11,6 +11,7 @@ import { DEFAULT_BOTTOM_BAR_MODE } from './todoPanel.js';
 // Zamknięcie zakładki zatrzymuje też JEJ suby - po tym samym adresie zwrotnym, co
 // zamknięcie całego panelu (`stop_all_turns`).
 import { collectSubTaskIdsForOwners } from './turnAbort.js';
+import { evaluateStopQueueCancel } from './queuedMessage.js';
 // Receiver mixina = ZŁOŻONY widok (`ChatViewLike`: klasa + osiem paczek mixinów). Cykl typów
 // chatViewShape ↔ mixin jest legalny i znika w buildzie (`import type`).
 import type { ChatTab, ChatViewLike } from './chatViewShape.js';
@@ -265,6 +266,22 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
         } catch (e) {
             log.warn('Chat', `Zatrzymanie tury zamykanej zakładki padło (zamykamy dalej): ${(e as Error)?.message || String(e)}`);
         }
+    } else if (preparing) {
+        // Strumień tego samego agenta może należeć do innej zakładki.
+        // Sprzątamy tylko aktywny widok, bez zatrzymywania tamtego strumienia.
+        this._drainSuppressed = true;
+        this._clearQueuedDrainTimer();
+        const cancel = evaluateStopQueueCancel(this._queuedMessage, this.input_area?.value);
+        if (cancel.clearSlot) {
+            this._queuedMessage = null;
+            if (cancel.restoreText !== null) {
+                this.input_area.value = cancel.restoreText;
+                this.handleInputResize?.();
+            }
+        }
+        this._hideQueuedIndicator();
+        this.hideTypingIndicator();
+        this.set_generating(false);
     }
 
     // Suby zlecone Z TEJ zakładki — po adresie zwrotnym (`origin`), jak w `stop_all_turns`.

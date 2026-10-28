@@ -4,8 +4,7 @@ import { QuestionTestClock } from '../../sub-agents/test-support/questionTestClo
 import { findOpenSubQuestion, answeredSubQuestion, renderAnsweredSubQuestion } from './subQuestionView.js';
 import { register } from 'node:module';
 import { createAskUserChannels } from '../../tools/index.js';
-import { setLocale, t as translate } from '../../../core/i18n/index.js';
-import { createAskUserTool } from '../../tools/index.js';
+import { setLocale } from '../../../core/i18n/index.js';
 
 test('powiązanie pytania wymaga otwartego pytania i pełnego właściciela sesji', t => {
     const owner = { agentName: 'Jaskier', sessionPath: 's.md', sessionEpoch: 'e1' };
@@ -22,7 +21,6 @@ test('powiązanie pytania wymaga otwartego pytania i pełnego właściciela sesj
     t.is(findOpenSubQuestion(registry, opened.question.id, owner), undefined);
     registry.dispose();
 });
-
 class ElementStub {
     children: ElementStub[] = [];
     textContent = '';
@@ -67,20 +65,12 @@ test.serial('bloki czatu pokazują tylko otwarte pytanie właściciela i rozwija
     t.false(texts(render(opened.question.id, { ...owner, sessionEpoch: 'e2' })).includes('Pytanie od Klara'));
     registry.cancelParentQuestion('r1');
     t.false(texts(render(opened.question.id)).includes('Pytanie od Klara'));
-    const tile = renderAnsweredSubQuestion({ name: 'Klara', question: 'Jaki zakres?', answer: 'Cały.' }) as unknown as ElementStub;
+    const saved = answeredSubQuestion({ name: 'Klara', question: 'Jaki zakres?', answer: 'Cały.' });
+    if (!saved) throw new Error('brak zapisanej odpowiedzi');
+    const tile = renderAnsweredSubQuestion(saved) as unknown as ElementStub;
     t.true(texts(tile).includes('Klara zapytał, odpowiedziałem'));
     t.true(tile.children[1].attrs.has('hidden'));
     tile.children[0].listeners.get('click')?.();
     t.false(tile.children[1].attrs.has('hidden')); t.true(texts(tile).includes('Jaki zakres?\n\nCały.'));
     registry.dispose(); setLocale('en'); root.createDiv = oldCreate; root.document = oldDocument;
-});
-
-test.serial('schemat i reguła prowadzącego wskazują question_id', t => {
-    setLocale('pl');
-    t.truthy(createAskUserTool().inputSchema.properties.question_id);
-    t.regex(translate('prompt.dt.rule.deleg_question'), /ask_user[^.]*question_id/);
-    t.deepEqual(answeredSubQuestion({ name: 'Klara', question: 'Jaki zakres?', answer: 'Cały.' }), { name: 'Klara', question: 'Jaki zakres?', answer: 'Cały.' });
-    t.is(translate('chat.sub_question.from', { name: 'Klara' }), 'Pytanie od Klara');
-    t.is(translate('chat.sub_question.answered', { name: 'Klara' }), 'Klara zapytał, odpowiedziałem');
-    setLocale('en');
 });

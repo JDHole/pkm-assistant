@@ -1,7 +1,7 @@
 import test from 'ava';
 import { SubTaskNotifier, SubTaskRegistry } from '../../sub-agents/index.js';
 import { QuestionTestClock } from '../../sub-agents/test-support/questionTestClock.js';
-import { _chatExecuteToolCall, _deliverSubTaskQuestion, send_message, stop_all_turns } from './chat_streaming.js';
+import { _chatExecuteToolCall, _deliverSubTaskQuestion, send_message, stop_all_turns, stop_generation, _releaseStreamCtx } from './chat_streaming.js';
 import { append_message } from './chat_messages.js';
 import { _closeActiveTab } from './chat_tabs.js';
 import { RollingWindow } from './RollingWindow.js';
@@ -219,7 +219,7 @@ function concurrentFixture() {
         async appendToActiveSession(event: unknown) { events.push({ path: memory.activeSessionPath, event }); },
         async _resolveMentions(text: string) { return { displayText: text, contextText: '' }; },
         resetInputArea() { this.input_area.value = ''; }, set_generating(value: boolean) { f.view.is_generating = value; },
-        showTypingIndicator() {}, _clearQueuedDrainTimer() {}, stop_generation() {},
+        showTypingIndicator() {}, hideTypingIndicator() {}, _hideQueuedIndicator() {}, _clearQueuedDrainTimer() {}, stop_generation() {},
         get_chat_model: () => model, _chatResolveTools: () => [{ type: 'function', function: { name: 'list', parameters: {} } }],
         _chatExecuteToolCall, _chatOnIterationStart() {}, _chatOnToolCallsParsed() {}, _chatOnToolResults() {},
         _chatBeforeContinue() {}, _chatOnUsage() {}, _chatOnBackstop() {}, _isTurnActiveTab: () => false,
@@ -228,6 +228,50 @@ function concurrentFixture() {
     });
     return { ...f, view, a, b, tabB, memory, saving, release, events, toolOwners, modelCalls: () => modelCalls };
 }
+
+test.serial('zamknięcie ostatniej zakładki podczas budowy promptu pozwala od razu wysłać kolejną wiadomość', async t => {
+    const f = concurrentFixture();
+    let resume!: () => void;
+    let entered!: () => void;
+    const waiting = new Promise<void>(resolve => { resume = resolve; });
+    const atPrompt = new Promise<void>(resolve => { entered = resolve; });
+    let calls = 0;
+    let answer = '';
+    const model = { modelKey: 'close-preparing', stream(_payload: unknown, handlers: { done(response: unknown): void }) {
+        calls++;
+        handlers.done({ choices: [{ message: { role: 'assistant', content: 'Odpowiedź' } }] });
+    } };
+    Object.assign(f.view, {
+        chatTabs: [f.tab],
+        handleSaveSession: async () => {},
+        _createRollingWindow: () => new RollingWindow(),
+        render_messages() {}, add_welcome_message() {}, updateTokenCounter() {}, _updateTokenPanel() {},
+        _hideQueuedIndicator() {}, _showQueuedIndicator() {}, _queueOwner: () => ({ agentName: 'Jaskier', tabKey: 'tab' }),
+        _releaseStreamCtx, _resetPaintTargets() {}, hideTypingIndicator() {},
+        stop_generation,
+        get_chat_model: () => model, _chatResolveTools: () => [],
+        _finalizeTurn(_turn: unknown, result: { finalText: string }) { answer = result.finalText; f.view.is_generating = false; },
+    });
+    let promptCalls = 0;
+    f.view.plugin.agentManager.getActiveSystemPromptWithMemory = async () => {
+        if (++promptCalls === 1) { entered(); await waiting; }
+        return 'system';
+    };
+    t.teardown(() => { resume(); f.notifier.dispose(); f.registry.dispose(); streamingManager.stopStream('question-concurrent::Jaskier'); });
+    f.view.input_area.value = 'Pierwsza';
+    const first = send_message.call(f.view as never, { meta: { origin: 'human' } });
+    await atPrompt;
+    f.view.input_area.value = 'W kolejce';
+    await send_message.call(f.view as never, { meta: { origin: 'human' } });
+    await _closeActiveTab.call(f.view as never);
+    resume();
+    await first;
+    t.false(f.view.is_generating);
+    t.is((f.view as unknown as { _queuedMessage: unknown })._queuedMessage, null);
+    f.view.input_area.value = 'Nowa';
+    await send_message.call(f.view as never, { meta: { origin: 'human' } });
+    t.deepEqual({ calls, answer, generating: f.view.is_generating }, { calls: 1, answer: 'Odpowiedź', generating: false });
+});
 
 test.serial('zamknięcie podczas zapisu przyjętego pytania nie uruchamia modelu', async t => {
     const f = concurrentFixture();
@@ -270,6 +314,9 @@ test.serial('zamknięcie przygotowywanej zakładki nie przerywa drugiej sesji ag
     t.teardown(() => { f.release(); f.notifier.dispose(); f.registry.dispose(); streamingManager.stopStream('question-concurrent::Jaskier'); });
     f.registry.openParentQuestion('r1', 'Jaki zakres?');
     await f.saving;
+    let stoppedOther = false;
+    const otherStream = { rollingWindow: f.b, abort: { abort() { stoppedOther = true; } } };
+    f.view._streamCtxMap.set('Jaskier', otherStream);
     Object.assign(f.view, {
         handleSaveSession: async () => {},
         _switchTab: async () => {
@@ -281,6 +328,9 @@ test.serial('zamknięcie przygotowywanej zakładki nie przerywa drugiej sesji ag
         },
     });
     await _closeActiveTab.call(f.view as never);
+    t.false(stoppedOther);
+    t.is(f.view._streamCtxMap.get('Jaskier'), otherStream);
+    f.view._streamCtxMap.delete('Jaskier');
     f.release();
     for (let i = 0; i < 30; i++) await Promise.resolve();
     t.is(f.modelCalls(), 0);

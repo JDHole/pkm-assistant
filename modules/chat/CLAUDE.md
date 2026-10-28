@@ -393,7 +393,9 @@ turn.abort.isAborted()`.
 
 - Uchwyt powstaje razem z zapaleniem guzika Stop (`set_generating(true)`), nie dopiero przy
   rejestracji wpisu w `_streamCtxMap` - budowa promptu z pamięcią potrafi trwać sekundy. Na ten
-  czas uchwyt leży w `_preparingTurns` (agentName -> uchwyt); wpis znika przy rejestracji ctx.
+  czas uchwyt leży w `_preparingTurns` (klucz zakładki -> uchwyt); wpis znika przy rejestracji ctx.
+  Zamknięcie zakładki w tym czasie przerywa przygotowanie i czyści stan generowania oraz
+  kolejkę aktywnego widoku, także dla ostatniej zakładki, bez zatrzymywania strumienia innej sesji.
 - **`stop_generation` musi dostać `agentName` jako string** - wpięty jako listener kliknięcia
   bez wrappera dostawałby `MouseEvent`, a mapa tur jest kluczowana nazwą agenta. Guzik jest
   dziś `() => this.stop_generation()`, z pasem zapasowym w funkcji (argument nie-string =
