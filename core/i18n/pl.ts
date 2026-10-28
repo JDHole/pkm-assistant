@@ -2623,6 +2623,8 @@ export const pl: Record<string, string> = {
   'mcp.sub_agent.param.action': 'Operacja: message, task, stop, close albo list.',
   'mcp.sub_agent.param.sub_id': 'Identyfikator wątku sub-agenta.',
   'mcp.sub_agent.param.text': 'Wiadomość dla pracującego sub-agenta.',
+  'mcp.sub_agent.param.question_id': 'Identyfikator pytania, na które odpowiadasz.',
+  'mcp.sub_agent.question_reply_instruction': 'Odpowiedz przez sub_agent action: message, podając sub_id, question_id i text.',
   'mcp.sub_agent.param.task': 'Kolejne zadanie dla tego samego sub-agenta.',
   'mcp.sub_agent.param.background': 'Uruchom kolejne zadanie w tle. Domyślnie użyj trybu delegate.',
   'mcp.sub_agent.owner_missing': 'Nie można ustalić pełnej tożsamości tej rozmowy. Użyj delegate, aby utworzyć nowego suba.',

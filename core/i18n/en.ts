@@ -2616,6 +2616,8 @@ export const en: Record<string, string> = {
   'mcp.sub_agent.param.action': 'Operation: message, task, stop, close, or list.',
   'mcp.sub_agent.param.sub_id': 'Sub-agent thread identifier.',
   'mcp.sub_agent.param.text': 'Message for a running sub-agent.',
+  'mcp.sub_agent.param.question_id': 'ID of the question being answered.',
+  'mcp.sub_agent.question_reply_instruction': 'Reply using sub_agent action: message with sub_id, question_id and text.',
   'mcp.sub_agent.param.task': 'Next task for the same sub-agent.',
   'mcp.sub_agent.param.background': 'Run the next task in the background. Defaults to delegate behavior.',
   'mcp.sub_agent.owner_missing': 'The full identity of this conversation is unavailable. Use delegate to create a new sub-agent.',
