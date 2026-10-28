@@ -2,7 +2,7 @@
 import { t, pluralCategory } from '../../../core/i18n/index.js';
 import { SkinManager, setSvg } from '../../crystal-soul/index.js';
 import { buildStripModel, formatDuration, getStripStateLabelParts, summarizeStripRows } from '../../sub-agents/index.js';
-import type { StripRow, StripRun, StripState, StripStep, SubTask, SubThread } from '../../sub-agents/index.js';
+import type { QuestionState, StripRow, StripRun, StripState, StripStep, SubTask, SubThread } from '../../sub-agents/index.js';
 
 interface ElOpts { cls?: string; text?: string; attr?: Record<string, string> }
 type El = HTMLElement & {
@@ -12,6 +12,7 @@ type El = HTMLElement & {
     createEl<K extends keyof HTMLElementTagNameMap>(tag: K, opts?: ElOpts): HTMLElementTagNameMap[K] & El;
 };
 interface RegistryLike {
+    events?: { on(event: string, handler: () => void): () => void };
     list?(): SubTask[];
     listThreads?(owner: { agentName: string; sessionPath?: string; sessionEpoch?: string }): SubThread[];
     getThreadMaxRuns?(threadId: string): number;
@@ -31,6 +32,29 @@ interface SubTaskStripContext {
 }
 
 const expandedRunSteps = new WeakMap<El, Set<string>>();
+const stripTimers = new WeakMap<El, () => void>();
+const questionTicks = new WeakMap<El, Array<() => void>>();
+
+function remaining(clock: Extract<QuestionState, { kind: 'waiting' }>['clock']): string {
+    const ms = clock.kind === 'ticking' ? clock.remainingMs - Math.max(0, performance.now() - clock.since) : clock.remainingMs;
+    const seconds = Math.ceil(Math.max(0, ms) / 1000);
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function noAnswer(question: QuestionState): question is Extract<QuestionState, { kind: 'closed' }> {
+    return question.kind === 'closed' && question.resolution.kind === 'no-answer';
+}
+
+function questionLabel(question: QuestionState, state: StripState): string {
+    if (state.kind === 'running' && question.kind === 'waiting') return question.clock.kind === 'paused'
+        ? t('chat.substrip.question_paused') : t('chat.substrip.question_ticking', { time: remaining(question.clock) });
+    if (state.kind !== 'running' && state.kind !== 'stopping' && noAnswer(question)) return t('chat.substrip.question_no_answer_partial');
+    return stateLabel(state);
+}
+
+function updateClock(host: El, question: QuestionState, update: () => void): void {
+    if (question.kind === 'waiting' && question.clock.kind === 'ticking') questionTicks.get(host)?.push(update);
+}
 const countKeys = {
     running: { one: 'chat.substrip.count_running_one', few: 'chat.substrip.count_running_few', many: 'chat.substrip.count_running_many', other: 'chat.substrip.count_running_other' },
     queued: { one: 'chat.substrip.count_queued_one', few: 'chat.substrip.count_queued_few', many: 'chat.substrip.count_queued_many', other: 'chat.substrip.count_queued_other' },
@@ -64,6 +88,8 @@ function safeCall<T>(fn: () => T, fallback: T): T {
 }
 
 export function renderSubTaskStrip(host: El, ctx: SubTaskStripContext): number {
+    stripTimers.get(host)?.();
+    questionTicks.set(host, []);
     const active = host.ownerDocument.activeElement;
     const focusId = active && host.contains(active) ? (active as HTMLElement).dataset?.substripId : undefined;
     const focusRunId = active && host.contains(active) ? (active as HTMLElement).dataset?.substripRunId : undefined;
@@ -92,6 +118,16 @@ export function renderSubTaskStrip(host: El, ctx: SubTaskStripContext): number {
     const chips = host.createDiv({ cls: 'pkm-substrip__chips' });
     for (const row of rows) renderChip(chips, row, ctx, expanded?.id === row.id);
     if (expanded) renderDetail(host, host.createDiv({ cls: 'pkm-substrip__detail' }), expanded, registry, ctx);
+    const ticks = questionTicks.get(host) ?? [];
+    if (host.isConnected && (ticks.length || registry?.events)) {
+        const timer = ticks.length ? window.setInterval(() => ticks.forEach(tick => tick()), 1000) : undefined;
+        const refresh = (): void => { if (host.isConnected) renderSubTaskStrip(host, ctx); };
+        const unsubs = ['question:opened', 'question:closed', 'question:clock'].map(event => registry?.events?.on(event, refresh)).filter((off): off is () => void => typeof off === 'function');
+        const observer = new MutationObserver(() => { if (!host.isConnected) cleanup(); });
+        const cleanup = (): void => { if (timer !== undefined) window.clearInterval(timer); for (const off of unsubs) off(); observer.disconnect(); stripTimers.delete(host); };
+        observer.observe(host.ownerDocument, { childList: true, subtree: true });
+        stripTimers.set(host, cleanup);
+    }
     if (focusRunId) findRunButton(host, focusRunId)?.focus();
     else if (focusId) findChip(host, focusId)?.focus();
     else if (focusStop) host.querySelector<HTMLElement>('.pkm-substrip__stop')?.focus();
@@ -113,15 +149,22 @@ function findRunButton(host: El, id: string): HTMLElement | null {
 }
 
 function renderChip(chips: El, row: StripRow, ctx: SubTaskStripContext, isExpanded: boolean): void {
-    const cls = `pkm-substrip__chip ${stateClass(row.state)}` + (isExpanded ? ' pkm-substrip__chip--open' : '');
+    const asking = row.state.kind === 'running' && row.questionState.kind === 'waiting';
+    const unanswered = row.state.kind !== 'running' && row.state.kind !== 'stopping' && noAnswer(row.questionState);
+    const cls = `pkm-substrip__chip ${unanswered ? 'pkm-substrip__chip--no-answer' : stateClass(row.state)}` + (asking ? ` pkm-substrip__chip--question-${row.questionState.kind === 'waiting' && row.questionState.clock.kind === 'paused' ? 'paused' : 'ticking'}` : '') + (isExpanded ? ' pkm-substrip__chip--open' : '');
     const button = chips.createEl('button', {
         cls,
-        attr: { type: 'button', 'aria-expanded': String(isExpanded), 'aria-label': `${row.name}: ${stateLabel(row.state)}`, 'data-substrip-id': row.id },
+        attr: { type: 'button', 'aria-expanded': String(isExpanded), 'aria-label': `${row.name}: ${questionLabel(row.questionState, row.state)}`, 'data-substrip-id': row.id },
     });
-    setSvg(button.createSpan({ cls: 'pkm-substrip__crystal' }), SkinManager.getCrystal(row.name, { size: 12, color: 'currentColor', glow: false }));
+    const icon = button.createSpan({ cls: 'pkm-substrip__crystal' });
+    if (asking && row.questionState.kind === 'waiting') setSvg(icon, row.questionState.clock.kind === 'paused'
+        ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 8v8M15 8v8"/></svg>'
+        : '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-1 .5-1 1-1 2.2M12 17h.01"/></svg>');
+    else setSvg(icon, SkinManager.getCrystal(row.name, { size: 12, color: 'currentColor', glow: false }));
     const copy = button.createSpan({ cls: 'pkm-substrip__chip-copy' });
     copy.createSpan({ cls: 'pkm-substrip__name', text: row.name });
-    copy.createSpan({ cls: 'pkm-substrip__state', text: stateLabel(row.state) });
+    const label = copy.createSpan({ cls: 'pkm-substrip__state', text: questionLabel(row.questionState, row.state) });
+    updateClock(chips.parentElement as El, row.questionState, () => { label.textContent = questionLabel(row.questionState, row.state); button.setAttribute('aria-label', `${row.name}: ${label.textContent}`); });
     if (row.state.kind === 'queued') button.createSpan({ cls: 'pkm-substrip__queue', text: t('chat.substrip.queue_position', { position: String(row.state.position) }) });
     if (row.threadId && row.runNumber > 0 && row.runLimit) button.createSpan({ cls: 'pkm-substrip__run-number', text: t('chat.substrip.run_number', { number: String(row.runNumber), total: String(row.runLimit) }) });
     button.createSpan({ cls: 'pkm-substrip__time', text: formatDuration(row.durationMs) });
@@ -132,8 +175,20 @@ function renderChip(chips: El, row: StripRow, ctx: SubTaskStripContext, isExpand
 }
 
 function renderDetail(host: El, details: El, row: StripRow, registry: RegistryLike | null | undefined, ctx: SubTaskStripContext): void {
+    if (row.state.kind === 'running' && row.questionState.kind === 'waiting') {
+        const question = row.questionState;
+        const head = details.createDiv({ cls: 'pkm-substrip__detail-head' });
+        head.createSpan({ cls: 'pkm-substrip__detail-status', text: t(question.clock.kind === 'paused' ? 'chat.substrip.question_paused_heading' : 'chat.substrip.question_heading') });
+        const clock = head.createSpan({ cls: 'pkm-substrip__question-clock', text: t('chat.substrip.question_remaining', { time: remaining(question.clock) }) });
+        updateClock(host, question, () => { clock.textContent = t('chat.substrip.question_remaining', { time: remaining(question.clock) }); });
+        renderStopButton(head, registry, row);
+        details.createDiv({ cls: 'pkm-substrip__question', text: question.question.text });
+        details.createDiv({ cls: 'pkm-substrip__question-note', text: t('chat.substrip.question_preview') });
+        details.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); ctx.onToggle(null); findChip(host, row.id)?.focus(); } });
+        return;
+    }
     const head = details.createDiv({ cls: 'pkm-substrip__detail-head' });
-    head.createSpan({ cls: 'pkm-substrip__detail-status', text: `${row.name} · ${stateLabel(row.state)}` });
+    head.createSpan({ cls: 'pkm-substrip__detail-status', text: `${row.name} · ${questionLabel(row.questionState, row.state)}` });
     if (row.threadId && row.runNumber && row.runLimit) head.createSpan({ cls: 'pkm-substrip__run-badge', text: t('chat.substrip.run_number', { number: String(row.runNumber), total: String(row.runLimit) }) });
     if (row.state.kind === 'queued') renderStopButton(head, registry, row);
     const remembered = expandedRunSteps.get(host) ?? new Set<string>();
@@ -157,7 +212,7 @@ function renderRunCard(axis: El, run: StripRun, row: StripRow, registry: Registr
     const card = axis.createDiv({ cls: `pkm-substrip__run-card pkm-substrip__run-card--${showSteps ? 'expanded' : 'collapsed'}`, attr: { 'data-substrip-run-id': run.id } });
     const header = card.createDiv({ cls: 'pkm-substrip__run-head' });
     header.createEl('strong', { cls: 'pkm-substrip__run-title', text: t('chat.substrip.run_title', { number: String(run.number), title: run.taskPreview || row.name }) });
-    const label = !run.available ? t('chat.substrip.run_unavailable', { number: String(run.number) })
+    const label = noAnswer(run.questionState) && !live ? t('chat.substrip.question_no_answer') : !run.available ? t('chat.substrip.run_unavailable', { number: String(run.number) })
         : !live && run.endLabelKey ? [t(run.endLabelKey), ...(run.completenessLabelKey ? [t(run.completenessLabelKey)] : [])].join(' · ')
             : stateLabel(run.state);
     header.createSpan({ cls: 'pkm-substrip__run-state', text: label });
@@ -190,6 +245,10 @@ function renderRunCard(axis: El, run: StripRun, row: StripRow, registry: Registr
         });
     }
     if (!live) renderRunOutcome(card, run);
+    if (!live && noAnswer(run.questionState)) {
+        card.createDiv({ cls: 'pkm-substrip__question', text: t('chat.substrip.question_open', { question: run.questionState.question.text }) });
+        card.createDiv({ cls: 'pkm-substrip__question-note', text: t('chat.substrip.question_resume') });
+    }
     const meta = card.createDiv({ cls: 'pkm-substrip__detail-meta' });
     meta.textContent = `${t('chat.substrip.tokens_in', { count: String(run.tokenInput) })} · ${t('chat.substrip.tokens_out', { count: String(run.tokenOutput) })} · ${t('chat.substrip.tools', { count: String(run.toolCallCount) })} · ${formatDuration(run.durationMs)}`;
 }

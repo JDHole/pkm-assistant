@@ -1,5 +1,14 @@
 # modules/chat/
 
+Sekcja pytania w powiadomieniu normalizuje końce linii do LF przed obliczeniem długości. Pusty po trim handoff ustępuje dostępnemu wynikowi częściowemu.
+
+`ask_user` z `question_id` pokazuje pytanie i zadanie suba wyłącznie dla otwartego pytania właściciela kanału. Przyjęta odpowiedź prowadzącego przechowuje dane kafelka w wyniku narzędzia, aby historia mogła go odtworzyć.
+
+`ask_user` otwiera kanał z zamrożonym właścicielem tury (agent, ścieżka i epoka sesji).
+Token trafia do MCP z runtime, a przycisk zamyka uchwycony kanał. Koniec tury, Stop
+i zamknięcie widoku zwalniają wyłącznie własne kanały, także te nieprzejęte przez narzędzie.
+Pauza zegara pytania suba dotyczy tylko tego samego właściciela sesji.
+
 Pasek subów pokazuje podsumowanie od pięciu widocznych wierszy, a kroki pracującego lub zatrzymującego się biegu mają nagłówek na żywo.
 
 **Interfejs czatu.** Główny widok pluginu - okno czatu w sidebarze Obsidiana. `ChatView` jest
@@ -254,7 +263,9 @@ WŁAŚCIWEGO agenta/zakładki, nie do tego, co akurat widać na ekranie.
   synchronicznie, na samym starcie `send_message` (obok `createTurnAbort()`, razem z
   zapaleniem guzika Stop, PRZED pierwszym awaitem przygotowania) i oddaje `FrozenTurnOwner`:
   `agentName`, `agent`, `rollingWindow`, `tokenTracker`, `memory` (po nazwie, fail-closed),
-  `sessionPath`, `tab`, `autonomy`, `artifactId`. Od tej linii `send_message` NIE pyta już
+  `sessionPath`, `tab`, `autonomy`, `artifactId`. Ścieżka i epoka pochodzą z pamięci po
+  zapisie wiadomości użytkownika, który może naprawić nieaktualną ścieżkę zakładki.
+  Od tej linii `send_message` NIE pyta już
   widoku "kto jest teraz aktywny" - prompt, resolucja skilli z markerów, Oczko, model
   (`get_chat_model({agent})`), autonomia i adres zwrotny delegacji w tle idą z `owner`, nie z
   `getActiveAgent()`.
@@ -280,23 +291,34 @@ WŁAŚCIWEGO agenta/zakładki, nie do tego, co akurat widać na ekranie.
   wiecznym "generuję". Formuła `_tabKey` (`sessionId || sessionPath || sessionName ||
   agentName`) ma JEDNO źródło (`chat_tabs.js`, eksportowana) - druga kopia formuły gdziekolwiek
   indziej (popover autonomii, restore wielu zakładek) to zawsze bug w czekaniu.
-- **`_streamCtxMap` (uchwyt streamu per agent) zwalnia tylko właściciel.** Mapa jest kluczowana
-  nazwą agenta, a pod jedną nazwą potrafią chwilowo żyć dwie tury (zakładka dodana ponownie z
-  pickera, wyścig z przygotowaniem promptu) - bezwarunkowy `delete` przy finalizacji STAREJ
-  tury kasowałby uchwyt przerwania ŻYWEJ. `_releaseStreamCtx(agentName, turnId)` porównuje
-  `turnId` przed `delete` (ten sam wzór co watchdog w `_onStreamStall`). Znana, świadoma
-  granica: "Stop bez argumentu zatrzaskuje WSZYSTKIE żywe tury zakładki" wymagałoby kolekcji
-  tur per `turnId` zamiast mapy per nazwa agenta - nie jest zrobione; `_isTurnActiveTab` (która
-  gałąź tło/aktywna leci w finalizacji) rozstrzyga po nazwie agenta, nie po `_tabKey`/`turnId`,
-  ta sama, znana granica.
+- **`_streamCtxMap` i `_preparingTurns` są kluczowane zamrożonym kluczem zakładki.** Wpis
+  zawiera również obiekt zakładki i uchwyt przerwania. Zakładka przypisana przygotowaniu przez `_initTabs` przechodzi do wpisu strumienia tej samej tury. Zwolnienie ostatniej pracy bez zakładki gasi stan widoku tylko gdy jego aktywne okno i zakładka nie mają innej pracy. `_releaseStreamCtx(tabKey, turnId)`
+  sprawdza `turnId` przed usunięciem wpisu, aby spóźniona finalizacja nie usunęła nowszej tury.
+  `_isTurnActiveTab` sprawdza żywą turę, obiekt zakładki i tożsamość okna rozmowy.
+  Malowanie wymaga tego samego okna, więc `archive_new` oddziela starą turę od nowej rozmowy.
+  Stop aktywnej zakładki przerywa wszystkie jej tury i przygotowania według obiektu zakładki,
+  także po wymianie okna. Watchdog i zamknięcie zakładki nadal podają jawny klucz tury.
+  Stan generowania należy do zakładki i pozostaje prawdziwy, dopóki żyje jej tura lub
+  przygotowanie. Zwolnienie ostatniego wpisu zeruje stan pod bieżącym kluczem, a na aktywnej
+  zakładce wywołuje `set_generating(false)`. Po naturalnym zakończeniu uruchamia to normalny
+  dren kolejki według reguł właściciela, niezależnie od `_drainSuppressed`. Stop anuluje slot
+  przed zwolnieniem tury. Watchdog starego okna na aktywnym obiekcie zakładki anuluje przed
+  zwolnieniem tylko wiadomość należącą do tej zakładki, jeśli nie żyje na niej inna tura ani
+  przygotowanie; tekst wraca, jeśli pole jest puste.
+  Rejestr `StreamingManager` używa identyfikatora
+  `leafId::tabKey`, więc równoczesne tury jednego agenta mają osobne wpisy.
+- `_restoreActiveSession` odtwarza każdą niepustą aktywną sesję, także kilka sesji tego samego
+  agenta. Przed wymianą zakładek zatrzymuje tury i przygotowania rozpoczęte podczas restore.
+  Każda dostaje własną zakładkę, `RollingWindow`, tracker i stan pod kluczem ścieżki.
+  `chat_streaming.sameAgentTabs.test.ts` sprawdza kolejność kończenia, malowanie, Stop,
+  zamknięcie zakładki oraz zmianę klucza w trakcie tury.
 - **Callbacki OKNA (kompresja end-of-turn, ratunek pamięci) malują UI TYLKO gdy zakładka
   właściciela jest na wierzchu.** Zapis do dysku/pamięci leci bezwarunkowo także dla zakładki w
-  tle (to reguła o DANYCH), ale `messages_container` jest JEDEN na cały widok - malowanie bloku
+  tle, ale `messages_container` jest JEDEN na cały widok - malowanie bloku
   "skompresowano" agenta A w rozmowie, którą user czyta u agenta B, byłoby artefaktem cudzej
-  tury. `turnOwner.isOwnerTabActive(view, ownerName)` (fail-open gdy widok nie zna modelu
-  zakładek) bramkuje te trzy callbacki. Rozstrzyga po NAZWIE AGENTA, nie po `_tabKey` - dwie
-  otwarte zakładki tego samego agenta naraz nadal malowałyby sobie nawzajem te bloki (nie
-  zrobione, bo dziś nie da się otworzyć dwóch zakładek jednego agenta).
+  tury. `_createRollingWindow` przekazuje do callbacków sprawdzenie tożsamości okna:
+  `this.rollingWindow === rollingWindow`. Odrębne okna sesji tego samego agenta nie malują
+  sobie nawzajem tych bloków, także po zmianie klucza zakładki.
 - **Estymata wejścia tokenów (`lastInputTokens`/`lastInputChars`) żyje w `turn`, nie na
   widoku.** Przy dwóch turach naraz w jednym `ChatView` (patrz "świeża instancja modelu"
   niżej) tura A czytałaby estymatę nadpisaną przez turę B.
@@ -307,7 +329,7 @@ WŁAŚCIWEGO agenta/zakładki, nie do tego, co akurat widać na ekranie.
   argumentu celowo - tam pytanie o aktywnego agenta jest właściwym pytaniem.
 - **Mid-loop compression ustawia `rollingWindow.sessionPath` tak samo jak end-of-turn** (czyta
   ją `Summarizer` do stopki "pełna rozmowa zapisana w: ...") - obie ścieżki kompresji muszą
-  czytać `activeSessionPath` właściciela PRZED kompresją, nie tylko end-of-turn.
+  używać zamrożonej ścieżki tury, nie współdzielonego wskaźnika pamięci agenta.
 - ⚠️ **Zostaje wąskie okno PRZED zamrożeniem:** między kliknięciem Wyślij a `createTurnAbort()`
   są jeszcze awaity zapisu przy bezczynności, komendy `/`, rozwiązywanie wzmianek i
   `append_message` (wiadomość użytkownika idzie przez `this.rollingWindow` widoku, nie przez
@@ -318,10 +340,16 @@ WŁAŚCIWEGO agenta/zakładki, nie do tego, co akurat widać na ekranie.
 - **`appendToActiveSession` adresuje pamięć po `event.agentName`** - czyli po turze, która
   zdarzenie wyprodukowała, nie po agencie akurat wybranym w UI. Nowe zdarzenie do event-logu
   musi nieść `agentName` jawnie.
-- **`handleSaveSession(agentName?, rollingWindow?)`** przyjmuje właściciela i okno tury -
-  kompresja z tła podaje oba; wołania z aktywnej zakładki wołają bez argumentów.
-- Znana granica: gdy właściciel ma `minionEnabled === false`, `modelProvider` spada na
-  `get_chat_model()` bez agenta, czyli na aktywnego agenta w UI.
+- **`handleSaveSession(agentName?, rollingWindow?)`** przyjmuje właściciela i okno tury.
+  Kompresja zapisuje awaryjny ogon tylko gdy aktywna ścieżka pamięci nadal jest ścieżką tury;
+  zdarzenia tury są wcześniej dopisywane pod zamrożoną ścieżką. Wołania z aktywnej zakładki
+  korzystają z domyślnych argumentów.
+- Znana granica: awaryjny kontekst kompresji nadal odczytuje aktywną listę todo widoku oraz
+  ścieżkę z pamięci agenta. Dla dwóch sesji jednego agenta może opisać niewłaściwą sesję.
+  Po zmianie klucza i zakończeniu tury zamknięcie zakładki nie ma też dawnego klucza tury
+  do dopasowania subów, które nadal podają go w `origin.tabKey`.
+- Gdy właściciel ma `minionEnabled === false`, `modelProvider` wybiera model przez
+  `get_chat_model({ agent: ownerAgent })` dla właściciela okna.
 
 ### Proweniencja wiadomości: `meta.origin`, nie rola dymka
 
@@ -381,17 +409,19 @@ komendy `/`.
 Uchwyt przerwania (`createTurnAbort()`, `chat/turnAbort.ts` - zatrzask: raz podniesiona flaga
 nie gaśnie, `abort()` idempotentne) leży w DWÓCH miejscach naraz, ten sam obiekt: w `turn.abort`
 (czyta go pętla i watchdog ciszy) oraz we wpisie `_streamCtxMap` (sięga po niego
-`stop_generation(agentName)` i zamknięcie widoku). Pętla dostaje `shouldAbort: () =>
+`stop_generation(tabKey)` i zamknięcie widoku). Pętla dostaje `shouldAbort: () =>
 turn.abort.isAborted()`.
 
 - Uchwyt powstaje razem z zapaleniem guzika Stop (`set_generating(true)`), nie dopiero przy
   rejestracji wpisu w `_streamCtxMap` - budowa promptu z pamięcią potrafi trwać sekundy. Na ten
-  czas uchwyt leży w `_preparingTurns` (agentName -> uchwyt); wpis znika przy rejestracji ctx.
-- **`stop_generation` musi dostać `agentName` jako string** - wpięty jako listener kliknięcia
-  bez wrappera dostawałby `MouseEvent`, a mapa tur jest kluczowana nazwą agenta. Guzik jest
-  dziś `() => this.stop_generation()`, z pasem zapasowym w funkcji (argument nie-string =
-  aktywny agent).
-- **`stop_all_turns(reason)`** zatrzymuje KAŻDĄ turę z `_streamCtxMap` (kopia nazw przed
+  czas uchwyt i obiekt zakładki leżą w `_preparingTurns` pod zamrożonym `tabKey`; wpis znika
+  przy rejestracji ctx. Zamknięcie zakładki przerywa przygotowanie i czyści jej stan generowania,
+  także dla ostatniej zakładki, zachowując kolejkę należącą do innej zakładki.
+- **`stop_generation` przyjmuje opcjonalny klucz zakładki jako string.** Bez argumentu lub
+  przy argumencie innym niż string wybiera turę aktywnej zakładki, szukając najpierw jej
+  obiektu w mapach. Pozwala to zatrzymać właściwą turę po zmianie klucza zakładki. Guzik
+  wywołuje `() => this.stop_generation()`; watchdog i zamknięcie zakładki podają klucz tury.
+- **`stop_all_turns(reason)`** zatrzymuje KAŻDĄ turę z obu map (kopia kluczy przed
   iteracją, bo `stop_generation` kasuje wpisy w trakcie), kasuje `_queuedMessage` i prosi
   `subTaskRegistry.requestStop` o zatrzymanie biegnących subów z zakładek tego widoku.
   Dodatkowo `closeQueuedForOwners` zamyka ich wątki `queued`. Właściciele, w tym zakładki
@@ -404,23 +434,28 @@ turn.abort.isAborted()`.
   woła `stop_generation` i zamyka queued aktywnej zakładki z nadawcą `user`. Watchdog nie
   zamyka kolejek innych tur.
 - **Bramka "po Stopie/watchdogu nie startujemy tury sami"** żyje jako `_drainSuppressed` -
-  podnosi ją Stop i watchdog ciszy, gasi start następnej tury. Sprawdzana przez WSZYSTKIE
-  mechanizmy, które domykają turę "po fakcie" (z timera, z powiadomienia, z `finally`): dren
-  kolejki wiadomości, dostawca wyniku suba (`_deliverSubTaskResult`, bramka stoi obok trzech
-  innych: zakładka / aktywność / trwająca tura / sufit łańcucha). Sam fakt, że coś zostało
+  podnosi ją Stop i watchdog ciszy, gasi start następnej tury. Blokuje dostawcę wyniku suba
+  (`_deliverSubTaskResult`) oraz planowanie drenu wyników subów przy pustym slocie wiadomości.
+  Dren wiadomości nie sprawdza tej flagi; Stop i watchdog właściwej aktywnej zakładki anulują
+  jej slot przed zwolnieniem tury. Sam fakt, że coś zostało
   zaplanowane (timer, callback), nie jest zgodą na wykonanie - trzeba sprawdzić też, czy adresat
   to nadal ta sama zakładka/tura (`queuedOwnerMatches`, `turnId`).
 - **Kolejka wiadomości ma WŁAŚCICIELA i uchwyt timera.** `_queuedMessage` wozi `{text, meta,
   owner}` (`owner = {agentName, tabKey}` z chwili kolejkowania). Dren w `set_generating(false)`
-  trzyma uchwyt timera (nie goły `setTimeout` bez możliwości anulowania), opróżnia slot dopiero
-  W CALLBACKU po bramkach (anulowanie nigdy nie gubi wiadomości) i pyta
+  oraz wstrzyknięcie między rundami sprawdzają właściciela: tura w tle zostawia cudzy slot
+  dla zwykłego drenu właściwej zakładki. Dren trzyma uchwyt timera (nie goły `setTimeout`
+  bez możliwości anulowania), opróżnia slot dopiero
+  W CALLBACKU po bramkach i pyta
   `queuedOwnerMatches(queued, aktualnyWłaściciel)` - user mógł w międzyczasie przełączyć
   zakładkę, wybudzony timer bez tej bramki wkleiłby cudzy tekst w pole i wystartował turę
   złym modelem/promptem/pamięcią/uprawnieniami. Przy rozjeździe wiadomość ZOSTAJE w slocie i
   czeka na swoją zakładkę. `_switchTab` rozbraja timer na wejściu, `stop_all_turns` przed
   kasowaniem slotu. **Stop anuluje zakolejkowaną wiadomość** - kasuje slot, gasi wskaźnik,
   rozbraja timer; tekst wraca do pola wpisywania, jeśli ono jest puste (szkic usera się nie
-  gubi).
+  gubi). Jeśli pole zawiera szkic, anulowany tekst nie wraca. Ten sam mechanizm stosuje watchdog
+  w tle po `archive_new`, gdy obiekt zakładki tury jest aktywny, właściciel slotu do niej pasuje
+  i na tym obiekcie nie żyje inna tura ani przygotowanie.
+  Innego slotu nie anuluje.
 - **`_resetPaintTargets()` jest jedynym miejscem prawdy o wskaźnikach malowania**
   (`current_message_container`/`bubble`/`text`/`_lastPaintedContent`) - wołają go
   `handle_error`, `_finalizeTurn`, `stop_generation` i `_chatBeforeContinue`. Bez zerowania po
@@ -499,15 +534,12 @@ mid-stream.
   osobny `chat_model_call_timeout_ms` (default 600 s, 0 = off) - budzik per-call z JEDNYM
   przezbrojeniem na admisji.
 - `_onStreamStall(turn, silentMs)` przerywa turę TĄ SAMĄ ścieżką co ręczny Stop: aktywna
-  zakładka -> `stop_generation(agentName)` + komunikat w czacie; zakładka w tle -> cleanup stanu
+  zakładka -> `stop_generation(tabKey)` + komunikat w czacie; zakładka w tle -> cleanup stanu
   jak `handle_error`. Wyrejestrowuje stream ze `StreamingManager` (wiszący XHR po abort nie
   rozstrzyga promisy pętli, więc `finally` w `send_message` mógłby nigdy nie ruszyć bez tego).
-- **Watchdog celuje w TURĘ (`turnId`), nie w agenta.** Porzucona tura (user wystartował nową
-  sesję tego samego agenta, zostawiając starą wiszącą w tle) ma własny `turnId` w
-  `_streamCtxMap` - watchdog porzuconej tury sprząta po sobie i NIE woła `stop_generation`,
-  żeby nie ubić świeżej, żywej tury tego samego agenta (współdzieloną instancję modelu i wpis
-  mapy per nazwa). `handleNewSession` dodatkowo ubija trwającą turę na wejściu, żeby nowa sesja
-  nie zostawiała zombie z uzbrojonym watchdogiem.
+- **Watchdog celuje w turę przez zamrożony `tabKey` i `turnId`.** Sprawdza tożsamość wpisu
+  przed sprzątaniem, więc spóźniony watchdog nie zatrzymuje nowszej tury. `handleNewSession`
+  zatrzymuje trwającą turę na wejściu, żeby nie zostawić jej z uzbrojonym watchdogiem.
 - Czas pracy narzędzi się NIE liczy do watchdoga streamu - to osobna warstwa timeoutów w
   `modules/tools/`.
 - Zero wycieków timera: disarm w `finally` pętli + w `stop_generation` + `chat_view.onClose`
@@ -1535,3 +1567,29 @@ załącznik, a druga opcja to cytuj i kopiuje się to do chatu jako cytat."
 U3: `ChatTurnPartialState` synchronously adds one system receipt to the frozen owner RollingWindow, updates it by revision and observes queued `appendSessionEvent` persistence to the captured path. Native turn AbortSignal preserves the first cause; turnId and frozen tab key protect newer turns from late callbacks. The machine classifier recognizes `loop_partial` from metadata or its localized system header.
 
 Partial tiles carry `_loopPartialHasToolResults` while live. After history restoration drops metadata, `buildMachineView` checks localized tool receipt headings and their retained previews in the content. A Stop without tool results has an empty tile summary, even if an older receipt still contains the former unconditional disclaimer.
+# Pytania subów w tle
+
+Pasek odświeża się także po zdarzeniu `question:clock`, więc zmiana pauzy nie czeka na kolejną klatkę. Render historii i `append_message` korzystają z danych zadania w rejestrze lub zapisanego terminalnego pytania, a kafelek bezpośredniego wyniku narzędzia ze zwrotki zawierającej `question`.
+
+Notifier przekazuje czatowi także pytania. Auto-tura wymaga aktywnej sesji właściciela,
+wolnego czatu i przejścia tych samych bramek co wynik. Claim jest potwierdzany po
+synchronicznym dopisaniu wiadomości do okna, a pytanie przed dopisaniem jest ponownie
+sprawdzane w rejestrze. Metadane niosą identyfikator pytania i właściciela.
+Przyjęcie rejestruje uchwyt przerwania przed oczekiwaniem na render i zapis; zamknięcie
+widoku zatrzaskuje go, a przerwana tura nie uruchamia modelu. Uchwyt przygotowania jest
+adresowany zamrożonym kluczem zakładki, więc dwie sesje tego samego agenta nie nadpisują
+swoich uchwytów; zamknięcie widoku zatrzymuje wszystkie przygotowania. Rezerwacja blokuje zwykłą
+wiadomość tylko w sesji właściciela podczas przygotowania; po przekazaniu do stanu tury
+nie blokuje innych sesji.
+
+Przy zamknięciu zakładki uchwyt jej przygotowania jest przerywany po kluczu zakładki.
+Zakładka odtworzona przez `_initTabs` przejmuje przygotowanie lub strumień bez zakładki w swoim oknie; rejestracja strumienia zachowuje przypisaną zakładkę, uchwyt przerwania i pusty klucz tury. Zwolnienie ostatniej pracy bez zakładki gasi stan generowania widoku, jeśli jego aktywne okno i zakładka nie mają innej pracy. Stop przyjmuje także jawny pusty klucz, a zwolnienie usuwa taki wpis mapy.
+Zamknięcie zakładki anuluje kolejkę bez klucza właściciela, z jej bieżącym lub dawnym kluczem tury oraz bez żywego właściciela; kolejka innej żywej zakładki pozostaje. Anulowanie przywraca tekst do pustego pola.
+Kontekst aktywnego strumienia jest kluczowany zamrożonym kluczem zakładki, a identyfikator
+tury chroni jej następcę przed spóźnionym sprzątaniem.
+
+Powiadomienie o pytaniu suba jest osobnym kafelkiem: klasyfikator rozpoznaje także zapisany tekst PL/EN, pokazuje nazwę, zadanie z rejestru (albo jego identyfikator) i pytanie. Wynik niesie terminalne `question` w metadanych i w zdarzeniu sesji zarówno w auto-turze, jak w wyniku pobranym w trakcie tury. Po odczycie historii pytanie pozostaje dostępne także przy pustym rejestrze. Powód i tekst pytania są osobną sekcją powiadomienia dla modelu, poza limitem dorobku.
+
+Kafelek powiadomienia o pytaniu suba oraz zwinięty kafelek odpowiedzi prowadzącego używają statusu `attention`. Adapter ustala ten status, tytuł i znacznik ramki wyniku z otwartym pytaniem; pełne pytanie trafia do osobnego bloku. Adapter i powiadomienie dla modelu usuwają z początku surowego materiału wyłącznie dokładną `question.note` przekazaną przez runnera, raz i wraz z następującymi pustymi liniami. Bez notki nie zgadują jej treści. Powiadomienie dla modelu umieszcza sekcję z powodem i pełnym pytaniem po efektach; długość w znaczniku zamykającym pozwala odczytać ją od końca, bez szukania granicy w treści. Fallback historii nie usuwa notki na podstawie tekstu i czyta sekcję pytania tylko dla wyniku częściowego lub pustego i przy wyróżnionej granicy stopki. Cytaty w materiale nie są sekcją. Wyniki narzędzi pozostają, a błędy i zatrzymanie bez pytania zachowują status błędu.
+
+Decyzja: po `cancelled` (Stop) kafelek nie pokazuje otwartego pytania ani instrukcji wznowienia, a model dostaje pytanie w sekcji powiadomienia.

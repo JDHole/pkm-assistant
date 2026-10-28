@@ -5,7 +5,7 @@
  * Pętla tool-callingu jest wyciągnięta do modules/agent-loop (runAgentLoop) - wspólna
  * z czatem. SubAgentRunner buduje store/tools/limity/egzekutor i mapuje wynik.
  */
-import { runAgentLoop, ArrayMessageStore } from '../agent-loop/index.js';
+import { runAgentLoop, ArrayMessageStore, formatAgentLoopPartial } from '../agent-loop/index.js';
 import type { RunAgentLoopOptions, ToolExecutionContext, AgentLoopPartialSnapshot, AgentLoopStopReason } from '../agent-loop/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
@@ -30,8 +30,13 @@ import type { ChatModel } from '../models/index.js';
 import { classifyRunEnd } from './runOutcome.js';
 import type { RunEffect, RunOutcome } from './runOutcome.js';
 import { allocateSubTaskId } from './subTaskId.js';
+import type { RunActivity, ParentQuestion, QuestionResolution } from './ParentQuestions.js';
 
 type AgentLike = { name: string };
+
+function _canAskParentAtDepth(depth: number): boolean {
+    return depth <= 1;
+}
 
 const SUB_AGENT_MAX_OUTPUT_TOKENS = 16384;
 
@@ -90,6 +95,8 @@ interface RunnerPlugin extends PluginApi {
 }
 
 type RunOptions = {
+    onActivity?: (activity: RunActivity) => void;
+    onQuestion?: (question: ParentQuestion) => void;
     turnKind?: 'user' | 'machine';
     turnStartedSeq?: import('./SubTaskRegistry.js').RuntimeSequence;
     delegationDepth?: number;
@@ -158,6 +165,7 @@ export type SubRunResult = {
     stopReason?: AgentLoopStopReason;
     outcome: RunOutcome;
     handoff?: string;
+    question?: import('./ParentQuestions.js').TerminalQuestion;
 };
 
 type ToolCall = { name: string; arguments: unknown };
@@ -225,8 +233,20 @@ function _maskHandoffText(value: string, knownSecrets: readonly string[]): strin
     return maskSensitiveData(withoutKnownSecrets);
 }
 
-function _buildHandoff(outcome: RunOutcome, partial: AgentLoopPartialSnapshot | undefined, details: readonly unknown[], cap: number, knownSecrets: readonly string[]): string {
+function _questionText(question: { text: string; resolution: QuestionResolution }, knownSecrets: readonly string[]): string {
+    const key = question.resolution.kind === 'no-answer' ? 'subagent.question_no_answer' : 'subagent.question_cancelled';
+    return t(key, { question: _maskHandoffText(question.text, knownSecrets) });
+}
+
+function _clipText(value: string, cap: number): string {
+    if (value.length <= cap) return value;
+    return cap > 0 ? value.slice(0, cap - 1) + '…' : '';
+}
+
+function _buildHandoff(outcome: RunOutcome, partial: AgentLoopPartialSnapshot | undefined, details: readonly unknown[], cap: number, knownSecrets: readonly string[], question?: { text: string; resolution: QuestionResolution }): { text: string; note?: string } {
     const sections: string[] = [];
+    const note = question && cap > 0 ? _clipText(_questionText(question, knownSecrets), Math.ceil(cap / 2)) : '';
+    if (note) sections.push(note);
     const append = (label: string, value: string) => {
         const used = sections.join('\n\n').length;
         const remaining = cap - used - (sections.length ? 2 : 0);
@@ -253,7 +273,7 @@ function _buildHandoff(outcome: RunOutcome, partial: AgentLoopPartialSnapshot | 
         return `${name} | ${targetPreview} | ${preview}`;
     }).join('\n');
     if (resultsText) append('subagent.handoff.results', resultsText);
-    return sections.join('\n\n').slice(0, Math.max(0, cap));
+    return { text: sections.join('\n\n').slice(0, Math.max(0, cap)), ...(note ? { note } : {}) };
 }
 
 export class SubAgentRunner {
@@ -383,6 +403,7 @@ export class SubAgentRunner {
         let subTask: SubTask | undefined;
         let conversationStore: ArrayMessageStore | undefined;
         let lastPartial: AgentLoopPartialSnapshot | undefined;
+        let closedQuestion: { text: string; resolution: QuestionResolution } | undefined;
         let partialPersistence: Promise<void> = Promise.resolve();
         const effects: RunEffect[] = [];
         const descriptions = new Map<RunEffect, ToolEffect>();
@@ -568,7 +589,7 @@ export class SubAgentRunner {
             const visibleToolNames = _canDelegateAtDepth(delegationDepth, limits.max_delegation_depth)
                 ? toolNames
                 : toolNames.filter((name) => name !== 'delegate' && name !== 'agent_delegate' && name !== 'sub_agent');
-            const tools = this._getTools(visibleToolNames, agent, options.callerToolNames);
+            const tools = this._getTools(visibleToolNames, agent, options.callerToolNames, delegationDepth);
             // Fail-closed whitelist: the sub-agent may ONLY execute tools that
             // survived the parent∩sub intersection in _getTools. _executeTool enforces this
             // so the direct-execution fallback cannot run a tool outside the whitelist.
@@ -594,7 +615,7 @@ export class SubAgentRunner {
             const transcript = thread?.transcript.map(m => structuredClone(m)) ?? [];
             const messages = [{ role: 'system' as const, content: systemPrompt }, ...transcript, { role: 'user' as const, content: `${nextTask}${options.threadId && effectsNote ? `\n${effectsNote}` : ''}` }];
 
-            if (thread && !options.threadId) thread.config.toolNames = tools.map(tool => tool.function.name);
+            if (thread && !options.threadId) thread.config.toolNames = tools.map(tool => tool.function.name).filter(name => name !== 'ask_parent');
             if (thread && options.threadId) {
                 const budget = Number((thread.config.limits as Record<string, unknown> | undefined)?.subagent_thread_context_tokens) || getLimits(this.plugin?.env?.settings).subagent_thread_context_tokens;
                 const serialized = JSON.stringify(messages);
@@ -627,7 +648,39 @@ export class SubAgentRunner {
                     },
                 }
                 : null;
-            const response = await runAgentLoop({
+            const localAbort = new AbortController();
+            let localReason: 'manual-stop' | 'task-timeout' | 'superseded' = 'manual-stop';
+            let ending = false;
+            const activity = (value: RunActivity) => _safeRegistry(() => options.onActivity?.(value));
+            const questionHook = (question: ParentQuestion) => _safeRegistry(() => options.onQuestion?.(question));
+            const offClosed = registry?.events?.on('question:closed', (payload: unknown) => {
+                const question = payload as ParentQuestion;
+                if (question.taskId !== subTask?.id) return;
+                const state = subTask.questionState;
+                if (state?.kind !== 'closed' || state.question.id !== question.id) return;
+                if (state.resolution.kind === 'answered') {
+                    questionHook(question);
+                    activity({ kind: 'working' });
+                } else {
+                    closedQuestion = { text: question.text, resolution: state.resolution };
+                    if (state.resolution.kind === 'no-answer') localReason = 'task-timeout';
+                    ending = true;
+                    questionHook(question);
+                    activity({ kind: 'ending' });
+                    localAbort.abort();
+                }
+            });
+            const externalAbort = () => {
+                localReason = options.abortReason?.() ?? 'manual-stop';
+                if (subTask) _safeRegistry(() => registry?.cancelParentQuestion(subTask!.id));
+                localAbort.abort();
+            };
+            options.abortSignal?.addEventListener('abort', externalAbort, { once: true });
+            if (options.abortSignal?.aborted) externalAbort();
+            activity({ kind: 'working' });
+            let response: Awaited<ReturnType<typeof runAgentLoop>>;
+            try {
+                response = await runAgentLoop({
                 // TS-boundary: `runAgentLoop` przyjmuje własny, WĄSKI strukturalny kontrakt
                 // (`LoopModelLike`, nieeksportowany — `modules/agent-loop` świadomie NIE zależy od
                 // `modules/models`, patrz komentarz przy `LoopModelLike` w AgentLoop.ts), którego
@@ -651,6 +704,22 @@ export class SubAgentRunner {
                     }
                     const detail = { name: toolCall.name ?? '', args, resultPreview: '' };
                     observedToolDetails[seq] = detail;
+                    if (toolCall.name === 'ask_parent') {
+                        if (!allowedToolNames.has('ask_parent')) {
+                            failedToolCalls.add(seq);
+                            return t('subagent.ask_parent_unavailable');
+                        }
+                        const text = (args && typeof args === 'object' && 'text' in args && typeof args.text === 'string' ? args.text : '').replace(/\r\n?/g, '\n');
+                        const opened = subTask && registry ? _safeRegistry(() => registry.openParentQuestion(subTask!.id, text)) : undefined;
+                        if (!opened || opened.kind === 'rejected') {
+                            failedToolCalls.add(seq);
+                            return t('subagent.ask_parent_unavailable');
+                        }
+                        activity({ kind: 'waiting', questionId: opened.question.id });
+                        questionHook(opened.question);
+                        const resolution = await opened.resolution;
+                        return resolution.kind === 'answered' ? resolution.text : '';
+                    }
                     const result = await this._executeTool(toolCall as ToolCall, agent.name, allowedToolNames,
                         { delegationDepth, scopeFolders: scopeFolders as string[], autonomy },
                         () => { failedToolCalls.add(seq); }, runtimeContext,
@@ -667,13 +736,22 @@ export class SubAgentRunner {
                 ...(options.shouldAbort ? { shouldAbort: options.shouldAbort } : {}),
                 // Przelot sygnału bramki do wołacza (DelegateTool uzbraja nim budzik zadania).
                 ...(options.onGateAdmitted ? { onGateAdmitted: options.onGateAdmitted } : {}),
-                ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-                ...(options.abortReason ? { abortReason: options.abortReason } : {}),
+                abortSignal: localAbort.signal,
+                abortReason: () => localReason,
                 knownSecrets,
                 callbacks: { partial: (snapshot) => {
                     // AgentLoop publikuje partial po zakończeniu wywołań narzędzi.
                     // Odbiorca zdarzenia może rozstrzygnąć wiszące narzędzie synchronicznie.
                     closeEffects(snapshot.stopReason);
+                    if (closedQuestion) {
+                        const text = _maskHandoffText(closedQuestion.text, knownSecrets);
+                        const questionText = _clipText(text, 2000);
+                        const used = snapshot.lastText.length + snapshot.toolOutcomes.reduce((sum, item) => sum + item.resultPreview.length, 0)
+                            + snapshot.toolCallDetails.reduce((sum, item) => sum + item.resultPreview.length, 0) + questionText.length;
+                        const receipt = formatAgentLoopPartial(snapshot, Math.max(0, 12000 - used));
+                        const enriched = { ...snapshot, question: { ...closedQuestion, text: questionText }, text: receipt };
+                        snapshot = enriched;
+                    }
                     snapshot = JSON.parse(maskSensitiveData(JSON.stringify(snapshot)).replace(/\b(https?:\/\/)[^\s/@"\\]+@/gi, '$1[REDACTED]@')) as AgentLoopPartialSnapshot;
                     lastPartial = snapshot;
                     if (subTask) _safeRegistry(() => registry?.publishPartial?.(subTask as SubTask, snapshot));
@@ -683,6 +761,7 @@ export class SubAgentRunner {
                             await memory.appendSessionEvent(origin.sessionPath, {
                                 type: 'agent_loop_partial', role: 'system', agentName: origin.agentName,
                                 content: t('subagent.partial_header', { name: config.name }) + '\n\n' + snapshot.text,
+                                question: (snapshot as AgentLoopPartialSnapshot & { question?: { text: string; resolution: QuestionResolution } }).question,
                                 result: { owner: origin, run: subTask?.id || label, revision: snapshot.revision, snapshot },
                             }, origin.sessionEpoch ?? null);
                         }).catch(() => {
@@ -696,16 +775,24 @@ export class SubAgentRunner {
                 trace: loopTrace,
                 limits: loopLimits,
                 modelOptions: { maxTokens: SUB_AGENT_MAX_OUTPUT_TOKENS, agentName: agent.name },
-            });
+                });
+            } finally {
+                options.abortSignal?.removeEventListener('abort', externalAbort);
+                if (typeof offClosed === 'function') offClosed();
+                if (!ending) activity({ kind: 'ending' });
+            }
 
             closeEffects(response.stopReason);
             await partialPersistence;
             const finalEffects = await finalizeEffects();
             const outcome = classifyRunEnd({ stoppedBy: response.stoppedBy, stopReason: response.stopReason, finalText: response.finalText, partial: lastPartial, stoppedByActor: subTask?.stopRequestedBy, effects: finalEffects, successfulToolResults });
             if (outcome.hasAnswer) store.appendAssistant(response.finalText);
-            const handoff = outcome.completeness !== 'unconfirmed'
-                ? _buildHandoff(outcome, lastPartial, response.toolCallDetails || [], limits.subagent_salvage_max_chars, knownSecrets)
+            const builtHandoff = outcome.completeness !== 'unconfirmed' || closedQuestion
+                ? _buildHandoff(outcome, lastPartial, response.toolCallDetails || [], limits.subagent_salvage_max_chars, knownSecrets, closedQuestion)
                 : undefined;
+            const handoff = builtHandoff?.text;
+            const note = builtHandoff?.note;
+            const terminalQuestion = closedQuestion ? { ...closedQuestion, text: _maskHandoffText(closedQuestion.text, knownSecrets), ...(note ? { note } : {}) } : undefined;
             log.info(logTag, `Task DONE: ${response.toolsUsed?.length || 0} tools, ${(response.finalText || '').length} znaków (stop: ${response.stoppedBy})`);
             log.timing(logTag, 'Task', startTime);
             log.groupEnd();
@@ -720,18 +807,19 @@ export class SubAgentRunner {
             if (thread) _safeRegistry(() => registry?.endRun?.(thread!.threadId, { successful: true, transcript: store.messages, answer: outcome.hasAnswer ? response.finalText : undefined, effects: finalEffects.map((effect, index) => ({ ...effect, expectedCheck: descriptions.get(effects[index])?.check })), userStop: subTask?.stopRequestedBy === 'user' }));
             if (subTask) {
                 _safeRegistry(() => registry?.finish?.(subTask as SubTask, {
-                    text: response.finalText || '',
+                    text: closedQuestion ? lastPartial?.text || '' : response.finalText || '',
                     toolsUsed: response.toolsUsed || [],
                     durationMs: Date.now() - startTime,
                     usage: response.usage || null,
                     stoppedBy: response.stoppedBy,
                     stopReason: response.stopReason,
                     outcome,
+                    ...(terminalQuestion ? { question: terminalQuestion } : {}),
                     ...(handoff ? { handoff } : {}),
                 }));
             }
             return {
-                result: response.finalText || '',
+                result: closedQuestion ? lastPartial?.text || '' : response.finalText || '',
                 toolsUsed: response.toolsUsed || [],
                 toolCallDetails: response.toolCallDetails || [],
                 duration: Date.now() - startTime,
@@ -744,6 +832,7 @@ export class SubAgentRunner {
                 partial: lastPartial,
                 stopReason: response.stopReason,
                 outcome,
+                ...(terminalQuestion ? { question: terminalQuestion } : {}),
                 ...(handoff ? { handoff } : {}),
             };
         } catch (error) {
@@ -754,7 +843,7 @@ export class SubAgentRunner {
             const finalEffects = await finalizeEffects();
             const outcome = classifyRunEnd({ stoppedBy: 'error', failed: true, stopReason: lastPartial?.stopReason, finalText: '', partial: lastPartial, stoppedByActor: subTask?.stopRequestedBy, effects: finalEffects, successfulToolResults });
             const handoff = outcome.completeness !== 'unconfirmed'
-                ? _buildHandoff(outcome, lastPartial, observedToolDetails, getLimits(this.plugin?.env?.settings).subagent_salvage_max_chars, knownSecrets)
+                ? _buildHandoff(outcome, lastPartial, observedToolDetails, getLimits(this.plugin?.env?.settings).subagent_salvage_max_chars, knownSecrets).text
                 : undefined;
             log.groupEnd();
             // TEN SAM kształt bloku co przy udanym biegu (`subagent_call`) - te same pola
@@ -844,7 +933,7 @@ export class SubAgentRunner {
         const seen = new Set<string>();
         return toolNames
             .map((name) => DEPRECATED_TOOL_RENAMES[name as keyof typeof DEPRECATED_TOOL_RENAMES] || name)
-            .filter(name => (seen.has(name) ? false : (seen.add(name), true)));
+            .filter(name => name !== 'ask_user' && (seen.has(name) ? false : (seen.add(name), true)));
     }
 
     /**
@@ -873,7 +962,7 @@ export class SubAgentRunner {
         // `[key: string]: unknown` w `PkmAssistantSettings`, więc nominalnie się nie unifikuje).
         // Rama idzie za JĘZYKIEM INTERFEJSU i liczy się RAZ NA BIEG (tu), nie przy imporcie -
         // `setLocale()` leci z `src/main.ts` dopiero po załadowaniu modułów.
-        const frame = resolveWorkPrompt(agent, 'subagent_frame_prompt', this.plugin?.env?.settings as WorkPromptSettings | undefined, defaultSubAgentFramePrompt());
+        const frame = resolveWorkPrompt(agent, 'subagent_frame_prompt', this.plugin?.env?.settings as WorkPromptSettings | undefined, defaultSubAgentFramePrompt(undefined, _canAskParentAtDepth(delegationDepth)));
 
         // METHOD — custom sub method (KNOWLEDGE.md), soft cap z limits.
         let methodBlock = '';
@@ -945,9 +1034,8 @@ export class SubAgentRunner {
         toolNames: string[],
         parentAgent: AgentLike | null | undefined,
         callerToolNames?: string[] | null,
+        delegationDepth = 0,
     ): Array<{ type: 'function'; function: { name: string; description: string; parameters: unknown } }> {
-        if (!toolNames || toolNames.length === 0) return [];
-
         const parentVisible = parentAgent && typeof this.toolRegistry.filterByAgent === 'function'
             ? new Set<string>(this.toolRegistry.filterByAgent(parentAgent).map((t) => t.name))
             : null;
@@ -958,19 +1046,22 @@ export class SubAgentRunner {
         // `as RunnerToolDefinition[]`: TS 5.4 nie zwęża `.filter(Boolean)` (brak predykatu typu w
         // lib.es5.d.ts w tej wersji) - cast na WYNIKU (nie nowy statement, nie zmieniony warunek)
         // trzyma resztę łańcucha bez zmian w emitowanym JS.
-        return (toolNames
+        const tools = (toolNames
+            .filter(name => name !== 'ask_user' && name !== 'ask_parent')
             .map(name => this.toolRegistry.getTool(name))
             .filter(Boolean) as RunnerToolDefinition[])
             .filter((tool) => !parentVisible || parentVisible.has(tool.name))
             .filter((tool) => !callerVisible || callerVisible.has(tool.name))
             .map(tool => ({
-                type: "function",
+                type: "function" as const,
                 function: {
                     name: tool.name,
                     description: tool.description,
                     parameters: tool.inputSchema
                 }
             }));
+        if (_canAskParentAtDepth(delegationDepth)) tools.push({ type: 'function', function: { name: 'ask_parent', description: 'Ask the parent agent one specific question when information cannot be obtained with your tools.', parameters: { type: 'object', properties: { text: { type: 'string', description: 'The question for the parent agent.' } }, required: ['text'], additionalProperties: false } } });
+        return tools;
     }
 
     /**
@@ -1006,7 +1097,7 @@ export class SubAgentRunner {
 
         // Fail-closed: never execute a tool outside the sub-agent's intersection whitelist,
         // regardless of which execution path (MCPClient or fallback) handles it.
-        if (allowedToolNames && !allowedToolNames.has(toolCall.name)) {
+        if (toolCall.name === 'ask_user' || (allowedToolNames && !allowedToolNames.has(toolCall.name))) {
             log.warn('SubAgent', `_executeTool ODMOWA (spoza whitelisty rodzic∩sub): ${toolCall.name}`);
             onFailure?.();
             return t('subagent.tool_not_allowed', { name: toolCall.name });
@@ -1058,7 +1149,7 @@ export class SubAgentRunner {
                     // Whitelista TEGO suba jedzie dalej jako znacznik,
                     // żeby `delegate` policzył narzędzia wnuka względem niego, nie względem
                     // agenta głównego. Lista jest już przecięciem rodzic∩sub (patrz `runTask`).
-                    ...(allowedToolNames ? { callerToolNames: [...allowedToolNames] } : {}),
+                    ...(allowedToolNames ? { callerToolNames: [...allowedToolNames].filter(name => name !== 'ask_parent') } : {}),
                 });
                 const sanitized = stripImageBase64ForTranscript(toolCall.name, result);
                 effectHooks?.complete(describedArgs, result,

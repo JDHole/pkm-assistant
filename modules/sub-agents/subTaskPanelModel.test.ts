@@ -6,7 +6,7 @@
  * licznik z sufitu, urwany wynik).
  */
 import test from 'ava';
-import { buildStripModel, formatDuration } from './subTaskPanelModel.js';
+import { buildStripModel, formatDuration, summarizeStripRows } from './subTaskPanelModel.js';
 import type { StripState } from './subTaskPanelModel.js';
 import { SubTaskRegistry } from './SubTaskRegistry.js';
 import { SubTaskNotifier } from './SubTaskNotifier.js';
@@ -15,6 +15,14 @@ import { TraceLog, maskSensitiveData } from '../../core/index.js';
 import type { SubTask } from './SubTaskRegistry.js';
 import { t as tr } from '../../core/i18n/index.js';
 import { buildSubTaskResultModel, getStripStateLabelParts } from './index.js';
+
+test('wynik zachowuje rozstrzygnięcie i treść pytania bez odpowiedzi', t => {
+    const model = buildSubTaskResultModel({ question: { text: 'Jaki zakres?', resolution: { kind: 'no-answer' } }, thread: { kind: 'single' } });
+    t.deepEqual([model.questionResolution, model.openQuestion, model.endLabelKey], ['no-answer', 'Jaki zakres?', 'chat.substrip.question_no_answer_partial']);
+    const cancelled = buildSubTaskResultModel({ question: { text: 'Jaki zakres?', resolution: { kind: 'cancelled', by: 'user', reason: 'stop' } }, thread: { kind: 'single' } });
+    t.is(cancelled.questionResolution, 'cancelled');
+    t.is(cancelled.openQuestion, undefined);
+});
 
 const TERAZ = 1_000_000;
 
@@ -820,4 +828,14 @@ test('publiczny model nie wyprowadza kontynuacji z samego biegu ani task_id', t 
         t.false('sub_id' in model.thread);
     }
     t.throws(() => buildSubTaskResultModel({ thread: { kind: 'reusable', sub_id: '  ' } }), { message: 'Reusable sub-agent thread requires a non-empty sub_id' });
+});
+test('model zachowuje żywy bieg i treść pytania', t => {
+    const registry = new SubTaskRegistry();
+    const task = registry.create({ id: 'r1', threadId: 's1', name: 'Klara', origin: { agentName: 'Jaskier', sessionPath: 's.md', sessionEpoch: 'e1' } });
+    const opened = registry.openParentQuestion('r1', 'Jaki zakres?');
+    if (opened.kind !== 'opened') throw new Error('question did not open');
+    const rows = buildStripModel({ tasks: [task], agentName: 'Jaskier', sessionPath: 's.md' });
+    const state = rows[0].questionState;
+    t.deepEqual({ state: rows[0].state.kind, questionId: state.kind === 'waiting' && state.question.id === opened.question.id ? 'q1' : '', text: state.kind === 'waiting' ? state.question.text : '', running: summarizeStripRows(rows).running }, { state: 'running', questionId: 'q1', text: 'Jaki zakres?', running: 1 });
+    registry.dispose();
 });

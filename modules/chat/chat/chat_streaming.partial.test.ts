@@ -125,19 +125,19 @@ function setup() {
 async function fakeDocument<T>(fn: () => Promise<T>): Promise<T> {
     const prev = (globalThis as Record<string, unknown>).document;
     (globalThis as Record<string, unknown>).document = { createElement: (tag: string) => makeFakeEl(tag), hasFocus: () => true };
-    try { return await fn(); } finally { (globalThis as Record<string, unknown>).document = prev; streamingManager.stopStream('u3-fixture::Owner'); }
+    try { return await fn(); } finally { (globalThis as Record<string, unknown>).document = prev; streamingManager.stopStream('u3-fixture::tab-a'); streamingManager.stopStream('u3-fixture::tab-b'); }
 }
 
 test.serial('real send_message publishes a masked system tile before synthesis and native Stop settles hanging transport', async t => {
     await fakeDocument(async () => {
         const f = setup(); const run = send_message.call(f.ctx, { injectedText: 'synthetic create folder' });
-        await f.held; const live = f.ctx._streamCtxMap.get('Owner');
+        await f.held; const live = f.ctx._streamCtxMap.get('tab-a');
         t.is(f.rw.messages.filter(m => m._loopPartial).length, 1);
         t.truthy(findByClass(f.container, 'cs-tile--system'));
         t.is(live.partial.latest.synthesis, 'pending');
         t.false(JSON.stringify(live.partial.latest).includes(f.key));
         t.false(JSON.stringify(live.partial.latest).includes('user:password'));
-        stop_generation.call(f.ctx, 'Owner');
+        stop_generation.call(f.ctx, 'tab-a');
         await run; await live.partial.persisted();
         t.deepEqual(f.counts(), { calls: 2, stops: 1, paints: 0, finals: 0 });
         t.is(live.partial.latest.stopReason.kind, 'manual-stop');
@@ -154,18 +154,19 @@ test.serial('real send_message publishes a masked system tile before synthesis a
 test.serial('owner A keeps partials after switch; late A callbacks and finally leave same-agent B untouched', async t => {
     await fakeDocument(async () => {
         const f = setup(); const run = send_message.call(f.ctx, { injectedText: 'synthetic create folder' });
-        await f.held; const a = f.ctx._streamCtxMap.get('Owner');
+        await f.held; const a = f.ctx._streamCtxMap.get('tab-a');
         f.memory.activeSessionPath = 'owner-b.md';
         f.ctx.chatTabs[0].isActive = false; f.ctx.chatTabs.push({ agentName: 'Owner', sessionId: 'tab-b', isActive: true });
         f.ctx.rollingWindow = f.rwB;
         let bStops = 0;
-        const b = { ...a, turnId: a.turnId + 1, rollingWindow: f.rwB, chatModel: { stopStream() { bStops++; } } };
-        f.ctx._streamCtxMap.set('Owner', b); f.ctx.is_generating = true;
+        const b = { ...a, tab: f.ctx.chatTabs[1], turnId: a.turnId + 1, rollingWindow: f.rwB, chatModel: { stopStream() { bStops++; } } };
+        f.ctx._streamCtxMap.set('tab-b', b); f.ctx.is_generating = true;
+        streamingManager.startStream('u3-fixture::tab-b', { agent: 'Owner' });
         const before = f.container.children.length;
         a.abort.abort('superseded');
         await run; await a.partial.persisted();
         f.handlers().chunk({ choices: [{ message: { content: 'late A' } }] }); f.handlers().gate_admitted?.();
-        t.is(f.ctx._streamCtxMap.get('Owner'), b);
+        t.is(f.ctx._streamCtxMap.get('tab-b'), b);
         t.true(f.ctx.is_generating); t.is(bStops, 0);
         t.is(f.rwB.messages.length, 0);
         t.is(f.rw.messages.filter(m => m._loopPartial).length, 1);
@@ -174,7 +175,23 @@ test.serial('owner A keeps partials after switch; late A callbacks and finally l
         t.is(a.partial.latest.stopReason.kind, 'superseded');
         t.is(streamingManager.getActiveStreams().length, 1);
         handle_error.call(f.ctx, new Error('late A error'), 'Owner', a.turnId, 'tab-a');
-        await _finalizeTurn.call(f.ctx, { agentName: 'Owner', turnId: a.turnId } as never, { finalText: 'late A final' } as never);
+        await _finalizeTurn.call(f.ctx, { agentName: 'Owner', turnId: a.turnId, origin: { tabKey: 'tab-a' } } as never, { finalText: 'late A final' } as never);
         t.true(f.ctx.is_generating); t.is(bStops, 0); t.is(f.rwB.messages.length, 0);
+    });
+});
+
+test.serial('late callbacks starej tury nie usuwają nowszej tury pod tym samym kluczem', async t => {
+    await fakeDocument(async () => {
+        const f = setup(); const run = send_message.call(f.ctx, { injectedText: 'synthetic create folder' });
+        await f.held; const old = f.ctx._streamCtxMap.get('tab-a');
+        let stops = 0;
+        const newer = { ...old, turnId: old.turnId + 1, chatModel: { stopStream() { stops++; } } };
+        f.ctx._streamCtxMap.set('tab-a', newer);
+        old.abort.abort('superseded'); await run;
+        handle_error.call(f.ctx, new Error('late error'), 'Owner', old.turnId, 'tab-a');
+        await _finalizeTurn.call(f.ctx, { agentName: 'Owner', turnId: old.turnId, origin: { tabKey: 'tab-a' } } as never, { finalText: 'late' } as never);
+        t.is(f.ctx._streamCtxMap.get('tab-a'), newer);
+        t.true(f.ctx.is_generating);
+        t.is(stops, 0);
     });
 });

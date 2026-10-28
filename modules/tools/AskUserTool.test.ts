@@ -72,6 +72,21 @@ test('UI jest - odpowiedź usera wraca nietknięta (ścieżka zdrowa)', async t 
     t.is(plugin._askUserPromise, null, 'sprzątanie w finally działa dalej');
 });
 
+test('sprzątanie starego oczekiwania nie usuwa nowego kanału zgodnościowego', async t => {
+    let resolve!: (answer: string | null) => void;
+    const oldPromise = new Promise<string | null>(done => { resolve = done; });
+    const plugin: AskUserPlugin = { _askUserPromise: oldPromise, _askUserResolve: resolve };
+    const result = exec(plugin);
+    const nextPromise = new Promise<string | null>(() => {});
+    const nextResolve = () => {};
+    plugin._askUserPromise = nextPromise;
+    plugin._askUserResolve = nextResolve;
+    resolve('A/');
+    await result;
+    t.is(plugin._askUserPromise, nextPromise);
+    t.is(plugin._askUserResolve, nextResolve);
+});
+
 test('UI jest, ale user anulował - porażka, nie pierwsza opcja', async t => {
     const res = await exec({ _askUserPromise: Promise.resolve(null) });
 

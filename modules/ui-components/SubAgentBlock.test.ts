@@ -144,6 +144,38 @@ test.serial('resultView omits empty sections; legacy remains available', t => {
     });
 });
 
+test.serial('resultView displays an unanswered question', t => {
+    withFakeDocument(() => {
+        const row = createSubAgentBlock({ type: 'delegate', resultView: {
+            title: 'Result worker', badge: 'no answer', status: 'error', missingTargets: [], effects: [], notes: [], openQuestion: 'Which note?',
+        } }) as unknown as FakeEl;
+        t.is(findByClass(row, 'cs-tile__badge')?.textContent, 'no answer');
+        findByClass(row, 'cs-tile__head')!.fire('click');
+        t.is(findByClass(row, 'cs-subresult__question')?.textContent, 'Open question: Which note?');
+        t.true(allText(row).includes('Reply to the lead, who will resume this sub-agent with your answer.'));
+    });
+});
+
+test.serial('resultView status is rendered independently of the question', t => {
+    withFakeDocument(() => {
+        const base = { title: 'Result worker', missingTargets: [], effects: [], notes: [] };
+        const attention = createSubAgentBlock({ type: 'delegate', resultView: { ...base, status: 'attention' } }) as unknown as FakeEl;
+        const error = createSubAgentBlock({ type: 'delegate', resultView: { ...base, status: 'error', openQuestion: 'Which note?' } }) as unknown as FakeEl;
+        t.true(attention.classList.contains('cs-tile--attention'));
+        t.true(error.classList.contains('cs-tile--error'));
+    });
+});
+
+test.serial('resultView attention takes precedence while opts error remains an error', t => {
+    withFakeDocument(() => {
+        const base = { title: 'Result worker', missingTargets: [], effects: [], notes: [] };
+        const error = createSubAgentBlock({ type: 'delegate', status: 'error', resultView: { ...base, status: 'ok' } }) as unknown as FakeEl;
+        const attention = createSubAgentBlock({ type: 'delegate', status: 'error', resultView: { ...base, status: 'attention' } }) as unknown as FakeEl;
+        t.true(error.classList.contains('cs-tile--error'));
+        t.true(attention.classList.contains('cs-tile--attention'));
+    });
+});
+
 test.serial('wynik: naglowek (tytul/skrot/meta) nie zawiera nazw narzedzi ani liczb tokenow', t => {
     withFakeDocument(() => {
         const row = createSubAgentBlock({

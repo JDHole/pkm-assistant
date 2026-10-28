@@ -118,7 +118,7 @@ test('`turnAbort` to uchwyt TEJ tury, sięgalny dla Stopu i zamknięcia widoku',
     // zatrzask, którego guzik Stop nie ma jak podnieść.
     t.regex(body, /const turnAbort = createTurnAbort\(\);/,
         'tura przestała zakładać własny zatrzask (przerwanie jest stanem TURY, nie pola widoku)');
-    t.regex(body, /this\._preparingTurns\.set\([^)]*,\s*turnAbort\)/,
+    t.regex(body, /this\._preparingTurns\.set\(ownerTabKey,\s*\{\s*tab:\s*owner\.tab,\s*rollingWindow:\s*rw,\s*abort:\s*turnAbort\s*\}\)/,
         'Stop kliknięty w oknie przygotowania tury (prompt się buduje) trafiałby w próżnię');
     t.regex(body, /this\._streamCtxMap\.set\([\s\S]{0,400}?\babort:\s*turnAbort,/,
         '`stop_generation(agentName)` i zamknięcie widoku sięgają po zatrzask przez wpis `_streamCtxMap`');

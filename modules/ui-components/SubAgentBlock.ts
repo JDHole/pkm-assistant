@@ -37,12 +37,13 @@ export interface SubAgentResultView {
     title: string;
     summary?: string;
     badge?: string;
-    status: 'ok' | 'error';
+    status: 'ok' | 'error' | 'attention';
     material?: string;
     error?: string;
     missingTargets: string[];
     effects: Array<{ tool: string; target: string; statusLabel: string }>;
     notes: string[];
+    openQuestion?: string;
 }
 
 interface SubAgentBlockOptions {
@@ -96,6 +97,12 @@ function appendResultView(body: HTMLElement, view: SubAgentResultView): void {
     for (const note of view.notes) {
         const line = body.createDiv({ cls: 'cs-subresult__note' });
         line.textContent = note;
+    }
+    if (view.openQuestion !== undefined) {
+        const question = body.createDiv({ cls: 'cs-subresult__question' });
+        question.textContent = t('chat.substrip.question_open', { question: view.openQuestion });
+        const note = body.createDiv({ cls: 'cs-subresult__note' });
+        note.textContent = t('chat.substrip.question_resume');
     }
 }
 
@@ -232,7 +239,7 @@ export function createSubAgentBlock(opts: SubAgentBlockOptions): HTMLElement {
     const isBackground = opts.pending === true;
     const resultView = opts.resultView;
     const isError = !isBackground && (resultView?.status === 'error' || opts.status === 'error');
-    const status: TileStatus = isBackground ? 'pending' : (isError ? 'error' : 'ok');
+    const status: TileStatus = isBackground ? 'pending' : resultView?.status === 'attention' ? 'attention' : (isError ? 'error' : 'ok');
 
     let title: string;
     let summary: string | undefined;

@@ -39,6 +39,8 @@ import { EventEmitter } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
 import type { RunOutcome, StopBy } from './runOutcome.js';
 import type { LoopMessage } from '../agent-loop/index.js';
+import { ParentQuestions } from './ParentQuestions.js';
+import type { Owner, QuestionId, QuestionState, ParentQuestionClock, OpenParentQuestionResult, AnswerResult } from './ParentQuestions.js';
 
 /** Stan biegu suba. `aborted` = ubity z zewnątrz (timeout delegacji), `error` = wyjątek. */
 export type SubTaskStatus = 'running' | 'done' | 'error' | 'aborted';
@@ -68,6 +70,7 @@ export interface SubTaskResult {
     stopReason?: AgentLoopStopReason;
     outcome?: RunOutcome;
     handoff?: string;
+    question?: import('./ParentQuestions.js').TerminalQuestion;
 }
 
 /**
@@ -106,6 +109,7 @@ export interface SubThread {
 
 /** Bieg sub-agenta jako byt. `id` = etykieta trace (`sub/<nazwa>#<seq>`), unikalna w procesie. */
 export interface SubTask {
+    questionState?: QuestionState;
     id: string;
     name: string;
     agentName: string;
@@ -152,6 +156,7 @@ export interface SubTaskTraceLogLike {
 }
 
 export interface SubTaskRegistryOptions {
+    questionClock?: ParentQuestionClock;
     /** Gdy podany — rejestr sam subskrybuje domyślnego konsumenta piszącego do trace.log. */
     traceLog?: SubTaskTraceLogLike | null;
     /** W produkcji `maskSensitiveData`; brak = zero maskowania (tylko testy/harness). */
@@ -182,12 +187,39 @@ const DEFAULT_MAX_MESSAGES_PER_TASK = 10;
 const MAX_THREAD_EFFECTS = 100;
 
 export class SubTaskRegistry {
+    private readonly _questions: ParentQuestions;
     private _runtimeSequence = 0;
     private _nextSequence(): RuntimeSequence {
         if (this._runtimeSequence >= Number.MAX_SAFE_INTEGER) throw new Error('Runtime sequence exhausted');
         return ++this._runtimeSequence as RuntimeSequence;
     }
     issueTurnStartSequence(): RuntimeSequence { return this._nextSequence(); }
+    openParentQuestion(taskId: string, text: string): OpenParentQuestionResult {
+        const task = this._tasks.get(taskId);
+        return task ? this._questions.open(task, text) : { kind: 'rejected', reason: 'unavailable' };
+    }
+    cancelParentQuestion(taskId: string): void {
+        const task = this._tasks.get(taskId);
+        if (task) this._questions.close(task, { kind: 'cancelled', by: task.stopRequestedBy ?? 'system', reason: 'run-ended' });
+    }
+    answerParentQuestion(taskId: string, id: QuestionId, owner: Owner, text: string): AnswerResult {
+        return this._questions.answer(this._tasks.get(taskId), id, owner, text);
+    }
+    getQuestionState(taskId: string): QuestionState {
+        const task = this._tasks.get(taskId);
+        return task ? this._questions.check(task) : { kind: 'none' };
+    }
+    isQuestionOpen(taskId: string, id: QuestionId): boolean {
+        const state = this.getQuestionState(taskId);
+        return state.kind === 'waiting' && state.question.id === id;
+    }
+    registerUserWait(owner: Owner, cancel: () => void): () => void { return this._questions.registerUserWait(owner, cancel); }
+    promoteToBackground(taskId: string): boolean {
+        const task = this._tasks.get(taskId);
+        if (!task || task.status !== 'running' || task.stopRequested) return false;
+        task.background = true;
+        return true;
+    }
     // `declare` = sama deklaracja typu, zero emitu.
     /** Szyna zdarzeń: `task:created` (task), `task:step` ({task, step}), `task:finished` (task). */
     declare events: EventEmitter;
@@ -221,8 +253,10 @@ export class SubTaskRegistry {
         maxStepsPerTask = DEFAULT_MAX_STEPS_PER_TASK,
         maxMessagesPerTask = DEFAULT_MAX_MESSAGES_PER_TASK,
         maxThreadRuns = 5, maxThreadTranscriptChars = 200000, threadIdleMs = 1800000, maxIdleThreadsPerSession = 3,
+        questionClock,
     }: SubTaskRegistryOptions = {}) {
         this.events = new EventEmitter();
+        this._questions = new ParentQuestions((event, payload) => this.events.emit(event, payload), questionClock);
         this._tasks = new Map();
         this._threads = new Map();
         this._threadLimits = { runs: maxThreadRuns, chars: maxThreadTranscriptChars, idleMs: threadIdleMs, perSession: maxIdleThreadsPerSession };
@@ -465,6 +499,7 @@ export class SubTaskRegistry {
             createdAt: Date.now(),
             steps: [],
             budget: budget ? { ...budget } : {},
+            questionState: { kind: 'none' },
         };
         // Pola opcjonalne dokładamy tylko gdy podane — kształt bytu bez delegacji w tle
         // zostaje bit w bit ten sam (konsumenci sprawdzają obecność pola).
@@ -527,6 +562,7 @@ export class SubTaskRegistry {
             task.outcome = result.outcome;
             task.status = result?.stoppedBy === 'abort' ? 'aborted' : 'done';
             task.endedAt = Date.now();
+            this._questions.close(task, { kind: 'cancelled', by: 'system', reason: 'run-ended' });
             this.events.emit('task:finished', task);
             this._evictOldDone();
         } catch (e) {
@@ -545,6 +581,7 @@ export class SubTaskRegistry {
             task.error = this._mask ? this._mask(message) : message;
             if (result) task.result = result;
             task.endedAt = Date.now();
+            this._questions.close(task, { kind: 'cancelled', by: 'system', reason: 'run-ended' });
             this.events.emit('task:finished', task);
             this._evictOldDone();
         } catch (e) {
@@ -589,6 +626,7 @@ export class SubTaskRegistry {
             if (!task || !stop || task.status !== 'running') return false;
             task.stopRequested = true;
             task.stopRequestedBy ??= by;
+            this._questions.close(task, { kind: 'cancelled', by: task.stopRequestedBy, reason: 'stop' });
             if (by === 'user') {
                 const seq = this._nextSequence();
                 task.userStopSeq = seq;
@@ -628,6 +666,12 @@ export class SubTaskRegistry {
      */
     stopAll(reason = 'stopAll'): number {
         let stopped = 0;
+        for (const task of this._tasks.values()) {
+            if (task.questionState?.kind === 'waiting') { task.stopRequested = true; task.stopRequestedBy ??= 'system'; }
+        }
+        for (const task of this._tasks.values()) {
+            this._questions.close(task, { kind: 'cancelled', by: 'system', reason: 'unload' });
+        }
         try {
             // Kopia: uchwyt potrafi domknąć bieg synchronicznie, a housekeeping kasuje wtedy
             // wpis z `_aborts` w trakcie iteracji.
@@ -777,6 +821,7 @@ export class SubTaskRegistry {
      * zostaje best-effort i idempotentna: wolno ją zawołać dwa razy i nie ma prawa rzucić.
      */
     dispose(): void {
+        this._questions.dispose();
         try {
             this.events.removeAllListeners();
             this._tasks.clear();

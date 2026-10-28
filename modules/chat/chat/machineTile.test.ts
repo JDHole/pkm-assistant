@@ -15,12 +15,75 @@ import { readFileSync } from 'node:fs';
 import { renderMachineTile } from './machineTile.js';
 import { buildMachineView } from './machineMessage.js';
 import { buildSubTaskNotificationText } from './subTaskNotification.js';
-import { t as translate } from '../../../core/i18n/index.js';
+import { buildSubTaskQuestionDelivery } from './subTaskQuestionDelivery.js';
+import { buildSubTaskResultDelivery } from './subTaskResultDelivery.js';
+import { setLocale, t as translate } from '../../../core/i18n/index.js';
 import { setNoteOpener } from '../../ui-components/index.js';
 import type { MachineView } from './machineMessage.js';
+import { SubAgentRunner, SubTaskRegistry } from '../../sub-agents/index.js';
+import { QuestionTestClock } from '../../sub-agents/test-support/questionTestClock.js';
 import type { SubTask } from '../../sub-agents/index.js';
+import { formatSessionEvent, parseActiveSession } from '../../memory/activeSessionFormat.js';
+import { RollingWindow } from './RollingWindow.js';
+import { RollingWindowMessageStore } from './RollingWindowMessageStore.js';
+import { runAgentLoop } from '../../agent-loop/index.js';
 
 type Listener = (ev: unknown) => void;
+
+test.serial('partial runnera i historia pytania przeżywają zapis sesji', async t => {
+    await withFakeDocument(async () => {
+        for (const locale of ['pl', 'en'] as const) for (const mode of ['stop', 'timeout'] as const) for (const cap of [0, 12, 12000]) {
+            setLocale(locale);
+            const clock = new QuestionTestClock();
+            const registry = new SubTaskRegistry({ questionClock: clock });
+            const events: Array<{ type?: string; [key: string]: unknown }> = [];
+            const memory = { appendSessionEvent: async (_path: string, event: { type?: string; [key: string]: unknown }) => { events.push(event); return ''; } };
+            const read = { name: 'read', description: 'read', inputSchema: {}, execute: async () => 'DOROBEK' };
+            const runner = new SubAgentRunner({ app: {}, plugin: { subTaskRegistry: registry, agentManager: { getAgentMemory: () => memory }, env: { settings: { pkmAssistant: { limits: { subagent_salvage_max_chars: cap } } } } }, toolRegistry: { filterByAgent: () => [read], getTool: () => read } });
+            let ready!: () => void;
+            const waiting = new Promise<void>(resolve => { ready = resolve; });
+            let calls = 0;
+            const model = { stream(_payload: unknown, cb: { done(value: unknown): void }) {
+                const call = calls++ === 0 ? { id: 'r', type: 'function', function: { name: 'read', arguments: '{}' } } : { id: 'q', type: 'function', function: { name: 'ask_parent', arguments: JSON.stringify({ text: 'First?\r\n\r\nSecond?\rThird?' }) } };
+                cb.done({ choices: [{ message: { role: 'assistant', content: '', tool_calls: [call] } }] });
+            } };
+            const run = runner.runTask('zadanie', { name: 'Lead' }, { name: 'Badacz', tools: ['read'] } as never, model as never,
+                { origin: { agentName: 'Lead', sessionPath: 'a', sessionEpoch: 'b' }, onTaskCreated: task => registry.attachAbort(task.id, () => {}), onActivity: activity => { if (activity.kind === 'waiting') ready(); } });
+            await waiting;
+            if (mode === 'stop') registry.requestStop(registry.list()[0].id, 'lead');
+            else clock.advance(300000);
+            await run;
+            const partial = events.find(event => event.type === 'agent_loop_partial')!;
+            const restored = parseActiveSession(formatSessionEvent('agent_loop_partial', partial, '2026-10-28T00:00:00Z')).messages[0];
+            const window = new RollingWindow();
+            await window.addMessage(restored.role, restored.content);
+            let payload = '';
+            const lead = { stream(request: unknown, cb: { done(value: unknown): void }) {
+                payload = JSON.stringify(request);
+                cb.done({ choices: [{ message: { role: 'assistant', content: 'Gotowe' } }] });
+            } };
+            await runAgentLoop({ model: lead as never, store: new RollingWindowMessageStore(window), resolveTools: () => [], executeToolCall: async () => '', limits: { maxIterations: 1 } });
+            t.true(payload.includes('First?\\n\\nSecond?\\nThird?'));
+            t.true(payload.includes(mode === 'stop' ? 'cancelled' : 'no-answer'));
+            if (mode === 'stop') { t.true(payload.includes('lead')); t.true(payload.includes('stop')); }
+            const task = registry.list()[0];
+            const delivery = buildSubTaskResultDelivery(task, undefined, 0);
+            const history = parseActiveSession(formatSessionEvent('user_message', { content: delivery.text }, '2026-10-28T00:00:00Z')).messages[0];
+            for (const withRegistry of [false, true]) {
+                const view = buildMachineView({ ...history }, { t: translate, ...(withRegistry ? { getTask: () => task } : {}) });
+                if (mode === 'timeout') t.is(view!.subAgentResult!.openQuestion, 'First?\n\nSecond?\nThird?');
+                t.false(Boolean(view!.subAgentResult!.material?.includes('SUBTASK_QUESTION')));
+                const container = makeFakeEl();
+                await renderMachineTile(container as unknown as HTMLElement, fakePlugin([], null), view!);
+                const tile = findByClass(container, 'cs-tile--subresult')!;
+                findByClass(tile, 'cs-tile__head')!.fire('click');
+                if (mode === 'timeout') t.is(deepText(tile).split('First?\n\nSecond?\nThird?').length - 1, 1);
+            }
+            registry.dispose();
+        }
+        setLocale('en');
+    });
+});
 
 type FakeEl = {
     tagName: string;
@@ -286,5 +349,273 @@ test.serial('renderMachineTile: ramka wyniku suba używa SubAgentBlock z rolą s
         const result = findByClass(tile!, 'cs-subresult');
         t.truthy(result);
         t.true(deepText(result!).includes('DOROBEK'));
+    });
+});
+
+
+test.serial('pytanie suba przechodzi przez delivery, klasyfikator i render w PL i EN', async t => {
+    await withFakeDocument(async () => {
+        for (const [locale, title] of [['pl', 'Pytanie sub-agenta Badacz'], ['en', 'Question from sub-agent Badacz']] as const) {
+            setLocale(locale);
+            const delivery = buildSubTaskQuestionDelivery({ id: 'q1', taskId: 'task1', subId: 'sub1', name: 'Badacz', text: 'Który katalog wybrać?', owner: { agentName: 'Lead', sessionPath: 'a', sessionEpoch: 'b' }, askedAt: 1 } as never);
+            for (const meta of [delivery.meta, {}]) {
+                const view = buildMachineView({ role: 'user', content: delivery.text, ...meta }, { t: translate, getTask: () => ({ taskPreview: 'Sprawdź notatki' }) });
+                t.is(view?.kind, 'subtask_question');
+                const container = makeFakeEl();
+                await renderMachineTile(container as unknown as HTMLElement, fakePlugin([], null), view!);
+                const tile = findByClass(container, 'cs-tile--subquestion');
+                t.truthy(tile);
+                t.true(tile!.classList.contains('cs-tile--attention'));
+                t.is(tileColor(tile!), 'var(--text-warning)');
+                findByClass(container, 'cs-tile__head')?.fire('click');
+                t.truthy(findByClass(container, 'cs-sub-question__text'));
+                const rendered = deepText(container);
+                t.true(rendered.includes(title));
+                t.true(rendered.includes('Sprawdź notatki'));
+                t.true(rendered.includes('Który katalog wybrać?'));
+                t.false(rendered.includes('skończył w tle'));
+                t.false(rendered.includes('finished in the background'));
+            }
+        }
+        setLocale('en');
+    });
+});
+
+test.serial('brak odpowiedzi: dorobek i jedno pytanie w wyniku żywym oraz historii PL i EN', async t => {
+    await withFakeDocument(async () => {
+        for (const locale of ['pl', 'en'] as const) {
+            setLocale(locale);
+            const question = 'Którą wersję planu wybrać?';
+            const runner = locale === 'pl' ? `Sub nie dostał odpowiedzi na pytanie: ${question}` : `The sub-agent received no answer to the question: ${question}`;
+            const tool = 'read | Notatki/Plan Q4.md | {"success":true}';
+            const task = { id: 'task1', name: 'pkm-sub', agentName: 'Lead', status: 'done', background: true, createdAt: 1, steps: [], budget: {}, outcome: { end: { kind: 'timeout' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] }, result: { text: `${runner}\n\nTool results, newest first\n${tool}`, toolsUsed: ['read'], durationMs: 1, usage: null, question: { text: question, resolution: { kind: 'no-answer' }, note: runner } } } as SubTask;
+            const delivery = buildSubTaskResultDelivery(task, undefined, 0);
+            for (const meta of [delivery.meta, {}]) {
+                const view = buildMachineView({ role: 'user', content: delivery.text, ...meta }, { t: translate });
+                const container = makeFakeEl();
+                await renderMachineTile(container as unknown as HTMLElement, fakePlugin([], null), view!);
+                const tile = findByClass(container, 'cs-tile--subresult')!;
+                t.true(tile.classList.contains('cs-tile--attention'));
+                t.is(tileColor(tile), 'var(--text-warning)');
+                findByClass(tile, 'cs-tile__head')!.fire('click');
+                const rendered = deepText(tile);
+                t.is(rendered.split(question).length - 1, 1);
+                const badge = locale === 'pl' ? 'brak odpowiedzi' : 'no answer';
+                t.is(deepText(findByClass(tile, 'cs-tile__head')!).toLowerCase().split(badge).length - 1, 1);
+                t.true(deepText(findByClass(tile, 'cs-subresult')!).includes(tool));
+                t.false(rendered.includes(runner));
+                t.false(rendered.includes(locale === 'pl' ? 'czas na odpowiedź upłynął' : 'response time expired'));
+                t.truthy(findByClass(tile, 'cs-subresult__question'));
+            }
+        }
+        setLocale('en');
+    });
+});
+
+for (const scenario of ['partial', 'success'] as const) test.serial(`delivery i render PL i EN: ${scenario}`, async t => {
+    await withFakeDocument(async () => {
+        for (const locale of ['pl', 'en'] as const) {
+            setLocale(locale);
+            const question = 'Pierwszy akapit?\n\nDrugi akapit z wyborem A lub B?';
+            const runner = locale === 'pl' ? `Sub nie dostał odpowiedzi na pytanie: ${question}` : `The sub-agent received no answer to the question: ${question}`;
+            const tool = 'read | Plan.md | OK';
+            const base = { id: 'task1', name: 'pkm-sub', agentName: 'Lead', status: 'done', background: true, createdAt: 1, steps: [], budget: {} };
+            const partial = { ...base, outcome: { end: { kind: 'timeout' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] }, result: { text: `${runner}\n\n${tool}`, toolsUsed: ['read'], durationMs: 1, usage: null, question: { text: question, resolution: { kind: 'no-answer' }, note: runner } } } as SubTask;
+            const quote = locale === 'pl' ? 'Brak odpowiedzi: czas na odpowiedź upłynął.\nOtwarte pytanie: CYTAT - wybierz folder?' : 'No answer: response time expired.\nOpen question: CYTAT - wybierz folder?';
+            const material = `Dokumentacja:\n\n\`\`\`\n\n${quote}\n\n\`\`\``;
+            const success = { ...base, outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true, effects: [] }, result: { text: material, toolsUsed: [], durationMs: 1, usage: null } } as SubTask;
+            for (const task of [scenario === 'partial' ? partial : success]) {
+                const delivery = buildSubTaskResultDelivery(task, undefined, 0);
+                for (const meta of [delivery.meta, {}]) {
+                    const view = buildMachineView({ role: 'user', content: delivery.text, ...meta }, { t: translate });
+                    const container = makeFakeEl();
+                    await renderMachineTile(container as unknown as HTMLElement, fakePlugin([], null), view!);
+                    const tile = findByClass(container, 'cs-tile--subresult')!;
+                    findByClass(tile, 'cs-tile__head')!.fire('click');
+                    const rendered = deepText(tile);
+                    t.false(rendered.includes('[SUBTASK_QUESTION'));
+                    t.false(rendered.includes('[/SUBTASK_QUESTION]'));
+                    if (task === partial) {
+                        t.true(tile.classList.contains('cs-tile--attention'));
+                        t.is(view!.subAgentResult!.title, locale === 'pl' ? 'Wynik pkm-sub' : 'Result pkm-sub');
+                        t.is(view!.subAgentResult!.openQuestion, question);
+                        t.is(rendered.split(question).length - 1, 1);
+                        t.true(rendered.includes(tool));
+                        t.false(rendered.includes(runner));
+                    } else {
+                        t.true(tile.classList.contains('cs-tile--ok'));
+                        t.is(view!.subAgentResult!.openQuestion, undefined);
+                        t.true(rendered.includes(material));
+                    }
+                }
+            }
+        }
+        setLocale('en');
+    });
+});
+
+test.serial('historia pytania z reusable thread zachowuje pytanie i instrukcję wątku', async t => {
+    await withFakeDocument(async () => {
+        setLocale('pl');
+        const question = 'Pierwszy akapit?\n\nDrugi akapit?';
+        const task = { id: 'task1', name: 'pkm-sub', agentName: 'Lead', status: 'done', background: true, createdAt: 1, steps: [], budget: {}, outcome: { end: { kind: 'timeout' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] }, result: { text: `Sub nie dostał odpowiedzi na pytanie: ${question}\n\nread | Plan.md | OK`, toolsUsed: ['read'], durationMs: 1, usage: null, question: { text: question, resolution: { kind: 'no-answer' }, note: `Sub nie dostał odpowiedzi na pytanie: ${question}` } } } as SubTask;
+        const text = buildSubTaskNotificationText(task, { subId: 'sub/pkm#1', maxResultChars: 0 });
+        const view = buildMachineView({ role: 'user', content: text }, { t: translate, getThread: () => ({ phase: 'idle', reusable: true }) });
+        t.is(view!.subAgentResult!.openQuestion, question);
+        t.true(view!.subAgentResult!.notes.includes('Agent może dokończyć tym samym subem'));
+        const container = makeFakeEl();
+        await renderMachineTile(container as unknown as HTMLElement, fakePlugin([], null), view!);
+        const tile = findByClass(container, 'cs-tile--subresult')!;
+        findByClass(tile, 'cs-tile__head')!.fire('click');
+        t.is(deepText(tile).split(question).length - 1, 1);
+        t.true(deepText(tile).includes('read | Plan.md | OK'));
+        setLocale('en');
+    });
+});
+
+test.serial('wynik z question renderuje brak odpowiedzi bez rejestru', async t => {
+    await withFakeDocument(async () => {
+        setLocale('pl');
+        const task = { id: 'task1', name: 'Badacz', agentName: 'Lead', status: 'done', background: true, createdAt: 1, steps: [], budget: {}, outcome: { end: { kind: 'timeout' }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] }, result: { text: '', toolsUsed: [], durationMs: 1, usage: null, question: { text: 'Który katalog?', resolution: { kind: 'no-answer' } } } } as SubTask;
+        const delivery = buildSubTaskResultDelivery(task, undefined, 10);
+        const view = buildMachineView({ role: 'user', content: delivery.text, ...delivery.meta }, { t: translate });
+        const container = makeFakeEl();
+        await renderMachineTile(container as unknown as HTMLElement, fakePlugin([], null), view!);
+        findByClass(container, 'cs-tile__head')?.fire('click');
+        const rendered = deepText(container);
+        t.true(rendered.includes('brak odpowiedzi'));
+        t.true(rendered.includes('Otwarte pytanie: Który katalog?'));
+        setLocale('en');
+    });
+});
+
+
+for (const scenario of ['long', 'trailing'] as const) test.serial(`delivery i render: ${scenario}`, async t => {
+    await withFakeDocument(async () => {
+        for (const locale of ['pl', 'en'] as const) {
+            setLocale(locale);
+            const question = `UNIKALNY_POCZĄTEK ${'bardzo długie pytanie '.repeat(1100)} KONIEC?`;
+            const clock = new QuestionTestClock();
+            const registry = new SubTaskRegistry({ questionClock: clock });
+            const read = { name: 'read', description: 'read', inputSchema: {}, execute: async () => 'DOROBEK_NARZĘDZIA' };
+            const runner = new SubAgentRunner({ app: {}, plugin: { subTaskRegistry: registry }, toolRegistry: { filterByAgent: () => [read], getTool: () => read } });
+            let ready!: () => void;
+            const waiting = new Promise<void>(resolve => { ready = resolve; });
+            let calls = 0;
+            const model = { stream(_payload: unknown, cb: { done(value: unknown): void }) {
+                const call = calls++ === 0
+                    ? { id: 'r', type: 'function', function: { name: 'read', arguments: '{}' } }
+                    : { id: 'q', type: 'function', function: { name: 'ask_parent', arguments: JSON.stringify({ text: question }) } };
+                cb.done({ choices: [{ message: { role: 'assistant', content: '', tool_calls: [call] } }] });
+            } };
+            const run = runner.runTask('zadanie', { name: 'Lead' }, { name: 'Badacz', tools: ['read'] } as never, model as never,
+                { origin: { agentName: 'Lead', sessionPath: 'a', sessionEpoch: 'b' }, onActivity: activity => { if (activity.kind === 'waiting') ready(); } });
+            await Promise.race([waiting, run.then(() => { throw new Error('runner nie otworzył pytania'); })]);
+            clock.advance(300000);
+            const result = await run;
+            t.is(result.question?.text, question);
+            const task = registry.list()[0];
+            t.true(task.result!.handoff!.includes('DOROBEK_NARZĘDZIA'));
+            const shortQuestion = 'First?\n\nSecond?\n\n';
+            const sentence = translate('subagent.question_no_answer', { question: shortQuestion });
+            const onlySentence = { ...task, questionState: { kind: 'none' as const }, result: { ...task.result!, text: sentence, handoff: sentence, question: { text: shortQuestion, resolution: { kind: 'no-answer' as const }, note: sentence } } };
+            for (const [candidate, expectedQuestion, material] of [scenario === 'long' ? [task, question, 'DOROBEK_NARZĘDZIA'] as const : [onlySentence, shortQuestion, ''] as const]) {
+                for (const reusable of [false, true]) {
+                    const deliveryRegistry = reusable ? { getThread: () => ({ phase: 'idle', reusable: true, effects: [] }) } : undefined;
+                    const delivery = buildSubTaskResultDelivery(candidate, deliveryRegistry as never, 0);
+                    for (const meta of [delivery.meta, {}]) for (const withRegistry of [false, true]) {
+                        const view = buildMachineView({ role: 'user', content: delivery.text, ...meta }, { t: translate, ...(withRegistry ? { getTask: () => candidate, getThread: () => ({ phase: 'idle', reusable: true }) } : {}) });
+                        const container = makeFakeEl();
+                        await renderMachineTile(container as unknown as HTMLElement, fakePlugin([], null), view!);
+                        const tile = findByClass(container, 'cs-tile--subresult')!;
+                        findByClass(tile, 'cs-tile__head')!.fire('click');
+                        const rendered = deepText(tile);
+                        t.is(view!.subAgentResult!.openQuestion, expectedQuestion);
+                        t.is(rendered.split(expectedQuestion).length - 1, 1);
+                        t.is(rendered.split(expectedQuestion.slice(0, 6)).length - 1, 1);
+                        if (material) t.true(view!.subAgentResult!.material!.includes(material));
+                        else t.is(view!.subAgentResult!.material, undefined);
+                    }
+                }
+            }
+            registry.dispose();
+        }
+        setLocale('en');
+    });
+});
+
+test.serial('dokładna notka runnera przy limitach i naturalnym wielokropku', async t => {
+    await withFakeDocument(async () => {
+        for (const locale of ['pl', 'en'] as const) for (const cap of [0, 1, 12, 100, 124, 148, 12000, 200000]) {
+            setLocale(locale);
+            const question = 'First…\n\nSecond question is long enough to be truncated?';
+            const clock = new QuestionTestClock();
+            const registry = new SubTaskRegistry({ questionClock: clock });
+            const read = { name: 'read', description: 'read', inputSchema: {}, execute: async () => 'DOROBEK_NARZĘDZIA' };
+            const runner = new SubAgentRunner({ app: {}, plugin: { subTaskRegistry: registry, env: { settings: { pkmAssistant: { limits: { subagent_salvage_max_chars: cap } } } } }, toolRegistry: { filterByAgent: () => [read], getTool: () => read } });
+            let ready!: () => void;
+            const waiting = new Promise<void>(resolve => { ready = resolve; });
+            let calls = 0;
+            const model = { stream(_payload: unknown, cb: { done(value: unknown): void }) {
+                const call = calls++ === 0
+                    ? { id: 'r', type: 'function', function: { name: 'read', arguments: '{}' } }
+                    : { id: 'q', type: 'function', function: { name: 'ask_parent', arguments: JSON.stringify({ text: question }) } };
+                cb.done({ choices: [{ message: { role: 'assistant', content: '', tool_calls: [call] } }] });
+            } };
+            const run = runner.runTask('zadanie', { name: 'Lead' }, { name: 'Badacz', tools: ['read'] } as never, model as never,
+                { origin: { agentName: 'Lead', sessionPath: 'a', sessionEpoch: 'b' }, onActivity: activity => { if (activity.kind === 'waiting') ready(); } });
+            await Promise.race([waiting, run.then(() => { throw new Error('runner nie otworzył pytania'); })]);
+            clock.advance(300000);
+            const result = await run;
+            const task = registry.list()[0];
+            if (cap === 0) t.is(result.question?.note, undefined);
+            else {
+                t.true(!!result.question?.note && !!result.handoff?.startsWith(result.question.note));
+                t.is(task.result?.question?.note, result.question?.note);
+            }
+            for (const reusable of [false, true]) {
+                const delivery = buildSubTaskResultDelivery(task, reusable ? { getThread: () => ({ phase: 'idle', reusable: true, effects: [] }) } as never : undefined, 0);
+                for (const meta of [delivery.meta, {}]) for (const withRegistry of [false, true]) {
+                    const view = buildMachineView({ role: 'user', content: delivery.text, ...meta }, { t: translate, ...(withRegistry ? { getTask: () => task, getThread: () => ({ phase: 'idle', reusable: true }) } : {}) });
+                    const container = makeFakeEl();
+                    await renderMachineTile(container as unknown as HTMLElement, fakePlugin([], null), view!);
+                    const tile = findByClass(container, 'cs-tile--subresult')!;
+                    findByClass(tile, 'cs-tile__head')!.fire('click');
+                    t.is(view!.subAgentResult!.openQuestion, question);
+                    t.is(deepText(tile).split(question).length - 1, 1);
+                    if (cap === 0) {
+                        t.true(view!.subAgentResult!.material?.includes('DOROBEK_NARZĘDZIA'));
+                        t.false(Boolean(view!.subAgentResult!.material?.includes(question)));
+                    }
+                    if (cap >= 124) t.true(view!.subAgentResult!.material?.includes('DOROBEK_NARZĘDZIA'));
+                    if (cap > 0 && cap < 124) t.false(Boolean(view!.subAgentResult!.material?.startsWith(result.question!.note!)));
+                }
+            }
+            registry.dispose();
+        }
+        setLocale('en');
+    });
+});
+
+test.serial('cytat notki i podobne zdanie pozostają w dorobku', async t => {
+    await withFakeDocument(async () => {
+        for (const locale of ['pl', 'en'] as const) {
+            setLocale(locale);
+            const question = 'First? Second?';
+            const note = translate('subagent.question_no_answer', { question });
+            const similar = translate('subagent.question_no_answer', { question: 'First…' });
+            for (const [prefix, material] of [[note, `${note}\n\nDOROBEK`], ['', `${similar}\n\nDOROBEK`]] as const) {
+                const task = { id: 'task1', name: 'Badacz', agentName: 'Lead', status: 'done', background: true, createdAt: 1, steps: [], budget: {}, outcome: { end: { kind: 'timeout' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] }, result: { text: prefix ? `${prefix}\n\n${material}` : material, toolsUsed: [], durationMs: 1, usage: null, question: { text: question, resolution: { kind: 'no-answer' }, ...(prefix ? { note: prefix } : {}) } } } as SubTask;
+                for (const reusable of [false, true]) {
+                    const delivery = buildSubTaskResultDelivery(task, reusable ? { getThread: () => ({ phase: 'idle', reusable: true, effects: [] }) } as never : undefined, 0);
+                    for (const meta of [delivery.meta, {}]) for (const withRegistry of [false, true]) {
+                        const view = buildMachineView({ role: 'user', content: delivery.text, ...meta }, { t: translate, ...(withRegistry ? { getTask: () => task } : {}) });
+                        t.is(view!.subAgentResult!.material, material);
+                        t.is(view!.subAgentResult!.openQuestion, question);
+                    }
+                }
+            }
+        }
+        setLocale('en');
     });
 });

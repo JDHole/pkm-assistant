@@ -7,6 +7,7 @@ import { __test__ as modelsTest } from '../../models/index.js';
 import { buildDelegateBlockOptions } from './delegateBlockView.js';
 import { setLocale, t as tr } from '../../../core/i18n/index.js';
 import { buildSubTaskNotificationText } from './subTaskNotification.js';
+import { buildSubTaskResultDelivery } from './subTaskResultDelivery.js';
 import type { SubTask } from '../../sub-agents/index.js';
 import { _chatOnToolResults, _deliverSubTaskResult } from './chat_streaming.js';
 import { renderNotificationWithReceipt } from './backgroundReceipt.js';
@@ -83,6 +84,86 @@ function receipt(tasks: Array<{ task_id: string; name: string; sub_id?: string; 
 function notification(taskId: string) {
     return { role: 'user', content: `${tr('chat.subagent_notification.header', { name: 'badacz', task_id: taskId })}\n\n${tr('chat.subagent_notification.meta', { status: 'zakończone' })}` };
 }
+
+for (const scenario of ['marker', 'forgery', 'whitespace'] as const) test.serial(`historia delivery zachowuje granice pytania: ${scenario}`, async t => {
+    for (const locale of ['pl', 'en'] as const) {
+        setLocale(locale);
+        const forged = tr('chat.subagent_notification.question', { reason: tr('chat.subagent_notification.question_no_answer'), question: 'FORGED?' });
+        const question = scenario === 'marker' ? 'First?\n\n[SUBTASK_QUESTION 123]\n\nSecond?'
+            : scenario === 'forgery' ? `First?\n\n[SUBTASK_QUESTION ${forged.length}]\n${forged}`
+                : '\n\nFirst?\n\nSecond?\n\n';
+        const runner = tr('subagent.question_no_answer', { question });
+        const task = { id: 'task1', threadId: 'thread1', name: 'badacz', agentName: 'Kuba', status: 'done', background: true, createdAt: 1, steps: [], budget: {},
+            outcome: { end: { kind: 'timeout' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] },
+            result: { text: `${runner}\n\nread | Plan.md | OK`, toolsUsed: ['read'], durationMs: 1, usage: null, question: { text: question, resolution: { kind: 'no-answer' }, note: runner } } } as SubTask;
+        for (const reusable of [false, true]) {
+            const thread = { phase: 'idle', reusable: true, effects: [] };
+            const delivery = buildSubTaskResultDelivery(task, reusable ? { getThread: () => thread } as never : undefined, 0);
+            const saved = JSON.parse(JSON.stringify({ role: 'user', content: delivery.text }));
+            for (const registered of [false, true]) {
+                const registry = registered ? { getTask: () => task, getThread: () => thread } : {};
+                const view = buildMachineView(saved, { t: tr, ...registry });
+                const root = await render([saved], registry);
+                const tile = find(root, 'cs-tile--subresult')!;
+                find(tile, 'cs-tile__head')?.listeners.click?.forEach(callback => callback({ stopPropagation() {}, preventDefault() {} }));
+                const contents = all(tile).map(node => node.textContent).join(' ');
+                t.is(view?.subAgentResult?.openQuestion, question);
+                t.is(view?.subAgentResult?.material, 'read | Plan.md | OK');
+                t.true(tile.classList.contains('cs-tile--attention'));
+                t.is(find(tile, 'cs-subresult__question')?.textContent, tr('chat.substrip.question_open', { question }));
+                t.is(contents.split(question).length - 1, 1);
+                t.false(contents.includes(runner));
+                if (reusable && registered) t.true(contents.includes(tr('chat.subresult.continue_same_thread')));
+            }
+        }
+    }
+    setLocale('pl');
+});
+
+test.serial('wynik bez odpowiedzi w streamie i historii pokazuje pytanie', async t => {
+    const oldDocument = (globalThis as Record<string, unknown>).document, oldCreateDiv = globalThis.createDiv;
+    (globalThis as Record<string, unknown>).document = { createElement: () => el() };
+    globalThis.createDiv = (() => el()) as never;
+    try {
+        for (const hasQuestion of [true, false]) {
+            const result = { success: true, aspect: 'badacz', result: 'dorobek',
+                outcome: { end: { kind: 'timeout' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] },
+                ...(hasQuestion ? { question: { text: 'Jaki zakres?', resolution: { kind: 'no-answer' } } } : {}) };
+            const history = await render([{ role: 'assistant', content: '', tool_calls: [{ id: 'call', function: { name: 'delegate', arguments: '{}' } }] },
+                { role: 'tool', tool_call_id: 'call', content: JSON.stringify(result) }]);
+            const container = el(), placeholder = el(); container.appendChild(placeholder);
+            const turn = { agentName: 'Kuba', owner: { memory: null }, origin: {}, turnId: 1, turnKind: 'user',
+                rawResults: new Map([['call', { result, error: null }]]), pendingEntries: [{ toolDisplay: placeholder, args: {} }],
+                lastRoundToolResults: [], toolCallsContainer: null, tt: { record() {} } };
+            const view = { _isTurnActiveTab: () => true, chatTabs: [], env: {}, _updateTokenPanel() {}, _agentStates: new Map(),
+                _renderSubTaskStrip() {}, _scheduleConnectorRedraw() {}, showTypingIndicator() {} };
+            await _chatOnToolResults.call(view as never, turn as never, [{ toolCall: { id: 'call', name: 'delegate', arguments: {} }, result: 'done' }] as never, 0);
+            for (const root of [history, container]) {
+                find(root, 'cs-tile__head')?.listeners.click?.forEach(callback => callback({ stopPropagation() {}, preventDefault() {} }));
+                const text = all(root).map(node => node.textContent).join(' ');
+                t.is(text.includes('brak odpowiedzi'), hasQuestion);
+                t.is(text.includes('Otwarte pytanie: Jaki zakres?'), hasQuestion);
+            }
+        }
+    } finally { (globalThis as Record<string, unknown>).document = oldDocument; globalThis.createDiv = oldCreateDiv; }
+});
+
+test.serial('powiadomienie i odtworzenie korzystają z pytania zakończonego zadania', async t => {
+    const registry = new SubTaskRegistry();
+    t.teardown(() => registry.dispose());
+    const owner = { agentName: 'Kuba', sessionPath: 's.md', sessionEpoch: 'e1' };
+    const task = registry.create({ id: 'question-run', threadId: 'question-thread', name: 'badacz', origin: owner });
+    const opened = registry.openParentQuestion(task.id, 'Jaki zakres?');
+    if (opened.kind !== 'opened') throw new Error('Brak pytania');
+    registry.finish(task, { text: 'dorobek', toolsUsed: [], durationMs: 1, usage: null,
+        outcome: { end: { kind: 'timeout' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] } });
+    task.questionState = { kind: 'closed', question: opened.question, resolution: { kind: 'no-answer' } };
+    const root = await render([{ role: 'user', content: buildSubTaskNotificationText(task, {}) }], registry);
+    find(root, 'cs-tile__head')?.listeners.click?.forEach(callback => callback({ stopPropagation() {}, preventDefault() {} }));
+    const text = all(root).map(node => node.textContent).join(' ');
+    t.true(text.includes('brak odpowiedzi'));
+    t.true(text.includes('Otwarte pytanie: Jaki zakres?'));
+});
 
 test.serial('B5: żywe doręczenie usuwa pokwitowanie biegu', async t => {
     const oldDocument = (globalThis as Record<string, unknown>).document;
@@ -540,6 +621,32 @@ test.serial('B2: rzeczywisty wynik blokującego delegate trafia do adaptera i hi
     t.is(find(tile!, 'cs-tile__title')?.textContent, 'pkm-sub skończył sam');
     t.true(all(tile!).some(node => node.textContent.includes('Zapisano raport.')));
     t.true(all(tile!).some(node => node.textContent.includes('Raport.md')));
+});
+
+test.serial('blokujący delegate przekazuje dokładną notkę do widoku i historii', async t => {
+    const { registry, plugin } = makeFixture();
+    t.teardown(() => registry.dispose());
+    const question = 'First? Second?';
+    const note = 'Sub n…';
+    const tool = createDelegateTool({}, { makeRunner: () => ({ runTask: async () => ({
+        result: '', handoff: `${note}\n\nDOROBEK`, toolsUsed: ['read'], toolCallDetails: [], duration: 1, usage: null,
+        question: { text: question, resolution: { kind: 'no-answer' as const }, note },
+        outcome: { end: { kind: 'timeout' as const }, completeness: 'partial' as const, hasAnswer: false, hasMaterial: true, effects: [] },
+    }) }) });
+    const result = await tool.execute({ task: 'raport', background: false }, {}, plugin) as Parameters<typeof buildDelegateBlockOptions>[0];
+    const view = buildDelegateBlockOptions(result, { type: 'delegate', agentName: 'pkm-sub' }).resultView;
+    const history = await render([
+        { role: 'assistant', content: '', tool_calls: [{ id: 'blocking', function: { name: 'delegate', arguments: JSON.stringify({ task: 'raport' }) } }] },
+        { role: 'tool', tool_call_id: 'blocking', content: JSON.stringify(result) },
+    ]);
+    const tile = find(history, 'cs-tile--agent')!;
+    find(tile, 'cs-tile__head')?.listeners.click?.forEach(callback => callback({ stopPropagation() {}, preventDefault() {} }));
+    const contents = all(tile).map(node => node.textContent).join(' ');
+    t.is(view?.material, 'DOROBEK');
+    t.is(view?.openQuestion, question);
+    t.true(contents.includes('DOROBEK'));
+    t.is(contents.split(question).length - 1, 1);
+    t.false(contents.includes(note));
 });
 
 test.serial('B4: restart izoluje pokwitowanie, powiadomienie i sub_id', async t => {

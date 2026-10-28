@@ -36,35 +36,9 @@ const tabs = readSource('./chat_tabs.ts');
 
 // ── Stop anuluje zakolejkowaną wiadomość ────────────────────────────────────
 
-test('stop_generation kasuje slot kolejki i gasi wskaźnik', t => {
-    const body = bodyOf(streaming, 'stop_generation');
-    t.true(body.length > 0, 'nie znalazłem stop_generation w chat_streaming.ts');
-    t.regex(body, /this\._queuedMessage\s*=\s*null/,
-        'Stop bez kasowania kolejki = wiadomość leci do modelu 100 ms po kliknięciu Stop');
-    t.regex(body, /_hideQueuedIndicator\(\)/, 'wskaźnik ⏳ musi zgasnąć razem z kolejką');
-});
-
-// SAMA DECYZJA („kasować slot?", „oddać tekst do pola?") mieszka w
-// `queuedMessage.evaluateStopQueueCancel` i ma tam testy obu stron. Tutaj pilnujemy już tylko
-// OKABLOWANIA - że monolit tę decyzję woła i wykonuje jej werdykt w niezmienionym kształcie.
-// Regex nie może być luźniejszy niż kształt gałęzi: `if (cancel.clearSlot)` bez negacji,
-// z kasowaniem slotu w środku (odwrócenie warunku ma dawać CZERWONY test).
-
-test('stop_generation woła czystą decyzję kolejki i wykonuje jej werdykt', t => {
-    const body = bodyOf(streaming, 'stop_generation');
-    t.regex(body, /\bevaluateStopQueueCancel\(\s*this\._queuedMessage\s*,\s*this\.input_area\?\.value\s*\)/,
-        'Stop musi pytać czystej decyzji o kolejkę, nie liczyć jej inline w mixinie');
-    t.regex(body, /if\s*\(cancel\.clearSlot\)\s*\{[\s\S]{0,160}?this\._queuedMessage\s*=\s*null/,
-        'gałąź kasowania slotu musi stać na `cancel.clearSlot` BEZ negacji i kasować slot w środku');
-    t.regex(body, /if\s*\(cancel\.restoreText\s*!==\s*null\)\s*\{[\s\S]{0,120}?this\.input_area\.value\s*=\s*cancel\.restoreText/,
-        'tekst wraca do pola wpisywania TYLKO gdy decyzja go oddała (inaczej Stop zjada szkic usera)');
-});
-
-test('każda ścieżka Stopu rozbraja timer drenu', t => {
-    for (const fn of ['stop_generation', 'stop_all_turns']) {
-        t.regex(bodyOf(streaming, fn), /_clearQueuedDrainTimer\(\)/,
-            `${fn} zostawia uzbrojony setTimeout - wybudzi się w zamkniętym/przerwanym widoku`);
-    }
+// Stop i przywracanie tekstu sprawdzają testy zachowania w chat_streaming.sameAgentTabs.test.ts.
+test('stop_all_turns rozbraja timer drenu', t => {
+    t.regex(bodyOf(streaming, 'stop_all_turns'), /_clearQueuedDrainTimer\(\)/);
 });
 
 // ── timer drenu ma właściciela i sprawdza zakładkę ──────────────────────────

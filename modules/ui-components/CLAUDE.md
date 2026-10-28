@@ -287,3 +287,7 @@ zostaje jako TODO dla kolejnej jednostki.
 Gdy `resultView` jest podany, `createSubAgentBlock` tworzy zwinięty kafelek także dla błędu. Nagłówek pokazuje tytuł i badge. Szczegóły renderują osobno sekcje CO POWSTAŁO, błąd, CZEGO BRAKUJE (tylko gdy lista nie jest pusta) i EFEKTY (narzędzie, cel, etykieta stanu), a następnie notatki. Puste sekcje nie powstają. Tekst trafia przez `textContent`. Bez `resultView` obowiązuje dotychczasowe renderowanie wyniku i pokwitowania w tle.
 
 `TileSpec.badge` dodaje opcjonalną etykietę `.cs-tile__badge` do nagłówka; pozostali konsumenci `createTile` nie muszą jej ustawiać. Wszystkie kafelki z `resultView` dostają root class `.cs-tile--subresult`, niezależnie od roli `agent` lub `system`; arkusz `modules/chat/chat_view.css` używa jej do zawijania tytułu i badge w wąskim panelu. Klasy `.cs-subresult`, `.cs-subresult__section`, `.cs-subresult__effect`, `.cs-subresult__error` i `.cs-subresult__note` są zaczepami strukturalnymi.
+
+`SubAgentResultView.openQuestion` zawiera tekst pytania bez odpowiedzi: kafelek pokazuje je w osobnej linii. Tytuł i znacznik otrzymuje od adaptera.
+
+`TileStatus.attention` oznacza stan wymagający uwagi: pasek, ikona i kropka korzystają z `var(--text-warning)`. Adapter ustawia `SubAgentResultView.status`, także dla otwartego pytania; komponent mapuje ten status bez interpretacji pytania. Materiał komponent renderuje bez zmian.

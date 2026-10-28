@@ -20,6 +20,7 @@
 
 import { t } from '../../core/i18n/index.js';
 import { log } from '../../core/utils/Logger.js';
+import type { AskUserChannels } from './AskUserChannels.js';
 
 const ASK_USER_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -60,6 +61,7 @@ interface AskUserToolArgs {
  * `chat_view._renderAskUserBlock()` (Faza 1, sync); tu go tylko czekamy i sprzątamy.
  */
 export interface AskUserPlugin {
+    _askUserChannels?: AskUserChannels;
     _askUserPending?: { question: string; options: string[]; context: string } | null;
     _askUserPromise?: Promise<string | null> | null;
     _askUserResolve?: ((answer: string | null) => void) | null;
@@ -90,6 +92,10 @@ export function createAskUserTool(options: AskUserToolOptions = {}) {
                 context: {
                     type: 'string',
                     description: t('mcp.ask_user.param.context')
+                },
+                question_id: {
+                    type: 'string',
+                    description: t('mcp.ask_user.param.question_id')
                 }
             },
             required: ['question']
@@ -111,14 +117,18 @@ export function createAskUserTool(options: AskUserToolOptions = {}) {
 
             // Signal to chat_view what question to render (used if _renderAskUserBlock
             // hasn't fired yet, e.g. background tab auto-answer path)
-            if (plugin) {
+            const token = args._invocationAskUserChannelId;
+            if (plugin && typeof token !== 'string') {
                 plugin._askUserPending = { question, options: options || [], context: context || '' };
             }
 
             // Wait for chat_view to create and resolve the promise.
             // chat_view._renderAskUserBlock() creates plugin._askUserPromise in Phase 1 (sync),
             // which runs BEFORE Phase 2 (this execute). So the promise should already exist.
-            if (!plugin?._askUserPromise) {
+            const channel = typeof token === 'string' ? plugin?._askUserChannels?.get(token) : undefined;
+            const legacyPromise = typeof token === 'string' ? null : plugin?._askUserPromise;
+            const legacyResolve = plugin?._askUserResolve;
+            if (!channel && !legacyPromise) {
                 // Brak kanału pytania (tura leci w zakładce W TLE, blok pytania nigdy nie
                 // powstał) = NIE MA KOGO ZAPYTAĆ. Pierwsza opcja z listy jako "odpowiedź
                 // użytkownika" (success:true, auto:true) byłaby sfabrykowaną ZGODĄ na operację,
@@ -127,7 +137,7 @@ export function createAskUserTool(options: AskUserToolOptions = {}) {
                 log.warn('AskUserTool', 'Brak kanału pytania (zakładka w tle?) - zwracam ask_user.no_ui');
                 // Bramka jak u sąsiadów (linia wyżej i finally) — do tej gałęzi wchodzi się
                 // TAKŻE gdy plugin jest null, więc jej brak byłby uśpionym NPE.
-                if (plugin) plugin._askUserPending = null;
+                if (plugin && typeof token !== 'string') plugin._askUserPending = null;
                 return {
                     success: false,
                     error: 'ask_user.no_ui',
@@ -142,22 +152,28 @@ export function createAskUserTool(options: AskUserToolOptions = {}) {
             try {
                 // Race between user response and timeout
                 const timeoutPromise = new Promise<never>((_, reject) => {
-                    timeoutHandle = _nodeSafeSetTimeout(() => reject(new Error('ask_user_timeout')), timeoutMs);
+                    timeoutHandle = _nodeSafeSetTimeout(() => {
+                        reject(new Error('ask_user_timeout'));
+                        channel?.timeout();
+                    }, timeoutMs);
                 });
                 // `finally` zdejmuje budzik po ROZSTRZYGNIĘCIU wyścigu. W oknie oczekiwania
                 // (user jeszcze nie odpowiedział) obietnica nie rozstrzyga się nigdy, więc bez
                 // rejestracji budzik tykałby dalej na martwym pluginie po `onunload`. Uchwyt
                 // idzie więc dodatkowo do cyklu życia hosta — kanon z src/main.ts (`clearInterval`
                 // w JS kasuje uchwyty obu rodzajów, więc `registerInterval` obsługuje też `setTimeout`).
-                try { plugin.registerInterval?.(timeoutHandle); } catch { /* host bez rejestru */ }
+                try { plugin?.registerInterval?.(timeoutHandle); } catch { /* host bez rejestru */ }
 
                 const answer = await Promise.race([
-                    plugin._askUserPromise,
+                    channel?.promise ?? legacyPromise!,
                     timeoutPromise
                 ]);
 
                 // null answer = cancelled (handle_error, onClose cleanup)
                 if (answer === null || answer === undefined) {
+                    if (channel?.state.kind === 'closed' && channel.state.reason === 'timeout') {
+                        return { success: false, error: 'ask_user.timeout', message: t('mcp.ask_user.timeout'), question };
+                    }
                     return {
                         success: false,
                         error: 'Użytkownik anulował pytanie.',
@@ -191,7 +207,8 @@ export function createAskUserTool(options: AskUserToolOptions = {}) {
             } finally {
                 if (timeoutHandle !== undefined) _nodeSafeClearTimeout(timeoutHandle);
                 // Always cleanup — regardless of success, error, or timeout
-                if (plugin) {
+                channel?.cancel();
+                if (plugin && !channel && plugin._askUserPromise === legacyPromise && plugin._askUserResolve === legacyResolve) {
                     plugin._askUserPending = null;
                     plugin._askUserPromise = null;
                     plugin._askUserResolve = null;

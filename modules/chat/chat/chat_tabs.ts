@@ -11,6 +11,7 @@ import { DEFAULT_BOTTOM_BAR_MODE } from './todoPanel.js';
 // Zamknięcie zakładki zatrzymuje też JEJ suby - po tym samym adresie zwrotnym, co
 // zamknięcie całego panelu (`stop_all_turns`).
 import { collectSubTaskIdsForOwners } from './turnAbort.js';
+import { readQueuedMessage } from './queuedMessage.js';
 // Receiver mixina = ZŁOŻONY widok (`ChatViewLike`: klasa + osiem paczek mixinów). Cykl typów
 // chatViewShape ↔ mixin jest legalny i znika w buildzie (`import type`).
 import type { ChatTab, ChatViewLike } from './chatViewShape.js';
@@ -27,6 +28,10 @@ export function _initTabs(this: ChatViewLike) {
 
     if (this.chatTabs.length === 0) {
         this.chatTabs.push({ agentName: activeAgentName, sessionId: activeAgentName, isActive: true });
+        const restoredTab = this.chatTabs[0];
+        for (const ctx of [this._streamCtxMap.get(''), this._preparingTurns.get('')]) {
+            if (ctx && !ctx.tab && ctx.rollingWindow === this.rollingWindow) ctx.tab = restoredTab;
+        }
     }
 
     const activeTab = this.chatTabs.find((t: ChatTab) => t.isActive) || this.chatTabs[0];
@@ -255,14 +260,24 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
     const agentName = tab?.agentName;
     // Tylko gdy ta zakładka NAPRAWDĘ coś trzyma — `stop_generation` czyści stan streamingu
     // i podnosi `_drainSuppressed`, więc na cichej zakładce byłoby to szkodliwe.
-    const wLocie = !!agentName && !!(
-        this._streamCtxMap?.has?.(agentName) || this._preparingTurns?.has?.(agentName)
-    );
-    if (wLocie) {
+    const queued = this._queuedMessage;
+    const queueTabKey = readQueuedMessage(queued)?.owner?.tabKey;
+    const turnKeys = [...new Set([...this._streamCtxMap.entries(), ...this._preparingTurns.entries()]
+        .filter(([key, ctx]) => ctx.tab === tab || (key === tabKey && !ctx.tab)).map(([key]) => key))];
+    const otherLiveOwner = queueTabKey && this.chatTabs.some((other: ChatTab) => other !== tab
+        && (_tabKey(other) === queueTabKey || [...this._streamCtxMap.entries(), ...this._preparingTurns.entries()]
+            .some(([key, ctx]) => key === queueTabKey && ctx.tab === other)));
+    const ownQueue = !queueTabKey || queueTabKey === tabKey || turnKeys.includes(queueTabKey) || !otherLiveOwner;
+    if (turnKeys.length === 0 && queued && ownQueue) this.stop_generation(tabKey, 'close_tab');
+    for (const key of turnKeys) this._preparingTurns.get(key)?.abort.abort('close_tab');
+    for (const turnKey of turnKeys) {
         try {
-            this.stop_generation(agentName, 'close_tab');
+            if (!ownQueue) this._queuedMessage = null;
+            this.stop_generation(turnKey, 'close_tab');
         } catch (e) {
             log.warn('Chat', `Zatrzymanie tury zamykanej zakładki padło (zamykamy dalej): ${(e as Error)?.message || String(e)}`);
+        } finally {
+            if (!ownQueue) this._queuedMessage = queued;
         }
     }
 
@@ -272,7 +287,7 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
     if (!registry) return;
     try {
         registry.closeQueuedForOwners?.({
-            tabKeys: [tabKey],
+            tabKeys: [...new Set([tabKey, ...turnKeys])],
             agentNames: agentName ? [agentName] : [],
         }, 'system');
     } catch (e) {
@@ -281,7 +296,7 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
     if (!registry.list || !registry.requestStop) return;
     try {
         const ids = collectSubTaskIdsForOwners(registry.list(), {
-            tabKeys: [tabKey],
+            tabKeys: [...new Set([tabKey, ...turnKeys])],
             ...(agentName ? { agentNames: [agentName] } : {}),
         });
         for (const id of ids) {

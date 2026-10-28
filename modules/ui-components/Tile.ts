@@ -12,7 +12,7 @@ import { setSvg } from '../crystal-soul/index.js';
 import { truncatePreview } from './textPreview.js';
 
 export type TileRole = 'system' | 'agent' | 'agent-muted' | 'user';
-export type TileStatus = 'ok' | 'error' | 'pending';
+export type TileStatus = 'ok' | 'error' | 'pending' | 'attention';
 
 export interface TileAction {
     label: string;

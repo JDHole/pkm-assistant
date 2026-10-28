@@ -257,14 +257,17 @@ test('sub-agent forwards trusted context through the real MCPClient and keeps bo
             Promise.resolve().then(() => handlers.done(result));
         },
     };
-    const shouldAbort = () => false;
+    let abortRequested = false;
+    const shouldAbort = () => abortRequested;
 
     await runner.runTask('Przeczytaj plik.', { name: 'Jaskier' }, {
         name: 'worker', role: 'worker', tools: ['read'], max_iterations: 3, max_tool_result_length: 600,
     }, model as never, { modelTimeout: 5000, shouldAbort });
 
     t.is((received as { resultBudgetChars: number }).resultBudgetChars, 600);
-    t.is((received as { shouldAbort: () => boolean }).shouldAbort, shouldAbort);
+    t.false((received as { shouldAbort: () => boolean }).shouldAbort());
+    abortRequested = true;
+    t.true((received as { shouldAbort: () => boolean }).shouldAbort());
     const transcript = wynikNarzedziaZTranskryptu(model);
     t.deepEqual(JSON.parse(transcript), { success: false, code: 'file_changed', restart_offset: 0, isError: true });
     t.false(transcript.startsWith('Błąd narzędzia'));

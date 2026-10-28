@@ -1,5 +1,8 @@
 # modules/sub-agents/
 
+Zegar pytania po zbyt wczesnym wywołaniu timera uzbraja go ponownie na
+pozostały czas; termin nadal rozstrzyga zegar monotoniczny.
+
 Model paska `summarizeStripRows` zlicza widoczne wiersze: pracujące i zatrzymujące się, oczekujące w kolejce oraz wszystkie wiersze.
 
 > Fizyczne źródła modułu mają rozszerzenie `.ts`. Zapisy `.js` poniżej to specyfikatory
@@ -51,6 +54,18 @@ modules/sub-agents/
 ---
 
 ## Public API (`index.js`)
+
+Protokół pytań rodzica jest częścią `SubTaskRegistry`: `openParentQuestion(taskId, text)` zwraca pytanie i Promise rozstrzygnięcia albo odmowę; `answerParentQuestion(taskId, questionId, owner, text)`, `getQuestionState`, `isQuestionOpen`, `promoteToBackground` i `registerUserWait(owner, cancel)` obsługują odpowiedź, stan i pauzę. Funkcja zwolnienia kanału użytkownika jest idempotentna; `dispose` anuluje otwarte kanały. Zegar pytania mierzy monotonicznie 300000 ms, pauzuje tylko dla pełnego właściciela i nie resetuje pozostałego czasu. Stop, koniec biegu i unload zamykają oczekiwanie przed powiadomieniem obserwatorów. `SubTask.questionState` jest opcjonalne dla starszych danych, a model paska normalizuje brak do `none`.
+
+Zmiana zegara oczekującego pytania emituje `question:clock` po zapisaniu pauzy lub wznowienia, z pytaniem jako payloadem. Model wyniku przyjmuje stan pytania oraz pytanie z wyniku; zamknięty stan ma pierwszeństwo. Dla `no-answer` udostępnia treść otwartego pytania, a `cancelled` zachowuje jako osobne rozstrzygnięcie.
+
+`SubTaskNotifier` udostępnia dodatkowo `setNoticeDeliverer`, `pendingNotices` i `claimNotices` dla unii `SubTaskNotice` (pytanie albo wynik). Zamknięcie pytania usuwa także zajęty wpis, więc późne `ack` lub `release` nie przywróci go. Starsze metody pozostają adapterami samych wyników. Typy protokołu i zegara są eksportowane przez barrel.
+
+Runner dodaje lokalne `ask_parent` subowi pierwszego piętra (głębokość 1, a 0 dla starszych wywołań), również przy pustej konfiguracji narzędzi. Głębszy sub nie dostaje definicji ani instrukcji w fabrycznej ramie, a jego wywołanie jest odrzucane bez otwarcia pytania. Runner odmawia `ask_user`. Odpowiedź trafia do tego samego transkryptu. Brak odpowiedzi lub anulowanie przerywa pętlę bez syntezy; partial, wynik i handoff zachowują treść pytania i rozstrzygnięcie. Hooki `onActivity` i `onQuestion` informują o otwarciu i zamknięciu. `cancelParentQuestion` zamyka oczekiwanie przy zewnętrznym abort przed publikacją partial. `DelegateTool` pauzuje budżet biegu podczas oczekiwania. Pierwsze pytanie biegu blokującego wraca bezpośrednio w pokwitowaniu i promuje bieg do tła; notifier pomija je, a kolejne pytania i wynik doręcza normalnie. Terminalne `question` zachowuje treść i rozstrzygnięcie `no-answer` lub `cancelled` w wyniku runnera, rejestru i zwrotce delegacji.
+
+Opcjonalne `question.note` to dokładny prefiks dodany przez runnera do handoffu, po maskowaniu i przycięciu, bez separatora. Pole nie występuje, gdy nie dodano notki; typ `TerminalQuestion` eksportuje barrel. Snapshot przechowuje pytanie strukturalnie, bez dopisywania zdania o nim do `partial.text`, które może być użyte jako dorobek przy pustym handoffie.
+
+`ask_parent` normalizuje CRLF i samotne CR do LF przed otwarciem pytania. Zapis zdarzenia partialu zawiera także strukturalne `question` snapshotu.
 
 **Publiczne drzwi modułu:** klasy runtime + helpery widoczności/migracji.
 
@@ -118,6 +133,8 @@ Stary YAML agenta z przypisaniem nieistniejącej roli systemowej (np. dawne `pre
 `max_iterations` i `max_tool_result_length` z YAML są sanityzowane przez `sanitizeLimit` i sufity `LIMIT_SPECS`; 0 iteracji spada do defaultu, a 0 znaków pozostaje legalnym brakiem limitu. Jeden pomocnik wylicza efektywne limity dla pętli i ramy. Głębokość rozstrzyga jedna funkcja dla widoczności narzędzi i ramy: na limicie `delegate` oraz `agent_delegate` są ukryte, a rama każe wykonać zadanie samodzielnie. Bramka w `DelegateTool` nadal odrzuca próbę wywołania na limicie.
 
 Dla wyniku innego niż `unconfirmed` runner tworzy `handoff` w kolejności: efekty ze stanem sprawdzenia, ostatnia wypowiedź suba, wyniki narzędzi od najnowszego. Przed przycięciem podglądu i całego tekstu runner maskuje klucze z ustawień oraz stosuje `maskSensitiveData` także do argumentów i treści handoff. Limit całości to `subagent_salvage_max_chars`. Runner zachowuje argumenty wykonanych wywołań na wypadek błędu syntezy, ponieważ migawka `partial` ich nie zawiera. Handoff trafia do `SubRunResult` i `SubTaskResult`, także w ścieżce błędu.
+
+Przy terminalnym pytaniu handoff zaczyna się od zamaskowanego pytania, które może zająć do połowy jego limitu. Snapshot przechowuje skrót pytania do 2000 znaków i uwzględnia jego rozmiar przy formatowaniu tekstu w łącznym limicie 12000 znaków wyświetlanych pól; nazwy i stany narzędzi mają pierwszeństwo przed ostatnią wypowiedzią i podglądami. Osobne `question` wyniku zachowuje pełną zamaskowaną treść.
 
 ### Custom YAML scope schema
 

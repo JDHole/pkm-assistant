@@ -1,6 +1,7 @@
 /** Czysty model paska czatu. Wiersz wątku niesie uporządkowaną oś biegów, a bieg bez wątku ma własny wiersz. */
 import type { SubTask, SubTaskStep, SubThread, SubThreadEffect } from './SubTaskRegistry.js';
 import type { RunEnd, RunOutcome } from './runOutcome.js';
+import type { QuestionState } from './ParentQuestions.js';
 
 export type StripState =
     | { kind: 'queued'; position: number }
@@ -40,6 +41,8 @@ export interface BuildSubTaskResultModelInput {
     partialResult?: string | null;
     partialText?: string | null;
     error?: string | null;
+    question?: unknown;
+    questionState?: QuestionState;
     effects?: Array<{ tool: string; action: string; targets: Array<{ path?: string; id?: string; kind?: string }>; outcome: string; check: StripEffect['check']; expectedCheck?: StripEffect['expectedCheck'] }> | null;
     thread: SubTaskResultThread;
 }
@@ -53,10 +56,13 @@ export interface SubTaskResultModel {
     effects: SubTaskResultEffect[];
     missingTargets: string[];
     userStopped: boolean;
+    openQuestion?: string;
+    questionResolution?: 'no-answer' | 'cancelled';
     thread: SubTaskResultThread;
 }
 
 export interface StripRun {
+    questionState: QuestionState;
     id: string;
     number: number;
     available: boolean;
@@ -79,6 +85,7 @@ export interface StripRun {
 }
 
 export interface StripRow {
+    questionState: QuestionState;
     id: string;
     name: string;
     state: StripState;
@@ -229,7 +236,12 @@ export function buildSubTaskResultModel(input: BuildSubTaskResultModelInput): Su
         .find(value => typeof value === 'string' && value.trim().length > 0)?.trim() ?? '';
     const missingTargets = effectList.flatMap(effect => effect.check === 'mismatch' && effect.expectedCheck === 'exists'
         ? effect.targets.map(target => target.path || target.id || '').filter(Boolean) : []);
-    const endLabelKey = getStripStateLabelParts(resultEndState(outcome)).end;
+    const stateQuestion = input.questionState?.kind === 'closed'
+        ? { text: input.questionState.question.text, resolution: input.questionState.resolution } : undefined;
+    const rawQuestion = stateQuestion ?? input.question;
+    const question = rawQuestion && typeof rawQuestion === 'object' ? rawQuestion as { text?: unknown; resolution?: { kind?: unknown } } : undefined;
+    const questionResolution = question?.resolution?.kind === 'no-answer' || question?.resolution?.kind === 'cancelled' ? question.resolution.kind : undefined;
+    const endLabelKey = questionResolution === 'no-answer' ? 'chat.substrip.question_no_answer_partial' : getStripStateLabelParts(resultEndState(outcome)).end;
     return {
         state,
         ...(outcome ? { end: outcome.end } : {}),
@@ -242,12 +254,14 @@ export function buildSubTaskResultModel(input: BuildSubTaskResultModelInput): Su
         effects: effectList,
         missingTargets,
         userStopped: outcome?.end.kind === 'stopped' && outcome.end.by === 'user',
+        ...(questionResolution ? { questionResolution } : {}),
+        ...(questionResolution === 'no-answer' && typeof question?.text === 'string' ? { openQuestion: question.text } : {}),
         thread: input.thread,
     };
 }
 
 function runView(task: SubTask | undefined, id: string, number: number, now: number, effects: SubThreadEffect[] = []): StripRun {
-    if (!task) return { id, number, available: false, state: { kind: 'empty' }, taskPreview: '', steps: [], outcome: '', durationMs: 0, tokenInput: 0, tokenOutput: 0, toolCallCount: 0, effects: [], missingTargets: [] };
+    if (!task) return { id, number, available: false, state: { kind: 'empty' }, questionState: { kind: 'none' }, taskPreview: '', steps: [], outcome: '', durationMs: 0, tokenInput: 0, tokenOutput: 0, toolCallCount: 0, effects: [], missingTargets: [] };
     const steps = (task.steps || []).slice(-MAX_STEPS).map(stepView);
     const result = task.result;
     const usage = result?.usage as { prompt_tokens?: number; completion_tokens?: number; input_tokens?: number; output_tokens?: number } | null | undefined;
@@ -273,7 +287,7 @@ function runView(task: SubTask | undefined, id: string, number: number, now: num
     const outcome = rawOutcome.length > MAX_CHARS ? `${rawOutcome.slice(0, MAX_CHARS)}…` : rawOutcome;
     const endReason = partialOutcome && stripMaterial && task.error ? task.error : undefined;
     return {
-        id, number, available: true, state: runState(task, shared.state), status: task.status,
+        id, number, available: true, state: runState(task, shared.state), status: task.status, questionState: task.questionState ?? { kind: 'none' },
         ...(task.outcome ? { endLabelKey: shared.endLabelKey, completenessLabelKey: shared.completenessLabelKey } : {}),
         taskPreview: (task.taskPreview || '').slice(0, MAX_TASK), steps, outcome,
         ...(endReason ? { endReason } : {}),
@@ -329,7 +343,7 @@ export function buildStripModel({ tasks, pending, threads, tabKey = '', agentNam
         const runNumber = thread.runIds.length;
         const maxRuns = getThreadRunLimit?.(thread.threadId);
         return {
-            id: thread.threadId, threadId: thread.threadId, name: thread.name, state, reusable: thread.reusable,
+            id: thread.threadId, threadId: thread.threadId, name: thread.name, state, reusable: thread.reusable, questionState: (activeRun ?? lastRun)?.questionState ?? { kind: 'none' },
             runs, runNumber, runLimit: Number.isFinite(maxRuns) && Number(maxRuns) > 0 ? Number(maxRuns) : null,
             durationMs: runs[runs.length - 1]?.durationMs || 0,
             taskPreview: runs[runs.length - 1]?.taskPreview || '',
@@ -356,7 +370,7 @@ export function buildStripModel({ tasks, pending, threads, tabKey = '', agentNam
     for (const task of orderedStandalone) {
         const run = runView(task, task.id, 1, now);
         const state = delivered.has(task.id) ? { kind: 'delivery' as const } : runState(task);
-        rows.push({ id: task.id, name: task.name || task.id, state, reusable: false, runs: [run], runNumber: 1, runLimit: null,
+        rows.push({ id: task.id, name: task.name || task.id, state, questionState: run.questionState, reusable: false, runs: [run], runNumber: 1, runLimit: null,
             durationMs: run.durationMs, taskPreview: run.taskPreview, outcome: run.outcome });
     }
     return rows;

@@ -181,6 +181,7 @@ test('executeToolCall lists only the trusted owner threads from the real sub-tas
     t.deepEqual(result, { success: true, threads: [{
         sub_id: 'owned-thread', name: 'Worker', phase: 'idle', runs: 1,
         outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed' },
+        questionState: { kind: 'none' },
     }] });
     registry.dispose();
 });
@@ -409,6 +410,16 @@ function _makeArgsSpyClient(seen: ToolCallArgs[]) {
         }),
     }));
 }
+
+test('executeToolCall ufa tylko tokenowi kanału z runtime', async t => {
+    const seen: ToolCallArgs[] = [];
+    const client = _makeArgsSpyClient(seen);
+    const call = { name: 'delegate', arguments: { task: 'x', _invocationAskUserChannelId: 'cudzy' } };
+    await client.executeToolCall(call, 'Jaskier', { askUserChannelId: 'wlasny' });
+    await client.executeToolCall(call, 'Jaskier');
+    t.is(seen[0]._invocationAskUserChannelId, 'wlasny');
+    t.false('_invocationAskUserChannelId' in seen[1]);
+});
 
 test('executeToolCall: opts.origin wstrzykiwany do args jako _invocationOrigin', async t => {
     const seen: ToolCallArgs[] = [];

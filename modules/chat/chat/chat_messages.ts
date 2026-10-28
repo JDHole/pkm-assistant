@@ -16,6 +16,7 @@ import {
 import { t, getDateLocale } from '../../../core/i18n/index.js';
 import { buildDelegateBlockOptions } from './delegateBlockView.js';
 import { subAgentCallView } from './subAgentCallView.js';
+import { answeredSubQuestion, renderAnsweredSubQuestion } from './subQuestionView.js';
 import { registerUrlsFromText } from '../../web/index.js';
 import { registerUrlsIfHuman } from './messagePrivileges.js';
 // Historia liczy status narzędzia TĄ SAMĄ regułą co żywa tura (chat_streaming).
@@ -123,7 +124,7 @@ export async function append_message(this: ChatViewLike, role: MessageRole, cont
         // (spec A3) - klasyfikacja przez meta (świeżo dopisana kilka linii wyżej na tej samej
         // wiadomości). Zasada nadrzędna: treść dla MODELU zostaje identyczna, zmienia się
         // WYŁĄCZNIE render w oknie czatu.
-        const machineView = buildMachineView({ role, content, ...(meta || {}) }, { t, getThread: id => this.plugin?.subTaskRegistry?.getThread?.(id) });
+        const machineView = buildMachineView({ role, content, ...(meta || {}) }, { t, getTask: id => this.plugin?.subTaskRegistry?.getTask?.(id), getThread: id => this.plugin?.subTaskRegistry?.getThread?.(id) });
         if (machineView) {
             const id = getSubTaskNotificationTaskId({ role, content, ...(meta || {}) });
             if (id) {
@@ -262,6 +263,11 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                         : (tcArgs || {})) as DelegateArgs;
                     const historyOutput = (typeof tcOutput === 'object' && tcOutput) ? tcOutput : null;
                     const isSubAgent = subAgentCallView(tcName, _hArgs, historyOutput, 'result') === 'block';
+                    const answeredQuestion = answeredSubQuestion(historyOutput?.sub_question_view);
+                    if (tcName === 'sub_agent' && _hArgs.action === 'message' && historyOutput?.success === true && answeredQuestion) {
+                        agentDiv.appendChild(renderAnsweredSubQuestion(answeredQuestion));
+                        continue;
+                    }
                     if (isSubAgent) {
                         const taskQuery = _hArgs.task || '';
                         const _hName = tcName === 'sub_agent'
@@ -315,15 +321,18 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                                     const resultThread = thread?.phase === 'idle' && thread.reusable && threadId
                                         ? { kind: 'reusable' as const, sub_id: threadId }
                                         : { kind: 'unknown' as const };
-                                    return [markReceipt(createDelegateBlock(buildDelegateBlockOptions({
+                                    const options = buildDelegateBlockOptions({
                                         success: !failed,
                                         error: task?.error || (failed ? t('mcp.delegate.outcome_note') : undefined),
                                         result: task?.result ? { text: task.result.text, handoff: task.result.handoff } : '',
                                         partial: task?.partial ? { text: task.partial.text } : undefined,
                                         outcome,
                                         effects: thread?.effects,
+                                        question: task?.result?.question,
+                                        questionState: task?.questionState,
                                         thread: resultThread,
-                                    }, { type: tcName, agentName: name, query: taskQuery })))];
+                                    }, { type: tcName, agentName: name, query: taskQuery });
+                                    return [markReceipt(createDelegateBlock(options))];
                                 }
                                 return [markReceipt(createSubAgentBlock({ type: tcName, pending: true, status: 'success', agentName: name,
                                     query: taskQuery, response: buildBackgroundReceiptText([item], item?.queued ? 1 : startedList.length === 1 ? historyOutput.queued : undefined) }))];
@@ -336,7 +345,8 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                             block = createSubAgentBlock({ type: tcName, pending: true, status: 'success', agentName: _hName,
                                 query: taskQuery, response: buildBackgroundReceiptText(startedList, historyOutput.queued) });
                         } else {
-                            block = createDelegateBlock(buildDelegateBlockOptions(tcOutput || {}, { type: tcName, agentName: _hName, query: taskQuery }));
+                            const options = buildDelegateBlockOptions(tcOutput || {}, { type: tcName, agentName: _hName, query: taskQuery });
+                            block = createDelegateBlock(options);
                         }
                         agentDiv.appendChild(block);
                     } else {

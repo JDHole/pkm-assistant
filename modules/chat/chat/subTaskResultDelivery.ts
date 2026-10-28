@@ -26,6 +26,7 @@ export function buildSubTaskResultDelivery(task: SubTask, registry: SubTaskRegis
     const subTaskResult = {
         outcome,
         result: task.result ? { text: task.result.text, handoff: task.result.handoff } : undefined,
+        ...(task.result?.question ? { question: task.result.question } : {}),
         partial: task.partial,
         error: task.error,
         effects,

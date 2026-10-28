@@ -2408,3 +2408,17 @@ test('komplet stempli → zwrotka bez pominiętych', async t => {
     t.is(outcome.marked, 1);
     t.deepEqual(outcome.skipped, []);
 });
+
+
+test('saveSession zachowuje terminalne pytanie i dorobek wyniku z tła', async t => {
+    const { vault } = makeVault();
+    const memory = new AgentMemory(vault, 'Jaskier');
+    const path = await memory.saveSession([
+        { role: 'user', content: 'Dorobek: dwa pliki', _subTaskResult: { question: { text: 'Jaki zakres?', resolution: { kind: 'no-answer' } } } },
+        { role: 'user', content: 'Inny wynik' },
+    ]);
+    t.deepEqual((await memory.loadActiveSession(path)).messages, [
+        { role: 'user', content: 'Dorobek: dwa pliki', seq: 1, question: { text: 'Jaki zakres?', resolution: { kind: 'no-answer' } } },
+        { role: 'user', content: 'Inny wynik', seq: 2 },
+    ]);
+});

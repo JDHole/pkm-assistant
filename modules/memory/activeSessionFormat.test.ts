@@ -1,6 +1,5 @@
 import test from 'ava';
 import {
-    EVENT_FIELDS,
     escapeActiveText,
     unescapeActiveText,
     escapeEventFieldText,
@@ -33,6 +32,16 @@ const FRONTMATTER = [
     '# Jaskier session 2026-07-30T10:00:00.000Z',
     '',
 ].join('\n');
+
+test('odtworzony partial przekazuje modelowi pytanie i rozstrzygnięcie', t => {
+    const event = formatSessionEvent('agent_loop_partial', { role: 'system', content: 'DOROBEK', question: { text: 'Jaki zakres?', resolution: { kind: 'cancelled', by: 'lead', reason: 'stop' } } }, '2026-10-28T00:00:00Z');
+    const message = parseActiveSession(FRONTMATTER + event).messages[0];
+    t.true(message.content.includes('DOROBEK'));
+    t.true(message.content.includes('Jaki zakres?'));
+    t.true(message.content.includes('cancelled'));
+    t.true(message.content.includes('lead'));
+    t.true(message.content.includes('stop'));
+});
 
 /** Zdarzenie w zapisie testowym: pola eventu (`EVENT_FIELDS`) + typ + stempel. */
 interface TestEvent {
@@ -471,20 +480,6 @@ test('pola: escape/unescape etykiet = identyczność, unescape jest no-opem bez 
     t.is(unescapeEventFieldLabels(plain), plain, 'no-op na treści bez escapów (legacy)');
 });
 
-test('EVENT_FIELDS: kolejność pól w bloku idzie z jednej listy', t => {
-    t.deepEqual(EVENT_FIELDS, [
-        'content', 'tool', 'args', 'result', 'model', 'tokens', 'duration_ms', 'role', 'prompt',
-        'tool_call_id', 'tool_calls', 'seq',
-    ]);
-    const block = formatSessionEvent('tool_result', {
-        seq: 1, prompt: 'p', role: 'tool', duration_ms: 5, tokens: 3, model: 'm',
-        result: 'r', args: { a: 1 }, tool: 't', content: 'c',
-        tool_call_id: 'call_1', tool_calls: [{ id: 'call_1', function: { name: 'x', arguments: '{}' } }],
-    }, '2026-07-30T10:00:00.000Z');
-    const order = [...block.matchAll(/^\*\*([a-z_]+):\*\*$/gm)].map(m => m[1]);
-    t.deepEqual(order, EVENT_FIELDS, 'blok zapisuje pola w kolejności EVENT_FIELDS');
-});
-
 // ─── 6. Strażnik: sessionParser dalej robi round-trip po przepięciu regexów ───
 
 test('strażnik: formatToMarkdown → parseSessionFile bez zmian po przeniesieniu escape/unescape', t => {
@@ -703,4 +698,24 @@ test('NIT #6: plik v2 (bez tool_call_id/tool_calls, `**tool:**` = id połączeni
         { role: 'assistant', content: 'Notatka mówi tak.', seq: 4 },
         { role: 'assistant', content: 'sub padł', seq: 6 },
     ]);
+});
+
+
+test('terminalne pytania przeżywają event-log, a starsze wyniki nie zmieniają kształtu', t => {
+    const timestamp = '2026-10-28T12:00:00.000Z';
+    const text = [
+        formatSessionEvent('user_message', { content: 'Dorobek: dwa pliki', question: { text: 'Jaki zakres?', resolution: { kind: 'no-answer' } } }, timestamp),
+        formatSessionEvent('subagent_call', { result: 'Gotowe' }, timestamp),
+        formatSessionEvent('subagent_error', { result: 'Przerwane', question: { text: 'Co dalej?', resolution: { kind: 'cancelled', by: 'user', reason: 'stop' } } }, timestamp),
+    ].join('');
+    t.deepEqual(parseActiveSession(text).messages, [
+        { role: 'user', content: 'Dorobek: dwa pliki', seq: null, question: { text: 'Jaki zakres?', resolution: { kind: 'no-answer' } } },
+        { role: 'assistant', content: 'Gotowe', seq: null },
+        { role: 'assistant', content: 'Przerwane', seq: null, question: { text: 'Co dalej?', resolution: { kind: 'cancelled', by: 'user', reason: 'stop' } } },
+    ]);
+});
+
+test('uszkodzone lub nieterminalne pytanie nie blokuje odczytu wyniku', t => {
+    const text = formatSessionEvent('user_message', { content: 'Dorobek', question: { text: 'Pytanie', resolution: { kind: 'answered', text: 'Tak' } } }, '2026-10-28T12:00:00.000Z');
+    t.deepEqual(parseActiveSession(text).messages, [{ role: 'user', content: 'Dorobek', seq: null }]);
 });

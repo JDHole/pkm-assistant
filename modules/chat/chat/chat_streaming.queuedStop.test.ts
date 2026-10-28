@@ -103,3 +103,22 @@ test('zamknięcie zakładki zamyka jej queued z nadawcą system przed usunięcie
     t.is(registry.getThread('queued-other')?.phase, 'queued');
     t.deepEqual(view.chatTabs, [otherTab]);
 });
+
+test('zamknięcie aktywnego strumienia nie anuluje kolejki innej zakładki', async t => {
+    const window = { messages: [] };
+    const otherQueue = { text: 'Wiadomość B', meta: { origin: 'human' }, owner: { agentName: 'Borys', tabKey: 'tab-b' } };
+    const view = {
+        plugin: { agentManager: { getActiveAgent: () => ({ name: 'Jaskier' }) } },
+        chatTabs: [{ agentName: 'Jaskier', sessionId: 'tab-a', isActive: true }, { agentName: 'Borys', sessionId: 'tab-b', isActive: false }],
+        rollingWindow: window, _agentStates: new Map(), _preparingTurns: new Map(),
+        _streamCtxMap: new Map([['Jaskier', { rollingWindow: window }]]), _queuedMessage: otherQueue,
+        input_area: { value: 'Szkic A' }, _clearQueuedDrainTimer() {}, _hideQueuedIndicator() {},
+        _releaseStreamCtx() {}, _resetPaintTargets() {}, hideTypingIndicator() {}, set_generating() {},
+        _renderThrottle: null, env: {}, stop_generation, async _switchTab() {},
+    };
+
+    await _closeActiveTab.call(view as never);
+
+    t.deepEqual(view._queuedMessage, otherQueue);
+    t.is(view.input_area.value, 'Szkic A');
+});

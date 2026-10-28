@@ -24,7 +24,7 @@ import {
     KNOWN_ROLES,
 } from './activeSessionFormat.js';
 import { StateManager } from './StateManager.js';
-import type { ParsedActiveSession, SessionFrontmatter, SessionRole } from './activeSessionFormat.js';
+import type { ParsedActiveSession, SessionFrontmatter, SessionRole, SessionQuestion } from './activeSessionFormat.js';
 import type { TranscriptMetadata, ParsedSessionFile } from './sessionParser.js';
 import type { MemoryNoteType } from './MemoryAccessGuard.js';
 import type { NaTerazOp, NaTerazSections } from './BrainIndex.js';
@@ -287,6 +287,7 @@ export interface ChatMessageLike {
     content?: unknown;
     tool_call_id?: string;
     tool_calls?: unknown[];
+    _subTaskResult?: { question?: SessionQuestion };
 }
 
 /**
@@ -1054,7 +1055,7 @@ epoch: ${epoch}
         const text = Array.isArray(msg?.content)
             ? (msg.content as Array<{ text?: string; content?: string }>).map(c => c?.text || c?.content || '').filter(Boolean).join('\n')
             : _nullishToString(msg?.content);
-        const event: { content: string; seq: number; role?: string; tool_call_id?: string; tool_calls?: unknown[] } =
+        const event: { content: string; seq: number; role?: string; tool_call_id?: string; tool_calls?: unknown[]; question?: SessionQuestion } =
             { content: text, seq: this._nextSeq(path, content) };
         if (role === 'system') event.role = 'system';
         // Kod review MAJOR #3: SAMA gałąź co pisarz per-event w `chat_streaming.ts`
@@ -1063,6 +1064,7 @@ epoch: ${epoch}
         // pisałby `**tool_calls:** []` na KAŻDEJ wiadomości asystenta z tego ogona).
         if (typeof msg?.tool_call_id === 'string' && msg.tool_call_id) event.tool_call_id = msg.tool_call_id;
         if (Array.isArray(msg?.tool_calls) && msg.tool_calls.length > 0) event.tool_calls = msg.tool_calls;
+        if (msg._subTaskResult?.question) event.question = msg._subTaskResult.question;
         const block = formatSessionEvent(ROLE_TO_EVENT_TYPE[role], event, timestamp);
         return content.endsWith('\n') ? content + block : `${content}\n${block}`;
     }

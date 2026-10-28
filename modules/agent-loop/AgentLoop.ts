@@ -298,8 +298,8 @@ function formatPartialText(snapshot: AgentLoopPartialSnapshot, maxChars: number)
     return clipPartialText(lines.join('\n'), maxChars);
 }
 
-export function formatAgentLoopPartial(snapshot: AgentLoopPartialSnapshot): string {
-    return formatPartialText(snapshot, PARTIAL_MAX_CHARS);
+export function formatAgentLoopPartial(snapshot: AgentLoopPartialSnapshot, maxChars = PARTIAL_MAX_CHARS): string {
+    return formatPartialText(snapshot, Math.max(0, Math.min(PARTIAL_MAX_CHARS, maxChars)));
 }
 
 function copyPartial(snapshot: AgentLoopPartialSnapshot): AgentLoopPartialSnapshot {

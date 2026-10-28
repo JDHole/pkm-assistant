@@ -1,5 +1,19 @@
 # modules/tools/
 
+`ask_user` przyjmuje opcjonalny `question_id` pytania suba, przekazywany w argumentach wywołania do czatu.
+
+Kanały `ask_user` tworzy `createAskUserChannels(registry)`. Każdy ma właściciela,
+identyfikator, obietnicę i idempotentne `answer`, `cancel`, `timeout`; otwarcie
+rejestruje pauzę w rejestrze subów, a zamknięcie ją zwalnia. Runtime przekazuje
+identyfikator przez `askUserChannelId` i umieszcza fabrykę w `_askUserChannels`.
+Kanał zamknięty przed wykonaniem narzędzia pozostaje dostępny do odczytu;
+nieużyty kanał UI usuwa przez `forget`. Czat otwiera kanał dla właściciela tury,
+przekazuje jego identyfikator narzędziu i zamyka go po odpowiedzi lub anulowaniu.
+
+`sub_agent list` zwraca `questionState` ostatniego biegu wątku. Wiadomość
+z `question_id` przekazuje odpowiedź do protokołu po sprawdzeniu właściciela;
+bez ID pozostaje zwykłą wiadomością sterującą.
+
 **MCP runtime + built-in narzędzia agenta.** Plugin uruchamia:
 1. **Built-in tools** - wbudowane narzędzia agenta (read, list, write, memory_save, delegate, web_search, ...), skompilowane w bundlu.
 2. **External MCP servers** - zewnętrzne serwery przez prawdziwy klient MCP (`ExternalMcpManager`, stdio/HTTP przez `@modelcontextprotocol/sdk`), konfigurowane w ustawieniach pluginu (`data.json`), NIE w vaulcie.
@@ -531,6 +545,8 @@ Przyjęte elementy listy `tasks` rezerwują wątki `queued` w kolejności wejśc
 
 
 U3: each delegation owns an AbortController with a first-cause latch (`manual-stop` or `task-timeout`). The per-request stop guard prevents duplicate cancellation; final settlement clears the stop closure and existing timeout finalization cancels stale grace. Both result branches retain partial/stop_reason/tools_used/tool_call_details/usage.
+
+Zegar zadania delegacji pauzuje podczas oczekiwania na odpowiedź na `ask_parent`, a po odpowiedzi wraca z pozostałym budżetem. Pierwsza admisja nadal jednokrotnie przezbraja limit; pauza nie odnawia grace. Blokująca kontynuacja zwraca aktualne pytanie i promuje żywy bieg do tła; notifier nie doręcza ponownie tego pytania. Obietnica pełnego biegu nadal posiada zegar, kontrolkę abortu i miejsce w liczniku tła, aż do zakończenia; wynik dostarcza notifier. Terminalne `question` z treścią i rozstrzygnięciem przechodzi przez zwrotkę i ratowanie dorobku. Odpowiedź na nieaktualne `question_id` dostaje kod `question_expired` i może wskazać `activeQuestionId` nowego pytania tego samego wątku.
 
 ## Wątki sub-agentów przez `sub_agent`
 

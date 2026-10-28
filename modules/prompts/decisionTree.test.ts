@@ -20,6 +20,26 @@ import { en as enDict } from '../../core/i18n/en.js';
 const AGENT = { name: 'Tola', personality: '', disabled_tools: [] };
 const CTX = { vaultName: 'Vault', currentDate: '2026-09-13' };
 
+test.serial('instrukcja odpowiedzi subowi zależy od dostępności sub_agent w obu językach', t => {
+    try {
+        for (const locale of ['pl', 'en'] as const) {
+            setLocale(locale);
+            const render = (availableToolNames: string[]) => {
+                const builder = new PromptBuilder();
+                builder.build({ ...AGENT } as never, { ...CTX, availableToolNames } as never);
+                return builder.getSections().find(section => section.key === 'decision_tree')!.content;
+            };
+            const withTool = render(['sub_agent', 'ask_user']);
+            const withoutTool = render(['ask_user']);
+            const instruction = locale === 'pl'
+                ? /sub_agent message z question_id[^.]+\. Jeśli nie wiesz, zapytaj użytkownika przez ask_user z question_id[^.]+, a potem przekaż jego odpowiedź subowi/
+                : /sub_agent message with question_id[^.]+\. Otherwise ask the user using ask_user with that question_id, then relay their answer to the sub-agent/;
+            t.regex(withTool, instruction);
+            t.notRegex(withoutTool, instruction);
+        }
+    } finally { setLocale('en'); }
+});
+
 /** Sekcja „JAK PRACUJĘ" tak, jak realnie dostaje ją model (render przez `PromptBuilder`). */
 function renderDecisionTree(agentOverrides: Record<string, unknown> = {}): string {
     const builder = new PromptBuilder();
@@ -276,5 +296,5 @@ test('każda reguła ma treść w OBU słownikach', t => {
         if (!(key in enDict)) braki.push(`en: ${key}`);
     }
     t.deepEqual(braki, []);
-    t.is(DECISION_TREE_DEFAULTS.length, 17, 'pin liczby reguł - nowa reguła = nowy klucz w obu słownikach');
+    t.is(DECISION_TREE_DEFAULTS.length, 18, 'pin liczby reguł - nowa reguła = nowy klucz w obu słownikach');
 });

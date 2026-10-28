@@ -348,13 +348,12 @@ export function _renderMultimodalUserContent(this: ChatViewLike, container: HTML
 /**
  * Cleanup any pending ask_user promise.
  */
-export function _cleanupAskUser(this: ChatViewLike) {
-    if (this.plugin?._askUserResolve) {
-        this.plugin._askUserResolve(null);
-    }
-    if (this.plugin) {
-        this.plugin._askUserPromise = null;
-        this.plugin._askUserResolve = null;
-        this.plugin._askUserPending = null;
+export function _cleanupAskUser(this: ChatViewLike, turnId?: number) {
+    const turns = this._askUserTurnChannels;
+    if (!turns) return;
+    for (const [id, channels] of turns) {
+        if (turnId !== undefined && id !== turnId) continue;
+        for (const channel of channels) this.plugin?._askUserChannels?.forget(channel.id);
+        turns.delete(id);
     }
 }

@@ -16,6 +16,7 @@
 import { t } from '../../../core/i18n/index.js';
 import { DEFAULT_LIMITS } from '../../../config/limits.js';
 import type { SubTask, SubTaskOrigin } from '../../sub-agents/index.js';
+import { stripRunnerQuestion } from './stripRunnerQuestion.js';
 
 
 /** Minimalny kształt zakładki, jakiego potrzebuje dopasowanie (czat ma na niej więcej pól). */
@@ -131,7 +132,8 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
         parts.push(t('chat.subagent_notification.unconfirmed'));
     } else if (outcome?.completeness === 'partial') {
         parts.push(t('chat.subagent_notification.partial'));
-        const raw = (typeof task?.result?.handoff === 'string' && task.result.handoff.trim()) || (typeof task?.partial?.text === 'string' && task.partial.text.trim()) || (typeof task?.result?.text === 'string' ? task.result.text.trim() : '');
+        const source = [task?.result?.handoff, task?.partial?.text, task?.result?.text].find(value => typeof value === 'string' && value.trim()) ?? '';
+        const raw = stripRunnerQuestion(source, task.result?.question?.note).trim();
         parts.push(raw ? (maxResultChars > 0 && raw.length > maxResultChars ? `${raw.slice(0, maxResultChars)}\n${t('chat.subagent_notification.truncated', { chars: maxResultChars })}` : raw) : t('chat.subagent_notification.empty_result'));
     } else if (outcome?.completeness === 'empty') {
         parts.push(t('chat.subagent_notification.empty', { reason: outcomeEndLabel(outcome) }));
@@ -164,11 +166,15 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
         }
     }
 
-    const body = parts.join('\n\n');
+    const question = task.result?.question;
+    const questionSection = question && question.resolution.kind !== 'answered'
+        ? t('chat.subagent_notification.question', { reason: t(question.resolution.kind === 'no-answer' ? 'chat.subagent_notification.question_no_answer' : 'chat.subagent_notification.question_cancelled'), question: question.text }).replace(/\r\n?/g, '\n')
+        : '';
+    const body = parts.join('\n\n') + (questionSection ? `\n\n[SUBTASK_QUESTION]\n${questionSection}\n[/SUBTASK_QUESTION ${questionSection.length}]` : '');
     const instruction = options.subId
         ? `\n\n${t('chat.subagent_notification.reusable_thread', { sub_id: options.subId })}`
         : '';
-    const footerSeparator = options.subId ? '\n\n\n' : '\n\n';
+    const footerSeparator = '\n'.repeat(2 + (options.subId ? 1 : 0) + (questionSection ? 2 : 0));
     return `${body}${instruction}${footerSeparator}${t('chat.subagent_notification.footer')}`;
 }
 

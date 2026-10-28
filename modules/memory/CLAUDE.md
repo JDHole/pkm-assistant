@@ -1,5 +1,7 @@
 # modules/memory/
 
+Zdarzenie `agent_loop_partial` zapisuje opcjonalne `question`; przy odczycie jego treść i rozstrzygnięcie są dodawane jako oznaczona część wiadomości dla modelu. Dorobek snapshotu pozostaje osobny.
+
 **Pamięć agenta w Memory v3: per-agent, plikowa, jawna dla usera i niedestrukcyjna.**
 
 Każdy agent ma osobny folder:
@@ -26,6 +28,8 @@ Trwałe fakty idą do osobnych notatek; `## Bieżące` pokazuje kilka aktywnych 
 link + jedno zdanie opisu. Agent nie dopisuje faktów bezpośrednio do `brain.md`.
 
 ---
+
+Terminalne pytanie wyniku suba (`question`: tekst i `no-answer` lub `cancelled`) jest opcjonalnym polem eventu aktywnej sesji. Odczyt przywraca wyłącznie dane historii, bez oczekiwania, zegara ani możliwości odpowiedzi. Stare bloki bez tego pola pozostają bez zmian; niepoprawne pole jest pomijane.
 
 ## Co tu jest
 

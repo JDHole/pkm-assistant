@@ -1,5 +1,9 @@
 # modules/prompts/
 
+Reguła `deleg_question` jest częścią rdzenia przy dostępności `sub_agent`, także
+dla generycznego workera. Prowadzący odpowiada na pytanie z `question_id` sam
+albo pyta użytkownika przez `ask_user` i przekazuje odpowiedź subowi.
+
 Buduje system prompt agenta. Sekcja „JAK PRACUJĘ" to **chudy rdzeń**: kilka reguł
 cross-tool i sądów modelu, zawsze włączonych (`CORE_RULES`), plus **indeks skilli** i dane
 dynamiczne. Guidance „kiedy użyć KONKRETNEGO narzędzia" siedzi w opisach narzędzi (i18n

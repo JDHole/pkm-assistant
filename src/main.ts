@@ -81,11 +81,12 @@ import {
   createWebReadTool,
   // Communication
   createAskUserTool,
+  createAskUserChannels,
   // Multimodal
   createGenerateImageTool,
   createAddTextToImageTool,
 } from "../modules/tools/index.js";
-import type { ServerVisibilityAgent } from "../modules/tools/index.js";
+import type { AskUserChannels, ServerVisibilityAgent } from "../modules/tools/index.js";
 import { ArtifactStore, registerArtifactBlocks, migrateJsonArtifactsToNotes, DEFAULT_ARTIFACTS_FOLDER, buildArtifactsBaseContent, buildArtifactsBasePath } from "../modules/artifacts/index.js";
 // Księga biegów sub-agentów. Stoi obok traceLog, bo trace.log jest jej pierwszym konsumentem
 // (patrz modules/sub-agents/CLAUDE.md).
@@ -195,6 +196,7 @@ export default class PkmAssistantPlugin extends PluginBase {
   declare vaultIndexer: VaultIndexer | undefined;
   // Nullowane w `onunload()` - patrz tam.
   declare subTaskRegistry: SubTaskRegistry | null;
+  declare _askUserChannels: AskUserChannels | null;
   declare subTaskNotifier: SubTaskNotifier | null;
   declare traceLog: TraceLog | undefined;
   declare skinManager: typeof SkinManager | undefined;
@@ -446,13 +448,12 @@ export default class PkmAssistantPlugin extends PluginBase {
     // Odepnij nasłuch sprzątania skrzynki (i porzuć kolejkę czekających modali).
     this._komunikatorCleanupUnsub?.();
     this._komunikatorCleanupUnsub = null;
-    // Odepnij konsumentów rejestru subów PRZED zamknięciem trace'u (rejestr do niego pisze).
-    // Notifier jest konsumentem rejestru, więc znika PIERWSZY - inaczej odpinałby
-    // subskrypcję od szyny, której już nie ma.
-    this.subTaskNotifier?.dispose?.();
-    this.subTaskNotifier = null;
+    // Rejestr zamyka oczekiwania użytkownika i pytania przed odpięciem odbiorców.
     this.subTaskRegistry?.dispose?.();
     this.subTaskRegistry = null;
+    this._askUserChannels = null;
+    this.subTaskNotifier?.dispose?.();
+    this.subTaskNotifier = null;
     // Watcher plików agentów wiesza trzy nasłuchy na vaulcie POZA `registerEvent` - bez tego
     // wyłączony plugin dalej przeładowywałby agentów (i dopisywał pliki do vaulta) przy
     // każdym zapisie yamla.
@@ -573,6 +574,7 @@ export default class PkmAssistantPlugin extends PluginBase {
         traceLog: this.traceLog,
         mask: maskSensitiveData,
       });
+      this._askUserChannels = createAskUserChannels(this.subTaskRegistry);
       // Delegacja w tle: skrzynka wyników subów odpalonych w tle. Bez rejestru nie ma czego
       // słuchać, więc wstaje tylko razem z nim. Dostawcę (czat) podłącza inny moduł przez
       // `subTaskNotifier.setDeliverer(...)`; do tego czasu wyniki po prostu czekają w kolejce.

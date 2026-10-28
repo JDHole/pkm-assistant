@@ -6,6 +6,26 @@
    Override via .pkm-assistant/theme.css
    ═══════════════════════════════════════════════════════════════ */
 
+.pkm-substrip .pkm-substrip__chip--question-ticking,
+.pkm-substrip .pkm-substrip__chip--question-paused {
+  border: 1px solid var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 8%, transparent);
+}
+.pkm-substrip .pkm-substrip__chip--question-paused { border-style: dashed; }
+.pkm-substrip__chip--question-ticking .pkm-substrip__crystal,
+.pkm-substrip__chip--question-paused .pkm-substrip__crystal { color: var(--interactive-accent); }
+.pkm-substrip .pkm-substrip__chip--no-answer { border-left: 3px solid var(--cs-agent-color); }
+.pkm-substrip__question, .cs-subresult__question {
+  margin: 8px 0;
+  padding: 9px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-left: 3px solid var(--interactive-accent);
+  border-radius: 4px;
+  background: var(--background-secondary);
+  white-space: pre-wrap;
+}
+.pkm-substrip__question-note, .pkm-substrip__question-clock { color: var(--text-muted); font-size: 11px; }
+
 .theme-dark, .theme-light {
 
   /* ── Agent color (primary accent - set per element) ── */
@@ -1354,4 +1374,19 @@ input.pkm-onboarding-key-input {
 }
 .pkm-model-badge--cloud {
   background: #2196f3;
+}
+
+.cs-ask-user--sub-question .cs-ask-user__icon { color: var(--interactive-accent); }
+.cs-ask-user--sub-question .cs-ask-user__label { color: var(--text-normal); font-size: var(--font-ui-small); text-transform: none; letter-spacing: normal; }
+.cs-ask-user--sub-question .cs-ask-user__head { border: 0; padding: 0; flex-wrap: wrap; }
+.cs-ask-user--sub-question .cs-ask-user__custom { display: flex; gap: 8px; }
+.cs-ask-user--sub-question .cs-ask-user__input { flex: 1; min-width: 0; }
+.cs-sub-question-answer .cs-tile__dot { display: none; }
+.cs-ask-user__task { color: var(--text-muted); font-size: 11px; }
+.cs-ask-user__sub-question {
+  background: var(--background-secondary);
+  border-left: 3px solid var(--interactive-accent);
+  border-radius: 3px;
+  margin: 8px 0;
+  padding: 8px 10px;
 }

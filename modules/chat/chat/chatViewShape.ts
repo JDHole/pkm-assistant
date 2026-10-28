@@ -28,7 +28,7 @@ import type { TokenTracker } from '../../../core/index.js';
 import type { Agent, AgentManager } from '../../agents/index.js';
 import type { SkillData } from '../../skills/index.js';
 import type { AgentMemory } from '../../memory/index.js';
-import type { MCPClient, OpenAiToolDefinition, ServerVisibilityAgent, ToolRegistry } from '../../tools/index.js';
+import type { AskUserChannels, MCPClient, OpenAiToolDefinition, ServerVisibilityAgent, ToolRegistry } from '../../tools/index.js';
 import type { ChatModel, ChatRuntimeConfig, ModelLibraryEntry, PkmModelSettings } from '../../models/index.js';
 import type { SubTaskNotifier, SubTaskRegistry } from '../../sub-agents/index.js';
 import type { ArtifactStore } from '../../artifacts/index.js';
@@ -138,6 +138,7 @@ export interface ChatPlugin extends PluginApi {
     _askUserPromise?: Promise<string | null> | null;
     _askUserResolve?: ((answer: string | null) => void) | null;
     _askUserPending?: unknown;
+    _askUserChannels?: AskUserChannels | null;
 }
 
 /** Migawka ostatnio wysłanego promptu (Ustawienia → „Pokaż prompt"). */
@@ -233,6 +234,7 @@ export interface ChatTabState {
  * w `send_message`; tutaj leży tylko to, co czytają INNE metody widoku.
  */
 export interface ChatStreamContext {
+    tab: ChatTab | null;
     agentName: string;
     agent: Agent | null;
     rollingWindow: RollingWindow;
@@ -306,6 +308,7 @@ export interface ChatViewMixins extends
     _queuedDrainTimer: number | null;
     _queuedIndicatorEl: HTMLElement | null;
     _autoTurnChainCounts?: Map<string, number>;
+    _questionAutoTurn?: import('./subTaskQuestionDelivery.js').AutoTurnReservation;
     _pendingDelegation: DelegationProposal | null;
 
     // ── Pasek biegów subów ──

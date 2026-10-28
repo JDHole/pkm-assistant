@@ -39,7 +39,8 @@ ZASADY:
 1. Wykonaj zadanie DOKŁADNIE - nie wymyślaj faktów.
 2. Zwróć zwięzły, konkretny wynik; jeśli czegoś nie znalazłeś, napisz wprost.
 3. Cytuj ścieżki źródeł, z których korzystałeś.
-4. Twoim zleceniodawcą jest agent, nie user.`;
+4. Twoim zleceniodawcą jest agent, nie user.
+5. Gdy brakuje informacji, której nie zdobędziesz narzędziami, zadaj prowadzącemu jedno konkretne pytanie przez ask_parent zamiast zgadywać lub się poddawać. Nie pytaj o to, co możesz sprawdzić sam.`;
 
 const FRAME_EN = `You are the sub-agent "{{SUB_NAME}}" of agent {{AGENT_NAME}} - a specialised version of the agent running on a dedicated AI model. Carry out the task and return a concise result for the agent.
 Your speciality: {{DESCRIPTION}}
@@ -50,7 +51,8 @@ RULES:
 1. Carry out the task EXACTLY - do not invent facts.
 2. Return a concise, concrete result; if you did not find something, say so plainly.
 3. Quote the paths of the sources you used.
-4. Your client is the agent, not the user.`;
+4. Your client is the agent, not the user.
+5. When information is missing and you cannot obtain it with your tools, ask the parent agent one specific question using ask_parent instead of guessing or giving up. Do not ask about things you can check yourself.`;
 
 const SUBAGENT_FRAME_PROMPTS = { pl: FRAME_PL, en: FRAME_EN };
 
@@ -62,6 +64,7 @@ const SUBAGENT_FRAME_PROMPTS = { pl: FRAME_PL, en: FRAME_EN };
  * Ustawień → Prompt), nie przy imporcie modułu. `DEFAULT_SUBAGENT_FRAME_PROMPT` skasowany:
  * stała nie umie być leniwa.
  */
-export function defaultSubAgentFramePrompt(locale: string = getLocale()): string {
-    return SUBAGENT_FRAME_PROMPTS[locale === 'pl' ? 'pl' : 'en'];
+export function defaultSubAgentFramePrompt(locale: string = getLocale(), mayAskParent = true): string {
+    const frame = SUBAGENT_FRAME_PROMPTS[locale === 'pl' ? 'pl' : 'en'];
+    return mayAskParent ? frame : frame.slice(0, frame.lastIndexOf('\n5. '));
 }

@@ -16,7 +16,6 @@ import { t } from '../../../core/i18n/index.js';
 import { TokenTracker } from '../../../core/index.js';
 import {
     buildOwnerWindowOptions,
-    isOwnerTabActive,
     resolveOwnerAgentName,
     resolveOwnerMemory,
 } from './turnOwner.js';
@@ -180,9 +179,10 @@ type RestoredMessage = Awaited<ReturnType<AgentMemory['loadActiveSession']>>['me
  * (`ActiveSessionMessage.toolCallId`/`toolCalls` są opcjonalne — brak w pliku legacy/v1/v2).
  */
 function _restoredMessageMeta(msg: RestoredMessage) {
-    const meta: { tool_call_id?: string; tool_calls?: NonNullable<RestoredMessage['toolCalls']> } = {};
+    const meta: { tool_call_id?: string; tool_calls?: NonNullable<RestoredMessage['toolCalls']>; _subTaskResult?: { question: NonNullable<RestoredMessage['question']> } } = {};
     if (msg.toolCallId) meta.tool_call_id = msg.toolCallId;
     if (msg.toolCalls) meta.tool_calls = msg.toolCalls;
+    if (msg.question) meta._subTaskResult = { question: msg.question };
     return meta;
 }
 
@@ -273,6 +273,11 @@ export async function _restoreActiveSession(this: ChatViewLike) {
             return (b.session?.mtime || 0) - (a.session?.mtime || 0);
         });
 
+        // Restore zastępuje obiekty zakładek i okna. Najpierw przerwij tury, które
+        // rozpoczęły się podczas odczytu, aby żadna nie straciła uchwytu Stopu.
+        for (const key of new Set([...(this._streamCtxMap?.keys() || []), ...(this._preparingTurns?.keys() || [])])) {
+            this.stop_generation(key, 'restore');
+        }
         this.chatTabs = restored.map((item, index) => ({
             agentName: item.agentName,
             sessionId: item.session.path,
@@ -657,7 +662,10 @@ export function _createRollingWindow(this: ChatViewLike, agentName?: string | nu
     // się po niej - nie po globalnym `activeAgent` w chwili kompresji. Kompresja końca tury
     // leci także dla zakładek W TLE (chat_streaming: „Background tab finished").
     const ownerAgentName = resolveOwnerAgentName(this.plugin?.agentManager, agentName);
-    return new RollingWindow({
+    // Tożsamość okna przetrwa zmianę sessionPath/sessionId w tej samej zakładce i odróżnia
+    // dwie rozmowy tego samego agenta. Callbacki są wywoływane dopiero po konstrukcji okna.
+    const isOwnerActive = () => this.rollingWindow === rollingWindow;
+    const rollingWindow: RollingWindow = new RollingWindow({
         maxTokens,
         triggerThreshold: threshold,
         toolTrimThreshold,
@@ -666,21 +674,22 @@ export function _createRollingWindow(this: ChatViewLike, agentName?: string | nu
         // więc bez tej bramki blok „skompresowano" agenta A malowałby się fizycznie w
         // rozmowie agenta B, którą user akurat czyta (z licznikami z okna A).
         onSummarized: (summary, count, messagesKept, isEmergency) => {
-            if (!isOwnerTabActive(this, ownerAgentName)) return;
+            if (!isOwnerActive()) return;
             this._renderCompressionBlock(summary, count, messagesKept, isEmergency);
             this._updateTokenPanel();
         },
         onToolsTrimmed: (info) => {
             log.info('Chat', `Faza 1: skrócono ${info.trimmed} wyników narzędzi (łącznie: ${info.totalTrimmed})`);
-            if (!isOwnerTabActive(this, ownerAgentName)) return;
+            if (!isOwnerActive()) return;
             this._renderTrimBlock(info);
             this._updateTokenPanel();
         },
         // Dedup context + durable-memory rescue. chat_session owns AgentMemory access;
         // RollingWindow only calls these providers (kierunek zależności jak dziś).
         // Szkielet kompresji (agent>global>factory) też jest w tej paczce.
-        ...buildOwnerWindowOptions(this, ownerAgentName),
+        ...buildOwnerWindowOptions(this, ownerAgentName, isOwnerActive),
     });
+    return rollingWindow;
 }
 
 /**

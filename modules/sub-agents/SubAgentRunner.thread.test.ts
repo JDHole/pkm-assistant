@@ -126,7 +126,7 @@ test('runTask nie poszerza narzędzi ani zakresu po kontynuacji', async t => {
     } } as unknown as ChatModel;
     await runner.runTask('drugie', { name: owner.agentName }, cfg, second,
         { origin: owner, threadId: thread.threadId, callerToolNames: ['read', 'write'], scopeFolders: ['Safe', 'Private'], modelTimeout: 5 });
-    t.deepEqual(visible, ['read']);
+    t.deepEqual(visible, ['read', 'ask_parent']);
     t.deepEqual(calls[0].scopeFolders, ['Safe']);
     t.deepEqual(calls[0].callerToolNames, ['read']);
 });
