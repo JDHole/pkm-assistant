@@ -68,6 +68,8 @@ test.serial('bloki czatu pokazują tylko otwarte pytanie właściciela i rozwija
     const saved = answeredSubQuestion({ name: 'Klara', question: 'Jaki zakres?', answer: 'Cały.' });
     if (!saved) throw new Error('brak zapisanej odpowiedzi');
     const tile = renderAnsweredSubQuestion(saved) as unknown as ElementStub;
+    t.true(tile.classes.has('cs-tile--attention'));
+    t.false(tile.classes.has('cs-tile--ok'));
     t.true(texts(tile).includes('Klara zapytał, odpowiedziałem'));
     t.true(tile.children[1].attrs.has('hidden'));
     tile.children[0].listeners.get('click')?.();

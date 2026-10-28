@@ -39,6 +39,7 @@ import type { MachineView } from './machineMessage.js';
 import type { ChatViewLike } from './chatViewShape.js';
 
 function _machineTileIcon(kind: MachineView['kind']): string {
+    if (kind === 'subtask_question') return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4"/><path d="M12 17h.01"/></svg>';
     return kind === 'artifact_summon' ? UiIcons.file(14) : UiIcons.robot(14);
 }
 
@@ -107,8 +108,12 @@ export async function renderMachineTile(container: HTMLElement, plugin: ChatView
         iconSvg: _machineTileIcon(view.kind),
         title: view.title,
         summary: view.summary,
-        details: view.details,
+        details: view.kind === 'subtask_question' ? body => {
+            const question = body.createDiv({ cls: 'cs-sub-question__text' });
+            question.textContent = view.details;
+        } : view.details,
         actions: action ? [action] : undefined,
     });
+    if (view.kind === 'subtask_question') tile.el.classList.add('cs-tile--subquestion');
     container.appendChild(tile.el);
 }

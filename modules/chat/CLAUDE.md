@@ -1587,3 +1587,5 @@ Kontekst aktywnego strumienia jest kluczowany zamrożonym kluczem zakładki, a i
 tury chroni jej następcę przed spóźnionym sprzątaniem.
 
 Powiadomienie o pytaniu suba jest osobnym kafelkiem: klasyfikator rozpoznaje także zapisany tekst PL/EN, pokazuje nazwę, zadanie z rejestru (albo jego identyfikator) i pytanie. Wynik niesie terminalne `question` w metadanych i w zdarzeniu sesji zarówno w auto-turze, jak w wyniku pobranym w trakcie tury. Po odczycie historii pytanie pozostaje dostępne także przy pustym rejestrze. Powód i tekst pytania są osobną sekcją powiadomienia dla modelu, poza limitem dorobku.
+
+Kafelek powiadomienia o pytaniu suba oraz zwinięty kafelek odpowiedzi prowadzącego używają statusu `attention`. Pytanie ma fioletową ikonę i kreskę bloku treści. Ramka wyniku z otwartym pytaniem używa tego samego statusu, pokazuje nazwę suba, jeden znacznik braku odpowiedzi i jedną osobną linię pytania. Przy odtwarzaniu powiadomienia z historii pytanie jest rozpoznawane z systemowej sekcji PL lub EN; systemowe zdania o braku odpowiedzi są pomijane w dorobku, a wyniki narzędzi pozostają. Zwykłe błędy i zatrzymanie bez otwartego pytania zachowują status błędu.

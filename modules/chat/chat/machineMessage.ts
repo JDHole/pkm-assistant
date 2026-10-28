@@ -49,7 +49,7 @@ export interface MachineView {
     /** Tylko `artifact_summon`, i tylko gdy jest artifactId do przywołania. */
     open?: MachineViewOpen;
     /** Steruje kolorem/domyślnym rozwinięciem kafelka (`createTile`'s `status`). */
-    status: 'ok' | 'error';
+    status: 'ok' | 'error' | 'attention';
     subAgentResult?: SubAgentResultView;
 }
 
@@ -428,7 +428,7 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
         const task = ctx.getTask?.(question.taskId);
         const preview = task && typeof task === 'object' && 'taskPreview' in task && typeof task.taskPreview === 'string' ? task.taskPreview : question.taskId;
         return { kind, title: ctx.t('chat.tile.machine.question_title', { name: question.name }),
-            summary: preview, details: question.question, status: 'ok' };
+            summary: preview, details: question.question, status: 'attention' };
     }
     if (kind === 'subtask_notification') {
         const name = extractFirstVar(text, SUBTASK_HEADER_KEY, ['name', 'task_id']) || '?';
@@ -575,7 +575,19 @@ function buildParsedNotificationResult(text: string, name: string, thread: SubTa
     // Po restarcie brak strukturalnego _subTaskResult. Zachowujemy więc body jako tekst
     // i odtwarzamy wyłącznie stan z jego dedykowanej linii systemowej. Treść może cytować
     // przykłady błędów lub efektów, więc nie klasyfikujemy akapitów jako dane.
-    const material = completionValue === 'empty' ? '' : body.split('\n\n').map(part => part.trim()).filter(part => part && !boilerplate.includes(part)).join('\n\n').trim();
+    let openQuestion: string | undefined;
+    const paragraphs = body.split('\n\n').map(part => part.trim());
+    for (const locale of LOCALES) {
+        const reason = translate('chat.subagent_notification.question_no_answer', undefined, locale);
+        const [prefix, suffix] = templateSegments('chat.subagent_notification.question', locale, ['reason', 'question']).slice(1);
+        const start = reason + prefix;
+        const paragraph = paragraphs.find(part => part.startsWith(start) && (!suffix || part.endsWith(suffix)));
+        if (paragraph) {
+            openQuestion = paragraph.slice(start.length, suffix ? -suffix.length : undefined);
+            break;
+        }
+    }
+    const material = completionValue === 'empty' ? '' : paragraphs.filter(part => part && !boilerplate.includes(part)).join('\n\n').trim();
     let error: string | undefined;
     if (completionValue === 'empty' && end.kind === 'failed') {
         for (const locale of LOCALES) {
@@ -584,6 +596,11 @@ function buildParsedNotificationResult(text: string, name: string, thread: SubTa
             if (paragraph) { error = paragraph.slice(prefix.length, suffix ? -suffix.length : undefined).trim(); break; }
         }
     }
-    return buildSubAgentResultView({ name, outcome: { end, completeness: completionValue, hasAnswer: completionValue === 'unconfirmed', hasMaterial: !!material, effects: [] },
+    const view = buildSubAgentResultView({ name, outcome: { end, completeness: completionValue, hasAnswer: completionValue === 'unconfirmed', hasMaterial: !!material, effects: [] },
         text: material, error, thread }, translate);
+    if (openQuestion !== undefined) {
+        view.openQuestion = openQuestion;
+        view.title = name;
+    }
+    return view;
 }

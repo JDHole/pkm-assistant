@@ -302,13 +302,49 @@ test.serial('pytanie suba przechodzi przez delivery, klasyfikator i render w PL 
                 t.is(view?.kind, 'subtask_question');
                 const container = makeFakeEl();
                 await renderMachineTile(container as unknown as HTMLElement, fakePlugin([], null), view!);
+                const tile = findByClass(container, 'cs-tile--subquestion');
+                t.truthy(tile);
+                t.true(tile!.classList.contains('cs-tile--attention'));
+                t.is(tileColor(tile!), 'var(--text-warning)');
                 findByClass(container, 'cs-tile__head')?.fire('click');
+                t.truthy(findByClass(container, 'cs-sub-question__text'));
                 const rendered = deepText(container);
                 t.true(rendered.includes(title));
                 t.true(rendered.includes('Sprawdź notatki'));
                 t.true(rendered.includes('Który katalog wybrać?'));
                 t.false(rendered.includes('skończył w tle'));
                 t.false(rendered.includes('finished in the background'));
+            }
+        }
+        setLocale('en');
+    });
+});
+
+test.serial('brak odpowiedzi: dorobek i jedno pytanie w wyniku żywym oraz historii PL i EN', async t => {
+    await withFakeDocument(async () => {
+        for (const locale of ['pl', 'en'] as const) {
+            setLocale(locale);
+            const question = 'Którą wersję planu wybrać?';
+            const runner = locale === 'pl' ? `Sub nie dostał odpowiedzi na pytanie: ${question}` : `The sub-agent received no answer to the question: ${question}`;
+            const tool = 'read | Notatki/Plan Q4.md | {"success":true}';
+            const task = { id: 'task1', name: 'pkm-sub', agentName: 'Lead', status: 'done', background: true, createdAt: 1, steps: [], budget: {}, outcome: { end: { kind: 'timeout' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] }, result: { text: `${runner}\n\nTool results, newest first\n${tool}`, toolsUsed: ['read'], durationMs: 1, usage: null, question: { text: question, resolution: { kind: 'no-answer' } } } } as SubTask;
+            const delivery = buildSubTaskResultDelivery(task, undefined, 0);
+            for (const meta of [delivery.meta, {}]) {
+                const view = buildMachineView({ role: 'user', content: delivery.text, ...meta }, { t: translate });
+                const container = makeFakeEl();
+                await renderMachineTile(container as unknown as HTMLElement, fakePlugin([], null), view!);
+                const tile = findByClass(container, 'cs-tile--subresult')!;
+                t.true(tile.classList.contains('cs-tile--attention'));
+                t.is(tileColor(tile), 'var(--text-warning)');
+                findByClass(tile, 'cs-tile__head')!.fire('click');
+                const rendered = deepText(tile);
+                t.is(rendered.split(question).length - 1, 1);
+                const badge = locale === 'pl' ? 'brak odpowiedzi' : 'no answer';
+                t.is(deepText(findByClass(tile, 'cs-tile__head')!).toLowerCase().split(badge).length - 1, 1);
+                t.true(deepText(findByClass(tile, 'cs-subresult')!).includes(tool));
+                t.false(rendered.includes(runner));
+                t.false(rendered.includes(locale === 'pl' ? 'czas na odpowiedź upłynął' : 'response time expired'));
+                t.truthy(findByClass(tile, 'cs-subresult__question'));
             }
         }
         setLocale('en');

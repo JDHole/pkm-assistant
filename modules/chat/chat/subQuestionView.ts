@@ -27,7 +27,7 @@ export function answeredSubQuestion(value: unknown): AnsweredSubQuestion | undef
 
 export function renderAnsweredSubQuestion(value: AnsweredSubQuestion): HTMLElement {
     const tile = createTile({
-        role: 'agent', status: 'ok',
+        role: 'agent', status: 'attention',
         iconSvg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H5l1.5-3A8.5 8.5 0 1 1 21 11.5Z"/><path d="m12 8-3 3 3 3M9 11h6"/></svg>',
         title: t('chat.sub_question.answered', { name: value.name }),
         meta: t('chat.sub_question.expand'),
