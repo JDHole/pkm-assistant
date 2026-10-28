@@ -2689,6 +2689,11 @@ export const pl: Record<string, string> = {
   'mcp.ask_user.param.question': 'Treść pytania do użytkownika.',
   'mcp.ask_user.param.options': 'Sugerowane odpowiedzi (2-4 opcje). Żadna opcja nie jest wstępnie wybrana; pierwsza jest zwracana dopiero po wysłaniu formularza bez wybrania opcji i bez wpisania odpowiedzi. Opcjonalne - bez nich user dostaje tylko pole tekstowe.',
   'mcp.ask_user.param.context': 'Krótki opis kontekstu pytania (dlaczego pytasz). Opcjonalne.',
+  'mcp.ask_user.param.question_id': 'Identyfikator pytania suba, którego dotyczy pytanie do użytkownika. Opcjonalne.',
+  'chat.sub_question.from': 'Pytanie od {{name}}',
+  'chat.sub_question.task': 'zadanie: {{task}}',
+  'chat.sub_question.answered': '{{name}} zapytał, odpowiedziałem',
+  'chat.sub_question.expand': 'rozwiń',
   'mcp.ask_user.no_ui': 'Tego pytania NIE dało się zadać: rozmowa leci w tle (użytkownik jest na innej zakładce), więc nikt go nie zobaczył i nikt nie odpowiedział. NIE zgaduj odpowiedzi i nie zakładaj zgody. Zakończ turę albo zapytaj ponownie, gdy użytkownik wróci.',
   'mcp.ask_user.timeout': 'Na to pytanie NIE PRZYSZŁA odpowiedź w ciągu 5 minut - użytkownik nie odpowiedział (mógł odejść od komputera albo nie zauważyć pytania). NIE zgaduj odpowiedzi i nie zakładaj zgody na żadną z opcji. Zakończ turę albo zapytaj ponownie, gdy użytkownik wróci.',
 
@@ -3057,7 +3062,7 @@ Status raportu → \`gotowy\`. Powiedz userowi 2-3 zdania esencji + gdzie leży 
   // Nazwy sekcji artefaktu ZMIENIAJĄ się z językiem (`modules/artifacts/artifactSections.ts`).
   'prompt.dt.rule.deleg_escalation': 'ESKALACJA: wiesz → odpowiadaj; brakuje danych → zbierz (narzędzia albo delegate); brak wyniku → ask_user; user odmówił → STOP.',
   'prompt.dt.rule.deleg_core': 'Dużo danych z vaulta/weba do zebrania (przeszukanie wielu plików, analiza zbiorcza, synteza) → delegate. Drobiazgi (jeden read/search) rób sam.',
-  'prompt.dt.rule.deleg_question': 'Gdy sub zada pytanie, odpowiedz przez sub_agent message z question_id, jeśli znasz odpowiedź. Jeśli nie wiesz, zapytaj użytkownika przez ask_user, a potem przekaż jego odpowiedź subowi. Nie zostawiaj pytania bez reakcji.',
+  'prompt.dt.rule.deleg_question': 'Gdy sub zada pytanie, odpowiedz przez sub_agent message z question_id, jeśli znasz odpowiedź. Jeśli nie wiesz, zapytaj użytkownika przez ask_user z question_id tego pytania, a potem przekaż jego odpowiedź subowi. Nie zostawiaj pytania bez reakcji.',
   'prompt.dt.rule.art_todo_default': 'Zadanie na 3+ kroków → od razu todo (lista kroków) i odhaczaj po kolei - masz je na oczach, nie gubisz wątku.',
   'prompt.dt.rule.art_hierarchy': 'Proponujesz plan/dokument do zatwierdzenia przez usera → artifact_create(typ:"plan", tytul, sekcje z krokami). Powstaje notatka w vaultcie z guzikami akceptacji - user ją przegląda, poprawia i zatwierdza. NIE pisz artefaktów przez write.',
   // `{{user_notes}}` wypełnia `fillSectionNames` (`modules/prompts/decisionTree.ts`) z rejestru

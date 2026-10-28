@@ -2682,6 +2682,11 @@ export const en: Record<string, string> = {
   'mcp.ask_user.param.question': 'Question text for the user.',
   'mcp.ask_user.param.options': 'Suggested answers (2-4 options). No option is preselected; the first is returned only if the user submits without choosing an option or typing an answer. Optional - without them user gets only a text field.',
   'mcp.ask_user.param.context': 'Short description of question context (why you\'re asking). Optional.',
+  'mcp.ask_user.param.question_id': 'ID of the sub-agent question being passed to the user. Optional.',
+  'chat.sub_question.from': 'Question from {{name}}',
+  'chat.sub_question.task': 'task: {{task}}',
+  'chat.sub_question.answered': '{{name}} asked, I answered',
+  'chat.sub_question.expand': 'expand',
   'mcp.ask_user.no_ui': 'This question could NOT be asked: the conversation is running in the background (the user is on another tab), so nobody saw it and nobody answered. Do NOT guess the answer and do not assume consent. End the turn or ask again once the user is back.',
   'mcp.ask_user.timeout': 'This question got NO answer within 5 minutes - the user did not respond (they may have stepped away or missed the question). Do NOT guess the answer and do not assume consent to any option. End the turn or ask again once the user is back.',
 
@@ -3050,7 +3055,7 @@ Report status → \`gotowy\`. Tell the user 2-3 sentences of essence + where the
   // Artifact section names DO follow the language (`modules/artifacts/artifactSections.ts`).
   'prompt.dt.rule.deleg_escalation': 'ESCALATION: you know → answer; data missing → gather it (tools or delegate); no result → ask_user; user refused → STOP.',
   'prompt.dt.rule.deleg_core': 'A lot of data to gather from the vault/web (searching many files, bulk analysis, synthesis) → delegate. Small things (a single read/search) do yourself.',
-  'prompt.dt.rule.deleg_question': 'When a sub-agent asks a question, answer using sub_agent message with question_id if you know the answer. Otherwise ask the user using ask_user, then relay their answer to the sub-agent. Do not leave the question unanswered.',
+  'prompt.dt.rule.deleg_question': 'When a sub-agent asks a question, answer using sub_agent message with question_id if you know the answer. Otherwise ask the user using ask_user with that question_id, then relay their answer to the sub-agent. Do not leave the question unanswered.',
   'prompt.dt.rule.art_todo_default': 'A task of 3+ steps → a todo right away (the list of steps) and tick them off one by one - you keep them in front of you and do not lose the thread.',
   'prompt.dt.rule.art_hierarchy': 'You are proposing a plan/document for the user to approve → artifact_create(typ:"plan", tytul, sekcje with the steps). A note with approval buttons appears in the vault - the user reviews it, corrects it and approves it. Do NOT write artifacts through write.',
   // `{{user_notes}}` is filled by `fillSectionNames` (`modules/prompts/decisionTree.ts`) from the

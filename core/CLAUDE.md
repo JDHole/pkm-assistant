@@ -1,5 +1,7 @@
 # core/
 
+Reguła delegacji instruuje prowadzącego, aby przy przekazaniu pytania suba przez `ask_user` podał `question_id`.
+
 Tłumaczenia i18n obejmują komunikaty odpowiedzi na pytanie suba, wygaśnięcia
 pytania oraz niedostępnego kanału do prowadzącego.
 
