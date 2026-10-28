@@ -11,6 +11,7 @@ import {
     isOwnerTabActive,
 } from './turnOwner.js';
 import { _switchTab } from './chat_tabs.js';
+import { _createRollingWindow } from './chat_session.js';
 import { AgentMemory } from '../../memory/index.js';
 import { RollingWindow } from './RollingWindow.js';
 
@@ -244,16 +245,40 @@ test('onMemoryCandidates maluje notę, gdy zakładka właściciela jest aktywna'
     t.is(seen.tokenPanelUpdates, 1);
 });
 
-// `_createRollingWindow` (chat_session.ts) importuje `obsidian` — strażnik PO ŹRÓDLE, wzór
-// `stopSemantics.test.ts`.
-test('chat_session._createRollingWindow gate’uje onSummarized/onToolsTrimmed przez isOwnerTabActive', t => {
-    const src = readFileSync(fileURLToPath(new URL('./chat_session.ts', import.meta.url)), 'utf8');
-    const head = /onSummarized:[\s\S]*?\.\.\.buildOwnerWindowOptions/.exec(src);
-    t.true(!!head, 'nie znalazłem bloku onSummarized/onToolsTrimmed w _createRollingWindow');
-    const block = head![0];
-    t.regex(block, /isOwnerTabActive\(this, ownerAgentName\)/g);
-    // Dwa wystąpienia — jedno per callback.
-    t.is((block.match(/isOwnerTabActive\(/g) || []).length, 2);
+test('callbacki RollingWindow rozróżniają rozmowy tego samego agenta i przeżywają zmianę klucza', async t => {
+    const { manager, written } = makeManager();
+    const { view, seen } = makeView(manager, { chatTabs: [
+        { agentName: 'A', sessionPath: 'a.md', isActive: false },
+        { agentName: 'A', sessionPath: 'b.md', isActive: true },
+    ] });
+    const receiver: Runtime = view;
+    const rendered: string[] = [];
+    receiver._renderCompressionBlock = (summary: string) => { rendered.push(`summary:${summary}`); };
+    receiver._renderTrimBlock = (info: { trimmed: number }) => { rendered.push(`trim:${info.trimmed}`); };
+    const a = _createRollingWindow.call(receiver, 'A');
+    const b = _createRollingWindow.call(receiver, 'A');
+    receiver.rollingWindow = b;
+    const trimInfo = { trimmed: 1, details: [], savedChars: 20, tokensBefore: 30, tokensAfterTrim: 10, totalTrimmed: 1 };
+
+    a.onSummarized!('A w tle', 1, 2, false);
+    a.onToolsTrimmed!(trimInfo);
+    await a.onMemoryCandidates!([{ name: 'background', type: 'project_context', content: 'fakt A',
+        description: 'Fakt z rozmowy A', why: 'Kontekst projektu', how_to_apply: 'Przy dalszej pracy' }]);
+    t.deepEqual({ rendered, notes: seen.savedNotes, panels: seen.tokenPanelUpdates },
+        { rendered: [], notes: [], panels: 0 });
+    t.deepEqual(written.map(entry => entry.agent), ['A'], 'zapis pamięci okna w tle nadal dochodzi');
+
+    receiver.chatTabs[0].isActive = true;
+    receiver.chatTabs[0].sessionPath = 'a-now.md';
+    receiver.chatTabs[0].sessionId = 'new-key';
+    receiver.chatTabs[1].isActive = false;
+    receiver.rollingWindow = a;
+    a.onSummarized!('A na wierzchu', 2, 2, false);
+    a.onToolsTrimmed!(trimInfo);
+    await a.onMemoryCandidates!([{ name: 'foreground', type: 'project_context', content: 'drugi fakt A',
+        description: 'Drugi fakt z rozmowy A', why: 'Kontekst projektu', how_to_apply: 'Przy dalszej pracy' }]);
+    t.deepEqual({ rendered, notes: seen.savedNotes, panels: seen.tokenPanelUpdates },
+        { rendered: ['summary:A na wierzchu', 'trim:1'], notes: [1], panels: 3 });
 });
 
 test('brak pamięci dla nazwanego właściciela = zero zapisów (fail-closed)', async t => {
@@ -380,11 +405,33 @@ test('freezeTurnOwner: ścieżka sesji to sesja właściciela z chwili startu tu
     bundle.memories.A.activeSessionPath = 'sessions/active/A-teraz.md';
     bundle.memories.B.activeSessionPath = 'sessions/active/B-teraz.md';
     const { view, switchTab } = makeTabbedView(bundle.manager, bundle);
+    view.chatTabs[0].sessionPath = 'sessions/active/A-zakladka.md';
+    view.chatTabs[0].sessionEpoch = 'epoch-tab';
+    bundle.memories.A.sessionEpoch = 'epoch-inny-widok';
 
     const owner = freezeTurnOwner(view);
     switchTab('B');
+    view.chatTabs[0].sessionPath = 'sessions/active/A-nowa.md';
+    view.chatTabs[0].sessionEpoch = 'epoch-new';
 
-    t.is(owner.sessionPath, 'sessions/active/A-teraz.md');
+    t.deepEqual({ path: owner.sessionPath, epoch: owner.sessionEpoch },
+        { path: 'sessions/active/A-teraz.md', epoch: 'epoch-inny-widok' });
+});
+
+test('freezeTurnOwner: tożsamość sesji pochodzi z pamięci po zapisie', t => {
+    const bundle = makeManager();
+    bundle.state.active = 'A';
+    bundle.memories.A.activeSessionPath = 'sessions/active/other-view.md';
+    bundle.memories.A.sessionEpoch = 'epoch-other-view';
+    const { view } = makeTabbedView(bundle.manager, bundle);
+    const legacy = freezeTurnOwner(view);
+    view.chatTabs[0].sessionPath = undefined;
+    const fresh = freezeTurnOwner(view);
+    view.chatTabs = [];
+    const withoutTabs = freezeTurnOwner(view);
+    t.deepEqual([legacy, fresh, withoutTabs].map(owner => [owner.sessionPath, owner.sessionEpoch]), [
+        ['sessions/active/other-view.md', 'epoch-other-view'], ['sessions/active/other-view.md', 'epoch-other-view'], ['sessions/active/other-view.md', 'epoch-other-view'],
+    ]);
 });
 
 test('freezeTurnOwner: nieznany agent nie dostaje cudzej pamięci (fail-closed)', t => {
@@ -392,12 +439,14 @@ test('freezeTurnOwner: nieznany agent nie dostaje cudzej pamięci (fail-closed)'
     bundle.agents.Duch = { name: 'Duch' }; // profil jest, wpisu w agentMemories brak
     bundle.state.active = 'Duch';
     const { view } = makeTabbedView(bundle.manager, bundle);
+    view.chatTabs[0].sessionEpoch = 'epoch-cudzej-zakladki';
 
     const owner = freezeTurnOwner(view);
 
     t.is(owner.agentName, 'Duch');
     t.is(owner.memory, null, 'brak pamięci = odmowa, a nie katalog sąsiada');
     t.is(owner.sessionPath, '');
+    t.is(owner.sessionEpoch, null);
 });
 
 test('freezeTurnOwner: pusty widok nie wybucha', t => {

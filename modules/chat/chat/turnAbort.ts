@@ -19,7 +19,7 @@
 
 /** Uchwyt przerwania JEDNEJ tury. Zatrzask: raz podniesiona flaga już nie gaśnie. */
 // `export` zdjęty na trzech typach w tym pliku — zero referencji
-// spoza pliku; funkcje, które je noszą w sygnaturze (`createTurnAbort`, `collectTurnsToStop`, …),
+// spoza pliku; funkcje, które je noszą w sygnaturze (`createTurnAbort`, …),
 // zostają publiczne.
 export interface TurnAbortHandle {
     /** Czy ta tura została przerwana (Stop / watchdog / zamknięcie widoku). */
@@ -47,34 +47,6 @@ export function createTurnAbort(): TurnAbortHandle {
             return true;
         },
     };
-}
-
-/** Minimalny widok wpisu `_streamCtxMap`, jakiego potrzebuje zatrzymywanie tur. */
-interface AbortableTurnCtx {
-    agentName?: string | null;
-    abort?: TurnAbortHandle | null;
-}
-
-/**
- * Nazwy agentów WSZYSTKICH tur w locie — także tych na zakładkach w tle.
- *
- * Pytanie o jedno pole widoku (`is_generating`) nie wystarcza: przełączenie zakładki nadpisuje
- * je stanem zakładki DOCELOWEJ — więc tura z zakładki w tle przeżyłaby zamknięcie panelu
- * (a rozbrojenie jej watchdoga, ostatniego strażnika, trafiłoby w niewłaściwą turę).
- * Zamykamy PO WŁAŚCICIELACH TUR, nie po tym, kto akurat jest na wierzchu.
- *
- * @returns unikalne, niepuste nazwy w kolejności wpisów (kopia — wołacz kasuje wpisy w trakcie)
- */
-export function collectTurnsToStop(entries: Iterable<AbortableTurnCtx> | null | undefined): string[] {
-    const out: string[] = [];
-    const seen = new Set<string>();
-    for (const ctx of entries || []) {
-        const name = typeof ctx?.agentName === 'string' ? ctx.agentName.trim() : '';
-        if (!name || seen.has(name)) continue;
-        seen.add(name);
-        out.push(name);
-    }
-    return out;
 }
 
 /** Minimalny widok biegu suba (`SubTask`) — tyle, ile trzeba, żeby zdecydować „to nasz bieg". */

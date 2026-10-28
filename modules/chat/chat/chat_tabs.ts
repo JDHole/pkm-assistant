@@ -11,7 +11,7 @@ import { DEFAULT_BOTTOM_BAR_MODE } from './todoPanel.js';
 // Zamknięcie zakładki zatrzymuje też JEJ suby - po tym samym adresie zwrotnym, co
 // zamknięcie całego panelu (`stop_all_turns`).
 import { collectSubTaskIdsForOwners } from './turnAbort.js';
-import { evaluateStopQueueCancel, readQueuedMessage } from './queuedMessage.js';
+import { readQueuedMessage } from './queuedMessage.js';
 // Receiver mixina = ZŁOŻONY widok (`ChatViewLike`: klasa + osiem paczek mixinów). Cykl typów
 // chatViewShape ↔ mixin jest legalny i znika w buildzie (`import type`).
 import type { ChatTab, ChatViewLike } from './chatViewShape.js';
@@ -256,38 +256,21 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
     const agentName = tab?.agentName;
     // Tylko gdy ta zakładka NAPRAWDĘ coś trzyma — `stop_generation` czyści stan streamingu
     // i podnosi `_drainSuppressed`, więc na cichej zakładce byłoby to szkodliwe.
-    const preparing = this._preparingTurns?.get(tabKey);
-    preparing?.abort('close_tab');
-    const stream = agentName ? this._streamCtxMap?.get(agentName) : undefined;
-    const wLocie = !!stream && stream.rollingWindow === this.rollingWindow;
     const queued = this._queuedMessage;
     const queueTabKey = readQueuedMessage(queued)?.owner?.tabKey;
     const ownQueue = !queueTabKey || queueTabKey === tabKey;
-    if (wLocie) {
+    const turnKeys = [...new Set([...this._streamCtxMap.entries(), ...this._preparingTurns.entries()]
+        .filter(([key, ctx]) => ctx.tab === tab || (key === tabKey && !ctx.tab)).map(([key]) => key))];
+    for (const key of turnKeys) this._preparingTurns.get(key)?.abort.abort('close_tab');
+    for (const turnKey of turnKeys) {
         try {
             if (!ownQueue) this._queuedMessage = null;
-            this.stop_generation(agentName, 'close_tab');
+            this.stop_generation(turnKey, 'close_tab');
         } catch (e) {
             log.warn('Chat', `Zatrzymanie tury zamykanej zakładki padło (zamykamy dalej): ${(e as Error)?.message || String(e)}`);
         } finally {
             if (!ownQueue) this._queuedMessage = queued;
         }
-    } else if (preparing) {
-        // Strumień tego samego agenta może należeć do innej zakładki.
-        // Sprzątamy tylko aktywny widok, bez zatrzymywania tamtego strumienia.
-        this._drainSuppressed = true;
-        this._clearQueuedDrainTimer();
-        const cancel = evaluateStopQueueCancel(ownQueue ? this._queuedMessage : null, this.input_area?.value);
-        if (cancel.clearSlot) {
-            this._queuedMessage = null;
-            if (cancel.restoreText !== null) {
-                this.input_area.value = cancel.restoreText;
-                this.handleInputResize?.();
-            }
-        }
-        this._hideQueuedIndicator();
-        this.hideTypingIndicator();
-        this.set_generating(false);
     }
 
     // Suby zlecone Z TEJ zakładki — po adresie zwrotnym (`origin`), jak w `stop_all_turns`.
@@ -296,7 +279,7 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
     if (!registry) return;
     try {
         registry.closeQueuedForOwners?.({
-            tabKeys: [tabKey],
+            tabKeys: [...new Set([tabKey, ...turnKeys])],
             agentNames: agentName ? [agentName] : [],
         }, 'system');
     } catch (e) {
@@ -305,7 +288,7 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
     if (!registry.list || !registry.requestStop) return;
     try {
         const ids = collectSubTaskIdsForOwners(registry.list(), {
-            tabKeys: [tabKey],
+            tabKeys: [...new Set([tabKey, ...turnKeys])],
             ...(agentName ? { agentNames: [agentName] } : {}),
         });
         for (const id of ids) {

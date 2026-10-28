@@ -10,6 +10,7 @@
 import test from 'ava';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
+import { _releaseStreamCtx } from './chat_streaming.js';
 
 const readSource = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 
@@ -32,12 +33,8 @@ const streamingCode = stripComments(streaming);
 
 // ── _agentStates kluczowana _tabKey, nie nazwą agenta ───────────────────────────────────────
 //
-// `_tabKey(turn.owner?.tab)` przeliczony w miejscu sprzątania (finalize/error/watchdog) czyta
-// ŻYWE pole `tab.sessionPath` - a `/save session` → „Archiwizuj i nowa sesja" (`archive_new`,
-// `slash-commands/save_session.ts`) podmienia `activeTab.sessionPath` NA MIEJSCU, bez
-// re-keyowania `_agentStates`. Klucz musi być zamrożony RAZ, na starcie tury (`ownerTabKey`
-// w `send_message`, wożony dalej jako `turn.origin.tabKey` albo wprost jako string do
-// `handle_error`), nie przeliczany leniwie po (czasem długich) awaitach.
+// Klucz uchwytu tury jest zamrożony na starcie. Stan generowania należy do obiektu
+// zakładki i po wymianie rozmowy może leżeć pod jej nowym kluczem.
 
 test('send_message liczy ownerTabKey RAZ, zaraz po freezeTurnOwner', t => {
     const body = bodyOf(streaming, 'send_message');
@@ -56,26 +53,16 @@ test('turnOrigin.tabKey reużywa ownerTabKey zamiast przeliczać _tabKey drugi r
     t.regex(body, /tabKey:\s*ownerTabKey/, 'turnOrigin powinien wozić ownerTabKey, nie osobne przeliczenie _tabKey(turnTab)');
 });
 
-test('_finalizeTurn (tura w tle): zwalnia stan zakładki przez zamrożony turn.origin.tabKey', t => {
-    const body = bodyOf(streaming, '_finalizeTurn');
-    t.true(body.length > 0, 'nie znalazłem _finalizeTurn');
-    t.regex(body, /this\._agentStates\.get\(turn\.origin\?\.tabKey \?\? ''\)/,
-        '_agentStates musi być czytana zamrożonym turn.origin.tabKey, nie przeliczonym _tabKey(turn.owner?.tab)');
-    t.notRegex(body, /this\._agentStates\.get\(streamAgentName\)/,
-        'powrót do klucza-nazwy = zakładka odtworzona z dysku (sessionId=ścieżka) znów wisi na "generuję"');
-    t.notRegex(body, /this\._agentStates\.get\(_tabKey\(turn\.owner\?\.tab\)\)/,
-        'przeliczenie leniwe po awaitach = archive_new podmienia tab.sessionPath pod nogami tego lookupu');
-});
-
-test('handle_error (tura w tle): przyjmuje KLUCZ (string), nie obiekt taba, i zwalnia stan przez niego', t => {
-    const body = bodyOf(streaming, 'handle_error');
-    t.true(body.length > 0, 'nie znalazłem handle_error');
-    t.regex(streamingCode, /export function handle_error\([^)]*ownerTabKey\?:\s*string\)/,
-        'sygnatura handle_error musi przyjmować ownerTabKey jako string, nie obiekt tab');
-    t.regex(body, /this\._agentStates\.get\(ownerTabKey \?\? ''\)/,
-        'handle_error musi czytać _agentStates przez ownerTabKey (string) podany przez wołacza');
-    t.notRegex(body, /this\._agentStates\.get\(streamAgentName\)/);
-    t.notRegex(body, /_tabKey\(ownerTab\)/, 'stara sygnatura (obiekt tab + przeliczenie _tabKey tu) nie ma wrócić');
+test('zwolnienie ostatniej tury zmienia bieżący stan zakładki, nie stan innej tury', t => {
+    const tab = { agentName: 'Owner', sessionId: 'q.md', isActive: false };
+    const oldWindow = {}; const q = { rollingWindow: {}, isGenerating: true };
+    const ctx: any = { chatTabs: [tab], _agentStates: new Map([['q.md', q]]), _preparingTurns: new Map(), _streamCtxMap: new Map([
+        ['old.md', { tab, rollingWindow: oldWindow, turnId: 1 }], ['other.md', { tab, rollingWindow: {}, turnId: 2 }],
+    ]) };
+    _releaseStreamCtx.call(ctx, 'old.md', 1);
+    t.true(q.isGenerating);
+    _releaseStreamCtx.call(ctx, 'other.md', 2);
+    t.false(q.isGenerating);
 });
 
 test('send_message przekazuje ownerTabKey (string, zamrożony) do handle_error', t => {
@@ -83,32 +70,6 @@ test('send_message przekazuje ownerTabKey (string, zamrożony) do handle_error',
         'bez czwartego argumentu handle_error nie wie, którą zakładkę zwolnić w _agentStates');
     t.notRegex(streamingCode, /this\.handle_error\(error, streamAgentName, turnId, owner\.tab\)/,
         'przekazanie obiektu tab zamiast zamrożonego stringa = handle_error znów przelicza klucz leniwie');
-});
-
-test('_onStreamStall (tura w tle): zwalnia stan przez zamrożony turn.origin.tabKey', t => {
-    const body = bodyOf(streaming, '_onStreamStall');
-    t.true(body.length > 0, 'nie znalazłem _onStreamStall');
-    t.regex(body, /this\._agentStates\.get\(turn\.origin\?\.tabKey \?\? ''\)/);
-    t.notRegex(body, /this\._agentStates\.get\(agentName\)/);
-    t.notRegex(body, /this\._agentStates\.get\(_tabKey\(turn\.owner\?\.tab\)\)/,
-        'watchdog strzela nawet po kilku minutach ciszy - największe okno na archive_new pod nogami');
-});
-
-// ── strażnik file-wide: KAŻDE _agentStates.get(...) w całym pliku czyta zamrożony klucz ────
-//
-// Wolno tylko `turn.origin?.tabKey ?? ''` i `ownerTabKey ?? ''` (allowlist, nie notRegex na
-// pojedynczy zły kształt) - inaczej strażnik złapie tylko wzorce, o których pomyśleliśmy dziś,
-// a przyszły nowy odczyt po nazwie agenta albo po żywym `_tabKey(tab)` przemknie bez testu.
-
-test('CAŁY plik: każde _agentStates.get(...) czyta wyłącznie zamrożony klucz (file-wide)', t => {
-    const calls = [...streamingCode.matchAll(/this\._agentStates\.get\(([^)]*)\)/g)].map(m => m[1].trim());
-    t.true(calls.length >= 3, `spodziewałem się co najmniej 3 odczytów _agentStates.get(...) w pliku, znalazłem ${calls.length}`);
-    const allowed = new Set(["turn.origin?.tabKey ?? ''", "ownerTabKey ?? ''"]);
-    for (const call of calls) {
-        t.true(allowed.has(call),
-            `this._agentStates.get(${call}) - dozwolone WYŁĄCZNIE zamrożone klucze (${[...allowed].join(' | ')}); ` +
-            `każdy inny kształt (nazwa agenta, _tabKey(tab) przeliczony na żywo) rozjeżdża się z zakładką pod nogami`);
-    }
 });
 
 // ── estymata wejścia żyje W TURZE, nie na widoku ────────────────────────────────────────────

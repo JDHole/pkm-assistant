@@ -234,6 +234,7 @@ export interface ChatTabState {
  * w `send_message`; tutaj leży tylko to, co czytają INNE metody widoku.
  */
 export interface ChatStreamContext {
+    tab: ChatTab | null;
     agentName: string;
     agent: Agent | null;
     rollingWindow: RollingWindow;

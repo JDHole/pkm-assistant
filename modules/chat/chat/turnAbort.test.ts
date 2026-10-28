@@ -7,7 +7,7 @@
  *   3. suby zlecone z zamykanej zakładki są rozpoznawane po adresie zwrotnym, a cudze nie.
  */
 import test from 'ava';
-import { createTurnAbort, collectTurnsToStop, collectSubTaskIdsForOwners } from './turnAbort.js';
+import { createTurnAbort, collectSubTaskIdsForOwners } from './turnAbort.js';
 
 // ─── 1. Uchwyt tury ──────────────────────────────────────────────────────────
 
@@ -43,32 +43,6 @@ test('nowa tura NIE gasi przerwania tury poprzedniej', (t) => {
     const nowa = createTurnAbort(); // user pisze kolejną wiadomość
     t.false(nowa.isAborted(), 'nowa tura startuje czysta');
     t.true(stara.isAborted(), 'stara tura ZOSTAJE przerwana mimo startu nowej');
-});
-
-// ─── 2. Zamknięcie widoku: wszystkie tury ────────────────────────────────────
-
-test('zbieramy WSZYSTKIE tury w locie, nie tylko aktywną zakładkę', (t) => {
-    const mapa = new Map([
-        ['Borys', { agentName: 'Borys', abort: createTurnAbort() }],
-        ['Jaskier', { agentName: 'Jaskier', abort: createTurnAbort() }],
-    ]);
-    t.deepEqual(collectTurnsToStop(mapa.values()), ['Borys', 'Jaskier']);
-});
-
-test('collectTurnsToStop: puste nazwy i duplikaty wypadają', (t) => {
-    const wpisy = [
-        { agentName: 'Borys' },
-        { agentName: '  ' },
-        { agentName: 'Borys' },
-        { agentName: null },
-        { agentName: 'Wera' },
-    ];
-    t.deepEqual(collectTurnsToStop(wpisy), ['Borys', 'Wera']);
-});
-
-test('collectTurnsToStop: brak wpisów = pusta lista (zamknięcie bezczynnego czatu nic nie robi)', (t) => {
-    t.deepEqual(collectTurnsToStop(null), []);
-    t.deepEqual(collectTurnsToStop([]), []);
 });
 
 // ─── 3. Suby zlecone z zamykanej zakładki ────────────────────────────────────

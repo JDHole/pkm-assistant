@@ -192,8 +192,13 @@ export function isOwnerTabActive(view: { chatTabs?: OwnerTabLike[] } | null | un
  *
  * @param view - odbiorca mixinów ChatView (`_getMinionModel`, `_buildEmergencyTaskContext`, …)
  * @param ownerName - nazwa agenta zakładki, do której należy to okno
+ * @param isOwnerActive - bramka konkretnego okna dla callbacków malujących do widoku
  */
-export function buildOwnerWindowOptions(view: OwnerViewLike, ownerName: string | null) {
+export function buildOwnerWindowOptions(
+    view: OwnerViewLike,
+    ownerName: string | null,
+    isOwnerActive: () => boolean = () => isOwnerTabActive(view, ownerName),
+) {
     const am = (): OwnerManagerLike => view?.plugin?.agentManager;
     // Szkielet kompresji rozstrzygany raz, przy zakładaniu okna (agent>global>factory).
     const compressionPrompt = resolveWorkPrompt(
@@ -219,10 +224,10 @@ export function buildOwnerWindowOptions(view: OwnerViewLike, ownerName: string |
         emergencyContextProvider: () => view._buildEmergencyTaskContext(ownerName),
         onMemoryCandidates: async (candidates: BrainNoteInput[]) => {
             const saved = await saveMemoryCandidatesFor(am(), ownerName, candidates);
-            // Nota „N kandydatów czeka" jest DOM-em jednego widoku — malujemy
-            // ją tylko, gdy zakładka właściciela jest akurat na wierzchu (patrz `isOwnerTabActive`).
-            if (saved > 0 && isOwnerTabActive(view, ownerName)) view._renderMemorySavedNote(saved);
-            if (isOwnerTabActive(view, ownerName)) view._updateTokenPanel?.();
+            // Produkcyjny caller wiąże bramkę z konkretnym RollingWindow: dwie zakładki
+            // tego samego agenta dzielą pamięć, ale nie kontener rozmowy ani licznik tokenów.
+            if (saved > 0 && isOwnerActive()) view._renderMemorySavedNote(saved);
+            if (isOwnerActive()) view._updateTokenPanel?.();
         },
     };
 }
@@ -280,6 +285,7 @@ export function freezeTurnOwner(view: FreezeViewLike): FrozenTurnOwner {
         ? resolveOwnerMemory(agentManager, agentName)
         : (agentManager?.getActiveMemory?.() || null);
     const tabs = Array.isArray(view?.chatTabs) ? view.chatTabs : [];
+    const tab = tabs.find((tab) => tab?.isActive) || null;
     return {
         agentName,
         agent,
@@ -288,7 +294,7 @@ export function freezeTurnOwner(view: FreezeViewLike): FrozenTurnOwner {
         memory,
         sessionPath: memory?.activeSessionPath || '',
         sessionEpoch: memory?.sessionEpoch ?? null,
-        tab: tabs.find((tab) => tab?.isActive) || null,
+        tab,
         autonomy: view?.currentAutonomy,
         artifactId: view?.currentArtifactId ?? null,
     };

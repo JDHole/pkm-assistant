@@ -407,6 +407,20 @@ test.serial('druga sesja tego samego agenta działa, gdy zapis pytania pierwszej
     t.is(f.view._preparingTurns.size, 0);
 });
 
+test.serial('zamknięcie zakładki po zmianie klucza zatrzymuje starą i przygotowywaną turę', async t => {
+    const f = concurrentFixture();
+    t.teardown(() => { f.release(); f.notifier.dispose(); f.registry.dispose(); });
+    const stopped: string[] = [];
+    let aborted = false;
+    f.view._streamCtxMap.set('stary-klucz', { tab: f.tab });
+    f.view._preparingTurns.set('tab', { tab: f.tab, abort: { abort() { aborted = true; } } });
+    Object.assign(f.view, { stop_generation: (key: string) => { stopped.push(key); },
+        handleSaveSession: async () => {}, _switchTab: async () => {} });
+    await _closeActiveTab.call(f.view as never);
+    t.true(aborted);
+    t.deepEqual(stopped.sort(), ['stary-klucz', 'tab']);
+});
+
 test.serial('zamknięcie przygotowywanej zakładki nie przerywa drugiej sesji agenta', async t => {
     const f = concurrentFixture();
     t.teardown(() => { f.release(); f.notifier.dispose(); f.registry.dispose(); streamingManager.stopStream('question-concurrent::Jaskier'); });
