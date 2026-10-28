@@ -3,7 +3,7 @@ import { SubTaskNotifier, SubTaskRegistry } from '../../sub-agents/index.js';
 import { QuestionTestClock } from '../../sub-agents/test-support/questionTestClock.js';
 import { _chatExecuteToolCall, _deliverSubTaskQuestion, send_message, stop_all_turns, stop_generation, _releaseStreamCtx, _queueOwner, _clearQueuedDrainTimer, set_generating, _finalizeTurn } from './chat_streaming.js';
 import { append_message } from './chat_messages.js';
-import { _closeActiveTab, _switchTab } from './chat_tabs.js';
+import { _closeActiveTab, _initTabs, _switchTab } from './chat_tabs.js';
 import { RollingWindow } from './RollingWindow.js';
 import streamingManager from './StreamingManager.js';
 import { buildSubTaskResultDelivery } from './subTaskResultDelivery.js';
@@ -228,6 +228,30 @@ function concurrentFixture() {
     });
     return { ...f, view, a, b, tabB, memory, saving, release, events, toolOwners, modelCalls: () => modelCalls };
 }
+
+test.serial('zamknięcie odtworzonej zakładki anuluje kolejkę utworzoną bez zakładki', async t => {
+    const f = concurrentFixture();
+    t.teardown(() => { f.release(); f.notifier.dispose(); f.registry.dispose(); });
+    const streamWindow = f.view.rollingWindow;
+    Object.assign(f.view, {
+        chatTabs: [], is_generating: true, input_area: { value: 'W kolejce' },
+        _streamCtxMap: new Map([['Jaskier', { rollingWindow: streamWindow, abort: new AbortController() }]]),
+        _queueOwner, _clearQueuedDrainTimer, _releaseStreamCtx, stop_generation,
+        _showQueuedIndicator() {}, _hideQueuedIndicator() {}, handleInputResize() {},
+        _resetPaintTargets() {}, hideTypingIndicator() {}, set_generating(value: boolean) { this.is_generating = value; },
+        _createRollingWindow: () => new RollingWindow(), handleSaveSession: async () => {},
+        render_messages() {}, add_welcome_message() {}, updateTokenCounter() {}, _updateTokenPanel() {},
+    });
+
+    await send_message.call(f.view as never, { meta: { origin: 'human' } });
+    t.deepEqual(_queueOwner.call(f.view as never), { agentName: '', tabKey: '' });
+    t.is(f.view.input_area.value, '');
+    _initTabs.call(f.view as never);
+    await _closeActiveTab.call(f.view as never);
+
+    t.deepEqual({ queue: (f.view as unknown as { _queuedMessage: unknown })._queuedMessage, input: f.view.input_area.value },
+        { queue: null, input: 'W kolejce' });
+});
 
 test.serial('zamknięcie ostatniej zakładki podczas budowy promptu pozwala od razu wysłać kolejną wiadomość', async t => {
     const f = concurrentFixture();

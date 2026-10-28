@@ -1560,7 +1560,7 @@ wiadomość tylko w sesji właściciela podczas przygotowania; po przekazaniu do
 nie blokuje innych sesji.
 
 Przy zamknięciu zakładki uchwyt jej przygotowania jest przerywany po kluczu zakładki.
-Zamknięcie zakładki anuluje tylko kolejkę wiadomości należącą do tej zakładki.
+Zamknięcie zakładki anuluje kolejkę wiadomości bez klucza właściciela lub z kluczem tej zakładki; kolejka z kluczem innej zakładki pozostaje.
 Kontekst aktywnego strumienia nadal jest jednak kluczowany nazwą agenta: dwie równoległe
 tury tego samego agenta mogą nadpisać swój kontekst. Ta ścieżka wymaga dalszej poprawki.
 

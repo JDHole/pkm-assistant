@@ -261,7 +261,8 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
     const stream = agentName ? this._streamCtxMap?.get(agentName) : undefined;
     const wLocie = !!stream && stream.rollingWindow === this.rollingWindow;
     const queued = this._queuedMessage;
-    const ownQueue = readQueuedMessage(queued)?.owner?.tabKey === tabKey;
+    const queueTabKey = readQueuedMessage(queued)?.owner?.tabKey;
+    const ownQueue = !queueTabKey || queueTabKey === tabKey;
     if (wLocie) {
         try {
             if (!ownQueue) this._queuedMessage = null;
