@@ -147,7 +147,7 @@ test.serial('resultView omits empty sections; legacy remains available', t => {
 test.serial('resultView displays an unanswered question', t => {
     withFakeDocument(() => {
         const row = createSubAgentBlock({ type: 'delegate', resultView: {
-            title: 'Result worker', status: 'error', missingTargets: [], effects: [], notes: [], openQuestion: 'Which note?',
+            title: 'Result worker', badge: 'no answer', status: 'error', missingTargets: [], effects: [], notes: [], openQuestion: 'Which note?',
         } }) as unknown as FakeEl;
         t.is(findByClass(row, 'cs-tile__badge')?.textContent, 'no answer');
         findByClass(row, 'cs-tile__head')!.fire('click');
