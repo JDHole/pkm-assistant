@@ -65,6 +65,8 @@ Runner dodaje lokalne `ask_parent` subowi pierwszego piętra (głębokość 1, a
 
 Opcjonalne `question.note` to dokładny prefiks dodany przez runnera do handoffu, po maskowaniu i przycięciu, bez separatora. Pole nie występuje, gdy nie dodano notki; typ `TerminalQuestion` eksportuje barrel. Snapshot przechowuje pytanie strukturalnie, bez dopisywania zdania o nim do `partial.text`, które może być użyte jako dorobek przy pustym handoffie.
 
+`ask_parent` normalizuje CRLF i samotne CR do LF przed otwarciem pytania. Zapis zdarzenia partialu zawiera także strukturalne `question` snapshotu.
+
 **Publiczne drzwi modułu:** klasy runtime + helpery widoczności/migracji.
 
 | Export | Po co |

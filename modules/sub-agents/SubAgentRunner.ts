@@ -709,7 +709,7 @@ export class SubAgentRunner {
                             failedToolCalls.add(seq);
                             return t('subagent.ask_parent_unavailable');
                         }
-                        const text = args && typeof args === 'object' && 'text' in args && typeof args.text === 'string' ? args.text : '';
+                        const text = (args && typeof args === 'object' && 'text' in args && typeof args.text === 'string' ? args.text : '').replace(/\r\n?/g, '\n');
                         const opened = subTask && registry ? _safeRegistry(() => registry.openParentQuestion(subTask!.id, text)) : undefined;
                         if (!opened || opened.kind === 'rejected') {
                             failedToolCalls.add(seq);
@@ -761,6 +761,7 @@ export class SubAgentRunner {
                             await memory.appendSessionEvent(origin.sessionPath, {
                                 type: 'agent_loop_partial', role: 'system', agentName: origin.agentName,
                                 content: t('subagent.partial_header', { name: config.name }) + '\n\n' + snapshot.text,
+                                question: (snapshot as AgentLoopPartialSnapshot & { question?: { text: string; resolution: QuestionResolution } }).question,
                                 result: { owner: origin, run: subTask?.id || label, revision: snapshot.revision, snapshot },
                             }, origin.sessionEpoch ?? null);
                         }).catch(() => {

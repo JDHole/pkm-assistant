@@ -85,6 +85,24 @@ test('odpowiedź wraca do tego samego transkryptu', async t => {
     f.registry.dispose();
 });
 
+test('ask_parent normalizuje CRLF i samotne CR przed zapisaniem pytania', async t => {
+    const f = fixture();
+    let ready!: () => void;
+    const waiting = new Promise<void>(resolve => { ready = resolve; });
+    const model = { stream(_payload: unknown, cb: { done(value: unknown): void }) {
+        cb.done(response({ role: 'assistant', content: '', tool_calls: [{ ...questionCall, function: { ...questionCall.function, arguments: JSON.stringify({ text: 'First?\r\n\r\nSecond?\rThird?' }) } }] }));
+    } };
+    const run = f.runner.runTask('zadanie', { name: 'Jaskier' }, { name: 'Klara', tools: [] } as never, model as never,
+        { origin: owner, onActivity: activity => { if (activity.kind === 'waiting') ready(); } });
+    await waiting;
+    const state = f.registry.getQuestionState(f.registry.list()[0].id);
+    t.is(state.kind === 'waiting' ? state.question.text : '', 'First?\n\nSecond?\nThird?');
+    f.clock.advance(300000);
+    const result = await run;
+    t.is(result.question?.text, 'First?\n\nSecond?\nThird?');
+    f.registry.dispose();
+});
+
 for (const mode of ['no-answer', 'stop'] as const) {
     test(mode === 'stop' ? 'Stop w oczekiwaniu kończy bieg z pytaniem' : 'brak odpowiedzi zachowuje dorobek bez syntezy', async t => {
         const f = fixture(true);
