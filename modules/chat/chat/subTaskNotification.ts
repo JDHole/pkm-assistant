@@ -156,14 +156,6 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
         parts.push(t('chat.subagent_notification.failed', { error: err }));
     }
 
-    const question = task.result?.question;
-    if (question && question.resolution.kind !== 'answered') {
-        const reason = question.resolution.kind === 'no-answer'
-            ? t('chat.subagent_notification.question_no_answer')
-            : t('chat.subagent_notification.question_cancelled');
-        parts.push(t('chat.subagent_notification.question', { reason, question: question.text }));
-    }
-
     if (outcome?.completeness === 'partial' || outcome?.completeness === 'empty') {
         for (const effect of outcome.effects) {
             const check = effect.outcome === 'unknown' || effect.outcome === 'pending' ? 'unknown' : effect.check === 'matches' ? 'matches' : effect.check === 'mismatch' ? 'mismatch' : 'not_checked';
@@ -172,11 +164,15 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
         }
     }
 
-    const body = parts.join('\n\n');
+    const question = task.result?.question;
+    const questionSection = question && question.resolution.kind !== 'answered'
+        ? t('chat.subagent_notification.question', { reason: t(question.resolution.kind === 'no-answer' ? 'chat.subagent_notification.question_no_answer' : 'chat.subagent_notification.question_cancelled'), question: question.text })
+        : '';
+    const body = parts.join('\n\n') + (questionSection ? `\n\n[SUBTASK_QUESTION ${questionSection.length}]\n${questionSection}\n[/SUBTASK_QUESTION]` : '');
     const instruction = options.subId
         ? `\n\n${t('chat.subagent_notification.reusable_thread', { sub_id: options.subId })}`
         : '';
-    const footerSeparator = options.subId ? '\n\n\n' : '\n\n';
+    const footerSeparator = '\n'.repeat(2 + (options.subId ? 1 : 0) + (questionSection ? 2 : 0));
     return `${body}${instruction}${footerSeparator}${t('chat.subagent_notification.footer')}`;
 }
 

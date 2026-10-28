@@ -24,7 +24,6 @@
  *      zmiana tekstu nagłówka w `pl.ts`/`en.ts` nie rozjechała się cicho z klasyfikatorem.
  */
 import { t } from '../../../core/i18n/index.js';
-import { buildSubTaskResultModel } from '../../sub-agents/index.js';
 import { artifactStatusLabel } from '../../artifacts/index.js';
 import { buildSubAgentResultView } from './subAgentResultView.js';
 import type { BuildSubAgentResultViewInput } from './subAgentResultView.js';
@@ -311,13 +310,13 @@ function subtaskDetails(text: string): { afterHeader: string; details: string } 
         const footer = t(SUBTASK_FOOTER_KEY, undefined, locale);
         if (footer && details.endsWith(footer)) {
             details = details.slice(0, details.length - footer.length);
-            hasReusableInstruction = details.endsWith('\n\n\n');
-            details = details.replace(/\n\n\n?$/, '');
+            const separator = details.match(/\n+$/)?.[0].length || 0;
+            hasReusableInstruction = separator === 3 || separator === 5;
+            details = details.slice(0, details.length - separator);
             break;
         }
     }
-    // Tylko wygenerowana instrukcja ma trzy znaki nowej linii PRZED stopką.
-    // Wynik bez sub_id zawsze ma tam dwa, nawet gdy sam cytuje dokładnie tę instrukcję.
+    // Instrukcja ma trzy znaki nowej linii przed stopką, albo pięć z sekcją pytania.
     if (hasReusableInstruction) {
         const lastSplit = details.lastIndexOf('\n\n');
         const lastParagraph = details.slice(lastSplit + 2);
@@ -451,6 +450,11 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
         const subTaskId = (typeof metaSubTaskId === 'string' && metaSubTaskId)
             || extractSecondVar(text, SUBTASK_HEADER_KEY, ['name', 'task_id'])
             || null;
+        const task = subTaskId ? ctx.getTask?.(subTaskId) : undefined;
+        const taskData = task && typeof task === 'object' ? task as { questionState?: { kind?: unknown; question?: unknown; resolution?: unknown }; result?: { question?: unknown } } : undefined;
+        const taskQuestion = taskData?.questionState?.kind === 'closed'
+            ? { ...(typeof taskData.questionState.question === 'object' && taskData.questionState.question !== null ? taskData.questionState.question : {}), resolution: taskData.questionState.resolution }
+            : taskData?.result?.question;
         // Uwaga 8 (spec A3-fix): details nie powtarza `summary` (linia stanu) jako swój
         // pierwszy akapit - Tile już pokazuje `summary` w nagłówku.
         const dedupedDetails = stripLeadingDuplicate(details, statusLine);
@@ -485,15 +489,9 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
             partialText: typeof structural?.partialText === 'string' ? structural.partialText : typeof storedPartial?.text === 'string' ? storedPartial.text : undefined,
             error: typeof structural?.error === 'string' ? structural.error : undefined,
             effects: Array.isArray(structural?.effects) ? structural.effects as BuildSubAgentResultViewInput['effects'] : undefined,
+            question: structural?.question ?? taskQuestion,
             thread: availableThread(storedThread),
-        }, ctx.t) : buildParsedNotificationResult(text, name, availableThread(reusableInstruction ? { kind: 'reusable', sub_id: reusableInstruction } : { kind: 'unknown' }), ctx.t);
-        if (subAgentResult && structural?.question) {
-            const question = buildSubTaskResultModel({ question: structural.question, thread: { kind: 'unknown' } });
-            if (question.openQuestion !== undefined) {
-                subAgentResult.openQuestion = question.openQuestion;
-                subAgentResult.title = `${name} ${ctx.t(question.endLabelKey)}`;
-            }
-        }
+        }, ctx.t) : buildParsedNotificationResult(text, name, availableThread(reusableInstruction ? { kind: 'reusable', sub_id: reusableInstruction } : { kind: 'unknown' }), ctx.t, taskQuestion);
         return {
             kind,
             title,
@@ -533,8 +531,9 @@ function extractReusableSubId(text: string): string | null {
     const footer = LOCALES.map(locale => t(SUBTASK_FOOTER_KEY, undefined, locale)).find(value => value && details.endsWith(value));
     if (!footer) return null;
     details = details.slice(0, -footer.length);
-    if (!details.endsWith('\n\n\n')) return null;
-    const withoutSeparator = details.slice(0, -3);
+    const separator = details.match(/\n+$/)?.[0].length || 0;
+    if (separator !== 3 && separator !== 5) return null;
+    const withoutSeparator = details.slice(0, -separator);
     const lastParagraph = withoutSeparator.slice(withoutSeparator.lastIndexOf('\n\n') + 2);
     for (const locale of LOCALES) {
         const [prefix, suffix] = templateSegments(SUBTASK_REUSABLE_THREAD_KEY, locale, ['sub_id']);
@@ -545,7 +544,7 @@ function extractReusableSubId(text: string): string | null {
     return null;
 }
 
-function buildParsedNotificationResult(text: string, name: string, thread: SubTaskResultThread, translate: typeof t): SubAgentResultView | undefined {
+function buildParsedNotificationResult(text: string, name: string, thread: SubTaskResultThread, translate: typeof t, taskQuestion?: unknown): SubAgentResultView | undefined {
     const { afterHeader, details: userDetails } = subtaskDetails(text);
     const statusLine = firstParagraph(afterHeader);
     const matchEnd = (keys: string[]): string | undefined => keys.find(key => LOCALES.some(locale => statusLine.includes(translate(key, undefined, locale))));
@@ -565,7 +564,7 @@ function buildParsedNotificationResult(text: string, name: string, thread: SubTa
     ] as const;
     const end = endKinds.find(([key]) => LOCALES.some(locale => statusLine.includes(translate(key, undefined, locale))))?.[1];
     if (!end || !completeness) return undefined;
-    const body = userDetails.slice(userDetails.indexOf('\n\n') + 2).trim();
+    let body = userDetails.slice(userDetails.indexOf('\n\n') + 2).trim();
     const emptyText = LOCALES.map(locale => translate('chat.subagent_notification.empty_result', undefined, locale));
     const boilerplate = [
         ...LOCALES.flatMap(locale => ['chat.subagent_notification.partial', 'chat.subagent_notification.partial_heading'].map(key => translate(key, undefined, locale))),
@@ -576,17 +575,32 @@ function buildParsedNotificationResult(text: string, name: string, thread: SubTa
     // i odtwarzamy wyłącznie stan z jego dedykowanej linii systemowej. Treść może cytować
     // przykłady błędów lub efektów, więc nie klasyfikujemy akapitów jako dane.
     let openQuestion: string | undefined;
-    const paragraphs = body.split('\n\n').map(part => part.trim());
-    for (const locale of LOCALES) {
-        const reason = translate('chat.subagent_notification.question_no_answer', undefined, locale);
-        const [prefix, suffix] = templateSegments('chat.subagent_notification.question', locale, ['reason', 'question']).slice(1);
-        const start = reason + prefix;
-        const paragraph = paragraphs.find(part => part.startsWith(start) && (!suffix || part.endsWith(suffix)));
-        if (paragraph) {
-            openQuestion = paragraph.slice(start.length, suffix ? -suffix.length : undefined);
-            break;
+    let questionResolution: 'no-answer' | 'cancelled' = 'no-answer';
+    const footerBoundary = LOCALES.some(locale => {
+        const footer = translate(SUBTASK_FOOTER_KEY, undefined, locale);
+        return text.endsWith(`\n\n\n\n${footer}`) || text.endsWith(`\n\n\n\n\n${footer}`);
+    });
+    if (completionValue !== 'unconfirmed' && footerBoundary) {
+        const marker = body.lastIndexOf('\n\n[SUBTASK_QUESTION ');
+        const section = marker >= 0 ? body.slice(marker + 2) : '';
+        const header = /^\[SUBTASK_QUESTION (\d+)\]\n/.exec(section);
+        const endMarker = '\n[/SUBTASK_QUESTION]';
+        if (header && section.endsWith(endMarker) && section.slice(header[0].length, -endMarker.length).length === Number(header[1])) {
+            const content = section.slice(header[0].length, -endMarker.length);
+            for (const locale of LOCALES) for (const resolution of ['no-answer', 'cancelled'] as const) {
+                const reason = translate(resolution === 'no-answer' ? 'chat.subagent_notification.question_no_answer' : 'chat.subagent_notification.question_cancelled', undefined, locale);
+                const [prefix, suffix] = templateSegments('chat.subagent_notification.question', locale, ['reason', 'question']).slice(1);
+                const start = reason + prefix;
+                if (content.startsWith(start) && (!suffix || content.endsWith(suffix))) {
+                    openQuestion = content.slice(start.length, suffix ? -suffix.length : undefined);
+                    questionResolution = resolution;
+                    body = body.slice(0, marker);
+                    break;
+                }
+            }
         }
     }
+    const paragraphs = body.split('\n\n').map(part => part.trim());
     const material = completionValue === 'empty' ? '' : paragraphs.filter(part => part && !boilerplate.includes(part)).join('\n\n').trim();
     let error: string | undefined;
     if (completionValue === 'empty' && end.kind === 'failed') {
@@ -597,10 +611,6 @@ function buildParsedNotificationResult(text: string, name: string, thread: SubTa
         }
     }
     const view = buildSubAgentResultView({ name, outcome: { end, completeness: completionValue, hasAnswer: completionValue === 'unconfirmed', hasMaterial: !!material, effects: [] },
-        text: material, error, thread }, translate);
-    if (openQuestion !== undefined) {
-        view.openQuestion = openQuestion;
-        view.title = name;
-    }
+        text: material, error, thread, question: taskQuestion ?? (openQuestion === undefined ? undefined : { text: openQuestion, resolution: { kind: questionResolution } }) }, translate);
     return view;
 }

@@ -15,8 +15,16 @@ export function buildSubAgentResultView(input: BuildSubAgentResultViewInput, tra
         ? { ...input, text: undefined, handoff: undefined, partialResult: undefined, partialText: undefined }
         : input);
     const name = input.name.trim() || translate('subagent.label');
-    const title = `${name} ${translate(model.endLabelKey)}`;
-    const badge = model.completenessLabelKey ? translate(model.completenessLabelKey) : undefined;
+    const title = model.openQuestion !== undefined ? translate('chat.subresult.question_result_title', { name }) : `${name} ${translate(model.endLabelKey)}`;
+    const badge = model.openQuestion !== undefined ? translate('chat.substrip.question_no_answer') : model.completenessLabelKey ? translate(model.completenessLabelKey) : undefined;
+    let material = model.material;
+    if (material && model.openQuestion !== undefined) {
+        for (const locale of ['pl', 'en']) {
+            const runner = translate('subagent.question_no_answer', { question: model.openQuestion }, locale);
+            if (material === runner) material = '';
+            else if (material.startsWith(`${runner}\n`)) material = material.slice(runner.length).trimStart();
+        }
+    }
     const notes: string[] = [];
     if (model.thread.kind === 'reusable' && model.thread.sub_id.trim()) notes.push(translate('chat.subresult.continue_same_thread'));
     if (model.userStopped) {
@@ -27,7 +35,8 @@ export function buildSubAgentResultView(input: BuildSubAgentResultViewInput, tra
         title,
         badge,
         status: model.state.kind === 'done' ? 'ok' : 'error',
-        material: model.material || undefined,
+        material: material || undefined,
+        openQuestion: model.openQuestion,
         error: model.error || undefined,
         missingTargets: model.missingTargets,
         effects: model.effects.map(effect => ({

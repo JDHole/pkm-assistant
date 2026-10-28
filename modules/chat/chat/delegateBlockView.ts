@@ -24,6 +24,8 @@ interface DelegateResult {
     threadId?: string;
     thread?: { kind: 'reusable'; sub_id: string } | { kind: 'single' } | { kind: 'unknown' };
     effects?: Array<{ tool: string; action: string; targets: Array<{ path?: string; id?: string; kind?: string }>; outcome: string; check: 'matches' | 'mismatch' | 'not-checked'; expectedCheck?: 'exists' | 'absent' | 'none' }>;
+    question?: unknown;
+    questionState?: import('../../sub-agents/index.js').QuestionState;
 }
 
 export interface DelegateBlockOptions {
@@ -74,6 +76,8 @@ export function buildDelegateBlockOptions(
             partialText: result.partial?.text,
             error: result.error,
             effects: result.effects,
+            question: result.question,
+            questionState: result.questionState,
             thread,
         }) } : {}),
     };

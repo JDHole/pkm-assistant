@@ -351,6 +351,67 @@ test.serial('brak odpowiedzi: dorobek i jedno pytanie w wyniku żywym oraz histo
     });
 });
 
+for (const scenario of ['partial', 'success'] as const) test.serial(`delivery i render PL i EN: ${scenario}`, async t => {
+    await withFakeDocument(async () => {
+        for (const locale of ['pl', 'en'] as const) {
+            setLocale(locale);
+            const question = 'Pierwszy akapit?\n\nDrugi akapit z wyborem A lub B?';
+            const runner = locale === 'pl' ? `Sub nie dostał odpowiedzi na pytanie: ${question}` : `The sub-agent received no answer to the question: ${question}`;
+            const tool = 'read | Plan.md | OK';
+            const base = { id: 'task1', name: 'pkm-sub', agentName: 'Lead', status: 'done', background: true, createdAt: 1, steps: [], budget: {} };
+            const partial = { ...base, outcome: { end: { kind: 'timeout' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] }, result: { text: `${runner}\n\n${tool}`, toolsUsed: ['read'], durationMs: 1, usage: null, question: { text: question, resolution: { kind: 'no-answer' } } } } as SubTask;
+            const quote = locale === 'pl' ? 'Brak odpowiedzi: czas na odpowiedź upłynął.\nOtwarte pytanie: CYTAT - wybierz folder?' : 'No answer: response time expired.\nOpen question: CYTAT - wybierz folder?';
+            const material = `Dokumentacja:\n\n\`\`\`\n\n${quote}\n\n\`\`\``;
+            const success = { ...base, outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true, effects: [] }, result: { text: material, toolsUsed: [], durationMs: 1, usage: null } } as SubTask;
+            for (const task of [scenario === 'partial' ? partial : success]) {
+                const delivery = buildSubTaskResultDelivery(task, undefined, 0);
+                for (const meta of [delivery.meta, {}]) {
+                    const view = buildMachineView({ role: 'user', content: delivery.text, ...meta }, { t: translate });
+                    const container = makeFakeEl();
+                    await renderMachineTile(container as unknown as HTMLElement, fakePlugin([], null), view!);
+                    const tile = findByClass(container, 'cs-tile--subresult')!;
+                    findByClass(tile, 'cs-tile__head')!.fire('click');
+                    const rendered = deepText(tile);
+                    t.false(rendered.includes('[SUBTASK_QUESTION'));
+                    t.false(rendered.includes('[/SUBTASK_QUESTION]'));
+                    if (task === partial) {
+                        t.true(tile.classList.contains('cs-tile--attention'));
+                        t.is(view!.subAgentResult!.title, locale === 'pl' ? 'Wynik pkm-sub' : 'Result pkm-sub');
+                        t.is(view!.subAgentResult!.openQuestion, question);
+                        t.is(rendered.split(question).length - 1, 1);
+                        t.true(rendered.includes(tool));
+                        t.false(rendered.includes(runner));
+                    } else {
+                        t.true(tile.classList.contains('cs-tile--ok'));
+                        t.is(view!.subAgentResult!.openQuestion, undefined);
+                        t.true(rendered.includes(material));
+                    }
+                }
+            }
+        }
+        setLocale('en');
+    });
+});
+
+test.serial('historia pytania z reusable thread zachowuje pytanie i instrukcję wątku', async t => {
+    await withFakeDocument(async () => {
+        setLocale('pl');
+        const question = 'Pierwszy akapit?\n\nDrugi akapit?';
+        const task = { id: 'task1', name: 'pkm-sub', agentName: 'Lead', status: 'done', background: true, createdAt: 1, steps: [], budget: {}, outcome: { end: { kind: 'timeout' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] }, result: { text: `Sub nie dostał odpowiedzi na pytanie: ${question}\n\nread | Plan.md | OK`, toolsUsed: ['read'], durationMs: 1, usage: null, question: { text: question, resolution: { kind: 'no-answer' } } } } as SubTask;
+        const text = buildSubTaskNotificationText(task, { subId: 'sub/pkm#1', maxResultChars: 0 });
+        const view = buildMachineView({ role: 'user', content: text }, { t: translate, getThread: () => ({ phase: 'idle', reusable: true }) });
+        t.is(view!.subAgentResult!.openQuestion, question);
+        t.true(view!.subAgentResult!.notes.includes('Agent może dokończyć tym samym subem'));
+        const container = makeFakeEl();
+        await renderMachineTile(container as unknown as HTMLElement, fakePlugin([], null), view!);
+        const tile = findByClass(container, 'cs-tile--subresult')!;
+        findByClass(tile, 'cs-tile__head')!.fire('click');
+        t.is(deepText(tile).split(question).length - 1, 1);
+        t.true(deepText(tile).includes('read | Plan.md | OK'));
+        setLocale('en');
+    });
+});
+
 test.serial('wynik z question renderuje brak odpowiedzi bez rejestru', async t => {
     await withFakeDocument(async () => {
         setLocale('pl');
