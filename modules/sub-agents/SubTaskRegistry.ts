@@ -40,7 +40,7 @@ import { log } from '../../core/utils/Logger.js';
 import type { RunOutcome, StopBy } from './runOutcome.js';
 import type { LoopMessage } from '../agent-loop/index.js';
 import { ParentQuestions } from './ParentQuestions.js';
-import type { Owner, QuestionId, QuestionState, QuestionResolution, ParentQuestionClock, OpenParentQuestionResult, AnswerResult } from './ParentQuestions.js';
+import type { Owner, QuestionId, QuestionState, ParentQuestionClock, OpenParentQuestionResult, AnswerResult } from './ParentQuestions.js';
 
 /** Stan biegu suba. `aborted` = ubity z zewnątrz (timeout delegacji), `error` = wyjątek. */
 export type SubTaskStatus = 'running' | 'done' | 'error' | 'aborted';
@@ -70,7 +70,7 @@ export interface SubTaskResult {
     stopReason?: AgentLoopStopReason;
     outcome?: RunOutcome;
     handoff?: string;
-    question?: { text: string; resolution: QuestionResolution };
+    question?: import('./ParentQuestions.js').TerminalQuestion;
 }
 
 /**

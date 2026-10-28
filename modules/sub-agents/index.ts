@@ -52,7 +52,7 @@ export type {
 } from './SubTaskRegistry.js';
 export type { SubTaskDeliverer, SubTaskClaim } from './SubTaskNotifier.js';
 export type { SubTaskNotice, SubTaskNoticeDeliverer, SubTaskNoticeClaim } from './SubTaskNotifier.js';
-export type { Owner, QuestionId, ParentQuestion, QuestionClock, QuestionResolution, QuestionState, AnswerResult, RunActivity, ParentQuestionClock, OpenParentQuestionResult } from './ParentQuestions.js';
+export type { Owner, QuestionId, ParentQuestion, QuestionClock, QuestionResolution, QuestionState, AnswerResult, RunActivity, ParentQuestionClock, OpenParentQuestionResult, TerminalQuestion } from './ParentQuestions.js';
 
 // SubAgentDetailView.js statically imports `obsidian` (MarkdownRenderer). Lazy-load it
 // via dynamic import so this barrel stays obsidian-free — it is imported by TriggerPopup /

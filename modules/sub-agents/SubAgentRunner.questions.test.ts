@@ -107,10 +107,11 @@ for (const mode of ['no-answer', 'stop'] as const) {
         t.is(result.question?.resolution.kind, mode === 'stop' ? 'cancelled' : 'no-answer');
         t.is(calls, 2);
         t.true(result.result.includes('DOROBEK'));
-        t.true(result.result.includes('Jaki zakres?'));
+        t.false(result.result.includes('Jaki zakres?'));
         t.true(result.handoff?.includes('Jaki zakres?'));
+        t.is(result.question?.note, result.handoff?.split('\n\n')[0]);
         t.deepEqual(task.result?.question, result.question);
-        t.deepEqual((task.partial as typeof task.partial & { question?: typeof result.question })?.question, result.question);
+        t.deepEqual((task.partial as typeof task.partial & { question?: typeof result.question })?.question, { text: result.question?.text, resolution: result.question?.resolution });
         t.is(result.partial?.synthesis, 'skipped');
         if (mode === 'stop') t.deepEqual(result.outcome.end, { kind: 'stopped', by: 'lead' });
         f.registry.dispose();
@@ -195,7 +196,7 @@ test.serial('pytanie mieści się w budżetach i komunikat używa języka interf
                 : (mode === 'timeout' ? 'The sub-agent received no answer to the question: Zakres [REDACTED]' : 'Run stopped, open question: Zakres [REDACTED]');
             t.true(displayed <= 12000);
             t.true((result.handoff?.length ?? 0) <= 240);
-            t.true(partial.text.includes(sentence));
+            t.false(partial.text.includes(sentence));
             t.true(result.handoff?.includes(sentence));
             t.true(result.question?.text.startsWith('Zakres [REDACTED]'));
             t.false(JSON.stringify({ partial, handoff: result.handoff, question: result.question }).includes(secret));
@@ -239,7 +240,7 @@ test.serial('długie pytanie i wypowiedź nie wypierają stanów narzędzi ze sn
         + partial.toolOutcomes.reduce((sum, item) => sum + item.resultPreview.length, 0)
         + partial.toolCallDetails.reduce((sum, item) => sum + item.resultPreview.length, 0);
     t.true(displayed <= 12000);
-    t.true(partial.text.includes('Zakres [REDACTED]'));
+    t.true(snapshotQuestion.includes('Zakres [REDACTED]'));
     for (const tool of tools) t.true(partial.text.includes(`### ${tool.name} - returned response`), tool.name);
     t.true(partial.text.includes('### ask_parent - outcome unknown'));
     t.is(result.question?.text, question.replace(secret, '[REDACTED]'));

@@ -63,6 +63,8 @@ Zmiana zegara oczekującego pytania emituje `question:clock` po zapisaniu pauzy 
 
 Runner dodaje lokalne `ask_parent` subowi pierwszego piętra (głębokość 1, a 0 dla starszych wywołań), również przy pustej konfiguracji narzędzi. Głębszy sub nie dostaje definicji ani instrukcji w fabrycznej ramie, a jego wywołanie jest odrzucane bez otwarcia pytania. Runner odmawia `ask_user`. Odpowiedź trafia do tego samego transkryptu. Brak odpowiedzi lub anulowanie przerywa pętlę bez syntezy; partial, wynik i handoff zachowują treść pytania i rozstrzygnięcie. Hooki `onActivity` i `onQuestion` informują o otwarciu i zamknięciu. `cancelParentQuestion` zamyka oczekiwanie przy zewnętrznym abort przed publikacją partial. `DelegateTool` pauzuje budżet biegu podczas oczekiwania. Pierwsze pytanie biegu blokującego wraca bezpośrednio w pokwitowaniu i promuje bieg do tła; notifier pomija je, a kolejne pytania i wynik doręcza normalnie. Terminalne `question` zachowuje treść i rozstrzygnięcie `no-answer` lub `cancelled` w wyniku runnera, rejestru i zwrotce delegacji.
 
+Opcjonalne `question.note` to dokładny prefiks dodany przez runnera do handoffu, po maskowaniu i przycięciu, bez separatora. Pole nie występuje, gdy nie dodano notki; typ `TerminalQuestion` eksportuje barrel. Snapshot przechowuje pytanie strukturalnie, bez dopisywania zdania o nim do `partial.text`, które może być użyte jako dorobek przy pustym handoffie.
+
 **Publiczne drzwi modułu:** klasy runtime + helpery widoczności/migracji.
 
 | Export | Po co |

@@ -165,7 +165,7 @@ export type SubRunResult = {
     stopReason?: AgentLoopStopReason;
     outcome: RunOutcome;
     handoff?: string;
-    question?: { text: string; resolution: QuestionResolution };
+    question?: import('./ParentQuestions.js').TerminalQuestion;
 };
 
 type ToolCall = { name: string; arguments: unknown };
@@ -243,9 +243,10 @@ function _clipText(value: string, cap: number): string {
     return cap > 0 ? value.slice(0, cap - 1) + '…' : '';
 }
 
-function _buildHandoff(outcome: RunOutcome, partial: AgentLoopPartialSnapshot | undefined, details: readonly unknown[], cap: number, knownSecrets: readonly string[], question?: { text: string; resolution: QuestionResolution }): string {
+function _buildHandoff(outcome: RunOutcome, partial: AgentLoopPartialSnapshot | undefined, details: readonly unknown[], cap: number, knownSecrets: readonly string[], question?: { text: string; resolution: QuestionResolution }): { text: string; note?: string } {
     const sections: string[] = [];
-    if (question && cap > 0) sections.push(_clipText(_questionText(question, knownSecrets), Math.ceil(cap / 2)));
+    const note = question && cap > 0 ? _clipText(_questionText(question, knownSecrets), Math.ceil(cap / 2)) : '';
+    if (note) sections.push(note);
     const append = (label: string, value: string) => {
         const used = sections.join('\n\n').length;
         const remaining = cap - used - (sections.length ? 2 : 0);
@@ -272,7 +273,7 @@ function _buildHandoff(outcome: RunOutcome, partial: AgentLoopPartialSnapshot | 
         return `${name} | ${targetPreview} | ${preview}`;
     }).join('\n');
     if (resultsText) append('subagent.handoff.results', resultsText);
-    return sections.join('\n\n').slice(0, Math.max(0, cap));
+    return { text: sections.join('\n\n').slice(0, Math.max(0, cap)), ...(note ? { note } : {}) };
 }
 
 export class SubAgentRunner {
@@ -747,8 +748,7 @@ export class SubAgentRunner {
                         const questionText = _clipText(text, 2000);
                         const used = snapshot.lastText.length + snapshot.toolOutcomes.reduce((sum, item) => sum + item.resultPreview.length, 0)
                             + snapshot.toolCallDetails.reduce((sum, item) => sum + item.resultPreview.length, 0) + questionText.length;
-                        const receipt = formatAgentLoopPartial({ ...snapshot,
-                            lastText: `${_questionText({ ...closedQuestion, text: questionText }, knownSecrets)}\n\n${snapshot.lastText}` }, Math.max(0, 12000 - used));
+                        const receipt = formatAgentLoopPartial(snapshot, Math.max(0, 12000 - used));
                         const enriched = { ...snapshot, question: { ...closedQuestion, text: questionText }, text: receipt };
                         snapshot = enriched;
                     }
@@ -786,9 +786,12 @@ export class SubAgentRunner {
             const finalEffects = await finalizeEffects();
             const outcome = classifyRunEnd({ stoppedBy: response.stoppedBy, stopReason: response.stopReason, finalText: response.finalText, partial: lastPartial, stoppedByActor: subTask?.stopRequestedBy, effects: finalEffects, successfulToolResults });
             if (outcome.hasAnswer) store.appendAssistant(response.finalText);
-            const handoff = outcome.completeness !== 'unconfirmed' || closedQuestion
+            const builtHandoff = outcome.completeness !== 'unconfirmed' || closedQuestion
                 ? _buildHandoff(outcome, lastPartial, response.toolCallDetails || [], limits.subagent_salvage_max_chars, knownSecrets, closedQuestion)
                 : undefined;
+            const handoff = builtHandoff?.text;
+            const note = builtHandoff?.note;
+            const terminalQuestion = closedQuestion ? { ...closedQuestion, text: _maskHandoffText(closedQuestion.text, knownSecrets), ...(note ? { note } : {}) } : undefined;
             log.info(logTag, `Task DONE: ${response.toolsUsed?.length || 0} tools, ${(response.finalText || '').length} znaków (stop: ${response.stoppedBy})`);
             log.timing(logTag, 'Task', startTime);
             log.groupEnd();
@@ -810,7 +813,7 @@ export class SubAgentRunner {
                     stoppedBy: response.stoppedBy,
                     stopReason: response.stopReason,
                     outcome,
-                    ...(closedQuestion ? { question: { ...closedQuestion, text: _maskHandoffText(closedQuestion.text, knownSecrets) } } : {}),
+                    ...(terminalQuestion ? { question: terminalQuestion } : {}),
                     ...(handoff ? { handoff } : {}),
                 }));
             }
@@ -828,7 +831,7 @@ export class SubAgentRunner {
                 partial: lastPartial,
                 stopReason: response.stopReason,
                 outcome,
-                ...(closedQuestion ? { question: { ...closedQuestion, text: _maskHandoffText(closedQuestion.text, knownSecrets) } } : {}),
+                ...(terminalQuestion ? { question: terminalQuestion } : {}),
                 ...(handoff ? { handoff } : {}),
             };
         } catch (error) {
@@ -839,7 +842,7 @@ export class SubAgentRunner {
             const finalEffects = await finalizeEffects();
             const outcome = classifyRunEnd({ stoppedBy: 'error', failed: true, stopReason: lastPartial?.stopReason, finalText: '', partial: lastPartial, stoppedByActor: subTask?.stopRequestedBy, effects: finalEffects, successfulToolResults });
             const handoff = outcome.completeness !== 'unconfirmed'
-                ? _buildHandoff(outcome, lastPartial, observedToolDetails, getLimits(this.plugin?.env?.settings).subagent_salvage_max_chars, knownSecrets)
+                ? _buildHandoff(outcome, lastPartial, observedToolDetails, getLimits(this.plugin?.env?.settings).subagent_salvage_max_chars, knownSecrets).text
                 : undefined;
             log.groupEnd();
             // TEN SAM kształt bloku co przy udanym biegu (`subagent_call`) - te same pola

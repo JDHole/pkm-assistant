@@ -9,6 +9,7 @@ export type ParentQuestion = Readonly<{ id: QuestionId; taskId: string; subId: s
 export type QuestionClock = { kind: 'ticking'; remainingMs: number; since: number } | { kind: 'paused'; remainingMs: number };
 export type QuestionResolution = { kind: 'answered'; text: string } | { kind: 'no-answer' } | { kind: 'cancelled'; by: StopBy; reason: 'stop' | 'unload' | 'run-ended' };
 export type QuestionState = { kind: 'none' } | { kind: 'waiting'; question: ParentQuestion; clock: QuestionClock } | { kind: 'closed'; question: ParentQuestion; resolution: QuestionResolution };
+export type TerminalQuestion = { text: string; resolution: QuestionResolution; note?: string };
 export type AnswerResult = { kind: 'accepted' } | { kind: 'rejected'; reason: 'expired' | 'wrong-owner' | 'wrong-question' };
 export type RunActivity = { kind: 'working' } | { kind: 'waiting'; questionId: QuestionId } | { kind: 'ending' };
 export interface ParentQuestionClock {
