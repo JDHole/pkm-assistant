@@ -5,7 +5,7 @@
  * Pętla tool-callingu jest wyciągnięta do modules/agent-loop (runAgentLoop) - wspólna
  * z czatem. SubAgentRunner buduje store/tools/limity/egzekutor i mapuje wynik.
  */
-import { runAgentLoop, ArrayMessageStore } from '../agent-loop/index.js';
+import { runAgentLoop, ArrayMessageStore, formatAgentLoopPartial } from '../agent-loop/index.js';
 import type { RunAgentLoopOptions, ToolExecutionContext, AgentLoopPartialSnapshot, AgentLoopStopReason } from '../agent-loop/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
@@ -233,8 +233,19 @@ function _maskHandoffText(value: string, knownSecrets: readonly string[]): strin
     return maskSensitiveData(withoutKnownSecrets);
 }
 
-function _buildHandoff(outcome: RunOutcome, partial: AgentLoopPartialSnapshot | undefined, details: readonly unknown[], cap: number, knownSecrets: readonly string[]): string {
+function _questionText(question: { text: string; resolution: QuestionResolution }, knownSecrets: readonly string[]): string {
+    const key = question.resolution.kind === 'no-answer' ? 'subagent.question_no_answer' : 'subagent.question_cancelled';
+    return t(key, { question: _maskHandoffText(question.text, knownSecrets) });
+}
+
+function _clipText(value: string, cap: number): string {
+    if (value.length <= cap) return value;
+    return cap > 0 ? value.slice(0, cap - 1) + '…' : '';
+}
+
+function _buildHandoff(outcome: RunOutcome, partial: AgentLoopPartialSnapshot | undefined, details: readonly unknown[], cap: number, knownSecrets: readonly string[], question?: { text: string; resolution: QuestionResolution }): string {
     const sections: string[] = [];
+    if (question && cap > 0) sections.push(_clipText(_questionText(question, knownSecrets), Math.ceil(cap / 2)));
     const append = (label: string, value: string) => {
         const used = sections.join('\n\n').length;
         const remaining = cap - used - (sections.length ? 2 : 0);
@@ -733,7 +744,12 @@ export class SubAgentRunner {
                     closeEffects(snapshot.stopReason);
                     if (closedQuestion) {
                         const text = _maskHandoffText(closedQuestion.text, knownSecrets);
-                        const enriched = { ...snapshot, question: { ...closedQuestion, text }, text: `${snapshot.text}\n\n${closedQuestion.resolution.kind}: ${text}` };
+                        const questionText = _clipText(text, 2000);
+                        const used = snapshot.lastText.length + snapshot.toolOutcomes.reduce((sum, item) => sum + item.resultPreview.length, 0)
+                            + snapshot.toolCallDetails.reduce((sum, item) => sum + item.resultPreview.length, 0) + questionText.length;
+                        const receipt = formatAgentLoopPartial({ ...snapshot,
+                            lastText: `${_questionText({ ...closedQuestion, text: questionText }, knownSecrets)}\n\n${snapshot.lastText}` });
+                        const enriched = { ...snapshot, question: { ...closedQuestion, text: questionText }, text: _clipText(receipt, Math.max(0, 12000 - used)) };
                         snapshot = enriched;
                     }
                     snapshot = JSON.parse(maskSensitiveData(JSON.stringify(snapshot)).replace(/\b(https?:\/\/)[^\s/@"\\]+@/gi, '$1[REDACTED]@')) as AgentLoopPartialSnapshot;
@@ -770,10 +786,9 @@ export class SubAgentRunner {
             const finalEffects = await finalizeEffects();
             const outcome = classifyRunEnd({ stoppedBy: response.stoppedBy, stopReason: response.stopReason, finalText: response.finalText, partial: lastPartial, stoppedByActor: subTask?.stopRequestedBy, effects: finalEffects, successfulToolResults });
             if (outcome.hasAnswer) store.appendAssistant(response.finalText);
-            let handoff = outcome.completeness !== 'unconfirmed'
-                ? _buildHandoff(outcome, lastPartial, response.toolCallDetails || [], limits.subagent_salvage_max_chars, knownSecrets)
+            const handoff = outcome.completeness !== 'unconfirmed' || closedQuestion
+                ? _buildHandoff(outcome, lastPartial, response.toolCallDetails || [], limits.subagent_salvage_max_chars, knownSecrets, closedQuestion)
                 : undefined;
-            if (closedQuestion) handoff = `${handoff || ''}\n${closedQuestion.resolution.kind}: ${_maskHandoffText(closedQuestion.text, knownSecrets)}`.trim();
             log.info(logTag, `Task DONE: ${response.toolsUsed?.length || 0} tools, ${(response.finalText || '').length} znaków (stop: ${response.stoppedBy})`);
             log.timing(logTag, 'Task', startTime);
             log.groupEnd();

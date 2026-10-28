@@ -45,6 +45,7 @@ interface PendingEntry {
 
 /** Minimalny widok rejestru, jakiego notifier używa (duck-typing — testy podstawiają atrapę). */
 export interface SubTaskNotifierRegistryLike {
+    getTask?(id: string): SubTask | undefined;
     events?: {
         on(event: string, handler: (payload: unknown) => void): (() => void) | void;
         off?(event: string, handler: (payload: unknown) => void): void;
@@ -67,6 +68,7 @@ export class SubTaskNotifier {
     declare private _noticeDeliverer: SubTaskNoticeDeliverer | null;
     declare private _maxPending: number;
     declare private _unsubscribe: (() => void) | null;
+    declare private _registry: SubTaskNotifierRegistryLike | null | undefined;
 
     constructor({ registry, maxPending = MAX_PENDING }: SubTaskNotifierOptions) {
         this._pending = [];
@@ -74,6 +76,7 @@ export class SubTaskNotifier {
         this._noticeDeliverer = null;
         this._maxPending = Number(maxPending) > 0 ? Number(maxPending) : MAX_PENDING;
         this._unsubscribe = null;
+        this._registry = registry;
         this._subscribe(registry);
     }
 
@@ -114,6 +117,7 @@ export class SubTaskNotifier {
     private _onQuestion(payload: unknown): void {
         const question = payload as ParentQuestion;
         if (!question?.id) return;
+        if (this._registry?.getTask?.(question.taskId)?.background === false) return;
         const entry: PendingEntry = { notice: { kind: 'question', question }, claimed: false, delivering: false };
         this._pending.push(entry); this._tryDeliver(entry); this._trimPending();
     }

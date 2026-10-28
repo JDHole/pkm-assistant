@@ -2,6 +2,7 @@ import test from 'ava';
 import { SubAgentRunner } from './SubAgentRunner.js';
 import { SubTaskRegistry } from './SubTaskRegistry.js';
 import { QuestionTestClock } from './test-support/questionTestClock.js';
+import { setLocale } from '../../core/i18n/index.js';
 
 const owner = { agentName: 'Jaskier', sessionPath: 's.md', sessionEpoch: 'e1' };
 const questionCall = { id: 'q', type: 'function', function: { name: 'ask_parent', arguments: '{"text":"Jaki zakres?"}' } };
@@ -155,4 +156,52 @@ test('późne narzędzie równoległe nie wznawia modelu po wygaśnięciu', asyn
     t.is(JSON.stringify(result.partial), snapshot);
     t.false(snapshot.includes('PÓŹNY WYNIK'));
     registry.dispose();
+});
+
+test.serial('pytanie mieści się w budżetach i komunikat używa języka interfejsu', async t => {
+    const secret = 'tajny-klucz-unikalny';
+    const question = `Zakres ${secret} ${'pytanie '.repeat(1500)}`;
+    for (const locale of ['pl', 'en'] as const) {
+        for (const mode of ['timeout', 'stop'] as const) {
+            setLocale(locale);
+            const clock = new QuestionTestClock();
+            const registry = new SubTaskRegistry({ questionClock: clock });
+            const read = { name: 'read', description: 'read', inputSchema: {}, execute: async () => 'dorobek '.repeat(3000) };
+            const runner = new SubAgentRunner({ app: {}, plugin: { subTaskRegistry: registry, env: { settings: { pkmAssistant: {
+                limits: { subagent_salvage_max_chars: 240 }, chat: { apiKeys: { test: secret } },
+            } } } }, toolRegistry: { filterByAgent: () => [read], getTool: () => read } });
+            let ready!: () => void;
+            const waiting = new Promise<void>(resolve => { ready = resolve; });
+            let calls = 0;
+            const model = { stream(_payload: unknown, cb: { done(value: unknown): void }) {
+                const call = calls++ === 0
+                    ? { id: 'r', type: 'function', function: { name: 'read', arguments: '{}' } }
+                    : { id: 'q', type: 'function', function: { name: 'ask_parent', arguments: JSON.stringify({ text: question }) } };
+                cb.done(response({ role: 'assistant', content: '', tool_calls: [call] }));
+            } };
+            const run = runner.runTask('zadanie', { name: 'Jaskier' }, { name: 'Klara', tools: ['read'] } as never, model as never,
+                { origin: owner, onTaskCreated: task => registry.attachAbort(task.id, () => {}), onActivity: activity => { if (activity.kind === 'waiting') ready(); } });
+            await Promise.race([waiting, run.then(value => { throw new Error(`Bieg zakończył się przed pytaniem: ${value.result}`); })]);
+            if (mode === 'stop') registry.requestStop(registry.list()[0].id, 'lead');
+            else clock.advance(300000);
+            const result = await run;
+            const partial = result.partial!;
+            const snapshotQuestion = (partial as typeof partial & { question: { text: string } }).question.text;
+            const displayed = partial.text.length + partial.lastText.length + snapshotQuestion.length
+                + partial.toolOutcomes.reduce((sum, item) => sum + item.resultPreview.length, 0)
+                + partial.toolCallDetails.reduce((sum, item) => sum + item.resultPreview.length, 0);
+            const sentence = locale === 'pl'
+                ? (mode === 'timeout' ? 'Sub nie dostał odpowiedzi na pytanie: Zakres [REDACTED]' : 'Bieg zatrzymany, otwarte pytanie: Zakres [REDACTED]')
+                : (mode === 'timeout' ? 'The sub-agent received no answer to the question: Zakres [REDACTED]' : 'Run stopped, open question: Zakres [REDACTED]');
+            t.true(displayed <= 12000);
+            t.true((result.handoff?.length ?? 0) <= 240);
+            t.true(partial.text.includes(sentence));
+            t.true(result.handoff?.includes(sentence));
+            t.true(result.question?.text.startsWith('Zakres [REDACTED]'));
+            t.false(JSON.stringify({ partial, handoff: result.handoff, question: result.question }).includes(secret));
+            t.false(/no-answer|cancelled/.test(partial.text + result.handoff));
+            registry.dispose();
+        }
+    }
+    setLocale('en');
 });
