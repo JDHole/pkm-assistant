@@ -24,16 +24,18 @@ test.serial('instrukcja odpowiedzi subowi zależy od dostępności sub_agent w o
     try {
         for (const locale of ['pl', 'en'] as const) {
             setLocale(locale);
-            const resolved = resolveDecisionTreeInstructions({}, {});
-            const withTool = splitDecisionTreeRules(resolved, { available: new Set(['sub_agent']), hasSkills: false, extended: false }).core;
-            const withoutTool = splitDecisionTreeRules(resolved, { available: new Set(), hasSkills: false, extended: false }).core;
-            const rule = withTool.find(item => item.id === 'deleg_question');
-            t.truthy(rule?.text.includes('question_id'));
-            t.true(rule?.text.includes('ask_user') ?? false);
-            t.false(withoutTool.some(item => item.id === 'deleg_question'));
-            const rendered = withTool.map(item => item.text).join('\n');
-            t.true(rendered.includes(rule!.text));
-            t.false(withoutTool.map(item => item.text).join('\n').includes(rule!.text));
+            const render = (availableToolNames: string[]) => {
+                const builder = new PromptBuilder();
+                builder.build({ ...AGENT } as never, { ...CTX, availableToolNames } as never);
+                return builder.getSections().find(section => section.key === 'decision_tree')!.content;
+            };
+            const withTool = render(['sub_agent', 'ask_user']);
+            const withoutTool = render(['ask_user']);
+            const instruction = locale === 'pl'
+                ? /sub_agent message z question_id[^.]+\. Jeśli nie wiesz, zapytaj użytkownika przez ask_user z question_id[^.]+, a potem przekaż jego odpowiedź subowi/
+                : /sub_agent message with question_id[^.]+\. Otherwise ask the user using ask_user with that question_id, then relay their answer to the sub-agent/;
+            t.regex(withTool, instruction);
+            t.notRegex(withoutTool, instruction);
         }
     } finally { setLocale('en'); }
 });
