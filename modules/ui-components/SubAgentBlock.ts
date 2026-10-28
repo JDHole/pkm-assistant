@@ -43,6 +43,7 @@ export interface SubAgentResultView {
     missingTargets: string[];
     effects: Array<{ tool: string; target: string; statusLabel: string }>;
     notes: string[];
+    openQuestion?: string;
 }
 
 interface SubAgentBlockOptions {
@@ -96,6 +97,12 @@ function appendResultView(body: HTMLElement, view: SubAgentResultView): void {
     for (const note of view.notes) {
         const line = body.createDiv({ cls: 'cs-subresult__note' });
         line.textContent = note;
+    }
+    if (view.openQuestion !== undefined) {
+        const question = body.createDiv({ cls: 'cs-subresult__question' });
+        question.textContent = t('chat.substrip.question_open', { question: view.openQuestion });
+        const note = body.createDiv({ cls: 'cs-subresult__note' });
+        note.textContent = t('chat.substrip.question_resume');
     }
 }
 
@@ -262,7 +269,7 @@ export function createSubAgentBlock(opts: SubAgentBlockOptions): HTMLElement {
         iconSvg: cfg.iconFn(),
         title,
         summary,
-        badge: resultView?.badge,
+        badge: resultView?.openQuestion !== undefined ? t('chat.substrip.question_no_answer') : resultView?.badge,
         expanded: resultView ? false : undefined,
         // Meta = czas po ludzku, TYLKO gdy jest i TYLKO dla wyniku (nie dla pokwitowania w tle,
         // które nie ma jeszcze żadnego czasu trwania do pokazania) - nic więcej w nagłówku,

@@ -144,6 +144,18 @@ test.serial('resultView omits empty sections; legacy remains available', t => {
     });
 });
 
+test.serial('resultView displays an unanswered question', t => {
+    withFakeDocument(() => {
+        const row = createSubAgentBlock({ type: 'delegate', resultView: {
+            title: 'Result worker', status: 'error', missingTargets: [], effects: [], notes: [], openQuestion: 'Which note?',
+        } }) as unknown as FakeEl;
+        t.is(findByClass(row, 'cs-tile__badge')?.textContent, 'no answer');
+        findByClass(row, 'cs-tile__head')!.fire('click');
+        t.is(findByClass(row, 'cs-subresult__question')?.textContent, 'Open question: Which note?');
+        t.true(allText(row).includes('Reply to the lead, who will resume this sub-agent with your answer.'));
+    });
+});
+
 test.serial('wynik: naglowek (tytul/skrot/meta) nie zawiera nazw narzedzi ani liczb tokenow', t => {
     withFakeDocument(() => {
         const row = createSubAgentBlock({
