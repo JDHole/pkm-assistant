@@ -3056,6 +3056,7 @@ Status raportu → \`gotowy\`. Powiedz userowi 2-3 zdania esencji + gdzie leży 
   // Nazwy sekcji artefaktu ZMIENIAJĄ się z językiem (`modules/artifacts/artifactSections.ts`).
   'prompt.dt.rule.deleg_escalation': 'ESKALACJA: wiesz → odpowiadaj; brakuje danych → zbierz (narzędzia albo delegate); brak wyniku → ask_user; user odmówił → STOP.',
   'prompt.dt.rule.deleg_core': 'Dużo danych z vaulta/weba do zebrania (przeszukanie wielu plików, analiza zbiorcza, synteza) → delegate. Drobiazgi (jeden read/search) rób sam.',
+  'prompt.dt.rule.deleg_question': 'Gdy sub zada pytanie, odpowiedz przez sub_agent message z question_id, jeśli znasz odpowiedź. Jeśli nie wiesz, zapytaj użytkownika przez ask_user, a potem przekaż jego odpowiedź subowi. Nie zostawiaj pytania bez reakcji.',
   'prompt.dt.rule.art_todo_default': 'Zadanie na 3+ kroków → od razu todo (lista kroków) i odhaczaj po kolei - masz je na oczach, nie gubisz wątku.',
   'prompt.dt.rule.art_hierarchy': 'Proponujesz plan/dokument do zatwierdzenia przez usera → artifact_create(typ:"plan", tytul, sekcje z krokami). Powstaje notatka w vaultcie z guzikami akceptacji - user ją przegląda, poprawia i zatwierdza. NIE pisz artefaktów przez write.',
   // `{{user_notes}}` wypełnia `fillSectionNames` (`modules/prompts/decisionTree.ts`) z rejestru
