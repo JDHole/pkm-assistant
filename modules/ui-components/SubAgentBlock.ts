@@ -71,9 +71,22 @@ function appendResultView(body: HTMLElement, view: SubAgentResultView): void {
         title.textContent = heading;
         content(group);
     };
-    if (view.material) section(t('chat.subresult.heading_created'), el => {
+    let material = view.material;
+    if (material && view.openQuestion !== undefined) {
+        for (const locale of ['pl', 'en']) {
+            const runnerLine = t('subagent.question_no_answer', { question: view.openQuestion }, locale);
+            const notification = t('chat.subagent_notification.question', {
+                reason: t('chat.subagent_notification.question_no_answer', undefined, locale), question: view.openQuestion,
+            }, locale);
+            material = material.split('\n\n').map(part => {
+                if (part === notification || part === runnerLine) return '';
+                return part.startsWith(`${runnerLine}\n`) ? part.slice(runnerLine.length + 1) : part;
+            }).filter(Boolean).join('\n\n').trim();
+        }
+    }
+    if (material) section(t('chat.subresult.heading_created'), el => {
         const text = el.createDiv();
-        text.textContent = view.material!;
+        text.textContent = material!;
     });
     if (view.error) section(t('chat.tile.error.title'), el => {
         const text = el.createDiv({ cls: 'cs-subresult__error' });
@@ -239,7 +252,7 @@ export function createSubAgentBlock(opts: SubAgentBlockOptions): HTMLElement {
     const isBackground = opts.pending === true;
     const resultView = opts.resultView;
     const isError = !isBackground && (resultView?.status === 'error' || opts.status === 'error');
-    const status: TileStatus = isBackground ? 'pending' : (isError ? 'error' : 'ok');
+    const status: TileStatus = isBackground ? 'pending' : resultView?.openQuestion !== undefined ? 'attention' : (isError ? 'error' : 'ok');
 
     let title: string;
     let summary: string | undefined;
@@ -247,6 +260,13 @@ export function createSubAgentBlock(opts: SubAgentBlockOptions): HTMLElement {
 
     if (resultView) {
         title = resultView.title;
+        if (resultView.openQuestion !== undefined) {
+            for (const locale of ['pl', 'en']) {
+                const suffix = ` ${t('chat.substrip.question_no_answer_partial', undefined, locale)}`;
+                if (title.endsWith(suffix)) title = title.slice(0, -suffix.length);
+            }
+            title = t('chat.subresult.question_result_title', { name: title });
+        }
         summary = resultView.summary;
         details = (body) => appendResultView(body, resultView);
     } else if (isBackground) {
