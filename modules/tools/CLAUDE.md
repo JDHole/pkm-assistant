@@ -1,5 +1,7 @@
 # modules/tools/
 
+`ask_user` przyjmuje opcjonalny `question_id` pytania suba, przekazywany w argumentach wywołania do czatu.
+
 Kanały `ask_user` tworzy `createAskUserChannels(registry)`. Każdy ma właściciela,
 identyfikator, obietnicę i idempotentne `answer`, `cancel`, `timeout`; otwarcie
 rejestruje pauzę w rejestrze subów, a zamknięcie ją zwalnia. Runtime przekazuje

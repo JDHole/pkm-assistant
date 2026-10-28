@@ -92,6 +92,10 @@ export function createAskUserTool(options: AskUserToolOptions = {}) {
                 context: {
                     type: 'string',
                     description: t('mcp.ask_user.param.context')
+                },
+                question_id: {
+                    type: 'string',
+                    description: t('mcp.ask_user.param.question_id')
                 }
             },
             required: ['question']
