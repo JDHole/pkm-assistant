@@ -290,7 +290,7 @@ WŁAŚCIWEGO agenta/zakładki, nie do tego, co akurat widać na ekranie.
   agentName`) ma JEDNO źródło (`chat_tabs.js`, eksportowana) - druga kopia formuły gdziekolwiek
   indziej (popover autonomii, restore wielu zakładek) to zawsze bug w czekaniu.
 - **`_streamCtxMap` i `_preparingTurns` są kluczowane zamrożonym kluczem zakładki.** Wpis
-  zawiera również obiekt zakładki i uchwyt przerwania. `_releaseStreamCtx(tabKey, turnId)`
+  zawiera również obiekt zakładki i uchwyt przerwania. Zakładka przypisana przygotowaniu przez `_initTabs` przechodzi do wpisu strumienia tej samej tury. Zwolnienie ostatniej pracy bez zakładki gasi stan widoku tylko gdy jego aktywne okno i zakładka nie mają innej pracy. `_releaseStreamCtx(tabKey, turnId)`
   sprawdza `turnId` przed usunięciem wpisu, aby spóźniona finalizacja nie usunęła nowszej tury.
   `_isTurnActiveTab` sprawdza żywą turę, obiekt zakładki i tożsamość okna rozmowy.
   Malowanie wymaga tego samego okna, więc `archive_new` oddziela starą turę od nowej rozmowy.
@@ -1581,7 +1581,7 @@ wiadomość tylko w sesji właściciela podczas przygotowania; po przekazaniu do
 nie blokuje innych sesji.
 
 Przy zamknięciu zakładki uchwyt jej przygotowania jest przerywany po kluczu zakładki.
-Zakładka odtworzona przez `_initTabs` przejmuje turę bez zakładki w swoim oknie, zachowując pusty klucz tury. Stop przyjmuje także jawny pusty klucz, a zwolnienie usuwa taki wpis mapy.
+Zakładka odtworzona przez `_initTabs` przejmuje przygotowanie lub strumień bez zakładki w swoim oknie; rejestracja strumienia zachowuje przypisaną zakładkę, uchwyt przerwania i pusty klucz tury. Zwolnienie ostatniej pracy bez zakładki gasi stan generowania widoku, jeśli jego aktywne okno i zakładka nie mają innej pracy. Stop przyjmuje także jawny pusty klucz, a zwolnienie usuwa taki wpis mapy.
 Zamknięcie zakładki anuluje kolejkę bez klucza właściciela, z jej bieżącym lub dawnym kluczem tury oraz bez żywego właściciela; kolejka innej żywej zakładki pozostaje. Anulowanie przywraca tekst do pustego pola.
 Kontekst aktywnego strumienia jest kluczowany zamrożonym kluczem zakładki, a identyfikator
 tury chroni jej następcę przed spóźnionym sprzątaniem.

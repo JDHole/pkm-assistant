@@ -116,6 +116,54 @@ test.serial('tura bez zakładki po archive_close jest zatrzymywana po odtworzeni
     }
 });
 
+async function prepareTablessTurn(restoreDuringPrompt: boolean) {
+    const f = await fixture();
+    await _restoreActiveSession.call(f.ctx);
+    f.ctx.chatTabs = f.ctx.chatTabs.filter((tab: Dynamic) => tab.isActive);
+    f.ctx._queueOwner = _queueOwner.bind(f.ctx);
+    f.ctx._showQueuedIndicator = () => {};
+    f.ctx.handleInputResize = () => {};
+    await applyPostArchiveAction(f.ctx, {} as Dynamic, f.memory, { action: 'archive_close' } as Dynamic, 'a.md');
+    let release!: (value: string) => void;
+    f.ctx.plugin.agentManager.getActiveSystemPromptWithMemory = () => new Promise<string>(resolve => { release = resolve; });
+    f.ctx.input_area.value = 'Pierwsza';
+    const run = send_message.call(f.ctx, { meta: { origin: 'human' } });
+    await waitFor(() => !!release);
+    const pending = f.ctx._preparingTurns.get('');
+    f.ctx.input_area.value = 'W kolejce';
+    await send_message.call(f.ctx, { meta: { origin: 'human' } });
+    if (restoreDuringPrompt) _initTabs.call(f.ctx);
+    release('system');
+    await waitFor(() => !!f.handlers[0]);
+    return { ...f, run, pending, turn: f.ctx._streamCtxMap.get('') };
+}
+
+for (const closeView of [false, true]) {
+    test.serial(`odtworzenie zakładki podczas budowy promptu: ${closeView ? 'zamknięcie widoku' : 'zamknięcie zakładki'}`, async t => {
+        const f = await prepareTablessTurn(true);
+        t.is(f.pending.tab, f.ctx.chatTabs[0]);
+        t.is(f.turn.abort, f.pending.abort);
+        if (closeView) stop_all_turns.call(f.ctx, 'close');
+        else await _closeActiveTab.call(f.ctx);
+        const actual = { aborted: f.turn.abort.isAborted(), size: f.ctx._streamCtxMap.size,
+            generating: f.ctx.is_generating, queue: f.ctx._queuedMessage, input: f.ctx.input_area.value };
+        done(f.handlers[0], 'przerwana');
+        await f.run;
+        streamingManager.stopStream('same-agent-test::Owner');
+        t.deepEqual(actual, { aborted: true, size: 0, generating: false, queue: null, input: closeView ? '' : 'W kolejce' });
+    });
+}
+
+test.serial('zamknięcie widoku z turą bez zakładki gasi generowanie', async t => {
+    const f = await prepareTablessTurn(false);
+    stop_all_turns.call(f.ctx, 'close');
+    const actual = { aborted: f.turn.abort.isAborted(), size: f.ctx._streamCtxMap.size,
+        generating: f.ctx.is_generating, queue: f.ctx._queuedMessage };
+    done(f.handlers[0], 'przerwana');
+    await f.run;
+    streamingManager.stopStream('same-agent-test::Owner');
+    t.deepEqual(actual, { aborted: true, size: 0, generating: false, queue: null });
+});
 test.serial('zamknięcie zakładki po archive_new anuluje kolejkę jej dawnej tury', async t => {
     const f = await fixture();
     await _restoreActiveSession.call(f.ctx);

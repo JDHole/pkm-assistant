@@ -635,9 +635,10 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     }
 
     } catch (error) {
-        if (this._preparingTurns.get(ownerTabKey)?.abort === turnAbort) {
+        const preparing = this._preparingTurns.get(ownerTabKey);
+        if (preparing?.abort === turnAbort) {
             this._preparingTurns.delete(ownerTabKey);
-            syncTabGenerating(this, owner.tab, ownerTabKey, rw);
+            syncTabGenerating(this, preparing.tab, ownerTabKey, rw);
         }
         throw error;
     }
@@ -663,8 +664,9 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     // Uchwyt przerwania TEJ tury (`turnAbort`, założony wyżej razem z guzikiem Stop) wchodzi
     // teraz do wpisu `_streamCtxMap` - stamtąd sięga po niego `stop_generation(ownerTabKey)`
     // i zamknięcie widoku. Ten sam obiekt niesie `turn` (czyta go pętla i watchdog) - nie kopia.
+    const preparing = this._preparingTurns.get(ownerTabKey);
     this._streamCtxMap.set(ownerTabKey, {
-        tab: owner.tab,
+        tab: preparing?.abort === turnAbort ? preparing.tab : owner.tab,
         agentName: streamAgentName,
         agent: activeAgent,
         rollingWindow: rw,
@@ -1179,7 +1181,15 @@ function hasTabWork(view: ChatViewLike, tab: ChatTab, exceptStreamKey?: string) 
 }
 
 function syncTabGenerating(view: ChatViewLike, tab: ChatTab | null | undefined, oldKey?: string, oldWindow?: RollingWindow) {
-    if (!tab || !view.chatTabs.includes(tab)) return;
+    if (!tab) {
+        const activeTab = view.chatTabs.find(item => item.isActive);
+        const activeWork = activeTab && hasTabWork(view, activeTab);
+        const windowWork = [...view._streamCtxMap.values(), ...view._preparingTurns.values()]
+            .some(ctx => ctx.rollingWindow === view.rollingWindow);
+        if (oldWindow === view.rollingWindow && !activeWork && !windowWork) view.set_generating(false);
+        return;
+    }
+    if (!view.chatTabs.includes(tab)) return;
     if (hasTabWork(view, tab)) return;
     if (tab.isActive) view.set_generating(false);
     else {
@@ -2353,7 +2363,7 @@ export function stop_generation(this: ChatViewLike, tabKey?: string, reason = 's
     if (targetTab && targetTab !== activeTab) {
         sCtx?.watchdog?.disarm();
         this._releaseStreamCtx(targetKey, sCtx?.turnId);
-        if (preparing) syncTabGenerating(this, targetTab);
+        if (preparing) syncTabGenerating(this, preparing.tab, targetKey, preparing.rollingWindow);
         return;
     }
     // Po Stopie nie sięgamy sami po zaległe wyniki subów (patrz `_deliverSubTaskResult`) - to
@@ -2403,7 +2413,7 @@ export function stop_generation(this: ChatViewLike, tabKey?: string, reason = 's
     this._resetPaintTargets();
     this.hideTypingIndicator();
 
-    if (preparing) syncTabGenerating(this, targetTab);
+    if (preparing) syncTabGenerating(this, preparing.tab, targetKey, preparing.rollingWindow);
     if (!sCtx && !preparing) this.set_generating(false);
     if (!requested) {
         for (const [key, ctx] of [...this._streamCtxMap.entries(), ...this._preparingTurns.entries()]) {
