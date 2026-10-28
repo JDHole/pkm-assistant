@@ -64,6 +64,7 @@ const SUBAGENT_FRAME_PROMPTS = { pl: FRAME_PL, en: FRAME_EN };
  * Ustawień → Prompt), nie przy imporcie modułu. `DEFAULT_SUBAGENT_FRAME_PROMPT` skasowany:
  * stała nie umie być leniwa.
  */
-export function defaultSubAgentFramePrompt(locale: string = getLocale()): string {
-    return SUBAGENT_FRAME_PROMPTS[locale === 'pl' ? 'pl' : 'en'];
+export function defaultSubAgentFramePrompt(locale: string = getLocale(), mayAskParent = true): string {
+    const frame = SUBAGENT_FRAME_PROMPTS[locale === 'pl' ? 'pl' : 'en'];
+    return mayAskParent ? frame : frame.slice(0, frame.lastIndexOf('\n5. '));
 }

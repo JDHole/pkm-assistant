@@ -19,10 +19,37 @@ function fixture(withRead = false) {
     return { clock, registry, runner, tools, executions: () => executions };
 }
 
-test('ask_parent jest mechaniką każdego suba', t => {
+test('ask_parent jest mechaniką suba pierwszego piętra', t => {
     const f = fixture();
     t.deepEqual({ subTools: f.runner._getTools([], { name: 'Jaskier' }).map(x => x.function.name), rootHasAskParent: f.tools.getTool('ask_parent') !== null },
         { subTools: ['ask_parent'], rootHasAskParent: false });
+    f.registry.dispose();
+});
+
+test('głębszy sub nie widzi ani nie wykonuje ask_parent', async t => {
+    const f = fixture();
+    const payloads: Array<{ tools?: Array<{ function: { name: string } }>; messages: Array<{ role: string; content: string }> }> = [];
+    const model = { stream(payload: typeof payloads[number], cb: { done(value: unknown): void }) {
+        payloads.push(structuredClone(payload));
+        cb.done(response(payloads.length === 1 ? { role: 'assistant', content: '', tool_calls: [questionCall] } : { role: 'assistant', content: 'Gotowe' }));
+    } };
+    await f.runner.runTask('zadanie', { name: 'Jaskier' }, { name: 'Klara', tools: [] } as never, model as never, { origin: owner, delegationDepth: 2 });
+    t.deepEqual((payloads[0].tools ?? []).map(tool => tool.function.name), []);
+    t.false(payloads[0].messages[0].content.includes('ask_parent'));
+    t.is(payloads[1].messages.find(message => message.role === 'tool')?.content, 'Cannot ask the lead: no channel is available.');
+    t.deepEqual(f.registry.getQuestionState(f.registry.list()[0].id), { kind: 'none' });
+    f.registry.dispose();
+});
+
+test('sub pierwszego piętra widzi ask_parent', async t => {
+    const f = fixture();
+    let names: string[] = [];
+    const model = { stream(payload: { tools?: Array<{ function: { name: string } }> }, cb: { done(value: unknown): void }) {
+        names = (payload.tools ?? []).map(tool => tool.function.name);
+        cb.done(response({ role: 'assistant', content: 'Gotowe' }));
+    } };
+    await f.runner.runTask('zadanie', { name: 'Jaskier' }, { name: 'Klara', tools: [] } as never, model as never, { origin: owner, delegationDepth: 1 });
+    t.deepEqual(names, ['ask_parent']);
     f.registry.dispose();
 });
 

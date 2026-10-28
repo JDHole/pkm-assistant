@@ -34,6 +34,10 @@ import type { RunActivity, ParentQuestion, QuestionResolution } from './ParentQu
 
 type AgentLike = { name: string };
 
+function _canAskParentAtDepth(depth: number): boolean {
+    return depth <= 1;
+}
+
 const SUB_AGENT_MAX_OUTPUT_TOKENS = 16384;
 
 /** Narzędzie tak, jak oddaje je `ToolRegistry.getTool`/`filterByAgent` — pełny kształt
@@ -573,7 +577,7 @@ export class SubAgentRunner {
             const visibleToolNames = _canDelegateAtDepth(delegationDepth, limits.max_delegation_depth)
                 ? toolNames
                 : toolNames.filter((name) => name !== 'delegate' && name !== 'agent_delegate' && name !== 'sub_agent');
-            const tools = this._getTools(visibleToolNames, agent, options.callerToolNames);
+            const tools = this._getTools(visibleToolNames, agent, options.callerToolNames, delegationDepth);
             // Fail-closed whitelist: the sub-agent may ONLY execute tools that
             // survived the parent∩sub intersection in _getTools. _executeTool enforces this
             // so the direct-execution fallback cannot run a tool outside the whitelist.
@@ -689,6 +693,10 @@ export class SubAgentRunner {
                     const detail = { name: toolCall.name ?? '', args, resultPreview: '' };
                     observedToolDetails[seq] = detail;
                     if (toolCall.name === 'ask_parent') {
+                        if (!allowedToolNames.has('ask_parent')) {
+                            failedToolCalls.add(seq);
+                            return t('subagent.ask_parent_unavailable');
+                        }
                         const text = args && typeof args === 'object' && 'text' in args && typeof args.text === 'string' ? args.text : '';
                         const opened = subTask && registry ? _safeRegistry(() => registry.openParentQuestion(subTask!.id, text)) : undefined;
                         if (!opened || opened.kind === 'rejected') {
@@ -935,7 +943,7 @@ export class SubAgentRunner {
         // `[key: string]: unknown` w `PkmAssistantSettings`, więc nominalnie się nie unifikuje).
         // Rama idzie za JĘZYKIEM INTERFEJSU i liczy się RAZ NA BIEG (tu), nie przy imporcie -
         // `setLocale()` leci z `src/main.ts` dopiero po załadowaniu modułów.
-        const frame = resolveWorkPrompt(agent, 'subagent_frame_prompt', this.plugin?.env?.settings as WorkPromptSettings | undefined, defaultSubAgentFramePrompt());
+        const frame = resolveWorkPrompt(agent, 'subagent_frame_prompt', this.plugin?.env?.settings as WorkPromptSettings | undefined, defaultSubAgentFramePrompt(undefined, _canAskParentAtDepth(delegationDepth)));
 
         // METHOD — custom sub method (KNOWLEDGE.md), soft cap z limits.
         let methodBlock = '';
@@ -1007,6 +1015,7 @@ export class SubAgentRunner {
         toolNames: string[],
         parentAgent: AgentLike | null | undefined,
         callerToolNames?: string[] | null,
+        delegationDepth = 0,
     ): Array<{ type: 'function'; function: { name: string; description: string; parameters: unknown } }> {
         const parentVisible = parentAgent && typeof this.toolRegistry.filterByAgent === 'function'
             ? new Set<string>(this.toolRegistry.filterByAgent(parentAgent).map((t) => t.name))
@@ -1032,7 +1041,7 @@ export class SubAgentRunner {
                     parameters: tool.inputSchema
                 }
             }));
-        tools.push({ type: 'function', function: { name: 'ask_parent', description: 'Ask the parent agent one specific question when information cannot be obtained with your tools.', parameters: { type: 'object', properties: { text: { type: 'string', description: 'The question for the parent agent.' } }, required: ['text'], additionalProperties: false } } });
+        if (_canAskParentAtDepth(delegationDepth)) tools.push({ type: 'function', function: { name: 'ask_parent', description: 'Ask the parent agent one specific question when information cannot be obtained with your tools.', parameters: { type: 'object', properties: { text: { type: 'string', description: 'The question for the parent agent.' } }, required: ['text'], additionalProperties: false } } });
         return tools;
     }
 
