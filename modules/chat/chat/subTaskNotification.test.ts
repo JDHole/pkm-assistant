@@ -90,6 +90,13 @@ function makeTask(over: Partial<SubTask> = {}): SubTask {
     } as SubTask;
 }
 
+test('biały handoff ustępuje niepustemu wynikowi częściowemu', t => {
+    const task = makeTask({ outcome: { end: { kind: 'timeout' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] },
+        result: { text: '', handoff: ' \n\t ', toolsUsed: [], durationMs: 1, usage: null },
+        partial: { text: 'DOROBEK' } as SubTask['partial'] });
+    t.true(buildSubTaskNotificationText(task).includes('DOROBEK'));
+});
+
 // ── buildSubTaskNotificationText ─────────────────────────────────────────────
 
 test('powiadomienie niesie nazwę suba, id zadania, treść wyniku i stopkę-instrukcję', t => {

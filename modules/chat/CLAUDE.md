@@ -1,5 +1,7 @@
 # modules/chat/
 
+Sekcja pytania w powiadomieniu normalizuje końce linii do LF przed obliczeniem długości. Pusty po trim handoff ustępuje dostępnemu wynikowi częściowemu.
+
 `ask_user` z `question_id` pokazuje pytanie i zadanie suba wyłącznie dla otwartego pytania właściciela kanału. Przyjęta odpowiedź prowadzącego przechowuje dane kafelka w wyniku narzędzia, aby historia mogła go odtworzyć.
 
 `ask_user` otwiera kanał z zamrożonym właścicielem tury (agent, ścieżka i epoka sesji).

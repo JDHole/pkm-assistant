@@ -132,7 +132,7 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
         parts.push(t('chat.subagent_notification.unconfirmed'));
     } else if (outcome?.completeness === 'partial') {
         parts.push(t('chat.subagent_notification.partial'));
-        const source = (typeof task?.result?.handoff === 'string' && task.result.handoff) || (typeof task?.partial?.text === 'string' && task.partial.text) || (typeof task?.result?.text === 'string' ? task.result.text : '');
+        const source = [task?.result?.handoff, task?.partial?.text, task?.result?.text].find(value => typeof value === 'string' && value.trim()) ?? '';
         const raw = stripRunnerQuestion(source, task.result?.question?.note).trim();
         parts.push(raw ? (maxResultChars > 0 && raw.length > maxResultChars ? `${raw.slice(0, maxResultChars)}\n${t('chat.subagent_notification.truncated', { chars: maxResultChars })}` : raw) : t('chat.subagent_notification.empty_result'));
     } else if (outcome?.completeness === 'empty') {
@@ -168,7 +168,7 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
 
     const question = task.result?.question;
     const questionSection = question && question.resolution.kind !== 'answered'
-        ? t('chat.subagent_notification.question', { reason: t(question.resolution.kind === 'no-answer' ? 'chat.subagent_notification.question_no_answer' : 'chat.subagent_notification.question_cancelled'), question: question.text })
+        ? t('chat.subagent_notification.question', { reason: t(question.resolution.kind === 'no-answer' ? 'chat.subagent_notification.question_no_answer' : 'chat.subagent_notification.question_cancelled'), question: question.text }).replace(/\r\n?/g, '\n')
         : '';
     const body = parts.join('\n\n') + (questionSection ? `\n\n[SUBTASK_QUESTION]\n${questionSection}\n[/SUBTASK_QUESTION ${questionSection.length}]` : '');
     const instruction = options.subId

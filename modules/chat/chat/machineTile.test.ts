@@ -23,8 +23,67 @@ import type { MachineView } from './machineMessage.js';
 import { SubAgentRunner, SubTaskRegistry } from '../../sub-agents/index.js';
 import { QuestionTestClock } from '../../sub-agents/test-support/questionTestClock.js';
 import type { SubTask } from '../../sub-agents/index.js';
+import { formatSessionEvent, parseActiveSession } from '../../memory/activeSessionFormat.js';
+import { RollingWindow } from './RollingWindow.js';
+import { RollingWindowMessageStore } from './RollingWindowMessageStore.js';
+import { runAgentLoop } from '../../agent-loop/index.js';
 
 type Listener = (ev: unknown) => void;
+
+test.serial('partial runnera i historia pytania przeżywają zapis sesji', async t => {
+    await withFakeDocument(async () => {
+        for (const locale of ['pl', 'en'] as const) for (const mode of ['stop', 'timeout'] as const) for (const cap of [0, 12, 12000]) {
+            setLocale(locale);
+            const clock = new QuestionTestClock();
+            const registry = new SubTaskRegistry({ questionClock: clock });
+            const events: Array<{ type?: string; [key: string]: unknown }> = [];
+            const memory = { appendSessionEvent: async (_path: string, event: { type?: string; [key: string]: unknown }) => { events.push(event); return ''; } };
+            const read = { name: 'read', description: 'read', inputSchema: {}, execute: async () => 'DOROBEK' };
+            const runner = new SubAgentRunner({ app: {}, plugin: { subTaskRegistry: registry, agentManager: { getAgentMemory: () => memory }, env: { settings: { pkmAssistant: { limits: { subagent_salvage_max_chars: cap } } } } }, toolRegistry: { filterByAgent: () => [read], getTool: () => read } });
+            let ready!: () => void;
+            const waiting = new Promise<void>(resolve => { ready = resolve; });
+            let calls = 0;
+            const model = { stream(_payload: unknown, cb: { done(value: unknown): void }) {
+                const call = calls++ === 0 ? { id: 'r', type: 'function', function: { name: 'read', arguments: '{}' } } : { id: 'q', type: 'function', function: { name: 'ask_parent', arguments: JSON.stringify({ text: 'First?\r\n\r\nSecond?\rThird?' }) } };
+                cb.done({ choices: [{ message: { role: 'assistant', content: '', tool_calls: [call] } }] });
+            } };
+            const run = runner.runTask('zadanie', { name: 'Lead' }, { name: 'Badacz', tools: ['read'] } as never, model as never,
+                { origin: { agentName: 'Lead', sessionPath: 'a', sessionEpoch: 'b' }, onTaskCreated: task => registry.attachAbort(task.id, () => {}), onActivity: activity => { if (activity.kind === 'waiting') ready(); } });
+            await waiting;
+            if (mode === 'stop') registry.requestStop(registry.list()[0].id, 'lead');
+            else clock.advance(300000);
+            await run;
+            const partial = events.find(event => event.type === 'agent_loop_partial')!;
+            const restored = parseActiveSession(formatSessionEvent('agent_loop_partial', partial, '2026-10-28T00:00:00Z')).messages[0];
+            const window = new RollingWindow();
+            await window.addMessage(restored.role, restored.content);
+            let payload = '';
+            const lead = { stream(request: unknown, cb: { done(value: unknown): void }) {
+                payload = JSON.stringify(request);
+                cb.done({ choices: [{ message: { role: 'assistant', content: 'Gotowe' } }] });
+            } };
+            await runAgentLoop({ model: lead as never, store: new RollingWindowMessageStore(window), resolveTools: () => [], executeToolCall: async () => '', limits: { maxIterations: 1 } });
+            t.true(payload.includes('First?\\n\\nSecond?\\nThird?'));
+            t.true(payload.includes(mode === 'stop' ? 'cancelled' : 'no-answer'));
+            if (mode === 'stop') { t.true(payload.includes('lead')); t.true(payload.includes('stop')); }
+            const task = registry.list()[0];
+            const delivery = buildSubTaskResultDelivery(task, undefined, 0);
+            const history = parseActiveSession(formatSessionEvent('user_message', { content: delivery.text }, '2026-10-28T00:00:00Z')).messages[0];
+            for (const withRegistry of [false, true]) {
+                const view = buildMachineView({ ...history }, { t: translate, ...(withRegistry ? { getTask: () => task } : {}) });
+                if (mode === 'timeout') t.is(view!.subAgentResult!.openQuestion, 'First?\n\nSecond?\nThird?');
+                t.false(Boolean(view!.subAgentResult!.material?.includes('SUBTASK_QUESTION')));
+                const container = makeFakeEl();
+                await renderMachineTile(container as unknown as HTMLElement, fakePlugin([], null), view!);
+                const tile = findByClass(container, 'cs-tile--subresult')!;
+                findByClass(tile, 'cs-tile__head')!.fire('click');
+                if (mode === 'timeout') t.is(deepText(tile).split('First?\n\nSecond?\nThird?').length - 1, 1);
+            }
+            registry.dispose();
+        }
+        setLocale('en');
+    });
+});
 
 type FakeEl = {
     tagName: string;
