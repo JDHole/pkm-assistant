@@ -60,6 +60,10 @@ export const ACTIVE_SESSION_FORMAT_VERSION = 3;
  * Zbiór jest zamknięty CELOWO: parser bez whitelisty brał każdy nagłówek
  * `## X` z treści za nową wiadomość, a API odrzuca nieznane role.
  */
+import type { QuestionResolution } from '../sub-agents/index.js';
+
+export type SessionQuestion = { text: string; resolution: Exclude<QuestionResolution, { kind: 'answered' }> };
+
 export type SessionRole = 'system' | 'user' | 'assistant' | 'tool';
 
 /**
@@ -77,6 +81,7 @@ export type EventFieldName =
     | 'prompt'
     | 'tool_call_id'
     | 'tool_calls'
+    | 'question'
     | 'seq';
 
 /**
@@ -128,6 +133,7 @@ export interface ActiveSessionMessage {
     seq: number | null;
     toolCallId?: string;
     toolCalls?: SessionToolCall[];
+    question?: SessionQuestion;
 }
 
 /**
@@ -175,6 +181,7 @@ export const EVENT_FIELDS: EventFieldName[] = [
     'prompt',
     'tool_call_id',
     'tool_calls',
+    'question',
     'seq',
 ];
 
@@ -403,6 +410,7 @@ export function parseActiveSession(text: string | null | undefined): ParsedActiv
         if (contentValue || toolCallIdRaw || toolCalls) {
             const eventRole = roleFromEvent(eventTypeFromHeader(rawHeader), rawBody);
             if (eventRole) {
+                const question = parseSessionQuestion(extractEventField(rawBody, 'question'));
                 // v3: `tool_call_id` (event `tool_result`) i `tool_calls` (event `agent_message`
                 // z wywołaniami narzędzi) - klucz dokładany TYLKO gdy pole realnie jest w bloku,
                 // żeby wiadomość bez nich zostawała bit w bit takim samym obiektem jak przed v3
@@ -413,6 +421,7 @@ export function parseActiveSession(text: string | null | undefined): ParsedActiv
                     seq: seqFromEvent(rawBody),
                     ...(toolCallIdRaw ? { toolCallId: toolCallIdRaw } : {}),
                     ...(toolCalls ? { toolCalls } : {}),
+                    ...(question ? { question } : {}),
                 });
                 lastWasTranscript = false;
                 continue;
@@ -506,6 +515,24 @@ function seqFromEvent(body: string): number | null {
  * traktowany tak, jakby pola w ogóle nie było - restore nie ma prawa rzucić na
  * uszkodzonym/ręcznie edytowanym pliku sesji).
  */
+function parseSessionQuestion(raw: string): SessionQuestion | undefined {
+    if (!raw) return undefined;
+    try {
+        const value: unknown = JSON.parse(unescapeActiveText(raw));
+        if (!value || typeof value !== 'object' || !('text' in value) || typeof value.text !== 'string'
+            || !('resolution' in value) || !value.resolution || typeof value.resolution !== 'object'
+            || !('kind' in value.resolution)) return undefined;
+        const resolution = value.resolution;
+        if (resolution.kind === 'no-answer') return { text: value.text, resolution: { kind: 'no-answer' } };
+        if (resolution.kind === 'cancelled' && 'by' in resolution && 'reason' in resolution
+            && (resolution.by === 'user' || resolution.by === 'lead' || resolution.by === 'system')
+            && (resolution.reason === 'stop' || resolution.reason === 'unload' || resolution.reason === 'run-ended')) {
+            return { text: value.text, resolution: { kind: 'cancelled', by: resolution.by, reason: resolution.reason } };
+        }
+    } catch { /* uszkodzone pole nie blokuje odczytu reszty sesji */ }
+    return undefined;
+}
+
 function parseSessionToolCalls(raw: string): SessionToolCall[] | null {
     if (!raw) return null;
     let parsed: unknown;
