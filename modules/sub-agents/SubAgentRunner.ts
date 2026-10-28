@@ -30,6 +30,7 @@ import type { ChatModel } from '../models/index.js';
 import { classifyRunEnd } from './runOutcome.js';
 import type { RunEffect, RunOutcome } from './runOutcome.js';
 import { allocateSubTaskId } from './subTaskId.js';
+import type { RunActivity, ParentQuestion } from './ParentQuestions.js';
 
 type AgentLike = { name: string };
 
@@ -90,6 +91,8 @@ interface RunnerPlugin extends PluginApi {
 }
 
 type RunOptions = {
+    onActivity?: (activity: RunActivity) => void;
+    onQuestion?: (question: ParentQuestion) => void;
     turnKind?: 'user' | 'machine';
     turnStartedSeq?: import('./SubTaskRegistry.js').RuntimeSequence;
     delegationDepth?: number;

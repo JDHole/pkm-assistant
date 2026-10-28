@@ -22,6 +22,10 @@
  */
 import { log } from '../../core/utils/Logger.js';
 import type { SubTask } from './SubTaskRegistry.js';
+import type { ParentQuestion } from './ParentQuestions.js';
+export type SubTaskNotice = { kind: 'result'; task: SubTask } | { kind: 'question'; question: ParentQuestion };
+export type SubTaskNoticeDeliverer = (notice: SubTaskNotice) => boolean;
+export interface SubTaskNoticeClaim { notice: SubTaskNotice; ack(): void; release(): void }
 
 /** Dostawca wyniku. `true` = skonsumowane (wypada z kolejki); `false`/wyjątek = zostaje. */
 export type SubTaskDeliverer = (task: SubTask) => boolean;
@@ -34,7 +38,7 @@ export interface SubTaskClaim {
 }
 
 interface PendingEntry {
-    task: SubTask;
+    notice: SubTaskNotice;
     claimed: boolean;
     delivering: boolean;
 }
@@ -60,12 +64,14 @@ export class SubTaskNotifier {
     // `declare` = sama deklaracja typu, zero emitu.
     declare private _pending: PendingEntry[];
     declare private _deliverer: SubTaskDeliverer | null;
+    declare private _noticeDeliverer: SubTaskNoticeDeliverer | null;
     declare private _maxPending: number;
     declare private _unsubscribe: (() => void) | null;
 
     constructor({ registry, maxPending = MAX_PENDING }: SubTaskNotifierOptions) {
         this._pending = [];
         this._deliverer = null;
+        this._noticeDeliverer = null;
         this._maxPending = Number(maxPending) > 0 ? Number(maxPending) : MAX_PENDING;
         this._unsubscribe = null;
         this._subscribe(registry);
@@ -75,11 +81,16 @@ export class SubTaskNotifier {
         try {
             const events = registry?.events;
             if (!events?.on) return;
-            const handler = (payload: unknown) => this._onFinished(payload);
-            const off = events.on('task:finished', handler);
-            this._unsubscribe = typeof off === 'function'
-                ? off
-                : () => { try { events.off?.('task:finished', handler); } catch { /* best-effort */ } };
+            const handlers: Array<[string, (payload: unknown) => void]> = [
+                ['task:finished', payload => this._onFinished(payload)],
+                ['question:opened', payload => this._onQuestion(payload)],
+                ['question:closed', payload => this._removeQuestion(payload)],
+            ];
+            const unsubs = handlers.map(([name, handler]) => {
+                const off = events.on(name, handler);
+                return typeof off === 'function' ? off : () => events.off?.(name, handler);
+            });
+            this._unsubscribe = () => { for (const off of unsubs) off(); };
         } catch (e) {
             log.warn('SubTaskNotifier', 'subskrypcja rejestru padła (powiadomienia OFF):', e);
         }
@@ -90,7 +101,8 @@ export class SubTaskNotifier {
         try {
             const task = payload as SubTask | undefined;
             if (!task?.id || task.background !== true) return;
-            const entry: PendingEntry = { task, claimed: false, delivering: false };
+            this._removeTaskQuestions(task.id);
+            const entry: PendingEntry = { notice: { kind: 'result', task }, claimed: false, delivering: false };
             this._pending.push(entry);
             this._tryDeliver(entry);
             this._trimPending();
@@ -99,15 +111,29 @@ export class SubTaskNotifier {
         }
     }
 
+    private _onQuestion(payload: unknown): void {
+        const question = payload as ParentQuestion;
+        if (!question?.id) return;
+        const entry: PendingEntry = { notice: { kind: 'question', question }, claimed: false, delivering: false };
+        this._pending.push(entry); this._tryDeliver(entry); this._trimPending();
+    }
+    private _removeQuestion(payload: unknown): void {
+        const question = payload as ParentQuestion;
+        this._pending = this._pending.filter(entry => entry.notice.kind !== 'question' || entry.notice.question.id !== question?.id);
+    }
+    private _removeTaskQuestions(taskId: string): void {
+        this._pending = this._pending.filter(entry => entry.notice.kind !== 'question' || entry.notice.question.taskId !== taskId);
+    }
+
     /** Jedno miejsce, w którym wołamy dostawcę. Wyjątek = „nie skonsumowano". */
     private _tryDeliver(entry: PendingEntry): void {
-        const deliver = this._deliverer;
+        const deliver = this._noticeDeliverer ?? (entry.notice.kind === 'result' && this._deliverer ? (notice: SubTaskNotice) => notice.kind === 'result' && this._deliverer?.(notice.task) === true : null);
         if (!deliver || entry.claimed || entry.delivering || !this._pending.includes(entry)) return;
         entry.delivering = true;
         try {
-            if (deliver(entry.task) === true) this._remove(entry);
+            if (deliver(entry.notice) === true) this._remove(entry);
         } catch (e) {
-            log.warn('SubTaskNotifier', `dostawca odbił wynik ${entry.task.id} (zostaje w kolejce):`, e);
+            log.warn('SubTaskNotifier', 'dostawca odbił powiadomienie (zostaje w kolejce):', e);
         } finally {
             entry.delivering = false;
         }
@@ -125,7 +151,7 @@ export class SubTaskNotifier {
             if (index === -1) break;
             const [dropped] = this._pending.splice(index, 1);
             log.warn('SubTaskNotifier',
-                `kolejka powiadomień pełna (${this._maxPending}) — gubię najstarszy wynik ${dropped?.task.id || '(?)'}`);
+                `kolejka powiadomień pełna (${this._maxPending}) — gubię najstarsze powiadomienie ${dropped?.notice.kind || '(?)'}`);
         }
     }
 
@@ -136,6 +162,7 @@ export class SubTaskNotifier {
     setDeliverer(fn: SubTaskDeliverer | null): void {
         this._deliverer = typeof fn === 'function' ? fn : null;
     }
+    setNoticeDeliverer(fn: SubTaskNoticeDeliverer | null): void { this._noticeDeliverer = typeof fn === 'function' ? fn : null; }
 
     /** Ponów próbę dla wszystkiego, co czeka — w kolejności FIFO. Nieskonsumowane zostaje. */
     drain(): void {
@@ -145,12 +172,15 @@ export class SubTaskNotifier {
 
     /** Zajmij pasujące wolne wyniki synchronicznie, bez usuwania ich z kolejki. */
     claimPending(predicate: (task: SubTask) => boolean): SubTaskClaim[] {
-        const claims: SubTaskClaim[] = [];
+        return this.claimNotices(notice => notice.kind === 'result' && predicate(notice.task)).map(claim => ({ task: (claim.notice as { kind: 'result'; task: SubTask }).task, ack: () => claim.ack(), release: () => claim.release() }));
+    }
+    claimNotices(predicate: (notice: SubTaskNotice) => boolean): SubTaskNoticeClaim[] {
+        const claims: SubTaskNoticeClaim[] = [];
         for (const entry of [...this._pending]) {
             if (entry.claimed || entry.delivering || !this._pending.includes(entry)) continue;
             let matches: boolean;
             try {
-                matches = predicate(entry.task);
+                matches = predicate(entry.notice);
             } catch (e) {
                 log.warn('SubTaskNotifier', 'filtr claim padł (ignorowane):', e);
                 continue;
@@ -165,15 +195,16 @@ export class SubTaskNotifier {
                 entry.claimed = false;
                 if (ack) this._remove(entry);
             };
-            claims.push({ task: entry.task, ack: () => finish(true), release: () => finish(false) });
+            claims.push({ notice: entry.notice, ack: () => finish(true), release: () => finish(false) });
         }
         return claims;
     }
 
     /** Wszystko, co czeka na dostarczenie (kopia — kolejka jest prywatna). */
     pending(): SubTask[] {
-        return this._pending.map(entry => entry.task);
+        return this._pending.flatMap(entry => entry.notice.kind === 'result' ? [entry.notice.task] : []);
     }
+    pendingNotices(): SubTaskNotice[] { return this._pending.map(entry => entry.notice); }
 
     /**
      * Czekające wyniki zlecone przez danego agenta. Bierzemy `origin.agentName`
@@ -193,6 +224,7 @@ export class SubTaskNotifier {
         }
         this._unsubscribe = null;
         this._deliverer = null;
+        this._noticeDeliverer = null;
         this._pending = [];
     }
 }
