@@ -222,7 +222,7 @@ function buildPaintFakeThis() {
         current_message_container: bubble,
         current_message_bubble: null,
         current_message_text: textEl,
-        chatTabs: [],
+        chatTabs: [], _streamCtxMap: new Map(),
         app: {},
         _currentThinkingBlock: null,
         _lastPaintedContent: null,
@@ -539,7 +539,7 @@ test.serial('handle_error: aktywna zakladka planuje przerysowanie lacznika NAWET
 function buildStopGenerationFakeThis() {
     let drawCount = 0;
     const fakeThis: TestDynamic = {
-        _streamCtxMap: new Map(),
+        chatTabs: [], _streamCtxMap: new Map(),
         _preparingTurns: new Map(),
         _drainSuppressed: false,
         _clearQueuedDrainTimer() { /* no-op fake */ },

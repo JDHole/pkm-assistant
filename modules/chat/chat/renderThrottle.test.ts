@@ -308,10 +308,10 @@ test('_switchTab rozbraja throttle, a malowanie pyta o właściciela (strażnik 
         'cancel MUSI stać przed przerysowaniem listy (krok 7) i przywróceniem scrollTop (krok 9)');
 
     const paint = bodyOf(streaming, '_paintStreamFrame');
-    t.regex(paint, /shouldPaintFrame\(frame, activeTabAgent\)/,
+    t.regex(paint, /shouldPaintFrame\(frame, activeKey\)/,
         'malowanie musi pytać, czy właściciel klatki nadal jest na wierzchu');
     const chunk = bodyOf(streaming, 'handle_chunk');
-    t.regex(chunk, /owner: agentName/,
+    t.regex(chunk, /owner: tabKey/,
         'klatka musi wozić właściciela, inaczej bramka nie ma czego sprawdzić');
 });
 

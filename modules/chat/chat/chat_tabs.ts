@@ -255,12 +255,12 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
     const agentName = tab?.agentName;
     // Tylko gdy ta zakładka NAPRAWDĘ coś trzyma — `stop_generation` czyści stan streamingu
     // i podnosi `_drainSuppressed`, więc na cichej zakładce byłoby to szkodliwe.
-    const wLocie = !!agentName && !!(
-        this._streamCtxMap?.has?.(agentName) || this._preparingTurns?.has?.(agentName)
-    );
+    const turnKey = [...this._streamCtxMap.entries(), ...this._preparingTurns.entries()]
+        .find(([, ctx]) => ctx.tab === tab)?.[0] || tabKey;
+    const wLocie = this._streamCtxMap.has(turnKey) || this._preparingTurns.has(turnKey);
     if (wLocie) {
         try {
-            this.stop_generation(agentName, 'close_tab');
+            this.stop_generation(turnKey, 'close_tab');
         } catch (e) {
             log.warn('Chat', `Zatrzymanie tury zamykanej zakładki padło (zamykamy dalej): ${(e as Error)?.message || String(e)}`);
         }
@@ -272,7 +272,7 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
     if (!registry) return;
     try {
         registry.closeQueuedForOwners?.({
-            tabKeys: [tabKey],
+            tabKeys: [...new Set([tabKey, turnKey])],
             agentNames: agentName ? [agentName] : [],
         }, 'system');
     } catch (e) {
@@ -281,7 +281,7 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
     if (!registry.list || !registry.requestStop) return;
     try {
         const ids = collectSubTaskIdsForOwners(registry.list(), {
-            tabKeys: [tabKey],
+            tabKeys: [...new Set([tabKey, turnKey])],
             ...(agentName ? { agentNames: [agentName] } : {}),
         });
         for (const id of ids) {

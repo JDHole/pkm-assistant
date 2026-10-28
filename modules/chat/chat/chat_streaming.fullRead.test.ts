@@ -289,6 +289,7 @@ test.serial('first response after New Session renders and clears generating stat
     const memory = { activeSessionPath: oldPath as string | null,
         sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as string | null,
         async startNewSession() { this.activeSessionPath = null; this.sessionEpoch = null; },
+        async startActiveSession() { this.activeSessionPath = path; this.sessionEpoch = epoch; return path; },
         async appendSessionEvent() { return path; } };
     const agent = { name: 'Jaskier' };
     const rw = new RollingWindow();

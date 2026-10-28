@@ -60,7 +60,7 @@ export class ChatView extends PluginItemView {
     declare chatTabs: ChatTab[];
     declare _agentStates: Map<string, ChatTabState>;
     declare _streamCtxMap: Map<string, ChatStreamContext>;
-    declare _preparingTurns: Map<string, TurnAbortHandle>;
+    declare _preparingTurns: Map<string, { tab: ChatTab | null; rollingWindow: RollingWindow; abort: TurnAbortHandle }>;
     declare currentAutonomy: AutonomyMode;
     declare currentArtifactId: string | null;
     declare slashCommands: SlashCommandsRegistry;
