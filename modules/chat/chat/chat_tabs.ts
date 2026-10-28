@@ -28,6 +28,10 @@ export function _initTabs(this: ChatViewLike) {
 
     if (this.chatTabs.length === 0) {
         this.chatTabs.push({ agentName: activeAgentName, sessionId: activeAgentName, isActive: true });
+        const restoredTab = this.chatTabs[0];
+        for (const ctx of [this._streamCtxMap.get(''), this._preparingTurns.get('')]) {
+            if (ctx && !ctx.tab && ctx.rollingWindow === this.rollingWindow) ctx.tab = restoredTab;
+        }
     }
 
     const activeTab = this.chatTabs.find((t: ChatTab) => t.isActive) || this.chatTabs[0];
@@ -258,9 +262,13 @@ function _stopTabWork(this: ChatViewLike, tab: ChatTab | undefined, tabKey: stri
     // i podnosi `_drainSuppressed`, więc na cichej zakładce byłoby to szkodliwe.
     const queued = this._queuedMessage;
     const queueTabKey = readQueuedMessage(queued)?.owner?.tabKey;
-    const ownQueue = !queueTabKey || queueTabKey === tabKey;
     const turnKeys = [...new Set([...this._streamCtxMap.entries(), ...this._preparingTurns.entries()]
         .filter(([key, ctx]) => ctx.tab === tab || (key === tabKey && !ctx.tab)).map(([key]) => key))];
+    const otherLiveOwner = queueTabKey && this.chatTabs.some((other: ChatTab) => other !== tab
+        && (_tabKey(other) === queueTabKey || [...this._streamCtxMap.entries(), ...this._preparingTurns.entries()]
+            .some(([key, ctx]) => key === queueTabKey && ctx.tab === other)));
+    const ownQueue = !queueTabKey || queueTabKey === tabKey || turnKeys.includes(queueTabKey) || !otherLiveOwner;
+    if (turnKeys.length === 0 && queued && ownQueue) this.stop_generation(tabKey, 'close_tab');
     for (const key of turnKeys) this._preparingTurns.get(key)?.abort.abort('close_tab');
     for (const turnKey of turnKeys) {
         try {

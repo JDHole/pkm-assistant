@@ -1163,7 +1163,6 @@ export function _resetPaintTargets(this: ChatViewLike) {
  * Wzór porównania tożsamości jest ten sam, co u watchdoga w `_onStreamStall`.
  */
 export function _releaseStreamCtx(this: ChatViewLike, tabKey: string, turnId?: number) {
-    if (!tabKey) return;
     const live = this._streamCtxMap.get(tabKey);
     if (!live) return;
     if (typeof turnId === 'number' && typeof live.turnId === 'number' && live.turnId !== turnId) {
@@ -2315,10 +2314,10 @@ export function stop_generation(this: ChatViewLike, tabKey?: string, reason = 's
     // więc pierwszym argumentem potrafi być MouseEvent (wzór ostrzeżenia przy `send_message`).
     // Nie-string traktujemy jak brak klucza - czyli turę aktywnej zakładki.
     const activeTab = this.chatTabs.find((tab: ChatTab) => tab.isActive);
-    const requested = typeof tabKey === 'string' ? tabKey : '';
+    const requested = typeof tabKey === 'string';
     const activeKey = [...this._streamCtxMap.entries(), ...this._preparingTurns.entries()]
-        .find(([, ctx]) => ctx.tab === activeTab)?.[0] || _tabKey(activeTab);
-    const targetKey = requested || activeKey;
+        .find(([, ctx]) => ctx.tab === activeTab)?.[0] ?? _tabKey(activeTab);
+    const targetKey = requested ? tabKey : activeKey;
     const candidate = this._streamCtxMap.get(targetKey);
     const pending = this._preparingTurns.get(targetKey);
     const sCtx = requested || candidate?.tab === activeTab ? candidate : undefined;

@@ -1,7 +1,7 @@
 import test from 'ava';
 import { _restoreActiveSession, appendToActiveSession } from './chat_session.js';
-import { _closeActiveTab, _switchTab } from './chat_tabs.js';
-import { send_message, stop_generation, stop_all_turns, set_generating, _clearQueuedDrainTimer, _isTurnActiveTab, _releaseStreamCtx, _finalizeTurn, _paintStreamFrame, _chatBeforeContinue, handle_error, _onStreamStall } from './chat_streaming.js';
+import { _closeActiveTab, _initTabs, _switchTab } from './chat_tabs.js';
+import { send_message, stop_generation, stop_all_turns, set_generating, _queueOwner, _clearQueuedDrainTimer, _isTurnActiveTab, _releaseStreamCtx, _finalizeTurn, _paintStreamFrame, _chatBeforeContinue, handle_error, _onStreamStall } from './chat_streaming.js';
 import { queueChatMessage } from './queuedMessage.js';
 import { AgentMemory } from '../../memory/index.js';
 import streamingManager from './StreamingManager.js';
@@ -85,6 +85,61 @@ function cleanupStreams() {
     streamingManager.stopStream('same-agent-test::a.md');
     streamingManager.stopStream('same-agent-test::b.md');
 }
+
+test.serial('tura bez zakładki po archive_close jest zatrzymywana po odtworzeniu widoku', async t => {
+    for (const closeView of [false, true]) {
+        const f = await fixture();
+        await _restoreActiveSession.call(f.ctx);
+        f.ctx.chatTabs = f.ctx.chatTabs.filter((tab: Dynamic) => tab.isActive);
+        f.ctx._queueOwner = _queueOwner.bind(f.ctx);
+        f.ctx._showQueuedIndicator = () => {};
+        f.ctx.handleInputResize = () => {};
+        await applyPostArchiveAction(f.ctx, {} as Dynamic, f.memory, { action: 'archive_close' } as Dynamic, 'a.md');
+        t.is(f.ctx.chatTabs.length, 0);
+        f.ctx.input_area.value = 'Pierwsza';
+        const run = send_message.call(f.ctx, { meta: { origin: 'human' } });
+        await waitFor(() => !!f.handlers[0]);
+        const turn = f.ctx._streamCtxMap.get('');
+        t.truthy(turn);
+        t.is(turn.tab, null);
+        f.ctx.input_area.value = 'W kolejce';
+        await send_message.call(f.ctx, { meta: { origin: 'human' } });
+        _initTabs.call(f.ctx);
+        if (closeView) stop_all_turns.call(f.ctx, 'close');
+        else await _closeActiveTab.call(f.ctx);
+        const result = { aborted: turn.abort.isAborted(), generating: f.ctx.is_generating,
+            queue: f.ctx._queuedMessage, input: f.ctx.input_area.value };
+        done(f.handlers[0], 'przerwana');
+        await run;
+        streamingManager.stopStream('same-agent-test::Owner');
+        t.deepEqual(result, { aborted: true, generating: false, queue: null, input: closeView ? '' : 'W kolejce' });
+    }
+});
+
+test.serial('zamknięcie zakładki po archive_new anuluje kolejkę jej dawnej tury', async t => {
+    const f = await fixture();
+    await _restoreActiveSession.call(f.ctx);
+    f.ctx._queueOwner = _queueOwner.bind(f.ctx);
+    f.ctx._showQueuedIndicator = () => {};
+    f.ctx.handleInputResize = () => {};
+    f.memory.agentName = 'Owner';
+    f.memory.startActiveSession = async () => 'new.md';
+    f.ctx.input_area.value = 'Pierwsza';
+    const run = send_message.call(f.ctx, { meta: { origin: 'human' } });
+    await waitFor(() => !!f.handlers[0]);
+    const turn = f.ctx._streamCtxMap.get('a.md');
+    f.ctx.input_area.value = 'W kolejce';
+    await send_message.call(f.ctx, { meta: { origin: 'human' } });
+    t.is(f.ctx._queuedMessage.owner.tabKey, 'a.md');
+    await applyPostArchiveAction(f.ctx, {} as Dynamic, f.memory, { action: 'archive_new' } as Dynamic, 'a.md');
+    t.is(f.ctx.chatTabs.find((tab: Dynamic) => tab.isActive).sessionId, 'new.md');
+    await _closeActiveTab.call(f.ctx);
+    const result = { aborted: turn.abort.isAborted(), queue: f.ctx._queuedMessage, input: f.ctx.input_area.value };
+    done(f.handlers[0], 'przerwana');
+    await run;
+    cleanupStreams();
+    t.deepEqual(result, { aborted: true, queue: null, input: 'W kolejce' });
+});
 
 test.serial('obydwie odtworzone zakładki zachowują odpowiedzi i kończą generowanie', async t => {
     const f = await setup();

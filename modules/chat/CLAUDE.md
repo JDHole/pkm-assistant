@@ -1581,7 +1581,8 @@ wiadomość tylko w sesji właściciela podczas przygotowania; po przekazaniu do
 nie blokuje innych sesji.
 
 Przy zamknięciu zakładki uchwyt jej przygotowania jest przerywany po kluczu zakładki.
-Zamknięcie zakładki anuluje kolejkę wiadomości bez klucza właściciela lub z kluczem tej zakładki; kolejka z kluczem innej zakładki pozostaje.
+Zakładka odtworzona przez `_initTabs` przejmuje turę bez zakładki w swoim oknie, zachowując pusty klucz tury. Stop przyjmuje także jawny pusty klucz, a zwolnienie usuwa taki wpis mapy.
+Zamknięcie zakładki anuluje kolejkę bez klucza właściciela, z jej bieżącym lub dawnym kluczem tury oraz bez żywego właściciela; kolejka innej żywej zakładki pozostaje. Anulowanie przywraca tekst do pustego pola.
 Kontekst aktywnego strumienia jest kluczowany zamrożonym kluczem zakładki, a identyfikator
 tury chroni jej następcę przed spóźnionym sprzątaniem.
 
