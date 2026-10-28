@@ -1,5 +1,10 @@
 # modules/chat/
 
+`ask_user` otwiera kanał z zamrożonym właścicielem tury (agent, ścieżka i epoka sesji).
+Token trafia do MCP z runtime, a przycisk zamyka uchwycony kanał. Koniec tury, Stop
+i zamknięcie widoku zwalniają wyłącznie własne kanały, także te nieprzejęte przez narzędzie.
+Pauza zegara pytania suba dotyczy tylko tego samego właściciela sesji.
+
 Pasek subów pokazuje podsumowanie od pięciu widocznych wierszy, a kroki pracującego lub zatrzymującego się biegu mają nagłówek na żywo.
 
 **Interfejs czatu.** Główny widok pluginu - okno czatu w sidebarze Obsidiana. `ChatView` jest

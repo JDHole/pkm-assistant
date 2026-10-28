@@ -28,7 +28,7 @@ import type { TokenTracker } from '../../../core/index.js';
 import type { Agent, AgentManager } from '../../agents/index.js';
 import type { SkillData } from '../../skills/index.js';
 import type { AgentMemory } from '../../memory/index.js';
-import type { MCPClient, OpenAiToolDefinition, ServerVisibilityAgent, ToolRegistry } from '../../tools/index.js';
+import type { AskUserChannels, MCPClient, OpenAiToolDefinition, ServerVisibilityAgent, ToolRegistry } from '../../tools/index.js';
 import type { ChatModel, ChatRuntimeConfig, ModelLibraryEntry, PkmModelSettings } from '../../models/index.js';
 import type { SubTaskNotifier, SubTaskRegistry } from '../../sub-agents/index.js';
 import type { ArtifactStore } from '../../artifacts/index.js';
@@ -138,6 +138,7 @@ export interface ChatPlugin extends PluginApi {
     _askUserPromise?: Promise<string | null> | null;
     _askUserResolve?: ((answer: string | null) => void) | null;
     _askUserPending?: unknown;
+    _askUserChannels?: AskUserChannels | null;
 }
 
 /** Migawka ostatnio wysłanego promptu (Ustawienia → „Pokaż prompt"). */

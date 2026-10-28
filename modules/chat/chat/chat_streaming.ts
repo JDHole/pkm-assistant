@@ -149,6 +149,7 @@ interface PendingToolEntry {
     toolCall: ParsedToolCall;
     toolDisplay: HTMLElement | null;
     args: ChatToolArgs;
+    askUserChannel?: import('../../tools/index.js').AskUserChannel;
 }
 
 /** Zakumulowana odpowiedź modelu, w zakresie, jaki maluje `handle_chunk`. */
@@ -836,6 +837,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
             });
         } finally {
             turn.watchdog.disarm();
+            this._cleanupAskUser?.(turnId);
             const live = this._streamCtxMap.get(streamAgentName);
             if (!live || live.turnId === turnId) streamingManager.stopStream(streamId);
         }
@@ -1260,8 +1262,7 @@ export function _chatOnUsage(this: ChatViewLike, turn: ChatTurn, usage: Usage | 
 
 /**
  * onToolCallsParsed (SYNC względem egzekucji) - Faza 1: placeholdery UI dla wszystkich tool_calls.
- * ask_user WYMAGA tego przed egzekucją (placeholder tworzy plugin._askUserPromise, na który czeka
- * AskUserTool.execute). NIE filtruje (zwraca undefined).
+ * ask_user wymaga kanału utworzonego przed egzekucją. NIE filtruje (zwraca undefined).
  */
 export function _chatOnToolCallsParsed(this: ChatViewLike, turn: ChatTurn, toolCalls: ParsedToolCall[]) {
     turn.watchdog?.disarm(); // model skończył mówić - narzędzia mogą trwać minuty, cisza legalna
@@ -1312,10 +1313,20 @@ export function _chatOnToolCallsParsed(this: ChatViewLike, turn: ChatTurn, toolC
         const isSubAgent = subAgentCallView(toolCall.name || '', args, undefined, 'pending') === 'block';
         const isAskUser = toolCall.name === 'ask_user';
         let toolDisplay = null;
+        let askUserChannel: import('../../tools/index.js').AskUserChannel | undefined;
         if (isActiveTab && toolCallsContainer) {
-            if (isAskUser) {
+            if (isAskUser && this.plugin._askUserChannels) {
                 this.hideTypingIndicator();
-                toolDisplay = this._renderAskUserBlock(toolCall, toolCallsContainer);
+                askUserChannel = this.plugin._askUserChannels.open({
+                    agentName: turn.origin.agentName,
+                    sessionPath: turn.origin.sessionPath || '',
+                    sessionEpoch: turn.origin.sessionEpoch || '',
+                });
+                this._askUserTurnChannels ??= new Map();
+                const channels = this._askUserTurnChannels.get(turn.turnId) ?? new Set();
+                channels.add(askUserChannel);
+                this._askUserTurnChannels.set(turn.turnId, channels);
+                toolDisplay = this._renderAskUserBlock(toolCall, toolCallsContainer, askUserChannel);
             } else if (isSubAgent) {
                 this.hideTypingIndicator();
                 const _subName = args.aspect || args.sub_id || '';
@@ -1333,7 +1344,7 @@ export function _chatOnToolCallsParsed(this: ChatViewLike, turn: ChatTurn, toolC
             toolCallsContainer.appendChild(toolDisplay);
             if (isSubAgent || isAskUser) toolDisplay.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
-        return { toolCall, toolDisplay, args };
+        return { toolCall, toolDisplay, args, askUserChannel };
     });
     turn.toolCallsContainer = toolCallsContainer;
     // Nowe kotwice łącznika (kafelki/ask_user właśnie wstawione wyżej) - jeden raz na rundę
@@ -1356,6 +1367,11 @@ export async function _chatExecuteToolCall(
 ) {
     let raw: ChatToolResult | undefined;
     let error: Error | null = null;
+    const pending = toolCall.name === 'ask_user'
+        ? turn.pendingEntries?.find(entry => entry.toolCall.id === toolCall.id && entry.toolCall.name === 'ask_user' && entry.askUserChannel)
+        : undefined;
+    const channel = pending?.askUserChannel;
+    if (pending) pending.askUserChannel = undefined;
     try {
         // Odczyt nie jest racjonowany limiterem per turę: narzędzia = uprawnienia agenta,
         // nie tryb pracy.
@@ -1370,12 +1386,18 @@ export async function _chatExecuteToolCall(
             origin: turn.origin,
             turnKind: turn.turnKind,
             turnStartedSeq: turn.turnStartedSeq,
+            askUserChannelId: channel?.id,
             resultBudgetChars: context.resultBudgetChars,
             shouldAbort: context.shouldAbort,
         }) as ChatToolResult;
     } catch (err) {
         raw = { isError: true, error: (err as Error).message };
         error = err as Error;
+    } finally {
+        if (channel) {
+            this.plugin._askUserChannels?.forget(channel.id);
+            this._askUserTurnChannels?.get(turn.turnId)?.delete(channel);
+        }
     }
     turn.rawResults.set(toolCall.id, { result: raw, error });
 
@@ -2125,7 +2147,7 @@ export function handle_error(this: ChatViewLike, error: unknown, agentName?: str
     }
 
     // Resolve hanging ask_user promise to unblock tool execution
-    if (isActiveTab) this._cleanupAskUser();
+    if (turnId !== undefined) this._cleanupAskUser?.(turnId);
 
     // Always clear streaming context on error - ale wyłącznie wpis TEJ tury.
     if (agentName) this._releaseStreamCtx(agentName, turnId);
@@ -2170,6 +2192,7 @@ export function _onStreamStall(this: ChatViewLike, turn: ChatTurn, silentMs: num
         // Tura w tle: przerwanie TEJ tury + przerwanie XHR właściwej instancji + cleanup stanu
         // zakładki (wzór handle_error) - bez dotykania UI aktywnej zakładki.
         turn.abort?.abort('stall');
+        this._cleanupAskUser?.(turn.turnId);
         // Parytet z ręcznym Stopem: po przerwaniu nie sięgamy sami po zaległe wyniki subów
         // (auto-tura poleciałaby w ten sam martwy serwer).
         this._drainSuppressed = true;
@@ -2234,6 +2257,7 @@ export function stop_generation(this: ChatViewLike, agentName?: string, reason =
     }
 
     const sCtx = this._streamCtxMap.get(activeAgent);
+    if (sCtx) this._cleanupAskUser?.(sCtx.turnId);
     // Tura w locie ma uchwyt we wpisie mapy; tura w przygotowaniu (prompt się jeszcze buduje) -
     // w `_preparingTurns`. Bez tej drugiej gałęzi Stop kliknięty w oknie przygotowania trafiałby
     // w próżnię i tura ruszyłaby mimo niego.

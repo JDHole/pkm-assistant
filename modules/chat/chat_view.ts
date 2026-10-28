@@ -23,6 +23,7 @@ import * as sessionMethods from './chat/chat_session.js';
 
 import type { AutonomyMode } from '../../core/index.js';
 import type { Agent } from '../agents/index.js';
+import type { AskUserChannel } from '../tools/index.js';
 import type {
     ChatPlugin,
     ChatStreamContext,
@@ -60,6 +61,7 @@ export class ChatView extends PluginItemView {
     declare chatTabs: ChatTab[];
     declare _agentStates: Map<string, ChatTabState>;
     declare _streamCtxMap: Map<string, ChatStreamContext>;
+    declare _askUserTurnChannels: Map<number, Set<AskUserChannel>>;
     declare _preparingTurns: Map<string, TurnAbortHandle>;
     declare currentAutonomy: AutonomyMode;
     declare currentArtifactId: string | null;
@@ -165,6 +167,7 @@ export class ChatView extends PluginItemView {
         this.chatTabs = []; // [{agentName, isActive}]
         this._agentStates = new Map(); // agentName -> {rollingWindow, tokenTracker, autonomy, scrollTop, isGenerating}
         this._streamCtxMap = new Map(); // agentName -> streaming context (active streams)
+        this._askUserTurnChannels = new Map();
         // agentName -> uchwyt przerwania tury, która jest jeszcze W PRZYGOTOWANIU (guzik Stop
         // już się pali, ale prompt z pamięcią się buduje i wpisu w `_streamCtxMap` jeszcze nie ma).
         this._preparingTurns = new Map();

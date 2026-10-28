@@ -356,6 +356,7 @@ export function _renderAskUserBlock(
     this: ChatViewLike,
     toolCall: AskUserToolCall,
     _container: HTMLElement,
+    channel: import('../../tools/index.js').AskUserChannel,
 ): HTMLDivElement {
     // TS-boundary: argumenty wywołania narzędzia pochodzą od modelu — string JSON albo obiekt;
     // render czyta z nich wyłącznie trzy pola opisane w `AskUserArguments`.
@@ -423,13 +424,6 @@ export function _renderAskUserBlock(
         );
     }
 
-    // Promise for AskUserTool to await
-    // `null` wchodzi tą samą drogą przy sprzątaniu widoku (`_cleanupAskUser`) — obietnica
-    // musi to dopuszczać, inaczej typ kłamie o realnym zachowaniu.
-    let resolveAnswer: ((answer: string | null) => void) | undefined;
-    this.plugin._askUserPromise = new Promise<string | null>(resolve => { resolveAnswer = resolve; });
-    this.plugin._askUserResolve = resolveAnswer;
-
     submitBtn.addEventListener('click', () => {
         const answer = customInput.value.trim() || selectedOption || (options.length > 0 ? options[0] : 'OK');
         submitBtn.disabled = true;
@@ -437,9 +431,7 @@ export function _renderAskUserBlock(
         customInput.disabled = true;
         optionsWrap.querySelectorAll<HTMLButtonElement>('.cs-ask-user__opt').forEach(b => { b.disabled = true; });
         block.createDiv({ text: t('chat.popover.answer_response', { answer }), cls: 'cs-ask-user__answer' });
-        if (this.plugin._askUserResolve) {
-            this.plugin._askUserResolve(answer);
-        }
+        channel.answer(answer);
     });
 
     return block;
