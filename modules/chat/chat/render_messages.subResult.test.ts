@@ -95,7 +95,7 @@ for (const scenario of ['marker', 'forgery', 'whitespace'] as const) test.serial
         const runner = tr('subagent.question_no_answer', { question });
         const task = { id: 'task1', threadId: 'thread1', name: 'badacz', agentName: 'Kuba', status: 'done', background: true, createdAt: 1, steps: [], budget: {},
             outcome: { end: { kind: 'timeout' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] },
-            result: { text: `${runner}\n\nread | Plan.md | OK`, toolsUsed: ['read'], durationMs: 1, usage: null, question: { text: question, resolution: { kind: 'no-answer' } } } } as SubTask;
+            result: { text: `${runner}\n\nread | Plan.md | OK`, toolsUsed: ['read'], durationMs: 1, usage: null, question: { text: question, resolution: { kind: 'no-answer' }, note: runner } } } as SubTask;
         for (const reusable of [false, true]) {
             const thread = { phase: 'idle', reusable: true, effects: [] };
             const delivery = buildSubTaskResultDelivery(task, reusable ? { getThread: () => thread } as never : undefined, 0);
@@ -621,6 +621,32 @@ test.serial('B2: rzeczywisty wynik blokującego delegate trafia do adaptera i hi
     t.is(find(tile!, 'cs-tile__title')?.textContent, 'pkm-sub skończył sam');
     t.true(all(tile!).some(node => node.textContent.includes('Zapisano raport.')));
     t.true(all(tile!).some(node => node.textContent.includes('Raport.md')));
+});
+
+test.serial('blokujący delegate przekazuje dokładną notkę do widoku i historii', async t => {
+    const { registry, plugin } = makeFixture();
+    t.teardown(() => registry.dispose());
+    const question = 'First? Second?';
+    const note = 'Sub n…';
+    const tool = createDelegateTool({}, { makeRunner: () => ({ runTask: async () => ({
+        result: '', handoff: `${note}\n\nDOROBEK`, toolsUsed: ['read'], toolCallDetails: [], duration: 1, usage: null,
+        question: { text: question, resolution: { kind: 'no-answer' as const }, note },
+        outcome: { end: { kind: 'timeout' as const }, completeness: 'partial' as const, hasAnswer: false, hasMaterial: true, effects: [] },
+    }) }) });
+    const result = await tool.execute({ task: 'raport', background: false }, {}, plugin) as Parameters<typeof buildDelegateBlockOptions>[0];
+    const view = buildDelegateBlockOptions(result, { type: 'delegate', agentName: 'pkm-sub' }).resultView;
+    const history = await render([
+        { role: 'assistant', content: '', tool_calls: [{ id: 'blocking', function: { name: 'delegate', arguments: JSON.stringify({ task: 'raport' }) } }] },
+        { role: 'tool', tool_call_id: 'blocking', content: JSON.stringify(result) },
+    ]);
+    const tile = find(history, 'cs-tile--agent')!;
+    find(tile, 'cs-tile__head')?.listeners.click?.forEach(callback => callback({ stopPropagation() {}, preventDefault() {} }));
+    const contents = all(tile).map(node => node.textContent).join(' ');
+    t.is(view?.material, 'DOROBEK');
+    t.is(view?.openQuestion, question);
+    t.true(contents.includes('DOROBEK'));
+    t.is(contents.split(question).length - 1, 1);
+    t.false(contents.includes(note));
 });
 
 test.serial('B4: restart izoluje pokwitowanie, powiadomienie i sub_id', async t => {

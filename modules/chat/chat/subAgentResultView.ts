@@ -18,7 +18,16 @@ export function buildSubAgentResultView(input: BuildSubAgentResultViewInput, tra
     const name = input.name.trim() || translate('subagent.label');
     const title = model.openQuestion !== undefined ? translate('chat.subresult.question_result_title', { name }) : `${name} ${translate(model.endLabelKey)}`;
     const badge = model.openQuestion !== undefined ? translate('chat.substrip.question_no_answer') : model.completenessLabelKey ? translate(model.completenessLabelKey) : undefined;
-    const material = model.openQuestion !== undefined ? stripRunnerQuestion(model.material, model.openQuestion, translate) : model.material;
+    const question = input.question && typeof input.question === 'object' ? input.question : undefined;
+    const note = question && 'text' in question && typeof question.text === 'string'
+        && 'resolution' in question && question.resolution && typeof question.resolution === 'object'
+        && 'kind' in question.resolution && (question.resolution.kind === 'no-answer' || question.resolution.kind === 'cancelled')
+        && 'note' in question && typeof question.note === 'string' ? question.note : undefined;
+    const candidates = input.outcome?.completeness === 'partial'
+        ? [input.handoff, input.partialResult, input.partialText, input.text]
+        : [input.text, input.handoff, input.partialResult, input.partialText];
+    const rawMaterial = candidates.find(value => typeof value === 'string' && value.trim().length > 0);
+    const material = input.outcome?.completeness === 'empty' ? '' : stripRunnerQuestion(rawMaterial ?? '', note).trim();
     const notes: string[] = [];
     if (model.thread.kind === 'reusable' && model.thread.sub_id.trim()) notes.push(translate('chat.subresult.continue_same_thread'));
     if (model.userStopped) {

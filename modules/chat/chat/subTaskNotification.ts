@@ -16,6 +16,7 @@
 import { t } from '../../../core/i18n/index.js';
 import { DEFAULT_LIMITS } from '../../../config/limits.js';
 import type { SubTask, SubTaskOrigin } from '../../sub-agents/index.js';
+import { stripRunnerQuestion } from './stripRunnerQuestion.js';
 
 
 /** Minimalny kształt zakładki, jakiego potrzebuje dopasowanie (czat ma na niej więcej pól). */
@@ -131,7 +132,8 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
         parts.push(t('chat.subagent_notification.unconfirmed'));
     } else if (outcome?.completeness === 'partial') {
         parts.push(t('chat.subagent_notification.partial'));
-        const raw = (typeof task?.result?.handoff === 'string' && task.result.handoff.trim()) || (typeof task?.partial?.text === 'string' && task.partial.text.trim()) || (typeof task?.result?.text === 'string' ? task.result.text.trim() : '');
+        const source = (typeof task?.result?.handoff === 'string' && task.result.handoff) || (typeof task?.partial?.text === 'string' && task.partial.text) || (typeof task?.result?.text === 'string' ? task.result.text : '');
+        const raw = stripRunnerQuestion(source, task.result?.question?.note).trim();
         parts.push(raw ? (maxResultChars > 0 && raw.length > maxResultChars ? `${raw.slice(0, maxResultChars)}\n${t('chat.subagent_notification.truncated', { chars: maxResultChars })}` : raw) : t('chat.subagent_notification.empty_result'));
     } else if (outcome?.completeness === 'empty') {
         parts.push(t('chat.subagent_notification.empty', { reason: outcomeEndLabel(outcome) }));

@@ -26,7 +26,6 @@
 import { t } from '../../../core/i18n/index.js';
 import { artifactStatusLabel } from '../../artifacts/index.js';
 import { buildSubAgentResultView } from './subAgentResultView.js';
-import { stripRunnerQuestion } from './stripRunnerQuestion.js';
 import type { BuildSubAgentResultViewInput } from './subAgentResultView.js';
 import type { RunOutcome, SubTaskResultThread } from '../../sub-agents/index.js';
 import type { SubAgentResultView } from '../../ui-components/index.js';
@@ -608,17 +607,6 @@ function buildParsedNotificationResult(text: string, name: string, thread: SubTa
             }
         }
     }
-    if (openQuestion !== undefined) {
-        for (const prefix of ['', ...boilerplate.map(part => `${part}\n\n`)]) {
-            if (!body.startsWith(prefix)) continue;
-            const material = body.slice(prefix.length);
-            const stripped = stripRunnerQuestion(material, openQuestion, translate);
-            if (stripped !== material) {
-                body = prefix + stripped;
-                break;
-            }
-        }
-    }
     const paragraphs = body.split('\n\n').map(part => part.trim());
     const material = completionValue === 'empty' ? '' : paragraphs.filter(part => part && !boilerplate.includes(part)).join('\n\n').trim();
     let error: string | undefined;
@@ -630,6 +618,6 @@ function buildParsedNotificationResult(text: string, name: string, thread: SubTa
         }
     }
     const view = buildSubAgentResultView({ name, outcome: { end, completeness: completionValue, hasAnswer: completionValue === 'unconfirmed', hasMaterial: !!material, effects: [] },
-        text: material, error, thread, question: taskQuestion ?? (openQuestion === undefined ? undefined : { text: openQuestion, resolution: { kind: questionResolution } }) }, translate);
+        text: material, error, thread, question: openQuestion === undefined ? taskQuestion : { text: openQuestion, resolution: { kind: questionResolution } } }, translate);
     return view;
 }
