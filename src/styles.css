@@ -1375,3 +1375,18 @@ input.pkm-onboarding-key-input {
 .pkm-model-badge--cloud {
   background: #2196f3;
 }
+
+.cs-ask-user--sub-question .cs-ask-user__icon { color: var(--interactive-accent); }
+.cs-ask-user--sub-question .cs-ask-user__label { color: var(--text-normal); font-size: var(--font-ui-small); text-transform: none; letter-spacing: normal; }
+.cs-ask-user--sub-question .cs-ask-user__head { border: 0; padding: 0; flex-wrap: wrap; }
+.cs-ask-user--sub-question .cs-ask-user__custom { display: flex; gap: 8px; }
+.cs-ask-user--sub-question .cs-ask-user__input { flex: 1; min-width: 0; }
+.cs-sub-question-answer .cs-tile__dot { display: none; }
+.cs-ask-user__task { color: var(--text-muted); font-size: 11px; }
+.cs-ask-user__sub-question {
+  background: var(--background-secondary);
+  border-left: 3px solid var(--interactive-accent);
+  border-radius: 3px;
+  margin: 8px 0;
+  padding: 8px 10px;
+}
