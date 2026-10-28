@@ -75,10 +75,13 @@ function all(node: MockEl): MockEl[] { return [node, ...node.children.flatMap(al
 const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: 'epoch-1' };
 
 test('obecny pasek renderuje czekający bieg', t => {
+    setLocale('pl');
     const registry = new SubTaskRegistry({ questionClock: new QuestionTestClock() });
     registry.createThread({ threadId: 's1', name: 'worker', owner, origin: owner, config: {} });
-    registry.create({ id: 'r1', threadId: 's1', name: 'worker', agentName: owner.agentName, origin: owner, background: true });
+    const task = registry.create({ id: 'r1', threadId: 's1', name: 'worker', agentName: owner.agentName, origin: owner, background: true });
     registry.openParentQuestion('r1', 'Jaki zakres?');
+    if (task.questionState?.kind !== 'waiting') throw new Error('Brak pytania');
+    task.questionState.clock = { kind: 'ticking', remainingMs: 252000, since: performance.now() };
     const model = buildStripModel({ tasks: registry.list(), threads: registry.listThreads(owner), ...owner });
     const host = new MockEl();
     renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, expandedId: 's1', onToggle() {} });
@@ -86,7 +89,27 @@ test('obecny pasek renderuje czekający bieg', t => {
         running: model.filter(row => row.state.kind === 'running').length,
         stopButtons: all(host).filter(node => node.classList.contains('pkm-substrip__stop')).length },
     { chips: 1, running: 1, stopButtons: 1 });
+    t.true(all(host).some(node => node.classList.contains('pkm-substrip__chip--question-ticking')));
+    t.true(textTree(host).includes('pyta prowadzącego · 4:12'));
+    t.true(textTree(host).includes('zostało 4:12 z 5 min'));
+    t.true(textTree(host).includes('Jaki zakres?'));
+    t.false(all(host).some(node => ['INPUT', 'TEXTAREA'].includes(node.tagName)));
+    task.questionState.clock = { kind: 'paused', remainingMs: 252000 };
+    renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, expandedId: 's1', onToggle() {} });
+    t.true(all(host).some(node => node.classList.contains('pkm-substrip__chip--question-paused')));
+    t.true(textTree(host).includes('czeka na Ciebie'));
+    t.true(textTree(host).includes('Czeka na Twoją odpowiedź'));
+    const question = task.questionState.question;
+    registry.finish(task, { text: '', toolsUsed: [], durationMs: 1, usage: null,
+        outcome: { end: { kind: 'timeout' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] } });
+    task.questionState = { kind: 'closed', question, resolution: { kind: 'no-answer' } };
+    renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, expandedId: 's1', onToggle() {} });
+    t.true(all(host).some(node => node.classList.contains('pkm-substrip__chip--no-answer')));
+    t.true(textTree(host).includes('bez odpowiedzi · częściowy'));
+    t.true(textTree(host).includes('Otwarte pytanie: Jaki zakres?'));
+    t.true(textTree(host).includes('brak odpowiedzi'));
     registry.dispose();
+    setLocale('en');
 });
 
 test('karta pustego biegu pokazuje przyczynę i brak wyniku', t => {
