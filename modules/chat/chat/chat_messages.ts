@@ -15,6 +15,7 @@ import {
 } from '../../ui-components/index.js';
 import { t, getDateLocale } from '../../../core/i18n/index.js';
 import { buildDelegateBlockOptions } from './delegateBlockView.js';
+import { buildSubTaskResultModel } from '../../sub-agents/index.js';
 import { subAgentCallView } from './subAgentCallView.js';
 import { registerUrlsFromText } from '../../web/index.js';
 import { registerUrlsIfHuman } from './messagePrivileges.js';
@@ -42,6 +43,14 @@ import { buildBackgroundReceiptText, renderNotificationWithReceipt } from './bac
 import type { ChatViewLike } from './chatViewShape.js';
 import type { SubAgentToolCallDetail, SubAgentUsage } from '../../ui-components/index.js';
 import type { ContentBlock, RollingMessage, TextContentBlock, ToolCall } from './RollingWindow.js';
+
+function addTaskQuestion(view: ReturnType<typeof buildMachineView>, task: import('../../sub-agents/index.js').SubTask | undefined): void {
+    if (!view?.subAgentResult || !task) return;
+    const model = buildSubTaskResultModel({ questionState: task.questionState, question: task.result?.question, thread: { kind: 'unknown' } });
+    if (model.openQuestion === undefined) return;
+    view.subAgentResult.openQuestion = model.openQuestion;
+    view.subAgentResult.title = `${task.name || t('subagent.label')} ${t(model.endLabelKey)}`;
+}
 
 type MessageRole = 'user' | 'assistant';
 type MessageContent = string | ContentBlock[];
@@ -127,6 +136,7 @@ export async function append_message(this: ChatViewLike, role: MessageRole, cont
         if (machineView) {
             const id = getSubTaskNotificationTaskId({ role, content, ...(meta || {}) });
             if (id) {
+                addTaskQuestion(machineView, this.plugin?.subTaskRegistry?.getTask?.(id));
                 await renderNotificationWithReceipt(this.messages_container, this.plugin, machineView, id, () => this._scheduleConnectorRedraw?.());
                 managedScroll = true;
             } else await renderMachineTile(this.messages_container, this.plugin, machineView);
@@ -197,6 +207,8 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
             // nie przeżywa zapisu sesji) klasyfikacja po treści wewnątrz `buildMachineView`.
             const machineView = buildMachineView(msg, { t, getTask: id => this.plugin?.subTaskRegistry?.getTask?.(id), getThread: id => this.plugin?.subTaskRegistry?.getThread?.(id) });
             if (machineView) {
+                const id = getSubTaskNotificationTaskId(msg);
+                if (id) addTaskQuestion(machineView, this.plugin?.subTaskRegistry?.getTask?.(id));
                 await renderMachineTile(this.messages_container, this.plugin, machineView);
             } else {
                 // -- USER MESSAGE - .cs-message--user --
@@ -315,7 +327,7 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                                     const resultThread = thread?.phase === 'idle' && thread.reusable && threadId
                                         ? { kind: 'reusable' as const, sub_id: threadId }
                                         : { kind: 'unknown' as const };
-                                    return [markReceipt(createDelegateBlock(buildDelegateBlockOptions({
+                                    const options = buildDelegateBlockOptions({
                                         success: !failed,
                                         error: task?.error || (failed ? t('mcp.delegate.outcome_note') : undefined),
                                         result: task?.result ? { text: task.result.text, handoff: task.result.handoff } : '',
@@ -323,7 +335,13 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                                         outcome,
                                         effects: thread?.effects,
                                         thread: resultThread,
-                                    }, { type: tcName, agentName: name, query: taskQuery })))];
+                                    }, { type: tcName, agentName: name, query: taskQuery });
+                                    const question = buildSubTaskResultModel({ questionState: task?.questionState, question: task?.result?.question, thread: resultThread });
+                                    if (options.resultView && question.openQuestion !== undefined) {
+                                        options.resultView.openQuestion = question.openQuestion;
+                                        options.resultView.title = `${name || t('subagent.label')} ${t(question.endLabelKey)}`;
+                                    }
+                                    return [markReceipt(createDelegateBlock(options))];
                                 }
                                 return [markReceipt(createSubAgentBlock({ type: tcName, pending: true, status: 'success', agentName: name,
                                     query: taskQuery, response: buildBackgroundReceiptText([item], item?.queued ? 1 : startedList.length === 1 ? historyOutput.queued : undefined) }))];
@@ -336,7 +354,13 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                             block = createSubAgentBlock({ type: tcName, pending: true, status: 'success', agentName: _hName,
                                 query: taskQuery, response: buildBackgroundReceiptText(startedList, historyOutput.queued) });
                         } else {
-                            block = createDelegateBlock(buildDelegateBlockOptions(tcOutput || {}, { type: tcName, agentName: _hName, query: taskQuery }));
+                            const options = buildDelegateBlockOptions(tcOutput || {}, { type: tcName, agentName: _hName, query: taskQuery });
+                            const question = buildSubTaskResultModel({ question: historyOutput?.question, thread: { kind: 'unknown' } });
+                            if (options.resultView && question.openQuestion !== undefined) {
+                                options.resultView.openQuestion = question.openQuestion;
+                                options.resultView.title = `${_hName || t('subagent.label')} ${t(question.endLabelKey)}`;
+                            }
+                            block = createDelegateBlock(options);
                         }
                         agentDiv.appendChild(block);
                     } else {

@@ -30,6 +30,7 @@ import {
 } from '../../ui-components/index.js';
 import { getDateLocale, t } from '../../../core/i18n/index.js';
 import { buildDelegateBlockOptions } from './delegateBlockView.js';
+import { buildSubTaskResultModel } from '../../sub-agents/index.js';
 import { subAgentCallView } from './subAgentCallView.js';
 import streamingManager, { shouldUseFreshModel } from './StreamingManager.js';
 import { _tabKey } from './chat_tabs.js';
@@ -1518,7 +1519,14 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                 toolDisplay.replaceWith(...blocks);
                 blocks.at(-1)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } else if (isSubAgent && (result?.success === true || result?.success === false)) {
-                const fullBlock = createDelegateBlock(buildDelegateBlockOptions(result, { type: toolCall.name, agentName: result.aspect || (toolCall.name === 'sub_agent' ? result.sub_id : toolArgs.aspect || result.sub_id) || '', query: toolArgs.task || '' }));
+                const name = result.aspect || (toolCall.name === 'sub_agent' ? result.sub_id : toolArgs.aspect || result.sub_id) || '';
+                const options = buildDelegateBlockOptions(result, { type: toolCall.name, agentName: name, query: toolArgs.task || '' });
+                const question = buildSubTaskResultModel({ question: result.question, thread: { kind: 'unknown' } });
+                if (options.resultView && question.openQuestion !== undefined) {
+                    options.resultView.openQuestion = question.openQuestion;
+                    options.resultView.title = `${name || t('subagent.label')} ${t(question.endLabelKey)}`;
+                }
+                const fullBlock = createDelegateBlock(options);
                 toolDisplay.replaceWith(fullBlock);
                 fullBlock.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } else if (isSubAgent && !result?.success) {

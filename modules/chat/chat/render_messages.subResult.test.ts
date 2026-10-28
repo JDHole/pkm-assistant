@@ -84,6 +84,51 @@ function notification(taskId: string) {
     return { role: 'user', content: `${tr('chat.subagent_notification.header', { name: 'badacz', task_id: taskId })}\n\n${tr('chat.subagent_notification.meta', { status: 'zakończone' })}` };
 }
 
+test.serial('wynik bez odpowiedzi w streamie i historii pokazuje pytanie', async t => {
+    const oldDocument = (globalThis as Record<string, unknown>).document, oldCreateDiv = globalThis.createDiv;
+    (globalThis as Record<string, unknown>).document = { createElement: () => el() };
+    globalThis.createDiv = (() => el()) as never;
+    try {
+        for (const hasQuestion of [true, false]) {
+            const result = { success: true, aspect: 'badacz', result: 'dorobek',
+                outcome: { end: { kind: 'timeout' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] },
+                ...(hasQuestion ? { question: { text: 'Jaki zakres?', resolution: { kind: 'no-answer' } } } : {}) };
+            const history = await render([{ role: 'assistant', content: '', tool_calls: [{ id: 'call', function: { name: 'delegate', arguments: '{}' } }] },
+                { role: 'tool', tool_call_id: 'call', content: JSON.stringify(result) }]);
+            const container = el(), placeholder = el(); container.appendChild(placeholder);
+            const turn = { agentName: 'Kuba', owner: { memory: null }, origin: {}, turnId: 1, turnKind: 'user',
+                rawResults: new Map([['call', { result, error: null }]]), pendingEntries: [{ toolDisplay: placeholder, args: {} }],
+                lastRoundToolResults: [], toolCallsContainer: null, tt: { record() {} } };
+            const view = { _isTurnActiveTab: () => true, chatTabs: [], env: {}, _updateTokenPanel() {}, _agentStates: new Map(),
+                _renderSubTaskStrip() {}, _scheduleConnectorRedraw() {}, showTypingIndicator() {} };
+            await _chatOnToolResults.call(view as never, turn as never, [{ toolCall: { id: 'call', name: 'delegate', arguments: {} }, result: 'done' }] as never, 0);
+            for (const root of [history, container]) {
+                find(root, 'cs-tile__head')?.listeners.click?.forEach(callback => callback({ stopPropagation() {}, preventDefault() {} }));
+                const text = all(root).map(node => node.textContent).join(' ');
+                t.is(text.includes('brak odpowiedzi'), hasQuestion);
+                t.is(text.includes('Otwarte pytanie: Jaki zakres?'), hasQuestion);
+            }
+        }
+    } finally { (globalThis as Record<string, unknown>).document = oldDocument; globalThis.createDiv = oldCreateDiv; }
+});
+
+test.serial('powiadomienie i odtworzenie korzystają z pytania zakończonego zadania', async t => {
+    const registry = new SubTaskRegistry();
+    t.teardown(() => registry.dispose());
+    const owner = { agentName: 'Kuba', sessionPath: 's.md', sessionEpoch: 'e1' };
+    const task = registry.create({ id: 'question-run', threadId: 'question-thread', name: 'badacz', origin: owner });
+    const opened = registry.openParentQuestion(task.id, 'Jaki zakres?');
+    if (opened.kind !== 'opened') throw new Error('Brak pytania');
+    registry.finish(task, { text: 'dorobek', toolsUsed: [], durationMs: 1, usage: null,
+        outcome: { end: { kind: 'timeout' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] } });
+    task.questionState = { kind: 'closed', question: opened.question, resolution: { kind: 'no-answer' } };
+    const root = await render([{ role: 'user', content: buildSubTaskNotificationText(task, {}) }], registry);
+    find(root, 'cs-tile__head')?.listeners.click?.forEach(callback => callback({ stopPropagation() {}, preventDefault() {} }));
+    const text = all(root).map(node => node.textContent).join(' ');
+    t.true(text.includes('brak odpowiedzi'));
+    t.true(text.includes('Otwarte pytanie: Jaki zakres?'));
+});
+
 test.serial('B5: żywe doręczenie usuwa pokwitowanie biegu', async t => {
     const oldDocument = (globalThis as Record<string, unknown>).document;
     const oldCreateDiv = globalThis.createDiv;

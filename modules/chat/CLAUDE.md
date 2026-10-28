@@ -1542,6 +1542,8 @@ U3: `ChatTurnPartialState` synchronously adds one system receipt to the frozen o
 Partial tiles carry `_loopPartialHasToolResults` while live. After history restoration drops metadata, `buildMachineView` checks localized tool receipt headings and their retained previews in the content. A Stop without tool results has an empty tile summary, even if an older receipt still contains the former unconditional disclaimer.
 # Pytania subów w tle
 
+Pasek odświeża się także po zdarzeniu `question:clock`, więc zmiana pauzy nie czeka na kolejną klatkę. Render historii i `append_message` pobierają dane pytania z dostępnego zadania w rejestrze, a kafelek bezpośredniego wyniku narzędzia ze zwrotki zawierającej `question`. Kolejka renderowana w `_chatBeforeContinue` oraz odtworzenie bez zadania w rejestrze nie mają tych danych.
+
 Notifier przekazuje czatowi także pytania. Auto-tura wymaga aktywnej sesji właściciela,
 wolnego czatu i przejścia tych samych bramek co wynik. Claim jest potwierdzany po
 synchronicznym dopisaniu wiadomości do okna, a pytanie przed dopisaniem jest ponownie

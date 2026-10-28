@@ -122,7 +122,7 @@ export function renderSubTaskStrip(host: El, ctx: SubTaskStripContext): number {
     if (host.isConnected && (ticks.length || registry?.events)) {
         const timer = ticks.length ? window.setInterval(() => ticks.forEach(tick => tick()), 1000) : undefined;
         const refresh = (): void => { if (host.isConnected) renderSubTaskStrip(host, ctx); };
-        const unsubs = ['question:opened', 'question:closed'].map(event => registry?.events?.on(event, refresh)).filter((off): off is () => void => typeof off === 'function');
+        const unsubs = ['question:opened', 'question:closed', 'question:clock'].map(event => registry?.events?.on(event, refresh)).filter((off): off is () => void => typeof off === 'function');
         const observer = new MutationObserver(() => { if (!host.isConnected) cleanup(); });
         const cleanup = (): void => { if (timer !== undefined) window.clearInterval(timer); for (const off of unsubs) off(); observer.disconnect(); stripTimers.delete(host); };
         observer.observe(host.ownerDocument, { childList: true, subtree: true });

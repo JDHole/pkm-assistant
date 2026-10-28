@@ -74,6 +74,28 @@ function all(node: MockEl): MockEl[] { return [node, ...node.children.flatMap(al
 
 const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: 'epoch-1' };
 
+test.serial('zdarzenia zegara od razu przerysowują pasek', t => {
+    setLocale('pl');
+    const oldWindow = globalThis.window; const oldObserver = globalThis.MutationObserver;
+    (globalThis as Record<string, unknown>).window = { setInterval: () => 1, clearInterval() {} };
+    (globalThis as Record<string, unknown>).MutationObserver = class { observe() {} disconnect() {} };
+    const registry = new SubTaskRegistry({ questionClock: new QuestionTestClock() });
+    try {
+        registry.createThread({ threadId: 's-clock', name: 'worker', owner, origin: owner, config: {} });
+        registry.create({ id: 'r-clock', threadId: 's-clock', name: 'worker', origin: owner });
+        registry.openParentQuestion('r-clock', 'Jaki zakres?');
+        const host = new MockEl(); Object.assign(host, { isConnected: true });
+        renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, onToggle() {} });
+        t.true(textTree(host).includes('pyta prowadzącego'));
+        const release = registry.registerUserWait(owner, () => {});
+        t.true(textTree(host).includes('czeka na Ciebie'));
+        release();
+        t.true(textTree(host).includes('pyta prowadzącego'));
+    } finally {
+        registry.dispose(); globalThis.window = oldWindow; globalThis.MutationObserver = oldObserver; setLocale('en');
+    }
+});
+
 test('obecny pasek renderuje czekający bieg', t => {
     setLocale('pl');
     const registry = new SubTaskRegistry({ questionClock: new QuestionTestClock() });
