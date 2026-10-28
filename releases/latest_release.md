@@ -1,31 +1,13 @@
-# PKM Assistant 2.4.0
+# PKM Assistant 2.4.1
 
-**Sub-agents you can follow and continue** - PKM Assistant 2.4.0
+**Sub-agents can ask before giving up** - PKM Assistant 2.4.1
 
-**In plain words.** You can now follow sub-agents in the chat as they work: the sub-agent strip
-shows queued tasks, live steps and elapsed time. You can stop one sub-agent at a time, even before
-it starts. Its result shows whether the work is complete or partial and why it ended, while keeping
-any work already done. The same sub-agent can continue a task in a later run. This release also
-fixes deleting sub-agents and templates on Obsidian 1.14.5, and gives newly saved sub-agents their
-default tools without requiring a reload.
+**In plain words.** When a sub-agent gets stuck, it can now ask the main agent for an answer and wait before continuing. If the answer needs your input, you will be asked in the chat. If no answer arrives in time, the sub-agent keeps the work it has done and the open question, so it can continue later. This release also fixes conversations getting mixed up when you have two chats with the same agent open.
 
 What changed, in detail:
 
-- **Progress and control.** The sub-agent strip groups runs by thread, shows their states, live
-  steps, counts and duration, and lets you stop an individual run, including one waiting in the
-  queue. Completed runs have collapsible steps and tool actions have readable labels.
-- **Honest results.** Result cards show the end reason and completeness, identify empty results,
-  and keep partial work separate from errors. Background notifications include effects and use
-  the handoff for partial results. Interrupted background runs are identified after a restart.
-- **Continue the work.** A sub-agent can receive a follow-up task in the same session, keeping
-  its original model and permissions. A result stopped by you waits for a later user turn, and
-  continuation respects the latest stop.
-- **Approvals and boundaries.** Delegation approvals show the sub-agent and task, with secrets
-  masked in previews. A timed-out run cannot start a tool write after waiting for approval, and
-  sub-agents at the delegation depth limit work without delegation tools.
-- **Templates and tools.** Newly saved sub-agents receive default tools immediately. Deleting
-  custom sub-agents, their templates and skill templates works on Obsidian 1.14.5. Template
-  editing supports changing the display name, and deletion explains which existing copies remain.
-- **Background work.** Results return to the matching chat session, and rendering their cards
-  preserves your reading position. Closing a chat or ending a session handles its sub-agent runs
-  and threads more clearly.
+- **Questions and answers.** A stuck sub-agent can ask the lead agent and wait in the same thread. The lead answers when it knows the answer, or asks you in chat and passes your answer back. Sub-agents do not ask you or other sub-agents directly.
+- **Background questions and waiting.** The lead wakes automatically when a background sub-agent asks a question, just as it does for a completed result. A sub-agent waits up to five minutes; its clock pauses while the lead waits for your answer, and waiting does not consume the task time limit.
+- **Partial results and stopping.** If no answer arrives within five minutes, the sub-agent returns its work so far and the open question as a partial result. The lead can resume it later with an answer. Stopping while it waits ends the sub-agent cleanly.
+- **Visible and remembered.** The sub-agent strip shows when it is asking the lead with a countdown, waiting for you, or has received no answer and returned a partial result. The chat shows the question card, a collapsed card after the lead answers, and the result with its open question. Questions and their states survive an Obsidian restart.
+- **Separate chat tabs.** Two chat tabs for the same agent keep their turns separate: replies go to the right tab, generating indicators do not get stuck, stopping one tab does not stop the other, and closing a tab ends only its own work.
