@@ -25,6 +25,18 @@ test('granica pięciu minut', async t => {
     clock.advance(299999); const state = registry.getQuestionState('r1').kind; clock.advance(1);
     t.deepEqual([state, (await q.resolution).kind], ['waiting', 'no-answer']);
 });
+test('timer uruchomiony przed terminem uzbraja się na pozostały czas', async t => {
+    const { clock, registry, create } = fixture();
+    create();
+    const question = open(registry);
+    clock.advance(299999, false);
+    clock.fireNextEarly();
+    t.is(registry.getQuestionState('r1').kind, 'waiting');
+    t.is(clock.pending, 1);
+    clock.advance(1);
+    t.deepEqual(await question.resolution, { kind: 'no-answer' });
+    t.is(clock.pending, 0);
+});
 test('odpowiedź po terminie jest odrzucona', t => {
     const { clock, registry, create } = fixture(); create(); const q = open(registry); clock.advance(300000, false);
     t.deepEqual(registry.answerParentQuestion('r1', q.question.id, owner, 'A/'), { kind: 'rejected', reason: 'expired' });

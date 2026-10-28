@@ -12,5 +12,9 @@ export class QuestionTestClock implements ParentQuestionClock {
         if (!fire) return;
         for (const [id, timer] of [...this.timers]) if (timer.at <= this.time && this.timers.delete(id)) timer.fn();
     }
+    fireNextEarly(): void {
+        const next = this.timers.entries().next().value as [number, { at: number; fn: () => void }] | undefined;
+        if (next && this.timers.delete(next[0])) next[1].fn();
+    }
     get pending(): number { return this.timers.size; }
 }

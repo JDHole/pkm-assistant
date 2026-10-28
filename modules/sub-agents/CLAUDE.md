@@ -1,5 +1,8 @@
 # modules/sub-agents/
 
+Zegar pytania po zbyt wczesnym wywołaniu timera uzbraja go ponownie na
+pozostały czas; termin nadal rozstrzyga zegar monotoniczny.
+
 Model paska `summarizeStripRows` zlicza widoczne wiersze: pracujące i zatrzymujące się, oczekujące w kolejce oraz wszystkie wiersze.
 
 > Fizyczne źródła modułu mają rozszerzenie `.ts`. Zapisy `.js` poniżej to specyfikatory

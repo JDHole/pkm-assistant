@@ -44,7 +44,15 @@ export class ParentQuestions {
         this.emit('question:opened', question);
         return { kind: 'opened', question, resolution };
     }
-    private arm(entry: Waiting, ms: number): void { entry.timer = this.clock.setTimeout(() => { entry.timer = undefined; this.check(entry.task); }, ms); }
+    private arm(entry: Waiting, ms: number): void {
+        entry.timer = this.clock.setTimeout(() => {
+            entry.timer = undefined;
+            const state = this.check(entry.task);
+            if (state.kind === 'waiting' && state.clock.kind === 'ticking' && this.waiting.get(entry.task.id) === entry) {
+                this.arm(entry, state.clock.remainingMs);
+            }
+        }, ms);
+    }
     private clear(entry: Waiting): void { if (entry.timer !== undefined) { this.clock.clearTimeout(entry.timer); entry.timer = undefined; } }
     check(task: SubTask): QuestionState {
         const state = task.questionState ?? { kind: 'none' };
