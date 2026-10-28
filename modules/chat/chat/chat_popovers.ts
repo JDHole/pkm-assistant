@@ -24,6 +24,7 @@ import { _tabKey } from './chat_tabs.js';
 // Receiver mixina = ZŁOŻONY widok (`ChatViewLike`: klasa + osiem paczek mixinów).
 import type { ChatTab, ChatViewLike } from './chatViewShape.js';
 import type { AutonomyMode } from '../../../core/index.js';
+import { findOpenSubQuestion } from './subQuestionView.js';
 
 type AutonomyId = AutonomyMode;
 
@@ -44,6 +45,7 @@ interface AskUserArguments {
     question?: string;
     options?: string[];
     context?: string;
+    question_id?: string;
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -367,6 +369,7 @@ export function _renderAskUserBlock(
     const question = args.question || 'Agent pyta...';
     const options = args.options || [];
     const context = args.context || '';
+    const subQuestion = findOpenSubQuestion(this.plugin?.subTaskRegistry, args.question_id, channel.state.owner);
 
     const block = createDiv();
     block.addClass('cs-ask-user');
@@ -375,13 +378,18 @@ export function _renderAskUserBlock(
     const head = block.createDiv({ cls: 'cs-ask-user__head' });
     const iconEl = head.createSpan({ cls: 'cs-ask-user__icon' });
     setSvg(iconEl, UiIcons.question(14));
-    head.createSpan({ text: t('chat.popover.question'), cls: 'cs-ask-user__label' });
+    head.createSpan({ text: subQuestion ? t('chat.sub_question.from', { name: subQuestion.question.name }) : t('chat.popover.question'), cls: 'cs-ask-user__label' });
+    if (subQuestion) {
+        block.addClass('cs-ask-user--sub-question');
+        if (subQuestion.task) head.createSpan({ text: t('chat.sub_question.task', { task: subQuestion.task }), cls: 'cs-ask-user__task' });
+        block.createDiv({ text: subQuestion.question.text, cls: 'cs-ask-user__sub-question' });
+    }
 
     if (context) {
         block.createDiv({ text: context, cls: 'cs-ask-user__context' });
     }
 
-    block.createDiv({ text: question, cls: 'cs-ask-user__question' });
+    block.createDiv({ text: question, cls: subQuestion ? 'cs-ask-user__context' : 'cs-ask-user__question' });
 
     // Options
     const optionsWrap = block.createDiv({ cls: 'cs-ask-user__options' });
@@ -412,7 +420,7 @@ export function _renderAskUserBlock(
     });
 
     // Submit
-    const submitBtn = block.createEl('button', { text: t('chat.popover.answer'), cls: 'cs-ask-user__submit' });
+    const submitBtn = (subQuestion ? customRow : block).createEl('button', { text: t('chat.popover.answer'), cls: 'cs-ask-user__submit' });
 
     // Notify user
     {

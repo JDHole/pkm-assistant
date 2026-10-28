@@ -17,6 +17,7 @@ import { t, getDateLocale } from '../../../core/i18n/index.js';
 import { buildDelegateBlockOptions } from './delegateBlockView.js';
 import { buildSubTaskResultModel } from '../../sub-agents/index.js';
 import { subAgentCallView } from './subAgentCallView.js';
+import { answeredSubQuestion, renderAnsweredSubQuestion } from './subQuestionView.js';
 import { registerUrlsFromText } from '../../web/index.js';
 import { registerUrlsIfHuman } from './messagePrivileges.js';
 // Historia liczy status narzędzia TĄ SAMĄ regułą co żywa tura (chat_streaming).
@@ -274,6 +275,11 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                         : (tcArgs || {})) as DelegateArgs;
                     const historyOutput = (typeof tcOutput === 'object' && tcOutput) ? tcOutput : null;
                     const isSubAgent = subAgentCallView(tcName, _hArgs, historyOutput, 'result') === 'block';
+                    const answeredQuestion = answeredSubQuestion(historyOutput?.sub_question_view);
+                    if (tcName === 'sub_agent' && _hArgs.action === 'message' && historyOutput?.success === true && answeredQuestion) {
+                        agentDiv.appendChild(renderAnsweredSubQuestion(answeredQuestion));
+                        continue;
+                    }
                     if (isSubAgent) {
                         const taskQuery = _hArgs.task || '';
                         const _hName = tcName === 'sub_agent'

@@ -6,6 +6,23 @@ import { _cleanupAskUser } from './chat_model.js';
 import { _chatExecuteToolCall, _chatOnToolCallsParsed } from './chat_streaming.js';
 
 const owner = { agentName: 'Jaskier', sessionPath: 's.md', sessionEpoch: 'e1' };
+
+test('tylko przyjęta odpowiedź dostaje dane kafelka do historii', async t => {
+    const registry = new SubTaskRegistry({ questionClock: new QuestionTestClock() });
+    registry.create({ id: 'r1', threadId: 's1', name: 'Klara', origin: owner });
+    const q = registry.openParentQuestion('r1', 'Jaki zakres?');
+    if (q.kind !== 'opened') throw new Error('question did not open');
+    let accepted = false;
+    const view = { plugin: { subTaskRegistry: registry, mcpClient: { executeToolCall: async () => ({ success: accepted }) } } };
+    const turn = { origin: owner, agentName: owner.agentName, rawResults: new Map() };
+    const call = { id: 'x', name: 'sub_agent', arguments: { action: 'message', sub_id: 's1', question_id: q.question.id, text: 'Cały.' } };
+    const rejected = JSON.parse(await _chatExecuteToolCall.call(view as never, turn as never, call) as string);
+    accepted = true;
+    const result = JSON.parse(await _chatExecuteToolCall.call(view as never, turn as never, call) as string);
+    t.deepEqual(rejected, { success: false });
+    t.deepEqual(result, { success: true, sub_question_view: { name: 'Klara', question: 'Jaki zakres?', answer: 'Cały.' } });
+    registry.dispose();
+});
 function fixture() {
     const clock = new QuestionTestClock();
     const registry = new SubTaskRegistry({ questionClock: clock });

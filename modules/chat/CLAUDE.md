@@ -1,5 +1,7 @@
 # modules/chat/
 
+`ask_user` z `question_id` pokazuje pytanie i zadanie suba wyłącznie dla otwartego pytania właściciela kanału. Przyjęta odpowiedź prowadzącego przechowuje dane kafelka w wyniku narzędzia, aby historia mogła go odtworzyć.
+
 `ask_user` otwiera kanał z zamrożonym właścicielem tury (agent, ścieżka i epoka sesji).
 Token trafia do MCP z runtime, a przycisk zamyka uchwycony kanał. Koniec tury, Stop
 i zamknięcie widoku zwalniają wyłącznie własne kanały, także te nieprzejęte przez narzędzie.

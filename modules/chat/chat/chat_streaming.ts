@@ -32,6 +32,7 @@ import { getDateLocale, t } from '../../../core/i18n/index.js';
 import { buildDelegateBlockOptions } from './delegateBlockView.js';
 import { buildSubTaskResultModel } from '../../sub-agents/index.js';
 import { subAgentCallView } from './subAgentCallView.js';
+import { findOpenSubQuestion, answeredSubQuestion, renderAnsweredSubQuestion } from './subQuestionView.js';
 import streamingManager, { shouldUseFreshModel } from './StreamingManager.js';
 import { _tabKey } from './chat_tabs.js';
 import { matchTabForOrigin } from './subTaskNotification.js';
@@ -1372,6 +1373,11 @@ export async function _chatExecuteToolCall(
         ? turn.pendingEntries?.find(entry => entry.toolCall.id === toolCall.id && entry.toolCall.name === 'ask_user' && entry.askUserChannel)
         : undefined;
     const channel = pending?.askUserChannel;
+    const args = parseToolCallArgs(toolCall);
+    const subQuestion = toolCall.name === 'sub_agent' && args.action === 'message'
+        ? findOpenSubQuestion(this.plugin.subTaskRegistry, args.question_id, {
+            agentName: turn.origin.agentName, sessionPath: turn.origin.sessionPath || '', sessionEpoch: turn.origin.sessionEpoch || '',
+        }) : undefined;
     if (pending) pending.askUserChannel = undefined;
     try {
         // Odczyt nie jest racjonowany limiterem per turę: narzędzia = uprawnienia agenta,
@@ -1391,6 +1397,9 @@ export async function _chatExecuteToolCall(
             resultBudgetChars: context.resultBudgetChars,
             shouldAbort: context.shouldAbort,
         }) as ChatToolResult;
+        if (raw?.success === true && subQuestion && args.sub_id === subQuestion.question.subId && typeof args.text === 'string') {
+            raw = { ...raw, sub_question_view: { name: subQuestion.question.name, question: subQuestion.question.text, answer: args.text } };
+        }
     } catch (err) {
         raw = { isError: true, error: (err as Error).message };
         error = err as Error;
@@ -1490,6 +1499,8 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                         error: error.message
                     }));
                 }
+            } else if (toolCall.name === 'sub_agent' && toolArgs.action === 'message' && result?.success === true && answeredSubQuestion(result.sub_question_view)) {
+                toolDisplay.replaceWith(renderAnsweredSubQuestion(answeredSubQuestion(result.sub_question_view)!));
             } else if (isSubAgent && result?.started === true) {
                 // Delegacja W TLE. Nie ma wyniku do pokazania - jest pokwitowanie startu.
                 // Bez tej gałęzi leciała gałąź „success" niżej i rysowała PUSTĄ ramkę

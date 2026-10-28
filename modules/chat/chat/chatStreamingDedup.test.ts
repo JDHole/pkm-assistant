@@ -21,10 +21,10 @@ test('parseToolCallArgs: dokładnie JEDNA definicja wzorca string→JSON.parse w
     t.is(matches.length, 1, `wzorzec parsowania toolCall.arguments powinien żyć w JEDNYM miejscu (parseToolCallArgs), znaleziono ${matches.length} kopii`);
 });
 
-test('parseToolCallArgs: wszystkie 4 call-site\'y wołają wspólny helper', t => {
+test('parseToolCallArgs: wszystkie 5 call-site\'ów woła wspólny helper', t => {
     const calls = source.match(/parseToolCallArgs\(toolCall\)/g) || [];
-    // Args współdzielone w placeholderze i wyniku; osobne odczyty vault_read i vault_write.
-    t.is(calls.length, 4, `oczekiwano 4 wywołań parseToolCallArgs(toolCall), znaleziono ${calls.length}`);
+    // Również odczyt pytania przed wykonaniem odpowiedzi używa tego samego parsera.
+    t.is(calls.length, 5, `oczekiwano 5 wywołań parseToolCallArgs(toolCall), znaleziono ${calls.length}`);
 });
 
 test('parseToolCallArgs: zachowanie identyczne ze starym inline wzorcem (string parsowalny/niepoprawny, obiekt, undefined)', t => {
