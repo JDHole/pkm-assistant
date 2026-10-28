@@ -20,6 +20,8 @@ import { buildSubTaskResultDelivery } from './subTaskResultDelivery.js';
 import { setLocale, t as translate } from '../../../core/i18n/index.js';
 import { setNoteOpener } from '../../ui-components/index.js';
 import type { MachineView } from './machineMessage.js';
+import { SubAgentRunner, SubTaskRegistry } from '../../sub-agents/index.js';
+import { QuestionTestClock } from '../../sub-agents/test-support/questionTestClock.js';
 import type { SubTask } from '../../sub-agents/index.js';
 
 type Listener = (ev: unknown) => void;
@@ -424,6 +426,61 @@ test.serial('wynik z question renderuje brak odpowiedzi bez rejestru', async t =
         const rendered = deepText(container);
         t.true(rendered.includes('brak odpowiedzi'));
         t.true(rendered.includes('Otwarte pytanie: Który katalog?'));
+        setLocale('en');
+    });
+});
+
+
+for (const scenario of ['long', 'trailing'] as const) test.serial(`delivery i render: ${scenario}`, async t => {
+    await withFakeDocument(async () => {
+        for (const locale of ['pl', 'en'] as const) {
+            setLocale(locale);
+            const question = `UNIKALNY_POCZĄTEK ${'bardzo długie pytanie '.repeat(1100)} KONIEC?`;
+            const clock = new QuestionTestClock();
+            const registry = new SubTaskRegistry({ questionClock: clock });
+            const read = { name: 'read', description: 'read', inputSchema: {}, execute: async () => 'DOROBEK_NARZĘDZIA' };
+            const runner = new SubAgentRunner({ app: {}, plugin: { subTaskRegistry: registry }, toolRegistry: { filterByAgent: () => [read], getTool: () => read } });
+            let ready!: () => void;
+            const waiting = new Promise<void>(resolve => { ready = resolve; });
+            let calls = 0;
+            const model = { stream(_payload: unknown, cb: { done(value: unknown): void }) {
+                const call = calls++ === 0
+                    ? { id: 'r', type: 'function', function: { name: 'read', arguments: '{}' } }
+                    : { id: 'q', type: 'function', function: { name: 'ask_parent', arguments: JSON.stringify({ text: question }) } };
+                cb.done({ choices: [{ message: { role: 'assistant', content: '', tool_calls: [call] } }] });
+            } };
+            const run = runner.runTask('zadanie', { name: 'Lead' }, { name: 'Badacz', tools: ['read'] } as never, model as never,
+                { origin: { agentName: 'Lead', sessionPath: 'a', sessionEpoch: 'b' }, onActivity: activity => { if (activity.kind === 'waiting') ready(); } });
+            await Promise.race([waiting, run.then(() => { throw new Error('runner nie otworzył pytania'); })]);
+            clock.advance(300000);
+            const result = await run;
+            t.is(result.question?.text, question);
+            const task = registry.list()[0];
+            t.true(task.result!.handoff!.includes('DOROBEK_NARZĘDZIA'));
+            const shortQuestion = 'First?\n\nSecond?\n\n';
+            const sentence = translate('subagent.question_no_answer', { question: shortQuestion });
+            const onlySentence = { ...task, questionState: { kind: 'none' as const }, result: { ...task.result!, text: sentence, handoff: sentence, question: { text: shortQuestion, resolution: { kind: 'no-answer' as const } } } };
+            for (const [candidate, expectedQuestion, material] of [scenario === 'long' ? [task, question, 'DOROBEK_NARZĘDZIA'] as const : [onlySentence, shortQuestion, ''] as const]) {
+                for (const reusable of [false, true]) {
+                    const deliveryRegistry = reusable ? { getThread: () => ({ phase: 'idle', reusable: true, effects: [] }) } : undefined;
+                    const delivery = buildSubTaskResultDelivery(candidate, deliveryRegistry as never, 0);
+                    for (const meta of [delivery.meta, {}]) for (const withRegistry of [false, true]) {
+                        const view = buildMachineView({ role: 'user', content: delivery.text, ...meta }, { t: translate, ...(withRegistry ? { getTask: () => candidate, getThread: () => ({ phase: 'idle', reusable: true }) } : {}) });
+                        const container = makeFakeEl();
+                        await renderMachineTile(container as unknown as HTMLElement, fakePlugin([], null), view!);
+                        const tile = findByClass(container, 'cs-tile--subresult')!;
+                        findByClass(tile, 'cs-tile__head')!.fire('click');
+                        const rendered = deepText(tile);
+                        t.is(view!.subAgentResult!.openQuestion, expectedQuestion);
+                        t.is(rendered.split(expectedQuestion).length - 1, 1);
+                        t.is(rendered.split(expectedQuestion.slice(0, 6)).length - 1, 1);
+                        if (material) t.true(view!.subAgentResult!.material!.includes(material));
+                        else t.is(view!.subAgentResult!.material, undefined);
+                    }
+                }
+            }
+            registry.dispose();
+        }
         setLocale('en');
     });
 });

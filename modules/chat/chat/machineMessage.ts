@@ -26,6 +26,7 @@
 import { t } from '../../../core/i18n/index.js';
 import { artifactStatusLabel } from '../../artifacts/index.js';
 import { buildSubAgentResultView } from './subAgentResultView.js';
+import { stripRunnerQuestion } from './stripRunnerQuestion.js';
 import type { BuildSubAgentResultViewInput } from './subAgentResultView.js';
 import type { RunOutcome, SubTaskResultThread } from '../../sub-agents/index.js';
 import type { SubAgentResultView } from '../../ui-components/index.js';
@@ -608,13 +609,13 @@ function buildParsedNotificationResult(text: string, name: string, thread: SubTa
         }
     }
     if (openQuestion !== undefined) {
-        for (const locale of LOCALES) {
-            const runner = translate('subagent.question_no_answer', { question: openQuestion }, locale);
-            for (const prefix of ['', ...boilerplate.map(part => `${part}\n\n`)]) {
-                if (body.startsWith(prefix + runner) && (body.length === prefix.length + runner.length || body[prefix.length + runner.length] === '\n')) {
-                    body = prefix + body.slice(prefix.length + runner.length).replace(/^\n+/, '');
-                    break;
-                }
+        for (const prefix of ['', ...boilerplate.map(part => `${part}\n\n`)]) {
+            if (!body.startsWith(prefix)) continue;
+            const material = body.slice(prefix.length);
+            const stripped = stripRunnerQuestion(material, openQuestion, translate);
+            if (stripped !== material) {
+                body = prefix + stripped;
+                break;
             }
         }
     }

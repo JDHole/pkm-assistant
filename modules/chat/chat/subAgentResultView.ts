@@ -1,4 +1,5 @@
 import { t } from '../../../core/i18n/index.js';
+import { stripRunnerQuestion } from './stripRunnerQuestion.js';
 import { buildSubTaskResultModel } from '../../sub-agents/index.js';
 import type { BuildSubTaskResultModelInput, SubTaskResultThread } from '../../sub-agents/index.js';
 import type { SubAgentResultView } from '../../ui-components/index.js';
@@ -17,14 +18,7 @@ export function buildSubAgentResultView(input: BuildSubAgentResultViewInput, tra
     const name = input.name.trim() || translate('subagent.label');
     const title = model.openQuestion !== undefined ? translate('chat.subresult.question_result_title', { name }) : `${name} ${translate(model.endLabelKey)}`;
     const badge = model.openQuestion !== undefined ? translate('chat.substrip.question_no_answer') : model.completenessLabelKey ? translate(model.completenessLabelKey) : undefined;
-    let material = model.material;
-    if (material && model.openQuestion !== undefined) {
-        for (const locale of ['pl', 'en']) {
-            const runner = translate('subagent.question_no_answer', { question: model.openQuestion }, locale);
-            if (material === runner) material = '';
-            else if (material.startsWith(`${runner}\n`)) material = material.slice(runner.length).trimStart();
-        }
-    }
+    const material = model.openQuestion !== undefined ? stripRunnerQuestion(model.material, model.openQuestion, translate) : model.material;
     const notes: string[] = [];
     if (model.thread.kind === 'reusable' && model.thread.sub_id.trim()) notes.push(translate('chat.subresult.continue_same_thread'));
     if (model.userStopped) {
