@@ -332,7 +332,7 @@ export function buildStripModel({ tasks, pending, threads, tabKey = '', agentNam
         const runNumber = thread.runIds.length;
         const maxRuns = getThreadRunLimit?.(thread.threadId);
         return {
-            id: thread.threadId, threadId: thread.threadId, name: thread.name, state, reusable: thread.reusable, questionState: activeRun?.questionState ?? { kind: 'none' },
+            id: thread.threadId, threadId: thread.threadId, name: thread.name, state, reusable: thread.reusable, questionState: (activeRun ?? lastRun)?.questionState ?? { kind: 'none' },
             runs, runNumber, runLimit: Number.isFinite(maxRuns) && Number(maxRuns) > 0 ? Number(maxRuns) : null,
             durationMs: runs[runs.length - 1]?.durationMs || 0,
             taskPreview: runs[runs.length - 1]?.taskPreview || '',
