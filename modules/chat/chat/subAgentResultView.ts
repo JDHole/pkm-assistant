@@ -34,7 +34,7 @@ export function buildSubAgentResultView(input: BuildSubAgentResultViewInput, tra
     return {
         title,
         badge,
-        status: model.state.kind === 'done' ? 'ok' : 'error',
+        status: model.openQuestion !== undefined ? 'attention' : model.state.kind === 'done' ? 'ok' : 'error',
         material: material || undefined,
         openQuestion: model.openQuestion,
         error: model.error || undefined,

@@ -7,6 +7,7 @@ import { __test__ as modelsTest } from '../../models/index.js';
 import { buildDelegateBlockOptions } from './delegateBlockView.js';
 import { setLocale, t as tr } from '../../../core/i18n/index.js';
 import { buildSubTaskNotificationText } from './subTaskNotification.js';
+import { buildSubTaskResultDelivery } from './subTaskResultDelivery.js';
 import type { SubTask } from '../../sub-agents/index.js';
 import { _chatOnToolResults, _deliverSubTaskResult } from './chat_streaming.js';
 import { renderNotificationWithReceipt } from './backgroundReceipt.js';
@@ -83,6 +84,41 @@ function receipt(tasks: Array<{ task_id: string; name: string; sub_id?: string; 
 function notification(taskId: string) {
     return { role: 'user', content: `${tr('chat.subagent_notification.header', { name: 'badacz', task_id: taskId })}\n\n${tr('chat.subagent_notification.meta', { status: 'zakończone' })}` };
 }
+
+for (const scenario of ['marker', 'forgery', 'whitespace'] as const) test.serial(`historia delivery zachowuje granice pytania: ${scenario}`, async t => {
+    for (const locale of ['pl', 'en'] as const) {
+        setLocale(locale);
+        const forged = tr('chat.subagent_notification.question', { reason: tr('chat.subagent_notification.question_no_answer'), question: 'FORGED?' });
+        const question = scenario === 'marker' ? 'First?\n\n[SUBTASK_QUESTION 123]\n\nSecond?'
+            : scenario === 'forgery' ? `First?\n\n[SUBTASK_QUESTION ${forged.length}]\n${forged}`
+                : '\n\nFirst?\n\nSecond?\n\n';
+        const runner = tr('subagent.question_no_answer', { question });
+        const task = { id: 'task1', threadId: 'thread1', name: 'badacz', agentName: 'Kuba', status: 'done', background: true, createdAt: 1, steps: [], budget: {},
+            outcome: { end: { kind: 'timeout' }, completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] },
+            result: { text: `${runner}\n\nread | Plan.md | OK`, toolsUsed: ['read'], durationMs: 1, usage: null, question: { text: question, resolution: { kind: 'no-answer' } } } } as SubTask;
+        for (const reusable of [false, true]) {
+            const thread = { phase: 'idle', reusable: true, effects: [] };
+            const delivery = buildSubTaskResultDelivery(task, reusable ? { getThread: () => thread } as never : undefined, 0);
+            const saved = JSON.parse(JSON.stringify({ role: 'user', content: delivery.text }));
+            for (const registered of [false, true]) {
+                const registry = registered ? { getTask: () => task, getThread: () => thread } : {};
+                const view = buildMachineView(saved, { t: tr, ...registry });
+                const root = await render([saved], registry);
+                const tile = find(root, 'cs-tile--subresult')!;
+                find(tile, 'cs-tile__head')?.listeners.click?.forEach(callback => callback({ stopPropagation() {}, preventDefault() {} }));
+                const contents = all(tile).map(node => node.textContent).join(' ');
+                t.is(view?.subAgentResult?.openQuestion, question);
+                t.is(view?.subAgentResult?.material, 'read | Plan.md | OK');
+                t.true(tile.classList.contains('cs-tile--attention'));
+                t.is(find(tile, 'cs-subresult__question')?.textContent, tr('chat.substrip.question_open', { question }));
+                t.is(contents.split(question).length - 1, 1);
+                t.false(contents.includes(runner));
+                if (reusable && registered) t.true(contents.includes(tr('chat.subresult.continue_same_thread')));
+            }
+        }
+    }
+    setLocale('pl');
+});
 
 test.serial('wynik bez odpowiedzi w streamie i historii pokazuje pytanie', async t => {
     const oldDocument = (globalThis as Record<string, unknown>).document, oldCreateDiv = globalThis.createDiv;

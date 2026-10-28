@@ -168,7 +168,7 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
     const questionSection = question && question.resolution.kind !== 'answered'
         ? t('chat.subagent_notification.question', { reason: t(question.resolution.kind === 'no-answer' ? 'chat.subagent_notification.question_no_answer' : 'chat.subagent_notification.question_cancelled'), question: question.text })
         : '';
-    const body = parts.join('\n\n') + (questionSection ? `\n\n[SUBTASK_QUESTION ${questionSection.length}]\n${questionSection}\n[/SUBTASK_QUESTION]` : '');
+    const body = parts.join('\n\n') + (questionSection ? `\n\n[SUBTASK_QUESTION]\n${questionSection}\n[/SUBTASK_QUESTION ${questionSection.length}]` : '');
     const instruction = options.subId
         ? `\n\n${t('chat.subagent_notification.reusable_thread', { sub_id: options.subId })}`
         : '';

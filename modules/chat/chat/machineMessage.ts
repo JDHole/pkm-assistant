@@ -581,12 +581,19 @@ function buildParsedNotificationResult(text: string, name: string, thread: SubTa
         return text.endsWith(`\n\n\n\n${footer}`) || text.endsWith(`\n\n\n\n\n${footer}`);
     });
     if (completionValue !== 'unconfirmed' && footerBoundary) {
-        const marker = body.lastIndexOf('\n\n[SUBTASK_QUESTION ');
-        const section = marker >= 0 ? body.slice(marker + 2) : '';
-        const header = /^\[SUBTASK_QUESTION (\d+)\]\n/.exec(section);
-        const endMarker = '\n[/SUBTASK_QUESTION]';
-        if (header && section.endsWith(endMarker) && section.slice(header[0].length, -endMarker.length).length === Number(header[1])) {
-            const content = section.slice(header[0].length, -endMarker.length);
+        let digitsStart = body.length - 1;
+        if (body.endsWith(']')) {
+            while (digitsStart > 0 && body.length - digitsStart <= 16 && body.charCodeAt(digitsStart - 1) >= 48 && body.charCodeAt(digitsStart - 1) <= 57) digitsStart--;
+        }
+        const closingPrefix = '\n[/SUBTASK_QUESTION ';
+        const contentEnd = digitsStart - closingPrefix.length;
+        const digits = body.slice(digitsStart, -1);
+        const length = body.endsWith(']') && digits && body.slice(contentEnd, digitsStart) === closingPrefix ? Number(digits) : NaN;
+        const contentStart = contentEnd - length;
+        const header = '\n\n[SUBTASK_QUESTION]\n';
+        const marker = contentStart - header.length;
+        if (Number.isSafeInteger(length) && length >= 0 && marker >= 0 && body.slice(marker, contentStart) === header) {
+            const content = body.slice(contentStart, contentEnd);
             for (const locale of LOCALES) for (const resolution of ['no-answer', 'cancelled'] as const) {
                 const reason = translate(resolution === 'no-answer' ? 'chat.subagent_notification.question_no_answer' : 'chat.subagent_notification.question_cancelled', undefined, locale);
                 const [prefix, suffix] = templateSegments('chat.subagent_notification.question', locale, ['reason', 'question']).slice(1);
@@ -595,6 +602,17 @@ function buildParsedNotificationResult(text: string, name: string, thread: SubTa
                     openQuestion = content.slice(start.length, suffix ? -suffix.length : undefined);
                     questionResolution = resolution;
                     body = body.slice(0, marker);
+                    break;
+                }
+            }
+        }
+    }
+    if (openQuestion !== undefined) {
+        for (const locale of LOCALES) {
+            const runner = translate('subagent.question_no_answer', { question: openQuestion }, locale);
+            for (const prefix of ['', ...boilerplate.map(part => `${part}\n\n`)]) {
+                if (body.startsWith(prefix + runner) && (body.length === prefix.length + runner.length || body[prefix.length + runner.length] === '\n')) {
+                    body = prefix + body.slice(prefix.length + runner.length).replace(/^\n+/, '');
                     break;
                 }
             }
