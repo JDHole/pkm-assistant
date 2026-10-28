@@ -290,4 +290,4 @@ Gdy `resultView` jest podany, `createSubAgentBlock` tworzy zwinięty kafelek tak
 
 `SubAgentResultView.openQuestion` zawiera tekst pytania bez odpowiedzi: kafelek pokazuje je w osobnej linii. Tytuł i znacznik otrzymuje od adaptera.
 
-`TileStatus.attention` oznacza stan wymagający uwagi: pasek, ikona i kropka korzystają z `var(--text-warning)`. Wynik z `openQuestion` używa tego statusu. Materiał komponent renderuje bez zmian.
+`TileStatus.attention` oznacza stan wymagający uwagi: pasek, ikona i kropka korzystają z `var(--text-warning)`. Adapter ustawia `SubAgentResultView.status`, także dla otwartego pytania; komponent mapuje ten status bez interpretacji pytania. Materiał komponent renderuje bez zmian.

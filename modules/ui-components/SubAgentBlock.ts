@@ -37,7 +37,7 @@ export interface SubAgentResultView {
     title: string;
     summary?: string;
     badge?: string;
-    status: 'ok' | 'error';
+    status: 'ok' | 'error' | 'attention';
     material?: string;
     error?: string;
     missingTargets: string[];
@@ -239,7 +239,7 @@ export function createSubAgentBlock(opts: SubAgentBlockOptions): HTMLElement {
     const isBackground = opts.pending === true;
     const resultView = opts.resultView;
     const isError = !isBackground && (resultView?.status === 'error' || opts.status === 'error');
-    const status: TileStatus = isBackground ? 'pending' : resultView?.openQuestion !== undefined ? 'attention' : (isError ? 'error' : 'ok');
+    const status: TileStatus = isBackground ? 'pending' : resultView?.status === 'attention' ? 'attention' : (isError ? 'error' : 'ok');
 
     let title: string;
     let summary: string | undefined;

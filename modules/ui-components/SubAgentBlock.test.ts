@@ -156,6 +156,26 @@ test.serial('resultView displays an unanswered question', t => {
     });
 });
 
+test.serial('resultView status is rendered independently of the question', t => {
+    withFakeDocument(() => {
+        const base = { title: 'Result worker', missingTargets: [], effects: [], notes: [] };
+        const attention = createSubAgentBlock({ type: 'delegate', resultView: { ...base, status: 'attention' } }) as unknown as FakeEl;
+        const error = createSubAgentBlock({ type: 'delegate', resultView: { ...base, status: 'error', openQuestion: 'Which note?' } }) as unknown as FakeEl;
+        t.true(attention.classList.contains('cs-tile--attention'));
+        t.true(error.classList.contains('cs-tile--error'));
+    });
+});
+
+test.serial('resultView attention takes precedence while opts error remains an error', t => {
+    withFakeDocument(() => {
+        const base = { title: 'Result worker', missingTargets: [], effects: [], notes: [] };
+        const error = createSubAgentBlock({ type: 'delegate', status: 'error', resultView: { ...base, status: 'ok' } }) as unknown as FakeEl;
+        const attention = createSubAgentBlock({ type: 'delegate', status: 'error', resultView: { ...base, status: 'attention' } }) as unknown as FakeEl;
+        t.true(error.classList.contains('cs-tile--error'));
+        t.true(attention.classList.contains('cs-tile--attention'));
+    });
+});
+
 test.serial('wynik: naglowek (tytul/skrot/meta) nie zawiera nazw narzedzi ani liczb tokenow', t => {
     withFakeDocument(() => {
         const row = createSubAgentBlock({
