@@ -3132,6 +3132,7 @@ Report status → \`gotowy\`. Tell the user 2-3 sentences of essence + where the
   'chat.substrip.question_remaining': '{{time}} of 5 min remaining',
   'chat.substrip.question_preview': 'Preview only. The lead answers; you reply to the lead in chat. When the lead asks you, the sub-agent’s clock pauses.',
   'chat.substrip.question_no_answer': 'no answer',
+  'chat.subresult.question_result_title': 'Result {{name}}',
   'chat.substrip.question_no_answer_partial': 'no answer · partial',
   'chat.substrip.question_open': 'Open question: {{question}}',
   'chat.substrip.question_resume': 'Reply to the lead, who will resume this sub-agent with your answer.',

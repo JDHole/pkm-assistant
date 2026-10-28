@@ -3138,6 +3138,7 @@ Status raportu → \`gotowy\`. Powiedz userowi 2-3 zdania esencji + gdzie leży 
   'chat.substrip.question_remaining': 'zostało {{time}} z 5 min',
   'chat.substrip.question_preview': 'Tylko podgląd. Odpowiada prowadzący; Ty odpisujesz mu w czacie. Gdy prowadzący pyta Ciebie, zegar suba stoi.',
   'chat.substrip.question_no_answer': 'brak odpowiedzi',
+  'chat.subresult.question_result_title': 'Wynik {{name}}',
   'chat.substrip.question_no_answer_partial': 'bez odpowiedzi · częściowy',
   'chat.substrip.question_open': 'Otwarte pytanie: {{question}}',
   'chat.substrip.question_resume': 'Odpowiedz prowadzącemu, a wznowi tego suba z Twoją odpowiedzią.',
