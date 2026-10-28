@@ -181,6 +181,7 @@ test('executeToolCall lists only the trusted owner threads from the real sub-tas
     t.deepEqual(result, { success: true, threads: [{
         sub_id: 'owned-thread', name: 'Worker', phase: 'idle', runs: 1,
         outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed' },
+        questionState: { kind: 'none' },
     }] });
     registry.dispose();
 });

@@ -11,7 +11,7 @@
  * 4. Return results
  */
 import { SubAgentRunner, DEFAULT_SUB_AGENT_TOOLS, PKM_SUB_NAME, allocateSubTaskId, canContinueAfterUserStop, isRuntimeSequence } from '../../modules/sub-agents/index.js';
-import type { RuntimeSequence, SubTask, SubTaskOrigin } from '../../modules/sub-agents/index.js';
+import type { RuntimeSequence, SubTask, SubTaskOrigin, QuestionId, Owner, AnswerResult, QuestionState } from '../../modules/sub-agents/index.js';
 import type { RunOutcome } from '../../modules/sub-agents/index.js';
 import { createModelForRole } from '../../modules/models/index.js';
 import type { ModelRole, ResolverPluginLike } from '../../modules/models/index.js';
@@ -225,6 +225,8 @@ export type DelegatePlugin = NonNullable<ResolverPluginLike> & {
         getThread?: (id: string) => import('../sub-agents/index.js').SubThread | undefined;
         listThreads?: (owner: import('../sub-agents/index.js').SubThreadOwner) => import('../sub-agents/index.js').SubThread[];
         postMessage?: (id: string, message: string) => boolean;
+        answerParentQuestion?: (id: string, questionId: QuestionId, owner: Owner, text: string) => AnswerResult;
+        getQuestionState?: (id: string) => QuestionState;
         requestStop?: (id: string, by: 'lead') => boolean;
         closeThread?: (id: string, by?: 'user' | 'lead' | 'system') => boolean;
         createThread?: (input: { threadId: string; name: string; owner: import('../sub-agents/index.js').SubThreadOwner; origin: SubTaskOrigin; config: Record<string, unknown>; phase: 'queued' }) => import('../sub-agents/index.js').SubThread;
@@ -1147,6 +1149,7 @@ export function createSubAgentTool(app: object, deps: DelegateToolDeps = {}) {
                 action: { type: 'string', enum: ['message', 'task', 'stop', 'close', 'list'], description: t('mcp.sub_agent.param.action') },
                 sub_id: { type: 'string', description: t('mcp.sub_agent.param.sub_id') },
                 text: { type: 'string', description: t('mcp.sub_agent.param.text') },
+                question_id: { type: 'string', description: 'ID of the question being answered.' },
                 task: { type: 'string', description: t('mcp.sub_agent.param.task') },
                 background: { type: 'boolean', description: t('mcp.sub_agent.param.background') },
             }, required: ['action'],
@@ -1169,7 +1172,8 @@ export function createSubAgentTool(app: object, deps: DelegateToolDeps = {}) {
                 return { success: true, threads: threads.map(thread => {
                     const last = thread.runIds.length ? registry?.getTask?.(thread.runIds[thread.runIds.length - 1]) : undefined;
                     return { sub_id: thread.threadId, name: thread.name, phase: thread.phase, runs: thread.runIds.length,
-                        outcome: last?.outcome ? { end: last.outcome.end, completeness: last.outcome.completeness } : null };
+                        outcome: last?.outcome ? { end: last.outcome.end, completeness: last.outcome.completeness } : null,
+                        questionState: last ? registry?.getQuestionState?.(last.id) ?? { kind: 'none' } : { kind: 'none' } };
                 }) };
             }
             const id = typeof raw.sub_id === 'string' ? raw.sub_id : '';
@@ -1179,6 +1183,16 @@ export function createSubAgentTool(app: object, deps: DelegateToolDeps = {}) {
                 return { success: false, error: t('mcp.sub_agent.owner_mismatch') };
             }
             if (action === 'message') {
+                if (raw.question_id !== undefined) {
+                    const runId = thread.runIds[thread.runIds.length - 1];
+                    const text = typeof raw.text === 'string' ? raw.text : '';
+                    if (!text.trim()) return { success: false, error: t('mcp.sub_agent.empty_message') };
+                    if (typeof raw.question_id !== 'string' || !raw.question_id || !runId ||
+                        registry?.answerParentQuestion?.(runId, raw.question_id as QuestionId, owner, text).kind !== 'accepted') {
+                        return { success: false, error: t('mcp.sub_agent.question_expired') };
+                    }
+                    return { success: true, message: t('mcp.sub_agent.question_answered', { sub_id: id }) };
+                }
                 if (thread.phase !== 'running') return { success: false, error: t('mcp.sub_agent.message_state') };
                 const runId = thread.runIds[thread.runIds.length - 1];
                 const text = typeof raw.text === 'string' ? raw.text : '';

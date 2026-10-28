@@ -1,5 +1,9 @@
 # modules/tools/
 
+`sub_agent list` zwraca `questionState` ostatniego biegu wątku. Wiadomość
+z `question_id` przekazuje odpowiedź do protokołu po sprawdzeniu właściciela;
+bez ID pozostaje zwykłą wiadomością sterującą.
+
 **MCP runtime + built-in narzędzia agenta.** Plugin uruchamia:
 1. **Built-in tools** - wbudowane narzędzia agenta (read, list, write, memory_save, delegate, web_search, ...), skompilowane w bundlu.
 2. **External MCP servers** - zewnętrzne serwery przez prawdziwy klient MCP (`ExternalMcpManager`, stdio/HTTP przez `@modelcontextprotocol/sdk`), konfigurowane w ustawieniach pluginu (`data.json`), NIE w vaulcie.

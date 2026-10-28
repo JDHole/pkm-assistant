@@ -27,7 +27,7 @@ test('sub_agent handles owned thread actions and rejects a different owner', asy
     registry.endRun(thread.threadId, { successful: true });
     t.deepEqual(await call({ action: 'list' }), {
         success: true,
-        threads: [{ sub_id: 'sub-id-1', name: 'Worker', phase: 'idle', runs: 1, outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed' } }],
+        threads: [{ sub_id: 'sub-id-1', name: 'Worker', phase: 'idle', runs: 1, outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed' }, questionState: { kind: 'none' } }],
     });
     t.deepEqual(await tool.execute({ action: 'close', sub_id: 'sub-id-1', _invocationOrigin: { ...owner, sessionEpoch: 'epoch-2' } }, {}, plugin), {
         success: false, error: tr('mcp.sub_agent.owner_mismatch'),
@@ -36,6 +36,33 @@ test('sub_agent handles owned thread actions and rejects a different owner', asy
         success: true, message: tr('mcp.sub_agent.closed', { sub_id: 'sub-id-1' }),
     });
     t.is(registry.getThread('sub-id-1')?.phase, 'closed');
+});
+
+test('wiadomość bez ID pozostaje wiadomością', async t => {
+    const owner = { agentName: 'Jaskier', sessionPath: 's.md', sessionEpoch: 'e1' };
+    const registry = new SubTaskRegistry();
+    registry.createThread({ threadId: 's1', name: 'Klara', owner, origin: owner, config: {}, phase: 'running' });
+    const run = registry.create({ id: 'r1', name: 'Klara', threadId: 's1', origin: owner });
+    const question = registry.openParentQuestion(run.id, 'Jaki zakres?');
+    if (question.kind !== 'opened') throw new Error('question did not open');
+    const tool = createSubAgentTool({});
+    await tool.execute({ action: 'message', sub_id: 's1', text: 'doprecyzowanie', _invocationOrigin: owner }, {}, { subTaskRegistry: registry } as never);
+    t.deepEqual({ question: registry.getQuestionState('r1').kind, messages: registry.takeMessages('r1') }, { question: 'waiting', messages: ['doprecyzowanie'] });
+    registry.dispose();
+});
+
+test('odpowiedź z ID rozwiązuje tylko wskazane pytanie', async t => {
+    const owner = { agentName: 'Jaskier', sessionPath: 's.md', sessionEpoch: 'e1' };
+    const registry = new SubTaskRegistry();
+    registry.createThread({ threadId: 's1', name: 'Klara', owner, origin: owner, config: {}, phase: 'running' });
+    registry.create({ id: 'r1', name: 'Klara', threadId: 's1', origin: owner });
+    const question = registry.openParentQuestion('r1', 'Jaki zakres?');
+    if (question.kind !== 'opened') throw new Error('question did not open');
+    const tool = createSubAgentTool({});
+    const result = await tool.execute({ action: 'message', sub_id: 's1', question_id: question.question.id, text: 'A/', _invocationOrigin: owner }, {}, { subTaskRegistry: registry } as never);
+    t.is((result as { success: boolean }).success, true);
+    t.deepEqual(await question.resolution, { kind: 'answered', text: 'A/' });
+    registry.dispose();
 });
 import { __test__ as modelTest } from '../models/index.js';
 import type { DelegatePlugin, SubAgentConfigLike } from './DelegateTool.js';
