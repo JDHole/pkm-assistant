@@ -2,6 +2,7 @@ import test from 'ava';
 import { register } from 'node:module';
 import { renderSubTaskStrip } from './subTaskStrip.js';
 import { SubTaskRegistry, buildStripModel } from '../../sub-agents/index.js';
+import { QuestionTestClock } from '../../sub-agents/test-support/questionTestClock.js';
 import { DEFAULT_LIMITS } from '../../../config/limits.js';
 import { pl as trPl } from '../../../core/i18n/pl.js';
 import { pluralCategory, setLocale, t as tr } from '../../../core/i18n/index.js';
@@ -72,6 +73,21 @@ function textTree(node: MockEl): string { return [node.textContent, ...node.chil
 function all(node: MockEl): MockEl[] { return [node, ...node.children.flatMap(all)]; }
 
 const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: 'epoch-1' };
+
+test('obecny pasek renderuje czekający bieg', t => {
+    const registry = new SubTaskRegistry({ questionClock: new QuestionTestClock() });
+    registry.createThread({ threadId: 's1', name: 'worker', owner, origin: owner, config: {} });
+    registry.create({ id: 'r1', threadId: 's1', name: 'worker', agentName: owner.agentName, origin: owner, background: true });
+    registry.openParentQuestion('r1', 'Jaki zakres?');
+    const model = buildStripModel({ tasks: registry.list(), threads: registry.listThreads(owner), ...owner });
+    const host = new MockEl();
+    renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, expandedId: 's1', onToggle() {} });
+    t.deepEqual({ chips: all(host).filter(node => node.classList.contains('pkm-substrip__chip')).length,
+        running: model.filter(row => row.state.kind === 'running').length,
+        stopButtons: all(host).filter(node => node.classList.contains('pkm-substrip__stop')).length },
+    { chips: 1, running: 1, stopButtons: 1 });
+    registry.dispose();
+});
 
 test('karta pustego biegu pokazuje przyczynę i brak wyniku', t => {
     setLocale('pl');

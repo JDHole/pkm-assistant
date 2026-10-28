@@ -216,6 +216,9 @@ export class ChatView extends PluginItemView {
         // Zamknięty czat nie ma jak dostarczyć wyniku suba (ani gdzie odpalić auto-tury).
         // Odpinamy dostawcę — wyniki zostają w kolejce notifiera do następnego otwarcia.
         this.plugin?.subTaskNotifier?.setDeliverer?.(null);
+        this.plugin?.subTaskNotifier?.setNoticeDeliverer?.(null);
+        this._questionAutoTurn = { kind: 'idle' };
+        this._subTaskTurnPending = false;
         this._unwireSubTaskStrip?.();
         this._unsubscribeSkinEvents?.();
         this._unsubscribeSkinEvents = null;

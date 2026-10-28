@@ -35,6 +35,7 @@ import streamingManager, { shouldUseFreshModel } from './StreamingManager.js';
 import { _tabKey } from './chat_tabs.js';
 import { matchTabForOrigin } from './subTaskNotification.js';
 import { buildSubTaskResultDelivery } from './subTaskResultDelivery.js';
+import { buildSubTaskQuestionDelivery } from './subTaskQuestionDelivery.js';
 // Wiadomości maszynowe (spec A3) - dren kolejki niżej renderuje bezpośrednio (bez
 // `append_message`), więc musi widzieć ten sam klasyfikator co historia/render na żywo
 // (`chat_messages.ts`), inaczej powiadomienie/przywołanie zakolejkowane w trakcie trwającej
@@ -84,7 +85,7 @@ import type { OpenAiToolDefinition, ServerVisibilityAgent, ToolDefinition } from
 import type { LoopMessage, ParsedToolCall, RunAgentLoopOptions, RunAgentLoopResult, ToolExecutionContext, ToolResultEntry, Usage } from '../../agent-loop/index.js';
 import type { ToolCall as ToolsToolCall } from '../../tools/index.js';
 import type { SubAgentToolCallDetail } from '../../ui-components/index.js';
-import type { RuntimeSequence, SubTask, SubTaskOrigin } from '../../sub-agents/index.js';
+import type { RuntimeSequence, SubTask, SubTaskOrigin, ParentQuestion, SubTaskNoticeClaim } from '../../sub-agents/index.js';
 import type { ContentBlock, RollingWindow } from './RollingWindow.js';
 import type { FrozenTurnOwner } from './turnOwner.js';
 import type { DelegationProposal } from './chat_artifacts.js';
@@ -98,6 +99,7 @@ import type { TurnAbortHandle } from './turnAbort.js';
 interface SendMessageOptions {
     injectedText?: unknown;
     meta?: unknown;
+    questionDelivery?: { question: ParentQuestion; token: object; claim: SubTaskNoticeClaim; window: RollingWindow; tab: ChatTab; owner: FrozenTurnOwner };
 }
 
 /**
@@ -260,6 +262,7 @@ let _turnSeq = 0;
  *   - tamto jest adresem zwrotnym delegacji w tle.
  */
 export async function send_message(this: ChatViewLike, opts: SendMessageOptions = {}) {
+    const questionDelivery = opts?.questionDelivery;
     const injectedText = typeof opts?.injectedText === 'string' ? opts.injectedText.trim() : '';
     const isInjected = injectedText.length > 0;
 
@@ -276,15 +279,19 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     const inlineTriggers = parseTriggersIfHuman(rawText, messageMeta);
     const text = inlineTriggers.length > 0 ? (stripInlineTriggers(rawText) || rawText) : rawText;
     if (!text) return;
+    if (isHuman && this._questionAutoTurn?.kind === 'reserved' && !this._questionAutoTurn.accepted) {
+        this._questionAutoTurn = { kind: 'idle' };
+        this._subTaskTurnPending = false;
+    }
 
     // ── MESSAGE QUEUE: if generating, queue message for after completion ──
-    if (this.is_generating) {
+    if (this.is_generating || (isHuman && this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.accepted)) {
         if (isInjected) {
             // Dostawca wyniku sprawdza `is_generating` PRZED wstrzyknięciem, więc tu nie
             // powinniśmy trafić. Jak jednak trafimy - wynik ZOSTAJE w kolejce notifiera
             // (dostawca zwrócił `true` tylko wtedy, gdy tura naprawdę ruszyła), a slotu
             // usera nie wolno zająć powiadomieniem.
-            this._subTaskTurnPending = false;
+            if (!questionDelivery) this._subTaskTurnPending = false;
             log.warn('Chat', 'Powiadomienie o subie trafiło na trwającą turę - pomijam wstrzyknięcie');
             return;
         }
@@ -390,6 +397,23 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         if (this.mentionAutocomplete?.hasMentions()) this.mentionAutocomplete.clear();
     }
 
+    if (questionDelivery) {
+        const { question, token, window, tab } = questionDelivery;
+        const reservation = this._questionAutoTurn;
+        const activeTab = matchTabForOrigin(this.chatTabs, question.owner, _tabKey);
+        const valid = reservation?.kind === 'reserved' && reservation.token === token
+            && activeTab === tab && tab.isActive === true && this.rollingWindow === window
+            && isQuestionOwnerCurrent(this, question)
+            && !this.is_generating && !this._drainSuppressed
+            && evaluateAutoTurnChain(this._autoTurnChainCounts?.get(question.owner.agentName) || 0,
+                getLimits(this.env?.settings).max_consecutive_auto_turns).allowed
+            && this.plugin?.subTaskRegistry?.isQuestionOpen(question.taskId, question.id) === true;
+        if (!valid) return;
+        if (window.messages.some(message => message.questionId === question.id)) {
+            questionDelivery.claim.ack();
+            return;
+        }
+    }
     let savedUserContent;
     if (hasAttachments && attachmentResult) {
         // Attachments present: content may be array (multimodal) or string
@@ -399,15 +423,31 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     } else {
         // No attachments: API gets mention context, display shows only user text
         const apiContent = mentionContextText ? mentionContextText + '\n\n' + mentionDisplayText : mentionDisplayText;
-        await this.append_message('user', apiContent, mentionContextText ? mentionDisplayText : undefined, messageMeta);
+        const appended = this.append_message('user', apiContent, mentionContextText ? mentionDisplayText : undefined, messageMeta);
+        if (questionDelivery?.window.messages.some(message => message.questionId === questionDelivery.question.id)) {
+            questionDelivery.claim.ack();
+            if (this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.token === questionDelivery.token) {
+                this._questionAutoTurn.accepted = true;
+            }
+            if (!this._autoTurnChainCounts) this._autoTurnChainCounts = new Map();
+            const agentName = questionDelivery.question.owner.agentName;
+            const count = this._autoTurnChainCounts.get(agentName) || 0;
+            this._autoTurnChainCounts.set(agentName, evaluateAutoTurnChain(count, getLimits(this.env?.settings).max_consecutive_auto_turns).nextCount);
+        }
+        await appended;
         savedUserContent = apiContent;
     }
-    await this.appendToActiveSession?.({
+    const userEvent: ActiveSessionEventInput = {
         type: 'user_message',
         agentName: activeAgentName,
         content: savedUserContent,
         timestamp: new Date().toISOString()
-    });
+    };
+    if (questionDelivery) {
+        await questionDelivery.owner.memory?.appendSessionEvent(questionDelivery.owner.sessionPath, userEvent, questionDelivery.owner.sessionEpoch);
+    } else {
+        await this.appendToActiveSession?.(userEvent);
+    }
 
     // WŁAŚCICIEL TURY zamrożony DOKŁADNIE TU - razem z zapaleniem guzika Stop i PRZED pierwszym
     // awaitem przygotowania. Za chwilę wchodzimy w budowę promptu z pamięcią (okno „potrafi
@@ -419,6 +459,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     // wszystko w `send_message` idzie z `owner`; `getActiveAgent()` / `this.rollingWindow` są
     // tu zakazane (pilnuje tego strażnik po źródle w `turnOwner.test.ts`).
     const owner = freezeTurnOwner(this);
+    if (questionDelivery) Object.assign(owner, questionDelivery.owner);
     // Klucz `_agentStates` liczony RAZ, TU - zaraz po zamrożeniu właściciela, przed KAŻDYM
     // awaitem tej funkcji - i wożony dalej jako STRING (`turn.origin.tabKey`, `ownerTabKey`
     // w catchu). `_tabKey(turn.owner?.tab)` przeliczany LENIWIE przy sprzątaniu
@@ -2340,8 +2381,56 @@ export function _wireSubTaskDeliverer(this: ChatViewLike) {
     const notifier = this.plugin?.subTaskNotifier;
     if (!notifier?.setDeliverer) return;
     notifier.setDeliverer((task: SubTask) => this._deliverSubTaskResult(task));
+    notifier.setNoticeDeliverer((notice) => notice.kind === 'result'
+        ? this._deliverSubTaskResult(notice.task)
+        : _deliverSubTaskQuestion.call(this, notice.question));
     // `setDeliverer` świadomie NIC nie dostarcza - moment wybiera wołacz. Teraz.
     this._drainSubTasks();
+}
+
+function isQuestionOwnerCurrent(view: ChatViewLike, question: ParentQuestion): boolean {
+    const owner = freezeTurnOwner(view);
+    return owner.agentName === question.owner.agentName && owner.sessionPath === question.owner.sessionPath
+        && owner.sessionEpoch === question.owner.sessionEpoch;
+}
+
+export function _deliverSubTaskQuestion(this: ChatViewLike, question: ParentQuestion): boolean {
+    const notifier = this.plugin?.subTaskNotifier;
+    const registry = this.plugin?.subTaskRegistry;
+    const task = registry?.getTask(question.taskId);
+    const tab = matchTabForOrigin(this.chatTabs, question.owner, _tabKey);
+    const limits = getLimits(this.env?.settings);
+    const chain = evaluateAutoTurnChain(this._autoTurnChainCounts?.get(question.owner.agentName) || 0, limits.max_consecutive_auto_turns);
+    if (!notifier || !task?.background || !registry?.isQuestionOpen(question.taskId, question.id)
+        || !evaluateSubTaskDelivery({ tab, isGenerating: this.is_generating,
+            subTaskTurnPending: this._subTaskTurnPending, drainSuppressed: this._drainSuppressed,
+            userStopped: task.userStopSeq !== undefined, chainAllowed: chain.allowed }).allowed
+        || !tab || !this.rollingWindow) return false;
+    const token = {};
+    const window = this.rollingWindow;
+    const owner = freezeTurnOwner(this);
+    if (owner.tab !== tab || owner.rollingWindow !== window || owner.agentName !== question.owner.agentName
+        || owner.sessionPath !== question.owner.sessionPath || owner.sessionEpoch !== question.owner.sessionEpoch) return false;
+    this._questionAutoTurn = { kind: 'reserved', token, owner: question.owner };
+    this._subTaskTurnPending = true;
+    void Promise.resolve().then(async () => {
+        const [claim] = notifier.claimNotices(notice => notice.kind === 'question' && notice.question.id === question.id);
+        if (!claim) return;
+        try {
+            const { text, meta } = buildSubTaskQuestionDelivery(question);
+            await this.send_message({ injectedText: text, meta, questionDelivery: { question, token, claim, window, tab, owner } });
+        } finally {
+            if (window.messages.some(message => message.questionId === question.id)) claim.ack();
+            else claim.release();
+        }
+    }).catch((e: unknown) => log.warn('Chat', `Dostarczenie pytania suba padło: ${(e as Error)?.message || String(e)}`))
+        .finally(() => {
+            if (this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.token === token) {
+                this._questionAutoTurn = { kind: 'idle' };
+                this._subTaskTurnPending = false;
+            }
+        });
+    return false;
 }
 
 /** Ponów próbę dostarczenia zaległych wyników. Nigdy nie rzuca (powiadomienia nie wywracają czatu). */
@@ -2438,7 +2527,7 @@ export function _deliverSubTaskResult(this: ChatViewLike, task: SubTask) {
             // markery `@@skill:`, komendy `/`).
             .then(() => this.send_message({ injectedText: text, meta }))
             .catch((e: unknown) => log.warn('Chat', `Auto-tura po subie padła: ${(e as Error)?.message || String(e)}`))
-            .finally(() => { this._subTaskTurnPending = false; });
+            .finally(() => { if (this._questionAutoTurn?.kind !== 'reserved') this._subTaskTurnPending = false; });
         return true;
     } catch (e) {
         log.warn('Chat', `Dostarczenie wyniku suba padło (zostaje w kolejce): ${(e as Error)?.message || String(e)}`);

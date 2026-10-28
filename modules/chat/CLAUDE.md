@@ -1535,3 +1535,9 @@ załącznik, a druga opcja to cytuj i kopiuje się to do chatu jako cytat."
 U3: `ChatTurnPartialState` synchronously adds one system receipt to the frozen owner RollingWindow, updates it by revision and observes queued `appendSessionEvent` persistence to the captured path. Native turn AbortSignal preserves the first cause; turnId and frozen tab key protect newer turns from late callbacks. The machine classifier recognizes `loop_partial` from metadata or its localized system header.
 
 Partial tiles carry `_loopPartialHasToolResults` while live. After history restoration drops metadata, `buildMachineView` checks localized tool receipt headings and their retained previews in the content. A Stop without tool results has an empty tile summary, even if an older receipt still contains the former unconditional disclaimer.
+# Pytania subów w tle
+
+Notifier przekazuje czatowi także pytania. Auto-tura wymaga aktywnej sesji właściciela,
+wolnego czatu i przejścia tych samych bramek co wynik. Claim jest potwierdzany po
+synchronicznym dopisaniu wiadomości do okna, a pytanie przed dopisaniem jest ponownie
+sprawdzane w rejestrze. Metadane niosą identyfikator pytania i właściciela.
