@@ -12,7 +12,7 @@
  */
 import { SubAgentRunner, DEFAULT_SUB_AGENT_TOOLS, PKM_SUB_NAME, allocateSubTaskId, canContinueAfterUserStop, isRuntimeSequence } from '../../modules/sub-agents/index.js';
 import type { RuntimeSequence, SubTask, SubTaskOrigin, QuestionId, Owner, AnswerResult, QuestionState, RunActivity, ParentQuestion } from '../../modules/sub-agents/index.js';
-import type { RunOutcome } from '../../modules/sub-agents/index.js';
+import type { RunOutcome, SubRunResult } from '../../modules/sub-agents/index.js';
 import { createModelForRole } from '../../modules/models/index.js';
 import type { ModelRole, ResolverPluginLike } from '../../modules/models/index.js';
 import { t } from '../../core/i18n/index.js';
@@ -148,6 +148,7 @@ function _rawToString(value: unknown): string {
 }
 
 interface SubAgentRunResult {
+    question?: SubRunResult['question'];
     result?: unknown;
     toolsUsed?: unknown;
     toolCallDetails?: unknown[];
@@ -465,6 +466,7 @@ function _makeSalvageMapper(salvageCap: number): SalvageMapper {
             ...(typeof r.duration_ms === 'number' ? { duration_ms: r.duration_ms } : {}),
             ...(r.stop_reason ? { stop_reason: r.stop_reason } : {}),
             ...(r.partial ? { partial: r.partial } : {}),
+            ...(r.question ? { question: r.question } : {}),
             ...(Array.isArray(r.tool_call_details) ? { tool_call_details: r.tool_call_details } : {}),
             ...(r.usage ? { usage: r.usage } : {}),
         };
@@ -1228,7 +1230,7 @@ export function createSubAgentTool(app: object, deps: DelegateToolDeps = {}) {
                     if (typeof raw.question_id !== 'string' || !raw.question_id || !runId ||
                         registry?.answerParentQuestion?.(runId, raw.question_id as QuestionId, owner, text).kind !== 'accepted') {
                         const state = runId ? registry?.getQuestionState?.(runId) : undefined;
-                        return { success: false, error: t('mcp.sub_agent.question_expired'),
+                        return { success: false, error: t('mcp.sub_agent.question_expired'), code: 'question_expired',
                             ...(state?.kind === 'waiting' ? { activeQuestionId: state.question.id } : {}) };
                     }
                     return { success: true, message: t('mcp.sub_agent.question_answered', { sub_id: id }) };
@@ -1683,6 +1685,7 @@ async function _executeSubAgent(
             stopped_by: 'error',
             ...(result.stopReason ? { stop_reason: result.stopReason } : {}),
             ...(result.partial ? { partial: result.partial } : {}),
+            ...(result.question ? { question: result.question } : {}),
             ...(result.handoff ? { partial_result: result.handoff } : {}),
             tools_used: result.toolsUsed || [],
             tool_call_details: result.toolCallDetails || [],
@@ -1704,6 +1707,7 @@ async function _executeSubAgent(
             ...(result.stoppedBy ? { stopped_by: result.stoppedBy } : {}),
             ...(result.stopReason ? { stop_reason: result.stopReason } : {}),
             ...(result.partial ? { partial: result.partial } : {}),
+            ...(result.question ? { question: result.question } : {}),
             tools_used: result.toolsUsed || [], tool_call_details: details,
             usage: result.usage || null, duration_ms: result.duration,
             outcome: _outcomeFields(outcome), effects: outcome.effects,
@@ -1735,6 +1739,7 @@ async function _executeSubAgent(
         ...(result.stoppedBy ? { stopped_by: result.stoppedBy } : {}),
         ...(result.stopReason ? { stop_reason: result.stopReason } : {}),
         ...(result.partial ? { partial: result.partial } : {}),
+        ...(result.question ? { question: result.question } : {}),
         tools_used: result.toolsUsed,
         tool_call_details: result.toolCallDetails || [],
         duration_ms: result.duration,

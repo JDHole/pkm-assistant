@@ -546,7 +546,7 @@ Przyjęte elementy listy `tasks` rezerwują wątki `queued` w kolejności wejśc
 
 U3: each delegation owns an AbortController with a first-cause latch (`manual-stop` or `task-timeout`). The per-request stop guard prevents duplicate cancellation; final settlement clears the stop closure and existing timeout finalization cancels stale grace. Both result branches retain partial/stop_reason/tools_used/tool_call_details/usage.
 
-Zegar zadania delegacji pauzuje podczas oczekiwania na odpowiedź na `ask_parent`, a po odpowiedzi wraca z pozostałym budżetem. Pierwsza admisja nadal jednokrotnie przezbraja limit; pauza nie odnawia grace. Blokująca kontynuacja zwraca aktualne pytanie i promuje żywy bieg do tła. Obietnica pełnego biegu nadal posiada zegar, kontrolkę abortu i miejsce w liczniku tła, aż do zakończenia; wynik dostarcza notifier. Odpowiedź na nieaktualne `question_id` może wskazać `activeQuestionId` nowego pytania tego samego wątku.
+Zegar zadania delegacji pauzuje podczas oczekiwania na odpowiedź na `ask_parent`, a po odpowiedzi wraca z pozostałym budżetem. Pierwsza admisja nadal jednokrotnie przezbraja limit; pauza nie odnawia grace. Blokująca kontynuacja zwraca aktualne pytanie i promuje żywy bieg do tła; notifier nie doręcza ponownie tego pytania. Obietnica pełnego biegu nadal posiada zegar, kontrolkę abortu i miejsce w liczniku tła, aż do zakończenia; wynik dostarcza notifier. Terminalne `question` z treścią i rozstrzygnięciem przechodzi przez zwrotkę i ratowanie dorobku. Odpowiedź na nieaktualne `question_id` dostaje kod `question_expired` i może wskazać `activeQuestionId` nowego pytania tego samego wątku.
 
 ## Wątki sub-agentów przez `sub_agent`
 

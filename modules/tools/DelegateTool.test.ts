@@ -1972,6 +1972,16 @@ test.serial('end-to-end: delegacja z realnym rejestrem odracza abort, gdy sub je
 
 // ─── Ratowanie dorobku po strzale budzika zadania ───
 
+test('ratowanie przycina dorobek, ale zachowuje całe terminalne pytanie', t => {
+    const mapper = __test__._makeSalvageMapper(4);
+    const result = mapper({ success: true, result: 'dorobek', question: {
+        text: 'Jaki zakres?', resolution: { kind: 'no-answer' },
+    } }, 100);
+    t.deepEqual({ partial: result?.partial_result, question: result?.question }, {
+        partial: 'doro', question: { text: 'Jaki zakres?', resolution: { kind: 'no-answer' } },
+    });
+});
+
 test('_withTimeout z mapperem — ubity bieg oddaje dorobek jako partial_result', async t => {
     const mapper = __test__._makeSalvageMapper(12000);
     // Bieg „domyka się" 40 ms po strzale budzika (abort → pętla finalize → runner) z częściowym

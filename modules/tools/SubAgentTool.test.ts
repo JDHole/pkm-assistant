@@ -80,7 +80,7 @@ test('stare pytanie nie odpowiada na nowy bieg', async t => {
     if (current.kind !== 'opened') throw new Error('missing current question');
     const result = await createSubAgentTool({}).execute({ action: 'message', sub_id: 's1', question_id: old.question.id,
         text: 'A/', _invocationOrigin: owner }, {}, { subTaskRegistry: registry } as never);
-    t.deepEqual(result, { success: false, error: tr('mcp.sub_agent.question_expired'), activeQuestionId: current.question.id });
+    t.deepEqual(result, { success: false, error: tr('mcp.sub_agent.question_expired'), code: 'question_expired', activeQuestionId: current.question.id });
     t.is(registry.getQuestionState('r2').kind, 'waiting');
     registry.dispose();
 });
