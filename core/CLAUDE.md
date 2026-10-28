@@ -1,5 +1,8 @@
 # core/
 
+Tłumaczenia i18n obejmują komunikaty odpowiedzi na pytanie suba, wygaśnięcia
+pytania oraz niedostępnego kanału do prowadzącego.
+
 `core/i18n` udostępnia `pluralCategory` do wyboru form liczby mnogiej PL i EN.
 
 **Fundament pluginu.** Wszystko co KAŻDY moduł potrzebuje żeby w ogóle wystartować: klasa pluginu, runtime, tryby pracy, security, i18n, utilities.
