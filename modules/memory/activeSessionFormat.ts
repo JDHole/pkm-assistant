@@ -62,7 +62,7 @@ export const ACTIVE_SESSION_FORMAT_VERSION = 3;
  */
 import type { QuestionResolution } from '../sub-agents/index.js';
 
-export type SessionQuestion = { text: string; resolution: Exclude<QuestionResolution, { kind: 'answered' }> };
+export type SessionQuestion = { text: string; resolution: Exclude<QuestionResolution, { kind: 'answered' }>; note?: string };
 
 export type SessionRole = 'system' | 'user' | 'assistant' | 'tool';
 
@@ -523,11 +523,12 @@ function parseSessionQuestion(raw: string): SessionQuestion | undefined {
             || !('resolution' in value) || !value.resolution || typeof value.resolution !== 'object'
             || !('kind' in value.resolution)) return undefined;
         const resolution = value.resolution;
-        if (resolution.kind === 'no-answer') return { text: value.text, resolution: { kind: 'no-answer' } };
+        const note = 'note' in value && typeof value.note === 'string' ? { note: value.note } : {};
+        if (resolution.kind === 'no-answer') return { text: value.text, resolution: { kind: 'no-answer' }, ...note };
         if (resolution.kind === 'cancelled' && 'by' in resolution && 'reason' in resolution
             && (resolution.by === 'user' || resolution.by === 'lead' || resolution.by === 'system')
             && (resolution.reason === 'stop' || resolution.reason === 'unload' || resolution.reason === 'run-ended')) {
-            return { text: value.text, resolution: { kind: 'cancelled', by: resolution.by, reason: resolution.reason } };
+            return { text: value.text, resolution: { kind: 'cancelled', by: resolution.by, reason: resolution.reason }, ...note };
         }
     } catch { /* uszkodzone pole nie blokuje odczytu reszty sesji */ }
     return undefined;
