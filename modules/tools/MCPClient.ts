@@ -174,6 +174,8 @@ export interface ToolCall {
 
 /** Dodatkowe opcje wykonania (autonomia czatu + kaganiec delegacji + adres zwrotny). */
 export interface ExecuteToolCallOptions {
+    /** Token supplied by the runtime, never by the model. */
+    askUserChannelId?: string;
     /** Called once immediately before the permitted tool execution begins. */
     onExecutionStart?: () => void;
     autonomy?: string | null;
@@ -851,6 +853,8 @@ export class MCPClient {
             delete argsWithContext._invocationThreadId;
             delete argsWithContext._invocationThreadAccepted;
             delete argsWithContext._invocationBackground;
+            if (opts.askUserChannelId) argsWithContext._invocationAskUserChannelId = opts.askUserChannelId;
+            else delete argsWithContext._invocationAskUserChannelId;
             // Ten sam wzorzec co `_invocationAgentName` - zaufany znacznik od runtime'u,
             // nie od modelu. Poza delegacją pole jest USUWANE (model mógłby podać ujemną
             // wartość i wyzerować licznik głębi u dziecka), w delegacji zawsze nadpisywane.

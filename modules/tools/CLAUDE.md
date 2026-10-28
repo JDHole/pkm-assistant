@@ -1,5 +1,13 @@
 # modules/tools/
 
+Kanały `ask_user` tworzy `createAskUserChannels(registry)`. Każdy ma właściciela,
+identyfikator, obietnicę i idempotentne `answer`, `cancel`, `timeout`; otwarcie
+rejestruje pauzę w rejestrze subów, a zamknięcie ją zwalnia. Runtime przekazuje
+identyfikator przez `askUserChannelId` i umieszcza fabrykę w `_askUserChannels`.
+Kanał zamknięty przed wykonaniem narzędzia pozostaje dostępny do odczytu;
+nieużyty kanał UI usuwa przez `forget`. Stary kanał pluginu pozostaje zgodny
+z obecnym czatem do czasu podłączenia nowego w module chat.
+
 `sub_agent list` zwraca `questionState` ostatniego biegu wątku. Wiadomość
 z `question_id` przekazuje odpowiedź do protokołu po sprawdzeniu właściciela;
 bez ID pozostaje zwykłą wiadomością sterującą.

@@ -77,6 +77,8 @@ export { createWebReadTool } from './WebReadTool.js';
 
 // ── Komunikacja ────────────────────────────────────────────────────────────
 export { createAskUserTool } from './AskUserTool.js';
+export { createAskUserChannels } from './AskUserChannels.js';
+export type { AskUserChannel, AskUserChannelState, AskUserChannels, AskUserWaitRegistry } from './AskUserChannels.js';
 // Poczta agenta — kom_send / kom_list / kom_read (serwer `komunikator`).
 export { createKomunikatorTools } from './KomunikatorTools.js';
 
