@@ -748,8 +748,8 @@ export class SubAgentRunner {
                         const used = snapshot.lastText.length + snapshot.toolOutcomes.reduce((sum, item) => sum + item.resultPreview.length, 0)
                             + snapshot.toolCallDetails.reduce((sum, item) => sum + item.resultPreview.length, 0) + questionText.length;
                         const receipt = formatAgentLoopPartial({ ...snapshot,
-                            lastText: `${_questionText({ ...closedQuestion, text: questionText }, knownSecrets)}\n\n${snapshot.lastText}` });
-                        const enriched = { ...snapshot, question: { ...closedQuestion, text: questionText }, text: _clipText(receipt, Math.max(0, 12000 - used)) };
+                            lastText: `${_questionText({ ...closedQuestion, text: questionText }, knownSecrets)}\n\n${snapshot.lastText}` }, Math.max(0, 12000 - used));
+                        const enriched = { ...snapshot, question: { ...closedQuestion, text: questionText }, text: receipt };
                         snapshot = enriched;
                     }
                     snapshot = JSON.parse(maskSensitiveData(JSON.stringify(snapshot)).replace(/\b(https?:\/\/)[^\s/@"\\]+@/gi, '$1[REDACTED]@')) as AgentLoopPartialSnapshot;

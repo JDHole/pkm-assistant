@@ -130,6 +130,8 @@ Stary YAML agenta z przypisaniem nieistniejącej roli systemowej (np. dawne `pre
 
 Dla wyniku innego niż `unconfirmed` runner tworzy `handoff` w kolejności: efekty ze stanem sprawdzenia, ostatnia wypowiedź suba, wyniki narzędzi od najnowszego. Przed przycięciem podglądu i całego tekstu runner maskuje klucze z ustawień oraz stosuje `maskSensitiveData` także do argumentów i treści handoff. Limit całości to `subagent_salvage_max_chars`. Runner zachowuje argumenty wykonanych wywołań na wypadek błędu syntezy, ponieważ migawka `partial` ich nie zawiera. Handoff trafia do `SubRunResult` i `SubTaskResult`, także w ścieżce błędu.
 
+Przy terminalnym pytaniu handoff zaczyna się od zamaskowanego pytania, które może zająć do połowy jego limitu. Snapshot przechowuje skrót pytania do 2000 znaków i uwzględnia jego rozmiar przy formatowaniu tekstu w łącznym limicie 12000 znaków wyświetlanych pól; nazwy i stany narzędzi mają pierwszeństwo przed ostatnią wypowiedzią i podglądami. Osobne `question` wyniku zachowuje pełną zamaskowaną treść.
+
 ### Custom YAML scope schema
 
 Custom sub-agenty mogą definiować `scope` w `SUB_AGENT.yaml`:

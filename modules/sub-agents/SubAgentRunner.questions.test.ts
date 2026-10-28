@@ -205,3 +205,44 @@ test.serial('pytanie mieści się w budżetach i komunikat używa języka interf
     }
     setLocale('en');
 });
+
+test.serial('długie pytanie i wypowiedź nie wypierają stanów narzędzi ze snapshotu', async t => {
+    setLocale('en');
+    const secret = 'unikalny-sekret-testowy';
+    const question = `Zakres ${secret} ${'pytanie '.repeat(270)}`;
+    const clock = new QuestionTestClock();
+    const registry = new SubTaskRegistry({ questionClock: clock });
+    const tools = Array.from({ length: 24 }, (_, i) => ({
+        name: `tool_${i.toString().padStart(2, '0')}`, description: 'tool', inputSchema: {},
+        execute: async () => 'wynik '.repeat(80),
+    }));
+    const runner = new SubAgentRunner({ app: {}, plugin: { subTaskRegistry: registry, env: { settings: { pkmAssistant: {
+        chat: { apiKeys: { test: secret } },
+    } } } }, toolRegistry: { filterByAgent: () => tools, getTool: (name: string) => tools.find(tool => tool.name === name) ?? null } });
+    let ready!: () => void;
+    const waiting = new Promise<void>(resolve => { ready = resolve; });
+    let calls = 0;
+    const model = { stream(_payload: unknown, cb: { done(value: unknown): void }) {
+        const toolCalls = calls++ === 0
+            ? tools.map((tool, i) => ({ id: `t${i}`, type: 'function', function: { name: tool.name, arguments: '{}' } }))
+            : [{ id: 'q', type: 'function', function: { name: 'ask_parent', arguments: JSON.stringify({ text: question }) } }];
+        cb.done(response({ role: 'assistant', content: 'wypowiedź '.repeat(200), tool_calls: toolCalls }));
+    } };
+    const run = runner.runTask('zadanie', { name: 'Jaskier' }, { name: 'Klara', tools: tools.map(tool => tool.name) } as never, model as never,
+        { origin: owner, onActivity: activity => { if (activity.kind === 'waiting') ready(); } });
+    await Promise.race([waiting, run.then(() => { throw new Error('Bieg zakończył się przed pytaniem'); })]);
+    clock.advance(300000);
+    const result = await run;
+    const partial = result.partial!;
+    const snapshotQuestion = (partial as typeof partial & { question: { text: string } }).question.text;
+    const displayed = partial.text.length + partial.lastText.length + snapshotQuestion.length
+        + partial.toolOutcomes.reduce((sum, item) => sum + item.resultPreview.length, 0)
+        + partial.toolCallDetails.reduce((sum, item) => sum + item.resultPreview.length, 0);
+    t.true(displayed <= 12000);
+    t.true(partial.text.includes('Zakres [REDACTED]'));
+    for (const tool of tools) t.true(partial.text.includes(`### ${tool.name} - returned response`), tool.name);
+    t.true(partial.text.includes('### ask_parent - outcome unknown'));
+    t.is(result.question?.text, question.replace(secret, '[REDACTED]'));
+    t.false(JSON.stringify({ partial, question: result.question }).includes(secret));
+    registry.dispose();
+});
