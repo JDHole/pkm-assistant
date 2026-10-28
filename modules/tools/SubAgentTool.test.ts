@@ -64,6 +64,26 @@ test('odpowiedź z ID rozwiązuje tylko wskazane pytanie', async t => {
     t.deepEqual(await question.resolution, { kind: 'answered', text: 'A/' });
     registry.dispose();
 });
+
+test('stare pytanie nie odpowiada na nowy bieg', async t => {
+    const owner = { agentName: 'Jaskier', sessionPath: 's.md', sessionEpoch: 'e1' };
+    const registry = new SubTaskRegistry();
+    registry.createThread({ threadId: 's1', name: 'Klara', owner, origin: owner, config: {}, phase: 'running' });
+    registry.create({ id: 'r1', name: 'Klara', threadId: 's1', origin: owner });
+    const old = registry.openParentQuestion('r1', 'Pierwsze?');
+    if (old.kind !== 'opened') throw new Error('missing old question');
+    registry.cancelParentQuestion('r1');
+    registry.endRun('s1', { successful: true });
+    if (!registry.beginRun('s1', owner)) throw new Error('cannot begin next run');
+    registry.create({ id: 'r2', name: 'Klara', threadId: 's1', origin: owner });
+    const current = registry.openParentQuestion('r2', 'Drugie?');
+    if (current.kind !== 'opened') throw new Error('missing current question');
+    const result = await createSubAgentTool({}).execute({ action: 'message', sub_id: 's1', question_id: old.question.id,
+        text: 'A/', _invocationOrigin: owner }, {}, { subTaskRegistry: registry } as never);
+    t.deepEqual(result, { success: false, error: tr('mcp.sub_agent.question_expired'), activeQuestionId: current.question.id });
+    t.is(registry.getQuestionState('r2').kind, 'waiting');
+    registry.dispose();
+});
 import { __test__ as modelTest } from '../models/index.js';
 import type { DelegatePlugin, SubAgentConfigLike } from './DelegateTool.js';
 

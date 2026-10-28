@@ -11,7 +11,7 @@
  * 4. Return results
  */
 import { SubAgentRunner, DEFAULT_SUB_AGENT_TOOLS, PKM_SUB_NAME, allocateSubTaskId, canContinueAfterUserStop, isRuntimeSequence } from '../../modules/sub-agents/index.js';
-import type { RuntimeSequence, SubTask, SubTaskOrigin, QuestionId, Owner, AnswerResult, QuestionState } from '../../modules/sub-agents/index.js';
+import type { RuntimeSequence, SubTask, SubTaskOrigin, QuestionId, Owner, AnswerResult, QuestionState, RunActivity, ParentQuestion } from '../../modules/sub-agents/index.js';
 import type { RunOutcome } from '../../modules/sub-agents/index.js';
 import { createModelForRole } from '../../modules/models/index.js';
 import type { ModelRole, ResolverPluginLike } from '../../modules/models/index.js';
@@ -179,6 +179,8 @@ interface SubAgentRunnerLike {
             abortReason?: () => 'manual-stop' | 'task-timeout' | 'superseded';
             /** „Sub wszedł na slot bramki" - tym uzbraja się budzik zadania. */
             onGateAdmitted?: () => void;
+            onActivity?: (activity: RunActivity) => void;
+            onQuestion?: (question: ParentQuestion) => void;
             /** Adres zwrotny zlecenia (1:1 do rejestru biegów). */
             origin?: SubTaskOrigin;
             /** Bieg w tle (1:1 do rejestru biegów). */
@@ -227,6 +229,8 @@ export type DelegatePlugin = NonNullable<ResolverPluginLike> & {
         postMessage?: (id: string, message: string) => boolean;
         answerParentQuestion?: (id: string, questionId: QuestionId, owner: Owner, text: string) => AnswerResult;
         getQuestionState?: (id: string) => QuestionState;
+        isQuestionOpen?: (id: string, questionId: QuestionId) => boolean;
+        promoteToBackground?: (id: string) => boolean;
         requestStop?: (id: string, by: 'lead') => boolean;
         closeThread?: (id: string, by?: 'user' | 'lead' | 'system') => boolean;
         createThread?: (input: { threadId: string; name: string; owner: import('../sub-agents/index.js').SubThreadOwner; origin: SubTaskOrigin; config: Record<string, unknown>; phase: 'queued' }) => import('../sub-agents/index.js').SubThread;
@@ -934,6 +938,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                             {
                                 abortCtl,
                                 onGateAdmitted: gateArm.signal,
+                                onActivity: gateArm.activity,
                                 modelTimeout: effectiveTaskTimeout,
                                 origin: reservation ? runOrigin : origin,
                                 autonomy: turnAutonomy,
@@ -1065,6 +1070,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                         _executeSubAgent(args, resolved, activeAgent, agentManager, plugin, makeRunner, childDepth,
                             {
                                 abortCtl, salvageCap: limits.subagent_salvage_max_chars, onGateAdmitted: gateArm.signal,
+                                onActivity: gateArm.activity,
                                 modelTimeout: effectiveSingleTimeout, origin, autonomy: turnAutonomy,
                                 callerScopeFolders, callerToolNames, background: true,
                                 ...(continuation ? { threadId: continuation.threadId, turnKind: continuation.turnKind, turnStartedSeq: continuation.turnStartedSeq } : {}),
@@ -1105,10 +1111,19 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 // z panelu działał także dla biegów blokujących (nikt tu na byt nie czeka).
                 // Przy okazji zbieramy z niego `task.id` dla grace-okna.
                 let blockingTaskId: string | null = null;
-                const blockingResult = await _withTimeout(
+                const questions: ParentQuestion[] = [];
+                let wakeQuestion: (() => void) | null = null;
+                const blockingRun = _withTimeout(
                     _executeSubAgent(args, resolved, activeAgent, agentManager, plugin, makeRunner, childDepth,
                         {
                             abortCtl, salvageCap: limits.subagent_salvage_max_chars, onGateAdmitted: gateArm.signal,
+                            onActivity: gateArm.activity,
+                            onQuestion: question => {
+                                if (plugin.subTaskRegistry?.isQuestionOpen?.(question.taskId, question.id)) {
+                                    questions.push(question);
+                                    wakeQuestion?.();
+                                }
+                            },
                             modelTimeout: effectiveSingleTimeout, origin, autonomy: turnAutonomy,
                             callerScopeFolders, callerToolNames, background,
                             ...(continuation ? { threadId: continuation.threadId, turnKind: continuation.turnKind, turnStartedSeq: continuation.turnStartedSeq } : {}),
@@ -1122,7 +1137,30 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     gateArm,
                     salvageMapper,
                 ).finally(forgetAbort);
-                return attachReusableThread(blockingResult, blockingTaskId);
+                type BlockingDelivery = { kind: 'result'; value: Awaited<typeof blockingRun> } | { kind: 'question'; question: ParentQuestion };
+                while (true) {
+                    const nextQuestion = new Promise<ParentQuestion>(resolve => {
+                        const take = () => { const question = questions.shift(); if (question) resolve(question); };
+                        wakeQuestion = take;
+                        take();
+                    });
+                    const delivery: BlockingDelivery = await Promise.race([
+                        blockingRun.then(value => ({ kind: 'result' as const, value })),
+                        nextQuestion.then(question => ({ kind: 'question' as const, question })),
+                    ]);
+                    wakeQuestion = null;
+                    if (delivery.kind === 'result') return attachReusableThread(delivery.value, blockingTaskId);
+                    const question = delivery.question;
+                    const registry = plugin.subTaskRegistry;
+                    if (registry?.isQuestionOpen?.(question.taskId, question.id) && registry.promoteToBackground?.(question.taskId)) {
+                        _trackBackground(blockingRun, 1);
+                        void blockingRun.catch(() => { /* wynik pozostaje w rejestrze */ });
+                        return { success: true, started: true, kind: 'question', task_id: question.taskId,
+                            sub_id: question.subId, name: question.name, question_id: question.id, question: question.text,
+                            note: t('mcp.sub_agent.question_reply_instruction') };
+                    }
+                    if (registry?.isQuestionOpen?.(question.taskId, question.id)) return attachReusableThread(await blockingRun, blockingTaskId);
+                }
 
             } catch (e) {
                 log.error('DelegateTool', 'Error:', e);
@@ -1149,7 +1187,7 @@ export function createSubAgentTool(app: object, deps: DelegateToolDeps = {}) {
                 action: { type: 'string', enum: ['message', 'task', 'stop', 'close', 'list'], description: t('mcp.sub_agent.param.action') },
                 sub_id: { type: 'string', description: t('mcp.sub_agent.param.sub_id') },
                 text: { type: 'string', description: t('mcp.sub_agent.param.text') },
-                question_id: { type: 'string', description: 'ID of the question being answered.' },
+                question_id: { type: 'string', description: t('mcp.sub_agent.param.question_id') },
                 task: { type: 'string', description: t('mcp.sub_agent.param.task') },
                 background: { type: 'boolean', description: t('mcp.sub_agent.param.background') },
             }, required: ['action'],
@@ -1189,7 +1227,9 @@ export function createSubAgentTool(app: object, deps: DelegateToolDeps = {}) {
                     if (!text.trim()) return { success: false, error: t('mcp.sub_agent.empty_message') };
                     if (typeof raw.question_id !== 'string' || !raw.question_id || !runId ||
                         registry?.answerParentQuestion?.(runId, raw.question_id as QuestionId, owner, text).kind !== 'accepted') {
-                        return { success: false, error: t('mcp.sub_agent.question_expired') };
+                        const state = runId ? registry?.getQuestionState?.(runId) : undefined;
+                        return { success: false, error: t('mcp.sub_agent.question_expired'),
+                            ...(state?.kind === 'waiting' ? { activeQuestionId: state.question.id } : {}) };
                     }
                     return { success: true, message: t('mcp.sub_agent.question_answered', { sub_id: id }) };
                 }
@@ -1235,7 +1275,7 @@ export function createSubAgentTool(app: object, deps: DelegateToolDeps = {}) {
                 if (result && typeof result === 'object' && thread.reusable) {
                     const response = result as Record<string, unknown>;
                     return { ...response, sub_id: id,
-                        ...(response.started === true ? { note: t('mcp.sub_agent.task_started', { sub_id: id }) } : {}),
+                        ...(response.started === true && response.kind !== 'question' ? { note: t('mcp.sub_agent.task_started', { sub_id: id }) } : {}),
                         ...(response.success === false ? { note: t('mcp.sub_agent.task_note') } : {}) };
                 }
                 if (result && typeof result === 'object' && (result as Record<string, unknown>).success === false && !thread.reusable) {
@@ -1405,6 +1445,8 @@ type SubRunControl = {
     abortCtl?: SubAbortControl;
     /** Sygnał pierwszego wjazdu na slot bramki — przelot do `runTask`, bez interpretacji. */
     onGateAdmitted?: () => void;
+    onActivity?: (activity: RunActivity) => void;
+    onQuestion?: (question: ParentQuestion) => void;
     modelTimeout?: number;
     /** Adres zwrotny + tryb tła + hak „byt istnieje" — przelot do `runTask`, bez interpretacji. */
     origin?: SubTaskOrigin;
@@ -1614,6 +1656,8 @@ async function _executeSubAgent(
             } : {}),
             // Budżet zadania ma liczyć czas ROBOTY, nie czekania w kolejce bramki.
             ...(runControl.onGateAdmitted ? { onGateAdmitted: runControl.onGateAdmitted } : {}),
+            ...(runControl.onActivity ? { onActivity: runControl.onActivity } : {}),
+            ...(runControl.onQuestion ? { onQuestion: runControl.onQuestion } : {}),
             // Przelot do rejestru biegów — runner ich nie interpretuje, my też nie.
             ...(runControl.origin ? { origin: runControl.origin } : {}),
             // Tryb pytań tury zlecającej — zamrożony, jak `scopeFolders`.
@@ -1841,12 +1885,14 @@ type FinalGrace = {
  * implementacje `LoopModelLike`), zostałby bez żadnego sufitu. Efekt dla realnego przypadku
  * jest identyczny: po wjeździe na slot zadanie ma PEŁNY budżet na robotę.
  */
-type GateArm = { signal: () => void; attach: (rearm: () => void) => void };
+type GateArm = { signal: () => void; activity: (activity: RunActivity) => void; attach: (rearm: () => void, activity: (activity: RunActivity) => void) => void };
 
 function _makeGateArm(): GateArm {
     let rearm: (() => void) | null = null;
     let signalled = false;
     let done = false;
+    let activityHandler: ((activity: RunActivity) => void) | null = null;
+    let lastActivity: RunActivity | null = null;
     const fire = () => {
         if (done || !rearm || !signalled) return;
         done = true;
@@ -1854,7 +1900,8 @@ function _makeGateArm(): GateArm {
     };
     return {
         signal: () => { signalled = true; fire(); },
-        attach: (fn) => { rearm = fn; fire(); },
+        activity: (value) => { lastActivity = value; activityHandler?.(value); },
+        attach: (fn, handler) => { rearm = fn; activityHandler = handler; fire(); if (lastActivity) handler(lastActivity); },
     };
 }
 
@@ -1900,10 +1947,18 @@ function _withTimeout<T>(
             if (!salvage) { resolve(bare); return; }
             salvageTimer = _nodeSafeSetTimeout(() => resolve(bare), SALVAGE_SETTLE_MS);
         };
+        let remaining = effectiveTimeout;
+        let since = performance.now();
+        let waiting = false;
+        let expired = false;
         const armTimer = () => {
             if (settled) return;
             if (timer !== null) _nodeSafeClearTimeout(timer); // przezbrojenie liczy budżet od nowa
+            since = performance.now();
+            if (waiting || expired) return;
             timer = _nodeSafeSetTimeout(() => {
+                expired = true;
+                timer = null;
                 // Budżet zadania obejmuje CAŁY bieg, więc budzik potrafi strzelić dokładnie
                 // wtedy, gdy sub pisze już finalne podsumowanie — zadanie spaliłoby pełny czas na
                 // narzędzia i oddało zaślepkę zamiast dorobku. Jeśli bieg jest w finalnej
@@ -1915,13 +1970,24 @@ function _withTimeout<T>(
 
                 try { grace!.onDefer?.(); } catch { /* ślad jest miły, nie obowiązkowy */ }
                 graceTimer = _nodeSafeSetTimeout(() => kill(effectiveTimeout + grace!.ms), grace!.ms);
-            }, effectiveTimeout);
+            }, remaining);
         };
         // Budzik tyka od zlecenia (siatka bezpieczeństwa dla suba, który slotu nigdy nie
         // dostanie), a przezbraja się przy PIERWSZYM wjeździe na slot — od tej chwili
         // zadanie ma pełny budżet na samą robotę, bez czasu przestanego w kolejce.
         armTimer();
-        arm?.attach(armTimer);
+        arm?.attach(() => { remaining = effectiveTimeout; armTimer(); }, activity => {
+            if (settled || expired) return;
+            if (activity.kind === 'waiting' && !waiting) {
+                remaining = Math.max(0, remaining - (performance.now() - since));
+                waiting = true;
+                if (timer !== null) _nodeSafeClearTimeout(timer);
+                timer = null;
+            } else if (activity.kind === 'working' && waiting) {
+                waiting = false;
+                armTimer();
+            }
+        });
     });
     // Przed strzałem budzika odrzucenie biegu leci jak dotąd (wołacz ma catch).
     // PO strzale okno salvage trzyma wyścig otwarty — odrzucenie ubitego biegu (abort
