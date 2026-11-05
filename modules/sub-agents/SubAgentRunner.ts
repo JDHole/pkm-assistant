@@ -130,6 +130,7 @@ type RunOptions = {
     onTaskCreated?: (task: SubTask) => void;
     threadId?: string;
     queuedThreadId?: string;
+    reservedRunId?: string;
 };
 /**
  * Jak sub ZSZEDŁ z biegu. Trzy pierwsze wartości przychodzą wprost z `runAgentLoop`
@@ -344,7 +345,7 @@ export class SubAgentRunner {
                 const outcome: RunOutcome = { end: { kind: 'stopped', by }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] };
                 return { result: '', toolsUsed: [], toolCallDetails: [], duration: Date.now() - startTime, usage: null, stoppedBy: 'abort', outcome };
             }
-            const owner = options.origin;
+            const owner = options.origin ?? queued?.origin;
             const queuedLimits = getLimits(this.plugin?.env?.settings);
             const frozenConfig = { subConfig: structuredClone(config), options: { delegationDepth: Number(options.delegationDepth) || 0, scopeFolders: options.scopeFolders ? [...options.scopeFolders] : undefined, callerToolNames: options.callerToolNames ? [...options.callerToolNames] : undefined, modelTimeout: options.modelTimeout, autonomy: options.autonomy }, toolNames: this._resolveToolNames(config), limits: { ...queuedLimits }, model: config.model || null, modelId: model.modelId, providerId: model.providerId };
             if (!queued || !owner || !registry.beginQueuedRun(options.queuedThreadId, { agentName: owner.agentName, sessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch }, frozenConfig)) {
@@ -356,7 +357,7 @@ export class SubAgentRunner {
             : options.queuedThreadId ? registry?.getThread?.(options.queuedThreadId) : undefined;
         if (options.threadId) {
             const owner = options.origin;
-            if (!thread || !owner || !registry?.beginRun?.(options.threadId, { agentName: owner.agentName, sessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch }, { turnKind: options.turnKind, turnStartedSeq: options.turnStartedSeq })) {
+            if (!thread || !owner || !registry?.beginRun?.(options.threadId, { agentName: owner.agentName, sessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch }, { turnKind: options.turnKind, turnStartedSeq: options.turnStartedSeq, reservedRunId: options.reservedRunId })) {
                 const outcome = classifyRunEnd({ stoppedBy: 'error', failed: true, finalText: '' });
                 return { result: t('subagent.thread_refused'), toolsUsed: [], toolCallDetails: [], duration: Date.now() - startTime, usage: null, stoppedBy: 'error', failed: true, outcome };
             }
@@ -485,7 +486,7 @@ export class SubAgentRunner {
             // (`chat/<agent>#<id sesji>`, `harness/<agent>#<runId>`). Bez numeru N równoległych
             // workerów z jednego `delegate` pisało pod wspólną etykietą i nie dało się ich rozdzielić.
             // Czytelnicy trace dopasowują etykietę PREFIKSOWO (patrz `scenarios/_asserts.ts` w repo harnessu).
-            const label = options.queuedThreadId ?? allocateSubTaskId(config.name || config.role || 'sub');
+            const label = options.reservedRunId ?? options.queuedThreadId ?? allocateSubTaskId(config.name || config.role || 'sub');
             const loopLimits = {
                 maxIterations: effectiveLimits.maxIterations,
                 minIterations: config.min_iterations || 1,

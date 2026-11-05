@@ -227,10 +227,10 @@ test.serial('A2: turn started before Stop cannot resume sub after mention resolu
     modelTest.setChatModelFactory(() => ({ modelId: 'worker-model', providerId: 'ollama', stream() {} }) as never);
     const tool = createSubAgentTool({}, { makeRunner: () => ({
         runTask: async (_task: string, _agent: unknown, _config: unknown, _model: unknown, options: {
-            threadId?: string; origin?: import('../../sub-agents/index.js').SubTaskOrigin; turnKind?: 'user' | 'machine'; turnStartedSeq?: number;
+            threadId?: string; reservedRunId?: string; origin?: import('../../sub-agents/index.js').SubTaskOrigin; turnKind?: 'user' | 'machine'; turnStartedSeq?: number;
             onTaskCreated?: (task: import('../../sub-agents/index.js').SubTask) => void;
         }) => {
-            if (!registry.beginRun(options.threadId!, options.origin!, { turnKind: options.turnKind, turnStartedSeq: options.turnStartedSeq })) return { failed: true, result: 'refused' } as never;
+            if (!registry.beginRun(options.threadId!, options.origin!, { turnKind: options.turnKind, turnStartedSeq: options.turnStartedSeq, reservedRunId: options.reservedRunId })) return { failed: true, result: 'refused' } as never;
             const task = registry.create({ id: 'next-run', name: 'Worker', agentName: owner.agentName, threadId: thread.threadId, origin: owner });
             options.onTaskCreated?.(task);
             registry.endRun(thread.threadId, { successful: true });

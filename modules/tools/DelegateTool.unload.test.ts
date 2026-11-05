@@ -321,7 +321,7 @@ test.serial('stopAllDelegations ubija KOLEJKĘ multi-task w tle - zero startów 
 
     // ── `stopAll()` kończy biegi, a thunk guard domyka oczekujące rezerwacje przy unload ──
     t.is(registry.stopAll('unload'), 1, '`stopAll` zatrzymuje tylko task pierwszego biegu');
-    t.is(stopAllDelegations('unload'), 1, '_liveAborts zawiera tylko aktualnie pracujące zadanie');
+    t.is(stopAllDelegations('unload'), 3, 'admisja posiada także kontrolki dwóch oczekujących zadań');
 
     // Zwolnij zadanie 1 — robotnik puli sięgnie po KOLEJNY thunk (zadanie 2).
     letFirstFinish();

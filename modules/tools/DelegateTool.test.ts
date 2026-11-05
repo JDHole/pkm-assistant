@@ -937,7 +937,7 @@ type TloLog = {
  * Plugin-atrapa Z REJESTREM + runner, który zachowuje się jak produkcyjny: melduje byt
  * hakiem `onTaskCreated`, a wynik oddaje dopiero po `opoznienieMs`.
  */
-function pluginZTlem(log: TloLog, opts: { opoznienieMs?: number; registry?: unknown; limits?: Record<string, number> } = {}) {
+function pluginZTlem(log: TloLog, opts: { opoznienieMs?: number; finish?: Promise<void>; registry?: unknown; limits?: Record<string, number> } = {}) {
     class FakeModel { stream() {} }
     const activeAgent = { name: 'Jaskier', activeSubAgents: [{ name: 'jaskier-prep' }] };
     let seq = 0;
@@ -968,6 +968,7 @@ function pluginZTlem(log: TloLog, opts: { opoznienieMs?: number; registry?: unkn
                 log.options.push(options);
                 const id = `sub/${config.name}#${(++seq).toString(36)}`;
                 options.onTaskCreated?.(fakeSubTask(id, config.name));
+                if (opts.finish) await opts.finish;
                 if (opts.opoznienieMs) await new Promise(r => setTimeout(r, opts.opoznienieMs));
                 log.ukonczone.push(id);
                 return { result: 'wynik suba', toolsUsed: [], toolCallDetails: [], duration: 1, usage: null };
@@ -1057,10 +1058,12 @@ test.serial('multi-task: cała paczka jedzie w tle, zwrotka niesie listę task_i
     t.is(log.ukonczone.length, 3);
 });
 
-test.serial('szerokość: zadania biegnące W TLE liczą się do limitu następnego wywołania', async t => {
+test.serial('szerokość: globalny licznik tła nie odrzuca następnego wywołania', async t => {
     __test__._resetBackground();
     const log = nowyLog();
-    const { plugin, makeRunner } = pluginZTlem(log, { opoznienieMs: 150 });
+    let finish!: () => void;
+    const done = new Promise<void>(resolve => { finish = resolve; });
+    const { plugin, makeRunner } = pluginZTlem(log, { finish: done });
     const tool = createDelegateTool({}, { makeRunner });
 
     const pierwsze = await tool.execute(
@@ -1068,25 +1071,28 @@ test.serial('szerokość: zadania biegnące W TLE liczą się do limitu następn
     t.true(pierwsze.started);
     t.is(__test__._backgroundCount(), 4);
 
-    // Limit domyślny = 5, w tle biegnie 4 → paczka dwóch już się nie zmieści.
+    // Limit dotyczy długości jednej listy; licznik tła nie odrzuca kolejnej paczki.
     const drugie = await tool.execute({ tasks: [{ task: 'e' }, { task: 'f' }] }, {}, plugin) as TloRes;
-    t.false(drugie.success);
-    t.true((drugie.error || '').includes('6') && (drugie.error || '').includes('5'),
-        `komunikat niesie łączny licznik i limit: ${drugie.error}`);
+    t.is(drugie.success, true);
+    t.deepEqual(drugie.tasks?.map(task => task.name), ['pkm-sub', 'pkm-sub']);
 
-    // Pojedyncze zadanie wchodzi (4 + 1 = 5, granica włącznie).
+    // Pojedyncze zadanie także jest przyjmowane.
     const trzecie = await tool.execute({ task: 'g' }, {}, plugin) as TloRes;
     t.true(trzecie.started);
 
-    await new Promise(r => setTimeout(r, 300));
+    finish();
+    await __test__._settleBackground();
+    t.is(log.ukonczone.length, 7);
     t.is(__test__._backgroundCount(), 0, 'licznik zwalnia się po zakończeniu biegów');
 });
 
-test.serial('MCPClient nie pozwala modelowi ominąć puli przez _invocationBackground', async t => {
+test.serial('MCPClient ignoruje _invocationBackground przy przyjęciu kolejnego zadania', async t => {
     __test__._resetBackground();
     const log = nowyLog();
+    let finish!: () => void;
+    const done = new Promise<void>(resolve => { finish = resolve; });
     const { plugin, makeRunner } = pluginZTlem(log, {
-        opoznienieMs: 150,
+        finish: done,
         limits: { max_parallel_delegations: 1 },
     });
     const tool = createDelegateTool({}, { makeRunner });
@@ -1108,11 +1114,13 @@ test.serial('MCPClient nie pozwala modelowi ominąć puli przez _invocationBackg
     const second = await client.executeToolCall({ name: 'delegate', arguments: {
         task: 'Drugi bieg', _invocationBackground: false,
     } }, 'Jaskier') as Record<string, unknown>;
-    t.is(second.success, false);
-    t.true(String(second.error).includes('(2, limit 1)'));
-    t.is(log.prompts.length, 1);
+    t.is(second.success, true);
+    t.is(second.started, true);
+    t.deepEqual(log.options.map(options => options.background), [true, true]);
+    t.is(log.prompts.length, 2);
 
-    await new Promise(resolve => setTimeout(resolve, 200));
+    finish();
+    await __test__._settleBackground();
     t.is(__test__._backgroundCount(), 0);
 });
 

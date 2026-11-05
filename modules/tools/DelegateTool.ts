@@ -12,7 +12,7 @@ import type { ReasoningEffort } from '../models/index.js';
  * 4. Return results
  */
 import { SubAgentRunner, DEFAULT_SUB_AGENT_TOOLS, PKM_SUB_NAME, allocateSubTaskId, canContinueAfterUserStop, isRuntimeSequence } from '../../modules/sub-agents/index.js';
-import type { RuntimeSequence, SubRunContext, SubTask, SubTaskOrigin, QuestionId, Owner, AnswerResult, QuestionState, RunActivity, ParentQuestion } from '../../modules/sub-agents/index.js';
+import type { AdmissionGroup, SubTaskRegistry, SubThread, Lease, RuntimeSequence, SubRunContext, SubTask, SubTaskOrigin, QuestionId, Owner, AnswerResult, QuestionState, RunActivity, ParentQuestion } from '../../modules/sub-agents/index.js';
 import type { RunOutcome, SubRunResult } from '../../modules/sub-agents/index.js';
 import { createModelForRole } from '../../modules/models/index.js';
 import type { ModelRole, ResolverPluginLike } from '../../modules/models/index.js';
@@ -196,6 +196,7 @@ interface SubAgentRunnerLike {
             turnKind?: 'user' | 'machine';
             turnStartedSeq?: RuntimeSequence;
             queuedThreadId?: string;
+            reservedRunId?: string;
             /** Tryb pytań tury zlecającej, zamrożony na cały bieg. */
             autonomy?: string | null;
             /** Whitelista narzędzi wołającego suba (trzeci składnik przecięcia). */
@@ -226,6 +227,10 @@ export type DelegatePlugin = NonNullable<ResolverPluginLike> & {
      * odroczenia (`step`) - patrz `_isInFinalSummary` / grace-okno w `_withTimeout`.
      */
     subTaskRegistry?: {
+        acquire?: SubTaskRegistry['acquire'];
+        getRunActivity?: SubTaskRegistry['getRunActivity'];
+        reserveContinuation?: SubTaskRegistry['reserveContinuation'];
+        events?: SubTaskRegistry['events'];
         attachAbort?: (id: string, fn: () => void) => void;
         getDelegationAncestors?: (context: SubRunContext, agentName: string) => SubTask[] | undefined;
         getTask?: (id: string) => SubTask | undefined;
@@ -505,9 +510,8 @@ function _digestFromToolDetails(details: unknown, cap: number): string {
  * Biegi odpalone W TLE, których jeszcze nikt nie rozliczył. Klucz = obietnica biegu
  * (single-task) albo całej puli (multi-task), wartość = ILE ZADAŃ ona niesie.
  *
- * Po co: bramka szerokości `max_parallel_delegations` liczyła dotąd tylko zadania z JEDNEGO
- * wywołania — bo tura i tak czekała na wynik. W tle tura nie czeka, więc model mógłby
- * wystrzelić 5 × 5 zadań w pięciu kolejnych wywołaniach i zarżnąć most lokalny.
+ * To księgowość obietnic, nie pojemność: przyjęciem steruje scheduler rozmowy.
+ * Licznik obejmuje także zadania czekające na przydział.
  */
 const _backgroundRuns = new Map<Promise<unknown>, number>();
 
@@ -543,17 +547,10 @@ function _trackAbort(ctl: SubAbortControl): () => void {
 }
 
 /**
- * `_liveAborts` ma właściciela dopiero WEWNĄTRZ thunka (`_trackAbort`, patrz `taskThunks`
- * w `execute`), czyli dopiero gdy robotnik puli (`_runWithConcurrency`) po niego sięgnie.
- * Zadanie, które w chwili `stopAllDelegations` jeszcze CZEKA w kolejce (bramka platformy
- * lokalnej = 1, `queued > 0`), jest dla `_liveAborts` niewidzialne - pula sama z siebie
- * odpaliłaby dla niego PEŁNY bieg suba na zdemontowanym pluginie. Ta flaga jest DRUGĄ,
- * wcześniejszą bramką: stan MODUŁU (jak `_liveAborts`/`_backgroundRuns`), sprawdzany na
- * WEJŚCIU do każdego thunka (`taskThunks` w `execute`, NIE w `_runWithConcurrency` - patrz
- * jej docstring: guard tam skutkuje `continue` bez otwarcia `gate`, czyli deadlockiem, więc
- * musi siedzieć przed thunkiem). Zerowana przy każdym starcie pluginu (`createDelegateTool`),
- * więc kolejny `onload` w tym samym procesie nie dziedziczy odmowy po poprzednim `onunload`;
- * testy mogą też zerować ją ręcznie przez `__test__._resetModuleUnloaded()`.
+ * Zatrzask unload sprawdzany przed admisją i ponownie po niej. W produkcji wszystkie
+ * przyjęte zadania mają już kontrolki abortu, także queued. Legacy fallback bez
+ * schedulera używa puli z odroczonymi thunkami, więc nadal potrzebuje guardu na wejściu.
+ * Zerowany przy createDelegateTool (onload), zanim przyjmiemy nowe zlecenia.
  */
 let _moduleUnloaded = false;
 
@@ -783,19 +780,39 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     ? _makeSalvageMapper(limits.subagent_salvage_max_chars)
                     : null;
 
+                const registry = plugin.subTaskRegistry;
+                const runOrigin: SubTaskOrigin = origin ?? { agentName: activeAgent.name || '' };
+                const reserve = (resolved: ResolvedDelegate): SubThread | null => {
+                    if (!registry?.createThread) return null;
+                    const name = (subRunContext ? canonicalName(resolved) : undefined) ?? _queuedThreadName(resolved, plugin);
+                    const runId = allocateSubTaskId(name);
+                    if (continuation && registry.reserveContinuation) {
+                        const thread = registry.reserveContinuation(continuation.threadId, runOrigin, runId, continuation,
+                            { parentId: subRunContext?.runId, level: childDepth });
+                        if (!thread) throw new Error(t('subagent.thread_refused'));
+                        return thread;
+                    }
+                    try {
+                        return registry.createThread({ threadId: runId, name, owner: runOrigin, origin: runOrigin,
+                            config: {}, phase: 'queued', parentId: subRunContext?.runId, level: childDepth });
+                    } catch (error) {
+                        registry.finishQueuedFailure?.(runId, { error: maskSensitiveData(String((error as Error)?.message ?? error)), background });
+                        throw error;
+                    }
+                };
+
                 // ── Multi-task mode ──
                 if (args.tasks && Array.isArray(args.tasks) && args.tasks.length > 0) {
                     // Strażnik SZEROKOŚCI. Odrzucamy CAŁE wywołanie - świadomie nie tniemy
                     // listy po cichu, bo model musiałby zgadywać, które zadania poszły.
-                    // W tle do rachunku wchodzi też to, co JUŻ biegnie (poprzednie tury).
-                    const inFlight = background ? _backgroundCount() : 0;
-                    if (inFlight + args.tasks.length > limits.max_parallel_delegations) {
-                        log.warn('DelegateTool', `Delegacja ODRZUCONA: ${args.tasks.length} zadań (+${inFlight} w tle) > limit ${limits.max_parallel_delegations}`);
+                    // Limit listy jest niezależny od bieżących dzierżaw rozmowy.
+                    if (args.tasks.length > limits.max_parallel_delegations) {
+                        log.warn('DelegateTool', `Delegacja ODRZUCONA: ${args.tasks.length} zadań > limit ${limits.max_parallel_delegations}`);
                         return {
                             success: false,
                             error: t('mcp.delegate.parallel_limit', {
                                 limit: limits.max_parallel_delegations,
-                                count: inFlight + args.tasks.length,
+                                count: args.tasks.length,
                             }),
                         };
                     }
@@ -813,6 +830,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     // 1 = sekwencyjnie, budzik każdego taska startuje dopiero z jego biegiem),
                     // chmura → pełna paczka.
                     const taskConcurrency = _resolveTaskConcurrency(plugin, activeAgent, args.tasks.length);
+                    const admissionGroup = { limit: taskConcurrency };
                     if (taskConcurrency < args.tasks.length) {
                         log.debug('DelegateTool', `Delegacja ${args.tasks.length} zadań ograniczona do ${taskConcurrency} naraz (bramka platformy lokalnej)`);
                     }
@@ -850,47 +868,16 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                         }
                         return { ok: true, resolved };
                     });
-                    const runOrigin: SubTaskOrigin = origin ?? { agentName: activeAgent.name || '' };
-
-                    // Lista tasks rezerwuje wątki w kolejności przyjęcia, zanim pula ruszy.
-                    // Rezerwacja zawiera tylko tożsamość i adres zwrotny. Runner oblicza model,
-                    // limity i narzędzia dopiero wtedy, gdy zadanie dostanie slot.
-                    const queuedThreads: Array<import('../sub-agents/index.js').SubThread | null> = args.tasks.map(() => null);
-                    const registry = plugin?.subTaskRegistry;
-                    if (registry?.createThread) {
-                        for (let i = 0; i < args.tasks.length; i++) {
-                            if (!precheck[i].ok) continue;
-                            const resolved = (precheck[i] as { ok: true; resolved: ResolvedDelegate }).resolved;
-                            const name = (subRunContext ? canonicalName(resolved) : undefined) ?? _queuedThreadName(resolved, plugin);
-                            const threadId = allocateSubTaskId(name);
-                            const owner = {
-                                agentName: runOrigin.agentName,
-                                ...(origin?.sessionPath ? { sessionPath: origin.sessionPath } : {}),
-                                ...(origin?.sessionEpoch ? { sessionEpoch: origin.sessionEpoch } : {}),
-                            };
-                            try {
-                                queuedThreads[i] = registry.createThread({
-                                    threadId,
-                                    name,
-                                    owner,
-                                    origin: runOrigin,
-                                    config: {},
-                                    phase: 'queued',
-                                    parentId: subRunContext?.runId,
-                                    level: childDepth,
-                                });
-                            } catch (error) {
-                                log.warn('DelegateTool', `Nie udało się zarezerwować wątku dla zadania ${i + 1}:`, error);
-                                // Nie uruchamiamy zadania bez rezerwacji. Pozostałe pozycje
-                                // zachowują swoje ID i miejsce w kompletnym pokwitowaniu.
-                                const message = maskSensitiveData(String((error as Error)?.message ?? error));
-                                precheck[i] = { ok: false, result: { success: false, error: message } };
-                                rejectedTasks.push({ task: args.tasks[i].task!, aspect: args.tasks[i].aspect, error: message });
-                                // Rejestr mógł zapisać wątek przed rzuceniem wyjątku.
-                                if (registry.getThread?.(threadId)?.phase === 'queued') {
-                                    registry.finishQueuedFailure?.(threadId, { error: message, background, taskPreview: args.tasks[i].task });
-                                }
-                            }
+                    const queuedThreads: Array<SubThread | null> = args.tasks.map(() => null);
+                    for (let i = 0; i < args.tasks.length; i++) {
+                        const checked = precheck[i];
+                        if (!checked.ok) continue;
+                        try { queuedThreads[i] = reserve(checked.resolved); }
+                        catch (error) {
+                            log.warn('DelegateTool', `Nie udało się zarezerwować zadania ${i + 1}:`, error);
+                            const message = maskSensitiveData(String((error as Error)?.message ?? error));
+                            precheck[i] = { ok: false, result: { success: false, error: message } };
+                            rejectedTasks.push({ task: args.tasks[i].task!, aspect: args.tasks[i].aspect, error: message });
                         }
                     }
                     const acceptedCount = args.tasks.length - rejectedTasks.length;
@@ -902,14 +889,9 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                             gate.open();
                             return Promise.resolve(checked.result);
                         }
-                        // Guard NA WEJŚCIU do thunka, nie w robotniku puli - `gate` musi być tu
-                        // w zasięgu. Zadanie, które demontaż łapie jeszcze w kolejce (bramka
-                        // platformy lokalnej = 1), dostaje w `_runWithConcurrency` `continue`
-                        // BEZ wywołania thunka; `gate.open()` woła wyłącznie sam thunk (tu, albo
-                        // w `onTaskCreated`/`.finally()` niżej), więc bez tego guardu ta bramka
-                        // nigdy by się nie otworzyła. Ścieżka tła czeka na te bramki
-                        // (`acceptedGates...opened`), więc `execute()` wisiałby w nieskończoność
-                        // zamiast wrócić.
+                        // Guard musi otworzyć bramkę pokwitowania także przy unload.
+                        // W produkcji wszystkie thunki enqueue synchronicznie; tylko fallback
+                        // bez schedulera uruchamia je przez pulę o ograniczonej szerokości.
                         const reservation = queuedThreads[i];
                         const finishClosedReservation = (): Record<string, unknown> | null => {
                             if (!reservation) return null;
@@ -965,7 +947,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                         // Id biegu poznajemy dopiero w `onTaskCreated` - grace-okno domyka
                         // tę zmienną, żeby przy strzale budzika móc zapytać rejestr o stan.
                         let taskId: string | null = null;
-                        return _withTimeout(_executeSubAgent(
+                        return _withAdmission(plugin, reservation, abortCtl, background, taskDef.task, release => _withTimeout(_executeSubAgent(
                             { task: taskDef.task, context: taskDef.context, aspect_explicit: taskDef.aspect_explicit },
                             resolvedDef,
                             activeAgent, agentManager, plugin, makeRunner, childDepth,
@@ -990,9 +972,9 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                     gate.open();
                                 },
                             },
-                        ), taskDef.timeout_ms, tasksDefaultTimeoutMs, () => {
+                        ).finally(release), taskDef.timeout_ms, tasksDefaultTimeoutMs, () => {
                             abortSub(abortCtl, 'task-timeout');
-                        }, _makeFinalGrace(plugin, graceMs, () => taskId), gateArm, salvageMapper)
+                        }, _makeFinalGrace(plugin, graceMs, () => taskId), gateArm, salvageMapper), gate.open, admissionGroup)
                             .then(result => {
                                 if (reservation && registry?.getThread?.(reservation.threadId)?.phase === 'queued') {
                                     if (result.success === false) {
@@ -1022,7 +1004,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
 
                     if (background) {
                         // Pula leci BEZ await — całość zadań toczy się po zakończeniu tury.
-                        const pool = _runWithConcurrency(taskThunks, taskConcurrency);
+                        const pool = _runWithConcurrency(taskThunks, registry?.acquire ? taskThunks.length : taskConcurrency);
                         _trackBackground(pool, acceptedCount);
                         // `runTask` nie rzuca, ale pula to obietnica bez właściciela — pas bezpieczeństwa.
                         void pool.catch(() => { /* wynik i tak wraca rejestrem */ });
@@ -1031,7 +1013,10 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                         const acceptedGates = gates.filter((_, i) => precheck[i].ok);
                         const wave = Math.max(1, Math.min(taskConcurrency, acceptedGates.length));
                         await Promise.all(acceptedGates.slice(0, wave).map((g) => g.opened));
-                        if (startedTasks.length === 0) {
+                        // Pozwól runnerom pierwszej fali dokończyć synchroniczną admisję
+                        // modelu po nowej granicy await schedulera, jak przed P2.
+                        await Promise.resolve();
+                        if (startedTasks.length === 0 && !queuedThreads.some(thread => thread?.phase === 'queued')) {
                             // Żaden byt nie powstał (wysypany rejestr / same odmowy) — nie ma czego
                             // meldować modelowi, więc uczciwiej dokończyć po staremu.
                             return {
@@ -1043,7 +1028,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                             ? [{ task_id: thread.threadId, name: thread.name, sub_id: thread.threadId,
                                 queued: registry?.getThread?.(thread.threadId)?.phase === 'queued' }]
                             : []);
-                        const runnerUsedReservations = registeredTasks.length === acceptedCount && startedTasks.length > 0
+                        const runnerUsedReservations = registeredTasks.length === acceptedCount
                             && startedTasks.every(started => queuedThreads.some(thread => thread?.threadId === started.sub_id));
                         const receiptTasks = runnerUsedReservations ? registeredTasks : startedTasks;
                         const queued = runnerUsedReservations
@@ -1059,7 +1044,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                         };
                     }
 
-                    const results = await _runWithConcurrency(taskThunks, taskConcurrency);
+                    const results = await _runWithConcurrency(taskThunks, registry?.acquire ? taskThunks.length : taskConcurrency);
                     return _aggregateResults(results.map((value, i) => attachReusableThread(value, completedTaskIds[i])));
                 }
 
@@ -1071,6 +1056,10 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 const resolved = resolveForRun(args.aspect, args.aspect_explicit === true);
                 if (resolved.error) return resolved;
 
+                const reservation = reserve(resolved);
+                const reservedRunId = reservation?.queuedRunId ?? reservation?.threadId;
+                const reservedOptions = reservation ? continuation
+                    ? { reservedRunId } : { queuedThreadId: reservation.threadId } : {};
                 const singleTimeout = Number(args.timeout_ms);
                 const effectiveSingleTimeout = Number.isFinite(singleTimeout) && singleTimeout > 0
                     ? singleTimeout
@@ -1085,28 +1074,15 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 };
 
                 if (background) {
-                    // Ta sama bramka szerokości co dla paczki — jedno zadanie też zajmuje slot.
-                    const inFlight = _backgroundCount();
-                    if (inFlight + 1 > limits.max_parallel_delegations) {
-                        log.warn('DelegateTool', `Delegacja ODRZUCONA: ${inFlight} zadań już biegnie w tle (limit ${limits.max_parallel_delegations})`);
-                        forgetAbort(); // odmowa = biegu nie ma, kontrolka nie ma czego pilnować
-                        return {
-                            success: false,
-                            error: t('mcp.delegate.parallel_limit', {
-                                limit: limits.max_parallel_delegations,
-                                count: inFlight + 1,
-                            }),
-                        };
-                    }
-                    let announce!: (task: SubTask | null) => void;
-                    const taskCreated = new Promise<SubTask | null>((res) => { announce = res; });
+                    let announce!: (task: { id: string; name: string; threadId?: string; queued?: boolean } | null) => void;
+                    const taskCreated = new Promise<{ id: string; name: string; threadId?: string; queued?: boolean } | null>((res) => { announce = res; });
                     let bgTaskId: string | null = null;
-                    const run = _withTimeout(
+                    const run = _withAdmission(plugin, reservation, abortCtl, true, args.task, release => _withTimeout(
                         _executeSubAgent(args, resolved, activeAgent, agentManager, plugin, makeRunner, childDepth,
                             {
                                 abortCtl, salvageCap: limits.subagent_salvage_max_chars, onGateAdmitted: gateArm.signal,
                                 onActivity: gateArm.activity,
-                                modelTimeout: effectiveSingleTimeout, origin, subRunContext, autonomy: turnAutonomy,
+                                modelTimeout: effectiveSingleTimeout, origin, subRunContext, ...reservedOptions, autonomy: turnAutonomy,
                                 callerScopeFolders, callerToolNames, background: true,
                                 ...(continuation ? { threadId: continuation.threadId, turnKind: continuation.turnKind, turnStartedSeq: continuation.turnStartedSeq } : {}),
                                 onTaskCreated: (task: SubTask) => {
@@ -1114,12 +1090,15 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                     _attachStop(plugin, task, abortCtl);
                                     announce(task);
                                 },
-                            }),
+                            }).finally(release),
                         args.timeout_ms, defaultTimeoutMs, onTimeout,
                         _makeFinalGrace(plugin, graceMs, () => bgTaskId),
                         gateArm,
                         salvageMapper,
-                    );
+                    ), () => {
+                        if (reservation && reservedRunId) announce({ id: reservedRunId, name: reservation.name,
+                            threadId: reservation.threadId, queued: true });
+                    });
                     _trackBackground(run, 1);
                     // Kontrolka schodzi z listy żywych biegów, cokolwiek się z biegiem stanie
                     // (wzór `_trackBackground` - `then` z dwiema gałęziami nie robi sieroty).
@@ -1130,11 +1109,13 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     // modelowi jego prawdziwy wynik zamiast zwrotki „bieg wystartował w tle".
                     const created = await Promise.race([taskCreated, run.then(() => null, () => null)]);
                     if (!created) return await run;
+                    await Promise.resolve();
                     return {
                         success: true,
                         started: true,
                         task_id: created.id,
                         name: created.name,
+                        ...(created.queued ? { queued: true } : {}),
                         ...(created.threadId ? { sub_id: created.threadId } : {}),
                         note: t('subagent.background_started', { name: created.name, task_id: created.id }),
                     };
@@ -1148,7 +1129,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 let blockingTaskId: string | null = null;
                 const questions: ParentQuestion[] = [];
                 let wakeQuestion: (() => void) | null = null;
-                const blockingRun = _withTimeout(
+                const blockingRun = _withAdmission(plugin, reservation, abortCtl, false, args.task, release => _withTimeout(
                     _executeSubAgent(args, resolved, activeAgent, agentManager, plugin, makeRunner, childDepth,
                         {
                             abortCtl, salvageCap: limits.subagent_salvage_max_chars, onGateAdmitted: gateArm.signal,
@@ -1159,19 +1140,19 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                     wakeQuestion?.();
                                 }
                             },
-                            modelTimeout: effectiveSingleTimeout, origin, subRunContext, autonomy: turnAutonomy,
+                            modelTimeout: effectiveSingleTimeout, origin, subRunContext, ...reservedOptions, autonomy: turnAutonomy,
                             callerScopeFolders, callerToolNames, background,
                             ...(continuation ? { threadId: continuation.threadId, turnKind: continuation.turnKind, turnStartedSeq: continuation.turnStartedSeq } : {}),
                             onTaskCreated: (task: SubTask) => {
                                 blockingTaskId = task.id;
                                 _attachStop(plugin, task, abortCtl);
                             },
-                        }),
+                        }).finally(release),
                     args.timeout_ms, defaultTimeoutMs, onTimeout,
                     _makeFinalGrace(plugin, graceMs, () => blockingTaskId),
                     gateArm,
                     salvageMapper,
-                ).finally(forgetAbort);
+                )).finally(forgetAbort);
                 type BlockingDelivery = { kind: 'result'; value: Awaited<typeof blockingRun> } | { kind: 'question'; question: ParentQuestion };
                 while (true) {
                     const nextQuestion = new Promise<ParentQuestion>(resolve => {
@@ -1499,6 +1480,7 @@ type SubRunControl = {
     turnKind?: 'user' | 'machine';
     turnStartedSeq?: RuntimeSequence;
     queuedThreadId?: string;
+    reservedRunId?: string;
 };
 
 /**
@@ -1510,6 +1492,61 @@ function _readStringList(raw: unknown): string[] | null {
     if (!Array.isArray(raw)) return null;
     const out = raw.filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
     return out.length > 0 ? out : null;
+}
+
+/** One admission owns both preparation and the timed run. Waiting has no task timer. */
+async function _withAdmission(
+    plugin: DelegatePlugin, reservation: SubThread | null, ctl: SubAbortControl,
+    background: boolean, taskPreview: string | undefined,
+    run: (release: () => void) => Promise<Record<string, unknown>>, onQueued?: () => void, group?: AdmissionGroup,
+): Promise<Record<string, unknown>> {
+    const registry = plugin.subTaskRegistry;
+    if (!reservation || !registry?.acquire || !ctl.controller) return run(() => {});
+    const runId = reservation.queuedRunId ?? reservation.threadId;
+    let lease: Lease | undefined;
+    let running = false;
+    const off = registry.events?.on('thread:closed', value => {
+        if (value === reservation) abortSub(ctl, 'manual-stop');
+    });
+    const stopped = () => {
+        registry.closeThread?.(reservation.threadId, 'system');
+        const task = registry.finishQueuedStop?.(reservation.threadId, { background, taskPreview });
+        const outcome: RunOutcome = task?.outcome ?? {
+            end: { kind: 'stopped', by: reservation.closedBy ?? 'system' },
+            completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [],
+        };
+        return { success: false, error: t('mcp.delegate.outcome_error', { reason: _outcomeReason(outcome) }),
+            stopped_by: 'abort', aspect: reservation.name, tools_used: [], tool_call_details: [], usage: null,
+            outcome: _outcomeFields(outcome), effects: [], note: t('mcp.delegate.outcome_note') };
+    };
+    try {
+        const admission = registry.acquire(reservation.owner, runId, ctl.controller.signal, group);
+        if (registry.getRunActivity?.(runId) === 'queued') onQueued?.();
+        lease = await admission;
+        if (ctl.aborted || reservation.phase === 'closed' || _moduleUnloaded) return stopped();
+        // The closed-thread listener belongs only to admission, never to runner finalization.
+        off?.();
+        running = true;
+        // The actual runner owns the lease, even if its timeout returns before it settles.
+        const result = await run(() => lease?.release());
+        if (registry.getThread?.(reservation.threadId)?.phase === 'closed' && reservation.queuedRunId === runId
+            && !registry.getTask?.(runId)) return stopped();
+        if (reservation.phase === 'queued') {
+            if (result.success === false) registry.finishQueuedFailure?.(reservation.threadId,
+                { error: typeof result.error === 'string' && result.error.trim()
+                    ? result.error : t('mcp.delegate.runner_init_failed'), background, taskPreview });
+            else stopped();
+        }
+        return result;
+    } catch (error) {
+        if (ctl.aborted || !lease || reservation.phase === 'closed') return stopped();
+        const message = maskSensitiveData(String((error as Error)?.message ?? error));
+        registry.finishQueuedFailure?.(reservation.threadId, { error: message, background, taskPreview });
+        return { success: false, error: message };
+    } finally {
+        off?.();
+        if (!running) lease?.release();
+    }
 }
 
 async function _executeSubAgent(
@@ -1597,7 +1634,9 @@ async function _executeSubAgent(
         }
         const modelAvailable = listedOrPinned || Boolean(pinnedAgentModel);
         if (!frozenProviderId || !frozenModelId || !providers || !Object.hasOwn(providers, frozenProviderId) || !modelAvailable) {
-            if (existingThread) plugin.subTaskRegistry?.closeThread?.(existingThread.threadId);
+            if (existingThread?.phase === 'queued') plugin.subTaskRegistry?.finishQueuedFailure?.(existingThread.threadId,
+                { error: t('mcp.sub_agent.model_unavailable'), background: runControl.background, taskPreview: args.task });
+            else if (existingThread) plugin.subTaskRegistry?.closeThread?.(existingThread.threadId);
             return { success: false, error: t('mcp.sub_agent.model_unavailable') };
         }
     }
@@ -1613,7 +1652,9 @@ async function _executeSubAgent(
     const finalModel = frozen ? model : model?.stream ? model : createModelForRole(plugin, 'main', activeAgent, null, true);
 
     if (frozen && (!finalModel?.stream || finalModel.modelId !== frozenModelId || finalModel.providerId !== frozenProviderId)) {
-        if (existingThread) plugin.subTaskRegistry?.closeThread?.(existingThread.threadId);
+        if (existingThread?.phase === 'queued') plugin.subTaskRegistry?.finishQueuedFailure?.(existingThread.threadId,
+                { error: t('mcp.sub_agent.model_unavailable'), background: runControl.background, taskPreview: args.task });
+            else if (existingThread) plugin.subTaskRegistry?.closeThread?.(existingThread.threadId);
         return { success: false, error: t('mcp.sub_agent.model_unavailable') };
     }
 
@@ -1714,6 +1755,7 @@ async function _executeSubAgent(
             ...(runControl.threadId ? { threadId: runControl.threadId } : {}),
             turnKind: runControl.turnKind,
             turnStartedSeq: runControl.turnStartedSeq,
+            ...(runControl.reservedRunId ? { reservedRunId: runControl.reservedRunId } : {}),
             ...(runControl.queuedThreadId ? { queuedThreadId: runControl.queuedThreadId } : {}),
         }
     ); } finally { if (runControl.abortCtl) runControl.abortCtl.stop = null; }
@@ -2091,9 +2133,9 @@ export const __test__ = {
     PKM_EXPLORER_NAME,
     PKM_WORKER_NAME,
     DEFAULT_TASK_TIMEOUT_MS,
-    // Licznik zadań w tle jest stanem MODUŁU — testy muszą umieć go podejrzeć i wyzerować,
-    // żeby jeden przypadek nie zjadł limitu szerokości następnemu.
+    // Księgowość obietnic tła; synchronizacja testów bez pollingu.
     _backgroundCount,
+    _settleBackground: () => Promise.allSettled([..._backgroundRuns.keys()]),
     _resetBackground: (): void => { _backgroundRuns.clear(); },
     // Ile biegów delegacji ma teraz właściciela (test pilnuje, że zbiór nie przecieka).
     _liveAbortCount: (): number => _liveAborts.size,

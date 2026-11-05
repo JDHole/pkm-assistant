@@ -134,10 +134,10 @@ function seedIdleThread(registry: SubTaskRegistry, userStop = false) {
 
 function acceptedRunner(registry: SubTaskRegistry) {
     return {
-        runTask: async (_task: string, _agent: unknown, _config: unknown, _model: unknown, options: { threadId?: string; origin?: { agentName: string; sessionPath?: string; sessionEpoch?: string }; turnKind?: 'user' | 'machine'; turnStartedSeq?: number; onTaskCreated?: (task: import('../sub-agents/index.js').SubTask) => void }) => {
+        runTask: async (_task: string, _agent: unknown, _config: unknown, _model: unknown, options: { threadId?: string; reservedRunId?: string; origin?: { agentName: string; sessionPath?: string; sessionEpoch?: string }; turnKind?: 'user' | 'machine'; turnStartedSeq?: number; onTaskCreated?: (task: import('../sub-agents/index.js').SubTask) => void }) => {
             const threadId = options.threadId!;
             const owner = options.origin!;
-            if (!(registry as SequenceRegistry).beginRun(threadId, owner, { turnKind: options.turnKind, turnStartedSeq: options.turnStartedSeq })) return { result: tr('subagent.thread_refused'), failed: true as const } as never;
+            if (!(registry as SequenceRegistry).beginRun(threadId, owner, { turnKind: options.turnKind, turnStartedSeq: options.turnStartedSeq, reservedRunId: options.reservedRunId })) return { result: tr('subagent.thread_refused'), failed: true as const } as never;
             const task = registry.create({ id: 'next-run', name: 'Worker', agentName: owner.agentName, threadId, origin: options.origin });
             registry.attachAbort(task.id, () => undefined);
             options.onTaskCreated?.(task);
@@ -169,13 +169,13 @@ function stoppedThread(registry: SequenceRegistry) {
 
 function sequenceRunner(registry: SequenceRegistry, id: string, beforeAdmission: () => Promise<void> = async () => undefined) {
     return { runTask: async (_task: string, _agent: unknown, _config: unknown, _model: unknown, options: {
-        threadId?: string; origin?: { agentName: string; sessionPath?: string; sessionEpoch?: string };
+        threadId?: string; reservedRunId?: string; origin?: { agentName: string; sessionPath?: string; sessionEpoch?: string };
         turnKind?: 'user' | 'machine'; turnStartedSeq?: number;
         onTaskCreated?: (task: import('../sub-agents/index.js').SubTask) => void;
     }) => {
         await beforeAdmission();
         const owner = options.origin!;
-        if (!registry.beginRun(options.threadId!, owner, { turnKind: options.turnKind, turnStartedSeq: options.turnStartedSeq })) {
+        if (!registry.beginRun(options.threadId!, owner, { turnKind: options.turnKind, turnStartedSeq: options.turnStartedSeq, reservedRunId: options.reservedRunId })) {
             return { result: tr('subagent.thread_refused'), failed: true as const } as never;
         }
         const task = registry.create({ id, name: 'Worker', agentName: owner.agentName, threadId: options.threadId!, origin: owner });
@@ -229,7 +229,7 @@ test.serial('A2: old user turn remains refused after a newer turn resumed the th
     t.deepEqual(thread.runIds, ['previous-run', 'next-run', 'third-run']);
 });
 
-test.serial('A2: Stop between precheck and beginRun rejects the older attempt atomically', async t => {
+test.serial('A2: synchronous reservation rejects a concurrent continuation; Stop before beginRun rejects the reserved attempt', async t => {
     const registry = new SubTaskRegistry() as SequenceRegistry;
     const old = registry.issueTurnStartSequence();
     const { owner, thread } = stoppedThread(registry);
@@ -238,23 +238,22 @@ test.serial('A2: Stop between precheck and beginRun rejects the older attempt at
     let entered!: () => void;
     const paused = new Promise<void>(resolve => { release = resolve; });
     const atGate = new Promise<void>(resolve => { entered = resolve; });
-    let calls = 0;
-    const tool = createSubAgentTool({}, { makeRunner: () => ++calls === 1
-        ? sequenceRunner(registry, 'old-run', async () => { entered(); await paused; })
-        : sequenceRunner(registry, 'newer-run') });
+    const tool = createSubAgentTool({}, { makeRunner: () =>
+        sequenceRunner(registry, 'old-run', async () => { entered(); await paused; }) });
     const call = (seq: number) => tool.execute({ action: 'task', sub_id: thread.threadId, task: 'Continue', _invocationOrigin: owner, _invocationTurnKind: 'user', _invocationTurnStartedSeq: seq }, {}, makePlugin(registry));
     const first = call(old);
     await atGate;
+    const reservedId = thread.queuedRunId!;
     const newer = await call(registry.issueTurnStartSequence()) as Record<string, unknown>;
-    t.is(newer.success, true);
-    t.true(registry.requestStop('newer-run', 'user'));
-    registry.endRun(thread.threadId, { successful: true });
+    t.deepEqual(newer, { success: false, error: tr('mcp.sub_agent.task_state') });
+    t.true(registry.stopThread(thread.threadId));
     release();
     const result = await first as Record<string, unknown>;
     t.is(result.success, false);
-    t.is(thread.phase, 'idle');
+    t.is(thread.phase, 'closed');
     t.is(thread.userStop, true);
-    t.deepEqual(thread.runIds, ['previous-run', 'newer-run']);
+    t.deepEqual(thread.runIds, ['previous-run', reservedId]);
+    t.deepEqual(registry.getTask(reservedId)?.outcome?.end, { kind: 'stopped', by: 'user' });
 });
 
 test('task after user Stop requires a user turn and clears userStop only after registry admission', async (t) => {
@@ -283,8 +282,8 @@ test('two concurrent task calls reserve only one run on a thread', async (t) => 
     let admitted = 0;
     const paused = new Promise<void>(resolve => { release = resolve; });
     const tool = createSubAgentTool({}, { makeRunner: () => ({
-        runTask: async (_task: string, _agent: unknown, _config: unknown, _model: unknown, options: { threadId?: string; origin?: { agentName: string; sessionPath?: string; sessionEpoch?: string }; onTaskCreated?: (task: import('../sub-agents/index.js').SubTask) => void }) => {
-            t.true(registry.beginRun(options.threadId!, options.origin!));
+        runTask: async (_task: string, _agent: unknown, _config: unknown, _model: unknown, options: { threadId?: string; reservedRunId?: string; origin?: { agentName: string; sessionPath?: string; sessionEpoch?: string }; onTaskCreated?: (task: import('../sub-agents/index.js').SubTask) => void }) => {
+            t.true(registry.beginRun(options.threadId!, options.origin!, { reservedRunId: options.reservedRunId }));
             admitted++;
             const task = registry.create({ id: `concurrent-${admitted}`, name: 'Worker', agentName: options.origin!.agentName, threadId: options.threadId!, origin: options.origin });
             options.onTaskCreated?.(task);
@@ -374,7 +373,7 @@ test('user Stop blocks machine and unmarked turns, and failed admission preserve
     registry.endRun(thread.threadId, { successful: true });
     const plugin = makePlugin(registry);
     let reachedRunner = false;
-    const tool = createSubAgentTool({}, { makeRunner: () => ({ runTask: async (_task: string, _agent: unknown, _config: unknown, _model: unknown, options: { threadId?: string; origin?: import('../sub-agents/index.js').SubTaskOrigin }) => {
+    const tool = createSubAgentTool({}, { makeRunner: () => ({ runTask: async (_task: string, _agent: unknown, _config: unknown, _model: unknown, options: { threadId?: string; reservedRunId?: string; origin?: import('../sub-agents/index.js').SubTaskOrigin }) => {
         reachedRunner = true;
         t.false(registry.beginRun(options.threadId!, { ...options.origin!, sessionEpoch: 'wrong' }));
         return { result: tr('subagent.thread_refused'), failed: true as const } as never;
@@ -388,7 +387,8 @@ test('user Stop blocks machine and unmarked turns, and failed admission preserve
     t.true(reachedRunner);
     t.is(refused.success, false);
     t.true(thread.userStop);
-    t.is(thread.phase, 'idle');
+    t.is(thread.phase, 'closed');
+    t.deepEqual(registry.getTask(thread.runIds.at(-1)!)?.outcome?.end, { kind: 'failed', stage: 'work' });
 });
 
 test('task directs the lead to delegate after run ceiling, transcript ceiling and failed run', async t => {
@@ -447,8 +447,8 @@ test('failed continuation that closes its thread directs the lead to delegate a 
     const { owner, thread } = seedIdleThread(registry);
     const plugin = makePlugin(registry);
     const tool = createSubAgentTool({}, { makeRunner: () => ({
-        runTask: async (_task: string, _agent: unknown, _config: unknown, _model: unknown, options: { threadId?: string; origin?: { agentName: string; sessionPath?: string; sessionEpoch?: string } }) => {
-            t.true(registry.beginRun(options.threadId!, options.origin!));
+        runTask: async (_task: string, _agent: unknown, _config: unknown, _model: unknown, options: { threadId?: string; reservedRunId?: string; origin?: { agentName: string; sessionPath?: string; sessionEpoch?: string } }) => {
+            t.true(registry.beginRun(options.threadId!, options.origin!, { reservedRunId: options.reservedRunId }));
             registry.endRun(options.threadId!, { successful: false });
             return { result: 'thread refused', failed: true as const } as never;
         },
@@ -496,7 +496,8 @@ test('task refuses a removed frozen model before starting a run', async t => {
     t.deepEqual(result, { success: false, error: tr('mcp.sub_agent.model_unavailable') });
     t.false(thread.reusable);
     t.is(thread.phase, 'closed');
-    t.is(thread.runIds.length, 1);
+    t.is(thread.runIds.length, 2);
+    t.deepEqual(registry.getTask(thread.runIds[1])?.outcome?.end, { kind: 'failed', stage: 'work' });
 });
 
 test('task refuses a removed frozen provider before starting a run', async t => {
@@ -510,7 +511,8 @@ test('task refuses a removed frozen provider before starting a run', async t => 
         _invocationOrigin: owner, _invocationTurnKind: 'user' }, {}, plugin);
     t.deepEqual(result, { success: false, error: tr('mcp.sub_agent.model_unavailable') });
     t.false(thread.reusable);
-    t.is(thread.runIds.length, 1);
+    t.is(thread.runIds.length, 2);
+    t.deepEqual(registry.getTask(thread.runIds[1])?.outcome?.end, { kind: 'failed', stage: 'work' });
 });
 
 test('task keeps a frozen model pinned in the sub-agent config outside the library', async t => {

@@ -9,7 +9,7 @@ Rejestr i model paska przyjmują opcjonalne `parentId` i `level` także na rezer
 
 P1: `SubTaskRegistry.getDelegationAncestors(context, agentName)` zwraca łańcuch biegów od rodzica do korzenia albo `undefined`. Wymaga żywego rodzica bez prośby Stop, pełnego właściciela (agent, ścieżka, epoka), zgodnych poziomów i kompletnego, acyklicznego łańcucha tej samej sesji. Delegacja prowadzącego bez `SubRunContext` nie używa tej walidacji. `DelegateTool` wyklucza konfiguracje rodzica i przodków po kanonicznej nazwie, również po fuzzy/aliasie oraz ponownie po oczekiwaniu w kolejce. Rezerwacja zna relację przed startem; kontynuacja bierze relację i poziom z nowego wywołania, nie ze starego wątku. `create` aktualizuje relację wątku do najnowszego biegu. Retencja i `pruneSession` zachowują cały łańcuch przodków żywych biegów i rezerwacji queued, nawet ponad `maxDone`.
 
-Testy P1: `modules/tools/DelegateTool.tree.test.ts` (rzeczywista ścieżka runner -> MCP/fallback -> delegate -> registry, sterowane stream/done bez pollingu) i `SubTaskRegistry.tree.test.ts` (retencja biegu i kolejki). Domyślna głębokość nadal 1; scheduler, Stop poddrzewa, skrzynka pytań, historia po restarcie i renderer drzewa należą do dalszych prac.
+Testy P1: `modules/tools/DelegateTool.tree.test.ts` (rzeczywista ścieżka runner -> MCP/fallback -> delegate -> registry, sterowane stream/done bez pollingu) i `SubTaskRegistry.tree.test.ts` (retencja biegu i kolejki). Domyślna głębokość nadal 1; Stop poddrzewa, skrzynka pytań, historia po restarcie i renderer drzewa należą do dalszych prac.
 
 > Fizyczne źródła modułu mają rozszerzenie `.ts`. Zapisy `.js` poniżej to specyfikatory
 > importów, które celowo zostają `.js`.
@@ -30,6 +30,7 @@ modules/sub-agents/
 ├── CLAUDE.md                   # ten plik
 ├── SubAgentLoader.js           # skanuje .pkm-assistant/sub-agents/, parsuje YAML, save/delete/starter + migracje tools
 ├── SubAgentRunner.js           # wykonanie sub-agent z tool-calling loop
+├── SubTaskScheduler.ts         # FIFO rozmowy, dzierżawy pracy i anulowalna admisja; pure
 ├── SubTaskRegistry.js          # SubTask jako byt (id/status/kroki/wynik/budżet) + szyna zdarzeń + side-channel abortów; pure, obsidian-free
 ├── SubTaskNotifier.js          # skrzynka wyników subów z tła: kolejka + `setDeliverer`/`drain`; pure, obsidian-free
 ├── subTaskPanelModel.js        # CO pasek biegów ma narysować (per zakładka czatu): filtr, kolejność, liczniki, skróty; pure (zero obsidian/DOM/i18n)
@@ -545,15 +546,22 @@ Retencja usuwa zamknięty wątek wraz z konfiguracją, gdy usunięto jego ostatn
 Skrzynka `postMessage` dostarcza wiadomość w ramce od agenta zlecającego przez hak
 `beforeContinue`, między wywołaniami modelu.
 
+### Scheduler rozmowy (P2)
+
+`SubTaskRegistry.acquire(owner, runId, signal): Promise<Lease>` synchronicznie kolejkuje bieg i przydziela najwyżej pięć dzierżaw dla pełnego klucza `agentName + sessionPath + sessionEpoch`. `tabKey` nie jest kluczem schedulera. Niepełny właściciel izoluje wywołanie po `runId`, zamiast łączyć obce rozmowy; nie uprawnia do zagnieżdżania. Wewnętrzny `SubTaskScheduler.ts` nie ma timerów ani zależności od UI. `Lease.release()` jest idempotentne; po zwolnieniu można wywołać `acquire` z tym samym ID, trafiając na koniec FIFO. Ponowne `acquire` bez zwolnienia odmawia. `getRunActivity(runId)` zwraca `queued | working | inactive` niezależnie od `SubTask.status`.
+
+Opcjonalny czwarty argument `AdmissionGroup = Readonly<{limit}>` zachowuje szerokość pojedynczej listy dla lokalnego dostawcy. Grupa jest tożsamością obiektu danej paczki. Jej przydział jest atomowy z dzierżawą rozmowy: czekający nie trzyma dodatkowego slotu puli. FIFO obejmuje także kolejne wywołania tej samej rozmowy. Sygnał anuluje tylko oczekiwanie; po przydziale abort należy do runnera, a slot zwalnia dopiero `release`. `dispose` zamyka admisję i odrzuca oczekujących, bez uruchamiania następnych. Typy `Lease`, `AdmissionGroup` i `SubRunActivity` są w barrelu.
+
+Testy: `SubTaskScheduler.test.ts` i `modules/tools/DelegateTool.scheduler.test.ts` - literalne wyniki, sterowane stream/done i `QuestionTestClock`, bez pollingu. Automatyczne oddawanie slotu przy pytaniu lub oczekiwaniu na dzieci należy do P5; P2 przygotowuje API, nie zmienia pętli rodzica.
+
 ### Rezerwacja z kolejki
 
-Zadanie z listy `tasks` dostaje `SubThread` w fazie `queued` przed wejściem do puli.
+Każde zadanie (pojedyncze i z listy `tasks`) dostaje `SubThread` w fazie `queued` przed admisją schedulera.
 Runner dostaje `queuedThreadId` i przejmuje rezerwację przez synchroniczne
 `beginQueuedRun(threadId, owner, frozenConfig)`. Przejście do `running` sprawdza
 właściciela i fazę bez `await`; runner używa tego samego identyfikatora jako id biegu
 i nie tworzy drugiego wątku. Konfiguracja pełna, w tym limity i model, jest kopiowana
-przy starcie. `beginRun` pozostaje osobną operacją kontynuacji wątku `idle` i nadal
-wymaga kompletnego klucza sesji oraz epoki.
+przy starcie. Kontynuację rezerwuje synchroniczne `reserveContinuation(threadId, owner, runId, turn, relation)`: sprawdza dotychczasową zgodę na wznowienie, ustawia `queued` i `queuedRunId`, zachowując transkrypt, zamrożoną konfigurację i flagę `userStop` aż do faktycznego `beginRun`. Runner dostaje `reservedRunId`; `beginRun` przejmuje wyłącznie zgodną rezerwację i ponawia kontrolę właściciela oraz progu Stopu. Historyczne bezpośrednie `beginRun` z `idle` nadal działa. Syntetyczny koniec kolejki używa `queuedRunId` kontynuacji, więc nie nadpisuje pierwszego biegu ani nie dopisuje go drugi raz.
 
 `allocateSubTaskId(name)` z publicznego barrela przydziela identyfikatory w formacie
 `sub/<nazwa>#<znacznik>-<licznik-base36>`. Wątek zamknięty przed startem nie wywołuje modelu.

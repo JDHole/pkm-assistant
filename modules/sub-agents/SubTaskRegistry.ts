@@ -40,6 +40,8 @@ import { log } from '../../core/utils/Logger.js';
 import type { RunOutcome, StopBy } from './runOutcome.js';
 import type { LoopMessage } from '../agent-loop/index.js';
 import { ParentQuestions } from './ParentQuestions.js';
+import { SubTaskScheduler } from './SubTaskScheduler.js';
+import type { AdmissionGroup, Lease, SubRunActivity } from './SubTaskScheduler.js';
 import type { Owner, QuestionId, QuestionState, ParentQuestionClock, OpenParentQuestionResult, AnswerResult } from './ParentQuestions.js';
 
 /** Stan biegu suba. `aborted` = ubity z zewnątrz (timeout delegacji), `error` = wyjątek. */
@@ -103,6 +105,7 @@ export function canContinueAfterUserStop(thread: SubThread, turnKind: unknown, t
 }
 export type SubThreadEffect = RunOutcome['effects'][number] & { expectedCheck?: 'exists' | 'absent' | 'none' };
 export interface SubThread {
+    queuedRunId?: string;
     threadId: string; name: string; owner: SubThreadOwner; origin: SubTaskOrigin;
     parentId?: string; level?: number;
     phase: 'queued' | 'running' | 'idle' | 'closed'; reusable: boolean; runIds: string[];
@@ -193,6 +196,12 @@ const DEFAULT_MAX_MESSAGES_PER_TASK = 10;
 const MAX_THREAD_EFFECTS = 100;
 
 export class SubTaskRegistry {
+    private readonly _scheduler = new SubTaskScheduler();
+    acquire(owner: Readonly<SubThreadOwner>, runId: string, signal: AbortSignal, group?: AdmissionGroup): Promise<Lease> {
+        return this._scheduler.acquire(owner, runId, signal, group);
+    }
+    getRunActivity(runId: string): SubRunActivity { return this._scheduler.getActivity(runId); }
+
     private readonly _questions: ParentQuestions;
     private _runtimeSequence = 0;
     private _nextSequence(): RuntimeSequence {
@@ -316,17 +325,37 @@ export class SubTaskRegistry {
         return level === 0 ? ancestors : undefined;
     }
 
-    beginRun(threadId: string, owner: SubThreadOwner, turn?: { turnKind?: unknown; turnStartedSeq?: unknown }): boolean {
+    reserveContinuation(threadId: string, owner: SubThreadOwner, runId: string,
+        turn?: { turnKind?: unknown; turnStartedSeq?: unknown }, relation?: { parentId?: string; level?: number }): SubThread | undefined {
+        if (!this._canBeginRun(threadId, owner, turn)) return undefined;
+        const thread = this._threads.get(threadId)!;
+        thread.phase = 'queued';
+        thread.queuedRunId = runId;
+        thread.parentId = relation?.parentId;
+        thread.level = relation?.level;
+        this.events.emit('thread:queued', thread);
+        return thread;
+    }
+
+    beginRun(threadId: string, owner: SubThreadOwner, turn?: { turnKind?: unknown; turnStartedSeq?: unknown; reservedRunId?: string }): boolean {
+        if (!this._canBeginRun(threadId, owner, turn)) return false;
+        const thread = this._threads.get(threadId)!;
+        delete thread.queuedRunId;
+        thread.phase = 'running'; thread.userStop = false; thread.lastActiveAt = Date.now(); return true;
+    }
+
+    private _canBeginRun(threadId: string, owner: SubThreadOwner, turn?: { turnKind?: unknown; turnStartedSeq?: unknown; reservedRunId?: string }): boolean {
         const thread = this._threads.get(threadId);
         if (thread?.phase === 'idle') {
             const idleMs = Number((thread.config.limits as Record<string, unknown> | undefined)?.subagent_thread_idle_ms) || this._threadLimits.idleMs;
             if (Date.now() - thread.lastActiveAt >= idleMs) this._closeThreadData(thread);
         }
-        if (!thread || thread.phase !== 'idle' || !owner?.agentName || !owner.sessionPath || !owner.sessionEpoch
+        const reserved = thread?.phase === 'queued' && !!turn?.reservedRunId && thread.queuedRunId === turn.reservedRunId;
+        if (!thread || (thread.phase !== 'idle' && !reserved) || !owner?.agentName || !owner.sessionPath || !owner.sessionEpoch
             || !thread.owner.agentName || !thread.owner.sessionPath || !thread.owner.sessionEpoch
             || thread.owner.agentName !== owner.agentName || thread.owner.sessionPath !== owner.sessionPath || thread.owner.sessionEpoch !== owner.sessionEpoch || !thread.reusable) return false;
         if (!canContinueAfterUserStop(thread, turn?.turnKind, turn?.turnStartedSeq)) return false;
-        thread.phase = 'running'; thread.userStop = false; thread.lastActiveAt = Date.now(); return true;
+        return true;
     }
 
     beginQueuedRun(threadId: string, owner: SubThreadOwner, frozenConfig: Record<string, unknown>): boolean {
@@ -387,8 +416,9 @@ export class SubTaskRegistry {
     }
     finishQueuedStop(threadId: string, input: { background?: boolean; taskPreview?: string }): SubTask | undefined {
         const thread = this._threads.get(threadId);
-        if (!thread || thread.phase !== 'closed' || !thread.closedBy || this._tasks.has(threadId)) return undefined;
-        const task: SubTask = { id: threadId, name: thread.name, agentName: thread.owner.agentName, status: 'done', createdAt: Date.now(), endedAt: Date.now(), steps: [], budget: {}, threadId,
+        const runId = thread?.queuedRunId ?? threadId;
+        if (!thread || thread.phase !== 'closed' || !thread.closedBy || this._tasks.has(runId)) return undefined;
+        const task: SubTask = { id: runId, name: thread.name, agentName: thread.owner.agentName, status: 'done', createdAt: Date.now(), endedAt: Date.now(), steps: [], budget: {}, threadId,
             origin: { ...thread.origin }, outcome: { end: { kind: 'stopped', by: thread.closedBy }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } };
         if (thread.lastUserStopSeq !== undefined) task.userStopSeq = thread.lastUserStopSeq;
         if (thread.parentId !== undefined) task.parentId = thread.parentId;
@@ -406,12 +436,13 @@ export class SubTaskRegistry {
     }
     finishQueuedFailure(threadId: string, input: { error: string; background?: boolean; taskPreview?: string }): SubTask | undefined {
         const thread = this._threads.get(threadId);
-        if (!thread || thread.phase !== 'queued' || this._tasks.has(threadId)) return undefined;
+        const runId = thread?.queuedRunId ?? threadId;
+        if (!thread || thread.phase !== 'queued' || this._tasks.has(runId)) return undefined;
         const error = this._mask ? this._mask(maskSensitiveData(input.error)) : maskSensitiveData(input.error);
         thread.closedBy = 'system';
         this._closeThreadData(thread);
         const now = Date.now();
-        const task: SubTask = { id: threadId, name: thread.name, agentName: thread.owner.agentName, status: 'error', createdAt: now, endedAt: now, steps: [], budget: {}, threadId,
+        const task: SubTask = { id: runId, name: thread.name, agentName: thread.owner.agentName, status: 'error', createdAt: now, endedAt: now, steps: [], budget: {}, threadId,
             origin: { ...thread.origin }, error,
             outcome: { end: { kind: 'failed', stage: 'work' }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } };
         if (thread.parentId !== undefined) task.parentId = thread.parentId;
@@ -881,6 +912,7 @@ export class SubTaskRegistry {
      * zostaje best-effort i idempotentna: wolno ją zawołać dwa razy i nie ma prawa rzucić.
      */
     dispose(): void {
+        this._scheduler.dispose();
         this._questions.dispose();
         try {
             this.events.removeAllListeners();

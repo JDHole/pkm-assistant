@@ -76,3 +76,5 @@ export async function loadSubAgentEditorModal() {
 
 export { classifyRunEnd } from './runOutcome.js';
 export type { StopBy, RunEnd, RunEffect, RunOutcome, ClassifyRunEndInput } from './runOutcome.js';
+
+export type { AdmissionGroup, Lease, SubRunActivity } from './SubTaskScheduler.js';
