@@ -21,10 +21,10 @@ import { defaultSubAgentFramePrompt } from './framePrompt.js';
 import { DEPRECATED_TOOL_RENAMES, DEFAULT_SUB_AGENT_TOOLS } from './SubAgentLoader.js';
 import type { SubAgentData } from './types.js';
 import { describeToolEffect, checkEffectTargets } from '../tools/index.js';
-import type { BuiltinToolExecutionContext, ToolEffect, EffectTargetIo } from '../tools/index.js';
+import type { BuiltinToolExecutionContext, ToolEffect, EffectTargetIo, ExecuteToolCallOptions } from '../tools/index.js';
 // Bieg suba jest BYTEM w rejestrze (`plugin.subTaskRegistry`).
 // Sam rejestr przychodzi z pluginu (DI), stąd tylko typ - runner go nie tworzy.
-import type { SubTask, SubTaskOrigin, SubTaskRegistry, SubTaskTrace } from './SubTaskRegistry.js';
+import type { SubTask, SubTaskOrigin, SubRunContext, SubTaskRegistry, SubTaskTrace } from './SubTaskRegistry.js';
 import type { ActiveSessionEventInput } from '../memory/index.js';
 import type { ChatModel } from '../models/index.js';
 import { classifyRunEnd } from './runOutcome.js';
@@ -64,15 +64,7 @@ interface RunnerMcpClient {
     executeToolCall(
         toolCall: ToolCall,
         agentName: string,
-        opts: {
-            autonomy?: string | null;
-            delegationDepth?: number;
-            scopeFolders?: string[] | null;
-            callerToolNames?: string[];
-            resultBudgetChars?: number;
-            shouldAbort?: () => boolean;
-            onExecutionStart?: () => void;
-        },
+        opts: ExecuteToolCallOptions,
     ): Promise<unknown>;
 }
 
@@ -127,6 +119,7 @@ type RunOptions = {
     onGateAdmitted?: () => void;
     /** Adres zwrotny zlecenia - leci 1:1 do `registry.create`. */
     origin?: SubTaskOrigin;
+    parentId?: string;
     /** Bieg w tle (wołający nie czeka na wynik) - leci 1:1 do `registry.create`. */
     background?: boolean;
     /**
@@ -375,7 +368,7 @@ export class SubAgentRunner {
             }
             try {
                 config = structuredClone(frozen.subConfig as SubAgentData);
-                options = { ...options, ...(frozen.options as Partial<RunOptions>), threadId: options.threadId };
+                options = { ...options, ...(frozen.options as Partial<RunOptions>), threadId: options.threadId, delegationDepth: options.delegationDepth, parentId: options.parentId };
             } catch (error) {
                 log.warn('SubAgent', `Wątek ${thread.threadId} ma nieprawidłową konfigurację: ${String(error)}`);
                 registry?.endRun?.(thread.threadId, { successful: false });
@@ -528,14 +521,15 @@ export class SubAgentRunner {
             if (registry && !thread) {
                 const owner = { agentName: origin?.agentName || agent.name, sessionPath: origin?.sessionPath, sessionEpoch: origin?.sessionEpoch };
                 const frozenConfig = { subConfig: structuredClone(config), options: { delegationDepth, scopeFolders: scopeFolders ? [...scopeFolders] : undefined, callerToolNames: options.callerToolNames ? [...options.callerToolNames] : undefined, modelTimeout: options.modelTimeout, autonomy }, toolNames: this._resolveToolNames(config), limits: { ...limits }, model: config.model || null, modelId: model.modelId, providerId: model.providerId };
-                thread = _safeRegistry(() => registry.createThread?.({ threadId: label, name: config.name || config.role || 'sub', owner, origin: origin ?? { agentName: owner.agentName }, config: frozenConfig }));
+                thread = _safeRegistry(() => registry.createThread?.({ threadId: label, name: config.name || config.role || 'sub', owner, origin: origin ?? { agentName: owner.agentName }, config: frozenConfig, parentId: options.parentId, level: Math.max(1, delegationDepth) }));
             }
             subTask = registry
                 ? _safeRegistry(() => registry.create?.({
                     id: label,
                     name: config.name || config.role || 'sub',
                     agentName: agent.name,
-                    level: delegationDepth,
+                    level: Math.max(1, delegationDepth),
+                    parentId: options.parentId,
                     budget: {
                         maxIterations: loopLimits.maxIterations,
                         perCallTimeoutMs: loopLimits.perCallTimeoutMs,
@@ -722,7 +716,8 @@ export class SubAgentRunner {
                         return resolution.kind === 'answered' ? resolution.text : '';
                     }
                     const result = await this._executeTool(toolCall as ToolCall, agent.name, allowedToolNames,
-                        { delegationDepth, scopeFolders: scopeFolders as string[], autonomy },
+                        { delegationDepth, scopeFolders: scopeFolders as string[], autonomy,
+                            subRunContext: { runId: subTask?.id ?? label, level: Math.max(1, delegationDepth), origin: origin ?? { agentName: agent.name } } },
                         () => { failedToolCalls.add(seq); }, runtimeContext,
                         { start: (args) => beginEffect(seq, toolCall.name ?? '', args),
                             complete: (args, result, failed) => completeEffect(seq, toolCall.name ?? '', args, result, failed),
@@ -1089,7 +1084,7 @@ export class SubAgentRunner {
         toolCall: ToolCall,
         agentName: string,
         allowedToolNames: Set<string> | null = null,
-        execOptions: Pick<RunOptions, 'delegationDepth' | 'scopeFolders' | 'autonomy'> = {},
+        execOptions: Pick<RunOptions, 'delegationDepth' | 'scopeFolders' | 'autonomy'> & { subRunContext?: SubRunContext } = {},
         onFailure?: () => void,
         runtimeContext: ToolExecutionContext = { resultBudgetChars: 0, shouldAbort: () => false },
         effectHooks?: { start(args: unknown): void; complete(args: unknown, result: unknown, failed: boolean): void; fail(): void },
@@ -1143,6 +1138,8 @@ export class SubAgentRunner {
                     // Głębokość delegacji + bariera scope suba jadą z biegu suba do
                     // klienta narzędzi (MCPClient wstrzykuje je dalej: do args / checkPermission).
                     delegationDepth: execOptions.delegationDepth,
+                    subRunContext: execOptions.subRunContext,
+                    origin: execOptions.subRunContext?.origin,
                     scopeFolders: execOptions.scopeFolders,
                     resultBudgetChars: runtimeContext.resultBudgetChars,
                     shouldAbort: runtimeContext.shouldAbort,
@@ -1190,12 +1187,18 @@ export class SubAgentRunner {
                 // The fallback has no MCP identity/scope context. Remove every runtime marker
                 // the model could have forged, then re-add only values owned by this runner.
                 delete trustedArgs._invocationOrigin;
+                delete trustedArgs._invocationSubRunContext;
                 delete trustedArgs._invocationAutonomy;
                 delete trustedArgs._invocationScopeFolders;
                 delete trustedArgs._invocationToolNames;
                 delete trustedArgs._invocationDelegationDepth;
                 if ((execOptions.delegationDepth as number) > 0) {
                     trustedArgs._invocationDelegationDepth = execOptions.delegationDepth;
+                }
+                if (execOptions.subRunContext) {
+                    trustedArgs._invocationSubRunContext = execOptions.subRunContext;
+                    trustedArgs._invocationOrigin = execOptions.subRunContext.origin;
+                    trustedArgs._invocationDelegationDepth = execOptions.subRunContext.level;
                 }
                 if (execOptions.autonomy) trustedArgs._invocationAutonomy = execOptions.autonomy;
                 if (allowedToolNames) trustedArgs._invocationToolNames = [...allowedToolNames];

@@ -14,7 +14,7 @@ import { makeMemoryNoteFilename } from '../memory/index.js';
 // Jeden filtr znaczników `_invocation*` dla wysyłki i dla podglądu w approvalu.
 import { ExternalMcpManager } from './ExternalMcpManager.js';
 import { isRuntimeSequence } from '../sub-agents/index.js';
-import type { RuntimeSequence } from '../sub-agents/index.js';
+import type { RuntimeSequence, SubRunContext } from '../sub-agents/index.js';
 import type { PermissionDecision, PermissionedAgent, ScopeFolders } from '../../core/index.js';
 import type { BuiltinToolExecutionContext } from './ToolRegistry.js';
 import type { ModelResponse, ParsedToolCall } from '../agent-loop/index.js';
@@ -180,6 +180,7 @@ export interface ExecuteToolCallOptions {
     onExecutionStart?: () => void;
     autonomy?: string | null;
     delegationDepth?: number;
+    subRunContext?: SubRunContext;
     scopeFolders?: ScopeFolders | null;
     /**
      * Adres zwrotny wołającego (kto i z której rozmowy zleca). Klient go NIE BUDUJE -
@@ -800,7 +801,7 @@ export class MCPClient {
             ? opts.scopeFolders
             : null;
         // Klient origin'u NIE buduje - bierze go od wołacza i wstrzykuje do args.
-        const origin = opts.origin || null;
+        const origin = opts.subRunContext?.origin ?? opts.origin ?? null;
         // Whitelista wołającego - przelot do args, bez interpretacji.
         const callerToolNames = Array.isArray(opts.callerToolNames) && opts.callerToolNames.length > 0
             ? opts.callerToolNames.filter((n): n is string => typeof n === 'string' && n.length > 0)
@@ -850,6 +851,8 @@ export class MCPClient {
             const argsWithContext: ToolCallArgs = (args && typeof args === 'object' && !Array.isArray(args))
                 ? { ...args, _invocationAgentName: invocationAgentName }
                 : { _invocationAgentName: invocationAgentName };
+            if (opts.subRunContext) argsWithContext._invocationSubRunContext = opts.subRunContext;
+            else delete argsWithContext._invocationSubRunContext;
             delete argsWithContext._invocationThreadId;
             delete argsWithContext._invocationThreadAccepted;
             delete argsWithContext._invocationBackground;
@@ -858,8 +861,8 @@ export class MCPClient {
             // Ten sam wzorzec co `_invocationAgentName` - zaufany znacznik od runtime'u,
             // nie od modelu. Poza delegacją pole jest USUWANE (model mógłby podać ujemną
             // wartość i wyzerować licznik głębi u dziecka), w delegacji zawsze nadpisywane.
-            if (delegationDepth > 0) {
-                argsWithContext._invocationDelegationDepth = delegationDepth;
+            if (opts.subRunContext || delegationDepth > 0) {
+                argsWithContext._invocationDelegationDepth = opts.subRunContext?.level ?? delegationDepth;
             } else {
                 delete argsWithContext._invocationDelegationDepth;
             }

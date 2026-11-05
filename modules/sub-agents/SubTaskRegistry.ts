@@ -86,6 +86,9 @@ export interface SubTaskOrigin {
     tabKey?: string;
 }
 
+/** Identity of the calling run, supplied only by the runner. Origin remains the lead conversation. */
+export type SubRunContext = Readonly<{ runId: string; level: number; origin: Readonly<SubTaskOrigin> }>;
+
 export interface SubThreadOwner { agentName: string; sessionPath?: string; sessionEpoch?: string }
 declare const runtimeSequenceBrand: unique symbol;
 export type RuntimeSequence = number & { readonly [runtimeSequenceBrand]: true };
@@ -290,6 +293,27 @@ export class SubTaskRegistry {
         this.events.emit('thread:created', thread);
         this._pruneIdleThreads();
         return thread;
+    }
+
+    /** Fail closed only for nested calls carrying runtime identity. Old lead calls do not use this gate. */
+    getDelegationAncestors(context: SubRunContext, agentName: string): SubTask[] | undefined {
+        const owner = context.origin;
+        if (!owner?.agentName || !owner.sessionPath || !owner.sessionEpoch || owner.agentName !== agentName
+            || !Number.isInteger(context.level) || context.level < 1) return undefined;
+        const ancestors: SubTask[] = [];
+        let id: string | undefined = context.runId;
+        let level = context.level;
+        while (id) {
+            const task = this._tasks.get(id);
+            if (!task || ancestors.some(item => item.id === id) || task.level !== level
+                || task.agentName !== agentName || task.origin?.agentName !== owner.agentName
+                || task.origin.sessionPath !== owner.sessionPath || task.origin.sessionEpoch !== owner.sessionEpoch
+                || (ancestors.length === 0 && (task.status !== 'running' || task.stopRequested))) return undefined;
+            ancestors.push(task);
+            id = task.parentId;
+            level--;
+        }
+        return level === 0 ? ancestors : undefined;
     }
 
     beginRun(threadId: string, owner: SubThreadOwner, turn?: { turnKind?: unknown; turnStartedSeq?: unknown }): boolean {
@@ -515,7 +539,17 @@ export class SubTaskRegistry {
         if (background !== undefined) task.background = background;
         if (parentId !== undefined) task.parentId = parentId;
         if (level !== undefined) task.level = level;
-        if (threadId) { task.threadId = threadId; this._threads.get(threadId)?.runIds.push(id); }
+        if (threadId) {
+            task.threadId = threadId;
+            const thread = this._threads.get(threadId);
+            if (thread) {
+                thread.runIds.push(id);
+                delete thread.parentId;
+                delete thread.level;
+                if (parentId !== undefined) thread.parentId = parentId;
+                if (level !== undefined) thread.level = level;
+            }
+        }
         if (origin) task.origin = { ...origin };
         // Skrót zadania przechodzi przez tę samą maskę co kroki (zadanie potrafi
         // nieść sekret z kontekstu rodzica) i ma twardy sufit — to podgląd, nie transkrypt.
@@ -779,8 +813,9 @@ export class SubTaskRegistry {
         try {
             if (!sessionPath) return 0;
             let removed = 0;
+            const retained = this._liveAncestorIds();
             for (const [id, task] of [...this._tasks]) {
-                if (task.status === 'running') continue;
+                if (task.status === 'running' || retained.has(id)) continue;
                 if ((task.origin?.sessionPath || '') !== sessionPath) continue;
                 this._tasks.delete(id);
                 this._traceScopes.delete(id);
@@ -789,7 +824,7 @@ export class SubTaskRegistry {
                 removed++;
             }
             for (const [id, thread] of this._threads) {
-                if (thread.owner.sessionPath === sessionPath && thread.phase === 'closed') this._threads.delete(id);
+                if (thread.owner.sessionPath === sessionPath && thread.phase === 'closed' && !thread.runIds.some(id => retained.has(id))) this._threads.delete(id);
             }
             return removed;
         } catch (e) {
@@ -803,17 +838,31 @@ export class SubTaskRegistry {
         return [...this._tasks.values()];
     }
 
+    private _liveAncestorIds(): Set<string> {
+        const retained = new Set<string>();
+        const retain = (parentId: string | undefined) => {
+            while (parentId && !retained.has(parentId)) {
+                retained.add(parentId);
+                parentId = this._tasks.get(parentId)?.parentId;
+            }
+        };
+        for (const task of this._tasks.values()) if (task.status === 'running') retain(task.parentId);
+        for (const thread of this._threads.values()) if (thread.phase === 'queued') retain(thread.parentId);
+        return retained;
+    }
+
     /** Retencja: nadmiarowe ZAKOŃCZONE biegi wylatują od najstarszego; `running` zostaje. */
     private _evictOldDone(): void {
         let done = 0;
         for (const task of this._tasks.values()) {
             if (task.status !== 'running') done++;
         }
+        const retained = this._liveAncestorIds();
         let toDrop = done - this._maxDone;
         if (toDrop <= 0) return;
         for (const [id, task] of this._tasks) {
             if (toDrop <= 0) break;
-            if (task.status === 'running') continue;
+            if (task.status === 'running' || retained.has(id)) continue;
             this._tasks.delete(id);
             this._traceScopes.delete(id);
             this._aborts.delete(id);

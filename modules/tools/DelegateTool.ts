@@ -12,7 +12,7 @@ import type { ReasoningEffort } from '../models/index.js';
  * 4. Return results
  */
 import { SubAgentRunner, DEFAULT_SUB_AGENT_TOOLS, PKM_SUB_NAME, allocateSubTaskId, canContinueAfterUserStop, isRuntimeSequence } from '../../modules/sub-agents/index.js';
-import type { RuntimeSequence, SubTask, SubTaskOrigin, QuestionId, Owner, AnswerResult, QuestionState, RunActivity, ParentQuestion } from '../../modules/sub-agents/index.js';
+import type { RuntimeSequence, SubRunContext, SubTask, SubTaskOrigin, QuestionId, Owner, AnswerResult, QuestionState, RunActivity, ParentQuestion } from '../../modules/sub-agents/index.js';
 import type { RunOutcome, SubRunResult } from '../../modules/sub-agents/index.js';
 import { createModelForRole } from '../../modules/models/index.js';
 import type { ModelRole, ResolverPluginLike } from '../../modules/models/index.js';
@@ -43,6 +43,7 @@ interface DelegateToolArgs extends DelegateTaskDef {
     _invocationDelegationDepth?: unknown;
     /** Adres zwrotny zlecenia - wstrzykiwany przez `MCPClient` (model go nie poda). */
     _invocationOrigin?: unknown;
+    _invocationSubRunContext?: SubRunContext;
     /** Tryb autonomii TURY zlecającej - zaufany znacznik od `MCPClient`, zawsze nadpisywany. */
     _invocationAutonomy?: unknown;
     /** `scope.folders` suba ZLECAJĄCEGO - zaufany znacznik od `MCPClient`. */
@@ -186,6 +187,7 @@ interface SubAgentRunnerLike {
             onQuestion?: (question: ParentQuestion) => void;
             /** Adres zwrotny zlecenia (1:1 do rejestru biegów). */
             origin?: SubTaskOrigin;
+            parentId?: string;
             /** Bieg w tle (1:1 do rejestru biegów). */
             background?: boolean;
             /** „Byt już istnieje" - stąd bierzemy `task_id` dla zwrotki w trybie tła. */
@@ -225,6 +227,7 @@ export type DelegatePlugin = NonNullable<ResolverPluginLike> & {
      */
     subTaskRegistry?: {
         attachAbort?: (id: string, fn: () => void) => void;
+        getDelegationAncestors?: (context: SubRunContext, agentName: string) => SubTask[] | undefined;
         getTask?: (id: string) => SubTask | undefined;
         step?: (task: SubTask, type: string, fields?: Record<string, unknown>) => void;
         getThread?: (id: string) => import('../sub-agents/index.js').SubThread | undefined;
@@ -236,7 +239,7 @@ export type DelegatePlugin = NonNullable<ResolverPluginLike> & {
         promoteToBackground?: (id: string) => boolean;
         requestStop?: (id: string, by: 'lead') => boolean;
         closeThread?: (id: string, by?: 'user' | 'lead' | 'system') => boolean;
-        createThread?: (input: { threadId: string; name: string; owner: import('../sub-agents/index.js').SubThreadOwner; origin: SubTaskOrigin; config: Record<string, unknown>; phase: 'queued' }) => import('../sub-agents/index.js').SubThread;
+        createThread?: (input: { threadId: string; name: string; owner: import('../sub-agents/index.js').SubThreadOwner; origin: SubTaskOrigin; config: Record<string, unknown>; phase: 'queued'; parentId?: string; level?: number }) => import('../sub-agents/index.js').SubThread;
         finishQueuedStop?: (id: string, input: { background?: boolean; taskPreview?: string }) => SubTask | undefined;
         finishQueuedFailure?: (id: string, input: { error: string; background?: boolean; taskPreview?: string }) => SubTask | undefined;
     } | null;
@@ -698,7 +701,32 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 // `_invocationDelegationDepth` wstrzykuje MCPClient (jak `_invocationAgentName`) -
                 // model nie poda go sam z palca, bo pole i tak jest nadpisywane przy wykonaniu.
                 // 0 = wywołanie z głównego czatu; 1 = wywołanie z wnętrza sub-agenta itd.
-                const currentDepth = Math.max(0, Number(args?._invocationDelegationDepth) || 0);
+                const subRunContext = args._invocationSubRunContext;
+                const ancestors = subRunContext
+                    ? plugin?.subTaskRegistry?.getDelegationAncestors?.(subRunContext, activeAgent.name || '') : undefined;
+                const origin = _resolveOrigin(args);
+                if (subRunContext && (!ancestors || origin?.agentName !== subRunContext.origin.agentName
+                    || origin?.sessionPath !== subRunContext.origin.sessionPath || origin?.sessionEpoch !== subRunContext.origin.sessionEpoch)) {
+                    return { success: false, error: 'Invalid sub-agent parent context.' };
+                }
+                const forbidden = new Set(ancestors?.map(task => task.name.toLowerCase()));
+                const canonicalName = (resolved: ResolvedDelegate): string | undefined => {
+                    if (continuation) return plugin?.subTaskRegistry?.getThread?.(continuation.threadId)?.name;
+                    if (resolved.delegate) return agentManager.resolveSubAgentConfig(resolved.delegate.name, activeAgent)?.name;
+                    return _queuedThreadName(resolved, plugin);
+                };
+                const resolveForRun = (aspect: string | undefined, explicit: boolean): ResolvedDelegate => {
+                    const resolved = _resolveDelegate(aspect, delegates, explicit);
+                    if (!subRunContext) return resolved;
+                    // Check after exact/fuzzy resolution too: an alias may point at an ancestor config.
+                    if (!resolved.error && forbidden.has(canonicalName(resolved)?.toLowerCase() || '')) {
+                        return { success: false, error: 'Cannot delegate to self or ancestor configuration.' };
+                    }
+                    const eligible = delegates.filter(delegate => !forbidden.has(
+                        agentManager.resolveSubAgentConfig(delegate.name, activeAgent)?.name.toLowerCase() || ''));
+                    return resolved.error ? _resolveDelegate(aspect, eligible, explicit) : resolved;
+                };
+                const currentDepth = subRunContext?.level ?? Math.max(0, Number(args?._invocationDelegationDepth) || 0);
                 if (currentDepth >= limits.max_delegation_depth) {
                     log.warn('DelegateTool', `Delegacja ODRZUCONA: głębokość ${currentDepth} >= limit ${limits.max_delegation_depth}`);
                     return { success: false, error: t('mcp.delegate.depth_limit', { limit: limits.max_delegation_depth }) };
@@ -726,7 +754,6 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 const background = typeof continuation?.background === 'boolean'
                     ? continuation.background
                     : !!plugin?.subTaskRegistry && currentDepth === 0;
-                const origin = _resolveOrigin(args);
                 const attachReusableThread = (value: unknown, taskId: string | null): unknown => {
                     const threadId = taskId ? plugin?.subTaskRegistry?.getTask?.(taskId)?.threadId : undefined;
                     if (!threadId || !plugin?.subTaskRegistry?.getThread?.(threadId)?.reusable || !value || typeof value !== 'object') return value;
@@ -816,7 +843,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                             rejectedTasks.push({ task: taskDef.task || '', aspect: taskDef.aspect, error });
                             return { ok: false, result: { success: false, error } };
                         }
-                        const resolved = _resolveDelegate(taskDef.aspect, delegates, taskDef.aspect_explicit === true);
+                        const resolved = resolveForRun(taskDef.aspect, taskDef.aspect_explicit === true);
                         if (resolved.error) {
                             rejectedTasks.push({ task: taskDef.task, aspect: taskDef.aspect, error: resolved.error });
                             return { ok: false, result: resolved };
@@ -834,7 +861,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                         for (let i = 0; i < args.tasks.length; i++) {
                             if (!precheck[i].ok) continue;
                             const resolved = (precheck[i] as { ok: true; resolved: ResolvedDelegate }).resolved;
-                            const name = _queuedThreadName(resolved, plugin);
+                            const name = (subRunContext ? canonicalName(resolved) : undefined) ?? _queuedThreadName(resolved, plugin);
                             const threadId = allocateSubTaskId(name);
                             const owner = {
                                 agentName: runOrigin.agentName,
@@ -849,6 +876,8 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                     origin: runOrigin,
                                     config: {},
                                     phase: 'queued',
+                                    parentId: subRunContext?.runId,
+                                    level: childDepth,
                                 });
                             } catch (error) {
                                 log.warn('DelegateTool', `Nie udało się zarezerwować wątku dla zadania ${i + 1}:`, error);
@@ -946,6 +975,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                 onActivity: gateArm.activity,
                                 modelTimeout: effectiveTaskTimeout,
                                 origin: reservation ? runOrigin : origin,
+                                subRunContext,
                                 autonomy: turnAutonomy,
                                 callerScopeFolders,
                                 callerToolNames,
@@ -1038,7 +1068,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     return { success: false, error: t('mcp.delegate.empty_task') };
                 }
 
-                const resolved = _resolveDelegate(args.aspect, delegates, args.aspect_explicit === true);
+                const resolved = resolveForRun(args.aspect, args.aspect_explicit === true);
                 if (resolved.error) return resolved;
 
                 const singleTimeout = Number(args.timeout_ms);
@@ -1076,7 +1106,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                             {
                                 abortCtl, salvageCap: limits.subagent_salvage_max_chars, onGateAdmitted: gateArm.signal,
                                 onActivity: gateArm.activity,
-                                modelTimeout: effectiveSingleTimeout, origin, autonomy: turnAutonomy,
+                                modelTimeout: effectiveSingleTimeout, origin, subRunContext, autonomy: turnAutonomy,
                                 callerScopeFolders, callerToolNames, background: true,
                                 ...(continuation ? { threadId: continuation.threadId, turnKind: continuation.turnKind, turnStartedSeq: continuation.turnStartedSeq } : {}),
                                 onTaskCreated: (task: SubTask) => {
@@ -1129,7 +1159,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                     wakeQuestion?.();
                                 }
                             },
-                            modelTimeout: effectiveSingleTimeout, origin, autonomy: turnAutonomy,
+                            modelTimeout: effectiveSingleTimeout, origin, subRunContext, autonomy: turnAutonomy,
                             callerScopeFolders, callerToolNames, background,
                             ...(continuation ? { threadId: continuation.threadId, turnKind: continuation.turnKind, turnStartedSeq: continuation.turnStartedSeq } : {}),
                             onTaskCreated: (task: SubTask) => {
@@ -1267,6 +1297,7 @@ export function createSubAgentTool(app: object, deps: DelegateToolDeps = {}) {
                     _invocationOrigin: origin,
                     _invocationAgentName: owner.agentName,
                     _invocationDelegationDepth: raw._invocationDelegationDepth,
+                    _invocationSubRunContext: raw._invocationSubRunContext,
                     _invocationAutonomy: raw._invocationAutonomy,
                     _invocationScopeFolders: raw._invocationScopeFolders,
                     _invocationToolNames: raw._invocationToolNames,
@@ -1455,6 +1486,7 @@ type SubRunControl = {
     modelTimeout?: number;
     /** Adres zwrotny + tryb tła + hak „byt istnieje" — przelot do `runTask`, bez interpretacji. */
     origin?: SubTaskOrigin;
+    subRunContext?: SubRunContext;
     background?: boolean;
     onTaskCreated?: (task: SubTask) => void;
     /** Tryb autonomii tury zlecającej, zamrożony na cały bieg suba. */
@@ -1529,6 +1561,15 @@ async function _executeSubAgent(
         subAgentConfig = agentManager.resolveSubAgentConfig((resolved.delegate as DelegateEntry).name, activeAgent);
         if (!subAgentConfig) {
             return { success: false, error: t('mcp.delegate.config_not_found', { name: (resolved.delegate as DelegateEntry).name }) };
+        }
+    }
+
+    // Recheck at actual start, after queueing/config resolution. Lead calls retain the old path.
+    if (runControl.subRunContext) {
+        const ancestors = plugin.subTaskRegistry?.getDelegationAncestors?.(runControl.subRunContext, activeAgent.name || '');
+        if (!ancestors) return { success: false, error: 'Invalid sub-agent parent context.' };
+        if (ancestors.some(task => task.name.toLowerCase() === subAgentConfig.name.toLowerCase())) {
+            return { success: false, error: 'Cannot delegate to self or ancestor configuration.' };
         }
     }
 
@@ -1665,6 +1706,7 @@ async function _executeSubAgent(
             ...(runControl.onQuestion ? { onQuestion: runControl.onQuestion } : {}),
             // Przelot do rejestru biegów — runner ich nie interpretuje, my też nie.
             ...(runControl.origin ? { origin: runControl.origin } : {}),
+            ...(runControl.subRunContext ? { parentId: runControl.subRunContext.runId } : {}),
             // Tryb pytań tury zlecającej — zamrożony, jak `scopeFolders`.
             ...(runControl.autonomy ? { autonomy: runControl.autonomy } : {}),
             ...(runControl.background !== undefined ? { background: runControl.background } : {}),
