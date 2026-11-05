@@ -32,6 +32,10 @@ export interface LoopMessage {
     content?: string | null | unknown[];
     tool_calls?: unknown[];
     tool_call_id?: string;
+    /** Internal provenance; preserved across thread continuation, stripped by API sanitizer. */
+    parentConversationInherited?: boolean;
+    /** User text before attachments/mentions, for the lead projection only. */
+    parentConversationText?: string;
     reasoning_content?: unknown;
     [key: string]: unknown;
 }

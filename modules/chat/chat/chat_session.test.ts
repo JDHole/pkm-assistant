@@ -386,3 +386,27 @@ for (const fallback of [false, true]) test(`P6 restore imports a history-only se
     t.deepEqual(memory.identity, { path: 'sessions/active/tree.md', epoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' });
     registry.dispose();
 });
+
+test('P1: zapis i restore przenosi tylko jawne źródło tekstu użytkownika do projekcji', async t => {
+    const disk = [
+        formatSessionEvent('user_message', { content: 'Pytanie + PDF', parent_conversation_text: { text: '  Pytanie\n**content:**\nMoje  ' } }, '2026-11-05T00:00:00Z'),
+        formatSessionEvent('user_message', { content: 'Sam załącznik', parent_conversation_text: { text: '' } }, '2026-11-05T00:00:01Z'),
+        formatSessionEvent('user_message', { content: 'Legacy PDF' }, '2026-11-05T00:00:02Z'),
+        formatSessionEvent('user_message', { content: 'Zepsute źródło', parent_conversation_text: { text: 42 } }, '2026-11-05T00:00:03Z'),
+        formatSessionEvent('agent_message', { content: 'Odpowiedź' }, '2026-11-05T00:00:04Z'),
+    ].join('\n');
+    const view = buildFakeThis(parseActiveSession(disk).messages);
+    await _restoreActiveSession.call(view);
+    t.deepEqual(view.rollingWindow.parentConversation.snapshot(), { messages: [
+        { sequence: 1, role: 'user', text: '  Pytanie\n**content:**\nMoje  ' },
+        { sequence: 2, role: 'assistant', text: 'Odpowiedź' },
+    ], summary: '', keptMessages: 2, summarizedMessages: 0, omittedMessages: 2, truncated: true });
+    t.deepEqual(view.rollingWindow.getMessagesForAPI(), [
+        { role: 'system', content: 'sys' },
+        { role: 'user', content: 'Pytanie + PDF' },
+        { role: 'user', content: 'Sam załącznik' },
+        { role: 'user', content: 'Legacy PDF' },
+        { role: 'user', content: 'Zepsute źródło' },
+        { role: 'assistant', content: 'Odpowiedź' },
+    ]);
+});

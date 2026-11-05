@@ -704,3 +704,28 @@ Zakończony rodzic z żywymi potomkami nadal pozwala zatrzymać poddrzewo przez 
 `StripTreeLabel`, `StripTreeNode`, `StripTreeModel` wychodzą przez barrel.
 Model nie przechowuje stanu widoku i nie zna DOM, CSS ani bieżącego języka.
 Testy literalne: `subTaskPanelModel.tree.test.ts` (w tym PL/EN, sieroty i cykle).
+
+## 2.4.5 P1 - źródło rozmowy rodzica (jeszcze bez trybu w schemacie)
+
+Publiczne `ParentConversationProjection`, `freezeParentConversation`, `captureSubParentConversation`
+i typy `ParentConversationContext`, `ParentConversationSnapshot`, `ConversationEntry` mieszkają
+w `ParentConversation.ts`. Projekcja zachowuje 8 niepustych user/assistant w całości; narzędzia
+nie zużywają tej ósemki. Starsze wpisy stają się ekstrakcyjnym skrótem: pierwsze zdanie,
+max 160 znaków, rola i numer; łącznie max 4096 znaków (najstarsze wpisy wypadają).
+Narzędzia są tekstowymi podglądami max 240 znaków, parowanymi po ID; brak pary jest jawny.
+Filtr zna tekstowe pola wyników read/search/list/web, pomija argumenty, reasoning, obrazy
+oraz binaria; nieznane struktury i ucięty/uszkodzony JSON oznacza jako pominięte i ustawia
+`truncated`. Znane tagi think/reasoning w tekstowych wynikach także są usuwane.
+Snapshot zawiera zamrożone wpisy, skrót, liczniki oraz `truncated`; nie zawiera protokołu tools.
+`keptMessages`/`summarizedMessages` liczą user/assistant; `omittedMessages` liczy nierozdzielalne
+wiadomości user i wyparte wpisy skrótu (także podglądy narzędzi).
+
+Runner zamraża źródło synchronicznie przed awaitem delegate, z aktywnego `ArrayMessageStore`,
+po `getDelegationAncestors`; brak lub nieaktualny rodzic daje brak źródła, nigdy główny czat.
+Runtime niesie source=lead/sub, owner, turnId (dla suba runId), rzeczywisty providerId i snapshot.
+Wiadomości z wewnętrznym `parentConversationInherited: true` są pomijane nawet po endRun
+oraz sklonowaniu transkryptu przy kontynuacji. Ten znacznik ustawi przyszły builder P2.
+Kanał MCP i fallback podają snapshot tylko built-in delegate; nic nie wstrzykuje go jeszcze
+w prompt i nie publikuje `context_mode`. Zgody, budżet, integracja trybu i UI należą do P2-P5.
+Testy: `ParentConversation.test.ts`, `SubAgentRunner.parentConversation.test.ts` i testy
+`parentConversation` w agent-loop/chat/tools. Używają literalnych oczekiwań, deferred i QuestionTestClock.

@@ -1622,3 +1622,19 @@ aby P3 objął także potomków wcześniejszego, zakończonego biegu tego wątku
 Pytanie w szczególe wnuka pokazuje jego rodzica zamiast prowadzącego.
 Testy: `chat/subTaskStrip.test.ts` — klasy, teksty, interakcje, izolacja widoków,
 Stop na prawdziwym rejestrze oraz literalny DOM płaskiej listy z HEAD `882d8b7`.
+
+## 2.4.5 P1 - osobna projekcja rozmowy
+
+`RollingWindow.parentConversation` zbiera czysty tekst przed kompresją; nie czyta
+`conversationSummary`. `clear()` wymienia projekcję. Tura przechwytuje jej referencję razem
+z oknem przed przygotowaniem promptu, więc nowa epoka na tym samym oknie nie podmienia źródła.
+`send_message` przekazuje `parentConversationText` sprzed załączników i rozwinięcia wzmianek;
+pisze też opcjonalne JSON `parent_conversation_text: {text}` w evencie user. Restore przekazuje
+pole z parsera przed addMessage/kompresją. Legacy user bez osobnego źródła pomijamy w projekcji
+z licznikiem i `truncated`, zachowując dotychczasową historię modelu. Pusty tekst jest celowy
+(np. sam obraz), nie oznacza zgody na użycie content. Metadane nie wychodzą do API modelu.
+`_chatExecuteToolCall` tworzy snapshot wyłącznie dla delegate z projekcji i origin zamrożonej
+tury oraz `chatModel.providerId`, z bieżącym `assistantText` poza store. Nie czyta aktywnej
+zakładki/pamięci. Testy: `chat_streaming.parentConversation.test.ts` (pełne send_message,
+PDF/image/wzmianki, dwie zakładki jednego agenta, reset epoki, późne dopiski), `chat_session.test.ts`
+(round-trip), `../sub-agents/ParentConversation.test.ts` (kompresja). UI pozostaje poza P1.

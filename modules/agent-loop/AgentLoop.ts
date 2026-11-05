@@ -330,6 +330,8 @@ export interface ToolResultEntry {
 
 /** Trusted runtime details for one tool invocation. Never derived from model arguments. */
 export interface ToolExecutionContext {
+    /** Visible answer of this round, before tool results are committed to the store. */
+    assistantText?: string;
     /** Effective cap selected for the original tool name; 0 means the loop has no cap. */
     resultBudgetChars: number;
     /** Abort predicate bound to the current turn. */
@@ -923,7 +925,7 @@ export async function runAgentLoop({
                 const resultBudgetChars = (toolName && perToolResultCaps && toolName in perToolResultCaps)
                     ? perToolResultCaps[toolName] : maxToolResultLength;
                 const raw = await executeToolCall(
-                    { id: tc.id, name: toolName, arguments: toolArgs }, { resultBudgetChars, shouldAbort: abort },
+                    { id: tc.id, name: toolName, arguments: toolArgs }, { resultBudgetChars, shouldAbort: abort, assistantText: content },
                 );
                 // Raw status/preview are captured before stringification (which itself can fail).
                 if (!terminal && !abortLatched) {

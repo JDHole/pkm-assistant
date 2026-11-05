@@ -62,6 +62,8 @@ import { safeErrorText } from './safeErrorText.js';
 import { registerUrlsFromText } from '../../web/index.js';
 import { getCachedToolTokenBreakdown } from './ToolTokenCache.js';
 import { getLimits } from '../../../config/limits.js';
+import type { ParentConversationProjection } from '../../sub-agents/index.js';
+import { freezeParentConversation } from '../../sub-agents/index.js';
 import { runAgentLoop } from '../../agent-loop/index.js';
 import { RollingWindowMessageStore } from './RollingWindowMessageStore.js';
 import { createTurnAbort, stopSubTasksForOwners } from './turnAbort.js';
@@ -179,6 +181,7 @@ interface ChatTurn {
     turnKind: 'user' | 'machine';
     turnStartedSeq?: RuntimeSequence;
     rw: RollingWindow;
+    parentConversation?: ParentConversationProjection;
     tt: TokenTracker;
     chatModel: ChatModel;
     model: string;
@@ -363,6 +366,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         }
     }
 
+    const parentConversationText = text;
     // Resolve @ mentions ONCE, before any clearing (fixes bug: mentions lost when no attachments)
     const { displayText: mentionDisplayText, contextText: mentionContextText } = isInjected
         ? { displayText: text, contextText: '' }
@@ -429,12 +433,12 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     if (hasAttachments && attachmentResult) {
         // Attachments present: content may be array (multimodal) or string
         // Display: user's text with @[Name] badges (no mention metadata)
-        await this.append_message('user', attachmentResult.content, mentionDisplayText, messageMeta);
+        await this.append_message('user', attachmentResult.content, mentionDisplayText, { ...messageMeta, parentConversationText });
         savedUserContent = mentionDisplayText;
     } else {
         // No attachments: API gets mention context, display shows only user text
         const apiContent = mentionContextText ? mentionContextText + '\n\n' + mentionDisplayText : mentionDisplayText;
-        const appended = this.append_message('user', apiContent, mentionContextText ? mentionDisplayText : undefined, messageMeta);
+        const appended = this.append_message('user', apiContent, mentionContextText ? mentionDisplayText : undefined, { ...messageMeta, parentConversationText });
         if (questionDelivery?.window.messages.some(message => message.questionId === questionDelivery.question.id)) {
             questionDelivery.claim.ack();
             if (this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.token === questionDelivery.token) {
@@ -460,6 +464,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         type: 'user_message',
         agentName: activeAgentName,
         content: savedUserContent,
+        parent_conversation_text: { text: parentConversationText },
         timestamp: new Date().toISOString(),
         ...(savedResultQuestion(messageMeta) ? { question: savedResultQuestion(messageMeta) } : {}),
     };
@@ -518,6 +523,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     // nawet jeśli user przełączy zakładkę.
     // Konstruktor widoku zakłada oba pola i żadna ścieżka ich nie zeruje - zamrożenie je tylko kopiuje.
     const rw = owner.rollingWindow!;
+    const parentConversation = rw.parentConversation;
     const tt = owner.tokenTracker!;
 
     // Uchwyt przerwania powstaje RAZEM z zapaleniem guzika Stop, nie dopiero przy rejestracji
@@ -751,6 +757,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
             turnKind,
             turnStartedSeq,
             rw,
+            parentConversation,
             tt,
             chatModel: chat_model,
             model: chat_model?.modelKey || '',
@@ -1448,6 +1455,9 @@ export async function _chatExecuteToolCall(
     toolCall: ParsedToolCall,
     context: ToolExecutionContext = { resultBudgetChars: 0, shouldAbort: () => false },
 ) {
+    const parentConversation = toolCall.name === 'delegate' && turn.parentConversation && !context.shouldAbort()
+        ? freezeParentConversation('lead', turn.origin, turn.turnId, turn.chatModel?.providerId,
+            turn.parentConversation.snapshot(context.assistantText)) : undefined;
     let raw: ChatToolResult | undefined;
     let error: Error | null = null;
     const pending = toolCall.name === 'ask_user'
@@ -1470,6 +1480,7 @@ export async function _chatExecuteToolCall(
         // TS-boundary: wynik narzędzia należy do SERWERA, który je wykonał - czat czyta z niego
         // wyłącznie pola opisane w `ChatToolResult`, bez walidacji schematem (ta byłaby zmianą runtime).
         raw = await this.plugin.mcpClient!.executeToolCall(toolCall as ToolsToolCall, turn.agentName, {
+            parentConversation,
             autonomy: turn.autonomy,
             origin: turn.origin,
             turnKind: turn.turnKind,

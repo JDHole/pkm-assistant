@@ -1,3 +1,4 @@
+import type { ParentConversationContext } from '../sub-agents/index.js';
 /**
  * Central registry for all available MCP tools.
  *
@@ -45,6 +46,7 @@ export interface ToolDefinition {
 
 /** Trusted runtime context supplied only to built-in tool implementations. */
 export interface BuiltinToolExecutionContext {
+    parentConversation?: ParentConversationContext;
     /** Cap chosen by AgentLoop for the original tool name; 0 means no loop cap. */
     resultBudgetChars: number;
     /** Effective read/text envelope cap after the fixed 12000-character ceiling. */

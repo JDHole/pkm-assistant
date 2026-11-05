@@ -600,3 +600,13 @@ nie ustawia override głębokości i prowadzi pytanie wnuka przez rodzica, prowa
 Zegar sterowany testem potwierdza pauzę obu pytań podczas oczekiwania na człowieka i brak
 pozostałych timerów po wyniku. Test starej odmowy przy limicie 1 teraz jawnie ustawia 1;
 asercje delegacji pozostają bez zmian.
+
+## 2.4.5 P1 - prywatny kanał rozmowy rodzica
+
+`ExecuteToolCallOptions.parentConversation` i `BuiltinToolExecutionContext.parentConversation`
+niosą zamrożone dane source/owner/turnId/providerId/snapshot (typy z sub-agents/index).
+MCP przekazuje je wyłącznie narzędziu o nazwie `delegate` ze źródłem `built-in`, jako czwarty
+argument execute. Treść nie jest doklejana do argumentów ani ich logów i nie wychodzi do
+zewnętrznych MCP lub innych built-inów. Brak źródła to undefined, bez poszukiwania innej sesji.
+P1 nie publikuje `context_mode` i nie zmienia wykonania samego DelegateTool; konsument trybu,
+zgoda oraz metadane delegacji należą do następnych paczek. Test: `MCPClient.parentConversation.test.ts`.

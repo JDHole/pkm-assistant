@@ -1,4 +1,5 @@
 import { fenceUntrusted, countTokensFromStats, countNonAsciiChars } from '../../../core/index.js';
+import { ParentConversationProjection } from '../../sub-agents/index.js';
 import { Summarizer } from './Summarizer.js';
 import { t } from '../../../core/i18n/index.js';
 // Prosto z DOMU sanitizera (modules/agent-loop) - żaden pass-through pośrednik go nie osłania.
@@ -206,6 +207,7 @@ interface RollingWindowOptions {
  * To jest osobny system od TokenTracker (który liczy in/out API usage).
  */
 export class RollingWindow {
+    parentConversation = new ParentConversationProjection();
     declare maxTokens: number;
     declare baseSystemPrompt: string;
     declare conversationSummary: string;
@@ -401,6 +403,7 @@ export class RollingWindow {
             }
         }
 
+        this.parentConversation.append({ role, content, ...metadata }, true);
         this.messages.push({ role, content, ...metadata });
 
         // HARD LIMIT — dwufazowa kompresja awaryjna
@@ -942,6 +945,7 @@ export class RollingWindow {
      * Czyści historię i summary (ale zachowuje base system prompt)
      */
     clear(): void {
+        this.parentConversation = new ParentConversationProjection();
         this.messages = [];
         this.conversationSummary = '';
         this._summarizationCount = 0;

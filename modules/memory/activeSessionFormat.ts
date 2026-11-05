@@ -70,6 +70,7 @@ export type SessionRole = 'system' | 'user' | 'assistant' | 'tool';
  * Nazwa pola bloku event-logu (format A). Kolejność zapisu trzyma `EVENT_FIELDS`.
  */
 export type EventFieldName =
+    | 'parent_conversation_text'
     | 'content'
     | 'tool'
     | 'args'
@@ -129,6 +130,7 @@ export interface SessionToolCall {
  * (`t.deepEqual`), nie widzi zmiany kształtu.
  */
 export interface ActiveSessionMessage {
+    parentConversationText?: string;
     role: SessionRole;
     content: string;
     seq: number | null;
@@ -172,6 +174,7 @@ export const KNOWN_ROLES = new Set<string>(['system', 'user', 'assistant', 'tool
  * w `extractEventField`. Rozjazd między nimi = ucięta treść, więc żadnej kopii.
  */
 export const EVENT_FIELDS: EventFieldName[] = [
+    'parent_conversation_text',
     'content',
     'tool',
     'args',
@@ -417,9 +420,15 @@ export function parseActiveSession(text: string | null | undefined): ParsedActiv
         //    tool-calling, `content` puste) - bez tej gałęzi CAŁY blok znikał z restore, więc
         //    kolejny `tool_result` i tak zostawał sierotą (scenariusz z logu 2026-08-09,
         //    "every tool call ... was cut").
+        const parentTextRaw = extractEventField(rawBody, 'parent_conversation_text');
+        let parentConversationText: string | undefined;
+        try {
+            const parsed: unknown = JSON.parse(unescapeActiveText(parentTextRaw));
+            if (parsed && typeof parsed === 'object' && 'text' in parsed && typeof parsed.text === 'string') parentConversationText = parsed.text;
+        } catch { /* Legacy or invalid source text: omit it, never infer from attachment content. */ }
         const toolCallIdRaw = extractEventField(rawBody, 'tool_call_id');
         const toolCalls = parseSessionToolCalls(extractEventField(rawBody, 'tool_calls'));
-        if (contentValue || toolCallIdRaw || toolCalls) {
+        if (contentValue || toolCallIdRaw || toolCalls || parentConversationText !== undefined) {
             const eventRole = roleFromEvent(eventTypeFromHeader(rawHeader), rawBody);
             if (eventRole) {
                 const question = parseSessionQuestion(extractEventField(rawBody, 'question'));
@@ -428,6 +437,7 @@ export function parseActiveSession(text: string | null | undefined): ParsedActiv
                 // żeby wiadomość bez nich zostawała bit w bit takim samym obiektem jak przed v3
                 // (kontrakt: `t.deepEqual` na `{role, content, seq}` gdzie indziej w tym pliku).
                 result.messages.push({
+                    ...(parentConversationText !== undefined ? { parentConversationText } : {}),
                     role: eventRole,
                     content: unescapeActiveText(contentValue.trim()) + (question && eventTypeFromHeader(rawHeader) === 'agent_loop_partial'
                         ? `\n\n[Sub-agent question]\n${question.text}\n[Resolution]\n${JSON.stringify(question.resolution)}` : ''),

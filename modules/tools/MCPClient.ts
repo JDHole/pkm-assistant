@@ -1,3 +1,4 @@
+import type { ParentConversationContext } from '../sub-agents/index.js';
 import { log } from '../../core/utils/Logger.js';
 // `toolResultStatus` = jedna reguła „co jest porażką narzędzia" (klient, czat, suby).
 import { AccessGuard, maskSensitiveData, normalizeAutonomy, sanitizePath, toolResultStatus, getAgentSafeName, SessionWriteConsent, configuredChatSecrets } from '../../core/index.js';
@@ -176,6 +177,7 @@ export interface ToolCall {
 
 /** Dodatkowe opcje wykonania (autonomia czatu + kaganiec delegacji + adres zwrotny). */
 export interface ExecuteToolCallOptions {
+    parentConversation?: ParentConversationContext;
     /** Token supplied by the runtime, never by the model. */
     askUserChannelId?: string;
     /** Called once immediately before the permitted tool execution begins. */
@@ -1287,6 +1289,8 @@ export class MCPClient {
                 return JSON.stringify(finalCandidate) ?? '';
             };
             const builtInContext: BuiltinToolExecutionContext = {
+                ...(tool.source === 'built-in' && toolCall.name === 'delegate' && opts.parentConversation
+                    ? { parentConversation: opts.parentConversation } : {}),
                 resultBudgetChars: requestedResultBudgetChars,
                 effectiveResultBudgetChars,
                 shouldAbort,

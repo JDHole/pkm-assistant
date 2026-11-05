@@ -59,3 +59,14 @@ U3 consumer compatibility: `abortReason` additionally accepts an existing `Agent
 
 
 P5: optional `beforeFinish(i): Promise<'finish' | 'continue'>` guards every natural exit (plain text, filtered calls and orphan guard). Without this hook the previous path is unchanged. `continue` uses the existing loop and iteration budget; its caller inserts the event that warrants another request. Abort is checked after the awaited barrier. Limit/error/Stop do not enter this barrier; `onBackstop` remains the pre-synthesis hook. `AgentLoop.finish.test.ts` verifies held barriers, all natural exits, unchanged transcript accounting, iteration exhaustion and Stop before continuation.
+
+## 2.4.5 P1 - current visible answer outside the transcript
+
+`ToolExecutionContext.assistantText?: string` supplies this round's visible answer to every
+parallel executor before assistant/tool accounting. It carries no reasoning. Callers can
+append it to a private snapshot without changing store order or model input. Parallel tool
+results remain unavailable until batch settlement, as before. `LoopMessage` adds internal
+`parentConversationInherited` provenance (kept by initial-store/thread clones) and optional
+`parentConversationText` for attachment-free lead user text; the API sanitizer strips both.
+`AgentLoop.parentConversation.test.ts` checks held parallel delegates, literal snapshots,
+reasoning exclusion and the full unchanged model message arrays with controlled promises.

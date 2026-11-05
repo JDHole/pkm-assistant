@@ -938,3 +938,14 @@ tego pola mają dokładnie dotychczasowy kształt wyniku. Wpisy używają istnie
 `appendSessionEvent(path,event,epoch)` z kolejką i sprawdzaniem epoki, bez zmiany aktywnej sesji.
 Historia dotyczy plików active; archiwizacja nadal zapisuje transkrypt. Test pełnej drogi:
 `modules/sub-agents/SubTaskHistory.test.ts`.
+
+## 2.4.5 P1 - czysty tekst źródłowy wiadomości użytkownika
+
+Opcjonalne pole event-logu `parent_conversation_text` ma JSON `{text: string}` (także pusty
+string, zachowuje whitespace). `parseActiveSession` waliduje ten kształt i zwraca
+`ActiveSessionMessage.parentConversationText`; brak/uszkodzenie pola nie zmienia starego
+obiektu wiadomości. Format zachowuje wersję 3 i dotychczasową treść `content`.
+`AgentMemory._appendMessageAsEvent` przenosi pole również podczas dopisywania ogona autosave.
+Przechowywany jest osobny tekst użytkownika, nie snapshot rozmowy ani zgoda. Chat restore
+używa go wyłącznie do projekcji rodzica, nigdy nie odtwarza go z nierozdzielalnego legacy content.
+Testy round-trip: `../chat/chat/chat_session.test.ts`, `../chat/chat/chat_streaming.parentConversation.test.ts`.

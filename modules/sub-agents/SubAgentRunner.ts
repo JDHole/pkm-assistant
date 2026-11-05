@@ -32,6 +32,8 @@ import type { RunEffect, RunOutcome } from './runOutcome.js';
 import { SubRunCoordinator } from './SubRunCoordinator.js';
 import { retainExecutor } from './RetainedExecutor.js';
 import type { RunAdmission } from './SubRunCoordinator.js';
+import { captureSubParentConversation } from './ParentConversation.js';
+import type { ParentConversationContext } from './ParentConversation.js';
 import { allocateSubTaskId } from './subTaskId.js';
 import type { RunActivity, ParentQuestion, QuestionResolution } from './ParentQuestions.js';
 
@@ -47,6 +49,7 @@ const SUB_AGENT_MAX_OUTPUT_TOKENS = 16384;
  * (execute/inputSchema itd.) mieszka w `modules/tools`, poza zakresem tej fali; runner
  * czyta z niego wyłącznie te pola. */
 interface RunnerToolDefinition {
+    source?: string;
     name: string;
     description: string;
     inputSchema: unknown;
@@ -724,6 +727,10 @@ export class SubAgentRunner {
                 // Numer wywołania łapiemy PRZY STARCIE (kolejność tablicy pętli),
                 // a nie przy zakończeniu - wywołania jednego batcha rozstrzygają się równolegle.
                 executeToolCall: async (toolCall, runtimeContext) => {
+                    const parentConversation = toolCall.name === 'delegate'
+                        ? captureSubParentConversation(registry,
+                            { runId: subTask?.id ?? label, level: Math.max(1, delegationDepth), origin: origin ?? { agentName: agent.name } },
+                            store.messages, model.providerId, runtimeContext.assistantText) : undefined;
                     // Waiting for a parent is idle; other executors pin the lease through abort grace.
                     const executor = toolCall.name === 'ask_parent' ? undefined : retainExecutor(
                         localAbort.signal, executorGraceMs, subTask?.id ?? label,
@@ -771,7 +778,7 @@ export class SubAgentRunner {
                     const result = await this._executeTool(toolCall as ToolCall, agent.name, allowedToolNames,
                         { delegationDepth, scopeFolders: scopeFolders as string[], autonomy, controlOnly,
                             subRunContext: { runId: subTask?.id ?? label, level: Math.max(1, delegationDepth), origin: origin ?? { agentName: agent.name } } },
-                        () => { failedToolCalls.add(seq); }, { ...runtimeContext, abortSignal: localAbort.signal,
+                        () => { failedToolCalls.add(seq); }, { ...runtimeContext, parentConversation, abortSignal: localAbort.signal,
                             isDetached: () => executor?.detached === true },
                         { start: (args) => beginEffect(seq, toolCall.name ?? '', args),
                             complete: (args, result, failed) => completeEffect(seq, toolCall.name ?? '', args, result, failed),
@@ -1155,7 +1162,7 @@ export class SubAgentRunner {
         allowedToolNames: Set<string> | null = null,
         execOptions: Pick<RunOptions, 'delegationDepth' | 'scopeFolders' | 'autonomy'> & { subRunContext?: SubRunContext; controlOnly?: boolean } = {},
         onFailure?: () => void,
-        runtimeContext: ToolExecutionContext & { abortSignal?: AbortSignal; isDetached?: () => boolean } = { resultBudgetChars: 0, shouldAbort: () => false },
+        runtimeContext: ToolExecutionContext & { parentConversation?: ParentConversationContext; abortSignal?: AbortSignal; isDetached?: () => boolean } = { resultBudgetChars: 0, shouldAbort: () => false },
         effectHooks?: { start(args: unknown): void; complete(args: unknown, result: unknown, failed: boolean): void; fail(): void },
     ) {
         log.debug('SubAgent', `_executeTool: ${toolCall.name} (agent: ${agentName || 'brak'})`);
@@ -1203,6 +1210,7 @@ export class SubAgentRunner {
             // czytane w trakcie biegu dawałoby subowi tryb zakładki, na którą user właśnie przeskoczył.
             if (this.mcpClient && agentName) {
                 const result = await this.mcpClient.executeToolCall(toolCall, agentName, {
+                    parentConversation: runtimeContext.parentConversation,
                     autonomy: execOptions.autonomy ?? this.plugin?.currentAutonomy,
                     // Głębokość delegacji + bariera scope suba jadą z biegu suba do
                     // klienta narzędzi (MCPClient wstrzykuje je dalej: do args / checkPermission).
@@ -1278,6 +1286,8 @@ export class SubAgentRunner {
             const requestedBudget = runtimeContext.resultBudgetChars > 0 ? runtimeContext.resultBudgetChars : 0;
             effectHooks?.start(args);
             const result = await tool.execute(args, this.app, this.plugin, {
+                ...(tool.source === 'built-in' && toolCall.name === 'delegate' && runtimeContext.parentConversation
+                    ? { parentConversation: runtimeContext.parentConversation } : {}),
                 resultBudgetChars: requestedBudget,
                 effectiveResultBudgetChars: requestedBudget > 0 ? Math.min(requestedBudget, 12000) : 12000,
                 shouldAbort: runtimeContext.shouldAbort,

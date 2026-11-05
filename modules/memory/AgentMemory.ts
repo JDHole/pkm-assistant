@@ -283,6 +283,7 @@ export interface ActiveSessionEventInput {
  * ta sama utrata id co BUG C1, na DRUGIM pisarzu tego samego pliku).
  */
 export interface ChatMessageLike {
+    parentConversationText?: string;
     role?: string;
     content?: unknown;
     tool_call_id?: string;
@@ -1055,8 +1056,9 @@ epoch: ${epoch}
         const text = Array.isArray(msg?.content)
             ? (msg.content as Array<{ text?: string; content?: string }>).map(c => c?.text || c?.content || '').filter(Boolean).join('\n')
             : _nullishToString(msg?.content);
-        const event: { content: string; seq: number; role?: string; tool_call_id?: string; tool_calls?: unknown[]; question?: SessionQuestion } =
+        const event: { parent_conversation_text?: { text: string }; content: string; seq: number; role?: string; tool_call_id?: string; tool_calls?: unknown[]; question?: SessionQuestion } =
             { content: text, seq: this._nextSeq(path, content) };
+        if (msg.parentConversationText !== undefined) event.parent_conversation_text = { text: msg.parentConversationText };
         if (role === 'system') event.role = 'system';
         // Kod review MAJOR #3: SAMA gałąź co pisarz per-event w `chat_streaming.ts`
         // (`_chatBeforeContinue`) - `tool_call_id` na `tool`, `tool_calls` na `assistant` TYLKO
