@@ -62,6 +62,7 @@ export interface SubTaskResultModel {
 }
 
 export interface StripRun {
+    parentConversation?: SubTask['parentConversation'];
     questionState: QuestionState;
     id: string;
     number: number;
@@ -85,6 +86,7 @@ export interface StripRun {
 }
 
 export interface StripRow {
+    parentConversation?: SubTask['parentConversation'];
     parentId?: string;
     level?: number;
     questionState: QuestionState;
@@ -289,7 +291,7 @@ function runView(task: SubTask | undefined, id: string, number: number, now: num
     const outcome = rawOutcome.length > MAX_CHARS ? `${rawOutcome.slice(0, MAX_CHARS)}…` : rawOutcome;
     const endReason = partialOutcome && stripMaterial && task.error ? task.error : undefined;
     return {
-        id, number, available: true, state: runState(task, shared.state), status: task.status, questionState: task.questionState ?? { kind: 'none' },
+        id, number, available: true, ...(task.parentConversation ? { parentConversation: task.parentConversation } : {}), state: runState(task, shared.state), status: task.status, questionState: task.questionState ?? { kind: 'none' },
         ...(task.outcome ? { endLabelKey: shared.endLabelKey, completenessLabelKey: shared.completenessLabelKey } : {}),
         taskPreview: (task.taskPreview || '').slice(0, MAX_TASK), steps, outcome,
         ...(endReason ? { endReason } : {}),
@@ -349,6 +351,8 @@ export function buildStripModel({ tasks, pending, threads, tabKey = '', agentNam
             id: thread.threadId, threadId: thread.threadId, name: thread.name, state, reusable: thread.reusable, questionState: (activeRun ?? lastRun)?.questionState ?? { kind: 'none' },
             ...(relation.parentId !== undefined ? { parentId: relation.parentId } : {}),
             ...(relation.level !== undefined ? { level: relation.level } : {}),
+            ...((thread.phase === 'queued' ? thread.parentConversation : (activeRun ?? lastRun)?.parentConversation)
+                ? { parentConversation: thread.phase === 'queued' ? thread.parentConversation : (activeRun ?? lastRun)?.parentConversation } : {}),
             runs, runNumber, runLimit: Number.isFinite(maxRuns) && Number(maxRuns) > 0 ? Number(maxRuns) : null,
             durationMs: runs[runs.length - 1]?.durationMs || 0,
             taskPreview: runs[runs.length - 1]?.taskPreview || '',
@@ -375,7 +379,7 @@ export function buildStripModel({ tasks, pending, threads, tabKey = '', agentNam
     for (const task of orderedStandalone) {
         const run = runView(task, task.id, 1, now);
         const state = delivered.has(task.id) ? { kind: 'delivery' as const } : runState(task);
-        rows.push({ id: task.id, name: task.name || task.id, ...(task.parentId !== undefined ? { parentId: task.parentId } : {}), ...(task.level !== undefined ? { level: task.level } : {}), state, questionState: run.questionState, reusable: false, runs: [run], runNumber: 1, runLimit: null,
+        rows.push({ ...(task.parentConversation ? { parentConversation: task.parentConversation } : {}), id: task.id, name: task.name || task.id, ...(task.parentId !== undefined ? { parentId: task.parentId } : {}), ...(task.level !== undefined ? { level: task.level } : {}), state, questionState: run.questionState, reusable: false, runs: [run], runNumber: 1, runLimit: null,
             durationMs: run.durationMs, taskPreview: run.taskPreview, outcome: run.outcome });
     }
     return rows;

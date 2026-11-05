@@ -638,3 +638,12 @@ sterowane przyjęcie przez prawdziwy rejestr i runner: zero slotów/streamów/bu
 zgodą, potem literalny prompt i sterowany done; używa QuestionTestClock/deferred.
 Pokrywa też fallback, wnuka, OpenRouter, brak dostawców, odmowę, redirect, wszystkie
 tryby autonomii, Stop/zamknięcie/unload i późne approve. Integracja kolejek i batcha jest w P4.
+
+### Integracja rozmowy rodzica (P4)
+
+Wewnętrzne `context_mode` obsługuje `clean` i `parent_conversation`; schemat modelowy
+pozostaje niezmieniony do P5. Dla każdego zadania osobno przygotowanie modelu i zgoda
+poprzedzają rezerwację, a po kolejce ponownie sprawdzane są źródło, rodzic, uprawnienie,
+anulowanie i tożsamość zamrożonego modelu. Snapshot i konfiguracja po zgodzie są
+niezmienne. Pokwitowanie niesie `parentConversation` pending albo końcowe metadane,
+a wynik powtarza końcowy stan; batch zachowuje oddzielne odmowy.

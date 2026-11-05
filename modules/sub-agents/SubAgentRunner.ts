@@ -899,6 +899,7 @@ export class SubAgentRunner {
             if (thread) _safeRegistry(() => registry?.endRun?.(thread!.threadId, { successful: true, transcript: store.messages, answer: outcome.hasAnswer ? response.finalText : undefined, effects: finalEffects.map((effect, index) => ({ ...effect, expectedCheck: descriptions.get(effects[index])?.check })), userStop: subTask?.stopRequestedBy === 'user' }));
             if (subTask) {
                 _safeRegistry(() => registry?.finish?.(subTask as SubTask, {
+                    ...(parentConversation ? { parentConversation } : {}),
                     text: closedQuestion ? lastPartial?.text || '' : response.finalText || '',
                     toolsUsed: response.toolsUsed || [],
                     durationMs: Date.now() - startTime,
@@ -956,6 +957,7 @@ export class SubAgentRunner {
             if (subTask) {
                 const failedTask = subTask;
                 _safeRegistry(() => registry?.fail?.(failedTask, safeErrorMsg, outcome, {
+                    ...(parentConversation ? { parentConversation } : {}),
                     text: '', toolsUsed: [...(lastPartial?.toolsUsed || [])], durationMs: Date.now() - startTime,
                     usage: lastPartial?.usage || null, outcome, ...(handoff ? { handoff } : {}),
                 }));

@@ -21,6 +21,12 @@ export type ParentConversationPreparation = Readonly<{
     note?: string;
 }>;
 
+/** Pending means the final prompt has not been fitted yet; no invented token counts. */
+export type ParentConversationMetadata = ParentConversationPreparation | Readonly<{
+    mode: 'parent_conversation'; status: 'pending';
+    source: ParentConversationContext['source']; sourceId: ParentConversationContext['turnId'];
+}>;
+
 /** Fits only inherited material; the caller's base task and permission frame are immutable. */
 export function fitParentConversation(
     context: ParentConversationContext, base: readonly LoopMessage[], tools: readonly unknown[], window: ContextWindow,

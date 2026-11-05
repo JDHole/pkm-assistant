@@ -725,8 +725,8 @@ po `getDelegationAncestors`; brak lub nieaktualny rodzic daje brak źródła, ni
 Runtime niesie source=lead/sub, owner, turnId (dla suba runId), rzeczywisty providerId i snapshot.
 Wiadomości z wewnętrznym `parentConversationInherited: true` są pomijane nawet po endRun
 oraz sklonowaniu transkryptu przy kontynuacji. Ten znacznik ustawi przyszły builder P2.
-Kanał MCP i fallback podają snapshot tylko built-in delegate; nic nie wstrzykuje go jeszcze
-w prompt i nie publikuje `context_mode`. Zgody, budżet, integracja trybu i UI należą do P2-P5.
+Kanał MCP i fallback podają snapshot tylko built-in delegate. Budżet, zgoda i integracja
+są opisane poniżej; publikacja `context_mode` i UI należą do P5.
 Testy: `ParentConversation.test.ts`, `SubAgentRunner.parentConversation.test.ts` i testy
 `parentConversation` w agent-loop/chat/tools. Używają literalnych oczekiwań, deferred i QuestionTestClock.
 
@@ -745,3 +745,11 @@ Najpierw usuwa najstarsze wyciągi, potem pełne wiadomości, w końcu jawnie pr
 przy braku miejsca uruchamia zadanie bazowe i zgłasza `status: omitted` z opisem. Metadane
 odpowiadają wysłanej treści, a estymata i nieznane okno nie gwarantują dopasowania u providera.
 Testy: `ParentConversationBudget.test.ts`, `SubAgentRunner.contextBudget.test.ts`.
+
+### Metadane rozmowy rodzica (P4)
+
+Rezerwacja przenosi wyłącznie `parentConversation` ze statusem `pending`. Po końcowym
+budżetowaniu `task:context` zapisuje faktyczne liczniki, okno i status, a wynik biegu
+powtarza te same metadane. Zapis P6 i restore przyjmują także stare rekordy bez pola;
+rekord nie zawiera snapshotu ani decyzji zgody. Model paska udostępnia metadane osobno
+per bieg i dla kolejki, bez zmian w interfejsie użytkownika (P5).

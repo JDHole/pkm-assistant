@@ -43,6 +43,7 @@ import { ParentQuestions } from './ParentQuestions.js';
 import { SubTaskInbox } from './SubTaskInbox.js';
 import type { SubTaskNotice } from './SubTaskNotifier.js';
 import { SubTaskHistory, restoreSubTaskHistory } from './SubTaskHistory.js';
+import type { ParentConversationMetadata } from './ParentConversationBudget.js';
 import type { SubTaskHistoryRecord } from './SubTaskHistory.js';
 import { SubTaskScheduler } from './SubTaskScheduler.js';
 import type { AdmissionGroup, Lease, SubRunActivity } from './SubTaskScheduler.js';
@@ -68,6 +69,7 @@ export interface SubTaskBudget {
 
 /** Wynik biegu suba — mapowanie 1:1 z tym, co zwraca `runAgentLoop`. */
 export interface SubTaskResult {
+    parentConversation?: ParentConversationMetadata;
     text: string;
     toolsUsed: string[];
     durationMs: number;
@@ -109,6 +111,7 @@ export function canContinueAfterUserStop(thread: SubThread, turnKind: unknown, t
 }
 export type SubThreadEffect = RunOutcome['effects'][number] & { expectedCheck?: 'exists' | 'absent' | 'none' };
 export interface SubThread {
+    parentConversation?: ParentConversationMetadata;
     queuedRunId?: string;
     threadId: string; name: string; owner: SubThreadOwner; origin: SubTaskOrigin;
     parentId?: string; level?: number;
@@ -120,6 +123,7 @@ export interface SubThread {
 
 /** Bieg sub-agenta jako byt. `id` = etykieta trace (`sub/<nazwa>#<seq>`), unikalna w procesie. */
 export interface SubTask {
+    parentConversation?: ParentConversationMetadata;
     interruptedByRestart?: boolean;
     parentId?: string;
     level?: number;
@@ -384,7 +388,7 @@ export class SubTaskRegistry {
         if (thread?.threadId) this._traceLog?.scope?.(thread.threadId)?.(type, { threadId: thread.threadId, phase: thread.phase });
     }
 
-    createThread(input: { threadId: string; name: string; owner: SubThreadOwner; origin: SubTaskOrigin; config: Record<string, unknown>; phase?: SubThread['phase']; parentId?: string; level?: number }): SubThread {
+    createThread(input: { threadId: string; name: string; owner: SubThreadOwner; origin: SubTaskOrigin; config: Record<string, unknown>; phase?: SubThread['phase']; parentId?: string; level?: number; parentConversation?: ParentConversationMetadata }): SubThread {
         if (this._startCancelled(input.owner, input.parentId)) throw new Error('Sub-agent admission cancelled');
         const now = Date.now();
         const thread: SubThread = { ...input, owner: { ...input.owner }, origin: { ...input.origin }, config: structuredClone(input.config), phase: input.phase ?? 'running', reusable: false, runIds: [], transcript: [], userStop: false, lastActiveAt: now, closeAfterRun: false, effects: [] };
@@ -421,6 +425,7 @@ export class SubTaskRegistry {
         const thread = this._threads.get(threadId)!;
         thread.phase = 'queued';
         thread.queuedRunId = runId;
+        delete thread.parentConversation;
         thread.parentId = relation?.parentId;
         thread.level = relation?.level;
         this.events.emit('thread:queued', thread);
@@ -522,6 +527,7 @@ export class SubTaskRegistry {
         const task: SubTask = { id: runId, name: thread.name, agentName: thread.owner.agentName, status: 'done', createdAt: Date.now(), endedAt: Date.now(), steps: [], budget: {}, threadId,
             origin: { ...thread.origin }, outcome: { end: { kind: 'stopped', by: thread.closedBy }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } };
         if (thread.lastUserStopSeq !== undefined) task.userStopSeq = thread.lastUserStopSeq;
+        if (thread.parentConversation) task.parentConversation = thread.parentConversation;
         if (thread.parentId !== undefined) task.parentId = thread.parentId;
         if (thread.level !== undefined) task.level = thread.level;
         if (input.background !== undefined) task.background = input.background;
@@ -546,6 +552,7 @@ export class SubTaskRegistry {
         const task: SubTask = { id: runId, name: thread.name, agentName: thread.owner.agentName, status: 'error', createdAt: now, endedAt: now, steps: [], budget: {}, threadId,
             origin: { ...thread.origin }, error,
             outcome: { end: { kind: 'failed', stage: 'work' }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } };
+        if (thread.parentConversation) task.parentConversation = thread.parentConversation;
         if (thread.parentId !== undefined) task.parentId = thread.parentId;
         if (thread.level !== undefined) task.level = thread.level;
         if (input.background !== undefined) task.background = input.background;
@@ -641,6 +648,14 @@ export class SubTaskRegistry {
         return out;
     }
 
+    /** Metadata only, emitted after fitting and persisted independently of model output. */
+    setParentConversation(id: string, metadata: ParentConversationMetadata): void {
+        const task = this._tasks.get(id);
+        if (!task) return;
+        task.parentConversation = structuredClone(metadata);
+        this.events.emit('task:context', task);
+    }
+
     /**
      * Zakłada byt dla nowego biegu suba i ogłasza `task:created`.
      * @param id - etykieta trace tego wywołania (`sub/<nazwa>#<seq>`) — jednocześnie klucz rejestru.
@@ -678,6 +693,7 @@ export class SubTaskRegistry {
             task.threadId = threadId;
             const thread = this._threads.get(threadId);
             if (thread) {
+                if (thread.parentConversation) task.parentConversation = thread.parentConversation;
                 thread.runIds.push(id);
                 delete thread.parentId;
                 delete thread.level;
@@ -807,6 +823,7 @@ export class SubTaskRegistry {
         if (!key || this._stoppingOwners.has(key)) return 0;
         this._stoppingOwners.add(key);
         try {
+            this.events.emit('owner:stopping', owner);
             const ids = this.list().filter(task => task.origin && this._ownerKey(task.origin) === key).map(task => task.id);
             for (const thread of this.listThreads(owner)) if (thread.phase === 'queued') ids.push(thread.queuedRunId ?? thread.threadId);
             return this._stopRuns(ids, by).accepted;

@@ -4,10 +4,12 @@ import type { Schema } from '@cfworker/json-schema';
 import { maskSensitiveData } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
 import type { Owner, ParentQuestion, QuestionId, QuestionResolution } from './ParentQuestions.js';
+import type { ParentConversationMetadata } from './ParentConversationBudget.js';
 import type { RunOutcome } from './runOutcome.js';
 import type { SubTask, SubTaskRegistry, SubThread } from './SubTaskRegistry.js';
 
 export interface SubTaskHistoryRecord {
+    parentConversation?: ParentConversationMetadata;
     version: 1;
     runId: string;
     threadId: string;
@@ -49,12 +51,23 @@ const outcome: Schema = object({
         cause: choice('natural', 'iteration-limit', 'synthesis-budget', 'tool-uncertain', 'manual-stop', 'superseded', 'task-timeout', 'silence', 'model-timeout', 'transport-error', 'model-error', 'hook-error'),
     }, ['tool', 'action', 'targets', 'outcome', 'check']) },
 });
+const sourceFields = { mode: { const: 'parent_conversation' }, source: choice('lead', 'sub'),
+    sourceId: { anyOf: [id, { type: 'integer', minimum: 0 }] } } satisfies Record<string, Schema>;
+const parentConversation: Schema = { oneOf: [
+    object({ ...sourceFields, status: { const: 'pending' } }),
+    object({ ...sourceFields, status: choice('included', 'omitted'), truncated: { type: 'boolean' },
+        keptMessages: time, summarizedMessages: time, omittedMessages: time, estimatedTokens: time,
+        inputTokens: time, maxOutputTokens: time, marginTokens: time,
+        window: object({ tokens: { type: 'number', minimum: 1 }, estimated: { type: 'boolean' }, source: choice('override', 'catalog', 'fallback') }), note: string,
+    }, [...Object.keys(sourceFields), 'status', 'truncated', 'keptMessages', 'summarizedMessages', 'omittedMessages',
+        'estimatedTokens', 'inputTokens', 'maxOutputTokens', 'marginTokens', 'window']),
+] };
 const validator = new Validator(object({
     version: { const: 1 }, runId: id, threadId: id, name: id,
     owner: object({ agentName: id, sessionPath: id, sessionEpoch: { type: 'string', pattern: '^[0-9a-f]{32}$' } }),
     parentId: id, level: { type: 'integer', minimum: 1, maximum: 3 },
     state: choice('queued', 'running', 'done', 'error', 'aborted'), createdAt: time, endedAt: time,
-    taskPreview: string, material: string, error: string, outcome,
+    taskPreview: string, material: string, error: string, outcome, parentConversation,
     question: object({ id, text: string, askedAt: time, resolution }, ['id', 'text', 'askedAt']),
 }, ['version', 'runId', 'threadId', 'name', 'owner', 'level', 'state', 'createdAt']));
 
@@ -89,10 +102,10 @@ export class SubTaskHistory {
                 owner: task.origin && { agentName: task.origin.agentName, sessionPath: task.origin.sessionPath, sessionEpoch: task.origin.sessionEpoch },
                 parentId: task.parentId, level: task.level ?? 1, state: task.status, createdAt: task.createdAt, endedAt: task.endedAt,
                 taskPreview: task.taskPreview, material: maskSensitiveData(task.result?.handoff || task.result?.text || task.partial?.text || ''),
-                error: task.error, outcome: task.outcome, question,
+                error: task.error, outcome: task.outcome, question, parentConversation: task.parentConversation,
             });
         };
-        for (const event of ['task:created', 'task:partial', 'task:finished']) {
+        for (const event of ['task:created', 'task:partial', 'task:finished', 'task:context']) {
             this.unsubscribe.push(registry.events.on(event, value => {
                 const task = value as SubTask;
                 if (event === 'task:finished' || task.status === 'running') taskRecord(task);
@@ -110,7 +123,7 @@ export class SubTaskHistory {
                 if (thread.phase !== 'queued') return;
                 save({ version: 1, runId: thread.queuedRunId ?? thread.threadId, threadId: thread.threadId, name: thread.name,
                     owner: { agentName: thread.owner.agentName, sessionPath: thread.owner.sessionPath, sessionEpoch: thread.owner.sessionEpoch },
-                    parentId: thread.parentId, level: thread.level ?? 1, state: 'queued', createdAt: thread.lastActiveAt });
+                    parentId: thread.parentId, level: thread.level ?? 1, state: 'queued', createdAt: thread.lastActiveAt, parentConversation: thread.parentConversation });
             }));
         }
     }
@@ -149,8 +162,9 @@ export function restoreSubTaskHistory(input: readonly unknown[], owner: Owner): 
             outcome: interrupted ? { end: { kind: 'stopped', by: 'system' }, completeness: hasMaterial ? 'partial' : 'empty',
                 hasAnswer: false, hasMaterial, effects: record.outcome?.effects ?? [] } : record.outcome,
             questionState: { kind: 'none' }, interruptedByRestart: interrupted,
+            ...(record.parentConversation ? { parentConversation: record.parentConversation } : {}),
         };
-        if (record.material !== undefined) task.result = { text: record.material, toolsUsed: [], durationMs: 0, usage: null };
+        if (record.material !== undefined) task.result = { text: record.material, toolsUsed: [], durationMs: 0, usage: null, ...(record.parentConversation ? { parentConversation: record.parentConversation } : {}) };
         if (record.question) task.questionState = { kind: 'closed', question: {
             id: record.question.id as QuestionId, taskId: record.runId, subId: record.threadId, name: record.name,
             text: record.question.text, askedAt: record.question.askedAt, owner: { ...owner },
