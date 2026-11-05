@@ -81,6 +81,7 @@ export type EventFieldName =
     | 'prompt'
     | 'tool_call_id'
     | 'tool_calls'
+    | 'sub_task_history'
     | 'question'
     | 'seq';
 
@@ -145,6 +146,7 @@ export type SessionFrontmatter = Record<string, string | number | boolean | null
 
 /** Wynik czytania pliku aktywnej sesji (kanon formatu). */
 export interface ParsedActiveSession {
+    subTaskHistory?: unknown[];
     messages: ActiveSessionMessage[];
     metadata: SessionFrontmatter;
     summary: string | null;
@@ -181,6 +183,7 @@ export const EVENT_FIELDS: EventFieldName[] = [
     'prompt',
     'tool_call_id',
     'tool_calls',
+    'sub_task_history',
     'question',
     'seq',
 ];
@@ -388,6 +391,15 @@ export function parseActiveSession(text: string | null | undefined): ParsedActiv
         if (KNOWN_ROLES.has(role)) {
             result.messages.push({ role: role as SessionRole, content: unescapeActiveText(rawBody.trim()), seq: null });
             lastWasTranscript = true;
+            continue;
+        }
+
+        // Structural history never becomes a model message, even when corrupt.
+        if (eventTypeFromHeader(rawHeader) === 'sub_task_history') {
+            try {
+                const record: unknown = JSON.parse(unescapeActiveText(extractEventField(rawBody, 'sub_task_history')));
+                (result.subTaskHistory ??= []).push(record);
+            } catch { /* A damaged history record must not destroy the conversation. */ }
             continue;
         }
 

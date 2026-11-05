@@ -1,6 +1,8 @@
 import test from 'ava';
 import type { ExecutionContext } from 'ava';
 import { createDelegateTool, createSubAgentTool, __test__, stopAllDelegations } from './DelegateTool.js';
+import { createAskUserChannels } from './AskUserChannels.js';
+import { createAskUserTool } from './AskUserTool.js';
 import { MCPClient } from './MCPClient.js';
 import { SubAgentRunner, SubTaskRegistry, SubTaskNotifier } from '../sub-agents/index.js';
 import type { ParentQuestion, RunActivity, SubTask } from '../sub-agents/index.js';
@@ -22,7 +24,7 @@ type Payload = { messages: Array<{ role: string; content: string }>; tools?: Arr
 type Request = { payload: Payload; complete(text: string): void; calls(...calls: Array<[string, Record<string, unknown>]>): void; fail(): void };
 const owner = { agentName: 'Mira', sessionPath: 'chat.md', sessionEpoch: 'e1', tabKey: 'tab' };
 
-function fixture(t: ExecutionContext, options: { maxIterations?: number; fallback?: boolean; local?: boolean } = {}) {
+function fixture(t: ExecutionContext, options: { maxIterations?: number; fallback?: boolean; local?: boolean; defaultDepth?: boolean } = {}) {
     const clock = new QuestionTestClock();
     const registry = new SubTaskRegistry({ questionClock: clock, maxIdleThreadsPerSession: 30 });
     const notifier = new SubTaskNotifier({ registry });
@@ -76,11 +78,11 @@ function fixture(t: ExecutionContext, options: { maxIterations?: number; fallbac
     const deps = { makeRunner: makeRunner as never };
     const delegate = createDelegateTool({}, deps);
     const control = createSubAgentTool({}, deps);
-    const tools = [delegate, control, { name: 'read', description: 'read', inputSchema: {}, execute: () => { measure(); readStarted.resolve(); return read.promise; } }];
+    const tools = [delegate, control, createAskUserTool(), { name: 'read', description: 'read', inputSchema: {}, execute: () => { measure(); readStarted.resolve(); return read.promise; } }];
     const toolRegistry = { getTool: (name: string) => tools.find(tool => tool.name === name) ?? null, filterByAgent: () => tools };
     modelsTest.setChatModelFactory(() => new Model() as never);
     const plugin = {
-        toolRegistry, subTaskRegistry: registry,
+        toolRegistry, subTaskRegistry: registry, _askUserChannels: createAskUserChannels(registry),
         agentManager: { getActiveAgent: () => agent, getAgent: () => agent, resolveSubAgentConfig: (name: string) => configs.get(name) },
         permissionSystem: { checkPermission: () => ({ allowed: true, requiresApproval: false }), requiresApproval: () => false },
         env: { chatModel: new Model(), config: { chat: { providers: { ollama: { info: { id: 'ollama' } } },
@@ -88,7 +90,7 @@ function fixture(t: ExecutionContext, options: { maxIterations?: number; fallbac
             transport: { open: async () => ({ status: 200, headers: {}, body: '' }) } } },
         settings: { pkmAssistant: { chat: { platform: 'ollama', hosts: { ollama: 'http://localhost:11434' } },
             modelLibrary: { minion: [{ platform: 'ollama', model: 'tree-model', isDefault: true }] },
-            limits: { max_delegation_depth: 2, max_parallel_delegations: 5, delegation_timeout_ms: 1000, subagent_stall_timeout_ms: 0,
+            limits: { ...(options.defaultDepth ? {} : { max_delegation_depth: 2 }), max_parallel_delegations: 5, delegation_timeout_ms: 1000, subagent_stall_timeout_ms: 0,
                 model_synthesis_timeout_ms: 0, subagent_final_grace_ms: 0 },
         } } },
     };
@@ -105,7 +107,7 @@ function fixture(t: ExecutionContext, options: { maxIterations?: number; fallbac
         modelsTest.reset();
     });
     const submit = (task: string) => client.executeToolCall({ name: 'delegate', arguments: { task, aspect: 'parent' } }, 'Mira', { origin: owner });
-    return { registry, notifier, clock, submit, read, readStarted, questions, configs,
+    return { registry, notifier, clock, submit, read, readStarted, questions, configs, client, channels: plugin._askUserChannels,
         batch: () => client.executeToolCall({ name: 'delegate', arguments: { tasks: [1, 2, 3, 4, 5].map(i => ({ task: `parent-${i}`, aspect: 'parent' })) } }, 'Mira', { origin: owner }),
         next: (key: string) => mailbox(requests, key).next(),
         activity: async (key: string, kind: RunActivity['kind']) => {
@@ -377,4 +379,54 @@ test.serial('waiting for a child result and queued reacquisition both pause the 
     resumed.complete('parent after both waits');
     await __test__._settleBackground(true);
     t.deepEqual([parent.status, parent.result?.text, f.clock.pending, f.metrics().streams], ['done', 'parent after both waits', 0, 4]);
+});
+
+
+test.serial('P6 default 2: grandchild question -> parent -> lead ask_user -> Kuba -> parent -> grandchild', async t => {
+    const f = fixture(t, { defaultDepth: true });
+    f.configs.get('mira-child')!.tools.push('delegate');
+    await f.submit('parent-1');
+    const parent = await f.next('parent-1');
+    t.deepEqual(parent.payload.tools?.map(tool => tool.function.name), ['read', 'delegate', 'ask_parent', 'sub_agent']);
+    parent.calls(['delegate', { task: 'child-1', aspect: 'child' }]);
+    (await f.next('parent-1')).complete('waiting');
+    await f.activity('parent-1', 'waiting-children');
+    const child = await f.next('child-1');
+    t.deepEqual(child.payload.tools?.map(tool => tool.function.name), ['read', 'ask_parent']);
+    child.calls(['ask_parent', { text: 'Jaki zakres wnuka?' }]);
+    const qg = await f.questions.next();
+    await f.activity('child-1', 'waiting');
+    (await f.next('parent-1')).calls(['ask_parent', { text: 'Kubo, jaki zakres?' }]);
+    const qp = await f.questions.next();
+    await f.activity('parent-1', 'waiting');
+    t.deepEqual([qg.recipient, qp.recipient, qg.id === qp.id], [{ kind: 'sub', runId: qp.taskId }, { kind: 'lead' }, false]);
+    const human = f.channels.open(owner);
+    f.clock.advance(400000);
+    t.deepEqual(f.registry.list().map(task => {
+        const state = f.registry.getQuestionState(task.id);
+        return state.kind === 'waiting' ? state.clock : state;
+    }), [{ kind: 'paused', remainingMs: 300000 }, { kind: 'paused', remainingMs: 300000 }]);
+    const asking = f.client.executeToolCall({ name: 'ask_user', arguments: { question: qp.text, question_id: qp.id } }, 'Mira',
+        { origin: owner, askUserChannelId: human.id });
+    human.answer('Tylko folder Projekty');
+    const response = await asking as { success: boolean; answer: string; auto: boolean };
+    t.deepEqual([response.success, response.answer, response.auto], [true, 'Tylko folder Projekty', false]);
+    const delivered = await f.client.executeToolCall({ name: 'sub_agent', arguments: {
+        action: 'message', sub_id: qp.subId, question_id: qp.id, text: response.answer,
+    } }, 'Mira', { origin: owner }) as { success: boolean };
+    t.is(delivered.success, true);
+    const resumed = await f.next('parent-1');
+    t.is(resumed.payload.messages.filter(message => message.role === 'tool').at(-1)?.content, 'Tylko folder Projekty');
+    answer(resumed, qg, response.answer);
+    (await f.next('parent-1')).complete('waiting for child');
+    await f.activity('parent-1', 'waiting-children');
+    const resumedChild = await f.next('child-1');
+    t.is(resumedChild.payload.messages.filter(message => message.role === 'tool').at(-1)?.content, 'Tylko folder Projekty');
+    resumedChild.complete('Wynik wnuka');
+    const finalParent = await f.next('parent-1');
+    t.deepEqual(notices(finalParent).map(n => [n.kind, n.text ?? n.result?.text]), [['question', 'Jaki zakres wnuka?'], ['result', 'Wynik wnuka']]);
+    finalParent.complete('Wynik rodzica');
+    await __test__._settleBackground(true);
+    t.deepEqual(f.registry.list().map(task => [task.status, task.result?.text]), [['done', 'Wynik rodzica'], ['done', 'Wynik wnuka']]);
+    t.deepEqual([f.clock.pending, f.metrics().maxStreamsPerModel], [0, 1]);
 });

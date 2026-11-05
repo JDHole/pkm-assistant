@@ -88,10 +88,10 @@ export const DEFAULT_LIMITS = {
   max_tool_result_length: 15000,
 
   // Strażnik GŁĘBOKOŚCI delegacji. Ile pięter delegacji wolno zbudować, licząc
-  // od agenta głównego. Default 1 = agent może odpalić sub-agenta, a sub-agent NIE deleguje
-  // dalej (jego wywołanie `delegate` jest odrzucane). Bez tego kagańca łańcuch sub→sub→sub
+  // od agenta głównego. Default 2 = prowadzący -> sub -> wnuk; wnuk nie deleguje.
+  // Jawna konfiguracja dopuszcza 1-3 piętra. Bez tego kagańca łańcuch sub→sub→sub
   // mnoży się wykładniczo: pali tokeny, gubi tożsamość zlecającego i omija budżet iteracji.
-  max_delegation_depth: 1,
+  max_delegation_depth: 2,
 
   // Strażnik SZEROKOŚCI delegacji. Ile zadań wolno wsadzić do JEDNEGO wywołania
   // `delegate` w trybie multi-task (`args.tasks[]`, odpalane równolegle przez Promise.all).

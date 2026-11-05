@@ -1595,3 +1595,13 @@ Kafelek powiadomienia o pytaniu suba oraz zwinięty kafelek odpowiedzi prowadzą
 Decyzja: po `cancelled` (Stop) kafelek nie pokazuje otwartego pytania ani instrukcji wznowienia, a model dostaje pytanie w sekcji powiadomienia.
 
 P3 - `stop_generation` (ręczny Stop) i `stop_all_turns` korzystają ze wspólnego `stopSubTasksForOwners` w `turnAbort.ts`. `ChatStreamContext.origin` przechowuje zamrożoną tożsamość tury również po zmianie sesji na obiekcie zakładki. Pełna tożsamość sesji trafia do `registry.requestStopForOwner`; dostępna ścieżka i epoka mają pierwszeństwo przed kluczem zakładki. Stare wpisy bez pełnego właściciela zachowują dopasowanie po tabKey lub agentName. `_drainSuppressed` jest ustawiane przed callbackami Stopu, więc synchroniczny późny wynik nie uruchamia samoczynnej tury. Naturalna finalizacja tury nie zatrzymuje tła. Test `chat_streaming.queuedStop.test.ts` sprawdza rzeczywisty notifier, izolację epoki i brak samoczynnego send_message.
+
+
+P6 - obie ścieżki `_restoreActiveSession` importują `parsed.subTaskHistory` do rejestru
+z właścicielem ustalonym z agenta, ścieżki i epoki odczytanego pliku. Sesja zawierająca
+wyłącznie poprawną historię drzewa zachowuje zakładkę również po ponownym restore;
+nie dopisuje się sztucznych wiadomości do RollingWindow. Import nie uruchamia modeli,
+powiadomień, pytań ani zgód. Brak nowych rekordów zachowuje zachowanie starszych sesji,
+w tym terminalne pytanie w treści i pusty rejestr. `chat/chat_session.test.ts` sprawdza
+obie ścieżki, idempotencję i historię queued/running po restarcie. Restore odświeża istniejący
+pasek po związaniu zakładki z odczytaną epoką; renderer drzewa bez zmian.

@@ -547,7 +547,7 @@ function pluginForGuards(
 
 test('depth: sub-agent (depth 1) NIE deleguje dalej przy limicie 1', async t => {
     const runs: RunRow[] = [];
-    const { plugin, makeRunner } = pluginForGuards(runs);
+    const { plugin, makeRunner } = pluginForGuards(runs, { limits: { max_delegation_depth: 1 } });
     const tool = createDelegateTool({}, { makeRunner });
 
     const res = await tool.execute(

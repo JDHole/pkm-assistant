@@ -390,7 +390,7 @@ test('runTask hides delegate at the depth limit and keeps it below the limit', a
         observed.push({ names: (payload.tools || []).map(tool => tool.function.name), prompt: payload.messages?.[0]?.content || '' });
         cb.done({ choices: [{ message: { role: 'assistant', content: 'done' } }] });
     } };
-    const runner = new SubAgentRunner({ toolRegistry: registry, app: {}, plugin: {} });
+    const runner = new SubAgentRunner({ toolRegistry: registry, app: {}, plugin: { env: { settings: { pkmAssistant: { limits: { max_delegation_depth: 1 } } } } } });
     const deeperRunner = new SubAgentRunner({ toolRegistry: registry, app: {}, plugin: { env: { settings: { pkmAssistant: { limits: { max_delegation_depth: 2 } } } } } });
     await runner.runTask('task', { name: 'Owner' }, { name: 'worker', tools: names }, model, { delegationDepth: 1, modelTimeout: 5 });
     await deeperRunner.runTask('task', { name: 'Owner' }, { name: 'worker', tools: names }, model, { delegationDepth: 1, modelTimeout: 5 });

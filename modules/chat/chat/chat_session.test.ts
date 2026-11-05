@@ -3,7 +3,7 @@ import { RollingWindow } from './RollingWindow.js';
 import { _restoreActiveSession, handleNewSession } from './chat_session.js';
 import { SessionWriteConsent } from '../../../core/index.js';
 import { SessionCloseModal } from '../SessionCloseModal.js';
-import { SubTaskRegistry } from '../../sub-agents/index.js';
+import { SubTaskRegistry, buildStripModel } from '../../sub-agents/index.js';
 import { formatSessionEvent, parseActiveSession } from '../../memory/activeSessionFormat.js';
 
 /**
@@ -354,4 +354,35 @@ test('_restoreActiveSession zachowuje terminalne pytanie i treść bez rejestru 
         { content: 'Inny wynik', question: undefined },
     ]);
     t.deepEqual(fakeThis.plugin.subTaskRegistry.list(), []);
+});
+
+
+for (const fallback of [false, true]) test(`P6 restore imports a history-only session silently (fallback=${fallback})`, async t => {
+    const owner = { agentName: 'Jaskier', sessionPath: 'sessions/active/tree.md', sessionEpoch: 'a'.repeat(32) };
+    const file = `---\nepoch: ${owner.sessionEpoch}\n---\n` + formatSessionEvent('sub_task_history', { sub_task_history: {
+        version: 1, runId: 'parent', threadId: 'parent', name: 'Parent', owner, level: 1, state: 'running', createdAt: 10,
+    } }, '2026-11-05T12:00:00Z') + formatSessionEvent('sub_task_history', { sub_task_history: {
+        version: 1, runId: 'child', threadId: 'child', name: 'Child', owner, parentId: 'parent', level: 2, state: 'queued', createdAt: 11,
+    } }, '2026-11-05T12:00:01Z');
+    const view = buildFakeThis([], [{ path: owner.sessionPath, epoch: owner.sessionEpoch }]);
+    const memory = view.plugin.agentManager.getActiveMemory();
+    memory.loadActiveSession = async () => parseActiveSession(file);
+    if (fallback) { memory.listActiveSessions = async () => []; memory.restoreActiveSession = async () => owner.sessionPath; }
+    const registry = new SubTaskRegistry();
+    view.plugin.subTaskRegistry = registry;
+    let visible: Array<[string, string | undefined, number | undefined]> = [];
+    view._renderSubTaskStrip = () => { visible = buildStripModel({ tasks: registry.list(), threads: registry.listThreads(owner), ...owner })
+        .map(row => [row.id, row.parentId, row.level]); };
+    const events: string[] = [];
+    registry.events.on('task:created', () => events.push('created'));
+    registry.events.on('task:finished', () => events.push('finished'));
+    await _restoreActiveSession.call(view);
+    await _restoreActiveSession.call(view);
+    t.deepEqual(registry.list().map(task => [task.id, task.parentId, task.status, task.interruptedByRestart]), [
+        ['parent', undefined, 'aborted', true], ['child', 'parent', 'aborted', true],
+    ]);
+    t.deepEqual([view.chatTabs.length, view.rollingWindow.messages.length, events], [1, 0, []]);
+    t.deepEqual(visible, [['parent', undefined, 1], ['child', 'parent', 2]]);
+    t.deepEqual(memory.identity, { path: 'sessions/active/tree.md', epoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' });
+    registry.dispose();
 });

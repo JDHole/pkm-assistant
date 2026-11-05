@@ -42,6 +42,8 @@ import type { LoopMessage } from '../agent-loop/index.js';
 import { ParentQuestions } from './ParentQuestions.js';
 import { SubTaskInbox } from './SubTaskInbox.js';
 import type { SubTaskNotice } from './SubTaskNotifier.js';
+import { SubTaskHistory, restoreSubTaskHistory } from './SubTaskHistory.js';
+import type { SubTaskHistoryRecord } from './SubTaskHistory.js';
 import { SubTaskScheduler } from './SubTaskScheduler.js';
 import type { AdmissionGroup, Lease, SubRunActivity } from './SubTaskScheduler.js';
 import type { Owner, QuestionId, QuestionRecipient, ParentQuestion, QuestionState, ParentQuestionClock, OpenParentQuestionResult, AnswerResult } from './ParentQuestions.js';
@@ -118,6 +120,7 @@ export interface SubThread {
 
 /** Bieg sub-agenta jako byt. `id` = etykieta trace (`sub/<nazwa>#<seq>`), unikalna w procesie. */
 export interface SubTask {
+    interruptedByRestart?: boolean;
     parentId?: string;
     level?: number;
     questionState?: QuestionState;
@@ -167,6 +170,7 @@ export interface SubTaskTraceLogLike {
 }
 
 export interface SubTaskRegistryOptions {
+    appendHistory?: (record: SubTaskHistoryRecord) => Promise<unknown>;
     questionClock?: ParentQuestionClock;
     /** Gdy podany — rejestr sam subskrybuje domyślnego konsumenta piszącego do trace.log. */
     traceLog?: SubTaskTraceLogLike | null;
@@ -198,6 +202,41 @@ const DEFAULT_MAX_MESSAGES_PER_TASK = 10;
 const MAX_THREAD_EFFECTS = 100;
 
 export class SubTaskRegistry {
+    private readonly _history?: SubTaskHistory;
+    flushHistory(): Promise<void> { return this._history?.flush() ?? Promise.resolve(); }
+    /** Silent and idempotent: historical threads are closed and cannot resume execution. */
+    importHistory(records: readonly unknown[], owner: Owner): number {
+        let imported = 0;
+        const tasks = restoreSubTaskHistory(records, owner);
+        const existingTasks = new Set(this._tasks.keys());
+        const existingThreads = new Set(this._threads.keys());
+        const accepted = new Set<string>();
+        for (const task of [...tasks].sort((a, b) => a.level! - b.level!)) {
+            if (existingTasks.has(task.id) || existingThreads.has(task.threadId)
+                || (task.parentId && !accepted.has(task.parentId))) continue;
+            this._tasks.set(task.id, task);
+            accepted.add(task.id);
+            imported++;
+        }
+        // Run topology controls admission; chronological order controls a thread's latest relation.
+        for (const task of tasks) {
+            if (!accepted.has(task.id)) continue;
+            const threadId = task.threadId;
+            let thread = this._threads.get(threadId);
+            if (!thread) {
+                thread = { threadId, name: task.name, owner: { ...owner }, origin: { ...owner }, phase: 'closed',
+                    reusable: false, runIds: [], transcript: [], config: {}, userStop: false,
+                    lastActiveAt: task.endedAt, closeAfterRun: false, effects: [] };
+                this._threads.set(threadId, thread);
+            }
+            thread.runIds.push(task.id);
+            thread.parentId = task.parentId;
+            thread.level = task.level;
+            thread.lastActiveAt = Math.max(thread.lastActiveAt, task.endedAt);
+        }
+        return imported;
+    }
+
     private readonly _scheduler = new SubTaskScheduler();
     private readonly _cancelledRuns = new Map<string, StopBy>();
     private readonly _stoppingRuns = new Set<string>();
@@ -310,7 +349,7 @@ export class SubTaskRegistry {
         maxStepsPerTask = DEFAULT_MAX_STEPS_PER_TASK,
         maxMessagesPerTask = DEFAULT_MAX_MESSAGES_PER_TASK,
         maxThreadRuns = 5, maxThreadTranscriptChars = 200000, threadIdleMs = 1800000, maxIdleThreadsPerSession = 3,
-        questionClock,
+        questionClock, appendHistory,
     }: SubTaskRegistryOptions = {}) {
         this.events = new EventEmitter();
         this._questions = new ParentQuestions((event, payload) => {
@@ -333,6 +372,7 @@ export class SubTaskRegistry {
         this._maxMessagesPerTask = Number(maxMessagesPerTask) > 0 ? Number(maxMessagesPerTask) : DEFAULT_MAX_MESSAGES_PER_TASK;
         this._subscribeHousekeeping();
         if (this._traceLog) this._subscribeTraceConsumer();
+        if (appendHistory) this._history = new SubTaskHistory(this, appendHistory);
         if (this._traceLog) this.events.on('thread:created', (x: unknown) => this._traceThread(x, 'thread.created'));
         if (this._traceLog) this.events.on('thread:idle', (x: unknown) => this._traceThread(x, 'thread.idle'));
         if (this._traceLog) this.events.on('thread:closed', (x: unknown) => this._traceThread(x, 'thread.closed'));
@@ -978,6 +1018,7 @@ export class SubTaskRegistry {
         this._scheduler.dispose();
         this._inbox.dispose();
         this._questions.dispose();
+        this._history?.dispose();
         try {
             this.events.removeAllListeners();
             this._tasks.clear();

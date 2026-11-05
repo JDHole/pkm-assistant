@@ -58,7 +58,7 @@ test('narzędzia suba na limicie głębokości ukrywają sub_agent', async t => 
         visible = (payload.tools ?? []).map(tool => tool.function.name);
         cb.done({ choices: [{ message: { role: 'assistant', content: 'GOTOWE' } }] });
     } } as unknown as ChatModel;
-    const runner = new SubAgentRunner({ toolRegistry: { getTool: (name: string) => tools.find(tool => tool.name === name) ?? null, filterByAgent: () => tools }, app: {}, plugin: { subTaskRegistry: registry } });
+    const runner = new SubAgentRunner({ toolRegistry: { getTool: (name: string) => tools.find(tool => tool.name === name) ?? null, filterByAgent: () => tools }, app: {}, plugin: { subTaskRegistry: registry, env: { settings: { pkmAssistant: { limits: { max_delegation_depth: 1 } } } } } });
     await runner.runTask('zadanie', { name: owner.agentName }, { ...config, tools: names }, model, { origin: owner, delegationDepth: 1 });
     t.deepEqual(visible, ['read', 'ask_parent']);
 });

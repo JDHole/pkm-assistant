@@ -586,3 +586,11 @@ P5 - `delegate` z zaufanym `SubRunContext` zawsze przyjmuje pracę w tle, równi
 `_withAdmission` przekazuje `RunAdmission` przez publiczny barrel sub-agents. Runner oddaje i odzyskuje tę samą dzierżawę przez scheduler rozmowy; nie trzyma osobnego slotu grupy podczas snu. `_withTimeout` zachowuje pozostały czas dla `waiting`, `waiting-children` i `queued`; równoległe pracujące narzędzie nie pozwala ogłosić pauzy. `onQuestion` pozostaje osobnym sygnałem otwarcia pytania. Pomocnik testowy `_settleBackground(true)` oczekuje także na potomków dodanych podczas kończenia rodziców, przez obietnice istniejących biegów; bez flagi zachowuje dotychczasową barierę migawki.
 
 Testy P5: `DelegateTool.coordinator.test.ts` z prawdziwym runnerem, MCP/fallback i rejestrem. Asercje testów P1 `DelegateTool.tree.test.ts` uwzględniają pokwitowania zamiast blokujących wyników: błędy sprawdzają na terminalnych biegach, a liczba streamów obejmuje iteracje rodzica po pokwitowaniu i zdarzeniach. Pozostałe kontrakty P1 i delegacja prowadzącego pozostają zachowane.
+
+
+P6 - domyślny limit delegacji wynosi 2 (sufit 3). Test w `DelegateTool.coordinator.test.ts`
+nie ustawia override głębokości i prowadzi pytanie wnuka przez rodzica, prowadzącego,
+`ask_user(question_id: Qp)`, kanał Kuby oraz `sub_agent.message` z zachowaniem Qp/Qg.
+Zegar sterowany testem potwierdza pauzę obu pytań podczas oczekiwania na człowieka i brak
+pozostałych timerów po wyniku. Test starej odmowy przy limicie 1 teraz jawnie ustawia 1;
+asercje delegacji pozostają bez zmian.

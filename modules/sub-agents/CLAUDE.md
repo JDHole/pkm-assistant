@@ -5,11 +5,11 @@ pozostały czas; termin nadal rozstrzyga zegar monotoniczny.
 
 Model paska `summarizeStripRows` zlicza widoczne wiersze: pracujące i zatrzymujące się, oczekujące w kolejce oraz wszystkie wiersze.
 
-Rejestr i model paska przyjmują opcjonalne `parentId` i `level` także na rezerwacji `SubThread`; syntetyczne wyniki zatrzymanej lub nieudanej kolejki zachowują te pola. Runner zapisuje `RunOptions.parentId` i poziom biegu (root = 1), a przez MCP i fallback przekazuje `SubRunContext = Readonly<{ runId; level; origin }>`. `origin` pozostaje adresem rozmowy prowadzącego. Relacja nie jest jeszcze odtwarzana po restarcie.
+Rejestr i model paska przyjmują opcjonalne `parentId` i `level` także na rezerwacji `SubThread`; syntetyczne wyniki zatrzymanej lub nieudanej kolejki zachowują te pola. Runner zapisuje `RunOptions.parentId` i poziom biegu (root = 1), a przez MCP i fallback przekazuje `SubRunContext = Readonly<{ runId; level; origin }>`. `origin` pozostaje adresem rozmowy prowadzącego. P6 odtwarza relację po restarcie z historii sesji.
 
 P1: `SubTaskRegistry.getDelegationAncestors(context, agentName)` zwraca łańcuch biegów od rodzica do korzenia albo `undefined`. Wymaga żywego rodzica bez prośby Stop, pełnego właściciela (agent, ścieżka, epoka), zgodnych poziomów i kompletnego, acyklicznego łańcucha tej samej sesji. Delegacja prowadzącego bez `SubRunContext` nie używa tej walidacji. `DelegateTool` wyklucza konfiguracje rodzica i przodków po kanonicznej nazwie, również po fuzzy/aliasie oraz ponownie po oczekiwaniu w kolejce. Rezerwacja zna relację przed startem; kontynuacja bierze relację i poziom z nowego wywołania, nie ze starego wątku. `create` aktualizuje relację wątku do najnowszego biegu. Retencja i `pruneSession` zachowują cały łańcuch przodków żywych biegów i rezerwacji queued, nawet ponad `maxDone`.
 
-Testy P1: `modules/tools/DelegateTool.tree.test.ts` (rzeczywista ścieżka runner -> MCP/fallback -> delegate -> registry, sterowane stream/done bez pollingu) i `SubTaskRegistry.tree.test.ts` (retencja biegu i kolejki). Domyślna głębokość nadal 1; historia po restarcie należy do P6, renderer drzewa jest poza planem. Stop poddrzewa dostarcza P3, skrzynkę rodzica P4, odbiornik pętli i dzierżawy P5.
+Testy P1: `modules/tools/DelegateTool.tree.test.ts` (rzeczywista ścieżka runner -> MCP/fallback -> delegate -> registry, sterowane stream/done bez pollingu) i `SubTaskRegistry.tree.test.ts` (retencja biegu i kolejki). Od P6 domyślna głębokość wynosi 2, historia po restarcie jest odtwarzana; renderer drzewa jest poza planem. Stop poddrzewa dostarcza P3, skrzynkę rodzica P4, odbiornik pętli i dzierżawy P5.
 
 > Fizyczne źródła modułu mają rozszerzenie `.ts`. Zapisy `.js` poniżej to specyfikatory
 > importów, które celowo zostają `.js`.
@@ -33,6 +33,7 @@ modules/sub-agents/
 ├── SubTaskScheduler.ts         # FIFO rozmowy, dzierżawy pracy i anulowalna admisja; pure
 ├── SubTaskRegistry.js          # SubTask jako byt (id/status/kroki/wynik/budżet) + szyna zdarzeń + side-channel abortów; pure, obsidian-free
 ├── SubRunCoordinator.ts        # odbiór skrzynki w jednej pętli modelu, bariera końca i oddawanie dzierżawy
+├── SubTaskHistory.ts           # wersjonowany zapis danych drzewa, walidacja schematem i bezczynny import
 ├── SubTaskInbox.ts             # FIFO pytań i wyników dzieci do konkretnego biegu rodzica; bez timerów i UI
 ├── SubTaskNotifier.js          # skrzynka wyników subów z tła: kolejka + `setDeliverer`/`drain`; pure, obsidian-free
 ├── subTaskPanelModel.js        # CO pasek biegów ma narysować (per zakładka czatu): filtr, kolejność, liczniki, skróty; pure (zero obsidian/DOM/i18n)
@@ -639,7 +640,7 @@ Publiczne `takeChildNotices(parentId): SubTaskNotice[]` opróżnia FIFO; `waitCh
 
 Qg i eskalowane Qp zachowują osobne ID oraz osobne 300000 ms. Eskalacja nie odnawia Qg. Kanały człowieka pauzują oba pytania wyłącznie po pełnym właścicielu; dopiero ostatni zwolniony kanał wznawia zachowany czas. Testy `SubTaskInbox.test.ts` i `modules/tools/SubAgentTool.recipients.test.ts` sprawdzają literalne wyniki, granice 299999/300000, Qg -> Qp -> odpowiedź Qp -> odpowiedź Qg, dwa kanały człowieka, izolację rodziców, wyścigi, retencję i sprzątanie. Używają `QuestionTestClock` i zdarzeń, bez rzeczywistych opóźnień.
 
-P4 dostarcza transport, a P5 podłącza go do runnera, udostępnia pytania wnukom i zwalnia dzierżawy podczas oczekiwania. Default głębokości i trwała historia pozostają zakresem P6; renderer drzewa jest poza tym planem.
+P4 dostarcza transport, a P5 podłącza go do runnera, udostępnia pytania wnukom i zwalnia dzierżawy podczas oczekiwania. Default 2 i trwałą historię dostarcza P6; renderer drzewa jest poza tym planem.
 
 
 ### Koordynator biegu (P5)
@@ -652,4 +653,35 @@ Licznik całego batcha powstaje przed pierwszym wykonawcą. `ask_parent` oznacza
 
 Sub uprawniony do `delegate` dostaje kontrolne `sub_agent` także bez niego w YAML. Automatyczna definicja i wykonawca dopuszczają tylko `message/list/stop/close`; P4 ogranicza je do własnych dzieci. Ta zdolność nie dodaje `task`, nie jest zapisywana jako pełne uprawnienie w konfiguracji wątku ani przekazywana jako takie wnukowi. Jawne `tools: []` nadal nie przyznaje delegacji. Potomek dostaje własne zadanie i konfigurację, bez transkryptu rodzica. Fabryczna rama PL/EN wyjaśnia pokwitowanie, odpowiedź na oryginalne `question_id` i eskalację osobnym pytaniem.
 
-Testy: `SubRunCoordinator.test.ts`, `modules/tools/DelegateTool.coordinator.test.ts`, `modules/agent-loop/AgentLoop.finish.test.ts`. Sterowane stream/done/error, zdarzenia, deferred i `QuestionTestClock`, jawny limit głębokości 2. Pokrywają pięciu rodziców i pięciu pytających wnuków, MCP/fallback, dwa pytania z eskalacją, pauzę człowieka, oba porządki batcha read/delegate/ask_parent, resztę budżetu 599/600 ms, Stop podczas reacquire, backstop/błąd/późny wynik, wygasłe pytanie w kolejce i kontrolę obcego dziecka. Default 1, trwała historia i renderer pozostają bez zmian.
+Testy: `SubRunCoordinator.test.ts`, `modules/tools/DelegateTool.coordinator.test.ts`, `modules/agent-loop/AgentLoop.finish.test.ts`. Sterowane stream/done/error, zdarzenia, deferred i `QuestionTestClock`, jawny limit głębokości 2. Pokrywają pięciu rodziców i pięciu pytających wnuków, MCP/fallback, dwa pytania z eskalacją, pauzę człowieka, oba porządki batcha read/delegate/ask_parent, resztę budżetu 599/600 ms, Stop podczas reacquire, backstop/błąd/późny wynik, wygasłe pytanie w kolejce i kontrolę obcego dziecka. P6 dodaje scenariusz na domyślnym limicie 2 z rzeczywistymi narzędziami ask_user/sub_agent i kanałem odpowiedzi Kuby; renderer pozostaje bez zmian.
+
+
+### Trwała historia drzewa (P6)
+
+`SubTaskHistoryRecord` (wersja 1) i `parseSubTaskHistoryRecord` wychodzą przez `index.ts`.
+Rekord zawiera ID biegu i wątku, nazwę, pełnego właściciela (agent/ścieżka/epoka), rodzica,
+poziom, stan, czasy oraz opcjonalny podgląd zadania, dorobek, outcome, błąd i pytanie.
+Schemat JSON jest walidowany przez `@cfworker/json-schema` bez generowania kodu.
+Nie zapisujemy konfiguracji wykonawczej, transkryptu, zgód, dzierżaw, timerów ani callbacków.
+
+`SubTaskRegistry({appendHistory})` podpina konsumenta rezerwacji (także kontynuacji), startu,
+partialu, otwarcia/zamknięcia pytania i końca. Snapshot powstaje synchronicznie, zapis jest
+kolejny, a błąd I/O trafia do Loggera i nie blokuje następnych wpisów ani biegu.
+Composition root w `src/main.ts` zapisuje przez `appendSessionEvent(path, event, epoch)`
+we właściwym `AgentMemory`, nigdy przez bieżącą sesję. Niepełny właściciel nie daje prawa zapisu.
+`flushHistory()` pozwala czekać na dotychczasowe wpisy; `dispose()` odpina subskrypcje.
+
+`importHistory(records, owner)` waliduje wersję, kształt i cały graf przed importem.
+Akceptuje dziecko zapisane przed rodzicem, deduplikuje ID, nie cofa terminalnego stanu do running,
+odrzuca sprzeczną tożsamość, brak rodzica, błędne poziomy/cykle i obcego właściciela/epokę.
+Nie nadpisuje istniejących biegów/wątków i nie doczepia historii do żywej pracy.
+Import jest idempotentny i nie emituje zdarzeń uruchamiających notifier, skrzynkę ani zapis.
+Odtworzone wątki są zamknięte i niekontynuowalne; queued/running stają się aborted z
+`interruptedByRestart: true` i końcem `stopped/system`. Otwarte pytanie staje się zamknięte
+(`cancelled/system/run-ended`); nie wracają zegary ani Promise. Dorobek i terminalny outcome zostają.
+
+Default `max_delegation_depth` wynosi 2, jawny zakres nadal 1-3. Wnuk na limicie nie dostaje
+`delegate`; jawne `tools: []` nadal nie daje delegacji. Bez kontekstu runtime ścieżka prowadzącego
+nie podlega walidacji żywego rodzica. Testy: `SubTaskHistory.test.ts` (prawdziwy AgentMemory,
+parser i model paska, restart, błędne dane, stop kolejki, dorobek, brak wycieków),
+`modules/chat/chat/chat_session.test.ts` i `modules/tools/DelegateTool.coordinator.test.ts`.

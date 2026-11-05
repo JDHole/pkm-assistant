@@ -573,6 +573,12 @@ export default class PkmAssistantPlugin extends PluginBase {
       this.subTaskRegistry = new SubTaskRegistry({
         traceLog: this.traceLog,
         mask: maskSensitiveData,
+        appendHistory: async record => {
+          const memory = this.agentManager?.getAgentMemory(record.owner.agentName);
+          if (!memory) throw new Error('Sub-task history owner memory unavailable');
+          await memory.appendSessionEvent(record.owner.sessionPath,
+            { type: 'sub_task_history', sub_task_history: record }, record.owner.sessionEpoch);
+        },
       });
       this._askUserChannels = createAskUserChannels(this.subTaskRegistry);
       // Delegacja w tle: skrzynka wyników subów odpalonych w tle. Bez rejestru nie ma czego

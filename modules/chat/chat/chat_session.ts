@@ -186,9 +186,16 @@ function _restoredMessageMeta(msg: RestoredMessage) {
     return meta;
 }
 
-/**
- * Restore the last active session from disk.
- */
+/** Restoring an existing history twice keeps a history-only tab without reviving work. */
+function restoreSubTaskHistory(view: ChatViewLike, parsed: Awaited<ReturnType<AgentMemory['loadActiveSession']>>, agentName: string, sessionPath: string): boolean {
+    const registry = view.plugin?.subTaskRegistry;
+    if (!registry) return false;
+    const owner = { agentName, sessionPath, sessionEpoch: String(parsed.metadata.epoch ?? '') };
+    registry.importHistory(parsed.subTaskHistory ?? [], owner);
+    return registry.listThreads(owner).length > 0;
+}
+
+/** Restore the last active session from disk. */
 export async function _restoreActiveSession(this: ChatViewLike) {
     try {
         const agentManager = this.plugin?.agentManager;
@@ -212,7 +219,8 @@ export async function _restoreActiveSession(this: ChatViewLike) {
                 } catch (e) {
                     log.warn('Chat', `Could not load active session ${session?.name}: ${(e as Error).message}`);
                 }
-                if (!parsed?.messages?.length) {
+                const hasHistory = parsed && restoreSubTaskHistory(this, parsed, agentName, session.path);
+                if (!parsed || (!parsed.messages.length && !hasHistory)) {
                     // Memory v3: do NOT delete the underlying file. We previously called
                     // _discardEmptyActiveSession here, which destroyed a real session for the user when
                     // the parser returned 0 messages. Only prune the .state.json pointer; the file
@@ -247,7 +255,8 @@ export async function _restoreActiveSession(this: ChatViewLike) {
             // rozumie format A, B i pliki MIESZANE).
             // `restoredPath` jest niepuste tylko wtedy, gdy `agentMemory` istnieje (linia wyżej).
             const parsed = await agentMemory!.loadActiveSession(restoredPath);
-            if (!parsed?.messages?.length) return;
+            const hasHistory = restoreSubTaskHistory(this, parsed, activeAgentName, restoredPath);
+            if (!parsed.messages.length && !hasHistory) return;
 
             const rollingWindow = this._createRollingWindow(activeAgentName);
             for (const msg of parsed.messages) {
@@ -322,6 +331,7 @@ export async function _restoreActiveSession(this: ChatViewLike) {
         this.updateTokenCounter();
         this._updateTokenPanel();
         if (this._tabBarContainer) this._renderTabBar(this._tabBarContainer);
+        this._renderSubTaskStrip?.();
         log.info('Chat', `Restored ${restored.length} active session(s)`);
     } catch (e) {
         log.warn('Chat', `Session restore failed: ${(e as Error).message}`);

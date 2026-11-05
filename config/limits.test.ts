@@ -112,20 +112,20 @@ test('chat_stream_stall_timeout_ms: default 120s, 0 = off valid, negative → de
 
 // ── Kagańce delegacji (głębokość + szerokość) ──────────────────
 
-test('max_delegation_depth default 1, clamped to ceiling 3, min 1', t => {
-    t.is(DEFAULT_LIMITS.max_delegation_depth, 1);
+test('max_delegation_depth default 2, clamped to ceiling 3, min 1', t => {
+    t.is(getLimits({}).max_delegation_depth, 2);
     t.is(LIMIT_SPECS.max_delegation_depth.ceiling, 3);
     t.is(LIMIT_SPECS.max_delegation_depth.min, 1);
 
     // ponad sufit → przycięte do 3 (nigdy nie spada na default)
     t.is(getLimits({ pkmAssistant: { limits: { max_delegation_depth: 99 } } }).max_delegation_depth, 3);
     // 0 / ujemne = próba wyłączenia delegacji tylnymi drzwiami → default
-    t.is(getLimits({ pkmAssistant: { limits: { max_delegation_depth: 0 } } }).max_delegation_depth, 1);
-    t.is(getLimits({ pkmAssistant: { limits: { max_delegation_depth: -2 } } }).max_delegation_depth, 1);
+    t.is(getLimits({ pkmAssistant: { limits: { max_delegation_depth: 0 } } }).max_delegation_depth, 2);
+    t.is(getLimits({ pkmAssistant: { limits: { max_delegation_depth: -2 } } }).max_delegation_depth, 2);
     // sensowny override przechodzi
     t.is(getLimits({ pkmAssistant: { limits: { max_delegation_depth: 2 } } }).max_delegation_depth, 2);
     // śmieć → default
-    t.is(getLimits({ pkmAssistant: { limits: { max_delegation_depth: 'gleboko' } } }).max_delegation_depth, 1);
+    t.is(getLimits({ pkmAssistant: { limits: { max_delegation_depth: 'gleboko' } } }).max_delegation_depth, 2);
 });
 
 test('max_parallel_delegations default 5, ceiling 20, min 1', t => {

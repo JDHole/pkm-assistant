@@ -926,3 +926,15 @@ Memory v3 critical path ma testy w:
 
 
 U3: `appendSessionEvent(path,event): Promise<string>` writes only an explicit file under this memory owner active-sessions root. It shares the existing per-path queue and event format, reads the target even with warm caches, and rejects missing/unreadable targets without creation, redirection or changing activeSessionPath.
+
+
+P6 - event `sub_task_history` ma osobne pole JSON o tej samej nazwie. `formatSessionEvent`
+zapisuje i escapuje je wspólnie z pozostałymi polami; `parseActiveSession` zwraca opcjonalne
+`subTaskHistory: unknown[]`, oddzielone od wiadomości modelu. Składnię JSON czyta parser,
+a wersję 1, schemat rekordu i relacje drzewa waliduje `SubTaskRegistry.importHistory`.
+Parser pamięci nie importuje runtime sub-agentów (zachowuje lekką, bezpieczną dla Node zależność).
+Uszkodzony JSON nie trafia do transkryptu; nieznaną wersję odrzuca importer. Stare pliki bez
+tego pola mają dokładnie dotychczasowy kształt wyniku. Wpisy używają istniejącego
+`appendSessionEvent(path,event,epoch)` z kolejką i sprawdzaniem epoki, bez zmiany aktywnej sesji.
+Historia dotyczy plików active; archiwizacja nadal zapisuje transkrypt. Test pełnej drogi:
+`modules/sub-agents/SubTaskHistory.test.ts`.
