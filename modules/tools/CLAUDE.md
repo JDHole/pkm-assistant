@@ -1,6 +1,8 @@
 # modules/tools/
 
-F1: `DelegateTool` odracza zwolnienie dzierżawy po logicznym końcu biegu, dopóki nie rozstrzygną się wszystkie rzeczywiste egzekutory narzędzi. `DelegateTool.coordinator.test.ts` mierzy aktywne modele i narzędzia niezależnie od schedulera; `DelegateTool.tree.test.ts` sprawdza zakres i narzędzia kontynuacji oraz nowego wnuka przez runner → MCP → delegację.
+F1: `DelegateTool` odracza zwolnienie dzierżawy po logicznym końcu biegu, dopóki nie rozstrzygną się wszystkie rzeczywiste egzekutory narzędzi lub runner nie odetnie ich po okresie łaski F2. `DelegateTool.coordinator.test.ts` mierzy aktywne modele i narzędzia niezależnie od schedulera; `DelegateTool.tree.test.ts` sprawdza zakres i narzędzia kontynuacji oraz nowego wnuka przez runner → MCP → delegację.
+
+F2: `ExecuteToolCallOptions.abortSignal` trafia przez MCP do `BuiltinToolExecutionContext.abortSignal` (oraz bezpośrednio w fallbacku runnera). Narzędzia obsługujące sygnał mogą kończyć od razu; obcy kod ignorujący anulowanie może nadal wykonywać I/O po odcięciu. MCP pomija dalszą obróbkę wyniku po abort. `DelegateTool.coordinator.test.ts` odtwarza pięć zawieszonych `read`, zwrot slotów dokładnie po grace, ignorowanie późnych wyników, kooperatywny abort i batch szerokości 1 z niezależnym zadaniem. Licznik dzierżawy w `_withAdmission` nadal chroni slot aż do rozliczenia wszystkich uchwytów runnera.
 
 `ask_user` przyjmuje opcjonalny `question_id` pytania suba, przekazywany w argumentach wywołania do czatu.
 

@@ -9,7 +9,7 @@ import { runAgentLoop, ArrayMessageStore, formatAgentLoopPartial } from '../agen
 import type { RunAgentLoopOptions, ToolExecutionContext, AgentLoopPartialSnapshot, AgentLoopStopReason } from '../agent-loop/index.js';
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
-import { getLimits, sanitizeLimit } from '../../config/limits.js';
+import { getLimits, sanitizeLimit, DEFAULT_LIMITS } from '../../config/limits.js';
 import { AccessGuard, countTokens } from '../../core/index.js';
 // „Co jest porażką narzędzia" liczy ta sama funkcja, co status chipa w czacie.
 import { resolveWorkPrompt, maskSensitiveData, sanitizePath, toolResultStatus, configuredChatSecrets } from '../../core/index.js';
@@ -30,6 +30,7 @@ import type { ChatModel } from '../models/index.js';
 import { classifyRunEnd } from './runOutcome.js';
 import type { RunEffect, RunOutcome } from './runOutcome.js';
 import { SubRunCoordinator } from './SubRunCoordinator.js';
+import { retainExecutor } from './RetainedExecutor.js';
 import type { RunAdmission } from './SubRunCoordinator.js';
 import { allocateSubTaskId } from './subTaskId.js';
 import type { RunActivity, ParentQuestion, QuestionResolution } from './ParentQuestions.js';
@@ -488,6 +489,7 @@ export class SubAgentRunner {
             const limits = thread
                 ? thread.config.limits as ReturnType<typeof getLimits>
                 : getLimits(this.plugin?.env?.settings);
+            const executorGraceMs = sanitizeLimit('subagent_executor_abort_grace_ms', limits.subagent_executor_abort_grace_ms, DEFAULT_LIMITS.subagent_executor_abort_grace_ms);
             const effectiveLimits = _effectiveSubLimits(config, limits);
             const maxResultLen = effectiveLimits.maxToolResultLength;
             // Sufit delegate/agent_delegate nie może być NIŻSZY niż
@@ -718,8 +720,10 @@ export class SubAgentRunner {
                 // Numer wywołania łapiemy PRZY STARCIE (kolejność tablicy pętli),
                 // a nie przy zakończeniu - wywołania jednego batcha rozstrzygają się równolegle.
                 executeToolCall: async (toolCall, runtimeContext) => {
-                    // Waiting for a parent is idle; every other executor pins the lease through Stop.
-                    const releaseExecutor = toolCall.name === 'ask_parent' ? undefined : options.admission?.retainExecutor?.();
+                    // Waiting for a parent is idle; other executors pin the lease through abort grace.
+                    const executor = toolCall.name === 'ask_parent' ? undefined : retainExecutor(
+                        localAbort.signal, executorGraceMs, subTask?.id ?? label,
+                        toolCall.name ?? '?', options.admission?.retainExecutor?.());
                     try {
                     const seq = toolCallSeq++;
                     let args: unknown = toolCall.arguments;
@@ -752,13 +756,18 @@ export class SubAgentRunner {
                     const result = await this._executeTool(toolCall as ToolCall, agent.name, allowedToolNames,
                         { delegationDepth, scopeFolders: scopeFolders as string[], autonomy, controlOnly,
                             subRunContext: { runId: subTask?.id ?? label, level: Math.max(1, delegationDepth), origin: origin ?? { agentName: agent.name } } },
-                        () => { failedToolCalls.add(seq); }, runtimeContext,
+                        () => { failedToolCalls.add(seq); }, { ...runtimeContext, abortSignal: localAbort.signal,
+                            isDetached: () => executor?.detached === true },
                         { start: (args) => beginEffect(seq, toolCall.name ?? '', args),
                             complete: (args, result, failed) => completeEffect(seq, toolCall.name ?? '', args, result, failed),
                             fail: () => failEffect(seq) });
+                    if (executor?.detached) return '';
                     detail.resultPreview = _maskHandoffText(result, knownSecrets).slice(0, 500);
                     return result;
-                    } finally { releaseExecutor?.(); coordinator?.toolDone(); }
+                    } finally {
+                        executor?.settle();
+                        if (!executor?.detached) coordinator?.toolDone();
+                    }
                 },
                 hooks: {
                     ...steerHooks,
@@ -1131,7 +1140,7 @@ export class SubAgentRunner {
         allowedToolNames: Set<string> | null = null,
         execOptions: Pick<RunOptions, 'delegationDepth' | 'scopeFolders' | 'autonomy'> & { subRunContext?: SubRunContext; controlOnly?: boolean } = {},
         onFailure?: () => void,
-        runtimeContext: ToolExecutionContext = { resultBudgetChars: 0, shouldAbort: () => false },
+        runtimeContext: ToolExecutionContext & { abortSignal?: AbortSignal; isDetached?: () => boolean } = { resultBudgetChars: 0, shouldAbort: () => false },
         effectHooks?: { start(args: unknown): void; complete(args: unknown, result: unknown, failed: boolean): void; fail(): void },
     ) {
         log.debug('SubAgent', `_executeTool: ${toolCall.name} (agent: ${agentName || 'brak'})`);
@@ -1188,12 +1197,14 @@ export class SubAgentRunner {
                     scopeFolders: execOptions.scopeFolders,
                     resultBudgetChars: runtimeContext.resultBudgetChars,
                     shouldAbort: runtimeContext.shouldAbort,
+                    abortSignal: runtimeContext.abortSignal,
                     onExecutionStart: () => effectHooks?.start(describedArgs),
                     // Whitelista TEGO suba jedzie dalej jako znacznik,
                     // żeby `delegate` policzył narzędzia wnuka względem niego, nie względem
                     // agenta głównego. Lista jest już przecięciem rodzic∩sub (patrz `runTask`).
                     ...(allowedToolNames ? { callerToolNames: [...allowedToolNames].filter(name => name !== 'ask_parent' && !(execOptions.controlOnly && name === 'sub_agent')) } : {}),
                 });
+                if (runtimeContext.isDetached?.()) return '';
                 const sanitized = stripImageBase64ForTranscript(toolCall.name, result);
                 effectHooks?.complete(describedArgs, result,
                     toolResultStatus(sanitized) === 'error' || (_isBoundedReadTextError(toolCall, sanitized) && sanitized === 'B'));
@@ -1255,16 +1266,19 @@ export class SubAgentRunner {
                 resultBudgetChars: requestedBudget,
                 effectiveResultBudgetChars: requestedBudget > 0 ? Math.min(requestedBudget, 12000) : 12000,
                 shouldAbort: runtimeContext.shouldAbort,
+                abortSignal: runtimeContext.abortSignal,
                 // Direct fallback has no full PermissionSystem invocation context. New file reads
                 // must fail closed here instead of treating this runner path as an authorization.
                 authorizeFileRead: () => ({ allowed: false, reason: 'Permission context unavailable' }),
                 serializeFinalResult: (candidate) => JSON.stringify(candidate) ?? '',
             });
+            if (runtimeContext.isDetached?.()) return '';
             const sanitized = stripImageBase64ForTranscript(toolCall.name, result);
             effectHooks?.complete(args, result,
                 toolResultStatus(sanitized) === 'error' || (_isBoundedReadTextError(toolCall, sanitized) && sanitized === 'B'));
             return asTranscript(result);
         } catch (error) {
+            if (runtimeContext.isDetached?.()) return '';
             effectHooks?.fail();
             onFailure?.();
             // Błąd narzędzia wraca do transkryptu suba - też przez maskę.

@@ -43,6 +43,10 @@ export const DEFAULT_LIMITS = {
   // go w połowie roboty.
   delegation_timeout_ms: 900000,
 
+  // Po abort narzędzie trzyma dzierżawę do rozstrzygnięcia, najwyżej przez 10 s.
+  // Potem odcinamy wynik i oddajemy slot; nie jest to gwarancja przerwania obcego I/O.
+  subagent_executor_abort_grace_ms: 10000,
+
   // WATCHDOG CISZY per wywołanie modelu SUB-AGENTA (ms). Timer przezbrajany
   // KAŻDYM chunkiem streamu (i sygnałem bramki) — strzela dopiero po pełnej ciszy modelu.
   // Odróżnia trupa (zero bajtów — znany tryb awarii lokalnego mostu API) od myśliciela
@@ -195,6 +199,7 @@ export const LIMIT_SPECS: Record<LimitKey, LimitSpec> = {
   // Sufit 30 min — worker z podniesionym budżetem iteracji na wolnym moście potrzebuje
   // kilkunastu minut; krótszy sufit wiązałby ręce userowi.
   delegation_timeout_ms:              { min: 1000, ceiling: 1800000, integer: true },
+  subagent_executor_abort_grace_ms:    { min: 1, ceiling: 60000, integer: true },
   // Min 5000 — poniżej pięciu sekund grace-okno jest fikcją (jedno wywołanie modelu
   // z pełnym kontekstem tyle nie zdąży). Sufit 240000 — więcej niż 4 min na JEDNĄ syntezę
   // to już nie grace, tylko drugie życie. Nie ma tu 0 „wyłącz" — od tego jest krótki

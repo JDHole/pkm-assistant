@@ -174,19 +174,21 @@ test.serial('queued work has no timeout until admission even after more than its
     held.forEach(lease => lease.release());
 });
 
-test.serial('local provider queue is enqueued before a later call and owns no extra pool slot', async t => {
+test.serial('local batch width queues its next member without blocking an eligible later call', async t => {
     const f = fixture(t, true);
     const batch = await f.batch(['a', 'b']);
     const first = await f.requests.next();
     const later = await f.submit('c');
-    t.deepEqual([batch.queued, later.queued, f.starts], [1, true, ['a']]);
+    t.deepEqual([batch.queued, later.success, f.registry.getRunActivity(later.task_id),
+        f.registry.getRunActivity(batch.tasks[1].task_id), f.starts], [1, true, 'working', 'queued', ['a', 'c']]);
+    const independent = await f.requests.next();
+    t.is(independent.task, 'c');
     first.complete('a result');
     const second = await f.requests.next();
-    const third = await f.requests.next();
-    t.deepEqual([second.task, third.task], ['b', 'c']);
-    second.complete('b result'); third.complete('c result');
+    t.deepEqual([second.task, f.starts], ['b', ['a', 'c', 'b']]);
+    second.complete('b result'); independent.complete('c result');
     await __test__._settleBackground();
-    t.deepEqual(f.registry.list().map(task => task.result?.text), ['a result', 'b result', 'c result']);
+    t.deepEqual(f.registry.list().map(task => task.result?.text), ['a result', 'c result', 'b result']);
 });
 
 test.serial('Stop after slot assignment but before runner start cancels exactly that queued single', async t => {

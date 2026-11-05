@@ -202,6 +202,8 @@ export interface ExecuteToolCallOptions {
     resultBudgetChars?: number;
     /** Abort predicate for the specific chat/sub-agent turn. Never read from model args. */
     shouldAbort?: () => boolean;
+    /** Cooperative cancellation for tools that support an AbortSignal. */
+    abortSignal?: AbortSignal;
 }
 
 /**
@@ -1280,6 +1282,7 @@ export class MCPClient {
                 resultBudgetChars: requestedResultBudgetChars,
                 effectiveResultBudgetChars,
                 shouldAbort,
+                abortSignal: opts.abortSignal,
                 authorizeFileRead: (canonicalPath) => {
                     if (typeof canonicalPath !== 'string' || canonicalPath.length === 0) {
                         return { allowed: false, reason: 'Invalid path' };
@@ -1308,6 +1311,8 @@ export class MCPClient {
                 this.plugin,
                 tool.source === 'built-in' ? builtInContext : undefined,
             ) as ToolExecutionResult;
+
+            if (opts.abortSignal?.aborted) return { success: false, error: t('chat.substrip.status_aborted') };
 
             // 7b/7c. Modale review (IdeaReviewModal → _planStore) i ArtifactProgressModal
             // (polling chat_todo) SKASOWANE. Artefakty żywe mają approval w notatce (guziki B1) i live-widok
@@ -1380,6 +1385,7 @@ export class MCPClient {
             return result;
 
         } catch (error) {
+            if (opts.abortSignal?.aborted) return { success: false, error: t('chat.substrip.status_aborted') };
             log.error('MCPClient', `${toolCall.name} BŁĄD:`, error);
             // Ten komunikat idzie MODELOWI i do transkryptu
             // tury, a komunikat wyjątku bywa całym zrzutem zdarzenia strumienia razem

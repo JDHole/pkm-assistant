@@ -118,3 +118,21 @@ test('provider batch constraint shares the lease, never occupies a conversation 
     t.deepEqual(['first', 'next'].map(id => registry.getRunActivity(id)), ['inactive', 'working']);
     lease.release(); registry.dispose();
 });
+
+
+test('F2 FIFO among eligible entries bypasses a blocked group and preserves its order', async t => {
+    const registry = new SubTaskRegistry();
+    const group = { limit: 1 };
+    const first = await registry.acquire(owner, 'first', signal(), group);
+    const second = registry.acquire(owner, 'second', signal(), group);
+    const third = registry.acquire(owner, 'third', signal(), group);
+    const independent = registry.acquire(owner, 'independent', signal());
+    t.deepEqual(['first', 'second', 'third', 'independent'].map(id => registry.getRunActivity(id)),
+        ['working', 'queued', 'queued', 'working']);
+    (await independent).release();
+    first.release();
+    t.deepEqual(['second', 'third'].map(id => registry.getRunActivity(id)), ['working', 'queued']);
+    (await second).release();
+    (await third).release();
+    registry.dispose();
+});

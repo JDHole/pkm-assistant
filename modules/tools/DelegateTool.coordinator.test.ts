@@ -5,6 +5,8 @@ import { createDelegateTool, createSubAgentTool, __test__, stopAllDelegations } 
 import { createAskUserChannels } from './AskUserChannels.js';
 import { createAskUserTool } from './AskUserTool.js';
 import { MCPClient } from './MCPClient.js';
+import type { BuiltinToolExecutionContext } from './ToolRegistry.js';
+import { log } from '../../core/utils/Logger.js';
 import { SubAgentRunner, SubTaskRegistry, SubTaskNotifier } from '../sub-agents/index.js';
 import type { ParentQuestion, RunActivity, SubTask } from '../sub-agents/index.js';
 import { QuestionTestClock } from '../sub-agents/test-support/questionTestClock.js';
@@ -12,8 +14,9 @@ import { __test__ as modelsTest } from '../models/index.js';
 
 function deferred<T>() {
     let resolve!: (value: T) => void;
-    const promise = new Promise<T>(done => { resolve = done; });
-    return { promise, resolve };
+    let reject!: (error: Error) => void;
+    const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+    return { promise, resolve, reject };
 }
 class Mailbox<T> {
     private values: T[] = [];
@@ -25,7 +28,7 @@ type Payload = { messages: Array<{ role: string; content: string }>; tools?: Arr
 type Request = { payload: Payload; complete(text: string): void; calls(...calls: Array<[string, Record<string, unknown>]>): void; fail(): void };
 const owner = { agentName: 'Mira', sessionPath: 'chat.md', sessionEpoch: 'e1', tabKey: 'tab' };
 
-function fixture(t: ExecutionContext, options: { maxIterations?: number; fallback?: boolean; local?: boolean; defaultDepth?: boolean } = {}) {
+function fixture(t: ExecutionContext, options: { maxIterations?: number; fallback?: boolean; local?: boolean; defaultDepth?: boolean; executorGrace?: number; cooperative?: boolean } = {}) {
     const clock = new QuestionTestClock();
     const registry = new SubTaskRegistry({ questionClock: clock, maxIdleThreadsPerSession: 30 });
     const notifier = new SubTaskNotifier({ registry });
@@ -33,6 +36,7 @@ function fixture(t: ExecutionContext, options: { maxIterations?: number; fallbac
     const activities = new Map<string, Mailbox<RunActivity>>();
     const read = deferred<string>();
     const readStarted = deferred<void>();
+    const readSignals: Array<AbortSignal | undefined> = [];
     const questions = new Mailbox<ParentQuestion>();
     registry.events.on('question:opened', value => questions.push(value as ParentQuestion));
     let liveExecutors = 0, maxExecutors = 0;
@@ -82,7 +86,13 @@ function fixture(t: ExecutionContext, options: { maxIterations?: number; fallbac
     const deps = { makeRunner: makeRunner as never };
     const delegate = createDelegateTool({}, deps);
     const control = createSubAgentTool({}, deps);
-    const tools = [delegate, control, createAskUserTool(), { name: 'read', description: 'read', inputSchema: {}, execute: () => { enterExecutor(); measure(); readStarted.resolve(); return read.promise.finally(leaveExecutor); } }];
+    const tools = [delegate, control, createAskUserTool(), { name: 'read', source: 'built-in', description: 'read', inputSchema: {}, execute: (_args: unknown, _app: unknown, _plugin: unknown, context?: BuiltinToolExecutionContext) => {
+        enterExecutor(); measure(); readStarted.resolve();
+        const signal = context?.abortSignal;
+        readSignals.push(signal);
+        if (options.cooperative) signal?.addEventListener('abort', () => read.resolve('cancelled'), { once: true });
+        return read.promise.finally(leaveExecutor);
+    } }];
     const toolRegistry = { getTool: (name: string) => tools.find(tool => tool.name === name) ?? null, filterByAgent: () => tools };
     modelsTest.setChatModelFactory(() => new Model() as never);
     const plugin = {
@@ -95,7 +105,8 @@ function fixture(t: ExecutionContext, options: { maxIterations?: number; fallbac
         settings: { pkmAssistant: { chat: { platform: 'ollama', hosts: { ollama: 'http://localhost:11434' } },
             modelLibrary: { minion: [{ platform: 'ollama', model: 'tree-model', isDefault: true }] },
             limits: { ...(options.defaultDepth ? {} : { max_delegation_depth: 2 }), max_parallel_delegations: 5, delegation_timeout_ms: 1000, subagent_stall_timeout_ms: 0,
-                model_synthesis_timeout_ms: 0, subagent_final_grace_ms: 0 },
+                model_synthesis_timeout_ms: 0, subagent_final_grace_ms: 0,
+                ...(options.executorGrace === undefined ? {} : { subagent_executor_abort_grace_ms: options.executorGrace }) },
         } } },
     };
     const client = new MCPClient(null as never, plugin as never, toolRegistry as never);
@@ -111,7 +122,7 @@ function fixture(t: ExecutionContext, options: { maxIterations?: number; fallbac
         modelsTest.reset();
     });
     const submit = (task: string) => client.executeToolCall({ name: 'delegate', arguments: { task, aspect: 'parent' } }, 'Mira', { origin: owner });
-    return { registry, notifier, clock, submit, read, readStarted, questions, configs, client, channels: plugin._askUserChannels,
+    return { registry, notifier, clock, submit, read, readStarted, readSignals, questions, configs, client, channels: plugin._askUserChannels,
         batch: () => client.executeToolCall({ name: 'delegate', arguments: { tasks: [1, 2, 3, 4, 5].map(i => ({ task: `parent-${i}`, aspect: 'parent' })) } }, 'Mira', { origin: owner }),
         next: (key: string) => mailbox(requests, key).next(),
         activity: async (key: string, kind: RunActivity['kind']) => {
@@ -459,4 +470,92 @@ for (const batch of [false, true]) test.serial(`F1 Stop retains lease until real
     await __test__._settleBackground(true);
     t.deepEqual(f.executors(), { live: 0, max: 5 });
     t.is(f.metrics().streams, 6);
+    t.is(f.clock.pending, 0);
+});
+
+for (const fallback of [false, true]) for (const rejected of [false, true]) test.serial(`F2 five hung reads release only at abort grace; late results inert (fallback=${fallback}, rejected=${rejected})`, async t => {
+    const grace = fallback ? 2000 : 10000;
+    const f = fixture(t, { fallback, ...(fallback ? { executorGrace: grace } : {}) });
+    const warnings: unknown[][] = [];
+    const warn = log.warn;
+    log.warn = (...args) => { warnings.push(args); };
+    t.teardown(() => { log.warn = warn; });
+    for (let i = 1; i <= 5; i++) {
+        await f.submit(`parent-${i}`);
+        (await f.next(`parent-${i}`)).calls(['read', {}]);
+    }
+    await nextTurn();
+    t.deepEqual(f.executors(), { live: 5, max: 5 });
+    const receipt = await f.submit('parent-6') as { task_id: string };
+    const stopped = f.registry.list().slice(0, 5);
+    stopped.forEach(task => f.registry.requestStop(task.id));
+    await nextTurn();
+    t.deepEqual(stopped.map(task => task.status), ['aborted', 'aborted', 'aborted', 'aborted', 'aborted']);
+    const snapshot = () => JSON.stringify([f.registry.list(), f.registry.listThreads(owner), f.notifier.pending()]);
+    f.clock.advance(grace - 1);
+    await nextTurn();
+    t.deepEqual([f.registry.getRunActivity(receipt.task_id), f.metrics().streams, f.executors().max], ['queued', 5, 5]);
+    f.clock.advance(1);
+    await nextTurn();
+    t.deepEqual([f.registry.getRunActivity(receipt.task_id), f.metrics().streams], ['working', 6]);
+    t.deepEqual(f.readSignals.map(signal => signal?.aborted), [true, true, true, true, true]);
+    t.deepEqual(stopped.map(task => f.registry.getRunActivity(task.id)), ['inactive', 'inactive', 'inactive', 'inactive', 'inactive']);
+    t.deepEqual(warnings.filter(args => args[1] === 'Executor detached after abort grace').map(args => args[2]),
+        stopped.map(task => ({ runId: task.id, tool: 'read' })));
+    (await f.next('parent-6')).complete('sixth done');
+    await __test__._settleBackground(true);
+    const after = snapshot();
+    if (rejected) f.read.reject(new Error('LATE DETACHED ERROR'));
+    else f.read.resolve('LATE DETACHED RESULT');
+    await nextTurn();
+    t.is(snapshot(), after);
+    t.deepEqual([f.metrics().streams, f.clock.pending, __test__._liveAbortCount()], [6, 0, 0]);
+});
+
+test.serial('F2 width-one hung batch does not block independent work before grace', async t => {
+    const f = fixture(t, { local: true });
+    const batch = await f.batch() as { tasks: Array<{ task_id: string }> };
+    (await f.next('parent-1')).calls(['read', {}]);
+    await f.readStarted.promise;
+    f.registry.requestStop(batch.tasks[0].task_id);
+    await nextTurn();
+    const independent = await f.submit('parent-6') as { task_id: string };
+    await nextTurn();
+    t.deepEqual(batch.tasks.map(task => f.registry.getRunActivity(task.task_id)), ['working', 'queued', 'queued', 'queued', 'queued']);
+    t.deepEqual([f.registry.getRunActivity(independent.task_id), f.metrics().streams, f.clock.now()], ['working', 2, 0]);
+    (await f.next('parent-6')).complete('independent done');
+    f.clock.advance(10000);
+    for (let i = 2; i <= 5; i++) (await f.next(`parent-${i}`)).complete(`done-${i}`);
+    await __test__._settleBackground(true);
+    t.deepEqual([f.metrics().streams, f.clock.pending], [6, 0]);
+});
+
+for (const fallback of [false, true]) test.serial(`F2 cooperative abort clears grace immediately (fallback=${fallback})`, async t => {
+    const f = fixture(t, { fallback, cooperative: true });
+    await f.submit('parent-1');
+    (await f.next('parent-1')).calls(['read', {}]);
+    await f.readStarted.promise;
+    const task = f.registry.list()[0];
+    f.registry.requestStop(task.id);
+    await nextTurn();
+    t.deepEqual([task.status, f.registry.getRunActivity(task.id), f.executors().live, f.clock.pending], ['aborted', 'inactive', 0, 0]);
+});
+
+for (const cause of ['timeout', 'unload'] as const) test.serial(`F2 ${cause} also bounds executor retention and cleans timers`, async t => {
+    const f = fixture(t);
+    await f.submit('parent-1');
+    (await f.next('parent-1')).calls(['read', {}]);
+    await f.readStarted.promise;
+    const task = f.registry.list()[0];
+    if (cause === 'timeout') f.clock.advance(1000);
+    else stopAllDelegations('test');
+    await nextTurn();
+    t.deepEqual([task.status, f.registry.getRunActivity(task.id), f.readSignals[0]?.aborted], ['aborted', 'working', true]);
+    f.clock.fireNextEarly();
+    t.is(f.registry.getRunActivity(task.id), 'working');
+    f.clock.advance(9999);
+    t.is(f.registry.getRunActivity(task.id), 'working');
+    f.clock.advance(1);
+    await __test__._settleBackground(true);
+    t.deepEqual([f.registry.getRunActivity(task.id), f.clock.pending, __test__._liveAbortCount()], ['inactive', 0, 0]);
 });

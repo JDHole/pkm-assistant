@@ -347,3 +347,12 @@ test('thread limits have explicit defaults and bounded overrides', t => {
   t.deepEqual(LIMIT_SPECS.subagent_thread_max_idle_per_session, { min: 1, ceiling: 20, integer: true });
   t.deepEqual(LIMIT_SPECS.subagent_thread_context_tokens, { min: 4096, ceiling: 1000000, integer: true });
 });
+
+
+test('executor abort grace validates overrides and cannot disable bounded retention', t => {
+    const read = (value: unknown) => getLimits({ pkmAssistant: { limits: { subagent_executor_abort_grace_ms: value } } }).subagent_executor_abort_grace_ms;
+    for (const bad of [0, -1, NaN, Infinity, 'bad', null, true, {}]) t.is(read(bad), 10000);
+    t.is(read('2500.9'), 2500);
+    t.is(read(1), 1);
+    t.is(read(999999), 60000);
+});

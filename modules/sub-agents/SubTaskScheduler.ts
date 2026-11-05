@@ -78,7 +78,11 @@ export class SubTaskScheduler {
     cancel(runId: string): void { this.runs.get(runId)?.cancel(); }
 
     private drain(key: string, lane: Lane): void {
-        while (!this.disposed && !this.suspended && lane.active < 5 && lane.queue.length && lane.queue[0].ready()) lane.queue.shift()!.admit();
+        while (!this.disposed && !this.suspended && lane.active < 5 && lane.queue.length) {
+            const index = lane.queue.findIndex(ticket => ticket.ready());
+            if (index < 0) break;
+            lane.queue.splice(index, 1)[0].admit();
+        }
         if (lane.active === 0 && lane.queue.length === 0) this.lanes.delete(key);
     }
 

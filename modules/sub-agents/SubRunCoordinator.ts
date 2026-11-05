@@ -6,7 +6,7 @@ import type { SubTaskNotice } from './SubTaskNotifier.js';
 export interface RunAdmission {
     release(): void;
     resume(): Promise<void>;
-    /** Pins work until a non-waiting executor actually settles, even after logical Stop. */
+    /** Pins work until a non-waiting executor settles or is detached after abort grace. */
     retainExecutor?(): () => void;
 }
 
