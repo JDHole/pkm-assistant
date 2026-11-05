@@ -238,3 +238,5 @@ export type {
 
 /** Sekcja „Pamięć i kontekst" w Settings - worek DI, którego oczekuje renderer. */
 export type { MemorySettingsCtx, MemoryPkmSlice } from './SettingsContent.js';
+
+export { sessionMessageId, bindSessionMessageId } from './sessionMessageIdentity.js';

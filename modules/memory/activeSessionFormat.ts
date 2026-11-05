@@ -1,3 +1,4 @@
+import { sessionMessageId, bindSessionMessageId } from './sessionMessageIdentity.js';
 /**
  * activeSessionFormat.js - JEDNO ŹRÓDŁO kontraktu pliku `sessions/active/<agent>_*.md`.
  *
@@ -70,6 +71,9 @@ export type SessionRole = 'system' | 'user' | 'assistant' | 'tool';
  * Nazwa pola bloku event-logu (format A). Kolejność zapisu trzyma `EVENT_FIELDS`.
  */
 export type EventFieldName =
+    | 'message_id'
+    | 'removed_messages'
+    | 'removed_ranges'
     | 'parent_conversation_text'
     | 'content'
     | 'tool'
@@ -174,6 +178,9 @@ export const KNOWN_ROLES = new Set<string>(['system', 'user', 'assistant', 'tool
  * w `extractEventField`. Rozjazd między nimi = ucięta treść, więc żadnej kopii.
  */
 export const EVENT_FIELDS: EventFieldName[] = [
+    'message_id',
+    'removed_messages',
+    'removed_ranges',
     'parent_conversation_text',
     'content',
     'tool',
@@ -378,6 +385,14 @@ export function parseActiveSession(text: string | null | undefined): ParsedActiv
     const parts = body.split(/(?:^|\n)## /);
     // Ostatnia wiadomość była transkryptowa? (decyduje, czy doklejka idzie przez unescape)
     let lastWasTranscript = false;
+    let ordinal = 0;
+    const deleted = new Set<string>();
+    const addMessage = (message: ActiveSessionMessage, explicitId = '') => {
+        const id = explicitId || `legacy:${++ordinal}`;
+        if (explicitId) ordinal++;
+        bindSessionMessageId(message, id);
+        if (!deleted.has(id)) result.messages.push(message);
+    };
 
     // parts[0] to treść PRZED pierwszym `## ` (nagłówek H1 pliku sesji) - nigdy nie jest blokiem.
     for (let i = 1; i < parts.length; i++) {
@@ -392,8 +407,26 @@ export function parseActiveSession(text: string | null | undefined): ParsedActiv
         // `KNOWN_ROLES` to Set<string> (zbiór dzielony z sessionParser), więc `has`
         // nie zawęża typu - asercja przywraca wiedzę, którą właśnie sprawdziliśmy.
         if (KNOWN_ROLES.has(role)) {
-            result.messages.push({ role: role as SessionRole, content: unescapeActiveText(rawBody.trim()), seq: null });
+            addMessage({ role: role as SessionRole, content: unescapeActiveText(rawBody.trim()), seq: null });
             lastWasTranscript = true;
+            continue;
+        }
+
+        if (eventTypeFromHeader(rawHeader) === 'messages_removed') {
+            try {
+                const ranges: unknown = JSON.parse(extractEventField(rawBody, 'removed_ranges') || '[]');
+                if (Array.isArray(ranges)) for (const range of ranges as unknown[]) {
+                    if (!range || typeof range !== 'object' || !('from' in range) || !('to' in range) || typeof range.from !== 'string' || typeof range.to !== 'string') continue;
+                    const from = result.messages.findIndex(message => sessionMessageId(message) === range.from);
+                    const to = result.messages.map(sessionMessageId).lastIndexOf(range.to);
+                    if (from >= 0 && to >= from) for (const message of result.messages.slice(from, to + 1)) deleted.add(sessionMessageId(message));
+                }
+                const ids: unknown = JSON.parse(extractEventField(rawBody, 'removed_messages'));
+                if (Array.isArray(ids) && ids.every((id: unknown): id is string => typeof id === 'string' && id.length > 0)) {
+                    for (const id of ids) deleted.add(id);
+                    result.messages = result.messages.filter(message => !deleted.has(sessionMessageId(message)));
+                }
+            } catch { /* Corrupt control records are not model messages. */ }
             continue;
         }
 
@@ -436,7 +469,7 @@ export function parseActiveSession(text: string | null | undefined): ParsedActiv
                 // z wywołaniami narzędzi) - klucz dokładany TYLKO gdy pole realnie jest w bloku,
                 // żeby wiadomość bez nich zostawała bit w bit takim samym obiektem jak przed v3
                 // (kontrakt: `t.deepEqual` na `{role, content, seq}` gdzie indziej w tym pliku).
-                result.messages.push({
+                addMessage({
                     ...(parentConversationText !== undefined ? { parentConversationText } : {}),
                     role: eventRole,
                     content: unescapeActiveText(contentValue.trim()) + (question && eventTypeFromHeader(rawHeader) === 'agent_loop_partial'
@@ -445,7 +478,7 @@ export function parseActiveSession(text: string | null | undefined): ParsedActiv
                     ...(toolCallIdRaw ? { toolCallId: toolCallIdRaw } : {}),
                     ...(toolCalls ? { toolCalls } : {}),
                     ...(question ? { question } : {}),
-                });
+                }, extractEventField(rawBody, 'message_id'));
                 lastWasTranscript = false;
                 continue;
             }

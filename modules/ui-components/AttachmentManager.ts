@@ -617,6 +617,17 @@ export class AttachmentManager {
      * Check if there are any attachments.
      * @returns {boolean}
      */
+    /** Detached copies for editing a sent message in the current session. */
+    snapshotAttachments(): Attachment[] {
+        return this.attachments.map(attachment => ({ ...attachment }));
+    }
+
+    restoreAttachments(attachments: readonly Attachment[]): void {
+        this.attachments = attachments.map(attachment => ({ ...attachment }));
+        this._renderChips();
+        this.onChange(this.attachments);
+    }
+
     hasAttachments(): boolean {
         return this.attachments.length > 0;
     }

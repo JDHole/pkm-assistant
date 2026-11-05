@@ -503,6 +503,11 @@ export class MentionAutocomplete {
      * Get current mention chips.
      * @returns {Array<{type: string, name: string, path: string, icon: string}>}
      */
+    restoreMentions(mentions: readonly MentionChip[]): void {
+        this.mentions = mentions.map(mention => ({ ...mention }));
+        this.onChange(this.mentions);
+    }
+
     getMentions() {
         return [...this.mentions];
     }

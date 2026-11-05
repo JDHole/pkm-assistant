@@ -673,3 +673,11 @@ przed podglądem oraz budżetowaniem: `configuredChatSecrets` z ustawień plugin
 Ten sam zredagowany snapshot trafia do runnera także przy zgodnym dostawcy, bez modala.
 Testy F4 w `DelegateTool.parentConversation.test.ts` przechwytują rzeczywisty payload
 modelu i przechodzą ścieżkę zamknięcia zakładki przez MCP, ApprovalManager i ApprovalModal.
+
+### 2.4.5 F5 — kolejność redakcji
+
+DelegateTool redaguje snapshot synchronicznie przed structuredClone, korzystając z pełnych
+źródeł projekcji przez `redactParentConversationSnapshot`. Zgoda również wywołuje ten
+helper: redakcja skonfigurowanych wartości i lokalnego wzorca sk- poprzedza wyciągi,
+podgląd i dopasowanie budżetu. Bez zmiany globalnego SensitiveDataGuard.
+Testy F5-3 przechwytują podgląd oraz payload: sekret na granicy 160/240 znaków i sklejony sk-.

@@ -1667,3 +1667,16 @@ projekcję. Ponowienie przenosi osobne `parentConversationText` w metadanych wys
 `_chatExecuteToolCall` przekazuje sygnał abort tury do MCP, więc zamknięcie zakładki
 zamyka też modal zgody. Testy sekwencji: `chat_messages.parentConversation.test.ts`
 oraz `modules/tools/DelegateTool.parentConversation.test.ts` (F4-6, prawdziwy modal/MCP).
+
+### 2.4.5 F5 — zapis usunięć i źródło edycji
+
+`RollingWindow.removeMessages` zbiera identyfikatory i zakresy usuniętych wiadomości;
+`handleSaveSession` zapisuje je również dla pustego okna, a `send_message` przed dopisaniem
+zastępczego pytania. Kolejka znika dopiero po udanym zapisie. Restore przenosi tożsamość
+z parsera; kompresja jej nie zmienia i nie zgłasza usunięć.
+Edycja oraz ponowienie używają `parentConversationText` sprzed rozwinięć. Żywe wiadomości
+zachowują kopie `userAttachments` i `userMentions`, odtwarzane jako chipy przed wysłaniem.
+Nie zapisujemy binariów/chipów w nowych polach sesji; po restarcie dostępny jest osobny
+tekst źródłowy. Nierozdzielalne legacy daje pusty edytor, nigdy pełny payload pliku.
+Akcje dymka wskazują obiekt wiadomości, nie porównują źródła z rozwiniętym `content`.
+Testy: F5-1 w `chat_session.test.ts`, F5-2 w `chat_messages.parentConversation.test.ts`.

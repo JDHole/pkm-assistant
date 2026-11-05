@@ -1,3 +1,4 @@
+import { sessionMessageId } from '../../memory/index.js';
 /**
  * @module chat_streaming
  * Streaming, tool-call handling and generation control methods extracted from ChatView.
@@ -252,6 +253,25 @@ function parseToolCallArgs(toolCall: ParsedToolCall): ChatToolArgs {
         : (toolCall.arguments || {})) as ChatToolArgs;
 }
 
+/** Save explicit edits before the next turn; a tab switch cannot retarget the write. */
+async function persistMessageRemovals(view: ChatViewLike): Promise<boolean> {
+    const rw = view.rollingWindow;
+    if (!rw.removedMessageIds?.length) return true;
+    const owner = freezeTurnOwner(view);
+    const removed = [...rw.removedMessageIds];
+    const ranges = [...rw.removedMessageRanges];
+    if (owner.memory?.saveSession) {
+        await owner.memory.saveSession(rw.messages, {}, { removedMessageIds: removed, removedRanges: ranges,
+            ...(owner.sessionPath ? { expectedSession: { path: owner.sessionPath, epoch: owner.sessionEpoch ?? null } } : {}),
+        });
+        // Concurrent saves may acknowledge the same IDs; never discard a newer edit.
+        const acknowledged = new Set(removed);
+        rw.removedMessageIds = rw.removedMessageIds.filter(id => !acknowledged.has(id));
+        rw.removedMessageRanges = rw.removedMessageRanges.filter(range => !ranges.includes(range));
+    }
+    return view.rollingWindow === rw && (!owner.tab || owner.tab.isActive === true);
+}
+
 /** Licznik tur w procesie - tożsamość tury, żeby watchdog nie ubił cudzej tury po nazwie agenta. */
 let _turnSeq = 0;
 
@@ -324,6 +344,9 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         return;
     }
 
+    // Persist edits before any replacement event can enter the append-only journal.
+    if (this.rollingWindow.removedMessageIds?.length && !await persistMessageRemovals(this)) return;
+
     const turnStartedSeq = this.plugin?.subTaskRegistry?.issueTurnStartSequence();
 
     // Tu NIE MA `this._abortedStream = null` („nowa wiadomość = świeży start"): przerwanie jako
@@ -382,6 +405,9 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     // ⚠️ Przy wstrzykniętej turze załączniki usera zostają NIETKNIĘTE - czekają na jego
     // własną wiadomość. Podpięcie ich do powiadomienia zjadłoby mu spinacz bez pytania.
     const hasAttachments = !isInjected && this.attachmentManager?.hasAttachments();
+    const userAttachments = hasAttachments ? this.attachmentManager?.snapshotAttachments?.() : undefined;
+    const userMentions = !isInjected ? this.mentionAutocomplete?.getMentions().map(mention => ({ ...mention })) : undefined;
+    const userMessageId = crypto.randomUUID();
     let attachmentResult = null;
     if (hasAttachments) {
         const textWithMentions = mentionContextText ? mentionContextText + '\n\n' + mentionDisplayText : mentionDisplayText;
@@ -439,12 +465,12 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     if (hasAttachments && attachmentResult) {
         // Attachments present: content may be array (multimodal) or string
         // Display: user's text with @[Name] badges (no mention metadata)
-        await this.append_message('user', attachmentResult.content, mentionDisplayText, { ...messageMeta, parentConversationText });
+        await this.append_message('user', attachmentResult.content, mentionDisplayText, { ...messageMeta, parentConversationText, userAttachments, userMentions, sessionMessageId: userMessageId });
         savedUserContent = mentionDisplayText;
     } else {
         // No attachments: API gets mention context, display shows only user text
         const apiContent = mentionContextText ? mentionContextText + '\n\n' + mentionDisplayText : mentionDisplayText;
-        const appended = this.append_message('user', apiContent, mentionContextText ? mentionDisplayText : undefined, { ...messageMeta, parentConversationText });
+        const appended = this.append_message('user', apiContent, mentionContextText ? mentionDisplayText : undefined, { ...messageMeta, parentConversationText, userAttachments, userMentions, sessionMessageId: userMessageId });
         if (questionDelivery?.window.messages.some(message => message.questionId === questionDelivery.question.id)) {
             questionDelivery.claim.ack();
             if (this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.token === questionDelivery.token) {
@@ -468,6 +494,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     }
     const userEvent: ActiveSessionEventInput = {
         type: 'user_message',
+        message_id: userMessageId,
         agentName: activeAgentName,
         content: savedUserContent,
         ...(parentConversationText !== undefined ? { parent_conversation_text: { text: parentConversationText } } : {}),
@@ -1122,7 +1149,7 @@ async function _consumeUserStoppedSubTasks(this: ChatViewLike, turn: ChatTurn): 
                 getLimits(this.env?.settings).subagent_result_max_chars);
             await turn.rw.addMessage('user', text, meta);
             await appendTurnSessionEvent(turn, {
-                type: 'user_message', agentName: turn.agentName, content: text, timestamp: new Date().toISOString(),
+                type: 'user_message', message_id: sessionMessageId(turn.rw.messages[turn.rw.messages.length - 1]), agentName: turn.agentName, content: text, timestamp: new Date().toISOString(),
                 ...(savedResultQuestion(meta) ? { question: savedResultQuestion(meta) } : {}),
             });
             const tab = turn.owner.tab;
@@ -1857,6 +1884,7 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
     // (patrz `modules/memory/activeSessionFormat.ts`, `ACTIVE_SESSION_FORMAT_VERSION` v3).
     await appendTurnSessionEvent(turn, {
         type: 'agent_message',
+        ...(asstMsg ? { message_id: sessionMessageId(asstMsg) } : {}),
         agentName,
         content: assistantContent,
         model: turn.model || '',
@@ -1865,8 +1893,10 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
         timestamp: new Date().toISOString()
     });
     for (const tr of (turn.lastRoundToolResults || [])) {
+        const message = [...rw.messages].reverse().find(item => item.role === 'tool' && item.tool_call_id === tr.id);
         await appendTurnSessionEvent(turn, {
             type: 'tool_result',
+            ...(message ? { message_id: sessionMessageId(message) } : {}),
             agentName,
             // `tr.id` to `tool_call_id` (patrz `turn.lastRoundToolResults` w `_chatOnToolResults`:
             // `{id: r.toolCall.id, content: r.result}`) - MUSI przetrwać restore, żeby ta sama
@@ -1970,6 +2000,7 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
             type: 'user_message',
             agentName,
             content: injectedText,
+            message_id: sessionMessageId(rw.messages[rw.messages.length - 1]),
             timestamp: new Date().toISOString()
         });
 
@@ -2045,9 +2076,11 @@ export async function _finalizeTurn(this: ChatViewLike, turn: ChatTurn, result: 
     }
     const timestamp = new Date().toLocaleTimeString(getDateLocale(), { hour: '2-digit', minute: '2-digit' });
     const idx = rw.messages.length; // Will be the index after adding
-    await rw.addMessage('assistant', content, { timestamp, ...((cacheMeta?.cached_tokens as number) > 0 ? { cache: cacheMeta } : {}) });
+    const assistantMessageId = crypto.randomUUID();
+    await rw.addMessage('assistant', content, { sessionMessageId: assistantMessageId, timestamp, ...((cacheMeta?.cached_tokens as number) > 0 ? { cache: cacheMeta } : {}) });
     await appendTurnSessionEvent(turn, {
         type: 'agent_message',
+        message_id: assistantMessageId,
         agentName: streamAgentName,
         content,
         model: turn.model || '',

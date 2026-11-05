@@ -4,7 +4,7 @@
  */
 import { Notice } from 'obsidian';
 import { RollingWindow } from './RollingWindow.js';
-import { IdleScheduler } from '../../memory/index.js';
+import { IdleScheduler, sessionMessageId } from '../../memory/index.js';
 import { runSaveSessionFlow } from '../slash-commands/save_session.js';
 import { SessionCloseModal } from '../SessionCloseModal.js';
 import { OpenSessionModal } from '../OpenSessionModal.js';
@@ -51,7 +51,7 @@ export async function initSessionManager(this: ChatViewLike) {
     const autoSaveInterval = this.env?.settings?.pkmAssistant?.autoSaveInterval;
     if (autoSaveInterval && autoSaveInterval > 0) {
         this.registerInterval(window.setInterval(() => {
-            if (this.rollingWindow?.messages?.length > 0) {
+            if (this.rollingWindow?.messages?.length > 0 || this.rollingWindow?.removedMessageIds?.length > 0) {
                 void this.handleSaveSession();
             }
         }, autoSaveInterval * 60 * 1000));
@@ -179,7 +179,8 @@ type RestoredMessage = Awaited<ReturnType<AgentMemory['loadActiveSession']>>['me
  * (`ActiveSessionMessage.toolCallId`/`toolCalls` są opcjonalne — brak w pliku legacy/v1/v2).
  */
 function _restoredMessageMeta(msg: RestoredMessage) {
-    const meta: { parentConversationText?: string; tool_call_id?: string; tool_calls?: NonNullable<RestoredMessage['toolCalls']>; _subTaskResult?: { question: NonNullable<RestoredMessage['question']> } } = {};
+    const meta: { sessionMessageId?: string; parentConversationText?: string; tool_call_id?: string; tool_calls?: NonNullable<RestoredMessage['toolCalls']>; _subTaskResult?: { question: NonNullable<RestoredMessage['question']> } } = {};
+    meta.sessionMessageId = sessionMessageId(msg);
     if (msg.parentConversationText !== undefined) meta.parentConversationText = msg.parentConversationText;
     if (msg.toolCallId) meta.tool_call_id = msg.toolCallId;
     if (msg.toolCalls) meta.tool_calls = msg.toolCalls;
@@ -503,7 +504,7 @@ export async function handleNewSession(this: ChatViewLike) {
 export async function handleSaveSession(this: ChatViewLike, agentName?: string | null, rollingWindow?: RollingWindow | null) {
     log.debug('Chat', 'handleSaveSession');
     const rw = rollingWindow || this.rollingWindow;
-    if (!rw?.messages?.length) return;
+    if (!rw?.messages?.length && !rw?.removedMessageIds?.length) return;
     try {
         const agentManager = this.plugin?.agentManager;
         const ownerName = resolveOwnerAgentName(agentManager, agentName) || 'default';
@@ -516,7 +517,14 @@ export async function handleSaveSession(this: ChatViewLike, agentName?: string |
         };
 
         if (memory?.saveSession) {
-            const savedPath = await memory.saveSession(rw.messages, metadata);
+            const removed = [...(rw.removedMessageIds ?? [])];
+            const ranges = [...(rw.removedMessageRanges ?? [])];
+            const savedPath = await memory.saveSession(rw.messages, metadata, { removedMessageIds: removed, removedRanges: ranges,
+                ...(memory.activeSessionPath ? { expectedSession: { path: memory.activeSessionPath, epoch: memory.sessionEpoch } } : {}),
+            });
+            const acknowledged = new Set(removed);
+            rw.removedMessageRanges = (rw.removedMessageRanges ?? []).filter(range => !ranges.includes(range));
+            rw.removedMessageIds = (rw.removedMessageIds ?? []).filter(id => !acknowledged.has(id));
             if (savedPath) {
                 if (this.autosaveStatus) {
                     this.autosaveStatus.textContent = t('chat.session.autosave_saved', { agent: ownerName });

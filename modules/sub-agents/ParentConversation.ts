@@ -1,3 +1,4 @@
+import { maskSensitiveData, redactSecretValues } from '../../core/index.js';
 import type { LoopMessage } from '../agent-loop/index.js';
 import type { SubRunContext, SubTaskOrigin, SubTaskRegistry } from './SubTaskRegistry.js';
 
@@ -17,6 +18,30 @@ export type ParentConversationContext = Readonly<{
     providerId: string | undefined;
     snapshot: ParentConversationSnapshot;
 }>;
+
+// Full source stays private to this process and frozen snapshot; it is never serialized.
+const snapshotSources = new WeakMap<ParentConversationSnapshot, (secrets: readonly string[]) => ParentConversationSnapshot>();
+
+/** Export-only pattern: a key can be glued to prose without a word boundary. */
+function redactExport(text: string, secrets: readonly string[]): string {
+    const known = redactSecretValues({ message: text, code: '', http_status: null }, secrets).message;
+    return maskSensitiveData(known.replace(/sk-[A-Za-z0-9_-]{20,}/g, key => maskSensitiveData(key)));
+}
+
+export function redactParentConversationSnapshot(snapshot: ParentConversationSnapshot, secrets: readonly string[] = []): ParentConversationSnapshot {
+    const rebuild = snapshotSources.get(snapshot);
+    if (rebuild) return rebuild(secrets);
+    return Object.freeze({ ...snapshot, summary: redactExport(snapshot.summary, secrets),
+        messages: Object.freeze(snapshot.messages.map(entry => Object.freeze({ ...entry, text: redactExport(entry.text, secrets) }))),
+    });
+}
+
+type SourceEntry = ConversationEntry & { toolName?: string };
+function exportEntry(entry: SourceEntry, secrets: readonly string[]): ConversationEntry {
+    const safe = redactExport(entry.text, secrets);
+    return { sequence: entry.sequence, role: entry.role, text: entry.toolName !== undefined
+        ? `[narzędzie: ${redactExport(entry.toolName, secrets)}; wynik: ${excerpt(safe, 240) || '[pominięta treść nietekstowa]'}]` : safe };
+}
 
 function textOnly(content: unknown): string {
     if (typeof content === 'string') return content;
@@ -56,8 +81,8 @@ function excerpt(text: string, limit: number): string {
 
 /** Text-only projection, independent of the model's compressed window. No API calls. */
 export class ParentConversationProjection {
-    private recent: ConversationEntry[] = [];
-    private older: ConversationEntry[] = [];
+    private recent: SourceEntry[] = [];
+    private older: SourceEntry[] = [];
     private names = new Map<string, string>();
     private sequence = 0;
     private omitted = 0;
@@ -91,45 +116,49 @@ export class ParentConversationProjection {
             this.names.delete(id);
         }
         let text: string;
+        let toolName: string | undefined;
         if (message.role === 'tool') {
             const name = this.names.get(message.tool_call_id ?? '') ?? 'niedopasowane';
             this.names.delete(message.tool_call_id ?? '');
             const raw = toolText(message.content);
-            const preview = excerpt(raw, 240);
+            const preview = excerpt(redactExport(raw, []), 240);
             this.clipped ||= !raw || raw !== preview;
-            text = `[narzędzie: ${name}; wynik: ${preview || '[pominięta treść nietekstowa]'}]`;
+            text = raw;
+            toolName = name;
         } else if (message.role === 'user' && requireUserText) {
             if (typeof message.parentConversationText !== 'string') { this.omitted++; this.sources.set(message, 'omitted'); return; }
             text = message.parentConversationText;
         } else text = textOnly(message.content);
-        if (!text.trim()) return;
-        this.recent.push({ sequence: ++this.sequence, role: message.role, text });
+        if (!text.trim() && toolName === undefined) return;
+        this.recent.push({ sequence: ++this.sequence, role: message.role, text, ...(toolName !== undefined ? { toolName } : {}) });
         this.sources.set(message, this.sequence);
         while (this.recent.filter(entry => entry.role !== 'tool').length > 8) {
             const entry = this.recent.shift()!;
-            this.older.push({ ...entry, text: excerpt(entry.text, 160) });
+            this.older.push(entry);
         }
         while (this.summary().length > 4096) { this.older.shift(); this.omitted++; }
     }
 
-    private summary(): string {
-        return this.older.map(entry => `[${entry.sequence} ${entry.role}] ${entry.text}`).join('\n');
+    private summary(secrets: readonly string[] = []): string {
+        return this.older.map(source => { const entry = exportEntry(source, secrets); return `[${entry.sequence} ${entry.role}] ${excerpt(entry.text, 160)}`; }).join('\n');
     }
 
-    snapshot(assistantText?: string): ParentConversationSnapshot {
+    snapshot(assistantText?: string, secrets: readonly string[] = []): ParentConversationSnapshot {
         // Work on a copy: the current delegating answer is not yet in the loop's store.
         const copy = new ParentConversationProjection();
         copy.recent = [...this.recent]; copy.older = [...this.older];
         copy.sequence = this.sequence; copy.omitted = this.omitted; copy.clipped = this.clipped;
         if (assistantText?.trim()) copy.append({ role: 'assistant', content: assistantText });
-        return Object.freeze({
-            messages: Object.freeze(copy.recent.map(entry => Object.freeze({ ...entry }))),
-            summary: copy.summary(),
+        const snapshot = Object.freeze({
+            messages: Object.freeze(copy.recent.map(entry => Object.freeze(exportEntry(entry, secrets)))),
+            summary: copy.summary(secrets),
             keptMessages: copy.recent.filter(entry => entry.role !== 'tool').length,
             summarizedMessages: copy.older.filter(entry => entry.role !== 'tool').length,
             omittedMessages: copy.omitted,
             truncated: copy.clipped || copy.omitted > 0 || copy.older.length > 0,
         });
+        snapshotSources.set(snapshot, known => copy.snapshot(undefined, known));
+        return snapshot;
     }
 }
 

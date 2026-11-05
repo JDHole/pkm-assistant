@@ -1,3 +1,4 @@
+import { redactParentConversationSnapshot } from '../sub-agents/index.js';
 import { Validator } from '@cfworker/json-schema';
 import type { Schema } from '@cfworker/json-schema';
 import type { ReasoningEffort } from '../models/index.js';
@@ -731,7 +732,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 const wantsConversation = args.context_mode === 'parent_conversation'
                     || args.tasks?.some(task => task.context_mode === 'parent_conversation');
                 const conversation = wantsConversation && runtime?.parentConversation
-                    ? structuredClone(runtime.parentConversation) : undefined;
+                    ? structuredClone({ ...runtime.parentConversation, snapshot: redactParentConversationSnapshot(runtime.parentConversation.snapshot, configuredChatSecrets(plugin?.env?.settings?.pkmAssistant?.chat)) }) : undefined;
                 const agentManager = plugin?.agentManager;
                 if (!agentManager) {
                     return { success: false, error: t('mcp.delegate.no_agent_manager') };

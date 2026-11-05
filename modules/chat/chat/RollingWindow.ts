@@ -1,3 +1,5 @@
+import { sessionMessageId, bindSessionMessageId } from '../../memory/index.js';
+import type { AttachmentManager, MentionAutocomplete } from '../../ui-components/index.js';
 import { fenceUntrusted, countTokensFromStats, countNonAsciiChars } from '../../../core/index.js';
 import { ParentConversationProjection } from '../../sub-agents/index.js';
 import { Summarizer } from './Summarizer.js';
@@ -143,6 +145,9 @@ export interface ToolCall {
 }
 
 export interface RollingMessage extends LoopMessage {
+    userAttachments?: AttachmentManager['attachments'];
+    userMentions?: ReturnType<MentionAutocomplete['getMentions']>;
+    sessionMessageId?: string;
     tool_call_id?: string;
     content?: string | null | ContentBlock[];
     tool_calls?: ToolCall[];
@@ -207,6 +212,8 @@ interface RollingWindowOptions {
  * To jest osobny system od TokenTracker (który liczy in/out API usage).
  */
 export class RollingWindow {
+    removedMessageIds: string[] = [];
+    removedMessageRanges: Array<{ from: string; to: string }> = [];
     parentConversation = new ParentConversationProjection();
     declare maxTokens: number;
     declare baseSystemPrompt: string;
@@ -403,7 +410,10 @@ export class RollingWindow {
             }
         }
 
-        const message = { role, content, ...metadata };
+        const { sessionMessageId: restoredId, ...fields } = metadata;
+        const message = { role, content, ...fields };
+        if (restoredId) bindSessionMessageId(message, restoredId);
+        else sessionMessageId(message);
         this.parentConversation.append(message, true);
         this.messages.push(message);
 
@@ -436,7 +446,12 @@ export class RollingWindow {
 
     /** User removal differs from compression: revoke both full text and older excerpts. */
     removeMessages(start: number, count = this.messages.length - start): void {
-        for (const message of this.messages.splice(start, count)) this.parentConversation.remove(message);
+        const removed = this.messages.splice(start, count);
+        if (removed.length) this.removedMessageRanges.push({ from: sessionMessageId(removed[0]), to: sessionMessageId(removed[removed.length - 1]) });
+        for (const message of removed) {
+            this.removedMessageIds.push(sessionMessageId(message));
+            this.parentConversation.remove(message);
+        }
     }
 
     /**
@@ -951,6 +966,8 @@ export class RollingWindow {
      * Czyści historię i summary (ale zachowuje base system prompt)
      */
     clear(): void {
+        this.removedMessageIds = [];
+        this.removedMessageRanges = [];
         this.parentConversation = new ParentConversationProjection();
         this.messages = [];
         this.conversationSummary = '';

@@ -303,3 +303,10 @@ Klasy: `cs-tile--conversation`, `cs-parent-conversation__badge`,
 `cs-parent-conversation__details`. Wygląd i zawijanie w wąskim panelu ustala wyłącznie
 CSS czatu. Teksty są przekazywane przez adapter i renderowane jako tekst, bez HTML.
 Bez `conversation` DOM i zachowanie komponentu pozostają niezmienione.
+
+### 2.4.5 F5 — odtworzenie chipów podczas edycji
+
+`AttachmentManager.snapshotAttachments()` / `restoreAttachments()` kopiują załączniki
+wiadomości w RAM i odświeżają pasek. `MentionAutocomplete.restoreMentions()` odtwarza
+kopie referencji i zgłasza onChange. Czat używa ich przy edycji/ponowieniu, bez wklejania
+rozwiniętej zawartości do pola użytkownika; nie są mechanizmem trwałego zapisu plików.

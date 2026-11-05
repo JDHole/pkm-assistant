@@ -947,5 +947,19 @@ string, zachowuje whitespace). `parseActiveSession` waliduje ten kształt i zwra
 obiektu wiadomości. Format zachowuje wersję 3 i dotychczasową treść `content`.
 `AgentMemory._appendMessageAsEvent` przenosi pole również podczas dopisywania ogona autosave.
 Przechowywany jest osobny tekst użytkownika, nie snapshot rozmowy ani zgoda. Chat restore
-używa go wyłącznie do projekcji rodzica, nigdy nie odtwarza go z nierozdzielalnego legacy content.
+używa go do projekcji rodzica oraz tekstu edycji, nigdy nie odtwarza go z nierozdzielalnego legacy content.
 Testy round-trip: `../chat/chat/chat_session.test.ts`, `../chat/chat/chat_streaming.parentConversation.test.ts`.
+
+### 2.4.5 F5 — trwałe usunięcie gałęzi
+
+`saveSession(messages, metadata, changes?)` dopisuje event
+`changes` niesie usunięte ID/zakresy i opcjonalną oczekiwaną ścieżkę/epokę. Event
+`messages_removed` (pola `removed_messages`, `removed_ranges`) zamiast przepisywać dziennik.
+Nowe wiadomości mają opcjonalne `message_id`; parser starszym blokom A/B/mieszanym nadaje
+stabilną tożsamość według kolejności bloków wiadomości. `sessionMessageId` / `bindSessionMessageId`
+przenoszą ją w WeakMap, poza treścią dla modelu. Parser stosuje usunięcia przed restore;
+zakres między końcami gałęzi obejmuje także telemetryczne wiadomości spoza okna.
+Autozapis wiadomości z ID dopisuje brakujące ID, a dla starych wołaczy bez ID zachowuje
+licznik ogona. Kompresja okna nie zgłasza usunięć. Stary format pozostaje czytelny;
+starszy plugin nie honoruje nowych zdarzeń usunięcia (downgrade nie zachowuje tej ochrony).
+Testy F5-1: `../chat/chat/chat_session.test.ts` — zapis, oba restore, format mieszany i kompresja.

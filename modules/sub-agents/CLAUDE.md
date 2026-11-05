@@ -761,3 +761,14 @@ wiadomości z `append`, bez przechowywania jej surowej treści. `RollingWindow` 
 projekcji ten sam obiekt, który przechowuje w oknie. Usunięcie nie przebudowuje projekcji
 z okna po kompresji i nie pobiera skażonego `conversationSummary`; zamrożone kopie pozostają
 niezmienne. Nierozdzielalne wiadomości legacy nadal są pomijane.
+
+### 2.4.5 F5 — redakcja przed wyciągami
+
+`ParentConversationProjection` trzyma pełne tekstowe źródła zachowanych wpisów także
+przy starszych wyciągach i wynikach narzędzi. Snapshot ma tylko dotychczasowy publiczny
+kształt; prywatny WeakMap wiąże go z zamrożonym źródłem do ponownej redakcji pełnych wartości.
+`redactParentConversationSnapshot(snapshot, knownSecrets?)` redaguje PRZED limitami 160/240
+znaków; DelegateTool wywołuje go przed structuredClone, zgoda przed podglądem i budżetem.
+Dopasowanie sk- bez granicy słowa jest lokalne dla eksportu. Globalny SensitiveDataGuard
+pozostaje bez zmian. Surowe źródła nie są serializowane ani przekazywane dziecku.
+Testy F5-3 w `../tools/DelegateTool.parentConversation.test.ts`: podgląd i realny payload.

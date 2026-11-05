@@ -410,3 +410,73 @@ test('P1: zapis i restore przenosi tylko jawne źródło tekstu użytkownika do 
         { role: 'assistant', content: 'Odpowiedź' },
     ]);
 });
+
+
+// Full storage round-trip: the append-only log must not resurrect a removed branch.
+import { handleSaveSession } from './chat_session.js';
+import { _chatExecuteToolCall } from './chat_streaming.js';
+import type { ExecuteToolCallOptions } from '../../tools/index.js';
+import { AgentMemory } from '../../memory/index.js';
+import { startEditMessage, addMessageActions } from './chat_messages.js';
+
+for (const operation of ['edit', 'delete'] as const) for (const storage of ['current', 'legacy', 'fallback', 'compressed'] as const) {
+    test.serial(`F5-1: ${operation} → pytanie → zapis → restore → delegacja (${storage})`, async t => {
+        const files = new Map<string, string>();
+        const memory = new AgentMemory({ adapter: {
+            exists: async path => files.has(path), read: async path => { if (!files.has(path)) throw new Error('missing'); return files.get(path)!; },
+            write: async (path, text) => { files.set(path, text); }, mkdir: async () => {}, list: async () => ({ files: [] }),
+        } }, 'Mira');
+        const path = memory.paths.sessionsActive + '/branch.md';
+        files.set(path, '---\nepoch: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n---\n');
+        memory.setActiveSessionIdentity(path, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+        let rw = new RollingWindow({ summarizer: { triggerThreshold: 0.9, summarize: async () => 'Skrót modelu' } });
+        await rw.addMessage('user', 'Zostaje', { parentConversationText: 'Zostaje' });
+        await rw.addMessage('user', 'USUNIĘTY SEKRET', { parentConversationText: 'USUNIĘTY SEKRET' });
+        for (let i = 0; i < 9; i++) await rw.addMessage('assistant', 'Dalsza odpowiedź');
+        await memory.saveSession(rw.messages);
+        const view = buildFakeThis([], [{ path, epoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }]);
+        view.plugin.agentManager.getActiveAgent = () => ({ name: 'Mira' });
+        view.plugin.agentManager.getAllAgents = () => [{ name: 'Mira' }];
+        view.plugin.agentManager.getActiveMemory = () => memory;
+        view.plugin.agentManager.getAgentMemory = () => memory;
+        memory.listActiveSessions = async () => [{ path, name: 'branch.md', agent: 'Mira', created: '', mtime: 1, size: 0, label: 'Mira' }];
+        if (storage === 'legacy') {
+            files.set(path, '---\nepoch: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n---\n' + formatSessionEvent('user_message', { content: 'Zostaje', parent_conversation_text: { text: 'Zostaje' } }, '2026-11-05T00:00:00Z')
+                + formatSessionEvent('user_message', { content: 'USUNIĘTY SEKRET', parent_conversation_text: { text: 'USUNIĘTY SEKRET' } }, '2026-11-05T00:00:01Z')
+                + Array<string>(9).fill('\n## Assistant\n\nDalsza odpowiedź\n').join('').trimEnd());
+            await _restoreActiveSession.call(view);
+            rw = view.rollingWindow;
+        }
+        if (storage === 'fallback') {
+            memory.listActiveSessions = async () => [];
+            memory.restoreActiveSession = async () => path;
+        }
+        view.rollingWindow = rw;
+        view.input_area = { value: '', focus() {} };
+        if (operation === 'edit') startEditMessage.call(view, 1, 'USUNIĘTY SEKRET');
+        else {
+            const buttons = createDiv();
+            addMessageActions.call(view, buttons, 'USUNIĘTY SEKRET', 'user', 1);
+            (buttons.children[1] as HTMLButtonElement).onclick!({ stopPropagation() {} } as MouseEvent);
+        }
+        await rw.addMessage('user', 'Bezpieczne pytanie', { parentConversationText: 'Bezpieczne pytanie' });
+        if (storage === 'compressed') await rw.performSummarization(true);
+        await handleSaveSession.call(view);
+        await _restoreActiveSession.call(view);
+        let delegated: ExecuteToolCallOptions | undefined;
+        view.plugin.mcpClient = { executeToolCall: async (_call: unknown, _agent: string, options: ExecuteToolCallOptions) => { delegated = options; return { success: true }; } };
+        await _chatExecuteToolCall.call(view, { parentConversation: view.rollingWindow.parentConversation,
+            origin: { agentName: 'Mira', sessionPath: path, sessionEpoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }, turnId: 1,
+            chatModel: { providerId: 'openai' }, agentName: 'Mira', rawResults: new Map(),
+        } as never, { id: 'd', name: 'delegate', arguments: '{}' }, { resultBudgetChars: 0, shouldAbort: () => false, assistantText: 'Deleguję' });
+        const snapshot = delegated!.parentConversation!.snapshot;
+        t.deepEqual(snapshot.messages.map((m: { text: string }) => m.text), operation === 'edit'
+            ? ['Zostaje', 'Bezpieczne pytanie', 'Deleguję']
+            : [...Array<string>(6).fill('Dalsza odpowiedź'), 'Bezpieczne pytanie', 'Deleguję']);
+        t.is(snapshot.summary, operation === 'edit' ? '' : '[1 user] Zostaje\n[2 assistant] Dalsza odpowiedź\n[3 assistant] Dalsza odpowiedź\n[4 assistant] Dalsza odpowiedź');
+        t.false(JSON.stringify(snapshot).includes('USUNIĘTY SEKRET'));
+        await handleSaveSession.call(view);
+        await _restoreActiveSession.call(view);
+        t.false(JSON.stringify(view.rollingWindow.parentConversation.snapshot()).includes('USUNIĘTY SEKRET'));
+    });
+}

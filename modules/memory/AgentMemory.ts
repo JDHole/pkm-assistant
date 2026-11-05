@@ -1,3 +1,4 @@
+import { knownSessionMessageId, sessionMessageId } from './sessionMessageIdentity.js';
 /**
  * AgentMemory - Hierarchical memory management per agent
  *
@@ -1056,8 +1057,8 @@ epoch: ${epoch}
         const text = Array.isArray(msg?.content)
             ? (msg.content as Array<{ text?: string; content?: string }>).map(c => c?.text || c?.content || '').filter(Boolean).join('\n')
             : _nullishToString(msg?.content);
-        const event: { parent_conversation_text?: { text: string }; content: string; seq: number; role?: string; tool_call_id?: string; tool_calls?: unknown[]; question?: SessionQuestion } =
-            { content: text, seq: this._nextSeq(path, content) };
+        const event: { message_id?: string; parent_conversation_text?: { text: string }; content: string; seq: number; role?: string; tool_call_id?: string; tool_calls?: unknown[]; question?: SessionQuestion } =
+            { content: text, seq: this._nextSeq(path, content), ...(knownSessionMessageId(msg) ? { message_id: sessionMessageId(msg) } : {}) };
         if (msg.parentConversationText !== undefined) event.parent_conversation_text = { text: msg.parentConversationText };
         if (role === 'system') event.role = 'system';
         // Kod review MAJOR #3: SAMA gałąź co pisarz per-event w `chat_streaming.ts`
@@ -1242,8 +1243,9 @@ epoch: ${epoch}
      * SIATKĄ BEZPIECZEŃSTWA: dopisuje ogon `messages`, którego czytnik w pliku nie widzi.
      *
      * Reguły:
-     *  - `messages.length <= K` (K = wiadomości widziane w pliku) → treści NIE ruszamy w ogóle;
-     *    plik jest nadzbiorem okna i ma nim zostać,
+     *  - wiadomości z tożsamością: dopisujemy brakujące ID; jawne usunięcia osobnym eventem,
+     *  - legacy bez ID: `messages.length <= K` (K = wiadomości widziane w pliku) → bez ogona;
+     *    kompresja sama w sobie nigdy nie usuwa historii z pliku,
      *  - ogon dopisujemy jako EVENTY (format A), nie transkrypt, i logujemy `warn` — niepusty
      *    ogon znaczy, że pisarz zdarzeń coś przegapił, a to ma być widoczne,
      *  - frontmatter: ruszamy WYŁĄCZNIE `updated` i `messageCount` (`_setFrontmatterField`,
@@ -1256,12 +1258,16 @@ epoch: ${epoch}
      * @param metadata - Session metadata
      * @returns Path to saved session
      */
-    async saveSession(messages: ChatMessageLike[] | null | undefined, metadata: TranscriptMetadata = {}): Promise<string> {
-        const list: ChatMessageLike[] = Array.isArray(messages) ? messages : [];
+    async saveSession(messages: ChatMessageLike[] | null | undefined, metadata: TranscriptMetadata = {}, changes: { removedMessageIds?: readonly string[]; removedRanges?: readonly { from: string; to: string }[]; expectedSession?: { path: string; epoch: string | null } } = {}): Promise<string> {
+        const list: ChatMessageLike[] = Array.isArray(messages) ? [...messages] : [];
+        const removed = new Set(changes.removedMessageIds);
+        const removedRanges = changes.removedRanges?.map(range => ({ ...range })) ?? [];
         // Reuse existing session file if already saved (prevents duplicates)
         let path: string;
-        const isNewFile = !this.activeSessionPath;
-        if (this.activeSessionPath) {
+        const isNewFile = !changes.expectedSession && !this.activeSessionPath;
+        if (changes.expectedSession) {
+            path = changes.expectedSession.path;
+        } else if (this.activeSessionPath) {
             path = this.activeSessionPath;
         } else {
             // Ta gałąź NIE zakłada plik wprost pod `paths.sessions` (płaski, legacy folder) —
@@ -1305,12 +1311,20 @@ epoch: ${epoch}
                 throw new Error(`saveSession: nie mogę odczytać istniejącego pliku sesji — nie nadpisuję: ${path} (${causeText(probe.cause)})`);
             }
             const existing = probe.state === 'content' ? probe.content : '';
+            if (changes.expectedSession && (!existing || (parseFrontmatter(existing).epoch ?? null) !== changes.expectedSession.epoch)) {
+                throw new Error('saveSession: frozen session missing or epoch mismatch');
+            }
 
-            const known = parseActiveSession(existing).messages.length;
+            const parsedMessages = parseActiveSession(existing).messages;
+            const knownIds = new Set(parsedMessages.map(sessionMessageId));
+            const known = parsedMessages.filter(msg => !removed.has(sessionMessageId(msg))).length;
             // Baza ogona: większa z „ile widać w pliku" i „ile już dopisaliśmy w tym biegu"
             // (patrz `_sessionSavedCounts` w konstruktorze — chroni przed dublowaniem).
             const base = Math.max(known, this._sessionSavedCounts.get(path) || 0);
-            const tail = list.length > base ? list.slice(base) : [];
+            const tail = list.filter((msg, index) => {
+                const id = knownSessionMessageId(msg);
+                return id ? !knownIds.has(id) && !removed.has(id) : index >= base;
+            });
 
             let content = existing;
             let createdEpoch: string | null = null;
@@ -1336,6 +1350,10 @@ epoch: ${epoch}
                 content = `${header}\n\n# ${this.agentName} session ${created}\n\n`;
             }
 
+            if (removed.size > 0) {
+                const removal = formatSessionEvent('messages_removed', { removed_messages: [...removed], removed_ranges: removedRanges, seq: this._nextSeq(path, content) }, now);
+                content = content.endsWith('\n') ? content + removal : content + '\n' + removal;
+            }
             for (const msg of tail) {
                 content = this._appendMessageAsEvent(content, path, msg, now);
             }
@@ -1350,7 +1368,7 @@ epoch: ${epoch}
             content = this._setFrontmatterField(content, 'updated', now);
             // `messageCount` = ile wiadomości widzi czytnik W PLIKU (K + ogon), nie ile
             // pozycji listy pokryliśmy (`base` może być wyżej po niewidocznych blokach).
-            content = this._setFrontmatterField(content, 'messageCount', known + tail.length);
+            content = this._setFrontmatterField(content, 'messageCount', removed.size > 0 ? parseActiveSession(content).messages.length : known + tail.length);
             if (content !== existing) await this._writeSessionFile(path, content);
             if (createdEpoch && this.activeSessionPath === path && this._sessionIdentityRevision === identityRevision) {
                 this.sessionEpoch = createdEpoch;

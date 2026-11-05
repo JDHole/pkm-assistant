@@ -194,7 +194,8 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
             continue;
         }
 
-        const uiText = typeof msg.content === 'string' ? msg.content : this._contentBlocksToText(msg.content);
+        const uiText = msg.role === 'user' && typeof msg.parentConversationText === 'string' ? msg.parentConversationText
+            : typeof msg.content === 'string' ? msg.content : this._contentBlocksToText(msg.content);
 
         if (msg.role === 'user') {
             // Wiadomość maszynowa (spec A3) - meta na żywo, albo (po restarcie Obsidiana, meta
@@ -423,6 +424,7 @@ export function _renderUserText(this: ChatViewLike, container: HTMLElement, text
 }
 
 export function addMessageActions(this: ChatViewLike, metaEl: HTMLElement, content: string, role: MessageRole, idx: number): void {
+    const actionMessage = this.rollingWindow.messages[idx];
     // Copy button
     const copyBtn = metaEl.createEl('button', { cls: 'cs-message__meta-btn' });
     setSvg(copyBtn, UiIcons.copy(12));
@@ -440,19 +442,11 @@ export function addMessageActions(this: ChatViewLike, metaEl: HTMLElement, conte
     deleteBtn.setAttribute('aria-label', t('chat.msg.delete'));
     deleteBtn.onclick = (e: MouseEvent) => {
         e.stopPropagation();
-        if (idx < this.rollingWindow.messages.length &&
-            this.rollingWindow.messages[idx].content === content &&
-            this.rollingWindow.messages[idx].role === role) {
-            this.rollingWindow.removeMessages(idx, 1);
+        const foundIdx = this.rollingWindow.messages.indexOf(actionMessage);
+        if (foundIdx >= 0) {
+            this.rollingWindow.removeMessages(foundIdx, 1);
             void this.render_messages();
             this.updateTokenCounter();
-        } else {
-            const foundIdx = this.rollingWindow.messages.findIndex((m: RollingMessage) => m.content === content && m.role === role);
-            if (foundIdx > -1) {
-                this.rollingWindow.removeMessages(foundIdx, 1);
-                void this.render_messages();
-                this.updateTokenCounter();
-            }
         }
     };
 
@@ -460,7 +454,7 @@ export function addMessageActions(this: ChatViewLike, metaEl: HTMLElement, conte
         const editBtn = metaEl.createEl('button', { cls: 'cs-message__meta-btn' });
         setSvg(editBtn, UiIcons.edit(12));
         editBtn.setAttribute('aria-label', t('chat.msg.edit'));
-        editBtn.onclick = (e: MouseEvent) => { e.stopPropagation(); this.startEditMessage(idx, content); };
+        editBtn.onclick = (e: MouseEvent) => { e.stopPropagation(); this.startEditMessage(this.rollingWindow.messages.indexOf(actionMessage), content); };
     }
 
     if (role === 'assistant') {
@@ -515,15 +509,20 @@ export function addMessageActions(this: ChatViewLike, metaEl: HTMLElement, conte
     }
 }
 
-export function startEditMessage(this: ChatViewLike, msgIndex: number, originalContent: string): void {
+export function startEditMessage(this: ChatViewLike, msgIndex: number, _originalContent: string): void {
     // For simplicity, just remove messages from index and resend
     const messages = this.rollingWindow.messages;
     if (msgIndex >= 0 && msgIndex < messages.length) {
+        const message = messages[msgIndex];
+        // Legacy content cannot be split reliably into user text and file contents.
+        const source = message.parentConversationText ?? '';
+        this.attachmentManager?.restoreAttachments(message.userAttachments ?? []);
+        this.mentionAutocomplete?.restoreMentions(message.userMentions ?? []);
         // Remove edited message and all subsequent
         this.rollingWindow.removeMessages(msgIndex);
 
         void this.render_messages();
-        this.input_area.value = originalContent;
+        this.input_area.value = source;
         this.input_area.focus();
         // User can now edit and resend
     }
@@ -575,7 +574,10 @@ export async function regenerateLastResponse(this: ChatViewLike): Promise<void> 
     // Z ZAŁĄCZNIKIEM niesie tablicę bloków, nie string. `_joinTextBlocksForInput` łączy TYLKO
     // bloki `type === 'text'` (nowa linia między nimi) i zwraca string bez zmian - bez tego
     // pole wpisywania dostawało `[object Object]` (BUG C2).
-    const userContent = _joinTextBlocksForInput(messages[lastUserIdx].content);
+    const message = messages[lastUserIdx];
+    const userContent = message.parentConversationText ?? _joinTextBlocksForInput(message.content);
+    if (message.userAttachments) this.attachmentManager?.restoreAttachments(message.userAttachments);
+    if (message.userMentions) this.mentionAutocomplete?.restoreMentions(message.userMentions);
     // Proweniencja jedzie ZA tekstem — ponowienie nie może awansować wiadomości maszynowej
     // (np. powiadomienia o wyniku suba) do rangi „to pisał człowiek". Brak znacznika = maszyna.
     const userOrigin = resolveMessageOrigin(messages[lastUserIdx]);

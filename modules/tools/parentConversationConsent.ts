@@ -1,5 +1,5 @@
 import type { ApprovalManager } from '../../core/index.js';
-import { maskSensitiveData, redactSecretValues } from '../../core/index.js';
+import { redactParentConversationSnapshot } from '../sub-agents/index.js';
 import { t } from '../../core/i18n/index.js';
 import type { ParentConversationContext } from '../sub-agents/index.js';
 import type { prepareDelegateExecution } from './DelegateTool.js';
@@ -53,12 +53,9 @@ export async function prepareParentConversationDelegation(request: Request): Pro
     if (request.signal.aborted) return refuse('cancelled');
     if (!request.parentConversation || !request.validate()) return refuse('invalid_source');
     // Capture synchronously, before preparation or the first await can change the source.
-    const redact = (text: string) => maskSensitiveData(redactSecretValues({ message: text, code: '', http_status: null }, request.knownSecrets ?? []).message);
-    const snapshot = request.parentConversation.snapshot;
-    const parentConversation = freezeCopy({ ...request.parentConversation, snapshot: {
-        ...snapshot, summary: redact(snapshot.summary),
-        messages: snapshot.messages.map(entry => ({ ...entry, text: redact(entry.text) })),
-    } });
+    const parentConversation = freezeCopy({ ...request.parentConversation,
+        snapshot: redactParentConversationSnapshot(request.parentConversation.snapshot, request.knownSecrets),
+    });
     const result = request.prepare();
     if (!result.success) return result;
     const prepared: PreparedParentDelegation = Object.freeze({
