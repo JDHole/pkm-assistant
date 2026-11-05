@@ -360,3 +360,31 @@ test('runner without effort sends the legacy request options', async t => {
     t.true(Array.isArray(messages));
     t.deepEqual(options, { max_tokens: 16384, tools: [{ type: 'function', function: { name: 'ask_parent', description: 'Ask the parent agent one specific question when information cannot be obtained with your tools.', parameters: { type: 'object', properties: { text: { type: 'string', description: 'The question for the parent agent.' } }, required: ['text'], additionalProperties: false } } }] });
 });
+
+test('F1 continuation rejects disjoint scopes before starting the model', async t => {
+    const registry = new SubTaskRegistry(); t.teardown(() => registry.dispose());
+    const runner = new SubAgentRunner({ toolRegistry: { getTool: () => null }, app: {}, plugin: { subTaskRegistry: registry } });
+    await runner.runTask('first', { name: owner.agentName }, config, done('first result'), { origin: owner, scopeFolders: ['Safe'] });
+    const thread = registry.listThreads(owner)[0];
+    let streams = 0;
+    const model = { stream(_payload: unknown, cb: { done(value: unknown): void }) {
+        streams++; cb.done({ choices: [{ message: { role: 'assistant', content: 'should not start' } }] });
+    } } as unknown as ChatModel;
+    const result = await runner.runTask('continue', { name: owner.agentName }, config, model,
+        { origin: owner, threadId: thread.threadId, scopeFolders: ['Other'] });
+    t.deepEqual([result.failed, result.result, streams, thread.phase], [true, tr('subagent.thread_refused'), 0, 'closed']);
+});
+
+test('F1 empty caller tool intersection denies read rather than restoring frozen tools', async t => {
+    const registry = new SubTaskRegistry(); t.teardown(() => registry.dispose());
+    let reads = 0;
+    const read = { ...tool('read'), execute: async () => { reads++; return 'secret'; } };
+    const runner = new SubAgentRunner({ toolRegistry: { getTool: () => read, filterByAgent: () => [read] }, app: {}, plugin: { subTaskRegistry: registry } });
+    const cfg = { ...config, tools: ['read'] };
+    await runner.runTask('first', { name: owner.agentName }, cfg, done('first result'), { origin: owner, callerToolNames: ['read'] });
+    const thread = registry.listThreads(owner)[0];
+    const result = await runner.runTask('continue', { name: owner.agentName }, cfg, toolThenAnswer('read', '{}', 'done'),
+        { origin: owner, threadId: thread.threadId, callerToolNames: ['write'] });
+    t.deepEqual([result.result, reads], ['done', 0]);
+    t.like(result.toolCallDetails[0], { resultPreview: tr('subagent.tool_not_allowed', { name: 'read' }) });
+});

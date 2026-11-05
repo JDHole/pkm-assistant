@@ -540,9 +540,11 @@ test('requestStop bez uchwytu zatrzaskuje Stop i przerywa późne attachAbort', 
 
 test('requestStop na nieznanym id zwraca false', t => {
     const reg = new SubTaskRegistry();
-    reg.attachAbort('sub/pkm-sub#duch', () => { t.fail('uchwyt sieroty nie ma prawa się odpalić'); });
+    let aborted = 0;
+    reg.attachAbort('sub/pkm-sub#duch', () => { aborted++; });
 
     t.false(reg.requestStop('sub/pkm-sub#duch'));
+    t.is(aborted, 1, 'brak żywego biegu lub rezerwacji oznacza natychmiastowy abort');
 });
 
 test('bieg NIE running nie da się zatrzymać (status running jest wymagany)', t => {

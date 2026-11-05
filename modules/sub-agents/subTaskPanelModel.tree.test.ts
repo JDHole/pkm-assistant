@@ -83,3 +83,18 @@ test('tree: plain rows retain input order and times are model data', t => {
         [['lena', 0, false, 0, '1:16'], ['iga', 0, false, 0, '0:42']]);
     t.false(tree.hierarchical);
 });
+
+test('F1 queued continuation uses the current reservation relation', t => {
+    const registry = new SubTaskRegistry(); t.teardown(() => registry.dispose());
+    const thread = registry.createThread({ threadId: 'child', name: 'Child', owner, origin: owner, config: {}, parentId: 'old-parent', level: 2 });
+    const run = registry.create({ id: 'old-child-run', threadId: thread.threadId, origin: owner, parentId: 'old-parent', level: 2 });
+    registry.finish(run, { text: 'done', toolsUsed: [], durationMs: 0, usage: null });
+    registry.endRun(thread.threadId, { successful: true });
+    for (const relation of [{ level: 1 }, { parentId: 'new-parent', level: 3 }]) {
+        registry.reserveContinuation(thread.threadId, owner, 'next-run', undefined, relation);
+        const row = rowsOf(registry)[0];
+        t.deepEqual([row.state.kind, row.parentId, row.level], ['queued', relation.parentId, relation.level]);
+        registry.beginRun(thread.threadId, owner, { reservedRunId: 'next-run' });
+        registry.endRun(thread.threadId, { successful: true });
+    }
+});

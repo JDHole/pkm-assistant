@@ -1,5 +1,7 @@
 # modules/tools/
 
+F1: `DelegateTool` odracza zwolnienie dzierżawy po logicznym końcu biegu, dopóki nie rozstrzygną się wszystkie rzeczywiste egzekutory narzędzi. `DelegateTool.coordinator.test.ts` mierzy aktywne modele i narzędzia niezależnie od schedulera; `DelegateTool.tree.test.ts` sprawdza zakres i narzędzia kontynuacji oraz nowego wnuka przez runner → MCP → delegację.
+
 `ask_user` przyjmuje opcjonalny `question_id` pytania suba, przekazywany w argumentach wywołania do czatu.
 
 Kanały `ask_user` tworzy `createAskUserChannels(registry)`. Każdy ma właściciela,

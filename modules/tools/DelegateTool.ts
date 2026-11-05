@@ -1536,9 +1536,24 @@ async function _withAdmission(
         off?.();
         running = true;
         // The actual runner owns the lease, even if its timeout returns before it settles.
+        let executors = 0;
+        let releaseRequested = false;
+        const releaseIfSettled = () => {
+            if (!releaseRequested || executors > 0) return;
+            lease?.release(); lease = undefined;
+        };
         const admissionControl: RunAdmission = {
-            release: () => { lease?.release(); lease = undefined; },
+            release: () => { releaseRequested = true; releaseIfSettled(); },
+            retainExecutor: () => {
+                executors++;
+                let settled = false;
+                return () => {
+                    if (settled) return;
+                    settled = true; executors--; releaseIfSettled();
+                };
+            },
             resume: async () => {
+                releaseRequested = false;
                 if (!lease) lease = await registry.acquire!(reservation.owner, runId, ctl.controller!.signal, group);
             },
         };

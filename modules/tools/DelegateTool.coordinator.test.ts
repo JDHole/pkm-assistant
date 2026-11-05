@@ -1,4 +1,5 @@
 import test from 'ava';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import type { ExecutionContext } from 'ava';
 import { createDelegateTool, createSubAgentTool, __test__, stopAllDelegations } from './DelegateTool.js';
 import { createAskUserChannels } from './AskUserChannels.js';
@@ -34,6 +35,9 @@ function fixture(t: ExecutionContext, options: { maxIterations?: number; fallbac
     const readStarted = deferred<void>();
     const questions = new Mailbox<ParentQuestion>();
     registry.events.on('question:opened', value => questions.push(value as ParentQuestion));
+    let liveExecutors = 0, maxExecutors = 0;
+    const enterExecutor = () => { liveExecutors++; maxExecutors = Math.max(maxExecutors, liveExecutors); };
+    const leaveExecutor = () => { liveExecutors--; };
     let maxWorking = 0;
     let maxStreamsPerModel = 0;
     let streams = 0;
@@ -47,11 +51,11 @@ function fixture(t: ExecutionContext, options: { maxIterations?: number; fallbac
         stream(payload: Payload, handlers: { done(value: unknown): void; error(error: Error): void }) {
             const key = payload.messages.find(message => message.role === 'user')!.content;
             const task = key.match(/(?:parent|child)-\d+/)![0];
-            this.active++; streams++; measure(); maxStreamsPerModel = Math.max(maxStreamsPerModel, this.active);
+            this.active++; streams++; enterExecutor(); measure(); maxStreamsPerModel = Math.max(maxStreamsPerModel, this.active);
             let settled = false;
-            const finish = (message: unknown) => { if (!settled) { settled = true; this.active--; } handlers.done({ choices: [{ message }] }); };
-            const fail = () => { if (!settled) { settled = true; this.active--; } handlers.error(new Error('controlled failure')); };
-            this.cancel = () => { if (!settled) { settled = true; this.active--; } };
+            const finish = (message: unknown) => { if (!settled) { settled = true; this.active--; leaveExecutor(); } handlers.done({ choices: [{ message }] }); };
+            const fail = () => { if (!settled) { settled = true; this.active--; leaveExecutor(); } handlers.error(new Error('controlled failure')); };
+            this.cancel = () => { if (!settled) { settled = true; this.active--; leaveExecutor(); } };
             mailbox(requests, task).push({ payload: structuredClone(payload),
                 complete: text => finish({ role: 'assistant', content: text }), fail,
                 calls: (...calls) => finish({ role: 'assistant', content: '', tool_calls: calls.map(([name, args], i) => ({
@@ -78,7 +82,7 @@ function fixture(t: ExecutionContext, options: { maxIterations?: number; fallbac
     const deps = { makeRunner: makeRunner as never };
     const delegate = createDelegateTool({}, deps);
     const control = createSubAgentTool({}, deps);
-    const tools = [delegate, control, createAskUserTool(), { name: 'read', description: 'read', inputSchema: {}, execute: () => { measure(); readStarted.resolve(); return read.promise; } }];
+    const tools = [delegate, control, createAskUserTool(), { name: 'read', description: 'read', inputSchema: {}, execute: () => { enterExecutor(); measure(); readStarted.resolve(); return read.promise.finally(leaveExecutor); } }];
     const toolRegistry = { getTool: (name: string) => tools.find(tool => tool.name === name) ?? null, filterByAgent: () => tools };
     modelsTest.setChatModelFactory(() => new Model() as never);
     const plugin = {
@@ -113,6 +117,7 @@ function fixture(t: ExecutionContext, options: { maxIterations?: number; fallbac
         activity: async (key: string, kind: RunActivity['kind']) => {
             let value: RunActivity; do { value = await mailbox(activities, key).next(); } while (value.kind !== kind);
         },
+        executors: () => ({ live: liveExecutors, max: maxExecutors }),
         metrics: () => ({ maxWorking, maxStreamsPerModel, streams }),
     };
 }
@@ -429,4 +434,29 @@ test.serial('P6 default 2: grandchild question -> parent -> lead ask_user -> Kub
     await __test__._settleBackground(true);
     t.deepEqual(f.registry.list().map(task => [task.status, task.result?.text]), [['done', 'Wynik rodzica'], ['done', 'Wynik wnuka']]);
     t.deepEqual([f.clock.pending, f.metrics().maxStreamsPerModel], [0, 1]);
+});
+
+for (const batch of [false, true]) test.serial(`F1 Stop retains lease until real executors settle (batch=${batch})`, async t => {
+    const f = fixture(t);
+    for (let i = 1; i <= 5; i++) await f.submit(`parent-${i}`);
+    const fifth = await f.next('parent-5');
+    fifth.calls(...(batch ? [['ask_parent', { text: 'wait' }], ['read', {}]] as Array<[string, Record<string, unknown>]> : [['read', {}]] as Array<[string, Record<string, unknown>]>));
+    await f.readStarted.promise;
+    const receipt = await f.submit('parent-6') as { task_id: string };
+    const stopped = f.registry.list().find(task => task.taskPreview?.includes('parent-5'))!;
+    t.deepEqual(f.executors(), { live: 5, max: 5 });
+    t.is(f.registry.getRunActivity(receipt.task_id), 'queued');
+    t.true(f.registry.requestStop(stopped.id));
+    // Drain ready promises, including logical completion and DelegateTool.finally(release).
+    await nextTurn();
+    t.is(stopped.status, 'aborted');
+    t.deepEqual(f.executors(), { live: 5, max: 5 });
+    t.is(f.metrics().streams, 5);
+    t.is(f.registry.getRunActivity(receipt.task_id), 'queued');
+    f.read.resolve('late read');
+    (await f.next('parent-6')).complete('sixth done');
+    for (let i = 1; i <= 4; i++) (await f.next(`parent-${i}`)).complete(`done-${i}`);
+    await __test__._settleBackground(true);
+    t.deepEqual(f.executors(), { live: 0, max: 5 });
+    t.is(f.metrics().streams, 6);
 });

@@ -3,7 +3,12 @@ import type { RunActivity, QuestionId } from './ParentQuestions.js';
 import type { SubTaskNotice } from './SubTaskNotifier.js';
 
 /** Runner work lease; FIFO resume preserves the run identity and admission group. */
-export interface RunAdmission { release(): void; resume(): Promise<void> }
+export interface RunAdmission {
+    release(): void;
+    resume(): Promise<void>;
+    /** Pins work until a non-waiting executor actually settles, even after logical Stop. */
+    retainExecutor?(): () => void;
+}
 
 /** One runner, one model loop. Sleeps only at batch-safe boundaries. */
 export class SubRunCoordinator {

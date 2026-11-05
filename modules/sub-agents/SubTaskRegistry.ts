@@ -252,7 +252,8 @@ export class SubTaskRegistry {
             || (!!parentId && (this._cancelledRuns.has(parentId) || !!this._tasks.get(parentId)?.stopRequested));
     }
     acquire(owner: Readonly<SubThreadOwner>, runId: string, signal: AbortSignal, group?: AdmissionGroup): Promise<Lease> {
-        if (this._cancelledRuns.has(runId) || this._startCancelled(owner)) {
+        const task = this._tasks.get(runId);
+        if (this._cancelledRuns.has(runId) || (task && (task.status !== 'running' || task.stopRequested)) || this._startCancelled(owner)) {
             return Promise.reject(new Error('Sub-agent admission cancelled'));
         }
         return this._scheduler.acquire(owner, runId, signal, group);
@@ -594,6 +595,7 @@ export class SubTaskRegistry {
             const task = payload as SubTask | undefined;
             if (!task?.id) return;
             this._aborts.delete(task.id);
+            this._cancelledRuns.delete(task.id);
             // Niedoręczone wiadomości do zakończonego biegu nie mają już adresata.
             this._messages.delete(task.id);
             this._inbox.close(task.id);
@@ -783,7 +785,11 @@ export class SubTaskRegistry {
     attachAbort(id: string, fn: () => void): void {
         try {
             if (!id || typeof fn !== 'function') return;
-            if (this._cancelledRuns.has(id) || this._stoppingAll) { fn(); return; }
+            const task = this._tasks.get(id);
+            const queued = !task && [...this._threads.values()].some(thread => thread.phase === 'queued'
+                && (thread.queuedRunId ?? thread.threadId) === id);
+            if (this._cancelledRuns.has(id) || this._stoppingAll || task?.stopRequested
+                || (task ? task.status !== 'running' : !queued)) { fn(); return; }
             this._aborts.set(id, fn);
         } catch (e) {
             log.warn('SubTaskRegistry', 'attachAbort() padł (bieg suba leci dalej):', e);
@@ -951,6 +957,7 @@ export class SubTaskRegistry {
                 if (task.status === 'running' || retained.has(id)) continue;
                 if ((task.origin?.sessionPath || '') !== sessionPath) continue;
                 this._tasks.delete(id);
+                this._cancelledRuns.delete(id);
                 this._traceScopes.delete(id);
                 this._aborts.delete(id);
                 this._messages?.delete?.(id);
@@ -997,6 +1004,7 @@ export class SubTaskRegistry {
             if (toDrop <= 0) break;
             if (task.status === 'running' || retained.has(id)) continue;
             this._tasks.delete(id);
+            this._cancelledRuns.delete(id);
             this._traceScopes.delete(id);
             this._aborts.delete(id);
             this._messages.delete(id);

@@ -1,5 +1,7 @@
 # modules/sub-agents/
 
+F1: kontynuacja przecina zamrożone `scopeFolders` i `callerToolNames` z ograniczeniami bieżącego wołającego, bez zmiany konfiguracji wątku. Rozłączne zakresy odmawiają startu; puste przecięcie narzędzi nie daje dostępu. Runner trzyma `RunAdmission.retainExecutor()` do rozstrzygnięcia każdego wykonawcy poza oczekującym `ask_parent`, również po logicznym Stopie. Zatrzaski Stopu są usuwane po końcu biegu i przez retencję; `attachAbort` bez żywego biegu/rezerwacji natychmiast abortuje. Wiersz `queued` bierze relację z rezerwacji. Testy F1: `SubAgentRunner.thread.test.ts`, `SubTaskRegistry.stopTree.test.ts`, `subTaskPanelModel.tree.test.ts` oraz `../tools/DelegateTool.{coordinator,tree}.test.ts`.
+
 Zegar pytania po zbyt wczesnym wywołaniu timera uzbraja go ponownie na
 pozostały czas; termin nadal rozstrzyga zegar monotoniczny.
 

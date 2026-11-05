@@ -195,7 +195,7 @@ function renderTreeNode(host: El, parent: El, node: StripTreeNode, ctx: SubTaskS
         const stop = line.createEl('button', { cls: 'pkm-substrip__stop pkm-substrip__tree-stop',
             text: t(!node.canStop ? 'chat.substrip.tree_stopped' : stopping ? 'chat.substrip.stopping' : 'chat.substrip.stop'),
             attr: { type: 'button', 'data-substrip-control': `stop:${row.id}`,
-                'aria-label': `${t('chat.substrip.stop_aria', { name: row.name })}, ${t('chat.substrip.tree_stop_hint', { count: node.stopDescendantCount })}` } });
+                'aria-label': `${t('chat.substrip.stop_aria', { name: row.name })}, ${t(`chat.substrip.tree_stop_hint_${pluralCategory(node.stopDescendantCount)}`, { count: node.stopDescendantCount })}` } });
         stop.disabled = !node.canStop || stopping;
         stop.addEventListener('click', event => {
             event.stopPropagation();
@@ -203,7 +203,7 @@ function renderTreeNode(host: El, parent: El, node: StripTreeNode, ctx: SubTaskS
             for (const id of node.stopRunIds) safeCall(() => registry?.requestStop?.(id, 'user'), false);
             refresh(`stop:${row.id}`);
         });
-        if (node.canStop) group.createDiv({ cls: 'pkm-substrip__stop-hint', text: t('chat.substrip.tree_stop_hint', { count: node.stopDescendantCount }) });
+        if (node.canStop) group.createDiv({ cls: 'pkm-substrip__stop-hint', text: t(`chat.substrip.tree_stop_hint_${pluralCategory(node.stopDescendantCount)}`, { count: node.stopDescendantCount }) });
     }
     if (row.state.kind === 'queued') {
         const control = `info:${row.id}`;

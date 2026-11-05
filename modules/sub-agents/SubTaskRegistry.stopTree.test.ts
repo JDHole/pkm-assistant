@@ -144,3 +144,20 @@ test('Stop rejects a synchronous answer from another question close observer bef
     ]);
     t.is(clock.pending, 0);
 });
+
+for (const prune of [false, true]) test(`F1 cancellation latches follow retention; late attach aborts (prune=${prune})`, t => {
+    const registry = new SubTaskRegistry({ maxDone: 1 });
+    t.teardown(() => registry.dispose());
+    for (let i = 0; i <= 100; i++) {
+        const task = registry.create({ id: `stopped-${i}`, origin: owner });
+        registry.requestStop(task.id);
+        registry.finish(task, result);
+    }
+    if (prune) registry.pruneSession(owner.sessionPath);
+    t.is(registry.list().length, prune ? 0 : 1);
+    // Memory retention is the bug under test, so inspect the actual retained latch map.
+    t.is((registry as unknown as { _cancelledRuns: Map<string, unknown> })._cancelledRuns.size, 0);
+    const aborted: string[] = [];
+    for (const id of ['stopped-0', 'stopped-100']) registry.attachAbort(id, () => aborted.push(id));
+    t.deepEqual(aborted, ['stopped-0', 'stopped-100']);
+});

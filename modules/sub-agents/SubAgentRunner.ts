@@ -10,7 +10,7 @@ import type { RunAgentLoopOptions, ToolExecutionContext, AgentLoopPartialSnapsho
 import { log } from '../../core/utils/Logger.js';
 import { t } from '../../core/i18n/index.js';
 import { getLimits, sanitizeLimit } from '../../config/limits.js';
-import { countTokens } from '../../core/index.js';
+import { AccessGuard, countTokens } from '../../core/index.js';
 // „Co jest porażką narzędzia" liczy ta sama funkcja, co status chipa w czacie.
 import { resolveWorkPrompt, maskSensitiveData, sanitizePath, toolResultStatus, configuredChatSecrets } from '../../core/index.js';
 import type { PluginApi, AppLike, WorkPromptSettings } from '../../core/index.js';
@@ -374,7 +374,15 @@ export class SubAgentRunner {
             }
             try {
                 config = structuredClone(frozen.subConfig as SubAgentData);
-                options = { ...options, ...(frozen.options as Partial<RunOptions>), threadId: options.threadId, delegationDepth: options.delegationDepth, parentId: options.parentId };
+                const frozenOptions = frozen.options as Partial<RunOptions>;
+                const scope = AccessGuard.intersectScopeFolders(frozenOptions.scopeFolders, options.scopeFolders);
+                if (scope?.length === 0) throw new Error('Disjoint continuation scope');
+                const callerToolNames = frozenOptions.callerToolNames === undefined ? options.callerToolNames
+                    : options.callerToolNames === undefined ? frozenOptions.callerToolNames
+                    : frozenOptions.callerToolNames.filter(name => options.callerToolNames!.includes(name));
+                options = { ...options, ...frozenOptions, threadId: options.threadId,
+                    delegationDepth: options.delegationDepth, parentId: options.parentId,
+                    scopeFolders: scope?.filter((entry): entry is string => typeof entry === 'string'), callerToolNames };
             } catch (error) {
                 log.warn('SubAgent', `Wątek ${thread.threadId} ma nieprawidłową konfigurację: ${String(error)}`);
                 registry?.endRun?.(thread.threadId, { successful: false });
@@ -710,6 +718,8 @@ export class SubAgentRunner {
                 // Numer wywołania łapiemy PRZY STARCIE (kolejność tablicy pętli),
                 // a nie przy zakończeniu - wywołania jednego batcha rozstrzygają się równolegle.
                 executeToolCall: async (toolCall, runtimeContext) => {
+                    // Waiting for a parent is idle; every other executor pins the lease through Stop.
+                    const releaseExecutor = toolCall.name === 'ask_parent' ? undefined : options.admission?.retainExecutor?.();
                     try {
                     const seq = toolCallSeq++;
                     let args: unknown = toolCall.arguments;
@@ -748,7 +758,7 @@ export class SubAgentRunner {
                             fail: () => failEffect(seq) });
                     detail.resultPreview = _maskHandoffText(result, knownSecrets).slice(0, 500);
                     return result;
-                    } finally { coordinator?.toolDone(); }
+                    } finally { releaseExecutor?.(); coordinator?.toolDone(); }
                 },
                 hooks: {
                     ...steerHooks,
@@ -1070,7 +1080,7 @@ export class SubAgentRunner {
         const parentVisible = parentAgent && typeof this.toolRegistry.filterByAgent === 'function'
             ? new Set<string>(this.toolRegistry.filterByAgent(parentAgent).map((t) => t.name))
             : null;
-        const callerVisible = Array.isArray(callerToolNames) && callerToolNames.length > 0
+        const callerVisible = Array.isArray(callerToolNames)
             ? new Set<string>(callerToolNames)
             : null;
 

@@ -344,10 +344,11 @@ export function buildStripModel({ tasks, pending, threads, tabKey = '', agentNam
         else state = runState(lastRun);
         const runNumber = thread.runIds.length;
         const maxRuns = getThreadRunLimit?.(thread.threadId);
+        const relation = thread.phase === 'queued' ? thread : activeRun ?? lastRun ?? thread;
         return {
             id: thread.threadId, threadId: thread.threadId, name: thread.name, state, reusable: thread.reusable, questionState: (activeRun ?? lastRun)?.questionState ?? { kind: 'none' },
-            ...((activeRun ?? lastRun)?.parentId !== undefined ? { parentId: (activeRun ?? lastRun)?.parentId } : !lastRun && thread.parentId !== undefined ? { parentId: thread.parentId } : {}),
-            ...((activeRun ?? lastRun)?.level !== undefined ? { level: (activeRun ?? lastRun)?.level } : !lastRun && thread.level !== undefined ? { level: thread.level } : {}),
+            ...(relation.parentId !== undefined ? { parentId: relation.parentId } : {}),
+            ...(relation.level !== undefined ? { level: relation.level } : {}),
             runs, runNumber, runLimit: Number.isFinite(maxRuns) && Number(maxRuns) > 0 ? Number(maxRuns) : null,
             durationMs: runs[runs.length - 1]?.durationMs || 0,
             taskPreview: runs[runs.length - 1]?.taskPreview || '',

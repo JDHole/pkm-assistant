@@ -932,7 +932,7 @@ test.serial('tree DOM: asks the actual parent, escalates to lead and Stop reache
     registry.openParentQuestion('lena-run', 'Pomóż');
     renderSubTaskStrip(host as never, ctx);
     t.is(byClass(host, 'state')[0].textContent, 'pyta prowadzącego');
-    t.deepEqual(byClass(host, 'stop-hint').map(n => n.textContent), ['zatrzyma też 3 subów pod nim', 'zatrzyma też 1 subów pod nim']);
+    t.deepEqual(byClass(host, 'stop-hint').map(n => n.textContent), ['zatrzyma też 3 suby pod nim', 'zatrzyma też 1 suba pod nim']);
     const stopped: string[] = [];
     for (const id of ['lena-run', 'marek-run', 'worker-run']) registry.attachAbort(id, () => {
         stopped.push(id);
@@ -992,4 +992,29 @@ test.serial('tree DOM: naturally finished branches show finished, never a false 
     t.deepEqual(byClass(host, 'tree-stop').map(n => n.textContent), []);
     t.is(control(host, 'toggle:parent').attributes['aria-expanded'], 'true');
     t.is(textTree(byClass(host, 'summary')[0]).trim(), '0 pracuje, 0 w kolejce  · 2 zadania');
+});
+
+test.serial('F1 Stop hint plural forms are literal in the DOM and aria label', t => {
+    t.teardown(() => setLocale('en'));
+    for (const [count, pl, en] of [
+        [1, '1 suba', '1 sub'], [2, '2 suby', '2 subs'], [3, '3 suby', '3 subs'], [4, '4 suby', '4 subs'],
+        [5, '5 subów', '5 subs'], [12, '12 subów', '12 subs'], [13, '13 subów', '13 subs'], [14, '14 subów', '14 subs'],
+        [22, '22 suby', '22 subs'], [23, '23 suby', '23 subs'], [24, '24 suby', '24 subs'],
+    ] as const) {
+        const registry = new SubTaskRegistry();
+        t.teardown(() => registry.dispose());
+        registry.createThread({ threadId: 'root', name: 'Root', owner, origin: owner, config: {} });
+        registry.create({ id: 'root-run', threadId: 'root', origin: owner });
+        for (let i = 0; i < count; i++) {
+            registry.createThread({ threadId: `child-${i}`, name: 'Child', owner, origin: owner, config: {}, parentId: 'root-run' });
+            registry.create({ id: `child-run-${i}`, threadId: `child-${i}`, parentId: 'root-run', origin: owner });
+        }
+        for (const [locale, expected] of [['pl', `zatrzyma też ${pl} pod nim`], ['en', `also stops ${en} below it`]]) {
+            setLocale(locale);
+            const host = new MockEl();
+            renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, onToggle() {} });
+            t.is(byClass(host, 'stop-hint')[0].textContent, expected);
+            t.is(control(host, 'stop:root').attributes['aria-label'], `${tr('chat.substrip.stop_aria', { name: 'Root' })}, ${expected}`);
+        }
+    }
 });

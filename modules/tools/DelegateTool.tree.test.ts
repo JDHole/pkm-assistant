@@ -2,6 +2,7 @@ import test from 'ava';
 import type { ExecutionContext } from 'ava';
 import { createDelegateTool, createSubAgentTool, __test__ as delegateTest } from './DelegateTool.js';
 import type { SubAgentConfigLike } from './DelegateTool.js';
+import { AccessGuard } from '../../core/index.js';
 import { MCPClient } from './MCPClient.js';
 import { SubAgentRunner, SubTaskRegistry, buildStripModel } from '../sub-agents/index.js';
 import type { SubRunContext, SubTask } from '../sub-agents/index.js';
@@ -58,13 +59,22 @@ function fixture(t: ExecutionContext, fallback = false) {
     const agent = { name: 'Mira', activeSubAgents: [...configs.keys()].map(name => ({ name })) };
     const delegate = createDelegateTool({});
     const control = createSubAgentTool({});
-    const tools = [delegate, control];
+    const reads: string[] = [];
+    const scopes: unknown[] = [];
+    const tools = [delegate, control, ...['read', 'write'].map(name => ({ name, description: name, inputSchema: {},
+        execute: async (args: { path: string }) => { reads.push(args.path); return `contents:${args.path}`; } }))];
     const toolRegistry = { getTool: (name: string) => tools.find(tool => tool.name === name) ?? null, filterByAgent: () => tools };
     modelsTest.setChatModelFactory(() => new Model() as never);
     const plugin = {
         toolRegistry, subTaskRegistry: registry,
         agentManager: { getActiveAgent: () => agent, getAgent: () => agent, resolveSubAgentConfig: (name: string) => configs.get(name) },
-        permissionSystem: { checkPermission: () => ({ allowed: true, requiresApproval: false }), requiresApproval: () => false },
+        permissionSystem: { checkPermission: (_agent: unknown, action: string, path: string, opts: { scopeFolders?: string[] }) => {
+            if (action === 'vault.read') {
+                scopes.push(opts.scopeFolders);
+                return { ...AccessGuard.checkAccess({ admin_access: true }, path, 'read', opts), requiresApproval: false };
+            }
+            return { allowed: true, requiresApproval: false };
+        }, requiresApproval: () => false },
         env: {
             chatModel: new Model(),
             config: { chat: { providers: { ollama: { info: { id: 'ollama' } } },
@@ -86,7 +96,7 @@ function fixture(t: ExecutionContext, fallback = false) {
         return runner.runTask('Zadanie rodzica', agent, configs.get('mira-parent')! as never, new Model() as never,
             { delegationDepth: 1, origin: owner, ...options });
     }
-    return { registry, clock, requests, parents, children, client, runner, plugin, delegate, configs, start, streamCount: () => streamCount };
+    return { reads, scopes, registry, clock, requests, parents, children, client, runner, plugin, delegate, configs, start, streamCount: () => streamCount };
 }
 
 for (const fallback of [false, true]) {
@@ -267,3 +277,44 @@ test.serial('P3 Stop from thread:created before admission records one queued ter
         [['mira-child', 'rezerwacja', true, { kind: 'stopped', by: 'user' }]]);
     t.deepEqual([finished, f.streamCount(), delegateTest._liveAbortCount(), f.registry.events.listenerCount('thread:closed')], [1, 0, 0, 0]);
 });
+
+for (const continuation of [true, false]) for (const allowRead of [false, true]) {
+    test.serial(`F1 restricted parent constrains ${continuation ? 'continued thread' : 'new grandchild'} (read=${allowRead})`, async t => {
+        const f = fixture(t);
+        f.configs.set('mira-child', config('mira-child', ['read', 'write']));
+        const broad = f.client.executeToolCall({ name: 'delegate', arguments: { task: 'broad child', aspect: 'child', background: false } }, 'Mira', { origin: owner });
+        const broadRequest = await f.children.next();
+        broadRequest.complete('initial result');
+        await broad;
+        const thread = f.registry.list()[0].threadId!;
+        const frozen = structuredClone(f.registry.getThread(thread)!.config);
+        f.configs.set('mira-parent', config('mira-parent', ['read', 'write', 'delegate', 'sub_agent']));
+        const parent = f.start({ scopeFolders: ['Allowed'], callerToolNames: allowRead ? ['read', 'delegate', 'sub_agent'] : ['delegate', 'sub_agent'] });
+        const parentRequest = await f.parents.next();
+        parentRequest.call(continuation ? 'sub_agent' : 'delegate', continuation
+            ? { action: 'task', sub_id: thread, task: 'continue child' }
+            : { aspect: 'child', task: 'new child' });
+        const child = await f.children.next();
+        (await f.parents.next()).complete('waiting for child');
+        const visible = (child.payload as { tools: Array<{ function: { name: string } }> }).tools.map(tool => tool.function.name);
+        child.call('read', { path: 'Outside/secret.md' });
+        const denied = await f.children.next();
+        const messages = (denied.payload as { messages: Array<{ role: string; content: string }> }).messages;
+        const outsideResult = messages.filter(message => message.role === 'tool').at(-1)!.content;
+        const outsideReads = [...f.reads], outsideScopes = [...f.scopes];
+        if (allowRead) {
+            denied.call('read', { path: 'Allowed/public.md' });
+            const allowed = await f.children.next();
+            allowed.complete('child done');
+        } else denied.complete('child done');
+        (await f.parents.next()).complete('parent done');
+        t.is((await parent).result, 'parent done');
+        t.deepEqual(f.registry.getThread(thread)!.config, frozen);
+        await delegateTest._settleBackground();
+        t.deepEqual(outsideReads, []);
+        t.deepEqual(outsideScopes, allowRead ? [['Allowed']] : []);
+        t.false(outsideResult.includes('contents:Outside'));
+        t.deepEqual(visible, allowRead ? ['read', 'ask_parent'] : ['ask_parent']);
+        t.deepEqual(f.reads, allowRead ? ['Allowed/public.md'] : []);
+    });
+}
