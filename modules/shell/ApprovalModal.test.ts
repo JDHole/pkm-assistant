@@ -352,3 +352,33 @@ test('delegate i sub_agent przycinają podgląd do 500 znaków, a opis delegate 
     }));
     t.is(preview(subAgent), `${'a'.repeat(500)}\n... (skrócono)`);
 });
+
+// P3: the consent UI is part of the security gate; the delegation badges belong to P5.
+test('share conversation shows source, destination, scope and text preview with exactly three choices', async t => {
+    const { modal, resultPromise } = openModal({ type: 'delegate.share_conversation', agentName: 'Mira',
+        description: 'badacz chce przekazać swoją rozmowę subowi worker: dostawca ollama -> openai.',
+        preview: '[1 user] <script>tekst</script> sk-abcdefghijklmnopqrstuvwxyz123456', rememberAvailable: true });
+    t.is(description(modal), 'badacz chce przekazać swoją rozmowę subowi worker: dostawca ollama -> openai.');
+    t.is(previewHeading(modal), 'Podgląd rozmowy do przekazania:');
+    t.is(preview(modal), '[1 user] <script>tekst</script> sk-a***3456');
+    t.deepEqual(findAll(modal.contentEl, node => node.tagName === 'P').map(node => node.textContent ?? node.text), [
+        'badacz chce przekazać swoją rozmowę subowi worker: dostawca ollama -> openai.',
+        'Ostatnie wiadomości bezpośredniego rodzica i skrót starszych, z podglądami wyników narzędzi. Bez załączników i myślenia. Rozmowa może zostać skrócona do budżetu modelu. Zgoda dotyczy tylko tego zlecenia.',
+    ]);
+    t.deepEqual(findAll(modal.contentEl, node => node.tagName === 'BUTTON').map(node => node.className), ['mod-warning', 'mod-cta', 'mod-muted']);
+    t.is(findCheckbox(modal), undefined);
+    findButtonByClass(modal, 'mod-cta')!.onclick!();
+    t.deepEqual(await resultPromise, { result: 'approve', reason: '', rememberForSession: false });
+});
+
+for (const stop of ['close', 'abort'] as const) {
+    test(`share conversation ${stop} rejects a later click`, async t => {
+        const control = new AbortController();
+        const { modal, resultPromise } = openModal({ type: 'delegate.share_conversation', agentName: 'Mira', signal: control.signal });
+        const approve = findButtonByClass(modal, 'mod-cta')!.onclick!;
+        if (stop === 'close') modal.onClose(); else control.abort();
+        t.deepEqual(await resultPromise, { result: 'deny', reason: stop === 'close' ? '' : 'cancelled' });
+        approve();
+        t.deepEqual(await resultPromise, { result: 'deny', reason: stop === 'close' ? '' : 'cancelled' });
+    });
+}

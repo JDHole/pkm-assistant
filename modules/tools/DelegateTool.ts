@@ -1578,38 +1578,17 @@ async function _withAdmission(
     }
 }
 
-async function _executeSubAgent(
+/** Configuration and actual model selection only: no reservation, lease, runner or stream.
+ * P3 exposes the same ladder to the pre-admission consent step; P4 connects that step.
+ */
+export function prepareDelegateExecution(
     args: DelegateTaskDef,
     resolved: ResolvedDelegate,
     activeAgent: DelegatingAgent,
     agentManager: DelegateAgentManager,
     plugin: DelegatePlugin,
-    makeRunner: (plugin: DelegatePlugin) => SubAgentRunnerLike,
-    delegationDepth = 1,
     runControl: SubRunControl = {},
-): Promise<Record<string, unknown>> {
-    // Zamknięcie mogło nadejść po wejściu do thunka, ale przed przygotowaniem modelu.
-    // Zapisujemy zwykły zakończony bieg i wracamy tą samą ścieżką outcome co runner.
-    if (runControl.queuedThreadId) {
-        const queued = plugin.subTaskRegistry?.getThread?.(runControl.queuedThreadId);
-        if (queued?.phase === 'closed') {
-            const task = plugin.subTaskRegistry?.finishQueuedStop?.(runControl.queuedThreadId, {
-                background: runControl.background,
-                taskPreview: args.task,
-            });
-            const outcome: RunOutcome = {
-                end: { kind: 'stopped', by: task?.outcome?.end.kind === 'stopped' ? task.outcome.end.by : queued.closedBy ?? 'user' },
-                completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [],
-            };
-            const name = _queuedThreadName(resolved, plugin);
-            return {
-                success: false,
-                error: t('mcp.delegate.outcome_error', { reason: _outcomeReason(outcome) }),
-                stopped_by: 'abort', aspect: name, tools_used: [], tool_call_details: [], usage: null,
-                outcome: _outcomeFields(outcome), effects: [], note: t('mcp.delegate.outcome_note'),
-            };
-        }
-    }
+): { success: false; error: string } | { success: true; subAgentConfig: SubAgentConfigLike; finalModel: StreamingModelLike } {
     // Generyczny worker (syntetyczny config) albo custom sub usera po nazwie.
     // Gdy user wyznaczył globalny szablon suba — worker bierze jego config (fail-soft).
     let subAgentConfig: SubAgentConfigLike | null | undefined;
@@ -1690,6 +1669,45 @@ async function _executeSubAgent(
     if (!finalModel?.stream) {
         return { success: false, error: t('mcp.delegate.no_model') };
     }
+
+    return { success: true, subAgentConfig, finalModel };
+}
+
+async function _executeSubAgent(
+    args: DelegateTaskDef,
+    resolved: ResolvedDelegate,
+    activeAgent: DelegatingAgent,
+    agentManager: DelegateAgentManager,
+    plugin: DelegatePlugin,
+    makeRunner: (plugin: DelegatePlugin) => SubAgentRunnerLike,
+    delegationDepth = 1,
+    runControl: SubRunControl = {},
+): Promise<Record<string, unknown>> {
+    // Zamknięcie mogło nadejść po wejściu do thunka, ale przed przygotowaniem modelu.
+    // Zapisujemy zwykły zakończony bieg i wracamy tą samą ścieżką outcome co runner.
+    if (runControl.queuedThreadId) {
+        const queued = plugin.subTaskRegistry?.getThread?.(runControl.queuedThreadId);
+        if (queued?.phase === 'closed') {
+            const task = plugin.subTaskRegistry?.finishQueuedStop?.(runControl.queuedThreadId, {
+                background: runControl.background,
+                taskPreview: args.task,
+            });
+            const outcome: RunOutcome = {
+                end: { kind: 'stopped', by: task?.outcome?.end.kind === 'stopped' ? task.outcome.end.by : queued.closedBy ?? 'user' },
+                completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [],
+            };
+            const name = _queuedThreadName(resolved, plugin);
+            return {
+                success: false,
+                error: t('mcp.delegate.outcome_error', { reason: _outcomeReason(outcome) }),
+                stopped_by: 'abort', aspect: name, tools_used: [], tool_call_details: [], usage: null,
+                outcome: _outcomeFields(outcome), effects: [], note: t('mcp.delegate.outcome_note'),
+            };
+        }
+    }
+    const preparation = prepareDelegateExecution(args, resolved, activeAgent, agentManager, plugin, runControl);
+    if (!preparation.success) return preparation;
+    const { subAgentConfig, finalModel } = preparation;
 
     // Sub NIGDY nie wyprzedza głównego czatu w kolejce bramki platformy lokalnej
     // (`ChatModel.stream` czyta `_gatePriority`, brak = 1 = main). Delegacja

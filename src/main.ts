@@ -449,6 +449,7 @@ export default class PkmAssistantPlugin extends PluginBase {
     this._komunikatorCleanupUnsub?.();
     this._komunikatorCleanupUnsub = null;
     // Rejestr zamyka oczekiwania użytkownika i pytania przed odpięciem odbiorców.
+    this.approvalManager?.dispose();
     this.subTaskRegistry?.dispose?.();
     this.subTaskRegistry = null;
     this._askUserChannels = null;

@@ -53,6 +53,7 @@ interface ApprovalActionDetails extends ApprovalAction {
 }
 
 export class ApprovalModal extends Modal {
+    private cancelApproval = () => this._resolve({ result: 'deny', reason: 'cancelled' });
     declare private action: ApprovalActionDetails;
     declare private result: ApprovalModalResult | null;
     declare private resolvePromise: ((result: ApprovalModalResult) => void) | null;
@@ -212,23 +213,25 @@ export class ApprovalModal extends Modal {
         // Always approve button. Dla narzędzia zewnętrznego serwera „zawsze"
         // dotyczy TEGO KONKRETNEGO narzędzia (reguła external.call::serverId__tool, nie hurt),
         // więc etykieta + tooltip mówią to wprost.
-        const isExternalCall = this.action.type === 'external.call';
-        const alwaysBtn = buttonContainer.createEl('button', {
-            cls: 'mod-muted'
-        });
-        setSvg(alwaysBtn, UiIcons.refresh(14));
-        alwaysBtn.appendText(isExternalCall ? t('approval.always_this_tool') : t('approval.approve_session'));
-        if (isExternalCall) alwaysBtn.title = t('approval.always_this_tool_desc');
-        alwaysBtn.onclick = () => this._resolve({
-            result: 'always',
-            reason: '',
-            // Checkbox zaznaczony + „Zawsze zezwalaj" niesie TĘ SAMĄ intencję co checkbox +
-            // Zatwierdź - user właśnie powiedział „nie pytaj więcej o TEN plik w tej sesji",
-            // niezależnie od tego, który guzik zamknął modal. Bez tego druga bramka (krok 6b,
-            // podgląd diffa) pytałaby zaraz potem o TEN SAM zapis, mimo że reguła "Zawsze
-            // zezwalaj" (core/security/ApprovalManager.ts) już go osobno pokrywa na stałe.
-            rememberForSession: !!rememberCheckbox?.checked,
-        });
+        if (this.action.type !== 'delegate.share_conversation') {
+            const isExternalCall = this.action.type === 'external.call';
+            const alwaysBtn = buttonContainer.createEl('button', {
+                cls: 'mod-muted'
+            });
+            setSvg(alwaysBtn, UiIcons.refresh(14));
+            alwaysBtn.appendText(isExternalCall ? t('approval.always_this_tool') : t('approval.approve_session'));
+            if (isExternalCall) alwaysBtn.title = t('approval.always_this_tool_desc');
+            alwaysBtn.onclick = () => this._resolve({
+                result: 'always',
+                reason: '',
+                // Checkbox zaznaczony + „Zawsze zezwalaj" niesie TĘ SAMĄ intencję co checkbox +
+                // Zatwierdź - user właśnie powiedział „nie pytaj więcej o TEN plik w tej sesji",
+                // niezależnie od tego, który guzik zamknął modal. Bez tego druga bramka (krok 6b,
+                // podgląd diffa) pytałaby zaraz potem o TEN SAM zapis, mimo że reguła "Zawsze
+                // zezwalaj" (core/security/ApprovalManager.ts) już go osobno pokrywa na stałe.
+                rememberForSession: !!rememberCheckbox?.checked,
+            });
+        }
 
         // Redirect button - third path: stop the action and tell the agent what to do
         // instead. First click reveals the instruction field, second click confirms.
@@ -269,6 +272,8 @@ export class ApprovalModal extends Modal {
         const a = this.action;
 
         switch (a.type) {
+            case 'delegate.share_conversation':
+                return a.description || t('approval.share.title');
             case 'vault.write': {
                 const path = a.targetPath || t('approval.fallback.file');
                 const modeLabels: Record<string, string> = {
@@ -366,6 +371,7 @@ export class ApprovalModal extends Modal {
             'vault.write': [UiIcons.edit(14), t('approval.type.vault_write')],
             'vault.delete': [UiIcons.trash(14), t('approval.type.vault_delete')],
             'vault.create_folder': [UiIcons.folder(14), t('approval.type.vault_create_folder')],
+            'delegate.share_conversation': [UiIcons.send(14), t('approval.share.title')],
             'memory.write': [UiIcons.brain(14), t('approval.type.memory_save')],
             'agent.message': [UiIcons.send(14), t('approval.type.agent_message')],
             'web.search': [UiIcons.search(14), t('approval.type.web_search')],
@@ -430,7 +436,12 @@ export class ApprovalModal extends Modal {
         const delegateTask = typeof a.delegateTask === 'string' ? maskSensitiveData(a.delegateTask) : null;
         const subAgentText = typeof a.subAgentText === 'string' ? maskSensitiveData(a.subAgentText) : null;
 
-        if (a.type === 'external.call') {
+        if (a.type === 'delegate.share_conversation') {
+            const section = contentEl.createDiv('approval-preview');
+            section.createEl('h4', { text: t('approval.share.preview') });
+            section.createEl('p', { text: t('approval.share.scope') });
+            section.createEl('pre', { cls: 'approval-content-preview' }).createEl('code', { text: maskSensitiveData(a.preview || '') });
+        } else if (a.type === 'external.call') {
             // Zewnętrzny serwer MCP - zamiast ogólnego preview pokazujemy pełne argumenty.
             this._renderExternalArgs(contentEl);
         } else if (a.toolName === 'delegate' && delegateTask !== null) {
@@ -487,7 +498,9 @@ export class ApprovalModal extends Modal {
     }
 
     _resolve(result: ApprovalModalResult): void {
+        if (this.result !== null) return;
         this.result = result;
+        this.action.signal?.removeEventListener('abort', this.cancelApproval);
         if (this.resolvePromise) {
             this.resolvePromise(result);
         }
@@ -497,10 +510,12 @@ export class ApprovalModal extends Modal {
     onClose() {
         const { contentEl } = this;
         contentEl.empty();
+        this.action.signal?.removeEventListener('abort', this.cancelApproval);
 
         // If closed without action, treat as deny
         if (this.result === null && this.resolvePromise) {
-            this.resolvePromise({ result: 'deny', reason: '' });
+            this.result = { result: 'deny', reason: '' };
+            this.resolvePromise(this.result);
         }
     }
 
@@ -511,6 +526,8 @@ export class ApprovalModal extends Modal {
     async waitForResponse(): Promise<ApprovalModalResult> {
         return new Promise<ApprovalModalResult>((resolve) => {
             this.resolvePromise = resolve;
+            if (this.action.signal?.aborted) { this.cancelApproval(); return; }
+            this.action.signal?.addEventListener('abort', this.cancelApproval, { once: true });
             this.open();
         });
     }

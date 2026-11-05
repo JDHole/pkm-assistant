@@ -73,6 +73,8 @@ export interface ApprovalAction {
      * (albo `false`) = checkbox się nie pokazuje — bez klucza sesji nie ma czego pamiętać.
      */
     rememberAvailable?: boolean;
+    /** Runtime cancellation, never persisted. */
+    signal?: AbortSignal;
     /** Wołacze dokładają własne pola informacyjne dla modala (np. `toolName`, `args`). */
     [key: string]: unknown;
 }
@@ -150,6 +152,8 @@ export interface ApprovalManagerOptions {
 }
 
 export class ApprovalManager {
+    private pendingOneTime = new Set<AbortController>();
+    private disposed = false;
     // `declare` = sama deklaracja typu, zero emitu. Bez `private`,
     // bo to zwykłe pola instancji, po których chodzą wołacze w .js.
     declare app: unknown;
@@ -188,6 +192,7 @@ export class ApprovalManager {
      * @param action - Action details
      */
     async requestApproval(action: ApprovalAction): Promise<ApprovalResult> {
+        if (action.type === 'delegate.share_conversation') return this.requestOneTimeApproval(action);
         // Narzędzia zewnętrznych serwerów MCP niosą osobne `approvalTarget` (prefiksowana
         // nazwa narzędzia), żeby trwała reguła „zawsze" była per KONKRETNE narzędzie
         // (external.call::srv__tool), a nie za szeroka external.call::*. Dla pozostałych akcji
@@ -249,6 +254,49 @@ export class ApprovalManager {
                 this.logApproval(action, 'denied');
                 return { result: 'deny', reason: denyReason };
         }
+    }
+
+    /** Sharing a conversation can never consume or create a persistent approval. */
+    private requestOneTimeApproval(action: ApprovalAction): Promise<ApprovalResult> {
+        if (this.disposed || action.signal?.aborted) return Promise.resolve({ result: 'deny', reason: 'cancelled' });
+        if (!this.approvalHandler) return Promise.resolve({ result: 'deny', reason: 'handler_unavailable' });
+        const handler = this.approvalHandler;
+        const controller = new AbortController();
+        this.pendingOneTime.add(controller);
+        return new Promise(resolve => {
+            let settled = false;
+            const finish = (result: ApprovalResult) => {
+                if (settled) return;
+                settled = true;
+                action.signal?.removeEventListener('abort', cancel);
+                controller.signal.removeEventListener('abort', cancelled);
+                this.pendingOneTime.delete(controller);
+                // The history contains no preview, snapshot or consent capability.
+                this.logApproval(action, result.result);
+                resolve(result);
+            };
+            const cancel = () => controller.abort();
+            const cancelled = () => finish({ result: 'deny', reason: 'cancelled' });
+            action.signal?.addEventListener('abort', cancel, { once: true });
+            controller.signal.addEventListener('abort', cancelled, { once: true });
+            try {
+                const response = handler(this.app, { ...action, signal: controller.signal, rememberAvailable: false });
+                void Promise.resolve(response).then(value => {
+                    const result = typeof value === 'string' ? value : value?.result;
+                    if (result === 'approve') finish({ result: 'approve', reason: '' });
+                    else if (result === 'redirect') finish({ result: 'redirect', instruction: typeof value === 'object' ? value?.instruction || '' : '' });
+                    else finish({ result: 'deny', reason: typeof value === 'object' ? value?.reason || '' : '' });
+                }, () => finish({ result: 'deny', reason: 'handler_unavailable' }));
+            } catch {
+                finish({ result: 'deny', reason: 'handler_unavailable' });
+            }
+        });
+    }
+
+    /** Plugin unload closes pending one-time modals and rejects late approvals. */
+    dispose(): void {
+        this.disposed = true;
+        for (const controller of this.pendingOneTime) controller.abort();
     }
 
     /**

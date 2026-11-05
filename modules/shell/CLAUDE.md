@@ -194,3 +194,14 @@ Widok wiesza swoje odpięcia na `nav._currentCleanup` (np. Komunikator: `agentMa
 ### Okno zgody dla delegacji
 
 Dla `delegate` opis zgody pokazuje aspekt sub-agenta albo ogólnego workera oraz zadanie skrócone do 80 znaków. Podgląd zawiera treść zadania do 500 znaków. Dla `sub_agent` akcje task i message wskazują sub-agenta i pokazują treść do 500 znaków. Pozostałe akcje mają ogólny opis z nazwą akcji.
+
+## 2.4.5 P3 - modal przekazania rozmowy
+
+`ApprovalModal` obsługuje `delegate.share_conversation`: opis rodzica, suba i dostawców,
+zakres (ostatnie wiadomości i skrót starszych, bez załączników/myślenia, możliwe dalsze
+skrócenie) oraz tekstowy, maskowany podgląd. Dostępne są wyłącznie Zatwierdź/Odrzuć/Przekieruj,
+bez „zawsze” i checkboxa pamięci zgody. Sygnał `ApprovalAction.signal` zamyka modal
+z odmową; zamknięcie bez decyzji również odmawia. Rozstrzygnięcie jest jednokrotne,
+więc późne kliknięcie nie może zmienić odmowy. Testy DOM w `ApprovalModal.test.ts`
+sprawdzają literalne treści, zestaw przycisków, maskowanie, zamknięcie i abort.
+To UI bramki zgody P3; kafelek i pasek delegacji pozostają zakresem P5.

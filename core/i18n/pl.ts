@@ -488,6 +488,16 @@ export const pl: Record<string, string> = {
   'audio.mic_error': 'Nie udało się uruchomić mikrofonu: {{error}}',
 
   // ── Approval modal ──
+  'approval.share.title': " Przekazanie rozmowy rodzica",
+  'approval.share.preview': "Podgląd rozmowy do przekazania:",
+  'approval.share.scope': "Ostatnie wiadomości bezpośredniego rodzica i skrót starszych, z podglądami wyników narzędzi. Bez załączników i myślenia. Rozmowa może zostać skrócona do budżetu modelu. Zgoda dotyczy tylko tego zlecenia.",
+  'approval.share.description': "{{parent}} chce przekazać swoją rozmowę subowi {{child}}: dostawca {{source}} -> {{target}}.",
+  'approval.share.unknown': "nieznany",
+  'mcp.delegate.share.cancelled': "Zlecenie z rozmową rodzica anulowane. Sub nie został uruchomiony.",
+  'mcp.delegate.share.invalid_source': "Brak prawidłowej rozmowy bezpośredniego rodzica. Sub nie został uruchomiony.",
+  'mcp.delegate.share.unavailable': "Zgoda na przekazanie rozmowy jest niedostępna. Sub nie został uruchomiony.",
+  'mcp.delegate.share.denied': "Odmowa przekazania rozmowy rodzica. Sub nie został uruchomiony.",
+  'mcp.delegate.share.redirected': "Użytkownik przekierował zlecenie. Sub nie został uruchomiony.",
   'approval.title': ' Wymagane zatwierdzenie',
   // Etykieta drugiej ścieżki, gdy narzędzie czyta jeden plik i pisze drugi.
   'approval.source_label': 'Źródło:',

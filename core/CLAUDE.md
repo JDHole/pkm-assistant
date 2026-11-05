@@ -409,3 +409,16 @@ NIE otwieraj gdy pracujesz nad konkretnym modułem - wtedy otwórz `modules/<naz
 `PkmAssistantSettings.model_context_limits` przechowuje opcjonalne limity okna wejściowego
 według dokładnego identyfikatora dostawcy i modelu; ich interpretacja i fallback należą do
 `modules/models/contextBudget.ts` (publiczny resolver przez barrel models).
+
+## 2.4.5 P3 - jednorazowa zgoda na rozmowę rodzica
+
+`ApprovalManager.requestApproval` rozpoznaje wewnętrzną akcję `delegate.share_conversation`.
+Ta akcja zawsze pyta handler, pomija zastane reguły „zawsze” i odrzuca wynik `always`.
+Zwraca tylko approve/deny/redirect, bez zgody sesyjnej i bez zapisu reguły. Autonomia
+nie uczestniczy w tej bramce (wołacz nie używa `PermissionSystem.requiresApproval`).
+`ApprovalAction.signal` anuluje oczekiwanie i przez lokalny sygnał zamyka modal.
+Brak/awaria handlera daje `deny/handler_unavailable`; Stop lub `dispose()` daje
+`deny/cancelled`, również przy późnym approve. `src/main.ts.onunload` woła `dispose()`.
+Historia RAM nie zawiera podglądu ani snapshotu; nowe komunikaty mają warianty PL/EN.
+Pozostałe akcje zachowują dotychczasowe reguły i wyniki. Testy: `ApprovalManager.oneTime.test.ts`
+oraz istniejący `ApprovalManager.test.ts`.

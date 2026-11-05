@@ -610,3 +610,31 @@ argument execute. Treść nie jest doklejana do argumentów ani ich logów i nie
 zewnętrznych MCP lub innych built-inów. Brak źródła to undefined, bez poszukiwania innej sesji.
 P1 nie publikuje `context_mode` i nie zmienia wykonania samego DelegateTool; konsument trybu,
 zgoda oraz metadane delegacji należą do następnych paczek. Test: `MCPClient.parentConversation.test.ts`.
+
+## 2.4.5 P3 - przygotowanie i jednorazowa zgoda przed przyjęciem zadania
+
+`prepareDelegateExecution` wydziela z `DelegateTool` dotychczasowy wybór konfiguracji
+oraz rzeczywistego modelu (override, fallback i przypięty model kontynuacji). Nie tworzy
+runnera, rezerwacji ani dzierżawy. Stara ścieżka wywołuje go w tym samym miejscu co wcześniej.
+`parentConversationConsent.ts` jest punktem integracji runtime dla P4. Barrel `index.ts`
+eksportuje `prepareParentConversationDelegation`, `isPreparedParentDelegationCurrent`
+i typy `ParentConsentResult`/`PreparedParentDelegation` (bez publikacji schematu narzędzia):
+- `prepareParentConversationDelegation` dla braku trybu/`clean` nie czyta żadnych zależności;
+- dla `parent_conversation` kopiuje i zamraża źródło przed pierwszym await, następnie
+  konfigurację i tożsamość rzeczywistego modelu; sama instancja modelu pozostaje operacyjna;
+- porównuje providerId bezpośredniego rodzica ze snapshotu z finalModel.providerId,
+  nigdy z globalną platformą czatu; nieznane ID wymagają jawnej zgody;
+- wymusza `delegate.share_conversation` niezależnie od autonomii i zapisanych zgód;
+- odmowa, redirect, brak handlera/źródła i anulowanie zwracają konkretny wynik narzędzia,
+  bez startu clean. Redirect zachowuje instrukcję użytkownika;
+- wołacz dostarcza sygnał Stop/zamknięcia i walidator właściciela, epoki, przodków oraz
+  uprawnień. Walidacja biegnie przed i po zgodzie. `isPreparedParentDelegationCurrent`
+  służy też ponownemu sprawdzeniu po kolejce; zmiana providerId/modelId unieważnia wynik.
+
+P3 nie publikuje argumentu ani nie podpina bramki do dispatchera/batcha - to P4/P5.
+Wynik przygotowania żyje tylko w RAM, nie jest argumentem modelu ani rekordem historii.
+Test `parentConversationConsent.test.ts` przechodzi przygotowanie, ApprovalManager,
+sterowane przyjęcie przez prawdziwy rejestr i runner: zero slotów/streamów/budzików przed
+zgodą, potem literalny prompt i sterowany done; używa QuestionTestClock/deferred.
+Pokrywa też fallback, wnuka, OpenRouter, brak dostawców, odmowę, redirect, wszystkie
+tryby autonomii, Stop/zamknięcie/unload i późne approve. Integracja kolejek i batcha jest w P4.

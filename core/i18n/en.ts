@@ -488,6 +488,16 @@ export const en: Record<string, string> = {
   'audio.mic_error': 'Could not start microphone: {{error}}',
 
   // ── Approval modal ──
+  'approval.share.title': " Share parent conversation",
+  'approval.share.preview': "Conversation preview:",
+  'approval.share.scope': "The immediate parent's recent messages and a summary of older ones, with tool result previews. No attachments or thinking. The conversation may be shortened to fit the model budget. Consent applies only to this task.",
+  'approval.share.description': "{{parent}} wants to share their conversation with {{child}}: provider {{source}} -> {{target}}.",
+  'approval.share.unknown': "unknown",
+  'mcp.delegate.share.cancelled': "Delegation with parent conversation cancelled. The sub-agent was not started.",
+  'mcp.delegate.share.invalid_source': "No valid immediate parent conversation. The sub-agent was not started.",
+  'mcp.delegate.share.unavailable': "Consent to share the conversation is unavailable. The sub-agent was not started.",
+  'mcp.delegate.share.denied': "Sharing the parent conversation was denied. The sub-agent was not started.",
+  'mcp.delegate.share.redirected': "The user redirected the task. The sub-agent was not started.",
   'approval.title': ' Approval required',
   // Label for the second path, when a tool reads one file and writes another.
   'approval.source_label': 'Source:',
