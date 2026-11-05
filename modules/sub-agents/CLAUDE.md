@@ -775,3 +775,11 @@ znaków; DelegateTool wywołuje go przed structuredClone, zgoda przed podglądem
 Dopasowanie sk- bez granicy słowa jest lokalne dla eksportu. Globalny SensitiveDataGuard
 pozostaje bez zmian. Surowe źródła nie są serializowane ani przekazywane dziecku.
 Testy F5-3 w `../tools/DelegateTool.parentConversation.test.ts`: podgląd i realny payload.
+
+### 2.4.5 F7 — kształt sklejonego klucza
+
+Eksport bez granicy słowa rozpoznaje jawne prefiksy `sk-ant-`, `sk-proj-`, `sk-or-v1-`
+z długim korpusem klucza. Zwykły `sk-` wymaga co najmniej 20 znaków alfanumerycznych
+lub `_`, w tym cyfry albo wielkiej litery. Dzięki temu `task-przygotowanie-dokumentacji`
+i zwykłe `mask-...` pozostają czytelne. Globalny guard i redakcja znanych wartości
+pozostają bez zmian. F7 sprawdza tekst i prefiksy; F5-3 nadal sprawdza zgodę i payload.

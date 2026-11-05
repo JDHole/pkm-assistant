@@ -212,8 +212,8 @@ export class ChatView extends PluginItemView {
     }
 
     // Obsidian deklaruje `View.onClose(): Promise<void>`, a sprzątanie czatu jest w całości
-    // SYNCHRONICZNE (`async` byłoby zmianą runtime'u). Sygnatura przeciążenia oddaje kontrakt
-    // bazy, implementacja mówi prawdę o tym, co realnie wraca: nic.
+    // synchroniczne do zatrzymania tur. Zwracamy Promise zapisu wszystkich zakładek,
+    // aby zamknięcie widoku mogło poczekać także na usunięcia w pustym oknie.
     onClose(this: ChatViewLike): Promise<void>;
     onClose(this: ChatViewLike): Promise<void> | void {
         // Zamknięty czat nie ma jak dostarczyć wyniku suba (ani gdzie odpalić auto-tury).
@@ -286,9 +286,7 @@ export class ChatView extends PluginItemView {
         // przez `stop_generation` → `_resetPaintTargets`, ale tylko dla tur, które BYŁY w mapie.
         this._renderThrottle?.cancel();
         this._cancelConnectorRedraw?.();
-        if (this.rollingWindow?.messages?.length > 0) {
-            void this.handleSaveSession();
-        }
+        return this.handleSaveSession?.();
     }
 
     _subscribeAgentManagerEvents(this: ChatViewLike) {

@@ -46,12 +46,17 @@ interface RestoredSession {
  * Memory v3 drops the v2 draft recovery flow: sessions live in active/ and archive/ only.
  */
 export async function initSessionManager(this: ChatViewLike) {
+    // Unlike beforeunload, Obsidian's graceful quit lets us contribute awaited tasks.
+    this.registerEvent(this.app.workspace.on('quit', tasks => {
+        this.stop_all_turns('close');
+        tasks.addPromise(this.handleSaveSession());
+    }));
     // registerInterval ties the timer to the view lifecycle (Component clears it on unload),
     // same as the idle tick below — no manual field, no clearInterval in onClose.
     const autoSaveInterval = this.env?.settings?.pkmAssistant?.autoSaveInterval;
     if (autoSaveInterval && autoSaveInterval > 0) {
         this.registerInterval(window.setInterval(() => {
-            if (this.rollingWindow?.messages?.length > 0 || this.rollingWindow?.removedMessageIds?.length > 0) {
+            if (this.rollingWindow?.messages?.length > 0 || this.rollingWindow?.removedMessageIds?.length > 0 || this.rollingWindow?.removedMessageRanges?.length > 0) {
                 void this.handleSaveSession();
             }
         }, autoSaveInterval * 60 * 1000));
@@ -178,7 +183,7 @@ type RestoredMessage = Awaited<ReturnType<AgentMemory['loadActiveSession']>>['me
  * result sprzed restartu Obsidiana znikał z okna. Klucze są dokładane TYLKO gdy obecne
  * (`ActiveSessionMessage.toolCallId`/`toolCalls` są opcjonalne — brak w pliku legacy/v1/v2).
  */
-function _restoredMessageMeta(msg: RestoredMessage) {
+function _restoredMessageMeta(msg: Omit<RestoredMessage, 'seq'>) {
     const meta: { sessionMessageId?: string; parentConversationText?: string; tool_call_id?: string; tool_calls?: NonNullable<RestoredMessage['toolCalls']>; _subTaskResult?: { question: NonNullable<RestoredMessage['question']> } } = {};
     meta.sessionMessageId = sessionMessageId(msg);
     if (msg.parentConversationText !== undefined) meta.parentConversationText = msg.parentConversationText;
@@ -402,6 +407,8 @@ export async function handleNewSession(this: ChatViewLike) {
     const msgCount = this.rollingWindow.messages.length;
     log.info('Chat', `handleNewSession: ${msgCount} wiadomości`);
 
+    if (this.rollingWindow.removedMessageIds?.length || this.rollingWindow.removedMessageRanges?.length) await this.handleSaveSession();
+
     if (msgCount > 0) {
         await this.handleSaveSession();
 
@@ -501,10 +508,27 @@ export async function handleNewSession(this: ChatViewLike) {
  * @param agentName - właściciel tury (opcjonalny)
  * @param rollingWindow - okno tury (opcjonalne; brak = okno bieżącej zakładki)
  */
-export async function handleSaveSession(this: ChatViewLike, agentName?: string | null, rollingWindow?: RollingWindow | null) {
+export async function handleSaveSession(this: ChatViewLike, agentName?: string | null, rollingWindow?: RollingWindow | null, expectedSession?: { path: string; epoch: string | null }) {
     log.debug('Chat', 'handleSaveSession');
+    if (!rollingWindow && !this.rollingWindow) return;
+    // The default save also flushes hidden tabs, using their captured path/epoch.
+    // beforeunload and view close call this same entrypoint.
+    if (!rollingWindow && !agentName) {
+        const active = this.chatTabs?.find(tab => tab.isActive);
+        const saves = [handleSaveSession.call(this, active?.agentName, this.rollingWindow)];
+        const seen = new Set([this.rollingWindow]);
+        for (const tab of this.chatTabs ?? []) {
+            if (tab.isActive) continue;
+            const window = this._agentStates?.get(_tabKey(tab))?.rollingWindow;
+            if (!window || seen.has(window) || !tab.sessionPath) continue;
+            seen.add(window);
+            saves.push(handleSaveSession.call(this, tab.agentName, window, { path: tab.sessionPath, epoch: tab.sessionEpoch ?? null }));
+        }
+        await Promise.all(saves);
+        return;
+    }
     const rw = rollingWindow || this.rollingWindow;
-    if (!rw?.messages?.length && !rw?.removedMessageIds?.length) return;
+    if (!rw?.messages?.length && !rw?.removedMessageIds?.length && !rw?.removedMessageRanges?.length) return;
     try {
         const agentManager = this.plugin?.agentManager;
         const ownerName = resolveOwnerAgentName(agentManager, agentName) || 'default';
@@ -520,7 +544,7 @@ export async function handleSaveSession(this: ChatViewLike, agentName?: string |
             const removed = [...(rw.removedMessageIds ?? [])];
             const ranges = [...(rw.removedMessageRanges ?? [])];
             const savedPath = await memory.saveSession(rw.messages, metadata, { removedMessageIds: removed, removedRanges: ranges,
-                ...(memory.activeSessionPath ? { expectedSession: { path: memory.activeSessionPath, epoch: memory.sessionEpoch } } : {}),
+                ...(expectedSession ? { expectedSession } : memory.activeSessionPath ? { expectedSession: { path: memory.activeSessionPath, epoch: memory.sessionEpoch } } : {}),
             });
             const acknowledged = new Set(removed);
             rw.removedMessageRanges = (rw.removedMessageRanges ?? []).filter(range => !ranges.includes(range));
@@ -547,7 +571,7 @@ export async function handleLoadSession(this: ChatViewLike, path: string) {
         const agentMemory = this.plugin?.agentManager?.getActiveMemory();
         if (!agentMemory) return;
         const filename = path.split('/').pop() as string;
-        const parsed = await agentMemory.loadSession(filename);
+        const parsed = await agentMemory.loadSession(path);
         if (!parsed?.messages) return;
 
         // Modal otwórz starą sesję - 3 opcje + cancel. Default focus 'compress'.
@@ -562,12 +586,13 @@ export async function handleLoadSession(this: ChatViewLike, path: string) {
         const choice = await modal.prompt();
         if (choice === 'cancel') return;
 
+        await this.handleSaveSession();
         this.rollingWindow = this._createRollingWindow();
 
         if (choice === 'continue') {
             // Pełen load
             for (const msg of parsed.messages) {
-                await this.rollingWindow.addMessage(msg.role, msg.content);
+                await this.rollingWindow.addMessage(msg.role, msg.content, _restoredMessageMeta(msg));
             }
             new Notice(t('chat.session.loaded_full', { count: parsed.messages.length }), 4000);
         } else if (choice === 'compress') {

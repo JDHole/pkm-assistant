@@ -1,3 +1,4 @@
+import { commitMessageEdit } from './messageEdit.js';
 import test from 'ava';
 import { RollingWindow } from './RollingWindow.js';
 import { _restoreActiveSession, handleNewSession } from './chat_session.js';
@@ -459,6 +460,7 @@ for (const operation of ['edit', 'delete'] as const) for (const storage of ['cur
             addMessageActions.call(view, buttons, 'USUNIĘTY SEKRET', 'user', 1);
             (buttons.children[1] as HTMLButtonElement).onclick!({ stopPropagation() {} } as MouseEvent);
         }
+        if (operation === 'edit') commitMessageEdit(rw);
         await rw.addMessage('user', 'Bezpieczne pytanie', { parentConversationText: 'Bezpieczne pytanie' });
         if (storage === 'compressed') await rw.performSummarization(true);
         await handleSaveSession.call(view);

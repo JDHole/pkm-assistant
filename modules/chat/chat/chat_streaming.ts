@@ -1,3 +1,4 @@
+import { commitMessageEdit, hasPendingMessageEdit } from './messageEdit.js';
 import { sessionMessageId } from '../../memory/index.js';
 /**
  * @module chat_streaming
@@ -382,6 +383,12 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         if (await this.slashCommands?.execute(text, { view: this, plugin: this.plugin })) {
             return;
         }
+    }
+
+    if (isHuman && !isInjected && hasPendingMessageEdit(this.rollingWindow)) {
+        commitMessageEdit(this.rollingWindow);
+        if (!await persistMessageRemovals(this)) return;
+        void this.render_messages();
     }
 
     // Add to history (max 20) - historia to pamięć TEGO, co user wpisał (strzałka w górę).
@@ -1976,7 +1983,7 @@ export async function _chatBeforeContinue(this: ChatViewLike, turn: ChatTurn, i:
 
     // ── QUEUE INJECT: If a message was queued, inject it into context before continuing ──
     const queued = readQueuedMessage(this._queuedMessage);
-    if (queued && queuedOwnerMatches(queued, { tabKey: turn.origin.tabKey, agentName: turn.agentName })) {
+    if (queued && !hasPendingMessageEdit(rw) && queuedOwnerMatches(queued, { tabKey: turn.origin.tabKey, agentName: turn.agentName })) {
         const injectedText = queued.text;
         this._queuedMessage = null;
         log.info('Chat', `Injecting queued message into context (${queued.meta.origin}): "${injectedText.slice(0, 60)}..."`);

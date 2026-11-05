@@ -430,6 +430,12 @@ export default class PkmAssistantPlugin extends PluginBase {
 
   onunload() {
     log.debug('Main', "Unloading PKM Assistant plugin");
+    // Obsidian does not await onunload. Start every tab's pending writes while
+    // agent memories still exist; beforeunload and view close use the same save.
+    for (const leaf of this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)) {
+      const view = leaf.view as ChatViewLike;
+      void view.handleSaveSession?.();
+    }
     // NAJPIERW ZATRZYMAJ BIEGI, POTEM ODEPNIJ KANAŁY. Demontaż w złej kolejności zrywa szynę
     // zdarzeń i czyści mapę uchwytów abortu BEZ ich wywołania, a `mcpClient`/`toolRegistry`
     // żyją do końca procesu - sub odpalony w tle mieliłby po wyładowaniu dalej (realne

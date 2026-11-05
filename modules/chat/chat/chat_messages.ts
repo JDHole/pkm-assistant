@@ -1,3 +1,4 @@
+import { beginMessageEdit, messageEditText } from './messageEdit.js';
 /**
  * @module chat_messages
  * Message rendering and manipulation methods extracted from ChatView.
@@ -509,17 +510,16 @@ export function addMessageActions(this: ChatViewLike, metaEl: HTMLElement, conte
     }
 }
 
-export function startEditMessage(this: ChatViewLike, msgIndex: number, _originalContent: string): void {
+export function startEditMessage(this: ChatViewLike, msgIndex: number, originalContent: string): void {
     // For simplicity, just remove messages from index and resend
     const messages = this.rollingWindow.messages;
     if (msgIndex >= 0 && msgIndex < messages.length) {
         const message = messages[msgIndex];
-        // Legacy content cannot be split reliably into user text and file contents.
-        const source = message.parentConversationText ?? '';
+        const source = messageEditText(message, originalContent);
         this.attachmentManager?.restoreAttachments(message.userAttachments ?? []);
         this.mentionAutocomplete?.restoreMentions(message.userMentions ?? []);
-        // Remove edited message and all subsequent
-        this.rollingWindow.removeMessages(msgIndex);
+        // Sending the replacement confirms the edit; opening the editor preserves history.
+        beginMessageEdit(this.rollingWindow, message);
 
         void this.render_messages();
         this.input_area.value = source;

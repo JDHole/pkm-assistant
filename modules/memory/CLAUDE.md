@@ -963,3 +963,14 @@ Autozapis wiadomości z ID dopisuje brakujące ID, a dla starych wołaczy bez ID
 licznik ogona. Kompresja okna nie zgłasza usunięć. Stary format pozostaje czytelny;
 starszy plugin nie honoruje nowych zdarzeń usunięcia (downgrade nie zachowuje tej ochrony).
 Testy F5-1: `../chat/chat/chat_session.test.ts` — zapis, oba restore, format mieszany i kompresja.
+
+### 2.4.5 F7 — metadane tylko przed treścią eventu
+
+`message_id`, `removed_messages`, `removed_ranges` i `parent_conversation_text` są
+rozpoznawane wyłącznie w ciągłym prefiksie pól przed pierwszym polem starego formatu.
+Ich literalne etykiety wewnątrz content/result/prompt nie kończą treści, także w legacy.
+Archiwum zachowuje osobny tekst użytkownika jako JSON pozycyjny `pkm_user_text_v1`
+w frontmatterze transkryptu; `parseSessionFile` waliduje tablicę i długość, a brak pola
+pozostawia stary kształt wiadomości. Żadnych nowych delimiterów wewnątrz treści Markdown.
+Test F7 w `../chat/chat/chat_f7.test.ts` czyta stare i nowe eventy, archiwizuje i odczytuje
+rzeczywiście zapisane archiwum, a potem kontynuuje i edytuje sesję.

@@ -1677,6 +1677,26 @@ z parsera; kompresja jej nie zmienia i nie zgłasza usunięć.
 Edycja oraz ponowienie używają `parentConversationText` sprzed rozwinięć. Żywe wiadomości
 zachowują kopie `userAttachments` i `userMentions`, odtwarzane jako chipy przed wysłaniem.
 Nie zapisujemy binariów/chipów w nowych polach sesji; po restarcie dostępny jest osobny
-tekst źródłowy. Nierozdzielalne legacy daje pusty edytor, nigdy pełny payload pliku.
+tekst źródłowy. Legacy z rozpoznanym załącznikiem/wzmianką bez osobnego tekstu daje pusty
+edytor; zwykła wiadomość zachowuje tekst przekazany przez dymek (jak 2.4.1).
 Akcje dymka wskazują obiekt wiadomości, nie porównują źródła z rozwiniętym `content`.
 Testy: F5-1 w `chat_session.test.ts`, F5-2 w `chat_messages.parentConversation.test.ts`.
+
+### 2.4.5 F7 — potwierdzenie edycji i zapis przy zamykaniu
+
+`messageEdit.ts` wiąże szkic z obiektem wiadomości i oknem. Otwarcie edytora nie usuwa
+historii; dopiero wysłanie poprawki przez człowieka ucina gałąź i zapisuje usunięcia
+przed nową wiadomością. Powiadomienie suba ani komenda slash nie potwierdzają edycji.
+Edycja zakolejkowana podczas generowania czeka do końca tury, zamiast wejść w jej środek.
+To celowe odroczenie względem 2.4.1, które ucinało historię już przy kliknięciu Edytuj.
+Kontynuacja otwiera pełną ścieżkę archiwum i przekazuje osobny tekst źródłowy.
+
+Domyślne `handleSaveSession()` zapisuje też ukryte zakładki z ich ścieżką i epoką;
+wariant z jawnym oknem nadal zapisuje tylko wskazane okno. Zamknięcie zakładki, nowa
+sesja i wymiana okna zapisują także puste okno z usunięciami. `onClose` zwraca Promise
+zapisu, a beforeunload i plugin onunload uruchamiają tę samą ścieżkę dla wszystkich zakładek.
+Dodatkowo event workspace `quit` dostaje Promise zapisu przez `Tasks.addPromise`, aby
+łagodne zamknięcie Obsidiana mogło na niego poczekać. Async onunload/beforeunload to
+siatka zapasowa; test nie symuluje zabicia procesu w trakcie I/O.
+Testy sekwencji F7: `chat/chat_f7.test.ts`; stare F4/F5 potwierdzają symulowaną wysyłkę
+przez `commitMessageEdit`, a F7 wywołuje rzeczywiste `send_message`.

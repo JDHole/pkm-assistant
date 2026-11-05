@@ -13,12 +13,14 @@ import type { SessionRole } from './activeSessionFormat.js';
  * treść multimodalną (tablica bloków `{text}`/`{content}`), z której wycina sam tekst.
  */
 export interface TranscriptMessageInput {
+    parentConversationText?: string;
     role?: unknown;
     content?: string | Array<{ text?: string; content?: string }> | null;
 }
 
 /** Wiadomość odzyskana z transkryptu (`format B`) - rola zawsze ze znanego zbioru. */
 export interface TranscriptMessage {
+    parentConversationText?: string;
     role: SessionRole;
     content: string;
 }
@@ -48,6 +50,11 @@ export function formatToMarkdown(
     summary: string | null = null,
 ): string {
     const lines: string[] = [];
+
+    // Source text is metadata, never a delimiter inside a user's Markdown.
+    if (messages.some(msg => msg?.parentConversationText !== undefined)) {
+        metadata = { ...metadata, pkm_user_text_v1: JSON.stringify(messages.map(msg => msg?.parentConversationText ?? null)) };
+    }
 
     // 1. Frontmatter YAML
     if (metadata && Object.keys(metadata).length > 0) {
@@ -175,5 +182,13 @@ export function parseSessionFile(content: string | null | undefined): ParsedSess
         // Brak poprzedniej wiadomości = śmieć przed pierwszą rolą - pomijamy.
     });
 
+    try {
+        const sources: unknown = JSON.parse(String(result.metadata.pkm_user_text_v1 ?? 'null'));
+        if (Array.isArray(sources) && sources.length === result.messages.length) {
+            sources.forEach((source: unknown, index) => {
+                if (typeof source === 'string') result.messages[index].parentConversationText = source;
+            });
+        }
+    } catch { /* Legacy or damaged optional metadata leaves the transcript intact. */ }
     return result;
 }

@@ -1,3 +1,4 @@
+import { commitMessageEdit } from './messageEdit.js';
 import test from 'ava';
 import { RollingWindow } from './RollingWindow.js';
 import { startEditMessage, addMessageActions, regenerateLastResponse } from './chat_messages.js';
@@ -22,6 +23,7 @@ for (const operation of ['edit', 'delete'] as const) {
             const button = meta.children[1] as HTMLButtonElement;
             button.onclick!({ stopPropagation() {} } as MouseEvent);
         }
+        if (operation === 'edit') commitMessageEdit(rw);
         await rw.addMessage('user', 'Bezpieczne pytanie', { parentConversationText: 'Bezpieczne pytanie' });
         const snapshot = rw.parentConversation.snapshot();
         t.is(snapshot.summary, operation === 'edit' ? '[1 user] Zostaje' : '[1 user] Zostaje\n[3 assistant] Stara odpowiedź\n[4 assistant] Dalsza odpowiedź');
@@ -34,7 +36,7 @@ for (const operation of ['edit', 'delete'] as const) {
 for (const legacy of [false, true]) for (const edit of [false, true]) for (const kind of (edit && !legacy ? ['pdf', 'text', 'mention', 'image'] as const : ['pdf'] as const)) {
     test.serial(`${edit ? 'F5-2' : 'F4-2'}: ${kind} → ponowienie → edycja=${edit} → wysyłka → delegacja, legacy=${legacy}`, async t => {
         const rw = new RollingWindow();
-        await rw.addMessage('user', 'Pytanie\nTAJNY ZAŁĄCZNIK PDF', legacy ? {} : { parentConversationText: 'Pytanie' });
+        await rw.addMessage('user', '📎 Attachment: file.pdf\n```\nTAJNY ZAŁĄCZNIK PDF\n```\n\nPytanie', legacy ? {} : { parentConversationText: 'Pytanie' });
         await rw.addMessage('assistant', 'Stara odpowiedź');
         let captured: ExecuteToolCallOptions | undefined;
         let disk = '';

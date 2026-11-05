@@ -22,10 +22,13 @@ export type ParentConversationContext = Readonly<{
 // Full source stays private to this process and frozen snapshot; it is never serialized.
 const snapshotSources = new WeakMap<ParentConversationSnapshot, (secrets: readonly string[]) => ParentConversationSnapshot>();
 
-/** Export-only pattern: a key can be glued to prose without a word boundary. */
+/** Export-only patterns allow glued keys, but ordinary lower-case hyphenated words
+ * (e.g. task-przygotowanie-dokumentacji) are not key bodies. Generic sk- requires
+ * a long alphanumeric body with a digit or uppercase letter; provider prefixes
+ * explicitly allow the separators used by their keys. */
 function redactExport(text: string, secrets: readonly string[]): string {
     const known = redactSecretValues({ message: text, code: '', http_status: null }, secrets).message;
-    return maskSensitiveData(known.replace(/sk-[A-Za-z0-9_-]{20,}/g, key => maskSensitiveData(key)));
+    return maskSensitiveData(known.replace(/sk-(?:or-v1-[A-Za-z0-9_-]{16,}|(?:ant-|proj-)[A-Za-z0-9_-]{20,}|(?=[A-Za-z0-9_]*[A-Z0-9])[A-Za-z0-9_]{20,})/g, key => maskSensitiveData(key)));
 }
 
 export function redactParentConversationSnapshot(snapshot: ParentConversationSnapshot, secrets: readonly string[] = []): ParentConversationSnapshot {

@@ -174,8 +174,9 @@ export const KNOWN_ROLES = new Set<string>(['system', 'user', 'assistant', 'tool
  * pola są jego zawartością.
  *
  * To jest JEDNA lista dla trzech rzeczy: (1) kolejność pól w `formatSessionEvent`,
- * (2) escapowanie linii treści, które udają etykietę pola, (3) lookahead kończący pole
- * w `extractEventField`. Rozjazd między nimi = ucięta treść, więc żadnej kopii.
+ * (2) escapowanie linii treści, które udają etykietę pola. Czytnik oddziela nowe
+ * pola nagłówka (HEADER_FIELDS) od starych delimiterów treści (BODY_LABELS_ALT),
+ * aby dodana nazwa metadanych nie ucinała nieescapowanej wiadomości legacy.
  */
 export const EVENT_FIELDS: EventFieldName[] = [
     'message_id',
@@ -200,6 +201,8 @@ export const EVENT_FIELDS: EventFieldName[] = [
 
 /** Alternatywa regexowa ze znanych etykiet - składana RAZ. */
 const FIELD_LABELS_ALT = EVENT_FIELDS.join('|');
+const HEADER_FIELDS = new Set(['message_id', 'removed_messages', 'removed_ranges', 'parent_conversation_text']);
+const BODY_LABELS_ALT = EVENT_FIELDS.filter(field => !HEADER_FIELDS.has(field)).join('|');
 
 /**
  * Linia będąca DOKŁADNIE etykietą znanego pola (`**result:**`, z opcjonalnymi spacjami
@@ -218,11 +221,12 @@ const ESCAPED_FIELD_LABEL_LINE_RE = new RegExp(
 );
 
 /**
- * Lookahead kończący pole: NASTĘPNA etykieta ZNANEGO pola stojąca sama w linii.
+ * Lookahead kończący treść: następna etykieta starego pola, sama w linii.
+ * Nowe pola nagłówka są rozpoznawane wyłącznie w prefiksie eventu.
  * Zawężenie do znanych etykiet ma skutek uboczny na plikach legacy:
  * nieznana bold-etykieta w treści (np. `**Uwaga:**`) PRZESTAJE ucinać pole. To poprawa.
  */
-const FIELD_END_LOOKAHEAD = `(?=\\n\\*\\*(?:${FIELD_LABELS_ALT}):\\*\\*[ \\t]*(?:\\n|$)|\\s*$)`;
+const FIELD_END_LOOKAHEAD = `(?=\\n\\*\\*(?:${BODY_LABELS_ALT}):\\*\\*[ \\t]*(?:\\n|$)|\\s*$)`;
 
 /**
  * Escapuje linie, które w pliku sesji wyglądałyby jak granica wiadomości.
@@ -547,6 +551,22 @@ function eventTypeFromHeader(header: unknown): string {
  * @returns treść pola albo ''
  */
 function extractEventField(body: string, field: string): string {
+    // New metadata is a contiguous prefix BEFORE any old event field. A literal
+    // metadata label in content is never a delimiter, even in an unescaped legacy event.
+    if (HEADER_FIELDS.has(field)) {
+        let rest = body.trimStart();
+        while (rest) {
+            const label = rest.match(/^\*\*([a-z_]+):\*\*\n\n/);
+            if (!label || !HEADER_FIELDS.has(label[1])) return '';
+            const value = rest.slice(label[0].length);
+            const end = value.search(new RegExp(`\\n\\*\\*(?:${FIELD_LABELS_ALT}):\\*\\*[ \\t]*(?:\\n|$)`));
+            const raw = end < 0 ? value : value.slice(0, end);
+            if (label[1] === field) return unescapeEventFieldLabels(raw).trim();
+            if (end < 0) return '';
+            rest = value.slice(end).trimStart();
+        }
+        return '';
+    }
     const pattern = new RegExp(`(?:^|\\n)\\*\\*${field}:\\*\\*\\n\\n([\\s\\S]*?)${FIELD_END_LOOKAHEAD}`);
     const match = body.match(pattern);
     if (!match) return '';

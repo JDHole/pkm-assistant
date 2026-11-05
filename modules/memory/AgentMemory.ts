@@ -1105,8 +1105,8 @@ epoch: ${epoch}
                 }
                 meta.updated = now;
                 meta.messageCount = parsed.messages.length;
-                // `seq` z wiadomości nie idzie do transkryptu — `formatToMarkdown` czyta
-                // wyłącznie `role` + `content`.
+                // `seq` z wiadomości nie idzie do transkryptu. Osobny tekst użytkownika
+                // formatToMarkdown zachowuje w metadanych dla kontynuacji/edycji.
                 output = formatToMarkdown(parsed.messages, meta, parsed.summary);
             }
             await this._writeSessionFile(archivePath, output);

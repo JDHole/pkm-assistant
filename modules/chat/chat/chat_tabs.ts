@@ -115,6 +115,11 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
     // `_paintStreamFrame`.
     this._renderThrottle?.cancel();
 
+    // Persist pending removals before switching the memory's active session identity.
+    if (this.rollingWindow?.removedMessageIds?.length || this.rollingWindow?.removedMessageRanges?.length) {
+        await this.handleSaveSession(currentTab?.agentName, this.rollingWindow);
+    }
+
     // 1. Save current state
     if (currentTab) {
         const scrollTop = this.messages_container?.scrollTop || 0;
@@ -346,7 +351,7 @@ export async function _closeActiveTab(this: ChatViewLike) {
 
     _stopTabWork.call(this, activeTab, activeKey);
 
-    if (this.rollingWindow?.messages?.length > 0) {
+    if (this.rollingWindow?.messages?.length > 0 || this.rollingWindow?.removedMessageIds?.length > 0 || this.rollingWindow?.removedMessageRanges?.length > 0) {
         try {
             await this.handleSaveSession();
         } catch (e) {
