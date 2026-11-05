@@ -86,3 +86,5 @@ export type { SubTaskHistoryRecord } from './SubTaskHistory.js';
 
 export { ParentConversationProjection, freezeParentConversation, captureSubParentConversation } from './ParentConversation.js';
 export type { ParentConversationContext, ParentConversationSnapshot, ConversationEntry } from './ParentConversation.js';
+
+export type { ParentConversationPreparation } from './ParentConversationBudget.js';

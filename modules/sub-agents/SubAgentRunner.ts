@@ -27,6 +27,9 @@ import type { BuiltinToolExecutionContext, ToolEffect, EffectTargetIo, ExecuteTo
 import type { SubTask, SubTaskOrigin, SubRunContext, SubTaskRegistry, SubTaskTrace } from './SubTaskRegistry.js';
 import type { ActiveSessionEventInput } from '../memory/index.js';
 import type { ChatModel } from '../models/index.js';
+import { contextBudgetResolver } from '../models/index.js';
+import { fitParentConversation } from './ParentConversationBudget.js';
+import type { ParentConversationPreparation } from './ParentConversationBudget.js';
 import { classifyRunEnd } from './runOutcome.js';
 import type { RunEffect, RunOutcome } from './runOutcome.js';
 import { SubRunCoordinator } from './SubRunCoordinator.js';
@@ -93,6 +96,9 @@ interface RunnerPlugin extends PluginApi {
 }
 
 type RunOptions = {
+    /** Prepared/authorized by the caller; never taken from model arguments. New threads only. */
+    parentConversation?: ParentConversationContext;
+    onParentConversationPrepared?: (metadata: ParentConversationPreparation) => void;
     admission?: RunAdmission;
     onActivity?: (activity: RunActivity) => void;
     onQuestion?: (question: ParentQuestion) => void;
@@ -154,6 +160,7 @@ export type SubRunStoppedBy = 'natural' | 'backstop' | 'abort' | 'error';
  * (obecne WYŁĄCZNIE w gałęzi catch).
  */
 export type SubRunResult = {
+    parentConversation?: ParentConversationPreparation;
     result: string;
     toolsUsed: string[];
     toolCallDetails: unknown[];
@@ -343,6 +350,7 @@ export class SubAgentRunner {
      */
     async runTask(taskPrompt: string, agent: AgentLike, config: SubAgentData, model: ChatModel, options: RunOptions = {}): Promise<SubRunResult> {
         const startTime = Date.now();
+        let parentConversation: ParentConversationPreparation | undefined;
         const registry: SubTaskRegistry | null = this.plugin?.subTaskRegistry || null;
         // Legacy DI registries expose only bookkeeping; coordination requires the inbox API.
         const supportsCoordination = typeof registry?.takeChildNotices === 'function' && typeof registry?.waitChildNotice === 'function';
@@ -655,6 +663,19 @@ export class SubAgentRunner {
                 }
             }
 
+            let maxOutputTokens = SUB_AGENT_MAX_OUTPUT_TOKENS;
+            if (options.parentConversation && !options.threadId) {
+                const window = await contextBudgetResolver.resolve(model, {
+                    overrides: this.plugin?.env?.settings?.pkmAssistant?.model_context_limits,
+                    fallbackTokens: limits.parent_conversation_fallback_tokens,
+                });
+                const prepared = fitParentConversation(options.parentConversation, messages, tools, window);
+                if (prepared.message) messages.splice(1, 0, prepared.message);
+                parentConversation = prepared.metadata;
+                maxOutputTokens = prepared.metadata.maxOutputTokens;
+                _safeRegistry(() => options.onParentConversationPrepared?.(prepared.metadata));
+            }
+
             // Wspólna pętla (runAgentLoop). Store = ArrayMessageStore (system+user).
             // resolveTools = zamrożona lista jak dotąd. Obcinanie wyniku narzędzia przejmuje
             // pętla (limits.maxToolResultLength) - _executeTool już nie truncuje.
@@ -844,7 +865,7 @@ export class SubAgentRunner {
                 } },
                 trace: loopTrace,
                 limits: loopLimits,
-                modelOptions: { maxTokens: SUB_AGENT_MAX_OUTPUT_TOKENS, agentName: agent.name, ...(config.effort ? { effort: config.effort } : {}) },
+                modelOptions: { maxTokens: maxOutputTokens, agentName: agent.name, ...(config.effort ? { effort: config.effort } : {}) },
                 });
             } finally {
                 coordinator?.close();
@@ -890,6 +911,7 @@ export class SubAgentRunner {
                 }));
             }
             return {
+                ...(parentConversation ? { parentConversation } : {}),
                 result: closedQuestion ? lastPartial?.text || '' : response.finalText || '',
                 toolsUsed: response.toolsUsed || [],
                 toolCallDetails: response.toolCallDetails || [],
@@ -939,6 +961,7 @@ export class SubAgentRunner {
                 }));
             }
             return {
+                ...(parentConversation ? { parentConversation } : {}),
                 result: t('subagent.error', { name: config.name, error: safeErrorMsg }),
                 toolsUsed: [...(lastPartial?.toolsUsed || [])],
                 toolCallDetails: [...(lastPartial?.toolCallDetails || [])],

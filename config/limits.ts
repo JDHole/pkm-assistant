@@ -19,6 +19,7 @@
  * `modules/chat/CLAUDE.md`) — to JEDEN kanoniczny zestaw.
  */
 export const DEFAULT_LIMITS = {
+  parent_conversation_fallback_tokens: 32768,
   // Ile rund tool-callingu robi GŁÓWNA pętla czatu (agent), zanim zostanie zmuszony do
   // finalnej odpowiedzi BEZ narzędzi (twardy backstop w chat_streaming.js). Wyrównane
   // z domyślnym budżetem researcher-a (8). Twarda granica — model nie może jej ignorować.
@@ -191,6 +192,7 @@ export type LimitSpec = { min: number; ceiling: number; integer: boolean };
  * Eksportowane, żeby Settings UI mogło pokazać podpowiedzi (min/max) bez duplikacji.
  */
 export const LIMIT_SPECS: Record<LimitKey, LimitSpec> = {
+  parent_conversation_fallback_tokens: { min: 1, ceiling: 2000000, integer: true },
   model_synthesis_timeout_ms:         { min: 0, ceiling: 600000, integer: true },
   chat_max_iterations:                { min: 1,    ceiling: 50,     integer: true },
   // Sufit 100 — sub ma pracować aż skończy; strażnikami są watchdog ciszy i zegar zadania,

@@ -367,3 +367,14 @@ dochodzą też żadne nowe klucze i18n.
 `makeSpyGate`.
 
 `ChatRequest.effort` is an optional `ReasoningEffort` (`low`, `medium`, `high`). Providers translate it independently of the legacy `thinking` option; absent effort preserves existing request bodies. `supportsEffort(provider, model)` describes the adapter's supported combinations. Groq is restricted to documented models with all three levels; DeepSeek and xAI are limited to documented model families; DeepSeek maps medium to high on its server. LM Studio forwards the OpenAI field for bridge use. Ollama effort is limited to recognized thinking model families; legacy thinking remains unchanged. OpenRouter uses only reasoning.effort.
+
+### Budżet opcjonalnej rozmowy rodzica
+
+Publiczne `ContextBudgetResolver`, `contextBudgetResolver`, `estimateContextTokens` oraz typy
+`ContextWindow`, `ContextBudgetModel`, `ContextBudgetClock`, `ContextBudgetSettings` pochodzą z
+`contextBudget.ts`. Resolver bierze dokładny `pkmAssistant.model_context_limits[providerId][modelId]`,
+potem dodatnie `max_input_tokens` wybranego modelu z katalogu, a na końcu walidowany
+`pkmAssistant.limits.parent_conversation_fallback_tokens` (domyślnie 32768). Wynik podaje źródło i
+flagę szacunku. Odczyt katalogu jest ograniczony do 1500 ms i cache'owany per instancja modelu,
+także po braku wyniku; inna instancja ma osobny cache. Estymator jest deterministyczny i nie
+stanowi gwarancji liczby tokenów providera. Testy: `contextBudget.test.ts`.

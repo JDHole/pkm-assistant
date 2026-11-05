@@ -96,3 +96,6 @@ export type {
 
 export type { ReasoningEffort } from './contracts.js';
 export { supportsEffort } from './effort.js';
+
+export { ContextBudgetResolver, contextBudgetResolver, estimateContextTokens } from './contextBudget.js';
+export type { ContextWindow, ContextBudgetModel, ContextBudgetClock, ContextBudgetSettings } from './contextBudget.js';

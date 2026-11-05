@@ -729,3 +729,19 @@ Kanał MCP i fallback podają snapshot tylko built-in delegate; nic nie wstrzyku
 w prompt i nie publikuje `context_mode`. Zgody, budżet, integracja trybu i UI należą do P2-P5.
 Testy: `ParentConversation.test.ts`, `SubAgentRunner.parentConversation.test.ts` i testy
 `parentConversation` w agent-loop/chat/tools. Używają literalnych oczekiwań, deferred i QuestionTestClock.
+
+### Opcjonalny budżet rozmowy rodzica (P2)
+
+`SubAgentRunner.runTask` przyjmuje wewnętrzną opcję `parentConversation` i callback
+`onParentConversationPrepared`; wynik może zawierać publiczny typ `ParentConversationPreparation`.
+Tylko nowy wątek dostaje osobną wiadomość user z `fenceUntrusted` i wewnętrzną proweniencją
+`parentConversationInherited`, zachowaną w transkrypcie, lecz pomijaną przy projekcji wnuka.
+Bez opcji wiadomości i limit wyjścia pozostają jak dotąd; kontynuacja nie wstrzykuje snapshotu
+ponownie i zachowuje dotychczasową odmowę zbyt długiego wątku.
+
+`ParentConversationBudget.ts` rozlicza bazowy prompt, zadanie z ręcznym kontekstem, definicje
+narzędzi, rezerwę wyjścia `min(16384, floor(okno/4))` i margines `256 + ceil(5% okna)`.
+Najpierw usuwa najstarsze wyciągi, potem pełne wiadomości, w końcu jawnie przycina ostatnią;
+przy braku miejsca uruchamia zadanie bazowe i zgłasza `status: omitted` z opisem. Metadane
+odpowiadają wysłanej treści, a estymata i nieznane okno nie gwarantują dopasowania u providera.
+Testy: `ParentConversationBudget.test.ts`, `SubAgentRunner.contextBudget.test.ts`.

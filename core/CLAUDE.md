@@ -405,3 +405,7 @@ Otwieraj `core/` jako kontekst gdy pracujesz nad:
 - Utils używanymi wszędzie (logger, yaml, hash, slugify, tokens, i18n)
 
 NIE otwieraj gdy pracujesz nad konkretnym modułem - wtedy otwórz `modules/<nazwa>/`. Core jest cicho w tle, jego publiczne API siedzi w `index.js` i to wystarczy zobaczyć.
+
+`PkmAssistantSettings.model_context_limits` przechowuje opcjonalne limity okna wejściowego
+według dokładnego identyfikatora dostawcy i modelu; ich interpretacja i fallback należą do
+`modules/models/contextBudget.ts` (publiczny resolver przez barrel models).

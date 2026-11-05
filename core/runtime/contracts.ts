@@ -209,6 +209,8 @@ export interface SettingsBag {
 
 /** Namespace pluginu. Poprzedni namespace migrowany przez `migrateNamespace`. */
 export interface PkmAssistantSettings {
+    /** Exact provider/model input-window overrides for optional parent conversation. */
+    model_context_limits?: Record<string, Record<string, number>>;
     chat?: ChatSettingsSlice;
     embedding?: EmbeddingSettingsSlice;
     notices?: NoticesSettingsSlice;
