@@ -20,7 +20,7 @@ import { defaultSubAgentFramePrompt } from './framePrompt.js';
 // Jednolity domyślny zestaw narzędzi workera (brak podziału research/strateg).
 import { DEPRECATED_TOOL_RENAMES, DEFAULT_SUB_AGENT_TOOLS } from './SubAgentLoader.js';
 import type { SubAgentData } from './types.js';
-import { describeToolEffect, checkEffectTargets } from '../tools/index.js';
+import { describeToolEffect, checkEffectTargets, isOwnChildQuestionReply } from '../tools/index.js';
 import type { BuiltinToolExecutionContext, ToolEffect, EffectTargetIo, ExecuteToolCallOptions } from '../tools/index.js';
 // Bieg suba jest BYTEM w rejestrze (`plugin.subTaskRegistry`).
 // Sam rejestr przychodzi z pluginu (DI), stąd tylko typ - runner go nie tworzy.
@@ -605,12 +605,16 @@ export class SubAgentRunner {
             // survived the parent∩sub intersection in _getTools. _executeTool enforces this
             // so the direct-execution fallback cannot run a tool outside the whitelist.
             const controlOnly = !tools.some(tool => tool.function.name === 'sub_agent');
+            const replyOnly = controlOnly && typeof this.toolRegistry.filterByAgent === 'function'
+                && !this.toolRegistry.filterByAgent(agent).some(tool => tool.name === 'sub_agent');
             // Reply/control capability is independent of YAML, but never grants delegation.
             if (controlOnly && supportsCoordination && registry && subTask && tools.some(tool => ['delegate', 'agent_delegate'].includes(tool.function.name))) {
                 tools.push({ type: 'function', function: { name: 'sub_agent',
-                    description: 'Answer or control your own children. Use message with question_id to answer a question.',
-                    parameters: { type: 'object', properties: { action: { type: 'string', enum: ['message', 'list', 'stop', 'close'] },
-                        sub_id: { type: 'string' }, question_id: { type: 'string' }, text: { type: 'string' } }, required: ['action'] } } });
+                    description: replyOnly ? 'Answer an open question from your own child. Use message with its question_id.'
+                        : 'Answer or control your own children. Use message with question_id to answer a question.',
+                    parameters: { type: 'object', properties: { action: { type: 'string', enum: replyOnly ? ['message'] : ['message', 'list', 'stop', 'close'] },
+                        sub_id: { type: 'string' }, question_id: { type: 'string' }, text: { type: 'string' } },
+                        required: replyOnly ? ['action', 'sub_id', 'question_id', 'text'] : ['action'] } } });
             }
             const allowedToolNames = new Set<string>(tools.map((td) => td.function.name));
 
@@ -752,6 +756,17 @@ export class SubAgentRunner {
                         && (!args || typeof args !== 'object' || !('action' in args) || !['message', 'list', 'stop', 'close'].includes(String(args.action)))) {
                         failedToolCalls.add(seq);
                         return t('subagent.tool_not_allowed', { name: 'sub_agent.task' });
+                    }
+                    // The direct fallback bypasses MCP's gate; its synthetic tool must not
+                    // turn disabled sub_agent into general control authority either.
+                    if (!this.mcpClient && toolCall.name === 'sub_agent'
+                        && typeof this.toolRegistry.filterByAgent === 'function'
+                        && !this.toolRegistry.filterByAgent(agent).some(tool => tool.name === 'sub_agent')
+                        && !isOwnChildQuestionReply({ name: toolCall.name, arguments: args },
+                            { runId: subTask?.id ?? label, level: Math.max(1, delegationDepth), origin: origin ?? { agentName: agent.name } },
+                            agent.name, registry)) {
+                        failedToolCalls.add(seq);
+                        return t('subagent.tool_not_allowed', { name: 'sub_agent' });
                     }
                     const result = await this._executeTool(toolCall as ToolCall, agent.name, allowedToolNames,
                         { delegationDepth, scopeFolders: scopeFolders as string[], autonomy, controlOnly,

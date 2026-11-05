@@ -3,6 +3,7 @@ import type { ExecutionContext } from 'ava';
 import { getEventListeners } from 'node:events';
 import { createSubAgentTool } from './DelegateTool.js';
 import { MCPClient } from './MCPClient.js';
+import { ToolRegistry } from './ToolRegistry.js';
 import { createAskUserChannels } from './AskUserChannels.js';
 import { createAskUserTool } from './AskUserTool.js';
 import { SubTaskRegistry } from '../sub-agents/index.js';
@@ -10,7 +11,7 @@ import type { SubRunContext } from '../sub-agents/index.js';
 import { QuestionTestClock } from '../sub-agents/test-support/questionTestClock.js';
 
 const owner = { agentName: 'Mira', sessionPath: 's.md', sessionEpoch: 'epoch-1' };
-function fixture(t: ExecutionContext) {
+function fixture(t: ExecutionContext, disabledControls = false) {
     const clock = new QuestionTestClock();
     const registry = new SubTaskRegistry({ questionClock: clock });
     t.teardown(() => registry.dispose());
@@ -25,9 +26,10 @@ function fixture(t: ExecutionContext) {
         return q;
     };
     const tool = createSubAgentTool({});
-    const toolRegistry = { getTool: () => tool };
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.registerTool(tool as never);
     const plugin = { subTaskRegistry: registry, toolRegistry,
-        agentManager: { getAgent: () => ({ name: 'Mira' }) },
+        agentManager: { getAgent: () => ({ name: 'Mira', disabled_tools: disabledControls ? ['sub_agent'] : [] }) },
         permissionSystem: { checkPermission: () => ({ allowed: true, requiresApproval: false }), requiresApproval: () => false },
     };
     const client = new MCPClient(null as never, plugin as never, toolRegistry as never);
@@ -159,4 +161,49 @@ test('waitChildNotice zwalnia subskrypcję abortu po wyniku, Stopie i dispose', 
     const disposed = f.registry.waitChildNotice('other', signal);
     f.registry.dispose();
     t.deepEqual([await disposed, getEventListeners(signal, 'abort').length, f.registry.events.listenerCount('task:finished'), f.clock.pending], [undefined, 0, 0, 0]);
+});
+
+test('F3 disabled sub_agent permits only a live own-child answer; lead keeps 2.4.1 gate', async t => {
+    const f = fixture(t, true);
+    f.create('p1'); f.create('p2'); f.create('g1', 'p1'); f.create('g2', 'p2');
+    const own = f.open('g1'), other = f.open('g2'), lead = f.open('p1');
+    const reply = { action: 'message', sub_id: 'g1-thread', question_id: own.question.id, text: 'niebieski' };
+    const denied = { isError: true, error: 'Permission denied: Tool "sub_agent" is disabled for this agent (Permissions)' };
+    for (const args of [
+        ...['task', 'start', 'list', 'stop', 'close'].map(action => ({ ...reply, action, task: 'new task' })),
+        { action: 'message', sub_id: 'g1-thread', text: 'ordinary message' },
+        { ...reply, sub_id: 'g2-thread', question_id: other.question.id },
+        { ...reply, question_id: 'stale-question' },
+        { ...reply, text: '' },
+    ]) t.deepEqual(await f.call(args, 'p1'), denied);
+    t.deepEqual(await f.call({ ...reply, _invocationSubRunContext: { runId: 'p1', level: 1, origin: owner } }, 'p2'), denied);
+    t.deepEqual(await f.call({ action: 'message', sub_id: 'p1-thread', question_id: lead.question.id, text: 'lead answer' }), denied);
+    t.deepEqual(await f.call({ ...reply, _invocationSubRunContext: { runId: 'p1', level: 1, origin: owner } }), denied);
+    t.deepEqual(await f.call(reply, 'p1'), { success: true, message: 'Answer delivered to sub-agent g1-thread.' });
+    t.deepEqual(await own.resolution, { kind: 'answered', text: 'niebieski' });
+    t.deepEqual(await f.call(reply, 'p1'), denied);
+    f.registry.finish(f.registry.getTask('g1')!, { text: 'done', toolsUsed: [], durationMs: 0, usage: null });
+    f.registry.endRun('g1-thread', { successful: true });
+    t.is(f.registry.getThread('g1-thread')?.phase, 'idle');
+    t.deepEqual(await f.call({ action: 'task', sub_id: 'g1-thread', task: 'continue' }, 'p1'), denied);
+    t.deepEqual(f.registry.getThread('g1-thread')?.runIds, ['g1']);
+    f.clock.advance(299999);
+    t.deepEqual([f.registry.getQuestionState('g2').kind, f.registry.getQuestionState('p1').kind], ['waiting', 'waiting']);
+    f.clock.advance(1);
+    t.deepEqual(await Promise.all([other.resolution, lead.resolution]), [{ kind: 'no-answer' }, { kind: 'no-answer' }]);
+    t.deepEqual(await f.call({ ...reply, sub_id: 'g2-thread', question_id: other.question.id }, 'p2'), denied);
+});
+
+test('F3 disabled sub_agent rejects stopped parents, ended children and foreign epochs', async t => {
+    const f = fixture(t, true);
+    f.create('p'); f.create('g', 'p');
+    const q = f.open('g');
+    const args = { action: 'message', sub_id: 'g-thread', question_id: q.question.id, text: 'answer' };
+    const denied = { isError: true, error: 'Permission denied: Tool "sub_agent" is disabled for this agent (Permissions)' };
+    t.deepEqual(await f.call(args, 'missing-parent'), denied);
+    f.create('foreign', undefined, { ...owner, sessionEpoch: 'other' });
+    t.deepEqual(await f.call(args, 'foreign'), denied);
+    f.registry.requestStop('p', 'user');
+    t.deepEqual(await f.call(args, 'p'), denied);
+    t.deepEqual(await q.resolution, { kind: 'cancelled', by: 'user', reason: 'stop' });
 });

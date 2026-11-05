@@ -14,7 +14,8 @@ import { makeMemoryNoteFilename } from '../memory/index.js';
 // Jeden filtr znaczników `_invocation*` dla wysyłki i dla podglądu w approvalu.
 import { ExternalMcpManager } from './ExternalMcpManager.js';
 import { isRuntimeSequence } from '../sub-agents/index.js';
-import type { RuntimeSequence, SubRunContext } from '../sub-agents/index.js';
+import type { RuntimeSequence, SubRunContext, SubTaskRegistry } from '../sub-agents/index.js';
+import { isOwnChildQuestionReply } from './subAgentQuestionReply.js';
 import type { PermissionDecision, PermissionedAgent, ScopeFolders } from '../../core/index.js';
 import type { BuiltinToolExecutionContext } from './ToolRegistry.js';
 import type { ModelResponse, ParsedToolCall } from '../agent-loop/index.js';
@@ -123,6 +124,7 @@ interface ToolContext {
 
 /** Plugin widziany przez klienta - same bramki bezpieczeństwa i rejestry, nic więcej. */
 export interface MCPClientPlugin {
+    subTaskRegistry?: Pick<SubTaskRegistry, 'getDelegationAncestors' | 'getThread' | 'getTask' | 'getQuestionState'> | null;
     env?: { settings?: { pkmAssistant?: { chat?: { apiKeys?: Record<string, unknown> } } } };
     permissionSystem: {
         checkPermission(
@@ -947,7 +949,13 @@ export class MCPClient {
             //    tylko narzędzie, którego user agentowi nie dał.
             if (typeof this.toolRegistry.checkToolAxis === 'function') {
                 const axis = this.toolRegistry.checkToolAxis(agent, toolCall.name);
-                if (!axis.allowed) {
+                // A parent may resolve its child's pending question even with sub_agent disabled.
+                // The tool rechecks the recipient/deadline when delivering; task/control never qualify.
+                const childReply = !axis.allowed && axis.reason === 'disabled_tool'
+                    && this.toolRegistry.getTool(toolCall.name)?.source !== 'user'
+                    && isOwnChildQuestionReply({ name: toolCall.name, arguments: argsWithContext },
+                        opts.subRunContext, agent.name ?? invocationAgentName ?? '', this.plugin.subTaskRegistry);
+                if (!axis.allowed && !childReply) {
                     const reason = axis.reason === 'server_not_opted_in'
                         ? t('perm.server_not_opted_in', { server: String(axis.serverName || '?') })
                         : t('perm.tool_disabled', { tool: toolCall.name });

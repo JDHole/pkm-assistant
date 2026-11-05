@@ -5,6 +5,7 @@ import { createDelegateTool, createSubAgentTool, __test__, stopAllDelegations } 
 import { createAskUserChannels } from './AskUserChannels.js';
 import { createAskUserTool } from './AskUserTool.js';
 import { MCPClient } from './MCPClient.js';
+import { ToolRegistry } from './ToolRegistry.js';
 import type { BuiltinToolExecutionContext } from './ToolRegistry.js';
 import { log } from '../../core/utils/Logger.js';
 import { SubAgentRunner, SubTaskRegistry, SubTaskNotifier } from '../sub-agents/index.js';
@@ -28,7 +29,7 @@ type Payload = { messages: Array<{ role: string; content: string }>; tools?: Arr
 type Request = { payload: Payload; complete(text: string): void; calls(...calls: Array<[string, Record<string, unknown>]>): void; fail(): void };
 const owner = { agentName: 'Mira', sessionPath: 'chat.md', sessionEpoch: 'e1', tabKey: 'tab' };
 
-function fixture(t: ExecutionContext, options: { maxIterations?: number; fallback?: boolean; local?: boolean; defaultDepth?: boolean; executorGrace?: number; cooperative?: boolean } = {}) {
+function fixture(t: ExecutionContext, options: { maxIterations?: number; fallback?: boolean; local?: boolean; defaultDepth?: boolean; executorGrace?: number; cooperative?: boolean; disabledControls?: boolean } = {}) {
     const clock = new QuestionTestClock();
     const registry = new SubTaskRegistry({ questionClock: clock, maxIdleThreadsPerSession: 30 });
     const notifier = new SubTaskNotifier({ registry });
@@ -73,7 +74,7 @@ function fixture(t: ExecutionContext, options: { maxIterations?: number; fallbac
         ['mira-parent', { name: 'mira-parent', description: 'parent', tools: ['read', 'delegate'], max_iterations: options.maxIterations ?? 25 }],
         ['mira-child', { name: 'mira-child', description: 'child', tools: ['read'], max_iterations: 25 }],
     ]);
-    const agent = { name: 'Mira', activeSubAgents: [...configs.keys()].map(name => ({ name })) };
+    const agent = { name: 'Mira', disabled_tools: options.disabledControls ? ['sub_agent'] : [], activeSubAgents: [...configs.keys()].map(name => ({ name })) };
     const makeRunner = (runtime: unknown) => {
         const runner = new SubAgentRunner({ app: {} as never, plugin: runtime as never, toolRegistry: toolRegistry as never });
         return { runTask: (...args: Parameters<SubAgentRunner['runTask']>) => {
@@ -93,7 +94,9 @@ function fixture(t: ExecutionContext, options: { maxIterations?: number; fallbac
         if (options.cooperative) signal?.addEventListener('abort', () => read.resolve('cancelled'), { once: true });
         return read.promise.finally(leaveExecutor);
     } }];
-    const toolRegistry = { getTool: (name: string) => tools.find(tool => tool.name === name) ?? null, filterByAgent: () => tools };
+    const realToolRegistry = new ToolRegistry();
+    for (const tool of tools) realToolRegistry.registerTool(tool as never);
+    const toolRegistry = options.disabledControls ? realToolRegistry : { getTool: (name: string) => tools.find(tool => tool.name === name) ?? null, filterByAgent: () => tools };
     modelsTest.setChatModelFactory(() => new Model() as never);
     const plugin = {
         toolRegistry, subTaskRegistry: registry, _askUserChannels: createAskUserChannels(registry),
@@ -558,4 +561,47 @@ for (const cause of ['timeout', 'unload'] as const) test.serial(`F2 ${cause} als
     f.clock.advance(1);
     await __test__._settleBackground(true);
     t.deepEqual([f.registry.getRunActivity(task.id), f.clock.pending, __test__._liveAbortCount()], ['inactive', 0, 0]);
+});
+
+for (const fallback of [false, true]) test.serial(`F3 disabled sub_agent: parent answers its child's question (${fallback ? 'fallback' : 'MCP'})`, async t => {
+    const f = fixture(t, { fallback, disabledControls: true });
+    await f.submit('parent-1');
+    const start = await f.next('parent-1');
+    t.deepEqual(start.payload.tools?.map(tool => tool.function.name), ['read', 'delegate', 'ask_parent', 'sub_agent']);
+    start.calls(['delegate', { task: 'child-1', aspect: 'child' }]);
+    (await f.next('parent-1')).complete('waiting');
+    await f.activity('parent-1', 'waiting-children');
+    (await f.next('child-1')).calls(['ask_parent', { text: 'Jaki kolor?' }]);
+    const question = await f.questions.next();
+    await f.activity('child-1', 'waiting');
+    const pendingParent = await f.next('parent-1');
+    pendingParent.calls(...['list', 'stop', 'close', 'task'].map(action => ['sub_agent', {
+        action, sub_id: question.subId, question_id: question.id, text: 'not an answer', task: 'child-2',
+    }] as [string, Record<string, unknown>]), ['sub_agent', { action: 'message', sub_id: question.subId, text: 'ordinary message' }]);
+    const denied = await f.next('parent-1');
+    const controlDenial = fallback
+        ? 'Refused: tool "sub_agent" is outside this sub-agent\'s allowed set (parent∩sub whitelist). Use only the tools provided to you.'
+        : 'Tool sub_agent error: {"isError":true,"error":"Permission denied: Tool \\"sub_agent\\" is disabled for this agent (Permissions)"}';
+    t.deepEqual(denied.payload.messages.filter(message => message.role === 'tool').slice(-5).map(message => message.content), [
+        controlDenial, controlDenial, controlDenial,
+        'Refused: tool "sub_agent.task" is outside this sub-agent\'s allowed set (parent∩sub whitelist). Use only the tools provided to you.',
+        controlDenial,
+    ]);
+    t.is(f.registry.getQuestionState(question.taskId).kind, 'waiting');
+    answer(denied, question, 'niebieski');
+    const afterAnswer = await f.next('parent-1');
+    // Assert before awaiting the child: the old MCP gate fails here, without hanging.
+    t.is(f.registry.getQuestionState(question.taskId).kind, 'closed');
+    t.deepEqual(JSON.parse(afterAnswer.payload.messages.filter(message => message.role === 'tool').at(-1)!.content), {
+        success: true, message: `Answer delivered to sub-agent ${question.subId}.`,
+    });
+    afterAnswer.complete('waiting for child');
+    const child = await f.next('child-1');
+    t.is(child.payload.messages.filter(message => message.role === 'tool').at(-1)!.content, 'niebieski');
+    child.complete('Ulubiony kolor klienta to niebieski.');
+    const parent = await f.next('parent-1');
+    t.deepEqual(notices(parent).filter(n => n.kind === 'result').map(n => n.result?.text), ['Ulubiony kolor klienta to niebieski.']);
+    parent.complete('Gotowe.');
+    await __test__._settleBackground(true);
+    t.deepEqual(f.registry.list().map(task => [task.status, task.result?.text]), [['done', 'Gotowe.'], ['done', 'Ulubiony kolor klienta to niebieski.']]);
 });
