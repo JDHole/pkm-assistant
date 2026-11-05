@@ -12,7 +12,7 @@ import type { ReasoningEffort } from '../models/index.js';
  * 4. Return results
  */
 import { SubAgentRunner, DEFAULT_SUB_AGENT_TOOLS, PKM_SUB_NAME, allocateSubTaskId, canContinueAfterUserStop, isRuntimeSequence } from '../../modules/sub-agents/index.js';
-import type { AdmissionGroup, SubTaskRegistry, SubThread, Lease, RuntimeSequence, SubRunContext, SubTask, SubTaskOrigin, QuestionId, Owner, AnswerResult, QuestionState, RunActivity, ParentQuestion } from '../../modules/sub-agents/index.js';
+import type { AdmissionGroup, SubTaskRegistry, SubThread, Lease, RuntimeSequence, SubRunContext, SubTask, SubTaskOrigin, QuestionId, QuestionState, RunActivity, ParentQuestion } from '../../modules/sub-agents/index.js';
 import type { RunOutcome, SubRunResult } from '../../modules/sub-agents/index.js';
 import { createModelForRole } from '../../modules/models/index.js';
 import type { ModelRole, ResolverPluginLike } from '../../modules/models/index.js';
@@ -238,7 +238,7 @@ export type DelegatePlugin = NonNullable<ResolverPluginLike> & {
         getThread?: (id: string) => import('../sub-agents/index.js').SubThread | undefined;
         listThreads?: (owner: import('../sub-agents/index.js').SubThreadOwner) => import('../sub-agents/index.js').SubThread[];
         postMessage?: (id: string, message: string) => boolean;
-        answerParentQuestion?: (id: string, questionId: QuestionId, owner: Owner, text: string) => AnswerResult;
+        answerParentQuestion?: SubTaskRegistry['answerParentQuestion'];
         getQuestionState?: (id: string) => QuestionState;
         isQuestionOpen?: (id: string, questionId: QuestionId) => boolean;
         promoteToBackground?: (id: string) => boolean;
@@ -1220,9 +1220,16 @@ export function createSubAgentTool(app: object, deps: DelegateToolDeps = {}) {
             const origin = originRaw && typeof originRaw === 'object' ? originRaw as Partial<SubTaskOrigin> : undefined;
             if (!origin?.agentName || !origin.sessionPath || !origin.sessionEpoch) return { success: false, error: t('mcp.sub_agent.owner_missing') };
             const owner = { agentName: origin.agentName, sessionPath: origin.sessionPath, sessionEpoch: origin.sessionEpoch };
+            const context = raw._invocationSubRunContext as SubRunContext | undefined;
+            if (context && (!registry?.getDelegationAncestors?.(context, owner.agentName)
+                || context.origin.agentName !== owner.agentName || context.origin.sessionPath !== owner.sessionPath || context.origin.sessionEpoch !== owner.sessionEpoch)) {
+                return { success: false, error: t('mcp.sub_agent.owner_mismatch') };
+            }
             const action = raw.action;
+            // task establishes a new run relation, validated by delegate (including continuations).
+            const canControl = (thread: SubThread): boolean => !context || action === 'task' || thread.parentId === context.runId;
             if (action === 'list') {
-                const threads = registry?.listThreads?.(owner) || [];
+                const threads = (registry?.listThreads?.(owner) || []).filter(canControl);
                 return { success: true, threads: threads.map(thread => {
                     const last = thread.runIds.length ? registry?.getTask?.(thread.runIds[thread.runIds.length - 1]) : undefined;
                     return { sub_id: thread.threadId, name: thread.name, phase: thread.phase, runs: thread.runIds.length,
@@ -1233,7 +1240,7 @@ export function createSubAgentTool(app: object, deps: DelegateToolDeps = {}) {
             const id = typeof raw.sub_id === 'string' ? raw.sub_id : '';
             const thread = id ? registry?.getThread?.(id) : undefined;
             if (!thread) return { success: false, error: t('mcp.sub_agent.not_found') };
-            if (thread.owner.agentName !== owner.agentName || thread.owner.sessionPath !== owner.sessionPath || thread.owner.sessionEpoch !== owner.sessionEpoch) {
+            if (thread.owner.agentName !== owner.agentName || thread.owner.sessionPath !== owner.sessionPath || thread.owner.sessionEpoch !== owner.sessionEpoch || !canControl(thread)) {
                 return { success: false, error: t('mcp.sub_agent.owner_mismatch') };
             }
             if (action === 'message') {
@@ -1241,8 +1248,12 @@ export function createSubAgentTool(app: object, deps: DelegateToolDeps = {}) {
                     const runId = thread.runIds[thread.runIds.length - 1];
                     const text = typeof raw.text === 'string' ? raw.text : '';
                     if (!text.trim()) return { success: false, error: t('mcp.sub_agent.empty_message') };
-                    if (typeof raw.question_id !== 'string' || !raw.question_id || !runId ||
-                        registry?.answerParentQuestion?.(runId, raw.question_id as QuestionId, owner, text).kind !== 'accepted') {
+                    const answer = typeof raw.question_id === 'string' && raw.question_id && runId
+                        ? context
+                            ? registry?.answerParentQuestion?.(runId, raw.question_id as QuestionId, owner, { kind: 'sub', runId: context.runId }, text)
+                            : registry?.answerParentQuestion?.(runId, raw.question_id as QuestionId, owner, text)
+                        : undefined;
+                    if (answer?.kind !== 'accepted') {
                         const state = runId ? registry?.getQuestionState?.(runId) : undefined;
                         return { success: false, error: t('mcp.sub_agent.question_expired'), code: 'question_expired',
                             ...(state?.kind === 'waiting' ? { activeQuestionId: state.question.id } : {}) };

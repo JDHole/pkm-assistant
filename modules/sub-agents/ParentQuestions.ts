@@ -5,12 +5,13 @@ import { log } from '../../core/utils/Logger.js';
 export type Owner = Required<Pick<SubTaskOrigin, 'agentName' | 'sessionPath' | 'sessionEpoch'>>;
 declare const questionIdBrand: unique symbol;
 export type QuestionId = string & { readonly [questionIdBrand]: true };
-export type ParentQuestion = Readonly<{ id: QuestionId; taskId: string; subId: string; name: string; text: string; owner: Owner; askedAt: number }>;
+export type QuestionRecipient = Readonly<{ kind: 'lead' } | { kind: 'sub'; runId: string }>;
+export type ParentQuestion = Readonly<{ id: QuestionId; taskId: string; subId: string; name: string; text: string; owner: Owner; recipient: QuestionRecipient; askedAt: number }>;
 export type QuestionClock = { kind: 'ticking'; remainingMs: number; since: number } | { kind: 'paused'; remainingMs: number };
 export type QuestionResolution = { kind: 'answered'; text: string } | { kind: 'no-answer' } | { kind: 'cancelled'; by: StopBy; reason: 'stop' | 'unload' | 'run-ended' };
 export type QuestionState = { kind: 'none' } | { kind: 'waiting'; question: ParentQuestion; clock: QuestionClock } | { kind: 'closed'; question: ParentQuestion; resolution: QuestionResolution };
 export type TerminalQuestion = { text: string; resolution: QuestionResolution; note?: string };
-export type AnswerResult = { kind: 'accepted' } | { kind: 'rejected'; reason: 'expired' | 'wrong-owner' | 'wrong-question' };
+export type AnswerResult = { kind: 'accepted' } | { kind: 'rejected'; reason: 'expired' | 'wrong-owner' | 'wrong-question' | 'wrong-recipient' };
 export type RunActivity = { kind: 'working' } | { kind: 'waiting'; questionId: QuestionId } | { kind: 'ending' };
 export interface ParentQuestionClock {
     now(): number;
@@ -52,7 +53,8 @@ export class ParentQuestions {
         // A timeout is terminal for this run, even before the runner finishes it.
         if (task.questionState?.kind === 'closed' && task.questionState.resolution.kind !== 'answered') return { kind: 'rejected', reason: 'unavailable' };
         const owner: Owner = { agentName: origin.agentName, sessionPath: origin.sessionPath, sessionEpoch: origin.sessionEpoch };
-        const question: ParentQuestion = Object.freeze({ id: `${this.prefix}-${++this.sequence}` as QuestionId, taskId: task.id, subId: task.threadId, name: task.name, text, owner: Object.freeze(owner), askedAt: Date.now() });
+        const recipient: QuestionRecipient = Object.freeze(task.parentId === undefined ? { kind: 'lead' } : { kind: 'sub', runId: task.parentId });
+        const question: ParentQuestion = Object.freeze({ id: `${this.prefix}-${++this.sequence}` as QuestionId, taskId: task.id, subId: task.threadId, name: task.name, text, owner: Object.freeze(owner), recipient, askedAt: Date.now() });
         let resolve!: (value: QuestionResolution) => void;
         const resolution = new Promise<QuestionResolution>(r => {
             resolve = r;
@@ -105,12 +107,14 @@ export class ParentQuestions {
         entry.resolve(resolution);
         return true;
     }
-    answer(task: SubTask | undefined, id: QuestionId, owner: Owner, text: string): AnswerResult {
+    answer(task: SubTask | undefined, id: QuestionId, owner: Owner, actor: QuestionRecipient, text: string): AnswerResult {
         if (!task) return { kind: 'rejected', reason: 'expired' };
         const state = this.check(task);
         if (state.kind !== 'waiting') return { kind: 'rejected', reason: 'expired' };
         if (state.question.id !== id) return { kind: 'rejected', reason: 'wrong-question' };
         if (ownerKey(state.question.owner) !== ownerKey(owner)) return { kind: 'rejected', reason: 'wrong-owner' };
+        const recipient = state.question.recipient;
+        if (recipient.kind !== actor.kind || (recipient.kind === 'sub' && actor.kind === 'sub' && recipient.runId !== actor.runId)) return { kind: 'rejected', reason: 'wrong-recipient' };
         return this.close(task, { kind: 'answered', text }) ? { kind: 'accepted' } : { kind: 'rejected', reason: 'expired' };
     }
     registerUserWait(owner: Owner, cancel: () => void): () => void {

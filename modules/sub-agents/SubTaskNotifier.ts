@@ -103,7 +103,7 @@ export class SubTaskNotifier {
     private _onFinished(payload: unknown): void {
         try {
             const task = payload as SubTask | undefined;
-            if (!task?.id || task.background !== true) return;
+            if (!task?.id || task.background !== true || task.parentId !== undefined) return;
             this._removeTaskQuestions(task.id);
             const entry: PendingEntry = { notice: { kind: 'result', task }, claimed: false, delivering: false };
             this._pending.push(entry);
@@ -116,7 +116,7 @@ export class SubTaskNotifier {
 
     private _onQuestion(payload: unknown): void {
         const question = payload as ParentQuestion;
-        if (!question?.id) return;
+        if (!question?.id || question.recipient?.kind === 'sub') return;
         if (this._registry?.getTask?.(question.taskId)?.background === false) return;
         const entry: PendingEntry = { notice: { kind: 'question', question }, claimed: false, delivering: false };
         this._pending.push(entry); this._tryDeliver(entry); this._trimPending();

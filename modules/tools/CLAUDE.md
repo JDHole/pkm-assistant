@@ -11,7 +11,7 @@ nieużyty kanał UI usuwa przez `forget`. Czat otwiera kanał dla właściciela 
 przekazuje jego identyfikator narzędziu i zamyka go po odpowiedzi lub anulowaniu.
 
 `sub_agent list` zwraca `questionState` ostatniego biegu wątku. Wiadomość
-z `question_id` przekazuje odpowiedź do protokołu po sprawdzeniu właściciela;
+z `question_id` przekazuje odpowiedź do protokołu po sprawdzeniu właściciela i adresata;
 bez ID pozostaje zwykłą wiadomością sterującą.
 
 **MCP runtime + built-in narzędzia agenta.** Plugin uruchamia:
@@ -574,3 +574,8 @@ P2 - `delegate` odrzuca wyłącznie zbyt długą pojedynczą listę (`tasks.leng
 Kontynuacja rezerwuje nowe `queuedRunId`, zachowuje `threadId`, transkrypt i model oraz przyjmuje relację nowego biegu. Druga próba uruchomienia tego samego wątku w kolejce odmawia. P1 waliduje rodzica nadal wyłącznie dla `SubRunContext`; root bez sesji zachowuje brak `origin` na biegu. Testy P2: `DelegateTool.scheduler.test.ts` (prawdziwy runner, rejestr i sterowany model; timeout przez `QuestionTestClock`) oraz `SubTaskScheduler.test.ts`.
 
 P3 - `_withAdmission` rejestruje abort pod ID rezerwacji przed `acquire`. Stop z rejestru obejmuje więc przygotowanie, kolejkę i wykonanie, a zatrzask obsługuje także Stop wyemitowany przez `thread:created` przed wejściem w `_withAdmission`. Zatrzymana rezerwacja jest rozliczana dokładnie raz przez `finishQueuedStop`, z zachowaniem metadanych pokwitowania. Testy `DelegateTool.tree.test.ts` przechodzą rzeczywiste MCP i fallback oraz sprawdzają brak kolejnych modeli po późnym callbacku dostawcy; istniejące testy delegacji nie zmieniają oczekiwań.
+
+
+P4 - `sub_agent` wyprowadza adresata odpowiedzi z zaufanego `_invocationSubRunContext` dostarczonego przez MCP lub fallback runnera. Przy obecnym kontekście sprawdza żywy bieg, poziom i pełnego właściciela przez `getDelegationAncestors`; bez kontekstu zachowuje ścieżkę prowadzącego. `message(question_id)` przekazuje do rejestru aktora `{kind: 'sub', runId}` albo korzysta ze zgodnościowego wariantu odpowiedzi prowadzącego. Prowadzący nie może odpowiedzieć na Qg za rodzica. Wiadomość bez ID nadal jest wiadomością, nie odpowiedzią na pytanie.
+
+`list`, `message`, `stop` i `close` wywołane przez suba obejmują tylko jego bezpośrednie dzieci według bieżącego `thread.parentId`; inny rodzic w tej samej sesji nie uzyskuje dostępu. `task` pozostaje nową delegacją: przy kontynuacji relację wyznacza aktualny bieg wołającego, zgodnie z P1, a walidację wykonuje `delegate`. P4 nie zmienia widoczności narzędzi w runnerze ani jego pętli. Testy `SubAgentTool.recipients.test.ts` przechodzą przez MCP z fałszywymi znacznikami modelu, sprawdzają stare Q, kolejne biegi rodzica, ścieżkę prowadzącego oraz rzeczywiste kanały `ask_user` z `QuestionTestClock`. Dotychczasowe asercje delegacji pozostają bez zmian.

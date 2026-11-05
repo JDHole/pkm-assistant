@@ -40,9 +40,11 @@ import { log } from '../../core/utils/Logger.js';
 import type { RunOutcome, StopBy } from './runOutcome.js';
 import type { LoopMessage } from '../agent-loop/index.js';
 import { ParentQuestions } from './ParentQuestions.js';
+import { SubTaskInbox } from './SubTaskInbox.js';
+import type { SubTaskNotice } from './SubTaskNotifier.js';
 import { SubTaskScheduler } from './SubTaskScheduler.js';
 import type { AdmissionGroup, Lease, SubRunActivity } from './SubTaskScheduler.js';
-import type { Owner, QuestionId, QuestionState, ParentQuestionClock, OpenParentQuestionResult, AnswerResult } from './ParentQuestions.js';
+import type { Owner, QuestionId, QuestionRecipient, ParentQuestion, QuestionState, ParentQuestionClock, OpenParentQuestionResult, AnswerResult } from './ParentQuestions.js';
 
 /** Stan biegu suba. `aborted` = ubity z zewnątrz (timeout delegacji), `error` = wyjątek. */
 export type SubTaskStatus = 'running' | 'done' | 'error' | 'aborted';
@@ -219,6 +221,13 @@ export class SubTaskRegistry {
     getRunActivity(runId: string): SubRunActivity { return this._scheduler.getActivity(runId); }
 
     private readonly _questions: ParentQuestions;
+    private readonly _inbox: SubTaskInbox;
+    takeChildNotices(parentId: string): SubTaskNotice[] { return this._inbox.take(parentId); }
+    waitChildNotice(parentId: string, signal: AbortSignal): Promise<SubTaskNotice | undefined> { return this._inbox.wait(parentId, signal); }
+    private _isLiveRun(id: string): boolean {
+        const task = this._tasks.get(id);
+        return task?.status === 'running' && !task.stopRequested;
+    }
     private _runtimeSequence = 0;
     private _nextSequence(): RuntimeSequence {
         if (this._runtimeSequence >= Number.MAX_SAFE_INTEGER) throw new Error('Runtime sequence exhausted');
@@ -227,16 +236,31 @@ export class SubTaskRegistry {
     issueTurnStartSequence(): RuntimeSequence { return this._nextSequence(); }
     openParentQuestion(taskId: string, text: string): OpenParentQuestionResult {
         const task = this._tasks.get(taskId);
+        if (task?.parentId !== undefined) {
+            const parent = this._tasks.get(task.parentId);
+            const key = task.origin && this._ownerKey(task.origin);
+            if (!parent?.origin || !this._isLiveRun(parent.id) || !key || this._ownerKey(parent.origin) !== key) return { kind: 'rejected', reason: 'unavailable' };
+        }
         return task ? this._questions.open(task, text) : { kind: 'rejected', reason: 'unavailable' };
     }
     cancelParentQuestion(taskId: string): void {
         const task = this._tasks.get(taskId);
         if (task) this._questions.close(task, { kind: 'cancelled', by: task.stopRequestedBy ?? 'system', reason: 'run-ended' });
     }
-    answerParentQuestion(taskId: string, id: QuestionId, owner: Owner, text: string): AnswerResult {
+    answerParentQuestion(taskId: string, id: QuestionId, owner: Owner, text: string): AnswerResult;
+    answerParentQuestion(taskId: string, id: QuestionId, owner: Owner, actor: QuestionRecipient, text: string): AnswerResult;
+    answerParentQuestion(taskId: string, id: QuestionId, owner: Owner, actorOrText: QuestionRecipient | string, answer?: string): AnswerResult {
+        // The four-argument API remains a lead answer, never an implicit parent answer.
+        const actor = typeof actorOrText === 'string' ? { kind: 'lead' } as const : actorOrText;
+        const text = typeof actorOrText === 'string' ? actorOrText : answer ?? '';
         const task = this._tasks.get(taskId);
         if (task?.stopRequested) return { kind: 'rejected', reason: 'expired' };
-        return this._questions.answer(task, id, owner, text);
+        if (actor.kind === 'sub') {
+            const parent = this._tasks.get(actor.runId);
+            if (!this._isLiveRun(actor.runId)) return { kind: 'rejected', reason: 'expired' };
+            if (!parent?.origin || this._ownerKey(parent.origin) !== this._ownerKey(owner)) return { kind: 'rejected', reason: 'wrong-owner' };
+        }
+        return this._questions.answer(task, id, owner, actor, text);
     }
     getQuestionState(taskId: string): QuestionState {
         const task = this._tasks.get(taskId);
@@ -289,13 +313,19 @@ export class SubTaskRegistry {
         questionClock,
     }: SubTaskRegistryOptions = {}) {
         this.events = new EventEmitter();
-        this._questions = new ParentQuestions((event, payload) => this.events.emit(event, payload), questionClock);
+        this._questions = new ParentQuestions((event, payload) => {
+            const question = payload as ParentQuestion;
+            if (event === 'question:opened' && question.recipient.kind === 'sub') this._inbox.push(question.recipient.runId, { kind: 'question', question });
+            if (event === 'question:closed') this._inbox.removeQuestion(question);
+            this.events.emit(event, payload);
+        }, questionClock);
         this._tasks = new Map();
         this._threads = new Map();
         this._threadLimits = { runs: maxThreadRuns, chars: maxThreadTranscriptChars, idleMs: threadIdleMs, perSession: maxIdleThreadsPerSession };
         this._traceScopes = new Map();
         this._aborts = new Map();
         this._messages = new Map();
+        this._inbox = new SubTaskInbox(id => this._isLiveRun(id), (id, questionId) => this.isQuestionOpen(id, questionId));
         this._traceLog = traceLog || null;
         this._mask = typeof mask === 'function' ? mask : null;
         this._maxDone = Number(maxDone) > 0 ? Number(maxDone) : DEFAULT_MAX_DONE;
@@ -526,6 +556,8 @@ export class SubTaskRegistry {
             this._aborts.delete(task.id);
             // Niedoręczone wiadomości do zakończonego biegu nie mają już adresata.
             this._messages.delete(task.id);
+            this._inbox.close(task.id);
+            if (task.parentId !== undefined) this._inbox.push(task.parentId, { kind: 'result', task });
         });
     }
 
@@ -777,7 +809,7 @@ export class SubTaskRegistry {
             const aborts = live.map(([id]) => ({ id, stop: this._aborts.get(id), depth: depth(id) }))
                 .sort((a, b) => b.depth - a.depth);
             try {
-                for (const [id] of live) this._scheduler.cancel(id);
+                for (const [id] of live) { this._scheduler.cancel(id); this._inbox.close(id); }
                 for (const [, node] of live) {
                     if (node.task) {
                         this._questions.close(node.task, { kind: 'cancelled', by: node.task.stopRequestedBy!, reason: reason ? 'unload' : 'stop' });
@@ -944,6 +976,7 @@ export class SubTaskRegistry {
     dispose(): void {
         this._stoppingAll = true;
         this._scheduler.dispose();
+        this._inbox.dispose();
         this._questions.dispose();
         try {
             this.events.removeAllListeners();
