@@ -5,6 +5,8 @@ pozostały czas; termin nadal rozstrzyga zegar monotoniczny.
 
 Model paska `summarizeStripRows` zlicza widoczne wiersze: pracujące i zatrzymujące się, oczekujące w kolejce oraz wszystkie wiersze.
 
+Rejestr i model paska przyjmują opcjonalne `parentId` i `level` także na rezerwacji `SubThread`; syntetyczne wyniki zatrzymanej lub nieudanej kolejki zachowują te pola. Runner zapisuje poziom biegu. Relacja rodzica nie jest jeszcze przekazywana przez delegację ani odtwarzana po restarcie.
+
 > Fizyczne źródła modułu mają rozszerzenie `.ts`. Zapisy `.js` poniżej to specyfikatory
 > importów, które celowo zostają `.js`.
 

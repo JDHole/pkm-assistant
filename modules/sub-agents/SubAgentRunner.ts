@@ -535,6 +535,7 @@ export class SubAgentRunner {
                     id: label,
                     name: config.name || config.role || 'sub',
                     agentName: agent.name,
+                    level: delegationDepth,
                     budget: {
                         maxIterations: loopLimits.maxIterations,
                         perCallTimeoutMs: loopLimits.perCallTimeoutMs,

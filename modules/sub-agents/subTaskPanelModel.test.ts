@@ -26,6 +26,13 @@ test('wynik zachowuje rozstrzygnięcie i treść pytania bez odpowiedzi', t => {
 
 const TERAZ = 1_000_000;
 
+test('model paska zachowuje rodzica i poziom biegu', t => {
+    const registry = new SubTaskRegistry();
+    registry.create({ id: 'child', name: 'worker', agentName: 'Klara', parentId: 'parent', level: 2 });
+    const rows = buildStripModel({ agentName: 'Klara', tasks: registry.list() });
+    t.deepEqual(rows.map(row => [row.id, row.parentId, row.level]), [['child', 'parent', 2]]);
+});
+
 test('naturalne zakończenie bez materiału ma tytuł pusty wynik', t => {
     const model = buildSubTaskResultModel({
         outcome: { end: { kind: 'finished' }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] },
@@ -396,6 +403,18 @@ test('wątki queued dostają pozycję w kolejności rejestru i filtrują pełneg
     t.deepEqual(rows.map(row => row.state), [{ kind: 'queued', position: 1 }, { kind: 'queued', position: 2 }]);
     t.is(tr('chat.substrip.queue_position', { position: '1' }, 'pl'), '1. w kolejce');
     t.is(tr('chat.substrip.queue_position', { position: '2' }, 'en'), '2 in queue');
+    reg.dispose();
+});
+
+test('relacja rezerwacji jest widoczna przed startem i po zatrzymaniu', t => {
+    const reg = new SubTaskRegistry();
+    const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: 'epoch' };
+    const thread = reg.createThread({ threadId: 'child', name: 'worker', owner, origin: owner, config: {}, phase: 'queued', parentId: 'parent-run', level: 2 });
+    const rows = buildStripModel({ threads: [thread], tasks: [], agentName: owner.agentName, sessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch });
+    t.deepEqual({ parentId: rows[0].parentId, level: rows[0].level }, { parentId: 'parent-run', level: 2 });
+    reg.closeThread('child', 'lead');
+    const stopped = reg.finishQueuedStop('child', {});
+    t.deepEqual({ parentId: stopped?.parentId, level: stopped?.level }, { parentId: 'parent-run', level: 2 });
     reg.dispose();
 });
 

@@ -101,6 +101,7 @@ export function canContinueAfterUserStop(thread: SubThread, turnKind: unknown, t
 export type SubThreadEffect = RunOutcome['effects'][number] & { expectedCheck?: 'exists' | 'absent' | 'none' };
 export interface SubThread {
     threadId: string; name: string; owner: SubThreadOwner; origin: SubTaskOrigin;
+    parentId?: string; level?: number;
     phase: 'queued' | 'running' | 'idle' | 'closed'; reusable: boolean; runIds: string[];
     transcript: LoopMessage[]; config: Record<string, unknown>; userStop: boolean;
     lastUserStopSeq?: RuntimeSequence;
@@ -109,6 +110,8 @@ export interface SubThread {
 
 /** Bieg sub-agenta jako byt. `id` = etykieta trace (`sub/<nazwa>#<seq>`), unikalna w procesie. */
 export interface SubTask {
+    parentId?: string;
+    level?: number;
     questionState?: QuestionState;
     id: string;
     name: string;
@@ -280,7 +283,7 @@ export class SubTaskRegistry {
         if (thread?.threadId) this._traceLog?.scope?.(thread.threadId)?.(type, { threadId: thread.threadId, phase: thread.phase });
     }
 
-    createThread(input: { threadId: string; name: string; owner: SubThreadOwner; origin: SubTaskOrigin; config: Record<string, unknown>; phase?: SubThread['phase'] }): SubThread {
+    createThread(input: { threadId: string; name: string; owner: SubThreadOwner; origin: SubTaskOrigin; config: Record<string, unknown>; phase?: SubThread['phase']; parentId?: string; level?: number }): SubThread {
         const now = Date.now();
         const thread: SubThread = { ...input, owner: { ...input.owner }, origin: { ...input.origin }, config: structuredClone(input.config), phase: input.phase ?? 'running', reusable: false, runIds: [], transcript: [], userStop: false, lastActiveAt: now, closeAfterRun: false, effects: [] };
         this._threads.set(thread.threadId, thread);
@@ -364,6 +367,8 @@ export class SubTaskRegistry {
         const task: SubTask = { id: threadId, name: thread.name, agentName: thread.owner.agentName, status: 'done', createdAt: Date.now(), endedAt: Date.now(), steps: [], budget: {}, threadId,
             origin: { ...thread.origin }, outcome: { end: { kind: 'stopped', by: thread.closedBy }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } };
         if (thread.lastUserStopSeq !== undefined) task.userStopSeq = thread.lastUserStopSeq;
+        if (thread.parentId !== undefined) task.parentId = thread.parentId;
+        if (thread.level !== undefined) task.level = thread.level;
         if (input.background !== undefined) task.background = input.background;
         if (typeof input.taskPreview === 'string' && input.taskPreview.trim()) task.taskPreview = this._mask ? this._mask(input.taskPreview.trim().slice(0, 300)) : input.taskPreview.trim().slice(0, 300);
         this._tasks.set(task.id, task);
@@ -385,6 +390,8 @@ export class SubTaskRegistry {
         const task: SubTask = { id: threadId, name: thread.name, agentName: thread.owner.agentName, status: 'error', createdAt: now, endedAt: now, steps: [], budget: {}, threadId,
             origin: { ...thread.origin }, error,
             outcome: { end: { kind: 'failed', stage: 'work' }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } };
+        if (thread.parentId !== undefined) task.parentId = thread.parentId;
+        if (thread.level !== undefined) task.level = thread.level;
         if (input.background !== undefined) task.background = input.background;
         if (typeof input.taskPreview === 'string' && input.taskPreview.trim()) task.taskPreview = this._mask ? this._mask(maskSensitiveData(input.taskPreview.trim().slice(0, 300))) : maskSensitiveData(input.taskPreview.trim().slice(0, 300));
         this._tasks.set(task.id, task);
@@ -481,7 +488,7 @@ export class SubTaskRegistry {
      * @param background - bieg w tle (wołający nie czeka). Rejestr tylko przechowuje flagę.
      * @param origin - adres zwrotny zlecenia. Rejestr go NIE interpretuje (patrz `SubTaskOrigin`).
      */
-    create({ id, name, agentName, budget, background, origin, taskPreview, threadId }: {
+    create({ id, name, agentName, budget, background, origin, taskPreview, threadId, parentId, level }: {
         id: string;
         name?: string;
         agentName?: string;
@@ -490,6 +497,8 @@ export class SubTaskRegistry {
         origin?: SubTaskOrigin;
         taskPreview?: string;
         threadId?: string;
+        parentId?: string;
+        level?: number;
     }): SubTask {
         const task: SubTask = {
             id,
@@ -504,6 +513,8 @@ export class SubTaskRegistry {
         // Pola opcjonalne dokładamy tylko gdy podane — kształt bytu bez delegacji w tle
         // zostaje bit w bit ten sam (konsumenci sprawdzają obecność pola).
         if (background !== undefined) task.background = background;
+        if (parentId !== undefined) task.parentId = parentId;
+        if (level !== undefined) task.level = level;
         if (threadId) { task.threadId = threadId; this._threads.get(threadId)?.runIds.push(id); }
         if (origin) task.origin = { ...origin };
         // Skrót zadania przechodzi przez tę samą maskę co kroki (zadanie potrafi

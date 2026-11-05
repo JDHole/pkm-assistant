@@ -85,6 +85,8 @@ export interface StripRun {
 }
 
 export interface StripRow {
+    parentId?: string;
+    level?: number;
     questionState: QuestionState;
     id: string;
     name: string;
@@ -344,6 +346,8 @@ export function buildStripModel({ tasks, pending, threads, tabKey = '', agentNam
         const maxRuns = getThreadRunLimit?.(thread.threadId);
         return {
             id: thread.threadId, threadId: thread.threadId, name: thread.name, state, reusable: thread.reusable, questionState: (activeRun ?? lastRun)?.questionState ?? { kind: 'none' },
+            ...((activeRun ?? lastRun)?.parentId !== undefined ? { parentId: (activeRun ?? lastRun)?.parentId } : !lastRun && thread.parentId !== undefined ? { parentId: thread.parentId } : {}),
+            ...((activeRun ?? lastRun)?.level !== undefined ? { level: (activeRun ?? lastRun)?.level } : !lastRun && thread.level !== undefined ? { level: thread.level } : {}),
             runs, runNumber, runLimit: Number.isFinite(maxRuns) && Number(maxRuns) > 0 ? Number(maxRuns) : null,
             durationMs: runs[runs.length - 1]?.durationMs || 0,
             taskPreview: runs[runs.length - 1]?.taskPreview || '',
@@ -370,7 +374,7 @@ export function buildStripModel({ tasks, pending, threads, tabKey = '', agentNam
     for (const task of orderedStandalone) {
         const run = runView(task, task.id, 1, now);
         const state = delivered.has(task.id) ? { kind: 'delivery' as const } : runState(task);
-        rows.push({ id: task.id, name: task.name || task.id, state, questionState: run.questionState, reusable: false, runs: [run], runNumber: 1, runLimit: null,
+        rows.push({ id: task.id, name: task.name || task.id, ...(task.parentId !== undefined ? { parentId: task.parentId } : {}), ...(task.level !== undefined ? { level: task.level } : {}), state, questionState: run.questionState, reusable: false, runs: [run], runNumber: 1, runLimit: null,
             durationMs: run.durationMs, taskPreview: run.taskPreview, outcome: run.outcome });
     }
     return rows;
