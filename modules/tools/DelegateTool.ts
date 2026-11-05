@@ -1,3 +1,5 @@
+import { Validator } from '@cfworker/json-schema';
+import type { Schema } from '@cfworker/json-schema';
 import type { ReasoningEffort } from '../models/index.js';
 /**
  * DelegateTool — v3.0 (Dispatcher Model)
@@ -24,7 +26,7 @@ import { t } from '../../core/i18n/index.js';
 // Reguła przecięcia zakresów mieszka tam, gdzie reszta reguł ścieżek.
 // `maskSensitiveData` to ta sama granica maskowania, co w `SubAgentRunner`.
 import type { AgentLoopPartialSnapshot, AgentLoopStopReason, RunAgentLoopOptions } from '../agent-loop/index.js';
-import { AccessGuard, maskSensitiveData } from '../../core/index.js';
+import { AccessGuard, maskSensitiveData, configuredChatSecrets } from '../../core/index.js';
 import type { ScopeFolders, PermissionedAgent } from '../../core/index.js';
 import { getLimits, DEFAULT_LIMITS } from '../../config/limits.js';
 import { log } from '../../core/utils/Logger.js';
@@ -551,6 +553,8 @@ function _trackBackground(run: Promise<unknown>, weight: number): void {
  * biegu od pierwszej linijki `execute`, więc `stopAllDelegations` sięga też tam.
  */
 const _liveAborts = new Set<SubAbortControl>();
+// Invocation latches also cover pre-consent work; they are not additional child runs.
+const _liveInvocations = new Set<SubAbortControl>();
 
 /** Weź kontrolkę pod opiekę; zwrócona funkcja zdejmuje ją (wołana, cokolwiek się z biegiem stanie). */
 function _trackAbort(ctl: SubAbortControl): () => void {
@@ -582,6 +586,7 @@ let _moduleUnloaded = false;
  */
 export function stopAllDelegations(reason = 'unload'): number {
     _moduleUnloaded = true;
+    for (const ctl of [..._liveInvocations]) abortSub(ctl, 'manual-stop');
     let stopped = 0;
     for (const ctl of [..._liveAborts]) {
         try {
@@ -630,63 +635,98 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
         app,
         plugin
     }) as SubAgentRunnerLike);
+    const inputSchema = {
+        type: 'object',
+        properties: {
+            task: {
+                type: 'string',
+                description: t('mcp.delegate.param.task')
+            },
+            aspect: {
+                type: 'string',
+                description: t('mcp.delegate.param.aspect')
+            },
+            context: {
+                type: 'string',
+                description: t('mcp.delegate.param.context')
+            },
+            context_mode: { type: 'string', enum: ['clean', 'parent_conversation'], description: t('mcp.delegate.param.context_mode') },
+            // `extra_tools` świadomie NIE JEST w schemacie: rozszerzanie narzędzi suba
+            // ponad config to decyzja usera w YAML, nie modelu w locie.
+            aspect_explicit: {
+                type: 'boolean',
+                description: 'Exact sub-agent match. Used by inline trigger chips and force-delegate UI.'
+            },
+            timeout_ms: {
+                type: 'number',
+                description: 'Per sub-agent hard budget in milliseconds. Leave UNSET to use the configured default (Settings → Limits) — do not guess tight values; a silence watchdog already kills dead runs.'
+            },
+            // Parametr `background` świadomie NIE JEST w schemacie: delegacja z głównego
+            // czatu idzie w tło zawsze, model nie ma tu wyboru (jawnie podany argument jest
+            // ignorowany w execute; patrz komentarz przy `const background`).
+            tasks: {
+                type: 'array',
+                // Informacyjny sufit dla modelu. Twarda bramka i tak siedzi w execute()
+                // (getLimits().max_parallel_delegations) - schemat tylko podpowiada, nie chroni.
+                maxItems: DEFAULT_LIMITS.max_parallel_delegations,
+                items: {
+                    type: 'object',
+                    properties: {
+                        task: { type: 'string', description: t('mcp.delegate.param.task') },
+                        aspect: { type: 'string', description: t('mcp.delegate.param.aspect') },
+                        context: { type: 'string', description: t('mcp.delegate.param.context') },
+                        context_mode: { type: 'string', enum: ['clean', 'parent_conversation'], description: t('mcp.delegate.param.context_mode') },
+                        aspect_explicit: { type: 'boolean' },
+                        timeout_ms: { type: 'number' },
+                    },
+                    required: ['task']
+                },
+                description: t('mcp.delegate.param.tasks')
+            }
+        },
+        required: [],
+        not: { required: ['tasks', 'context_mode'] },
+    } satisfies Schema;
+    // Width has its configurable limit and dedicated error below; validate every other
+    // model argument together, before any preparation, consent or reservation.
+    const validator = new Validator({ ...inputSchema, properties: { ...inputSchema.properties,
+        tasks: { ...inputSchema.properties.tasks, maxItems: undefined },
+    } });
     return {
         name: 'delegate',
         description: t('mcp.delegate.desc'),
-        inputSchema: {
-            type: 'object',
-            properties: {
-                task: {
-                    type: 'string',
-                    description: t('mcp.delegate.param.task')
-                },
-                aspect: {
-                    type: 'string',
-                    description: t('mcp.delegate.param.aspect')
-                },
-                context: {
-                    type: 'string',
-                    description: t('mcp.delegate.param.context')
-                },
-                context_mode: { type: 'string', enum: ['clean', 'parent_conversation'], description: t('mcp.delegate.param.context_mode') },
-                // `extra_tools` świadomie NIE JEST w schemacie: rozszerzanie narzędzi suba
-                // ponad config to decyzja usera w YAML, nie modelu w locie.
-                aspect_explicit: {
-                    type: 'boolean',
-                    description: 'Exact sub-agent match. Used by inline trigger chips and force-delegate UI.'
-                },
-                timeout_ms: {
-                    type: 'number',
-                    description: 'Per sub-agent hard budget in milliseconds. Leave UNSET to use the configured default (Settings → Limits) — do not guess tight values; a silence watchdog already kills dead runs.'
-                },
-                // Parametr `background` świadomie NIE JEST w schemacie: delegacja z głównego
-                // czatu idzie w tło zawsze, model nie ma tu wyboru (jawnie podany argument jest
-                // ignorowany w execute; patrz komentarz przy `const background`).
-                tasks: {
-                    type: 'array',
-                    // Informacyjny sufit dla modelu. Twarda bramka i tak siedzi w execute()
-                    // (getLimits().max_parallel_delegations) - schemat tylko podpowiada, nie chroni.
-                    maxItems: DEFAULT_LIMITS.max_parallel_delegations,
-                    items: {
-                        type: 'object',
-                        properties: {
-                            task: { type: 'string', description: t('mcp.delegate.param.task') },
-                            aspect: { type: 'string', description: t('mcp.delegate.param.aspect') },
-                            context: { type: 'string', description: t('mcp.delegate.param.context') },
-                            context_mode: { type: 'string', enum: ['clean', 'parent_conversation'], description: t('mcp.delegate.param.context_mode') },
-                            aspect_explicit: { type: 'boolean' },
-                            timeout_ms: { type: 'number' },
-                        },
-                        required: ['task']
-                    },
-                    description: t('mcp.delegate.param.tasks')
-                }
-            },
-            required: [],
-            not: { required: ['tasks', 'context_mode'] },
-        },
+        inputSchema,
         execute: async (args: DelegateToolArgs, _app: unknown, plugin: DelegatePlugin | null | undefined, runtime?: BuiltinToolExecutionContext) => {
+            const invocation = createSubAbortControl();
+            _liveInvocations.add(invocation);
+            const cancel = () => abortSub(invocation, 'manual-stop');
+            const signal = invocation.controller!.signal;
+            const cancelled = () => {
+                if (_moduleUnloaded || runtime?.shouldAbort?.() || runtime?.abortSignal?.aborted) cancel();
+                return invocation.aborted;
+            };
+            const refusal = () => ({ success: false as const, error: t('mcp.delegate.share.cancelled') });
+            let offOwner: (() => void) | undefined;
+            let offThread: (() => void) | undefined;
+            runtime?.abortSignal?.addEventListener('abort', cancel, { once: true });
+            const trackChild = (ctl: SubAbortControl) => {
+                const stop = () => abortSub(ctl, 'manual-stop');
+                signal.addEventListener('abort', stop, { once: true });
+                if (cancelled()) stop();
+                const forget = _trackAbort(ctl);
+                return () => { signal.removeEventListener('abort', stop); forget(); };
+            };
             try {
+                // In-process callers can supply absent optional properties as undefined.
+                // Validate their JSON-equivalent shape without changing capability identity.
+                const defined = (value: unknown): unknown => value && typeof value === 'object' && !Array.isArray(value)
+                    ? Object.fromEntries(Object.entries(value).filter(([, field]) => field !== undefined)) : value;
+                const validationArgs = defined(args);
+                if (validationArgs && typeof validationArgs === 'object' && 'tasks' in validationArgs && Array.isArray(validationArgs.tasks)) {
+                    validationArgs.tasks = validationArgs.tasks.map(defined);
+                }
+                if (!validator.validate(validationArgs).valid) return { success: false, error: 'Invalid delegation context mode.' };
+                cancelled();
                 const continuation = _continuations.get(args);
                 const wantsConversation = args.context_mode === 'parent_conversation'
                     || args.tasks?.some(task => task.context_mode === 'parent_conversation');
@@ -792,7 +832,14 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
 
                 const registry = plugin.subTaskRegistry;
                 const runOrigin: SubTaskOrigin = origin ?? { agentName: activeAgent.name || '' };
+                const ownerMatches = (value: SubTaskOrigin | undefined) => !!value && !!runOrigin.sessionPath && !!runOrigin.sessionEpoch
+                    && value.agentName === runOrigin.agentName && value.sessionPath === runOrigin.sessionPath && value.sessionEpoch === runOrigin.sessionEpoch;
+                offOwner = registry?.events?.on('owner:stopping', value => { if (ownerMatches(value as SubTaskOrigin)) cancel(); });
+                offThread = registry?.events?.on('thread:closed', value => {
+                    if (subRunContext && (value as SubThread).runIds.includes(subRunContext.runId)) cancel();
+                });
                 const reserve = (resolved: ResolvedDelegate, prepared?: PreparedParentDelegation): SubThread | null => {
+                    if (cancelled()) throw new Error(refusal().error);
                     if (!registry?.createThread) return null;
                     const name = (subRunContext ? canonicalName(resolved) : undefined) ?? _queuedThreadName(resolved, plugin);
                     const runId = allocateSubTaskId(name);
@@ -812,19 +859,14 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     }
                 };
 
-                // The trusted runtime source is never read from model arguments. Each consent
-                // owns an abort handle before a reservation or timeout exists.
+                // The trusted runtime source is never read from model arguments. Consent and
+                // every clean sibling share the invocation cancellation latch.
                 const prepare = async (task: DelegateTaskDef, resolved: ResolvedDelegate) => {
-                    const mode = task.context_mode === undefined ? args.context_mode : task.context_mode;
+                    if (cancelled()) return refusal();
+                    const mode = task.context_mode;
                     if (mode === undefined || mode === 'clean') return { success: true as const, prepared: undefined };
                     if (mode !== 'parent_conversation' || continuation) return { success: false as const, error: 'Invalid delegation context mode.' };
-                    const ctl = createSubAbortControl();
-                    const forget = _trackAbort(ctl);
-                    const cancel = () => abortSub(ctl, 'manual-stop');
-                    const signal = ctl.controller!.signal;
-                    const ownerMatches = (value: SubTaskOrigin | undefined) => !!value && !!runOrigin.sessionPath && !!runOrigin.sessionEpoch && value.agentName === runOrigin.agentName
-                        && value.sessionPath === runOrigin.sessionPath && value.sessionEpoch === runOrigin.sessionEpoch;
-                    const validate = () => !_moduleUnloaded && !runtime?.shouldAbort?.() && !runtime?.abortSignal?.aborted
+                    const validate = () => !cancelled()
                         && ownerMatches(conversation?.owner)
                         && (subRunContext ? conversation?.source === 'sub'
                             && conversation.turnId === subRunContext.runId
@@ -837,24 +879,16 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                 && (plugin.permissionSystem?.checkPermission(currentAgent, 'delegate', '',
                                     { autonomy: turnAutonomy, scopeFolders: callerScopeFolders }).allowed ?? true);
                         })();
-                    const offOwner = registry?.events?.on('owner:stopping', value => { if (ownerMatches(value as SubTaskOrigin)) cancel(); });
-                    const offThread = registry?.events?.on('thread:closed', value => {
-                        if (subRunContext && (value as SubThread).runIds.includes(subRunContext.runId)) cancel();
-                    });
-                    runtime?.abortSignal?.addEventListener('abort', cancel, { once: true });
-                    if (runtime?.abortSignal?.aborted) cancel();
-                    try {
-                        const answer = await prepareParentConversationDelegation({ mode: 'parent_conversation',
-                            parentConversation: conversation, parentName: subRunContext ? registry?.getTask?.(subRunContext.runId)?.name || activeAgent.name || '' : activeAgent.name || '',
-                            signal, approvalManager: plugin.approvalManager, validate,
-                            prepare: () => prepareDelegateExecution(task, resolved, activeAgent, agentManager, plugin,
-                                { subRunContext, callerToolNames }) });
-                        if (!answer.success) return answer;
-                        if (answer.mode !== 'parent_conversation') return { success: false as const, error: 'Invalid delegation context mode.' };
-                        return { success: true as const, prepared: answer.prepared, validate };
-                    } finally {
-                        offOwner?.(); offThread?.(); runtime?.abortSignal?.removeEventListener('abort', cancel); forget();
-                    }
+                    const answer = await prepareParentConversationDelegation({ mode: 'parent_conversation',
+                        parentConversation: conversation, parentName: subRunContext ? registry?.getTask?.(subRunContext.runId)?.name || activeAgent.name || '' : activeAgent.name || '',
+                        signal, approvalManager: plugin.approvalManager, validate,
+                        knownSecrets: configuredChatSecrets(plugin.env?.settings?.pkmAssistant?.chat),
+                        prepare: () => prepareDelegateExecution(task, resolved, activeAgent, agentManager, plugin,
+                            { subRunContext, callerToolNames }) });
+                    if (cancelled()) return refusal();
+                    if (!answer.success) return answer;
+                    if (answer.mode !== 'parent_conversation') return { success: false as const, error: 'Invalid delegation context mode.' };
+                    return { success: true as const, prepared: answer.prepared, validate };
                 };
 
                 // ── Multi-task mode ──
@@ -928,7 +962,8 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     for (let i = 0; i < args.tasks.length; i++) {
                         const checked = precheck[i];
                         if (!checked.ok) continue;
-                        const decision = await prepare(args.tasks[i], checked.resolved);
+                        const prepared = await prepare(args.tasks[i], checked.resolved);
+                        const decision = cancelled() ? refusal() : prepared;
                         if (!decision.success) {
                             precheck[i] = { ok: false, result: decision };
                             rejectedTasks.push({ task: args.tasks[i].task!, aspect: args.tasks[i].aspect, error: decision.error,
@@ -982,13 +1017,13 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                 note: t('mcp.delegate.outcome_note'),
                             };
                         };
-                        if (_moduleUnloaded) {
+                        if (cancelled()) {
                             if (reservation && registry?.getThread?.(reservation.threadId)?.phase !== 'closed') {
                                 registry?.closeThread?.(reservation.threadId, 'system');
                             }
                             const stopped = finishClosedReservation();
                             gate.open();
-                            return Promise.resolve(stopped ?? { success: false, error: t('mcp.delegate.plugin_unloaded') });
+                            return Promise.resolve(stopped ?? refusal());
                         }
                         const closedAtEntry = finishClosedReservation();
                         if (closedAtEntry) {
@@ -1005,7 +1040,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                             : tasksDefaultTimeoutMs;
                         const abortCtl = createSubAbortControl();
                         // Bieg ma właściciela OD RAZU - rejestr pozna go dopiero w `onTaskCreated`.
-                        const forgetAbort = _trackAbort(abortCtl);
+                        const forgetAbort = trackChild(abortCtl);
                         // Budżet TEGO zadania rusza dopiero, gdy sub wjedzie na slot bramki.
                         const gateArm = _makeGateArm();
                         // Id biegu poznajemy dopiero w `onTaskCreated` - grace-okno domyka
@@ -1016,7 +1051,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                             resolvedDef,
                             activeAgent, agentManager, plugin, makeRunner, childDepth,
                             {
-                                abortCtl, prepared: checked.prepared, validatePrepared: checked.validate,
+                                abortCtl, invocationCancelled: cancelled, prepared: checked.prepared, validatePrepared: checked.validate,
                                 onGateAdmitted: gateArm.signal,
                                 onActivity: gateArm.activity, admission,
                                 modelTimeout: effectiveTaskTimeout,
@@ -1076,11 +1111,14 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                         // otwiera się od razu i bez tego "tło" wracałoby, zanim ruszy cokolwiek realnego.
                         const acceptedGates = gates.filter((_, i) => precheck[i].ok);
                         const wave = Math.max(1, Math.min(taskConcurrency, acceptedGates.length));
-                        if (!subRunContext) await Promise.all(acceptedGates.slice(0, wave).map((g) => g.opened));
+                        if (!subRunContext) {
+                            await Promise.all(acceptedGates.slice(0, wave).map((g) => g.opened));
+                            cancelled();
+                        }
                         // Pozwól runnerom pierwszej fali dokończyć synchroniczną admisję
                         // modelu po nowej granicy await schedulera, jak przed P2.
                         await Promise.resolve();
-                        if (startedTasks.length === 0 && !queuedThreads.some(thread => thread?.phase === 'queued')) {
+                        if (cancelled() || (startedTasks.length === 0 && !queuedThreads.some(thread => thread?.phase === 'queued'))) {
                             // Żaden byt nie powstał (wysypany rejestr / same odmowy) — nie ma czego
                             // meldować modelowi, więc uczciwiej dokończyć po staremu.
                             return {
@@ -1111,6 +1149,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     }
 
                     const results = await _runWithConcurrency(taskThunks, registry?.acquire ? taskThunks.length : taskConcurrency);
+                    cancelled();
                     return _aggregateResults(results.map((value, i) => attachReusableThread(value, completedTaskIds[i])));
                 }
 
@@ -1123,6 +1162,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 if (resolved.error) return resolved;
 
                 const decision = await prepare(args, resolved);
+                if (cancelled()) return refusal();
                 if (!decision.success) return decision;
                 const reservation = reserve(resolved, decision.prepared);
                 const reservedRunId = reservation?.queuedRunId ?? reservation?.threadId;
@@ -1134,7 +1174,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     : defaultTimeoutMs;
                 const abortCtl = createSubAbortControl();
                 // Bieg ma właściciela OD RAZU - rejestr pozna go dopiero w `onTaskCreated`.
-                const forgetAbort = _trackAbort(abortCtl);
+                const forgetAbort = trackChild(abortCtl);
                 // Jak w trybie wielozadaniowym - zegar budżetu startuje od pierwszej admisji.
                 const gateArm = _makeGateArm();
                 const onTimeout = () => {
@@ -1148,7 +1188,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     const run = _withAdmission(plugin, reservation, abortCtl, true, args.task, (release, admission) => _withTimeout(
                         _executeSubAgent(args, resolved, activeAgent, agentManager, plugin, makeRunner, childDepth,
                             {
-                                abortCtl, prepared: decision.prepared, validatePrepared: decision.validate, salvageCap: limits.subagent_salvage_max_chars, onGateAdmitted: gateArm.signal,
+                                abortCtl, invocationCancelled: cancelled, prepared: decision.prepared, validatePrepared: decision.validate, salvageCap: limits.subagent_salvage_max_chars, onGateAdmitted: gateArm.signal,
                                 onActivity: gateArm.activity, admission,
                                 modelTimeout: effectiveSingleTimeout, origin, subRunContext, ...reservedOptions, autonomy: turnAutonomy,
                                 callerScopeFolders, callerToolNames, background: true,
@@ -1178,8 +1218,10 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     if (subRunContext && reservation && reservedRunId) announce({ id: reservedRunId,
                         name: reservation.name, threadId: reservation.threadId, queued: reservation.phase === 'queued' });
                     const created = await Promise.race([taskCreated, run.then(() => null, () => null)]);
+                    if (cancelled()) return refusal();
                     if (!created) return await run;
                     await Promise.resolve();
+                    if (cancelled()) return refusal();
                     return {
                         success: true,
                         started: true,
@@ -1203,7 +1245,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 const blockingRun = _withAdmission(plugin, reservation, abortCtl, false, args.task, (release, admission) => _withTimeout(
                     _executeSubAgent(args, resolved, activeAgent, agentManager, plugin, makeRunner, childDepth,
                         {
-                            abortCtl, prepared: decision.prepared, validatePrepared: decision.validate, salvageCap: limits.subagent_salvage_max_chars, onGateAdmitted: gateArm.signal,
+                            abortCtl, invocationCancelled: cancelled, prepared: decision.prepared, validatePrepared: decision.validate, salvageCap: limits.subagent_salvage_max_chars, onGateAdmitted: gateArm.signal,
                             onActivity: gateArm.activity, admission,
                             onQuestion: question => {
                                 if (plugin.subTaskRegistry?.isQuestionOpen?.(question.taskId, question.id)) {
@@ -1235,6 +1277,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                         blockingRun.then(value => ({ kind: 'result' as const, value })),
                         nextQuestion.then(question => ({ kind: 'question' as const, question })),
                     ]);
+                    cancelled();
                     wakeQuestion = null;
                     if (delivery.kind === 'result') return attachReusableThread(delivery.value, blockingTaskId);
                     const question = delivery.question;
@@ -1257,6 +1300,10 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 // z rejestru / z odczytu ustawień potrafi nieść zrzut zdarzenia strumienia
                 // z nagłówkiem Authorization.
                 return { success: false, error: maskSensitiveData(String((e as Error)?.message ?? e)) };
+            } finally {
+                offOwner?.(); offThread?.();
+                runtime?.abortSignal?.removeEventListener('abort', cancel);
+                _liveInvocations.delete(invocation);
             }
         }
     };
@@ -1545,6 +1592,7 @@ function pendingMetadata(prepared: PreparedParentDelegation): ParentConversation
 }
 
 type SubRunControl = {
+    invocationCancelled?: () => boolean;
     admission?: RunAdmission;
     prepared?: PreparedParentDelegation;
     validatePrepared?: () => boolean;
@@ -1790,6 +1838,9 @@ async function _executeSubAgent(
                 outcome: _outcomeFields(outcome), effects: [], note: t('mcp.delegate.outcome_note'),
             };
         }
+    }
+    if (runControl.invocationCancelled?.() || runControl.abortCtl?.aborted) {
+        return { success: false, error: t('mcp.delegate.share.cancelled') };
     }
     if (runControl.prepared && !isPreparedParentDelegationCurrent(runControl.prepared,
         runControl.abortCtl?.controller?.signal ?? new AbortController().signal, runControl.validatePrepared ?? (() => false))) {

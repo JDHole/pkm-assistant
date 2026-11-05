@@ -1657,3 +1657,13 @@ z rejestru (również odtworzonego z P6), a pokwitowanie preferuje rejestr przed
 zapisanym wynikiem narzędzia. Wszystkie nowe style są w `chat_view.css`.
 Testy: `render_messages.delegateError.test.ts` (live/historia, błąd, kolejka,
 pominięcie, końcowy kafelek i restore P6), `subTaskStrip.test.ts` (zdarzenie i oś biegów).
+
+### 2.4.5 F4 — usuwanie, ponowienie i zamknięcie zgody
+
+Kasowanie, edycja gałęzi i ponowienie używają `RollingWindow.removeMessages`: usuwa ono
+również odpowiadające wpisy projekcji, w tym starsze wyciągi. Kompresja nadal zachowuje
+projekcję. Ponowienie przenosi osobne `parentConversationText` w metadanych wysyłki
+(także przez kolejkę); null oznacza legacy bez rozdzielnego tekstu i wyklucza je z eksportu.
+`_chatExecuteToolCall` przekazuje sygnał abort tury do MCP, więc zamknięcie zakładki
+zamyka też modal zgody. Testy sekwencji: `chat_messages.parentConversation.test.ts`
+oraz `modules/tools/DelegateTool.parentConversation.test.ts` (F4-6, prawdziwy modal/MCP).

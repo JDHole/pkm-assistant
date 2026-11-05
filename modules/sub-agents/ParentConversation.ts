@@ -62,6 +62,21 @@ export class ParentConversationProjection {
     private sequence = 0;
     private omitted = 0;
     private clipped = false;
+    private sources = new WeakMap<LoopMessage, number | 'omitted'>();
+
+    /** Explicit user deletion; compression deliberately keeps the projection. */
+    remove(message: LoopMessage): void {
+        const id = this.sources.get(message);
+        this.sources.delete(message);
+        if (id === 'omitted') this.omitted--;
+        else if (typeof id === 'number') {
+            this.recent = this.recent.filter(entry => entry.sequence !== id);
+            this.older = this.older.filter(entry => entry.sequence !== id);
+        }
+        for (const call of message.tool_calls ?? []) {
+            if (call && typeof call === 'object' && 'id' in call && typeof call.id === 'string') this.names.delete(call.id);
+        }
+    }
 
     append(message: LoopMessage, requireUserText = false): void {
         if (message.parentConversationInherited === true || message.role === 'system') return;
@@ -84,11 +99,12 @@ export class ParentConversationProjection {
             this.clipped ||= !raw || raw !== preview;
             text = `[narzędzie: ${name}; wynik: ${preview || '[pominięta treść nietekstowa]'}]`;
         } else if (message.role === 'user' && requireUserText) {
-            if (typeof message.parentConversationText !== 'string') { this.omitted++; return; }
+            if (typeof message.parentConversationText !== 'string') { this.omitted++; this.sources.set(message, 'omitted'); return; }
             text = message.parentConversationText;
         } else text = textOnly(message.content);
         if (!text.trim()) return;
         this.recent.push({ sequence: ++this.sequence, role: message.role, text });
+        this.sources.set(message, this.sequence);
         while (this.recent.filter(entry => entry.role !== 'tool').length > 8) {
             const entry = this.recent.shift()!;
             this.older.push({ ...entry, text: excerpt(entry.text, 160) });

@@ -369,7 +369,10 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         }
     }
 
-    const parentConversationText = text;
+    // Retry preserves the pre-attachment source; null explicitly marks inseparable legacy content.
+    const parentConversationText = 'parentConversationText' in rawMeta
+        ? (typeof rawMeta.parentConversationText === 'string' ? rawMeta.parentConversationText : undefined)
+        : text;
     // Resolve @ mentions ONCE, before any clearing (fixes bug: mentions lost when no attachments)
     const { displayText: mentionDisplayText, contextText: mentionContextText } = isInjected
         ? { displayText: text, contextText: '' }
@@ -467,7 +470,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         type: 'user_message',
         agentName: activeAgentName,
         content: savedUserContent,
-        parent_conversation_text: { text: parentConversationText },
+        ...(parentConversationText !== undefined ? { parent_conversation_text: { text: parentConversationText } } : {}),
         timestamp: new Date().toISOString(),
         ...(savedResultQuestion(messageMeta) ? { question: savedResultQuestion(messageMeta) } : {}),
     };
@@ -1499,6 +1502,7 @@ export async function _chatExecuteToolCall(
             askUserChannelId: channel?.id,
             resultBudgetChars: context.resultBudgetChars,
             shouldAbort: context.shouldAbort,
+            abortSignal: turn.abort?.signal,
         }) as ChatToolResult;
         if (raw?.success === true && subQuestion && args.sub_id === subQuestion.question.subId && typeof args.text === 'string') {
             raw = { ...raw, sub_question_view: { name: subQuestion.question.name, question: subQuestion.question.text, answer: args.text } };

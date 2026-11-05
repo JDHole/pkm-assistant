@@ -753,3 +753,11 @@ budżetowaniu `task:context` zapisuje faktyczne liczniki, okno i status, a wynik
 powtarza te same metadane. Zapis P6 i restore przyjmują także stare rekordy bez pola;
 rekord nie zawiera snapshotu ani decyzji zgody. Model paska udostępnia metadane osobno
 per bieg i dla kolejki, bez zmian w interfejsie użytkownika (P5).
+
+### 2.4.5 F4 — odwołanie wpisu projekcji
+
+`ParentConversationProjection.remove(message)` usuwa tekst i starszy wyciąg po tożsamości
+wiadomości z `append`, bez przechowywania jej surowej treści. `RollingWindow` przekazuje
+projekcji ten sam obiekt, który przechowuje w oknie. Usunięcie nie przebudowuje projekcji
+z okna po kompresji i nie pobiera skażonego `conversationSummary`; zamrożone kopie pozostają
+niezmienne. Nierozdzielalne wiadomości legacy nadal są pomijane.

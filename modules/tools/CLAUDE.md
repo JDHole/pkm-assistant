@@ -658,3 +658,18 @@ zgodę innego dostawcy i brak startu po odmowie. Wykonanie zachowuje walidator P
 Testy P5 w `DelegateTool.parentConversation.test.ts`: publiczne definicje narzędzi,
 literalne prompty lead → sub → wnuk (bez odziedziczonego głównego czatu) oraz
 identyczne prompty clean z ręcznym kontekstem dla braku pola i jawnego clean.
+
+### 2.4.5 F4 — walidacja, zatrzask Stop i redakcja eksportu
+
+`delegate.execute` waliduje cały argument schematem przed przygotowaniem i rezerwacją;
+limit liczby zadań pozostaje konfigurowalną bramką. Zewnętrzne `context_mode` przy `tasks`
+jest błędem; tryb nie jest dziedziczony. Zatrzask wywołania obejmuje zgodę i wszystkie
+zadania clean, reaguje na Stop właściciela, abort tury, zamknięcie rodzica i unload.
+Sprawdzany przed rezerwacją, po przygotowaniu i przy starcie po admisji; odmowa samej
+zgody nadal dotyczy wyłącznie zadania wymagającego przekazania rozmowy.
+`prepareParentConversationDelegation` przyjmuje `knownSecrets` i redaguje kopię snapshotu
+przed podglądem oraz budżetowaniem: `configuredChatSecrets` z ustawień pluginu,
+`redactSecretValues` po wartości i `maskSensitiveData` po wzorcach z core/security.
+Ten sam zredagowany snapshot trafia do runnera także przy zgodnym dostawcy, bez modala.
+Testy F4 w `DelegateTool.parentConversation.test.ts` przechwytują rzeczywisty payload
+modelu i przechodzą ścieżkę zamknięcia zakładki przez MCP, ApprovalManager i ApprovalModal.

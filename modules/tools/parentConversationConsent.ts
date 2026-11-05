@@ -1,5 +1,5 @@
 import type { ApprovalManager } from '../../core/index.js';
-import { maskSensitiveData } from '../../core/index.js';
+import { maskSensitiveData, redactSecretValues } from '../../core/index.js';
 import { t } from '../../core/i18n/index.js';
 import type { ParentConversationContext } from '../sub-agents/index.js';
 import type { prepareDelegateExecution } from './DelegateTool.js';
@@ -16,6 +16,7 @@ type ParentRequest = {
     parentConversation: ParentConversationContext | undefined;
     parentName: string;
     signal: AbortSignal;
+    knownSecrets?: readonly string[];
     approvalManager: Pick<ApprovalManager, 'requestApproval'> | null | undefined;
     prepare: () => ReturnType<typeof prepareDelegateExecution>;
     /** Recheck owner/epoch, ancestry and permissions, without consulting the active tab. */
@@ -52,7 +53,12 @@ export async function prepareParentConversationDelegation(request: Request): Pro
     if (request.signal.aborted) return refuse('cancelled');
     if (!request.parentConversation || !request.validate()) return refuse('invalid_source');
     // Capture synchronously, before preparation or the first await can change the source.
-    const parentConversation = freezeCopy(request.parentConversation);
+    const redact = (text: string) => maskSensitiveData(redactSecretValues({ message: text, code: '', http_status: null }, request.knownSecrets ?? []).message);
+    const snapshot = request.parentConversation.snapshot;
+    const parentConversation = freezeCopy({ ...request.parentConversation, snapshot: {
+        ...snapshot, summary: redact(snapshot.summary),
+        messages: snapshot.messages.map(entry => ({ ...entry, text: redact(entry.text) })),
+    } });
     const result = request.prepare();
     if (!result.success) return result;
     const prepared: PreparedParentDelegation = Object.freeze({
@@ -69,7 +75,6 @@ export async function prepareParentConversationDelegation(request: Request): Pro
         const snapshot = parentConversation.snapshot;
         const text = [snapshot.summary, ...snapshot.messages.map(entry => `[${entry.sequence} ${entry.role}] ${entry.text}`)]
             .filter(Boolean).join('\n');
-        const masked = maskSensitiveData(text);
         let decision;
         try {
             decision = await request.approvalManager.requestApproval({
@@ -80,7 +85,7 @@ export async function prepareParentConversationDelegation(request: Request): Pro
                     source: parentProvider || t('approval.share.unknown'),
                     target: childProvider || t('approval.share.unknown'),
                 }),
-                preview: masked.length > 4000 ? masked.slice(0, 4000) + '\n' + t('approval.preview.truncated') : masked,
+                preview: text.length > 4000 ? text.slice(0, 4000) + '\n' + t('approval.preview.truncated') : text,
             });
         } catch { return refuse('unavailable'); }
         if (!current() || decision.reason === 'cancelled') return refuse('cancelled');

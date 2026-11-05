@@ -8,6 +8,8 @@ import { isUrlKnown, registerUrlsFromText } from '../../web/urlRegistry.js';
 import { HUMAN_MESSAGE_META, MACHINE_MESSAGE_META, machineMeta } from '../../../core/index.js';
 import { SubTaskRegistry } from '../../sub-agents/index.js';
 import { _deliverSubTaskResult } from './chat_streaming.js';
+import { regenerateLastResponse } from './chat_messages.js';
+import { RollingWindow } from './RollingWindow.js';
 
 // Rejestr adresów jest singletonem na moduł, a AVA puszcza testy w pliku RÓWNOLEGLE -
 // każdy przypadek dostaje więc własny adres zamiast czyścić wspólny stan.
@@ -118,10 +120,17 @@ test('auto-tura po subie wysyła z origin: machine', async t => {
     t.false(isUrlKnown(evil('auto-sub')));
 });
 
-test('ponowienie odpowiedzi niesie proweniencję ponawianej wiadomości, nie swoją', t => {
-    const src = read('./chat_messages.ts');
-    t.regex(src, /resolveMessageOrigin\(messages\[lastUserIdx\]\)/);
-    t.regex(src, /send_message\(\{\s*meta:\s*\{\s*origin:\s*userOrigin\s*\}\s*\}\)/);
+test('ponowienie odpowiedzi niesie proweniencję ponawianej wiadomości, nie swoją', async t => {
+    for (const origin of ['human', 'machine', undefined] as const) {
+        const rw = new RollingWindow();
+        await rw.addMessage('user', 'Pytanie + plik', { ...(origin ? { origin } : {}), parentConversationText: 'Pytanie' });
+        await rw.addMessage('assistant', 'Odpowiedź');
+        let sent: unknown;
+        const view = { rollingWindow: rw, input_area: { value: '' }, render_messages: async () => {},
+            send_message: async (opts: unknown) => { sent = opts; } };
+        await regenerateLastResponse.call(view as never);
+        t.deepEqual(sent, { meta: { origin: origin ?? 'machine', parentConversationText: 'Pytanie' } });
+    }
 });
 
 test('ścieżki z pola wpisywania nadają origin: human JAWNIE', t => {

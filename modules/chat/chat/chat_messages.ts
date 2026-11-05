@@ -443,13 +443,13 @@ export function addMessageActions(this: ChatViewLike, metaEl: HTMLElement, conte
         if (idx < this.rollingWindow.messages.length &&
             this.rollingWindow.messages[idx].content === content &&
             this.rollingWindow.messages[idx].role === role) {
-            this.rollingWindow.messages.splice(idx, 1);
+            this.rollingWindow.removeMessages(idx, 1);
             void this.render_messages();
             this.updateTokenCounter();
         } else {
             const foundIdx = this.rollingWindow.messages.findIndex((m: RollingMessage) => m.content === content && m.role === role);
             if (foundIdx > -1) {
-                this.rollingWindow.messages.splice(foundIdx, 1);
+                this.rollingWindow.removeMessages(foundIdx, 1);
                 void this.render_messages();
                 this.updateTokenCounter();
             }
@@ -520,7 +520,7 @@ export function startEditMessage(this: ChatViewLike, msgIndex: number, originalC
     const messages = this.rollingWindow.messages;
     if (msgIndex >= 0 && msgIndex < messages.length) {
         // Remove edited message and all subsequent
-        messages.splice(msgIndex);
+        this.rollingWindow.removeMessages(msgIndex);
 
         void this.render_messages();
         this.input_area.value = originalContent;
@@ -581,12 +581,13 @@ export async function regenerateLastResponse(this: ChatViewLike): Promise<void> 
     const userOrigin = resolveMessageOrigin(messages[lastUserIdx]);
 
     // Remove everything INCLUDING last user message to avoid duplication
-    messages.splice(lastUserIdx);
+    const parentConversationText = messages[lastUserIdx].parentConversationText ?? null;
+    this.rollingWindow.removeMessages(lastUserIdx);
 
     // Re-render and resend
     void this.render_messages();
     this.input_area.value = userContent;
-    await this.send_message({ meta: { origin: userOrigin } });
+    await this.send_message({ meta: { origin: userOrigin, parentConversationText } });
 }
 
 /**

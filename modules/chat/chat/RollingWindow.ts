@@ -403,8 +403,9 @@ export class RollingWindow {
             }
         }
 
-        this.parentConversation.append({ role, content, ...metadata }, true);
-        this.messages.push({ role, content, ...metadata });
+        const message = { role, content, ...metadata };
+        this.parentConversation.append(message, true);
+        this.messages.push(message);
 
         // HARD LIMIT — dwufazowa kompresja awaryjna
         try {
@@ -431,6 +432,11 @@ export class RollingWindow {
         } catch (e) {
             log.warn('RollingWindow', 'Hard limit check failed:', e);
         }
+    }
+
+    /** User removal differs from compression: revoke both full text and older excerpts. */
+    removeMessages(start: number, count = this.messages.length - start): void {
+        for (const message of this.messages.splice(start, count)) this.parentConversation.remove(message);
     }
 
     /**
