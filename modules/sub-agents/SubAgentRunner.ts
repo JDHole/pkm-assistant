@@ -774,7 +774,7 @@ export class SubAgentRunner {
                 } },
                 trace: loopTrace,
                 limits: loopLimits,
-                modelOptions: { maxTokens: SUB_AGENT_MAX_OUTPUT_TOKENS, agentName: agent.name },
+                modelOptions: { maxTokens: SUB_AGENT_MAX_OUTPUT_TOKENS, agentName: agent.name, ...(config.effort ? { effort: config.effort } : {}) },
                 });
             } finally {
                 options.abortSignal?.removeEventListener('abort', externalAbort);

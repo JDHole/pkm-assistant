@@ -1,3 +1,4 @@
+import { effortBudget, supportsEffort } from '../effort.js';
 /**
  * `modules/models/providers/anthropic.ts` - dostawca `anthropic` (Messages API).
  *
@@ -152,6 +153,7 @@ interface RequestBody {
     tools?: SentTool[];
     tool_choice?: { type: string; name?: string };
     temperature?: number;
+    output_config?: { effort: string };
     thinking?:
         | { type: 'enabled'; budget_tokens: number }
         | { type: 'adaptive' }
@@ -943,13 +945,16 @@ export class AnthropicProvider implements ChatProvider {
         const toolChoice = mapToolChoice(req.tool_choice);
         if (toolChoice) body.tool_choice = toolChoice;
 
-        const thinkingEnabled = req.thinking !== undefined && req.thinking !== false;
+        const effort = req.effort && supportsEffort('anthropic', model) ? req.effort : undefined;
+        const thinking = effort ? effortBudget(effort) : req.thinking;
+        const thinkingEnabled = thinking !== undefined && thinking !== false;
+        if (effort && family !== 'legacy') body.output_config = { effort };
         if (thinkingEnabled && family === 'adaptive') {
             body.thinking = { type: 'adaptive', display: 'summarized' };
         } else if (thinkingEnabled && family === 'adaptive46') {
             body.thinking = { type: 'adaptive' };
         } else if (family === 'legacy') {
-            const budget = resolveThinkingBudget(req.thinking, maxTokens);
+            const budget = resolveThinkingBudget(thinking, maxTokens);
             if (budget !== null) body.thinking = { type: 'enabled', budget_tokens: budget };
         }
 

@@ -1,4 +1,5 @@
 import test from 'ava';
+import { log } from '../../core/utils/Logger.js';
 import { SubAgentTemplateStore as RuntimeSubAgentTemplateStore } from './SubAgentTemplateStore.js';
 import { SubAgentLoader as RuntimeSubAgentLoader } from './SubAgentLoader.js';
 import { editorModelOptions, modelListRoleForEditorRole, templateSaveNotice } from './editorDecisions.js';
@@ -296,4 +297,53 @@ test('delete — gałąź catch (adapter.remove rzuca) zwraca false, szablon zos
     t.false(ok);
     t.is(store.count(), 1, 'cache NIE jest czyszczony przy nieudanym kasowaniu');
     t.truthy(vault.files[`${BASE}/zwiadowca/SUB_AGENT.yaml`], 'plik zostaje na dysku po porażce — kafel nie może zniknąć z UI');
+});
+
+test('effort survives template and sub YAML round trips and invalid YAML is ignored', async t => {
+    const vault = makeVault();
+    const store = new RuntimeSubAgentTemplateStore(vault);
+    const loader = new RuntimeSubAgentLoader(vault);
+    await store.createFromData({ name: 'Thinker', description: 'test', effort: 'high' });
+    await store.loadAll();
+    t.is(store.get('thinker')?.effort, 'high');
+    await store.instantiate('thinker', 'parent', { subAgentLoader: loader });
+    await loader.reloadSubAgents();
+    t.is(loader.getSubAgent('parent-thinker')?.effort, 'high');
+    const path = '.pkm-assistant/sub-agents/parent-thinker/SUB_AGENT.yaml';
+    vault.files[path] = vault.files[path].replace('effort: high', 'effort: invalid');
+    const warnings: unknown[][] = [];
+    const originalWarn = log.warn;
+    log.warn = (...args: unknown[]) => { warnings.push(args); };
+    try { await loader.reloadSubAgents(); } finally { log.warn = originalWarn; }
+    t.is(loader.getSubAgent('parent-thinker')?.name, 'parent-thinker');
+    t.is(loader.getSubAgent('parent-thinker')?.effort, undefined);
+    t.deepEqual(warnings, [['SubAgent', 'Invalid effort in YAML:', 'invalid']]);
+});
+
+test('YAML effort reaches the OpenAI request through the runner', async t => {
+    const { SubAgentRunner } = await import('./SubAgentRunner.js');
+    const { openaiProvider } = await import('../models/providers/openai.js');
+    const { makeCtx } = await import('../models/testing/harness.js');
+    const vault = makeVault();
+    const loader = new RuntimeSubAgentLoader(vault);
+    await loader.saveSubAgent({ name: 'thinker', description: 'test', effort: 'high' });
+    await loader.reloadSubAgents();
+    let body: Record<string, unknown> = {};
+    const model = { stream(payload: import('../models/contracts.js').ChatRequest, cb: { done(value: unknown): void }) {
+        body = JSON.parse(openaiProvider.buildRequest(payload, makeCtx({ modelId: 'gpt-5' }), false).body || '{}') as Record<string, unknown>;
+        cb.done({ choices: [{ message: { role: 'assistant', content: 'done' } }] });
+    } } as unknown as import('../models/index.js').ChatModel;
+    const runner = new SubAgentRunner({ toolRegistry: { getTool: () => null }, app: {}, plugin: {} });
+    await runner.runTask('task', { name: 'parent' }, loader.getSubAgent('thinker')!, model, { modelTimeout: 5 });
+    t.is(body.reasoning_effort, 'high');
+});
+
+test('sub and template YAML without effort is byte-for-byte unchanged', async t => {
+    const vault = makeVault();
+    const store = new RuntimeSubAgentTemplateStore(vault);
+    const loader = new RuntimeSubAgentLoader(vault);
+    await store.createFromData({ name: 'Plain', description: 'test' });
+    await loader.saveSubAgent({ name: 'Plain', description: 'test', max_iterations: 7, min_iterations: 2 });
+    t.is(vault.files['.pkm-assistant/templates/sub-agents/plain/SUB_AGENT.yaml'], 'name: Plain\ndescription: test\nrole: researcher\nenabled: true\nversion: 1\n');
+    t.is(vault.files['.pkm-assistant/sub-agents/plain/SUB_AGENT.yaml'], 'name: Plain\ndescription: test\nrole: researcher\nmax_iterations: 7\nmin_iterations: 2\nenabled: true\n');
 });

@@ -336,3 +336,27 @@ test('wyjątek runnera zamyka wątek i zwalnia rozmowę', async t => {
     t.is(thread.reusable, false);
     t.deepEqual(thread.transcript, []);
 });
+
+test('runner forwards sub effort to the model request', async t => {
+    const runner = new SubAgentRunner({ toolRegistry: { getTool: () => null }, app: {}, plugin: {} });
+    let seen: unknown;
+    const model = { stream(payload: unknown, cb: { done(value: unknown): void }) {
+        seen = payload;
+        cb.done({ choices: [{ message: { role: 'assistant', content: 'done' } }] });
+    } } as unknown as ChatModel;
+    await runner.runTask('task', { name: 'Tester' }, { ...config, effort: 'high' }, model, { modelTimeout: 5 });
+    t.is((seen as { effort?: string }).effort, 'high');
+});
+
+test('runner without effort sends the legacy request options', async t => {
+    const runner = new SubAgentRunner({ toolRegistry: { getTool: () => null }, app: {}, plugin: {} });
+    let seen: Record<string, unknown> = {};
+    const model = { stream(payload: Record<string, unknown>, cb: { done(value: unknown): void }) {
+        seen = payload;
+        cb.done({ choices: [{ message: { role: 'assistant', content: 'done' } }] });
+    } } as unknown as ChatModel;
+    await runner.runTask('task', { name: 'Tester' }, config, model, { modelTimeout: 5 });
+    const { messages, ...options } = seen;
+    t.true(Array.isArray(messages));
+    t.deepEqual(options, { max_tokens: 16384, tools: [{ type: 'function', function: { name: 'ask_parent', description: 'Ask the parent agent one specific question when information cannot be obtained with your tools.', parameters: { type: 'object', properties: { text: { type: 'string', description: 'The question for the parent agent.' } }, required: ['text'], additionalProperties: false } } }] });
+});

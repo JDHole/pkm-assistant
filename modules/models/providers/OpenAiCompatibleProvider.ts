@@ -1,3 +1,4 @@
+import { supportsEffort } from '../effort.js';
 /**
  * `modules/models/providers/OpenAiCompatibleProvider.ts` — wspólna baza dostawców, którzy
  * mówią kształtem czatu OpenAI (`POST …/chat/completions`, `messages[]`, `choices[0]`).
@@ -82,6 +83,7 @@ const MANAGED_REQUEST_FIELDS = new Set([
     'stream_options',
     'agentName',
     'thinking',
+    'effort',
 ]);
 
 /** Lekki kształt bloku treści, jaki widzimy w wiadomości wejściowej. */
@@ -239,6 +241,7 @@ export abstract class OpenAiCompatibleProvider implements ChatProvider {
             max_tokens: this.resolveMaxTokens(req, ctx, modelId),
         };
 
+        if (req.effort && this.info.id !== 'open_router' && supportsEffort(this.info.id, modelId)) body.reasoning_effort = req.effort;
         const temperature = req.temperature ?? ctx.temperature;
         if (typeof temperature === 'number' && Number.isFinite(temperature)) body.temperature = temperature;
         if (Array.isArray(req.tools) && req.tools.length > 0) body.tools = req.tools;

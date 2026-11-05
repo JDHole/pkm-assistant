@@ -1,3 +1,4 @@
+import type { ReasoningEffort } from '../models/index.js';
 /**
  * DelegateTool — v3.0 (Dispatcher Model)
  *
@@ -67,6 +68,7 @@ export interface SubAgentConfigLike {
     description: string;
     tools: string[];
     model?: string;
+    effort?: ReasoningEffort;
     prompt?: string;
     scope?: { folders?: unknown };
     role?: string;
@@ -278,6 +280,7 @@ function buildWorkerConfigFromTemplate(tpl: SubAgentTemplateLike): SubAgentConfi
         tools: (tpl.tools?.length as number) > 0 ? [...(tpl.tools as string[])] : [...DEFAULT_SUB_AGENT_TOOLS],
     };
     if (tpl.model) config.model = tpl.model;
+    if (tpl.effort) config.effort = tpl.effort;
     if (tpl.prompt) config.prompt = tpl.prompt;
     if (tpl.scope) config.scope = tpl.scope;
     if (tpl.max_iterations) config.max_iterations = tpl.max_iterations;

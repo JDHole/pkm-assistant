@@ -599,3 +599,5 @@ Identyfikator biegu i wątku ma postać `sub/<nazwa>#<znacznik>-<licznik>`: znac
 
 `SubTaskRegistry.stopThread(threadId)` synchronicznie sprawdza bieżącą fazę wątku: zamyka rezerwację `queued` jako user albo wysyła `requestStop` jako user do aktualnego biegu `running`. Dla pozostałych faz zwraca `false`.
 Stop użytkownika zapisuje znacznik kolejności na wątku i biegu przed przerwaniem pracy; dla rezerwacji znacznik przechodzi do jej syntetycznego biegu. Kontynuację przyjmuje atomowo `beginRun` według progu ostatniego Stopu, który pozostaje także po zdjęciu `userStop`.
+
+Sub-agent and template YAML may contain `effort: low|medium|high`. Invalid values are logged and ignored; absence never inherits from the lead. The editor resolves the model for an explicitly supplied agent through the runtime resolver (without an execution context it shows a neutral hint), template instantiation copies the choice, and the runner forwards it to model options.

@@ -54,3 +54,5 @@ Gates: focused/full npm test, typecheck, lint, lint:obsidian.
 
 
 U3 consumer compatibility: `abortReason` additionally accepts an existing `AgentLoopStopReason` object so chat watchdog silence preserves the actual work/synthesis stage. The first observed reason is copied and latched.
+
+`modelOptions` passes the optional sub-agent `effort` through to each model request, including synthesis, without adding it when absent.

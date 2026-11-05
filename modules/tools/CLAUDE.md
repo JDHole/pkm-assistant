@@ -560,3 +560,5 @@ Identyfikator kontynuacji i wybór trybu tła trafiają z `sub_agent` do `delega
 
 Odpowiedź `delegate` niesie `sub_id`, gdy wątek po biegu nadaje się do ponownego użycia. Potwierdzenie biegu w tle niesie identyfikator nowego wątku. Zgoda dla `task` i `message` korzysta z przełącznika `delegate`; kontekst zawiera `sub_id`, akcję i pełną treść w `approvalContext`, a `targetPath` pozostaje pusty. Akcje `stop`, `close` i `list` są GREEN w trybie edge.
 W trybie blokującym każdy element listy `tasks` osobno dostaje `sub_id` po sprawdzeniu, czy jego wątek pozostał reusable. Nieudany element z `sub_id` dostaje notkę o kolejnym zadaniu przez `sub_agent`.
+
+Globalny szablon workera przekazuje opcjonalne `effort` do konfiguracji delegacji, bez dziedziczenia od prowadzącego.

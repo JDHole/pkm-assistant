@@ -219,7 +219,7 @@ function _renderAddFromScratch(ctx: ProfileCtx, el: HTMLElement) {
                     }
                     void ctx.renderActiveTab();
                 })();
-            }, { alsoTemplate: true }).open();
+            }, { alsoTemplate: true, agent: ctx.agent as unknown as import('../../models/index.js').ResolverAgentLike }).open();
         })();
     });
     el.createDiv({ text: t('profile.team.add_from_scratch_hint'), cls: 'setting-item-description' });

@@ -275,6 +275,7 @@ export interface ChatRequest {
     tool_choice?: ChatToolChoice;
     /** `true` → domyślny budżet myślenia; liczba → budżet wprost. */
     thinking?: boolean | number;
+    effort?: ReasoningEffort;
     /** Nazwa agenta - metadana cache promptu, NIE pole API. */
     agentName?: string;
     [key: string]: unknown;
@@ -705,6 +706,8 @@ export interface ChatModelDeps {
 export type ModelRole = 'main' | 'researcher' | 'minion' | 'sub_worker';
 
 /** Nadpisanie modelu per agent: `"platforma/model"` albo obiekt. */
+export type ReasoningEffort = 'low' | 'medium' | 'high';
+
 export type ModelOverride = string | { platform?: string; model?: string };
 
 /** Agent w zakresie, jaki czyta resolver (pełny typ żyje w `modules/agents`). */

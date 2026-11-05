@@ -1,3 +1,4 @@
+import { parseEffort } from './effort.js';
 /**
  * SubAgentTemplateStore — magazyn SZABLONÓW sub-agentów.
  *
@@ -31,6 +32,7 @@ export type SubAgentTemplateRecord = {
     description: string;
     role: string | null;
     model?: string | null;
+    effort?: SubAgentData['effort'];
     tools: string[];
     scope: SubAgentData['scope'];
     max_iterations: number | null;
@@ -138,6 +140,7 @@ export class SubAgentTemplateStore {
             description: config.description,
             role: config.role || null,
             model: config.model || null,
+            effort: parseEffort(config.effort),
             tools: normalizeToolList(Array.isArray(config.tools) ? config.tools : undefined, []),
             scope: config.scope || null,
             max_iterations: config.max_iterations || null,
@@ -237,6 +240,7 @@ export class SubAgentTemplateStore {
             description: tpl.description,
             role: tpl.role || 'researcher',
             model: tpl.model || null,
+            effort: tpl.effort,
             ...(tpl.tools.length ? { tools: normalizeToolList(tpl.tools, []) } : {}),
             scope: tpl.scope || null,
             enabled: tpl.enabled !== false,
@@ -266,6 +270,7 @@ export class SubAgentTemplateStore {
             role: data.role || 'researcher',
         };
         if (data.model) yamlConfig.model = data.model;
+        if (data.effort) yamlConfig.effort = data.effort;
         if (data.tools !== undefined) yamlConfig.tools = normalizeToolList(data.tools, []);
         if (data.scope) yamlConfig.scope = data.scope;
         if (data.max_iterations) yamlConfig.max_iterations = data.max_iterations;

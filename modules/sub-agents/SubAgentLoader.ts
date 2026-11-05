@@ -1,3 +1,4 @@
+import { parseEffort } from './effort.js';
 /**
  * SubAgentLoader
  * Loads, validates, and caches sub-agent configurations from .pkm-assistant/sub-agents/
@@ -248,6 +249,7 @@ export class SubAgentLoader {
             description: config.description,
             role: config.role || null,
             model: config.model || null,
+            effort: parseEffort(config.effort),
             tools: normalizeToolList(config.tools, DEFAULT_SUB_AGENT_TOOLS),
             scope: normalizeScope(config.scope),
             scope_type: config.scope_type || 'custom',
@@ -317,6 +319,7 @@ export class SubAgentLoader {
             role,
         };
         if (data.model) yamlConfig.model = data.model;
+        if (data.effort) yamlConfig.effort = data.effort;
         if (data.tools !== undefined) yamlConfig.tools = normalizeToolList(data.tools, DEFAULT_SUB_AGENT_TOOLS);
         migrateDeprecatedTools(yamlConfig);
         const scope = normalizeScope(data.scope);
@@ -356,6 +359,7 @@ export class SubAgentLoader {
             description: data.description,
             role,
             model: data.model || null,
+            effort: data.effort,
             tools: normalizeToolList(yamlConfig.tools, DEFAULT_SUB_AGENT_TOOLS),
             scope,
             scope_type: data.scope_type || 'custom',

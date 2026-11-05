@@ -93,3 +93,6 @@ export type {
   ResolverAgentLike,
   ResolverPluginLike,
 } from './contracts.js';
+
+export type { ReasoningEffort } from './contracts.js';
+export { supportsEffort } from './effort.js';

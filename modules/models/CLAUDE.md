@@ -365,3 +365,5 @@ dochodzą też żadne nowe klucze i18n.
 `testing/harness.ts` daje atrapy: `collect`/`collectEvents` (dekoder → snapshot),
 `ScriptedTransport`, `HangingTransport`, `CapturingHttpClient`, `makeCtx`/`makeModel`,
 `makeSpyGate`.
+
+`ChatRequest.effort` is an optional `ReasoningEffort` (`low`, `medium`, `high`). Providers translate it independently of the legacy `thinking` option; absent effort preserves existing request bodies. `supportsEffort(provider, model)` describes the adapter's supported combinations. Groq is restricted to documented models with all three levels; DeepSeek and xAI are limited to documented model families; DeepSeek maps medium to high on its server. LM Studio forwards the OpenAI field for bridge use. Ollama effort is limited to recognized thinking model families; legacy thinking remains unchanged. OpenRouter uses only reasoning.effort.

@@ -1,4 +1,5 @@
 import type { PluginApi } from '../../core/index.js';
+import type { ReasoningEffort } from '../models/index.js';
 import type { Agent } from '../agents/index.js';
 import type { SubAgentLoader } from './SubAgentLoader.js';
 import type { SubAgentTemplateStore } from './SubAgentTemplateStore.js';
@@ -15,6 +16,7 @@ export type SubAgentData = {
     description: string;
     role: string | null;
     model: string | null;
+    effort?: ReasoningEffort;
     tools: string[];
     scope: ScopeData | null;
     scope_type?: string;
@@ -40,6 +42,7 @@ export type SubAgentYaml = {
     description: string;
     role: string;
     model?: string | null;
+    effort?: ReasoningEffort;
     tools?: string[];
     scope?: ScopeData | null;
     max_iterations?: number | null;
@@ -56,7 +59,7 @@ export type SubAgentYaml = {
  * dopiero potem. Dlatego wszystko jest opcjonalne (na dysku user może edytować plik ręcznie
  * i zostawić go niekompletnym), w odróżnieniu od `SubAgentYaml` (kształt zapisu).
  */
-export type SubAgentYamlRaw = Partial<SubAgentYaml> & { scope_type?: string };
+export type SubAgentYamlRaw = Omit<Partial<SubAgentYaml>, 'effort'> & { scope_type?: string; effort?: unknown };
 
 type VaultAdapterLike = {
     exists: (path: string) => Promise<boolean>;

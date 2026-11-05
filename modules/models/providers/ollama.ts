@@ -21,6 +21,7 @@
  */
 import { NdjsonFrames, normalizeError } from '../../../core/index.js';
 import { t } from '../../../core/i18n/index.js';
+import { supportsEffort } from '../effort.js';
 import { isVisionModel } from '../capabilities.js';
 import { resolveMaxOutputTokens } from '../cache_utils.js';
 import { ReasoningTagFilter } from '../ReasoningTagFilter.js';
@@ -621,7 +622,8 @@ export class OllamaProvider implements ChatProvider {
         if (narzedzia.length > 0) body.tools = narzedzia;
         // Tryb myślenia. Demon przyjmuje flagę, nie budżet w tokenach — liczba z żądania
         // znaczy więc tyle samo co `true`.
-        if (req.thinking) body.think = true;
+        if (req.effort && supportsEffort('ollama', modelId)) body.think = /gpt-oss/i.test(modelId) ? req.effort : true;
+        else if (req.thinking) body.think = true;
 
         return {
             url: adres(ctx.endpoint ?? '', SCIEZKA_CZATU),

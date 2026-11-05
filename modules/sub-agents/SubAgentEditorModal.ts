@@ -7,8 +7,8 @@ import { Modal, Setting, Notice } from 'obsidian';
 import type { App } from 'obsidian';
 import { TOOL_INFO, confirmModal } from '../ui-components/index.js';
 import { UiIcons, setSvgLabel } from '../crystal-soul/index.js';
-import { getModelsForRole } from '../models/index.js';
-import type { PkmModelSettings } from '../models/index.js';
+import { createModelForRole, getModelsForRole, supportsEffort } from '../models/index.js';
+import type { PkmModelSettings, ResolverAgentLike, ResolverPluginLike } from '../models/index.js';
 import { t } from '../../core/i18n/index.js';
 import { DEFAULT_LIMITS } from '../../config/limits.js';
 import { log } from '../../core/utils/Logger.js';
@@ -28,6 +28,7 @@ export class SubAgentEditorModal extends Modal {
     declare offerTemplateCopy: boolean;
     declare _alsoTemplate: boolean;
     declare _maxIterationsRaw: string;
+    declare resolverAgent: ResolverAgentLike;
     /**
      * @param {Object} app - Obsidian App
      * @param {Object} plugin - Plugin instance
@@ -38,9 +39,10 @@ export class SubAgentEditorModal extends Modal {
      *        `.pkm-assistant/templates/sub-agents/`, wersja podbijana przez store).
      * @param {boolean} [options.alsoTemplate] - checkbox „Zapisz też jako szablon".
      */
-    constructor(app: App, plugin: SubAgentsPlugin, existing: SubAgentData | SubAgentTemplateRecord | null = null, onSave: ((data?: SubAgentInput) => void) | null = null, options: { template?: boolean; alsoTemplate?: boolean } = {}) {
+    constructor(app: App, plugin: SubAgentsPlugin, existing: SubAgentData | SubAgentTemplateRecord | null = null, onSave: ((data?: SubAgentInput) => void) | null = null, options: { template?: boolean; alsoTemplate?: boolean; agent?: ResolverAgentLike } = {}) {
         super(app);
         this.plugin = plugin;
+        this.resolverAgent = options.agent ?? null;
         this.role = existing?.role || 'researcher';
         this.existing = existing;
         this.onSave = onSave;
@@ -82,6 +84,7 @@ export class SubAgentEditorModal extends Modal {
             description: this.existing?.description || '',
             role: this.existing?.role || this.role,
             model: this.existing?.model || '',
+            effort: this.existing?.effort,
             tools: [...(this.existing?.tools || defaultTools)],
             scope: {
                 folders: [...(this.existing?.scope?.folders || [])],
@@ -142,6 +145,7 @@ export class SubAgentEditorModal extends Modal {
             const pkmM = (this.plugin?.env?.settings?.pkmAssistant || {}) as PkmModelSettings;
             const platformNames = { anthropic: 'Anthropic', openai: 'OpenAI', open_router: 'OpenRouter', ollama: 'Ollama', gemini: 'Gemini', groq: 'Groq', deepseek: 'DeepSeek', lm_studio: 'LM Studio' };
             let modelSelect: HTMLSelectElement | null = null;
+            let updateEffortDescription = () => {};
             const populateModels = (select: HTMLSelectElement, role: string, preserveMissing = false) => {
                 const selected = formData.model;
                 select.replaceChildren(new Option(t('modal.sub_agent.model_default'), ''));
@@ -156,6 +160,7 @@ export class SubAgentEditorModal extends Modal {
                 }
                 formData.model = options.some(option => option.model === selected) ? selected : '';
                 select.value = formData.model;
+                updateEffortDescription();
             };
             refreshModelOptions = role => {
                 if (modelSelect) populateModels(modelSelect, role);
@@ -168,8 +173,28 @@ export class SubAgentEditorModal extends Modal {
                     modelSelect = dd.selectEl;
                     populateModels(dd.selectEl, formData.role, true);
                     dd.setValue(formData.model || '');
-                    dd.onChange(v => formData.model = (v || null) as string);
+                    dd.onChange(v => { formData.model = v; updateEffortDescription(); });
                 });
+        const effortSetting = new Setting(contentEl)
+            .setName(t('modal.sub_agent.effort_label'))
+            .addDropdown(dd => {
+                dd.addOption('', t('modal.sub_agent.effort_default'));
+                dd.addOption('low', t('modal.sub_agent.effort_low'));
+                dd.addOption('medium', t('modal.sub_agent.effort_medium'));
+                dd.addOption('high', t('modal.sub_agent.effort_high'));
+                dd.setValue(formData.effort || '');
+                dd.onChange(value => { formData.effort = value === 'low' || value === 'medium' || value === 'high' ? value : undefined; });
+            });
+            updateEffortDescription = () => {
+                const agent = this.isTemplate ? null : this.resolverAgent;
+                const resolverPlugin = this.plugin as unknown as ResolverPluginLike;
+                const role = formData.role === 'worker' ? 'sub_worker' : 'researcher';
+                const selected = agent && (createModelForRole(resolverPlugin, role, agent, { model: formData.model })
+                    || createModelForRole(resolverPlugin, 'main', agent, null, true));
+                effortSetting.setDesc(!selected ? t('modal.sub_agent.effort_unknown')
+                    : !supportsEffort(selected.providerId, selected.modelId) ? t('modal.sub_agent.effort_unsupported') : '');
+            };
+            updateEffortDescription();
         }
 
         const advanced = contentEl.createEl('details');

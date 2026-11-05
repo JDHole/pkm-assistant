@@ -1,3 +1,4 @@
+import { effortBudget, supportsEffort } from '../effort.js';
 /**
  * `modules/models/providers/gemini.ts` — dostawca `gemini` (WŁASNY kształt żądania).
  *
@@ -619,7 +620,7 @@ export class GeminiProvider implements ChatProvider {
         const temperature = typeof req.temperature === 'number' ? req.temperature : ctx.temperature;
         if (typeof temperature === 'number') generationConfig.temperature = temperature;
 
-        const thinkingBudget = thinkingBudgetOf(req.thinking);
+        const thinkingBudget = thinkingBudgetOf(req.effort && supportsEffort('gemini', req.model ?? ctx.modelId) ? effortBudget(req.effort) : req.thinking);
         if (thinkingBudget !== undefined) generationConfig.thinkingConfig = { thinkingBudget };
 
         const body: Json = {

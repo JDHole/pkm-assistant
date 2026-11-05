@@ -59,7 +59,7 @@ export class OpenRouterProvider extends OpenAiCompatibleProvider {
         _ctx: ProviderContext,
         _stream: boolean,
     ): void {
-        const reasoning = reasoningOption(req.thinking);
+        const reasoning = req.effort ? { effort: req.effort } : reasoningOption(req.thinking);
         if (reasoning) body.reasoning = reasoning;
     }
 
