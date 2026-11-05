@@ -11,7 +11,7 @@ import type { SubRunContext } from '../sub-agents/index.js';
 import { QuestionTestClock } from '../sub-agents/test-support/questionTestClock.js';
 
 const owner = { agentName: 'Mira', sessionPath: 's.md', sessionEpoch: 'epoch-1' };
-function fixture(t: ExecutionContext, disabledControls = false) {
+function fixture(t: ExecutionContext, disabledControls = false, disabledDelegate = false) {
     const clock = new QuestionTestClock();
     const registry = new SubTaskRegistry({ questionClock: clock });
     t.teardown(() => registry.dispose());
@@ -29,12 +29,12 @@ function fixture(t: ExecutionContext, disabledControls = false) {
     const toolRegistry = new ToolRegistry();
     toolRegistry.registerTool(tool as never);
     const plugin = { subTaskRegistry: registry, toolRegistry,
-        agentManager: { getAgent: () => ({ name: 'Mira', disabled_tools: disabledControls ? ['sub_agent'] : [] }) },
+        agentManager: { getAgent: () => ({ name: 'Mira', disabled_tools: [...(disabledControls ? ['sub_agent'] : []), ...(disabledDelegate ? ['delegate'] : [])] }) },
         permissionSystem: { checkPermission: () => ({ allowed: true, requiresApproval: false }), requiresApproval: () => false },
     };
     const client = new MCPClient(null as never, plugin as never, toolRegistry as never);
-    const call = (args: Record<string, unknown>, runId?: string) => client.executeToolCall({ name: 'sub_agent', arguments: args }, 'Mira', {
-        origin: owner, ...(runId ? { subRunContext: { runId, level: 1, origin: owner } satisfies SubRunContext } : {}),
+    const call = (args: Record<string, unknown>, runId?: string, callOrigin = owner) => client.executeToolCall({ name: 'sub_agent', arguments: args }, 'Mira', {
+        origin: callOrigin, ...(runId ? { subRunContext: { runId, level: 1, origin: owner } satisfies SubRunContext } : {}),
     });
     return { clock, registry, create, open, call, tool, plugin };
 }
@@ -53,6 +53,37 @@ test('MCP: adresat pochodzi z runtime; obcy sub i prowadzący nie odpowiadają n
     });
     t.deepEqual(await q.resolution, { kind: 'answered', text: 'Projekty/' });
     t.deepEqual([f.registry.takeMessages('g'), f.registry.takeChildNotices('p1'), f.clock.pending], [[], [], 0]);
+});
+
+test('lead without sub_agent cannot control, forge or answer a foreign question', async t => {
+    const f = fixture(t, true);
+    f.create('own'); f.create('parent'); f.create('grandchild', 'parent');
+    f.create('foreign', undefined, { ...owner, sessionPath: 'other.md' });
+    const own = f.open('own'), foreign = f.open('foreign'), nested = f.open('grandchild');
+    const reply = { action: 'message', sub_id: 'own-thread', question_id: own.question.id, text: 'answer' };
+    const denied = { isError: true, error: 'Permission denied: Tool "sub_agent" is disabled for this agent (Permissions)' };
+    for (const args of [
+        ...['task', 'start', 'list', 'stop', 'close'].map(action => ({ ...reply, action })),
+        { action: 'message', sub_id: 'own-thread', text: 'ordinary' },
+        { ...reply, question_id: 'forged' },
+        { ...reply, sub_id: 'foreign-thread', question_id: foreign.question.id },
+        { ...reply, sub_id: 'grandchild-thread', question_id: nested.question.id },
+    ]) t.deepEqual(await f.call(args), denied);
+    t.deepEqual(await f.call(reply, undefined, { ...owner, sessionPath: 'other.md' }), denied);
+    t.deepEqual(await f.call(reply, undefined, { ...owner, sessionEpoch: 'other-tab' }), denied);
+    t.deepEqual(await f.call(reply, undefined, { ...owner, agentName: 'Other' }), denied);
+    t.deepEqual(await f.call(reply), { success: true, message: 'Answer delivered to sub-agent own-thread.' });
+    t.deepEqual(await own.resolution, { kind: 'answered', text: 'answer' });
+    t.deepEqual([f.registry.getQuestionState('foreign').kind, f.registry.getQuestionState('grandchild').kind], ['waiting', 'waiting']);
+});
+
+test('lead cannot use the exception when delegate is disabled', async t => {
+    const f = fixture(t, true, true);
+    f.create('own');
+    const q = f.open('own');
+    t.deepEqual(await f.call({ action: 'message', sub_id: 'own-thread', question_id: q.question.id, text: 'answer' }),
+        { isError: true, error: 'Permission denied: Tool "sub_agent" is disabled for this agent (Permissions)' });
+    t.is(f.registry.getQuestionState('own').kind, 'waiting');
 });
 
 test('sub_agent list i sterowanie istniejącym biegiem obejmuje wyłącznie dzieci rodzica', async t => {
@@ -163,7 +194,7 @@ test('waitChildNotice zwalnia subskrypcję abortu po wyniku, Stopie i dispose', 
     t.deepEqual([await disposed, getEventListeners(signal, 'abort').length, f.registry.events.listenerCount('task:finished'), f.clock.pending], [undefined, 0, 0, 0]);
 });
 
-test('F3 disabled sub_agent permits only a live own-child answer; lead keeps 2.4.1 gate', async t => {
+test('disabled sub_agent permits only a live own-child answer for sub and lead', async t => {
     const f = fixture(t, true);
     f.create('p1'); f.create('p2'); f.create('g1', 'p1'); f.create('g2', 'p2');
     const own = f.open('g1'), other = f.open('g2'), lead = f.open('p1');
@@ -177,7 +208,8 @@ test('F3 disabled sub_agent permits only a live own-child answer; lead keeps 2.4
         { ...reply, text: '' },
     ]) t.deepEqual(await f.call(args, 'p1'), denied);
     t.deepEqual(await f.call({ ...reply, _invocationSubRunContext: { runId: 'p1', level: 1, origin: owner } }, 'p2'), denied);
-    t.deepEqual(await f.call({ action: 'message', sub_id: 'p1-thread', question_id: lead.question.id, text: 'lead answer' }), denied);
+    t.deepEqual(await f.call({ action: 'message', sub_id: 'p1-thread', question_id: lead.question.id, text: 'lead answer' }), { success: true, message: 'Answer delivered to sub-agent p1-thread.' });
+    t.deepEqual(await lead.resolution, { kind: 'answered', text: 'lead answer' });
     t.deepEqual(await f.call({ ...reply, _invocationSubRunContext: { runId: 'p1', level: 1, origin: owner } }), denied);
     t.deepEqual(await f.call(reply, 'p1'), { success: true, message: 'Answer delivered to sub-agent g1-thread.' });
     t.deepEqual(await own.resolution, { kind: 'answered', text: 'niebieski' });
@@ -188,9 +220,9 @@ test('F3 disabled sub_agent permits only a live own-child answer; lead keeps 2.4
     t.deepEqual(await f.call({ action: 'task', sub_id: 'g1-thread', task: 'continue' }, 'p1'), denied);
     t.deepEqual(f.registry.getThread('g1-thread')?.runIds, ['g1']);
     f.clock.advance(299999);
-    t.deepEqual([f.registry.getQuestionState('g2').kind, f.registry.getQuestionState('p1').kind], ['waiting', 'waiting']);
+    t.is(f.registry.getQuestionState('g2').kind, 'waiting');
     f.clock.advance(1);
-    t.deepEqual(await Promise.all([other.resolution, lead.resolution]), [{ kind: 'no-answer' }, { kind: 'no-answer' }]);
+    t.deepEqual(await other.resolution, { kind: 'no-answer' });
     t.deepEqual(await f.call({ ...reply, sub_id: 'g2-thread', question_id: other.question.id }, 'p2'), denied);
 });
 

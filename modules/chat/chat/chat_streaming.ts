@@ -1284,6 +1284,14 @@ export function _chatResolveTools(this: ChatViewLike, turn: ChatTurn, _applyEnab
         systemTools = (this.plugin.toolRegistry.getToolDefinitions() as ChatToolDefinition[])
             .filter((t: ChatToolDefinition) => mcpAllowedNames.has(t.function?.name || t.name));
 
+        if (mcpAllowedNames.has('delegate') && !mcpAllowedNames.has('sub_agent')) {
+            systemTools.push({ type: 'function', function: { name: 'sub_agent',
+                description: 'Answer an open question from your own sub-agent using its question_id.',
+                parameters: { type: 'object', properties: { action: { type: 'string', enum: ['message'] },
+                    sub_id: { type: 'string' }, question_id: { type: 'string' }, text: { type: 'string' } },
+                required: ['action', 'sub_id', 'question_id', 'text'] } } });
+        }
+
         // Layer 2: active user/custom MCP server tools. Odfiltruj wyłączone (disabled_tools).
         const preferredServers = getAgentServerFilter(this.plugin.serverManager, agent);
         const disabledSet = new Set<string | undefined>(Array.isArray(agent.disabled_tools) ? agent.disabled_tools : []);

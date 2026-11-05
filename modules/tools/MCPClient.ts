@@ -955,8 +955,9 @@ export class MCPClient {
                 // The tool rechecks the recipient/deadline when delivering; task/control never qualify.
                 const childReply = !axis.allowed && axis.reason === 'disabled_tool'
                     && this.toolRegistry.getTool(toolCall.name)?.source !== 'user'
+                    && (opts.subRunContext || this.toolRegistry.checkToolAxis(agent, 'delegate').allowed)
                     && isOwnChildQuestionReply({ name: toolCall.name, arguments: argsWithContext },
-                        opts.subRunContext, agent.name ?? invocationAgentName ?? '', this.plugin.subTaskRegistry);
+                        opts.subRunContext, agent.name ?? invocationAgentName ?? '', this.plugin.subTaskRegistry, origin ?? undefined);
                 if (!axis.allowed && !childReply) {
                     const reason = axis.reason === 'server_not_opted_in'
                         ? t('perm.server_not_opted_in', { server: String(axis.serverName || '?') })
