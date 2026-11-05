@@ -685,3 +685,17 @@ Default `max_delegation_depth` wynosi 2, jawny zakres nadal 1-3. Wnuk na limicie
 nie podlega walidacji żywego rodzica. Testy: `SubTaskHistory.test.ts` (prawdziwy AgentMemory,
 parser i model paska, restart, błędne dane, stop kolejki, dorobek, brak wycieków),
 `modules/chat/chat/chat_session.test.ts` i `modules/tools/DelegateTool.coordinator.test.ts`.
+
+### Model drzewa paska (P7)
+
+`buildStripTreeModel(rows, collapsed)` jest publicznym, czystym modelem prezentacji.
+Łączy `parentId` z ID biegu w `StripRow.runs`, zachowuje kolejność korzeni i rodzeństwa,
+a brakującego rodzica traktuje jako korzeń; przerywa cykle bez usuwania wierszy.
+Zwraca korzenie, widoczną kolejność preorder, głębokość, zwinięcie, liczbę potomków
+(i ukrytych wierszy), żywych potomków Stopu, ID biegów Stopu, czas `m:ss` i klucze
+podpisów i18n. Liczniki całego drzewa nie maleją po zwinięciu. Odpowiadanie rodzica
+wynika z otwartego pytania do jego żywego biegu; własne pytanie rodzica ma pierwszeństwo.
+Zakończony rodzic z żywymi potomkami nadal pozwala zatrzymać poddrzewo przez P3.
+`StripTreeLabel`, `StripTreeNode`, `StripTreeModel` wychodzą przez barrel.
+Model nie przechowuje stanu widoku i nie zna DOM, CSS ani bieżącego języka.
+Testy literalne: `subTaskPanelModel.tree.test.ts` (w tym PL/EN, sieroty i cykle).

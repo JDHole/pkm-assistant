@@ -49,6 +49,7 @@ class MockEl {
         if (name === 'data-substrip-id') this.dataset.substripId = value;
         if (name === 'data-substrip-run-id') this.dataset.substripRunId = value;
     }
+    getAttribute(name: string) { return this.attributes[name] ?? null; }
     addEventListener(type: string, handler: (event: any) => void) { this.listeners.set(type, [...(this.listeners.get(type) || []), handler]); }
     dispatch(type: string, event: any = {}) { for (const handler of this.listeners.get(type) || []) handler({ stopPropagation() {}, preventDefault() {}, key: '', ...event }); }
     contains(target: unknown): boolean { return target === this || this.children.some(child => child.contains(target)); }
@@ -62,6 +63,7 @@ class MockEl {
         return null;
     }
     querySelectorAll<T extends MockEl>(selector: string): T[] {
+        if (selector === '[data-substrip-control]') return all(this).filter(node => Boolean(node.attributes['data-substrip-control'])) as T[];
         if (selector === '[data-substrip-id]') return all(this).filter(node => Boolean(node.dataset.substripId)) as T[];
         if (selector === '[data-substrip-run-id]') return all(this).filter(node => Boolean(node.dataset.substripRunId)) as T[];
         return [];
@@ -866,4 +868,128 @@ test('subTaskStrip: rozwinięty bieg pokazuje notkę o podsumowaniu w toku i o p
     t.true(render('run-zapis').includes(trPl['chat.streaming.partial_storage_error']));
     registry.dispose();
     setLocale('en');
+});
+
+function treeRegistry() {
+    const registry = new SubTaskRegistry({ questionClock: new QuestionTestClock() });
+    for (const [id, name, parentId] of [['lena', 'Lena', undefined], ['iga', 'Iga', undefined],
+        ['marek', 'Marek', 'lena-run'], ['worker', 'worker', 'marek-run']] as const) {
+        registry.createThread({ threadId: id, name, parentId, owner, origin: owner, config: {} });
+        registry.create({ id: `${id}-run`, threadId: id, name, parentId, origin: owner });
+    }
+    registry.createThread({ threadId: 'queued', name: 'Jan', parentId: 'lena-run', owner, origin: owner, config: {}, phase: 'queued' });
+    return registry;
+}
+const byClass = (host: MockEl, name: string) => all(host).filter(node => node.classList.contains(`pkm-substrip__${name}`));
+const control = (host: MockEl, id: string) => all(host).find(node => node.attributes['data-substrip-control'] === id)!;
+
+test.serial('tree DOM: branches, independent collapse, stable counters, focus, owner/view isolation and queue tooltip', t => {
+    setLocale('pl'); t.teardown(() => setLocale('en'));
+    const registry = treeRegistry(); t.teardown(() => registry.dispose());
+    const host = new MockEl();
+    const ctx = { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, onToggle() {} };
+    t.is(renderSubTaskStrip(host as never, ctx), 5);
+    t.true(host.classList.contains('pkm-substrip--tree'));
+    t.deepEqual(byClass(host, 'name').map(n => n.textContent), ['Lena', 'Marek', 'worker', 'Jan', 'Iga']);
+    t.deepEqual(byClass(host, 'tree').map(n => n.attributes['data-substrip-depth']), ['0', '1', '2', '1', '0']);
+    t.deepEqual(byClass(host, 'branch').map(n => byClass(n, 'name').map(el => el.textContent)), [['Marek', 'worker', 'Jan'], ['worker']]);
+    t.is(textTree(byClass(host, 'summary')[0]).trim(), '4 pracuje, 1 w kolejce  · 5 zadań');
+    t.is(byClass(host, 'tip')[0].textContent, 'Czeka na wolne miejsce, max 5 naraz.');
+    control(host, 'info:queued').dispatch('click');
+    t.deepEqual([control(host, 'info:queued').attributes['aria-expanded'], byClass(host, 'tip').length], ['false', 0]);
+    control(host, 'info:queued').dispatch('click');
+    t.is(byClass(host, 'tip')[0].textContent, 'Czeka na wolne miejsce, max 5 naraz.');
+    control(host, 'toggle:marek').dispatch('click');
+    control(host, 'toggle:lena').dispatch('click');
+    t.deepEqual(byClass(host, 'name').map(n => n.textContent), ['Lena', 'Iga']);
+    t.deepEqual(byClass(host, 'count').map(n => n.textContent), ['+3']);
+    t.is(host.ownerDocument.activeElement?.attributes['data-substrip-control'], 'toggle:lena');
+    t.is(control(host, 'toggle:lena').attributes['aria-expanded'], 'false');
+    renderSubTaskStrip(host as never, ctx);
+    t.deepEqual(byClass(host, 'count').map(n => n.textContent), ['+3']);
+    t.is(textTree(byClass(host, 'summary')[0]).trim(), '4 pracuje, 1 w kolejce  · 5 zadań');
+    control(host, 'toggle:lena').dispatch('click');
+    t.deepEqual(byClass(host, 'name').map(n => n.textContent), ['Lena', 'Marek', 'Jan', 'Iga']);
+    t.deepEqual(byClass(host, 'count').map(n => n.textContent), ['+1']);
+    const other = new MockEl(); renderSubTaskStrip(other as never, ctx);
+    t.deepEqual(byClass(other, 'name').map(n => n.textContent), ['Lena', 'Marek', 'worker', 'Jan', 'Iga']);
+    renderSubTaskStrip(host as never, { ...ctx, agentName: 'Other' });
+    t.is(host.children.length, 0);
+    renderSubTaskStrip(host as never, ctx);
+    t.deepEqual(byClass(host, 'count').map(n => n.textContent), ['+1']);
+});
+
+test.serial('tree DOM: asks the actual parent, escalates to lead and Stop reaches the whole subtree through P3', t => {
+    setLocale('pl'); t.teardown(() => setLocale('en'));
+    const registry = treeRegistry(); t.teardown(() => registry.dispose());
+    registry.openParentQuestion('marek-run', 'Jakie źródła?');
+    const host = new MockEl();
+    const ctx = { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, expandedId: 'marek', onToggle() {} };
+    renderSubTaskStrip(host as never, ctx);
+    t.deepEqual(byClass(host, 'state').map(n => n.textContent), ['odpowiada wnukowi', 'pyta Lena', 'pracuje', 'w kolejce', 'pracuje']);
+    t.is(byClass(host, 'detail-status')[0].textContent, 'pyta Lena');
+    t.is(byClass(host, 'question-note')[0].textContent, 'Tylko podgląd. Odpowiada rodzic, który zlecił to zadanie.');
+    registry.openParentQuestion('lena-run', 'Pomóż');
+    renderSubTaskStrip(host as never, ctx);
+    t.is(byClass(host, 'state')[0].textContent, 'pyta prowadzącego');
+    t.deepEqual(byClass(host, 'stop-hint').map(n => n.textContent), ['zatrzyma też 3 subów pod nim', 'zatrzyma też 1 subów pod nim']);
+    const stopped: string[] = [];
+    for (const id of ['lena-run', 'marek-run', 'worker-run']) registry.attachAbort(id, () => {
+        stopped.push(id);
+        registry.finish(registry.getTask(id)!, { text: '', toolsUsed: [], durationMs: 0, usage: null,
+            outcome: { end: { kind: 'stopped', by: 'user' }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } });
+    });
+    control(host, 'toggle:lena').dispatch('click');
+    control(host, 'stop:lena').dispatch('click');
+    t.deepEqual(stopped, ['worker-run', 'marek-run', 'lena-run']);
+    t.deepEqual(['lena-run', 'marek-run', 'worker-run', 'iga-run'].map(id => registry.getTask(id)?.stopRequestedBy), ['user', 'user', 'user', undefined]);
+    t.is(registry.getThread('queued')?.phase, 'closed');
+    t.deepEqual(byClass(host, 'state').map(n => n.textContent), ['zatrzymany', 'pracuje']);
+    t.true(control(host, 'stop:lena').disabled);
+    t.is(byClass(host, 'count')[0].textContent, '+3');
+});
+
+// Literal DOM output captured from the renderer at 882d8b7, before P7.
+test.serial('flat DOM: exact pre-P7 structure, classes, labels and accessibility attributes', t => {
+    setLocale('pl'); t.teardown(() => setLocale('en'));
+    const registry = new SubTaskRegistry(); t.teardown(() => registry.dispose());
+    registry.create({ id: 'flat-run', name: 'Lena', agentName: 'Klara', origin: { agentName: 'Klara' } }).createdAt = Date.now();
+    registry.createThread({ threadId: 'flat-queued', name: 'Jan', owner: { agentName: 'Klara' }, origin: { agentName: 'Klara' }, config: {}, phase: 'queued' });
+    const host = new MockEl();
+    renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', agentName: 'Klara', onToggle() {} });
+    t.deepEqual(all(host).map(n => [n.tagName, n.className, n.textContent, n.attributes]), [
+        ["DIV", "pkm-substrip", "", {}],
+        ["DIV", "pkm-substrip__chips", "", {}],
+        ["BUTTON", "pkm-substrip__chip pkm-substrip__chip--queued", "", {"type": "button", "aria-expanded": "false", "aria-label": "Jan: czeka na miejsce", "data-substrip-id": "flat-queued"}],
+        ["SPAN", "pkm-substrip__crystal", "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 60 100\" width=\"12\" height=\"20\"><g><polygon points=\"30,33 41.8,37.9 52.2,55.9 39.8,74.1 18.2,63.6 11.9,53.7 6.9,28.7\" fill=\"currentColor\" fill-opacity=\"0.25\" stroke=\"currentColor\" stroke-width=\"1.8\"/><line x1=\"30\" y1=\"50\" x2=\"39.8\" y2=\"74.1\" stroke=\"currentColor\" stroke-opacity=\"0.2\" stroke-width=\"1\"/><line x1=\"30\" y1=\"50\" x2=\"41.8\" y2=\"37.9\" stroke=\"currentColor\" stroke-opacity=\"0.2\" stroke-width=\"1\"/><line x1=\"30\" y1=\"50\" x2=\"11.9\" y2=\"53.7\" stroke=\"currentColor\" stroke-opacity=\"0.2\" stroke-width=\"1\"/></g></svg>", {}],
+        ["SPAN", "pkm-substrip__chip-copy", "", {}],
+        ["SPAN", "pkm-substrip__name", "Jan", {}],
+        ["SPAN", "pkm-substrip__state", "czeka na miejsce", {}],
+        ["SPAN", "pkm-substrip__queue", "1. w kolejce", {}],
+        ["SPAN", "pkm-substrip__time", "0 s", {}],
+        ["BUTTON", "pkm-substrip__chip pkm-substrip__chip--running", "", {"type": "button", "aria-expanded": "false", "aria-label": "Lena: pracuje", "data-substrip-id": "flat-run"}],
+        ["SPAN", "pkm-substrip__crystal", "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 60 100\" width=\"12\" height=\"20\"><g><polygon points=\"30,4.871933228336275 57.390984209254384,29.954387640580535 47.595174764283,61.01037771720439 30,91.84988234564662 12.404825235716999,61.01037771720439 2.609015790745616,29.954387640580535\" fill=\"currentColor\" fill-opacity=\"0.25\" stroke=\"currentColor\" stroke-width=\"1.8\"/><line x1=\"2.609015790745616\" y1=\"29.954387640580535\" x2=\"57.390984209254384\" y2=\"29.954387640580535\" stroke=\"currentColor\" stroke-opacity=\"0.3\" stroke-width=\"1\"/><line x1=\"30\" y1=\"4.871933228336275\" x2=\"12.404825235716999\" y2=\"61.01037771720439\" stroke=\"currentColor\" stroke-opacity=\"0.2\" stroke-width=\"1\"/><line x1=\"30\" y1=\"4.871933228336275\" x2=\"47.595174764283\" y2=\"61.01037771720439\" stroke=\"currentColor\" stroke-opacity=\"0.2\" stroke-width=\"1\"/><line x1=\"30\" y1=\"91.84988234564662\" x2=\"2.609015790745616\" y2=\"29.954387640580535\" stroke=\"currentColor\" stroke-opacity=\"0.15\" stroke-width=\"1\"/><line x1=\"30\" y1=\"91.84988234564662\" x2=\"57.390984209254384\" y2=\"29.954387640580535\" stroke=\"currentColor\" stroke-opacity=\"0.15\" stroke-width=\"1\"/></g></svg>", {}],
+        ["SPAN", "pkm-substrip__chip-copy", "", {}],
+        ["SPAN", "pkm-substrip__name", "Lena", {}],
+        ["SPAN", "pkm-substrip__state", "pracuje", {}],
+        ["SPAN", "pkm-substrip__time", "0 s", {}],
+    ]);
+});
+
+test.serial('tree DOM: naturally finished branches show finished, never a false stopped button', t => {
+    setLocale('pl'); t.teardown(() => setLocale('en'));
+    const registry = new SubTaskRegistry(); t.teardown(() => registry.dispose());
+    for (const [id, parentId] of [['parent', undefined], ['child', 'parent-run']] as const) {
+        registry.createThread({ threadId: id, name: id, parentId, owner, origin: owner, config: { limits: { subagent_thread_max_runs: 1 } } });
+        const task = registry.create({ id: `${id}-run`, threadId: id, name: id, parentId, origin: owner });
+        registry.finish(task, { text: 'wynik', toolsUsed: [], durationMs: 0, usage: null,
+            outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true, effects: [] } });
+        registry.endRun(id, { successful: true });
+    }
+    const host = new MockEl();
+    renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, onToggle() {} });
+    t.deepEqual(byClass(host, 'state').map(n => n.textContent), ['skończył', 'skończył']);
+    t.deepEqual(byClass(host, 'tree-stop').map(n => n.textContent), []);
+    t.is(control(host, 'toggle:parent').attributes['aria-expanded'], 'true');
+    t.is(textTree(byClass(host, 'summary')[0]).trim(), '0 pracuje, 0 w kolejce  · 2 zadania');
 });

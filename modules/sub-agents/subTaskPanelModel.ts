@@ -379,3 +379,94 @@ export function buildStripModel({ tasks, pending, threads, tabKey = '', agentNam
     }
     return rows;
 }
+
+/** Presentation data only: no DOM, CSS, locale or view-local state. */
+export interface StripTreeLabel { key: string; params?: Record<string, string | number> }
+export interface StripTreeNode {
+    row: StripRow;
+    depth: number;
+    children: StripTreeNode[];
+    collapsed: boolean;
+    descendantCount: number;
+    hiddenCount: number;
+    stopDescendantCount: number;
+    canStop: boolean;
+    stopRunIds: string[];
+    label: StripTreeLabel;
+    time: string;
+}
+export interface StripTreeModel {
+    hierarchical: boolean;
+    roots: StripTreeNode[];
+    visible: StripTreeNode[];
+    counts: ReturnType<typeof summarizeStripRows>;
+    summary: StripTreeLabel;
+}
+
+/** parentId addresses a RUN, whereas the strip groups runs into thread rows. */
+export function buildStripTreeModel(rows: readonly StripRow[], collapsed: ReadonlySet<string> = new Set()): StripTreeModel {
+    const byRun = new Map(rows.flatMap(row => row.runs.map(run => [run.id, row] as const)));
+    const parents = new Map<StripRow, StripRow>();
+    for (const row of rows) {
+        const parent = row.parentId ? byRun.get(row.parentId) : undefined;
+        if (!parent || parent === row) continue;
+        // Retained history can be incomplete. Break cycles without dropping rows.
+        let ancestor: StripRow | undefined = parent;
+        while (ancestor && ancestor !== row) ancestor = parents.get(ancestor);
+        if (ancestor !== row) parents.set(row, parent);
+    }
+    const children = new Map<StripRow, StripRow[]>();
+    for (const row of rows) {
+        const parent = parents.get(row);
+        if (parent) children.set(parent, [...(children.get(parent) ?? []), row]);
+    }
+    const askingParents = new Set(rows.flatMap(row => {
+        const q = row.questionState;
+        return row.state.kind === 'running' && q.kind === 'waiting' && q.question.recipient.kind === 'sub'
+            ? [q.question.recipient.runId] : [];
+    }));
+    const live = (row: StripRow): boolean => ['running', 'stopping', 'queued'].includes(row.state.kind);
+    const label = (row: StripRow): StripTreeLabel => {
+        if (row.state.kind === 'running' && row.questionState.kind === 'waiting') {
+            const recipient = row.questionState.question.recipient;
+            return recipient.kind === 'lead' ? { key: 'chat.substrip.tree_asks_lead' }
+                : { key: 'chat.substrip.tree_asks_parent', params: { name: byRun.get(recipient.runId)?.name ?? recipient.runId } };
+        }
+        if (row.state.kind === 'running' && row.runs.some(run => run.status === 'running' && askingParents.has(run.id))) {
+            return { key: 'chat.substrip.tree_answering' };
+        }
+        if (row.state.kind === 'queued') return { key: 'chat.substrip.tree_queued' };
+        const last = row.runs[row.runs.length - 1];
+        if (!live(row) && (last?.status === 'aborted' || ['chat.substrip.state_partial_user', 'chat.substrip.state_partial_lead', 'chat.substrip.state_partial_system'].includes(last?.endLabelKey ?? ''))) {
+            return { key: 'chat.substrip.tree_stopped' };
+        }
+        if (row.state.kind === 'done' || row.state.kind === 'idle' || (row.state.kind === 'closed' && last?.state.kind === 'done')) {
+            return { key: 'chat.substrip.tree_done' };
+        }
+        if (!live(row) && row.questionState.kind === 'closed' && row.questionState.resolution.kind === 'no-answer') {
+            return { key: 'chat.substrip.question_no_answer_partial' };
+        }
+        return { key: getStripStateLabelParts(row.state).end };
+    };
+    const build = (row: StripRow, depth: number): StripTreeNode => {
+        const nodes = (children.get(row) ?? []).map(child => build(child, depth + 1));
+        const descendantCount = nodes.reduce((sum, node) => sum + 1 + node.descendantCount, 0);
+        const stopDescendantCount = nodes.reduce((sum, node) => sum + Number(live(node.row)) + node.stopDescendantCount, 0);
+        const seconds = Math.floor(Math.max(0, row.durationMs) / 1000);
+        return { row, depth, children: nodes, collapsed: nodes.length > 0 && collapsed.has(row.id), descendantCount,
+            hiddenCount: collapsed.has(row.id) ? descendantCount : 0, stopDescendantCount,
+            canStop: live(row) || stopDescendantCount > 0,
+            stopRunIds: row.runs.map(run => run.id), label: label(row),
+            time: `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` };
+    };
+    const roots = rows.filter(row => !parents.has(row)).map(row => build(row, 0));
+    const visible: StripTreeNode[] = [];
+    const visit = (node: StripTreeNode): void => {
+        visible.push(node);
+        if (!node.collapsed) node.children.forEach(visit);
+    };
+    roots.forEach(visit);
+    const counts = summarizeStripRows(rows);
+    return { hierarchical: parents.size > 0, roots, visible, counts,
+        summary: { key: 'chat.substrip.tree_summary', params: counts } };
+}

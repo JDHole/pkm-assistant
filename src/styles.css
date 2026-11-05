@@ -1390,3 +1390,108 @@ input.pkm-onboarding-key-input {
   margin: 8px 0;
   padding: 8px 10px;
 }
+
+/* Sub-agent tree: layout follows the 2.4.4 mockup; all colour comes from the host theme.
+   Flat strips retain their existing styles in chat_view.css. Nesting supplies indentation. */
+.pkm-substrip.pkm-substrip--tree {
+  padding: 10px 13px 13px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+.pkm-substrip--tree .pkm-substrip__summary {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.pkm-substrip--tree .pkm-substrip__chips {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  padding: 0;
+  overflow: visible;
+}
+.pkm-substrip__tree { min-width: 0; }
+.pkm-substrip__row { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.pkm-substrip--tree .pkm-substrip__chip--tree {
+  font: inherit;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 7px;
+  padding: 5px 8px;
+  display: flex;
+  flex: 0 1 auto;
+  gap: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  max-width: 100%;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 1px 3px var(--background-modifier-box-shadow);
+}
+.pkm-substrip--tree .pkm-substrip__chip--tree:hover { border-color: var(--interactive-accent); }
+.pkm-substrip--tree .pkm-substrip__chip--open { border-color: var(--interactive-accent); background: var(--background-modifier-hover); }
+.pkm-substrip--tree .pkm-substrip__crystal { color: var(--color-orange); }
+.pkm-substrip--tree .pkm-substrip__name { font-weight: 650; }
+.pkm-substrip--tree .pkm-substrip__state,
+.pkm-substrip--tree .pkm-substrip__time { color: var(--text-muted); font-size: inherit; }
+.pkm-substrip--tree .pkm-substrip__state { white-space: normal; overflow-wrap: anywhere; }
+.pkm-substrip--tree .pkm-substrip__time { white-space: nowrap; }
+.pkm-substrip__branch {
+  position: relative;
+  margin-left: 18px;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-left: 1px solid var(--background-modifier-border);
+}
+.pkm-substrip__branch > .pkm-substrip__tree > .pkm-substrip__row { position: relative; }
+.pkm-substrip__branch > .pkm-substrip__tree > .pkm-substrip__row::before {
+  content: '';
+  position: absolute;
+  left: -18px;
+  width: 15px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.pkm-substrip--tree .pkm-substrip__toggle,
+.pkm-substrip--tree .pkm-substrip__tree-stop,
+.pkm-substrip--tree .pkm-substrip__info {
+  font: inherit;
+  cursor: pointer;
+  height: auto;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  border-radius: 5px;
+  padding: 3px 7px;
+  box-shadow: none;
+}
+.pkm-substrip--tree .pkm-substrip__toggle { min-width: 29px; }
+.pkm-substrip--tree .pkm-substrip__tree-stop { font-size: 11px; }
+.pkm-substrip--tree .pkm-substrip__info { padding: 0 5px; font-size: 11px; border-radius: 50%; }
+.pkm-substrip__toggle:focus-visible,
+.pkm-substrip__info:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; }
+.pkm-substrip__count { color: var(--text-accent); font-size: 11px; white-space: nowrap; }
+.pkm-substrip__stop-hint { font-size: 11px; color: var(--text-muted); margin: 2px 0 1px 34px; }
+.pkm-substrip__tip {
+  display: inline-block;
+  background: var(--background-secondary-alt);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 6px 9px;
+  font-size: 11px;
+  margin: 3px 0 2px 34px;
+  max-width: min(260px, 100%);
+}
+@media (max-width: 500px) {
+  .pkm-substrip--tree .pkm-substrip__chip--tree { gap: 5px; }
+}

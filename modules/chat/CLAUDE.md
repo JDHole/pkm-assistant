@@ -1605,3 +1605,20 @@ powiadomień, pytań ani zgód. Brak nowych rekordów zachowuje zachowanie stars
 w tym terminalne pytanie w treści i pusty rejestr. `chat/chat_session.test.ts` sprawdza
 obie ścieżki, idempotencję i historię queued/running po restarcie. Restore odświeża istniejący
 pasek po związaniu zakładki z odczytaną epoką; renderer drzewa bez zmian.
+
+### Drzewo na pasku subów (P7, makieta 2.4.4)
+
+`subTaskStrip.ts` korzysta z `buildStripTreeModel` przez barrel sub-agents. Przy
+rzeczywistej relacji rodzic–dziecko pokazuje pionowe wiersze, zagnieżdżone gałęzie
+z łącznikami, strzałki, `+N`, podsumowanie i dymek kolejki. Układ i kolory drzewa
+są wyłącznie w `src/styles.css` (`pkm-substrip*`, zmienne motywu Obsidiana).
+Płaska lista zachowuje stary DOM, klasy, opisy, próg podsumowania i style.
+Zwinięcia oraz widoczność dymków żyją w WeakMap per kontener i właściciel zakładki
+(agent/ścieżka/epoka); odświeżenie i przełączenie zakładki ich nie zeruje.
+Strzałka działa niezależnie od otwierania szczegółów. Zwinięte potomstwo nie pokazuje
+swojego szczegółu. Focus wraca do właściwej strzałki, informacji lub Stopu.
+Stop przy rodzicu wysyła `requestStop(id, 'user')` do jego konkretnych biegów,
+aby P3 objął także potomków wcześniejszego, zakończonego biegu tego wątku.
+Pytanie w szczególe wnuka pokazuje jego rodzica zamiast prowadzącego.
+Testy: `chat/subTaskStrip.test.ts` — klasy, teksty, interakcje, izolacja widoków,
+Stop na prawdziwym rejestrze oraz literalny DOM płaskiej listy z HEAD `882d8b7`.

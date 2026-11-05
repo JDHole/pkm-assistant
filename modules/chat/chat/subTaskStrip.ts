@@ -1,8 +1,8 @@
 /** Render paska wątku i biegów w czacie. Komunikacja do suba pozostaje wyłącznie po stronie agenta. */
 import { t, pluralCategory } from '../../../core/i18n/index.js';
 import { SkinManager, setSvg } from '../../crystal-soul/index.js';
-import { buildStripModel, formatDuration, getStripStateLabelParts, summarizeStripRows } from '../../sub-agents/index.js';
-import type { QuestionState, StripRow, StripRun, StripState, StripStep, SubTask, SubThread } from '../../sub-agents/index.js';
+import { buildStripModel, buildStripTreeModel, formatDuration, getStripStateLabelParts, summarizeStripRows } from '../../sub-agents/index.js';
+import type { QuestionState, StripTreeNode, StripRow, StripRun, StripState, StripStep, SubTask, SubThread } from '../../sub-agents/index.js';
 
 interface ElOpts { cls?: string; text?: string; attr?: Record<string, string> }
 type El = HTMLElement & {
@@ -30,6 +30,9 @@ interface SubTaskStripContext {
     expandedId?: string | null;
     onToggle: (id: string | null) => void;
 }
+
+interface TreeViewState { collapsed: Set<string>; closedTips: Set<string> }
+const treeViews = new WeakMap<El, Map<string, TreeViewState>>();
 
 const expandedRunSteps = new WeakMap<El, Set<string>>();
 const stripTimers = new WeakMap<El, () => void>();
@@ -92,6 +95,7 @@ export function renderSubTaskStrip(host: El, ctx: SubTaskStripContext): number {
     questionTicks.set(host, []);
     const active = host.ownerDocument.activeElement;
     const focusId = active && host.contains(active) ? (active as HTMLElement).dataset?.substripId : undefined;
+    const focusControl = active && host.contains(active) ? active.getAttribute('data-substrip-control') : null;
     const focusRunId = active && host.contains(active) ? (active as HTMLElement).dataset?.substripRunId : undefined;
     const focusStop = active && host.contains(active) && (active as HTMLElement).classList.contains('pkm-substrip__stop');
     host.empty();
@@ -106,18 +110,34 @@ export function renderSubTaskStrip(host: El, ctx: SubTaskStripContext): number {
             tabKey: ctx.tabKey, ...owner,
             getThreadRunLimit: id => registry.getThreadMaxRuns?.(id) ?? 0,
         }) : [];
+    const viewKey = JSON.stringify([ctx.tabKey, ctx.agentName, ctx.sessionPath, ctx.sessionEpoch]);
+    const views = treeViews.get(host) ?? new Map<string, TreeViewState>();
+    treeViews.set(host, views);
+    const view = views.get(viewKey) ?? { collapsed: new Set<string>(), closedTips: new Set<string>() };
+    views.set(viewKey, view);
+    const tree = buildStripTreeModel(rows, view.collapsed);
+    host.classList.toggle('pkm-substrip--tree', tree.hierarchical);
     host.classList.toggle('pkm-substrip--empty', rows.length === 0);
     if (!rows.length) return 0;
-    if (rows.length >= 5) {
+    if (tree.hierarchical) {
+        const summary = host.createDiv({ cls: 'pkm-substrip__summary' });
+        summary.createSpan({ text: t(tree.summary.key, tree.summary.params) });
+        summary.createSpan({ text: ` · ${t(countKeys.total[pluralCategory(tree.counts.total)], { count: tree.counts.total })}` });
+    } else if (rows.length >= 5) {
         const counts = summarizeStripRows(rows);
         const summary = host.createDiv({ cls: 'pkm-substrip__summary' });
         summary.createEl('strong', { text: `${t(countKeys.running[pluralCategory(counts.running)], { count: counts.running })}, ${t(countKeys.queued[pluralCategory(counts.queued)], { count: counts.queued })}` });
         summary.createSpan({ text: t(countKeys.total[pluralCategory(counts.total)], { count: counts.total }) });
     }
-    const expanded = rows.find(row => row.id === ctx.expandedId) || null;
+    const expandedNode = tree.visible.find(node => node.row.id === ctx.expandedId);
+    const expanded = expandedNode?.row ?? null;
     const chips = host.createDiv({ cls: 'pkm-substrip__chips' });
-    for (const row of rows) renderChip(chips, row, ctx, expanded?.id === row.id);
-    if (expanded) renderDetail(host, host.createDiv({ cls: 'pkm-substrip__detail' }), expanded, registry, ctx);
+    if (tree.hierarchical) {
+        for (const node of tree.roots) renderTreeNode(host, chips, node, ctx, view, registry);
+    } else {
+        for (const row of rows) renderChip(chips, row, ctx, expanded?.id === row.id);
+    }
+    if (expanded) renderDetail(host, host.createDiv({ cls: 'pkm-substrip__detail' }), expanded, registry, ctx, tree.hierarchical ? expandedNode : undefined);
     const ticks = questionTicks.get(host) ?? [];
     if (host.isConnected && (ticks.length || registry?.events)) {
         const timer = ticks.length ? window.setInterval(() => ticks.forEach(tick => tick()), 1000) : undefined;
@@ -128,10 +148,79 @@ export function renderSubTaskStrip(host: El, ctx: SubTaskStripContext): number {
         observer.observe(host.ownerDocument, { childList: true, subtree: true });
         stripTimers.set(host, cleanup);
     }
-    if (focusRunId) findRunButton(host, focusRunId)?.focus();
+    if (focusControl) findTreeControl(host, focusControl)?.focus();
+    else if (focusRunId) findRunButton(host, focusRunId)?.focus();
     else if (focusId) findChip(host, focusId)?.focus();
     else if (focusStop) host.querySelector<HTMLElement>('.pkm-substrip__stop')?.focus();
     return rows.length;
+}
+
+function findTreeControl(host: El, id: string): HTMLElement | undefined {
+    return Array.from(host.querySelectorAll<HTMLElement>('[data-substrip-control]'))
+        .find(button => button.getAttribute('data-substrip-control') === id);
+}
+
+function renderTreeNode(host: El, parent: El, node: StripTreeNode, ctx: SubTaskStripContext,
+    view: TreeViewState, registry: RegistryLike | null | undefined): void {
+    const { row } = node;
+    const group = parent.createDiv({ cls: 'pkm-substrip__tree', attr: { 'data-substrip-depth': String(node.depth) } });
+    const line = group.createDiv({ cls: 'pkm-substrip__row' });
+    const refresh = (control: string): void => { renderSubTaskStrip(host, ctx); findTreeControl(host, control)?.focus(); };
+    if (node.children.length) {
+        const control = `toggle:${row.id}`;
+        const toggle = line.createEl('button', { cls: 'pkm-substrip__toggle', text: node.collapsed ? '▸' : '▾',
+            attr: { type: 'button', 'aria-expanded': String(!node.collapsed), 'data-substrip-control': control,
+                'aria-label': t(node.collapsed ? 'chat.substrip.tree_expand' : 'chat.substrip.tree_collapse', { name: row.name }) } });
+        toggle.addEventListener('click', event => {
+            event.stopPropagation();
+            if (view.collapsed.has(row.id)) view.collapsed.delete(row.id); else view.collapsed.add(row.id);
+            refresh(control);
+        });
+    }
+    const label = t(node.label.key, node.label.params);
+    const isExpanded = ctx.expandedId === row.id;
+    const chip = line.createEl('button', { cls: `pkm-substrip__chip pkm-substrip__chip--tree${isExpanded ? ' pkm-substrip__chip--open' : ''}`,
+        attr: { type: 'button', 'data-substrip-id': row.id, 'aria-expanded': String(isExpanded), 'aria-label': `${row.name}: ${label}` } });
+    chip.createSpan({ cls: 'pkm-substrip__crystal', text: '◆', attr: { 'aria-hidden': 'true' } });
+    chip.createSpan({ cls: 'pkm-substrip__name', text: row.name });
+    chip.createSpan({ cls: 'pkm-substrip__state', text: label });
+    chip.createSpan({ cls: 'pkm-substrip__time', text: node.time });
+    chip.addEventListener('click', event => { event.stopPropagation(); ctx.onToggle(isExpanded ? null : row.id); });
+    chip.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && isExpanded) { event.preventDefault(); ctx.onToggle(null); findChip(host, row.id)?.focus(); }
+    });
+    if (node.hiddenCount) line.createSpan({ cls: 'pkm-substrip__count', text: t('chat.substrip.tree_hidden', { count: node.hiddenCount }) });
+    if (node.children.length && (node.canStop || node.label.key === 'chat.substrip.tree_stopped')) {
+        const stopping = row.state.kind === 'stopping';
+        const stop = line.createEl('button', { cls: 'pkm-substrip__stop pkm-substrip__tree-stop',
+            text: t(!node.canStop ? 'chat.substrip.tree_stopped' : stopping ? 'chat.substrip.stopping' : 'chat.substrip.stop'),
+            attr: { type: 'button', 'data-substrip-control': `stop:${row.id}`,
+                'aria-label': `${t('chat.substrip.stop_aria', { name: row.name })}, ${t('chat.substrip.tree_stop_hint', { count: node.stopDescendantCount })}` } });
+        stop.disabled = !node.canStop || stopping;
+        stop.addEventListener('click', event => {
+            event.stopPropagation();
+            // P3 traverses descendants of each concrete run, including a finished parent.
+            for (const id of node.stopRunIds) safeCall(() => registry?.requestStop?.(id, 'user'), false);
+            refresh(`stop:${row.id}`);
+        });
+        if (node.canStop) group.createDiv({ cls: 'pkm-substrip__stop-hint', text: t('chat.substrip.tree_stop_hint', { count: node.stopDescendantCount }) });
+    }
+    if (row.state.kind === 'queued') {
+        const control = `info:${row.id}`;
+        const open = !view.closedTips.has(row.id);
+        const info = line.createEl('button', { cls: 'pkm-substrip__info', text: '?',
+            attr: { type: 'button', 'data-substrip-control': control, 'aria-label': t('chat.substrip.tree_queue_why'), 'aria-expanded': String(open) } });
+        info.addEventListener('click', event => {
+            event.stopPropagation();
+            if (view.closedTips.has(row.id)) view.closedTips.delete(row.id); else view.closedTips.add(row.id);
+            refresh(control);
+        });
+        if (open) group.createDiv({ cls: 'pkm-substrip__tip', text: t('chat.substrip.tree_queue_hint') });
+    }
+    if (node.children.length && !node.collapsed) {
+        const branch = group.createDiv({ cls: 'pkm-substrip__branch' });
+        for (const child of node.children) renderTreeNode(host, branch, child, ctx, view, registry);
+    }
 }
 
 function findChip(host: El, id: string): HTMLElement | null {
@@ -174,16 +263,16 @@ function renderChip(chips: El, row: StripRow, ctx: SubTaskStripContext, isExpand
     });
 }
 
-function renderDetail(host: El, details: El, row: StripRow, registry: RegistryLike | null | undefined, ctx: SubTaskStripContext): void {
+function renderDetail(host: El, details: El, row: StripRow, registry: RegistryLike | null | undefined, ctx: SubTaskStripContext, treeNode?: StripTreeNode): void {
     if (row.state.kind === 'running' && row.questionState.kind === 'waiting') {
         const question = row.questionState;
         const head = details.createDiv({ cls: 'pkm-substrip__detail-head' });
-        head.createSpan({ cls: 'pkm-substrip__detail-status', text: t(question.clock.kind === 'paused' ? 'chat.substrip.question_paused_heading' : 'chat.substrip.question_heading') });
+        head.createSpan({ cls: 'pkm-substrip__detail-status', text: treeNode ? t(treeNode.label.key, treeNode.label.params) : t(question.clock.kind === 'paused' ? 'chat.substrip.question_paused_heading' : 'chat.substrip.question_heading') });
         const clock = head.createSpan({ cls: 'pkm-substrip__question-clock', text: t('chat.substrip.question_remaining', { time: remaining(question.clock) }) });
         updateClock(host, question, () => { clock.textContent = t('chat.substrip.question_remaining', { time: remaining(question.clock) }); });
         renderStopButton(head, registry, row);
         details.createDiv({ cls: 'pkm-substrip__question', text: question.question.text });
-        details.createDiv({ cls: 'pkm-substrip__question-note', text: t('chat.substrip.question_preview') });
+        details.createDiv({ cls: 'pkm-substrip__question-note', text: t(treeNode && question.question.recipient.kind === 'sub' ? 'chat.substrip.tree_question_preview' : 'chat.substrip.question_preview') });
         details.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); ctx.onToggle(null); findChip(host, row.id)?.focus(); } });
         return;
     }
