@@ -66,7 +66,7 @@ export function fitParentConversation(
     const snapshot: ParentConversationSnapshot = {
         messages, summary: summary.join('\n'),
         keptMessages: messages.filter(entry => entry.role !== 'tool').length,
-        summarizedMessages: summary.filter(line => /^\[\d+ (user|assistant)\]/.test(line)).length,
+        summarizedMessages: summary.filter(line => /^\[\d+ (user|assistant|powiadomienie pluginu)\]/.test(line)).length,
         omittedMessages: omitted, truncated,
     };
     return {

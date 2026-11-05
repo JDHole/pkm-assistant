@@ -2,7 +2,7 @@ import { maskSensitiveData, redactSecretValues } from '../../core/index.js';
 import type { LoopMessage } from '../agent-loop/index.js';
 import type { SubRunContext, SubTaskOrigin, SubTaskRegistry } from './SubTaskRegistry.js';
 
-export type ConversationEntry = Readonly<{ sequence: number; role: 'user' | 'assistant' | 'tool'; text: string }>;
+export type ConversationEntry = Readonly<{ sequence: number; role: 'user' | 'assistant' | 'tool' | 'powiadomienie pluginu'; text: string }>;
 export type ParentConversationSnapshot = Readonly<{
     messages: readonly ConversationEntry[];
     summary: string;
@@ -86,7 +86,6 @@ export class ParentConversationProjection {
     private names = new Map<string, string>();
     private sequence = 0;
     private omitted = 0;
-    private clipped = false;
     private sources = new WeakMap<LoopMessage, number | 'omitted'>();
 
     /** Explicit user deletion; compression deliberately keeps the projection. */
@@ -121,8 +120,6 @@ export class ParentConversationProjection {
             const name = this.names.get(message.tool_call_id ?? '') ?? 'niedopasowane';
             this.names.delete(message.tool_call_id ?? '');
             const raw = toolText(message.content);
-            const preview = excerpt(redactExport(raw, []), 240);
-            this.clipped ||= !raw || raw !== preview;
             text = raw;
             toolName = name;
         } else if (message.role === 'user' && requireUserText) {
@@ -130,7 +127,10 @@ export class ParentConversationProjection {
             text = message.parentConversationText;
         } else text = textOnly(message.content);
         if (!text.trim() && toolName === undefined) return;
-        this.recent.push({ sequence: ++this.sequence, role: message.role, text, ...(toolName !== undefined ? { toolName } : {}) });
+        const role = message.role === 'user' && message.origin !== 'human'
+            && (message._subTaskNotification === true || text.startsWith('[SYSTEM NOTIFICATION]'))
+            ? 'powiadomienie pluginu' : message.role;
+        this.recent.push({ sequence: ++this.sequence, role, text, ...(toolName !== undefined ? { toolName } : {}) });
         this.sources.set(message, this.sequence);
         while (this.recent.filter(entry => entry.role !== 'tool').length > 8) {
             const entry = this.recent.shift()!;
@@ -147,7 +147,7 @@ export class ParentConversationProjection {
         // Work on a copy: the current delegating answer is not yet in the loop's store.
         const copy = new ParentConversationProjection();
         copy.recent = [...this.recent]; copy.older = [...this.older];
-        copy.sequence = this.sequence; copy.omitted = this.omitted; copy.clipped = this.clipped;
+        copy.sequence = this.sequence; copy.omitted = this.omitted;
         if (assistantText?.trim()) copy.append({ role: 'assistant', content: assistantText });
         const snapshot = Object.freeze({
             messages: Object.freeze(copy.recent.map(entry => Object.freeze(exportEntry(entry, secrets)))),
@@ -155,7 +155,7 @@ export class ParentConversationProjection {
             keptMessages: copy.recent.filter(entry => entry.role !== 'tool').length,
             summarizedMessages: copy.older.filter(entry => entry.role !== 'tool').length,
             omittedMessages: copy.omitted,
-            truncated: copy.clipped || copy.omitted > 0 || copy.older.length > 0,
+            truncated: copy.omitted > 0 || copy.older.length > 0,
         });
         snapshotSources.set(snapshot, known => copy.snapshot(undefined, known));
         return snapshot;

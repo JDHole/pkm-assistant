@@ -1495,3 +1495,7 @@ input.pkm-onboarding-key-input {
 @media (max-width: 500px) {
   .pkm-substrip--tree .pkm-substrip__chip--tree { gap: 5px; }
 }
+.approval-content-preview {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}

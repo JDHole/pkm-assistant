@@ -1,6 +1,6 @@
 import test from 'ava';
 import { fitParentConversation } from './ParentConversationBudget.js';
-import { freezeParentConversation } from './ParentConversation.js';
+import { freezeParentConversation, ParentConversationProjection } from './ParentConversation.js';
 
 const context = freezeParentConversation('sub', { agentName: 'A' }, 'run-1', 'openai', {
     messages: [{ sequence: 3, role: 'user', text: 'alpha' }, { sequence: 4, role: 'assistant', text: 'beta' }],
@@ -8,6 +8,20 @@ const context = freezeParentConversation('sub', { agentName: 'A' }, 'run-1', 'op
 });
 const base = [{ role: 'system' as const, content: 'frame' }, { role: 'user' as const, content: 'task' }];
 const window = { tokens: 550, estimated: false, source: 'override' as const };
+
+test('podgląd narzędzia nie oznacza skrócenia; brak miejsca na wiadomość oznacza skrócenie', t => {
+    const projection = new ParentConversationProjection();
+    projection.append({ role: 'user', content: 'Pytanie' });
+    projection.append({ role: 'tool', content: 'Pierwsze zdanie. Drugie zdanie.' });
+    const source = freezeParentConversation('lead', { agentName: 'A' }, 1, 'openai', projection.snapshot());
+    const fits = fitParentConversation(source, base, [], { tokens: 32768, estimated: true, source: 'fallback' });
+    t.deepEqual(fits.snapshot, { messages: [
+        { sequence: 1, role: 'user', text: 'Pytanie' },
+        { sequence: 2, role: 'tool', text: '[narzędzie: niedopasowane; wynik: Pierwsze zdanie.]' },
+    ], summary: '', keptMessages: 1, summarizedMessages: 0, omittedMessages: 0, truncated: false });
+    const noRoom = fitParentConversation(source, base, [], { tokens: 256, estimated: true, source: 'fallback' });
+    t.deepEqual(noRoom.snapshot, { messages: [], summary: '', keptMessages: 0, summarizedMessages: 0, omittedMessages: 2, truncated: true });
+});
 
 test('P2 fitting: tool definitions and response reserve consume space alongside the complete base prompt', t => {
     const noTools = fitParentConversation(context, base, [], window);

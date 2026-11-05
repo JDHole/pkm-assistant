@@ -122,7 +122,7 @@ test('P1: tekstowe bloki wyników MCP przechodzą ten sam filtr JSON i binariów
     ]);
 });
 
-test('P1: wyniki search/list/web pozostają tekstowe; nieznany payload oznacza skrócenie', t => {
+test('P1: wyniki search/list/web pozostają tekstowe; nieznany payload nie oznacza skrócenia rozmowy', t => {
     const p = new ParentConversationProjection();
     p.append({ role: 'assistant', content: 'Szukam', tool_calls: [
         { id: 's', function: { name: 'search' } }, { id: 'l', function: { name: 'list' } }, { id: 'w', function: { name: 'web_search' } },
@@ -137,7 +137,7 @@ test('P1: wyniki search/list/web pozostają tekstowe; nieznany payload oznacza s
         { sequence: 3, role: 'tool', text: '[narzędzie: list; wynik: Plan.md Notes/Plan.md]' },
         { sequence: 4, role: 'tool', text: '[narzędzie: web_search; wynik: Źródło https://example.org Ważny fakt]' },
         { sequence: 5, role: 'tool', text: '[narzędzie: niedopasowane; wynik: [pominięta treść nietekstowa]]' },
-    ], summary: '', keptMessages: 1, summarizedMessages: 0, omittedMessages: 0, truncated: true });
+    ], summary: '', keptMessages: 1, summarizedMessages: 0, omittedMessages: 0, truncated: false });
 });
 
 test('P1: ucięty JSON nie staje się surowym tekstem z argumentami; tagi myślenia są pomijane', t => {
@@ -149,5 +149,17 @@ test('P1: ucięty JSON nie staje się surowym tekstem z argumentami; tagi myśle
         { sequence: 1, role: 'tool', text: '[narzędzie: niedopasowane; wynik: [pominięta treść nietekstowa]]' },
         { sequence: 2, role: 'tool', text: '[narzędzie: niedopasowane; wynik: Wynik [pominięte rozumowanie] [pominięte dane]]' },
         { sequence: 3, role: 'tool', text: '[narzędzie: niedopasowane; wynik: Wynik [pominięte rozumowanie]]' },
-    ], summary: '', keptMessages: 0, summarizedMessages: 0, omittedMessages: 0, truncated: true });
+    ], summary: '', keptMessages: 0, summarizedMessages: 0, omittedMessages: 0, truncated: false });
+});
+
+test('powiadomienia subów zachowują treść i własną etykietę, cytat człowieka pozostaje userem', t => {
+    const p = new ParentConversationProjection();
+    p.append({ role: 'user', content: '[SYSTEM NOTIFICATION] Sub-agent Ada finished task 1.\n\nWynik: las.' });
+    p.append({ role: 'user', content: '[SYSTEM NOTIFICATION] Sub-agent Ada asks about task 2: Kiedy?' });
+    p.append({ role: 'user', content: '[SYSTEM NOTIFICATION] Co to znaczy?', origin: 'human' });
+    t.deepEqual(p.snapshot(), { messages: [
+        { sequence: 1, role: 'powiadomienie pluginu', text: '[SYSTEM NOTIFICATION] Sub-agent Ada finished task 1.\n\nWynik: las.' },
+        { sequence: 2, role: 'powiadomienie pluginu', text: '[SYSTEM NOTIFICATION] Sub-agent Ada asks about task 2: Kiedy?' },
+        { sequence: 3, role: 'user', text: '[SYSTEM NOTIFICATION] Co to znaczy?' },
+    ], summary: '', keptMessages: 3, summarizedMessages: 0, omittedMessages: 0, truncated: false });
 });

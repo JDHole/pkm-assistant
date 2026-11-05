@@ -714,8 +714,11 @@ nie zużywają tej ósemki. Starsze wpisy stają się ekstrakcyjnym skrótem: pi
 max 160 znaków, rola i numer; łącznie max 4096 znaków (najstarsze wpisy wypadają).
 Narzędzia są tekstowymi podglądami max 240 znaków, parowanymi po ID; brak pary jest jawny.
 Filtr zna tekstowe pola wyników read/search/list/web, pomija argumenty, reasoning, obrazy
-oraz binaria; nieznane struktury i ucięty/uszkodzony JSON oznacza jako pominięte i ustawia
-`truncated`. Znane tagi think/reasoning w tekstowych wynikach także są usuwane.
+oraz binaria; nieznane struktury i ucięty/uszkodzony JSON oznacza jako pominięte.
+Podgląd narzędzia nie ustawia `truncated`; flaga oznacza pominięcie lub skrócenie rozmowy
+przez projekcję albo dopasowanie do budżetu. Powiadomienia subów zachowują treść i etykietę
+`powiadomienie pluginu`, aby pytania nie udawały słów użytkownika. Znane tagi think/reasoning
+w tekstowych wynikach także są usuwane.
 Snapshot zawiera zamrożone wpisy, skrót, liczniki oraz `truncated`; nie zawiera protokołu tools.
 `keptMessages`/`summarizedMessages` liczą user/assistant; `omittedMessages` liczy nierozdzielalne
 wiadomości user i wyparte wpisy skrótu (także podglądy narzędzi).
