@@ -35,6 +35,27 @@ test('unset effort preserves the literal OpenAI body', t => {
     t.deepEqual(body(openaiProvider, 'gpt-4o'), { model: 'gpt-4o', messages: [{ role: 'user', content: 'x' }], stream: false, max_tokens: 16384 });
 });
 
+test('LM Studio preserves complete bodies with and without effort', t => {
+    t.deepEqual(body(lmStudioProvider, 'gpt'), { model: 'gpt', messages: [{ role: 'user', content: 'x' }], stream: false, max_tokens: 16384 });
+    t.deepEqual(body(lmStudioProvider, 'gpt', 'high'), { model: 'gpt', messages: [{ role: 'user', content: 'x' }], stream: false, max_tokens: 16384, reasoning_effort: 'high' });
+});
+
+test('Groq preserves complete bodies with and without effort', t => {
+    t.deepEqual(body(groqProvider, 'openai/gpt-oss-120b'), { model: 'openai/gpt-oss-120b', messages: [{ role: 'user', content: 'x' }], stream: false, max_tokens: 16384 });
+    t.deepEqual(body(groqProvider, 'openai/gpt-oss-120b', 'high'), { model: 'openai/gpt-oss-120b', messages: [{ role: 'user', content: 'x' }], stream: false, max_tokens: 16384, reasoning_effort: 'high' });
+    t.deepEqual(body(groqProvider, 'llama-3.3-70b-versatile', 'high'), { model: 'llama-3.3-70b-versatile', messages: [{ role: 'user', content: 'x' }], stream: false, max_tokens: 16384 });
+});
+
+test('DeepSeek preserves complete bodies with and without effort', t => {
+    t.deepEqual(body(deepseekProvider, 'deepseek-v4-pro'), { model: 'deepseek-v4-pro', messages: [{ role: 'user', content: 'x' }], stream: false, max_tokens: 16384 });
+    t.deepEqual(body(deepseekProvider, 'deepseek-v4-pro', 'high'), { model: 'deepseek-v4-pro', messages: [{ role: 'user', content: 'x' }], stream: false, max_tokens: 16384, reasoning_effort: 'high' });
+});
+
+test('xAI preserves complete bodies with and without effort', t => {
+    t.deepEqual(body(xaiProvider, 'grok-4.6'), { model: 'grok-4.6', messages: [{ role: 'user', content: 'x' }], stream: false, max_tokens: 16384 });
+    t.deepEqual(body(xaiProvider, 'grok-4.6', 'high'), { model: 'grok-4.6', messages: [{ role: 'user', content: 'x' }], stream: false, max_tokens: 16384, reasoning_effort: 'high' });
+});
+
 test('unset effort preserves complete provider bodies', t => {
     t.deepEqual(body(anthropicProvider, 'claude-sonnet-4'), { model: 'claude-sonnet-4', max_tokens: 16384, messages: [{ role: 'user', content: 'x' }] });
     t.deepEqual(body(geminiProvider, 'gemini-2.5-pro'), { contents: [{ role: 'user', parts: [{ text: 'x' }] }], generationConfig: { maxOutputTokens: 16384 } });
