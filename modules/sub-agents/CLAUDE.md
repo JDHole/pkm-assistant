@@ -9,7 +9,7 @@ Rejestr i model paska przyjmują opcjonalne `parentId` i `level` także na rezer
 
 P1: `SubTaskRegistry.getDelegationAncestors(context, agentName)` zwraca łańcuch biegów od rodzica do korzenia albo `undefined`. Wymaga żywego rodzica bez prośby Stop, pełnego właściciela (agent, ścieżka, epoka), zgodnych poziomów i kompletnego, acyklicznego łańcucha tej samej sesji. Delegacja prowadzącego bez `SubRunContext` nie używa tej walidacji. `DelegateTool` wyklucza konfiguracje rodzica i przodków po kanonicznej nazwie, również po fuzzy/aliasie oraz ponownie po oczekiwaniu w kolejce. Rezerwacja zna relację przed startem; kontynuacja bierze relację i poziom z nowego wywołania, nie ze starego wątku. `create` aktualizuje relację wątku do najnowszego biegu. Retencja i `pruneSession` zachowują cały łańcuch przodków żywych biegów i rezerwacji queued, nawet ponad `maxDone`.
 
-Testy P1: `modules/tools/DelegateTool.tree.test.ts` (rzeczywista ścieżka runner -> MCP/fallback -> delegate -> registry, sterowane stream/done bez pollingu) i `SubTaskRegistry.tree.test.ts` (retencja biegu i kolejki). Domyślna głębokość nadal 1; uruchomienie odbiornika skrzynki w pętli, historia po restarcie i renderer drzewa należą do dalszych prac. Stop poddrzewa dostarcza P3, skrzynkę rodzica P4.
+Testy P1: `modules/tools/DelegateTool.tree.test.ts` (rzeczywista ścieżka runner -> MCP/fallback -> delegate -> registry, sterowane stream/done bez pollingu) i `SubTaskRegistry.tree.test.ts` (retencja biegu i kolejki). Domyślna głębokość nadal 1; historia po restarcie należy do P6, renderer drzewa jest poza planem. Stop poddrzewa dostarcza P3, skrzynkę rodzica P4, odbiornik pętli i dzierżawy P5.
 
 > Fizyczne źródła modułu mają rozszerzenie `.ts`. Zapisy `.js` poniżej to specyfikatory
 > importów, które celowo zostają `.js`.
@@ -32,6 +32,7 @@ modules/sub-agents/
 ├── SubAgentRunner.js           # wykonanie sub-agent z tool-calling loop
 ├── SubTaskScheduler.ts         # FIFO rozmowy, dzierżawy pracy i anulowalna admisja; pure
 ├── SubTaskRegistry.js          # SubTask jako byt (id/status/kroki/wynik/budżet) + szyna zdarzeń + side-channel abortów; pure, obsidian-free
+├── SubRunCoordinator.ts        # odbiór skrzynki w jednej pętli modelu, bariera końca i oddawanie dzierżawy
 ├── SubTaskInbox.ts             # FIFO pytań i wyników dzieci do konkretnego biegu rodzica; bez timerów i UI
 ├── SubTaskNotifier.js          # skrzynka wyników subów z tła: kolejka + `setDeliverer`/`drain`; pure, obsidian-free
 ├── subTaskPanelModel.js        # CO pasek biegów ma narysować (per zakładka czatu): filtr, kolejność, liczniki, skróty; pure (zero obsidian/DOM/i18n)
@@ -69,7 +70,7 @@ Zmiana zegara oczekującego pytania emituje `question:clock` po zapisaniu pauzy 
 
 `SubTaskNotifier` udostępnia dodatkowo `setNoticeDeliverer`, `pendingNotices` i `claimNotices` dla unii `SubTaskNotice` (pytanie albo wynik). Zamknięcie pytania usuwa także zajęty wpis, więc późne `ack` lub `release` nie przywróci go. Starsze metody pozostają adapterami samych wyników. Typy protokołu i zegara są eksportowane przez barrel.
 
-Runner dodaje lokalne `ask_parent` subowi pierwszego piętra (głębokość 1, a 0 dla starszych wywołań), również przy pustej konfiguracji narzędzi. Głębszy sub nie dostaje definicji ani instrukcji w fabrycznej ramie, a jego wywołanie jest odrzucane bez otwarcia pytania. Runner odmawia `ask_user`. Odpowiedź trafia do tego samego transkryptu. Brak odpowiedzi lub anulowanie przerywa pętlę bez syntezy; partial, wynik i handoff zachowują treść pytania i rozstrzygnięcie. Hooki `onActivity` i `onQuestion` informują o otwarciu i zamknięciu. `cancelParentQuestion` zamyka oczekiwanie przy zewnętrznym abort przed publikacją partial. `DelegateTool` pauzuje budżet biegu podczas oczekiwania. Pierwsze pytanie biegu blokującego wraca bezpośrednio w pokwitowaniu i promuje bieg do tła; notifier pomija je, a kolejne pytania i wynik doręcza normalnie. Terminalne `question` zachowuje treść i rozstrzygnięcie `no-answer` lub `cancelled` w wyniku runnera, rejestru i zwrotce delegacji.
+Runner dodaje lokalne `ask_parent` subowi pierwszego piętra (głębokość 1, a 0 dla starszych wywołań) oraz potomkowi z runtime `parentId`, również przy pustej konfiguracji narzędzi. Głębsze starsze wywołanie bez rodzica nadal nie dostaje definicji ani instrukcji i nie otwiera pytania. Rejestr sprawdza żywego rodzica i właściciela. Runner odmawia `ask_user`. Odpowiedź trafia do tego samego transkryptu. Brak odpowiedzi lub anulowanie przerywa pętlę bez syntezy; partial, wynik i handoff zachowują treść pytania i rozstrzygnięcie. `onQuestion` informuje o otwarciu i zamknięciu; `onActivity` opisuje pracę, rzeczywiste oczekiwanie lub kończenie. Otwarte pytanie z równoległym pracującym narzędziem nie pauzuje budżetu. `cancelParentQuestion` zamyka oczekiwanie przy zewnętrznym abort przed publikacją partial. `DelegateTool` pauzuje budżet biegu podczas oczekiwania. Pierwsze pytanie biegu blokującego wraca bezpośrednio w pokwitowaniu i promuje bieg do tła; notifier pomija je, a kolejne pytania i wynik doręcza normalnie. Terminalne `question` zachowuje treść i rozstrzygnięcie `no-answer` lub `cancelled` w wyniku runnera, rejestru i zwrotce delegacji.
 
 Opcjonalne `question.note` to dokładny prefiks dodany przez runnera do handoffu, po maskowaniu i przycięciu, bez separatora. Pole nie występuje, gdy nie dodano notki; typ `TerminalQuestion` eksportuje barrel. Snapshot przechowuje pytanie strukturalnie, bez dopisywania zdania o nim do `partial.text`, które może być użyte jako dorobek przy pustym handoffie.
 
@@ -359,7 +360,7 @@ Odlew per agent = `<agent-slug>-researcher` (standardowe `instantiate`). Przepis
     (`loop.end … fallback=1`, patrz `modules/agent-loop/CLAUDE.md`).
 - ⚠️ **`postMessage` to DORĘCZENIE PRZY NAJBLIŻSZEJ ITERACJI, nie przerwanie.**
   `registry.postMessage(id, tekst)` wrzuca polecenie do kolejki biegu; runner zdejmuje je hakiem
-  `beforeContinue` (JEDYNY hook, jaki suby podpinają do pętli) i dopisuje do transkryptu jako
+  `beforeContinue` (wiadomości sterujące; koordynator używa też hooków iteracji i zakończenia) i dopisuje do transkryptu jako
   wiadomość usera z ramką `subagent.steer_prefix`.
   - **Sub w środku długiego strumienia przeczyta ją dopiero po nim** - hak leci między
     wywołaniami modelu, a nie w trakcie. **Sub, który wszedł już w ostatnią iterację (backstop),
@@ -553,7 +554,7 @@ Skrzynka `postMessage` dostarcza wiadomość w ramce od agenta zlecającego prze
 
 Opcjonalny czwarty argument `AdmissionGroup = Readonly<{limit}>` zachowuje szerokość pojedynczej listy dla lokalnego dostawcy. Grupa jest tożsamością obiektu danej paczki. Jej przydział jest atomowy z dzierżawą rozmowy: czekający nie trzyma dodatkowego slotu puli. FIFO obejmuje także kolejne wywołania tej samej rozmowy. Sygnał anuluje tylko oczekiwanie; po przydziale abort należy do runnera, a slot zwalnia dopiero `release`. `dispose` zamyka admisję i odrzuca oczekujących, bez uruchamiania następnych. Typy `Lease`, `AdmissionGroup` i `SubRunActivity` są w barrelu.
 
-Testy: `SubTaskScheduler.test.ts` i `modules/tools/DelegateTool.scheduler.test.ts` - literalne wyniki, sterowane stream/done i `QuestionTestClock`, bez pollingu. Automatyczne oddawanie slotu przy pytaniu lub oczekiwaniu na dzieci należy do P5; P2 przygotowuje API, nie zmienia pętli rodzica.
+Testy: `SubTaskScheduler.test.ts` i `modules/tools/DelegateTool.scheduler.test.ts` - literalne wyniki, sterowane stream/done i `QuestionTestClock`, bez pollingu. Automatyczne oddawanie slotu przy pytaniu lub oczekiwaniu na dzieci dostarcza koordynator P5 opisany niżej.
 
 ### Rezerwacja z kolejki
 
@@ -638,4 +639,17 @@ Publiczne `takeChildNotices(parentId): SubTaskNotice[]` opróżnia FIFO; `waitCh
 
 Qg i eskalowane Qp zachowują osobne ID oraz osobne 300000 ms. Eskalacja nie odnawia Qg. Kanały człowieka pauzują oba pytania wyłącznie po pełnym właścicielu; dopiero ostatni zwolniony kanał wznawia zachowany czas. Testy `SubTaskInbox.test.ts` i `modules/tools/SubAgentTool.recipients.test.ts` sprawdzają literalne wyniki, granice 299999/300000, Qg -> Qp -> odpowiedź Qp -> odpowiedź Qg, dwa kanały człowieka, izolację rodziców, wyścigi, retencję i sprzątanie. Używają `QuestionTestClock` i zdarzeń, bez rzeczywistych opóźnień.
 
-P4 przygotowuje transport. Runner nadal udostępnia `ask_parent` tylko na dotychczasowych poziomach; koordynator odbioru, delegacja wnuków w tle i oddawanie dzierżaw należą do P5. Default głębokości i trwała historia pozostają zakresem P6; renderer drzewa jest poza tym planem.
+P4 dostarcza transport, a P5 podłącza go do runnera, udostępnia pytania wnukom i zwalnia dzierżawy podczas oczekiwania. Default głębokości i trwała historia pozostają zakresem P6; renderer drzewa jest poza tym planem.
+
+
+### Koordynator biegu (P5)
+
+`SubRunCoordinator.ts` jest prywatny. Starszy rejestr DI bez API skrzynki zachowuje poprzednią pętlę. Publiczny typ `RunAdmission` (`release(): void`, `resume(): Promise<void>`) przekazuje runnerowi dzierżawę uzyskaną przed inicjalizacją modelu. `_withAdmission` zachowuje właściciela, ID i grupę przy ponownym wejściu FIFO. Zwolnienie dotyczy także grupy lokalnej platformy; sama bramka dostawcy pozostaje per stream.
+
+`onIterationStart` odzyskuje slot, odbiera pytania/wyniki bezpośrednich dzieci i dopisuje zamaskowane rekordy `Child notices:` do istniejącego transkryptu. `beforeFinish` chroni wszystkie naturalne wyjścia pętli: odbiera zaległy wynik albo zwalnia slot i czeka zdarzeniowo na dziecko. Po odzyskaniu slotu ponownie sprawdza ważność pytania. Zwrócone `continue` zużywa normalny budżet iteracji; nie powstaje druga pętla ani równoległy stream rodzica. Przedwczesna odpowiedź nie zostaje końcowym wynikiem. Backstop, błąd i Stop zatrzymują pozostałych potomków; późny callback nie wznawia rodzica.
+
+Licznik całego batcha powstaje przed pierwszym wykonawcą. `ask_parent` oznacza oczekiwanie jednego narzędzia; dzierżawę i budżet oddajemy dopiero, gdy wszystkie pozostałe narzędzia się rozstrzygną. Odpowiedź wymaga odzyskania slotu przed dalszą pracą. `RunActivity` ma dodatkowe `waiting-children` i `queued`; `DelegateTool` pauzuje wtedy pozostały budżet, bez resetowania go. `onQuestion` służy do obserwacji samego pytania nawet podczas pracującego batcha.
+
+Sub uprawniony do `delegate` dostaje kontrolne `sub_agent` także bez niego w YAML. Automatyczna definicja i wykonawca dopuszczają tylko `message/list/stop/close`; P4 ogranicza je do własnych dzieci. Ta zdolność nie dodaje `task`, nie jest zapisywana jako pełne uprawnienie w konfiguracji wątku ani przekazywana jako takie wnukowi. Jawne `tools: []` nadal nie przyznaje delegacji. Potomek dostaje własne zadanie i konfigurację, bez transkryptu rodzica. Fabryczna rama PL/EN wyjaśnia pokwitowanie, odpowiedź na oryginalne `question_id` i eskalację osobnym pytaniem.
+
+Testy: `SubRunCoordinator.test.ts`, `modules/tools/DelegateTool.coordinator.test.ts`, `modules/agent-loop/AgentLoop.finish.test.ts`. Sterowane stream/done/error, zdarzenia, deferred i `QuestionTestClock`, jawny limit głębokości 2. Pokrywają pięciu rodziców i pięciu pytających wnuków, MCP/fallback, dwa pytania z eskalacją, pauzę człowieka, oba porządki batcha read/delegate/ask_parent, resztę budżetu 599/600 ms, Stop podczas reacquire, backstop/błąd/późny wynik, wygasłe pytanie w kolejce i kontrolę obcego dziecka. Default 1, trwała historia i renderer pozostają bez zmian.

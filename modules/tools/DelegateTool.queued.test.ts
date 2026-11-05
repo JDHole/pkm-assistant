@@ -1,15 +1,18 @@
 import test from 'ava';
 import { createDelegateTool, createSubAgentTool, stopAllDelegations, __test__ } from './DelegateTool.js';
+import type { RunActivity } from '../sub-agents/index.js';
 import type { DelegatePlugin } from './DelegateTool.js';
-import { SubTaskRegistry, SubTaskNotifier } from '../sub-agents/index.js';
+import { SubAgentRunner, SubTaskRegistry, SubTaskNotifier } from '../sub-agents/index.js';
 import { __test__ as modelsTest } from '../models/index.js';
 import { QuestionTestClock } from '../sub-agents/test-support/questionTestClock.js';
 
 const PROVIDER_IDS = ['openai', 'ollama', 'lm_studio', 'anthropic', 'gemini', 'groq', 'deepseek', 'open_router', 'xai'];
 
-function makeFixture(clock = new QuestionTestClock()) {
+function makeFixture(clock = new QuestionTestClock(), onActivity?: (value: RunActivity) => void) {
     __test__._resetBackground();
     const registry = new SubTaskRegistry({ questionClock: clock });
+    const readers: Array<() => void> = [];
+    let nextIndex = 0;
     const requests: Array<{ payload: unknown; complete(text: string): void; question(): void }> = [];
     class GatedModel {
         modelId = 'worker-model';
@@ -20,6 +23,7 @@ function makeFixture(clock = new QuestionTestClock()) {
                 question: () => handlers.done({ choices: [{ message: { role: 'assistant', content: '', tool_calls: [
                     { id: 'call-q', type: 'function', function: { name: 'ask_parent', arguments: '{"text":"Jaki zakres?"}' } },
                 ] } }] }) });
+            readers.shift()?.();
         }
         stopStream() {}
     }
@@ -49,8 +53,16 @@ function makeFixture(clock = new QuestionTestClock()) {
             } },
         },
     } as unknown as DelegatePlugin;
-    const tool = createDelegateTool({});
-    return { registry, requests, plugin, tool, clock };
+    const tool = createDelegateTool({}, onActivity ? { makeRunner: runtime => {
+        const runner = new SubAgentRunner({ app: {} as never, plugin: runtime as never, toolRegistry: runtime.toolRegistry as never });
+        return { runTask: (prompt, agent, config, model, options) => runner.runTask(prompt, agent as never, config as never, model as never,
+            { ...options, scopeFolders: undefined, onActivity: value => { options.onActivity?.(value); onActivity(value); } }) };
+    } } : {});
+    const nextRequest = async () => {
+        if (nextIndex >= requests.length) await new Promise<void>(resolve => readers.push(resolve));
+        return requests[nextIndex++];
+    };
+    return { registry, requests, plugin, tool, clock, nextRequest };
 }
 
 async function waitUntil(predicate: () => boolean): Promise<void> {
@@ -163,52 +175,55 @@ test.serial('wynik runnera po wygaśnięciu pytania zachowuje pytanie w rejestrz
 });
 
 test.serial('pauza działa w pojedynczym tle, liście i blokującej kontynuacji', async t => {
+    const clock = new QuestionTestClock();
     const originalNow = performance.now;
     const originalSetTimeout = globalThis.setTimeout;
     const originalClearTimeout = globalThis.clearTimeout;
-    let now = 0;
     const durations: number[] = [];
-    const timers = new Map<ReturnType<typeof setTimeout>, number>();
-    Object.defineProperty(performance, 'now', { configurable: true, value: () => now });
-    globalThis.setTimeout = ((fn: (...args: never[]) => void, ms?: number, ...args: never[]) => {
-        if (ms === 1000 || ms === 600) {
-            const handle = originalSetTimeout(fn, 60000, ...args);
-            timers.set(handle, ms);
-            durations.push(ms);
-            return handle;
-        }
-        return originalSetTimeout(fn, ms, ...args);
+    Object.defineProperty(performance, 'now', { configurable: true, value: () => clock.now() });
+    globalThis.setTimeout = ((fn: () => void, ms = 0) => {
+        durations.push(ms);
+        return clock.setTimeout(fn, ms);
     }) as unknown as typeof setTimeout;
-    globalThis.clearTimeout = ((handle: ReturnType<typeof setTimeout>) => {
-        timers.delete(handle);
-        originalClearTimeout(handle);
-    }) as typeof clearTimeout;
+    globalThis.clearTimeout = ((handle: unknown) => clock.clearTimeout(handle)) as typeof clearTimeout;
     t.teardown(() => {
-        for (const handle of timers.keys()) originalClearTimeout(handle);
         globalThis.setTimeout = originalSetTimeout;
         globalThis.clearTimeout = originalClearTimeout;
         Object.defineProperty(performance, 'now', { configurable: true, value: originalNow });
     });
     const remaining: number[] = [];
     for (const mode of ['single', 'list', 'blocking'] as const) {
-        const { registry, requests, plugin, tool } = makeFixture();
+        let paused = false;
+        let ready!: () => void;
+        const waiting = new Promise<void>(resolve => { ready = resolve; });
+        const { registry, plugin, tool, nextRequest } = makeFixture(clock, activity => {
+            if (activity.kind === 'waiting') { paused = true; ready(); }
+            // Capture the task budget after FIFO admission, before the next per-call timer.
+            else if (activity.kind === 'working' && paused) { remaining.push(durations.at(-1)!); paused = false; }
+        });
         t.teardown(() => registry.dispose());
         const owner = { agentName: 'Jaskier', sessionPath: 's.md', sessionEpoch: 'e1' };
-        const settings = plugin.env!.settings!.pkmAssistant!;
-        settings.limits = { max_parallel_delegations: 5, delegation_timeout_ms: 1000 };
-        const subTool = createSubAgentTool({});
+        plugin.env!.settings!.pkmAssistant!.limits = { max_parallel_delegations: 5, delegation_timeout_ms: 1000 };
+        const subTool = createSubAgentTool({}, { makeRunner: runtime => {
+            const runner = new SubAgentRunner({ app: {} as never, plugin: runtime as never, toolRegistry: runtime.toolRegistry as never });
+            return { runTask: (prompt, agent, config, model, options) => runner.runTask(prompt, agent as never, config as never, model as never,
+                { ...options, scopeFolders: undefined, onActivity: activity => {
+                    options.onActivity?.(activity);
+                    if (activity.kind === 'waiting') { paused = true; ready(); }
+                    else if (activity.kind === 'working' && paused) { remaining.push(durations.at(-1)!); paused = false; }
+                } }) };
+        } });
         let taskId: string;
         let subId: string;
         if (mode === 'blocking') {
             const initial = await tool.execute({ task: 'pierwsze', _invocationOrigin: owner }, {}, plugin) as { sub_id: string };
-            await waitUntil(() => requests.length === 1);
-            requests[0].complete('gotowe');
-            await waitUntil(() => registry.getThread(initial.sub_id)?.phase === 'idle');
+            (await nextRequest()).complete('gotowe');
+            await __test__._settleBackground();
             const pending = subTool.execute({ action: 'task', sub_id: initial.sub_id, task: 'dalej', background: false,
                 _invocationOrigin: owner, _invocationTurnKind: 'user' }, {}, plugin);
-            await waitUntil(() => requests.length === 2);
-            now += 400;
-            requests[1].question();
+            const request = await nextRequest();
+            clock.advance(400);
+            request.question();
             const question = await pending as { task_id: string; sub_id: string };
             taskId = question.task_id;
             subId = question.sub_id;
@@ -220,24 +235,20 @@ test.serial('pauza działa w pojedynczym tle, liście i blokującej kontynuacji'
             const item = mode === 'single' ? receipt : receipt.tasks[0];
             taskId = item.task_id;
             subId = item.sub_id;
-            await waitUntil(() => requests.length === 1);
-            now += 400;
-            requests[0].question();
+            const request = await nextRequest();
+            clock.advance(400);
+            request.question();
         }
-        await waitUntil(() => registry.getQuestionState(taskId).kind === 'waiting');
-        now += 1100;
+        await waiting;
+        clock.advance(1100);
         const state = registry.getQuestionState(taskId);
         t.is(state.kind, 'waiting', mode);
         if (state.kind !== 'waiting') throw new Error(`question expired: ${mode}`);
         await subTool.execute({ action: 'message', sub_id: subId, question_id: state.question.id,
             text: 'A/', _invocationOrigin: owner }, {}, plugin);
-        remaining.push(durations[durations.length - 1]);
-        const expectedCalls = mode === 'blocking' ? 3 : 2;
-        await waitUntil(() => requests.length === expectedCalls);
-        requests[expectedCalls - 1].complete('wynik');
-        await waitUntil(() => registry.getTask(taskId)?.status === 'done');
+        (await nextRequest()).complete('wynik');
+        await __test__._settleBackground();
         t.is(registry.getTask(taskId)?.outcome?.end.kind, 'finished', mode);
-        await waitUntil(() => __test__._backgroundCount() === 0);
         registry.dispose();
     }
     t.deepEqual(remaining, [600, 600, 600]);

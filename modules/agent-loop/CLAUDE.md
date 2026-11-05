@@ -14,7 +14,7 @@ Stop reasons: natural, iteration-limit, tool-uncertain, synthesis-budget with bu
 
 ## Hook and transcript contracts
 
-Optional awaited hooks: onIterationStart, onToolCallsParsed, onToolResults, beforeContinue, onUsage, onBackstop. Parsed calls and ask_user placeholders precede tool execution. A hook array filters calls. Result hooks follow store accounting. Hooks stay awaited during settled accounting after Stop, so original store/hook errors retain already-observed tool work. Abort blocks further model generation, compression/nudges and tools.
+Optional awaited hooks: onIterationStart, onToolCallsParsed, onToolResults, beforeContinue, beforeFinish, onUsage, onBackstop. Parsed calls and ask_user placeholders precede tool execution. A hook array filters calls. Result hooks follow store accounting. Hooks stay awaited during settled accounting after Stop, so original store/hook errors retain already-observed tool work. Abort blocks further model generation, compression/nudges and tools.
 
 resolveTools runs every iteration. Sanitize transcripts before all model calls; reconstruct only calls with id/name so malformed orphan sequences do not reach APIs. minIterations uses assistant/user nudges. Backstop hardstop instructions are payload-only, never persisted in the user transcript. Synthesis requests contain no tools. reasoning_content remains in provider transcript metadata where required but never in partial snapshots.
 
@@ -56,3 +56,6 @@ Gates: focused/full npm test, typecheck, lint, lint:obsidian.
 U3 consumer compatibility: `abortReason` additionally accepts an existing `AgentLoopStopReason` object so chat watchdog silence preserves the actual work/synthesis stage. The first observed reason is copied and latched.
 
 `modelOptions` passes the optional sub-agent `effort` through to each model request, including synthesis, without adding it when absent.
+
+
+P5: optional `beforeFinish(i): Promise<'finish' | 'continue'>` guards every natural exit (plain text, filtered calls and orphan guard). Without this hook the previous path is unchanged. `continue` uses the existing loop and iteration budget; its caller inserts the event that warrants another request. Abort is checked after the awaited barrier. Limit/error/Stop do not enter this barrier; `onBackstop` remains the pre-synthesis hook. `AgentLoop.finish.test.ts` verifies held barriers, all natural exits, unchanged transcript accounting, iteration exhaustion and Stop before continuation.

@@ -12,7 +12,7 @@ import type { ReasoningEffort } from '../models/index.js';
  * 4. Return results
  */
 import { SubAgentRunner, DEFAULT_SUB_AGENT_TOOLS, PKM_SUB_NAME, allocateSubTaskId, canContinueAfterUserStop, isRuntimeSequence } from '../../modules/sub-agents/index.js';
-import type { AdmissionGroup, SubTaskRegistry, SubThread, Lease, RuntimeSequence, SubRunContext, SubTask, SubTaskOrigin, QuestionId, QuestionState, RunActivity, ParentQuestion } from '../../modules/sub-agents/index.js';
+import type { RunAdmission, AdmissionGroup, SubTaskRegistry, SubThread, Lease, RuntimeSequence, SubRunContext, SubTask, SubTaskOrigin, QuestionId, QuestionState, RunActivity, ParentQuestion } from '../../modules/sub-agents/index.js';
 import type { RunOutcome, SubRunResult } from '../../modules/sub-agents/index.js';
 import { createModelForRole } from '../../modules/models/index.js';
 import type { ModelRole, ResolverPluginLike } from '../../modules/models/index.js';
@@ -183,6 +183,7 @@ interface SubAgentRunnerLike {
             abortReason?: () => 'manual-stop' | 'task-timeout' | 'superseded';
             /** „Sub wszedł na slot bramki" - tym uzbraja się budzik zadania. */
             onGateAdmitted?: () => void;
+            admission?: RunAdmission;
             onActivity?: (activity: RunActivity) => void;
             onQuestion?: (question: ParentQuestion) => void;
             /** Adres zwrotny zlecenia (1:1 do rejestru biegów). */
@@ -730,17 +731,8 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 }
                 const childDepth = currentDepth + 1;
 
-                // ── Tło NIE JEST wyborem modelu ──
-                // Delegacja z GŁÓWNEGO CZATU idzie w tło ZAWSZE (żeby user mógł gadać,
-                // kiedy sub pracuje). Furtka `background:false` wyleciała ze schematu, bo model
-                // ją wybierał z przyzwyczajenia i mroził userowi czat na cały bieg suba
-                // (z perspektywy usera nie do odróżnienia od zwykłego, długiego myślenia modelu).
-                // Jawnie podany argument jest ignorowany, z logiem.
-                // Ścieżka blokująca ZOSTAJE dla dwóch przypadków twardych:
-                //   1. brak rejestru biegów (fail-soft — nie ma skąd wziąć `task_id` ani czym
-                //      wrócić z wynikiem),
-                //   2. delegacja z WNĘTRZA suba (`currentDepth >= 1`) — sub nie ma notifiera,
-                //      czeka na wynik w swojej pętli.
+                // Runtime-addressed descendants return a reservation receipt; their runner
+                // consumes child notices. Legacy calls without context retain blocking mode.
                 if (!plugin?.subTaskRegistry && !_warnedNoRegistry) {
                     _warnedNoRegistry = true;
                     log.warn('DelegateTool', 'Brak plugin.subTaskRegistry — delegacja leci ścieżką BLOKUJĄCĄ (tło niedostępne)');
@@ -748,7 +740,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 if (args.background === false && plugin?.subTaskRegistry && currentDepth === 0) {
                     log.debug('DelegateTool', 'background:false zignorowane — delegacja z czatu zawsze w tle (runda 3)');
                 }
-                const background = typeof continuation?.background === 'boolean'
+                const background = subRunContext ? true : typeof continuation?.background === 'boolean'
                     ? continuation.background
                     : !!plugin?.subTaskRegistry && currentDepth === 0;
                 const attachReusableThread = (value: unknown, taskId: string | null): unknown => {
@@ -947,14 +939,14 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                         // Id biegu poznajemy dopiero w `onTaskCreated` - grace-okno domyka
                         // tę zmienną, żeby przy strzale budzika móc zapytać rejestr o stan.
                         let taskId: string | null = null;
-                        return _withAdmission(plugin, reservation, abortCtl, background, taskDef.task, release => _withTimeout(_executeSubAgent(
+                        return _withAdmission(plugin, reservation, abortCtl, background, taskDef.task, (release, admission) => _withTimeout(_executeSubAgent(
                             { task: taskDef.task, context: taskDef.context, aspect_explicit: taskDef.aspect_explicit },
                             resolvedDef,
                             activeAgent, agentManager, plugin, makeRunner, childDepth,
                             {
                                 abortCtl,
                                 onGateAdmitted: gateArm.signal,
-                                onActivity: gateArm.activity,
+                                onActivity: gateArm.activity, admission,
                                 modelTimeout: effectiveTaskTimeout,
                                 origin: reservation ? runOrigin : origin,
                                 subRunContext,
@@ -1012,7 +1004,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                         // otwiera się od razu i bez tego "tło" wracałoby, zanim ruszy cokolwiek realnego.
                         const acceptedGates = gates.filter((_, i) => precheck[i].ok);
                         const wave = Math.max(1, Math.min(taskConcurrency, acceptedGates.length));
-                        await Promise.all(acceptedGates.slice(0, wave).map((g) => g.opened));
+                        if (!subRunContext) await Promise.all(acceptedGates.slice(0, wave).map((g) => g.opened));
                         // Pozwól runnerom pierwszej fali dokończyć synchroniczną admisję
                         // modelu po nowej granicy await schedulera, jak przed P2.
                         await Promise.resolve();
@@ -1077,11 +1069,11 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     let announce!: (task: { id: string; name: string; threadId?: string; queued?: boolean } | null) => void;
                     const taskCreated = new Promise<{ id: string; name: string; threadId?: string; queued?: boolean } | null>((res) => { announce = res; });
                     let bgTaskId: string | null = null;
-                    const run = _withAdmission(plugin, reservation, abortCtl, true, args.task, release => _withTimeout(
+                    const run = _withAdmission(plugin, reservation, abortCtl, true, args.task, (release, admission) => _withTimeout(
                         _executeSubAgent(args, resolved, activeAgent, agentManager, plugin, makeRunner, childDepth,
                             {
                                 abortCtl, salvageCap: limits.subagent_salvage_max_chars, onGateAdmitted: gateArm.signal,
-                                onActivity: gateArm.activity,
+                                onActivity: gateArm.activity, admission,
                                 modelTimeout: effectiveSingleTimeout, origin, subRunContext, ...reservedOptions, autonomy: turnAutonomy,
                                 callerScopeFolders, callerToolNames, background: true,
                                 ...(continuation ? { threadId: continuation.threadId, turnKind: continuation.turnKind, turnStartedSeq: continuation.turnStartedSeq } : {}),
@@ -1107,6 +1099,8 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     // Kto pierwszy: powstanie bytu czy koniec biegu. Koniec przed bytem = błąd
                     // wczesny (brak modelu, nieznany aspect, wysypany rejestr) - wtedy oddajemy
                     // modelowi jego prawdziwy wynik zamiast zwrotki „bieg wystartował w tle".
+                    if (subRunContext && reservation && reservedRunId) announce({ id: reservedRunId,
+                        name: reservation.name, threadId: reservation.threadId, queued: reservation.phase === 'queued' });
                     const created = await Promise.race([taskCreated, run.then(() => null, () => null)]);
                     if (!created) return await run;
                     await Promise.resolve();
@@ -1129,11 +1123,11 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 let blockingTaskId: string | null = null;
                 const questions: ParentQuestion[] = [];
                 let wakeQuestion: (() => void) | null = null;
-                const blockingRun = _withAdmission(plugin, reservation, abortCtl, false, args.task, release => _withTimeout(
+                const blockingRun = _withAdmission(plugin, reservation, abortCtl, false, args.task, (release, admission) => _withTimeout(
                     _executeSubAgent(args, resolved, activeAgent, agentManager, plugin, makeRunner, childDepth,
                         {
                             abortCtl, salvageCap: limits.subagent_salvage_max_chars, onGateAdmitted: gateArm.signal,
-                            onActivity: gateArm.activity,
+                            onActivity: gateArm.activity, admission,
                             onQuestion: question => {
                                 if (plugin.subTaskRegistry?.isQuestionOpen?.(question.taskId, question.id)) {
                                     questions.push(question);
@@ -1469,6 +1463,7 @@ function abortSub(ctl: SubAbortControl, reason: 'manual-stop' | 'task-timeout' |
 }
 
 type SubRunControl = {
+    admission?: RunAdmission;
     salvageCap?: number;
     abortCtl?: SubAbortControl;
     /** Sygnał pierwszego wjazdu na slot bramki — przelot do `runTask`, bez interpretacji. */
@@ -1509,7 +1504,7 @@ function _readStringList(raw: unknown): string[] | null {
 async function _withAdmission(
     plugin: DelegatePlugin, reservation: SubThread | null, ctl: SubAbortControl,
     background: boolean, taskPreview: string | undefined,
-    run: (release: () => void) => Promise<Record<string, unknown>>, onQueued?: () => void, group?: AdmissionGroup,
+    run: (release: () => void, admission?: RunAdmission) => Promise<Record<string, unknown>>, onQueued?: () => void, group?: AdmissionGroup,
 ): Promise<Record<string, unknown>> {
     const registry = plugin.subTaskRegistry;
     if (!reservation || !registry?.acquire || !ctl.controller) return run(() => {});
@@ -1541,7 +1536,13 @@ async function _withAdmission(
         off?.();
         running = true;
         // The actual runner owns the lease, even if its timeout returns before it settles.
-        const result = await run(() => lease?.release());
+        const admissionControl: RunAdmission = {
+            release: () => { lease?.release(); lease = undefined; },
+            resume: async () => {
+                if (!lease) lease = await registry.acquire!(reservation.owner, runId, ctl.controller!.signal, group);
+            },
+        };
+        const result = await run(() => admissionControl.release(), admissionControl);
         if (registry.getThread?.(reservation.threadId)?.phase === 'closed' && reservation.queuedRunId === runId
             && !registry.getTask?.(runId)) return stopped();
         if (reservation.phase === 'queued') {
@@ -1743,6 +1744,7 @@ async function _executeSubAgent(
         ownedModel,
         {
             delegationDepth,
+            admission: runControl.admission,
             scopeFolders,
             // Trzeci składnik przecięcia narzędzi — whitelista wołającego.
             ...(runControl.callerToolNames ? { callerToolNames: runControl.callerToolNames } : {}),
@@ -2083,7 +2085,7 @@ function _withTimeout<T>(
         armTimer();
         arm?.attach(() => { remaining = effectiveTimeout; armTimer(); }, activity => {
             if (settled || expired) return;
-            if (activity.kind === 'waiting' && !waiting) {
+            if ((activity.kind === 'waiting' || activity.kind === 'waiting-children' || activity.kind === 'queued') && !waiting) {
                 remaining = Math.max(0, remaining - (performance.now() - since));
                 waiting = true;
                 if (timer !== null) _nodeSafeClearTimeout(timer);
@@ -2148,7 +2150,11 @@ export const __test__ = {
     DEFAULT_TASK_TIMEOUT_MS,
     // Księgowość obietnic tła; synchronizacja testów bez pollingu.
     _backgroundCount,
-    _settleBackground: () => Promise.allSettled([..._backgroundRuns.keys()]),
+    _settleBackground: async (includeDescendants = false) => {
+        // Optional tree drain; the default retains the existing snapshot barrier.
+        do { await Promise.allSettled([..._backgroundRuns.keys()]); }
+        while (includeDescendants && _backgroundRuns.size);
+    },
     _resetBackground: (): void => { _backgroundRuns.clear(); },
     // Ile biegów delegacji ma teraz właściciela (test pilnuje, że zbiór nie przecieka).
     _liveAbortCount: (): number => _liveAborts.size,

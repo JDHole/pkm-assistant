@@ -164,7 +164,7 @@ test('późne narzędzie równoległe nie wznawia modelu po wygaśnięciu', asyn
         cb.done(response({ role: 'assistant', content: '', tool_calls: [questionCall, { id: 'r', type: 'function', function: { name: 'read', arguments: '{}' } }] }));
     } };
     const run = runner.runTask('zadanie', { name: 'Jaskier' }, { name: 'Klara', tools: ['read'] } as never, model as never,
-        { origin: owner, onActivity: value => { if (value.kind === 'waiting') ready(); } });
+        { origin: owner, onQuestion: () => ready() });
     await waiting;
     clock.advance(300000);
     const result = await run;

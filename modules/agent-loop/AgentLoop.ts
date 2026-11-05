@@ -349,6 +349,8 @@ interface AgentLoopHooks {
     ) => ParsedToolCall[] | void | Promise<ParsedToolCall[] | void>;
     onToolResults?: (results: ToolResultEntry[], i: number) => unknown;
     beforeContinue?: (i: number) => unknown;
+    /** Optional natural-finish barrier; continuation uses the same loop and iteration budget. */
+    beforeFinish?: (i: number) => Promise<'finish' | 'continue'>;
     onUsage?: (usage: ProviderUsage, i: number) => unknown;
     onBackstop?: () => unknown;
 }
@@ -839,6 +841,11 @@ export async function runAgentLoop({
                 continue;
             }
             logger.debug?.('AgentLoop', `Iteracja ${i + 1}: brak tool calls, zwracam tekst (${content.length} zn.)`);
+            if (hooks.beforeFinish) {
+                const finish = await callHook(() => hooks.beforeFinish!(i));
+                if (abort()) return finalize(content || lastText, 'abort');
+                if (finish === 'continue') continue;
+            }
             return finalize(content, 'natural');
         }
 
@@ -862,6 +869,11 @@ export async function runAgentLoop({
         // Hook zdusił wszystkie wywołania → koniec tury czysto (bez malformed sekwencji w store).
         if (effective.length === 0) {
             logger.debug?.('AgentLoop', `Iteracja ${i + 1}: onToolCallsParsed odfiltrował wszystkie wywołania — koniec tury`);
+            if (hooks.beforeFinish) {
+                const finish = await callHook(() => hooks.beforeFinish!(i));
+                if (abort()) return finalize(content || lastText, 'abort');
+                if (finish === 'continue') continue;
+            }
             return finalize(content, 'natural');
         }
 
@@ -1028,6 +1040,11 @@ export async function runAgentLoop({
 
         if (orphaned) {
             logger.error?.('AgentLoop', `ORPHAN GUARD: 0 poprawnych tool_calls, a ${results.length} wyników — kończę turę czysto`);
+            if (hooks.beforeFinish) {
+                const finish = await callHook(() => hooks.beforeFinish!(i));
+                if (abort()) return finalize(content || lastText, 'abort');
+                if (finish === 'continue') continue;
+            }
             return finalize(content, 'natural');
         }
 

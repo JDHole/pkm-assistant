@@ -28,6 +28,8 @@ function fixture(t: ExecutionContext, fallback = false) {
     const registry = new SubTaskRegistry({ questionClock: clock });
     t.teardown(() => registry.dispose());
     const requests = new Mailbox<Request>();
+    const parents = new Mailbox<Request>();
+    const children = new Mailbox<Request>();
     let streamCount = 0;
     class Model {
         modelId = 'tree-model';
@@ -35,12 +37,15 @@ function fixture(t: ExecutionContext, fallback = false) {
         _streamGateLimit() { return 1; }
         stream(payload: unknown, handlers: { done(value: unknown): void }) {
             streamCount++;
-            requests.push({ payload,
+            const request: Request = { payload,
                 complete: text => handlers.done({ choices: [{ message: { role: 'assistant', content: text } }] }),
                 call: (name, args) => handlers.done({ choices: [{ message: { role: 'assistant', content: '', tool_calls: [
                     { id: 'call-tree', type: 'function', function: { name, arguments: JSON.stringify(args) } },
                 ] } }] }),
-            });
+            };
+            requests.push(request);
+            const system = (payload as { messages: Array<{ content: string }> }).messages[0].content;
+            (system.includes('mira-parent') ? parents : children).push(request);
         }
         stopStream() {}
     }
@@ -81,49 +86,56 @@ function fixture(t: ExecutionContext, fallback = false) {
         return runner.runTask('Zadanie rodzica', agent, configs.get('mira-parent')! as never, new Model() as never,
             { delegationDepth: 1, origin: owner, ...options });
     }
-    return { registry, clock, requests, client, runner, plugin, delegate, configs, start, streamCount: () => streamCount };
+    return { registry, clock, requests, parents, children, client, runner, plugin, delegate, configs, start, streamCount: () => streamCount };
 }
 
 for (const fallback of [false, true]) {
     test.serial(`runner -> ${fallback ? 'fallback' : 'MCP'} -> delegate zachowuje drzewo i queued mimo fałszywych znaczników`, async t => {
         const f = fixture(t, fallback);
         const pending = f.start();
-        const rootRequest = await f.requests.next();
+        const rootRequest = await f.parents.next();
         const root = f.registry.list()[0];
         t.deepEqual([root.name, root.parentId, root.level, root.origin], ['mira-parent', undefined, 1, owner]);
         rootRequest.call('delegate', { tasks: [{ task: 'pierwsze', aspect: 'child' }, { task: 'drugie', aspect: 'child' }],
             _invocationSubRunContext: { runId: 'forged', level: 0, origin: { agentName: 'Other' } },
             _invocationOrigin: { agentName: 'Other' }, _invocationDelegationDepth: 0, parentId: 'forged', level: 99 });
-        const first = await f.requests.next();
+        const first = await f.children.next();
         const rows = buildStripModel({ ...owner, tasks: f.registry.list(), threads: f.registry.listThreads(owner) });
         t.deepEqual(rows.map(row => [row.name, row.parentId === root.id ? 'root-run' : row.parentId, row.level, row.state.kind]),
             [['mira-parent', undefined, 1, 'running'], ['mira-child', 'root-run', 2, 'running'], ['mira-child', 'root-run', 2, 'queued']]);
         t.deepEqual(f.registry.listThreads(owner).map(thread => [thread.name, thread.origin]),
             [['mira-parent', owner], ['mira-child', owner], ['mira-child', owner]]);
+        (await f.parents.next()).complete('za wcześnie');
         first.complete('pierwszy wynik');
-        (await f.requests.next()).complete('drugi wynik');
-        (await f.requests.next()).complete('wynik rodzica');
+        const second = await f.children.next();
+        (await f.parents.next()).complete('nadal za wcześnie');
+        second.complete('drugi wynik');
+        (await f.parents.next()).complete('wynik rodzica');
         t.is((await pending).result, 'wynik rodzica');
         t.deepEqual(f.registry.list().map(task => [task.name, task.status, task.parentId === root.id ? 'root-run' : task.parentId, task.level]),
             [['mira-parent', 'done', undefined, 1], ['mira-child', 'done', 'root-run', 2], ['mira-child', 'done', 'root-run', 2]]);
-        t.deepEqual([f.clock.pending, delegateTest._liveAbortCount(), f.streamCount()], [0, 0, 4]);
+        t.deepEqual([f.clock.pending, delegateTest._liveAbortCount(), f.streamCount()], [0, 0, 6]);
     });
 }
 
 test.serial('kontynuacja rodzica deleguje z nowego runId, a wznowione dziecko dostaje relację nowego biegu', async t => {
     const f = fixture(t);
     const first = f.start();
-    (await f.requests.next()).call('delegate', { task: 'dziecko', aspect: 'child' });
-    (await f.requests.next()).complete('wynik dziecka');
-    (await f.requests.next()).complete('pierwszy wynik rodzica');
+    (await f.parents.next()).call('delegate', { task: 'dziecko', aspect: 'child' });
+    const firstChild = await f.children.next();
+    (await f.parents.next()).complete('za wcześnie');
+    firstChild.complete('wynik dziecka');
+    (await f.parents.next()).complete('pierwszy wynik rodzica');
     await first;
     const [oldRoot, oldChild] = f.registry.list();
     const second = f.start({ threadId: oldRoot.threadId });
-    const request = await f.requests.next();
+    const request = await f.parents.next();
     const newRoot = f.registry.list()[2];
     request.call('sub_agent', { action: 'task', sub_id: oldChild.threadId, task: 'dalej', background: false });
-    (await f.requests.next()).complete('kontynuacja dziecka');
-    (await f.requests.next()).complete('drugi wynik rodzica');
+    const nextChild = await f.children.next();
+    (await f.parents.next()).complete('za wcześnie');
+    nextChild.complete('kontynuacja dziecka');
+    (await f.parents.next()).complete('drugi wynik rodzica');
     t.is((await second).result, 'drugi wynik rodzica');
     const child = f.registry.list()[3];
     t.deepEqual({ parentIsNewRun: child.parentId === newRoot.id, parentIsOldThread: child.parentId === oldRoot.threadId,
@@ -132,7 +144,7 @@ test.serial('kontynuacja rodzica deleguje z nowego runId, a wznowione dziecko do
     { parentIsNewRun: true, parentIsOldThread: false, sameChildThread: true, newChildRun: true, level: 2, threadParentIsNewRun: true });
     // Lead continuation of a formerly nested thread is a new root run, not a child of its old parent.
     const lead = f.client.executeToolCall({ name: 'sub_agent', arguments: { action: 'task', sub_id: oldChild.threadId, task: 'od prowadzącego', background: false } }, 'Mira', { origin: owner });
-    (await f.requests.next()).complete('wynik dla prowadzącego');
+    (await f.children.next()).complete('wynik dla prowadzącego');
     const result = await lead as { success: boolean; result: string };
     const leadRun = f.registry.list()[4];
     t.deepEqual([result.success, result.result, leadRun.parentId, leadRun.level], [true, 'wynik dla prowadzącego', undefined, 1]);
@@ -195,9 +207,11 @@ for (const change of ['parent-ended', 'config-changed'] as const) {
         if (change === 'parent-ended') f.registry.finish(parent, { text: 'koniec', toolsUsed: [], durationMs: 1, usage: null });
         else f.configs.set('mira-child', config('mira-parent'));
         first.complete('pierwszy wynik');
-        const response = await pending as { results: Array<{ success: boolean; error?: string }> };
-        t.deepEqual(response.results.map(item => [item.success, item.error]), [
-            [true, undefined], [false, change === 'parent-ended' ? 'Invalid sub-agent parent context.' : 'Cannot delegate to self or ancestor configuration.'],
+        const response = await pending as { started: boolean; tasks: Array<{ task_id: string }> };
+        await delegateTest._settleBackground();
+        t.deepEqual([response.started, response.tasks.length], [true, 2]);
+        t.deepEqual(f.registry.list().slice(1).map(task => [task.status, task.error]), [
+            ['done', undefined], ['error', change === 'parent-ended' ? 'Invalid sub-agent parent context.' : 'Cannot delegate to self or ancestor configuration.'],
         ]);
         t.deepEqual(f.registry.list().slice(1).map(task => [task.status, task.parentId, task.level]), [['done', 'parent', 2], ['error', 'parent', 2]]);
         t.deepEqual([f.streamCount(), delegateTest._liveAbortCount(), f.clock.pending], [1, 0, 0]);
@@ -209,8 +223,9 @@ for (const fallback of [false, true]) {
         const f = fixture(t, fallback);
         delegateTest._resetBackground();
         const receipt = await f.client.executeToolCall({ name: 'delegate', arguments: { task: 'rodzic', aspect: 'parent' } }, 'Mira', { origin: owner }) as { task_id: string };
-        (await f.requests.next()).call('delegate', { tasks: [{ task: 'dziecko', aspect: 'child' }, { task: 'kolejka', aspect: 'child' }] });
-        const childRequest = await f.requests.next();
+        (await f.parents.next()).call('delegate', { tasks: [{ task: 'dziecko', aspect: 'child' }, { task: 'kolejka', aspect: 'child' }] });
+        const childRequest = await f.children.next();
+        await f.parents.next();
         const finishes: string[] = [];
         f.registry.events.on('task:finished', value => finishes.push((value as SubTask).id));
         t.is(f.registry.requestStop(receipt.task_id), true);
@@ -225,7 +240,7 @@ for (const fallback of [false, true]) {
             ['mira-child', { kind: 'stopped', by: 'user' }],
         ]);
         t.deepEqual([finishes.length, new Set(finishes).size, f.streamCount(), f.clock.pending,
-            delegateTest._liveAbortCount(), f.registry.events.listenerCount('thread:closed')], [3, 3, 2, 0, 0, 0]);
+            delegateTest._liveAbortCount(), f.registry.events.listenerCount('thread:closed')], [3, 3, 3, 0, 0, 0]);
         t.deepEqual(f.registry.list().map(task => f.registry.getRunActivity(task.id)), ['inactive', 'inactive', 'inactive']);
     });
 }

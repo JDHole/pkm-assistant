@@ -12,7 +12,7 @@ export type QuestionResolution = { kind: 'answered'; text: string } | { kind: 'n
 export type QuestionState = { kind: 'none' } | { kind: 'waiting'; question: ParentQuestion; clock: QuestionClock } | { kind: 'closed'; question: ParentQuestion; resolution: QuestionResolution };
 export type TerminalQuestion = { text: string; resolution: QuestionResolution; note?: string };
 export type AnswerResult = { kind: 'accepted' } | { kind: 'rejected'; reason: 'expired' | 'wrong-owner' | 'wrong-question' | 'wrong-recipient' };
-export type RunActivity = { kind: 'working' } | { kind: 'waiting'; questionId: QuestionId } | { kind: 'ending' };
+export type RunActivity = { kind: 'working' } | { kind: 'waiting'; questionId: QuestionId } | { kind: 'waiting-children' } | { kind: 'queued' } | { kind: 'ending' };
 export interface ParentQuestionClock {
     now(): number;
     setTimeout(fn: () => void, ms: number): unknown;

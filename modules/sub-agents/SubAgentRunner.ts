@@ -29,6 +29,8 @@ import type { ActiveSessionEventInput } from '../memory/index.js';
 import type { ChatModel } from '../models/index.js';
 import { classifyRunEnd } from './runOutcome.js';
 import type { RunEffect, RunOutcome } from './runOutcome.js';
+import { SubRunCoordinator } from './SubRunCoordinator.js';
+import type { RunAdmission } from './SubRunCoordinator.js';
 import { allocateSubTaskId } from './subTaskId.js';
 import type { RunActivity, ParentQuestion, QuestionResolution } from './ParentQuestions.js';
 
@@ -87,6 +89,7 @@ interface RunnerPlugin extends PluginApi {
 }
 
 type RunOptions = {
+    admission?: RunAdmission;
     onActivity?: (activity: RunActivity) => void;
     onQuestion?: (question: ParentQuestion) => void;
     turnKind?: 'user' | 'machine';
@@ -337,6 +340,8 @@ export class SubAgentRunner {
     async runTask(taskPrompt: string, agent: AgentLike, config: SubAgentData, model: ChatModel, options: RunOptions = {}): Promise<SubRunResult> {
         const startTime = Date.now();
         const registry: SubTaskRegistry | null = this.plugin?.subTaskRegistry || null;
+        // Legacy DI registries expose only bookkeeping; coordination requires the inbox API.
+        const supportsCoordination = typeof registry?.takeChildNotices === 'function' && typeof registry?.waitChildNotice === 'function';
         if (options.queuedThreadId && registry) {
             const queued = registry.getThread(options.queuedThreadId);
             if (queued?.phase === 'closed') {
@@ -585,13 +590,21 @@ export class SubAgentRunner {
             const visibleToolNames = _canDelegateAtDepth(delegationDepth, limits.max_delegation_depth)
                 ? toolNames
                 : toolNames.filter((name) => name !== 'delegate' && name !== 'agent_delegate' && name !== 'sub_agent');
-            const tools = this._getTools(visibleToolNames, agent, options.callerToolNames, delegationDepth);
+            const tools = this._getTools(visibleToolNames, agent, options.callerToolNames, delegationDepth, !!options.parentId);
             // Fail-closed whitelist: the sub-agent may ONLY execute tools that
             // survived the parent∩sub intersection in _getTools. _executeTool enforces this
             // so the direct-execution fallback cannot run a tool outside the whitelist.
+            const controlOnly = !tools.some(tool => tool.function.name === 'sub_agent');
+            // Reply/control capability is independent of YAML, but never grants delegation.
+            if (controlOnly && supportsCoordination && registry && subTask && tools.some(tool => ['delegate', 'agent_delegate'].includes(tool.function.name))) {
+                tools.push({ type: 'function', function: { name: 'sub_agent',
+                    description: 'Answer or control your own children. Use message with question_id to answer a question.',
+                    parameters: { type: 'object', properties: { action: { type: 'string', enum: ['message', 'list', 'stop', 'close'] },
+                        sub_id: { type: 'string' }, question_id: { type: 'string' }, text: { type: 'string' } }, required: ['action'] } } });
+            }
             const allowedToolNames = new Set<string>(tools.map((td) => td.function.name));
 
-            const systemPrompt = await this._buildTaskPrompt(agent, config, delegationDepth, limits);
+            const systemPrompt = await this._buildTaskPrompt(agent, config, delegationDepth, limits, !!options.parentId);
 
             const nextTask = options.threadId ? t('subagent.thread_next_task', { task: taskPrompt }) : taskPrompt;
             if (options.threadId && thread) {
@@ -611,7 +624,7 @@ export class SubAgentRunner {
             const transcript = thread?.transcript.map(m => structuredClone(m)) ?? [];
             const messages = [{ role: 'system' as const, content: systemPrompt }, ...transcript, { role: 'user' as const, content: `${nextTask}${options.threadId && effectsNote ? `\n${effectsNote}` : ''}` }];
 
-            if (thread && !options.threadId) thread.config.toolNames = tools.map(tool => tool.function.name).filter(name => name !== 'ask_parent');
+            if (thread && !options.threadId) thread.config.toolNames = tools.map(tool => tool.function.name).filter(name => name !== 'ask_parent' && !(controlOnly && name === 'sub_agent'));
             if (thread && options.threadId) {
                 const budget = Number((thread.config.limits as Record<string, unknown> | undefined)?.subagent_thread_context_tokens) || getLimits(this.plugin?.env?.settings).subagent_thread_context_tokens;
                 const serialized = JSON.stringify(messages);
@@ -630,11 +643,6 @@ export class SubAgentRunner {
             // pętla (limits.maxToolResultLength) - _executeTool już nie truncuje.
             const store = new ArrayMessageStore(messages);
             conversationStore = store;
-            // JEDYNY hak, jaki suby podpinają do pętli. `beforeContinue` leci przed KAŻDYM
-            // kolejnym wywołaniem modelu, więc wiadomość wrzucona przez agenta zlecającego do rejestru
-            // (panel biegów → `postMessage`) wchodzi do transkryptu suba dokładnie tam, gdzie
-            // model ją przeczyta - jak nudge, a nie jak przerwanie w połowie zdania.
-            // Bez rejestru (testy jednostkowe, stary bootstrap) hak NIE JEST podpinany.
             const steerHooks = (registry && subTask)
                 ? {
                     beforeContinue: () => {
@@ -648,6 +656,15 @@ export class SubAgentRunner {
             let localReason: 'manual-stop' | 'task-timeout' | 'superseded' = 'manual-stop';
             let ending = false;
             const activity = (value: RunActivity) => _safeRegistry(() => options.onActivity?.(value));
+            const coordinator = supportsCoordination && registry && subTask ? new SubRunCoordinator(registry, subTask, localAbort.signal, activity, notices => {
+                if (!notices.length) return;
+                const payload = notices.map(notice => notice.kind === 'question'
+                    ? { kind: 'question', sub_id: notice.question.subId, task_id: notice.question.taskId,
+                        question_id: notice.question.id, text: notice.question.text }
+                    : { kind: 'result', sub_id: notice.task.threadId, task_id: notice.task.id,
+                        status: notice.task.status, error: notice.task.error, result: notice.task.result, outcome: notice.task.outcome });
+                store.appendUser(`Child notices:\n${_maskHandoffText(JSON.stringify(payload), knownSecrets)}`);
+            }, options.admission) : undefined;
             const questionHook = (question: ParentQuestion) => _safeRegistry(() => options.onQuestion?.(question));
             const offClosed = registry?.events?.on('question:closed', (payload: unknown) => {
                 const question = payload as ParentQuestion;
@@ -656,7 +673,7 @@ export class SubAgentRunner {
                 if (state?.kind !== 'closed' || state.question.id !== question.id) return;
                 if (state.resolution.kind === 'answered') {
                     questionHook(question);
-                    activity({ kind: 'working' });
+                    if (!coordinator) activity({ kind: 'working' });
                 } else {
                     closedQuestion = { text: question.text, resolution: state.resolution };
                     if (state.resolution.kind === 'no-answer') localReason = 'task-timeout';
@@ -693,6 +710,7 @@ export class SubAgentRunner {
                 // Numer wywołania łapiemy PRZY STARCIE (kolejność tablicy pętli),
                 // a nie przy zakończeniu - wywołania jednego batcha rozstrzygają się równolegle.
                 executeToolCall: async (toolCall, runtimeContext) => {
+                    try {
                     const seq = toolCallSeq++;
                     let args: unknown = toolCall.arguments;
                     if (typeof args === 'string') {
@@ -711,13 +729,18 @@ export class SubAgentRunner {
                             failedToolCalls.add(seq);
                             return t('subagent.ask_parent_unavailable');
                         }
-                        activity({ kind: 'waiting', questionId: opened.question.id });
+                        if (!coordinator) activity({ kind: 'waiting', questionId: opened.question.id });
                         questionHook(opened.question);
-                        const resolution = await opened.resolution;
+                        const resolution = await (coordinator ? coordinator.question(opened.question.id, opened.resolution) : opened.resolution);
                         return resolution.kind === 'answered' ? resolution.text : '';
                     }
+                    if (controlOnly && toolCall.name === 'sub_agent'
+                        && (!args || typeof args !== 'object' || !('action' in args) || !['message', 'list', 'stop', 'close'].includes(String(args.action)))) {
+                        failedToolCalls.add(seq);
+                        return t('subagent.tool_not_allowed', { name: 'sub_agent.task' });
+                    }
                     const result = await this._executeTool(toolCall as ToolCall, agent.name, allowedToolNames,
-                        { delegationDepth, scopeFolders: scopeFolders as string[], autonomy,
+                        { delegationDepth, scopeFolders: scopeFolders as string[], autonomy, controlOnly,
                             subRunContext: { runId: subTask?.id ?? label, level: Math.max(1, delegationDepth), origin: origin ?? { agentName: agent.name } } },
                         () => { failedToolCalls.add(seq); }, runtimeContext,
                         { start: (args) => beginEffect(seq, toolCall.name ?? '', args),
@@ -725,8 +748,17 @@ export class SubAgentRunner {
                             fail: () => failEffect(seq) });
                     detail.resultPreview = _maskHandoffText(result, knownSecrets).slice(0, 500);
                     return result;
+                    } finally { coordinator?.toolDone(); }
                 },
-                ...(steerHooks ? { hooks: steerHooks } : {}),
+                hooks: {
+                    ...steerHooks,
+                    ...(coordinator ? {
+                        onIterationStart: () => coordinator.iterationStart(),
+                        onToolCallsParsed: (calls) => { coordinator.startBatch(calls.length); },
+                        beforeFinish: () => coordinator.beforeFinish(),
+                        onBackstop: () => coordinator.stopChildren(),
+                    } : {}),
+                },
                 // Delegate po SWOIM timeoucie ubija bieg suba, żeby sub nie wisiał w tle bez końca
                 // (abort streamu robi stopStream z kontrolki; flaga zatrzymuje pętlę między
                 // iteracjami, żeby porzucony sub nie mielił dalej na narzędziach).
@@ -774,6 +806,7 @@ export class SubAgentRunner {
                 modelOptions: { maxTokens: SUB_AGENT_MAX_OUTPUT_TOKENS, agentName: agent.name, ...(config.effort ? { effort: config.effort } : {}) },
                 });
             } finally {
+                coordinator?.close();
                 options.abortSignal?.removeEventListener('abort', externalAbort);
                 if (typeof offClosed === 'function') offClosed();
                 if (!ending) activity({ kind: 'ending' });
@@ -943,7 +976,7 @@ export class SubAgentRunner {
      * konfigurowalna: instrukcja jest karmą dla modelu, nie wynikiem narzędzia.
      * Rola nie steruje treścią promptu.
      */
-    async _buildTaskPrompt(agent: AgentLike, config: SubAgentData, delegationDepth = 0, frozenLimits?: ReturnType<typeof getLimits>): Promise<string> {
+    async _buildTaskPrompt(agent: AgentLike, config: SubAgentData, delegationDepth = 0, frozenLimits?: ReturnType<typeof getLimits>, hasParent = false): Promise<string> {
         // Limity czytamy RAZ - ten sam obiekt karmi cap instrukcji i blok BUDŻET niżej,
         // więc prompt nie może obiecać modelowi czegoś innego, niż realnie dostał.
         const limits = frozenLimits ?? getLimits(this.plugin?.env?.settings);
@@ -959,7 +992,7 @@ export class SubAgentRunner {
         // `[key: string]: unknown` w `PkmAssistantSettings`, więc nominalnie się nie unifikuje).
         // Rama idzie za JĘZYKIEM INTERFEJSU i liczy się RAZ NA BIEG (tu), nie przy imporcie -
         // `setLocale()` leci z `src/main.ts` dopiero po załadowaniu modułów.
-        const frame = resolveWorkPrompt(agent, 'subagent_frame_prompt', this.plugin?.env?.settings as WorkPromptSettings | undefined, defaultSubAgentFramePrompt(undefined, _canAskParentAtDepth(delegationDepth)));
+        const frame = resolveWorkPrompt(agent, 'subagent_frame_prompt', this.plugin?.env?.settings as WorkPromptSettings | undefined, defaultSubAgentFramePrompt(undefined, hasParent || _canAskParentAtDepth(delegationDepth)));
 
         // METHOD — custom sub method (KNOWLEDGE.md), soft cap z limits.
         let methodBlock = '';
@@ -1032,6 +1065,7 @@ export class SubAgentRunner {
         parentAgent: AgentLike | null | undefined,
         callerToolNames?: string[] | null,
         delegationDepth = 0,
+        hasParent = false,
     ): Array<{ type: 'function'; function: { name: string; description: string; parameters: unknown } }> {
         const parentVisible = parentAgent && typeof this.toolRegistry.filterByAgent === 'function'
             ? new Set<string>(this.toolRegistry.filterByAgent(parentAgent).map((t) => t.name))
@@ -1057,7 +1091,7 @@ export class SubAgentRunner {
                     parameters: tool.inputSchema
                 }
             }));
-        if (_canAskParentAtDepth(delegationDepth)) tools.push({ type: 'function', function: { name: 'ask_parent', description: 'Ask the parent agent one specific question when information cannot be obtained with your tools.', parameters: { type: 'object', properties: { text: { type: 'string', description: 'The question for the parent agent.' } }, required: ['text'], additionalProperties: false } } });
+        if (hasParent || _canAskParentAtDepth(delegationDepth)) tools.push({ type: 'function', function: { name: 'ask_parent', description: 'Ask the parent agent one specific question when information cannot be obtained with your tools.', parameters: { type: 'object', properties: { text: { type: 'string', description: 'The question for the parent agent.' } }, required: ['text'], additionalProperties: false } } });
         return tools;
     }
 
@@ -1085,7 +1119,7 @@ export class SubAgentRunner {
         toolCall: ToolCall,
         agentName: string,
         allowedToolNames: Set<string> | null = null,
-        execOptions: Pick<RunOptions, 'delegationDepth' | 'scopeFolders' | 'autonomy'> & { subRunContext?: SubRunContext } = {},
+        execOptions: Pick<RunOptions, 'delegationDepth' | 'scopeFolders' | 'autonomy'> & { subRunContext?: SubRunContext; controlOnly?: boolean } = {},
         onFailure?: () => void,
         runtimeContext: ToolExecutionContext = { resultBudgetChars: 0, shouldAbort: () => false },
         effectHooks?: { start(args: unknown): void; complete(args: unknown, result: unknown, failed: boolean): void; fail(): void },
@@ -1148,7 +1182,7 @@ export class SubAgentRunner {
                     // Whitelista TEGO suba jedzie dalej jako znacznik,
                     // żeby `delegate` policzył narzędzia wnuka względem niego, nie względem
                     // agenta głównego. Lista jest już przecięciem rodzic∩sub (patrz `runTask`).
-                    ...(allowedToolNames ? { callerToolNames: [...allowedToolNames].filter(name => name !== 'ask_parent') } : {}),
+                    ...(allowedToolNames ? { callerToolNames: [...allowedToolNames].filter(name => name !== 'ask_parent' && !(execOptions.controlOnly && name === 'sub_agent')) } : {}),
                 });
                 const sanitized = stripImageBase64ForTranscript(toolCall.name, result);
                 effectHooks?.complete(describedArgs, result,
@@ -1202,7 +1236,7 @@ export class SubAgentRunner {
                     trustedArgs._invocationDelegationDepth = execOptions.subRunContext.level;
                 }
                 if (execOptions.autonomy) trustedArgs._invocationAutonomy = execOptions.autonomy;
-                if (allowedToolNames) trustedArgs._invocationToolNames = [...allowedToolNames];
+                if (allowedToolNames) trustedArgs._invocationToolNames = [...allowedToolNames].filter(name => name !== 'ask_parent' && !(execOptions.controlOnly && name === 'sub_agent'));
                 args = trustedArgs;
             }
             const requestedBudget = runtimeContext.resultBudgetChars > 0 ? runtimeContext.resultBudgetChars : 0;
