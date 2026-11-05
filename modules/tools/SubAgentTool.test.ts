@@ -357,7 +357,8 @@ test('message, stop and close refuse invalid phases and exhausted message queue'
     t.deepEqual(await call('message', 'closed', 'text'), { success: false, error: tr('mcp.sub_agent.message_state') });
     t.deepEqual(await call('stop', 'closed'), { success: false, error: tr('mcp.sub_agent.stop_state') });
     t.deepEqual(await call('close', 'closed'), { success: false, error: tr('mcp.sub_agent.close_state') });
-    t.deepEqual(await call('stop', 'running'), { success: false, error: tr('mcp.sub_agent.stop_unavailable') });
+    t.deepEqual(await call('stop', 'running'), { success: true, message: 'Stop requested for sub-agent running.' });
+    t.is(registry.getTask(run.id)?.stopRequestedBy, 'lead');
     t.deepEqual(await call('message', 'running', 'first'), { success: true, message: tr('mcp.sub_agent.message_sent', { sub_id: 'running' }) });
     t.deepEqual(await call('message', 'running', 'second'), { success: false, error: tr('mcp.sub_agent.message_rejected') });
     t.is(registry.getTask(run.id)?.status, 'running');

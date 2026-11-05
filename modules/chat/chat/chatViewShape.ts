@@ -30,7 +30,7 @@ import type { SkillData } from '../../skills/index.js';
 import type { AgentMemory } from '../../memory/index.js';
 import type { AskUserChannels, MCPClient, OpenAiToolDefinition, ServerVisibilityAgent, ToolRegistry } from '../../tools/index.js';
 import type { ChatModel, ChatRuntimeConfig, ModelLibraryEntry, PkmModelSettings } from '../../models/index.js';
-import type { SubTaskNotifier, SubTaskRegistry } from '../../sub-agents/index.js';
+import type { SubTaskNotifier, SubTaskRegistry, SubTaskOrigin } from '../../sub-agents/index.js';
 import type { ArtifactStore } from '../../artifacts/index.js';
 import type { AttachmentManager, MentionAutocomplete } from '../../ui-components/index.js';
 import type { AudioRecorder } from '../../multimodal/index.js';
@@ -234,6 +234,7 @@ export interface ChatTabState {
  * w `send_message`; tutaj leży tylko to, co czytają INNE metody widoku.
  */
 export interface ChatStreamContext {
+    origin?: Readonly<SubTaskOrigin>;
     tab: ChatTab | null;
     agentName: string;
     agent: Agent | null;

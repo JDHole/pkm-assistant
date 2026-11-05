@@ -64,7 +64,7 @@ import { getCachedToolTokenBreakdown } from './ToolTokenCache.js';
 import { getLimits } from '../../../config/limits.js';
 import { runAgentLoop } from '../../agent-loop/index.js';
 import { RollingWindowMessageStore } from './RollingWindowMessageStore.js';
-import { createTurnAbort, collectSubTaskIdsForOwners } from './turnAbort.js';
+import { createTurnAbort, stopSubTasksForOwners } from './turnAbort.js';
 import { ChatTurnPartialState } from './turnPartial.js';
 import type { ActiveSessionEventInput } from '../../memory/index.js';
 import { freezeTurnOwner } from './turnOwner.js';
@@ -737,6 +737,8 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
             ...(turnSessionEpoch ? { sessionEpoch: turnSessionEpoch } : {}),
             ...(ownerTabKey ? { tabKey: ownerTabKey } : {}),
         };
+
+        if (sCtx) sCtx.origin = turnOrigin;
 
         // Kontekst tury (zamknięcie). Zastępuje dawny bogaty wpis _streamCtxMap.
         const turn: ChatTurn = {
@@ -2328,24 +2330,19 @@ export function stop_generation(this: ChatViewLike, tabKey?: string, reason = 's
     const preparing = requested || pending?.tab === activeTab ? pending : undefined;
     if (!requested && !sCtx && !preparing && (candidate || pending)) return;
     const targetTab = sCtx?.tab || preparing?.tab;
-    const activeAgent = targetTab?.agentName || activeTab?.agentName || '';
+    const selectedTab = targetTab ?? (requested ? this.chatTabs.find(tab => _tabKey(tab) === targetKey) : activeTab);
+    const activeAgent = sCtx?.origin?.agentName || selectedTab?.agentName || '';
     log.info('Chat', `Stop: aborting stream for tab "${targetKey}" (${reason})`);
 
-    // Ręczny przycisk Stop nie może pozwolić, by zadanie czekające z aktywnej zakładki
-    // wystartowało po zwolnieniu miejsca w puli. Watchdogi i pozostałe automatyczne Stopy
-    // nie zamykają kolejek innych tur.
+    // Suppress delivery BEFORE Stop callbacks can synchronously publish a late result.
+    if (!targetTab || targetTab === activeTab) this._drainSuppressed = true;
     if (reason === 'stop') {
-        const registry = this.plugin?.subTaskRegistry;
-        if (registry?.closeQueuedForOwners) {
-            try {
-                registry.closeQueuedForOwners({
-                    tabKeys: [...new Set([targetKey, activeTab ? _tabKey(activeTab) : ''].filter(Boolean))],
-                    agentNames: activeAgent ? [activeAgent] : [],
-                }, 'user');
-            } catch (e) {
-                log.warn('Chat', `Zamknięcie kolejki subów przy Stopie padło: ${(e as Error)?.message || String(e)}`);
-            }
-        }
+        const tab = selectedTab;
+        stopSubTasksForOwners(this.plugin?.subTaskRegistry, {
+            tabKeys: [...new Set([targetKey, tab ? _tabKey(tab) : ''].filter(Boolean))],
+            agentNames: activeAgent ? [activeAgent] : [],
+            owners: sCtx?.origin ? [sCtx.origin] : tab ? [{ agentName: tab.agentName, sessionPath: tab.sessionPath, sessionEpoch: tab.sessionEpoch ?? undefined }] : [],
+        }, 'user');
     }
 
     if (sCtx) this._cleanupAskUser?.(sCtx.turnId);
@@ -2433,6 +2430,7 @@ export function stop_generation(this: ChatViewLike, tabKey?: string, reason = 's
  * @returns nazwy agentów, których tury zatrzymano
  */
 export function stop_all_turns(this: ChatViewLike, reason = 'close'): string[] {
+    const runOwners = [...this._streamCtxMap.values()].flatMap(ctx => ctx.origin ? [ctx.origin] : []);
     // Kopia nazw PRZED pętlą - `stop_generation` kasuje wpisy z mapy w trakcie. Bierzemy też
     // tury W PRZYGOTOWANIU (prompt się buduje, wpisu w mapie jeszcze nie ma).
     for (const preparing of this._preparingTurns.values()) preparing.abort.abort(reason);
@@ -2460,27 +2458,10 @@ export function stop_all_turns(this: ChatViewLike, reason = 'close'): string[] {
         }
     }
 
-    // Suby zlecone z tego widoku - po adresie zwrotnym (origin), nie po tym, kto je wykonuje.
-    // `requestStop` to PROŚBA: bieg gaśnie przy najbliższym punkcie przerwania swojej pętli.
-    const registry = this.plugin?.subTaskRegistry;
-    if (registry?.list && registry.requestStop) {
-        try {
-            const ids = collectSubTaskIdsForOwners(registry.list(), { tabKeys, agentNames });
-            for (const id of ids) {
-                log.info('Chat', `Zamknięcie czatu → zatrzymuję bieg suba ${id}`);
-                registry.requestStop(id, reason === 'stop' ? 'user' : 'system');
-            }
-        } catch (e) {
-            log.warn('Chat', `Zatrzymanie subów przy zamknięciu padło: ${(e as Error)?.message || String(e)}`);
-        }
-    }
-    if (registry?.closeQueuedForOwners) {
-        try {
-            registry.closeQueuedForOwners({ tabKeys, agentNames }, reason === 'stop' ? 'user' : 'system');
-        } catch (e) {
-            log.warn('Chat', `Zamknięcie kolejki subów przy zamknięciu padło: ${(e as Error)?.message || String(e)}`);
-        }
-    }
+    stopSubTasksForOwners(this.plugin?.subTaskRegistry, {
+        tabKeys, agentNames,
+        owners: [...runOwners, ...tabs.map(tab => ({ agentName: tab.agentName, sessionPath: tab.sessionPath, sessionEpoch: tab.sessionEpoch ?? undefined }))],
+    }, reason === 'stop' ? 'user' : 'system');
 
     return names;
 }

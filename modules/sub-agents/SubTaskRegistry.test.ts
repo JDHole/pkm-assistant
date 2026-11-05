@@ -526,13 +526,16 @@ test('stopAll zapisuje system na biegu i w śladzie', t => {
     t.deepEqual(classifyRunEnd({ stopReason: { kind: 'manual-stop' }, stoppedByActor: task.stopRequestedBy }).end, { kind: 'stopped', by: 'system' });
 });
 
-test('requestStop bez podpiętego uchwytu zwraca false i nic nie znaczy', t => {
+test('requestStop bez uchwytu zatrzaskuje Stop i przerywa późne attachAbort', t => {
     const reg = new SubTaskRegistry();
     const task = newTask(reg);
 
-    t.false(reg.requestStop(task.id));
-    t.falsy(task.stopRequested);
-    t.deepEqual(task.steps, [], 'brak śladu — nie było czego prosić');
+    t.true(reg.requestStop(task.id));
+    t.is(task.stopRequested, true);
+    t.deepEqual(task.steps.map(step => [step.type, step.fields]), [['stop.requested', { by: 'user' }]]);
+    let aborted = 0;
+    reg.attachAbort(task.id, () => { aborted++; });
+    t.is(aborted, 1);
 });
 
 test('requestStop na nieznanym id zwraca false', t => {
@@ -582,7 +585,8 @@ test('attachAbort ignoruje śmieci zamiast rzucać', t => {
 
     t.notThrows(() => reg.attachAbort(task.id, null as unknown as () => void));
     t.notThrows(() => reg.attachAbort('', () => {}));
-    t.false(reg.requestStop(task.id), 'nic sensownego nie zostało podpięte');
+    t.true(reg.requestStop(task.id), 'Stop jest przyjęty także bez uchwytu');
+    t.is(task.stopRequestedBy, 'user');
 });
 
 test('dispose puszcza uchwyty abortu', t => {

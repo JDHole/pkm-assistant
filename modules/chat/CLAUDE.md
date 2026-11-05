@@ -423,7 +423,7 @@ turn.abort.isAborted()`.
   wywołuje `() => this.stop_generation()`; watchdog i zamknięcie zakładki podają klucz tury.
 - **`stop_all_turns(reason)`** zatrzymuje KAŻDĄ turę z obu map (kopia kluczy przed
   iteracją, bo `stop_generation` kasuje wpisy w trakcie), kasuje `_queuedMessage` i prosi
-  `subTaskRegistry.requestStop` o zatrzymanie biegnących subów z zakładek tego widoku.
+  `stopSubTasksForOwners` o zatrzymanie poddrzew subów z zakładek tego widoku.
   Dodatkowo `closeQueuedForOwners` zamyka ich wątki `queued`. Właściciele, w tym zakładki
   z samą kolejką, są zbierani przed czyszczeniem stanów. Dopasowanie używa `origin.tabKey`,
   a `origin.agentName` tylko przy braku `tabKey`. Dla reason `stop` zamknięcie ma nadawcę
@@ -431,7 +431,7 @@ turn.abort.isAborted()`.
   spoza czatu, zostają nietknięte. `onClose` woła to PRZED rozbrojeniem watchdogów.
   Zamknięcie JEDNEJ zakładki (`_closeActiveTab`) zamyka jej queued z nadawcą `system`
   przed usunięciem tożsamości zakładki, także gdy nie ma tury w locie. Rzeczywisty przycisk Stop
-  woła `stop_generation` i zamyka queued aktywnej zakładki z nadawcą `user`. Watchdog nie
+  woła `stop_generation` i zatrzymuje aktywne poddrzewa oraz queued rozmowy z nadawcą `user`. Watchdog nie
   zamyka kolejek innych tur.
 - **Bramka "po Stopie/watchdogu nie startujemy tury sami"** żyje jako `_drainSuppressed` -
   podnosi ją Stop i watchdog ciszy, gasi start następnej tury. Blokuje dostawcę wyniku suba
@@ -1593,3 +1593,5 @@ Powiadomienie o pytaniu suba jest osobnym kafelkiem: klasyfikator rozpoznaje tak
 Kafelek powiadomienia o pytaniu suba oraz zwinięty kafelek odpowiedzi prowadzącego używają statusu `attention`. Adapter ustala ten status, tytuł i znacznik ramki wyniku z otwartym pytaniem; pełne pytanie trafia do osobnego bloku. Adapter i powiadomienie dla modelu usuwają z początku surowego materiału wyłącznie dokładną `question.note` przekazaną przez runnera, raz i wraz z następującymi pustymi liniami. Bez notki nie zgadują jej treści. Powiadomienie dla modelu umieszcza sekcję z powodem i pełnym pytaniem po efektach; długość w znaczniku zamykającym pozwala odczytać ją od końca, bez szukania granicy w treści. Fallback historii nie usuwa notki na podstawie tekstu i czyta sekcję pytania tylko dla wyniku częściowego lub pustego i przy wyróżnionej granicy stopki. Cytaty w materiale nie są sekcją. Wyniki narzędzi pozostają, a błędy i zatrzymanie bez pytania zachowują status błędu.
 
 Decyzja: po `cancelled` (Stop) kafelek nie pokazuje otwartego pytania ani instrukcji wznowienia, a model dostaje pytanie w sekcji powiadomienia.
+
+P3 - `stop_generation` (ręczny Stop) i `stop_all_turns` korzystają ze wspólnego `stopSubTasksForOwners` w `turnAbort.ts`. `ChatStreamContext.origin` przechowuje zamrożoną tożsamość tury również po zmianie sesji na obiekcie zakładki. Pełna tożsamość sesji trafia do `registry.requestStopForOwner`; dostępna ścieżka i epoka mają pierwszeństwo przed kluczem zakładki. Stare wpisy bez pełnego właściciela zachowują dopasowanie po tabKey lub agentName. `_drainSuppressed` jest ustawiane przed callbackami Stopu, więc synchroniczny późny wynik nie uruchamia samoczynnej tury. Naturalna finalizacja tury nie zatrzymuje tła. Test `chat_streaming.queuedStop.test.ts` sprawdza rzeczywisty notifier, izolację epoki i brak samoczynnego send_message.

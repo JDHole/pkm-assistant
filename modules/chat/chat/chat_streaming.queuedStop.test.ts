@@ -122,3 +122,53 @@ test('zamknięcie aktywnego strumienia nie anuluje kolejki innej zakładki', asy
     t.deepEqual(view._queuedMessage, otherQueue);
     t.is(view.input_area.value, 'Szkic A');
 });
+
+test('P3 Stop active conversation latches before synchronous result delivery and preserves another epoch', async t => {
+    const registry = new SubTaskRegistry();
+    const owner = { agentName: 'Mira', sessionPath: 'chat.md', sessionEpoch: 'e1', tabKey: 'tab' };
+    const task = registry.create({ id: 'root', origin: owner, background: true });
+    const other = registry.create({ id: 'other', origin: { ...owner, sessionEpoch: 'e2' }, background: true });
+    registry.createThread({ threadId: 'queued', name: 'child', owner, origin: owner, config: {}, phase: 'queued', parentId: task.id });
+    registry.createThread({ threadId: 'other-queued', name: 'child', owner: { ...owner, sessionEpoch: 'e2' }, origin: owner, config: {}, phase: 'queued' });
+    let automaticTurns = 0;
+    const view = {
+        plugin: { subTaskRegistry: registry },
+        chatTabs: [{ ...owner, sessionId: 'tab', isActive: true }],
+        _streamCtxMap: new Map(), _preparingTurns: new Map(), _drainSuppressed: false,
+        _autoTurnChainCounts: new Map(), _subTaskTurnPending: false, is_generating: false,
+        input_area: { value: '' }, _queuedMessage: null, _clearQueuedDrainTimer() {}, _hideQueuedIndicator() {},
+        _releaseStreamCtx() {}, _resetPaintTargets() {}, hideTypingIndicator() {},
+        set_generating() {}, _renderThrottle: null, env: { settings: { pkmAssistant: { limits: {} } } },
+        send_message() { automaticTurns++; },
+    };
+    const { SubTaskNotifier } = await import('../../sub-agents/index.js');
+    const { _deliverSubTaskResult } = await import('./chat_streaming.js');
+    const notifier = new SubTaskNotifier({ registry });
+    notifier.setDeliverer(finished => _deliverSubTaskResult.call(view as never, finished));
+    registry.attachAbort(task.id, () => registry.finish(task, { text: 'późny wynik', toolsUsed: [], durationMs: 0, usage: null }));
+    stop_generation.call(view as never);
+    await Promise.resolve();
+    t.deepEqual([task.stopRequestedBy, other.status, other.stopRequested, registry.getThread('queued')?.phase,
+        registry.getThread('other-queued')?.phase, automaticTurns, notifier.pending().map(item => item.id)],
+    ['user', 'running', undefined, 'closed', 'queued', 0, ['root']]);
+    notifier.dispose(); registry.dispose();
+});
+
+test('P3 Stop uses the frozen turn owner after the tab object changes session', t => {
+    const registry = new SubTaskRegistry();
+    const oldOwner = { agentName: 'Mira', sessionPath: 'old.md', sessionEpoch: 'e1', tabKey: 'tab' };
+    const newOwner = { ...oldOwner, sessionPath: 'new.md', sessionEpoch: 'e2' };
+    const old = registry.create({ id: 'old', origin: oldOwner });
+    const fresh = registry.create({ id: 'new', origin: newOwner });
+    const tab = { ...newOwner, sessionId: 'tab', isActive: true };
+    const view = {
+        plugin: { subTaskRegistry: registry }, chatTabs: [tab],
+        _streamCtxMap: new Map([['frozen-key', { tab, origin: oldOwner, turnId: 1 }]]), _preparingTurns: new Map(),
+        _drainSuppressed: false, input_area: { value: '' }, _queuedMessage: null,
+        _clearQueuedDrainTimer() {}, _hideQueuedIndicator() {}, _releaseStreamCtx() {},
+        _resetPaintTargets() {}, hideTypingIndicator() {}, set_generating() {}, _renderThrottle: null, env: {},
+    };
+    stop_generation.call(view as never, 'frozen-key');
+    t.deepEqual([old.stopRequestedBy, fresh.stopRequested, fresh.status], ['user', undefined, 'running']);
+    registry.dispose();
+});

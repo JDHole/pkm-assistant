@@ -21,6 +21,9 @@
 // `export` zdjęty na trzech typach w tym pliku — zero referencji
 // spoza pliku; funkcje, które je noszą w sygnaturze (`createTurnAbort`, …),
 // zostają publiczne.
+import type { SubTaskRegistry, SubThreadOwner, StopBy } from '../../sub-agents/index.js';
+import { log } from '../../../core/utils/Logger.js';
+
 export interface TurnAbortHandle {
     /** Czy ta tura została przerwana (Stop / watchdog / zamknięcie widoku). */
     readonly signal: AbortSignal;
@@ -85,4 +88,30 @@ export function collectSubTaskIdsForOwners(
         if (byTab || byAgent) out.push(task.id);
     }
     return out;
+}
+
+/** Shared Stop for a chat button and view teardown. Full session identity wins over UI keys. */
+export function stopSubTasksForOwners(
+    registry: Partial<Pick<SubTaskRegistry, 'list' | 'requestStop' | 'requestStopForOwner' | 'closeQueuedForOwners'>> | undefined,
+    selection: { tabKeys: string[]; agentNames: string[]; owners?: SubThreadOwner[] }, by: StopBy,
+): void {
+    if (!registry) return;
+    try {
+        const complete = (owner: SubThreadOwner) => !!(owner.agentName && owner.sessionPath && owner.sessionEpoch);
+        const owners = (selection.owners ?? []).filter(complete);
+        const tasks = registry.list?.() ?? [];
+        const ids = new Set(collectSubTaskIdsForOwners(tasks, selection));
+        const stopped = new Set<string>();
+        for (const owner of [...owners, ...tasks.filter(task => ids.has(task.id) && task.origin).map(task => task.origin!)]) {
+            if (!complete(owner) || !registry.requestStopForOwner) continue;
+            const known = owners.filter(candidate => candidate.agentName === owner.agentName);
+            if (known.length && !known.some(candidate => candidate.sessionPath === owner.sessionPath && candidate.sessionEpoch === owner.sessionEpoch)) continue;
+            const key = JSON.stringify([owner.agentName, owner.sessionPath, owner.sessionEpoch]);
+            if (!stopped.has(key)) { stopped.add(key); registry.requestStopForOwner(owner, by); }
+        }
+        for (const task of tasks) if (ids.has(task.id) && (!registry.requestStopForOwner || !task.origin || !complete(task.origin))) {
+            registry.requestStop?.(task.id, by);
+        }
+        registry.closeQueuedForOwners?.({ ...selection, owners }, by);
+    } catch (error) { log.warn('Chat', 'Stopping sub-agent conversation failed:', error); }
 }

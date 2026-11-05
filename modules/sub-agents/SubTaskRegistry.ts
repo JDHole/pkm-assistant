@@ -197,7 +197,23 @@ const MAX_THREAD_EFFECTS = 100;
 
 export class SubTaskRegistry {
     private readonly _scheduler = new SubTaskScheduler();
+    private readonly _cancelledRuns = new Map<string, StopBy>();
+    private readonly _stoppingRuns = new Set<string>();
+    private readonly _stoppingOwners = new Set<string>();
+    private _stoppingAll = false;
+    private _ownerKey(owner: SubThreadOwner): string | undefined {
+        return owner.agentName && owner.sessionPath && owner.sessionEpoch
+            ? JSON.stringify([owner.agentName, owner.sessionPath, owner.sessionEpoch]) : undefined;
+    }
+    private _startCancelled(owner: SubThreadOwner, parentId?: string): boolean {
+        const key = this._ownerKey(owner);
+        return this._stoppingAll || (!!key && this._stoppingOwners.has(key))
+            || (!!parentId && (this._cancelledRuns.has(parentId) || !!this._tasks.get(parentId)?.stopRequested));
+    }
     acquire(owner: Readonly<SubThreadOwner>, runId: string, signal: AbortSignal, group?: AdmissionGroup): Promise<Lease> {
+        if (this._cancelledRuns.has(runId) || this._startCancelled(owner)) {
+            return Promise.reject(new Error('Sub-agent admission cancelled'));
+        }
         return this._scheduler.acquire(owner, runId, signal, group);
     }
     getRunActivity(runId: string): SubRunActivity { return this._scheduler.getActivity(runId); }
@@ -218,7 +234,9 @@ export class SubTaskRegistry {
         if (task) this._questions.close(task, { kind: 'cancelled', by: task.stopRequestedBy ?? 'system', reason: 'run-ended' });
     }
     answerParentQuestion(taskId: string, id: QuestionId, owner: Owner, text: string): AnswerResult {
-        return this._questions.answer(this._tasks.get(taskId), id, owner, text);
+        const task = this._tasks.get(taskId);
+        if (task?.stopRequested) return { kind: 'rejected', reason: 'expired' };
+        return this._questions.answer(task, id, owner, text);
     }
     getQuestionState(taskId: string): QuestionState {
         const task = this._tasks.get(taskId);
@@ -296,6 +314,7 @@ export class SubTaskRegistry {
     }
 
     createThread(input: { threadId: string; name: string; owner: SubThreadOwner; origin: SubTaskOrigin; config: Record<string, unknown>; phase?: SubThread['phase']; parentId?: string; level?: number }): SubThread {
+        if (this._startCancelled(input.owner, input.parentId)) throw new Error('Sub-agent admission cancelled');
         const now = Date.now();
         const thread: SubThread = { ...input, owner: { ...input.owner }, origin: { ...input.origin }, config: structuredClone(input.config), phase: input.phase ?? 'running', reusable: false, runIds: [], transcript: [], userStop: false, lastActiveAt: now, closeAfterRun: false, effects: [] };
         this._threads.set(thread.threadId, thread);
@@ -327,7 +346,7 @@ export class SubTaskRegistry {
 
     reserveContinuation(threadId: string, owner: SubThreadOwner, runId: string,
         turn?: { turnKind?: unknown; turnStartedSeq?: unknown }, relation?: { parentId?: string; level?: number }): SubThread | undefined {
-        if (!this._canBeginRun(threadId, owner, turn)) return undefined;
+        if (this._startCancelled(owner, relation?.parentId) || !this._canBeginRun(threadId, owner, turn)) return undefined;
         const thread = this._threads.get(threadId)!;
         thread.phase = 'queued';
         thread.queuedRunId = runId;
@@ -351,6 +370,7 @@ export class SubTaskRegistry {
             if (Date.now() - thread.lastActiveAt >= idleMs) this._closeThreadData(thread);
         }
         const reserved = thread?.phase === 'queued' && !!turn?.reservedRunId && thread.queuedRunId === turn.reservedRunId;
+        if (this._startCancelled(owner, reserved ? thread?.parentId : undefined) || (turn?.reservedRunId && this._cancelledRuns.has(turn.reservedRunId))) return false;
         if (!thread || (thread.phase !== 'idle' && !reserved) || !owner?.agentName || !owner.sessionPath || !owner.sessionEpoch
             || !thread.owner.agentName || !thread.owner.sessionPath || !thread.owner.sessionEpoch
             || thread.owner.agentName !== owner.agentName || thread.owner.sessionPath !== owner.sessionPath || thread.owner.sessionEpoch !== owner.sessionEpoch || !thread.reusable) return false;
@@ -360,6 +380,7 @@ export class SubTaskRegistry {
 
     beginQueuedRun(threadId: string, owner: SubThreadOwner, frozenConfig: Record<string, unknown>): boolean {
         const thread = this._threads.get(threadId);
+        if (this._startCancelled(owner, thread?.parentId) || this._cancelledRuns.has(thread?.queuedRunId ?? threadId)) return false;
         if (!thread || thread.phase !== 'queued' || !owner?.agentName || thread.owner.agentName !== owner.agentName
             || thread.owner.sessionPath !== owner.sessionPath || thread.owner.sessionEpoch !== owner.sessionEpoch) return false;
         thread.config = structuredClone(frozenConfig);
@@ -388,7 +409,14 @@ export class SubTaskRegistry {
         this._pruneIdleThreads();
     }
 
-    closeThread(threadId: string, by: StopBy = 'user'): boolean { const t = this._threads.get(threadId); if (!t || t.phase === 'closed') return false; if (t.phase === 'running') t.closeAfterRun = true; else { if (t.phase === 'queued') { t.closedBy ??= by; if (by === 'user') { t.userStop = true; t.lastUserStopSeq = this._nextSequence(); } } this._closeThreadData(t); } return true; }
+    closeThread(threadId: string, by: StopBy = 'user'): boolean {
+        const thread = this._threads.get(threadId);
+        if (!thread || thread.phase === 'closed') return false;
+        if (thread.phase === 'queued') this._stopRuns([thread.queuedRunId ?? threadId], by);
+        else if (thread.phase === 'running') thread.closeAfterRun = true;
+        else this._closeThreadData(thread);
+        return true;
+    }
     /** Stop from the strip resolves the current thread phase at click time. */
     stopThread(threadId: string): boolean {
         const thread = this._threads.get(threadId);
@@ -402,13 +430,15 @@ export class SubTaskRegistry {
     }
     closeSessionThreads(agentName: string, sessionPath: string): number { let n = 0; for (const t of this._threads.values()) if (t.owner.agentName === agentName && t.owner.sessionPath === sessionPath && this.closeThread(t.threadId, 'system')) n++; return n; }
     closeAll(): void { for (const t of this._threads.values()) this.closeThread(t.threadId, 'system'); }
-    closeQueuedForOwners(input: { tabKeys: string[]; agentNames: string[] }, by: StopBy): number {
+    closeQueuedForOwners(input: { tabKeys: string[]; agentNames: string[]; owners?: SubThreadOwner[] }, by: StopBy): number {
         const tabKeys = new Set(input.tabKeys.filter(Boolean));
         const agentNames = new Set(input.agentNames.filter(Boolean));
         let count = 0;
         for (const thread of this._threads.values()) {
             if (thread.phase !== 'queued') continue;
             const origin = thread.origin;
+            const known = (input.owners ?? []).filter(owner => owner.agentName === thread.owner.agentName);
+            if (known.length && this._ownerKey(thread.owner) && !known.some(owner => this._ownerKey(owner) === this._ownerKey(thread.owner))) continue;
             const matches = origin.tabKey ? tabKeys.has(origin.tabKey) : agentNames.has(origin.agentName);
             if (matches && this.closeThread(thread.threadId, by)) count++;
         }
@@ -681,97 +711,97 @@ export class SubTaskRegistry {
     attachAbort(id: string, fn: () => void): void {
         try {
             if (!id || typeof fn !== 'function') return;
+            if (this._cancelledRuns.has(id) || this._stoppingAll) { fn(); return; }
             this._aborts.set(id, fn);
         } catch (e) {
             log.warn('SubTaskRegistry', 'attachAbort() padł (bieg suba leci dalej):', e);
         }
     }
 
-    /**
-     * Poproś o zatrzymanie biegu. Zwraca `true` TYLKO gdy prośba miała dokąd pójść —
-     * czyli bieg istnieje, jeszcze biegnie i ma podpięty uchwyt.
-     *
-     * ⚠️ To jest PROŚBA, nie egzekucja: znacznik `stopRequested` i ślad `stop.requested`
-     * lądują od razu (panel może pokazać „zatrzymywanie…"), ale status zmieni się dopiero,
-     * gdy pętla suba naprawdę stanie i domknie byt przez `finish`/`fail`.
-     */
+    /** Stop a run and all its descendants, including reservations without an abort handle. */
     requestStop(id: string, by: StopBy = 'user'): boolean {
-        try {
-            const task = this._tasks.get(id);
-            const stop = this._aborts.get(id);
-            if (!task || !stop || task.status !== 'running') return false;
-            task.stopRequested = true;
-            task.stopRequestedBy ??= by;
-            this._questions.close(task, { kind: 'cancelled', by: task.stopRequestedBy, reason: 'stop' });
-            if (by === 'user') {
-                const seq = this._nextSequence();
-                task.userStopSeq = seq;
-                const thread = task.threadId ? this._threads.get(task.threadId) : undefined;
-                if (thread) { thread.userStop = true; thread.lastUserStopSeq = seq; }
-            }
-            // Ślad idzie tą samą drogą co reszta kroków — także do trace.log. Harness liczy
-            // KONKRETNE typy zdarzeń, więc dodatkowy typ go nie rusza.
-            this.step(task, 'stop.requested', { by: task.stopRequestedBy });
-            try {
-                stop();
-            } catch (e) {
-                log.warn('SubTaskRegistry', `uchwyt stop dla ${id} rzucił (prośba i tak zapisana):`, e);
-            }
-            return true;
-        } catch (e) {
-            log.warn('SubTaskRegistry', 'requestStop() padł:', e);
-            return false;
-        }
+        return this._stopRuns([id], by).accepted > 0;
     }
 
-    /**
-     * Zatrzymaj WSZYSTKIE żywe biegi — demontaż pluginu.
-     *
-     * PO CO: gdyby `dispose()` czyścił mapę uchwytów BEZ ich wywołania, wyłączenie pluginu
-     * zrywałoby kanały raportowania, ale nie zatrzymywałoby egzekucji: sub odpalony w tle
-     * mieliłby dalej na wciąż żywym `mcpClient` (realny zapis do vaulta) i znikałby z trace.log,
-     * bo szyna zdarzeń byłaby już odpięta. Demontaż ma NAJPIERW zatrzymać, POTEM odpiąć — stąd
-     * osobna metoda, wołana z `onunload` PRZED `dispose()`.
-     *
-     * ⚠️ To zbiorcza PROŚBA, nie egzekucja (jak `requestStop`): uchwyt podnosi flagę abortu
-     * i przerywa stream modelu, a bieg gaśnie przy najbliższym punkcie przerwania swojej
-     * pętli. `onunload` NIE CZEKA na zejście biegów (Obsidian nie czeka na obietnice).
-     *
-     * @param reason - powód lądujący w śladzie `stop.requested` i w logu (`'unload'`, …)
-     * @returns ile uchwytów wykonało się bez wyjątku (uchwyt, który rzucił, nie blokuje reszty)
-     */
-    stopAll(reason = 'stopAll'): number {
-        let stopped = 0;
-        for (const task of this._tasks.values()) {
-            if (task.questionState?.kind === 'waiting') { task.stopRequested = true; task.stopRequestedBy ??= 'system'; }
-        }
-        for (const task of this._tasks.values()) {
-            this._questions.close(task, { kind: 'cancelled', by: 'system', reason: 'unload' });
-        }
+    /** Exact conversation identity; an incomplete owner cannot authorize a session Stop. */
+    requestStopForOwner(owner: SubThreadOwner, by: StopBy = 'user'): number {
+        const key = this._ownerKey(owner);
+        if (!key || this._stoppingOwners.has(key)) return 0;
+        this._stoppingOwners.add(key);
         try {
-            // Kopia: uchwyt potrafi domknąć bieg synchronicznie, a housekeeping kasuje wtedy
-            // wpis z `_aborts` w trakcie iteracji.
-            for (const [id, stop] of [...this._aborts]) {
-                const task = this._tasks.get(id);
-                try {
-                    if (task && task.status === 'running' && !task.stopRequested) {
-                        task.stopRequested = true;
-                        task.stopRequestedBy ??= 'system';
-                        // Ślad tą samą drogą co `requestStop` — trace.log jeszcze żyje (zamykamy
-                        // go po rejestrze), więc w logu zostaje dowód, że bieg dostał sygnał.
-                        this.step(task, 'stop.requested', { by: task.stopRequestedBy, reason });
-                    }
-                    stop();
-                    stopped++;
-                    log.info('SubTaskRegistry', `stopAll(${reason}): zatrzymuję bieg ${id} (agent ${task?.agentName || '?'})`);
-                } catch (e) {
-                    log.warn('SubTaskRegistry', `stopAll(${reason}): uchwyt ${id} (agent ${task?.agentName || '?'}) rzucił — lecę dalej:`, e);
+            const ids = this.list().filter(task => task.origin && this._ownerKey(task.origin) === key).map(task => task.id);
+            for (const thread of this.listThreads(owner)) if (thread.phase === 'queued') ids.push(thread.queuedRunId ?? thread.threadId);
+            return this._stopRuns(ids, by).accepted;
+        } finally { this._stoppingOwners.delete(key); }
+    }
+
+    private _stopRuns(roots: string[], by: StopBy, reason?: string): { accepted: number; delivered: number } {
+        const queued = [...this._threads.values()].filter(thread => thread.phase === 'queued');
+        const nodes = new Map<string, { parentId?: string; task?: SubTask; thread?: SubThread }>();
+        for (const task of this._tasks.values()) nodes.set(task.id, { parentId: task.parentId, task });
+        for (const thread of queued) nodes.set(thread.queuedRunId ?? thread.threadId, { parentId: thread.parentId, thread });
+        const selected = new Set(roots);
+        // Follow run identities, never thread identities (continuations have a new parent).
+        let added = true;
+        while (added) {
+            added = false;
+            for (const [id, node] of nodes) if (node.parentId && selected.has(node.parentId) && !selected.has(id)) {
+                selected.add(id); added = true;
+            }
+        }
+        const live = [...nodes].filter(([id, node]) => selected.has(id) && !this._stoppingRuns.has(id)
+            && (node.thread || (node.task?.status === 'running' && node.task.endedAt === undefined)));
+        let delivered = 0;
+        this._scheduler.transaction(() => {
+            // No event or callback until every member has the cancellation latch.
+            for (const [id, node] of live) {
+                this._stoppingRuns.add(id);
+                this._cancelledRuns.set(id, this._cancelledRuns.get(id) ?? node.task?.stopRequestedBy ?? node.thread?.closedBy ?? by);
+                const actor = this._cancelledRuns.get(id)!;
+                if (node.task) { node.task.stopRequested = true; node.task.stopRequestedBy ??= actor; }
+                const thread = node.thread ?? (node.task?.threadId ? this._threads.get(node.task.threadId) : undefined);
+                if (node.thread) node.thread.closedBy ??= actor;
+                if (by === 'user') {
+                    const seq = this._nextSequence();
+                    if (node.task) node.task.userStopSeq = seq;
+                    if (thread) { thread.userStop = true; thread.lastUserStopSeq = seq; }
                 }
             }
-        } catch (e) {
-            log.warn('SubTaskRegistry', 'stopAll() padł:', e);
-        }
-        return stopped;
+            const depth = (id: string): number => {
+                const seen = new Set<string>();
+                let parent = nodes.get(id)?.parentId;
+                while (parent && !seen.has(parent)) { seen.add(parent); parent = nodes.get(parent)?.parentId; }
+                return seen.size;
+            };
+            // Snapshot before observers can synchronously finish tasks and remove handles.
+            const aborts = live.map(([id]) => ({ id, stop: this._aborts.get(id), depth: depth(id) }))
+                .sort((a, b) => b.depth - a.depth);
+            try {
+                for (const [id] of live) this._scheduler.cancel(id);
+                for (const [, node] of live) {
+                    if (node.task) {
+                        this._questions.close(node.task, { kind: 'cancelled', by: node.task.stopRequestedBy!, reason: reason ? 'unload' : 'stop' });
+                        if (!reason || !node.task.steps.some(step => step.type === 'stop.requested')) {
+                            this.step(node.task, 'stop.requested', { by: node.task.stopRequestedBy, ...(reason ? { reason } : {}) });
+                        }
+                    }
+                    if (node.thread) this._closeThreadData(node.thread);
+                }
+                for (const { id, stop } of aborts) if (stop) {
+                    try { stop(); if (nodes.get(id)?.task) delivered++; }
+                    catch (error) { log.warn('SubTaskRegistry', `Stop handle for ${id} failed:`, error); }
+                }
+            } finally { for (const [id] of live) this._stoppingRuns.delete(id); }
+        });
+        return { accepted: live.length, delivered };
+    }
+
+    /** Unload latches admission before callbacks. Returns delivered live-task handles (legacy count); reservations are cancelled too. */
+    stopAll(reason = 'stopAll'): number {
+        this._stoppingAll = true;
+        const ids = [...this._tasks.keys(), ...[...this._threads.values()]
+            .filter(thread => thread.phase === 'queued').map(thread => thread.queuedRunId ?? thread.threadId)];
+        return this._stopRuns(ids, 'system', reason).delivered;
     }
 
     /**
@@ -912,6 +942,7 @@ export class SubTaskRegistry {
      * zostaje best-effort i idempotentna: wolno ją zawołać dwa razy i nie ma prawa rzucić.
      */
     dispose(): void {
+        this._stoppingAll = true;
         this._scheduler.dispose();
         this._questions.dispose();
         try {
@@ -921,6 +952,7 @@ export class SubTaskRegistry {
             this._traceScopes.clear();
             this._aborts.clear();
             this._messages.clear();
+            this._cancelledRuns.clear();
         } catch (e) {
             log.warn('SubTaskRegistry', 'dispose() padł:', e);
         }

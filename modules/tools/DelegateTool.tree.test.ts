@@ -203,3 +203,52 @@ for (const change of ['parent-ended', 'config-changed'] as const) {
         t.deepEqual([f.streamCount(), delegateTest._liveAbortCount(), f.clock.pending], [1, 0, 0]);
     });
 }
+
+for (const fallback of [false, true]) {
+    test.serial(`P3 Stop through registry cancels parent, active child and queued sibling (${fallback ? 'fallback' : 'MCP'})`, async t => {
+        const f = fixture(t, fallback);
+        delegateTest._resetBackground();
+        const receipt = await f.client.executeToolCall({ name: 'delegate', arguments: { task: 'rodzic', aspect: 'parent' } }, 'Mira', { origin: owner }) as { task_id: string };
+        (await f.requests.next()).call('delegate', { tasks: [{ task: 'dziecko', aspect: 'child' }, { task: 'kolejka', aspect: 'child' }] });
+        const childRequest = await f.requests.next();
+        const finishes: string[] = [];
+        f.registry.events.on('task:finished', value => finishes.push((value as SubTask).id));
+        t.is(f.registry.requestStop(receipt.task_id), true);
+        // A provider may still deliver a tool call after cancellation. It must not run.
+        childRequest.call('delegate', { task: 'spóźnione', aspect: 'grandparent' });
+        await delegateTest._settleBackground();
+        t.deepEqual(f.registry.listThreads(owner).map(thread => [thread.name, thread.phase]),
+            [['mira-parent', 'idle'], ['mira-child', 'idle'], ['mira-child', 'closed']]);
+        t.deepEqual(f.registry.list().map(task => [task.name, task.outcome?.end]), [
+            ['mira-parent', { kind: 'stopped', by: 'user' }],
+            ['mira-child', { kind: 'stopped', by: 'user' }],
+            ['mira-child', { kind: 'stopped', by: 'user' }],
+        ]);
+        t.deepEqual([finishes.length, new Set(finishes).size, f.streamCount(), f.clock.pending,
+            delegateTest._liveAbortCount(), f.registry.events.listenerCount('thread:closed')], [3, 3, 2, 0, 0, 0]);
+        t.deepEqual(f.registry.list().map(task => f.registry.getRunActivity(task.id)), ['inactive', 'inactive', 'inactive']);
+    });
+}
+
+test.serial('P3 Stop from task:created before runner attachAbort prevents the first model stream', async t => {
+    const f = fixture(t);
+    delegateTest._resetBackground();
+    f.registry.events.on('task:created', value => f.registry.requestStop((value as SubTask).id, 'lead'));
+    await f.client.executeToolCall({ name: 'delegate', arguments: { task: 'zatrzymaj przed startem', aspect: 'child' } }, 'Mira', { origin: owner });
+    await delegateTest._settleBackground();
+    t.deepEqual(f.registry.list().map(task => [task.name, task.outcome?.end]), [['mira-child', { kind: 'stopped', by: 'lead' }]]);
+    t.deepEqual([f.streamCount(), delegateTest._liveAbortCount(), f.clock.pending], [0, 0, 0]);
+});
+
+test.serial('P3 Stop from thread:created before admission records one queued terminal result without a model', async t => {
+    const f = fixture(t);
+    delegateTest._resetBackground();
+    let finished = 0;
+    f.registry.events.on('thread:created', () => f.registry.requestStopForOwner(owner, 'user'));
+    f.registry.events.on('task:finished', () => { finished++; });
+    await f.client.executeToolCall({ name: 'delegate', arguments: { task: 'rezerwacja', aspect: 'child' } }, 'Mira', { origin: owner });
+    await delegateTest._settleBackground();
+    t.deepEqual(f.registry.list().map(task => [task.name, task.taskPreview, task.background, task.outcome?.end]),
+        [['mira-child', 'rezerwacja', true, { kind: 'stopped', by: 'user' }]]);
+    t.deepEqual([finished, f.streamCount(), delegateTest._liveAbortCount(), f.registry.events.listenerCount('thread:closed')], [1, 0, 0, 0]);
+});

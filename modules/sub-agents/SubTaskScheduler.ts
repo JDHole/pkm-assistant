@@ -11,6 +11,7 @@ export class SubTaskScheduler {
     private readonly lanes = new Map<string, Lane>();
     private readonly runs = new Map<string, Entry>();
     private disposed = false;
+    private suspended = 0;
     private readonly groups = new Map<AdmissionGroup, number>();
 
     acquire(owner: Readonly<SubThreadOwner>, runId: string, signal: AbortSignal, group?: AdmissionGroup): Promise<Lease> {
@@ -64,8 +65,20 @@ export class SubTaskScheduler {
 
     getActivity(runId: string): SubRunActivity { return this.runs.get(runId)?.state ?? 'inactive'; }
 
+    /** Stop marks and cancels every member before any released slot can be reassigned. */
+    transaction<T>(work: () => T): T {
+        this.suspended++;
+        try { return work(); }
+        finally {
+            this.suspended--;
+            if (!this.suspended) for (const [key, lane] of this.lanes) this.drain(key, lane);
+        }
+    }
+
+    cancel(runId: string): void { this.runs.get(runId)?.cancel(); }
+
     private drain(key: string, lane: Lane): void {
-        while (!this.disposed && lane.active < 5 && lane.queue.length && lane.queue[0].ready()) lane.queue.shift()!.admit();
+        while (!this.disposed && !this.suspended && lane.active < 5 && lane.queue.length && lane.queue[0].ready()) lane.queue.shift()!.admit();
         if (lane.active === 0 && lane.queue.length === 0) this.lanes.delete(key);
     }
 

@@ -9,7 +9,7 @@ Rejestr i model paska przyjmują opcjonalne `parentId` i `level` także na rezer
 
 P1: `SubTaskRegistry.getDelegationAncestors(context, agentName)` zwraca łańcuch biegów od rodzica do korzenia albo `undefined`. Wymaga żywego rodzica bez prośby Stop, pełnego właściciela (agent, ścieżka, epoka), zgodnych poziomów i kompletnego, acyklicznego łańcucha tej samej sesji. Delegacja prowadzącego bez `SubRunContext` nie używa tej walidacji. `DelegateTool` wyklucza konfiguracje rodzica i przodków po kanonicznej nazwie, również po fuzzy/aliasie oraz ponownie po oczekiwaniu w kolejce. Rezerwacja zna relację przed startem; kontynuacja bierze relację i poziom z nowego wywołania, nie ze starego wątku. `create` aktualizuje relację wątku do najnowszego biegu. Retencja i `pruneSession` zachowują cały łańcuch przodków żywych biegów i rezerwacji queued, nawet ponad `maxDone`.
 
-Testy P1: `modules/tools/DelegateTool.tree.test.ts` (rzeczywista ścieżka runner -> MCP/fallback -> delegate -> registry, sterowane stream/done bez pollingu) i `SubTaskRegistry.tree.test.ts` (retencja biegu i kolejki). Domyślna głębokość nadal 1; Stop poddrzewa, skrzynka pytań, historia po restarcie i renderer drzewa należą do dalszych prac.
+Testy P1: `modules/tools/DelegateTool.tree.test.ts` (rzeczywista ścieżka runner -> MCP/fallback -> delegate -> registry, sterowane stream/done bez pollingu) i `SubTaskRegistry.tree.test.ts` (retencja biegu i kolejki). Domyślna głębokość nadal 1; skrzynka pytań, historia po restarcie i renderer drzewa należą do dalszych prac. Stop poddrzewa dostarcza P3.
 
 > Fizyczne źródła modułu mają rozszerzenie `.ts`. Zapisy `.js` poniżej to specyfikatory
 > importów, które celowo zostają `.js`.
@@ -80,7 +80,7 @@ Opcjonalne `question.note` to dokładny prefiks dodany przez runnera do handoffu
 |---|---|
 | `SubAgentLoader` | Klasa - skanowanie `.pkm-assistant/sub-agents/`, parse YAML + KNOWLEDGE.md, cache, save/delete, ensureStarter |
 | `SubAgentRunner` | Klasa - wykonanie sub-agent (`runTask()`), ujednolicony system prompt builder (`framePrompt.js`, NIE zależy od roli - patrz „Model delegacji" niżej), tool-calling loop przez `runAgentLoop` (`modules/agent-loop`, wspólna pętla z czatem) |
-| `SubTaskRegistry` | Księga biegów subów + szyna zdarzeń (`task:*`, `thread:*`). `issueTurnStartSequence()` wydaje znacznik startu tury ze wspólnego licznika runtime. API wątków: `createThread`, synchroniczne `beginRun` z kontekstem rodzaju i znacznika bieżącej tury, `endRun`, `closeThread`, `closeSessionThreads`, `closeAll`, `listThreads`. Pure - zero `obsidian`, zero I/O. Skrzynka biegu: `attachAbort` / `requestStop` oraz `postMessage` / `takeMessages`. |
+| `SubTaskRegistry` | Księga biegów subów + szyna zdarzeń (`task:*`, `thread:*`). `issueTurnStartSequence()` wydaje znacznik startu tury ze wspólnego licznika runtime. API wątków: `createThread`, synchroniczne `beginRun` z kontekstem rodzaju i znacznika bieżącej tury, `endRun`, `closeThread`, `closeSessionThreads`, `closeAll`, `listThreads`. Pure - zero `obsidian`, zero I/O. Skrzynka biegu: `attachAbort` / `requestStop` / `requestStopForOwner` oraz `postMessage` / `takeMessages`. |
 | `SubThread`, `SubThreadOwner` (typy) | Czysty byt rozmowy suba i wymagany klucz właściciela przy kontynuacji. |
 | `SubRunResult`, `SubRunStoppedBy` (typy) | Kształt zwrotki `runTask` - zgodnościowe `stoppedBy` (`natural`/`backstop`/`abort`/`error`) i `failed?: true` oraz nowe `outcome`. Czyta je `DelegateTool`. |
 | `buildStripModel`, `formatDuration` (+ typy `StripRow`/`StripStep`/`BuildStripModelInput`) | Czysta arytmetyka **paska biegów w oknie czatu**: filtr per zakładka, kolejność, liczniki, skróty. Konsumentem jest `modules/chat` (`chat/subTaskStrip.ts`), stąd eksport; plik zostaje pure, więc barrel dalej jest obsidian-free. |
@@ -301,13 +301,13 @@ Odlew per agent = `<agent-slug>-researcher` (standardowe `instantiate`). Przepis
     `_safeRegistry` co reszta księgowości. **Bez rejestru hak nie jest wołany** (fallback bez
     zmian), a wyjątek z haka nie może wywrócić suba.
 - ⚠️ **„Stop" z panelu to PROŚBA, nie egzekucja.** Rejestr nie wie, jak się ubija suba - trzyma
-  cudzą funkcję. Uchwyt wpina `DelegateTool` w haku `onTaskCreated` (jedyne miejsce, gdzie
-  istnieje naraz `task.id` i domknięta kontrolka abortu tego zadania), a ubija dokładnie tą samą
+  cudzą funkcję. `DelegateTool` wpina uchwyt przy admisji rezerwacji, a następnie w haku
+  `onTaskCreated` wiąże go z bytem runnera. Przerwanie idzie dokładnie tą samą
   drogą co timeout delegacji: `abortCtl.aborted = true` (pętla staje między iteracjami) +
   `abortCtl.stop()` (`stop_stream` modelu). Dotyczy WSZYSTKICH trzech ścieżek delegacji -
   multi-task, single w tle i single BLOKUJĄCY (tam hak istnieje wyłącznie po to).
-  - `requestStop(id, by = 'user')` zwraca `true` tylko gdy bieg istnieje, ma status `running` i ma podpięty
-    uchwyt. Ustawia znacznik `stopRequested` na karcie (panel rysuje „zatrzymywanie…") i zapisuje
+  - `requestStop(id, by = 'user')` zwraca `true`, gdy przyjęto Stop żywego biegu lub rezerwacji w poddrzewie,
+    również przed podpięciem uchwytu. Ustawia znacznik `stopRequested` na karcie (panel rysuje „zatrzymywanie…") i zapisuje
     krok `stop.requested {by}` - nowy TYP zdarzenia w trace.log. `by` to nadawca (`user` z paska
     i domyślnie, `lead` z narzędzia prowadzącego, `system` z zamknięcia i demontażu); pierwszy
     zapisany nadawca wygrywa i trafia do `outcome.end.by` zatrzymanego biegu.
@@ -615,3 +615,13 @@ Identyfikator biegu i wątku ma postać `sub/<nazwa>#<znacznik>-<licznik>`: znac
 Stop użytkownika zapisuje znacznik kolejności na wątku i biegu przed przerwaniem pracy; dla rezerwacji znacznik przechodzi do jej syntetycznego biegu. Kontynuację przyjmuje atomowo `beginRun` według progu ostatniego Stopu, który pozostaje także po zdjęciu `userStop`.
 
 Sub-agent and template YAML may contain `effort: low|medium|high`. Invalid values are logged and ignored; absence never inherits from the lead. The editor resolves the model for an explicitly supplied agent through the runtime resolver (without an execution context it shows a neutral hint), template instantiation copies the choice, and the runner forwards it to model options.
+
+### Stop poddrzewa (P3)
+
+`requestStop(id, by): boolean` zbiera biegi i rezerwacje według `parentId` konkretnego biegu, także pod zakończonym rodzicem. `requestStopForOwner(owner, by): number` zatrzymuje rozmowę po pełnym `agentName + sessionPath + sessionEpoch`; niepełny właściciel zwraca 0. Liczba oznacza przyjęte żywe biegi i rezerwacje. Biegi bez kontekstu suba nadal przechodzą dotychczasową ścieżkę delegacji prowadzącego.
+
+Transakcja schedulera wstrzymuje przydziały, zatrzaskuje anulowanie wszystkich członków przed zdarzeniami, usuwa oczekiwanie na slot, zamyka pytania i rezerwacje, wywołuje zapamiętane aborty od liści, a dopiero potem drenuje FIFO. Wyjątek uchwytu nie blokuje pozostałych; synchroniczne finish/release nie uruchamia zatrzymanej kolejki. Późny `attachAbort` natychmiast przerywa bieg. Reentrantne rezerwacje pod zatrzymanym rodzicem oraz w trakcie Stopu całej rozmowy są odrzucane. Odpowiedź na pytanie zatrzymanego biegu jest odrzucana już po ustawieniu zatrzasku, przed emisją zamknięcia pozostałych pytań.
+
+Pierwszy nadawca Stopu i progi kontynuacji pozostają zachowane. Zatrzymany bieg może pozostać wątkiem `idle/reusable`; nowa legalna kontynuacja ma nowy runId. `finishQueuedStop` rozlicza anulowaną rezerwację raz, z oryginalnym podglądem zadania i flagą tła przekazanymi przez delegację. `stopAll` blokuje nowe przyjęcia do końca życia rejestru, obejmuje też rezerwacje, ale zgodnościowo zwraca liczbę bezbłędnie wywołanych uchwytów istniejących SubTask. Kolejność unload pozostaje `stopAll` przed `dispose`; samo `dispose` nie wywołuje już podpiętych abortów.
+
+Testy: `SubTaskRegistry.stopTree.test.ts`, `modules/tools/DelegateTool.tree.test.ts`, `modules/chat/chat/chat_streaming.queuedStop.test.ts`. Kontrolowane stream/done, Promise i QuestionTestClock; bez pollingu i rzeczywistych opóźnień. P4-P6 pozostają poza P3.

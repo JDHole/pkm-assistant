@@ -1503,6 +1503,8 @@ async function _withAdmission(
     const registry = plugin.subTaskRegistry;
     if (!reservation || !registry?.acquire || !ctl.controller) return run(() => {});
     const runId = reservation.queuedRunId ?? reservation.threadId;
+    // Cover admission and async preparation, before the runner creates its SubTask.
+    registry.attachAbort?.(runId, () => abortSub(ctl, 'manual-stop'));
     let lease: Lease | undefined;
     let running = false;
     const off = registry.events?.on('thread:closed', value => {
