@@ -1018,3 +1018,66 @@ test.serial('F1 Stop hint plural forms are literal in the DOM and aria label', t
         }
     }
 });
+
+test.serial('P5: pasek odświeża kontekst zdarzeniem i rozróżnia biegi jednego wątku', t => {
+    setLocale('pl'); t.teardown(() => setLocale('en'));
+    const previousWindow = globalThis.window, previousObserver = globalThis.MutationObserver;
+    (globalThis as Record<string, unknown>).window = { setInterval: () => 1, clearInterval() {} };
+    (globalThis as Record<string, unknown>).MutationObserver = class { observe() {} disconnect() {} };
+    t.teardown(() => { globalThis.window = previousWindow; globalThis.MutationObserver = previousObserver; });
+    const registry = new SubTaskRegistry({ questionClock: new QuestionTestClock() });
+    t.teardown(() => registry.dispose());
+    const pending = { mode: 'parent_conversation', status: 'pending', source: 'lead', sourceId: 8 } as const;
+    registry.createThread({ threadId: 'thread-context', name: 'worker', owner, origin: owner, config: {}, parentConversation: pending });
+    const first = registry.create({ id: 'run-context', threadId: 'thread-context', name: 'worker', origin: owner });
+    const host = new MockEl(); Object.assign(host, { isConnected: true });
+    const render = () => renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, expandedId: 'thread-context', onToggle() {} });
+    const badges = () => all(host).filter(node => node.classList.contains('cs-parent-conversation__badge')).map(node => [node.textContent, node.className]);
+    render();
+    t.deepEqual(badges(), [['z rozmową - oczekuje', 'cs-parent-conversation__badge cs-parent-conversation--pending'], ['z rozmową - oczekuje', 'cs-parent-conversation__badge cs-parent-conversation--pending']]);
+    registry.setParentConversation(first.id, { ...pending, status: 'included', truncated: true,
+        window: { tokens: 4096, estimated: false, source: 'catalog' }, keptMessages: 2, summarizedMessages: 1,
+        omittedMessages: 3, estimatedTokens: 80, inputTokens: 200, maxOutputTokens: 1024, marginTokens: 461 });
+    t.deepEqual(badges(), [['z rozmową - rozmowa skrócona', 'cs-parent-conversation__badge cs-parent-conversation--truncated'], ['z rozmową - rozmowa skrócona', 'cs-parent-conversation__badge cs-parent-conversation--truncated']]);
+    t.deepEqual(all(host).find(node => node.classList.contains('cs-parent-conversation__details'))?.children.map(node => node.textContent), [
+        'Źródło: prowadzący, tura 8.', 'Wiadomości: zachowane 2, streszczone 1, pominięte 3.',
+        'Szacowany rozmiar rozmowy: 80 tokenów.', 'Bez załączników i myślenia. Uprawnienia do plików i narzędzi bez zmian.',
+    ]);
+    registry.finish(first, { text: 'PIERWSZY', toolsUsed: [], durationMs: 0, usage: null });
+    registry.endRun('thread-context', { successful: true });
+    registry.reserveContinuation('thread-context', owner, 'run-clean');
+    registry.beginRun('thread-context', owner, { reservedRunId: 'run-clean' });
+    const second = registry.create({ id: 'run-clean', threadId: 'thread-context', name: 'worker', origin: owner });
+    registry.finish(second, { text: 'DRUGI', toolsUsed: [], durationMs: 0, usage: null });
+    registry.endRun('thread-context', { successful: true });
+    render();
+    t.deepEqual(badges(), [['z rozmową - rozmowa skrócona', 'cs-parent-conversation__badge cs-parent-conversation--truncated']]);
+    t.deepEqual(all(host).filter(node => node.classList.contains('pkm-substrip__run-card')).map(card => ({
+        id: card.dataset.substripRunId, badges: all(card).filter(node => node.classList.contains('cs-parent-conversation__badge')).map(node => node.textContent),
+    })), [{ id: 'run-context', badges: ['z rozmową - rozmowa skrócona'] }, { id: 'run-clean', badges: [] }]);
+});
+
+test.serial('P5: drzewo sub → wnuk pokazuje niezależny zakres i pominięcie rozmowy', t => {
+    setLocale('pl'); t.teardown(() => setLocale('en'));
+    const registry = new SubTaskRegistry({ questionClock: new QuestionTestClock() });
+    t.teardown(() => registry.dispose());
+    registry.create({ id: 'parent-ui', name: 'parent', origin: owner, level: 1 });
+    registry.create({ id: 'child-ui', name: 'child', origin: owner, parentId: 'parent-ui', level: 2 });
+    registry.setParentConversation('parent-ui', { mode: 'parent_conversation', status: 'pending', source: 'lead', sourceId: 3 });
+    registry.setParentConversation('child-ui', { mode: 'parent_conversation', status: 'omitted', source: 'sub', sourceId: 'parent-ui',
+        truncated: true, keptMessages: 0, summarizedMessages: 0, omittedMessages: 1, estimatedTokens: 0,
+        inputTokens: 400, maxOutputTokens: 128, marginTokens: 300, window: { tokens: 512, estimated: false, source: 'override' } });
+    const host = new MockEl();
+    renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, expandedId: 'child-ui', onToggle() {} });
+    t.true(host.classList.contains('pkm-substrip--tree'));
+    t.deepEqual(all(host).filter(node => node.classList.contains('cs-parent-conversation__badge')).map(node => [node.textContent, node.className]), [
+        ['z rozmową - oczekuje', 'cs-parent-conversation__badge cs-parent-conversation--pending'],
+        ['rozmowa pominięta', 'cs-parent-conversation__badge cs-parent-conversation--omitted'],
+        ['rozmowa pominięta', 'cs-parent-conversation__badge cs-parent-conversation--omitted'],
+    ]);
+    t.deepEqual(all(host).find(node => node.classList.contains('cs-parent-conversation__details'))?.children.map(node => node.textContent), [
+        'Źródło: rodzic-sub, bieg parent-ui.', 'Brak treści lub miejsca w oknie modelu. Zadanie bazowe bez rozmowy rodzica.',
+        'Wiadomości: zachowane 0, streszczone 0, pominięte 1.', 'Szacowany rozmiar rozmowy: 0 tokenów.',
+        'Bez załączników i myślenia. Uprawnienia do plików i narzędzi bez zmian.',
+    ]);
+});

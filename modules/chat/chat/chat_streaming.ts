@@ -29,6 +29,8 @@ import {
     isVaultNotePath,
 } from '../../ui-components/index.js';
 import { getDateLocale, t } from '../../../core/i18n/index.js';
+import { buildParentConversationView } from './parentConversationView.js';
+import type { ParentConversationMetadata } from '../../sub-agents/index.js';
 import { buildDelegateBlockOptions } from './delegateBlockView.js';
 import { subAgentCallView } from './subAgentCallView.js';
 import { findOpenSubQuestion, answeredSubQuestion, renderAnsweredSubQuestion } from './subQuestionView.js';
@@ -117,6 +119,7 @@ function savedResultQuestion(meta: unknown): unknown {
  * a indeks zostaje otwarty na `unknown`.
  */
 interface ChatToolResult {
+    parentConversation?: ParentConversationMetadata;
     isError?: boolean;
     error?: string;
     success?: boolean;
@@ -125,7 +128,7 @@ interface ChatToolResult {
     task_id?: string;
     name?: string;
     sub_id?: string;
-    tasks?: Array<{ task_id?: string; name?: string; sub_id?: string; queued?: boolean }>;
+    tasks?: Array<{ task_id?: string; name?: string; sub_id?: string; queued?: boolean; parentConversation?: ParentConversationMetadata }>;
     queued?: number;
     result?: string;
     aspect?: string;
@@ -1599,7 +1602,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                 // (brak `result.result`, `tools_used`, `duration_ms`) z zielonym „gotowe".
                 const startedList = Array.isArray(result.tasks)
                     ? result.tasks
-                    : [{ task_id: result.task_id, name: result.name }];
+                    : [{ task_id: result.task_id, name: result.name, parentConversation: result.parentConversation }];
                 // Identyfikator zadania idzie WYŁĄCZNIE do details, jako ostatnia linia
                 // (spec A2, sekcja 1 - werdykt właściciela: nigdy w nagłówku). Nagłówek dostaje
                 // stały tekst "wynik wróci powiadomieniem" (`SubAgentBlock.ts`, `opts.pending`),
@@ -1610,6 +1613,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                 const blocks = startedList.filter(item => typeof item.task_id === 'string' && item.task_id.length > 0).map(item => {
                     const bgBlock = createSubAgentBlock({
                     type: toolCall.name,
+                    conversation: buildParentConversationView(this.plugin?.subTaskRegistry?.getTask?.(item.task_id!)?.parentConversation ?? item.parentConversation),
                     pending: true,
                     status: 'success',
                     agentName: item.name || result.name || (toolCall.name === 'sub_agent' ? result.sub_id : toolArgs.aspect || result.sub_id) || '',

@@ -422,3 +422,9 @@ Brak/awaria handlera daje `deny/handler_unavailable`; Stop lub `dispose()` daje
 Historia RAM nie zawiera podglądu ani snapshotu; nowe komunikaty mają warianty PL/EN.
 Pozostałe akcje zachowują dotychczasowe reguły i wyniki. Testy: `ApprovalManager.oneTime.test.ts`
 oraz istniejący `ApprovalManager.test.ts`.
+
+## 2.4.5 P5 - teksty kontekstu delegacji
+
+Klucze i18n `chat.parent_conversation.*` opisują pending/included/truncated/omitted,
+źródło, zakres i szacunek w UI. `mcp.delegate.param.context_mode` oraz opisy delegate
+PL/EN publikują wybór kontekstu po ukończeniu UI P5. Zgody i wykonanie bez zmian.

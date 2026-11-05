@@ -291,3 +291,15 @@ Gdy `resultView` jest podany, `createSubAgentBlock` tworzy zwinięty kafelek tak
 `SubAgentResultView.openQuestion` zawiera tekst pytania bez odpowiedzi: kafelek pokazuje je w osobnej linii. Tytuł i znacznik otrzymuje od adaptera.
 
 `TileStatus.attention` oznacza stan wymagający uwagi: pasek, ikona i kropka korzystają z `var(--text-warning)`. Adapter ustawia `SubAgentResultView.status`, także dla otwartego pytania; komponent mapuje ten status bez interpretacji pytania. Materiał komponent renderuje bez zmian.
+
+## 2.4.5 P5 - opis kontekstu delegacji
+
+Barrel eksportuje typ `SubAgentConversationView` (`state`, `badge`, `details`).
+`createSubAgentBlock({conversation})` dokłada osobny znacznik nagłówka i leniwą sekcję
+szczegółów zarówno do pokwitowania, jak wyniku/błędu i `resultView`. Nie interpretuje
+metadanych domenowych, nie importuje sub-agents i nie zmienia znacznika outcome.
+Klasy: `cs-tile--conversation`, `cs-parent-conversation__badge`,
+`cs-parent-conversation--pending|included|truncated|omitted`,
+`cs-parent-conversation__details`. Wygląd i zawijanie w wąskim panelu ustala wyłącznie
+CSS czatu. Teksty są przekazywane przez adapter i renderowane jako tekst, bez HTML.
+Bez `conversation` DOM i zachowanie komponentu pozostają niezmienione.

@@ -65,7 +65,7 @@ async function _resolveArtifactPath(plugin: ChatViewLike['plugin'], artifactId: 
  */
 export async function renderMachineTile(container: HTMLElement, plugin: ChatViewLike['plugin'], view: MachineView): Promise<void> {
     if (view.subAgentResult) {
-        container.appendChild(createSubAgentBlock({ type: 'delegate', role: 'system', status: view.subAgentResult.status === 'error' ? 'error' : 'success', resultView: view.subAgentResult }));
+        container.appendChild(createSubAgentBlock({ type: 'delegate', conversation: view.conversation, role: 'system', status: view.subAgentResult.status === 'error' ? 'error' : 'success', resultView: view.subAgentResult }));
         return;
     }
     let action: { label: string; onClick: (ev: MouseEvent) => void; disabled?: boolean; title?: string } | undefined;

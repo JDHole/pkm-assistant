@@ -3929,3 +3929,27 @@ span.cs-note-link {
 .cs-selection-menu__btn:hover {
   background: var(--background-modifier-hover);
 }
+
+/* 2.4.5: parent conversation, shared by tiles and the sub-agent strip. */
+.cs-parent-conversation__badge {
+    flex-shrink: 0;
+    font-size: var(--font-smallest);
+    color: var(--text-muted);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    padding: 2px 6px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.cs-parent-conversation--truncated,
+.cs-parent-conversation--omitted { color: var(--text-warning); }
+.cs-parent-conversation--pending { font-style: italic; }
+.cs-parent-conversation__details {
+    color: var(--text-muted);
+    font-size: var(--font-small);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    margin-block: 6px;
+}
+.cs-tile--conversation > .cs-tile__head { flex-wrap: wrap; }
+.cs-tile--conversation .cs-tile__title { white-space: normal; }

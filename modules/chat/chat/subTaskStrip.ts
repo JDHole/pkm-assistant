@@ -1,4 +1,5 @@
 /** Render paska wątku i biegów w czacie. Komunikacja do suba pozostaje wyłącznie po stronie agenta. */
+import { buildParentConversationView } from './parentConversationView.js';
 import { t, pluralCategory } from '../../../core/i18n/index.js';
 import { SkinManager, setSvg } from '../../crystal-soul/index.js';
 import { buildStripModel, buildStripTreeModel, formatDuration, getStripStateLabelParts, summarizeStripRows } from '../../sub-agents/index.js';
@@ -142,7 +143,7 @@ export function renderSubTaskStrip(host: El, ctx: SubTaskStripContext): number {
     if (host.isConnected && (ticks.length || registry?.events)) {
         const timer = ticks.length ? window.setInterval(() => ticks.forEach(tick => tick()), 1000) : undefined;
         const refresh = (): void => { if (host.isConnected) renderSubTaskStrip(host, ctx); };
-        const unsubs = ['question:opened', 'question:closed', 'question:clock'].map(event => registry?.events?.on(event, refresh)).filter((off): off is () => void => typeof off === 'function');
+        const unsubs = ['question:opened', 'question:closed', 'question:clock', 'task:context'].map(event => registry?.events?.on(event, refresh)).filter((off): off is () => void => typeof off === 'function');
         const observer = new MutationObserver(() => { if (!host.isConnected) cleanup(); });
         const cleanup = (): void => { if (timer !== undefined) window.clearInterval(timer); for (const off of unsubs) off(); observer.disconnect(); stripTimers.delete(host); };
         observer.observe(host.ownerDocument, { childList: true, subtree: true });
@@ -184,6 +185,7 @@ function renderTreeNode(host: El, parent: El, node: StripTreeNode, ctx: SubTaskS
     chip.createSpan({ cls: 'pkm-substrip__crystal', text: '◆', attr: { 'aria-hidden': 'true' } });
     chip.createSpan({ cls: 'pkm-substrip__name', text: row.name });
     chip.createSpan({ cls: 'pkm-substrip__state', text: label });
+    renderConversation(chip, row.parentConversation);
     chip.createSpan({ cls: 'pkm-substrip__time', text: node.time });
     chip.addEventListener('click', event => { event.stopPropagation(); ctx.onToggle(isExpanded ? null : row.id); });
     chip.addEventListener('keydown', event => {
@@ -256,6 +258,7 @@ function renderChip(chips: El, row: StripRow, ctx: SubTaskStripContext, isExpand
     updateClock(chips.parentElement as El, row.questionState, () => { label.textContent = questionLabel(row.questionState, row.state); button.setAttribute('aria-label', `${row.name}: ${label.textContent}`); });
     if (row.state.kind === 'queued') button.createSpan({ cls: 'pkm-substrip__queue', text: t('chat.substrip.queue_position', { position: String(row.state.position) }) });
     if (row.threadId && row.runNumber > 0 && row.runLimit) button.createSpan({ cls: 'pkm-substrip__run-number', text: t('chat.substrip.run_number', { number: String(row.runNumber), total: String(row.runLimit) }) });
+    renderConversation(button, row.parentConversation);
     button.createSpan({ cls: 'pkm-substrip__time', text: formatDuration(row.durationMs) });
     button.addEventListener('click', event => { event.stopPropagation(); ctx.onToggle(isExpanded ? null : row.id); });
     button.addEventListener('keydown', event => {
@@ -264,6 +267,7 @@ function renderChip(chips: El, row: StripRow, ctx: SubTaskStripContext, isExpand
 }
 
 function renderDetail(host: El, details: El, row: StripRow, registry: RegistryLike | null | undefined, ctx: SubTaskStripContext, treeNode?: StripTreeNode): void {
+    if (!row.runs.length || row.questionState.kind === 'waiting') renderConversation(details, row.parentConversation, true);
     if (row.state.kind === 'running' && row.questionState.kind === 'waiting') {
         const question = row.questionState;
         const head = details.createDiv({ cls: 'pkm-substrip__detail-head' });
@@ -306,6 +310,7 @@ function renderRunCard(axis: El, run: StripRun, row: StripRow, registry: Registr
             : stateLabel(run.state);
     header.createSpan({ cls: 'pkm-substrip__run-state', text: label });
     if (live && (row.state.kind === 'running' || row.state.kind === 'stopping')) renderStopButton(header, registry, row);
+    renderConversation(card, run.parentConversation, true);
     if (run.endReason) card.createDiv({ cls: 'pkm-substrip__end-reason', text: run.endReason });
     if (run.note) card.createDiv({ cls: 'pkm-substrip__end-reason', text: t(run.note === 'storage-error' ? 'chat.streaming.partial_storage_error' : 'chat.substrip.synthesis_pending') });
     if (!run.available) {
@@ -401,4 +406,14 @@ function renderStopButton(parent: El, registry: RegistryLike | null | undefined,
 function formatClock(at: number): string {
     const date = new Date(at);
     return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
+}
+
+function renderConversation(parent: El, metadata: StripRow['parentConversation'], expanded = false): void {
+    const view = buildParentConversationView(metadata);
+    if (!view) return;
+    parent.createSpan({ cls: `cs-parent-conversation__badge cs-parent-conversation--${view.state}`, text: view.badge });
+    if (expanded) {
+        const details = parent.createDiv({ cls: 'cs-parent-conversation__details' });
+        for (const text of view.details) details.createDiv({ text });
+    }
 }

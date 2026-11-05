@@ -46,7 +46,14 @@ export interface SubAgentResultView {
     openQuestion?: string;
 }
 
+export interface SubAgentConversationView {
+    state: 'pending' | 'included' | 'truncated' | 'omitted';
+    badge: string;
+    details: string[];
+}
+
 interface SubAgentBlockOptions {
+    conversation?: SubAgentConversationView;
     type: string;
     aspectType?: string;
     agentName?: string;
@@ -263,6 +270,16 @@ export function createSubAgentBlock(opts: SubAgentBlockOptions): HTMLElement {
         details = _buildResultDetails(opts, isError);
     }
 
+    const conversation = opts.conversation;
+    if (conversation) {
+        const originalDetails = details;
+        details = body => {
+            const section = body.createDiv({ cls: 'cs-parent-conversation__details' });
+            for (const line of conversation.details) section.createDiv().textContent = line;
+            if (typeof originalDetails === 'function') originalDetails(body);
+            else if (originalDetails) body.createDiv().textContent = originalDetails;
+        };
+    }
     const handle = createTile({
         role: opts.role || 'agent',
         status,
@@ -278,6 +295,11 @@ export function createSubAgentBlock(opts: SubAgentBlockOptions): HTMLElement {
         details,
     });
     if (resultView) handle.el.classList.add('cs-tile--subresult');
+    if (conversation) {
+        handle.el.classList.add('cs-tile--conversation');
+        const badge = handle.el.querySelector('.cs-tile__head')!.createSpan({ cls: `cs-parent-conversation__badge cs-parent-conversation--${conversation.state}` });
+        badge.textContent = conversation.badge;
+    }
     return handle.el;
 }
 

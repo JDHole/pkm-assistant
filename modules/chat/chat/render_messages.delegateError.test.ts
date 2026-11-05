@@ -23,10 +23,15 @@
 import test from 'ava';
 import { render_messages, append_message } from './chat_messages.js';
 import { _chatOnToolResults } from './chat_streaming.js';
+import { SubTaskRegistry } from '../../sub-agents/index.js';
+import type { ParentConversationMetadata } from '../../sub-agents/index.js';
+import { QuestionTestClock } from '../../sub-agents/test-support/questionTestClock.js';
+import { buildSubTaskResultDelivery } from './subTaskResultDelivery.js';
+import { formatSessionEvent, parseActiveSession } from '../../memory/activeSessionFormat.js';
 import { createSubAgentBlock } from '../../ui-components/index.js';
 // `translate` (nie `t`) - AVA nazywa swój argument asercji `t`, więc import pod tą samą nazwą
 // cieniowałby się wewnątrz callbacku testu.
-import { t as translate } from '../../../core/i18n/index.js';
+import { setLocale, t as translate } from '../../../core/i18n/index.js';
 
 type Listener = (ev: unknown) => void;
 
@@ -50,6 +55,7 @@ type FakeEl = {
     createDiv(opts?: { cls?: string | string[] }): FakeEl;
     createSpan(opts?: { cls?: string | string[]; text?: string }): FakeEl;
     createEl(tag: string, opts?: { cls?: string | string[]; text?: string }): FakeEl;
+    querySelector(selector: string): FakeEl | null;
     querySelectorAll(): FakeEl[];
     scrollIntoView(): void;
     style: { setProperty(name: string, value: string): void; getPropertyValue(name: string): string };
@@ -97,6 +103,7 @@ function makeFakeEl(tag = 'div'): FakeEl {
         createDiv(opts) { const c = makeFakeEl('div'); if (opts?.cls) c.className = Array.isArray(opts.cls) ? opts.cls.join(' ') : opts.cls; el.appendChild(c); return c; },
         createSpan(opts) { const c = makeFakeEl('span'); if (opts?.cls) c.className = Array.isArray(opts.cls) ? opts.cls.join(' ') : opts.cls; if (opts?.text != null) c.textContent = opts.text; el.appendChild(c); return c; },
         createEl(tag2, opts) { const c = makeFakeEl(tag2); if (opts?.cls) c.className = Array.isArray(opts.cls) ? opts.cls.join(' ') : opts.cls; if (opts?.text != null) c.textContent = opts.text; el.appendChild(c); return c; },
+        querySelector(selector) { return findByClass(el, selector.slice(1)); },
         querySelectorAll() { return []; },
         scrollIntoView() {},
     } as FakeEl;
@@ -387,5 +394,93 @@ test.serial('render_messages: sub_agent task, pokwitowanie, list i odmowa maja w
         const deniedContainer = await render({ success: false, error: 'odmowa' }, { action: 'task' });
         t.truthy(findByClass(deniedContainer, 'cs-tile--error'));
         t.falsy(findByClass(deniedContainer, 'cs-tile--agent'));
+    });
+});
+
+const contextMetadata: ParentConversationMetadata = {
+    mode: 'parent_conversation', status: 'included', source: 'sub', sourceId: 'parent#2',
+    window: { tokens: 4096, estimated: true, source: 'fallback' }, truncated: true,
+    keptMessages: 3, summarizedMessages: 2, omittedMessages: 1, estimatedTokens: 120,
+    inputTokens: 400, maxOutputTokens: 1024, marginTokens: 461,
+};
+const contextDetails = [
+    'Źródło: rodzic-sub, bieg parent#2.',
+    'Wiadomości: zachowane 3, streszczone 2, pominięte 1.',
+    'Szacowany rozmiar rozmowy: 120 tokenów.',
+    'Limit okna modelu jest szacunkowy.',
+    'Bez załączników i myślenia. Uprawnienia do plików i narzędzi bez zmian.',
+];
+
+for (const sample of [
+    { label: 'kolejka', metadata: { mode: 'parent_conversation', status: 'pending', source: 'lead', sourceId: 7 } as ParentConversationMetadata,
+        badge: 'z rozmową - oczekuje', cls: 'pending', background: true,
+        details: ['Źródło: prowadzący, tura 7.', 'Rozmowa oczekuje na dopasowanie do okna modelu. Nie potwierdzono jej wysłania.', 'Bez załączników i myślenia. Uprawnienia do plików i narzędzi bez zmian.'] },
+    { label: 'wynik skrócony', metadata: contextMetadata, badge: 'z rozmową - rozmowa skrócona', cls: 'truncated', details: contextDetails },
+    { label: 'błąd', metadata: contextMetadata, badge: 'z rozmową - rozmowa skrócona', cls: 'truncated', error: true, details: contextDetails },
+    { label: 'bez skrócenia', metadata: { ...contextMetadata, truncated: false }, badge: 'z rozmową', cls: 'included', details: contextDetails },
+    { label: 'bez miejsca', metadata: { ...contextMetadata, status: 'omitted', keptMessages: 0, summarizedMessages: 0, omittedMessages: 6, estimatedTokens: 0 } as ParentConversationMetadata,
+        badge: 'rozmowa pominięta', cls: 'omitted', details: ['Źródło: rodzic-sub, bieg parent#2.', 'Brak treści lub miejsca w oknie modelu. Zadanie bazowe bez rozmowy rodzica.', 'Wiadomości: zachowane 0, streszczone 0, pominięte 6.', 'Szacowany rozmiar rozmowy: 0 tokenów.', 'Limit okna modelu jest szacunkowy.', 'Bez załączników i myślenia. Uprawnienia do plików i narzędzi bez zmian.'] },
+]) {
+    test.serial(`P5: żywy kafelek i historia - ${sample.label}`, async t => {
+        setLocale('pl'); t.teardown(() => setLocale('en'));
+        await withFakeDocument(async () => {
+            const output = { success: !sample.error, ...(sample.error ? { error: 'AWARIA' } : {}), result: 'DOROBEK', parentConversation: sample.metadata,
+                ...(sample.background ? { started: true, task_id: 'run-1', queued: 1 } : {}) };
+            const call = { id: 'c', name: 'delegate', arguments: { task: 'Zadanie', aspect: 'worker' } };
+            const container = makeFakeEl();
+            const view = buildFakeThis(container, [
+                { role: 'assistant', content: '', tool_calls: [{ id: 'c', function: { name: 'delegate', arguments: JSON.stringify(call.arguments) } }] },
+                { role: 'tool', tool_call_id: 'c', content: JSON.stringify(output) },
+            ]);
+            view.plugin.subTaskRegistry.getTask = () => sample.background ? { status: 'running' } : undefined;
+            await render_messages.call(view);
+            let live!: FakeEl;
+            const turn = { agentName: 'Jaskier', owner: { memory: null }, origin: {}, tt: { record() {} },
+                rawResults: new Map([['c', { result: output, error: null }]]),
+                pendingEntries: [{ toolDisplay: { replaceWith: (el: FakeEl) => { live = el; } } }],
+            };
+            await _chatOnToolResults.call({ ...view, _isTurnActiveTab: () => true, _scheduleConnectorRedraw() {}, _updateTokenPanel() {} } as never,
+                turn as never, [{ toolCall: call, result: JSON.stringify(output) }] as never, 0);
+            for (const tile of [findByClass(container, 'cs-tile--agent')!, live]) {
+                t.is(findByClass(tile, 'cs-parent-conversation__badge')?.textContent, sample.badge);
+                t.is(findByClass(tile, 'cs-parent-conversation__badge')?.className, `cs-parent-conversation__badge cs-parent-conversation--${sample.cls}`);
+                t.true(tile.classList.contains(sample.background ? 'cs-tile--pending' : sample.error ? 'cs-tile--error' : 'cs-tile--ok'));
+                if (!sample.error) (findByClass(tile, 'cs-tile__head')?.listeners.click || []).forEach(cb => cb({}));
+                t.deepEqual(findByClass(tile, 'cs-parent-conversation__details')?.children.map(el => el.textContent), sample.details);
+                t.is(deepText(tile).includes('DOROBEK'), !sample.background && !sample.error);
+            }
+        });
+    });
+}
+
+test.serial('P5: powiadomienie końcowe i restore P6 zachowują metadane konkretnego biegu', async t => {
+    setLocale('pl'); t.teardown(() => setLocale('en'));
+    await withFakeDocument(async () => {
+        const owner = { agentName: 'Jaskier', sessionPath: 'chat.md', sessionEpoch: 'a'.repeat(32) };
+        const records: unknown[] = [];
+        const registry = new SubTaskRegistry({ questionClock: new QuestionTestClock(), appendHistory: async record => { records.push(record); } });
+        t.teardown(() => registry.dispose());
+        registry.create({ id: 'run-1', name: 'worker', origin: owner, background: true });
+        registry.setParentConversation('run-1', contextMetadata);
+        registry.finish(registry.getTask('run-1')!, { text: 'WYNIK', toolsUsed: [], durationMs: 0, usage: null,
+            outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true, effects: [] } });
+        const task = registry.getTask('run-1')!;
+        const delivery = buildSubTaskResultDelivery(task, registry, 1000);
+        await registry.flushHistory();
+        const session = records.map(record => formatSessionEvent('sub_task_history', { sub_task_history: record }, '2026-11-05T12:00:00Z')).join('');
+        const restored = new SubTaskRegistry({ questionClock: new QuestionTestClock() });
+        t.teardown(() => restored.dispose());
+        t.is(restored.importHistory(parseActiveSession(session).subTaskHistory!, owner), 1);
+        for (const [source, meta] of [[registry, delivery.meta], [restored, {}]] as const) {
+            const container = makeFakeEl();
+            const view = buildFakeThis(container, [{ role: 'user', content: delivery.text, ...meta }]);
+            view.plugin.subTaskRegistry = source;
+            await render_messages.call(view);
+            const tile = findByClass(container, 'cs-tile--system')!;
+            t.is(findByClass(tile, 'cs-parent-conversation__badge')?.textContent, 'z rozmową - rozmowa skrócona');
+            (findByClass(tile, 'cs-tile__head')?.listeners.click || []).forEach(cb => cb({}));
+            t.deepEqual(findByClass(tile, 'cs-parent-conversation__details')?.children.map(el => el.textContent), contextDetails);
+            t.true(deepText(tile).includes('WYNIK'));
+        }
     });
 });

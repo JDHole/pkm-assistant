@@ -55,3 +55,17 @@ for (const kind of ['single', 'unknown'] as const) {
         t.false(options.resultView?.notes.includes(tr('chat.subresult.continue_same_thread')));
     });
 }
+
+test.serial('P5: angielski adapter przekazuje zakres i szacunek do UI błędu', t => {
+    setLocale('en'); t.teardown(() => setLocale('pl'));
+    const options = buildDelegateBlockOptions({ success: false, error: 'MODEL FAILED', parentConversation: {
+        mode: 'parent_conversation', status: 'included', source: 'lead', sourceId: 5,
+        truncated: false, keptMessages: 8, summarizedMessages: 2, omittedMessages: 0, estimatedTokens: 210,
+        inputTokens: 400, maxOutputTokens: 1024, marginTokens: 461, window: { tokens: 4096, source: 'catalog', estimated: false },
+    } }, { type: 'delegate' });
+    t.deepEqual(options.conversation, { state: 'included', badge: 'with conversation', details: [
+        'Source: lead, turn 5.', 'Messages: kept 8, summarized 2, omitted 0.', 'Estimated conversation size: 210 tokens.',
+        'No attachments or reasoning. File and tool permissions remain unchanged.',
+    ] });
+    t.is(options.response, 'Error: MODEL FAILED');
+});

@@ -1,3 +1,6 @@
+import { buildParentConversationView } from './parentConversationView.js';
+import type { ParentConversationMetadata } from '../../sub-agents/index.js';
+import type { SubAgentConversationView } from '../../ui-components/index.js';
 /**
  * @module machineMessage
  * Klasyfikator wiadomości maszynowych (spec A3, "Czat bez ścian" 2.3.0).
@@ -50,6 +53,7 @@ export interface MachineView {
     /** Steruje kolorem/domyślnym rozwinięciem kafelka (`createTile`'s `status`). */
     status: 'ok' | 'error' | 'attention';
     subAgentResult?: SubAgentResultView;
+    conversation?: SubAgentConversationView;
 }
 
 /** Kształt wiadomości, jaki realnie czyta klasyfikator - `RollingMessage` z `chat/RollingWindow.ts`
@@ -451,7 +455,7 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
             || extractSecondVar(text, SUBTASK_HEADER_KEY, ['name', 'task_id'])
             || null;
         const task = subTaskId ? ctx.getTask?.(subTaskId) : undefined;
-        const taskData = task && typeof task === 'object' ? task as { questionState?: { kind?: unknown; question?: unknown; resolution?: unknown }; result?: { question?: unknown } } : undefined;
+        const taskData = task && typeof task === 'object' ? task as { parentConversation?: ParentConversationMetadata; questionState?: { kind?: unknown; question?: unknown; resolution?: unknown }; result?: { question?: unknown } } : undefined;
         const taskQuestion = taskData?.questionState?.kind === 'closed'
             ? { ...(typeof taskData.questionState.question === 'object' && taskData.questionState.question !== null ? taskData.questionState.question : {}), resolution: taskData.questionState.resolution }
             : taskData?.result?.question;
@@ -499,6 +503,7 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
             details: finalDetails,
             status: outcome === 'done' ? 'ok' : 'error',
             ...(subAgentResult ? { subAgentResult } : {}),
+            ...(taskData?.parentConversation ? { conversation: buildParentConversationView(taskData.parentConversation, ctx.t) } : {}),
         };
     }
 

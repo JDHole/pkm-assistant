@@ -648,6 +648,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     type: 'string',
                     description: t('mcp.delegate.param.context')
                 },
+                context_mode: { type: 'string', enum: ['clean', 'parent_conversation'], description: t('mcp.delegate.param.context_mode') },
                 // `extra_tools` świadomie NIE JEST w schemacie: rozszerzanie narzędzi suba
                 // ponad config to decyzja usera w YAML, nie modelu w locie.
                 aspect_explicit: {
@@ -672,6 +673,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                             task: { type: 'string', description: t('mcp.delegate.param.task') },
                             aspect: { type: 'string', description: t('mcp.delegate.param.aspect') },
                             context: { type: 'string', description: t('mcp.delegate.param.context') },
+                            context_mode: { type: 'string', enum: ['clean', 'parent_conversation'], description: t('mcp.delegate.param.context_mode') },
                             aspect_explicit: { type: 'boolean' },
                             timeout_ms: { type: 'number' },
                         },
@@ -680,7 +682,8 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     description: t('mcp.delegate.param.tasks')
                 }
             },
-            required: []
+            required: [],
+            not: { required: ['tasks', 'context_mode'] },
         },
         execute: async (args: DelegateToolArgs, _app: unknown, plugin: DelegatePlugin | null | undefined, runtime?: BuiltinToolExecutionContext) => {
             try {

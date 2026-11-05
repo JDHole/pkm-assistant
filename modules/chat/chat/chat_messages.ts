@@ -14,6 +14,8 @@ import {
     createNoteLink,
 } from '../../ui-components/index.js';
 import { t, getDateLocale } from '../../../core/i18n/index.js';
+import { buildParentConversationView } from './parentConversationView.js';
+import type { ParentConversationMetadata } from '../../sub-agents/index.js';
 import { buildDelegateBlockOptions } from './delegateBlockView.js';
 import { subAgentCallView } from './subAgentCallView.js';
 import { answeredSubQuestion, renderAnsweredSubQuestion } from './subQuestionView.js';
@@ -54,6 +56,7 @@ type MessageContent = string | ContentBlock[];
  * nie tutaj (dawne `unknown[]`/`unknown` nie przechodziły do jego wymaganych pól).
  */
 interface HistoryToolOutput {
+    parentConversation?: ParentConversationMetadata;
     [key: string]: unknown;
     result?: string;
     error?: string;
@@ -68,7 +71,7 @@ interface HistoryToolOutput {
     name?: string;
     aspect?: string;
     sub_id?: string;
-    tasks?: Array<{ task_id?: string; sub_id?: string; name?: string; queued?: boolean }>;
+    tasks?: Array<{ task_id?: string; sub_id?: string; name?: string; queued?: boolean; parentConversation?: ParentConversationMetadata }>;
     queued?: number;
 }
 
@@ -282,7 +285,7 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                             // żywo (`chat_streaming.ts`), ta sama funkcja receipt.
                             const startedList = Array.isArray(historyOutput.tasks)
                                 ? historyOutput.tasks
-                                : [{ task_id: historyOutput.task_id, name: historyOutput.name }];
+                                : [{ task_id: historyOutput.task_id, name: historyOutput.name, parentConversation: historyOutput.parentConversation }];
                             const receiptBlocks = startedList.flatMap(item => {
                                 const taskId = typeof item?.task_id === 'string' ? item.task_id : '';
                                 if (taskId && notificationTaskIds.has(taskId)) return [];
@@ -295,6 +298,7 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                                     : typeof item?.sub_id === 'string' ? item.sub_id
                                         : typeof historyOutput.sub_id === 'string' ? historyOutput.sub_id : '';
                                 const thread = threadId ? this.plugin?.subTaskRegistry?.getThread?.(threadId) : undefined;
+                                const conversation = buildParentConversationView(task?.parentConversation ?? item?.parentConversation);
                                 const known = !!task || !!thread;
                                 const name = item?.name || _hName || '';
                                 if (!known) {
@@ -303,7 +307,7 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                                         status: 'error' as const,
                                         missingTargets: [], effects: [], notes: [],
                                     };
-                                    return [markReceipt(createSubAgentBlock({ type: tcName, agentName: name, query: taskQuery, status: 'error', resultView }))];
+                                    return [markReceipt(createSubAgentBlock({ type: tcName, agentName: name, query: taskQuery, status: 'error', resultView, conversation }))];
                                 }
                                 if (!task && (thread?.phase === 'idle' || thread?.phase === 'closed')) {
                                     const resultView = {
@@ -311,7 +315,7 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                                         status: 'error' as const,
                                         missingTargets: [], effects: [], notes: [],
                                     };
-                                    return [markReceipt(createSubAgentBlock({ type: tcName, agentName: name, query: taskQuery, status: 'error', resultView }))];
+                                    return [markReceipt(createSubAgentBlock({ type: tcName, agentName: name, query: taskQuery, status: 'error', resultView, conversation }))];
                                 }
                                 const isActive = task ? task.status === 'running'
                                     : thread?.phase === 'queued' || thread?.phase === 'running';
@@ -327,6 +331,7 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                                         result: task?.result ? { text: task.result.text, handoff: task.result.handoff } : '',
                                         partial: task?.partial ? { text: task.partial.text } : undefined,
                                         outcome,
+                                        parentConversation: task?.parentConversation ?? item?.parentConversation,
                                         effects: thread?.effects,
                                         question: task?.result?.question,
                                         questionState: task?.questionState,
@@ -334,7 +339,7 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                                     }, { type: tcName, agentName: name, query: taskQuery });
                                     return [markReceipt(createDelegateBlock(options))];
                                 }
-                                return [markReceipt(createSubAgentBlock({ type: tcName, pending: true, status: 'success', agentName: name,
+                                return [markReceipt(createSubAgentBlock({ type: tcName, pending: true, status: 'success', agentName: name, conversation,
                                     query: taskQuery, response: buildBackgroundReceiptText([item], item?.queued ? 1 : startedList.length === 1 ? historyOutput.queued : undefined) }))];
                             });
                             if (receiptBlocks.length) {

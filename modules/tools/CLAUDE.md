@@ -647,3 +647,14 @@ poprzedzają rezerwację, a po kolejce ponownie sprawdzane są źródło, rodzic
 anulowanie i tożsamość zamrożonego modelu. Snapshot i konfiguracja po zgodzie są
 niezmienne. Pokwitowanie niesie `parentConversation` pending albo końcowe metadane,
 a wynik powtarza końcowy stan; batch zachowuje oddzielne odmowy.
+
+### Publikacja argumentu (2.4.5 P5)
+
+`delegate.inputSchema` publikuje opcjonalne `context_mode: clean|parent_conversation`
+w pojedynczym zadaniu i każdym elemencie `tasks[]`. Schema odrzuca jednoczesne
+zewnętrzne `context_mode` i `tasks`, null oraz inne wartości. Brak pola oznacza clean;
+ręczny `context` pozostaje niezależny. Opisy PL/EN objaśniają zakres, wykluczenia,
+zgodę innego dostawcy i brak startu po odmowie. Wykonanie zachowuje walidator P4.
+Testy P5 w `DelegateTool.parentConversation.test.ts`: publiczne definicje narzędzi,
+literalne prompty lead → sub → wnuk (bez odziedziczonego głównego czatu) oraz
+identyczne prompty clean z ręcznym kontekstem dla braku pola i jawnego clean.

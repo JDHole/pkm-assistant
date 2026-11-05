@@ -1638,3 +1638,22 @@ tury oraz `chatModel.providerId`, z bieżącym `assistantText` poza store. Nie c
 zakładki/pamięci. Testy: `chat_streaming.parentConversation.test.ts` (pełne send_message,
 PDF/image/wzmianki, dwie zakładki jednego agenta, reset epoki, późne dopiski), `chat_session.test.ts`
 (round-trip), `../sub-agents/ParentConversation.test.ts` (kompresja). UI pozostaje poza P1.
+
+## 2.4.5 P5 - oznaczenia rozmowy rodzica
+
+`chat/parentConversationView.ts` zamienia metadane biegu na wspólny opis UI dla
+`delegateBlockView`, pokwitowań live/restore, końcowych powiadomień `machineMessage`
+i płaskiego/drzewiastego `subTaskStrip`. Pending pokazuje „z rozmową - oczekuje” i nie
+potwierdza wysłania ani rozmiaru. Included pokazuje „z rozmową”, truncated dodatkowo
+„rozmowa skrócona”, omitted „rozmowa pominięta” z wyjaśnieniem braku treści/miejsca.
+Szczegóły zawierają bezpośrednie źródło lead/sub i ID tury/biegu, liczby wiadomości,
+szacowane tokeny, informację o szacunkowym oknie oraz wyłączeniu załączników/myślenia.
+Nie renderujemy treści snapshotu ani zgody. Brak metadanych zachowuje stary DOM.
+
+Pasek słucha `task:context`, więc dopasowanie po kolejce natychmiast aktualizuje
+znacznik. Oś wątku używa metadanych każdego biegu osobno; kontynuacja clean nie
+dziedziczy oznaczenia poprzednika. Powiadomienie czyta metadane zadania po ID biegu
+z rejestru (również odtworzonego z P6), a pokwitowanie preferuje rejestr przed
+zapisanym wynikiem narzędzia. Wszystkie nowe style są w `chat_view.css`.
+Testy: `render_messages.delegateError.test.ts` (live/historia, błąd, kolejka,
+pominięcie, końcowy kafelek i restore P6), `subTaskStrip.test.ts` (zdarzenie i oś biegów).

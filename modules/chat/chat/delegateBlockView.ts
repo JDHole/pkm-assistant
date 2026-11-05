@@ -2,9 +2,11 @@ import { t } from '../../../core/i18n/index.js';
 import { toolResultStatus } from '../../../core/index.js';
 import type { SubAgentToolCallDetail, SubAgentUsage } from '../../ui-components/index.js';
 import type { RunOutcome } from '../../sub-agents/index.js';
+import { buildParentConversationView } from './parentConversationView.js';
 import { buildSubAgentResultView } from './subAgentResultView.js';
 
 interface DelegateResult {
+    parentConversation?: import('../../sub-agents/index.js').ParentConversationMetadata;
     isError?: boolean;
     success?: boolean;
     error?: string;
@@ -29,6 +31,7 @@ interface DelegateResult {
 }
 
 export interface DelegateBlockOptions {
+    conversation?: import('../../ui-components/index.js').SubAgentConversationView;
     type: string;
     status: 'success' | 'error';
     aspectType?: string;
@@ -60,6 +63,7 @@ export function buildDelegateBlockOptions(
         ? { kind: 'reusable' as const, sub_id: result.sub_id }
         : { kind: 'unknown' as const });
     const common = {
+        ...(result.parentConversation ? { conversation: buildParentConversationView(result.parentConversation) } : {}),
         type: identity.type,
         agentName: identity.agentName || result.aspect || '',
         query: identity.query || '',
