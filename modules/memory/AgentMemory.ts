@@ -322,7 +322,14 @@ export interface BrainLogEntry {
     detail: string;
 }
 
+type SessionChanges = {
+    removedMessageIds?: readonly string[];
+    removedRanges?: readonly { from: string; to: string }[];
+    expectedSession?: { path: string; epoch: string | null };
+};
+
 export class AgentMemory {
+    private _removalSavesInFlight = new Map<string, Promise<string>>();
     // `declare` = sama deklaracja typu, zero emitu.
     declare vault: MemoryVaultLike;
     declare agentName: string;
@@ -1258,7 +1265,26 @@ epoch: ${epoch}
      * @param metadata - Session metadata
      * @returns Path to saved session
      */
-    async saveSession(messages: ChatMessageLike[] | null | undefined, metadata: TranscriptMetadata = {}, changes: { removedMessageIds?: readonly string[]; removedRanges?: readonly { from: string; to: string }[]; expectedSession?: { path: string; epoch: string | null } } = {}): Promise<string> {
+    async saveSession(messages: ChatMessageLike[] | null | undefined, metadata: TranscriptMetadata = {}, changes: SessionChanges = {}): Promise<string> {
+        const path = changes.expectedSession?.path ?? this.activeSessionPath;
+        if (!path || (!changes.removedMessageIds?.length && !changes.removedRanges?.length)) {
+            return this._saveSession(messages, metadata, changes);
+        }
+        // Closing can request the same deletion four times before its first write finishes.
+        // Only identical snapshots share a promise; subsequent edits still enter the path queue.
+        const key = JSON.stringify([path, changes.expectedSession ? changes.expectedSession.epoch : this.sessionEpoch,
+            (messages ?? []).map(message => [knownSessionMessageId(message), message]),
+            changes.removedMessageIds, changes.removedRanges]);
+        const pending = this._removalSavesInFlight.get(key);
+        if (pending) return pending;
+        const save = this._saveSession(messages, metadata, changes).finally(() => {
+            this._removalSavesInFlight.delete(key);
+        });
+        this._removalSavesInFlight.set(key, save);
+        return save;
+    }
+
+    private async _saveSession(messages: ChatMessageLike[] | null | undefined, metadata: TranscriptMetadata, changes: SessionChanges): Promise<string> {
         const list: ChatMessageLike[] = Array.isArray(messages) ? [...messages] : [];
         const removed = new Set(changes.removedMessageIds);
         const removedRanges = changes.removedRanges?.map(range => ({ ...range })) ?? [];

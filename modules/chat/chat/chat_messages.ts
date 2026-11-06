@@ -511,7 +511,6 @@ export function addMessageActions(this: ChatViewLike, metaEl: HTMLElement, conte
 }
 
 export function startEditMessage(this: ChatViewLike, msgIndex: number, originalContent: string): void {
-    // For simplicity, just remove messages from index and resend
     const messages = this.rollingWindow.messages;
     if (msgIndex >= 0 && msgIndex < messages.length) {
         const message = messages[msgIndex];
@@ -519,7 +518,15 @@ export function startEditMessage(this: ChatViewLike, msgIndex: number, originalC
         this.attachmentManager?.restoreAttachments(message.userAttachments ?? []);
         this.mentionAutocomplete?.restoreMentions(message.userMentions ?? []);
         // Sending the replacement confirms the edit; opening the editor preserves history.
-        beginMessageEdit(this.rollingWindow, message);
+        const editWindow = this.rollingWindow;
+        const editTab = this.chatTabs?.find(tab => tab.isActive);
+        const editPath = editTab?.sessionPath;
+        const editEpoch = editTab?.sessionEpoch;
+        const editAgent = this.plugin?.agentManager?.getActiveAgent?.()?.name;
+        beginMessageEdit(editWindow, message, this.input_area, () => this.rollingWindow === editWindow
+            && this.chatTabs?.find(tab => tab.isActive) === editTab
+            && editTab?.sessionPath === editPath && editTab?.sessionEpoch === editEpoch
+            && this.plugin?.agentManager?.getActiveAgent?.()?.name === editAgent);
 
         void this.render_messages();
         this.input_area.value = source;

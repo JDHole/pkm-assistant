@@ -1,3 +1,4 @@
+import { cancelMessageEdit } from './messageEdit.js';
 /**
  * Session management — save, load, consolidate, rolling window creation.
  * Methods mixed into ChatView.prototype.
@@ -374,6 +375,7 @@ export async function appendToActiveSession(this: ChatViewLike, event: ActiveSes
  * Handle new session — save, optionally compress, reset.
  */
 export async function handleNewSession(this: ChatViewLike) {
+    cancelMessageEdit(this.rollingWindow);
     // Nowa sesja NIE może zostawić trwającej tury jako zombie. Porzucona tura wisiałaby w tle
     // z uzbrojonym watchdogiem, który strzela „po agencie" i ubijałby requesty KOLEJNEJ tury
     // tego samego agenta. Ubijamy jawnie, zanim wymienimy sesję.
@@ -586,6 +588,7 @@ export async function handleLoadSession(this: ChatViewLike, path: string) {
         const choice = await modal.prompt();
         if (choice === 'cancel') return;
 
+        cancelMessageEdit(this.rollingWindow);
         await this.handleSaveSession();
         this.rollingWindow = this._createRollingWindow();
 

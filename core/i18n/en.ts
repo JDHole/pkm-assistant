@@ -338,6 +338,7 @@ export const en: Record<string, string> = {
   'chat.msg.copy': 'Copy',
   'chat.msg.delete': 'Delete',
   'chat.msg.edit': 'Edit',
+  'chat.msg.editing': 'Editing message - Esc cancels',
   'chat.msg.regenerate': 'Regenerate',
   'chat.msg.emergency_compress': 'Emergency compression #{{count}} - context limit',
   'chat.msg.compress': 'Context compression #{{count}}',

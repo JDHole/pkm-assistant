@@ -1700,3 +1700,16 @@ Dodatkowo event workspace `quit` dostaje Promise zapisu przez `Tasks.addPromise`
 siatka zapasowa; test nie symuluje zabicia procesu w trakcie I/O.
 Testy sekwencji F7: `chat/chat_f7.test.ts`; stare F4/F5 potwierdzają symulowaną wysyłkę
 przez `commitMessageEdit`, a F7 wywołuje rzeczywiste `send_message`.
+
+### 2.4.5 F8 — przełączenie zakładki i porzucenie edycji
+
+`_switchTab` zapisuje stan wychodzącego okna i zamraża ścieżkę/epokę zapisu przed
+pierwszym await. Aktywna zakładka, agent i okno zmieniają się synchronicznie; oczekiwanie
+na I/O jest na końcu, więc klik A → B → C nie przypisuje okna B do sesji A.
+`messageEdit` wiąże edycję z wiadomością, oknem, zakładką, agentem i tożsamością sesji.
+Przełączenie zakładki/agenta, nowa lub wczytana sesja, zamknięcie, wymiana inputu,
+wyczyszczenie szkicu i Escape anulują tryb bez usuwania historii. Znacznik PL/EN nad
+polem znika przy anulowaniu i potwierdzeniu; wygląd jest wyłącznie w CSS.
+`resetInputArea(true)` zachowuje tylko już wysłaną do kolejki poprawkę, oczekującą na
+koniec tury; zwykłe czyszczenie pola anuluje edycję. Restart nie odtwarza szkicu ani trybu.
+Testy sekwencji, callbacków zamykania i odczytu zapisanych plików: `chat/chat_f8.test.ts`.

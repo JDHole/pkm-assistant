@@ -1,3 +1,4 @@
+import { cancelMessageEdit } from './chat/messageEdit.js';
 /**
  * ChatView — coordinator.
  * Imports method modules from chat/ and wires them onto the prototype.
@@ -292,6 +293,7 @@ export class ChatView extends PluginItemView {
     _subscribeAgentManagerEvents(this: ChatViewLike) {
         if (this._agentManagerUnsub || !this.plugin?.agentManager?.on) return;
         this._agentManagerUnsub = this.plugin.agentManager.on((event: string) => {
+            if (event === 'agent:switched') cancelMessageEdit(this.rollingWindow);
             if (!['agents:loaded', 'agents:reloaded', 'agent:created', 'agent:deleted', 'agent:updated', 'communicator:project_updated'].includes(event)) {
                 return;
             }

@@ -1,3 +1,4 @@
+import { cancelMessageEdit } from './messageEdit.js';
 /**
  * @module chat_ui
  * ChatView UI rendering methods — extracted from chat_view.js.
@@ -125,6 +126,7 @@ function makeNoteOpener(app: ChatViewLike['app']): NoteOpener {
 // ── Main view render ────────────────────────────────────────────────
 
 export async function renderView(this: ChatViewLike, container = this.container) {
+    cancelMessageEdit(this.rollingWindow);
     // Adopt chat styles (CSSStyleSheet from import) przez `adoptSheet`, żeby demontaż pluginu
     // zdjął arkusz zamiast zostawiać go w dokumencie do restartu.
     adoptSheet(chat_view_styles);
@@ -1211,7 +1213,8 @@ export function handleInputResize(this: ChatViewLike) {
     textarea.style.height = newHeight + 'px';
 }
 
-export function resetInputArea(this: ChatViewLike) {
+export function resetInputArea(this: ChatViewLike, preserveMessageEdit = false) {
+    if (!preserveMessageEdit) cancelMessageEdit(this.rollingWindow);
     if (!this.input_area) return;
     this.input_area.value = '';
     this.input_area.style.removeProperty('height'); // Reset to min-height (CSS floor, .cs-input-textarea)
@@ -1256,6 +1259,7 @@ export function handle_input_keydown(this: ChatViewLike, e: KeyboardEvent) {
         } else if (this.historyIndex !== -1) {
             this.historyIndex = -1;
             this.input_area.value = '';
+            cancelMessageEdit(this.rollingWindow);
         }
         this.handleInputResize();
         return;
@@ -1263,6 +1267,7 @@ export function handle_input_keydown(this: ChatViewLike, e: KeyboardEvent) {
 }
 
 export function handleGlobalKeydown(this: ChatViewLike, e: KeyboardEvent) {
+    if (e.key === 'Escape') cancelMessageEdit(this.rollingWindow);
     if (e.key === 'Escape' && this.is_generating) {
         e.preventDefault();
         this.stop_generation();

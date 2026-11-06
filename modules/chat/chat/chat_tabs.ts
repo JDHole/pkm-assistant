@@ -1,3 +1,4 @@
+import { cancelMessageEdit } from './messageEdit.js';
 /**
  * Multi-agent tab management — init, switch, close, picker, tab bar rendering.
  * Methods mixed into ChatView.prototype.
@@ -115,10 +116,13 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
     // `_paintStreamFrame`.
     this._renderThrottle?.cancel();
 
-    // Persist pending removals before switching the memory's active session identity.
-    if (this.rollingWindow?.removedMessageIds?.length || this.rollingWindow?.removedMessageRanges?.length) {
-        await this.handleSaveSession(currentTab?.agentName, this.rollingWindow);
-    }
+    cancelMessageEdit(this.rollingWindow);
+    // Capture the outgoing window and destination before any asynchronous work.
+    // Switching the visible tab stays synchronous, so another click sees a coherent owner.
+    const outgoingWindow = this.rollingWindow;
+    const outgoingSession = currentTab?.sessionPath
+        ? { path: currentTab.sessionPath, epoch: currentTab.sessionEpoch ?? null } : undefined;
+    const saves: Promise<unknown>[] = [];
 
     // 1. Save current state
     if (currentTab) {
@@ -132,6 +136,10 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
             scrollTop,
             isGenerating: this.is_generating,
         });
+    }
+
+    if (outgoingWindow?.removedMessageIds?.length || outgoingWindow?.removedMessageRanges?.length) {
+        saves.push(this.handleSaveSession(currentTab?.agentName, outgoingWindow, outgoingSession));
     }
 
     // 2. Switch active flag
@@ -149,7 +157,8 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
             if (!memory.setActiveSessionIdentity) memory.activeSessionPath = targetTab.sessionPath || null;
         }
         if (memory && targetTab.sessionPath) {
-            await memory._persistActiveSession?.();
+            const persist = memory._persistActiveSession?.();
+            if (persist !== undefined) saves.push(persist);
         }
     }
 
@@ -245,6 +254,7 @@ export async function _switchTab(this: ChatViewLike, tabIdOrAgentName: string) {
     // wtedy przyjęcia (auto-tura za plecami usera). Teraz zakładka jest na wierzchu, więc
     // ponawiamy próbę. Nic nie czeka = drain jest darmowy.
     this._drainSubTasks?.();
+    await Promise.all(saves);
 }
 
 /**
@@ -346,6 +356,7 @@ export async function _closeActiveTab(this: ChatViewLike) {
     const activeIndex = this.chatTabs.findIndex((t: ChatTab) => t.isActive);
     if (activeIndex === -1) return;
 
+    cancelMessageEdit(this.rollingWindow);
     const activeTab = this.chatTabs[activeIndex];
     const activeKey = _tabKey(activeTab);
 

@@ -3953,3 +3953,9 @@ span.cs-note-link {
 }
 .cs-tile--conversation > .cs-tile__head { flex-wrap: wrap; }
 .cs-tile--conversation .cs-tile__title { white-space: normal; }
+
+.cs-message-edit-indicator {
+    padding: 4px 12px;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}

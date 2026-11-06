@@ -974,3 +974,12 @@ w frontmatterze transkryptu; `parseSessionFile` waliduje tablicę i długość, 
 pozostawia stary kształt wiadomości. Żadnych nowych delimiterów wewnątrz treści Markdown.
 Test F7 w `../chat/chat/chat_f7.test.ts` czyta stare i nowe eventy, archiwizuje i odczytuje
 rzeczywiście zapisane archiwum, a potem kontynuuje i edytuje sesję.
+
+### 2.4.5 F8 — scalanie zapisów usunięcia podczas zamykania
+
+`saveSession` współdzieli zapis w locie dla identycznego snapshotu z usunięciami,
+kluczowanego ścieżką, epoką, wiadomościami (również ich ID) i usuniętymi ID/zakresami.
+Quit/beforeunload/onunload/onClose nie dopisują czterech kopii tego samego zdarzenia.
+Zmieniony snapshot ma osobny zapis w dotychczasowej kolejce per plik; sukces i błąd
+zwalniają wpis, więc błąd nie blokuje ponowienia. Publiczna sygnatura bez zmian.
+Testy: `../chat/chat/chat_f8.test.ts` (cztery callbacki, błąd i kolejna zmiana w locie).

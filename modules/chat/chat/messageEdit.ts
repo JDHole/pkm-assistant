@@ -1,14 +1,41 @@
 import type { RollingMessage, RollingWindow } from './RollingWindow.js';
+import { t } from '../../../core/i18n/index.js';
 
-// Bind the draft to the original object, so deleting/reordering messages cannot edit a neighbour.
-const pending = new WeakMap<RollingWindow, RollingMessage>();
-export function beginMessageEdit(window: RollingWindow, message: RollingMessage): void {
-    pending.set(window, message);
-}
-export function hasPendingMessageEdit(window: RollingWindow): boolean { return pending.has(window); }
-export function commitMessageEdit(window: RollingWindow): void {
-    const message = pending.get(window);
+// An edit belongs to one window and the exact original message, never its array index.
+const pending = new WeakMap<RollingWindow, { message: RollingMessage; isCurrent(): boolean; cleanup(): void }>();
+export function cancelMessageEdit(window: RollingWindow): void {
+    pending.get(window)?.cleanup();
     pending.delete(window);
+}
+export function beginMessageEdit(window: RollingWindow, message: RollingMessage, input?: HTMLTextAreaElement, isCurrent = () => true): void {
+    cancelMessageEdit(window);
+    const row = input?.parentElement;
+    const indicator = row?.parentElement?.createDiv({ cls: 'cs-message-edit-indicator', text: t('chat.msg.editing'), attr: { role: 'status' } });
+    if (indicator) row?.parentElement?.insertBefore(indicator, row);
+    const onInput = () => { if (!input?.value.trim()) cancelMessageEdit(window); };
+    const onKey = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            cancelMessageEdit(window);
+        }
+    };
+    // Capture Escape before autocomplete/popups can consume it.
+    input?.addEventListener?.('input', onInput);
+    input?.addEventListener?.('keydown', onKey, true);
+    pending.set(window, { message, isCurrent, cleanup() {
+        indicator?.remove();
+        input?.removeEventListener?.('input', onInput);
+        input?.removeEventListener?.('keydown', onKey, true);
+    } });
+}
+export function hasPendingMessageEdit(window: RollingWindow): boolean {
+    const edit = pending.get(window);
+    if (edit && (!edit.isCurrent() || !window.messages.includes(edit.message))) cancelMessageEdit(window);
+    return pending.has(window);
+}
+export function commitMessageEdit(window: RollingWindow): void {
+    const message = hasPendingMessageEdit(window) ? pending.get(window)?.message : undefined;
+    cancelMessageEdit(window);
     if (!message) return;
     const index = window.messages.indexOf(message);
     if (index >= 0) window.removeMessages(index);

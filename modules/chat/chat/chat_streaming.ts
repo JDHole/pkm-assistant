@@ -1,4 +1,4 @@
-import { commitMessageEdit, hasPendingMessageEdit } from './messageEdit.js';
+import { cancelMessageEdit, commitMessageEdit, hasPendingMessageEdit } from './messageEdit.js';
 import { sessionMessageId } from '../../memory/index.js';
 /**
  * @module chat_streaming
@@ -313,7 +313,13 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     // z propozycji delegacji czy wynik suba to cudzy tekst, nie polecenie usera.
     const inlineTriggers = parseTriggersIfHuman(rawText, messageMeta);
     const text = inlineTriggers.length > 0 ? (stripInlineTriggers(rawText) || rawText) : rawText;
-    if (!text) return;
+    if (!text) {
+        if (!isInjected) cancelMessageEdit(this.rollingWindow);
+        return;
+    }
+    const sendWindow = this.rollingWindow;
+    const sendTab = this.chatTabs?.find(tab => tab.isActive);
+
     const reservationOwner = this._questionAutoTurn?.kind === 'reserved' && isQuestionOwnerCurrent(this, this._questionAutoTurn);
     if (isHuman && reservationOwner && this._questionAutoTurn?.kind === 'reserved' && !this._questionAutoTurn.accepted) {
         this._questionAutoTurn = { kind: 'idle' };
@@ -339,7 +345,8 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         // (`set_generating(false)`, wołane też przez `_switchTab`) porówna to z aktualną
         // zakładką i nie wystrzeli wiadomości pisanej do Jaskra w turę Borysa.
         this._queuedMessage = queueChatMessage(rawText, messageMeta, this._queueOwner());
-        this.resetInputArea();
+        // The submitted edit waits for this tab's queued send; clearing a draft still cancels.
+        this.resetInputArea(true);
         this._showQueuedIndicator(text);
         log.info('Chat', `Wiadomość zakolejkowana (${messageOrigin}): "${text.slice(0, 60)}..."`);
         return;
@@ -385,7 +392,9 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         }
     }
 
-    if (isHuman && !isInjected && hasPendingMessageEdit(this.rollingWindow)) {
+    // A save or slash command above may have yielded while the user switched tabs.
+    if (this.rollingWindow !== sendWindow || (sendTab && !sendTab.isActive)) return;
+    if (isHuman && !isInjected && hasPendingMessageEdit(sendWindow)) {
         commitMessageEdit(this.rollingWindow);
         if (!await persistMessageRemovals(this)) return;
         void this.render_messages();
@@ -2497,6 +2506,7 @@ export function stop_generation(this: ChatViewLike, tabKey?: string, reason = 's
  * @returns nazwy agentów, których tury zatrzymano
  */
 export function stop_all_turns(this: ChatViewLike, reason = 'close'): string[] {
+    cancelMessageEdit(this.rollingWindow);
     const runOwners = [...this._streamCtxMap.values()].flatMap(ctx => ctx.origin ? [ctx.origin] : []);
     // Kopia nazw PRZED pętlą - `stop_generation` kasuje wpisy z mapy w trakcie. Bierzemy też
     // tury W PRZYGOTOWANIU (prompt się buduje, wpisu w mapie jeszcze nie ma).
