@@ -165,6 +165,16 @@ Kroki po zakończeniu/usunięciu zadania nadal trafiają do trace, ale ich funkc
 scope nie wracają do cache. Testy F1: `SubTaskRegistry.plan.test.ts` oraz
 `../tools/DelegateTool.plan.test.ts` (natychmiastowe powiadomienie i inbox rodzica).
 
+2.4.6 F2: przed asynchronicznym zapisem `subagent_call` runner przekazuje gotowy
+wynik do `stagePlanResult(task, result)`. Rejestr trzyma go przez WeakMap tylko
+dla pracującego węzła planu, bez publikacji ani odblokowania następców. Stop/timeout
+w tym oknie przejmuje dorobek do pierwszego zakończenia, z zatrzaśniętym outcome
+`stopped`/`timeout` i kompletnością `partial` przy niepustym materiale. Terminalna
+transakcja usuwa referencję; późniejszy naturalny `finish` nie zmienia porażki,
+blokad ani liczby powiadomień. Biegi bez planu zachowują dotychczasową ścieżkę.
+Testy F2 w `../tools/DelegateTool.plan.test.ts` wstrzymują `appendSessionEvent`
+runnera dla Stopu i timeoutu; obejmują też oba warianty kontrolne bez zależności.
+
 ### 2.4.6 P3 — gotowość dla puli
 
 `PlanHandle` rozszerza `PlanReadyDriver`: `nextReady(): Promise<number | undefined>`

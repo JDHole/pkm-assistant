@@ -297,6 +297,11 @@ export class SubTaskRegistry {
 
     private _writeTerminal(task: SubTask, terminal: TaskTerminal): void {
         if (task.plan && task.stopRequested && terminal.kind !== 'aborted') terminal = { kind: 'aborted', result: terminal.result };
+        const finalizing = this._finalizingPlanResults.get(task);
+        this._finalizingPlanResults.delete(task);
+        if (finalizing && (terminal.kind === 'timeout' || terminal.kind === 'aborted')) {
+            terminal = { ...terminal, result: terminal.result ?? finalizing };
+        }
         if (terminal.result) task.result = terminal.result;
         switch (terminal.kind) {
             case 'result':
@@ -320,6 +325,7 @@ export class SubTaskRegistry {
                     : { kind: 'stopped', by: task.stopRequestedBy ?? 'system' },
                     completeness: hasMaterial ? 'partial' : 'empty', hasAnswer: false,
                     hasMaterial, effects: terminal.result?.outcome?.effects ?? task.outcome?.effects ?? [] };
+                if (finalizing && task.result) task.result = { ...task.result, outcome: task.outcome };
                 break;
             }
             default: { const exhaustive: never = terminal; return exhaustive; }
@@ -441,6 +447,7 @@ export class SubTaskRegistry {
     private readonly _scheduler = new SubTaskScheduler();
     private readonly _cancelledRuns = new Map<string, StopBy>();
     private readonly _pendingPlanMaterial = new WeakSet<SubTask>();
+    private readonly _finalizingPlanResults = new WeakMap<SubTask, SubTaskResult>();
     private readonly _stoppingRuns = new Set<string>();
     private readonly _stoppingOwners = new Set<string>();
     private _stoppingAll = false;
@@ -990,6 +997,11 @@ export class SubTaskRegistry {
         task.outcome = { ...result.outcome, end: task.outcome.end, hasAnswer: false,
             hasMaterial, completeness: hasMaterial ? 'partial' : 'empty' };
         task.result = { ...result, outcome: task.outcome };
+    }
+
+    /** Keep completed work available to Stop/timeout while the runner journals it. No settlement. */
+    stagePlanResult(task: SubTask, result: SubTaskResult): void {
+        if (task.plan && task.status === 'running') this._finalizingPlanResults.set(task, result);
     }
 
     finish(task: SubTask, result: SubTaskResult): void {

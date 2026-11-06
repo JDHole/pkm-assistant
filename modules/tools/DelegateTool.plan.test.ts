@@ -29,7 +29,8 @@ const tasks = (): DelegateTaskDef[] => [
     { id: 'A', task: 'TASK A', aspect: 'child' },
     { id: 'B', task: 'TASK B', aspect: 'child' },
 ];
-function fixture(t: ExecutionContext, options: { local?: boolean; noRegistry?: boolean; maxDone?: number } = {}) {
+function fixture(t: ExecutionContext, options: { local?: boolean; noRegistry?: boolean; maxDone?: number;
+    memory?: { appendSessionEvent(path: string, event: { type?: string; prompt?: unknown }): Promise<string> } } = {}) {
     setLocale('en');
     const clock = new QuestionTestClock();
     const registry = new SubTaskRegistry({ questionClock: clock, maxDone: options.maxDone });
@@ -64,7 +65,7 @@ function fixture(t: ExecutionContext, options: { local?: boolean; noRegistry?: b
     const config = { name: 'child', description: 'child', role: 'worker', model: 'openai/model', tools: ['read'], prompt: 'METHOD' };
     const toolRegistry = { getTool: (name: string) => tools.find(tool => tool.name === name) ?? null, filterByAgent: () => tools };
     const plugin = { subTaskRegistry: options.noRegistry ? undefined : registry, approvalManager: approval, toolRegistry,
-        agentManager: { getActiveAgent: () => agent, getAgent: () => agent,
+        agentManager: { getActiveAgent: () => agent, getAgent: () => agent, getAgentMemory: () => options.memory,
             resolveSubAgentConfig: (name: string) => name === 'parent' ? { ...config, name: 'parent', tools: ['delegate'] } : config },
         env: { chatModel: new Model(), settings: { pkmAssistant: {
             promptDefaults: { subagent_frame_prompt: 'FRAME {{METHOD}}' },
@@ -98,6 +99,58 @@ function fixture(t: ExecutionContext, options: { local?: boolean; noRegistry?: b
     return { registry, notifier, starts, created, clock, plugin, config, delegate, runtime, signal, shown, decision, questions,
         submit, next: (key: string) => box(key).next(), task: (id: string) => created.find(task => task.plan?.nodeId === id)! };
 }
+
+for (const mode of ['stop', 'timeout'] as const) for (const plan of [true, false])
+test.serial(`F2 ${mode} during subagent_call persistence preserves material (plan=${plan})`, async t => {
+    const saving = deferred<void>(); const release = deferred<void>();
+    const f = fixture(t, { memory: { appendSessionEvent: async (_path, event) => {
+        if (event.type === 'subagent_call' && event.prompt === 'TASK A') {
+            saving.resolve(); await release.promise;
+        }
+        return 'chat.md';
+    } } });
+    const delivered: Array<{ id: string; text: string; outcome: SubTask['outcome'] }> = [];
+    const finished: string[] = [];
+    f.registry.events.on('task:finished', value => finished.push((value as SubTask).id));
+    f.notifier.setDeliverer(task => {
+        delivered.push({ id: task.id, text: buildSubTaskNotificationText(task), outcome: structuredClone(task.outcome) });
+        return true;
+    });
+    const list = tasks(); list[2].timeout_ms = 5000;
+    await f.submit(plan ? list : list.slice(1).map(({ task, aspect, timeout_ms }) => ({ task, aspect, timeout_ms })));
+    (await f.next('A')).calls('read', { path: 'note.md' });
+    (await f.next('A')).complete('Answer from Saved material');
+    const b = await f.next('B');
+    await saving.promise;
+    const a = f.created.find(task => task.taskPreview === 'TASK A')!;
+    t.deepEqual([a.status, a.partial], ['running', undefined]);
+    try {
+        if (mode === 'stop') f.registry.requestStop(a.id, 'user');
+        else f.clock.advance(1000);
+        if (plan) {
+            // Serialize before the disk write resolves: a later mutation cannot repair this notice.
+            const notice = delivered.find(item => item.id === a.id)!;
+            t.deepEqual(notice.outcome, { end: mode === 'stop' ? { kind: 'stopped', by: 'user' } : { kind: 'timeout' },
+                completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] });
+            t.regex(notice.text, /Answer from Saved material/);
+            t.deepEqual(f.task('C').plan!.state, { kind: 'blocked', causes: [{ nodeId: 'A', runId: a.id }] });
+        }
+    } finally {
+        release.resolve(); b.complete('Independent B');
+        await __test__._settleBackground(true);
+    }
+    t.regex(delivered.find(item => item.id === a.id)!.text, /Answer from Saved material/);
+    t.deepEqual([a.result?.text, finished.filter(id => id === a.id).length, delivered.filter(item => item.id === a.id).length],
+        ['Answer from Saved material', 1, 1]);
+    t.deepEqual(f.starts, ['A', 'B', 'A']);
+    if (plan) {
+        t.deepEqual(a.result?.outcome, a.outcome);
+        t.deepEqual([a.plan!.state, a.outcome?.end, a.outcome?.completeness, f.task('C').status, f.task('B').result?.text],
+            [{ kind: 'failed', reason: mode === 'stop' ? 'aborted' : 'timeout' },
+                mode === 'stop' ? { kind: 'stopped', by: 'user' } : { kind: 'timeout' }, 'partial', 'blocked', 'Independent B']);
+        t.is(finished.length, 3);
+    }
+});
 
 for (const mode of ['stop', 'timeout'] as const) test.serial(`F1 ${mode} delivers saved material immediately, blocks C and ignores late success`, async t => {
     const f = fixture(t);

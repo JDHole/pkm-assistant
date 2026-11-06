@@ -905,6 +905,21 @@ export class SubAgentRunner {
             log.info(logTag, `Task DONE: ${response.toolsUsed?.length || 0} tools, ${(response.finalText || '').length} znaków (stop: ${response.stoppedBy})`);
             log.timing(logTag, 'Task', startTime);
             log.groupEnd();
+            const result: SubTaskResult = {
+                ...(parentConversation ? { parentConversation } : {}),
+                text: closedQuestion ? lastPartial?.text || '' : response.finalText || '',
+                toolsUsed: response.toolsUsed || [],
+                durationMs: Date.now() - startTime,
+                usage: response.usage || null,
+                stoppedBy: response.stoppedBy,
+                stopReason: response.stopReason,
+                outcome,
+                ...(terminalQuestion ? { question: terminalQuestion } : {}),
+                ...(handoff ? { handoff } : {}),
+            };
+            // The loop's abort listener is gone. Stage material before async journaling
+            // so a plan's first Stop/timeout notice can include it without accepting success.
+            if (subTask) _safeRegistry(() => registry?.stagePlanResult?.(subTask as SubTask, result));
             await this._appendMemoryEvent(agent.name, {
                 type: 'subagent_call',
                 role: config.role || 'researcher',
@@ -916,16 +931,8 @@ export class SubAgentRunner {
             if (thread) _safeRegistry(() => registry?.endRun?.(thread!.threadId, { successful: true, transcript: store.messages, answer: outcome.hasAnswer ? response.finalText : undefined, effects: finalEffects.map((effect, index) => ({ ...effect, expectedCheck: descriptions.get(effects[index])?.check })), userStop: subTask?.stopRequestedBy === 'user' }));
             if (subTask) {
                 _safeRegistry(() => registry?.finish?.(subTask as SubTask, {
-                    ...(parentConversation ? { parentConversation } : {}),
-                    text: closedQuestion ? lastPartial?.text || '' : response.finalText || '',
-                    toolsUsed: response.toolsUsed || [],
+                    ...result,
                     durationMs: Date.now() - startTime,
-                    usage: response.usage || null,
-                    stoppedBy: response.stoppedBy,
-                    stopReason: response.stopReason,
-                    outcome,
-                    ...(terminalQuestion ? { question: terminalQuestion } : {}),
-                    ...(handoff ? { handoff } : {}),
                 }));
             }
             return {
