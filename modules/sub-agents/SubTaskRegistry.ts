@@ -284,10 +284,10 @@ export class SubTaskRegistry {
     }
 
     /** First terminal wins, including timeout before a late runner success. */
-    settle(runId: string, terminal: TaskTerminal): boolean {
+    settle(runId: string, terminal: TaskTerminal, beforePublish?: () => void): boolean {
         const task = this._tasks.get(runId);
         if (!task || !isActiveTask(task)) return false;
-        if (task.plan) return this._settlePlanBatch([{ id: runId, terminal }]) > 0;
+        if (task.plan) return this._settlePlanBatch([{ id: runId, terminal }], beforePublish) > 0;
         this._writeTerminal(task, terminal);
         this._questions.close(task, { kind: 'cancelled', by: 'system', reason: 'run-ended' });
         this.events.emit('task:finished', task);
@@ -311,6 +311,7 @@ export class SubTaskRegistry {
                 break;
             }
             case 'timeout': case 'aborted': {
+                if (task.plan && task.startedAt !== undefined && !terminal.result) this._pendingPlanMaterial.add(task);
                 const hasMaterial = !!(terminal.result?.text || terminal.result?.handoff || task.partial?.text
                     || terminal.result?.outcome?.hasMaterial || task.outcome?.hasMaterial
                     || task.partial?.toolOutcomes.some(tool => tool.outcome === 'returned'));
@@ -344,7 +345,7 @@ export class SubTaskRegistry {
         return report;
     }
 
-    private _settlePlanBatch(entries: readonly { id: string; terminal: TaskTerminal }[]): number {
+    private _settlePlanBatch(entries: readonly { id: string; terminal: TaskTerminal }[], beforePublish?: () => void): number {
         const finished: SubTask[] = [];
         const reports = new Map<PlanId, PlanReport>();
         let accepted = 0;
@@ -358,7 +359,17 @@ export class SubTaskRegistry {
         for (const planId of reports.keys()) reports.set(planId, this._refreshPlan(planId, finished));
         // Every selected plan is committed before observers or scheduler callbacks run.
         for (const task of finished) task.planReport = reports.get(task.plan!.planId)!;
-        for (const [planId, report] of reports) this._publishPlan(report, finished.filter(task => task.plan!.planId === planId));
+        // Queue notices and protect their tasks before callbacks can reenter settlement.
+        // Abort captures material synchronously; only then may consumers serialize it.
+        const publishing = this._publishingPlan;
+        this._publishingPlan = true;
+        try {
+            for (const [planId, report] of reports) this._publishPlan(report, finished.filter(task => task.plan!.planId === planId));
+            beforePublish?.();
+        } finally {
+            this._publishingPlan = publishing;
+            if (!publishing) this._flushPlanEvents();
+        }
         return accepted;
     }
 
@@ -378,6 +389,10 @@ export class SubTaskRegistry {
             }
             this.events.emit('task:plan', report);
         });
+        this._flushPlanEvents();
+    }
+
+    private _flushPlanEvents(): void {
         if (this._publishingPlan) return;
         this._publishingPlan = true;
         try { while (this._planEvents.length) this._planEvents.shift()!(); }
@@ -425,6 +440,7 @@ export class SubTaskRegistry {
 
     private readonly _scheduler = new SubTaskScheduler();
     private readonly _cancelledRuns = new Map<string, StopBy>();
+    private readonly _pendingPlanMaterial = new WeakSet<SubTask>();
     private readonly _stoppingRuns = new Set<string>();
     private readonly _stoppingOwners = new Set<string>();
     private _stoppingAll = false;
@@ -832,7 +848,10 @@ export class SubTaskRegistry {
         if (cached) return cached;
         const fn = this._traceLog?.scope?.(id);
         if (typeof fn !== 'function') return null;
-        this._traceScopes.set(id, fn);
+        // Late cleanup/Stop steps still go to the trace, but must not retain a
+        // closure for a terminal or already evicted task.
+        const task = this._tasks.get(id);
+        if (task && isActiveTask(task)) this._traceScopes.set(id, fn);
         return fn;
     }
 
@@ -947,8 +966,8 @@ export class SubTaskRegistry {
     }
 
     /** Domyka bieg wynikiem. `stoppedBy: 'abort'` → status `aborted`, reszta → `done`. */
-    publishPartial(task: SubTask, snapshot: AgentLoopPartialSnapshot): void {
-        if (task.status !== 'running' || snapshot.revision <= (task.partial?.revision ?? 0)) return;
+    publishPartial(task: SubTask, snapshot: AgentLoopPartialSnapshot, material?: SubTaskResult): void {
+        if ((task.status !== 'running' && !this._pendingPlanMaterial.has(task)) || snapshot.revision <= (task.partial?.revision ?? 0)) return;
         const mask = (value: string) => {
             const safe = maskSensitiveData(value).replace(/\b(https?:\/\/)[^\s/@"\\]+@/gi, '$1[REDACTED]@');
             return this._mask ? this._mask(safe) : safe;
@@ -960,12 +979,28 @@ export class SubTaskRegistry {
             toolCallDetails: Object.freeze(snapshot.toolCallDetails.map(d => Object.freeze({ ...d, ...(d.name ? { name: mask(d.name) } : {}), resultPreview: mask(d.resultPreview) }))),
             usage: Object.freeze({ ...snapshot.usage }), lastText: mask(snapshot.lastText), text: mask(snapshot.text),
         });
+        if (material) this._mergePlanMaterial(task, material);
         this.events.emit('task:partial', task);
+    }
+
+    /** Enrich a latched failure without changing its reason, graph, end time or notices. */
+    private _mergePlanMaterial(task: SubTask, result: SubTaskResult): void {
+        if (!this._pendingPlanMaterial.has(task) || !task.outcome || result.stoppedBy !== 'abort' || !result.outcome) return;
+        const hasMaterial = task.outcome.hasMaterial || result.outcome.hasMaterial;
+        task.outcome = { ...result.outcome, end: task.outcome.end, hasAnswer: false,
+            hasMaterial, completeness: hasMaterial ? 'partial' : 'empty' };
+        task.result = { ...result, outcome: task.outcome };
     }
 
     finish(task: SubTask, result: SubTaskResult): void {
         try {
             if (!task) return;
+            if (this._pendingPlanMaterial.has(task) && result.stoppedBy === 'abort') {
+                this._mergePlanMaterial(task, result);
+                this._pendingPlanMaterial.delete(task);
+                this.events.emit('task:partial', task);
+                return;
+            }
             if (task.status !== 'running') return;
             this.settle(task.id, { kind: 'result', result });
         } catch (e) {
@@ -1087,21 +1122,22 @@ export class SubTaskRegistry {
                     const plan = this._plans.get(planId);
                     return plan ? planStopRoots(plan.report, new Set(live.map(([id]) => id))) : [];
                 });
-                this._settlePlanBatch(stoppedPlanIds.map(id => ({ id, terminal: { kind: 'aborted' } })));
-                for (const [id] of live) { this._scheduler.cancel(id); this._inbox.close(id); }
-                for (const [, node] of live) {
-                    if (node.task) {
-                        this._questions.close(node.task, { kind: 'cancelled', by: node.task.stopRequestedBy!, reason: reason ? 'unload' : 'stop' });
-                        if (!reason || !node.task.steps.some(step => step.type === 'stop.requested')) {
-                            this.step(node.task, 'stop.requested', { by: node.task.stopRequestedBy, ...(reason ? { reason } : {}) });
+                this._settlePlanBatch(stoppedPlanIds.map(id => ({ id, terminal: { kind: 'aborted' } })), () => {
+                    for (const [id] of live) { this._scheduler.cancel(id); this._inbox.close(id); }
+                    for (const [, node] of live) {
+                        if (node.task) {
+                            this._questions.close(node.task, { kind: 'cancelled', by: node.task.stopRequestedBy!, reason: reason ? 'unload' : 'stop' });
+                            if (!reason || !node.task.steps.some(step => step.type === 'stop.requested')) {
+                                this.step(node.task, 'stop.requested', { by: node.task.stopRequestedBy, ...(reason ? { reason } : {}) });
+                            }
                         }
+                        if (node.thread && node.thread.phase !== 'closed') this._closeThreadData(node.thread);
                     }
-                    if (node.thread && node.thread.phase !== 'closed') this._closeThreadData(node.thread);
-                }
-                for (const { id, stop } of aborts) if (stop) {
-                    try { stop(); if (nodes.get(id)?.task) delivered++; }
-                    catch (error) { log.warn('SubTaskRegistry', `Stop handle for ${id} failed:`, error); }
-                }
+                    for (const { id, stop } of aborts) if (stop) {
+                        try { stop(); if (nodes.get(id)?.task) delivered++; }
+                        catch (error) { log.warn('SubTaskRegistry', `Stop handle for ${id} failed:`, error); }
+                    }
+                });
             } finally { for (const [id] of live) this._stoppingRuns.delete(id); }
         });
         return { accepted: live.length, delivered };

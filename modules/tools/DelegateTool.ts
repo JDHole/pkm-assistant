@@ -1168,7 +1168,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                 },
                             },
                         ).finally(release), taskDef.timeout_ms, tasksDefaultTimeoutMs, () => {
-                            if (plan && taskId) registry?.settle?.(taskId, { kind: 'timeout' });
+                            if (plan && taskId) registry?.settle?.(taskId, { kind: 'timeout' }, () => abortSub(abortCtl, 'task-timeout'));
                             abortSub(abortCtl, 'task-timeout');
                         }, _makeFinalGrace(plugin, graceMs, () => taskId), gateArm, salvageMapper), gate.open, admissionGroup)
                             .then(result => {

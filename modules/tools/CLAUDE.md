@@ -1,5 +1,12 @@
 # modules/tools/
 
+2.4.6 F1: timeout planu uruchamia abort w callbacku `settle`, po zatrzaśnięciu
+porażki i blokad, przed publikacją zakończenia. Dzięki temu pierwsze powiadomienie
+prowadzącego i skrzynka rodzica dostają snapshot/handoff dotychczasowej pracy.
+Późny sukces nadal nie odblokowuje następników. Przy `subagent_salvage_max_chars: 0`
+agregat synchroniczny zachowuje licznik `failed` zamiast niedostarczalnego `partial`.
+Testy: scenariusze F1 w `DelegateTool.plan.test.ts`.
+
 F3/B5: `MCPClient` robi wyjątek od `disabled_tool` wyłącznie dla `sub_agent message` z niepustą odpowiedzią na aktualne pytanie własnego żywego dziecka. Publiczny helper `isOwnChildQuestionReply` (`subAgentQuestionReply.ts`, współdzielony z fallbackiem runnera) sprawdza zaufany kontekst suba albo pełne pochodzenie prowadzącego, właściciela, aktualny bieg dziecka, relację i adresata oraz `question_id`; odczyt stanu uwzględnia deadline. Prowadzący musi mieć włączone `delegate`; czat udostępnia mu ograniczoną definicję odpowiedzi. Znaczniki modelu nie nadają uprawnienia. Dostarczenie nadal ponownie sprawdza pytanie w `answerParentQuestion`. Wyjątek nie obejmuje zwykłej wiadomości, `task`, `list`, `stop`, `close`, obcych pytań ani serwerów zewnętrznych. Timeout pozostaje 300000 ms. `DelegateTool.coordinator.test.ts` sprawdza MCP/fallback rodzica, a `SubAgentTool.recipients.test.ts` odpowiedzi prowadzącego, odmowy i granicę czasu.
 
 F1: `DelegateTool` odracza zwolnienie dzierżawy po logicznym końcu biegu, dopóki nie rozstrzygną się wszystkie rzeczywiste egzekutory narzędzi lub runner nie odetnie ich po okresie łaski F2. `DelegateTool.coordinator.test.ts` mierzy aktywne modele i narzędzia niezależnie od schedulera; `DelegateTool.tree.test.ts` sprawdza zakres i narzędzia kontynuacji oraz nowego wnuka przez runner → MCP → delegację.

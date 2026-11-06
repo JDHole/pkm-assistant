@@ -150,6 +150,21 @@ payload jako snapshot zdarzenia, a aktualny stan pobierać przez `getReport()`.
 Testy zachowania: `SubTaskRegistry.plan.test.ts` (rejestr, scheduler, notifier,
 skrzynka rodzica, pytania, Stop i retencja), plus istniejące testy rejestru.
 
+### 2.4.6 F1 — dorobek po Stopie i retencja trace
+
+2.4.6 F1: `settle(runId, terminal, beforePublish?)` dla planu najpierw zatrzaskuje
+porażkę i blokady, chroni całą transakcję przed retencją, następnie synchronicznie
+wywołuje `beforePublish` (abort runnera), a dopiero potem publikuje zakończenia.
+Stop używa tej samej kolejności. `publishPartial(task, snapshot, material?)` może
+uzupełnić dorobek uruchomionego węzła zatrzymanego zewnętrznym Stopem/timeoutem;
+runner dostarcza od razu istniejący handoff i stan efektów. Późniejsze `finish`
+z wynikiem abortu dopina końcowy dorobek przez `task:partial`, bez zmiany przyczyny,
+grafu, czasu końca ani drugiego `task:finished`. Spóźniony sukces jest ignorowany.
+Uprawnienie do uzupełnienia jest słabą referencją i wygasa po końcu runnera.
+Kroki po zakończeniu/usunięciu zadania nadal trafiają do trace, ale ich funkcje
+scope nie wracają do cache. Testy F1: `SubTaskRegistry.plan.test.ts` oraz
+`../tools/DelegateTool.plan.test.ts` (natychmiastowe powiadomienie i inbox rodzica).
+
 ### 2.4.6 P3 — gotowość dla puli
 
 `PlanHandle` rozszerza `PlanReadyDriver`: `nextReady(): Promise<number | undefined>`

@@ -25,7 +25,7 @@ import { describeToolEffect, checkEffectTargets, isOwnChildQuestionReply } from 
 import type { BuiltinToolExecutionContext, ToolEffect, EffectTargetIo, ExecuteToolCallOptions } from '../tools/index.js';
 // Bieg suba jest BYTEM w rejestrze (`plugin.subTaskRegistry`).
 // Sam rejestr przychodzi z pluginu (DI), stąd tylko typ - runner go nie tworzy.
-import type { SubTask, SubTaskOrigin, SubRunContext, SubTaskRegistry, SubTaskTrace } from './SubTaskRegistry.js';
+import type { SubTask, SubTaskResult, SubTaskOrigin, SubRunContext, SubTaskRegistry, SubTaskTrace } from './SubTaskRegistry.js';
 import type { ActiveSessionEventInput } from '../memory/index.js';
 import type { ChatModel } from '../models/index.js';
 import { contextBudgetResolver } from '../models/index.js';
@@ -846,7 +846,23 @@ export class SubAgentRunner {
                     }
                     snapshot = JSON.parse(maskSensitiveData(JSON.stringify(snapshot)).replace(/\b(https?:\/\/)[^\s/@"\\]+@/gi, '$1[REDACTED]@')) as AgentLoopPartialSnapshot;
                     lastPartial = snapshot;
-                    if (subTask) _safeRegistry(() => registry?.publishPartial?.(subTask as SubTask, snapshot));
+                    if (subTask) _safeRegistry(() => {
+                        // A plan latches Stop/timeout before aborting us. Supply the existing
+                        // handoff synchronously so even an immediate notice retains the work.
+                        let material: SubTaskResult | undefined;
+                        if (subTask?.plan && subTask.status === 'aborted') {
+                            const outcome = classifyRunEnd({ stoppedBy: 'abort', stopReason: snapshot.stopReason,
+                                partial: snapshot, stoppedByActor: subTask.stopRequestedBy, effects, successfulToolResults });
+                            const handoff = _buildHandoff(outcome, snapshot, observedToolDetails,
+                                limits.subagent_salvage_max_chars, knownSecrets, closedQuestion);
+                            material = { text: '', stoppedBy: 'abort', stopReason: snapshot.stopReason, outcome,
+                                toolsUsed: [...snapshot.toolsUsed], durationMs: Date.now() - startTime,
+                                usage: snapshot.usage, handoff: handoff.text,
+                                ...(closedQuestion ? { question: { ...closedQuestion,
+                                    text: _maskHandoffText(closedQuestion.text, knownSecrets), ...(handoff.note ? { note: handoff.note } : {}) } } : {}) };
+                        }
+                        registry?.publishPartial?.(subTask as SubTask, snapshot, material);
+                    });
                     if (origin) {
                         partialPersistence = partialPersistence.then(async () => {
                             if (!memory?.appendSessionEvent || !origin.sessionPath) throw new Error('missing frozen owner');

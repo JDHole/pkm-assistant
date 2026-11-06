@@ -46,7 +46,7 @@ export function aggregatePlanResults(plan: PlanHandle, tasks: readonly SubTask[]
                     : task.outcome?.hasMaterial ? task.result?.handoff?.trim() || task.result?.text?.trim() || task.partial?.text?.trim() || '' : '';
                 const partial = material.slice(0, salvageCap);
                 const hasMaterial = partial.length > 0;
-                if (hasMaterial || task.outcome?.completeness === 'partial') counts.partial++;
+                if (hasMaterial || (salvageCap > 0 && task.outcome?.completeness === 'partial')) counts.partial++;
                 else counts.failed++;
                 return { ...response, ...identity, success: false,
                     error: response.error ?? task.error ?? t('mcp.delegate.plan_failed', { reason: node.state.reason }),

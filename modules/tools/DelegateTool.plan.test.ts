@@ -12,6 +12,7 @@ import { createDelegateTool, createSubAgentTool, stopAllDelegations, __test__ } 
 import type { DelegateTaskDef } from './DelegateTool.js';
 import type { BuiltinToolExecutionContext } from './ToolRegistry.js';
 import { stopSubTasksForOwners } from '../chat/chat/turnAbort.js';
+import { buildSubTaskNotificationText } from '../chat/chat/subTaskNotification.js';
 
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 class Mailbox<T> {
@@ -97,6 +98,62 @@ function fixture(t: ExecutionContext, options: { local?: boolean; noRegistry?: b
     return { registry, notifier, starts, created, clock, plugin, config, delegate, runtime, signal, shown, decision, questions,
         submit, next: (key: string) => box(key).next(), task: (id: string) => created.find(task => task.plan?.nodeId === id)! };
 }
+
+for (const mode of ['stop', 'timeout'] as const) test.serial(`F1 ${mode} delivers saved material immediately, blocks C and ignores late success`, async t => {
+    const f = fixture(t);
+    const delivered: Array<{ id: string; text: string; outcome: SubTask['outcome']; states: string[] }> = [];
+    f.notifier.setDeliverer(task => {
+        delivered.push({ id: task.plan!.nodeId, text: buildSubTaskNotificationText(task),
+            outcome: structuredClone(task.outcome), states: task.planReport!.nodes.map(node => node.state.kind) });
+        return true;
+    });
+    const list = tasks(); list[2].timeout_ms = 5000;
+    await f.submit(list);
+    (await f.next('A')).calls('read', { path: 'note.md' });
+    const late = await f.next('A'); const b = await f.next('B');
+    if (mode === 'stop') f.registry.requestStop(f.task('A').id, 'user');
+    else f.clock.advance(1000);
+    // The consumer already serialized the notice, before the runner's async cleanup.
+    const notice = delivered.find(item => item.id === 'A')!;
+    t.deepEqual(notice.outcome, { end: mode === 'stop' ? { kind: 'stopped', by: 'user' } : { kind: 'timeout' },
+        completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: [] });
+    t.regex(notice.text, /Saved material/);
+    t.deepEqual(notice.states, ['blocked', 'failed', 'running']);
+    t.deepEqual(f.task('C').plan!.state, { kind: 'blocked', causes: [{ nodeId: 'A', runId: f.task('A').id }] });
+    b.complete('Independent B'); await __test__._settleBackground(true);
+    late.complete('late success'); await nextTurn();
+    t.deepEqual(delivered.map(item => item.id).sort(), ['A', 'B', 'C']);
+    t.regex(f.task('A').result?.handoff ?? '', /Saved material/);
+    t.deepEqual([f.task('A').plan!.state, f.task('C').status, f.task('B').result?.text, f.starts],
+        [{ kind: 'failed', reason: mode === 'stop' ? 'aborted' : 'timeout' }, 'blocked', 'Independent B', ['A', 'B', 'A']]);
+});
+
+test.serial('F1 stopped child plan delivers handoff once through the parent inbox', async t => {
+    const f = fixture(t);
+    const resolve = f.plugin.agentManager.resolveSubAgentConfig;
+    f.plugin.agentManager.resolveSubAgentConfig = name => name === 'parent'
+        ? { ...resolve(name), tools: ['delegate', 'read'] } : resolve(name);
+    await f.delegate.execute({ task: 'TASK P', aspect: 'parent', _invocationOrigin: owner }, {}, f.plugin as never, f.runtime);
+    (await f.next('P')).calls('delegate', { tasks: tasks() });
+    const parentReceipt = await f.next('P');
+    (await f.next('A')).calls('read', { path: 'note.md' });
+    const late = await f.next('A'); const b = await f.next('B');
+    t.deepEqual(late.payload.messages.filter(message => message.role === 'tool').map(message => message.content), ['Saved material']);
+    f.registry.requestStop(f.task('A').id, 'user');
+    parentReceipt.complete('interim parent');
+    const parentAfterStop = await f.next('P');
+    const notices = parentAfterStop.payload.messages.filter(message => message.content?.startsWith('Child notices:\n'))
+        .flatMap(message => JSON.parse(message.content.slice('Child notices:\n'.length)));
+    t.deepEqual(notices.map(notice => [notice.task_id, notice.outcome.completeness]),
+        [[f.task('A').id, 'partial'], [f.task('C').id, 'empty']]);
+    t.regex(notices[0].result.handoff, /Saved material/);
+    t.deepEqual(notices[0].plan_report.nodes.map((node: { state: { kind: string } }) => node.state.kind), ['blocked', 'failed', 'running']);
+    b.complete('Independent B'); await nextTurn(); parentAfterStop.complete('interim parent');
+    (await f.next('P')).complete('Final parent'); await __test__._settleBackground(true);
+    late.complete('late success'); await nextTurn();
+    t.deepEqual(f.notifier.pending().map(task => task.result?.text), ['Final parent']);
+    t.deepEqual(f.starts.filter(key => key !== 'P'), ['A', 'B', 'A']);
+});
 
 // The real runner, scheduler and registry sit between execute and every observable prompt/result.
 test.serial('P5 chat receipt skips C-first barrier; all placeholders exist and A unlocks C while B runs', async t => {

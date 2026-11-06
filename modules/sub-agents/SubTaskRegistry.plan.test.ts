@@ -28,6 +28,45 @@ function activate(registry: SubTaskRegistry, id: string): SubTask {
 }
 const states = (report: PlanReport) => report.nodes.map(node => [node.nodeId, node.state]);
 
+test('F1 repeated owner Stop keeps trace retention bounded and records every stopped task', t => {
+    const writes: Array<[string, string]> = [];
+    const registry = new SubTaskRegistry({ traceLog: { scope: id => type => { writes.push([id, type]); } } });
+    t.teardown(() => registry.dispose());
+    for (let round = 0; round < 3; round++) {
+        for (let i = 0; i < 26; i++) registry.reservePlan(input([['A', []], ['C', ['A']]], `trace-${round}-${i}`));
+        const lateTrace = registry.traceFor(task(registry, 'A', `trace-${round}-0`));
+        t.is(registry.requestStopForOwner(owner), 52);
+        t.deepEqual(registry.list().map(task => task.status), Array.from({ length: 25 }, () => ['aborted', 'blocked']).flat());
+        t.deepEqual(writes.filter(([, type]) => type === 'stop.requested').slice(round * 52),
+            Array.from({ length: 26 }, (_, i) => [[`trace-${round}-${i}-A`, 'stop.requested'], [`trace-${round}-${i}-C`, 'stop.requested']]).flat());
+        // Resource lifetime is the behavior under test: removed tasks must not own cached closures.
+        lateTrace('effects.checked', { matches: 1 });
+        t.deepEqual(writes.at(-1), [`trace-${round}-0-A`, 'effects.checked']);
+        const scopes: ReadonlyMap<string, unknown> = Reflect.get(registry, '_traceScopes');
+        t.deepEqual([...scopes.keys()], []);
+    }
+});
+
+test('F1 material capture protects terminal tasks during reentrant settlement and publishes once in order', t => {
+    const registry = new SubTaskRegistry({ maxDone: 1 }); t.teardown(() => registry.dispose());
+    const handle = registry.reservePlan(input([['C', ['A']], ['A', []], ['B', []]]));
+    const a = activate(registry, 'A'); const b = activate(registry, 'B');
+    const delivered: unknown[] = [];
+    registry.events.on('task:finished', value => {
+        const task = value as SubTask;
+        delivered.push([task.id, task.planReport?.complete, registry.getTask(a.id)?.plan?.state.kind]);
+    });
+    registry.settle(a.id, { kind: 'timeout' }, () => {
+        registry.finish(b, result('Independent B'));
+        t.deepEqual(registry.list().map(task => [task.id, task.status]),
+            [['plan-1-C', 'blocked'], ['plan-1-A', 'aborted'], ['plan-1-B', 'done']]);
+        t.is(registry.pruneSession(owner.sessionPath), 0);
+    });
+    t.deepEqual(delivered, [['plan-1-A', false, 'failed'], ['plan-1-C', false, 'failed'], ['plan-1-B', true, 'failed']]);
+    t.deepEqual([handle.getReport().complete, registry.list().map(task => [task.id, task.result?.text])],
+        [true, [['plan-1-B', 'Independent B']]]);
+});
+
 test('P2 all nodes and one axis entry exist before the first event; activation preserves the placeholder', async t => {
     const registry = new SubTaskRegistry(); t.teardown(() => registry.dispose());
     const observed: unknown[] = [];
