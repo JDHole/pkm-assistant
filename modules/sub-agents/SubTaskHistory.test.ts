@@ -1,8 +1,8 @@
 import test from 'ava';
 import { AgentMemory } from '../memory/index.js';
 import { formatSessionEvent, parseActiveSession } from '../memory/activeSessionFormat.js';
-import { SubTaskRegistry, SubTaskNotifier, buildStripModel, parseSubTaskHistoryRecord } from './index.js';
-import type { SubTaskHistoryRecord } from './index.js';
+import { SubTaskPlan, SubTaskRegistry, SubTaskNotifier, buildStripModel, parseSubTaskHistoryRecord } from './index.js';
+import type { SubTaskHistoryRecord, SubTaskRunHistoryRecord, SubTaskPlanHistoryRecord } from './index.js';
 import { QuestionTestClock } from './test-support/questionTestClock.js';
 
 const owner = { agentName: 'Mira', sessionPath: '.pkm-assistant/agents/mira/memory/sessions/active/test.md', sessionEpoch: 'a'.repeat(32) };
@@ -25,7 +25,7 @@ function run(registry: SubTaskRegistry, id: string, parentId?: string) {
     return registry.create({ id, threadId: id, name: id, agentName: 'Mira', origin: owner, parentId, level: parentId ? 2 : 1, background: true });
 }
 const finished = { text: 'Gotowe\n## Wynik\n**sub_task_history:**', toolsUsed: [], durationMs: 4, usage: null, stoppedBy: 'natural' as const };
-const record = (runId: string, changes: Partial<SubTaskHistoryRecord> = {}): SubTaskHistoryRecord => ({
+const record = (runId: string, changes: Partial<SubTaskRunHistoryRecord> = {}): SubTaskRunHistoryRecord => ({
     version: 1, runId, threadId: runId, name: runId, owner, level: 1, state: 'running', createdAt: 10, ...changes,
 });
 const rows = (registry: SubTaskRegistry) => buildStripModel({ tasks: registry.list(), threads: registry.listThreads(owner), ...owner, now: 20 })
@@ -40,7 +40,7 @@ test('appendSessionEvent -> real parser -> new registry -> strip preserves the c
     registry.finish(parent, { ...finished, text: 'Rodzic gotowy' });
     await registry.flushHistory();
     const parsed = await disk.memory.loadActiveSession(owner.sessionPath);
-    t.deepEqual(parsed.subTaskHistory?.map(value => { const r = parseSubTaskHistoryRecord(value)!; return [r.runId, r.state, r.parentId, r.level]; }), [
+    t.deepEqual(parsed.subTaskHistory?.map(value => { const r = parseSubTaskHistoryRecord(value); if (!r || r.version !== 1) throw new Error('Expected run record'); return [r.runId, r.state, r.parentId, r.level]; }), [
         ['parent', 'queued', undefined, 1], ['parent', 'running', undefined, 1],
         ['child', 'queued', 'parent', 2], ['child', 'running', 'parent', 2],
         ['child', 'done', 'parent', 2], ['parent', 'done', undefined, 1],
@@ -154,7 +154,7 @@ test('failed frozen append cannot redirect to new epoch, later records still per
     disk.replace(header);
     registry.fail(task, 'Controlled failure');
     await registry.flushHistory();
-    t.deepEqual(parseActiveSession(disk.read()).subTaskHistory?.map(value => { const r = parseSubTaskHistoryRecord(value)!; return [r.runId, r.state, r.error]; }), [['root', 'error', 'Controlled failure']]);
+    t.deepEqual(parseActiveSession(disk.read()).subTaskHistory?.map(value => { const r = parseSubTaskHistoryRecord(value); if (!r || r.version !== 1) throw new Error('Expected run record'); return [r.runId, r.state, r.error]; }), [['root', 'error', 'Controlled failure']]);
     registry.dispose();
 });
 
@@ -185,7 +185,7 @@ test('partial and failed outcome survive persistence; Stop of a queued run recor
     registry.finishQueuedStop('queued', {});
     await registry.flushHistory();
     const parsed = parseActiveSession(disk.read());
-    t.deepEqual(parsed.subTaskHistory!.map(value => { const r = parseSubTaskHistoryRecord(value)!; return [r.runId, r.state]; }), [
+    t.deepEqual(parsed.subTaskHistory!.map(value => { const r = parseSubTaskHistoryRecord(value); if (!r || r.version !== 1) throw new Error('Expected run record'); return [r.runId, r.state]; }), [
         ['root', 'queued'], ['root', 'running'], ['root', 'running'], ['root', 'error'], ['queued', 'queued'], ['queued', 'done'],
     ]);
     const restored = new SubTaskRegistry();
@@ -209,7 +209,7 @@ test('history snapshots cannot change while an earlier append is pending; dispos
     registry.dispose();
     release();
     await registry.flushHistory();
-    t.deepEqual(written.map(r => [r.state, r.material]), [['queued', undefined], ['running', ''], ['done', 'Zapisany wynik']]);
+    t.deepEqual(written.map(r => r.version === 1 ? [r.state, r.material] : ['plan']), [['queued', undefined], ['running', ''], ['done', 'Zapisany wynik']]);
     t.deepEqual(['task:created', 'task:partial', 'task:finished', 'thread:created', 'thread:queued', 'question:opened', 'question:closed']
         .map(event => registry.events.listenerCount(event)), [0, 0, 0, 0, 0, 0, 0]);
 });
@@ -226,4 +226,130 @@ test('continuation moved from nested to lead keeps chronological runs and the la
     t.deepEqual([registry.getThread('worker')?.parentId, registry.getThread('worker')?.level], [undefined, 1]);
     t.deepEqual([registry.getTask('nested')?.parentId, registry.getTask('lead-continuation')?.parentId], ['parent', undefined]);
     registry.dispose();
+});
+
+
+function graph() {
+    const result = SubTaskPlan.create([{ id: 'A' }, { id: 'B' }, { id: 'C', depends_on: ['A', 'B'] }], 5);
+    if (result.kind !== 'valid') throw new Error('Invalid fixture');
+    return result.plan;
+}
+const planModel = (registry: SubTaskRegistry) => registry.listPlans(owner).map(plan => ({
+    status: plan.status, nodes: plan.nodes.map(node => [node.id, node.state.kind, 'material' in node.state ? node.state.material : undefined]),
+}));
+async function savedPlan() {
+    const disk = storage(), registry = new SubTaskRegistry({ appendHistory: disk.appendHistory });
+    const plan = await registry.createPlan(graph(), owner);
+    for (const node of plan.nodes.slice(0, 2)) {
+        registry.createThread({ threadId: node.id, name: node.id, owner, origin: owner, config: {}, phase: 'queued', level: 1,
+            plan: { planId: plan.planId, nodeId: node.id } });
+        registry.beginQueuedRun(node.id, owner, {});
+        const task = registry.create({ id: node.id, threadId: node.id, name: node.id, origin: owner, level: 1 });
+        if (node.id === 'A') {
+            registry.finish(task, { ...finished, text: 'wynik A' });
+            plan.settle(node.id, { kind: 'done', material: 'wynik A' });
+        }
+    }
+    await registry.flushHistory();
+    const parsed = await disk.memory.loadActiveSession(owner.sessionPath);
+    const records = parsed.subTaskHistory!;
+    registry.dispose();
+    return { records, parsed, planId: plan.planId };
+}
+
+test('P4 AgentMemory round-trip restores done/running/waiting silently and idempotently', async t => {
+    const { records, parsed } = await savedPlan();
+    const first = parseSubTaskHistoryRecord(records[0]);
+    t.deepEqual(first?.version === 2 ? [first.revision, first.nodes.map(n => [n.id, n.state.kind, n.depends_on])] : first,
+        [0, [['A', 'waiting_dependencies', []], ['B', 'waiting_dependencies', []], ['C', 'waiting_dependencies', ['A', 'B']]]]);
+    t.deepEqual(parsed.messages, []);
+    const clock = new QuestionTestClock(), registry = new SubTaskRegistry({ questionClock: clock });
+    const notifier = new SubTaskNotifier({ registry });
+    t.teardown(() => { notifier.dispose(); registry.dispose(); });
+    const events: string[] = [];
+    for (const event of ['task:created', 'question:opened', 'plan:changed', 'plan:finished']) registry.events.on(event, () => events.push(event));
+    t.is(registry.importHistory(records, owner), 3);
+    t.deepEqual(planModel(registry), [{ status: 'interrupted', nodes: [
+        ['A', 'done', 'wynik A'], ['B', 'interrupted', ''], ['C', 'not_executed', undefined],
+    ] }]);
+    const snapshot = registry.listPlans(owner).map(p => [p.planId, p.revision, p.nodes]);
+    t.is(registry.importHistory(records, owner), 0);
+    t.deepEqual(registry.listPlans(owner).map(p => [p.planId, p.revision, p.nodes]), snapshot);
+    const restored = registry.listPlans(owner)[0];
+    const starts: string[] = [];
+    restored.start(async id => { starts.push(id); return { kind: 'done', material: 'unexpected' }; });
+    await restored.completion;
+    clock.advance(300000);
+    t.deepEqual([restored.settled, events, starts, clock.pending, notifier.pendingNotices(), registry.takeChildNotices('A')],
+        [true, [], [], 0, [], []]);
+    t.deepEqual(registry.list().map(task => [task.id, task.result?.text, task.plan?.nodeId, registry.getRunActivity(task.id)]),
+        [['A', 'wynik A', 'A', 'inactive'], ['B', '', 'B', 'inactive']]);
+});
+
+test('P4 rejects foreign epochs, cycles, inconsistent references and conflicting revisions; older snapshots cannot roll back done', async t => {
+    const { records } = await savedPlan();
+    const plans = records.map(parseSubTaskHistoryRecord).filter((r): r is SubTaskPlanHistoryRecord => r?.version === 2);
+    const latest = plans.at(-1)!;
+    const runs = records.filter(value => parseSubTaskHistoryRecord(value)?.version === 1);
+    for (const damage of ['epoch', 'cycle', 'thread', 'revision', 'definition', 'terminal'] as const) {
+        const corrupt = structuredClone(latest);
+        if (damage === 'epoch') corrupt.owner.sessionEpoch = 'b'.repeat(32);
+        if (damage === 'cycle') corrupt.nodes = corrupt.nodes.map(n => n.id === 'A' ? { ...n, depends_on: [corrupt.nodes[2].id] } : n);
+        if (damage === 'thread' && 'execution' in corrupt.nodes[0].state) corrupt.nodes[0].state = { kind: 'done', execution: { runId: 'A', threadId: 'B' } };
+        if (damage === 'revision') corrupt.revision = -1;
+        if (damage === 'definition') corrupt.nodes = corrupt.nodes.map(n => n.id === 'C' ? { ...n, depends_on: [] } : n);
+        if (damage === 'terminal') { corrupt.revision++; corrupt.nodes[0].state = { kind: 'error', error: 'late error', execution: { runId: 'A', threadId: 'A' } }; }
+        const registry = new SubTaskRegistry();
+        const conflict = damage === 'definition' || damage === 'terminal';
+        registry.importHistory([...runs, ...(conflict ? [latest] : []), corrupt], owner);
+        t.deepEqual([damage, registry.listPlans(owner).length, registry.getTask('A')?.result?.text], [damage, 0, 'wynik A']);
+        registry.dispose();
+    }
+    const registry = new SubTaskRegistry();
+    registry.importHistory([...records].reverse(), owner);
+    t.deepEqual(planModel(registry), [{ status: 'interrupted', nodes: [
+        ['A', 'done', 'wynik A'], ['B', 'interrupted', ''], ['C', 'not_executed', undefined],
+    ] }]);
+    registry.dispose();
+});
+
+test('P4 missing run material is unavailable, never a successful node', async t => {
+    const { records } = await savedPlan();
+    const registry = new SubTaskRegistry(); t.teardown(() => registry.dispose());
+    registry.importHistory(records.filter(value => { const r = parseSubTaskHistoryRecord(value); return r?.version !== 1 || r.runId !== 'A'; }), owner);
+    t.deepEqual(registry.listPlans(owner)[0].nodes.map(n => [n.id, n.state.kind, 'error' in n.state ? n.state.error : null]),
+        [['A', 'error', 'plan_material_unavailable'], ['B', 'interrupted', null], ['C', 'not_executed', null]]);
+});
+
+test('P4 initial append failure refuses the whole plan; a later valid append still works', async t => {
+    const disk = storage(), registry = new SubTaskRegistry({ appendHistory: disk.appendHistory });
+    t.teardown(() => registry.dispose());
+    disk.replace(header.replace(owner.sessionEpoch, 'b'.repeat(32)));
+    await t.throwsAsync(registry.createPlan(graph(), owner), { message: 'plan_persistence_failed' });
+    t.deepEqual([registry.listPlans(owner), registry.listThreads(owner)], [[], []]);
+    disk.replace(header);
+    const plan = await registry.createPlan(graph(), owner);
+    const parsed = await disk.memory.loadActiveSession(owner.sessionPath);
+    t.deepEqual([plan.status, plan.nodes.map(n => n.state.kind), parseSubTaskHistoryRecord(parsed.subTaskHistory![0])?.version],
+        ['active', ['waiting_dependencies', 'waiting_dependencies', 'waiting_dependencies'], 2]);
+});
+
+test('P4 initial write is a barrier; Stop during it cannot dispatch work after acceptance', async t => {
+    let release!: () => void;
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    const disk = storage(), registry = new SubTaskRegistry({ appendHistory: async r => { await barrier; return disk.appendHistory(r); } });
+    const notifier = new SubTaskNotifier({ registry });
+    t.teardown(() => { notifier.dispose(); registry.dispose(); });
+    const pending = registry.createPlan(graph(), owner), plan = registry.listPlans(owner)[0];
+    const starts: string[] = [];
+    plan.start(async id => { starts.push(id); return { kind: 'done', material: 'unexpected' }; });
+    t.throws(() => registry.createThread({ threadId: 'A', name: 'A', owner, origin: owner, config: {},
+        plan: { planId: plan.planId, nodeId: plan.nodes[0].id } }), { message: 'plan_unavailable' });
+    t.is(registry.requestStopPlan(plan.planId), true);
+    release(); await pending; await registry.flushHistory();
+    t.deepEqual([starts, plan.status, plan.nodes.map(n => n.state.kind)], [[], 'stopped', ['stopped', 'stopped', 'stopped']]);
+    const restored = new SubTaskRegistry();
+    restored.importHistory((await disk.memory.loadActiveSession(owner.sessionPath)).subTaskHistory!, owner);
+    t.deepEqual(planModel(restored), [{ status: 'stopped', nodes: [['A', 'stopped', undefined], ['B', 'stopped', undefined], ['C', 'stopped', undefined]] }]);
+    restored.dispose();
 });

@@ -482,3 +482,26 @@ for (const operation of ['edit', 'delete'] as const) for (const storage of ['cur
         t.false(JSON.stringify(view.rollingWindow.parentConversation.snapshot()).includes('USUNIĘTY SEKRET'));
     });
 }
+
+
+for (const fallback of [false, true]) test(`P4 restores a plan-only session without synthetic messages (fallback=${fallback})`, async t => {
+    const owner = { agentName: 'Jaskier', sessionPath: 'sessions/active/plan.md', sessionEpoch: 'a'.repeat(32) };
+    const file = `---\nepoch: ${owner.sessionEpoch}\n---\n` + formatSessionEvent('sub_task_history', { sub_task_history: {
+        version: 2, kind: 'plan', planId: 'plan-only', owner, revision: 0, status: 'active',
+        nodes: [{ id: 'A', depends_on: [], dependency_results: 'summary', state: { kind: 'waiting_dependencies' } }],
+    } }, '2026-11-06T12:00:00Z');
+    const view = buildFakeThis([], [{ path: owner.sessionPath, epoch: owner.sessionEpoch }]);
+    const memory = view.plugin.agentManager.getActiveMemory();
+    memory.loadActiveSession = async () => parseActiveSession(file);
+    if (fallback) { memory.listActiveSessions = async () => []; memory.restoreActiveSession = async () => owner.sessionPath; }
+    const registry = new SubTaskRegistry(); view.plugin.subTaskRegistry = registry;
+    const events: string[] = [];
+    registry.events.on('plan:changed', () => events.push('changed'));
+    registry.events.on('plan:finished', () => events.push('finished'));
+    await _restoreActiveSession.call(view); await _restoreActiveSession.call(view);
+    t.deepEqual([view.chatTabs.length, view.rollingWindow.messages, registry.listThreads(owner), events], [1, [], [], []]);
+    t.deepEqual(registry.listPlans(owner).map(p => [p.planId, p.status, p.nodes.map(n => [n.id, n.state.kind])]),
+        [['plan-only', 'interrupted', [['A', 'not_executed']]]]);
+    t.deepEqual(memory.identity, { path: 'sessions/active/plan.md', epoch: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' });
+    registry.dispose();
+});

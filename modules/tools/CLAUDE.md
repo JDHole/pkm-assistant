@@ -721,3 +721,12 @@ runner's typed outcome and terminal question, and still follows timeout mapping.
 material is retained before the lead delivery cap. No new model-facing schema fields are published.
 `DelegateTool.plan.test.ts` now observes the distinct dependency user message and aggregate parent
 inbox result, including a controlled provider error, custom frame and a smaller lead output cap.
+
+
+### 2.4.6 P4 - initial plan persistence barrier
+
+`delegate` awaits `registry.createPlan` before preparation, consent, reservation or execution.
+A failed initial definition append returns `{success:false, error:plan_persistence_failed,
+code:plan_persistence_failed}` with no runner or accepted plan. The existing cancellation latch
+remains active during the await. `DelegateTool.plan.test.ts` supplies a durable-writer fixture,
+keeps P2/P3 behavioral assertions and adds initial-write refusal. Schema publication remains P6.

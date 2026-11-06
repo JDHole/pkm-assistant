@@ -1728,3 +1728,13 @@ turn. The sanitizer sees one tool response (the delegate receipt) and a later us
 notification, never orphan tool responses for individual nodes. Group-specific UI is deferred to P5.
 Tests: `chat/subTaskPlanDelivery.test.ts`; existing question tests keep their assertions and extend
 only their test-side notice formatters for the third union variant.
+
+
+### 2.4.6 P4 - plan-only session restoration
+
+Both `_restoreActiveSession` paths retain sessions with imported plans even when there are no
+threads or chat messages. Presence is checked through `listThreads(owner)` or `listPlans(owner)`,
+so a repeated restore keeps the tab without adding a synthetic RollingWindow message. Import uses
+the file's exact owner and epoch and remains inert. `chat/chat_session.test.ts` covers both paths,
+two restores, an interrupted group with a not_executed node, and unchanged session identity.
+The group renderer remains P5; P4 supplies its complete historical registry model.

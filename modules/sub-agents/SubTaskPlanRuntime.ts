@@ -10,7 +10,8 @@ export type PlanSettlement = Extract<PlanNodeTerminal, { kind: 'done' | 'error' 
 
 /** Owns a graph, never a work lease, timer or second admission queue. */
 export class SubTaskPlanRuntime {
-    readonly planId = allocateSubTaskId('plan');
+    private admitted = false;
+    admit(): void { this.admitted = true; }
     readonly owner: PlanOwner;
     readonly completion: Promise<void>;
     private complete!: () => void;
@@ -22,30 +23,32 @@ export class SubTaskPlanRuntime {
     get settled(): boolean { return this.settledValue; }
 
     constructor(private readonly graph: SubTaskPlan, owner: PlanOwner,
-        readonly parentRunId: string | undefined, private readonly changed: () => void, private readonly finished: () => void) {
+        readonly parentRunId: string | undefined, private readonly changed: () => void, private readonly finished: () => void, readonly planId = allocateSubTaskId('plan')) {
         this.owner = Object.freeze({ ...owner });
         this.completion = new Promise(resolve => { this.complete = resolve; });
+        if (graph.status !== 'active') { this.settledValue = true; this.complete(); }
     }
     get nodes() { return this.graph.nodes; }
     get status() { return this.graph.status; }
     get revision() { return this.graph.revision; }
-    reserve(id: PlanNodeId, execution: PlanExecution): boolean { return this.graph.queue(id, execution); }
-    startNode(id: PlanNodeId): boolean { return this.graph.start(id); }
+    reserve(id: PlanNodeId, execution: PlanExecution): boolean { return this.admitted && this.graph.queue(id, execution); }
+    startNode(id: PlanNodeId): boolean { return this.admitted && this.graph.start(id); }
 
     start(execute: (id: PlanNodeId) => Promise<PlanSettlement>): void {
-        if (this.started || this.status !== 'active') return;
+        if (!this.admitted || this.started || this.status !== 'active') return;
         this.started = true;
         this.execute = execute;
         this.dispatch();
     }
     settle(id: PlanNodeId, result: PlanSettlement): void {
-        if (!this.graph.settle(id, result)) return;
+        if (!this.admitted || !this.graph.settle(id, result)) return;
         this.publish();
         this.dispatch();
     }
     /** No observers here: the registry latches every plan and run in one Stop transaction. */
     latchStop(by: StopBy): void { this.graph.stop(by); this.execute = undefined; }
     publish(): void {
+        if (!this.admitted) return;
         if (this.status !== 'active') this.execute = undefined;
         this.changed();
         this.finish();

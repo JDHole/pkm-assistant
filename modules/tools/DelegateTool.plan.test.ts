@@ -14,14 +14,14 @@ class Mailbox<T> {
     next(): Promise<T> { return this.values.length ? Promise.resolve(this.values.shift()!) : new Promise(resolve => this.readers.push(resolve)); }
 }
 type Request = { messages: Array<{ role: string; content: string }>; fail(): void; complete(text: string): void; call(args: Record<string, unknown>): void };
-const owner = { agentName: 'Mira', sessionPath: 'chat.md', sessionEpoch: 'e1' };
+const owner = { agentName: 'Mira', sessionPath: 'chat.md', sessionEpoch: 'a'.repeat(32) };
 const dag = [
     { id: 'A', task: 'A', timeout_ms: 10000 }, { id: 'B', task: 'B', timeout_ms: 10000 },
     { id: 'C', task: 'C', depends_on: ['A', 'B'], timeout_ms: 1000 },
 ];
-function fixture(t: ExecutionContext, local = false) {
+function fixture(t: ExecutionContext, local = false, appendHistory: NonNullable<ConstructorParameters<typeof SubTaskRegistry>[0]>['appendHistory'] = async () => {}) {
     const clock = new QuestionTestClock();
-    const registry = new SubTaskRegistry({ questionClock: clock });
+    const registry = new SubTaskRegistry({ questionClock: clock, appendHistory });
     const requests = new Map<string, Mailbox<Request>>(), activities = new Map<string, Mailbox<RunActivity>>();
     const starts: string[] = [];
     let active = 0, maximum = 0, allowed = true;
@@ -307,4 +307,11 @@ test.serial('P3 full dependency material precedes the lead delivery cap and surv
     c.complete('done'); await runtime.completion;
     t.deepEqual(f.registry.list().find(task => task.plan?.nodeId === 'C')?.dependencyResults,
         [{ id: 'A', mode: 'full', sentChars: 49, truncated: false }]);
+});
+
+
+test.serial('P4 failed initial persistence returns plan_persistence_failed before any runner starts', async t => {
+    const f = fixture(t, false, async () => { throw new Error('controlled write failure'); });
+    t.deepEqual(await f.submit(), { success: false, error: 'plan_persistence_failed', code: 'plan_persistence_failed' });
+    t.deepEqual([f.starts, f.registry.listPlans(owner), f.registry.listThreads(owner)], [[], [], []]);
 });

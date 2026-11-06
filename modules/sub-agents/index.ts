@@ -82,7 +82,7 @@ export type { AdmissionGroup, Lease, SubRunActivity } from './SubTaskScheduler.j
 export type { RunAdmission } from './SubRunCoordinator.js';
 
 export { parseSubTaskHistoryRecord } from './SubTaskHistory.js';
-export type { SubTaskHistoryRecord } from './SubTaskHistory.js';
+export type { SubTaskHistoryRecord, SubTaskRunHistoryRecord } from './SubTaskHistory.js';
 
 export { ParentConversationProjection, redactParentConversationSnapshot, freezeParentConversation, captureSubParentConversation } from './ParentConversation.js';
 export type { ParentConversationContext, ParentConversationSnapshot, ConversationEntry } from './ParentConversation.js';
@@ -99,3 +99,5 @@ export { dependencyResults, redactExport } from './DependencyResults.js';
 export type { DependencyResult, DependencyPreparation } from './DependencyResults.js';
 export { limitPlanResult } from './SubTaskPlanResult.js';
 export type { PlanResultNotice } from './SubTaskPlanResult.js';
+
+export type { SubTaskPlanHistoryRecord } from './SubTaskPlanHistory.js';

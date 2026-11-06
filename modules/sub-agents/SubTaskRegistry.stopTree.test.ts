@@ -3,7 +3,7 @@ import { SubRunCoordinator } from './SubRunCoordinator.js';
 import { SubTaskPlan, SubTaskRegistry } from './index.js';
 import { QuestionTestClock } from './test-support/questionTestClock.js';
 
-const owner = { agentName: 'Mira', sessionPath: 'chat.md', sessionEpoch: 'e1' };
+const owner = { agentName: 'Mira', sessionPath: 'chat.md', sessionEpoch: 'a'.repeat(32) };
 const result = { text: 'zachowany dorobek', toolsUsed: ['read'], durationMs: 0, usage: null, stoppedBy: 'abort' as const };
 const signal = () => new AbortController().signal;
 
@@ -72,7 +72,7 @@ test('owner Stop isolates epoch, path and agent, rejects incomplete owner, block
     const registry = new SubTaskRegistry();
     t.teardown(() => registry.dispose());
     const root = registry.create({ id: 'root', origin: owner });
-    const otherOwners = [{ ...owner, sessionEpoch: 'e2' }, { ...owner, sessionPath: 'other.md' }, { ...owner, agentName: 'Other' }];
+    const otherOwners = [{ ...owner, sessionEpoch: 'b'.repeat(32) }, { ...owner, sessionPath: 'other.md' }, { ...owner, agentName: 'Other' }];
     otherOwners.forEach((origin, i) => registry.create({ id: `other-${i}`, origin }));
     registry.attachAbort(root.id, () => {
         t.throws(() => reserve(registry, 'reentrant'), { message: 'Sub-agent admission cancelled' });
@@ -170,14 +170,14 @@ function plan(registry: SubTaskRegistry, parentRunId?: string, origin = owner) {
 }
 
 test('plan Stop latches unreserved nodes and nested plans before callbacks; completed material survives', async t => {
-    const registry = new SubTaskRegistry(); t.teardown(() => registry.dispose());
-    const group = plan(registry);
+    const registry = new SubTaskRegistry({ appendHistory: async () => {} }); t.teardown(() => registry.dispose());
+    const group = await plan(registry);
     const [a, b] = group.nodes;
     const reserveNode = (id: typeof a.id) => registry.createThread({ threadId: id, name: id, owner, origin: owner,
         config: {}, phase: 'queued', plan: { planId: group.planId, nodeId: id } });
     reserveNode(a.id); registry.beginQueuedRun('A', owner, {});
     const task = registry.create({ id: 'A', threadId: 'A', origin: owner });
-    const nested = plan(registry, task.id);
+    const nested = await plan(registry, task.id);
     reserveNode(b.id);
     const leases = await Promise.all(['A', 'x', 'y', 'z', 'w'].map(id => registry.acquire(owner, id, signal())));
     const waiting = t.throwsAsync(registry.acquire(owner, 'B', signal()), { message: 'Sub-agent admission cancelled' });
@@ -194,11 +194,11 @@ test('plan Stop latches unreserved nodes and nested plans before callbacks; comp
 });
 
 for (const stop of ['ancestor', 'owner', 'unload', 'close', 'tab'] as const) test(`graph-only plan participates in ${stop} lifecycle and owner isolation`, async t => {
-    const registry = new SubTaskRegistry(); t.teardown(() => registry.dispose());
+    const registry = new SubTaskRegistry({ appendHistory: async () => {} }); t.teardown(() => registry.dispose());
     registry.createThread({ threadId: 'parent', name: 'parent', owner, origin: owner, config: {} });
     registry.create({ id: 'parent', threadId: 'parent', origin: owner });
-    const group = plan(registry, 'parent');
-    const other = plan(registry, undefined, { ...owner, sessionEpoch: 'e2' });
+    const group = await plan(registry, 'parent');
+    const other = await plan(registry, undefined, { ...owner, sessionEpoch: 'b'.repeat(32) });
     if (stop === 'ancestor') registry.requestStop('parent', 'user');
     if (stop === 'owner') registry.requestStopForOwner(owner, 'user');
     if (stop === 'unload') registry.stopAll('unload');
@@ -212,9 +212,9 @@ for (const stop of ['ancestor', 'owner', 'unload', 'close', 'tab'] as const) tes
     { message: ['ancestor', 'owner', 'unload'].includes(stop) ? 'Sub-agent admission cancelled' : 'plan_unavailable' });
 });
 
-test('active plan retains predecessors and their material across eviction and session pruning', t => {
-    const registry = new SubTaskRegistry({ maxDone: 1 }); t.teardown(() => registry.dispose());
-    const group = plan(registry); const id = group.nodes[0].id;
+test('active plan retains predecessors and their material across eviction and session pruning', async t => {
+    const registry = new SubTaskRegistry({ maxDone: 1, appendHistory: async () => {} }); t.teardown(() => registry.dispose());
+    const group = await plan(registry); const id = group.nodes[0].id;
     registry.createThread({ threadId: 'A', name: 'A', owner, origin: owner, config: {}, phase: 'queued', plan: { planId: group.planId, nodeId: id } });
     registry.beginQueuedRun('A', owner, {});
     const a = registry.create({ id: 'A', threadId: 'A', origin: owner });
@@ -230,9 +230,9 @@ test('active plan retains predecessors and their material across eviction and se
 });
 
 test('coordinator releases admission while a plan has no runs and wakes when preparation fails', async t => {
-    const registry = new SubTaskRegistry(); t.teardown(() => registry.dispose());
+    const registry = new SubTaskRegistry({ appendHistory: async () => {} }); t.teardown(() => registry.dispose());
     const parent = registry.create({ id: 'parent', origin: owner });
-    const group = plan(registry, parent.id);
+    const group = await plan(registry, parent.id);
     const leases = await Promise.all(['parent', 'a', 'b', 'c', 'd'].map(id => registry.acquire(owner, id, signal())));
     const next = registry.acquire(owner, 'next', signal());
     const activities: unknown[] = [];

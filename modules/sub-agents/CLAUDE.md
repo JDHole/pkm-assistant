@@ -695,7 +695,8 @@ Testy: `SubRunCoordinator.test.ts`, `modules/tools/DelegateTool.coordinator.test
 
 ### Trwała historia drzewa (P6)
 
-`SubTaskHistoryRecord` (wersja 1) i `parseSubTaskHistoryRecord` wychodzą przez `index.ts`.
+`SubTaskRunHistoryRecord` (wersja 1) i `parseSubTaskHistoryRecord` wychodzą przez `index.ts`.
+`SubTaskHistoryRecord` is now the v1 run / v2 plan union described in 2.4.6 P4 below.
 Rekord zawiera ID biegu i wątku, nazwę, pełnego właściciela (agent/ścieżka/epoka), rodzica,
 poziom, stan, czasy oraz opcjonalny podgląd zadania, dorobek, outcome, błąd i pytanie.
 Schemat JSON jest walidowany przez `@cfworker/json-schema` bez generowania kodu.
@@ -878,3 +879,35 @@ alone exceeds the cap, the complete state table takes precedence over that text 
 JSON or missing node states are delivered. Chat receives a machine message, not another tool result.
 Tests: `DependencyResults.test.ts`, `../tools/DelegateTool.plan.test.ts`, and
 `../chat/chat/subTaskPlanDelivery.test.ts`. Persistence and group rendering remain P4/P5.
+
+
+### 2.4.6 P4 - durable plans and inert restart
+
+`SubTaskPlanHistory.ts` validates and snapshots v2 `kind: plan` records; the barrel exports
+`SubTaskPlanHistoryRecord` alongside the v1/v2 `SubTaskHistoryRecord` union. V1 remains readable
+and gains an optional `{planId, nodeId}` backlink. Plan snapshots preserve ordered graph fields,
+revision, status, execution references and failure/block/Stop reasons. Run material, outcome and
+questions remain in v1 records; errors without a run belong to the plan. No execution configuration,
+consent, transcript, callback, timer or new session event format is persisted.
+
+`createPlan` now returns `Promise<SubTaskPlanRuntime>` and requires an `appendHistory` writer.
+It registers an inert graph for lifecycle Stop, snapshots its complete definition and awaits the
+ordered append before admitting any reservation, settlement or executor. Missing writer, refused
+append or initial I/O failure rejects with `plan_persistence_failed` and removes the graph; no work
+or completion notice is created. Stop during that await remains latched when admission completes.
+Subsequent `plan:changed` snapshots share the run writer's ordering and best-effort error handling.
+`SubTaskPlanRuntime.admit()` is registry plumbing, not a caller API: callers await `createPlan`.
+
+`importHistory` counts imported runs plus plans. It validates schema, DAG, immutable definition,
+monotonic revisions, terminal states, owner/epoch and run/thread/parent/level/backlink agreement.
+It never attaches plan history to live registry work. Missing successful-run material becomes an
+error with `plan_material_unavailable`; other nodes and available material remain visible.
+`SubTaskPlan.restore` is internal plumbing after boundary validation; it preserves terminal states
+and turns active groups into interrupted, running into interrupted, and queued/waiting into
+not_executed. Imported runtimes have resolved completion, no admission and no executable callback;
+repeated import preserves the existing model. No events, notices, questions, timers or writes fire.
+
+Tests: `SubTaskHistory.test.ts` uses real AgentMemory append/load and the session parser; it covers
+A/B/C restart, repeated import, out-of-order snapshots, corruption, missing material, initial-write
+failure and Stop during persistence. The runtime/delivery tests now await creation with a writer
+and valid durable epochs; their previous behavioral assertions remain. Plan group rendering is P5.

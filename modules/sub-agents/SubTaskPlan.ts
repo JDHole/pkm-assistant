@@ -102,6 +102,18 @@ export class SubTaskPlan {
         return { kind: 'valid', plan: new SubTaskPlan(entries, topological), warnings };
     }
 
+    /** Internal history boundary supplies validated snapshots; never dispatch restored work. */
+    static restore(nodes: readonly PlanNode[], status: PlanStatus, revision: number): SubTaskPlan {
+        const result = SubTaskPlan.create(nodes, nodes.length);
+        if (result.kind !== 'valid') throw new Error('Invalid plan history');
+        const graph = result.plan;
+        graph.entries.forEach((node, i) => { node.state = structuredClone(nodes[i].state); });
+        graph.statusValue = status;
+        graph.revisionValue = revision;
+        graph.interrupt();
+        return graph;
+    }
+
     get nodes(): readonly PlanNode[] { return structuredClone(this.entries); }
     get revision(): number { return this.revisionValue; }
     get status(): PlanStatus { return this.statusValue; }
@@ -149,7 +161,7 @@ export class SubTaskPlan {
     }
 
     interrupt(): void {
-        this.close('interrupted', state => ({ kind: state.kind === 'running' ? 'interrupted' : 'not_executed',
+        this.close('interrupted', state => ({ ...state, kind: state.kind === 'running' ? 'interrupted' : 'not_executed',
             ...('execution' in state ? { execution: state.execution } : {}) }));
     }
 

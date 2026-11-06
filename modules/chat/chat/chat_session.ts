@@ -200,7 +200,7 @@ function restoreSubTaskHistory(view: ChatViewLike, parsed: Awaited<ReturnType<Ag
     if (!registry) return false;
     const owner = { agentName, sessionPath, sessionEpoch: String(parsed.metadata.epoch ?? '') };
     registry.importHistory(parsed.subTaskHistory ?? [], owner);
-    return registry.listThreads(owner).length > 0;
+    return registry.listThreads(owner).length > 0 || registry.listPlans(owner).length > 0;
 }
 
 /** Restore the last active session from disk. */

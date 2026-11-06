@@ -6,9 +6,14 @@ import { log } from '../../core/utils/Logger.js';
 import type { Owner, ParentQuestion, QuestionId, QuestionResolution } from './ParentQuestions.js';
 import type { ParentConversationMetadata } from './ParentConversationBudget.js';
 import type { RunOutcome } from './runOutcome.js';
+import { parseSubTaskPlanHistoryRecord, snapshotPlan } from './SubTaskPlanHistory.js';
+import type { SubTaskPlanHistoryRecord } from './SubTaskPlanHistory.js';
+import type { PlanReference, SubTaskPlanRuntime } from './SubTaskPlanRuntime.js';
 import type { SubTask, SubTaskRegistry, SubThread } from './SubTaskRegistry.js';
 
-export interface SubTaskHistoryRecord {
+export type SubTaskHistoryRecord = SubTaskRunHistoryRecord | SubTaskPlanHistoryRecord;
+export interface SubTaskRunHistoryRecord {
+    plan?: PlanReference;
     parentConversation?: ParentConversationMetadata;
     version: 1;
     runId: string;
@@ -68,12 +73,13 @@ const validator = new Validator(object({
     parentId: id, level: { type: 'integer', minimum: 1, maximum: 3 },
     state: choice('queued', 'running', 'done', 'error', 'aborted'), createdAt: time, endedAt: time,
     taskPreview: string, material: string, error: string, outcome, parentConversation,
+    plan: object({ planId: id, nodeId: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9_-]{0,63}$' } }),
     question: object({ id, text: string, askedAt: time, resolution }, ['id', 'text', 'askedAt']),
 }, ['version', 'runId', 'threadId', 'name', 'owner', 'level', 'state', 'createdAt']));
 
 export function parseSubTaskHistoryRecord(value: unknown): SubTaskHistoryRecord | undefined {
-    if (!validator.validate(value).valid) return undefined;
-    const record = value as SubTaskHistoryRecord; // schema validates the entire persisted boundary
+    if (!validator.validate(value).valid) return parseSubTaskPlanHistoryRecord(value);
+    const record = value as SubTaskRunHistoryRecord; // schema validates the entire persisted boundary
     if ((record.parentId === undefined) !== (record.level === 1)
         || record.parentId === record.runId || (record.endedAt !== undefined && record.endedAt < record.createdAt)) return undefined;
     return structuredClone(record);
@@ -84,13 +90,11 @@ const ownerKey = (owner: Owner): string => JSON.stringify([owner.agentName, owne
 export class SubTaskHistory {
     private pending: Promise<void> = Promise.resolve();
     private readonly unsubscribe: Array<() => void> = [];
-    constructor(registry: SubTaskRegistry, append: (record: SubTaskHistoryRecord) => Promise<unknown>) {
+    constructor(registry: SubTaskRegistry, private readonly append: (record: SubTaskHistoryRecord) => Promise<unknown>) {
         const save = (input: unknown) => {
             const record = parseSubTaskHistoryRecord(JSON.parse(JSON.stringify(input)));
             if (!record) return; // Legacy calls without a full frozen owner do not acquire persistence rights.
-            this.pending = this.pending.then(() => append(record)).then(() => {}, error => {
-                log.warn('SubTaskHistory', 'Session history append failed:', error);
-            });
+            void this.enqueue(record).catch(() => {});
         };
         const taskRecord = (task: SubTask) => {
             const state = task.questionState;
@@ -98,13 +102,16 @@ export class SubTaskHistory {
                 id: state.question.id, text: maskSensitiveData(state.question.text), askedAt: state.question.askedAt,
                 ...(state.kind === 'closed' ? { resolution: state.resolution.kind === 'answered' ? { ...state.resolution, text: maskSensitiveData(state.resolution.text) } : state.resolution } : {}),
             } : undefined;
-            save({ version: 1, runId: task.id, threadId: task.threadId ?? task.id, name: task.name,
+            save({ version: 1, plan: task.plan, runId: task.id, threadId: task.threadId ?? task.id, name: task.name,
                 owner: task.origin && { agentName: task.origin.agentName, sessionPath: task.origin.sessionPath, sessionEpoch: task.origin.sessionEpoch },
                 parentId: task.parentId, level: task.level ?? 1, state: task.status, createdAt: task.createdAt, endedAt: task.endedAt,
                 taskPreview: task.taskPreview, material: maskSensitiveData(task.result?.handoff || task.result?.text || task.partial?.text || ''),
                 error: task.error, outcome: task.outcome, question, parentConversation: task.parentConversation,
             });
         };
+        this.unsubscribe.push(registry.events.on('plan:changed', value => {
+            void this.savePlan(value as SubTaskPlanRuntime).catch(() => {});
+        }));
         for (const event of ['task:created', 'task:partial', 'task:finished', 'task:context']) {
             this.unsubscribe.push(registry.events.on(event, value => {
                 const task = value as SubTask;
@@ -121,11 +128,20 @@ export class SubTaskHistory {
             this.unsubscribe.push(registry.events.on(event, value => {
                 const thread = value as SubThread;
                 if (thread.phase !== 'queued') return;
-                save({ version: 1, runId: thread.queuedRunId ?? thread.threadId, threadId: thread.threadId, name: thread.name,
+                save({ version: 1, plan: thread.plan, runId: thread.queuedRunId ?? thread.threadId, threadId: thread.threadId, name: thread.name,
                     owner: { agentName: thread.owner.agentName, sessionPath: thread.owner.sessionPath, sessionEpoch: thread.owner.sessionEpoch },
                     parentId: thread.parentId, level: thread.level ?? 1, state: 'queued', createdAt: thread.lastActiveAt, parentConversation: thread.parentConversation });
             }));
         }
+    }
+    /** Initial definition failure is observable; later snapshots use the same ordered writer. */
+    savePlan(plan: SubTaskPlanRuntime): Promise<void> { return this.enqueue(snapshotPlan(plan)); }
+    private enqueue(record: SubTaskHistoryRecord): Promise<void> {
+        const write = this.pending.then(() => this.append(record)).then(result => {
+            if (result === false) throw new Error('Session history append refused');
+        });
+        this.pending = write.catch(error => { log.warn('SubTaskHistory', 'Session history append failed:', error); });
+        return write;
     }
     flush(): Promise<void> { return this.pending; }
     dispose(): void { for (const off of this.unsubscribe.splice(0)) off(); }
@@ -133,18 +149,18 @@ export class SubTaskHistory {
 
 /** Validate the whole graph before importing; input order need not be parent-first. */
 export function restoreSubTaskHistory(input: readonly unknown[], owner: Owner): Array<SubTask & { threadId: string; endedAt: number }> {
-    const records = new Map<string, SubTaskHistoryRecord>();
+    const records = new Map<string, SubTaskRunHistoryRecord>();
     const invalid = new Set<string>();
-    const identity = (r: SubTaskHistoryRecord) => JSON.stringify([r.threadId, r.name, r.parentId, r.level]);
-    const rank = (r: SubTaskHistoryRecord) => r.state === 'queued' ? 0 : r.state === 'running' ? 1 : 2;
+    const identity = (r: SubTaskRunHistoryRecord) => JSON.stringify([r.threadId, r.name, r.parentId, r.level, r.plan]);
+    const rank = (r: SubTaskRunHistoryRecord) => r.state === 'queued' ? 0 : r.state === 'running' ? 1 : 2;
     for (const value of input) {
         const record = parseSubTaskHistoryRecord(value);
-        if (!record || ownerKey(record.owner) !== ownerKey(owner)) continue;
+        if (!record || record.version !== 1 || ownerKey(record.owner) !== ownerKey(owner)) continue;
         const old = records.get(record.runId);
         if (old && identity(old) !== identity(record)) invalid.add(record.runId);
         if (!old || rank(record) >= rank(old)) records.set(record.runId, record);
     }
-    const valid = (record: SubTaskHistoryRecord): boolean => {
+    const valid = (record: SubTaskRunHistoryRecord): boolean => {
         if (invalid.has(record.runId)) return false;
         if (!record.parentId) return record.level === 1;
         const parent = records.get(record.parentId);
@@ -154,7 +170,7 @@ export function restoreSubTaskHistory(input: readonly unknown[], owner: Owner): 
         const interrupted = record.state === 'queued' || record.state === 'running';
         const hasMaterial = !!record.material || !!record.outcome?.hasMaterial;
         const task: SubTask & { threadId: string; endedAt: number } = {
-            id: record.runId, threadId: record.threadId, name: record.name, agentName: owner.agentName,
+            id: record.runId, threadId: record.threadId, ...(record.plan ? { plan: record.plan } : {}), name: record.name, agentName: owner.agentName,
             origin: { ...owner }, parentId: record.parentId, level: record.level,
             status: interrupted ? 'aborted' : record.state as SubTask['status'], createdAt: record.createdAt,
             endedAt: record.endedAt ?? record.createdAt, steps: [], budget: {}, taskPreview: record.taskPreview,

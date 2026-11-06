@@ -45,6 +45,7 @@ import type { LoopMessage } from '../agent-loop/index.js';
 import { ParentQuestions } from './ParentQuestions.js';
 import { SubTaskInbox } from './SubTaskInbox.js';
 import type { SubTaskNotice } from './SubTaskNotifier.js';
+import { restoreSubTaskPlans } from './SubTaskPlanHistory.js';
 import { SubTaskHistory, restoreSubTaskHistory } from './SubTaskHistory.js';
 import type { ParentConversationMetadata } from './ParentConversationBudget.js';
 import type { SubTaskHistoryRecord } from './SubTaskHistory.js';
@@ -247,13 +248,19 @@ export class SubTaskRegistry {
             thread.level = task.level;
             thread.lastActiveAt = Math.max(thread.lastActiveAt, task.endedAt);
         }
+        const closedTasks = tasks.filter(task => accepted.has(task.id));
+        for (const plan of restoreSubTaskPlans(records, owner, closedTasks, new Set([...existingTasks, ...existingThreads]))) {
+            if (this._plans.has(plan.planId)) continue;
+            this._plans.set(plan.planId, plan);
+            imported++;
+        }
         return imported;
     }
 
     private _disposed = false;
     private readonly _plans = new Map<string, SubTaskPlanRuntime>();
-    createPlan(graph: SubTaskPlan, owner: SubTaskOrigin, parentRunId?: string): SubTaskPlanRuntime {
-        if (!owner.agentName || !owner.sessionPath || !owner.sessionEpoch || this._startCancelled(owner, parentRunId)
+    async createPlan(graph: SubTaskPlan, owner: SubTaskOrigin, parentRunId?: string): Promise<SubTaskPlanRuntime> {
+        if (this._disposed || !owner.agentName || !owner.sessionPath || !owner.sessionEpoch || this._startCancelled(owner, parentRunId)
             || (parentRunId && (!this._isLiveRun(parentRunId)
                 || this._ownerKey(this._tasks.get(parentRunId)!.origin ?? { agentName: '' }) !== this._ownerKey(owner))))
             throw new Error('plan_unavailable');
@@ -280,7 +287,16 @@ export class SubTaskRegistry {
             this.events.emit('plan:finished', notice);
         });
         this._plans.set(plan.planId, plan);
-        this.events.emit('plan:changed', plan);
+        try {
+            if (!this._history) throw new Error('History writer unavailable');
+            await this._history.savePlan(plan);
+        } catch {
+            this._plans.delete(plan.planId);
+            throw new Error('plan_persistence_failed');
+        }
+        if (this._disposed) { this._plans.delete(plan.planId); throw new Error('plan_unavailable'); }
+        plan.admit();
+        plan.publish();
         return plan;
     }
     getPlan(id: string): SubTaskPlanRuntime | undefined { return this._plans.get(id); }

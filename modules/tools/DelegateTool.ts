@@ -890,7 +890,11 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     if (continuation || !registry?.acquire || !registry.createThread || !registry.createPlan || !registry.requestStopPlan
                         || !origin?.sessionPath || !origin.sessionEpoch || origin.agentName !== activeAgent.name
                         || (currentDepth > 0 && !subRunContext)) return { success: false, error: 'plan_unavailable', code: 'plan_unavailable' };
-                    planRuntime = registry.createPlan(graph.plan, origin, subRunContext?.runId);
+                    try { planRuntime = await registry.createPlan(graph.plan, origin, subRunContext?.runId); }
+                    catch (error) {
+                        const code = error instanceof Error && error.message === 'plan_persistence_failed' ? 'plan_persistence_failed' : 'plan_unavailable';
+                        return { success: false, error: code, code };
+                    }
                     const plan = planRuntime;
                     const stopPlan = () => registry.requestStopPlan!(plan.planId, 'system');
                     signal.addEventListener('abort', stopPlan, { once: true });
