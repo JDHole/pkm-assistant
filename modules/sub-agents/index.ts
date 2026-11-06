@@ -91,3 +91,6 @@ export { ParentConversationProjection, redactParentConversationSnapshot, freezeP
 export type { ParentConversationContext, ParentConversationSnapshot, ConversationEntry } from './ParentConversation.js';
 
 export type { ParentConversationPreparation, ParentConversationMetadata } from './ParentConversationBudget.js';
+
+export type { PlanHandle, PlanReservation, ReservePlanInput } from './SubTaskRegistry.js';
+export type { TaskTerminal } from './planTaskLifecycle.js';

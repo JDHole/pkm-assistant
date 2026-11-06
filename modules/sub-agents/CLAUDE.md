@@ -95,6 +95,62 @@ Raport nie zawiera tekstów wyników. Niepełne wykonanie to failed/incomplete;
 rozłączne liczniki dorobku finished/partial/failed/blocked wyliczy adapter narzędzia.
 P1 nie rejestruje ani nie uruchamia planów. Testy: `DelegationPlan.test.ts`.
 
+### 2.4.6 P2 — rejestr planu, zakończenie i Stop
+
+`reservePlan(input: ReservePlanInput): PlanHandle` przyjmuje zwalidowany DAG z P1,
+unikalny `planId`, mapowanie węzłów na `runId`, wspólnego właściciela/rodzica oraz
+`PlanReservation[]`. Każdy element ma rozłączne `preparation`: `ready` z ID wątku
+oraz przygotowaną konfiguracją albo `rejected` z błędem. Wołający musi zakończyć
+przygotowanie i wymagane zgody **przed** `reservePlan`; API nie uzyskuje zgód,
+nie rozwiązuje konfiguracji i nie wywołuje modelu. Odrzucony element ma terminalny
+SubTask bez rezerwacji wykonawczej. Błąd kopiowania konfiguracji lub kolizja ID
+odrzuca rejestrację przed zapisaniem rekordów i emisją zdarzeń.
+
+Wszystkie placeholdery i ich pojedyncze wpisy `thread.runIds` istnieją przed pierwszym
+zdarzeniem. `SubTask.plan` zawiera tylko metadane, `SubTask.status: waiting` obejmuje
+zarówno zależności (`plan.state: waiting`), jak i gotowość (`queued`). Placeholder
+nie zajmuje slotu ani nie uruchamia timera. `acquire` i `beginQueuedRun` dopuszczają
+wyłącznie gotowy, niezatrzymany placeholder; dotychczasowa kontrola właściciela
+pozostaje. Runner wywołuje `create` po `beginQueuedRun`: aktywuje ten sam obiekt i ID,
+zapisuje budżet oraz `startedAt`, bez drugiego `task:created` i wpisu osi.
+Placeholder nie może pytać ani być żywym rodzicem delegacji.
+
+`settle(runId, terminal: TaskTerminal): boolean` zatrzaskuje pierwszy wynik, błąd,
+timeout albo abort. `finish` i `fail` korzystają z tej samej ścieżki. Sukces wymaga
+naturalnego końca z odpowiedzią (`unconfirmed`); partial/backstop, pusta odpowiedź,
+`no-answer`, timeout i błąd blokują przechodnich następców, wskazując pierwotne
+nieudane węzły. Status `done` sam nie odblokowuje grafu. Blokada ma pusty dorobek.
+Wyniki i blokady są zapisane przed `task:finished`; każdy terminalny task otrzymuje
+niemutowalny `planReport` z tej transakcji. Następnie `task:plan` publikuje raport,
+również przy rejestracji i aktywacji. Zagnieżdżone synchroniczne zakończenia są
+kolejkowane do publikacji, a rekordy pozostają chronione do końca emisji.
+`PlanHandle.getReport()` zwraca bieżący, zamrożony raport w kolejności wejściowej;
+uchwyt po zakończeniu zachowuje tylko metadane, bez tekstów wyników i callbacków.
+
+Stop pojedynczego węzła obejmuje jego rzeczywistych potomków (`parentId`), a następcy
+DAG dostają `blocked`. Stop czekającego C daje C `failed/aborted` i nie zatrzymuje A/B.
+Stop drzewa, właściciela i unload najpierw zatrzaskuje cały zakres; niewystartowane
+zależne węzły są blokowane, pozostałe wybrane abortowane. Plan zostaje logicznie
+rozliczony przed callbackami abort, również przy Stopie między admission a aktywacją;
+nie zastępuje to zwolnienia dzierżawy przez wykonawcę. Zapisany wcześniej partial
+pozostaje dorobkiem zatrzymanego węzła. Późne finish/fail nie zmieniają pierwszego
+rozstrzygnięcia ani nie wysyłają kolejnego wyniku. Starsze biegi bez planu nadal
+zmieniają status dopiero po powrocie pętli. Mapa Stopu łączy task i rezerwację tego
+samego ID, zachowując oba rekordy oraz pierwszego nadawcę i próg Stopu użytkownika.
+
+Retencja i `pruneSession` chronią `waiting`, przodków i wszystkie wyniki aktywnego
+planu, także ponad `maxDone`; pełny wynik pozostaje wyłącznie w SubTask. Ochrona planu
+znika po terminalnej publikacji, a potem działa zwykła retencja. `dispose` zwalnia
+mapę planów. Prywatny `planTaskLifecycle.ts` liczy gotowość, klasyfikuje zakończenia
+i wybiera węzły do abortu podczas Stopu. Publiczne typy są dostępne przez barrel.
+
+P2 nie podłącza jeszcze DelegateTool: driver gotowych zadań i materiał poprzedników
+należą do P3, UI/historia i formatowanie raportów do P4, integracja wykonania oraz
+bariera dzieci `waiting` w koordynatorze do P5. Konsument `task:plan` powinien traktować
+payload jako snapshot zdarzenia, a aktualny stan pobierać przez `getReport()`.
+Testy zachowania: `SubTaskRegistry.plan.test.ts` (rejestr, scheduler, notifier,
+skrzynka rodzica, pytania, Stop i retencja), plus istniejące testy rejestru.
+
 ### Istniejący runtime
 
 Protokół pytań rodzica jest częścią `SubTaskRegistry`: `openParentQuestion(taskId, text)` zwraca pytanie i Promise rozstrzygnięcia albo odmowę; `answerParentQuestion(taskId, questionId, owner, actor, text)`, `getQuestionState`, `isQuestionOpen`, `promoteToBackground` i `registerUserWait(owner, cancel)` obsługują odpowiedź, stan i pauzę. `actor: QuestionRecipient` wskazuje prowadzącego albo konkretny bieg rodzica. Starszy wariant `answerParentQuestion(taskId, questionId, owner, text)` oznacza wyłącznie prowadzącego. Funkcja zwolnienia kanału użytkownika jest idempotentna; `dispose` anuluje otwarte kanały. Zegar pytania mierzy monotonicznie 300000 ms, pauzuje tylko dla pełnego właściciela i nie resetuje pozostałego czasu. Stop, koniec biegu i unload zamykają oczekiwanie przed powiadomieniem obserwatorów. `SubTask.questionState` jest opcjonalne dla starszych danych, a model paska normalizuje brak do `none`.
@@ -346,7 +402,7 @@ Odlew per agent = `<agent-slug>-researcher` (standardowe `instantiate`). Przepis
     krok `stop.requested {by}` - nowy TYP zdarzenia w trace.log. `by` to nadawca (`user` z paska
     i domyślnie, `lead` z narzędzia prowadzącego, `system` z zamknięcia i demontażu); pierwszy
     zapisany nadawca wygrywa i trafia do `outcome.end.by` zatrzymanego biegu.
-  - **Status zmienia się dopiero, gdy pętla naprawdę stanie** i domknie byt przez `finish`/`fail`
+  - **Dla biegu bez planu status zmienia się dopiero, gdy pętla naprawdę stanie** i domknie byt przez `finish`/`fail`
     (zwykle `aborted`). `stopRequested === true` przy `status === 'running'` to normalny stan
     przejściowy, nie awaria.
   - Uchwyt jest kasowany przy `task:finished` (subskrypcja BEZWARUNKOWA, w odróżnieniu od

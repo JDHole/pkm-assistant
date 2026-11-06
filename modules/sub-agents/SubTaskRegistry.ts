@@ -21,7 +21,7 @@
  *   - Maskowanie NA WEJŚCIU (`step` przepuszcza stringowe wartości pól przez `mask`),
  *     więc KAŻDY konsument — trace, przyszły panel — dostaje dane już bezpieczne.
  *   - Sufity pamięci: `maxStepsPerTask` (kroki w RAM per task) i `maxDone` (ile zakończonych
- *     tasków trzymamy). Taski `running` nie są usuwane NIGDY.
+ *     tasków trzymamy). Taski `running`/`waiting` oraz wyniki aktywnego planu są chronione.
  *
  * Panel biegów: rejestr jest też SKRZYNKĄ KONTAKTOWĄ do biegu — `attachAbort`
  * przyjmuje uchwyt „ubij mnie" od tego, kto suba odpalił, a `requestStop` pozwala nim
@@ -37,6 +37,10 @@ import type { AgentLoopPartialSnapshot, AgentLoopStopReason } from '../agent-loo
 import { maskSensitiveData } from '../../core/index.js';
 import { EventEmitter } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
+import { getPlanReport } from './DelegationPlan.js';
+import type { DelegationGraph, PlanId, PlanNodeId, PlanReport, PlanTaskMetadata } from './DelegationPlan.js';
+import { refreshPlan, terminalPlanState, planStopRoots } from './planTaskLifecycle.js';
+import type { TaskTerminal } from './planTaskLifecycle.js';
 import type { RunOutcome, StopBy } from './runOutcome.js';
 import type { LoopMessage } from '../agent-loop/index.js';
 import { ParentQuestions } from './ParentQuestions.js';
@@ -50,7 +54,7 @@ import type { AdmissionGroup, Lease, SubRunActivity } from './SubTaskScheduler.j
 import type { Owner, QuestionId, QuestionRecipient, ParentQuestion, QuestionState, ParentQuestionClock, OpenParentQuestionResult, AnswerResult } from './ParentQuestions.js';
 
 /** Stan biegu suba. `aborted` = ubity z zewnątrz (timeout delegacji), `error` = wyjątek. */
-export type SubTaskStatus = 'running' | 'done' | 'error' | 'aborted';
+export type SubTaskStatus = 'waiting' | 'blocked' | 'running' | 'done' | 'error' | 'aborted';
 
 /** Jeden krok pętli (`loop.start`, `tool.pre`, `tool.post`, `backstop`, `loop.end`, …). */
 export interface SubTaskStep {
@@ -123,6 +127,11 @@ export interface SubThread {
 
 /** Bieg sub-agenta jako byt. `id` = etykieta trace (`sub/<nazwa>#<seq>`), unikalna w procesie. */
 export interface SubTask {
+    plan?: PlanTaskMetadata;
+    /** Immutable snapshot of the transaction that ended this node. */
+    planReport?: PlanReport;
+    /** Plan placeholders have no execution start time until runner activation. */
+    startedAt?: number;
     parentConversation?: ParentConversationMetadata;
     interruptedByRestart?: boolean;
     parentId?: string;
@@ -190,6 +199,20 @@ export interface SubTaskRegistryOptions {
     maxIdleThreadsPerSession?: number;
 }
 
+/** Caller supplies prepared configurations only AFTER required consent and preparation.
+ * Rejected preparation has no executable reservation. Graph is validated by P1. */
+export type PlanReservation = Readonly<{
+    nodeId: PlanNodeId; runId: string; name: string; taskPreview?: string;
+    preparation: { kind: 'ready'; threadId: string; config: Record<string, unknown>; parentConversation?: ParentConversationMetadata }
+        | { kind: 'rejected'; error: string };
+}>;
+export type ReservePlanInput = Readonly<{
+    planId: PlanId; graph: DelegationGraph; tasks: readonly PlanReservation[];
+    owner: SubThreadOwner; origin: SubTaskOrigin; parentId?: string; level?: number; background?: boolean;
+}>;
+export type PlanHandle = Readonly<{ planId: PlanId; getReport(): PlanReport }>;
+const isActiveTask = (task: SubTask): boolean => task.status === 'running' || task.status === 'waiting';
+
 /** Ile ZAKOŃCZONYCH biegów trzymamy w pamięci (starsze wypadają). */
 const DEFAULT_MAX_DONE = 50;
 /** Ile kroków per bieg ląduje w RAM (nadmiar idzie tylko do konsumentów, np. do pliku). */
@@ -206,6 +229,163 @@ const DEFAULT_MAX_MESSAGES_PER_TASK = 10;
 const MAX_THREAD_EFFECTS = 100;
 
 export class SubTaskRegistry {
+    private readonly _plans = new Map<PlanId, { report: PlanReport }>();
+    private readonly _planEvents: Array<() => void> = [];
+    private readonly _publishingPlanTasks = new Set<string>();
+    private _publishingPlan = false;
+
+    reservePlan(input: ReservePlanInput): PlanHandle {
+        if (this._plans.has(input.planId) || this.list().some(task => task.plan?.planId === input.planId)
+            || this._startCancelled(input.owner, input.parentId)) throw new Error('Sub-agent plan reservation cancelled');
+        const reservations = new Map(input.tasks.map(task => [task.nodeId, task]));
+        const runIds = new Set(input.tasks.map(task => task.runId));
+        const threadIds = input.tasks.flatMap(task => task.preparation.kind === 'ready' ? [task.preparation.threadId] : []);
+        if (!input.graph.length || reservations.size !== input.tasks.length || reservations.size !== input.graph.length
+            || runIds.size !== input.tasks.length || new Set(threadIds).size !== threadIds.length
+            || input.graph.some(node => !reservations.has(node.nodeId))
+            || [...runIds].some(id => this._tasks.has(id) || this._cancelledRuns.has(id))
+            || threadIds.some(id => this._threads.has(id))) throw new Error('Sub-agent plan identity conflict');
+        // Clone/mask everything before publishing any record; a preparation failure cannot leave half a plan.
+        const threads: SubThread[] = [];
+        const tasks = input.graph.map(node => {
+            const reservation = reservations.get(node.nodeId)!;
+            const preparation = reservation.preparation;
+            const task: SubTask = { id: reservation.runId, name: reservation.name, agentName: input.owner.agentName,
+                origin: { ...input.origin }, parentId: input.parentId, level: input.level ?? 1, background: input.background,
+                status: 'waiting', createdAt: Date.now(), steps: [], budget: {}, questionState: { kind: 'none' },
+                plan: { planId: input.planId, nodeId: node.nodeId,
+                    dependsOn: node.dependsOn.map(nodeId => ({ nodeId, runId: reservations.get(nodeId)!.runId })), state: { kind: 'queued' } } };
+            if (reservation.taskPreview?.trim()) {
+                const preview = reservation.taskPreview.trim().slice(0, 300);
+                task.taskPreview = this._mask ? this._mask(preview) : preview;
+            }
+            if (preparation.kind === 'ready') {
+                task.threadId = preparation.threadId;
+                if (preparation.parentConversation) task.parentConversation = preparation.parentConversation;
+                const thread = this._newThread({ threadId: preparation.threadId, name: reservation.name,
+                    owner: input.owner, origin: input.origin, parentId: input.parentId, level: task.level,
+                    config: preparation.config, parentConversation: preparation.parentConversation, phase: 'queued' });
+                thread.queuedRunId = task.id;
+                thread.runIds.push(task.id);
+                threads.push(thread);
+            } else this._writeTerminal(task, { kind: 'error', error: preparation.error });
+            return task;
+        });
+        const cell = { report: getPlanReport({ planId: input.planId, nodes: tasks.map(task => ({ nodeId: task.plan!.nodeId, dependsOn: task.plan!.dependsOn, state: task.plan!.state, runId: task.id })) }) };
+        for (const task of tasks) this._tasks.set(task.id, task);
+        for (const thread of threads) this._threads.set(thread.threadId, thread);
+        this._plans.set(input.planId, cell);
+        const finished = tasks.filter(task => !isActiveTask(task));
+        const report = this._refreshPlan(input.planId, finished);
+        this._publishPlan(report, finished, tasks, threads);
+        return Object.freeze({ planId: input.planId, getReport: () => cell.report });
+    }
+
+    /** First terminal wins, including timeout before a late runner success. */
+    settle(runId: string, terminal: TaskTerminal): boolean {
+        const task = this._tasks.get(runId);
+        if (!task || !isActiveTask(task)) return false;
+        if (task.plan) return this._settlePlanBatch([{ id: runId, terminal }]) > 0;
+        this._writeTerminal(task, terminal);
+        this._questions.close(task, { kind: 'cancelled', by: 'system', reason: 'run-ended' });
+        this.events.emit('task:finished', task);
+        this._evictOldDone();
+        return true;
+    }
+
+    private _writeTerminal(task: SubTask, terminal: TaskTerminal): void {
+        if (task.plan && task.stopRequested && terminal.kind !== 'aborted') terminal = { kind: 'aborted', result: terminal.result };
+        if (terminal.result) task.result = terminal.result;
+        switch (terminal.kind) {
+            case 'result':
+                task.status = terminal.result.stoppedBy === 'abort' ? 'aborted' : 'done';
+                task.outcome = terminal.result.outcome;
+                break;
+            case 'error': {
+                const message = String(terminal.error);
+                task.status = 'error';
+                task.error = this._mask ? this._mask(message) : message;
+                if (terminal.outcome) task.outcome = terminal.outcome;
+                break;
+            }
+            case 'timeout': case 'aborted': {
+                const hasMaterial = !!(terminal.result?.text || terminal.result?.handoff || task.partial?.text
+                    || terminal.result?.outcome?.hasMaterial || task.outcome?.hasMaterial
+                    || task.partial?.toolOutcomes.some(tool => tool.outcome === 'returned'));
+                task.status = 'aborted';
+                task.outcome = { end: terminal.kind === 'timeout' ? { kind: 'timeout' }
+                    : { kind: 'stopped', by: task.stopRequestedBy ?? 'system' },
+                    completeness: hasMaterial ? 'partial' : 'empty', hasAnswer: false,
+                    hasMaterial, effects: terminal.result?.outcome?.effects ?? task.outcome?.effects ?? [] };
+                break;
+            }
+            default: { const exhaustive: never = terminal; return exhaustive; }
+        }
+        task.endedAt = Date.now();
+        if (task.plan) task.plan = { ...task.plan, state: terminalPlanState(terminal) };
+    }
+
+    private _refreshPlan(planId: PlanId, finished: SubTask[]): PlanReport {
+        const cell = this._plans.get(planId)!;
+        const report = refreshPlan({ planId, nodes: cell.report.nodes.map(node => ({ ...node, state: this._tasks.get(node.runId)!.plan!.state })) });
+        cell.report = report;
+        for (const node of report.nodes) {
+            const task = this._tasks.get(node.runId)!;
+            task.plan = Object.freeze({ planId, nodeId: node.nodeId, dependsOn: node.dependsOn, state: node.state });
+            if (node.state.kind === 'blocked' && isActiveTask(task)) {
+                task.status = 'blocked'; task.endedAt = Date.now();
+                task.result = { text: '', toolsUsed: [], durationMs: 0, usage: null };
+                task.outcome = { end: { kind: 'failed', stage: 'work' }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] };
+                finished.push(task);
+            }
+        }
+        return report;
+    }
+
+    private _settlePlanBatch(entries: readonly { id: string; terminal: TaskTerminal }[]): number {
+        const finished: SubTask[] = [];
+        const reports = new Map<PlanId, PlanReport>();
+        let accepted = 0;
+        for (const { id, terminal } of entries) {
+            const task = this._tasks.get(id);
+            if (!task?.plan || !isActiveTask(task)) continue;
+            this._writeTerminal(task, terminal);
+            finished.push(task); accepted++;
+            reports.set(task.plan.planId, this._plans.get(task.plan.planId)!.report);
+        }
+        for (const planId of reports.keys()) reports.set(planId, this._refreshPlan(planId, finished));
+        // Every selected plan is committed before observers or scheduler callbacks run.
+        for (const task of finished) task.planReport = reports.get(task.plan!.planId)!;
+        for (const [planId, report] of reports) this._publishPlan(report, finished.filter(task => task.plan!.planId === planId));
+        return accepted;
+    }
+
+    private _publishPlan(report: PlanReport, finished: SubTask[], created: SubTask[] = [], threads: SubThread[] = []): void {
+        for (const node of report.nodes) this._publishingPlanTasks.add(node.runId);
+        for (const task of finished) task.planReport = report;
+        if (report.complete) this._plans.delete(report.planId);
+        this._planEvents.push(() => {
+            for (const thread of threads) this.events.emit('thread:created', thread);
+            for (const task of created) this.events.emit('task:created', task);
+            for (const task of finished) {
+                const thread = task.threadId ? this._threads.get(task.threadId) : undefined;
+                if (thread && thread.phase !== 'closed' && task.startedAt === undefined) this._closeThreadData(thread);
+                this._questions.close(task, { kind: 'cancelled', by: task.stopRequestedBy ?? 'system',
+                    reason: task.stopRequested ? (this._stoppingAll ? 'unload' : 'stop') : 'run-ended' });
+                this.events.emit('task:finished', task);
+            }
+            this.events.emit('task:plan', report);
+        });
+        if (this._publishingPlan) return;
+        this._publishingPlan = true;
+        try { while (this._planEvents.length) this._planEvents.shift()!(); }
+        finally {
+            this._publishingPlan = false;
+            this._publishingPlanTasks.clear();
+            this._evictOldDone();
+        }
+    }
+
     private readonly _history?: SubTaskHistory;
     flushHistory(): Promise<void> { return this._history?.flush() ?? Promise.resolve(); }
     /** Silent and idempotent: historical threads are closed and cannot resume execution. */
@@ -257,10 +437,14 @@ export class SubTaskRegistry {
     }
     acquire(owner: Readonly<SubThreadOwner>, runId: string, signal: AbortSignal, group?: AdmissionGroup): Promise<Lease> {
         const task = this._tasks.get(runId);
-        if (this._cancelledRuns.has(runId) || (task && (task.status !== 'running' || task.stopRequested)) || this._startCancelled(owner)) {
+        if (this._cancelledRuns.has(runId) || (task && (!this._canAdmitTask(task) || task.stopRequested)) || this._startCancelled(owner, task?.plan ? task.parentId : undefined)
+            || (task?.plan && (!task.origin || this._ownerKey(task.origin) !== this._ownerKey(owner) || task.agentName !== owner.agentName))) {
             return Promise.reject(new Error('Sub-agent admission cancelled'));
         }
         return this._scheduler.acquire(owner, runId, signal, group);
+    }
+    private _canAdmitTask(task: SubTask): boolean {
+        return task.status === 'running' || (task.status === 'waiting' && task.plan?.state.kind === 'queued');
     }
     getRunActivity(runId: string): SubRunActivity { return this._scheduler.getActivity(runId); }
 
@@ -390,11 +574,16 @@ export class SubTaskRegistry {
 
     createThread(input: { threadId: string; name: string; owner: SubThreadOwner; origin: SubTaskOrigin; config: Record<string, unknown>; phase?: SubThread['phase']; parentId?: string; level?: number; parentConversation?: ParentConversationMetadata }): SubThread {
         if (this._startCancelled(input.owner, input.parentId)) throw new Error('Sub-agent admission cancelled');
-        const now = Date.now();
-        const thread: SubThread = { ...input, owner: { ...input.owner }, origin: { ...input.origin }, config: structuredClone(input.config), phase: input.phase ?? 'running', reusable: false, runIds: [], transcript: [], userStop: false, lastActiveAt: now, closeAfterRun: false, effects: [] };
+        const thread = this._newThread(input);
         this._threads.set(thread.threadId, thread);
         this.events.emit('thread:created', thread);
         this._pruneIdleThreads();
+        return thread;
+    }
+
+    private _newThread(input: Parameters<SubTaskRegistry['createThread']>[0]): SubThread {
+        const now = Date.now();
+        const thread: SubThread = { ...input, owner: { ...input.owner }, origin: { ...input.origin }, config: structuredClone(input.config), phase: input.phase ?? 'running', reusable: false, runIds: [], transcript: [], userStop: false, lastActiveAt: now, closeAfterRun: false, effects: [] };
         return thread;
     }
 
@@ -459,6 +648,8 @@ export class SubTaskRegistry {
         if (this._startCancelled(owner, thread?.parentId) || this._cancelledRuns.has(thread?.queuedRunId ?? threadId)) return false;
         if (!thread || thread.phase !== 'queued' || !owner?.agentName || thread.owner.agentName !== owner.agentName
             || thread.owner.sessionPath !== owner.sessionPath || thread.owner.sessionEpoch !== owner.sessionEpoch) return false;
+        const task = this._tasks.get(thread.queuedRunId ?? threadId);
+        if (task?.plan && (!this._canAdmitTask(task) || task.stopRequested)) return false;
         thread.config = structuredClone(frozenConfig);
         thread.phase = 'running';
         thread.lastActiveAt = Date.now();
@@ -544,6 +735,11 @@ export class SubTaskRegistry {
     finishQueuedFailure(threadId: string, input: { error: string; background?: boolean; taskPreview?: string }): SubTask | undefined {
         const thread = this._threads.get(threadId);
         const runId = thread?.queuedRunId ?? threadId;
+        const placeholder = this._tasks.get(runId);
+        if (thread?.phase === 'queued' && placeholder?.plan && placeholder.status === 'waiting') {
+            this.settle(runId, { kind: 'error', error: maskSensitiveData(input.error) });
+            return placeholder;
+        }
         if (!thread || thread.phase !== 'queued' || this._tasks.has(runId)) return undefined;
         const error = this._mask ? this._mask(maskSensitiveData(input.error)) : maskSensitiveData(input.error);
         thread.closedBy = 'system';
@@ -674,6 +870,21 @@ export class SubTaskRegistry {
         parentId?: string;
         level?: number;
     }): SubTask {
+        const existing = this._tasks.get(id);
+        if (existing?.plan) {
+            if (existing.status !== 'waiting' || existing.plan.state.kind !== 'queued' || existing.stopRequested
+                || this._startCancelled(existing.origin ?? { agentName: existing.agentName }, existing.parentId)
+                || existing.threadId !== threadId || !threadId || this._threads.get(threadId)?.phase !== 'running') {
+                throw new Error('Sub-agent plan activation cancelled');
+            }
+            existing.budget = budget ? { ...budget } : {};
+            existing.status = 'running';
+            existing.startedAt = Date.now();
+            existing.plan = { ...existing.plan, state: { kind: 'running' } };
+            const report = this._refreshPlan(existing.plan.planId, []);
+            this._publishPlan(report, []);
+            return existing;
+        }
         const task: SubTask = {
             id,
             name: name || 'sub',
@@ -754,13 +965,7 @@ export class SubTaskRegistry {
         try {
             if (!task) return;
             if (task.status !== 'running') return;
-            task.result = result;
-            task.outcome = result.outcome;
-            task.status = result?.stoppedBy === 'abort' ? 'aborted' : 'done';
-            task.endedAt = Date.now();
-            this._questions.close(task, { kind: 'cancelled', by: 'system', reason: 'run-ended' });
-            this.events.emit('task:finished', task);
-            this._evictOldDone();
+            this.settle(task.id, { kind: 'result', result });
         } catch (e) {
             log.warn('SubTaskRegistry', 'finish() padł (bieg suba leci dalej):', e);
         }
@@ -771,15 +976,7 @@ export class SubTaskRegistry {
         try {
             if (!task) return;
             if (task.status !== 'running') return;
-            const message = typeof error === 'string' ? error : String(error);
-            task.status = 'error';
-            if (outcome) task.outcome = outcome;
-            task.error = this._mask ? this._mask(message) : message;
-            if (result) task.result = result;
-            task.endedAt = Date.now();
-            this._questions.close(task, { kind: 'cancelled', by: 'system', reason: 'run-ended' });
-            this.events.emit('task:finished', task);
-            this._evictOldDone();
+            this.settle(task.id, { kind: 'error', error, outcome, result });
         } catch (e) {
             log.warn('SubTaskRegistry', 'fail() padł (bieg suba leci dalej):', e);
         }
@@ -805,7 +1002,7 @@ export class SubTaskRegistry {
             const queued = !task && [...this._threads.values()].some(thread => thread.phase === 'queued'
                 && (thread.queuedRunId ?? thread.threadId) === id);
             if (this._cancelledRuns.has(id) || this._stoppingAll || task?.stopRequested
-                || (task ? task.status !== 'running' : !queued)) { fn(); return; }
+                || (task ? !isActiveTask(task) : !queued)) { fn(); return; }
             this._aborts.set(id, fn);
         } catch (e) {
             log.warn('SubTaskRegistry', 'attachAbort() padł (bieg suba leci dalej):', e);
@@ -834,7 +1031,11 @@ export class SubTaskRegistry {
         const queued = [...this._threads.values()].filter(thread => thread.phase === 'queued');
         const nodes = new Map<string, { parentId?: string; task?: SubTask; thread?: SubThread }>();
         for (const task of this._tasks.values()) nodes.set(task.id, { parentId: task.parentId, task });
-        for (const thread of queued) nodes.set(thread.queuedRunId ?? thread.threadId, { parentId: thread.parentId, thread });
+        for (const thread of queued) {
+            const id = thread.queuedRunId ?? thread.threadId;
+            const existing = nodes.get(id);
+            nodes.set(id, { parentId: existing?.parentId ?? thread.parentId, task: existing?.task, thread });
+        }
         const selected = new Set(roots);
         // Follow run identities, never thread identities (continuations have a new parent).
         let added = true;
@@ -845,7 +1046,7 @@ export class SubTaskRegistry {
             }
         }
         const live = [...nodes].filter(([id, node]) => selected.has(id) && !this._stoppingRuns.has(id)
-            && (node.thread || (node.task?.status === 'running' && node.task.endedAt === undefined)));
+            && (node.task ? isActiveTask(node.task) && node.task.endedAt === undefined : !!node.thread));
         let delivered = 0;
         this._scheduler.transaction(() => {
             // No event or callback until every member has the cancellation latch.
@@ -872,6 +1073,13 @@ export class SubTaskRegistry {
             const aborts = live.map(([id]) => ({ id, stop: this._aborts.get(id), depth: depth(id) }))
                 .sort((a, b) => b.depth - a.depth);
             try {
+                // All cancellation latches and abort handles exist before terminal publication.
+                const selectedPlans = new Set(live.flatMap(([, node]) => node.task?.plan ? [node.task.plan.planId] : []));
+                const stoppedPlanIds = [...selectedPlans].flatMap(planId => {
+                    const plan = this._plans.get(planId);
+                    return plan ? planStopRoots(plan.report, new Set(live.map(([id]) => id))) : [];
+                });
+                this._settlePlanBatch(stoppedPlanIds.map(id => ({ id, terminal: { kind: 'aborted' } })));
                 for (const [id] of live) { this._scheduler.cancel(id); this._inbox.close(id); }
                 for (const [, node] of live) {
                     if (node.task) {
@@ -880,7 +1088,7 @@ export class SubTaskRegistry {
                             this.step(node.task, 'stop.requested', { by: node.task.stopRequestedBy, ...(reason ? { reason } : {}) });
                         }
                     }
-                    if (node.thread) this._closeThreadData(node.thread);
+                    if (node.thread && node.thread.phase !== 'closed') this._closeThreadData(node.thread);
                 }
                 for (const { id, stop } of aborts) if (stop) {
                     try { stop(); if (nodes.get(id)?.task) delivered++; }
@@ -971,7 +1179,7 @@ export class SubTaskRegistry {
             let removed = 0;
             const retained = this._liveAncestorIds();
             for (const [id, task] of [...this._tasks]) {
-                if (task.status === 'running' || retained.has(id)) continue;
+                if (isActiveTask(task) || retained.has(id)) continue;
                 if ((task.origin?.sessionPath || '') !== sessionPath) continue;
                 this._tasks.delete(id);
                 this._cancelledRuns.delete(id);
@@ -1003,23 +1211,29 @@ export class SubTaskRegistry {
                 parentId = this._tasks.get(parentId)?.parentId;
             }
         };
-        for (const task of this._tasks.values()) if (task.status === 'running') retain(task.parentId);
+        for (const task of this._tasks.values()) if (isActiveTask(task)) retain(task.parentId);
+        // Full predecessor results stay in one place until the entire plan settles.
+        for (const { report } of this._plans.values()) for (const node of report.nodes) {
+            retained.add(node.runId);
+            retain(this._tasks.get(node.runId)?.parentId);
+        }
+        for (const id of this._publishingPlanTasks) retained.add(id);
         for (const thread of this._threads.values()) if (thread.phase === 'queued') retain(thread.parentId);
         return retained;
     }
 
-    /** Retencja: nadmiarowe ZAKOŃCZONE biegi wylatują od najstarszego; `running` zostaje. */
+    /** Retencja: nadmiarowe terminalne biegi wylatują od najstarszego; aktywne plany zostają. */
     private _evictOldDone(): void {
         let done = 0;
         for (const task of this._tasks.values()) {
-            if (task.status !== 'running') done++;
+            if (!isActiveTask(task)) done++;
         }
         const retained = this._liveAncestorIds();
         let toDrop = done - this._maxDone;
         if (toDrop <= 0) return;
         for (const [id, task] of this._tasks) {
             if (toDrop <= 0) break;
-            if (task.status === 'running' || retained.has(id)) continue;
+            if (isActiveTask(task) || retained.has(id)) continue;
             this._tasks.delete(id);
             this._cancelledRuns.delete(id);
             this._traceScopes.delete(id);
@@ -1046,6 +1260,8 @@ export class SubTaskRegistry {
         this._history?.dispose();
         try {
             this.events.removeAllListeners();
+            this._plans.clear();
+            this._planEvents.length = 0;
             this._tasks.clear();
             this._threads.clear();
             this._traceScopes.clear();
