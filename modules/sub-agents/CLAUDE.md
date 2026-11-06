@@ -815,3 +815,39 @@ z długim korpusem klucza. Zwykły `sk-` wymaga co najmniej 20 znaków alfanumer
 lub `_`, w tym cyfry albo wielkiej litery. Dzięki temu `task-przygotowanie-dokumentacji`
 i zwykłe `mask-...` pozostają czytelne. Globalny guard i redakcja znanych wartości
 pozostają bez zmian. F7 sprawdza tekst i prefiksy; F5-3 nadal sprawdza zgodę i payload.
+
+### 2.4.6 P2 - plan runtime and lifecycle
+
+`SubTaskPlanRuntime.ts` owns the validated graph, generated plan ID, frozen full owner,
+optional real `parentRunId`, revisions and a completion promise. `SubTaskRegistry` exposes
+`createPlan`, `getPlan`, `listPlans(owner?)` and `requestStopPlan`; `plan:changed` publishes
+state changes. The barrel additionally exports the runtime type, `PlanReference` and
+`PlanSettlement`. Runtime `start` dispatches eligible nodes once through the supplied
+single-task executor; `settle` accepts only its final mapped result. `completion` waits
+for dispatched preparation/execution promises to settle, including after Stop, but does
+not claim that detached I/O has ended. The existing executor alone owns work leases.
+
+Waiting dependencies have no reservation, timer or lease. `createThread({plan})` atomically
+claims a ready node before publishing the reservation; actual task creation marks it running.
+Both reservation and run carry `{planId,nodeId}` without changing the real parent or depth.
+Continuation clears the thread's old plan link; the original run and frozen node result stay
+unchanged. All phases share one existing scheduler admission group.
+
+Stop selects plan executions and their real subtrees, latches every selected graph and run
+before owner/plan/question callbacks, and cancels them in one scheduler transaction. Nodes
+without executions become stopped; settled results and the first Stop actor survive. The
+same selection covers ancestor/owner Stop, parent completion/closure, session/tab closure
+and unload. Owner Stop counts accepted plans as well as runs/reservations; legacy counts
+without plans are unchanged. `stopAll` retains its legacy delivered-abort count. Dispose
+latches graphs without invoking attached abort handles; unload must still stop first.
+
+The coordinator includes active plans in its finish barrier, releases admission while waiting,
+and wakes on completion even if every node failed before creating a run. This closes the gap
+between predecessor settlement and successor reservation. Active plans retain their executions
+and ancestor chains through eviction/session pruning. Frozen material belongs to the graph;
+terminal plans use the existing `maxDone` retention and are removed by session pruning.
+
+Tests: `SubTaskRegistry.stopTree.test.ts` and `../tools/DelegateTool.plan.test.ts` exercise
+atomic Stop, graph-only lifecycle, retention, admission and controlled runner completion.
+P3 adds dependency material/delivery; P4 adds durable history; P5 adds group presentation.
+These runtime APIs do not publish new delegate schema fields (P6).

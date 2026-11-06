@@ -45,6 +45,9 @@ import type { SubTaskNotice } from './SubTaskNotifier.js';
 import { SubTaskHistory, restoreSubTaskHistory } from './SubTaskHistory.js';
 import type { ParentConversationMetadata } from './ParentConversationBudget.js';
 import type { SubTaskHistoryRecord } from './SubTaskHistory.js';
+import { SubTaskPlanRuntime } from './SubTaskPlanRuntime.js';
+import type { PlanReference } from './SubTaskPlanRuntime.js';
+import type { SubTaskPlan } from './SubTaskPlan.js';
 import { SubTaskScheduler } from './SubTaskScheduler.js';
 import type { AdmissionGroup, Lease, SubRunActivity } from './SubTaskScheduler.js';
 import type { Owner, QuestionId, QuestionRecipient, ParentQuestion, QuestionState, ParentQuestionClock, OpenParentQuestionResult, AnswerResult } from './ParentQuestions.js';
@@ -111,6 +114,7 @@ export function canContinueAfterUserStop(thread: SubThread, turnKind: unknown, t
 }
 export type SubThreadEffect = RunOutcome['effects'][number] & { expectedCheck?: 'exists' | 'absent' | 'none' };
 export interface SubThread {
+    plan?: PlanReference;
     parentConversation?: ParentConversationMetadata;
     queuedRunId?: string;
     threadId: string; name: string; owner: SubThreadOwner; origin: SubTaskOrigin;
@@ -123,6 +127,7 @@ export interface SubThread {
 
 /** Bieg sub-agenta jako byt. `id` = etykieta trace (`sub/<nazwa>#<seq>`), unikalna w procesie. */
 export interface SubTask {
+    plan?: PlanReference;
     parentConversation?: ParentConversationMetadata;
     interruptedByRestart?: boolean;
     parentId?: string;
@@ -241,6 +246,27 @@ export class SubTaskRegistry {
         return imported;
     }
 
+    private readonly _plans = new Map<string, SubTaskPlanRuntime>();
+    createPlan(graph: SubTaskPlan, owner: SubTaskOrigin, parentRunId?: string): SubTaskPlanRuntime {
+        if (!owner.agentName || !owner.sessionPath || !owner.sessionEpoch || this._startCancelled(owner, parentRunId)
+            || (parentRunId && (!this._isLiveRun(parentRunId)
+                || this._ownerKey(this._tasks.get(parentRunId)!.origin ?? { agentName: '' }) !== this._ownerKey(owner))))
+            throw new Error('plan_unavailable');
+        const plan = new SubTaskPlanRuntime(graph, { ...owner, agentName: owner.agentName,
+            sessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch }, parentRunId, () => {
+            this.events.emit('plan:changed', plan);
+            this._evictOldDone();
+        });
+        this._plans.set(plan.planId, plan);
+        this.events.emit('plan:changed', plan);
+        return plan;
+    }
+    getPlan(id: string): SubTaskPlanRuntime | undefined { return this._plans.get(id); }
+    listPlans(owner?: SubThreadOwner): SubTaskPlanRuntime[] {
+        return [...this._plans.values()].filter(plan => !owner || this._ownerKey(owner) === this._ownerKey(plan.owner));
+    }
+    requestStopPlan(id: string, by: StopBy = 'user'): boolean { return this._stopRuns([id], by).accepted > 0; }
+
     private readonly _scheduler = new SubTaskScheduler();
     private readonly _cancelledRuns = new Map<string, StopBy>();
     private readonly _stoppingRuns = new Set<string>();
@@ -267,7 +293,17 @@ export class SubTaskRegistry {
     private readonly _questions: ParentQuestions;
     private readonly _inbox: SubTaskInbox;
     takeChildNotices(parentId: string): SubTaskNotice[] { return this._inbox.take(parentId); }
-    waitChildNotice(parentId: string, signal: AbortSignal): Promise<SubTaskNotice | undefined> { return this._inbox.wait(parentId, signal); }
+    async waitChildNotice(parentId: string, signal: AbortSignal): Promise<SubTaskNotice | undefined> {
+        const plans = this.listPlans().filter(plan => plan.parentRunId === parentId && plan.status === 'active');
+        if (!plans.length) return this._inbox.wait(parentId, signal);
+        const waiting = new AbortController();
+        const cancel = () => waiting.abort();
+        signal.addEventListener('abort', cancel, { once: true });
+        if (signal.aborted) cancel();
+        try { return await Promise.race([this._inbox.wait(parentId, waiting.signal),
+            Promise.all(plans.map(plan => plan.completion)).then(() => undefined)]); }
+        finally { signal.removeEventListener('abort', cancel); waiting.abort(); }
+    }
     private _isLiveRun(id: string): boolean {
         const task = this._tasks.get(id);
         return task?.status === 'running' && !task.stopRequested;
@@ -388,12 +424,19 @@ export class SubTaskRegistry {
         if (thread?.threadId) this._traceLog?.scope?.(thread.threadId)?.(type, { threadId: thread.threadId, phase: thread.phase });
     }
 
-    createThread(input: { threadId: string; name: string; owner: SubThreadOwner; origin: SubTaskOrigin; config: Record<string, unknown>; phase?: SubThread['phase']; parentId?: string; level?: number; parentConversation?: ParentConversationMetadata }): SubThread {
+    createThread(input: { plan?: PlanReference; threadId: string; name: string; owner: SubThreadOwner; origin: SubTaskOrigin; config: Record<string, unknown>; phase?: SubThread['phase']; parentId?: string; level?: number; parentConversation?: ParentConversationMetadata }): SubThread {
         if (this._startCancelled(input.owner, input.parentId)) throw new Error('Sub-agent admission cancelled');
+        if (input.plan) {
+            const plan = this._plans.get(input.plan.planId);
+            if (!plan || plan.parentRunId !== input.parentId || this._ownerKey(plan.owner) !== this._ownerKey(input.owner)
+                || !plan.reserve(input.plan.nodeId, { runId: input.threadId, threadId: input.threadId }))
+                throw new Error('plan_unavailable');
+        }
         const now = Date.now();
         const thread: SubThread = { ...input, owner: { ...input.owner }, origin: { ...input.origin }, config: structuredClone(input.config), phase: input.phase ?? 'running', reusable: false, runIds: [], transcript: [], userStop: false, lastActiveAt: now, closeAfterRun: false, effects: [] };
         this._threads.set(thread.threadId, thread);
         this.events.emit('thread:created', thread);
+        if (thread.plan) this._plans.get(thread.plan.planId)?.publish();
         this._pruneIdleThreads();
         return thread;
     }
@@ -426,6 +469,7 @@ export class SubTaskRegistry {
         thread.phase = 'queued';
         thread.queuedRunId = runId;
         delete thread.parentConversation;
+        delete thread.plan;
         thread.parentId = relation?.parentId;
         thread.level = relation?.level;
         this.events.emit('thread:queued', thread);
@@ -489,7 +533,10 @@ export class SubTaskRegistry {
         const thread = this._threads.get(threadId);
         if (!thread || thread.phase === 'closed') return false;
         if (thread.phase === 'queued') this._stopRuns([thread.queuedRunId ?? threadId], by);
-        else if (thread.phase === 'running') thread.closeAfterRun = true;
+        else if (thread.phase === 'running') {
+            thread.closeAfterRun = true;
+            this._stopRuns(this.listPlans().filter(plan => plan.parentRunId === thread.runIds.at(-1)).map(plan => plan.planId), by);
+        }
         else this._closeThreadData(thread);
         return true;
     }
@@ -504,19 +551,30 @@ export class SubTaskRegistry {
         }
         return false;
     }
-    closeSessionThreads(agentName: string, sessionPath: string): number { let n = 0; for (const t of this._threads.values()) if (t.owner.agentName === agentName && t.owner.sessionPath === sessionPath && this.closeThread(t.threadId, 'system')) n++; return n; }
-    closeAll(): void { for (const t of this._threads.values()) this.closeThread(t.threadId, 'system'); }
+    closeSessionThreads(agentName: string, sessionPath: string): number {
+        this._stopRuns(this.listPlans().filter(plan => plan.owner.agentName === agentName && plan.owner.sessionPath === sessionPath)
+            .map(plan => plan.planId), 'system');
+        let count = 0;
+        for (const thread of this._threads.values()) if (thread.owner.agentName === agentName && thread.owner.sessionPath === sessionPath
+            && this.closeThread(thread.threadId, 'system')) count++;
+        return count;
+    }
+    closeAll(): void {
+        this._stopRuns([...this._plans.keys()], 'system');
+        for (const thread of this._threads.values()) this.closeThread(thread.threadId, 'system');
+    }
     closeQueuedForOwners(input: { tabKeys: string[]; agentNames: string[]; owners?: SubThreadOwner[] }, by: StopBy): number {
         const tabKeys = new Set(input.tabKeys.filter(Boolean));
         const agentNames = new Set(input.agentNames.filter(Boolean));
-        let count = 0;
+        const matches = (origin: SubTaskOrigin, owner: SubThreadOwner = origin) => {
+            const known = (input.owners ?? []).filter(candidate => candidate.agentName === owner.agentName);
+            if (known.length && this._ownerKey(owner) && !known.some(candidate => this._ownerKey(candidate) === this._ownerKey(owner))) return false;
+            return origin.tabKey ? tabKeys.has(origin.tabKey) : agentNames.has(origin.agentName);
+        };
+        const plans = this.listPlans().filter(plan => matches(plan.owner));
+        let count = this._stopRuns(plans.map(plan => plan.planId), by).accepted;
         for (const thread of this._threads.values()) {
-            if (thread.phase !== 'queued') continue;
-            const origin = thread.origin;
-            const known = (input.owners ?? []).filter(owner => owner.agentName === thread.owner.agentName);
-            if (known.length && this._ownerKey(thread.owner) && !known.some(owner => this._ownerKey(owner) === this._ownerKey(thread.owner))) continue;
-            const matches = origin.tabKey ? tabKeys.has(origin.tabKey) : agentNames.has(origin.agentName);
-            if (matches && this.closeThread(thread.threadId, by)) count++;
+            if (thread.phase === 'queued' && matches(thread.origin, thread.owner) && this.closeThread(thread.threadId, by)) count++;
         }
         return count;
     }
@@ -527,6 +585,7 @@ export class SubTaskRegistry {
         const task: SubTask = { id: runId, name: thread.name, agentName: thread.owner.agentName, status: 'done', createdAt: Date.now(), endedAt: Date.now(), steps: [], budget: {}, threadId,
             origin: { ...thread.origin }, outcome: { end: { kind: 'stopped', by: thread.closedBy }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } };
         if (thread.lastUserStopSeq !== undefined) task.userStopSeq = thread.lastUserStopSeq;
+        if (thread.plan) task.plan = thread.plan;
         if (thread.parentConversation) task.parentConversation = thread.parentConversation;
         if (thread.parentId !== undefined) task.parentId = thread.parentId;
         if (thread.level !== undefined) task.level = thread.level;
@@ -552,6 +611,7 @@ export class SubTaskRegistry {
         const task: SubTask = { id: runId, name: thread.name, agentName: thread.owner.agentName, status: 'error', createdAt: now, endedAt: now, steps: [], budget: {}, threadId,
             origin: { ...thread.origin }, error,
             outcome: { end: { kind: 'failed', stage: 'work' }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } };
+        if (thread.plan) task.plan = thread.plan;
         if (thread.parentConversation) task.parentConversation = thread.parentConversation;
         if (thread.parentId !== undefined) task.parentId = thread.parentId;
         if (thread.level !== undefined) task.level = thread.level;
@@ -605,6 +665,7 @@ export class SubTaskRegistry {
             this._cancelledRuns.delete(task.id);
             // Niedoręczone wiadomości do zakończonego biegu nie mają już adresata.
             this._messages.delete(task.id);
+            this._stopRuns(this.listPlans().filter(plan => plan.parentRunId === task.id && plan.status === 'active').map(plan => plan.planId), 'system');
             this._inbox.close(task.id);
             if (task.parentId !== undefined) this._inbox.push(task.parentId, { kind: 'result', task });
         });
@@ -693,6 +754,10 @@ export class SubTaskRegistry {
             task.threadId = threadId;
             const thread = this._threads.get(threadId);
             if (thread) {
+                if (thread.plan) {
+                    task.plan = thread.plan;
+                    this._plans.get(thread.plan.planId)?.startNode(thread.plan.nodeId);
+                }
                 if (thread.parentConversation) task.parentConversation = thread.parentConversation;
                 thread.runIds.push(id);
                 delete thread.parentId;
@@ -710,6 +775,7 @@ export class SubTaskRegistry {
         }
         this._tasks.set(task.id, task);
         this.events.emit('task:created', task);
+        if (task.plan) this._plans.get(task.plan.planId)?.publish();
         return task;
     }
 
@@ -823,32 +889,41 @@ export class SubTaskRegistry {
         if (!key || this._stoppingOwners.has(key)) return 0;
         this._stoppingOwners.add(key);
         try {
-            this.events.emit('owner:stopping', owner);
             const ids = this.list().filter(task => task.origin && this._ownerKey(task.origin) === key).map(task => task.id);
             for (const thread of this.listThreads(owner)) if (thread.phase === 'queued') ids.push(thread.queuedRunId ?? thread.threadId);
-            return this._stopRuns(ids, by).accepted;
+            ids.push(...this.listPlans(owner).map(plan => plan.planId));
+            return this._stopRuns(ids, by, undefined, () => this.events.emit('owner:stopping', owner)).accepted;
         } finally { this._stoppingOwners.delete(key); }
     }
 
-    private _stopRuns(roots: string[], by: StopBy, reason?: string): { accepted: number; delivered: number } {
+    private _stopRuns(roots: string[], by: StopBy, reason?: string, afterLatch?: () => void): { accepted: number; delivered: number } {
+        if (!roots.length && !afterLatch) return { accepted: 0, delivered: 0 };
         const queued = [...this._threads.values()].filter(thread => thread.phase === 'queued');
         const nodes = new Map<string, { parentId?: string; task?: SubTask; thread?: SubThread }>();
         for (const task of this._tasks.values()) nodes.set(task.id, { parentId: task.parentId, task });
         for (const thread of queued) nodes.set(thread.queuedRunId ?? thread.threadId, { parentId: thread.parentId, thread });
+        for (const plan of this._plans.values()) nodes.set(plan.planId, { parentId: plan.parentRunId });
         const selected = new Set(roots);
         // Follow run identities, never thread identities (continuations have a new parent).
         let added = true;
         while (added) {
             added = false;
+            for (const plan of this._plans.values()) if (selected.has(plan.planId)) {
+                for (const node of plan.nodes) if ('execution' in node.state && node.state.execution && !selected.has(node.state.execution.runId)) {
+                    selected.add(node.state.execution.runId); added = true;
+                }
+            }
             for (const [id, node] of nodes) if (node.parentId && selected.has(node.parentId) && !selected.has(id)) {
                 selected.add(id); added = true;
             }
         }
         const live = [...nodes].filter(([id, node]) => selected.has(id) && !this._stoppingRuns.has(id)
             && (node.thread || (node.task?.status === 'running' && node.task.endedAt === undefined)));
+        const plans = this.listPlans().filter(plan => selected.has(plan.planId) && plan.status === 'active');
         let delivered = 0;
         this._scheduler.transaction(() => {
             // No event or callback until every member has the cancellation latch.
+            for (const plan of plans) plan.latchStop(by);
             for (const [id, node] of live) {
                 this._stoppingRuns.add(id);
                 this._cancelledRuns.set(id, this._cancelledRuns.get(id) ?? node.task?.stopRequestedBy ?? node.thread?.closedBy ?? by);
@@ -872,6 +947,8 @@ export class SubTaskRegistry {
             const aborts = live.map(([id]) => ({ id, stop: this._aborts.get(id), depth: depth(id) }))
                 .sort((a, b) => b.depth - a.depth);
             try {
+                afterLatch?.();
+                for (const plan of plans) plan.publish();
                 for (const [id] of live) { this._scheduler.cancel(id); this._inbox.close(id); }
                 for (const [, node] of live) {
                     if (node.task) {
@@ -888,13 +965,13 @@ export class SubTaskRegistry {
                 }
             } finally { for (const [id] of live) this._stoppingRuns.delete(id); }
         });
-        return { accepted: live.length, delivered };
+        return { accepted: live.length + plans.length, delivered };
     }
 
     /** Unload latches admission before callbacks. Returns delivered live-task handles (legacy count); reservations are cancelled too. */
     stopAll(reason = 'stopAll'): number {
         this._stoppingAll = true;
-        const ids = [...this._tasks.keys(), ...[...this._threads.values()]
+        const ids = [...this._plans.keys(), ...this._tasks.keys(), ...[...this._threads.values()]
             .filter(thread => thread.phase === 'queued').map(thread => thread.queuedRunId ?? thread.threadId)];
         return this._stopRuns(ids, 'system', reason).delivered;
     }
@@ -969,6 +1046,7 @@ export class SubTaskRegistry {
         try {
             if (!sessionPath) return 0;
             let removed = 0;
+            for (const plan of this.listPlans()) if (plan.owner.sessionPath === sessionPath && plan.status !== 'active') this._plans.delete(plan.planId);
             const retained = this._liveAncestorIds();
             for (const [id, task] of [...this._tasks]) {
                 if (task.status === 'running' || retained.has(id)) continue;
@@ -1005,11 +1083,17 @@ export class SubTaskRegistry {
         };
         for (const task of this._tasks.values()) if (task.status === 'running') retain(task.parentId);
         for (const thread of this._threads.values()) if (thread.phase === 'queued') retain(thread.parentId);
+        for (const plan of this._plans.values()) if (plan.status === 'active') {
+            retain(plan.parentRunId);
+            for (const node of plan.nodes) if ('execution' in node.state) retain(node.state.execution?.runId);
+        }
         return retained;
     }
 
     /** Retencja: nadmiarowe ZAKOŃCZONE biegi wylatują od najstarszego; `running` zostaje. */
     private _evictOldDone(): void {
+        const completed = this.listPlans().filter(plan => plan.status !== 'active');
+        for (const plan of completed.slice(0, Math.max(0, completed.length - this._maxDone))) this._plans.delete(plan.planId);
         let done = 0;
         for (const task of this._tasks.values()) {
             if (task.status !== 'running') done++;
@@ -1040,6 +1124,8 @@ export class SubTaskRegistry {
      */
     dispose(): void {
         this._stoppingAll = true;
+        for (const plan of this._plans.values()) plan.latchStop('system');
+        this._plans.clear();
         this._scheduler.dispose();
         this._inbox.dispose();
         this._questions.dispose();

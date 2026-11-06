@@ -681,3 +681,32 @@ DelegateTool redaguje snapshot synchronicznie przed structuredClone, korzystają
 helper: redakcja skonfigurowanych wartości i lokalnego wzorca sk- poprzedza wyciągi,
 podgląd i dopasowanie budżetu. Bez zmiany globalnego SensitiveDataGuard.
 Testy F5-3 przechwytują podgląd oraz payload: sekret na granicy 160/240 znaków i sklejony sk-.
+
+### 2.4.6 P2 - internal dependency plan execution
+
+`DelegateTool` recognizes `id`, `depends_on` and `dependency_results` internally in `tasks[]`;
+the model-facing schema and descriptions remain unchanged until P6. Graph validation and
+payload freezing precede consent/reservations. A plan requires a full session owner and the
+real registry admission API; missing runtime returns `plan_unavailable`, never the legacy
+fallback. Nested plans require the live caller context and retain the normal depth checks.
+
+A registered plan returns a background receipt with `plan_id`, ordered node snapshots and
+warnings. Only ready nodes prepare/obtain consent/reserve, then use the same batch thunk,
+`_withAdmission`, `_withTimeout` and `_executeSubAgent` as legacy lists. All phases share one
+`AdmissionGroup`. Caller permissions, live ancestry and cancellation are checked again before
+reservation and after admission. Preflight/consent failures settle individual nodes and block
+their dependants; independent branches continue. No retry, new queue or new limits exist.
+
+Final node settlement happens after timeout/salvage mapping, never at `task:finished`.
+Typed run outcome and mapped material are copied into the graph. A timeout cannot release
+its runner lease or unlock successors even if a late runner reports success. Invocation
+cancellation listeners live until plan completion, covering consent, dependency waiting and
+module unload. Stop is one registry transaction, including nodes with no execution.
+
+`DelegateTool.plan.test.ts` uses real runners, controlled model callbacks and a fake monotonic
+clock to check A/B/C ordering, full budgets after dependency waiting, local width 1, conversation
+width 5, sleeping parents, permission changes, preflight errors and Stop races. A deliberately
+held runner covers timeout mapping and retention of its actual lease. Existing tests and legacy
+result/receipt shapes are unchanged. Dependency prompts and one aggregate notification belong
+to P3; P2 still uses the existing child-result transport internally. Persistence, UI and public
+schema publication remain P4-P6 responsibilities.

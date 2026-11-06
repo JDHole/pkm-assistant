@@ -1,5 +1,6 @@
 import test from 'ava';
-import { SubTaskRegistry } from './index.js';
+import { SubRunCoordinator } from './SubRunCoordinator.js';
+import { SubTaskPlan, SubTaskRegistry } from './index.js';
 import { QuestionTestClock } from './test-support/questionTestClock.js';
 
 const owner = { agentName: 'Mira', sessionPath: 'chat.md', sessionEpoch: 'e1' };
@@ -160,4 +161,89 @@ for (const prune of [false, true]) test(`F1 cancellation latches follow retentio
     const aborted: string[] = [];
     for (const id of ['stopped-0', 'stopped-100']) registry.attachAbort(id, () => aborted.push(id));
     t.deepEqual(aborted, ['stopped-0', 'stopped-100']);
+});
+
+function plan(registry: SubTaskRegistry, parentRunId?: string, origin = owner) {
+    const validation = SubTaskPlan.create([{ id: 'A' }, { id: 'B' }, { id: 'C', depends_on: ['A', 'B'] }], 5);
+    if (validation.kind !== 'valid') throw new Error('invalid fixture');
+    return registry.createPlan(validation.plan, origin, parentRunId);
+}
+
+test('plan Stop latches unreserved nodes and nested plans before callbacks; completed material survives', async t => {
+    const registry = new SubTaskRegistry(); t.teardown(() => registry.dispose());
+    const group = plan(registry);
+    const [a, b] = group.nodes;
+    const reserveNode = (id: typeof a.id) => registry.createThread({ threadId: id, name: id, owner, origin: owner,
+        config: {}, phase: 'queued', plan: { planId: group.planId, nodeId: id } });
+    reserveNode(a.id); registry.beginQueuedRun('A', owner, {});
+    const task = registry.create({ id: 'A', threadId: 'A', origin: owner });
+    const nested = plan(registry, task.id);
+    reserveNode(b.id);
+    const leases = await Promise.all(['A', 'x', 'y', 'z', 'w'].map(id => registry.acquire(owner, id, signal())));
+    const waiting = t.throwsAsync(registry.acquire(owner, 'B', signal()), { message: 'Sub-agent admission cancelled' });
+    const outside = registry.acquire(owner, 'outside', signal());
+    const seen: unknown[] = [];
+    registry.attachAbort('A', () => {
+        seen.push([group.nodes.map(node => node.state.kind), nested.nodes.map(node => node.state.kind), registry.getThread('B')?.closedBy]);
+        registry.finish(task, result); leases[0].release(); seen.push(registry.getRunActivity('outside'));
+    });
+    t.is(registry.requestStopPlan(group.planId, 'lead'), true);
+    await waiting; (await outside).release(); leases.forEach(lease => lease.release());
+    t.deepEqual(seen, [[['stopped', 'stopped', 'stopped'], ['stopped', 'stopped', 'stopped'], 'lead'], 'queued']);
+    t.deepEqual([group.status, nested.status, registry.getTask('A')?.result?.text], ['stopped', 'stopped', 'zachowany dorobek']);
+});
+
+for (const stop of ['ancestor', 'owner', 'unload', 'close', 'tab'] as const) test(`graph-only plan participates in ${stop} lifecycle and owner isolation`, async t => {
+    const registry = new SubTaskRegistry(); t.teardown(() => registry.dispose());
+    registry.createThread({ threadId: 'parent', name: 'parent', owner, origin: owner, config: {} });
+    registry.create({ id: 'parent', threadId: 'parent', origin: owner });
+    const group = plan(registry, 'parent');
+    const other = plan(registry, undefined, { ...owner, sessionEpoch: 'e2' });
+    if (stop === 'ancestor') registry.requestStop('parent', 'user');
+    if (stop === 'owner') registry.requestStopForOwner(owner, 'user');
+    if (stop === 'unload') registry.stopAll('unload');
+    if (stop === 'close') registry.closeThread('parent', 'user');
+    if (stop === 'tab') registry.closeQueuedForOwners({ tabKeys: [], agentNames: ['Mira'], owners: [owner] }, 'system');
+    await group.completion;
+    t.deepEqual([group.status, group.nodes.map(node => node.state.kind), other.status],
+        ['stopped', ['stopped', 'stopped', 'stopped'], stop === 'unload' ? 'stopped' : 'active']);
+    t.throws(() => registry.createThread({ threadId: 'late', name: 'late', owner, origin: owner, config: {},
+        parentId: 'parent', plan: { planId: group.planId, nodeId: group.nodes[0].id } }),
+    { message: ['ancestor', 'owner', 'unload'].includes(stop) ? 'Sub-agent admission cancelled' : 'plan_unavailable' });
+});
+
+test('active plan retains predecessors and their material across eviction and session pruning', t => {
+    const registry = new SubTaskRegistry({ maxDone: 1 }); t.teardown(() => registry.dispose());
+    const group = plan(registry); const id = group.nodes[0].id;
+    registry.createThread({ threadId: 'A', name: 'A', owner, origin: owner, config: {}, phase: 'queued', plan: { planId: group.planId, nodeId: id } });
+    registry.beginQueuedRun('A', owner, {});
+    const a = registry.create({ id: 'A', threadId: 'A', origin: owner });
+    registry.finish(a, { ...result, text: 'frozen A', stoppedBy: 'natural' }); group.settle(id, { kind: 'done', material: 'frozen A' });
+    for (const id of ['unrelated-1', 'unrelated-2']) registry.finish(registry.create({ id, origin: owner }), result);
+    registry.pruneSession(owner.sessionPath);
+    t.deepEqual([registry.list().map(task => task.id), registry.listPlans(owner).length, group.nodes[0].state],
+        [['A'], 1, { kind: 'done', material: 'frozen A', execution: { runId: 'A', threadId: 'A' } }]);
+    registry.requestStopPlan(group.planId);
+    t.deepEqual(group.nodes.map(node => node.state.kind), ['done', 'stopped', 'stopped']);
+    registry.pruneSession(owner.sessionPath);
+    t.deepEqual([registry.listPlans(owner).length, registry.list().length], [0, 0]);
+});
+
+test('coordinator releases admission while a plan has no runs and wakes when preparation fails', async t => {
+    const registry = new SubTaskRegistry(); t.teardown(() => registry.dispose());
+    const parent = registry.create({ id: 'parent', origin: owner });
+    const group = plan(registry, parent.id);
+    const leases = await Promise.all(['parent', 'a', 'b', 'c', 'd'].map(id => registry.acquire(owner, id, signal())));
+    const next = registry.acquire(owner, 'next', signal());
+    const activities: unknown[] = [];
+    const coordinator = new SubRunCoordinator(registry, parent, signal(), value => activities.push(value), () => {},
+        { release: () => leases[0].release(), resume: async () => {} });
+    const ending = coordinator.beforeFinish();
+    const admitted = await next;
+    t.deepEqual([activities, registry.getRunActivity('next'), group.nodes.map(node => node.state.kind)],
+        [[{ kind: 'waiting-children' }], 'working', ['waiting_dependencies', 'waiting_dependencies', 'waiting_dependencies']]);
+    group.settle(group.nodes[0].id, { kind: 'error', error: 'preparation failed' });
+    group.settle(group.nodes[1].id, { kind: 'error', error: 'preparation failed' });
+    t.deepEqual([await ending, group.status], ['finish', 'partial']);
+    admitted.release(); leases.forEach(lease => lease.release());
 });

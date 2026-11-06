@@ -92,3 +92,5 @@ export type { ParentConversationPreparation, ParentConversationMetadata } from '
 export { SubTaskPlan } from './SubTaskPlan.js';
 export type { PlanNodeId, PlanNodeDefinition, PlanExecution, PlanNodeTerminal, PlanNodeState,
     PlanNode, PlanStatus, PlanWarning, PlanValidation, PlanResult } from './SubTaskPlan.js';
+
+export type { SubTaskPlanRuntime, PlanReference, PlanSettlement } from './SubTaskPlanRuntime.js';

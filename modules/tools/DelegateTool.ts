@@ -1,4 +1,4 @@
-import { redactParentConversationSnapshot } from '../sub-agents/index.js';
+import { SubTaskPlan, redactParentConversationSnapshot } from '../sub-agents/index.js';
 import { Validator } from '@cfworker/json-schema';
 import type { Schema } from '@cfworker/json-schema';
 import type { ReasoningEffort } from '../models/index.js';
@@ -15,7 +15,7 @@ import type { ReasoningEffort } from '../models/index.js';
  * 4. Return results
  */
 import { SubAgentRunner, DEFAULT_SUB_AGENT_TOOLS, PKM_SUB_NAME, allocateSubTaskId, canContinueAfterUserStop, isRuntimeSequence } from '../../modules/sub-agents/index.js';
-import type { RunAdmission, AdmissionGroup, SubTaskRegistry, SubThread, Lease, RuntimeSequence, SubRunContext, SubTask, SubTaskOrigin, QuestionId, QuestionState, RunActivity, ParentQuestion } from '../../modules/sub-agents/index.js';
+import type { PlanReference, PlanSettlement, SubTaskPlanRuntime, RunAdmission, AdmissionGroup, SubTaskRegistry, SubThread, Lease, RuntimeSequence, SubRunContext, SubTask, SubTaskOrigin, QuestionId, QuestionState, RunActivity, ParentQuestion } from '../../modules/sub-agents/index.js';
 import type { RunOutcome, SubRunResult, ParentConversationContext, ParentConversationMetadata, ParentConversationPreparation } from '../../modules/sub-agents/index.js';
 import type { ApprovalManager } from '../../core/index.js';
 import type { BuiltinToolExecutionContext } from './ToolRegistry.js';
@@ -34,6 +34,9 @@ import { log } from '../../core/utils/Logger.js';
 
 /** Pojedyncze zadanie w trybie wielozadaniowym (`args.tasks[]`). */
 export interface DelegateTaskDef {
+    id?: unknown;
+    depends_on?: unknown;
+    dependency_results?: unknown;
     task?: string;
     context_mode?: unknown;
     aspect?: string;
@@ -242,6 +245,8 @@ export type DelegatePlugin = NonNullable<ResolverPluginLike> & {
      */
     subTaskRegistry?: {
         acquire?: SubTaskRegistry['acquire'];
+        createPlan?: SubTaskRegistry['createPlan'];
+        requestStopPlan?: SubTaskRegistry['requestStopPlan'];
         setParentConversation?: SubTaskRegistry['setParentConversation'];
         getRunActivity?: SubTaskRegistry['getRunActivity'];
         reserveContinuation?: SubTaskRegistry['reserveContinuation'];
@@ -259,7 +264,7 @@ export type DelegatePlugin = NonNullable<ResolverPluginLike> & {
         promoteToBackground?: (id: string) => boolean;
         requestStop?: (id: string, by: 'lead') => boolean;
         closeThread?: (id: string, by?: 'user' | 'lead' | 'system') => boolean;
-        createThread?: (input: { threadId: string; name: string; owner: import('../sub-agents/index.js').SubThreadOwner; origin: SubTaskOrigin; config: Record<string, unknown>; phase: 'queued'; parentId?: string; level?: number; parentConversation?: ParentConversationMetadata }) => import('../sub-agents/index.js').SubThread;
+        createThread?: SubTaskRegistry['createThread'];
         finishQueuedStop?: (id: string, input: { background?: boolean; taskPreview?: string }) => SubTask | undefined;
         finishQueuedFailure?: (id: string, input: { error: string; background?: boolean; taskPreview?: string }) => SubTask | undefined;
     } | null;
@@ -709,6 +714,13 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
             const refusal = () => ({ success: false as const, error: t('mcp.delegate.share.cancelled') });
             let offOwner: (() => void) | undefined;
             let offThread: (() => void) | undefined;
+            let offPlan: (() => void) | undefined;
+            let planRuntime: SubTaskPlanRuntime | undefined;
+            const cleanup = () => {
+                offOwner?.(); offThread?.(); offPlan?.();
+                runtime?.abortSignal?.removeEventListener('abort', cancel);
+                _liveInvocations.delete(invocation);
+            };
             runtime?.abortSignal?.addEventListener('abort', cancel, { once: true });
             const trackChild = (ctl: SubAbortControl) => {
                 const stop = () => abortSub(ctl, 'manual-stop');
@@ -753,12 +765,17 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 // via settings.pkmAssistant.limits.delegation_timeout_ms; per-call timeout_ms still wins.
                 const limits = getLimits(plugin?.env?.settings);
                 const defaultTimeoutMs = limits.delegation_timeout_ms;
+                const planMode = args.tasks?.some(task => 'id' in task || 'depends_on' in task || 'dependency_results' in task);
+                const graph = planMode ? SubTaskPlan.create(args.tasks, limits.max_parallel_delegations) : undefined;
+                if (graph?.kind === 'invalid') return { success: false, ...graph };
+                // Freeze payloads before consent or delayed dependency release.
+                if (graph) args = { ...args, tasks: structuredClone(args.tasks) };
 
                 // ── Strażnik GŁĘBOKOŚCI (fail-closed) ──
                 // `_invocationDelegationDepth` wstrzykuje MCPClient (jak `_invocationAgentName`) -
                 // model nie poda go sam z palca, bo pole i tak jest nadpisywane przy wykonaniu.
                 // 0 = wywołanie z głównego czatu; 1 = wywołanie z wnętrza sub-agenta itd.
-                const subRunContext = args._invocationSubRunContext;
+                const subRunContext = graph && args._invocationSubRunContext ? structuredClone(args._invocationSubRunContext) : args._invocationSubRunContext;
                 const ancestors = subRunContext
                     ? plugin?.subTaskRegistry?.getDelegationAncestors?.(subRunContext, activeAgent.name || '') : undefined;
                 const origin = _resolveOrigin(args);
@@ -799,7 +816,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 if (args.background === false && plugin?.subTaskRegistry && currentDepth === 0) {
                     log.debug('DelegateTool', 'background:false zignorowane — delegacja z czatu zawsze w tle (runda 3)');
                 }
-                const background = subRunContext ? true : typeof continuation?.background === 'boolean'
+                const background = graph || subRunContext ? true : typeof continuation?.background === 'boolean'
                     ? continuation.background
                     : !!plugin?.subTaskRegistry && currentDepth === 0;
                 const attachReusableThread = (value: unknown, taskId: string | null): unknown => {
@@ -839,7 +856,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 offThread = registry?.events?.on('thread:closed', value => {
                     if (subRunContext && (value as SubThread).runIds.includes(subRunContext.runId)) cancel();
                 });
-                const reserve = (resolved: ResolvedDelegate, prepared?: PreparedParentDelegation): SubThread | null => {
+                const reserve = (resolved: ResolvedDelegate, prepared?: PreparedParentDelegation, plan?: PlanReference): SubThread | null => {
                     if (cancelled()) throw new Error(refusal().error);
                     if (!registry?.createThread) return null;
                     const name = (subRunContext ? canonicalName(resolved) : undefined) ?? _queuedThreadName(resolved, plugin);
@@ -852,13 +869,37 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     }
                     try {
                         return registry.createThread({ threadId: runId, name, owner: runOrigin, origin: runOrigin,
-                            config: {}, phase: 'queued', parentId: subRunContext?.runId, level: childDepth,
+                            config: {}, phase: 'queued', parentId: subRunContext?.runId, level: childDepth, ...(plan ? { plan } : {}),
                             ...(prepared ? { parentConversation: pendingMetadata(prepared) } : {}) });
                     } catch (error) {
                         registry.finishQueuedFailure?.(runId, { error: maskSensitiveData(String((error as Error)?.message ?? error)), background });
                         throw error;
                     }
                 };
+
+                const currentCallerAllowed = () => {
+                    const currentAgent = agentManager.getAgent ? agentManager.getAgent(activeAgent.name || '') : activeAgent;
+                    return !!currentAgent && !cancelled()
+                        && (!subRunContext || !!registry?.getDelegationAncestors?.(subRunContext, activeAgent.name || ''))
+                        && childDepth <= getLimits(plugin.env?.settings).max_delegation_depth
+                        && (plugin.toolRegistry?.checkToolAxis?.(currentAgent, 'delegate').allowed ?? true)
+                        && (plugin.permissionSystem?.checkPermission(currentAgent, 'delegate', '',
+                            { autonomy: turnAutonomy, scopeFolders: callerScopeFolders }).allowed ?? true);
+                };
+                if (graph?.kind === 'valid') {
+                    if (continuation || !registry?.acquire || !registry.createThread || !registry.createPlan || !registry.requestStopPlan
+                        || !origin?.sessionPath || !origin.sessionEpoch || origin.agentName !== activeAgent.name
+                        || (currentDepth > 0 && !subRunContext)) return { success: false, error: 'plan_unavailable', code: 'plan_unavailable' };
+                    planRuntime = registry.createPlan(graph.plan, origin, subRunContext?.runId);
+                    const plan = planRuntime;
+                    const stopPlan = () => registry.requestStopPlan!(plan.planId, 'system');
+                    signal.addEventListener('abort', stopPlan, { once: true });
+                    offPlan = registry.events?.on('plan:changed', value => {
+                        if (value === plan && plan.status === 'stopped') cancel();
+                    });
+                    void plan.completion.then(() => { signal.removeEventListener('abort', stopPlan); cleanup(); });
+                    if (cancelled()) stopPlan();
+                }
 
                 // The trusted runtime source is never read from model arguments. Consent and
                 // every clean sibling share the invocation cancellation latch.
@@ -936,6 +977,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     });
                     const startedTasks: Array<{ task_id: string; name: string; sub_id?: string }> = [];
                     const completedTaskIds: Array<string | null> = args.tasks.map(() => null);
+                    const planOutcomes = new Map<number, RunOutcome>();
 
                     // Zadanie odbite OD RĘKI (puste `task`, nietrafiony `aspect`)
                     // nigdy nie wejdzie do rejestru, więc powiadomienie o nim NIE przyjdzie.
@@ -960,26 +1002,32 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                         return { ok: true, resolved };
                     });
                     const queuedThreads: Array<SubThread | null> = args.tasks.map(() => null);
-                    for (let i = 0; i < args.tasks.length; i++) {
+                    const prepareTask = async (i: number) => {
                         const checked = precheck[i];
-                        if (!checked.ok) continue;
-                        const prepared = await prepare(args.tasks[i], checked.resolved);
+                        if (!checked.ok) return;
+                        const taskDef = args.tasks![i];
+                        const prepared = planRuntime && !currentCallerAllowed() ? refusal() : await prepare(taskDef, checked.resolved);
                         const decision = cancelled() ? refusal() : prepared;
                         if (!decision.success) {
                             precheck[i] = { ok: false, result: decision };
-                            rejectedTasks.push({ task: args.tasks[i].task!, aspect: args.tasks[i].aspect, error: decision.error,
+                            rejectedTasks.push({ task: taskDef.task!, aspect: taskDef.aspect, error: decision.error,
                                 ...('instruction' in decision && typeof decision.instruction === 'string' ? { instruction: decision.instruction } : {}) });
-                            continue;
+                            return;
                         }
                         checked.prepared = decision.prepared; checked.validate = decision.validate;
-                        try { queuedThreads[i] = reserve(checked.resolved, checked.prepared); }
+                        try {
+                            if (planRuntime && !currentCallerAllowed()) throw new Error(refusal().error);
+                            queuedThreads[i] = reserve(checked.resolved, checked.prepared, planRuntime
+                                ? { planId: planRuntime.planId, nodeId: planRuntime.nodes[i].id } : undefined);
+                        }
                         catch (error) {
                             log.warn('DelegateTool', `Nie udało się zarezerwować zadania ${i + 1}:`, error);
                             const message = maskSensitiveData(String((error as Error)?.message ?? error));
                             precheck[i] = { ok: false, result: { success: false, error: message } };
-                            rejectedTasks.push({ task: args.tasks[i].task!, aspect: args.tasks[i].aspect, error: message });
+                            rejectedTasks.push({ task: taskDef.task!, aspect: taskDef.aspect, error: message });
                         }
-                    }
+                    };
+                    if (!planRuntime) for (let i = 0; i < args.tasks.length; i++) await prepareTask(i);
                     const acceptedCount = args.tasks.length - rejectedTasks.length;
 
                     const taskThunks = args.tasks.map((taskDef, i) => (): Promise<unknown> => {
@@ -1052,8 +1100,10 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                             resolvedDef,
                             activeAgent, agentManager, plugin, makeRunner, childDepth,
                             {
-                                abortCtl, invocationCancelled: cancelled, prepared: checked.prepared, validatePrepared: checked.validate,
+                                abortCtl, invocationCancelled: planRuntime ? () => !currentCallerAllowed() || planRuntime?.status !== 'active' : cancelled,
+                                prepared: checked.prepared, validatePrepared: checked.validate,
                                 onGateAdmitted: gateArm.signal,
+                                ...(planRuntime ? { onResult: (result: SubAgentRunResult) => { if (result.outcome) planOutcomes.set(i, result.outcome); } } : {}),
                                 onActivity: gateArm.activity, admission,
                                 modelTimeout: effectiveTaskTimeout,
                                 origin: reservation ? runOrigin : origin,
@@ -1101,6 +1151,29 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                 gate.open();
                             });
                     });
+
+                    if (planRuntime) {
+                        const plan = planRuntime;
+                        const settlement = (value: unknown, index: number): PlanSettlement => {
+                            const result = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+                            const material = typeof result.result === 'string' ? result.result
+                                : typeof result.partial_result === 'string' ? result.partial_result : '';
+                            const outcome = planOutcomes.get(index) ?? (result.stopped_by === 'abort'
+                                ? registry?.getTask?.(queuedThreads[index]?.threadId ?? '')?.outcome : undefined);
+                            const saved = { material, ...(outcome ? { outcome } : {}) };
+                            if (result.stopped_by !== 'timeout' && outcome?.end.kind === 'stopped') return { kind: 'stopped', by: outcome.end.by, ...saved };
+                            return result.success === true ? { kind: 'done', ...saved }
+                                : { kind: 'error', error: typeof result.error === 'string' ? result.error : t('mcp.delegate.runner_init_failed'), ...saved };
+                        };
+                        for (const [i, checked] of precheck.entries()) if (!checked.ok) plan.settle(plan.nodes[i].id, settlement(checked.result, i));
+                        plan.start(async id => {
+                            const i = plan.nodes.findIndex(node => node.id === id);
+                            await prepareTask(i);
+                            return settlement(await taskThunks[i](), i);
+                        });
+                        _trackBackground(plan.completion, args.tasks.length);
+                        return { success: true, started: true, plan_id: plan.planId, nodes: plan.nodes, warnings: graph?.kind === 'valid' ? graph.warnings : [] };
+                    }
 
                     if (background) {
                         // Pula leci BEZ await — całość zadań toczy się po zakończeniu tury.
@@ -1294,6 +1367,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 }
 
             } catch (e) {
+                if (planRuntime) plugin?.subTaskRegistry?.requestStopPlan?.(planRuntime.planId, 'system');
                 log.error('DelegateTool', 'Error:', e);
                 // Ten komunikat widzi MODEL i transkrypt tury, więc maskujemy go tu osobno:
                 // `SubAgentRunner.runTask` ma własną maskę na tę samą klasę wycieku, ale nasz
@@ -1302,9 +1376,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 // z nagłówkiem Authorization.
                 return { success: false, error: maskSensitiveData(String((e as Error)?.message ?? e)) };
             } finally {
-                offOwner?.(); offThread?.();
-                runtime?.abortSignal?.removeEventListener('abort', cancel);
-                _liveInvocations.delete(invocation);
+                if (!planRuntime) cleanup();
             }
         }
     };
@@ -1593,6 +1665,7 @@ function pendingMetadata(prepared: PreparedParentDelegation): ParentConversation
 }
 
 type SubRunControl = {
+    onResult?: (result: SubAgentRunResult) => void;
     invocationCancelled?: () => boolean;
     admission?: RunAdmission;
     prepared?: PreparedParentDelegation;
@@ -1955,6 +2028,8 @@ async function _executeSubAgent(
             ...(runControl.queuedThreadId ? { queuedThreadId: runControl.queuedThreadId } : {}),
         }
     ); } finally { if (runControl.abortCtl) runControl.abortCtl.stop = null; }
+
+    runControl.onResult?.(result);
 
     // ── Uczciwość niepowodzenia ──
     // Runner oznacza flagą `failed` wyłącznie bieg, który padł na wyjątku — bez tego rozróżnienia
