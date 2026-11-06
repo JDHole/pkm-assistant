@@ -11,6 +11,6 @@ test('koniec zastępuje niedostarczone pytanie wynikiem', t => {
     const [claim] = notifier.claimNotices(() => true); t.is(claim.notice.kind, 'question');
     clock.advance(300000);
     registry.finish(task, { text: 'dorobek', toolsUsed: [], durationMs: 0, usage: null }); claim.release(); claim.ack();
-    t.deepEqual(notifier.pendingNotices().map(n => n.kind === 'result' ? { kind: n.kind, taskId: n.task.id } : { kind: n.kind, taskId: n.question.taskId }), [{ kind: 'result', taskId: 'r1' }]);
+    t.deepEqual(notifier.pendingNotices().map(n => n.kind === 'result' ? { kind: n.kind, taskId: n.task.id } : n.kind === 'question' ? { kind: n.kind, taskId: n.question.taskId } : { kind: n.kind, planId: n.result.plan_id }), [{ kind: 'result', taskId: 'r1' }]);
     notifier.dispose(); registry.dispose();
 });

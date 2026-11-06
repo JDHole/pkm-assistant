@@ -65,7 +65,7 @@ export class SubRunCoordinator {
         for (const thread of this.registry.listThreads(this.task.origin ?? { agentName: this.task.agentName })) {
             if (thread.parentId === this.task.id && thread.phase === 'queued') ids.push(thread.queuedRunId ?? thread.threadId);
         }
-        for (const plan of this.registry.listPlans()) if (plan.parentRunId === this.task.id && plan.status === 'active') ids.push(plan.planId);
+        for (const plan of this.registry.listPlans()) if (plan.parentRunId === this.task.id && !plan.settled) ids.push(plan.planId);
         return ids;
     }
     async iterationStart(): Promise<void> {
@@ -87,7 +87,7 @@ export class SubRunCoordinator {
             await this.resume();
         }
         if (!this.closed && !this.signal.aborted) this.deliver([...notices, ...this.registry.takeChildNotices(this.task.id)]
-            .filter(notice => notice.kind === 'result' || this.registry.isQuestionOpen(notice.question.taskId, notice.question.id)));
+            .filter(notice => notice.kind !== 'question' || this.registry.isQuestionOpen(notice.question.taskId, notice.question.id)));
         return 'continue';
     }
     stopChildren(): void {

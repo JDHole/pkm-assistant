@@ -1,3 +1,6 @@
+import type { DependencyPreparation } from './DependencyResults.js';
+import { buildPlanResult } from './SubTaskPlanResult.js';
+import type { PlanResultNotice } from './SubTaskPlanResult.js';
 /**
  * SubTaskRegistry — księga zadań sub-agentów.
  *
@@ -127,6 +130,7 @@ export interface SubThread {
 
 /** Bieg sub-agenta jako byt. `id` = etykieta trace (`sub/<nazwa>#<seq>`), unikalna w procesie. */
 export interface SubTask {
+    dependencyResults?: readonly DependencyPreparation[];
     plan?: PlanReference;
     parentConversation?: ParentConversationMetadata;
     interruptedByRestart?: boolean;
@@ -246,6 +250,7 @@ export class SubTaskRegistry {
         return imported;
     }
 
+    private _disposed = false;
     private readonly _plans = new Map<string, SubTaskPlanRuntime>();
     createPlan(graph: SubTaskPlan, owner: SubTaskOrigin, parentRunId?: string): SubTaskPlanRuntime {
         if (!owner.agentName || !owner.sessionPath || !owner.sessionEpoch || this._startCancelled(owner, parentRunId)
@@ -254,8 +259,25 @@ export class SubTaskRegistry {
             throw new Error('plan_unavailable');
         const plan = new SubTaskPlanRuntime(graph, { ...owner, agentName: owner.agentName,
             sessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch }, parentRunId, () => {
+            if (this._disposed) return;
             this.events.emit('plan:changed', plan);
             this._evictOldDone();
+        }, () => {
+            if (this._disposed) return;
+            const notice: PlanResultNotice = { kind: 'plan-result', owner: plan.owner, parentRunId,
+                result: buildPlanResult({ planId: plan.planId, nodes: plan.nodes.map(node => {
+                    if (node.state.kind !== 'stopped' || !node.state.execution) return node;
+                    const task = this.getTask(node.state.execution.runId);
+                    return { ...node, state: { ...node.state,
+                        material: task?.result?.handoff || task?.partial?.text || task?.result?.text || '',
+                        ...(task?.outcome ? { outcome: task.outcome } : {}),
+                        ...(task?.result?.question ? { question: task.result.question } : {}),
+                    } };
+                }), status: plan.status }), completedSeq: this.issueTurnStartSequence(),
+                userStopped: plan.nodes.some(node => node.state.kind === 'stopped' && node.state.by === 'user'),
+            };
+            if (parentRunId !== undefined) this._inbox.push(parentRunId, notice);
+            this.events.emit('plan:finished', notice);
         });
         this._plans.set(plan.planId, plan);
         this.events.emit('plan:changed', plan);
@@ -294,7 +316,7 @@ export class SubTaskRegistry {
     private readonly _inbox: SubTaskInbox;
     takeChildNotices(parentId: string): SubTaskNotice[] { return this._inbox.take(parentId); }
     async waitChildNotice(parentId: string, signal: AbortSignal): Promise<SubTaskNotice | undefined> {
-        const plans = this.listPlans().filter(plan => plan.parentRunId === parentId && plan.status === 'active');
+        const plans = this.listPlans().filter(plan => plan.parentRunId === parentId && !plan.settled);
         if (!plans.length) return this._inbox.wait(parentId, signal);
         const waiting = new AbortController();
         const cancel = () => waiting.abort();
@@ -667,7 +689,7 @@ export class SubTaskRegistry {
             this._messages.delete(task.id);
             this._stopRuns(this.listPlans().filter(plan => plan.parentRunId === task.id && plan.status === 'active').map(plan => plan.planId), 'system');
             this._inbox.close(task.id);
-            if (task.parentId !== undefined) this._inbox.push(task.parentId, { kind: 'result', task });
+            if (task.parentId !== undefined && !task.plan) this._inbox.push(task.parentId, { kind: 'result', task });
         });
     }
 
@@ -1046,7 +1068,7 @@ export class SubTaskRegistry {
         try {
             if (!sessionPath) return 0;
             let removed = 0;
-            for (const plan of this.listPlans()) if (plan.owner.sessionPath === sessionPath && plan.status !== 'active') this._plans.delete(plan.planId);
+            for (const plan of this.listPlans()) if (plan.owner.sessionPath === sessionPath && plan.settled) this._plans.delete(plan.planId);
             const retained = this._liveAncestorIds();
             for (const [id, task] of [...this._tasks]) {
                 if (task.status === 'running' || retained.has(id)) continue;
@@ -1083,7 +1105,7 @@ export class SubTaskRegistry {
         };
         for (const task of this._tasks.values()) if (task.status === 'running') retain(task.parentId);
         for (const thread of this._threads.values()) if (thread.phase === 'queued') retain(thread.parentId);
-        for (const plan of this._plans.values()) if (plan.status === 'active') {
+        for (const plan of this._plans.values()) if (!plan.settled) {
             retain(plan.parentRunId);
             for (const node of plan.nodes) if ('execution' in node.state) retain(node.state.execution?.runId);
         }
@@ -1092,7 +1114,7 @@ export class SubTaskRegistry {
 
     /** Retencja: nadmiarowe ZAKOŃCZONE biegi wylatują od najstarszego; `running` zostaje. */
     private _evictOldDone(): void {
-        const completed = this.listPlans().filter(plan => plan.status !== 'active');
+        const completed = this.listPlans().filter(plan => plan.settled);
         for (const plan of completed.slice(0, Math.max(0, completed.length - this._maxDone))) this._plans.delete(plan.planId);
         let done = 0;
         for (const task of this._tasks.values()) {
@@ -1123,8 +1145,9 @@ export class SubTaskRegistry {
      * zostaje best-effort i idempotentna: wolno ją zawołać dwa razy i nie ma prawa rzucić.
      */
     dispose(): void {
+        this._disposed = true;
         this._stoppingAll = true;
-        for (const plan of this._plans.values()) plan.latchStop('system');
+        for (const plan of this._plans.values()) { plan.latchStop('system'); plan.publish(); }
         this._plans.clear();
         this._scheduler.dispose();
         this._inbox.dispose();

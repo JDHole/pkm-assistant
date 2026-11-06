@@ -94,3 +94,8 @@ export type { PlanNodeId, PlanNodeDefinition, PlanExecution, PlanNodeTerminal, P
     PlanNode, PlanStatus, PlanWarning, PlanValidation, PlanResult } from './SubTaskPlan.js';
 
 export type { SubTaskPlanRuntime, PlanReference, PlanSettlement } from './SubTaskPlanRuntime.js';
+
+export { dependencyResults, redactExport } from './DependencyResults.js';
+export type { DependencyResult, DependencyPreparation } from './DependencyResults.js';
+export { limitPlanResult } from './SubTaskPlanResult.js';
+export type { PlanResultNotice } from './SubTaskPlanResult.js';

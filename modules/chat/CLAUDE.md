@@ -1713,3 +1713,18 @@ polem znika przy anulowaniu i potwierdzeniu; wygląd jest wyłącznie w CSS.
 `resetInputArea(true)` zachowuje tylko już wysłaną do kolejki poprawkę, oczekującą na
 koniec tury; zwykłe czyszczenie pola anuluje edycję. Restart nie odtwarza szkicu ani trybu.
 Testy sekwencji, callbacków zamykania i odczytu zapisanych plików: `chat/chat_f8.test.ts`.
+
+### 2.4.6 P3 - plan result delivery
+
+`chat/subTaskPlanDelivery.ts` formats one fenced machine message with `subTaskPlanId` and a complete
+plan state table. It reuses the existing active-tab, Stop and automatic-turn chain gates. A claim
+is acknowledged only after insertion into the captured window; failures before insertion release
+it. `send_message` shares frozen ownership, early abort registration and session persistence between
+question and plan notifications, rechecking Stop and the session epoch before acceptance.
+
+Ready results, including user-stopped plans, join the next human turn for the exact owner and epoch;
+results created after that turn started wait for a later turn. Stop never triggers its own automatic
+turn. The sanitizer sees one tool response (the delegate receipt) and a later user-role machine
+notification, never orphan tool responses for individual nodes. Group-specific UI is deferred to P5.
+Tests: `chat/subTaskPlanDelivery.test.ts`; existing question tests keep their assertions and extend
+only their test-side notice formatters for the third union variant.

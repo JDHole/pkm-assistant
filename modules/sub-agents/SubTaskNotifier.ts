@@ -23,7 +23,8 @@
 import { log } from '../../core/utils/Logger.js';
 import type { SubTask } from './SubTaskRegistry.js';
 import type { ParentQuestion } from './ParentQuestions.js';
-export type SubTaskNotice = { kind: 'result'; task: SubTask } | { kind: 'question'; question: ParentQuestion };
+import type { PlanResultNotice } from './SubTaskPlanResult.js';
+export type SubTaskNotice = PlanResultNotice | { kind: 'result'; task: SubTask } | { kind: 'question'; question: ParentQuestion };
 export type SubTaskNoticeDeliverer = (notice: SubTaskNotice) => boolean;
 export interface SubTaskNoticeClaim { notice: SubTaskNotice; ack(): void; release(): void }
 
@@ -86,6 +87,12 @@ export class SubTaskNotifier {
             if (!events?.on) return;
             const handlers: Array<[string, (payload: unknown) => void]> = [
                 ['task:finished', payload => this._onFinished(payload)],
+                ['plan:finished', payload => {
+                    const notice = payload as PlanResultNotice;
+                    if (notice.parentRunId !== undefined) return;
+                    const entry: PendingEntry = { notice, claimed: false, delivering: false };
+                    this._pending.push(entry); this._tryDeliver(entry); this._trimPending();
+                }],
                 ['question:opened', payload => this._onQuestion(payload)],
                 ['question:closed', payload => this._removeQuestion(payload)],
             ];
@@ -103,7 +110,7 @@ export class SubTaskNotifier {
     private _onFinished(payload: unknown): void {
         try {
             const task = payload as SubTask | undefined;
-            if (!task?.id || task.background !== true || task.parentId !== undefined) return;
+            if (!task?.id || task.background !== true || task.parentId !== undefined || task.plan !== undefined) return;
             this._removeTaskQuestions(task.id);
             const entry: PendingEntry = { notice: { kind: 'result', task }, claimed: false, delivering: false };
             this._pending.push(entry);

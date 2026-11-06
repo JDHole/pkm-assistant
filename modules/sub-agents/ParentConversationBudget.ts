@@ -27,6 +27,11 @@ export type ParentConversationMetadata = ParentConversationPreparation | Readonl
     source: ParentConversationContext['source']; sourceId: ParentConversationContext['turnId'];
 }>;
 
+export function contextReserves(window: ContextWindow) {
+    return { maxOutputTokens: Math.max(1, Math.min(16384, Math.floor(window.tokens / 4))),
+        marginTokens: 256 + Math.ceil(window.tokens * 0.05) };
+}
+
 /** Fits only inherited material; the caller's base task and permission frame are immutable. */
 export function fitParentConversation(
     context: ParentConversationContext, base: readonly LoopMessage[], tools: readonly unknown[], window: ContextWindow,
@@ -35,8 +40,7 @@ export function fitParentConversation(
     const summary = context.snapshot.summary ? context.snapshot.summary.split('\n') : [];
     let omitted = context.snapshot.omittedMessages;
     let truncated = context.snapshot.truncated;
-    const maxOutputTokens = Math.max(1, Math.min(16384, Math.floor(window.tokens / 4)));
-    const marginTokens = 256 + Math.ceil(window.tokens * 0.05);
+    const { maxOutputTokens, marginTokens } = contextReserves(window);
     const content = () => {
         const body = [...(summary.length ? ['Starsze wiadomości:', ...summary] : []),
             ...messages.map(entry => `[${entry.sequence} ${entry.role}] ${entry.text}`)].join('\n');

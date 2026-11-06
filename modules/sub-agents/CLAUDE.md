@@ -851,3 +851,30 @@ Tests: `SubTaskRegistry.stopTree.test.ts` and `../tools/DelegateTool.plan.test.t
 atomic Stop, graph-only lifecycle, retention, admission and controlled runner completion.
 P3 adds dependency material/delivery; P4 adds durable history; P5 adds group presentation.
 These runtime APIs do not publish new delegate schema fields (P6).
+
+### 2.4.6 P3 - dependency inputs and one plan result
+
+`dependencyResults` reads only frozen final node material. `DependencyResults.ts` shares the
+parent projection's extraction, 240-character excerpt and export redaction; configured secrets
+are removed before excerpts or budgets. The runner inserts a separate untrusted user message
+even with a custom system frame. Manual context shares `delegation_context_max_chars` with
+all predecessors (at most one equal share for manual context); remaining text is fitted fairly
+against the actual model window, tools, output reserve and margin. Required labels and explicit
+truncation markers survive. A minimal block that cannot fit fails with `dependency_context_budget`.
+Optional parent conversation uses only the remaining window. `SubTask.dependencyResults` records
+requested modes, sent lengths and truncation reasons; it contains no raw input.
+
+The barrel exports `DependencyResult`, `DependencyPreparation`, `dependencyResults`, `redactExport`,
+`PlanResultNotice` and `limitPlanResult`. `SubTaskNotice` now includes `plan-result`. Registry
+`plan:finished` emits once, after final executor settlement, and routes nested plans only to the
+real parent's inbox. Node runs keep their history and original question recipients but produce no
+standalone result notices. Terminal questions remain in the aggregate; Stop also retains available
+run handoff/partial material. The coordinator waits until runtime `settled`, including the gap
+between the final graph transition and publishing the result, without holding a work lease.
+
+`SubTaskPlanResult.ts` keeps every node/state/error/outcome and disjoint count, and stores material
+only in nodes. Delivery limits shorten material before serialization; 0 is unlimited. If metadata
+alone exceeds the cap, the complete state table takes precedence over that text cap. No malformed
+JSON or missing node states are delivered. Chat receives a machine message, not another tool result.
+Tests: `DependencyResults.test.ts`, `../tools/DelegateTool.plan.test.ts`, and
+`../chat/chat/subTaskPlanDelivery.test.ts`. Persistence and group rendering remain P4/P5.

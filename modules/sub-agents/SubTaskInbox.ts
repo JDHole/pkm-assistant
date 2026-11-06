@@ -35,7 +35,7 @@ export class SubTaskInbox {
         while (queue?.length) {
             const notice = queue.shift()!;
             if (!queue.length) this.queues.delete(parentId);
-            if (notice.kind === 'result' || this.isQuestionOpen(notice.question.taskId, notice.question.id)) return notice;
+            if (notice.kind !== 'question' || this.isQuestionOpen(notice.question.taskId, notice.question.id)) return notice;
             queue = this.queues.get(parentId);
         }
         return undefined;

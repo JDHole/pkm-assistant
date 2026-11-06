@@ -30,6 +30,7 @@ function fixture(t: ExecutionContext, maxDone = 50) {
 }
 function view(notice: SubTaskNotice | undefined): unknown {
     if (!notice) return 'closed';
+    if (notice.kind === 'plan-result') return [notice.kind, notice.result.plan_id];
     return notice.kind === 'question'
         ? { kind: 'question', run: notice.question.taskId, text: notice.question.text, recipient: notice.question.recipient }
         : { kind: 'result', run: notice.task.id, text: notice.task.result?.text, error: notice.task.error };

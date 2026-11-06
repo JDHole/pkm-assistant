@@ -710,3 +710,14 @@ held runner covers timeout mapping and retention of its actual lease. Existing t
 result/receipt shapes are unchanged. Dependency prompts and one aggregate notification belong
 to P3; P2 still uses the existing child-result transport internally. Persistence, UI and public
 schema publication remain P4-P6 responsibilities.
+
+### 2.4.6 P3 - dependency material adapter
+
+Ready plan nodes pass `dependencyResults` through trusted runner options, independently of manual
+context and `context_mode`. Manual context gets at most one equal share of the existing context
+limit when dependencies exist, leaving the rest for predecessor labels and material. Legacy
+context truncation is unchanged. Settlement masks the final material before storing it, keeps the
+runner's typed outcome and terminal question, and still follows timeout mapping. Full successful
+material is retained before the lead delivery cap. No new model-facing schema fields are published.
+`DelegateTool.plan.test.ts` now observes the distinct dependency user message and aggregate parent
+inbox result, including a controlled provider error, custom frame and a smaller lead output cap.

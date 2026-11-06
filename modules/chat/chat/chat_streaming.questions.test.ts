@@ -68,7 +68,7 @@ test('wygaśnięcie przed claim usuwa pytanie', async t => {
     f.clock.advance(300000);
     f.registry.finish(f.task, { text: 'dorobek', toolsUsed: [], durationMs: 0, usage: null });
     await Promise.resolve();
-    t.deepEqual({ questionMessages: f.sent.length, pending: f.notifier.pendingNotices().map(n => n.kind === 'result' ? { kind: n.kind, taskId: n.task.id } : { kind: n.kind, taskId: n.question.taskId }) },
+    t.deepEqual({ questionMessages: f.sent.length, pending: f.notifier.pendingNotices().map(n => n.kind === 'result' ? { kind: n.kind, taskId: n.task.id } : n.kind === 'question' ? { kind: n.kind, taskId: n.question.taskId } : { kind: n.kind, planId: n.result.plan_id }) },
         { questionMessages: 0, pending: [{ kind: 'result', taskId: 'r1' }] });
 });
 
@@ -112,7 +112,7 @@ test('wygaśnięcie przed przyjęciem usuwa pytanie', async t => {
     resume();
     for (let i = 0; i < 5; i++) await Promise.resolve();
     t.deepEqual({ questionMessages: f.window.messages.filter(m => m.questionId).length,
-        pending: f.notifier.pendingNotices().map(n => n.kind === 'result' ? { kind: n.kind, taskId: n.task.id } : { kind: n.kind, taskId: n.question.taskId }) },
+        pending: f.notifier.pendingNotices().map(n => n.kind === 'result' ? { kind: n.kind, taskId: n.task.id } : n.kind === 'question' ? { kind: n.kind, taskId: n.question.taskId } : { kind: n.kind, planId: n.result.plan_id }) },
     { questionMessages: 0, pending: [{ kind: 'result', taskId: 'r1' }] });
 });
 

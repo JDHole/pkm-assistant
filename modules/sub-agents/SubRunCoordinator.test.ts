@@ -32,7 +32,7 @@ test('question closed while parent queues for a lease is not delivered; terminal
     resumed.resolve();
     t.is(await waiting, 'continue');
     await coordinator.iterationStart();
-    t.deepEqual(received.map(notice => notice.kind === 'result' ? [notice.kind, notice.task.result?.text] : [notice.kind, notice.question.text]),
+    t.deepEqual(received.map(notice => notice.kind === 'result' ? [notice.kind, notice.task.result?.text] : notice.kind === 'question' ? [notice.kind, notice.question.text] : [notice.kind, notice.result.plan_id]),
         [['result', 'child ended after deadline']]);
     t.deepEqual([await coordinator.beforeFinish(), releases, clock.pending], ['finish', 1, 0]);
     coordinator.close(); registry.dispose();

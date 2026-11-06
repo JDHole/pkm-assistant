@@ -1,4 +1,4 @@
-import { maskSensitiveData, redactSecretValues } from '../../core/index.js';
+import { redactExport, toolText, excerpt } from './DependencyResults.js';
 import type { LoopMessage } from '../agent-loop/index.js';
 import type { SubRunContext, SubTaskOrigin, SubTaskRegistry } from './SubTaskRegistry.js';
 
@@ -22,15 +22,6 @@ export type ParentConversationContext = Readonly<{
 // Full source stays private to this process and frozen snapshot; it is never serialized.
 const snapshotSources = new WeakMap<ParentConversationSnapshot, (secrets: readonly string[]) => ParentConversationSnapshot>();
 
-/** Export-only patterns allow glued keys, but ordinary lower-case hyphenated words
- * (e.g. task-przygotowanie-dokumentacji) are not key bodies. Generic sk- requires
- * a long alphanumeric body with a digit or uppercase letter; provider prefixes
- * explicitly allow the separators used by their keys. */
-function redactExport(text: string, secrets: readonly string[]): string {
-    const known = redactSecretValues({ message: text, code: '', http_status: null }, secrets).message;
-    return maskSensitiveData(known.replace(/sk-(?:or-v1-[A-Za-z0-9_-]{16,}|(?:ant-|proj-)[A-Za-z0-9_-]{20,}|(?=[A-Za-z0-9_]*[A-Z0-9])[A-Za-z0-9_]{20,})/g, key => maskSensitiveData(key)));
-}
-
 export function redactParentConversationSnapshot(snapshot: ParentConversationSnapshot, secrets: readonly string[] = []): ParentConversationSnapshot {
     const rebuild = snapshotSources.get(snapshot);
     if (rebuild) return rebuild(secrets);
@@ -52,34 +43,6 @@ function textOnly(content: unknown): string {
     return content.flatMap((block: unknown) => block && typeof block === 'object'
         && 'type' in block && block.type === 'text' && 'text' in block && typeof block.text === 'string'
         ? [block.text] : []).join('\n');
-}
-
-// Never stringify raw tool payloads: structured results can carry arguments, images and thinking.
-function toolText(content: unknown, depth = 0): string {
-    if (depth > 8) return '';
-    if (typeof content === 'string') {
-        let parsed: unknown;
-        try { parsed = JSON.parse(content); }
-        catch {
-            // A loop-clipped JSON result cannot safely be interpreted as plain prose.
-            if (/^\s*[[{]/.test(content)) return '';
-            return content.replace(/data:[^\s]+|[A-Za-z0-9+/=]{128,}/gi, '[pominięte dane]')
-                .replace(/<(?:think|reasoning)\b[^>]*>[\s\S]*?(?:<\/(?:think|reasoning)>|$)/gi, '[pominięte rozumowanie]');
-        }
-        return toolText(parsed, depth + 1);
-    }
-    if (Array.isArray(content)) return content.map(block => toolText(block, depth + 1)).filter(Boolean).join('\n');
-    if (typeof content === 'number' || typeof content === 'boolean') return String(content);
-    if (!content || typeof content !== 'object') return '';
-    if ('type' in content && content.type !== 'text') return '';
-    return Object.entries(content).flatMap(([key, value]) =>
-        /^(text|content|result|output|message|error|summary|results|files|matches|path|name|title|excerpt|fragment|formatted|snippet|url|line|count)$/.test(key) ? [toolText(value, depth + 1)] : []).filter(Boolean).join('\n');
-}
-
-function excerpt(text: string, limit: number): string {
-    const line = text.replace(/\s+/g, ' ').trim();
-    const sentence = line.match(/^.*?[.!?](?:\s|$)/)?.[0].trim() || line;
-    return sentence.length > limit ? sentence.slice(0, limit - 1) + '…' : sentence;
 }
 
 /** Text-only projection, independent of the model's compressed window. No API calls. */

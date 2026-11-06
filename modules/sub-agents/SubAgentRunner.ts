@@ -1,3 +1,6 @@
+import { fitDependencyResults } from './DependencyResults.js';
+import type { DependencyResult } from './DependencyResults.js';
+import { limitPlanResult } from './SubTaskPlanResult.js';
 /**
  * SubAgentRunner
  * Unified runner for sub-agent tasks (replaces MinionRunner + MasterRunner).
@@ -97,6 +100,8 @@ interface RunnerPlugin extends PluginApi {
 
 type RunOptions = {
     /** Prepared/authorized by the caller; never taken from model arguments. New threads only. */
+    dependencyResults?: readonly DependencyResult[];
+    dependencyContextChars?: number;
     parentConversation?: ParentConversationContext;
     onParentConversationPrepared?: (metadata: ParentConversationPreparation) => void;
     admission?: RunAdmission;
@@ -664,16 +669,25 @@ export class SubAgentRunner {
             }
 
             let maxOutputTokens = SUB_AGENT_MAX_OUTPUT_TOKENS;
-            if (options.parentConversation && !options.threadId) {
+            if ((options.parentConversation || options.dependencyResults?.length) && !options.threadId) {
                 const window = await contextBudgetResolver.resolve(model, {
                     overrides: this.plugin?.env?.settings?.pkmAssistant?.model_context_limits,
                     fallbackTokens: limits.parent_conversation_fallback_tokens,
                 });
-                const prepared = fitParentConversation(options.parentConversation, messages, tools, window);
-                if (prepared.message) messages.splice(1, 0, prepared.message);
-                parentConversation = prepared.metadata;
-                maxOutputTokens = prepared.metadata.maxOutputTokens;
-                _safeRegistry(() => options.onParentConversationPrepared?.(prepared.metadata));
+                if (options.dependencyResults?.length) {
+                    const prepared = fitDependencyResults(options.dependencyResults, messages, tools, window,
+                        options.dependencyContextChars ?? limits.delegation_context_max_chars, knownSecrets);
+                    messages.splice(1, 0, prepared.message);
+                    maxOutputTokens = prepared.maxOutputTokens;
+                    if (subTask) subTask.dependencyResults = prepared.metadata;
+                }
+                if (options.parentConversation) {
+                    const prepared = fitParentConversation(options.parentConversation, messages, tools, window);
+                    if (prepared.message) messages.splice(1, 0, prepared.message);
+                    parentConversation = prepared.metadata;
+                    maxOutputTokens = prepared.metadata.maxOutputTokens;
+                    _safeRegistry(() => options.onParentConversationPrepared?.(prepared.metadata));
+                }
             }
 
             // Wspólna pętla (runAgentLoop). Store = ArrayMessageStore (system+user).
@@ -699,6 +713,7 @@ export class SubAgentRunner {
                 const payload = notices.map(notice => notice.kind === 'question'
                     ? { kind: 'question', sub_id: notice.question.subId, task_id: notice.question.taskId,
                         question_id: notice.question.id, text: notice.question.text }
+                    : notice.kind === 'plan-result' ? limitPlanResult(notice.result, limits.subagent_result_max_chars)
                     : { kind: 'result', sub_id: notice.task.threadId, task_id: notice.task.id,
                         status: notice.task.status, error: notice.task.error, result: notice.task.result, outcome: notice.task.outcome });
                 store.appendUser(`Child notices:\n${_maskHandoffText(JSON.stringify(payload), knownSecrets)}`);

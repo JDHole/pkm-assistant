@@ -18,9 +18,11 @@ export class SubTaskPlanRuntime {
     private readonly dispatched = new Set<PlanNodeId>();
     private started = false;
     private pending = 0;
+    private settledValue = false;
+    get settled(): boolean { return this.settledValue; }
 
     constructor(private readonly graph: SubTaskPlan, owner: PlanOwner,
-        readonly parentRunId: string | undefined, private readonly changed: () => void) {
+        readonly parentRunId: string | undefined, private readonly changed: () => void, private readonly finished: () => void) {
         this.owner = Object.freeze({ ...owner });
         this.completion = new Promise(resolve => { this.complete = resolve; });
     }
@@ -42,13 +44,18 @@ export class SubTaskPlanRuntime {
         this.dispatch();
     }
     /** No observers here: the registry latches every plan and run in one Stop transaction. */
-    latchStop(by: StopBy): void { this.graph.stop(by); this.execute = undefined; this.finish(); }
+    latchStop(by: StopBy): void { this.graph.stop(by); this.execute = undefined; }
     publish(): void {
         if (this.status !== 'active') this.execute = undefined;
         this.changed();
         this.finish();
     }
-    private finish(): void { if (this.status !== 'active' && this.pending === 0) this.complete(); }
+    private finish(): void {
+        if (this.status === 'active' || this.pending !== 0 || this.settledValue) return;
+        this.settledValue = true;
+        try { this.finished(); }
+        finally { this.complete(); }
+    }
     private dispatch(): void {
         for (const id of this.graph.ready()) {
             if (!this.execute || this.status !== 'active' || this.dispatched.has(id)) continue;

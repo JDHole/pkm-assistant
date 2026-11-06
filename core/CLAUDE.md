@@ -428,3 +428,9 @@ oraz istniejący `ApprovalManager.test.ts`.
 Klucze i18n `chat.parent_conversation.*` opisują pending/included/truncated/omitted,
 źródło, zakres i szacunek w UI. `mcp.delegate.param.context_mode` oraz opisy delegate
 PL/EN publikują wybór kontekstu po ukończeniu UI P5. Zgody i wykonanie bez zmian.
+
+### 2.4.6 P3 - dependency material text
+
+`subagent.dependencies.*`, `subagent.plan.partial` and `chat.plan_result.header` provide PL/EN
+labels, untrusted-input guidance, truncation markers and aggregate notification text. They do not
+publish new delegate arguments; that remains P6.

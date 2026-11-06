@@ -236,7 +236,11 @@ test('coordinator releases admission while a plan has no runs and wakes when pre
     const leases = await Promise.all(['parent', 'a', 'b', 'c', 'd'].map(id => registry.acquire(owner, id, signal())));
     const next = registry.acquire(owner, 'next', signal());
     const activities: unknown[] = [];
-    const coordinator = new SubRunCoordinator(registry, parent, signal(), value => activities.push(value), () => {},
+    const delivered: unknown[] = [];
+    const coordinator = new SubRunCoordinator(registry, parent, signal(), value => activities.push(value), notices => {
+        delivered.push(...notices.map(notice => notice.kind === 'plan-result'
+            ? { kind: notice.kind, states: notice.result.nodes.map(node => node.state.kind) } : notice.kind));
+    },
         { release: () => leases[0].release(), resume: async () => {} });
     const ending = coordinator.beforeFinish();
     const admitted = await next;
@@ -244,6 +248,7 @@ test('coordinator releases admission while a plan has no runs and wakes when pre
         [[{ kind: 'waiting-children' }], 'working', ['waiting_dependencies', 'waiting_dependencies', 'waiting_dependencies']]);
     group.settle(group.nodes[0].id, { kind: 'error', error: 'preparation failed' });
     group.settle(group.nodes[1].id, { kind: 'error', error: 'preparation failed' });
-    t.deepEqual([await ending, group.status], ['finish', 'partial']);
+    t.deepEqual([await ending, group.status, delivered], ['continue', 'partial',
+        [{ kind: 'plan-result', states: ['error', 'error', 'blocked'] }]]);
     admitted.release(); leases.forEach(lease => lease.release());
 });

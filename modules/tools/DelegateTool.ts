@@ -1,4 +1,4 @@
-import { SubTaskPlan, redactParentConversationSnapshot } from '../sub-agents/index.js';
+import { SubTaskPlan, redactParentConversationSnapshot, dependencyResults, redactExport } from '../sub-agents/index.js';
 import { Validator } from '@cfworker/json-schema';
 import type { Schema } from '@cfworker/json-schema';
 import type { ReasoningEffort } from '../models/index.js';
@@ -15,7 +15,7 @@ import type { ReasoningEffort } from '../models/index.js';
  * 4. Return results
  */
 import { SubAgentRunner, DEFAULT_SUB_AGENT_TOOLS, PKM_SUB_NAME, allocateSubTaskId, canContinueAfterUserStop, isRuntimeSequence } from '../../modules/sub-agents/index.js';
-import type { PlanReference, PlanSettlement, SubTaskPlanRuntime, RunAdmission, AdmissionGroup, SubTaskRegistry, SubThread, Lease, RuntimeSequence, SubRunContext, SubTask, SubTaskOrigin, QuestionId, QuestionState, RunActivity, ParentQuestion } from '../../modules/sub-agents/index.js';
+import type { DependencyResult, PlanReference, PlanSettlement, SubTaskPlanRuntime, RunAdmission, AdmissionGroup, SubTaskRegistry, SubThread, Lease, RuntimeSequence, SubRunContext, SubTask, SubTaskOrigin, QuestionId, QuestionState, RunActivity, ParentQuestion } from '../../modules/sub-agents/index.js';
 import type { RunOutcome, SubRunResult, ParentConversationContext, ParentConversationMetadata, ParentConversationPreparation } from '../../modules/sub-agents/index.js';
 import type { ApprovalManager } from '../../core/index.js';
 import type { BuiltinToolExecutionContext } from './ToolRegistry.js';
@@ -977,7 +977,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     });
                     const startedTasks: Array<{ task_id: string; name: string; sub_id?: string }> = [];
                     const completedTaskIds: Array<string | null> = args.tasks.map(() => null);
-                    const planOutcomes = new Map<number, RunOutcome>();
+                    const planResults = new Map<number, SubAgentRunResult>();
 
                     // Zadanie odbite OD RĘKI (puste `task`, nietrafiony `aspect`)
                     // nigdy nie wejdzie do rejestru, więc powiadomienie o nim NIE przyjdzie.
@@ -1103,7 +1103,8 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                 abortCtl, invocationCancelled: planRuntime ? () => !currentCallerAllowed() || planRuntime?.status !== 'active' : cancelled,
                                 prepared: checked.prepared, validatePrepared: checked.validate,
                                 onGateAdmitted: gateArm.signal,
-                                ...(planRuntime ? { onResult: (result: SubAgentRunResult) => { if (result.outcome) planOutcomes.set(i, result.outcome); } } : {}),
+                                ...(planRuntime ? { dependencyResults: dependencyResults(planRuntime.nodes, planRuntime.nodes[i]) } : {}),
+                                ...(planRuntime ? { onResult: (result: SubAgentRunResult) => { planResults.set(i, result); } } : {}),
                                 onActivity: gateArm.activity, admission,
                                 modelTimeout: effectiveTaskTimeout,
                                 origin: reservation ? runOrigin : origin,
@@ -1158,12 +1159,13 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                             const result = value && typeof value === 'object' ? value as Record<string, unknown> : {};
                             const material = typeof result.result === 'string' ? result.result
                                 : typeof result.partial_result === 'string' ? result.partial_result : '';
-                            const outcome = planOutcomes.get(index) ?? (result.stopped_by === 'abort'
+                            const raw = planResults.get(index);
+                            const outcome = raw?.outcome ?? (result.stopped_by === 'abort'
                                 ? registry?.getTask?.(queuedThreads[index]?.threadId ?? '')?.outcome : undefined);
-                            const saved = { material, ...(outcome ? { outcome } : {}) };
+                            const saved = { material: redactExport(material, configuredChatSecrets(plugin.env?.settings?.pkmAssistant?.chat)), ...(outcome ? { outcome } : {}), ...(raw?.question ? { question: raw.question } : {}) };
                             if (result.stopped_by !== 'timeout' && outcome?.end.kind === 'stopped') return { kind: 'stopped', by: outcome.end.by, ...saved };
                             return result.success === true ? { kind: 'done', ...saved }
-                                : { kind: 'error', error: typeof result.error === 'string' ? result.error : t('mcp.delegate.runner_init_failed'), ...saved };
+                                : { kind: 'error', error: redactExport(typeof result.error === 'string' ? result.error : t('mcp.delegate.runner_init_failed'), configuredChatSecrets(plugin.env?.settings?.pkmAssistant?.chat)), ...saved };
                         };
                         for (const [i, checked] of precheck.entries()) if (!checked.ok) plan.settle(plan.nodes[i].id, settlement(checked.result, i));
                         plan.start(async id => {
@@ -1665,6 +1667,7 @@ function pendingMetadata(prepared: PreparedParentDelegation): ParentConversation
 }
 
 type SubRunControl = {
+    dependencyResults?: readonly DependencyResult[];
     onResult?: (result: SubAgentRunResult) => void;
     invocationCancelled?: () => boolean;
     admission?: RunAdmission;
@@ -1956,11 +1959,15 @@ async function _executeSubAgent(
     // Wartość to budżet `delegation_context_max_chars` z `config/limits.js` (default 48000),
     // który user może zmienić w Ustawieniach → Limity, nie hardcode.
     let taskPrompt = args.task as string;
+    const contextLimit = getLimits(plugin?.env?.settings).delegation_context_max_chars;
+    const dependencies = runControl.dependencyResults;
+    let manualChars = 0;
     if (args.context) {
-        const maxContextLen = getLimits(plugin?.env?.settings).delegation_context_max_chars;
+        const maxContextLen = dependencies?.length ? Math.floor(contextLimit / (dependencies.length + 1)) : contextLimit;
         const ctx = args.context.length > maxContextLen
-            ? args.context.slice(0, maxContextLen) + '\n' + t('mcp.delegate.truncated')
+            ? args.context.slice(0, dependencies?.length ? Math.max(0, maxContextLen - t('mcp.delegate.truncated').length - 1) : maxContextLen) + '\n' + t('mcp.delegate.truncated')
             : args.context;
+        manualChars = ctx.length;
         taskPrompt = `${t('mcp.delegate.context_header')}\n${ctx}\n${t('mcp.delegate.context_footer')}\n\n${t('mcp.delegate.task_header')}\n${args.task}\n${t('mcp.delegate.task_footer')}`;
     }
 
@@ -1993,6 +2000,7 @@ async function _executeSubAgent(
         ownedModel,
         {
             delegationDepth,
+            ...(dependencies?.length ? { dependencyResults: dependencies, dependencyContextChars: contextLimit - manualChars } : {}),
             ...(runControl.prepared ? { parentConversation: runControl.prepared.parentConversation,
                 onParentConversationPrepared: (metadata: ParentConversationPreparation) => {
                     const id = actualTaskId ?? runControl.reservedRunId ?? runControl.queuedThreadId;

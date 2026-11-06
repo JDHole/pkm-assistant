@@ -1,3 +1,5 @@
+import type { PlanResultNotice } from '../../sub-agents/index.js';
+import { deliverSubTaskPlan, consumeSubTaskPlans } from './subTaskPlanDelivery.js';
 import { cancelMessageEdit, commitMessageEdit, hasPendingMessageEdit } from './messageEdit.js';
 import { sessionMessageId } from '../../memory/index.js';
 /**
@@ -106,6 +108,7 @@ import type { TurnAbortHandle } from './turnAbort.js';
 interface SendMessageOptions {
     injectedText?: unknown;
     meta?: unknown;
+    planDelivery?: { notice: PlanResultNotice; claim: SubTaskNoticeClaim; window: RollingWindow; tab: ChatTab; owner: FrozenTurnOwner };
     questionDelivery?: { question: ParentQuestion; token: object; claim: SubTaskNoticeClaim; window: RollingWindow; tab: ChatTab; owner: FrozenTurnOwner };
 }
 
@@ -298,6 +301,8 @@ let _turnSeq = 0;
  */
 export async function send_message(this: ChatViewLike, opts: SendMessageOptions = {}) {
     const questionDelivery = opts?.questionDelivery;
+    const planDelivery = opts?.planDelivery;
+    const notificationDelivery = questionDelivery ?? planDelivery;
     const injectedText = typeof opts?.injectedText === 'string' ? opts.injectedText.trim() : '';
     const isInjected = injectedText.length > 0;
 
@@ -475,9 +480,13 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
             return;
         }
     }
+    if (planDelivery && (this._drainSuppressed || this.is_generating || planDelivery.notice.userStopped
+        || this.rollingWindow !== planDelivery.window || !planDelivery.tab.isActive
+        || !isQuestionOwnerCurrent(this, { owner: planDelivery.notice.owner })
+        || matchTabForOrigin(this.chatTabs, planDelivery.notice.owner, _tabKey) !== planDelivery.tab)) return;
     let savedUserContent;
     const turnAbort = createTurnAbort();
-    const questionTabKey = questionDelivery ? _tabKey(questionDelivery.tab) : '';
+    const questionTabKey = notificationDelivery ? _tabKey(notificationDelivery.tab) : '';
     if (hasAttachments && attachmentResult) {
         // Attachments present: content may be array (multimodal) or string
         // Display: user's text with @[Name] badges (no mention metadata)
@@ -487,21 +496,22 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         // No attachments: API gets mention context, display shows only user text
         const apiContent = mentionContextText ? mentionContextText + '\n\n' + mentionDisplayText : mentionDisplayText;
         const appended = this.append_message('user', apiContent, mentionContextText ? mentionDisplayText : undefined, { ...messageMeta, parentConversationText, userAttachments, userMentions, sessionMessageId: userMessageId });
-        if (questionDelivery?.window.messages.some(message => message.questionId === questionDelivery.question.id)) {
-            questionDelivery.claim.ack();
-            if (this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.token === questionDelivery.token) {
+        if (notificationDelivery && (questionDelivery?.window.messages.some(message => message.questionId === questionDelivery.question.id)
+            || planDelivery?.window.messages.some(message => message.subTaskPlanId === planDelivery.notice.result.plan_id))) {
+            notificationDelivery.claim.ack();
+            if (this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.token === questionDelivery?.token) {
                 this._questionAutoTurn.accepted = true;
             }
-            this._preparingTurns.set(questionTabKey, { tab: questionDelivery.tab, rollingWindow: questionDelivery.window, abort: turnAbort });
+            this._preparingTurns.set(questionTabKey, { tab: notificationDelivery.tab, rollingWindow: notificationDelivery.window, abort: turnAbort });
             if (!this._autoTurnChainCounts) this._autoTurnChainCounts = new Map();
-            const agentName = questionDelivery.question.owner.agentName;
+            const agentName = notificationDelivery.owner.agentName;
             const count = this._autoTurnChainCounts.get(agentName) || 0;
             this._autoTurnChainCounts.set(agentName, evaluateAutoTurnChain(count, getLimits(this.env?.settings).max_consecutive_auto_turns).nextCount);
         }
         try {
             await appended;
         } catch (error) {
-            if (questionDelivery && this._preparingTurns.get(questionTabKey)?.abort === turnAbort) {
+            if (notificationDelivery && this._preparingTurns.get(questionTabKey)?.abort === turnAbort) {
                 this._preparingTurns.delete(questionTabKey);
             }
             throw error;
@@ -517,9 +527,9 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         timestamp: new Date().toISOString(),
         ...(savedResultQuestion(messageMeta) ? { question: savedResultQuestion(messageMeta) } : {}),
     };
-    if (questionDelivery) {
+    if (notificationDelivery) {
         try {
-            await questionDelivery.owner.memory?.appendSessionEvent(questionDelivery.owner.sessionPath, userEvent, questionDelivery.owner.sessionEpoch);
+            await notificationDelivery.owner.memory?.appendSessionEvent(notificationDelivery.owner.sessionPath, userEvent, notificationDelivery.owner.sessionEpoch);
         } catch (error) {
             if (this._preparingTurns.get(questionTabKey)?.abort === turnAbort) {
                 this._preparingTurns.delete(questionTabKey);
@@ -546,7 +556,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     // wszystko w `send_message` idzie z `owner`; `getActiveAgent()` / `this.rollingWindow` są
     // tu zakazane (pilnuje tego strażnik po źródle w `turnOwner.test.ts`).
     const owner = freezeTurnOwner(this);
-    if (questionDelivery) Object.assign(owner, questionDelivery.owner);
+    if (notificationDelivery) Object.assign(owner, notificationDelivery.owner);
     // Klucz `_agentStates` liczony RAZ, TU - zaraz po zamrożeniu właściciela, przed KAŻDYM
     // awaitem tej funkcji - i wożony dalej jako STRING (`turn.origin.tabKey`, `ownerTabKey`
     // w catchu). `_tabKey(turn.owner?.tab)` przeliczany LENIWIE przy sprzątaniu
@@ -556,7 +566,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     // `_agentStates`. Zamrożony klucz sprzed mutacji trafia we wpis, pod którym stan NAPRAWDĘ
     // leży; przeliczony po fakcie - nie.
     const ownerTabKey = _tabKey(owner.tab);
-    if (questionDelivery && ownerTabKey !== questionTabKey) {
+    if (notificationDelivery && ownerTabKey !== questionTabKey) {
         if (this._preparingTurns.get(questionTabKey)?.abort === turnAbort) this._preparingTurns.delete(questionTabKey);
         return;
     }
@@ -600,7 +610,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
 
     if (turnAbort.isAborted()) return;
     // Toggle UI state + show immediate visual feedback
-    if (!questionDelivery || owner.tab?.isActive) {
+    if (!notificationDelivery || owner.tab?.isActive) {
         this.set_generating(true);
         this.showTypingIndicator(t('chat.streaming.preparing'));
     } else {
@@ -610,7 +620,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     // Od tej chwili serializację przejmuje `is_generating` - bezpiecznik „tura powiadomienia
     // już rusza" (ustawiany przez dostawcę PRZED tym awaitem) nie jest już potrzebny.
     this._subTaskTurnPending = false;
-    if (questionDelivery && this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.token === questionDelivery.token) {
+    if (questionDelivery && this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.token === questionDelivery?.token) {
         this._questionAutoTurn = { kind: 'idle' };
     }
 
@@ -769,7 +779,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         // Ostatnia treść namalowana przez handle_chunk (cykl życia jak current_message_container) -
         // czyta to _finalizeTurn, żeby wiedzieć czy finalna wersja różni się od tego, co widzi user.
         this._lastPaintedContent = null;
-        if (!questionDelivery || owner.tab?.isActive) this.showTypingIndicator();
+        if (!notificationDelivery || owner.tab?.isActive) this.showTypingIndicator();
 
         // Extended thinking: universal flag for all providers that support it.
         // Liczony RAZ na turę, nie per kontynuację.
@@ -1133,6 +1143,13 @@ export function _isTurnActiveTab(this: ChatViewLike, turn: ChatTurn) {
 async function _consumeUserStoppedSubTasks(this: ChatViewLike, turn: ChatTurn): Promise<void> {
     if (turn.turnKind !== 'user' || turn.turnStartedSeq === undefined) return;
     const notifier = this.plugin?.subTaskNotifier;
+    await consumeSubTaskPlans(notifier, turn.origin, turn.turnStartedSeq,
+        id => turn.rw.messages.some(message => message.subTaskPlanId === id), async ({ text, meta }) => {
+            await turn.rw.addMessage('user', text, meta);
+            await appendTurnSessionEvent(turn, { type: 'user_message', agentName: turn.agentName, content: text,
+                message_id: sessionMessageId(turn.rw.messages[turn.rw.messages.length - 1]), timestamp: new Date().toISOString() });
+            if (turn.owner.tab) turn.owner.tab._needsRefresh = true;
+        }, getLimits(this.env?.settings).subagent_result_max_chars);
     if (!notifier?.claimPending) return;
     const frozenTab = {
         agentName: turn.agentName,
@@ -2558,6 +2575,7 @@ export function _wireSubTaskDeliverer(this: ChatViewLike) {
     notifier.setDeliverer((task: SubTask) => this._deliverSubTaskResult(task));
     notifier.setNoticeDeliverer((notice) => notice.kind === 'result'
         ? this._deliverSubTaskResult(notice.task)
+        : notice.kind === 'plan-result' ? deliverSubTaskPlan(this, notice)
         : _deliverSubTaskQuestion.call(this, notice.question));
     // `setDeliverer` świadomie NIC nie dostarcza - moment wybiera wołacz. Teraz.
     this._drainSubTasks();

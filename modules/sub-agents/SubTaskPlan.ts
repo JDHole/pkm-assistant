@@ -1,5 +1,6 @@
 /** Pure DAG bookkeeping. Admission, ownership, persistence and delivery belong to the runtime. */
 import { Validator } from '@cfworker/json-schema';
+import type { TerminalQuestion } from './ParentQuestions.js';
 import type { RunOutcome, StopBy } from './runOutcome.js';
 
 export type PlanNodeId = string & { readonly __planNodeId: unique symbol };
@@ -9,7 +10,7 @@ export interface PlanNodeDefinition {
     readonly dependency_results: 'summary' | 'full';
 }
 export type PlanExecution = Readonly<{ runId: string; threadId: string }>;
-type Material = Readonly<{ material?: string; outcome?: RunOutcome; truncated?: boolean }>;
+type Material = Readonly<{ material?: string; outcome?: RunOutcome; question?: TerminalQuestion; truncated?: boolean }>;
 export type PlanNodeTerminal = Material & (
     | { kind: 'done'; material: string }
     | { kind: 'error'; error: string }

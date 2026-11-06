@@ -28,7 +28,7 @@
  *  - {{SCOPE}}       — SCOPE block when config.scope is set, else empty
  *  - {{BUDGET}}      — BUDGET block (iterations + max tool result size)
  */
-import { getLocale } from '../../core/i18n/index.js';
+import { getLocale, t } from '../../core/i18n/index.js';
 
 const FRAME_PL = `Jesteś sub-agentem "{{SUB_NAME}}" agenta {{AGENT_NAME}} - wyspecjalizowana wersja agenta na dedykowanym modelu AI. Wykonaj zadanie i zwróć zwięzły wynik dla agenta.
 Twoja specjalizacja: {{DESCRIPTION}}
@@ -68,5 +68,5 @@ const SUBAGENT_FRAME_PROMPTS = { pl: FRAME_PL, en: FRAME_EN };
  */
 export function defaultSubAgentFramePrompt(locale: string = getLocale(), mayAskParent = true): string {
     const frame = SUBAGENT_FRAME_PROMPTS[locale === 'pl' ? 'pl' : 'en'];
-    return mayAskParent ? frame : frame.slice(0, frame.lastIndexOf('\n5. '));
+    return (mayAskParent ? frame : frame.slice(0, frame.lastIndexOf('\n5. '))) + '\n' + t('subagent.dependencies.frame', {}, locale);
 }
