@@ -77,7 +77,7 @@ modules/sub-agents/
 `PlanReport` oraz pomocnicze `PlanGraphNode`, `Dependency`, `NonEmpty`, `FailureReason`.
 `parsePlanId(unknown)` waliduje 1–128 znaków `[A-Za-z0-9_-]`, a `parsePlanNodeId(unknown)`
 1–64; obie funkcje zwracają ID albo `undefined`, bez normalizacji lub generowania ID.
-Unikalny PlanId dostarcza przyszły runtime. Graf zachowuje kolejność wejściową.
+Unikalny PlanId dostarcza runtime. Graf zachowuje kolejność wejściową.
 
 `getPlanDependencyState(dependencies, states)` liczy gotowość: tylko `finished`
 odblokowuje; waiting/queued/running pozostają w `pending`, failed/blocked dają
@@ -85,15 +85,15 @@ odblokowuje; waiting/queued/running pozostają w `pending`, failed/blocked dają
 `queued` w tym wyniku znaczy gotowość do przyjęcia, nie zajęcie slotu.
 `propagatePlanBlocks(plan)` zwraca nowy stan przechodnich blokad, nie mutuje wejścia,
 nie zmienia terminalnych stanów i nie przejmuje gotowych zadań. Aktualizację `pending`
-oraz atomowe waiting → queued wykona rejestr, korzystając z helpera gotowości.
+oraz atomowe waiting → queued wykonuje rejestr, korzystając z helpera gotowości.
 Helpery przyjmują kompletny, wcześniej zwalidowany DAG i mapowanie nodeId → runId;
 brak rekordu zależności jest błędem kontraktu wewnętrznego.
 
 `getPlanReport(plan)` zwraca głęboko zamrożoną kopię metadanych w kolejności wejścia,
 liczniki sześciu stanów i `complete` dla niepustego planu bez waiting/queued/running.
 Raport nie zawiera tekstów wyników. Niepełne wykonanie to failed/incomplete;
-rozłączne liczniki dorobku finished/partial/failed/blocked wyliczy adapter narzędzia.
-P1 nie rejestruje ani nie uruchamia planów. Testy: `DelegationPlan.test.ts`.
+rozłączne liczniki dorobku finished/partial/failed/blocked wylicza adapter narzędzia.
+Rejestracja i wykonanie są podłączone przez `DelegateTool`. Testy: `DelegationPlan.test.ts`.
 
 ### 2.4.6 P2 — rejestr planu, zakończenie i Stop
 
@@ -760,7 +760,7 @@ P4 dostarcza transport, a P5 podłącza go do runnera, udostępnia pytania wnuko
 
 Licznik całego batcha powstaje przed pierwszym wykonawcą. `ask_parent` oznacza oczekiwanie jednego narzędzia; dzierżawę i budżet oddajemy dopiero, gdy wszystkie pozostałe narzędzia się rozstrzygną. Odpowiedź wymaga odzyskania slotu przed dalszą pracą. `RunActivity` ma dodatkowe `waiting-children` i `queued`; `DelegateTool` pauzuje wtedy pozostały budżet, bez resetowania go. `onQuestion` służy do obserwacji samego pytania nawet podczas pracującego batcha.
 
-Sub uprawniony do `delegate` dostaje kontrolne `sub_agent` także bez niego w YAML. Przy włączonym narzędziu automatyczna definicja i wykonawca dopuszczają tylko `message/list/stop/close`; P4 ogranicza je do własnych dzieci. F3: gdy agent ma `sub_agent` w `disabled_tools`, automatyczna definicja oferuje wyłącznie `message` z wymaganym `question_id`, `sub_id` i `text`. MCP oraz fallback pozwalają tylko odpowiedzieć na otwarte pytanie własnego żywego dziecka (wspólny `isOwnChildQuestionReply` z publicznego API `tools`); pozostałe akcje są odrzucane, także zwykła wiadomość. Timeout 300000 ms i ścieżka prowadzącego pozostają bez zmian. Testy F3 w `modules/tools/DelegateTool.coordinator.test.ts` i `SubAgentTool.recipients.test.ts` używają rzeczywistego filtra uprawnień. Ta zdolność nie dodaje `task`, nie jest zapisywana jako pełne uprawnienie w konfiguracji wątku ani przekazywana jako takie wnukowi. Jawne `tools: []` nadal nie przyznaje delegacji. Potomek dostaje własne zadanie i konfigurację, bez transkryptu rodzica. Fabryczna rama PL/EN wyjaśnia pokwitowanie, odpowiedź na oryginalne `question_id` i eskalację osobnym pytaniem.
+Sub uprawniony do `delegate` dostaje kontrolne `sub_agent` także bez niego w YAML. Przy włączonym narzędziu automatyczna definicja i wykonawca dopuszczają tylko `message/list/stop/close`; P4 ogranicza je do własnych dzieci. F3: gdy agent ma `sub_agent` w `disabled_tools`, automatyczna definicja oferuje wyłącznie `message` z wymaganym `question_id`, `sub_id` i `text`. MCP oraz fallback pozwalają tylko odpowiedzieć na otwarte pytanie własnego żywego dziecka (wspólny `isOwnChildQuestionReply` z publicznego API `tools`); pozostałe akcje są odrzucane, także zwykła wiadomość. Timeout 300000 ms i ścieżka prowadzącego pozostają bez zmian. Testy F3 w `modules/tools/DelegateTool.coordinator.test.ts` i `SubAgentTool.recipients.test.ts` używają rzeczywistego filtra uprawnień. Ta zdolność nie dodaje `task`, nie jest zapisywana jako pełne uprawnienie w konfiguracji wątku ani przekazywana jako takie wnukowi. Jawne `tools: []` nadal nie przyznaje delegacji. Potomek dostaje własne zadanie i konfigurację; domyślnie nie dostaje transkryptu rodzica, lecz jawne `parent_conversation` może przekazać snapshot bezpośredniego rodzica po wymaganej zgodzie. Fabryczna rama PL/EN wyjaśnia pokwitowanie, odpowiedź na oryginalne `question_id` i eskalację osobnym pytaniem.
 
 Testy: `SubRunCoordinator.test.ts`, `modules/tools/DelegateTool.coordinator.test.ts`, `modules/agent-loop/AgentLoop.finish.test.ts`. Sterowane stream/done/error, zdarzenia, deferred i `QuestionTestClock`, jawny limit głębokości 2. Pokrywają pięciu rodziców i pięciu pytających wnuków, MCP/fallback, dwa pytania z eskalacją, pauzę człowieka, oba porządki batcha read/delegate/ask_parent, resztę budżetu 599/600 ms, Stop podczas reacquire, backstop/błąd/późny wynik, wygasłe pytanie w kolejce i kontrolę obcego dziecka. P6 dodaje scenariusz na domyślnym limicie 2 z rzeczywistymi narzędziami ask_user/sub_agent i kanałem odpowiedzi Kuby; renderer pozostaje bez zmian.
 
@@ -928,3 +928,17 @@ więc naturalne zakończenie rodzica czeka na ich doręczenia. Runner udostępni
 rodzicowi planu także na starszej ścieżce z samą głębokością; prywatny rejestr fallbacku
 odrzuca je bez oczekiwania. Zwykłe biegi zachowują dotychczasową regułę głębokości.
 Testy przez publiczny delegate: `../tools/DelegateTool.plan.test.ts`.
+
+### 2.4.6 P6 — tożsamość i życie planu
+
+`planId` identyfikuje plan, `nodeId` to krótkie ID z `tasks[]`, `runId`
+(`task_id` w pokwitowaniu) identyfikuje bieg, a `threadId` (`sub_id`) wątek
+możliwy do kontynuacji. Krawędzie odnoszą się do `nodeId`; `parentId` do biegu
+rzeczywistego rodzica, więc nie tworzą drzewa zależności.
+
+Tylko naturalny sukces z odpowiedzią odblokowuje następników. Partial jest
+dorobkiem dla prowadzącego, nie materiałem odblokowującym. Stop węzła blokuje
+jego następców, niezależne gałęzie nadal pracują; pytanie blokującego planu
+promuje niedokończone węzły do tła. Po pokwitowaniu pula i nasłuchy Stopu żyją
+do rozliczenia planu. Historia zachowuje terminalne blokady, a `waiting`,
+`queued` i `running` odtwarza jako przerwane: restart nie wznawia grafu.

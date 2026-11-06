@@ -758,3 +758,23 @@ pokwitowaniu. Stop sygnału/unload używa transakcji `requestStopPlan`; Stop wł
 zachowuje autora i transakcję rejestru. Referencje do zadań chronią końcową agregację
 przed retencją; teksty wyników nie są kopiowane do metadanych grafu.
 Testy integracyjne: `DelegateTool.plan.test.ts` (prawdziwy runner, rejestr i sterowane modele).
+
+### 2.4.6 P6 — kontrakt materiału i identyfikatorów
+
+W planie `id` oznacza węzeł, `plan_id` cały plan, `task_id` bieg, a `sub_id`
+wątek. Co najmniej jedna krawędź `depends_on` włącza plan; poprawna lista bez
+krawędzi, także z pustymi tablicami, korzysta ze starej ścieżki i jej odpowiedzi.
+
+Następnik dostaje pełne `result.text` wyłącznie bezpośrednich poprzedników,
+w kolejności `depends_on`, bez streszczania modelem. Zamrożony dla wywołania
+`delegation_dependencies_max_chars` (domyślnie 20000) ogranicza całą sekcję,
+łącznie z nagłówkami, separatorami i znacznikami przycięcia; to nie limit całego
+promptu. Partial nie odblokowuje następników. Niepowodzenie blokuje ich przechodnio,
+niezależne gałęzie pracują dalej, a ponowienie wymaga nowego `delegate`.
+
+`parent_conversation` wybiera się osobno dla elementu: snapshot bezpośredniego
+rodzica powstaje przy delegowaniu, a wyniki zależności dochodzą później jako
+osobna sekcja przed dopasowaniem rozmowy do budżetu. Odmowa zgody blokuje
+następników tego węzła. Zaufany sub→sub otrzymuje pokwitowanie po przyjęciu
+planu, a wyniki i pytania przez skrzynkę rodzica; plan pozostaje żywy po zwrocie
+pokwitowania aż do rozliczenia puli, także dla Stopu i unload.

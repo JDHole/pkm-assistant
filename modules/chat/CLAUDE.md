@@ -1739,3 +1739,16 @@ import nadal nie rozpoczyna strumieni ani doręczeń. Testy: `planDelivery.test.
 starszych wpisów dopasowanych po tabKey/agentName. Pełna tożsamość sesji nadal ma
 pierwszeństwo. Lifetime planu po pokwitowaniu obsługuje DelegateTool; zmiana aktywnej
 zakładki nie zmienia właściciela kolejnej fali. Testy: `../tools/DelegateTool.plan.test.ts`.
+
+### 2.4.6 P6 — odczyt planu w czacie
+
+ID w wierszu to ID węzła planu, nie `task_id` biegu ani `sub_id` wątku.
+`waiting` oznacza oczekiwanie na poprzedników i ma Stop; `queued` oznacza
+gotowość i oczekiwanie na przyjęcie do wykonania. `blocked` nie startuje i nie
+ma Stopu. Stop węzła blokuje jego następców, lecz nie zatrzymuje niezależnych
+gałęzi. Pytanie z planu blokującego promuje niedokończony plan do tła; wynik
+częściowy nie jest sukcesem odblokowującym kolejny węzeł.
+
+Po restarcie historia pokazuje przerwane wcześniej aktywne węzły i zachowane
+blokady, bez wznawiania planu. Lista bez krawędzi, również z `depends_on: []`,
+zachowuje dotychczasowe pokwitowania, powiadomienia i pasek.
