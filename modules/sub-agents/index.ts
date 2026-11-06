@@ -96,3 +96,5 @@ export type { PlanHandle, PlanReservation, ReservePlanInput } from './SubTaskReg
 export type { TaskTerminal } from './planTaskLifecycle.js';
 export { terminalPlanState } from './planTaskLifecycle.js';
 export type { PlanReadyDriver } from './DelegationPlan.js';
+
+export { buildPlanNotice } from './planNotice.js';

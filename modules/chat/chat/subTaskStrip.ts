@@ -67,6 +67,8 @@ const countKeys = {
 
 function stateClass(state: StripState): string {
     switch (state.kind) {
+        case 'waiting': return 'pkm-substrip__chip--queued';
+        case 'blocked': return 'pkm-substrip__chip--partial pkm-substrip__chip--partial-error';
         case 'queued': return 'pkm-substrip__chip--queued';
         case 'running': return 'pkm-substrip__chip--running';
         case 'stopping': return 'pkm-substrip__chip--stopping';
@@ -82,7 +84,7 @@ function stateClass(state: StripState): string {
 
 function stateLabel(state: StripState): string {
     const parts = getStripStateLabelParts(state);
-    return parts.completeness ? `${t(parts.end)} · ${t(parts.completeness)}` : t(parts.end);
+    return parts.completeness ? `${t(parts.end, parts.params)} · ${t(parts.completeness)}` : t(parts.end, parts.params);
 }
 
 function assertNever(value: never): never { throw new Error(`Nieobsługiwany stan: ${String(value)}`); }
@@ -130,6 +132,10 @@ export function renderSubTaskStrip(host: El, ctx: SubTaskStripContext): number {
         summary.createEl('strong', { text: `${t(countKeys.running[pluralCategory(counts.running)], { count: counts.running })}, ${t(countKeys.queued[pluralCategory(counts.queued)], { count: counts.queued })}` });
         summary.createSpan({ text: t(countKeys.total[pluralCategory(counts.total)], { count: counts.total }) });
     }
+    if (tree.counts.waiting || tree.counts.blocked) {
+        const summary = host.createDiv({ cls: 'pkm-substrip__summary' });
+        summary.createSpan({ text: t('chat.substrip.plan_counts', { waiting: tree.counts.waiting ?? 0, blocked: tree.counts.blocked ?? 0 }) });
+    }
     const expandedNode = tree.visible.find(node => node.row.id === ctx.expandedId);
     const expanded = expandedNode?.row ?? null;
     const chips = host.createDiv({ cls: 'pkm-substrip__chips' });
@@ -143,7 +149,7 @@ export function renderSubTaskStrip(host: El, ctx: SubTaskStripContext): number {
     if (host.isConnected && (ticks.length || registry?.events)) {
         const timer = ticks.length ? window.setInterval(() => ticks.forEach(tick => tick()), 1000) : undefined;
         const refresh = (): void => { if (host.isConnected) renderSubTaskStrip(host, ctx); };
-        const unsubs = ['question:opened', 'question:closed', 'question:clock', 'task:context'].map(event => registry?.events?.on(event, refresh)).filter((off): off is () => void => typeof off === 'function');
+        const unsubs = ['question:opened', 'question:closed', 'question:clock', 'task:context', 'task:plan'].map(event => registry?.events?.on(event, refresh)).filter((off): off is () => void => typeof off === 'function');
         const observer = new MutationObserver(() => { if (!host.isConnected) cleanup(); });
         const cleanup = (): void => { if (timer !== undefined) window.clearInterval(timer); for (const off of unsubs) off(); observer.disconnect(); stripTimers.delete(host); };
         observer.observe(host.ownerDocument, { childList: true, subtree: true });
@@ -186,7 +192,7 @@ function renderTreeNode(host: El, parent: El, node: StripTreeNode, ctx: SubTaskS
     chip.createSpan({ cls: 'pkm-substrip__name', text: row.name });
     chip.createSpan({ cls: 'pkm-substrip__state', text: label });
     renderConversation(chip, row.parentConversation);
-    chip.createSpan({ cls: 'pkm-substrip__time', text: node.time });
+    if (!row.notStarted) chip.createSpan({ cls: 'pkm-substrip__time', text: node.time });
     chip.addEventListener('click', event => { event.stopPropagation(); ctx.onToggle(isExpanded ? null : row.id); });
     chip.addEventListener('keydown', event => {
         if (event.key === 'Escape' && isExpanded) { event.preventDefault(); ctx.onToggle(null); findChip(host, row.id)?.focus(); }
@@ -259,7 +265,7 @@ function renderChip(chips: El, row: StripRow, ctx: SubTaskStripContext, isExpand
     if (row.state.kind === 'queued') button.createSpan({ cls: 'pkm-substrip__queue', text: t('chat.substrip.queue_position', { position: String(row.state.position) }) });
     if (row.threadId && row.runNumber > 0 && row.runLimit) button.createSpan({ cls: 'pkm-substrip__run-number', text: t('chat.substrip.run_number', { number: String(row.runNumber), total: String(row.runLimit) }) });
     renderConversation(button, row.parentConversation);
-    button.createSpan({ cls: 'pkm-substrip__time', text: formatDuration(row.durationMs) });
+    if (!row.notStarted) button.createSpan({ cls: 'pkm-substrip__time', text: formatDuration(row.durationMs) });
     button.addEventListener('click', event => { event.stopPropagation(); ctx.onToggle(isExpanded ? null : row.id); });
     button.addEventListener('keydown', event => {
         if (event.key === 'Escape' && isExpanded) { event.preventDefault(); ctx.onToggle(null); findChip(chips, row.id)?.focus(); }
@@ -283,7 +289,7 @@ function renderDetail(host: El, details: El, row: StripRow, registry: RegistryLi
     const head = details.createDiv({ cls: 'pkm-substrip__detail-head' });
     head.createSpan({ cls: 'pkm-substrip__detail-status', text: `${row.name} · ${questionLabel(row.questionState, row.state)}` });
     if (row.threadId && row.runNumber && row.runLimit) head.createSpan({ cls: 'pkm-substrip__run-badge', text: t('chat.substrip.run_number', { number: String(row.runNumber), total: String(row.runLimit) }) });
-    if (row.state.kind === 'queued') renderStopButton(head, registry, row);
+    if (row.state.kind === 'queued' || row.state.kind === 'waiting') renderStopButton(head, registry, row);
     const remembered = expandedRunSteps.get(host) ?? new Set<string>();
     expandedRunSteps.set(host, remembered);
     if (row.runs.length) {
@@ -319,6 +325,10 @@ function renderRunCard(axis: El, run: StripRun, row: StripRow, registry: Registr
     }
     section(card, 'chat.substrip.heading_task', 'ZLECENIE');
     card.createDiv({ cls: 'pkm-substrip__task', text: run.taskPreview || t('chat.substrip.no_task') });
+    if (run.notStarted) {
+        card.createDiv({ cls: 'pkm-substrip__unavailable', text: t('chat.substrip.plan_not_started') });
+        return;
+    }
     const stepsSlot = card.createDiv({ cls: 'pkm-substrip__run-steps' });
     if (showSteps) renderRunSteps(stepsSlot, run);
     if (!live) {

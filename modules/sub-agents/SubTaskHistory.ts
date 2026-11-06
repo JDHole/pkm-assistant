@@ -5,10 +5,15 @@ import { maskSensitiveData } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
 import type { Owner, ParentQuestion, QuestionId, QuestionResolution } from './ParentQuestions.js';
 import type { ParentConversationMetadata } from './ParentConversationBudget.js';
+import { getPlanReport } from './DelegationPlan.js';
+import type { PlanTaskMetadata, PlanReport } from './DelegationPlan.js';
 import type { RunOutcome } from './runOutcome.js';
 import type { SubTask, SubTaskRegistry, SubThread } from './SubTaskRegistry.js';
 
 export interface SubTaskHistoryRecord {
+    plan?: PlanTaskMetadata;
+    planReport?: PlanReport;
+    startedAt?: number;
     parentConversation?: ParentConversationMetadata;
     version: 1;
     runId: string;
@@ -62,11 +67,26 @@ const parentConversation: Schema = { oneOf: [
     }, [...Object.keys(sourceFields), 'status', 'truncated', 'keptMessages', 'summarizedMessages', 'omittedMessages',
         'estimatedTokens', 'inputTokens', 'maxOutputTokens', 'marginTokens', 'window']),
 ] };
+const planId: Schema = { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' };
+const nodeId: Schema = { type: 'string', pattern: '^[A-Za-z0-9_-]{1,64}$' };
+const dependencies: Schema = { type: 'array', uniqueItems: true, items: object({ nodeId, runId: id }) };
+const planState: Schema = { oneOf: [
+    object({ kind: { const: 'waiting' }, pending: { ...dependencies, minItems: 1 } }),
+    object({ kind: { const: 'blocked' }, causes: { ...dependencies, minItems: 1 } }),
+    object({ kind: choice('queued', 'running', 'finished') }),
+    object({ kind: { const: 'failed' }, reason: choice('error', 'timeout', 'aborted', 'no-answer', 'incomplete') }),
+] };
+const plan: Schema = object({ planId, nodeId, dependsOn: dependencies, state: planState });
+const count: Schema = { type: 'integer', minimum: 0 };
+const planReport: Schema = object({ planId, complete: { type: 'boolean' },
+    nodes: { type: 'array', minItems: 1, maxItems: 20, items: object({ nodeId, runId: id, dependsOn: dependencies, state: planState }) },
+    counts: object({ waiting: count, queued: count, running: count, finished: count, failed: count, blocked: count }),
+});
 const validator = new Validator(object({
     version: { const: 1 }, runId: id, threadId: id, name: id,
     owner: object({ agentName: id, sessionPath: id, sessionEpoch: { type: 'string', pattern: '^[0-9a-f]{32}$' } }),
     parentId: id, level: { type: 'integer', minimum: 1, maximum: 3 },
-    state: choice('queued', 'running', 'done', 'error', 'aborted'), createdAt: time, endedAt: time,
+    state: choice('waiting', 'blocked', 'queued', 'running', 'done', 'error', 'aborted'), createdAt: time, endedAt: time, startedAt: time, plan, planReport,
     taskPreview: string, material: string, error: string, outcome, parentConversation,
     question: object({ id, text: string, askedAt: time, resolution }, ['id', 'text', 'askedAt']),
 }, ['version', 'runId', 'threadId', 'name', 'owner', 'level', 'state', 'createdAt']));
@@ -76,6 +96,25 @@ export function parseSubTaskHistoryRecord(value: unknown): SubTaskHistoryRecord 
     const record = value as SubTaskHistoryRecord; // schema validates the entire persisted boundary
     if ((record.parentId === undefined) !== (record.level === 1)
         || record.parentId === record.runId || (record.endedAt !== undefined && record.endedAt < record.createdAt)) return undefined;
+    if ((record.state === 'blocked' && record.plan?.state.kind !== 'blocked')
+        || (record.state === 'waiting' && !['waiting', 'queued'].includes(record.plan?.state.kind ?? ''))) return undefined;
+    if (record.plan) {
+        const state = record.plan.state;
+        switch (state.kind) {
+            case 'waiting': case 'queued': if (record.state !== 'waiting' && record.state !== 'queued') return undefined; break;
+            case 'running': if (record.state !== 'running') return undefined; break;
+            case 'finished': if (record.state !== 'done') return undefined; break;
+            case 'blocked': if (record.state !== 'blocked') return undefined; break;
+            case 'failed': if (!['done', 'error', 'aborted'].includes(record.state)) return undefined; break;
+            default: { const exhaustive: never = state; return exhaustive; }
+        }
+    }
+    if (record.planReport) {
+        if (!record.plan || record.plan.planId !== record.planReport.planId) return undefined;
+        const report = getPlanReport(record.planReport);
+        if (report.complete !== record.planReport.complete
+            || Object.entries(report.counts).some(([key, count]) => record.planReport!.counts[key as keyof PlanReport['counts']] !== count)) return undefined;
+    }
     return structuredClone(record);
 }
 const ownerKey = (owner: Owner): string => JSON.stringify([owner.agentName, owner.sessionPath, owner.sessionEpoch]);
@@ -102,15 +141,21 @@ export class SubTaskHistory {
                 owner: task.origin && { agentName: task.origin.agentName, sessionPath: task.origin.sessionPath, sessionEpoch: task.origin.sessionEpoch },
                 parentId: task.parentId, level: task.level ?? 1, state: task.status, createdAt: task.createdAt, endedAt: task.endedAt,
                 taskPreview: task.taskPreview, material: maskSensitiveData(task.result?.handoff || task.result?.text || task.partial?.text || ''),
-                error: task.error, outcome: task.outcome, question, parentConversation: task.parentConversation,
+                error: task.error, outcome: task.outcome, question, plan: task.plan, planReport: task.planReport, startedAt: task.startedAt, parentConversation: task.parentConversation,
             });
         };
         for (const event of ['task:created', 'task:partial', 'task:finished', 'task:context']) {
             this.unsubscribe.push(registry.events.on(event, value => {
                 const task = value as SubTask;
-                if (event === 'task:finished' || task.status === 'running') taskRecord(task);
+                if (event === 'task:finished' || task.status === 'running' || task.plan) taskRecord(task);
             }));
         }
+        this.unsubscribe.push(registry.events.on('task:plan', value => {
+            for (const node of (value as PlanReport).nodes) {
+                const task = registry.getTask(node.runId);
+                if (task?.status === 'waiting' || task?.status === 'running') taskRecord(task);
+            }
+        }));
         for (const event of ['question:opened', 'question:closed']) {
             this.unsubscribe.push(registry.events.on(event, value => {
                 const task = registry.getTask((value as ParentQuestion).taskId);
@@ -120,7 +165,7 @@ export class SubTaskHistory {
         for (const event of ['thread:created', 'thread:queued']) {
             this.unsubscribe.push(registry.events.on(event, value => {
                 const thread = value as SubThread;
-                if (thread.phase !== 'queued') return;
+                if (thread.phase !== 'queued' || registry.getTask(thread.queuedRunId ?? '')?.plan) return;
                 save({ version: 1, runId: thread.queuedRunId ?? thread.threadId, threadId: thread.threadId, name: thread.name,
                     owner: { agentName: thread.owner.agentName, sessionPath: thread.owner.sessionPath, sessionEpoch: thread.owner.sessionEpoch },
                     parentId: thread.parentId, level: thread.level ?? 1, state: 'queued', createdAt: thread.lastActiveAt, parentConversation: thread.parentConversation });
@@ -135,8 +180,8 @@ export class SubTaskHistory {
 export function restoreSubTaskHistory(input: readonly unknown[], owner: Owner): Array<SubTask & { threadId: string; endedAt: number }> {
     const records = new Map<string, SubTaskHistoryRecord>();
     const invalid = new Set<string>();
-    const identity = (r: SubTaskHistoryRecord) => JSON.stringify([r.threadId, r.name, r.parentId, r.level]);
-    const rank = (r: SubTaskHistoryRecord) => r.state === 'queued' ? 0 : r.state === 'running' ? 1 : 2;
+    const identity = (r: SubTaskHistoryRecord) => JSON.stringify([r.threadId, r.name, r.parentId, r.level, r.plan?.planId, r.plan?.nodeId, r.plan?.dependsOn]);
+    const rank = (r: SubTaskHistoryRecord) => r.state === 'queued' || r.state === 'waiting' ? 0 : r.state === 'running' ? 1 : 2;
     for (const value of input) {
         const record = parseSubTaskHistoryRecord(value);
         if (!record || ownerKey(record.owner) !== ownerKey(owner)) continue;
@@ -151,7 +196,7 @@ export function restoreSubTaskHistory(input: readonly unknown[], owner: Owner): 
         return !!parent && parent.level === record.level - 1 && valid(parent);
     };
     return [...records.values()].filter(valid).sort((a, b) => a.createdAt - b.createdAt).map(record => {
-        const interrupted = record.state === 'queued' || record.state === 'running';
+        const interrupted = record.state === 'waiting' || record.state === 'queued' || record.state === 'running';
         const hasMaterial = !!record.material || !!record.outcome?.hasMaterial;
         const task: SubTask & { threadId: string; endedAt: number } = {
             id: record.runId, threadId: record.threadId, name: record.name, agentName: owner.agentName,
@@ -162,6 +207,9 @@ export function restoreSubTaskHistory(input: readonly unknown[], owner: Owner): 
             outcome: interrupted ? { end: { kind: 'stopped', by: 'system' }, completeness: hasMaterial ? 'partial' : 'empty',
                 hasAnswer: false, hasMaterial, effects: record.outcome?.effects ?? [] } : record.outcome,
             questionState: { kind: 'none' }, interruptedByRestart: interrupted,
+            ...(record.plan ? { plan: interrupted ? { ...record.plan, state: { kind: 'failed', reason: 'aborted' } as const } : record.plan } : {}),
+            ...(record.planReport ? { planReport: record.planReport } : {}),
+            ...(record.startedAt !== undefined ? { startedAt: record.startedAt } : {}),
             ...(record.parentConversation ? { parentConversation: record.parentConversation } : {}),
         };
         if (record.material !== undefined) task.result = { text: record.material, toolsUsed: [], durationMs: 0, usage: null, ...(record.parentConversation ? { parentConversation: record.parentConversation } : {}) };

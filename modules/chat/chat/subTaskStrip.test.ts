@@ -1,7 +1,8 @@
+import { planInput, planOwner, planResult, activatePlanTask } from '../../sub-agents/test-support/planFixture.js';
 import test from 'ava';
 import { register } from 'node:module';
 import { renderSubTaskStrip } from './subTaskStrip.js';
-import { SubTaskRegistry, buildStripModel } from '../../sub-agents/index.js';
+import { SubTaskRegistry, SubTaskNotifier, buildStripModel, summarizeStripRows } from '../../sub-agents/index.js';
 import { QuestionTestClock } from '../../sub-agents/test-support/questionTestClock.js';
 import { DEFAULT_LIMITS } from '../../../config/limits.js';
 import { pl as trPl } from '../../../core/i18n/pl.js';
@@ -1080,4 +1081,81 @@ test.serial('P5: drzewo sub → wnuk pokazuje niezależny zakres i pominięcie r
         'Wiadomości: zachowane 0, streszczone 0, pominięte 1.', 'Szacowany rozmiar rozmowy: 0 tokenów.',
         'Bez załączników i myślenia. Uprawnienia do plików i narzędzi bez zmian.',
     ]);
+});
+
+for (const locale of ['pl', 'en'] as const) test.serial(`P4 ${locale}: registry events render A/B waiting, B waiting, slot queue and start`, t => {
+    setLocale(locale);
+    const oldObserver = globalThis.MutationObserver;
+    (globalThis as Record<string, unknown>).MutationObserver = class { observe() {} disconnect() {} };
+    const registry = new SubTaskRegistry();
+    t.teardown(() => { registry.dispose(); globalThis.MutationObserver = oldObserver; setLocale('en'); });
+    registry.reservePlan(planInput());
+    const host = new MockEl(); Object.assign(host, { isConnected: true });
+    const render = (epoch = planOwner.sessionEpoch) => renderSubTaskStrip(host as never, {
+        plugin: { subTaskRegistry: registry }, tabKey: 'plan', ...planOwner, sessionEpoch: epoch, expandedId: 'C', onToggle() {},
+    });
+    t.is(render(), 3);
+    const chip = () => all(host).find(el => el.dataset.substripId === 'C')!;
+    const states = () => all(chip()).filter(el => el.className === 'pkm-substrip__state').map(el => el.textContent);
+    t.deepEqual(states(), [locale === 'pl' ? 'czeka na: A, B' : 'waiting for: A, B']);
+    t.deepEqual(all(host).filter(el => el.className === 'pkm-substrip__name').map(el => el.textContent), ['C · explorer', 'A · explorer', 'B · explorer']);
+    t.deepEqual(all(host).filter(el => el.className === 'pkm-substrip__queue').map(el => el.textContent), locale === 'pl' ? ['1. w kolejce', '2. w kolejce'] : ['1 in queue', '2 in queue']);
+    t.is(all(chip()).filter(el => el.className === 'pkm-substrip__time').length, 0);
+    t.is(all(host).filter(el => el.className === 'pkm-substrip__detail-meta').length, 0);
+    t.deepEqual(all(host).filter(el => el.className === 'pkm-substrip__stop').map(el => el.disabled), [false]);
+    const a = activatePlanTask(registry, 'A'); const b = activatePlanTask(registry, 'B');
+    registry.finish(a, planResult());
+    t.deepEqual(states(), [locale === 'pl' ? 'czeka na: B' : 'waiting for: B']);
+    registry.finish(b, planResult());
+    t.deepEqual(states(), [locale === 'pl' ? 'czeka na miejsce' : 'waiting for a slot']);
+    t.deepEqual(all(chip()).filter(el => el.className === 'pkm-substrip__queue').map(el => el.textContent), [locale === 'pl' ? '1. w kolejce' : '1 in queue']);
+    activatePlanTask(registry, 'C');
+    t.deepEqual(states(), [locale === 'pl' ? 'pracuje' : 'working']);
+    t.is(all(chip()).filter(el => el.className === 'pkm-substrip__time').length, 1);
+    t.is(render('b'.repeat(32)), 0);
+    t.is(render(), 3);
+    t.deepEqual(states(), [locale === 'pl' ? 'pracuje' : 'working']);
+});
+
+test.serial('P4 blocked keeps original A ahead of closed/delivery; waiting Stop stops C only', t => {
+    setLocale('en');
+    const registry = new SubTaskRegistry(); const notifier = new SubTaskNotifier({ registry });
+    t.teardown(() => { notifier.dispose(); registry.dispose(); });
+    registry.reservePlan(planInput(planOwner, undefined, [['D', ['C']], ['C', ['A']], ['A', []], ['B', []]]));
+    const a = activatePlanTask(registry, 'A'); activatePlanTask(registry, 'B');
+    registry.fail(a, 'A failed');
+    const host = new MockEl();
+    renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: registry, subTaskNotifier: notifier }, tabKey: 'plan', ...planOwner, expandedId: 'D', onToggle() {} });
+    t.deepEqual(all(host).filter(el => el.className === 'pkm-substrip__state').map(el => el.textContent),
+        ['blocked (failed: A)', 'blocked (failed: A)', 'waiting for delivery', 'working']);
+    t.deepEqual(all(host).filter(el => el.className === 'pkm-substrip__run-state').map(el => el.textContent), ['blocked (failed: A)']);
+    t.deepEqual(all(host).filter(el => el.className === 'pkm-substrip__unavailable').map(el => el.textContent), ['task was not started']);
+    t.is(all(host).filter(el => el.className === 'pkm-substrip__stop').length, 0);
+    const rows = buildStripModel({ tasks: registry.list(), pending: notifier.pending(), threads: registry.listThreads(planOwner), ...planOwner });
+    t.deepEqual(summarizeStripRows(rows), { running: 1, queued: 0, total: 4, waiting: 0, blocked: 2 });
+    const waiting = new SubTaskRegistry(); t.teardown(() => waiting.dispose());
+    waiting.reservePlan(planInput());
+    renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: waiting }, tabKey: 'plan', ...planOwner, expandedId: 'C', onToggle() {} });
+    all(host).find(el => el.className === 'pkm-substrip__stop')!.dispatch('click');
+    t.deepEqual(waiting.list().map(task => [task.id, task.plan?.state.kind]), [['C', 'failed'], ['A', 'queued'], ['B', 'queued']]);
+});
+
+test.serial('P4 nested plan stays among real siblings; waiting has Stop and no slot hint', t => {
+    setLocale('en');
+    const registry = new SubTaskRegistry(); t.teardown(() => registry.dispose());
+    registry.createThread({ threadId: 'parent', name: 'parent', owner: planOwner, origin: planOwner, config: {} });
+    registry.create({ id: 'parent', threadId: 'parent', name: 'parent', agentName: planOwner.agentName, origin: planOwner, level: 1 });
+    registry.reservePlan(planInput(planOwner, 'parent'));
+    const host = new MockEl();
+    const render = () => renderSubTaskStrip(host as never, { plugin: { subTaskRegistry: registry }, tabKey: 'plan', ...planOwner, expandedId: 'C', onToggle() {} });
+    t.is(render(), 4);
+    t.deepEqual(all(host).filter(el => el.className === 'pkm-substrip__tree').map(el => el.attributes['data-substrip-depth']), ['0', '1', '1', '1']);
+    const c = all(host).find(el => el.dataset.substripId === 'C')!.parentElement!;
+    t.deepEqual(all(c).filter(el => el.className === 'pkm-substrip__state').map(el => el.textContent), ['waiting for: A, B']);
+    t.is(all(c).filter(el => el.className === 'pkm-substrip__info' || el.className === 'pkm-substrip__time').length, 0);
+    t.deepEqual(all(host).filter(el => el.className === 'pkm-substrip__info').map(el => el.attributes['data-substrip-control']), ['info:A', 'info:B']);
+    t.deepEqual(all(host).filter(el => el.className === 'pkm-substrip__stop').map(el => el.disabled), [false]);
+    registry.fail(activatePlanTask(registry, 'A'), 'A failed'); render();
+    t.deepEqual(all(host).filter(el => el.className === 'pkm-substrip__state').map(el => el.textContent), ['working', 'blocked (failed: A)', 'failed', 'queued']);
+    t.is(all(host).filter(el => el.className === 'pkm-substrip__stop').length, 0);
 });

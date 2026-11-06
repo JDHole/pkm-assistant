@@ -15,6 +15,7 @@
  */
 import { t } from '../../../core/i18n/index.js';
 import { DEFAULT_LIMITS } from '../../../config/limits.js';
+import { buildPlanNotice } from '../../sub-agents/index.js';
 import type { SubTask, SubTaskOrigin } from '../../sub-agents/index.js';
 import { stripRunnerQuestion } from './stripRunnerQuestion.js';
 
@@ -89,7 +90,7 @@ function durationSeconds(task: SubTask): string | null {
     const ms = typeof task?.result?.durationMs === 'number'
         ? task.result.durationMs
         : (typeof task?.endedAt === 'number' && typeof task?.createdAt === 'number'
-            ? task.endedAt - task.createdAt
+            ? task.endedAt - (task.startedAt ?? task.createdAt)
             : null);
     if (ms === null || !Number.isFinite(ms) || ms < 0) return null;
     return (ms / 1000).toFixed(1);
@@ -116,16 +117,19 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
         task_id: task?.id || '?',
     }));
 
-    const seconds = durationSeconds(task);
+    const seconds = task.plan && task.startedAt === undefined ? null : durationSeconds(task);
     const outcome = task?.outcome;
-    const lineStatus = outcome
+    const blocked = task.plan?.state.kind === 'blocked' ? task.plan.state : undefined;
+    const lineStatus = blocked ? t('chat.substrip.plan_blocked', { ids: blocked.causes.map(d => d.nodeId).join(', ') }) : outcome
         ? `${outcomeEndLabel(outcome)} · ${t(COMPLETENESS_KEY[outcome.completeness])}`
         : statusLabel(task?.status);
     parts.push(seconds !== null
         ? t('chat.subagent_notification.meta_with_time', { status: lineStatus, seconds })
         : t('chat.subagent_notification.meta', { status: lineStatus }));
 
-    if (outcome?.completeness === 'unconfirmed') {
+    if (blocked) {
+        parts.push(t('chat.substrip.plan_not_started'));
+    } else if (outcome?.completeness === 'unconfirmed') {
         const raw = typeof task?.result?.text === 'string' ? task.result.text.trim() : '';
         if (raw) parts.push(raw.length > maxResultChars && maxResultChars > 0 ? `${raw.slice(0, maxResultChars)}\n${t('chat.subagent_notification.truncated', { chars: maxResultChars })}` : raw);
         else parts.push(t('chat.subagent_notification.empty_result'));
@@ -165,6 +169,9 @@ export function buildSubTaskNotificationText(task: SubTask, options: SubTaskNoti
             parts.push(t('chat.subagent_notification.effect', { tool: effect.tool, target: targets, check: t(CHECK_KEY[check]) }));
         }
     }
+
+    const planNotice = buildPlanNotice(task);
+    if (planNotice) parts.push(planNotice.plan_summary);
 
     const question = task.result?.question;
     const questionSection = question && question.resolution.kind !== 'answered'

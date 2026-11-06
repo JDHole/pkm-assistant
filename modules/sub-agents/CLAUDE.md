@@ -888,3 +888,32 @@ z długim korpusem klucza. Zwykły `sk-` wymaga co najmniej 20 znaków alfanumer
 lub `_`, w tym cyfry albo wielkiej litery. Dzięki temu `task-przygotowanie-dokumentacji`
 i zwykłe `mask-...` pozostają czytelne. Globalny guard i redakcja znanych wartości
 pozostają bez zmian. F7 sprawdza tekst i prefiksy; F5-3 nadal sprawdza zgodę i payload.
+
+### 2.4.6 P4 — pasek, raport doręczenia i historia planu
+
+`StripState` zawiera `waiting { dependencies }` i `blocked { causes }`; etykiety
+zwracają też parametry interpolacji. Model pokazuje ID węzła przy nazwie suba,
+nie buduje relacji drzewa z krawędzi DAG. Waiting nie zajmuje pozycji kolejki,
+pozostaje zatrzymywalny; blocked wygrywa z closed/delivery i nie oferuje Stopu.
+Opcjonalne `notStarted` na wierszu i biegu wyłącza czas oraz statystyki wykonania.
+`summarizeStripRows` zachowuje dawny kształt dla zwykłych wierszy; przy waiting/blocked
+zwraca też ich liczniki. Nie liczy oczekiwania na zależności jako kolejki slotów.
+
+Publiczny `buildPlanNotice(task)` zwraca dla terminalnego węzła `plan`, `plan_report`,
+`plan_complete` i lokalizowaną tabelę `plan_summary`, a bez planu undefined.
+Korzystają z niego czat i payload `Child notices` runnera. Tabela wszystkich węzłów
+jest poza limitem dorobku. `plan_complete` pochodzi ze snapshotu ostatniej transakcji;
+może oznaczać kilka wyników, gdy jedna awaria rozliczy również blokady. Nie powstaje
+osobne zbiorcze powiadomienie ani ponowny wynik po późnym callbacku.
+
+Historia v1 dopuszcza `plan`, `planReport`, `startedAt` i statusy waiting/blocked.
+Schema waliduje ID, rozłączne stany, niepuste zależności/przyczyny i liczniki raportu.
+`task:plan` zapisuje aktualizacje żywych węzłów; terminalne snapshoty zapisuje
+`task:finished`. Restore zamienia waiting/queued/running na aborted ze stanem planu
+failed/aborted i przerwaniem systemowym; blocked oraz raport transakcji pozostają.
+Nie odtwarza grafu wykonawczego, modeli, pytań ani powiadomień.
+
+Testy P4: `SubTaskHistory.test.ts` (round-trip przez AgentMemory, schemat),
+`../chat/chat/planDelivery.test.ts` (notifier i rzeczywisty prompt rodzica),
+`../chat/chat/subTaskStrip.test.ts` (prawdziwy rejestr, DOM PL/EN, Stop i izolacja).
+Publiczne wykonanie planu przez delegate oraz bariera dzieci waiting należą do P5.

@@ -1,3 +1,4 @@
+import { planInput, planResult, activatePlanTask } from './test-support/planFixture.js';
 import test from 'ava';
 import { AgentMemory } from '../memory/index.js';
 import { formatSessionEvent, parseActiveSession } from '../memory/activeSessionFormat.js';
@@ -226,4 +227,62 @@ test('continuation moved from nested to lead keeps chronological runs and the la
     t.deepEqual([registry.getThread('worker')?.parentId, registry.getThread('worker')?.level], [undefined, 1]);
     t.deepEqual([registry.getTask('nested')?.parentId, registry.getTask('lead-continuation')?.parentId], ['parent', undefined]);
     registry.dispose();
+});
+
+test('P4 plan round-trip through AgentMemory restores waiting/queued/running as interrupted and blocked unchanged', async t => {
+    const disk = storage(); const registry = new SubTaskRegistry({ appendHistory: disk.appendHistory });
+    t.teardown(() => registry.dispose());
+    registry.reservePlan(planInput(owner));
+    activatePlanTask(registry, 'B', owner);
+    await registry.flushHistory();
+    const snapshot = parseActiveSession(disk.read()).subTaskHistory!;
+    const restarted = new SubTaskRegistry(); t.teardown(() => restarted.dispose());
+    t.is(restarted.importHistory(snapshot, owner), 3);
+    t.deepEqual(restarted.list().map(task => [task.id, task.status, task.plan?.state, task.outcome?.end]), [
+        ['C', 'aborted', { kind: 'failed', reason: 'aborted' }, { kind: 'stopped', by: 'system' }],
+        ['A', 'aborted', { kind: 'failed', reason: 'aborted' }, { kind: 'stopped', by: 'system' }],
+        ['B', 'aborted', { kind: 'failed', reason: 'aborted' }, { kind: 'stopped', by: 'system' }],
+    ]);
+    t.deepEqual(buildStripModel({ tasks: restarted.list(), threads: restarted.listThreads(owner), ...owner }).map(row => [row.name, row.state]), [
+        ['C · explorer', { kind: 'partial', reason: 'system-stop' }], ['A · explorer', { kind: 'partial', reason: 'system-stop' }], ['B · explorer', { kind: 'partial', reason: 'system-stop' }],
+    ]);
+    registry.fail(activatePlanTask(registry, 'A', owner), 'A failed');
+    await registry.flushHistory();
+    const clock = new QuestionTestClock(); const restored = new SubTaskRegistry({ questionClock: clock });
+    const notifier = new SubTaskNotifier({ registry: restored });
+    t.teardown(() => { notifier.dispose(); restored.dispose(); });
+    const events: string[] = [];
+    for (const event of ['task:created', 'task:plan', 'task:finished', 'thread:created']) restored.events.on(event, () => events.push(event));
+    const records = (await disk.memory.loadActiveSession(owner.sessionPath)).subTaskHistory!;
+    t.is(restored.importHistory(records, owner), 3);
+    t.deepEqual(restored.getTask('C')?.plan, { planId: 'plan-p4', nodeId: 'C', dependsOn: [{ nodeId: 'A', runId: 'A' }, { nodeId: 'B', runId: 'B' }],
+        state: { kind: 'blocked', causes: [{ nodeId: 'A', runId: 'A' }] } });
+    t.deepEqual(restored.list().map(task => [task.id, task.status, task.result?.text]), [['C', 'blocked', ''], ['A', 'error', ''], ['B', 'aborted', '']]);
+    t.deepEqual(buildStripModel({ tasks: restored.list(), threads: restored.listThreads(owner), ...owner })[0].state,
+        { kind: 'blocked', causes: [{ nodeId: 'A', runId: 'A' }] });
+    t.deepEqual([events, notifier.pendingNotices(), restored.takeChildNotices('A'), clock.pending], [[], [], [], 0]);
+    t.is(restored.importHistory(records, owner), 0);
+    registry.finish(registry.getTask('B')!, planResult('Independent result'));
+    await registry.flushHistory();
+    const completed = new SubTaskRegistry(); t.teardown(() => completed.dispose());
+    t.is(completed.importHistory((await disk.memory.loadActiveSession(owner.sessionPath)).subTaskHistory!, owner), 3);
+    t.deepEqual(completed.getTask('B')?.planReport?.nodes.map(node => [node.nodeId, node.state.kind]), [['C', 'blocked'], ['A', 'failed'], ['B', 'finished']]);
+    t.deepEqual([completed.getTask('B')?.planReport?.complete, completed.getTask('B')?.result?.text], [true, 'Independent result']);
+});
+
+test('P4 persisted plan schema rejects malformed IDs, states, empty causes and false report counts', async t => {
+    const records: SubTaskHistoryRecord[] = [];
+    const registry = new SubTaskRegistry({ appendHistory: async record => { records.push(record); } });
+    t.teardown(() => registry.dispose());
+    registry.reservePlan(planInput(owner)); registry.requestStop('A');
+    await registry.flushHistory();
+    const blocked = records.find(record => record.state === 'blocked')!;
+    t.deepEqual(parseSubTaskHistoryRecord(blocked)?.plan?.state, { kind: 'blocked', causes: [{ nodeId: 'A', runId: 'A' }] });
+    const invalid: unknown[] = [
+        { ...blocked, plan: { ...blocked.plan, nodeId: 'bad id' } },
+        { ...blocked, plan: { ...blocked.plan, state: { kind: 'blocked', causes: [] } } },
+        { ...blocked, plan: { ...blocked.plan, state: { kind: 'resuming' } } },
+        { ...blocked, planReport: { ...blocked.planReport, counts: { ...blocked.planReport!.counts, blocked: 50 } } },
+    ];
+    t.deepEqual(invalid.map(parseSubTaskHistoryRecord), [undefined, undefined, undefined, undefined]);
 });

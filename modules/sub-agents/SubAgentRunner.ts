@@ -1,3 +1,4 @@
+import { buildPlanNotice } from './planNotice.js';
 /**
  * SubAgentRunner
  * Unified runner for sub-agent tasks (replaces MinionRunner + MasterRunner).
@@ -700,7 +701,7 @@ export class SubAgentRunner {
                     ? { kind: 'question', sub_id: notice.question.subId, task_id: notice.question.taskId,
                         question_id: notice.question.id, text: notice.question.text }
                     : { kind: 'result', sub_id: notice.task.threadId, task_id: notice.task.id,
-                        status: notice.task.status, error: notice.task.error, result: notice.task.result, outcome: notice.task.outcome });
+                        ...buildPlanNotice(notice.task), status: notice.task.status, error: notice.task.error, result: notice.task.result, outcome: notice.task.outcome });
                 store.appendUser(`Child notices:\n${_maskHandoffText(JSON.stringify(payload), knownSecrets)}`);
             }, options.admission) : undefined;
             const questionHook = (question: ParentQuestion) => _safeRegistry(() => options.onQuestion?.(question));

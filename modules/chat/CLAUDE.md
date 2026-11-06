@@ -1713,3 +1713,21 @@ polem znika przy anulowaniu i potwierdzeniu; wygląd jest wyłącznie w CSS.
 `resetInputArea(true)` zachowuje tylko już wysłaną do kolejki poprawkę, oczekującą na
 koniec tury; zwykłe czyszczenie pola anuluje edycję. Restart nie odtwarza szkicu ani trybu.
 Testy sekwencji, callbacków zamykania i odczytu zapisanych plików: `chat/chat_f8.test.ts`.
+
+### 2.4.6 P4 — prezentacja planu zależności
+
+Pasek odświeża się na `task:plan`. Wiersz planu pokazuje `ID · nazwa`, waiting
+wylicza pozostałych poprzedników bez numeru i dymka kolejki, blocked wskazuje
+pierwotne niepowodzenia i nie ma Stopu. Niewystartowane biegi pokazują jawny opis
+bez czasu, tokenów i kroków modelu. Plan prowadzącego pozostaje płaski; drzewo
+wynika wyłącznie z rzeczywistego parentId. Dotychczasowe style wystarczają.
+Zwykła lista zachowuje literalny stary DOM (test regresji w `subTaskStrip.test.ts`).
+
+`subTaskNotification` dodaje tabelę wszystkich stanów przez publiczny
+`buildPlanNotice` z sub-agents, poza limitem dorobku. Blocked opisuje brak startu,
+bez pozornego błędu modelu i czasu. `subTaskResultDelivery` przenosi metadane planu,
+raport transakcji i `plan_complete` w `_subTaskResult`. Ostatnia transakcja kończy
+plan bez dodatkowego zbiorczego notice. Payload skrzynki rodzica używa tego samego
+helpera w runnerze. Historia rejestru zachowuje blokady i przerywa żywe węzły;
+import nadal nie rozpoczyna strumieni ani doręczeń. Testy: `planDelivery.test.ts`,
+`subTaskStrip.test.ts` i `../sub-agents/SubTaskHistory.test.ts`.

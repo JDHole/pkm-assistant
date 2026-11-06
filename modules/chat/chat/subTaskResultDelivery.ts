@@ -1,4 +1,5 @@
 import { machineMeta } from '../../../core/index.js';
+import { buildPlanNotice } from '../../sub-agents/index.js';
 import type { SubTask, SubTaskRegistry } from '../../sub-agents/index.js';
 import { buildSubTaskNotificationText } from './subTaskNotification.js';
 
@@ -24,6 +25,7 @@ export function buildSubTaskResultDelivery(task: SubTask, registry: SubTaskRegis
             ? { kind: 'single' as const }
             : { kind: 'unknown' as const };
     const subTaskResult = {
+        ...buildPlanNotice(task),
         outcome,
         result: task.result ? { text: task.result.text, handoff: task.result.handoff } : undefined,
         ...(task.result?.question ? { question: task.result.question } : {}),
