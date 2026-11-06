@@ -428,6 +428,13 @@ export default class PkmAssistantPlugin extends PluginBase {
     return notice;
   }
 
+  unload() {
+    // Component.unload runs view cleanup before onunload; their close must not win
+    // the plan's terminal cause. Ordinary sub teardown stays in onunload below.
+    this.subTaskRegistry?.interruptPlansForUnload();
+    super.unload();
+  }
+
   onunload() {
     log.debug('Main', "Unloading PKM Assistant plugin");
     // Obsidian does not await onunload. Start every tab's pending writes while

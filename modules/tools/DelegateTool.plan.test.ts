@@ -10,6 +10,14 @@ import { QuestionTestClock } from '../sub-agents/test-support/questionTestClock.
 import { __test__ as modelsTest } from '../models/index.js';
 import { runAgentLoop, ArrayMessageStore, sanitizeToolTranscript } from '../agent-loop/index.js';
 import type { LoopMessage } from '../agent-loop/index.js';
+import { AgentMemory } from '../memory/index.js';
+import { stop_all_turns } from '../chat/chat/chat_streaming.js';
+import { initSessionManager } from '../chat/chat/chat_session.js';
+import esbuild from 'esbuild';
+import fs from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
+import { createRequire } from 'node:module';
 
 class Mailbox<T> {
     private values: T[] = [];
@@ -23,7 +31,7 @@ const dag = [
     { id: 'A', task: 'A', timeout_ms: 10000 }, { id: 'B', task: 'B', timeout_ms: 10000 },
     { id: 'C', task: 'C', depends_on: ['A', 'B'], timeout_ms: 1000 },
 ];
-function fixture(t: ExecutionContext, local = false, appendHistory: NonNullable<ConstructorParameters<typeof SubTaskRegistry>[0]>['appendHistory'] = async () => {}) {
+function fixture(t: ExecutionContext, local = false, appendHistory: NonNullable<ConstructorParameters<typeof SubTaskRegistry>[0]>['appendHistory'] = async () => {}, origin = owner) {
     const clock = new QuestionTestClock();
     const registry = new SubTaskRegistry({ questionClock: clock, appendHistory });
     const requests = new Map<string, Mailbox<Request>>(), activities = new Map<string, Mailbox<RunActivity>>();
@@ -77,7 +85,7 @@ function fixture(t: ExecutionContext, local = false, appendHistory: NonNullable<
         globalThis.setTimeout = originalSet; globalThis.clearTimeout = originalClear;
         Object.defineProperty(performance, 'now', { configurable: true, value: originalNow }); modelsTest.reset();
     });
-    const submit = (tasks: DelegateTaskDef[] = dag) => delegate.execute({ tasks, _invocationOrigin: owner }, {}, plugin);
+    const submit = (tasks: DelegateTaskDef[] = dag) => delegate.execute({ tasks, _invocationOrigin: origin }, {}, plugin);
     const plan = async (tasks?: DelegateTaskDef[]) => {
         const receipt = await submit(tasks) as { plan_id: string; nodes: PlanNode[] };
         return { receipt, runtime: registry.getPlan(receipt.plan_id)! };
@@ -93,6 +101,11 @@ function changed(registry: SubTaskRegistry, plan: SubTaskPlanRuntime, predicate:
     return new Promise<void>(resolve => { const off = registry.events.on('plan:changed', value => {
         if (value === plan && predicate(plan.nodes)) { off(); resolve(); }
     }); });
+}
+function deferred() {
+    let resolve!: () => void;
+    const promise = new Promise<void>(done => { resolve = done; });
+    return { promise, resolve };
 }
 const states = (plan: SubTaskPlanRuntime) => plan.nodes.map(node => [node.id, node.state.kind]);
 
@@ -456,4 +469,131 @@ test.serial('unload distinguishes a working local node from queued and dependent
     f.registry.stopAll('unload'); await runtime.completion;
     t.deepEqual([runtime.status, states(runtime), f.starts], ['interrupted',
         [['A', 'interrupted'], ['B', 'not_executed'], ['C', 'not_executed']], ['A']]);
+});
+
+test.serial('O7 timeout salvage redacts the complete answer before its character cap', async t => {
+    const f = fixture(t), notifier = new SubTaskNotifier({ registry: f.registry });
+    const saving = deferred(), release = deferred();
+    t.teardown(() => { release.resolve(); notifier.dispose(); });
+    Object.assign(f.plugin.env!.settings!.pkmAssistant!.chat!, { apiKeys: { ollama: 'private-crossing-secret-value' } });
+    f.plugin.env!.settings!.pkmAssistant!.limits!.subagent_salvage_max_chars = 32;
+    Object.assign(f.plugin.agentManager!, { getAgentMemory: () => ({
+        activeSessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch,
+        async appendSessionEvent(_path: string, event: { type: string }) {
+            if (event.type === 'subagent_call') { saving.resolve(); await release.promise; }
+        },
+    }) });
+    const { runtime } = await f.plan([{ id: 'A', task: 'A', timeout_ms: 1000 },
+        { id: 'C', task: 'C', depends_on: ['A'] }]);
+    (await f.next('A')).complete('Result: private-crossing-secret-value');
+    await saving.promise;
+    f.clock.advance(1000);
+    release.resolve();
+    await runtime.completion;
+    t.deepEqual(notifier.pendingNotices().map(notice => notice.kind === 'plan-result'
+        ? [notice.result.status, notice.result.nodes.map(node => [node.id, node.state.kind, node.state.material ?? null]),
+            notice.result.nodes[0].state.kind === 'error' ? notice.result.nodes[0].state.error : null]
+        : notice.kind),
+    [['partial', [['A', 'error', 'Result: [REDACTED]'], ['C', 'blocked', null]], 'Sub-agent timeout after 1000ms']]);
+    t.deepEqual([f.starts, f.clock.pending], [['A'], 0]);
+});
+
+test.serial('restart after the full synchronous unload sequence restores running queued and waiting nodes', async t => {
+    const records: unknown[] = [];
+    const f = fixture(t, true, async record => { records.push(structuredClone(record)); });
+    const { runtime } = await f.plan();
+    await f.next('A');
+    t.deepEqual(states(runtime), [['A', 'running'], ['B', 'queued'], ['C', 'waiting_dependencies']]);
+    f.registry.stopAll('unload');
+    f.registry.closeAll();
+    stopAllDelegations('unload');
+    f.registry.dispose();
+    await runtime.completion;
+    await f.registry.flushHistory();
+    const restored = new SubTaskRegistry(), notifier = new SubTaskNotifier({ registry: restored });
+    t.teardown(() => { notifier.dispose(); restored.dispose(); });
+    restored.importHistory(records, owner);
+    const plan = restored.listPlans(owner)[0];
+    const starts: string[] = [];
+    plan.start(async id => { starts.push(id); return { kind: 'done', material: 'unexpected' }; });
+    await plan.completion;
+    t.deepEqual([plan.status, states(plan), f.starts, starts, notifier.pendingNotices()],
+        ['interrupted', [['A', 'interrupted'], ['B', 'not_executed'], ['C', 'not_executed']], ['A'], [], []]);
+});
+
+// Load the actual composition root while replacing only Obsidian's host lifecycle.
+async function pluginLifecycle() {
+    const bundle = await esbuild.build({
+        stdin: { contents: "export {default as Plugin} from './src/main.ts'; export {Plugin as HostPlugin} from 'obsidian';",
+            resolveDir: process.cwd(), sourcefile: 'unload-entry.ts' },
+        bundle: true, platform: 'node', format: 'cjs', write: false, logLevel: 'silent',
+        plugins: [{ name: 'test-assets', setup(build) {
+            build.onResolve({ filter: /^obsidian$/ }, () => ({ path: path.join(process.env.PKM_TEST_SUPPORT_DIR!, 'obsidian.ts') }));
+            build.onResolve({ filter: /\.(css|md)$/ }, args => ({ path: path.resolve(args.resolveDir, args.path), namespace: 'text-asset' }));
+            build.onLoad({ filter: /.*/, namespace: 'text-asset' }, args => ({ contents: `export default ${JSON.stringify(fs.readFileSync(args.path, 'utf8'))};`, loader: 'js' }));
+        } }],
+    });
+    type Host = { closeView(): void; onunload(): void; unload(): void };
+    const module = { exports: {} as { Plugin: { prototype: Host }; HostPlugin: { prototype: Host } } };
+    const execute = vm.runInThisContext(`(function(require, module, exports) { ${bundle.outputFiles[0].text} })`) as
+        (require: NodeRequire, module: object, exports: object) => void;
+    execute(createRequire(import.meta.url), module, module.exports);
+    // Measured in Obsidian: registered view cleanup runs synchronously before onunload.
+    module.exports.HostPlugin.prototype.unload = function () { this.closeView(); this.onunload(); };
+    return module.exports.Plugin;
+}
+
+for (const quit of [false, true]) for (const completedA of [false, true]) test.serial(`restart after Obsidian closes views before onunload preserves plan interruption; quit=${quit}, completed A=${completedA}`, async t => {
+    const Plugin = await pluginLifecycle();
+    const sessionOwner = { ...owner, sessionPath: '.pkm-assistant/agents/mira/memory/sessions/active/test.md' };
+    let file = `---\ntype: active_session\nepoch: ${owner.sessionEpoch}\n---\n`;
+    const memory = new AgentMemory({ adapter: {
+        read: async () => file, exists: async () => true,
+        write: async (_path: string, value: string) => { file = value; },
+        append: async (_path: string, value: string) => { file += value; },
+    } } as never, owner.agentName);
+    const f = fixture(t, true, record => memory.appendSessionEvent(record.owner.sessionPath,
+        { type: 'sub_task_history', sub_task_history: record }, record.owner.sessionEpoch), sessionOwner);
+    const { runtime } = await f.plan();
+    const a = await f.next('A');
+    if (completedA) {
+        a.complete('result A'); await f.next('B');
+        await changed(f.registry, runtime, nodes => nodes[0].state.kind === 'done');
+    }
+    const view = { plugin: f.plugin, rollingWindow: { messages: [] }, chatTabs: [{ ...sessionOwner, isActive: true }],
+        _streamCtxMap: new Map(), _preparingTurns: new Map(), _clearQueuedDrainTimer() {} };
+    const plugin = Object.assign(Object.create(Plugin.prototype) as { unload(): void }, {
+        subTaskRegistry: f.registry,
+        closeView() { stop_all_turns.call(view as never, 'close'); },
+        onunload() {
+            f.registry.stopAll('unload');
+            f.registry.closeAll();
+            stopAllDelegations('unload');
+            f.registry.dispose();
+        },
+    });
+    if (quit) {
+        let onQuit!: (tasks: { addPromise(promise: Promise<unknown>): void }) => void;
+        Object.assign(view, {
+            app: { workspace: { on(_event: string, callback: typeof onQuit) { onQuit = callback; return {}; } } },
+            registerEvent() {}, registerInterval(id: number) { window.clearInterval(id); },
+            _restoreActiveSession: async () => {}, handleSaveSession: async () => {}, stop_all_turns,
+        });
+        await initSessionManager.call(view as never);
+        onQuit({ addPromise() {} });
+    }
+    plugin.unload();
+    await runtime.completion; await f.registry.flushHistory();
+    const history = await memory.loadActiveSession(sessionOwner.sessionPath);
+    const restored = new SubTaskRegistry(), notifier = new SubTaskNotifier({ registry: restored });
+    t.teardown(() => { notifier.dispose(); restored.dispose(); });
+    restored.importHistory(history.subTaskHistory!, sessionOwner);
+    const plan = restored.listPlans(sessionOwner)[0], starts: string[] = [];
+    plan.start(async id => { starts.push(id); return { kind: 'done', material: 'unexpected' }; });
+    await plan.completion;
+    const first = plan.nodes[0].state;
+    t.deepEqual([plan.status, states(plan), 'material' in first ? first.material : null, f.starts, starts, notifier.pendingNotices()],
+        completedA ? ['interrupted', [['A', 'done'], ['B', 'interrupted'], ['C', 'not_executed']], 'result A', ['A', 'B'], [], []]
+            : ['interrupted', [['A', 'interrupted'], ['B', 'not_executed'], ['C', 'not_executed']],
+                'Partial work\nReason: manual Stop. Final summary: skipped.', ['A'], [], []]);
 });

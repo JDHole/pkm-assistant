@@ -330,10 +330,10 @@ WŁAŚCIWEGO agenta/zakładki, nie do tego, co akurat widać na ekranie.
 - **Mid-loop compression ustawia `rollingWindow.sessionPath` tak samo jak end-of-turn** (czyta
   ją `Summarizer` do stopki "pełna rozmowa zapisana w: ...") - obie ścieżki kompresji muszą
   używać zamrożonej ścieżki tury, nie współdzielonego wskaźnika pamięci agenta.
-- ⚠️ **Zostaje wąskie okno PRZED zamrożeniem:** między kliknięciem Wyślij a `createTurnAbort()`
-  są jeszcze awaity zapisu przy bezczynności, komendy `/`, rozwiązywanie wzmianek i
-  `append_message` (wiadomość użytkownika idzie przez `this.rollingWindow` widoku, nie przez
-  okno tury). Nowy await w tym odcinku - rozważ przesunięcie zamrożenia w górę.
+- The send reserves `_preparingTurns` with its abort handle before the first await,
+  including idle saves, slash commands and mention resolution. Ownership still freezes
+  after user-message persistence; before acceptance, resumed preparation checks the captured
+  tab/window and abort latch. New awaits in this region must preserve those checks.
 - ⚠️ **`_switchTab` NIE jest blokowany w trakcie generowania i nie będzie** - user ma prawo
   czytać inną zakładkę, gdy agent pracuje. Bezpieczeństwo stoi na tym, że żywa tura trzyma
   WŁASNE referencje (zamrożone), nie na tym, że nikt nic nie przełączy.
@@ -1773,3 +1773,17 @@ is created. O1 tests hold session persistence and exercise Enter/Stop; the auto-
 compares actual model requests and persists the final answer using the real chat finalizer.
 The real delegate/sanitizer evidence now lives in `DelegateTool.plan.test.ts` for both notifier and
 parent inbox, replacing the manually assembled transcript assertion in the delivery test.
+
+### 2.4.6 P8 - human send reservation and quit ordering
+
+`send_message` reserves human and legacy sends in `_preparingTurns` before the first await,
+so a plan notification cannot start while mention resolution or user persistence is pending.
+The same abort handle transfers to the stream; early return, slash-command completion and
+errors release only their own reservation in finally. Resuming after Stop cannot start a model.
+`subTaskPlanDelivery.test.ts` covers the reverse race with held mentions, counts live model
+requests and verifies Stop leaves zero active operations, with the plan result still pending.
+
+The workspace `quit` handler calls `interruptPlansForUnload()` before `stop_all_turns('close')`.
+Plugin disable is handled earlier by the composition root's `unload()` override, because
+Obsidian closes registered views before calling `onunload()`. A normal view close still has
+system Stop semantics. Ordinary sub-result delivery during unload is unchanged.

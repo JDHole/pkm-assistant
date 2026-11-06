@@ -323,7 +323,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         return;
     }
     const sendWindow = this.rollingWindow;
-    const sendTab = this.chatTabs?.find(tab => tab.isActive);
+    const sendTab = this.chatTabs?.find(tab => tab.isActive) ?? null;
 
     const reservationOwner = this._questionAutoTurn?.kind === 'reserved' && isQuestionOwnerCurrent(this, this._questionAutoTurn);
     if (isHuman && reservationOwner && this._questionAutoTurn?.kind === 'reserved' && !this._questionAutoTurn.accepted) {
@@ -359,6 +359,14 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         return;
     }
 
+    const turnAbort = createTurnAbort();
+    const sendingTabKey = _tabKey(sendTab);
+    // Reserve human/legacy sends before any await, including mentions and persistence.
+    // Notifications keep their claim/acceptance protocol below and see this reservation.
+    if (!notificationDelivery) {
+        this._preparingTurns.set(sendingTabKey, { tab: sendTab, rollingWindow: sendWindow, abort: turnAbort });
+    }
+    try {
     // Persist edits before any replacement event can enter the append-only journal.
     if (this.rollingWindow.removedMessageIds?.length && !await persistMessageRemovals(this)) return;
 
@@ -400,7 +408,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     }
 
     // A save or slash command above may have yielded while the user switched tabs.
-    if (this.rollingWindow !== sendWindow || (sendTab && !sendTab.isActive)) return;
+    if (turnAbort.isAborted() || this.rollingWindow !== sendWindow || (sendTab && !sendTab.isActive)) return;
     if (isHuman && !isInjected && hasPendingMessageEdit(sendWindow)) {
         commitMessageEdit(this.rollingWindow);
         if (!await persistMessageRemovals(this)) return;
@@ -423,6 +431,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     const { displayText: mentionDisplayText, contextText: mentionContextText } = isInjected
         ? { displayText: text, contextText: '' }
         : await this._resolveMentions(text);
+    if (turnAbort.isAborted() || this.rollingWindow !== sendWindow || (sendTab && !sendTab.isActive)) return;
 
     // Capture attachments before clearing.
     // ⚠️ Przy wstrzykniętej turze załączniki usera zostają NIETKNIĘTE - czekają na jego
@@ -487,7 +496,6 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         || !isQuestionOwnerCurrent(this, { owner: planDelivery.notice.owner })
         || matchTabForOrigin(this.chatTabs, planDelivery.notice.owner, _tabKey) !== planDelivery.tab)) return;
     let savedUserContent;
-    const turnAbort = createTurnAbort();
     const questionTabKey = notificationDelivery ? _tabKey(notificationDelivery.tab) : '';
     if (hasAttachments && attachmentResult) {
         // Attachments present: content may be array (multimodal) or string
@@ -547,6 +555,7 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     } else {
         await this.appendToActiveSession?.(userEvent);
     }
+    if (turnAbort.isAborted()) return;
 
     // WŁAŚCICIEL TURY zamrożony DOKŁADNIE TU - razem z zapaleniem guzika Stop i PRZED pierwszym
     // awaitem przygotowania. Za chwilę wchodzimy w budowę promptu z pamięcią (okno „potrafi
@@ -996,6 +1005,14 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
         }
     }
     log.debug('Chat', `[${streamAgentName}] send_message END (${Date.now() - sendStart}ms)`);
+    } finally {
+        // Early returns/errors must release only this send, never a later turn's slot.
+        for (const [key, preparing] of this._preparingTurns ?? []) {
+            if (preparing.abort !== turnAbort) continue;
+            this._preparingTurns.delete(key);
+            syncTabGenerating(this, preparing.tab, key, preparing.rollingWindow);
+        }
+    }
 }
 
 export function handle_chunk(this: ChatViewLike, response: StreamResponse, tabKey: string) {

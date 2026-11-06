@@ -225,3 +225,61 @@ for (const stopDuringSave of [false, true]) test.serial(`O1 human send during ac
     t.deepEqual([maximum, active, view._streamCtxMap.size, view._preparingTurns.size, view.input_area.value],
         [stopDuringSave ? 0 : 1, 0, 0, 0, 'Human follow-up']);
 });
+
+for (const stopWhileResolving of [false, true]) test.serial(`O1 human mention resolution reserves the turn before a plan notification can start; Stop during mentions=${stopWhileResolving}`, async t => {
+    const f = await fixture(), window = new RollingWindow();
+    const resolving = deferred<void>(), release = deferred<void>();
+    const planAttempt = deferred<void>(), planStarted = deferred<void>(), humanStarted = deferred<void>();
+    const sent: Promise<unknown>[] = [], cleanup: Array<() => void> = [];
+    let active = 0, maximum = 0;
+    const started: string[] = [], stopped: string[] = [];
+    let planSent!: Promise<unknown>;
+    const view = Object.assign(f.view, {
+        leaf: { id: 'human-first-plan-race' }, rollingWindow: window, input_area: { value: 'Human first' }, inputHistory: [],
+        tokenTracker: { record() {} }, _preparingTurns: new Map(), _streamCtxMap: new Map(), _agentStates: new Map(),
+        _queueOwner, _releaseStreamCtx, stop_generation,
+        env: { settings: { pkmAssistant: { enableOczko: false, limits: { chat_stream_stall_timeout_ms: 0 } } } },
+        set_generating(value: boolean) { f.view.is_generating = value; }, resetInputArea() { this.input_area.value = ''; },
+        showTypingIndicator() {}, hideTypingIndicator() {}, _resetPaintTargets() {}, _cleanupAskUser() {},
+        _showQueuedIndicator() {}, _hideQueuedIndicator() {}, _clearQueuedDrainTimer() {},
+        async _resolveMentions(text: string) { resolving.resolve(); await release.promise; return { displayText: text, contextText: '' }; },
+        append_message: (role: 'user', text: string, _display: unknown, meta: Record<string, unknown>) => window.addMessage(role, text, meta),
+        appendToActiveSession: async () => {}, _chatResolveTools: () => [], _chatOnIterationStart() {}, _chatOnUsage() {},
+        _isTurnActiveTab: () => false, _finalizeTurn() {}, handle_error(error: unknown) { throw error; },
+        get_chat_model() {
+            let stop = () => {};
+            return { modelKey: 'lead', stream(payload: { messages: Array<{ content: unknown }> }, handlers: { done(value: unknown): void }) {
+                const kind = payload.messages.some(message => message.content === 'Human first') ? 'human' : 'plan';
+                started.push(kind); active++; maximum = Math.max(maximum, active);
+                let ended = false;
+                stop = () => {
+                    if (ended) return;
+                    ended = true; stopped.push(kind); active--;
+                    handlers.done({ choices: [{ message: { role: 'assistant', content: '' } }] });
+                };
+                cleanup.push(stop);
+                (kind === 'human' ? humanStarted : planStarted).resolve();
+            }, stopStream() { stop(); } };
+        },
+        send_message(opts: unknown) {
+            planSent = send_message.call(this as never, opts as never); sent.push(planSent); planAttempt.resolve();
+            return planSent;
+        },
+    });
+    Object.assign(view.plugin.agentManager, { getActiveSystemPromptWithMemory: async () => 'Lead system',
+        getAgentMemory: () => ({ activeSessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch, async appendSessionEvent() {} }) });
+    t.teardown(async () => { release.resolve(); cleanup.forEach(stop => stop()); await Promise.all(sent); f.dispose(); });
+    const humanSent = send_message.call(view as never, { meta: { origin: 'human' } }); sent.push(humanSent);
+    await resolving.promise;
+    f.plan.settle(f.plan.nodes[0].id, { kind: 'error', error: 'A failed' });
+    f.plan.settle(f.plan.nodes[1].id, { kind: 'error', error: 'B failed' });
+    await planAttempt.promise;
+    await Promise.race([planSent, planStarted.promise]);
+    if (stopWhileResolving) stop_generation.call(view as never);
+    release.resolve();
+    if (stopWhileResolving) await humanSent;
+    else { await humanStarted.promise; stop_generation.call(view as never); }
+    t.deepEqual([maximum, active, started, stopped, view._streamCtxMap.size, view._preparingTurns.size],
+        stopWhileResolving ? [0, 0, [], [], 0, 0] : [1, 0, ['human'], ['human'], 0, 0]);
+    t.deepEqual(f.notifier.pendingNotices().map(notice => notice.kind), ['plan-result']);
+});

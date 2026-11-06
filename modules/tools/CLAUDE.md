@@ -797,3 +797,17 @@ the same auto-turn request/finalization path as ordinary sub results.
 The receipt remains an immediate graph snapshot after dispatch, before asynchronous preparation
 or consent completes. Ready roots can still say waiting_dependencies (displayed as preparation)
 until reservation; waiting for the whole first preparation wave would change this contract.
+
+### 2.4.6 P8 - timeout redaction and host teardown regressions
+
+The timeout salvage mapper receives configured secrets and redacts the complete selected
+handoff/partial/result before applying `subagent_salvage_max_chars`. Tool-detail fallback
+also redacts before its argument and digest caps. Settlement redaction alone cannot recognize
+a secret split by an earlier cap. No timeout, retry or admission defaults change.
+
+`DelegateTool.plan.test.ts` holds the real runner's final `subagent_call` memory append,
+fires the timeout, then releases the append inside salvage: a 32-character cap must yield
+`Result: [REDACTED]` for `Result: private-crossing-secret-value`. Restart tests use the actual
+composition root with Obsidian's measured view-cleanup-before-onunload order, real delegation,
+the full synchronous stopAll/closeAll/stopAllDelegations/dispose sequence and AgentMemory
+round trips. Both plugin disable and workspace quit retain completed A and never resume B/C.

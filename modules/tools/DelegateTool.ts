@@ -472,7 +472,7 @@ type SalvageMapper = (value: unknown, waitedMs: number) => Record<string, unknow
  * `partial_result` (tekst biegu albo skrót z `tool_call_details`). Prawdziwy błąd biegu
  * (`stopped_by:'error'`) zostaje nietknięty, żeby timeout nie przykrył diagnozy.
  */
-function _makeSalvageMapper(salvageCap: number): SalvageMapper {
+function _makeSalvageMapper(salvageCap: number, knownSecrets: readonly string[] = []): SalvageMapper {
     return (value, waitedMs) => {
         if (!value || typeof value !== 'object') return null;
         const r = value as Record<string, unknown>;
@@ -480,7 +480,9 @@ function _makeSalvageMapper(salvageCap: number): SalvageMapper {
         const text = typeof r.result === 'string' ? r.result.trim() : '';
         const priorPartial = typeof r.partial_result === 'string' ? r.partial_result.trim() : '';
         const handoff = typeof r.handoff === 'string' ? r.handoff.trim() : '';
-        const partial = (handoff || priorPartial || text || _digestFromToolDetails(r.tool_call_details, salvageCap)).slice(0, salvageCap);
+        // Redact the complete candidate: a cap can otherwise split a configured secret.
+        const partial = redactExport(handoff || priorPartial || text
+            || _digestFromToolDetails(r.tool_call_details, salvageCap, knownSecrets), knownSecrets).slice(0, salvageCap);
         return {
             success: false,
             error: `Sub-agent timeout after ${waitedMs}ms`,
@@ -510,7 +512,7 @@ function _makeSalvageMapper(salvageCap: number): SalvageMapper {
  * podgląd 500 znaków na narzędzie niż nic. Pełny salvage z transkryptu robi pętla
  * w backstopie (`_fallbackWithSalvage` w agent-loop).
  */
-function _digestFromToolDetails(details: unknown, cap: number): string {
+function _digestFromToolDetails(details: unknown, cap: number, knownSecrets: readonly string[] = []): string {
     if (!Array.isArray(details) || details.length === 0 || !cap || cap <= 0) return '';
     const entries: string[] = [];
     for (const raw of details) {
@@ -519,7 +521,7 @@ function _digestFromToolDetails(details: unknown, cap: number): string {
         let argsStr = '';
         try { argsStr = typeof det.args === 'string' ? det.args : JSON.stringify(det.args ?? ''); }
         catch { argsStr = ''; }
-        entries.push(`${`### ${det.name || '?'} ${String(argsStr).slice(0, 200)}`.trimEnd()}\n${det.resultPreview}`);
+        entries.push(`${`### ${redactExport(det.name || '?', knownSecrets)} ${redactExport(String(argsStr), knownSecrets).slice(0, 200)}`.trimEnd()}\n${redactExport(det.resultPreview, knownSecrets)}`);
     }
     if (entries.length === 0) return '';
     const digest = entries.join('\n\n');
@@ -851,7 +853,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 // zdąży się domknąć (abort → pętla oddaje częściowy wynik), timeout wraca
                 // z `partial_result` zamiast gołego błędu. 0 = wyłączone (stare zachowanie).
                 const salvageMapper = limits.subagent_salvage_max_chars > 0
-                    ? _makeSalvageMapper(limits.subagent_salvage_max_chars)
+                    ? _makeSalvageMapper(limits.subagent_salvage_max_chars, configuredChatSecrets(plugin.env?.settings?.pkmAssistant?.chat))
                     : null;
 
                 const registry = plugin.subTaskRegistry;

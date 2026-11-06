@@ -960,3 +960,20 @@ O3/O4 use persisted AgentMemory journals in `SubTaskHistory.test.ts`; `Dependenc
 covers explicit unavailable input; `SubTaskPlanResult.test.ts` checks both presentation modes
 and preservation of the original result. Question text, notes and answers use the same export
 redaction as material, including questions recovered during Stop.
+
+### 2.4.6 P8 - interruption before Obsidian view cleanup
+
+`SubTaskRegistry.interruptPlansForUnload()` interrupts plan groups and their real execution
+subtrees through the existing atomic Stop transaction. It leaves ordinary, unrelated runs
+to their existing teardown path and preserves already terminal plans, including user Stop.
+No new scheduler or queue is introduced.
+
+Obsidian's `Component.unload()` invokes registered cleanups before `onunload()`. Unregistering
+the chat view synchronously reaches `ChatView.onClose()` and its system Stop. Waiting until
+`src/main.ts:onunload()` is therefore too late: that Stop has already made the plan terminal.
+The composition root's `unload()` calls `interruptPlansForUnload()` before `super.unload()`;
+the chat workspace-quit handler does the same before closing its turns. The later
+`stopAll('unload')`, `closeAll()`, `stopAllDelegations('unload')` and dispose remain idempotent.
+History restores interrupted working nodes, unexecuted queued/dependent nodes and completed
+material without new work. Tests in `../tools/DelegateTool.plan.test.ts` reproduce both host
+entry paths with real registry/delegation and persisted AgentMemory history.

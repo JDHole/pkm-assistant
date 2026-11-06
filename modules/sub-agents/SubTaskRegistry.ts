@@ -1009,6 +1009,13 @@ export class SubTaskRegistry {
         return { accepted: live.length + plans.length, delivered };
     }
 
+    /** Interrupt plans before host view cleanup; ordinary runs keep their existing lifecycle. */
+    interruptPlansForUnload(): void {
+        // Obsidian closes registered views before plugin.onunload. Latch plan interruption
+        // before their system Stop, without changing ordinary delegation teardown/delivery.
+        this._stopRuns([...this._plans.keys()], 'system', 'unload');
+    }
+
     /** Unload latches admission before callbacks. Returns delivered live-task handles (legacy count); reservations are cancelled too. */
     stopAll(reason = 'stopAll'): number {
         this._stoppingAll = true;

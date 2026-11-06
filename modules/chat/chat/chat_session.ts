@@ -49,6 +49,7 @@ interface RestoredSession {
 export async function initSessionManager(this: ChatViewLike) {
     // Unlike beforeunload, Obsidian's graceful quit lets us contribute awaited tasks.
     this.registerEvent(this.app.workspace.on('quit', tasks => {
+        this.plugin?.subTaskRegistry?.interruptPlansForUnload();
         this.stop_all_turns('close');
         tasks.addPromise(this.handleSaveSession());
     }));
