@@ -1757,3 +1757,19 @@ unavailable result. These adapters do not change the model's transcript or publi
 Tests: `chat/subTaskStrip.test.ts` checks real registry Stop, empty-to-plan refresh, owner isolation,
 collapse/focus and legacy DOM; `chat/render_messages.delegateError.test.ts` checks live/history receipts
 without a task ID and the same partial result with and without persisted metadata.
+
+### 2.4.6 P7 - accepted auto turns and readable plan notifications
+
+`send_message` treats an accepted `_preparingTurns` entry for the current tab/window as occupied,
+including the await on plan-result session persistence before `is_generating`. Human input queues
+there; Stop aborts the same captured preparation or stream and restores the queued text.
+Preparations belonging to another tab/window do not reserve this conversation.
+
+`subTaskPlanDelivery` uses public `formatPlanResult` from sub-agents and keeps machine provenance.
+The readable notification includes a localized status, one row per node and the ordinary sub-result
+continuation instruction. `machineMessage` reads the `plan_result:<status>` envelope both live and
+after restart without metadata; legacy JSON envelopes remain supported. No extra tool response
+is created. O1 tests hold session persistence and exercise Enter/Stop; the auto-turn parity test
+compares actual model requests and persists the final answer using the real chat finalizer.
+The real delegate/sanitizer evidence now lives in `DelegateTool.plan.test.ts` for both notifier and
+parent inbox, replacing the manually assembled transcript assertion in the delivery test.

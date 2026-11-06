@@ -321,6 +321,30 @@ test('P4 missing run material is unavailable, never a successful node', async t 
         [['A', 'error', 'plan_material_unavailable'], ['B', 'interrupted', null], ['C', 'not_executed', null]]);
 });
 
+test('O3 journal ending at running v1 before running v2 restores the started node as interrupted', async t => {
+    const { records } = await savedPlan();
+    const last = records.findIndex(value => {
+        const record = parseSubTaskHistoryRecord(value);
+        return record?.version === 1 && record.runId === 'B' && record.state === 'running';
+    });
+    const registry = new SubTaskRegistry(); t.teardown(() => registry.dispose());
+    t.is(registry.importHistory(records.slice(0, last + 1), owner), 3);
+    t.deepEqual(planModel(registry), [{ status: 'interrupted', nodes: [
+        ['A', 'done', 'wynik A'], ['B', 'interrupted', ''], ['C', 'not_executed', undefined],
+    ] }]);
+    t.deepEqual(registry.list().map(task => [task.id, registry.getRunActivity(task.id)]), [['A', 'inactive'], ['B', 'inactive']]);
+});
+
+test('O4 rejected plan history keeps valid run results visible as ordinary rows', async t => {
+    const { records } = await savedPlan();
+    const latest = records.map(parseSubTaskHistoryRecord).filter((r): r is SubTaskPlanHistoryRecord => r?.version === 2).at(-1)!;
+    latest.nodes[0].state = { kind: 'done', execution: { runId: 'A', threadId: 'wrong-thread' } };
+    const registry = new SubTaskRegistry(); t.teardown(() => registry.dispose());
+    t.is(registry.importHistory([...records.filter(r => parseSubTaskHistoryRecord(r)?.version === 1), latest], owner), 2);
+    const model = buildStripModel({ plans: registry.listPlans(owner), tasks: registry.list(), threads: registry.listThreads(owner), ...owner });
+    t.deepEqual(model.map(row => [row.kind, row.id, row.outcome]), [['thread', 'A', 'wynik A'], ['thread', 'B', '']]);
+});
+
 test('P4 initial append failure refuses the whole plan; a later valid append still works', async t => {
     const disk = storage(), registry = new SubTaskRegistry({ appendHistory: disk.appendHistory });
     t.teardown(() => registry.dispose());

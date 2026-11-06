@@ -780,3 +780,20 @@ legacy-result checks live in `DelegateTool.plan.test.ts`. Harness scenarios
 `66_plan_zaleznosci` / `67_plan_awaria` reuse Deep Research's fixtures and run real MCP and
 runners with separately controlled A/B HTTP barriers. Ship this plugin change together with
 the corresponding harness commit; neither repository is committed by the package executor.
+
+### 2.4.6 P7 - review and smoke regression coverage
+
+Plan creation passes configured chat secrets to the registry so Stop recovery uses the same
+value redaction as normal settlement, including Stop inside task:finished before the mapper.
+Final JSON answers and bracket-prefixed prose remain usable dependency text; empty usable
+material refuses preparation explicitly. No scheduler, permission or depth limits change.
+
+`DelegateTool.plan.test.ts` now runs real lead and parent loops through delegate A/B/C and
+sanitizes their produced transcripts: exactly one tool response, one aggregate notice, and no
+standalone node results in notifier or inbox. Graceful unload tests cover completed material,
+running/queued/waiting nodes and inert re-import. Chat tests cover the persistence race and
+the same auto-turn request/finalization path as ordinary sub results.
+
+The receipt remains an immediate graph snapshot after dispatch, before asynchronous preparation
+or consent completes. Ready roots can still say waiting_dependencies (displayed as preparation)
+until reservation; waiting for the whole first preparation wave would change this contract.

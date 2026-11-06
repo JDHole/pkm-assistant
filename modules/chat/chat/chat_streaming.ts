@@ -332,7 +332,9 @@ export async function send_message(this: ChatViewLike, opts: SendMessageOptions 
     }
 
     // ── MESSAGE QUEUE: if generating, queue message for after completion ──
-    if (this.is_generating || (isHuman && reservationOwner && this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.accepted)) {
+    const acceptedPreparation = [...(this._preparingTurns?.values() ?? [])]
+        .some(turn => turn.tab === sendTab && turn.rollingWindow === sendWindow && !turn.abort.signal.aborted);
+    if (this.is_generating || acceptedPreparation || (isHuman && reservationOwner && this._questionAutoTurn?.kind === 'reserved' && this._questionAutoTurn.accepted)) {
         if (isInjected) {
             // Dostawca wyniku sprawdza `is_generating` PRZED wstrzyknięciem, więc tu nie
             // powinniśmy trafić. Jak jednak trafimy - wynik ZOSTAJE w kolejce notifiera

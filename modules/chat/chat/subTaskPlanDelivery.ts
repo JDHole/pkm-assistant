@@ -1,8 +1,7 @@
-import { machineMeta, fenceUntrusted } from '../../../core/index.js';
-import { t } from '../../../core/i18n/index.js';
+import { machineMeta } from '../../../core/index.js';
 import { log } from '../../../core/utils/Logger.js';
 import { getLimits } from '../../../config/limits.js';
-import { limitPlanResult } from '../../sub-agents/index.js';
+import { formatPlanResult } from '../../sub-agents/index.js';
 import type { PlanResultNotice, SubTaskNotifier, SubTaskOrigin } from '../../sub-agents/index.js';
 import type { ChatViewLike } from './chatViewShape.js';
 import { evaluateSubTaskDelivery } from './subTaskDelivery.js';
@@ -12,10 +11,8 @@ import { freezeTurnOwner } from './turnOwner.js';
 import { _tabKey } from './chat_tabs.js';
 
 export function buildSubTaskPlanDelivery(notice: PlanResultNotice, maxChars: number) {
-    const result = limitPlanResult(notice.result, maxChars);
-    return { text: t('chat.plan_result.header', { id: result.plan_id }) + '\n'
-        + fenceUntrusted(JSON.stringify(result), 'plan_result'),
-    meta: machineMeta({ subTaskPlanId: result.plan_id }) };
+    return { text: formatPlanResult(notice.result, maxChars),
+        meta: machineMeta({ subTaskPlanId: notice.result.plan_id }) };
 }
 
 /** Claim after synchronous notifier dispatch; recheck Stop and owner before starting a turn. */

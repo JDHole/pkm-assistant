@@ -896,7 +896,8 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                     if (continuation || !registry?.acquire || !registry.createThread || !registry.createPlan || !registry.requestStopPlan
                         || !origin?.sessionPath || !origin.sessionEpoch || origin.agentName !== activeAgent.name
                         || (currentDepth > 0 && !subRunContext)) return { success: false, error: 'plan_unavailable', code: 'plan_unavailable' };
-                    try { planRuntime = await registry.createPlan(graph.plan, origin, subRunContext?.runId); }
+                    try { planRuntime = await registry.createPlan(graph.plan, origin, subRunContext?.runId,
+                        configuredChatSecrets(plugin.env?.settings?.pkmAssistant?.chat)); }
                     catch (error) {
                         const code = error instanceof Error && error.message === 'plan_persistence_failed' ? 'plan_persistence_failed' : 'plan_unavailable';
                         return { success: false, error: code, code };

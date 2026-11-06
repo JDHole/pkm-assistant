@@ -259,11 +259,12 @@ export class SubTaskRegistry {
 
     private _disposed = false;
     private readonly _plans = new Map<string, SubTaskPlanRuntime>();
-    async createPlan(graph: SubTaskPlan, owner: SubTaskOrigin, parentRunId?: string): Promise<SubTaskPlanRuntime> {
+    async createPlan(graph: SubTaskPlan, owner: SubTaskOrigin, parentRunId?: string, knownSecrets: readonly string[] = []): Promise<SubTaskPlanRuntime> {
         if (this._disposed || !owner.agentName || !owner.sessionPath || !owner.sessionEpoch || this._startCancelled(owner, parentRunId)
             || (parentRunId && (!this._isLiveRun(parentRunId)
                 || this._ownerKey(this._tasks.get(parentRunId)!.origin ?? { agentName: '' }) !== this._ownerKey(owner))))
             throw new Error('plan_unavailable');
+        const exportSecrets = [...knownSecrets];
         const plan = new SubTaskPlanRuntime(graph, { ...owner, agentName: owner.agentName,
             sessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch }, parentRunId, () => {
             if (this._disposed) return;
@@ -273,14 +274,14 @@ export class SubTaskRegistry {
             if (this._disposed) return;
             const notice: PlanResultNotice = { kind: 'plan-result', owner: plan.owner, parentRunId,
                 result: buildPlanResult({ planId: plan.planId, nodes: plan.nodes.map(node => {
-                    if (node.state.kind !== 'stopped' || !node.state.execution) return node;
+                    if (!['stopped', 'interrupted'].includes(node.state.kind) || !('execution' in node.state) || !node.state.execution) return node;
                     const task = this.getTask(node.state.execution.runId);
                     return { ...node, state: { ...node.state,
                         material: task?.result?.handoff || task?.partial?.text || task?.result?.text || '',
                         ...(task?.outcome ? { outcome: task.outcome } : {}),
                         ...(task?.result?.question ? { question: task.result.question } : {}),
                     } };
-                }), status: plan.status }), completedSeq: this.issueTurnStartSequence(),
+                }), status: plan.status }, 0, exportSecrets), completedSeq: this.issueTurnStartSequence(),
                 userStopped: plan.nodes.some(node => node.state.kind === 'stopped' && node.state.by === 'user'),
             };
             if (parentRunId !== undefined) this._inbox.push(parentRunId, notice);
@@ -961,7 +962,9 @@ export class SubTaskRegistry {
         let delivered = 0;
         this._scheduler.transaction(() => {
             // No event or callback until every member has the cancellation latch.
-            for (const plan of plans) plan.latchStop(by);
+            for (const plan of plans) {
+                if (reason === 'unload') plan.latchInterrupt(); else plan.latchStop(by);
+            }
             for (const [id, node] of live) {
                 this._stoppingRuns.add(id);
                 this._cancelledRuns.set(id, this._cancelledRuns.get(id) ?? node.task?.stopRequestedBy ?? node.thread?.closedBy ?? by);

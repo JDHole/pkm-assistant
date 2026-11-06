@@ -522,11 +522,16 @@ test.serial('P5 plan receipt renders without task_id live and after restart; par
         plan.settle(plan.nodes[0].id, { kind: 'error', error: 'Awaria A', material: 'Dorobek A' });
         if (!delivered) throw new Error('Missing result');
         const expected = { kind: 'plan_result', title: 'Plan', summary: 'wynik częściowy', status: 'error',
-            details: 'A: błąd\nAwaria A\nDorobek A\n\nB: czeka na A (błąd)' };
+            details: 'A: błąd (Awaria A) | wynik A (streszczenie): Dorobek A | blocked_by: -\nB: zablokowany | wynik B (streszczenie): - | blocked_by: A' };
         t.deepEqual(buildMachineView({ role: 'user', content: delivered.text, ...delivered.meta }, { t: translate }), expected);
         t.deepEqual(buildMachineView({ role: 'user', content: delivered.text }, { t: translate }), expected);
         await render_messages.call(buildFakeThis(container, [{ role: 'user', content: delivered.text }]));
         t.is(findByClass(container, 'cs-tile--system')?.classList.contains('cs-tile--error'), true);
         t.is(findByClass(container, 'cs-tile__details')?.textContent, expected.details);
+        const legacy = '[POWIADOMIENIE SYSTEMOWE] Wynik planu legacy\n<vault_content source="plan_result">\n'
+            + JSON.stringify({ kind: 'plan_result', plan_id: 'legacy', status: 'partial', nodes: plan.nodes }) + '\n</vault_content>';
+        t.deepEqual(buildMachineView({ role: 'user', content: legacy, subTaskPlanId: 'legacy' }, { t: translate }),
+            { kind: 'plan_result', title: 'Plan', summary: 'wynik częściowy', status: 'error',
+                details: 'A: błąd\nAwaria A\nDorobek A\n\nB: czeka na A (błąd)' });
     });
 });

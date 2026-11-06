@@ -420,6 +420,10 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
     const text = typeof msg?.content === 'string' ? msg.content : '';
 
     if (kind === 'plan_result') {
+        const readable = text.match(/\n<vault_content source="plan_result:(completed|partial|stopped|interrupted)">\n([^\n]*)\n([\s\S]*?)\n<\/vault_content>/);
+        if (readable) return { kind, title: ctx.t('chat.plan.name'), summary: readable[2], details: readable[3],
+            status: readable[1] === 'completed' ? 'ok' : 'error' };
+        // Preserve notifications written before the readable format was introduced.
         const body = text.match(/\n<vault_content source="plan_result">\n([\s\S]*)\n<\/vault_content>$/)?.[1];
         let raw: unknown;
         try { raw = body ? JSON.parse(body) : undefined; } catch { raw = undefined; }

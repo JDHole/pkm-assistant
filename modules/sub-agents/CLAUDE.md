@@ -856,7 +856,7 @@ These runtime APIs do not publish new delegate schema fields (P6).
 ### 2.4.6 P3 - dependency inputs and one plan result
 
 `dependencyResults` reads only frozen final node material. `DependencyResults.ts` shares the
-parent projection's extraction, 240-character excerpt and export redaction; configured secrets
+parent projection's 240-character excerpt and export redaction; configured secrets
 are removed before excerpts or budgets. The runner inserts a separate untrusted user message
 even with a custom system frame. Manual context shares `delegation_context_max_chars` with
 all predecessors (at most one equal share for manual context); remaining text is fitted fairly
@@ -927,3 +927,36 @@ execution/material even after thread continuation. Plan executions are removed f
 rows, including closed imported threads without a plan backlink, to avoid duplicate restart rows.
 Tests: `subTaskPanelModel.tree.test.ts` covers preorder, counts, labels, real parentage, continuation,
 queued nodes without runs, completed material, inert restart and exact owner isolation.
+
+### 2.4.6 P7 - review and smoke fixes
+
+`createPlan(graph, owner, parentRunId?, knownSecrets?)` snapshots configured secret values in RAM.
+The final aggregate redacts recovered Stop/interruption material and errors with that snapshot
+before any delivery cap. Secrets never enter persisted plan definitions. `stopAll('unload')`
+uses `latchInterrupt()` inside the existing cancellation transaction: working nodes become
+interrupted, queued/waiting nodes become not_executed, and terminal results remain intact.
+Explicit user/lead/system Stop keeps its previous meaning and first-cause latch.
+
+Restore reconciles queued plan snapshots with valid running v1 records before interruption,
+because task:created can be persisted before plan:changed. A rejected v2 group must not hide
+accepted v1 results: the strip suppresses only executions represented in a visible plan,
+while orphan plan runs and descendants still require the exact owner and epoch.
+Queued continuations are identified by queuedRunId, not just threadId: their new execution
+remains visible while the original completed run is represented by its plan node.
+
+Dependency final answers are text. JSON answers with arbitrary public keys and bracket-prefixed
+prose survive; private reasoning, tool arguments and binary fields are removed independently of
+the stricter tool-result whitelist used by parent conversation. Empty usable input fails with
+`dependency_result_unavailable`, never a zero-character successful preparation.
+
+The barrel exports `formatPlanResult(result, maxChars)`, used by chat and the harness. It projects
+each node's summary/full mode without modifying frozen material, emits one status line and one
+line per node (state, error, material, unanswered question, blocked_by), and appends the ordinary result continuation
+instruction. The untrusted source `plan_result:<status>` preserves status across locale changes.
+The complete state table still takes precedence over a cap too small for metadata.
+
+Tests: O2/O5/O6 and graceful unload use real delegates/runners in `DelegateTool.plan.test.ts`;
+O3/O4 use persisted AgentMemory journals in `SubTaskHistory.test.ts`; `DependencyResults.test.ts`
+covers explicit unavailable input; `SubTaskPlanResult.test.ts` checks both presentation modes
+and preservation of the original result. Question text, notes and answers use the same export
+redaction as material, including questions recovered during Stop.

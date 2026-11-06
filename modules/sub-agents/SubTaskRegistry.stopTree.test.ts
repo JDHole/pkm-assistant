@@ -206,7 +206,8 @@ for (const stop of ['ancestor', 'owner', 'unload', 'close', 'tab'] as const) tes
     if (stop === 'tab') registry.closeQueuedForOwners({ tabKeys: [], agentNames: ['Mira'], owners: [owner] }, 'system');
     await group.completion;
     t.deepEqual([group.status, group.nodes.map(node => node.state.kind), other.status],
-        ['stopped', ['stopped', 'stopped', 'stopped'], stop === 'unload' ? 'stopped' : 'active']);
+        stop === 'unload' ? ['interrupted', ['not_executed', 'not_executed', 'not_executed'], 'interrupted']
+            : ['stopped', ['stopped', 'stopped', 'stopped'], 'active']);
     t.throws(() => registry.createThread({ threadId: 'late', name: 'late', owner, origin: owner, config: {},
         parentId: 'parent', plan: { planId: group.planId, nodeId: group.nodes[0].id } }),
     { message: ['ancestor', 'owner', 'unload'].includes(stop) ? 'Sub-agent admission cancelled' : 'plan_unavailable' });

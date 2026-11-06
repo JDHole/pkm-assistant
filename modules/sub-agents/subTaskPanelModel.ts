@@ -336,15 +336,20 @@ export function buildStripModel({ plans, tasks, pending, threads, tabKey = '', a
     const pendingTasks = Array.isArray(pending) ? pending : [];
     const taskById = new Map([...pendingTasks, ...allTasks].map(task => [task.id, task]));
     const pendingIds = new Set(pendingTasks.map(task => task.id));
-    const planRunIds = new Set((plans ?? []).flatMap(plan => plan.nodes.flatMap(node =>
+    const visiblePlans = (plans ?? []).filter(plan => plan.owner.agentName === activeAgent
+        && plan.owner.sessionPath === activeSession && plan.owner.sessionEpoch === activeEpoch);
+    const planRunIds = new Set(visiblePlans.flatMap(plan => plan.nodes.flatMap(node =>
         'execution' in node.state && node.state.execution ? [node.state.execution.runId] : [])));
-    for (const task of allTasks) if (task.plan) planRunIds.add(task.id);
+    const planThreadIds = new Set(visiblePlans.flatMap(plan => plan.nodes.flatMap(node =>
+        'execution' in node.state && node.state.execution ? [node.state.execution.threadId] : [])));
+    const representedExecution = (thread: SubThread) => thread.phase === 'queued'
+        ? planRunIds.has(thread.queuedRunId ?? thread.threadId) : planThreadIds.has(thread.threadId);
     const visibleThreads = (Array.isArray(threads) ? threads : []).filter(thread =>
         !thread.runIds.length || thread.runIds.some(id => !planRunIds.has(id))
-        || (!thread.plan && ['queued', 'running'].includes(thread.phase))
+        || (!representedExecution(thread) && ['queued', 'running'].includes(thread.phase))
     ).map(thread => ({ ...thread,
         runIds: thread.runIds.filter(id => !planRunIds.has(id)),
-    })).filter(thread => (!thread.plan || thread.runIds.length > 0) &&
+    })).filter(thread => (!representedExecution(thread) || thread.runIds.length > 0) &&
         thread.owner.agentName === activeAgent && (thread.owner.sessionPath || '') === activeSession && (thread.owner.sessionEpoch || '') === activeEpoch);
     const queued = visibleThreads.filter(thread => thread.phase === 'queued');
     const queuePosition = new Map(queued.map((thread, index) => [thread.threadId, index + 1]));
@@ -386,7 +391,7 @@ export function buildStripModel({ plans, tasks, pending, threads, tabKey = '', a
         const seen = new Set<string>();
         let ancestor: SubTask | undefined = task;
         while (ancestor && !seen.has(ancestor.id)) {
-            if (planRunIds.has(ancestor.id)) return task.origin?.agentName === activeAgent
+            if (ancestor.plan || planRunIds.has(ancestor.id)) return task.origin?.agentName === activeAgent
                 && task.origin.sessionPath === activeSession && task.origin.sessionEpoch === activeEpoch;
             seen.add(ancestor.id);
             ancestor = ancestor.parentId ? taskById.get(ancestor.parentId) : undefined;
@@ -394,7 +399,7 @@ export function buildStripModel({ plans, tasks, pending, threads, tabKey = '', a
         return belongsToTab(task, activeTab, activeAgent, activeSession);
     };
     const standalone = allTasks.filter(task => !planRunIds.has(task.id) && !threadRunIds.has(task.id)
-        && (!task.threadId || task.status === 'running')
+        && (!task.threadId || task.status === 'running' || task.plan)
         && belongsToView(task));
     const seenDelivery = new Set<string>();
     const deliveryTasks = pendingTasks.filter(task => {
@@ -415,8 +420,7 @@ export function buildStripModel({ plans, tasks, pending, threads, tabKey = '', a
         rows.push({ kind: 'thread', ...(task.parentConversation ? { parentConversation: task.parentConversation } : {}), id: task.id, name: task.name || task.id, ...(task.parentId !== undefined ? { parentId: task.parentId } : {}), ...(task.level !== undefined ? { level: task.level } : {}), state, questionState: run.questionState, reusable: false, runs: [run], runNumber: 1, runLimit: null,
             durationMs: run.durationMs, taskPreview: run.taskPreview, outcome: run.outcome });
     }
-    for (const plan of plans ?? []) {
-        if (plan.owner.agentName !== activeAgent || plan.owner.sessionPath !== activeSession || plan.owner.sessionEpoch !== activeEpoch) continue;
+    for (const plan of visiblePlans) {
         const base = { questionState: { kind: 'none' as const }, reusable: false, runs: [], runNumber: 0,
             runLimit: null, durationMs: 0, taskPreview: '', outcome: '' };
         rows.push({ ...base, kind: 'plan', id: plan.planId, planId: plan.planId, name: '',

@@ -145,6 +145,9 @@ test('P5 plan parentage is presentational; continuation cannot replace a settled
     registry.endRun('A', { successful: true });
     plan.settle(plan.nodes[0].id, { kind: 'done', material: 'original' });
     registry.reserveContinuation('A', plan.owner, 'continued', undefined, { parentId: 'parent', level: 2 });
+    t.deepEqual(tree().visible.filter(n => n.row.kind === 'thread').map(n => [n.row.id, n.row.state.kind]),
+        [['parent', 'running'], ['A', 'queued']]);
+    t.deepEqual(tree().counts, { running: 2, queued: 1, waitingDependencies: 1, total: 5 });
     registry.beginRun('A', plan.owner, { reservedRunId: 'continued' });
     registry.create({ id: 'continued', threadId: 'A', name: 'Continuation', origin: plan.owner, parentId: 'parent', level: 2 });
     const node = tree().visible.find(n => n.row.kind === 'plan-node' && n.row.node.id === 'A')!;

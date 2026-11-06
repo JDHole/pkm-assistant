@@ -95,9 +95,12 @@ export function restoreSubTaskPlans(input: readonly unknown[], owner: Owner, tas
         records.set(record.planId, record);
     }
     const unavailable = new Set(occupied);
+    const startedRuns = new Set<string>();
     for (const value of input) {
         const run = parseSubTaskHistoryRecord(value);
         if (run?.version === 1 && !tasks.some(task => task.id === run.runId)) unavailable.add(run.runId);
+        // task:created is durable before the corresponding plan:changed snapshot.
+        if (run?.version === 1 && ownerKey(run.owner) === ownerKey(owner) && run.state === 'running') startedRuns.add(run.runId);
     }
     const restored: SubTaskPlanRuntime[] = [];
     for (const record of records.values()) {
@@ -120,7 +123,9 @@ export function restoreSubTaskPlans(input: readonly unknown[], owner: Owner, tas
             }
             const material = task?.result ? { material: task.result.text } : {};
             if (s.kind === 'done') return { ...node, state: { ...s, material: task!.result!.text, ...(task?.outcome ? { outcome: task.outcome } : {}) } };
-            return { ...node, state: { ...s, ...material, ...(task?.outcome ? { outcome: task.outcome } : {}) } };
+            const reconciled = s.kind === 'queued' && task && startedRuns.has(task.id) ? { ...s, kind: 'running' as const } : s;
+            return { ...node, state: { ...reconciled,
+                ...material, ...(task?.outcome ? { outcome: task.outcome } : {}) } };
         });
         if (mismatch) continue;
         const graph = SubTaskPlan.restore(nodes, missing && record.status === 'completed' ? 'partial' : record.status, record.revision);

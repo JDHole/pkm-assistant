@@ -97,7 +97,7 @@ export type { SubTaskPlanRuntime, PlanReference, PlanSettlement } from './SubTas
 
 export { dependencyResults, redactExport } from './DependencyResults.js';
 export type { DependencyResult, DependencyPreparation } from './DependencyResults.js';
-export { limitPlanResult } from './SubTaskPlanResult.js';
+export { limitPlanResult, formatPlanResult } from './SubTaskPlanResult.js';
 export type { PlanResultNotice } from './SubTaskPlanResult.js';
 
 export type { SubTaskPlanHistoryRecord } from './SubTaskPlanHistory.js';

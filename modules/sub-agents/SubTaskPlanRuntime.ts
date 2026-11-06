@@ -47,6 +47,7 @@ export class SubTaskPlanRuntime {
     }
     /** No observers here: the registry latches every plan and run in one Stop transaction. */
     latchStop(by: StopBy): void { this.graph.stop(by); this.execute = undefined; }
+    latchInterrupt(): void { this.graph.interrupt(); this.execute = undefined; }
     publish(): void {
         if (!this.admitted) return;
         if (this.status !== 'active') this.execute = undefined;

@@ -47,6 +47,43 @@ export type DependencyResult = Readonly<{ id: string; mode: 'summary' | 'full'; 
 export type DependencyPreparation = Readonly<{ id: string; mode: 'summary' | 'full'; sentChars: number;
     truncated: boolean; reason?: 'summary' | 'context_limit' | 'model_window' }>;
 
+/** Final answers are text, including JSON answers and bracket-prefixed prose.
+ * Remove private payload fields without applying the tool-result key whitelist. */
+function answerText(text: string): string {
+    const cleanText = (value: string) => value
+        .replace(/data:[^\s]+|[A-Za-z0-9+/=]{128,}/gi, '')
+        .replace(/<(?:think|reasoning)\b[^>]*>[\s\S]*?(?:<\/(?:think|reasoning)>|$)/gi, '');
+    let changed = false, useful = false;
+    const clean = (value: unknown, depth: number): unknown => {
+        if (depth > 8) { changed = true; return undefined; }
+        if (typeof value === 'string') {
+            const safe = cleanText(value); changed ||= safe !== value; useful ||= !!safe.trim(); return safe;
+        }
+        if (Array.isArray(value)) return value.map(item => clean(item, depth + 1)).filter(item => item !== undefined);
+        if (!value || typeof value !== 'object') {
+            useful ||= typeof value === 'number' || typeof value === 'boolean';
+            return value;
+        }
+        if ('type' in value && /^(image|image_url|input_image|audio|thinking|reasoning)/i.test(String(value.type))) {
+            changed = true; return undefined;
+        }
+        return Object.fromEntries(Object.entries(value).flatMap(([key, child]) => {
+            if (/^(arguments|reasoning(?:_content)?|thinking|analysis|base64|image(?:_url)?|audio|tool_calls)$/i.test(key)) {
+                changed = true; return [];
+            }
+            const safe = clean(child, depth + 1);
+            return safe === undefined ? [] : [[key, safe]];
+        }));
+    };
+    try {
+        const safe = clean(JSON.parse(text), 0);
+        if (!changed) return text;
+        if (!useful) return '';
+        const serialized = JSON.stringify(safe);
+        return !serialized || serialized === '{}' || serialized === '[]' ? '' : serialized;
+    } catch { return cleanText(text); }
+}
+
 /** Read frozen, finally settled material, never previews or later thread continuations. */
 export function dependencyResults(nodes: readonly PlanNode[], node: PlanNode): DependencyResult[] {
     return node.depends_on.map(id => {
@@ -60,7 +97,8 @@ export function fitDependencyResults(sources: readonly DependencyResult[], base:
     tools: readonly unknown[], window: ContextWindow, maxChars: number, secrets: readonly string[] = [],
 ): { message: LoopMessage; metadata: DependencyPreparation[]; maxOutputTokens: number } {
     const { maxOutputTokens, marginTokens } = contextReserves(window);
-    const full = sources.map(source => toolText(redactExport(source.text, secrets)));
+    const full = sources.map(source => answerText(redactExport(source.text, secrets)));
+    if (full.some(text => !text.trim())) throw new Error('dependency_result_unavailable');
     const texts = full.map((text, i) => sources[i].mode === 'summary' ? excerpt(text, 240) : text);
     const marker = t('subagent.dependencies.truncated');
     // A marker must never cost more than the original short result.
