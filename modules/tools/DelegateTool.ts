@@ -684,9 +684,15 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                         context_mode: { type: 'string', enum: ['clean', 'parent_conversation'], description: t('mcp.delegate.param.context_mode') },
                         aspect_explicit: { type: 'boolean' },
                         timeout_ms: { type: 'number' },
+                        id: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9_-]{0,63}$', description: t('mcp.delegate.param.id') },
+                        depends_on: { type: 'array', items: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9_-]{0,63}$' }, description: t('mcp.delegate.param.depends_on') },
+                        dependency_results: { type: 'string', enum: ['summary', 'full'], description: t('mcp.delegate.param.dependency_results') },
                     },
                     required: ['task']
                 },
+                // Any graph field switches the entire list into plan mode.
+                if: { contains: { anyOf: [ { required: ['id'] }, { required: ['depends_on'] }, { required: ['dependency_results'] } ] } },
+                then: { items: { required: ['id'] } },
                 description: t('mcp.delegate.param.tasks')
             }
         },

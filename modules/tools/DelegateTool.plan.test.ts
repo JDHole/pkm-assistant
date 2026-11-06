@@ -1,4 +1,6 @@
 import test from 'ava';
+import { Validator } from '@cfworker/json-schema';
+import { ToolRegistry } from './ToolRegistry.js';
 import type { ExecutionContext } from 'ava';
 import { createDelegateTool, __test__, stopAllDelegations } from './DelegateTool.js';
 import type { DelegateTaskDef, DelegatePlugin } from './DelegateTool.js';
@@ -91,6 +93,38 @@ function changed(registry: SubTaskRegistry, plan: SubTaskPlanRuntime, predicate:
     }); });
 }
 const states = (plan: SubTaskPlanRuntime) => plan.nodes.map(node => [node.id, node.state.kind]);
+
+test.serial('published delegate schema accepts plans and legacy lists but rejects malformed graph fields', t => {
+    const registry = new ToolRegistry();
+    registry.registerTool(createDelegateTool({}) as never);
+    const definition = registry.getToolDefinitions().find(tool => tool.function.name === 'delegate')!;
+    const validator = new Validator(definition.function.parameters);
+    t.deepEqual([
+        { tasks: dag },
+        { tasks: [{ id: 'A', task: 'A' }, { id: 'B', task: 'B', depends_on: ['A'], dependency_results: 'full' }] },
+        { tasks: [{ task: 'A' }, { task: 'B' }] },
+        ...[null, 1, '', '1A', 'A B', 'A'.repeat(65)].map(id => ({ tasks: [{ task: 'A', id }] })),
+        ...[null, 'A', [1], ['bad id']].map(depends_on => ({ tasks: [{ task: 'A', id: 'A', depends_on }] })),
+        ...[null, 'other', 1].map(dependency_results => ({ tasks: [{ task: 'A', id: 'A', dependency_results }] })),
+        { tasks: [{ task: 'A', id: 'A' }, { task: 'B' }] },
+        { tasks: [{ task: 'A', depends_on: [] }] },
+        { tasks: [{ task: 'A', dependency_results: 'summary' }] },
+    ].map(args => validator.validate(args).valid),
+    [true, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false]);
+});
+
+test.serial('legacy list still returns ordered results and finished partial failed counts', async t => {
+    const f = fixture(t);
+    f.plugin.subTaskRegistry = undefined;
+    const pending = f.submit([{ task: 'A' }, { task: 'B' }]);
+    const a = await f.next('A'), b = await f.next('B');
+    b.complete('result B'); a.complete('result A');
+    const result = await pending as { success: boolean; counts: unknown; results: Array<{ success: boolean; result: string }> };
+    t.deepEqual({ ...result, results: result.results.map(row => ({ success: row.success, result: row.result })) }, {
+        success: true, counts: { finished: 2, partial: 0, failed: 0 },
+        results: [{ success: true, result: 'result A' }, { success: true, result: 'result B' }],
+    });
+});
 
 test.serial('A and B start once; C has no reservation or budget until both final results', async t => {
     const f = fixture(t); const { receipt, runtime } = await f.plan();

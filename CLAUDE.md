@@ -38,7 +38,7 @@ All modular code lives in `modules/<name>/`. `src/` holds only two files: `src/m
 | `modules/memory/` | Agent memory: `brain.md` short index + `brain/` persistent notes + `sessions/active` + `sessions/archive` + L1-L3 summaries, create-only `memory_save`, LLM-driven consolidation, isolation between agents |
 | `modules/embedding/` | Vectorization (Orama): `EmbeddingModel` + `EmbeddingRegistry` + `providers/` (OpenAI/Ollama/Gemini/LM Studio and others) + `VaultIndexer` |
 | `modules/prompts/` | `PromptBuilder` + Decision Tree - agent behavior instructions, grouped and toggleable |
-| `modules/sub-agents/` | `SubAgentLoader` + `Runner` (delegation) + system roles loaded via `loadSystemRoles()` + custom YAML scope (folders / frontmatter / sections / pinned_notes) + DelegateTool DI + parallel execution + per-task timeout |
+| `modules/sub-agents/` | `SubAgentLoader` + `Runner` (delegation) + system roles loaded via `loadSystemRoles()` + custom YAML scope (folders / frontmatter / sections / pinned_notes) + DelegateTool DI + parallel execution + per-task timeout + dependency plans (graph, scheduler, material, history and aggregate results) |
 | `modules/tools/` | Agent tools: built-in (vault, artifacts, communication, media...) + external MCP client (stdio/HTTP) |
 | `modules/skills/` | Skill engine (recipes for agents) |
 | `modules/chat/` | `ChatView` + mixins + `InlineChipPlugin` + `StreamingManager` + `RollingWindow`/`Summarizer` + `TriggerPopup` (inline `/` trigger; `@` = MentionAutocomplete) |

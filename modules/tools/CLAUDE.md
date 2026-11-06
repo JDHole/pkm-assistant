@@ -730,3 +730,53 @@ A failed initial definition append returns `{success:false, error:plan_persisten
 code:plan_persistence_failed}` with no runner or accepted plan. The existing cancellation latch
 remains active during the await. `DelegateTool.plan.test.ts` supplies a durable-writer fixture,
 keeps P2/P3 behavioral assertions and adds initial-write refusal. Schema publication remains P6.
+
+### 2.4.6 P6 - published dependency plan API
+
+`createDelegateTool().inputSchema` now publishes `tasks[].id`, `depends_on` and
+`dependency_results`, with PL/EN descriptions. These supersede the publication deferrals
+in the historical P2-P4 notes above. Example: one call with
+`tasks:[{id:"A",task:"Research A"},{id:"B",task:"Research B"},{id:"C",task:"Synthesize",depends_on:["A","B"]}]`.
+Any graph field enables plan mode for the entire list: every task needs a unique,
+case-sensitive ID matching `[A-Za-z][A-Za-z0-9_-]{0,63}`. Missing dependencies mean `[]`;
+missing result mode means `summary`. IDs are local labels, never runtime IDs or authority.
+The public schema checks field shapes and conditional IDs; the runtime graph validator
+rejects duplicate IDs, unknown predecessors and cycles before side effects. Duplicate
+edges are deduplicated with warnings. A list without graph fields keeps its original
+receipt/result/order, including blocking legacy `counts:{finished,partial,failed}`.
+
+Plans always run in the background. A receipt (`success:true,started:true,plan_id,nodes`)
+means acceptance, not completion; waiting nodes have no execution ID or scheduler slot.
+One `kind:plan_result` aggregate contains every terminal node and disjoint counts, delivered
+as a `plan-result` notice (or to the calling sub's inbox). Material is in `nodes[].state.material`;
+`result` is a compact state summary. A failure, timeout, refusal or incomplete predecessor
+blocks successors with `blocked_by` and `root_causes`; independent branches finish normally.
+The lead decides what to do with a partial result. There are no automatic retries.
+
+`summary` is a redacted deterministic extract of at most 240 characters per predecessor;
+`full` requests full text, not reasoning or tool arguments. Both remain untrusted input.
+Manual context and dependency material share `delegation_context_max_chars`, then fit the
+actual model window with response reserve. Optional parent conversation uses remaining space.
+Truncation is explicit; an impossible minimum dependency payload fails with
+`dependency_context_budget`. The existing lead delivery cap limits material in the aggregate,
+not stored full results. Waiting for dependencies consumes no task timeout budget.
+
+The existing scheduler and provider gate govern all phases: at most five active leases per
+conversation, default delegation depth two, and the existing list limit counts ALL nodes.
+A presentation group adds no delegation level. Local width one may serialize A/B. No new
+queue, settings or permissions exist. Ready successors recheck the live caller and permissions.
+
+Stop on the strip group calls the registry's transactional `requestStopPlan`: it stops the
+whole plan and descendants, including nodes with no run, while preserving finished material.
+A user Stop does not launch an automatic lead turn. Initial graph persistence must succeed
+before execution (`plan_persistence_failed` otherwise). Restart restores active plans as
+`interrupted`, never resumes them; started nodes become `interrupted`, unstarted nodes
+`not_executed`, and durable completed results remain available in the strip.
+
+Boundaries: tools owns schema, consent and the execution adapter; sub-agents owns the graph,
+admission, material, persistence and aggregate transport; chat owns delivery and strip UI;
+core supplies localized descriptions. Cross-module imports use barrels. AVA publication and
+legacy-result checks live in `DelegateTool.plan.test.ts`. Harness scenarios
+`66_plan_zaleznosci` / `67_plan_awaria` reuse Deep Research's fixtures and run real MCP and
+runners with separately controlled A/B HTTP barriers. Ship this plugin change together with
+the corresponding harness commit; neither repository is committed by the package executor.

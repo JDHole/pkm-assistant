@@ -439,3 +439,12 @@ publish new delegate arguments; that remains P6.
 
 `chat.plan.*` supplies PL/EN group/node states, dependency labels, waiting counters and unavailable
 result text for the existing strip and chat tiles. No delegate argument descriptions are published.
+
+### 2.4.6 P6 - published plan descriptions
+
+`mcp.delegate.param.id`, `.depends_on` and `.dependency_results`, plus the updated
+`.tasks` and `mcp.delegate.desc`, now describe dependency plans in PL/EN. They explain
+conditional IDs, one-call graphs, background receipts, summary/full material with budgets,
+partial failure, group Stop and no retries or restart resumption. P3/P5 publication deferrals
+above are historical. Graph/runtime validation remains in tools and sub-agents; i18n adds
+no permissions, settings or scheduler. The complete API is in `modules/tools/CLAUDE.md`.
