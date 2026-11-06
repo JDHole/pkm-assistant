@@ -144,9 +144,8 @@ znika po terminalnej publikacji, a potem działa zwykła retencja. `dispose` zwa
 mapę planów. Prywatny `planTaskLifecycle.ts` liczy gotowość, klasyfikuje zakończenia
 i wybiera węzły do abortu podczas Stopu. Publiczne typy są dostępne przez barrel.
 
-P2 nie podłącza jeszcze DelegateTool: driver gotowych zadań i materiał poprzedników
-należą do P3, UI/historia i formatowanie raportów do P4, integracja wykonania oraz
-bariera dzieci `waiting` w koordynatorze do P5. Konsument `task:plan` powinien traktować
+Integrację DelegateTool i barierę dzieci `waiting` dostarcza P5; driver gotowości
+i materiał poprzedników pochodzą z P3, UI/historia oraz raporty z P4. Konsument `task:plan` powinien traktować
 payload jako snapshot zdarzenia, a aktualny stan pobierać przez `getReport()`.
 Testy zachowania: `SubTaskRegistry.plan.test.ts` (rejestr, scheduler, notifier,
 skrzynka rodzica, pytania, Stop i retencja), plus istniejące testy rejestru.
@@ -170,7 +169,7 @@ rozliczyć plan i obudzić śpiących. Uchwyty planu należy zwolnić po zakońc
 
 Barrel udostępnia też `terminalPlanState`, aby budowniczy materiału w tools używał
 tej samej klasyfikacji sukcesu co rejestr. Publiczne uruchamianie planu, zamrożenie
-limitu dla wywołania i lifetime tła nadal należą do P5. Testy kontraktu puli z
+limitu dla wywołania i lifetime tła są podpięte w P5. Testy kontraktu puli z
 prawdziwym rejestrem/schedulerem: `../tools/DelegateTool.dependencies.test.ts`.
 
 ### Istniejący runtime
@@ -917,3 +916,15 @@ Testy P4: `SubTaskHistory.test.ts` (round-trip przez AgentMemory, schemat),
 `../chat/chat/planDelivery.test.ts` (notifier i rzeczywisty prompt rodzica),
 `../chat/chat/subTaskStrip.test.ts` (prawdziwy rejestr, DOM PL/EN, Stop i izolacja).
 Publiczne wykonanie planu przez delegate oraz bariera dzieci waiting należą do P5.
+
+
+### 2.4.6 P5 — lifecycle wywołania planu
+
+`requestStopPlan(planId, by = 'system')` zatrzymuje cały zakres DAG przez istniejącą
+transakcję schedulera i Stopu; obejmuje także rzeczywiste dzieci węzłów. Autor Stopu
+właściciela pozostaje własnością `requestStopForOwner`. `promoteToBackground` obejmuje
+również aktywne placeholdery waiting. Koordynator zalicza waiting do żywych dzieci,
+więc naturalne zakończenie rodzica czeka na ich doręczenia. Runner udostępnia pytania
+rodzicowi planu także na starszej ścieżce z samą głębokością; prywatny rejestr fallbacku
+odrzuca je bez oczekiwania. Zwykłe biegi zachowują dotychczasową regułę głębokości.
+Testy przez publiczny delegate: `../tools/DelegateTool.plan.test.ts`.

@@ -503,7 +503,7 @@ export class SubTaskRegistry {
     registerUserWait(owner: Owner, cancel: () => void): () => void { return this._questions.registerUserWait(owner, cancel); }
     promoteToBackground(taskId: string): boolean {
         const task = this._tasks.get(taskId);
-        if (!task || task.status !== 'running' || task.stopRequested) return false;
+        if (!task || !isActiveTask(task) || task.stopRequested) return false;
         task.background = true;
         return true;
     }
@@ -1014,6 +1014,12 @@ export class SubTaskRegistry {
     /** Stop a run and all its descendants, including reservations without an abort handle. */
     requestStop(id: string, by: StopBy = 'user'): boolean {
         return this._stopRuns([id], by).accepted > 0;
+    }
+
+    /** One invocation owns this whole DAG; latch its range before any abort callbacks. */
+    requestStopPlan(planId: PlanId, by: StopBy = 'system'): number {
+        const report = this._plans.get(planId)?.report;
+        return report ? this._stopRuns(report.nodes.map(node => node.runId), by).accepted : 0;
     }
 
     /** Exact conversation identity; an incomplete owner cannot authorize a session Stop. */

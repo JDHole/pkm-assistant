@@ -101,8 +101,8 @@ rozróżniają wielkość liter i mają 1–64 znaki `[A-Za-z0-9_-]`.
 Walidacja odrzuca błędne referencje, self-edge, duplikaty zależności i cykle
 (z ich ścieżką); limit liczy wszystkie węzły. Poprawna lista bez krawędzi,
 również z `depends_on: []` i bez ID, wraca jako legacy. Pojedyncze zadanie
-pozostaje legacy. Parser celowo nie jest jeszcze podpięty do narzędzia ani
-jego publicznego schematu; integracja należy do P5. Eksport parsera i typu
+pozostaje legacy. Od P5 parser jest podpięty do narzędzia przed walidacją pozostałych argumentów,
+a schemat tasks[] publikuje id i depends_on z instrukcją i przykładem PL/EN. Eksport parsera i typu
 `ParsePlanResult` utrzymuje kontrakt w grafie produkcyjnym wymaganym przez
 `core/dead_code_zasieg.test.ts`, bez wyjątku w strażniku osiągalności.
 Testy: `delegatePlanInput.test.ts`.
@@ -114,7 +114,7 @@ wejścia. Po `await nextReady()` sprawdzany jest Stop przez `canDispatch`, dopie
 potem startuje istniejący thunk z admission i timeoutem. `onError` musi synchronicznie
 rozliczyć wyjątek węzła w rejestrze i zwrócić jego wynik; niezależne gałęzie pracują
 dalej. Niewystartowane terminalne węzły zostawiają `undefined` pod swoim indeksem:
-adapter P5 uzupełni je z raportu rejestru. Thunki nadal odpowiadają za ponowne
+adapter planu uzupełnia je z raportu rejestru. Thunki nadal odpowiadają za ponowne
 sprawdzenie zatrzasków i przygotowania po admission oraz zachowanie dzierżawy.
 
 `buildDependencyContext(results, cap)` i typy `DependencyResult`/`DependencyContext`
@@ -135,9 +135,8 @@ mieści oprawę również przy minimum 4096.
 
 Wewnętrzne `SubRunControl.dependencyContext` dopina gotową sekcję w `_executeSubAgent`
 po ręcznym kontekście i zadaniu, przed `runTask` oraz dopasowaniem rozmowy rodzica.
-Nie przechodzi przez limit `args.context`. P5 ma zamrozić cap raz na wywołanie planu
-i budować materiał w chwili dispatch; P3 nie zmienia publicznego schematu ani
-nie uruchamia jeszcze planów przez `delegate.execute`. Testy:
+Nie przechodzi przez limit `args.context`. Od P5 cap jest zamrożony raz na wywołanie,
+a materiał jest budowany w chwili dispatch przez publiczne `delegate.execute`. Testy:
 `DelegateTool.dependencies.test.ts`, `delegateDependencyContext.test.ts`,
 `config/limits.test.ts` oraz istniejące testy delegacji.
 
@@ -733,3 +732,29 @@ DelegateTool redaguje snapshot synchronicznie przed structuredClone, korzystają
 helper: redakcja skonfigurowanych wartości i lokalnego wzorca sk- poprzedza wyciągi,
 podgląd i dopasowanie budżetu. Bez zmiany globalnego SensitiveDataGuard.
 Testy F5-3 przechwytują podgląd oraz payload: sekret na granicy 160/240 znaków i sklejony sk-.
+
+
+### 2.4.6 P5 — publiczne wykonanie planu
+
+`delegate.execute` parsuje cały graf przed zgodami i rezerwacjami. Co najmniej jedna
+krawędź wybiera plan; poprawne `task`, `tasks` i `depends_on: []` zachowują stare
+odpowiedzi. Po przygotowaniu wszystkich elementów i wymaganych zgodach `reservePlan`
+atomowo rejestruje także terminalne odmowy. Driver gotowości uruchamia dotychczasowe
+thunki z jedną AdmissionGroup, ponowną walidacją przygotowania i istniejącym timeoutem.
+Zewnętrzny timeout zatrzaskuje `settle(timeout)` przed abortem runnera.
+
+Pokwitowanie zawiera `plan_id`, `tasks: [{id, task_id, sub_id?, name, state}]`,
+`waiting`, `queued` i `plan_complete`. Bariera czatu obejmuje wyłącznie początkowo
+gotowe korzenie; zaufany sub→sub dostaje pokwitowanie bez tej bariery. Wyniki i pytania
+wracają dotychczasowym notifierem lub inboxem rzeczywistego rodzica.
+Synchroniczna odpowiedź ma wyniki w kolejności wejścia i rozłączne liczniki
+`finished/partial/failed/blocked`. Pytanie promuje wszystkie niedokończone węzły
+wspólnie do tła; `completed_results` w pokwitowaniu zachowuje wcześniejsze wyniki,
+bez ponownej emisji ich powiadomień. Bez publicznego rejestru prywatny rejestr żyje
+wyłącznie przez wywołanie blokujące i odrzuca pytania bez adresata.
+
+Nasłuchy właściciela, sygnału tury i unload żyją do rozliczenia puli, również po
+pokwitowaniu. Stop sygnału/unload używa transakcji `requestStopPlan`; Stop właściciela
+zachowuje autora i transakcję rejestru. Referencje do zadań chronią końcową agregację
+przed retencją; teksty wyników nie są kopiowane do metadanych grafu.
+Testy integracyjne: `DelegateTool.plan.test.ts` (prawdziwy runner, rejestr i sterowane modele).

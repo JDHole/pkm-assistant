@@ -78,7 +78,7 @@ export function collectSubTaskIdsForOwners(
     const agentNames = new Set(owners.agentNames || []);
     const out: string[] = [];
     for (const task of tasks || []) {
-        if (!task?.id || task.status !== 'running' || task.stopRequested) continue;
+        if (!task?.id || (task.status !== 'running' && task.status !== 'waiting') || task.stopRequested) continue;
         const origin = task.origin;
         if (!origin) continue;
         const byTab = typeof origin.tabKey === 'string' && origin.tabKey && tabKeys.has(origin.tabKey);

@@ -1731,3 +1731,11 @@ plan bez dodatkowego zbiorczego notice. Payload skrzynki rodzica używa tego sam
 helpera w runnerze. Historia rejestru zachowuje blokady i przerywa żywe węzły;
 import nadal nie rozpoczyna strumieni ani doręczeń. Testy: `planDelivery.test.ts`,
 `subTaskStrip.test.ts` i `../sub-agents/SubTaskHistory.test.ts`.
+
+
+### 2.4.6 P5 — Stop oczekujących zadań planu
+
+`turnAbort.collectSubTaskIdsForOwners` uwzględnia waiting obok running, również dla
+starszych wpisów dopasowanych po tabKey/agentName. Pełna tożsamość sesji nadal ma
+pierwszeństwo. Lifetime planu po pokwitowaniu obsługuje DelegateTool; zmiana aktywnej
+zakładki nie zmienia właściciela kolejnej fali. Testy: `../tools/DelegateTool.plan.test.ts`.

@@ -14,7 +14,7 @@ import type { ReasoningEffort } from '../models/index.js';
  * 3. Route to SubAgentRunner with role-appropriate config
  * 4. Return results
  */
-import { SubAgentRunner, DEFAULT_SUB_AGENT_TOOLS, PKM_SUB_NAME, allocateSubTaskId, canContinueAfterUserStop, isRuntimeSequence } from '../../modules/sub-agents/index.js';
+import { SubAgentRunner, DEFAULT_SUB_AGENT_TOOLS, PKM_SUB_NAME, allocateSubTaskId, parsePlanId, canContinueAfterUserStop, isRuntimeSequence } from '../../modules/sub-agents/index.js';
 import type { RunAdmission, AdmissionGroup, SubTaskRegistry, SubThread, Lease, RuntimeSequence, SubRunContext, SubTask, SubTaskOrigin, QuestionId, QuestionState, RunActivity, ParentQuestion } from '../../modules/sub-agents/index.js';
 import type { RunOutcome, SubRunResult, ParentConversationContext, ParentConversationMetadata, ParentConversationPreparation } from '../../modules/sub-agents/index.js';
 import type { ApprovalManager } from '../../core/index.js';
@@ -31,11 +31,16 @@ import { AccessGuard, maskSensitiveData, configuredChatSecrets } from '../../cor
 import type { ScopeFolders, PermissionedAgent } from '../../core/index.js';
 import { getLimits, DEFAULT_LIMITS } from '../../config/limits.js';
 import { log } from '../../core/utils/Logger.js';
-import type { PlanReadyDriver } from '../sub-agents/index.js';
+import type { PlanReadyDriver, PlanHandle, PlanReservation } from '../sub-agents/index.js';
+import { buildDependencyContext } from './delegateDependencyContext.js';
 import type { DependencyContext } from './delegateDependencyContext.js';
+import { parseDelegatePlan } from './delegatePlanInput.js';
+import { createBlockingPlanRegistry, planReceipt, aggregatePlanResults } from './delegatePlanExecution.js';
 
 /** Pojedyncze zadanie w trybie wielozadaniowym (`args.tasks[]`). */
 export interface DelegateTaskDef {
+    id?: string;
+    depends_on?: string[];
     task?: string;
     context_mode?: unknown;
     aspect?: string;
@@ -243,6 +248,9 @@ export type DelegatePlugin = NonNullable<ResolverPluginLike> & {
      * odroczenia (`step`) - patrz `_isInFinalSummary` / grace-okno w `_withTimeout`.
      */
     subTaskRegistry?: {
+        reservePlan?: SubTaskRegistry['reservePlan'];
+        requestStopPlan?: SubTaskRegistry['requestStopPlan'];
+        settle?: SubTaskRegistry['settle'];
         acquire?: SubTaskRegistry['acquire'];
         setParentConversation?: SubTaskRegistry['setParentConversation'];
         getRunActivity?: SubTaskRegistry['getRunActivity'];
@@ -675,6 +683,8 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 items: {
                     type: 'object',
                     properties: {
+                        id: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,64}$', description: t('mcp.delegate.param.id') },
+                        depends_on: { type: 'array', default: [], uniqueItems: true, items: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,64}$' }, description: t('mcp.delegate.param.depends_on') },
                         task: { type: 'string', description: t('mcp.delegate.param.task') },
                         aspect: { type: 'string', description: t('mcp.delegate.param.aspect') },
                         context: { type: 'string', description: t('mcp.delegate.param.context') },
@@ -699,7 +709,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
         name: 'delegate',
         description: t('mcp.delegate.desc'),
         inputSchema,
-        execute: async (args: DelegateToolArgs, _app: unknown, plugin: DelegatePlugin | null | undefined, runtime?: BuiltinToolExecutionContext) => {
+        execute: async (args: DelegateToolArgs, _app: unknown, providedPlugin: DelegatePlugin | null | undefined, runtime?: BuiltinToolExecutionContext) => {
             const invocation = createSubAbortControl();
             _liveInvocations.add(invocation);
             const cancel = () => abortSub(invocation, 'manual-stop');
@@ -711,6 +721,17 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
             const refusal = () => ({ success: false as const, error: t('mcp.delegate.share.cancelled') });
             let offOwner: (() => void) | undefined;
             let offThread: (() => void) | undefined;
+            let planOwnsLifecycle = false;
+            let registryStopping = false;
+            let offPlanAbort: (() => void) | undefined;
+            let offPlanFinished: (() => void) | undefined;
+            let privateRegistry: SubTaskRegistry | undefined;
+            const cleanup = () => {
+                offOwner?.(); offThread?.(); offPlanAbort?.(); offPlanFinished?.();
+                runtime?.abortSignal?.removeEventListener('abort', cancel);
+                _liveInvocations.delete(invocation);
+                privateRegistry?.dispose();
+            };
             runtime?.abortSignal?.addEventListener('abort', cancel, { once: true });
             const trackChild = (ctl: SubAbortControl) => {
                 const stop = () => abortSub(ctl, 'manual-stop');
@@ -728,7 +749,15 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 if (validationArgs && typeof validationArgs === 'object' && 'tasks' in validationArgs && Array.isArray(validationArgs.tasks)) {
                     validationArgs.tasks = validationArgs.tasks.map(defined);
                 }
+                const limits = getLimits(providedPlugin?.env?.settings);
+                const parsedPlan = parseDelegatePlan(validationArgs, limits.max_parallel_delegations);
+                if (parsedPlan.kind === 'invalid') return { success: false, error:
+                    args.tasks && args.tasks.length > limits.max_parallel_delegations
+                        ? t('mcp.delegate.parallel_limit', { limit: limits.max_parallel_delegations, count: args.tasks.length })
+                        : parsedPlan.error };
                 if (!validator.validate(validationArgs).valid) return { success: false, error: 'Invalid delegation context mode.' };
+                if (parsedPlan.kind === 'plan' && providedPlugin && !providedPlugin.subTaskRegistry) privateRegistry = createBlockingPlanRegistry();
+                const plugin = privateRegistry && providedPlugin ? { ...providedPlugin, subTaskRegistry: privateRegistry } : providedPlugin;
                 cancelled();
                 const continuation = _continuations.get(args);
                 const wantsConversation = args.context_mode === 'parent_conversation'
@@ -753,7 +782,6 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
 
                 // Default per-task timeout from config/limits.js (120s), user-overridable
                 // via settings.pkmAssistant.limits.delegation_timeout_ms; per-call timeout_ms still wins.
-                const limits = getLimits(plugin?.env?.settings);
                 const defaultTimeoutMs = limits.delegation_timeout_ms;
 
                 // ── Strażnik GŁĘBOKOŚCI (fail-closed) ──
@@ -803,7 +831,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 }
                 const background = subRunContext ? true : typeof continuation?.background === 'boolean'
                     ? continuation.background
-                    : !!plugin?.subTaskRegistry && currentDepth === 0;
+                    : !!providedPlugin?.subTaskRegistry && currentDepth === 0;
                 const attachReusableThread = (value: unknown, taskId: string | null): unknown => {
                     const threadId = taskId ? plugin?.subTaskRegistry?.getTask?.(taskId)?.threadId : undefined;
                     if (!threadId || !plugin?.subTaskRegistry?.getThread?.(threadId)?.reusable || !value || typeof value !== 'object') return value;
@@ -837,7 +865,11 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 const runOrigin: SubTaskOrigin = origin ?? { agentName: activeAgent.name || '' };
                 const ownerMatches = (value: SubTaskOrigin | undefined) => !!value && !!runOrigin.sessionPath && !!runOrigin.sessionEpoch
                     && value.agentName === runOrigin.agentName && value.sessionPath === runOrigin.sessionPath && value.sessionEpoch === runOrigin.sessionEpoch;
-                offOwner = registry?.events?.on('owner:stopping', value => { if (ownerMatches(value as SubTaskOrigin)) cancel(); });
+                offOwner = registry?.events?.on('owner:stopping', value => {
+                    if (!ownerMatches(value as SubTaskOrigin)) return;
+                    registryStopping = true;
+                    try { cancel(); } finally { registryStopping = false; }
+                });
                 offThread = registry?.events?.on('thread:closed', value => {
                     if (subRunContext && (value as SubThread).runIds.includes(subRunContext.runId)) cancel();
                 });
@@ -974,6 +1006,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                             continue;
                         }
                         checked.prepared = decision.prepared; checked.validate = decision.validate;
+                        if (parsedPlan.kind === 'plan') continue;
                         try { queuedThreads[i] = reserve(checked.resolved, checked.prepared); }
                         catch (error) {
                             log.warn('DelegateTool', `Nie udało się zarezerwować zadania ${i + 1}:`, error);
@@ -982,6 +1015,52 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                             rejectedTasks.push({ task: args.tasks[i].task!, aspect: args.tasks[i].aspect, error: message });
                         }
                     }
+                    let plan: PlanHandle | undefined;
+                    const planTasks: SubTask[] = [];
+                    if (parsedPlan.kind === 'plan') {
+                        if (cancelled()) return refusal();
+                        if (!registry?.reservePlan || !registry.getTask || !registry.requestStopPlan || !registry.settle) {
+                            throw new Error('Delegation plans require a plan-capable registry.');
+                        }
+                        const planId = parsePlanId(allocateSubTaskId('plan').replace(/[^A-Za-z0-9_-]/g, '_'));
+                        if (!planId) throw new Error('Invalid allocated plan ID.');
+                        const reservations: PlanReservation[] = parsedPlan.graph.map((node, i) => {
+                            const checked = precheck[i];
+                            const name = checked.ok ? canonicalName(checked.resolved) ?? _queuedThreadName(checked.resolved, plugin) : args.tasks![i].aspect ?? PKM_SUB_NAME;
+                            const runId = allocateSubTaskId(name);
+                            const error = !checked.ok && checked.result && typeof checked.result === 'object' && 'error' in checked.result
+                                ? String(checked.result.error) : t('mcp.delegate.runner_init_failed');
+                            return { nodeId: node.nodeId, runId, name, taskPreview: args.tasks![i].task,
+                                preparation: checked.ok ? { kind: 'ready', threadId: runId, config: {},
+                                    ...(checked.prepared ? { parentConversation: pendingMetadata(checked.prepared) } : {}) }
+                                    : { kind: 'rejected', error } };
+                        });
+                        // Keep object references, not copies of predecessor texts; also covers immediate eviction.
+                        const offCreated = registry.events?.on('task:created', value => {
+                            const task = value as SubTask;
+                            if (task.plan?.planId === planId) planTasks.push(task);
+                        });
+                        try {
+                            plan = registry.reservePlan({ planId, graph: parsedPlan.graph, tasks: reservations,
+                                owner: runOrigin, origin: runOrigin, parentId: subRunContext?.runId, level: childDepth, background });
+                        } finally { offCreated?.(); }
+                        for (let i = 0; i < reservations.length; i++) {
+                            queuedThreads[i] = registry.getThread?.(reservations[i].runId) ?? null;
+                            completedTaskIds[i] = reservations[i].runId;
+                        }
+                        offPlanFinished = registry.events?.on('task:finished', value => {
+                            const i = planTasks.indexOf(value as SubTask);
+                            if (i !== -1) gates[i].open();
+                        });
+                        const handle = plan;
+                        const stop = () => { if (!registryStopping) registry.requestStopPlan!(handle.planId); };
+                        signal.addEventListener('abort', stop, { once: true });
+                        offPlanAbort = () => signal.removeEventListener('abort', stop);
+                        if (cancelled()) stop();
+                    }
+                    let planBackground = background;
+                    let announceQuestion!: (question: ParentQuestion) => void;
+                    const planQuestion = new Promise<ParentQuestion>(resolve => { announceQuestion = resolve; });
                     const acceptedCount = args.tasks.length - rejectedTasks.length;
 
                     const taskThunks = args.tasks.map((taskDef, i) => (): Promise<unknown> => {
@@ -1033,6 +1112,11 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                             gate.open();
                             return Promise.resolve(closedAtEntry);
                         }
+                        const dependencyContext = plan ? buildDependencyContext(planTasks[i].plan!.dependsOn.map(dependency => {
+                            const result = registry?.getTask?.(dependency.runId)?.result;
+                            if (!result) throw new Error('Missing predecessor result.');
+                            return { nodeId: dependency.nodeId, result };
+                        }), limits.delegation_dependencies_max_chars) : undefined;
                         const resolvedDef = checked.resolved;
                         // Kontrolka abortu: timeout zadania ubija bieg suba (stream + pętla),
                         // a budżet modelu suba = budżet zadania (nie globalny delegation_timeout_ms,
@@ -1048,13 +1132,22 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                         const gateArm = _makeGateArm();
                         // Id biegu poznajemy dopiero w `onTaskCreated` - grace-okno domyka
                         // tę zmienną, żeby przy strzale budzika móc zapytać rejestr o stan.
-                        let taskId: string | null = null;
+                        let taskId: string | null = completedTaskIds[i];
                         return _withAdmission(plugin, reservation, abortCtl, background, taskDef.task, (release, admission) => _withTimeout(_executeSubAgent(
                             { task: taskDef.task, context: taskDef.context, aspect_explicit: taskDef.aspect_explicit },
                             resolvedDef,
                             activeAgent, agentManager, plugin, makeRunner, childDepth,
                             {
                                 abortCtl, invocationCancelled: cancelled, prepared: checked.prepared, validatePrepared: checked.validate,
+                                dependencyContext,
+                                onQuestion: plan && !privateRegistry ? question => {
+                                    if (!planBackground && registry?.isQuestionOpen?.(question.taskId, question.id)) {
+                                        // Promote every unfinished node before any further terminal event.
+                                        planBackground = true;
+                                        for (const task of planTasks) registry?.promoteToBackground?.(task.id);
+                                        announceQuestion(question);
+                                    }
+                                } : undefined,
                                 onGateAdmitted: gateArm.signal,
                                 onActivity: gateArm.activity, admission,
                                 modelTimeout: effectiveTaskTimeout,
@@ -1064,7 +1157,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                 callerScopeFolders,
                                 callerToolNames,
                                 salvageCap: limits.subagent_salvage_max_chars,
-                                background,
+                                background: plan ? planBackground : background,
                                 ...(reservation ? { queuedThreadId: reservation.threadId } : {}),
                                 onTaskCreated: (task: SubTask) => {
                                     taskId = task.id;
@@ -1075,9 +1168,14 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                 },
                             },
                         ).finally(release), taskDef.timeout_ms, tasksDefaultTimeoutMs, () => {
+                            if (plan && taskId) registry?.settle?.(taskId, { kind: 'timeout' });
                             abortSub(abortCtl, 'task-timeout');
                         }, _makeFinalGrace(plugin, graceMs, () => taskId), gateArm, salvageMapper), gate.open, admissionGroup)
                             .then(result => {
+                                if (plan && taskId && planTasks[i].status === 'waiting') {
+                                    registry?.settle?.(taskId, { kind: 'error', error: typeof result.error === 'string'
+                                        ? result.error : t('mcp.delegate.runner_init_failed') });
+                                }
                                 if (reservation && registry?.getThread?.(reservation.threadId)?.phase === 'queued') {
                                     if (result.success === false) {
                                         const error = typeof result.error === 'string' && result.error.trim()
@@ -1103,6 +1201,47 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                                 gate.open();
                             });
                     });
+
+                    if (plan) {
+                        const handle = plan;
+                        const initialRoots = handle.getReport().nodes.flatMap((node, i) => node.state.kind === 'queued' ? [i] : []);
+                        planOwnsLifecycle = true;
+                        const pool = _runWithConcurrency(taskThunks, registry?.acquire ? taskThunks.length : taskConcurrency, {
+                            ...handle, onError: (i, error) => {
+                                const message = maskSensitiveData(String(error instanceof Error ? error.message : error));
+                                registry?.settle?.(planTasks[i].id, { kind: 'error', error: message });
+                                gates[i].open();
+                                return { success: false, error: message };
+                            },
+                        }).then(values => aggregatePlanResults(handle, planTasks, values.map((value, i) => {
+                            const checked = precheck[i];
+                            return attachReusableThread(value ?? (!checked.ok ? checked.result : undefined), completedTaskIds[i]);
+                        }), limits.subagent_salvage_max_chars))
+                            .finally(cleanup);
+                        if (background) {
+                            _trackBackground(pool, acceptedCount);
+                            void pool.catch(() => { /* failures are also recorded per node */ });
+                            if (!subRunContext) await Promise.race([
+                                Promise.all(initialRoots.slice(0, taskConcurrency).map(i => gates[i].opened)), pool,
+                            ]);
+                            return planReceipt(handle, planTasks);
+                        }
+                        const delivery = await Promise.race([
+                            pool.then(value => ({ kind: 'result' as const, value })),
+                            planQuestion.then(question => ({ kind: 'question' as const, question })),
+                        ]);
+                        if (delivery.kind === 'result') return delivery.value;
+                        _trackBackground(pool, acceptedCount);
+                        void pool.catch(() => { /* terminal results go through the registry */ });
+                        return { ...planReceipt(handle, planTasks), kind: 'question',
+                            task_id: delivery.question.taskId, sub_id: delivery.question.subId,
+                            question_id: delivery.question.id, question: delivery.question.text,
+                            completed_results: planTasks.filter(task => !task.background).map(task => ({
+                                id: task.plan!.nodeId, task_id: task.id, state: task.plan!.state,
+                                result: task.result, error: task.error, outcome: task.outcome,
+                            })),
+                            note: t('mcp.sub_agent.question_reply_instruction') };
+                    }
 
                     if (background) {
                         // Pula leci BEZ await — całość zadań toczy się po zakończeniu tury.
@@ -1304,9 +1443,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                 // z nagłówkiem Authorization.
                 return { success: false, error: maskSensitiveData(String((e as Error)?.message ?? e)) };
             } finally {
-                offOwner?.(); offThread?.();
-                runtime?.abortSignal?.removeEventListener('abort', cancel);
-                _liveInvocations.delete(invocation);
+                if (!planOwnsLifecycle) cleanup();
             }
         }
     };

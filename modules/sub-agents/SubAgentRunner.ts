@@ -612,7 +612,7 @@ export class SubAgentRunner {
             const visibleToolNames = _canDelegateAtDepth(delegationDepth, limits.max_delegation_depth)
                 ? toolNames
                 : toolNames.filter((name) => name !== 'delegate' && name !== 'agent_delegate' && name !== 'sub_agent');
-            const tools = this._getTools(visibleToolNames, agent, options.callerToolNames, delegationDepth, !!options.parentId);
+            const tools = this._getTools(visibleToolNames, agent, options.callerToolNames, delegationDepth, !!options.parentId || !!subTask?.plan);
             // Fail-closed whitelist: the sub-agent may ONLY execute tools that
             // survived the parent∩sub intersection in _getTools. _executeTool enforces this
             // so the direct-execution fallback cannot run a tool outside the whitelist.
@@ -630,7 +630,7 @@ export class SubAgentRunner {
             }
             const allowedToolNames = new Set<string>(tools.map((td) => td.function.name));
 
-            const systemPrompt = await this._buildTaskPrompt(agent, config, delegationDepth, limits, !!options.parentId);
+            const systemPrompt = await this._buildTaskPrompt(agent, config, delegationDepth, limits, !!options.parentId || !!subTask?.plan);
 
             const nextTask = options.threadId ? t('subagent.thread_next_task', { task: taskPrompt }) : taskPrompt;
             if (options.threadId && thread) {

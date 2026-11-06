@@ -72,3 +72,12 @@ test('collectSubTaskIdsForOwners: zakończone i już zatrzymywane biegi pomijamy
     ];
     t.deepEqual(collectSubTaskIdsForOwners(zadania, { tabKeys: ['T::1'] }), ['sub/live#3']);
 });
+
+test('P5 owner fallback includes waiting tasks, excludes blocked and foreign tasks', t => {
+    t.deepEqual(collectSubTaskIdsForOwners([
+        bieg('waiting-tab', { tabKey: 'ours' }, { status: 'waiting' }),
+        bieg('waiting-agent', { agentName: 'Mira' }, { status: 'waiting' }),
+        bieg('blocked', { tabKey: 'ours' }, { status: 'blocked' }),
+        bieg('foreign', { tabKey: 'other' }, { status: 'waiting' }),
+    ], { tabKeys: ['ours'], agentNames: ['Mira'] }), ['waiting-tab', 'waiting-agent']);
+});
