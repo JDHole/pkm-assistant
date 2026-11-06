@@ -35,6 +35,7 @@ modules/sub-agents/
 ├── SubAgentLoader.js           # skanuje .pkm-assistant/sub-agents/, parsuje YAML, save/delete/starter + migracje tools
 ├── SubAgentRunner.js           # wykonanie sub-agent z tool-calling loop
 ├── SubTaskScheduler.ts         # FIFO rozmowy, dzierżawy pracy i anulowalna admisja; pure
+├── SubTaskPlan.ts              # Pure DAG validation, node transitions and result contract (2.4.6 P1)
 ├── SubTaskRegistry.js          # SubTask jako byt (id/status/kroki/wynik/budżet) + szyna zdarzeń + side-channel abortów; pure, obsidian-free
 ├── RetainedExecutor.ts        # dzierżawa narzędzia do rozstrzygnięcia lub odcięcia po abort grace
 ├── SubRunCoordinator.ts        # odbiór skrzynki w jednej pętli modelu, bariera końca i oddawanie dzierżawy
@@ -69,6 +70,37 @@ modules/sub-agents/
 ---
 
 ## Public API (`index.js`)
+
+### 2.4.6 P1 - plan graph contract
+
+`SubTaskPlan.create(input, maxNodes)` validates unknown graph input before effects and returns
+`PlanValidation` (`valid` with a plan and warnings, or `invalid` with a code and location).
+Pass the existing `max_parallel_delegations` limit; this module defines no limit or scheduler.
+Only graph fields are copied; task text, context and execution payload remain with the caller.
+IDs are case-sensitive, schema-validated `PlanNodeId` values; they are not run, thread or plan IDs.
+Duplicate edges are deduplicated in first-occurrence order with one warning per repeated edge.
+Invalid fields, duplicate IDs, unknown predecessors and cycles reject the whole graph.
+Cycle diagnostics list an actual cycle, excluding downstream nodes. Definition order determines
+ready-node order and public snapshots, even when predecessors appear after successors.
+
+`ready()` only reads eligibility. `queue(id, {runId, threadId})` claims a ready node once;
+`start(id)` requires that reservation. `settle(id, result)` accepts final `done`, `error` or
+`stopped`; only running nodes can succeed, while preflight errors need no run. It propagates
+terminal blocks transitively with direct `blocked_by` and original `root_causes`.
+The first terminal settlement wins: later failures do not append causes to an existing block.
+`nodes` returns detached snapshots; `revision` increases per changed node, including blocks.
+Group `status` remains active until all nodes terminate, then becomes completed or partial.
+`stop(by)` latches all unfinished nodes before any runtime callbacks and preserves the first
+actor and completed material. `interrupt()` maps running to interrupted and waiting/queued
+to not_executed; neither operation executes work. They do not overwrite a terminal group.
+
+The barrel exports the class and its `Plan*` data types. `PlanNodeTerminal` is a discriminated
+union; `PlanResult` separates completed success from partial/stopped/interrupted failure and
+defines ordered terminal nodes, blocked nodes and disjoint counts. Formatting belongs to P3.
+Runtime ownership/plan IDs, permission checks, admission and aborts belong to P2; durable import
+belongs to P4. This pure contract grants no execution rights and publishes no delegate arguments.
+Tests: `SubTaskPlan.test.ts` covers readiness, validation, warnings, transitive blocks, immutable
+terminal results, reservations, Stop and interruption without scheduler, timers, DOM or models.
 
 Protokół pytań rodzica jest częścią `SubTaskRegistry`: `openParentQuestion(taskId, text)` zwraca pytanie i Promise rozstrzygnięcia albo odmowę; `answerParentQuestion(taskId, questionId, owner, actor, text)`, `getQuestionState`, `isQuestionOpen`, `promoteToBackground` i `registerUserWait(owner, cancel)` obsługują odpowiedź, stan i pauzę. `actor: QuestionRecipient` wskazuje prowadzącego albo konkretny bieg rodzica. Starszy wariant `answerParentQuestion(taskId, questionId, owner, text)` oznacza wyłącznie prowadzącego. Funkcja zwolnienia kanału użytkownika jest idempotentna; `dispose` anuluje otwarte kanały. Zegar pytania mierzy monotonicznie 300000 ms, pauzuje tylko dla pełnego właściciela i nie resetuje pozostałego czasu. Stop, koniec biegu i unload zamykają oczekiwanie przed powiadomieniem obserwatorów. `SubTask.questionState` jest opcjonalne dla starszych danych, a model paska normalizuje brak do `none`.
 
