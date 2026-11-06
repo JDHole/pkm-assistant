@@ -1,7 +1,7 @@
 import test from 'ava';
 import { register } from 'node:module';
 import { renderSubTaskStrip } from './subTaskStrip.js';
-import { SubTaskRegistry, buildStripModel } from '../../sub-agents/index.js';
+import { SubTaskRegistry, SubTaskPlan, buildStripModel } from '../../sub-agents/index.js';
 import { QuestionTestClock } from '../../sub-agents/test-support/questionTestClock.js';
 import { DEFAULT_LIMITS } from '../../../config/limits.js';
 import { pl as trPl } from '../../../core/i18n/pl.js';
@@ -1080,4 +1080,45 @@ test.serial('P5: drzewo sub → wnuk pokazuje niezależny zakres i pominięcie r
         'Wiadomości: zachowane 0, streszczone 0, pominięte 1.', 'Szacowany rozmiar rozmowy: 0 tokenów.',
         'Bez załączników i myślenia. Uprawnienia do plików i narzędzi bez zmian.',
     ]);
+});
+
+
+test.serial('P5 plan DOM: refresh from empty, collapse and focus survive; Stop cancels actual runs and dependencies', async t => {
+    const owner = { agentName: 'Klara', sessionPath: 'active.md', sessionEpoch: '1234567890abcdef1234567890abcdef' };
+    setLocale('pl'); t.teardown(() => setLocale('en'));
+    const previousObserver = globalThis.MutationObserver;
+    (globalThis as Record<string, unknown>).MutationObserver = class { observe() {} disconnect() {} };
+    t.teardown(() => { globalThis.MutationObserver = previousObserver; });
+    const registry = new SubTaskRegistry({ appendHistory: async () => true }); t.teardown(() => registry.dispose());
+    const host = new MockEl(); Object.assign(host, { isConnected: true });
+    const ctx = { plugin: { subTaskRegistry: registry }, tabKey: 'Klara', ...owner, onToggle() {} };
+    renderSubTaskStrip(host as never, ctx);
+    const graph = SubTaskPlan.create([{ id: 'A' }, { id: 'B' }, { id: 'C', depends_on: ['A', 'B'] }], 5);
+    if (graph.kind !== 'valid') throw new Error('Invalid fixture');
+    const plan = await registry.createPlan(graph.plan, owner);
+    t.deepEqual(byClass(host, 'name').map(n => n.textContent), ['Plan', 'A', 'B', 'C']);
+    for (const node of plan.nodes.slice(0, 2)) {
+        registry.createThread({ threadId: node.id, name: node.id, owner, origin: owner, config: {}, phase: 'queued',
+            plan: { planId: plan.planId, nodeId: node.id } });
+        registry.beginQueuedRun(node.id, owner, {});
+        const run = registry.create({ id: node.id, threadId: node.id, origin: owner });
+        registry.attachAbort(run.id, () => registry.finish(run, { text: '', toolsUsed: [], durationMs: 0, usage: null, stoppedBy: 'abort',
+            outcome: { end: { kind: 'stopped', by: 'user' }, completeness: 'empty', hasAnswer: false, hasMaterial: false, effects: [] } }));
+    }
+    t.deepEqual(byClass(host, 'state').map(n => n.textContent), ['w toku', 'pracuje', 'pracuje', 'czeka na A, B']);
+    t.is(textTree(byClass(host, 'summary')[0]).trim(), '2 pracuje, 0 w kolejce, 1 czeka na zależności  · 3 zadania');
+    control(host, `toggle:${plan.planId}`).dispatch('click');
+    plan.publish();
+    t.deepEqual([byClass(host, 'name').map(n => n.textContent), host.ownerDocument.activeElement?.attributes['data-substrip-control']],
+        [['Plan'], `toggle:${plan.planId}`]);
+    renderSubTaskStrip(host as never, { ...ctx, sessionEpoch: 'other' });
+    t.deepEqual(host.children, []);
+    renderSubTaskStrip(host as never, ctx);
+    t.deepEqual(byClass(host, 'count').map(n => n.textContent), ['+3']);
+    control(host, `stop:${plan.planId}`).dispatch('click');
+    t.deepEqual(registry.list().map(run => [run.id, run.status, run.stopRequestedBy]), [['A', 'aborted', 'user'], ['B', 'aborted', 'user']]);
+    t.deepEqual(plan.nodes.map(node => [node.id, node.state.kind]), [['A', 'stopped'], ['B', 'stopped'], ['C', 'stopped']]);
+    t.deepEqual([byClass(host, 'state')[0].textContent, control(host, `stop:${plan.planId}`).disabled], ['zatrzymany', true]);
+    control(host, `toggle:${plan.planId}`).dispatch('click');
+    t.deepEqual(byClass(host, 'state').map(n => n.textContent), ['zatrzymany', 'zatrzymany', 'zatrzymany', 'zatrzymany']);
 });

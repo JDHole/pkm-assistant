@@ -101,3 +101,6 @@ export { limitPlanResult } from './SubTaskPlanResult.js';
 export type { PlanResultNotice } from './SubTaskPlanResult.js';
 
 export type { SubTaskPlanHistoryRecord } from './SubTaskPlanHistory.js';
+
+export { getPlanNodeLabel } from './subTaskPanelModel.js';
+export type { StripPlan } from './subTaskPanelModel.js';

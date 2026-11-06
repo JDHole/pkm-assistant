@@ -1499,3 +1499,12 @@ input.pkm-onboarding-key-input {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
+
+/* Dependency groups are presentation rows; nesting still controls tree indentation. */
+.pkm-substrip__row--plan > .pkm-substrip__chip {
+  border-color: var(--interactive-accent);
+  background: var(--background-secondary-alt);
+}
+.pkm-substrip__row--plan > .pkm-substrip__chip .pkm-substrip__crystal { color: var(--text-accent); }
+.pkm-substrip__row--plan > .pkm-substrip__chip .pkm-substrip__time { display: none; }
+.pkm-substrip__row--plan-node > .pkm-substrip__chip .pkm-substrip__name { color: var(--text-accent); }

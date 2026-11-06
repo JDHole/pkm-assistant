@@ -434,3 +434,8 @@ PL/EN publikują wybór kontekstu po ukończeniu UI P5. Zgody i wykonanie bez zm
 `subagent.dependencies.*`, `subagent.plan.partial` and `chat.plan_result.header` provide PL/EN
 labels, untrusted-input guidance, truncation markers and aggregate notification text. They do not
 publish new delegate arguments; that remains P6.
+
+### 2.4.6 P5 - plan presentation text
+
+`chat.plan.*` supplies PL/EN group/node states, dependency labels, waiting counters and unavailable
+result text for the existing strip and chat tiles. No delegate argument descriptions are published.

@@ -911,3 +911,19 @@ Tests: `SubTaskHistory.test.ts` uses real AgentMemory append/load and the sessio
 A/B/C restart, repeated import, out-of-order snapshots, corruption, missing material, initial-write
 failure and Stop during persistence. The runtime/delivery tests now await creation with a writer
 and valid durable epochs; their previous behavioral assertions remain. Plan group rendering is P5.
+
+### 2.4.6 P5 - plan rows in the existing strip model
+
+`buildStripModel({plans})` accepts the exported `StripPlan` projection. `StripRow.kind`
+distinguishes ordinary threads, plan groups and plan nodes, including nodes without executions.
+`buildStripTreeModel` uses presentation-only parents: groups attach to the real delegating run,
+nodes attach to their group, and actual descendants still attach to node runs. Runtime parent/depth
+and admission are unchanged. Plan ownership, including actual descendants, requires the exact agent, path and epoch.
+
+`summarizeStripRows` adds `waitingDependencies`; groups are excluded from work and total counts.
+`getPlanNodeLabel` exports i18n keys/parameters for waiting, failed predecessors and terminal states.
+The model remains independent of DOM, CSS and translation. A settled node retains its original
+execution/material even after thread continuation. Plan executions are removed from ordinary thread
+rows, including closed imported threads without a plan backlink, to avoid duplicate restart rows.
+Tests: `subTaskPanelModel.tree.test.ts` covers preorder, counts, labels, real parentage, continuation,
+queued nodes without runs, completed material, inert restart and exact owner isolation.

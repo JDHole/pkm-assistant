@@ -17,7 +17,7 @@ import {
 import { t, getDateLocale } from '../../../core/i18n/index.js';
 import { buildParentConversationView } from './parentConversationView.js';
 import type { ParentConversationMetadata } from '../../sub-agents/index.js';
-import { buildDelegateBlockOptions } from './delegateBlockView.js';
+import { buildDelegateBlockOptions, buildPlanBlockOptions } from './delegateBlockView.js';
 import { subAgentCallView } from './subAgentCallView.js';
 import { answeredSubQuestion, renderAnsweredSubQuestion } from './subQuestionView.js';
 import { registerUrlsFromText } from '../../web/index.js';
@@ -279,7 +279,10 @@ export async function render_messages(this: ChatViewLike, createDelegateBlock: t
                             ? historyOutput?.name || historyOutput?.aspect || historyOutput?.sub_id || ''
                             : historyOutput?.name || historyOutput?.aspect || _hArgs.aspect || historyOutput?.sub_id || '';
                         let block: HTMLElement;
-                        if (historyOutput && historyOutput.started === true) {
+                        const planOptions = buildPlanBlockOptions(historyOutput, id => this.plugin?.subTaskRegistry?.getPlan?.(id), true);
+                        if (planOptions) {
+                            block = createDelegateBlock(planOptions);
+                        } else if (historyOutput && historyOutput.started === true) {
                             // Uwaga 10 (spec A2-fix): delegacja zlecona w TLE, odtworzona z
                             // historii, dawniej renderowala sie jak zielony wynik z samym
                             // "Zadanie" (ta gałąź nie istniała - `historyOutput` bez `pending`

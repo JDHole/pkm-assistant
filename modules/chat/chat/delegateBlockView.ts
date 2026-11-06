@@ -1,3 +1,6 @@
+import { Validator } from '@cfworker/json-schema';
+import { getPlanNodeLabel } from '../../sub-agents/index.js';
+import type { PlanNode, PlanStatus, StripPlan } from '../../sub-agents/index.js';
 import { t } from '../../../core/i18n/index.js';
 import { toolResultStatus } from '../../../core/index.js';
 import type { SubAgentToolCallDetail, SubAgentUsage } from '../../ui-components/index.js';
@@ -100,4 +103,53 @@ export function buildDelegateBlockOptions(
         aspectType: result.aspect_type || 'researcher',
         response: typeof result.result === 'string' ? result.result : '',
     };
+}
+
+const planViewSchema = new Validator({
+    type: 'object', required: ['plan_id', 'nodes'],
+    anyOf: [{ required: ['started'], properties: { started: { const: true } } },
+        { required: ['kind', 'status'], properties: { kind: { const: 'plan_result' } } }],
+    properties: {
+        plan_id: { type: 'string', minLength: 1 },
+        status: { enum: ['active', 'completed', 'partial', 'stopped', 'interrupted'] },
+        nodes: { type: 'array', minItems: 1, items: {
+            type: 'object', required: ['id', 'depends_on', 'state'], properties: {
+                id: { type: 'string', pattern: '^[A-Za-z][A-Za-z0-9_-]{0,63}$' },
+                depends_on: { type: 'array', items: { type: 'string' } },
+                state: { type: 'object', required: ['kind'], properties: {
+                    kind: { enum: ['waiting_dependencies', 'queued', 'running', 'done', 'error', 'blocked', 'stopped', 'not_executed', 'interrupted'] },
+                    material: { type: 'string' }, error: { type: 'string' },
+                    blocked_by: { type: 'array', items: { type: 'string' } },
+                }, allOf: [{ if: { properties: { kind: { const: 'blocked' } } }, then: { required: ['blocked_by'] } }] },
+            },
+        } },
+    },
+});
+
+/** Validate saved tool/notification data before producing presentation-only text. */
+export function buildPlanView(raw: unknown, getPlan?: (id: string) => StripPlan | undefined, restored = false, translate = t) {
+    if (!planViewSchema.validate(raw).valid) return undefined;
+    const saved = raw as { plan_id: string; nodes: PlanNode[]; status?: PlanStatus; started?: boolean };
+    const current = getPlan?.(saved.plan_id);
+    const status = current?.status ?? saved.status ?? (restored ? 'interrupted' : 'active');
+    const nodes = current?.nodes ?? saved.nodes.map(node => restored && saved.started ? { ...node,
+        state: node.state.kind === 'running' ? { kind: 'interrupted' as const }
+            : ['waiting_dependencies', 'queued'].includes(node.state.kind) ? { kind: 'not_executed' as const } : node.state,
+    } : node);
+    const summary = translate(`chat.plan.status.${status}`);
+    const details = nodes.map(node => {
+        const label = getPlanNodeLabel(node, nodes);
+        return [`${node.id}: ${translate(label.key, label.params)}`, 'error' in node.state ? node.state.error : '',
+            'material' in node.state ? node.state.material : ''].filter(Boolean).join('\n');
+    }).join('\n\n');
+    return { title: translate('chat.plan.name'), summary, details,
+        status: status === 'active' ? 'attention' as const : status === 'completed' ? 'ok' as const : 'error' as const };
+}
+
+export function buildPlanBlockOptions(raw: unknown, getPlan?: (id: string) => StripPlan | undefined, restored = false): DelegateBlockOptions | undefined {
+    const view = buildPlanView(raw, getPlan, restored);
+    if (!view) return undefined;
+    return { type: 'delegate', status: view.status === 'error' ? 'error' : 'success',
+        resultView: { title: `${view.title} · ${view.summary}`, status: view.status,
+            material: view.details, effects: [], missingTargets: [], notes: [] } };
 }

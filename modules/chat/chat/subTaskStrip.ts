@@ -3,7 +3,7 @@ import { buildParentConversationView } from './parentConversationView.js';
 import { t, pluralCategory } from '../../../core/i18n/index.js';
 import { SkinManager, setSvg } from '../../crystal-soul/index.js';
 import { buildStripModel, buildStripTreeModel, formatDuration, getStripStateLabelParts, summarizeStripRows } from '../../sub-agents/index.js';
-import type { QuestionState, StripTreeNode, StripRow, StripRun, StripState, StripStep, SubTask, SubThread } from '../../sub-agents/index.js';
+import type { QuestionState, StripTreeNode, StripRow, StripRun, StripState, StripStep, SubTask, SubThread, StripPlan } from '../../sub-agents/index.js';
 
 interface ElOpts { cls?: string; text?: string; attr?: Record<string, string> }
 type El = HTMLElement & {
@@ -15,6 +15,8 @@ type El = HTMLElement & {
 interface RegistryLike {
     events?: { on(event: string, handler: () => void): () => void };
     list?(): SubTask[];
+    listPlans?(owner: { agentName: string; sessionPath?: string; sessionEpoch?: string }): StripPlan[];
+    requestStopPlan?(id: string, by: 'user'): boolean;
     listThreads?(owner: { agentName: string; sessionPath?: string; sessionEpoch?: string }): SubThread[];
     getThreadMaxRuns?(threadId: string): number;
     requestStop?(id: string, by: 'user'): boolean;
@@ -67,6 +69,8 @@ const countKeys = {
 
 function stateClass(state: StripState): string {
     switch (state.kind) {
+        case 'plan': return `pkm-substrip__chip--plan-${state.status}`;
+        case 'dependency': return `pkm-substrip__chip--node-${state.status}`;
         case 'queued': return 'pkm-substrip__chip--queued';
         case 'running': return 'pkm-substrip__chip--running';
         case 'stopping': return 'pkm-substrip__chip--stopping';
@@ -105,6 +109,7 @@ export function renderSubTaskStrip(host: El, ctx: SubTaskStripContext): number {
     const owner = { agentName: ctx.agentName, sessionPath: ctx.sessionPath || undefined, sessionEpoch: ctx.sessionEpoch || undefined };
     const rows = registry?.list
         ? buildStripModel({
+            plans: safeCall(() => registry.listPlans?.(owner) ?? [], [] as StripPlan[]),
             tasks: safeCall(() => registry.list!(), [] as SubTask[]),
             pending: safeCall(() => ctx.plugin?.subTaskNotifier?.pending?.() ?? [], [] as SubTask[]),
             threads: safeCall(() => registry.listThreads?.(owner) ?? [], [] as SubThread[]),
@@ -119,7 +124,19 @@ export function renderSubTaskStrip(host: El, ctx: SubTaskStripContext): number {
     const tree = buildStripTreeModel(rows, view.collapsed);
     host.classList.toggle('pkm-substrip--tree', tree.hierarchical);
     host.classList.toggle('pkm-substrip--empty', rows.length === 0);
-    if (!rows.length) return 0;
+    const subscribe = (): void => {
+        const ticks = questionTicks.get(host) ?? [];
+        if (host.isConnected && (ticks.length || registry?.events)) {
+            const timer = ticks.length ? window.setInterval(() => ticks.forEach(tick => tick()), 1000) : undefined;
+            const refresh = (): void => { if (host.isConnected) renderSubTaskStrip(host, ctx); };
+            const unsubs = ['question:opened', 'question:closed', 'question:clock', 'task:context', 'plan:changed'].map(event => registry?.events?.on(event, refresh)).filter((off): off is () => void => typeof off === 'function');
+            const observer = new MutationObserver(() => { if (!host.isConnected) cleanup(); });
+            const cleanup = (): void => { if (timer !== undefined) window.clearInterval(timer); for (const off of unsubs) off(); observer.disconnect(); stripTimers.delete(host); };
+            observer.observe(host.ownerDocument, { childList: true, subtree: true });
+            stripTimers.set(host, cleanup);
+        }
+    };
+    if (!rows.length) { subscribe(); return 0; }
     if (tree.hierarchical) {
         const summary = host.createDiv({ cls: 'pkm-substrip__summary' });
         summary.createSpan({ text: t(tree.summary.key, tree.summary.params) });
@@ -139,16 +156,7 @@ export function renderSubTaskStrip(host: El, ctx: SubTaskStripContext): number {
         for (const row of rows) renderChip(chips, row, ctx, expanded?.id === row.id);
     }
     if (expanded) renderDetail(host, host.createDiv({ cls: 'pkm-substrip__detail' }), expanded, registry, ctx, tree.hierarchical ? expandedNode : undefined);
-    const ticks = questionTicks.get(host) ?? [];
-    if (host.isConnected && (ticks.length || registry?.events)) {
-        const timer = ticks.length ? window.setInterval(() => ticks.forEach(tick => tick()), 1000) : undefined;
-        const refresh = (): void => { if (host.isConnected) renderSubTaskStrip(host, ctx); };
-        const unsubs = ['question:opened', 'question:closed', 'question:clock', 'task:context'].map(event => registry?.events?.on(event, refresh)).filter((off): off is () => void => typeof off === 'function');
-        const observer = new MutationObserver(() => { if (!host.isConnected) cleanup(); });
-        const cleanup = (): void => { if (timer !== undefined) window.clearInterval(timer); for (const off of unsubs) off(); observer.disconnect(); stripTimers.delete(host); };
-        observer.observe(host.ownerDocument, { childList: true, subtree: true });
-        stripTimers.set(host, cleanup);
-    }
+    subscribe();
     if (focusControl) findTreeControl(host, focusControl)?.focus();
     else if (focusRunId) findRunButton(host, focusRunId)?.focus();
     else if (focusId) findChip(host, focusId)?.focus();
@@ -164,14 +172,15 @@ function findTreeControl(host: El, id: string): HTMLElement | undefined {
 function renderTreeNode(host: El, parent: El, node: StripTreeNode, ctx: SubTaskStripContext,
     view: TreeViewState, registry: RegistryLike | null | undefined): void {
     const { row } = node;
+    const name = row.kind === 'plan' ? t('chat.plan.name') : row.name;
     const group = parent.createDiv({ cls: 'pkm-substrip__tree', attr: { 'data-substrip-depth': String(node.depth) } });
-    const line = group.createDiv({ cls: 'pkm-substrip__row' });
+    const line = group.createDiv({ cls: `pkm-substrip__row${row.kind === 'thread' ? '' : ` pkm-substrip__row--${row.kind}`}` });
     const refresh = (control: string): void => { renderSubTaskStrip(host, ctx); findTreeControl(host, control)?.focus(); };
     if (node.children.length) {
         const control = `toggle:${row.id}`;
         const toggle = line.createEl('button', { cls: 'pkm-substrip__toggle', text: node.collapsed ? '▸' : '▾',
             attr: { type: 'button', 'aria-expanded': String(!node.collapsed), 'data-substrip-control': control,
-                'aria-label': t(node.collapsed ? 'chat.substrip.tree_expand' : 'chat.substrip.tree_collapse', { name: row.name }) } });
+                'aria-label': t(node.collapsed ? 'chat.substrip.tree_expand' : 'chat.substrip.tree_collapse', { name }) } });
         toggle.addEventListener('click', event => {
             event.stopPropagation();
             if (view.collapsed.has(row.id)) view.collapsed.delete(row.id); else view.collapsed.add(row.id);
@@ -181,9 +190,9 @@ function renderTreeNode(host: El, parent: El, node: StripTreeNode, ctx: SubTaskS
     const label = t(node.label.key, node.label.params);
     const isExpanded = ctx.expandedId === row.id;
     const chip = line.createEl('button', { cls: `pkm-substrip__chip pkm-substrip__chip--tree${isExpanded ? ' pkm-substrip__chip--open' : ''}`,
-        attr: { type: 'button', 'data-substrip-id': row.id, 'aria-expanded': String(isExpanded), 'aria-label': `${row.name}: ${label}` } });
+        attr: { type: 'button', 'data-substrip-id': row.id, 'aria-expanded': String(isExpanded), 'aria-label': `${name}: ${label}` } });
     chip.createSpan({ cls: 'pkm-substrip__crystal', text: '◆', attr: { 'aria-hidden': 'true' } });
-    chip.createSpan({ cls: 'pkm-substrip__name', text: row.name });
+    chip.createSpan({ cls: 'pkm-substrip__name', text: name });
     chip.createSpan({ cls: 'pkm-substrip__state', text: label });
     renderConversation(chip, row.parentConversation);
     chip.createSpan({ cls: 'pkm-substrip__time', text: node.time });
@@ -192,17 +201,18 @@ function renderTreeNode(host: El, parent: El, node: StripTreeNode, ctx: SubTaskS
         if (event.key === 'Escape' && isExpanded) { event.preventDefault(); ctx.onToggle(null); findChip(host, row.id)?.focus(); }
     });
     if (node.hiddenCount) line.createSpan({ cls: 'pkm-substrip__count', text: t('chat.substrip.tree_hidden', { count: node.hiddenCount }) });
-    if (node.children.length && (node.canStop || node.label.key === 'chat.substrip.tree_stopped')) {
+    if (node.children.length && (node.canStop || node.label.key === 'chat.substrip.tree_stopped' || (row.kind === 'plan' && row.state.kind === 'plan' && row.state.status === 'stopped'))) {
         const stopping = row.state.kind === 'stopping';
         const stop = line.createEl('button', { cls: 'pkm-substrip__stop pkm-substrip__tree-stop',
             text: t(!node.canStop ? 'chat.substrip.tree_stopped' : stopping ? 'chat.substrip.stopping' : 'chat.substrip.stop'),
             attr: { type: 'button', 'data-substrip-control': `stop:${row.id}`,
-                'aria-label': `${t('chat.substrip.stop_aria', { name: row.name })}, ${t(`chat.substrip.tree_stop_hint_${pluralCategory(node.stopDescendantCount)}`, { count: node.stopDescendantCount })}` } });
+                'aria-label': `${t('chat.substrip.stop_aria', { name })}, ${t(`chat.substrip.tree_stop_hint_${pluralCategory(node.stopDescendantCount)}`, { count: node.stopDescendantCount })}` } });
         stop.disabled = !node.canStop || stopping;
         stop.addEventListener('click', event => {
             event.stopPropagation();
             // P3 traverses descendants of each concrete run, including a finished parent.
-            for (const id of node.stopRunIds) safeCall(() => registry?.requestStop?.(id, 'user'), false);
+            if (row.kind === 'plan') safeCall(() => registry?.requestStopPlan?.(row.planId, 'user'), false);
+            else for (const id of node.stopRunIds) safeCall(() => registry?.requestStop?.(id, 'user'), false);
             refresh(`stop:${row.id}`);
         });
         if (node.canStop) group.createDiv({ cls: 'pkm-substrip__stop-hint', text: t(`chat.substrip.tree_stop_hint_${pluralCategory(node.stopDescendantCount)}`, { count: node.stopDescendantCount }) });
@@ -281,8 +291,10 @@ function renderDetail(host: El, details: El, row: StripRow, registry: RegistryLi
         return;
     }
     const head = details.createDiv({ cls: 'pkm-substrip__detail-head' });
-    head.createSpan({ cls: 'pkm-substrip__detail-status', text: `${row.name} · ${questionLabel(row.questionState, row.state)}` });
+    head.createSpan({ cls: 'pkm-substrip__detail-status', text: `${row.kind === 'plan' ? t('chat.plan.name') : row.name} · ${row.kind !== 'thread' && treeNode ? t(treeNode.label.key, treeNode.label.params) : questionLabel(row.questionState, row.state)}` });
     if (row.threadId && row.runNumber && row.runLimit) head.createSpan({ cls: 'pkm-substrip__run-badge', text: t('chat.substrip.run_number', { number: String(row.runNumber), total: String(row.runLimit) }) });
+    if (row.kind === 'plan-node' && 'error' in row.node.state) details.createDiv({ cls: 'pkm-substrip__end-reason', text: row.node.state.error });
+    if (row.kind === 'plan-node' && row.outcome) details.createDiv({ cls: 'pkm-substrip__outcome', text: row.outcome });
     if (row.state.kind === 'queued') renderStopButton(head, registry, row);
     const remembered = expandedRunSteps.get(host) ?? new Set<string>();
     expandedRunSteps.set(host, remembered);
@@ -396,7 +408,10 @@ function renderStopButton(parent: El, registry: RegistryLike | null | undefined,
     button.disabled = stopping;
     button.addEventListener('click', event => {
         event.stopPropagation();
-        const stopped = row.threadId
+        const execution = row.kind === 'plan-node' && 'execution' in row.node.state ? row.node.state.execution : undefined;
+        const stopped = execution
+            ? safeCall(() => registry?.requestStop?.(execution.runId, 'user'), false)
+            : row.threadId
             ? safeCall(() => registry?.stopThread?.(row.threadId!), false)
             : safeCall(() => registry?.requestStop?.(row.runs[row.runs.length - 1]?.id || row.id, 'user'), false);
         if (stopped) { button.textContent = t('chat.substrip.stopping'); button.disabled = true; }

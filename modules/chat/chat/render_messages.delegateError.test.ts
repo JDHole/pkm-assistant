@@ -1,3 +1,5 @@
+import { buildSubTaskPlanDelivery } from './subTaskPlanDelivery.js';
+import { buildMachineView } from './machineMessage.js';
 /**
  * `render_messages` - historia z `delegate` i wynikiem `{success:false, error:"limit czasu"}`
  * musi renderować kafelek sub-agenta ze statusem błędu, którego SZCZEGÓŁY niosą tekst
@@ -23,7 +25,7 @@
 import test from 'ava';
 import { render_messages, append_message } from './chat_messages.js';
 import { _chatOnToolResults } from './chat_streaming.js';
-import { SubTaskRegistry } from '../../sub-agents/index.js';
+import { SubTaskRegistry, SubTaskPlan } from '../../sub-agents/index.js';
 import type { ParentConversationMetadata } from '../../sub-agents/index.js';
 import { QuestionTestClock } from '../../sub-agents/test-support/questionTestClock.js';
 import { buildSubTaskResultDelivery } from './subTaskResultDelivery.js';
@@ -482,5 +484,49 @@ test.serial('P5: powiadomienie końcowe i restore P6 zachowują metadane konkret
             t.deepEqual(findByClass(tile, 'cs-parent-conversation__details')?.children.map(el => el.textContent), contextDetails);
             t.true(deepText(tile).includes('WYNIK'));
         }
+    });
+});
+
+
+test.serial('P5 plan receipt renders without task_id live and after restart; partial notice is a readable system tile', async t => {
+    setLocale('pl'); t.teardown(() => setLocale('en'));
+    const owner = { agentName: 'Lead', sessionPath: 'session.md', sessionEpoch: '1234567890abcdef1234567890abcdef' };
+    const registry = new SubTaskRegistry({ appendHistory: async () => true }); t.teardown(() => registry.dispose());
+    const graph = SubTaskPlan.create([{ id: 'A' }, { id: 'B', depends_on: ['A'] }], 5);
+    if (graph.kind !== 'valid') throw new Error('Invalid fixture');
+    const plan = await registry.createPlan(graph.plan, owner);
+    const output = { success: true, started: true, plan_id: plan.planId, nodes: plan.nodes };
+    await withFakeDocument(async () => {
+        const container = makeFakeEl();
+        const call = { id: 'plan-call', name: 'delegate', arguments: {} };
+        let live!: FakeEl;
+        const turn = { agentName: 'Lead', owner: { memory: null }, origin: {},
+            rawResults: new Map([['plan-call', { result: output, error: null }]]),
+            pendingEntries: [{ toolDisplay: { replaceWith: (el: FakeEl) => { live = el; } } }],
+        };
+        await _chatOnToolResults.call({ _isTurnActiveTab: () => true, _scheduleConnectorRedraw() {},
+            plugin: { subTaskRegistry: registry } } as never, turn as never, [{ toolCall: call, result: JSON.stringify(output) }] as never, 0);
+        t.is(findByClass(live, 'cs-tile__title')?.textContent, 'Plan · w toku');
+        for (const cb of findByClass(live, 'cs-tile__head')?.listeners.click ?? []) cb({});
+        t.is(findByClass(live, 'cs-subresult__section')?.children[1].textContent, 'A: przygotowanie\n\nB: czeka na A');
+        const messages = [
+            { role: 'assistant', content: '', tool_calls: [{ id: call.id, function: { name: 'delegate', arguments: '{}' } }] },
+            { role: 'tool', tool_call_id: call.id, content: JSON.stringify(output) },
+        ];
+        await render_messages.call(buildFakeThis(container, messages));
+        t.is(findByClass(container, 'cs-tile__title')?.textContent, 'Plan · przerwany przez restart');
+        for (const cb of findByClass(container, 'cs-tile__head')?.listeners.click ?? []) cb({});
+        t.is(findByClass(container, 'cs-subresult__section')?.children[1].textContent, 'A: nie wykonano\n\nB: nie wykonano');
+        let delivered: ReturnType<typeof buildSubTaskPlanDelivery> | undefined;
+        registry.events.on('plan:finished', notice => { delivered = buildSubTaskPlanDelivery(notice as never, 0); });
+        plan.settle(plan.nodes[0].id, { kind: 'error', error: 'Awaria A', material: 'Dorobek A' });
+        if (!delivered) throw new Error('Missing result');
+        const expected = { kind: 'plan_result', title: 'Plan', summary: 'wynik częściowy', status: 'error',
+            details: 'A: błąd\nAwaria A\nDorobek A\n\nB: czeka na A (błąd)' };
+        t.deepEqual(buildMachineView({ role: 'user', content: delivered.text, ...delivered.meta }, { t: translate }), expected);
+        t.deepEqual(buildMachineView({ role: 'user', content: delivered.text }, { t: translate }), expected);
+        await render_messages.call(buildFakeThis(container, [{ role: 'user', content: delivered.text }]));
+        t.is(findByClass(container, 'cs-tile--system')?.classList.contains('cs-tile--error'), true);
+        t.is(findByClass(container, 'cs-tile__details')?.textContent, expected.details);
     });
 });

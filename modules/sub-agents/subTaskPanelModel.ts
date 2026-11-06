@@ -1,9 +1,13 @@
 /** Czysty model paska czatu. Wiersz wątku niesie uporządkowaną oś biegów, a bieg bez wątku ma własny wiersz. */
 import type { SubTask, SubTaskStep, SubThread, SubThreadEffect } from './SubTaskRegistry.js';
+import type { PlanNode, PlanNodeState, PlanStatus } from './SubTaskPlan.js';
+import type { SubTaskPlanRuntime } from './SubTaskPlanRuntime.js';
 import type { RunEnd, RunOutcome } from './runOutcome.js';
 import type { QuestionState } from './ParentQuestions.js';
 
 export type StripState =
+    | { kind: 'plan'; status: PlanStatus }
+    | { kind: 'dependency'; status: PlanNodeState['kind'] }
     | { kind: 'queued'; position: number }
     | { kind: 'running' }
     | { kind: 'stopping' }
@@ -85,7 +89,7 @@ export interface StripRun {
     note?: 'synthesis-pending' | 'storage-error';
 }
 
-export interface StripRow {
+interface StripRowBase {
     parentConversation?: SubTask['parentConversation'];
     parentId?: string;
     level?: number;
@@ -103,16 +107,24 @@ export interface StripRow {
     outcome: string;
 }
 
+export type StripRow = StripRowBase & (
+    | { kind: 'thread' }
+    | { kind: 'plan'; planId: string }
+    | { kind: 'plan-node'; planId: string; node: PlanNode; presentationParentId: string; label: StripTreeLabel }
+);
+
 /** Counts exactly the rows presented by the strip. */
-export function summarizeStripRows(rows: readonly StripRow[]): { running: number; queued: number; total: number } {
+export function summarizeStripRows(rows: readonly StripRow[]): { running: number; queued: number; waitingDependencies: number; total: number } {
     return {
         running: rows.filter(row => row.state.kind === 'running' || row.state.kind === 'stopping').length,
         queued: rows.filter(row => row.state.kind === 'queued').length,
-        total: rows.length,
+        waitingDependencies: rows.filter(row => row.kind === 'plan-node' && row.node.state.kind === 'waiting_dependencies').length,
+        total: rows.filter(row => row.kind !== 'plan').length,
     };
 }
 
 export interface BuildStripModelInput {
+    plans?: readonly StripPlan[] | null;
     tasks?: SubTask[] | null;
     pending?: SubTask[] | null;
     threads?: SubThread[] | null;
@@ -169,6 +181,8 @@ function stepView(step: SubTaskStep): StripStep {
  */
 export function getStripStateLabelParts(state: StripState): { end: string; completeness?: string } {
     switch (state.kind) {
+        case 'plan': return { end: `chat.plan.status.${state.status}` };
+        case 'dependency': return { end: `chat.plan.node.${state.status}` };
         case 'queued': return { end: 'chat.substrip.state_queued' };
         case 'running': return { end: 'chat.substrip.state_running' };
         case 'stopping': return { end: 'chat.substrip.state_stopping' };
@@ -313,7 +327,7 @@ function runState(task: SubTask | undefined, classified = resultState(task?.outc
 
 function assertNever(value: never): never { throw new Error(`Nieobsługiwany stan: ${String(value)}`); }
 
-export function buildStripModel({ tasks, pending, threads, tabKey = '', agentName = '', sessionPath = '', sessionEpoch = '', now = Date.now(), getThreadRunLimit }: BuildStripModelInput = {}): StripRow[] {
+export function buildStripModel({ plans, tasks, pending, threads, tabKey = '', agentName = '', sessionPath = '', sessionEpoch = '', now = Date.now(), getThreadRunLimit }: BuildStripModelInput = {}): StripRow[] {
     const activeTab = typeof tabKey === 'string' ? tabKey : '';
     const activeAgent = typeof agentName === 'string' ? agentName : '';
     const activeSession = typeof sessionPath === 'string' ? sessionPath : '';
@@ -322,7 +336,15 @@ export function buildStripModel({ tasks, pending, threads, tabKey = '', agentNam
     const pendingTasks = Array.isArray(pending) ? pending : [];
     const taskById = new Map([...pendingTasks, ...allTasks].map(task => [task.id, task]));
     const pendingIds = new Set(pendingTasks.map(task => task.id));
+    const planRunIds = new Set((plans ?? []).flatMap(plan => plan.nodes.flatMap(node =>
+        'execution' in node.state && node.state.execution ? [node.state.execution.runId] : [])));
+    for (const task of allTasks) if (task.plan) planRunIds.add(task.id);
     const visibleThreads = (Array.isArray(threads) ? threads : []).filter(thread =>
+        !thread.runIds.length || thread.runIds.some(id => !planRunIds.has(id))
+        || (!thread.plan && ['queued', 'running'].includes(thread.phase))
+    ).map(thread => ({ ...thread,
+        runIds: thread.runIds.filter(id => !planRunIds.has(id)),
+    })).filter(thread => (!thread.plan || thread.runIds.length > 0) &&
         thread.owner.agentName === activeAgent && (thread.owner.sessionPath || '') === activeSession && (thread.owner.sessionEpoch || '') === activeEpoch);
     const queued = visibleThreads.filter(thread => thread.phase === 'queued');
     const queuePosition = new Map(queued.map((thread, index) => [thread.threadId, index + 1]));
@@ -348,7 +370,7 @@ export function buildStripModel({ tasks, pending, threads, tabKey = '', agentNam
         const maxRuns = getThreadRunLimit?.(thread.threadId);
         const relation = thread.phase === 'queued' ? thread : activeRun ?? lastRun ?? thread;
         return {
-            id: thread.threadId, threadId: thread.threadId, name: thread.name, state, reusable: thread.reusable, questionState: (activeRun ?? lastRun)?.questionState ?? { kind: 'none' },
+            kind: 'thread', id: thread.threadId, threadId: thread.threadId, name: thread.name, state, reusable: thread.reusable, questionState: (activeRun ?? lastRun)?.questionState ?? { kind: 'none' },
             ...(relation.parentId !== undefined ? { parentId: relation.parentId } : {}),
             ...(relation.level !== undefined ? { level: relation.level } : {}),
             ...((thread.phase === 'queued' ? thread.parentConversation : (activeRun ?? lastRun)?.parentConversation)
@@ -360,12 +382,23 @@ export function buildStripModel({ tasks, pending, threads, tabKey = '', agentNam
         };
     });
 
-    const standalone = allTasks.filter(task => !threadRunIds.has(task.id)
+    const belongsToView = (task: SubTask): boolean => {
+        const seen = new Set<string>();
+        let ancestor: SubTask | undefined = task;
+        while (ancestor && !seen.has(ancestor.id)) {
+            if (planRunIds.has(ancestor.id)) return task.origin?.agentName === activeAgent
+                && task.origin.sessionPath === activeSession && task.origin.sessionEpoch === activeEpoch;
+            seen.add(ancestor.id);
+            ancestor = ancestor.parentId ? taskById.get(ancestor.parentId) : undefined;
+        }
+        return belongsToTab(task, activeTab, activeAgent, activeSession);
+    };
+    const standalone = allTasks.filter(task => !planRunIds.has(task.id) && !threadRunIds.has(task.id)
         && (!task.threadId || task.status === 'running')
-        && belongsToTab(task, activeTab, activeAgent, activeSession));
+        && belongsToView(task));
     const seenDelivery = new Set<string>();
     const deliveryTasks = pendingTasks.filter(task => {
-        if (task.threadId || threadRunIds.has(task.id) || !belongsToTab(task, activeTab, activeAgent, activeSession) || seenDelivery.has(task.id)) return false;
+        if (task.plan || planRunIds.has(task.id) || task.threadId || threadRunIds.has(task.id) || !belongsToView(task) || seenDelivery.has(task.id)) return false;
         seenDelivery.add(task.id);
         return true;
     });
@@ -379,10 +412,45 @@ export function buildStripModel({ tasks, pending, threads, tabKey = '', agentNam
     for (const task of orderedStandalone) {
         const run = runView(task, task.id, 1, now);
         const state = delivered.has(task.id) ? { kind: 'delivery' as const } : runState(task);
-        rows.push({ ...(task.parentConversation ? { parentConversation: task.parentConversation } : {}), id: task.id, name: task.name || task.id, ...(task.parentId !== undefined ? { parentId: task.parentId } : {}), ...(task.level !== undefined ? { level: task.level } : {}), state, questionState: run.questionState, reusable: false, runs: [run], runNumber: 1, runLimit: null,
+        rows.push({ kind: 'thread', ...(task.parentConversation ? { parentConversation: task.parentConversation } : {}), id: task.id, name: task.name || task.id, ...(task.parentId !== undefined ? { parentId: task.parentId } : {}), ...(task.level !== undefined ? { level: task.level } : {}), state, questionState: run.questionState, reusable: false, runs: [run], runNumber: 1, runLimit: null,
             durationMs: run.durationMs, taskPreview: run.taskPreview, outcome: run.outcome });
     }
+    for (const plan of plans ?? []) {
+        if (plan.owner.agentName !== activeAgent || plan.owner.sessionPath !== activeSession || plan.owner.sessionEpoch !== activeEpoch) continue;
+        const base = { questionState: { kind: 'none' as const }, reusable: false, runs: [], runNumber: 0,
+            runLimit: null, durationMs: 0, taskPreview: '', outcome: '' };
+        rows.push({ ...base, kind: 'plan', id: plan.planId, planId: plan.planId, name: '',
+            parentId: plan.parentRunId, state: { kind: 'plan', status: plan.status } });
+        for (const node of plan.nodes) {
+            const execution = 'execution' in node.state ? node.state.execution : undefined;
+            const task = execution ? taskById.get(execution.runId) : undefined;
+            const run = task ? runView(task, task.id, 1, now) : undefined;
+            const state: StripState = node.state.kind === 'running' ? run?.state ?? { kind: 'running' }
+                : node.state.kind === 'queued' ? { kind: 'queued', position: 1 }
+                    : { kind: 'dependency', status: node.state.kind };
+            rows.push({ ...base, kind: 'plan-node', id: `${plan.planId}/${node.id}`, planId: plan.planId,
+                presentationParentId: plan.planId, node, label: getPlanNodeLabel(node, plan.nodes), name: node.id, state,
+                runs: run ? [run] : [], runNumber: run ? 1 : 0, questionState: run?.questionState ?? base.questionState,
+                parentConversation: task?.parentConversation, durationMs: run?.durationMs ?? 0,
+                taskPreview: run?.taskPreview ?? '', outcome: ('material' in node.state ? node.state.material : '') ?? '',
+            });
+        }
+    }
     return rows;
+}
+
+export type StripPlan = Pick<SubTaskPlanRuntime, 'planId' | 'owner' | 'parentRunId' | 'nodes' | 'status'>;
+
+/** Dependency labels use settled graph state, never a run's preliminary outcome. */
+export function getPlanNodeLabel(node: PlanNode, nodes: readonly PlanNode[]): StripTreeLabel {
+    const state = node.state;
+    if (state.kind === 'blocked') return { key: 'chat.plan.blocked', params: { ids: state.blocked_by.join(', ') } };
+    if (state.kind === 'waiting_dependencies') {
+        const pending = node.depends_on.filter(id => nodes.find(candidate => candidate.id === id)?.state.kind !== 'done');
+        return pending.length ? { key: 'chat.plan.waiting', params: { ids: pending.join(', ') } }
+            : { key: 'chat.plan.preparing' };
+    }
+    return { key: `chat.plan.node.${state.kind}` };
 }
 
 /** Presentation data only: no DOM, CSS, locale or view-local state. */
@@ -411,9 +479,11 @@ export interface StripTreeModel {
 /** parentId addresses a RUN, whereas the strip groups runs into thread rows. */
 export function buildStripTreeModel(rows: readonly StripRow[], collapsed: ReadonlySet<string> = new Set()): StripTreeModel {
     const byRun = new Map(rows.flatMap(row => row.runs.map(run => [run.id, row] as const)));
+    const byId = new Map(rows.map(row => [row.id, row]));
     const parents = new Map<StripRow, StripRow>();
     for (const row of rows) {
-        const parent = row.parentId ? byRun.get(row.parentId) : undefined;
+        const parent = row.kind === 'plan-node' ? byId.get(row.presentationParentId)
+            : row.parentId ? byRun.get(row.parentId) : undefined;
         if (!parent || parent === row) continue;
         // Retained history can be incomplete. Break cycles without dropping rows.
         let ancestor: StripRow | undefined = parent;
@@ -430,7 +500,8 @@ export function buildStripTreeModel(rows: readonly StripRow[], collapsed: Readon
         return row.state.kind === 'running' && q.kind === 'waiting' && q.question.recipient.kind === 'sub'
             ? [q.question.recipient.runId] : [];
     }));
-    const live = (row: StripRow): boolean => ['running', 'stopping', 'queued'].includes(row.state.kind);
+    const live = (row: StripRow): boolean => row.kind === 'plan' ? row.state.kind === 'plan' && row.state.status === 'active'
+        : ['running', 'stopping', 'queued'].includes(row.state.kind) || (row.kind === 'plan-node' && row.node.state.kind === 'waiting_dependencies');
     const label = (row: StripRow): StripTreeLabel => {
         if (row.state.kind === 'running' && row.questionState.kind === 'waiting') {
             const recipient = row.questionState.question.recipient;
@@ -440,6 +511,7 @@ export function buildStripTreeModel(rows: readonly StripRow[], collapsed: Readon
         if (row.state.kind === 'running' && row.runs.some(run => run.status === 'running' && askingParents.has(run.id))) {
             return { key: 'chat.substrip.tree_answering' };
         }
+        if (row.kind === 'plan-node' && row.state.kind !== 'running' && row.state.kind !== 'stopping') return row.label;
         if (row.state.kind === 'queued') return { key: 'chat.substrip.tree_queued' };
         const last = row.runs[row.runs.length - 1];
         if (!live(row) && (last?.status === 'aborted' || ['chat.substrip.state_partial_user', 'chat.substrip.state_partial_lead', 'chat.substrip.state_partial_system'].includes(last?.endLabelKey ?? ''))) {
@@ -456,7 +528,7 @@ export function buildStripTreeModel(rows: readonly StripRow[], collapsed: Readon
     const build = (row: StripRow, depth: number): StripTreeNode => {
         const nodes = (children.get(row) ?? []).map(child => build(child, depth + 1));
         const descendantCount = nodes.reduce((sum, node) => sum + 1 + node.descendantCount, 0);
-        const stopDescendantCount = nodes.reduce((sum, node) => sum + Number(live(node.row)) + node.stopDescendantCount, 0);
+        const stopDescendantCount = nodes.reduce((sum, node) => sum + Number(node.row.kind !== 'plan' && live(node.row)) + node.stopDescendantCount, 0);
         const seconds = Math.floor(Math.max(0, row.durationMs) / 1000);
         return { row, depth, children: nodes, collapsed: nodes.length > 0 && collapsed.has(row.id), descendantCount,
             hiddenCount: collapsed.has(row.id) ? descendantCount : 0, stopDescendantCount,
@@ -473,5 +545,5 @@ export function buildStripTreeModel(rows: readonly StripRow[], collapsed: Readon
     roots.forEach(visit);
     const counts = summarizeStripRows(rows);
     return { hierarchical: parents.size > 0, roots, visible, counts,
-        summary: { key: 'chat.substrip.tree_summary', params: counts } };
+        summary: { key: rows.some(row => row.kind === 'plan') ? 'chat.plan.summary' : 'chat.substrip.tree_summary', params: counts } };
 }

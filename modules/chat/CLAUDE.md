@@ -1738,3 +1738,22 @@ so a repeated restore keeps the tab without adding a synthetic RollingWindow mes
 the file's exact owner and epoch and remains inert. `chat/chat_session.test.ts` covers both paths,
 two restores, an interrupted group with a not_executed node, and unchanged session identity.
 The group renderer remains P5; P4 supplies its complete historical registry model.
+
+### 2.4.6 P5 - plan groups, receipts and readable results
+
+`subTaskStrip` consumes `listPlans(owner)` through the existing tree renderer. Even an empty strip
+subscribes to `plan:changed`; refresh preserves the existing owner-scoped collapse/focus state.
+Group Stop invokes `requestStopPlan` once, so runs and dependencies share the registry's atomic Stop.
+Plan-node controls target the original execution, never a later thread continuation. Nodes without
+runs show graph errors/material directly. Plan appearance uses only classes in `src/styles.css`.
+
+`delegateBlockView.buildPlanView` validates receipt/result graph fields and produces localized text;
+`buildPlanBlockOptions` adapts it to the existing delegate tile without manufacturing a `task_id`.
+Both live tool rendering and history rendering use this adapter. History prefers the restored registry
+snapshot; without it, unfinished receipt nodes display interrupted/not executed. `machineMessage`
+recognizes plan notifications by metadata or PL/EN header after restart, and renders the fenced state
+map as readable text, including partial material and blocked predecessors. Invalid payloads show an
+unavailable result. These adapters do not change the model's transcript or publish delegate arguments.
+Tests: `chat/subTaskStrip.test.ts` checks real registry Stop, empty-to-plan refresh, owner isolation,
+collapse/focus and legacy DOM; `chat/render_messages.delegateError.test.ts` checks live/history receipts
+without a task ID and the same partial result with and without persisted metadata.

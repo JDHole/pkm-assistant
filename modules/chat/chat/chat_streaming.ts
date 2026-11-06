@@ -35,7 +35,7 @@ import {
 import { getDateLocale, t } from '../../../core/i18n/index.js';
 import { buildParentConversationView } from './parentConversationView.js';
 import type { ParentConversationMetadata } from '../../sub-agents/index.js';
-import { buildDelegateBlockOptions } from './delegateBlockView.js';
+import { buildDelegateBlockOptions, buildPlanBlockOptions } from './delegateBlockView.js';
 import { subAgentCallView } from './subAgentCallView.js';
 import { findOpenSubQuestion, answeredSubQuestion, renderAnsweredSubQuestion } from './subQuestionView.js';
 import streamingManager, { shouldUseFreshModel } from './StreamingManager.js';
@@ -1644,6 +1644,7 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
 
         // --- UI updates (only on active tab) ---
         if (isActiveTab && toolDisplay) {
+            const planOptions = isSubAgent && !error ? buildPlanBlockOptions(result, id => this.plugin?.subTaskRegistry?.getPlan?.(id)) : undefined;
             if (error) {
                 if (isSubAgent) {
                     // Blad transportu (np. wyjatek w trakcie executeToolCall, przed dotarciem do
@@ -1668,6 +1669,8 @@ export async function _chatOnToolResults(this: ChatViewLike, turn: ChatTurn, res
                 }
             } else if (toolCall.name === 'sub_agent' && toolArgs.action === 'message' && result?.success === true && answeredSubQuestion(result.sub_question_view)) {
                 toolDisplay.replaceWith(renderAnsweredSubQuestion(answeredSubQuestion(result.sub_question_view)!));
+            } else if (planOptions) {
+                toolDisplay.replaceWith(createDelegateBlock(planOptions));
             } else if (isSubAgent && result?.started === true) {
                 // Delegacja W TLE. Nie ma wyniku do pokazania - jest pokwitowanie startu.
                 // Bez tej gałęzi leciała gałąź „success" niżej i rysowała PUSTĄ ramkę

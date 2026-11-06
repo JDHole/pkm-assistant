@@ -1,3 +1,4 @@
+import { buildPlanView } from './delegateBlockView.js';
 import { buildParentConversationView } from './parentConversationView.js';
 import type { ParentConversationMetadata } from '../../sub-agents/index.js';
 import type { SubAgentConversationView } from '../../ui-components/index.js';
@@ -33,7 +34,7 @@ import type { BuildSubAgentResultViewInput } from './subAgentResultView.js';
 import type { RunOutcome, SubTaskResultThread } from '../../sub-agents/index.js';
 import type { SubAgentResultView } from '../../ui-components/index.js';
 
-export type MachineKind = 'subtask_notification' | 'subtask_question' | 'artifact_summon' | 'loop_partial' | null;
+export type MachineKind = 'plan_result' | 'subtask_notification' | 'subtask_question' | 'artifact_summon' | 'loop_partial' | null;
 
 export interface MachineViewOpen {
     label: string;
@@ -157,6 +158,8 @@ export function classifyMachineMessage(msg: MachineMessageLike | null | undefine
     if (!msg) return null;
     if (msg.role === 'system' && (msg._loopPartial === true || LOCALES.some(locale => typeof msg.content === 'string' && msg.content.startsWith(t('chat.streaming.partial_header', undefined, locale))))) return 'loop_partial';
     if (msg.role !== 'user') return null;
+    if (msg.origin !== 'human' && (typeof msg.subTaskPlanId === 'string' || LOCALES.some(locale =>
+        typeof msg.content === 'string' && msg.content.startsWith(t('chat.plan_result.header', { id: '' }, locale))))) return 'plan_result';
     if (msg._subTaskNotification === true) return 'subtask_notification';
     if (msg._artifactSummon === true) return 'artifact_summon';
     // Uwaga 1 (spec A3-fix): meta ma pierwszeństwo w OBIE strony - `origin:'human'` zapisany na
@@ -416,6 +419,14 @@ export function buildMachineView(msg: MachineMessageLike | null | undefined, ctx
     if (!kind) return null;
     const text = typeof msg?.content === 'string' ? msg.content : '';
 
+    if (kind === 'plan_result') {
+        const body = text.match(/\n<vault_content source="plan_result">\n([\s\S]*)\n<\/vault_content>$/)?.[1];
+        let raw: unknown;
+        try { raw = body ? JSON.parse(body) : undefined; } catch { raw = undefined; }
+        const view = buildPlanView(raw, undefined, false, ctx.t);
+        return { kind, ...(view ?? { title: ctx.t('chat.plan.name'), summary: ctx.t('chat.plan.unavailable'),
+            details: '', status: 'error' as const }) };
+    }
     if (kind === 'loop_partial') {
         return {
             kind, title: ctx.t('chat.streaming.partial_header'),
