@@ -151,6 +151,28 @@ payload jako snapshot zdarzenia, a aktualny stan pobierać przez `getReport()`.
 Testy zachowania: `SubTaskRegistry.plan.test.ts` (rejestr, scheduler, notifier,
 skrzynka rodzica, pytania, Stop i retencja), plus istniejące testy rejestru.
 
+### 2.4.6 P3 — gotowość dla puli
+
+`PlanHandle` rozszerza `PlanReadyDriver`: `nextReady(): Promise<number | undefined>`
+oddaje indeks w kolejności wejściowej, najwyżej raz, a `undefined` dopiero po
+terminalnym rozliczeniu całego planu. Wszystkie robotniki używają tego samego uchwytu.
+Przejście `waiting → queued` pozostaje atomową częścią transakcji `settle` z P2
+(przed `task:finished`); driver synchronicznie zajmuje gotowy indeks przed pierwszym
+`await`. Dzięki temu nie zmienia obserwowalnego kontraktu P2 i nie startuje zadania
+dwukrotnie przy jednoczesnym końcu poprzedników. Nie ma bariery całej fali.
+
+`canDispatch(index)` ponownie sprawdza stan po oczekiwaniu na indeks. Thunk nadal
+musi zachować istniejący Stop i walidację po admission. Driver nie przyjmuje slotów,
+nie tworzy modeli, timerów ani kopii wyników. Śpiące wywołania subskrybują `task:plan`
+i odpinają nasłuch po obudzeniu; czytają bieżący raport, nie snapshot zdarzenia.
+Cykl życia jest taki jak rejestru: przed `dispose()` trzeba wywołać Stop, aby
+rozliczyć plan i obudzić śpiących. Uchwyty planu należy zwolnić po zakończeniu puli.
+
+Barrel udostępnia też `terminalPlanState`, aby budowniczy materiału w tools używał
+tej samej klasyfikacji sukcesu co rejestr. Publiczne uruchamianie planu, zamrożenie
+limitu dla wywołania i lifetime tła nadal należą do P5. Testy kontraktu puli z
+prawdziwym rejestrem/schedulerem: `../tools/DelegateTool.dependencies.test.ts`.
+
 ### Istniejący runtime
 
 Protokół pytań rodzica jest częścią `SubTaskRegistry`: `openParentQuestion(taskId, text)` zwraca pytanie i Promise rozstrzygnięcia albo odmowę; `answerParentQuestion(taskId, questionId, owner, actor, text)`, `getQuestionState`, `isQuestionOpen`, `promoteToBackground` i `registerUserWait(owner, cancel)` obsługują odpowiedź, stan i pauzę. `actor: QuestionRecipient` wskazuje prowadzącego albo konkretny bieg rodzica. Starszy wariant `answerParentQuestion(taskId, questionId, owner, text)` oznacza wyłącznie prowadzącego. Funkcja zwolnienia kanału użytkownika jest idempotentna; `dispose` anuluje otwarte kanały. Zegar pytania mierzy monotonicznie 300000 ms, pauzuje tylko dla pełnego właściciela i nie resetuje pozostałego czasu. Stop, koniec biegu i unload zamykają oczekiwanie przed powiadomieniem obserwatorów. `SubTask.questionState` jest opcjonalne dla starszych danych, a model paska normalizuje brak do `none`.

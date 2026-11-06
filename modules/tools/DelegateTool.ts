@@ -31,6 +31,8 @@ import { AccessGuard, maskSensitiveData, configuredChatSecrets } from '../../cor
 import type { ScopeFolders, PermissionedAgent } from '../../core/index.js';
 import { getLimits, DEFAULT_LIMITS } from '../../config/limits.js';
 import { log } from '../../core/utils/Logger.js';
+import type { PlanReadyDriver } from '../sub-agents/index.js';
+import type { DependencyContext } from './delegateDependencyContext.js';
 
 /** Pojedyncze zadanie w trybie wielozadaniowym (`args.tasks[]`). */
 export interface DelegateTaskDef {
@@ -1593,6 +1595,8 @@ function pendingMetadata(prepared: PreparedParentDelegation): ParentConversation
 }
 
 type SubRunControl = {
+    /** Built at dispatch with the plan's frozen cap; independent of args.context's cap. */
+    dependencyContext?: DependencyContext;
     invocationCancelled?: () => boolean;
     admission?: RunAdmission;
     prepared?: PreparedParentDelegation;
@@ -1890,6 +1894,7 @@ async function _executeSubAgent(
             : args.context;
         taskPrompt = `${t('mcp.delegate.context_header')}\n${ctx}\n${t('mcp.delegate.context_footer')}\n\n${t('mcp.delegate.task_header')}\n${args.task}\n${t('mcp.delegate.task_footer')}`;
     }
+    if (runControl.dependencyContext?.text) taskPrompt += `\n\n${runControl.dependencyContext.text}`;
 
     // `scope.folders` custom suba nie jest samą wskazówką w prompcie — jedzie do
     // łańcucha uprawnień jako DODATKOWE zawężenie (przecięcie rodzic∩sub). Puste/brak = zero
@@ -2131,7 +2136,27 @@ function _resolveTaskConcurrency(
  * W NIESKOŃCZONOŚĆ zamiast wrócić z odmową. Guard mieszka dziś WEWNĄTRZ każdego
  * thunka (`taskThunks` w `execute`), gdzie `gate` jest w zasięgu i zdąży się otworzyć.
  */
-async function _runWithConcurrency(thunks: Array<() => Promise<unknown>>, limit: number): Promise<unknown[]> {
+type ReadyPoolDriver = PlanReadyDriver & {
+    /** Settle this node's failure before returning its tool result; other branches continue. */
+    onError(index: number, error: unknown): unknown;
+};
+
+async function _runWithConcurrency(thunks: Array<() => Promise<unknown>>, limit: number, driver?: ReadyPoolDriver): Promise<unknown[]> {
+    if (driver) {
+        // Unstarted terminal nodes leave undefined entries for the plan report adapter.
+        const results = new Array<unknown>(thunks.length).fill(undefined);
+        const workers = Array.from({ length: Math.max(1, Math.min(limit, thunks.length)) }, async () => {
+            for (;;) {
+                const i = await driver.nextReady();
+                if (i === undefined) return;
+                if (!driver.canDispatch(i)) continue;
+                try { results[i] = await thunks[i](); }
+                catch (error: unknown) { results[i] = driver.onError(i, error); }
+            }
+        });
+        await Promise.all(workers);
+        return results;
+    }
     const results = new Array<unknown>(thunks.length);
     let next = 0;
     const workers = Array.from({ length: Math.max(1, Math.min(limit, thunks.length)) }, async () => {
@@ -2308,6 +2333,7 @@ function _withTimeout<T>(
 }
 
 export const __test__ = {
+    _executeSubAgent,
     _resolveDelegate,
     _withTimeout,
     // Uzbrojenie budzika zadania na pierwszym wjeździe na slot bramki.

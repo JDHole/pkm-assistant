@@ -30,6 +30,40 @@ export type PlanReport = DelegationPlan & Readonly<{
     counts: Readonly<Record<PlanTaskState['kind'], number>>;
 }>;
 
+export type PlanReadyDriver = Readonly<{
+    nextReady(): Promise<number | undefined>;
+    /** Recheck after awaiting the index: Stop may have latched in that microtask gap. */
+    canDispatch(index: number): boolean;
+}>;
+
+/** One queue per plan, shared by all pool workers. The registry commits waiting → queued
+ * atomically during settle, before notifications. Claim that queued index synchronously
+ * (before any await), so concurrent completions cannot dispatch a successor twice.
+ * Only sleeping callers subscribe; no polling, admission, timers or result-text copies.
+ */
+export function createPlanReadyDriver(
+    getReport: () => PlanReport, subscribe: (wake: () => void) => () => void,
+): PlanReadyDriver {
+    const claimed = new Set<number>();
+    return Object.freeze({
+        async nextReady(): Promise<number | undefined> {
+            for (;;) {
+                const report = getReport();
+                const index = report.nodes.findIndex((node, i) => node.state.kind === 'queued' && !claimed.has(i));
+                if (index !== -1) { claimed.add(index); return index; }
+                if (report.complete) return undefined;
+                let wake!: () => void;
+                const changed = new Promise<void>(resolve => { wake = resolve; });
+                const off = subscribe(wake);
+                // Covers a synchronous change during subscription, without a lost wakeup.
+                if (getReport() === report) await changed;
+                off();
+            }
+        },
+        canDispatch: (index: number) => claimed.has(index) && getReport().nodes[index]?.state.kind === 'queued',
+    });
+}
+
 /** Runtime supplies a unique ID; validation does not allocate one or consult a clock. */
 export function parsePlanId(value: unknown): PlanId | undefined {
     return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value as PlanId : undefined;

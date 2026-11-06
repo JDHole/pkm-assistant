@@ -152,6 +152,8 @@ export const DEFAULT_LIMITS = {
   // do suba. Wcześniej hardcode 16000 w `DelegateTool._executeSubAgent`. To najważniejszy kanał
   // „rodzic wie coś, czego sub nie wyszuka" — 16k było ciasne dla okien 128k+.
   delegation_context_max_chars: 48000,
+  // Whole direct-predecessor material section, including framing and truncation markers.
+  delegation_dependencies_max_chars: 20000,
 
   // Watchdog martwego streamu czatu (ms): ile ciszy modelu (zero chunków) tolerujemy,
   // zanim tura zostanie przerwana tą samą ścieżką co ręczny Stop (chat_streaming
@@ -229,6 +231,7 @@ export const LIMIT_SPECS: Record<LimitKey, LimitSpec> = {
   // Min 1000 (kontekst od rodzica ma sens dopiero od akapitu w górę), sufit 200000 —
   // tyle, co sufit wyniku narzędzia; oba karmią to samo okno kontekstu suba.
   delegation_context_max_chars:       { min: 1000, ceiling: 200000, integer: true },
+  delegation_dependencies_max_chars:  { min: 4096, ceiling: 200000, integer: true },
   // 0 jest legalny (= watchdog wyłączony). Sufit = twardy timeout XHR adaptera (600 s).
   chat_stream_stall_timeout_ms:       { min: 0,    ceiling: 600000, integer: true },
   // 0 legalny (= budzik wyłączony). Sufit 900 s — powyżej tego to już nie jest „wolny

@@ -202,6 +202,15 @@ test('delegation_context_max_chars default 48000, min 1000, ceiling 200000', t =
     t.is(getLimits({ pkmAssistant: { limits: { delegation_context_max_chars: 0 } } }).delegation_context_max_chars, 48000);
 });
 
+test('dependency section limit validates integers, minimum, ceiling and rejects unlimited', t => {
+    const read = (value: unknown) => getLimits({ pkmAssistant: { limits: { delegation_dependencies_max_chars: value } } }).delegation_dependencies_max_chars;
+    t.is(getLimits().delegation_dependencies_max_chars, 20000);
+    for (const invalid of [0, -1, 4095, Infinity, NaN, null, {}, true, 'bad']) t.is(read(invalid), 20000);
+    t.is(read(4096), 4096);
+    t.is(read('8192.9'), 8192);
+    t.is(read(200001), 200000);
+});
+
 test('subagent_final_grace_ms default 120000, min 5000, ceiling 240000', t => {
     t.is(DEFAULT_LIMITS.subagent_final_grace_ms, 120000);
     t.is(LIMIT_SPECS.subagent_final_grace_ms.min, 5000);

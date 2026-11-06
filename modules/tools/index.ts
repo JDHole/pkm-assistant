@@ -38,6 +38,8 @@ export { createDelegateTool } from './DelegateTool.js';
 // P1 contract only; dispatch integration follows in P5.
 export { parseDelegatePlan } from './delegatePlanInput.js';
 export type { ParsePlanResult } from './delegatePlanInput.js';
+export { buildDependencyContext } from './delegateDependencyContext.js';
+export type { DependencyResult, DependencyContext } from './delegateDependencyContext.js';
 // P3 runtime API; dispatcher integration follows in P4, model schema publication in P5.
 export { prepareParentConversationDelegation, isPreparedParentDelegationCurrent } from './parentConversationConsent.js';
 export type { ParentConsentResult, PreparedParentDelegation } from './parentConversationConsent.js';

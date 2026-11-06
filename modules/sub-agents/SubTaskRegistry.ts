@@ -37,8 +37,8 @@ import type { AgentLoopPartialSnapshot, AgentLoopStopReason } from '../agent-loo
 import { maskSensitiveData } from '../../core/index.js';
 import { EventEmitter } from '../../core/index.js';
 import { log } from '../../core/utils/Logger.js';
-import { getPlanReport } from './DelegationPlan.js';
-import type { DelegationGraph, PlanId, PlanNodeId, PlanReport, PlanTaskMetadata } from './DelegationPlan.js';
+import { createPlanReadyDriver, getPlanReport } from './DelegationPlan.js';
+import type { DelegationGraph, PlanId, PlanNodeId, PlanReadyDriver, PlanReport, PlanTaskMetadata } from './DelegationPlan.js';
 import { refreshPlan, terminalPlanState, planStopRoots } from './planTaskLifecycle.js';
 import type { TaskTerminal } from './planTaskLifecycle.js';
 import type { RunOutcome, StopBy } from './runOutcome.js';
@@ -210,7 +210,7 @@ export type ReservePlanInput = Readonly<{
     planId: PlanId; graph: DelegationGraph; tasks: readonly PlanReservation[];
     owner: SubThreadOwner; origin: SubTaskOrigin; parentId?: string; level?: number; background?: boolean;
 }>;
-export type PlanHandle = Readonly<{ planId: PlanId; getReport(): PlanReport }>;
+export type PlanHandle = PlanReadyDriver & Readonly<{ planId: PlanId; getReport(): PlanReport }>;
 const isActiveTask = (task: SubTask): boolean => task.status === 'running' || task.status === 'waiting';
 
 /** Ile ZAKOŃCZONYCH biegów trzymamy w pamięci (starsze wypadają). */
@@ -278,7 +278,9 @@ export class SubTaskRegistry {
         const finished = tasks.filter(task => !isActiveTask(task));
         const report = this._refreshPlan(input.planId, finished);
         this._publishPlan(report, finished, tasks, threads);
-        return Object.freeze({ planId: input.planId, getReport: () => cell.report });
+        const getReport = () => cell.report;
+        return Object.freeze({ planId: input.planId, getReport,
+            ...createPlanReadyDriver(getReport, wake => this.events.on('task:plan', wake)) });
     }
 
     /** First terminal wins, including timeout before a late runner success. */

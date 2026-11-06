@@ -94,3 +94,5 @@ export type { ParentConversationPreparation, ParentConversationMetadata } from '
 
 export type { PlanHandle, PlanReservation, ReservePlanInput } from './SubTaskRegistry.js';
 export type { TaskTerminal } from './planTaskLifecycle.js';
+export { terminalPlanState } from './planTaskLifecycle.js';
+export type { PlanReadyDriver } from './DelegationPlan.js';

@@ -107,6 +107,40 @@ jego publicznego schematu; integracja należy do P5. Eksport parsera i typu
 `core/dead_code_zasieg.test.ts`, bez wyjątku w strażniku osiągalności.
 Testy: `delegatePlanInput.test.ts`.
 
+**2.4.6 P3:** pula `_runWithConcurrency` ma opcjonalny driver `nextReady`,
+`canDispatch` i `onError`. Bez drivera wykonuje dotychczasową gałąź bez zmian.
+Driver korzysta ze wspólnego `PlanHandle`; indeksy i wyniki zachowują kolejność
+wejścia. Po `await nextReady()` sprawdzany jest Stop przez `canDispatch`, dopiero
+potem startuje istniejący thunk z admission i timeoutem. `onError` musi synchronicznie
+rozliczyć wyjątek węzła w rejestrze i zwrócić jego wynik; niezależne gałęzie pracują
+dalej. Niewystartowane terminalne węzły zostawiają `undefined` pod swoim indeksem:
+adapter P5 uzupełni je z raportu rejestru. Thunki nadal odpowiadają za ponowne
+sprawdzenie zatrzasków i przygotowania po admission oraz zachowanie dzierżawy.
+
+`buildDependencyContext(results, cap)` i typy `DependencyResult`/`DependencyContext`
+są dostępne przez barrel. Wołający wybiera pełne `SubTaskResult` bezpośrednich
+poprzedników w kolejności `depends_on`; wynik to `{ text, truncated }`. Budowniczy
+odrzuca partial/no-answer/niepowodzenie według tej samej klasyfikacji co rejestr,
+nie używa handoff ani skrótów doręczanych prowadzącemu. Teksty pozostają literalne,
+ogrodzone znacznikami materiału dobranymi tak, by treść nie zamknęła własnej sekcji.
+Nagłówki, informacja o braku nowych instrukcji/uprawnień i znaczniki skrócenia są PL/EN.
+
+`delegation_dependencies_max_chars` ma default 20000, minimum 4096 i sufit 200000,
+bez trybu unlimited. Limit obejmuje całą sekcję (UTF-16 jak pozostałe limity):
+nagłówki, ogrodzenia, separatory i znaczniki. Pełne teksty są zachowane, jeśli się
+mieszczą; inaczej równy podział budżetu oddaje wolne miejsce krótkich wyników
+dłuższym, deterministycznie w kolejności wejścia. Niemożliwie mały cap daje jawny
+RangeError zamiast zgubienia poprzednika. Legalne 19 poprzedników z ID długości 64
+mieści oprawę również przy minimum 4096.
+
+Wewnętrzne `SubRunControl.dependencyContext` dopina gotową sekcję w `_executeSubAgent`
+po ręcznym kontekście i zadaniu, przed `runTask` oraz dopasowaniem rozmowy rodzica.
+Nie przechodzi przez limit `args.context`. P5 ma zamrozić cap raz na wywołanie planu
+i budować materiał w chwili dispatch; P3 nie zmienia publicznego schematu ani
+nie uruchamia jeszcze planów przez `delegate.execute`. Testy:
+`DelegateTool.dependencies.test.ts`, `delegateDependencyContext.test.ts`,
+`config/limits.test.ts` oraz istniejące testy delegacji.
+
 Pojedyncze zadanie z `outcome` ma `success: true` wyłącznie przy
 `outcome.completeness === 'unconfirmed'`. Pozostałe końce zwracają `success: false`,
 krótki `error` opisujący koniec, opcjonalny `partial_result` z tekstu biegu albo
