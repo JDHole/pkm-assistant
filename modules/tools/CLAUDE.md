@@ -89,6 +89,24 @@ modules/tools/
 
 ### DelegateTool: wynik biegu i listy tasks
 
+**2.4.6 P1:** `delegatePlanInput.ts` udostępnia przez barrel `index.ts`
+`parseDelegatePlan(input: unknown, maxTasks: number): ParsePlanResult`.
+Zwraca `{kind:'legacy'}`, `{kind:'plan', graph}` albo `{kind:'invalid', error}`.
+Schema sprawdza obiekt, listę i pola grafu; istniejąca walidacja zadania, aspektu,
+trybu kontekstu i pozostałych argumentów nadal należy do `DelegateTool`.
+Parser nie przepisuje argumentów ani nie wykonuje zgód/rezerwacji/modeli.
+Graf zwrotny jest zamrożoną kopią ID i krawędzi w kolejności wejścia.
+Przynajmniej jedna krawędź wymaga ID każdego zadania; ID są unikalne,
+rozróżniają wielkość liter i mają 1–64 znaki `[A-Za-z0-9_-]`.
+Walidacja odrzuca błędne referencje, self-edge, duplikaty zależności i cykle
+(z ich ścieżką); limit liczy wszystkie węzły. Poprawna lista bez krawędzi,
+również z `depends_on: []` i bez ID, wraca jako legacy. Pojedyncze zadanie
+pozostaje legacy. Parser celowo nie jest jeszcze podpięty do narzędzia ani
+jego publicznego schematu; integracja należy do P5. Eksport parsera i typu
+`ParsePlanResult` utrzymuje kontrakt w grafie produkcyjnym wymaganym przez
+`core/dead_code_zasieg.test.ts`, bez wyjątku w strażniku osiągalności.
+Testy: `delegatePlanInput.test.ts`.
+
 Pojedyncze zadanie z `outcome` ma `success: true` wyłącznie przy
 `outcome.completeness === 'unconfirmed'`. Pozostałe końce zwracają `success: false`,
 krótki `error` opisujący koniec, opcjonalny `partial_result` z tekstu biegu albo

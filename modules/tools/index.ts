@@ -35,6 +35,9 @@ export type { EffectCheck, EffectTarget, EffectTargetIo, EffectTargetKind, ToolE
 
 // ── Delegacja (sub-agent + agent). `agent_message` nie istnieje — pocztę robi `kom_send`.
 export { createDelegateTool } from './DelegateTool.js';
+// P1 contract only; dispatch integration follows in P5.
+export { parseDelegatePlan } from './delegatePlanInput.js';
+export type { ParsePlanResult } from './delegatePlanInput.js';
 // P3 runtime API; dispatcher integration follows in P4, model schema publication in P5.
 export { prepareParentConversationDelegation, isPreparedParentDelegationCurrent } from './parentConversationConsent.js';
 export type { ParentConsentResult, PreparedParentDelegation } from './parentConversationConsent.js';

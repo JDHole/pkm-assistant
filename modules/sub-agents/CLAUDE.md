@@ -70,6 +70,33 @@ modules/sub-agents/
 
 ## Public API (`index.js`)
 
+### 2.4.6 P1 — kontrakt planu zależności
+
+`DelegationPlan.ts` eksportuje przez barrel branded `PlanId`/`PlanNodeId`,
+`DelegationGraph`, `DelegationPlan`, `PlanNode`, `PlanTaskMetadata`, `PlanTaskState`,
+`PlanReport` oraz pomocnicze `PlanGraphNode`, `Dependency`, `NonEmpty`, `FailureReason`.
+`parsePlanId(unknown)` waliduje 1–128 znaków `[A-Za-z0-9_-]`, a `parsePlanNodeId(unknown)`
+1–64; obie funkcje zwracają ID albo `undefined`, bez normalizacji lub generowania ID.
+Unikalny PlanId dostarcza przyszły runtime. Graf zachowuje kolejność wejściową.
+
+`getPlanDependencyState(dependencies, states)` liczy gotowość: tylko `finished`
+odblokowuje; waiting/queued/running pozostają w `pending`, failed/blocked dają
+`blocked` z unikalnymi pierwotnymi przyczynami w kolejności zależności.
+`queued` w tym wyniku znaczy gotowość do przyjęcia, nie zajęcie slotu.
+`propagatePlanBlocks(plan)` zwraca nowy stan przechodnich blokad, nie mutuje wejścia,
+nie zmienia terminalnych stanów i nie przejmuje gotowych zadań. Aktualizację `pending`
+oraz atomowe waiting → queued wykona rejestr, korzystając z helpera gotowości.
+Helpery przyjmują kompletny, wcześniej zwalidowany DAG i mapowanie nodeId → runId;
+brak rekordu zależności jest błędem kontraktu wewnętrznego.
+
+`getPlanReport(plan)` zwraca głęboko zamrożoną kopię metadanych w kolejności wejścia,
+liczniki sześciu stanów i `complete` dla niepustego planu bez waiting/queued/running.
+Raport nie zawiera tekstów wyników. Niepełne wykonanie to failed/incomplete;
+rozłączne liczniki dorobku finished/partial/failed/blocked wyliczy adapter narzędzia.
+P1 nie rejestruje ani nie uruchamia planów. Testy: `DelegationPlan.test.ts`.
+
+### Istniejący runtime
+
 Protokół pytań rodzica jest częścią `SubTaskRegistry`: `openParentQuestion(taskId, text)` zwraca pytanie i Promise rozstrzygnięcia albo odmowę; `answerParentQuestion(taskId, questionId, owner, actor, text)`, `getQuestionState`, `isQuestionOpen`, `promoteToBackground` i `registerUserWait(owner, cancel)` obsługują odpowiedź, stan i pauzę. `actor: QuestionRecipient` wskazuje prowadzącego albo konkretny bieg rodzica. Starszy wariant `answerParentQuestion(taskId, questionId, owner, text)` oznacza wyłącznie prowadzącego. Funkcja zwolnienia kanału użytkownika jest idempotentna; `dispose` anuluje otwarte kanały. Zegar pytania mierzy monotonicznie 300000 ms, pauzuje tylko dla pełnego właściciela i nie resetuje pozostałego czasu. Stop, koniec biegu i unload zamykają oczekiwanie przed powiadomieniem obserwatorów. `SubTask.questionState` jest opcjonalne dla starszych danych, a model paska normalizuje brak do `none`.
 
 Zmiana zegara oczekującego pytania emituje `question:clock` po zapisaniu pauzy lub wznowienia, z pytaniem jako payloadem. Model wyniku przyjmuje stan pytania oraz pytanie z wyniku; zamknięty stan ma pierwszeństwo. Dla `no-answer` udostępnia treść otwartego pytania, a `cancelled` zachowuje jako osobne rozstrzygnięcie.

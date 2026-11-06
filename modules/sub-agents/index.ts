@@ -18,6 +18,9 @@ export {
 } from './SubAgentLoader.js';
 export { SubAgentRunner } from './SubAgentRunner.js';
 export { allocateSubTaskId } from './subTaskId.js';
+export { parsePlanId, parsePlanNodeId, getPlanDependencyState, propagatePlanBlocks, getPlanReport } from './DelegationPlan.js';
+export type { PlanId, PlanNodeId, NonEmpty, Dependency, FailureReason, PlanTaskState, PlanTaskMetadata,
+    PlanGraphNode, DelegationGraph, PlanNode, DelegationPlan, PlanReport } from './DelegationPlan.js';
 // Kształt zwrotki runnera (sposób zejścia + flaga niepowodzenia) — czyta go `DelegateTool`.
 export type { SubRunResult, SubRunStoppedBy } from './SubAgentRunner.js';
 // Rejestr biegów subów + szyna zdarzeń. Pure (obsidian-free) —
