@@ -330,10 +330,13 @@ WŁAŚCIWEGO agenta/zakładki, nie do tego, co akurat widać na ekranie.
 - **Mid-loop compression ustawia `rollingWindow.sessionPath` tak samo jak end-of-turn** (czyta
   ją `Summarizer` do stopki "pełna rozmowa zapisana w: ...") - obie ścieżki kompresji muszą
   używać zamrożonej ścieżki tury, nie współdzielonego wskaźnika pamięci agenta.
-- The send reserves `_preparingTurns` with its abort handle before the first await,
+- Human and legacy sends reserve `_preparingTurns` with their abort handle before the first await,
   including idle saves, slash commands and mention resolution. Ownership still freezes
-  after user-message persistence; before acceptance, resumed preparation checks the captured
-  tab/window and abort latch. New awaits in this region must preserve those checks.
+  after user-message persistence; each resumed preparation checks its reservation identity,
+  conflicting live preparations/streams and the abort latch. Before acceptance it also checks
+  the captured tab/window. Notifications acquire the same reservation synchronously just before
+  insertion, yielding to a human who reserved the window during an earlier await. New awaits
+  must preserve these checks; an accepted message is still persisted if Stop interrupts rendering.
 - ⚠️ **`_switchTab` NIE jest blokowany w trakcie generowania i nie będzie** - user ma prawo
   czytać inną zakładkę, gdy agent pracuje. Bezpieczeństwo stoi na tym, że żywa tura trzyma
   WŁASNE referencje (zamrożone), nie na tym, że nikt nic nie przełączy.
@@ -1787,3 +1790,18 @@ The workspace `quit` handler calls `interruptPlansForUnload()` before `stop_all_
 Plugin disable is handled earlier by the composition root's `unload()` override, because
 Obsidian closes registered views before calling `onunload()`. A normal view close still has
 system Stop semantics. Ordinary sub-result delivery during unload is unchanged.
+
+### 2.4.6 P9 - reservation checks after preparation awaits (O1)
+
+One live turn owns a frozen tab key and conversation window across preparation and streaming.
+`send_message` checks both maps synchronously before acquiring or moving a reservation and
+revalidates its own abort handle after each preparation await, including idle saves and mentions.
+An unaccepted notification may wait on an idle save without reserving the window; if a human
+reserves it meanwhile, the notification returns without insertion or acknowledgement and its
+existing notifier claim is released. No extra queue or retry is introduced.
+
+`chat/subTaskPlanDelivery.test.ts` holds a plan auto turn on `handleSaveSession`, then a human
+send on `_resolveMentions`, and releases the save first. Actual model requests show one active
+human turn, with the deferred result consumed once by the existing next-human-turn path after
+mentions resume. Stop leaves zero active requests and empty turn maps; a later turn completes
+normally without duplicating the result. On e87643c this test observes two concurrent requests.

@@ -257,7 +257,11 @@ test.serial('A2: turn started before Stop cannot resume sub after mention resolu
         async append_message(role: 'user', content: string) { rw.addMessage(role, content); }, async appendToActiveSession() {},
         get_chat_model: () => model, _chatResolveTools: () => [{ type: 'function', function: { name: 'sub_agent', parameters: {} } }],
         _chatExecuteToolCall, _chatOnIterationStart() {}, _chatOnToolCallsParsed() {}, _chatOnToolResults() {}, _chatBeforeContinue() {}, _chatOnUsage() {}, _chatOnBackstop() {},
-        _isTurnActiveTab: () => false, _finalizeTurn() { this.is_generating = false; }, handle_error(error: unknown) { throw error; },
+        _isTurnActiveTab: () => false,
+        _finalizeTurn(turn: Parameters<typeof _finalizeTurn>[0]) {
+            // Finish the reservation as production finalization does before the next send.
+            _releaseStreamCtx.call(this as never, turn.origin.tabKey ?? '', turn.turnId);
+        }, handle_error(error: unknown) { throw error; },
     };
     try {
         const first = send_message.call(view as never, { meta: { origin: 'human' } });

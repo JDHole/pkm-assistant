@@ -2,7 +2,7 @@ import { commitMessageEdit } from './messageEdit.js';
 import test from 'ava';
 import { RollingWindow } from './RollingWindow.js';
 import { startEditMessage, addMessageActions, regenerateLastResponse } from './chat_messages.js';
-import { send_message, _chatExecuteToolCall } from './chat_streaming.js';
+import { send_message, _chatExecuteToolCall, _releaseStreamCtx, _finalizeTurn } from './chat_streaming.js';
 import { parseActiveSession, formatSessionEvent } from '../../memory/activeSessionFormat.js';
 import type { RollingMessage } from './RollingWindow.js';
 import { AttachmentManager, MentionAutocomplete } from '../../ui-components/index.js';
@@ -74,7 +74,10 @@ for (const legacy of [false, true]) for (const edit of [false, true]) for (const
             _chatResolveTools: () => [{ type: 'function', function: { name: 'delegate', parameters: {} } }],
             _chatExecuteToolCall, _chatOnIterationStart() {}, _chatOnToolCallsParsed() {}, _chatOnToolResults() {},
             _chatBeforeContinue() {}, _chatOnUsage() {}, _chatOnBackstop() {}, _isTurnActiveTab: () => false,
-            _finalizeTurn() { this.is_generating = false; }, handle_error(error: unknown) { throw error; },
+            _finalizeTurn(turn: Parameters<typeof _finalizeTurn>[0]) {
+                // Finish the reservation as production finalization does before the next send.
+                _releaseStreamCtx.call(this as never, turn.origin.tabKey ?? '', turn.turnId);
+            }, handle_error(error: unknown) { throw error; },
         };
         if (edit && !legacy) {
             rw.clear();

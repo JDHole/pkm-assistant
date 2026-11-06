@@ -283,3 +283,88 @@ for (const stopWhileResolving of [false, true]) test.serial(`O1 human mention re
         stopWhileResolving ? [0, 0, [], [], 0, 0] : [1, 0, ['human'], ['human'], 0, 0]);
     t.deepEqual(f.notifier.pendingNotices().map(notice => notice.kind), ['plan-result']);
 });
+
+test.serial('O1 plan idle save yields to a human reservation, which later consumes the result and remains stoppable', async t => {
+    const f = await fixture(), window = new RollingWindow();
+    await window.addMessage('user', 'Previous conversation');
+    const saving = deferred<void>(), releaseSave = deferred<void>();
+    const resolving = deferred<void>(), releaseMentions = deferred<void>();
+    const planStarted = deferred<void>(), humanStarted = deferred<void>();
+    const sent: Promise<unknown>[] = [], cleanup: Array<() => void> = [];
+    const started: string[] = [], stopped: string[] = [], requests: Array<Array<{ content: unknown }>> = [];
+    let active = 0, maximum = 0, saves = 0;
+    let planSent!: Promise<unknown>;
+    const view = Object.assign(f.view, {
+        leaf: { id: 'plan-idle-save-race' }, rollingWindow: window, lastMessageTimestamp: 1,
+        input_area: { value: '' }, inputHistory: [], tokenTracker: { record() {} },
+        _preparingTurns: new Map(), _streamCtxMap: new Map(), _agentStates: new Map(),
+        _queueOwner, _releaseStreamCtx, stop_generation, _finalizeTurn,
+        env: { settings: { pkmAssistant: { enableOczko: false, limits: { chat_stream_stall_timeout_ms: 0 } } } },
+        set_generating(value: boolean) { f.view.is_generating = value; }, resetInputArea() { this.input_area.value = ''; },
+        showTypingIndicator() {}, hideTypingIndicator() {}, _resetPaintTargets() {}, _cleanupAskUser() {},
+        _showQueuedIndicator() {}, _hideQueuedIndicator() {}, _clearQueuedDrainTimer() {},
+        async handleSaveSession() { if (++saves === 1) { saving.resolve(); await releaseSave.promise; } },
+        async _resolveMentions(text: string) {
+            resolving.resolve(); await releaseMentions.promise;
+            return { displayText: text, contextText: '' };
+        },
+        append_message: (role: 'user', text: string, _display: unknown, meta: Record<string, unknown>) => window.addMessage(role, text, meta),
+        appendToActiveSession: async () => {}, _chatResolveTools: () => [], _chatOnIterationStart() {}, _chatOnUsage() {},
+        _isTurnActiveTab: () => false, handle_error(error: unknown) { throw error; },
+        get_chat_model() {
+            let stop = () => {};
+            return { modelKey: 'lead', stream(payload: { messages: Array<{ content: unknown }> }, handlers: { done(value: unknown): void }) {
+                const kind = payload.messages.some(message => message.content === 'Next human turn') ? 'Next human turn'
+                    : payload.messages.some(message => message.content === 'Human during save') ? 'Human during save' : 'plan';
+                requests.push(payload.messages); started.push(kind); active++; maximum = Math.max(maximum, active);
+                let ended = false;
+                stop = () => {
+                    if (ended) return;
+                    ended = true; stopped.push(kind); active--;
+                    handlers.done({ choices: [{ message: { role: 'assistant', content: '' } }] });
+                };
+                cleanup.push(stop);
+                (kind === 'plan' ? planStarted : humanStarted).resolve();
+                if (kind === 'Next human turn') {
+                    ended = true; active--;
+                    handlers.done({ choices: [{ message: { role: 'assistant', content: 'Follow-up reply' } }] });
+                }
+            }, stopStream() { stop(); } };
+        },
+        send_message(opts: unknown) {
+            planSent = send_message.call(this as never, opts as never); sent.push(planSent); return planSent;
+        },
+    });
+    Object.assign(view.plugin, { showCrystalNotice() {} });
+    Object.assign(view.plugin.agentManager, { getActiveSystemPromptWithMemory: async () => 'Lead system',
+        getAgentMemory: () => ({ activeSessionPath: owner.sessionPath, sessionEpoch: owner.sessionEpoch, async appendSessionEvent() {} }) });
+    t.teardown(async () => {
+        releaseSave.resolve(); releaseMentions.resolve(); stop_generation.call(view as never);
+        cleanup.forEach(stop => stop()); await Promise.all(sent); f.dispose();
+    });
+    f.plan.settle(f.plan.nodes[0].id, { kind: 'error', error: 'A failed', material: 'Saved A result.' });
+    f.plan.settle(f.plan.nodes[1].id, { kind: 'error', error: 'B failed' });
+    await saving.promise;
+    view.input_area.value = 'Human during save';
+    const humanSent = send_message.call(view as never, { meta: { origin: 'human' } }); sent.push(humanSent);
+    await resolving.promise;
+    releaseSave.resolve();
+    // The old code starts a model here; the fixed code returns and releases its notice claim.
+    await Promise.race([planSent, planStarted.promise]);
+    const waiting = f.notifier.pendingNotices().map(notice => notice.kind);
+    releaseMentions.resolve();
+    await Promise.race([humanSent, humanStarted.promise]);
+    t.deepEqual([maximum, active, started, waiting], [1, 1, ['Human during save'], ['plan-result']]);
+    t.deepEqual(requests[0].filter(message => String(message.content).includes('Saved A result.')).map(message =>
+        String(message.content).split('\n')[3]), ['A: failed (A failed) | result A (summary): Saved A result. | blocked_by: -']);
+    t.deepEqual([f.notifier.pendingNotices().length, window.messages.filter(message => message.subTaskPlanId).length], [0, 1]);
+    stop_generation.call(view as never);
+    await humanSent; await planSent;
+    t.deepEqual([active, stopped, view._streamCtxMap.size, view._preparingTurns.size], [0, ['Human during save'], 0, 0]);
+
+    view.input_area.value = 'Next human turn';
+    await send_message.call(view as never, { meta: { origin: 'human' } });
+    t.deepEqual([maximum, started, window.messages.filter(message => message.subTaskPlanId).length,
+        window.messages.at(-1)?.content, view._streamCtxMap.size],
+    [1, ['Human during save', 'Next human turn'], 1, 'Follow-up reply', 0]);
+});
