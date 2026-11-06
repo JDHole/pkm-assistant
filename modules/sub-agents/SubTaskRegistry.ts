@@ -316,7 +316,7 @@ export class SubTaskRegistry {
                 break;
             }
             case 'timeout': case 'aborted': {
-                if (task.plan && task.startedAt !== undefined && !terminal.result) this._pendingPlanMaterial.add(task);
+                if (task.plan && task.startedAt !== undefined && (!terminal.result || this._runningPlanTasks.has(task))) this._pendingPlanMaterial.add(task);
                 const hasMaterial = !!(terminal.result?.text || terminal.result?.handoff || task.partial?.text
                     || terminal.result?.outcome?.hasMaterial || task.outcome?.hasMaterial
                     || task.partial?.toolOutcomes.some(tool => tool.outcome === 'returned'));
@@ -325,7 +325,7 @@ export class SubTaskRegistry {
                     : { kind: 'stopped', by: task.stopRequestedBy ?? 'system' },
                     completeness: hasMaterial ? 'partial' : 'empty', hasAnswer: false,
                     hasMaterial, effects: terminal.result?.outcome?.effects ?? task.outcome?.effects ?? [] };
-                if (finalizing && task.result) task.result = { ...task.result, outcome: task.outcome };
+                if (task.plan && task.result) task.result = { ...task.result, outcome: task.outcome };
                 break;
             }
             default: { const exhaustive: never = terminal; return exhaustive; }
@@ -391,7 +391,12 @@ export class SubTaskRegistry {
                 if (thread && thread.phase !== 'closed' && task.startedAt === undefined) this._closeThreadData(thread);
                 this._questions.close(task, { kind: 'cancelled', by: task.stopRequestedBy ?? 'system',
                     reason: task.stopRequested ? (this._stoppingAll ? 'unload' : 'stop') : 'run-ended' });
-                this.events.emit('task:finished', task);
+                if (this._pendingPlanMaterial.has(task) && this._runningPlanTasks.has(task) && !task.result) {
+                    // Same bounded salvage window as DelegateTool's legacy timeout path.
+                    // The graph is already terminal; only delivery waits for runner material.
+                    const timer = this._planResultClock.setTimeout(() => this._publishDeferredPlanFinish(task), 1500);
+                    this._deferredPlanFinishes.set(task.id, { task, timer });
+                } else this.events.emit('task:finished', task);
             }
             this.events.emit('task:plan', report);
         });
@@ -448,6 +453,32 @@ export class SubTaskRegistry {
     private readonly _cancelledRuns = new Map<string, StopBy>();
     private readonly _pendingPlanMaterial = new WeakSet<SubTask>();
     private readonly _finalizingPlanResults = new WeakMap<SubTask, SubTaskResult>();
+    private readonly _runningPlanTasks = new WeakSet<SubTask>();
+    private readonly _deferredPlanFinishes = new Map<string, { task: SubTask; timer: unknown }>();
+    private readonly _planResultClock: Pick<ParentQuestionClock, 'setTimeout' | 'clearTimeout'>;
+
+    /** Track the whole runner lifetime, including every asynchronous finalization step. */
+    trackPlanRunner(task: SubTask): () => void {
+        if (task.plan) this._runningPlanTasks.add(task);
+        return () => {
+            this._runningPlanTasks.delete(task);
+            this._finalizingPlanResults.delete(task);
+            this._pendingPlanMaterial.delete(task);
+            this._publishDeferredPlanFinish(task);
+        };
+    }
+
+    isAwaitingPlanResult(id: string): boolean { return this._deferredPlanFinishes.has(id); }
+
+    private _publishDeferredPlanFinish(task: SubTask): void {
+        const pending = this._deferredPlanFinishes.get(task.id);
+        if (!pending) return;
+        this._planResultClock.clearTimeout(pending.timer);
+        this._deferredPlanFinishes.delete(task.id);
+        this._publishingPlanTasks.add(task.id);
+        this._planEvents.push(() => this.events.emit('task:finished', task));
+        this._flushPlanEvents();
+    }
     private readonly _stoppingRuns = new Set<string>();
     private readonly _stoppingOwners = new Set<string>();
     private _stoppingAll = false;
@@ -566,6 +597,10 @@ export class SubTaskRegistry {
         questionClock, appendHistory,
     }: SubTaskRegistryOptions = {}) {
         this.events = new EventEmitter();
+        this._planResultClock = questionClock ?? {
+            setTimeout: (fn, ms) => window.setTimeout(fn, ms),
+            clearTimeout: handle => window.clearTimeout(handle as number),
+        };
         this._questions = new ParentQuestions((event, payload) => {
             const question = payload as ParentQuestion;
             if (event === 'question:opened' && question.recipient.kind === 'sub') this._inbox.push(question.recipient.runId, { kind: 'question', question });
@@ -992,25 +1027,31 @@ export class SubTaskRegistry {
 
     /** Enrich a latched failure without changing its reason, graph, end time or notices. */
     private _mergePlanMaterial(task: SubTask, result: SubTaskResult): void {
-        if (!this._pendingPlanMaterial.has(task) || !task.outcome || result.stoppedBy !== 'abort' || !result.outcome) return;
-        const hasMaterial = task.outcome.hasMaterial || result.outcome.hasMaterial;
-        task.outcome = { ...result.outcome, end: task.outcome.end, hasAnswer: false,
+        if (!this._pendingPlanMaterial.has(task) || !task.outcome) return;
+        const hasMaterial = task.outcome.hasMaterial || !!(result.outcome?.hasMaterial || result.text.trim() || result.handoff?.trim());
+        task.outcome = { ...task.outcome, ...result.outcome, end: task.outcome.end, hasAnswer: false,
             hasMaterial, completeness: hasMaterial ? 'partial' : 'empty' };
-        task.result = { ...result, outcome: task.outcome };
+        task.result = { ...task.result, ...result, text: result.text || task.result?.text || '', outcome: task.outcome };
     }
 
     /** Keep completed work available to Stop/timeout while the runner journals it. No settlement. */
     stagePlanResult(task: SubTask, result: SubTaskResult): void {
         if (task.plan && task.status === 'running') this._finalizingPlanResults.set(task, result);
+        else if (this._pendingPlanMaterial.has(task)) {
+            this._mergePlanMaterial(task, result);
+            this.events.emit('task:partial', task);
+            this._publishDeferredPlanFinish(task);
+        }
     }
 
     finish(task: SubTask, result: SubTaskResult): void {
         try {
             if (!task) return;
-            if (this._pendingPlanMaterial.has(task) && result.stoppedBy === 'abort') {
+            if (this._pendingPlanMaterial.has(task)) {
                 this._mergePlanMaterial(task, result);
                 this._pendingPlanMaterial.delete(task);
                 this.events.emit('task:partial', task);
+                this._publishDeferredPlanFinish(task);
                 return;
             }
             if (task.status !== 'running') return;
@@ -1024,6 +1065,13 @@ export class SubTaskRegistry {
     fail(task: SubTask, error: string, outcome?: RunOutcome, result?: SubTaskResult): void {
         try {
             if (!task) return;
+            if (this._pendingPlanMaterial.has(task)) {
+                if (result) this._mergePlanMaterial(task, result);
+                this._pendingPlanMaterial.delete(task);
+                this.events.emit('task:partial', task);
+                this._publishDeferredPlanFinish(task);
+                return;
+            }
             if (task.status !== 'running') return;
             this.settle(task.id, { kind: 'error', error, outcome, result });
         } catch (e) {
@@ -1274,6 +1322,10 @@ export class SubTaskRegistry {
             retain(this._tasks.get(node.runId)?.parentId);
         }
         for (const id of this._publishingPlanTasks) retained.add(id);
+        for (const { task } of this._deferredPlanFinishes.values()) {
+            retained.add(task.id);
+            retain(task.parentId);
+        }
         for (const thread of this._threads.values()) if (thread.phase === 'queued') retain(thread.parentId);
         return retained;
     }
@@ -1314,6 +1366,8 @@ export class SubTaskRegistry {
         this._inbox.dispose();
         this._questions.dispose();
         this._history?.dispose();
+        for (const { timer } of this._deferredPlanFinishes.values()) this._planResultClock.clearTimeout(timer);
+        this._deferredPlanFinishes.clear();
         try {
             this.events.removeAllListeners();
             this._plans.clear();

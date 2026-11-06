@@ -13,6 +13,7 @@ import type { DelegateTaskDef } from './DelegateTool.js';
 import type { BuiltinToolExecutionContext } from './ToolRegistry.js';
 import { stopSubTasksForOwners } from '../chat/chat/turnAbort.js';
 import { buildSubTaskNotificationText } from '../chat/chat/subTaskNotification.js';
+import { createWriteTool } from './WriteTool.js';
 
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 class Mailbox<T> {
@@ -30,6 +31,7 @@ const tasks = (): DelegateTaskDef[] => [
     { id: 'B', task: 'TASK B', aspect: 'child' },
 ];
 function fixture(t: ExecutionContext, options: { local?: boolean; noRegistry?: boolean; maxDone?: number;
+    app?: Parameters<ReturnType<typeof createWriteTool>['execute']>[1];
     memory?: { appendSessionEvent(path: string, event: { type?: string; prompt?: unknown }): Promise<string> } } = {}) {
     setLocale('en');
     const clock = new QuestionTestClock();
@@ -75,9 +77,9 @@ function fixture(t: ExecutionContext, options: { local?: boolean; noRegistry?: b
         } }, config: { chat: { providers: { openai: { info: { id: 'openai' } } },
             http: { send: async () => ({ status: 200, headers: {}, text: '', json: () => ({}) }) },
             transport: { open: async () => ({ status: 200, headers: {}, body: '' }) } } } } };
-    const deps = { makeRunner: (runtime: unknown) => new SubAgentRunner({ app: {}, plugin: runtime as never, toolRegistry }) as never };
+    const deps = { makeRunner: (runtime: unknown) => new SubAgentRunner({ app: options.app ?? {}, plugin: runtime as never, toolRegistry }) as never };
     const delegate = createDelegateTool({}, deps); const control = createSubAgentTool({}, deps);
-    const tools = [ { ...delegate, source: 'built-in' }, { ...control, source: 'built-in' },
+    const tools = [ { ...delegate, source: 'built-in' }, { ...control, source: 'built-in' }, { ...createWriteTool(), source: 'built-in' },
         { name: 'read', source: 'built-in', description: 'Read material', inputSchema: {}, execute: async () => 'Saved material' } ];
     const signal = new AbortController();
     const runtime: BuiltinToolExecutionContext = { resultBudgetChars: 0, effectiveResultBudgetChars: 12000,
@@ -99,6 +101,129 @@ function fixture(t: ExecutionContext, options: { local?: boolean; noRegistry?: b
     return { registry, notifier, starts, created, clock, plugin, config, delegate, runtime, signal, shown, decision, questions,
         submit, next: (key: string) => box(key).next(), task: (id: string) => created.find(task => task.plan?.nodeId === id)! };
 }
+
+function savedFileApp() {
+    const checking = deferred<void>(); const release = deferred<void>();
+    const files = new Map<string, string>();
+    const file = (path: string) => ({ path, name: path });
+    const app = { vault: {
+        adapter: {
+            exists: async (path: string) => { checking.resolve(); await release.promise; return files.has(path); },
+            read: async (path: string) => files.get(path)!,
+            write: async (path: string, content: string) => { files.set(path, content); },
+        },
+        getAbstractFileByPath: (path: string) => files.has(path) ? file(path) : null,
+        createFolder: async () => {},
+        create: async (path: string, content: string) => { files.set(path, content); return file(path); },
+        read: async (entry: { path: string }) => files.get(entry.path)!,
+        modify: async (entry: { path: string }, content: string) => { files.set(entry.path, content); },
+    } };
+    return { checking, release, app, file };
+}
+
+for (const mode of ['stop', 'timeout'] as const) for (const plan of [true, false])
+test.serial(`F3 ${mode} during adapter.exists preserves Saved file and write effect (plan=${plan})`, async t => {
+    const { checking, release, app, file } = savedFileApp();
+    const f = fixture(t, { app }); f.config.tools = ['write'];
+    const delivered: Array<{ id: string; text: string; outcome: SubTask['outcome'] }> = [];
+    const finished: string[] = [];
+    f.registry.events.on('task:finished', value => finished.push((value as SubTask).id));
+    f.notifier.setDeliverer(task => {
+        delivered.push({ id: task.id, text: buildSubTaskNotificationText(task), outcome: structuredClone(task.outcome) });
+        return true;
+    });
+    const list = tasks(); list[2].timeout_ms = 5000;
+    await f.submit(plan ? list : list.slice(1).map(({ task, aspect, timeout_ms }) => ({ task, aspect, timeout_ms })));
+    (await f.next('A')).calls('write', { path: 'saved.md', content: 'Saved file', mode: 'create' });
+    const answer = await f.next('A');
+    t.deepEqual(JSON.parse(answer.payload.messages.find(message => message.role === 'tool')!.content),
+        { success: true, path: 'saved.md', mode: 'create', bytesWritten: 10 });
+    t.is(await app.vault.read(file('saved.md')), 'Saved file');
+    answer.complete('Answer from Saved file');
+    const b = await f.next('B'); await checking.promise;
+    const a = f.created.find(task => task.taskPreview === 'TASK A')!;
+    try {
+        if (mode === 'stop') f.registry.requestStop(a.id, 'user');
+        else f.clock.advance(1000);
+        t.deepEqual(delivered.filter(item => item.id === a.id), [], 'wait for final material before serializing the first notice');
+        if (plan) t.deepEqual([a.plan!.state, f.task('C').plan!.state],
+            [{ kind: 'failed', reason: mode === 'stop' ? 'aborted' : 'timeout' },
+                { kind: 'blocked', causes: [{ nodeId: 'A', runId: a.id }] }]);
+    } finally {
+        release.resolve(); b.complete('Independent B'); await __test__._settleBackground(true);
+    }
+    const notice = delivered.find(item => item.id === a.id)!;
+    t.regex(notice.text, /Answer from Saved file/);
+    t.deepEqual(notice.outcome?.effects, [{ tool: 'write', action: 'create', targets: [{ kind: 'vault-file', path: 'saved.md' }],
+        outcome: 'returned', check: 'matches' }]);
+    t.deepEqual([a.result?.text, finished.filter(id => id === a.id).length, delivered.filter(item => item.id === a.id).length],
+        ['Answer from Saved file', 1, 1]);
+    t.deepEqual(f.starts, ['A', 'B', 'A']);
+    if (plan) {
+        t.deepEqual(notice.outcome, { end: mode === 'stop' ? { kind: 'stopped', by: 'user' } : { kind: 'timeout' },
+            completeness: 'partial', hasAnswer: false, hasMaterial: true, effects: notice.outcome!.effects });
+        t.deepEqual(a.result?.outcome, a.outcome);
+        t.deepEqual([f.task('C').status, f.task('B').result?.text, finished.length], ['blocked', 'Independent B', 3]);
+    }
+});
+
+for (const mode of ['stop', 'timeout'] as const)
+test.serial(`F3 ${mode} bounds adapter.exists wait and accepts material after the only notice`, async t => {
+    const { checking, release, app } = savedFileApp();
+    const f = fixture(t, { app, maxDone: 1 }); f.config.tools = ['write'];
+    const notices: SubTask[] = [];
+    f.notifier.setDeliverer(task => { notices.push(structuredClone(task)); return true; });
+    const list = tasks(); list[2].timeout_ms = 5000;
+    await f.submit(list);
+    (await f.next('A')).calls('write', { path: 'saved.md', content: 'Saved file', mode: 'create' });
+    (await f.next('A')).complete('Answer from Saved file');
+    await checking.promise;
+    const a = f.task('A'); const ended = () => notices.filter(task => task.id === a.id);
+    try {
+        if (mode === 'stop') f.registry.requestStop(a.id, 'user'); else f.clock.advance(1000);
+        (await f.next('B')).complete('Independent B'); await nextTurn();
+        f.clock.advance(1499);
+        t.deepEqual([ended().length, f.registry.getTask(a.id)?.plan?.state, f.registry.pruneSession(owner.sessionPath)],
+            [0, { kind: 'failed', reason: mode === 'stop' ? 'aborted' : 'timeout' }, 0]);
+        t.deepEqual(f.registry.list().map(task => task.id), [a.id]);
+        f.clock.advance(1);
+        t.deepEqual(ended().map(task => [task.status, task.outcome?.completeness]), [['aborted', 'empty']]);
+    } finally {
+        release.resolve(); await __test__._settleBackground(true);
+    }
+    t.deepEqual([a.result?.text, a.outcome?.completeness, a.outcome?.effects[0]?.check, ended().length, f.clock.pending],
+        ['Answer from Saved file', 'partial', 'matches', 1, 0]);
+    t.deepEqual([a.plan!.state, f.starts], [{ kind: 'failed', reason: mode === 'stop' ? 'aborted' : 'timeout' }, ['A', 'B', 'A']]);
+});
+
+for (const mode of ['stop', 'timeout'] as const)
+test.serial(`F3 parent waits for ${mode} child finalization and receives Saved file once`, async t => {
+    const { checking, release, app } = savedFileApp();
+    const f = fixture(t, { app }); f.config.tools = ['write'];
+    const resolve = f.plugin.agentManager.resolveSubAgentConfig;
+    f.plugin.agentManager.resolveSubAgentConfig = name => name === 'parent'
+        ? { ...resolve(name), tools: ['delegate', 'write'] } : resolve(name);
+    await f.delegate.execute({ task: 'TASK P', aspect: 'parent', timeout_ms: 5000, _invocationOrigin: owner }, {}, f.plugin as never, f.runtime);
+    (await f.next('P')).calls('delegate', { tasks: tasks() });
+    const parentReceipt = await f.next('P');
+    (await f.next('A')).calls('write', { path: 'saved.md', content: 'Saved file', mode: 'create' });
+    (await f.next('A')).complete('Answer from Saved file'); await checking.promise;
+    try {
+        if (mode === 'stop') f.registry.requestStop(f.task('A').id, 'user'); else f.clock.advance(1000);
+        (await f.next('B')).complete('Independent B'); await nextTurn();
+        parentReceipt.complete('Interim parent');
+        (await f.next('P')).complete('Waiting for final material'); await nextTurn();
+        t.deepEqual(f.created.filter(task => task.taskPreview === 'TASK P').map(task => task.status), ['running']);
+    } finally { release.resolve(); }
+    const resumed = await f.next('P');
+    const notices = resumed.payload.messages.filter(message => message.content?.startsWith('Child notices:\n'))
+        .flatMap(message => JSON.parse(message.content.slice('Child notices:\n'.length)));
+    const a = notices.filter(notice => notice.task_id === f.task('A').id);
+    t.deepEqual(a.map(notice => [notice.result.text, notice.outcome.completeness, notice.outcome.effects[0].check]),
+        [['Answer from Saved file', 'partial', 'matches']]);
+    resumed.complete('Final parent'); await __test__._settleBackground(true);
+    t.deepEqual(f.notifier.pending().map(task => task.result?.text), ['Final parent']);
+});
 
 for (const mode of ['stop', 'timeout'] as const) for (const plan of [true, false])
 test.serial(`F2 ${mode} during subagent_call persistence preserves material (plan=${plan})`, async t => {

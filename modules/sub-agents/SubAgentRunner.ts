@@ -421,6 +421,7 @@ export class SubAgentRunner {
 
         // Deklaracja PRZED `try`, bo domknięcie biegu robi też gałąź `catch` (fail).
         let subTask: SubTask | undefined;
+        let releasePlanRunner: (() => void) | undefined;
         let conversationStore: ArrayMessageStore | undefined;
         let lastPartial: AgentLoopPartialSnapshot | undefined;
         let closedQuestion: { text: string; resolution: QuestionResolution } | undefined;
@@ -571,6 +572,7 @@ export class SubAgentRunner {
                     ...(threadId ? { threadId } : {}),
                 }))
                 : undefined;
+            if (subTask) releasePlanRunner = _safeRegistry(() => registry?.trackPlanRunner?.(subTask as SubTask));
             // „Byt istnieje" - hak dla wołacza (DelegateTool), pod tym samym bezpiecznikiem
             // co reszta księgowości. Bez rejestru nie ma czego zgłaszać, więc hak milczy.
             if (subTask && typeof options.onTaskCreated === 'function') {
@@ -1003,6 +1005,8 @@ export class SubAgentRunner {
                 outcome,
                 ...(handoff ? { handoff } : {}),
             };
+        } finally {
+            _safeRegistry(() => releasePlanRunner?.());
         }
     }
 

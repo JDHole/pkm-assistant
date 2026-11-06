@@ -61,7 +61,8 @@ export class SubRunCoordinator {
         await this.resuming;
     }
     private children(): string[] {
-        const ids = this.registry.list().filter(child => child.parentId === this.task.id && (child.status === 'running' || child.status === 'waiting')).map(child => child.id);
+        const ids = this.registry.list().filter(child => child.parentId === this.task.id
+            && (child.status === 'running' || child.status === 'waiting' || this.registry.isAwaitingPlanResult?.(child.id))).map(child => child.id);
         for (const thread of this.registry.listThreads(this.task.origin ?? { agentName: this.task.agentName })) {
             if (thread.parentId === this.task.id && thread.phase === 'queued') ids.push(thread.queuedRunId ?? thread.threadId);
         }

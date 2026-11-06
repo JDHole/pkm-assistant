@@ -13,6 +13,17 @@ wynik rejestrowi przed zapisem; porażka pozostaje zatrzaśnięta, zależni bloc
 niezależne gałęzie pracują dalej. Testy F2 w `DelegateTool.plan.test.ts` sprawdzają
 oba przerwania i kontrole bez planu, bez podwójnych zakończeń.
 
+2.4.6 F3: rejestr śledzi cały czas życia runnera. Stop/timeout od razu blokuje
+graf, a gdy wynik jeszcze się finalizuje (w tym sprawdzenie efektów przez
+`adapter.exists`), pierwsze powiadomienie czeka na dorobek najwyżej 1500 ms,
+tak jak salvage timeoutu bez planu. Późny staging, naturalny finish lub fail
+uzupełnia częściowy wynik bez odblokowania grafu i bez drugiego zakończenia,
+również po upływie okna doręczenia. Gotowy snapshot/handoff nadal jest doręczany
+od razu; koordynator rodzica czeka na odroczony wynik dziecka. Ścieżka bez
+krawędzi nie zmienia się. Scenariusze F3 w `DelegateTool.plan.test.ts` wykonują
+rzeczywisty WriteTool, potwierdzają Saved file i sprawdzają Stop/timeout podczas
+adapter.exists, kontrolę bez planu, granicę czasu, retencję oraz inbox rodzica.
+
 F3/B5: `MCPClient` robi wyjątek od `disabled_tool` wyłącznie dla `sub_agent message` z niepustą odpowiedzią na aktualne pytanie własnego żywego dziecka. Publiczny helper `isOwnChildQuestionReply` (`subAgentQuestionReply.ts`, współdzielony z fallbackiem runnera) sprawdza zaufany kontekst suba albo pełne pochodzenie prowadzącego, właściciela, aktualny bieg dziecka, relację i adresata oraz `question_id`; odczyt stanu uwzględnia deadline. Prowadzący musi mieć włączone `delegate`; czat udostępnia mu ograniczoną definicję odpowiedzi. Znaczniki modelu nie nadają uprawnienia. Dostarczenie nadal ponownie sprawdza pytanie w `answerParentQuestion`. Wyjątek nie obejmuje zwykłej wiadomości, `task`, `list`, `stop`, `close`, obcych pytań ani serwerów zewnętrznych. Timeout pozostaje 300000 ms. `DelegateTool.coordinator.test.ts` sprawdza MCP/fallback rodzica, a `SubAgentTool.recipients.test.ts` odpowiedzi prowadzącego, odmowy i granicę czasu.
 
 F1: `DelegateTool` odracza zwolnienie dzierżawy po logicznym końcu biegu, dopóki nie rozstrzygną się wszystkie rzeczywiste egzekutory narzędzi lub runner nie odetnie ich po okresie łaski F2. `DelegateTool.coordinator.test.ts` mierzy aktywne modele i narzędzia niezależnie od schedulera; `DelegateTool.tree.test.ts` sprawdza zakres i narzędzia kontynuacji oraz nowego wnuka przez runner → MCP → delegację.

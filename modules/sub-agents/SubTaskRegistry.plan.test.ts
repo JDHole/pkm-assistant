@@ -28,6 +28,48 @@ function activate(registry: SubTaskRegistry, id: string): SubTask {
 }
 const states = (report: PlanReport) => report.nodes.map(node => [node.nodeId, node.state]);
 
+for (const completion of ['finish', 'fail'] as const) for (const afterDeadline of [false, true])
+test(`F3 ${completion} enriches latched timeout without staging (afterDeadline=${afterDeadline})`, t => {
+    const clock = new QuestionTestClock();
+    const registry = new SubTaskRegistry({ questionClock: clock }); t.teardown(() => registry.dispose());
+    const handle = registry.reservePlan(input([['A', []], ['C', ['A']]]));
+    const a = activate(registry, 'A');
+    const release = registry.trackPlanRunner(a);
+    const delivered: Array<[string, string | undefined]> = [];
+    registry.events.on('task:finished', value => {
+        const task = value as SubTask; delivered.push([task.id, task.result?.text]);
+    });
+    registry.settle(a.id, { kind: 'timeout' });
+    const endedAt = a.endedAt;
+    if (afterDeadline) clock.advance(1500);
+    const material: SubTaskResult = { ...result('Final answer'), handoff: 'Saved material', toolsUsed: ['write'],
+        outcome: { end: { kind: 'finished' }, completeness: 'unconfirmed', hasAnswer: true, hasMaterial: true,
+            effects: [{ tool: 'write', action: 'create', targets: [{ kind: 'vault-file', path: 'saved.md' }], outcome: 'returned', check: 'matches' }] } };
+    if (completion === 'finish') registry.finish(a, material);
+    else registry.fail(a, 'Late finalization error', material.outcome, material);
+    release(); release();
+    registry.finish(a, result('Duplicate finish'));
+    t.deepEqual([a.status, a.endedAt, a.plan!.state, a.result?.text, a.result?.handoff, a.result?.toolsUsed],
+        ['aborted', endedAt, { kind: 'failed', reason: 'timeout' }, 'Final answer', 'Saved material', ['write']]);
+    t.deepEqual(a.outcome, { end: { kind: 'timeout' }, completeness: 'partial', hasAnswer: false, hasMaterial: true,
+        effects: [{ tool: 'write', action: 'create', targets: [{ kind: 'vault-file', path: 'saved.md' }], outcome: 'returned', check: 'matches' }] });
+    t.deepEqual(a.result?.outcome, a.outcome);
+    t.deepEqual([delivered, handle.getReport().counts, clock.pending],
+        [[['plan-1-C', ''], ['plan-1-A', afterDeadline ? undefined : 'Final answer']],
+            { waiting: 0, queued: 0, running: 0, finished: 0, failed: 1, blocked: 1 }, 0]);
+});
+
+test('F3 dispose cancels deferred publication and late runner cleanup cannot recreate it', t => {
+    const clock = new QuestionTestClock();
+    const registry = new SubTaskRegistry({ questionClock: clock });
+    registry.reservePlan(input([['A', []], ['C', ['A']]]));
+    const a = activate(registry, 'A'); const release = registry.trackPlanRunner(a);
+    registry.requestStop(a.id);
+    t.deepEqual([a.status, registry.isAwaitingPlanResult(a.id), clock.pending], ['aborted', true, 1]);
+    registry.dispose(); release(); clock.advance(1500);
+    t.deepEqual([registry.list(), registry.isAwaitingPlanResult(a.id), clock.pending], [[], false, 0]);
+});
+
 test('F1 repeated owner Stop keeps trace retention bounded and records every stopped task', t => {
     const writes: Array<[string, string]> = [];
     const registry = new SubTaskRegistry({ traceLog: { scope: id => type => { writes.push([id, type]); } } });

@@ -158,8 +158,8 @@ wywołuje `beforePublish` (abort runnera), a dopiero potem publikuje zakończeni
 Stop używa tej samej kolejności. `publishPartial(task, snapshot, material?)` może
 uzupełnić dorobek uruchomionego węzła zatrzymanego zewnętrznym Stopem/timeoutem;
 runner dostarcza od razu istniejący handoff i stan efektów. Późniejsze `finish`
-z wynikiem abortu dopina końcowy dorobek przez `task:partial`, bez zmiany przyczyny,
-grafu, czasu końca ani drugiego `task:finished`. Spóźniony sukces jest ignorowany.
+dopina końcowy dorobek przez `task:partial`, bez zmiany przyczyny,
+grafu, czasu końca ani drugiego `task:finished`. Spóźniony sukces nie zmienia porażki.
 Uprawnienie do uzupełnienia jest słabą referencją i wygasa po końcu runnera.
 Kroki po zakończeniu/usunięciu zadania nadal trafiają do trace, ale ich funkcje
 scope nie wracają do cache. Testy F1: `SubTaskRegistry.plan.test.ts` oraz
@@ -174,6 +174,30 @@ transakcja usuwa referencję; późniejszy naturalny `finish` nie zmienia poraż
 blokad ani liczby powiadomień. Biegi bez planu zachowują dotychczasową ścieżkę.
 Testy F2 w `../tools/DelegateTool.plan.test.ts` wstrzymują `appendSessionEvent`
 runnera dla Stopu i timeoutu; obejmują też oba warianty kontrolne bez zależności.
+
+2.4.6 F3: `trackPlanRunner(task)` obejmuje cały bieg od aktywacji; zwrócony,
+idempotentny callback runner wywołuje w `finally`. Po zatrzaśnięciu Stopu/timeoutu
+`publishPartial`, `stagePlanResult`, `finish` (także naturalny) i `fail` mogą uzupełnić
+odpowiedź, materiał, efekty i handoff. Uprawnienie wygasa przy końcu runnera;
+powtórny finish nie nadpisuje wyniku. Outcome pozostaje stopped/timeout z partial
+przy niepustym dorobku, bez zmiany statusu, grafu, raportu ani czasu końca.
+
+Gdy runner jeszcze działa i nie przekazał wyniku, rejestr odracza wyłącznie jego
+`task:finished` do gotowego materiału/końca runnera, najwyżej o 1500 ms (jak okno
+salvage timeoutu w DelegateTool). Snapshot F1 i gotowy staging F2 nadal pozwalają
+na natychmiastowe doręczenie. Blokady i `task:plan` powstają od razu; niezależne
+gałęzie pracują dalej. `isAwaitingPlanResult(runId)` pozwala koordynatorowi rodzica
+czekać także na takie logicznie zakończone dziecko, zanim zamknie jego skrzynkę.
+Do publikacji rejestr chroni zadanie i przodków przed retencją. Timer znika przy
+publikacji lub `dispose`; limit czasu zwalnia silną referencję również przy
+zawieszonym I/O. Po limicie pierwsze powiadomienie zawiera dostępny wtedy dorobek;
+późniejszy wynik aktualizuje kartę przez `task:partial`, bez drugiego powiadomienia.
+Bez planu dotychczasowe zakończenie pozostaje bez zmian.
+
+Testy F3: `../tools/DelegateTool.plan.test.ts` (WriteTool, odczyt Saved file,
+Stop/timeout podczas adapter.exists, kontrola bez planu, granica 1499/1500 ms,
+doręczenie rodzicowi) i `SubTaskRegistry.plan.test.ts` (naturalny finish/fail bez
+stagingu przed/po limicie, handoff, jednokrotna publikacja, retencja i dispose).
 
 ### 2.4.6 P3 — gotowość dla puli
 
