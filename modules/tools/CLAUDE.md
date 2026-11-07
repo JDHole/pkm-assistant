@@ -804,16 +804,14 @@ planu, a wyniki i pytania przez skrzynkę rodzica; plan pozostaje żywy po zwroc
 pokwitowania aż do rozliczenia puli, także dla Stopu i unload.
 
 
-### 2.4.7 P2 — host kopii (bez aktywacji runtime)
+### 2.4.7 P2 — host kopii
 
 Barrel eksportuje `prepareSubToolExecution` oraz `VaultExecution` (`live`,
 `overlay-read` z view, `overlay-write` z workspace — wspólnym `DraftView` biegu).
 Wołacz dostarcza zaufaną kanoniczną tożsamość narzędzia z rejestru i `callId`, poza
 argumentami modelu. Przygotowanie jest po aliasach/whiteliście, przed extractorem;
-TA SAMA para app/plugin ma trafić do extractora i execute. Uprawnienia, zgody,
-filtrowanie wyników i odcięcie definicji MCP pozostają zadaniem integracji P3–P5.
-P2 nie podpinała tej funkcji do MCPClient/runnera. Integrację przez opcjonalne DI
-dodaje P3 poniżej; UI i aktywacja runtime nadal należą do P5.
+TA SAMA para app/plugin ma trafić do extractora i execute. Uprawnienia, zgody, filtrowanie wyników i odcięcie definicji MCP są podłączone
+w integracji P3–P5 opisanej poniżej.
 
 `draftToolHost.ts` tworzy zamknięte lokalne app/vault/adapter/fileManager/metadataCache.
 Nieznana metoda daje `mutation-denied`; nie ma automatycznego przekazywania metod,
@@ -843,7 +841,7 @@ bez runnera, sieci, canvasu i Obsidiana.
 Plan przekazuje zaufane `draftDependencies` oddzielnie od `dependencyContext`,
 bez pól modelowych; następnik startuje dopiero po trwałym zamknięciu poprzednika.
 Wyniki delegacji przenoszą opcjonalne `draft: DraftRef`. Produkcyjny composition
-root NIE podaje tego DI, więc aktywacja nadal należy do P5.
+root wstrzykuje to DI po odtworzeniu magazynu (P5).
 
 `ExecuteToolCallOptions.vaultExecution` to zaufany kontekst runnera, poza argumentami.
 MCP przygotowuje host po rozwiązaniu aliasu i osi narzędziowej. Extractor i wykonanie
@@ -874,7 +872,7 @@ oraz odczyty pamięci, todo i manager poczty wykonują rzeczywisty kod.
 ### 2.4.7 P4 — pojedyncza decyzja prowadzącego
 
 Barrel eksportuje `createSubagentChangesTool(review)` i `createDraftReviewHost(app)`.
-Rejestracja w manifeście delegacji i produkcyjnym runtime pozostaje P5. Fabryka
+Narzędzie jest zarejestrowane w manifeście delegacji i produkcyjnym runtime (P5). Fabryka
 publikuje ścisły oneOf list/accept/reject (additionalProperties:false); argumenty
 są unknown do walidacji i nie dopuszczają all, force, ścieżki, treści ani znaczników
 _invocation. Brak zaufanego kontekstu zawsze odmawia. List/reject nie pytają o zapis.
@@ -898,7 +896,7 @@ modifyBinary (ukryte: adapter.writeBinary), usunięcia przez trash/delete z zach
 dyspozycji. `adapter.process` w obecnych deklaracjach API obsługuje ukryty tekst;
 nie zmienia to starego WriteTool ani jego fallbacków opisanych wyżej.
 Granica optymistyczna binariów/usunięć i metadanych ukrytych plików jest szczegółowo
-opisana w `modules/vault-drafts/CLAUDE.md`. P5 nadal dostarcza adapter magazynu.
+opisana w `modules/vault-drafts/CLAUDE.md`. Adapter magazynu dostarcza P5.
 Testy P4: `SubagentChangesTool.test.ts`; dotychczasowe asercje pozostają bez zmian.
 
 

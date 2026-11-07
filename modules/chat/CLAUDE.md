@@ -1772,3 +1772,7 @@ osią; przyjęcie pliku nie zmienia zatrzymanego biegu w sukces. Metadane doręc
 niosą opcjonalną projekcję; po restarcie historia/rejestr łączą referencję ze store.
 Testy P5 w `chat/subTaskStrip.test.ts`, `../tools/vaultDraftRuntime.test.ts`
 i `../ui-components/SubAgentBlock.test.ts`; stare asercje DOM pozostają.
+
+Po restarcie nierozstrzygnięte kopie pozostają dostępne do przeglądu; odtworzenie
+nie wznawia subagenta. UI nie ma przycisków przyjęcia: prowadzący wywołuje narzędzie,
+a istniejący przepływ zgody i diff obsługuje rzeczywisty zapis.

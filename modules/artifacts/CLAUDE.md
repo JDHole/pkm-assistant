@@ -179,4 +179,12 @@ zachowuje dotychczasowe nasłuchy i zachowanie. Host jest przygotowywany na każ
 wywołanie, także przed synchronicznym contextExtractor, więc nie dzieli starego
 indeksu ze store'em globalnym ani poprzednim wywołaniem. Test integracyjny
 `modules/tools/subToolExecution.test.ts`: create → update → read/list oraz
-niezmienione body/frontmatter bazowego artefaktu. Runtime jeszcze niepodłączony.
+niezmienione body/frontmatter bazowego artefaktu. Runtime podłączono w P5.
+
+### 2.4.7 — artefakty w kopii subagenta
+
+Publiczny `ArtifactStore.forHost(app)` tworzy osobny store z własnymi indeksami, bez
+nasłuchów żywego vaulta. Host kopii z `tools` używa go do odczytu i zapisu artefaktów,
+także frontmatter; propozycje trafiają do kopii i wymagają przyjęcia prowadzącego
+plik po pliku przez `subagent_changes`. Dedykowane todo zachowuje dotychczasowy host.
+Wewnętrzne `move` store’a nie dodaje operacji rename/move do modelu kopii.

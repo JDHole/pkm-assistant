@@ -336,3 +336,7 @@ zapisu. Status/badge/outcome biegu pozostają bez zmian. Bez draft DOM jest ten 
 Klasy cs-tile--draft/cs-subdraft__summary/cs-subdraft__details mają style w src/styles.css.
 Test P5 w SubAgentBlock.test.ts przechodzi od pending do accepted/rejected przez
 rzeczywisty runtime/review oraz sprawdza zatrzymanie i odpięcie subskrypcji.
+
+Prezentacja kopii i podgląd są opcjonalne: publiczne `SubAgentDraftView`,
+`createSubAgentBlock` i `DiffModal` nie podejmują decyzji domenowych. Konflikty oraz
+odtworzone po restarcie propozycje pokazuje projekcja dostarczona przez czat.

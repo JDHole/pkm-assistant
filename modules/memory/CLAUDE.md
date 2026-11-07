@@ -983,3 +983,11 @@ Quit/beforeunload/onunload/onClose nie dopisują czterech kopii tego samego zdar
 Zmieniony snapshot ma osobny zapis w dotychczasowej kolejce per plik; sukces i błąd
 zwalniają wpis, więc błąd nie blokuje ponowienia. Publiczna sygnatura bez zmian.
 Testy: `../chat/chat/chat_f8.test.ts` (cztery callbacki, błąd i kolejna zmiana w locie).
+
+### 2.4.7 — pamięć a kopie subagentów
+
+Dedykowane zapisy pamięci, sesji i logów zachowują dotychczasowy host i nie trafiają
+do kopii treści. `RetrievalEngine` pozostaje publicznym silnikiem wyszukiwania; wybór
+hosta należy do `tools/SearchTool`: keyword/text widzą warstwy kopii, auto przechodzi
+na keyword, a semantic korzysta z bazowego vaulta i nie widzi kopii. `scope: memory`
+zachowuje dotychczasowy odczyt. Osobna tożsamość hosta kopii izoluje cache skanów.

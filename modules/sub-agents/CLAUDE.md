@@ -992,10 +992,10 @@ promuje niedokończone węzły do tła. Po pokwitowaniu pula i nasłuchy Stopu �
 do rozliczenia planu. Historia zachowuje terminalne blokady, a `waiting`,
 `queued` i `running` odtwarza jako przerwane: restart nie wznawia grafu.
 
-### 2.4.7 P3 — kopia biegu i zamykanie (bez aktywacji produkcyjnej)
+### 2.4.7 P3 — kopia biegu i zamykanie
 
 Barrel eksportuje `SubRunDrafts(store, persistence, vaultViewIO, allocateId)`. Wspólna
-instancja jest opcjonalnym DI konstruktora runnera oraz `createDelegateTool(app, {drafts})`. `src/main.ts` nadal jej nie tworzy. Bieg bez DI zachowuje
+instancja jest opcjonalnym DI konstruktora runnera oraz `createDelegateTool(app, {drafts})`. Runtime tworzy ją przez `initializeVaultDrafts` w `src/main.ts`. Bieg bez DI zachowuje
 starą ścieżkę; zwykły sub odczytowy także przy DI nie tworzy kopii ani lokalnego hosta.
 
 `SubRunDrafts.ts` wiąże runId/wątek z właścicielem i zamrożonymi warstwami. Runner
@@ -1031,10 +1031,8 @@ Stop/timeout/błąd/awaria seal i restart, spóźnione I/O, MCP i podrobione arg
 pamięć/todo/poczta oraz prowadzący ze zgodą i diffem. Dostawca obrazów i canvas są
 kontrolowanymi granicami testu; nie ma sieci ani żywego Obsidiana.
 
-P4 dostarcza przyjęcie plików. P5 musi podłączyć trwały adapter publikacji, historię
-referencji/osi efektów, odtworzenie, projekcję UI i retencję. Manager P3 zachowuje
-zamrożone wejścia niezależnie od retencji rejestru; nie ma automatycznego GC ani
-wznawiania pracy po restarcie.
+P4 dostarcza przyjęcie plików, a P5 podłącza trwały adapter, historię, odtworzenie,
+projekcję UI i retencję opisaną poniżej. Restart nie wznawia pracy.
 
 
 ### 2.4.7 P5 — podłączenie historii i retencji

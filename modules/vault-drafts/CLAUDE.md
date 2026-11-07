@@ -83,7 +83,7 @@ jest zwracane w `issues`, plik pozostaje na dysku. Nierozpoznana wersja manifest
 blokuje fallback i zapis do tego katalogu. Osierocone bloby nie tworzą propozycji.
 Nie ma TTL nierozstrzygniętych kopii. GC P5 opisano poniżej.
 
-## Następne paczki
+## Warstwowy widok
 
 `DraftView(store, persistence, vaultIO, draftId | null, predecessors = [])`:
 - `resolve(path)` zwraca vault/proposal/ambiguous-input i źródła; `read/readBinary/stat`
@@ -167,12 +167,12 @@ pod blokadą ścieżki magazynu**, po przygotowaniu blobów i rodziców. To gwar
 optymistyczna wobec niezależnego pisarza poza pluginem: taki pisarz może zmienić plik
 między końcowym sprawdzeniem i operacją hosta. Nie jest to compare-and-swap. Blokada
 zamyka wyścigi przyjęć tego magazynu, nie zewnętrzne procesy ani zwykłe zapisy live.
-Rozstrzygnięcie właściciela z 07.11 akceptuje to ograniczenie dla binariów/usunięć.
+To ograniczenie pozostawia możliwość nadpisania niezależnej zmiany w tym krótkim
+oknie dla binariów i usunięć; nie jest pełną gwarancją konfliktu z architektury.
 
 Host review `createDraftReviewHost(app)` jest w tools (barrel). Nie uruchamia się
-samodzielnie ani nie aktywuje runtime. P5 musi współdzielić JEDEN store i wykonać
-restore przed rejestracją narzędzia. GC musi zachować pokwitowania oraz bloby używane
-przez następników; P4 niczego nie usuwa z magazynu.
+samodzielnie. Runtime P5 współdzieli jeden store i wykonuje restore przed rejestracją
+narzędzia. GC zachowuje pokwitowania i bloby używane przez następników.
 Testy: `modules/tools/SubagentChangesTool.test.ts` (publiczne MCP, rzeczywisty system
 uprawnień, host review, trwałe bajty i restart, kontrolowane bariery),
 `modules/ui-components/DiffModal.test.ts` (nowe warianty DOM obok starych asercji).
