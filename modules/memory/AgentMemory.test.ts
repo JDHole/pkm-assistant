@@ -2469,25 +2469,35 @@ test('saveSession zachowuje terminalne pytanie i dorobek wyniku z tła', async t
     ]);
 });
 
-test('F1 legacy epoch is durable, queued with appends, and survives reload', async t => {
+test('F1 two memories share the adapter writer queue and a fresh reader confirms epoch and history', async t => {
     const f = makeVault();
     const memory = new AgentMemory(f.vault, 'Lead');
-    // Migration needs native append to create without clobbering a raced target.
     memory.vault.adapter.append = async (path, data) => { f.files[path] = (f.files[path] ?? '') + data; };
     const path = `${memory.paths.sessionsActive}/legacy.md`;
-    f.files[path] = '---\ntype: active_session\nagent: Lead\n---\n\nHistoria\n';
+    const original = '---\ntype: active_session\nagent: Lead\n---\n\n## User\n\nHistoria\n';
+    f.files[path] = original;
     memory.setActiveSessionIdentity(path, null);
-    const [epoch] = await Promise.all([
+    const other = new AgentMemory(f.vault, 'Lead');
+    other.setActiveSessionIdentity(path, null);
+    const [epoch, siblingEpoch] = await Promise.all([
         memory.ensureActiveSessionEpoch(path, () => true),
-        memory.appendToActiveSession({ content: 'Kolejka' }),
+        other.ensureActiveSessionEpoch(path, () => true),
+        memory.appendToActiveSession({ type: 'user_message', content: 'Kolejka' }),
+        other.appendToActiveSession({ type: 'user_message', content: 'Druga pamięć' }),
     ]);
     t.regex(epoch, /^[0-9a-f]{32}$/);
     const fresh = new AgentMemory(f.vault, 'Lead');
     const parsed = await fresh.loadActiveSession(path);
     t.is(parsed.metadata.epoch, epoch);
     t.is(memory.sessionEpoch, epoch);
-    t.true(f.files[path].includes('Historia'));
-    t.true(f.files[path].includes('Kolejka'));
+    t.is(siblingEpoch, epoch);
+    t.is(other.sessionEpoch, epoch);
+    t.true(f.files[path].includes(original.slice(original.indexOf('\n---\n') + 5)));
+    t.deepEqual(parsed.messages, [
+        { role: 'user', content: 'Historia', seq: null },
+        { role: 'user', content: 'Kolejka', seq: 1 },
+        { role: 'user', content: 'Druga pamięć', seq: 2 },
+    ]);
 });
 
 test('F1 epoch migration does not publish identity into a switched owner', async t => {

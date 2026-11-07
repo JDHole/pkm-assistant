@@ -7,20 +7,20 @@ import { send_message } from './chat_streaming.js';
 import { RollingWindow } from './RollingWindow.js';
 import streamingManager from './StreamingManager.js';
 import { AgentMemory } from '../../memory/index.js';
-import { formatSessionEvent, parseActiveSession } from '../../memory/activeSessionFormat.js';
 import type { RollingMessage } from './RollingWindow.js';
 
 const history = '---\ntype: active_session\nagent: Lead\n---\n\n## User\n\nHistoryczne pytanie\n\n## Assistant\n\nHistoryczna odpowiedź\n'
-    + formatSessionEvent('tool_call', { tool: 'read', args: { path: 'A.md' }, seq: 1 }, '2026-11-01T00:00:00Z')
-    + formatSessionEvent('sub_task_history', { sub_task_history: { version: 1, marker: 'zachowaj zdarzenie' }, seq: 2 }, '2026-11-01T00:00:01Z');
+    + '## 2026-11-01T00:00:00Z — tool call\n\n**tool:**\n\nread\n\n**args:**\n\n{"path":"A.md"}\n\n**seq:**\n\n1\n\n'
+    + '## 2026-11-01T00:00:01Z — sub task history\n\n**sub_task_history:**\n\n{"version":1,"marker":"zachowaj zdarzenie"}\n\n**seq:**\n\n2\n\n';
+const historyBody = history.slice(history.indexOf('\n---\n') + 5);
 
 function fixture() {
     const files = new Map<string, string>();
-    const writes: { path: string; data: string }[] = [];
+    const appends: { path: string; data: string }[] = [];
     const adapter = {
         async read(path: string) { if (!files.has(path)) throw new Error('ENOENT'); return files.get(path)!; },
-        async write(path: string, data: string) { writes.push({ path, data }); files.set(path, data); },
-        async append(path: string, data: string) { files.set(path, (files.get(path) ?? '') + data); },
+        async write(path: string, data: string) { files.set(path, data); },
+        async append(path: string, data: string) { appends.push({ path, data }); files.set(path, (files.get(path) ?? '') + data); },
         async remove(path: string) { files.delete(path); },
         async rename(path: string, target: string) { files.set(target, await adapter.read(path)); files.delete(path); },
         async exists(path: string) { return files.has(path); },
@@ -32,6 +32,7 @@ function fixture() {
     files.set(path, history);
     memory.setActiveSessionIdentity(path, null);
     const requests: string[] = [], errors: string[] = [];
+    const payloads = new Map<string, unknown>(), answers = new Map<string, string>();
     function chat(id: string, delegation = true) {
         const rw = new RollingWindow();
         const agent = { name: 'Lead' };
@@ -48,58 +49,72 @@ function fixture() {
             showTypingIndicator() {},
             async append_message(role: 'user', content: RollingMessage['content'], _display: unknown, meta: Partial<RollingMessage>) { await rw.addMessage(role, content, meta); },
             appendToActiveSession: memory.appendToActiveSession.bind(memory),
-            get_chat_model: () => ({ modelKey: id, providerId: 'ollama', stream(_payload: unknown, cb: { done(response: unknown): void }) {
-                requests.push(id); cb.done({ choices: [{ message: { role: 'assistant', content: 'Odpowiedź' } }] });
+            get_chat_model: () => ({ modelKey: id, providerId: 'ollama', stream(payload: Record<string, unknown>, cb: { done(response: unknown): void }) {
+                requests.push(id); payloads.set(id, payload.messages);
+                cb.done({ choices: [{ message: { role: 'assistant', content: `Odpowiedź ${id}` } }] });
             } }),
             _chatResolveTools: () => [], _chatOnIterationStart() {}, _chatOnToolCallsParsed() {}, _chatOnToolResults() {},
             _chatBeforeContinue() {}, _chatOnUsage() {}, _chatOnBackstop() {}, _isTurnActiveTab: () => false,
-            _finalizeTurn() {}, handle_error(error: unknown) { errors.push(String(error)); },
+            _finalizeTurn(_turn: unknown, result: { finalText: string }) { answers.set(id, result.finalText); }, handle_error(error: unknown) { errors.push(String(error)); },
         };
         return { view, tab, send: () => send_message.call(view as never, { injectedText: `Pytanie ${id}`, meta: { origin: 'human' } }),
             close: () => streamingManager.stopStream(`${id}::${id}`) };
     }
-    return { files, writes, adapter, memory, path, requests, errors, chat };
+    return { files, appends, adapter, memory, path, requests, payloads, answers, errors, chat };
 }
 
-test.serial('R2 a: send_message preserves all history when write reports success with only frontmatter', async t => {
-    const f = fixture(), chat = f.chat('a');
-    t.teardown(chat.close);
-    const write = f.adapter.write;
-    let original = '', truncated = 0;
-    f.adapter.write = async (path, data) => {
-        if (data.includes('\nepoch:')) {
-            original = await f.adapter.read(f.path); truncated++;
-            return write(path, data.slice(0, data.indexOf('\n---\n') + 5));
-        }
-        return write(path, data);
-    };
-    await chat.send();
-    t.is(truncated, 1);
-    t.deepEqual(parseActiveSession(await f.adapter.read(f.path)).messages.map(m => m.content),
-        ['Historyczne pytanie', 'Historyczna odpowiedź', 'Pytanie a']);
-    t.is(await f.adapter.read(f.path), original, 'pełny oryginał, także zdarzenia, został zachowany');
-    const backup = [...f.files].find(([path, data]) => path !== f.path && data === original);
-    t.truthy(backup, 'trwała kopia jest dostępna po błędzie');
-    t.true(f.errors.some(error => error.includes(backup![0])), 'błąd wskazuje kopię do odtworzenia');
-    t.deepEqual(f.requests, []);
-    t.is(f.memory.sessionEpoch, null);
-});
+// Replacements: R2 unverified backup → read failure; failed replacement → append failure;
+// truncated staging → unconfirmed append. Each must retain the exact source history.
+for (const failure of ['read', 'append', 'unconfirmed-append'] as const) {
+    test.serial(`P2: ${failure} failure preserves exact history and leaves epoch unconfirmed`, async t => {
+        const f = fixture(), chat = f.chat(failure);
+        t.teardown(chat.close);
+        const read = f.adapter.read, append = f.adapter.append;
+        let original = '', failed = false, appends = 0;
+        f.adapter.read = async path => {
+            const data = await read(path);
+            if (path === f.path && !original && data.includes(`Pytanie ${failure}`)) {
+                original = data;
+                if (failure === 'read') { failed = true; throw new Error('EACCES epoch read'); }
+            }
+            return data;
+        };
+        f.adapter.append = async (path, data) => {
+            if (path === f.path && ++appends === 2) {
+                failed = true;
+                if (failure === 'append') throw new Error('EACCES epoch append');
+                if (failure === 'unconfirmed-append') return;
+            }
+            await append(path, data);
+        };
+        await chat.send();
+        t.true(failed);
+        t.true(original.startsWith(history));
+        t.is(await read(f.path), original);
+        t.deepEqual((await f.memory.loadActiveSession(f.path)).messages.map(m => m.content),
+            ['Historyczne pytanie', 'Historyczna odpowiedź', `Pytanie ${failure}`]);
+        t.is(f.errors.length, 1);
+        t.deepEqual(f.requests, []); // P4 changes failed ensure to allow the model.
+        t.deepEqual([f.memory.sessionEpoch, chat.tab.sessionEpoch], [null, null]);
+    });
+}
 
-test.serial('R2 b: send_message retains an independent append while migration is preparing its write', async t => {
+test.serial('R2 b: send_message retains an independent append during the active session read', async t => {
     const f = fixture(), chat = f.chat('b');
     t.teardown(chat.close);
-    const write = f.adapter.write;
+    const read = f.adapter.read;
     let injected = false;
-    f.adapter.write = async (path, data) => {
-        if (data.includes('\nepoch:') && !injected) {
+    f.adapter.read = async path => {
+        const data = await read(path);
+        if (path === f.path && data.includes('Pytanie b') && !injected) {
             injected = true;
             await f.adapter.append(f.path, '\n## User\n\nRównoczesny dopisek\n');
         }
-        return write(path, data);
+        return data;
     };
     await chat.send();
     t.true(injected);
-    t.deepEqual(parseActiveSession(await f.adapter.read(f.path)).messages.map(m => m.content),
+    t.deepEqual((await f.memory.loadActiveSession(f.path)).messages.map(m => m.content),
         ['Historyczne pytanie', 'Historyczna odpowiedź', 'Pytanie b', 'Równoczesny dopisek']);
     t.deepEqual(f.requests, ['b']);
     t.deepEqual(f.errors, []);
@@ -110,26 +125,30 @@ test.serial('R2 c: two tabs sending concurrently share one confirmed migration a
     t.teardown(a.close); t.teardown(b.close);
     await Promise.all([a.send(), b.send()]);
     t.deepEqual(f.requests.sort(), ['c-a', 'c-b']);
+    t.deepEqual(f.payloads.get('c-a'), [{ role: 'system', content: 'system' }, { role: 'user', content: 'Pytanie c-a' }]);
+    t.deepEqual(f.payloads.get('c-b'), [{ role: 'system', content: 'system' }, { role: 'user', content: 'Pytanie c-b' }]);
+    t.deepEqual([...f.answers].sort(), [['c-a', 'Odpowiedź c-a'], ['c-b', 'Odpowiedź c-b']]);
     t.deepEqual(f.errors, []);
     t.regex(a.tab.sessionEpoch!, /^[0-9a-f]{32}$/);
     t.is(b.tab.sessionEpoch, a.tab.sessionEpoch);
-    t.is(parseActiveSession(await f.adapter.read(f.path)).metadata.epoch, a.tab.sessionEpoch);
-    t.is(f.writes.filter(write => write.data.includes('\nepoch:')).length, 1);
-    t.deepEqual(parseActiveSession(await f.adapter.read(f.path)).messages.map(m => m.content),
+    t.is((await f.memory.loadActiveSession(f.path)).metadata.epoch, a.tab.sessionEpoch);
+    t.is(f.appends.filter(append => append.path === f.path).length, 3);
+    t.deepEqual((await f.memory.loadActiveSession(f.path)).messages.map(m => m.content),
         ['Historyczne pytanie', 'Historyczna odpowiedź', 'Pytanie c-a', 'Pytanie c-b']);
 });
 
 test.serial('R2 d: a real owner switch during preparation refuses the turn and leaves the original session intact', async t => {
     const f = fixture(), chat = f.chat('d');
     t.teardown(chat.close);
-    const write = f.adapter.write;
+    const read = f.adapter.read;
     let original = '', switched = false;
-    f.adapter.write = async (path, data) => {
-        if (data.includes('\nepoch:') && !switched) {
-            original = await f.adapter.read(f.path); switched = true;
+    f.adapter.read = async path => {
+        const data = await read(path);
+        if (path === f.path && data.includes('Pytanie d') && !switched) {
+            original = data; switched = true;
             f.memory.setActiveSessionIdentity('other.md', 'b'.repeat(32));
         }
-        return write(path, data);
+        return data;
     };
     await chat.send();
     t.true(switched);
@@ -139,58 +158,28 @@ test.serial('R2 d: a real owner switch during preparation refuses the turn and l
     t.is(await f.adapter.read(f.path), original);
 });
 
-test.serial('R2: failed replacement restores the exact source and retains a usable backup', async t => {
-    const f = fixture(), chat = f.chat('rollback');
-    t.teardown(chat.close);
-    const append = f.adapter.append;
-    let original = '';
-    f.adapter.append = async (path, data) => {
-        if (path === f.path && data.includes('\nepoch:')) {
-            original = [...f.files].find(([name]) => name.endsWith('.bak'))![1];
-            await append(path, data);
-            f.files.set(path, '---\nepoch: ' + 'a'.repeat(32) + '\n---\n');
-            throw new Error('append failed after installing partial bytes');
-        }
-        return append(path, data);
-    };
-    await chat.send();
-    t.is(await f.adapter.read(f.path), original);
-    t.true(original.startsWith(history));
-    t.true(f.errors[0].includes('original restored;'));
-    t.is(f.files.get(f.errors[0].split('backup: ')[1]), original);
-    t.deepEqual(f.requests, []);
-    t.is(f.memory.sessionEpoch, null);
-});
-
-test.serial('R2: no verified backup means no replacement of the source', async t => {
-    const f = fixture(), chat = f.chat('backup');
-    t.teardown(chat.close);
-    const write = f.adapter.write;
-    f.adapter.write = (path, data) => write(path, path.endsWith('.bak') ? 'damaged backup' : data);
-    await chat.send();
-    t.deepEqual(parseActiveSession(await f.adapter.read(f.path)).messages.map(m => m.content),
-        ['Historyczne pytanie', 'Historyczna odpowiedź', 'Pytanie backup']);
-    t.deepEqual(f.errors, [`Error: Session epoch: backup verification failed; source untouched: ${f.path}`]);
-    t.deepEqual(f.requests, []);
-});
-
-test.serial('R2: a last-moment external append is retained in the displaced original and retried', async t => {
+test.serial('R2: an external append without newline before readback survives and refreshes the writer', async t => {
     const f = fixture(), chat = f.chat('boundary');
     t.teardown(chat.close);
-    const rename = f.adapter.rename;
-    let appended = false;
-    f.adapter.rename = async (path, target) => {
-        if (path === f.path && !appended) {
+    const read = f.adapter.read, append = f.adapter.append;
+    let appended = false, appends = 0;
+    f.adapter.append = async (path, data) => {
+        await append(path, data);
+        if (path === f.path) appends++;
+    };
+    f.adapter.read = async path => {
+        if (path === f.path && appends === 2 && !appended) {
             appended = true;
-            await f.adapter.append(path, formatSessionEvent('user_message', { content: 'Dopisek przy zastąpieniu', seq: 9 }, '2026-11-01T00:00:02Z').trimEnd());
+            await append(path, '\n## 2026-11-01T00:00:02Z — user message\n\n**seq:**\n\n9\n\n**content:**\n\nDopisek przed readbackiem');
         }
-        return rename(path, target);
+        return read(path);
     };
     await chat.send();
+    t.true(appended);
     await f.memory.appendToActiveSession({ type: 'user_message', content: 'Po migracji' });
-    t.deepEqual(parseActiveSession(await f.adapter.read(f.path)).messages.map(m => m.content),
-        ['Historyczne pytanie', 'Historyczna odpowiedź', 'Pytanie boundary', 'Dopisek przy zastąpieniu', 'Po migracji']);
-    t.deepEqual(parseActiveSession(await f.adapter.read(f.path)).messages.slice(-2).map(message => message.seq), [9, 10]);
+    t.deepEqual((await f.memory.loadActiveSession(f.path)).messages.map(m => m.content),
+        ['Historyczne pytanie', 'Historyczna odpowiedź', 'Pytanie boundary', 'Dopisek przed readbackiem', 'Po migracji']);
+    t.deepEqual((await f.memory.loadActiveSession(f.path)).messages.slice(-2).map(message => message.seq), [9, 10]);
     t.deepEqual(f.requests, ['boundary']);
     t.deepEqual(f.errors, []);
 });
@@ -199,13 +188,14 @@ test.serial('R2: append from another memory instance waits for migration in the 
     const f = fixture(), chat = f.chat('queue');
     t.teardown(chat.close);
     const other = new AgentMemory({ adapter: f.adapter }, 'Lead');
-    const write = f.adapter.write;
+    const read = f.adapter.read;
     let appended: Promise<string> | undefined;
-    f.adapter.write = async (path, data) => {
-        if (path.endsWith('.prepared')) {
+    f.adapter.read = async path => {
+        const data = await read(path);
+        if (path === f.path && data.includes('Pytanie queue') && !appended) {
             appended = other.appendSessionEvent(f.path, { type: 'user_message', content: 'Dopisek z kolejki' });
         }
-        return write(path, data);
+        return data;
     };
     await chat.send();
     await appended;
@@ -226,20 +216,22 @@ test.serial('R2: ordinary chat without delegation never rewrites the legacy sess
     t.deepEqual(f.requests, ['ordinary']);
     t.deepEqual(f.errors, []);
     t.is(f.memory.sessionEpoch, null);
-    t.deepEqual(parseActiveSession(await f.adapter.read(f.path)).messages.map(m => m.content),
+    t.deepEqual((await f.memory.loadActiveSession(f.path)).messages.map(m => m.content),
         ['Historyczne pytanie', 'Historyczna odpowiedź', 'Pytanie ordinary']);
 });
 
 test.serial('R2: changing the initiating tab does not cancel its valid sibling waiting for the same migration', async t => {
     const f = fixture(), a = f.chat('sibling-a'), b = f.chat('sibling-b');
     t.teardown(a.close); t.teardown(b.close);
-    const write = f.adapter.write;
-    f.adapter.write = async (path, data) => {
-        if (path.endsWith('.prepared')) a.tab.isActive = false;
-        return write(path, data);
+    const read = f.adapter.read;
+    f.adapter.read = async path => {
+        const data = await read(path);
+        if (path === f.path && data.includes('Pytanie sibling-b')) a.tab.isActive = false;
+        return data;
     };
     await Promise.all([a.send(), b.send()]);
     t.deepEqual(f.requests, ['sibling-b']);
+    t.deepEqual([...f.answers], [['sibling-b', 'Odpowiedź sibling-b']]);
     t.deepEqual(f.errors, ['Error: Session epoch: owner changed']);
     t.is(a.tab.sessionEpoch, null);
     t.is((await f.memory.loadActiveSession(f.path)).metadata.epoch, b.tab.sessionEpoch);
@@ -262,115 +254,123 @@ function diskFixture(t: ExecutionContext) {
     f.adapter.remove = async path => { fs.unlinkSync(abs(path)); };
     f.adapter.exists = async path => fs.existsSync(abs(path));
     f.adapter.list = async () => ({ files: fs.readdirSync(abs(f.memory.paths.sessionsActive)).map(name => `${f.memory.paths.sessionsActive}/${name}`) });
-    const copies = async () => Promise.all((await f.adapter.list()).files
-        .filter(path => path.startsWith(f.path)).map(async path => ({ path, data: await f.adapter.read(path) })));
-    return { ...f, abs, copies };
+    return { ...f, abs };
 }
 
-for (const timing of ['after-displacement', 'inside-install'] as const) {
-    test.serial(`R3 filesystem: send_message preserves a recreated session (${timing})`, async t => {
-        const f = diskFixture(t), chat = f.chat(`gap-${timing}`);
+// Replaces both recreated-source races: protect history and both owners at the I/O boundary.
+for (const timing of ['read', 'readback'] as const) {
+    test.serial(`P2 filesystem: owner switch during ${timing} preserves both sessions`, async t => {
+        const f = diskFixture(t), chat = f.chat(`switch-${timing}`);
         t.teardown(chat.close);
-        const marker = `\n## User\n\nEXTERNAL recreated ${timing}\n`;
-        const rename = f.adapter.rename, append = f.adapter.append;
-        let injected = false, original = '';
-        const inject = () => { fs.appendFileSync(f.abs(f.path), marker); injected = true; };
-        f.adapter.rename = async (path, target) => {
-            if (path === f.path && target.endsWith('.original')) original = await f.adapter.read(path);
-            if (timing === 'inside-install' && path.endsWith('.prepared')) inject();
-            await rename(path, target);
-            if (timing === 'after-displacement' && path === f.path && target.endsWith('.original')) inject();
-        };
-        f.adapter.append = async (path, data) => {
-            if (timing === 'inside-install' && path === f.path && data.includes('\nepoch:') && !injected) inject();
-            await append(path, data);
+        const otherPath = `${f.memory.paths.sessionsActive}/other.md`;
+        const other = '---\nagent: Lead\nepoch: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n---\n\n## User\n\nInna rozmowa\n';
+        await f.adapter.write(otherPath, other);
+        const read = f.adapter.read, append = f.adapter.append;
+        let switched = false, appends = 0;
+        f.adapter.append = async (path, data) => { await append(path, data); if (path === f.path) appends++; };
+        f.adapter.read = async path => {
+            const data = await read(path);
+            if (path === f.path && appends === (timing === 'read' ? 1 : 2) && !switched) {
+                switched = true;
+                await append(path, `\n## User\n\nEXTERNAL switch-${timing}\n`);
+                f.memory.setActiveSessionIdentity(otherPath, 'b'.repeat(32));
+            }
+            return data;
         };
         await chat.send();
-        t.true(injected);
-        const copies = await f.copies();
-        t.true(copies.some(copy => copy.data.includes(marker)), 'independent bytes must remain on disk');
-        t.true(copies.some(copy => copy.data === original), 'exact displaced original must remain on disk');
-        t.is(f.errors.length, 1);
+        t.true(switched);
+        t.true((await read(f.path)).includes(historyBody));
+        t.deepEqual((await f.memory.loadActiveSession(f.path)).messages.map(m => m.content),
+            ['Historyczne pytanie', 'Historyczna odpowiedź', `Pytanie switch-${timing}`, `EXTERNAL switch-${timing}`]);
+        t.is(await read(otherPath), other);
+        t.deepEqual([f.memory.activeSessionPath, f.memory.sessionEpoch, chat.tab.sessionEpoch],
+            [otherPath, 'b'.repeat(32), null]);
+        t.deepEqual(f.errors, ['Error: Session epoch: owner changed']);
         t.deepEqual(f.requests, []);
-        t.true(copies.filter(copy => copy.data.includes(marker) || copy.data === original)
-            .every(copy => f.errors[0].includes(copy.path)), 'error names both recoverable versions');
     });
 }
 
-for (const mode of ['append', 'rewrite'] as const) {
-    test.serial(`R3 filesystem: send_message preserves an independent ${mode} before readback`, async t => {
+// Replaces the readback rewrite/rollback test with an actual read failure.
+for (const mode of ['append', 'read-failure'] as const) {
+    test.serial(`P2 filesystem: history survives ${mode} before readback`, async t => {
         const f = diskFixture(t), chat = f.chat(`readback-${mode}`);
         t.teardown(chat.close);
         const marker = '\n## User\n\nEXTERNAL readback\n';
-        const read = f.adapter.read, rename = f.adapter.rename, append = f.adapter.append;
-        let installed = false, injected = false, original = '';
-        f.adapter.rename = async (path, target) => {
-            if (path === f.path && target.endsWith('.original')) original = await read(path);
-            await rename(path, target);
-            if (path.endsWith('.prepared')) installed = true;
-        };
-        f.adapter.append = async (path, data) => {
-            await append(path, data);
-            if (path === f.path && data.includes('\nepoch:')) installed = true;
-        };
+        const read = f.adapter.read, append = f.adapter.append;
+        let appends = 0, injected = false;
+        f.adapter.append = async (path, data) => { await append(path, data); if (path === f.path) appends++; };
         f.adapter.read = async path => {
-            if (path === f.path && installed && !injected) {
+            if (path === f.path && appends === 2 && !injected) {
                 injected = true;
-                if (mode === 'append') fs.appendFileSync(f.abs(path), marker);
-                else fs.writeFileSync(f.abs(path), marker);
+                if (mode === 'read-failure') throw new Error('EACCES epoch readback');
+                fs.appendFileSync(f.abs(path), marker);
             }
             return read(path);
         };
         await chat.send();
         t.true(injected);
-        const copies = await f.copies();
-        t.true(copies.some(copy => copy.data.includes(marker)), 'readback must not discard the observed external bytes');
+        t.true((await read(f.path)).includes(historyBody));
+        const parsed = await new AgentMemory({ adapter: f.adapter }, 'Lead').loadActiveSession(f.path);
+        const expected = ['Historyczne pytanie', 'Historyczna odpowiedź', `Pytanie readback-${mode}`];
         if (mode === 'append') {
-            t.true((await read(f.path)).includes(marker));
+            t.deepEqual(parsed.messages.map(m => m.content), [...expected, 'EXTERNAL readback']);
+            t.is(typeof parsed.metadata.epoch, 'string');
+            t.regex(String(parsed.metadata.epoch), /^[0-9a-f]{32}$/);
+            t.is(parsed.metadata.epoch, chat.tab.sessionEpoch);
             t.deepEqual(f.requests, ['readback-append']);
             t.deepEqual(f.errors, []);
         } else {
-            t.is(await read(f.path), original);
+            t.deepEqual(parsed.messages.map(m => m.content), expected);
+            t.deepEqual([f.memory.sessionEpoch, chat.tab.sessionEpoch], [null, null]);
             t.deepEqual(f.requests, []);
             t.is(f.errors.length, 1);
-            const rescue = copies.find(copy => copy.path !== f.path && copy.data === marker);
-            t.truthy(rescue);
-            t.true(f.errors[0].includes(rescue!.path));
+            t.true(f.errors[0].includes('EACCES epoch readback'));
         }
     });
 }
 
-test.serial('R3 filesystem: five failed send_message turns retain a constant number of files', async t => {
-    const f = diskFixture(t), write = f.adapter.write;
-    f.adapter.write = (path, data) => write(path, path.endsWith('.prepared') ? data.slice(0, data.indexOf('\n---\n') + 5) : data);
-    const counts: number[] = [];
+test.serial('P2 filesystem: five failed epoch reads preserve history and the next send retries', async t => {
+    const f = diskFixture(t), read = f.adapter.read;
+    let failures = 0;
+    f.adapter.read = async path => {
+        const data = await read(path);
+        if (path === f.path && data.includes(`Pytanie failure-${failures}`) && failures < 5) {
+            failures++;
+            throw new Error('EACCES epoch read');
+        }
+        return data;
+    };
     for (let i = 0; i < 5; i++) {
         const chat = f.chat(`failure-${i}`); t.teardown(chat.close);
         await chat.send();
-        counts.push((await f.copies()).length);
+        t.is(f.memory.sessionEpoch, null);
     }
-    t.deepEqual(counts, [3, 3, 3, 3, 3]);
-    t.is(f.errors.length, 5);
+    t.is(failures, 5);
+    t.deepEqual(f.errors, Array<string>(5).fill('Error: EACCES epoch read'));
     t.deepEqual(f.requests, []);
+    t.true((await read(f.path)).startsWith(history));
     t.deepEqual((await f.memory.loadActiveSession(f.path)).messages.map(message => message.content),
         ['Historyczne pytanie', 'Historyczna odpowiedź', 'Pytanie failure-0', 'Pytanie failure-1', 'Pytanie failure-2', 'Pytanie failure-3', 'Pytanie failure-4']);
+    const retry = f.chat('retry'); t.teardown(retry.close);
+    await retry.send();
+    t.deepEqual(f.requests, ['retry']);
+    t.regex(retry.tab.sessionEpoch!, /^[0-9a-f]{32}$/);
+    t.is((await f.memory.loadActiveSession(f.path)).metadata.epoch, retry.tab.sessionEpoch);
 });
 
-test.serial('R3 filesystem: successful migration leaves only the session and one exact original copy', async t => {
+test.serial('P2 filesystem: successful migration preserves history and a fresh reader confirms identity', async t => {
     const f = diskFixture(t), chat = f.chat('success');
     t.teardown(chat.close);
-    const rename = f.adapter.rename;
-    let original = '';
-    f.adapter.rename = async (path, target) => {
-        if (path === f.path) original = await f.adapter.read(path);
-        await rename(path, target);
-    };
     await chat.send();
-    const copies = await f.copies();
     t.deepEqual(f.requests, ['success']);
     t.deepEqual(f.errors, []);
-    t.is(copies.length, 2);
-    t.deepEqual(copies.filter(copy => copy.path !== f.path).map(copy => copy.data), [original]);
-    t.false(copies.some(copy => copy.path.endsWith('.prepared')));
-    t.true((await f.adapter.read(f.path)).includes('\nepoch:'));
+    t.true((await f.adapter.read(f.path)).includes(historyBody));
+    const fresh = new AgentMemory({ adapter: { ...f.adapter } }, 'Lead');
+    const parsed = await fresh.loadActiveSession(f.path);
+    t.is(typeof parsed.metadata.epoch, 'string');
+    t.regex(String(parsed.metadata.epoch), /^[0-9a-f]{32}$/);
+    t.is(parsed.metadata.epoch, chat.tab.sessionEpoch);
+    t.is(parsed.metadata.epoch, f.memory.sessionEpoch);
+    t.deepEqual(parsed.messages.map(m => m.content),
+        ['Historyczne pytanie', 'Historyczna odpowiedź', 'Pytanie success']);
 });

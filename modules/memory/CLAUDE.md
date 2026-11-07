@@ -1022,8 +1022,11 @@ pozostaje per instancja. Wywołania jednej rewizji współdzielą Promise i zbi�
 odejście jednego nie anuluje ważnego drugiego. Publikacja RAM wymaga potwierdzenia pliku
 i aktualności właściciela, także po A→B→A. Restore samo nie migruje; send robi to przed
 zamrożeniem ownera, jeśli dostępna jest delegacja (starszy host bez rejestru też próbuje).
-Dotychczasowe testy migratora zostają w `chat_streaming.epochMigration.test.ts`,
-F1 w `AgentMemory.test.ts` i `turnOwner.test.ts`; ich przebudowa należy do P2.
+P2: `chat_streaming.epochMigration.test.ts` oraz F1 w `AgentMemory.test.ts` i
+`turnOwner.test.ts` sprawdzają historię, trwałą tożsamość, dwóch właścicieli i kolejkę.
+Bariery są na odczycie sesji, migracyjnym append i readbacku, bez zależności od nazw kopii.
+Dokładny dopisek i zakaz operacji na innych plikach należą do P3; odblokowanie modelu po
+awarii ensure do P4. P2 nadal oczekuje zatrzymania modelu przy takiej awarii.
 
 `RetrievalEngine` pomija prywatny namespace kopii również podczas adapterowego skanu
 administratora oraz w wynikach starego indeksu semantycznego; nie odczytuje jego

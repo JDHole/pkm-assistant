@@ -500,21 +500,33 @@ test('po zamrożeniu send_message nie czyta już globalnych luster widoku', t =>
 
 test('F1 tab guard prevents legacy epoch publication after switching tabs during readback', async t => {
     const path = '.pkm-assistant/agents/a/memory/sessions/active/legacy.md';
-    const content = '---\ntype: active_session\nagent: A\n---\nHistoria';
+    const content = '---\ntype: active_session\nagent: A\n---\n\n## User\n\nHistoria\n';
     const files = new Map([[path, content]]);
     const tab = { agentName: 'A', sessionPath: path, sessionEpoch: null, isActive: true };
+    const otherTab = { agentName: 'A', sessionPath: 'other.md', sessionEpoch: 'b'.repeat(32), isActive: false };
+    let appended = false, switched = false;
     const memory = new AgentMemory({ adapter: { exists: async p => files.has(p), mkdir: async () => {}, list: async () => ({ files: [] }),
-        read: async p => { if (!files.has(p)) throw new Error('ENOENT'); return files.get(p)!; },
+        read: async p => {
+            if (!files.has(p)) throw new Error('ENOENT');
+            if (p === path && appended) { tab.isActive = false; otherTab.isActive = true; switched = true; }
+            return files.get(p)!;
+        },
         rename: async (p, target) => { files.set(target, files.get(p)!); files.delete(p); },
-        append: async (p, value) => { files.set(p, (files.get(p) ?? '') + value); },
+        append: async (p, value) => { files.set(p, (files.get(p) ?? '') + value); if (p === path) appended = true; },
         remove: async p => { files.delete(p); },
-        write: async (p, value) => { files.set(p, value); tab.isActive = false; } } }, 'A');
+        write: async (p, value) => { files.set(p, value); } } }, 'A');
     memory.setActiveSessionIdentity(path, null);
     const agent = { name: 'A' };
-    const view: Runtime = { chatTabs: [tab], rollingWindow: new RollingWindow(), plugin: { agentManager: {
+    const view: Runtime = { chatTabs: [tab, otherTab], rollingWindow: new RollingWindow(), plugin: { agentManager: {
         getActiveAgent: () => agent, getAgentMemory: () => memory } } };
     await t.throwsAsync(ensureTurnSessionEpoch(view), { message: 'Session epoch: owner changed' });
     t.is(memory.sessionEpoch, null);
     t.is(tab.sessionEpoch, null);
-    t.is(files.get(path), content, 'przełączenie przy przygotowaniu nie zastępuje źródła');
+    t.true(switched);
+    t.deepEqual(otherTab, { agentName: 'A', sessionPath: 'other.md', sessionEpoch: 'b'.repeat(32), isActive: true });
+    t.true(files.get(path)!.includes(content.slice(content.indexOf('\n---\n') + 5)));
+    const parsed = await new AgentMemory(memory.vault, 'A').loadActiveSession(path);
+    t.is(typeof parsed.metadata.epoch, 'string');
+    t.regex(String(parsed.metadata.epoch), /^[0-9a-f]{32}$/);
+    t.deepEqual(parsed.messages, [{ role: 'user', content: 'Historia', seq: null }]);
 });
