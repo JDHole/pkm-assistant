@@ -133,6 +133,7 @@ test.serial('R2 c: two tabs sending concurrently share one confirmed migration a
     t.is(b.tab.sessionEpoch, a.tab.sessionEpoch);
     t.is((await f.memory.loadActiveSession(f.path)).metadata.epoch, a.tab.sessionEpoch);
     t.is(f.appends.filter(append => append.path === f.path).length, 3);
+    t.is(f.appends.filter(append => append.data.includes('— session epoch')).length, 1);
     t.deepEqual((await f.memory.loadActiveSession(f.path)).messages.map(m => m.content),
         ['Historyczne pytanie', 'Historyczna odpowiedź', 'Pytanie c-a', 'Pytanie c-b']);
 });
@@ -203,7 +204,7 @@ test.serial('R2: append from another memory instance waits for migration in the 
     const parsed = await f.memory.loadActiveSession(f.path);
     t.deepEqual(parsed.messages.map(m => m.content),
         ['Historyczne pytanie', 'Historyczna odpowiedź', 'Pytanie queue', 'Dopisek z kolejki', 'Następny dopisek']);
-    t.deepEqual(parsed.messages.slice(-2).map(message => message.seq), [4, 5]);
+    t.deepEqual(parsed.messages.slice(-2).map(message => message.seq), [5, 6]);
     t.deepEqual(f.requests, ['queue']);
     t.deepEqual(f.errors, []);
 });
@@ -361,10 +362,15 @@ test.serial('P2 filesystem: five failed epoch reads preserve history and the nex
 test.serial('P2 filesystem: successful migration preserves history and a fresh reader confirms identity', async t => {
     const f = diskFixture(t), chat = f.chat('success');
     t.teardown(chat.close);
+    const before = await f.adapter.list();
+    for (const operation of ['write', 'rename', 'remove', 'mkdir'] as const) {
+        f.adapter[operation] = async () => { throw new Error(`Forbidden ${operation}`); };
+    }
     await chat.send();
+    t.deepEqual(await f.adapter.list(), before);
     t.deepEqual(f.requests, ['success']);
     t.deepEqual(f.errors, []);
-    t.true((await f.adapter.read(f.path)).includes(historyBody));
+    t.true((await f.adapter.read(f.path)).startsWith(history));
     const fresh = new AgentMemory({ adapter: { ...f.adapter } }, 'Lead');
     const parsed = await fresh.loadActiveSession(f.path);
     t.is(typeof parsed.metadata.epoch, 'string');

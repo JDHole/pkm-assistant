@@ -2492,11 +2492,13 @@ test('F1 two memories share the adapter writer queue and a fresh reader confirms
     t.is(memory.sessionEpoch, epoch);
     t.is(siblingEpoch, epoch);
     t.is(other.sessionEpoch, epoch);
-    t.true(f.files[path].includes(original.slice(original.indexOf('\n---\n') + 5)));
+    t.true(f.files[path].startsWith(original));
+    t.is((f.files[path].match(/— session epoch/g) || []).length, 1);
+    t.deepEqual(Object.keys(f.files), [path]);
     t.deepEqual(parsed.messages, [
         { role: 'user', content: 'Historia', seq: null },
-        { role: 'user', content: 'Kolejka', seq: 1 },
-        { role: 'user', content: 'Druga pamięć', seq: 2 },
+        { role: 'user', content: 'Kolejka', seq: 2 },
+        { role: 'user', content: 'Druga pamięć', seq: 3 },
     ]);
 });
 
@@ -2511,3 +2513,87 @@ test('F1 epoch migration does not publish identity into a switched owner', async
     await t.throwsAsync(memory.ensureActiveSessionEpoch(path, () => true), { message: 'Session epoch: owner changed' });
     t.deepEqual([memory.activeSessionPath, memory.sessionEpoch, f.files[path]], ['other.md', 'b'.repeat(32), original]);
 });
+
+// Literal bytes, fixed only at the clock/randomness boundaries; no formatter in expectations.
+for (const outcome of ['success', 'append-error', 'readback-error', 'owner-switch', 'no-append'] as const) {
+    test.serial(`epoch establishment only appends to its existing session: ${outcome}`, async t => {
+        const f = makeVault(), memory = new AgentMemory(f.vault, 'Lead');
+        const path = `${memory.paths.sessionsActive}/legacy.md`;
+        const original = '\uFEFF---\r\nagent: Lead\r\n---\r\n\r\n## User\r\n\r\nHistoria\r\n## unknown block\r\nopaque';
+        const block = '\n## 2026-11-07T12:00:00.000Z — session epoch\n\n**epoch:**\n\n0123456789abcdef0123456789abcdef\n\n**seq:**\n\n1\n\n';
+        f.files[path] = original;
+        f.files[`${path}.epoch-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bak`] = 'Previous recovery bytes';
+        const before = { ...f.files }, operations: string[] = [];
+        const clock = Date.prototype.toISOString;
+        Date.prototype.toISOString = () => '2026-11-07T12:00:00.000Z';
+        t.teardown(() => { Date.prototype.toISOString = clock; });
+        memory._newSessionEpoch = () => '0123456789abcdef0123456789abcdef';
+        memory.setActiveSessionIdentity(path, null);
+        const read = f.vault.adapter.read;
+        let reads = 0;
+        f.vault.adapter.read = async target => {
+            operations.push(`read:${target}`);
+            if (++reads === 2 && outcome === 'readback-error') throw new Error('EACCES readback');
+            return read(target);
+        };
+        for (const operation of ['write', 'rename', 'remove', 'mkdir', 'list'] as const) {
+            f.vault.adapter[operation] = async () => { operations.push(operation); throw new Error(`Forbidden ${operation}`); };
+        }
+        if (outcome !== 'no-append') memory.vault.adapter.append = async (target, data) => {
+            operations.push(`append:${target}`);
+            if (outcome === 'append-error') throw new Error('EACCES append');
+            f.files[target] += data;
+            if (outcome === 'owner-switch') memory.setActiveSessionIdentity('other.md', 'b'.repeat(32));
+        };
+        const result = memory.ensureActiveSessionEpoch(path, () => true);
+        if (outcome === 'success') t.is(await result, '0123456789abcdef0123456789abcdef');
+        else await t.throwsAsync(result, { message: {
+            'append-error': 'EACCES append', 'readback-error': 'EACCES readback',
+            'owner-switch': 'Session epoch: owner changed', 'no-append': 'Session epoch: native append unavailable',
+        }[outcome] });
+        const appended = outcome !== 'append-error' && outcome !== 'no-append';
+        t.deepEqual(f.files, { ...before, [path]: original + (appended ? block : '') });
+        t.deepEqual(operations, [`read:${path}`, ...(outcome === 'no-append' ? [] : [`append:${path}`]), ...(appended ? [`read:${path}`] : [])]);
+        const fresh = new AgentMemory({ adapter: { ...f.vault.adapter, read } }, 'Lead');
+        const parsed = await fresh.loadActiveSession(path);
+        t.is(parsed.metadata.epoch, appended ? '0123456789abcdef0123456789abcdef' : null);
+        t.deepEqual(parsed.messages, [{ role: 'user', content: 'Historia\n## unknown block\nopaque', seq: null }]);
+        t.is(memory.sessionEpoch, outcome === 'owner-switch' ? 'b'.repeat(32) : outcome === 'success' ? '0123456789abcdef0123456789abcdef' : null);
+    });
+}
+
+for (const phase of ['readback', 'readback-error', 'existing-epoch'] as const) {
+    test(`readback refreshes warm sequence and newline state: ${phase}`, async t => {
+        const f = makeVault(), memory = new AgentMemory(f.vault, 'Lead');
+        const path = `${memory.paths.sessionsActive}/legacy.md`;
+        f.files[path] = '---\nagent: Lead\n---\n';
+        memory.setActiveSessionIdentity(path, null);
+        memory.vault.adapter.append = async (target, data) => { f.files[target] += data; };
+        // Empty assistant is covered by autosave, though not a parsed message.
+        const saved = [{ role: 'user', content: 'Historia' }, { role: 'assistant', content: '' }, { role: 'tool', content: '' }];
+        await memory.saveSession(saved);
+        if (phase === 'existing-epoch') await memory.ensureActiveSessionEpoch(path, () => true);
+        const read = f.vault.adapter.read;
+        let reads = 0;
+        f.vault.adapter.read = async target => {
+            if (++reads === (phase === 'existing-epoch' ? 1 : 2)) {
+                f.files[path] += '\n## 2026-11-07T12:01:00.000Z — user message\n\n**seq:**\n\n9\n\n**content:**\n\nZewnętrzny dopisek';
+                if (phase === 'readback-error') throw new Error('EACCES readback');
+            }
+            return read(target);
+        };
+        const result = memory.ensureActiveSessionEpoch(path, () => true);
+        if (phase === 'readback-error') {
+            await t.throwsAsync(result, { message: 'EACCES readback' });
+            t.is(memory.sessionEpoch, null);
+        } else t.regex(await result, /^[0-9a-f]{32}$/);
+        await memory.saveSession(saved);
+        t.is((f.files[path].match(/— tool result/g) || []).length, 1, 'autosave still covers the invisible messages');
+        await memory.appendToActiveSession({ type: 'user_message', content: 'Po migracji' });
+        t.deepEqual((await memory.loadActiveSession(path)).messages, [
+            { role: 'user', content: 'Historia', seq: 1 },
+            { role: 'user', content: 'Zewnętrzny dopisek', seq: 9 },
+            { role: 'user', content: 'Po migracji', seq: 10 },
+        ]);
+    });
+}

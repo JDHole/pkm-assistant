@@ -1788,7 +1788,7 @@ jeśli delegacja jest dostępna, epoka musi powstać przed zamrożeniem adresu t
 Sprawdzane są agent, instancja pamięci, aktywny obiekt i ID zakładki, ścieżka/epoka oraz
 okno rozmowy; przełączenie nie przypisuje migrowanej tożsamości nowej zakładce ani nie
 uruchamia jej modelu. Dwie zakładki współdzielą migrację i przyjmują tę samą epokę,
-ale zachowują osobne kontrole właściciela. Backup, staging i odtworzenie należą do
-AgentMemory (gotcha migracji w `../memory/CLAUDE.md`). Brak rzeczywistego właściciela nadal
+ale zachowują osobne kontrole właściciela. AgentMemory dopisuje epokę natywnym append
+i potwierdza ją readbackiem (kontrakt P3 w `../memory/CLAUDE.md`). Brak rzeczywistego właściciela nadal
 odmawia piszącemu subowi, bez zapisu live. Testy: `chat_streaming.epochMigration.test.ts`
 (produkcyjne send_message), F1 w `turnOwner.test.ts` i harness 74 (piszący sub po boocie).

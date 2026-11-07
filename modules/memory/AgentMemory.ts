@@ -156,7 +156,6 @@ export interface MemoryVaultAdapterLike {
     /** opcjonalne — atrapy testów bywają bez nich, kod to sprawdza (`stat?.`, `if (remove)`) */
     stat?(path: string): Promise<{ mtime?: number; size?: number } | null>;
     remove?(path: string): Promise<void>;
-    /** DataAdapter supports rename; migration refuses replacement without it. */
     rename?(path: string, target: string): Promise<void>;
     /**
      * Dopisanie ogona pliku bez pełnego read+write. Obsidian ma tę metodę
@@ -340,6 +339,10 @@ const vaultSessionWriters = new WeakMap<MemoryVaultAdapterLike, {
     appends: Map<string, number>;
 }>();
 
+type ObservedWriterInput =
+    | { kind: 'observed'; content: string }
+    | { kind: 'cached' };
+
 export class AgentMemory {
     private _removalSavesInFlight = new Map<string, Promise<string>>();
     private _epochMigrations = new Map<string, {
@@ -495,7 +498,7 @@ export class AgentMemory {
             const owners = new Set([isCurrent]);
             const current = () => sameOwner() && this.sessionEpoch === expectedEpoch && [...owners].some(check => check());
             const result = this._enqueuePathWrite(path, async () => {
-                const epoch = await this._migrateSessionEpoch(path, expectedEpoch, current);
+                const epoch = await this._establishSessionEpochUnderLock(path, expectedEpoch, current);
                 if (!current()) throw new Error('Session epoch: owner changed');
                 this.sessionEpoch = epoch;
                 return epoch;
@@ -517,126 +520,28 @@ export class AgentMemory {
         }
     }
 
-    /** Caller holds the session's append/save/archive queue for the ENTIRE transaction.
-     * Backups contain exact source bytes. Only verified, redundant artifacts are removed. */
-    private async _migrateSessionEpoch(path: string, expectedEpoch: string | null, current: () => boolean): Promise<string> {
-        const adapter = this.vault.adapter;
-        let epoch = '', backup = '', prepared = '', displaced = '', rescue = '', backedUp = '';
-        const removeOwned = async (file: string, expected: string) => {
-            if (await adapter.read(file) !== expected) throw new Error(`Session epoch: changed artifact retained: ${file}`);
-            await adapter.remove!(file);
-        };
-        // A synchronizer outside our queue can change the source while staging.
-        // Retries share one backup and epoch; uncertain artifacts require manual recovery.
-        for (let attempt = 0; attempt < 3; attempt++) {
+    /** Caller holds the path queue; only append may mutate the existing session. */
+    private async _establishSessionEpochUnderLock(path: string, expectedEpoch: string | null, current: () => boolean): Promise<string> {
+        try {
             if (!current()) throw new Error('Session epoch: owner changed');
-            const content = await adapter.read(path);
+            const content = await this.vault.adapter.read(path);
             const metadata = this._parseFrontmatter(content);
             if (!current() || metadata.agent && metadata.agent !== this.agentName) throw new Error('Session epoch: owner changed');
-            if (expectedEpoch && metadata.epoch !== expectedEpoch) throw new Error('Session epoch: identity mismatch');
-            if (typeof metadata.epoch === 'string' && /^[0-9a-f]{32}$/.test(metadata.epoch)) return metadata.epoch;
-            if (!adapter.rename) throw new Error('Session epoch: adapter cannot safely replace a session (rename unavailable)');
-            // rename/write can overwrite a target recreated AFTER an existence check.
-            // Native append never replaces those bytes; its readback detects that race.
-            if (!adapter.append || !adapter.remove) throw new Error('Session epoch: adapter cannot safely migrate a session (append/remove unavailable)');
-
-            if (!epoch) {
-                const listed = await adapter.list(this.paths.sessionsActive);
-                if (!listed?.files) throw new Error('Session epoch: recovery files cannot be listed; source untouched');
-                const pending = listed.files.filter(file =>
-                    file.startsWith(`${path}.epoch-`) && /^[0-9a-f]{32}\.bak(?:\..+)?$/.test(file.slice(`${path}.epoch-`.length)));
-                if (pending.length) {
-                    // This also survives a restart: do not allocate another epoch, overwrite
-                    // an unverified prepared file, or delete any previous recovery bytes.
-                    throw new Error(`Session epoch: unfinished migration; preserve ${path}; inspect existing recovery files before retry: ${pending.join(', ')}`);
-                }
-                epoch = this._newSessionEpoch();
-                backup = `${path}.epoch-${epoch}.bak`;
-                prepared = `${backup}.prepared`;
-                displaced = `${backup}.original`;
-                rescue = `${backup}.rescue`;
-                for (const file of [backup, prepared, displaced, rescue]) {
-                    if (await probeFile(adapter, file) !== 'missing') throw new Error(`Session epoch: recovery path already exists or is unreadable: ${file}`);
-                }
-                await adapter.write(backup, content);
-                if (await adapter.read(backup) !== content) throw new Error(`Session epoch: backup verification failed; source untouched: ${path}`);
-                backedUp = content;
-            }
-
-            const updated = maskSensitiveData(this._setFrontmatterField(content, 'epoch', epoch));
-            if (await probeFile(adapter, prepared) !== 'missing') throw new Error(`Session epoch: prepared path occupied: ${prepared}`);
-            await this._writeSessionFile(prepared, updated);
-            const staged = await adapter.read(prepared);
-            const body = (text: string) => text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/^---\n[\s\S]*?\n---\n?/, '');
-            if (staged !== updated || body(staged) !== body(maskSensitiveData(content))
-                || this._parseFrontmatter(staged).epoch !== epoch) {
-                throw new Error(`Session epoch: prepared history verification failed; source untouched; backup: ${backup}`);
-            }
-            const latest = await adapter.read(path);
+            const existingEpoch = resolveSessionEpoch(content);
+            if (expectedEpoch && existingEpoch !== expectedEpoch) throw new Error('Session epoch: identity mismatch');
+            this._refreshSessionWriterState(path, content);
+            if (existingEpoch) return existingEpoch;
+            await this._appendEventUnderLock(path, { type: 'session_epoch', epoch: this._newSessionEpoch() }, { kind: 'observed', content });
+            const readback = await this.vault.adapter.read(path);
+            this._refreshSessionWriterState(path, readback);
+            const epoch = resolveSessionEpoch(readback);
+            if (!readback.startsWith(content) || !epoch) throw new Error('Session epoch: write verification failed');
             if (!current()) throw new Error('Session epoch: owner changed');
-            if (latest !== content) {
-                await removeOwned(prepared, staged);
-                continue;
-            }
-            let installing = false;
-            let installed = '';
-            if (await probeFile(adapter, displaced) !== 'missing') throw new Error(`Session epoch: original path occupied: ${displaced}`);
-            try {
-                await adapter.rename(path, displaced);
-                const saved = await adapter.read(displaced);
-                if (await probeFile(adapter, path) !== 'missing') throw new Error('session path recreated; installation cancelled');
-                if (saved !== content) {
-                    // Keep a last-moment append in the source, then prepare from it again.
-                    await adapter.append(path, saved);
-                    if (await adapter.read(path) !== saved) throw new Error('source changed during retry restoration');
-                    await removeOwned(displaced, saved);
-                    await removeOwned(prepared, staged);
-                    continue;
-                }
-                if (!current()) throw new Error('Session epoch: owner changed');
-                installing = true;
-                await adapter.append(path, staged);
-                installed = await adapter.read(path);
-                // A concurrent suffix is valid history, not a reason to roll it back.
-                if (!installed.startsWith(staged)) throw new Error('write verification failed');
-            } catch (error) {
-                try {
-                    const saved = await readIfExists(adapter, displaced);
-                    if (saved.state === 'unreadable') throw new Error(`original unreadable: ${displaced}`);
-                    if (saved.state === 'content') {
-                        const live = await readIfExists(adapter, path);
-                        if (live.state === 'unreadable') throw new Error(`current session unreadable: ${path}`);
-                        if (live.state === 'content') {
-                            if (!installing) throw new Error('recreated session retained without replacement');
-                            // Preserve the actual divergent file BEFORE restoring anything.
-                            // An unreadable/unverified rescue forbids restoration.
-                            if (await probeFile(adapter, rescue) !== 'missing') throw new Error(`rescue path occupied: ${rescue}`);
-                            await adapter.rename(path, rescue);
-                            if (await adapter.read(rescue) !== live.content) throw new Error(`rescue verification failed: ${rescue}`);
-                        }
-                        if (await probeFile(adapter, path) !== 'missing') throw new Error('session recreated during recovery');
-                        await adapter.append(path, saved.content);
-                        if (!(await adapter.read(path)).startsWith(saved.content)) throw new Error('restore verification failed');
-                    } else if (await adapter.read(path) !== content) {
-                        throw new Error('source differs from backup');
-                    }
-                } catch (restoreError) {
-                    throw new Error(`Session epoch: ${causeText(error)}; restore failed (${causeText(restoreError)}); preserve session: ${path}; original: ${displaced}; rescue: ${rescue}; prepared: ${prepared}; backup: ${backup}`);
-                } finally {
-                    this._forgetSessionWriterState(path);
-                }
-                throw new Error(`Session epoch: ${causeText(error)}; original restored; original: ${displaced}; rescue: ${rescue}; backup: ${backup}`);
-            }
-            // The displaced original is the one retained exact copy, including any
-            // append incorporated by a retry. Never clean artifacts with unknown bytes.
-            if (await adapter.read(displaced) !== content) throw new Error(`Session epoch: original changed; recovery files retained: ${displaced}, ${backup}, ${prepared}`);
-            await removeOwned(prepared, staged);
-            await removeOwned(backup, backedUp);
-            this._sessionSeqCache.set(path, maxSeq(installed));
-            this._sessionEndsWithNewline.set(path, installed.endsWith('\n'));
             return epoch;
+        } catch (error) {
+            this._invalidateSessionWriterCache(path);
+            throw error;
         }
-        throw new Error(`Session epoch: source kept changing; migration cancelled; source: ${path}; backup: ${backup}`);
     }
 
     /**
@@ -1000,7 +905,7 @@ epoch: ${epoch}
 
     /**
      * Dopisz FRAGMENT do pliku aktywnej sesji bez czytania/przepisywania reszty.
-     * Wołany WYŁĄCZNIE przez `appendToActiveSession` — ten sam kontrakt maskowania co
+     * Wołany przez `_appendEventUnderLock` — ten sam kontrakt maskowania co
      * `_writeSessionFile`, tylko na nowy kawałek zamiast na cały plik. Bezpieczne: maski
      * `maskSensitiveData` działają w granicach linii/tokenu WEWNĄTRZ jednego, kompletnego bloku
      * zdarzenia (`formatSessionEvent`) — nigdy w poprzek dwóch osobnych zapisów.
@@ -1117,10 +1022,7 @@ epoch: ${epoch}
                 log.warn('AgentMemory', 'appendSessionEvent: frozen session epoch mismatch');
                 throw new Error('appendSessionEvent: frozen session epoch mismatch');
             }
-            const seq = this._nextSeq(path, probe.content);
-            const body = formatSessionEvent(event.type || 'event', { ...event, seq }, event.timestamp || new Date().toISOString());
-            await this._appendSessionFile(path, probe.content.endsWith('\n') ? body : '\n' + body);
-            this._sessionEndsWithNewline.set(path, true);
+            await this._appendEventUnderLock(path, event, { kind: 'observed', content: probe.content });
             return path;
         });
     }
@@ -1128,7 +1030,6 @@ epoch: ${epoch}
     async appendToActiveSession(event: ActiveSessionEventInput = {}): Promise<string> {
         let path = await this.startActiveSession(event.agentName || this.agentName);
         const timestamp: string = event.timestamp || new Date().toISOString();
-        const type = event.type || 'event';
         return this._enqueuePathWrite(path, async () => {
             let attemptsLeft = 1;
             for (;;) {
@@ -1139,9 +1040,8 @@ epoch: ${epoch}
                 // wierszem" — raz na ścieżkę (pierwsze zdarzenie sesji, albo pierwsze po
                 // restarcie Obsidiana, gdy cache jest zimny). Każdy kolejny append dokleja
                 // TYLKO nowy blok.
-                let endsWithNewline = this._sessionEndsWithNewline.get(path);
-                let existingForSeq = '';
-                const cacheWasCold = !this._sessionSeqCache.has(path) || endsWithNewline === undefined;
+                let input: ObservedWriterInput = { kind: 'cached' };
+                const cacheWasCold = !this._sessionSeqCache.has(path) || !this._sessionEndsWithNewline.has(path);
                 let pathIsDead = false;
 
                 if (cacheWasCold) {
@@ -1155,8 +1055,7 @@ epoch: ${epoch}
                             `appendToActiveSession: nie mogę odczytać pliku sesji — nie nadpisuję: ${path} (${causeText(probe.cause)})`
                         );
                     } else {
-                        existingForSeq = probe.content;
-                        endsWithNewline = existingForSeq.endsWith('\n');
+                        input = { kind: 'observed', content: probe.content };
                     }
                 } else {
                     // Ciepły cache ufa, że plik żyje, bez czytania go na każde
@@ -1175,14 +1074,8 @@ epoch: ${epoch}
                 }
 
                 if (!pathIsDead) {
-                    const seq = this._nextSeq(path, existingForSeq);
-                    const body = formatSessionEvent(type, { ...event, seq }, timestamp);
                     try {
-                        await this._appendSessionFile(path, endsWithNewline ? body : `\n${body}`);
-                        // `formatSessionEvent` KOŃCZY SIĘ `\n` (kontrakt funkcji) — po tym
-                        // zapisie plik zawsze kończy się nowym wierszem, więc kolejny append
-                        // tego już nie sprawdza.
-                        this._sessionEndsWithNewline.set(path, true);
+                        await this._appendEventUnderLock(path, { ...event, timestamp }, input);
                         return path;
                     } catch (e) {
                         // Fallback bez natywnego `append` (`_appendSessionFile`)
@@ -1210,6 +1103,38 @@ epoch: ${epoch}
         });
     }
 
+    /** Shared event writer. Never re-enter the public queue from here. */
+    private async _appendEventUnderLock(path: string, event: ActiveSessionEventInput, input: ObservedWriterInput): Promise<void> {
+        try {
+            if (input.kind === 'observed') this._refreshSessionWriterState(path, input.content);
+            const isEpoch = event.type === 'session_epoch';
+            if (isEpoch && typeof this.vault.adapter.append !== 'function') {
+                throw new Error('Session epoch: native append unavailable');
+            }
+            const seq = this._nextSeq(path, '');
+            const body = formatSessionEvent(event.type || 'event', { ...event, seq }, event.timestamp || new Date().toISOString());
+            const separator = isEpoch || !this._sessionEndsWithNewline.get(path) ? '\n' : '';
+            await this._appendSessionFile(path, separator + body);
+            this._sessionEndsWithNewline.set(path, true);
+        } catch (error) {
+            this._invalidateSessionWriterCache(path);
+            throw error;
+        }
+    }
+
+    private _refreshSessionWriterState(path: string, content: string): void {
+        this._sessionSeqCache.set(path, maxSeq(content));
+        this._sessionEndsWithNewline.set(path, content.endsWith('\n'));
+        this._appendsSinceVerify.set(path, 0);
+    }
+
+    /** Uncertain I/O must not discard the separate autosave coverage count. */
+    private _invalidateSessionWriterCache(path: string): void {
+        this._sessionSeqCache.delete(path);
+        this._sessionEndsWithNewline.delete(path);
+        this._appendsSinceVerify.delete(path);
+    }
+
     /**
      * Następny numer zdarzenia dla ścieżki. Cache-miss (pierwszy zapis / po restarcie)
      * inicjalizuje licznik skanem podanej treści pliku.
@@ -1225,10 +1150,8 @@ epoch: ${epoch}
 
     /** Zapomnij stan numeracji/pokrycia dla ścieżki (sesja zeszła z active). */
     _forgetSessionWriterState(path: string): void {
-        this._sessionSeqCache.delete(path);
+        this._invalidateSessionWriterCache(path);
         this._sessionSavedCounts.delete(path);
-        this._sessionEndsWithNewline.delete(path);
-        this._appendsSinceVerify.delete(path);
     }
 
     /**

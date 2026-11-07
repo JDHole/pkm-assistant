@@ -332,9 +332,10 @@ Każda wiadomość usera, odpowiedź agenta, tool result i sub-agent result dopi
 `sessions/active/<agent>_YYYY-MM-DD_HH-mm.md`. `.state.json` trzyma listę aktywnych sesji do
 restore po restarcie Obsidiana.
 
-**Plik active ma JEDNEGO pisarza: `appendToActiveSession`** (event-log, append-only, z
-numeracją `**seq:**`). `saveSession` NIE nadpisuje pliku transkryptem - dopisuje tylko ogon,
-którego czytnik eventowy nie widzi (patrz gotcha "dopisywanie, nie nadpisywanie" niżej).
+**Zdarzenia active dopisuje `_appendEventUnderLock`**, pod kolejką adaptera, z numeracją
+`**seq:**`: przez `appendToActiveSession`, `appendSessionEvent` i `ensureActiveSessionEpoch`.
+`saveSession` dopisuje brakujący ogon jako eventy, ale aktualizacja metadanych nadal wykonuje
+pełny zapis pliku; nie zamienia go na transkrypt.
 Transkrypt (`## User`/`## Assistant`) to widok POCHODNY: powstaje przy `archiveActiveSession`
 (konwersja event-log -> format transkryptu, `formatToMarkdown`). Format `sessions/archive/`
 jest transkryptem od zawsze - konsolidacja L1/L2/L3 i `parseSessionFile` go czytają bez zmian.
@@ -350,7 +351,8 @@ bez cyklu.
 Nowy plik `sessions/active/` zapisuje `epoch` jako 32 znaki hex z 16 losowych bajtów
 `crypto.getRandomValues`. `parseFrontmatter` czyta tylko frontmatter; `parseActiveSession`
 używa resolvera opisanego niżej (format v4). Brak poprawnej epoki daje `null`. Odczyt
-starych plików nie dopisuje pola ani nie migruje treści. `AgentMemory.sessionEpoch` jest
+starych plików nie dopisuje pola ani nie migruje treści. Jawne `ensureActiveSessionEpoch`
+dopisuje epokę jako event, bez zmiany istniejących bajtów (kontrakt P3 poniżej). `AgentMemory.sessionEpoch` jest
 zsynchronizowane z `activeSessionPath`; bezpośrednia zmiana ścieżki zeruje epokę, a
 `setActiveSessionIdentity(path, epoch)` wiąże ścieżkę z wartością potwierdzoną z pliku.
 `appendSessionEvent` wewnątrz kolejki zapisu odczytuje efektywną epokę resolverem i porównuje ją z przekazaną oczekiwaną epoką; niezgodność przerywa zapis.
@@ -767,7 +769,7 @@ Flow:
   obejmuje TYLKO nowo doklejany fragment, nie cały plik - bezpieczne, bo wzorce sekretów
   działają w granicach jednego, kompletnego bloku zdarzenia, nigdy w poprzek dwóch osobnych
   zapisów. Adapter bez natywnego `append` dostaje fallback przez `readIfExists` (nie goły
-  `exists()+read()`).
+  `exists()+read()`). Dla `session_epoch` fallback jest zabroniony: wymagany natywny append.
   - **Plik skasowany Z ZEWNĄTRZ między zdarzeniami, na ciepłym cache, jest realnym ryzykiem** -
     natywny `adapter.append` na brakującym pliku wg wielu implementacji nie rzuca, tylko cicho
     zakłada plik OD NOWA (jak `fs` z flagą `a`), więc bez dodatkowej ochrony taki plik wracał
@@ -817,16 +819,13 @@ Flow:
   zamiast zawisnąć w retry-loopie. Furtka jest wąska: dotyczy tylko `writeBrainNote` - inne
   pisarze `brain/` (`MemorySaveTool`, `MemoryDeleteTool`, konsolidacja w `ArchiveWorkflow`) nie
   mają jeszcze tej samoobrony, mimo że wołają tę samą memoizowaną ścieżkę.
-- ⚠️ **`_sessionEndsWithNewline` - znane ryzyko bez taniej naprawy.** Cache stanu "plik kończy
-  się `\n`" jest ustawiany po każdym udanym zapisie tej instancji i inwalidowany wyłącznie przez
-  koniec sesji (archiwizacja/odłożenie/martwa ścieżka). Jeśli plik zostanie zmieniony z zewnątrz
-  tak, że traci końcowy `\n` (np. user otworzy go w Obsidianie i zapisze ręcznie), a cache tej
-  instancji wciąż mówi "kończy się `\n`", kolejny append dokleja się bez wiodącego `\n` do
-  ostatniej linii - blok zdarzenia zlewa się z poprzednią linią i parser może go nie rozpoznać
-  (oczekuje nagłówka na POCZĄTKU linii). Nie ma taniego sposobu wykrycia tego bez pełnego
-  odczytu treści (dokładnie tego, czego append-only miało uniknąć) - periodyczna weryfikacja
-  sprawdza wyłącznie `exists()`, nie kształt ostatniej linii. Świadomie nienaprawione - zapisane
-  jako znane ryzyko dla przyszłego czytelnika, nie jako TODO.
+- ⚠️ **Cache pisarza odświeża każdy świeży odczyt w drodze dopisku.**
+  `appendSessionEvent` i `ensureActiveSessionEpoch` ustawiają seq, newline oraz licznik
+  okresowej weryfikacji z odczytanego tekstu, nawet na ciepłym cache. Ensure robi to także
+  po readbacku. Błąd dopisku/ensure unieważnia te trzy cache, zachowując licznik autosave
+  `_sessionSavedCounts`. Sam ciepły `appendToActiveSession` nadal nie czyta treści, więc
+  zewnętrzna zmiana po ostatnim odczycie może pozostać niewidoczna dla zwykłego dopisku.
+  Event epoki zawsze zaczyna się dodatkowym newline, także przy ciepłym cache.
 - ⚠️ **Znacznikiem pokrycia na szczeblach L1→L2 i L2→L3 jest PLIK NADRZĘDNY, nie stempel w
   źródle.** Kandydatów na paczkę L2 odsiewa `AgentMemory.listUncoveredL1s()` - L1, których nie
   wymienia żadne L2 we frontmatterze `l1_files:`; analogicznie `listUncoveredL2s()` po
@@ -993,7 +992,7 @@ na keyword, a semantic korzysta z bazowego vaulta i nie widzi kopii. `scope: mem
 zachowuje dotychczasowy odczyt. Osobna tożsamość hosta kopii izoluje cache skanów.
 
 
-### 2.4.7 P1 — czytnik epoki i dotychczasowy migrator
+### 2.4.7 P3 — epoka starszej sesji przez dopisek
 
 Format v4 dodaje `session_epoch`: nagłówek ISO z tytułem `session epoch`, pole `epoch`
 w prefiksie metadanych i dodatni bezpieczny całkowity `seq`. `parseSessionEpoch(unknown)`
@@ -1008,25 +1007,30 @@ w `saveSession`. Nowe sesje nadal zapisują epokę we frontmatter.
 Testy: `activeSessionFormat.test.ts` (format, pierwszeństwo, walidacja, treść i ID)
 i `AgentMemory.test.ts` (`frozen append and save accept event epoch and reject another owner`).
 
-P1 nie przełącza pisarza migracji. `ensureActiveSessionEpoch(path, isCurrent)` nadal
-uruchamia `_migrateSessionEpoch`: sprawdza katalog, agenta i rewizję właściciela, tworzy
-`.bak`/`.prepared`, odsuwa źródło do `.original`, instaluje przygotowaną wersję i odczytuje
-wynik; rozbieżności mogą trafić do `.rescue`. Wymaga rename/append/remove, wykrywa
-pozostałości nieudanej migracji, a awaria nadal zatrzymuje turę przed modelem.
-Mechanizm ma znane wyścigi sprzątania/rescue i odświeżania cache; jego usunięcie należy do P3.
-Nie traktować obsługi eventu przez czytnik jako gwarancji zgodności starego migratora
-z sesją mającą wyłącznie epokę eventową: migrator nadal odczytuje frontmatter.
+`ensureActiveSessionEpoch(path, isCurrent)` pod kolejką sprawdza ścieżkę, agenta,
+rewizję właściciela i oczekiwaną epokę. Przyjmuje już istniejącą epokę resolvera bez zapisu.
+Przy jej braku wymaga natywnego `append` i dopisuje jeden blok `session_epoch`, zawsze
+z początkowym newline. Stary BOM, CRLF, nieznane bloki i treść pozostają bajtowo nietknięte;
+maskowany jest tylko nowy fragment. Brak tworzenia kopii, rename, remove i rollbacku.
+Pozostałości dawnych `.epoch-*.bak*` nie są czytane, wykrywane ani sprzątane.
+
+Readback musi zachować odczytany prefiks i zawierać poprawną epokę; dodatkowe dopiski są
+akceptowane. Cache pisarza jest odświeżany z readbacku przed kontrolą właściciela.
+RAM otrzymuje wynik resolvera, więc wcześniejszy poprawny wpis innego pisarza wygrywa
+z własnym kandydatem. Błąd nie publikuje epoki; następna próba ponownie czyta plik,
+bez zapamiętywania kandydata. W P3 awaria ensure nadal zatrzymuje model; odblokowanie
+rozmowy i odmowa piszącemu subowi z przyczyną należą do P4.
 
 Migracja, append/save/archive dzielą kolejkę i cache adaptera; `_sessionSavedCounts`
 pozostaje per instancja. Wywołania jednej rewizji współdzielą Promise i zbiór właścicieli;
 odejście jednego nie anuluje ważnego drugiego. Publikacja RAM wymaga potwierdzenia pliku
 i aktualności właściciela, także po A→B→A. Restore samo nie migruje; send robi to przed
 zamrożeniem ownera, jeśli dostępna jest delegacja (starszy host bez rejestru też próbuje).
-P2: `chat_streaming.epochMigration.test.ts` oraz F1 w `AgentMemory.test.ts` i
-`turnOwner.test.ts` sprawdzają historię, trwałą tożsamość, dwóch właścicieli i kolejkę.
-Bariery są na odczycie sesji, migracyjnym append i readbacku, bez zależności od nazw kopii.
-Dokładny dopisek i zakaz operacji na innych plikach należą do P3; odblokowanie modelu po
-awarii ensure do P4. P2 nadal oczekuje zatrzymania modelu przy takiej awarii.
+`chat_streaming.epochMigration.test.ts` oraz F1 w `AgentMemory.test.ts` i `turnOwner.test.ts`
+sprawdzają historię, trwałą tożsamość, dwóch właścicieli i kolejkę. Testy P3 dodatkowo
+porównują stare bajty + literalny blok, zakaz write/rename/remove/mkdir/list oraz świeży
+cache po zewnętrznym dopisku bez newline, również po błędzie readbacku. Epoka zużywa seq,
+ale nie zwiększa liczby wiadomości. Test filesystemowy sendu potwierdza brak nowych plików.
 
 `RetrievalEngine` pomija prywatny namespace kopii również podczas adapterowego skanu
 administratora oraz w wynikach starego indeksu semantycznego; nie odczytuje jego
