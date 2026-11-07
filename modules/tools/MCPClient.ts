@@ -22,6 +22,8 @@ import type { BuiltinToolExecutionContext } from './ToolRegistry.js';
 import { prepareSubToolExecution, isVaultContentWriter } from './subToolExecution.js';
 import type { VaultExecution, HostPlugin } from './subToolExecution.js';
 import { DraftError } from '../vault-drafts/index.js';
+import type { DraftPreview } from '../vault-drafts/index.js';
+import { draftReviewContext } from './draftReviewApproval.js';
 import type { ModelResponse, ParsedToolCall } from '../agent-loop/index.js';
 import type { App } from 'obsidian';
 
@@ -305,6 +307,9 @@ export interface MCPClientOptions {
 
 /** Wejście modala diffa (5b) - ten sam kształt dla haka testowego i dla `DiffModal`. */
 export interface DiffApprovalOptions {
+    /** Optional draft preview; legacy string-pair callers retain their exact contract. */
+    preview?: DraftPreview;
+    signal?: AbortSignal;
     path: string;
     oldContent: string;
     newContent: string;
@@ -981,6 +986,20 @@ export class MCPClient {
             const tool = this.toolRegistry.getTool(toolCall.name);
             if (!tool) {
                 throw new Error(`Tool not found: ${toolCall.name}`);
+            }
+            if (toolCall.name === 'subagent_changes' && tool.source === 'built-in') {
+                const reviewContext = draftReviewContext({ plugin: this.plugin, registry: this.toolRegistry,
+                    agentName: invocationAgentName ?? '', autonomy, opts, consent: this.sessionWriteConsent,
+                    requestDiff: options => this._requestDiffApproval(options),
+                    isDenied: (name, path) => this._isDenied(invocationAgentName ?? '', name, path),
+                    recordDenial: (name, path) => this._recordDenial(invocationAgentName ?? '', name, path) });
+                // Only this new tool uses the review protocol. Existing approval/DOM paths are untouched.
+                return await tool.execute(args, this.app, this.plugin, {
+                    draftReview: reviewContext, resultBudgetChars: 0, effectiveResultBudgetChars: 12000,
+                    shouldAbort: () => !!opts.shouldAbort?.() || !!opts.abortSignal?.aborted,
+                    abortSignal: opts.abortSignal, authorizeFileRead: () => ({ allowed: false }),
+                    serializeFinalResult: result => JSON.stringify(result),
+                });
             }
             const execution = opts.vaultExecution ?? { kind: 'live' as const };
             const host = execution.kind === 'live' ? { kind: 'live' as const, app: this.app, plugin: this.plugin }

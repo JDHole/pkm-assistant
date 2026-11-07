@@ -7,6 +7,7 @@
  * wprost, tak jak realny Obsidian robi to za kulisami `open()`.
  */
 import test from 'ava';
+import { resolveObjectURL } from 'node:buffer';
 import { DiffModal } from './DiffModal.js';
 
 type MockNode = {
@@ -108,4 +109,75 @@ test('zaznaczony checkbox + Odrzuć → rememberForSession ZAWSZE false', t => {
 
     t.is(modal.rememberForSession, false);
     t.is(modal.result, 'deny');
+});
+
+// P4: new preview variants retain the legacy promise and session-consent contract.
+function draftModal(preview: NonNullable<ConstructorParameters<typeof DiffModal>[1]['preview']>, path = 'note.md') {
+    const modal = new DiffModal({} as ConstructorParameters<typeof DiffModal>[0], {
+        path, oldContent: 'legacy old', newContent: 'legacy new', agentName: 'Lead', rememberAvailable: true, preview,
+    });
+    modal.onOpen(); return modal;
+}
+function texts(modal: DiffModal, cls: string): string[] {
+    return findAll(modal.contentEl, node => !!node.className?.split(' ').includes(cls))
+        .map(node => (node as MockNode & { textContent: string }).textContent).reverse();
+}
+
+test('P4 deletion preview shows removed text and never offers session consent', t => {
+    const modal = draftModal({ kind: 'deleted', oldContent: 'Delete me', newContent: '' });
+    t.deepEqual(texts(modal, 'diff-operation'), ['Delete file']);
+    t.deepEqual(texts(modal, 'diff-text'), ['Delete me', '']);
+    t.is(findCheckbox(modal), undefined);
+    findButtonByClass(modal, 'mod-cta')!.onclick!();
+    t.deepEqual([modal.result, modal.rememberForSession], ['approve', false]);
+});
+
+test('P4 binary preview shows operation and sizes without base64 diff', t => {
+    const modal = draftModal({ kind: 'binary', operation: 'replace', oldBytes: 3, newBytes: 4 }, 'data.bin');
+    t.deepEqual(texts(modal, 'diff-operation'), ['Replace binary file']);
+    t.deepEqual(texts(modal, 'diff-binary-size'), ['Size before: 3 B; after: 4 B']);
+    t.deepEqual(texts(modal, 'diff-text'), []);
+    findButtonByClass(modal, 'mod-cta')!.onclick!();
+    t.deepEqual([modal.result, modal.rememberForSession], ['approve', false]);
+});
+
+test('P4 folder preview describes folder creation and retains deny result', t => {
+    const modal = draftModal({ kind: 'folder' }, 'Notes');
+    t.deepEqual(texts(modal, 'diff-operation'), ['Create folder']);
+    findButtonByClass(modal, 'mod-warning')!.onclick!();
+    t.deepEqual([modal.result, modal.rememberForSession], ['deny', false]);
+});
+
+test('P4 text preview renders approved content with unchanged session checkbox behavior', t => {
+    const modal = draftModal({ kind: 'text', oldContent: 'Base', newContent: 'Proposal' });
+    t.deepEqual(texts(modal, 'diff-text'), ['Base', 'Proposal']);
+    findCheckbox(modal)!.checked = true;
+    findButtonByClass(modal, 'mod-cta')!.onclick!();
+    t.deepEqual([modal.result, modal.rememberForSession], ['approve', true]);
+});
+
+test('P4 aborted preview resolves the existing promise as deny', async t => {
+    const controller = new AbortController();
+    const modal = new DiffModal({} as ConstructorParameters<typeof DiffModal>[0], {
+        path: 'note.md', oldContent: 'Base', newContent: 'Proposal', agentName: 'Lead', signal: controller.signal,
+    });
+    const result = modal.waitForApproval(); controller.abort();
+    t.is(await result, 'deny'); t.is(modal.rememberForSession, false);
+});
+
+
+test.serial('P4 image preview uses the proposed bytes and releases its temporary URL', async t => {
+    const original = URL.createObjectURL;
+    let imageUrl = '';
+    URL.createObjectURL = blob => { imageUrl = original(blob); return imageUrl; };
+    try {
+        const modal = draftModal({ kind: 'binary', operation: 'create', oldBytes: 0, newBytes: 4,
+            image: new Uint8Array([137, 80, 78, 71]) }, 'image.png');
+        const blob = resolveObjectURL(imageUrl)!;
+        t.deepEqual([...new Uint8Array(await blob.arrayBuffer())], [137, 80, 78, 71]);
+        t.is(blob.type, 'image/png');
+        t.deepEqual(findAll(modal.contentEl, n => n.tagName === 'IMG').map(n => n.className), ['diff-image']);
+        modal.onClose();
+        t.is(resolveObjectURL(imageUrl), undefined);
+    } finally { URL.createObjectURL = original; }
 });

@@ -1,8 +1,8 @@
 # modules/vault-drafts/
 
-P1–P2 wersji 2.4.7: trwały magazyn i warstwowy widok kopii roboczych. Moduł nie jest jeszcze
+P1–P4 wersji 2.4.7: trwały magazyn, warstwowy widok i przegląd kopii roboczych. Moduł nie jest jeszcze
 podłączony do runtime. Nie importuje Obsidiana, runnera, czatu ani MCPClient.
-Nie ma żadnego portu zapisu treści do bazowego vaulta.
+Jedyny port zapisu do bazowego vaulta należy do jawnego DraftReview; magazyn i widok pozostają odizolowane.
 
 Pliki są osiągalne statycznie przez barrel `tools/index.ts` (P2), a od P3 runner tworzy widok/host wyłącznie po jawnym wstrzyknięciu
 `SubRunDrafts`. Produkcyjny runtime nadal go nie tworzy. Dlatego usunięto pięć nieaktualnych
@@ -33,7 +33,7 @@ wpisów P1 w `ZNANE_SIEROTY`; asercje strażnika pozostają bez zmian.
 - `mutate(draftId, {path, source: {tool, callId}, value}, inheritedFrom?)`: tekst, bajty, folder albo
   tombstone z dyspozycją trash/permanent. Zwraca trwały snapshot manifestu.
 - `snapshot(draftId)`, `list()`: niezależne kopie danych; to wewnętrzne API, nie
-  autoryzowane narzędzie prowadzącego. Własność i zakres dostępu egzekwuje przyszłe P4.
+  autoryzowane narzędzie prowadzącego. Własność i zakres dostępu egzekwuje DraftReview z zaufanym kontekstem prowadzącego.
 - `seal(draftId, reason)`: synchronicznie odbiera prawo mutacji/publikacji; Promise
   potwierdza trwałe zamknięcie. Powtórzenie zachowuje pierwszą utrwaloną przyczynę.
   Po błędzie zapisu kopia pozostaje zablokowana w RAM; `seal` można ponowić.
@@ -42,7 +42,7 @@ wpisów P1 w `ZNANE_SIEROTY`; asercje strażnika pozostają bez zmian.
   Nie uruchamia pracy, zgód ani zapisów do vaulta. Błąd utrwalenia restore odrzuca Promise.
 
 `DraftPersistence(storageIO, hasher)` udostępnia `putBlob`, `readBlob`, `hash`,
-`hasDraft`, `save`, `loadAll`. `save` jest niskopoziomowym API dla zaufanego store/review;
+`hasDraft`, `save`, `writeIntent`, `loadAll`. `save` jest niskopoziomowym API dla zaufanego store/review;
 nie udostępniać go narzędziom modelu. `readBlob` sprawdza długość i SHA-256.
 Barrel eksportuje też typy, `DraftError` z `code`, `DRAFT_ROOT` i fabryki
 `parseDraftId/ChangeId/BlobId/ContentHash/Revision/VaultPath/DraftManifest/DraftMutation`.
@@ -50,7 +50,7 @@ Barrel eksportuje też typy, `DraftError` z `code`, `DRAFT_ROOT` i fabryki
 ## Trwałość i granica adaptera
 
 Zapis wyłącznie pod `.pkm-assistant/subagent-drafts/v1/<draftId>/`:
-`blobs/<sha256>` i `manifests/000001.json`, `000002.json`, itd. Nazwa bloba nie zawiera
+`blobs/<sha256>`, `manifests/000001.json`, `000002.json`, itd., oraz `decisions/<attemptId>.json`. Nazwa bloba nie zawiera
 ścieżki użytkownika; runId/threadId są tylko metadanymi. Rewizja treści rośnie przy
 mutacji; generacja manifestu również przy seal/restore. Manifest jest opakowany jako
 `{payload: string, checksum: SHA256(payload)}`. Starsze generacje są zachowane.
@@ -66,7 +66,7 @@ P1 testuje oba momenty Stopu: podczas bloba oraz przed atomową publikacją mani
 Jeden aktywny store jest właścicielem namespace; równoległe procesy zapisujące ten sam
 DraftId wymagają blokady po stronie adaptera. `publish` nie nadpisuje istniejącej nazwy.
 
-Port vaulta ma tylko `stat/read`. Baza powstaje przy pierwszej mutacji przez
+Port magazynu/widoku vaulta ma tylko `stat/read` (widok dodatkowo list). Baza powstaje przy pierwszej mutacji przez
 stat → bajty → stat, maksymalnie trzy próby. Błąd odczytu daje `io-error`, nie pustą
 bazę. SHA-256, rozmiar, mtime i oryginalne bajty są zachowane. Port zegara podaje
 nieujemne milisekundy; mtime i czas mogą zawierać część ułamkową. SHA-256 dostarcza host, a wynik jest walidowany.
@@ -110,7 +110,69 @@ wyłącznie z niepustym `inheritedFrom`; własne create → delete nadal znika n
 Testy P2: `modules/tools/subToolExecution.test.ts` (narzędzia, widok, izolacja,
 artefakty/frontmatter, Orama, adapter, odtworzenie pochodnego tombstone i paginacja).
 
-P3 wiąże store z biegiem i Stopem przez opcjonalny `SubRunDrafts` w module sub-agents; P4 implementuje decyzje, blokady logicznych ścieżek,
-kontrolę konfliktu, intencje i idempotencję. Same typy stanów przeglądu nie oznaczają
-implementacji przyjęcia. P5 dostarczy adaptery, rejestrację, zdarzenia i retencję.
+P3 wiąże store z biegiem i Stopem przez opcjonalny `SubRunDrafts` w module sub-agents.
+P5 dostarczy adapter trwałej publikacji magazynu, rejestrację, zdarzenia i retencję.
 Przed aktywacją konieczna jest weryfikacja kontraktu atomowej publikacji na hoście.
+
+## P4 — przegląd, decyzje i granica atomowości
+
+`DraftReview(store, persistence, reviewIO)` eksportuje `list(context, filter)` i
+`decide(context, {action, draftId, changeId, revision})`. Publiczne typy:
+`DraftReviewIO`, `DraftReviewContext`, `DraftPreview`, `ReviewDecision`, `ChangeSummary`.
+Kontekst `main` i callbacki uprawnień/zgody pochodzą z runtime, nigdy z argumentów
+modelu. Właścicielem jest agent; domyślna lista dodatkowo wymaga tej samej ścieżki
+sesji i epoki. Jawne `scope: agent` pozwala odnaleźć wcześniejsze sesje. Decyzja
+wskazująca konkretną kopię własnego agenta jest możliwa również po archiwizacji sesji.
+Każdy wpis listy podlega aktualnemu prawu odczytu. Strona ma najwyżej 50 wpisów,
+stabilny kursor draft/change; szczegół ogranicza każdą stronę tekstu do 2000 znaków
+z `truncated`. Binary zwraca rozmiary i operację, nigdy bajty/base64 w wyniku narzędzia.
+
+`DraftStore.withReviewLock` serializuje decyzje po logicznej ścieżce w CAŁYM magazynie,
+również między reviewerami, sesjami i kopiami. Niezależne pliki nie czekają na cudzy
+modal. `setReview` jest niskopoziomowym, zaufanym API z walidacją przejść; wymaga seal,
+rewizji zmiany i aktualizuje wyłącznie generację manifestu. Nie zmienia rewizji treści
+ani zamrożonych wejść następników. Accepted/rejected są terminalne; ponowienie
+przyjętej rewizji zwraca zachowane pokwitowanie bez nowego zapisu lub okna.
+
+Kontrola bazy obejmuje SHA-256, bajty i mtime, przez stat → odczyt → stat. Powtarza się
+przed zgodą, po zgodzie i po utrwaleniu intencji, tuż przed operacją. Baza odziedziczona
+pozostaje bazą poprzednika. Konflikt blokuje wyłącznie tę ścieżkę; nie istnieje force
+ani merge. Odmowa okna pozostawia pending, reject jest osobną trwałą decyzją.
+Po zgodzie ponownie sprawdzamy rewizję, narzędzia, uprawnienia i brakujące katalogi
+nadrzędne. Tworzenie technicznych rodziców nie przyjmuje innych pozycji przeglądu.
+
+Dziennik: najpierw trwała generacja `applying`, potem create-only, sprawdzony odczytem
+plik `decisions/<attemptId>.json` z sumą SHA-256, bazą, propozycją i zatwierdzoną rewizją.
+Dopiero potem wolno dotknąć vaulta. To eliminuje okno, w którym intencja byłaby na
+dysku, ale restore widziałby tylko pending. Odczyt rzeczywistego wyniku musi zgadzać
+się z propozycją przed publikacją accepted. Błąd zapisu/odczytu/pokwitowania daje
+recovery-required; gdy dysk nadal nie działa, applying w RAM i na dysku blokuje
+ponowienie. Restore nigdy nie odtwarza operacji i nie wnioskuje o autorstwie po
+zgodnych bajtach. Decyzja końcowa mieszka w manifeście; plik intencji pozostaje niezmienny.
+
+**Granica atomowości:** `DraftReviewIO.processText` MUSI wywołać `vault.process`
+(dla ukrytego tekstu host ma `adapter.process`), bez fallbacku modify/write.
+Callback porównuje świeży tekst z oryginalnymi bajtami wcześniej sprawdzonymi SHA-256
+oraz mtime. Porównanie całego tekstu jest dokładniejsze niż sam hash i nie wymaga
+asynchronicznego hashowania w synchronicznym callbacku Obsidiana. Host indexed podaje
+mtime z TFile; adapter ukrytych plików podaje ostatni stat bezpośrednio przed process,
+ponieważ callback adaptera udostępnia tylko tekst. Atomowość process dotyczy treści;
+metadata-only zmiana ukrytego pliku w samym callbacku nie ma warunkowej operacji hosta.
+Tworzenie plików używa create-only Vault API. Brak potrzebnej metody kończy się
+odmową/niepewną decyzją, nigdy niezabezpieczonym fallbackiem.
+
+Zainstalowane deklaracje Obsidiana nie oferują warunkowego `modifyBinary/trash/delete`.
+Dla binariów i usunięć ponownie odczytujemy hash/mtime **bezpośrednio przed operacją,
+pod blokadą ścieżki magazynu**, po przygotowaniu blobów i rodziców. To gwarancja
+optymistyczna wobec niezależnego pisarza poza pluginem: taki pisarz może zmienić plik
+między końcowym sprawdzeniem i operacją hosta. Nie jest to compare-and-swap. Blokada
+zamyka wyścigi przyjęć tego magazynu, nie zewnętrzne procesy ani zwykłe zapisy live.
+Rozstrzygnięcie właściciela z 07.11 akceptuje to ograniczenie dla binariów/usunięć.
+
+Host review `createDraftReviewHost(app)` jest w tools (barrel). Nie uruchamia się
+samodzielnie ani nie aktywuje runtime. P5 musi współdzielić JEDEN store i wykonać
+restore przed rejestracją narzędzia. GC musi zachować pokwitowania oraz bloby używane
+przez następników; P4 niczego nie usuwa z magazynu.
+Testy: `modules/tools/SubagentChangesTool.test.ts` (publiczne MCP, rzeczywisty system
+uprawnień, host review, trwałe bajty i restart, kontrolowane bariery),
+`modules/ui-components/DiffModal.test.ts` (nowe warianty DOM obok starych asercji).

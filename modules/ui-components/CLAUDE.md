@@ -310,3 +310,17 @@ Bez `conversation` DOM i zachowanie komponentu pozostają niezmienione.
 wiadomości w RAM i odświeżają pasek. `MentionAutocomplete.restoreMentions()` odtwarza
 kopie referencji i zgłasza onChange. Czat używa ich przy edycji/ponowieniu, bez wklejania
 rozwiniętej zawartości do pola użytkownika; nie są mechanizmem trwałego zapisu plików.
+
+
+### 2.4.7 P4 — podgląd przyjęcia kopii
+
+`DiffModal` nadal przyjmuje path/oldContent/newContent/agentName i zwraca
+Promise<approve|deny>; pole rememberForSession zachowuje dotychczasowy kontrakt.
+Opcjonalny rozłączny `preview` dodaje text, deleted (etykieta usunięcia + diff),
+binary (operacja, rozmiary, opcjonalny obraz przez tymczasowy Blob URL) i folder.
+Binary nie diffuje ani nie renderuje base64. Rasterowe PNG/JPEG/GIF/WebP/AVIF/BMP
+mogą pokazać obraz; URL jest zwalniany po zamknięciu. Checkbox sesyjny występuje
+wyłącznie dla legacy/text, nawet gdy wołacz omyłkowo poda rememberAvailable innemu
+wariantowi. Opcjonalny AbortSignal zamyka okno z deny. Brak preview/signal zachowuje
+starą strukturę DOM. Nie dodano przycisków zapisu poza istniejącą zgodą modala.
+Testy: nowe przypadki P4 w `DiffModal.test.ts` oraz niezmienione testy legacy.

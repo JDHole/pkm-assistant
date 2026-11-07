@@ -1,12 +1,13 @@
 import { DraftPersistence } from './DraftPersistence.js';
 import { parseChangeId, parseDraftId, parseDraftManifest, parseDraftMutation, parseRevision } from './schema.js';
 import { DraftError } from './types.js';
-import type { BaseSnapshot, DraftClock, DraftId, DraftManifest, DraftMutation, DraftPhase, DraftRef, DraftVaultIO, FirstTouch, ProposedValue, RecoveryIssue, VaultPath, VaultStat } from './types.js';
+import type { BaseSnapshot, ChangeId, ReviewState, Revision, DraftClock, DraftId, DraftManifest, DraftMutation, DraftPhase, DraftRef, DraftVaultIO, FirstTouch, ProposedValue, RecoveryIssue, VaultPath, VaultStat } from './types.js';
 
 type Entry = { manifest: DraftManifest; persisted: boolean; closed: boolean; publication: Promise<void>; paths: Map<VaultPath, Promise<void>> };
 type SealReason = Extract<DraftPhase, { kind: 'sealed' }>['reason'];
 export class DraftStore {
     private readonly entries = new Map<DraftId, Entry>();
+    private readonly decisions = new Map<VaultPath, Promise<void>>();
     constructor(private readonly persistence: DraftPersistence, private readonly vault: DraftVaultIO, private readonly clock: DraftClock) {}
     /** Validates untrusted identity; no files or directories until the first net mutation. */
     async create(identity: unknown): Promise<DraftManifest> {
@@ -32,6 +33,35 @@ export class DraftStore {
     }
     snapshot(id: DraftId): DraftManifest { return structuredClone(this.get(id).manifest); }
     list(): readonly DraftManifest[] { return [...this.entries.values()].map(entry => structuredClone(entry.manifest)); }
+    /** Shared by ALL reviewers/sessions of this store, including different draft IDs. */
+    withReviewLock<T>(path: VaultPath, operation: () => Promise<T>): Promise<T> {
+        const result = (this.decisions.get(path) ?? Promise.resolve()).then(operation);
+        const tail = result.then(() => {}, () => {});
+        this.decisions.set(path, tail);
+        void tail.then(() => { if (this.decisions.get(path) === tail) this.decisions.delete(path); });
+        return result;
+    }
+    /** Trusted review journal. Content revision is immutable; only generation advances.
+     * Applying is published before the separate intent record. Restore never replays it. */
+    setReview(id: DraftId, changeId: ChangeId, revision: Revision, review: ReviewState): Promise<void> {
+        const entry = this.get(id);
+        return this.publish(entry, async () => {
+            const old = entry.manifest;
+            const change = old.changes.find(item => item.id === changeId);
+            if (old.phase.kind !== 'sealed' || !change || change.revision !== revision)
+                throw new DraftError('invalid-transition', 'Review requires a sealed, current change');
+            const from = change.review.kind, to = review.kind;
+            if (!(from === 'pending' && ['rejected', 'conflict', 'applying'].includes(to)
+                || from === 'conflict' && to === 'rejected'
+                || from === 'applying' && ['accepted', 'conflict', 'recovery-required'].includes(to)))
+                throw new DraftError('invalid-transition', 'Invalid review transition');
+            entry.manifest = await this.persistence.save({ ...old,
+                changes: old.changes.map(item => item.id === changeId ? { ...item, review } : item),
+                updatedAt: this.clock.now(),
+            }, () => true);
+            if (review.kind === 'applying') await this.persistence.writeIntent(entry.manifest, change, review.attemptId);
+        });
+    }
     private requireOpen(entry: Entry): void {
         if (entry.closed) throw new DraftError('draft-closed', 'Draft is sealed');
     }

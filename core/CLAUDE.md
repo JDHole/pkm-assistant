@@ -433,3 +433,11 @@ oraz istniejący `ApprovalManager.test.ts`.
 Klucze i18n `chat.parent_conversation.*` opisują pending/included/truncated/omitted,
 źródło, zakres i szacunek w UI. `mcp.delegate.param.context_mode` oraz opisy delegate
 PL/EN publikują wybór kontekstu po ukończeniu UI P5. Zgody i wykonanie bez zmian.
+
+
+## 2.4.7 P4 — komunikaty przeglądu kopii
+
+PL/EN mają równoległe klucze `mcp.subagent_changes.*` (opis, parametry, odmowy,
+konflikt, rewizja, seal/recovery), `subagent.draft.*`, `chat.subdraft.*` i nowe
+warianty `modal.diff.*`. Klucze paska są przygotowane dla integracji P5;
+P4 nie zmienia istniejących tekstów, modeli uprawnień ani inicjalizacji runtime.

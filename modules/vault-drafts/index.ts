@@ -10,3 +10,5 @@ export { parseDraftId, parseChangeId, parseBlobId, parseContentHash, parseRevisi
 
 export { DraftView, FrozenDraftView } from './DraftView.js';
 export type { DraftViewIO, DraftResolution } from './DraftView.js';
+export { DraftReview } from './DraftReview.js';
+export type { DraftReviewIO, DraftReviewContext, DraftPreview, ReviewDecision, ChangeSummary } from './DraftReview.js';

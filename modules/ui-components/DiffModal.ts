@@ -12,7 +12,14 @@ import type { DiffOp } from './diffLines.js';
 
 /** Wejście modala — ten sam kształt, który buduje `modules/tools/MCPClient.ts`
  *  (`DiffApprovalOptions`, jedyny prawdziwy wołacz poza testowym hakiem `diffModalFactory`). */
+type DraftDiffPreview =
+    | { kind: 'text'; oldContent: string; newContent: string }
+    | { kind: 'deleted'; oldContent: string; newContent: '' }
+    | { kind: 'binary'; operation: 'create' | 'replace' | 'delete'; oldBytes: number; newBytes: number; image?: Uint8Array }
+    | { kind: 'folder' };
 interface DiffModalOptions {
+    preview?: DraftDiffPreview;
+    signal?: AbortSignal;
     path: string;
     oldContent: string;
     newContent: string;
@@ -29,6 +36,8 @@ type DiffModalResult = 'approve' | 'deny';
 
 export class DiffModal extends Modal {
     declare opts: DiffModalOptions;
+    private imageUrl: string | null = null;
+    private readonly cancel = () => this._resolve('deny');
     declare result: DiffModalResult | null;
     declare resolvePromise: ((result: DiffModalResult) => void) | null;
     /**
@@ -77,38 +86,58 @@ export class DiffModal extends Modal {
         pathEl.appendText(' ');
         pathEl.createEl('code', { text: this.opts.path });
 
-        // Diff computed ONCE, shared by stats + render — computing the same full LCS DP table
-        // twice (once per method) would waste one pass for nothing.
-        const ops = computeLineDiff(this.opts.oldContent, this.opts.newContent);
-
-        // Stats
-        const stats = computeDiffStats(ops);
-        if (stats.added > 0 || stats.removed > 0) {
-            const statsEl = contentEl.createDiv('diff-stats');
-            if (stats.removed > 0) {
-                statsEl.createSpan({
-                    text: t('modal.diff.stat_removed', { count: stats.removed }),
-                    cls: 'diff-stat-removed'
-                });
+        const preview = this.opts.preview;
+        if (preview?.kind === 'binary') {
+            contentEl.createDiv({ cls: 'diff-operation', text: t(preview.operation === 'create' ? 'modal.diff.binary_create' : preview.operation === 'replace' ? 'modal.diff.binary_replace' : 'modal.diff.binary_delete') });
+            contentEl.createDiv({ cls: 'diff-binary-size', text: t('modal.diff.binary_size', {
+                before: preview.oldBytes, after: preview.newBytes,
+            }) });
+            const extension = this.opts.path.split('.').at(-1)?.toLowerCase() ?? '';
+            const mime: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+                gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp' };
+            if (preview.image && mime[extension] && typeof URL.createObjectURL === 'function') {
+                this.imageUrl = URL.createObjectURL(new Blob([preview.image], { type: mime[extension] }));
+                contentEl.createEl('img', { cls: 'diff-image', attr: { src: this.imageUrl,
+                    alt: t('modal.diff.image_preview') } });
             }
-            if (stats.added > 0) {
-                statsEl.createSpan({
-                    text: t('modal.diff.stat_added', { count: stats.added }),
-                    cls: 'diff-stat-added'
-                });
-            }
-        }
-
-        // Diff body
-        const diffBody = contentEl.createDiv('diff-body');
-        // oldContent !== newContent as STRINGS doesn't guarantee any line actually differs after
-        // split('\n') (e.g. content that differs only outside what split captures) — without
-        // this check, the modal would show nothing but a single "⋯ N unchanged lines ⋯"
-        // placeholder, an approval screen with no visible change to approve.
-        if (stats.added === 0 && stats.removed === 0) {
-            this._renderNoChanges(diffBody);
+        } else if (preview?.kind === 'folder') {
+            contentEl.createDiv({ cls: 'diff-operation', text: t('modal.diff.folder') });
         } else {
-            this._renderDiff(diffBody, ops);
+            if (preview?.kind === 'deleted') contentEl.createDiv({ cls: 'diff-operation', text: t('modal.diff.deleted') });
+            // Diff computed ONCE, shared by stats + render — computing the same full LCS DP table
+            // twice (once per method) would waste one pass for nothing.
+            const ops = computeLineDiff(preview?.oldContent ?? this.opts.oldContent, preview?.newContent ?? this.opts.newContent);
+
+            // Stats
+            const stats = computeDiffStats(ops);
+            if (stats.added > 0 || stats.removed > 0) {
+                const statsEl = contentEl.createDiv('diff-stats');
+                if (stats.removed > 0) {
+                    statsEl.createSpan({
+                        text: t('modal.diff.stat_removed', { count: stats.removed }),
+                        cls: 'diff-stat-removed'
+                    });
+                }
+                if (stats.added > 0) {
+                    statsEl.createSpan({
+                        text: t('modal.diff.stat_added', { count: stats.added }),
+                        cls: 'diff-stat-added'
+                    });
+                }
+            }
+
+            // Diff body
+            const diffBody = contentEl.createDiv('diff-body');
+            // oldContent !== newContent as STRINGS doesn't guarantee any line actually differs after
+            // split('\n') (e.g. content that differs only outside what split captures) — without
+            // this check, the modal would show nothing but a single "⋯ N unchanged lines ⋯"
+            // placeholder, an approval screen with no visible change to approve.
+            if (stats.added === 0 && stats.removed === 0) {
+                this._renderNoChanges(diffBody);
+            } else {
+                this._renderDiff(diffBody, ops);
+            }
+
         }
 
         // Checkbox „Nie pytaj więcej w tej sesji o zapisy do tego pliku" - TYLKO gdy wołacz
@@ -120,7 +149,7 @@ export class DiffModal extends Modal {
         // nigdy w swój własny. Zagnieżdżenie działa natywnie - przeglądarka aktywuje kontrolkę
         // wewnątrz `<label>` niezależnie od `id`.
         let rememberCheckbox: HTMLInputElement | null = null;
-        if (this.opts.rememberAvailable) {
+        if (this.opts.rememberAvailable && (!preview || preview.kind === 'text')) {
             const rememberRow = contentEl.createDiv('diff-remember');
             const label = rememberRow.createEl('label');
             rememberCheckbox = label.createEl('input', { type: 'checkbox' });
@@ -193,6 +222,9 @@ export class DiffModal extends Modal {
     }
 
     onClose(): void {
+        this.opts.signal?.removeEventListener('abort', this.cancel);
+        if (this.imageUrl) URL.revokeObjectURL(this.imageUrl);
+        this.imageUrl = null;
         this.contentEl.empty();
         if (this.result === null) this.resolvePromise?.('deny');
     }
@@ -204,6 +236,8 @@ export class DiffModal extends Modal {
     async waitForApproval(): Promise<DiffModalResult> {
         return new Promise(resolve => {
             this.resolvePromise = resolve;
+            if (this.opts.signal?.aborted) { this._resolve('deny'); return; }
+            this.opts.signal?.addEventListener('abort', this.cancel, { once: true });
             this.open();
         });
     }

@@ -1,7 +1,7 @@
 import { Validator } from '@cfworker/json-schema';
 import { DraftError } from './types.js';
-import type { BaseSnapshot, BlobId, ContentHash, DraftHasher, DraftId, DraftManifest, DraftStorageIO, RecoveryIssue } from './types.js';
-import { parseBlobId, parseContentHash, parseDraftId, parseDraftManifest } from './schema.js';
+import type { BaseSnapshot, BlobId, Change, ContentHash, DraftHasher, DraftId, DraftManifest, DraftStorageIO, RecoveryIssue } from './types.js';
+import { parseBlobId, parseChangeId, parseContentHash, parseDraftId, parseDraftManifest } from './schema.js';
 
 export const DRAFT_ROOT = '.pkm-assistant/subagent-drafts/v1';
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
@@ -44,6 +44,18 @@ export class DraftPersistence {
         }
     }
     async hasDraft(id: DraftId): Promise<boolean> { return (await this.io.list(this.directory(id))).length > 0; }
+    /** Immutable intent record. The applying manifest is published FIRST, so a crash at
+     * either boundary is recoverable without guessing whether the vault was changed. */
+    async writeIntent(manifest: DraftManifest, change: Change, attemptId: string): Promise<void> {
+        const payload = JSON.stringify({ version: 1, draftId: manifest.draftId,
+            attemptId: parseChangeId(attemptId), changeId: change.id, revision: change.revision,
+            path: change.path, base: change.base, proposed: change.proposed });
+        const bytes = encode(JSON.stringify({ payload, checksum: await this.hash(encode(payload)) }));
+        const path = `${this.directory(manifest.draftId)}/decisions/${attemptId}.json`;
+        if (await this.io.publish(path, bytes, () => true) !== 'published'
+            || decode(await this.io.read(path)) !== decode(bytes))
+            throw new DraftError('io-error', 'Cannot persist acceptance intent');
+    }
     async save(input: DraftManifest, mayPublish: () => boolean): Promise<DraftManifest> {
         try {
             const directory = `${this.directory(input.draftId)}/manifests`;

@@ -869,3 +869,34 @@ wyniki, zgody i diff pozostają na starej ścieżce.
 Testy P3: `runnerDrafts.test.ts` (przez rzeczywisty runner, MCP i publiczne delegate).
 Obrazy testowane z kontrolowanym requestUrl i canvasem, bez sieci; pozostałe writery
 oraz odczyty pamięci, todo i manager poczty wykonują rzeczywisty kod.
+
+
+### 2.4.7 P4 — pojedyncza decyzja prowadzącego
+
+Barrel eksportuje `createSubagentChangesTool(review)` i `createDraftReviewHost(app)`.
+Rejestracja w manifeście delegacji i produkcyjnym runtime pozostaje P5. Fabryka
+publikuje ścisły oneOf list/accept/reject (additionalProperties:false); argumenty
+są unknown do walidacji i nie dopuszczają all, force, ścieżki, treści ani znaczników
+_invocation. Brak zaufanego kontekstu zawsze odmawia. List/reject nie pytają o zapis.
+
+MCP rozpoznaje wyłącznie built-in `subagent_changes` i przekazuje surowe argumenty
+plus osobny `BuiltinToolExecutionContext.draftReview`. Prywatny helper
+`draftReviewApproval.ts` wymaga pełnego origin prowadzącego, odrzuca subRunContext,
+głębokość suba i host overlay. Przy każdej kontroli pobiera aktualny profil agenta.
+Sprawdza oś narzędzia przeglądu, źródłowego writera i rzeczywistej operacji oraz
+PermissionSystem na niezmienionej kanonicznej ścieżce. Rodzice pliku wymagają
+create_folder. Yolo pomija okna, nigdy dostęp ani konflikt. Zgoda używa tego samego
+PermissionSystem.requiresApproval i ApprovalManager co zwykłe writery; potem
+DiffModal. Helper współdzieli też pamięć odmów MCP: równoległe odrzucone przyjęcia
+nie otwierają następnych okien. Zgoda sesyjna pozostaje ograniczona do tekstowego write, bez binariów,
+usuwania i folderów. Odczyty do podglądu są fail-closed. Anulowanie tury blokuje
+późne approve. Wszystkie inne narzędzia pozostają na poprzedniej gałęzi MCP.
+
+Host review ma wyłącznie jawne metody I/O. Tekst nadpisuje przez process z kontrolą
+świeżej treści w callbacku, nowe pliki przez create/createBinary; binaria przez
+modifyBinary (ukryte: adapter.writeBinary), usunięcia przez trash/delete z zachowaniem
+dyspozycji. `adapter.process` w obecnych deklaracjach API obsługuje ukryty tekst;
+nie zmienia to starego WriteTool ani jego fallbacków opisanych wyżej.
+Granica optymistyczna binariów/usunięć i metadanych ukrytych plików jest szczegółowo
+opisana w `modules/vault-drafts/CLAUDE.md`. P5 nadal dostarcza adapter magazynu.
+Testy P4: `SubagentChangesTool.test.ts`; dotychczasowe asercje pozostają bez zmian.
