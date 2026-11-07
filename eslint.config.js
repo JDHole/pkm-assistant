@@ -68,6 +68,7 @@ export const MODULE_NAMES = [
   'sub-agents',
   'tools',
   'ui-components',
+  'vault-drafts',
   'web',
 ];
 

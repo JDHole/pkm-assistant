@@ -27,6 +27,11 @@ Pełny opis jest w [`core/SECURITY.md`](SECURITY.md). Skrót dla agenta:
 
 ## Kryterium wstępu
 
+Strażnik `dead_code_zasieg.test.ts` uwzględnia pięć imiennych plików
+`modules/vault-drafts/` jako tymczasowo niepodłączone (architektura 2.4.7, §11,
+P1–P4 bez aktywacji). Integracja w P5 usuwa te wpisy z `ZNANE_SIEROTY`;
+skaner i asercje dokładnego zestawu sierot pozostają bez zmian.
+
 Do `core/` trafia TYLKO plik który spełnia **wszystkie 3 warunki**:
 
 1. **Używany przez ≥3 moduły** (1-2 → idzie do modułu który go najbardziej używa)
