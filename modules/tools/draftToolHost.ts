@@ -61,7 +61,8 @@ export async function createDraftToolHost(view: DraftView, options: {
     const get = (path: string): LocalFile | null => {
         if (!path || path === '/') return files.get('')!;
         parseVaultPath(path);
-        if (view.resolve(path).kind === 'ambiguous-input') throw new DraftError('ambiguous-input', `Ambiguous input: ${path}`);
+        const resolved = view.resolve(path);
+        if (resolved.kind === 'ambiguous-input') throw new DraftError('ambiguous-input', `Ambiguous input ${path}: ${resolved.sources.map(source => source.ref.draftId).join(', ')}`);
         return files.get(path) ?? null;
     };
     const write = async (path: string, value: Parameters<DraftView['mutate']>[2], expectation: 'create' | 'file' | 'any' = 'any'): Promise<void> => {

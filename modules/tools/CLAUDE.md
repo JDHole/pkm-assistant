@@ -812,7 +812,8 @@ Wołacz dostarcza zaufaną kanoniczną tożsamość narzędzia z rejestru i `cal
 argumentami modelu. Przygotowanie jest po aliasach/whiteliście, przed extractorem;
 TA SAMA para app/plugin ma trafić do extractora i execute. Uprawnienia, zgody,
 filtrowanie wyników i odcięcie definicji MCP pozostają zadaniem integracji P3–P5.
-P2 nie podpina tej funkcji do MCPClient/runnera ani nie zmienia UI.
+P2 nie podpinała tej funkcji do MCPClient/runnera. Integrację przez opcjonalne DI
+dodaje P3 poniżej; UI i aktywacja runtime nadal należą do P5.
 
 `draftToolHost.ts` tworzy zamknięte lokalne app/vault/adapter/fileManager/metadataCache.
 Nieznana metoda daje `mutation-denied`; nie ma automatycznego przekazywania metod,
@@ -835,3 +836,36 @@ keyword/text czytają overlay; semantic używa bazowego pluginu i bazowych fragm
 `draft_note` ma komunikaty PL/EN. Bez wpisu WeakMap odpowiedzi pozostają bez zmian.
 Testy: `subToolExecution.test.ts` — prawdziwe narzędzia oraz binarne helpery obrazów,
 bez runnera, sieci, canvasu i Obsidiana.
+
+### 2.4.7 P3 — wykonanie narzędzi suba w kopii
+
+`createDelegateTool(app, {drafts})` może wstrzyknąć wspólny `SubRunDrafts` do runnerów.
+Plan przekazuje zaufane `draftDependencies` oddzielnie od `dependencyContext`,
+bez pól modelowych; następnik startuje dopiero po trwałym zamknięciu poprzednika.
+Wyniki delegacji przenoszą opcjonalne `draft: DraftRef`. Produkcyjny composition
+root NIE podaje tego DI, więc aktywacja nadal należy do P5.
+
+`ExecuteToolCallOptions.vaultExecution` to zaufany kontekst runnera, poza argumentami.
+MCP przygotowuje host po rozwiązaniu aliasu i osi narzędziowej. Extractor i wykonanie
+otrzymują TEN SAM lokalny plugin; błąd extractora overlayu nie przechodzi do fallbacku.
+Uprawnienia nadal oceniają kanoniczny logiczny cel. Dla propozycji writerów pomijamy
+zgodę/diff zapisu live; przyjmowanie w P4 musi ponownie ocenić uprawnienia i zgodę.
+Sukces writera ma `vault_effect: {kind:'draft', draftId}`. Pamięć, todo i poczta
+zachowują oryginalny host oraz dotychczasową politykę zgód.
+
+Wspólny `isDraftToolAllowed` z ToolRegistry filtruje definicje runnera i wykonanie
+w adapterze. Liczy `source`, nie prefiks/nazwę; source:user nie podszyje się pod
+built-in. Znane nazwy zewnętrznych MCP także są odmawiane. Próba dostarczenia
+`_draft_id`, `vaultExecution`, `_invocationVaultExecution` lub `_invocationDraftId`
+w argumentach daje `mutation-denied`. Tych pól nie czyta się jako kontekstu.
+`supportsVaultDrafts: true` oznacza klienta obsługującego ten kontrakt; runner w trybie
+kopii odmawia starszego klienta i bezpośredniego fallbacku.
+
+Niejednoznaczny cel A/B po kontroli uprawnień zwraca `ambiguous-input`, logiczną
+ścieżkę i obie referencje w `sources`. Odczyt/patch nie wybiera zwycięzcy. Semantyczne
+wyszukiwanie zachowuje bazowy widok. Bez kontekstu kopii dotychczasowy host,
+wyniki, zgody i diff pozostają na starej ścieżce.
+
+Testy P3: `runnerDrafts.test.ts` (przez rzeczywisty runner, MCP i publiczne delegate).
+Obrazy testowane z kontrolowanym requestUrl i canvasem, bez sieci; pozostałe writery
+oraz odczyty pamięci, todo i manager poczty wykonują rzeczywisty kod.

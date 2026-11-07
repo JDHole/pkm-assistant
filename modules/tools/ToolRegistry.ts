@@ -14,6 +14,9 @@ import type { ParentConversationContext } from '../sub-agents/index.js';
  */
 import { log } from '../../core/utils/Logger.js';
 
+/** Shared definition/execution gate; an external entry cannot impersonate a built-in name. */
+export function isDraftToolAllowed(tool: { source?: string }): boolean { return tool.source === 'built-in'; }
+
 /**
  * Kanoniczny kształt narzędzia w rejestrze. Właścicielem typu jest ToolRegistry —
  * fabryki `create*Tool()` i wrappery external MCP rejestrują obiekty tego kształtu.

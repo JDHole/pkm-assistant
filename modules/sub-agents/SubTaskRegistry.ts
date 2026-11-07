@@ -73,6 +73,7 @@ export interface SubTaskBudget {
 
 /** Wynik biegu suba — mapowanie 1:1 z tym, co zwraca `runAgentLoop`. */
 export interface SubTaskResult {
+    draft?: import('../vault-drafts/index.js').DraftRef;
     parentConversation?: ParentConversationMetadata;
     text: string;
     toolsUsed: string[];

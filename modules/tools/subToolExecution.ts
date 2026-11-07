@@ -4,17 +4,20 @@ import type { DraftView } from '../vault-drafts/index.js';
 import { createDraftToolHost, bindDraftSearchPlugin } from './draftToolHost.js';
 import { resolveSearchScope } from './SearchTool.js';
 import type { SearchToolPlugin } from './SearchTool.js';
+import { isDraftToolAllowed } from './ToolRegistry.js';
 
 export type VaultExecution =
     | { kind: 'live' }
     | { kind: 'overlay-read'; view: DraftView }
     | { kind: 'overlay-write'; workspace: DraftView };
-type HostPlugin = SearchToolPlugin & { artifactStore?: ArtifactStore; permissionSystem?: unknown };
+export type HostPlugin = SearchToolPlugin & { artifactStore?: ArtifactStore; permissionSystem?: unknown };
 function property<P, K extends keyof P>(object: P, key: K): P[K] { return object[key]; }
 const contentTools = new Set(['read', 'list', 'search', 'write', 'delete', 'create_folder', 'artifact_create', 'artifact_update', 'artifact_read', 'artifact_list', 'generate_image', 'add_text_to_image']);
 const liveTools = new Set(['memory_save', 'memory_delete', 'todo', 'kom_send', 'kom_read', 'kom_list', 'ask_user', 'delegate', 'sub_agent', 'agent_delegate', 'web_search', 'web_read']);
+const writers = new Set(['write', 'delete', 'create_folder', 'artifact_create', 'artifact_update', 'generate_image', 'add_text_to_image']);
+export function isVaultContentWriter(name: string): boolean { return writers.has(name); }
 /** Called AFTER canonical registry identity/whitelist, BEFORE contextExtractor and permissions.
- * Return the SAME host to extractor and execute. Not wired into MCP/runner until P3/P5.
+ * Return the SAME host to extractor and execute. Used by MCP/runner when drafts are injected; production activation belongs to P5.
  * The execution mode and source must come from trusted runtime, never model arguments.
  */
 export async function prepareSubToolExecution<A, P extends HostPlugin>(input: {
@@ -23,7 +26,7 @@ export async function prepareSubToolExecution<A, P extends HostPlugin>(input: {
 }) {
     const { execution, tool, args, app, plugin } = input;
     if (execution.kind === 'live') return { kind: 'live' as const, app, plugin };
-    if (tool.source !== 'built-in') throw new DraftError('mutation-denied', 'External tools are unavailable in a draft');
+    if (!isDraftToolAllowed(tool)) throw new DraftError('mutation-denied', 'External tools are unavailable in a draft');
     const memory = tool.name === 'search' ? resolveSearchScope(args, plugin).scope === 'memory'
         : (tool.name === 'read' || tool.name === 'list') && args.scope === 'memory';
     if (memory || liveTools.has(tool.name)) return { kind: 'live' as const, app, plugin };

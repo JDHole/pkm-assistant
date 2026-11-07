@@ -48,7 +48,7 @@ export interface SearchToolArgs {
 
 /** Agent w zakresie, jaki czyta to narzędzie: tożsamość + bramka pamięci. */
 interface SearchToolAgent extends AgentIdentityLike {
-    permissions?: { memory?: unknown };
+    permissions?: { memory?: unknown; guidance_mode?: unknown } | null;
 }
 
 /** Minimalny widok AgentManagera. Wszystko opcjonalne — wołane defensywnie (`?.`). */

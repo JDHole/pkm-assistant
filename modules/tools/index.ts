@@ -147,5 +147,6 @@ export type { ToolsSettingsCtx, ImageGenSettings, SttSettings } from './Settings
 export type { ConnectorsPluginLike } from './ConnectorsBackstageTab.js';
 export type { BackstageTabDef, BackstageRegistryLike } from './BackstageTab.js';
 
-export { prepareSubToolExecution } from './subToolExecution.js';
+export { prepareSubToolExecution, isVaultContentWriter } from './subToolExecution.js';
+export { isDraftToolAllowed } from './ToolRegistry.js';
 export type { VaultExecution } from './subToolExecution.js';

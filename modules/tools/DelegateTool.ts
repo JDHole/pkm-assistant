@@ -1,3 +1,5 @@
+import type { SubRunDrafts } from '../sub-agents/index.js';
+import type { DraftRef } from '../vault-drafts/index.js';
 import { redactParentConversationSnapshot } from '../sub-agents/index.js';
 import { Validator } from '@cfworker/json-schema';
 import type { Schema } from '@cfworker/json-schema';
@@ -166,6 +168,7 @@ function _rawToString(value: unknown): string {
 }
 
 interface SubAgentRunResult {
+    draft?: DraftRef;
     parentConversation?: ParentConversationPreparation;
     question?: SubRunResult['question'];
     result?: unknown;
@@ -189,6 +192,7 @@ interface SubAgentRunnerLike {
         subAgentConfig: SubAgentConfigLike,
         model: unknown,
         opts: {
+            draftDependencies?: readonly string[];
             parentConversation?: ParentConversationContext;
             onParentConversationPrepared?: (metadata: ParentConversationPreparation) => void;
             delegationDepth: number;
@@ -283,6 +287,7 @@ export type DelegatePlugin = NonNullable<ResolverPluginLike> & {
 
 /** DI dla testów: podmiana fabryki runnera (`__test__` + `DelegateTool.test.ts`). */
 interface DelegateToolDeps {
+    drafts?: SubRunDrafts;
     makeRunner?: (plugin: DelegatePlugin) => SubAgentRunnerLike;
 }
 
@@ -505,6 +510,7 @@ function _makeSalvageMapper(salvageCap: number): SalvageMapper {
             ...(r.question ? { question: r.question } : {}),
             ...(Array.isArray(r.tool_call_details) ? { tool_call_details: r.tool_call_details } : {}),
             ...(r.usage ? { usage: r.usage } : {}),
+            ...(r.draft ? { draft: r.draft } : {}),
         };
     };
 }
@@ -644,7 +650,8 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
     const makeRunner = deps.makeRunner || ((plugin: DelegatePlugin) => new SubAgentRunner({
         toolRegistry: plugin.toolRegistry!,
         app,
-        plugin
+        plugin,
+        drafts: deps.drafts
     }) as SubAgentRunnerLike);
     const inputSchema = {
         type: 'object',
@@ -1140,6 +1147,7 @@ export function createDelegateTool(app: object, deps: DelegateToolDeps = {}) {
                             {
                                 abortCtl, invocationCancelled: cancelled, prepared: checked.prepared, validatePrepared: checked.validate,
                                 dependencyContext,
+                                draftDependencies: plan ? planTasks[i].plan!.dependsOn.map(dependency => dependency.runId) : undefined,
                                 onQuestion: plan && !privateRegistry ? question => {
                                     if (!planBackground && registry?.isQuestionOpen?.(question.taskId, question.id)) {
                                         // Promote every unfinished node before any further terminal event.
@@ -1734,6 +1742,7 @@ function pendingMetadata(prepared: PreparedParentDelegation): ParentConversation
 type SubRunControl = {
     /** Built at dispatch with the plan's frozen cap; independent of args.context's cap. */
     dependencyContext?: DependencyContext;
+    draftDependencies?: readonly string[];
     invocationCancelled?: () => boolean;
     admission?: RunAdmission;
     prepared?: PreparedParentDelegation;
@@ -2062,6 +2071,7 @@ async function _executeSubAgent(
         ownedModel,
         {
             delegationDepth,
+            draftDependencies: runControl.draftDependencies,
             ...(runControl.prepared ? { parentConversation: runControl.prepared.parentConversation,
                 onParentConversationPrepared: (metadata: ParentConversationPreparation) => {
                     const id = actualTaskId ?? runControl.reservedRunId ?? runControl.queuedThreadId;
@@ -2105,6 +2115,7 @@ async function _executeSubAgent(
     if (result.failed) {
         return {
             success: false,
+            ...(result.draft ? { draft: result.draft } : {}),
             ...(result.parentConversation ? { parentConversation: result.parentConversation } : {}),
             error: typeof result.result === 'string' ? result.result : _rawResultToString(result.result),
             aspect: subAgentConfig.name,
@@ -2129,6 +2140,7 @@ async function _executeSubAgent(
         const cap = runControl.salvageCap ?? DEFAULT_LIMITS.subagent_salvage_max_chars;
         const partialText = (result.handoff?.trim() || resultText.trim() || _digestFromToolDetails(details, cap)).slice(0, cap);
         const common = {
+            ...(result.draft ? { draft: result.draft } : {}),
             ...(result.parentConversation ? { parentConversation: result.parentConversation } : {}),
             aspect: subAgentConfig.name,
             ...(result.stoppedBy ? { stopped_by: result.stoppedBy } : {}),
@@ -2155,6 +2167,7 @@ async function _executeSubAgent(
 
     return {
         success: true,
+        ...(result.draft ? { draft: result.draft } : {}),
         ...(result.parentConversation ? { parentConversation: result.parentConversation } : {}),
         result: result.result,
         aspect: subAgentConfig.name,

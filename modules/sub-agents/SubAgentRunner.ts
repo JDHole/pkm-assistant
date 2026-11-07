@@ -1,3 +1,6 @@
+import { SubRunDrafts } from './SubRunDrafts.js';
+import type { RunDraft } from './SubRunDrafts.js';
+import type { DraftRef } from '../vault-drafts/index.js';
 import { buildPlanNotice } from './planNotice.js';
 /**
  * SubAgentRunner
@@ -21,8 +24,8 @@ import { defaultSubAgentFramePrompt } from './framePrompt.js';
 // Jednolity domyślny zestaw narzędzi workera (brak podziału research/strateg).
 import { DEPRECATED_TOOL_RENAMES, DEFAULT_SUB_AGENT_TOOLS } from './SubAgentLoader.js';
 import type { SubAgentData } from './types.js';
-import { describeToolEffect, checkEffectTargets, isOwnChildQuestionReply } from '../tools/index.js';
-import type { BuiltinToolExecutionContext, ToolEffect, EffectTargetIo, ExecuteToolCallOptions } from '../tools/index.js';
+import { describeToolEffect, checkEffectTargets, isOwnChildQuestionReply, isVaultContentWriter, isDraftToolAllowed } from '../tools/index.js';
+import type { BuiltinToolExecutionContext, ToolEffect, EffectTargetIo, ExecuteToolCallOptions, VaultExecution } from '../tools/index.js';
 // Bieg suba jest BYTEM w rejestrze (`plugin.subTaskRegistry`).
 // Sam rejestr przychodzi z pluginu (DI), stąd tylko typ - runner go nie tworzy.
 import type { SubTask, SubTaskResult, SubTaskOrigin, SubRunContext, SubTaskRegistry, SubTaskTrace } from './SubTaskRegistry.js';
@@ -71,6 +74,7 @@ interface RunnerToolRegistry {
 /** `MCPClient` w zakresie, jakiego używa runner — trasuje wywołanie narzędzia przez
  * uprawnienia/whitelistę (`modules/tools/MCPClient.ts`, poza zakresem). */
 interface RunnerMcpClient {
+    readonly supportsVaultDrafts?: true;
     executeToolCall(
         toolCall: ToolCall,
         agentName: string,
@@ -97,6 +101,7 @@ interface RunnerPlugin extends PluginApi {
 }
 
 type RunOptions = {
+    draftDependencies?: readonly string[];
     /** Prepared/authorized by the caller; never taken from model arguments. New threads only. */
     parentConversation?: ParentConversationContext;
     onParentConversationPrepared?: (metadata: ParentConversationPreparation) => void;
@@ -161,6 +166,7 @@ export type SubRunStoppedBy = 'natural' | 'backstop' | 'abort' | 'error';
  * (obecne WYŁĄCZNIE w gałęzi catch).
  */
 export type SubRunResult = {
+    draft?: DraftRef;
     parentConversation?: ParentConversationPreparation;
     result: string;
     toolsUsed: string[];
@@ -264,7 +270,7 @@ function _buildHandoff(outcome: RunOutcome, partial: AgentLoopPartialSnapshot | 
     };
     const effectsText = outcome.effects.map(effect => {
         const targets = effect.targets.map(target => `${target.kind}${target.path ? `: ${target.path}` : ''}`).join(', ');
-        return `${effect.tool} | ${targets || effect.action} | ${effect.outcome} | ${effect.check}`;
+        return `${effect.tool}${effect.location?.kind === 'draft' ? ` [draft ${effect.location.draftId}]` : ''} | ${targets || effect.action} | ${effect.outcome} | ${effect.check}`;
     }).join('\n');
     if (effectsText) append('subagent.handoff.effects', effectsText);
     if (partial?.lastText?.trim()) append('subagent.handoff.last_text', partial.lastText.trim());
@@ -291,6 +297,7 @@ export class SubAgentRunner {
     declare plugin: RunnerPlugin;
     declare mcpClient: RunnerMcpClient | null;
     declare effectTargetIo: EffectTargetIo;
+    private readonly drafts?: SubRunDrafts;
     /**
      * @param {Object} options
      * @param {Object} options.toolRegistry - ToolRegistry instance
@@ -303,7 +310,8 @@ export class SubAgentRunner {
     // dostaje więc parametry `unknown` i zawęża je do tego, czego SAM realnie potrzebuje
     // (`getTool` na registry, pełny `PluginApi` na plugin). W praktyce to zawsze te same,
     // realne obiekty `ToolRegistry`/`App`/plugin.
-    constructor({ toolRegistry, app, plugin, effectTargetIo }: { toolRegistry: unknown; app: unknown; plugin: unknown; effectTargetIo?: EffectTargetIo }) {
+    constructor({ toolRegistry, app, plugin, effectTargetIo, drafts }: { toolRegistry: unknown; app: unknown; plugin: unknown; effectTargetIo?: EffectTargetIo; drafts?: SubRunDrafts }) {
+        this.drafts = drafts;
         this.toolRegistry = toolRegistry as RunnerToolRegistry;
         this.app = app as AppLike;
         this.plugin = plugin as RunnerPlugin;
@@ -315,7 +323,7 @@ export class SubAgentRunner {
         } };
     }
 
-    private async _checkEffect(described: ToolEffect, agentName: string): Promise<RunEffect['check']> {
+    private async _checkEffect(described: ToolEffect, agentName: string, draft?: RunDraft): Promise<RunEffect['check']> {
         if (described.check === 'none') return 'not-checked';
         const targets = described.targets.map(target => ({ ...target }));
         for (const target of targets) {
@@ -331,7 +339,7 @@ export class SubAgentRunner {
             if (brainNotes && !target.path.includes('/')) target.path = `${brainNotes}/${target.path}`;
             else if (!target.path.includes('/')) return 'not-checked';
         }
-        return checkEffectTargets({ ...described, targets }, this.effectTargetIo);
+        return checkEffectTargets({ ...described, targets }, draft ? { exists: async path => (await draft.view.stat(path)).kind !== 'missing' } : this.effectTargetIo);
     }
 
     /**
@@ -421,6 +429,10 @@ export class SubAgentRunner {
 
         // Deklaracja PRZED `try`, bo domknięcie biegu robi też gałąź `catch` (fail).
         let subTask: SubTask | undefined;
+        let draft: RunDraft | undefined;
+        let draftRef: DraftRef | undefined;
+        const closeDraftOnAbort = () => { void draft?.close(options.abortReason?.() === 'task-timeout' ? 'timeout' : 'stopped'); };
+        if (this.drafts) options.abortSignal?.addEventListener('abort', closeDraftOnAbort);
         let releasePlanRunner: (() => void) | undefined;
         let conversationStore: ArrayMessageStore | undefined;
         let lastPartial: AgentLoopPartialSnapshot | undefined;
@@ -437,6 +449,7 @@ export class SubAgentRunner {
             const described = describeToolEffect(name, args);
             if (!described) return;
             const entry: RunEffect = { tool: described.tool, action: described.action,
+                ...(draft?.view.draftId && isVaultContentWriter(described.tool) ? { location: { kind: 'draft' as const, draftId: draft.view.draftId } } : {}),
                 targets: described.targets.map(target => ({ ...target })), outcome: 'pending', check: 'not-checked' };
             effects.push(entry);
             descriptions.set(entry, described);
@@ -484,7 +497,7 @@ export class SubAgentRunner {
                 if (entry.outcome === 'unknown') counts.unknown++;
                 if (entry.outcome === 'returned' || entry.outcome === 'unknown') {
                     const described = descriptions.get(entry);
-                    if (described) entry.check = await this._checkEffect(described, agent.name);
+                    if (described) entry.check = await this._checkEffect(described, agent.name, entry.location?.kind === 'draft' ? draft : undefined);
                 }
                 counts[entry.check]++;
             }
@@ -614,7 +627,19 @@ export class SubAgentRunner {
             const visibleToolNames = _canDelegateAtDepth(delegationDepth, limits.max_delegation_depth)
                 ? toolNames
                 : toolNames.filter((name) => name !== 'delegate' && name !== 'agent_delegate' && name !== 'sub_agent');
-            const tools = this._getTools(visibleToolNames, agent, options.callerToolNames, delegationDepth, !!options.parentId || !!subTask?.plan);
+            let tools = this._getTools(visibleToolNames, agent, options.callerToolNames, delegationDepth, !!options.parentId || !!subTask?.plan);
+            if (this.drafts) {
+                draft = await this.drafts.open({ runId: label, threadId: threadId ?? label, origin,
+                    writable: tools.some(tool => isVaultContentWriter(tool.function.name)),
+                    dependencies: options.draftDependencies, continuation: !!options.threadId,
+                    ...(subTask?.plan ? { plan: { planId: subTask.plan.planId, nodeId: subTask.plan.nodeId } } : {}) });
+                if (options.abortSignal?.aborted || options.shouldAbort?.()) closeDraftOnAbort();
+                if (draft) {
+                    if (!this.mcpClient?.supportsVaultDrafts) throw new Error('Draft execution requires a compatible MCPClient');
+                    tools = tools.filter(tool => tool.function.name === 'ask_parent'
+                        || isDraftToolAllowed(this.toolRegistry.getTool(tool.function.name) ?? {}));
+                } else this.drafts.recordLive(label, origin);
+            }
             // Fail-closed whitelist: the sub-agent may ONLY execute tools that
             // survived the parent∩sub intersection in _getTools. _executeTool enforces this
             // so the direct-execution fallback cannot run a tool outside the whitelist.
@@ -638,12 +663,13 @@ export class SubAgentRunner {
             if (options.threadId && thread) {
                 for (const effect of thread.effects) {
                     if (effect.outcome === 'returned' || effect.outcome === 'unknown') {
-                        if (effect.expectedCheck) effect.check = await this._checkEffect({ ...effect, check: effect.expectedCheck }, agent.name);
+                        if (effect.expectedCheck) effect.check = await this._checkEffect({ ...effect, check: effect.expectedCheck }, agent.name, effect.location?.kind === 'draft' ? draft : undefined);
                     }
                 }
             }
             const effectsNote = thread?.effects.map(effect => {
                 const target = effect.targets.map(x => x.path || x.kind).join(', ');
+                if (effect.location?.kind === 'draft') return `Draft ${effect.location.draftId}: ${target} | ${effect.check}`;
                 if (effect.outcome === 'unknown') return t('subagent.thread_effect_unknown', { tool: effect.tool });
                 if (effect.check === 'matches') return t(effect.action === 'delete' ? 'subagent.thread_effect_deleted' : 'subagent.thread_effect_saved', { target });
                 if (effect.check === 'mismatch') return t(effect.action === 'delete' ? 'subagent.thread_effect_present' : 'subagent.thread_effect_missing', { target });
@@ -800,7 +826,7 @@ export class SubAgentRunner {
                         return t('subagent.tool_not_allowed', { name: 'sub_agent' });
                     }
                     const result = await this._executeTool(toolCall as ToolCall, agent.name, allowedToolNames,
-                        { delegationDepth, scopeFolders: scopeFolders as string[], autonomy, controlOnly,
+                        { delegationDepth, scopeFolders: scopeFolders as string[], autonomy, controlOnly, vaultExecution: draft?.execution,
                             subRunContext: { runId: subTask?.id ?? label, level: Math.max(1, delegationDepth), origin: origin ?? { agentName: agent.name } } },
                         () => { failedToolCalls.add(seq); }, { ...runtimeContext, parentConversation, abortSignal: localAbort.signal,
                             isDetached: () => executor?.detached === true },
@@ -837,6 +863,8 @@ export class SubAgentRunner {
                     // AgentLoop publikuje partial po zakończeniu wywołań narzędzi.
                     // Odbiorca zdarzenia może rozstrzygnąć wiszące narzędzie synchronicznie.
                     closeEffects(snapshot.stopReason);
+                    void draft?.close(snapshot.stopReason.kind === 'task-timeout' ? 'timeout' : snapshot.stopReason.kind === 'manual-stop' ? 'stopped' : 'failed');
+                    draftRef = draft?.reference();
                     if (closedQuestion) {
                         const text = _maskHandoffText(closedQuestion.text, knownSecrets);
                         const questionText = _clipText(text, 2000);
@@ -857,7 +885,7 @@ export class SubAgentRunner {
                                 partial: snapshot, stoppedByActor: subTask.stopRequestedBy, effects, successfulToolResults });
                             const handoff = _buildHandoff(outcome, snapshot, observedToolDetails,
                                 limits.subagent_salvage_max_chars, knownSecrets, closedQuestion);
-                            material = { text: '', stoppedBy: 'abort', stopReason: snapshot.stopReason, outcome,
+                            material = { ...(draftRef ? { draft: draftRef } : {}), text: '', stoppedBy: 'abort', stopReason: snapshot.stopReason, outcome,
                                 toolsUsed: [...snapshot.toolsUsed], durationMs: Date.now() - startTime,
                                 usage: snapshot.usage, handoff: handoff.text,
                                 ...(closedQuestion ? { question: { ...closedQuestion,
@@ -894,6 +922,8 @@ export class SubAgentRunner {
             }
 
             closeEffects(response.stopReason);
+            if (draft) await draft.close(response.stoppedBy === 'abort' ? (response.stopReason?.kind === 'task-timeout' ? 'timeout' : 'stopped') : 'finished');
+            draftRef = draft?.reference();
             await partialPersistence;
             const finalEffects = await finalizeEffects();
             const outcome = classifyRunEnd({ stoppedBy: response.stoppedBy, stopReason: response.stopReason, finalText: response.finalText, partial: lastPartial, stoppedByActor: subTask?.stopRequestedBy, effects: finalEffects, successfulToolResults });
@@ -908,6 +938,7 @@ export class SubAgentRunner {
             log.timing(logTag, 'Task', startTime);
             log.groupEnd();
             const result: SubTaskResult = {
+                ...(draftRef ? { draft: draftRef } : {}),
                 ...(parentConversation ? { parentConversation } : {}),
                 text: closedQuestion ? lastPartial?.text || '' : response.finalText || '',
                 toolsUsed: response.toolsUsed || [],
@@ -938,6 +969,7 @@ export class SubAgentRunner {
                 }));
             }
             return {
+                ...(draftRef ? { draft: draftRef } : {}),
                 ...(parentConversation ? { parentConversation } : {}),
                 result: closedQuestion ? lastPartial?.text || '' : response.finalText || '',
                 toolsUsed: response.toolsUsed || [],
@@ -956,6 +988,8 @@ export class SubAgentRunner {
                 ...(handoff ? { handoff } : {}),
             };
         } catch (error) {
+            if (draft) await draft.close('failed').catch(error => log.error(logTag, 'Draft seal failed:', error));
+            draftRef = draft?.reference();
             closeEffects(lastPartial?.stopReason);
             const safeErrorMsg = knownSecrets.reduce((text, secret) => text.split(secret).join('[REDACTED]'), _extractSafeErrorMessage(error));
             log.error(logTag, 'Task FAIL:', safeErrorMsg);
@@ -983,12 +1017,14 @@ export class SubAgentRunner {
             if (subTask) {
                 const failedTask = subTask;
                 _safeRegistry(() => registry?.fail?.(failedTask, safeErrorMsg, outcome, {
+                    ...(draftRef ? { draft: draftRef } : {}),
                     ...(parentConversation ? { parentConversation } : {}),
                     text: '', toolsUsed: [...(lastPartial?.toolsUsed || [])], durationMs: Date.now() - startTime,
                     usage: lastPartial?.usage || null, outcome, ...(handoff ? { handoff } : {}),
                 }));
             }
             return {
+                ...(draftRef ? { draft: draftRef } : {}),
                 ...(parentConversation ? { parentConversation } : {}),
                 result: t('subagent.error', { name: config.name, error: safeErrorMsg }),
                 toolsUsed: [...(lastPartial?.toolsUsed || [])],
@@ -1006,6 +1042,8 @@ export class SubAgentRunner {
                 ...(handoff ? { handoff } : {}),
             };
         } finally {
+            options.abortSignal?.removeEventListener('abort', closeDraftOnAbort);
+            if (draft) await draft.close('failed').catch(error => log.error(logTag, 'Draft seal failed:', error));
             _safeRegistry(() => releasePlanRunner?.());
         }
     }
@@ -1213,7 +1251,7 @@ export class SubAgentRunner {
         toolCall: ToolCall,
         agentName: string,
         allowedToolNames: Set<string> | null = null,
-        execOptions: Pick<RunOptions, 'delegationDepth' | 'scopeFolders' | 'autonomy'> & { subRunContext?: SubRunContext; controlOnly?: boolean } = {},
+        execOptions: Pick<RunOptions, 'delegationDepth' | 'scopeFolders' | 'autonomy'> & { subRunContext?: SubRunContext; controlOnly?: boolean; vaultExecution?: VaultExecution } = {},
         onFailure?: () => void,
         runtimeContext: ToolExecutionContext & { parentConversation?: ParentConversationContext; abortSignal?: AbortSignal; isDetached?: () => boolean } = { resultBudgetChars: 0, shouldAbort: () => false },
         effectHooks?: { start(args: unknown): void; complete(args: unknown, result: unknown, failed: boolean): void; fail(): void },
@@ -1261,8 +1299,11 @@ export class SubAgentRunner {
             // `runTask` z opcji zlecenia). Globalne lustro `plugin.currentAutonomy` zostaje
             // wyłącznie jako fallback dla starych wołaczy, którzy autonomii nie przekazują -
             // czytane w trakcie biegu dawałoby subowi tryb zakładki, na którą user właśnie przeskoczył.
+            if (execOptions.vaultExecution && execOptions.vaultExecution.kind !== 'live' && !this.mcpClient?.supportsVaultDrafts)
+                return asTranscript({ isError: true, code: 'mutation-denied', error: 'Draft execution requires a compatible MCPClient' });
             if (this.mcpClient && agentName) {
                 const result = await this.mcpClient.executeToolCall(toolCall, agentName, {
+                    vaultExecution: execOptions.vaultExecution,
                     parentConversation: runtimeContext.parentConversation,
                     autonomy: execOptions.autonomy ?? this.plugin?.currentAutonomy,
                     // Głębokość delegacji + bariera scope suba jadą z biegu suba do

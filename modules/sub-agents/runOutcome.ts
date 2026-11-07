@@ -1,5 +1,6 @@
 import type { AgentLoopPartialSnapshot, AgentLoopStopReason } from '../agent-loop/index.js';
 import type { EffectTarget, ToolEffect } from '../tools/index.js';
+import type { DraftId } from '../vault-drafts/index.js';
 
 export type StopBy = 'user' | 'lead' | 'system';
 export type RunEnd =
@@ -10,6 +11,8 @@ export type RunEnd =
     | { kind: 'timeout' }
     | { kind: 'failed'; stage: 'work' | 'synthesis' };
 export interface RunEffect extends Pick<ToolEffect, 'tool' | 'action' | 'targets'> {
+    /** Absent for legacy/live effects; matches never implies acceptance. */
+    location?: { kind: 'draft'; draftId: DraftId };
     outcome: 'pending' | 'returned' | 'error' | 'unknown';
     cause?: AgentLoopStopReason['kind'];
     check: 'matches' | 'mismatch' | 'not-checked';

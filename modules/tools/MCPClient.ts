@@ -19,6 +19,9 @@ import type { RuntimeSequence, SubRunContext, SubTaskRegistry } from '../sub-age
 import { isOwnChildQuestionReply } from './subAgentQuestionReply.js';
 import type { PermissionDecision, PermissionedAgent, ScopeFolders } from '../../core/index.js';
 import type { BuiltinToolExecutionContext } from './ToolRegistry.js';
+import { prepareSubToolExecution, isVaultContentWriter } from './subToolExecution.js';
+import type { VaultExecution, HostPlugin } from './subToolExecution.js';
+import { DraftError } from '../vault-drafts/index.js';
 import type { ModelResponse, ParsedToolCall } from '../agent-loop/index.js';
 import type { App } from 'obsidian';
 
@@ -104,7 +107,7 @@ export interface ClientTool {
     source?: string;
     contextExtractor?: (
         args: ToolCallArgs,
-        ctx: { agentName: string | null; plugin: MCPClientPlugin },
+        ctx: { agentName: string | null; plugin: HostPlugin },
     ) => { targetPath?: string; approvalContext?: Record<string, unknown> } | null | undefined;
     [extra: string]: unknown;
 }
@@ -177,6 +180,8 @@ export interface ToolCall {
 
 /** Dodatkowe opcje wykonania (autonomia czatu + kaganiec delegacji + adres zwrotny). */
 export interface ExecuteToolCallOptions {
+    /** Trusted runner context, never deserialized from tool arguments. */
+    vaultExecution?: VaultExecution;
     parentConversation?: ParentConversationContext;
     /** Token supplied by the runtime, never by the model. */
     askUserChannelId?: string;
@@ -215,6 +220,7 @@ export interface ExecuteToolCallOptions {
  * (krok 7) i doklejenie noty aliasu. Narzędzia zwracają własne kształty - te pola są opcjonalne.
  */
 interface ToolExecutionResult {
+    vault_effect?: { kind: 'draft'; draftId: import('../vault-drafts/index.js').DraftId | null };
     success?: boolean;
     /** Znacznik porażki dopisywany przez normalizację (krok 8b niżej). */
     isError?: boolean;
@@ -388,6 +394,7 @@ const ACTION_TYPE_MAP: Record<string, string> = {
  * Main client for handling MCP tool calls from AI agents.
  */
 export class MCPClient {
+    readonly supportsVaultDrafts = true as const;
     declare app: MCPClientApp;
     declare plugin: MCPClientPlugin;
     declare toolRegistry: MCPToolRegistryLike;
@@ -638,7 +645,7 @@ export class MCPClient {
      * Extract targetPath and approval context per tool type.
      * Returns meaningful display info for each tool.
      */
-    _extractToolContext(toolName: string, args: ToolCallArgs, agentName: string | null): ToolContext {
+    _extractToolContext(toolName: string, args: ToolCallArgs, agentName: string | null, hostPlugin: HostPlugin = this.plugin): ToolContext {
         let targetPath = '';
         let approvalContext: Record<string, unknown> = {};
 
@@ -647,7 +654,7 @@ export class MCPClient {
         const tool = this.toolRegistry?.getTool?.(toolName);
         if (tool && typeof tool.contextExtractor === 'function') {
             try {
-                const extracted = tool.contextExtractor(args, { agentName, plugin: this.plugin }) || {};
+                const extracted = tool.contextExtractor(args, { agentName, plugin: hostPlugin }) || {};
                 // Kanonizacja obejmuje TAKŻE tę ścieżkę - to nią chodzą dzisiejsze prymitywy
                 // (`read`/`write`/`delete`/`list`/`create_folder`), switch niżej jest już tylko zapasem.
                 return this._canonicalizeToolContext(args, {
@@ -656,6 +663,7 @@ export class MCPClient {
                 });
             } catch (e) {
                 log.warn('MCPClient', `contextExtractor for ${toolName} failed:`, (e as ErrLike).message);
+                if (hostPlugin !== this.plugin) throw e;
                 // fall through to switch fallback
             }
         }
@@ -829,6 +837,8 @@ export class MCPClient {
             // image_path/file/filepath → path (canonical naming standard).
             // Breaking compat planowane na v3.0 - do tego czasu emit deprecation warning + accept obu form.
             args = MCPClient.normalizeArgsAliases(args, toolCall.name);
+            if (args && ['_draft_id', 'vaultExecution', '_invocationVaultExecution', '_invocationDraftId'].some(key => Object.hasOwn(args, key)))
+                throw new DraftError('mutation-denied', 'Draft context cannot be supplied in tool arguments');
             // Gdy model/YAML woła starą nazwę (nieznaną w registry) → przemapuj na
             // kanoniczne narzędzie (search / read / list / write / delete / create_folder) z
             // przekształceniem argumentów. Nota o zastąpieniu/przemianowaniu dołączana do wyniku.
@@ -972,6 +982,11 @@ export class MCPClient {
             if (!tool) {
                 throw new Error(`Tool not found: ${toolCall.name}`);
             }
+            const execution = opts.vaultExecution ?? { kind: 'live' as const };
+            const host = execution.kind === 'live' ? { kind: 'live' as const, app: this.app, plugin: this.plugin }
+                : await prepareSubToolExecution({ execution, tool: { name: tool.name, source: tool.source === 'built-in' ? 'built-in' : 'user' },
+                    args: argsWithContext, callId: toolCall.id ?? toolCall.name, app: this.app, plugin: this.plugin });
+            const draftWrite = host.kind === 'overlay' && isVaultContentWriter(tool.name);
 
             // 5. Check permissions (agent jest już zagwarantowany krokiem 2 - jedyny wyjątek to
             //    narzędzia pamięci, które mają WŁASNĄ bramkę, patrz `isMemoryTool` niżej).
@@ -989,7 +1004,8 @@ export class MCPClient {
             // wyprowadza z tożsamości CAŁY cel akcji - bramka oceniałaby inną ścieżkę niż
             // ta, do której pisze `execute` (ono zawsze dostaje worek zaufany).
             const { targetPath, approvalContext, invalidPath, canonicalPathField } =
-                this._extractToolContext(toolCall.name, argsWithContext, invocationAgentName);
+                this._extractToolContext(toolCall.name, argsWithContext, invocationAgentName,
+                    host.plugin);
 
             // Ścieżki nie do uratowania (traversal, absolutna, null byte,
             // zero-width unicode) odbijają się TUTAJ - bez pytania usera i bez wołania narzędzia.
@@ -1050,7 +1066,15 @@ export class MCPClient {
                 }
             }
 
-            permResult.requiresApproval = this._shouldRequestApproval({
+            if (host.kind === 'overlay' && execution.kind !== 'live' && targetPath && targetPath !== '/'
+                && !(tool.name === 'search' && args.mode === 'semantic')) {
+                const view = execution.kind === 'overlay-write' ? execution.workspace : execution.view;
+                const resolved = view.resolve(targetPath);
+                if (resolved.kind === 'ambiguous-input') return { isError: true, code: 'ambiguous-input', path: targetPath,
+                    sources: resolved.sources.map(source => source.ref),
+                    error: `Ambiguous input ${targetPath}: ${resolved.sources.map(source => source.ref.draftId).join(', ')}` };
+            }
+            permResult.requiresApproval = !draftWrite && this._shouldRequestApproval({
                 actionType,
                 targetPath,
                 toolName: toolCall.name,
@@ -1320,12 +1344,16 @@ export class MCPClient {
             if (shouldAbort()) return { success: false, error: t('chat.substrip.status_aborted') };
             let result = await tool.execute(
                 argsWithContext,
-                this.app,
-                this.plugin,
+                host.app,
+                host.plugin,
                 tool.source === 'built-in' ? builtInContext : undefined,
             ) as ToolExecutionResult;
 
             if (opts.abortSignal?.aborted) return { success: false, error: t('chat.substrip.status_aborted') };
+            if (draftWrite && result && typeof result === 'object' && toolResultStatus(result) !== 'error'
+                && execution.kind === 'overlay-write') {
+                result = { ...result, vault_effect: { kind: 'draft', draftId: execution.workspace.draftId } };
+            }
 
             // 7b/7c. Modale review (IdeaReviewModal → _planStore) i ArtifactProgressModal
             // (polling chat_todo) SKASOWANE. Artefakty żywe mają approval w notatce (guziki B1) i live-widok
@@ -1399,6 +1427,7 @@ export class MCPClient {
 
         } catch (error) {
             if (opts.abortSignal?.aborted) return { success: false, error: t('chat.substrip.status_aborted') };
+            if (error instanceof DraftError) return { isError: true, code: error.code, error: error.message };
             log.error('MCPClient', `${toolCall.name} BŁĄD:`, error);
             // Ten komunikat idzie MODELOWI i do transkryptu
             // tury, a komunikat wyjątku bywa całym zrzutem zdarzenia strumienia razem

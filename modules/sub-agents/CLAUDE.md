@@ -991,3 +991,47 @@ jego następców, niezależne gałęzie nadal pracują; pytanie blokującego pla
 promuje niedokończone węzły do tła. Po pokwitowaniu pula i nasłuchy Stopu żyją
 do rozliczenia planu. Historia zachowuje terminalne blokady, a `waiting`,
 `queued` i `running` odtwarza jako przerwane: restart nie wznawia grafu.
+
+### 2.4.7 P3 — kopia biegu i zamykanie (bez aktywacji produkcyjnej)
+
+Barrel eksportuje `SubRunDrafts(store, persistence, vaultViewIO, allocateId)`. Wspólna
+instancja jest opcjonalnym DI konstruktora runnera oraz `createDelegateTool(app, {drafts})`. `src/main.ts` nadal jej nie tworzy. Bieg bez DI zachowuje
+starą ścieżkę; zwykły sub odczytowy także przy DI nie tworzy kopii ani lokalnego hosta.
+
+`SubRunDrafts.ts` wiąże runId/wątek z właścicielem i zamrożonymi warstwami. Runner
+wybiera własną kopię po przecięciu whitelist, gdy pozostał writer treści. Wymaga
+pełnego właściciela (agent, sesja, epoka) i klienta z `supportsVaultDrafts: true`;
+brak magazynu w tym komponencie, błąd otwarcia lub niezgodny klient nie uruchamiają
+fallbacku live. ID kopii dostarcza wyłącznie wstrzyknięty allocator.
+
+`RunOptions.draftDependencies` niesie ID bezpośrednich poprzedników obok tekstowego
+materiału planu. Manager rozwiązuje je do zamkniętych widoków z kontrolą właściciela.
+Warstwy zachowują przodków, również przez odczytowego pośrednika. Kontynuacja własnego
+wątku otrzymuje poprzedni zamknięty widok i nową kopię; niezależni sąsiedzi go nie
+otrzymują. Puste kopie nie tworzą dorobku ani zbędnych warstw.
+
+Stop/timeout synchronicznie wywołują `seal`, odbierając prawo publikacji. Listener
+żyje przez cały runner, także finalizację. Partial/błąd także zamykają kopię;
+naturalny wynik czeka na trwałe seal PRZED stagingiem i `registry.finish`, zatem
+plan nigdy nie odblokowuje następników przed zamknięciem wejścia. Awaria seal
+powoduje błąd biegu i blokadę następników, a potwierdzone wcześniej zmiany pozostają.
+Spóźnione narzędzie nie może opublikować nowej rewizji. Dotychczasowe zatrzaski
+wyników i jednokrotne doręczanie planu 2.4.6 pozostają.
+
+`SubRunResult`/`SubTaskResult` mogą mieć `draft: DraftRef`, także po przerwaniu.
+Partial planu przekazuje referencję ostatniej potwierdzonej rewizji już przy Stopie;
+referencja do przeglądu nie jest pozwoleniem na przyjęcie otwartego manifestu.
+`RunEffect.location: {kind:'draft', draftId}` odróżnia propozycję od starego efektu
+live (brak pola). Sprawdzenie celu i kontynuacja używają widoku kopii, a handoff
+jawnie oznacza draft; `matches` nadal nie dowodzi przyjęcia do vaulta.
+
+Testy: `../tools/runnerDrafts.test.ts` — rzeczywisty runner/MCP/narzędzia/magazyn,
+sześć rodzin writerów, A/B→C i niejednoznaczność, odczytowy pośrednik, kontynuacja,
+Stop/timeout/błąd/awaria seal i restart, spóźnione I/O, MCP i podrobione argumenty,
+pamięć/todo/poczta oraz prowadzący ze zgodą i diffem. Dostawca obrazów i canvas są
+kontrolowanymi granicami testu; nie ma sieci ani żywego Obsidiana.
+
+P4 dostarcza przyjęcie plików. P5 musi podłączyć trwały adapter publikacji, historię
+referencji/osi efektów, odtworzenie, projekcję UI i retencję. Manager P3 zachowuje
+zamrożone wejścia niezależnie od retencji rejestru; nie ma automatycznego GC ani
+wznawiania pracy po restarcie.

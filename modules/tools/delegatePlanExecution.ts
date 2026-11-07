@@ -49,6 +49,7 @@ export function aggregatePlanResults(plan: PlanHandle, tasks: readonly SubTask[]
                 if (hasMaterial || (salvageCap > 0 && task.outcome?.completeness === 'partial')) counts.partial++;
                 else counts.failed++;
                 return { ...response, ...identity, success: false,
+                    ...(task.result?.draft ? { draft: task.result.draft } : {}),
                     error: response.error ?? task.error ?? t('mcp.delegate.plan_failed', { reason: node.state.reason }),
                     ...(hasMaterial ? { partial_result: partial } : {}) };
             }

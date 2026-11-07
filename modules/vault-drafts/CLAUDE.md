@@ -4,8 +4,8 @@ P1–P2 wersji 2.4.7: trwały magazyn i warstwowy widok kopii roboczych. Moduł 
 podłączony do runtime. Nie importuje Obsidiana, runnera, czatu ani MCPClient.
 Nie ma żadnego portu zapisu treści do bazowego vaulta.
 
-Pliki są osiągalne statycznie przez barrel `tools/index.ts` (P2), ale żaden
-runner ani runtime nie tworzy widoku/hosta. Dlatego usunięto pięć nieaktualnych
+Pliki są osiągalne statycznie przez barrel `tools/index.ts` (P2), a od P3 runner tworzy widok/host wyłącznie po jawnym wstrzyknięciu
+`SubRunDrafts`. Produkcyjny runtime nadal go nie tworzy. Dlatego usunięto pięć nieaktualnych
 wpisów P1 w `ZNANE_SIEROTY`; asercje strażnika pozostają bez zmian.
 
 ## Co tu mieszka
@@ -110,7 +110,7 @@ wyłącznie z niepustym `inheritedFrom`; własne create → delete nadal znika n
 Testy P2: `modules/tools/subToolExecution.test.ts` (narzędzia, widok, izolacja,
 artefakty/frontmatter, Orama, adapter, odtworzenie pochodnego tombstone i paginacja).
 
-P3 wiąże store z biegiem i Stopem; P4 implementuje decyzje, blokady logicznych ścieżek,
+P3 wiąże store z biegiem i Stopem przez opcjonalny `SubRunDrafts` w module sub-agents; P4 implementuje decyzje, blokady logicznych ścieżek,
 kontrolę konfliktu, intencje i idempotencję. Same typy stanów przeglądu nie oznaczają
 implementacji przyjęcia. P5 dostarczy adaptery, rejestrację, zdarzenia i retencję.
 Przed aktywacją konieczna jest weryfikacja kontraktu atomowej publikacji na hoście.
